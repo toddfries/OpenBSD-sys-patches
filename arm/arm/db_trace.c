@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/db_trace.c,v 1.14 2007/12/02 20:40:31 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/db_trace.c,v 1.17 2010/01/29 16:14:35 marcel Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 
@@ -194,18 +194,18 @@ db_md_set_watchpoint(db_expr_t addr, db_expr_t size)
 int
 db_trace_thread(struct thread *thr, int count)
 {
-	uint32_t addr;
+	struct pcb *ctx;
 
-	if (thr == curthread)
-		addr = (uint32_t)__builtin_frame_address(0);
-	else
-		addr = thr->td_pcb->un_32.pcb32_r11;
-	db_stack_trace_cmd(addr, -1);
+	ctx = kdb_thr_ctx(thr);
+	db_stack_trace_cmd(ctx->un_32.pcb32_r11, -1);
 	return (0);
 }
 
 void
 db_trace_self(void)
 {
-	db_trace_thread(curthread, -1);
+	db_addr_t addr;
+
+	addr = (db_addr_t)__builtin_frame_address(0);
+	db_stack_trace_cmd(addr, -1);
 }

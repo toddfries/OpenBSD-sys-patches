@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iir/iir_ctrl.c,v 1.18 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iir/iir_ctrl.c,v 1.21 2009/12/02 20:24:37 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,11 +51,8 @@ __FBSDID("$FreeBSD: src/sys/dev/iir/iir_ctrl.c,v 1.18 2008/09/27 08:51:18 ed Exp
 #include <sys/disk.h>
 #include <sys/stat.h>
 #include <sys/disklabel.h>
+#include <sys/sysctl.h>
 #include <machine/bus.h>
-#include <vm/vm.h>
-#include <vm/vm_kern.h>
-#include <vm/vm_extern.h>
-#include <vm/pmap.h>
 
 #include <dev/iir/iir.h>
 
@@ -87,8 +84,6 @@ static int iir_devsw_installed = 0;
 static int sdev_made = 0;
 #endif
 extern int gdt_cnt;
-extern char ostype[];
-extern char osrelease[];
 extern gdt_statist_t gdt_stat;
 
 /*
@@ -144,7 +139,7 @@ gdt_minor2softc(int minor_no)
 }
 
 static int
-iir_open(struct cdev *dev, int flags, int fmt, d_thread_t * p)
+iir_open(struct cdev *dev, int flags, int fmt, struct thread * p)
 {
     GDT_DPRINTF(GDT_D_DEBUG, ("iir_open()\n"));
 
@@ -162,7 +157,7 @@ iir_open(struct cdev *dev, int flags, int fmt, d_thread_t * p)
 }
 
 static int
-iir_close(struct cdev *dev, int flags, int fmt, d_thread_t * p)
+iir_close(struct cdev *dev, int flags, int fmt, struct thread * p)
 {
     GDT_DPRINTF(GDT_D_DEBUG, ("iir_close()\n"));
                 
@@ -222,7 +217,7 @@ iir_read(struct cdev *dev, struct uio * uio, int ioflag)
  */
 
 static int
-iir_ioctl(struct cdev *dev, u_long cmd, caddr_t cmdarg, int flags, d_thread_t * p)
+iir_ioctl(struct cdev *dev, u_long cmd, caddr_t cmdarg, int flags, struct thread * p)
 {
     GDT_DPRINTF(GDT_D_DEBUG, ("iir_ioctl() cmd 0x%lx\n",cmd));
 

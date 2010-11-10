@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/autoconf.c,v 1.1 2008/04/13 07:27:37 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/autoconf.c,v 1.2 2010/04/19 07:34:26 jmallett Exp $");
 
 /*
  * Setup the system to run on the current machine.
@@ -102,6 +102,7 @@ static void
 configure_final(dummy)
 	void *dummy;
 {
+	intr_enable();
 
 	cninit_finish(); 
 

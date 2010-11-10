@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/pf/net/if_pfsync.h,v 1.9 2007/07/03 12:16:07 mlaier Exp $	*/
+/*	$FreeBSD: src/sys/contrib/pf/net/if_pfsync.h,v 1.10 2009/12/24 00:43:44 delphij Exp $	*/
 /*	$OpenBSD: if_pfsync.h,v 1.30 2006/10/31 14:49:01 henning Exp $	*/
 
 /*
@@ -80,7 +80,7 @@ struct pfsync_state {
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
-	u_int8_t	 allow_opts;
+	u_int8_t	 state_flags;
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;

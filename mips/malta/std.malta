@@ -1,9 +1,8 @@
-# $FreeBSD: src/sys/mips/malta/std.malta,v 1.2 2008/09/03 18:40:29 obrien Exp $
+# $FreeBSD: src/sys/mips/malta/std.malta,v 1.3 2010/01/10 20:06:14 imp Exp $
 files	"../malta/files.malta"
 
 cpu		CPU_MIPS4KC
-options 	ISA_MIPS32
-options		SOFTFLOAT
+#options 	ISA_MIPS32
 device		pci
 device		ata
 device		atadisk

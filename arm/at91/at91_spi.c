@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91_spi.c,v 1.8 2008/11/25 00:13:26 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91_spi.c,v 1.9 2009/05/13 18:42:49 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -297,7 +297,7 @@ static device_method_t at91_spi_methods[] = {
 };
 
 static driver_t at91_spi_driver = {
-	"at91_spi",
+	"spi",
 	at91_spi_methods,
 	sizeof(struct at91_spi_softc),
 };

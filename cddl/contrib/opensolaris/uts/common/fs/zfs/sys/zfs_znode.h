@@ -19,7 +19,7 @@
  * CDDL HEADER END
  */
 /*
- * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
@@ -74,11 +74,16 @@ extern "C" {
 #define	ZFS_ACL_DEFAULTED	0x20		/* ACL should be defaulted */
 #define	ZFS_ACL_AUTO_INHERIT	0x40		/* ACL should be inherited */
 #define	ZFS_BONUS_SCANSTAMP	0x80		/* Scanstamp in bonus area */
+#define	ZFS_NO_EXECS_DENIED	0x100		/* exec was given to everyone */
 
 /*
  * Is ID ephemeral?
  */
+#ifdef TODO
 #define	IS_EPHEMERAL(x)		(x > MAXUID)
+#else
+#define	IS_EPHEMERAL(x)		(0)
+#endif
 
 /*
  * Should we use FUIDs?
@@ -96,6 +101,7 @@ extern "C" {
 #define	ZFS_ROOT_OBJ		"ROOT"
 #define	ZPL_VERSION_STR		"VERSION"
 #define	ZFS_FUID_TABLES		"FUID"
+#define	ZFS_SHARES_DIR		"SHARES"
 
 #define	ZFS_MAX_BLOCKSIZE	(SPA_MAXBLOCKSIZE)
 
@@ -170,6 +176,7 @@ typedef struct znode_phys {
 typedef struct zfs_dirlock {
 	char		*dl_name;	/* directory entry being locked */
 	uint32_t	dl_sharecnt;	/* 0 if exclusive, > 0 if shared */
+	uint8_t		dl_namelock;	/* 1 if z_name_lock is NOT held */
 	uint16_t	dl_namesize;	/* set if dl_name was allocated */
 	kcondvar_t	dl_cv;		/* wait for entry to be unlocked */
 	struct znode	*dl_dzp;	/* directory znode */
@@ -181,7 +188,6 @@ typedef struct znode {
 	vnode_t		*z_vnode;
 	uint64_t	z_id;		/* object ID for this znode */
 	kmutex_t	z_lock;		/* znode modification lock */
-	krwlock_t	z_map_lock;	/* page map lock */
 	krwlock_t	z_parent_lock;	/* parent lock for directories */
 	krwlock_t	z_name_lock;	/* "master" lock for dirent locks */
 	zfs_dirlock_t	*z_dirlocks;	/* directory entry lock list */
@@ -197,6 +203,7 @@ typedef struct znode {
 	uint64_t	z_gen;		/* generation (same as zp_gen) */
 	uint32_t	z_sync_cnt;	/* synchronous open count */
 	kmutex_t	z_acl_lock;	/* acl data lock */
+	zfs_acl_t	*z_acl_cached;	/* cached acl */
 	list_node_t	z_link_node;	/* all znodes in fs link */
 	/*
 	 * These are dmu managed fields.
@@ -227,11 +234,31 @@ typedef struct znode {
 /*
  * Convert between znode pointers and vnode pointers
  */
+#ifdef DEBUG
+static __inline vnode_t *
+ZTOV(znode_t *zp)
+{
+	vnode_t *vp = zp->z_vnode;
+
+	ASSERT(vp == NULL || vp->v_data == NULL || vp->v_data == zp);
+	return (vp);
+}
+static __inline znode_t *
+VTOZ(vnode_t *vp)
+{
+	znode_t *zp = (znode_t *)vp->v_data;
+
+	ASSERT(zp == NULL || zp->z_vnode == NULL || zp->z_vnode == vp);
+	return (zp);
+}
+#else
 #define	ZTOV(ZP)	((ZP)->z_vnode)
 #define	VTOZ(VP)	((znode_t *)(VP)->v_data)
+#endif
 
 /*
  * ZFS_ENTER() is called on entry to each ZFS vnode and vfs operation.
+ * ZFS_ENTER_NOERROR() is called when we can't return EIO.
  * ZFS_EXIT() must be called before exitting the vop.
  * ZFS_VERIFY_ZP() verifies the znode is valid.
  */
@@ -243,6 +270,9 @@ typedef struct znode {
 			return (EIO); \
 		} \
 	}
+
+#define	ZFS_ENTER_NOERROR(zfsvfs) \
+	rrw_enter(&(zfsvfs)->z_teardown_lock, RW_READER, FTAG)
 
 #define	ZFS_EXIT(zfsvfs) rrw_exit(&(zfsvfs)->z_teardown_lock, FTAG)
 
@@ -310,7 +340,6 @@ extern void	zfs_remove_op_tables();
 extern int	zfs_create_op_tables();
 extern dev_t	zfs_cmpldev(uint64_t);
 extern int	zfs_get_zplprop(objset_t *os, zfs_prop_t prop, uint64_t *value);
-extern int	zfs_set_version(const char *name, uint64_t newvers);
 extern int	zfs_get_stats(objset_t *os, nvlist_t *nv);
 extern void	zfs_znode_dmu_fini(znode_t *);
 
@@ -339,6 +368,7 @@ extern void zfs_log_acl(zilog_t *zilog, dmu_tx_t *tx, znode_t *zp,
 #endif
 extern void zfs_xvattr_set(znode_t *zp, xvattr_t *xvap);
 extern void zfs_upgrade(zfsvfs_t *zfsvfs, dmu_tx_t *tx);
+extern int zfs_create_share_dir(zfsvfs_t *zfsvfs, dmu_tx_t *tx);
 
 extern zil_get_data_t zfs_get_data;
 extern zil_replay_func_t *zfs_replay_vector[TX_MAX_TYPE];

@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.h,v 1.9 2008/07/09 16:45:30 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.h,v 1.10 2010/05/16 17:03:56 rrs Exp $");
 
 #ifndef __sctp_bsd_addr_h__
 #define __sctp_bsd_addr_h__
@@ -37,12 +37,11 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.h,v 1.9 2008/07/09 16:45:30 rr
 
 #if defined(_KERNEL) || defined(__Userspace__)
 
-#if defined(SCTP_USE_THREAD_BASED_ITERATOR)
+extern struct iterator_control sctp_it_ctl;
 void sctp_wakeup_iterator(void);
 
 void sctp_startup_iterator(void);
 
-#endif
 
 #ifdef INET6
 void sctp_gather_internal_ifa_flags(struct sctp_ifa *ifa);

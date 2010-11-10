@@ -48,7 +48,7 @@
     ********************************************************************* */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cfe/cfe_api.c,v 1.1 2008/09/26 03:53:10 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cfe/cfe_api.c,v 1.2 2010/01/11 17:16:06 imp Exp $");
 
 #include <dev/cfe/cfe_api.h>
 #include <dev/cfe/cfe_api_int.h>
@@ -160,7 +160,7 @@ cfe_enumenv(int idx, char *name, int namelen, char *val, int vallen)
 {
     cfe_xiocb_t xiocb;
 
-    xiocb.xiocb_fcode = CFE_CMD_ENV_SET;
+    xiocb.xiocb_fcode = CFE_CMD_ENV_ENUM;
     xiocb.xiocb_status = 0;
     xiocb.xiocb_handle = 0;
     xiocb.xiocb_flags = 0;

@@ -35,9 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_environment.c,v 1.50 2008/07/21 15:05:25 pjd Exp $");
-
-#include "opt_mac.h"
+__FBSDID("$FreeBSD: src/sys/kern/kern_environment.c,v 1.53 2010/01/10 22:34:18 imp Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -62,6 +60,8 @@ static MALLOC_DEFINE(M_KENV, "kenv", "kernel environment");
 
 /* pointer to the static environment */
 char		*kern_envp;
+static int	env_len;
+static int	env_pos;
 static char	*kernenv_next(char *);
 
 /* dynamic environment variables */
@@ -87,7 +87,7 @@ kenv(td, uap)
 	} */ *uap;
 {
 	char *name, *value, *buffer = NULL;
-	size_t len, done, needed;
+	size_t len, done, needed, buflen;
 	int error, i;
 
 	KASSERT(dynamic_kenv, ("kenv: dynamic_kenv = 0"));
@@ -100,13 +100,17 @@ kenv(td, uap)
 			return (error);
 #endif
 		done = needed = 0;
+		buflen = uap->len;
+		if (buflen > KENV_SIZE * (KENV_MNAMELEN + KENV_MVALLEN + 2))
+			buflen = KENV_SIZE * (KENV_MNAMELEN +
+			    KENV_MVALLEN + 2);
 		if (uap->len > 0 && uap->value != NULL)
-			buffer = malloc(uap->len, M_TEMP, M_WAITOK|M_ZERO);
+			buffer = malloc(buflen, M_TEMP, M_WAITOK|M_ZERO);
 		mtx_lock(&kenv_lock);
 		for (i = 0; kenvp[i] != NULL; i++) {
 			len = strlen(kenvp[i]) + 1;
 			needed += len;
-			len = min(len, uap->len - done);
+			len = min(len, buflen - done);
 			/*
 			 * If called with a NULL or insufficiently large
 			 * buffer, just keep computing the required size.
@@ -204,6 +208,14 @@ kenv(td, uap)
 done:
 	free(name, M_TEMP);
 	return (error);
+}
+
+void
+init_static_kenv(char *buf, size_t len)
+{
+	kern_envp = buf;
+	env_len = len;
+	env_pos = 0;
 }
 
 /*
@@ -334,6 +346,26 @@ testenv(const char *name)
 	return (0);
 }
 
+static int
+setenv_static(const char *name, const char *value)
+{
+	int len;
+
+	if (env_pos >= env_len)
+		return (-1);
+
+	/* Check space for x=y and two nuls */
+	len = strlen(name) + strlen(value);
+	if (len + 3 < env_len - env_pos) {
+		len = sprintf(&kern_envp[env_pos], "%s=%s", name, value);
+		env_pos += len+1;
+		kern_envp[env_pos] = '\0';
+		return (0);
+	} else
+		return (-1);
+
+}
+
 /*
  * Set an environment variable by name.
  */
@@ -342,6 +374,9 @@ setenv(const char *name, const char *value)
 {
 	char *buf, *cp, *oldenv;
 	int namelen, vallen, i;
+
+	if (dynamic_kenv == 0 && env_len > 0)
+		return (setenv_static(name, value));
 
 	KENV_CHECK;
 

@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/cambria_led.c,v 1.1 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/cambria_led.c,v 1.2 2009/06/11 17:05:13 avg Exp $");
 
 /*
  * Gateworks Cambria Octal LED Latch driver.
@@ -102,7 +102,7 @@ led_attach(device_t dev)
 	return 0;
 }
 
-static void
+static int
 led_detach(device_t dev)
 {
 	struct led_softc *sc = device_get_softc(dev);
@@ -113,12 +113,13 @@ led_detach(device_t dev)
 		if (led != NULL)
 			led_destroy(led);
 	}
+	return (0);
 }
 
 static device_method_t led_methods[] = {
 	DEVMETHOD(device_probe,		led_probe),
 	DEVMETHOD(device_attach,	led_attach),
-	DEVMETHOD(device_attach,	led_detach),
+	DEVMETHOD(device_detach,	led_detach),
 
 	{0, 0},
 };

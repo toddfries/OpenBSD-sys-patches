@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fb/s3_pci.c,v 1.11 2008/11/29 20:16:53 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fb/s3_pci.c,v 1.14 2009/12/29 21:51:28 rnoland Exp $");
 
 /* Enable LFB on S3 cards that has only VESA 1.2 BIOS */
 
@@ -54,9 +54,8 @@ __FBSDID("$FreeBSD: src/sys/dev/fb/s3_pci.c,v 1.11 2008/11/29 20:16:53 kib Exp $
 #include <dev/pci/pcivar.h>
 
 #include <machine/md_var.h>
-#include <machine/vm86.h>
 #include <machine/pc/bios.h>
-#include <machine/pc/vesa.h>
+#include <dev/fb/vesa.h>
 
 #include <dev/fb/fbreg.h>
 #include <dev/fb/vgareg.h>
@@ -389,10 +388,10 @@ s3lfb_blank_display(video_adapter_t *adp, int mode)
 }
 
 static int
-s3lfb_mmap(video_adapter_t *adp, vm_offset_t offset, vm_paddr_t *paddr,
-	  int prot)
+s3lfb_mmap(video_adapter_t *adp, vm_ooffset_t offset, vm_paddr_t *paddr,
+	  int prot, vm_memattr_t *memattr)
 {
-	return (*prevvidsw->mmap)(adp, offset, paddr, prot);
+	return (*prevvidsw->mmap)(adp, offset, paddr, prot, memattr);
 }
 
 static int

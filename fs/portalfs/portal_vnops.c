@@ -31,7 +31,7 @@
  *
  *	@(#)portal_vnops.c	8.14 (Berkeley) 5/21/95
  *
- * $FreeBSD: src/sys/fs/portalfs/portal_vnops.c,v 1.80 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/fs/portalfs/portal_vnops.c,v 1.82 2009/12/02 18:09:22 trasz Exp $
  */
 
 /*
@@ -246,7 +246,7 @@ portal_open(ap)
 	/*
 	 * Create a new socket.
 	 */
-	error = socreate(AF_UNIX, &so, SOCK_STREAM, 0, ap->a_td->td_ucred,
+	error = socreate(AF_UNIX, &so, SOCK_STREAM, 0, ap->a_cred,
 	    ap->a_td);
 	if (error)
 		goto bad;
@@ -311,8 +311,9 @@ portal_open(ap)
 
 	pcred.pcr_flag = ap->a_mode;
 	pcred.pcr_uid = ap->a_cred->cr_uid;
-	pcred.pcr_ngroups = ap->a_cred->cr_ngroups;
-	bcopy(ap->a_cred->cr_groups, pcred.pcr_groups, NGROUPS * sizeof(gid_t));
+	pcred.pcr_ngroups = MIN(ap->a_cred->cr_ngroups, XU_NGROUPS);
+	bcopy(ap->a_cred->cr_groups, pcred.pcr_groups,
+	    pcred.pcr_ngroups * sizeof(gid_t));
 	aiov[0].iov_base = (caddr_t) &pcred;
 	aiov[0].iov_len = sizeof(pcred);
 	aiov[1].iov_base = pt->pt_arg;

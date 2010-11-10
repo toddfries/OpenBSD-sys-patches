@@ -26,7 +26,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 
-$FreeBSD: src/sys/dev/cxgb/cxgb_osdep.h,v 1.30 2008/11/23 07:30:07 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_osdep.h,v 1.33 2010/02/24 10:16:18 np Exp $
 
 ***************************************************************************/
 
@@ -41,13 +41,11 @@ $FreeBSD: src/sys/dev/cxgb/cxgb_osdep.h,v 1.30 2008/11/23 07:30:07 kmacy Exp $
 
 #include <dev/mii/mii.h>
 
-#include <common/cxgb_version.h>
-#include <cxgb_config.h>
-
 #ifndef _CXGB_OSDEP_H_
 #define _CXGB_OSDEP_H_
 
 typedef struct adapter adapter_t;
+typedef struct port_info pinfo_t;
 struct sge_rspq;
 
 enum {
@@ -89,33 +87,6 @@ struct t3_mbuf_hdr {
 #define	KTR_CXGB	KTR_SPARE2
 
 #define MT_DONTFREE  128
-
-#if __FreeBSD_version > 700030
-#define INTR_FILTERS
-#define FIRMWARE_LATEST
-#endif
-
-#if ((__FreeBSD_version > 602103) && (__FreeBSD_version < 700000))
-#define FIRMWARE_LATEST
-#endif
-
-#if __FreeBSD_version > 700000
-#define MSI_SUPPORTED
-#define TSO_SUPPORTED
-#define VLAN_SUPPORTED
-#define TASKQUEUE_CURRENT
-#else
-#define if_name(ifp) (ifp)->if_xname
-#define M_SANITY(m, n)
-#endif
-
-#if __FreeBSD_version >= 701000
-#include "opt_inet.h"
-#ifdef INET
-#define LRO_SUPPORTED
-#endif
-#define TOE_SUPPORTED
-#endif
 
 #if __FreeBSD_version < 800054
 #if defined (__GNUC__)
@@ -165,8 +136,7 @@ struct t3_mbuf_hdr {
 #define TX_MAX_DESC                       4     /* max descriptors per packet    */
 
 
-#define TX_START_MIN_DESC  (TX_MAX_DESC << 2)
-#define TX_START_MAX_DESC (TX_MAX_DESC << 3)    /* maximum number of descriptors
+#define TX_START_MAX_DESC (TX_MAX_DESC << 2)    /* maximum number of descriptors
 						 * call to start used per 	 */
 
 #define TX_CLEAN_MAX_DESC (TX_MAX_DESC << 4)    /* maximum tx descriptors
@@ -177,18 +147,17 @@ struct t3_mbuf_hdr {
 #define TX_WR_COUNT_MAX         7              /* the maximum total number of packets that can be
 						* aggregated into a single TX WR
 						*/
+#if defined(__i386__) || defined(__amd64__)  
 
-
-#if defined(__i386__) || defined(__amd64__)
-#define smp_mb() mb()
-
-#define L1_CACHE_BYTES 128
 static __inline
 void prefetch(void *x) 
 { 
         __asm volatile("prefetcht0 %0" :: "m" (*(unsigned long *)x));
-} 
+}
 
+#define smp_mb() mb()
+
+#define L1_CACHE_BYTES 128
 extern void kdb_backtrace(void);
 
 #define WARN_ON(condition) do { \
@@ -198,8 +167,7 @@ extern void kdb_backtrace(void);
         } \
 } while (0)
 
-
-#else /* !i386 && !amd64 */
+#else 
 #define smp_mb()
 #define prefetch(x)
 #define L1_CACHE_BYTES 32
@@ -250,10 +218,10 @@ static const int debug_flags = DBG_RX;
 #define MII_CTRL1000		MII_100T2CR
 
 #define ADVERTISE_PAUSE_CAP	ANAR_FC
-#define ADVERTISE_PAUSE_ASYM	ANAR_X_PAUSE_ASYM
-#define ADVERTISE_PAUSE		ANAR_X_PAUSE_SYM
-#define ADVERTISE_1000HALF	ANAR_X_HD
-#define ADVERTISE_1000FULL	ANAR_X_FD
+#define ADVERTISE_PAUSE_ASYM	0x800
+#define ADVERTISE_PAUSE		ANAR_FC
+#define ADVERTISE_1000HALF	0x100
+#define ADVERTISE_1000FULL	0x200
 #define ADVERTISE_10FULL	ANAR_10_FD
 #define ADVERTISE_10HALF	ANAR_10
 #define ADVERTISE_100FULL	ANAR_TX_FD
@@ -269,17 +237,18 @@ static const int debug_flags = DBG_RX;
 #define ADVERTISE_NPAGE		ANAR_NP
 
 
-/* Standard PCI Extended Capaibilities definitions */
-#define PCI_CAP_ID_VPD	0x03
-#define PCI_VPD_ADDR	2
+/* Standard PCI Extended Capabilities definitions */
+#define PCI_CAP_ID_VPD	PCIY_VPD
+#define PCI_VPD_ADDR	PCIR_VPD_ADDR
 #define PCI_VPD_ADDR_F	0x8000
-#define PCI_VPD_DATA	4
+#define PCI_VPD_DATA	PCIR_VPD_DATA
 
-#define PCI_CAP_ID_EXP	0x10
-#define PCI_EXP_DEVCTL	8
-#define PCI_EXP_DEVCTL_PAYLOAD 0x00e0
-#define PCI_EXP_LNKCTL	16
-#define PCI_EXP_LNKSTA	18
+#define PCI_CAP_ID_EXP		PCIY_EXPRESS
+#define PCI_EXP_DEVCTL		PCIR_EXPRESS_DEVICE_CTL
+#define PCI_EXP_DEVCTL_PAYLOAD	PCIM_EXP_CTL_MAX_PAYLOAD
+#define PCI_EXP_DEVCTL_READRQ	PCIM_EXP_CTL_MAX_READ_REQUEST
+#define PCI_EXP_LNKCTL		PCIR_EXPRESS_LINK_CTL
+#define PCI_EXP_LNKSTA		PCIR_EXPRESS_LINK_STA
 
 /*
  * Linux compatibility macros

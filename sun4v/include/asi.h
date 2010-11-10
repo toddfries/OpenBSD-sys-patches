@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  *
  *	from: BSDI: asi.h,v 1.3 1997/08/08 14:31:42 torek
- * $FreeBSD: src/sys/sun4v/include/asi.h,v 1.3 2008/09/10 20:07:08 marius Exp $
+ * $FreeBSD: src/sys/sun4v/include/asi.h,v 1.4 2010/02/13 14:13:39 marius Exp $
  */
 
 #ifndef	_MACHINE_ASI_H_
@@ -158,6 +158,11 @@
 #define	AA_DMMU_TAR			        0x30
 
 #define ASI_UPA_CONFIG_REG                      0x4a    /* US-I, II */
+#define	ASI_FIREPLANE_CONFIG_REG		0x4a	/* US-III{,+}, IV{,+} */
+#define		AA_FIREPLANE_CONFIG		0x0	/* US-III{,+}, IV{,+} */
+#define		AA_FIREPLANE_ADDRESS		0x8	/* US-III{,+}, IV{,+} */
+#define		AA_FIREPLANE_CONFIG_2		0x10	/* US-IV{,+} */
+#define	ASI_JBUS_CONFIG_REG			0x4a	/* US-IIIi{,+} */
 #define	ASI_IMMU				0x50
 #define	ASI_ITLB_DATA_IN_REG			0x54
 #define	ASI_ITLB_DATA_ACCESS_REG		0x55
@@ -167,5 +172,7 @@
 #define	ASI_DTLB_DATA_IN_REG			0x5c
 #define	ASI_DTLB_DATA_ACCESS_REG		0x5d
 #define	ASI_DTLB_TAG_READ_REG			0x5e
+#define	ASI_INTR_ID				0x63	/* US-IV{,+} */
+#define		AA_INTR_ID			0x0	/* US-IV{,+} */
 
 #endif /* !_MACHINE_ASI_H_ */

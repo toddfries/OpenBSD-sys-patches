@@ -1,6 +1,6 @@
 /*-
  * Copyright (C) 2002-2003 NetGroup, Politecnico di Torino (Italy)
- * Copyright (C) 2005-2008 Jung-uk Kim <jkim@FreeBSD.org>
+ * Copyright (C) 2005-2009 Jung-uk Kim <jkim@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/bpf_jitter.h,v 1.5 2008/08/25 20:43:13 jkim Exp $
+ * $FreeBSD: src/sys/net/bpf_jitter.h,v 1.8 2009/11/20 18:49:20 jkim Exp $
  */
 
 #ifndef _NET_BPF_JITTER_H_
@@ -53,8 +53,7 @@ typedef u_int (*bpf_filter_func)(u_char *, u_int, u_int);
 typedef struct bpf_jit_filter {
 	/* The native filtering binary, in the form of a bpf_filter_func. */
 	bpf_filter_func	func;
-
-	int		mem[BPF_MEMWORDS];	/* Scratch memory */
+	size_t		size;
 } bpf_jit_filter;
 
 /*

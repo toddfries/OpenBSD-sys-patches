@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label_ext2fs.c,v 1.2 2005/08/23 18:55:38 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label_ext2fs.c,v 1.3 2009/11/28 11:57:43 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,7 +86,10 @@ exit_free:
 	g_free(fs);
 }
 
-const struct g_label_desc g_label_ext2fs = {
+struct g_label_desc g_label_ext2fs = {
 	.ld_taste = g_label_ext2fs_taste,
-	.ld_dir = "ext2fs"
+	.ld_dir = "ext2fs",
+	.ld_enabled = 1
 };
+
+G_LABEL_INIT(ext2fs, g_label_ext2fs, "Create device nodes for EXT2FS volumes");

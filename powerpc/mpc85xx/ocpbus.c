@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/ocpbus.c,v 1.10 2008/12/18 18:27:12 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/ocpbus.c,v 1.15 2010/03/23 20:12:53 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -114,8 +114,6 @@ devclass_t ocpbus_devclass;
 
 DRIVER_MODULE(ocpbus, nexus, ocpbus_driver, ocpbus_devclass, 0, 0);
 
-static int law_max = 0;
-
 static device_t
 ocpbus_mk_child(device_t dev, int type, int unit)
 {
@@ -154,6 +152,10 @@ ocpbus_write_law(int trgt, int type, u_long *startp, u_long *countp)
 			addr = 0xA0000000;
 			size = 0x10000000;
 			break;
+		case OCP85XX_TGTIF_PCI3:
+			addr = 0xB0000000;
+			size = 0x10000000;
+			break;
 		default:
 			return (EINVAL);
 		}
@@ -161,15 +163,19 @@ ocpbus_write_law(int trgt, int type, u_long *startp, u_long *countp)
 	case SYS_RES_IOPORT:
 		switch (trgt) {
 		case OCP85XX_TGTIF_PCI0:
-			addr = 0xff000000;
+			addr = 0xfee00000;
 			size = 0x00010000;
 			break;
 		case OCP85XX_TGTIF_PCI1:
-			addr = 0xff010000;
+			addr = 0xfee10000;
 			size = 0x00010000;
 			break;
 		case OCP85XX_TGTIF_PCI2:
-			addr = 0xff020000;
+			addr = 0xfee20000;
+			size = 0x00010000;
+			break;
+		case OCP85XX_TGTIF_PCI3:
+			addr = 0xfee30000;
 			size = 0x00010000;
 			break;
 		default:
@@ -189,18 +195,8 @@ ocpbus_write_law(int trgt, int type, u_long *startp, u_long *countp)
 static int
 ocpbus_probe(device_t dev)
 {
-	struct ocpbus_softc *sc;
-	uint32_t ver;
 
-	sc = device_get_softc(dev);
-
-	ver = SVR_VER(mfspr(SPR_SVR));
-	if (ver == SVR_MPC8572E || ver == SVR_MPC8572)
-		law_max = 12;
-	else
-		law_max = 8;
-
-	device_set_desc(dev, "On-Chip Peripherals bus");
+	device_set_desc(dev, "Freescale on-chip peripherals bus");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -208,7 +204,7 @@ static int
 ocpbus_attach(device_t dev)
 {
 	struct ocpbus_softc *sc;
-	int error, i, tgt;
+	int error, i, tgt, law_max;
 	uint32_t sr;
 	u_long start, end;
 
@@ -222,12 +218,14 @@ ocpbus_attach(device_t dev)
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_PCIB, 0);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_PCIB, 1);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_PCIB, 2);
+	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_PCIB, 3);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_TSEC, 0);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_TSEC, 1);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_TSEC, 2);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_TSEC, 3);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_PIC, 0);
 	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_QUICC, 0);
+	ocpbus_mk_child(dev, OCPBUS_DEVTYPE_SEC, 0);
 
 	/* Set up IRQ rman */
 	start = 0;
@@ -261,12 +259,14 @@ ocpbus_attach(device_t dev)
 	 * Clear local access windows. Skip DRAM entries, so we don't shoot
 	 * ourselves in the foot.
 	 */
+	law_max = law_getmax();
 	for (i = 0; i < law_max; i++) {
 		sr = ccsr_read4(OCP85XX_LAWSR(i));
 		if ((sr & 0x80000000) == 0)
 			continue;
 		tgt = (sr & 0x01f00000) >> 20;
-		if (tgt == OCP85XX_TGTIF_RAM1 || tgt == OCP85XX_TGTIF_RAM2)
+		if (tgt == OCP85XX_TGTIF_RAM1 || tgt == OCP85XX_TGTIF_RAM2 ||
+		    tgt == OCP85XX_TGTIF_RAM_INTL)
 			continue;
 
 		ccsr_write4(OCP85XX_LAWSR(i), sr & 0x7fffffff);
@@ -277,7 +277,7 @@ ocpbus_attach(device_t dev)
 		    ccsr_read4(OCP85XX_PORDEVSR),
 		    ccsr_read4(OCP85XX_PORDEVSR2));
 
-	for (i = 0; i < 4; i++)
+	for (i = PIC_IRQ_START; i < PIC_IRQ_START + 4; i++)
 		powerpc_config_intr(i, INTR_TRIGGER_LEVEL, INTR_POLARITY_LOW);
 
 	return (bus_generic_attach(dev));
@@ -347,6 +347,10 @@ const struct ocp_resource mpc8555_resources[] = {
 	    OCP85XX_PCI_SIZE},
 	{OCPBUS_DEVTYPE_PCIB, 2, SYS_RES_MEMORY, 1, 0, OCP85XX_TGTIF_PCI2},
 	{OCPBUS_DEVTYPE_PCIB, 2, SYS_RES_IOPORT, 1, 0, OCP85XX_TGTIF_PCI2},
+	{OCPBUS_DEVTYPE_PCIB, 3, SYS_RES_MEMORY, 0, OCP85XX_PCI3_OFF,
+	    OCP85XX_PCI_SIZE},
+	{OCPBUS_DEVTYPE_PCIB, 3, SYS_RES_MEMORY, 1, 0, OCP85XX_TGTIF_PCI3},
+	{OCPBUS_DEVTYPE_PCIB, 3, SYS_RES_IOPORT, 1, 0, OCP85XX_TGTIF_PCI3},
 
 	{OCPBUS_DEVTYPE_LBC, 0, SYS_RES_MEMORY, 0, OCP85XX_LBC_OFF,
 	    OCP85XX_LBC_SIZE},
@@ -357,6 +361,11 @@ const struct ocp_resource mpc8555_resources[] = {
 	{OCPBUS_DEVTYPE_I2C, 1, SYS_RES_MEMORY, 0, OCP85XX_I2C1_OFF,
 	    OCP85XX_I2C_SIZE},
 	{OCPBUS_DEVTYPE_I2C, 1, SYS_RES_IRQ, 0, PIC_IRQ_INT(27), 1},
+
+	{OCPBUS_DEVTYPE_SEC, 0, SYS_RES_MEMORY, 0, OCP85XX_SEC_OFF,
+	    OCP85XX_SEC_SIZE},
+	{OCPBUS_DEVTYPE_SEC, 0, SYS_RES_IRQ, 0, PIC_IRQ_INT(29), 1},
+	{OCPBUS_DEVTYPE_SEC, 0, SYS_RES_IRQ, 1, PIC_IRQ_INT(42), 1},
 
 	{0}
 };
@@ -435,15 +444,8 @@ ocpbus_alloc_resource(device_t dev, device_t child, int type, int *rid,
 				return (NULL);
 		}
 
-		/*
-		 * ISA interrupts (IRQ 0-15) are remapped by the
-		 * PCI driver. Make sure this happened.
-		 */
-		if (start < PIC_IRQ_START)
-			return (NULL);
-
-		rv = rman_reserve_resource(&sc->sc_irq, start - PIC_IRQ_START,
-		    start - PIC_IRQ_START + count - 1, count, flags, child);
+		rv = rman_reserve_resource(&sc->sc_irq, start,
+		    start + count - 1, count, flags, child);
 		if (rv == NULL)
 			return (NULL);
 		break;
@@ -609,7 +611,5 @@ ocpbus_config_intr(device_t dev, int irq, enum intr_trigger trig,
     enum intr_polarity pol)
 {
 
-	if (irq < PIC_IRQ_START)
-		return (EINVAL);
-	return (powerpc_config_intr(irq - PIC_IRQ_START, trig, pol));
+	return (powerpc_config_intr(irq, trig, pol));
 }

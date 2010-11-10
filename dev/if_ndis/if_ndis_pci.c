@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.22 2009/03/09 13:23:54 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.23 2009/06/23 02:19:59 thompsa Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,7 +55,7 @@ __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.22 2009/03/09 13:23:54
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/usb/usb.h>
-#include <dev/usb/usb_core.h>
+#include <dev/usb/usbdi.h>
 
 #include <compat/ndis/pe_var.h>
 #include <compat/ndis/cfg_var.h>

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/i915_dma.c,v 1.16 2009/02/28 02:37:55 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/i915_dma.c,v 1.21 2010/04/22 18:21:25 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -151,7 +151,7 @@ static int i915_dma_cleanup(struct drm_device * dev)
 	if (dev_priv->ring.virtual_start) {
 		drm_core_ioremapfree(&dev_priv->ring.map, dev);
 		dev_priv->ring.virtual_start = NULL;
-		dev_priv->ring.map.handle = NULL;
+		dev_priv->ring.map.virtual = NULL;
 		dev_priv->ring.map.size = 0;
 	}
 
@@ -174,7 +174,7 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 	}
 
 	dev_priv->sarea_priv = (drm_i915_sarea_t *)
-	    ((u8 *) dev_priv->sarea->handle + init->sarea_priv_offset);
+	    ((u8 *) dev_priv->sarea->virtual + init->sarea_priv_offset);
 
 	if (init->ring_size != 0) {
 		if (dev_priv->ring.ring_obj != NULL) {
@@ -193,9 +193,9 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 		dev_priv->ring.map.flags = 0;
 		dev_priv->ring.map.mtrr = 0;
 
-		drm_core_ioremap(&dev_priv->ring.map, dev);
+		drm_core_ioremap_wc(&dev_priv->ring.map, dev);
 
-		if (dev_priv->ring.map.handle == NULL) {
+		if (dev_priv->ring.map.virtual == NULL) {
 			i915_dma_cleanup(dev);
 			DRM_ERROR("can not ioremap virtual address for"
 				  " ring buffer\n");
@@ -203,13 +203,13 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 		}
 	}
 
-	dev_priv->ring.virtual_start = dev_priv->ring.map.handle;
+	dev_priv->ring.virtual_start = dev_priv->ring.map.virtual;
 
 	dev_priv->cpp = init->cpp;
 	dev_priv->back_offset = init->back_offset;
 	dev_priv->front_offset = init->front_offset;
 	dev_priv->current_page = 0;
-	dev_priv->sarea_priv->pf_current_page = dev_priv->current_page;
+	dev_priv->sarea_priv->pf_current_page = 0;
 
 	/* Allow hardware batchbuffers unless told otherwise.
 	 */
@@ -229,7 +229,7 @@ static int i915_dma_resume(struct drm_device * dev)
 		return -EINVAL;
 	}
 
-	if (dev_priv->ring.map.handle == NULL) {
+	if (dev_priv->ring.map.virtual == NULL) {
 		DRM_ERROR("can not ioremap virtual address for"
 			  " ring buffer\n");
 		return -ENOMEM;
@@ -439,8 +439,7 @@ static void i915_emit_breadcrumb(struct drm_device *dev)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	RING_LOCALS;
 
-	dev_priv->counter++;
-	if (dev_priv->counter > 0x7FFFFFFFUL)
+	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
 	if (dev_priv->sarea_priv)
 		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
@@ -574,7 +573,10 @@ static int i915_dispatch_flip(struct drm_device * dev)
 	OUT_RING(0);
 	ADVANCE_LP_RING();
 
-	dev_priv->sarea_priv->last_enqueue = dev_priv->counter++;
+	if (++dev_priv->counter > 0x7FFFFFFFUL)
+		dev_priv->counter = 0;
+	if (dev_priv->sarea_priv)
+		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
@@ -642,17 +644,16 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 			return -EFAULT;
 		}
 	}
-	DRM_LOCK();
 
 	ret = i915_dispatch_batchbuffer(dev, batch);
 
-	if (sarea_priv)
-		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
-
-	DRM_UNLOCK();
 	if (batch->num_cliprects)
 		vsunlock(batch->cliprects, cliplen);
+
 	DRM_LOCK();
+
+	if (sarea_priv)
+		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
 	return ret;
 }
@@ -695,10 +696,9 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 			return -EFAULT;
 		}
 	}
-	DRM_LOCK();
 
 	ret = i915_dispatch_cmdbuffer(dev, cmdbuf);
-	DRM_UNLOCK();
+
 	if (cmdbuf->num_cliprects) {
 		vsunlock(cmdbuf->buf, cmdbuf->sz);
 		vsunlock(cmdbuf->cliprects, cliplen);
@@ -721,7 +721,7 @@ static int i915_flip_bufs(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("%s\n", __func__);
 
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
+	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
 	ret = i915_dispatch_flip(dev);
 
@@ -758,7 +758,7 @@ static int i915_getparam(struct drm_device *dev, void *data,
 		value = 0;
 		break;
 	default:
-		DRM_ERROR("Unknown parameter %d\n", param->param);
+		DRM_DEBUG("Unknown parameter %d\n", param->param);
 		return -EINVAL;
 	}
 
@@ -791,7 +791,7 @@ static int i915_setparam(struct drm_device *dev, void *data,
 		dev_priv->allow_batchbuffer = param->value;
 		break;
 	default:
-		DRM_ERROR("unknown parameter %d\n", param->param);
+		DRM_DEBUG("unknown parameter %d\n", param->param);
 		return -EINVAL;
 	}
 
@@ -822,15 +822,15 @@ static int i915_set_status_page(struct drm_device *dev, void *data,
 	dev_priv->hws_map.flags = 0;
 	dev_priv->hws_map.mtrr = 0;
 
-	drm_core_ioremap(&dev_priv->hws_map, dev);
-	if (dev_priv->hws_map.handle == NULL) {
+	drm_core_ioremap_wc(&dev_priv->hws_map, dev);
+	if (dev_priv->hws_map.virtual == NULL) {
 		i915_dma_cleanup(dev);
 		dev_priv->status_gfx_addr = 0;
 		DRM_ERROR("can not ioremap virtual address for"
 				" G33 hw status page\n");
 		return -ENOMEM;
 	}
-	dev_priv->hw_status_page = dev_priv->hws_map.handle;
+	dev_priv->hw_status_page = dev_priv->hws_map.virtual;
 
 	memset(dev_priv->hw_status_page, 0, PAGE_SIZE);
 	I915_WRITE(HWS_PGA, dev_priv->status_gfx_addr);
@@ -869,10 +869,13 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
 	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
 
-	if (IS_GM45(dev))
-		dev->driver->get_vblank_counter = gm45_get_vblank_counter;
-	else
+	if (IS_G4X(dev)) {
+		dev->driver->get_vblank_counter = g45_get_vblank_counter;
+		dev->max_vblank_count = 0xffffffff; /* 32 bits of frame count */
+	} else {
 		dev->driver->get_vblank_counter = i915_get_vblank_counter;
+		dev->max_vblank_count = 0x00ffffff; /* 24 bits of frame count */
+	}
 
 #ifdef I915_HAVE_GEM
 	i915_gem_load(dev);
@@ -880,8 +883,12 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	/* Init HWS */
 	if (!I915_NEED_GFX_HWS(dev)) {
 		ret = i915_init_phys_hws(dev);
-		if (ret != 0)
+		if (ret != 0) {
+			drm_rmmap(dev, dev_priv->mmio_map);
+			drm_free(dev_priv, sizeof(struct drm_i915_private),
+			    DRM_MEM_DRIVER);
 			return ret;
+		}
 	}
 #ifdef __linux__
 	/* On the 945G/GM, the chipset reports the MSI capability on the
@@ -901,6 +908,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	intel_opregion_init(dev);
 #endif
 	DRM_SPININIT(&dev_priv->user_irq_lock, "userirq");
+	dev_priv->user_irq_refcount = 0;
 
 	ret = drm_vblank_init(dev, I915_NUM_PIPE);
 

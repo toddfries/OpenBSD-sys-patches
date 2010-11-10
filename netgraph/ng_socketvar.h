@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_socketvar.h,v 1.10 2005/07/05 17:35:20 glebius Exp $
+ * $FreeBSD: src/sys/netgraph/ng_socketvar.h,v 1.11 2010/03/12 15:04:59 glebius Exp $
  * $Whistle: ng_socketvar.h,v 1.1 1999/01/20 21:35:39 archie Exp $
  */
 
@@ -61,6 +61,7 @@ struct ngsock {
 	int    refs;
 	struct mtx	mtx;		/* mtx to wait on */
 	int		error;		/* place to store error */
+	ng_ID_t		node_id;	/* a hint for netstat(1) to find the node */
 };
 #define	NGS_FLAG_NOLINGER	1	/* close with last hook */
 

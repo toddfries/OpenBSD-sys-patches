@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_ccmp.c,v 1.15 2008/12/18 23:00:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_ccmp.c,v 1.18 2010/04/10 13:54:00 bschmidt Exp $");
 
 /*
  * IEEE 802.11i AES-CCMP crypto support.
@@ -226,11 +226,18 @@ ccmp_decap(struct ieee80211_key *k, struct mbuf *m, int hdrlen)
 	}
 	tid = ieee80211_gettid(wh);
 	pn = READ_6(ivp[0], ivp[1], ivp[4], ivp[5], ivp[6], ivp[7]);
-	if (pn <= k->wk_keyrsc[tid]) {
+	/*
+	 * NB: Multiple stations are using the same key in
+	 * IBSS mode, there is currently no way to sync keyrsc
+	 * counters without discarding too many frames.
+	 */
+	if (vap->iv_opmode != IEEE80211_M_IBSS &&
+	    vap->iv_opmode != IEEE80211_M_AHDEMO &&
+	    pn <= k->wk_keyrsc[tid]) {
 		/*
 		 * Replay violation.
 		 */
-		ieee80211_notify_replay_failure(vap, wh, k, pn);
+		ieee80211_notify_replay_failure(vap, wh, k, pn, tid);
 		vap->iv_stats.is_rx_ccmpreplay++;
 		return 0;
 	}
@@ -298,8 +305,6 @@ ccmp_init_blocks(rijndael_ctx *ctx, struct ieee80211_frame *wh,
 	uint8_t b0[AES_BLOCK_LEN], uint8_t aad[2 * AES_BLOCK_LEN],
 	uint8_t auth[AES_BLOCK_LEN], uint8_t s0[AES_BLOCK_LEN])
 {
-#define	IS_4ADDRESS(wh) \
-	((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) == IEEE80211_FC1_DIR_DSTODS)
 #define	IS_QOS_DATA(wh)	IEEE80211_QOS_HAS_SEQ(wh)
 
 	/* CCM Initial Block:
@@ -344,7 +349,7 @@ ccmp_init_blocks(rijndael_ctx *ctx, struct ieee80211_frame *wh,
 	 * initial block as we know whether or not we have
 	 * a QOS frame.
 	 */
-	if (IS_4ADDRESS(wh)) {
+	if (IEEE80211_IS_DSTODS(wh)) {
 		IEEE80211_ADDR_COPY(aad + 24,
 			((struct ieee80211_frame_addr4 *)wh)->i_addr4);
 		if (IS_QOS_DATA(wh)) {
@@ -386,7 +391,6 @@ ccmp_init_blocks(rijndael_ctx *ctx, struct ieee80211_frame *wh,
 	b0[14] = b0[15] = 0;
 	rijndael_encrypt(ctx, b0, s0);
 #undef	IS_QOS_DATA
-#undef	IS_4ADDRESS
 }
 
 #define	CCMP_ENCRYPT(_i, _b, _b0, _pos, _e, _len) do {	\

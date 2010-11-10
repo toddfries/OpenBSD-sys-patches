@@ -26,11 +26,11 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE. 
  *
- * P4: //depot/projects/trustedbsd/openbsm/libbsm/bsm_domain.c#2
+ * P4: //depot/projects/trustedbsd/openbsm/libbsm/bsm_domain.c#3
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_domain.c,v 1.1 2009/01/14 10:44:16 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_domain.c,v 1.2 2009/04/19 14:53:17 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -320,13 +320,6 @@ static const struct bsm_domain bsm_domains[] = {
 	{ BSM_PF_BLUETOOTH,
 #ifdef PF_BLUETOOTH
 	PF_BLUETOOTH
-#else
-	PF_NO_LOCAL_MAPPING
-#endif
-	},
-	{ BSM_PF_IEEE80211,
-#ifdef PF_IEEE80211
-	PF_IEEE80211
 #else
 	PF_NO_LOCAL_MAPPING
 #endif

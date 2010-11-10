@@ -30,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_pthreadtypes.h,v 1.1 2005/05/31 15:18:17 rodrigc Exp $
+ * $FreeBSD: src/sys/sys/_pthreadtypes.h,v 1.2 2009/03/14 20:10:14 das Exp $
  */
 
 #ifndef _SYS__PTHREADTYPES_H_
@@ -61,7 +61,10 @@ struct pthread_spinlock;
  * or assignment operators for the types pthread_attr_t, pthread_cond_t,
  * pthread_condattr_t, pthread_mutex_t, pthread_mutexattr_t.
  */
+#ifndef _PTHREAD_T_DECLARED
 typedef struct	pthread			*pthread_t;
+#define	_PTHREAD_T_DECLARED
+#endif
 typedef struct	pthread_attr		*pthread_attr_t;
 typedef struct	pthread_mutex		*pthread_mutex_t;
 typedef struct	pthread_mutex_attr	*pthread_mutexattr_t;

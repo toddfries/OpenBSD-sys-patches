@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Mark Brinicombe
- *      for the NetBSD Project.
- * 4. The name of the company nor the name of the author may be used to
- *    endorse or promote products derived from this software without specific
- *    prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
@@ -43,7 +36,7 @@
 #include <machine/armreg.h>
 #include <machine/asmacros.h>
 #include <arm/sa11x0/sa11x0_reg.h>
-__FBSDID("$FreeBSD: src/sys/arm/sa11x0/sa11x0_irq.S,v 1.3 2005/01/05 21:58:48 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/sa11x0/sa11x0_irq.S,v 1.4 2010/02/16 21:59:17 imp Exp $");
 Lcurrent_intr_depth:
 	.word	_C_LABEL(current_intr_depth)
 

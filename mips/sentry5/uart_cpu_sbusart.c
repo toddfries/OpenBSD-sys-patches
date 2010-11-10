@@ -36,7 +36,7 @@
 #include "opt_uart.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/sentry5/uart_cpu_sbusart.c,v 1.2 2008/09/10 03:49:08 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/sentry5/uart_cpu_sbusart.c,v 1.3 2010/01/10 20:09:30 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,7 +76,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	di->parity = UART_PARITY_NONE;
 
 	uart_bus_space_io = MIPS_PHYS_TO_KSEG1(SENTRY5_UART1ADR);
-	uart_bus_space_mem = MIPS_PHYS_TO_KSEG1(SENTRY5_UART1ADR);
+	uart_bus_space_mem = mips_bus_space_generic;
 	di->bas.bsh = MIPS_PHYS_TO_KSEG1(SENTRY5_UART1ADR);
 	return (0);
 }

@@ -27,7 +27,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/cudavar.h,v 1.3 2008/12/13 18:49:01 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/cudavar.h,v 1.4 2010/03/23 03:14:44 nwhitehorn Exp $
  *
  */
 
@@ -90,6 +90,7 @@ struct cuda_softc {
 	int		sc_polling;
 	int		sc_iic_done;
 	volatile int	sc_autopoll;
+	uint32_t	sc_rtc;
 
 	int sc_i2c_read_len;
 

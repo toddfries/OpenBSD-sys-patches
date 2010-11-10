@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/fb/vgareg.h,v 1.9 2008/09/27 08:51:18 ed Exp $
+ * $FreeBSD: src/sys/dev/fb/vgareg.h,v 1.13 2009/12/29 21:51:28 rnoland Exp $
  */
 
 #ifndef _DEV_FB_VGAREG_H_
@@ -70,6 +70,7 @@ struct video_adapter;
 typedef struct vga_softc {
 	struct video_adapter	*adp;
 	void			*state_buf;
+	void			*pal_buf;
 #ifdef FB_INSTALL_CDEV
 	genfb_softc_t		gensc;
 #endif
@@ -87,8 +88,8 @@ int		vga_read(struct cdev *dev, vga_softc_t *sc, struct uio *uio, int flag);
 int		vga_write(struct cdev *dev, vga_softc_t *sc, struct uio *uio, int flag);
 int		vga_ioctl(struct cdev *dev, vga_softc_t *sc, u_long cmd, caddr_t arg,
 			  int flag, struct thread *td);
-int		vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_offset_t offset,
-			 vm_offset_t *paddr, int prot);
+int		vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_ooffset_t offset,
+			 vm_offset_t *paddr, int prot, vm_memattr_t *memattr);
 #endif
 
 extern int	(*vga_sub_configure)(int flags);

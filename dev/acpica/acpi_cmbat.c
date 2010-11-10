@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_cmbat.c,v 1.46 2007/03/22 18:16:40 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_cmbat.c,v 1.47 2009/06/05 18:44:36 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -41,7 +41,8 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_cmbat.c,v 1.46 2007/03/22 18:16:40 j
 #include <sys/rman.h>
 #include <sys/malloc.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpiio.h>
 

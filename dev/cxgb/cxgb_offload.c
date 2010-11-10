@@ -30,7 +30,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_offload.c,v 1.16 2008/09/23 03:16:54 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_offload.c,v 1.17 2009/03/23 19:58:26 gnn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -94,6 +94,9 @@ register_tdev(struct t3cdev *tdev)
 static inline void
 unregister_tdev(struct t3cdev *tdev)
 {
+	if (!inited)
+		return;
+
 	mtx_lock(&cxgb_db_lock);
 	TAILQ_REMOVE(&ofld_dev_list, tdev, entry);
 	mtx_unlock(&cxgb_db_lock);	

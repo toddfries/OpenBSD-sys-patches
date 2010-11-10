@@ -23,11 +23,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.4 2008/12/11 16:48:35 ps Exp $
+ *	$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.8 2010/09/17 22:51:45 pjd Exp $
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.4 2008/12/11 16:48:35 ps Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.8 2010/09/17 22:51:45 pjd Exp $");
 
 /*
  *	Stand-alone file reading package.
@@ -44,6 +44,8 @@ __FBSDID("$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.4 2008/12/11 16:48:35 ps Exp $");
 #include <bootstrap.h>
 
 #include "zfsimpl.c"
+
+#define	MAXBDDEV	31
 
 static int	zfs_open(const char *path, struct open_file *f);
 static int	zfs_write(struct open_file *f, void *buf, size_t size, size_t *resid);
@@ -100,7 +102,7 @@ zfs_open(const char *upath, struct open_file *f)
 	f->f_fsdata = (void *)fp;
 
 	if (spa->spa_root_objset.os_type != DMU_OST_ZFS) {
-		printf("Unexpected object set type %lld\n",
+		printf("Unexpected object set type %llu\n",
 		    spa->spa_root_objset.os_type);
 		rc = EIO;
 		goto out;
@@ -265,6 +267,8 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 
 		rc = dnode_read(spa, &fp->f_dnode,
 				fp->f_seekp, &mze, sizeof(mze));
+		if (rc)
+			return (rc);
 		fp->f_seekp += sizeof(mze);
 
 		if (!mze.mze_name[0])
@@ -397,10 +401,10 @@ zfs_dev_init(void)
 	/*
 	 * Open all the disks we can find and see if we can reconstruct
 	 * ZFS pools from them. Bogusly assumes that the disks are named
-	 * diskN or diskNsM.
+	 * diskN, diskNpM or diskNsM.
 	 */
 	zfs_init();
-	for (unit = 0; unit < 32 /* XXX */; unit++) {
+	for (unit = 0; unit < MAXBDDEV; unit++) {
 		sprintf(devname, "disk%d:", unit);
 		fd = open(devname, O_RDONLY);
 		if (fd == -1)
@@ -413,7 +417,7 @@ zfs_dev_init(void)
 		if (vdev_probe(vdev_read, (void*) (uintptr_t) fd, 0))
 			close(fd);
 
-		for (slice = 1; slice <= 4; slice++) {
+		for (slice = 1; slice <= 128; slice++) {
 			sprintf(devname, "disk%dp%d:", unit, slice);
 			fd = open(devname, O_RDONLY);
 			if (fd == -1) {

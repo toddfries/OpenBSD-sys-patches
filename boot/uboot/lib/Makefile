@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/uboot/lib/Makefile,v 1.4 2008/09/03 15:39:50 raj Exp $
+# $FreeBSD: src/sys/boot/uboot/lib/Makefile,v 1.6 2010/08/23 01:50:34 imp Exp $
 
 LIB=		uboot
 INTERNALLIB=
@@ -10,6 +10,10 @@ SRCS=	devicename.c elf_freebsd.c console.c copy.c disk.c \
 CFLAGS+=	-ffreestanding -msoft-float
 
 CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
+
+# Pick up FDT includes
+CFLAGS+=	-I${.CURDIR}/../../../../sys/contrib/libfdt/
+
 # Pick up the bootstrap header for some interface items
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
 
@@ -19,7 +23,7 @@ CFLAGS+= -DDISK_DEBUG
 .endif
 
 machine:
-	ln -sf ${.CURDIR}/../../../${MACHINE_ARCH}/include machine
+	ln -sf ${.CURDIR}/../../../${MACHINE_CPUARCH}/include machine
 
 CLEANFILES+=	machine
 

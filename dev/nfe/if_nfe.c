@@ -21,7 +21,7 @@
 /* Driver for NVIDIA nForce MCP Fast Ethernet and Gigabit Ethernet */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/nfe/if_nfe.c,v 1.31 2008/12/20 00:04:04 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/nfe/if_nfe.c,v 1.36 2010/04/19 22:10:40 yongari Exp $");
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_device_polling.h"
@@ -93,8 +93,8 @@ static __inline void nfe_discard_rxbuf(struct nfe_softc *, int);
 static __inline void nfe_discard_jrxbuf(struct nfe_softc *, int);
 static int nfe_newbuf(struct nfe_softc *, int);
 static int nfe_jnewbuf(struct nfe_softc *, int);
-static int  nfe_rxeof(struct nfe_softc *, int);
-static int  nfe_jrxeof(struct nfe_softc *, int);
+static int  nfe_rxeof(struct nfe_softc *, int, int *);
+static int  nfe_jrxeof(struct nfe_softc *, int, int *);
 static void nfe_txeof(struct nfe_softc *);
 static int  nfe_encap(struct nfe_softc *, struct mbuf **);
 static void nfe_setmulti(struct nfe_softc *);
@@ -567,7 +567,6 @@ nfe_attach(device_t dev)
 	ifp->if_start = nfe_start;
 	ifp->if_hwassist = 0;
 	ifp->if_capabilities = 0;
-	ifp->if_watchdog = NULL;
 	ifp->if_init = nfe_init;
 	IFQ_SET_MAXLEN(&ifp->if_snd, NFE_TX_RING_COUNT - 1);
 	ifp->if_snd.ifq_drv_maxlen = NFE_TX_RING_COUNT - 1;
@@ -1153,7 +1152,7 @@ nfe_alloc_jrx_ring(struct nfe_softc *sc, struct nfe_jrx_ring *ring)
 
 	/* Create DMA tag for jumbo Rx buffers. */
 	error = bus_dma_tag_create(sc->nfe_parent_tag,
-	    PAGE_SIZE, 0,			/* alignment, boundary */
+	    1, 0,				/* alignment, boundary */
 	    BUS_SPACE_MAXADDR,			/* lowaddr */
 	    BUS_SPACE_MAXADDR,			/* highaddr */
 	    NULL, NULL,				/* filter, filterarg */
@@ -1551,23 +1550,24 @@ nfe_free_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 static poll_handler_t nfe_poll;
 
 
-static void
+static int
 nfe_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 {
 	struct nfe_softc *sc = ifp->if_softc;
 	uint32_t r;
+	int rx_npkts = 0;
 
 	NFE_LOCK(sc);
 
 	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 		NFE_UNLOCK(sc);
-		return;
+		return (rx_npkts);
 	}
 
 	if (sc->nfe_framesize > MCLBYTES - ETHER_HDR_LEN)
-		nfe_jrxeof(sc, count);
+		rx_npkts = nfe_jrxeof(sc, count, &rx_npkts);
 	else
-		nfe_rxeof(sc, count);
+		rx_npkts = nfe_rxeof(sc, count, &rx_npkts);
 	nfe_txeof(sc);
 	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 		taskqueue_enqueue_fast(sc->nfe_tq, &sc->nfe_tx_task);
@@ -1575,7 +1575,7 @@ nfe_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 	if (cmd == POLL_AND_CHECK_STATUS) {
 		if ((r = NFE_READ(sc, sc->nfe_irq_status)) == 0) {
 			NFE_UNLOCK(sc);
-			return;
+			return (rx_npkts);
 		}
 		NFE_WRITE(sc, sc->nfe_irq_status, r);
 
@@ -1586,6 +1586,7 @@ nfe_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 		}
 	}
 	NFE_UNLOCK(sc);
+	return (rx_npkts);
 }
 #endif /* DEVICE_POLLING */
 
@@ -1826,9 +1827,9 @@ nfe_int_task(void *arg, int pending)
 	domore = 0;
 	/* check Rx ring */
 	if (sc->nfe_framesize > MCLBYTES - ETHER_HDR_LEN)
-		domore = nfe_jrxeof(sc, sc->nfe_process_limit);
+		domore = nfe_jrxeof(sc, sc->nfe_process_limit, NULL);
 	else
-		domore = nfe_rxeof(sc, sc->nfe_process_limit);
+		domore = nfe_rxeof(sc, sc->nfe_process_limit, NULL);
 	/* check Tx ring */
 	nfe_txeof(sc);
 
@@ -2015,7 +2016,7 @@ nfe_jnewbuf(struct nfe_softc *sc, int idx)
 
 
 static int
-nfe_rxeof(struct nfe_softc *sc, int count)
+nfe_rxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 {
 	struct ifnet *ifp = sc->nfe_ifp;
 	struct nfe_desc32 *desc32;
@@ -2023,9 +2024,10 @@ nfe_rxeof(struct nfe_softc *sc, int count)
 	struct nfe_rx_data *data;
 	struct mbuf *m;
 	uint16_t flags;
-	int len, prog;
+	int len, prog, rx_npkts;
 	uint32_t vtag = 0;
 
+	rx_npkts = 0;
 	NFE_LOCK_ASSERT(sc);
 
 	bus_dmamap_sync(sc->rxq.rx_desc_tag, sc->rxq.rx_desc_map,
@@ -2115,18 +2117,21 @@ nfe_rxeof(struct nfe_softc *sc, int count)
 		NFE_UNLOCK(sc);
 		(*ifp->if_input)(ifp, m);
 		NFE_LOCK(sc);
+		rx_npkts++;
 	}
 
 	if (prog > 0)
 		bus_dmamap_sync(sc->rxq.rx_desc_tag, sc->rxq.rx_desc_map,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
+	if (rx_npktsp != NULL)
+		*rx_npktsp = rx_npkts;
 	return (count > 0 ? 0 : EAGAIN);
 }
 
 
 static int
-nfe_jrxeof(struct nfe_softc *sc, int count)
+nfe_jrxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 {
 	struct ifnet *ifp = sc->nfe_ifp;
 	struct nfe_desc32 *desc32;
@@ -2134,9 +2139,10 @@ nfe_jrxeof(struct nfe_softc *sc, int count)
 	struct nfe_rx_data *data;
 	struct mbuf *m;
 	uint16_t flags;
-	int len, prog;
+	int len, prog, rx_npkts;
 	uint32_t vtag = 0;
 
+	rx_npkts = 0;
 	NFE_LOCK_ASSERT(sc);
 
 	bus_dmamap_sync(sc->jrxq.jrx_desc_tag, sc->jrxq.jrx_desc_map,
@@ -2227,12 +2233,15 @@ nfe_jrxeof(struct nfe_softc *sc, int count)
 		NFE_UNLOCK(sc);
 		(*ifp->if_input)(ifp, m);
 		NFE_LOCK(sc);
+		rx_npkts++;
 	}
 
 	if (prog > 0)
 		bus_dmamap_sync(sc->jrxq.jrx_desc_tag, sc->jrxq.jrx_desc_map,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
+	if (rx_npktsp != NULL)
+		*rx_npktsp = rx_npkts;
 	return (count > 0 ? 0 : EAGAIN);
 }
 
@@ -2357,19 +2366,18 @@ nfe_encap(struct nfe_softc *sc, struct mbuf **m_head)
 	m = *m_head;
 	cflags = flags = 0;
 	tso_segsz = 0;
-	if ((m->m_pkthdr.csum_flags & NFE_CSUM_FEATURES) != 0) {
+	if ((m->m_pkthdr.csum_flags & CSUM_TSO) != 0) {
+		tso_segsz = (uint32_t)m->m_pkthdr.tso_segsz <<
+		    NFE_TX_TSO_SHIFT;
+		cflags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_UDP_CSUM);
+		cflags |= NFE_TX_TSO;
+	} else if ((m->m_pkthdr.csum_flags & NFE_CSUM_FEATURES) != 0) {
 		if ((m->m_pkthdr.csum_flags & CSUM_IP) != 0)
 			cflags |= NFE_TX_IP_CSUM;
 		if ((m->m_pkthdr.csum_flags & CSUM_TCP) != 0)
 			cflags |= NFE_TX_TCP_UDP_CSUM;
 		if ((m->m_pkthdr.csum_flags & CSUM_UDP) != 0)
 			cflags |= NFE_TX_TCP_UDP_CSUM;
-	}
-	if ((m->m_pkthdr.csum_flags & CSUM_TSO) != 0) {
-		tso_segsz = (uint32_t)m->m_pkthdr.tso_segsz <<
-		    NFE_TX_TSO_SHIFT;
-		cflags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_UDP_CSUM);
-		cflags |= NFE_TX_TSO;
 	}
 
 	for (i = 0; i < nsegs; i++) {
@@ -2481,7 +2489,7 @@ nfe_setmulti(struct nfe_softc *sc)
 	bcopy(etherbroadcastaddr, addr, ETHER_ADDR_LEN);
 	bcopy(etherbroadcastaddr, mask, ETHER_ADDR_LEN);
 
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		u_char *addrp;
 
@@ -2495,7 +2503,7 @@ nfe_setmulti(struct nfe_softc *sc)
 			mask[i] &= ~mcaddr;
 		}
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	for (i = 0; i < ETHER_ADDR_LEN; i++) {
 		mask[i] |= addr[i];

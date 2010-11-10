@@ -36,9 +36,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/pm_machdep.c,v 1.1 2008/04/13 07:27:37 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/pm_machdep.c,v 1.5 2010/03/25 14:24:00 nwhitehorn Exp $");
 
 #include "opt_compat.h"
+#include "opt_cputype.h"
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -130,7 +132,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 		sfp = (struct sigframe *)((vm_offset_t)(regs->sp - 
 		    sizeof(struct sigframe)) & ~(sizeof(__int64_t) - 1));
 
-	/* Translate the signal is appropriate */
+	/* Translate the signal if appropriate */
 	if (p->p_sysent->sv_sigtbl) {
 		if (sig <= p->p_sysent->sv_sigsize)
 			sig = p->p_sysent->sv_sigtbl[_SIG_IDX(sig)];
@@ -213,13 +215,11 @@ int
 sigreturn(struct thread *td, struct sigreturn_args *uap)
 {
 	struct trapframe *regs;
-	const ucontext_t *ucp;
-	struct proc *p;
+	ucontext_t *ucp;
 	ucontext_t uc;
 	int error;
 
 	ucp = &uc;
-	p = td->td_proc;
 
 	error = copyin(uap->sigcntxp, &uc, sizeof(uc));
 	if (error != 0)
@@ -229,14 +229,14 @@ sigreturn(struct thread *td, struct sigreturn_args *uap)
 
 /* #ifdef DEBUG */
 	if (ucp->uc_mcontext.mc_regs[ZERO] != UCONTEXT_MAGIC) {
-		printf("sigreturn: pid %d, ucp %p\n", p->p_pid, ucp);
-		printf("  old sp %x ra %x pc %x\n",
-		    regs->sp, regs->ra, regs->pc);
-		printf("  new sp %x ra %x pc %x z %x\n",
-		    ucp->uc_mcontext.mc_regs[SP],
-		    ucp->uc_mcontext.mc_regs[RA],
-		    ucp->uc_mcontext.mc_regs[PC],
-		    ucp->uc_mcontext.mc_regs[ZERO]);
+		printf("sigreturn: pid %d, ucp %p\n", td->td_proc->p_pid, ucp);
+		printf("  old sp %p ra %p pc %p\n",
+		    (void *)regs->sp, (void *)regs->ra, (void *)regs->pc);
+		printf("  new sp %p ra %p pc %p z %p\n",
+		    (void *)ucp->uc_mcontext.mc_regs[SP],
+		    (void *)ucp->uc_mcontext.mc_regs[RA],
+		    (void *)ucp->uc_mcontext.mc_regs[PC],
+		    (void *)ucp->uc_mcontext.mc_regs[ZERO]);
 		return EINVAL;
 	}
 /* #endif */
@@ -253,11 +253,8 @@ sigreturn(struct thread *td, struct sigreturn_args *uap)
 	regs->mullo = ucp->uc_mcontext.mullo;
 	regs->mulhi = ucp->uc_mcontext.mulhi;
 
-	PROC_LOCK(p);
-	td->td_sigmask = ucp->uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &ucp->uc_sigmask, NULL, 0);
+
 	return(EJUSTRETURN);
 }
 
@@ -327,7 +324,7 @@ ptrace_single_step(struct thread *td)
 	/* compute next address after current location */
 	if(curinstr != 0) {
 		va = MipsEmulateBranch(locr0, locr0->pc, locr0->fsr,
-		    (u_int)&curinstr);
+		    (uintptr_t)&curinstr);
 	} else {
 		va = locr0->pc + 4;
 	}
@@ -413,9 +410,16 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int flags)
 		bcopy((void *)&td->td_frame->f0, (void *)&mcp->mc_fpregs,
 		    sizeof(mcp->mc_fpregs));
 	}
+	if (flags & GET_MC_CLEAR_RET) {
+		mcp->mc_regs[V0] = 0;
+		mcp->mc_regs[V1] = 0;
+		mcp->mc_regs[A3] = 0;
+	}
+
 	mcp->mc_pc = td->td_frame->pc;
 	mcp->mullo = td->td_frame->mullo;
 	mcp->mulhi = td->td_frame->mulhi;
+	mcp->mc_tls = td->td_md.md_tls;
 	return (0);
 }
 
@@ -436,6 +440,7 @@ set_mcontext(struct thread *td, const mcontext_t *mcp)
 	td->td_frame->pc = mcp->mc_pc;
 	td->td_frame->mullo = mcp->mullo;
 	td->td_frame->mulhi = mcp->mulhi;
+	td->td_md.md_tls = mcp->mc_tls;
 	/* Dont let user to set any bits in Status and casue registers */
 
 	return (0);
@@ -467,7 +472,7 @@ set_fpregs(struct thread *td, struct fpreg *fpregs)
  * code by the MIPS elf abi).
  */
 void
-exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
+exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 
 	bzero((caddr_t)td->td_frame, sizeof(struct trapframe));
@@ -476,13 +481,14 @@ exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
 	 * Make sp 64-bit aligned.
 	 */
 	td->td_frame->sp = ((register_t) stack) & ~(sizeof(__int64_t) - 1);
-	td->td_frame->pc = entry & ~3;
-	td->td_frame->t9 = entry & ~3; /* abicall req */
+	td->td_frame->pc = imgp->entry_addr & ~3;
+	td->td_frame->t9 = imgp->entry_addr & ~3; /* abicall req */
 #if 0
 //	td->td_frame->sr = SR_KSU_USER | SR_EXL | SR_INT_ENAB;
 //?	td->td_frame->sr |=  idle_mask & ALL_INT_MASK;
 #else
-	td->td_frame->sr = SR_KSU_USER | SR_EXL;// mips2 also did COP_0_BIT
+	td->td_frame->sr = SR_KSU_USER | SR_EXL | SR_INT_ENAB |
+	    (mips_rd_status() & ALL_INT_MASK);
 #endif
 #ifdef TARGET_OCTEON
 	td->td_frame->sr |= MIPS_SR_COP_2_BIT | MIPS32_SR_PX | MIPS_SR_UX |
@@ -505,7 +511,7 @@ exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
 	td->td_frame->a0 = (register_t) stack;
 	td->td_frame->a1 = 0;
 	td->td_frame->a2 = 0;
-	td->td_frame->a3 = (register_t)ps_strings;
+	td->td_frame->a3 = (register_t)imgp->ps_strings;
 
 	td->td_md.md_flags &= ~MDTD_FPUSED;
 	if (PCPU_GET(fpcurthread) == td)

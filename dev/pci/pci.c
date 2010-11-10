@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.376 2009/03/10 06:21:52 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.399 2010/06/14 07:10:37 mav Exp $");
 
 #include "opt_bus.h"
 
@@ -51,8 +51,9 @@ __FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.376 2009/03/10 06:21:52 marcel Exp
 #include <machine/bus.h>
 #include <sys/rman.h>
 #include <machine/resource.h>
+#include <machine/stdarg.h>
 
-#if defined(__i386__) || defined(__amd64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__powerpc__)
 #include <machine/intr_machdep.h>
 #endif
 
@@ -61,11 +62,15 @@ __FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.376 2009/03/10 06:21:52 marcel Exp
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pci_private.h>
 
+#include <dev/usb/controller/ehcireg.h>
+#include <dev/usb/controller/ohcireg.h>
+#include <dev/usb/controller/uhcireg.h>
+
 #include "pcib_if.h"
 #include "pci_if.h"
 
 #ifdef __HAVE_ACPI
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
 #include "acpi_if.h"
 #else
 #define	ACPI_PWR_FOR_SLEEP(x, y, z)
@@ -75,14 +80,16 @@ static pci_addr_t	pci_mapbase(uint64_t mapreg);
 static const char	*pci_maptype(uint64_t mapreg);
 static int		pci_mapsize(uint64_t testval);
 static int		pci_maprange(uint64_t mapreg);
+static pci_addr_t	pci_rombase(uint64_t mapreg);
+static int		pci_romsize(uint64_t testval);
 static void		pci_fixancient(pcicfgregs *cfg);
+static int		pci_printf(pcicfgregs *cfg, const char *fmt, ...);
 
-static int		pci_porten(device_t pcib, int b, int s, int f);
-static int		pci_memen(device_t pcib, int b, int s, int f);
+static int		pci_porten(device_t dev);
+static int		pci_memen(device_t dev);
 static void		pci_assign_interrupt(device_t bus, device_t dev,
 			    int force_route);
-static int		pci_add_map(device_t pcib, device_t bus, device_t dev,
-			    int b, int s, int f, int reg,
+static int		pci_add_map(device_t bus, device_t dev, int reg,
 			    struct resource_list *rl, int force, int prefetch);
 static int		pci_probe(device_t dev);
 static int		pci_attach(device_t dev);
@@ -111,6 +118,8 @@ static void		pci_unmask_msix(device_t dev, u_int index);
 static int		pci_msi_blacklisted(void);
 static void		pci_resume_msi(device_t dev);
 static void		pci_resume_msix(device_t dev);
+static int		pci_remap_intr_method(device_t bus, device_t dev,
+			    u_int irq);
 
 static device_method_t pci_methods[] = {
 	/* Device interface */
@@ -137,9 +146,10 @@ static device_method_t pci_methods[] = {
 	DEVMETHOD(bus_alloc_resource,	pci_alloc_resource),
 	DEVMETHOD(bus_release_resource,	bus_generic_rl_release_resource),
 	DEVMETHOD(bus_activate_resource, pci_activate_resource),
-	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
+	DEVMETHOD(bus_deactivate_resource, pci_deactivate_resource),
 	DEVMETHOD(bus_child_pnpinfo_str, pci_child_pnpinfo_str_method),
 	DEVMETHOD(bus_child_location_str, pci_child_location_str_method),
+	DEVMETHOD(bus_remap_intr,	pci_remap_intr_method),
 
 	/* PCI interface */
 	DEVMETHOD(pci_read_config,	pci_read_config_method),
@@ -248,7 +258,7 @@ disable.  1 means conservatively place devices into D3 state.  2 means\n\
 agressively place devices into D3 state.  3 means put absolutely everything\n\
 in D3 state.");
 
-static int pci_do_power_resume = 1;
+int pci_do_power_resume = 1;
 TUNABLE_INT("hw.pci.do_power_resume", &pci_do_power_resume);
 SYSCTL_INT(_hw_pci, OID_AUTO, do_power_resume, CTLFLAG_RW,
     &pci_do_power_resume, 1,
@@ -268,6 +278,17 @@ static int pci_honor_msi_blacklist = 1;
 TUNABLE_INT("hw.pci.honor_msi_blacklist", &pci_honor_msi_blacklist);
 SYSCTL_INT(_hw_pci, OID_AUTO, honor_msi_blacklist, CTLFLAG_RD,
     &pci_honor_msi_blacklist, 1, "Honor chipset blacklist for MSI");
+
+#if defined(__i386__) || defined(__amd64__)
+static int pci_usb_takeover = 1;
+#else
+static int pci_usb_takeover = 0;
+#endif
+TUNABLE_INT("hw.pci.usb_early_takeover", &pci_usb_takeover);
+SYSCTL_INT(_hw_pci, OID_AUTO, usb_early_takeover, CTLFLAG_RD | CTLFLAG_TUN,
+    &pci_usb_takeover, 1, "Enable early takeover of USB controllers.\n\
+Disable this if you depend on BIOS emulation of USB devices, that is\n\
+you use USB devices (like keyboard or mouse) but do not load USB drivers");
 
 /* Find a device_t by bus/slot/function in domain 0 */
 
@@ -314,6 +335,20 @@ pci_find_device(uint16_t vendor, uint16_t device)
 	return (NULL);
 }
 
+static int
+pci_printf(pcicfgregs *cfg, const char *fmt, ...)
+{
+	va_list ap;
+	int retval;
+
+	retval = printf("pci%d:%d:%d:%d: ", cfg->domain, cfg->bus, cfg->slot,
+	    cfg->func);
+	va_start(ap, fmt);
+	retval += vprintf(fmt, ap);
+	va_end(ap);
+	return (retval);
+}
+
 /* return base address of memory or port map */
 
 static pci_addr_t
@@ -358,6 +393,34 @@ pci_mapsize(uint64_t testval)
 	return (ln2size);
 }
 
+/* return base address of device ROM */
+
+static pci_addr_t
+pci_rombase(uint64_t mapreg)
+{
+
+	return (mapreg & PCIM_BIOS_ADDR_MASK);
+}
+
+/* return log2 of map size decided for device ROM */
+
+static int
+pci_romsize(uint64_t testval)
+{
+	int ln2size;
+
+	testval = pci_rombase(testval);
+	ln2size = 0;
+	if (testval != 0) {
+		while ((testval & 1) == 0)
+		{
+			ln2size++;
+			testval >>= 1;
+		}
+	}
+	return (ln2size);
+}
+	
 /* return log2 of address range supported by map register */
 
 static int
@@ -499,7 +562,7 @@ pci_read_extcap(device_t pcib, pcicfgregs *cfg)
 {
 #define	REG(n, w)	PCIB_READ_CONFIG(pcib, cfg->bus, cfg->slot, cfg->func, n, w)
 #define	WREG(n, v, w)	PCIB_WRITE_CONFIG(pcib, cfg->bus, cfg->slot, cfg->func, n, v, w)
-#if defined(__i386__) || defined(__amd64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__powerpc__)
 	uint64_t addr;
 #endif
 	uint32_t val;
@@ -543,7 +606,7 @@ pci_read_extcap(device_t pcib, pcicfgregs *cfg)
 					cfg->pp.pp_data = ptr + PCIR_POWER_DATA;
 			}
 			break;
-#if defined(__i386__) || defined(__amd64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__powerpc__)
 		case PCIY_HT:		/* HyperTransport */
 			/* Determine HT-specific capability type. */
 			val = REG(ptr + PCIR_HT_COMMAND, 2);
@@ -1030,8 +1093,9 @@ pci_get_vpd_readonly_method(device_t dev, device_t child, const char *kw,
 }
 
 /*
- * Return the offset in configuration space of the requested extended
- * capability entry or 0 if the specified capability was not found.
+ * Find the requested extended capability and return the offset in
+ * configuration space via the pointer provided. The function returns
+ * 0 on success and error code otherwise.
  */
 int
 pci_find_extcap_method(device_t dev, device_t child, int capability,
@@ -1565,6 +1629,40 @@ pci_ht_map_msi(device_t dev, uint64_t addr)
 	}
 }
 
+int
+pci_get_max_read_req(device_t dev)
+{
+	int cap;
+	uint16_t val;
+
+	if (pci_find_extcap(dev, PCIY_EXPRESS, &cap) != 0)
+		return (0);
+	val = pci_read_config(dev, cap + PCIR_EXPRESS_DEVICE_CTL, 2);
+	val &= PCIM_EXP_CTL_MAX_READ_REQUEST;
+	val >>= 12;
+	return (1 << (val + 7));
+}
+
+int
+pci_set_max_read_req(device_t dev, int size)
+{
+	int cap;
+	uint16_t val;
+
+	if (pci_find_extcap(dev, PCIY_EXPRESS, &cap) != 0)
+		return (0);
+	if (size < 128)
+		size = 128;
+	if (size > 4096)
+		size = 4096;
+	size = (1 << (fls(size) - 1));
+	val = pci_read_config(dev, cap + PCIR_EXPRESS_DEVICE_CTL, 2);
+	val &= ~PCIM_EXP_CTL_MAX_READ_REQUEST;
+	val |= (fls(size) - 8) << 12;
+	pci_write_config(dev, cap + PCIR_EXPRESS_DEVICE_CTL, val, 2);
+	return (size);
+}
+
 /*
  * Support for MSI message signalled interrupts.
  */
@@ -1641,20 +1739,17 @@ pci_resume_msi(device_t dev)
 	    2);
 }
 
-int
-pci_remap_msi_irq(device_t dev, u_int irq)
+static int
+pci_remap_intr_method(device_t bus, device_t dev, u_int irq)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	pcicfgregs *cfg = &dinfo->cfg;
 	struct resource_list_entry *rle;
 	struct msix_table_entry *mte;
 	struct msix_vector *mv;
-	device_t bus;
 	uint64_t addr;
 	uint32_t data;	
 	int error, i, j;
-
-	bus = device_get_parent(dev);
 
 	/*
 	 * Handle MSI first.  We try to find this IRQ among our list
@@ -2049,10 +2144,8 @@ pci_set_powerstate_method(device_t dev, device_t child, int state)
 	}
 
 	if (bootverbose)
-		printf(
-		    "pci%d:%d:%d:%d: Transition from D%d to D%d\n",
-		    dinfo->cfg.domain, dinfo->cfg.bus, dinfo->cfg.slot,
-		    dinfo->cfg.func, oldstate, state);
+		pci_printf(cfg, "Transition from D%d to D%d\n", oldstate,
+		    state);
 
 	PCI_WRITE_CONFIG(dev, child, cfg->pp.pp_status, status, 2);
 	if (delay)
@@ -2135,62 +2228,38 @@ pci_disable_busmaster_method(device_t dev, device_t child)
 int
 pci_enable_io_method(device_t dev, device_t child, int space)
 {
-	uint16_t command;
 	uint16_t bit;
-	char *error;
-
-	bit = 0;
-	error = NULL;
 
 	switch(space) {
 	case SYS_RES_IOPORT:
 		bit = PCIM_CMD_PORTEN;
-		error = "port";
 		break;
 	case SYS_RES_MEMORY:
 		bit = PCIM_CMD_MEMEN;
-		error = "memory";
 		break;
 	default:
 		return (EINVAL);
 	}
 	pci_set_command_bit(dev, child, bit);
-	/* Some devices seem to need a brief stall here, what do to? */
-	command = PCI_READ_CONFIG(dev, child, PCIR_COMMAND, 2);
-	if (command & bit)
-		return (0);
-	device_printf(child, "failed to enable %s mapping!\n", error);
-	return (ENXIO);
+	return (0);
 }
 
 int
 pci_disable_io_method(device_t dev, device_t child, int space)
 {
-	uint16_t command;
 	uint16_t bit;
-	char *error;
-
-	bit = 0;
-	error = NULL;
 
 	switch(space) {
 	case SYS_RES_IOPORT:
 		bit = PCIM_CMD_PORTEN;
-		error = "port";
 		break;
 	case SYS_RES_MEMORY:
 		bit = PCIM_CMD_MEMEN;
-		error = "memory";
 		break;
 	default:
 		return (EINVAL);
 	}
 	pci_clear_command_bit(dev, child, bit);
-	command = PCI_READ_CONFIG(dev, child, PCIR_COMMAND, 2);
-	if (command & bit) {
-		device_printf(child, "failed to disable %s mapping!\n", error);
-		return (ENXIO);
-	}
 	return (0);
 }
 
@@ -2257,51 +2326,51 @@ pci_print_verbose(struct pci_devinfo *dinfo)
 }
 
 static int
-pci_porten(device_t pcib, int b, int s, int f)
+pci_porten(device_t dev)
 {
-	return (PCIB_READ_CONFIG(pcib, b, s, f, PCIR_COMMAND, 2)
-		& PCIM_CMD_PORTEN) != 0;
+	return (pci_read_config(dev, PCIR_COMMAND, 2) & PCIM_CMD_PORTEN) != 0;
 }
 
 static int
-pci_memen(device_t pcib, int b, int s, int f)
+pci_memen(device_t dev)
 {
-	return (PCIB_READ_CONFIG(pcib, b, s, f, PCIR_COMMAND, 2)
-		& PCIM_CMD_MEMEN) != 0;
+	return (pci_read_config(dev, PCIR_COMMAND, 2) & PCIM_CMD_MEMEN) != 0;
 }
 
-/*
- * Add a resource based on a pci map register. Return 1 if the map
- * register is a 32bit map register or 2 if it is a 64bit register.
- */
-static int
-pci_add_map(device_t pcib, device_t bus, device_t dev,
-    int b, int s, int f, int reg, struct resource_list *rl, int force,
-    int prefetch)
+static void
+pci_read_bar(device_t dev, int reg, pci_addr_t *mapp, pci_addr_t *testvalp)
 {
-	pci_addr_t base, map;
-	pci_addr_t start, end, count;
-	uint8_t ln2size;
-	uint8_t ln2range;
-	uint32_t testval;
+	pci_addr_t map, testval;
+	int ln2range;
 	uint16_t cmd;
-	int type;
-	int barlen;
-	struct resource *res;
 
-	map = PCIB_READ_CONFIG(pcib, b, s, f, reg, 4);
+	/*
+	 * The device ROM BAR is special.  It is always a 32-bit
+	 * memory BAR.  Bit 0 is special and should not be set when
+	 * sizing the BAR.
+	 */
+	if (reg == PCIR_BIOS) {
+		map = pci_read_config(dev, reg, 4);
+		pci_write_config(dev, reg, 0xfffffffe, 4);
+		testval = pci_read_config(dev, reg, 4);
+		pci_write_config(dev, reg, map, 4);
+		*mapp = map;
+		*testvalp = testval;
+		return;
+	}
+
+	map = pci_read_config(dev, reg, 4);
 	ln2range = pci_maprange(map);
 	if (ln2range == 64)
-		map |= (uint64_t)PCIB_READ_CONFIG(pcib, b, s, f, reg + 4, 4) <<
-		    32;
+		map |= (pci_addr_t)pci_read_config(dev, reg + 4, 4) << 32;
 
 	/*
 	 * Disable decoding via the command register before
 	 * determining the BAR's length since we will be placing it in
 	 * a weird state.
 	 */
-	cmd = PCIB_READ_CONFIG(pcib, b, s, f, PCIR_COMMAND, 2);
-	PCIB_WRITE_CONFIG(pcib, b, s, f, PCIR_COMMAND,
+	cmd = pci_read_config(dev, PCIR_COMMAND, 2);
+	pci_write_config(dev, PCIR_COMMAND,
 	    cmd & ~(PCI_BAR_MEM(map) ? PCIM_CMD_MEMEN : PCIM_CMD_PORTEN), 2);
 
 	/*
@@ -2309,29 +2378,74 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 	 * log_2(size) bits of the BAR will stick as 0 when we read
 	 * the value back.
 	 */
-	PCIB_WRITE_CONFIG(pcib, b, s, f, reg, 0xffffffff, 4);
-	testval = PCIB_READ_CONFIG(pcib, b, s, f, reg, 4);
+	pci_write_config(dev, reg, 0xffffffff, 4);
+	testval = pci_read_config(dev, reg, 4);
 	if (ln2range == 64) {
-		PCIB_WRITE_CONFIG(pcib, b, s, f, reg + 4, 0xffffffff, 4);
-		testval |= (uint64_t)PCIB_READ_CONFIG(pcib, b, s, f, reg + 4,
-		    4) << 32;
+		pci_write_config(dev, reg + 4, 0xffffffff, 4);
+		testval |= (pci_addr_t)pci_read_config(dev, reg + 4, 4) << 32;
 	}
 
-	/* Restore the BAR and command register. */
-	PCIB_WRITE_CONFIG(pcib, b, s, f, reg, map, 4);
+	/*
+	 * Restore the original value of the BAR.  We may have reprogrammed
+	 * the BAR of the low-level console device and when booting verbose,
+	 * we need the console device addressable.
+	 */
+	pci_write_config(dev, reg, map, 4);
 	if (ln2range == 64)
-		PCIB_WRITE_CONFIG(pcib, b, s, f, reg + 4, map >> 32, 4);
-	PCIB_WRITE_CONFIG(pcib, b, s, f, PCIR_COMMAND, cmd, 2);
+		pci_write_config(dev, reg + 4, map >> 32, 4);
+	pci_write_config(dev, PCIR_COMMAND, cmd, 2);
 
+	*mapp = map;
+	*testvalp = testval;
+}
+
+static void
+pci_write_bar(device_t dev, int reg, pci_addr_t base)
+{
+	pci_addr_t map;
+	int ln2range;
+
+	map = pci_read_config(dev, reg, 4);
+
+	/* The device ROM BAR is always 32-bits. */
+	if (reg == PCIR_BIOS)
+		return;
+	ln2range = pci_maprange(map);
+	pci_write_config(dev, reg, base, 4);
+	if (ln2range == 64)
+		pci_write_config(dev, reg + 4, base >> 32, 4);
+}
+
+/*
+ * Add a resource based on a pci map register. Return 1 if the map
+ * register is a 32bit map register or 2 if it is a 64bit register.
+ */
+static int
+pci_add_map(device_t bus, device_t dev, int reg, struct resource_list *rl,
+    int force, int prefetch)
+{
+	pci_addr_t base, map, testval;
+	pci_addr_t start, end, count;
+	int barlen, basezero, maprange, mapsize, type;
+	uint16_t cmd;
+	struct resource *res;
+
+	pci_read_bar(dev, reg, &map, &testval);
 	if (PCI_BAR_MEM(map)) {
 		type = SYS_RES_MEMORY;
 		if (map & PCIM_BAR_MEM_PREFETCH)
 			prefetch = 1;
 	} else
 		type = SYS_RES_IOPORT;
-	ln2size = pci_mapsize(testval);
+	mapsize = pci_mapsize(testval);
 	base = pci_mapbase(map);
-	barlen = ln2range == 64 ? 2 : 1;
+#ifdef __PCI_BAR_ZERO_VALID
+	basezero = 0;
+#else
+	basezero = base == 0;
+#endif
+	maprange = pci_maprange(map);
+	barlen = maprange == 64 ? 2 : 1;
 
 	/*
 	 * For I/O registers, if bottom bit is set, and the next bit up
@@ -2342,38 +2456,39 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 	 */
 	if (PCI_BAR_IO(testval) && (testval & PCIM_BAR_IO_RESERVED) != 0)
 		return (barlen);
-	if ((type == SYS_RES_MEMORY && ln2size < 4) ||
-	    (type == SYS_RES_IOPORT && ln2size < 2))
+	if ((type == SYS_RES_MEMORY && mapsize < 4) ||
+	    (type == SYS_RES_IOPORT && mapsize < 2))
 		return (barlen);
 
 	if (bootverbose) {
 		printf("\tmap[%02x]: type %s, range %2d, base %#jx, size %2d",
-		    reg, pci_maptype(map), ln2range, (uintmax_t)base, ln2size);
-		if (type == SYS_RES_IOPORT && !pci_porten(pcib, b, s, f))
+		    reg, pci_maptype(map), maprange, (uintmax_t)base, mapsize);
+		if (type == SYS_RES_IOPORT && !pci_porten(dev))
 			printf(", port disabled\n");
-		else if (type == SYS_RES_MEMORY && !pci_memen(pcib, b, s, f))
+		else if (type == SYS_RES_MEMORY && !pci_memen(dev))
 			printf(", memory disabled\n");
 		else
 			printf(", enabled\n");
 	}
 
 	/*
-	 * If base is 0, then we have problems.  It is best to ignore
-	 * such entries for the moment.  These will be allocated later if
-	 * the driver specifically requests them.  However, some
-	 * removable busses look better when all resources are allocated,
-	 * so allow '0' to be overriden.
+	 * If base is 0, then we have problems if this architecture does
+	 * not allow that.  It is best to ignore such entries for the
+	 * moment.  These will be allocated later if the driver specifically
+	 * requests them.  However, some removable busses look better when
+	 * all resources are allocated, so allow '0' to be overriden.
 	 *
 	 * Similarly treat maps whose values is the same as the test value
 	 * read back.  These maps have had all f's written to them by the
 	 * BIOS in an attempt to disable the resources.
 	 */
-	if (!force && (base == 0 || map == testval))
+	if (!force && (basezero || map == testval))
 		return (barlen);
 	if ((u_long)base != base) {
 		device_printf(bus,
 		    "pci%d:%d:%d:%d bar %#x too many address bits",
-		    pci_get_domain(dev), b, s, f, reg);
+		    pci_get_domain(dev), pci_get_bus(dev), pci_get_slot(dev),
+		    pci_get_function(dev), reg);
 		return (barlen);
 	}
 
@@ -2386,30 +2501,30 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 	 */
 	if (pci_enable_io_modes) {
 		/* Turn on resources that have been left off by a lazy BIOS */
-		if (type == SYS_RES_IOPORT && !pci_porten(pcib, b, s, f)) {
-			cmd = PCIB_READ_CONFIG(pcib, b, s, f, PCIR_COMMAND, 2);
+		if (type == SYS_RES_IOPORT && !pci_porten(dev)) {
+			cmd = pci_read_config(dev, PCIR_COMMAND, 2);
 			cmd |= PCIM_CMD_PORTEN;
-			PCIB_WRITE_CONFIG(pcib, b, s, f, PCIR_COMMAND, cmd, 2);
+			pci_write_config(dev, PCIR_COMMAND, cmd, 2);
 		}
-		if (type == SYS_RES_MEMORY && !pci_memen(pcib, b, s, f)) {
-			cmd = PCIB_READ_CONFIG(pcib, b, s, f, PCIR_COMMAND, 2);
+		if (type == SYS_RES_MEMORY && !pci_memen(dev)) {
+			cmd = pci_read_config(dev, PCIR_COMMAND, 2);
 			cmd |= PCIM_CMD_MEMEN;
-			PCIB_WRITE_CONFIG(pcib, b, s, f, PCIR_COMMAND, cmd, 2);
+			pci_write_config(dev, PCIR_COMMAND, cmd, 2);
 		}
 	} else {
-		if (type == SYS_RES_IOPORT && !pci_porten(pcib, b, s, f))
+		if (type == SYS_RES_IOPORT && !pci_porten(dev))
 			return (barlen);
-		if (type == SYS_RES_MEMORY && !pci_memen(pcib, b, s, f))
+		if (type == SYS_RES_MEMORY && !pci_memen(dev))
 			return (barlen);
 	}
 
-	count = 1 << ln2size;
-	if (base == 0 || base == pci_mapbase(testval)) {
+	count = 1 << mapsize;
+	if (basezero || base == pci_mapbase(testval)) {
 		start = 0;	/* Let the parent decide. */
 		end = ~0ULL;
 	} else {
 		start = base;
-		end = base + (1 << ln2size) - 1;
+		end = base + (1 << mapsize) - 1;
 	}
 	resource_list_add(rl, type, reg, start, end, count);
 
@@ -2419,7 +2534,7 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 	 * driver for this device will later inherit this resource in
 	 * pci_alloc_resource().
 	 */
-	res = resource_list_alloc(rl, bus, dev, type, &reg, start, end, count,
+	res = resource_list_reserve(rl, bus, dev, type, &reg, start, end, count,
 	    prefetch ? RF_PREFETCHABLE : 0);
 	if (res == NULL) {
 		/*
@@ -2430,13 +2545,9 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 		 */
 		resource_list_delete(rl, type, reg);
 		start = 0;
-	} else {
+	} else
 		start = rman_get_start(res);
-		rman_set_device(res, bus);
-	}
-	pci_write_config(dev, reg, start, 4);
-	if (ln2range == 64)
-		pci_write_config(dev, reg + 4, start >> 32, 4);
+	pci_write_bar(dev, reg, start);
 	return (barlen);
 }
 
@@ -2448,8 +2559,8 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
  * addressing mode.
  */
 static void
-pci_ata_maps(device_t pcib, device_t bus, device_t dev, int b,
-    int s, int f, struct resource_list *rl, int force, uint32_t prefetchmask)
+pci_ata_maps(device_t bus, device_t dev, struct resource_list *rl, int force,
+    uint32_t prefetchmask)
 {
 	struct resource *r;
 	int rid, type, progif;
@@ -2467,42 +2578,38 @@ pci_ata_maps(device_t pcib, device_t bus, device_t dev, int b,
 	progif = pci_read_config(dev, PCIR_PROGIF, 1);
 	type = SYS_RES_IOPORT;
 	if (progif & PCIP_STORAGE_IDE_MODEPRIM) {
-		pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(0), rl, force,
+		pci_add_map(bus, dev, PCIR_BAR(0), rl, force,
 		    prefetchmask & (1 << 0));
-		pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(1), rl, force,
+		pci_add_map(bus, dev, PCIR_BAR(1), rl, force,
 		    prefetchmask & (1 << 1));
 	} else {
 		rid = PCIR_BAR(0);
 		resource_list_add(rl, type, rid, 0x1f0, 0x1f7, 8);
-		r = resource_list_alloc(rl, bus, dev, type, &rid, 0x1f0, 0x1f7,
-		    8, 0);
-		rman_set_device(r, bus);
+		r = resource_list_reserve(rl, bus, dev, type, &rid, 0x1f0,
+		    0x1f7, 8, 0);
 		rid = PCIR_BAR(1);
 		resource_list_add(rl, type, rid, 0x3f6, 0x3f6, 1);
-		r = resource_list_alloc(rl, bus, dev, type, &rid, 0x3f6, 0x3f6,
-		    1, 0);
-		rman_set_device(r, bus);
+		r = resource_list_reserve(rl, bus, dev, type, &rid, 0x3f6,
+		    0x3f6, 1, 0);
 	}
 	if (progif & PCIP_STORAGE_IDE_MODESEC) {
-		pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(2), rl, force,
+		pci_add_map(bus, dev, PCIR_BAR(2), rl, force,
 		    prefetchmask & (1 << 2));
-		pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(3), rl, force,
+		pci_add_map(bus, dev, PCIR_BAR(3), rl, force,
 		    prefetchmask & (1 << 3));
 	} else {
 		rid = PCIR_BAR(2);
 		resource_list_add(rl, type, rid, 0x170, 0x177, 8);
-		r = resource_list_alloc(rl, bus, dev, type, &rid, 0x170, 0x177,
-		    8, 0);
-		rman_set_device(r, bus);
+		r = resource_list_reserve(rl, bus, dev, type, &rid, 0x170,
+		    0x177, 8, 0);
 		rid = PCIR_BAR(3);
 		resource_list_add(rl, type, rid, 0x376, 0x376, 1);
-		r = resource_list_alloc(rl, bus, dev, type, &rid, 0x376, 0x376,
-		    1, 0);
-		rman_set_device(r, bus);
+		r = resource_list_reserve(rl, bus, dev, type, &rid, 0x376,
+		    0x376, 1, 0);
 	}
-	pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(4), rl, force,
+	pci_add_map(bus, dev, PCIR_BAR(4), rl, force,
 	    prefetchmask & (1 << 4));
-	pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(5), rl, force,
+	pci_add_map(bus, dev, PCIR_BAR(5), rl, force,
 	    prefetchmask & (1 << 5));
 }
 
@@ -2554,21 +2661,131 @@ pci_assign_interrupt(device_t bus, device_t dev, int force_route)
 	resource_list_add(&dinfo->resources, SYS_RES_IRQ, 0, irq, irq, 1);
 }
 
+/* Perform early OHCI takeover from SMM. */
+static void
+ohci_early_takeover(device_t self)
+{
+	struct resource *res;
+	uint32_t ctl;
+	int rid;
+	int i;
+
+	rid = PCIR_BAR(0);
+	res = bus_alloc_resource_any(self, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (res == NULL)
+		return;
+
+	ctl = bus_read_4(res, OHCI_CONTROL);
+	if (ctl & OHCI_IR) {
+		if (bootverbose)
+			printf("ohci early: "
+			    "SMM active, request owner change\n");
+		bus_write_4(res, OHCI_COMMAND_STATUS, OHCI_OCR);
+		for (i = 0; (i < 100) && (ctl & OHCI_IR); i++) {
+			DELAY(1000);
+			ctl = bus_read_4(res, OHCI_CONTROL);
+		}
+		if (ctl & OHCI_IR) {
+			if (bootverbose)
+				printf("ohci early: "
+				    "SMM does not respond, resetting\n");
+			bus_write_4(res, OHCI_CONTROL, OHCI_HCFS_RESET);
+		}
+		/* Disable interrupts */
+		bus_write_4(res, OHCI_INTERRUPT_DISABLE, OHCI_ALL_INTRS);
+	}
+
+	bus_release_resource(self, SYS_RES_MEMORY, rid, res);
+}
+
+/* Perform early UHCI takeover from SMM. */
+static void
+uhci_early_takeover(device_t self)
+{
+	struct resource *res;
+	int rid;
+
+	/*
+	 * Set the PIRQD enable bit and switch off all the others. We don't
+	 * want legacy support to interfere with us XXX Does this also mean
+	 * that the BIOS won't touch the keyboard anymore if it is connected
+	 * to the ports of the root hub?
+	 */
+	pci_write_config(self, PCI_LEGSUP, PCI_LEGSUP_USBPIRQDEN, 2);
+
+	/* Disable interrupts */
+	rid = PCI_UHCI_BASE_REG;
+	res = bus_alloc_resource_any(self, SYS_RES_IOPORT, &rid, RF_ACTIVE);
+	if (res != NULL) {
+		bus_write_2(res, UHCI_INTR, 0);
+		bus_release_resource(self, SYS_RES_IOPORT, rid, res);
+	}
+}
+
+/* Perform early EHCI takeover from SMM. */
+static void
+ehci_early_takeover(device_t self)
+{
+	struct resource *res;
+	uint32_t cparams;
+	uint32_t eec;
+	uint8_t eecp;
+	uint8_t bios_sem;
+	uint8_t offs;
+	int rid;
+	int i;
+
+	rid = PCIR_BAR(0);
+	res = bus_alloc_resource_any(self, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (res == NULL)
+		return;
+
+	cparams = bus_read_4(res, EHCI_HCCPARAMS);
+
+	/* Synchronise with the BIOS if it owns the controller. */
+	for (eecp = EHCI_HCC_EECP(cparams); eecp != 0;
+	    eecp = EHCI_EECP_NEXT(eec)) {
+		eec = pci_read_config(self, eecp, 4);
+		if (EHCI_EECP_ID(eec) != EHCI_EC_LEGSUP) {
+			continue;
+		}
+		bios_sem = pci_read_config(self, eecp +
+		    EHCI_LEGSUP_BIOS_SEM, 1);
+		if (bios_sem == 0) {
+			continue;
+		}
+		if (bootverbose)
+			printf("ehci early: "
+			    "SMM active, request owner change\n");
+
+		pci_write_config(self, eecp + EHCI_LEGSUP_OS_SEM, 1, 1);
+
+		for (i = 0; (i < 100) && (bios_sem != 0); i++) {
+			DELAY(1000);
+			bios_sem = pci_read_config(self, eecp +
+			    EHCI_LEGSUP_BIOS_SEM, 1);
+		}
+
+		if (bios_sem != 0) {
+			if (bootverbose)
+				printf("ehci early: "
+				    "SMM does not respond\n");
+		}
+		/* Disable interrupts */
+		offs = bus_read_1(res, EHCI_CAPLENGTH);
+		bus_write_4(res, offs + EHCI_USBINTR, 0);
+	}
+	bus_release_resource(self, SYS_RES_MEMORY, rid, res);
+}
+
 void
 pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 {
-	device_t pcib;
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	pcicfgregs *cfg = &dinfo->cfg;
 	struct resource_list *rl = &dinfo->resources;
 	struct pci_quirk *q;
-	int b, i, f, s;
-
-	pcib = device_get_parent(bus);
-
-	b = cfg->bus;
-	s = cfg->slot;
-	f = cfg->func;
+	int i;
 
 	/* ATA devices needs special map treatment */
 	if ((pci_get_class(dev) == PCIC_STORAGE) &&
@@ -2576,11 +2793,11 @@ pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 	    ((pci_get_progif(dev) & PCIP_STORAGE_IDE_MASTERDEV) ||
 	     (!pci_read_config(dev, PCIR_BAR(0), 4) &&
 	      !pci_read_config(dev, PCIR_BAR(2), 4))) )
-		pci_ata_maps(pcib, bus, dev, b, s, f, rl, force, prefetchmask);
+		pci_ata_maps(bus, dev, rl, force, prefetchmask);
 	else
 		for (i = 0; i < cfg->nummaps;)
-			i += pci_add_map(pcib, bus, dev, b, s, f, PCIR_BAR(i),
-			    rl, force, prefetchmask & (1 << i));
+			i += pci_add_map(bus, dev, PCIR_BAR(i), rl, force,
+			    prefetchmask & (1 << i));
 
 	/*
 	 * Add additional, quirked resources.
@@ -2588,8 +2805,7 @@ pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 	for (q = &pci_quirks[0]; q->devid; q++) {
 		if (q->devid == ((cfg->device << 16) | cfg->vendor)
 		    && q->type == PCI_QUIRK_MAP_REG)
-			pci_add_map(pcib, bus, dev, b, s, f, q->arg1, rl,
-			  force, 0);
+			pci_add_map(bus, dev, q->arg1, rl, force, 0);
 	}
 
 	if (cfg->intpin > 0 && PCI_INTERRUPT_VALID(cfg->intline)) {
@@ -2604,6 +2820,16 @@ pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 #else
 		pci_assign_interrupt(bus, dev, 0);
 #endif
+	}
+
+	if (pci_usb_takeover && pci_get_class(dev) == PCIC_SERIALBUS &&
+	    pci_get_subclass(dev) == PCIS_SERIALBUS_USB) {
+		if (pci_get_progif(dev) == PCIP_SERIALBUS_USB_EHCI)
+			ehci_early_takeover(dev);
+		else if (pci_get_progif(dev) == PCIP_SERIALBUS_USB_OHCI)
+			ohci_early_takeover(dev);
+		else if (pci_get_progif(dev) == PCIP_SERIALBUS_USB_UHCI)
+			uhci_early_takeover(dev);
 	}
 }
 
@@ -2762,6 +2988,8 @@ pci_resume(device_t dev)
 
 		/* Now the device is powered up, restore its config space. */
 		pci_cfg_restore(child, dinfo);
+		if (!device_is_attached(child))
+			pci_cfg_save(child, dinfo, 1);
 	}
 	free(devlist, M_TEMP);
 	return (bus_generic_resume(dev));
@@ -2803,9 +3031,7 @@ pci_driver_added(device_t dev, driver_t *driver)
 		dinfo = device_get_ivars(child);
 		pci_print_verbose(dinfo);
 		if (bootverbose)
-			printf("pci%d:%d:%d:%d: reprobing on driver added\n",
-			    dinfo->cfg.domain, dinfo->cfg.bus, dinfo->cfg.slot,
-			    dinfo->cfg.func);
+			pci_printf(&dinfo->cfg, "reprobing on driver added\n");
 		pci_cfg_restore(child, dinfo);
 		if (device_probe_and_attach(child) != 0)
 			pci_cfg_save(child, dinfo, 1);
@@ -2859,8 +3085,10 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 					goto bad;
 				dinfo->cfg.msi.msi_addr = addr;
 				dinfo->cfg.msi.msi_data = data;
-				pci_enable_msi(child, addr, data);
 			}
+			if (dinfo->cfg.msi.msi_handlers == 0)
+				pci_enable_msi(child, dinfo->cfg.msi.msi_addr,
+				    dinfo->cfg.msi.msi_data);
 			dinfo->cfg.msi.msi_handlers++;
 		} else {
 			KASSERT(dinfo->cfg.msix.msix_alloc > 0,
@@ -3415,7 +3643,7 @@ DB_SHOW_COMMAND(pciregs, db_pci_dump)
 #endif /* DDB */
 
 static struct resource *
-pci_alloc_map(device_t dev, device_t child, int type, int *rid,
+pci_reserve_map(device_t dev, device_t child, int type, int *rid,
     u_long start, u_long end, u_long count, u_int flags)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(child);
@@ -3423,8 +3651,7 @@ pci_alloc_map(device_t dev, device_t child, int type, int *rid,
 	struct resource_list_entry *rle;
 	struct resource *res;
 	pci_addr_t map, testval;
-	uint16_t cmd;
-	int maprange, mapsize;
+	int mapsize;
 
 	/*
 	 * Weed out the bogons, and figure out how large the BAR/map
@@ -3434,44 +3661,14 @@ pci_alloc_map(device_t dev, device_t child, int type, int *rid,
 	 * it fails here, that other code is broken.
 	 */
 	res = NULL;
-	map = pci_read_config(child, *rid, 4);
-	maprange = pci_maprange(map);
-	if (maprange == 64)
-		map |= (pci_addr_t)pci_read_config(child, *rid + 4, 4) << 32;
-
-	/*
-	 * Disable decoding via the command register before
-	 * determining the BAR's length since we will be placing it in
-	 * a weird state.
-	 */
-	cmd = pci_read_config(child, PCIR_COMMAND, 2);
-	pci_write_config(child, PCIR_COMMAND,
-	    cmd & ~(PCI_BAR_MEM(map) ? PCIM_CMD_MEMEN : PCIM_CMD_PORTEN), 2);
-
-	/* Determine the BAR's length. */
-	pci_write_config(child, *rid, 0xffffffff, 4);
-	testval = pci_read_config(child, *rid, 4);
-	if (maprange == 64) {
-		pci_write_config(child, *rid + 4, 0xffffffff, 4);
-		testval |= (pci_addr_t)pci_read_config(child, *rid + 4, 4) <<
-		    32;
-	}
-
-	/*
-	 * Restore the original value of the BAR.  We may have reprogrammed
-	 * the BAR of the low-level console device and when booting verbose,
-	 * we need the console device addressable.
-	 */
-	pci_write_config(child, *rid, map, 4);
-	if (maprange == 64)
-		pci_write_config(child, *rid + 4, map >> 32, 4);
-	pci_write_config(child, PCIR_COMMAND, cmd, 2);
+	pci_read_bar(child, *rid, &map, &testval);
 
 	/* Ignore a BAR with a base of 0. */
-	if (pci_mapbase(testval) == 0)
+	if ((*rid == PCIR_BIOS && pci_rombase(testval) == 0) ||
+	    pci_mapbase(testval) == 0)
 		goto out;
 
-	if (PCI_BAR_MEM(testval)) {
+	if (PCI_BAR_MEM(testval) || *rid == PCIR_BIOS) {
 		if (type != SYS_RES_MEMORY) {
 			if (bootverbose)
 				device_printf(dev,
@@ -3490,14 +3687,20 @@ pci_alloc_map(device_t dev, device_t child, int type, int *rid,
 			goto out;
 		}
 	}
+
 	/*
 	 * For real BARs, we need to override the size that
 	 * the driver requests, because that's what the BAR
 	 * actually uses and we would otherwise have a
 	 * situation where we might allocate the excess to
 	 * another driver, which won't work.
+	 *
+	 * Device ROM BARs use a different mask value.
 	 */
-	mapsize = pci_mapsize(testval);
+	if (*rid == PCIR_BIOS)
+		mapsize = pci_romsize(testval);
+	else
+		mapsize = pci_mapsize(testval);
 	count = 1UL << mapsize;
 	if (RF_ALIGNMENT(flags) < mapsize)
 		flags = (flags & ~RF_ALIGNMENT_MASK) | RF_ALIGNMENT_LOG2(mapsize);
@@ -3516,23 +3719,21 @@ pci_alloc_map(device_t dev, device_t child, int type, int *rid,
 		    count, *rid, type, start, end);
 		goto out;
 	}
-	rman_set_device(res, dev);
 	resource_list_add(rl, type, *rid, start, end, count);
 	rle = resource_list_find(rl, type, *rid);
 	if (rle == NULL)
-		panic("pci_alloc_map: unexpectedly can't find resource.");
+		panic("pci_reserve_map: unexpectedly can't find resource.");
 	rle->res = res;
 	rle->start = rman_get_start(res);
 	rle->end = rman_get_end(res);
 	rle->count = count;
+	rle->flags = RLE_RESERVED;
 	if (bootverbose)
 		device_printf(child,
 		    "Lazy allocation of %#lx bytes rid %#x type %d at %#lx\n",
 		    count, *rid, type, rman_get_start(res));
 	map = rman_get_start(res);
-	pci_write_config(child, *rid, map, 4);
-	if (maprange == 64)
-		pci_write_config(child, *rid + 4, map >> 32, 4);
+	pci_write_bar(child, *rid, map);
 out:;
 	return (res);
 }
@@ -3576,69 +3777,17 @@ pci_alloc_resource(device_t dev, device_t child, int type, int *rid,
 		break;
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		/* Allocate resources for this BAR if needed. */
+		/* Reserve resources for this BAR if needed. */
 		rle = resource_list_find(rl, type, *rid);
 		if (rle == NULL) {
-			res = pci_alloc_map(dev, child, type, rid, start, end,
+			res = pci_reserve_map(dev, child, type, rid, start, end,
 			    count, flags);
 			if (res == NULL)
 				return (NULL);
-			rle = resource_list_find(rl, type, *rid);
-		}
-
-		/*
-		 * If the resource belongs to the bus, then give it to
-		 * the child.  We need to activate it if requested
-		 * since the bus always allocates inactive resources.
-		 */
-		if (rle != NULL && rle->res != NULL &&
-		    rman_get_device(rle->res) == dev) {
-			if (bootverbose)
-				device_printf(child,
-			    "Reserved %#lx bytes for rid %#x type %d at %#lx\n",
-				    rman_get_size(rle->res), *rid, type,
-				    rman_get_start(rle->res));
-			rman_set_device(rle->res, child);
-			if ((flags & RF_ACTIVE) &&
-			    bus_activate_resource(child, type, *rid,
-			    rle->res) != 0)
-				return (NULL);
-			return (rle->res);
 		}
 	}
 	return (resource_list_alloc(rl, dev, child, type, rid,
 	    start, end, count, flags));
-}
-
-int
-pci_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
-{
-	int error;
-
-	if (device_get_parent(child) != dev)
-		return (BUS_RELEASE_RESOURCE(device_get_parent(dev), child,
-		    type, rid, r));
-
-	/*
-	 * For BARs we don't actually want to release the resource.
-	 * Instead, we deactivate the resource if needed and then give
-	 * ownership of the BAR back to the bus.
-	 */
-	switch (type) {
-	case SYS_RES_IOPORT:
-	case SYS_RES_MEMORY:
-		if (rman_get_device(r) != child)
-			return (EINVAL);
-		if (rman_get_flags(r) & RF_ACTIVE) {
-			error = bus_deactivate_resource(child, type, rid, r);
-			if (error)
-				return (error);
-		}
-		rman_set_device(r, dev);
-		return (0);
-	}
-	return (bus_generic_rl_release_resource(dev, child, type, rid, r));
 }
 
 int
@@ -3653,6 +3802,10 @@ pci_activate_resource(device_t dev, device_t child, int type, int rid,
 
 	/* Enable decoding in the command register when activating BARs. */
 	if (device_get_parent(child) == dev) {
+		/* Device ROMs need their decoding explicitly enabled. */
+		if (rid == PCIR_BIOS)
+			pci_write_config(child, rid, rman_get_start(r) |
+			    PCIM_BIOS_ENABLE, 4);
 		switch (type) {
 		case SYS_RES_IOPORT:
 		case SYS_RES_MEMORY:
@@ -3661,6 +3814,62 @@ pci_activate_resource(device_t dev, device_t child, int type, int rid,
 		}
 	}
 	return (error);
+}
+
+int
+pci_deactivate_resource(device_t dev, device_t child, int type,
+    int rid, struct resource *r)
+{
+	int error;
+
+	error = bus_generic_deactivate_resource(dev, child, type, rid, r);
+	if (error)
+		return (error);
+
+	/* Disable decoding for device ROMs. */
+	if (rid == PCIR_BIOS)
+		pci_write_config(child, rid, rman_get_start(r), 4);
+	return (0);
+}
+
+void
+pci_delete_child(device_t dev, device_t child)
+{
+	struct resource_list_entry *rle;
+	struct resource_list *rl;
+	struct pci_devinfo *dinfo;
+
+	dinfo = device_get_ivars(child);
+	rl = &dinfo->resources;
+
+	if (device_is_attached(child))
+		device_detach(child);
+
+	/* Turn off access to resources we're about to free */
+	pci_write_config(child, PCIR_COMMAND, pci_read_config(child,
+	    PCIR_COMMAND, 2) & ~(PCIM_CMD_MEMEN | PCIM_CMD_PORTEN), 2);
+
+	/* Free all allocated resources */
+	STAILQ_FOREACH(rle, rl, link) {
+		if (rle->res) {
+			if (rman_get_flags(rle->res) & RF_ACTIVE ||
+			    resource_list_busy(rl, rle->type, rle->rid)) {
+				pci_printf(&dinfo->cfg,
+				    "Resource still owned, oops. "
+				    "(type=%d, rid=%d, addr=%lx)\n",
+				    rle->type, rle->rid,
+				    rman_get_start(rle->res));
+				bus_release_resource(child, rle->type, rle->rid,
+				    rle->res);
+			}
+			resource_list_unreserve(rl, dev, child, rle->type,
+			    rle->rid);
+		}
+	}
+	resource_list_free(rl);
+
+	device_delete_child(dev, child);
+	pci_freecfg(dinfo);
 }
 
 void
@@ -3680,16 +3889,16 @@ pci_delete_resource(device_t dev, device_t child, int type, int rid)
 		return;
 
 	if (rle->res) {
-		if (rman_get_device(rle->res) != dev ||
-		    rman_get_flags(rle->res) & RF_ACTIVE) {
+		if (rman_get_flags(rle->res) & RF_ACTIVE ||
+		    resource_list_busy(rl, type, rid)) {
 			device_printf(dev, "delete_resource: "
 			    "Resource still owned by child, oops. "
 			    "(type=%d, rid=%d, addr=%lx)\n",
-			    rle->type, rle->rid,
-			    rman_get_start(rle->res));
+			    type, rid, rman_get_start(rle->res));
 			return;
 		}
 
+#ifndef __PCI_BAR_ZERO_VALID
 		/*
 		 * If this is a BAR, clear the BAR so it stops
 		 * decoding before releasing the resource.
@@ -3697,11 +3906,11 @@ pci_delete_resource(device_t dev, device_t child, int type, int rid)
 		switch (type) {
 		case SYS_RES_IOPORT:
 		case SYS_RES_MEMORY:
-			/* XXX: 64-bit BARs? */
-			pci_write_config(child, rid, 0, 4);
+			pci_write_bar(child, rid, 0);
 			break;
 		}
-		bus_release_resource(dev, type, rid, rle->res);
+#endif
+		resource_list_unreserve(rl, dev, child, type, rid);
 	}
 	resource_list_delete(rl, type, rid);
 }

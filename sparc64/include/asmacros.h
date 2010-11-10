@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/asmacros.h,v 1.19 2004/06/06 21:26:48 phk Exp $
+ * $FreeBSD: src/sys/sparc64/include/asmacros.h,v 1.20 2010/02/13 19:17:06 marius Exp $
  */
 
 #ifndef	_MACHINE_ASMACROS_H_
@@ -107,7 +107,7 @@
 
 #ifdef INVARIANTS
 #define	KASSERT(r1, msg) \
-	brnz	r1, 8f ; \
+	brnz,pt	r1, 8f ; \
 	 nop ; \
 	PANIC(msg, r1) ; \
 8:

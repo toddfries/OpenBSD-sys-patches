@@ -30,7 +30,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc_asm_sheeva.S,v 1.1 2009/01/09 10:55:33 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc_asm_sheeva.S,v 1.3 2010/09/18 16:57:05 mav Exp $");
 
 #include <machine/param.h>
 
@@ -375,6 +375,14 @@ ENTRY(sheeva_l2cache_wbinv_all)
 	mcr	p15, 0, r0, c7, c10, 4	/* drain the write buffer */
 	RET
 
+/* This function modifies register value as follows:
+ *
+ * arg1  arg		EFFECT (bit value saved into register)
+ *    0     0           not changed
+ *    0     1           negated
+ *    1     0           cleared
+ *    1     1           set
+ */
 ENTRY(sheeva_control_ext)
 	mrc	p15, 1, r3, c15, c1, 0	/* Read the control register */
 	bic	r2, r3, r0		/* Clear bits */
@@ -384,3 +392,10 @@ ENTRY(sheeva_control_ext)
 	mcrne	p15, 1, r2, c15, c1, 0	/* Write new control register */
 	mov	r0, r3			/* Return old value */
 	RET
+
+ENTRY(sheeva_cpu_sleep)
+	mov	r0, #0
+	mcr	p15, 0, r0, c7, c10, 4	/* Drain write buffer */
+	mcr	p15, 0, r0, c7, c0, 4	/* Wait for interrupt */
+	mov	pc, lr
+

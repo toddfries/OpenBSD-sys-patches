@@ -34,8 +34,11 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/mips/include/cache.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/cache.h,v 1.2 2010/01/10 19:50:24 imp Exp $
  */
+
+#ifndef	_MACHINE_CACHE_H_
+#define	_MACHINE_CACHE_H_
 
 /*
  * Cache operations.
@@ -156,50 +159,8 @@ struct mips_cache_ops {
 extern struct mips_cache_ops mips_cache_ops;
 
 /* PRIMARY CACHE VARIABLES */
-extern u_int mips_picache_size;
-extern u_int mips_picache_line_size;
-extern u_int mips_picache_ways;
-extern u_int mips_picache_way_size;
-extern u_int mips_picache_way_mask;
-
-extern u_int mips_pdcache_size;		/* and unified */
-extern u_int mips_pdcache_line_size;
-extern u_int mips_pdcache_ways;
-extern u_int mips_pdcache_way_size;
-extern u_int mips_pdcache_way_mask;
-extern int mips_pdcache_write_through;
-
-extern int mips_pcache_unified;
-
-/* SECONDARY CACHE VARIABLES */
-extern u_int mips_sicache_size;
-extern u_int mips_sicache_line_size;
-extern u_int mips_sicache_ways;
-extern u_int mips_sicache_way_size;
-extern u_int mips_sicache_way_mask;
-
-extern u_int mips_sdcache_size;		/* and unified */
-extern u_int mips_sdcache_line_size;
-extern u_int mips_sdcache_ways;
-extern u_int mips_sdcache_way_size;
-extern u_int mips_sdcache_way_mask;
-extern int mips_sdcache_write_through;
-
-extern int mips_scache_unified;
-
-/* TERTIARY CACHE VARIABLES */
-extern u_int mips_tcache_size;		/* always unified */
-extern u_int mips_tcache_line_size;
-extern u_int mips_tcache_ways;
-extern u_int mips_tcache_way_size;
-extern u_int mips_tcache_way_mask;
-extern int mips_tcache_write_through;
-
-extern u_int mips_dcache_align;
-extern u_int mips_dcache_align_mask;
-
-extern u_int mips_cache_alias_mask;
-extern u_int mips_cache_prefer_mask;
+extern int mips_picache_linesize;
+extern int mips_pdcache_linesize;
 
 #define	__mco_noargs(prefix, x)						\
 do {									\
@@ -259,3 +220,4 @@ void    mips_config_cache(struct mips_cpuinfo *);
 void    mips_dcache_compute_align(void);
 
 #include <machine/cache_mipsNN.h>
+#endif	/* _MACHINE_CACHE_H_ */

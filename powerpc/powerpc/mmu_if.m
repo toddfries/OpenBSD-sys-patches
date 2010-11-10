@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/powerpc/powerpc/mmu_if.m,v 1.9 2008/05/18 04:16:56 alc Exp $
+# $FreeBSD: src/sys/powerpc/powerpc/mmu_if.m,v 1.14 2010/05/24 14:26:57 alc Exp $
 #
 
 #include <sys/param.h>
@@ -90,7 +90,8 @@ CODE {
 		return;
 	}
 
-	static int mmu_null_mincore(mmu_t mmu, pmap_t pmap, vm_offset_t addr)
+	static int mmu_null_mincore(mmu_t mmu, pmap_t pmap, vm_offset_t addr,
+	    vm_paddr_t *locked_pa)
 	{
 		return (0);
 	}
@@ -104,6 +105,11 @@ CODE {
 	    vm_ooffset_t offset, vm_offset_t *addr, vm_size_t size)
 	{
 		return;
+	}
+
+	static struct pmap_md *mmu_null_scan_md(mmu_t mmu, struct pmap_md *p)
+	{
+		return (NULL);
 	}
 };
 
@@ -338,6 +344,20 @@ METHOD boolean_t is_prefaultable {
 	pmap_t		_pmap;
 	vm_offset_t	_va;
 } DEFAULT mmu_null_is_prefaultable;
+
+
+/**
+ * @brief Return whether or not the specified physical page was referenced
+ * in any physical maps.
+ *
+ * @params _pg		physical page
+ *
+ * @retval boolean	TRUE if page has been referenced
+ */
+METHOD boolean_t is_referenced {
+	mmu_t		_mmu;
+	vm_page_t	_pg;
+};
 
 
 /**
@@ -614,12 +634,11 @@ METHOD void zero_page_idle {
 
 
 /**
- * @brief Extract mincore(2) information from a mapping. This routine is
- * optional and is an optimisation: the mincore code will call is_modified
- * and ts_referenced if no result is returned.
+ * @brief Extract mincore(2) information from a mapping.
  *
  * @param _pmap		physical map
  * @param _addr		page virtual address
+ * @param _locked_pa	page physical address
  *
  * @retval 0		no result
  * @retval non-zero	mincore(2) flag values
@@ -628,6 +647,7 @@ METHOD int mincore {
 	mmu_t		_mmu;
 	pmap_t		_pmap;
 	vm_offset_t	_addr;
+	vm_paddr_t	*_locked_pa;
 } DEFAULT mmu_null_mincore;
 
 
@@ -695,6 +715,18 @@ METHOD void bootstrap {
 	mmu_t		_mmu;
 	vm_offset_t	_start;
 	vm_offset_t	_end;
+};
+
+/**
+ * @brief Set up the MMU on the current CPU. Only called by the PMAP layer
+ * for alternate CPUs on SMP systems.
+ *
+ * @param _ap		Set to 1 if the CPU being set up is an AP
+ *
+ */
+METHOD void cpu_bootstrap {
+	mmu_t		_mmu;
+	int		_ap;
 };
 
 
@@ -772,14 +804,67 @@ METHOD boolean_t dev_direct_mapped {
 
 
 /**
- * @brief Evaluate if a physical page has an executable mapping
+ * @brief Enforce instruction cache coherency. Typically called after a
+ * region of memory has been modified and before execution of or within
+ * that region is attempted. Setting breakpoints in a process through
+ * ptrace(2) is one example of when the instruction cache needs to be
+ * made coherent.
  *
- * @param _pg		physical page
- *
- * @retval bool		TRUE if a physical mapping exists for the given page.
+ * @param _pm		the physical map of the virtual address
+ * @param _va		the virtual address of the modified region
+ * @param _sz		the size of the modified region
  */
-METHOD boolean_t page_executable {
+METHOD void sync_icache {
 	mmu_t		_mmu;
-	vm_page_t	_pg;
+	pmap_t		_pm;
+	vm_offset_t	_va;
+	vm_size_t	_sz;
 };
 
+
+/**
+ * @brief Create temporary memory mapping for use by dumpsys().
+ *
+ * @param _md		The memory chunk in which the mapping lies.
+ * @param _ofs		The offset within the chunk of the mapping.
+ * @param _sz		The requested size of the mapping.
+ *
+ * @retval vm_offset_t	The virtual address of the mapping.
+ *			
+ * The sz argument is modified to reflect the actual size of the
+ * mapping.
+ */
+METHOD vm_offset_t dumpsys_map {
+	mmu_t		_mmu;
+	struct pmap_md	*_md;
+	vm_size_t	_ofs;
+	vm_size_t	*_sz;
+};
+
+
+/**
+ * @brief Remove temporary dumpsys() mapping.
+ *
+ * @param _md		The memory chunk in which the mapping lies.
+ * @param _ofs		The offset within the chunk of the mapping.
+ * @param _va		The virtual address of the mapping.
+ */
+METHOD void dumpsys_unmap {
+	mmu_t		_mmu;
+	struct pmap_md	*_md;
+	vm_size_t	_ofs;
+	vm_offset_t	_va;
+};
+
+
+/**
+ * @brief Scan/iterate memory chunks.
+ *
+ * @param _prev		The previously returned chunk or NULL.
+ *
+ * @retval		The next (or first when _prev is NULL) chunk.
+ */
+METHOD struct pmap_md * scan_md {
+	mmu_t		_mmu;
+	struct pmap_md	*_prev;
+} DEFAULT mmu_null_scan_md;

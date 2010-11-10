@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.13 2009/01/14 21:31:22 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.19 2010/05/11 22:51:13 mjacob Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -226,6 +226,9 @@ sgasync(void *callback_arg, uint32_t code, struct cam_path *path, void *arg)
 		if (cgd == NULL)
 			break;
 
+		if (cgd->protocol != PROTO_SCSI)
+			break;
+
 		/*
 		 * Allocate a peripheral instance for this device and
 		 * start the probe process.
@@ -300,7 +303,14 @@ sgregister(struct cam_periph *periph, void *arg)
 	softc->dev = make_dev(&sg_cdevsw, periph->unit_number,
 			      UID_ROOT, GID_OPERATOR, 0600, "%s%d",
 			      periph->periph_name, periph->unit_number);
-	(void)make_dev_alias(softc->dev, "sg%c", 'a' + periph->unit_number);
+	if (periph->unit_number < 26) {
+		(void)make_dev_alias(softc->dev, "sg%c",
+		    periph->unit_number + 'a');
+	} else {
+		(void)make_dev_alias(softc->dev, "sg%c%c",
+		    ((periph->unit_number / 26) - 1) + 'a',
+		    (periph->unit_number % 26) + 'a');
+	}
 	cam_periph_lock(periph);
 	softc->dev->si_drv1 = periph;
 
@@ -507,7 +517,7 @@ sgioctl(struct cdev *dev, u_long cmd, caddr_t arg, int flag, struct thread *td)
 			break;
 		}
 
-		ccb = cam_periph_getccb(periph, /*priority*/5);
+		ccb = cam_periph_getccb(periph, CAM_PRIORITY_NORMAL);
 		csio = &ccb->csio;
 
 		error = copyin(req.cmdp, &csio->cdb_io.cdb_bytes,
@@ -583,7 +593,7 @@ sgioctl(struct cdev *dev, u_long cmd, caddr_t arg, int flag, struct thread *td)
 	{
 		struct sg_scsi_id id;
 
-		id.host_no = 0; /* XXX */
+		id.host_no = cam_sim_path(xpt_path_sim(periph->path));
 		id.channel = xpt_path_path_id(periph->path);
 		id.scsi_id = xpt_path_target_id(periph->path);
 		id.lun = xpt_path_lun_id(periph->path);
@@ -726,7 +736,7 @@ sgwrite(struct cdev *dev, struct uio *uio, int ioflag)
 
 	cam_periph_lock(periph);
 	sc = periph->softc;
-	xpt_setup_ccb(&ccb->ccb_h, periph->path, /*priority*/5);
+	xpt_setup_ccb(&ccb->ccb_h, periph->path, CAM_PRIORITY_NORMAL);
 	cam_fill_csio(csio,
 		      /*retries*/1,
 		      sgdone,
@@ -953,6 +963,7 @@ sg_scsiio_status(struct ccb_scsiio *csio, u_short *hoststat, u_short *drvstat)
 	case CAM_SCSI_STATUS_ERROR:
 		*hoststat = DID_ERROR;
 		*drvstat = 0;
+		break;
 	case CAM_SCSI_BUS_RESET:
 		*hoststat = DID_RESET;
 		*drvstat = 0;
@@ -964,6 +975,7 @@ sg_scsiio_status(struct ccb_scsiio *csio, u_short *hoststat, u_short *drvstat)
 	case CAM_SCSI_BUSY:
 		*hoststat = DID_BUS_BUSY;
 		*drvstat = 0;
+		break;
 	default:
 		*hoststat = DID_ERROR;
 		*drvstat = DRIVER_ERROR;

@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/pci/pci_cfgreg.c,v 1.132 2008/09/11 21:42:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/pci/pci_cfgreg.c,v 1.135 2009/09/24 07:11:23 avg Exp $");
 
 #include "opt_xbox.h"
 
@@ -40,6 +40,7 @@ __FBSDID("$FreeBSD: src/sys/i386/pci/pci_cfgreg.c,v 1.132 2008/09/11 21:42:11 jh
 #include <sys/mutex.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/sysctl.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <machine/pci_cfgreg.h>
@@ -75,6 +76,8 @@ enum {
 	CFGMECH_PCIE,
 };
 
+SYSCTL_DECL(_hw_pci);
+
 static TAILQ_HEAD(pcie_cfg_list, pcie_cfg_elem) pcie_list[MAXCPU];
 static uint64_t pcie_base;
 static int pcie_minbus, pcie_maxbus;
@@ -84,6 +87,8 @@ static int devmax;
 static struct mtx pcicfg_mtx;
 static int mcfg_enable = 1;
 TUNABLE_INT("hw.pci.mcfg", &mcfg_enable);
+SYSCTL_INT(_hw_pci, OID_AUTO, mcfg, CTLFLAG_RDTUN, &mcfg_enable, 0,
+    "Enable support for PCI-e memory mapped config access");
 
 static uint32_t	pci_docfgregread(int bus, int slot, int func, int reg,
 		    int bytes);
@@ -206,6 +211,7 @@ pci_docfgregread(int bus, int slot, int func, int reg, int bytes)
 {
 
 	if (cfgmech == CFGMECH_PCIE &&
+	    (bus >= pcie_minbus && bus <= pcie_maxbus) &&
 	    (bus != 0 || !(1 << slot & pcie_badslots)))
 		return (pciereg_cfgread(bus, slot, func, reg, bytes));
 	else
@@ -240,6 +246,7 @@ pci_cfgregwrite(int bus, int slot, int func, int reg, u_int32_t data, int bytes)
 {
 
 	if (cfgmech == CFGMECH_PCIE &&
+	    (bus >= pcie_minbus && bus <= pcie_maxbus) &&
 	    (bus != 0 || !(1 << slot & pcie_badslots)))
 		pciereg_cfgwrite(bus, slot, func, reg, data, bytes);
 	else
@@ -292,9 +299,9 @@ pci_cfgenable(unsigned bus, unsigned slot, unsigned func, int reg, int bytes)
 	if (bus <= PCI_BUSMAX
 	    && slot < devmax
 	    && func <= PCI_FUNCMAX
-	    && reg <= PCI_REGMAX
+	    && (unsigned)reg <= PCI_REGMAX
 	    && bytes != 3
-	    && (unsigned) bytes <= 4
+	    && (unsigned)bytes <= 4
 	    && (reg & (bytes - 1)) == 0) {
 		switch (cfgmech) {
 		case CFGMECH_PCIE:
@@ -588,7 +595,7 @@ pcie_cfgregopen(uint64_t base, uint8_t minbus, uint8_t maxbus)
 	 * fall back to using type 1 config access instead.
 	 */
 	if (pci_cfgregopen() != 0) {
-		for (slot = 0; slot < 32; slot++) {
+		for (slot = 0; slot <= PCI_SLOTMAX; slot++) {
 			val1 = pcireg_cfgread(0, slot, 0, 0, 4);
 			if (val1 == 0xffffffff)
 				continue;
@@ -654,8 +661,8 @@ pciereg_cfgread(int bus, unsigned slot, unsigned func, unsigned reg,
 	vm_paddr_t pa, papage;
 	int data = -1;
 
-	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
-	    func > PCI_FUNCMAX || reg >= 0x1000 || bytes > 4 || bytes == 3)
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot > PCI_SLOTMAX ||
+	    func > PCI_FUNCMAX || reg > PCIE_REGMAX)
 		return (-1);
 
 	critical_enter();
@@ -688,8 +695,8 @@ pciereg_cfgwrite(int bus, unsigned slot, unsigned func, unsigned reg, int data,
 	volatile vm_offset_t va;
 	vm_paddr_t pa, papage;
 
-	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
-	    func > PCI_FUNCMAX || reg >= 0x1000)
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot > PCI_SLOTMAX ||
+	    func > PCI_FUNCMAX || reg > PCIE_REGMAX)
 		return;
 
 	critical_enter();

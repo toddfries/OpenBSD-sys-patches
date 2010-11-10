@@ -19,7 +19,7 @@
  * CDDL HEADER END
  */
 /*
- * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
 
@@ -56,8 +56,14 @@ typedef struct zil_header {
 	uint64_t zh_replay_seq;	/* highest replayed sequence number */
 	blkptr_t zh_log;	/* log chain */
 	uint64_t zh_claim_seq;	/* highest claimed sequence number */
-	uint64_t zh_pad[5];
+	uint64_t zh_flags;	/* header flags */
+	uint64_t zh_pad[4];
 } zil_header_t;
+
+/*
+ * zh_flags bit settings
+ */
+#define	ZIL_REPLAY_NEEDED 0x1	/* replay needed - internal only */
 
 /*
  * Log block trailer - structure at the end of the header and each log block
@@ -133,7 +139,8 @@ typedef enum zil_create {
 #define	TX_MKDIR_ACL		17	/* mkdir with ACL */
 #define	TX_MKDIR_ATTR		18	/* mkdir with attr */
 #define	TX_MKDIR_ACL_ATTR	19	/* mkdir with ACL + attrs */
-#define	TX_MAX_TYPE		20	/* Max transaction type */
+#define	TX_WRITE2		20	/* dmu_sync EALREADY write */
+#define	TX_MAX_TYPE		21	/* Max transaction type */
 
 /*
  * The transactions for mkdir, symlink, remove, rmdir, link, and rename
@@ -335,7 +342,6 @@ typedef void zil_parse_blk_func_t(zilog_t *zilog, blkptr_t *bp, void *arg,
 typedef void zil_parse_lr_func_t(zilog_t *zilog, lr_t *lr, void *arg,
     uint64_t txg);
 typedef int zil_replay_func_t();
-typedef void zil_replay_cleaner_t();
 typedef int zil_get_data_t(void *arg, lr_write_t *lr, char *dbuf, zio_t *zio);
 
 extern uint64_t	zil_parse(zilog_t *zilog, zil_parse_blk_func_t *parse_blk_func,
@@ -350,9 +356,8 @@ extern void	zil_free(zilog_t *zilog);
 extern zilog_t	*zil_open(objset_t *os, zil_get_data_t *get_data);
 extern void	zil_close(zilog_t *zilog);
 
-extern void	zil_replay(objset_t *os, void *arg, uint64_t *txgp,
-    zil_replay_func_t *replay_func[TX_MAX_TYPE],
-    zil_replay_cleaner_t *replay_cleaner);
+extern void	zil_replay(objset_t *os, void *arg,
+    zil_replay_func_t *replay_func[TX_MAX_TYPE]);
 extern void	zil_destroy(zilog_t *zilog, boolean_t keep_first);
 extern void	zil_rollback_destroy(zilog_t *zilog, dmu_tx_t *tx);
 
@@ -361,9 +366,9 @@ extern uint64_t zil_itx_assign(zilog_t *zilog, itx_t *itx, dmu_tx_t *tx);
 
 extern void	zil_commit(zilog_t *zilog, uint64_t seq, uint64_t oid);
 
+extern int	zil_vdev_offline(char *osname, void *txarg);
 extern int	zil_claim(char *osname, void *txarg);
 extern int	zil_check_log_chain(char *osname, void *txarg);
-extern int	zil_clear_log_chain(char *osname, void *txarg);
 extern void	zil_sync(zilog_t *zilog, dmu_tx_t *tx);
 extern void	zil_clean(zilog_t *zilog);
 extern int	zil_is_committed(zilog_t *zilog);
@@ -372,6 +377,7 @@ extern int	zil_suspend(zilog_t *zilog);
 extern void	zil_resume(zilog_t *zilog);
 
 extern void	zil_add_block(zilog_t *zilog, blkptr_t *bp);
+extern void	zil_get_replay_data(zilog_t *zilog, lr_write_t *lr);
 
 extern int zil_disable;
 

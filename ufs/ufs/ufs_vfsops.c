@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_vfsops.c,v 1.51 2008/12/18 12:01:53 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_vfsops.c,v 1.53 2010/05/07 00:41:12 mckusick Exp $");
 
 #include "opt_quota.h"
 #include "opt_ufs.h"
@@ -66,11 +66,10 @@ MALLOC_DEFINE(M_UFSMNT, "ufs_mount", "UFS mount structure");
  * Return the root of a filesystem.
  */
 int
-ufs_root(mp, flags, vpp, td)
+ufs_root(mp, flags, vpp)
 	struct mount *mp;
 	int flags;
 	struct vnode **vpp;
-	struct thread *td;
 {
 	struct vnode *nvp;
 	int error;
@@ -86,18 +85,19 @@ ufs_root(mp, flags, vpp, td)
  * Do operations associated with quotas
  */
 int
-ufs_quotactl(mp, cmds, id, arg, td)
+ufs_quotactl(mp, cmds, id, arg)
 	struct mount *mp;
 	int cmds;
 	uid_t id;
 	void *arg;
-	struct thread *td;
 {
 #ifndef QUOTA
 	return (EOPNOTSUPP);
 #else
+	struct thread *td;
 	int cmd, type, error;
 
+	td = curthread;
 	cmd = cmds >> SUBCMDSHIFT;
 	type = cmds & SUBCMDMASK;
 	if (id == -1) {
@@ -127,6 +127,18 @@ ufs_quotactl(mp, cmds, id, arg, td)
 		error = quotaoff(td, mp, type);
 		break;
 
+	case Q_SETQUOTA32:
+		error = setquota32(td, mp, id, type, arg);
+		break;
+
+	case Q_SETUSE32:
+		error = setuse32(td, mp, id, type, arg);
+		break;
+
+	case Q_GETQUOTA32:
+		error = getquota32(td, mp, id, type, arg);
+		break;
+
 	case Q_SETQUOTA:
 		error = setquota(td, mp, id, type, arg);
 		break;
@@ -137,6 +149,10 @@ ufs_quotactl(mp, cmds, id, arg, td)
 
 	case Q_GETQUOTA:
 		error = getquota(td, mp, id, type, arg);
+		break;
+
+	case Q_GETQUOTASIZE:
+		error = getquotasize(td, mp, id, type, arg);
 		break;
 
 	case Q_SYNC:

@@ -1,0 +1,4 @@
+# $FreeBSD: src/sys/boot/Makefile.powerpc,v 1.1 2010/08/23 01:48:07 imp Exp $
+
+SUBDIR+=		ofw
+SUBDIR+=		uboot

@@ -28,7 +28,7 @@
  */
 
 static const char rcs_id[] =
-    "@(#) $FreeBSD: src/sys/netgraph/netflow/ng_netflow.c,v 1.19 2008/10/23 15:53:51 des Exp $";
+    "@(#) $FreeBSD: src/sys/netgraph/netflow/ng_netflow.c,v 1.21 2010/03/25 10:13:21 glebius Exp $";
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -286,15 +286,6 @@ ng_netflow_newhook(node_p node, hook_p hook, const char *name)
 
 		priv->export = hook;
 
-#if 0	/* TODO: profile & test first */
-		/*
-		 * We send export dgrams in interrupt handlers and in
-		 * callout threads. We'd better queue data for later
-		 * netgraph ISR processing.
-		 */
-		NG_HOOK_FORCE_QUEUE(NG_HOOK_PEER(hook));
-#endif
-
 		/* Exporter is ready. Let's schedule expiry. */
 		callout_reset(&priv->exp_callout, (1*hz), &ng_netflow_expire,
 		    (void *)priv);
@@ -422,7 +413,7 @@ ng_netflow_rcvmsg (node_p node, item_p item, hook_p lasthook)
 		{
 			struct ng_netflow_setconfig *set;
 
-			if (msg->header.arglen != sizeof(struct ng_netflow_settimeouts))
+			if (msg->header.arglen != sizeof(struct ng_netflow_setconfig))
 				ERROUT(EINVAL);
 
 			set = (struct ng_netflow_setconfig *)msg->data;

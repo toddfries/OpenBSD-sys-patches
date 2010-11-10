@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/an/if_an_pccard.c,v 1.31 2007/02/23 12:18:31 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/an/if_an_pccard.c,v 1.33 2009/11/24 16:54:54 jhb Exp $");
 
 #include "opt_inet.h"
 
@@ -141,11 +141,9 @@ an_pccard_attach(device_t dev)
 
 	an_alloc_irq(dev, sc->irq_rid, 0);
 
-	sc->an_bhandle = rman_get_bushandle(sc->port_res);
-	sc->an_btag = rman_get_bustag(sc->port_res);
 	sc->an_dev = dev;
 
-	error = an_attach(sc, device_get_unit(dev), flags);
+	error = an_attach(sc, flags);
 	if (error)
 		goto fail;
 	

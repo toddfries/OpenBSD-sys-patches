@@ -23,7 +23,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/ddb/db_command.h,v 1.15 2008/09/25 19:50:14 jhb Exp $
+ * $FreeBSD: src/sys/ddb/db_command.h,v 1.16 2010/05/24 16:41:05 bz Exp $
  */
 
 #ifndef _DDB_DB_COMMAND_H_
@@ -33,6 +33,12 @@
  *	Author: David B. Golub, Carnegie Mellon University
  *	Date:	7/90
  */
+
+/*
+ * Helper functions.
+ */
+db_expr_t db_hex2dec(db_expr_t expr);
+
 /*
  * Command loop declarations.
  */

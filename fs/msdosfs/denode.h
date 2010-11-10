@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/denode.h,v 1.40 2009/02/27 20:00:15 jhb Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/denode.h,v 1.41 2010/02/13 11:34:25 kib Exp $ */
 /*	$NetBSD: denode.h,v 1.25 1997/11/17 15:36:28 ws Exp $	*/
 
 /*-
@@ -206,9 +206,6 @@ struct denode {
 	 putulong((dp)->deFileSize,			\
 	     ((dep)->de_Attributes & ATTR_DIRECTORY) ? 0 : (dep)->de_FileSize), \
 	 putushort((dp)->deHighClust, (dep)->de_StartCluster >> 16))
-
-#define	de_forw		de_chain[0]
-#define	de_back		de_chain[1]
 
 #ifdef _KERNEL
 

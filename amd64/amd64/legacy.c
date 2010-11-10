@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/legacy.c,v 1.63 2008/03/13 20:39:03 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/legacy.c,v 1.65 2010/09/10 11:19:03 avg Exp $");
 
 /*
  * This code implements a system driver for legacy systems that do not
@@ -60,7 +60,7 @@ struct legacy_device {
 static	int legacy_probe(device_t);
 static	int legacy_attach(device_t);
 static	int legacy_print_child(device_t, device_t);
-static device_t legacy_add_child(device_t bus, int order, const char *name,
+static device_t legacy_add_child(device_t bus, u_int order, const char *name,
 				int unit);
 static	int legacy_read_ivar(device_t, device_t, int, uintptr_t *);
 static	int legacy_write_ivar(device_t, device_t, int, uintptr_t);
@@ -149,7 +149,7 @@ legacy_print_child(device_t bus, device_t child)
 }
 
 static device_t
-legacy_add_child(device_t bus, int order, const char *name, int unit)
+legacy_add_child(device_t bus, u_int order, const char *name, int unit)
 {
 	device_t child;
 	struct legacy_device *atdev;
@@ -213,7 +213,7 @@ legacy_write_ivar(device_t dev, device_t child, int which, uintptr_t value)
 static void	cpu_identify(driver_t *driver, device_t parent);
 static int	cpu_read_ivar(device_t dev, device_t child, int index,
 		    uintptr_t *result);
-static device_t cpu_add_child(device_t bus, int order, const char *name,
+static device_t cpu_add_child(device_t bus, u_int order, const char *name,
 		    int unit);
 static struct resource_list *cpu_get_rlist(device_t dev, device_t child);
 
@@ -269,16 +269,15 @@ cpu_identify(driver_t *driver, device_t parent)
 	 * so that these devices are attached after the Host-PCI
 	 * bridges (which are added at order 100).
 	 */
-	for (i = 0; i <= mp_maxid; i++)
-		if (!CPU_ABSENT(i)) {
-			child = BUS_ADD_CHILD(parent, 150, "cpu", i);
-			if (child == NULL)
-				panic("legacy_attach cpu");
-		}
+	CPU_FOREACH(i) {
+		child = BUS_ADD_CHILD(parent, 150, "cpu", i);
+		if (child == NULL)
+			panic("legacy_attach cpu");
+	}
 }
 
 static device_t
-cpu_add_child(device_t bus, int order, const char *name, int unit)
+cpu_add_child(device_t bus, u_int order, const char *name, int unit)
 {
 	struct cpu_device *cd;
 	device_t child;

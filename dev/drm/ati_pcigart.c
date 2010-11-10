@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/ati_pcigart.c,v 1.7 2008/10/13 18:03:27 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/ati_pcigart.c,v 1.11 2010/04/22 18:47:30 rnoland Exp $");
 
 /** @file ati_pcigart.c
  * Implementation of ATI's PCIGART, which provides an aperture in card virtual
@@ -39,8 +39,9 @@ __FBSDID("$FreeBSD: src/sys/dev/drm/ati_pcigart.c,v 1.7 2008/10/13 18:03:27 rnol
 #define ATI_PCIGART_PAGE_SIZE		4096	/* PCI GART page size */
 #define ATI_PCIGART_PAGE_MASK		(~(ATI_PCIGART_PAGE_SIZE-1))
 
-#define ATI_PCIE_WRITE 0x4
-#define ATI_PCIE_READ 0x8
+#define ATI_GART_NOSNOOP	0x1
+#define ATI_GART_WRITE		0x4
+#define ATI_GART_READ		0x8
 
 static void
 drm_ati_alloc_pcigart_table_cb(void *arg, bus_dma_segment_t *segs,
@@ -75,14 +76,14 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 	    NULL, NULL, /* filtfunc, filtfuncargs */
 	    gart_info->table_size, 1, /* maxsize, nsegs */
 	    gart_info->table_size, /* maxsegsize */
-	    BUS_DMA_ALLOCNOW, NULL, NULL, /* flags, lockfunc, lockfuncargs */
+	    0, NULL, NULL, /* flags, lockfunc, lockfuncargs */
 	    &dmah->tag);
 	if (ret != 0) {
 		free(dmah, DRM_MEM_DMA);
 		return ENOMEM;
 	}
 
-	flags = BUS_DMA_NOWAIT | BUS_DMA_ZERO;
+	flags = BUS_DMA_WAITOK | BUS_DMA_ZERO;
 	if (gart_info->gart_reg_if == DRM_ATI_GART_IGP)
 	    flags |= BUS_DMA_NOCACHE;
 	
@@ -95,7 +96,8 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 	DRM_LOCK();
 
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
-	    gart_info->table_size, drm_ati_alloc_pcigart_table_cb, dmah, 0);
+	    gart_info->table_size, drm_ati_alloc_pcigart_table_cb, dmah,
+	    BUS_DMA_NOWAIT);
 	if (ret != 0) {
 		bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
 		bus_dma_tag_destroy(dmah->tag);
@@ -103,7 +105,7 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 		return ENOMEM;
 	}
 
-	dev->sg->dmah = dmah;
+	gart_info->dmah = dmah;
 
 	return 0;
 }
@@ -112,12 +114,12 @@ static void
 drm_ati_free_pcigart_table(struct drm_device *dev,
 			   struct drm_ati_pcigart_info *gart_info)
 {
-	struct drm_dma_handle *dmah = dev->sg->dmah;
+	struct drm_dma_handle *dmah = gart_info->dmah;
 
 	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
 	bus_dma_tag_destroy(dmah->tag);
 	free(dmah, DRM_MEM_DMA);
-	dev->sg->dmah = NULL;
+	gart_info->dmah = NULL;
 }
 
 int
@@ -133,7 +135,7 @@ drm_ati_pcigart_cleanup(struct drm_device *dev,
 	if (gart_info->bus_addr) {
 		if (gart_info->gart_table_location == DRM_ATI_GART_MAIN) {
 			gart_info->bus_addr = 0;
-			if (dev->sg->dmah)
+			if (gart_info->dmah)
 				drm_ati_free_pcigart_table(dev, gart_info);
 		}
 	}
@@ -168,8 +170,8 @@ drm_ati_pcigart_init(struct drm_device *dev,
 			goto done;
 		}
 
-		address = (void *)dev->sg->dmah->vaddr;
-		bus_address = dev->sg->dmah->busaddr;
+		address = (void *)gart_info->dmah->vaddr;
+		bus_address = gart_info->dmah->busaddr;
 	} else {
 		address = gart_info->addr;
 		bus_address = gart_info->bus_addr;
@@ -195,13 +197,15 @@ drm_ati_pcigart_init(struct drm_device *dev,
 			case DRM_ATI_GART_IGP:
 				page_base |=
 				    (upper_32_bits(entry_addr) & 0xff) << 4;
-				page_base |= 0xc;
+				page_base |= ATI_GART_READ | ATI_GART_WRITE;
+				page_base |= ATI_GART_NOSNOOP;
 				break;
 			case DRM_ATI_GART_PCIE:
 				page_base >>= 8;
 				page_base |=
 				    (upper_32_bits(entry_addr) & 0xff) << 24;
-				page_base |= ATI_PCIE_READ | ATI_PCIE_WRITE;
+				page_base |= ATI_GART_READ | ATI_GART_WRITE;
+				page_base |= ATI_GART_NOSNOOP;
 				break;
 			default:
 			case DRM_ATI_GART_PCI:

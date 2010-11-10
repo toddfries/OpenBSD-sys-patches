@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/twa/tw_osl_inline.h,v 1.3 2007/05/09 04:16:32 scottl Exp $
+ *	$FreeBSD: src/sys/dev/twa/tw_osl_inline.h,v 1.4 2010/06/09 21:40:38 delphij Exp $
  */
 
 /*
@@ -105,21 +105,6 @@
  */
 #define tw_osl_free_lock(ctlr_handle, lock)	\
 	mtx_unlock_spin(lock)
-
-
-
-/*
- * Function name:	tw_osl_ctlr_ready
- * Description:		CL calls this function to notify the OS Layer that it
- *			is ready to accept new requests.  This function is
- *			called only if a call to tw_osl_ctlr_busy has been
- *			made previously.  We don't use this function as of now.
- *
- * Input:		ctlr_handle	-- ptr to controller handle
- * Output:		None
- * Return value:	None
- */
-#define tw_osl_ctlr_ready(ctlr_handle)
 
 
 

@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_bufs.c,v 1.10 2009/03/09 07:49:13 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_bufs.c,v 1.16 2010/04/22 18:44:23 rnoland Exp $");
 
 /** @file drm_bufs.c
  * Implementation of the ioctls for setup of DRM mappings and DMA buffers.
@@ -45,25 +45,33 @@ __FBSDID("$FreeBSD: src/sys/dev/drm/drm_bufs.c,v 1.10 2009/03/09 07:49:13 rnolan
  */
 static int drm_alloc_resource(struct drm_device *dev, int resource)
 {
+	struct resource *res;
+	int rid;
+
+	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+
 	if (resource >= DRM_MAX_PCI_RESOURCE) {
 		DRM_ERROR("Resource %d too large\n", resource);
 		return 1;
 	}
 
-	DRM_UNLOCK();
 	if (dev->pcir[resource] != NULL) {
-		DRM_LOCK();
 		return 0;
 	}
 
-	dev->pcirid[resource] = PCIR_BAR(resource);
-	dev->pcir[resource] = bus_alloc_resource_any(dev->device,
-	    SYS_RES_MEMORY, &dev->pcirid[resource], RF_SHAREABLE);
+	DRM_UNLOCK();
+	rid = PCIR_BAR(resource);
+	res = bus_alloc_resource_any(dev->device, SYS_RES_MEMORY, &rid,
+	    RF_SHAREABLE);
 	DRM_LOCK();
-
-	if (dev->pcir[resource] == NULL) {
+	if (res == NULL) {
 		DRM_ERROR("Couldn't find resource 0x%x\n", resource);
 		return 1;
+	}
+
+	if (dev->pcir[resource] == NULL) {
+		dev->pcirid[resource] = rid;
+		dev->pcir[resource] = res;
 	}
 
 	return 0;
@@ -148,10 +156,12 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 	map->size = size;
 	map->type = type;
 	map->flags = flags;
+	map->handle = (void *)((unsigned long)alloc_unr(dev->map_unrhdr) <<
+	    DRM_MAP_HANDLE_SHIFT);
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		map->handle = drm_ioremap(dev, map);
+		map->virtual = drm_ioremap(dev, map);
 		if (!(map->flags & _DRM_WRITE_COMBINING))
 			break;
 		/* FALLTHROUGH */
@@ -160,25 +170,25 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 			map->mtrr = 1;
 		break;
 	case _DRM_SHM:
-		map->handle = malloc(map->size, DRM_MEM_MAPS, M_NOWAIT);
+		map->virtual = malloc(map->size, DRM_MEM_MAPS, M_NOWAIT);
 		DRM_DEBUG("%lu %d %p\n",
-		    map->size, drm_order(map->size), map->handle);
-		if (!map->handle) {
+		    map->size, drm_order(map->size), map->virtual);
+		if (!map->virtual) {
 			free(map, DRM_MEM_MAPS);
 			DRM_LOCK();
 			return ENOMEM;
 		}
-		map->offset = (unsigned long)map->handle;
+		map->offset = (unsigned long)map->virtual;
 		if (map->flags & _DRM_CONTAINS_LOCK) {
 			/* Prevent a 2nd X Server from creating a 2nd lock */
 			DRM_LOCK();
 			if (dev->lock.hw_lock != NULL) {
 				DRM_UNLOCK();
-				free(map->handle, DRM_MEM_MAPS);
+				free(map->virtual, DRM_MEM_MAPS);
 				free(map, DRM_MEM_MAPS);
 				return EBUSY;
 			}
-			dev->lock.hw_lock = map->handle; /* Pointer to lock */
+			dev->lock.hw_lock = map->virtual; /* Pointer to lock */
 			DRM_UNLOCK();
 		}
 		break;
@@ -216,7 +226,8 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 			DRM_LOCK();
 			return EINVAL;
 		}
-		map->offset = map->offset + dev->sg->handle;
+		map->virtual = (void *)(dev->sg->vaddr + offset);
+		map->offset = dev->sg->vaddr + offset;
 		break;
 	case _DRM_CONSISTENT:
 		/* Unfortunately, we don't get any alignment specification from
@@ -234,7 +245,7 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 			DRM_LOCK();
 			return ENOMEM;
 		}
-		map->handle = map->dmah->vaddr;
+		map->virtual = map->dmah->vaddr;
 		map->offset = map->dmah->busaddr;
 		break;
 	default:
@@ -283,11 +294,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	request->type = map->type;
 	request->flags = map->flags;
 	request->mtrr   = map->mtrr;
-	request->handle = map->handle;
-
-	if (request->type != _DRM_SHM) {
-		request->handle = (void *)request->offset;
-	}
+	request->handle = (void *)map->handle;
 
 	return 0;
 }
@@ -295,6 +302,9 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 void drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
 {
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+
+	if (map == NULL)
+		return;
 
 	TAILQ_REMOVE(&dev->maplist, map, link);
 
@@ -313,7 +323,7 @@ void drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
 		}
 		break;
 	case _DRM_SHM:
-		free(map->handle, DRM_MEM_MAPS);
+		free(map->virtual, DRM_MEM_MAPS);
 		break;
 	case _DRM_AGP:
 	case _DRM_SCATTER_GATHER:
@@ -330,6 +340,12 @@ void drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
 		bus_release_resource(dev->device, SYS_RES_MEMORY, map->rid,
 		    map->bsr);
 	}
+
+	DRM_UNLOCK();
+	if (map->handle)
+		free_unr(dev->map_unrhdr, (unsigned long)map->handle >>
+		    DRM_MAP_HANDLE_SHIFT);
+	DRM_LOCK();
 
 	free(map, DRM_MEM_MAPS);
 }
@@ -728,7 +744,7 @@ static int drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *reques
 
 		buf->offset  = (dma->byte_count + offset);
 		buf->bus_address = agp_offset + offset;
-		buf->address = (void *)(agp_offset + offset + dev->sg->handle);
+		buf->address = (void *)(agp_offset + offset + dev->sg->vaddr);
 		buf->next    = NULL;
 		buf->pending = 0;
 		buf->file_priv = NULL;
@@ -1043,7 +1059,7 @@ int drm_mapbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 			goto done;
 		}
 		size = round_page(map->size);
-		foff = map->offset;
+		foff = (unsigned long)map->handle;
 	} else {
 		size = round_page(dma->byte_count),
 		foff = 0;
@@ -1106,7 +1122,7 @@ int drm_order(unsigned long size)
 	if (size == 0)
 		return 0;
 
-	order = ffsl(size) - 1;
+	order = flsl(size) - 1;
 	if (size & ~(1ul << order))
 		++order;
 

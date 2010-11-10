@@ -31,7 +31,7 @@
 /* $KAME: sctp_timer.c,v 1.29 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_timer.c,v 1.42 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_timer.c,v 1.46 2010/05/16 17:03:56 rrs Exp $");
 
 #define _IP_VHL
 #include <netinet/sctp_os.h>
@@ -588,7 +588,7 @@ sctp_recover_sent_list(struct sctp_tcb *stcb)
 				/* sa_ignore NO_NULL_CHK */
 				sctp_free_bufspace(stcb, asoc, chk, 1);
 				sctp_m_freem(chk->data);
-				if (PR_SCTP_BUF_ENABLED(chk->flags)) {
+				if (asoc->peer_supports_prsctp && PR_SCTP_BUF_ENABLED(chk->flags)) {
 					asoc->sent_queue_cnt_removeable--;
 				}
 			}
@@ -757,7 +757,7 @@ start_again:
 					continue;
 				}
 			}
-			if (PR_SCTP_TTL_ENABLED(chk->flags)) {
+			if (stcb->asoc.peer_supports_prsctp && PR_SCTP_TTL_ENABLED(chk->flags)) {
 				/* Is it expired? */
 				if ((now.tv_sec > chk->rec.data.timetodrop.tv_sec) ||
 				    ((chk->rec.data.timetodrop.tv_sec == now.tv_sec) &&
@@ -767,19 +767,19 @@ start_again:
 						(void)sctp_release_pr_sctp_chunk(stcb,
 						    chk,
 						    (SCTP_RESPONSE_TO_USER_REQ | SCTP_NOTIFY_DATAGRAM_SENT),
-						    &stcb->asoc.sent_queue, SCTP_SO_NOT_LOCKED);
+						    SCTP_SO_NOT_LOCKED);
 					}
 					continue;
 				}
 			}
-			if (PR_SCTP_RTX_ENABLED(chk->flags)) {
+			if (stcb->asoc.peer_supports_prsctp && PR_SCTP_RTX_ENABLED(chk->flags)) {
 				/* Has it been retransmitted tv_sec times? */
 				if (chk->snd_count > chk->rec.data.timetodrop.tv_sec) {
 					if (chk->data) {
 						(void)sctp_release_pr_sctp_chunk(stcb,
 						    chk,
 						    (SCTP_RESPONSE_TO_USER_REQ | SCTP_NOTIFY_DATAGRAM_SENT),
-						    &stcb->asoc.sent_queue, SCTP_SO_NOT_LOCKED);
+						    SCTP_SO_NOT_LOCKED);
 					}
 					continue;
 				}
@@ -1773,7 +1773,7 @@ sctp_pathmtu_timer(struct sctp_inpcb *inp,
 					struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&net->ro._l_addr;
 
 					/* KAME hack: embed scopeid */
-					(void)sa6_embedscope(sin6, MODULE_GLOBAL(MOD_INET6, ip6_use_defzone));
+					(void)sa6_embedscope(sin6, MODULE_GLOBAL(ip6_use_defzone));
 				}
 #endif
 
@@ -1879,144 +1879,4 @@ sctp_autoclose_timer(struct sctp_inpcb *inp,
 			asoc->sctp_autoclose_ticks = tmp;
 		}
 	}
-}
-
-void
-sctp_iterator_timer(struct sctp_iterator *it)
-{
-	int iteration_count = 0;
-	int inp_skip = 0;
-
-	/*
-	 * only one iterator can run at a time. This is the only way we can
-	 * cleanly pull ep's from underneath all the running interators when
-	 * a ep is freed.
-	 */
-	SCTP_ITERATOR_LOCK();
-	if (it->inp == NULL) {
-		/* iterator is complete */
-done_with_iterator:
-		SCTP_ITERATOR_UNLOCK();
-		SCTP_INP_INFO_WLOCK();
-		TAILQ_REMOVE(&SCTP_BASE_INFO(iteratorhead), it, sctp_nxt_itr);
-		/* stopping the callout is not needed, in theory */
-		SCTP_INP_INFO_WUNLOCK();
-		(void)SCTP_OS_TIMER_STOP(&it->tmr.timer);
-		if (it->function_atend != NULL) {
-			(*it->function_atend) (it->pointer, it->val);
-		}
-		SCTP_FREE(it, SCTP_M_ITER);
-		return;
-	}
-select_a_new_ep:
-	SCTP_INP_WLOCK(it->inp);
-	while (((it->pcb_flags) &&
-	    ((it->inp->sctp_flags & it->pcb_flags) != it->pcb_flags)) ||
-	    ((it->pcb_features) &&
-	    ((it->inp->sctp_features & it->pcb_features) != it->pcb_features))) {
-		/* endpoint flags or features don't match, so keep looking */
-		if (it->iterator_flags & SCTP_ITERATOR_DO_SINGLE_INP) {
-			SCTP_INP_WUNLOCK(it->inp);
-			goto done_with_iterator;
-		}
-		SCTP_INP_WUNLOCK(it->inp);
-		it->inp = LIST_NEXT(it->inp, sctp_list);
-		if (it->inp == NULL) {
-			goto done_with_iterator;
-		}
-		SCTP_INP_WLOCK(it->inp);
-	}
-	if ((it->inp->inp_starting_point_for_iterator != NULL) &&
-	    (it->inp->inp_starting_point_for_iterator != it)) {
-		SCTP_PRINTF("Iterator collision, waiting for one at %p\n",
-		    it->inp);
-		SCTP_INP_WUNLOCK(it->inp);
-		goto start_timer_return;
-	}
-	/* mark the current iterator on the endpoint */
-	it->inp->inp_starting_point_for_iterator = it;
-	SCTP_INP_WUNLOCK(it->inp);
-	SCTP_INP_RLOCK(it->inp);
-	/* now go through each assoc which is in the desired state */
-	if (it->done_current_ep == 0) {
-		if (it->function_inp != NULL)
-			inp_skip = (*it->function_inp) (it->inp, it->pointer, it->val);
-		it->done_current_ep = 1;
-	}
-	if (it->stcb == NULL) {
-		/* run the per instance function */
-		it->stcb = LIST_FIRST(&it->inp->sctp_asoc_list);
-	}
-	SCTP_INP_RUNLOCK(it->inp);
-	if ((inp_skip) || it->stcb == NULL) {
-		if (it->function_inp_end != NULL) {
-			inp_skip = (*it->function_inp_end) (it->inp,
-			    it->pointer,
-			    it->val);
-		}
-		goto no_stcb;
-	}
-	if ((it->stcb) &&
-	    (it->stcb->asoc.stcb_starting_point_for_iterator == it)) {
-		it->stcb->asoc.stcb_starting_point_for_iterator = NULL;
-	}
-	while (it->stcb) {
-		SCTP_TCB_LOCK(it->stcb);
-		if (it->asoc_state && ((it->stcb->asoc.state & it->asoc_state) != it->asoc_state)) {
-			/* not in the right state... keep looking */
-			SCTP_TCB_UNLOCK(it->stcb);
-			goto next_assoc;
-		}
-		/* mark the current iterator on the assoc */
-		it->stcb->asoc.stcb_starting_point_for_iterator = it;
-		/* see if we have limited out the iterator loop */
-		iteration_count++;
-		if (iteration_count > SCTP_ITERATOR_MAX_AT_ONCE) {
-	start_timer_return:
-			/* set a timer to continue this later */
-			if (it->stcb)
-				SCTP_TCB_UNLOCK(it->stcb);
-			sctp_timer_start(SCTP_TIMER_TYPE_ITERATOR,
-			    (struct sctp_inpcb *)it, NULL, NULL);
-			SCTP_ITERATOR_UNLOCK();
-			return;
-		}
-		/* run function on this one */
-		(*it->function_assoc) (it->inp, it->stcb, it->pointer, it->val);
-
-		/*
-		 * we lie here, it really needs to have its own type but
-		 * first I must verify that this won't effect things :-0
-		 */
-		if (it->no_chunk_output == 0)
-			sctp_chunk_output(it->inp, it->stcb, SCTP_OUTPUT_FROM_T3, SCTP_SO_NOT_LOCKED);
-
-		SCTP_TCB_UNLOCK(it->stcb);
-next_assoc:
-		it->stcb = LIST_NEXT(it->stcb, sctp_tcblist);
-		if (it->stcb == NULL) {
-			if (it->function_inp_end != NULL) {
-				inp_skip = (*it->function_inp_end) (it->inp,
-				    it->pointer,
-				    it->val);
-			}
-		}
-	}
-no_stcb:
-	/* done with all assocs on this endpoint, move on to next endpoint */
-	it->done_current_ep = 0;
-	SCTP_INP_WLOCK(it->inp);
-	it->inp->inp_starting_point_for_iterator = NULL;
-	SCTP_INP_WUNLOCK(it->inp);
-	if (it->iterator_flags & SCTP_ITERATOR_DO_SINGLE_INP) {
-		it->inp = NULL;
-	} else {
-		SCTP_INP_INFO_RLOCK();
-		it->inp = LIST_NEXT(it->inp, sctp_list);
-		SCTP_INP_INFO_RUNLOCK();
-	}
-	if (it->inp == NULL) {
-		goto done_with_iterator;
-	}
-	goto select_a_new_ep;
 }

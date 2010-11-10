@@ -28,7 +28,7 @@
  *
  *	from: NetBSD: psychoreg.h,v 1.8 2001/09/10 16:17:06 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/pci/ofw_pci.h,v 1.14 2008/12/15 15:31:10 nwhitehorn Exp $
+ * $FreeBSD: src/sys/sparc64/pci/ofw_pci.h,v 1.16 2009/12/23 21:07:49 marius Exp $
  */
 
 #ifndef _SPARC64_PCI_OFW_PCI_H_
@@ -43,6 +43,35 @@ typedef uint32_t ofw_pci_intr_t;
 #define	OFW_PCI_CS_IO		0x01
 #define	OFW_PCI_CS_MEM32	0x02
 #define	OFW_PCI_CS_MEM64	0x03
+
+/* OFW device types */
+#define	OFW_TYPE_PCI		"pci"
+#define	OFW_TYPE_PCIE		"pciex"
+
+struct ofw_pci_msi_addr_ranges {
+	uint32_t	addr32_hi;
+	uint32_t	addr32_lo;
+	uint32_t	addr32_sz;
+	uint32_t	addr64_hi;
+	uint32_t	addr64_lo;
+	uint32_t	addr64_sz;
+};
+
+#define	OFW_PCI_MSI_ADDR_RANGE_32(r) \
+	(((uint64_t)(r)->addr32_hi << 32) | (uint64_t)(r)->addr32_lo)
+#define	OFW_PCI_MSI_ADDR_RANGE_64(r) \
+	(((uint64_t)(r)->addr64_hi << 32) | (uint64_t)(r)->addr64_lo)
+
+struct ofw_pci_msi_eq_to_devino {
+	uint32_t	eq_first;
+	uint32_t	eq_count;
+	uint32_t	devino_first;
+};
+
+struct ofw_pci_msi_ranges {
+	uint32_t	first;
+	uint32_t	count;
+};
 
 struct ofw_pci_ranges {
 	uint32_t	cspace;

@@ -26,24 +26,25 @@
  * SUCH DAMAGE.
  *
  * from: src/sys/i386/include/_bus.h,v 1.1 2005/04/18 21:45:33 imp
- * $FreeBSD: src/sys/mips/include/_bus.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/_bus.h,v 1.2 2010/01/10 19:50:24 imp Exp $
  */
 
 #ifndef MIPS_INCLUDE__BUS_H
 #define	MIPS_INCLUDE__BUS_H
-#ifdef TARGET_OCTEON
-#include "_bus_octeon.h"
-#else
 /*
  * Bus address and size types
  */
+#include "opt_cputype.h" 
+#if !(defined(TARGET_OCTEON) && defined(ISA_MIPS32))
 typedef uintptr_t bus_addr_t;
+#else
+typedef uint64_t bus_addr_t;
+#endif
 typedef uintptr_t bus_size_t;
 
 /*
  * Access methods for bus resources and address space.
  */
-typedef long bus_space_tag_t;
-typedef u_long bus_space_handle_t;
-#endif
+typedef struct bus_space *bus_space_tag_t;
+typedef bus_addr_t bus_space_handle_t;
 #endif /* MIPS_INCLUDE__BUS_H */

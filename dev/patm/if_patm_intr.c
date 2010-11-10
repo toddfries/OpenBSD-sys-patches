@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/patm/if_patm_intr.c,v 1.8 2008/11/26 13:44:11 ganbold Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/patm/if_patm_intr.c,v 1.9 2010/01/07 21:01:37 mbr Exp $");
 
 #include "opt_inet.h"
 #include "opt_natm.h"
@@ -381,7 +381,7 @@ patm_feed_lbufs(struct patm_softc *sc)
 static void
 patm_intr_tsif(struct patm_softc *sc)
 {
-	struct idt_tsqe *tsqe = sc->tsq_next;;
+	struct idt_tsqe *tsqe = sc->tsq_next;
 	struct idt_tsqe *prev = NULL;
 	uint32_t stamp;
 

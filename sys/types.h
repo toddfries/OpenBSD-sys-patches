@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)types.h	8.6 (Berkeley) 2/19/95
- * $FreeBSD: src/sys/sys/types.h,v 1.102 2009/01/28 17:57:16 ed Exp $
+ * $FreeBSD: src/sys/sys/types.h,v 1.103 2009/08/28 14:06:55 jhb Exp $
  */
 
 #ifndef _SYS_TYPES_H_
@@ -299,6 +299,7 @@ typedef	__uint32_t	intrmask_t;	/* Interrupt mask (spl, xxx_imask...) */
 
 typedef	__uintfptr_t	uintfptr_t;
 typedef	__uint64_t	uoff_t;
+typedef	char		vm_memattr_t;	/* memory attribute codes */
 typedef	struct vm_page	*vm_page_t;
 
 #define offsetof(type, field) __offsetof(type, field)

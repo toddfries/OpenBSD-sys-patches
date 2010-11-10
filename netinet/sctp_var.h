@@ -31,7 +31,7 @@
 /* $KAME: sctp_var.h,v 1.24 2005/03/06 16:04:19 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_var.h,v 1.30 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_var.h,v 1.32 2010/04/03 15:40:14 tuexen Exp $");
 
 #ifndef _NETINET_SCTP_VAR_H_
 #define _NETINET_SCTP_VAR_H_
@@ -96,7 +96,8 @@ extern struct pr_usrreqs sctp_usrreqs;
 
 #define sctp_alloc_a_strmoq(_stcb, _strmoq) { \
 	(_strmoq) = SCTP_ZONE_GET(SCTP_BASE_INFO(ipi_zone_strmoq), struct sctp_stream_queue_pending); \
-	if ((_strmoq)) { \
+         if ((_strmoq)) {			  \
+		memset(_strmoq, 0, sizeof(struct sctp_stream_queue_pending)); \
 		SCTP_INCR_STRMOQ_COUNT(); \
 		(_strmoq)->holds_key_ref = 0; \
  	} \
@@ -107,7 +108,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 		sctp_auth_key_release((_stcb), (_chk)->auth_keyid); \
 		(_chk)->holds_key_ref = 0; \
 	} \
-        if(_stcb) { \
+        if (_stcb) { \
           SCTP_TCB_LOCK_ASSERT((_stcb)); \
           if ((_chk)->whoTo) { \
                   sctp_free_remote_addr((_chk)->whoTo); \
@@ -230,7 +231,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 
 #ifdef SCTP_FS_SPEC_LOG
 #define sctp_total_flight_decrease(stcb, tp1) do { \
-        if(stcb->asoc.fs_index > SCTP_FS_SPEC_LOG_SIZE) \
+        if (stcb->asoc.fs_index > SCTP_FS_SPEC_LOG_SIZE) \
 		stcb->asoc.fs_index = 0;\
 	stcb->asoc.fslog[stcb->asoc.fs_index].total_flight = stcb->asoc.total_flight; \
 	stcb->asoc.fslog[stcb->asoc.fs_index].tsn = tp1->rec.data.TSN_seq; \
@@ -251,7 +252,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 } while (0)
 
 #define sctp_total_flight_increase(stcb, tp1) do { \
-        if(stcb->asoc.fs_index > SCTP_FS_SPEC_LOG_SIZE) \
+        if (stcb->asoc.fs_index > SCTP_FS_SPEC_LOG_SIZE) \
 		stcb->asoc.fs_index = 0;\
 	stcb->asoc.fslog[stcb->asoc.fs_index].total_flight = stcb->asoc.total_flight; \
 	stcb->asoc.fslog[stcb->asoc.fs_index].tsn = tp1->rec.data.TSN_seq; \
@@ -267,6 +268,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 #else
 
 #define sctp_total_flight_decrease(stcb, tp1) do { \
+        tp1->window_probe = 0; \
 	if (stcb->asoc.total_flight >= tp1->book_size) { \
 		stcb->asoc.total_flight -= tp1->book_size; \
 		if (stcb->asoc.total_flight_count > 0) \

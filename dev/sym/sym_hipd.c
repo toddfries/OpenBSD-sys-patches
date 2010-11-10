@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sym/sym_hipd.c,v 1.72 2008/10/14 20:18:57 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sym/sym_hipd.c,v 1.74 2010/04/27 18:05:33 marius Exp $");
 
 #define SYM_DRIVER_NAME	"sym-1.6.5-20000902"
 
@@ -87,6 +87,12 @@ __FBSDID("$FreeBSD: src/sys/dev/sym/sym_hipd.c,v 1.72 2008/10/14 20:18:57 marius
 
 #include <machine/bus.h>
 #include <machine/resource.h>
+
+#ifdef __sparc64__
+#include <dev/ofw/openfirm.h>
+#include <machine/ofw_machdep.h>
+#endif
+
 #include <sys/rman.h>
 
 #include <cam/cam.h>
@@ -97,10 +103,6 @@ __FBSDID("$FreeBSD: src/sys/dev/sym/sym_hipd.c,v 1.72 2008/10/14 20:18:57 marius
 
 #include <cam/scsi/scsi_all.h>
 #include <cam/scsi/scsi_message.h>
-
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/pmap.h>
 
 /* Short and quite clear integer types */
 typedef int8_t    s8;
@@ -2682,6 +2684,9 @@ static int sym_prepare_setting(hcb_p np, struct sym_nvram *nvram)
 	 */
 	np->myaddr = 255;
 	sym_nvram_setup_host (np, nvram);
+#ifdef __sparc64__
+	np->myaddr = OF_getscsinitid(np->device);
+#endif
 
 	/*
 	 *  Get SCSI addr of host adapter (set by bios?).
@@ -8582,7 +8587,7 @@ sym_pci_attach(device_t dev)
 	 *  Allocate a tag for the DMA of user data.
 	 */
 	if (bus_dma_tag_create(np->bus_dmat, 1, (1<<24),
-				BUS_SPACE_MAXADDR, BUS_SPACE_MAXADDR,
+				BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR,
 				NULL, NULL,
 				BUS_SPACE_MAXSIZE, SYM_CONF_MAX_SG,
 				(1<<24), 0, busdma_lock_mutex, &np->mtx,

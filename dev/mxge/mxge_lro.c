@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mxge/mxge_lro.c,v 1.7 2008/02/14 00:09:59 gallatin Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mxge/mxge_lro.c,v 1.8 2009/06/23 17:42:06 gallatin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,6 +54,9 @@ __FBSDID("$FreeBSD: src/sys/dev/mxge/mxge_lro.c,v 1.7 2008/02/14 00:09:59 gallat
 #include <dev/mxge/mxge_mcp.h>
 #include <dev/mxge/if_mxge_var.h>
 
+#include "opt_inet.h"
+
+#ifdef INET
 
 /* Assume len is a multiple of 4 */
 static uint16_t
@@ -340,6 +343,8 @@ mxge_lro_rx(struct mxge_slice_state *ss, struct mbuf *m_head, uint32_t csum)
 	lro->m_tail = m_tail;
 	return 0;
 }
+
+#endif /* INET */
 /*
   This file uses Myri10GE driver indentation.
 

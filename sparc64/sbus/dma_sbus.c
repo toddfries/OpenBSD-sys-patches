@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sbus/dma_sbus.c,v 1.7 2008/09/08 20:20:44 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sbus/dma_sbus.c,v 1.10 2009/12/22 21:02:46 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -122,14 +122,15 @@ static device_method_t dma_methods[] = {
 	/* Bus interface */
 	DEVMETHOD(bus_print_child,	dma_print_child),
 	DEVMETHOD(bus_probe_nomatch,	dma_probe_nomatch),
-	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
-	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
 	DEVMETHOD(bus_alloc_resource,	bus_generic_rl_alloc_resource),
-	DEVMETHOD(bus_release_resource, bus_generic_rl_release_resource),
 	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
 	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
-	DEVMETHOD(bus_get_resource_list, dma_get_resource_list),
+	DEVMETHOD(bus_release_resource, bus_generic_rl_release_resource),
+	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
+	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
+	DEVMETHOD(bus_get_resource_list, dma_get_resource_list),
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	dma_get_devinfo),
@@ -139,7 +140,7 @@ static device_method_t dma_methods[] = {
 	DEVMETHOD(ofw_bus_get_node,	ofw_bus_gen_get_node),
 	DEVMETHOD(ofw_bus_get_type,	ofw_bus_gen_get_type),
 
-	{ 0, 0 }
+	KOBJMETHOD_END
 };
 
 static driver_t dma_driver = {
@@ -148,7 +149,13 @@ static driver_t dma_driver = {
 	sizeof(struct dma_softc),
 };
 
-DRIVER_MODULE(dma, sbus, dma_driver, dma_devclass, 0, 0);
+/*
+ * The probe order is handled by sbus(4) as we don't want the variants
+ * with children to be attached earlier than the stand-alone controllers
+ * in order to generally preserve the OFW device tree order.
+ */
+EARLY_DRIVER_MODULE(dma, sbus, dma_driver, dma_devclass, 0, 0,
+    BUS_PASS_DEFAULT);
 MODULE_DEPEND(dma, sbus, 1, 1, 1);
 MODULE_VERSION(dma, 1);
 

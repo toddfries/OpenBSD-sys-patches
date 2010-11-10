@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/amd64/mp_watchdog.c,v 1.6 2007/12/25 17:51:55 rwatson Exp $
+ * $FreeBSD: src/sys/amd64/amd64/mp_watchdog.c,v 1.7 2010/11/01 18:18:46 jhb Exp $
  */
 
 #include "opt_mp_watchdog.h"
@@ -44,7 +44,7 @@
 #include <sys/systm.h>
 
 #include <machine/smp.h>
-#include <machine/apicreg.h>
+#include <x86/apicreg.h>
 #include <machine/apicvar.h>
 #include <machine/mp_watchdog.h>
 

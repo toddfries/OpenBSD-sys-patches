@@ -24,7 +24,7 @@
 # SUCH DAMAGE.
 #
 
-# $FreeBSD: src/sys/modules/ispfw/Makefile,v 1.5 2008/05/04 14:59:24 marius Exp $ 
+# $FreeBSD: src/sys/modules/ispfw/Makefile,v 1.6 2009/08/01 00:57:34 mjacob Exp $ 
 
 
 SUBDIR = ispfw
@@ -39,6 +39,9 @@ SUBDIR += isp_2200
 SUBDIR += isp_2300
 SUBDIR += isp_2322
 SUBDIR += isp_2400
+SUBDIR += isp_2400_multi
+SUBDIR += isp_2500
+SUBDIR += isp_2500_multi
 .if ${MACHINE} == "sparc64"
 SUBDIR += isp_1000
 .endif

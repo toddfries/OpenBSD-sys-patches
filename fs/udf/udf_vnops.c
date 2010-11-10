@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/udf/udf_vnops.c,v 1.87 2009/03/04 13:54:10 avg Exp $
+ * $FreeBSD: src/sys/fs/udf/udf_vnops.c,v 1.88 2010/05/31 09:08:44 avg Exp $
  */
 
 /* udf_vnops.c */
@@ -904,9 +904,9 @@ udf_readlink(struct vop_readlink_args *ap)
 	vp = ap->a_vp;
 	node = VTON(vp);
 	len = le64toh(node->fentry->inf_len);
+	iov[0].iov_len = len;
 	buf = malloc(iov[0].iov_len, M_DEVBUF, M_WAITOK);
 	iov[0].iov_base = buf;
-	iov[0].iov_len = len;
 	uio.uio_iov = iov;
 	uio.uio_iovcnt = 1;
 	uio.uio_offset = 0;

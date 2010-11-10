@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_nfsiod.c,v 1.93 2008/11/02 17:00:23 trhodes Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_nfsiod.c,v 1.96 2010/01/27 15:22:20 rmacklem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,10 +63,7 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_nfsiod.c,v 1.93 2008/11/02 17:00:23 tr
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-#include <rpc/rpcclnt.h>
-
 #include <nfs/xdr_subs.h>
-#include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfsclient/nfs.h>
 #include <nfsclient/nfsm_subs.h>
@@ -116,7 +113,7 @@ sysctl_iodmin(SYSCTL_HANDLER_ARGS)
 	 * than the new minimum, create some more.
 	 */
 	for (i = nfs_iodmin - nfs_numasync; i > 0; i--)
-		nfs_nfsiodnew();
+		nfs_nfsiodnew(0);
 out:
 	mtx_unlock(&nfs_iod_mtx);	
 	return (0);
@@ -150,7 +147,7 @@ sysctl_iodmax(SYSCTL_HANDLER_ARGS)
 	 */
 	iod = nfs_numasync - 1;
 	for (i = 0; i < nfs_numasync - nfs_iodmax; i++) {
-		if (nfs_iodwant[iod])
+		if (nfs_iodwant[iod] == NFSIOD_AVAILABLE)
 			wakeup(&nfs_iodwant[iod]);
 		iod--;
 	}
@@ -163,7 +160,7 @@ SYSCTL_PROC(_vfs_nfs, OID_AUTO, iodmax, CTLTYPE_UINT | CTLFLAG_RW, 0,
     "Max number of nfsiod kthreads");
 
 int
-nfs_nfsiodnew(void)
+nfs_nfsiodnew(int set_iodwant)
 {
 	int error, i;
 	int newiod;
@@ -179,12 +176,17 @@ nfs_nfsiodnew(void)
 		}
 	if (newiod == -1)
 		return (-1);
+	if (set_iodwant > 0)
+		nfs_iodwant[i] = NFSIOD_CREATED_FOR_NFS_ASYNCIO;
 	mtx_unlock(&nfs_iod_mtx);
 	error = kproc_create(nfssvc_iod, nfs_asyncdaemon + i, NULL, RFHIGHPID,
 	    0, "nfsiod %d", newiod);
 	mtx_lock(&nfs_iod_mtx);
-	if (error)
+	if (error) {
+		if (set_iodwant > 0)
+			nfs_iodwant[i] = NFSIOD_NOT_AVAILABLE;
 		return (-1);
+	}
 	nfs_numasync++;
 	return (newiod);
 }
@@ -202,7 +204,7 @@ nfsiod_setup(void *dummy)
 		nfs_iodmin = NFS_MAXASYNCDAEMON;
 
 	for (i = 0; i < nfs_iodmin; i++) {
-		error = nfs_nfsiodnew();
+		error = nfs_nfsiodnew(0);
 		if (error == -1)
 			panic("nfsiod_setup: nfs_nfsiodnew failed");
 	}
@@ -239,7 +241,8 @@ nfssvc_iod(void *instance)
 			goto finish;
 		if (nmp)
 			nmp->nm_bufqiods--;
-		nfs_iodwant[myiod] = curthread->td_proc;
+		if (nfs_iodwant[myiod] == NFSIOD_NOT_AVAILABLE)
+			nfs_iodwant[myiod] = NFSIOD_AVAILABLE;
 		nfs_iodmount[myiod] = NULL;
 		/*
 		 * Always keep at least nfs_iodmin kthreads.
@@ -306,7 +309,7 @@ finish:
 	nfs_asyncdaemon[myiod] = 0;
 	if (nmp)
 	    nmp->nm_bufqiods--;
-	nfs_iodwant[myiod] = NULL;
+	nfs_iodwant[myiod] = NFSIOD_NOT_AVAILABLE;
 	nfs_iodmount[myiod] = NULL;
 	/* Someone may be waiting for the last nfsiod to terminate. */
 	if (--nfs_numasync == 0)

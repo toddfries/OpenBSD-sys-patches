@@ -25,9 +25,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ia64/ski/acpi_stub.c,v 1.8 2007/03/22 18:16:39 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ia64/ski/acpi_stub.c,v 1.9 2009/06/05 18:44:36 jkim Exp $");
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
 
 #define APIC_IO_SAPIC                   6
 #define APIC_LOCAL_SAPIC                7

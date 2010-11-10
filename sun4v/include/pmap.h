@@ -33,7 +33,7 @@
  *	from: hp300: @(#)pmap.h 7.2 (Berkeley) 12/16/90
  *	from: @(#)pmap.h        7.4 (Berkeley) 5/12/91
  *	from: FreeBSD: src/sys/i386/include/pmap.h,v 1.70 2000/11/30
- * $FreeBSD: src/sys/sun4v/include/pmap.h,v 1.8 2007/05/20 13:06:45 marius Exp $
+ * $FreeBSD: src/sys/sun4v/include/pmap.h,v 1.10 2010/04/30 00:46:43 kmacy Exp $
  */
 
 #ifndef	_MACHINE_PMAP_H_
@@ -75,6 +75,8 @@ struct pmap {
 	struct tte_hash        *pm_hash;
 	TAILQ_HEAD(,pv_entry)	pm_pvlist;	/* list of mappings in pmap */
 	struct hv_tsb_info      pm_tsb;
+	uint32_t		pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int			pm_retries;
 	pmap_cpumask_t          pm_active;      /* mask of cpus currently using pmap */
 	pmap_cpumask_t          pm_tlbactive;   /* mask of cpus that have used this pmap */
 	struct	pmap_statistics pm_stats;
@@ -106,7 +108,9 @@ typedef struct pv_entry {
 	TAILQ_ENTRY(pv_entry) pv_plist;
 } *pv_entry_t;
 
+#define	pmap_page_get_memattr(m)	VM_MEMATTR_DEFAULT
 #define pmap_page_is_mapped(m)  (!TAILQ_EMPTY(&(m)->md.pv_list))
+#define	pmap_page_set_memattr(m, ma)	(void)0
 
 void	pmap_bootstrap(vm_offset_t ekva);
 vm_paddr_t pmap_kextract(vm_offset_t va);

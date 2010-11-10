@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.7 2009/02/02 20:09:14 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.8 2009/05/29 21:27:12 jamie Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,7 +35,6 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.7 2009/02/02 20:09:14 cog
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kerneldump.h>
-#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/elf.h>

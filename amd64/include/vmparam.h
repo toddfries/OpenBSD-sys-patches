@@ -38,7 +38,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)vmparam.h	5.9 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/amd64/include/vmparam.h,v 1.56 2008/07/08 22:59:17 alc Exp $
+ * $FreeBSD: src/sys/amd64/include/vmparam.h,v 1.62 2010/09/17 07:36:32 avg Exp $
  */
 
 
@@ -132,6 +132,13 @@
 #define	VM_NFREEORDER		13
 
 /*
+ * Only one memory domain.
+ */
+#ifndef VM_NDOMAIN
+#define	VM_NDOMAIN		1
+#endif
+
+/*
  * Enable superpage reservations: 1 level.
  */
 #ifndef	VM_NRESERVLEVEL
@@ -145,6 +152,10 @@
 #define	VM_LEVEL_0_ORDER	9
 #endif
 
+#ifdef	SMP
+#define	PA_LOCK_COUNT	256
+#endif
+
 /*
  * Virtual addresses of things.  Derived from the page directory and
  * page table indexes from pmap.h for precision.
@@ -154,8 +165,7 @@
  * 0xffff800000000000 - 0xffff804020100fff   recursive page table (512GB slot)
  * 0xffff804020101000 - 0xfffffeffffffffff   unused
  * 0xffffff0000000000 - 0xffffff7fffffffff   512GB direct map mappings
- * 0xffffff8000000000 - 0xfffffffe3fffffff   unused (505GB)
- * 0xfffffffe40000000 - 0xffffffffffffffff   7GB kernel map
+ * 0xffffff8000000000 - 0xffffffffffffffff   512GB kernel map
  *
  * Within the kernel map:
  *
@@ -163,7 +173,7 @@
  */
 
 #define	VM_MAX_KERNEL_ADDRESS	KVADDR(KPML4I, NPDPEPG-1, NPDEPG-1, NPTEPG-1)
-#define	VM_MIN_KERNEL_ADDRESS	KVADDR(KPML4I, NPDPEPG-7, 0, 0)
+#define	VM_MIN_KERNEL_ADDRESS	KVADDR(KPML4I, NPDPEPG-512, 0, 0)
 
 #define	DMAP_MIN_ADDRESS	KVADDR(DMPML4I, 0, 0, 0)
 #define	DMAP_MAX_ADDRESS	KVADDR(DMPML4I+1, 0, 0, 0)
@@ -195,7 +205,7 @@
  * is the total KVA space allocated for kmem_map.
  */
 #ifndef VM_KMEM_SIZE_SCALE
-#define	VM_KMEM_SIZE_SCALE	(3)
+#define	VM_KMEM_SIZE_SCALE	(1)
 #endif
 
 /*

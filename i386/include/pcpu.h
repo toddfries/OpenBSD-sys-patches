@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/pcpu.h,v 1.54 2008/10/23 07:20:43 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/pcpu.h,v 1.58 2010/06/02 15:09:36 jhb Exp $
  */
 
 #ifndef _MACHINE_PCPU_H_
@@ -62,6 +62,19 @@ struct shadow_time_info {
 	uint32_t version;
 };
 
+#define	PCPU_XEN_FIELDS							\
+	;								\
+	u_int	pc_cr3;		/* track cr3 for R1/R3*/		\
+	vm_paddr_t *pc_pdir_shadow;					\
+	uint64_t pc_processed_system_time;				\
+	struct shadow_time_info pc_shadow_time;				\
+	int	pc_resched_irq;						\
+	int	pc_callfunc_irq;					\
+	int	pc_virq_to_irq[NR_VIRQS];				\
+	int	pc_ipi_to_irq[NR_IPIS]	
+#else
+#define PCPU_XEN_FIELDS
+#endif
 
 #define	PCPU_MD_FIELDS							\
 	char	pc_monitorbuf[128] __aligned(128); /* cache line */	\
@@ -71,40 +84,12 @@ struct shadow_time_info {
 	struct	segment_descriptor pc_common_tssd;			\
 	struct	segment_descriptor *pc_tss_gdt;				\
 	struct	segment_descriptor *pc_fsgs_gdt;			\
-	vm_paddr_t 	*pc_pdir_shadow;				\
 	int	pc_currentldt;						\
 	u_int   pc_acpi_id;		/* ACPI CPU id */		\
 	u_int	pc_apic_id;						\
 	int	pc_private_tss;		/* Flag indicating private tss*/\
-        u_int     pc_cr3;		/* track cr3 for R1/R3*/	\
-        u_int     pc_pdir;                                              \
-        u_int     pc_lazypmap;                                          \
-        u_int     pc_rendezvous;                                        \
-        u_int     pc_cpuast;						\
-	uint64_t  pc_processed_system_time;				\
-	struct shadow_time_info pc_shadow_time;				\
-	int	pc_resched_irq;						\
-	int	pc_callfunc_irq;					\
-        int	pc_virq_to_irq[NR_VIRQS];				\
-	int	pc_ipi_to_irq[NR_IPIS]
-	
-
-	
-#else
-#define	PCPU_MD_FIELDS							\
-	char	pc_monitorbuf[128] __aligned(128); /* cache line */	\
-	struct	pcpu *pc_prvspace;	/* Self-reference */		\
-	struct	pmap *pc_curpmap;					\
-	struct	i386tss pc_common_tss;					\
-	struct	segment_descriptor pc_common_tssd;			\
-	struct	segment_descriptor *pc_tss_gdt;				\
-	struct	segment_descriptor *pc_fsgs_gdt;			\
-	int	pc_currentldt;						\
-	u_int   pc_acpi_id;		/* ACPI CPU id */		\
-	u_int	pc_apic_id;						\
-	int	pc_private_tss		/* Flag indicating private tss */
-
-#endif
+	u_int	pc_cmci_mask		/* MCx banks for CMCI */	\
+	PCPU_XEN_FIELDS
 
 #ifdef _KERNEL
 
@@ -152,7 +137,7 @@ extern struct pcpu *pcpup;
 #define	__PCPU_GET(name) __extension__ ({				\
 	__pcpu_type(name) __res;					\
 	struct __s {							\
-		u_char	__b[MIN(sizeof(__pcpu_type(name)), 4)];		\
+		u_char	__b[MIN(sizeof(__res), 4)];			\
 	} __s;								\
 									\
 	if (sizeof(__res) == 1 || sizeof(__res) == 2 ||			\
@@ -174,7 +159,7 @@ extern struct pcpu *pcpup;
 #define	__PCPU_ADD(name, val) do {					\
 	__pcpu_type(name) __val;					\
 	struct __s {							\
-		u_char	__b[MIN(sizeof(__pcpu_type(name)), 4)];		\
+		u_char	__b[MIN(sizeof(__val), 4)];			\
 	} __s;								\
 									\
 	__val = (val);							\
@@ -214,10 +199,10 @@ extern struct pcpu *pcpup;
 /*
  * Sets the value of the per-cpu variable name to value val.
  */
-#define	__PCPU_SET(name, val) {						\
+#define	__PCPU_SET(name, val) do {					\
 	__pcpu_type(name) __val;					\
 	struct __s {							\
-		u_char	__b[MIN(sizeof(__pcpu_type(name)), 4)];		\
+		u_char	__b[MIN(sizeof(__val), 4)];			\
 	} __s;								\
 									\
 	__val = (val);							\
@@ -230,7 +215,7 @@ extern struct pcpu *pcpup;
 	} else {							\
 		*__PCPU_PTR(name) = __val;				\
 	}								\
-}
+} while (0)
 
 #define	PCPU_GET(member)	__PCPU_GET(pc_ ## member)
 #define	PCPU_ADD(member, val)	__PCPU_ADD(pc_ ## member, val)

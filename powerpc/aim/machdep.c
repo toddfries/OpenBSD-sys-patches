@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/aim/machdep.c,v 1.120 2009/02/20 17:48:40 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/aim/machdep.c,v 1.135 2010/03/25 14:24:00 nwhitehorn Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -114,9 +114,9 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/machdep.c,v 1.120 2009/02/20 17:48:40 nw
 #include <machine/metadata.h>
 #include <machine/mmuvar.h>
 #include <machine/pcb.h>
-#include <machine/powerpc.h>
 #include <machine/reg.h>
 #include <machine/sigframe.h>
+#include <machine/spr.h>
 #include <machine/trap.h>
 #include <machine/vmparam.h>
 
@@ -130,6 +130,7 @@ extern vm_offset_t ksym_start, ksym_end;
 
 int cold = 1;
 int cacheline_size = 32;
+int hw_direct_map = 1;
 
 struct pcpu __pcpu[MAXCPU];
 
@@ -197,6 +198,11 @@ cpu_startup(void *dummy)
 	    ptoa(physmem) / 1048576);
 	realmem = physmem;
 
+	if (bootverbose)
+		printf("available KVA = %zd (%zd MB)\n",
+		    virtual_end - virtual_avail,
+		    (virtual_end - virtual_avail) / 1048576);
+
 	/*
 	 * Display any holes after the first chunk of extended memory.
 	 */
@@ -230,10 +236,13 @@ cpu_startup(void *dummy)
 
 extern char	kernel_text[], _end[];
 
+extern void	*testppc64, *testppc64size;
+extern void	*restorebridge, *restorebridgesize;
+extern void	*rfid_patch, *rfi_patch1, *rfi_patch2;
 #ifdef SMP
 extern void	*rstcode, *rstsize;
 #endif
-extern void	*trapcode, *trapsize;
+extern void	*trapcode, *trapcode64, *trapsize;
 extern void	*alitrap, *alisize;
 extern void	*dsitrap, *dsisize;
 extern void	*decrint, *decrsize;
@@ -245,11 +254,17 @@ powerpc_init(u_int startkernel, u_int endkernel, u_int basekernel, void *mdp)
 {
 	struct		pcpu *pc;
 	vm_offset_t	end;
+	void		*generictrap;
+	size_t		trap_offset;
 	void		*kmdp;
         char		*env;
+	uint32_t	msr, scratch;
+	uint8_t		*cache_check;
+	int		ppc64;
 
 	end = 0;
 	kmdp = NULL;
+	trap_offset = 0;
 
 	/*
 	 * Parse metadata if present and fetch parameters.  Must be done
@@ -315,54 +330,181 @@ powerpc_init(u_int startkernel, u_int endkernel, u_int basekernel, void *mdp)
 		printf("powerpc_init: no loader metadata.\n");
 	}
 
+	/*
+	 * Init KDB
+	 */
+
 	kdb_init();
 
 	/*
-	 * XXX: Initialize the interrupt tables.
-	 *      Disable translation in case the vector area
-	 *      hasn't been mapped (G5)
+	 * PowerPC 970 CPUs have a misfeature requested by Apple that makes
+	 * them pretend they have a 32-byte cacheline. Turn this off
+	 * before we measure the cacheline size.
 	 */
-	mtmsr(mfmsr() & ~(PSL_IR | PSL_DR));
+
+	switch (mfpvr() >> 16) {
+		case IBM970:
+		case IBM970FX:
+		case IBM970MP:
+		case IBM970GX:
+			scratch = mfspr64upper(SPR_HID5,msr);
+			scratch &= ~HID5_970_DCBZ_SIZE_HI;
+			mtspr64(SPR_HID5, scratch, mfspr(SPR_HID5), msr);
+			break;
+	}
+
+	/*
+	 * Initialize the interrupt tables and figure out our cache line
+	 * size and whether or not we need the 64-bit bridge code.
+	 */
+
+	/*
+	 * Disable translation in case the vector area hasn't been
+	 * mapped (G5).
+	 */
+
+	msr = mfmsr();
+	mtmsr((msr & ~(PSL_IR | PSL_DR)) | PSL_RI);
 	isync();
+
+	/*
+	 * Measure the cacheline size using dcbz
+	 *
+	 * Use EXC_PGM as a playground. We are about to overwrite it
+	 * anyway, we know it exists, and we know it is cache-aligned.
+	 */
+
+	cache_check = (void *)EXC_PGM;
+
+	for (cacheline_size = 0; cacheline_size < 0x100; cacheline_size++)
+		cache_check[cacheline_size] = 0xff;
+
+	__asm __volatile("dcbz 0,%0":: "r" (cache_check) : "memory");
+
+	/* Find the first byte dcbz did not zero to get the cache line size */
+	for (cacheline_size = 0; cacheline_size < 0x100 &&
+	    cache_check[cacheline_size] == 0; cacheline_size++);
+
+	/* Work around psim bug */
+	if (cacheline_size == 0) {
+		printf("WARNING: cacheline size undetermined, setting to 32\n");
+		cacheline_size = 32;
+	}
+
+	/*
+	 * Figure out whether we need to use the 64 bit PMAP. This works by
+	 * executing an instruction that is only legal on 64-bit PPC (mtmsrd),
+	 * and setting ppc64 = 0 if that causes a trap.
+	 */
+
+	ppc64 = 1;
+
+	bcopy(&testppc64, (void *)EXC_PGM,  (size_t)&testppc64size);
+	__syncicache((void *)EXC_PGM, (size_t)&testppc64size);
+
+	__asm __volatile("\
+		mfmsr %0;	\
+		mtsprg2 %1;	\
+				\
+		mtmsrd %0;	\
+		mfsprg2 %1;"
+	    : "=r"(scratch), "=r"(ppc64));
+
+	if (ppc64)
+		cpu_features |= PPC_FEATURE_64;
+
+	/*
+	 * Now copy restorebridge into all the handlers, if necessary,
+	 * and set up the trap tables.
+	 */
+
+	if (cpu_features & PPC_FEATURE_64) {
+		/* Patch the two instances of rfi -> rfid */
+		bcopy(&rfid_patch,&rfi_patch1,4);
+	#ifdef KDB
+		/* rfi_patch2 is at the end of dbleave */
+		bcopy(&rfid_patch,&rfi_patch2,4);
+	#endif
+
+		/*
+		 * Copy a code snippet to restore 32-bit bridge mode
+		 * to the top of every non-generic trap handler
+		 */
+
+		trap_offset += (size_t)&restorebridgesize;
+		bcopy(&restorebridge, (void *)EXC_RST, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_DSI, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_ALI, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_PGM, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_MCHK, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_TRC, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_BPT, trap_offset); 
+
+		/*
+		 * Set the common trap entry point to the one that
+		 * knows to restore 32-bit operation on execution.
+		 */
+
+		generictrap = &trapcode64;
+	} else {
+		generictrap = &trapcode;
+	}
+
 #ifdef SMP
-	bcopy(&rstcode,  (void *)EXC_RST,  (size_t)&rstsize);
+	bcopy(&rstcode, (void *)(EXC_RST + trap_offset),  (size_t)&rstsize);
 #else
-	bcopy(&trapcode, (void *)EXC_RST,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_RST,  (size_t)&trapsize);
 #endif
-	bcopy(&trapcode, (void *)EXC_MCHK, (size_t)&trapsize);
-	bcopy(&dsitrap,  (void *)EXC_DSI,  (size_t)&dsisize);
-	bcopy(&trapcode, (void *)EXC_ISI,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_EXI,  (size_t)&trapsize);
-	bcopy(&alitrap,  (void *)EXC_ALI,  (size_t)&alisize);
-	bcopy(&trapcode, (void *)EXC_PGM,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_FPU,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_DECR, (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_SC,   (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_TRC,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_FPA,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_VEC,  (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_VECAST, (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_THRM, (size_t)&trapsize);
-	bcopy(&trapcode, (void *)EXC_BPT,  (size_t)&trapsize);
+
 #ifdef KDB
-	bcopy(&dblow,   (void *)EXC_MCHK, (size_t)&dbsize);
-	bcopy(&dblow,   (void *)EXC_PGM,  (size_t)&dbsize);
-	bcopy(&dblow,   (void *)EXC_TRC,  (size_t)&dbsize);
-	bcopy(&dblow,   (void *)EXC_BPT,  (size_t)&dbsize);
+	bcopy(&dblow,	(void *)(EXC_MCHK + trap_offset), (size_t)&dbsize);
+	bcopy(&dblow,   (void *)(EXC_PGM + trap_offset),  (size_t)&dbsize);
+	bcopy(&dblow,   (void *)(EXC_TRC + trap_offset),  (size_t)&dbsize);
+	bcopy(&dblow,   (void *)(EXC_BPT + trap_offset),  (size_t)&dbsize);
+#else
+	bcopy(generictrap, (void *)EXC_MCHK, (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_PGM,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_TRC,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_BPT,  (size_t)&trapsize);
 #endif
+	bcopy(&dsitrap,  (void *)(EXC_DSI + trap_offset),  (size_t)&dsisize);
+	bcopy(&alitrap,  (void *)(EXC_ALI + trap_offset),  (size_t)&alisize);
+	bcopy(generictrap, (void *)EXC_ISI,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_EXI,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_FPU,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_DECR, (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_SC,   (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_FPA,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_VEC,  (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_VECAST, (size_t)&trapsize);
+	bcopy(generictrap, (void *)EXC_THRM, (size_t)&trapsize);
 	__syncicache(EXC_RSVD, EXC_LAST - EXC_RSVD);
 
 	/*
-	 * Make sure translation has been enabled
+	 * Restore MSR
 	 */
-	mtmsr(mfmsr() | PSL_IR|PSL_DR|PSL_ME|PSL_RI);
+	mtmsr(msr);
 	isync();
+	
+	/*
+	 * Choose a platform module so we can get the physical memory map.
+	 */
+	
+	platform_probe_and_attach();
 
 	/*
-	 * Initialise virtual memory.
+	 * Initialise virtual memory. Use BUS_PROBE_GENERIC priority
+	 * in case the platform module had a better idea of what we
+	 * should do.
 	 */
-	pmap_mmu_install(MMU_TYPE_OEA, 0);		/* XXX temporary */
+	if (cpu_features & PPC_FEATURE_64)
+		pmap_mmu_install(MMU_TYPE_G5, BUS_PROBE_GENERIC);
+	else
+		pmap_mmu_install(MMU_TYPE_OEA, BUS_PROBE_GENERIC);
+
 	pmap_bootstrap(startkernel, endkernel);
+	mtmsr(mfmsr() | PSL_IR|PSL_DR|PSL_ME|PSL_RI);
+	isync();
 
 	/*
 	 * Initialize params/tunables that are derived from memsize
@@ -384,6 +526,7 @@ powerpc_init(u_int startkernel, u_int endkernel, u_int basekernel, void *mdp)
 	thread0.td_pcb = (struct pcb *)
 	    ((thread0.td_kstack + thread0.td_kstack_pages * PAGE_SIZE -
 	    sizeof(struct pcb)) & ~15);
+	bzero((void *)thread0.td_pcb, sizeof(struct pcb));
 	pc->pc_curpcb = thread0.td_pcb;
 
 	/* Initialise the message buffer. */
@@ -557,7 +700,6 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 int
 sigreturn(struct thread *td, struct sigreturn_args *uap)
 {
-	struct proc *p;
 	ucontext_t uc;
 	int error;
 
@@ -572,12 +714,7 @@ sigreturn(struct thread *td, struct sigreturn_args *uap)
 	if (error != 0)
 		return (error);
 
-	p = td->td_proc;
-	PROC_LOCK(p);
-	td->td_sigmask = uc.uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &uc.uc_sigmask, NULL, 0);
 
 	CTR3(KTR_SIG, "sigreturn: return td=%p pc=%#x sp=%#x",
 	     td, uc.uc_mcontext.mc_srr0, uc.uc_mcontext.mc_gpr[1]);
@@ -735,19 +872,23 @@ cpu_boot(int howto)
 {
 }
 
+/*
+ * Flush the D-cache for non-DMA I/O so that the I-cache can
+ * be made coherent later.
+ */
+void
+cpu_flush_dcache(void *ptr, size_t len)
+{
+	/* TBD */
+}
+
 void
 cpu_initclocks(void)
 {
 
 	decr_tc_init();
-}
-
-/* Get current clock frequency for the given cpu id. */
-int
-cpu_est_clockrate(int cpu_id, uint64_t *rate)
-{
-
-	return (ENXIO);
+	stathz = hz;
+	profhz = hz;
 }
 
 /*
@@ -764,8 +905,10 @@ void
 cpu_idle(int busy)
 {
 	uint32_t msr;
+	uint16_t vers;
 
 	msr = mfmsr();
+	vers = mfpvr() >> 16;
 
 #ifdef INVARIANTS
 	if ((msr & PSL_EE) != PSL_EE) {
@@ -775,9 +918,25 @@ cpu_idle(int busy)
 	}
 #endif
 	if (powerpc_pow_enabled) {
-		powerpc_sync();
-		mtmsr(msr | PSL_POW);
-		isync();
+		switch (vers) {
+		case IBM970:
+		case IBM970FX:
+		case IBM970MP:
+		case MPC7447A:
+		case MPC7448:
+		case MPC7450:
+		case MPC7455:
+		case MPC7457:
+			__asm __volatile("\
+			    dssall; sync; mtmsr %0; isync"
+			    :: "r"(msr | PSL_POW));
+			break;
+		default:
+			powerpc_sync();
+			mtmsr(msr | PSL_POW);
+			isync();
+			break;
+		}
 	}
 }
 
@@ -792,7 +951,7 @@ cpu_idle_wakeup(int cpu)
  * Set set up registers on exec.
  */
 void
-exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
+exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe	*tf;
 	struct ps_strings	arginfo;
@@ -836,7 +995,7 @@ exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
 	tf->fixreg[7] = 0;			/* termination vector */
 	tf->fixreg[8] = (register_t)PS_STRINGS;	/* NetBSD extension */
 
-	tf->srr0 = entry;
+	tf->srr0 = imgp->entry_addr;
 	tf->srr1 = PSL_MBO | PSL_USERSET | PSL_FE_DFLT;
 	td->td_pcb->pcb_flags = 0;
 }

@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_socket.c,v 1.16 2008/09/30 23:45:22 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_socket.c,v 1.17 2010/02/24 10:16:18 np Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -61,7 +61,6 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_socket.c,v 1.16 2008/09/30
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 
-#include <cxgb_config.h>
 #include <cxgb_osdep.h>
 #include <sys/mbufq.h>
 #include <ulp/tom/cxgb_tcp_offload.h>

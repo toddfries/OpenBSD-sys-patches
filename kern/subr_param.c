@@ -35,11 +35,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.85 2009/03/09 19:35:20 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.94 2010/03/02 23:57:42 ivoras Exp $");
 
 #include "opt_param.h"
 #include "opt_maxusers.h"
 
+#include <sys/limits.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -58,7 +59,7 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.85 2009/03/09 19:35:20 jhb Exp
 #    define	HZ 100
 #  endif
 #  ifndef HZ_VM
-#    define	HZ_VM 10
+#    define	HZ_VM 100
 #  endif
 #else
 #  ifndef HZ_VM
@@ -73,10 +74,6 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.85 2009/03/09 19:35:20 jhb Exp
 #define	MAXFILES (maxproc * 2)
 #endif
 
-/* Values of enum VM_GUEST members are used as indices in 
- * vm_guest_sysctl_names */
-enum VM_GUEST { VM_GUEST_NO = 0, VM_GUEST_VM, VM_GUEST_XEN };
-
 static int sysctl_kern_vm_guest(SYSCTL_HANDLER_ARGS);
 
 int	hz;
@@ -88,10 +85,11 @@ int	maxfiles;			/* sys. wide open files limit */
 int	maxfilesperproc;		/* per-proc open files limit */
 int	ncallout;			/* maximum # of timer events */
 int	nbuf;
+int	ngroups_max;			/* max # groups per process */
 int	nswbuf;
 long	maxswzone;			/* max swmeta KVA storage */
 long	maxbcache;			/* max buffer cache KVA storage */
-u_long	maxpipekva;			/* Limit on pipe KVA */
+long	maxpipekva;			/* Limit on pipe KVA */
 int 	vm_guest;			/* Running as virtual machine guest? */
 u_long	maxtsiz;			/* max text size */
 u_long	dfldsiz;			/* initial data size limit */
@@ -100,26 +98,33 @@ u_long	dflssiz;			/* initial stack size limit */
 u_long	maxssiz;			/* max stack size */
 u_long	sgrowsiz;			/* amount to grow stack */
 
-SYSCTL_INT(_kern, OID_AUTO, hz, CTLFLAG_RDTUN, &hz, 0, "ticks/second");
-SYSCTL_INT(_kern, OID_AUTO, maxswzone, CTLFLAG_RDTUN, &maxswzone, 0,
-    "max swmeta KVA storage");
-SYSCTL_INT(_kern, OID_AUTO, maxbcache, CTLFLAG_RDTUN, &maxbcache, 0,
-    "max buffer cache KVA storage");
+SYSCTL_INT(_kern, OID_AUTO, hz, CTLFLAG_RDTUN, &hz, 0,
+    "Number of clock ticks per second");
+SYSCTL_INT(_kern, OID_AUTO, ncallout, CTLFLAG_RDTUN, &ncallout, 0,
+    "Number of pre-allocated timer events");
+SYSCTL_INT(_kern, OID_AUTO, nbuf, CTLFLAG_RDTUN, &nbuf, 0,
+    "Number of buffers in the buffer cache");
+SYSCTL_INT(_kern, OID_AUTO, nswbuf, CTLFLAG_RDTUN, &nswbuf, 0,
+    "Number of swap buffers");
+SYSCTL_LONG(_kern, OID_AUTO, maxswzone, CTLFLAG_RDTUN, &maxswzone, 0,
+    "Maximum memory for swap metadata");
+SYSCTL_LONG(_kern, OID_AUTO, maxbcache, CTLFLAG_RDTUN, &maxbcache, 0,
+    "Maximum value of vfs.maxbufspace");
 SYSCTL_ULONG(_kern, OID_AUTO, maxtsiz, CTLFLAG_RDTUN, &maxtsiz, 0,
-    "max text size");
+    "Maximum text size");
 SYSCTL_ULONG(_kern, OID_AUTO, dfldsiz, CTLFLAG_RDTUN, &dfldsiz, 0,
-    "initial data size limit");
+    "Initial data size limit");
 SYSCTL_ULONG(_kern, OID_AUTO, maxdsiz, CTLFLAG_RDTUN, &maxdsiz, 0,
-    "max data size");
+    "Maximum data size");
 SYSCTL_ULONG(_kern, OID_AUTO, dflssiz, CTLFLAG_RDTUN, &dflssiz, 0,
-    "initial stack size limit");
+    "Initial stack size limit");
 SYSCTL_ULONG(_kern, OID_AUTO, maxssiz, CTLFLAG_RDTUN, &maxssiz, 0,
-    "max stack size");
+    "Maximum stack size");
 SYSCTL_ULONG(_kern, OID_AUTO, sgrowsiz, CTLFLAG_RDTUN, &sgrowsiz, 0,
-    "amount to grow stack");
+    "Amount to grow stack on a stack fault");
 SYSCTL_PROC(_kern, OID_AUTO, vm_guest, CTLFLAG_RD | CTLTYPE_STRING,
     NULL, 0, sysctl_kern_vm_guest, "A",
-    "Virtual machine detected? (none|generic|xen)");
+    "Virtual machine guest detected? (none|generic|xen)");
 
 /*
  * These have to be allocated somewhere; allocating
@@ -128,6 +133,10 @@ SYSCTL_PROC(_kern, OID_AUTO, vm_guest, CTLFLAG_RD | CTLTYPE_STRING,
  */
 struct	buf *swbuf;
 
+/*
+ * The elements of this array are ordered based upon the values of the
+ * corresponding enum VM_GUEST members.
+ */
 static const char *const vm_guest_sysctl_names[] = {
 	"none",
 	"generic",
@@ -221,6 +230,16 @@ init_param1(void)
 	TUNABLE_ULONG_FETCH("kern.maxssiz", &maxssiz);
 	sgrowsiz = SGROWSIZ;
 	TUNABLE_ULONG_FETCH("kern.sgrowsiz", &sgrowsiz);
+
+	/*
+	 * Let the administrator set {NGROUPS_MAX}, but disallow values
+	 * less than NGROUPS_MAX which would violate POSIX.1-2008 or
+	 * greater than INT_MAX-1 which would result in overflow.
+	 */
+	ngroups_max = NGROUPS_MAX;
+	TUNABLE_INT_FETCH("kern.ngroups", &ngroups_max);
+	if (ngroups_max < NGROUPS_MAX)
+		ngroups_max = NGROUPS_MAX;
 }
 
 /*
@@ -282,7 +301,7 @@ init_param3(long kmempages)
 	maxpipekva = (kmempages / 20) * PAGE_SIZE;
 	if (maxpipekva < 512 * 1024)
 		maxpipekva = 512 * 1024;
-	TUNABLE_ULONG_FETCH("kern.ipc.maxpipekva", &maxpipekva);
+	TUNABLE_LONG_FETCH("kern.ipc.maxpipekva", &maxpipekva);
 }
 
 /*

@@ -14,13 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/controller/uhci_pci.c,v 1.2 2009/03/09 13:23:54 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/controller/uhci_pci.c,v 1.15 2010/03/03 10:18:03 joel Exp $");
 
 /* Universal Host Controller Interface
  *
@@ -48,14 +41,32 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/controller/uhci_pci.c,v 1.2 2009/03/09 13:23
  * sharing of code between *BSD's
  */
 
-#include <dev/usb/usb_mfunc.h>
-#include <dev/usb/usb_defs.h>
+#include <sys/stdint.h>
+#include <sys/stddef.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/bus.h>
+#include <sys/linker_set.h>
+#include <sys/module.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+#include <sys/sysctl.h>
+#include <sys/sx.h>
+#include <sys/unistd.h>
+#include <sys/callout.h>
+#include <sys/malloc.h>
+#include <sys/priv.h>
+
 #include <dev/usb/usb.h>
+#include <dev/usb/usbdi.h>
 
 #include <dev/usb/usb_core.h>
 #include <dev/usb/usb_busdma.h>
 #include <dev/usb/usb_process.h>
-#include <dev/usb/usb_sw_transfer.h>
 #include <dev/usb/usb_util.h>
 #include <dev/usb/usb_debug.h>
 
@@ -63,13 +74,12 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/controller/uhci_pci.c,v 1.2 2009/03/09 13:23
 #include <dev/usb/usb_bus.h>
 #include <dev/usb/usb_pci.h>
 #include <dev/usb/controller/uhci.h>
+#include <dev/usb/controller/uhcireg.h>
 
 #define	PCI_UHCI_VENDORID_INTEL		0x8086
 #define	PCI_UHCI_VENDORID_VIA		0x1106
 
 /* PIIX4E has no separate stepping */
-
-#define	PCI_UHCI_BASE_REG               0x20
 
 static device_probe_t uhci_pci_probe;
 static device_attach_t uhci_pci_attach;
@@ -182,6 +192,15 @@ uhci_pci_match(device_t self)
 	case 0x265b8086:
 		return ("Intel 82801FB/FR/FW/FRW (ICH6) USB controller USB-D");
 
+	case 0x27c88086:
+		return ("Intel 82801G (ICH7) USB controller USB-A");
+	case 0x27c98086:
+		return ("Intel 82801G (ICH7) USB controller USB-B");
+	case 0x27ca8086:
+		return ("Intel 82801G (ICH7) USB controller USB-C");
+	case 0x27cb8086:
+		return ("Intel 82801G (ICH7) USB controller USB-D");
+
 	case 0x28308086:
 		return ("Intel 82801H (ICH8) USB controller USB-A");
 	case 0x28318086:
@@ -204,6 +223,18 @@ uhci_pci_match(device_t self)
 		return ("Intel 82801I (ICH9) USB controller");
 	case 0x29398086:
 		return ("Intel 82801I (ICH9) USB controller");
+	case 0x3a348086:
+		return ("Intel 82801JI (ICH10) USB controller USB-A");
+	case 0x3a358086:
+		return ("Intel 82801JI (ICH10) USB controller USB-B");
+	case 0x3a368086:
+		return ("Intel 82801JI (ICH10) USB controller USB-C");
+	case 0x3a378086:
+		return ("Intel 82801JI (ICH10) USB controller USB-D");
+	case 0x3a388086:
+		return ("Intel 82801JI (ICH10) USB controller USB-E");
+	case 0x3a398086:
+		return ("Intel 82801JI (ICH10) USB controller USB-F");
 
 	case 0x719a8086:
 		return ("Intel 82443MX USB controller");
@@ -252,7 +283,7 @@ uhci_pci_attach(device_t self)
 	sc->sc_bus.devices_max = UHCI_MAX_DEVICES;
 
 	/* get all DMA memory */
-	if (usb2_bus_mem_alloc_all(&sc->sc_bus, USB_GET_DMA_TAG(self),
+	if (usb_bus_mem_alloc_all(&sc->sc_bus, USB_GET_DMA_TAG(self),
 	    &uhci_iterate_hw_softc)) {
 		return ENOMEM;
 	}
@@ -324,10 +355,10 @@ uhci_pci_attach(device_t self)
 
 #if (__FreeBSD_version >= 700031)
 	err = bus_setup_intr(self, sc->sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
-	    NULL, (void *)(void *)uhci_interrupt, sc, &sc->sc_intr_hdl);
+	    NULL, (driver_intr_t *)uhci_interrupt, sc, &sc->sc_intr_hdl);
 #else
 	err = bus_setup_intr(self, sc->sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
-	    (void *)(void *)uhci_interrupt, sc, &sc->sc_intr_hdl);
+	    (driver_intr_t *)uhci_interrupt, sc, &sc->sc_intr_hdl);
 #endif
 
 	if (err) {
@@ -341,7 +372,7 @@ uhci_pci_attach(device_t self)
 	 * that the BIOS won't touch the keyboard anymore if it is connected
 	 * to the ports of the root hub?
 	 */
-#if USB_DEBUG
+#ifdef USB_DEBUG
 	if (pci_read_config(self, PCI_LEGSUP, 2) != PCI_LEGSUP_USBPIRQDEN) {
 		device_printf(self, "LegSup = 0x%04x\n",
 		    pci_read_config(self, PCI_LEGSUP, 2));
@@ -411,7 +442,7 @@ uhci_pci_detach(device_t self)
 		    sc->sc_io_res);
 		sc->sc_io_res = NULL;
 	}
-	usb2_bus_mem_free_all(&sc->sc_bus, &uhci_iterate_hw_softc);
+	usb_bus_mem_free_all(&sc->sc_bus, &uhci_iterate_hw_softc);
 
 	return (0);
 }

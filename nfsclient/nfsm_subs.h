@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)nfsm_subs.h	8.2 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/nfsclient/nfsm_subs.h,v 1.38 2008/02/13 00:04:58 jhb Exp $
+ * $FreeBSD: src/sys/nfsclient/nfsm_subs.h,v 1.40 2009/06/30 19:03:27 dfr Exp $
  */
 
 #ifndef _NFSCLIENT_NFSM_SUBS_H_
@@ -54,10 +54,6 @@ struct vnode;
  */
 u_int32_t nfs_xid_gen(void);
 struct mbuf *nfsm_reqhead(struct vnode *vp, u_long procid, int hsiz);
-struct mbuf *nfsm_rpchead(struct ucred *cr, int nmflag, int procid,
-			  int auth_type, int auth_len,
-			  struct mbuf *mrest, int mrest_len,
-			  struct mbuf **mbp, u_int32_t **xidpp);
 
 #define	M_HASCL(m)	((m)->m_flags & M_EXT)
 #define	NFSMINOFF(m) \
@@ -139,17 +135,6 @@ do { \
 	nfs_set_sigmask(p, &oldset); \
 	error = nfs_request((v), mreq, (t), (p), (c), &mrep, &md, &dpos); \
 	nfs_restore_sigmask(p, &oldset); \
-	if (error != 0) { \
-		if (error & NFSERR_RETERR) \
-			error &= ~NFSERR_RETERR; \
-		else \
-			goto nfsmout; \
-	} \
-} while (0)
-
-#define	nfsm_request_mnt(n, t, p, c) \
-do { \
-	error = nfs4_request_mnt((n), mreq, (t), (p), (c), &mrep, &md, &dpos); \
 	if (error != 0) { \
 		if (error & NFSERR_RETERR) \
 			error &= ~NFSERR_RETERR; \

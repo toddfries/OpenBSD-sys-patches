@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/isa/pnp.c,v 1.22 2008/11/02 18:48:54 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/isa/pnp.c,v 1.23 2010/01/07 21:01:37 mbr Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -480,7 +480,7 @@ pnp_create_devices(device_t parent, pnp_id *p, int csn,
 		}
 		resinfo = resp;
 		resp += PNP_SRES_LEN(tag);
-		scanning -= PNP_SRES_LEN(tag);;
+		scanning -= PNP_SRES_LEN(tag);
 			
 		switch (PNP_SRES_NUM(tag)) {
 		case PNP_TAG_LOGICAL_DEVICE:

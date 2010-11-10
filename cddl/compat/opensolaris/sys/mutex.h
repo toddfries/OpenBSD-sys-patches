@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/mutex.h,v 1.5 2008/03/28 22:16:06 jb Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/mutex.h,v 1.8 2009/08/23 11:22:46 pjd Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_MUTEX_H_
@@ -32,9 +32,9 @@
 #ifdef _KERNEL
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/lock.h>
 #include_next <sys/mutex.h>
+#include <sys/proc.h>
 #include <sys/sx.h>
 
 typedef enum {

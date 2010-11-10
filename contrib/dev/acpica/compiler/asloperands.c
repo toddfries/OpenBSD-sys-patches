@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: asloperands - AML operand processing
- *              $Revision: 1.61 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -118,7 +117,7 @@
 
 #include <contrib/dev/acpica/compiler/aslcompiler.h>
 #include "aslcompiler.y.h"
-#include <contrib/dev/acpica/amlcode.h>
+#include <contrib/dev/acpica/include/amlcode.h>
 
 #define _COMPONENT          ACPI_COMPILER
         ACPI_MODULE_NAME    ("asloperands")
@@ -605,7 +604,7 @@ OpnDoRegion (
     }
     else
     {
-        Op->Asl.Value.Integer = ACPI_INTEGER_MAX;
+        Op->Asl.Value.Integer = ACPI_UINT64_MAX;
     }
 }
 
@@ -789,20 +788,30 @@ OpnDoPackage (
     if ((PackageLengthOp->Asl.ParseOpcode == PARSEOP_INTEGER)      ||
         (PackageLengthOp->Asl.ParseOpcode == PARSEOP_QWORDCONST))
     {
-        if (PackageLengthOp->Asl.Value.Integer >= PackageLength)
+        if (PackageLengthOp->Asl.Value.Integer > PackageLength)
         {
-            /* Allow package to be longer than the initializer list */
+            /*
+             * Allow package length to be longer than the initializer
+             * list -- but if the length of initializer list is nonzero,
+             * issue a message since this is probably a coding error,
+             * even though technically legal.
+             */
+            if (PackageLength > 0)
+            {
+                AslError (ASL_REMARK, ASL_MSG_LIST_LENGTH_SHORT,
+                    PackageLengthOp, NULL);
+            }
 
             PackageLength = (UINT32) PackageLengthOp->Asl.Value.Integer;
         }
-        else
+        else if (PackageLengthOp->Asl.Value.Integer < PackageLength)
         {
             /*
-             * Initializer list is longer than the package length. This
-             * is an error as per the ACPI spec.
+             * The package length is smaller than the length of the
+             * initializer list. This is an error as per the ACPI spec.
              */
-            AslError (ASL_ERROR, ASL_MSG_LIST_LENGTH,
-                PackageLengthOp->Asl.Next, NULL);
+            AslError (ASL_ERROR, ASL_MSG_LIST_LENGTH_LONG,
+                PackageLengthOp, NULL);
         }
     }
 
@@ -948,7 +957,8 @@ OpnDoDefinitionBlock (
 {
     ACPI_PARSE_OBJECT       *Child;
     ACPI_SIZE               Length;
-    ACPI_NATIVE_UINT        i;
+    UINT32                  i;
+    char                    *Filename;
 
 
     /*
@@ -966,7 +976,19 @@ OpnDoDefinitionBlock (
         *Child->Asl.Value.Buffer &&
         (Gbl_UseDefaultAmlFilename))
     {
-        Gbl_OutputFilenamePrefix = (char *) Child->Asl.Value.Buffer;
+        /*
+         * We will use the AML filename that is embedded in the source file
+         * for the output filename.
+         */
+        Filename = ACPI_ALLOCATE (strlen (Gbl_DirectoryPath) +
+                    strlen ((char *) Child->Asl.Value.Buffer) + 1);
+
+        /* Prepend the current directory path */
+
+        strcpy (Filename, Gbl_DirectoryPath);
+        strcat (Filename, (char *) Child->Asl.Value.Buffer);
+
+        Gbl_OutputFilenamePrefix = Filename;
     }
     Child->Asl.ParseOpcode = PARSEOP_DEFAULT_ARG;
 
@@ -985,7 +1007,7 @@ OpnDoDefinitionBlock (
 
         for (i = 0; i < 4; i++)
         {
-            if (!isalnum (Gbl_TableSignature[i]))
+            if (!isalnum ((int) Gbl_TableSignature[i]))
             {
                 AslError (ASL_ERROR, ASL_MSG_TABLE_SIGNATURE, Child,
                     "Contains non-alphanumeric characters");

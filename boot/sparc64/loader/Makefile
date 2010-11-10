@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.22 2009/02/21 15:04:31 ru Exp $
+# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.23 2010/01/09 21:23:39 marius Exp $
 
 .include <bsd.own.mk>
 MK_SSP=		no
@@ -51,11 +51,15 @@ CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/sparc64
 LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
 .endif
 
-# Always add MI sources 
+# Always add MI sources
 .PATH:		${.CURDIR}/../../common
 .include	"${.CURDIR}/../../common/Makefile.inc"
 CFLAGS+=	-I${.CURDIR}/../../common
 CFLAGS+=	-I.
+# Avoid the open-close-dance for every file access as some firmwares perform
+# an auto-negotiation on every open of the network interface and thus causes
+# netbooting to take horribly long.
+CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE
 
 CLEANFILES+=	vers.c loader.help
 

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.169 2008/09/23 14:25:56 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.177 2010/06/10 16:14:05 mav Exp $");
 
 #include "opt_ddb.h"
 
@@ -43,6 +43,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.169 2008/09/23 14:25:56 obrien 
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
+#include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/resourcevar.h>
@@ -304,9 +305,14 @@ intr_event_bind(struct intr_event *ie, u_char cpu)
 
 	if (ie->ie_assign_cpu == NULL)
 		return (EOPNOTSUPP);
+
+	error = priv_check(curthread, PRIV_SCHED_CPUSET_INTR);
+	if (error)
+		return (error);
+
 	/*
-	 * If we have any ithreads try to set their mask first since this
-	 * can fail.
+	 * If we have any ithreads try to set their mask first to verify
+	 * permissions, etc.
 	 */
 	mtx_lock(&ie->ie_lock);
 	if (ie->ie_thread != NULL) {
@@ -323,8 +329,22 @@ intr_event_bind(struct intr_event *ie, u_char cpu)
 	} else
 		mtx_unlock(&ie->ie_lock);
 	error = ie->ie_assign_cpu(ie->ie_source, cpu);
-	if (error)
+	if (error) {
+		mtx_lock(&ie->ie_lock);
+		if (ie->ie_thread != NULL) {
+			CPU_ZERO(&mask);
+			if (ie->ie_cpu == NOCPU)
+				CPU_COPY(cpuset_root, &mask);
+			else
+				CPU_SET(cpu, &mask);
+			id = ie->ie_thread->it_thread->td_tid;
+			mtx_unlock(&ie->ie_lock);
+			(void)cpuset_setthread(id, &mask);
+		} else
+			mtx_unlock(&ie->ie_lock);
 		return (error);
+	}
+
 	mtx_lock(&ie->ie_lock);
 	ie->ie_cpu = cpu;
 	mtx_unlock(&ie->ie_lock);
@@ -373,8 +393,7 @@ intr_setaffinity(int irq, void *m)
 	ie = intr_lookup(irq);
 	if (ie == NULL)
 		return (ESRCH);
-	intr_event_bind(ie, cpu);
-	return (0);
+	return (intr_event_bind(ie, cpu));
 }
 
 int
@@ -505,7 +524,7 @@ intr_event_add_handler(struct intr_event *ie, const char *name,
 	ih->ih_filter = filter;
 	ih->ih_handler = handler;
 	ih->ih_argument = arg;
-	ih->ih_name = name;
+	strlcpy(ih->ih_name, name, sizeof(ih->ih_name));
 	ih->ih_event = ie;
 	ih->ih_pri = pri;
 	if (flags & INTR_EXCL)
@@ -578,7 +597,7 @@ intr_event_add_handler(struct intr_event *ie, const char *name,
 	ih->ih_filter = filter;
 	ih->ih_handler = handler;
 	ih->ih_argument = arg;
-	ih->ih_name = name;
+	strlcpy(ih->ih_name, name, sizeof(ih->ih_name));
 	ih->ih_event = ie;
 	ih->ih_pri = pri;
 	if (flags & INTR_EXCL)
@@ -644,6 +663,61 @@ intr_event_add_handler(struct intr_event *ie, const char *name,
 	return (0);
 }
 #endif
+
+/*
+ * Append a description preceded by a ':' to the name of the specified
+ * interrupt handler.
+ */
+int
+intr_event_describe_handler(struct intr_event *ie, void *cookie,
+    const char *descr)
+{
+	struct intr_handler *ih;
+	size_t space;
+	char *start;
+
+	mtx_lock(&ie->ie_lock);
+#ifdef INVARIANTS
+	TAILQ_FOREACH(ih, &ie->ie_handlers, ih_next) {
+		if (ih == cookie)
+			break;
+	}
+	if (ih == NULL) {
+		mtx_unlock(&ie->ie_lock);
+		panic("handler %p not found in interrupt event %p", cookie, ie);
+	}
+#endif
+	ih = cookie;
+
+	/*
+	 * Look for an existing description by checking for an
+	 * existing ":".  This assumes device names do not include
+	 * colons.  If one is found, prepare to insert the new
+	 * description at that point.  If one is not found, find the
+	 * end of the name to use as the insertion point.
+	 */
+	start = index(ih->ih_name, ':');
+	if (start == NULL)
+		start = index(ih->ih_name, 0);
+
+	/*
+	 * See if there is enough remaining room in the string for the
+	 * description + ":".  The "- 1" leaves room for the trailing
+	 * '\0'.  The "+ 1" accounts for the colon.
+	 */
+	space = sizeof(ih->ih_name) - (start - ih->ih_name) - 1;
+	if (strlen(descr) + 1 > space) {
+		mtx_unlock(&ie->ie_lock);
+		return (ENOSPC);
+	}
+
+	/* Append a colon followed by the description. */
+	*start = ':';
+	strcpy(start + 1, descr);
+	intr_event_update(ie);
+	mtx_unlock(&ie->ie_lock);
+	return (0);
+}
 
 /*
  * Return the ie_source field from the intr_event an intr_handler is
@@ -968,6 +1042,18 @@ intr_event_schedule_thread(struct intr_event *ie, struct intr_thread *it)
 #endif
 
 /*
+ * Allow interrupt event binding for software interrupt handlers -- a no-op,
+ * since interrupts are generated in software rather than being directed by
+ * a PIC.
+ */
+static int
+swi_assign_cpu(void *arg, u_char cpu)
+{
+
+	return (0);
+}
+
+/*
  * Add a software interrupt handler to a specified event.  If a given event
  * is not specified, then a new event is created.
  */
@@ -975,6 +1061,7 @@ int
 swi_add(struct intr_event **eventp, const char *name, driver_intr_t handler,
 	    void *arg, int pri, enum intr_type flags, void **cookiep)
 {
+	struct thread *td;
 	struct intr_event *ie;
 	int error;
 
@@ -988,7 +1075,7 @@ swi_add(struct intr_event **eventp, const char *name, driver_intr_t handler,
 			return (EINVAL);
 	} else {
 		error = intr_event_create(&ie, NULL, IE_SOFT, 0,
-		    NULL, NULL, NULL, NULL, "swi%d:", pri);
+		    NULL, NULL, NULL, swi_assign_cpu, "swi%d:", pri);
 		if (error)
 			return (error);
 		if (eventp != NULL)
@@ -999,11 +1086,10 @@ swi_add(struct intr_event **eventp, const char *name, driver_intr_t handler,
 	if (error)
 		return (error);
 	if (pri == SWI_CLOCK) {
-		struct proc *p;
-		p = ie->ie_thread->it_thread->td_proc;
-		PROC_LOCK(p);
-		p->p_flag |= P_NOLOAD;
-		PROC_UNLOCK(p);
+		td = ie->ie_thread->it_thread;
+		thread_lock(td);
+		td->td_flags |= TDF_NOLOAD;
+		thread_unlock(td);
 	}
 	return (0);
 }
@@ -1261,6 +1347,7 @@ int
 intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 {
 	struct intr_handler *ih;
+	struct trapframe *oldframe;
 	struct thread *td;
 	int error, ret, thread;
 
@@ -1280,6 +1367,8 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 	thread = 0;
 	ret = 0;
 	critical_enter();
+	oldframe = td->td_intr_frame;
+	td->td_intr_frame = frame;
 	TAILQ_FOREACH(ih, &ie->ie_handlers, ih_next) {
 		if (ih->ih_filter == NULL) {
 			thread = 1;
@@ -1292,6 +1381,12 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 			ret = ih->ih_filter(frame);
 		else
 			ret = ih->ih_filter(ih->ih_argument);
+		KASSERT(ret == FILTER_STRAY ||
+		    ((ret & (FILTER_SCHEDULE_THREAD | FILTER_HANDLED)) != 0 &&
+		    (ret & ~(FILTER_SCHEDULE_THREAD | FILTER_HANDLED)) == 0),
+		    ("%s: incorrect return value %#x from %s", __func__, ret,
+		    ih->ih_name));
+
 		/* 
 		 * Wrapper handler special handling:
 		 *
@@ -1311,6 +1406,7 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 				thread = 1;
 		}
 	}
+	td->td_intr_frame = oldframe;
 
 	if (thread) {
 		if (ie->ie_pre_ithread != NULL)
@@ -1460,7 +1556,11 @@ intr_filter_loop(struct intr_event *ie, struct trapframe *frame,
 			thread_only = 1;
 			continue;
 		}
-
+		KASSERT(ret == FILTER_STRAY ||
+		    ((ret & (FILTER_SCHEDULE_THREAD | FILTER_HANDLED)) != 0 &&
+		    (ret & ~(FILTER_SCHEDULE_THREAD | FILTER_HANDLED)) == 0),
+		    ("%s: incorrect return value %#x from %s", __func__, ret,
+		    ih->ih_name));
 		if (ret & FILTER_STRAY)
 			continue;
 		else { 
@@ -1496,6 +1596,7 @@ int
 intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 {
 	struct intr_thread *ithd;
+	struct trapframe *oldframe;
 	struct thread *td;
 	int thread;
 
@@ -1508,6 +1609,8 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 	td->td_intr_nesting_level++;
 	thread = 0;
 	critical_enter();
+	oldframe = td->td_intr_frame;
+	td->td_intr_frame = frame;
 	thread = intr_filter_loop(ie, frame, &ithd);	
 	if (thread & FILTER_HANDLED) {
 		if (ie->ie_post_filter != NULL)
@@ -1516,6 +1619,7 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 		if (ie->ie_pre_ithread != NULL)
 			ie->ie_pre_ithread(ie->ie_source);
 	}
+	td->td_intr_frame = oldframe;
 	critical_exit();
 	
 	/* Interrupt storm logic */

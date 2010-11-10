@@ -46,7 +46,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.32 2009/02/12 22:55:39 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.38 2010/11/05 13:42:58 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -67,6 +67,7 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.32 2009/02/12 22:55:39 cognet 
 #include <sys/pcpu.h>
 #include <sys/ptrace.h>
 #include <sys/signalvar.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/uio.h>
@@ -77,7 +78,6 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.32 2009/02/12 22:55:39 cognet 
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
-#include <vm/vnode_pager.h>
 
 #include <machine/armreg.h>
 #include <machine/cpu.h>
@@ -316,6 +316,18 @@ cpu_startup(void *dummy)
 
 SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL);
 
+/*
+ * Flush the D-cache for non-DMA I/O so that the I-cache can
+ * be made coherent later.
+ */
+void
+cpu_flush_dcache(void *ptr, size_t len)
+{
+
+	cpu_dcache_wb_range((uintptr_t)ptr, len);
+	cpu_l2cache_wb_range((uintptr_t)ptr, len);
+}
+
 /* Get current clock frequency for the given cpu id. */
 int
 cpu_est_clockrate(int cpu_id, uint64_t *rate)
@@ -481,11 +493,15 @@ void
 spinlock_enter(void)
 {
 	struct thread *td;
+	register_t cspr;
 
 	td = curthread;
-	if (td->td_md.md_spinlock_count == 0)
-		td->td_md.md_saved_cspr = disable_interrupts(I32_bit | F32_bit);
-	td->td_md.md_spinlock_count++;
+	if (td->td_md.md_spinlock_count == 0) {
+		cspr = disable_interrupts(I32_bit | F32_bit);
+		td->td_md.md_spinlock_count = 1;
+		td->td_md.md_saved_cspr = cspr;
+	} else
+		td->td_md.md_spinlock_count++;
 	critical_enter();
 }
 
@@ -493,27 +509,29 @@ void
 spinlock_exit(void)
 {
 	struct thread *td;
+	register_t cspr;
 
 	td = curthread;
 	critical_exit();
+	cspr = td->td_md.md_saved_cspr;
 	td->td_md.md_spinlock_count--;
 	if (td->td_md.md_spinlock_count == 0)
-		restore_interrupts(td->td_md.md_saved_cspr);
+		restore_interrupts(cspr);
 }
 
 /*
  * Clear registers on exec
  */
 void
-exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
+exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *tf = td->td_frame;
 
 	memset(tf, 0, sizeof(*tf));
 	tf->tf_usr_sp = stack;
-	tf->tf_usr_lr = entry;
+	tf->tf_usr_lr = imgp->entry_addr;
 	tf->tf_svc_lr = 0x77777777;
-	tf->tf_pc = entry;
+	tf->tf_pc = imgp->entry_addr;
 	tf->tf_spsr = PSR_USR32_MODE;
 }
 
@@ -593,7 +611,6 @@ sigreturn(td, uap)
 		const struct __ucontext *sigcntxp;
 	} */ *uap;
 {
-	struct proc *p = td->td_proc;
 	struct sigframe sf;
 	struct trapframe *tf;
 	int spsr;
@@ -615,11 +632,7 @@ sigreturn(td, uap)
 	set_mcontext(td, &sf.sf_uc.uc_mcontext);
 
 	/* Restore signal mask. */
-	PROC_LOCK(p);
-	td->td_sigmask = sf.sf_uc.uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &sf.sf_uc.uc_sigmask, NULL, 0);
 
 	return (EJUSTRETURN);
 }

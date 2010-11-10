@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/stack_protector.c,v 1.2 2008/06/26 07:52:45 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/stack_protector.c,v 1.3 2009/10/20 16:36:51 ru Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -28,5 +28,4 @@ __stack_chk_init(void *dummy __unused)
 	for (i = 0; i < __arraycount(guard); i++)
 		__stack_chk_guard[i] = guard[i];
 }
-/* SI_SUB_EVENTHANDLER is right after SI_SUB_LOCK used by arc4rand() init. */
-SYSINIT(stack_chk, SI_SUB_EVENTHANDLER, SI_ORDER_ANY, __stack_chk_init, NULL);
+SYSINIT(stack_chk, SI_SUB_RANDOM, SI_ORDER_ANY, __stack_chk_init, NULL);

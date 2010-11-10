@@ -25,22 +25,46 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/clock.c,v 1.34 2008/04/22 19:38:28 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/clock.c,v 1.39 2010/03/26 02:29:15 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/bus.h>
+#include <sys/interrupt.h>
+#include <sys/priority.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
-#include <sys/bus.h>
 #include <sys/timetc.h>
 #include <sys/pcpu.h>
 
-#include <machine/clock.h>
 #include <machine/cpu.h>
 #include <machine/efi.h>
+#include <machine/intr.h>
+#include <machine/intrcnt.h>
+#include <machine/md_var.h>
+#include <machine/smp.h>
 
-uint64_t ia64_clock_reload;
+SYSCTL_NODE(_debug, OID_AUTO, clock, CTLFLAG_RW, 0, "clock statistics");
+
+static int adjust_edges = 0;
+SYSCTL_INT(_debug_clock, OID_AUTO, adjust_edges, CTLFLAG_RD,
+    &adjust_edges, 0, "Number of times ITC got more than 12.5% behind");
+
+static int adjust_excess = 0;
+SYSCTL_INT(_debug_clock, OID_AUTO, adjust_excess, CTLFLAG_RD,
+    &adjust_excess, 0, "Total number of ignored ITC interrupts");
+
+static int adjust_lost = 0;
+SYSCTL_INT(_debug_clock, OID_AUTO, adjust_lost, CTLFLAG_RD,
+    &adjust_lost, 0, "Total number of lost ITC interrupts");
+
+static int adjust_ticks = 0;
+SYSCTL_INT(_debug_clock, OID_AUTO, adjust_ticks, CTLFLAG_RD,
+    &adjust_ticks, 0, "Total number of ITC interrupts with adjustment");
+
+static u_int ia64_clock_xiv;
+static uint64_t ia64_clock_reload;
 
 #ifndef SMP
 static timecounter_get_t ia64_get_timecount;
@@ -53,44 +77,107 @@ static struct timecounter ia64_timecounter = {
 	"ITC"			/* name */
 };
 
-static unsigned
+static u_int
 ia64_get_timecount(struct timecounter* tc)
 {
 	return ia64_get_itc();
 }
 #endif
 
-void
-pcpu_initclock(void)
+static u_int
+ia64_ih_clock(struct thread *td, u_int xiv, struct trapframe *tf)
 {
+	uint64_t adj, clk, itc;
+	int64_t delta;
+	int count;
 
-	PCPU_SET(clockadj, 0);
-	PCPU_SET(clock, ia64_get_itc());
-	ia64_set_itm(PCPU_GET(clock) + ia64_clock_reload);
-	ia64_set_itv(CLOCK_VECTOR);	/* highest priority class */
-	ia64_srlz_d();
+	PCPU_INC(md.stats.pcs_nclks);
+
+	if (PCPU_GET(cpuid) == 0) {
+		/*
+		 * Clock processing on the BSP.
+		 */
+		intrcnt[INTRCNT_CLOCK]++;
+
+		itc = ia64_get_itc();
+
+		adj = PCPU_GET(md.clockadj);
+		clk = PCPU_GET(md.clock);
+
+		delta = itc - clk;
+		count = 0;
+		while (delta >= ia64_clock_reload) {
+#ifdef SMP
+			ipi_all_but_self(ia64_clock_xiv);
+#endif
+			hardclock(TRAPF_USERMODE(tf), TRAPF_PC(tf));
+			if (profprocs != 0)
+				profclock(TRAPF_USERMODE(tf), TRAPF_PC(tf));
+			statclock(TRAPF_USERMODE(tf));
+			delta -= ia64_clock_reload;
+			clk += ia64_clock_reload;
+			if (adj != 0)
+				adjust_ticks++;
+			count++;
+		}
+		ia64_set_itm(ia64_get_itc() + ia64_clock_reload - adj);
+		ia64_srlz_d();
+		if (count > 0) {
+			adjust_lost += count - 1;
+			if (delta > (ia64_clock_reload >> 3)) {
+				if (adj == 0)
+					adjust_edges++;
+				adj = ia64_clock_reload >> 4;
+			} else
+				adj = 0;
+		} else {
+			adj = 0;
+			adjust_excess++;
+		}
+		PCPU_SET(md.clock, clk);
+		PCPU_SET(md.clockadj, adj);
+	} else {
+		/*
+		 * Clock processing on the BSP.
+		 */
+		hardclock_cpu(TRAPF_USERMODE(tf));
+		if (profprocs != 0)
+			profclock(TRAPF_USERMODE(tf), TRAPF_PC(tf));
+		statclock(TRAPF_USERMODE(tf));
+	}
+
+	return (0);
 }
 
 /*
- * Start the real-time and statistics clocks. We use cr.itc and cr.itm
+ * Start the real-time and statistics clocks. We use ar.itc and cr.itm
  * to implement a 1000hz clock.
  */
 void
 cpu_initclocks()
 {
+	u_long itc_freq;
 
-	if (itc_frequency == 0)
-		panic("Unknown clock frequency");
+	ia64_clock_xiv = ia64_xiv_alloc(PI_REALTIME, IA64_XIV_IPI,
+	    ia64_ih_clock);
+	if (ia64_clock_xiv == 0)
+		panic("No XIV for clock interrupts");
+
+	itc_freq = (u_long)ia64_itc_freq() * 1000000ul;
 
 	stathz = hz;
-	ia64_clock_reload = (itc_frequency + hz/2) / hz;
+	ia64_clock_reload = (itc_freq + hz/2) / hz;
 
 #ifndef SMP
-	ia64_timecounter.tc_frequency = itc_frequency;
+	ia64_timecounter.tc_frequency = itc_freq;
 	tc_init(&ia64_timecounter);
 #endif
 
-	pcpu_initclock();
+	PCPU_SET(md.clockadj, 0);
+	PCPU_SET(md.clock, ia64_get_itc());
+	ia64_set_itm(PCPU_GET(md.clock) + ia64_clock_reload);
+	ia64_set_itv(ia64_clock_xiv);
+	ia64_srlz_d();
 }
 
 void

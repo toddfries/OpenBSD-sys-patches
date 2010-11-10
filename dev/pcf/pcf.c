@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pcf/pcf.c,v 1.27 2008/08/05 17:39:37 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pcf/pcf.c,v 1.28 2009/06/11 17:15:44 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -378,7 +378,7 @@ pcf_rst_card(device_t dev, u_char speed, u_char addr, u_char *oldaddr)
 }
 
 int
-pcf_write(device_t dev, char *buf, int len, int *sent, int timeout /* us */)
+pcf_write(device_t dev, const char *buf, int len, int *sent, int timeout /* us */)
 {
 	struct pcf_softc *sc = DEVTOSOFTC(dev);
 	int bytes, error = 0;

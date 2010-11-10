@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/i686_mem.c,v 1.30 2009/01/12 22:01:49 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/i686_mem.c,v 1.32 2010/01/31 14:35:49 rnoland Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -73,11 +73,13 @@ static void	i686_mrinit(struct mem_range_softc *sc);
 static int	i686_mrset(struct mem_range_softc *sc,
 		    struct mem_range_desc *mrd, int *arg);
 static void	i686_mrAPinit(struct mem_range_softc *sc);
+static void	i686_mrreinit(struct mem_range_softc *sc);
 
 static struct mem_range_ops i686_mrops = {
 	i686_mrinit,
 	i686_mrset,
-	i686_mrAPinit
+	i686_mrAPinit,
+	i686_mrreinit
 };
 
 /* XXX for AP startup hook */
@@ -668,6 +670,30 @@ i686_mrAPinit(struct mem_range_softc *sc)
 	wrmsr(MSR_MTRRdefType, mtrrdef);
 }
 
+/*
+ * Re-initialise running CPU(s) MTRRs to match the ranges in the descriptor
+ * list.
+ *
+ * XXX Must be called with interrupts enabled.
+ */
+static void
+i686_mrreinit(struct mem_range_softc *sc)
+{
+#ifdef SMP
+	/*
+	 * We should use ipi_all_but_self() to call other CPUs into a
+	 * locking gate, then call a target function to do this work.
+	 * The "proper" solution involves a generalised locking gate
+	 * implementation, not ready yet.
+	 */
+	smp_rendezvous(NULL, (void *)i686_mrAPinit, NULL, sc);
+#else
+	disable_intr();				/* disable interrupts */
+	i686_mrAPinit(sc);
+	enable_intr();
+#endif
+}
+
 static void
 i686_mem_drvinit(void *unused)
 {
@@ -681,11 +707,8 @@ i686_mem_drvinit(void *unused)
 	switch (cpu_vendor_id) {
 	case CPU_VENDOR_INTEL:
 	case CPU_VENDOR_AMD:
-		break;
 	case CPU_VENDOR_CENTAUR:
-		if (cpu_exthigh >= 0x80000008)
-			break;
-		/* FALLTHROUGH */
+		break;
 	default:
 		return;
 	}

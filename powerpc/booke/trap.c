@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/booke/trap.c,v 1.4 2009/02/27 12:08:24 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/booke/trap.c,v 1.7 2010/05/23 18:32:02 kib Exp $");
 
 #include "opt_fpu_emu.h"
 #include "opt_ktrace.h"
@@ -100,8 +100,6 @@ int	setfault(faultbuf);		/* defined in locore.S */
 /* Why are these not defined in a header? */
 int	badaddr(void *, size_t);
 int	badaddr_read(void *, size_t, int *);
-
-extern char	*syscallnames[];
 
 struct powerpc_exception {
 	u_int	vector;
@@ -324,160 +322,75 @@ handle_onfault(struct trapframe *frame)
 	return (0);
 }
 
-void
-syscall(struct trapframe *frame)
+int
+cpu_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
 {
-	caddr_t		params;
-	struct		sysent *callp;
-	struct		thread *td;
-	struct		proc *p;
-	int		error, n;
-	size_t		narg;
-	register_t	args[10];
-	u_int		code;
+	struct proc *p;
+	struct trapframe *frame;
+	caddr_t	params;
+	int error, n;
 
-	td = PCPU_GET(curthread);
 	p = td->td_proc;
+	frame = td->td_frame;
 
-	PCPU_INC(cnt.v_syscall);
-
-	code = frame->fixreg[0];
+	sa->code = frame->fixreg[0];
 	params = (caddr_t)(frame->fixreg + FIRSTARG);
 	n = NARGREG;
 
-	if (p->p_sysent->sv_prepsyscall) {
-		/*
-		 * The prep code is MP aware.
-		 */
-		(*p->p_sysent->sv_prepsyscall)(frame, args, &code, &params);
-	} else if (code == SYS_syscall) {
+	if (sa->code == SYS_syscall) {
 		/*
 		 * code is first argument,
 		 * followed by actual args.
 		 */
-		code = *(u_int *) params;
+		sa->code = *(u_int *) params;
 		params += sizeof(register_t);
 		n -= 1;
-	} else if (code == SYS___syscall) {
+	} else if (sa->code == SYS___syscall) {
 		/*
 		 * Like syscall, but code is a quad,
 		 * so as to maintain quad alignment
 		 * for the rest of the args.
 		 */
 		params += sizeof(register_t);
-		code = *(u_int *) params;
+		sa->code = *(u_int *) params;
 		params += sizeof(register_t);
 		n -= 2;
 	}
 
 	if (p->p_sysent->sv_mask)
-		code &= p->p_sysent->sv_mask;
-
-	if (code >= p->p_sysent->sv_size)
-		callp = &p->p_sysent->sv_table[0];
+		sa->code &= p->p_sysent->sv_mask;
+	if (sa->code >= p->p_sysent->sv_size)
+		sa->callp = &p->p_sysent->sv_table[0];
 	else
-		callp = &p->p_sysent->sv_table[code];
+		sa->callp = &p->p_sysent->sv_table[sa->code];
+	sa->narg = sa->callp->sy_narg;
 
-	narg = callp->sy_narg;
-
-	if (narg > n) {
-		bcopy(params, args, n * sizeof(register_t));
-		error = copyin(MOREARGS(frame->fixreg[1]), args + n,
-		    (narg - n) * sizeof(register_t));
-		params = (caddr_t)args;
+	bcopy(params, sa->args, n * sizeof(register_t));
+	if (sa->narg > n) {
+		error = copyin(MOREARGS(frame->fixreg[1]), sa->args + n,
+		    (sa->narg - n) * sizeof(register_t));
 	} else
 		error = 0;
-
-	CTR5(KTR_SYSC, "syscall: p=%s %s(%x %x %x)", p->p_comm,
-	     syscallnames[code],
-	     frame->fixreg[FIRSTARG],
-	     frame->fixreg[FIRSTARG+1],
-	     frame->fixreg[FIRSTARG+2]);
-
-#ifdef	KTRACE
-	if (KTRPOINT(td, KTR_SYSCALL))
-		ktrsyscall(code, narg, (register_t *)params);
-#endif
-
-	td->td_syscalls++;
 
 	if (error == 0) {
 		td->td_retval[0] = 0;
 		td->td_retval[1] = frame->fixreg[FIRSTARG + 1];
-
-		STOPEVENT(p, S_SCE, narg);
-
-		PTRACESTOP_SC(p, td, S_PT_SCE);
-
-		AUDIT_SYSCALL_ENTER(code, td);
-		error = (*callp->sy_call)(td, params);
-		AUDIT_SYSCALL_EXIT(error, td);
-
-		CTR3(KTR_SYSC, "syscall: p=%s %s ret=%x", p->p_comm,
-		     syscallnames[code], td->td_retval[0]);
 	}
+	return (error);
+}
 
-	switch (error) {
-	case 0:
-		if (frame->fixreg[0] == SYS___syscall && SYS_lseek) {
-			/*
-			 * 64-bit return, 32-bit syscall. Fixup byte order
-			 */
-			frame->fixreg[FIRSTARG] = 0;
-			frame->fixreg[FIRSTARG + 1] = td->td_retval[0];
-		} else {
-			frame->fixreg[FIRSTARG] = td->td_retval[0];
-			frame->fixreg[FIRSTARG + 1] = td->td_retval[1];
-		}
-		/* XXX: Magic number */
-		frame->cr &= ~0x10000000;
-		break;
-	case ERESTART:
-		/*
-		 * Set user's pc back to redo the system call.
-		 */
-		frame->srr0 -= 4;
-		break;
-	case EJUSTRETURN:
-		/* nothing to do */
-		break;
-	default:
-		if (p->p_sysent->sv_errsize) {
-			if (error >= p->p_sysent->sv_errsize)
-				error = -1;	/* XXX */
-			else
-				error = p->p_sysent->sv_errtbl[error];
-		}
-		frame->fixreg[FIRSTARG] = error;
-		/* XXX: Magic number: Carry Flag Equivalent? */
-		frame->cr |= 0x10000000;
-		break;
-	}
+void
+syscall(struct trapframe *frame)
+{
+	struct thread *td;
+	struct syscall_args sa;
+	int error;
 
-	/*
-	 * Check for misbehavior.
-	 */
-	WITNESS_WARN(WARN_PANIC, NULL, "System call %s returning",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???");
-	KASSERT(td->td_critnest == 0,
-	    ("System call %s returning in a critical section",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???"));
-	KASSERT(td->td_locks == 0,
-	    ("System call %s returning with %d locks held",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???",
-	    td->td_locks));
+	td = PCPU_GET(curthread);
+	td->td_frame = frame;
 
-#ifdef	KTRACE
-	if (KTRPOINT(td, KTR_SYSRET))
-		ktrsysret(code, error, td->td_retval[0]);
-#endif
-
-	/*
-	 * Does the comment in the i386 code about errno apply here?
-	 */
-	STOPEVENT(p, S_SCX, code);
-
-	PTRACESTOP_SC(p, td, S_PT_SCX);
+	error = syscallenter(td, &sa);
+	syscallret(td, error, &sa);
 }
 
 static int
@@ -532,8 +445,7 @@ trap_pfault(struct trapframe *frame, int user)
 		PROC_UNLOCK(p);
 
 		/* Fault in the user page: */
-		rv = vm_fault(map, va, ftype,
-		    (ftype & VM_PROT_WRITE) ? VM_FAULT_DIRTY : VM_FAULT_NORMAL);
+		rv = vm_fault(map, va, ftype, VM_FAULT_NORMAL);
 
 		PROC_LOCK(p);
 		--p->p_lock;

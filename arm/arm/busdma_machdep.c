@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/busdma_machdep.c,v 1.44 2009/02/09 18:03:31 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/busdma_machdep.c,v 1.50 2010/03/11 21:16:54 raj Exp $");
 
 /*
  * ARM bus dma support routines
@@ -114,7 +114,6 @@ struct bounce_zone {
 	int		total_deferred;
 	int		map_count;
 	bus_size_t	alignment;
-	bus_size_t	boundary;
 	bus_addr_t	lowaddr;
 	char		zoneid[8];
 	char		lowaddrid[20];
@@ -556,12 +555,12 @@ int
 bus_dmamap_destroy(bus_dma_tag_t dmat, bus_dmamap_t map)
 {
 
-	_busdma_free_dmamap(map);
 	if (STAILQ_FIRST(&map->bpages) != NULL) {
 		CTR3(KTR_BUSDMA, "%s: tag %p error %d",
 		    __func__, dmat, EBUSY);
 		return (EBUSY);
 	}
+	_busdma_free_dmamap(map);
 	if (dmat->bounce_zone)
 		dmat->bounce_zone->map_count--;
         dmat->map_count--;
@@ -631,10 +630,6 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 			    ((vm_offset_t)*vaddr & PAGE_MASK));
 			newmap->origbuffer = *vaddr;
 			newmap->allocbuffer = tmpaddr;
-			cpu_idcache_wbinv_range((vm_offset_t)*vaddr, 
-			    dmat->maxsize);
-			cpu_l2cache_wbinv_range((vm_offset_t)*vaddr,
-			    dmat->maxsize);
 			*vaddr = tmpaddr;
 		} else
 			newmap->origbuffer = newmap->allocbuffer = NULL;
@@ -654,7 +649,8 @@ bus_dmamem_free(bus_dma_tag_t dmat, void *vaddr, bus_dmamap_t map)
 		KASSERT(map->allocbuffer == vaddr,
 		    ("Trying to freeing the wrong DMA buffer"));
 		vaddr = map->origbuffer;
-		arm_unmap_nocache(map->allocbuffer, dmat->maxsize);
+		arm_unmap_nocache(map->allocbuffer,
+		    dmat->maxsize + ((vm_offset_t)vaddr & PAGE_MASK));
 	}
         if (dmat->maxsize <= PAGE_SIZE &&
 	   dmat->alignment < dmat->maxsize &&
@@ -669,8 +665,8 @@ bus_dmamem_free(bus_dma_tag_t dmat, void *vaddr, bus_dmamap_t map)
 }
 
 static int
-_bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
-			bus_size_t buflen, int flags)
+_bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, pmap_t pmap,
+    void *buf, bus_size_t buflen, int flags)
 {
 	vm_offset_t vaddr;
 	vm_offset_t vendaddr;
@@ -689,7 +685,10 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
-			paddr = pmap_kextract(vaddr);
+			if (__predict_true(pmap == pmap_kernel()))
+				paddr = pmap_kextract(vaddr);
+			else
+				paddr = pmap_extract(pmap, vaddr);
 			if (((dmat->flags & BUS_DMA_COULD_BOUNCE) != 0) &&
 			    run_filter(dmat, paddr) != 0)
 				map->pagesneeded++;
@@ -745,7 +744,8 @@ bus_dmamap_load_buffer(bus_dma_tag_t dmat, bus_dma_segment_t *segs,
 	bmask = ~(dmat->boundary - 1);
 
 	if ((dmat->flags & BUS_DMA_COULD_BOUNCE) != 0) {
-		error = _bus_dmamap_count_pages(dmat, map, buf, buflen, flags);
+		error = _bus_dmamap_count_pages(dmat, map, pmap, buf, buflen,
+		    flags);
 		if (error)
 			return (error);
 	}
@@ -1263,7 +1263,6 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	/* Check to see if we already have a suitable zone */
 	STAILQ_FOREACH(bz, &bounce_zone_list, links) {
 		if ((dmat->alignment <= bz->alignment)
-		 && (dmat->boundary <= bz->boundary)
 		 && (dmat->lowaddr >= bz->lowaddr)) {
 			dmat->bounce_zone = bz;
 			return (0);
@@ -1279,8 +1278,7 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	bz->reserved_bpages = 0;
 	bz->active_bpages = 0;
 	bz->lowaddr = dmat->lowaddr;
-	bz->alignment = dmat->alignment;
-	bz->boundary = dmat->boundary;
+	bz->alignment = MAX(dmat->alignment, PAGE_SIZE);
 	bz->map_count = 0;
 	snprintf(bz->zoneid, 8, "zone%d", busdma_zonecount);
 	busdma_zonecount++;
@@ -1327,9 +1325,6 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	SYSCTL_ADD_INT(busdma_sysctl_tree(bz),
 	    SYSCTL_CHILDREN(busdma_sysctl_tree_top(bz)), OID_AUTO,
 	    "alignment", CTLFLAG_RD, &bz->alignment, 0, "");
-	SYSCTL_ADD_INT(busdma_sysctl_tree(bz),
-	    SYSCTL_CHILDREN(busdma_sysctl_tree_top(bz)), OID_AUTO,
-	    "boundary", CTLFLAG_RD, &bz->boundary, 0, "");
 
 	return (0);
 }
@@ -1354,7 +1349,7 @@ alloc_bounce_pages(bus_dma_tag_t dmat, u_int numpages)
 							 M_NOWAIT, 0ul,
 							 bz->lowaddr,
 							 PAGE_SIZE,
-							 bz->boundary);
+							 0);
 		if (bpage->vaddr == 0) {
 			free(bpage, M_DEVBUF);
 			break;
@@ -1423,9 +1418,7 @@ add_bounce_page(bus_dma_tag_t dmat, bus_dmamap_t map, vm_offset_t vaddr,
 	mtx_unlock(&bounce_lock);
 
 	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
-		/* page offset needs to be preserved */
-		bpage->vaddr &= ~PAGE_MASK;
-		bpage->busaddr &= ~PAGE_MASK;
+		/* Page offset needs to be preserved. */
 		bpage->vaddr |= vaddr & PAGE_MASK;
 		bpage->busaddr |= vaddr & PAGE_MASK;
 	}
@@ -1444,6 +1437,15 @@ free_bounce_page(bus_dma_tag_t dmat, struct bounce_page *bpage)
 	bz = dmat->bounce_zone;
 	bpage->datavaddr = 0;
 	bpage->datacount = 0;
+	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
+		/*
+		 * Reset the bounce page to start at offset 0.  Other uses
+		 * of this bounce page may need to store a full page of
+		 * data and/or assume it starts on a page boundary.
+		 */
+		bpage->vaddr &= ~PAGE_MASK;
+		bpage->busaddr &= ~PAGE_MASK;
+	}
 
 	mtx_lock(&bounce_lock);
 	STAILQ_INSERT_HEAD(&bz->bounce_page_list, bpage, links);

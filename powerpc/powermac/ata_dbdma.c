@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/ata_dbdma.c,v 1.2 2008/10/28 22:09:30 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/ata_dbdma.c,v 1.3 2009/12/06 00:10:13 mav Exp $
  */
 
 /*
@@ -204,7 +204,6 @@ static int
 ata_dbdma_load(struct ata_request *request, void *addr, int *entries)
 {
 	struct ata_channel *ch = device_get_softc(request->parent);
-	struct ata_device *atadev = device_get_softc(request->dev);
 	struct ata_dbdma_dmaload_args args;
 
 	int error;
@@ -230,7 +229,7 @@ ata_dbdma_load(struct ata_request *request, void *addr, int *entries)
 		return EIO;
 	}
 
-	request->dma = &ch->dma.slot[atadev->unit];
+	request->dma = &ch->dma.slot[0];
 
 	if ((error = bus_dmamap_load(request->dma->data_tag, 
 	    request->dma->data_map, request->data, request->bytecount,

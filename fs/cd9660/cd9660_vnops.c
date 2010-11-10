@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vnops.c,v 1.121 2009/01/28 18:46:29 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vnops.c,v 1.126 2010/01/23 22:38:01 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -165,7 +165,7 @@ cd9660_open(ap)
 		int a_mode;
 		struct ucred *a_cred;
 		struct thread *a_td;
-		int a_fdidx;
+		struct file *a_fp;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
@@ -251,20 +251,35 @@ cd9660_ioctl(ap)
 		struct thread *a_td;
 	} */ *ap;
 {
-	struct vnode *vp = ap->a_vp;
-	struct iso_node *ip = VTOI(vp);
+	struct vnode *vp;
+	struct iso_node *ip;
+	int error;
 
-	if (vp->v_type == VCHR || vp->v_type == VBLK)
+	vp = ap->a_vp;
+	vn_lock(vp, LK_SHARED | LK_RETRY);
+	if (vp->v_iflag & VI_DOOMED) {
+		VOP_UNLOCK(vp, 0);
+		return (EBADF);
+	}
+	if (vp->v_type == VCHR || vp->v_type == VBLK) {
+		VOP_UNLOCK(vp, 0);
 		return (EOPNOTSUPP);
+	}
+
+	ip = VTOI(vp);
+	error = 0;
 
 	switch (ap->a_command) {
-
 	case FIOGETLBA:
 		*(int *)(ap->a_data) = ip->iso_start;
-		return 0;
+		break;
 	default:
-		return (ENOTTY);
+		error = ENOTTY;
+		break;
 	}
+
+	VOP_UNLOCK(vp, 0);
+	return (error);
 }
 
 /*
@@ -804,20 +819,25 @@ cd9660_vptofh(ap)
 		struct fid *a_fhp;
 	} */ *ap;
 {
+	struct ifid ifh;
 	struct iso_node *ip = VTOI(ap->a_vp);
-	struct ifid *ifhp;
 
-	ifhp = (struct ifid *)ap->a_fhp;
-	ifhp->ifid_len = sizeof(struct ifid);
+	ifh.ifid_len = sizeof(struct ifid);
 
-	ifhp->ifid_ino = ip->i_number;
-	ifhp->ifid_start = ip->iso_start;
+	ifh.ifid_ino = ip->i_number;
+	ifh.ifid_start = ip->iso_start;
+	/*
+	 * This intentionally uses sizeof(ifh) in order to not copy stack
+	 * garbage on ILP32.
+	 */
+	memcpy(ap->a_fhp, &ifh, sizeof(ifh));
 
 #ifdef	ISOFS_DBG
 	printf("vptofh: ino %d, start %ld\n",
-	       ifhp->ifid_ino,ifhp->ifid_start);
+	    ifh.ifid_ino, ifh.ifid_start);
 #endif
-	return 0;
+
+	return (0);
 }
 
 /*

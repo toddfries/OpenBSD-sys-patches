@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket.c,v 1.4 2003/09/14 23:29:06 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket.c,v 1.14 2008/07/30 22:41:23 emax Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket.c,v 1.15 2009/07/23 20:46:49 rwatson Exp $
  */
 
 #include <sys/param.h>
@@ -45,6 +45,7 @@
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
 #include <sys/taskqueue.h>
+
 #include <netgraph/ng_message.h>
 #include <netgraph/netgraph.h>
 #include <netgraph/bluetooth/include/ng_bluetooth.h>
@@ -57,7 +58,7 @@
 #include <netgraph/bluetooth/include/ng_btsocket_sco.h>
 
 static int			ng_btsocket_modevent (module_t, int, void *);
-extern struct domain		ng_btsocket_domain;
+static struct domain		ng_btsocket_domain;
 
 /*
  * Bluetooth raw HCI sockets
@@ -219,7 +220,7 @@ static struct protosw		ng_btsocket_protosw[] = {
  * BLUETOOTH domain
  */
 
-struct domain			ng_btsocket_domain = {
+static struct domain ng_btsocket_domain = {
 	.dom_family =		AF_BLUETOOTH,
 	.dom_name =		"bluetooth",
 	.dom_protosw =		ng_btsocket_protosw,
@@ -269,7 +270,6 @@ ng_btsocket_modevent(module_t mod, int event, void *data)
         
 	switch (event) {
 	case MOD_LOAD:
-		net_add_domain(&ng_btsocket_domain);
 		break;
 
 	case MOD_UNLOAD:
@@ -285,3 +285,4 @@ ng_btsocket_modevent(module_t mod, int event, void *data)
 	return (error);
 } /* ng_btsocket_modevent */
 
+DOMAIN_SET(ng_btsocket_);

@@ -1,14 +1,9 @@
-# $FreeBSD: src/sys/mips/sentry5/files.sentry5,v 1.1 2008/07/06 21:09:29 imp Exp $
+# $FreeBSD: src/sys/mips/sentry5/files.sentry5,v 1.2 2010/01/10 20:09:30 imp Exp $
 
 # TODO: Add attachment elsehwere in the tree
 # for USB 1.1 OHCI, Ethernet and IPSEC cores
 # which are believed to be devices we have drivers for
 # which just need to be tweaked for attachment to an SSB system bus.
-
 mips/sentry5/s5_machdep.c		standard
-dev/siba/siba.c					optional siba
-dev/siba/siba_pcib.c				optional siba pci
-mips/sentry5/siba_cc.c			optional siba
-
-# notyet
-#mips/sentry5/siba_mips.c			optional siba
+mips/mips/intr_machdep.c		standard
+mips/mips/tick.c			standard

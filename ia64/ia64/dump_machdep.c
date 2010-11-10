@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.16 2008/10/01 22:08:53 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.17 2009/05/29 21:27:12 jamie Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -33,7 +33,6 @@ __FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.16 2008/10/01 22:08:53 
 #include <sys/cons.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
-#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/efi.h>

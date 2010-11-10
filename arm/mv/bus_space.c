@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/bus_space.c,v 1.1 2008/10/13 20:07:13 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/bus_space.c,v 1.2 2010/06/13 13:28:53 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,7 +49,7 @@ bs_protos(generic);
 bs_protos(generic_armv4);
 
 /*
- * The obio bus space tag.  This is constant for all instances, so
+ * The bus space tag.  This is constant for all instances, so
  * we never have to explicitly "create" it.
  */
 static struct bus_space _base_tag = {
@@ -159,4 +159,4 @@ static struct bus_space _base_tag = {
 	NULL
 };
 
-bus_space_tag_t obio_tag = &_base_tag;
+bus_space_tag_t fdtbus_bs_tag = &_base_tag;

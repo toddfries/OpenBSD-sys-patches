@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_meter.c,v 1.100 2009/01/23 22:49:23 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_meter.c,v 1.101 2009/07/24 13:50:29 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -205,7 +205,7 @@ vmtotal(SYSCTL_HANDLER_ARGS)
 		 * synchronization should not impair the accuracy of
 		 * the reported statistics. 
 		 */
-		if (object->type == OBJT_DEVICE) {
+		if (object->type == OBJT_DEVICE || object->type == OBJT_SG) {
 			/*
 			 * Devices, like /dev/mem, will badly skew our totals.
 			 */

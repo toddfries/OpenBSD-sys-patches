@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/freebsd32/freebsd32_signal.h,v 1.2 2008/12/11 00:58:05 bz Exp $
+ * $FreeBSD: src/sys/compat/freebsd32/freebsd32_signal.h,v 1.3 2010/07/04 11:43:53 kib Exp $
  */
 
 #ifndef _COMPAT_FREEBSD32_SIGNAL_H_
@@ -96,6 +96,6 @@ struct sigevent32 {
 	} _sigev_un;
 };
 
-void siginfo_to_siginfo32(siginfo_t *src, struct siginfo32 *dst);
+void siginfo_to_siginfo32(const siginfo_t *src, struct siginfo32 *dst);
 
 #endif /* !_COMPAT_FREEBSD32_SIGNAL_H_ */

@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/rwlock.h,v 1.20 2008/12/08 21:46:55 kmacy Exp $
+ * $FreeBSD: src/sys/sys/rwlock.h,v 1.22 2009/09/30 13:26:31 attilio Exp $
  */
 
 #ifndef _SYS_RWLOCK_H_
@@ -35,6 +35,7 @@
 #include <sys/_lock.h>
 #include <sys/_rwlock.h>
 #include <sys/lock_profile.h>
+#include <sys/lockstat.h>
 
 #ifdef _KERNEL
 #include <sys/pcpu.h>
@@ -54,13 +55,6 @@
  *
  * When the lock is not locked by any thread, it is encoded as a read lock
  * with zero waiters.
- *
- * A note about memory barriers.  Write locks need to use the same memory
- * barriers as mutexes: _acq when acquiring a write lock and _rel when
- * releasing a write lock.  Read locks also need to use an _acq barrier when
- * acquiring a read lock.  However, since read locks do not update any
- * locked data (modulo bugs of course), no memory barrier is needed when
- * releasing a read lock.
  */
 
 #define	RW_LOCK_READ		0x01
@@ -107,9 +101,9 @@
 						                        \
 	if (!_rw_write_lock((rw), _tid))				\
 		_rw_wlock_hard((rw), _tid, (file), (line));		\
-	else								\
-		lock_profile_obtain_lock_success(&(rw)->lock_object, 0,	\
-		    0, (file), (line));					\
+	else 								\
+		LOCKSTAT_PROFILE_OBTAIN_LOCK_SUCCESS(LS_RW_WLOCK_ACQUIRE, \
+		    rw, 0, 0, (file), (line));				\
 } while (0)
 
 /* Release a write lock. */

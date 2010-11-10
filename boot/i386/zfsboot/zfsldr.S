@@ -12,7 +12,7 @@
  * warranties of merchantability and fitness for a particular
  * purpose.
  *
- * $FreeBSD: src/sys/boot/i386/zfsboot/zfsldr.S,v 1.1 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/boot/i386/zfsboot/zfsldr.S,v 1.2 2009/11/20 12:48:35 jhb Exp $
  */
 
 /* Memory Locations */
@@ -83,7 +83,7 @@ ebpb:		.byte	0		# BIOS physical drive number (W)
  * Trampoline used by boot2 to call read to read data from the disk via
  * the BIOS.  Call with:
  *
- * %cx:%ax	- long    - LBA to read in
+ * %ecx:%eax	- long    - LBA to read in
  * %es:(%bx)	- caddr_t - buffer to read data into
  * %dl		- byte    - drive to read from
  * %dh		- byte    - num sectors to read
@@ -94,10 +94,8 @@ xread:		push %ss			# Address
 /*
  * Setup an EDD disk packet and pass it to read
  */
-xread.1:					# Starting
-		pushl $0x0			#  absolute
-		push %cx			#  block
-		push %ax			#  number
+xread.1:	pushl %ecx			# Starting absolute block
+		pushl %eax			#  block number
 		push %es			# Address of
 		push %bx			#  transfer buffer
 		xor %ax,%ax			# Number of
@@ -195,7 +193,7 @@ main.4: 	xor %dx,%dx			# Partition:drive
  */
 main.5: 	mov %dx,MEM_ARG			# Save args
 		movb $NSECT,%dh			# Sector count
-		movw $1024,%ax			# Offset to boot2
+		movl $1024,%eax			# Offset to boot2
 		callw nread.1			# Read disk
 main.6:		mov $MEM_BUF,%si		# BTX (before reloc)
 		mov 0xa(%si),%bx		# Get BTX length and set
@@ -245,10 +243,11 @@ seta20.3:	sti				# Enable interrupts
 /*
  * Trampoline used to call read from within boot1.
  */
-nread:		xor %ax,%ax			# Sector offset in partition
+nread:		xor %eax,%eax			# Sector offset in partition
 nread.1:	mov $MEM_BUF,%bx		# Transfer buffer
-		add 0x8(%si),%ax		# Get
-		mov 0xa(%si),%cx		#  LBA
+		xor %ecx,%ecx			# Get
+		addl 0x8(%si),%eax		#  LBA
+		adc $0,%ecx
 		push %cs			# Read from
 		callw xread.1	 		#  disk
 		jnc return			# If success, return

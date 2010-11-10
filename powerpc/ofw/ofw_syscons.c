@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.15 2008/12/13 20:53:57 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.19 2010/06/15 22:01:38 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,10 +55,10 @@ __FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.15 2008/12/13 20:53:57
 #include <dev/ofw/ofw_pci.h>
 #include <powerpc/ofw/ofw_syscons.h>
 
-static int ofwfb_ignore_mmap_checks;
+static int ofwfb_ignore_mmap_checks = 1;
 SYSCTL_NODE(_hw, OID_AUTO, ofwfb, CTLFLAG_RD, 0, "ofwfb");
 SYSCTL_INT(_hw_ofwfb, OID_AUTO, relax_mmap, CTLFLAG_RW,
-    &ofwfb_ignore_mmap_checks, 0, "relax mmap bounds checking");
+    &ofwfb_ignore_mmap_checks, 0, "relaxed mmap bounds checking");
 
 extern u_char dflt_font_16[];
 extern u_char dflt_font_14[];
@@ -216,6 +216,7 @@ ofwfb_configure(int flags)
         phandle_t chosen;
         ihandle_t stdout;
 	phandle_t node;
+	bus_addr_t fb_phys;
 	int depth;
 	int disable;
 	int len;
@@ -270,10 +271,16 @@ ofwfb_configure(int flags)
 	OF_getprop(node, "linebytes", &sc->sc_stride, sizeof(sc->sc_stride));
 
 	/*
-	 * XXX the physical address of the frame buffer is assumed to be
-	 * BAT-mapped so it can be accessed directly
+	 * Grab the physical address of the framebuffer, and then map it
+	 * into our memory space. If the MMU is not yet up, it will be
+	 * remapped for us when relocation turns on.
+	 *
+	 * XXX We assume #address-cells is 1 at this point.
 	 */
-	OF_getprop(node, "address", &sc->sc_addr, sizeof(sc->sc_addr));
+	OF_getprop(node, "address", &fb_phys, sizeof(fb_phys));
+
+	bus_space_map(&bs_be_tag, fb_phys, sc->sc_height * sc->sc_stride,
+	    0, &sc->sc_addr);
 
 	/*
 	 * Get the PCI addresses of the adapter. The node may be the
@@ -283,8 +290,8 @@ ofwfb_configure(int flags)
 	len = OF_getprop(node, "assigned-addresses", sc->sc_pciaddrs,
 	          sizeof(sc->sc_pciaddrs));
 	if (len == -1) {
-		len = OF_getprop(OF_parent(node), "assigned-addresses", sc->sc_pciaddrs,
-		          sizeof(sc->sc_pciaddrs));
+		len = OF_getprop(OF_parent(node), "assigned-addresses",
+		    sc->sc_pciaddrs, sizeof(sc->sc_pciaddrs));
 	}
 
 	if (len != -1) {
@@ -617,8 +624,8 @@ ofwfb_blank_display(video_adapter_t *adp, int mode)
 }
 
 static int
-ofwfb_mmap(video_adapter_t *adp, vm_offset_t offset, vm_paddr_t *paddr,
-    int prot)
+ofwfb_mmap(video_adapter_t *adp, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int prot, vm_memattr_t *memattr)
 {
 	struct ofwfb_softc *sc;
 	int i;
@@ -849,16 +856,11 @@ ofwfb_putm8(video_adapter_t *adp, int x, int y, uint8_t *pixel_image,
 {
 	struct ofwfb_softc *sc;
 	int i, j, k;
-	uint32_t *addr;
+	uint8_t *addr;
 	u_char fg, bg;
-	union {
-		uint32_t l[2];
-		uint8_t  c[8];
-	} ch;
-
 
 	sc = (struct ofwfb_softc *)adp;
-	addr = (u_int32_t *)((int)sc->sc_addr
+	addr = (u_int8_t *)((int)sc->sc_addr
 		+ (y + sc->sc_ymargin)*sc->sc_stride
 		+ x + sc->sc_xmargin);
 
@@ -866,12 +868,6 @@ ofwfb_putm8(video_adapter_t *adp, int x, int y, uint8_t *pixel_image,
 	bg = ofwfb_background(SC_NORM_ATTR);
 
 	for (i = 0; i < size && i+y < sc->sc_height - 2*sc->sc_ymargin; i++) {
-		/*
-		 * Use the current values for the line
-		 */
-		ch.l[0] = addr[0];
-		ch.l[1] = addr[1];
-
 		/*
 		 * Calculate 2 x 4-chars at a time, and then
 		 * write these out.
@@ -881,12 +877,10 @@ ofwfb_putm8(video_adapter_t *adp, int x, int y, uint8_t *pixel_image,
 				continue;
 
 			if (pixel_image[i] & (1 << k))
-				ch.c[j] = (ch.c[j] == fg) ? bg : fg;
+				addr[j] = (addr[j] == fg) ? bg : fg;
 		}
 
-		addr[0] = ch.l[0];
-		addr[1] = ch.l[1];
-		addr += (sc->sc_stride / sizeof(u_int32_t));
+		addr += (sc->sc_stride / sizeof(u_int8_t));
 	}
 
 	return (0);
@@ -941,13 +935,17 @@ ofwfb_scidentify(driver_t *driver, device_t parent)
 static int
 ofwfb_scprobe(device_t dev)
 {
-	/* This is a fake device, so make sure there is no OF node for it */
-	if (ofw_bus_get_node(dev) != -1)
-		return ENXIO;
-	
+	int error;
+
 	device_set_desc(dev, "System console");
-	return (sc_probe_unit(device_get_unit(dev), 
-	    device_get_flags(dev) | SC_AUTODETECT_KBD));
+
+	error = sc_probe_unit(device_get_unit(dev), 
+	    device_get_flags(dev) | SC_AUTODETECT_KBD);
+	if (error != 0)
+		return (error);
+
+	/* This is a fake device, so make sure we added it ourselves */
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 static int

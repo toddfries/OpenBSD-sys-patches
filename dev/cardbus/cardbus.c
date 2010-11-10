@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus.c,v 1.70 2009/03/10 12:10:50 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus.c,v 1.74 2010/01/05 20:42:25 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -80,10 +80,6 @@ static void	cardbus_driver_added(device_t cbdev, driver_t *driver);
 static int	cardbus_probe(device_t cbdev);
 static int	cardbus_read_ivar(device_t cbdev, device_t child, int which,
 		    uintptr_t *result);
-static void	cardbus_release_all_resources(device_t cbdev,
-		    struct cardbus_devinfo *dinfo);
-static int	cardbus_write_ivar(device_t cbdev, device_t child, int which,
-		    uintptr_t value);
 
 /************************************************************************/
 /* Probe/Attach								*/
@@ -228,16 +224,11 @@ cardbus_detach_card(device_t cbdev)
 
 	for (tmp = 0; tmp < numdevs; tmp++) {
 		struct cardbus_devinfo *dinfo = device_get_ivars(devlist[tmp]);
-		int status = device_get_state(devlist[tmp]);
 
 		if (dinfo->pci.cfg.dev != devlist[tmp])
 			device_printf(cbdev, "devinfo dev mismatch\n");
-		if (status == DS_ATTACHED || status == DS_BUSY)
-			device_detach(devlist[tmp]);
-		cardbus_release_all_resources(cbdev, dinfo);
 		cardbus_device_destroy(dinfo);
-		device_delete_child(cbdev, devlist[tmp]);
-		pci_freecfg((struct pci_devinfo *)dinfo);
+		pci_delete_child(cbdev, devlist[tmp]);
 	}
 	POWER_DISABLE_SOCKET(device_get_parent(cbdev), cbdev);
 	free(devlist, M_TEMP);
@@ -283,28 +274,6 @@ cardbus_driver_added(device_t cbdev, driver_t *driver)
 			pci_cfg_save(dev, &dinfo->pci, 1);
 	}
 	free(devlist, M_TEMP);
-}
-
-static void
-cardbus_release_all_resources(device_t cbdev, struct cardbus_devinfo *dinfo)
-{
-	struct resource_list_entry *rle;
-	device_t dev;
-
-	/* Free all allocated resources */
-	STAILQ_FOREACH(rle, &dinfo->pci.resources, link) {
-		if (rle->res) {
-			BUS_RELEASE_RESOURCE(device_get_parent(cbdev),
-			    cbdev, rle->type, rle->rid, rle->res);
-			rle->res = NULL;
-		}
-	}
-	resource_list_free(&dinfo->pci.resources);
-	/* turn off the card's decoding now that the resources are done */
-	dev = dinfo->pci.cfg.dev;
-	pci_write_config(dev, PCIR_COMMAND,
-	    pci_read_config(dev, PCIR_COMMAND, 2) &
-	    ~(PCIM_CMD_MEMEN | PCIM_CMD_PORTEN), 2);
 }
 
 /************************************************************************/

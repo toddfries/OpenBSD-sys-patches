@@ -14,13 +14,14 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416.h,v 1.7 2009/02/24 01:07:06 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416.h,v 1.10 2010/02/15 17:49:49 rpaulo Exp $
  */
 #ifndef _ATH_AR5416_H_
 #define _ATH_AR5416_H_
 
 #include "ar5212/ar5212.h"
 #include "ar5416_cal.h"
+#include "ah_eeprom_v14.h"	/* for CAL_TARGET_POWER_* */
 
 #define	AR5416_MAGIC	0x20065416
 
@@ -44,6 +45,9 @@ typedef struct {
 #define	AR5416_CCA_MAX_GOOD_VALUE	-85
 #define	AR5416_CCA_MAX_HIGH_VALUE	-62
 #define	AR5416_CCA_MIN_BAD_VALUE	-140
+#define	AR9285_CCA_MAX_GOOD_VALUE	-118
+
+#define AR5416_SPUR_RSSI_THRESH		40
 
 struct ath_hal_5416 {
 	struct ath_hal_5212 ah_5212;
@@ -58,6 +62,11 @@ struct ath_hal_5416 {
 	HAL_INI_ARRAY	ah_ini_bank7;
 	HAL_INI_ARRAY	ah_ini_addac;
 	HAL_INI_ARRAY	ah_ini_pcieserdes;
+
+	void		(*ah_writeIni)(struct ath_hal *,
+			    const struct ieee80211_channel *);
+	void		(*ah_spurMitigate)(struct ath_hal *,
+			    const struct ieee80211_channel *);
 
 	u_int       	ah_globaltxtimeout;	/* global tx timeout */
 	u_int		ah_gpioMask;
@@ -171,12 +180,27 @@ extern	HAL_RFGAIN ar5416GetRfgain(struct ath_hal *ah);
 extern	HAL_BOOL ar5416Disable(struct ath_hal *ah);
 extern	HAL_BOOL ar5416ChipReset(struct ath_hal *ah,
 		const struct ieee80211_channel *);
+extern	HAL_BOOL ar5416SetBoardValues(struct ath_hal *,
+		const struct ieee80211_channel *);
 extern	HAL_BOOL ar5416SetResetReg(struct ath_hal *, uint32_t type);
 extern	HAL_BOOL ar5416SetTxPowerLimit(struct ath_hal *ah, uint32_t limit);
+extern	HAL_BOOL ar5416SetTransmitPower(struct ath_hal *,
+    		const struct ieee80211_channel *, uint16_t *);
 extern	HAL_BOOL ar5416GetChipPowerLimits(struct ath_hal *ah,
 		struct ieee80211_channel *chan);
 extern	void ar5416GetChannelCenters(struct ath_hal *,
 		const struct ieee80211_channel *chan, CHAN_CENTERS *centers);
+extern	void ar5416GetTargetPowers(struct ath_hal *ah, 
+		const struct ieee80211_channel *chan,
+		CAL_TARGET_POWER_HT *powInfo,
+		uint16_t numChannels, CAL_TARGET_POWER_HT *pNewPower,
+		uint16_t numRates, HAL_BOOL isHt40Target);
+extern	void ar5416GetTargetPowersLeg(struct ath_hal *ah, 
+		const struct ieee80211_channel *chan,
+		CAL_TARGET_POWER_LEG *powInfo,
+		uint16_t numChannels, CAL_TARGET_POWER_LEG *pNewPower,
+		uint16_t numRates, HAL_BOOL isExtTarget);
+
 
 extern	HAL_BOOL ar5416StopTxDma(struct ath_hal *ah, u_int q);
 extern	HAL_BOOL ar5416SetupTxDesc(struct ath_hal *ah, struct ath_desc *ds,

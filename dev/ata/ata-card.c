@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-card.c,v 1.42 2009/02/19 12:47:24 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-card.c,v 1.43 2009/03/12 06:30:59 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +90,7 @@ ata_pccard_attach(device_t dev)
     struct ata_channel *ch = device_get_softc(dev);
     struct resource *io, *ctlio;
     int i, rid, err;
+    uint16_t funce;
 
     if (ch->attached)
 	return (0);
@@ -132,7 +133,11 @@ ata_pccard_attach(device_t dev)
 
     /* initialize softc for this channel */
     ch->unit = 0;
-    ch->flags |= (ATA_USE_16BIT | ATA_NO_SLAVE);
+    ch->flags |= ATA_USE_16BIT;
+    funce = 0;		/* Default to sane setting of FUNCE */
+    pccard_get_funce_disk(dev, &funce);
+    if (!(funce & PFD_I_D))
+	    ch-> flags |= ATA_NO_SLAVE;
     ata_generic_hw(dev);
     err = ata_probe(dev);
     if (err)

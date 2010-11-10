@@ -57,7 +57,7 @@
  * SUCH DAMAGE.
 */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_qmgr.c,v 1.5 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_qmgr.c,v 1.7 2010/11/09 10:59:09 brucec Exp $");
 
 /*
  * Intel XScale Queue Manager support.
@@ -317,7 +317,7 @@ ixpqmgr_attach(device_t dev)
 	
 	sc->aqmFreeSramAddress = 0x100;	/* Q buffer space starts at 0x2100 */
 
-	ixpqmgr_rebuild(sc);		/* build inital priority table */
+	ixpqmgr_rebuild(sc);		/* build initial priority table */
 	aqm_reset(sc);			/* reset h/w */
 	return (0);
 }
@@ -338,7 +338,7 @@ ixpqmgr_detach(device_t dev)
 
 int
 ixpqmgr_qconfig(int qId, int qEntries, int ne, int nf, int srcSel,
-    void (*cb)(int, void *), void *cbarg)
+    qconfig_hand_t *cb, void *cbarg)
 {
 	struct ixpqmgr_softc *sc = ixpqmgr_sc;
 	struct qmgrInfo *qi = &sc->qinfo[qId];
@@ -775,7 +775,7 @@ ixpqmgr_intr(void *arg)
 		      *
 		      * The search will end when all the bits of the interrupt
 		      * register are cleared. There is no need to maintain
-		      * a seperate value and test it at each iteration.
+		      * a separate value and test it at each iteration.
 		      */
 		     if (intRegVal & sc->lowPriorityTableFirstHalfMask) {
 			 priorityTableIndex = 0;

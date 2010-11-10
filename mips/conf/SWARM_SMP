@@ -1,0 +1,7 @@
+#
+# $FreeBSD: src/sys/mips/conf/SWARM_SMP,v 1.1 2010/02/09 06:24:43 neel Exp $
+#
+options		SMP
+options		PRINTF_BUFR_SIZE=128
+
+include		SWARM

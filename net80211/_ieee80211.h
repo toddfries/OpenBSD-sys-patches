@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/_ieee80211.h,v 1.25 2009/02/19 05:21:54 sam Exp $
+ * $FreeBSD: src/sys/net80211/_ieee80211.h,v 1.27 2009/07/11 15:02:45 rpaulo Exp $
  */
 #ifndef _NET80211__IEEE80211_H_
 #define _NET80211__IEEE80211_H_
@@ -83,8 +83,9 @@ enum ieee80211_opmode {
 	IEEE80211_M_AHDEMO	= 3,	/* Old lucent compatible adhoc demo */
 	IEEE80211_M_HOSTAP	= 4,	/* Software Access Point */
 	IEEE80211_M_MONITOR	= 5,	/* Monitor mode */
+	IEEE80211_M_MBSS	= 6,	/* MBSS (Mesh Point) link */
 };
-#define	IEEE80211_OPMODE_MAX	(IEEE80211_M_MONITOR+1)
+#define	IEEE80211_OPMODE_MAX	(IEEE80211_M_MBSS+1)
 
 /*
  * 802.11g/802.11n protection mode.
@@ -389,6 +390,7 @@ struct ieee80211_regdomain {
 struct ieee80211_mimo_info {
 	int8_t		rssi[3];	/* per-antenna rssi */
 	int8_t		noise[3];	/* per-antenna noise floor */
+	uint8_t		pad[2];
 	uint32_t	evm[3];		/* EVM data */
 };
 #endif /* _NET80211__IEEE80211_H_ */

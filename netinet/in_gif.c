@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.44 2009/03/07 19:08:58 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.51 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_mrouting.h"
 #include "opt_inet.h"
@@ -46,10 +46,10 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.44 2009/03/07 19:08:58 marius E
 #include <sys/sysctl.h>
 #include <sys/protosw.h>
 #include <sys/malloc.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -59,7 +59,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.44 2009/03/07 19:08:58 marius E
 #include <netinet/in_var.h>
 #include <netinet/ip_encap.h>
 #include <netinet/ip_ecn.h>
-#include <netinet/vinet.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -86,16 +85,14 @@ struct protosw in_gif_protosw = {
 	.pr_usrreqs =		&rip_usrreqs
 };
 
-#ifdef VIMAGE_GLOBALS
-extern int ip_gif_ttl;
-#endif
-SYSCTL_V_INT(V_NET, vnet_gif, _net_inet_ip, IPCTL_GIF_TTL, gifttl,
-	CTLFLAG_RW, ip_gif_ttl,	0, "");
+VNET_DEFINE(int, ip_gif_ttl) = GIF_TTL;
+#define	V_ip_gif_ttl		VNET(ip_gif_ttl)
+SYSCTL_VNET_INT(_net_inet_ip, IPCTL_GIF_TTL, gifttl, CTLFLAG_RW,
+	&VNET_NAME(ip_gif_ttl), 0, "");
 
 int
 in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 {
-	INIT_VNET_GIF(ifp->if_vnet);
 	struct gif_softc *sc = ifp->if_softc;
 	struct sockaddr_in *dst = (struct sockaddr_in *)&sc->gif_ro.ro_dst;
 	struct sockaddr_in *sin_src = (struct sockaddr_in *)sc->gif_psrc;
@@ -148,8 +145,22 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 #endif /* INET6 */
 	case AF_LINK:
  		proto = IPPROTO_ETHERIP;
- 		eiphdr.eip_ver = ETHERIP_VERSION & ETHERIP_VER_VERS_MASK;
- 		eiphdr.eip_pad = 0;
+
+		/*
+		 * GIF_SEND_REVETHIP (disabled by default) intentionally
+		 * sends an EtherIP packet with revered version field in
+		 * the header.  This is a knob for backward compatibility
+		 * with FreeBSD 7.2R or prior.
+		 */
+		if ((sc->gif_options & GIF_SEND_REVETHIP)) {
+ 			eiphdr.eip_ver = 0;
+ 			eiphdr.eip_resvl = ETHERIP_VERSION;
+ 			eiphdr.eip_resvh = 0;
+		} else {
+ 			eiphdr.eip_ver = ETHERIP_VERSION;
+ 			eiphdr.eip_resvl = 0;
+ 			eiphdr.eip_resvh = 0;
+		}
  		/* prepend Ethernet-in-IP header */
  		M_PREPEND(m, sizeof(struct etherip_header), M_DONTWAIT);
  		if (m && m->m_len < sizeof(struct etherip_header))
@@ -259,7 +270,6 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 void
 in_gif_input(struct mbuf *m, int off)
 {
-	INIT_VNET_INET(curvnet);
 	struct ifnet *gifp = NULL;
 	struct gif_softc *sc;
 	struct ip *ip;
@@ -273,14 +283,14 @@ in_gif_input(struct mbuf *m, int off)
 	sc = (struct gif_softc *)encap_getarg(m);
 	if (sc == NULL) {
 		m_freem(m);
-		V_ipstat.ips_nogif++;
+		KMOD_IPSTAT_INC(ips_nogif);
 		return;
 	}
 
 	gifp = GIF2IFP(sc);
 	if (gifp == NULL || (gifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
-		V_ipstat.ips_nogif++;
+		KMOD_IPSTAT_INC(ips_nogif);
 		return;
 	}
 
@@ -340,7 +350,7 @@ in_gif_input(struct mbuf *m, int off)
  		break;	
 
 	default:
-		V_ipstat.ips_nogif++;
+		KMOD_IPSTAT_INC(ips_nogif);
 		m_freem(m);
 		return;
 	}
@@ -354,7 +364,6 @@ in_gif_input(struct mbuf *m, int off)
 static int
 gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 {
-	INIT_VNET_INET(curvnet);
 	struct sockaddr_in *src, *dst;
 	struct in_ifaddr *ia4;
 
@@ -373,13 +382,19 @@ gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 	case 0: case 127: case 255:
 		return 0;
 	}
+
 	/* reject packets with broadcast on source */
+	/* XXXRW: should use hash lists? */
+	IN_IFADDR_RLOCK();
 	TAILQ_FOREACH(ia4, &V_in_ifaddrhead, ia_link) {
 		if ((ia4->ia_ifa.ifa_ifp->if_flags & IFF_BROADCAST) == 0)
 			continue;
-		if (ip->ip_src.s_addr == ia4->ia_broadaddr.sin_addr.s_addr)
+		if (ip->ip_src.s_addr == ia4->ia_broadaddr.sin_addr.s_addr) {
+			IN_IFADDR_RUNLOCK();
 			return 0;
+		}
 	}
+	IN_IFADDR_RUNLOCK();
 
 	/* ingress filters on outer source */
 	if ((GIF2IFP(sc)->if_flags & IFF_LINK2) == 0 && ifp) {

@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mmc/mmc.c,v 1.35 2009/02/03 04:28:45 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mmc/mmc.c,v 1.39 2010/05/23 09:44:48 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1437,7 +1437,7 @@ mmc_scan(struct mmc_softc *sc)
 }
 
 static int
-mmc_read_ivar(device_t bus, device_t child, int which, u_char *result)
+mmc_read_ivar(device_t bus, device_t child, int which, uintptr_t *result)
 {
 	struct mmc_ivars *ivar = device_get_ivars(child);
 
@@ -1500,6 +1500,15 @@ mmc_delayed_attach(void *xsc)
 	config_intrhook_disestablish(&sc->config_intrhook);
 }
 
+static int
+mmc_child_location_str(device_t dev, device_t child, char *buf,
+    size_t buflen)
+{
+
+	snprintf(buf, buflen, "rca=0x%04x", mmc_get_rca(child));
+	return (0);
+}
+
 static device_method_t mmc_methods[] = {
 	/* device_if */
 	DEVMETHOD(device_probe, mmc_probe),
@@ -1511,6 +1520,7 @@ static device_method_t mmc_methods[] = {
 	/* Bus interface */
 	DEVMETHOD(bus_read_ivar, mmc_read_ivar),
 	DEVMETHOD(bus_write_ivar, mmc_write_ivar),
+	DEVMETHOD(bus_child_location_str, mmc_child_location_str),
 
 	/* MMC Bus interface */
 	DEVMETHOD(mmcbus_wait_for_request, mmc_wait_for_request),

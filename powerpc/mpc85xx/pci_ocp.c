@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/pci_ocp.c,v 1.3 2008/04/26 17:47:28 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/pci_ocp.c,v 1.9 2010/03/23 23:46:28 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/pci_ocp.c,v 1.3 2008/04/26 17:47:28 
 
 #include <machine/resource.h>
 #include <machine/bus.h>
+#include <machine/intr_machdep.h>
 #include <machine/ocpbus.h>
 #include <machine/spr.h>
 
@@ -75,6 +76,11 @@ __FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/pci_ocp.c,v 1.3 2008/04/26 17:47:28 
 #define	REG_PIWBEAR(n)	(0x0e0c - 0x20 * (n))
 #define	REG_PIWAR(n)	(0x0e10 - 0x20 * (n))
 
+#define	PCIR_FSL_LTSSM	0x404
+#define	FSL_LTSSM_L0	0x16
+
+#define	DEVFN(b, s, f)	((b << 16) | (s << 8) | f)
+
 struct pci_ocp_softc {
 	device_t	sc_dev;
 
@@ -91,7 +97,11 @@ struct pci_ocp_softc {
 	int		sc_rid;
 
 	int		sc_busnr;
-	int		sc_pcie:1;
+	uint8_t		sc_pcie_cap;
+
+	/* Devices that need special attention. */
+	int		sc_devfn_tundra;
+	int		sc_devfn_via_ide;
 };
 
 static int pci_ocp_attach(device_t);
@@ -161,7 +171,7 @@ pci_ocp_cfgread(struct pci_ocp_softc *sc, u_int bus, u_int slot, u_int func,
 	addr |= (slot & 0x1f) << 11;
 	addr |= (func & 0x7) << 8;
 	addr |= reg & 0xfc;
-	if (sc->sc_pcie)
+	if (sc->sc_pcie_cap)
 		addr |= (reg & 0xf00) << 16;
 	bus_space_write_4(sc->sc_bst, sc->sc_bsh, REG_CFG_ADDR, addr);
 
@@ -199,7 +209,7 @@ pci_ocp_cfgwrite(struct pci_ocp_softc *sc, u_int bus, u_int slot, u_int func,
 	addr |= (slot & 0x1f) << 11;
 	addr |= (func & 0x7) << 8;
 	addr |= reg & 0xfc;
-	if (sc->sc_pcie)
+	if (sc->sc_pcie_cap)
 		addr |= (reg & 0xf00) << 16;
 	bus_space_write_4(sc->sc_bst, sc->sc_bsh, REG_CFG_ADDR, addr);
 
@@ -254,7 +264,7 @@ pci_ocp_maxslots(device_t dev)
 {
 	struct pci_ocp_softc *sc = device_get_softc(dev);
 
-	return ((sc->sc_pcie) ? 0 : 30);
+	return ((sc->sc_pcie_cap) ? 0 : 31);
 }
 
 static uint32_t
@@ -262,9 +272,27 @@ pci_ocp_read_config(device_t dev, u_int bus, u_int slot, u_int func,
     u_int reg, int bytes)
 {
 	struct pci_ocp_softc *sc = device_get_softc(dev);
+	u_int devfn;
 
-	if (bus == sc->sc_busnr && !sc->sc_pcie && slot < 10)
+	if (bus == sc->sc_busnr && !sc->sc_pcie_cap && slot < 10)
 		return (~0);
+	devfn = DEVFN(bus, slot, func);
+	/*
+	 * For the host controller itself, pretend to be a standard
+	 * PCI bridge, rather than a PowerPC processor. That way the
+	 * generic PCI code will enumerate all subordinate busses
+	 * and devices as usual.
+	 */
+	if (sc->sc_pcie_cap && devfn == 0) {
+		if (reg == PCIR_CLASS && bytes == 1)
+			return (PCIC_BRIDGE);
+		if (reg == PCIR_SUBCLASS && bytes == 1)
+			return (PCIS_BRIDGE_PCI);
+	}
+	if (devfn == sc->sc_devfn_tundra)
+		return (~0);
+	if (devfn == sc->sc_devfn_via_ide && reg == PCIR_INTPIN)
+		return (1);
 	return (pci_ocp_cfgread(sc, bus, slot, func, reg, bytes));
 }
 
@@ -274,7 +302,7 @@ pci_ocp_write_config(device_t dev, u_int bus, u_int slot, u_int func,
 {
 	struct pci_ocp_softc *sc = device_get_softc(dev);
 
-	if (bus == sc->sc_busnr && !sc->sc_pcie && slot < 10)
+	if (bus == sc->sc_busnr && !sc->sc_pcie_cap && slot < 10)
 		return;
 	pci_ocp_cfgwrite(sc, bus, slot, func, reg, val, bytes);
 }
@@ -284,11 +312,12 @@ pci_ocp_probe(device_t dev)
 {
 	char buf[128];
 	struct pci_ocp_softc *sc;
-	const char *mpcid, *type;
+	const char *type;
 	device_t parent;
 	u_long start, size;
 	uintptr_t devtype;
 	uint32_t cfgreg;
+	uint8_t capptr;
 	int error;
 
 	parent = device_get_parent(dev);
@@ -299,6 +328,7 @@ pci_ocp_probe(device_t dev)
 		return (ENXIO);
 
 	sc = device_get_softc(dev);
+	sc->sc_dev = dev;
 
 	sc->sc_rid = 0;
 	sc->sc_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &sc->sc_rid,
@@ -314,48 +344,33 @@ pci_ocp_probe(device_t dev)
 	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_VENDOR, 2);
 	if (cfgreg != 0x1057 && cfgreg != 0x1957)
 		goto out;
-	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_DEVICE, 2);
-	switch (cfgreg) {
-	case 0x000a:
-		mpcid = "8555E";
-		break;
-	case 0x0012:
-		mpcid = "8548E";
-		break;
-	case 0x0013:
-		mpcid = "8548";
-		break;
-	/*
-	 * Documentation from Freescale is incorrect.
-	 * Use right values after documentation is corrected.
-	 */
-	case 0x0030:
-		mpcid = "8544E";
-		break;
-	case 0x0031:
-		mpcid = "8544";
-		break;
-	case 0x0032:
-		mpcid = "8544";
-		break;
-	default:
+
+	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_CLASS, 1);
+	if (cfgreg != PCIC_PROCESSOR)
 		goto out;
-	}
+
+	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_SUBCLASS, 1);
+	if (cfgreg != PCIS_PROCESSOR_POWERPC)
+		goto out;
+
+	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_PROGIF, 1);
+	if (cfgreg != 0)	/* RC mode = 0, EP mode = 1 */
+		goto out;
 
 	type = "PCI";
-	cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_CAP_PTR, 1);
-	while (cfgreg != 0) {
-		cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, cfgreg, 2);
+	capptr = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_CAP_PTR, 1);
+	while (capptr != 0) {
+		cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, capptr, 2);
 		switch (cfgreg & 0xff) {
 		case PCIY_PCIX:		/* PCI-X */
 			type = "PCI-X";
 			break;
 		case PCIY_EXPRESS:	/* PCI Express */
 			type = "PCI Express";
-			sc->sc_pcie = 1;
+			sc->sc_pcie_cap = capptr;
 			break;
 		}
-		cfgreg = (cfgreg >> 8) & 0xff;
+		capptr = (cfgreg >> 8) & 0xff;
 	}
 
 	error = bus_get_resource(dev, SYS_RES_MEMORY, 1, &start, &size);
@@ -363,13 +378,29 @@ pci_ocp_probe(device_t dev)
 		goto out;
 
 	snprintf(buf, sizeof(buf),
-	    "Freescale MPC%s %s host controller", mpcid, type);
+	    "Freescale on-chip %s host controller", type);
 	device_set_desc_copy(dev, buf);
 	error = BUS_PROBE_DEFAULT;
 
 out:
 	bus_release_resource(dev, SYS_RES_MEMORY, sc->sc_rid, sc->sc_res);
 	return (error);
+}
+
+static void
+pci_ocp_init_via(struct pci_ocp_softc *sc, uint16_t device, int bus,
+    int slot, int fn)
+{
+
+	if (device == 0x0686) {
+		pci_ocp_write_config(sc->sc_dev, bus, slot, fn, 0x52, 0x34, 1);
+		pci_ocp_write_config(sc->sc_dev, bus, slot, fn, 0x77, 0x00, 1);
+		pci_ocp_write_config(sc->sc_dev, bus, slot, fn, 0x83, 0x98, 1);
+		pci_ocp_write_config(sc->sc_dev, bus, slot, fn, 0x85, 0x03, 1);
+	} else if (device == 0x0571) {
+		sc->sc_devfn_via_ide = DEVFN(bus, slot, fn);
+		pci_ocp_write_config(sc->sc_dev, bus, slot, fn, 0x40, 0x0b, 1);
+	}
 }
 
 static int
@@ -381,6 +412,20 @@ pci_ocp_init_bar(struct pci_ocp_softc *sc, int bus, int slot, int func,
 	int reg, width;
 
 	reg = PCIR_BAR(barno);
+
+	if (DEVFN(bus, slot, func) == sc->sc_devfn_via_ide) {
+		switch (barno) {
+		case 0:	addr = 0x1f0; break;
+		case 1: addr = 0x3f4; break;
+		case 2: addr = 0x170; break;
+		case 3: addr = 0x374; break;
+		case 4: addr = 0xcc0; break;
+		default: return (1);
+		}
+		pci_ocp_write_config(sc->sc_dev, bus, slot, func, reg, addr, 4);
+		return (1);
+	}
+
 	pci_ocp_write_config(sc->sc_dev, bus, slot, func, reg, ~0, 4);
 	size = pci_ocp_read_config(sc->sc_dev, bus, slot, func, reg, 4);
 	if (size == 0)
@@ -421,17 +466,23 @@ static u_int
 pci_ocp_route_int(struct pci_ocp_softc *sc, u_int bus, u_int slot, u_int func,
     u_int intpin)
 {
-	u_int intline;
+	u_int devfn, intline;
 
-	/*
-	 * Default interrupt routing.
-	 */
-	if (intpin != 0) {
-		intline = intpin - 1;
-		intline += (bus != sc->sc_busnr) ? slot : 0;
-		intline = PIC_IRQ_EXT(intline & 3);
-	} else
-		intline = 0xff;
+	devfn = DEVFN(bus, slot, func);
+	if (devfn == sc->sc_devfn_via_ide)
+		intline = 14;
+	else if (devfn == sc->sc_devfn_via_ide + 1)
+		intline = 10;
+	else if (devfn == sc->sc_devfn_via_ide + 2)
+		intline = 10;
+	else {
+		if (intpin != 0) {
+			intline = intpin - 1;
+			intline += (bus != sc->sc_busnr) ? slot : 0;
+			intline = PIC_IRQ_EXT(intline & 3);
+		} else
+			intline = 0xff;
+	}
 
 	if (bootverbose)
 		printf("PCI %u:%u:%u:%u: intpin %u: intline=%u\n",
@@ -442,17 +493,17 @@ pci_ocp_route_int(struct pci_ocp_softc *sc, u_int bus, u_int slot, u_int func,
 }
 
 static int
-pci_ocp_init(struct pci_ocp_softc *sc, int bus, int maxslot)
+pci_ocp_init(struct pci_ocp_softc *sc, int bus, int nslots)
 {
 	int secbus, slot;
 	int func, maxfunc;
 	int bar, maxbar;
 	uint16_t vendor, device;
-	uint8_t cr8, command, hdrtype, class, subclass;
+	uint8_t command, hdrtype, class, subclass;
 	uint8_t intline, intpin;
 
 	secbus = bus;
-	for (slot = 0; slot < maxslot; slot++) {
+	for (slot = 0; slot < nslots; slot++) {
 		maxfunc = 0;
 		for (func = 0; func <= maxfunc; func++) {
 			hdrtype = pci_ocp_read_config(sc->sc_dev, bus, slot,
@@ -463,45 +514,24 @@ pci_ocp_init(struct pci_ocp_softc *sc, int bus, int maxslot)
 			if (func == 0 && (hdrtype & PCIM_MFDEV))
 				maxfunc = PCI_FUNCMAX;
 
+			vendor = pci_ocp_read_config(sc->sc_dev, bus, slot,
+			    func, PCIR_VENDOR, 2);
+			device = pci_ocp_read_config(sc->sc_dev, bus, slot,
+			    func, PCIR_DEVICE, 2);
+
+			if (vendor == 0x1957 && device == 0x3fff) {
+				sc->sc_devfn_tundra = DEVFN(bus, slot, func);
+				continue;
+			}
+
 			command = pci_ocp_read_config(sc->sc_dev, bus, slot,
 			    func, PCIR_COMMAND, 1);
 			command &= ~(PCIM_CMD_MEMEN | PCIM_CMD_PORTEN);
 			pci_ocp_write_config(sc->sc_dev, bus, slot, func,
 			    PCIR_COMMAND, command, 1);
 
-			vendor = pci_ocp_read_config(sc->sc_dev, bus, slot,
-			    func, PCIR_VENDOR, 2);
-			device = pci_ocp_read_config(sc->sc_dev, bus, slot,
-			    func, PCIR_DEVICE, 2);
-
-			/*
-			 * Make sure the ATA controller on the VIA82C686
-			 * South bridge is enabled.
-			 */
-			if (vendor == 0x1106 && device == 0x0686) {
-				/* Enable the ATA controller. */
-				cr8 = pci_ocp_read_config(sc->sc_dev, bus,
-				    slot, func, 0x48, 1);
-				if (cr8 & 2) {
-					device_printf(sc->sc_dev,
-					    "enabling ATA controller\n");
-					pci_ocp_write_config(sc->sc_dev, bus,
-					    slot, func, 0x48, cr8 & ~2, 1);
-				}
-			}
-			if (vendor == 0x1106 && device == 0x0571) {
-				pci_ocp_write_config(sc->sc_dev, bus, slot,
-				    func, 0xc4, 0x00, 1);
-				/* Set legacy mode. */
-				pci_ocp_write_config(sc->sc_dev, bus, slot,
-				    func, 0x40, 0x08, 1);
-				pci_ocp_write_config(sc->sc_dev, bus, slot,
-				    func, PCIR_PROGIF, 0x00, 1);
-				pci_ocp_write_config(sc->sc_dev, bus, slot,
-				    func, 0x42, 0x09, 1);
-				pci_ocp_write_config(sc->sc_dev, bus, slot,
-				    func, 0x40, 0x0b, 1);
-			}
+			if (vendor == 0x1106)
+				pci_ocp_init_via(sc, device, bus, slot, func);
 
 			/* Program the base address registers. */
 			maxbar = (hdrtype & PCIM_HDRTYPE) ? 1 : 6;
@@ -518,8 +548,7 @@ pci_ocp_init(struct pci_ocp_softc *sc, int bus, int maxslot)
 			pci_ocp_write_config(sc->sc_dev, bus, slot, func,
 			    PCIR_INTLINE, intline, 1);
 
-			command |= PCIM_CMD_BUSMASTEREN | PCIM_CMD_MEMEN |
-			    PCIM_CMD_PORTEN;
+			command |= PCIM_CMD_MEMEN | PCIM_CMD_PORTEN;
 			pci_ocp_write_config(sc->sc_dev, bus, slot, func,
 			    PCIR_COMMAND, command, 1);
 
@@ -571,7 +600,7 @@ pci_ocp_init(struct pci_ocp_softc *sc, int bus, int maxslot)
 			    PCIR_SUBBUS_1, 0xff, 1);
 
 			secbus = pci_ocp_init(sc, secbus,
-			    (subclass == PCIS_BRIDGE_PCI) ? 31 : 1);
+			    (subclass == PCIS_BRIDGE_PCI) ? 32 : 1);
 
 			pci_ocp_write_config(sc->sc_dev, bus, slot, func,
 			    PCIR_SUBBUS_1, secbus, 1);
@@ -693,7 +722,7 @@ pci_ocp_attach(device_t dev)
 {
 	struct pci_ocp_softc *sc;
 	uint32_t cfgreg;
-	int error, maxslot;
+	int error, nslots;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
@@ -723,8 +752,22 @@ pci_ocp_attach(device_t dev)
 	pci_ocp_inbound(sc, 2, -1, 0, 0, 0);
 	pci_ocp_inbound(sc, 3, OCP85XX_TGTIF_RAM1, 0, 2U*1024U*1024U*1024U, 0);
 
-	maxslot = (sc->sc_pcie) ? 1 : 31;
-	pci_ocp_init(sc, sc->sc_busnr, maxslot);
+	sc->sc_devfn_tundra = -1;
+	sc->sc_devfn_via_ide = -1;
+
+	/*
+	 * PCI Express host controllers require a link. We don't
+	 * fail the attach if there's no link, but we also don't
+	 * create a child pci(4) device.
+	 */
+	if (sc->sc_pcie_cap) {
+		cfgreg = pci_ocp_cfgread(sc, 0, 0, 0, PCIR_FSL_LTSSM, 4);
+		if (cfgreg < FSL_LTSSM_L0)
+			return (0);
+	}
+
+	nslots = (sc->sc_pcie_cap) ? 1 : 32;
+	pci_ocp_init(sc, sc->sc_busnr, nslots);
 
 	device_add_child(dev, "pci", -1);
 	return (bus_generic_attach(dev));
@@ -749,13 +792,11 @@ pci_ocp_alloc_resource(device_t dev, device_t child, int type, int *rid,
 		va = sc->sc_iomem_va;
 		break;
 	case SYS_RES_IRQ:
-		/* ISA interrupts are routed to IRQ 0 on the PIC. */
 		if (start < PIC_IRQ_START) {
 			device_printf(dev, "%s requested ISA interrupt %lu\n",
 			    device_get_nameunit(child), start);
-			/* XXX */
-			start = PIC_IRQ_EXT(0);
 		}
+		flags |= RF_SHAREABLE;
 		return (BUS_ALLOC_RESOURCE(device_get_parent(dev), child,
 		    type, rid, start, end, count, flags));
 	default:

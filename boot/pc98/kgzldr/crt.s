@@ -24,7 +24,7 @@
 # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #	From: btx.s 1.10 1999/02/25 16:27:41 rnordier
-# $FreeBSD: src/sys/boot/pc98/kgzldr/crt.s,v 1.5 2005/05/08 14:17:28 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/kgzldr/crt.s,v 1.6 2009/12/21 14:59:23 nyan Exp $
 #
 
 # Screen defaults and assumptions.
@@ -75,5 +75,15 @@ crt_putchr.3:	cmpw $SCR_ROW*SCR_COL*2,%dx
 		stosw				#  line
 		movw $(SCR_ROW-1)*SCR_COL*2,%dx
 crt_putchr.4:	movw %dx,(%ebx) 		# Update position
+		shrw $1,%dx
+crt_putchr.5:	inb $0x60,%al			# Move cursor
+		testb $0x04,%al
+		jz crt_putchr.5
+		movb $0x49,%al
+		outb %al,$0x62
+		movb %dl,%al
+		outb %al,$0x60
+		movb %dh,%al
+		outb %al,$0x60
 		popa				# Restore
 		ret				# To caller

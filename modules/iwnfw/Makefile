@@ -1,13 +1,5 @@
-# $FreeBSD: src/sys/modules/iwnfw/Makefile,v 1.2 2009/01/09 22:35:25 sam Exp $
+# $FreeBSD: src/sys/modules/iwnfw/Makefile,v 1.5 2009/12/29 19:47:34 rpaulo Exp $
 
-.PATH: ${.CURDIR}/../../contrib/dev/iwn
+SUBDIR=	iwn1000 iwn4965 iwn5000 iwn5150 iwn6000
 
-KMOD=	iwnfw
-FIRMWS=	iwlwifi-4965-4.44.17.fw:iwnfw:44417
-
-CLEANFILES=	iwlwifi-4965-4.44.17.fw
-
-iwlwifi-4965-4.44.17.fw: ${.CURDIR}/../../contrib/dev/iwn/iwlwifi-4965-4.44.17.fw.uu
-	uudecode -p ${.CURDIR}/../../contrib/dev/iwn/iwlwifi-4965-4.44.17.fw.uu > ${.TARGET}
-
-.include <bsd.kmod.mk>
+.include <bsd.subdir.mk>

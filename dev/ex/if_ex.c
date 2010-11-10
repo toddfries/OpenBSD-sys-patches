@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ex/if_ex.c,v 1.64 2008/08/24 00:22:42 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ex/if_ex.c,v 1.67 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  * Intel EtherExpress Pro/10, Pro/10+ Ethernet driver
@@ -237,7 +237,7 @@ ex_attach(device_t dev)
 	ifp->if_start = ex_start;
 	ifp->if_ioctl = ex_ioctl;
 	ifp->if_init = ex_init;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 	ifmedia_init(&sc->ifmedia, 0, ex_ifmedia_upd, ex_ifmedia_sts);
 	mtx_init(&sc->lock, device_get_nameunit(dev), MTX_NETWORK_LOCK,
@@ -677,7 +677,7 @@ ex_tx_intr(struct ex_softc *sc)
 	while (sc->tx_head != sc->tx_tail) {
 		CSR_WRITE_2(sc, HOST_ADDR_REG, sc->tx_head);
 
-		if (! CSR_READ_2(sc, IO_PORT_REG) & Done_bit)
+		if (!(CSR_READ_2(sc, IO_PORT_REG) & Done_bit))
 			break;
 
 		tx_status = CSR_READ_2(sc, IO_PORT_REG);
@@ -870,13 +870,13 @@ ex_setmulti(struct ex_softc *sc)
 	ifp = sc->ifp;
 
 	count = 0;
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(maddr, &ifp->if_multiaddrs, ifma_link) {
 		if (maddr->ifma_addr->sa_family != AF_LINK)
 			continue;
 		count++;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	if ((ifp->if_flags & IFF_PROMISC) || (ifp->if_flags & IFF_ALLMULTI)
 			|| count > 63) {
@@ -904,7 +904,7 @@ ex_setmulti(struct ex_softc *sc)
 		CSR_WRITE_2(sc, IO_PORT_REG, 0);
 		CSR_WRITE_2(sc, IO_PORT_REG, (count + 1) * 6);
 
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH(maddr, &ifp->if_multiaddrs, ifma_link) {
 			if (maddr->ifma_addr->sa_family != AF_LINK)
 				continue;
@@ -915,7 +915,7 @@ ex_setmulti(struct ex_softc *sc)
 			CSR_WRITE_2(sc, IO_PORT_REG, *addr++);
 			CSR_WRITE_2(sc, IO_PORT_REG, *addr++);
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 
 		/* Program our MAC address as well */
 		/* XXX: Is this necessary?  The Linux driver does this

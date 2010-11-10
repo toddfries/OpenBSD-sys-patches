@@ -24,7 +24,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 **************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/r300_reg.h,v 1.4 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/r300_reg.h,v 1.5 2009/04/07 22:20:58 rnoland Exp $");
 
 /* *INDENT-OFF* */
 
@@ -1775,6 +1775,11 @@ __FBSDID("$FreeBSD: src/sys/dev/drm/r300_reg.h,v 1.4 2008/08/23 20:59:12 rnoland
 
 #define R500_RB3D_COLOR_CLEAR_VALUE_AR  0x46c0
 #define R500_RB3D_CONSTANT_COLOR_AR     0x4ef8
+
+#define R300_SU_REG_DEST                0x42c8
+#define RV530_FG_ZBREG_DEST             0x4be8
+#define R300_ZB_ZPASS_DATA              0x4f58
+#define R300_ZB_ZPASS_ADDR              0x4f5c
 
 #endif /* _R300_REG_H */
 

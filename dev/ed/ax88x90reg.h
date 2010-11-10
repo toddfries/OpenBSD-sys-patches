@@ -24,13 +24,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ed/ax88x90reg.h,v 1.1 2005/10/05 05:21:07 imp Exp $
+ * $FreeBSD: src/sys/dev/ed/ax88x90reg.h,v 1.2 2009/03/30 16:15:06 imp Exp $
  */
 
 /* AX88x90 based miibus defines */
 #define ED_AX88X90_MIIBUS	0x04	/* MII bus register on ASIC */
 #define ED_AX88X90_MII_CLK	    0x01
-#define ED_AX88X90_MII_DIROUT	    0x02
+#define ED_AX88X90_MII_DIRIN	    0x02
 #define ED_AX88X90_MII_DATAIN	    0x04
 #define ED_AX88X90_MII_DATAOUT	    0x08
 #define	ED_AX88X90_TEST		0x05	/* "test" register on asic */

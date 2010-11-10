@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/tl/if_tl.c,v 1.2 2009/02/10 23:17:20 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/tl/if_tl.c,v 1.5 2009/11/19 22:14:23 jhb Exp $");
 
 /*
  * Texas Instruments ThunderLAN driver for FreeBSD 2.2.6 and 3.x.
@@ -281,7 +281,7 @@ static int tl_ioctl(struct ifnet *, u_long, caddr_t);
 static void tl_init(void *);
 static void tl_init_locked(struct tl_softc *);
 static void tl_stop(struct tl_softc *);
-static void tl_watchdog(struct ifnet *);
+static void tl_watchdog(struct tl_softc *);
 static int tl_shutdown(device_t);
 static int tl_ifmedia_upd(struct ifnet *);
 static void tl_ifmedia_sts(struct ifnet *, struct ifmediareq *);
@@ -952,7 +952,7 @@ tl_setmulti(sc)
 		hashes[1] = 0xFFFFFFFF;
 	} else {
 		i = 1;
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH_REVERSE(ifma, &ifp->if_multiaddrs, ifmultihead, ifma_link) {
 			if (ifma->ifma_addr->sa_family != AF_LINK)
 				continue;
@@ -975,7 +975,7 @@ tl_setmulti(sc)
 			else
 				hashes[1] |= (1 << (h - 32));
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 	}
 
 	tl_dio_write32(sc, TL_HASH1, hashes[0]);
@@ -1170,9 +1170,6 @@ tl_attach(dev)
 		goto fail;
 	}
 
-	sc->tl_btag = rman_get_bustag(sc->tl_res);
-	sc->tl_bhandle = rman_get_bushandle(sc->tl_res);
-
 #ifdef notdef
 	/*
 	 * The ThunderLAN manual suggests jacking the PCI latency
@@ -1263,7 +1260,6 @@ tl_attach(dev)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = tl_ioctl;
 	ifp->if_start = tl_start;
-	ifp->if_watchdog = tl_watchdog;
 	ifp->if_init = tl_init;
 	ifp->if_mtu = ETHERMTU;
 	ifp->if_snd.ifq_maxlen = TL_TX_LIST_CNT - 1;
@@ -1340,11 +1336,11 @@ tl_detach(dev)
 
 	/* These should only be active if attach succeeded */
 	if (device_is_attached(dev)) {
+		ether_ifdetach(ifp);
 		TL_LOCK(sc);
 		tl_stop(sc);
 		TL_UNLOCK(sc);
 		callout_drain(&sc->tl_stat_callout);
-		ether_ifdetach(ifp);
 	}
 	if (sc->tl_miibus)
 		device_delete_child(dev, sc->tl_miibus);
@@ -1638,7 +1634,7 @@ tl_intvec_txeoc(xsc, type)
 	ifp = sc->tl_ifp;
 
 	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
+	sc->tl_timer = 0;
 
 	if (sc->tl_cdata.tl_tx_head == NULL) {
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
@@ -1823,6 +1819,9 @@ tl_stats_update(xsc)
 			tl_dio_setbit(sc, TL_ACOMMIT, tx_thresh << 4);
 		}
 	}
+
+	if (sc->tl_timer > 0 && --sc->tl_timer == 0)
+		tl_watchdog(sc);
 
 	callout_reset(&sc->tl_stat_callout, hz, tl_stats_update, sc);
 
@@ -2032,7 +2031,7 @@ tl_start_locked(ifp)
 	/*
 	 * Set a timeout in case the chip goes out to lunch.
 	 */
-	ifp->if_timer = 5;
+	sc->tl_timer = 5;
 
 	return;
 }
@@ -2257,21 +2256,20 @@ tl_ioctl(ifp, command, data)
 }
 
 static void
-tl_watchdog(ifp)
-	struct ifnet		*ifp;
-{
+tl_watchdog(sc)
 	struct tl_softc		*sc;
+{
+	struct ifnet		*ifp;
 
-	sc = ifp->if_softc;
+	TL_LOCK_ASSERT(sc);
+	ifp = sc->tl_ifp;
 
 	if_printf(ifp, "device timeout\n");
 
-	TL_LOCK(sc);
 	ifp->if_oerrors++;
 
 	tl_softreset(sc, 1);
 	tl_init_locked(sc);
-	TL_UNLOCK(sc);
 
 	return;
 }

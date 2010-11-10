@@ -1,7 +1,7 @@
 /*	$NecBSD: ct_isa.c,v 1.6 1999/07/26 06:32:01 honda Exp $	*/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ct/ct_isa.c,v 1.14 2007/02/23 12:18:36 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ct/ct_isa.c,v 1.15 2010/01/12 17:59:58 gavin Exp $");
 /*	$NetBSD$	*/
 
 /*-
@@ -316,7 +316,7 @@ ct_isa_attach(device_t dev)
 		break;
 	}
 #if	0
-	printf("%s: chiprev %s chipclk %d Mhz\n", 
+	printf("%s: chiprev %s chipclk %d MHz\n", 
 		slp->sl_dev.dv_xname, s, ct->sc_chipclk);
 #endif
 

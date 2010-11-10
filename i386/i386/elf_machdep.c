@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/elf_machdep.c,v 1.24 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/elf_machdep.c,v 1.31 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/elf_machdep.c,v 1.24 2008/11/22 12:36:15 k
 #include <sys/exec.h>
 #include <sys/imgact.h>
 #include <sys/linker.h>
+#include <sys/proc.h>
 #include <sys/sysent.h>
 #include <sys/imgact_elf.h>
 #include <sys/syscall.h>
@@ -73,7 +74,10 @@ struct sysentvec elf32_freebsd_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_FREEBSD | SV_IA32 | SV_ILP32
+	.sv_flags	= SV_ABI_FREEBSD | SV_IA32 | SV_ILP32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = syscallnames,
 };
 
 static Elf32_Brandinfo freebsd_brand_info = {
@@ -84,10 +88,11 @@ static Elf32_Brandinfo freebsd_brand_info = {
 	.interp_path	= "/libexec/ld-elf.so.1",
 	.sysvec		= &elf32_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf32_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
-SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_ANY,
+SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_FIRST,
 	(sysinit_cfunc_t) elf32_insert_brand_entry,
 	&freebsd_brand_info);
 
@@ -99,12 +104,29 @@ static Elf32_Brandinfo freebsd_brand_oinfo = {
 	.interp_path	= "/usr/libexec/ld-elf.so.1",
 	.sysvec		= &elf32_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf32_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
 SYSINIT(oelf32, SI_SUB_EXEC, SI_ORDER_ANY,
 	(sysinit_cfunc_t) elf32_insert_brand_entry,
 	&freebsd_brand_oinfo);
+
+static Elf32_Brandinfo kfreebsd_brand_info = {
+	.brand		= ELFOSABI_FREEBSD,
+	.machine	= EM_386,
+	.compat_3_brand	= "FreeBSD",
+	.emul_path	= NULL,
+	.interp_path	= "/lib/ld.so.1",
+	.sysvec		= &elf32_freebsd_sysvec,
+	.interp_newpath	= NULL,
+	.brand_note	= &elf32_kfreebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE_MANDATORY
+};
+
+SYSINIT(kelf32, SI_SUB_EXEC, SI_ORDER_ANY,
+	(sysinit_cfunc_t) elf32_insert_brand_entry,
+	&kfreebsd_brand_info);
 
 
 void
@@ -147,7 +169,7 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 
 	if (local) {
 		if (rtype == R_386_RELATIVE) {	/* A + B */
-			addr = relocbase + addend;
+			addr = elf_relocaddr(lf, relocbase + addend);
 			if (*where != addr)
 				*where = addr;
 		}

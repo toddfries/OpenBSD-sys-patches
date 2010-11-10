@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_asus.c,v 1.40 2008/12/27 20:48:11 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_asus.c,v 1.44 2010/06/11 20:08:20 jkim Exp $");
 
 /*
  * Driver for extra ACPI-controlled gadgets (hotkeys, leds, etc) found on
@@ -47,7 +47,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_asus.c,v 1.40 2008/12/27 20:48
 #include <sys/bus.h>
 #include <sys/sbuf.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 #include <dev/led/led.h>
 
@@ -176,16 +178,39 @@ static struct acpi_asus_model acpi_asus_models[] = {
 		.disp_set	= "SDSP"
 	},
 	{
+		.name           = "A3E",
+		.mled_set       = "MLED",
+		.wled_set       = "WLED",
+		.lcd_get        = "\\_SB.PCI0.SBRG.EC0.RPIN(0x67)",
+		.lcd_set        = "\\_SB.PCI0.SBRG.EC0._Q10",
+		.brn_get        = "GPLV",
+		.brn_set        = "SPLV",
+		.disp_get       = "\\_SB.PCI0.P0P2.VGA.GETD",
+		.disp_set       = "SDSP"
+	},
+	{
+		.name           = "A3F",
+		.mled_set       = "MLED",
+		.wled_set       = "WLED",
+		.bled_set       = "BLED",
+		.lcd_get        = "\\_SB.PCI0.SBRG.EC0.RPIN(0x11)",
+		.lcd_set        = "\\_SB.PCI0.SBRG.EC0._Q10",
+		.brn_get        = "GPLV",
+		.brn_set        = "SPLV",
+		.disp_get       = "\\SSTE",
+		.disp_set       = "SDSP"
+	},
+	{
 		.name           = "A3N",
 		.mled_set       = "MLED",
 		.bled_set       = "BLED",
 		.wled_set       = "WLED",
-		.lcd_get        = NULL,
+		.lcd_get        = "\\BKLT",
 		.lcd_set        = "\\_SB.PCI0.SBRG.EC0._Q10",
+		.brn_get        = "GPLV",
 		.brn_set        = "SPLV",
-		.brn_get        = "SDSP",
-		.disp_set       = "SDSP",
-		.disp_get       = "\\_SB.PCI0.P0P3.VGA.GETD"
+		.disp_get       = "\\_SB.PCI0.P0P3.VGA.GETD",
+		.disp_set       = "SDSP"
 	},
 	{
 		.name		= "A4D",
@@ -245,8 +270,8 @@ static struct acpi_asus_model acpi_asus_models[] = {
 		.wled_set	= "WLED",
 		.brn_get	= "GPLV",
 		.brn_set	= "SPLV",
-		.lcd_get	= "\\_SB.PCI0.SBRG.EC0.RPIN",
-		.lcd_set	= "\\_SB.PCI0.SBRG.EC0._Q10",
+		.lcd_get	= "GBTL",
+		.lcd_set	= "SBTL",
 		.disp_get	= "\\_SB.PCI0.PCE2.VGA.GETD",
 		.disp_set	= "SDSP",
 	},
@@ -577,7 +602,7 @@ acpi_asus_probe(device_t dev)
 			return (0);
 		}
 
-		/* if EeePC */
+		/* EeePC */
 		if (strncmp("ASUS010", rstr, 7) == 0) {
 			sc->model = &acpi_eeepc_models[0];
 			device_set_desc(dev, "ASUS EeePC");
@@ -626,6 +651,9 @@ good:
 			goto good;
 		else if (strncmp(model->name, "A2x", 3) == 0 &&
 		    strncmp(Obj->String.Pointer, "A2", 2) == 0)
+			goto good;
+		else if (strncmp(model->name, "A3F", 3) == 0 &&
+		    strncmp(Obj->String.Pointer, "A6F", 3) == 0)
 			goto good;
 		else if (strncmp(model->name, "D1x", 3) == 0 &&
 		    strncmp(Obj->String.Pointer, "D1", 2) == 0)
@@ -683,7 +711,7 @@ good:
 	sbuf_printf(sb, "Unsupported Asus laptop: %s\n", Obj->String.Pointer);
 	sbuf_finish(sb);
 
-	device_printf(dev, sbuf_data(sb));
+	device_printf(dev, "%s", sbuf_data(sb));
 
 	sbuf_delete(sb);
 	AcpiOsFree(Buf.Pointer);
@@ -1106,26 +1134,7 @@ acpi_asus_sysctl_init(struct acpi_asus_softc *sc, int method)
 		return (FALSE);
 	case ACPI_ASUS_METHOD_LCD:
 		if (sc->model->lcd_get) {
-			if (strncmp(sc->model->name, "G2K", 3) == 0) {
-				ACPI_BUFFER		Buf;
-				ACPI_OBJECT		Arg, Obj;
-				ACPI_OBJECT_LIST	Args;
-
-				Arg.Type = ACPI_TYPE_INTEGER;
-				Arg.Integer.Value = 0x11;
-				Args.Count = 1;
-				Args.Pointer = &Arg;
-				Buf.Length = sizeof(Obj);
-				Buf.Pointer = &Obj;
-
-				status = AcpiEvaluateObject(sc->handle,
-				    sc->model->lcd_get, &Args, &Buf);
-				if (ACPI_SUCCESS(status) &&
-				    Obj.Type == ACPI_TYPE_INTEGER) {
-					sc->s_lcd = Obj.Integer.Value;
-					return (TRUE);
-				}
-			} else if (strncmp(sc->model->name, "L3H", 3) == 0) {
+			if (strncmp(sc->model->name, "L3H", 3) == 0) {
 				ACPI_BUFFER		Buf;
 				ACPI_OBJECT		Arg[2], Obj;
 				ACPI_OBJECT_LIST	Args;

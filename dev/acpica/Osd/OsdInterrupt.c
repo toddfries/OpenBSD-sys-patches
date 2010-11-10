@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdInterrupt.c,v 1.22 2007/02/23 12:18:29 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdInterrupt.c,v 1.23 2009/06/05 18:44:36 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -39,7 +39,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdInterrupt.c,v 1.22 2007/02/23 12:1
 #include <machine/resource.h>
 #include <sys/rman.h>
  
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 
 #define _COMPONENT	ACPI_OS_SERVICES

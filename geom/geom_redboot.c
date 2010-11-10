@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_redboot.c,v 1.1 2009/03/09 23:18:36 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_redboot.c,v 1.4 2010/02/03 01:12:19 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -62,6 +62,7 @@ struct fis_image_desc {
 
 #define	FISDIR_NAME	"FIS directory"
 #define	REDBCFG_NAME	"RedBoot config"
+#define	REDBOOT_NAME	"RedBoot"
 
 #define	REDBOOT_MAXSLICE	64
 #define	REDBOOT_MAXOFF \
@@ -70,6 +71,8 @@ struct fis_image_desc {
 struct g_redboot_softc {
 	uint32_t	entry[REDBOOT_MAXSLICE];
 	uint32_t	dsize[REDBOOT_MAXSLICE];
+	uint8_t		readonly[REDBOOT_MAXSLICE];
+	g_access_t	*parent_access;
 };
 
 static void
@@ -87,6 +90,18 @@ static int
 g_redboot_ioctl(struct g_provider *pp, u_long cmd, void *data, int fflag, struct thread *td)
 {
 	return (ENOIOCTL);
+}
+
+static int
+g_redboot_access(struct g_provider *pp, int dread, int dwrite, int dexcl)
+{
+	struct g_geom *gp = pp->geom;
+	struct g_slicer *gsp = gp->softc;
+	struct g_redboot_softc *sc = gsp->softc;
+
+	if (dwrite > 0 && sc->readonly[pp->index])
+		return (EPERM);
+	return (sc->parent_access(pp, dread, dwrite, dexcl));
 }
 
 static int
@@ -155,8 +170,7 @@ nameok(const char name[16])
 static struct fis_image_desc *
 parse_fis_directory(u_char *buf, size_t bufsize, off_t offset, uint32_t offmask)
 {
-#define	match(a,b) \
-	(bcmp(fd->name, FISDIR_NAME, sizeof(FISDIR_NAME)-1) == 0)
+#define	match(a,b)	(bcmp(a, b, sizeof(b)-1) == 0)
 	struct fis_image_desc *fd, *efd;
 	struct fis_image_desc *fisdir, *redbcfg;
 	struct fis_image_desc *head, **tail;
@@ -181,7 +195,9 @@ parse_fis_directory(u_char *buf, size_t bufsize, off_t offset, uint32_t offmask)
 	 */
 	fisdir = redbcfg = NULL;
 	*(tail = &head) = NULL;
-	for (i = 0; fd < efd && fd->name[0] != 0xff; i++, fd++) {
+	for (i = 0; fd < efd; i++, fd++) {
+		if (fd->name[0] == 0xff)
+			continue;
 		if (match(fd->name, FISDIR_NAME))
 			fisdir = fd;
 		else if (match(fd->name, REDBCFG_NAME))
@@ -236,12 +252,17 @@ g_redboot_taste(struct g_class *mp, struct g_provider *pp, int insist)
 	if (!strcmp(pp->geom->class->name, REDBOOT_CLASS_NAME))
 		return (NULL);
 	/* XXX only taste flash providers */
-	if (strncmp(pp->name, "cfi", 3))
+	if (strncmp(pp->name, "cfi", 3) && 
+	    strncmp(pp->name, "flash/spi", 9))
 		return (NULL);
 	gp = g_slice_new(mp, REDBOOT_MAXSLICE, pp, &cp, &sc, sizeof(*sc),
 	    g_redboot_start);
 	if (gp == NULL)
 		return (NULL);
+	/* interpose our access method */
+	sc->parent_access = gp->access;
+	gp->access = g_redboot_access;
+
 	sectorsize = cp->provider->sectorsize;
 	blksize = cp->provider->stripesize;
 	if (powerof2(cp->provider->mediasize))
@@ -287,6 +308,9 @@ again:
 			    __func__, error, fd->name);
 		sc->entry[i] = fd->entry;
 		sc->dsize[i] = fd->dsize;
+		/* disallow writing hard-to-recover entries */
+		sc->readonly[i] = (strcmp(fd->name, FISDIR_NAME) == 0) ||
+				  (strcmp(fd->name, REDBOOT_NAME) == 0);
 		i++;
 	}
 	g_free(buf);

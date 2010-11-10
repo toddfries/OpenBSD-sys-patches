@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_smbat.c,v 1.7 2008/12/13 07:45:48 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_smbat.c,v 1.9 2010/01/21 21:14:28 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -33,7 +33,8 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_smbat.c,v 1.7 2008/12/13 07:45:48 si
 #include <sys/module.h>
 #include <sys/bus.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpiio.h>
 #include <dev/acpica/acpi_smbus.h>
@@ -189,7 +190,7 @@ acpi_smbus_read_2(struct acpi_smbat_softc *sc, uint8_t addr, uint8_t cmd,
     uint16_t *ptr)
 {
 	int error, to;
-	ACPI_INTEGER val;
+	UINT64 val;
 
 	ACPI_SERIAL_ASSERT(smbat);
 
@@ -256,7 +257,7 @@ static int
 acpi_smbus_read_multi_1(struct acpi_smbat_softc *sc, uint8_t addr, uint8_t cmd,
     uint8_t *ptr, uint16_t len)
 {
-	ACPI_INTEGER val;
+	UINT64 val;
 	uint8_t	to;
 	int error;
 

@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/pci/schizovar.h,v 1.2 2008/11/20 18:44:09 marius Exp $
+ * $FreeBSD: src/sys/sparc64/pci/schizovar.h,v 1.5 2010/05/14 20:00:21 marius Exp $
  */
 
 #ifndef _SPARC64_PCI_SCHIZOVAR_H_
@@ -70,7 +70,11 @@ struct schizo_softc {
 	bus_space_tag_t			sc_pci_memt;
 	bus_dma_tag_t			sc_pci_dmat;
 
+	uint32_t			sc_stats_dma_ce;
+	uint32_t			sc_stats_pci_non_fatal;
+
 	uint8_t				sc_pci_secbus;
+	uint8_t				sc_pci_subbus;
 
 	struct ofw_bus_iinfo		sc_pci_iinfo;
 

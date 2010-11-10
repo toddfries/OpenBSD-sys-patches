@@ -26,15 +26,13 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/cxgb_offload.h,v 1.12 2008/09/24 01:19:08 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_offload.h,v 1.13 2010/02/24 10:16:18 np Exp $
 
 ***************************************************************************/
 
 #ifndef _CXGB_OFFLOAD_H
 #define _CXGB_OFFLOAD_H
 
-#include <common/cxgb_version.h>
-#include <cxgb_config.h>
 #include <common/cxgb_tcb.h>
 #include <t3cdev.h>
 

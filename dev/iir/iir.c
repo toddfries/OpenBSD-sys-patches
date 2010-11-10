@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iir/iir.c,v 1.20 2008/01/09 20:02:56 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iir/iir.c,v 1.24 2010/01/08 15:47:23 trasz Exp $");
 
 #define _IIR_C_
 
@@ -66,9 +66,6 @@ __FBSDID("$FreeBSD: src/sys/dev/iir/iir.c,v 1.20 2008/01/09 20:02:56 scottl Exp 
 #include <cam/cam_debug.h>
 #include <cam/scsi/scsi_all.h>
 #include <cam/scsi/scsi_message.h>
-
-#include <vm/vm.h>
-#include <vm/pmap.h>
 
 #include <dev/iir/iir.h>
 
@@ -156,7 +153,6 @@ static void     iir_action(struct cam_sim *sim, union ccb *ccb);
 static void     iir_poll(struct cam_sim *sim);
 static void     iir_shutdown(void *arg, int howto);
 static void     iir_timeout(void *arg);
-static void     iir_watchdog(void *arg);
 
 static void     gdt_eval_mapping(u_int32_t size, int *cyls, int *heads, 
                                  int *secs);
@@ -1485,40 +1481,6 @@ static void
 iir_timeout(void *arg)
 {
     GDT_DPRINTF(GDT_D_TIMEOUT, ("iir_timeout(%p)\n", gccb));
-}
-
-static void
-iir_watchdog(void *arg)
-{
-    struct gdt_softc *gdt;
-
-    gdt = (struct gdt_softc *)arg;
-    GDT_DPRINTF(GDT_D_DEBUG, ("iir_watchdog(%p)\n", gdt));
-
-    {
-        int ccbs = 0, ucmds = 0, frees = 0, pends = 0;
-        struct gdt_ccb *p;
-        struct ccb_hdr *h;
-        struct gdt_ucmd *u;
-
-        for (h = TAILQ_FIRST(&gdt->sc_ccb_queue); h != NULL; 
-             h = TAILQ_NEXT(h, sim_links.tqe))
-            ccbs++;
-        for (u = TAILQ_FIRST(&gdt->sc_ucmd_queue); u != NULL; 
-             u = TAILQ_NEXT(u, links))
-            ucmds++;
-        for (p = SLIST_FIRST(&gdt->sc_free_gccb); p != NULL; 
-             p = SLIST_NEXT(p, sle))
-            frees++;
-        for (p = SLIST_FIRST(&gdt->sc_pending_gccb); p != NULL; 
-             p = SLIST_NEXT(p, sle))
-            pends++;
-
-        GDT_DPRINTF(GDT_D_TIMEOUT, ("ccbs %d ucmds %d frees %d pends %d\n",
-               ccbs, ucmds, frees, pends));
-    }
-
-    timeout(iir_watchdog, (caddr_t)gdt, hz * 15);
 }
 
 static void     

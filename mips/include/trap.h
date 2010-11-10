@@ -36,7 +36,7 @@
  *	from: Utah Hdr: trap.h 1.1 90/07/09
  *	from: @(#)trap.h	8.1 (Berkeley) 6/10/93
  *	JNPR: trap.h,v 1.3 2006/12/02 09:53:41 katta
- * $FreeBSD: src/sys/mips/include/trap.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/trap.h,v 1.5 2010/04/17 01:17:31 jmallett Exp $
  */
 
 #ifndef _MACHINE_TRAP_H_
@@ -74,17 +74,17 @@
 #if !defined(SMP) && (defined(DDB) || defined(DEBUG))
 
 struct trapdebug {		/* trap history buffer for debugging */
-	u_int	status;
-	u_int	cause;
-	u_int	vadr;
-	u_int	pc;
-	u_int	ra;
-	u_int	sp;
-	u_int	code;
+	register_t	status;
+	register_t	cause;
+	register_t	vadr;
+	register_t	pc;
+	register_t	ra;
+	register_t	sp;
+	register_t	code;
 };
 
 #define	trapdebug_enter(x, cd) {	\
-	intrmask_t s = disableintr();	\
+	register_t s = intr_disable();	\
 	trp->status = x->sr;		\
 	trp->cause = x->cause;		\
 	trp->vadr = x->badvaddr;	\
@@ -94,7 +94,7 @@ struct trapdebug {		/* trap history buffer for debugging */
 	trp->code = cd;			\
 	if (++trp == &trapdebug[TRAPSIZE])	\
 		trp = trapdebug;	\
-	restoreintr(s);			\
+	intr_restore(s);		\
 }
 
 #define	TRAPSIZE 10		/* Trap log buffer length */
@@ -107,6 +107,16 @@ void trapDump(char *msg);
 #define	trapdebug_enter(x, cd)
 
 #endif
+
+void MipsFPTrap(u_int, u_int, u_int);
+void MipsKernGenException(void);
+void MipsKernIntr(void);
+void MipsTLBInvalidException(void);
+void MipsTLBMissException(void);
+void MipsUserGenException(void);
+void MipsUserIntr(void);
+
+register_t trap(struct trapframe *);
 
 #ifndef LOCORE /* XXX */
 int check_address(void *);

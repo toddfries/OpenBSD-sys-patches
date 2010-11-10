@@ -31,7 +31,7 @@
 /*static char sccsid[] = "from: * @(#)nlm_prot.x	2.1 88/08/01 4.0 RPCSRC";*/
 __RCSID("$NetBSD: nlm_prot.x,v 1.6 2000/06/07 14:30:15 bouyer Exp $");
 #endif /* not lint */
-__FBSDID("$FreeBSD: src/sys/nlm/nlm_prot_server.c,v 1.4 2008/08/25 09:30:27 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/nlm/nlm_prot_server.c,v 1.5 2009/10/07 19:50:14 zml Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -671,6 +671,7 @@ bool_t
 nlm4_granted_res_4_svc(nlm4_res *argp, void *result, struct svc_req *rqstp)
 {
 
+	nlm_do_granted_res(argp, rqstp);
 	return (FALSE);
 }
 

@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright (c) 2001-2008, Intel Corporation 
+  Copyright (c) 2001-2009, Intel Corporation 
   All rights reserved.
   
   Redistribution and use in source and binary forms, with or without 
@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/e1000_nvm.h,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/e1000_nvm.h,v 1.2 2009/04/10 00:05:46 jfv Exp $*/
 
 #ifndef _E1000_NVM_H_
 #define _E1000_NVM_H_
@@ -61,7 +61,6 @@ s32  e1000_write_nvm_spi(struct e1000_hw *hw, u16 offset, u16 words,
 s32  e1000_update_nvm_checksum_generic(struct e1000_hw *hw);
 void e1000_stop_nvm(struct e1000_hw *hw);
 void e1000_release_nvm_generic(struct e1000_hw *hw);
-void e1000_reload_nvm_generic(struct e1000_hw *hw);
 
 #define E1000_STM_OPCODE  0xDB00
 

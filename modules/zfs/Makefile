@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/zfs/Makefile,v 1.13 2008/11/17 20:49:29 pjd Exp $
+# $FreeBSD: src/sys/modules/zfs/Makefile,v 1.24 2010/06/03 09:29:54 pjd Exp $
 
 KMOD=	zfs
 
@@ -16,19 +16,19 @@ SRCS+=	nvpair.c
 SRCS+=	u8_textprep.c
 
 .PATH:	${.CURDIR}/../../cddl/compat/opensolaris/kern
-SRCS+=	opensolaris_kmem.c
+SRCS+=	opensolaris_acl.c
 SRCS+=	opensolaris_kobj.c
 SRCS+=	opensolaris_kstat.c
 SRCS+=	opensolaris_lookup.c
-SRCS+=	opensolaris_misc.c
 SRCS+=	opensolaris_policy.c
 SRCS+=	opensolaris_string.c
+SRCS+=	opensolaris_taskq.c
 SRCS+=	opensolaris_vfs.c
 SRCS+=	opensolaris_zone.c
 
 .if ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "amd64" || ${MACHINE_ARCH} == "ia64" || ${MACHINE_ARCH} == "sparc64"
 .PATH:	${SUNW}/common/atomic/${MACHINE_ARCH}
-SRCS+=	atomic.S
+SRCS+=	opensolaris_atomic.S
 .else
 .PATH:	${.CURDIR}/../../cddl/compat/opensolaris/kern
 SRCS+=	opensolaris_atomic.c
@@ -42,16 +42,10 @@ SRCS+=	vnode.c
 SRCS+=	callb.c
 SRCS+=	list.c
 SRCS+=	nvpair_alloc_system.c
-SRCS+=	taskq.c
-
-.PATH:	${SUNW}/uts/common/rpc
-SRCS+=	xdr.c
-SRCS+=	xdr_array.c
-SRCS+=	xdr_mem.c
 
 .PATH:	${SUNW}/uts/common/zmod
 SRCS+=	adler32.c
-SRCS+=	crc32.c
+SRCS+=	opensolaris_crc32.c
 SRCS+=	deflate.c
 SRCS+=	inffast.c
 SRCS+=	inflate.c
@@ -67,9 +61,6 @@ SRCS+=	zutil.c
 ZFS_SRCS=	${ZFS_OBJS:C/.o$/.c/}
 SRCS+=	${ZFS_SRCS}
 SRCS+=	vdev_geom.c
-
-# Use UMA for ZIO allocation. This is not stable.
-#CFLAGS+=-DZIO_USE_UMA
 
 # Use FreeBSD's namecache.
 CFLAGS+=-DFREEBSD_NAMECACHE

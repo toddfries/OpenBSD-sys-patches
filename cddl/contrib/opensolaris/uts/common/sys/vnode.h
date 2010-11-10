@@ -39,8 +39,6 @@
 #ifndef _SYS_VNODE_H
 #define	_SYS_VNODE_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include_next <sys/vnode.h>
 
 #ifdef	__cplusplus
@@ -266,6 +264,14 @@ typedef struct xvattr {
 	ASSERT((xvap)->xva_vattr.va_mask | AT_XVATTR);		\
 	ASSERT((xvap)->xva_magic == XVA_MAGIC);			\
 	(xvap)->xva_reqattrmap[XVA_INDEX(attr)] |= XVA_ATTRBIT(attr)
+/*
+ * XVA_CLR_REQ() clears an attribute bit in the proper element in the bitmap
+ * of requested attributes (xva_reqattrmap[]).
+ */
+#define	XVA_CLR_REQ(xvap, attr)					\
+	ASSERT((xvap)->xva_vattr.va_mask | AT_XVATTR);		\
+	ASSERT((xvap)->xva_magic == XVA_MAGIC);			\
+	(xvap)->xva_reqattrmap[XVA_INDEX(attr)] &= ~XVA_ATTRBIT(attr)
 
 /*
  * XVA_SET_RTN() sets an attribute bit in the proper element in the bitmap
@@ -304,7 +310,6 @@ typedef struct xvattr {
  * VOP_ACCESS flags
  */
 #define	V_ACE_MASK	0x1	/* mask represents  NFSv4 ACE permissions */
-#define	V_APPEND	0x2	/* want to do append only check */
 
 /*
  * Flags for vnode operations.
@@ -354,6 +359,11 @@ typedef struct caller_context {
 } caller_context_t;
 
 /*
+ * Structure tags for function prototypes, defined elsewhere.
+ */
+struct taskq;
+
+/*
  * Flags for VOP_LOOKUP
  *
  * Defined in file.h, but also possible, FIGNORECASE
@@ -368,6 +378,14 @@ typedef struct caller_context {
  * Flags for VOP_READDIR
  */
 #define	V_RDDIR_ENTFLAGS	0x01	/* request dirent flags */
+#define	V_RDDIR_ACCFILTER	0x02	/* filter out inaccessible dirents */
+
+/*
+ * Public vnode manipulation functions.
+ */
+#ifdef	_KERNEL
+
+void	vn_rele_async(struct vnode *vp, struct taskq *taskq);
 
 /*
  * Extensible vnode attribute (xva) routines:
@@ -376,6 +394,12 @@ typedef struct caller_context {
  */
 void		xva_init(xvattr_t *);
 xoptattr_t	*xva_getxoptattr(xvattr_t *);	/* Get ptr to xoptattr_t */
+
+#define	VN_RELE_ASYNC(vp, taskq)	{ \
+	vn_rele_async(vp, taskq); \
+}
+
+#endif	/* _KERNEL */
 
 /*
  * Flags to VOP_SETATTR/VOP_GETATTR.

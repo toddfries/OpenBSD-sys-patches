@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/macgpio.c,v 1.3 2009/01/12 01:36:01 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/macgpio.c,v 1.4 2010/06/06 14:29:06 nwhitehorn Exp $
  */
 
 /*
@@ -96,6 +96,8 @@ static device_method_t macgpio_methods[] = {
         DEVMETHOD(bus_activate_resource, macgpio_activate_resource),
         DEVMETHOD(bus_deactivate_resource, macgpio_deactivate_resource),
         DEVMETHOD(bus_release_resource, bus_generic_release_resource),
+
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	macgpio_get_devinfo),

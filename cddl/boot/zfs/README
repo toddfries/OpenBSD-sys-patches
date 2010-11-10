@@ -1,4 +1,4 @@
-$FreeBSD: src/sys/cddl/boot/zfs/README,v 1.1 2008/11/17 20:49:29 pjd Exp $
+$FreeBSD: src/sys/cddl/boot/zfs/README,v 1.2 2009/05/16 10:48:20 dfr Exp $
 
 This directory contains various files derived from CDDL sources that
 are used by the ZFS bootstrap:
@@ -6,7 +6,7 @@ are used by the ZFS bootstrap:
     fletcher.c			checksum support
     sha256.c			checksum support
     lzjb.c			compression support
-    zfssubr.c			mostly checksum and compression support
+    zfssubr.c			checksum, compression and raidz support
     zfsimpl.h			mostly describing the physical layout
 
 The files fletcher.c, lzjb.c and sha256.c are largely identical to the

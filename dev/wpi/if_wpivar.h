@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/wpi/if_wpivar.h,v 1.4 2008/05/16 04:15:54 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/wpi/if_wpivar.h,v 1.7 2010/04/07 15:29:13 rpaulo Exp $	*/
 
 /*-
  * Copyright (c) 2006,2007
@@ -106,12 +106,6 @@ struct wpi_amrr {
 	int	recovery;
 };
 
-struct wpi_node {
-        struct  ieee80211_node ni;      /* must be the first */
-        struct  ieee80211_amrr_node     amn;
-};
-#define	WPI_NODE(ni)	((struct wpi_node *)(ni))
-
 struct wpi_power_sample {
 	uint8_t	index;
 	int8_t	power;
@@ -127,7 +121,6 @@ struct wpi_power_group {
 
 struct wpi_vap {
 	struct ieee80211vap	vap;
-	struct ieee80211_amrr	amrr;
 
 	int			(*newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
@@ -144,9 +137,8 @@ struct wpi_softc {
 	 */
 	uint32_t		flags;
 #define WPI_FLAG_HW_RADIO_OFF	(1 << 0)
-#define WPI_FLAG_SCANNING	(1 << 1)
-#define WPI_FLAG_BUSY		(1 << 2)
-#define WPI_FLAG_AUTH		(1 << 3)
+#define WPI_FLAG_BUSY		(1 << 1)
+#define WPI_FLAG_AUTH		(1 << 2)
 
 	/* shared area */
 	struct wpi_dma_info	shared_dma;
@@ -183,9 +175,7 @@ struct wpi_softc {
 	struct bpf_if		*sc_drvbpf;
 
 	struct wpi_rx_radiotap_header sc_rxtap;
-	int			sc_rxtap_len;
 	struct wpi_tx_radiotap_header sc_txtap;
-	int			sc_txtap_len;
 
 	/* firmware image */
 	const struct firmware	*fw_fp;
@@ -193,36 +183,9 @@ struct wpi_softc {
 	/* firmware DMA transfer */
 	struct wpi_dma_info	fw_dma;
 
-	/* command queue related variables */
-#define WPI_SCAN_START		(1<<0)
-#define WPI_SCAN_CURCHAN	(1<<1)
-#define WPI_SCAN_STOP		(1<<2)
-#define WPI_SET_CHAN		(1<<3)
-#define WPI_AUTH		(1<<4)
-#define WPI_RUN			(1<<5)
-#define WPI_SCAN_NEXT		(1<<6)
-#define WPI_RESTART		(1<<7)
-#define WPI_RF_RESTART		(1<<8)
-#define WPI_CMD_MAXOPS		10
-	/* command queuing request type */
-#define WPI_QUEUE_NORMAL	0
-#define WPI_QUEUE_CLEAR		1
-	int                     sc_cmd[WPI_CMD_MAXOPS];
-	int                     sc_cmd_arg[WPI_CMD_MAXOPS];
-	int                     sc_cmd_cur;    /* current queued scan task */
-	int                     sc_cmd_next;   /* last queued scan task */
-	struct mtx              sc_cmdlock;
-
-	/* Task queues used to control the driver */
-	struct taskqueue	*sc_tq;		/* Main command task queue */
-	struct taskqueue	*sc_tq2;	/* firmware reset task queue */
-
 	/* Tasks used by the driver */
-	struct task		sc_radioontask;	/* enable rf transmitter task*/
-	struct task		sc_radioofftask;/* disable rf transmitter task*/
-	struct task		sc_opstask;	/* operation handling task */
 	struct task		sc_restarttask;	/* reset firmware task */
-	struct task		sc_bmiss_task;	/* beacon miss */
+	struct task		sc_radiotask;	/* reset rf task */
 
        /* Eeprom info */
 	uint8_t			cap;
@@ -239,10 +202,3 @@ struct wpi_softc {
 #define WPI_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define WPI_LOCK_ASSERT(sc)     mtx_assert(&(sc)->sc_mtx, MA_OWNED)
 #define WPI_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
-
-#define WPI_CMD_LOCK_INIT(_sc)  \
-        mtx_init(&(_sc)->sc_cmdlock, device_get_nameunit((_sc)->sc_dev), \
-	    NULL, MTX_DEF)
-#define WPI_CMD_LOCK_DESTROY(_sc)        mtx_destroy(&(_sc)->sc_cmdlock)
-#define WPI_CMD_LOCK(_sc)                mtx_lock(&(_sc)->sc_cmdlock)
-#define WPI_CMD_UNLOCK(_sc)              mtx_unlock(&(_sc)->sc_cmdlock)

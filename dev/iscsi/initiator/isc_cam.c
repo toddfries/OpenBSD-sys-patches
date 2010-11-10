@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_cam.c,v 1.3 2008/11/25 07:17:11 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_cam.c,v 1.4 2009/08/18 08:46:54 mav Exp $");
 
 #include "opt_iscsi_initiator.h"
 
@@ -190,6 +190,8 @@ _inq(struct cam_sim *sim, union ccb *ccb, int maxluns)
      strncpy(cpi->hba_vid, "iSCSI", HBA_IDLEN);
      strncpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
      cpi->unit_number = cam_sim_unit(sim);
+     cpi->transport = XPORT_ISCSI;
+     cpi->transport_version = 0;
      cpi->ccb_h.status = CAM_REQ_CMP;
 }
 

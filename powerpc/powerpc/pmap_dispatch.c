@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.16 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.22 2010/05/24 14:26:57 alc Exp $");
 
 /*
  * Dispatch MI pmap calls to the appropriate MMU implementation
@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.16 2008/12/20 00
 #include <vm/vm_page.h>
 
 #include <machine/mmuvar.h>
+#include <machine/smp.h>
 
 #include "mmu_if.h"
 
@@ -191,6 +192,14 @@ pmap_is_prefaultable(pmap_t pmap, vm_offset_t va)
 
 	CTR3(KTR_PMAP, "%s(%p, %#x)", __func__, pmap, va);
 	return (MMU_IS_PREFAULTABLE(mmu_obj, pmap, va));
+}
+
+boolean_t
+pmap_is_referenced(vm_page_t m)
+{
+
+	CTR2(KTR_PMAP, "%s(%p)", __func__, m);
+	return (MMU_IS_REFERENCED(mmu_obj, m));
 }
 
 boolean_t
@@ -351,11 +360,11 @@ pmap_zero_page_idle(vm_page_t m)
 }
 
 int
-pmap_mincore(pmap_t pmap, vm_offset_t addr)
+pmap_mincore(pmap_t pmap, vm_offset_t addr, vm_paddr_t *locked_pa)
 {
 
 	CTR3(KTR_PMAP, "%s(%p, %#x)", __func__, pmap, addr);
-	return (MMU_MINCORE(mmu_obj, pmap, addr));
+	return (MMU_MINCORE(mmu_obj, pmap, addr, locked_pa));
 }
 
 void
@@ -406,6 +415,16 @@ pmap_bootstrap(vm_offset_t start, vm_offset_t end)
 	MMU_BOOTSTRAP(mmu_obj, start, end);
 }
 
+void
+pmap_cpu_bootstrap(int ap)
+{
+	/*
+	 * No KTR here because our console probably doesn't work yet
+	 */
+
+	return (MMU_CPU_BOOTSTRAP(mmu_obj, ap));
+}
+
 void *
 pmap_mapdev(vm_offset_t pa, vm_size_t size)
 {
@@ -446,12 +465,36 @@ pmap_dev_direct_mapped(vm_offset_t pa, vm_size_t size)
 	return (MMU_DEV_DIRECT_MAPPED(mmu_obj, pa, size));
 }
 
-boolean_t
-pmap_page_executable(vm_page_t pg)
+void
+pmap_sync_icache(pmap_t pm, vm_offset_t va, vm_size_t sz)
+{
+ 
+	CTR4(KTR_PMAP, "%s(%p, %#x, %#x)", __func__, pm, va, sz);
+	return (MMU_SYNC_ICACHE(mmu_obj, pm, va, sz));
+}
+
+vm_offset_t
+pmap_dumpsys_map(struct pmap_md *md, vm_size_t ofs, vm_size_t *sz)
 {
 
-	CTR2(KTR_PMAP, "%s(%p)", __func__, pg);
-	return (MMU_PAGE_EXECUTABLE(mmu_obj, pg));
+	CTR4(KTR_PMAP, "%s(%p, %#x, %#x)", __func__, md, ofs, *sz);
+	return (MMU_DUMPSYS_MAP(mmu_obj, md, ofs, sz));
+}
+
+void
+pmap_dumpsys_unmap(struct pmap_md *md, vm_size_t ofs, vm_offset_t va)
+{
+
+	CTR4(KTR_PMAP, "%s(%p, %#x, %#x)", __func__, md, ofs, va);
+	return (MMU_DUMPSYS_UNMAP(mmu_obj, md, ofs, va));
+}
+
+struct pmap_md *
+pmap_scan_md(struct pmap_md *prev)
+{
+
+	CTR2(KTR_PMAP, "%s(%p)", __func__, prev);
+	return (MMU_SCAN_MD(mmu_obj, prev));
 }
 
 /*
@@ -474,7 +517,7 @@ pmap_mmu_install(char *name, int prio)
 
 		if (mmup->name &&
 		    !strcmp(mmup->name, name) &&
-		    prio >= curr_prio) {
+		    (prio >= curr_prio || mmu_def_impl == NULL)) {
 			curr_prio = prio;
 			mmu_def_impl = mmup;
 			return (TRUE);

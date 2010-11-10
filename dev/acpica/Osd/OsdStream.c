@@ -30,9 +30,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdStream.c,v 1.6 2005/09/11 18:39:02 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdStream.c,v 1.7 2009/06/05 18:44:36 jkim Exp $");
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
 
 void
 AcpiOsPrintf(const char *Format, ...)

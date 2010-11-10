@@ -18,7 +18,7 @@
  *
  * CDDL HEADER END
  *
- * $FreeBSD: src/sys/cddl/dev/dtrace/dtrace_unload.c,v 1.2 2008/11/05 19:39:11 rodrigc Exp $
+ * $FreeBSD: src/sys/cddl/dev/dtrace/dtrace_unload.c,v 1.3 2010/08/22 11:05:37 rpaulo Exp $
  *
  */
 
@@ -43,6 +43,7 @@ dtrace_unload()
 	}
 #else
 	destroy_dev(dtrace_dev);
+	destroy_dev(helper_dev);
 #endif
 
 	mutex_enter(&dtrace_provider_lock);

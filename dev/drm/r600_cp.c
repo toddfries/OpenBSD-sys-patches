@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/r600_cp.c,v 1.2 2009/03/09 07:33:35 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/r600_cp.c,v 1.13 2010/04/22 18:47:30 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -174,14 +174,13 @@ int r600_page_table_init(struct drm_device *dev)
 		if (entry->busaddr[i] == 0) {
 			DRM_ERROR("unable to map PCIGART pages!\n");
 			r600_page_table_cleanup(dev, gart_info);
-			ret = -EINVAL;
 			goto done;
 		}
 #endif
 		entry_addr = entry->busaddr[i];
 		for (j = 0; j < (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE); j++) {
 			page_base = (u64) entry_addr & ATI_PCIGART_PAGE_MASK;
-			page_base |= R600_PTE_VALID | R600_PTE_SYSTEM | R600_PTE_SNOOPED;
+			page_base |= R600_PTE_VALID | R600_PTE_SYSTEM;
 			page_base |= R600_PTE_READABLE | R600_PTE_WRITEABLE;
 
 			*pci_gart = page_base;
@@ -193,6 +192,7 @@ int r600_page_table_init(struct drm_device *dev)
 			entry_addr += ATI_PCIGART_PAGE_SIZE;
 		}
 	}
+	ret = 1;
 #ifdef __linux__
 done:
 #endif
@@ -282,7 +282,50 @@ static void r600_vm_init(struct drm_device *dev)
 /* load r600 microcode */
 static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 {
+	const u32 (*cp)[3];
+	const u32 *pfp;
 	int i;
+
+	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
+	case CHIP_R600:
+		DRM_INFO("Loading R600 Microcode\n");
+		cp  = R600_cp_microcode;
+		pfp = R600_pfp_microcode;
+		break;
+	case CHIP_RV610:
+		DRM_INFO("Loading RV610 Microcode\n");
+		cp  = RV610_cp_microcode;
+		pfp = RV610_pfp_microcode;
+		break;
+	case CHIP_RV630:
+		DRM_INFO("Loading RV630 Microcode\n");
+		cp  = RV630_cp_microcode;
+		pfp = RV630_pfp_microcode;
+		break;
+	case CHIP_RV620:
+		DRM_INFO("Loading RV620 Microcode\n");
+		cp  = RV620_cp_microcode;
+		pfp = RV620_pfp_microcode;
+		break;
+	case CHIP_RV635:
+		DRM_INFO("Loading RV635 Microcode\n");
+		cp  = RV635_cp_microcode;
+		pfp = RV635_pfp_microcode;
+		break;
+	case CHIP_RV670:
+		DRM_INFO("Loading RV670 Microcode\n");
+		cp  = RV670_cp_microcode;
+		pfp = RV670_pfp_microcode;
+		break;
+	case CHIP_RS780:
+	case CHIP_RS880:
+		DRM_INFO("Loading RS780/RS880 Microcode\n");
+		cp  = RS780_cp_microcode;
+		pfp = RS780_pfp_microcode;
+		break;
+	default:
+		return;
+	}
 
 	r600_do_cp_stop(dev_priv);
 
@@ -298,116 +341,19 @@ static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 
-	if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R600)) {
-		DRM_INFO("Loading R600 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     R600_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     R600_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     R600_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading R600 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, R600_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV610)) {
-		DRM_INFO("Loading RV610 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV610_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV610_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV610_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV610 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV610_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV630)) {
-		DRM_INFO("Loading RV630 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV630_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV630_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV630_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV630 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV630_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV620)) {
-		DRM_INFO("Loading RV620 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV620_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV620_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV620_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV620 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV620_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV635)) {
-		DRM_INFO("Loading RV635 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV635_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV635_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV635_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV635 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV635_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV670)) {
-		DRM_INFO("Loading RV670 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV670 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV670_pfp_microcode[i]);
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780)) {
-		DRM_INFO("Loading RS780 CP Microcode\n");
-		for (i = 0; i < PM4_UCODE_SIZE; i++) {
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][0]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][1]);
-			RADEON_WRITE(R600_CP_ME_RAM_DATA,
-				     RV670_cp_microcode[i][2]);
-		}
-
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RS780 PFP Microcode\n");
-		for (i = 0; i < PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV670_pfp_microcode[i]);
+	for (i = 0; i < PM4_UCODE_SIZE; i++) {
+		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][0]);
+		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][1]);
+		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][2]);
 	}
+
+	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
+	for (i = 0; i < PFP_UCODE_SIZE; i++)
+		RADEON_WRITE(R600_CP_PFP_UCODE_DATA, pfp[i]);
+
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_RADDR, 0);
-
 }
 
 static void r700_vm_init(struct drm_device *dev)
@@ -465,7 +411,30 @@ static void r700_vm_init(struct drm_device *dev)
 /* load r600 microcode */
 static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 {
+	const u32 *pfp;
+	const u32 *cp;
 	int i;
+
+	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
+	case CHIP_RV770:
+		DRM_INFO("Loading RV770/RV790 Microcode\n");
+		pfp = RV770_pfp_microcode;
+		cp  = RV770_cp_microcode;
+		break;
+	case CHIP_RV730:
+	case CHIP_RV740:
+		DRM_INFO("Loading RV730/RV740 Microcode\n");
+		pfp = RV730_pfp_microcode;
+		cp  = RV730_cp_microcode;
+		break;
+	case CHIP_RV710:
+		DRM_INFO("Loading RV710 Microcode\n");
+		pfp = RV710_pfp_microcode;
+		cp  = RV710_cp_microcode;
+		break;
+	default:
+		return;
+	}
 
 	r600_do_cp_stop(dev_priv);
 
@@ -479,51 +448,19 @@ static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	DRM_UDELAY(15000);
 	RADEON_WRITE(R600_GRBM_SOFT_RESET, 0);
 
+	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
+	for (i = 0; i < R700_PFP_UCODE_SIZE; i++)
+		RADEON_WRITE(R600_CP_PFP_UCODE_DATA, pfp[i]);
+	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 
-	if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV770)) {
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV770 PFP Microcode\n");
-		for (i = 0; i < R700_PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV770_pfp_microcode[i]);
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
+	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
+	for (i = 0; i < R700_PM4_UCODE_SIZE; i++)
+		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i]);
+	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-		DRM_INFO("Loading RV770 CP Microcode\n");
-		for (i = 0; i < R700_PM4_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_ME_RAM_DATA, RV770_cp_microcode[i]);
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV730)) {
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV730 PFP Microcode\n");
-		for (i = 0; i < R700_PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV730_pfp_microcode[i]);
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-		DRM_INFO("Loading RV730 CP Microcode\n");
-		for (i = 0; i < R700_PM4_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_ME_RAM_DATA, RV730_cp_microcode[i]);
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-
-	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV710)) {
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-		DRM_INFO("Loading RV710 PFP Microcode\n");
-		for (i = 0; i < R700_PFP_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_PFP_UCODE_DATA, RV710_pfp_microcode[i]);
-		RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
-
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-		DRM_INFO("Loading RV710 CP Microcode\n");
-		for (i = 0; i < R700_PM4_UCODE_SIZE; i++)
-			RADEON_WRITE(R600_CP_ME_RAM_DATA, RV710_cp_microcode[i]);
-		RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-
-	}
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_RADDR, 0);
-
 }
 
 static void r600_test_writeback(drm_radeon_private_t *dev_priv)
@@ -786,6 +723,7 @@ static void r600_gfx_init(struct drm_device *dev,
 		break;
 	case CHIP_RV610:
 	case CHIP_RS780:
+	case CHIP_RS880:
 	case CHIP_RV620:
 		dev_priv->r600_max_pipes = 1;
 		dev_priv->r600_max_tile_pipes = 1;
@@ -920,7 +858,8 @@ static void r600_gfx_init(struct drm_device *dev,
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV630) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV610) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV620) ||
-	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780))
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780) ||
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS880))
 		RADEON_WRITE(R600_DB_DEBUG, R600_PREZ_MUST_WAIT_FOR_POSTZ_DONE);
 	else
 		RADEON_WRITE(R600_DB_DEBUG, 0);
@@ -938,7 +877,8 @@ static void r600_gfx_init(struct drm_device *dev,
 	sq_ms_fifo_sizes = RADEON_READ(R600_SQ_MS_FIFO_SIZES);
 	if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV610) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV620) ||
-	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780)) {
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780) ||
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS880)) {
 		sq_ms_fifo_sizes = (R600_CACHE_FIFO_SIZE(0xa) |
 				    R600_FETCH_FIFO_HIWATER(0xa) |
 				    R600_DONE_FIFO_HIWATER(0xe0) |
@@ -981,7 +921,8 @@ static void r600_gfx_init(struct drm_device *dev,
 					    R600_NUM_ES_STACK_ENTRIES(0));
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV610) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV620) ||
-		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780)) {
+		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780) ||
+		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS880)) {
 		/* no vertex cache */
 		sq_config &= ~R600_VC_ENABLE;
 
@@ -1038,7 +979,8 @@ static void r600_gfx_init(struct drm_device *dev,
 
 	if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV610) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV620) ||
-	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780))
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS780) ||
+	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS880))
 		RADEON_WRITE(R600_VGT_CACHE_INVALIDATION, R600_CACHE_INVALIDATION(R600_TC_ONLY));
 	else
 		RADEON_WRITE(R600_VGT_CACHE_INVALIDATION, R600_CACHE_INVALIDATION(R600_VC_AND_TC));
@@ -1081,6 +1023,7 @@ static void r600_gfx_init(struct drm_device *dev,
 		break;
 	case CHIP_RV610:
 	case CHIP_RS780:
+	case CHIP_RS880:
 	case CHIP_RV620:
 		gs_prim_buffer_depth = 32;
 		break;
@@ -1126,6 +1069,7 @@ static void r600_gfx_init(struct drm_device *dev,
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_RV610:
 	case CHIP_RS780:
+	case CHIP_RS880:
 	case CHIP_RV620:
 		tc_cntl = R600_TC_L2_SIZE(8);
 		break;
@@ -1309,6 +1253,31 @@ static void r700_gfx_init(struct drm_device *dev,
 		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
 		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
 		break;
+	case CHIP_RV740:
+		dev_priv->r600_max_pipes = 4;
+		dev_priv->r600_max_tile_pipes = 4;
+		dev_priv->r600_max_simds = 8;
+		dev_priv->r600_max_backends = 4;
+		dev_priv->r600_max_gprs = 256;
+		dev_priv->r600_max_threads = 248;
+		dev_priv->r600_max_stack_entries = 512;
+		dev_priv->r600_max_hw_contexts = 8;
+		dev_priv->r600_max_gs_threads = 16 * 2;
+		dev_priv->r600_sx_max_export_size = 256;
+		dev_priv->r600_sx_max_export_pos_size = 32;
+		dev_priv->r600_sx_max_export_smx_size = 224;
+		dev_priv->r600_sq_num_cf_insts = 2;
+
+		dev_priv->r700_sx_num_of_sets = 7;
+		dev_priv->r700_sc_prim_fifo_size = 0x100;
+		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
+		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
+
+		if (dev_priv->r600_sx_max_export_pos_size > 16) {
+			dev_priv->r600_sx_max_export_pos_size -= 16;
+			dev_priv->r600_sx_max_export_smx_size += 16;
+		}
+		break;
 	case CHIP_RV730:
 		dev_priv->r600_max_pipes = 2;
 		dev_priv->r600_max_tile_pipes = 4;
@@ -1328,6 +1297,11 @@ static void r700_gfx_init(struct drm_device *dev,
 		dev_priv->r700_sc_prim_fifo_size = 0xf9;
 		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
 		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
+
+		if (dev_priv->r600_sx_max_export_pos_size > 16) {
+			dev_priv->r600_sx_max_export_pos_size -= 16;
+			dev_priv->r600_sx_max_export_smx_size += 16;
+		}
 		break;
 	case CHIP_RV710:
 		dev_priv->r600_max_pipes = 2;
@@ -1495,6 +1469,7 @@ static void r700_gfx_init(struct drm_device *dev,
 	case CHIP_RV770:
 		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x1);
 		break;
+	case CHIP_RV740:
 	case CHIP_RV730:
 	case CHIP_RV710:
 	default:
@@ -1572,6 +1547,7 @@ static void r700_gfx_init(struct drm_device *dev,
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_RV770:
+	case CHIP_RV740:
 	case CHIP_RV730:
 		gs_prim_buffer_depth = 384;
 		break;
@@ -1694,9 +1670,8 @@ static void r600_cp_init_ring_buffer(struct drm_device *dev,
 	} else
 #endif
 	{
-		rptr_addr = dev_priv->ring_rptr->offset
-			- ((unsigned long) dev->sg->virtual)
-			+ dev_priv->gart_vm_start;
+		rptr_addr = dev_priv->ring_rptr->offset - dev->sg->vaddr +
+		    dev_priv->gart_vm_start;
 	}
 	RADEON_WRITE(R600_CP_RB_RPTR_ADDR,
 		     rptr_addr & 0xffffffff);
@@ -1730,18 +1705,14 @@ static void r600_cp_init_ring_buffer(struct drm_device *dev,
 			      + dev_priv->gart_vm_start);
 	} else
 #endif
-		ring_start = (dev_priv->cp_ring->offset
-			      - (unsigned long)dev->sg->virtual
-			      + dev_priv->gart_vm_start);
+		ring_start = dev_priv->cp_ring->offset - dev->sg->vaddr +
+		    dev_priv->gart_vm_start;
 
 	RADEON_WRITE(R600_CP_RB_BASE, ring_start >> 8);
 
 	RADEON_WRITE(R600_CP_ME_CNTL, 0xff);
 
 	RADEON_WRITE(R600_CP_DEBUG, (1 << 27) | (1 << 28));
-
-	/* Start with assuming that writeback doesn't work */
-	dev_priv->writeback_works = 0;
 
 	/* Initialize the scratch register pointer.  This will cause
 	 * the scratch register values to be written out to memory
@@ -1870,6 +1841,7 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	 */
 	dev_priv->vblank_crtc = DRM_RADEON_VBLANK_CRTC1;
 
+	dev_priv->do_boxes = 0;
 	dev_priv->cp_mode = init->cp_mode;
 
 	/* We don't support anything other than bus-mastering ring mode,
@@ -1940,7 +1912,7 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	}
 
 	dev_priv->sarea_priv =
-	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->handle +
+	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->virtual +
 				    init->sarea_priv_offset);
 
 #if __OS_HAS_AGP
@@ -1949,9 +1921,9 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		drm_core_ioremap_wc(dev_priv->cp_ring, dev);
 		drm_core_ioremap_wc(dev_priv->ring_rptr, dev);
 		drm_core_ioremap_wc(dev->agp_buffer_map, dev);
-		if (!dev_priv->cp_ring->handle ||
-		    !dev_priv->ring_rptr->handle ||
-		    !dev->agp_buffer_map->handle) {
+		if (!dev_priv->cp_ring->virtual ||
+		    !dev_priv->ring_rptr->virtual ||
+		    !dev->agp_buffer_map->virtual) {
 			DRM_ERROR("could not find ioremap agp regions!\n");
 			r600_do_cleanup_cp(dev);
 			return -EINVAL;
@@ -1959,18 +1931,19 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	} else
 #endif
 	{
-		dev_priv->cp_ring->handle = (void *)dev_priv->cp_ring->offset;
-		dev_priv->ring_rptr->handle =
+		dev_priv->cp_ring->virtual =
+		    (void *)dev_priv->cp_ring->offset;
+		dev_priv->ring_rptr->virtual =
 		    (void *)dev_priv->ring_rptr->offset;
-		dev->agp_buffer_map->handle =
+		dev->agp_buffer_map->virtual =
 		    (void *)dev->agp_buffer_map->offset;
 
-		DRM_DEBUG("dev_priv->cp_ring->handle %p\n",
-			  dev_priv->cp_ring->handle);
-		DRM_DEBUG("dev_priv->ring_rptr->handle %p\n",
-			  dev_priv->ring_rptr->handle);
-		DRM_DEBUG("dev->agp_buffer_map->handle %p\n",
-			  dev->agp_buffer_map->handle);
+		DRM_DEBUG("dev_priv->cp_ring->virtual %p\n",
+			  dev_priv->cp_ring->virtual);
+		DRM_DEBUG("dev_priv->ring_rptr->virtual %p\n",
+			  dev_priv->ring_rptr->virtual);
+		DRM_DEBUG("dev->agp_buffer_map->virtual %p\n",
+			  dev->agp_buffer_map->virtual);
 	}
 
 	dev_priv->fb_location = (radeon_read_fb_location(dev_priv) & 0xffff) << 24;
@@ -2037,9 +2010,8 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 						 + dev_priv->gart_vm_start);
 	else
 #endif
-		dev_priv->gart_buffers_offset = (dev->agp_buffer_map->offset
-						 - (unsigned long)dev->sg->virtual
-						 + dev_priv->gart_vm_start);
+		dev_priv->gart_buffers_offset = dev->agp_buffer_map->offset -
+		    dev->sg->vaddr + dev_priv->gart_vm_start;
 
 	DRM_DEBUG("fb 0x%08x size %d\n",
 		  (unsigned int) dev_priv->fb_location,
@@ -2050,8 +2022,8 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	DRM_DEBUG("dev_priv->gart_buffers_offset 0x%08lx\n",
 		  dev_priv->gart_buffers_offset);
 
-	dev_priv->ring.start = (u32 *) dev_priv->cp_ring->handle;
-	dev_priv->ring.end = ((u32 *) dev_priv->cp_ring->handle
+	dev_priv->ring.start = (u32 *) dev_priv->cp_ring->virtual;
+	dev_priv->ring.end = ((u32 *) dev_priv->cp_ring->virtual
 			      + init->ring_size / sizeof(u32));
 	dev_priv->ring.size = init->ring_size;
 	dev_priv->ring.size_l2qw = drm_order(init->ring_size / 8);
@@ -2090,20 +2062,20 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 			dev_priv->gart_info.table_size;
 
 		drm_core_ioremap_wc(&dev_priv->gart_info.mapping, dev);
-		if (!dev_priv->gart_info.mapping.handle) {
+		if (!dev_priv->gart_info.mapping.virtual) {
 			DRM_ERROR("ioremap failed.\n");
 			r600_do_cleanup_cp(dev);
 			return -EINVAL;
 		}
 
 		dev_priv->gart_info.addr =
-			dev_priv->gart_info.mapping.handle;
+			dev_priv->gart_info.mapping.virtual;
 
 		DRM_DEBUG("Setting phys_pci_gart to %p %08lX\n",
 			  dev_priv->gart_info.addr,
 			  dev_priv->pcigart_offset);
 
-		if (r600_page_table_init(dev)) {
+		if (!r600_page_table_init(dev)) {
 			DRM_ERROR("Failed to init GART table\n");
 			r600_do_cleanup_cp(dev);
 			return -EINVAL;
@@ -2126,6 +2098,8 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 
 	r600_do_engine_reset(dev);
 	r600_test_writeback(dev_priv);
+
+	r600_cs_init(dev);
 
 	return 0;
 }
@@ -2243,7 +2217,7 @@ int r600_cp_dispatch_indirect(struct drm_device *dev,
 		 */
 		while (dwords & 0xf) {
 			u32 *data = (u32 *)
-			    ((char *)dev->agp_buffer_map->handle
+			    ((char *)dev->agp_buffer_map->virtual
 			     + buf->offset + start);
 			data[dwords++] = RADEON_CP_PACKET2;
 		}
@@ -2256,6 +2230,139 @@ int r600_cp_dispatch_indirect(struct drm_device *dev,
 		OUT_RING(dwords);
 		ADVANCE_RING();
 	}
+
+	return 0;
+}
+
+void r600_cp_dispatch_swap(struct drm_device * dev)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
+	int nbox = sarea_priv->nbox;
+	struct drm_clip_rect *pbox = sarea_priv->boxes;
+	int i, cpp, src_pitch, dst_pitch;
+	uint64_t src, dst;
+	RING_LOCALS;
+	DRM_DEBUG("\n");
+
+	if (dev_priv->color_fmt == RADEON_COLOR_FORMAT_ARGB8888)
+		cpp = 4;
+	else
+		cpp = 2;
+
+	if (dev_priv->sarea_priv->pfCurrentPage == 0) {
+		src_pitch = dev_priv->back_pitch;
+		dst_pitch = dev_priv->front_pitch;
+		src = dev_priv->back_offset + dev_priv->fb_location;
+		dst = dev_priv->front_offset + dev_priv->fb_location;
+	} else {
+		src_pitch = dev_priv->front_pitch;
+		dst_pitch = dev_priv->back_pitch;
+		src = dev_priv->front_offset + dev_priv->fb_location;
+		dst = dev_priv->back_offset + dev_priv->fb_location;
+	}
+
+	if (r600_prepare_blit_copy(dev)) {
+		DRM_ERROR("unable to allocate vertex buffer for swap buffer\n");
+		return;
+	}
+	for (i = 0; i < nbox; i++) {
+		int x = pbox[i].x1;
+		int y = pbox[i].y1;
+		int w = pbox[i].x2 - x;
+		int h = pbox[i].y2 - y;
+
+		DRM_DEBUG("%d,%d-%d,%d\n", x, y, w, h);
+
+		r600_blit_swap(dev,
+			       src, dst,
+			       x, y, x, y, w, h,
+			       src_pitch, dst_pitch, cpp);
+	}
+	r600_done_blit_copy(dev);
+
+	/* Increment the frame counter.  The client-side 3D driver must
+	 * throttle the framerate by waiting for this value before
+	 * performing the swapbuffer ioctl.
+	 */
+	dev_priv->sarea_priv->last_frame++;
+
+	BEGIN_RING(3);
+	R600_FRAME_AGE(dev_priv->sarea_priv->last_frame);
+	ADVANCE_RING();
+}
+
+int r600_cp_dispatch_texture(struct drm_device * dev,
+			     struct drm_file *file_priv,
+			     drm_radeon_texture_t * tex,
+			     drm_radeon_tex_image_t * image)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+	struct drm_buf *buf;
+	u32 *buffer;
+	const u8 __user *data;
+	int size, pass_size;
+	u64 src_offset, dst_offset;
+
+	if (!radeon_check_offset(dev_priv, tex->offset)) {
+		DRM_ERROR("Invalid destination offset\n");
+		return -EINVAL;
+	}
+
+	/* this might fail for zero-sized uploads - are those illegal? */
+	if (!radeon_check_offset(dev_priv, tex->offset + tex->height * tex->pitch - 1)) {
+		DRM_ERROR("Invalid final destination offset\n");
+		return -EINVAL;
+	}
+
+	size = tex->height * tex->pitch;
+
+	if (size == 0)
+		return 0;
+
+	dst_offset = tex->offset;
+
+	r600_prepare_blit_copy(dev);
+	do {
+		data = (const u8 __user *)image->data;
+		pass_size = size;
+
+		buf = radeon_freelist_get(dev);
+		if (!buf) {
+			DRM_DEBUG("EAGAIN\n");
+			if (DRM_COPY_TO_USER(tex->image, image, sizeof(*image)))
+				return -EFAULT;
+			return -EAGAIN;
+		}
+
+		if (pass_size > buf->total)
+			pass_size = buf->total;
+
+		/* Dispatch the indirect buffer.
+		 */
+		buffer =
+		    (u32 *) ((char *)dev->agp_buffer_map->virtual +
+		    buf->offset);
+
+		if (DRM_COPY_FROM_USER(buffer, data, pass_size)) {
+			DRM_ERROR("EFAULT on pad, %d bytes\n", pass_size);
+			return -EFAULT;
+		}
+
+		buf->file_priv = file_priv;
+		buf->used = pass_size;
+		src_offset = dev_priv->gart_buffers_offset + buf->offset;
+
+		r600_blit_copy(dev, src_offset, dst_offset, pass_size);
+
+		radeon_cp_discard_buffer(dev, buf);
+
+		/* Update the input parameters for next time */
+		image->data = (const u8 __user *)image->data + pass_size;
+		dst_offset += pass_size;
+		size -= pass_size;
+	} while (size > 0);
+	r600_done_blit_copy(dev);
 
 	return 0;
 }

@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/sys/disk.h,v 1.44 2009/02/20 04:48:40 marcel Exp $
+ * $FreeBSD: src/sys/sys/disk.h,v 1.46 2009/12/24 11:05:23 mav Exp $
  *
  */
 
@@ -104,10 +104,16 @@ void disk_err(struct bio *bp, const char *what, int blkdone, int nl);
 	 * must be at least MAXPATHLEN bytes long.
 	 */
 
-#define	DIOCGPROVIDERALIAS _IOR('d', 139, char[MAXPATHLEN])
+#define DIOCGSTRIPESIZE	_IOR('d', 139, off_t)	/* Get stripe size in bytes */
 	/*-
-	 * Store the provider alias, if present, in a buffer. The buffer must
-	 * be at least MAXPATHLEN bytes long.
+	 * Get the size of the device's optimal access block in bytes.
+	 * This should be a multiple of the sectorsize.
+	 */
+
+#define DIOCGSTRIPEOFFSET _IOR('d', 140, off_t)	/* Get stripe offset in bytes */
+	/*-
+	 * Get the offset of the first device's optimal access block in bytes.
+	 * This should be a multiple of the sectorsize.
 	 */
 
 #endif /* _SYS_DISK_H_ */

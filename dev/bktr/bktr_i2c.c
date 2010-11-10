@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/bktr/bktr_i2c.c,v 1.31 2008/08/04 20:46:15 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/bktr/bktr_i2c.c,v 1.32 2010/01/07 21:01:37 mbr Exp $");
 
 /*
  * I2C support for the bti2c chipset.
@@ -331,7 +331,7 @@ bti2c_smb_readb(device_t dev, u_char slave, char cmd, char *byte)
 	/* clear status bits */
 	OUTL(sc,BKTR_INT_STAT, (BT848_INT_RACK | BT848_INT_I2CDONE));
 
-	OUTL(sc,BKTR_I2C_DATA_CTL, ((slave & 0xff) << 24) | (u_char)cmd);;
+	OUTL(sc,BKTR_I2C_DATA_CTL, ((slave & 0xff) << 24) | (u_char)cmd);
 
 	BTI2C_DEBUG(printf("r%lx/", (u_long)(((slave & 0xff) << 24) | (u_char)cmd)));
 

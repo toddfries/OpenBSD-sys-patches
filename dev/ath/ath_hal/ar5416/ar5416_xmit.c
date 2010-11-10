@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_xmit.c,v 1.2 2009/01/28 18:00:22 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_xmit.c,v 1.5 2010/03/02 12:59:42 rpaulo Exp $
  */
 #include "opt_ah.h"
 
@@ -519,16 +519,13 @@ ar5416ProcTxDesc(struct ath_hal *ah,
 		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate0);
 		break;
 	case 1:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate1) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate1);
 		break;
 	case 2:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate2) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate2);
 		break;
 	case 3:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate3) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate3);
 		break;
 	}
 

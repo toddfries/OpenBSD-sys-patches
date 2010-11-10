@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/aim/uma_machdep.c,v 1.5 2007/12/14 22:39:34 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/aim/uma_machdep.c,v 1.7 2010/02/20 16:23:29 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -35,9 +35,13 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/uma_machdep.c,v 1.5 2007/12/14 22:39:34 
 #include <sys/sysctl.h>
 #include <vm/vm.h>
 #include <vm/vm_page.h>
+#include <vm/vm_kern.h>
 #include <vm/vm_pageout.h>
+#include <vm/vm_extern.h>
+#include <vm/uma.h>
 #include <vm/uma.h>
 #include <vm/uma_int.h>
+#include <machine/md_var.h>
 #include <machine/vmparam.h>
 
 static int hw_uma_mdpages;
@@ -51,7 +55,7 @@ uma_small_alloc(uma_zone_t zone, int bytes, u_int8_t *flags, int wait)
 	void *va;
 	vm_page_t m;
 	int pflags;
-
+	
 	*flags = UMA_SLAB_PRIV;
 	if ((wait & (M_NOWAIT|M_USE_RESERVE)) == M_NOWAIT)
 		pflags = VM_ALLOC_INTERRUPT | VM_ALLOC_WIRED;
@@ -71,6 +75,10 @@ uma_small_alloc(uma_zone_t zone, int bytes, u_int8_t *flags, int wait)
 	}
 
 	va = (void *) VM_PAGE_TO_PHYS(m);
+
+	if (!hw_direct_map)
+		pmap_kenter((vm_offset_t)va, VM_PAGE_TO_PHYS(m));
+
 	if ((wait & M_ZERO) && (m->flags & PG_ZERO) == 0)
 		bzero(va, PAGE_SIZE);
 	atomic_add_int(&hw_uma_mdpages, 1);
@@ -83,7 +91,11 @@ uma_small_free(void *mem, int size, u_int8_t flags)
 {
 	vm_page_t m;
 
-	m = PHYS_TO_VM_PAGE((u_int32_t)mem);
+	if (!hw_direct_map)
+		pmap_remove(kernel_pmap,(vm_offset_t)mem,
+		    (vm_offset_t)mem + PAGE_SIZE);
+
+	m = PHYS_TO_VM_PAGE((vm_offset_t)mem);
 	m->wire_count--;
 	vm_page_free(m);
 	atomic_subtract_int(&cnt.v_wire_count, 1);

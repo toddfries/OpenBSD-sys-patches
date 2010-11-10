@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.56 2008/08/17 23:27:27 bz Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.57 2009/08/01 19:26:27 rwatson Exp $	*/
 
 /*
  * Copyright (C) 1993-2003 by Darren Reed.
@@ -32,9 +32,6 @@
 #  endif
 #  if (__FreeBSD_version == 400019)
 #   define CSUM_DELAY_DATA
-#  endif
-#  if (__FreeBSD_version >= 800044)
-#   include <sys/vimage.h>
 #  endif
 # endif
 # include <sys/filio.h>
@@ -158,7 +155,7 @@ struct file;
 
 #if !defined(lint)
 static const char sccsid[] = "@(#)fil.c	1.36 6/5/96 (C) 1993-2000 Darren Reed";
-static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.56 2008/08/17 23:27:27 bz Exp $";
+static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.57 2009/08/01 19:26:27 rwatson Exp $";
 /* static const char rcsid[] = "@(#)$Id: fil.c,v 2.243.2.125 2007/10/10 09:27:20 darrenr Exp $"; */
 #endif
 

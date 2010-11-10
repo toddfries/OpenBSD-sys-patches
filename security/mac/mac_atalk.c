@@ -1,8 +1,11 @@
 /*-
- * Copyright (c) 2007 Robert N. M. Watson
+ * Copyright (c) 2007-2009 Robert N. M. Watson
  * All rights reserved.
  *
  * This software was developed by Robert Watson for the TrustedBSD Project.
+ *
+ * This software was developed at the University of Cambridge Computer
+ * Laboratory with support from a grant from Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_atalk.c,v 1.1 2007/10/28 15:55:22 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_atalk.c,v 1.4 2009/06/03 18:46:28 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -58,9 +61,13 @@ mac_netatalk_aarp_send(struct ifnet *ifp, struct mbuf *m)
 {
 	struct label *mlabel;
 
+	if (mac_policy_count == 0)
+		return;
+
 	mlabel = mac_mbuf_to_label(m);
 
 	MAC_IFNET_LOCK(ifp);
-	MAC_PERFORM(netatalk_aarp_send, ifp, ifp->if_label, m, mlabel);
+	MAC_POLICY_PERFORM_NOSLEEP(netatalk_aarp_send, ifp, ifp->if_label, m,
+	    mlabel);
 	MAC_IFNET_UNLOCK(ifp);
 }

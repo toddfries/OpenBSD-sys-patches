@@ -1,6 +1,7 @@
-# $FreeBSD: src/sys/modules/syscons/Makefile,v 1.15 2005/07/10 11:47:04 marius Exp $
+# $FreeBSD: src/sys/modules/syscons/Makefile,v 1.16 2010/04/07 17:20:55 jkim Exp $
 
 SUBDIR=	${_apm} \
+	${_beastie} \
 	blank \
 	${_daemon} \
 	${_dragon} \
@@ -18,6 +19,7 @@ _apm=		apm
 .endif
 
 .if ${MACHINE_ARCH} != "sparc64"
+_beastie=	beastie
 _daemon=	daemon
 _dragon=	dragon
 _fire=		fire

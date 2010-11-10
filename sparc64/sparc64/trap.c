@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.104 2010/05/23 18:32:02 kib Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ktr.h"
@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nw
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/systm.h>
+#include <sys/pcpu.h>
 #include <sys/pioctl.h>
 #include <sys/ptrace.h>
 #include <sys/proc.h>
@@ -71,7 +72,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nw
 #include <security/audit/audit.h>
 
 #include <dev/ofw/openfirm.h>
-#include <machine/ofw_machdep.h>
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -84,6 +84,7 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nw
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/intr_machdep.h>
+#include <machine/ofw_machdep.h>
 #include <machine/pcb.h>
 #include <machine/smp.h>
 #include <machine/trap.h>
@@ -96,6 +97,7 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nw
 void trap(struct trapframe *tf);
 void syscall(struct trapframe *tf);
 
+static int trap_cecc(void);
 static int trap_pfault(struct thread *td, struct trapframe *tf);
 
 extern char copy_fault[];
@@ -112,9 +114,7 @@ extern char fas_fault[];
 extern char fas_nofault_begin[];
 extern char fas_nofault_end[];
 
-extern char *syscallnames[];
-
-const char *trap_msg[] = {
+const char *const trap_msg[] = {
 	"reserved",
 	"instruction access exception",
 	"instruction access error",
@@ -230,6 +230,10 @@ int debugger_on_signal = 0;
 SYSCTL_INT(_debug, OID_AUTO, debugger_on_signal, CTLFLAG_RW,
     &debugger_on_signal, 0, "");
 
+u_int corrected_ecc = 0;
+SYSCTL_UINT(_machdep, OID_AUTO, corrected_ecc, CTLFLAG_RD, &corrected_ecc, 0,
+    "corrected ECC errors");
+
 /*
  * SUNW,set-trap-table allows to take over %tba from the PROM, which
  * will turn off interrupts and handle outstanding ones while doing so,
@@ -245,7 +249,8 @@ sun4u_set_traptable(void *tba_addr)
 		cell_t tba_addr;
 	} args = {
 		(cell_t)"SUNW,set-trap-table",
-		2,
+		1,
+		0,
 	};
 
 	args.tba_addr = (cell_t)tba_addr;
@@ -298,10 +303,16 @@ trap(struct trapframe *tf)
 		case T_SPILL:
 			sig = rwindow_save(td);
 			break;
+		case T_CORRECTED_ECC_ERROR:
+			sig = trap_cecc();
+			break;
 		default:
-			if (tf->tf_type < 0 || tf->tf_type >= T_MAX ||
-			    trap_sig[tf->tf_type] == -1)
-				panic("trap: bad trap type");
+			if (tf->tf_type < 0 || tf->tf_type >= T_MAX)
+				panic("trap: bad trap type %#lx (user)",
+				    tf->tf_type);
+			else if (trap_sig[tf->tf_type] == -1)
+				panic("trap: %s (user)",
+				    trap_msg[tf->tf_type]);
 			sig = trap_sig[tf->tf_type];
 			break;
 		}
@@ -329,15 +340,12 @@ trap(struct trapframe *tf)
 		KASSERT((tf->tf_type & T_KERNEL) != 0,
 		    ("trap: kernel trap isn't"));
 
-#ifdef KDB
 		if (kdb_active) {
 			kdb_reenter();
 			return;
 		}
-#endif
 
 		switch (tf->tf_type & ~T_KERNEL) {
-#ifdef KDB
 		case T_BREAKPOINT:
 		case T_KSTACK_FAULT:
 			error = (kdb_trap(tf->tf_type, 0, tf) == 0);
@@ -348,7 +356,6 @@ trap(struct trapframe *tf)
 		case T_VA_WATCHPOINT:
 			error = db_watch_trap(tf);
 			break;
-#endif
 #endif
 		case T_DATA_MISS:
 		case T_DATA_PROTECTION:
@@ -386,7 +393,7 @@ trap(struct trapframe *tf)
 			if (tf->tf_tpc > (u_long)fas_nofault_begin &&
 			    tf->tf_tpc < (u_long)fas_nofault_end) {
 				cache_flush();
-				cache_enable();
+				cache_enable(PCPU_GET(impl));
 				tf->tf_tpc = (u_long)fas_fault;
 				tf->tf_tnpc = tf->tf_tpc + 4;
 				error = 0;
@@ -394,28 +401,61 @@ trap(struct trapframe *tf)
 			}
 			error = 1;
 			break;
+		case T_CORRECTED_ECC_ERROR:
+			error = trap_cecc();
+			break;
 		default:
 			error = 1;
 			break;
 		}
 
-		if (error != 0)
-			panic("trap: %s", trap_msg[tf->tf_type & ~T_KERNEL]);
+		if (error != 0) {
+			tf->tf_type &= ~T_KERNEL;
+			if (tf->tf_type < 0 || tf->tf_type >= T_MAX)
+				panic("trap: bad trap type %#lx (kernel)",
+				    tf->tf_type);
+			else if (trap_sig[tf->tf_type] == -1)
+				panic("trap: %s (kernel)",
+				    trap_msg[tf->tf_type]);
+		}
 	}
 	CTR1(KTR_TRAP, "trap: td=%p return", td);
+}
+
+static int
+trap_cecc(void)
+{
+	u_long eee;
+
+	/*
+	 * Turn off (non-)correctable error reporting while we're dealing
+	 * with the error.
+	 */
+	eee = ldxa(0, ASI_ESTATE_ERROR_EN_REG);
+	stxa_sync(0, ASI_ESTATE_ERROR_EN_REG, eee & ~(AA_ESTATE_NCEEN |
+	    AA_ESTATE_CEEN));
+	/* Flush the caches in order ensure no corrupt data got installed. */
+	cache_flush();
+	/* Ensure the caches are still turned on (should be). */
+	cache_enable(PCPU_GET(impl));
+	/* Clear the the error from the AFSR. */
+	stxa_sync(0, ASI_AFSR, ldxa(0, ASI_AFSR));
+	corrected_ecc++;
+	printf("corrected ECC error\n");
+	/* Turn (non-)correctable error reporting back on. */
+	stxa_sync(0, ASI_ESTATE_ERROR_EN_REG, eee);
+	return (0);
 }
 
 static int
 trap_pfault(struct thread *td, struct trapframe *tf)
 {
 	struct vmspace *vm;
-	struct pcb *pcb;
 	struct proc *p;
 	vm_offset_t va;
 	vm_prot_t prot;
 	vm_map_entry_t entry;
 	u_long ctx;
-	int flags;
 	int type;
 	int rv;
 
@@ -429,22 +469,19 @@ trap_pfault(struct thread *td, struct trapframe *tf)
 
 	rv = KERN_SUCCESS;
 	ctx = TLB_TAR_CTX(tf->tf_tar);
-	pcb = td->td_pcb;
 	type = tf->tf_type & ~T_KERNEL;
 	va = TLB_TAR_VA(tf->tf_tar);
 
 	CTR4(KTR_TRAP, "trap_pfault: td=%p pm_ctx=%#lx va=%#lx ctx=%#lx",
 	    td, p->p_vmspace->vm_pmap.pm_context[curcpu], va, ctx);
 
-	if (type == T_DATA_PROTECTION) {
+	if (type == T_DATA_PROTECTION)
 		prot = VM_PROT_WRITE;
-		flags = VM_FAULT_DIRTY;
-	} else {
+	else {
 		if (type == T_DATA_MISS)
 			prot = VM_PROT_READ;
 		else
 			prot = VM_PROT_READ | VM_PROT_EXECUTE;
-		flags = VM_FAULT_NORMAL;
 	}
 
 	if (ctx != TLB_CTX_KERNEL) {
@@ -470,7 +507,7 @@ trap_pfault(struct thread *td, struct trapframe *tf)
 		PROC_UNLOCK(p);
 
 		/* Fault in the user page. */
-		rv = vm_fault(&vm->vm_map, va, prot, flags);
+		rv = vm_fault(&vm->vm_map, va, prot, VM_FAULT_NORMAL);
 
 		/*
 		 * Now the process can be swapped again.
@@ -531,173 +568,79 @@ trap_pfault(struct thread *td, struct trapframe *tf)
 /* Maximum number of arguments that can be passed via the out registers. */
 #define	REG_MAXARGS	6
 
+int
+cpu_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
+{
+	struct trapframe *tf;
+	struct proc *p;
+	register_t *argp;
+	int reg;
+	int regcnt;
+	int error;
+
+	p = td->td_proc;
+	tf = td->td_frame;
+	reg = 0;
+	regcnt = REG_MAXARGS;
+
+	sa->code = tf->tf_global[1];
+
+	if (sa->code == SYS_syscall || sa->code == SYS___syscall) {
+		sa->code = tf->tf_out[reg++];
+		regcnt--;
+	}
+
+	if (p->p_sysent->sv_mask)
+		sa->code &= p->p_sysent->sv_mask;
+	if (sa->code >= p->p_sysent->sv_size)
+		sa->callp = &p->p_sysent->sv_table[0];
+	else
+		sa->callp = &p->p_sysent->sv_table[sa->code];
+
+	sa->narg = sa->callp->sy_narg;
+	KASSERT(sa->narg <= sizeof(sa->args) / sizeof(sa->args[0]),
+	    ("Too many syscall arguments!"));
+	error = 0;
+	argp = sa->args;
+	bcopy(&tf->tf_out[reg], sa->args, sizeof(sa->args[0]) * regcnt);
+	if (sa->narg > regcnt)
+		error = copyin((void *)(tf->tf_out[6] + SPOFF +
+		    offsetof(struct frame, fr_pad[6])), &sa->args[regcnt],
+		    (sa->narg - regcnt) * sizeof(sa->args[0]));
+	if (error == 0) {
+		td->td_retval[0] = 0;
+		td->td_retval[1] = 0;
+	}
+
+	return (error);
+}
+
 /*
- * Syscall handler. The arguments to the syscall are passed in the o registers
- * by the caller, and are saved in the trap frame. The syscall number is passed
- * in %g1 (and also saved in the trap frame).
+ * Syscall handler
+ * The arguments to the syscall are passed in the out registers by the caller,
+ * and are saved in the trap frame.  The syscall number is passed in %g1 (and
+ * also saved in the trap frame).
  */
 void
 syscall(struct trapframe *tf)
 {
-	struct sysent *callp;
 	struct thread *td;
-	register_t args[8];
-	register_t *argp;
-	struct proc *p;
-	u_long code;
-	u_long tpc;
-	int reg;
-	int regcnt;
-	int narg;
+	struct syscall_args sa;
 	int error;
 
 	td = curthread;
+	td->td_frame = tf;
+
 	KASSERT(td != NULL, ("trap: curthread NULL"));
 	KASSERT(td->td_proc != NULL, ("trap: curproc NULL"));
-
-	p = td->td_proc;
-
-	PCPU_INC(cnt.v_syscall);
-
-	narg = 0;
-	error = 0;
-	reg = 0;
-	regcnt = REG_MAXARGS;
-
-	td->td_pticks = 0;
-	td->td_frame = tf;
-	if (td->td_ucred != p->p_ucred)
-		cred_update_thread(td);
-	code = tf->tf_global[1];
 
 	/*
 	 * For syscalls, we don't want to retry the faulting instruction
 	 * (usually), instead we need to advance one instruction.
 	 */
-	tpc = tf->tf_tpc;
+	td->td_pcb->pcb_tpc = tf->tf_tpc;
 	TF_DONE(tf);
 
-	if (p->p_sysent->sv_prepsyscall) {
-		/*
-		 * The prep code is MP aware.
-		 */
-#if 0
-		(*p->p_sysent->sv_prepsyscall)(tf, args, &code, &params);
-#endif
-	} else if (code == SYS_syscall || code == SYS___syscall) {
-		code = tf->tf_out[reg++];
-		regcnt--;
-	}
-
-	if (p->p_sysent->sv_mask)
-		code &= p->p_sysent->sv_mask;
-
-	if (code >= p->p_sysent->sv_size)
-		callp = &p->p_sysent->sv_table[0];
-	else
-		callp = &p->p_sysent->sv_table[code];
-
-	narg = callp->sy_narg;
-
-	KASSERT(narg <= sizeof(args) / sizeof(args[0]),
-	    ("Too many syscall arguments!"));
-	error = 0;
-	argp = args;
-	bcopy(&tf->tf_out[reg], args, sizeof(args[0]) * regcnt);
-	if (narg > regcnt)
-		error = copyin((void *)(tf->tf_out[6] + SPOFF +
-		    offsetof(struct frame, fr_pad[6])),
-		    &args[regcnt], (narg - regcnt) * sizeof(args[0]));
-
-	CTR5(KTR_SYSC, "syscall: td=%p %s(%#lx, %#lx, %#lx)", td,
-	    syscallnames[code], argp[0], argp[1], argp[2]);
-
-#ifdef KTRACE
-	if (KTRPOINT(td, KTR_SYSCALL))
-		ktrsyscall(code, narg, argp);
-#endif
-
-	td->td_syscalls++;
-
-	if (error == 0) {
-		td->td_retval[0] = 0;
-		td->td_retval[1] = 0;
-
-		STOPEVENT(p, S_SCE, narg);	/* MP aware */
-
-		PTRACESTOP_SC(p, td, S_PT_SCE);
-
-		AUDIT_SYSCALL_ENTER(code, td);
-		error = (*callp->sy_call)(td, argp);
-		AUDIT_SYSCALL_EXIT(error, td);
-
-		CTR5(KTR_SYSC, "syscall: p=%p error=%d %s return %#lx %#lx ", p,
-		    error, syscallnames[code], td->td_retval[0],
-		    td->td_retval[1]);
-	}
-
-	/*
-	 * MP SAFE (we may or may not have the MP lock at this point)
-	 */
-	switch (error) {
-	case 0:
-		tf->tf_out[0] = td->td_retval[0];
-		tf->tf_out[1] = td->td_retval[1];
-		tf->tf_tstate &= ~TSTATE_XCC_C;
-		break;
-
-	case ERESTART:
-		/*
-		 * Undo the tpc advancement we have done above, we want to
-		 * reexecute the system call.
-		 */
-		tf->tf_tpc = tpc;
-		tf->tf_tnpc -= 4;
-		break;
-
-	case EJUSTRETURN:
-		break;
-
-	default:
-		if (p->p_sysent->sv_errsize) {
-			if (error >= p->p_sysent->sv_errsize)
-				error = -1;	/* XXX */
-			else
-				error = p->p_sysent->sv_errtbl[error];
-		}
-		tf->tf_out[0] = error;
-		tf->tf_tstate |= TSTATE_XCC_C;
-		break;
-	}
-
-	/*
-	 * Check for misbehavior.
-	 */
-	WITNESS_WARN(WARN_PANIC, NULL, "System call %s returning",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???");
-	KASSERT(td->td_critnest == 0,
-	    ("System call %s returning in a critical section",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???"));
-	KASSERT(td->td_locks == 0,
-	    ("System call %s returning with %d locks held",
-	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???",
-	    td->td_locks));
-
-	/*
-	 * Handle reschedule and other end-of-syscall issues
-	 */
-	userret(td, tf);
-
-#ifdef KTRACE
-	if (KTRPOINT(td, KTR_SYSRET))
-		ktrsysret(code, error, td->td_retval[0]);
-#endif
-	/*
-	 * This works because errno is findable through the
-	 * register set.  If we ever support an emulation where this
-	 * is not the case, this code will need to be revisited.
-	 */
-	STOPEVENT(p, S_SCX, code);
-
-	PTRACESTOP_SC(p, td, S_PT_SCX);
+	error = syscallenter(td, &sa);
+	syscallret(td, error, &sa);
 }

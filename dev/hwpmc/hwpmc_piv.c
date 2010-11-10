@@ -29,9 +29,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_piv.c,v 1.20 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_piv.c,v 1.21 2009/08/14 21:05:08 jhb Exp $");
 
 #include <sys/param.h>
+#include <sys/bus.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/pmc.h>
@@ -39,6 +40,8 @@ __FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_piv.c,v 1.20 2008/11/26 19:25:13 jki
 #include <sys/smp.h>
 #include <sys/systm.h>
 
+#include <machine/intr_machdep.h>
+#include <machine/apicvar.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
@@ -1537,7 +1540,7 @@ p4_intr(int cpu, struct trapframe *tf)
 	 */
 
 	if (did_interrupt)
-		pmc_x86_lapic_enable_pmc_interrupt();
+		lapic_reenable_pmc();
 
 	atomic_add_int(did_interrupt ? &pmc_stats.pm_intr_processed :
 	    &pmc_stats.pm_intr_ignored, 1);

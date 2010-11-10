@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/si/si.c,v 1.143 2009/02/07 02:14:27 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/si/si.c,v 1.144 2009/05/29 06:41:23 ed Exp $");
 
 #ifndef lint
 static const char si_copyright1[] =  "@(#) Copyright (C) Specialix International, 1990,1992,1998",
@@ -584,7 +584,7 @@ try_next:
 			sprintf(pp->sp_name, "si%r%r", unit,
 			    (int)(pp - sc->sc_ports));
 #endif
-			tp = pp->sp_tty = tty_alloc(&si_tty_class, pp, &Giant);
+			tp = pp->sp_tty = tty_alloc_mutex(&si_tty_class, pp, &Giant);
 			tty_makedev(tp, NULL, "A%r%r", unit, (int)(pp - sc->sc_ports));
 		}
 try_next2:

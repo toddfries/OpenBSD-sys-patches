@@ -82,7 +82,7 @@
 #include "opt_ktrace.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/trap.c,v 1.37 2008/03/12 10:11:55 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/trap.c,v 1.42 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -130,7 +130,6 @@ void undefinedinstruction(trapframe_t *);
 #include <machine/machdep.h>
  
 extern char fusubailout[];
-extern char *syscallnames[];
 
 #ifdef DEBUG
 int last_fault_code;	/* For the benefit of pmap_fault_fixup() */
@@ -425,8 +424,7 @@ data_abort_handler(trapframe_t *tf)
 		p->p_lock++;
 		PROC_UNLOCK(p);
 	}
-	error = vm_fault(map, va, ftype, (ftype & VM_PROT_WRITE) ? 
-	    VM_FAULT_DIRTY : VM_FAULT_NORMAL);
+	error = vm_fault(map, va, ftype, VM_FAULT_NORMAL);
 	pcb->pcb_onfault = onfault;
 
 	if (map != kernel_map) {
@@ -520,7 +518,8 @@ dab_fatal(trapframe_t *tf, u_int fsr, u_int far, struct thread *td, struct ksig 
 	printf(", pc =%08x\n\n", tf->tf_pc);
 
 #ifdef KDB
-	kdb_trap(fsr, 0, tf);
+	if (debugger_on_panic || kdb_active)
+		kdb_trap(fsr, 0, tf);
 #endif
 	panic("Fatal abort");
 	/*NOTREACHED*/
@@ -530,7 +529,7 @@ dab_fatal(trapframe_t *tf, u_int fsr, u_int far, struct thread *td, struct ksig 
  * dab_align() handles the following data aborts:
  *
  *  FAULT_ALIGN_0 - Alignment fault
- *  FAULT_ALIGN_0 - Alignment fault
+ *  FAULT_ALIGN_1 - Alignment fault
  *
  * These faults are fatal if they happen in kernel mode. Otherwise, we
  * deliver a bus error to the process.
@@ -931,43 +930,8 @@ syscall(struct thread *td, trapframe_t *frame, u_int32_t insn)
 		KASSERT(td->td_ar == NULL, 
 		    ("returning from syscall with td_ar set!"));
 	}
-	switch (error) {
-	case 0: 
-#ifdef __ARMEB__
-		if ((insn & 0x000fffff) == SYS___syscall &&
-		    code != SYS_freebsd6_lseek && code != SYS_lseek) {
-			/*
-			 * 64-bit return, 32-bit syscall. Fixup byte order
-			 */ 
-			frame->tf_r0 = 0;
-			frame->tf_r1 = td->td_retval[0];
-		} else {
-			frame->tf_r0 = td->td_retval[0];
-			frame->tf_r1 = td->td_retval[1];
-		}
-#else
-		frame->tf_r0 = td->td_retval[0];
-	  	frame->tf_r1 = td->td_retval[1];
-#endif
-					      
-		frame->tf_spsr &= ~PSR_C_bit;   /* carry bit */
-		break;
-		
-	case ERESTART:
-		/*
-		 * Reconstruct the pc to point at the swi.
-		 */
-		frame->tf_pc -= INSN_SIZE;
-		break;
-	case EJUSTRETURN:                                       
-		/* nothing to do */  
-		break;
-	default:
 bad:
-		frame->tf_r0 = error;
-		frame->tf_spsr |= PSR_C_bit;    /* carry bit */
-		break;
-	}
+	cpu_set_syscall_retval(td, error);
 
 	WITNESS_WARN(WARN_PANIC, NULL, "System call %s returning",
 	    (code >= 0 && code < SYS_MAXSYSCALL) ? syscallnames[code] : "???");

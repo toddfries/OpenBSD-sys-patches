@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs.c,v 1.34 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs.c,v 1.35 2009/05/11 15:33:26 attilio Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -299,7 +299,7 @@ pfs_destroy(struct pfs_node *pn)
  * Mount a pseudofs instance
  */
 int
-pfs_mount(struct pfs_info *pi, struct mount *mp, struct thread *td)
+pfs_mount(struct pfs_info *pi, struct mount *mp)
 {
 	struct statfs *sbp;
 
@@ -330,7 +330,7 @@ pfs_mount(struct pfs_info *pi, struct mount *mp, struct thread *td)
  * Compatibility shim for old mount(2) system call
  */
 int
-pfs_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
+pfs_cmount(struct mntarg *ma, void *data, int flags)
 {
 	int error;
 
@@ -342,11 +342,12 @@ pfs_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
  * Unmount a pseudofs instance
  */
 int
-pfs_unmount(struct mount *mp, int mntflags, struct thread *td)
+pfs_unmount(struct mount *mp, int mntflags)
 {
 	int error;
 
-	error = vflush(mp, 0, (mntflags & MNT_FORCE) ?  FORCECLOSE : 0, td);
+	error = vflush(mp, 0, (mntflags & MNT_FORCE) ?  FORCECLOSE : 0,
+	    curthread);
 	return (error);
 }
 
@@ -354,7 +355,7 @@ pfs_unmount(struct mount *mp, int mntflags, struct thread *td)
  * Return a root vnode
  */
 int
-pfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
+pfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	struct pfs_info *pi;
 
@@ -366,7 +367,7 @@ pfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
  * Return filesystem stats
  */
 int
-pfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+pfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	/* no-op:  always called with mp->mnt_stat */
 	return (0);

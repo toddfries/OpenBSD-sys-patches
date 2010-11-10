@@ -27,9 +27,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/db_machdep.c,v 1.6 2007/12/02 20:40:33 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/db_machdep.c,v 1.9 2010/05/21 17:17:56 jhb Exp $");
 
-#include <opt_xtrace.h>
+#include "opt_xtrace.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -577,6 +577,13 @@ db_write_bytes(vm_offset_t addr, size_t size, char *data)
 void
 db_show_mdpcpu(struct pcpu *pc)
 {
+	struct pcpu_md *md = &pc->pc_md;
+
+	db_printf("MD: vhpt     = %#lx\n", md->vhpt);
+	db_printf("MD: lid      = %#lx\n", md->lid);
+	db_printf("MD: clock    = %#lx/%#lx\n", md->clock, md->clockadj);
+	db_printf("MD: stats    = %p\n", &md->stats);
+	db_printf("MD: pmap     = %p\n", md->current_pmap);
 }
 
 void

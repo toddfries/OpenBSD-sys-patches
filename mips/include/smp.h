@@ -8,7 +8,7 @@
  *
  *	from: src/sys/alpha/include/smp.h,v 1.8 2005/01/05 20:05:50 imp
  *	JNPR: smp.h,v 1.3 2006/12/02 09:53:41 katta
- * $FreeBSD: src/sys/mips/include/smp.h,v 1.2 2008/09/28 18:34:14 marius Exp $
+ * $FreeBSD: src/sys/mips/include/smp.h,v 1.6 2010/05/16 19:43:48 rrs Exp $
  *
  */
 
@@ -17,23 +17,24 @@
 
 #ifdef _KERNEL
 
+#include <machine/pcb.h>
+
 /*
  * Interprocessor interrupts for SMP.
  */
-#define	IPI_INVLTLB		0x0001
 #define	IPI_RENDEZVOUS		0x0002
 #define	IPI_AST			0x0004
 #define	IPI_STOP		0x0008
+#define	IPI_STOP_HARD		0x0008
+#define	IPI_PREEMPT		0x0010
 
 #ifndef LOCORE
 
-extern u_int32_t		boot_cpu_id;
-
-void	ipi_selected(u_int cpus, u_int32_t ipi);
-void	ipi_all_but_self(u_int32_t ipi);
-intrmask_t	smp_handle_ipi(struct trapframe *frame);
+void	ipi_selected(cpumask_t cpus, int ipi);
 void	smp_init_secondary(u_int32_t cpuid);
-void	mips_ipi_send(int thread_id);
+void	mpentry(void);
+
+extern struct pcb stoppcbs[];
 
 #endif /* !LOCORE */
 #endif /* _KERNEL */

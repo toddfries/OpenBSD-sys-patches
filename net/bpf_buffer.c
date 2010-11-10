@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/bpf_buffer.c,v 1.3 2008/07/25 23:58:09 trhodes Exp $");
+__FBSDID("$FreeBSD: src/sys/net/bpf_buffer.c,v 1.4 2009/08/12 17:28:53 jkim Exp $");
 
 #include "opt_bpf.h"
 
@@ -77,7 +77,6 @@ __FBSDID("$FreeBSD: src/sys/net/bpf_buffer.c,v 1.3 2008/07/25 23:58:09 trhodes E
 #include <net/if.h>
 #include <net/bpf.h>
 #include <net/bpf_buffer.h>
-#include <net/bpf_jitter.h>
 #include <net/bpfdesc.h>
 
 /*

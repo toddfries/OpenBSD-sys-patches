@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_logging.c,v 1.14 2008/12/15 14:41:55 jkoshy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_logging.c,v 1.18 2010/03/26 14:35:48 fabient Exp $");
 
 #include <sys/param.h>
 #include <sys/file.h>
@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_logging.c,v 1.14 2008/12/15 14:41:55
 #include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/pmc.h>
+#include <sys/pmckern.h>
 #include <sys/pmclog.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
@@ -236,9 +237,10 @@ pmclog_get_buffer(struct pmc_owner *po)
 static void
 pmclog_loop(void *arg)
 {
-	int error;
+	int error, last_buffer;
 	struct pmc_owner *po;
 	struct pmclog_buffer *lb;
+	struct proc *p;
 	struct ucred *ownercred;
 	struct ucred *mycred;
 	struct thread *td;
@@ -247,12 +249,14 @@ pmclog_loop(void *arg)
 	size_t nbytes;
 
 	po = (struct pmc_owner *) arg;
+	p = po->po_owner;
 	td = curthread;
 	mycred = td->td_ucred;
+	last_buffer = 0;
 
-	PROC_LOCK(po->po_owner);
-	ownercred = crhold(po->po_owner->p_ucred);
-	PROC_UNLOCK(po->po_owner);
+	PROC_LOCK(p);
+	ownercred = crhold(p->p_ucred);
+	PROC_UNLOCK(p);
 
 	PMCDBG(LOG,INI,1, "po=%p kt=%p", po, po->po_kthread);
 	KASSERT(po->po_kthread == curthread->td_proc,
@@ -281,22 +285,14 @@ pmclog_loop(void *arg)
 			if ((lb = TAILQ_FIRST(&po->po_logbuffers)) == NULL) {
 				mtx_unlock_spin(&po->po_mtx);
 
-				/*
-				 * Wakeup the thread waiting for the
-				 * PMC_OP_FLUSHLOG request to
-				 * complete.
-				 */
-				if (po->po_flags & PMC_PO_IN_FLUSH) {
-					po->po_flags &= ~PMC_PO_IN_FLUSH;
-					wakeup_one(po->po_kthread);
-				}
-
 				(void) msleep(po, &pmc_kthread_mtx, PWAIT,
 				    "pmcloop", 0);
 				continue;
 			}
 
 			TAILQ_REMOVE(&po->po_logbuffers, lb, plb_next);
+			if (po->po_flags & PMC_PO_SHUTDOWN)
+				last_buffer = TAILQ_EMPTY(&po->po_logbuffers);
 			mtx_unlock_spin(&po->po_mtx);
 		}
 
@@ -323,16 +319,14 @@ pmclog_loop(void *arg)
 		error = fo_write(po->po_file, &auio, ownercred, 0, td);
 		td->td_ucred = mycred;
 
-		mtx_lock(&pmc_kthread_mtx);
-
 		if (error) {
 			/* XXX some errors are recoverable */
-			/* XXX also check for SIGPIPE if a socket */
-
 			/* send a SIGIO to the owner and exit */
-			PROC_LOCK(po->po_owner);
-			psignal(po->po_owner, SIGIO);
-			PROC_UNLOCK(po->po_owner);
+			PROC_LOCK(p);
+			psignal(p, SIGIO);
+			PROC_UNLOCK(p);
+
+			mtx_lock(&pmc_kthread_mtx);
 
 			po->po_error = error; /* save for flush log */
 
@@ -340,6 +334,16 @@ pmclog_loop(void *arg)
 
 			break;
 		}
+
+		if (last_buffer) {
+			/*
+			 * Close the file to get PMCLOG_EOF error
+			 * in pmclog(3).
+			 */
+			fo_close(po->po_file, curthread);
+		}
+
+		mtx_lock(&pmc_kthread_mtx);
 
 		/* put the used buffer back into the global pool */
 		PMCLOG_INIT_BUFFER_DESCRIPTOR(lb);
@@ -419,6 +423,12 @@ pmclog_reserve(struct pmc_owner *po, int length)
 	    ("[pmclog,%d] length not a multiple of word size", __LINE__));
 
 	mtx_lock_spin(&po->po_mtx);
+
+	/* No more data when shutdown in progress. */
+	if (po->po_flags & PMC_PO_SHUTDOWN) {
+		mtx_unlock_spin(&po->po_mtx);
+		return (NULL);
+	}
 
 	if (po->po_curbuf == NULL)
 		if (pmclog_get_buffer(po) != 0) {
@@ -524,15 +534,20 @@ static void
 pmclog_stop_kthread(struct pmc_owner *po)
 {
 	/*
-	 * Unset flag, wakeup the helper thread,
+	 * Close the file to force the thread out of fo_write,
+	 * unset flag, wakeup the helper thread,
 	 * wait for it to exit
 	 */
 
-	mtx_assert(&pmc_kthread_mtx, MA_OWNED);
+	if (po->po_file != NULL)
+		fo_close(po->po_file, curthread);
+
+	mtx_lock(&pmc_kthread_mtx);
 	po->po_flags &= ~PMC_PO_OWNS_LOGFILE;
 	wakeup_one(po);
 	if (po->po_kthread)
 		msleep(po->po_kthread, &pmc_kthread_mtx, PPAUSE, "pmckstp", 0);
+	mtx_unlock(&pmc_kthread_mtx);
 }
 
 /*
@@ -552,6 +567,12 @@ pmclog_configure_log(struct pmc_mdep *md, struct pmc_owner *po, int logfd)
 	int error;
 	struct proc *p;
 
+	/*
+	 * As long as it is possible to get a LOR between pmc_sx lock and
+	 * proctree/allproc sx locks used for adding a new process, assure
+	 * the former is not held here.
+	 */
+	sx_assert(&pmc_sx, SA_UNLOCKED);
 	PMCDBG(LOG,CFG,1, "config po=%p logfd=%d", po, logfd);
 
 	p = po->po_owner;
@@ -595,10 +616,8 @@ pmclog_configure_log(struct pmc_mdep *md, struct pmc_owner *po, int logfd)
 
  error:
 	/* shutdown the thread */
-	mtx_lock(&pmc_kthread_mtx);
 	if (po->po_kthread)
 		pmclog_stop_kthread(po);
-	mtx_unlock(&pmc_kthread_mtx);
 
 	KASSERT(po->po_kthread == NULL, ("[pmclog,%d] po=%p kthread not "
 	    "stopped", __LINE__, po));
@@ -634,10 +653,8 @@ pmclog_deconfigure_log(struct pmc_owner *po)
 	    ("[pmclog,%d] po=%p no log file", __LINE__, po));
 
 	/* stop the kthread, this will reset the 'OWNS_LOGFILE' flag */
-	mtx_lock(&pmc_kthread_mtx);
 	if (po->po_kthread)
 		pmclog_stop_kthread(po);
-	mtx_unlock(&pmc_kthread_mtx);
 
 	KASSERT(po->po_kthread == NULL,
 	    ("[pmclog,%d] po=%p kthread not stopped", __LINE__, po));
@@ -674,7 +691,7 @@ pmclog_deconfigure_log(struct pmc_owner *po)
 int
 pmclog_flush(struct pmc_owner *po)
 {
-	int error, has_pending_buffers;
+	int error;
 
 	PMCDBG(LOG,FLS,1, "po=%p", po);
 
@@ -702,16 +719,13 @@ pmclog_flush(struct pmc_owner *po)
 	mtx_lock_spin(&po->po_mtx);
 	if (po->po_curbuf)
 		pmclog_schedule_io(po);
-	has_pending_buffers = !TAILQ_EMPTY(&po->po_logbuffers);
 	mtx_unlock_spin(&po->po_mtx);
 
-	if (has_pending_buffers) {
-		po->po_flags |= PMC_PO_IN_FLUSH; /* ask for a wakeup */
-		error = msleep(po->po_kthread, &pmc_kthread_mtx, PWAIT,
-		    "pmcflush", 0);
-		if (error == 0)
-			error = po->po_error;
-	}
+	/*
+	 * Initiate shutdown: no new data queued,
+	 * thread will close file on last block.
+	 */
+	po->po_flags |= PMC_PO_SHUTDOWN;
 
  error:
 	mtx_unlock(&pmc_kthread_mtx);

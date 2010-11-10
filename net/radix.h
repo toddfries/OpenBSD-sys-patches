@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)radix.h	8.2 (Berkeley) 10/31/94
- * $FreeBSD: src/sys/net/radix.h,v 1.28 2008/12/07 21:15:43 kmacy Exp $
+ * $FreeBSD: src/sys/net/radix.h,v 1.31 2010/03/07 15:37:58 bz Exp $
  */
 
 #ifndef _RADIX_H_
@@ -160,8 +160,9 @@ struct radix_node_head {
 #define	RADIX_NODE_HEAD_WLOCK_ASSERT(rnh) rw_assert(&(rnh)->rnh_lock, RA_WLOCKED)
 #endif /* _KERNEL */
 
-void	 rn_init(void);
+void	 rn_init(int);
 int	 rn_inithead(void **, int);
+int	 rn_detachhead(void **);
 int	 rn_refines(void *, void *);
 struct radix_node
 	 *rn_addmask(void *, int, int),

@@ -26,20 +26,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/include/sysarch.h,v 1.4 2004/01/09 16:52:08 nectar Exp $
+ * $FreeBSD: src/sys/ia64/include/sysarch.h,v 1.5 2010/01/11 18:10:13 marcel Exp $
  */
 
 #ifndef _MACHINE_SYSARCH_H_
 #define	_MACHINE_SYSARCH_H_
-
-#define	IA64_IORD	0
-#define	IA64_IOWR	1
-
-struct ia64_iodesc {
-	int port;
-	int width;
-	unsigned long val;
-};
 
 #ifndef _KERNEL
 #include <sys/cdefs.h>

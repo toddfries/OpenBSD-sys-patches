@@ -28,11 +28,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/i915_drv.h,v 1.10 2009/02/28 02:37:55 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/i915_drv.h,v 1.17 2010/03/13 18:14:51 rnoland Exp $");
 
 #ifndef _I915_DRV_H_
 #define _I915_DRV_H_
 
+#include "dev/drm/drm_mm.h"
 #include "dev/drm/i915_reg.h"
 
 /* General customization:
@@ -129,7 +130,6 @@ typedef struct drm_i915_private {
 	int page_flipping;
 
 	wait_queue_head_t irq_queue;
-	atomic_t irq_received;
 	/** Protects user_irq_refcount and irq_mask_reg */
 	DRM_SPINTYPE user_irq_lock;
 	/** Refcount for i915_user_irq_get() versus i915_user_irq_put(). */
@@ -151,6 +151,8 @@ typedef struct drm_i915_private {
 	u32 saveDSPACNTR;
 	u32 saveDSPBCNTR;
 	u32 saveDSPARB;
+	u32 saveRENDERSTANDBY;
+	u32 saveHWS;
 	u32 savePIPEACONF;
 	u32 savePIPEBCONF;
 	u32 savePIPEASRC;
@@ -232,12 +234,11 @@ typedef struct drm_i915_private {
 	u8 saveAR_INDEX;
 	u8 saveAR[21];
 	u8 saveDACMASK;
-	u8 saveDACDATA[256*3]; /* 256 3-byte colors */
 	u8 saveCR[37];
+
 	struct {
-#ifdef __linux__
 		struct drm_mm gtt_space;
-#endif
+
 		/**
 		 * List of objects currently involved in rendering from the
 		 * ringbuffer.
@@ -451,7 +452,7 @@ extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,
 extern int i915_enable_vblank(struct drm_device *dev, int crtc);
 extern void i915_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 i915_get_vblank_counter(struct drm_device *dev, int crtc);
-extern u32 gm45_get_vblank_counter(struct drm_device *dev, int crtc);
+extern u32 g45_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int i915_vblank_swap(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
 
@@ -643,7 +644,8 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 		       (dev)->pci_device == 0x2A42 || \
 		       (dev)->pci_device == 0x2E02 || \
 		       (dev)->pci_device == 0x2E12 || \
-		       (dev)->pci_device == 0x2E22)
+		       (dev)->pci_device == 0x2E22 || \
+		       (dev)->pci_device == 0x2E32)
 
 #define IS_I965GM(dev) ((dev)->pci_device == 0x2A02)
 
@@ -651,17 +653,25 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define IS_G4X(dev) ((dev)->pci_device == 0x2E02 || \
 		     (dev)->pci_device == 0x2E12 || \
-		     (dev)->pci_device == 0x2E22)
+		     (dev)->pci_device == 0x2E22 || \
+		     (dev)->pci_device == 0x2E32 || \
+		     IS_GM45(dev))
+
+#define IS_IGDG(dev) ((dev)->pci_device == 0xa001)
+#define IS_IGDGM(dev) ((dev)->pci_device == 0xa011)
+#define IS_IGD(dev) (IS_IGDG(dev) || IS_IGDGM(dev))
 
 #define IS_G33(dev)    ((dev)->pci_device == 0x29C2 ||	\
 			(dev)->pci_device == 0x29B2 ||	\
-			(dev)->pci_device == 0x29D2)
+			(dev)->pci_device == 0x29D2 ||  \
+			IS_IGD(dev))
 
 #define IS_I9XX(dev) (IS_I915G(dev) || IS_I915GM(dev) || IS_I945G(dev) || \
 		      IS_I945GM(dev) || IS_I965G(dev) || IS_G33(dev))
 
 #define IS_MOBILE(dev) (IS_I830(dev) || IS_I85X(dev) || IS_I915GM(dev) || \
-			IS_I945GM(dev) || IS_I965GM(dev) || IS_GM45(dev))
+			IS_I945GM(dev) || IS_I965GM(dev) || IS_GM45(dev) || \
+			IS_IGD(dev))
 
 #define I915_NEED_GFX_HWS(dev) (IS_G33(dev) || IS_GM45(dev) || IS_G4X(dev))
 

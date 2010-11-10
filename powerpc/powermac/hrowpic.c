@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/hrowpic.c,v 1.15 2008/10/14 14:54:14 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/hrowpic.c,v 1.16 2009/10/24 18:31:22 nwhitehorn Exp $
  */
 
 /*
@@ -182,7 +182,13 @@ hrowpic_toggle_irq(struct hrowpic_softc *sc, int irq, int enable)
 	u_int roffset;
 	u_int rbit;
 
-	KASSERT((irq > 0) && (irq < HROWPIC_IRQMAX), ("en irq out of range"));
+	KASSERT((irq > 0) && (irq <= HROWPIC_IRQMAX), ("en irq out of range"));
+
+	/*
+	 * Humor the SMP layer if it wants to set up an IPI handler.
+	 */
+	if (irq == HROWPIC_IRQMAX)
+		return;
 
 	/*
 	 * Calculate prim/sec register bank for the IRQ, update soft copy,

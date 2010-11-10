@@ -16,22 +16,20 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/SKYEYE,v 1.12 2008/11/30 17:53:19 sam Exp $
+# $FreeBSD: src/sys/arm/conf/SKYEYE,v 1.16 2010/02/15 23:44:48 attilio Exp $
 
 ident		KB920X
 
-options		KERNPHYSADDR=0xc0000000	
-options		KERNVIRTADDR=0xc0000000	
-options		PHYSADDR=0xc0000000
+options 	KERNPHYSADDR=0xc0000000	
+options 	KERNVIRTADDR=0xc0000000	
+options 	PHYSADDR=0xc0000000
 include		"../at91/std.kb920x"
-#To statically compile in device wiring instead of /boot/device.hints
-#hints		"GENERIC.hints"		#Default places to look for devices.
 makeoptions	MODULES_OVERRIDE=""
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 makeoptions	CONF_CFLAGS=-mcpu=arm9
-options		DDB
-options		KDB
+options 	DDB
+options 	KDB
 
 
 options 	SCHED_4BSD		#4BSD scheduler
@@ -42,8 +40,8 @@ options 	SOFTUPDATES		#Enable FFS soft updates support
 options 	UFS_ACL			#Support for access control lists
 options 	UFS_DIRHASH		#Improve performance on big directories
 options 	MD_ROOT			#MD is a potential root device
-options		MD_ROOT_SIZE=4096
-options		ROOTDEVNAME=\"ufs:md0\"
+options 	MD_ROOT_SIZE=4096
+options 	ROOTDEVNAME=\"ufs:md0\"
 options 	NFSCLIENT		#Network Filesystem Client
 options 	NFSSERVER		#Network Filesystem Server
 options 	NFSLOCKD		#Network Lock Manager
@@ -70,6 +68,7 @@ device		uart
 					# output.  Adds ~215k to driver.
 
 # Debugging for use in -current
+#options 	DEADLKRES		#Enable the deadlock resolver
 #options 	INVARIANTS		#Enable calls of extra sanity checking
 #options 	INVARIANT_SUPPORT	#Extra sanity checks of internal structures, required by INVARIANTS
 #options 	WITNESS			#Enable checks to detect deadlocks and cycles
@@ -79,8 +78,8 @@ device		uart
 #options 	SMP			# Symmetric MultiProcessor Kernel
 #options 	APIC_IO			# Symmetric (APIC) I/O
 
-device md
-options		SKYEYE_WORKAROUNDS
+device		md
+options 	SKYEYE_WORKAROUNDS
 # Floppy drives
 
 

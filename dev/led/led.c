@@ -9,7 +9,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/led/led.c,v 1.20 2008/09/26 14:19:52 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/led/led.c,v 1.21 2009/12/28 22:56:30 antoine Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -40,7 +40,7 @@ struct ledsc {
 static struct unrhdr *led_unit;
 static struct mtx led_mtx;
 static struct sx led_sx;
-static LIST_HEAD(, ledsc) led_list = LIST_HEAD_INITIALIZER(&led_list);
+static LIST_HEAD(, ledsc) led_list = LIST_HEAD_INITIALIZER(led_list);
 static struct callout led_ch;
 
 static MALLOC_DEFINE(M_LED, "LED", "LED driver");

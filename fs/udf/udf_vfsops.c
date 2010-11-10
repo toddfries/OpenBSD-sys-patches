@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/udf/udf_vfsops.c,v 1.61 2009/02/26 18:58:41 avg Exp $
+ * $FreeBSD: src/sys/fs/udf/udf_vfsops.c,v 1.63 2009/05/11 15:33:26 attilio Exp $
  */
 
 /* udf_vfsops.c */
@@ -186,15 +186,17 @@ udf_uninit(struct vfsconf *foo)
 }
 
 static int
-udf_mount(struct mount *mp, struct thread *td)
+udf_mount(struct mount *mp)
 {
 	struct vnode *devvp;	/* vnode of the mount device */
+	struct thread *td;
 	struct udf_mnt *imp = 0;
 	struct vfsoptlist *opts;
 	char *fspec, *cs_disk, *cs_local;
 	int error, len, *udf_flags;
 	struct nameidata nd, *ndp = &nd;
 
+	td = curthread;
 	opts = mp->mnt_optnew;
 
 	/*
@@ -353,7 +355,8 @@ udf_mountfs(struct vnode *devvp, struct mount *mp)
 	mp->mnt_stat.f_fsid.val[1] = mp->mnt_vfc->vfc_typenum;
 	MNT_ILOCK(mp);
 	mp->mnt_flag |= MNT_LOCAL;
-	mp->mnt_kern_flag |= MNTK_MPSAFE | MNTK_LOOKUP_SHARED;
+	mp->mnt_kern_flag |= MNTK_MPSAFE | MNTK_LOOKUP_SHARED |
+	    MNTK_EXTENDED_SHARED;
 	MNT_IUNLOCK(mp);
 	udfmp->im_mountp = mp;
 	udfmp->im_dev = dev;
@@ -509,7 +512,7 @@ bail:
 };
 
 static int
-udf_unmount(struct mount *mp, int mntflags, struct thread *td)
+udf_unmount(struct mount *mp, int mntflags)
 {
 	struct udf_mnt *udfmp;
 	int error, flags = 0;
@@ -519,7 +522,7 @@ udf_unmount(struct mount *mp, int mntflags, struct thread *td)
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
 
-	if ((error = vflush(mp, 0, flags, td)))
+	if ((error = vflush(mp, 0, flags, curthread)))
 		return (error);
 
 	if (udfmp->im_flags & UDFMNT_KICONV && udf_iconv) {
@@ -553,7 +556,7 @@ udf_unmount(struct mount *mp, int mntflags, struct thread *td)
 }
 
 static int
-udf_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
+udf_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	struct udf_mnt *udfmp;
 	ino_t id;
@@ -566,7 +569,7 @@ udf_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
 }
 
 static int
-udf_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+udf_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct udf_mnt *udfmp;
 

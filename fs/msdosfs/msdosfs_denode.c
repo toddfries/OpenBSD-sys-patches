@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.102 2009/02/27 20:00:15 jhb Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.107 2010/02/28 17:11:31 kib Exp $ */
 /*	$NetBSD: msdosfs_denode.c,v 1.28 1998/02/10 14:10:00 mrg Exp $	*/
 
 /*-
@@ -144,11 +144,11 @@ deget(pmp, dirclust, diroffset, depp)
 	}
 
 	/*
-	 * Do the MALLOC before the getnewvnode since doing so afterward
+	 * Do the malloc before the getnewvnode since doing so afterward
 	 * might cause a bogus v_data pointer to get dereferenced
-	 * elsewhere if MALLOC should block.
+	 * elsewhere if malloc should block.
 	 */
-	ldep = malloc(sizeof(struct denode), M_MSDOSFSNODE, M_WAITOK);
+	ldep = malloc(sizeof(struct denode), M_MSDOSFSNODE, M_WAITOK | M_ZERO);
 
 	/*
 	 * Directory entry was not in cache, have to create a vnode and
@@ -161,16 +161,14 @@ deget(pmp, dirclust, diroffset, depp)
 		free(ldep, M_MSDOSFSNODE);
 		return error;
 	}
-	bzero((caddr_t)ldep, sizeof *ldep);
 	nvp->v_data = ldep;
 	ldep->de_vnode = nvp;
 	ldep->de_flag = 0;
 	ldep->de_dirclust = dirclust;
 	ldep->de_diroffset = diroffset;
 	ldep->de_inode = inode;
-	fc_purge(ldep, 0);	/* init the fat cache for this denode */
-
 	lockmgr(nvp->v_vnlock, LK_EXCLUSIVE, NULL);
+	fc_purge(ldep, 0);	/* init the fat cache for this denode */
 	error = insmntque(nvp, mntp);
 	if (error != 0) {
 		free(ldep, M_MSDOSFSNODE);
@@ -184,9 +182,8 @@ deget(pmp, dirclust, diroffset, depp)
 		return (error);
 	}
 	if (xvp != NULL) {
-		/* XXX: Not sure this is right */
-		nvp = xvp;
-		ldep->de_vnode = nvp;
+		*depp = xvp->v_data;
+		return (0);
 	}
 
 	ldep->de_pmp = pmp;
@@ -595,7 +592,7 @@ msdosfs_inactive(ap)
 	/*
 	 * Ignore denodes related to stale file handles.
 	 */
-	if (dep->de_Name[0] == SLOT_DELETED)
+	if (dep->de_Name[0] == SLOT_DELETED || dep->de_Name[0] == SLOT_EMPTY)
 		goto out;
 
 	/*
@@ -623,7 +620,7 @@ out:
 	printf("msdosfs_inactive(): v_usecount %d, de_Name[0] %x\n",
 	       vrefcnt(vp), dep->de_Name[0]);
 #endif
-	if (dep->de_Name[0] == SLOT_DELETED)
+	if (dep->de_Name[0] == SLOT_DELETED || dep->de_Name[0] == SLOT_EMPTY)
 		vrecycle(vp, td);
 	return (error);
 }

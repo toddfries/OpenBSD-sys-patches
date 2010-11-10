@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.171 2009/01/22 21:04:46 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.183 2010/10/05 15:31:56 kib Exp $");
 
 #include "opt_cpu.h"
 
@@ -61,7 +61,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.171 2009/01/22 21:04:46 j
 #include <machine/specialreg.h>
 #include <machine/md_var.h>
 
-#include <amd64/isa/icu.h>
+#include <x86/isa/icu.h>
 
 /* XXX - should be in header file: */
 void printcpuinfo(void);
@@ -76,8 +76,30 @@ static void print_via_padlock_info(void);
 
 int	cpu_class;
 char machine[] = "amd64";
-SYSCTL_STRING(_hw, HW_MACHINE, machine, CTLFLAG_RD, 
-    machine, 0, "Machine class");
+
+#ifdef SCTL_MASK32
+extern int adaptive_machine_arch;
+#endif
+
+static int
+sysctl_hw_machine(SYSCTL_HANDLER_ARGS)
+{
+#ifdef SCTL_MASK32
+	static const char machine32[] = "i386";
+#endif
+	int error;
+
+#ifdef SCTL_MASK32
+	if ((req->flags & SCTL_MASK32) != 0 && adaptive_machine_arch)
+		error = SYSCTL_OUT(req, machine32, sizeof(machine32));
+	else
+#endif
+		error = SYSCTL_OUT(req, machine, sizeof(machine));
+	return (error);
+
+}
+SYSCTL_PROC(_hw, HW_MACHINE, machine, CTLTYPE_STRING | CTLFLAG_RD,
+    NULL, 0, sysctl_hw_machine, "A", "Machine class");
 
 static char cpu_model[128];
 SYSCTL_STRING(_hw, HW_MODEL, model, CTLFLAG_RD, 
@@ -106,12 +128,6 @@ static struct {
 	{ CENTAUR_VENDOR_ID,	CPU_VENDOR_CENTAUR },	/* CentaurHauls */
 };
 
-int cpu_cores;
-int cpu_logical;
-
-
-extern int pq_l2size;
-extern int pq_l2nways;
 
 void
 printcpuinfo(void)
@@ -193,9 +209,10 @@ printcpuinfo(void)
 	if (cpu_vendor_id == CPU_VENDOR_INTEL ||
 	    cpu_vendor_id == CPU_VENDOR_AMD ||
 	    cpu_vendor_id == CPU_VENDOR_CENTAUR) {
-		printf("  Stepping = %u", cpu_id & 0xf);
+		printf("  Family = %x", CPUID_TO_FAMILY(cpu_id));
+		printf("  Model = %x", CPUID_TO_MODEL(cpu_id));
+		printf("  Stepping = %u", cpu_id & CPUID_STEPPING);
 		if (cpu_high > 0) {
-			u_int cmp = 1, htt = 1;
 
 			/*
 			 * Here we should probably set up flags indicating
@@ -245,7 +262,7 @@ printcpuinfo(void)
 				printf("\n  Features2=0x%b", cpu_feature2,
 				"\020"
 				"\001SSE3"	/* SSE3 */
-				"\002<b1>"
+				"\002PCLMULQDQ"	/* Carry-Less Mul Quadword */
 				"\003DTES64"	/* 64-bit Debug Trace */
 				"\004MON"	/* MONITOR/MWAIT Instructions */
 				"\005DS_CPL"	/* CPL Qualified Debug Store */
@@ -261,15 +278,15 @@ printcpuinfo(void)
 				"\017xTPR"	/* Send Task Priority Messages*/
 				"\020PDCM"	/* Perf/Debug Capability MSR */
 				"\021<b16>"
-				"\022<b17>"
+				"\022PCID"	/* Process-context Identifiers */
 				"\023DCA"	/* Direct Cache Access */
 				"\024SSE4.1"
 				"\025SSE4.2"
 				"\026x2APIC"	/* xAPIC Extensions */
-				"\027<b22>"
+				"\027MOVBE"
 				"\030POPCNT"
 				"\031<b24>"
-				"\032<b25>"
+				"\032AESNI"	/* AES Crypto*/
 				"\033XSAVE"
 				"\034OSXSAVE"
 				"\035<b28>"
@@ -378,21 +395,21 @@ printcpuinfo(void)
 			switch (cpu_vendor_id) {
 			case CPU_VENDOR_AMD:
 				if ((amd_pminfo & AMDPM_TSC_INVARIANT) ||
-				    AMD64_CPU_FAMILY(cpu_id) >= 0x10 ||
+				    CPUID_TO_FAMILY(cpu_id) >= 0x10 ||
 				    cpu_id == 0x60fb2)
 					tsc_is_invariant = 1;
 				break;
 			case CPU_VENDOR_INTEL:
 				if ((amd_pminfo & AMDPM_TSC_INVARIANT) ||
-				    (AMD64_CPU_FAMILY(cpu_id) == 0x6 &&
-				    AMD64_CPU_MODEL(cpu_id) >= 0xe) ||
-				    (AMD64_CPU_FAMILY(cpu_id) == 0xf &&
-				    AMD64_CPU_MODEL(cpu_id) >= 0x3))
+				    (CPUID_TO_FAMILY(cpu_id) == 0x6 &&
+				    CPUID_TO_MODEL(cpu_id) >= 0xe) ||
+				    (CPUID_TO_FAMILY(cpu_id) == 0xf &&
+				    CPUID_TO_MODEL(cpu_id) >= 0x3))
 					tsc_is_invariant = 1;
 				break;
 			case CPU_VENDOR_CENTAUR:
-				if (AMD64_CPU_FAMILY(cpu_id) == 0x6 &&
-				    AMD64_CPU_MODEL(cpu_id) >= 0xf &&
+				if (CPUID_TO_FAMILY(cpu_id) == 0x6 &&
+				    CPUID_TO_MODEL(cpu_id) >= 0xf &&
 				    (rdmsr(0x1203) & 0x100000000ULL) == 0)
 					tsc_is_invariant = 1;
 				break;
@@ -400,28 +417,6 @@ printcpuinfo(void)
 			if (tsc_is_invariant)
 				printf("\n  TSC: P-state invariant");
 
-			/*
-			 * If this CPU supports HTT or CMP then mention the
-			 * number of physical/logical cores it contains.
-			 */
-			if (cpu_feature & CPUID_HTT)
-				htt = (cpu_procinfo & CPUID_HTT_CORES) >> 16;
-			if (cpu_vendor_id == CPU_VENDOR_AMD &&
-			    (amd_feature2 & AMDID2_CMP))
-				cmp = (cpu_procinfo2 & AMDID_CMP_CORES) + 1;
-			else if (cpu_vendor_id == CPU_VENDOR_INTEL &&
-			    (cpu_high >= 4)) {
-				cpuid_count(4, 0, regs);
-				if ((regs[0] & 0x1f) != 0)
-					cmp = ((regs[0] >> 26) & 0x3f) + 1;
-			}
-			cpu_cores = cmp;
-			cpu_logical = htt / cmp;
-			if (cmp > 1)
-				printf("\n  Cores per package: %d", cmp);
-			if ((htt / cmp) > 1)
-				printf("\n  Logical CPUs per core: %d",
-				    cpu_logical);
 		}
 	}
 	/* Avoid ugly blank lines: only print newline when we have to. */
@@ -497,6 +492,22 @@ identify_cpu(void)
 	cpu_procinfo = regs[1];
 	cpu_feature = regs[3];
 	cpu_feature2 = regs[2];
+
+	/*
+	 * Clear "Limit CPUID Maxval" bit and get the largest standard CPUID
+	 * function number again if it is set from BIOS.  It is necessary
+	 * for probing correct CPU topology later.
+	 * XXX This is only done on the BSP package.
+	 */
+	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_high > 0 && cpu_high < 4) {
+		uint64_t msr;
+		msr = rdmsr(MSR_IA32_MISC_ENABLE);
+		if ((msr & 0x400000ULL) != 0) {
+			wrmsr(MSR_IA32_MISC_ENABLE, msr & ~0x400000ULL);
+			do_cpuid(0, regs);
+			cpu_high = regs[0];
+		}
+	}
 
 	if (cpu_vendor_id == CPU_VENDOR_INTEL ||
 	    cpu_vendor_id == CPU_VENDOR_AMD ||
@@ -620,6 +631,21 @@ print_AMD_info(void)
 		printf(", %d lines/tag", (regs[2] >> 8) & 0x0f);
 		print_AMD_l2_assoc((regs[2] >> 12) & 0x0f);	
 	}
+
+	/*
+	 * Opteron Rev E shows a bug as in very rare occasions a read memory 
+	 * barrier is not performed as expected if it is followed by a 
+	 * non-atomic read-modify-write instruction.  
+	 * As long as that bug pops up very rarely (intensive machine usage
+	 * on other operating systems generally generates one unexplainable 
+	 * crash any 2 months) and as long as a model specific fix would be
+	 * impratical at this stage, print out a warning string if the broken
+	 * model and family are identified.
+	 */
+	if (CPUID_TO_FAMILY(cpu_id) == 0xf && CPUID_TO_MODEL(cpu_id) >= 0x20 &&
+	    CPUID_TO_MODEL(cpu_id) <= 0x3f)
+		printf("WARNING: This architecture revision has known SMP "
+		    "hardware bugs which may cause random instability\n");
 }
 
 static void

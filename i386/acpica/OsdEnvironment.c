@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/acpica/OsdEnvironment.c,v 1.12 2007/03/22 18:16:41 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/acpica/OsdEnvironment.c,v 1.13 2009/06/05 18:44:36 jkim Exp $");
 
 /*
  * 6.1 : Environmental support
@@ -36,8 +36,8 @@ __FBSDID("$FreeBSD: src/sys/i386/acpica/OsdEnvironment.c,v 1.12 2007/03/22 18:16
 #include <sys/linker_set.h>
 #include <sys/sysctl.h>
 
-#include <contrib/dev/acpica/acpi.h>
-#include <contrib/dev/acpica/actables.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/actables.h>
 
 static u_long i386_acpi_root;
 
@@ -63,7 +63,7 @@ AcpiOsGetRootPointer(void)
 
 	if (i386_acpi_root == 0 &&
 	    (resource_long_value("acpi", 0, "rsdp", (long *)&ptr) == 0 ||
-	    AcpiFindRootPointer((ACPI_NATIVE_UINT *)&ptr) == AE_OK) &&
+	    AcpiFindRootPointer((ACPI_SIZE *)&ptr) == AE_OK) &&
 	    ptr != 0)
 		i386_acpi_root = ptr;
 

@@ -36,15 +36,11 @@
  *	from: Utah Hdr: reg.h 1.1 90/07/09
  *	@(#)reg.h	8.2 (Berkeley) 1/11/94
  *	JNPR: regnum.h,v 1.6 2007/08/09 11:23:32 katta
- * $FreeBSD: src/sys/mips/include/regnum.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/regnum.h,v 1.3 2010/04/19 07:34:26 jmallett Exp $
  */
 
 #ifndef _MACHINE_REGNUM_H_
 #define	_MACHINE_REGNUM_H_
-
-#define	STAND_ARG_SIZE		16
-#define	STAND_FRAME_SIZE	24
-#define	STAND_RA_OFFSET		20
 
 /* This must match the numbers
  * in pcb.h and is used by
@@ -63,8 +59,7 @@
 #define PREG_RA   10
 #define PREG_SR   11
 #define PREG_GP   12
-
-
+#define PREG_PC   13
 
 /*
  * Location of the saved registers relative to ZERO.
@@ -82,10 +77,10 @@
 #define	T1	9
 #define	T2	10
 #define	T3	11
-#define	T4	12
-#define	T5	13
-#define	T6	14
-#define	T7	15
+#define	TA0	12
+#define	TA1	13
+#define	TA2	14
+#define	TA3	15
 #define	S0	16
 #define	S1	17
 #define	S2	18

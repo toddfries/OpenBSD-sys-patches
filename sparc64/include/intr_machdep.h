@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/intr_machdep.h,v 1.20 2008/11/19 22:12:32 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/intr_machdep.h,v 1.21 2009/12/24 15:43:37 marius Exp $
  */
 
 #ifndef	_MACHINE_INTR_MACHDEP_H_
@@ -93,6 +93,7 @@ extern struct intr_vector intr_vectors[];
 void	intr_add_cpu(u_int cpu);
 #endif
 int	intr_bind(int vec, u_char cpu);
+int	intr_describe(int vec, void *ih, const char *descr);
 void	intr_setup(int level, ih_func_t *ihf, int pri, iv_func_t *ivf,
 	    void *iva);
 void	intr_init1(void);

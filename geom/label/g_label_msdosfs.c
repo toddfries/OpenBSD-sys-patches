@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label_msdosfs.c,v 1.7 2009/02/11 18:13:20 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label_msdosfs.c,v 1.8 2009/11/28 11:57:43 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -216,7 +216,10 @@ error:
 		g_free(sector);
 }
 
-const struct g_label_desc g_label_msdosfs = {
+struct g_label_desc g_label_msdosfs = {
 	.ld_taste = g_label_msdosfs_taste,
-	.ld_dir = G_LABEL_MSDOSFS_DIR
+	.ld_dir = G_LABEL_MSDOSFS_DIR,
+	.ld_enabled = 1
 };
+
+G_LABEL_INIT(msdosfs, g_label_msdosfs, "Create device nodes for MSDOSFS volumes");

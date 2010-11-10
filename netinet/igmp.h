@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)igmp.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/igmp.h,v 1.16 2009/03/04 03:22:03 bms Exp $
+ * $FreeBSD: src/sys/netinet/igmp.h,v 1.18 2009/06/10 18:12:15 imp Exp $
  */
 
 #ifndef _NETINET_IGMP_H_
@@ -108,25 +108,12 @@ struct igmp_report {
 #define IGMP_HOST_MEMBERSHIP_QUERY	0x11	/* membership query         */
 #define IGMP_v1_HOST_MEMBERSHIP_REPORT	0x12	/* Ver. 1 membership report */
 #define IGMP_DVMRP			0x13	/* DVMRP routing message    */
-#define IGMP_PIM			0x14	/* PIM routing message     */
+#define IGMP_PIM			0x14	/* PIMv1 message (historic) */
 #define IGMP_v2_HOST_MEMBERSHIP_REPORT	0x16	/* Ver. 2 membership report */
 #define IGMP_HOST_LEAVE_MESSAGE		0x17	/* Leave-group message     */
 #define IGMP_MTRACE_REPLY		0x1e	/* mtrace(8) reply */
 #define IGMP_MTRACE_QUERY		0x1f	/* mtrace(8) probe */
 #define IGMP_v3_HOST_MEMBERSHIP_REPORT	0x22	/* Ver. 3 membership report */
-
-#ifndef BURN_BRIDGES
-/*
- * Legacy FreeBSD definitions for the above message types.
- */
-#define IGMP_MEMBERSHIP_QUERY		IGMP_HOST_MEMBERSHIP_QUERY
-#define IGMP_V1_MEMBERSHIP_REPORT	IGMP_v1_HOST_MEMBERSHIP_REPORT
-#define IGMP_V2_MEMBERSHIP_REPORT	IGMP_v2_HOST_MEMBERSHIP_REPORT
-#define IGMP_MTRACE_RESP		IGMP_MTRACE_REPLY
-#define IGMP_MTRACE			IGMP_MTRACE_QUERY
-#define IGMP_V2_LEAVE_GROUP		IGMP_HOST_LEAVE_MESSAGE
-#define IGMP_V3_MEMBERSHIP_REPORT	IGMP_v3_HOST_MEMBERSHIP_REPORT
-#endif /* BURN_BRIDGES */
 
 /*
  * IGMPv3 report modes.

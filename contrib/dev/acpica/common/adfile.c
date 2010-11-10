@@ -1,7 +1,6 @@
 /******************************************************************************
  *
  * Module Name: adfile - Application-level disassembler file support routines
- *              $Revision: 1.3 $
  *
  *****************************************************************************/
 
@@ -9,7 +8,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -115,25 +114,33 @@
  *****************************************************************************/
 
 
-#include <contrib/dev/acpica/acpi.h>
-#include <contrib/dev/acpica/acapps.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+#include <contrib/dev/acpica/include/acapps.h>
 
 #include <stdio.h>
-#include <string.h>
 
 
 #define _COMPONENT          ACPI_TOOLS
         ACPI_MODULE_NAME    ("adfile")
 
+/* Local prototypes */
+
+INT32
+AdWriteBuffer (
+    char                    *Filename,
+    char                    *Buffer,
+    UINT32                  Length);
 
 char                        FilenameBuf[20];
+
 
 /******************************************************************************
  *
  * FUNCTION:    AfGenerateFilename
  *
- * PARAMETERS:  Prefix      - prefix string
- *              TableId     - The table ID
+ * PARAMETERS:  Prefix              - prefix string
+ *              TableId             - The table ID
  *
  * RETURN:      Pointer to the completed string
  *
@@ -146,8 +153,8 @@ AdGenerateFilename (
     char                    *Prefix,
     char                    *TableId)
 {
-    ACPI_NATIVE_UINT         i;
-    ACPI_NATIVE_UINT         j;
+    UINT32                  i;
+    UINT32                  j;
 
 
     for (i = 0; Prefix[i]; i++)
@@ -173,9 +180,9 @@ AdGenerateFilename (
  *
  * FUNCTION:    AfWriteBuffer
  *
- * PARAMETERS:  Filename        - name of file
- *              Buffer          - data to write
- *              Length          - length of data
+ * PARAMETERS:  Filename            - name of file
+ *              Buffer              - data to write
+ *              Length              - length of data
  *
  * RETURN:      Actual number of bytes written
  *
@@ -183,14 +190,14 @@ AdGenerateFilename (
  *
  ******************************************************************************/
 
-ACPI_NATIVE_INT
+INT32
 AdWriteBuffer (
-    char                *Filename,
-    char                *Buffer,
-    UINT32              Length)
+    char                    *Filename,
+    char                    *Buffer,
+    UINT32                  Length)
 {
-    FILE                *fp;
-    ACPI_SIZE           Actual;
+    FILE                    *fp;
+    ACPI_SIZE               Actual;
 
 
     fp = fopen (Filename, "wb");
@@ -202,7 +209,7 @@ AdWriteBuffer (
 
     Actual = fwrite (Buffer, (size_t) Length, 1, fp);
     fclose (fp);
-    return ((ACPI_NATIVE_INT) Actual);
+    return ((INT32) Actual);
 }
 
 
@@ -210,10 +217,10 @@ AdWriteBuffer (
  *
  * FUNCTION:    AfWriteTable
  *
- * PARAMETERS:  Table       - pointer to the ACPI table
- *              Length      - length of the table
- *              TableName   - the table signature
- *              OemTableID  - from the table header
+ * PARAMETERS:  Table               - pointer to the ACPI table
+ *              Length              - length of the table
+ *              TableName           - the table signature
+ *              OemTableID          - from the table header
  *
  * RETURN:      None
  *
@@ -265,7 +272,7 @@ FlGenerateFilename (
      * Copy the original filename to a new buffer. Leave room for the worst case
      * where we append the suffix, an added dot and the null terminator.
      */
-    NewFilename = ACPI_ALLOCATE_ZEROED (
+    NewFilename = ACPI_ALLOCATE_ZEROED ((ACPI_SIZE)
         strlen (InputFilename) + strlen (Suffix) + 2);
     strcpy (NewFilename, InputFilename);
 
@@ -307,7 +314,7 @@ FlStrdup (
     char                *NewString;
 
 
-    NewString = ACPI_ALLOCATE (strlen (String) + 1);
+    NewString = ACPI_ALLOCATE ((ACPI_SIZE) strlen (String) + 1);
     if (!NewString)
     {
         return (NULL);

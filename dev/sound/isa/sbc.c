@@ -24,13 +24,17 @@
  * SUCH DAMAGE.
  */
 
+#ifdef HAVE_KERNEL_OPTION_HEADERS
+#include "opt_snd.h"
+#endif
+
 #include <dev/sound/chip.h>
 #include <dev/sound/pcm/sound.h>
 #include <dev/sound/isa/sb.h>
 
 #include <isa/isavar.h>
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/isa/sbc.c,v 1.48 2007/03/15 16:41:25 ariff Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/isa/sbc.c,v 1.49 2009/06/07 19:12:08 ariff Exp $");
 
 #define IO_MAX	3
 #define IRQ_MAX	1

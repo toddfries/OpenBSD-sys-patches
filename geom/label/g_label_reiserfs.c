@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label_reiserfs.c,v 1.3 2007/11/16 19:43:26 maxim Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label_reiserfs.c,v 1.4 2009/11/28 11:57:43 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -111,7 +111,10 @@ exit_free:
 	g_free(fs);
 }
 
-const struct g_label_desc g_label_reiserfs = {
+struct g_label_desc g_label_reiserfs = {
 	.ld_taste = g_label_reiserfs_taste,
-	.ld_dir = "reiserfs"
+	.ld_dir = "reiserfs",
+	.ld_enabled = 1
 };
+
+G_LABEL_INIT(reiserfs, g_label_reiserfs, "Create device nodes for REISERFS volumes");

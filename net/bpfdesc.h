@@ -33,7 +33,7 @@
  *
  *      @(#)bpfdesc.h	8.1 (Berkeley) 6/10/93
  *
- * $FreeBSD: src/sys/net/bpfdesc.h,v 1.40 2008/08/01 22:08:14 antoine Exp $
+ * $FreeBSD: src/sys/net/bpfdesc.h,v 1.43 2010/06/15 19:28:44 jkim Exp $
  */
 
 #ifndef _NET_BPFDESC_H_
@@ -72,9 +72,7 @@ struct bpf_d {
 	u_long		bd_rtout;	/* Read timeout in 'ticks' */
 	struct bpf_insn *bd_rfilter; 	/* read filter code */
 	struct bpf_insn *bd_wfilter;	/* write filter code */
-#ifdef BPF_JITTER
-	bpf_jit_filter	*bd_bfilter;	/* binary filter code */
-#endif
+	void		*bd_bfilter;	/* binary filter code */
 	u_int64_t	bd_rcount;	/* number of packets received */
 	u_int64_t	bd_dcount;	/* number of packets dropped */
 
@@ -83,6 +81,7 @@ struct bpf_d {
 	u_char		bd_immediate;	/* true to return on packet arrival */
 	int		bd_hdrcmplt;	/* false to fill in src lladdr automatically */
 	int		bd_direction;	/* select packet direction */
+	int		bd_tstamp;	/* select time stamping function */
 	int		bd_feedback;	/* true to feed back sent packets */
 	int		bd_async;	/* non-zero if packet reception should generate signal */
 	int		bd_sig;		/* signal to send upon packet reception */
@@ -99,6 +98,7 @@ struct bpf_d {
 	u_int64_t	bd_wfcount;	/* number of packets that matched write filter */
 	u_int64_t	bd_wdcount;	/* number of packets dropped during a write */
 	u_int64_t	bd_zcopy;	/* number of zero copy operations */
+	u_char		bd_compat32;	/* 32-bit stream on LP64 system */
 };
 
 /* Values for bd_state */

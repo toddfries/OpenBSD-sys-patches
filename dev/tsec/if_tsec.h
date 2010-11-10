@@ -22,7 +22,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/tsec/if_tsec.h,v 1.6 2009/02/17 14:59:47 raj Exp $
+ * $FreeBSD: src/sys/dev/tsec/if_tsec.h,v 1.7 2009/06/13 08:57:04 raj Exp $
  */
 
 #ifndef _IF_TSEC_H
@@ -358,10 +358,10 @@ void	tsec_receive_intr(void *arg);
 void	tsec_transmit_intr(void *arg);
 
 int	tsec_miibus_readreg(device_t dev, int phy, int reg);
-void	tsec_miibus_writereg(device_t dev, int phy, int reg, int value);
+int	tsec_miibus_writereg(device_t dev, int phy, int reg, int value);
 void	tsec_miibus_statchg(device_t dev);
 int	tsec_resume(device_t dev); /* XXX */
-void	tsec_shutdown(device_t dev);
+int	tsec_shutdown(device_t dev);
 int	tsec_suspend(device_t dev); /* XXX */
 
 void	tsec_get_hwaddr(struct tsec_softc *sc, uint8_t *addr);

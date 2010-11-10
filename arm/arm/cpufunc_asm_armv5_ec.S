@@ -37,7 +37,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc_asm_armv5_ec.S,v 1.1 2007/10/18 05:33:05 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc_asm_armv5_ec.S,v 1.2 2009/04/16 11:21:52 raj Exp $");
 
 /*
  * Functions to set the MMU Translation Table Base register
@@ -204,3 +204,4 @@ ENTRY(armv5_ec_dcache_wbinv_all)
 	bne	1b			/* More to do? */
 	mcr	p15, 0, r0, c7, c10, 4	/* drain the write buffer */
 	RET
+

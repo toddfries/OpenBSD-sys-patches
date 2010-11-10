@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/elf_machdep.c,v 1.28 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/elf_machdep.c,v 1.34 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -32,9 +32,11 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/elf_machdep.c,v 1.28 2008/11/22 12:36:15
 #include <sys/exec.h>
 #include <sys/imgact.h>
 #include <sys/linker.h>
+#include <sys/proc.h>
 #include <sys/sysent.h>
 #include <sys/imgact_elf.h>
 #include <sys/syscall.h>
+#include <sys/sysent.h>
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
 
@@ -73,7 +75,10 @@ struct sysentvec elf64_freebsd_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_FREEBSD | SV_LP64
+	.sv_flags	= SV_ABI_FREEBSD | SV_LP64,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = syscallnames,
 };
 
 static Elf64_Brandinfo freebsd_brand_info = {
@@ -84,10 +89,11 @@ static Elf64_Brandinfo freebsd_brand_info = {
 	.interp_path	= "/libexec/ld-elf.so.1",
 	.sysvec		= &elf64_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf64_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
-SYSINIT(elf64, SI_SUB_EXEC, SI_ORDER_ANY,
+SYSINIT(elf64, SI_SUB_EXEC, SI_ORDER_FIRST,
 	(sysinit_cfunc_t) elf64_insert_brand_entry,
 	&freebsd_brand_info);
 
@@ -99,12 +105,29 @@ static Elf64_Brandinfo freebsd_brand_oinfo = {
 	.interp_path	= "/usr/libexec/ld-elf.so.1",
 	.sysvec		= &elf64_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf64_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
 SYSINIT(oelf64, SI_SUB_EXEC, SI_ORDER_ANY,
 	(sysinit_cfunc_t) elf64_insert_brand_entry,
 	&freebsd_brand_oinfo);
+
+static Elf64_Brandinfo kfreebsd_brand_info = {
+	.brand		= ELFOSABI_FREEBSD,
+	.machine	= EM_X86_64,
+	.compat_3_brand	= "FreeBSD",
+	.emul_path	= NULL,
+	.interp_path	= "/lib/ld-kfreebsd-x86-64.so.1",
+	.sysvec		= &elf64_freebsd_sysvec,
+	.interp_newpath	= NULL,
+	.brand_note	= &elf64_kfreebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE_MANDATORY
+};
+
+SYSINIT(kelf64, SI_SUB_EXEC, SI_ORDER_ANY,
+	(sysinit_cfunc_t) elf64_insert_brand_entry,
+	&kfreebsd_brand_info);
 
 
 void

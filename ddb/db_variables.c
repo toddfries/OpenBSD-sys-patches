@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ddb/db_variables.c,v 1.23 2005/01/06 01:34:41 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/ddb/db_variables.c,v 1.24 2009/07/14 22:48:30 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,6 +46,12 @@ static struct db_variable db_vars[] = {
 	{ "maxwidth",	&db_max_width, FCN_NULL },
 	{ "tabstops",	&db_tab_stop_width, FCN_NULL },
 	{ "lines",	&db_lines_per_page, FCN_NULL },
+	{ "curcpu",	NULL, db_var_curcpu },
+	{ "db_cpu",	NULL, db_var_db_cpu },
+#ifdef VIMAGE
+	{ "curvnet",	NULL, db_var_curvnet },
+	{ "db_vnet",	NULL, db_var_db_vnet },
+#endif
 };
 static struct db_variable *db_evars =
 	db_vars + sizeof(db_vars)/sizeof(db_vars[0]);

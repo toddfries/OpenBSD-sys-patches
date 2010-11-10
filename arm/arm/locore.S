@@ -37,7 +37,7 @@
 #include <machine/asm.h>
 #include <machine/armreg.h>
 #include <machine/pte.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/locore.S,v 1.21 2008/10/14 10:11:14 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/locore.S,v 1.23 2009/06/09 17:21:47 marcel Exp $");
 
 /* What size should this really be ? It is only used by initarm() */
 #define INIT_ARM_STACK_SIZE	2048
@@ -72,6 +72,11 @@ ASENTRY_NP(_start)
  */
 
 	mov	ip, r0
+
+	/* Make sure interrupts are disabled. */
+	mrs	r7, cpsr
+	orr	r7, r7, #(I32_bit|F32_bit)
+	msr	cpsr_c, r7
 
 #if defined (FLASHADDR) && defined(LOADERRAMADDR)
 	/* Check if we're running from flash. */
@@ -110,7 +115,7 @@ from_ram:
 	nop
 #endif
 	adr	r7, Lunmapped
-	bic     r7, r7, #0xff000000
+	bic     r7, r7, #0xf0000000
 	orr     r7, r7, #PHYSADDR
 
 
@@ -144,7 +149,7 @@ Lunmapped:
 	ldmia	r4!, {r1,r2,r3}   /* # of sections, VA, PA|attr */
 	cmp	r1, #0
 	adrne	r5, 2b
-	bicne	r5, r5, #0xff000000
+	bicne	r5, r5, #0xf0000000
 	orrne	r5, r5, #PHYSADDR
 	movne	pc, r5
 

@@ -24,10 +24,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ipc.c,v 1.24 2006/07/08 19:54:12 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ipc.c,v 1.26 2009/06/25 07:25:39 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/limits.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
@@ -415,7 +416,10 @@ struct ibcs2_shmid_ds *ibp;
 	ibp->shm_segsz = bp->shm_segsz;
 	ibp->shm_lpid = bp->shm_lpid;
 	ibp->shm_cpid = bp->shm_cpid;
-	ibp->shm_nattch = bp->shm_nattch;
+	if (bp->shm_nattch > SHRT_MAX)
+		ibp->shm_nattch = SHRT_MAX;
+	else
+		ibp->shm_nattch = bp->shm_nattch;
 	ibp->shm_cnattch = 0;			/* ignored anyway */
 	ibp->shm_atime = bp->shm_atime;
 	ibp->shm_dtime = bp->shm_dtime;
@@ -436,7 +440,6 @@ struct shmid_ds *bp;
 	bp->shm_atime = ibp->shm_atime;
 	bp->shm_dtime = ibp->shm_dtime;
 	bp->shm_ctime = ibp->shm_ctime;
-	bp->shm_internal = (void *)0;		/* ignored anyway */
 	return;
 }
 

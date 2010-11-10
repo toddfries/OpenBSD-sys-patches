@@ -31,7 +31,7 @@
 /* $KAME: sctp_usrreq.c,v 1.48 2005/03/07 23:26:08 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_usrreq.c,v 1.66 2009/02/27 20:54:45 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_usrreq.c,v 1.77 2010/06/11 03:54:00 rrs Exp $");
 #include <netinet/sctp_os.h>
 #include <sys/proc.h>
 #include <netinet/sctp_pcb.h>
@@ -106,6 +106,7 @@ sctp_pathmtu_adjustment(struct sctp_inpcb *inp,
     uint16_t nxtsz)
 {
 	struct sctp_tmit_chunk *chk;
+	uint16_t overhead;
 
 	/* Adjust that too */
 	stcb->asoc.smallest_mtu = nxtsz;
@@ -114,18 +115,26 @@ sctp_pathmtu_adjustment(struct sctp_inpcb *inp,
 	SCTP_PRINTF("sctp_pathmtu_adjust called inp:%p stcb:%p net:%p nxtsz:%d\n",
 	    inp, stcb, net, nxtsz);
 #endif
+	overhead = IP_HDR_SIZE;
+	if (sctp_auth_is_required_chunk(SCTP_DATA, stcb->asoc.peer_auth_chunks)) {
+		overhead += sctp_get_auth_chunk_len(stcb->asoc.peer_hmac_id);
+	}
 	TAILQ_FOREACH(chk, &stcb->asoc.send_queue, sctp_next) {
-		if ((chk->send_size + IP_HDR_SIZE) > nxtsz) {
+		if ((chk->send_size + overhead) > nxtsz) {
 			chk->flags |= CHUNK_FLAGS_FRAGMENT_OK;
 		}
 	}
 	TAILQ_FOREACH(chk, &stcb->asoc.sent_queue, sctp_next) {
-		if ((chk->send_size + IP_HDR_SIZE) > nxtsz) {
+		if ((chk->send_size + overhead) > nxtsz) {
 			/*
 			 * For this guy we also mark for immediate resend
 			 * since we sent to big of chunk
 			 */
 			chk->flags |= CHUNK_FLAGS_FRAGMENT_OK;
+			if (chk->sent < SCTP_DATAGRAM_RESEND) {
+				sctp_flight_size_decrease(chk);
+				sctp_total_flight_decrease(stcb, chk);
+			}
 			if (chk->sent != SCTP_DATAGRAM_RESEND) {
 				sctp_ucount_incr(stcb->asoc.sent_queue_retran_cnt);
 			}
@@ -140,8 +149,6 @@ sctp_pathmtu_adjustment(struct sctp_inpcb *inp,
 			}
 			/* Clear any time so NO RTT is being done */
 			chk->do_rtt = 0;
-			sctp_flight_size_decrease(chk);
-			sctp_total_flight_decrease(stcb, chk);
 		}
 	}
 }
@@ -395,6 +402,9 @@ sctp_ctlinput(cmd, sa, vip)
 				SCTP_INP_DECR_REF(inp);
 				SCTP_INP_WUNLOCK(inp);
 			}
+			if (stcb) {
+				SCTP_TCB_UNLOCK(stcb);
+			}
 		}
 	}
 	return;
@@ -537,13 +547,14 @@ sctp_attach(struct socket *so, int proto, struct thread *p)
 	inp->sctp_flags &= ~SCTP_PCB_FLAGS_BOUND_V6;	/* I'm not v6! */
 	ip_inp = &inp->ip_inp.inp;
 	ip_inp->inp_vflag |= INP_IPV4;
-	ip_inp->inp_ip_ttl = MODULE_GLOBAL(MOD_INET, ip_defttl);
+	ip_inp->inp_ip_ttl = MODULE_GLOBAL(ip_defttl);
 #ifdef IPSEC
 	error = ipsec_init_policy(so, &ip_inp->inp_sp);
 #ifdef SCTP_LOG_CLOSING
 	sctp_log_closing(inp, NULL, 17);
 #endif
 	if (error != 0) {
+try_again:
 		flags = inp->sctp_flags;
 		if (((flags & SCTP_PCB_FLAGS_SOCKET_GONE) == 0) &&
 		    (atomic_cmpset_int(&inp->sctp_flags, flags, (flags | SCTP_PCB_FLAGS_SOCKET_GONE | SCTP_PCB_FLAGS_CLOSE_IP)))) {
@@ -554,7 +565,12 @@ sctp_attach(struct socket *so, int proto, struct thread *p)
 			sctp_inpcb_free(inp, SCTP_FREE_SHOULD_USE_ABORT,
 			    SCTP_CALLED_AFTER_CMPSET_OFCLOSE);
 		} else {
-			SCTP_INP_WUNLOCK(inp);
+			flags = inp->sctp_flags;
+			if ((flags & SCTP_PCB_FLAGS_SOCKET_GONE) == 0) {
+				goto try_again;
+			} else {
+				SCTP_INP_WUNLOCK(inp);
+			}
 		}
 		return error;
 	}
@@ -752,7 +768,7 @@ sctp_disconnect(struct socket *so)
 	SCTP_INP_RLOCK(inp);
 	if ((inp->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) ||
 	    (inp->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL)) {
-		if (SCTP_LIST_EMPTY(&inp->sctp_asoc_list)) {
+		if (LIST_EMPTY(&inp->sctp_asoc_list)) {
 			/* No connection */
 			SCTP_INP_RUNLOCK(inp);
 			return (0);
@@ -967,7 +983,9 @@ sctp_shutdown(struct socket *so)
 	/* For UDP model this is a invalid call */
 	if (inp->sctp_flags & SCTP_PCB_FLAGS_UDPTYPE) {
 		/* Restore the flags that the soshutdown took away. */
+		SOCKBUF_LOCK(&so->so_rcv);
 		so->so_rcv.sb_state &= ~SBS_CANTRCVMORE;
+		SOCKBUF_UNLOCK(&so->so_rcv);
 		/* This proc will wakeup for read and do nothing (I hope) */
 		SCTP_INP_RUNLOCK(inp);
 		SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_USRREQ, EOPNOTSUPP);
@@ -1477,7 +1495,7 @@ sctp_do_connect_x(struct socket *so, struct sctp_inpcb *inp, void *optval,
 
 
 	/* We are GOOD to go */
-	stcb = sctp_aloc_assoc(inp, sa, 1, &error, 0, vrf_id,
+	stcb = sctp_aloc_assoc(inp, sa, &error, 0, vrf_id,
 	    (struct thread *)p
 	    );
 	if (stcb == NULL) {
@@ -1495,7 +1513,7 @@ sctp_do_connect_x(struct socket *so, struct sctp_inpcb *inp, void *optval,
 	added = sctp_connectx_helper_add(stcb, sa, (totaddr - 1), &error);
 	/* Fill in the return id */
 	if (error) {
-		(void)sctp_free_assoc(inp, stcb, SCTP_PCBFREE_FORCE, SCTP_FROM_SCTP_USRREQ + SCTP_LOC_12);
+		(void)sctp_free_assoc(inp, stcb, SCTP_PCBFREE_FORCE, SCTP_FROM_SCTP_USRREQ + SCTP_LOC_6);
 		goto out_now;
 	}
 	a_id = (sctp_assoc_t *) optval;
@@ -2001,7 +2019,7 @@ flags_out:
 				events->sctp_sender_dry_event = 1;
 
 			if (sctp_is_feature_on(inp, SCTP_PCB_FLAGS_STREAM_RESETEVNT))
-				events->sctp_stream_reset_events = 1;
+				events->sctp_stream_reset_event = 1;
 			SCTP_INP_RUNLOCK(inp);
 			*optsize = sizeof(struct sctp_event_subscribe);
 		}
@@ -3643,7 +3661,7 @@ sctp_setopt(struct socket *so, int optname, void *optval, size_t optsize,
 				sctp_feature_off(inp, SCTP_PCB_FLAGS_DRYEVNT);
 			}
 
-			if (events->sctp_stream_reset_events) {
+			if (events->sctp_stream_reset_event) {
 				sctp_feature_on(inp, SCTP_PCB_FLAGS_STREAM_RESETEVNT);
 			} else {
 				sctp_feature_off(inp, SCTP_PCB_FLAGS_STREAM_RESETEVNT);
@@ -4444,7 +4462,7 @@ sctp_connect(struct socket *so, struct sockaddr *addr, struct thread *p)
 	}
 	vrf_id = inp->def_vrf_id;
 	/* We are GOOD to go */
-	stcb = sctp_aloc_assoc(inp, addr, 1, &error, 0, vrf_id, p);
+	stcb = sctp_aloc_assoc(inp, addr, &error, 0, vrf_id, p);
 	if (stcb == NULL) {
 		/* Gak! no memory */
 		goto out_now;
@@ -4452,6 +4470,15 @@ sctp_connect(struct socket *so, struct sockaddr *addr, struct thread *p)
 	if (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) {
 		stcb->sctp_ep->sctp_flags |= SCTP_PCB_FLAGS_CONNECTED;
 		/* Set the connected flag so we can queue data */
+		SOCKBUF_LOCK(&so->so_rcv);
+		so->so_rcv.sb_state &= ~SBS_CANTRCVMORE;
+		SOCKBUF_UNLOCK(&so->so_rcv);
+		SOCKBUF_LOCK(&so->so_snd);
+		so->so_snd.sb_state &= ~SBS_CANTSENDMORE;
+		SOCKBUF_UNLOCK(&so->so_snd);
+		SOCK_LOCK(so);
+		so->so_state &= ~SS_ISDISCONNECTING;
+		SOCK_UNLOCK(so);
 		soisconnecting(so);
 	}
 	SCTP_SET_STATE(&stcb->asoc, SCTP_STATE_COOKIE_WAIT);
@@ -4646,6 +4673,7 @@ sctp_accept(struct socket *so, struct sockaddr **addr)
 	SCTP_TCB_LOCK(stcb);
 	SCTP_INP_RUNLOCK(inp);
 	store = stcb->asoc.primary_destination->ro._l_addr;
+	stcb->asoc.state &= ~SCTP_STATE_IN_ACCEPT_QUEUE;
 	SCTP_TCB_UNLOCK(stcb);
 	switch (store.sa.sa_family) {
 	case AF_INET:
@@ -4653,6 +4681,8 @@ sctp_accept(struct socket *so, struct sockaddr **addr)
 			struct sockaddr_in *sin;
 
 			SCTP_MALLOC_SONAME(sin, struct sockaddr_in *, sizeof *sin);
+			if (sin == NULL)
+				return (ENOMEM);
 			sin->sin_family = AF_INET;
 			sin->sin_len = sizeof(*sin);
 			sin->sin_port = ((struct sockaddr_in *)&store)->sin_port;
@@ -4666,6 +4696,8 @@ sctp_accept(struct socket *so, struct sockaddr **addr)
 			struct sockaddr_in6 *sin6;
 
 			SCTP_MALLOC_SONAME(sin6, struct sockaddr_in6 *, sizeof *sin6);
+			if (sin6 == NULL)
+				return (ENOMEM);
 			sin6->sin6_family = AF_INET6;
 			sin6->sin6_len = sizeof(*sin6);
 			sin6->sin6_port = ((struct sockaddr_in6 *)&store)->sin6_port;
@@ -4712,6 +4744,10 @@ sctp_accept(struct socket *so, struct sockaddr **addr)
 		}
 		SCTP_INP_WUNLOCK(inp);
 	}
+	if (stcb->asoc.state & SCTP_STATE_ABOUT_TO_BE_FREED) {
+		SCTP_TCB_LOCK(stcb);
+		sctp_free_assoc(inp, stcb, SCTP_NORMAL_PROC, SCTP_FROM_SCTP_USRREQ + SCTP_LOC_7);
+	}
 	return (0);
 }
 
@@ -4727,6 +4763,8 @@ sctp_ingetaddr(struct socket *so, struct sockaddr **addr)
 	 * Do the malloc first in case it blocks.
 	 */
 	SCTP_MALLOC_SONAME(sin, struct sockaddr_in *, sizeof *sin);
+	if (sin == NULL)
+		return (ENOMEM);
 	sin->sin_family = AF_INET;
 	sin->sin_len = sizeof(*sin);
 	inp = (struct sctp_inpcb *)so->so_pcb;
@@ -4829,6 +4867,8 @@ sctp_peeraddr(struct socket *so, struct sockaddr **addr)
 		return (ENOTCONN);
 	}
 	SCTP_MALLOC_SONAME(sin, struct sockaddr_in *, sizeof *sin);
+	if (sin == NULL)
+		return (ENOMEM);
 	sin->sin_family = AF_INET;
 	sin->sin_len = sizeof(*sin);
 

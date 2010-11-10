@@ -14,7 +14,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/zfsboot/zfsboot.c,v 1.2 2008/11/19 16:39:01 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/zfsboot/zfsboot.c,v 1.13 2010/09/24 19:49:12 pjd Exp $");
 
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -27,6 +27,7 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/zfsboot/zfsboot.c,v 1.2 2008/11/19 16:39:0
 
 #include <machine/bootinfo.h>
 #include <machine/elf.h>
+#include <machine/pc/bios.h>
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -35,66 +36,24 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/zfsboot/zfsboot.c,v 1.2 2008/11/19 16:39:0
 
 #include <btxv86.h>
 
-#ifndef GPT
-#include "zfsboot.h"
-#endif
 #include "lib.h"
-
-#define IO_KEYBOARD	1
-#define IO_SERIAL	2
-
-#define SECOND		18	/* Circa that many ticks in a second. */
-
-#define RBX_ASKNAME	0x0	/* -a */
-#define RBX_SINGLE	0x1	/* -s */
-/* 0x2 is reserved for log2(RB_NOSYNC). */
-/* 0x3 is reserved for log2(RB_HALT). */
-/* 0x4 is reserved for log2(RB_INITNAME). */
-#define RBX_DFLTROOT	0x5	/* -r */
-#define RBX_KDB 	0x6	/* -d */
-/* 0x7 is reserved for log2(RB_RDONLY). */
-/* 0x8 is reserved for log2(RB_DUMP). */
-/* 0x9 is reserved for log2(RB_MINIROOT). */
-#define RBX_CONFIG	0xa	/* -c */
-#define RBX_VERBOSE	0xb	/* -v */
-#define RBX_SERIAL	0xc	/* -h */
-#define RBX_CDROM	0xd	/* -C */
-/* 0xe is reserved for log2(RB_POWEROFF). */
-#define RBX_GDB 	0xf	/* -g */
-#define RBX_MUTE	0x10	/* -m */
-/* 0x11 is reserved for log2(RB_SELFTEST). */
-/* 0x12 is reserved for boot programs. */
-/* 0x13 is reserved for boot programs. */
-#define RBX_PAUSE	0x14	/* -p */
-#define RBX_QUIET	0x15	/* -q */
-#define RBX_NOINTR	0x1c	/* -n */
-/* 0x1d is reserved for log2(RB_MULTIPLE) and is just misnamed here. */
-#define RBX_DUAL	0x1d	/* -D */
-/* 0x1f is reserved for log2(RB_BOOTINFO). */
-
-/* pass: -a, -s, -r, -d, -c, -v, -h, -C, -g, -m, -p, -D */
-#define RBX_MASK	(OPT_SET(RBX_ASKNAME) | OPT_SET(RBX_SINGLE) | \
-			OPT_SET(RBX_DFLTROOT) | OPT_SET(RBX_KDB ) | \
-			OPT_SET(RBX_CONFIG) | OPT_SET(RBX_VERBOSE) | \
-			OPT_SET(RBX_SERIAL) | OPT_SET(RBX_CDROM) | \
-			OPT_SET(RBX_GDB ) | OPT_SET(RBX_MUTE) | \
-			OPT_SET(RBX_PAUSE) | OPT_SET(RBX_DUAL))
+#include "rbx.h"
+#include "drv.h"
+#include "util.h"
+#include "cons.h"
 
 /* Hint to loader that we came from ZFS */
 #define	KARGS_FLAGS_ZFS		0x4
 
 #define PATH_CONFIG	"/boot.config"
-#define PATH_BOOT3	"/boot/loader"
+#define PATH_BOOT3	"/boot/zfsloader"
 #define PATH_KERNEL	"/boot/kernel/kernel"
 
 #define ARGS		0x900
 #define NOPT		14
 #define NDEV		3
-#define MEM_BASE	0x12
-#define MEM_EXT 	0x15
-#define V86_CY(x)	((x) & 1)
-#define V86_ZR(x)	((x) & 0x40)
 
+#define BIOS_NUMDRIVES	0x475
 #define DRV_HARD	0x80
 #define DRV_MASK	0x7f
 
@@ -103,8 +62,7 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/zfsboot/zfsboot.c,v 1.2 2008/11/19 16:39:0
 #define TYPE_MAXHARD	TYPE_DA
 #define TYPE_FD		2
 
-#define OPT_SET(opt)	(1 << (opt))
-#define OPT_CHECK(opt)	((opts) & OPT_SET(opt))
+#define	MAXBDDEV	31
 
 extern uint32_t _end;
 
@@ -128,26 +86,29 @@ static const unsigned char flags[NOPT] = {
     RBX_SINGLE,
     RBX_VERBOSE
 };
+uint32_t opts;
 
 static const char *const dev_nm[NDEV] = {"ad", "da", "fd"};
 static const unsigned char dev_maj[NDEV] = {30, 4, 2};
 
-struct dsk {
-    unsigned drive;
-    unsigned type;
-    unsigned unit;
-    unsigned slice;
-    unsigned part;
-    unsigned start;
-    int init;
-};
 static char cmd[512];
 static char kname[1024];
-static uint32_t opts;
 static int comspeed = SIOSPD;
 static struct bootinfo bootinfo;
 static uint32_t bootdev;
-static uint8_t ioctrl = IO_KEYBOARD;
+
+vm_offset_t	high_heap_base;
+uint32_t	bios_basemem, bios_extmem, high_heap_size;
+
+static struct bios_smap smap;
+
+/*
+ * The minimum amount of memory to reserve in bios_extmem for the heap.
+ */
+#define	HEAP_MIN	(3 * 1024 * 1024)
+
+static char *heap_next;
+static char *heap_end;
 
 /* Buffers that must not span a 64k boundary. */
 #define READ_BUF_SIZE	8192
@@ -160,91 +121,11 @@ static struct dmadat *dmadat;
 void exit(int);
 static void load(void);
 static int parse(void);
-static void printf(const char *,...);
-static void putchar(int);
-static uint32_t memsize(void);
-static int drvread(struct dsk *, void *, unsigned, unsigned);
-static int keyhit(unsigned);
-static int xputc(int);
-static int xgetc(int);
-static int getc(int);
-
-static void memcpy(void *, const void *, int);
-static void
-memcpy(void *dst, const void *src, int len)
-{
-    const char *s = src;
-    char *d = dst;
-
-    while (len--)
-        *d++ = *s++;
-}
-
-static void
-strcpy(char *dst, const char *src)
-{
-    while (*src)
-	*dst++ = *src++;
-    *dst++ = 0;
-}
-
-static void
-strcat(char *dst, const char *src)
-{
-    while (*dst)
-	dst++;
-    while (*src)
-	*dst++ = *src++;
-    *dst++ = 0;
-}
-
-static int
-strcmp(const char *s1, const char *s2)
-{
-    for (; *s1 == *s2 && *s1; s1++, s2++);
-    return (unsigned char)*s1 - (unsigned char)*s2;
-}
-
-static const char *
-strchr(const char *s, char ch)
-{
-    for (; *s; s++)
-	if (*s == ch)
-		return s;
-    return 0;
-}
-
-static int
-memcmp(const void *p1, const void *p2, size_t n)
-{
-    const char *s1 = (const char *) p1;
-    const char *s2 = (const char *) p2;
-    for (; n > 0 && *s1 == *s2; s1++, s2++, n--);
-    if (n)
-        return (unsigned char)*s1 - (unsigned char)*s2;
-    else
-	return 0;
-}
-
-static void
-memset(void *p, char val, size_t n)
-{
-    char *s = (char *) p;
-    while (n--)
-	*s++ = val;
-}
+static void bios_getmem(void);
 
 static void *
 malloc(size_t n)
 {
-	static char *heap_next;
-	static char *heap_end;
-
-	if (!heap_next) {
-		heap_next = (char *) dmadat + sizeof(*dmadat);
-		heap_end = (char *) (640*1024);
-	}
-
 	char *p = heap_next;
 	if (p + n > heap_end) {
 		printf("malloc failure\n");
@@ -254,15 +135,6 @@ malloc(size_t n)
 	}
 	heap_next += n;
 	return p;
-}
-
-static size_t
-strlen(const char *s)
-{
-	size_t len = 0;
-	while (*s++)
-		len++;
-	return len;
 }
 
 static char *
@@ -310,7 +182,8 @@ static int
 vdev_read(vdev_t *vdev, void *priv, off_t off, void *buf, size_t bytes)
 {
 	char *p;
-	unsigned int lba, nb;
+	daddr_t lba;
+	unsigned int nb;
 	struct dsk *dsk = (struct dsk *) priv;
 
 	if ((off & (DEV_BSIZE - 1)) || (bytes & (DEV_BSIZE - 1)))
@@ -318,6 +191,7 @@ vdev_read(vdev_t *vdev, void *priv, off_t off, void *buf, size_t bytes)
 
 	p = buf;
 	lba = off / DEV_BSIZE;
+	lba += dsk->start;
 	while (bytes > 0) {
 		nb = bytes / DEV_BSIZE;
 		if (nb > READ_BUF_SIZE / DEV_BSIZE)
@@ -343,53 +217,91 @@ xfsread(const dnode_phys_t *dnode, off_t *offp, void *buf, size_t nbyte)
     return 0;
 }
 
-static inline uint32_t
-memsize(void)
+static void
+bios_getmem(void)
 {
-    v86.addr = MEM_EXT;
-    v86.eax = 0x8800;
-    v86int();
-    return v86.eax;
-}
+    uint64_t size;
 
-static inline void
-getstr(void)
-{
-    char *s;
-    int c;
-
-    s = cmd;
-    for (;;) {
-	switch (c = xgetc(0)) {
-	case 0:
+    /* Parse system memory map */
+    v86.ebx = 0;
+    do {
+	v86.ctl = V86_FLAGS;
+	v86.addr = 0x15;		/* int 0x15 function 0xe820*/
+	v86.eax = 0xe820;
+	v86.ecx = sizeof(struct bios_smap);
+	v86.edx = SMAP_SIG;
+	v86.es = VTOPSEG(&smap);
+	v86.edi = VTOPOFF(&smap);
+	v86int();
+	if ((v86.efl & 1) || (v86.eax != SMAP_SIG))
 	    break;
-	case '\177':
-	case '\b':
-	    if (s > cmd) {
-		s--;
-		printf("\b \b");
+	/* look for a low-memory segment that's large enough */
+	if ((smap.type == SMAP_TYPE_MEMORY) && (smap.base == 0) &&
+	    (smap.length >= (512 * 1024)))
+	    bios_basemem = smap.length;
+	/* look for the first segment in 'extended' memory */
+	if ((smap.type == SMAP_TYPE_MEMORY) && (smap.base == 0x100000)) {
+	    bios_extmem = smap.length;
+	}
+
+	/*
+	 * Look for the largest segment in 'extended' memory beyond
+	 * 1MB but below 4GB.
+	 */
+	if ((smap.type == SMAP_TYPE_MEMORY) && (smap.base > 0x100000) &&
+	    (smap.base < 0x100000000ull)) {
+	    size = smap.length;
+
+	    /*
+	     * If this segment crosses the 4GB boundary, truncate it.
+	     */
+	    if (smap.base + size > 0x100000000ull)
+		size = 0x100000000ull - smap.base;
+
+	    if (size > high_heap_size) {
+		high_heap_size = size;
+		high_heap_base = smap.base;
 	    }
-	    break;
-	case '\n':
-	case '\r':
-	    *s = 0;
-	    return;
-	default:
-	    if (s - cmd < sizeof(cmd) - 1)
-		*s++ = c;
-	    putchar(c);
+	}
+    } while (v86.ebx != 0);
+
+    /* Fall back to the old compatibility function for base memory */
+    if (bios_basemem == 0) {
+	v86.ctl = 0;
+	v86.addr = 0x12;		/* int 0x12 */
+	v86int();
+	
+	bios_basemem = (v86.eax & 0xffff) * 1024;
+    }
+
+    /* Fall back through several compatibility functions for extended memory */
+    if (bios_extmem == 0) {
+	v86.ctl = V86_FLAGS;
+	v86.addr = 0x15;		/* int 0x15 function 0xe801*/
+	v86.eax = 0xe801;
+	v86int();
+	if (!(v86.efl & 1)) {
+	    bios_extmem = ((v86.ecx & 0xffff) + ((v86.edx & 0xffff) * 64)) * 1024;
 	}
     }
-}
+    if (bios_extmem == 0) {
+	v86.ctl = 0;
+	v86.addr = 0x15;		/* int 0x15 function 0x88*/
+	v86.eax = 0x8800;
+	v86int();
+	bios_extmem = (v86.eax & 0xffff) * 1024;
+    }
 
-static inline void
-putc(int c)
-{
-    v86.addr = 0x10;
-    v86.eax = 0xe00 | (c & 0xff);
-    v86.ebx = 0x7;
-    v86int();
-}
+    /*
+     * If we have extended memory and did not find a suitable heap
+     * region in the SMAP, use the last 3MB of 'extended' memory as a
+     * high heap candidate.
+     */
+    if (bios_extmem >= HEAP_MIN && high_heap_size < HEAP_MIN) {
+	high_heap_size = HEAP_MIN;
+	high_heap_base = bios_extmem + 0x100000 - HEAP_MIN;
+    }
+}    
 
 /*
  * Try to detect a device supported by the legacy int13 BIOS
@@ -413,6 +325,20 @@ int13probe(int drive)
     return(0);
 }
 
+/*
+ * We call this when we find a ZFS vdev - ZFS consumes the dsk
+ * structure so we must make a new one.
+ */
+static struct dsk *
+copy_dsk(struct dsk *dsk)
+{
+    struct dsk *newdsk;
+
+    newdsk = malloc(sizeof(struct dsk));
+    *newdsk = *dsk;
+    return (newdsk);
+}
+
 static void
 probe_drive(struct dsk *dsk, spa_t **spap)
 {
@@ -425,9 +351,6 @@ probe_drive(struct dsk *dsk, spa_t **spap)
     struct dos_partition *dp;
     char *sec;
     unsigned i;
-
-    if (!int13probe(dsk->drive))
-	return;
 
     /*
      * If we find a vdev on the whole disk, stop here. Otherwise dig
@@ -463,6 +386,7 @@ probe_drive(struct dsk *dsk, spa_t **spap)
     slba = hdr.hdr_lba_table;
     elba = slba + hdr.hdr_entries / entries_per_sec;
     while (slba < elba) {
+	dsk->start = 0;
 	if (drvread(dsk, sec, slba, 1))
 	    return;
 	for (part = 0; part < entries_per_sec; part++) {
@@ -473,20 +397,16 @@ probe_drive(struct dsk *dsk, spa_t **spap)
 		if (vdev_probe(vdev_read, dsk, spap) == 0) {
 		    /*
 		     * We record the first pool we find (we will try
-		     * to boot from that one.
+		     * to boot from that one).
 		     */
-		    spap = 0;
+		    spap = NULL;
 
 		    /*
 		     * This slice had a vdev. We need a new dsk
 		     * structure now since the vdev now owns this one.
 		     */
-		    struct dsk *newdsk;
-		    newdsk = malloc(sizeof(struct dsk));
-		    *newdsk = *dsk;
-		    dsk = newdsk;
+		    dsk = copy_dsk(dsk);
 		}
-		break;
 	    }
 	}
 	slba++;
@@ -514,10 +434,7 @@ trymbr:
 	     * This slice had a vdev. We need a new dsk structure now
 	     * since the vdev now owns this one.
 	     */
-	    struct dsk *newdsk;
-	    newdsk = malloc(sizeof(struct dsk));
-	    *newdsk = *dsk;
-	    dsk = newdsk;
+	    dsk = copy_dsk(dsk);
 	}
     }
 }
@@ -531,7 +448,16 @@ main(void)
     struct dsk *dsk;
 
     dmadat = (void *)(roundup2(__base + (int32_t)&_end, 0x10000) - __base);
-    v86.ctl = V86_FLAGS;
+
+    bios_getmem();
+
+    if (high_heap_size > 0) {
+	heap_end = PTOV(high_heap_base + high_heap_size);
+	heap_next = PTOV(high_heap_base);
+    } else {
+	heap_next = (char *) dmadat + sizeof(*dmadat);
+	heap_end = (char *) PTOV(bios_basemem);
+    }
 
     dsk = malloc(sizeof(struct dsk));
     dsk->drive = *(uint8_t *)PTOV(ARGS);
@@ -544,8 +470,8 @@ main(void)
 
     bootinfo.bi_version = BOOTINFO_VERSION;
     bootinfo.bi_size = sizeof(bootinfo);
-    bootinfo.bi_basemem = 0;	/* XXX will be filled by loader or kernel */
-    bootinfo.bi_extmem = memsize();
+    bootinfo.bi_basemem = bios_basemem / 1024;
+    bootinfo.bi_extmem = bios_extmem / 1024;
     bootinfo.bi_memsizes_valid++;
     bootinfo.bi_bios_dev = dsk->drive;
 
@@ -569,9 +495,17 @@ main(void)
      * will find any other available pools and it may fill in missing
      * vdevs for the boot pool.
      */
-    for (i = 0; i < 4; i++) {
+#ifndef VIRTUALBOX
+    for (i = 0; i < *(unsigned char *)PTOV(BIOS_NUMDRIVES); i++)
+#else
+    for (i = 0; i < MAXBDDEV; i++)
+#endif
+    {
 	if ((i | DRV_HARD) == *(uint8_t *)PTOV(ARGS))
 	    continue;
+
+	if (!int13probe(i | DRV_HARD))
+	    break;
 
 	dsk = malloc(sizeof(struct dsk));
 	dsk->drive = i | DRV_HARD;
@@ -581,7 +515,7 @@ main(void)
 	dsk->part = 0;
 	dsk->start = 0;
 	dsk->init = 0;
-	probe_drive(dsk, 0);
+	probe_drive(dsk, NULL);
     }
 
     /*
@@ -591,7 +525,7 @@ main(void)
     if (!spa) {
 	spa = STAILQ_FIRST(&zfs_pools);
 	if (!spa) {
-	    printf("No ZFS pools located, can't boot\n");
+	    printf("%s: No ZFS pools located, can't boot\n", BOOTPROG);
 	    for (;;)
 		;
 	}
@@ -601,7 +535,7 @@ main(void)
 
     if (zfs_lookup(spa, PATH_CONFIG, &dn) == 0) {
 	off = 0;
-	xfsread(&dn, &off, cmd, sizeof(cmd));
+	zfs_read(spa, &dn, &off, cmd, sizeof(cmd));
     }
 
     if (*cmd) {
@@ -620,7 +554,7 @@ main(void)
 
     if (autoboot && !*kname) {
 	memcpy(kname, PATH_BOOT3, sizeof(PATH_BOOT3));
-	if (!keyhit(3*SECOND)) {
+	if (!keyhit(3)) {
 	    load();
 	    memcpy(kname, PATH_KERNEL, sizeof(PATH_KERNEL));
 	}
@@ -630,14 +564,14 @@ main(void)
 
     for (;;) {
 	if (!autoboot || !OPT_CHECK(RBX_QUIET))
-	    printf("\nFreeBSD/i386 boot\n"
+	    printf("\nFreeBSD/x86 boot\n"
 		   "Default: %s:%s\n"
 		   "boot: ",
 		   spa->spa_name, kname);
 	if (ioctrl & IO_SERIAL)
 	    sio_flush();
-	if (!autoboot || keyhit(5*SECOND))
-	    getstr();
+	if (!autoboot || keyhit(5))
+	    getstr(cmd, sizeof(cmd));
 	else if (!autoboot || !OPT_CHECK(RBX_QUIET))
 	    putchar('\n');
 	autoboot = 0;
@@ -752,7 +686,7 @@ load(void)
 }
 
 static int
-parse()
+parse(void)
 {
     char *arg = cmd;
     char *ep, *p, *q;
@@ -843,207 +777,4 @@ parse()
 	arg = p;
     }
     return 0;
-}
-
-static void
-printf(const char *fmt,...)
-{
-    va_list ap;
-    char buf[10];
-    char *s;
-    unsigned u;
-    int c;
-    int minus;
-    int prec;
-    int len;
-    int pad;
-
-    va_start(ap, fmt);
-    while ((c = *fmt++)) {
-	if (c == '%') {
-	    minus = 0;
-	    prec = 0;
-	nextfmt:
-	    c = *fmt++;
-	    switch (c) {
-	    case '-':
-		minus = 1;
-		goto nextfmt;
-	    case '0':
-	    case '1':
-	    case '2':
-	    case '3':
-	    case '4':
-	    case '5':
-	    case '6':
-	    case '7':
-	    case '8':
-	    case '9':
-		prec = 10 * prec + (c - '0');
-		goto nextfmt;
-	    case 'c':
-		putchar(va_arg(ap, int));
-		continue;
-	    case 's':
-		s = va_arg(ap, char *);
-		if (prec) {
-		    len = strlen(s);
-		    if (len < prec)
-			pad = prec - len;
-		    else
-			pad = 0;
-		    if (minus)
-			while (pad--)
-			    putchar(' ');
-		    for (; *s; s++)
-			putchar(*s);
-		    if (!minus)
-			while (pad--)
-			    putchar(' ');
-		} else {
-		    for (; *s; s++)
-			putchar(*s);
-		}
-		continue;
-	    case 'u':
-		u = va_arg(ap, unsigned);
-		s = buf;
-		do
-		    *s++ = '0' + u % 10U;
-		while (u /= 10U);
-		while (--s >= buf)
-		    putchar(*s);
-		continue;
-	    }
-	}
-	putchar(c);
-    }
-    va_end(ap);
-    return;
-}
-
-static void
-putchar(int c)
-{
-    if (c == '\n')
-	xputc('\r');
-    xputc(c);
-}
-
-#ifdef GPT
-static struct {
-	uint16_t len;
-	uint16_t count;
-	uint16_t seg;
-	uint16_t off;
-	uint64_t lba;
-} packet;
-#endif
-
-static int
-drvread(struct dsk *dsk, void *buf, unsigned lba, unsigned nblk)
-{
-#ifdef GPT
-   static unsigned c = 0x2d5c7c2f;
-
-    if (!OPT_CHECK(RBX_QUIET))
-	printf("%c\b", c = c << 8 | c >> 24);
-    packet.len = 0x10;
-    packet.count = nblk;
-    packet.seg = VTOPOFF(buf);
-    packet.off = VTOPSEG(buf);
-    packet.lba = lba + dsk->start;
-    v86.ctl = V86_FLAGS;
-    v86.addr = 0x13;
-    v86.eax = 0x4200;
-    v86.edx = dsk->drive;
-    v86.ds = VTOPSEG(&packet);
-    v86.esi = VTOPOFF(&packet);
-    v86int();
-    if (V86_CY(v86.efl)) {
-	printf("error %u lba %u\n", v86.eax >> 8 & 0xff, lba);
-	return -1;
-    }
-    return 0;
-#else
-    static unsigned c = 0x2d5c7c2f;
-
-    lba += dsk->start;
-    if (!OPT_CHECK(RBX_QUIET))
-	printf("%c\b", c = c << 8 | c >> 24);
-    v86.ctl = V86_ADDR | V86_CALLF | V86_FLAGS;
-    v86.addr = XREADORG;		/* call to xread in boot1 */
-    v86.es = VTOPSEG(buf);
-    v86.eax = lba;
-    v86.ebx = VTOPOFF(buf);
-    v86.ecx = lba >> 16;
-    v86.edx = nblk << 8 | dsk->drive;
-    v86int();
-    v86.ctl = V86_FLAGS;
-    if (V86_CY(v86.efl)) {
-	printf("error %u lba %u\n", v86.eax >> 8 & 0xff, lba);
-	return -1;
-    }
-    return 0;
-#endif
-}
-
-static int
-keyhit(unsigned ticks)
-{
-    uint32_t t0, t1;
-
-    if (OPT_CHECK(RBX_NOINTR))
-	return 0;
-    t0 = 0;
-    for (;;) {
-	if (xgetc(1))
-	    return 1;
-	t1 = *(uint32_t *)PTOV(0x46c);
-	if (!t0)
-	    t0 = t1;
-	if (t1 < t0 || t1 >= t0 + ticks)
-	    return 0;
-    }
-}
-
-static int
-xputc(int c)
-{
-    if (ioctrl & IO_KEYBOARD)
-	putc(c);
-    if (ioctrl & IO_SERIAL)
-	sio_putc(c);
-    return c;
-}
-
-static int
-xgetc(int fn)
-{
-    if (OPT_CHECK(RBX_NOINTR))
-	return 0;
-    for (;;) {
-	if (ioctrl & IO_KEYBOARD && getc(1))
-	    return fn ? 1 : getc(0);
-	if (ioctrl & IO_SERIAL && sio_ischar())
-	    return fn ? 1 : sio_getc();
-	if (fn)
-	    return 0;
-    }
-}
-
-static int
-getc(int fn)
-{
-    /*
-     * The extra comparison against zero is an attempt to work around
-     * what appears to be a bug in QEMU and Bochs. Both emulators
-     * sometimes report a key-press with scancode one and ascii zero
-     * when no such key is pressed in reality. As far as I can tell,
-     * this only happens shortly after a reboot.
-     */
-    v86.addr = 0x16;
-    v86.eax = fn << 8;
-    v86int();
-    return fn == 0 ? v86.eax & 0xff : (!V86_ZR(v86.efl) && (v86.eax & 0xff));
 }

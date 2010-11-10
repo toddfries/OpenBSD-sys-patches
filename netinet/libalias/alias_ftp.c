@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_ftp.c,v 1.32 2009/01/15 19:35:23 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_ftp.c,v 1.33 2009/04/08 11:56:49 piso Exp $");
 
 /*
     Alias_ftp.c performs special processing for FTP sessions under
@@ -104,7 +104,7 @@ AliasHandleFtpOut(struct libalias *, struct ip *, struct alias_link *,
 		  int maxpacketsize);
 
 static int 
-fingerprint(struct libalias *la, struct ip *pip, struct alias_data *ah)
+fingerprint(struct libalias *la, struct alias_data *ah)
 {
 
 	if (ah->dport == NULL || ah->sport == NULL || ah->lnk == NULL || 

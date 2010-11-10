@@ -31,7 +31,7 @@
 /* $KAME: sctp_pcb.h,v 1.21 2005/07/16 01:18:47 suz Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_pcb.h,v 1.41 2009/02/03 11:04:03 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_pcb.h,v 1.46 2010/06/05 21:20:28 rrs Exp $");
 
 #ifndef __sctp_pcb_h__
 #define __sctp_pcb_h__
@@ -177,8 +177,6 @@ struct sctp_epinfo {
 	struct sctppcbhead listhead;
 	struct sctpladdr addr_wq;
 
-	struct sctpiterators iteratorhead;
-	int threads_must_exit;
 	/* ep zone info */
 	sctp_zone_t ipi_zone_ep;
 	sctp_zone_t ipi_zone_asoc;
@@ -191,10 +189,10 @@ struct sctp_epinfo {
 	sctp_zone_t ipi_zone_asconf_ack;
 
 	struct rwlock ipi_ep_mtx;
-	struct mtx it_mtx;
 	struct mtx ipi_iterator_wq_mtx;
 	struct rwlock ipi_addr_mtx;
 	struct mtx ipi_pktlog_mtx;
+	struct mtx wq_addr_mtx;
 	uint32_t ipi_count_ep;
 
 	/* assoc/tcb zone info */
@@ -228,14 +226,9 @@ struct sctp_epinfo {
 	uint32_t ipi_free_chunks;
 	uint32_t ipi_free_strmoq;
 
-
 	struct sctpvtaghead vtag_timewait[SCTP_STACK_VTAG_HASH_SIZE];
 
 	/* address work queue handling */
-#if defined(SCTP_USE_THREAD_BASED_ITERATOR)
-	uint32_t iterator_running;
-	SCTP_PROCESS_STRUCT thread_proc;
-#endif
 	struct sctp_timer addr_wq_timer;
 
 };
@@ -246,7 +239,11 @@ struct sctp_base_info {
 	 * All static structures that anchor the system must be here.
 	 */
 	struct sctp_epinfo sctppcbinfo;
+#if defined(__FreeBSD__) && defined(SMP) && defined(SCTP_USE_PERCPU_STAT)
+	struct sctpstat sctpstat[MAXCPU];
+#else
 	struct sctpstat sctpstat;
+#endif
 	struct sctp_sysctl sctpsysctl;
 	uint8_t first_time;
 	char sctp_pcb_initialized;
@@ -462,7 +459,7 @@ struct sctp_tcb {
  * goes with the base info. sctp_pcb.c has
  * the real definition.
  */
-extern struct sctp_base_info system_base_info;
+VNET_DECLARE(struct sctp_base_info, system_base_info);
 
 #ifdef INET6
 int SCTP6_ARE_ADDR_EQUAL(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
@@ -560,7 +557,7 @@ void sctp_inpcb_free(struct sctp_inpcb *, int, int);
 
 struct sctp_tcb *
 sctp_aloc_assoc(struct sctp_inpcb *, struct sockaddr *,
-    int, int *, uint32_t, uint32_t, struct thread *);
+    int *, uint32_t, uint32_t, struct thread *);
 
 int sctp_free_assoc(struct sctp_inpcb *, struct sctp_tcb *, int, int);
 
@@ -623,6 +620,12 @@ sctp_initiate_iterator(inp_func inpf,
     end_func ef,
     struct sctp_inpcb *,
     uint8_t co_off);
+
+#ifdef INVARIANTS
+void
+     sctp_validate_no_locks(struct sctp_inpcb *inp);
+
+#endif
 
 #endif				/* _KERNEL */
 #endif				/* !__sctp_pcb_h__ */

@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)icmp_var.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/icmp_var.h,v 1.27 2008/12/13 19:13:03 bz Exp $
+ * $FreeBSD: src/sys/netinet/icmp_var.h,v 1.31 2009/08/02 19:43:32 rwatson Exp $
  */
 
 #ifndef _NETINET_ICMP_VAR_H_
@@ -57,6 +57,22 @@ struct	icmpstat {
 	u_long	icps_noroute;		/* no route back */
 };
 
+#ifdef _KERNEL
+/*
+ * In-kernel consumers can use these accessor macros directly to update
+ * stats.
+ */
+#define	ICMPSTAT_ADD(name, val)	V_icmpstat.name += (val)
+#define	ICMPSTAT_INC(name)	ICMPSTAT_ADD(name, 1)
+
+/*
+ * Kernel module consumers must use this accessor macro.
+ */
+void	kmod_icmpstat_inc(int statnum);
+#define	KMOD_ICMPSTAT_INC(name)						\
+	kmod_icmpstat_inc(offsetof(struct icmpstat, name) / sizeof(u_long))
+#endif
+
 /*
  * Names for ICMP sysctl objects
  */
@@ -74,9 +90,10 @@ struct	icmpstat {
 
 #ifdef _KERNEL
 SYSCTL_DECL(_net_inet_icmp);
-#ifdef VIMAGE_GLOBALS
-extern struct icmpstat icmpstat;	/* icmp statistics */
-#endif
+
+VNET_DECLARE(struct icmpstat, icmpstat);	/* icmp statistics. */
+#define	V_icmpstat	VNET(icmpstat)
+
 extern int badport_bandlim(int);
 #define BANDLIM_UNLIMITED -1
 #define BANDLIM_ICMP_UNREACH 0

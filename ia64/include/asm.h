@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/ia64/include/asm.h,v 1.13 2005/01/31 08:16:12 imp Exp $ */
+/* $FreeBSD: src/sys/ia64/include/asm.h,v 1.14 2009/10/21 18:09:48 marcel Exp $ */
 /* From: NetBSD: asm.h,v 1.18 1997/11/03 04:22:06 ross Exp */
 
 /*-
@@ -61,7 +61,7 @@
  */
 #define	ENTRY(_name_, _n_args_)			\
 	.global	_name_;				\
-	.align	16;				\
+	.align	32;				\
 	.proc	_name_;				\
 _name_:;					\
 	.regstk	_n_args_, 0, 0, 0;		\
@@ -69,7 +69,7 @@ _name_:;					\
 
 #define	ENTRY_NOPROFILE(_name_, _n_args_)	\
 	.global	_name_;				\
-	.align	16;				\
+	.align	32;				\
 	.proc	_name_;				\
 _name_:;					\
 	.regstk	_n_args_, 0, 0, 0
@@ -79,7 +79,7 @@ _name_:;					\
  *	Declare a local leaf function.
  */
 #define STATIC_ENTRY(_name_, _n_args_)		\
-	.align	16;				\
+	.align	32;				\
 	.proc	_name_;				\
 _name_:;					\
 	.regstk	_n_args_, 0, 0, 0		\
@@ -161,6 +161,10 @@ label:	ASCIZ msg;				\
 #define	SYSCALLNUM(name)	SYS_ ## name
 
 #define	CALLSYS_NOERROR(name)					\
+	.prologue ;						\
+	.unwabi		@svr4, 'S' ;				\
+	.save		rp, r0 ;				\
+	.body ;							\
 {	.mmi ;							\
 	alloc		r9 = ar.pfs, 0, 0, 8, 0 ;		\
 	mov		r31 = ar.k5 ;				\

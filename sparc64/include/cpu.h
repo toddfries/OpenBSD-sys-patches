@@ -31,7 +31,7 @@
  *
  *	from: @(#)cpu.h 5.4 (Berkeley) 5/9/91
  *	from: FreeBSD: src/sys/i386/include/cpu.h,v 1.62 2001/06/29
- * $FreeBSD: src/sys/sparc64/include/cpu.h,v 1.18 2008/09/04 19:58:52 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/cpu.h,v 1.19 2010/02/20 23:24:19 marius Exp $
  */
 
 #ifndef	_MACHINE_CPU_H_
@@ -52,7 +52,7 @@
 extern	char btext[];
 extern	char etext[];
 
-void	cheetah_init(void);
+void	cheetah_init(u_int cpu_impl);
 void	cpu_halt(void);
 void	cpu_reset(void);
 void	fork_trampoline(void);

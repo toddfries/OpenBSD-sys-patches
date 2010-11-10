@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/net/if_axereg.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $
+ * $FreeBSD: src/sys/dev/usb/net/if_axereg.h,v 1.3 2009/06/15 01:02:43 thompsa Exp $
  */
 
 /*
@@ -166,7 +166,7 @@ struct axe_sframe_hdr {
 	uint16_t ilen;
 } __packed;
 
-#define	GET_MII(sc)		usb2_ether_getmii(&(sc)->sc_ue)
+#define	GET_MII(sc)		uether_getmii(&(sc)->sc_ue)
 
 /* The interrupt endpoint is currently unused by the ASIX part. */
 enum {
@@ -177,9 +177,9 @@ enum {
 };
 
 struct axe_softc {
-	struct usb2_ether	sc_ue;
+	struct usb_ether	sc_ue;
 	struct mtx		sc_mtx;
-	struct usb2_xfer	*sc_xfer[AXE_N_TRANSFER];
+	struct usb_xfer	*sc_xfer[AXE_N_TRANSFER];
 	int			sc_phyno;
 
 	int			sc_flags;

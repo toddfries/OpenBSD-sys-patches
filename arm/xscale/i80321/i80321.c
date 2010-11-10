@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/i80321/i80321.c,v 1.7 2007/09/04 18:45:27 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/i80321/i80321.c,v 1.8 2009/06/09 18:18:41 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -240,7 +240,7 @@ i80321_iintsrc_read(void)
 }
 
 int
-arm_get_next_irq()
+arm_get_next_irq(int last __unused)
 {
 	int irq;
 

@@ -1,5 +1,5 @@
 # $Whistle: Makefile,v 1.5 1999/01/24 06:48:37 archie Exp $
-# $FreeBSD: src/sys/modules/netgraph/Makefile,v 1.52 2008/12/25 09:32:20 mav Exp $
+# $FreeBSD: src/sys/modules/netgraph/Makefile,v 1.55 2010/06/09 12:25:57 ae Exp $
 
 .include <bsd.own.mk>
 
@@ -35,6 +35,8 @@ SUBDIR=	async \
 	netflow \
 	netgraph \
 	one2many \
+	patch \
+	pipe \
 	ppp \
 	pppoe \
 	pptpgre \
@@ -44,8 +46,6 @@ SUBDIR=	async \
 	source \
 	split \
 	sppp \
-	${_sync_ar} \
-	${_sync_sr} \
 	tag \
 	tcpmss \
 	tee \
@@ -53,11 +53,6 @@ SUBDIR=	async \
 	UI \
 	vjc \
 	vlan
-
-.if ${MACHINE_ARCH} == "i386"
-_sync_ar=	sync_ar
-_sync_sr=	sync_sr
-.endif
 
 .if ${MK_BLUETOOTH} != "no" || defined(ALL_MODULES)
 _bluetooth=	bluetooth

@@ -1,7 +1,7 @@
 #
 # $Id: //depot/aic7xxx/freebsd/dev/aic7xxx/aicasm/Makefile#2 $
 #
-# $FreeBSD: src/sys/dev/aic7xxx/aicasm/Makefile,v 1.23 2005/11/21 14:41:10 ru Exp $
+# $FreeBSD: src/sys/dev/aic7xxx/aicasm/Makefile,v 1.27 2009/12/31 00:07:26 ed Exp $
 
 PROG=	aicasm
 
@@ -15,6 +15,7 @@ SRCS=	${GENHDRS} ${CSRCS} ${YSRCS} ${LSRCS}
 CLEANFILES+= ${GENHDRS} ${YSRCS:R:C/(.*)/\1.output/g}
 DPADD=	${LIBL}
 LDADD=	-ll
+WARNS?=	5
 
 # Correct path for kernel builds
 # Don't rely on the kernel's .depend file

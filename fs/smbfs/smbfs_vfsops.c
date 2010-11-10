@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2000-2001, Boris Popov
+ * Copyright (c) 2000-2001 Boris Popov
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -29,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_vfsops.c,v 1.46 2008/11/02 23:20:27 rwatson Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_vfsops.c,v 1.49 2010/04/07 16:50:38 joel Exp $
  */
 
 #include <sys/param.h>
@@ -104,7 +98,7 @@ MODULE_DEPEND(smbfs, libmchain, 1, 1, 1);
 int smbfs_pbuf_freecnt = -1;	/* start out unlimited */
 
 static int
-smbfs_cmount(struct mntarg *ma, void * data, int flags, struct thread *td)
+smbfs_cmount(struct mntarg *ma, void * data, int flags)
 {
 	struct smbfs_args args;
 	int error;
@@ -143,16 +137,18 @@ static const char *smbfs_opts[] = {
 };
 
 static int
-smbfs_mount(struct mount *mp, struct thread *td)
+smbfs_mount(struct mount *mp)
 {
 	struct smbmount *smp = NULL;
 	struct smb_vc *vcp;
 	struct smb_share *ssp = NULL;
 	struct vnode *vp;
+	struct thread *td;
 	struct smb_cred scred;
 	int error, v;
 	char *pc, *pe;
 
+	td = curthread;
 	if (mp->mnt_flag & (MNT_UPDATE | MNT_ROOTFS))
 		return EOPNOTSUPP;
 
@@ -249,7 +245,7 @@ smbfs_mount(struct mount *mp, struct thread *td)
 		}
 	}
 	vfs_getnewfsid(mp);
-	error = smbfs_root(mp, LK_EXCLUSIVE, &vp, td);
+	error = smbfs_root(mp, LK_EXCLUSIVE, &vp);
 	if (error) {
 		vfs_mount_error(mp, "smbfs_root error: %d", error);
 		goto bad;
@@ -257,7 +253,7 @@ smbfs_mount(struct mount *mp, struct thread *td)
 	VOP_UNLOCK(vp, 0);
 	SMBVDEBUG("root.v_usecount = %d\n", vrefcnt(vp));
 
-#ifdef DIAGNOSTICS
+#ifdef DIAGNOSTIC
 	SMBERROR("mp=%p\n", mp);
 #endif
 	return error;
@@ -279,13 +275,15 @@ bad:
 
 /* Unmount the filesystem described by mp. */
 static int
-smbfs_unmount(struct mount *mp, int mntflags, struct thread *td)
+smbfs_unmount(struct mount *mp, int mntflags)
 {
+	struct thread *td;
 	struct smbmount *smp = VFSTOSMBFS(mp);
 	struct smb_cred scred;
 	int error, flags;
 
 	SMBVDEBUG("smbfs_unmount: flags=%04x\n", mntflags);
+	td = curthread;
 	flags = 0;
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
@@ -329,15 +327,19 @@ smbfs_unmount(struct mount *mp, int mntflags, struct thread *td)
  * Return locked root vnode of a filesystem
  */
 static int
-smbfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
+smbfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	struct smbmount *smp = VFSTOSMBFS(mp);
 	struct vnode *vp;
 	struct smbnode *np;
 	struct smbfattr fattr;
-	struct ucred *cred = td->td_ucred;
+	struct thread *td;
+	struct ucred *cred;
 	struct smb_cred scred;
 	int error;
+
+	td = curthread;
+	cred = td->td_ucred;
 
 	if (smp == NULL) {
 		SMBERROR("smp == NULL (bug in umount)\n");
@@ -368,12 +370,11 @@ smbfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
  */
 /* ARGSUSED */
 static int
-smbfs_quotactl(mp, cmd, uid, arg, td)
+smbfs_quotactl(mp, cmd, uid, arg)
 	struct mount *mp;
 	int cmd;
 	uid_t uid;
 	void *arg;
-	struct thread *td;
 {
 	SMBVDEBUG("return EOPNOTSUPP\n");
 	return EOPNOTSUPP;
@@ -404,8 +405,9 @@ smbfs_uninit(struct vfsconf *vfsp)
  * smbfs_statfs call
  */
 int
-smbfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+smbfs_statfs(struct mount *mp, struct statfs *sbp)
 {
+	struct thread *td = curthread;
 	struct smbmount *smp = VFSTOSMBFS(mp);
 	struct smbnode *np = smp->sm_root;
 	struct smb_share *ssp = smp->sm_share;

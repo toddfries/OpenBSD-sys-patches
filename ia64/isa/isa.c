@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/isa/isa.c,v 1.4 2007/02/24 16:56:22 piso Exp $
+ * $FreeBSD: src/sys/ia64/isa/isa.c,v 1.5 2009/04/24 03:43:20 marcel Exp $
  */
 
 /*
@@ -71,17 +71,6 @@
 void
 isa_init(device_t dev)
 {
-}
-
-intrmask_t
-isa_irq_pending(void)
-{
-	u_char irr1;
-	u_char irr2;
-
-	irr1 = inb(IO_ICU1);
-	irr2 = inb(IO_ICU2);
-	return ((irr2 << 8) | irr1);
 }
 
 /*

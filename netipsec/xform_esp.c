@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/xform_esp.c,v 1.24 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/xform_esp.c,v 1.31 2010/04/29 11:52:42 bz Exp $	*/
 /*	$OpenBSD: ip_esp.c,v 1.69 2001/06/26 06:18:59 angelos Exp $ */
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -46,9 +46,9 @@
 #include <sys/kernel.h>
 #include <sys/random.h>
 #include <sys/sysctl.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -76,17 +76,17 @@
 #include <opencrypto/cryptodev.h>
 #include <opencrypto/xform.h>
 
-#ifdef VIMAGE_GLOBALS
-struct	espstat espstat;
-static	int esp_max_ivlen;		/* max iv length over all algorithms */
-int	esp_enable;
-#endif
+VNET_DEFINE(int, esp_enable) = 1;
+VNET_DEFINE(struct espstat, espstat);
 
 SYSCTL_DECL(_net_inet_esp);
-SYSCTL_V_INT(V_NET, vnet_ipsec,_net_inet_esp, OID_AUTO,
-	esp_enable,	CTLFLAG_RW,	esp_enable,	0, "");
-SYSCTL_V_STRUCT(V_NET, vnet_ipsec, _net_inet_esp, IPSECCTL_STATS,
-	stats,		CTLFLAG_RD,	espstat,	espstat, "");
+SYSCTL_VNET_INT(_net_inet_esp, OID_AUTO,
+	esp_enable,	CTLFLAG_RW,	&VNET_NAME(esp_enable),	0, "");
+SYSCTL_VNET_STRUCT(_net_inet_esp, IPSECCTL_STATS,
+	stats,		CTLFLAG_RD,	&VNET_NAME(espstat),	espstat, "");
+
+static VNET_DEFINE(int, esp_max_ivlen);	/* max iv length over all algorithms */
+#define	V_esp_max_ivlen	VNET(esp_max_ivlen)
 
 static int esp_input_cb(struct cryptop *op);
 static int esp_output_cb(struct cryptop *crp);
@@ -124,7 +124,6 @@ esp_algorithm_lookup(int alg)
 size_t
 esp_hdrsiz(struct secasvar *sav)
 {
-	INIT_VNET_IPSEC(curvnet);
 	size_t size;
 
 	if (sav != NULL) {
@@ -159,7 +158,6 @@ esp_hdrsiz(struct secasvar *sav)
 static int
 esp_init(struct secasvar *sav, struct xformsw *xsp)
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct enc_xform *txform;
 	struct cryptoini cria, crie;
 	int keylen;
@@ -270,7 +268,6 @@ esp_zeroize(struct secasvar *sav)
 static int
 esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct auth_hash *esph;
 	struct enc_xform *espx;
 	struct tdb_ident *tdbi;
@@ -284,9 +281,15 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 
 	IPSEC_ASSERT(sav != NULL, ("null SA"));
 	IPSEC_ASSERT(sav->tdb_encalgxform != NULL, ("null encoding xform"));
-	IPSEC_ASSERT((skip&3) == 0 && (m->m_pkthdr.len&3) == 0,
-		("misaligned packet, skip %u pkt len %u",
-			skip, m->m_pkthdr.len));
+
+	/* Valid IP Packet length ? */
+	if ( (skip&3) || (m->m_pkthdr.len&3) ){
+		DPRINTF(("%s: misaligned packet, skip %u pkt len %u",
+				__func__, skip, m->m_pkthdr.len));
+		V_espstat.esps_badilen++;
+		m_freem(m);
+		return EINVAL;
+	}
 
 	/* XXX don't pullup, just copy header */
 	IP6_EXTHDR_GET(esp, struct newesp *, m, skip, sizeof (struct newesp));
@@ -453,7 +456,6 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 static int
 esp_input_cb(struct cryptop *crp)
 {
-	INIT_VNET_IPSEC(curvnet);
 	u_int8_t lastthree[3], aalg[AH_HMAC_HASHLEN];
 	int hlen, skip, protoff, error;
 	struct mbuf *m;
@@ -657,7 +659,6 @@ esp_output(
 	int protoff
 )
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct enc_xform *espx;
 	struct auth_hash *esph;
 	int hlen, rlen, plen, padding, blks, alen, i, roff;
@@ -888,7 +889,6 @@ bad:
 static int
 esp_output_cb(struct cryptop *crp)
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct tdb_crypto *tc;
 	struct ipsecrequest *isr;
 	struct secasvar *sav;
@@ -992,10 +992,7 @@ esp_attach(void)
 {
 #define	MAXIV(xform)					\
 	if (xform.blocksize > V_esp_max_ivlen)		\
-		V_esp_max_ivlen = xform.blocksize		\
-
-	V_esp_enable = 1;
-	V_esp_max_ivlen = 0;
+		V_esp_max_ivlen = xform.blocksize	\
 
 	MAXIV(enc_xform_des);		/* SADB_EALG_DESCBC */
 	MAXIV(enc_xform_3des);		/* SADB_EALG_3DESCBC */

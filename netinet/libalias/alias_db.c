@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_db.c,v 1.77 2009/02/07 18:49:42 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_db.c,v 1.78 2010/01/07 21:01:37 mbr Exp $");
 
 /*
     Alias_db.c encapsulates all data structures used for storing
@@ -2136,7 +2136,7 @@ void
 SetProtocolFlags(struct alias_link *lnk, int pflags)
 {
 
-	lnk->pflags = pflags;;
+	lnk->pflags = pflags;
 }
 
 int

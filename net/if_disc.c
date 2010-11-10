@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	From: @(#)if_loop.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_disc.c,v 1.55 2007/10/27 19:57:41 yar Exp $
+ * $FreeBSD: src/sys/net/if_disc.c,v 1.56 2009/04/16 20:30:28 kmacy Exp $
  */
 
 /*
@@ -66,7 +66,7 @@ struct disc_softc {
 };
 
 static int	discoutput(struct ifnet *, struct mbuf *,
-		    struct sockaddr *, struct rtentry *);
+		    struct sockaddr *, struct route *);
 static void	discrtrequest(int, struct rtentry *, struct rt_addrinfo *);
 static int	discioctl(struct ifnet *, u_long, caddr_t);
 static int	disc_clone_create(struct if_clone *, int, caddr_t);
@@ -156,7 +156,7 @@ DECLARE_MODULE(if_disc, disc_mod, SI_SUB_PSEUDO, SI_ORDER_ANY);
 
 static int
 discoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-    struct rtentry *rt)
+    struct route *ro)
 {
 	u_int32_t af;
 

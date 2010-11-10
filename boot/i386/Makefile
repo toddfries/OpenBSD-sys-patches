@@ -1,9 +1,15 @@
-# $FreeBSD: src/sys/boot/i386/Makefile,v 1.26 2008/11/22 14:24:55 dfr Exp $
+# $FreeBSD: src/sys/boot/i386/Makefile,v 1.28 2009/12/22 20:56:33 jhb Exp $
 
-SUBDIR=		mbr pmbr boot0 boot0sio btx boot2 cdboot gptboot zfsboot \
-		gptzfsboot kgzldr libi386 libfirewire loader
+.include <bsd.own.mk>
+
+SUBDIR=		mbr pmbr boot0 boot0sio btx boot2 cdboot gptboot kgzldr \
+		libi386 libfirewire loader
 
 # special boot programs, 'self-extracting boot2+loader'
 SUBDIR+=	pxeldr
+
+.if ${MK_ZFS} != "no"
+SUBDIR+=	zfsboot gptzfsboot zfsloader
+.endif
 
 .include <bsd.subdir.mk>

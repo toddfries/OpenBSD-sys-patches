@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/pxa/pxa_icu.c,v 1.1 2008/06/06 05:08:09 benno Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/pxa/pxa_icu.c,v 1.2 2009/06/09 18:18:41 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -128,7 +128,7 @@ static devclass_t pxa_icu_devclass;
 DRIVER_MODULE(pxaicu, pxa, pxa_icu_driver, pxa_icu_devclass, 0, 0);
 
 int
-arm_get_next_irq()
+arm_get_next_irq(int last __unused)
 {
 	int	irq;
 

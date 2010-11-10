@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2004-2008 University of Zagreb
  * Copyright (c) 2007-2008 FreeBSD Foundation
  *
@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_pipe.h,v 1.1 2008/09/03 18:17:45 julian Exp $
+ * $FreeBSD: src/sys/netgraph/ng_pipe.h,v 1.2 2010/04/07 16:29:10 joel Exp $
  */
 
 #ifndef _NETGRAPH_PIPE_H_

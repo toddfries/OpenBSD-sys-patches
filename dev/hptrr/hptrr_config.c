@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/hptrr/hptrr_config.c,v 1.2 2008/02/06 00:59:38 scottl Exp $
+ * $FreeBSD: src/sys/dev/hptrr/hptrr_config.c,v 1.3 2009/07/11 22:30:37 cperciva Exp $
  */
 #include <dev/hptrr/hptrr_config.h>
 /****************************************************************************
@@ -65,7 +65,7 @@ int init_config(void)
 
 char driver_name[] = "hptrr";
 char driver_name_long[] = "RocketRAID 17xx/2xxx SATA controller driver";
-char driver_ver[] = "v1.2 (" __DATE__ " " __TIME__ ")";
+char driver_ver[] = "v1.2";
 int  osm_max_targets = 0xff;
 
 

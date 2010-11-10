@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ips/ips_pci.c,v 1.15 2007/02/23 12:18:44 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ips/ips_pci.c,v 1.18 2009/12/17 00:21:12 mjacob Exp $");
 
 #include <dev/ips/ipsreg.h>
 #include <dev/ips/ips.h>
@@ -154,7 +154,7 @@ static int ips_pci_attach(device_t dev)
         }
 	sc->ips_ich.ich_func = ips_intrhook;
 	sc->ips_ich.ich_arg = sc;
-	mtx_init(&sc->queue_mtx, "IPS bioqueue lock", MTX_DEF, 0);
+	mtx_init(&sc->queue_mtx, "IPS bioqueue lock", NULL, MTX_DEF);
 	sema_init(&sc->cmd_sema, 0, "IPS Command Semaphore");
 	bioq_init(&sc->queue);
 	if (config_intrhook_establish(&sc->ips_ich) != 0) {

@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/uboot/lib/libuboot.h,v 1.4 2008/11/19 17:34:28 raj Exp $
+ * $FreeBSD: src/sys/boot/uboot/lib/libuboot.h,v 1.5 2009/05/05 16:29:08 raj Exp $
  */
 
 struct uboot_devdesc
@@ -35,12 +35,16 @@ struct uboot_devdesc
 	union {
 		struct {
 			void	*data;
-			int	partition;
+			int	pnum;
+			int	ptype;
 		} disk;
 	} d_kind;
 };
 
 #define d_disk d_kind.disk
+
+#define PTYPE_BSDLABEL	1
+#define PTYPE_GPT	2
 
 /*
  * Default network packet alignment in memory

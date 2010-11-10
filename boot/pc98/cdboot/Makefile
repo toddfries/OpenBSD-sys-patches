@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/pc98/cdboot/Makefile,v 1.1 2006/05/14 07:26:02 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/cdboot/Makefile,v 1.2 2010/06/03 17:42:32 ed Exp $
 
 PROG=	cdboot
 STRIP=
@@ -8,6 +8,6 @@ SRCS=	${PROG}.s
 
 ORG=	0x0000
 
-LDFLAGS=-N -e start -Ttext ${ORG} -Wl,-S,--oformat,binary
+LDFLAGS=-e start -Ttext ${ORG} -Wl,-N,-S,--oformat,binary
 
 .include <bsd.prog.mk>

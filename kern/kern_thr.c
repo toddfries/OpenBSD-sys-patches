@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.74 2009/02/26 15:51:54 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.81 2010/03/11 14:49:06 nwhitehorn Exp $");
 
 #include "opt_compat.h"
 #include "opt_posix.h"
@@ -55,7 +55,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.74 2009/02/26 15:51:54 ed Exp $"
 
 #include <security/audit/audit.h>
 
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
 
 static inline int
 suword_lwpid(void *addr, lwpid_t lwpid)
@@ -176,7 +176,7 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	}
 
 	/* Initialize our td */
-	newtd = thread_alloc();
+	newtd = thread_alloc(0);
 	if (newtd == NULL)
 		return (ENOMEM);
 
@@ -282,7 +282,7 @@ thr_exit(struct thread *td, struct thr_exit_args *uap)
 	}
 
 	PROC_LOCK(p);
-	sigqueue_flush(&td->td_sigqueue);
+	tdsigcleanup(td);
 	PROC_SLOCK(p);
 
 	/*
@@ -303,12 +303,18 @@ int
 thr_kill(struct thread *td, struct thr_kill_args *uap)
     /* long id, int sig */
 {
+	ksiginfo_t ksi;
 	struct thread *ttd;
 	struct proc *p;
 	int error;
 
 	p = td->td_proc;
 	error = 0;
+	ksiginfo_init(&ksi);
+	ksi.ksi_signo = uap->sig;
+	ksi.ksi_code = SI_USER;
+	ksi.ksi_pid = p->p_pid;
+	ksi.ksi_uid = td->td_ucred->cr_ruid;
 	PROC_LOCK(p);
 	if (uap->id == -1) {
 		if (uap->sig != 0 && !_SIG_VALID(uap->sig)) {
@@ -320,7 +326,7 @@ thr_kill(struct thread *td, struct thr_kill_args *uap)
 					error = 0;
 					if (uap->sig == 0)
 						break;
-					tdsignal(p, ttd, uap->sig, NULL);
+					tdsignal(p, ttd, uap->sig, &ksi);
 				}
 			}
 		}
@@ -336,7 +342,7 @@ thr_kill(struct thread *td, struct thr_kill_args *uap)
 		else if (!_SIG_VALID(uap->sig))
 			error = EINVAL;
 		else
-			tdsignal(p, ttd, uap->sig, NULL);
+			tdsignal(p, ttd, uap->sig, &ksi);
 	}
 	PROC_UNLOCK(p);
 	return (error);
@@ -346,11 +352,12 @@ int
 thr_kill2(struct thread *td, struct thr_kill2_args *uap)
     /* pid_t pid, long id, int sig */
 {
+	ksiginfo_t ksi;
 	struct thread *ttd;
 	struct proc *p;
 	int error;
 
-	AUDIT_ARG(signum, uap->sig);
+	AUDIT_ARG_SIGNUM(uap->sig);
 
 	if (uap->pid == td->td_proc->p_pid) {
 		p = td->td_proc;
@@ -358,10 +365,15 @@ thr_kill2(struct thread *td, struct thr_kill2_args *uap)
 	} else if ((p = pfind(uap->pid)) == NULL) {
 		return (ESRCH);
 	}
-	AUDIT_ARG(process, p);
+	AUDIT_ARG_PROCESS(p);
 
 	error = p_cansignal(td, p, uap->sig);
 	if (error == 0) {
+		ksiginfo_init(&ksi);
+		ksi.ksi_signo = uap->sig;
+		ksi.ksi_code = SI_USER;
+		ksi.ksi_pid = td->td_proc->p_pid;
+		ksi.ksi_uid = td->td_ucred->cr_ruid;
 		if (uap->id == -1) {
 			if (uap->sig != 0 && !_SIG_VALID(uap->sig)) {
 				error = EINVAL;
@@ -372,7 +384,8 @@ thr_kill2(struct thread *td, struct thr_kill2_args *uap)
 						error = 0;
 						if (uap->sig == 0)
 							break;
-						tdsignal(p, ttd, uap->sig, NULL);
+						tdsignal(p, ttd, uap->sig,
+						    &ksi);
 					}
 				}
 			}
@@ -388,7 +401,7 @@ thr_kill2(struct thread *td, struct thr_kill2_args *uap)
 			else if (!_SIG_VALID(uap->sig))
 				error = EINVAL;
 			else
-				tdsignal(p, ttd, uap->sig, NULL);
+				tdsignal(p, ttd, uap->sig, &ksi);
 		}
 	}
 	PROC_UNLOCK(p);

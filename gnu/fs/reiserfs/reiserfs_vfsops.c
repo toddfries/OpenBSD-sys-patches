@@ -4,7 +4,7 @@
  * 
  * Ported to FreeBSD by Jean-Sébastien Pédron <jspedron@club-internet.fr>
  * 
- * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vfsops.c,v 1.13 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vfsops.c,v 1.15 2009/12/03 18:16:14 trasz Exp $
  */
 
 #include <gnu/fs/reiserfs/reiserfs_fs.h>
@@ -49,7 +49,7 @@ MALLOC_DEFINE(M_REISERFSNODE, "reiserfs_node", "ReiserFS vnode private part");
  * -------------------------------------------------------------------*/
 
 static int
-reiserfs_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
+reiserfs_cmount(struct mntarg *ma, void *data, int flags)
 {
 	struct reiserfs_args args;
 	int error;
@@ -70,7 +70,7 @@ reiserfs_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
  * Mount system call
  */
 static int
-reiserfs_mount(struct mount *mp, struct thread *td)
+reiserfs_mount(struct mount *mp)
 {
 	size_t size;
 	int error, len;
@@ -81,7 +81,9 @@ reiserfs_mount(struct mount *mp, struct thread *td)
 	struct reiserfs_mount *rmp;
 	struct reiserfs_sb_info *sbi;
 	struct nameidata nd, *ndp = &nd;
+	struct thread *td;
 
+	td = curthread;
 	if (!(mp->mnt_flag & MNT_RDONLY))
 		return EROFS;
 
@@ -158,7 +160,7 @@ reiserfs_mount(struct mount *mp, struct thread *td)
 	reiserfs_log(LOG_DEBUG, "prepare statfs data\n");
 	(void)copystr(fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1, &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
-	(void)reiserfs_statfs(mp, &mp->mnt_stat, td);
+	(void)reiserfs_statfs(mp, &mp->mnt_stat);
 
 	reiserfs_log(LOG_DEBUG, "done\n");
 	return (0);
@@ -168,7 +170,7 @@ reiserfs_mount(struct mount *mp, struct thread *td)
  * Unmount system call
  */
 static int
-reiserfs_unmount(struct mount *mp, int mntflags, struct thread *td)
+reiserfs_unmount(struct mount *mp, int mntflags)
 {
 	int error, flags = 0;
 	struct reiserfs_mount *rmp;
@@ -185,7 +187,7 @@ reiserfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 
 	/* Flush files -> vflush */
 	reiserfs_log(LOG_DEBUG, "flush vnodes\n");
-	if ((error = vflush(mp, 0, flags, td)))
+	if ((error = vflush(mp, 0, flags, curthread)))
 		return (error);
 
 	/* XXX Super block update */
@@ -252,8 +254,7 @@ reiserfs_unmount(struct mount *mp, int mntflags, struct thread *td)
  * Return the root of a filesystem.
  */ 
 static int
-reiserfs_root(struct mount *mp, int flags, struct vnode **vpp,
-    struct thread *td)
+reiserfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	int error;
 	struct vnode *vp;
@@ -262,7 +263,7 @@ reiserfs_root(struct mount *mp, int flags, struct vnode **vpp,
 	rootkey.on_disk_key.k_dir_id = REISERFS_ROOT_PARENT_OBJECTID;
 	rootkey.on_disk_key.k_objectid = REISERFS_ROOT_OBJECTID;
 
-	error = reiserfs_iget(mp, &rootkey, &vp, td);
+	error = reiserfs_iget(mp, &rootkey, &vp, curthread);
 
 	if (error == 0)
 		*vpp = vp;
@@ -273,7 +274,7 @@ reiserfs_root(struct mount *mp, int flags, struct vnode **vpp,
  * The statfs syscall
  */
 static int
-reiserfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+reiserfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	struct reiserfs_mount *rmp;
 	struct reiserfs_sb_info *sbi;
@@ -428,40 +429,11 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	struct reiserfs_super_block *rs;
 	struct cdev *dev = devvp->v_rdev;
 
-#if (__FreeBSD_version >= 600000)
 	struct g_consumer *cp;
 	struct bufobj *bo;
-#endif
 
 	//ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
 
-#if (__FreeBSD_version < 600000)
-	/*
-	 * Disallow multiple mounts of the same device.
-	 * Disallow mounting of a device that is currently in use
-	 * (except for root, which might share swap device for miniroot).
-	 * Flush out any old buffers remaining from a previous use.
-	 */
-	if ((error = vfs_mountedon(devvp)) != 0)
-		return (error);
-	if (vcount(devvp) > 1)
-		return (EBUSY);
-
-	error = vinvalbuf(devvp, V_SAVE, td->td_ucred, td, 0, 0);
-	if (error) {
-		VOP_UNLOCK(devvp, 0);
-		return (error);
-	}
-
-	/*
-	 * Open the device in read-only, 'cause we don't support write
-	 * for now
-	 */
-	error = VOP_OPEN(devvp, FREAD, FSCRED, td, NULL);
-	VOP_UNLOCK(devvp, 0);
-	if (error)
-		return (error);
-#else
 	DROP_GIANT();
 	g_topology_lock();
 	error = g_vfs_open(devvp, &cp, "reiserfs", /* read-only */ 0);
@@ -474,7 +446,6 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	bo = &devvp->v_bufobj;
 	bo->bo_private = cp;
 	bo->bo_ops = g_vfs_bufops;
-#endif
 
 	if (devvp->v_rdev->si_iosize_max != 0)
 		mp->mnt_iosize_max = devvp->v_rdev->si_iosize_max;
@@ -499,10 +470,8 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	rmp->rm_mountp   = mp;
 	rmp->rm_devvp    = devvp;
 	rmp->rm_dev      = dev;
-#if (__FreeBSD_version >= 600000)
 	rmp->rm_bo       = &devvp->v_bufobj;
 	rmp->rm_cp       = cp;
-#endif
 
 	/* Set default values for options: non-aggressive tails */
 	REISERFS_SB(sbi)->s_mount_opt = (1 << REISERFS_SMALLTAIL);
@@ -629,9 +598,6 @@ out:
 		}
 	}
 
-#if (__FreeBSD_version < 600000)
-	(void)VOP_CLOSE(devvp, FREAD, NOCRED, td);
-#else
 	if (cp != NULL) {
 		DROP_GIANT();
 		g_topology_lock();
@@ -639,7 +605,6 @@ out:
 		g_topology_unlock();
 		PICKUP_GIANT();
 	}
-#endif
 
 	if (sbi)
 		free(sbi, M_REISERFSMNT);

@@ -29,7 +29,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)user.h	8.2 (Berkeley) 9/23/93
- * $FreeBSD: src/sys/sys/user.h,v 1.80 2008/12/02 10:39:47 peter Exp $
+ * $FreeBSD: src/sys/sys/user.h,v 1.87 2010/05/27 08:10:12 attilio Exp $
  */
 
 #ifndef _SYS_USER_H_
@@ -83,42 +83,29 @@
  * it in two places: function fill_kinfo_proc in sys/kern/kern_proc.c and
  * function kvm_proclist in lib/libkvm/kvm_proc.c .
  */
-#define	KI_NSPARE_INT	10
+#define	KI_NSPARE_INT	9
 #define	KI_NSPARE_LONG	12
 #define	KI_NSPARE_PTR	7
 
-#ifdef __amd64__
-#define	KINFO_PROC_SIZE	1088
-#endif
-#ifdef __arm__
-#define	KINFO_PROC_SIZE	792
-#endif
-#ifdef __ia64__
-#define	KINFO_PROC_SIZE 1088
-#endif
-#ifdef __i386__
-#define	KINFO_PROC_SIZE	768
-#endif
-#ifdef __mips__
-#define	KINFO_PROC_SIZE	816
-#endif
-#ifdef __powerpc__
-#define	KINFO_PROC_SIZE	768
-#endif
-#ifdef __sparc64__
-#define	KINFO_PROC_SIZE 1088
-#endif
+#ifndef _KERNEL
 #ifndef KINFO_PROC_SIZE
 #error "Unknown architecture"
 #endif
+#endif /* !_KERNEL */
 
 #define	WMESGLEN	8		/* size of returned wchan message */
 #define	LOCKNAMELEN	8		/* size of returned lock name */
 #define	OCOMMLEN	16		/* size of returned thread name */
 #define	COMMLEN		19		/* size of returned ki_comm name */
 #define	KI_EMULNAMELEN	16		/* size of returned ki_emul */
-#define	KI_NGROUPS	16		/* number of groups in ki_groups */
+#define KI_NGROUPS	16		/* number of groups in ki_groups */
 #define	LOGNAMELEN	17		/* size of returned ki_login */
+
+/*
+ * Steal a bit from ki_cr_flags (cr_flags is never used) to indicate
+ * that the cred had more than KI_NGROUPS groups.
+ */
+#define KI_CRF_GRP_OVERFLOW	0x80000000
 
 struct kinfo_proc {
 	int	ki_structsize;		/* size of this structure */
@@ -151,7 +138,7 @@ struct kinfo_proc {
 	gid_t	ki_svgid;		/* Saved effective group id */
 	short	ki_ngroups;		/* number of groups */
 	short	ki_spare_short2;	/* unused (just here for alignment) */
-	gid_t	ki_groups[KI_NGROUPS];	/* groups */
+	gid_t 	ki_groups[KI_NGROUPS];	/* groups */
 	vm_size_t ki_size;		/* virtual size */
 	segsz_t ki_rssize;		/* current resident set size in pages */
 	segsz_t ki_swrss;		/* resident set size before last swap */
@@ -190,6 +177,7 @@ struct kinfo_proc {
 	 */
 	char	ki_sparestrings[68];	/* spare string space */
 	int	ki_spareints[KI_NSPARE_INT];	/* spare room for growth */
+	u_int	ki_cr_flags;		/* Credential flags */
 	int	ki_jid;			/* Process jail ID */
 	int	ki_numthreads;		/* XXXKSE number of threads in total */
 	lwpid_t	ki_tid;			/* XXXKSE thread id */
@@ -339,6 +327,7 @@ struct kinfo_file {
 #define	KVME_TYPE_DEVICE	4
 #define	KVME_TYPE_PHYS		5
 #define	KVME_TYPE_DEAD		6
+#define	KVME_TYPE_SG		7
 #define	KVME_TYPE_UNKNOWN	255
 
 #define	KVME_PROT_READ		0x00000001
@@ -347,6 +336,7 @@ struct kinfo_file {
 
 #define	KVME_FLAG_COW		0x00000001
 #define	KVME_FLAG_NEEDS_COPY	0x00000002
+#define	KVME_FLAG_NOCOREDUMP	0x00000004
 
 #if defined(__amd64__)
 #define	KINFO_OVMENTRY_SIZE	1168

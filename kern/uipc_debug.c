@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.7 2009/02/09 18:19:58 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.8 2009/05/26 09:19:21 pjd Exp $");
 
 #include "opt_ddb.h"
 
@@ -134,6 +134,14 @@ db_print_sooptions(short so_options)
 	}
 	if (so_options & SO_BINTIME) {
 		db_printf("%sSO_BINTIME", comma ? ", " : "");
+		comma = 1;
+	}
+	if (so_options & SO_NO_OFFLOAD) {
+		db_printf("%sSO_NO_OFFLOAD", comma ? ", " : "");
+		comma = 1;
+	}
+	if (so_options & SO_NO_DDP) {
+		db_printf("%sSO_NO_DDP", comma ? ", " : "");
 		comma = 1;
 	}
 }

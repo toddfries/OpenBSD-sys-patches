@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_acl_posix1e.c,v 1.54 2008/10/28 21:58:48 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_acl_posix1e.c,v 1.58 2010/06/03 13:43:58 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -60,6 +60,11 @@ vaccess_acl_posix1e(enum vtype type, uid_t file_uid, gid_t file_gid,
 	accmode_t priv_granted;
 	accmode_t acl_mask_granted;
 	int group_matched, i;
+
+	KASSERT((accmode & ~(VEXEC | VWRITE | VREAD | VADMIN | VAPPEND)) == 0,
+	    ("invalid bit in accmode"));
+	KASSERT((accmode & VAPPEND) == 0 || (accmode & VWRITE),
+	    	("VAPPEND without VWRITE"));
 
 	/*
 	 * Look for a normal, non-privileged way to access the file/directory
@@ -409,6 +414,8 @@ acl_posix1e_mode_to_entry(acl_tag_t tag, uid_t uid, gid_t gid, mode_t mode)
 
 	acl_entry.ae_tag = tag;
 	acl_entry.ae_perm = acl_posix1e_mode_to_perm(tag, mode);
+	acl_entry.ae_entry_type = 0;
+	acl_entry.ae_flags = 0;
 	switch(tag) {
 	case ACL_USER_OBJ:
 		acl_entry.ae_id = uid;
@@ -551,7 +558,7 @@ acl_posix1e_check(struct acl *acl)
 	 */
 	num_acl_user_obj = num_acl_user = num_acl_group_obj = num_acl_group =
 	    num_acl_mask = num_acl_other = 0;
-	if (acl->acl_cnt > ACL_MAX_ENTRIES || acl->acl_cnt < 0)
+	if (acl->acl_cnt > ACL_MAX_ENTRIES)
 		return (EINVAL);
 	for (i = 0; i < acl->acl_cnt; i++) {
 		/*

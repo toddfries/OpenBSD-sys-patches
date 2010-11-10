@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.15 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.20 2010/05/12 05:50:56 kevlo Exp $");
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -54,30 +54,12 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.15 2008/12/20 03:26:09 sam Ex
 #include <machine/cpu.h>
 
 #include <machine/cpuconf.h>
+#include <machine/md_var.h>
 
 char machine[] = "arm";
 
 SYSCTL_STRING(_hw, HW_MACHINE, machine, CTLFLAG_RD,
         machine, 0, "Machine class");
-enum cpu_class {
-	CPU_CLASS_NONE,
-	CPU_CLASS_ARM2,
-	CPU_CLASS_ARM2AS,
-	CPU_CLASS_ARM3,
-	CPU_CLASS_ARM6,
-	CPU_CLASS_ARM7,
-	CPU_CLASS_ARM7TDMI,
-	CPU_CLASS_ARM8,
-	CPU_CLASS_ARM9TDMI,
-	CPU_CLASS_ARM9ES,
-	CPU_CLASS_ARM9EJS,
-	CPU_CLASS_ARM10E,
-	CPU_CLASS_ARM10EJ,
-	CPU_CLASS_SA1,
-	CPU_CLASS_XSCALE,
-	CPU_CLASS_ARM11J,
-	CPU_CLASS_MARVELL
-};
 
 static const char * const generic_steppings[16] = {
 	"rev 0",	"rev 1",	"rev 2",	"rev 3",
@@ -238,6 +220,11 @@ const struct cpuidtab cpuids[] = {
 	  generic_steppings },
 	{ CPU_ID_ARM966ESR1,	CPU_CLASS_ARM9ES,	"ARM966E-S",
 	  generic_steppings },
+	{ CPU_ID_FA526,		CPU_CLASS_ARM9TDMI,	"FA526",
+	  generic_steppings },
+	{ CPU_ID_FA626TE,	CPU_CLASS_ARM9ES,	"FA626TE",
+	  generic_steppings },
+
 	{ CPU_ID_TI925T,	CPU_CLASS_ARM9TDMI,	"TI ARM925T",
 	  generic_steppings },
 
@@ -343,6 +330,7 @@ const struct cpu_classtab cpu_classes[] = {
 	{ "SA-1",	"CPU_SA110" },		/* CPU_CLASS_SA1 */
 	{ "XScale",	"CPU_XSCALE_..." },	/* CPU_CLASS_XSCALE */
 	{ "ARM11J",	"CPU_ARM11" },		/* CPU_CLASS_ARM11J */
+	{ "Marvell",	"CPU_MARVELL" },	/* CPU_CLASS_MARVELL */
 };
 
 /*
@@ -372,11 +360,11 @@ static const char * const wtnames[] = {
 
 
 extern int ctrl;
+enum cpu_class cpu_class = CPU_CLASS_NONE;
 void
 identify_arm_cpu(void)
 {
 	u_int cpuid;
-	enum cpu_class cpu_class = CPU_CLASS_NONE;
 	int i;
 
 	cpuid = cpu_id();
@@ -418,6 +406,7 @@ identify_arm_cpu(void)
 	case CPU_CLASS_SA1:
 	case CPU_CLASS_XSCALE:
 	case CPU_CLASS_ARM11J:
+	case CPU_CLASS_MARVELL:
 		if ((ctrl & CPU_CONTROL_DC_ENABLE) == 0)
 			printf(" DC disabled");
 		else

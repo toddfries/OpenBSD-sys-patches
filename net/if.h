@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if.h,v 1.116 2009/02/16 15:09:37 luigi Exp $
+ * $FreeBSD: src/sys/net/if.h,v 1.126 2010/03/16 17:59:12 qingli Exp $
  */
 
 #ifndef _NET_IF_H_
@@ -149,7 +149,8 @@ struct if_data {
 #define	IFF_PPROMISC	0x20000		/* (n) user-requested promisc mode */
 #define	IFF_MONITOR	0x40000		/* (n) user-requested monitor mode */
 #define	IFF_STATICARP	0x80000		/* (n) static ARP */
-#define	IFF_NEEDSGIANT	0x100000	/* (i) hold Giant over if_start calls */
+#define	IFF_DYING	0x200000	/* (n) interface is winding down */
+#define	IFF_RENAMING	0x400000	/* (n) interface is being renamed */
 
 /*
  * Old names for driver flags so that user space tools can continue to use
@@ -164,7 +165,7 @@ struct if_data {
 #define	IFF_CANTCHANGE \
 	(IFF_BROADCAST|IFF_POINTOPOINT|IFF_DRV_RUNNING|IFF_DRV_OACTIVE|\
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI|IFF_SMART|IFF_PROMISC|\
-	    IFF_NEEDSGIANT)
+	    IFF_DYING)
 
 /*
  * Values for if_link_state.
@@ -216,6 +217,9 @@ struct if_data {
 #define	IFCAP_TOE4		0x04000	/* interface can offload TCP */
 #define	IFCAP_TOE6		0x08000	/* interface can offload TCP6 */
 #define	IFCAP_VLAN_HWFILTER	0x10000 /* interface hw can filter vlan tag */
+#define	IFCAP_POLLING_NOCOUNT	0x20000 /* polling ticks cannot be fragmented */
+#define	IFCAP_VLAN_HWTSO	0x40000 /* can do IFCAP_TSO on VLANs */
+#define	IFCAP_LINKSTATE		0x80000 /* the runtime link state is dynamic */
 
 #define IFCAP_HWCSUM	(IFCAP_RXCSUM | IFCAP_TXCSUM)
 #define	IFCAP_TSO	(IFCAP_TSO4 | IFCAP_TSO6)
@@ -282,6 +286,14 @@ struct if_announcemsghdr {
 #define	IFAN_DEPARTURE	1	/* interface departure */
 
 /*
+ * Buffer with length to be used in SIOCGIFDESCR/SIOCSIFDESCR requests
+ */
+struct ifreq_buffer {
+	size_t	length;
+	void	*buffer;
+};
+
+/*
  * Interface request structure used for socket
  * ioctl's.  All interface ioctl's must have parameter
  * definitions which begin with ifr_name.  The
@@ -293,8 +305,10 @@ struct	ifreq {
 		struct	sockaddr ifru_addr;
 		struct	sockaddr ifru_dstaddr;
 		struct	sockaddr ifru_broadaddr;
+		struct	ifreq_buffer ifru_buffer;
 		short	ifru_flags[2];
 		short	ifru_index;
+		int	ifru_jid;
 		int	ifru_metric;
 		int	ifru_mtu;
 		int	ifru_phys;
@@ -305,8 +319,10 @@ struct	ifreq {
 #define	ifr_addr	ifr_ifru.ifru_addr	/* address */
 #define	ifr_dstaddr	ifr_ifru.ifru_dstaddr	/* other end of p-to-p link */
 #define	ifr_broadaddr	ifr_ifru.ifru_broadaddr	/* broadcast address */
+#define	ifr_buffer	ifr_ifru.ifru_buffer	/* user supplied buffer with its length */
 #define	ifr_flags	ifr_ifru.ifru_flags[0]	/* flags (low 16 bits) */
 #define	ifr_flagshigh	ifr_ifru.ifru_flags[1]	/* flags (high 16 bits) */
+#define	ifr_jid		ifr_ifru.ifru_jid	/* jail/vnet */
 #define	ifr_metric	ifr_ifru.ifru_metric	/* metric */
 #define	ifr_mtu		ifr_ifru.ifru_mtu	/* mtu */
 #define ifr_phys	ifr_ifru.ifru_phys	/* physical wire */

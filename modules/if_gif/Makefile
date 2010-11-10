@@ -1,12 +1,11 @@
-# $FreeBSD: src/sys/modules/if_gif/Makefile,v 1.10 2006/03/17 18:54:37 ru Exp $
+# $FreeBSD: src/sys/modules/if_gif/Makefile,v 1.11 2009/06/06 17:01:44 rwatson Exp $
 
 .include <bsd.own.mk>
 
 .PATH: ${.CURDIR}/../../net ${.CURDIR}/../../netinet ${.CURDIR}/../../netinet6
 
 KMOD=	if_gif
-SRCS=	if_gif.c in_gif.c opt_inet.h opt_inet6.h opt_mac.h \
-	opt_mrouting.h
+SRCS=	if_gif.c in_gif.c opt_inet.h opt_inet6.h opt_mrouting.h
 
 .if !defined(KERNBUILDDIR)
 opt_inet.h:

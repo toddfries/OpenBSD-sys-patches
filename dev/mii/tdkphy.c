@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mii/tdkphy.c,v 1.23 2007/11/16 10:25:36 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mii/tdkphy.c,v 1.24 2010/01/03 23:31:58 imp Exp $");
 
 /*
  * Driver for the TDK 78Q2120 MII
@@ -38,7 +38,7 @@ __FBSDID("$FreeBSD: src/sys/dev/mii/tdkphy.c,v 1.23 2007/11/16 10:25:36 yongari 
  */
 
 /*
- * The TDK 78Q2120 is found on some Xircom X3201 based cardbus cards,
+ * The TDK 78Q2120 is found on some Xircom X3201 based CardBus cards,
  * also spotted on some 3C575 cards.  It's just like any other normal
  * phy, except it does auto negotiation in a different way.
  */

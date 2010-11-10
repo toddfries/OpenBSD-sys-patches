@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_accf.c,v 1.20 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_accf.c,v 1.21 2009/12/28 22:56:30 antoine Exp $");
 
 #define ACCEPT_FILTER_MOD
 
@@ -54,7 +54,7 @@ MTX_SYSINIT(accept_filter, &accept_filter_mtx, "accept_filter_mtx",
 #define	ACCEPT_FILTER_UNLOCK()	mtx_unlock(&accept_filter_mtx)
 
 static SLIST_HEAD(, accept_filter) accept_filtlsthd =
-	SLIST_HEAD_INITIALIZER(&accept_filtlsthd);
+	SLIST_HEAD_INITIALIZER(accept_filtlsthd);
 
 MALLOC_DEFINE(M_ACCF, "accf", "accept filter data");
 

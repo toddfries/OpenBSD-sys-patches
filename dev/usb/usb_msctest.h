@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb/usb_msctest.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb/usb_msctest.h,v 1.7 2010/02/14 20:05:12 thompsa Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -24,10 +24,20 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _USB2_MSCTEST_H_
-#define	_USB2_MSCTEST_H_
+#ifndef _USB_MSCTEST_H_
+#define	_USB_MSCTEST_H_
 
-usb2_error_t usb2_test_autoinstall(struct usb2_device *udev,
-	    uint8_t iface_index, uint8_t do_eject);
+enum {
+	MSC_EJECT_STOPUNIT,
+	MSC_EJECT_REZERO,
+	MSC_EJECT_ZTESTOR,
+	MSC_EJECT_CMOTECH,
+	MSC_EJECT_HUAWEI,
+};
 
-#endif					/* _USB2_MSCTEST_H_ */
+int usb_iface_is_cdrom(struct usb_device *udev,
+	    uint8_t iface_index);
+usb_error_t usb_msc_eject(struct usb_device *udev,
+	    uint8_t iface_index, int method);
+
+#endif					/* _USB_MSCTEST_H_ */

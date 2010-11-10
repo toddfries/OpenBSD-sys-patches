@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: aslopcode - AML opcode generation
- *              $Revision: 1.74 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -118,7 +117,7 @@
 
 #include <contrib/dev/acpica/compiler/aslcompiler.h>
 #include "aslcompiler.y.h"
-#include <contrib/dev/acpica/amlcode.h>
+#include <contrib/dev/acpica/include/amlcode.h>
 
 #define _COMPONENT          ACPI_COMPILER
         ACPI_MODULE_NAME    ("aslopcodes")
@@ -329,7 +328,7 @@ OpcSetOptimalIntegerSize (
             }
             break;
 
-        case ACPI_INTEGER_MAX:
+        case ACPI_UINT64_MAX:
 
             /* Check for table integer width (32 or 64) */
 
@@ -546,7 +545,7 @@ OpcDoEisaId (
     UINT32                  BigEndianId;
     char                    *InString;
     ACPI_STATUS             Status = AE_OK;
-    ACPI_NATIVE_UINT        i;
+    UINT32                  i;
 
 
     InString = (char *) Op->Asl.Value.String;
@@ -569,7 +568,7 @@ OpcDoEisaId (
 
             if (i < 3)
             {
-                if (!isupper (InString[i]))
+                if (!isupper ((int) InString[i]))
                 {
                     Status = AE_BAD_PARAMETER;
                 }
@@ -577,7 +576,7 @@ OpcDoEisaId (
 
             /* Last 4 characters must be hex digits */
 
-            else if (!isxdigit (InString[i]))
+            else if (!isxdigit ((int) InString[i]))
             {
                 Status = AE_BAD_PARAMETER;
             }
@@ -642,7 +641,7 @@ OpcDoUuId (
     char                    *InString;
     char                    *Buffer;
     ACPI_STATUS             Status = AE_OK;
-    ACPI_NATIVE_UINT        i;
+    UINT32                  i;
     ACPI_PARSE_OBJECT       *NewOp;
 
 
@@ -667,7 +666,7 @@ OpcDoUuId (
             }
             else
             {
-                if (!isxdigit (InString[i]))
+                if (!isxdigit ((int) InString[i]))
                 {
                     Status = AE_BAD_PARAMETER;
                 }

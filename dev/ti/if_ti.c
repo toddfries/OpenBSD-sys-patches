@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ti/if_ti.c,v 1.133 2008/04/26 14:13:48 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ti/if_ti.c,v 1.136 2010/05/03 15:51:59 alc Exp $");
 
 #include "opt_ti.h"
 
@@ -194,7 +194,7 @@ static void ti_init(void *);
 static void ti_init_locked(void *);
 static void ti_init2(struct ti_softc *);
 static void ti_stop(struct ti_softc *);
-static void ti_watchdog(struct ifnet *);
+static void ti_watchdog(void *);
 static int ti_shutdown(device_t);
 static int ti_ifmedia_upd(struct ifnet *);
 static void ti_ifmedia_sts(struct ifnet *, struct ifmediareq *);
@@ -1488,10 +1488,8 @@ ti_newbuf_jumbo(sc, idx, m_old)
 			}
 			sf[i] = sf_buf_alloc(frame, SFB_NOWAIT);
 			if (sf[i] == NULL) {
-				vm_page_lock_queues();
 				vm_page_unwire(frame, 0);
 				vm_page_free(frame);
-				vm_page_unlock_queues();
 				device_printf(sc->ti_dev, "buffer allocation "
 				    "failed -- packet dropped!\n");
 				printf("      index %d page %d\n", idx, i);
@@ -1851,7 +1849,7 @@ ti_setmulti(sc)
 	}
 
 	/* Now program new ones. */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1866,7 +1864,7 @@ ti_setmulti(sc)
 		SLIST_INSERT_HEAD(&sc->ti_mc_listhead, mc, mc_entries);
 		ti_add_mcast(sc, &mc->mc_addr);
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	/* Re-enable interrupts. */
 	CSR_WRITE_4(sc, TI_MB_HOSTINTR, intrs);
@@ -2285,6 +2283,7 @@ ti_attach(dev)
 
 	mtx_init(&sc->ti_mtx, device_get_nameunit(dev), MTX_NETWORK_LOCK,
 	    MTX_DEF);
+	callout_init_mtx(&sc->ti_watchdog, &sc->ti_mtx, 0);
 	ifmedia_init(&sc->ifmedia, IFM_IMASK, ti_ifmedia_upd, ti_ifmedia_sts);
 	ifp = sc->ti_ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL) {
@@ -2486,7 +2485,6 @@ ti_attach(dev)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = ti_ioctl;
 	ifp->if_start = ti_start;
-	ifp->if_watchdog = ti_watchdog;
 	ifp->if_init = ti_init;
 	ifp->if_baudrate = 1000000000;
 	ifp->if_mtu = ETHERMTU;
@@ -2565,24 +2563,22 @@ ti_detach(dev)
 {
 	struct ti_softc		*sc;
 	struct ifnet		*ifp;
-	int			attached;
 
 	sc = device_get_softc(dev);
 	if (sc->dev)
 		destroy_dev(sc->dev);
 	KASSERT(mtx_initialized(&sc->ti_mtx), ("ti mutex not initialized"));
-	attached = device_is_attached(dev);
-	TI_LOCK(sc);
 	ifp = sc->ti_ifp;
-	if (attached)
-		ti_stop(sc);
-	TI_UNLOCK(sc);
-	if (attached)
+	if (device_is_attached(dev)) {
 		ether_ifdetach(ifp);
+		TI_LOCK(sc);
+		ti_stop(sc);
+		TI_UNLOCK(sc);
+	}
 
 	/* These should only be active if attach succeeded */
-	if (attached)
-		bus_generic_detach(dev);
+	callout_drain(&sc->ti_watchdog);
+	bus_generic_detach(dev);
 	ti_free_dmamaps(sc);
 	ifmedia_removeall(&sc->ifmedia);
 
@@ -2866,7 +2862,7 @@ ti_txeof(sc)
 	}
 	sc->ti_tx_saved_considx = idx;
 
-	ifp->if_timer = sc->ti_txcnt > 0 ? 5 : 0;
+	sc->ti_timer = sc->ti_txcnt > 0 ? 5 : 0;
 }
 
 static void
@@ -3121,7 +3117,7 @@ ti_start_locked(ifp)
 		/*
 		 * Set a timeout in case the chip goes out to lunch.
 		 */
-		ifp->if_timer = 5;
+		sc->ti_timer = 5;
 	}
 }
 
@@ -3225,6 +3221,7 @@ static void ti_init2(sc)
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+	callout_reset(&sc->ti_watchdog, hz, ti_watchdog, sc);
 
 	/*
 	 * Make sure to set media properly. We have to do this
@@ -3786,30 +3783,31 @@ ti_ioctl2(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 }
 
 static void
-ti_watchdog(ifp)
-	struct ifnet		*ifp;
+ti_watchdog(void *arg)
 {
 	struct ti_softc		*sc;
+	struct ifnet		*ifp;
 
-	sc = ifp->if_softc;
-	TI_LOCK(sc);
+	sc = arg;
+	TI_LOCK_ASSERT(sc);
+	callout_reset(&sc->ti_watchdog, hz, ti_watchdog, sc);
+	if (sc->ti_timer == 0 || --sc->ti_timer > 0)
+		return;
 
 	/*
 	 * When we're debugging, the chip is often stopped for long periods
 	 * of time, and that would normally cause the watchdog timer to fire.
 	 * Since that impedes debugging, we don't want to do that.
 	 */
-	if (sc->ti_flags & TI_FLAG_DEBUGING) {
-		TI_UNLOCK(sc);
+	if (sc->ti_flags & TI_FLAG_DEBUGING)
 		return;
-	}
 
+	ifp = sc->ti_ifp;
 	if_printf(ifp, "watchdog timeout -- resetting\n");
 	ti_stop(sc);
 	ti_init_locked(sc);
 
 	ifp->if_oerrors++;
-	TI_UNLOCK(sc);
 }
 
 /*
@@ -3859,6 +3857,7 @@ ti_stop(sc)
 	sc->ti_tx_saved_considx = TI_TXCONS_UNSET;
 
 	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
+	callout_stop(&sc->ti_watchdog);
 }
 
 /*

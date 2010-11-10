@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/atkbdc/atkbdcreg.h,v 1.12 2005/06/10 20:56:37 marius Exp $
+ * $FreeBSD: src/sys/dev/atkbdc/atkbdcreg.h,v 1.13 2010/04/29 06:16:00 sobomax Exp $
  * from kbdio.h,v 1.8 1998/09/25 11:55:46 yokota Exp
  */
 
@@ -200,6 +200,7 @@ typedef struct atkbdc_softc {
     int lock;			/* FIXME: XXX not quite a semaphore... */
     kqueue kbd;			/* keyboard data queue */
     kqueue aux;			/* auxiliary data queue */
+    int retry;
 } atkbdc_softc_t; 
 
 enum kbdc_device_ivar {

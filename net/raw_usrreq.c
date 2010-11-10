@@ -28,10 +28,8 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_usrreq.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.50 2009/02/27 14:12:05 bz Exp $
+ * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.54 2009/08/01 19:26:27 rwatson Exp $
  */
-
-#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -46,11 +44,9 @@
 #include <sys/socketvar.h>
 #include <sys/sx.h>
 #include <sys/systm.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/raw_cb.h>
-#include <net/route.h>
 #include <net/vnet.h>
 
 MTX_SYSINIT(rawcb_mtx, &rawcb_mtx, "rawcb", MTX_DEF);
@@ -61,7 +57,6 @@ MTX_SYSINIT(rawcb_mtx, &rawcb_mtx, "rawcb", MTX_DEF);
 void
 raw_init(void)
 {
-	INIT_VNET_NET(curvnet);
 
 	LIST_INIT(&V_rawcb_list);
 }
@@ -76,7 +71,6 @@ raw_init(void)
 void
 raw_input(struct mbuf *m0, struct sockproto *proto, struct sockaddr *src)
 {
-	INIT_VNET_NET(curvnet);
 	struct rawcb *rp;
 	struct mbuf *m = m0;
 	struct socket *last;

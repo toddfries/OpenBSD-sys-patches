@@ -34,8 +34,10 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/mips/include/cache_mipsNN.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/cache_mipsNN.h,v 1.2 2010/01/10 19:50:24 imp Exp $
  */
+#ifndef	_MACHINE_CACHE_MIPSNN_H_
+#define	_MACHINE_CACHE_MIPSNN_H_
 
 void	mipsNN_cache_init(struct mips_cpuinfo *);
 
@@ -65,3 +67,5 @@ void	mipsNN_pdcache_wbinv_range_index_128(vm_offset_t, vm_size_t);
 void	mipsNN_pdcache_inv_range_128(vm_offset_t, vm_size_t);
 void	mipsNN_pdcache_wb_range_128(vm_offset_t, vm_size_t);
 #endif
+
+#endif	/* _MACHINE_CACHE_MIPSNN_H_ */

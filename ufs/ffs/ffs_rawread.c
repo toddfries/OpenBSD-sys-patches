@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_rawread.c,v 1.32 2008/03/22 09:15:16 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_rawread.c,v 1.33 2009/12/21 12:29:38 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -101,6 +101,7 @@ ffs_rawread_sync(struct vnode *vp)
 	int upgraded;
 	struct bufobj *bo;
 	struct mount *mp;
+	vm_object_t obj;
 
 	/* Check for dirty mmap, pending writes and dirty buffers */
 	bo = &vp->v_bufobj;
@@ -108,7 +109,8 @@ ffs_rawread_sync(struct vnode *vp)
 	VI_LOCK(vp);
 	if (bo->bo_numoutput > 0 ||
 	    bo->bo_dirty.bv_cnt > 0 ||
-	    (vp->v_iflag & VI_OBJDIRTY) != 0) {
+	    ((obj = vp->v_object) != NULL &&
+	     (obj->flags & OBJ_MIGHTBEDIRTY) != 0)) {
 		VI_UNLOCK(vp);
 		BO_UNLOCK(bo);
 		
@@ -138,13 +140,12 @@ ffs_rawread_sync(struct vnode *vp)
 			return (EIO);
 		}
 		/* Attempt to msync mmap() regions to clean dirty mmap */ 
-		if ((vp->v_iflag & VI_OBJDIRTY) != 0) {
+		if ((obj = vp->v_object) != NULL &&
+		    (obj->flags & OBJ_MIGHTBEDIRTY) != 0) {
 			VI_UNLOCK(vp);
-			if (vp->v_object != NULL) {
-				VM_OBJECT_LOCK(vp->v_object);
-				vm_object_page_clean(vp->v_object, 0, 0, OBJPC_SYNC);
-				VM_OBJECT_UNLOCK(vp->v_object);
-			}
+			VM_OBJECT_LOCK(obj);
+			vm_object_page_clean(obj, 0, 0, OBJPC_SYNC);
+			VM_OBJECT_UNLOCK(obj);
 		} else
 			VI_UNLOCK(vp);
 

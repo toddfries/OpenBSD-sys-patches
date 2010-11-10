@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_cfgreg.c,v 1.113 2008/09/11 21:42:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_cfgreg.c,v 1.116 2009/09/24 07:11:23 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/pci/pci_cfgreg.c,v 1.113 2008/09/11 21:42:11 j
 #include <sys/lock.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
+#include <sys/sysctl.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <vm/vm.h>
@@ -56,6 +57,8 @@ static void	pciereg_cfgwrite(int bus, unsigned slot, unsigned func,
 static int	pcireg_cfgread(int bus, int slot, int func, int reg, int bytes);
 static void	pcireg_cfgwrite(int bus, int slot, int func, int reg, int data, int bytes);
 
+SYSCTL_DECL(_hw_pci);
+
 static int cfgmech;
 static vm_offset_t pcie_base;
 static int pcie_minbus, pcie_maxbus;
@@ -63,6 +66,8 @@ static uint32_t pcie_badslots;
 static struct mtx pcicfg_mtx;
 static int mcfg_enable = 1;
 TUNABLE_INT("hw.pci.mcfg", &mcfg_enable);
+SYSCTL_INT(_hw_pci, OID_AUTO, mcfg, CTLFLAG_RDTUN, &mcfg_enable, 0,
+    "Enable support for PCI-e memory mapped config access");
 
 /* 
  * Initialise access to PCI configuration space 
@@ -119,6 +124,7 @@ pci_docfgregread(int bus, int slot, int func, int reg, int bytes)
 {
 
 	if (cfgmech == CFGMECH_PCIE &&
+	    (bus >= pcie_minbus && bus <= pcie_maxbus) &&
 	    (bus != 0 || !(1 << slot & pcie_badslots)))
 		return (pciereg_cfgread(bus, slot, func, reg, bytes));
 	else
@@ -158,6 +164,7 @@ pci_cfgregwrite(int bus, int slot, int func, int reg, u_int32_t data, int bytes)
 {
 
 	if (cfgmech == CFGMECH_PCIE &&
+	    (bus >= pcie_minbus && bus <= pcie_maxbus) &&
 	    (bus != 0 || !(1 << slot & pcie_badslots)))
 		pciereg_cfgwrite(bus, slot, func, reg, data, bytes);
 	else
@@ -174,9 +181,9 @@ pci_cfgenable(unsigned bus, unsigned slot, unsigned func, int reg, int bytes)
 {
 	int dataport = 0;
 
-	if (bus <= PCI_BUSMAX && slot < 32 && func <= PCI_FUNCMAX &&
-	    reg <= PCI_REGMAX && bytes != 3 && (unsigned) bytes <= 4 &&
-	    (reg & (bytes - 1)) == 0) {
+	if (bus <= PCI_BUSMAX && slot <= PCI_SLOTMAX && func <= PCI_FUNCMAX &&
+	    (unsigned)reg <= PCI_REGMAX && bytes != 3 &&
+	    (unsigned)bytes <= 4 && (reg & (bytes - 1)) == 0) {
 		outl(CONF1_ADDR_PORT, (1 << 31) | (bus << 16) | (slot << 11) 
 		    | (func << 8) | (reg & ~0x03));
 		dataport = CONF1_DATA_PORT + (reg & 0x03);
@@ -274,7 +281,7 @@ pcie_cfgregopen(uint64_t base, uint8_t minbus, uint8_t maxbus)
 	 * fall back to using type 1 config access instead.
 	 */
 	if (pci_cfgregopen() != 0) {
-		for (slot = 0; slot < 32; slot++) {
+		for (slot = 0; slot <= PCI_SLOTMAX; slot++) {
 			val1 = pcireg_cfgread(0, slot, 0, 0, 4);
 			if (val1 == 0xffffffff)
 				continue;
@@ -302,8 +309,8 @@ pciereg_cfgread(int bus, unsigned slot, unsigned func, unsigned reg,
 	volatile vm_offset_t va;
 	int data = -1;
 
-	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
-	    func > PCI_FUNCMAX || reg >= 0x1000)
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot > PCI_SLOTMAX ||
+	    func > PCI_FUNCMAX || reg > PCIE_REGMAX)
 		return (-1);
 
 	va = PCIE_VADDR(pcie_base, reg, bus, slot, func);
@@ -329,8 +336,8 @@ pciereg_cfgwrite(int bus, unsigned slot, unsigned func, unsigned reg, int data,
 {
 	volatile vm_offset_t va;
 
-	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
-	    func > PCI_FUNCMAX || reg >= 0x1000)
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot > PCI_SLOTMAX ||
+	    func > PCI_FUNCMAX || reg > PCIE_REGMAX)
 		return;
 
 	va = PCIE_VADDR(pcie_base, reg, bus, slot, func);

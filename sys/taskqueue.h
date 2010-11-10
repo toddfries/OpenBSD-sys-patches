@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/taskqueue.h,v 1.20 2008/07/18 06:22:57 kmacy Exp $
+ * $FreeBSD: src/sys/sys/taskqueue.h,v 1.24 2010/05/28 18:15:28 zml Exp $
  */
 
 #ifndef _SYS_TASKQUEUE_H_
@@ -37,6 +37,7 @@
 #include <sys/_task.h>
 
 struct taskqueue;
+struct thread;
 
 /*
  * A notification callback function which is called from
@@ -47,7 +48,6 @@ struct taskqueue;
  */
 typedef void (*taskqueue_enqueue_fn)(void *context);
 
-struct proc;
 struct taskqueue *taskqueue_create(const char *name, int mflags,
 				    taskqueue_enqueue_fn enqueue,
 				    void *context);
@@ -55,11 +55,11 @@ int	taskqueue_start_threads(struct taskqueue **tqp, int count, int pri,
 				const char *name, ...) __printflike(4, 5);
 int	taskqueue_enqueue(struct taskqueue *queue, struct task *task);
 void	taskqueue_drain(struct taskqueue *queue, struct task *task);
-struct taskqueue *taskqueue_find(const char *name);
 void	taskqueue_free(struct taskqueue *queue);
 void	taskqueue_run(struct taskqueue *queue);
 void	taskqueue_block(struct taskqueue *queue);
 void	taskqueue_unblock(struct taskqueue *queue);
+int	taskqueue_member(struct taskqueue *queue, struct thread *td);
 
 /*
  * Functions for dedicated thread taskqueues

@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	JNPR: elf.h,v 1.4 2006/12/02 09:53:40 katta
- * $FreeBSD: src/sys/mips/include/elf.h,v 1.3 2008/12/17 06:56:58 imp Exp $
+ * $FreeBSD: src/sys/mips/include/elf.h,v 1.7 2010/01/24 02:59:22 gonzo Exp $
  *
  */
 
@@ -41,7 +41,11 @@
 /* Information taken from MIPS ABI supplemental */
 
 #ifndef __ELF_WORD_SIZE
+#if defined(__mips_n64)
+#define	__ELF_WORD_SIZE 64	/* Used by <sys/elf_generic.h> */
+#else
 #define	__ELF_WORD_SIZE 32	/* Used by <sys/elf_generic.h> */
+#endif
 #endif
 #include <sys/elf32.h>	/* Definitions common to all 32 bit architectures. */
 #include <sys/elf64.h>	/* Definitions common to all 64 bit architectures. */
@@ -241,15 +245,20 @@ __ElfType(Auxinfo);
 #define	AT_BASE		7	/* Interpreter's base address. */
 #define	AT_FLAGS	8	/* Flags (unused for i386). */
 #define	AT_ENTRY	9	/* Where interpreter should transfer control. */
-/*
- * The following non-standard values are used in Linux ELF binaries.
- */
 #define	AT_NOTELF	10	/* Program is not ELF ?? */
 #define	AT_UID		11	/* Real uid. */
 #define	AT_EUID		12	/* Effective uid. */
 #define	AT_GID		13	/* Real gid. */
 #define	AT_EGID		14	/* Effective gid. */
+#define	AT_EXECPATH	15	/* Path to the executable. */
 
-#define	AT_COUNT	15	/* Count of defined aux entry types. */
+#define	AT_COUNT	16	/* Count of defined aux entry types. */
+
+#define	ET_DYN_LOAD_ADDR 0x0120000
+
+/*
+ * Constant to mark start of symtab/strtab saved by trampoline
+ */
+#define	SYMTAB_MAGIC	0x64656267
 
 #endif /* !_MACHINE_ELF_H_ */

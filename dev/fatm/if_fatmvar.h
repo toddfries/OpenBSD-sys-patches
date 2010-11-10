@@ -26,7 +26,7 @@
  *
  * Author: Hartmut Brandt <harti@freebsd.org>
  *
- * $FreeBSD: src/sys/dev/fatm/if_fatmvar.h,v 1.6 2005/06/10 16:49:08 brooks Exp $
+ * $FreeBSD: src/sys/dev/fatm/if_fatmvar.h,v 1.7 2009/11/19 22:06:40 jhb Exp $
  *
  * Fore PCA200E driver definitions.
  */
@@ -188,6 +188,7 @@ struct fatm_softc {
 	struct ifnet	*ifp;		/* common part */
 	struct mtx	mtx;		/* lock this structure */
 	struct ifmedia	media;		/* media */
+	struct callout	watchdog_timer;
 
 	int		init_state;	/* initialisation step */
 	int		memid;		/* resource id for card memory */

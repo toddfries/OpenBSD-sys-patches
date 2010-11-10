@@ -31,7 +31,7 @@
 /* $KAME: sctp_output.c,v 1.46 2005/03/06 16:04:17 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.c,v 1.23 2008/08/09 11:28:57 des Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.c,v 1.31 2010/06/05 21:33:16 rrs Exp $");
 
 #include <netinet/sctp_os.h>
 #include <netinet/sctp_var.h>
@@ -49,16 +49,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_bsd_addr.c,v 1.23 2008/08/09 11:28:57 d
 #include <sys/unistd.h>
 
 /* Declare all of our malloc named types */
-
-/* Note to Michael/Peter for mac-os,
- * I think mac has this too since I
- * do see the M_PCB type, so I
- * will also put in the mac file the
- * MALLOC_DECLARE. If this does not
- * work for mac uncomment the defines for
- * the strings that we use in Panda, I put
- * them in comments in the mac-os file.
- */
 MALLOC_DEFINE(SCTP_M_MAP, "sctp_map", "sctp asoc map descriptor");
 MALLOC_DEFINE(SCTP_M_STRMI, "sctp_stri", "sctp stream in array");
 MALLOC_DEFINE(SCTP_M_STRMO, "sctp_stro", "sctp stream out array");
@@ -79,23 +69,45 @@ MALLOC_DEFINE(SCTP_M_MVRF, "sctp_mvrf", "sctp mvrf pcb list");
 MALLOC_DEFINE(SCTP_M_ITER, "sctp_iter", "sctp iterator control");
 MALLOC_DEFINE(SCTP_M_SOCKOPT, "sctp_socko", "sctp socket option");
 
-#if defined(SCTP_USE_THREAD_BASED_ITERATOR)
+/* Global NON-VNET structure that controls the iterator */
+struct iterator_control sctp_it_ctl;
+static int __sctp_thread_based_iterator_started = 0;
+
+
+static void
+sctp_cleanup_itqueue(void)
+{
+	struct sctp_iterator *it;
+
+	while ((it = TAILQ_FIRST(&sctp_it_ctl.iteratorhead)) != NULL) {
+		if (it->function_atend != NULL) {
+			(*it->function_atend) (it->pointer, it->val);
+		}
+		TAILQ_REMOVE(&sctp_it_ctl.iteratorhead, it, sctp_nxt_itr);
+		SCTP_FREE(it, SCTP_M_ITER);
+	}
+}
+
+
 void
 sctp_wakeup_iterator(void)
 {
-	wakeup(&SCTP_BASE_INFO(iterator_running));
+	wakeup(&sctp_it_ctl.iterator_running);
 }
 
 static void
 sctp_iterator_thread(void *v)
 {
 	SCTP_IPI_ITERATOR_WQ_LOCK();
-	SCTP_BASE_INFO(iterator_running) = 0;
 	while (1) {
-		msleep(&SCTP_BASE_INFO(iterator_running),
-		    &SCTP_BASE_INFO(ipi_iterator_wq_mtx),
+		msleep(&sctp_it_ctl.iterator_running,
+		    &sctp_it_ctl.ipi_iterator_wq_mtx,
 		    0, "waiting_for_work", 0);
-		if (SCTP_BASE_INFO(threads_must_exit)) {
+		if (sctp_it_ctl.iterator_flags & SCTP_ITERATOR_MUST_EXIT) {
+			SCTP_IPI_ITERATOR_WQ_DESTROY();
+			SCTP_ITERATOR_LOCK_DESTROY();
+			sctp_cleanup_itqueue();
+			__sctp_thread_based_iterator_started = 0;
 			kthread_exit();
 		}
 		sctp_iterator_worker();
@@ -105,17 +117,28 @@ sctp_iterator_thread(void *v)
 void
 sctp_startup_iterator(void)
 {
+	if (__sctp_thread_based_iterator_started) {
+		/* You only get one */
+		return;
+	}
+	/* init the iterator head */
+	__sctp_thread_based_iterator_started = 1;
+	sctp_it_ctl.iterator_running = 0;
+	sctp_it_ctl.iterator_flags = 0;
+	sctp_it_ctl.cur_it = NULL;
+	SCTP_ITERATOR_LOCK_INIT();
+	SCTP_IPI_ITERATOR_WQ_INIT();
+	TAILQ_INIT(&sctp_it_ctl.iteratorhead);
+
 	int ret;
 
 	ret = kproc_create(sctp_iterator_thread,
 	    (void *)NULL,
-	    &SCTP_BASE_INFO(thread_proc),
+	    &sctp_it_ctl.thread_proc,
 	    RFPROC,
 	    SCTP_KTHREAD_PAGES,
 	    SCTP_KTRHEAD_NAME);
 }
-
-#endif
 
 #ifdef INET6
 
@@ -126,7 +149,7 @@ sctp_gather_internal_ifa_flags(struct sctp_ifa *ifa)
 
 	ifa6 = (struct in6_ifaddr *)ifa->ifa;
 	ifa->flags = ifa6->ia6_flags;
-	if (!MODULE_GLOBAL(MOD_INET6, ip6_use_deprecated)) {
+	if (!MODULE_GLOBAL(ip6_use_deprecated)) {
 		if (ifa->flags &
 		    IN6_IFF_DEPRECATED) {
 			ifa->localifa_flags |= SCTP_ADDR_IFA_UNUSEABLE;
@@ -175,6 +198,7 @@ sctp_is_desired_interface_type(struct ifaddr *ifa)
 	case IFT_LOOP:
 	case IFT_SLIP:
 	case IFT_GIF:
+	case IFT_L2VLAN:
 	case IFT_IP:
 	case IFT_IPOVERCDLC:
 	case IFT_IPOVERCLAW:
@@ -189,11 +213,11 @@ sctp_is_desired_interface_type(struct ifaddr *ifa)
 }
 
 
+
+
 static void
 sctp_init_ifns_for_vrf(int vrfid)
 {
-
-
 	/*
 	 * Here we must apply ANY locks needed by the IFN we access and also
 	 * make sure we lock any IFA that exists as we float through the
@@ -205,9 +229,10 @@ sctp_init_ifns_for_vrf(int vrfid)
 	struct sctp_ifa *sctp_ifa;
 	uint32_t ifa_flags;
 
-	TAILQ_FOREACH(ifn, &MODULE_GLOBAL(MOD_NET, ifnet), if_list) {
+	IFNET_RLOCK();
+	TAILQ_FOREACH(ifn, &MODULE_GLOBAL(ifnet), if_list) {
+		IF_ADDR_LOCK(ifn);
 		TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list) {
-
 			if (ifa->ifa_addr == NULL) {
 				continue;
 			}
@@ -248,9 +273,10 @@ sctp_init_ifns_for_vrf(int vrfid)
 				sctp_ifa->localifa_flags &= ~SCTP_ADDR_DEFER_USE;
 			}
 		}
+		IF_ADDR_UNLOCK(ifn);
 	}
+	IFNET_RUNLOCK();
 }
-
 
 void
 sctp_init_vrf_list(int vrfid)
@@ -335,7 +361,8 @@ void
 	struct ifnet *ifn;
 	struct ifaddr *ifa;
 
-	TAILQ_FOREACH(ifn, &MODULE_GLOBAL(MOD_NET, ifnet), if_list) {
+	IFNET_RLOCK();
+	TAILQ_FOREACH(ifn, &MODULE_GLOBAL(ifnet), if_list) {
 		if (!(*pred) (ifn)) {
 			continue;
 		}
@@ -343,6 +370,7 @@ void
 			sctp_addr_change(ifa, add ? RTM_ADD : RTM_DELETE);
 		}
 	}
+	IFNET_RUNLOCK();
 }
 
 struct mbuf *

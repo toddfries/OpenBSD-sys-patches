@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/stack.h,v 1.5 2008/04/06 20:08:50 attilio Exp $
+ * $FreeBSD: src/sys/sys/stack.h,v 1.6 2009/06/24 12:06:15 rwatson Exp $
  */
 
 #ifndef _SYS_STACK_H_
@@ -41,6 +41,8 @@ void		 stack_copy(struct stack *, struct stack *);
 void		 stack_zero(struct stack *);
 void		 stack_print(struct stack *);
 void		 stack_print_ddb(struct stack *);
+void		 stack_print_short(struct stack *);
+void		 stack_print_short_ddb(struct stack *);
 void		 stack_sbuf_print(struct sbuf *, struct stack *);
 void		 stack_sbuf_print_ddb(struct sbuf *, struct stack *);
 #ifdef KTR

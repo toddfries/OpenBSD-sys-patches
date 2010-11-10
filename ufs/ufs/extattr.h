@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ufs/ufs/extattr.h,v 1.22 2008/03/04 12:50:11 rwatson Exp $
+ * $FreeBSD: src/sys/ufs/ufs/extattr.h,v 1.23 2009/05/11 15:33:26 attilio Exp $
  */
 /*
  * Developed by the TrustedBSD Project.
@@ -143,7 +143,7 @@ int	ufs_extattr_start(struct mount *mp, struct thread *td);
 int	ufs_extattr_autostart(struct mount *mp, struct thread *td);
 int	ufs_extattr_stop(struct mount *mp, struct thread *td);
 int	ufs_extattrctl(struct mount *mp, int cmd, struct vnode *filename,
-	    int attrnamespace, const char *attrname, struct thread *td);
+	    int attrnamespace, const char *attrname);
 int	ufs_getextattr(struct vop_getextattr_args *ap);
 int	ufs_deleteextattr(struct vop_deleteextattr_args *ap);
 int	ufs_setextattr(struct vop_setextattr_args *ap);

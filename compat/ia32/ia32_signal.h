@@ -26,7 +26,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/ia32/ia32_signal.h,v 1.10 2006/10/05 01:56:11 davidxu Exp $
+ * $FreeBSD: src/sys/compat/ia32/ia32_signal.h,v 1.13 2010/04/03 12:34:32 bz Exp $
  */
 
 struct ia32_mcontext {
@@ -59,7 +59,9 @@ struct ia32_mcontext {
 	 * See <i386/include/npx.h> for the internals of mc_fpstate[].
 	 */
 	u_int32_t	mc_fpstate[128] __aligned(16);
-	u_int32_t	mc_spare2[8];
+	u_int32_t	mc_fsbase;
+	u_int32_t	mc_gsbase;
+	u_int32_t	mc_spare2[6];
 };
 
 struct ia32_ucontext {
@@ -178,10 +180,11 @@ struct ia32_sigframe3 {
 #endif
 
 struct ksiginfo;
+struct image_params;
 extern char ia32_sigcode[];
 extern char freebsd4_ia32_sigcode[];
 extern int sz_ia32_sigcode;
 extern int sz_freebsd4_ia32_sigcode;
 extern void ia32_sendsig(sig_t, struct ksiginfo *, sigset_t *);
-extern void ia32_setregs(struct thread *td, u_long entry, u_long stack,
-    u_long ps_strings);
+extern void ia32_setregs(struct thread *td, struct image_params *imgp,
+    u_long stack);

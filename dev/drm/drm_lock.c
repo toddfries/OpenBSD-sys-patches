@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_lock.c,v 1.7 2009/02/25 18:25:47 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_lock.c,v 1.9 2009/03/19 08:36:08 rnoland Exp $");
 
 /** @file drm_lock.c
  * Implementation of the ioctls and other support code for dealing with the
@@ -82,12 +82,17 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 		/* Contention */
 		ret = mtx_sleep((void *)&dev->lock.lock_queue, &dev->dev_lock,
-		    PZERO | PCATCH, "drmlk2", 0);
+		    PCATCH, "drmlk2", 0);
 		if (ret != 0)
 			break;
 	}
 	DRM_UNLOCK();
-	DRM_DEBUG("%d %s\n", lock->context, ret ? "interrupted" : "has lock");
+
+	if (ret == ERESTART)
+		DRM_DEBUG("restarting syscall\n");
+	else
+		DRM_DEBUG("%d %s\n", lock->context,
+		    ret ? "interrupted" : "has lock");
 
 	if (ret != 0)
 		return ret;

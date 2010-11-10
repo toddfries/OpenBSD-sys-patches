@@ -33,7 +33,7 @@
  *	@(#)kernfs.h	8.6 (Berkeley) 3/29/95
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs.h 1.14
  *
- * $FreeBSD: src/sys/fs/devfs/devfs.h,v 1.31 2006/10/18 11:17:14 kib Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs.h,v 1.33 2010/06/09 15:29:12 jh Exp $
  */
 
 #ifndef _FS_DEVFS_DEVFS_H_
@@ -172,13 +172,15 @@ extern unsigned devfs_rule_depth;
 void devfs_rules_apply(struct devfs_mount *dm, struct devfs_dirent *de);
 void devfs_rules_cleanup (struct devfs_mount *dm);
 int devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct thread *td);
-int devfs_allocv (struct devfs_dirent *de, struct mount *mp, struct vnode **vpp, struct thread *td);
+int devfs_allocv (struct devfs_dirent *de, struct mount *mp,
+    struct vnode **vpp);
 void devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int vp_locked);
 void devfs_dirent_free(struct devfs_dirent *de);
 void devfs_populate (struct devfs_mount *dm);
 void devfs_cleanup (struct devfs_mount *dm);
 void devfs_unmount_final(struct devfs_mount *mp);
 struct devfs_dirent *devfs_newdirent (char *name, int namelen);
+struct devfs_dirent *devfs_parent_dirent(struct devfs_dirent *de);
 struct devfs_dirent *devfs_vmkdir (struct devfs_mount *, char *name, int namelen, struct devfs_dirent *dotdot, u_int inode);
 struct devfs_dirent *devfs_find (struct devfs_dirent *dd, const char *name, int namelen);
 

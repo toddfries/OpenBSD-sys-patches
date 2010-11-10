@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/pci/pcib_if.m,v 1.11 2007/05/02 17:50:35 jhb Exp $
+# $FreeBSD: src/sys/dev/pci/pcib_if.m,v 1.13 2009/05/20 22:00:39 imp Exp $
 #
 
 #include <sys/bus.h>

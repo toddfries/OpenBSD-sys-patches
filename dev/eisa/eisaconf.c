@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/eisa/eisaconf.c,v 1.73 2005/08/01 07:09:15 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/eisa/eisaconf.c,v 1.74 2009/06/11 17:06:58 avg Exp $");
 
 #include "opt_eisa.h"
 
@@ -315,7 +315,7 @@ eisa_find_ioaddr(struct eisa_device *e_dev, int rid)
 }
 
 static int
-eisa_read_ivar(device_t dev, device_t child, int which, u_long *result)
+eisa_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 {
 	struct eisa_device *e_dev = device_get_ivars(child);
 	struct irq_node *irq;

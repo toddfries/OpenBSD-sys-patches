@@ -24,13 +24,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	from: src/sys/alpha/include/kdb.h,v 1.2 2005/01/05 20:05:50 imp
- * $FreeBSD: src/sys/mips/include/kdb.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/kdb.h,v 1.3 2010/03/11 07:17:14 neel Exp $
  */
 
 #ifndef _MACHINE_KDB_H_
 #define	_MACHINE_KDB_H_
 
 #include <machine/frame.h>
+
+#define	KDB_STOPPEDPCB(pc)	&stoppcbs[pc->pc_cpuid]
 
 static __inline void
 kdb_cpu_clear_singlestep(void)
@@ -47,4 +49,8 @@ kdb_cpu_trap(int vector, int _)
 {
 }
 
+static __inline void
+kdb_cpu_sync_icache(unsigned char *addr, size_t size)
+{
+}
 #endif /* _MACHINE_KDB_H_ */

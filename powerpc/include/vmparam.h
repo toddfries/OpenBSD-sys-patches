@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: vmparam.h,v 1.11 2000/02/11 19:25:16 thorpej Exp $
- * $FreeBSD: src/sys/powerpc/include/vmparam.h,v 1.12 2008/03/03 13:20:52 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/vmparam.h,v 1.16 2010/02/20 16:23:29 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_VMPARAM_H_
@@ -38,23 +38,23 @@
 #define	USRSTACK	VM_MAXUSER_ADDRESS
 
 #ifndef	MAXTSIZ
-#define	MAXTSIZ		(16*1024*1024)		/* max text size */
+#define	MAXTSIZ		(64*1024*1024)		/* max text size */
 #endif
 
 #ifndef	DFLDSIZ
-#define	DFLDSIZ		(32*1024*1024)		/* default data size */
+#define	DFLDSIZ		(128*1024*1024)		/* default data size */
 #endif
 
 #ifndef	MAXDSIZ
-#define	MAXDSIZ		(512*1024*1024)		/* max data size */
+#define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
 #endif
 
 #ifndef	DFLSSIZ
-#define	DFLSSIZ		(1*1024*1024)		/* default stack size */
+#define	DFLSSIZ		(8*1024*1024)		/* default stack size */
 #endif
 
 #ifndef	MAXSSIZ
-#define	MAXSSIZ		(32*1024*1024)		/* max stack size */
+#define	MAXSSIZ		(64*1024*1024)		/* max stack size */
 #endif
 
 /*
@@ -98,7 +98,8 @@
 #define	KERNBASE		0x00100000	/* start of kernel virtual */
 
 #define	VM_MIN_KERNEL_ADDRESS	((vm_offset_t)(KERNEL_SR << ADDR_SR_SHFT))
-#define	VM_MAX_KERNEL_ADDRESS	(VM_MIN_KERNEL_ADDRESS + 2*SEGMENT_LENGTH - 1)
+#define	VM_MAX_SAFE_KERNEL_ADDRESS (VM_MIN_KERNEL_ADDRESS + 2*SEGMENT_LENGTH -1)
+#define	VM_MAX_KERNEL_ADDRESS	(VM_MIN_KERNEL_ADDRESS + 3*SEGMENT_LENGTH - 1)
 
 /*
  * Use the direct-mapped BAT registers for UMA small allocs. This
@@ -117,7 +118,7 @@
 #define	KERNBASE		0xc0000000	/* start of kernel virtual */
 
 #define	VM_MIN_KERNEL_ADDRESS	KERNBASE
-#define	VM_MAX_KERNEL_ADDRESS	CCSRBAR_VA
+#define	VM_MAX_KERNEL_ADDRESS	0xf8000000
 
 #endif /* AIM/E500 */
 

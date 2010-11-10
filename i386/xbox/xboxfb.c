@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xbox/xboxfb.c,v 1.6 2007/12/29 23:26:59 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xbox/xboxfb.c,v 1.7 2009/12/29 21:51:28 rnoland Exp $");
 
 /*
  * This is the syscon(4)-ized version of the Xbox Frame Buffer driver. It
@@ -521,8 +521,8 @@ xboxfb_blank_display(video_adapter_t *adp, int mode)
 }
 
 static int
-xboxfb_mmap(video_adapter_t *adp, vm_offset_t offset, vm_paddr_t *paddr,
-    int prot)
+xboxfb_mmap(video_adapter_t *adp, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int prot, vm_memattr_t *memattr)
 {
 	return (EINVAL);
 }

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ipmi/ipmi_acpi.c,v 1.2 2009/02/03 16:39:51 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ipmi/ipmi_acpi.c,v 1.3 2009/06/05 18:44:36 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,7 +36,8 @@ __FBSDID("$FreeBSD: src/sys/dev/ipmi/ipmi_acpi.c,v 1.2 2009/02/03 16:39:51 jhb E
 #include <sys/rman.h>
 #include <sys/selinfo.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 
 /* Hooks for the ACPI CA debugging infrastructure */

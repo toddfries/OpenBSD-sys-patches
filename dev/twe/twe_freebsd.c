@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/twe/twe_freebsd.c,v 1.45 2008/09/27 08:51:18 ed Exp $
+ * $FreeBSD: src/sys/dev/twe/twe_freebsd.c,v 1.48 2009/12/25 17:34:43 mav Exp $
  */
 
 /*
@@ -79,10 +79,9 @@ static struct cdevsw twe_cdevsw = {
  * Accept an open operation on the control device.
  */
 static int
-twe_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+twe_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = dev2unit(dev);
-    struct twe_softc	*sc = devclass_get_softc(twe_devclass, unit);
+    struct twe_softc		*sc = (struct twe_softc *)dev->si_drv1;
 
     sc->twe_state |= TWE_STATE_OPEN;
     return(0);
@@ -92,10 +91,9 @@ twe_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
  * Accept the last close on the control device.
  */
 static int
-twe_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+twe_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = dev2unit(dev);
-    struct twe_softc	*sc = devclass_get_softc(twe_devclass, unit);
+    struct twe_softc		*sc = (struct twe_softc *)dev->si_drv1;
 
     sc->twe_state &= ~TWE_STATE_OPEN;
     return (0);
@@ -105,7 +103,7 @@ twe_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
  * Handle controller-specific control operations.
  */
 static int
-twe_ioctl_wrapper(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, d_thread_t *td)
+twe_ioctl_wrapper(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, struct thread *td)
 {
     struct twe_softc		*sc = (struct twe_softc *)dev->si_drv1;
     
@@ -820,6 +818,13 @@ twed_attach(device_t dev)
     sc->twed_disk->d_maxsize = (TWE_MAX_SGL_LENGTH - 1) * PAGE_SIZE;
     sc->twed_disk->d_sectorsize = TWE_BLOCK_SIZE;
     sc->twed_disk->d_mediasize = TWE_BLOCK_SIZE * (off_t)sc->twed_drive->td_size;
+    if (sc->twed_drive->td_type == TWE_UD_CONFIG_RAID0 ||
+	sc->twed_drive->td_type == TWE_UD_CONFIG_RAID5 ||
+	sc->twed_drive->td_type == TWE_UD_CONFIG_RAID10) {
+	    sc->twed_disk->d_stripesize =
+		TWE_BLOCK_SIZE << sc->twed_drive->td_stripe;
+	    sc->twed_disk->d_stripeoffset = 0;
+    }
     sc->twed_disk->d_fwsectors = sc->twed_drive->td_sectors;
     sc->twed_disk->d_fwheads = sc->twed_drive->td_heads;
     sc->twed_disk->d_unit = sc->twed_drive->td_sys_unit;

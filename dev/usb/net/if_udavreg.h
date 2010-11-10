@@ -1,6 +1,6 @@
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/net/if_udavreg.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/net/if_udavreg.h,v 1.3 2009/06/15 01:02:43 thompsa Exp $	*/
 /*-
  * Copyright (c) 2003
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.
@@ -137,7 +137,7 @@
 #define	UDAV_GPR_GEPIO1		(1<<1)	/* General purpose 1 */
 #define	UDAV_GPR_GEPIO0		(1<<0)	/* General purpose 0 */
 
-#define	GET_MII(sc)		usb2_ether_getmii(&(sc)->sc_ue)
+#define	GET_MII(sc)		uether_getmii(&(sc)->sc_ue)
 
 struct udav_rxpkt {
 	uint8_t	rxstat;
@@ -152,9 +152,9 @@ enum {
 };
 
 struct udav_softc {
-	struct usb2_ether	sc_ue;
+	struct usb_ether	sc_ue;
 	struct mtx		sc_mtx;
-	struct usb2_xfer	*sc_xfer[UDAV_N_TRANSFER];
+	struct usb_xfer	*sc_xfer[UDAV_N_TRANSFER];
 
 	int			sc_flags;
 #define	UDAV_FLAG_LINK		0x0001

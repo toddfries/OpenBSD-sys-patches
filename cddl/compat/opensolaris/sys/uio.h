@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2007 Pawel Jakub Dawidek <pjd@FreeBSD.org>
+ * Copyright (c) 2010 Pawel Jakub Dawidek <pjd@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/uio.h,v 1.4 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/uio.h,v 1.5 2010/07/12 23:49:04 mm Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_UIO_H_
@@ -60,6 +60,9 @@ zfs_uiomove(void *cp, size_t n, enum uio_rw dir, uio_t *uio)
 	return (uiomove(cp, (int)n, uio));
 }
 #define	uiomove(cp, n, dir, uio)	zfs_uiomove((cp), (n), (dir), (uio))
+
+int uiocopy(void *p, size_t n, enum uio_rw rw, struct uio *uio, size_t *cbytes);
+void uioskip(uio_t *uiop, size_t n);
 #endif	/* BUILDING_ZFS */
 
 #endif	/* !_OPENSOLARIS_SYS_UIO_H_ */

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/common/module.c,v 1.28 2009/02/16 02:42:17 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/common/module.c,v 1.30 2010/05/10 18:23:00 imp Exp $");
 
 /*
  * file/module function dispatcher, support, etc.
@@ -295,7 +295,8 @@ file_load(char *filename, vm_offset_t dest, struct preloaded_file **result)
 }
 
 static int
-file_load_dependencies(struct preloaded_file *base_file) {
+file_load_dependencies(struct preloaded_file *base_file)
+{
     struct file_metadata *md;
     struct preloaded_file *fp;
     struct mod_depend *verinfo;
@@ -351,6 +352,9 @@ file_loadraw(char *type, char *name)
     char			*cp;
     int				fd, got;
     vm_offset_t			laddr;
+#ifdef PC98
+    struct stat			st;
+#endif
 
     /* We can't load first */
     if ((file_findfile(NULL, NULL)) == NULL) {
@@ -371,6 +375,14 @@ file_loadraw(char *type, char *name)
 	free(name);
 	return(CMD_ERROR);
     }
+
+#ifdef PC98
+    /* We cannot use 15M-16M area on pc98. */
+    if (loadaddr < 0x1000000 &&
+	fstat(fd, &st) == 0 &&
+	(st.st_size == -1 || loadaddr + st.st_size > 0xf00000))
+	loadaddr = 0x1000000;
+#endif
 
     laddr = loadaddr;
     for (;;) {
@@ -477,6 +489,14 @@ mod_loadkld(const char *kldname, int argc, char *argv[])
 	;
 
     do {
+#ifdef PC98
+	/* We cannot use 15M-16M area on pc98. */
+	struct stat st;
+	if (loadaddr < 0x1000000 &&
+	    stat(filename, &st) == 0 &&
+	    (st.st_size == -1 || loadaddr + st.st_size > 0xf00000))
+	    loadaddr = 0x1000000;
+#endif
 	err = file_load(filename, loadaddr, &fp);
 	if (err)
 	    break;

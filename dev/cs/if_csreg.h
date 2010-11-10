@@ -27,7 +27,7 @@
  */
 
 /*
- * $FreeBSD: src/sys/dev/cs/if_csreg.h,v 1.8 2008/07/09 16:47:55 imp Exp $
+ * $FreeBSD: src/sys/dev/cs/if_csreg.h,v 1.9 2010/01/18 17:53:44 imp Exp $
  */
 
 #define CS_89x0_IO_PORTS	0x0020
@@ -539,6 +539,8 @@
 static __inline uint16_t
 cs_inw(struct cs_softc *sc, int off)
 {
+	if (off & 1)
+		device_printf(sc->dev, "BUG: inw to an odd address.\n");
 	return ((inb(sc->nic_addr + off) & 0xff) |
 	    (inb(sc->nic_addr + off + 1) << 8));
 }

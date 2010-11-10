@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/glue.c,v 1.9 2008/11/19 17:34:28 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/glue.c,v 1.12 2010/05/25 10:15:30 raj Exp $");
 
 #include <stand.h>
 #include "api_public.h"
@@ -467,7 +467,7 @@ ub_stor_type(int type)
 	if (type & DT_STOR_USB)
 		return ("USB");
 
-	if (type & DT_STOR_MMC);
+	if (type & DT_STOR_MMC)
 		return ("MMC");
 
 	return ("Unknown");
@@ -568,24 +568,18 @@ ub_env_enum(const char *last)
 	const char *env, *str;
 	int i;
 
-	env = NULL;
-
 	/*
 	 * It's OK to pass only the name piece as last (and not the whole
 	 * 'name=val' string), since the API_ENUM_ENV call uses envmatch()
 	 * internally, which handles such case
 	 */
+	env = NULL;
 	if (!syscall(API_ENV_ENUM, NULL, (uint32_t)last, (uint32_t)&env))
 		return (NULL);
 
-	if (!env)
+	if (env == NULL)
 		/* no more env. variables to enumerate */
 		return (NULL);
-#if 0
-	if (last && strncmp(env, last, strlen(last)) == 0);
-		/* error, trying to enumerate non existing env. variable */
-		return NULL;
-#endif
 
 	/* next enumerated env var */
 	memset(env_name, 0, 256);

@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright (c) 2001-2008, Intel Corporation 
+  Copyright (c) 2001-2010, Intel Corporation 
   All rights reserved.
   
   Redistribution and use in source and binary forms, with or without 
@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_phy.h,v 1.6 2008/11/26 23:41:18 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_phy.h,v 1.10 2010/03/27 00:21:40 jfv Exp $*/
 
 #ifndef _IXGBE_PHY_H_
 #define _IXGBE_PHY_H_
@@ -46,11 +46,15 @@
 #define IXGBE_SFF_VENDOR_OUI_BYTE2   0x27
 #define IXGBE_SFF_1GBE_COMP_CODES    0x6
 #define IXGBE_SFF_10GBE_COMP_CODES   0x3
-#define IXGBE_SFF_TRANSMISSION_MEDIA 0x9
+#define IXGBE_SFF_CABLE_TECHNOLOGY   0x8
+#define IXGBE_SFF_CABLE_SPEC_COMP    0x3C
 
 /* Bitmasks */
-#define IXGBE_SFF_TWIN_AX_CAPABLE            0x80
+#define IXGBE_SFF_DA_PASSIVE_CABLE           0x4
+#define IXGBE_SFF_DA_ACTIVE_CABLE            0x8
+#define IXGBE_SFF_DA_SPEC_ACTIVE_LIMITING   0x4
 #define IXGBE_SFF_1GBASESX_CAPABLE           0x1
+#define IXGBE_SFF_1GBASELX_CAPABLE           0x2
 #define IXGBE_SFF_10GBASESR_CAPABLE          0x10
 #define IXGBE_SFF_10GBASELR_CAPABLE          0x20
 #define IXGBE_I2C_EEPROM_READ_MASK           0x100
@@ -61,14 +65,15 @@
 #define IXGBE_I2C_EEPROM_STATUS_IN_PROGRESS  0x3
 
 /* Bit-shift macros */
-#define IXGBE_SFF_VENDOR_OUI_BYTE0_SHIFT    12
-#define IXGBE_SFF_VENDOR_OUI_BYTE1_SHIFT    8
-#define IXGBE_SFF_VENDOR_OUI_BYTE2_SHIFT    4
+#define IXGBE_SFF_VENDOR_OUI_BYTE0_SHIFT    24
+#define IXGBE_SFF_VENDOR_OUI_BYTE1_SHIFT    16
+#define IXGBE_SFF_VENDOR_OUI_BYTE2_SHIFT    8
 
 /* Vendor OUIs: format of OUI is 0x[byte0][byte1][byte2][00] */
 #define IXGBE_SFF_VENDOR_OUI_TYCO     0x00407600
 #define IXGBE_SFF_VENDOR_OUI_FTL      0x00906500
 #define IXGBE_SFF_VENDOR_OUI_AVAGO    0x00176A00
+#define IXGBE_SFF_VENDOR_OUI_INTEL    0x001B2100
 
 /* I2C SDA and SCL timing parameters for standard mode */
 #define IXGBE_I2C_T_HD_STA  4
@@ -81,6 +86,9 @@
 #define IXGBE_I2C_T_FALL    1
 #define IXGBE_I2C_T_SU_STO  4
 #define IXGBE_I2C_T_BUF     5
+
+#define IXGBE_TN_LASI_STATUS_REG        0x9005
+#define IXGBE_TN_LASI_STATUS_TEMP_ALARM 0x0008
 
 
 s32 ixgbe_init_phy_ops_generic(struct ixgbe_hw *hw);
@@ -98,12 +106,18 @@ s32 ixgbe_setup_phy_link_speed_generic(struct ixgbe_hw *hw,
                                        ixgbe_link_speed speed,
                                        bool autoneg,
                                        bool autoneg_wait_to_complete);
+s32 ixgbe_get_copper_link_capabilities_generic(struct ixgbe_hw *hw,
+                                             ixgbe_link_speed *speed,
+                                             bool *autoneg);
 
 /* PHY specific */
 s32 ixgbe_check_phy_link_tnx(struct ixgbe_hw *hw,
                              ixgbe_link_speed *speed,
                              bool *link_up);
+s32 ixgbe_setup_phy_link_tnx(struct ixgbe_hw *hw);
 s32 ixgbe_get_phy_firmware_version_tnx(struct ixgbe_hw *hw,
+                                       u16 *firmware_version);
+s32 ixgbe_get_phy_firmware_version_generic(struct ixgbe_hw *hw,
                                        u16 *firmware_version);
 
 s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw);
@@ -111,4 +125,14 @@ s32 ixgbe_identify_sfp_module_generic(struct ixgbe_hw *hw);
 s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
                                         u16 *list_offset,
                                         u16 *data_offset);
+s32 ixgbe_tn_check_overtemp(struct ixgbe_hw *hw);
+s32 ixgbe_tn_set_low_power_state(struct ixgbe_hw *hw);
+s32 ixgbe_read_i2c_byte_generic(struct ixgbe_hw *hw, u8 byte_offset,
+                                u8 dev_addr, u8 *data);
+s32 ixgbe_write_i2c_byte_generic(struct ixgbe_hw *hw, u8 byte_offset,
+                                 u8 dev_addr, u8 data);
+s32 ixgbe_read_i2c_eeprom_generic(struct ixgbe_hw *hw, u8 byte_offset,
+                                  u8 *eeprom_data);
+s32 ixgbe_write_i2c_eeprom_generic(struct ixgbe_hw *hw, u8 byte_offset,
+                                   u8 eeprom_data);
 #endif /* _IXGBE_PHY_H_ */

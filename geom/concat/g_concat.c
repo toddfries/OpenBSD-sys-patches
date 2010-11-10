@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/concat/g_concat.c,v 1.30 2008/08/09 11:14:05 des Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/concat/g_concat.c,v 1.33 2009/12/24 14:32:21 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -347,14 +347,14 @@ static void
 g_concat_check_and_run(struct g_concat_softc *sc)
 {
 	struct g_concat_disk *disk;
+	struct g_provider *pp;
 	u_int no, sectorsize = 0;
 	off_t start;
 
 	if (g_concat_nvalid(sc) != sc->sc_ndisks)
 		return;
 
-	sc->sc_provider = g_new_providerf(sc->sc_geom, "concat/%s",
-	    sc->sc_name);
+	pp = g_new_providerf(sc->sc_geom, "concat/%s", sc->sc_name);
 	start = 0;
 	for (no = 0; no < sc->sc_ndisks; no++) {
 		disk = &sc->sc_disks[no];
@@ -371,10 +371,13 @@ g_concat_check_and_run(struct g_concat_softc *sc)
 			    disk->d_consumer->provider->sectorsize);
 		}
 	}
-	sc->sc_provider->sectorsize = sectorsize;
+	pp->sectorsize = sectorsize;
 	/* We have sc->sc_disks[sc->sc_ndisks - 1].d_end in 'start'. */
-	sc->sc_provider->mediasize = start;
-	g_error_provider(sc->sc_provider, 0);
+	pp->mediasize = start;
+	pp->stripesize = sc->sc_disks[0].d_consumer->provider->stripesize;
+	pp->stripeoffset = sc->sc_disks[0].d_consumer->provider->stripeoffset;
+	sc->sc_provider = pp;
+	g_error_provider(pp, 0);
 
 	G_CONCAT_DEBUG(0, "Device %s activated.", sc->sc_name);
 }
@@ -599,6 +602,10 @@ g_concat_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 	g_trace(G_T_TOPOLOGY, "%s(%s, %s)", __func__, mp->name, pp->name);
 	g_topology_assert();
 
+	/* Skip providers that are already open for writing. */
+	if (pp->acw > 0)
+		return (NULL);
+
 	G_CONCAT_DEBUG(3, "Tasting %s.", pp->name);
 
 	gp = g_new_geomf(mp, "concat:taste");
@@ -753,6 +760,10 @@ g_concat_ctl_create(struct gctl_req *req, struct g_class *mp)
 	for (attached = 0, no = 1; no < *nargs; no++) {
 		snprintf(param, sizeof(param), "arg%u", no);
 		name = gctl_get_asciiparam(req, param);
+		if (name == NULL) {
+			gctl_error(req, "No 'arg%d' argument.", no);
+			return;
+		}
 		if (strncmp(name, "/dev/", strlen("/dev/")) == 0)
 			name += strlen("/dev/");
 		pp = g_provider_by_name(name);

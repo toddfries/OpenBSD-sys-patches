@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/ia32/ia32_util.h,v 1.9 2003/12/11 01:05:09 peter Exp $
+ * $FreeBSD: src/sys/compat/ia32/ia32_util.h,v 1.10 2010/05/23 18:32:02 kib Exp $
  */
 
 #include <vm/vm.h>
@@ -47,3 +47,7 @@
 #define	IA32_MAXDSIZ	(512*1024*1024)		/* 512MB */
 #define	IA32_MAXSSIZ	(64*1024*1024)		/* 64MB */
 #define IA32_MAXVMEM	0			/* Unlimited */
+
+struct syscall_args;
+int ia32_fetch_syscall_args(struct thread *td, struct syscall_args *sa);
+void ia32_set_syscall_retval(struct thread *, int);

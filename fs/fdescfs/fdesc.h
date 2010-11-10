@@ -31,7 +31,7 @@
  *
  *	@(#)fdesc.h	8.5 (Berkeley) 1/21/94
  *
- * $FreeBSD: src/sys/fs/fdescfs/fdesc.h,v 1.21 2008/05/24 14:51:30 lulf Exp $
+ * $FreeBSD: src/sys/fs/fdescfs/fdesc.h,v 1.22 2009/05/11 15:33:26 attilio Exp $
  */
 
 #ifdef _KERNEL
@@ -65,5 +65,5 @@ extern struct mtx fdesc_hashmtx;
 extern vfs_init_t fdesc_init;
 extern vfs_uninit_t fdesc_uninit;
 extern int fdesc_allocvp(fdntype, unsigned, int, struct mount *,
-    struct vnode **, struct thread *);
+    struct vnode **);
 #endif /* _KERNEL */

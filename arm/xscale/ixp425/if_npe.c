@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/if_npe.c,v 1.12 2008/12/23 04:51:46 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/if_npe.c,v 1.22 2010/10/15 14:52:11 marius Exp $");
 
 /*
  * Intel XScale NPE Ethernet driver.
@@ -137,12 +137,12 @@ struct npe_softc {
 	int		rx_freeqid;	/* rx free buffers qid */
 	int		tx_qid;		/* tx qid */
 	int		tx_doneqid;	/* tx completed qid */
-	int		sc_phy;		/* PHY id */
 	struct ifmib_iso_8802_3 mibdata;
 	bus_dma_tag_t	sc_stats_tag;	/* bus dma tag for stats block */
 	struct npestats	*sc_stats;
 	bus_dmamap_t	sc_stats_map;
 	bus_addr_t	sc_stats_phys;	/* phys addr of sc_stats */
+	struct npestats	sc_totals;	/* accumulated sc_stats */
 };
 
 /*
@@ -152,9 +152,9 @@ struct npe_softc {
  * multi-port processing.  It may be better to handle
  * all traffic through one Q (as done by the Intel drivers).
  *
- * Note that the PHY's are accessible only from MAC A
- * on the IXP425.  This and other platform-specific
- * assumptions probably need to be handled through hints.
+ * Note that the PHY's are accessible only from MAC B on the
+ * IXP425 and from MAC C on other devices.  This and other
+ * platform-specific assumptions are handled with hints.
  */
 static const struct {
 	uint32_t	macbase;
@@ -176,7 +176,7 @@ static const struct {
 	},
 	[NPE_B] = {
 	  .macbase	= IXP425_MAC_B_HWBASE,
-	  .miibase	= IXP425_MAC_C_HWBASE,
+	  .miibase	= IXP425_MAC_B_HWBASE,
 	  .phy		= 0,
 	  .rx_qid	= 4,
 	  .rx_freeqid	= 27,
@@ -185,7 +185,7 @@ static const struct {
 	},
 	[NPE_C] = {
 	  .macbase	= IXP425_MAC_C_HWBASE,
-	  .miibase	= IXP425_MAC_C_HWBASE,
+	  .miibase	= IXP425_MAC_B_HWBASE,
 	  .phy		= 1,
 	  .rx_qid	= 12,
 	  .rx_freeqid	= 28,
@@ -228,7 +228,7 @@ static void	npe_getmac(struct npe_softc *sc, u_char *eaddr);
 static void	npe_txdone(int qid, void *arg);
 static int	npe_rxbuf_init(struct npe_softc *, struct npebuf *,
 			struct mbuf *);
-static void	npe_rxdone(int qid, void *arg);
+static int	npe_rxdone(int qid, void *arg);
 static void	npeinit(void *);
 static void	npestart_locked(struct ifnet *);
 static void	npestart(struct ifnet *);
@@ -238,6 +238,7 @@ static int	npeioctl(struct ifnet * ifp, u_long, caddr_t);
 
 static int	npe_setrxqosentry(struct npe_softc *, int classix,
 			int trafclass, int qid);
+static int	npe_setportaddress(struct npe_softc *, const uint8_t mac[]);
 static int	npe_setfirewallmode(struct npe_softc *, int onoff);
 static int	npe_updatestats(struct npe_softc *);
 #if 0
@@ -358,11 +359,14 @@ npe_attach(device_t dev)
 	ifp->if_ioctl = npeioctl;
 	ifp->if_init = npeinit;
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->txdma.nbuf - 1);
-	ifp->if_snd.ifq_drv_maxlen = IFQ_MAXLEN;
+	ifp->if_snd.ifq_drv_maxlen = ifqmaxlen;
 	IFQ_SET_READY(&ifp->if_snd);
 	ifp->if_linkmib = &sc->mibdata;
 	ifp->if_linkmiblen = sizeof(sc->mibdata);
 	sc->mibdata.dot3Compliance = DOT3COMPLIANCE_STATS;
+	/* device supports oversided vlan frames */
+	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	ifp->if_capenable = ifp->if_capabilities;
 #ifdef DEVICE_POLLING
 	ifp->if_capabilities |= IFCAP_POLLING;
 #endif
@@ -371,6 +375,8 @@ npe_attach(device_t dev)
 	    CTLFLAG_RW, &sc->sc_debug, 0, "control debugging printfs");
 	SYSCTL_ADD_INT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "tickinterval",
 	    CTLFLAG_RW, &sc->sc_tickinterval, 0, "periodic work frequency");
+	SYSCTL_ADD_STRUCT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "stats",
+	    CTLFLAG_RD, &sc->sc_totals, npestats, "onboard stats");
 
 	ether_ifattach(ifp, eaddr);
 	return 0;
@@ -428,7 +434,7 @@ npe_setmcast(struct npe_softc *sc)
 		memset(clr, 0, ETHER_ADDR_LEN);
 		memset(set, 0xff, ETHER_ADDR_LEN);
 
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 			if (ifma->ifma_addr->sa_family != AF_LINK)
 				continue;
@@ -438,7 +444,7 @@ npe_setmcast(struct npe_softc *sc)
 				set[i] &= mac[i];
 			}
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 
 		for (i = 0; i < ETHER_ADDR_LEN; i++) {
 			mask[i] = set[i] | ~clr[i];
@@ -660,8 +666,8 @@ npe_mac_reset(struct npe_softc *sc)
 static int
 npe_activate(device_t dev)
 {
-	struct npe_softc * sc = device_get_softc(dev);
-	int error, i, macbase, miibase;
+	struct npe_softc *sc = device_get_softc(dev);
+	int error, i, macbase, miibase, phy;
 
 	/*
 	 * Setup NEP ID, MAC, and MII bindings.  We allow override
@@ -686,8 +692,8 @@ npe_activate(device_t dev)
 	}
 
 	/* PHY */
-	if (!override_unit(dev, "phy", &sc->sc_phy, 0, MII_NPHY-1))
-		sc->sc_phy = npeconfig[sc->sc_npeid].phy;
+	if (!override_unit(dev, "phy", &phy, 0, MII_NPHY - 1))
+		phy = npeconfig[sc->sc_npeid].phy;
 	if (!override_addr(dev, "mii", &miibase))
 		miibase = npeconfig[sc->sc_npeid].miibase;
 	device_printf(sc->sc_dev, "MII at 0x%x\n", miibase);
@@ -714,10 +720,12 @@ npe_activate(device_t dev)
 		return error;
 	}
 
-	/* probe for PHY */
-	if (mii_phy_probe(dev, &sc->sc_mii, npe_ifmedia_update, npe_ifmedia_status)) {
-		device_printf(dev, "cannot find PHY %d.\n", sc->sc_phy);
-		return ENXIO;
+	/* attach PHY */
+	error = mii_attach(dev, &sc->sc_mii, sc->sc_ifp, npe_ifmedia_update,
+	    npe_ifmedia_status, BMSR_DEFCAPMASK, phy, MII_OFFSET_ANY, 0);
+	if (error != 0) {
+		device_printf(dev, "attaching PHYs failed\n");
+		return error;
 	}
 
 	error = npe_dma_setup(sc, &sc->txdma, "tx", npe_txbuf, NPE_MAXSEG);
@@ -771,7 +779,7 @@ npe_activate(device_t dev)
 	 */
 	sc->rx_qid = npeconfig[sc->sc_npeid].rx_qid;
 	ixpqmgr_qconfig(sc->rx_qid, npe_rxbuf, 0,  1,
-		IX_QMGR_Q_SOURCE_ID_NOT_E, npe_rxdone, sc);
+		IX_QMGR_Q_SOURCE_ID_NOT_E, (qconfig_hand_t *)npe_rxdone, sc);
 	sc->rx_freeqid = npeconfig[sc->sc_npeid].rx_freeqid;
 	ixpqmgr_qconfig(sc->rx_freeqid,	npe_rxbuf, 0, npe_rxbuf/2, 0, NULL, sc);
 	/*
@@ -864,12 +872,24 @@ npe_ifmedia_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 static void
 npe_addstats(struct npe_softc *sc)
 {
-#define	MIBADD(x)	sc->mibdata.x += be32toh(ns->x)
+#define	NPEADD(x)	sc->sc_totals.x += be32toh(ns->x)
+#define	MIBADD(x) do { sc->mibdata.x += be32toh(ns->x); NPEADD(x); } while (0)
 	struct ifnet *ifp = sc->sc_ifp;
 	struct npestats *ns = sc->sc_stats;
 
 	MIBADD(dot3StatsAlignmentErrors);
 	MIBADD(dot3StatsFCSErrors);
+	MIBADD(dot3StatsInternalMacReceiveErrors);
+	NPEADD(RxOverrunDiscards);
+	NPEADD(RxLearnedEntryDiscards);
+	NPEADD(RxLargeFramesDiscards);
+	NPEADD(RxSTPBlockedDiscards);
+	NPEADD(RxVLANTypeFilterDiscards);
+	NPEADD(RxVLANIdFilterDiscards);
+	NPEADD(RxInvalidSourceDiscards);
+	NPEADD(RxBlackListDiscards);
+	NPEADD(RxWhiteListDiscards);
+	NPEADD(RxUnderflowEntryDiscards);
 	MIBADD(dot3StatsSingleCollisionFrames);
 	MIBADD(dot3StatsMultipleCollisionFrames);
 	MIBADD(dot3StatsDeferredTransmissions);
@@ -877,10 +897,12 @@ npe_addstats(struct npe_softc *sc)
 	MIBADD(dot3StatsExcessiveCollisions);
 	MIBADD(dot3StatsInternalMacTransmitErrors);
 	MIBADD(dot3StatsCarrierSenseErrors);
+	NPEADD(TxLargeFrameDiscards);
+	NPEADD(TxVLANIdFilterDiscards);
+
 	sc->mibdata.dot3StatsFrameTooLongs +=
 	      be32toh(ns->RxLargeFramesDiscards)
 	    + be32toh(ns->TxLargeFrameDiscards);
-	MIBADD(dot3StatsInternalMacReceiveErrors);
 	sc->mibdata.dot3StatsMissedFrames +=
 	      be32toh(ns->RxOverrunDiscards)
 	    + be32toh(ns->RxUnderflowEntryDiscards);
@@ -899,6 +921,7 @@ npe_addstats(struct npe_softc *sc)
 		  be32toh(ns->dot3StatsSingleCollisionFrames)
 		+ be32toh(ns->dot3StatsMultipleCollisionFrames)
 		;
+#undef NPEADD
 #undef MIBADD
 }
 
@@ -1003,7 +1026,7 @@ npe_txdone(int qid, void *arg)
 	struct txdone *td, q[NPE_MAX];
 	uint32_t entry;
 
-	/* XXX no NPE-A support */
+	q[NPE_A].tail = &q[NPE_A].head; q[NPE_A].count = 0;
 	q[NPE_B].tail = &q[NPE_B].head; q[NPE_B].count = 0;
 	q[NPE_C].tail = &q[NPE_C].head; q[NPE_C].count = 0;
 	/* XXX max # at a time? */
@@ -1022,6 +1045,8 @@ npe_txdone(int qid, void *arg)
 		td->count++;
 	}
 
+	if (q[NPE_A].count)
+		npe_txdone_finish(npes[NPE_A], &q[NPE_A]);
 	if (q[NPE_B].count)
 		npe_txdone_finish(npes[NPE_B], &q[NPE_B]);
 	if (q[NPE_C].count)
@@ -1070,7 +1095,7 @@ npe_rxbuf_init(struct npe_softc *sc, struct npebuf *npe, struct mbuf *m)
  * from the hardware queue and pass the frames up the
  * stack. Pass the rx buffers to the free list.
  */
-static void
+static int
 npe_rxdone(int qid, void *arg)
 {
 #define	P2V(a, dma) \
@@ -1078,6 +1103,7 @@ npe_rxdone(int qid, void *arg)
 	struct npe_softc *sc = arg;
 	struct npedma *dma = &sc->rxdma;
 	uint32_t entry;
+	int rx_npkts = 0;
 
 	while (ixpqmgr_qread(qid, &entry) == 0) {
 		struct npebuf *npe = P2V(NPE_QM_Q_ADDR(entry), dma);
@@ -1108,10 +1134,10 @@ npe_rxdone(int qid, void *arg)
 			mrx->m_len = be32toh(hw->ix_ne[0].len) & 0xffff;
 			mrx->m_pkthdr.len = mrx->m_len;
 			mrx->m_pkthdr.rcvif = ifp;
-			mrx->m_flags |= M_HASFCS;
 
 			ifp->if_ipackets++;
 			ifp->if_input(ifp, mrx);
+			rx_npkts++;
 		} else {
 			/* discard frame and re-use mbuf */
 			m = npe->ix_m;
@@ -1123,19 +1149,22 @@ npe_rxdone(int qid, void *arg)
 			/* XXX should not happen */
 		}
 	}
+	return rx_npkts;
 #undef P2V
 }
 
 #ifdef DEVICE_POLLING
-static void
+static int
 npe_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 {
 	struct npe_softc *sc = ifp->if_softc;
+	int rx_npkts = 0;
 
 	if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-		npe_rxdone(sc->rx_qid, sc);
+		rx_npkts = npe_rxdone(sc->rx_qid, sc);
 		npe_txdone(sc->tx_doneqid, sc);	/* XXX polls both NPE's */
 	}
+	return rx_npkts;
 }
 #endif /* DEVICE_POLLING */
 
@@ -1222,12 +1251,12 @@ if (ifp->if_drv_flags & IFF_DRV_RUNNING) return;/*XXX*/
 		| NPE_TX_CNTRL1_2DEFER		/* 2-part deferal */
 		| NPE_TX_CNTRL1_PAD_EN);	/* pad runt frames */
 	/* XXX pad strip? */
-	WR4(sc, NPE_MAC_RX_CNTRL1,
-		  NPE_RX_CNTRL1_CRC_EN		/* include CRC/FCS */
-		| NPE_RX_CNTRL1_PAUSE_EN);	/* ena pause frame handling */
+	/* ena pause frame handling */
+	WR4(sc, NPE_MAC_RX_CNTRL1, NPE_RX_CNTRL1_PAUSE_EN);
 	WR4(sc, NPE_MAC_RX_CNTRL2, 0);
 
 	npe_setmac(sc, IF_LLADDR(ifp));
+	npe_setportaddress(sc, IF_LLADDR(ifp));
 	npe_setmcast(sc);
 
 	npe_startxmit(sc);
@@ -1528,6 +1557,22 @@ npe_setrxqosentry(struct npe_softc *sc, int classix, int trafclass, int qid)
 }
 
 static int
+npe_setportaddress(struct npe_softc *sc, const uint8_t mac[ETHER_ADDR_LEN])
+{
+	uint32_t msg[2];
+
+	msg[0] = (NPE_SETPORTADDRESS << 24)
+	       | (sc->sc_npeid << 20)
+	       | (mac[0] << 8)
+	       | (mac[1] << 0);
+	msg[1] = (mac[2] << 24)
+	       | (mac[3] << 16)
+	       | (mac[4] << 8)
+	       | (mac[5] << 0);
+	return ixpnpe_sendandrecvmsg_sync(sc->sc_npe, msg, msg);
+}
+
+static int
 npe_setfirewallmode(struct npe_softc *sc, int onoff)
 {
 	uint32_t msg[2];
@@ -1656,8 +1701,6 @@ npe_miibus_readreg(device_t dev, int phy, int reg)
 	struct npe_softc *sc = device_get_softc(dev);
 	uint32_t v;
 
-	if (phy != sc->sc_phy)		/* XXX no auto-detect */
-		return 0xffff;
 	v = (phy << NPE_MII_ADDR_SHL) | (reg << NPE_MII_REG_SHL) | NPE_MII_GO;
 	npe_mii_mdio_write(sc, NPE_MAC_MDIO_CMD, v);
 	if (npe_mii_mdio_wait(sc))
@@ -1667,20 +1710,19 @@ npe_miibus_readreg(device_t dev, int phy, int reg)
 	return (v & NPE_MII_READ_FAIL) ? 0xffff : (v & 0xffff);
 }
 
-static void
+static int
 npe_miibus_writereg(device_t dev, int phy, int reg, int data)
 {
 	struct npe_softc *sc = device_get_softc(dev);
 	uint32_t v;
 
-	if (phy != sc->sc_phy)		/* XXX */
-		return;
 	v = (phy << NPE_MII_ADDR_SHL) | (reg << NPE_MII_REG_SHL)
 	  | data | NPE_MII_WRITE
 	  | NPE_MII_GO;
 	npe_mii_mdio_write(sc, NPE_MAC_MDIO_CMD, v);
 	/* XXX complain about timeout */
 	(void) npe_mii_mdio_wait(sc);
+	return (0);
 }
 
 static void

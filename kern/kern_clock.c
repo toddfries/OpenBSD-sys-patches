@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.210 2009/01/17 07:17:57 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.216 2010/06/11 18:46:34 jhb Exp $");
 
 #include "opt_kdb.h"
 #include "opt_device_polling.h"
@@ -48,14 +48,16 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.210 2009/01/17 07:17:57 jeff E
 #include <sys/callout.h>
 #include <sys/kdb.h>
 #include <sys/kernel.h>
-#include <sys/lock.h>
+#include <sys/kthread.h>
 #include <sys/ktr.h>
+#include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/resource.h>
 #include <sys/resourcevar.h>
 #include <sys/sched.h>
 #include <sys/signalvar.h>
+#include <sys/sleepqueue.h>
 #include <sys/smp.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -112,7 +114,7 @@ sysctl_kern_cp_time(SYSCTL_HANDLER_ARGS)
 	return error;
 }
 
-SYSCTL_PROC(_kern, OID_AUTO, cp_time, CTLTYPE_LONG|CTLFLAG_RD,
+SYSCTL_PROC(_kern, OID_AUTO, cp_time, CTLTYPE_LONG|CTLFLAG_RD|CTLFLAG_MPSAFE,
     0,0, sysctl_kern_cp_time, "LU", "CPU time statistics");
 
 static long empty[CPUSTATES];
@@ -156,8 +158,157 @@ sysctl_kern_cp_times(SYSCTL_HANDLER_ARGS)
 	return error;
 }
 
-SYSCTL_PROC(_kern, OID_AUTO, cp_times, CTLTYPE_LONG|CTLFLAG_RD,
+SYSCTL_PROC(_kern, OID_AUTO, cp_times, CTLTYPE_LONG|CTLFLAG_RD|CTLFLAG_MPSAFE,
     0,0, sysctl_kern_cp_times, "LU", "per-CPU time statistics");
+
+#ifdef DEADLKRES
+static const char *blessed[] = {
+	"getblk",
+	"so_snd_sx",
+	"so_rcv_sx",
+	NULL
+};
+static int slptime_threshold = 1800;
+static int blktime_threshold = 900;
+static int sleepfreq = 3;
+
+static void
+deadlkres(void)
+{
+	struct proc *p;
+	struct thread *td;
+	void *wchan;
+	int blkticks, i, slpticks, slptype, tryl, tticks;
+
+	tryl = 0;
+	for (;;) {
+		blkticks = blktime_threshold * hz;
+		slpticks = slptime_threshold * hz;
+
+		/*
+		 * Avoid to sleep on the sx_lock in order to avoid a possible
+		 * priority inversion problem leading to starvation.
+		 * If the lock can't be held after 100 tries, panic.
+		 */
+		if (!sx_try_slock(&allproc_lock)) {
+			if (tryl > 100)
+		panic("%s: possible deadlock detected on allproc_lock\n",
+				    __func__);
+			tryl++;
+			pause("allproc_lock deadlkres", sleepfreq * hz);
+			continue;
+		}
+		tryl = 0;
+		FOREACH_PROC_IN_SYSTEM(p) {
+			PROC_LOCK(p);
+			FOREACH_THREAD_IN_PROC(p, td) {
+				thread_lock(td);
+				if (TD_ON_LOCK(td)) {
+
+					/*
+					 * The thread should be blocked on a
+					 * turnstile, simply check if the
+					 * turnstile channel is in good state.
+					 */
+					MPASS(td->td_blocked != NULL);
+
+					/* Handle ticks wrap-up. */
+					if (ticks < td->td_blktick)
+						continue;
+					tticks = ticks - td->td_blktick;
+					thread_unlock(td);
+					if (tticks > blkticks) {
+
+						/*
+						 * Accordingly with provided
+						 * thresholds, this thread is
+						 * stuck for too long on a
+						 * turnstile.
+						 */
+						PROC_UNLOCK(p);
+						sx_sunlock(&allproc_lock);
+	panic("%s: possible deadlock detected for %p, blocked for %d ticks\n",
+						    __func__, td, tticks);
+					}
+				} else if (TD_IS_SLEEPING(td)) {
+
+					/* Handle ticks wrap-up. */
+					if (ticks < td->td_blktick)
+						continue;
+
+					/*
+					 * Check if the thread is sleeping on a
+					 * lock, otherwise skip the check.
+					 * Drop the thread lock in order to
+					 * avoid a LOR with the sleepqueue
+					 * spinlock.
+					 */
+					wchan = td->td_wchan;
+					tticks = ticks - td->td_slptick;
+					thread_unlock(td);
+					slptype = sleepq_type(wchan);
+					if ((slptype == SLEEPQ_SX ||
+					    slptype == SLEEPQ_LK) &&
+					    tticks > slpticks) {
+
+						/*
+						 * Accordingly with provided
+						 * thresholds, this thread is
+						 * stuck for too long on a
+						 * sleepqueue.
+						 * However, being on a
+						 * sleepqueue, we might still
+						 * check for the blessed
+						 * list.
+						 */
+						tryl = 0;
+						for (i = 0; blessed[i] != NULL;
+						    i++) {
+							if (!strcmp(blessed[i],
+							    td->td_wmesg)) {
+								tryl = 1;
+								break;
+							}
+						}
+						if (tryl != 0) {
+							tryl = 0;
+							continue;
+						}
+						PROC_UNLOCK(p);
+						sx_sunlock(&allproc_lock);
+	panic("%s: possible deadlock detected for %p, blocked for %d ticks\n",
+						    __func__, td, tticks);
+					}
+				} else
+					thread_unlock(td);
+			}
+			PROC_UNLOCK(p);
+		}
+		sx_sunlock(&allproc_lock);
+
+		/* Sleep for sleepfreq seconds. */
+		pause("deadlkres", sleepfreq * hz);
+	}
+}
+
+static struct kthread_desc deadlkres_kd = {
+	"deadlkres",
+	deadlkres,
+	(struct thread **)NULL
+};
+
+SYSINIT(deadlkres, SI_SUB_CLOCKS, SI_ORDER_ANY, kthread_start, &deadlkres_kd);
+
+SYSCTL_NODE(_debug, OID_AUTO, deadlkres, CTLFLAG_RW, 0, "Deadlock resolver");
+SYSCTL_INT(_debug_deadlkres, OID_AUTO, slptime_threshold, CTLFLAG_RW,
+    &slptime_threshold, 0,
+    "Number of seconds within is valid to sleep on a sleepqueue");
+SYSCTL_INT(_debug_deadlkres, OID_AUTO, blktime_threshold, CTLFLAG_RW,
+    &blktime_threshold, 0,
+    "Number of seconds within is valid to block on a turnstile");
+SYSCTL_INT(_debug_deadlkres, OID_AUTO, sleepfreq, CTLFLAG_RW, &sleepfreq, 0,
+    "Number of seconds between any deadlock resolver thread run");
+#endif	/* DEADLKRES */
 
 void
 read_cpu_time(long *cp_time)
@@ -167,9 +318,7 @@ read_cpu_time(long *cp_time)
 
 	/* Sum up global cp_time[]. */
 	bzero(cp_time, sizeof(long) * CPUSTATES);
-	for (i = 0; i <= mp_maxid; i++) {
-		if (CPU_ABSENT(i))
-			continue;
+	CPU_FOREACH(i) {
 		pc = pcpu_find(i);
 		for (j = 0; j < CPUSTATES; j++)
 			cp_time[j] += pc->pc_cp_time[j];
@@ -223,6 +372,12 @@ int	profprocs;
 int	ticks;
 int	psratio;
 
+int	timer1hz;
+int	timer2hz;
+static DPCPU_DEFINE(u_int, hard_cnt);
+static DPCPU_DEFINE(u_int, stat_cnt);
+static DPCPU_DEFINE(u_int, prof_cnt);
+
 /*
  * Initialize clock frequencies and start both clocks running.
  */
@@ -250,6 +405,52 @@ initclocks(dummy)
 #ifdef SW_WATCHDOG
 	EVENTHANDLER_REGISTER(watchdog_list, watchdog_config, NULL, 0);
 #endif
+}
+
+void
+timer1clock(int usermode, uintfptr_t pc)
+{
+	u_int *cnt;
+
+	cnt = DPCPU_PTR(hard_cnt);
+	*cnt += hz;
+	if (*cnt >= timer1hz) {
+		*cnt -= timer1hz;
+		if (*cnt >= timer1hz)
+			*cnt = 0;
+		if (PCPU_GET(cpuid) == 0)
+			hardclock(usermode, pc);
+		else
+			hardclock_cpu(usermode);
+	}
+	if (timer2hz == 0)
+		timer2clock(usermode, pc);
+}
+
+void
+timer2clock(int usermode, uintfptr_t pc)
+{
+	u_int *cnt;
+	int t2hz = timer2hz ? timer2hz : timer1hz;
+
+	cnt = DPCPU_PTR(stat_cnt);
+	*cnt += stathz;
+	if (*cnt >= t2hz) {
+		*cnt -= t2hz;
+		if (*cnt >= t2hz)
+			*cnt = 0;
+		statclock(usermode);
+	}
+	if (profprocs == 0)
+		return;
+	cnt = DPCPU_PTR(prof_cnt);
+	*cnt += profhz;
+	if (*cnt >= t2hz) {
+		*cnt -= t2hz;
+		if (*cnt >= t2hz)
+			*cnt = 0;
+			profclock(usermode, pc);
+	}
 }
 
 /*
@@ -559,7 +760,8 @@ sysctl_kern_clockrate(SYSCTL_HANDLER_ARGS)
 	return (sysctl_handle_opaque(oidp, &clkinfo, sizeof clkinfo, req));
 }
 
-SYSCTL_PROC(_kern, KERN_CLOCKRATE, clockrate, CTLTYPE_STRUCT|CTLFLAG_RD,
+SYSCTL_PROC(_kern, KERN_CLOCKRATE, clockrate,
+	CTLTYPE_STRUCT|CTLFLAG_RD|CTLFLAG_MPSAFE,
 	0, 0, sysctl_kern_clockrate, "S,clockinfo",
 	"Rate and period of various kernel clocks");
 

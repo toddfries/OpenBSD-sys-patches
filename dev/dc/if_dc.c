@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.199 2009/03/09 13:23:54 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.203 2010/01/03 23:15:14 imp Exp $");
 
 /*
  * DEC "tulip" clone ethernet driver. Supports the DEC/Intel 21143
@@ -43,8 +43,9 @@ __FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.199 2009/03/09 13:23:54 imp Exp $
  * ASIX Electronics AX88140A (www.asix.com.tw)
  * ASIX Electronics AX88141 (www.asix.com.tw)
  * ADMtek AL981 (www.admtek.com.tw)
- * ADMtek AN985 (www.admtek.com.tw)
- * Netgear FA511 (www.netgear.com) Appears to be rebadged ADMTek AN985
+ * ADMtek AN983 (www.admtek.com.tw)
+ * ADMtek CardBus AN985 (www.admtek.com.tw)
+ * Netgear FA511 (www.netgear.com) Appears to be rebadged ADMTek CardBus AN985
  * Davicom DM9100, DM9102, DM9102A (www.davicom8.com)
  * Accton EN1217 (www.accton.com)
  * Xircom X3201 (www.xircom.com)
@@ -161,14 +162,14 @@ static const struct dc_type dc_devs[] = {
 		"Davicom DM9102 10/100BaseTX" },
 	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_AL981), 0,
 		"ADMtek AL981 10/100BaseTX" },
+	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_AN983), 0,
+		"ADMtek AN983 10/100BaseTX" },
 	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_AN985), 0,
-		"ADMtek AN985 10/100BaseTX" },
+		"ADMtek AN985 CardBus 10/100BaseTX or clone" },
 	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_ADM9511), 0,
 		"ADMtek ADM9511 10/100BaseTX" },
 	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_ADM9513), 0,
 		"ADMtek ADM9513 10/100BaseTX" },
-	{ DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_FA511), 0,
-		"Netgear FA511 10/100BaseTX" },
 	{ DC_DEVID(DC_VENDORID_ASIX, DC_DEVICEID_AX88140A), DC_REVISION_88141,
 		"ASIX AX88141 10/100BaseTX" },
 	{ DC_DEVID(DC_VENDORID_ASIX, DC_DEVICEID_AX88140A), 0,
@@ -236,7 +237,7 @@ static int dc_newbuf(struct dc_softc *, int, int);
 static int dc_encap(struct dc_softc *, struct mbuf **);
 static void dc_pnic_rx_bug_war(struct dc_softc *, int);
 static int dc_rx_resync(struct dc_softc *);
-static void dc_rxeof(struct dc_softc *);
+static int dc_rxeof(struct dc_softc *);
 static void dc_txeof(struct dc_softc *);
 static void dc_tick(void *);
 static void dc_tx_underrun(struct dc_softc *);
@@ -778,10 +779,10 @@ dc_miibus_readreg(device_t dev, int phy, int reg)
 	bzero(&frame, sizeof(frame));
 
 	/*
-	 * Note: both the AL981 and AN985 have internal PHYs,
+	 * Note: both the AL981 and AN983 have internal PHYs,
 	 * however the AL981 provides direct access to the PHY
-	 * registers while the AN985 uses a serial MII interface.
-	 * The AN985's MII interface is also buggy in that you
+	 * registers while the AN983 uses a serial MII interface.
+	 * The AN983's MII interface is also buggy in that you
 	 * can read from any MII address (0 to 31), but only address 1
 	 * behaves normally. To deal with both cases, we pretend
 	 * that the PHY is at MII address 1.
@@ -1110,7 +1111,7 @@ dc_setfilt_21143(struct dc_softc *sc)
 	else
 		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
 
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1118,7 +1119,7 @@ dc_setfilt_21143(struct dc_softc *sc)
 		    LLADDR((struct sockaddr_dl *)ifma->ifma_addr));
 		sp[h >> 4] |= htole32(1 << (h & 0xF));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	if (ifp->if_flags & IFF_BROADCAST) {
 		h = dc_mchash_le(sc, ifp->if_broadcastaddr);
@@ -1185,7 +1186,7 @@ dc_setfilt_admtek(struct dc_softc *sc)
 		return;
 
 	/* Now program new ones. */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1200,7 +1201,7 @@ dc_setfilt_admtek(struct dc_softc *sc)
 		else
 			hashes[1] |= (1 << (h - 32));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	CSR_WRITE_4(sc, DC_AL_MAR0, hashes[0]);
 	CSR_WRITE_4(sc, DC_AL_MAR1, hashes[1]);
@@ -1258,7 +1259,7 @@ dc_setfilt_asix(struct dc_softc *sc)
 		return;
 
 	/* now program new ones */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1268,7 +1269,7 @@ dc_setfilt_asix(struct dc_softc *sc)
 		else
 			hashes[1] |= (1 << (h - 32));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	CSR_WRITE_4(sc, DC_AX_FILTIDX, DC_AX_FILTIDX_MAR0);
 	CSR_WRITE_4(sc, DC_AX_FILTDATA, hashes[0]);
@@ -1313,7 +1314,7 @@ dc_setfilt_xircom(struct dc_softc *sc)
 	else
 		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
 
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1321,7 +1322,7 @@ dc_setfilt_xircom(struct dc_softc *sc)
 		    LLADDR((struct sockaddr_dl *)ifma->ifma_addr));
 		sp[h >> 4] |= htole32(1 << (h & 0xF));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	if (ifp->if_flags & IFF_BROADCAST) {
 		h = dc_mchash_le(sc, ifp->if_broadcastaddr);
@@ -1895,11 +1896,11 @@ dc_attach(device_t dev)
 		sc->dc_pmode = DC_PMODE_MII;
 		dc_read_srom(sc, sc->dc_romwidth);
 		break;
+	case DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_AN983):
 	case DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_AN985):
 	case DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_ADM9511):
 	case DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_ADM9513):
 	case DC_DEVID(DC_VENDORID_DLINK, DC_DEVICEID_DRP32TXD):
-	case DC_DEVID(DC_VENDORID_ADMTEK, DC_DEVICEID_FA511):
 	case DC_DEVID(DC_VENDORID_ABOCOM, DC_DEVICEID_FE2500):
 	case DC_DEVID(DC_VENDORID_ABOCOM, DC_DEVICEID_FE2500MX):
 	case DC_DEVID(DC_VENDORID_ACCTON, DC_DEVICEID_EN2242):
@@ -1910,7 +1911,7 @@ dc_attach(device_t dev)
 	case DC_DEVID(DC_VENDORID_MICROSOFT, DC_DEVICEID_MSMN130):
 	case DC_DEVID(DC_VENDORID_LINKSYS, DC_DEVICEID_PCMPC200_AB08):
 	case DC_DEVID(DC_VENDORID_LINKSYS, DC_DEVICEID_PCMPC200_AB09):
-		sc->dc_type = DC_TYPE_AN985;
+		sc->dc_type = DC_TYPE_AN983;
 		sc->dc_flags |= DC_64BIT_HASH;
 		sc->dc_flags |= DC_TX_USE_TX_INTR;
 		sc->dc_flags |= DC_TX_ADMTEK_WAR;
@@ -2057,7 +2058,7 @@ dc_attach(device_t dev)
 		dc_read_eeprom(sc, (caddr_t)&eaddr, DC_EE_NODEADDR, 3, 0);
 		break;
 	case DC_TYPE_AL981:
-	case DC_TYPE_AN985:
+	case DC_TYPE_AN983:
 		reg = CSR_READ_4(sc, DC_AL_PAR0);
 		mac = (uint8_t *)&eaddr[0];
 		mac[0] = (reg >> 0) & 0xff;
@@ -2640,19 +2641,21 @@ dc_rx_resync(struct dc_softc *sc)
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  */
-static void
+static int
 dc_rxeof(struct dc_softc *sc)
 {
 	struct mbuf *m, *m0;
 	struct ifnet *ifp;
 	struct dc_desc *cur_rx;
-	int i, total_len = 0;
+	int i, total_len, rx_npkts;
 	u_int32_t rxstat;
 
 	DC_LOCK_ASSERT(sc);
 
 	ifp = sc->dc_ifp;
 	i = sc->dc_cdata.dc_rx_prod;
+	total_len = 0;
+	rx_npkts = 0;
 
 	bus_dmamap_sync(sc->dc_ltag, sc->dc_lmap, BUS_DMASYNC_POSTREAD);
 	while (!(le32toh(sc->dc_ldata->dc_rx_list[i].dc_status) &
@@ -2706,7 +2709,7 @@ dc_rxeof(struct dc_softc *sc)
 					continue;
 				} else {
 					dc_init_locked(sc);
-					return;
+					return (rx_npkts);
 				}
 			}
 		}
@@ -2745,9 +2748,11 @@ dc_rxeof(struct dc_softc *sc)
 		DC_UNLOCK(sc);
 		(*ifp->if_input)(ifp, m);
 		DC_LOCK(sc);
+		rx_npkts++;
 	}
 
 	sc->dc_cdata.dc_rx_prod = i;
+	return (rx_npkts);
 }
 
 /*
@@ -2989,20 +2994,21 @@ dc_tx_underrun(struct dc_softc *sc)
 #ifdef DEVICE_POLLING
 static poll_handler_t dc_poll;
 
-static void
+static int
 dc_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 {
 	struct dc_softc *sc = ifp->if_softc;
+	int rx_npkts = 0;
 
 	DC_LOCK(sc);
 
 	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 		DC_UNLOCK(sc);
-		return;
+		return (rx_npkts);
 	}
 
 	sc->rxcycles = count;
-	dc_rxeof(sc);
+	rx_npkts = dc_rxeof(sc);
 	dc_txeof(sc);
 	if (!IFQ_IS_EMPTY(&ifp->if_snd) &&
 	    !(ifp->if_drv_flags & IFF_DRV_OACTIVE))
@@ -3017,7 +3023,7 @@ dc_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 			DC_ISR_BUS_ERR);
 		if (!status) {
 			DC_UNLOCK(sc);
-			return;
+			return (rx_npkts);
 		}
 		/* ack what we have */
 		CSR_WRITE_4(sc, DC_ISR, status);
@@ -3043,6 +3049,7 @@ dc_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 		}
 	}
 	DC_UNLOCK(sc);
+	return (rx_npkts);
 }
 #endif /* DEVICE_POLLING */
 

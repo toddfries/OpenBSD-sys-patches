@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.4 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.5 2009/06/11 17:05:13 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -95,7 +95,7 @@ ixpiic_attach(device_t dev)
 }
 
 static int
-ixpiic_callback(device_t dev, int index, caddr_t *data)
+ixpiic_callback(device_t dev, int index, caddr_t data)
 {
 	return (0);
 }
@@ -129,7 +129,7 @@ ixpiic_getsda(device_t dev)
 }
 
 static void 
-ixpiic_setsda(device_t dev, char val)
+ixpiic_setsda(device_t dev, int val)
 {
 	struct ixpiic_softc *sc = ixpiic_sc;
 
@@ -144,7 +144,7 @@ ixpiic_setsda(device_t dev, char val)
 }
 
 static void 
-ixpiic_setscl(device_t dev, char val)
+ixpiic_setscl(device_t dev, int val)
 {
 	struct ixpiic_softc *sc = ixpiic_sc;
 

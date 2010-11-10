@@ -1,11 +1,11 @@
-# $FreeBSD: src/sys/modules/dtrace/lockstat/Makefile,v 1.1 2008/05/17 02:31:18 jb Exp $
+# $FreeBSD: src/sys/modules/dtrace/lockstat/Makefile,v 1.2 2009/09/10 19:12:08 n_hibma Exp $
 
 .PATH: ${.CURDIR}/../../../cddl/dev/lockstat
 
 KMOD=		lockstat
 SRCS=		lockstat.c 
 
-SRCS+=		vnode_if.h
+SRCS+=		vnode_if.h opt_kdtrace.h
 
 CFLAGS+=	-I${.CURDIR}/../../../cddl/compat/opensolaris \
 		-I${.CURDIR}/../../../cddl/contrib/opensolaris/uts/common \

@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_phy.h,v 1.2 2008/05/12 00:32:51 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_phy.h,v 1.3 2009/05/29 23:39:16 sam Exp $
  */
 
 #ifndef _NET80211_IEEE80211_PHY_H_
@@ -102,6 +102,12 @@ ieee80211_rate2phytype(const struct ieee80211_rate_table *rt, uint8_t rate)
 	uint8_t rix = rt->rateCodeToIndex[rate];
 	KASSERT(rix != (uint8_t)-1, ("rate %d has no info", rate));
 	return rt->info[rix].phy;
+}
+
+static __inline__ int
+ieee80211_isratevalid(const struct ieee80211_rate_table *rt, uint8_t rate)
+{
+	return rt->rateCodeToIndex[rate] != (uint8_t)-1;
 }
 
 /*

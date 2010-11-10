@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_copy.c,v 1.16 2005/07/22 23:22:29 grehan Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_copy.c,v 1.17 2010/09/02 22:26:49 nwhitehorn Exp $");
 
 /*
  * MD primitives supporting placement of module data 
@@ -68,7 +68,7 @@ ofw_mapmem(vm_offset_t dest, const size_t len)
 	/*
 	 * Trim area covered by existing mapping, if any
 	 */
-	if (dest < (last_dest + last_len)) {
+	if (dest < (last_dest + last_len) && dest >= last_dest) {
 		nlen -= (last_dest + last_len) - dest;
 		dest = last_dest + last_len;
 	}

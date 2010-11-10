@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/elf.h,v 1.16 2008/12/17 06:56:58 imp Exp $
+ * $FreeBSD: src/sys/sparc64/include/elf.h,v 1.19 2009/10/18 13:08:15 marius Exp $
  */
 
 #ifndef	_MACHINE_ELF_H_
@@ -78,16 +78,14 @@ __ElfType(Auxinfo);
 #define	AT_BASE		7	/* Interpreter's base address. */
 #define	AT_FLAGS	8	/* Flags (unused). */
 #define	AT_ENTRY	9	/* Where interpreter should transfer control. */
-/*
- * The following non-standard values are used in Linux ELF binaries.
- */
 #define	AT_NOTELF	10	/* Program is not ELF ?? */
 #define	AT_UID		11	/* Real uid. */
 #define	AT_EUID		12	/* Effective uid. */
 #define	AT_GID		13	/* Real gid. */
 #define	AT_EGID		14	/* Effective gid. */
+#define	AT_EXECPATH	15	/* Path to the executable. */
 
-#define	AT_COUNT	15	/* Count of defined aux entry types. */
+#define	AT_COUNT	16	/* Count of defined aux entry types. */
 
 /* Define "machine" characteristics */
 #if __ELF_WORD_SIZE == 32
@@ -98,5 +96,7 @@ __ElfType(Auxinfo);
 #define	ELF_TARG_DATA	ELFDATA2MSB
 #define	ELF_TARG_MACH	ELF_ARCH
 #define	ELF_TARG_VER	1
+
+#define	ET_DYN_LOAD_ADDR 0x100000
 
 #endif /* !_MACHINE_ELF_H_ */

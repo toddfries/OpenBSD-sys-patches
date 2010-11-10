@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.71 2009/03/05 16:43:33 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.75 2010/05/20 13:16:42 jhb Exp $");
 
 /*
  * PCI "universal" communications card driver configuration data (used to
@@ -168,10 +168,10 @@ const struct puc_cfg puc_pci_devices[] = {
 
 	{   0x10e8, 0x818e, 0xffff, 0,
 	    "Applied Micro Circuits 8 Port UART",
-            DEFAULT_RCLK,
-            PUC_PORT_8S, 0x14, -1, -1,
+	    DEFAULT_RCLK,
+	    PUC_PORT_8S, 0x14, -1, -1,
 	    .config_function = puc_config_amc
-        },
+	},
 
 	{   0x11fe, 0x8010, 0xffff, 0,
 	    "Comtrol RocketPort 550/8 RJ11 part A",
@@ -231,6 +231,17 @@ const struct puc_cfg puc_pci_devices[] = {
 	    "Comtrol RocketPort 550/8 part B",
 	    DEFAULT_RCLK * 4,
 	    PUC_PORT_4S, 0x10, 0, 8,
+	},
+
+	/*
+	 * IBM SurePOS 300 Series (481033H) serial ports
+	 * Details can be found on the IBM RSS websites
+	 */
+
+	{   0x1014, 0x0297, 0xffff, 0,
+	    "IBM SurePOS 300 Series (481033H) serial ports",
+	    DEFAULT_RCLK,
+	    PUC_PORT_4S, 0x10, 4, 0
 	},
 
 	/*
@@ -650,6 +661,18 @@ const struct puc_cfg puc_pci_devices[] = {
 	    PUC_PORT_8S, 0x18, 0, 8,
 	},
 
+	/*
+	 * Perle boards use Oxford Semiconductor chips, but they store the
+	 * Oxford Semiconductor device ID as a subvendor device ID and use
+	 * their own device IDs.
+	 */
+
+	{   0x155f, 0x0331, 0xffff, 0,
+	    "Perle Speed4 LE",
+	    DEFAULT_RCLK * 8,
+	    PUC_PORT_4S, 0x10, 0, 8,
+	},
+
 	{   0x14d2, 0x8010, 0xffff, 0,
 	    "VScom PCI-100L",
 	    DEFAULT_RCLK * 8,
@@ -773,6 +796,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	    PUC_PORT_1S, 0x10, 4, 0,
 	},
 
+	{   0x9710, 0x9835, 0x1000, 2,
+	    "NetMos NM9835 based 2-port serial",
+	    DEFAULT_RCLK,
+	    PUC_PORT_2S, 0x10, 4, 0,
+	},
+
 	{   0x9710, 0x9835, 0xffff, 0,
 	    "NetMos NM9835 Dual UART and 1284 Printer port",
 	    DEFAULT_RCLK,
@@ -789,6 +818,42 @@ const struct puc_cfg puc_pci_devices[] = {
 	    "NetMos NM9845 Quad UART and 1284 Printer port",
 	    DEFAULT_RCLK,
 	    PUC_PORT_4S1P, 0x10, 4, 0,
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3002,
+	    "NetMos NM9865 Dual UART",
+	    DEFAULT_RCLK,
+	    PUC_PORT_2S, 0x10, 4, 0,
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3003,
+	    "NetMos NM9865 Triple UART",
+	    DEFAULT_RCLK,
+	    PUC_PORT_3S, 0x10, 4, 0,
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3004,
+	    "NetMos NM9865 Quad UART",
+	    DEFAULT_RCLK,
+	    PUC_PORT_4S, 0x10, 4, 0,0
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3011,
+	    "NetMos NM9865 Single UART and 1284 Printer port",
+	    DEFAULT_RCLK,
+	    PUC_PORT_1S1P, 0x10, 4, 0,
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3012,
+	    "NetMos NM9865 Dual UART and 1284 Printer port",
+	    DEFAULT_RCLK,
+	    PUC_PORT_2S1P, 0x10, 4, 0,
+	},
+
+	{   0x9710, 0x9865, 0xa000, 0x3020,
+	    "NetMos NM9865 Dual 1284 Printer port",
+	    DEFAULT_RCLK,
+	    PUC_PORT_2P, 0x10, 4, 0,
 	},
 
 	{   0xb00c, 0x021c, 0xffff, 0,

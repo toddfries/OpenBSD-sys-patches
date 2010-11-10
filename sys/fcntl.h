@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fcntl.h	8.3 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/fcntl.h,v 1.24 2009/03/04 03:33:21 das Exp $
+ * $FreeBSD: src/sys/sys/fcntl.h,v 1.26 2009/09/28 16:59:47 delphij Exp $
  */
 
 #ifndef _SYS_FCNTL_H_
@@ -105,23 +105,6 @@ typedef	__pid_t		pid_t;
 #ifdef _KERNEL
 #define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
 #endif
-/* Defined by POSIX Extended API Set Part 2 */
-#if __BSD_VISIBLE
-/*
- * Magic value that specify the use of the current working directory
- * to determine the target of relative file paths in the openat() and
- * similar syscalls.
- */
-#define	AT_FDCWD		-100
-
-/*
- * Miscellaneous flags for the *at() syscalls.
- */
-#define	AT_EACCESS		0x100	/* Check access using effective user and group ID */
-#define	AT_SYMLINK_NOFOLLOW	0x200   /* Do not follow symbolic links */
-#define	AT_SYMLINK_FOLLOW	0x400	/* Follow symbolic link */
-#define	AT_REMOVEDIR		0x800	/* Remove directory instead of file */
-#endif
 
 /* Defined by POSIX 1003.1; BSD default, but must be distinct from O_RDONLY. */
 #define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
@@ -157,7 +140,7 @@ typedef	__pid_t		pid_t;
 /* bits to save after open */
 #define	FMASK	(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT|FEXEC)
 /* bits settable by fcntl(F_SETFL, ...) */
-#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT)
+#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FRDAHEAD|O_DIRECT)
 
 #if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
     defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
@@ -168,7 +151,8 @@ typedef	__pid_t		pid_t;
  */
 #define	FPOSIXSHM	O_NOFOLLOW
 #undef FCNTLFLAGS
-#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FPOSIXSHM|O_DIRECT)
+#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FPOSIXSHM|FRDAHEAD| \
+			 O_DIRECT)
 #endif
 #endif
 
@@ -193,6 +177,26 @@ typedef	__pid_t		pid_t;
  * different meaning for fcntl(2).
  */
 #if __BSD_VISIBLE
+/* Read ahead */
+#define	FRDAHEAD	O_CREAT
+#endif
+
+/* Defined by POSIX Extended API Set Part 2 */
+#if __BSD_VISIBLE
+/*
+ * Magic value that specify the use of the current working directory
+ * to determine the target of relative file paths in the openat() and
+ * similar syscalls.
+ */
+#define	AT_FDCWD		-100
+
+/*
+ * Miscellaneous flags for the *at() syscalls.
+ */
+#define	AT_EACCESS		0x100	/* Check access using effective user and group ID */
+#define	AT_SYMLINK_NOFOLLOW	0x200   /* Do not follow symbolic links */
+#define	AT_SYMLINK_FOLLOW	0x400	/* Follow symbolic link */
+#define	AT_REMOVEDIR		0x800	/* Remove directory instead of file */
 #endif
 
 /*
@@ -217,6 +221,8 @@ typedef	__pid_t		pid_t;
 #define	F_SETLK		12		/* set record locking information */
 #define	F_SETLKW	13		/* F_SETLK; wait if blocked */
 #define	F_SETLK_REMOTE	14		/* debugging support for remote locks */
+#define	F_READAHEAD	15		/* read ahead */
+#define	F_RDAHEAD	16		/* Darwin compatible read ahead */
 
 /* file descriptor flags (F_GETFD, F_SETFD) */
 #define	FD_CLOEXEC	1		/* close-on-exec flag */

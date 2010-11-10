@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/fxp/if_fxpreg.h,v 1.43 2008/12/02 02:30:12 yongari Exp $
+ * $FreeBSD: src/sys/dev/fxp/if_fxpreg.h,v 1.44 2010/05/09 22:16:15 yongari Exp $
  */
 
 #define FXP_VENDORID_INTEL	0x8086
@@ -418,7 +418,15 @@ struct fxp_stats {
 	uint32_t rx_overrun_errors;
 	uint32_t rx_cdt_errors;
 	uint32_t rx_shortframes;
+	uint32_t tx_pause;
+	uint32_t rx_pause;
+	uint32_t rx_controls;
+	uint16_t tx_tco;
+	uint16_t rx_tco;
 	uint32_t completion_status;
+	uint32_t reserved0;
+	uint32_t reserved1;
+	uint32_t reserved2;
 };
 #define FXP_STATS_DUMP_COMPLETE	0xa005
 #define FXP_STATS_DR_COMPLETE	0xa007

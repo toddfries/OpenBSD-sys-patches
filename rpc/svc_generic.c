@@ -38,7 +38,7 @@
 static char sccsid[] = "@(#)svc_generic.c 1.21 89/02/28 Copyr 1988 Sun Micro";
 #endif
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/svc_generic.c,v 1.3 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/svc_generic.c,v 1.5 2009/08/24 10:09:30 zec Exp $");
 
 /*
  * svc_generic.c, Server side for RPC.
@@ -59,6 +59,8 @@ __FBSDID("$FreeBSD: src/sys/rpc/svc_generic.c,v 1.3 2008/11/03 10:38:00 dfr Exp 
 #include <sys/systm.h>
 #include <sys/sx.h>
 #include <sys/ucred.h>
+
+#include <net/vnet.h>
 
 #include <rpc/rpc.h>
 #include <rpc/rpcb_clnt.h>
@@ -120,8 +122,10 @@ svc_create(
 			/* It was not found. Now create a new one */
 			xprt = svc_tp_create(pool, dispatch, prognum, versnum,
 			    NULL, nconf);
-			if (xprt)
+			if (xprt) {
 				num++;
+				SVC_RELEASE(xprt);
+			}
 		}
 	}
 	__rpc_endconf(handle);
@@ -179,6 +183,7 @@ svc_tp_create(
 				(unsigned)prognum, (unsigned)versnum,
 				nconf->nc_netid);
 		xprt_unregister(xprt);
+		SVC_RELEASE(xprt);
 		return (NULL);
 	}
 	return (xprt);
@@ -225,11 +230,14 @@ svc_tli_create(
 		/*
 		 * It is an open socket. Get the transport info.
 		 */
+		CURVNET_SET(so->so_vnet);
 		if (!__rpc_socket2sockinfo(so, &si)) {
 			printf(
 		"svc_tli_create: could not get transport information\n");
+			CURVNET_RESTORE();
 			return (NULL);
 		}
+		CURVNET_RESTORE();
 	}
 
 	/*
@@ -256,7 +264,9 @@ svc_tli_create(
 		"svc_tli_create: could not bind to requested address\n");
 				goto freedata;
 			}
+			CURVNET_SET(so->so_vnet);
 			solisten(so, (int)bindaddr->qlen, curthread);
+			CURVNET_RESTORE();
 		}
 			
 	}

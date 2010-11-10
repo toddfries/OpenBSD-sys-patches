@@ -1,10 +1,9 @@
-# $FreeBSD: src/sys/modules/nfsserver/Makefile,v 1.29 2008/11/25 16:11:41 dfr Exp $
+# $FreeBSD: src/sys/modules/nfsserver/Makefile,v 1.32 2010/02/16 20:00:21 marius Exp $
 
-.PATH: ${.CURDIR}/../../nfsserver ${.CURDIR}/../../nfs
+.PATH: ${.CURDIR}/../../nfsserver
 KMOD=	nfsserver
 SRCS=	vnode_if.h \
-	nfs_fha.c nfs_serv.c nfs_srvkrpc.c nfs_srvsock.c nfs_srvcache.c \
-	nfs_srvsubs.c nfs_syscalls.c nfs_common.c \
+	nfs_fha.c nfs_serv.c nfs_srvkrpc.c nfs_srvsubs.c \
 	opt_mac.h \
 	opt_kgssapi.h \
 	opt_nfs.h

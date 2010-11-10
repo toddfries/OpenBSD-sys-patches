@@ -25,7 +25,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_monitor.c,v 1.1 2008/04/20 20:35:43 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_monitor.c,v 1.4 2009/06/02 00:04:10 sam Exp $");
 #endif
 
 /*
@@ -60,7 +60,7 @@ __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_monitor.c,v 1.1 2008/04/20 20:35:
 static void monitor_vattach(struct ieee80211vap *);
 static int monitor_newstate(struct ieee80211vap *, enum ieee80211_state, int);
 static int monitor_input(struct ieee80211_node *ni, struct mbuf *m,
-	int rssi, int noise, uint32_t rstamp);
+	int rssi, int nf);
 
 void
 ieee80211_monitor_attach(struct ieee80211com *ic)
@@ -124,13 +124,15 @@ monitor_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
  * Process a received frame in monitor mode.
  */
 static int
-monitor_input(struct ieee80211_node *ni, struct mbuf *m,
-	int rssi, int noise, uint32_t rstamp)
+monitor_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 {
 	struct ieee80211vap *vap = ni->ni_vap;
+	struct ifnet *ifp = vap->iv_ifp;
 
-	if (bpf_peers_present(vap->iv_rawbpf))
-		bpf_mtap(vap->iv_rawbpf, m);
+	ifp->if_ipackets++;
+
+	if (ieee80211_radiotap_active_vap(vap))
+		ieee80211_radiotap_rx(vap, m);
 	m_freem(m);
 	return -1;
 }

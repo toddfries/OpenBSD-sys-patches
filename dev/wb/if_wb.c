@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/wb/if_wb.c,v 1.1 2008/08/14 21:26:29 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/wb/if_wb.c,v 1.5 2009/11/19 22:14:23 jhb Exp $");
 
 /*
  * Winbond fast ethernet PCI NIC driver
@@ -158,8 +158,8 @@ static int wb_ioctl(struct ifnet *, u_long, caddr_t);
 static void wb_init(void *);
 static void wb_init_locked(struct wb_softc *);
 static void wb_stop(struct wb_softc *);
-static void wb_watchdog(struct ifnet *);
-static void wb_shutdown(device_t);
+static void wb_watchdog(struct wb_softc *);
+static int wb_shutdown(device_t);
 static int wb_ifmedia_upd(struct ifnet *);
 static void wb_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -605,7 +605,7 @@ wb_setmulti(sc)
 	CSR_WRITE_4(sc, WB_MAR1, 0);
 
 	/* now program new ones */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -617,7 +617,7 @@ wb_setmulti(sc)
 			hashes[1] |= (1 << (h - 32));
 		mcnt++;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	if (mcnt)
 		rxfilt |= WB_NETCFG_RX_MULTI;
@@ -804,9 +804,6 @@ wb_attach(dev)
 		goto fail;
 	}
 
-	sc->wb_btag = rman_get_bustag(sc->wb_res);
-	sc->wb_bhandle = rman_get_bushandle(sc->wb_res);
-
 	/* Allocate interrupt */
 	rid = 0;
 	sc->wb_irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
@@ -852,7 +849,6 @@ wb_attach(dev)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = wb_ioctl;
 	ifp->if_start = wb_start;
-	ifp->if_watchdog = wb_watchdog;
 	ifp->if_init = wb_init;
 	ifp->if_snd.ifq_maxlen = WB_TX_LIST_CNT - 1;
 
@@ -910,11 +906,11 @@ wb_detach(dev)
 	 * This should only be done if attach succeeded.
 	 */
 	if (device_is_attached(dev)) {
+		ether_ifdetach(ifp);
 		WB_LOCK(sc);
 		wb_stop(sc);
 		WB_UNLOCK(sc);
 		callout_drain(&sc->wb_stat_callout);
-		ether_ifdetach(ifp);
 	}
 	if (sc->wb_miibus)
 		device_delete_child(dev, sc->wb_miibus);
@@ -1160,7 +1156,7 @@ wb_txeof(sc)
 	ifp = sc->wb_ifp;
 
 	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
+	sc->wb_timer = 0;
 
 	if (sc->wb_cdata.wb_tx_head == NULL)
 		return;
@@ -1215,7 +1211,7 @@ wb_txeoc(sc)
 
 	ifp = sc->wb_ifp;
 
-	ifp->if_timer = 0;
+	sc->wb_timer = 0;
 
 	if (sc->wb_cdata.wb_tx_head == NULL) {
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
@@ -1223,7 +1219,7 @@ wb_txeoc(sc)
 	} else {
 		if (WB_TXOWN(sc->wb_cdata.wb_tx_head) == WB_UNSENT) {
 			WB_TXOWN(sc->wb_cdata.wb_tx_head) = WB_TXSTAT_OWN;
-			ifp->if_timer = 5;
+			sc->wb_timer = 5;
 			CSR_WRITE_4(sc, WB_TXSTART, 0xFFFFFFFF);
 		}
 	}
@@ -1332,6 +1328,8 @@ wb_tick(xsc)
 
 	mii_tick(mii);
 
+	if (sc->wb_timer > 0 && --sc->wb_timer == 0)
+		wb_watchdog(sc);
 	callout_reset(&sc->wb_stat_callout, hz, wb_tick, sc);
 
 	return;
@@ -1532,7 +1530,7 @@ wb_start_locked(ifp)
 	/*
 	 * Set a timeout in case the chip goes out to lunch.
 	 */
-	ifp->if_timer = 5;
+	sc->wb_timer = 5;
 
 	return;
 }
@@ -1751,14 +1749,13 @@ wb_ioctl(ifp, command, data)
 }
 
 static void
-wb_watchdog(ifp)
-	struct ifnet		*ifp;
-{
+wb_watchdog(sc)
 	struct wb_softc		*sc;
+{
+	struct ifnet		*ifp;
 
-	sc = ifp->if_softc;
-
-	WB_LOCK(sc);
+	WB_LOCK_ASSERT(sc);
+	ifp = sc->wb_ifp;
 	ifp->if_oerrors++;
 	if_printf(ifp, "watchdog timeout\n");
 #ifdef foo
@@ -1771,7 +1768,6 @@ wb_watchdog(ifp)
 
 	if (ifp->if_snd.ifq_head != NULL)
 		wb_start_locked(ifp);
-	WB_UNLOCK(sc);
 
 	return;
 }
@@ -1789,7 +1785,7 @@ wb_stop(sc)
 
 	WB_LOCK_ASSERT(sc);
 	ifp = sc->wb_ifp;
-	ifp->if_timer = 0;
+	sc->wb_timer = 0;
 
 	callout_stop(&sc->wb_stat_callout);
 
@@ -1832,7 +1828,7 @@ wb_stop(sc)
  * Stop all chip I/O so that the kernel's probe routines don't
  * get confused by errant DMAs when rebooting.
  */
-static void
+static int
 wb_shutdown(dev)
 	device_t		dev;
 {
@@ -1844,5 +1840,5 @@ wb_shutdown(dev)
 	wb_stop(sc);
 	WB_UNLOCK(sc);
 
-	return;
+	return (0);
 }

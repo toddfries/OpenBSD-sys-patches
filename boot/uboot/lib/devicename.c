@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/devicename.c,v 1.4 2008/12/17 15:58:07 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/devicename.c,v 1.5 2009/05/05 16:29:08 raj Exp $");
 
 #include <sys/disklabel.h>
 
@@ -90,7 +90,7 @@ uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
 	struct devsw *dv;
 	char *cp;
 	const char *np;
-	int i, unit, partition, err;
+	int i, unit, pnum, ptype, err;
 
 	/* minimum length check */
 	if (strlen(devspec) < 2)
@@ -116,7 +116,8 @@ uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
 
 	case DEVT_DISK:
 		unit = -1;
-		partition = -1;
+		pnum = -1;
+		ptype = -1;
 		if (*np && (*np != ':')) {
 			/* next comes the unit number */
 			unit = strtol(np, &cp, 10);
@@ -126,13 +127,20 @@ uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
 			}
 			if (*cp && (*cp != ':')) {
 				/* get partition */
-				partition = *cp - 'a';
-				if ((partition < 0) ||
-				    (partition >= MAXPARTITIONS)) {
-					err = EPART;
-					goto fail;
+				if (*cp == 'p' && *(cp + 1) &&
+				    *(cp + 1) != ':') {
+					pnum = strtol(cp + 1, &cp, 10);
+					ptype = PTYPE_GPT;
+				} else {
+					pnum = *cp - 'a';
+					ptype = PTYPE_BSDLABEL;
+					if ((pnum < 0) ||
+					    (pnum >= MAXPARTITIONS)) {
+						err = EPART;
+						goto fail;
+					}
+					cp++;
 				}
-				cp++;
 			}
 		}
 		if (*cp && (*cp != ':')) {
@@ -141,7 +149,8 @@ uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
 		}
 
 		idev->d_unit = unit;
-		idev->d_disk.partition = partition;
+		idev->d_disk.pnum = pnum;
+		idev->d_disk.ptype = ptype;
 		idev->d_disk.data = NULL;
 		if (path != NULL)
 			*path = (*cp == 0) ? cp : cp + 1;
@@ -202,9 +211,15 @@ uboot_fmtdev(void *vdev)
 	case DEVT_DISK:
 		cp = buf;
 		cp += sprintf(cp, "%s%d", dev->d_dev->dv_name, dev->d_unit);
-		if (dev->d_kind.disk.partition >= 0)
-			cp += sprintf(cp, "%c", dev->d_kind.disk.partition +
-			    'a');
+		if (dev->d_kind.disk.pnum >= 0) {
+			if (dev->d_kind.disk.ptype == PTYPE_BSDLABEL)
+				cp += sprintf(cp, "%c",
+				    dev->d_kind.disk.pnum + 'a');
+			else if (dev->d_kind.disk.ptype == PTYPE_GPT)
+				cp += sprintf(cp, "p%i",
+				    dev->d_kind.disk.pnum);
+		}
+
 		strcat(cp, ":");
 		break;
 

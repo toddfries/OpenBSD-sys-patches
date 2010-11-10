@@ -1,0 +1,22 @@
+# /*
+#  *    This product includes software developed by the University of
+#  *    California, Berkeley and its contributors."
+# */
+# $FreeBSD: src/sys/mips/cavium/std.octeon1,v 1.2 2010/01/11 04:29:26 imp Exp $
+# 
+files	"../cavium/files.octeon1"
+
+#
+# 
+#
+cpu     CPU_MIPS4KC
+#device	pci
+#device	ata
+#device	atadisk
+
+#device clock
+#device obio
+#device uart
+
+# Kludge
+options	TARGET_OCTEON

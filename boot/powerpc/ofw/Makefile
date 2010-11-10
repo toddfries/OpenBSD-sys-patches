@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/powerpc/ofw/Makefile,v 1.25 2009/02/21 15:04:31 ru Exp $
+# $FreeBSD: src/sys/boot/powerpc/ofw/Makefile,v 1.27 2010/07/12 00:49:22 nwhitehorn Exp $
 
 .include <bsd.own.mk>
 MK_SSP=		no
@@ -10,6 +10,7 @@ INSTALLFLAGS=	-b
 
 # Architecture-specific loader code
 SRCS=		conf.c metadata.c vers.c start.c
+SRCS+=		ucmpdi2.c
 
 LOADER_DISK_SUPPORT?=	yes
 LOADER_UFS_SUPPORT?=	yes
@@ -56,10 +57,15 @@ CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/powerpc
 LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
 .endif
 
+# Avoid the open-close-dance for every file access as some firmwares perform
+# an auto-negotiation on every open of the network interface and thus causes
+# netbooting to take horribly long.
+CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE
+
 # Always add MI sources
-.PATH:		${.CURDIR}/../../common
+.PATH:		${.CURDIR}/../../common ${.CURDIR}/../../../libkern
 .include	"${.CURDIR}/../../common/Makefile.inc"
-CFLAGS+=	-I${.CURDIR}/../../common
+CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../..
 CFLAGS+=	-I.
 
 CLEANFILES+=	vers.c loader.help

@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)errno.h	8.5 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/errno.h,v 1.28 2005/04/02 12:33:28 das Exp $
+ * $FreeBSD: src/sys/sys/errno.h,v 1.29 2009/10/07 20:20:51 rwatson Exp $
  */
 
 #ifndef _SYS_ERRNO_H_
@@ -174,7 +174,11 @@ __END_DECLS
 #define	EPROTO		92		/* Protocol error */
 
 #ifndef _POSIX_SOURCE
-#define	ELAST		92		/* Must be equal largest errno */
+#define	ENOTCAPABLE	93		/* Capabilities insufficient */
+#endif /* _POSIX_SOURCE */
+
+#ifndef _POSIX_SOURCE
+#define	ELAST		93		/* Must be equal largest errno */
 #endif /* _POSIX_SOURCE */
 
 #ifdef _KERNEL

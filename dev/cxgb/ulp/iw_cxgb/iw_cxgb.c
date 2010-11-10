@@ -27,9 +27,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.7 2009/02/27 14:12:05 bz Exp $");
-
-#include "opt_route.h"
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.12 2010/02/24 10:16:18 np Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,16 +54,13 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.7 2009/02/27 14:1
 #include <sys/proc.h>
 #include <sys/eventhandler.h>
 
-#if __FreeBSD_version >= 800044
-#include <sys/vimage.h>
-#else
+#if __FreeBSD_version < 800044
 #define V_ifnet ifnet
 #endif
 
 #include <net/if.h>
 #include <net/if_var.h>
 #if __FreeBSD_version >= 800056
-#include <net/route.h>
 #include <net/vnet.h>
 #endif
 
@@ -143,8 +138,7 @@ open_rnic_dev(struct t3cdev *tdev)
 
 	CTR2(KTR_IW_CXGB, "%s t3cdev %p", __FUNCTION__,  tdev);
 	if (!vers_printed++)
-		printf("Chelsio T3 RDMA Driver - version %s\n",
-		       DRV_VERSION);
+		printf("Chelsio T3 RDMA Driver - version x.xx\n");
 	rnicp = (struct iwch_dev *)ib_alloc_device(sizeof(*rnicp));
 	if (!rnicp) {
 		printf("Cannot allocate ib device\n");
@@ -243,7 +237,6 @@ iwch_init_module(void)
 	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter); /* XXX CURVNET_SET_QUIET() ? */
-		INIT_VNET_NET(vnet_iter);
 		TAILQ_FOREACH(ifp, &V_ifnet, if_link)
 			(void)ifaddr_event_handler(NULL, ifp);
 		CURVNET_RESTORE();

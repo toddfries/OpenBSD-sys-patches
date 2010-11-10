@@ -31,7 +31,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/i386/exception.s,v 1.122 2008/12/13 13:07:12 jkoshy Exp $
+ * $FreeBSD: src/sys/i386/i386/exception.s,v 1.123 2010/02/25 14:13:39 attilio Exp $
  */
 
 #include "opt_apic.h"
@@ -294,7 +294,7 @@ ENTRY(fork_trampoline)
 	SUPERALIGN_TEXT
 MCOUNT_LABEL(bintr)
 
-#include <i386/isa/atpic_vector.s>
+#include <i386/i386/atpic_vector.s>
 
 #ifdef DEV_APIC
 	.data

@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w 
 
-#$FreeBSD: src/sys/dev/cxgb/bin2h.pl,v 1.2 2008/02/26 23:12:55 kmacy Exp $
+#$FreeBSD: src/sys/dev/cxgb/bin2h.pl,v 1.3 2009/03/10 19:22:45 gnn Exp $
 
 if ($#ARGV != 1) {
   print "bin2h.pl <firmware> <headername>\n";
@@ -22,7 +22,7 @@ unless ($success) {
 my $license = <<END;
 /**************************************************************************
 
-Copyright (c) 2007-2008, Chelsio Inc.
+Copyright (c) 2007-2009, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

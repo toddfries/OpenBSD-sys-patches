@@ -55,7 +55,7 @@
  *	from: Id: in_cksum.c,v 1.8 1995/12/03 18:35:19 bde Exp
  *	from: FreeBSD: src/sys/alpha/include/in_cksum.h,v 1.5 2000/05/06
  *
- * $FreeBSD: src/sys/sparc64/include/in_cksum.h,v 1.6 2008/07/05 15:28:30 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/in_cksum.h,v 1.7 2009/10/26 22:00:26 marius Exp $
  */
 
 #ifndef _MACHINE_IN_CKSUM_H_
@@ -164,6 +164,8 @@ in_cksum_hdr(struct ip *ip)
 	return (__ret);
 }
 
+#ifdef _KERNEL
 u_short	in_cksum_skip(struct mbuf *m, int len, int skip);
+#endif
 
 #endif /* _MACHINE_IN_CKSUM_H_ */

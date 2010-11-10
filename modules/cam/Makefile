@@ -1,8 +1,8 @@
-# $FreeBSD: src/sys/modules/cam/Makefile,v 1.15 2007/04/07 19:40:57 scottl Exp $
+# $FreeBSD: src/sys/modules/cam/Makefile,v 1.18 2010/05/23 20:24:03 marius Exp $
 
 S=	${.CURDIR}/../..
 
-.PATH: $S/cam $S/cam/scsi
+.PATH: $S/cam $S/cam/scsi $S/cam/ata $S/${MACHINE}/${MACHINE}
 
 KMOD=	cam
 
@@ -24,6 +24,14 @@ SRCS+=	scsi_sa.c
 SRCS+=	scsi_ses.c
 SRCS+=	scsi_sg.c
 SRCS+=	scsi_targ_bh.c scsi_target.c
+SRCS+=	scsi_xpt.c
+SRCS+=	ata_all.c
+SRCS+=	ata_xpt.c
+SRCS+=	ata_da.c
+.if exists($S/${MACHINE}/${MACHINE}/ata_machdep.c)
+SRCS+=  ata_machdep.c
+.endif
+SRCS+=	ata_pmp.c
 
 EXPORT_SYMS=	YES	# XXX evaluate
 

@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/mge/if_mgevar.h,v 1.2 2009/01/08 11:09:27 raj Exp $
+ * $FreeBSD: src/sys/dev/mge/if_mgevar.h,v 1.3 2010/06/13 13:28:53 raj Exp $
  */
 
 #ifndef __IF_MGE_H__
@@ -64,8 +64,12 @@ struct mge_desc_wrapper {
 
 struct mge_softc {
 	struct ifnet	*ifp;		/* per-interface network data */
+
+	phandle_t	node;
+
 	device_t	dev;
 	device_t	miibus;
+
 	struct mii_data	*mii;
 	struct resource	*res[1 + MGE_INTR_COUNT];	/* resources */
 	void		*ih_cookie[MGE_INTR_COUNT];	/* interrupt handlers cookies */
@@ -99,6 +103,8 @@ struct mge_softc {
 	uint32_t	mge_tx_tok_cnt;
 	uint16_t	mge_mtu;
 	int		mge_ver;
+
+	int		phyaddr;
 };
 
 

@@ -26,12 +26,13 @@
  * SUCH DAMAGE.
  *
  *	from BSDI $Id: mutex.h,v 2.7.2.35 2000/04/27 03:10:26 cp Exp $
- * $FreeBSD: src/sys/powerpc/include/mutex.h,v 1.28 2001/12/18 00:27:17 jhb Exp $
+ * $FreeBSD: src/sys/powerpc/include/mutex.h,v 1.29 2009/05/21 11:43:37 raj Exp $
  */
 
 #ifndef _MACHINE_MUTEX_H_
 #define _MACHINE_MUTEX_H_
 
+#if 0
 #ifdef LOCORE
 
 /*
@@ -62,4 +63,5 @@
 
 #endif	/* !LOCORE */
 
+#endif
 #endif	/* __MACHINE_MUTEX_H */

@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_slice.c,v 1.63 2008/08/09 11:14:05 des Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_slice.c,v 1.64 2010/01/06 13:14:37 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -393,10 +393,10 @@ g_slice_config(struct g_geom *gp, u_int idx, int how, off_t offset, off_t length
 	pp = g_new_providerf(gp, sbuf_data(sb));
 	pp2 = LIST_FIRST(&gp->consumer)->provider;
 	pp->flags = pp2->flags & G_PF_CANDELETE;
-	if (pp2->stripesize > 0) {
-		pp->stripesize = pp2->stripesize;
-		pp->stripeoffset = (pp2->stripeoffset + offset) % pp->stripesize;
-	}
+	pp->stripesize = pp2->stripesize;
+	pp->stripeoffset = pp2->stripeoffset + offset;
+	if (pp->stripesize > 0)
+		pp->stripeoffset %= pp->stripesize;
 	if (0 && bootverbose)
 		printf("GEOM: Configure %s, start %jd length %jd end %jd\n",
 		    pp->name, (intmax_t)offset, (intmax_t)length,

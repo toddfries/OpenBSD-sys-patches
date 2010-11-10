@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/cxgb/iw_cxgb/Makefile,v 1.4 2008/12/02 21:37:28 bz Exp $
+# $FreeBSD: src/sys/modules/cxgb/iw_cxgb/Makefile,v 1.5 2009/06/08 19:57:35 bz Exp $
 
 CXGB = ${.CURDIR}/../../../dev/cxgb
 .PATH: ${CXGB}/ulp/iw_cxgb
@@ -8,7 +8,7 @@ SRCS=   iw_cxgb.c iw_cxgb_cm.c iw_cxgb_hal.c
 SRCS+=  iw_cxgb_provider.c iw_cxgb_qp.c iw_cxgb_resource.c
 SRCS+=  iw_cxgb_ev.c iw_cxgb_mem.c iw_cxgb_dbg.c iw_cxgb_cq.c
 SRCS+=  bus_if.h device_if.h opt_sched.h pci_if.h pcib_if.h opt_ktr.h
-SRCS+=  opt_inet.h opt_route.h
+SRCS+=  opt_inet.h
 CFLAGS+= -g -I${CXGB}
 #CFLAGS+= -DDEBUG
 

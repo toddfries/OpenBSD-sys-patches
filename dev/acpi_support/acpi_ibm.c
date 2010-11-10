@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_ibm.c,v 1.17 2008/05/20 12:26:45 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_ibm.c,v 1.24 2010/06/11 19:53:42 jkim Exp $");
 
 /*
  * Driver for extra ACPI-controlled gadgets found on IBM ThinkPad laptops.
@@ -42,7 +42,10 @@ __FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_ibm.c,v 1.17 2008/05/20 12:26:
 #include <sys/kernel.h>
 #include <sys/bus.h>
 #include <machine/cpufunc.h>
-#include <contrib/dev/acpica/acpi.h>
+
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include "acpi_if.h"
 #include <sys/module.h>
 #include <dev/acpica/acpivar.h>
@@ -252,6 +255,7 @@ ACPI_SERIAL_DECL(ibm, "ACPI IBM extras");
 static int	acpi_ibm_probe(device_t dev);
 static int	acpi_ibm_attach(device_t dev);
 static int	acpi_ibm_detach(device_t dev);
+static int	acpi_ibm_resume(device_t dev);
 
 static void	ibm_led(void *softc, int onoff);
 static void	ibm_led_task(struct acpi_ibm_softc *sc, int pending __unused);
@@ -270,6 +274,7 @@ static device_method_t acpi_ibm_methods[] = {
 	DEVMETHOD(device_probe, acpi_ibm_probe),
 	DEVMETHOD(device_attach, acpi_ibm_attach),
 	DEVMETHOD(device_detach, acpi_ibm_detach),
+	DEVMETHOD(device_resume, acpi_ibm_resume),
 
 	{0, 0}
 };
@@ -285,7 +290,7 @@ static devclass_t acpi_ibm_devclass;
 DRIVER_MODULE(acpi_ibm, acpi, acpi_ibm_driver, acpi_ibm_devclass,
 	      0, 0);
 MODULE_DEPEND(acpi_ibm, acpi, 1, 1, 1);
-static char    *ibm_ids[] = {"IBM0057", "IBM0068", NULL};
+static char    *ibm_ids[] = {"IBM0068", NULL};
 
 static void
 ibm_led(void *softc, int onoff)
@@ -332,7 +337,6 @@ static int
 acpi_ibm_attach(device_t dev)
 {
 	struct acpi_ibm_softc	*sc;
-	struct acpi_softc	*acpi_sc;
 	devclass_t		ec_devclass;
 
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
@@ -340,8 +344,6 @@ acpi_ibm_attach(device_t dev)
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 	sc->handle = acpi_get_handle(dev);
-
-	acpi_sc = acpi_device_get_parent_softc(dev);
 
 	/* Look for the first embedded controller */
         if (!(ec_devclass = devclass_find ("acpi_ec"))) {
@@ -355,8 +357,6 @@ acpi_ibm_attach(device_t dev)
 		return (EINVAL);
 	}
 	sc->ec_handle = acpi_get_handle(sc->ec_dev);
-
-	ACPI_SERIAL_BEGIN(ibm);
 
 	/* Get the sysctl tree */
 	sc->sysctl_ctx = device_get_sysctl_ctx(dev);
@@ -404,8 +404,6 @@ acpi_ibm_attach(device_t dev)
 		    "Thermal zones");
 	}
 
-	ACPI_SERIAL_END(ibm);
-
 	/* Handle notifies */
 	AcpiInstallNotifyHandler(sc->handle, ACPI_DEVICE_NOTIFY,
 	    acpi_ibm_notify, dev);
@@ -434,6 +432,34 @@ acpi_ibm_detach(device_t dev)
 
 	if (sc->led_dev != NULL)
 		led_destroy(sc->led_dev);
+
+	return (0);
+}
+
+static int
+acpi_ibm_resume(device_t dev)
+{
+	struct acpi_ibm_softc *sc = device_get_softc(dev);
+
+	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
+
+	ACPI_SERIAL_BEGIN(ibm);
+	for (int i = 0; acpi_ibm_sysctls[i].name != NULL; i++) {
+		int val;
+
+		if ((acpi_ibm_sysctls[i].access & CTLFLAG_RD) == 0) {
+			continue;
+		}
+
+		val = acpi_ibm_sysctl_get(sc, i);
+
+		if ((acpi_ibm_sysctls[i].access & CTLFLAG_WR) == 0) {
+			continue;
+		}
+
+		acpi_ibm_sysctl_set(sc, i, val);
+	}
+	ACPI_SERIAL_END(ibm);
 
 	return (0);
 }
@@ -500,7 +526,7 @@ out:
 static int
 acpi_ibm_sysctl_get(struct acpi_ibm_softc *sc, int method)
 {
-	ACPI_INTEGER	val_ec;
+	UINT64		val_ec;
 	int 		val = 0, key;
 
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
@@ -631,7 +657,7 @@ static int
 acpi_ibm_sysctl_set(struct acpi_ibm_softc *sc, int method, int arg)
 {
 	int			val, step;
-	ACPI_INTEGER		val_ec;
+	UINT64			val_ec;
 	ACPI_OBJECT		Arg;
 	ACPI_OBJECT_LIST	Args;
 	ACPI_STATUS		status;
@@ -717,8 +743,6 @@ acpi_ibm_sysctl_set(struct acpi_ibm_softc *sc, int method, int arg)
 			return (status);
 
 		if (sc->cmos_handle) {
-			val = val_ec & IBM_EC_MASK_VOL;
-
 			Args.Count = 1;
 			Args.Pointer = &Arg;
 			Arg.Type = ACPI_TYPE_INTEGER;

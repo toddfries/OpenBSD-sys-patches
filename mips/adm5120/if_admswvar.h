@@ -34,7 +34,7 @@
 #define	_IF_ADMSWVAR_H_
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/adm5120/if_admswvar.h,v 1.2 2008/09/10 03:49:08 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/adm5120/if_admswvar.h,v 1.3 2009/11/24 18:34:47 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -132,7 +132,9 @@ struct admsw_softc {
 	bus_dma_tag_t	 sc_bufs_dmat;	/* bus DMA tag for buffers */
 	struct ifmedia	 sc_ifmedia[SW_DEVS];
 	int		 ndevs;		/* number of IFF_RUNNING interfaces */
-	struct ifnet	*sc_ifnet[SW_DEVS];	
+	struct ifnet	*sc_ifnet[SW_DEVS];
+	struct callout	 sc_watchdog;
+	int		 sc_timer;
 					/* Ethernet common data */
 	void		*sc_ih;		/* interrupt cookie */
 	struct resource	*irq_res;

@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_cal.h,v 1.2 2009/01/28 18:00:22 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_cal.h,v 1.4 2010/02/14 16:26:32 rpaulo Exp $
  */
 #ifndef _ATH_AR5416_CAL_H_
 #define _ATH_AR5416_CAL_H_

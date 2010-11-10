@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mca/mca_bus.c,v 1.14 2009/02/24 18:09:31 rdivacky Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mca/mca_bus.c,v 1.15 2009/06/11 17:06:58 avg Exp $");
 
 /*
  * References:
@@ -432,7 +432,7 @@ mca_probe_nomatch (device_t dev, device_t child)
 }
 
 static int
-mca_read_ivar (device_t dev, device_t child, int which, u_long * result)
+mca_read_ivar (device_t dev, device_t child, int which, uintptr_t * result)
 {
 	struct mca_device *		m_dev = device_get_ivars(child);
 

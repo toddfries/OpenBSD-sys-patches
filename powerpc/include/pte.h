@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: pte.h,v 1.2 1998/08/31 14:43:40 tsubai Exp $
- * $FreeBSD: src/sys/powerpc/include/pte.h,v 1.8 2009/01/13 15:41:58 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/pte.h,v 1.10 2010/02/24 00:54:37 nwhitehorn Exp $
  */
 
 #ifndef	_MACHINE_PTE_H_
@@ -95,6 +95,7 @@ struct lpteg {
 /* High quadword: */
 #define LPTE_VSID_SHIFT		12
 #define LPTE_API		0x0000000000000F80ULL
+#define LPTE_LOCKED		0x0000000000000008ULL
 #define LPTE_BIG		0x0000000000000004ULL	/* 4kb/16Mb page */
 #define LPTE_HID		0x0000000000000002ULL
 #define LPTE_VALID		0x0000000000000001ULL
@@ -243,7 +244,6 @@ typedef struct pte pte_t;
 #define PTE_MODIFIED	0x40000000	/* Modified */
 #define PTE_WIRED	0x20000000	/* Wired */
 #define PTE_MANAGED	0x10000000	/* Managed */
-#define PTE_FAKE	0x08000000	/* Ficticious */
 #define PTE_REFERENCED	0x04000000	/* Referenced */
 
 /* Macro argument must of pte_t type. */
@@ -251,7 +251,6 @@ typedef struct pte pte_t;
 #define PTE_ISVALID(pte)	((pte)->flags & PTE_VALID)
 #define PTE_ISWIRED(pte)	((pte)->flags & PTE_WIRED)
 #define PTE_ISMANAGED(pte)	((pte)->flags & PTE_MANAGED)
-#define PTE_ISFAKE(pte)		((pte)->flags & PTE_FAKE)
 #define PTE_ISMODIFIED(pte)	((pte)->flags & PTE_MODIFIED)
 #define PTE_ISREFERENCED(pte)	((pte)->flags & PTE_REFERENCED)
 

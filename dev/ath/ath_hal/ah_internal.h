@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ah_internal.h,v 1.10 2009/02/24 01:07:06 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah_internal.h,v 1.16 2010/03/03 17:42:39 rpaulo Exp $
  */
 #ifndef _ATH_AH_INTERAL_H_
 #define _ATH_AH_INTERAL_H_
@@ -193,7 +193,8 @@ typedef struct {
 			halExtChanDfsSupport		: 1,
 			halForcePpmSupport		: 1,
 			halEnhancedPmSupport		: 1,
-			halMbssidAggrSupport		: 1;
+			halMbssidAggrSupport		: 1,
+			halBssidMatchSupport		: 1;
 	uint32_t	halWirelessModes;
 	uint16_t	halTotalQueues;
 	uint16_t	halKeyCacheSize;
@@ -206,6 +207,7 @@ typedef struct {
 	uint8_t		halNumGpioPins;
 	uint8_t		halNumAntCfg2GHz;
 	uint8_t		halNumAntCfg5GHz;
+	uint32_t	halIntrMask;
 } HAL_CAPABILITIES;
 
 struct regDomain;
@@ -332,9 +334,13 @@ struct ath_hal_private {
 	(_ah)->ah_configPCIE(_ah, _reset)
 #define	ath_hal_disablePCIE(_ah) \
 	(_ah)->ah_disablePCIE(_ah)
+#define	ath_hal_setInterrupts(_ah, _mask) \
+	(_ah)->ah_setInterrupts(_ah, _mask)
 
-#define	ath_hal_eepromDetach(_ah) \
-	AH_PRIVATE(_ah)->ah_eepromDetach(_ah)
+#define	ath_hal_eepromDetach(_ah) do {				\
+	if (AH_PRIVATE(_ah)->ah_eepromDetach != AH_NULL)	\
+		AH_PRIVATE(_ah)->ah_eepromDetach(_ah);		\
+} while (0)
 #define	ath_hal_eepromGet(_ah, _param, _val) \
 	AH_PRIVATE(_ah)->ah_eepromGet(_ah, _param, _val)
 #define	ath_hal_eepromSet(_ah, _param, _val) \

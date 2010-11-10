@@ -23,7 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/geom/part/g_part_if.m,v 1.7 2009/02/20 04:48:40 marcel Exp $
+# $FreeBSD: src/sys/geom/part/g_part_if.m,v 1.10 2010/04/23 03:11:39 marcel Exp $
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -42,11 +42,28 @@ INTERFACE g_part;
 
 # Default implementations of methods.
 CODE {
+	static void
+	default_fullname(struct g_part_table *table,
+	    struct g_part_entry *entry, struct sbuf *sb, const char *pfx)
+	{
+		char buf[32];
+
+		sbuf_printf(sb, "%s%s", pfx,
+		    G_PART_NAME(table, entry, buf, sizeof(buf)));
+	}
+
 	static int
 	default_precheck(struct g_part_table *t __unused,
 	    enum g_part_ctl r __unused, struct g_part_parms *p __unused)
 	{
 		return (0);
+	}
+
+	static int
+	default_resize(struct g_part_table *t __unused,
+	    struct g_part_entry *e __unused, struct g_part_parms *p __unused)
+	{
+		return (ENOSYS);
 	}
 };
 
@@ -75,15 +92,6 @@ METHOD int destroy {
 	struct g_part_parms *gpp;
 };
 
-# devalias() - return the name (if any) to be used as an alias for
-# the device special file created for the partition entry.
-METHOD int devalias {
-	struct g_part_table *table;
-	struct g_part_entry *entry;
-	char *buf;
-	size_t bufsz;
-};
-
 # dumpconf()
 METHOD void dumpconf {
 	struct g_part_table *table;
@@ -98,12 +106,27 @@ METHOD int dumpto {
 	struct g_part_entry *entry;
 };
 
+# fullname() - write the name of the given partition entry to the sbuf.
+METHOD void fullname {
+	struct g_part_table *table;
+	struct g_part_entry *entry;
+	struct sbuf *sb;
+	const char *pfx;
+} DEFAULT default_fullname;
+
 # modify() - scheme specific processing for the modify verb.
 METHOD int modify {
 	struct g_part_table *table;
 	struct g_part_entry *entry;
 	struct g_part_parms *gpp;
 };
+
+# resize() - scheme specific processing for the resize verb.
+METHOD int resize {
+	struct g_part_table *table;
+	struct g_part_entry *entry;
+	struct g_part_parms *gpp;
+} DEFAULT default_resize;
 
 # name() - return the name of the given partition entry.
 # Typical names are "p1", "s0" or "c".

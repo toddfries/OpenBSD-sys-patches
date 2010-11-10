@@ -30,7 +30,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/lge/if_lgereg.h,v 1.9 2006/09/15 15:16:11 glebius Exp $
+ * $FreeBSD: src/sys/dev/lge/if_lgereg.h,v 1.10 2009/11/19 22:14:23 jhb Exp $
  */
 
 
@@ -534,6 +534,7 @@ struct lge_softc {
 	u_int8_t		lge_link;
 	u_int8_t		lge_pcs;
 	int			lge_if_flags;
+	int			lge_timer;
 	struct lge_list_data	*lge_ldata;
 	struct lge_ring_data	lge_cdata;
 	struct callout		lge_stat_callout;

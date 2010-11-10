@@ -39,7 +39,7 @@
  *
  * Updated by Andrew Thompson <thompsa@FreeBSD.org> for MPSAFE TTY.
  *
- * $FreeBSD: src/sys/netgraph/ng_tty.c,v 1.43 2008/12/13 22:05:46 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_tty.c,v 1.44 2010/05/03 07:32:50 sobomax Exp $
  * $Whistle: ng_tty.c,v 1.21 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -164,7 +164,7 @@ ngt_constructor(node_p node)
 	sc->node = node;
 
 	mtx_init(&sc->outq.ifq_mtx, "ng_tty node+queue", NULL, MTX_DEF);
-	IFQ_SET_MAXLEN(&sc->outq, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&sc->outq, ifqmaxlen);
 
 	return (0);
 }

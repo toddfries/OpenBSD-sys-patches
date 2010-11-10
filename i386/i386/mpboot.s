@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1995, Jack F. Vogel
+ * Copyright (c) 1995 Jack F. Vogel
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,11 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Jack F. Vogel
- * 4. The name of the developer may be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -31,7 +26,7 @@
  * mpboot.s:	FreeBSD machine support for the Intel MP Spec
  *		multiprocessor systems.
  *
- * $FreeBSD: src/sys/i386/i386/mpboot.s,v 1.24 2005/01/05 19:10:48 imp Exp $
+ * $FreeBSD: src/sys/i386/i386/mpboot.s,v 1.25 2010/04/07 18:26:13 joel Exp $
  */
 
 #include "opt_pmap.h"

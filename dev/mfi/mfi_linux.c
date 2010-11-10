@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_linux.c,v 1.2 2006/11/14 16:48:00 ambrisko Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_linux.c,v 1.3 2009/05/20 17:29:21 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -80,7 +80,7 @@ DEV_MODULE(mfi_linux, mfi_linux_modevent, NULL);
 MODULE_DEPEND(mfi, linux, 1, 1, 1);
 
 static int
-mfi_linux_ioctl(d_thread_t *p, struct linux_ioctl_args *args)
+mfi_linux_ioctl(struct thread *p, struct linux_ioctl_args *args)
 {
 	struct file *fp;
 	int error;

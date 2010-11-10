@@ -1,5 +1,5 @@
 /*-
- * Copryight 1997 Sean Eric Fagan
+ * Copyright 1997 Sean Eric Fagan
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,7 @@
 /*
  * procfs ioctl definitions.
  *
- * $FreeBSD: src/sys/sys/pioctl.h,v 1.15 2006/09/27 19:57:02 ru Exp $
+ * $FreeBSD: src/sys/sys/pioctl.h,v 1.16 2010/03/10 20:30:51 imp Exp $
  */
 
 #ifndef _SYS_PIOCTL_H

@@ -3,7 +3,7 @@
 #
 # modified for PC-9801/PC-9821
 #
-# $FreeBSD: src/sys/conf/files.pc98,v 1.373 2009/02/28 16:21:25 ed Exp $
+# $FreeBSD: src/sys/conf/files.pc98,v 1.386 2010/06/08 18:36:03 jhb Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -71,7 +71,6 @@ compat/svr4/svr4_syscallnames.c	optional compat_svr4
 compat/svr4/svr4_sysent.c	optional compat_svr4
 compat/svr4/svr4_sysvec.c	optional compat_svr4
 compat/svr4/svr4_termios.c	optional compat_svr4
-compat/svr4/svr4_ttold.c	optional compat_svr4
 bf_enc.o			optional crypto | ipsec	\
 	dependency	"$S/crypto/blowfish/arch/i386/bf_enc.S $S/crypto/blowfish/arch/i386/bf_enc_586.S $S/crypto/blowfish/arch/i386/bf_enc_686.S" \
 	compile-with	"${CC} -c -I$S/crypto/blowfish/arch/i386 ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}" \
@@ -85,8 +84,6 @@ dev/agp/agp_nvidia.c		optional agp
 dev/agp/agp_sis.c		optional agp
 dev/agp/agp_via.c		optional agp
 dev/aic/aic_cbus.c		optional aic isa
-dev/ar/if_ar.c			optional ar
-dev/ar/if_ar_pci.c		optional ar pci
 dev/ce/ceddk.c			optional ce
 dev/ce/if_ce.c			optional ce
 dev/ce/tau32-ddk.c		optional ce
@@ -102,14 +99,17 @@ dev/fe/if_fe_cbus.c		optional fe isa
 dev/hwpmc/hwpmc_amd.c		optional hwpmc
 dev/hwpmc/hwpmc_intel.c		optional hwpmc
 dev/hwpmc/hwpmc_core.c		optional hwpmc
+dev/hwpmc/hwpmc_uncore.c	optional hwpmc
 dev/hwpmc/hwpmc_pentium.c	optional hwpmc
 dev/hwpmc/hwpmc_piv.c		optional hwpmc
 dev/hwpmc/hwpmc_ppro.c		optional hwpmc
 dev/hwpmc/hwpmc_tsc.c		optional hwpmc
 dev/hwpmc/hwpmc_x86.c		optional hwpmc
 dev/io/iodev.c			optional io
-dev/kbd/kbd.c			optional pckbd | sc | ukbd | usb2_input_kbd
+dev/kbd/kbd.c			optional pckbd | sc | ukbd
 dev/le/if_le_cbus.c		optional le isa
+dev/lindev/full.c		optional lindev
+dev/lindev/lindev.c		optional lindev
 dev/mem/memutil.c		optional mem
 dev/mse/mse.c			optional mse
 dev/mse/mse_cbus.c		optional mse isa
@@ -148,10 +148,8 @@ i386/i386/in_cksum.c		optional inet
 i386/i386/initcpu.c		standard
 i386/i386/intr_machdep.c	standard
 i386/i386/io.c			optional io
-i386/i386/io_apic.c		optional apic
 i386/i386/k6_mem.c		optional mem
 i386/i386/legacy.c		standard
-i386/i386/local_apic.c		optional apic
 i386/i386/locore.s		standard	no-obj
 i386/i386/mem.c			optional mem
 i386/i386/minidump_machdep.c	standard
@@ -161,7 +159,6 @@ i386/i386/mp_watchdog.c		optional mp_watchdog smp
 i386/i386/mpboot.s		optional smp
 i386/i386/mptable.c		optional apic
 i386/i386/mptable_pci.c		optional apic pci
-i386/i386/msi.c			optional apic pci
 i386/i386/nexus.c		standard
 i386/i386/perfmon.c		optional perfmon
 i386/i386/pmap.c		standard
@@ -194,10 +191,7 @@ i386/ibcs2/ibcs2_util.c		optional ibcs2
 i386/ibcs2/ibcs2_xenix.c	optional ibcs2
 i386/ibcs2/ibcs2_xenix_sysent.c	optional ibcs2
 i386/ibcs2/imgact_coff.c	optional ibcs2
-i386/isa/atpic.c		standard
-#i386/isa/atpic_vector.s		standard
 i386/isa/elink.c		optional ep | ie
-i386/isa/isa.c			optional isa
 i386/isa/npx.c			optional npx
 i386/isa/pmtimer.c		optional pmtimer
 i386/isa/prof_machdep.c		optional profiling-routine
@@ -240,7 +234,7 @@ pc98/cbus/gdc.c			optional gdc
 pc98/cbus/nmi.c			standard
 pc98/cbus/olpt.c		optional olpt
 pc98/cbus/pckbd.c		optional pckbd
-pc98/cbus/pcrtc.c		standard
+pc98/cbus/pcrtc.c		optional atpic
 pc98/cbus/pmc.c			optional pmc
 pc98/cbus/scgdcrndr.c		optional sc gdc
 pc98/cbus/scterm-sck.c		optional sc
@@ -255,3 +249,12 @@ pc98/pc98/canbus.c		optional canbus
 pc98/pc98/canbus_if.m		optional canbus
 pc98/pc98/machdep.c		standard
 pc98/pc98/pc98_machdep.c	standard
+#
+# x86 shared code between IA32, AMD64 and PC98 architectures
+#
+x86/isa/atpic.c			optional atpic	
+x86/isa/isa.c			optional isa
+x86/x86/io_apic.c		optional apic
+x86/x86/local_apic.c		optional apic
+x86/x86/mca.c			standard
+x86/x86/msi.c			optional apic pci

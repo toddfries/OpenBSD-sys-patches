@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/audit/audit.c,v 1.50 2009/03/09 10:45:58 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/audit/audit.c,v 1.53 2009/07/28 21:39:58 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -77,6 +77,7 @@ static MALLOC_DEFINE(M_AUDITCRED, "audit_cred", "Audit cred storage");
 MALLOC_DEFINE(M_AUDITDATA, "audit_data", "Audit data storage");
 MALLOC_DEFINE(M_AUDITPATH, "audit_path", "Audit path storage");
 MALLOC_DEFINE(M_AUDITTEXT, "audit_text", "Audit text storage");
+MALLOC_DEFINE(M_AUDITGIDSET, "audit_gidset", "Audit GID set storage");
 
 SYSCTL_NODE(_security, OID_AUTO, audit, CTLFLAG_RW, 0,
     "TrustedBSD audit controls");
@@ -129,8 +130,8 @@ struct mtx		audit_mtx;
  * outstanding in the system.
  */
 struct kaudit_queue	audit_q;
-size_t			audit_q_len;
-size_t			audit_pre_q_len;
+int			audit_q_len;
+int			audit_pre_q_len;
 
 /*
  * Audit queue control settings (minimum free, low/high water marks, etc.)
@@ -253,6 +254,8 @@ audit_record_dtor(void *mem, int size, void *arg)
 		free(ar->k_ar.ar_arg_argv, M_AUDITTEXT);
 	if (ar->k_ar.ar_arg_envv != NULL)
 		free(ar->k_ar.ar_arg_envv, M_AUDITTEXT);
+	if (ar->k_ar.ar_arg_groups.gidset != NULL)
+		free(ar->k_ar.ar_arg_groups.gidset, M_AUDITGIDSET);
 }
 
 /*
@@ -406,14 +409,19 @@ audit_commit(struct kaudit_record *ar, int error, int retval)
 	else
 		sorf = AU_PRS_SUCCESS;
 
+	/*
+	 * syscalls.master sometimes contains a prototype event number, which
+	 * we will transform into a more specific event number now that we
+	 * have more complete information gathered during the system call.
+	 */
 	switch(ar->k_ar.ar_event) {
 	case AUE_OPEN_RWTC:
-		/*
-		 * The open syscall always writes a AUE_OPEN_RWTC event;
-		 * change it to the proper type of event based on the flags
-		 * and the error value.
-		 */
 		ar->k_ar.ar_event = audit_flags_and_error_to_openevent(
+		    ar->k_ar.ar_arg_fflags, error);
+		break;
+
+	case AUE_OPENAT_RWTC:
+		ar->k_ar.ar_event = audit_flags_and_error_to_openatevent(
 		    ar->k_ar.ar_arg_fflags, error);
 		break;
 

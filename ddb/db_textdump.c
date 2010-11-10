@@ -57,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ddb/db_textdump.c,v 1.5 2008/10/01 22:08:53 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/ddb/db_textdump.c,v 1.6 2009/05/29 21:27:12 jamie Exp $");
 
 #include "opt_config.h"
 
@@ -68,7 +68,6 @@ __FBSDID("$FreeBSD: src/sys/ddb/db_textdump.c,v 1.5 2008/10/01 22:08:53 peter Ex
 #include <sys/msgbuf.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
-#include <sys/vimage.h>
 
 #include <ddb/ddb.h>
 #include <ddb/db_lex.h>

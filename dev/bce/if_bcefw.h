@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2006-2009 Broadcom Corporation
+ * Copyright (c) 2006-2010 Broadcom Corporation
  *	David Christensen <davidch@broadcom.com>.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/bce/if_bcefw.h,v 1.9 2009/03/04 00:05:40 davidch Exp $
+ * $FreeBSD: src/sys/dev/bce/if_bcefw.h,v 1.10 2010/03/18 21:00:53 davidch Exp $
  */
 
 /*

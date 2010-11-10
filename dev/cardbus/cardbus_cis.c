@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus_cis.c,v 1.65 2008/11/17 01:32:29 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus_cis.c,v 1.70 2009/12/30 22:34:26 jhb Exp $");
 
 /*
  * CIS Handling for the Cardbus Bus
@@ -402,16 +402,11 @@ static int
 cardbus_read_tuple_mem(device_t cbdev, struct resource *res, uint32_t start,
     uint32_t *off, int *tupleid, int *len, uint8_t *tupledata)
 {
-	bus_space_tag_t bt;
-	bus_space_handle_t bh;
 	int ret;
 
-	bt = rman_get_bustag(res);
-	bh = rman_get_bushandle(res);
-
-	*tupleid = bus_space_read_1(bt, bh, start + *off);
-	*len = bus_space_read_1(bt, bh, start + *off + 1);
-	bus_space_read_region_1(bt, bh, *off + start + 2, tupledata, *len);
+	*tupleid = bus_read_1(res, start + *off);
+	*len = bus_read_1(res, start + *off + 1);
+	bus_read_region_1(res, *off + start + 2, tupledata, *len);
 	ret = 0;
 	*off += *len + 2;
 	return (ret);
@@ -435,9 +430,7 @@ cardbus_read_tuple_finish(device_t cbdev, device_t child, int rid,
 {
 	if (res != CIS_CONFIG_SPACE) {
 		bus_release_resource(child, SYS_RES_MEMORY, rid, res);
-		if (rid == PCIM_CIS_ASI_ROM)
-			pci_write_config(child, rid, pci_read_config(child,
-			    rid, 4) & ~PCIR_BIOS, 4);
+		bus_delete_resource(child, SYS_RES_MEMORY, rid);
 	}
 }
 
@@ -451,8 +444,7 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 	space = *start & PCIM_CIS_ASI_MASK;
 	switch (space) {
 	case PCIM_CIS_ASI_CONFIG:
-		if (cardbus_cis_debug)
-			device_printf(cbdev, "CIS in PCI config space\n");
+		DEVPRINTF((cbdev, "CIS in PCI config space\n"));
 		/* CIS in PCI config space need no initialization */
 		return (CIS_CONFIG_SPACE);
 	case PCIM_CIS_ASI_BAR0:
@@ -462,13 +454,11 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 	case PCIM_CIS_ASI_BAR4:
 	case PCIM_CIS_ASI_BAR5:
 		*rid = PCIR_BAR(space - PCIM_CIS_ASI_BAR0);
-		if (cardbus_cis_debug)
-			device_printf(cbdev, "CIS in BAR %#x\n", *rid);
+		DEVPRINTF((cbdev, "CIS in BAR %#x\n", *rid));
 		break;
 	case PCIM_CIS_ASI_ROM:
 		*rid = PCIR_BIOS;
-		if (cardbus_cis_debug)
-			device_printf(cbdev, "CIS in option rom\n");
+		DEVPRINTF((cbdev, "CIS in option rom\n"));
 		break;
 	default:
 		device_printf(cbdev, "Unable to read CIS: Unknown space: %d\n",
@@ -484,14 +474,10 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 		    "to read CIS.\n");
 		return (NULL);
 	}
-	if (*rid == PCIR_BIOS)
-		pci_write_config(child, *rid,
-		    rman_get_start(res) | PCIM_BIOS_ENABLE, 4);
+	DEVPRINTF((cbdev, "CIS Mapped to %#lx\n", rman_get_start(res)));
 
 	/* Flip to the right ROM image if CIS is in ROM */
 	if (space == PCIM_CIS_ASI_ROM) {
-		bus_space_tag_t bt;
-		bus_space_handle_t bh;
 		uint32_t imagesize;
 		uint32_t imagebase = 0;
 		uint32_t pcidata;
@@ -499,19 +485,16 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 		int romnum = 0;
 		int imagenum;
 
-		bt = rman_get_bustag(res);
-		bh = rman_get_bushandle(res);
-
 		imagenum = (*start & PCIM_CIS_ROM_MASK) >> 28;
 		for (romnum = 0;; romnum++) {
-			romsig = bus_space_read_2(bt, bh,
+			romsig = bus_read_2(res,
 			    imagebase + CARDBUS_EXROM_SIGNATURE);
 			if (romsig != 0xaa55) {
 				device_printf(cbdev, "Bad header in rom %d: "
 				    "[%x] %04x\n", romnum, imagebase +
 				    CARDBUS_EXROM_SIGNATURE, romsig);
-				bus_release_resource(child, SYS_RES_MEMORY,
-				    *rid, res);
+				cardbus_read_tuple_finish(cbdev, child, *rid,
+				    res);
 				*rid = 0;
 				return (NULL);
 			}
@@ -524,9 +507,9 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 				break;
 
 			/* Find out where the next Option ROM image is */
-			pcidata = imagebase + bus_space_read_2(bt, bh,
+			pcidata = imagebase + bus_read_2(res,
 			    imagebase + CARDBUS_EXROM_DATA_PTR);
-			imagesize = bus_space_read_2(bt, bh,
+			imagesize = bus_read_2(res,
 			    pcidata + CARDBUS_EXROM_DATA_IMAGE_LENGTH);
 
 			if (imagesize == 0) {
@@ -543,12 +526,12 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 			/* Image size is in 512 byte units */
 			imagesize <<= 9;
 
-			if ((bus_space_read_1(bt, bh, pcidata +
+			if ((bus_read_1(res, pcidata +
 			    CARDBUS_EXROM_DATA_INDICATOR) & 0x80) != 0) {
 				device_printf(cbdev, "Cannot find CIS in "
 				    "Option ROM\n");
-				bus_release_resource(child, SYS_RES_MEMORY,
-				    *rid, res);
+				cardbus_read_tuple_finish(cbdev, child, *rid,
+				    res);
 				*rid = 0;
 				return (NULL);
 			}
@@ -558,8 +541,7 @@ cardbus_read_tuple_init(device_t cbdev, device_t child, uint32_t *start,
 	} else {
 		*start = *start & PCIM_CIS_ADDR_MASK;
 	}
-	if (cardbus_cis_debug)
-		device_printf(cbdev, "CIS offset is %#x\n", *start);
+	DEVPRINTF((cbdev, "CIS offset is %#x\n", *start));
 
 	return (res);
 }
@@ -598,13 +580,10 @@ cardbus_parse_cis(device_t cbdev, device_t child,
 	bzero(tupledata, MAXTUPLESIZE);
 	expect_linktarget = TRUE;
 	if ((start = pci_read_config(child, PCIR_CIS, 4)) == 0) {
-		if (cardbus_cis_debug)
-			device_printf(cbdev,
-			    "Warning: CIS pointer 0 (no CIS present)\n");
+		DEVPRINTF((cbdev, "Warning: CIS pointer is 0: (no CIS)\n"));
 		return (ENXIO);
 	}
-	if (cardbus_cis_debug)
-		device_printf(cbdev, "CIS pointer is %#x\n", start);
+	DEVPRINTF((cbdev, "CIS pointer is %#x\n", start));
 	off = 0;
 	res = cardbus_read_tuple_init(cbdev, child, &start, &rid);
 	if (res == NULL) {

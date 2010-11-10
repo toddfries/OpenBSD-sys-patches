@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb/usb_endian.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb/usb_endian.h,v 1.5 2009/06/15 01:09:19 thompsa Exp $ */
 /*
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -24,8 +24,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _USB2_ENDIAN_H_
-#define	_USB2_ENDIAN_H_
+#ifndef _USB_ENDIAN_H_
+#define	_USB_ENDIAN_H_
 
 #include <sys/stdint.h>
 #include <sys/endian.h>
@@ -48,19 +48,19 @@ typedef uint8_t uQWord[8];
 
 #define	UGETW(w)			\
   ((w)[0] |				\
-  ((w)[1] << 8))
+  (((uint16_t)((w)[1])) << 8))
 
 #define	UGETDW(w)			\
   ((w)[0] |				\
-  ((w)[1] << 8) |			\
-  ((w)[2] << 16) |			\
-  ((w)[3] << 24))
+  (((uint16_t)((w)[1])) << 8) |		\
+  (((uint32_t)((w)[2])) << 16) |	\
+  (((uint32_t)((w)[3])) << 24))
 
 #define	UGETQW(w)			\
   ((w)[0] |				\
-  ((w)[1] << 8) |			\
-  ((w)[2] << 16) |			\
-  ((w)[3] << 24) |			\
+  (((uint16_t)((w)[1])) << 8) |		\
+  (((uint32_t)((w)[2])) << 16) |	\
+  (((uint32_t)((w)[3])) << 24) |	\
   (((uint64_t)((w)[4])) << 32) |	\
   (((uint64_t)((w)[5])) << 40) |	\
   (((uint64_t)((w)[6])) << 48) |	\
@@ -116,4 +116,4 @@ typedef uint8_t uQWord[8];
   (w)[7] = (uint8_t)(b7);		\
 } while (0)
 
-#endif					/* _USB2_ENDIAN_H_ */
+#endif					/* _USB_ENDIAN_H_ */

@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/geom/geom.h,v 1.102 2009/02/01 01:50:09 marcel Exp $
+ * $FreeBSD: src/sys/geom/geom.h,v 1.107 2010/05/05 18:53:24 jh Exp $
  */
 
 #ifndef _GEOM_GEOM_H_
@@ -134,6 +134,7 @@ struct g_geom {
 	void			*softc;
 	unsigned		flags;
 #define	G_GEOM_WITHER		1
+#define	G_GEOM_VOLATILE_BIO	2
 };
 
 /*
@@ -193,6 +194,17 @@ struct g_provider {
 	/* Two fields for the implementing class to use */
 	void			*private;
 	u_int			index;
+};
+
+/*
+ * Descriptor of a classifier. We can register a function and
+ * an argument, which is called by g_io_request() on bio's
+ * that are not previously classified.
+ */
+struct g_classifier_hook {
+	TAILQ_ENTRY(g_classifier_hook) link;
+	int			(*func)(void *arg, struct bio *bp);
+	void			*arg;
 };
 
 /* geom_dev.c */
@@ -272,6 +284,8 @@ void g_destroy_bio(struct bio *);
 void g_io_deliver(struct bio *bp, int error);
 int g_io_getattr(const char *attr, struct g_consumer *cp, int *len, void *ptr);
 int g_io_flush(struct g_consumer *cp);
+int g_register_classifier(struct g_classifier_hook *hook);
+void g_unregister_classifier(struct g_classifier_hook *hook);
 void g_io_request(struct bio *bp, struct g_consumer *cp);
 struct bio *g_new_bio(void);
 struct bio *g_alloc_bio(void);
@@ -338,6 +352,9 @@ g_free(void *ptr)
 	do {							\
 		sx_assert(&topology_lock, SX_UNLOCKED);		\
 	} while (0)
+
+#define g_topology_sleep(chan, timo)				\
+	sx_sleep(chan, &topology_lock, 0, "gtopol", timo)
 
 #define DECLARE_GEOM_CLASS(class, name) 			\
 	static moduledata_t name##_mod = {			\

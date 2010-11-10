@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sysvec.c,v 1.49 2008/12/17 13:13:35 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sysvec.c,v 1.51 2010/05/23 18:32:02 kib Exp $");
 
 /* XXX we use functions that might not exist. */
 #include "opt_compat.h"
@@ -191,7 +191,10 @@ struct sysentvec svr4_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz     = NULL,
-	.sv_flags	= SV_ABI_UNDEF | SV_IA32 | SV_ILP32
+	.sv_flags	= SV_ABI_UNDEF | SV_IA32 | SV_ILP32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = NULL,
 };
 
 const char      svr4_emul_path[] = "/compat/svr4";
@@ -204,6 +207,7 @@ Elf32_Brandinfo svr4_brand = {
 	.interp_path	= "/lib/libc.so.1",
 	.sysvec		= &svr4_sysvec,
 	.interp_newpath	= NULL,
+	.brand_note	= NULL,
 	.flags		= 0
 };
 

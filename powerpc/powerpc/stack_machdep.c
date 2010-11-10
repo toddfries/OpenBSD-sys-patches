@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/stack_machdep.c,v 1.1 2007/12/02 20:40:34 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/stack_machdep.c,v 1.2 2009/10/30 16:00:34 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -43,7 +43,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powerpc/stack_machdep.c,v 1.1 2007/12/02 20:
 #include <machine/trap.h>
 
 static void
-stack_capture(struct stack *st, register_t frame)
+stack_capture(struct stack *st, vm_offset_t frame)
 {
 	vm_offset_t callpc;
 
@@ -76,7 +76,7 @@ stack_capture(struct stack *st, register_t frame)
 void
 stack_save_td(struct stack *st, struct thread *td)
 {
-	register_t frame;
+	vm_offset_t frame;
 
 	if (TD_IS_SWAPPED(td))
 		panic("stack_save_td: swapped");

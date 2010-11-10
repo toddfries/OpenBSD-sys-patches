@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_state.c,v 1.24 2009/03/07 21:36:57 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_state.c,v 1.28 2010/04/22 18:21:25 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -1420,7 +1420,7 @@ static void radeon_cp_dispatch_swap(struct drm_device *dev)
 static void radeon_cp_dispatch_flip(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-	struct drm_sarea *sarea = (struct drm_sarea *)dev_priv->sarea->handle;
+	struct drm_sarea *sarea = (struct drm_sarea *)dev_priv->sarea->virtual;
 	int offset = (dev_priv->sarea_priv->pfCurrentPage == 1)
 	    ? dev_priv->front_offset : dev_priv->back_offset;
 	RING_LOCALS;
@@ -1541,7 +1541,7 @@ static void radeon_cp_dispatch_vertex(struct drm_device * dev,
 	} while (i < nbox);
 }
 
-static void radeon_cp_discard_buffer(struct drm_device *dev, struct drm_buf *buf)
+void radeon_cp_discard_buffer(struct drm_device *dev, struct drm_buf *buf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv = buf->dev_private;
@@ -1582,7 +1582,7 @@ static void radeon_cp_dispatch_indirect(struct drm_device * dev,
 		 */
 		if (dwords & 1) {
 			u32 *data = (u32 *)
-			    ((char *)dev->agp_buffer_map->handle
+			    ((char *)dev->agp_buffer_map->virtual
 			     + buf->offset + start);
 			data[dwords++] = RADEON_CP_PACKET2;
 		}
@@ -1629,7 +1629,7 @@ static void radeon_cp_dispatch_indices(struct drm_device *dev,
 
 	dwords = (prim->finish - prim->start + 3) / sizeof(u32);
 
-	data = (u32 *) ((char *)dev->agp_buffer_map->handle +
+	data = (u32 *) ((char *)dev->agp_buffer_map->virtual +
 			elt_buf->offset + prim->start);
 
 	data[0] = CP_PACKET3(RADEON_3D_RNDR_GEN_INDX_PRIM, dwords - 2);
@@ -1781,7 +1781,7 @@ static int radeon_cp_dispatch_texture(struct drm_device * dev,
 		/* Dispatch the indirect buffer.
 		 */
 		buffer =
-		    (u32 *) ((char *)dev->agp_buffer_map->handle + buf->offset);
+		    (u32 *) ((char *)dev->agp_buffer_map->virtual + buf->offset);
 		dwords = size / 4;
 
 #define RADEON_COPY_MT(_buf, _data, _width) \
@@ -2202,7 +2202,10 @@ static int radeon_cp_swap(struct drm_device *dev, void *data, struct drm_file *f
 	if (sarea_priv->nbox > RADEON_NR_SAREA_CLIPRECTS)
 		sarea_priv->nbox = RADEON_NR_SAREA_CLIPRECTS;
 
-	radeon_cp_dispatch_swap(dev);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		r600_cp_dispatch_swap(dev);
+	else
+		radeon_cp_dispatch_swap(dev);
 	sarea_priv->ctx_owner = 0;
 
 	COMMIT_RING();
@@ -2399,7 +2402,10 @@ static int radeon_cp_texture(struct drm_device *dev, void *data, struct drm_file
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	ret = radeon_cp_dispatch_texture(dev, file_priv, tex, &image);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		ret = r600_cp_dispatch_texture(dev, file_priv, tex, &image);
+	else
+		ret = radeon_cp_dispatch_texture(dev, file_priv, tex, &image);
 
 	return ret;
 }
@@ -3018,7 +3024,10 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		value = GET_SCRATCH(dev_priv, 2);
 		break;
 	case RADEON_PARAM_IRQ_NR:
-		value = dev->irq;
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			value = 0;
+		else
+			value = dev->irq;
 		break;
 	case RADEON_PARAM_GART_BASE:
 		value = dev_priv->gart_vm_start;
@@ -3071,6 +3080,9 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		break;
 	case RADEON_PARAM_NUM_GB_PIPES:
 		value = dev_priv->num_gb_pipes;
+		break;
+	case RADEON_PARAM_NUM_Z_PIPES:
+		value = dev_priv->num_z_pipes;
 		break;
 	default:
 		DRM_DEBUG("Invalid parameter %d\n", param->param);
@@ -3156,6 +3168,14 @@ void radeon_driver_preclose(struct drm_device *dev, struct drm_file *file_priv)
 void radeon_driver_lastclose(struct drm_device *dev)
 {
 	radeon_surfaces_release(PCIGART_FILE_PRIV, dev->dev_private);
+	if (dev->dev_private) {
+		drm_radeon_private_t *dev_priv = dev->dev_private;
+
+		if (dev_priv->sarea_priv &&
+		    dev_priv->sarea_priv->pfCurrentPage != 0)
+			radeon_cp_dispatch_flip(dev);
+	}
+
 	radeon_do_release(dev);
 }
 
@@ -3216,7 +3236,8 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_RADEON_IRQ_WAIT, radeon_irq_wait, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SETPARAM, radeon_cp_setparam, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_ALLOC, radeon_surface_alloc, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH)
+	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_RADEON_CS, radeon_cs_ioctl, DRM_AUTH)
 };
 
 int radeon_max_ioctl = DRM_ARRAY_SIZE(radeon_ioctls);

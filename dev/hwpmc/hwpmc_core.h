@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/hwpmc/hwpmc_core.h,v 1.1 2008/11/27 09:00:47 jkoshy Exp $
+ * $FreeBSD: src/sys/dev/hwpmc/hwpmc_core.h,v 1.2 2010/04/02 13:23:49 fabient Exp $
  */
 
 #ifndef _DEV_HWPMC_CORE_H_
@@ -46,6 +46,7 @@ struct pmc_md_iaf_op_pmcallocate {
  */
 struct pmc_md_iap_op_pmcallocate {
 	uint32_t	pm_iap_config;
+	uint32_t	pm_iap_rsp;
 };
 
 #define	IAP_EVSEL(C)	((C) & 0xFF)
@@ -58,6 +59,8 @@ struct pmc_md_iap_op_pmcallocate {
 #define	IAP_EN		(1 << 22)
 #define	IAP_INV		(1 << 23)
 #define	IAP_CMASK(C)	(((C) & 0xFF) << 24)
+
+#define	IA_OFFCORE_RSP_MASK	0xF7FF
 
 #ifdef	_KERNEL
 
@@ -76,16 +79,15 @@ struct pmc_md_iap_op_pmcallocate {
 /*
  * Programmable counters.
  */
-#define	IAP_PMC0				0x0C1
-#define	IAP_PMC1				0x0C2
 
+#define	IAP_PMC0				0x0C1
 #define	IAP_EVSEL0				0x186
-#define	IAP_EVSEL1				0x187
 
 /*
  * Simplified programming interface in Intel Performance Architecture
  * v2 and later.
  */
+
 #define	IA_GLOBAL_STATUS			0x38E
 #define	IA_GLOBAL_CTRL				0x38F
 #define	IA_GLOBAL_OVF_CTRL			0x390
@@ -93,12 +95,19 @@ struct pmc_md_iap_op_pmcallocate {
 #define	IA_GLOBAL_STATUS_FLAG_CONDCHG		(1ULL << 63)
 #define	IA_GLOBAL_STATUS_FLAG_OVFBUF		(1ULL << 62)
 
+/*
+ * Offcore response configuration.
+ */
+#define	IA_OFFCORE_RSP0				0x1A6
+#define	IA_OFFCORE_RSP1				0x1A7
+
 struct pmc_md_iaf_pmc {
 	uint64_t	pm_iaf_ctrl;
 };
 
 struct pmc_md_iap_pmc {
 	uint32_t	pm_iap_evsel;
+	uint32_t	pm_iap_rsp;
 };
 
 /*

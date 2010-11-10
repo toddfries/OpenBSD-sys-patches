@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)vnode.h	8.7 (Berkeley) 2/4/94
- * $FreeBSD: src/sys/sys/vnode.h,v 1.349 2009/03/08 19:06:26 marcus Exp $
+ * $FreeBSD: src/sys/sys/vnode.h,v 1.369 2010/06/11 18:20:56 avg Exp $
  */
 
 #ifndef _SYS_VNODE_H_
@@ -135,7 +135,7 @@ struct vnode {
 	 */
 	LIST_HEAD(, namecache) v_cache_src;	/* c Cache entries from us */
 	TAILQ_HEAD(, namecache) v_cache_dst;	/* c Cache entries to us */
-	struct	vnode *v_dd;			/* c .. vnode */
+	struct namecache *v_cache_dd;		/* c Cache entry for .. vnode */
 
 	/*
 	 * clustering stuff
@@ -219,9 +219,10 @@ struct xvnode {
 #define VN_KNOTE(vp, b, a)					\
 	do {							\
 		if (!VN_KNLIST_EMPTY(vp))			\
-			KNOTE(&vp->v_pollinfo->vpi_selinfo.si_note, (b), (a)); \
+			KNOTE(&vp->v_pollinfo->vpi_selinfo.si_note, (b), \
+			    (a) | KNF_NOKQLOCK);		\
 	} while (0)
-#define	VN_KNOTE_LOCKED(vp, b)		VN_KNOTE(vp, b, 1)
+#define	VN_KNOTE_LOCKED(vp, b)		VN_KNOTE(vp, b, KNF_LISTLOCKED)
 #define	VN_KNOTE_UNLOCKED(vp, b)	VN_KNOTE(vp, b, 0)
 
 /*
@@ -236,7 +237,6 @@ struct xvnode {
 #define	VI_AGE		0x0040	/* Insert vnode at head of free list */
 #define	VI_DOOMED	0x0080	/* This vnode is being recycled */
 #define	VI_FREE		0x0100	/* This vnode is on the freelist */
-#define	VI_OBJDIRTY	0x0400	/* object might be dirty */
 #define	VI_DOINGINACT	0x0800	/* VOP_INACTIVE is in progress */
 #define	VI_OWEINACT	0x1000	/* Need to call inactive */
 
@@ -308,15 +308,48 @@ struct vattr {
 #define IO_SEQSHIFT	16		/* seq heuristic in upper 16 bits */
 
 /*
- *  Flags for accmode_t.
+ * Flags for accmode_t.
  */
-#define	VEXEC	000100		/* execute/search permission */
-#define	VWRITE	000200		/* write permission */
-#define	VREAD	000400		/* read permission */
-#define	VADMIN	010000		/* permission to administer */
-#define	VSTAT	020000		/* permission to retrieve attrs */
-#define	VAPPEND	040000		/* permission to write/append */
-#define	VALLPERM	(VEXEC | VWRITE | VREAD | VADMIN | VSTAT | VAPPEND)
+#define	VEXEC			000000000100 /* execute/search permission */
+#define	VWRITE			000000000200 /* write permission */
+#define	VREAD			000000000400 /* read permission */
+#define	VADMIN			000000010000 /* being the file owner */
+#define	VAPPEND			000000040000 /* permission to write/append */
+/*
+ * VEXPLICIT_DENY makes VOP_ACCESSX(9) return EPERM or EACCES only
+ * if permission was denied explicitly, by a "deny" rule in NFSv4 ACL,
+ * and 0 otherwise.  This never happens with ordinary unix access rights
+ * or POSIX.1e ACLs.  Obviously, VEXPLICIT_DENY must be OR-ed with
+ * some other V* constant.
+ */
+#define	VEXPLICIT_DENY		000000100000
+#define	VREAD_NAMED_ATTRS 	000000200000 /* not used */
+#define	VWRITE_NAMED_ATTRS 	000000400000 /* not used */
+#define	VDELETE_CHILD	 	000001000000
+#define	VREAD_ATTRIBUTES 	000002000000 /* permission to stat(2) */
+#define	VWRITE_ATTRIBUTES 	000004000000 /* change {m,c,a}time */
+#define	VDELETE		 	000010000000
+#define	VREAD_ACL	 	000020000000 /* read ACL and file mode */
+#define	VWRITE_ACL	 	000040000000 /* change ACL and/or file mode */
+#define	VWRITE_OWNER	 	000100000000 /* change file owner */
+#define	VSYNCHRONIZE	 	000200000000 /* not used */
+
+/*
+ * Permissions that were traditionally granted only to the file owner.
+ */
+#define VADMIN_PERMS	(VADMIN | VWRITE_ATTRIBUTES | VWRITE_ACL | \
+    VWRITE_OWNER)
+
+/*
+ * Permissions that were traditionally granted to everyone.
+ */
+#define VSTAT_PERMS	(VREAD_ATTRIBUTES | VREAD_ACL)
+
+/*
+ * Permissions that allow to change the state of the file in any way.
+ */
+#define VMODIFY_PERMS	(VWRITE | VAPPEND | VADMIN_PERMS | VDELETE_CHILD | \
+    VDELETE)
 
 /*
  * Token indicating no attribute value yet assigned.
@@ -379,14 +412,6 @@ extern	struct uma_zone *namei_zone;
 extern	int prtactive;			/* nonzero to call vprint() */
 extern	struct vattr va_null;		/* predefined null vattr structure */
 
-/*
- * Macro/function to check for client cache inconsistency w.r.t. leasing.
- */
-#define	LEASE_READ	0x1		/* Check lease for readers */
-#define	LEASE_WRITE	0x2		/* Check lease for modifiers */
-
-extern void	(*lease_updatetime)(int deltat);
-
 #define	VI_LOCK(vp)	mtx_lock(&(vp)->v_interlock)
 #define	VI_LOCK_FLAGS(vp, flags) mtx_lock_flags(&(vp)->v_interlock, (flags))
 #define	VI_TRYLOCK(vp)	mtx_trylock(&(vp)->v_interlock)
@@ -394,7 +419,7 @@ extern void	(*lease_updatetime)(int deltat);
 #define	VI_MTX(vp)	(&(vp)->v_interlock)
 
 #define	VN_LOCK_AREC(vp)						\
-	((vp)->v_vnlock->lock_object.lo_flags |= LK_CANRECURSE)
+	((vp)->v_vnlock->lock_object.lo_flags |= LO_RECURSABLE)
 #define	VN_LOCK_ASHARE(vp)						\
 	((vp)->v_vnlock->lock_object.lo_flags &= ~LK_NOSHARE)
 
@@ -499,17 +524,17 @@ void	assert_vop_unlocked(struct vnode *vp, const char *str);
 
 #else /* !DEBUG_VFS_LOCKS */
 
-#define	ASSERT_VI_LOCKED(vp, str)
-#define	ASSERT_VI_UNLOCKED(vp, str)
-#define	ASSERT_VOP_ELOCKED(vp, str)
+#define	ASSERT_VI_LOCKED(vp, str)	((void)0)
+#define	ASSERT_VI_UNLOCKED(vp, str)	((void)0)
+#define	ASSERT_VOP_ELOCKED(vp, str)	((void)0)
 #if 0
 #define	ASSERT_VOP_ELOCKED_OTHER(vp, str)
 #endif
-#define	ASSERT_VOP_LOCKED(vp, str)
+#define	ASSERT_VOP_LOCKED(vp, str)	((void)0)
 #if 0
 #define	ASSERT_VOP_SLOCKED(vp, str)
 #endif
-#define	ASSERT_VOP_UNLOCKED(vp, str)
+#define	ASSERT_VOP_UNLOCKED(vp, str)	((void)0)
 #endif /* DEBUG_VFS_LOCKS */
 
 
@@ -537,6 +562,9 @@ vn_canvmio(struct vnode *vp)
  */
 #include "vnode_if.h"
 
+/* vn_open_flags */
+#define	VN_OPEN_NOAUDIT		0x00000001
+
 /*
  * Public vnode manipulation functions.
  */
@@ -553,8 +581,6 @@ struct ucred;
 struct uio;
 struct vattr;
 struct vnode;
-
-extern int	(*lease_check_hook)(struct vop_lease_args *);
 
 /* cache_* may belong in namei.h. */
 void	cache_enter(struct vnode *dvp, struct vnode *vp,
@@ -574,8 +600,9 @@ int	insmntque1(struct vnode *vp, struct mount *mp,
 	    void (*dtr)(struct vnode *, void *), void *dtr_arg);
 int	insmntque(struct vnode *vp, struct mount *mp);
 u_quad_t init_va_filerev(void);
-int	lease_check(struct vop_lease_args *ap);
 int	speedup_syncer(void);
+int	vn_vptocnp(struct vnode **vp, struct ucred *cred, char *buf,
+	    u_int *buflen);
 #define textvp_fullpath(p, rb, rfb) \
 	vn_fullpath(FIRST_THREAD_IN_PROC(p), (p)->p_textvp, rb, rfb)
 int	vn_fullpath(struct thread *td, struct vnode *vn,
@@ -585,6 +612,9 @@ int	vn_fullpath_global(struct thread *td, struct vnode *vn,
 int	vn_commname(struct vnode *vn, char *buf, u_int buflen);
 int	vaccess(enum vtype type, mode_t file_mode, uid_t file_uid,
 	    gid_t file_gid, accmode_t accmode, struct ucred *cred,
+	    int *privused);
+int	vaccess_acl_nfs4(enum vtype type, uid_t file_uid, gid_t file_gid,
+	    struct acl *aclp, accmode_t accmode, struct ucred *cred,
 	    int *privused);
 int	vaccess_acl_posix1e(enum vtype type, uid_t file_uid,
 	    gid_t file_gid, struct acl *acl, accmode_t accmode,
@@ -602,6 +632,7 @@ void	vholdl(struct vnode *);
 int	vinvalbuf(struct vnode *vp, int save, int slpflag, int slptimeo);
 int	vtruncbuf(struct vnode *vp, struct ucred *cred, struct thread *td,
 	    off_t length, int blksize);
+void	vunref(struct vnode *);
 void	vn_printf(struct vnode *vp, const char *fmt, ...) __printflike(2,3);
 #define vprint(label, vp) vn_printf((vp), "%s\n", (label))
 int	vrecycle(struct vnode *vp, struct thread *td);
@@ -614,7 +645,7 @@ int	_vn_lock(struct vnode *vp, int flags, char *file, int line);
 #define vn_lock(vp, flags) _vn_lock(vp, flags, __FILE__, __LINE__)
 int	vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp);
 int	vn_open_cred(struct nameidata *ndp, int *flagp, int cmode,
-	    struct ucred *cred, struct file *fp);
+	    u_int vn_open_flags, struct ucred *cred, struct file *fp);
 int	vn_pollrecord(struct vnode *vp, struct thread *p, int events);
 int	vn_rdwr(enum uio_rw rw, struct vnode *vp, void *base,
 	    int len, off_t offset, enum uio_seg segflg, int ioflg,
@@ -624,6 +655,8 @@ int	vn_rdwr_inchunks(enum uio_rw rw, struct vnode *vp, void *base,
 	    size_t len, off_t offset, enum uio_seg segflg, int ioflg,
 	    struct ucred *active_cred, struct ucred *file_cred, size_t *aresid,
 	    struct thread *td);
+int	vn_rlimit_fsize(const struct vnode *vn, const struct uio *uio,
+	    const struct thread *td);
 int	vn_stat(struct vnode *vp, struct stat *sb, struct ucred *active_cred,
 	    struct ucred *file_cred, struct thread *td);
 int	vn_start_write(struct vnode *vp, struct mount **mpp, int flags);
@@ -638,6 +671,7 @@ int	vn_extattr_rm(struct vnode *vp, int ioflg, int attrnamespace,
 	    const char *attrname, struct thread *td);
 int	vn_vget_ino(struct vnode *vp, ino_t ino, int lkflags,
 	    struct vnode **rvp);
+
 
 int	vfs_cache_lookup(struct vop_lookup_args *ap);
 void	vfs_timestamp(struct timespec *);
@@ -654,8 +688,11 @@ int	vop_stdlock(struct vop_lock1_args *);
 int	vop_stdputpages(struct vop_putpages_args *);
 int	vop_stdunlock(struct vop_unlock_args *);
 int	vop_nopoll(struct vop_poll_args *);
+int	vop_stdaccess(struct vop_access_args *ap);
+int	vop_stdaccessx(struct vop_accessx_args *ap);
 int	vop_stdadvlock(struct vop_advlock_args *ap);
 int	vop_stdadvlockasync(struct vop_advlockasync_args *ap);
+int	vop_stdadvlockpurge(struct vop_advlockpurge_args *ap);
 int	vop_stdpathconf(struct vop_pathconf_args *);
 int	vop_stdpoll(struct vop_poll_args *);
 int	vop_stdvptocnp(struct vop_vptocnp_args *ap);
@@ -686,6 +723,8 @@ void	vop_strategy_pre(void *a);
 void	vop_symlink_post(void *a, int rc);
 void	vop_unlock_post(void *a, int rc);
 void	vop_unlock_pre(void *a);
+
+void	vop_rename_fail(struct vop_rename_args *ap);
 
 #define	VOP_WRITE_PRE(ap)						\
 	struct vattr va;						\
@@ -743,6 +782,8 @@ int vfs_kqfilter(struct vop_kqfilter_args *);
 void vfs_mark_atime(struct vnode *vp, struct ucred *cred);
 struct dirent;
 int vfs_read_dirent(struct vop_readdir_args *ap, struct dirent *dp, off_t off);
+
+int	vfs_unixify_accmode(accmode_t *accmode);
 
 #endif /* _KERNEL */
 

@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_socket.c,v 1.86 2008/11/22 16:55:55 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_socket.c,v 1.90 2010/05/19 15:06:09 attilio Exp $
  * $Whistle: ng_socket.c,v 1.28 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -67,6 +67,9 @@
 #ifdef NOTYET
 #include <sys/vnode.h>
 #endif
+
+#include <net/vnet.h>
+
 #include <netgraph/ng_message.h>
 #include <netgraph/netgraph.h>
 #include <netgraph/ng_socketvar.h>
@@ -152,6 +155,11 @@ SYSCTL_INT(_net_graph, OID_AUTO, maxdgram, CTLFLAG_RW,
 static u_long ngpdg_recvspace = 20 * 1024;
 SYSCTL_INT(_net_graph, OID_AUTO, recvspace, CTLFLAG_RW,
     &ngpdg_recvspace , 0, "Maximum space for incoming Netgraph datagrams");
+
+/* List of all sockets (for netstat -f netgraph) */
+static LIST_HEAD(, ngpcb) ngsocklist;
+
+static struct mtx	ngsocketlist_mtx;
 
 #define sotongpcb(so) ((struct ngpcb *)(so)->so_pcb)
 
@@ -544,6 +552,9 @@ ng_attach_cntl(struct socket *so)
 		return (error);
 	}
 
+	/* Store a hint for netstat(1). */
+	priv->node_id = priv->node->nd_ID;
+
 	/* Link the node and the private data. */
 	NG_NODE_SET_PRIVATE(priv->node, priv);
 	NG_NODE_REF(priv->node);
@@ -581,6 +592,10 @@ ng_attach_common(struct socket *so, int type)
 	so->so_pcb = (caddr_t)pcbp;
 	pcbp->ng_socket = so;
 
+	/* Add the socket to linked list */
+	mtx_lock(&ngsocketlist_mtx);
+	LIST_INSERT_HEAD(&ngsocklist, pcbp, socks);
+	mtx_unlock(&ngsocketlist_mtx);
 	return (0);
 }
 
@@ -614,6 +629,9 @@ ng_detach_common(struct ngpcb *pcbp, int which)
 	}
 
 	pcbp->ng_socket->so_pcb = NULL;
+	mtx_lock(&ngsocketlist_mtx);
+	LIST_REMOVE(pcbp, socks);
+	mtx_unlock(&ngsocketlist_mtx);
 	free(pcbp, M_PCB);
 }
 
@@ -837,7 +855,7 @@ static int
 ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 {
 	struct ngsock *const priv = NG_NODE_PRIVATE(node);
-	struct ngpcb *const pcbp = priv->ctlsock;
+	struct ngpcb *pcbp;
 	struct socket *so;
 	struct sockaddr_ng addr;
 	struct ng_mesg *msg;
@@ -850,15 +868,27 @@ ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 	NG_FREE_ITEM(item);
 
 	/*
+	 * Grab priv->mtx here to prevent destroying of control socket
+	 * after checking that priv->ctlsock is not NULL.
+	 */
+	mtx_lock(&priv->mtx);
+	pcbp = priv->ctlsock;
+
+	/*
 	 * Only allow mesgs to be passed if we have the control socket.
 	 * Data sockets can only support the generic messages.
 	 */
 	if (pcbp == NULL) {
+		mtx_unlock(&priv->mtx);
 		TRAP_ERROR;
 		NG_FREE_MSG(msg);
 		return (EINVAL);
 	}
 	so = pcbp->ng_socket;
+	SOCKBUF_LOCK(&so->so_rcv);
+
+	/* As long as the race is handled, priv->mtx may be unlocked now. */
+	mtx_unlock(&priv->mtx);
 
 #ifdef TRACE_MESSAGES
 	printf("[%x]:---------->[socket]: c=<%d>cmd=%x(%s) f=%x #%d\n",
@@ -881,6 +911,8 @@ ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 		default:
 			error = EINVAL;		/* unknown command */
 		}
+		SOCKBUF_UNLOCK(&so->so_rcv);
+
 		/* Free the message and return. */
 		NG_FREE_MSG(msg);
 		return (error);
@@ -893,6 +925,7 @@ ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 	addrlen = snprintf((char *)&addr.sg_data, sizeof(addr.sg_data),
 	    "[%x]:", retaddr);
 	if (addrlen < 0 || addrlen > sizeof(addr.sg_data)) {
+		SOCKBUF_UNLOCK(&so->so_rcv);
 		printf("%s: snprintf([%x]) failed - %d\n", __func__, retaddr,
 		    addrlen);
 		NG_FREE_MSG(msg);
@@ -910,17 +943,20 @@ ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 	NG_FREE_MSG(msg);
 
 	if (m == NULL) {
+		SOCKBUF_UNLOCK(&so->so_rcv);
 		TRAP_ERROR;
 		return (ENOBUFS);
 	}
 
 	/* Send it up to the socket. */
-	if (sbappendaddr(&so->so_rcv, (struct sockaddr *)&addr, m, NULL) == 0) {
+	if (sbappendaddr_locked(&so->so_rcv, (struct sockaddr *)&addr, m,
+	    NULL) == 0) {
+		SOCKBUF_UNLOCK(&so->so_rcv);
 		TRAP_ERROR;
 		m_freem(m);
 		return (ENOBUFS);
 	}
-	sorwakeup(so);
+	sorwakeup_locked(so);
 	
 	return (error);
 }
@@ -1002,8 +1038,11 @@ static int
 ngs_shutdown(node_p node)
 {
 	struct ngsock *const priv = NG_NODE_PRIVATE(node);
-	struct ngpcb *const dpcbp = priv->datasock;
-	struct ngpcb *const pcbp = priv->ctlsock;
+	struct ngpcb *dpcbp, *pcbp;
+
+	mtx_lock(&priv->mtx);
+	dpcbp = priv->datasock;
+	pcbp = priv->ctlsock;
 
 	if (dpcbp != NULL)
 		soisdisconnected(dpcbp->ng_socket);
@@ -1011,7 +1050,6 @@ ngs_shutdown(node_p node)
 	if (pcbp != NULL)
 		soisdisconnected(pcbp->ng_socket);
 
-	mtx_lock(&priv->mtx);
 	priv->node = NULL;
 	NG_NODE_SET_PRIVATE(node, NULL);
 	ng_socket_free_priv(priv);
@@ -1112,17 +1150,18 @@ ngs_mod_event(module_t mod, int event, void *data)
 
 	switch (event) {
 	case MOD_LOAD:
-		/* Register protocol domain. */
-		net_add_domain(&ngdomain);
+		mtx_init(&ngsocketlist_mtx, "ng_socketlist", NULL, MTX_DEF);
 		break;
 	case MOD_UNLOAD:
+		/* Ensure there are no open netgraph sockets. */
+		if (!LIST_EMPTY(&ngsocklist)) {
+			error = EBUSY;
+			break;
+		}
 #ifdef NOTYET
 		/* Unregister protocol domain XXX can't do this yet.. */
-		if ((error = net_rm_domain(&ngdomain)) != 0)
-			break;
-		else
 #endif
-			error = EBUSY;
+		error = EBUSY;
 		break;
 	default:
 		error = EOPNOTSUPP;
@@ -1130,6 +1169,8 @@ ngs_mod_event(module_t mod, int event, void *data)
 	}
 	return (error);
 }
+
+VNET_DOMAIN_SET(ng);
 
 SYSCTL_INT(_net_graph, OID_AUTO, family, CTLFLAG_RD, 0, AF_NETGRAPH, "");
 SYSCTL_NODE(_net_graph, OID_AUTO, data, CTLFLAG_RW, 0, "DATA");

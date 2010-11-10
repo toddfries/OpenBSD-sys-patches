@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_balloc.c,v 1.55 2009/01/27 21:48:47 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_balloc.c,v 1.56 2010/04/24 07:05:35 jeff Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,6 +120,8 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 	if (lbn < 0)
 		return (EFBIG);
 
+	if (DOINGSOFTDEP(vp))
+		softdep_prealloc(vp, MNT_WAIT);
 	/*
 	 * If the next write will extend the file into a new block,
 	 * and the file is currently composed of a fragment
@@ -418,6 +420,8 @@ fail:
 	 * slow, running out of disk space is not expected to be a common
 	 * occurence. The error return from fsync is ignored as we already
 	 * have an error to return to the user.
+	 *
+	 * XXX Still have to journal the free below
 	 */
 	(void) ffs_syncvnode(vp, MNT_WAIT);
 	for (deallocated = 0, blkp = allociblk, lbns_remfree = lbns;
@@ -473,7 +477,7 @@ fail:
 	 */
 	for (blkp = allociblk; blkp < allocblk; blkp++) {
 		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
-		    ip->i_number);
+		    ip->i_number, NULL);
 	}
 	return (error);
 }
@@ -515,6 +519,9 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 	if (lbn < 0)
 		return (EFBIG);
 
+	if (DOINGSOFTDEP(vp))
+		softdep_prealloc(vp, MNT_WAIT);
+	
 	/*
 	 * Check for allocating external data.
 	 */
@@ -930,6 +937,8 @@ fail:
 	 * slow, running out of disk space is not expected to be a common
 	 * occurence. The error return from fsync is ignored as we already
 	 * have an error to return to the user.
+	 *
+	 * XXX Still have to journal the free below
 	 */
 	(void) ffs_syncvnode(vp, MNT_WAIT);
 	for (deallocated = 0, blkp = allociblk, lbns_remfree = lbns;
@@ -985,7 +994,7 @@ fail:
 	 */
 	for (blkp = allociblk; blkp < allocblk; blkp++) {
 		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
-		    ip->i_number);
+		    ip->i_number, NULL);
 	}
 	return (error);
 }

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cs/if_cs.c,v 1.54 2008/07/09 16:47:55 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cs/if_cs.c,v 1.58 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  *
@@ -475,7 +475,7 @@ int
 cs_attach(device_t dev)
 {
 	int error, media=0;
-	struct cs_softc *sc = device_get_softc(dev);;
+	struct cs_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp;
 
 	sc->dev = dev;
@@ -500,7 +500,7 @@ cs_attach(device_t dev)
 	ifp->if_start=cs_start;
 	ifp->if_ioctl=cs_ioctl;
 	ifp->if_init=cs_init;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 	ifp->if_flags=(IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST);
 
@@ -852,7 +852,7 @@ cs_write_mbufs( struct cs_softc *sc, struct mbuf *m )
 		 * Ignore empty parts
 		 */
 		if (!len)
-		continue;
+			continue;
 
 		/*
 		 * Find actual data address
@@ -1022,7 +1022,7 @@ cs_setmode(struct cs_softc *sc)
 			 * Set up the filter to only accept multicast
 			 * frames we're interested in.
 			 */
-			IF_ADDR_LOCK(ifp);
+			if_maddr_rlock(ifp);
 			TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 				struct sockaddr_dl *dl =
 				    (struct sockaddr_dl *)ifma->ifma_addr;
@@ -1032,7 +1032,7 @@ cs_setmode(struct cs_softc *sc)
 				mask = (u_int16_t) (1 << (index & 0xf));
 				af[port] |= mask;
 			}
-			IF_ADDR_UNLOCK(ifp);
+			if_maddr_runlock(ifp);
 		}
 
 		cs_writereg(sc, PP_LAF + 0, af[0]);

@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5211/ar5211_attach.c,v 1.5 2009/02/24 01:07:06 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5211/ar5211_attach.c,v 1.7 2009/05/19 17:30:13 sam Exp $
  */
 #include "opt_ah.h"
 
@@ -38,7 +38,6 @@ static void ar5211DisablePCIE(struct ath_hal *ah);
 
 static const struct ath_hal_private ar5211hal = {{
 	.ah_magic			= AR5211_MAGIC,
-	.ah_abi				= HAL_ABI_VERSION,
 
 	.ah_getRateTable		= ar5211GetRateTable,
 	.ah_detach			= ar5211Detach,
@@ -499,6 +498,13 @@ ar5211FillCapabilityInfo(struct ath_hal *ah)
 	}
 
 	pCap->halTstampPrecision = 13;
+	pCap->halIntrMask = HAL_INT_COMMON
+			| HAL_INT_RX
+			| HAL_INT_TX
+			| HAL_INT_FATAL
+			| HAL_INT_BNR
+			| HAL_INT_TIM
+			;
 
 	/* XXX might be ok w/ some chip revs */
 	ahpriv->ah_rxornIsFatal = AH_TRUE;

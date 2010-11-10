@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/ciss/cissvar.h,v 1.12 2008/07/11 21:20:51 scottl Exp $
+ *	$FreeBSD: src/sys/dev/ciss/cissvar.h,v 1.17 2010/03/03 17:58:41 mav Exp $
  */
 
 /*
@@ -41,7 +41,7 @@ typedef STAILQ_HEAD(, ciss_request)	cr_qhead_t;
  * commands an adapter may claim to support.  Cap it at a reasonable
  * value.
  */
-#define CISS_MAX_REQUESTS	256
+#define CISS_MAX_REQUESTS	1024
 
 /*
  * Maximum number of logical drives we support.
@@ -103,6 +103,8 @@ struct ciss_request
     void			*cr_data;	/* data buffer */
     u_int32_t			cr_length;	/* data length */
     bus_dmamap_t		cr_datamap;	/* DMA map for data */
+    struct ciss_command		*cr_cc;
+    uint32_t			cr_ccphys;
     int				cr_tag;
     int				cr_flags;
 #define CISS_REQ_MAPPED		(1<<0)		/* data mapped */
@@ -131,15 +133,16 @@ struct ciss_request
  * scatter-gather list, and we also want to avoid having commands
  * cross page boundaries.
  *
- * Note that 512 bytes yields 28 scatter/gather entries, or the
- * ability to map (26 * PAGE_SIZE) + 2 bytes of data.  On x86, this is
- * 104kB.  256 bytes would only yield 12 entries, giving a mere 40kB,
- * too small.
+ * The size of the ciss_command is 52 bytes.  65 s/g elements are reserved
+ * to allow a max i/o size of 256k.  This gives a total command size of
+ * 1120 bytes, including the 32 byte alignment padding.  Modern controllers
+ * seem to saturate nicely at this value.
  */
 
-#define CISS_COMMAND_ALLOC_SIZE		512	/* XXX tune to get sensible s/g list length */
-#define CISS_COMMAND_SG_LENGTH	((CISS_COMMAND_ALLOC_SIZE - sizeof(struct ciss_command)) \
-				 / sizeof(struct ciss_sg_entry))
+#define CISS_MAX_SG_ELEMENTS	65
+#define CISS_COMMAND_ALIGN	32
+#define CISS_COMMAND_SG_LENGTH	(sizeof(struct ciss_sg_entry) * CISS_MAX_SG_ELEMENTS)
+#define CISS_COMMAND_ALLOC_SIZE		(roundup2(sizeof(struct ciss_command) + CISS_COMMAND_SG_LENGTH, CISS_COMMAND_ALIGN))
 
 /*
  * Per-logical-drive data.
@@ -173,7 +176,7 @@ struct ciss_pdrive
 
 #define CISS_PHYSICAL_SHIFT	5
 #define CISS_PHYSICAL_BASE	(1 << CISS_PHYSICAL_SHIFT)
-#define CISS_MAX_PHYSTGT	15
+#define CISS_MAX_PHYSTGT	256
 
 #define CISS_IS_PHYSICAL(bus)	(bus >= CISS_PHYSICAL_BASE)
 #define CISS_CAM_TO_PBUS(bus)	(bus - CISS_PHYSICAL_BASE)
@@ -248,6 +251,7 @@ struct ciss_softc
 #define CISS_FLAG_CONTROL_OPEN	(1<<1)		/* control device is open */
 #define CISS_FLAG_ABORTING	(1<<2)		/* driver is going away */
 #define CISS_FLAG_RUNNING	(1<<3)		/* driver is running (interrupts usable) */
+#define CISS_FLAG_BUSY		(1<<4)		/* no free commands */
 
 #define CISS_FLAG_FAKE_SYNCH	(1<<16)		/* needs SYNCHRONISE_CACHE faked */
 #define CISS_FLAG_BMIC_ABORT	(1<<17)		/* use BMIC command to abort Notify on Event */
@@ -255,20 +259,6 @@ struct ciss_softc
 
     struct ciss_qstat		ciss_qstat[CISSQ_COUNT];	/* queue statistics */
 };
-
-/*
- * Given a request tag, find the corresponding command in virtual or
- * physical space.
- *
- * The arithmetic here is due to the allocation of ciss_command structures
- * inside CISS_COMMAND_ALLOC_SIZE blocks.  See the comment at the definition
- * of CISS_COMMAND_ALLOC_SIZE above.
- */
-#define CISS_FIND_COMMAND(cr)							\
-	(struct ciss_command *)((u_int8_t *)(cr)->cr_sc->ciss_command +		\
-				((cr)->cr_tag * CISS_COMMAND_ALLOC_SIZE))
-#define CISS_FIND_COMMANDPHYS(cr)	((cr)->cr_sc->ciss_command_phys + \
-					 ((cr)->cr_tag * CISS_COMMAND_ALLOC_SIZE))
 
 /************************************************************************
  * Debugging/diagnostic output.

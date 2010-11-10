@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_zone.c,v 1.3 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_zone.c,v 1.4 2009/04/29 21:14:15 jamie Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -233,7 +233,7 @@ static void
 zone_sysinit(void *arg __unused)
 {
 
-	zone_slot = osd_jail_register(zone_destroy);
+	zone_slot = osd_jail_register(zone_destroy, NULL);
 }
 
 static void

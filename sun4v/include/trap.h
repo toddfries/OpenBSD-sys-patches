@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sun4v/include/trap.h,v 1.4 2007/06/16 22:30:38 marius Exp $
+ * $FreeBSD: src/sys/sun4v/include/trap.h,v 1.5 2009/03/19 20:46:51 marius Exp $
  */
 
 #ifndef	_MACHINE_TRAP_H_
@@ -144,7 +144,7 @@
 
 
 #ifndef LOCORE
-extern const char *trap_msg[];
+extern const char *const trap_msg[];
 extern void set_mmfsa_traptable(void *, uint64_t);
 extern void trap_init(void);
 #endif

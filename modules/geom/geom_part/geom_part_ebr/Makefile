@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/geom/geom_part/geom_part_ebr/Makefile,v 1.1 2009/02/08 23:51:44 marcel Exp $
+# $FreeBSD: src/sys/modules/geom/geom_part/geom_part_ebr/Makefile,v 1.2 2009/05/30 22:04:18 marcel Exp $
 
 .PATH: ${.CURDIR}/../../../../geom/part
 
@@ -6,6 +6,7 @@ KMOD=	geom_part_ebr
 SRCS=	g_part_ebr.c
 
 SRCS+=	bus_if.h device_if.h g_part_if.h
+SRCS+=	opt_geom.h
 
 MFILES=	kern/bus_if.m kern/device_if.m geom/part/g_part_if.m
 

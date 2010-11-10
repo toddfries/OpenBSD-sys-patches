@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/smp.h,v 1.4 2008/09/28 18:34:14 marius Exp $
+ * $FreeBSD: src/sys/powerpc/include/smp.h,v 1.7 2009/10/23 03:17:02 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_SMP_H_
@@ -35,6 +35,7 @@
 #define	IPI_PREEMPT		1
 #define	IPI_RENDEZVOUS		2
 #define	IPI_STOP		3
+#define	IPI_STOP_HARD		3
 
 #ifndef LOCORE
 
@@ -46,13 +47,9 @@ struct cpuref {
 	u_int		cr_cpuid;
 };
 
-int	powerpc_smp_first_cpu(struct cpuref *);
-int	powerpc_smp_get_bsp(struct cpuref *);
-int	powerpc_smp_next_cpu(struct cpuref *);
-int	powerpc_smp_start_cpu(struct pcpu *);
-
 void	pmap_cpu_bootstrap(int);
-uint32_t cpudep_ap_bootstrap(void);
+uintptr_t cpudep_ap_bootstrap(void);
+void	cpudep_ap_setup(void);
 void	machdep_ap_bootstrap(void);
 
 #endif /* !LOCORE */

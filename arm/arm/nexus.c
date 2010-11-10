@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/nexus.c,v 1.14 2008/09/11 12:39:54 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/nexus.c,v 1.17 2010/09/10 11:19:03 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,7 +74,7 @@ static struct rman mem_rman;
 static	int nexus_probe(device_t);
 static	int nexus_attach(device_t);
 static	int nexus_print_child(device_t, device_t);
-static	device_t nexus_add_child(device_t, int, const char *, int);
+static	device_t nexus_add_child(device_t, u_int, const char *, int);
 static	struct resource *nexus_alloc_resource(device_t, device_t, int, int *,
     u_long, u_long, u_long, u_int);
 static	int nexus_activate_resource(device_t, device_t, int, int,
@@ -107,16 +107,10 @@ static devclass_t nexus_devclass;
 static int
 nexus_probe(device_t dev)
 {
+
 	device_quiet(dev);	/* suppress attach message for neatness */
 
-	mem_rman.rm_start = 0;
-	mem_rman.rm_end = ~0u;
-	mem_rman.rm_type = RMAN_ARRAY;
-	mem_rman.rm_descr = "I/O memory addresses";
-	if (rman_init(&mem_rman) || rman_manage_region(&mem_rman, 0, ~0u))
-		panic("nexus_probe mem_rman");
-
-	return (0);
+	return (BUS_PROBE_DEFAULT);
 }
 
 static int
@@ -143,6 +137,13 @@ static int
 nexus_attach(device_t dev)
 {
 
+	mem_rman.rm_start = 0;
+	mem_rman.rm_end = ~0u;
+	mem_rman.rm_type = RMAN_ARRAY;
+	mem_rman.rm_descr = "I/O memory addresses";
+	if (rman_init(&mem_rman) || rman_manage_region(&mem_rman, 0, ~0u))
+		panic("nexus_probe mem_rman");
+
 	/*
 	 * First, deal with the children we know about already
 	 */
@@ -165,7 +166,7 @@ nexus_print_child(device_t bus, device_t child)
 }
 
 static device_t
-nexus_add_child(device_t bus, int order, const char *name, int unit)
+nexus_add_child(device_t bus, u_int order, const char *name, int unit)
 {
 	device_t child;
 	struct nexus_device *ndev;

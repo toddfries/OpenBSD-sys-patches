@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)genassym.c	5.11 (Berkeley) 5/10/91
- * $FreeBSD: src/sys/powerpc/powerpc/genassym.c,v 1.65 2009/02/27 12:08:24 raj Exp $
+ * $FreeBSD: src/sys/powerpc/powerpc/genassym.c,v 1.66 2009/05/21 11:43:37 raj Exp $
  */
 
 #include <sys/param.h>
@@ -67,6 +67,7 @@ ASSYM(PC_BOOKE_CRITSAVE, offsetof(struct pcpu, pc_booke_critsave));
 ASSYM(PC_BOOKE_MCHKSAVE, offsetof(struct pcpu, pc_booke_mchksave));
 ASSYM(PC_BOOKE_TLBSAVE, offsetof(struct pcpu, pc_booke_tlbsave));
 ASSYM(PC_BOOKE_TLB_LEVEL, offsetof(struct pcpu, pc_booke_tlb_level));
+ASSYM(PC_BOOKE_TLB_LOCK, offsetof(struct pcpu, pc_booke_tlb_lock));
 #endif
 
 ASSYM(CPUSAVE_R28, CPUSAVE_R28*4);

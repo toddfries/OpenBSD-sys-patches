@@ -39,7 +39,7 @@
  *
  *	from: hp300: @(#)pmap.h	7.2 (Berkeley) 12/16/90
  *	from: @(#)pmap.h	7.4 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/amd64/include/pmap.h,v 1.148 2008/08/04 08:04:09 alc Exp $
+ * $FreeBSD: src/sys/amd64/include/pmap.h,v 1.155 2010/10/27 16:46:37 alc Exp $
  */
 
 #ifndef _MACHINE_PMAP_H_
@@ -160,13 +160,7 @@ typedef u_int64_t pml4_entry_t;
 #define	PDESHIFT	(3)
 
 /*
- * Address of current and alternate address space page table maps
- * and directories.
- * XXX it might be saner to just direct map all of physical memory
- * into the kernel using 2MB pages.  We have enough space to do
- * it (2^47 bits of KVM, while current max physical addressability
- * is 2^40 physical bits).  Then we can get rid of the evil hole
- * in the page tables and the evil overlapping.
+ * Address of current address space page table maps and directories.
  */
 #ifdef _KERNEL
 #define	addr_PTmap	(KVADDR(PML4PML4I, 0, 0, 0))
@@ -181,9 +175,7 @@ typedef u_int64_t pml4_entry_t;
 #define	PML4pml4e	((pd_entry_t *)(addr_PML4pml4e))
 
 extern u_int64_t KPML4phys;	/* physical address of kernel level 4 */
-#endif
 
-#ifdef _KERNEL
 /*
  * virtual address to page table entry and
  * to physical address.
@@ -241,13 +233,20 @@ struct	pv_chunk;
 
 struct md_page {
 	TAILQ_HEAD(,pv_entry)	pv_list;
+	int			pat_mode;
 };
 
+/*
+ * The kernel virtual address (KVA) of the level 4 page table page is always
+ * within the direct map (DMAP) region.
+ */
 struct pmap {
 	struct mtx		pm_mtx;
 	pml4_entry_t		*pm_pml4;	/* KVA of level 4 page table */
 	TAILQ_HEAD(,pv_chunk)	pm_pvchunk;	/* list of mappings in pmap */
-	u_int			pm_active;	/* active on cpus */
+	cpumask_t		pm_active;	/* active on cpus */
+	uint32_t		pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int			pm_retries;
 	/* spare u_int here due to padding */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	vm_page_t		pm_root;	/* spare page table pages */
@@ -296,14 +295,6 @@ struct pv_chunk {
 
 #ifdef	_KERNEL
 
-#define NPPROVMTRR		8
-#define PPRO_VMTRRphysBase0	0x200
-#define PPRO_VMTRRphysMask0	0x201
-struct ppro_vmtrr {
-	u_int64_t base, mask;
-};
-extern struct ppro_vmtrr PPro_vmtrr[NPPROVMTRR];
-
 extern caddr_t	CADDR1;
 extern pt_entry_t *CMAP1;
 extern vm_paddr_t phys_avail[];
@@ -311,10 +302,12 @@ extern vm_paddr_t dump_avail[];
 extern vm_offset_t virtual_avail;
 extern vm_offset_t virtual_end;
 
+#define	pmap_page_get_memattr(m)	((vm_memattr_t)(m)->md.pat_mode)
 #define	pmap_unmapbios(va, sz)	pmap_unmapdev((va), (sz))
 
 void	pmap_bootstrap(vm_paddr_t *);
 int	pmap_change_attr(vm_offset_t, vm_size_t, int);
+void	pmap_demote_DMAP(vm_paddr_t base, vm_size_t len, boolean_t invalidate);
 void	pmap_init_pat(void);
 void	pmap_kenter(vm_offset_t va, vm_paddr_t pa);
 void	*pmap_kenter_temporary(vm_paddr_t pa, int i);
@@ -324,6 +317,7 @@ void	*pmap_mapbios(vm_paddr_t, vm_size_t);
 void	*pmap_mapdev(vm_paddr_t, vm_size_t);
 void	*pmap_mapdev_attr(vm_paddr_t, vm_size_t, int);
 boolean_t pmap_page_is_mapped(vm_page_t m);
+void	pmap_page_set_memattr(vm_page_t m, vm_memattr_t ma);
 void	pmap_unmapdev(vm_offset_t, vm_size_t);
 void	pmap_invalidate_page(pmap_t, vm_offset_t);
 void	pmap_invalidate_range(pmap_t, vm_offset_t, vm_offset_t);

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2006 Fill this file and put your name here
+ * Copyright (c) 2006-2008 Bruce M. Simpson
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/malta/yamon.c,v 1.2 2008/09/10 03:49:08 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/malta/yamon.c,v 1.3 2009/06/29 16:45:50 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>

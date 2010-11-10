@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/safe/safe.c,v 1.20 2009/02/05 19:37:49 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/safe/safe.c,v 1.21 2010/01/07 21:01:37 mbr Exp $");
 
 /*
  * SafeNet SafeXcel-1141 hardware crypto accelerator
@@ -1902,7 +1902,7 @@ safe_init_board(struct safe_softc *sc)
 {
 	u_int32_t v, dwords;
 
-	v = READ_REG(sc, SAFE_PE_DMACFG);;
+	v = READ_REG(sc, SAFE_PE_DMACFG);
 	v &=~ SAFE_PE_DMACFG_PEMODE;
 	v |= SAFE_PE_DMACFG_FSENA		/* failsafe enable */
 	  |  SAFE_PE_DMACFG_GPRPCI		/* gather ring on PCI */

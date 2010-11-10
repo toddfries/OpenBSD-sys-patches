@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.4 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.7 2009/08/01 19:26:27 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -46,12 +46,10 @@ __FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.4 2008/12/02 21:37:28 bz
 #include <sys/taskqueue.h>
 #include <sys/priv.h>
 #include <sys/syslog.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_pcb.h>
-#include <netinet/vinet.h>
 
 #include <contrib/rdma/rdma_cm.h>
 #include <contrib/rdma/ib_cache.h>
@@ -1337,6 +1335,7 @@ static int iw_conn_req_handler(struct iw_cm_id *cm_id,
 	}
 	dev = ifa->ifa_ifp;
 	ret = rdma_copy_addr(&conn_id->id.route.addr.dev_addr, dev, NULL);
+	ifa_free(ifa);
 	if (ret) {
 		cma_enable_remove(conn_id);
 		rdma_destroy_id(new_cm_id);
@@ -1949,7 +1948,6 @@ err1:
 
 static int cma_alloc_any_port(struct kvl *ps, struct rdma_id_private *id_priv)
 {
-	INIT_VNET_INET(curvnet);
 	struct rdma_bind_list *bind_list;
 	int port, ret;
 
@@ -1994,7 +1992,6 @@ err1:
 
 static int cma_use_port(struct kvl *ps, struct rdma_id_private *id_priv)
 {
-	INIT_VNET_INET(curvnet);
 	struct rdma_id_private *cur_id;
 	struct sockaddr_in *sin, *cur_sin;
 	struct rdma_bind_list *bind_list;
@@ -2914,7 +2911,6 @@ static void cma_remove_one(struct ib_device *device)
 
 static int cma_init(void)
 {
-	INIT_VNET_INET(curvnet);
 	int ret;
 
 	LIST_INIT(&listen_any_list);

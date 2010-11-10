@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdDebug.c,v 1.14 2007/12/25 17:51:56 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdDebug.c,v 1.15 2009/06/05 18:44:36 jkim Exp $");
 
 #include "opt_ddb.h"
 #include <sys/param.h>
@@ -41,8 +41,10 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdDebug.c,v 1.14 2007/12/25 17:51:56
 #include <ddb/ddb.h>
 #include <ddb/db_output.h>
 
-#include <contrib/dev/acpica/acpi.h>
-#include <contrib/dev/acpica/acdebug.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+#include <contrib/dev/acpica/include/acdebug.h>
+
 #include <dev/acpica/acpivar.h>
 
 UINT32

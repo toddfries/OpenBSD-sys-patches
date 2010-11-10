@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sun4v/include/smp.h,v 1.6 2008/09/28 18:34:14 marius Exp $
+ * $FreeBSD: src/sys/sun4v/include/smp.h,v 1.7 2009/08/13 17:09:45 attilio Exp $
  */
 
 #ifndef	_MACHINE_SMP_H_
@@ -44,6 +44,7 @@
 #define	IPI_AST		PIL_AST
 #define	IPI_RENDEZVOUS	PIL_RENDEZVOUS
 #define	IPI_STOP	PIL_STOP
+#define	IPI_STOP_HARD	PIL_STOP
 #define IPI_PREEMPT     PIL_PREEMPT
 
 

@@ -57,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xe/if_xe.c,v 1.69 2008/06/04 20:26:57 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xe/if_xe.c,v 1.71 2010/05/03 07:32:50 sobomax Exp $");
 
 /*		
  * FreeBSD device driver for Xircom CreditCard PCMCIA Ethernet adapters.  The
@@ -254,7 +254,7 @@ xe_attach(device_t dev)
 	scp->ifp->if_ioctl = xe_ioctl;
 	scp->ifp->if_init = xe_init;
 	scp->ifp->if_baudrate = 100000000;
-	IFQ_SET_MAXLEN(&scp->ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&scp->ifp->if_snd, ifqmaxlen);
 
 	/* Initialise the ifmedia structure */
 	ifmedia_init(scp->ifm, 0, xe_media_change, xe_media_status);
@@ -1390,7 +1390,7 @@ xe_set_multicast(struct xe_softc *scp)
 
 	/* Iterate over multicast address list */
 	count = 0;
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(maddr, &ifp->if_multiaddrs, ifma_link) {
 		if (maddr->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1413,7 +1413,7 @@ xe_set_multicast(struct xe_softc *scp)
 			/* Nowhere else to put them on CE2 */
 			break;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	DEVPRINTF(2, (scp->dev, "set_multicast: count = %u\n", count));
 

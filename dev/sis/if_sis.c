@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.7 2009/02/13 02:08:20 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.10 2010/04/20 19:30:12 brucec Exp $");
 
 /*
  * SiS 900/SiS 7016 fast ethernet PCI NIC driver. Datasheets are
@@ -773,7 +773,7 @@ sis_setmulti_ns(struct sis_softc *sc)
 		CSR_WRITE_4(sc, SIS_RXFILT_DATA, 0);
 	}
 
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -786,7 +786,7 @@ sis_setmulti_ns(struct sis_softc *sc)
 			bit -= 0x10;
 		SIS_SETBIT(sc, SIS_RXFILT_DATA, (1 << bit));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, filtsave);
 
@@ -825,7 +825,7 @@ sis_setmulti_sis(struct sis_softc *sc)
 		for (i = 0; i < n; i++)
 			hashes[i] = 0;
 		i = 0;
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 			if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -834,7 +834,7 @@ sis_setmulti_sis(struct sis_softc *sc)
 			hashes[h >> 4] |= 1 << (h & 0xf);
 			i++;
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 		if (i > n) {
 			ctl |= SIS_RXFILTCTL_ALLMULTI;
 			for (i = 0; i < n; i++)
@@ -1394,13 +1394,13 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c, struct mbuf *m)
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  */
-static void
+static int
 sis_rxeof(struct sis_softc *sc)
 {
 	struct mbuf		*m, *m0;
 	struct ifnet		*ifp;
 	struct sis_desc		*cur_rx;
-	int			total_len = 0;
+	int			total_len = 0, rx_npkts = 0;
 	u_int32_t		rxstat;
 
 	SIS_LOCK_ASSERT(sc);
@@ -1476,18 +1476,11 @@ sis_rxeof(struct sis_softc *sc)
 		SIS_UNLOCK(sc);
 		(*ifp->if_input)(ifp, m);
 		SIS_LOCK(sc);
+		rx_npkts++;
 	}
 
 	sc->sis_rx_pdsc = cur_rx;
-}
-
-static void
-sis_rxeoc(struct sis_softc *sc)
-{
-
-	SIS_LOCK_ASSERT(sc);
-	sis_rxeof(sc);
-	sis_initl(sc);
+	return (rx_npkts);
 }
 
 /*
@@ -1580,15 +1573,16 @@ sis_tick(void *xsc)
 #ifdef DEVICE_POLLING
 static poll_handler_t sis_poll;
 
-static void
+static int
 sis_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 {
 	struct	sis_softc *sc = ifp->if_softc;
+	int rx_npkts = 0;
 
 	SIS_LOCK(sc);
 	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 		SIS_UNLOCK(sc);
-		return;
+		return (rx_npkts);
 	}
 
 	/*
@@ -1599,7 +1593,7 @@ sis_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 	 * and then call the interrupt routine
 	 */
 	sc->rxcycles = count;
-	sis_rxeof(sc);
+	rx_npkts = sis_rxeof(sc);
 	sis_txeof(sc);
 	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 		sis_startl(ifp);
@@ -1611,7 +1605,7 @@ sis_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 		status = CSR_READ_4(sc, SIS_ISR);
 
 		if (status & (SIS_ISR_RX_ERR|SIS_ISR_RX_OFLOW))
-			sis_rxeoc(sc);
+			ifp->if_ierrors++;
 
 		if (status & (SIS_ISR_RX_IDLE))
 			SIS_SETBIT(sc, SIS_CSR, SIS_CSR_RX_ENABLE);
@@ -1623,6 +1617,7 @@ sis_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 	}
 
 	SIS_UNLOCK(sc);
+	return (rx_npkts);
 }
 #endif /* DEVICE_POLLING */
 
@@ -1668,7 +1663,7 @@ sis_intr(void *arg)
 			sis_rxeof(sc);
 
 		if (status & SIS_ISR_RX_OFLOW)
-			sis_rxeoc(sc);
+			ifp->if_ierrors++;
 
 		if (status & (SIS_ISR_RX_IDLE))
 			SIS_SETBIT(sc, SIS_CSR, SIS_CSR_RX_ENABLE);
@@ -2013,7 +2008,7 @@ sis_initl(struct sis_softc *sc)
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0x0001);
 		reg = CSR_READ_4(sc, NS_PHY_DSPCFG) & 0xfff;
 		CSR_WRITE_4(sc, NS_PHY_DSPCFG, reg | 0x1000);
-		DELAY(100000);
+		DELAY(100);
 		reg = CSR_READ_4(sc, NS_PHY_TDATA) & 0xff;
 		if ((reg & 0x0080) == 0 || (reg > 0xd8 && reg <= 0xff)) {
 			device_printf(sc->sis_dev,

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/pcfclock.c,v 1.24 2009/01/21 23:10:06 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/pcfclock.c,v 1.25 2009/10/22 06:51:29 brueffer Exp $");
 
 #include "opt_pcfclock.h"
 
@@ -150,12 +150,14 @@ static int
 pcfclock_open(struct cdev *dev, int flag, int fms, struct thread *td)
 {
 	struct pcfclock_data *sc = dev->si_drv1;
-	device_t pcfclockdev = sc->dev;
-	device_t ppbus = device_get_parent(pcfclockdev);
+	device_t pcfclockdev;
+	device_t ppbus;
 	int res;
 
 	if (!sc)
 		return (ENXIO);
+	pcfclockdev = sc->dev;
+	ppbus = device_get_parent(pcfclockdev);
 
 	ppb_lock(ppbus);
 	res = ppb_request_bus(ppbus, pcfclockdev,

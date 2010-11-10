@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $FreeBSD: src/sys/boot/forth/loader.conf.5,v 1.28 2008/01/16 07:00:55 keramida Exp $
+.\" $FreeBSD: src/sys/boot/forth/loader.conf.5,v 1.30 2010/05/13 12:07:55 uqs Exp $
 .Dd January 16, 2008
 .Dt LOADER.CONF 5
 .Os
@@ -180,10 +180,15 @@ serial port speed setting.
 .Dq comconsole
 selects serial console,
 .Dq vidconsole
-selects the video console, and
+selects the video console,
 .Dq nullconsole
 selects a mute console
-(useful for systems with neither a video console nor a serial port).
+(useful for systems with neither a video console nor a serial port), and
+.Dq spinconsole
+selects the video console which prevents any input and hides all output
+replacing it with
+.Dq spinning
+character (useful for embedded products and such).
 .It Va kernel
 .Pq Dq Pa /boot/kernel/kernel
 .It Va loader_conf_files
@@ -238,6 +243,14 @@ contains the instructions to automatically process
 .Xr boot 8 ,
 .Xr loader 8 ,
 .Xr loader.4th 8
+.Sh HISTORY
+The file
+.Nm
+first appeared in
+.Fx 3.2 .
+.Sh AUTHORS
+This manual page was written by
+.An Daniel C. Sobral Aq dcs@FreeBSD.org .
 .Sh BUGS
 The
 .Xr loader 8
@@ -248,11 +261,3 @@ booting a particular system (i.e.\&
 .Dq Va hw.ata.ata_dma Ns "=0" )
 should precede any experimental additions to
 .Nm .
-.Sh HISTORY
-The file
-.Nm
-first appeared in
-.Fx 3.2 .
-.Sh AUTHORS
-This manual page was written by
-.An Daniel C. Sobral Aq dcs@FreeBSD.org .

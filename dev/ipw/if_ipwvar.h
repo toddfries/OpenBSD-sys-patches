@@ -1,4 +1,4 @@
-/*      $FreeBSD: src/sys/dev/ipw/if_ipwvar.h,v 1.8 2008/04/20 20:35:37 sam Exp $	*/
+/*      $FreeBSD: src/sys/dev/ipw/if_ipwvar.h,v 1.11 2010/04/17 18:18:46 bschmidt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -57,13 +57,15 @@ struct ipw_rx_radiotap_header {
 	uint8_t		wr_flags;
 	uint16_t	wr_chan_freq;
 	uint16_t	wr_chan_flags;
-	uint8_t		wr_antsignal;
+	int8_t		wr_antsignal;
+	int8_t		wr_antnoise;
 };
 
 #define IPW_RX_RADIOTAP_PRESENT						\
 	((1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL))
+	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL) |			\
+	 (1 << IEEE80211_RADIOTAP_DB_ANTNOISE))
 
 struct ipw_tx_radiotap_header {
 	struct ieee80211_radiotap_header wt_ihdr;
@@ -78,11 +80,6 @@ struct ipw_tx_radiotap_header {
 
 struct ipw_vap {
 	struct ieee80211vap	vap;
-	struct task		assoc_task;
-	struct task		disassoc_task;
-	struct task		assoc_success_task;
-	struct task		assoc_failed_task;
-	struct task		scandone_task;
 
 	int			(*newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
@@ -95,9 +92,6 @@ struct ipw_softc {
 
 	struct mtx			sc_mtx;
 	struct task			sc_init_task;
-	struct task			sc_scan_task;
-	struct task			sc_chan_task;
-	struct task			sc_bmiss_task;
 	struct callout			sc_wdtimer;	/* watchdog timer */
 
 	uint32_t			flags;
@@ -163,23 +157,13 @@ struct ipw_softc {
 	int				txfree;
 
 	struct ipw_rx_radiotap_header	sc_rxtap;
-	int				sc_rxtap_len;
-
 	struct ipw_tx_radiotap_header	sc_txtap;
-	int				sc_txtap_len;
 };
 
 /*
  * NB.: This models the only instance of async locking in ipw_init_locked
  *	and must be kept in sync.
  */
-#define	IPW_LOCK_DECL	int	__waslocked = 0
-#define IPW_LOCK(sc)	do {				\
-	if (!(__waslocked = mtx_owned(&(sc)->sc_mtx)))	\
-		mtx_lock(&sc->sc_mtx);			\
-} while (0)
-#define IPW_UNLOCK(sc)	do {				\
-	if (!__waslocked)				\
-		mtx_unlock(&sc->sc_mtx);		\
-} while (0)
+#define IPW_LOCK(sc)		mtx_lock(&sc->sc_mtx);
+#define IPW_UNLOCK(sc)		mtx_unlock(&sc->sc_mtx);
 #define IPW_LOCK_ASSERT(sc)	mtx_assert(&(sc)->sc_mtx, MA_OWNED)

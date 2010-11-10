@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vfsops.c,v 1.162 2009/02/11 22:22:26 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vfsops.c,v 1.165 2010/01/23 22:38:01 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -95,7 +95,7 @@ static int iso_mountfs(struct vnode *devvp, struct mount *mp);
  */
 
 static int
-cd9660_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
+cd9660_cmount(struct mntarg *ma, void *data, int flags)
 {
 	struct iso_args args;
 	int error;
@@ -123,14 +123,17 @@ cd9660_cmount(struct mntarg *ma, void *data, int flags, struct thread *td)
 }
 
 static int
-cd9660_mount(struct mount *mp, struct thread *td)
+cd9660_mount(struct mount *mp)
 {
 	struct vnode *devvp;
+	struct thread *td;
 	char *fspec;
 	int error;
 	accmode_t accmode;
 	struct nameidata ndp;
 	struct iso_mnt *imp = 0;
+
+	td = curthread;
 
 	/*
 	 * Unconditionally mount as read-only.
@@ -371,7 +374,8 @@ iso_mountfs(devvp, mp)
 	mp->mnt_maxsymlinklen = 0;
 	MNT_ILOCK(mp);
 	mp->mnt_flag |= MNT_LOCAL;
-	mp->mnt_kern_flag |= MNTK_MPSAFE | MNTK_LOOKUP_SHARED;
+	mp->mnt_kern_flag |= MNTK_MPSAFE | MNTK_LOOKUP_SHARED |
+	    MNTK_EXTENDED_SHARED;
 	MNT_IUNLOCK(mp);
 	isomp->im_mountp = mp;
 	isomp->im_dev = dev;
@@ -489,17 +493,16 @@ out:
  * unmount system call
  */
 static int
-cd9660_unmount(mp, mntflags, td)
+cd9660_unmount(mp, mntflags)
 	struct mount *mp;
 	int mntflags;
-	struct thread *td;
 {
 	struct iso_mnt *isomp;
 	int error, flags = 0;
 
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
-	if ((error = vflush(mp, 0, flags, td)))
+	if ((error = vflush(mp, 0, flags, curthread)))
 		return (error);
 
 	isomp = VFSTOISOFS(mp);
@@ -529,11 +532,10 @@ cd9660_unmount(mp, mntflags, td)
  * Return root of a filesystem
  */
 static int
-cd9660_root(mp, flags, vpp, td)
+cd9660_root(mp, flags, vpp)
 	struct mount *mp;
 	int flags;
 	struct vnode **vpp;
-	struct thread *td;
 {
 	struct iso_mnt *imp = VFSTOISOFS(mp);
 	struct iso_directory_record *dp =
@@ -552,10 +554,9 @@ cd9660_root(mp, flags, vpp, td)
  * Get filesystem statistics.
  */
 static int
-cd9660_statfs(mp, sbp, td)
+cd9660_statfs(mp, sbp)
 	struct mount *mp;
 	struct statfs *sbp;
-	struct thread *td;
 {
 	struct iso_mnt *isomp;
 
@@ -588,17 +589,19 @@ cd9660_fhtovp(mp, fhp, vpp)
 	struct fid *fhp;
 	struct vnode **vpp;
 {
-	struct ifid *ifhp = (struct ifid *)fhp;
+	struct ifid ifh;
 	struct iso_node *ip;
 	struct vnode *nvp;
 	int error;
 
+	memcpy(&ifh, fhp, sizeof(ifh));
+
 #ifdef	ISOFS_DBG
 	printf("fhtovp: ino %d, start %ld\n",
-	       ifhp->ifid_ino, ifhp->ifid_start);
+	    ifh.ifid_ino, ifh.ifid_start);
 #endif
 
-	if ((error = VFS_VGET(mp, ifhp->ifid_ino, LK_EXCLUSIVE, &nvp)) != 0) {
+	if ((error = VFS_VGET(mp, ifh.ifid_ino, LK_EXCLUSIVE, &nvp)) != 0) {
 		*vpp = NULLVP;
 		return (error);
 	}

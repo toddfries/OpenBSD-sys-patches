@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/atkbdc/psm.c,v 1.102 2008/12/17 10:42:53 dumbbell Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/atkbdc/psm.c,v 1.106 2009/12/18 17:46:57 dumbbell Exp $");
 
 #include "opt_isa.h"
 #include "opt_psm.h"
@@ -70,7 +70,10 @@ __FBSDID("$FreeBSD: src/sys/dev/atkbdc/psm.c,v 1.102 2008/12/17 10:42:53 dumbbel
 #include <sys/module.h>
 #include <sys/bus.h>
 #include <sys/conf.h>
+#include <sys/filio.h>
 #include <sys/poll.h>
+#include <sys/sigio.h>
+#include <sys/signalvar.h>
 #include <sys/syslog.h>
 #include <machine/bus.h>
 #include <sys/rman.h>
@@ -299,6 +302,7 @@ struct psm_softc {		/* Driver status information */
 	struct cdev	*bdev;
 	int		lasterr;
 	int		cmdcount;
+	struct sigio	*async;		/* Processes waiting for SIGIO */
 };
 static devclass_t psm_devclass;
 #define	PSM_SOFTC(unit)	\
@@ -339,6 +343,9 @@ static devclass_t psm_devclass;
 #define	PSM_FLAGS_FINGERDOWN	0x0001	/* VersaPad finger down */
 
 /* Tunables */
+static int tap_enabled = -1;
+TUNABLE_INT("hw.psm.tap_enabled", &tap_enabled);
+
 static int synaptics_support = 0;
 TUNABLE_INT("hw.psm.synaptics_support", &synaptics_support);
 
@@ -894,6 +901,36 @@ doopen(struct psm_softc *sc, int command_byte)
 			VLOG(5, (LOG_DEBUG, "psm%d: Synaptis Absolute Mode "
 			    "hopefully restored\n",
 			    sc->unit));
+		}
+	}
+
+	/*
+	 * A user may want to disable tap and drag gestures on a Synaptics
+	 * TouchPad when it operates in Relative Mode.
+	 */
+	if (sc->hw.model == MOUSE_MODEL_GENERIC) {
+		if (tap_enabled > 0) {
+			/*
+			 * Enable tap & drag gestures. We use a Mode Byte
+			 * and clear the DisGest bit (see §2.5 of Synaptics
+			 * TouchPad Interfacing Guide).
+			 */
+			VLOG(2, (LOG_DEBUG,
+			    "psm%d: enable tap and drag gestures\n",
+			    sc->unit));
+			mouse_ext_command(sc->kbdc, 0x00);
+			set_mouse_sampling_rate(sc->kbdc, 20);
+		} else if (tap_enabled == 0) {
+			/*
+			 * Disable tap & drag gestures. We use a Mode Byte
+			 * and set the DisGest bit (see §2.5 of Synaptics
+			 * TouchPad Interfacing Guide).
+			 */
+			VLOG(2, (LOG_DEBUG,
+			    "psm%d: disable tap and drag gestures\n",
+			    sc->unit));
+			mouse_ext_command(sc->kbdc, 0x04);
+			set_mouse_sampling_rate(sc->kbdc, 20);
 		}
 	}
 
@@ -1490,6 +1527,7 @@ psmopen(struct cdev *dev, int flag, int fmt, struct thread *td)
 	sc->mode.level = sc->dflt_mode.level;
 	sc->mode.protocol = sc->dflt_mode.protocol;
 	sc->watchdog = FALSE;
+	sc->async = NULL;
 
 	/* flush the event queue */
 	sc->queue.count = 0;
@@ -1628,6 +1666,12 @@ psmclose(struct cdev *dev, int flag, int fmt, struct thread *td)
 
 	/* remove anything left in the output buffer */
 	empty_aux_buffer(sc->kbdc, 10);
+
+	/* clean up and sigio requests */
+	if (sc->async != NULL) {
+		funsetown(&sc->async);
+		sc->async = NULL;
+	}
 
 	/* close is almost always successful */
 	sc->state &= ~PSM_OPEN;
@@ -2190,6 +2234,15 @@ psmioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 		break;
 #endif /* MOUSE_GETHWID */
 
+	case FIONBIO:
+	case FIOASYNC:
+		break;
+	case FIOSETOWN:
+		error = fsetown(*(int *)addr, &sc->async);
+		break;
+	case FIOGETOWN:
+		*(int *) addr = fgetown(&sc->async);
+		break;
 	default:
 		return (ENOTTY);
 	}
@@ -2241,6 +2294,8 @@ static int pkterrthresh = 2;
 SYSCTL_INT(_debug_psm, OID_AUTO, pkterrthresh, CTLFLAG_RW, &pkterrthresh, 0,
     "Number of error packets allowed before reinitializing the mouse");
 
+SYSCTL_INT(_hw_psm, OID_AUTO, tap_enabled, CTLFLAG_RW, &tap_enabled, 0,
+    "Enable tap and drag gestures");
 static int tap_threshold = PSM_TAP_THRESHOLD;
 SYSCTL_INT(_hw_psm, OID_AUTO, tap_threshold, CTLFLAG_RW, &tap_threshold, 0,
     "Button tap threshold");
@@ -3454,6 +3509,9 @@ next:
 		wakeup(sc);
 	}
 	selwakeuppri(&sc->rsel, PZERO);
+	if (sc->async != NULL) {
+		pgsigio(&sc->async, SIGIO, 0);
+	}
 	sc->state &= ~PSM_SOFTARMED;
 	splx(s);
 }

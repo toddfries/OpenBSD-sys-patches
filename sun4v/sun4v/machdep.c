@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/machdep.c,v 1.19 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/machdep.c,v 1.23 2010/03/25 14:24:00 nwhitehorn Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -129,6 +129,7 @@ int cold = 1;
 long Maxmem;
 long realmem;
 
+void *dpcpu0;
 char pcpu0[PCPU_PAGES * PAGE_SIZE];
 struct trapframe frame0;
 int trap_conversion[256];
@@ -500,6 +501,7 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	 * Initialize the message buffer (after setting trap table).
 	 */
 	BVPRINTF("initialize msgbuf\n");
+	dpcpu_init(dpcpu0, 0);
 	msgbufinit(msgbufp, MSGBUF_SIZE);
 
 	BVPRINTF("initialize mutexes\n");
@@ -665,11 +667,7 @@ sigreturn(struct thread *td, struct sigreturn_args *uap)
 	if (error != 0)
 		return (error);
 
-	PROC_LOCK(p);
-	td->td_sigmask = uc.uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &uc.uc_sigmask, NULL, 0);
 
 	CTR4(KTR_SIG, "sigreturn: return td=%p pc=%#lx sp=%#lx tstate=%#lx",
 	    td, mc->mc_tpc, mc->mc_sp, mc->mc_tstate);
@@ -767,6 +765,16 @@ cpu_shutdown(void *args)
 	hv_mach_exit(0);
 }
 
+/*
+ * Flush the D-cache for non-DMA I/O so that the I-cache can
+ * be made coherent later.
+ */
+void
+cpu_flush_dcache(void *ptr, size_t len)
+{
+	/* TBD */
+}
+
 /* Get current clock frequency for the given cpu id. */
 int
 cpu_est_clockrate(int cpu_id, uint64_t *rate)
@@ -861,7 +869,7 @@ ptrace_clear_single_step(struct thread *td)
 }
 
 void
-exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
+exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *tf;
 	struct pcb *pcb;
@@ -889,8 +897,8 @@ exec_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
 	tf->tf_out[3] = p->p_sysent->sv_psstrings;
 	tf->tf_out[6] = sp - SPOFF - sizeof(struct frame);
 
-	tf->tf_tnpc = entry + 4;
-	tf->tf_tpc = entry;
+	tf->tf_tnpc = imgp->entry_addr + 4;
+	tf->tf_tpc = imgp->entry_addr;
 	tf->tf_tstate = TSTATE_IE | TSTATE_PEF | TSTATE_MM_TSO;
 
 	td->td_retval[0] = tf->tf_out[0];

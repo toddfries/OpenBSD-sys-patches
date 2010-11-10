@@ -30,9 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.23 2009/02/27 14:12:05 bz Exp $");
-
-#include "opt_route.h"
+__FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.30 2010/04/29 11:52:42 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -41,9 +39,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.23 2009/02/27 14:12:05 bz Exp 
 #include <sys/systm.h>
 #include <sys/queue.h>
 #include <sys/syslog.h>
-#include <sys/vimage.h>
 
-#include <net/route.h>
 #include <net/if.h>
 #include <net/vnet.h>
 
@@ -51,9 +47,14 @@ __FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.23 2009/02/27 14:12:05 bz Exp 
 
 #include <netinet/ip6.h>
 #include <netinet6/in6_var.h>
+#include <netinet6/ip6_var.h>
 #include <netinet6/scope6_var.h>
-#include <netinet6/vinet6.h>
 
+#ifdef ENABLE_DEFAULT_SCOPE
+VNET_DEFINE(int, ip6_use_defzone) = 1;
+#else
+VNET_DEFINE(int, ip6_use_defzone) = 0;
+#endif
 
 /*
  * The scope6_lock protects the global sid default stored in
@@ -65,10 +66,8 @@ static struct mtx scope6_lock;
 #define	SCOPE6_UNLOCK()		mtx_unlock(&scope6_lock)
 #define	SCOPE6_LOCK_ASSERT()	mtx_assert(&scope6_lock, MA_OWNED)
 
-#ifdef VIMAGE_GLOBALS
-static struct scope6_id sid_default;
-int ip6_use_defzone;
-#endif
+static VNET_DEFINE(struct scope6_id, sid_default);
+#define	V_sid_default			VNET(sid_default)
 
 #define SID(ifp) \
 	(((struct in6_ifextra *)(ifp)->if_afdata[AF_INET6])->scope6_id)
@@ -76,15 +75,13 @@ int ip6_use_defzone;
 void
 scope6_init(void)
 {
-	INIT_VNET_INET6(curvnet);
 
-#ifdef ENABLE_DEFAULT_SCOPE
-	V_ip6_use_defzone = 1;
-#else
-	V_ip6_use_defzone = 0;
-#endif
-	SCOPE6_LOCK_INIT();
 	bzero(&V_sid_default, sizeof(V_sid_default));
+
+	if (!IS_DEFAULT_VNET(curvnet))
+		return;
+
+	SCOPE6_LOCK_INIT();
 }
 
 struct scope6_id *
@@ -120,7 +117,6 @@ scope6_ifdetach(struct scope6_id *sid)
 int
 scope6_set(struct ifnet *ifp, struct scope6_id *idlist)
 {
-	INIT_VNET_NET(ifp->if_vnet);
 	int i;
 	int error = 0;
 	struct scope6_id *sid = NULL;
@@ -275,7 +271,6 @@ in6_addrscope(struct in6_addr *addr)
 void
 scope6_setdefault(struct ifnet *ifp)
 {
-	INIT_VNET_INET6(ifp->if_vnet);
 
 	/*
 	 * Currently, this function just sets the default "interfaces"
@@ -299,7 +294,6 @@ scope6_setdefault(struct ifnet *ifp)
 int
 scope6_get_default(struct scope6_id *idlist)
 {
-	INIT_VNET_INET6(curvnet);
 
 	SCOPE6_LOCK();
 	*idlist = V_sid_default;
@@ -311,7 +305,6 @@ scope6_get_default(struct scope6_id *idlist)
 u_int32_t
 scope6_addr2default(struct in6_addr *addr)
 {
-	INIT_VNET_INET6(curvnet);
 	u_int32_t id;
 
 	/*
@@ -342,7 +335,6 @@ scope6_addr2default(struct in6_addr *addr)
 int
 sa6_embedscope(struct sockaddr_in6 *sin6, int defaultok)
 {
-	INIT_VNET_NET(curvnet);
 	struct ifnet *ifp;
 	u_int32_t zoneid;
 
@@ -379,7 +371,6 @@ sa6_embedscope(struct sockaddr_in6 *sin6, int defaultok)
 int
 sa6_recoverscope(struct sockaddr_in6 *sin6)
 {
-	INIT_VNET_NET(curvnet);
 	char ip6buf[INET6_ADDRSTRLEN];
 	u_int32_t zoneid;
 

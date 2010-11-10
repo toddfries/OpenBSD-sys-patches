@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_smedia.c,v 1.18 2008/03/06 21:50:41 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_smedia.c,v 1.19 2009/04/08 11:56:49 piso Exp $");
 
 /*
    Alias_smedia.c is meant to contain the aliasing code for streaming media
@@ -132,7 +132,7 @@ static void
 AliasHandleRtspOut(struct libalias *, struct ip *, struct alias_link *,	
 		  int maxpacketsize);
 static int 
-fingerprint(struct libalias *la, struct ip *pip, struct alias_data *ah)
+fingerprint(struct libalias *la, struct alias_data *ah)
 {
 
 	if (ah->dport != NULL && ah->aport != NULL && ah->sport != NULL &&

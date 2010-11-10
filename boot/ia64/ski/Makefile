@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/ia64/ski/Makefile,v 1.22 2009/02/21 15:04:31 ru Exp $
+# $FreeBSD: src/sys/boot/ia64/ski/Makefile,v 1.23 2010/08/23 01:50:34 imp Exp $
 
 NO_MAN=
 
@@ -17,10 +17,10 @@ CFLAGS+=	-I${.CURDIR}/../../common
 CFLAGS+=	-I${.CURDIR}/../../..
 CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand
 
-LDSCRIPT=	${.CURDIR}/ldscript.${MACHINE_ARCH}
+LDSCRIPT=	${.CURDIR}/ldscript.${MACHINE_CPUARCH}
 LDFLAGS=	-Wl,-T${LDSCRIPT}
 
-NEWVERSWHAT=	"SKI boot" ${MACHINE_ARCH}
+NEWVERSWHAT=	"SKI boot" ${MACHINE_CPUARCH}
 
 vers.c: ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
 	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}

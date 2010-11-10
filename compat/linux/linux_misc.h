@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/linux/linux_misc.h,v 1.5 2009/03/05 19:42:11 jhb Exp $
+ * $FreeBSD: src/sys/compat/linux/linux_misc.h,v 1.6 2009/05/10 18:16:07 dchagin Exp $
  */
 
 #ifndef _LINUX_MISC_H_
@@ -64,5 +64,7 @@ extern const char *linux_platform;
 #if defined(__i386__) || defined(__amd64__)
 #define	__LINUX_NPXCW__		0x37f
 #endif
+
+extern int stclohz;
 
 #endif	/* _LINUX_MISC_H_ */

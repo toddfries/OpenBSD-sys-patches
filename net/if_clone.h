@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	From: @(#)if.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_clone.h,v 1.5 2008/09/20 19:38:37 thompsa Exp $
+ * $FreeBSD: src/sys/net/if_clone.h,v 1.6 2009/07/23 20:46:49 rwatson Exp $
  */
 
 #ifndef	_NET_IF_CLONE_H_
@@ -72,6 +72,7 @@ struct if_clone {
 void	if_clone_init(void);
 void	if_clone_attach(struct if_clone *);
 void	if_clone_detach(struct if_clone *);
+void	vnet_if_clone_init(void);
 
 int	if_clone_create(char *, size_t, caddr_t);
 int	if_clone_destroy(const char *);

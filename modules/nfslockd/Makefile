@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/nfslockd/Makefile,v 1.3 2008/07/31 02:13:36 ps Exp $
+# $FreeBSD: src/sys/modules/nfslockd/Makefile,v 1.5 2009/10/03 12:22:12 nyan Exp $
 
 .PATH: ${.CURDIR}/../../nlm ${.CURDIR}/../../rpc
 KMOD=	nfslockd
@@ -19,6 +19,7 @@ NFS_INET6?=	1	# 0/1 - requires INET6 to be configured in kernel
 opt_inet6.h:
 	echo "#define INET6 1" > ${.TARGET}
 .endif
+
 .endif
 
 .include <bsd.kmod.mk>

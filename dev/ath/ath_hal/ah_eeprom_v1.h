@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: ah_eeprom_v1.h,v 1.1 2008/11/11 02:40:11 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah_eeprom_v1.h,v 1.2 2010/03/03 17:32:32 rpaulo Exp $
  */
 #ifndef _ATH_AH_EEPROM_V1_H_
 #define _ATH_AH_EEPROM_V1_H_

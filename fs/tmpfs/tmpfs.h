@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.16 2009/02/08 19:18:33 kib Exp $
+ * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.19 2010/01/13 14:17:21 jh Exp $
  */
 
 #ifndef _FS_TMPFS_TMPFS_H_
@@ -303,10 +303,30 @@ LIST_HEAD(tmpfs_node_list, tmpfs_node);
 
 #define TMPFS_NODE_LOCK(node) mtx_lock(&(node)->tn_interlock)
 #define TMPFS_NODE_UNLOCK(node) mtx_unlock(&(node)->tn_interlock)
-#define        TMPFS_NODE_MTX(node) (&(node)->tn_interlock)
+#define TMPFS_NODE_MTX(node) (&(node)->tn_interlock)
+
+#ifdef INVARIANTS
+#define TMPFS_ASSERT_LOCKED(node) do {					\
+		MPASS(node != NULL);					\
+		MPASS(node->tn_vnode != NULL);				\
+		if (!VOP_ISLOCKED(node->tn_vnode) &&			\
+		    !mtx_owned(TMPFS_NODE_MTX(node)))			\
+			panic("tmpfs: node is not locked: %p", node);	\
+	} while (0)
+#define TMPFS_ASSERT_ELOCKED(node) do {					\
+		MPASS((node) != NULL);					\
+		MPASS((node)->tn_vnode != NULL);			\
+		mtx_assert(TMPFS_NODE_MTX(node), MA_OWNED);		\
+		ASSERT_VOP_LOCKED((node)->tn_vnode, "tmpfs");		\
+	} while (0)
+#else
+#define TMPFS_ASSERT_LOCKED(node) (void)0
+#define TMPFS_ASSERT_ELOCKED(node) (void)0
+#endif
 
 #define TMPFS_VNODE_ALLOCATING	1
 #define TMPFS_VNODE_WANT	2
+#define TMPFS_VNODE_DOOMED	4
 /* --------------------------------------------------------------------- */
 
 /*
@@ -394,14 +414,14 @@ struct tmpfs_fid {
 
 int	tmpfs_alloc_node(struct tmpfs_mount *, enum vtype,
 	    uid_t uid, gid_t gid, mode_t mode, struct tmpfs_node *,
-	    char *, dev_t, struct thread *, struct tmpfs_node **);
+	    char *, dev_t, struct tmpfs_node **);
 void	tmpfs_free_node(struct tmpfs_mount *, struct tmpfs_node *);
 int	tmpfs_alloc_dirent(struct tmpfs_mount *, struct tmpfs_node *,
 	    const char *, uint16_t, struct tmpfs_dirent **);
 void	tmpfs_free_dirent(struct tmpfs_mount *, struct tmpfs_dirent *,
 	    boolean_t);
 int	tmpfs_alloc_vp(struct mount *, struct tmpfs_node *, int,
-	    struct vnode **, struct thread *);
+	    struct vnode **);
 void	tmpfs_free_vp(struct vnode *);
 int	tmpfs_alloc_file(struct vnode *, struct vnode **, struct vattr *,
 	    struct componentname *, char *);
@@ -472,10 +492,6 @@ int	tmpfs_truncate(struct vnode *, off_t);
 /*
  * Returns information about the number of available memory pages,
  * including physical and virtual ones.
- *
- * If 'total' is TRUE, the value returned is the total amount of memory
- * pages configured for the system (either in use or free).
- * If it is FALSE, the value returned is the amount of free memory pages.
  *
  * Remember to remove TMPFS_PAGES_RESERVED from the returned value to avoid
  * excessive memory usage.

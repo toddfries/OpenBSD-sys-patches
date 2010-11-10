@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/modules/usb/Makefile,v 1.22 2009/02/23 18:32:59 thompsa Exp $
+# $FreeBSD: src/sys/modules/usb/Makefile,v 1.32 2010/01/28 22:24:54 thompsa Exp $
 #
 # Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
 #
@@ -26,19 +26,26 @@
 #
 
 SUBDIR = usb
-#SUBDIR += ubt bluetooth_ng ubtfw
 SUBDIR += ehci musb ohci uhci uss820dci ${_at91dci} ${_atmegadci}
-SUBDIR += rum ural zyd
-SUBDIR += uhid ukbd ums udbp ufm uscanner
+SUBDIR += rum run uath upgt ural zyd ${_urtw}
+SUBDIR += atp uhid ukbd ums udbp ufm
 SUBDIR += ucom u3g uark ubsa ubser uchcom ucycom ufoma uftdi ugensa uipaq ulpt \
 	  umct umodem umoscom uplcom uslcom uvisor uvscom
-SUBDIR += uether aue axe cdce cue kue rue udav
+SUBDIR += uether aue axe cdce cue kue rue udav uhso
 SUBDIR += usfs umass urio
 SUBDIR += quirk template
+
+.if ${MACHINE_ARCH} == "amd64"
+_urtw=		urtw
+.endif
 
 .if ${MACHINE_ARCH} == "arm"
 _at91dci=	at91dci
 _atmegadci=	atmegadci
+.endif
+
+.if ${MACHINE_ARCH} == "i386"
+_urtw=		urtw
 .endif
 
 .include <bsd.subdir.mk>

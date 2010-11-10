@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ti/if_tireg.h,v 1.37 2006/01/03 06:14:07 yongari Exp $
+ * $FreeBSD: src/sys/dev/ti/if_tireg.h,v 1.38 2009/11/19 22:06:40 jhb Exp $
  */
 
 /*
@@ -1038,6 +1038,8 @@ struct ti_softc {
 	int			ti_if_flags;
 	int			ti_txcnt;
 	struct mtx		ti_mtx;
+	struct callout		ti_watchdog;
+	int			ti_timer;
 	ti_flag_vals		ti_flags;
 	struct cdev		 *dev;
 };

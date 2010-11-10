@@ -26,14 +26,14 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/acpica/OsdEnvironment.c,v 1.10 2007/03/22 18:16:42 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/acpica/OsdEnvironment.c,v 1.11 2009/06/05 18:44:36 jkim Exp $");
 
 #include <sys/types.h>
 #include <sys/linker_set.h>
 #include <sys/sysctl.h>
 #include <machine/efi.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
 
 static struct uuid acpi_root_uuid = EFI_TABLE_ACPI20;
 

@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_cb.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_cb.h,v 1.23 2008/12/11 16:26:38 bz Exp $
+ * $FreeBSD: src/sys/net/raw_cb.h,v 1.25 2009/07/16 21:13:04 rwatson Exp $
  */
 
 #ifndef _NET_RAW_CB_H_
@@ -55,9 +55,9 @@ struct rawcb {
 #define	RAWRCVQ		8192
 
 #ifdef _KERNEL
-#ifdef VIMAGE_GLOBALS
-extern LIST_HEAD(rawcb_list_head, rawcb) rawcb_list;
-#endif
+VNET_DECLARE(LIST_HEAD(rawcb_list_head, rawcb), rawcb_list);
+#define	V_rawcb_list	VNET(rawcb_list)
+
 extern struct mtx rawcb_mtx;
 
 /*

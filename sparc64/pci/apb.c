@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/pci/apb.c,v 1.16 2008/12/15 15:31:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/pci/apb.c,v 1.20 2010/03/31 22:27:33 marius Exp $");
 
 /*
  * Support for the Sun APB (Advanced PCI Bridge) PCI-PCI bridge.
@@ -90,9 +90,9 @@ static device_method_t apb_methods[] = {
 	DEVMETHOD(bus_read_ivar,	pcib_read_ivar),
 	DEVMETHOD(bus_write_ivar,	pcib_write_ivar),
 	DEVMETHOD(bus_alloc_resource,	apb_alloc_resource),
-	DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
 	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
 	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
+	DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
 	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
 	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
 
@@ -105,13 +105,14 @@ static device_method_t apb_methods[] = {
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_node,	ofw_pcib_gen_get_node),
 
-	{ 0, 0 }
+	KOBJMETHOD_END
 };
 
 static devclass_t pcib_devclass;
 
 DEFINE_CLASS_0(pcib, apb_driver, apb_methods, sizeof(struct apb_softc));
-DRIVER_MODULE(apb, pci, apb_driver, pcib_devclass, 0, 0);
+EARLY_DRIVER_MODULE(apb, pci, apb_driver, pcib_devclass, 0, 0, BUS_PASS_BUS);
+MODULE_DEPEND(apb, pci, 1, 1, 1);
 
 /* APB specific registers */
 #define	APBR_IOMAP	0xde
@@ -222,8 +223,7 @@ apb_alloc_resource(device_t dev, device_t child, int type, int *rid,
 	 */
 	if (start == 0 && end == ~0) {
 		device_printf(dev, "can't decode default resource id %d for "
-		    "%s%d, bypassing\n", *rid, device_get_name(child),
-		    device_get_unit(child));
+		    "%s, bypassing\n", *rid, device_get_nameunit(child));
 		goto passup;
 	}
 
@@ -235,31 +235,28 @@ apb_alloc_resource(device_t dev, device_t child, int type, int *rid,
 	switch (type) {
 	case SYS_RES_IOPORT:
 		if (!apb_checkrange(sc->sc_iomap, APB_IO_SCALE, start, end)) {
-			device_printf(dev, "device %s%d requested unsupported "
-			    "I/O range 0x%lx-0x%lx\n", device_get_name(child),
-			    device_get_unit(child), start, end);
+			device_printf(dev, "device %s requested unsupported "
+			    "I/O range 0x%lx-0x%lx\n",
+			    device_get_nameunit(child), start, end);
 			return (NULL);
 		}
 		if (bootverbose)
 			device_printf(sc->sc_bsc.ops_pcib_sc.dev, "device "
-			    "%s%d requested decoded I/O range 0x%lx-0x%lx\n",
-			    device_get_name(child), device_get_unit(child),
-			    start, end);
+			    "%s requested decoded I/O range 0x%lx-0x%lx\n",
+			    device_get_nameunit(child), start, end);
 		break;
 
 	case SYS_RES_MEMORY:
 		if (!apb_checkrange(sc->sc_memmap, APB_MEM_SCALE, start, end)) {
-			device_printf(dev, "device %s%d requested unsupported "
+			device_printf(dev, "device %s requested unsupported "
 			    "memory range 0x%lx-0x%lx\n",
-			    device_get_name(child), device_get_unit(child),
-			    start, end);
+			    device_get_nameunit(child), start, end);
 			return (NULL);
 		}
 		if (bootverbose)
 			device_printf(sc->sc_bsc.ops_pcib_sc.dev, "device "
-			    "%s%d requested decoded memory range 0x%lx-0x%lx\n",
-			    device_get_name(child), device_get_unit(child),
-			    start, end);
+			    "%s requested decoded memory range 0x%lx-0x%lx\n",
+			    device_get_nameunit(child), start, end);
 		break;
 
 	default:

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/intr_machdep.h,v 1.22 2009/01/29 09:22:56 jeff Exp $
+ * $FreeBSD: src/sys/i386/include/intr_machdep.h,v 1.26 2009/10/15 14:54:35 jhb Exp $
  */
 
 #ifndef __MACHINE_INTR_MACHDEP_H__
@@ -93,7 +93,7 @@ struct pic {
 	void (*pic_resume)(struct pic *);
 	int (*pic_config_intr)(struct intsrc *, enum intr_trigger,
 	    enum intr_polarity);
-	void (*pic_assign_cpu)(struct intsrc *, u_int apic_id);
+	int (*pic_assign_cpu)(struct intsrc *, u_int apic_id);
 	STAILQ_ENTRY(pic) pics;
 };
 
@@ -138,7 +138,9 @@ int	intr_bind(u_int vector, u_char cpu);
 #endif
 int	intr_config_intr(int vector, enum intr_trigger trig,
     enum intr_polarity pol);
+int	intr_describe(u_int vector, void *ih, const char *descr);
 void	intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame);
+u_int	intr_next_cpu(void);
 struct intsrc *intr_lookup_source(int vector);
 int	intr_register_pic(struct pic *pic);
 int	intr_register_source(struct intsrc *isrc);

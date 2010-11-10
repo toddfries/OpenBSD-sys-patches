@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)resourcevar.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/resourcevar.h,v 1.54 2008/08/20 08:31:58 ed Exp $
+ * $FreeBSD: src/sys/sys/resourcevar.h,v 1.57 2010/05/24 10:23:49 kib Exp $
  */
 
 #ifndef	_SYS_RESOURCEVAR_H_
@@ -86,15 +86,21 @@ struct plimit {
  * (a) Constant from inception
  * (b) Lockless, updated using atomics
  * (c) Locked by global uihashtbl_mtx
+ * (d) Locked by the ui_vmsize_mtx
  */
 struct uidinfo {
 	LIST_ENTRY(uidinfo) ui_hash;	/* (c) hash chain of uidinfos */
+	struct mtx ui_vmsize_mtx;
+	vm_ooffset_t ui_vmsize;		/* (d) swap reservation by uid */
 	long	ui_sbsize;		/* (b) socket buffer space consumed */
 	long	ui_proccnt;		/* (b) number of processes */
 	long	ui_ptscnt;		/* (b) number of pseudo-terminals */
 	uid_t	ui_uid;			/* (a) uid */
 	u_int	ui_ref;			/* (b) reference count */
 };
+
+#define	UIDINFO_VMSIZE_LOCK(ui)		mtx_lock(&((ui)->ui_vmsize_mtx))
+#define	UIDINFO_VMSIZE_UNLOCK(ui)	mtx_unlock(&((ui)->ui_vmsize_mtx))
 
 struct proc;
 struct rusage_ext;
@@ -125,7 +131,7 @@ void	 rucollect(struct rusage *ru, struct rusage *ru2);
 void	 rufetch(struct proc *p, struct rusage *ru);
 void	 rufetchcalc(struct proc *p, struct rusage *ru, struct timeval *up,
 	    struct timeval *sp);
-void	 ruxagg(struct rusage_ext *rux, struct thread *td);
+void	 ruxagg(struct proc *p, struct thread *td);
 int	 suswintr(void *base, int word);
 struct uidinfo
 	*uifind(uid_t uid);

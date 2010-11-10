@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)param.h	8.3 (Berkeley) 4/4/95
- * $FreeBSD: src/sys/sys/param.h,v 1.390 2009/03/09 17:53:05 bms Exp $
+ * $FreeBSD: src/sys/sys/param.h,v 1.452 2010/06/10 06:48:09 ed Exp $
  */
 
 #ifndef _SYS_PARAM_H_
@@ -53,11 +53,12 @@
  *	doc/en_US.ISO8859-1/books/porters-handbook/book.sgml
  *
  * scheme is:  <major><two digit minor>Rxx
- *		'R' is 0 if release branch or x.0-CURRENT before RELENG_*_0
- *		is created, otherwise 1.
+ *		'R' is in the range 0 to 4 if this is a release branch or
+ *		x.0-CURRENT before RELENG_*_0 is created, otherwise 'R' is
+ *		in the range 5 to 9.
  */
 #undef __FreeBSD_version
-#define __FreeBSD_version 800070	/* Master, propagated to newvers */
+#define __FreeBSD_version 900014	/* Master, propagated to newvers */
 
 #ifndef LOCORE
 #include <sys/types.h>
@@ -77,7 +78,7 @@
 #define	MAXLOGNAME	17		/* max login name length (incl. NUL) */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
-#define	NGROUPS		NGROUPS_MAX	/* max number groups */
+#define	NGROUPS		(NGROUPS_MAX+1)	/* max number groups */
 #define	NOFILE		OPEN_MAX	/* max open files per process */
 #define	NOGROUP		65535		/* marker for empty group set member */
 #define MAXHOSTNAMELEN	256		/* max hostname size */
@@ -111,8 +112,6 @@
 #include <sys/limits.h>
 #endif
 
-#ifndef _NO_NAMESPACE_POLLUTION
-
 #ifndef DEV_BSHIFT
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #endif
@@ -145,7 +144,14 @@
 
 #define MCLBYTES	(1 << MCLSHIFT)	/* size of an mbuf cluster */
 
-#define	MJUMPAGESIZE	PAGE_SIZE	/* jumbo cluster 4k */
+#if PAGE_SIZE < 2048
+#define	MJUMPAGESIZE	MCLBYTES
+#elif PAGE_SIZE <= 8192
+#define	MJUMPAGESIZE	PAGE_SIZE
+#else
+#define	MJUMPAGESIZE	(8 * 1024)
+#endif
+
 #define	MJUM9BYTES	(9 * 1024)	/* jumbo cluster 9k */
 #define	MJUM16BYTES	(16 * 1024)	/* jumbo cluster 16k */
 
@@ -181,11 +187,10 @@
 	((off_t)(db) << DEV_BSHIFT)
 #endif
 
-#endif /* _NO_NAMESPACE_POLLUTION */
-
 #define	PRIMASK	0x0ff
 #define	PCATCH	0x100		/* OR'd with pri for tsleep to check signals */
 #define	PDROP	0x200	/* OR'd with pri to stop re-entry of interlock mutex */
+#define	PBDRY	0x400	/* for PCATCH stop is done on the user boundary */
 
 #define	NZERO	0		/* default "nice" */
 
@@ -195,11 +200,6 @@
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
-
-#define	CBLOCK	128		/* Clist block size, must be a power of 2. */
-				/* Data chars/clist. */
-#define	CBSIZE	(CBLOCK - sizeof(struct cblock *))
-#define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
  * File system parameters and macros.

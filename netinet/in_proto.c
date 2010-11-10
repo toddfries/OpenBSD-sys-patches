@@ -30,13 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.93 2009/03/09 17:53:05 bms Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.102 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_ipx.h"
 #include "opt_mrouting.h"
 #include "opt_ipsec.h"
 #include "opt_inet6.h"
-#include "opt_route.h"
 #include "opt_pf.h"
 #include "opt_carp.h"
 #include "opt_sctp.h"
@@ -57,6 +56,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.93 2009/03/09 17:53:05 bms Ex
 #ifdef RADIX_MPATH
 #include <net/radix_mpath.h>
 #endif
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -114,6 +114,9 @@ struct protosw inetsw[] = {
 	.pr_domain =		&inetdomain,
 	.pr_protocol =		IPPROTO_IP,
 	.pr_init =		ip_init,
+#ifdef VIMAGE
+	.pr_destroy =		ip_destroy,
+#endif
 	.pr_slowtimo =		ip_slowtimo,
 	.pr_drain =		ip_drain,
 	.pr_usrreqs =		&nousrreqs
@@ -125,8 +128,11 @@ struct protosw inetsw[] = {
 	.pr_flags =		PR_ATOMIC|PR_ADDR,
 	.pr_input =		udp_input,
 	.pr_ctlinput =		udp_ctlinput,
-	.pr_ctloutput =		ip_ctloutput,
+	.pr_ctloutput =		udp_ctloutput,
 	.pr_init =		udp_init,
+#ifdef VIMAGE
+	.pr_destroy =		udp_destroy,
+#endif
 	.pr_usrreqs =		&udp_usrreqs
 },
 {
@@ -138,45 +144,51 @@ struct protosw inetsw[] = {
 	.pr_ctlinput =		tcp_ctlinput,
 	.pr_ctloutput =		tcp_ctloutput,
 	.pr_init =		tcp_init,
+#ifdef VIMAGE
+	.pr_destroy =		tcp_destroy,
+#endif
 	.pr_slowtimo =		tcp_slowtimo,
 	.pr_drain =		tcp_drain,
 	.pr_usrreqs =		&tcp_usrreqs
 },
 #ifdef SCTP
 { 
-	.pr_type = 	SOCK_DGRAM,
-	.pr_domain =  	&inetdomain,
-        .pr_protocol = 	IPPROTO_SCTP,
-        .pr_flags = 	PR_WANTRCVD,
-        .pr_input = 	sctp_input,
-        .pr_ctlinput =  sctp_ctlinput,	
-        .pr_ctloutput = sctp_ctloutput,
-        .pr_init = 	sctp_init,	
-        .pr_drain = 	sctp_drain,
-        .pr_usrreqs = 	&sctp_usrreqs
+	.pr_type =		SOCK_DGRAM,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_SCTP,
+	.pr_flags =		PR_WANTRCVD,
+	.pr_input =		sctp_input,
+	.pr_ctlinput =		sctp_ctlinput,
+	.pr_ctloutput =		sctp_ctloutput,
+	.pr_init =		sctp_init,
+#ifdef VIMAGE
+	.pr_destroy =		sctp_finish,
+#endif
+	.pr_drain =		sctp_drain,
+	.pr_usrreqs =		&sctp_usrreqs
 },
 {
-	.pr_type = 	SOCK_SEQPACKET,
-	.pr_domain =  	&inetdomain,
-        .pr_protocol = 	IPPROTO_SCTP,
-        .pr_flags = 	PR_WANTRCVD,
-        .pr_input = 	sctp_input,
-        .pr_ctlinput =  sctp_ctlinput,	
-        .pr_ctloutput = sctp_ctloutput,
-        .pr_drain = 	sctp_drain,
-        .pr_usrreqs = 	&sctp_usrreqs
+	.pr_type =		SOCK_SEQPACKET,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_SCTP,
+	.pr_flags =		PR_WANTRCVD,
+	.pr_input =		sctp_input,
+	.pr_ctlinput =		sctp_ctlinput,
+	.pr_ctloutput =		sctp_ctloutput,
+	.pr_drain =		sctp_drain,
+	.pr_usrreqs =		&sctp_usrreqs
 },
 
 { 
-	.pr_type = 	SOCK_STREAM,
-	.pr_domain =  	&inetdomain,
-        .pr_protocol = 	IPPROTO_SCTP,
-        .pr_flags = 	PR_WANTRCVD,
-        .pr_input = 	sctp_input,
-        .pr_ctlinput =  sctp_ctlinput,	
-        .pr_ctloutput = sctp_ctloutput,
-        .pr_drain = 	sctp_drain,
-        .pr_usrreqs = 	&sctp_usrreqs
+	.pr_type =		SOCK_STREAM,
+	.pr_domain =		&inetdomain,
+	.pr_protocol =		IPPROTO_SCTP,
+	.pr_flags =		PR_WANTRCVD,
+	.pr_input =		sctp_input,
+	.pr_ctlinput =		sctp_ctlinput,
+	.pr_ctloutput =		sctp_ctloutput,
+	.pr_drain =		sctp_drain,
+	.pr_usrreqs =		&sctp_usrreqs
 },
 #endif /* SCTP */
 {
@@ -196,7 +208,6 @@ struct protosw inetsw[] = {
 	.pr_flags =		PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input =		icmp_input,
 	.pr_ctloutput =		rip_ctloutput,
-	.pr_init =		icmp_init,
 	.pr_usrreqs =		&rip_usrreqs
 },
 {
@@ -348,11 +359,15 @@ IPPROTOSPACER,
 	.pr_input =		rip_input,
 	.pr_ctloutput =		rip_ctloutput,
 	.pr_init =		rip_init,
+#ifdef VIMAGE
+	.pr_destroy =		rip_destroy,
+#endif
 	.pr_usrreqs =		&rip_usrreqs
 },
 };
 
 extern int in_inithead(void **, int);
+extern int in_detachhead(void **, int);
 
 struct domain inetdomain = {
 	.dom_family =		AF_INET,
@@ -364,13 +379,16 @@ struct domain inetdomain = {
 #else
 	.dom_rtattach =		in_inithead,
 #endif
+#ifdef VIMAGE
+	.dom_rtdetach =		in_detachhead,
+#endif
 	.dom_rtoffset =		32,
 	.dom_maxrtkey =		sizeof(struct sockaddr_in),
 	.dom_ifattach =		in_domifattach,
 	.dom_ifdetach =		in_domifdetach
 };
 
-DOMAIN_SET(inet);
+VNET_DOMAIN_SET(inet);
 
 SYSCTL_NODE(_net,      PF_INET,		inet,	CTLFLAG_RW, 0,
 	"Internet Family");

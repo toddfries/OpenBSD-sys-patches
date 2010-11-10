@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_addr.c,v 1.2 2008/12/15 06:10:57 qingli Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_addr.c,v 1.3 2009/06/23 20:19:09 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -129,13 +129,16 @@ int rdma_translate_ip(struct sockaddr *addr, struct rdma_dev_addr *dev_addr)
 	struct ifaddr *ifa;
 	struct sockaddr_in *sin = (struct sockaddr_in *)addr;
 	uint16_t port = sin->sin_port;
+	int ret;
 	
 	sin->sin_port = 0;
 	ifa = ifa_ifwithaddr(addr);
 	sin->sin_port = port;
 	if (!ifa)
 		return (EADDRNOTAVAIL);
-	return rdma_copy_addr(dev_addr, ifa->ifa_ifp, NULL);
+	ret = rdma_copy_addr(dev_addr, ifa->ifa_ifp, NULL);
+	ifa_free(ifa);
+	return (ret);
 }
 
 static void queue_req(struct addr_req *req)

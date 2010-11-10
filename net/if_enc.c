@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_enc.c,v 1.10 2008/08/12 09:05:01 vanhu Exp $
+ * $FreeBSD: src/sys/net/if_enc.c,v 1.15 2009/10/14 11:55:55 bz Exp $
  */
 
 #include <sys/param.h>
@@ -46,6 +46,7 @@
 #include <net/route.h>
 #include <net/netisr.h>
 #include <net/bpf.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -85,7 +86,7 @@ struct enc_softc {
 
 static int	enc_ioctl(struct ifnet *, u_long, caddr_t);
 static int	enc_output(struct ifnet *ifp, struct mbuf *m,
-		    struct sockaddr *dst, struct rtentry *rt);
+		    struct sockaddr *dst, struct route *ro);
 static int	enc_clone_create(struct if_clone *, int, caddr_t);
 static void	enc_clone_destroy(struct ifnet *);
 
@@ -185,7 +186,7 @@ DECLARE_MODULE(enc, enc_mod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY);
 
 static int
 enc_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-    struct rtentry *rt)
+    struct route *ro)
 {
 	m_freem(m);
 	return (0);
@@ -242,9 +243,9 @@ ipsec_filter(struct mbuf **mp, int dir, int flags)
 	}
 
 	/* Skip pfil(9) if no filters are loaded */
-	if (!(PFIL_HOOKED(&inet_pfil_hook)
+	if (!(PFIL_HOOKED(&V_inet_pfil_hook)
 #ifdef INET6
-	    || PFIL_HOOKED(&inet6_pfil_hook)
+	    || PFIL_HOOKED(&V_inet6_pfil_hook)
 #endif
 	    )) {
 		return (0);
@@ -270,7 +271,7 @@ ipsec_filter(struct mbuf **mp, int dir, int flags)
 			ip->ip_len = ntohs(ip->ip_len);
 			ip->ip_off = ntohs(ip->ip_off);
 
-			error = pfil_run_hooks(&inet_pfil_hook, mp,
+			error = pfil_run_hooks(&V_inet_pfil_hook, mp,
 			    encif, dir, NULL);
 
 			if (*mp == NULL || error != 0)
@@ -284,7 +285,7 @@ ipsec_filter(struct mbuf **mp, int dir, int flags)
 
 #ifdef INET6
 		case 6:
-			error = pfil_run_hooks(&inet6_pfil_hook, mp,
+			error = pfil_run_hooks(&V_inet6_pfil_hook, mp,
 			    encif, dir, NULL);
 			break;
 #endif

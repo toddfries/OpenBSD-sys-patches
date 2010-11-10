@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/pf/Makefile,v 1.15 2008/12/02 21:37:28 bz Exp $
+# $FreeBSD: src/sys/modules/pf/Makefile,v 1.18 2009/10/10 03:32:46 eri Exp $
 
 .include <bsd.own.mk>
 
@@ -9,7 +9,7 @@ KMOD=	pf
 SRCS = 	pf.c pf_if.c pf_subr.c pf_osfp.c pf_ioctl.c pf_norm.c pf_table.c \
 	pf_ruleset.c \
 	in4_cksum.c \
-	opt_pf.h opt_inet.h opt_inet6.h opt_bpf.h opt_mac.h opt_route.h
+	opt_pf.h opt_inet.h opt_inet6.h opt_bpf.h
 
 CFLAGS+=  -I${.CURDIR}/../../contrib/pf
 
@@ -28,7 +28,7 @@ opt_bpf.h:
 # pflog can be loaded as a module, have the additional checks turned on
 opt_pf.h:
 	echo "#define DEV_PF 1" > ${.TARGET}
-	echo "#define DEF_PFLOG 1" >> ${.TARGET}
+	echo "#define DEV_PFLOG 1" >> ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

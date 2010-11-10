@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_auth.c,v 1.48 2008/10/02 15:37:58 zec Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_auth.c,v 1.49 2010/04/29 11:52:42 bz Exp $	*/
 
 /*
  * Copyright (C) 1998-2003 by Darren Reed & Guido van Rooij.
@@ -70,11 +70,6 @@ struct file;
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
-#if !defined(_KERNEL) && defined(__FreeBSD_version) && \
-    __FreeBSD_version >= 800049
-# define V_ip_do_randomid	ip_do_randomid
-# define V_ip_id		ip_id
-#endif
 #if !defined(_KERNEL) && !defined(__osf__) && !defined(__sgi)
 # define	KERNEL
 # define	_KERNEL
@@ -125,7 +120,7 @@ extern struct ifqueue   ipintrq;		/* ip packet input queue */
 /* END OF INCLUDES */
 
 #if !defined(lint)
-static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_auth.c,v 1.48 2008/10/02 15:37:58 zec Exp $";
+static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_auth.c,v 1.49 2010/04/29 11:52:42 bz Exp $";
 /* static const char rcsid[] = "@(#)$Id: ip_auth.c,v 2.73.2.24 2007/09/09 11:32:04 darrenr Exp $"; */
 #endif
 

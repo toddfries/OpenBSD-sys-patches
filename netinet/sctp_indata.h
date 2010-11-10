@@ -31,7 +31,7 @@
 /* $KAME: sctp_indata.h,v 1.9 2005/03/06 16:04:17 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_indata.h,v 1.11 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_indata.h,v 1.13 2010/04/03 15:40:14 tuexen Exp $");
 
 #ifndef __sctp_indata_h__
 #define __sctp_indata_h__
@@ -96,18 +96,11 @@ sctp_express_handle_sack(struct sctp_tcb *stcb, uint32_t cumack,
     uint32_t rwnd, int nonce_sum_flag, int *abort_now);
 
 void
-sctp_handle_sack(struct mbuf *m, int offset, struct sctp_sack_chunk *, struct sctp_tcb *,
-    struct sctp_nets *, int *, int, uint32_t);
-
-/* EY does "exactly" the same as sctp_express_handle_sack */
-void
-sctp_express_handle_nr_sack(struct sctp_tcb *stcb, uint32_t cumack,
-    uint32_t rwnd, int nonce_sum_flag, int *abort_now);
-
-/* EY nr_sack version of sctp_handle_sack */
-void
-sctp_handle_nr_sack(struct mbuf *m, int offset, struct sctp_nr_sack_chunk *, struct sctp_tcb *,
-    struct sctp_nets *, int *, int, uint32_t);
+sctp_handle_sack(struct mbuf *m, int offset_seg, int offset_dup,
+    struct sctp_tcb *stcb, struct sctp_nets *net_from,
+    uint16_t num_seg, uint16_t num_nr_seg, uint16_t num_dup,
+    int *abort_now, uint8_t flags,
+    uint32_t cum_ack, uint32_t rwnd);
 
 /* draft-ietf-tsvwg-usctp */
 void
@@ -128,7 +121,9 @@ sctp_process_data(struct mbuf **, int, int *, int, struct sctphdr *,
     struct sctp_inpcb *, struct sctp_tcb *,
     struct sctp_nets *, uint32_t *);
 
-void sctp_sack_check(struct sctp_tcb *, int, int, int *);
+void sctp_slide_mapping_arrays(struct sctp_tcb *stcb);
+
+void sctp_sack_check(struct sctp_tcb *, int, int *);
 
 #endif
 #endif

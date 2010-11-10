@@ -41,11 +41,10 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.60 2008/12/15 06:10:57 qingli Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.71 2009/12/24 00:43:44 delphij Exp $");
 #endif
 
 #ifdef __FreeBSD__
-#include "opt_mac.h"
 #include "opt_bpf.h"
 #include "opt_pf.h"
 
@@ -92,7 +91,6 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.60 2008/12/15 06:10:57 qingl
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/sx.h>
-#include <sys/vimage.h>
 #else
 #include <sys/rwlock.h>
 #endif
@@ -120,9 +118,6 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.60 2008/12/15 06:10:57 qingl
 #include <netinet/udp_var.h>
 #include <netinet/icmp_var.h>
 #include <netinet/if_ether.h>
-#ifdef __FreeBSD__
-#include <netinet/vinet.h>
-#endif
 
 #ifndef __FreeBSD__
 #include <dev/rndvar.h>
@@ -142,7 +137,6 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.60 2008/12/15 06:10:57 qingl
 #ifdef __FreeBSD__
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_pcb.h>
-#include <netinet6/vinet6.h>
 #endif
 #endif /* INET6 */
 
@@ -259,6 +253,13 @@ int			 pf_test_fragment(struct pf_rule **, int,
 			    struct pfi_kif *, struct mbuf *, void *,
 			    struct pf_pdesc *, struct pf_rule **,
 			    struct pf_ruleset **);
+int			 pf_tcp_track_full(struct pf_state_peer *,
+			    struct pf_state_peer *, struct pf_state **,
+			    struct pfi_kif *, struct mbuf *, int,
+			    struct pf_pdesc *, u_short *, int *);
+int			 pf_tcp_track_sloppy(struct pf_state_peer *,
+			    struct pf_state_peer *, struct pf_state **,
+			    struct pf_pdesc *, u_short *);
 int			 pf_test_state_tcp(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
@@ -977,6 +978,9 @@ void
 pf_purge_thread(void *v)
 {
 	int nloops = 0, s;
+#ifdef __FreeBSD__
+	int locked;
+#endif
 
 	for (;;) {
 		tsleep(pf_purge_thread, PWAIT, "pftm", 1 * hz);
@@ -984,14 +988,19 @@ pf_purge_thread(void *v)
 #ifdef __FreeBSD__
 		sx_slock(&pf_consistency_lock);
 		PF_LOCK();
+		locked = 0;
 
 		if (pf_end_threads) {
-			pf_purge_expired_states(pf_status.states);
+			PF_UNLOCK();
+			sx_sunlock(&pf_consistency_lock);
+			sx_xlock(&pf_consistency_lock);
+			PF_LOCK();
+			pf_purge_expired_states(pf_status.states, 1);
 			pf_purge_expired_fragments();
-			pf_purge_expired_src_nodes(0);
+			pf_purge_expired_src_nodes(1);
 			pf_end_threads++;
 
-			sx_sunlock(&pf_consistency_lock);
+			sx_xunlock(&pf_consistency_lock);
 			PF_UNLOCK();
 			wakeup(pf_purge_thread);
 			kproc_exit(0);
@@ -1000,20 +1009,44 @@ pf_purge_thread(void *v)
 		s = splsoftnet();
 
 		/* process a fraction of the state table every second */
+#ifdef __FreeBSD__
+		if(!pf_purge_expired_states(1 + (pf_status.states
+		    / pf_default_rule.timeout[PFTM_INTERVAL]), 0)) {
+			PF_UNLOCK();
+			sx_sunlock(&pf_consistency_lock);
+			sx_xlock(&pf_consistency_lock);
+			PF_LOCK();
+			locked = 1;
+
+			pf_purge_expired_states(1 + (pf_status.states
+			    / pf_default_rule.timeout[PFTM_INTERVAL]), 1);
+		}
+#else
 		pf_purge_expired_states(1 + (pf_status.states
 		    / pf_default_rule.timeout[PFTM_INTERVAL]));
+#endif
 
 		/* purge other expired types every PFTM_INTERVAL seconds */
 		if (++nloops >= pf_default_rule.timeout[PFTM_INTERVAL]) {
 			pf_purge_expired_fragments();
-			pf_purge_expired_src_nodes(0);
+			if (!pf_purge_expired_src_nodes(locked)) {
+				PF_UNLOCK();
+				sx_sunlock(&pf_consistency_lock);
+				sx_xlock(&pf_consistency_lock);
+				PF_LOCK();
+				locked = 1;
+				pf_purge_expired_src_nodes(1);
+			}
 			nloops = 0;
 		}
 
 		splx(s);
 #ifdef __FreeBSD__
 		PF_UNLOCK();
-		sx_sunlock(&pf_consistency_lock);
+		if (locked)
+			sx_xunlock(&pf_consistency_lock);
+		else
+			sx_sunlock(&pf_consistency_lock);
 #endif
 	}
 }
@@ -1062,8 +1095,13 @@ pf_state_expires(const struct pf_state *state)
 	return (state->expire + timeout);
 }
 
+#ifdef __FreeBSD__
+int
+pf_purge_expired_src_nodes(int waslocked)
+#else
 void
 pf_purge_expired_src_nodes(int waslocked)
+#endif
 {
 	 struct pf_src_node		*cur, *next;
 	 int				 locked = waslocked;
@@ -1074,12 +1112,8 @@ pf_purge_expired_src_nodes(int waslocked)
 		 if (cur->states <= 0 && cur->expire <= time_second) {
 			 if (! locked) {
 #ifdef __FreeBSD__
-				 if (!sx_try_upgrade(&pf_consistency_lock)) {
-					 PF_UNLOCK();
-					 sx_sunlock(&pf_consistency_lock);
-					 sx_xlock(&pf_consistency_lock);
-					 PF_LOCK();
-				 }
+				 if (!sx_try_upgrade(&pf_consistency_lock))
+				 	return (0);
 #else
 				 rw_enter_write(&pf_consistency_lock);
 #endif
@@ -1105,6 +1139,10 @@ pf_purge_expired_src_nodes(int waslocked)
 		sx_downgrade(&pf_consistency_lock);
 #else
 		rw_exit_write(&pf_consistency_lock);
+#endif
+
+#ifdef __FreeBSD__
+	return (1);
 #endif
 }
 
@@ -1208,12 +1246,21 @@ pf_free_state(struct pf_state *cur)
 	pf_status.states--;
 }
 
+#ifdef __FreeBSD__
+int
+pf_purge_expired_states(u_int32_t maxcheck, int waslocked)
+#else
 void
 pf_purge_expired_states(u_int32_t maxcheck)
+#endif
 {
 	static struct pf_state	*cur = NULL;
 	struct pf_state		*next;
+#ifdef __FreeBSD__
+	int 			 locked = waslocked;
+#else
 	int 			 locked = 0;
+#endif
 
 	while (maxcheck--) {
 		/* wrap to start of list when we hit the end */
@@ -1230,12 +1277,8 @@ pf_purge_expired_states(u_int32_t maxcheck)
 			/* free unlinked state */
 			if (! locked) {
 #ifdef __FreeBSD__
-				 if (!sx_try_upgrade(&pf_consistency_lock)) {
-					 PF_UNLOCK();
-					 sx_sunlock(&pf_consistency_lock);
-					 sx_xlock(&pf_consistency_lock);
-					 PF_LOCK();
-				 }
+				 if (!sx_try_upgrade(&pf_consistency_lock))
+				 	return (0);
 #else
 				rw_enter_write(&pf_consistency_lock);
 #endif
@@ -1247,12 +1290,8 @@ pf_purge_expired_states(u_int32_t maxcheck)
 			pf_unlink_state(cur);
 			if (! locked) {
 #ifdef __FreeBSD__
-				 if (!sx_try_upgrade(&pf_consistency_lock)) {
-					 PF_UNLOCK();
-					 sx_sunlock(&pf_consistency_lock);
-					 sx_xlock(&pf_consistency_lock);
-					 PF_LOCK();
-				 }
+				 if (!sx_try_upgrade(&pf_consistency_lock))
+				 	return (0);
 #else
 				rw_enter_write(&pf_consistency_lock);
 #endif
@@ -1263,10 +1302,13 @@ pf_purge_expired_states(u_int32_t maxcheck)
 		cur = next;
 	}
 
-	if (locked)
 #ifdef __FreeBSD__
+	if (!waslocked && locked)
 		sx_downgrade(&pf_consistency_lock);
+
+	return (1);
 #else
+	if (locked)
 		rw_exit_write(&pf_consistency_lock);
 #endif
 }
@@ -1763,7 +1805,6 @@ pf_send_tcp(const struct pf_rule *r, sa_family_t af,
     u_int8_t flags, u_int16_t win, u_int16_t mss, u_int8_t ttl, int tag,
     u_int16_t rtag, struct ether_header *eh, struct ifnet *ifp)
 {
-	INIT_VNET_INET(curvnet);
 	struct mbuf	*m;
 	int		 len, tlen;
 #ifdef INET
@@ -2927,7 +2968,6 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd, struct inpcb *inp_arg)
 pf_socket_lookup(int direction, struct pf_pdesc *pd)
 #endif
 {
-	INIT_VNET_INET(curvnet);
 	struct pf_addr		*saddr, *daddr;
 	u_int16_t		 sport, dport;
 #ifdef __FreeBSD__
@@ -3097,7 +3137,6 @@ pf_get_wscale(struct mbuf *m, int off, u_int16_t th_off, sa_family_t af)
 u_int16_t
 pf_get_mss(struct mbuf *m, int off, u_int16_t th_off, sa_family_t af)
 {
-	INIT_VNET_INET(curvnet);
 	int		 hlen;
 	u_int8_t	 hdr[60];
 	u_int8_t	*opt, optlen;
@@ -3137,7 +3176,6 @@ u_int16_t
 pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 {
 #ifdef INET
-	INIT_VNET_INET(curvnet);
 	struct sockaddr_in	*dst;
 	struct route		 ro;
 #endif /* INET */
@@ -3240,7 +3278,6 @@ pf_test_tcp(struct pf_rule **rm, struct pf_state **sm, int direction,
     struct ifqueue *ifq)
 #endif
 {
-	INIT_VNET_INET(curvnet);
 	struct pf_rule		*nr = NULL;
 	struct pf_addr		*saddr = pd->src, *daddr = pd->dst;
 	struct tcphdr		*th = pd->hdr.tcp;
@@ -3498,7 +3535,10 @@ cleanup:
 		s->nat_rule.ptr = nr;
 		s->anchor.ptr = a;
 		STATE_INC_COUNTERS(s);
-		s->allow_opts = r->allow_opts;
+		if (r->allow_opts)
+			s->state_flags |= PFSTATE_ALLOWOPTS;
+		if (r->rule_flag & PFRULE_STATESLOPPY)
+			s->state_flags |= PFSTATE_SLOPPY;
 		s->log = r->log & PF_LOG_ALL;
 		if (nr != NULL)
 			s->log |= nr->log & PF_LOG_ALL;
@@ -3895,7 +3935,10 @@ cleanup:
 		s->nat_rule.ptr = nr;
 		s->anchor.ptr = a;
 		STATE_INC_COUNTERS(s);
-		s->allow_opts = r->allow_opts;
+		if (r->allow_opts)
+			s->state_flags |= PFSTATE_ALLOWOPTS;
+ 		if (r->rule_flag & PFRULE_STATESLOPPY)
+			s->state_flags |= PFSTATE_SLOPPY;
 		s->log = r->log & PF_LOG_ALL;
 		if (nr != NULL)
 			s->log |= nr->log & PF_LOG_ALL;
@@ -4208,7 +4251,10 @@ cleanup:
 		s->nat_rule.ptr = nr;
 		s->anchor.ptr = a;
 		STATE_INC_COUNTERS(s);
-		s->allow_opts = r->allow_opts;
+		if (r->allow_opts)
+			s->state_flags |= PFSTATE_ALLOWOPTS;
+ 		if (r->rule_flag & PFRULE_STATESLOPPY)
+			s->state_flags |= PFSTATE_SLOPPY;
 		s->log = r->log & PF_LOG_ALL;
 		if (nr != NULL)
 			s->log |= nr->log & PF_LOG_ALL;
@@ -4495,7 +4541,10 @@ cleanup:
 		s->nat_rule.ptr = nr;
 		s->anchor.ptr = a;
 		STATE_INC_COUNTERS(s);
-		s->allow_opts = r->allow_opts;
+		if (r->allow_opts)
+			s->state_flags |= PFSTATE_ALLOWOPTS;
+ 		if (r->rule_flag & PFRULE_STATESLOPPY)
+			s->state_flags |= PFSTATE_SLOPPY;
 		s->log = r->log & PF_LOG_ALL;
 		if (nr != NULL)
 			s->log |= nr->log & PF_LOG_ALL;
@@ -4636,16 +4685,436 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 }
 
 int
+pf_tcp_track_full(struct pf_state_peer *src, struct pf_state_peer *dst,
+	struct pf_state **state, struct pfi_kif *kif, struct mbuf *m, int off,
+	struct pf_pdesc *pd, u_short *reason, int *copyback)
+{
+ 	struct tcphdr		*th = pd->hdr.tcp;
+ 	u_int16_t		 win = ntohs(th->th_win);
+ 	u_int32_t		 ack, end, seq, orig_seq;
+ 	u_int8_t		 sws, dws;
+ 	int			 ackskew;
+
+	if (src->wscale && dst->wscale && !(th->th_flags & TH_SYN)) {
+		sws = src->wscale & PF_WSCALE_MASK;
+		dws = dst->wscale & PF_WSCALE_MASK;
+	} else
+		sws = dws = 0;
+
+	/*
+	 * Sequence tracking algorithm from Guido van Rooij's paper:
+	 *   http://www.madison-gurkha.com/publications/tcp_filtering/
+	 *	tcp_filtering.ps
+	 */
+
+	orig_seq = seq = ntohl(th->th_seq);
+	if (src->seqlo == 0) {
+		/* First packet from this end. Set its state */
+
+		if ((pd->flags & PFDESC_TCP_NORM || dst->scrub) &&
+		    src->scrub == NULL) {
+			if (pf_normalize_tcp_init(m, off, pd, th, src, dst)) {
+				REASON_SET(reason, PFRES_MEMORY);
+				return (PF_DROP);
+			}
+		}
+
+		/* Deferred generation of sequence number modulator */
+		if (dst->seqdiff && !src->seqdiff) {
+#ifdef __FreeBSD__
+			while ((src->seqdiff = pf_new_isn(*state) - seq) == 0)
+				;
+#else
+			while ((src->seqdiff = tcp_rndiss_next() - seq) == 0)
+				;
+#endif
+			ack = ntohl(th->th_ack) - dst->seqdiff;
+			pf_change_a(&th->th_seq, &th->th_sum, htonl(seq +
+			    src->seqdiff), 0);
+			pf_change_a(&th->th_ack, &th->th_sum, htonl(ack), 0);
+			*copyback = 1;
+		} else {
+			ack = ntohl(th->th_ack);
+		}
+
+		end = seq + pd->p_len;
+		if (th->th_flags & TH_SYN) {
+			end++;
+			if (dst->wscale & PF_WSCALE_FLAG) {
+				src->wscale = pf_get_wscale(m, off, th->th_off,
+				    pd->af);
+				if (src->wscale & PF_WSCALE_FLAG) {
+					/* Remove scale factor from initial
+					 * window */
+					sws = src->wscale & PF_WSCALE_MASK;
+					win = ((u_int32_t)win + (1 << sws) - 1)
+					    >> sws;
+					dws = dst->wscale & PF_WSCALE_MASK;
+				} else {
+					/* fixup other window */
+					dst->max_win <<= dst->wscale &
+					    PF_WSCALE_MASK;
+					/* in case of a retrans SYN|ACK */
+					dst->wscale = 0;
+				}
+			}
+		}
+		if (th->th_flags & TH_FIN)
+			end++;
+
+		src->seqlo = seq;
+		if (src->state < TCPS_SYN_SENT)
+			src->state = TCPS_SYN_SENT;
+
+		/*
+		 * May need to slide the window (seqhi may have been set by
+		 * the crappy stack check or if we picked up the connection
+		 * after establishment)
+		 */
+		if (src->seqhi == 1 ||
+		    SEQ_GEQ(end + MAX(1, dst->max_win << dws), src->seqhi))
+			src->seqhi = end + MAX(1, dst->max_win << dws);
+		if (win > src->max_win)
+			src->max_win = win;
+
+	} else {
+		ack = ntohl(th->th_ack) - dst->seqdiff;
+		if (src->seqdiff) {
+			/* Modulate sequence numbers */
+			pf_change_a(&th->th_seq, &th->th_sum, htonl(seq +
+			    src->seqdiff), 0);
+			pf_change_a(&th->th_ack, &th->th_sum, htonl(ack), 0);
+			*copyback = 1;
+		}
+		end = seq + pd->p_len;
+		if (th->th_flags & TH_SYN)
+			end++;
+		if (th->th_flags & TH_FIN)
+			end++;
+	}
+
+	if ((th->th_flags & TH_ACK) == 0) {
+		/* Let it pass through the ack skew check */
+		ack = dst->seqlo;
+	} else if ((ack == 0 &&
+	    (th->th_flags & (TH_ACK|TH_RST)) == (TH_ACK|TH_RST)) ||
+	    /* broken tcp stacks do not set ack */
+	    (dst->state < TCPS_SYN_SENT)) {
+		/*
+		 * Many stacks (ours included) will set the ACK number in an
+		 * FIN|ACK if the SYN times out -- no sequence to ACK.
+		 */
+		ack = dst->seqlo;
+	}
+
+	if (seq == end) {
+		/* Ease sequencing restrictions on no data packets */
+		seq = src->seqlo;
+		end = seq;
+	}
+
+	ackskew = dst->seqlo - ack;
+
+
+	/*
+	 * Need to demodulate the sequence numbers in any TCP SACK options
+	 * (Selective ACK). We could optionally validate the SACK values
+	 * against the current ACK window, either forwards or backwards, but
+	 * I'm not confident that SACK has been implemented properly
+	 * everywhere. It wouldn't surprise me if several stacks accidently
+	 * SACK too far backwards of previously ACKed data. There really aren't
+	 * any security implications of bad SACKing unless the target stack
+	 * doesn't validate the option length correctly. Someone trying to
+	 * spoof into a TCP connection won't bother blindly sending SACK
+	 * options anyway.
+	 */
+	if (dst->seqdiff && (th->th_off << 2) > sizeof(struct tcphdr)) {
+		if (pf_modulate_sack(m, off, pd, th, dst))
+			*copyback = 1;
+	}
+
+
+#define MAXACKWINDOW (0xffff + 1500)	/* 1500 is an arbitrary fudge factor */
+	if (SEQ_GEQ(src->seqhi, end) &&
+	    /* Last octet inside other's window space */
+	    SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)) &&
+	    /* Retrans: not more than one window back */
+	    (ackskew >= -MAXACKWINDOW) &&
+	    /* Acking not more than one reassembled fragment backwards */
+	    (ackskew <= (MAXACKWINDOW << sws)) &&
+	    /* Acking not more than one window forward */
+	    ((th->th_flags & TH_RST) == 0 || orig_seq == src->seqlo ||
+	    (orig_seq == src->seqlo + 1) || (pd->flags & PFDESC_IP_REAS) == 0)) {
+	    /* Require an exact/+1 sequence match on resets when possible */
+
+		if (dst->scrub || src->scrub) {
+			if (pf_normalize_tcp_stateful(m, off, pd, reason, th,
+			    *state, src, dst, copyback))
+				return (PF_DROP);
+		}
+
+		/* update max window */
+		if (src->max_win < win)
+			src->max_win = win;
+		/* synchronize sequencing */
+		if (SEQ_GT(end, src->seqlo))
+			src->seqlo = end;
+		/* slide the window of what the other end can send */
+		if (SEQ_GEQ(ack + (win << sws), dst->seqhi))
+			dst->seqhi = ack + MAX((win << sws), 1);
+
+
+		/* update states */
+		if (th->th_flags & TH_SYN)
+			if (src->state < TCPS_SYN_SENT)
+				src->state = TCPS_SYN_SENT;
+		if (th->th_flags & TH_FIN)
+			if (src->state < TCPS_CLOSING)
+				src->state = TCPS_CLOSING;
+		if (th->th_flags & TH_ACK) {
+			if (dst->state == TCPS_SYN_SENT) {
+				dst->state = TCPS_ESTABLISHED;
+				if (src->state == TCPS_ESTABLISHED &&
+				    (*state)->src_node != NULL &&
+				    pf_src_connlimit(state)) {
+					REASON_SET(reason, PFRES_SRCLIMIT);
+					return (PF_DROP);
+				}
+			} else if (dst->state == TCPS_CLOSING)
+				dst->state = TCPS_FIN_WAIT_2;
+		}
+		if (th->th_flags & TH_RST)
+			src->state = dst->state = TCPS_TIME_WAIT;
+
+		/* update expire time */
+		(*state)->expire = time_second;
+		if (src->state >= TCPS_FIN_WAIT_2 &&
+		    dst->state >= TCPS_FIN_WAIT_2)
+			(*state)->timeout = PFTM_TCP_CLOSED;
+		else if (src->state >= TCPS_CLOSING &&
+		    dst->state >= TCPS_CLOSING)
+			(*state)->timeout = PFTM_TCP_FIN_WAIT;
+		else if (src->state < TCPS_ESTABLISHED ||
+		    dst->state < TCPS_ESTABLISHED)
+			(*state)->timeout = PFTM_TCP_OPENING;
+		else if (src->state >= TCPS_CLOSING ||
+		    dst->state >= TCPS_CLOSING)
+			(*state)->timeout = PFTM_TCP_CLOSING;
+		else
+			(*state)->timeout = PFTM_TCP_ESTABLISHED;
+
+		/* Fall through to PASS packet */
+
+	} else if ((dst->state < TCPS_SYN_SENT ||
+		dst->state >= TCPS_FIN_WAIT_2 ||
+		src->state >= TCPS_FIN_WAIT_2) &&
+	    SEQ_GEQ(src->seqhi + MAXACKWINDOW, end) &&
+	    /* Within a window forward of the originating packet */
+	    SEQ_GEQ(seq, src->seqlo - MAXACKWINDOW)) {
+	    /* Within a window backward of the originating packet */
+
+		/*
+		 * This currently handles three situations:
+		 *  1) Stupid stacks will shotgun SYNs before their peer
+		 *     replies.
+		 *  2) When PF catches an already established stream (the
+		 *     firewall rebooted, the state table was flushed, routes
+		 *     changed...)
+		 *  3) Packets get funky immediately after the connection
+		 *     closes (this should catch Solaris spurious ACK|FINs
+		 *     that web servers like to spew after a close)
+		 *
+		 * This must be a little more careful than the above code
+		 * since packet floods will also be caught here. We don't
+		 * update the TTL here to mitigate the damage of a packet
+		 * flood and so the same code can handle awkward establishment
+		 * and a loosened connection close.
+		 * In the establishment case, a correct peer response will
+		 * validate the connection, go through the normal state code
+		 * and keep updating the state TTL.
+		 */
+
+		if (pf_status.debug >= PF_DEBUG_MISC) {
+			printf("pf: loose state match: ");
+			pf_print_state(*state);
+			pf_print_flags(th->th_flags);
+			printf(" seq=%u (%u) ack=%u len=%u ackskew=%d "
+			    "pkts=%llu:%llu\n", seq, orig_seq, ack, pd->p_len,
+#ifdef __FreeBSD__
+			    ackskew, (unsigned long long)(*state)->packets[0],
+			    (unsigned long long)(*state)->packets[1]);
+#else
+			    ackskew, (*state)->packets[0],
+			    (*state)->packets[1]);
+#endif
+		}
+
+		if (dst->scrub || src->scrub) {
+			if (pf_normalize_tcp_stateful(m, off, pd, reason, th,
+			    *state, src, dst, copyback))
+				return (PF_DROP);
+		}
+
+		/* update max window */
+		if (src->max_win < win)
+			src->max_win = win;
+		/* synchronize sequencing */
+		if (SEQ_GT(end, src->seqlo))
+			src->seqlo = end;
+		/* slide the window of what the other end can send */
+		if (SEQ_GEQ(ack + (win << sws), dst->seqhi))
+			dst->seqhi = ack + MAX((win << sws), 1);
+
+		/*
+		 * Cannot set dst->seqhi here since this could be a shotgunned
+		 * SYN and not an already established connection.
+		 */
+
+		if (th->th_flags & TH_FIN)
+			if (src->state < TCPS_CLOSING)
+				src->state = TCPS_CLOSING;
+		if (th->th_flags & TH_RST)
+			src->state = dst->state = TCPS_TIME_WAIT;
+
+		/* Fall through to PASS packet */
+
+	} else {
+		if ((*state)->dst.state == TCPS_SYN_SENT &&
+		    (*state)->src.state == TCPS_SYN_SENT) {
+			/* Send RST for state mismatches during handshake */
+			if (!(th->th_flags & TH_RST))
+#ifdef __FreeBSD__
+				pf_send_tcp(m, (*state)->rule.ptr, pd->af,
+#else
+				pf_send_tcp((*state)->rule.ptr, pd->af,
+#endif
+				    pd->dst, pd->src, th->th_dport,
+				    th->th_sport, ntohl(th->th_ack), 0,
+				    TH_RST, 0, 0,
+				    (*state)->rule.ptr->return_ttl, 1, 0,
+				    pd->eh, kif->pfik_ifp);
+			src->seqlo = 0;
+			src->seqhi = 1;
+			src->max_win = 1;
+		} else if (pf_status.debug >= PF_DEBUG_MISC) {
+			printf("pf: BAD state: ");
+			pf_print_state(*state);
+			pf_print_flags(th->th_flags);
+			printf(" seq=%u (%u) ack=%u len=%u ackskew=%d "
+#ifdef notyet
+			    "pkts=%llu:%llu dir=%s,%s\n",
+#else
+			    "pkts=%llu:%llu%s\n",
+#endif
+			    seq, orig_seq, ack, pd->p_len, ackskew,
+#ifdef __FreeBSD__
+			    (unsigned long long)(*state)->packets[0],
+			    (unsigned long long)(*state)->packets[1],
+#else
+			    (*state)->packets[0], (*state)->packets[1],
+#endif
+#ifdef notyet
+			    direction == PF_IN ? "in" : "out",
+			    direction == (*state)->direction ? "fwd" : "rev");
+#else
+			    "");
+#endif
+			printf("pf: State failure on: %c %c %c %c | %c %c\n",
+			    SEQ_GEQ(src->seqhi, end) ? ' ' : '1',
+			    SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)) ?
+			    ' ': '2',
+			    (ackskew >= -MAXACKWINDOW) ? ' ' : '3',
+			    (ackskew <= (MAXACKWINDOW << sws)) ? ' ' : '4',
+			    SEQ_GEQ(src->seqhi + MAXACKWINDOW, end) ?' ' :'5',
+			    SEQ_GEQ(seq, src->seqlo - MAXACKWINDOW) ?' ' :'6');
+		}
+		REASON_SET(reason, PFRES_BADSTATE);
+		return (PF_DROP);
+	}
+
+	/* Any packets which have gotten here are to be passed */
+	return (PF_PASS);
+}
+
+int
+pf_tcp_track_sloppy(struct pf_state_peer *src, struct pf_state_peer *dst,
+	struct pf_state **state, struct pf_pdesc *pd, u_short *reason)
+{
+	struct tcphdr		*th = pd->hdr.tcp;
+
+	if (th->th_flags & TH_SYN)
+		if (src->state < TCPS_SYN_SENT)
+			src->state = TCPS_SYN_SENT;
+	if (th->th_flags & TH_FIN)
+		if (src->state < TCPS_CLOSING)
+			src->state = TCPS_CLOSING;
+	if (th->th_flags & TH_ACK) {
+		if (dst->state == TCPS_SYN_SENT) {
+			dst->state = TCPS_ESTABLISHED;
+			if (src->state == TCPS_ESTABLISHED &&
+			    (*state)->src_node != NULL &&
+			    pf_src_connlimit(state)) {
+				REASON_SET(reason, PFRES_SRCLIMIT);
+				return (PF_DROP);
+			}
+		} else if (dst->state == TCPS_CLOSING) {
+			dst->state = TCPS_FIN_WAIT_2;
+		} else if (src->state == TCPS_SYN_SENT &&
+		    dst->state < TCPS_SYN_SENT) {
+			/*
+			 * Handle a special sloppy case where we only see one
+			 * half of the connection. If there is a ACK after
+			 * the initial SYN without ever seeing a packet from
+			 * the destination, set the connection to established.
+			 */
+			dst->state = src->state = TCPS_ESTABLISHED;
+			if ((*state)->src_node != NULL &&
+			    pf_src_connlimit(state)) {
+				REASON_SET(reason, PFRES_SRCLIMIT);
+				return (PF_DROP);
+			}
+		} else if (src->state == TCPS_CLOSING &&
+		    dst->state == TCPS_ESTABLISHED &&
+		    dst->seqlo == 0) {
+			/*
+			 * Handle the closing of half connections where we
+			 * don't see the full bidirectional FIN/ACK+ACK
+			 * handshake.
+			 */
+			dst->state = TCPS_CLOSING;
+		}
+	}
+	if (th->th_flags & TH_RST)
+		src->state = dst->state = TCPS_TIME_WAIT;
+
+	/* update expire time */
+	(*state)->expire = time_second;
+	if (src->state >= TCPS_FIN_WAIT_2 &&
+	    dst->state >= TCPS_FIN_WAIT_2)
+		(*state)->timeout = PFTM_TCP_CLOSED;
+	else if (src->state >= TCPS_CLOSING &&
+	    dst->state >= TCPS_CLOSING)
+		(*state)->timeout = PFTM_TCP_FIN_WAIT;
+	else if (src->state < TCPS_ESTABLISHED ||
+	    dst->state < TCPS_ESTABLISHED)
+		(*state)->timeout = PFTM_TCP_OPENING;
+	else if (src->state >= TCPS_CLOSING ||
+	    dst->state >= TCPS_CLOSING)
+		(*state)->timeout = PFTM_TCP_CLOSING;
+	else
+		(*state)->timeout = PFTM_TCP_ESTABLISHED;
+
+	return (PF_PASS);
+}
+
+
+int
 pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
     struct mbuf *m, int off, void *h, struct pf_pdesc *pd,
     u_short *reason)
 {
 	struct pf_state_cmp	 key;
 	struct tcphdr		*th = pd->hdr.tcp;
-	u_int16_t		 win = ntohs(th->th_win);
-	u_int32_t		 ack, end, seq, orig_seq;
-	u_int8_t		 sws, dws;
-	int			 ackskew;
 	int			 copyback = 0;
 	struct pf_state_peer	*src, *dst;
 
@@ -4796,336 +5265,14 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		return (PF_DROP);
 	}
 
-	if (src->wscale && dst->wscale && !(th->th_flags & TH_SYN)) {
-		sws = src->wscale & PF_WSCALE_MASK;
-		dws = dst->wscale & PF_WSCALE_MASK;
-	} else
-		sws = dws = 0;
-
-	/*
-	 * Sequence tracking algorithm from Guido van Rooij's paper:
-	 *   http://www.madison-gurkha.com/publications/tcp_filtering/
-	 *	tcp_filtering.ps
-	 */
-
-	orig_seq = seq = ntohl(th->th_seq);
-	if (src->seqlo == 0) {
-		/* First packet from this end. Set its state */
-
-		if ((pd->flags & PFDESC_TCP_NORM || dst->scrub) &&
-		    src->scrub == NULL) {
-			if (pf_normalize_tcp_init(m, off, pd, th, src, dst)) {
-				REASON_SET(reason, PFRES_MEMORY);
-				return (PF_DROP);
-			}
-		}
-
-		/* Deferred generation of sequence number modulator */
-		if (dst->seqdiff && !src->seqdiff) {
-#ifdef __FreeBSD__
-			while ((src->seqdiff = pf_new_isn(*state) - seq) == 0)
-				;
-#else
-			while ((src->seqdiff = tcp_rndiss_next() - seq) == 0)
-				;
-#endif
-			ack = ntohl(th->th_ack) - dst->seqdiff;
-			pf_change_a(&th->th_seq, &th->th_sum, htonl(seq +
-			    src->seqdiff), 0);
-			pf_change_a(&th->th_ack, &th->th_sum, htonl(ack), 0);
-			copyback = 1;
-		} else {
-			ack = ntohl(th->th_ack);
-		}
-
-		end = seq + pd->p_len;
-		if (th->th_flags & TH_SYN) {
-			end++;
-			if (dst->wscale & PF_WSCALE_FLAG) {
-				src->wscale = pf_get_wscale(m, off, th->th_off,
-				    pd->af);
-				if (src->wscale & PF_WSCALE_FLAG) {
-					/* Remove scale factor from initial
-					 * window */
-					sws = src->wscale & PF_WSCALE_MASK;
-					win = ((u_int32_t)win + (1 << sws) - 1)
-					    >> sws;
-					dws = dst->wscale & PF_WSCALE_MASK;
-				} else {
-					/* fixup other window */
-					dst->max_win <<= dst->wscale &
-					    PF_WSCALE_MASK;
-					/* in case of a retrans SYN|ACK */
-					dst->wscale = 0;
-				}
-			}
-		}
-		if (th->th_flags & TH_FIN)
-			end++;
-
-		src->seqlo = seq;
-		if (src->state < TCPS_SYN_SENT)
-			src->state = TCPS_SYN_SENT;
-
-		/*
-		 * May need to slide the window (seqhi may have been set by
-		 * the crappy stack check or if we picked up the connection
-		 * after establishment)
-		 */
-		if (src->seqhi == 1 ||
-		    SEQ_GEQ(end + MAX(1, dst->max_win << dws), src->seqhi))
-			src->seqhi = end + MAX(1, dst->max_win << dws);
-		if (win > src->max_win)
-			src->max_win = win;
-
+	if ((*state)->state_flags & PFSTATE_SLOPPY) {
+		if (pf_tcp_track_sloppy(src, dst, state, pd, reason) == PF_DROP)
+			return (PF_DROP);
 	} else {
-		ack = ntohl(th->th_ack) - dst->seqdiff;
-		if (src->seqdiff) {
-			/* Modulate sequence numbers */
-			pf_change_a(&th->th_seq, &th->th_sum, htonl(seq +
-			    src->seqdiff), 0);
-			pf_change_a(&th->th_ack, &th->th_sum, htonl(ack), 0);
-			copyback = 1;
-		}
-		end = seq + pd->p_len;
-		if (th->th_flags & TH_SYN)
-			end++;
-		if (th->th_flags & TH_FIN)
-			end++;
+		if (pf_tcp_track_full(src, dst, state, kif, m, off, pd, reason,
+		    &copyback) == PF_DROP)
+			return (PF_DROP);
 	}
-
-	if ((th->th_flags & TH_ACK) == 0) {
-		/* Let it pass through the ack skew check */
-		ack = dst->seqlo;
-	} else if ((ack == 0 &&
-	    (th->th_flags & (TH_ACK|TH_RST)) == (TH_ACK|TH_RST)) ||
-	    /* broken tcp stacks do not set ack */
-	    (dst->state < TCPS_SYN_SENT)) {
-		/*
-		 * Many stacks (ours included) will set the ACK number in an
-		 * FIN|ACK if the SYN times out -- no sequence to ACK.
-		 */
-		ack = dst->seqlo;
-	}
-
-	if (seq == end) {
-		/* Ease sequencing restrictions on no data packets */
-		seq = src->seqlo;
-		end = seq;
-	}
-
-	ackskew = dst->seqlo - ack;
-
-
-	/*
-	 * Need to demodulate the sequence numbers in any TCP SACK options
-	 * (Selective ACK). We could optionally validate the SACK values
-	 * against the current ACK window, either forwards or backwards, but
-	 * I'm not confident that SACK has been implemented properly
-	 * everywhere. It wouldn't surprise me if several stacks accidently
-	 * SACK too far backwards of previously ACKed data. There really aren't
-	 * any security implications of bad SACKing unless the target stack
-	 * doesn't validate the option length correctly. Someone trying to
-	 * spoof into a TCP connection won't bother blindly sending SACK
-	 * options anyway.
-	 */
-	if (dst->seqdiff && (th->th_off << 2) > sizeof(struct tcphdr)) {
-		if (pf_modulate_sack(m, off, pd, th, dst))
-			copyback = 1;
-	}
-
-
-#define MAXACKWINDOW (0xffff + 1500)	/* 1500 is an arbitrary fudge factor */
-	if (SEQ_GEQ(src->seqhi, end) &&
-	    /* Last octet inside other's window space */
-	    SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)) &&
-	    /* Retrans: not more than one window back */
-	    (ackskew >= -MAXACKWINDOW) &&
-	    /* Acking not more than one reassembled fragment backwards */
-	    (ackskew <= (MAXACKWINDOW << sws)) &&
-	    /* Acking not more than one window forward */
-	    ((th->th_flags & TH_RST) == 0 || orig_seq == src->seqlo ||
-	    (orig_seq == src->seqlo + 1) || (pd->flags & PFDESC_IP_REAS) == 0)) {
-	    /* Require an exact/+1 sequence match on resets when possible */
-
-		if (dst->scrub || src->scrub) {
-			if (pf_normalize_tcp_stateful(m, off, pd, reason, th,
-			    *state, src, dst, &copyback))
-				return (PF_DROP);
-		}
-
-		/* update max window */
-		if (src->max_win < win)
-			src->max_win = win;
-		/* synchronize sequencing */
-		if (SEQ_GT(end, src->seqlo))
-			src->seqlo = end;
-		/* slide the window of what the other end can send */
-		if (SEQ_GEQ(ack + (win << sws), dst->seqhi))
-			dst->seqhi = ack + MAX((win << sws), 1);
-
-
-		/* update states */
-		if (th->th_flags & TH_SYN)
-			if (src->state < TCPS_SYN_SENT)
-				src->state = TCPS_SYN_SENT;
-		if (th->th_flags & TH_FIN)
-			if (src->state < TCPS_CLOSING)
-				src->state = TCPS_CLOSING;
-		if (th->th_flags & TH_ACK) {
-			if (dst->state == TCPS_SYN_SENT) {
-				dst->state = TCPS_ESTABLISHED;
-				if (src->state == TCPS_ESTABLISHED &&
-				    (*state)->src_node != NULL &&
-				    pf_src_connlimit(state)) {
-					REASON_SET(reason, PFRES_SRCLIMIT);
-					return (PF_DROP);
-				}
-			} else if (dst->state == TCPS_CLOSING)
-				dst->state = TCPS_FIN_WAIT_2;
-		}
-		if (th->th_flags & TH_RST)
-			src->state = dst->state = TCPS_TIME_WAIT;
-
-		/* update expire time */
-		(*state)->expire = time_second;
-		if (src->state >= TCPS_FIN_WAIT_2 &&
-		    dst->state >= TCPS_FIN_WAIT_2)
-			(*state)->timeout = PFTM_TCP_CLOSED;
-		else if (src->state >= TCPS_CLOSING &&
-		    dst->state >= TCPS_CLOSING)
-			(*state)->timeout = PFTM_TCP_FIN_WAIT;
-		else if (src->state < TCPS_ESTABLISHED ||
-		    dst->state < TCPS_ESTABLISHED)
-			(*state)->timeout = PFTM_TCP_OPENING;
-		else if (src->state >= TCPS_CLOSING ||
-		    dst->state >= TCPS_CLOSING)
-			(*state)->timeout = PFTM_TCP_CLOSING;
-		else
-			(*state)->timeout = PFTM_TCP_ESTABLISHED;
-
-		/* Fall through to PASS packet */
-
-	} else if ((dst->state < TCPS_SYN_SENT ||
-		dst->state >= TCPS_FIN_WAIT_2 ||
-		src->state >= TCPS_FIN_WAIT_2) &&
-	    SEQ_GEQ(src->seqhi + MAXACKWINDOW, end) &&
-	    /* Within a window forward of the originating packet */
-	    SEQ_GEQ(seq, src->seqlo - MAXACKWINDOW)) {
-	    /* Within a window backward of the originating packet */
-
-		/*
-		 * This currently handles three situations:
-		 *  1) Stupid stacks will shotgun SYNs before their peer
-		 *     replies.
-		 *  2) When PF catches an already established stream (the
-		 *     firewall rebooted, the state table was flushed, routes
-		 *     changed...)
-		 *  3) Packets get funky immediately after the connection
-		 *     closes (this should catch Solaris spurious ACK|FINs
-		 *     that web servers like to spew after a close)
-		 *
-		 * This must be a little more careful than the above code
-		 * since packet floods will also be caught here. We don't
-		 * update the TTL here to mitigate the damage of a packet
-		 * flood and so the same code can handle awkward establishment
-		 * and a loosened connection close.
-		 * In the establishment case, a correct peer response will
-		 * validate the connection, go through the normal state code
-		 * and keep updating the state TTL.
-		 */
-
-		if (pf_status.debug >= PF_DEBUG_MISC) {
-			printf("pf: loose state match: ");
-			pf_print_state(*state);
-			pf_print_flags(th->th_flags);
-			printf(" seq=%u (%u) ack=%u len=%u ackskew=%d "
-			    "pkts=%llu:%llu\n", seq, orig_seq, ack, pd->p_len,
-#ifdef __FreeBSD__
-			    ackskew, (unsigned long long)(*state)->packets[0],
-			    (unsigned long long)(*state)->packets[1]);
-#else
-			    ackskew, (*state)->packets[0],
-			    (*state)->packets[1]);
-#endif
-		}
-
-		if (dst->scrub || src->scrub) {
-			if (pf_normalize_tcp_stateful(m, off, pd, reason, th,
-			    *state, src, dst, &copyback))
-				return (PF_DROP);
-		}
-
-		/* update max window */
-		if (src->max_win < win)
-			src->max_win = win;
-		/* synchronize sequencing */
-		if (SEQ_GT(end, src->seqlo))
-			src->seqlo = end;
-		/* slide the window of what the other end can send */
-		if (SEQ_GEQ(ack + (win << sws), dst->seqhi))
-			dst->seqhi = ack + MAX((win << sws), 1);
-
-		/*
-		 * Cannot set dst->seqhi here since this could be a shotgunned
-		 * SYN and not an already established connection.
-		 */
-
-		if (th->th_flags & TH_FIN)
-			if (src->state < TCPS_CLOSING)
-				src->state = TCPS_CLOSING;
-		if (th->th_flags & TH_RST)
-			src->state = dst->state = TCPS_TIME_WAIT;
-
-		/* Fall through to PASS packet */
-
-	} else {
-		if ((*state)->dst.state == TCPS_SYN_SENT &&
-		    (*state)->src.state == TCPS_SYN_SENT) {
-			/* Send RST for state mismatches during handshake */
-			if (!(th->th_flags & TH_RST))
-#ifdef __FreeBSD__
-				pf_send_tcp(m, (*state)->rule.ptr, pd->af,
-#else
-				pf_send_tcp((*state)->rule.ptr, pd->af,
-#endif
-				    pd->dst, pd->src, th->th_dport,
-				    th->th_sport, ntohl(th->th_ack), 0,
-				    TH_RST, 0, 0,
-				    (*state)->rule.ptr->return_ttl, 1, 0,
-				    pd->eh, kif->pfik_ifp);
-			src->seqlo = 0;
-			src->seqhi = 1;
-			src->max_win = 1;
-		} else if (pf_status.debug >= PF_DEBUG_MISC) {
-			printf("pf: BAD state: ");
-			pf_print_state(*state);
-			pf_print_flags(th->th_flags);
-			printf(" seq=%u (%u) ack=%u len=%u ackskew=%d "
-			    "pkts=%llu:%llu dir=%s,%s\n",
-			    seq, orig_seq, ack, pd->p_len, ackskew,
-#ifdef __FreeBSD__
-			    (unsigned long long)(*state)->packets[0],
-			    (unsigned long long)(*state)->packets[1],
-#else
-			    (*state)->packets[0], (*state)->packets[1],
-#endif
-			    direction == PF_IN ? "in" : "out",
-			    direction == (*state)->direction ? "fwd" : "rev");
-			printf("pf: State failure on: %c %c %c %c | %c %c\n",
-			    SEQ_GEQ(src->seqhi, end) ? ' ' : '1',
-			    SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)) ?
-			    ' ': '2',
-			    (ackskew >= -MAXACKWINDOW) ? ' ' : '3',
-			    (ackskew <= (MAXACKWINDOW << sws)) ? ' ' : '4',
-			    SEQ_GEQ(src->seqhi + MAXACKWINDOW, end) ?' ' :'5',
-			    SEQ_GEQ(seq, src->seqlo - MAXACKWINDOW) ?' ' :'6');
-		}
-		REASON_SET(reason, PFRES_BADSTATE);
-		return (PF_DROP);
-	}
-
-	/* Any packets which have gotten here are to be passed */
 
 	/* translate source/destination address, if necessary */
 	if (STATE_TRANSLATE(*state)) {
@@ -5503,8 +5650,9 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				copyback = 1;
 			}
 
-			if (!SEQ_GEQ(src->seqhi, seq) ||
-			    !SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws))) {
+			if (!((*state)->state_flags & PFSTATE_SLOPPY) &&
+			    (!SEQ_GEQ(src->seqhi, seq) ||
+			    !SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)))) {
 				if (pf_status.debug >= PF_DEBUG_MISC) {
 					printf("pf: BAD ICMP %d:%d ",
 					    icmptype, pd->hdr.icmp->icmp_code);
@@ -6095,7 +6243,6 @@ void
 pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
     struct pf_state *s, struct pf_pdesc *pd)
 {
-	INIT_VNET_INET(curvnet);
 	struct mbuf		*m0, *m1;
 	struct route		 iproute;
 	struct route		*ro = NULL;
@@ -6153,7 +6300,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (r->rt == PF_FASTROUTE) {
 		in_rtalloc(ro, 0);
 		if (ro->ro_rt == 0) {
-			V_ipstat.ips_noroute++;
+			KMOD_IPSTAT_INC(ips_noroute);
 			goto bad;
 		}
 
@@ -6245,7 +6392,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 			}
 		}
 		PF_UNLOCK();
-		error = (*ifp->if_output)(ifp, m0, sintosa(dst), ro->ro_rt);
+		error = (*ifp->if_output)(ifp, m0, sintosa(dst), ro);
 		PF_LOCK();
 		goto done;
 	}
@@ -6284,16 +6431,16 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
 		    ifp->if_bridge == NULL) {
 			m0->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-			V_ipstat.ips_outhwcsum++;
+			KMOD_IPSTAT_INC(ips_outhwcsum);
 		} else {
 			ip->ip_sum = 0;
 			ip->ip_sum = in_cksum(m0, ip->ip_hl << 2);
 		}
 		/* Update relevant hardware checksum stats for TCP/UDP */
 		if (m0->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-			V_tcpstat.tcps_outhwcsum++;
+			KMOD_TCPSTAT_INC(tcps_outhwcsum);
 		else if (m0->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-			V_udpstat.udps_outhwcsum++;
+			KMOD_UDPSTAT_INC(udps_outhwcsum);
 		error = (*ifp->if_output)(ifp, m0, sintosa(dst), NULL);
 		goto done;
 	}
@@ -6303,7 +6450,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	 * Must be able to put at least 8 bytes per fragment.
 	 */
 	if (ip->ip_off & htons(IP_DF)) {
-		V_ipstat.ips_cantfrag++;
+		KMOD_IPSTAT_INC(ips_cantfrag);
 		if (r->rt != PF_DUPTO) {
 #ifdef __FreeBSD__
 			/* icmp_error() expects host byte ordering */
@@ -6360,7 +6507,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	}
 
 	if (error == 0)
-		V_ipstat.ips_fragmented++;
+		KMOD_IPSTAT_INC(ips_fragmented);
 
 done:
 	if (r->rt != PF_DUPTO)
@@ -6634,27 +6781,23 @@ pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p, sa_family_t a
 		switch (p) {
 		case IPPROTO_TCP:
 		    {
-			INIT_VNET_INET(curvnet);
-			V_tcpstat.tcps_rcvbadsum++;
+			KMOD_TCPSTAT_INC(tcps_rcvbadsum);
 			break;
 		    }
 		case IPPROTO_UDP:
 		    {
-			INIT_VNET_INET(curvnet);
-			V_udpstat.udps_badsum++;
+			KMOD_UDPSTAT_INC(udps_badsum);
 			break;
 		    }
 		case IPPROTO_ICMP:
 		    {
-			INIT_VNET_INET(curvnet);
-			V_icmpstat.icps_checksum++;
+			KMOD_ICMPSTAT_INC(icps_checksum);
 			break;
 		    }
 #ifdef INET6
 		case IPPROTO_ICMPV6:
 		    {
-			INIT_VNET_INET6(curvnet);
-			V_icmp6stat.icp6s_checksum++;
+			KMOD_ICMP6STAT_INC(icp6s_checksum);
 			break;
 		    }
 #endif /* INET6 */
@@ -6741,17 +6884,17 @@ pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p,
 		m->m_pkthdr.csum_flags |= flag_bad;
 		switch (p) {
 		case IPPROTO_TCP:
-			V_tcpstat.tcps_rcvbadsum++;
+			KMOD_TCPSTAT_INC(tcps_rcvbadsum);
 			break;
 		case IPPROTO_UDP:
-			V_udpstat.udps_badsum++;
+			KMOD_UDPSTAT_INC(udps_badsum);
 			break;
 		case IPPROTO_ICMP:
-			V_icmpstat.icps_checksum++;
+			KMOD_ICMPSTAT_INC(icps_checksum);
 			break;
 #ifdef INET6
 		case IPPROTO_ICMPV6:
-			V_icmp6stat.icp6s_checksum++;
+			KMOD_ICMP6STAT_INC(icp6s_checksum);
 			break;
 #endif /* INET6 */
 		}
@@ -7027,7 +7170,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 
 done:
 	if (action == PF_PASS && h->ip_hl > 5 &&
-	    !((s && s->allow_opts) || r->allow_opts)) {
+	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
 		log = 1;
@@ -7488,7 +7631,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 done:
 	/* handle dangerous IPv6 extension headers. */
 	if (action == PF_PASS && rh_cnt &&
-	    !((s && s->allow_opts) || r->allow_opts)) {
+	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
 		log = 1;

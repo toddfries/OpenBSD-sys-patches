@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.12 2008/12/15 15:31:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.14 2009/12/22 21:53:19 marius Exp $");
 
 /*
  * Helper functions which can be used in both ISA and EBus code.
@@ -40,8 +40,8 @@ __FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.12 2008/12/15 15:31:10 nwh
 #include <sys/systm.h>
 #include <sys/bus.h>
 
-#include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus_subr.h>
+#include <dev/ofw/openfirm.h>
 
 #include <machine/bus.h>
 #include <machine/resource.h>
@@ -79,11 +79,11 @@ ofw_isa_range_map(struct isa_ranges *range, int nrange, u_long *start,
 	for (i = 0; i < nrange; i++) {
 		r = &range[i];
 		cstart = ISA_RANGE_CHILD(r);
-		cend = cstart + r->size;
+		cend = cstart + r->size - 1;
 		if (*start < cstart || *start > cend)
 			continue;
 		if (*end < cstart || *end > cend) {
-			panic("ofw_isa_map_iorange: iorange crosses pci "
+			panic("ofw_isa_map_iorange: iorange crosses PCI "
 			    "ranges (%#lx not in %#lx - %#lx)", *end, cstart,
 			    cend);
 		}

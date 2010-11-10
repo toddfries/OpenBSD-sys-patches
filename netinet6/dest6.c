@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.15 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.17 2009/08/01 19:26:27 rwatson Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.15 2008/12/02 21:37:28 bz Exp $
 #include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -55,7 +54,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.15 2008/12/02 21:37:28 bz Exp $
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
-#include <netinet6/vinet6.h>
 
 /*
  * Destination options header processing.
@@ -63,7 +61,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.15 2008/12/02 21:37:28 bz Exp $
 int
 dest6_input(struct mbuf **mp, int *offp, int proto)
 {
-	INIT_VNET_INET6(curvnet);
 	struct mbuf *m = *mp;
 	int off = *offp, dstoptlen, optlen;
 	struct ip6_dest *dstopts;

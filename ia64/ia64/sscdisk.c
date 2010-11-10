@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/ia64/ia64/sscdisk.c,v 1.36 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/ia64/ia64/sscdisk.c,v 1.37 2009/12/28 22:56:30 antoine Exp $
  *
  */
 
@@ -76,7 +76,7 @@ MALLOC_DEFINE(M_SSC, "ssc_disk", "Simulator Disk");
 
 static d_strategy_t sscstrategy;
 
-static LIST_HEAD(, ssc_s) ssc_softc_list = LIST_HEAD_INITIALIZER(&ssc_softc_list);
+static LIST_HEAD(, ssc_s) ssc_softc_list = LIST_HEAD_INITIALIZER(ssc_softc_list);
 
 struct ssc_s {
 	int unit;

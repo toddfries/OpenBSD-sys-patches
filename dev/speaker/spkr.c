@@ -7,7 +7,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/speaker/spkr.c,v 1.78 2009/01/25 09:20:59 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/speaker/spkr.c,v 1.79 2009/06/25 18:46:30 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -439,7 +439,7 @@ spkrwrite(dev, uio, ioflag)
 	int ioflag;
 {
 #ifdef DEBUG
-	printf("spkrwrite: entering with dev = %s, count = %d\n",
+	printf("spkrwrite: entering with dev = %s, count = %zd\n",
 		devtoname(dev), uio->uio_resid);
 #endif /* DEBUG */
 

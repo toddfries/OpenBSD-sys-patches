@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_drv.c,v 1.23 2009/03/09 07:55:18 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_drv.c,v 1.32 2010/04/22 18:21:25 rnoland Exp $");
 
 /** @file drm_drv.c
  * The catch-all file for DRM device support, including module setup/teardown,
@@ -52,9 +52,6 @@ static int drm_load(struct drm_device *dev);
 static void drm_unload(struct drm_device *dev);
 static drm_pci_id_list_t *drm_find_description(int vendor, int device,
     drm_pci_id_list_t *idlist);
-
-#define DRIVER_SOFTC(unit) \
-	((struct drm_device *)devclass_get_softc(drm_devclass, unit))
 
 MODULE_VERSION(drm, 1);
 MODULE_DEPEND(drm, agp, 1, 1, 1);
@@ -134,8 +131,11 @@ static struct cdevsw drm_cdevsw = {
 	.d_flags =	D_TRACKCLOSE
 };
 
-int drm_msi = 1;	/* Enable by default. */
+static int drm_msi = 1;	/* Enable by default. */
 TUNABLE_INT("hw.drm.msi", &drm_msi);
+SYSCTL_NODE(_hw, OID_AUTO, drm, CTLFLAG_RW, NULL, "DRM device");
+SYSCTL_INT(_hw_drm, OID_AUTO, msi, CTLFLAG_RDTUN, &drm_msi, 1,
+    "Enable MSI interrupts for drm devices");
 
 static struct drm_msi_blacklist_entry drm_msi_blacklist[] = {
 	{0x8086, 0x2772}, /* Intel i945G	*/ \
@@ -182,7 +182,10 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {
-		device_set_desc(kdev, id_entry->name);
+		if (!device_get_desc(kdev)) {
+			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
+			device_set_desc(kdev, id_entry->name);
+		}
 		return 0;
 	}
 
@@ -207,11 +210,12 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 	dev->device = kdev;
 #endif
 	dev->devnode = make_dev(&drm_cdevsw,
-			unit,
+			0,
 			DRM_DEV_UID,
 			DRM_DEV_GID,
 			DRM_DEV_MODE,
 			"dri/card%d", unit);
+	dev->devnode->si_drv1 = dev;
 
 #if __FreeBSD_version >= 700053
 	dev->pci_domain = pci_get_domain(dev->device);
@@ -225,27 +229,30 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 	dev->pci_vendor = pci_get_vendor(dev->device);
 	dev->pci_device = pci_get_device(dev->device);
 
-	if (drm_msi &&
-	    !drm_msi_is_blacklisted(dev->pci_vendor, dev->pci_device)) {
-		msicount = pci_msi_count(dev->device);
-		DRM_DEBUG("MSI count = %d\n", msicount);
-		if (msicount > 1)
-			msicount = 1;
+	if (drm_core_check_feature(dev, DRIVER_HAVE_IRQ)) {
+		if (drm_msi &&
+		    !drm_msi_is_blacklisted(dev->pci_vendor, dev->pci_device)) {
+			msicount = pci_msi_count(dev->device);
+			DRM_DEBUG("MSI count = %d\n", msicount);
+			if (msicount > 1)
+				msicount = 1;
 
-		if (pci_alloc_msi(dev->device, &msicount) == 0) {
-			DRM_INFO("MSI enabled %d message(s)\n", msicount);
-			dev->msi_enabled = 1;
-			dev->irqrid = 1;
+			if (pci_alloc_msi(dev->device, &msicount) == 0) {
+				DRM_INFO("MSI enabled %d message(s)\n",
+				    msicount);
+				dev->msi_enabled = 1;
+				dev->irqrid = 1;
+			}
 		}
-	}
 
-	dev->irqr = bus_alloc_resource_any(dev->device, SYS_RES_IRQ,
-	    &dev->irqrid, RF_SHAREABLE);
-	if (!dev->irqr) {
-		return ENOENT;
-	}
+		dev->irqr = bus_alloc_resource_any(dev->device, SYS_RES_IRQ,
+		    &dev->irqrid, RF_SHAREABLE);
+		if (!dev->irqr) {
+			return ENOENT;
+		}
 
-	dev->irq = (int) rman_get_start(dev->irqr);
+		dev->irq = (int) rman_get_start(dev->irqr);
+	}
 
 	mtx_init(&dev->dev_lock, "drmdev", NULL, MTX_DEF);
 	mtx_init(&dev->irq_lock, "drmirq", NULL, MTX_DEF);
@@ -267,11 +274,14 @@ int drm_detach(device_t kdev)
 
 	drm_unload(dev);
 
-	bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid, dev->irqr);
+	if (dev->irqr) {
+		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
+		    dev->irqr);
 
-	if (dev->msi_enabled) {
-		pci_release_msi(dev->device);
-		DRM_INFO("MSI released\n");
+		if (dev->msi_enabled) {
+			pci_release_msi(dev->device);
+			DRM_INFO("MSI released\n");
+		}
 	}
 
 	return 0;
@@ -290,7 +300,8 @@ drm_pci_id_list_t *drm_find_description(int vendor, int device,
 	
 	for (i = 0; idlist[i].vendor != 0; i++) {
 		if ((idlist[i].vendor == vendor) &&
-		    (idlist[i].device == device)) {
+		    ((idlist[i].device == device) ||
+		    (idlist[i].device == 0))) {
 			return &idlist[i];
 		}
 	}
@@ -423,6 +434,12 @@ static int drm_load(struct drm_device *dev)
 	DRM_DEBUG("\n");
 
 	TAILQ_INIT(&dev->maplist);
+	dev->map_unrhdr = new_unrhdr(1, ((1 << DRM_MAP_HANDLE_BITS) - 1), NULL);
+	if (dev->map_unrhdr == NULL) {
+		DRM_ERROR("Couldn't allocate map number allocator\n");
+		return EINVAL;
+	}
+
 
 	drm_mem_init();
 	drm_sysctl_init(dev);
@@ -554,6 +571,7 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	delete_unrhdr(dev->drw_unrhdr);
+	delete_unrhdr(dev->map_unrhdr);
 
 	drm_mem_uninit();
 
@@ -596,7 +614,7 @@ int drm_open(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	struct drm_device *dev = NULL;
 	int retcode = 0;
 
-	dev = DRIVER_SOFTC(dev2unit(kdev));
+	dev = kdev->si_drv1;
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
@@ -666,7 +684,7 @@ void drm_close(void *data)
 			}
 			/* Contention */
 			retcode = mtx_sleep((void *)&dev->lock.lock_queue,
-			    &dev->dev_lock, PZERO | PCATCH, "drmlk2", 0);
+			    &dev->dev_lock, PCATCH, "drmlk2", 0);
 			if (retcode)
 				break;
 		}

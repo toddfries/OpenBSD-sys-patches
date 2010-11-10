@@ -31,7 +31,7 @@
 /* $KAME: sctp_output.h,v 1.14 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_output.h,v 1.18 2009/02/27 20:54:45 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_output.h,v 1.20 2010/04/03 15:40:14 tuexen Exp $");
 
 #ifndef __sctp_output_h__
 #define __sctp_output_h__
@@ -111,7 +111,7 @@ void sctp_send_shutdown(struct sctp_tcb *, struct sctp_nets *);
 
 void sctp_send_shutdown_ack(struct sctp_tcb *, struct sctp_nets *);
 
-void sctp_send_shutdown_complete(struct sctp_tcb *, struct sctp_nets *);
+void sctp_send_shutdown_complete(struct sctp_tcb *, struct sctp_nets *, int);
 
 void 
 sctp_send_shutdown_complete2(struct mbuf *, int, struct sctphdr *,
@@ -154,9 +154,6 @@ sctp_send_abort_tcb(struct sctp_tcb *, struct mbuf *, int
 void send_forward_tsn(struct sctp_tcb *, struct sctp_association *);
 
 void sctp_send_sack(struct sctp_tcb *);
-
-/* EY 05/07/08 if nr_sacks used, the following function will be called instead of sctp_send_sack */
-void sctp_send_nr_sack(struct sctp_tcb *);
 
 int sctp_send_hb(struct sctp_tcb *, int, struct sctp_nets *);
 

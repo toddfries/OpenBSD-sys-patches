@@ -54,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/coda/coda_subr.c,v 1.40 2008/11/03 16:36:23 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/coda/coda_subr.c,v 1.41 2010/04/05 20:12:54 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -164,7 +164,7 @@ coda_unsave(struct cnode *cp)
  * NOTE: this allows multiple cnodes with same fid -- dcs 1/25/95
  */
 struct cnode *
-coda_find(CodaFid *fid)
+coda_find(struct CodaFid *fid)
 {
 	struct cnode *cp;
 

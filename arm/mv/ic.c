@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/ic.c,v 1.1 2008/10/13 20:07:13 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/ic.c,v 1.4 2010/06/13 13:28:53 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,6 +39,9 @@ __FBSDID("$FreeBSD: src/sys/arm/mv/ic.c,v 1.1 2008/10/13 20:07:13 raj Exp $");
 #include <sys/rman.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
+
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
 #include <arm/mv/mvreg.h>
 #include <arm/mv/mvvar.h>
@@ -76,6 +79,9 @@ static int
 mv_ic_probe(device_t dev)
 {
 
+	if (!ofw_bus_is_compatible(dev, "mrvl,pic"))
+		return (ENXIO);
+
 	device_set_desc(dev, "Marvell Integrated Interrupt Controller");
 	return (0);
 }
@@ -98,10 +104,11 @@ mv_ic_attach(device_t dev)
 	sc->ic_high_regs = 0;
 	sc->ic_error_regs = 0;
 
-	if (dev_id == MV_DEV_88F6281 || dev_id == MV_DEV_MV78100)
+	if (dev_id == MV_DEV_88F6281 || dev_id == MV_DEV_MV78100 ||
+	    dev_id == MV_DEV_MV78100_Z0)
 		sc->ic_high_regs = 1;
 
-	if (dev_id == MV_DEV_MV78100)
+	if (dev_id == MV_DEV_MV78100 || dev_id == MV_DEV_MV78100_Z0)
 		sc->ic_error_regs = 1;
 
 	error = bus_alloc_resources(dev, mv_ic_spec, sc->ic_res);
@@ -133,10 +140,10 @@ static driver_t mv_ic_driver = {
 
 static devclass_t mv_ic_devclass;
 
-DRIVER_MODULE(ic, mbus, mv_ic_driver, mv_ic_devclass, 0, 0);
+DRIVER_MODULE(ic, simplebus, mv_ic_driver, mv_ic_devclass, 0, 0);
 
 int
-arm_get_next_irq(void)
+arm_get_next_irq(int last __unused)
 {
 	int irq;
 

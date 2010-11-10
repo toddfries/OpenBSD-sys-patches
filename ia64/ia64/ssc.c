@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/ia64/ia64/ssc.c,v 1.31 2008/08/20 08:31:58 ed Exp $
+ *	$FreeBSD: src/sys/ia64/ia64/ssc.c,v 1.32 2009/05/29 06:41:23 ed Exp $
  */
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -106,7 +106,7 @@ ssc_cnattach(void *arg)
 {
 	struct tty *tp;
 
-	tp = tty_alloc(&ssc_class, NULL, NULL);
+	tp = tty_alloc(&ssc_class, NULL);
 	tty_makedev(tp, NULL, "ssccons");
 }
 

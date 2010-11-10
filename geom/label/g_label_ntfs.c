@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label_ntfs.c,v 1.6 2006/01/18 11:03:20 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label_ntfs.c,v 1.7 2009/11/28 11:57:43 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -114,7 +114,10 @@ done:
 		g_free(filerecp);
 }
 
-const struct g_label_desc g_label_ntfs = {
+struct g_label_desc g_label_ntfs = {
 	.ld_taste = g_label_ntfs_taste,
-	.ld_dir = G_LABEL_NTFS_DIR
+	.ld_dir = G_LABEL_NTFS_DIR,
+	.ld_enabled = 1
 };
+
+G_LABEL_INIT(ntfs, g_label_ntfs, "Create device nodes for NTFS volumes");

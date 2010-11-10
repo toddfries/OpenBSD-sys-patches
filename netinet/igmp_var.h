@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)igmp_var.h	8.1 (Berkeley) 7/19/93
- * $FreeBSD: src/sys/netinet/igmp_var.h,v 1.23 2009/03/09 17:53:05 bms Exp $
+ * $FreeBSD: src/sys/netinet/igmp_var.h,v 1.24 2009/04/12 13:41:13 rwatson Exp $
  */
 
 #ifndef _NETINET_IGMP_VAR_H_
@@ -105,6 +105,11 @@ struct igmpstat {
 };
 #define IGPS_VERSION_3	3		/* as of FreeBSD 8.x */
 #define IGPS_VERSION3_LEN		168
+
+#ifdef _KERNEL
+#define	IGMPSTAT_ADD(name, val)		V_igmpstat.name += (val)
+#define	IGMPSTAT_INC(name)		IGMPSTAT_ADD(name, 1)
+#endif
 
 #ifdef CTASSERT
 CTASSERT(sizeof(struct igmpstat) == 168);

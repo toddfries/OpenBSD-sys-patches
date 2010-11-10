@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_sm.c,v 1.3 2008/11/25 07:17:11 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_sm.c,v 1.4 2010/01/07 21:01:37 mbr Exp $");
 
 #include "opt_iscsi_initiator.h"
 
@@ -399,7 +399,7 @@ ism_recv(isc_session_t *sp, pduq_t *pq)
 	       if(sp->flags & ISC_STALLED) {
 		    sdebug(4, "window opened: max=0x%x exp=0x%x opcode=0x%x cmd=0x%x cws=%d.",
 			   sn->maxCmd, sn->expCmd, bhs->opcode, sn->cmd, sp->cws);
-		    sp->flags &= ~ISC_STALLED;;
+		    sp->flags &= ~ISC_STALLED;
 	       }
 	  }
      }

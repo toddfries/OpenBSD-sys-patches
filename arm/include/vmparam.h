@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/vmparam.h,v 1.13 2009/01/22 15:36:11 cognet Exp $
+ * $FreeBSD: src/sys/arm/include/vmparam.h,v 1.15 2010/07/27 20:33:50 jhb Exp $
  */
 
 #ifndef	_MACHINE_VMPARAM_H_
@@ -86,6 +86,13 @@
 #define	VM_NFREEORDER		9
 
 /*
+ * Only one memory domain.
+ */
+#ifndef VM_NDOMAIN
+#define	VM_NDOMAIN		1
+#endif
+
+/*
  * Disable superpage reservations.
  */
 #ifndef	VM_NRESERVLEVEL
@@ -140,8 +147,6 @@
 #define MAXSSIZ         (8*1024*1024)
 #define SGROWSIZ        (128*1024)
 #define MAXSLP		20
-
-#define VM_PROT_READ_IS_EXEC
 
 #ifdef ARM_USE_SMALL_ALLOC
 #define UMA_MD_SMALL_ALLOC

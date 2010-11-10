@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cfi/cfi_core.c,v 1.7 2009/03/09 23:16:02 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cfi/cfi_core.c,v 1.8 2009/06/10 17:41:24 imp Exp $");
 
 #include "opt_cfi.h"
 
@@ -285,8 +285,7 @@ cfi_attach(device_t dev)
 	    "%s%u", cfi_driver_name, u);
 	sc->sc_nod->si_drv1 = sc;
 
-	device_add_child(dev, "cfid",
-	    devclass_find_free_unit(cfi_diskclass, 0));
+	device_add_child(dev, "cfid", -1);
 	bus_generic_attach(dev);
 
 	return (0);

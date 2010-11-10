@@ -1,0 +1,4 @@
+# $FreeBSD: src/sys/boot/Makefile.pc98,v 1.1 2010/08/23 01:48:07 imp Exp $
+
+# Blank, to override Makefile.i386 since Makefile.$MACHINE is included before 
+# Makefile.$MACHINE_ARCH

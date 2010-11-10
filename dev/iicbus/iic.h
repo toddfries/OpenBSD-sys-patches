@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iic.h,v 1.6 2009/01/26 13:53:39 raj Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iic.h,v 1.7 2010/06/05 17:48:26 nwhitehorn Exp $
  *
  */
 #ifndef __IIC_H
@@ -38,6 +38,8 @@ struct iic_msg
 	uint16_t	flags;
 #define	IIC_M_WR	0	/* Fake flag for write */
 #define	IIC_M_RD	0x0001	/* read vs write */
+#define	IIC_M_NOSTOP	0x0002	/* do not send a I2C stop after message */
+#define	IIC_M_NOSTART	0x0004	/* do not send a I2C start before message */
 	uint16_t	len;	/* msg legnth */
 	uint8_t *	buf;
 };

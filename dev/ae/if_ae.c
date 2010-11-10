@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ae/if_ae.c,v 1.3 2009/02/04 20:35:31 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ae/if_ae.c,v 1.10 2010/05/03 07:32:50 sobomax Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -367,6 +367,7 @@ ae_attach(device_t dev)
 	if (ifp == NULL) {
 		device_printf(dev, "could not allocate ifnet structure.\n");
 		error = ENXIO;
+		goto fail;
 	}
 
 	ifp->if_softc = sc;
@@ -377,7 +378,7 @@ ae_attach(device_t dev)
 	ifp->if_init = ae_init;
 	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_VLAN_HWTAGGING;
 	ifp->if_hwassist = 0;
-	ifp->if_snd.ifq_drv_maxlen = IFQ_MAXLEN;
+	ifp->if_snd.ifq_drv_maxlen = ifqmaxlen;
 	IFQ_SET_MAXLEN(&ifp->if_snd, ifp->if_snd.ifq_drv_maxlen);
 	IFQ_SET_READY(&ifp->if_snd);
 	if (pci_find_extcap(dev, PCIY_PMG, &pmc) == 0) {
@@ -1047,7 +1048,7 @@ ae_get_reg_eaddr(ae_softc_t *sc, uint32_t *eaddr)
 	if (AE_CHECK_EADDR_VALID(eaddr) != 0) {
 		if (bootverbose)
 			device_printf(sc->dev,
-			    "Ethetnet address registers are invalid.\n");
+			    "Ethernet address registers are invalid.\n");
 		return (EINVAL);
 	}
 	return (0);
@@ -2073,15 +2074,15 @@ ae_rxfilter(ae_softc_t *sc)
 	 * Load multicast tables.
 	 */
 	bzero(mchash, sizeof(mchash));
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
-		crc = ether_crc32_le(LLADDR((struct sockaddr_dl *)
+		crc = ether_crc32_be(LLADDR((struct sockaddr_dl *)
 			ifma->ifma_addr), ETHER_ADDR_LEN);
 		mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 	AE_WRITE_4(sc, AE_REG_MHT0, mchash[0]);
 	AE_WRITE_4(sc, AE_REG_MHT1, mchash[1]);
 	AE_WRITE_4(sc, AE_MAC_REG, rxcfg);

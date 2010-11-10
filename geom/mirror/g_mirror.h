@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/geom/mirror/g_mirror.h,v 1.24 2006/11/01 22:51:49 pjd Exp $
+ * $FreeBSD: src/sys/geom/mirror/g_mirror.h,v 1.25 2009/12/03 21:47:51 mav Exp $
  */
 
 #ifndef	_G_MIRROR_H_
@@ -133,8 +133,8 @@ struct g_mirror_disk {
 	struct g_mirror_softc	*d_softc; /* Back-pointer to softc. */
 	int		 d_state;	/* Disk state. */
 	u_int		 d_priority;	/* Disk priority. */
-	struct bintime	 d_delay;	/* Disk delay. */
-	struct bintime	 d_last_used;	/* When disk was last used. */
+	u_int		 load;		/* Averaged queue length */
+	off_t		 d_last_offset;	/* Last read offset */
 	uint64_t	 d_flags;	/* Additional flags. */
 	u_int		 d_genid;	/* Disk's generation ID. */
 	struct g_mirror_disk_sync d_sync;/* Sync information. */

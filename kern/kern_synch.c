@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_synch.c,v 1.318 2009/02/26 15:51:54 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_synch.c,v 1.320 2009/07/14 22:52:46 kib Exp $");
 
 #include "opt_ktrace.h"
 #include "opt_sched.h"
@@ -188,6 +188,8 @@ _sleep(void *ident, struct lock_object *lock, int priority,
 		flags = SLEEPQ_SLEEP;
 	if (catch)
 		flags |= SLEEPQ_INTERRUPTIBLE;
+	if (priority & PBDRY)
+		flags |= SLEEPQ_STOP_ON_BDRY;
 
 	sleepq_lock(ident);
 	CTR5(KTR_PROC, "sleep: thread %ld (pid %ld, %s) on %s (%p)",
@@ -347,8 +349,11 @@ wakeup(void *ident)
 	sleepq_lock(ident);
 	wakeup_swapper = sleepq_broadcast(ident, SLEEPQ_SLEEP, 0, 0);
 	sleepq_release(ident);
-	if (wakeup_swapper)
+	if (wakeup_swapper) {
+		KASSERT(ident != &proc0,
+		    ("wakeup and wakeup_swapper and proc0"));
 		kick_proc0();
+	}
 }
 
 /*

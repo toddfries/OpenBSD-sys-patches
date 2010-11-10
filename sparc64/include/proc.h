@@ -28,7 +28,7 @@
  *
  *      from: @(#)proc.h        7.1 (Berkeley) 5/15/91
  *	from: FreeBSD: src/sys/i386/include/proc.h,v 1.11 2001/06/29
- * $FreeBSD: src/sys/sparc64/include/proc.h,v 1.14 2005/04/04 21:53:55 jhb Exp $
+ * $FreeBSD: src/sys/sparc64/include/proc.h,v 1.17 2010/05/23 18:32:02 kib Exp $
  */
 
 #ifndef	_MACHINE_PROC_H_
@@ -50,5 +50,19 @@ struct mdproc {
 	struct	md_utrap *md_utrap;
 	void	*md_sigtramp;
 };
+
+#define	KINFO_PROC_SIZE 1088
+
+#ifdef _KERNEL
+
+struct syscall_args {
+	u_int code;
+	struct sysent *callp;
+	register_t args[8];
+	int narg;
+};
+#define	HAVE_SYSCALL_ARGS_DEF 1
+
+#endif
 
 #endif /* !_MACHINE_PROC_H_ */

@@ -24,7 +24,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/usb/usb_if.m,v 1.12 2009/02/23 18:31:00 thompsa Exp $
+# $FreeBSD: src/sys/dev/usb/usb_if.m,v 1.14 2009/06/27 21:23:30 thompsa Exp $
 #
 
 # USB interface description
@@ -35,6 +35,11 @@
 INTERFACE usb;
 
 # The device received a control request
+#
+# The value pointed to by "pstate" can be updated to
+# "USB_HR_COMPLETE_OK" to indicate that the control
+# read transfer is complete, in case of short USB
+# control transfers.
 #
 # Return values:
 # 0: Success
@@ -47,6 +52,5 @@ METHOD int handle_request {
 	void **pptr; /* data pointer */
 	uint16_t *plen; /* maximum transfer length */
 	uint16_t offset; /* data offset */
-	uint8_t is_complete; /* set if transfer is complete */
+	uint8_t *pstate; /* set if transfer is complete, see USB_HR_XXX */
 };
-

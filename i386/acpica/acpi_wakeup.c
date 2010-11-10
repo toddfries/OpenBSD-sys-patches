@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_wakeup.c,v 1.49 2009/02/18 22:44:55 rdivacky Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_wakeup.c,v 1.51 2010/06/15 18:51:41 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,9 +45,11 @@ __FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_wakeup.c,v 1.49 2009/02/18 22:44:55
 #include <machine/bus.h>
 #include <machine/cpufunc.h>
 #include <machine/intr_machdep.h>
+#include <machine/mca.h>
 #include <machine/segments.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 
 #include "acpi_wakecode.h"
@@ -271,6 +273,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		for (;;) ;
 	} else {
 		/* Execute Wakeup */
+		mca_resume();
 		intr_resume();
 
 		if (bootverbose) {

@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/amr/amr.c,v 1.88 2008/11/03 00:53:54 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/amr/amr.c,v 1.95 2010/01/07 21:01:37 mbr Exp $");
 
 /*
  * Driver for the AMI MegaRaid family of controllers.
@@ -173,7 +173,7 @@ static void	amr_printcommand(struct amr_command *ac);
 
 static void	amr_init_sysctl(struct amr_softc *sc);
 static int	amr_linux_ioctl_int(struct cdev *dev, u_long cmd, caddr_t addr,
-		    int32_t flag, d_thread_t *td);
+		    int32_t flag, struct thread *td);
 
 MALLOC_DEFINE(M_AMR, "amr", "AMR memory");
 
@@ -221,11 +221,11 @@ amr_attach(struct amr_softc *sc)
 	sc->amr_submit_command = amr_std_submit_command;
 	sc->amr_get_work       = amr_std_get_work;
 	sc->amr_poll_command   = amr_std_poll_command;
-	amr_std_attach_mailbox(sc);;
+	amr_std_attach_mailbox(sc);
     }
 
 #ifdef AMR_BOARD_INIT
-    if ((AMR_IS_QUARTZ(sc) ? amr_quartz_init(sc) : amr_std_init(sc))))
+    if ((AMR_IS_QUARTZ(sc) ? amr_quartz_init(sc) : amr_std_init(sc)))
 	return(ENXIO);
 #endif
 
@@ -431,7 +431,7 @@ amr_submit_bio(struct amr_softc *sc, struct bio *bio)
  * Accept an open operation on the control device.
  */
 static int
-amr_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+amr_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
     int			unit = dev2unit(dev);
     struct amr_softc	*sc = devclass_get_softc(devclass_find("amr"), unit);
@@ -487,7 +487,7 @@ amr_prepare_ld_delete(struct amr_softc *sc)
  * Accept the last close on the control device.
  */
 static int
-amr_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+amr_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
     int			unit = dev2unit(dev);
     struct amr_softc	*sc = devclass_get_softc(devclass_find("amr"), unit);
@@ -537,7 +537,7 @@ shutdown_out:
 
 int
 amr_linux_ioctl_int(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag,
-    d_thread_t *td)
+    struct thread *td)
 {
     struct amr_softc		*sc = (struct amr_softc *)dev->si_drv1;
     struct amr_command		*ac;
@@ -736,7 +736,7 @@ amr_linux_ioctl_int(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag,
 }
 
 static int
-amr_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, d_thread_t *td)
+amr_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, struct thread *td)
 {
     struct amr_softc		*sc = (struct amr_softc *)dev->si_drv1;
     union {

@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5212/ar5212.h,v 1.6 2009/02/24 01:07:06 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5212/ar5212.h,v 1.7 2010/03/02 12:59:42 rpaulo Exp $
  */
 #ifndef _ATH_AR5212_H_
 #define _ATH_AR5212_H_
@@ -327,6 +327,9 @@ struct ath_hal_5212 {
 	uint16_t	*ah_pcdacTable;
 	u_int		ah_pcdacTableSize;
 	uint16_t	ah_ratesArray[16];
+
+	uint8_t		ah_txTrigLev;		/* current Tx trigger level */
+	uint8_t		ah_maxTxTrigLev;	/* max tx trigger level */
 };
 #define	AH5212(_ah)	((struct ath_hal_5212 *)(_ah))
 

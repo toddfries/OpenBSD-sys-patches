@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powermac/cuda.c,v 1.4 2008/12/13 18:49:01 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powermac/cuda.c,v 1.6 2010/03/23 03:14:44 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powermac/cuda.c,v 1.4 2008/12/13 18:49:01 nw
 #include <sys/bus.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/clock.h>
 
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/openfirm.h>
@@ -55,6 +56,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powermac/cuda.c,v 1.4 2008/12/13 18:49:01 nw
 
 #include <dev/adb/adb.h>
 
+#include "clock_if.h"
 #include "cudavar.h"
 #include "viareg.h"
 
@@ -68,9 +70,15 @@ static int	cuda_detach(device_t);
 static u_int	cuda_adb_send(device_t dev, u_char command_byte, int len, 
     u_char *data, u_char poll);
 static u_int	cuda_adb_autopoll(device_t dev, uint16_t mask);
-static void	cuda_poll(device_t dev);
+static u_int	cuda_poll(device_t dev);
 static void	cuda_send_inbound(struct cuda_softc *sc);
 static void	cuda_send_outbound(struct cuda_softc *sc);
+
+/*
+ * Clock interface
+ */
+static int cuda_gettime(device_t dev, struct timespec *ts);
+static int cuda_settime(device_t dev, struct timespec *ts);
 
 static device_method_t  cuda_methods[] = {
 	/* Device interface */
@@ -89,6 +97,10 @@ static device_method_t  cuda_methods[] = {
 	DEVMETHOD(adb_hb_send_raw_packet,	cuda_adb_send),
 	DEVMETHOD(adb_hb_controller_poll,	cuda_poll),
 	DEVMETHOD(adb_hb_set_autopoll_mask,	cuda_adb_autopoll),
+
+	/* Clock interface */
+	DEVMETHOD(clock_gettime,	cuda_gettime),
+	DEVMETHOD(clock_settime,	cuda_settime),
 
 	{ 0, 0 },
 };
@@ -173,6 +185,7 @@ cuda_attach(device_t dev)
 	sc->sc_polling = 0;
 	sc->sc_state = CUDA_NOTREADY;
 	sc->sc_autopoll = 0;
+	sc->sc_rtc = -1;
 
 	STAILQ_INIT(&sc->sc_inq);
 	STAILQ_INIT(&sc->sc_outq);
@@ -235,6 +248,8 @@ cuda_attach(device_t dev)
 			sc->adb_bus = device_add_child(dev,"adb",-1);
 		}
 	}
+
+	clock_register(dev, 1000);
 
 	return (bus_generic_attach(dev));
 }
@@ -444,8 +459,18 @@ cuda_send_inbound(struct cuda_softc *sc)
 			break;
 		   case CUDA_PSEUDO:
 			mtx_lock(&sc->sc_mutex);
-			if (pkt->data[0] == CMD_AUTOPOLL)
+			switch (pkt->data[1]) {
+			case CMD_AUTOPOLL:
 				sc->sc_autopoll = 1;
+				break;
+			case CMD_READ_RTC:
+				memcpy(&sc->sc_rtc, &pkt->data[2],
+				    sizeof(sc->sc_rtc));
+				wakeup(&sc->sc_rtc);
+				break;
+			case CMD_WRITE_RTC:
+				break;
+			}
 			mtx_unlock(&sc->sc_mutex);
 			break;
 		   case CUDA_ERROR:
@@ -471,16 +496,17 @@ cuda_send_inbound(struct cuda_softc *sc)
 	mtx_unlock(&sc->sc_mutex);
 }
 
-static void
+static u_int
 cuda_poll(device_t dev)
 {
 	struct cuda_softc *sc = device_get_softc(dev);
 
 	if (sc->sc_state == CUDA_IDLE && !cuda_intr_state(sc) && 
 	    !sc->sc_waiting)
-		return;
+		return (0);
 
 	cuda_intr(dev);
+	return (0);
 }
 
 static void
@@ -709,6 +735,44 @@ cuda_adb_autopoll(device_t dev, uint16_t mask) {
 	sc->sc_autopoll = -1;
 	cuda_send(sc, 1, 3, cmd);
 
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+#define DIFF19041970	2082844800
+
+static int
+cuda_gettime(device_t dev, struct timespec *ts)
+{
+	struct cuda_softc *sc = device_get_softc(dev);
+	uint8_t cmd[] = {CUDA_PSEUDO, CMD_READ_RTC};
+
+	mtx_lock(&sc->sc_mutex);
+	sc->sc_rtc = -1;
+	cuda_send(sc, 1, 2, cmd);
+	if (sc->sc_rtc == -1)
+		mtx_sleep(&sc->sc_rtc, &sc->sc_mutex, 0, "rtc", 100);
+
+	ts->tv_sec = sc->sc_rtc - DIFF19041970;
+	ts->tv_nsec = 0;
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+static int
+cuda_settime(device_t dev, struct timespec *ts)
+{
+	struct cuda_softc *sc = device_get_softc(dev);
+	uint8_t cmd[] = {CUDA_PSEUDO, CMD_WRITE_RTC, 0, 0, 0, 0};
+	uint32_t sec;
+
+	sec = ts->tv_sec + DIFF19041970;
+	memcpy(&cmd[2], &sec, sizeof(sec));
+
+	mtx_lock(&sc->sc_mutex);
+	cuda_send(sc, 0, 6, cmd);
 	mtx_unlock(&sc->sc_mutex);
 
 	return (0);

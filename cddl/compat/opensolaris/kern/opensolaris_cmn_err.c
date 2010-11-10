@@ -18,7 +18,7 @@
  *
  * CDDL HEADER END
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_cmn_err.c,v 1.1 2008/05/23 22:39:28 jb Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_cmn_err.c,v 1.2 2010/10/13 17:13:43 rpaulo Exp $
  *
  */
 
@@ -48,7 +48,7 @@ vcmn_err(int ce, const char *fmt, va_list adx)
 		panic("Solaris: unknown severity level");
 	}
 	if (ce == CE_PANIC)
-		panic(buf);
+		panic("%s", buf);
 	if (ce != CE_IGNORE)
 		vprintf(buf, adx);
 }

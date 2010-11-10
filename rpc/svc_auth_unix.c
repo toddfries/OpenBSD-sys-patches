@@ -32,7 +32,7 @@ static char *sccsid2 = "@(#)svc_auth_unix.c 1.28 88/02/08 Copyr 1984 Sun Micro";
 static char *sccsid = "@(#)svc_auth_unix.c	2.3 88/08/01 4.0 RPCSRC";
 #endif
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/svc_auth_unix.c,v 1.3 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/svc_auth_unix.c,v 1.4 2009/06/19 17:10:35 brooks Exp $");
 
 /*
  * svc_auth_unix.c
@@ -95,13 +95,13 @@ _svcauth_unix(struct svc_req *rqst, struct rpc_msg *msg)
 			goto done;
 		}
 		for (i = 0; i < gid_len; i++) {
-			if (i + 1 < NGROUPS)
+			if (i + 1 < XU_NGROUPS)
 				xcr->cr_groups[i + 1] = IXDR_GET_INT32(buf);
 			else
 				buf++;
 		}
-		if (gid_len + 1 > NGROUPS)
-			xcr->cr_ngroups = NGROUPS;
+		if (gid_len + 1 > XU_NGROUPS)
+			xcr->cr_ngroups = XU_NGROUPS;
 		else
 			xcr->cr_ngroups = gid_len + 1;
 

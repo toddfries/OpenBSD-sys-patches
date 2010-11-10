@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_pci.c,v 1.4 2009/02/11 00:08:03 kaiw Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_pci.c,v 1.5 2010/03/23 20:08:18 delphij Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -89,6 +89,7 @@ static struct pci_id pci_ids[] = {
 	{ 0x84031415, "Oxford Semiconductor OX12PCI840 Parallel port", 0x10 },
 	{ 0x95131415, "Oxford Semiconductor OX16PCI954 Parallel port", 0x10 },
 	{ 0x98059710, "NetMos NM9805 1284 Printer port", 0x10 },
+	{ 0x99019710, "MosChip MCS9901 PCIe to Peripheral Controller", 0x10 },
 	{ 0xffff }
 };
 

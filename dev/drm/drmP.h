@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drmP.h,v 1.33 2009/03/09 07:55:18 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drmP.h,v 1.46 2010/04/24 18:13:12 rnoland Exp $");
 
 #ifndef _DRM_P_H_
 #define _DRM_P_H_
@@ -49,6 +49,7 @@ struct drm_file;
 #include <sys/module.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
+#include <sys/sglist.h>
 #include <sys/stat.h>
 #if __FreeBSD_version >= 700000
 #include <sys/priv.h>
@@ -60,14 +61,21 @@ struct drm_file;
 #include <sys/filio.h>
 #include <sys/sysctl.h>
 #include <sys/bus.h>
+#include <sys/queue.h>
 #include <sys/signalvar.h>
 #include <sys/poll.h>
+#include <sys/taskqueue.h>
 #include <sys/tree.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_extern.h>
+#include <vm/vm_kern.h>
 #include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 #include <vm/vm_param.h>
+#include <vm/vm_phys.h>
 #include <machine/param.h>
 #include <machine/pmap.h>
 #include <machine/bus.h>
@@ -91,9 +99,9 @@ struct drm_file;
 #include <sys/bus.h>
 
 #include "dev/drm/drm.h"
-#include "dev/drm/drm_linux_list.h"
 #include "dev/drm/drm_atomic.h"
 #include "dev/drm/drm_internal.h"
+#include "dev/drm/drm_linux_list.h"
 
 #include <opt_drm.h>
 #ifdef DRM_DEBUG
@@ -147,6 +155,10 @@ MALLOC_DECLARE(DRM_MEM_AGPLISTS);
 MALLOC_DECLARE(DRM_MEM_CTXBITMAP);
 MALLOC_DECLARE(DRM_MEM_SGLISTS);
 MALLOC_DECLARE(DRM_MEM_DRAWABLE);
+MALLOC_DECLARE(DRM_MEM_MM);
+MALLOC_DECLARE(DRM_MEM_HASHTAB);
+
+SYSCTL_DECL(_hw_drm);
 
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
@@ -191,6 +203,11 @@ typedef void			irqreturn_t;
 #define IRQ_HANDLED		/* nothing */
 #define IRQ_NONE		/* nothing */
 
+#define unlikely(x)            __builtin_expect(!!(x), 0)
+#define container_of(ptr, type, member) ({			\
+	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+
 enum {
 	DRM_IS_NOT_AGP,
 	DRM_IS_AGP,
@@ -211,7 +228,7 @@ enum {
 #define DRM_MTRR_WC		MDF_WRITECOMBINE
 #define jiffies			ticks
 
-typedef unsigned long dma_addr_t;
+typedef vm_paddr_t dma_addr_t;
 typedef u_int64_t u64;
 typedef u_int32_t u32;
 typedef u_int16_t u16;
@@ -221,36 +238,28 @@ typedef u_int8_t u8;
  * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
  * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
  */
-#if defined(__i386__)
-#define DRM_READMEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%esp)" : : : "memory");
-#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
-#define DRM_MEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%esp)" : : : "memory");
-#elif defined(__alpha__)
-#define DRM_READMEMORYBARRIER()		alpha_mb();
-#define DRM_WRITEMEMORYBARRIER()	alpha_wmb();
-#define DRM_MEMORYBARRIER()		alpha_mb();
-#elif defined(__amd64__)
-#define DRM_READMEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%rsp)" : : : "memory");
-#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
-#define DRM_MEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%rsp)" : : : "memory");
-#endif
+#define DRM_READMEMORYBARRIER()		rmb()
+#define DRM_WRITEMEMORYBARRIER()	wmb()
+#define DRM_MEMORYBARRIER()		mb()
 
 #define DRM_READ8(map, offset)						\
-	*(volatile u_int8_t *) (((unsigned long)(map)->handle) + (offset))
+	*(volatile u_int8_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset))
 #define DRM_READ16(map, offset)						\
-	*(volatile u_int16_t *) (((unsigned long)(map)->handle) + (offset))
+	*(volatile u_int16_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset))
 #define DRM_READ32(map, offset)						\
-	*(volatile u_int32_t *)(((unsigned long)(map)->handle) + (offset))
+	*(volatile u_int32_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset))
 #define DRM_WRITE8(map, offset, val)					\
-	*(volatile u_int8_t *) (((unsigned long)(map)->handle) + (offset)) = val
+	*(volatile u_int8_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset)) = val
 #define DRM_WRITE16(map, offset, val)					\
-	*(volatile u_int16_t *) (((unsigned long)(map)->handle) + (offset)) = val
+	*(volatile u_int16_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset)) = val
 #define DRM_WRITE32(map, offset, val)					\
-	*(volatile u_int32_t *)(((unsigned long)(map)->handle) + (offset)) = val
+	*(volatile u_int32_t *)(((vm_offset_t)(map)->virtual) +		\
+	    (vm_offset_t)(offset)) = val
 
 #define DRM_VERIFYAREA_READ( uaddr, size )		\
 	(!useracc(__DECONST(caddr_t, uaddr), size, VM_PROT_READ))
@@ -410,7 +419,6 @@ struct drm_file {
 	struct drm_device *dev;
 	int		  authenticated;
 	int		  master;
-	int		  minor;
 	pid_t		  pid;
 	uid_t		  uid;
 	drm_magic_t	  magic;
@@ -470,27 +478,26 @@ typedef struct drm_agp_head {
 } drm_agp_head_t;
 
 typedef struct drm_sg_mem {
-	unsigned long		  handle;
-	void			 *virtual;
-	int			  pages;
-	dma_addr_t		 *busaddr;
-	struct drm_dma_handle	 *sg_dmah;	/* Handle for sg_pages   */
-	struct drm_dma_handle	 *dmah;		/* Handle to PCI memory  */
-						/* for ATI PCIGART table */
+	vm_offset_t vaddr;
+	vm_paddr_t *busaddr;
+	vm_pindex_t pages;
 } drm_sg_mem_t;
 
+#define DRM_MAP_HANDLE_BITS	(sizeof(void *) == 4 ? 4 : 24)
+#define DRM_MAP_HANDLE_SHIFT	(sizeof(void *) * 8 - DRM_MAP_HANDLE_BITS)
 typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
 
 typedef struct drm_local_map {
-	unsigned long	offset;	 /* Physical address (0 for SAREA)*/
-	unsigned long	size;	 /* Physical size (bytes)	    */
-	enum drm_map_type	type;	 /* Type of memory mapped		    */
-	enum drm_map_flags	flags;	 /* Flags				    */
-	void		*handle; /* User-space: "Handle" to pass to mmap    */
-				 /* Kernel-space: kernel-virtual address    */
-	int		mtrr;	 /* Boolean: MTRR used */
-				 /* Private data			    */
-	int		rid;	 /* PCI resource ID for bus_space */
+	unsigned long offset;	  /* Physical address (0 for SAREA)       */
+	unsigned long size;	  /* Physical size (bytes)                */
+	enum drm_map_type type;	  /* Type of memory mapped                */
+	enum drm_map_flags flags; /* Flags                                */
+	void *handle;		  /* User-space: "Handle" to pass to mmap */
+				  /* Kernel-space: kernel-virtual address */
+	int mtrr;		  /* Boolean: MTRR used                   */
+				  /* Private data                         */
+	int rid;		  /* PCI resource ID for bus_space        */
+	void *virtual;		  /* Kernel-space: kernel-virtual address */
 	struct resource *bsr;
 	bus_space_tag_t bst;
 	bus_space_handle_t bsh;
@@ -498,19 +505,10 @@ typedef struct drm_local_map {
 	TAILQ_ENTRY(drm_local_map) link;
 } drm_local_map_t;
 
-TAILQ_HEAD(drm_vbl_sig_list, drm_vbl_sig);
-typedef struct drm_vbl_sig {
-	TAILQ_ENTRY(drm_vbl_sig) link;
-	unsigned int	sequence;
-	int		signo;
-	int		pid;
-} drm_vbl_sig_t;
-
 struct drm_vblank_info {
 	wait_queue_head_t queue;	/* vblank wait queue */
 	atomic_t count;			/* number of VBLANK interrupts */
 					/* (driver must alloc the right number of counters) */
-	struct drm_vbl_sig_list sigs;	/* signal list to send on VBLANK */
 	atomic_t refcount;		/* number of users of vblank interrupts */
 	u32 last;			/* protected by dev->vbl_lock, used */
 					/* for wraparound handling */
@@ -537,6 +535,7 @@ struct drm_ati_pcigart_info {
 	struct drm_dma_handle *table_handle;
 	drm_local_map_t mapping;
 	int table_size;
+	struct drm_dma_handle *dmah; /* handle for ATI PCIGART table */
 };
 
 #ifndef DMA_BIT_MASK
@@ -607,7 +606,7 @@ struct drm_driver_info {
 };
 
 /* Length for the array of resource pointers for drm_get_resource_*. */
-#define DRM_MAX_PCI_RESOURCE	3
+#define DRM_MAX_PCI_RESOURCE	6
 
 /** 
  * DRM device functions structure
@@ -649,6 +648,7 @@ struct drm_device {
 
 	/* Linked list of mappable regions. Protected by dev_lock */
 	drm_map_list_t	  maplist;
+	struct unrhdr	  *map_unrhdr;
 
 	drm_local_map_t	  **context_sareas;
 	int		  max_context;
@@ -679,7 +679,6 @@ struct drm_device {
 	int		  last_context;	/* Last current context		   */
 
 	int		  vblank_disable_allowed;
-	atomic_t 	  vbl_signal_pending;	/* number of signals pending on all crtcs */
 	struct callout	  vblank_disable_timer;
 	u32		  max_vblank_count;	/* size of vblank counter register */
 	struct drm_vblank_info *vblank;		/* per crtc vblank info */
@@ -797,7 +796,6 @@ void	drm_vblank_put(struct drm_device *dev, int crtc);
 void	drm_vblank_cleanup(struct drm_device *dev);
 int	drm_vblank_wait(struct drm_device *dev, unsigned int *vbl_seq);
 int	drm_vblank_init(struct drm_device *dev, int num_crtcs);
-void	drm_vbl_send_signals(struct drm_device *dev, int crtc);
 int 	drm_modeset_ctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
 
@@ -981,17 +979,17 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 static __inline__ void
 drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
 {
-	map->handle = drm_ioremap_wc(dev, map);
+	map->virtual = drm_ioremap_wc(dev, map);
 }
 static __inline__ void
 drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
 {
-	map->handle = drm_ioremap(dev, map);
+	map->virtual = drm_ioremap(dev, map);
 }
 static __inline__ void
 drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
 {
-	if ( map->handle && map->size )
+	if ( map->virtual && map->size )
 		drm_ioremapfree(map);
 }
 
@@ -1002,7 +1000,7 @@ drm_core_findmap(struct drm_device *dev, unsigned long offset)
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 	TAILQ_FOREACH(map, &dev->maplist, link) {
-		if (map->offset == offset)
+		if (offset == (unsigned long)map->handle)
 			return map;
 	}
 	return NULL;

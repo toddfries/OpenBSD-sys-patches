@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/apm.h,v 1.3 2008/06/12 04:37:37 marcel Exp $
+ * $FreeBSD: src/sys/sys/apm.h,v 1.4 2009/12/14 22:47:09 rpaulo Exp $
  */
 
 #ifndef _SYS_APM_H_
@@ -61,6 +61,8 @@ struct apm_ent {
 #define	APM_ENT_TYPE_FREEBSD_VINUM	"FreeBSD-Vinum"
 #define	APM_ENT_TYPE_FREEBSD_ZFS	"FreeBSD-ZFS"
 
+#define	APM_ENT_TYPE_APPLE_BOOT		"Apple_Bootstrap"
 #define	APM_ENT_TYPE_APPLE_HFS		"Apple_HFS"
+#define	APM_ENT_TYPE_APPLE_UFS		"Apple_UNIX_SVR2"
 
 #endif /* _SYS_APM_H_ */

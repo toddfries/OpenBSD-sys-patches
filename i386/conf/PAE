@@ -1,18 +1,14 @@
 #
 # PAE -- Generic kernel configuration file for FreeBSD/i386 PAE
 #
-# $FreeBSD: src/sys/i386/conf/PAE,v 1.31 2008/12/01 16:53:01 sam Exp $
+# $FreeBSD: src/sys/i386/conf/PAE,v 1.33 2010/01/08 09:16:37 alc Exp $
 
 include GENERIC
 
 ident		PAE-GENERIC
 
 # To make a PAE kernel, the next option is needed
-options		PAE			# Physical Address Extensions Kernel
-
-# Compile acpi in statically since the module isn't built properly.  Most
-# machines which support large amounts of memory require acpi.
-device		acpi
+options 	PAE			# Physical Address Extensions Kernel
 
 # Don't build modules with this kernel config, since they are not built with
 # the correct options headers.

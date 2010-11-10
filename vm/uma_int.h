@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/vm/uma_int.h,v 1.39 2009/01/25 09:11:24 jeff Exp $
+ * $FreeBSD: src/sys/vm/uma_int.h,v 1.44 2010/06/15 19:28:37 sbruno Exp $
  *
  */
 
@@ -144,10 +144,10 @@
 
 #define UMA_HASH_INSERT(h, s, mem)					\
 		SLIST_INSERT_HEAD(&(h)->uh_slab_hash[UMA_HASH((h),	\
-		    (mem))], (s), us_hlink);
+		    (mem))], (s), us_hlink)
 #define UMA_HASH_REMOVE(h, s, mem)					\
 		SLIST_REMOVE(&(h)->uh_slab_hash[UMA_HASH((h),		\
-		    (mem))], (s), uma_slab, us_hlink);
+		    (mem))], (s), uma_slab, us_hlink)
 
 /* Hash table for freed address -> slab translation */
 
@@ -158,6 +158,15 @@ struct uma_hash {
 	int		uh_hashsize;	/* Current size of the hash table */
 	int		uh_hashmask;	/* Mask used during hashing */
 };
+
+/*
+ * align field or structure to cache line
+ */
+#if defined(__amd64__)
+#define UMA_ALIGN	__aligned(CACHE_LINE_SIZE)
+#else
+#define UMA_ALIGN
+#endif
 
 /*
  * Structures for per cpu queues.
@@ -177,7 +186,7 @@ struct uma_cache {
 	uma_bucket_t	uc_allocbucket;	/* Bucket to allocate from */
 	u_int64_t	uc_allocs;	/* Count of allocations */
 	u_int64_t	uc_frees;	/* Count of frees */
-};
+} UMA_ALIGN;
 
 typedef struct uma_cache * uma_cache_t;
 
@@ -312,11 +321,13 @@ struct uma_zone {
 	uma_init	uz_init;	/* Initializer for each item */
 	uma_fini	uz_fini;	/* Discards memory */
 
-	u_int64_t	uz_allocs;	/* Total number of allocations */
-	u_int64_t	uz_frees;	/* Total number of frees */
-	u_int64_t	uz_fails;	/* Total number of alloc failures */
 	u_int32_t	uz_flags;	/* Flags inherited from kegs */
 	u_int32_t	uz_size;	/* Size inherited from kegs */
+
+	u_int64_t	uz_allocs UMA_ALIGN; /* Total number of allocations */
+	u_int64_t	uz_frees;	/* Total number of frees */
+	u_int64_t	uz_fails;	/* Total number of alloc failures */
+	u_int64_t	uz_sleeps;	/* Total number of alloc sleeps */
 	uint16_t	uz_fills;	/* Outstanding bucket fills */
 	uint16_t	uz_count;	/* Highest value ub_ptr can have */
 
@@ -324,7 +335,7 @@ struct uma_zone {
 	 * This HAS to be the last item because we adjust the zone size
 	 * based on NCPU and then allocate the space for the zones.
 	 */
-	struct uma_cache	uz_cpu[1];	/* Per cpu caches */
+	struct uma_cache	uz_cpu[1]; /* Per cpu caches */
 };
 
 /*
@@ -340,6 +351,8 @@ struct uma_zone {
 
 #define	UMA_ZFLAG_INHERIT	(UMA_ZFLAG_INTERNAL | UMA_ZFLAG_CACHEONLY | \
 				    UMA_ZFLAG_BUCKET)
+
+#undef UMA_ALIGN
 
 #ifdef _KERNEL
 /* Internal prototypes */

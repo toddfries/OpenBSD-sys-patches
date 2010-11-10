@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/powerpc/uboot/conf.c,v 1.3 2008/12/17 15:58:07 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/powerpc/uboot/conf.c,v 1.4 2010/02/25 15:21:37 raj Exp $");
 
 #include <stand.h>
 #include "bootstrap.h"
@@ -47,7 +47,7 @@ __FBSDID("$FreeBSD: src/sys/boot/powerpc/uboot/conf.c,v 1.3 2008/12/17 15:58:07 
 /* Exported for libstand */
 struct devsw *devsw[] = {
 #if defined(LOADER_DISK_SUPPORT) || defined(LOADER_CD9660_SUPPORT)
-    &uboot_disk,
+    &uboot_storage,
 #endif
 #if defined(LOADER_NET_SUPPORT)
     &netdev,

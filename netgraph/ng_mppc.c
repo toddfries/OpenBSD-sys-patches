@@ -38,7 +38,7 @@
  * Author: Archie Cobbs <archie@freebsd.org>
  *
  * $Whistle: ng_mppc.c,v 1.4 1999/11/25 00:10:12 archie Exp $
- * $FreeBSD: src/sys/netgraph/ng_mppc.c,v 1.37 2009/01/18 21:09:34 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_mppc.c,v 1.38 2010/03/31 22:47:55 mav Exp $
  */
 
 /*
@@ -53,6 +53,7 @@
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
+#include <sys/endian.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
 
@@ -601,7 +602,7 @@ err1:
 	/* Install header */
 	M_PREPEND(m, MPPC_HDRLEN, M_DONTWAIT);
 	if (m != NULL)
-		*(mtod(m, uint16_t *)) = htons(header);
+		be16enc(mtod(m, void *), header);
 
 	*datap = m;
 	return (*datap == NULL ? ENOBUFS : 0);
@@ -630,8 +631,7 @@ ng_mppc_decompress(node_p node, struct mbuf **datap)
 		m_freem(m);
 		return (EINVAL);
 	}
-	m_copydata(m, 0, MPPC_HDRLEN, (caddr_t)&header);
-	header = ntohs(header);
+	header = be16dec(mtod(m, void *));
 	cc = (header & MPPC_CCOUNT_MASK);
 	m_adj(m, MPPC_HDRLEN);
 

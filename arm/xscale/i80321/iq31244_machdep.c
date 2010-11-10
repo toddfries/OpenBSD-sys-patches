@@ -48,7 +48,7 @@
 #include "opt_msgbuf.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/i80321/iq31244_machdep.c,v 1.33 2008/12/01 10:16:25 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/i80321/iq31244_machdep.c,v 1.34 2009/06/23 22:42:39 jeff Exp $");
 
 #define _ARM32_BUS_DMA_PRIVATE
 #include <sys/param.h>
@@ -187,6 +187,7 @@ void *
 initarm(void *arg, void *arg2)
 {
 	struct pv_addr  kernel_l1pt;
+	struct pv_addr  dpcpu;
 	int loop, i;
 	u_int l1pagetable;
 	vm_offset_t freemempos;
@@ -235,6 +236,10 @@ initarm(void *arg, void *arg2)
 	 * shared by all processes.
 	 */
 	valloc_pages(systempage, 1);
+
+	/* Allocate dynamic per-cpu area. */
+	valloc_pages(dpcpu, DPCPU_SIZE / PAGE_SIZE);
+	dpcpu_init((void *)dpcpu.pv_va, 0);
 
 	/* Allocate stacks for all modes */
 	valloc_pages(irqstack, IRQ_STACK_SIZE);

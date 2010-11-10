@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_sysctl.h,v 1.18 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_sysctl.h,v 1.21 2009/07/28 15:07:41 tuexen Exp $");
 
 #ifndef __sctp_sysctl_h__
 #define __sctp_sysctl_h__
@@ -74,7 +74,7 @@ struct sctp_sysctl {
 	uint32_t sctp_nr_outgoing_streams_default;
 	uint32_t sctp_cmt_on_off;
 	uint32_t sctp_cmt_use_dac;
-/* EY 5/5/08 - nr_sack flag variable */
+	/* EY 5/5/08 - nr_sack flag variable */
 	uint32_t sctp_nr_sack_on_off;
 	uint32_t sctp_cmt_pf;
 	uint32_t sctp_use_cwnd_based_maxburst;
@@ -104,6 +104,7 @@ struct sctp_sysctl {
 	uint32_t sctp_udp_tunneling_for_client_enable;
 	uint32_t sctp_udp_tunneling_port;
 	uint32_t sctp_enable_sack_immediately;
+	uint32_t sctp_vtag_time_wait;
 #if defined(SCTP_DEBUG)
 	uint32_t sctp_debug_on;
 #endif
@@ -476,10 +477,17 @@ struct sctp_sysctl {
 #define SCTPCTL_SACK_IMMEDIATELY_ENABLE_DEFAULT	SCTPCTL_SACK_IMMEDIATELY_ENABLE_MIN
 
 /* Enable sending of the SACK-IMMEDIATELY bit */
-#define SCTPCTL_NAT_FRIENDLY_INITS	"Enable sending of the nat-friendly SCTP option on INITs."
+#define SCTPCTL_NAT_FRIENDLY_INITS_DESC	"Enable sending of the nat-friendly SCTP option on INITs."
 #define SCTPCTL_NAT_FRIENDLY_INITS_MIN	0
 #define SCTPCTL_NAT_FRIENDLY_INITS_MAX	1
 #define SCTPCTL_NAT_FRIENDLY_INITS_DEFAULT	SCTPCTL_NAT_FRIENDLY_INITS_MIN
+
+
+/* Vtag tiem wait bits */
+#define SCTPCTL_TIME_WAIT_DESC	"Vtag time wait time 0 disables."
+#define SCTPCTL_TIME_WAIT_MIN	0
+#define SCTPCTL_TIME_WAIT_MAX	0xffffffff
+#define SCTPCTL_TIME_WAIT_DEFAULT	SCTP_TIME_WAIT
 
 
 #if defined(SCTP_DEBUG)

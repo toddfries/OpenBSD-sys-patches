@@ -34,7 +34,7 @@
 
 /* #pragma ident	"@(#)rpc_generic.c	1.17	94/04/24 SMI" */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/rpc_generic.c,v 1.4 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/rpc_generic.c,v 1.5 2009/08/24 10:09:30 zec Exp $");
 
 /*
  * rpc_generic.c, Miscl routines for RPC.
@@ -55,6 +55,8 @@ __FBSDID("$FreeBSD: src/sys/rpc/rpc_generic.c,v 1.4 2008/11/03 10:38:00 dfr Exp 
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
+
+#include <net/vnet.h>
 
 #include <rpc/rpc.h>
 #include <rpc/nettype.h>
@@ -822,6 +824,7 @@ bindresvport(struct socket *so, struct sockaddr *sa)
 	sa->sa_len = salen;
 
 	if (*portp == 0) {
+		CURVNET_SET(so->so_vnet);
 		bzero(&opt, sizeof(opt));
 		opt.sopt_dir = SOPT_GET;
 		opt.sopt_level = proto;
@@ -829,12 +832,15 @@ bindresvport(struct socket *so, struct sockaddr *sa)
 		opt.sopt_val = &old;
 		opt.sopt_valsize = sizeof(old);
 		error = sogetopt(so, &opt);
-		if (error)
+		if (error) {
+			CURVNET_RESTORE();
 			goto out;
+		}
 
 		opt.sopt_dir = SOPT_SET;
 		opt.sopt_val = &portlow;
 		error = sosetopt(so, &opt);
+		CURVNET_RESTORE();
 		if (error)
 			goto out;
 	}
@@ -845,7 +851,9 @@ bindresvport(struct socket *so, struct sockaddr *sa)
 		if (error) {
 			opt.sopt_dir = SOPT_SET;
 			opt.sopt_val = &old;
+			CURVNET_SET(so->so_vnet);
 			sosetopt(so, &opt);
+			CURVNET_RESTORE();
 		}
 	}
 out:

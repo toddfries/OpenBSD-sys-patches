@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/amd64/linux32/linux32_locore.s,v 1.4 2009/01/31 11:37:21 obrien Exp $ */
+/* $FreeBSD: src/sys/amd64/linux32/linux32_locore.s,v 1.5 2009/04/01 13:09:26 kib Exp $ */
 
 #include "linux32_assym.h"			/* system definitions */
 #include <machine/asmacros.h>			/* miscellaneous asm macros */
@@ -11,8 +11,6 @@
 NON_GPROF_ENTRY(linux_sigcode)
 	call	*LINUX_SIGF_HANDLER(%esp)
 	leal	LINUX_SIGF_SC(%esp),%ebx	/* linux scp */
-	mov	LINUX_SC_ES(%ebx),%es
-	mov	LINUX_SC_DS(%ebx),%ds
 	movl	%esp, %ebx			/* pass sigframe */
 	push	%eax				/* fake ret addr */
 	movl	$LINUX_SYS_linux_sigreturn,%eax	/* linux_sigreturn() */
@@ -24,8 +22,6 @@ linux_rt_sigcode:
 	call	*LINUX_RT_SIGF_HANDLER(%esp)
 	leal	LINUX_RT_SIGF_UC(%esp),%ebx	/* linux ucp */
 	leal	LINUX_RT_SIGF_SC(%ebx),%ecx	/* linux sigcontext */
-	mov	LINUX_SC_ES(%ecx),%es
-	mov	LINUX_SC_DS(%ecx),%ds
 	push	%eax				/* fake ret addr */
 	movl	$LINUX_SYS_linux_rt_sigreturn,%eax   /* linux_rt_sigreturn() */
 	int	$0x80				/* enter kernel with args */

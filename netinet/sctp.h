@@ -30,7 +30,7 @@
 /* $KAME: sctp.h,v 1.18 2005/03/06 16:04:16 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp.h,v 1.27 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp.h,v 1.29 2009/06/17 12:34:56 rrs Exp $");
 
 #ifndef _NETINET_SCTP_H_
 #define _NETINET_SCTP_H_
@@ -415,9 +415,6 @@ struct sctp_error_unrecognized_chunk {
 /* ECN Nonce: SACK Chunk Specific Flags */
 #define SCTP_SACK_NONCE_SUM        0x01
 
-/* EY nr_sack all bit - All bit is the 2nd LSB of nr_sack chunk flags*/
-/* if All bit is set in an nr-sack chunk, then all nr gap acks gap acks*/
-#define SCTP_NR_SACK_ALL_BIT	0x02
 /* CMT DAC algorithm SACK flag */
 #define SCTP_SACK_CMT_DAC          0x80
 
@@ -544,7 +541,7 @@ struct sctp_error_unrecognized_chunk {
 #define SCTP_THRESHOLD_LOGGING              0x02000000
 #define SCTP_LOG_AT_SEND_2_SCTP             0x04000000
 #define SCTP_LOG_AT_SEND_2_OUTQ             0x08000000
-
+#define SCTP_LOG_TRY_ADVANCE                0x10000000
 
 
 #undef SCTP_PACKED

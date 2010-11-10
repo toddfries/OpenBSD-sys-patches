@@ -31,9 +31,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdMemory.c,v 1.15 2007/03/22 18:16:41 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdMemory.c,v 1.16 2009/06/05 18:44:36 jkim Exp $");
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
 
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -55,7 +55,7 @@ AcpiOsFree(void *Memory)
 }
 
 void *
-AcpiOsMapMemory(ACPI_PHYSICAL_ADDRESS PhysicalAddress, ACPI_NATIVE_UINT Length)
+AcpiOsMapMemory(ACPI_PHYSICAL_ADDRESS PhysicalAddress, ACPI_SIZE Length)
 {
     return (pmap_mapbios((vm_offset_t)PhysicalAddress, Length));
 }
@@ -78,17 +78,6 @@ ACPI_STATUS
 AcpiOsValidateInterface (char *Interface)
 {
     return (AE_SUPPORT);
-}
-
-/*
- * There is no clean way to do this.  We make the charitable assumption
- * that callers will not pass garbage to us.
- */
-ACPI_STATUS
-AcpiOsValidateAddress (UINT8 SpaceId, ACPI_PHYSICAL_ADDRESS Address,
-    ACPI_SIZE Length)
-{
-    return (AE_OK);
 }
 
 BOOLEAN

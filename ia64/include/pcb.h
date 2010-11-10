@@ -24,13 +24,15 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/ia64/include/pcb.h,v 1.16 2004/08/16 19:05:08 marcel Exp $
+ *	$FreeBSD: src/sys/ia64/include/pcb.h,v 1.17 2010/03/21 22:33:09 marcel Exp $
  */
 
 #ifndef _MACHINE_PCB_H_
 #define _MACHINE_PCB_H_
 
+#ifndef _MACHINE_REGSET_H_
 #include <machine/_regset.h>
+#endif
 
 /*
  * PCB: process control block

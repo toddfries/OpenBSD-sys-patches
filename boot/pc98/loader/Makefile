@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/pc98/loader/Makefile,v 1.43 2009/02/21 15:04:31 ru Exp $
+# $FreeBSD: src/sys/boot/pc98/loader/Makefile,v 1.45 2010/07/25 02:22:32 nyan Exp $
 
 .include <bsd.own.mk>
 MK_SSP=		no
@@ -18,6 +18,7 @@ CFLAGS+=	-DLOADER_TFTP_SUPPORT
 CFLAGS+=	-DLOADER_NFS_SUPPORT
 .endif
 
+# Include bcache code.
 HAVE_BCACHE=	yes
 
 # Enable PnP and ISA-PnP code.
@@ -93,6 +94,6 @@ FILES+=	${.CURDIR}/../../i386/loader/loader.rc
 OBJS=	${BTXCRT} 
 
 DPADD=	${LIBFICL} ${LIBPC98} ${LIBSTAND}
-LDADD=	${LIBFICL} ${LIBPC98} -lstand
+LDADD=	${LIBFICL} ${LIBPC98} ${LIBSTAND}
 
 .include <bsd.prog.mk>

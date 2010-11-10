@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ichwd/ichwd.c,v 1.16 2009/03/03 15:50:24 avg Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ichwd/ichwd.c,v 1.21 2010/01/24 10:50:20 remko Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -68,6 +68,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ichwd/ichwd.c,v 1.16 2009/03/03 15:50:24 avg Exp
 #include <machine/resource.h>
 #include <sys/watchdog.h>
 
+#include <isa/isavar.h>
 #include <dev/pci/pcivar.h>
 
 #include <dev/ichwd/ichwd.h>
@@ -92,6 +93,7 @@ static struct ichwd_device ichwd_devices[] = {
 	{ DEVICEID_ICH7DH,   "Intel ICH7DH watchdog timer",	7 },
 	{ DEVICEID_ICH7M,    "Intel ICH7M watchdog timer",	7 },
 	{ DEVICEID_ICH7MDH,  "Intel ICH7MDH watchdog timer",	7 },
+	{ DEVICEID_NM10,     "Intel NM10 watchdog timer",	7 },
 	{ DEVICEID_ICH8,     "Intel ICH8 watchdog timer",	8 },
 	{ DEVICEID_ICH8DH,   "Intel ICH8DH watchdog timer",	8 },
 	{ DEVICEID_ICH8DO,   "Intel ICH8DO watchdog timer",	8 },
@@ -108,6 +110,7 @@ static struct ichwd_device ichwd_devices[] = {
 	{ DEVICEID_ICH10D,   "Intel ICH10D watchdog timer",	10 },
 	{ DEVICEID_ICH10DO,  "Intel ICH10DO watchdog timer",	10 },
 	{ DEVICEID_ICH10R,   "Intel ICH10R watchdog timer",	10 },
+	{ DEVICEID_H55,      "Intel H55 watchdog timer",	10 },
 	{ 0, NULL, 0 },
 };
 
@@ -141,26 +144,55 @@ static devclass_t ichwd_devclass;
 			device_printf(dev, __VA_ARGS__);\
 	} while (0)
 
+/*
+ * Disable the watchdog timeout SMI handler.
+ *
+ * Apparently, some BIOSes install handlers that reset or disable the
+ * watchdog timer instead of resetting the system, so we disable the SMI
+ * (by clearing the SMI_TCO_EN bit of the SMI_EN register) to prevent this
+ * from happening.
+ */
 static __inline void
-ichwd_intr_enable(struct ichwd_softc *sc)
+ichwd_smi_disable(struct ichwd_softc *sc)
 {
 	ichwd_write_smi_4(sc, SMI_EN, ichwd_read_smi_4(sc, SMI_EN) & ~SMI_TCO_EN);
 }
 
+/*
+ * Enable the watchdog timeout SMI handler.  See above for details.
+ */
 static __inline void
-ichwd_intr_disable(struct ichwd_softc *sc)
+ichwd_smi_enable(struct ichwd_softc *sc)
 {
 	ichwd_write_smi_4(sc, SMI_EN, ichwd_read_smi_4(sc, SMI_EN) | SMI_TCO_EN);
 }
 
+/*
+ * Reset the watchdog status bits.
+ */
 static __inline void
 ichwd_sts_reset(struct ichwd_softc *sc)
 {
+	/*
+	 * The watchdog status bits are set to 1 by the hardware to
+	 * indicate various conditions.  They can be cleared by software
+	 * by writing a 1, not a 0.
+	 */
 	ichwd_write_tco_2(sc, TCO1_STS, TCO_TIMEOUT);
+	/*
+	 * XXX The datasheet says that TCO_SECOND_TO_STS must be cleared
+	 * before TCO_BOOT_STS, not the other way around.
+	 */
 	ichwd_write_tco_2(sc, TCO2_STS, TCO_BOOT_STS);
 	ichwd_write_tco_2(sc, TCO2_STS, TCO_SECOND_TO_STS);
 }
 
+/*
+ * Enable the watchdog timer by clearing the TCO_TMR_HALT bit in the
+ * TCO1_CNT register.  This is complicated by the need to preserve bit 9
+ * of that same register, and the requirement that all other bits must be
+ * written back as zero.
+ */
 static __inline void
 ichwd_tmr_enable(struct ichwd_softc *sc)
 {
@@ -172,6 +204,9 @@ ichwd_tmr_enable(struct ichwd_softc *sc)
 	ichwd_verbose_printf(sc->device, "timer enabled\n");
 }
 
+/*
+ * Disable the watchdog timer.  See above for details.
+ */
 static __inline void
 ichwd_tmr_disable(struct ichwd_softc *sc)
 {
@@ -183,6 +218,11 @@ ichwd_tmr_disable(struct ichwd_softc *sc)
 	ichwd_verbose_printf(sc->device, "timer disabled\n");
 }
 
+/*
+ * Reload the watchdog timer: writing anything to any of the lower five
+ * bits of the TCO_RLD register reloads the timer from the last value
+ * written to TCO_TMR.
+ */
 static __inline void
 ichwd_tmr_reload(struct ichwd_softc *sc)
 {
@@ -194,6 +234,10 @@ ichwd_tmr_reload(struct ichwd_softc *sc)
 	ichwd_verbose_printf(sc->device, "timer reloaded\n");
 }
 
+/*
+ * Set the initial timeout value.  Note that this must always be followed
+ * by a reload.
+ */
 static __inline void
 ichwd_tmr_set(struct ichwd_softc *sc, unsigned int timeout)
 {
@@ -262,7 +306,8 @@ ichwd_clear_noreboot(struct ichwd_softc *sc)
 }
 
 /*
- * Watchdog event handler.
+ * Watchdog event handler - called by the framework to enable or disable
+ * the watchdog or change the initial timeout value.
  */
 static void
 ichwd_event(void *arg, unsigned int cmd, int *error)
@@ -351,7 +396,9 @@ static int
 ichwd_probe(device_t dev)
 {
 
-	(void)dev;
+	/* Do not claim some ISA PnP device by accident. */
+	if (isa_get_logicalid(dev) != 0)
+		return (ENXIO);
 	return (0);
 }
 
@@ -423,8 +470,15 @@ ichwd_attach(device_t dev)
 	if (ichwd_clear_noreboot(sc) != 0)
 		goto fail;
 
-	device_printf(dev, "%s (ICH%d or equivalent)\n",
+	ichwd_verbose_printf(dev, "%s (ICH%d or equivalent)\n",
 	    device_get_desc(dev), sc->ich_version);
+
+	/*
+	 * XXX we should check the status registers (specifically, the
+	 * TCO_SECOND_TO_STS bit in the TCO2_STS register) to see if we
+	 * just came back from a watchdog-induced reset, and let the user
+	 * know.
+	 */
 
 	/* reset the watchdog status registers */
 	ichwd_sts_reset(sc);
@@ -435,8 +489,8 @@ ichwd_attach(device_t dev)
 	/* register the watchdog event handler */
 	sc->ev_tag = EVENTHANDLER_REGISTER(watchdog_list, ichwd_event, sc, 0);
 
-	/* enable watchdog timeout interrupts */
-	ichwd_intr_enable(sc);
+	/* disable the SMI handler */
+	ichwd_smi_disable(sc);
 
 	return (0);
  fail:
@@ -466,8 +520,8 @@ ichwd_detach(device_t dev)
 	if (sc->active)
 		ichwd_tmr_disable(sc);
 
-	/* disable watchdog timeout interrupts */
-	ichwd_intr_disable(sc);
+	/* enable the SMI handler */
+	ichwd_smi_enable(sc);
 
 	/* deregister event handler */
 	if (sc->ev_tag != NULL)
@@ -504,23 +558,4 @@ static driver_t ichwd_driver = {
 	sizeof(struct ichwd_softc),
 };
 
-static int
-ichwd_modevent(module_t mode, int type, void *data)
-{
-	int error = 0;
-
-	switch (type) {
-	case MOD_LOAD:
-		printf("ichwd module loaded\n");
-		break;
-	case MOD_UNLOAD:
-		printf("ichwd module unloaded\n");
-		break;
-	case MOD_SHUTDOWN:
-		printf("ichwd module shutting down\n");
-		break;
-	}
-	return (error);
-}
-
-DRIVER_MODULE(ichwd, isa, ichwd_driver, ichwd_devclass, ichwd_modevent, NULL);
+DRIVER_MODULE(ichwd, isa, ichwd_driver, ichwd_devclass, NULL, NULL);

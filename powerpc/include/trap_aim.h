@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $NetBSD: trap.h,v 1.7 2002/02/22 13:51:40 kleink Exp $
- * $FreeBSD: src/sys/powerpc/include/trap_aim.h,v 1.1 2008/03/03 13:20:52 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/trap_aim.h,v 1.2 2009/04/19 06:30:00 nwhitehorn Exp $
  */
 
 #ifndef	_POWERPC_TRAP_H_
@@ -102,5 +102,16 @@
 /* Macros to extract register information */
 #define EXC_ALI_RST(dsisr) ((dsisr >> 5) & 0x1f)   /* source or target */
 #define EXC_ALI_RA(dsisr) (dsisr & 0x1f)
+
+/*
+ * SRR1 bits for program exception traps. These identify what caused
+ * the program exception. See section 6.5.9 of the Power ISA Version
+ * 2.05.
+ */
+
+#define	EXC_PGM_FPENABLED	(1UL << 20)
+#define	EXC_PGM_ILLEGAL		(1UL << 19)
+#define	EXC_PGM_PRIV		(1UL << 18)
+#define	EXC_PGM_TRAP		(1UL << 17)
 
 #endif	/* _POWERPC_TRAP_H_ */

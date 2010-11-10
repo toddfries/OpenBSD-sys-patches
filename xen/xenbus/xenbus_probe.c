@@ -36,7 +36,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/xen/xenbus/xenbus_probe.c,v 1.6 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/xen/xenbus/xenbus_probe.c,v 1.10 2010/01/07 21:01:37 mbr Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -330,7 +330,7 @@ xenbus_devices_changed(struct xenbus_watch *watch,
 	device_t dev = sc->xs_dev;
 	char *node, *bus, *type, *id, *p;
 
-	node = strdup(vec[XS_WATCH_PATH], M_DEVBUF);;
+	node = strdup(vec[XS_WATCH_PATH], M_DEVBUF);
 	p = strchr(node, '/');
 	if (!p)
 		goto out;
@@ -565,7 +565,6 @@ xenbus_write_ivar(device_t dev, device_t child, int index, uintptr_t value)
 	return (ENOENT);
 }
 
-SYSCTL_DECL(_dev);
 SYSCTL_NODE(_dev, OID_AUTO, xen, CTLFLAG_RD, NULL, "Xen");
 SYSCTL_INT(_dev_xen, OID_AUTO, xsd_port, CTLFLAG_RD, &xen_store_evtchn, 0, "");
 SYSCTL_ULONG(_dev_xen, OID_AUTO, xsd_kva, CTLFLAG_RD, (u_long *) &xen_store, 0, "");

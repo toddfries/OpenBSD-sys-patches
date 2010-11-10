@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)locore.s	7.3 (Berkeley) 5/13/91
- * $FreeBSD: src/sys/i386/i386/locore.s,v 1.190 2009/01/31 11:37:21 obrien Exp $
+ * $FreeBSD: src/sys/i386/i386/locore.s,v 1.192 2010/01/11 16:01:20 alc Exp $
  *
  *		originally from: locore.s, by William F. Jolitz
  *
@@ -104,15 +104,11 @@ IdlePTD:	.long	0		/* phys addr of kernel PTD */
 IdlePDPT:	.long	0		/* phys addr of kernel PDPT */
 #endif
 
-#ifdef SMP
 	.globl	KPTphys
-#endif
 KPTphys:	.long	0		/* phys addr of kernel page tables */
 
 	.globl	proc0kstack
-proc0uarea:	.long	0		/* address of proc 0 uarea (unused)*/
 proc0kstack:	.long	0		/* address of proc 0 kstack space */
-p0upa:		.long	0		/* phys addr of proc0 UAREA (unused) */
 p0kpa:		.long	0		/* phys addr of proc0's STACK */
 
 vm86phystk:	.long	0		/* PA of vm86/bios stack */

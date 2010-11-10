@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/pccard/card_if.m,v 1.32 2009/02/05 19:39:07 imp Exp $
+# $FreeBSD: src/sys/dev/pccard/card_if.m,v 1.34 2010/01/03 23:31:58 imp Exp $
 #
 
 #include <sys/bus.h>
@@ -35,7 +35,7 @@ INTERFACE card;
 #
 # Companion interface for pccard.  We need to set attributes for memory
 # and i/o port mappings (as well as other types of attributes) that have
-# a well defined meaning inside the pccard/cardbus system.  The bus
+# a well defined meaning inside the PC Card/CardBus system.  The bus
 # methods are inadequate for this because this must be done at the time the
 # resources are set for the device, which predates their activation.  Also,
 # the driver activating the resources doesn't necessarily know or need to know
@@ -99,15 +99,6 @@ METHOD const struct pccard_product * do_product_lookup {
 	const struct pccard_product *tab;
 	size_t ent_size;
 	pccard_product_match_fn matchfn;
-}
-
-#
-# Helper method for the above.  When a compatibility driver is converted,
-# one must write a match routine.  This routine is unused on OLDCARD but
-# is used as a discriminator for NEWCARD.
-#
-METHOD int compat_match {
-	device_t dev;
 }
 
 #

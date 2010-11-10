@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: ah_devid.h,v 1.4 2008/10/06 18:32:46 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah_devid.h,v 1.2 2010/03/03 17:32:32 rpaulo Exp $
  */
 
 #ifndef _DEV_ATH_DEVID_H_

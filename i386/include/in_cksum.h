@@ -29,7 +29,7 @@
  *	from tahoe:	in_cksum.c	1.2	86/01/05
  *	from:		@(#)in_cksum.c	1.3 (Berkeley) 1/19/91
  *	from: Id: in_cksum.c,v 1.8 1995/12/03 18:35:19 bde Exp
- * $FreeBSD: src/sys/i386/include/in_cksum.h,v 1.18 2007/10/20 22:18:42 bz Exp $
+ * $FreeBSD: src/sys/i386/include/in_cksum.h,v 1.19 2009/06/13 14:00:10 ed Exp $
  */
 
 #ifndef _MACHINE_IN_CKSUM_H_
@@ -57,9 +57,9 @@
 static __inline u_int
 in_cksum_hdr(const struct ip *ip)
 {
-	register u_int sum = 0;
+	u_int sum = 0;
 
-	__asm __volatile (
+	__asm(
 		"addl %1, %0\n"
 		"adcl %2, %0\n"
 		"adcl %3, %0\n"
@@ -72,6 +72,7 @@ in_cksum_hdr(const struct ip *ip)
 		  "g" (((const u_int32_t *)ip)[2]),
 		  "g" (((const u_int32_t *)ip)[3]),
 		  "g" (((const u_int32_t *)ip)[4])
+		: "cc"
 	);
 	sum = (sum & 0xffff) + (sum >> 16);
 	if (sum > 0xffff)
@@ -91,12 +92,12 @@ in_cksum_update(struct ip *ip)
 static __inline u_short
 in_addword(u_short sum, u_short b)
 {
-	/* __volatile is necessary because the condition codes are used. */
-	__asm __volatile (
+	__asm(
 		"addw %1, %0\n"
 		"adcw $0, %0"
 		: "+r" (sum)
-		: "r" (b)
+		: "g" (b)
+		: "cc"
 	);
 	return (sum);
 }
@@ -104,14 +105,14 @@ in_addword(u_short sum, u_short b)
 static __inline u_short
 in_pseudo(u_int sum, u_int b, u_int c)
 {
-	/* __volatile is necessary because the condition codes are used. */
-	__asm __volatile (
+	__asm(
 		"addl %1, %0\n"
 		"adcl %2, %0\n"
 		"adcl $0, %0"
 		: "+r" (sum)
 		: "g" (b),
 		  "g" (c)
+		: "cc"
 	);
 	sum = (sum & 0xffff) + (sum >> 16);
 	if (sum > 0xffff)

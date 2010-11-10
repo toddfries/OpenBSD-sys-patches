@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/dnlc.h,v 1.4 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/dnlc.h,v 1.5 2010/05/11 22:46:36 pjd Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_DNLC_H_
@@ -35,6 +35,6 @@
 #define	dnlc_update(dvp, name, vp)	do { } while (0)
 #define	dnlc_remove(dvp, name)		do { } while (0)
 #define	dnlc_purge_vfsp(vfsp, count)	(0)
-#define	dnlc_reduce_cache(percent)	EVENTHANDLER_INVOKE(vfs_lowvnodes, (int)(intptr_t)(percent))
+#define	dnlc_reduce_cache(percent)	do { } while (0)
 
 #endif	/* !_OPENSOLARIS_SYS_DNLC_H_ */

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/xdr/xdr_mbuf.c,v 1.4 2008/11/13 14:36:52 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/xdr/xdr_mbuf.c,v 1.5 2009/08/12 16:27:51 rmacklem Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -282,6 +282,8 @@ xdrmbuf_inline(XDR *xdrs, u_int len)
 	size_t available;
 	char *p;
 
+	if (!m)
+		return (0);
 	if (xdrs->x_op == XDR_ENCODE) {
 		available = M_TRAILINGSPACE(m) + (m->m_len - xdrs->x_handy);
 	} else {

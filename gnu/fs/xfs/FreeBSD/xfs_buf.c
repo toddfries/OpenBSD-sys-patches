@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_buf.c,v 1.5 2008/10/10 21:23:50 attilio Exp $
+ * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_buf.c,v 1.6 2009/03/16 15:39:46 kib Exp $
  */
 
 #include "xfs.h"
@@ -81,7 +81,7 @@ xfs_buf_get_empty(size_t size,  xfs_buftarg_t *target)
 {
 	struct buf *bp;
 
-	bp = geteblk(0);
+	bp = geteblk(0, 0);
 	if (bp != NULL) {
 		bp->b_bufsize = size;
 		bp->b_bcount = size;
@@ -100,7 +100,7 @@ xfs_buf_get_noaddr(size_t len, xfs_buftarg_t *target)
 	if (len >= MAXPHYS)
 		return (NULL);
 
-	bp = geteblk(len);
+	bp = geteblk(len, 0);
 	if (bp != NULL) {
 		BUF_ASSERT_HELD(bp);
 

@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/modules/usb/zyd/Makefile,v 1.1 2009/02/23 18:32:59 thompsa Exp $
+# $FreeBSD: src/sys/modules/usb/zyd/Makefile,v 1.2 2009/06/04 03:59:20 weongyo Exp $
 #
 # Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
 #
@@ -31,6 +31,6 @@ S=	${.CURDIR}/../../..
 
 KMOD=	if_zyd
 SRCS=	opt_bus.h opt_usb.h device_if.h bus_if.h usb_if.h usbdevs.h \
-	if_zyd.c
+	if_zyd.c if_zydreg.h if_zydfw.h
 
 .include <bsd.kmod.mk>

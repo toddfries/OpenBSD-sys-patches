@@ -30,7 +30,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
-/*$FreeBSD: src/sys/dev/ixgb/if_ixgb.h,v 1.9 2006/05/16 14:36:27 phk Exp $*/
+/*$FreeBSD: src/sys/dev/ixgb/if_ixgb.h,v 1.11 2009/11/19 18:37:55 jhb Exp $*/
 
 #ifndef _IXGB_H_DEFINED_
 #define _IXGB_H_DEFINED_
@@ -284,7 +284,7 @@ struct adapter {
 	struct ifmedia  media;
 	struct callout 	timer;
 	int             io_rid;
-	u_int8_t        unit;
+	int		tx_timer;
 	struct mtx	mtx;
 
 	/* Info about the board itself */

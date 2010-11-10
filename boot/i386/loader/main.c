@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/loader/main.c,v 1.44 2009/03/09 17:16:29 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/loader/main.c,v 1.46 2009/12/07 16:29:43 jhb Exp $");
 
 /*
  * MD bootstrap main() and assorted miscellaneous
@@ -102,14 +102,19 @@ main(void)
      */
     bios_getmem();
 
-#if defined(LOADER_BZIP2_SUPPORT) || defined(LOADER_FIREWIRE_SUPPORT) || defined(LOADER_GPT_SUPPORT) || defined(LOADER_ZFS_SUPPORT)
-    heap_top = PTOV(memtop_copyin);
-    memtop_copyin -= 0x300000;
-    heap_bottom = PTOV(memtop_copyin);
-#else
-    heap_top = (void *)bios_basemem;
-    heap_bottom = (void *)end;
+#if defined(LOADER_BZIP2_SUPPORT) || defined(LOADER_FIREWIRE_SUPPORT) || \
+    defined(LOADER_GPT_SUPPORT) || defined(LOADER_ZFS_SUPPORT)
+    if (high_heap_size > 0) {
+	heap_top = PTOV(high_heap_base + high_heap_size);
+	heap_bottom = PTOV(high_heap_base);
+	if (high_heap_base < memtop_copyin)
+	    memtop_copyin = high_heap_base;
+    } else
 #endif
+    {
+	heap_top = (void *)PTOV(bios_basemem);
+	heap_bottom = (void *)end;
+    }
     setheap(heap_bottom, heap_top);
 
     /* 

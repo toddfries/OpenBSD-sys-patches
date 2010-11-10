@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/if_plip.c,v 1.50 2009/01/21 23:10:06 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/if_plip.c,v 1.52 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  * Parallel port TCP/IP interfaces added.  I looked at the driver from
@@ -99,6 +99,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ppbus/if_plip.c,v 1.50 2009/01/21 23:10:06 jhb E
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
+#include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -173,7 +174,7 @@ static u_char *ctxmith;
 static int lpinittables(void);
 static int lpioctl(struct ifnet *, u_long, caddr_t);
 static int lpoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-	struct rtentry *);
+       struct route *);
 static void lpstop(struct lp_data *);
 static void lp_intr(void *);
 static int lp_module_handler(module_t, int, void *);
@@ -261,7 +262,7 @@ lp_attach(device_t dev)
 	ifp->if_output = lpoutput;
 	ifp->if_hdrlen = 0;
 	ifp->if_addrlen = 0;
-	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	ifp->if_snd.ifq_maxlen = ifqmaxlen;
 	if_attach(ifp);
 
 	bpfattach(ifp, DLT_NULL, sizeof(u_int32_t));
@@ -678,7 +679,7 @@ lpoutbyte(u_char byte, int spin, device_t ppbus)
 
 static int
 lpoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-    struct rtentry *rt)
+    struct route *ro)
 {
 	struct lp_data *sc = ifp->if_softc;
 	device_t dev = sc->sc_dev;

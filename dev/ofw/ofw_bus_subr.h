@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ofw/ofw_bus_subr.h,v 1.2 2008/12/15 15:31:10 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/ofw/ofw_bus_subr.h,v 1.4 2010/05/28 10:43:56 raj Exp $
  */
 
 #ifndef	_DEV_OFW_OFW_BUS_SUBR_H_
@@ -41,30 +41,34 @@
 #define	ORIR_NOTFOUND	0xffffffff
 
 struct ofw_bus_iinfo {
-	u_int8_t		*opi_imap;
-	u_int8_t		*opi_imapmsk;
+	uint8_t			*opi_imap;
+	uint8_t			*opi_imapmsk;
 	int			opi_imapsz;
 	pcell_t			opi_addrc;
 };
 
+/* Generic implementation of ofw_bus_if.m methods and helper routines */
 int	ofw_bus_gen_setup_devinfo(struct ofw_bus_devinfo *, phandle_t);
 void	ofw_bus_gen_destroy_devinfo(struct ofw_bus_devinfo *);
-
-/* Helper method to report interesting OF properties in pnpinfo */
-int	ofw_bus_gen_child_pnpinfo_str(device_t, device_t, char *, size_t);
-
-/* Routines for processing firmware interrupt maps */
-
-void	ofw_bus_setup_iinfo(phandle_t, struct ofw_bus_iinfo *, int);
-int	ofw_bus_lookup_imap(phandle_t, struct ofw_bus_iinfo *, void *, int,
-	    void *, int, void *, int, void *);
-int	ofw_bus_search_intrmap(void *, int, void *, int, void *, int, void *,
-	    void *, void *, int);
 
 ofw_bus_get_compat_t	ofw_bus_gen_get_compat;
 ofw_bus_get_model_t	ofw_bus_gen_get_model;
 ofw_bus_get_name_t	ofw_bus_gen_get_name;
 ofw_bus_get_node_t	ofw_bus_gen_get_node;
 ofw_bus_get_type_t	ofw_bus_gen_get_type;
+
+/* Helper method to report interesting OF properties in pnpinfo */
+bus_child_pnpinfo_str_t	ofw_bus_gen_child_pnpinfo_str;
+
+/* Routines for processing firmware interrupt maps */
+void	ofw_bus_setup_iinfo(phandle_t, struct ofw_bus_iinfo *, int);
+int	ofw_bus_lookup_imap(phandle_t, struct ofw_bus_iinfo *, void *, int,
+	    void *, int, void *, int, void *);
+int	ofw_bus_search_intrmap(void *, int, void *, int, void *, int, void *,
+	    void *, void *, int);
+
+/* Helper routine for checking compat prop */
+int ofw_bus_is_compatible(device_t, const char *);
+int ofw_bus_is_compatible_strict(device_t, const char *);
 
 #endif /* !_DEV_OFW_OFW_BUS_SUBR_H_ */

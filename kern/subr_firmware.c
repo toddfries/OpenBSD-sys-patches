@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_firmware.c,v 1.13 2009/02/03 07:51:11 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_firmware.c,v 1.15 2010/03/07 22:37:35 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -121,7 +121,7 @@ struct priv_fw {
  * reallocate the array because pointers are held externally.
  * A list may work, though.
  */
-#define	FIRMWARE_MAX	30
+#define	FIRMWARE_MAX	50
 static struct priv_fw firmware_table[FIRMWARE_MAX];
 
 /*
@@ -500,7 +500,7 @@ firmware_modevent(module_t mod, int type, void *unused)
 		mtx_lock(&firmware_mtx);
 		for (i = 0; i < FIRMWARE_MAX; i++) {
 			fp = &firmware_table[i];
-			fp->flags |= FW_UNLOAD;;
+			fp->flags |= FW_UNLOAD;
 		}
 		mtx_unlock(&firmware_mtx);
 		taskqueue_enqueue(firmware_tq, &firmware_unload_task);

@@ -2,7 +2,7 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/usb_hid.c,v 1.3 2009/03/08 22:58:19 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/usb_hid.c,v 1.20 2010/05/12 22:50:23 thompsa Exp $");
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -19,13 +19,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/usb_hid.c,v 1.3 2009/03/08 22:58:19 thompsa 
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,35 +33,63 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/usb_hid.c,v 1.3 2009/03/08 22:58:19 thompsa 
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/stdint.h>
+#include <sys/stddef.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/bus.h>
+#include <sys/linker_set.h>
+#include <sys/module.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+#include <sys/sysctl.h>
+#include <sys/sx.h>
+#include <sys/unistd.h>
+#include <sys/callout.h>
+#include <sys/malloc.h>
+#include <sys/priv.h>
+
 #include <dev/usb/usb.h>
-#include <dev/usb/usb_mfunc.h>
-#include <dev/usb/usb_error.h>
-#include <dev/usb/usb_defs.h>
+#include <dev/usb/usbdi.h>
+#include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbhid.h>
 
-#define	USB_DEBUG_VAR usb2_debug
+#define	USB_DEBUG_VAR usb_debug
 
 #include <dev/usb/usb_core.h>
 #include <dev/usb/usb_debug.h>
-#include <dev/usb/usb_parse.h>
 #include <dev/usb/usb_process.h>
 #include <dev/usb/usb_device.h>
 #include <dev/usb/usb_request.h>
-#include <dev/usb/usb_hid.h>
 
 static void hid_clear_local(struct hid_item *);
 static uint8_t hid_get_byte(struct hid_data *s, const uint16_t wSize);
 
 #define	MAXUSAGE 64
 #define	MAXPUSH 4
+#define	MAXID 16
+
+struct hid_pos_data {
+	int32_t rid;
+	uint32_t pos;
+};
+
 struct hid_data {
 	const uint8_t *start;
 	const uint8_t *end;
 	const uint8_t *p;
 	struct hid_item cur[MAXPUSH];
+	struct hid_pos_data last_pos[MAXID];
 	int32_t	usages_min[MAXUSAGE];
 	int32_t	usages_max[MAXUSAGE];
-	int	kindset;
+	int32_t usage_last;	/* last seen usage */
+	uint32_t loc_size;	/* last seen size */
+	uint32_t loc_count;	/* last seen count */
+	uint8_t	kindset;	/* we have 5 kinds so 8 bits are enough */
 	uint8_t	pushlevel;	/* current pushlevel */
 	uint8_t	ncount;		/* end usage item count */
 	uint8_t icount;		/* current usage item count */
@@ -99,11 +120,63 @@ hid_clear_local(struct hid_item *c)
 	c->set_delimiter = 0;
 }
 
+static void
+hid_switch_rid(struct hid_data *s, struct hid_item *c, int32_t next_rID)
+{
+	uint8_t i;
+
+	/* check for same report ID - optimise */
+
+	if (c->report_ID == next_rID)
+		return;
+
+	/* save current position for current rID */
+
+	if (c->report_ID == 0) {
+		i = 0;
+	} else {
+		for (i = 1; i != MAXID; i++) {
+			if (s->last_pos[i].rid == c->report_ID)
+				break;
+			if (s->last_pos[i].rid == 0)
+				break;
+		}
+	}
+	if (i != MAXID) {
+		s->last_pos[i].rid = c->report_ID;
+		s->last_pos[i].pos = c->loc.pos;
+	}
+
+	/* store next report ID */
+
+	c->report_ID = next_rID;
+
+	/* lookup last position for next rID */
+
+	if (next_rID == 0) {
+		i = 0;
+	} else {
+		for (i = 1; i != MAXID; i++) {
+			if (s->last_pos[i].rid == next_rID)
+				break;
+			if (s->last_pos[i].rid == 0)
+				break;
+		}
+	}
+	if (i != MAXID) {
+		s->last_pos[i].rid = next_rID;
+		c->loc.pos = s->last_pos[i].pos;
+	} else {
+		DPRINTF("Out of RID entries, position is set to zero!\n");
+		c->loc.pos = 0;
+	}
+}
+
 /*------------------------------------------------------------------------*
  *	hid_start_parse
  *------------------------------------------------------------------------*/
 struct hid_data *
-hid_start_parse(const void *d, int len, int kindset)
+hid_start_parse(const void *d, usb_size_t len, int kindset)
 {
 	struct hid_data *s;
 
@@ -181,15 +254,21 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 
  top:
 	/* check if there is an array of items */
-	if ((s->icount != s->ncount) &&
-	    (s->iusage != s->nusage)) {
-		dval = s->usages_min[s->iusage] + s->ousage;
-		c->usage = dval;
-		if (dval == s->usages_max[s->iusage]) {
-			s->iusage ++;
-			s->ousage = 0;
+	if (s->icount < s->ncount) {
+		/* get current usage */
+		if (s->iusage < s->nusage) {
+			dval = s->usages_min[s->iusage] + s->ousage;
+			c->usage = dval;
+			s->usage_last = dval;
+			if (dval == s->usages_max[s->iusage]) {
+				s->iusage ++;
+				s->ousage = 0;
+			} else {
+				s->ousage ++;
+			}
 		} else {
-			s->ousage ++;
+			DPRINTFN(1, "Using last usage\n");
+			dval = s->usage_last;
 		}
 		s->icount ++;
 		/* 
@@ -268,6 +347,9 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 				c->kind = hid_input;
 				c->flags = dval;
 		ret:
+				c->loc.count = s->loc_count;
+				c->loc.size = s->loc_size;
+
 				if (c->flags & HIO_VARIABLE) {
 					/* range check usage count */
 					if (c->loc.count > 255) {
@@ -283,12 +365,6 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 					 */
 					c->loc.count = 1;
 				} else {
-					/* make sure we have a usage */
-					if (s->nusage == 0) {
-						s->usages_min[s->nusage] = 0;
-						s->usages_max[s->nusage] = 0;
-						s->nusage = 1;
-					}
 					s->ncount = 1;
 				}
 				goto top;
@@ -301,6 +377,7 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 				c->kind = hid_collection;
 				c->collection = dval;
 				c->collevel++;
+				c->usage = s->usage_last;
 				*h = *c;
 				return (1);
 			case 11:	/* Feature */
@@ -345,24 +422,28 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 				c->unit = dval;
 				break;
 			case 7:
-				c->loc.size = dval;
+				/* mask because value is unsigned */
+				s->loc_size = dval & mask;
 				break;
 			case 8:
-				c->report_ID = dval;
-				/* new report - reset position */
-				c->loc.pos = 0;
+				hid_switch_rid(s, c, dval);
 				break;
 			case 9:
-				c->loc.count = dval;
+				/* mask because value is unsigned */
+				s->loc_count = dval & mask;
 				break;
 			case 10:	/* Push */
 				s->pushlevel ++;
 				if (s->pushlevel < MAXPUSH) {
 					s->cur[s->pushlevel] = *c;
+					/* store size and count */
+					c->loc.size = s->loc_size;
+					c->loc.count = s->loc_count;
+					/* update current item pointer */
 					c = &s->cur[s->pushlevel];
 				} else {
 					DPRINTFN(0, "Cannot push "
-					    "item @ %d!\n", s->pushlevel);
+					    "item @ %d\n", s->pushlevel);
 				}
 				break;
 			case 11:	/* Pop */
@@ -371,10 +452,16 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 					/* preserve position */
 					oldpos = c->loc.pos;
 					c = &s->cur[s->pushlevel];
+					/* restore size and count */
+					s->loc_size = c->loc.size;
+					s->loc_count = c->loc.count;
+					/* set default item location */
 					c->loc.pos = oldpos;
+					c->loc.size = 0;
+					c->loc.count = 0;
 				} else {
 					DPRINTFN(0, "Cannot pop "
-					    "item @ %d!\n", s->pushlevel);
+					    "item @ %d\n", s->pushlevel);
 				}
 				break;
 			default:
@@ -388,12 +475,15 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 				if (bSize != 4)
 					dval = (dval & mask) | c->_usage_page;
 
+				/* set last usage, in case of a collection */
+				s->usage_last = dval;
+
 				if (s->nusage < MAXUSAGE) {
 					s->usages_min[s->nusage] = dval;
 					s->usages_max[s->nusage] = dval;
 					s->nusage ++;
 				} else {
-					DPRINTFN(0, "max usage reached!\n");
+					DPRINTFN(0, "max usage reached\n");
 				}
 
 				/* clear any pending usage sets */
@@ -420,7 +510,7 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 
 				/* sanity check */
 				if ((s->nusage < MAXUSAGE) &&
-				    (c->usage_minimum < c->usage_maximum)) {
+				    (c->usage_minimum <= c->usage_maximum)) {
 					/* add usage range */
 					s->usages_min[s->nusage] = 
 					    c->usage_minimum;
@@ -428,7 +518,7 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
 					    c->usage_maximum;
 					s->nusage ++;
 				} else {
-					DPRINTFN(0, "Usage set dropped!\n");
+					DPRINTFN(0, "Usage set dropped\n");
 				}
 				s->susage = 0;
 				break;
@@ -470,7 +560,7 @@ hid_get_item(struct hid_data *s, struct hid_item *h)
  *	hid_report_size
  *------------------------------------------------------------------------*/
 int
-hid_report_size(const void *buf, int len, enum hid_kind k, uint8_t *id)
+hid_report_size(const void *buf, usb_size_t len, enum hid_kind k, uint8_t *id)
 {
 	struct hid_data *d;
 	struct hid_item h;
@@ -523,14 +613,16 @@ hid_report_size(const void *buf, int len, enum hid_kind k, uint8_t *id)
  *	hid_locate
  *------------------------------------------------------------------------*/
 int
-hid_locate(const void *desc, int size, uint32_t u, enum hid_kind k,
-    struct hid_location *loc, uint32_t *flags, uint8_t *id)
+hid_locate(const void *desc, usb_size_t size, uint32_t u, enum hid_kind k,
+    uint8_t index, struct hid_location *loc, uint32_t *flags, uint8_t *id)
 {
 	struct hid_data *d;
 	struct hid_item h;
 
 	for (d = hid_start_parse(desc, size, 1 << k); hid_get_item(d, &h);) {
 		if (h.kind == k && !(h.flags & HIO_CONST) && h.usage == u) {
+			if (index--)
+				continue;
 			if (loc != NULL)
 				*loc = h.loc;
 			if (flags != NULL)
@@ -554,8 +646,9 @@ hid_locate(const void *desc, int size, uint32_t u, enum hid_kind k,
 /*------------------------------------------------------------------------*
  *	hid_get_data
  *------------------------------------------------------------------------*/
-uint32_t
-hid_get_data(const uint8_t *buf, uint32_t len, struct hid_location *loc)
+static uint32_t
+hid_get_data_sub(const uint8_t *buf, usb_size_t len, struct hid_location *loc,
+    int is_signed)
 {
 	uint32_t hpos = loc->pos;
 	uint32_t hsize = loc->size;
@@ -584,21 +677,36 @@ hid_get_data(const uint8_t *buf, uint32_t len, struct hid_location *loc)
 
 	/* Correctly shift down data */
 	data = (data >> (hpos % 8));
+	n = 32 - hsize;
 
 	/* Mask and sign extend in one */
-	n = 32 - hsize;
-	data = ((int32_t)data << n) >> n;
+	if (is_signed != 0)
+		data = (int32_t)((int32_t)data << n) >> n;
+	else
+		data = (uint32_t)((uint32_t)data << n) >> n;
 
 	DPRINTFN(11, "hid_get_data: loc %d/%d = %lu\n",
 	    loc->pos, loc->size, (long)data);
 	return (data);
 }
 
+int32_t
+hid_get_data(const uint8_t *buf, usb_size_t len, struct hid_location *loc)
+{
+	return (hid_get_data_sub(buf, len, loc, 1));
+}
+
+uint32_t
+hid_get_data_unsigned(const uint8_t *buf, usb_size_t len, struct hid_location *loc)
+{
+        return (hid_get_data_sub(buf, len, loc, 0));
+}
+
 /*------------------------------------------------------------------------*
  *	hid_is_collection
  *------------------------------------------------------------------------*/
 int
-hid_is_collection(const void *desc, int size, uint32_t usage)
+hid_is_collection(const void *desc, usb_size_t size, uint32_t usage)
 {
 	struct hid_data *hd;
 	struct hid_item hi;
@@ -608,9 +716,11 @@ hid_is_collection(const void *desc, int size, uint32_t usage)
 	if (hd == NULL)
 		return (0);
 
-	err = hid_get_item(hd, &hi) &&
-	    hi.kind == hid_collection &&
-	    hi.usage == usage;
+	while ((err = hid_get_item(hd, &hi))) {
+		 if (hi.kind == hid_collection &&
+		     hi.usage == usage)
+			break;
+	}
 	hid_end_parse(hd);
 	return (err);
 }
@@ -625,16 +735,16 @@ hid_is_collection(const void *desc, int size, uint32_t usage)
  * NULL: No more HID descriptors.
  * Else: Pointer to HID descriptor.
  *------------------------------------------------------------------------*/
-struct usb2_hid_descriptor *
-hid_get_descriptor_from_usb(struct usb2_config_descriptor *cd,
-    struct usb2_interface_descriptor *id)
+struct usb_hid_descriptor *
+hid_get_descriptor_from_usb(struct usb_config_descriptor *cd,
+    struct usb_interface_descriptor *id)
 {
-	struct usb2_descriptor *desc = (void *)id;
+	struct usb_descriptor *desc = (void *)id;
 
 	if (desc == NULL) {
 		return (NULL);
 	}
-	while ((desc = usb2_desc_foreach(cd, desc))) {
+	while ((desc = usb_desc_foreach(cd, desc))) {
 		if ((desc->bDescriptorType == UDESC_HID) &&
 		    (desc->bLength >= USB_HID_DESCRIPTOR_SIZE(0))) {
 			return (void *)desc;
@@ -647,7 +757,7 @@ hid_get_descriptor_from_usb(struct usb2_config_descriptor *cd,
 }
 
 /*------------------------------------------------------------------------*
- *	usb2_req_get_hid_desc
+ *	usbd_req_get_hid_desc
  *
  * This function will read out an USB report descriptor from the USB
  * device.
@@ -656,20 +766,20 @@ hid_get_descriptor_from_usb(struct usb2_config_descriptor *cd,
  * NULL: Failure.
  * Else: Success. The pointer should eventually be passed to free().
  *------------------------------------------------------------------------*/
-usb2_error_t
-usb2_req_get_hid_desc(struct usb2_device *udev, struct mtx *mtx,
+usb_error_t
+usbd_req_get_hid_desc(struct usb_device *udev, struct mtx *mtx,
     void **descp, uint16_t *sizep,
-    usb2_malloc_type mem, uint8_t iface_index)
+    struct malloc_type *mem, uint8_t iface_index)
 {
-	struct usb2_interface *iface = usb2_get_iface(udev, iface_index);
-	struct usb2_hid_descriptor *hid;
-	usb2_error_t err;
+	struct usb_interface *iface = usbd_get_iface(udev, iface_index);
+	struct usb_hid_descriptor *hid;
+	usb_error_t err;
 
 	if ((iface == NULL) || (iface->idesc == NULL)) {
 		return (USB_ERR_INVAL);
 	}
 	hid = hid_get_descriptor_from_usb
-	    (usb2_get_config_descriptor(udev), iface->idesc);
+	    (usbd_get_config_descriptor(udev), iface->idesc);
 
 	if (hid == NULL) {
 		return (USB_ERR_IOERROR);
@@ -689,7 +799,7 @@ usb2_req_get_hid_desc(struct usb2_device *udev, struct mtx *mtx,
 	if (*descp == NULL) {
 		return (USB_ERR_NOMEM);
 	}
-	err = usb2_req_get_report_descriptor
+	err = usbd_req_get_report_descriptor
 	    (udev, mtx, *descp, *sizep, iface_index);
 
 	if (err) {

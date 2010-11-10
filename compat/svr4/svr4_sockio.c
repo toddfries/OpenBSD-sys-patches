@@ -27,9 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.23 2009/02/27 14:12:05 bz Exp $");
-
-#include "opt_route.h"
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.27 2009/08/01 19:26:27 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -38,10 +36,8 @@ __FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.23 2009/02/27 14:12:05
 #include <sys/filedesc.h>
 #include <sys/sockio.h>
 #include <sys/socket.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
-#include <net/route.h>
 #include <net/vnet.h>
 
 #include <compat/svr4/svr4.h>
@@ -92,7 +88,6 @@ svr4_sock_ioctl(fp, td, retval, fd, cmd, data)
 	switch (cmd) {
 	case SVR4_SIOCGIFNUM:
 		{
-			INIT_VNET_NET(curvnet);
 			struct ifnet *ifp;
 			struct ifaddr *ifa;
 			int ifnum = 0;

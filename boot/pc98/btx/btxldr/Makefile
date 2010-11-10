@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/pc98/btx/btxldr/Makefile,v 1.10 2005/05/08 14:17:27 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/btx/btxldr/Makefile,v 1.11 2010/06/03 17:42:32 ed Exp $
 
 PROG=	btxldr
 INTERNALPROG=
@@ -11,6 +11,6 @@ CFLAGS+=-DLOADER_ADDRESS=${LOADER_ADDRESS}
 CFLAGS+=-DBTXLDR_VERBOSE
 .endif
 
-LDFLAGS=-N -e start -Ttext ${LOADER_ADDRESS} -Wl,-S,--oformat,binary
+LDFLAGS=-e start -Ttext ${LOADER_ADDRESS} -Wl,-N,-S,--oformat,binary
 
 .include <bsd.prog.mk>

@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp_i810.c,v 1.50 2009/03/09 13:27:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp_i810.c,v 1.58 2010/05/05 03:45:46 alc Exp $");
 
 #include "opt_bus.h"
 
@@ -70,6 +70,7 @@ enum {
 	CHIP_I915,	/* 915G/915GM */
 	CHIP_I965,	/* G965 */
 	CHIP_G33,	/* G33/Q33/Q35 */
+	CHIP_IGD,	/* Pineview */
 	CHIP_G4X,	/* G45/Q45 */
 };
 
@@ -163,6 +164,10 @@ static const struct agp_i810_match {
 	    "Intel G33 SVGA controller"},
 	{0x29D28086, CHIP_G33, 0x00020000,
 	    "Intel Q33 SVGA controller"},
+	{0xA0018086, CHIP_IGD, 0x00010000,
+	    "Intel Pineview SVGA controller"},
+	{0xA0118086, CHIP_IGD, 0x00010000,
+	    "Intel Pineview (M) SVGA controller"},
 	{0x2A028086, CHIP_I965, 0x00020000,
 	    "Intel GM965 SVGA controller"},
 	{0x2A128086, CHIP_I965, 0x00020000,
@@ -170,11 +175,17 @@ static const struct agp_i810_match {
 	{0x2A428086, CHIP_G4X, 0x00020000,
 	    "Intel GM45 SVGA controller"},
 	{0x2E028086, CHIP_G4X, 0x00020000,
-	    "Intel 4 Series SVGA controller"},
+	    "Intel Eaglelake SVGA controller"},
 	{0x2E128086, CHIP_G4X, 0x00020000,
 	    "Intel Q45 SVGA controller"},
 	{0x2E228086, CHIP_G4X, 0x00020000,
 	    "Intel G45 SVGA controller"},
+	{0x2E328086, CHIP_G4X, 0x00020000,
+	    "Intel G41 SVGA controller"},
+	{0x00428086, CHIP_G4X, 0x00020000,
+	    "Intel Ironlake (D) SVGA controller"},
+	{0x00468086, CHIP_G4X, 0x00020000,
+	    "Intel Ironlake (M) SVGA controller"},
 	{0, 0, 0, NULL}
 };
 
@@ -284,6 +295,7 @@ agp_i810_probe(device_t dev)
 	case CHIP_I915:
 	case CHIP_I965:
 	case CHIP_G33:
+	case CHIP_IGD:
 	case CHIP_G4X:
 		deven = pci_read_config(bdev, AGP_I915_DEVEN, 4);
 		if ((deven & AGP_I915_DEVEN_D2F0) ==
@@ -349,6 +361,7 @@ agp_i810_dump_regs(device_t dev)
 	case CHIP_I915:
 	case CHIP_I965:
 	case CHIP_G33:
+	case CHIP_IGD:
 	case CHIP_G4X:
 		device_printf(dev, "AGP_I855_GCC1: 0x%02x\n",
 		    pci_read_config(sc->bdev, AGP_I855_GCC1, 1));
@@ -384,6 +397,7 @@ agp_i810_attach(device_t dev)
 		break;
 	case CHIP_I915:
 	case CHIP_G33:
+	case CHIP_IGD:
 		sc->sc_res_spec = agp_i915_res_spec;
 		agp_set_aperture_resource(dev, AGP_I915_GMADR);
 		break;
@@ -399,7 +413,8 @@ agp_i810_attach(device_t dev)
 		return error;
 
 	if (sc->chiptype != CHIP_I965 && sc->chiptype != CHIP_G33 &&
-	    sc->chiptype != CHIP_G4X && ptoa((vm_paddr_t)Maxmem) > 0xfffffffful)
+	    sc->chiptype != CHIP_IGD && sc->chiptype != CHIP_G4X &&
+	    ptoa((vm_paddr_t)Maxmem) > 0xfffffffful)
 	{
 		device_printf(dev, "agp_i810.c does not support physical "
 		    "memory above 4GB.\n");
@@ -474,12 +489,6 @@ agp_i810_attach(device_t dev)
 				agp_generic_detach(dev);
 				return EINVAL;
 		}
-		if (sc->stolen > 0) {
-			device_printf(dev, "detected %dk stolen memory\n",
-			    sc->stolen * 4);
-		}
-		device_printf(dev, "aperture size is %dM\n",
-		    sc->initial_aperture / 1024 / 1024);
 
 		/* GATT address is already in there, make sure it's enabled */
 		pgtblctl = bus_read_4(sc->sc_res[0], AGP_I810_PGTBL_CTL);
@@ -489,7 +498,7 @@ agp_i810_attach(device_t dev)
 		gatt->ag_physical = pgtblctl & ~1;
 	} else if (sc->chiptype == CHIP_I855 || sc->chiptype == CHIP_I915 ||
 	    sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_G4X) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
 		unsigned int gcc1, pgtblctl, stolen, gtt_size;
 
 		/* Stolen memory is set up at the beginning of the aperture by
@@ -551,6 +560,7 @@ agp_i810_attach(device_t dev)
 				return EINVAL;
 			}
 			break;
+		case CHIP_IGD:
 		case CHIP_G4X:
 			gtt_size = 0;
 			break;
@@ -585,6 +595,7 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I915 ||
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
+			    sc->chiptype == CHIP_IGD ||
 			    sc->chiptype == CHIP_G4X) {
 				stolen = 48 * 1024;
 			} else {
@@ -595,6 +606,7 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I915 ||
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
+			    sc->chiptype == CHIP_IGD ||
 			    sc->chiptype == CHIP_G4X) {
 				stolen = 64 * 1024;
 			} else {
@@ -604,6 +616,7 @@ agp_i810_attach(device_t dev)
 		case AGP_G33_GCC1_GMS_STOLEN_128M:
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
+			    sc->chiptype == CHIP_IGD ||
 			    sc->chiptype == CHIP_G4X) {
 				stolen = 128 * 1024;
 			} else {
@@ -613,6 +626,7 @@ agp_i810_attach(device_t dev)
 		case AGP_G33_GCC1_GMS_STOLEN_256M:
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
+			    sc->chiptype == CHIP_IGD ||
 			    sc->chiptype == CHIP_G4X) {
 				stolen = 256 * 1024;
 			} else {
@@ -664,9 +678,6 @@ agp_i810_attach(device_t dev)
 		gtt_size += 4;
 
 		sc->stolen = (stolen - gtt_size) * 1024 / 4096;
-		if (sc->stolen > 0)
-			device_printf(dev, "detected %dk stolen memory\n", sc->stolen * 4);
-		device_printf(dev, "aperture size is %dM\n", sc->initial_aperture / 1024 / 1024);
 
 		/* GATT address is already in there, make sure it's enabled */
 		pgtblctl = bus_read_4(sc->sc_res[0], AGP_I810_PGTBL_CTL);
@@ -675,6 +686,13 @@ agp_i810_attach(device_t dev)
 
 		gatt->ag_physical = pgtblctl & ~1;
 	}
+
+	device_printf(dev, "aperture size is %dM",
+	    sc->initial_aperture / 1024 / 1024);
+	if (sc->stolen > 0)
+		printf(", detected %dk stolen memory\n", sc->stolen * 4);
+	else
+		printf("\n");
 
 	if (0)
 		agp_i810_dump_regs(dev);
@@ -781,6 +799,7 @@ agp_i810_set_aperture(device_t dev, u_int32_t aperture)
 	case CHIP_I915:
 	case CHIP_I965:
 	case CHIP_G33:
+	case CHIP_IGD:
 	case CHIP_G4X:
 		return agp_generic_set_aperture(dev, aperture);
 	}
@@ -801,7 +820,7 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 
 	pte = (u_int32_t)physical | 1;
 	if (sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_G4X) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
 		pte |= (physical & 0x0000000f00000000ull) >> 28;
 	} else {
 		/* If we do actually have memory above 4GB on an older system,
@@ -821,6 +840,7 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 		break;
 	case CHIP_I915:
 	case CHIP_G33:
+	case CHIP_IGD:
 		bus_write_4(sc->sc_res[1],
 		    (offset >> AGP_PAGE_SHIFT) * 4, pte);
 		break;
@@ -840,7 +860,7 @@ agp_i810_bind_page(device_t dev, vm_offset_t offset, vm_offset_t physical)
 {
 	struct agp_i810_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT)) {
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT)) {
 		device_printf(dev, "failed: offset is 0x%08jx, shift is %d, entries is %d\n", (intmax_t)offset, AGP_PAGE_SHIFT, sc->gatt->ag_entries);
 		return EINVAL;
 	}
@@ -862,7 +882,7 @@ agp_i810_unbind_page(device_t dev, vm_offset_t offset)
 {
 	struct agp_i810_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
 		return EINVAL;
 
 	if ( sc->chiptype != CHIP_I810 ) {
@@ -990,10 +1010,10 @@ agp_i810_free_memory(device_t dev, struct agp_memory *mem)
 	
 			VM_OBJECT_LOCK(mem->am_obj);
 			m = vm_page_lookup(mem->am_obj, 0);
-			VM_OBJECT_UNLOCK(mem->am_obj);
-			vm_page_lock_queues();
+			vm_page_lock(m);
 			vm_page_unwire(m, 0);
-			vm_page_unlock_queues();
+			vm_page_unlock(m);
+			VM_OBJECT_UNLOCK(mem->am_obj);
 		} else {
 			contigfree(sc->argb_cursor, mem->am_size, M_AGP);
 			sc->argb_cursor = NULL;
@@ -1016,7 +1036,7 @@ agp_i810_bind_memory(device_t dev, struct agp_memory *mem,
 	vm_offset_t i;
 
 	/* Do some sanity checks first. */
-	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0 ||
+	if ((offset & (AGP_PAGE_SIZE - 1)) != 0 ||
 	    offset + mem->am_size > AGP_GET_APERTURE(dev)) {
 		device_printf(dev, "binding memory at bad offset %#x\n",
 		    (int)offset);

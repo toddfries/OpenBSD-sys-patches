@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: aslerror - Error handling and statistics
- *              $Revision: 1.92 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -128,6 +127,26 @@ AeAddToErrorLog (
     ASL_ERROR_MSG           *Enode);
 
 
+void
+AeClearErrorLog (
+    void)
+{
+    ASL_ERROR_MSG           *Enode = Gbl_ErrorLog;
+    ASL_ERROR_MSG           *Next;
+
+    /* Walk the error node list */
+
+    while (Enode)
+    {
+        Next = Enode->Next;
+        ACPI_FREE (Enode);
+        Enode = Next;
+    }
+
+    Gbl_ErrorLog = NULL;
+}
+
+
 /*******************************************************************************
  *
  * FUNCTION:    AeAddToErrorLog
@@ -150,13 +169,7 @@ AeAddToErrorLog (
     ASL_ERROR_MSG           *Prev;
 
 
-    if (!Gbl_ErrorLog)
-    {
-        Gbl_ErrorLog = Enode;
-        return;
-    }
-
-    /* List is sorted according to line number */
+    /* If Gbl_ErrorLog is null, this is the first error node */
 
     if (!Gbl_ErrorLog)
     {
@@ -164,8 +177,10 @@ AeAddToErrorLog (
         return;
     }
 
-    /* Walk error list until we find a line number greater than ours */
-
+    /*
+     * Walk error list until we find a line number greater than ours.
+     * List is sorted according to line number.
+     */
     Prev = NULL;
     Next = Gbl_ErrorLog;
 
@@ -228,6 +243,11 @@ AePrintException (
     FILE                    *SourceFile;
 
 
+    if (Gbl_NoErrors)
+    {
+        return;
+    }
+
     /*
      * Only listing files have a header, and remarks/optimizations
      * are always output
@@ -288,7 +308,8 @@ AePrintException (
                 if (Actual)
                 {
                     fprintf (OutputFile,
-                        "[*** iASL: Seek error on source code temp file ***]");
+                        "[*** iASL: Seek error on source code temp file %s ***]",
+                        Gbl_Files[ASL_FILE_SOURCE_OUTPUT].Filename);
                 }
                 else
                 {
@@ -296,7 +317,8 @@ AePrintException (
                     if (!RActual)
                     {
                         fprintf (OutputFile,
-                            "[*** iASL: Read error on source code temp file ***]");
+                            "[*** iASL: Read error on source code temp file %s ***]",
+                            Gbl_Files[ASL_FILE_SOURCE_OUTPUT].Filename);
                     }
 
                     else while (RActual && SourceByte && (SourceByte != '\n'))
@@ -509,6 +531,7 @@ AslCommonError (
         Gbl_NextError = Gbl_ErrorLog;
         CmDoOutputFiles ();
         CmCleanupAndExit ();
+        exit(1);
     }
 
     return;

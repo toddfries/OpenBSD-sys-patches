@@ -27,7 +27,7 @@
 #define _HPTIOP_H
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.h,v 1.3 2008/10/04 10:39:31 antoine Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.h,v 1.5 2009/03/25 06:27:56 delphij Exp $");
 
 #define DBG 0
 
@@ -260,7 +260,7 @@ struct hpt_iop_ioctl_param {
 	unsigned long    lpOutBuffer;           /* output data buffer */
 	u_int32_t        nOutBufferSize;        /* size of output data buffer */
 	unsigned long    lpBytesReturned;       /* count of HPT_U8s returned */
-};
+} __packed;
 
 #define HPT_IOCTL_FLAG_OPEN 1
 #define HPT_CTL_CODE_BSD_TO_IOP(x) ((x)-0xff00)

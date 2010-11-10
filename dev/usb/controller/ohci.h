@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb/controller/ohci.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb/controller/ohci.h,v 1.9 2010/03/03 10:18:03 joel Exp $ */
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,96 +32,7 @@
 #ifndef _OHCI_H_
 #define	_OHCI_H_
 
-#define	OHCI_MAX_DEVICES USB_MAX_DEVICES
-
-/* PCI config registers */
-#define	PCI_CBMEM		0x10	/* configuration base memory */
-#define	PCI_INTERFACE_OHCI	0x10
-
-/* OHCI registers */
-#define	OHCI_REVISION		0x00	/* OHCI revision */
-#define	OHCI_REV_LO(rev)	((rev) & 0xf)
-#define	OHCI_REV_HI(rev)	(((rev)>>4) & 0xf)
-#define	OHCI_REV_LEGACY(rev)	((rev) & 0x100)
-#define	OHCI_CONTROL		0x04
-#define	OHCI_CBSR_MASK		0x00000003	/* Control/Bulk Service Ratio */
-#define	OHCI_RATIO_1_1		0x00000000
-#define	OHCI_RATIO_1_2		0x00000001
-#define	OHCI_RATIO_1_3		0x00000002
-#define	OHCI_RATIO_1_4		0x00000003
-#define	OHCI_PLE		0x00000004	/* Periodic List Enable */
-#define	OHCI_IE			0x00000008	/* Isochronous Enable */
-#define	OHCI_CLE		0x00000010	/* Control List Enable */
-#define	OHCI_BLE		0x00000020	/* Bulk List Enable */
-#define	OHCI_HCFS_MASK		0x000000c0	/* HostControllerFunctionalStat
-						 * e */
-#define	OHCI_HCFS_RESET		0x00000000
-#define	OHCI_HCFS_RESUME	0x00000040
-#define	OHCI_HCFS_OPERATIONAL	0x00000080
-#define	OHCI_HCFS_SUSPEND	0x000000c0
-#define	OHCI_IR			0x00000100	/* Interrupt Routing */
-#define	OHCI_RWC		0x00000200	/* Remote Wakeup Connected */
-#define	OHCI_RWE		0x00000400	/* Remote Wakeup Enabled */
-#define	OHCI_COMMAND_STATUS	0x08
-#define	OHCI_HCR		0x00000001	/* Host Controller Reset */
-#define	OHCI_CLF		0x00000002	/* Control List Filled */
-#define	OHCI_BLF		0x00000004	/* Bulk List Filled */
-#define	OHCI_OCR		0x00000008	/* Ownership Change Request */
-#define	OHCI_SOC_MASK		0x00030000	/* Scheduling Overrun Count */
-#define	OHCI_INTERRUPT_STATUS	0x0c
-#define	OHCI_SO			0x00000001	/* Scheduling Overrun */
-#define	OHCI_WDH		0x00000002	/* Writeback Done Head */
-#define	OHCI_SF			0x00000004	/* Start of Frame */
-#define	OHCI_RD			0x00000008	/* Resume Detected */
-#define	OHCI_UE			0x00000010	/* Unrecoverable Error */
-#define	OHCI_FNO		0x00000020	/* Frame Number Overflow */
-#define	OHCI_RHSC		0x00000040	/* Root Hub Status Change */
-#define	OHCI_OC			0x40000000	/* Ownership Change */
-#define	OHCI_MIE		0x80000000	/* Master Interrupt Enable */
-#define	OHCI_INTERRUPT_ENABLE	0x10
-#define	OHCI_INTERRUPT_DISABLE	0x14
-#define	OHCI_HCCA		0x18
-#define	OHCI_PERIOD_CURRENT_ED	0x1c
-#define	OHCI_CONTROL_HEAD_ED	0x20
-#define	OHCI_CONTROL_CURRENT_ED	0x24
-#define	OHCI_BULK_HEAD_ED	0x28
-#define	OHCI_BULK_CURRENT_ED	0x2c
-#define	OHCI_DONE_HEAD		0x30
-#define	OHCI_FM_INTERVAL	0x34
-#define	OHCI_GET_IVAL(s)	((s) & 0x3fff)
-#define	OHCI_GET_FSMPS(s)	(((s) >> 16) & 0x7fff)
-#define	OHCI_FIT		0x80000000
-#define	OHCI_FM_REMAINING	0x38
-#define	OHCI_FM_NUMBER		0x3c
-#define	OHCI_PERIODIC_START	0x40
-#define	OHCI_LS_THRESHOLD	0x44
-#define	OHCI_RH_DESCRIPTOR_A	0x48
-#define	OHCI_GET_NDP(s)		((s) & 0xff)
-#define	OHCI_PSM		0x0100	/* Power Switching Mode */
-#define	OHCI_NPS		0x0200	/* No Power Switching */
-#define	OHCI_DT			0x0400	/* Device Type */
-#define	OHCI_OCPM		0x0800	/* Overcurrent Protection Mode */
-#define	OHCI_NOCP		0x1000	/* No Overcurrent Protection */
-#define	OHCI_GET_POTPGT(s)	((s) >> 24)
-#define	OHCI_RH_DESCRIPTOR_B	0x4c
-#define	OHCI_RH_STATUS		0x50
-#define	OHCI_LPS		0x00000001	/* Local Power Status */
-#define	OHCI_OCI		0x00000002	/* OverCurrent Indicator */
-#define	OHCI_DRWE		0x00008000	/* Device Remote Wakeup Enable */
-#define	OHCI_LPSC		0x00010000	/* Local Power Status Change */
-#define	OHCI_CCIC		0x00020000	/* OverCurrent Indicator
-						 * Change */
-#define	OHCI_CRWE		0x80000000	/* Clear Remote Wakeup Enable */
-#define	OHCI_RH_PORT_STATUS(n)	(0x50 + ((n)*4))	/* 1 based indexing */
-
-#define	OHCI_LES		(OHCI_PLE | OHCI_IE | OHCI_CLE | OHCI_BLE)
-#define	OHCI_ALL_INTRS		(OHCI_SO | OHCI_WDH | OHCI_SF |		\
-				OHCI_RD | OHCI_UE | OHCI_FNO |		\
-				OHCI_RHSC | OHCI_OC)
-#define	OHCI_NORMAL_INTRS	(OHCI_WDH | OHCI_RD | OHCI_UE | OHCI_RHSC)
-
-#define	OHCI_FSMPS(i)		(((i-210)*6/7) << 16)
-#define	OHCI_PERIODIC(i)	((i)*9/10)
+#define	OHCI_MAX_DEVICES MIN(USB_MAX_DEVICES, 128)
 
 #define	OHCI_NO_INTRS		32
 #define	OHCI_HCCA_SIZE		256
@@ -196,7 +100,7 @@ struct ohci_ed {
 	struct ohci_ed *next;
 	struct ohci_ed *prev;
 	struct ohci_ed *obj_next;
-	struct usb2_page_cache *page_cache;
+	struct usb_page_cache *page_cache;
 	uint32_t ed_self;
 } __aligned(OHCI_ED_ALIGN);
 
@@ -230,7 +134,7 @@ struct ohci_td {
  */
 	struct ohci_td *obj_next;
 	struct ohci_td *alt_next;
-	struct usb2_page_cache *page_cache;
+	struct usb_page_cache *page_cache;
 	uint32_t td_self;
 	uint16_t len;
 } __aligned(OHCI_TD_ALIGN);
@@ -262,7 +166,7 @@ struct ohci_itd {
  * Extra information needed:
  */
 	struct ohci_itd *obj_next;
-	struct usb2_page_cache *page_cache;
+	struct usb_page_cache *page_cache;
 	uint32_t itd_self;
 	uint8_t	frames;
 } __aligned(OHCI_ITD_ALIGN);
@@ -290,42 +194,39 @@ typedef struct ohci_itd ohci_itd_t;
 #define	OHCI_NO_EDS			(2*OHCI_NO_INTRS)
 
 struct ohci_hw_softc {
-	struct usb2_page_cache hcca_pc;
-	struct usb2_page_cache ctrl_start_pc;
-	struct usb2_page_cache bulk_start_pc;
-	struct usb2_page_cache isoc_start_pc;
-	struct usb2_page_cache intr_start_pc[OHCI_NO_EDS];
+	struct usb_page_cache hcca_pc;
+	struct usb_page_cache ctrl_start_pc;
+	struct usb_page_cache bulk_start_pc;
+	struct usb_page_cache isoc_start_pc;
+	struct usb_page_cache intr_start_pc[OHCI_NO_EDS];
 
-	struct usb2_page hcca_pg;
-	struct usb2_page ctrl_start_pg;
-	struct usb2_page bulk_start_pg;
-	struct usb2_page isoc_start_pg;
-	struct usb2_page intr_start_pg[OHCI_NO_EDS];
+	struct usb_page hcca_pg;
+	struct usb_page ctrl_start_pg;
+	struct usb_page bulk_start_pg;
+	struct usb_page isoc_start_pg;
+	struct usb_page intr_start_pg[OHCI_NO_EDS];
 };
 
 struct ohci_config_desc {
-	struct usb2_config_descriptor confd;
-	struct usb2_interface_descriptor ifcd;
-	struct usb2_endpoint_descriptor endpd;
+	struct usb_config_descriptor confd;
+	struct usb_interface_descriptor ifcd;
+	struct usb_endpoint_descriptor endpd;
 } __packed;
 
 union ohci_hub_desc {
-	struct usb2_status stat;
-	struct usb2_port_status ps;
-	struct usb2_device_descriptor devd;
-	struct usb2_hub_descriptor hubd;
+	struct usb_status stat;
+	struct usb_port_status ps;
+	struct usb_hub_descriptor hubd;
 	uint8_t	temp[128];
 };
 
 typedef struct ohci_softc {
 	struct ohci_hw_softc sc_hw;
-	struct usb2_bus sc_bus;		/* base device */
-	struct usb2_callout sc_tmo_rhsc;
+	struct usb_bus sc_bus;		/* base device */
+	struct usb_callout sc_tmo_rhsc;
 	union ohci_hub_desc sc_hub_desc;
-	struct usb2_sw_transfer sc_root_ctrl;
-	struct usb2_sw_transfer sc_root_intr;
 
-	struct usb2_device *sc_devices[OHCI_MAX_DEVICES];
+	struct usb_device *sc_devices[OHCI_MAX_DEVICES];
 	struct resource *sc_io_res;
 	struct resource *sc_irq_res;
 	struct ohci_hcca *sc_hcca_p;
@@ -355,9 +256,9 @@ typedef struct ohci_softc {
 
 } ohci_softc_t;
 
-usb2_bus_mem_cb_t ohci_iterate_hw_softc;
+usb_bus_mem_cb_t ohci_iterate_hw_softc;
 
-usb2_error_t ohci_init(ohci_softc_t *sc);
+usb_error_t ohci_init(ohci_softc_t *sc);
 void	ohci_detach(struct ohci_softc *sc);
 void	ohci_suspend(ohci_softc_t *sc);
 void	ohci_resume(ohci_softc_t *sc);

@@ -24,7 +24,7 @@
  * SUCH DAMAGE.
  *
  *	from: FreeBSD: src/sys/i386/include/globaldata.h,v 1.27 2001/04/27
- * $FreeBSD: src/sys/sun4v/include/pcpu.h,v 1.13 2009/01/18 13:04:38 marius Exp $
+ * $FreeBSD: src/sys/sun4v/include/pcpu.h,v 1.15 2009/06/23 22:42:39 jeff Exp $
  */
 
 #ifndef	_MACHINE_PCPU_H_
@@ -39,9 +39,9 @@
 struct pmap;
 
 #ifdef KTR
-#define	PCPU_MD_FIELDS_PAD	(4 - (PCPU_NAME_LEN + 7) / 8)
+#define	PCPU_MD_FIELDS_PAD	(3 - (PCPU_NAME_LEN + 7) / 8)
 #else
-#define	PCPU_MD_FIELDS_PAD	4
+#define	PCPU_MD_FIELDS_PAD	3
 #endif
 
 /*
@@ -88,6 +88,8 @@ struct pmap;
 	 */
 
 #ifdef _KERNEL
+
+extern void *dpcpu0;
 
 struct pcpu;
 

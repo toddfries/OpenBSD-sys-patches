@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)tcp_timer.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/tcp_timer.h,v 1.39 2007/09/24 05:26:24 silby Exp $
+ * $FreeBSD: src/sys/netinet/tcp_timer.h,v 1.40 2009/09/16 05:33:15 silby Exp $
  */
 
 #ifndef _NETINET_TCP_TIMER_H_
@@ -141,6 +141,8 @@ static const char *tcptimers[] =
 
 #ifdef _KERNEL
 
+struct xtcp_timer;
+
 struct tcp_timer {
 	struct	callout tt_rexmt;	/* retransmit timer */
 	struct	callout tt_persist;	/* retransmit persistence */
@@ -177,6 +179,8 @@ void	tcp_timer_keep(void *xtp);
 void	tcp_timer_persist(void *xtp);
 void	tcp_timer_rexmt(void *xtp);
 void	tcp_timer_delack(void *xtp);
+void	tcp_timer_to_xtimer(struct tcpcb *tp, struct tcp_timer *timer,
+	struct xtcp_timer *xtimer);
 
 #endif /* _KERNEL */
 

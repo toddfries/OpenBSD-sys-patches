@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)filedesc.h	8.1 (Berkeley) 6/2/93
- * $FreeBSD: src/sys/sys/filedesc.h,v 1.78 2007/05/31 11:51:52 kib Exp $
+ * $FreeBSD: src/sys/sys/filedesc.h,v 1.79 2009/05/14 03:24:22 jeff Exp $
  */
 
 #ifndef _SYS_FILEDESC_H_
@@ -129,6 +129,10 @@ int	getvnode(struct filedesc *fdp, int fd, struct file **fpp);
 void	mountcheckdirs(struct vnode *olddp, struct vnode *newdp);
 void	setugidsafety(struct thread *td);
 
+/* Return a referenced file from an unlocked descriptor. */
+struct file *fget_unlocked(struct filedesc *fdp, int fd);
+
+/* Requires a FILEDESC_{S,X}LOCK held and returns without a ref. */
 static __inline struct file *
 fget_locked(struct filedesc *fdp, int fd)
 {

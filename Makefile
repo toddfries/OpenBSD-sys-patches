@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/Makefile,v 1.54 2009/02/15 18:19:24 imp Exp $
+# $FreeBSD: src/sys/Makefile,v 1.55 2009/05/22 12:35:12 rwatson Exp $
 
 .include <bsd.own.mk>
 
@@ -11,7 +11,7 @@ SUBDIR=	boot
 CSCOPEDIRS=	boot bsm cam cddl compat conf contrib crypto ddb dev fs gdb \
 		geom gnu isa kern libkern modules net net80211 netatalk \
 		netgraph netinet netinet6 netipsec netipx netnatm netncp \
-		netsmb nfs nfs4client nfsclient nfsserver nlm opencrypto \
+		netsmb nfs nfsclient nfsserver nlm opencrypto \
 		pci rpc security sys ufs vm xdr ${CSCOPE_ARCHDIR}
 .if defined(ALL_ARCH)
 CSCOPE_ARCHDIR ?= amd64 arm i386 ia64 mips pc98 powerpc sparc64 sun4v

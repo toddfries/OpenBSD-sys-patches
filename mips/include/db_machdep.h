@@ -31,14 +31,13 @@
  * SUCH DAMAGE.
  *
  *	JNPR: db_machdep.h,v 1.7 2006/10/16 12:30:34 katta
- * $FreeBSD: src/sys/mips/include/db_machdep.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/db_machdep.h,v 1.4 2010/04/17 01:17:31 jmallett Exp $
  */
 
 #ifndef	_MIPS_DB_MACHDEP_H_
 #define	_MIPS_DB_MACHDEP_H_
 
 #include <machine/frame.h>
-#include <machine/psl.h>
 #include <machine/trap.h>
 #include <machine/endian.h>
 
@@ -46,7 +45,7 @@ typedef struct trapframe db_regs_t;
 extern db_regs_t	ddb_regs;	/* register state */
 
 typedef	vm_offset_t	db_addr_t;	/* address - unsigned */
-typedef	int		db_expr_t;	/* expression - signed */
+typedef	register_t	db_expr_t;	/* expression - signed */
 
 #if BYTE_ORDER == _BIG_ENDIAN
 #define	BYTE_MSF	(1)
@@ -92,8 +91,8 @@ db_addr_t	next_instr_address(db_addr_t, boolean_t);
 #define	DB_SMALL_VALUE_MIN	(-0x400001)
 
 int db_inst_type(int);
-void db_dump_tlb(int, int);
 db_addr_t branch_taken(int inst, db_addr_t pc);
-void stacktrace_subr(db_regs_t *, int (*)(const char *, ...));
+void stacktrace_subr(register_t pc, register_t sp, register_t ra, int (*)(const char *, ...));
+int kdbpeek(int *);
 
 #endif	/* !_MIPS_DB_MACHDEP_H_ */

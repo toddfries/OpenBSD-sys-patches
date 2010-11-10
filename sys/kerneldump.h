@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/kerneldump.h,v 1.11 2008/10/01 22:08:53 peter Exp $
+ * $FreeBSD: src/sys/sys/kerneldump.h,v 1.12 2009/04/04 02:12:37 marcel Exp $
  */
 
 #ifndef _SYS_KERNELDUMP_H
@@ -67,12 +67,13 @@ struct kerneldumpheader {
 #define	KERNELDUMPVERSION	1
 	uint32_t	architectureversion;
 #define	KERNELDUMP_ALPHA_VERSION	1
-#define	KERNELDUMP_I386_VERSION	2
-#define	KERNELDUMP_IA64_VERSION	1
-#define	KERNELDUMP_SPARC64_VERSION	1
 #define	KERNELDUMP_AMD64_VERSION	2
-#define	KERNELDUMP_ARM_VERSION	1
-#define	KERNELDUMP_TEXT_VERSION	1
+#define	KERNELDUMP_ARM_VERSION		1
+#define	KERNELDUMP_I386_VERSION		2
+#define	KERNELDUMP_IA64_VERSION		1
+#define	KERNELDUMP_POWERPC_VERSION	1
+#define	KERNELDUMP_SPARC64_VERSION	1
+#define	KERNELDUMP_TEXT_VERSION		1
 	uint64_t	dumplength;		/* excl headers */
 	uint64_t	dumptime;
 	uint32_t	blocksize;

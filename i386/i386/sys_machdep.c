@@ -30,10 +30,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/sys_machdep.c,v 1.118 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/sys_machdep.c,v 1.120 2009/06/27 13:58:44 rwatson Exp $");
 
 #include "opt_kstack_pages.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -108,7 +107,7 @@ sysarch(td, uap)
 	uint32_t base;
 	struct segment_descriptor sd, *sdp;
 
-	AUDIT_ARG(cmd, uap->op);
+	AUDIT_ARG_CMD(uap->op);
 	switch (uap->op) {
 	case I386_GET_IOPERM:
 	case I386_SET_IOPERM:

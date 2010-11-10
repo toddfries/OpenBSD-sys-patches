@@ -25,11 +25,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_gjournal.c,v 1.3 2008/04/07 18:12:37 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_gjournal.c,v 1.4 2009/09/22 16:22:05 rdivacky Exp $");
 
 #include "opt_ufs.h"
-
-#ifdef UFS_GJOURNAL
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -137,5 +135,3 @@ ufs_gjournal_close(struct vnode *vp)
 		return;
 	ufs_gjournal_modref(vp, -1);
 }
-
-#endif /* UFS_GJOURNAL */

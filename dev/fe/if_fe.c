@@ -21,7 +21,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fe/if_fe.c,v 1.100 2008/06/23 18:16:25 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fe/if_fe.c,v 1.102 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  *
@@ -766,7 +766,7 @@ fe_attach (device_t dev)
 	 * Set fixed interface flags.
 	 */
  	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 #if FE_SINGLE_TRANSMISSION
 	/* Override txb config to allocate minimum.  */
@@ -2080,7 +2080,7 @@ fe_mcaf ( struct fe_softc *sc )
 	struct ifmultiaddr *ifma;
 
 	filter = fe_filter_nothing;
-	IF_ADDR_LOCK(sc->ifp);
+	if_maddr_rlock(sc->ifp);
 	TAILQ_FOREACH(ifma, &sc->ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -2093,7 +2093,7 @@ fe_mcaf ( struct fe_softc *sc )
 
 		filter.data[index >> 3] |= 1 << (index & 7);
 	}
-	IF_ADDR_UNLOCK(sc->ifp);
+	if_maddr_runlock(sc->ifp);
 	return ( filter );
 }
 

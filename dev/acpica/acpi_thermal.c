@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_thermal.c,v 1.70 2008/04/25 16:45:13 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_thermal.c,v 1.74 2010/06/11 19:27:21 avg Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -45,7 +45,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_thermal.c,v 1.70 2008/04/25 16:45:13
 
 #include "cpufreq_if.h"
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 
 /* Hooks for the ACPI CA debugging infrastructure */
@@ -1169,7 +1171,6 @@ static int
 acpi_tz_cooling_thread_start(struct acpi_tz_softc *sc)
 {
     int error;
-    char name[16];
 
     ACPI_LOCK(thermal);
     if (sc->tz_cooling_proc_running) {
@@ -1180,10 +1181,9 @@ acpi_tz_cooling_thread_start(struct acpi_tz_softc *sc)
     ACPI_UNLOCK(thermal);
     error = 0;
     if (sc->tz_cooling_proc == NULL) {
-	snprintf(name, sizeof(name), "acpi_cooling%d",
-	    device_get_unit(sc->tz_dev));
 	error = kproc_create(acpi_tz_cooling_thread, sc,
-	    &sc->tz_cooling_proc, RFHIGHPID, 0, name);
+	    &sc->tz_cooling_proc, RFHIGHPID, 0, "acpi_cooling%d",
+	    device_get_unit(sc->tz_dev));
 	if (error != 0) {
 	    device_printf(sc->tz_dev, "could not create thread - %d", error);
 	    ACPI_LOCK(thermal);

@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.35 2010/04/22 21:31:34 thompsa Exp $");
 
 /*-
  * Copyright (c) 1999 MAEKAWA Masahide <bishop@rr.iij4u.or.jp>,
@@ -27,7 +27,7 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 th
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 thompsa Exp $
+ *	$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.35 2010/04/22 21:31:34 thompsa Exp $
  *	$NetBSD: umass.c,v 1.28 2000/04/02 23:46:53 augustss Exp $
  */
 
@@ -102,18 +102,32 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 th
  * umass_cam_cb again to complete the CAM command.
  */
 
-#include "usbdevs.h"
-#include <dev/usb/usb.h>
-#include <dev/usb/usb_mfunc.h>
-#include <dev/usb/usb_error.h>
+#include <sys/stdint.h>
+#include <sys/stddef.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/bus.h>
+#include <sys/linker_set.h>
+#include <sys/module.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+#include <sys/sysctl.h>
+#include <sys/sx.h>
+#include <sys/unistd.h>
+#include <sys/callout.h>
+#include <sys/malloc.h>
+#include <sys/priv.h>
 
-#include <dev/usb/usb_core.h>
-#include <dev/usb/usb_util.h>
-#include <dev/usb/usb_busdma.h>
-#include <dev/usb/usb_request.h>
-#include <dev/usb/usb_debug.h>
-#include <dev/usb/usb_process.h>
-#include <dev/usb/usb_transfer.h>
+#include <dev/usb/usb.h>
+#include <dev/usb/usbdi.h>
+#include <dev/usb/usb_device.h>
+#include "usbdevs.h"
+
+#include <dev/usb/quirk/usb_quirk.h>
 
 #include <cam/cam.h>
 #include <cam/cam_ccb.h>
@@ -124,14 +138,15 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 th
 
 #include <cam/cam_periph.h>
 
-#if 1
+#define UMASS_EXT_BUFFER
+#ifdef UMASS_EXT_BUFFER
 /* this enables loading of virtual buffers into DMA */
 #define	UMASS_USB_FLAGS .ext_buffer=1,
 #else
 #define	UMASS_USB_FLAGS
 #endif
 
-#if USB_DEBUG
+#ifdef USB_DEBUG
 #define	DIF(m, x)				\
   do {						\
     if (umass_debug & (m)) { x ; }		\
@@ -159,9 +174,11 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/storage/umass.c,v 1.3 2009/03/02 05:37:05 th
 #define	UDMASS_ALL	0xffff0000	/* all of the above */
 static int umass_debug = 0;
 
-SYSCTL_NODE(_hw_usb2, OID_AUTO, umass, CTLFLAG_RW, 0, "USB umass");
-SYSCTL_INT(_hw_usb2_umass, OID_AUTO, debug, CTLFLAG_RW,
+SYSCTL_NODE(_hw_usb, OID_AUTO, umass, CTLFLAG_RW, 0, "USB umass");
+SYSCTL_INT(_hw_usb_umass, OID_AUTO, debug, CTLFLAG_RW,
     &umass_debug, 0, "umass debug level");
+
+TUNABLE_INT("hw.usb.umass.debug", &umass_debug);
 #else
 #define	DIF(...) do { } while (0)
 #define	DPRINTF(...) do { } while (0)
@@ -296,31 +313,18 @@ typedef void (umass_callback_t)(struct umass_softc *sc, union ccb *ccb,
 typedef uint8_t (umass_transform_t)(struct umass_softc *sc, uint8_t *cmd_ptr,
     	uint8_t cmd_len);
 
-struct umass_devdescr {
-	uint32_t vid;
-#define	VID_WILDCARD	0xffffffff
-#define	VID_EOT		0xfffffffe
-	uint32_t pid;
-#define	PID_WILDCARD	0xffffffff
-#define	PID_EOT		0xfffffffe
-	uint32_t rid;
-#define	RID_WILDCARD	0xffffffff
-#define	RID_EOT		0xfffffffe
-
-	/* wire and command protocol */
-	uint16_t proto;
+/* Wire and command protocol */
 #define	UMASS_PROTO_BBB		0x0001	/* USB wire protocol */
 #define	UMASS_PROTO_CBI		0x0002
 #define	UMASS_PROTO_CBI_I	0x0004
-#define	UMASS_PROTO_WIRE		0x00ff	/* USB wire protocol mask */
-#define	UMASS_PROTO_SCSI		0x0100	/* command protocol */
+#define	UMASS_PROTO_WIRE	0x00ff	/* USB wire protocol mask */
+#define	UMASS_PROTO_SCSI	0x0100	/* command protocol */
 #define	UMASS_PROTO_ATAPI	0x0200
 #define	UMASS_PROTO_UFI		0x0400
 #define	UMASS_PROTO_RBC		0x0800
 #define	UMASS_PROTO_COMMAND	0xff00	/* command protocol mask */
 
-	/* Device specific quirks */
-	uint16_t quirks;
+/* Device specific quirks */
 #define	NO_QUIRKS		0x0000
 	/*
 	 * The drive does not support Test Unit Ready. Convert to Start Unit
@@ -368,563 +372,6 @@ struct umass_devdescr {
 	 * result.
 	 */
 #define	NO_SYNCHRONIZE_CACHE	0x4000
-};
-
-static const struct umass_devdescr umass_devdescr[] = {
-	{USB_VENDOR_ASAHIOPTICAL, PID_WILDCARD, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		RS_NO_CLEAR_UA
-	},
-	{USB_VENDOR_ADDON, USB_PRODUCT_ADDON_ATTACHE, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_ADDON, USB_PRODUCT_ADDON_A256MB, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_ADDON, USB_PRODUCT_ADDON_DISKPRO512, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_ADDONICS2, USB_PRODUCT_ADDONICS2_CABLE_205, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_AIPTEK, USB_PRODUCT_AIPTEK_POCKETCAM3M, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ALCOR, USB_PRODUCT_ALCOR_UMCR_9361, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_ALCOR, USB_PRODUCT_ALCOR_TRANSCEND, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_ASAHIOPTICAL, USB_PRODUCT_ASAHIOPTICAL_OPTIO230, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_ASAHIOPTICAL, USB_PRODUCT_ASAHIOPTICAL_OPTIO330, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_USB2SCSI, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_CASIO, USB_PRODUCT_CASIO_QV_DIGICAM, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_CCYU, USB_PRODUCT_CCYU_ED1064, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_CENTURY, USB_PRODUCT_CENTURY_EX35QUAT, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_DESKNOTE, USB_PRODUCT_DESKNOTE_UCR_61S2B, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_DMI, USB_PRODUCT_DMI_CFSM_RW, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_EPSON, USB_PRODUCT_EPSON_STYLUS_875DC, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_EPSON, USB_PRODUCT_EPSON_STYLUS_895, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_FEIYA, USB_PRODUCT_FEIYA_5IN1, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_FREECOM, USB_PRODUCT_FREECOM_DVD, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_FUJIPHOTO, USB_PRODUCT_FUJIPHOTO_MASS0100, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		RS_NO_CLEAR_UA
-	},
-	{USB_VENDOR_GENESYS, USB_PRODUCT_GENESYS_GL641USB2IDE, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_GENESYS, USB_PRODUCT_GENESYS_GL641USB2IDE_2, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_GENESYS, USB_PRODUCT_GENESYS_GL641USB, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_GENESYS, USB_PRODUCT_GENESYS_GL641USB_2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		WRONG_CSWSIG
-	},
-	{USB_VENDOR_HAGIWARA, USB_PRODUCT_HAGIWARA_FG, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_HAGIWARA, USB_PRODUCT_HAGIWARA_FGSM, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_HITACHI, USB_PRODUCT_HITACHI_DVDCAM_DZ_MV100A, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_HITACHI, USB_PRODUCT_HITACHI_DVDCAM_USB, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_HP, USB_PRODUCT_HP_CDW4E, RID_WILDCARD,
-		UMASS_PROTO_ATAPI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_HP, USB_PRODUCT_HP_CDW8200, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		NO_TEST_UNIT_READY | NO_START_STOP
-	},
-	{USB_VENDOR_IMAGINATION, USB_PRODUCT_IMAGINATION_DBX1, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		WRONG_CSWSIG
-	},
-	{USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_USBCABLE, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_TEST_UNIT_READY | NO_START_STOP | ALT_IFACE_1
-	},
-	{USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_ATAPI, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_INSYSTEM, USB_PRODUCT_INSYSTEM_STORAGE_V2, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_IODATA, USB_PRODUCT_IODATA_IU_CD2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_IODATA, USB_PRODUCT_IODATA_DVR_UEH8, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_IOMEGA, USB_PRODUCT_IOMEGA_ZIP100, RID_WILDCARD,
-		/*
-		 * XXX This is not correct as there are Zip drives that use
-		 * ATAPI.
-		 */
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_TEST_UNIT_READY
-	},
-	{USB_VENDOR_KYOCERA, USB_PRODUCT_KYOCERA_FINECAM_L3, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_KYOCERA, USB_PRODUCT_KYOCERA_FINECAM_S3X, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_KYOCERA, USB_PRODUCT_KYOCERA_FINECAM_S4, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_KYOCERA, USB_PRODUCT_KYOCERA_FINECAM_S5, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_LACIE, USB_PRODUCT_LACIE_HD, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_LEXAR, USB_PRODUCT_LEXAR_CF_READER, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_LEXAR, USB_PRODUCT_LEXAR_JUMPSHOT, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LDR_H443SU2, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LDR_H443U2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MELCO, USB_PRODUCT_MELCO_DUBPXXG, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_MICROTECH, USB_PRODUCT_MICROTECH_DPCM, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_TEST_UNIT_READY | NO_START_STOP
-	},
-	{USB_VENDOR_MICROTECH, USB_PRODUCT_MICROTECH_SCSIDB25, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MICROTECH, USB_PRODUCT_MICROTECH_SCSIHD50, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_E223, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MINOLTA, USB_PRODUCT_MINOLTA_F300, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MITSUMI, USB_PRODUCT_MITSUMI_CDRRW, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MITSUMI, USB_PRODUCT_MITSUMI_FDD, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_MOTOROLA2, USB_PRODUCT_MOTOROLA2_E398, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_INQUIRY_EVPD | NO_GETMAXLUN
-	},
-	{USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE | NO_GETMAXLUN | RS_NO_CLEAR_UA
-	},
-	{USB_VENDOR_MSYSTEMS, USB_PRODUCT_MSYSTEMS_DISKONKEY2, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MYSON, USB_PRODUCT_MYSON_HEDEN, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_MYSON, USB_PRODUCT_MYSON_STARREADER, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_SYNCHRONIZE_CACHE
-	},
-	{USB_VENDOR_NEODIO, USB_PRODUCT_NEODIO_ND3260, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY
-	},
-	{USB_VENDOR_NETAC, USB_PRODUCT_NETAC_CF_CARD, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_NETAC, USB_PRODUCT_NETAC_ONLYDISK, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_NETCHIP, USB_PRODUCT_NETCHIP_CLIK_40, RID_WILDCARD,
-		UMASS_PROTO_ATAPI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_NIKON, USB_PRODUCT_NIKON_D300, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C1, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		WRONG_CSWSIG
-	},
-	{USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C700, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_SDS_HOTFIND_D, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN | NO_SYNCHRONIZE_CACHE
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_CFMS_RW, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_CFSM_COMBO, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_CFSM_READER, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_CFSM_READER2, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_MDCFE_B_CF_READER, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_MDSM_B_READER, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_READER, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_UCF100, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		NO_INQUIRY | NO_GETMAXLUN
-	},
-	{USB_VENDOR_ONSPEC2, USB_PRODUCT_ONSPEC2_IMAGEMATE_SDDR55, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_PANASONIC, USB_PRODUCT_PANASONIC_KXL840AN, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_PANASONIC, USB_PRODUCT_PANASONIC_KXLCB20AN, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_PANASONIC, USB_PRODUCT_PANASONIC_KXLCB35AN, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_PANASONIC, USB_PRODUCT_PANASONIC_LS120CAM, RID_WILDCARD,
-		UMASS_PROTO_UFI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_PLEXTOR, USB_PRODUCT_PLEXTOR_40_12_40U, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_TEST_UNIT_READY
-	},
-	{USB_VENDOR_PNY, USB_PRODUCT_PNY_ATTACHE2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE | NO_START_STOP
-	},
-	{USB_VENDOR_SAMSUNG, USB_PRODUCT_SAMSUNG_YP_U2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		SHUTTLE_INIT | NO_GETMAXLUN
-	},
-	{USB_VENDOR_SAMSUNG_TECHWIN, USB_PRODUCT_SAMSUNG_TECHWIN_DIGIMAX_410, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDDR05A, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		READ_CAPACITY_OFFBY1 | NO_GETMAXLUN
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDDR09, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		READ_CAPACITY_OFFBY1 | NO_GETMAXLUN
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDDR12, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		READ_CAPACITY_OFFBY1 | NO_GETMAXLUN
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDCZ2_256, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDCZ4_128, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDCZ4_256, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_SANDISK, USB_PRODUCT_SANDISK_SDDR31, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		READ_CAPACITY_OFFBY1
-	},
-	{USB_VENDOR_SCANLOGIC, USB_PRODUCT_SCANLOGIC_SL11R, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSB, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		NO_TEST_UNIT_READY | NO_START_STOP | SHUTTLE_INIT
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_CDRW, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_CF, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSBATAPI, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSBCFSM, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSCSI, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_HIFD, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_SDDR09, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_ZIOMMC, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SIGMATEL, USB_PRODUCT_SIGMATEL_I_BEAD100, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		SHUTTLE_INIT
-	},
-	{USB_VENDOR_SIIG, USB_PRODUCT_SIIG_WINTERREADER, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_SKANHEX, USB_PRODUCT_SKANHEX_MD_7425, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SKANHEX, USB_PRODUCT_SKANHEX_SX_520Z, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_HANDYCAM, 0x0500,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		RBC_PAD_TO_12
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_CLIE_40_MS, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_DSC, 0x0500,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		RBC_PAD_TO_12
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_DSC, 0x0600,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		RBC_PAD_TO_12
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_DSC, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_HANDYCAM, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_MSC, RID_WILDCARD,
-		UMASS_PROTO_RBC | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_MS_MSC_U03, RID_WILDCARD,
-		UMASS_PROTO_UFI | UMASS_PROTO_CBI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_MS_NW_MS7, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_MS_PEG_N760C, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_MSACUS1, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_SONY, USB_PRODUCT_SONY_PORTABLE_HDD_V2, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TAUGA, USB_PRODUCT_TAUGA_CAMERAMATE, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TEAC, USB_PRODUCT_TEAC_FD05PUB, RID_WILDCARD,
-		UMASS_PROTO_UFI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TREK, USB_PRODUCT_TREK_MEMKEY, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_TREK, USB_PRODUCT_TREK_THUMBDRIVE_8MB, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_BBB,
-		IGNORE_RESIDUE
-	},
-	{USB_VENDOR_TRUMPION, USB_PRODUCT_TRUMPION_C3310, RID_WILDCARD,
-		UMASS_PROTO_UFI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TRUMPION, USB_PRODUCT_TRUMPION_MP3, RID_WILDCARD,
-		UMASS_PROTO_RBC,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TRUMPION, USB_PRODUCT_TRUMPION_T33520, RID_WILDCARD,
-		UMASS_PROTO_SCSI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_TWINMOS, USB_PRODUCT_TWINMOS_MDIV, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_VIA, USB_PRODUCT_VIA_USB2IDEBRIDGE, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_SYNCHRONIZE_CACHE
-	},
-	{USB_VENDOR_VIVITAR, USB_PRODUCT_VIVITAR_35XX, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_WESTERN, USB_PRODUCT_WESTERN_COMBO, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_WESTERN, USB_PRODUCT_WESTERN_EXTHDD, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_WESTERN, USB_PRODUCT_WESTERN_MYBOOK, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY_EVPD
-	},
-	{USB_VENDOR_WINMAXGROUP, USB_PRODUCT_WINMAXGROUP_FLASH64MC, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY
-	},
-	{USB_VENDOR_YANO, USB_PRODUCT_YANO_FW800HD, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		FORCE_SHORT_INQUIRY | NO_START_STOP | IGNORE_RESIDUE
-	},
-	{USB_VENDOR_YANO, USB_PRODUCT_YANO_U640MO, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI_I,
-		FORCE_SHORT_INQUIRY
-	},
-	{USB_VENDOR_YEDATA, USB_PRODUCT_YEDATA_FLASHBUSTERU, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_CBI,
-		NO_GETMAXLUN
-	},
-	{USB_VENDOR_ZORAN, USB_PRODUCT_ZORAN_EX20DSC, RID_WILDCARD,
-		UMASS_PROTO_ATAPI | UMASS_PROTO_CBI,
-		NO_QUIRKS
-	},
-	{USB_VENDOR_MEIZU, USB_PRODUCT_MEIZU_M6_SL, RID_WILDCARD,
-		UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
-		NO_INQUIRY | NO_SYNCHRONIZE_CACHE
-	},
-	{VID_EOT, PID_EOT, RID_EOT, 0, 0}
-};
 
 struct umass_softc {
 
@@ -955,9 +402,9 @@ struct umass_softc {
 	umass_cbi_sbl_t sbl;		/* status block */
 
 	device_t sc_dev;
-	struct usb2_device *sc_udev;
+	struct usb_device *sc_udev;
 	struct cam_sim *sc_sim;		/* SCSI Interface Module */
-	struct usb2_xfer *sc_xfer[UMASS_T_MAX];
+	struct usb_xfer *sc_xfer[UMASS_T_MAX];
 
 	/*
 	 * The command transform function is used to convert the SCSI
@@ -966,9 +413,8 @@ struct umass_softc {
 	umass_transform_t *sc_transform;
 
 	uint32_t sc_unit;
-
-	uint16_t sc_proto;		/* wire and cmd protocol */
-	uint16_t sc_quirks;		/* they got it almost right */
+	uint32_t sc_quirks;		/* they got it almost right */
+	uint32_t sc_proto;		/* wire and cmd protocol */
 
 	uint8_t	sc_name[16];
 	uint8_t	sc_iface_no;		/* interface number */
@@ -978,10 +424,10 @@ struct umass_softc {
 };
 
 struct umass_probe_proto {
-	uint16_t quirks;
-	uint16_t proto;
+	uint32_t quirks;
+	uint32_t proto;
 
-	int32_t	error;
+	int	error;
 };
 
 /* prototypes */
@@ -990,41 +436,39 @@ static device_probe_t umass_probe;
 static device_attach_t umass_attach;
 static device_detach_t umass_detach;
 
-static usb2_callback_t umass_tr_error;
-static usb2_callback_t umass_t_bbb_reset1_callback;
-static usb2_callback_t umass_t_bbb_reset2_callback;
-static usb2_callback_t umass_t_bbb_reset3_callback;
-static usb2_callback_t umass_t_bbb_command_callback;
-static usb2_callback_t umass_t_bbb_data_read_callback;
-static usb2_callback_t umass_t_bbb_data_rd_cs_callback;
-static usb2_callback_t umass_t_bbb_data_write_callback;
-static usb2_callback_t umass_t_bbb_data_wr_cs_callback;
-static usb2_callback_t umass_t_bbb_status_callback;
-static usb2_callback_t umass_t_cbi_reset1_callback;
-static usb2_callback_t umass_t_cbi_reset2_callback;
-static usb2_callback_t umass_t_cbi_reset3_callback;
-static usb2_callback_t umass_t_cbi_reset4_callback;
-static usb2_callback_t umass_t_cbi_command_callback;
-static usb2_callback_t umass_t_cbi_data_read_callback;
-static usb2_callback_t umass_t_cbi_data_rd_cs_callback;
-static usb2_callback_t umass_t_cbi_data_write_callback;
-static usb2_callback_t umass_t_cbi_data_wr_cs_callback;
-static usb2_callback_t umass_t_cbi_status_callback;
+static usb_callback_t umass_tr_error;
+static usb_callback_t umass_t_bbb_reset1_callback;
+static usb_callback_t umass_t_bbb_reset2_callback;
+static usb_callback_t umass_t_bbb_reset3_callback;
+static usb_callback_t umass_t_bbb_command_callback;
+static usb_callback_t umass_t_bbb_data_read_callback;
+static usb_callback_t umass_t_bbb_data_rd_cs_callback;
+static usb_callback_t umass_t_bbb_data_write_callback;
+static usb_callback_t umass_t_bbb_data_wr_cs_callback;
+static usb_callback_t umass_t_bbb_status_callback;
+static usb_callback_t umass_t_cbi_reset1_callback;
+static usb_callback_t umass_t_cbi_reset2_callback;
+static usb_callback_t umass_t_cbi_reset3_callback;
+static usb_callback_t umass_t_cbi_reset4_callback;
+static usb_callback_t umass_t_cbi_command_callback;
+static usb_callback_t umass_t_cbi_data_read_callback;
+static usb_callback_t umass_t_cbi_data_rd_cs_callback;
+static usb_callback_t umass_t_cbi_data_write_callback;
+static usb_callback_t umass_t_cbi_data_wr_cs_callback;
+static usb_callback_t umass_t_cbi_status_callback;
 
 static void	umass_cancel_ccb(struct umass_softc *);
 static void	umass_init_shuttle(struct umass_softc *);
 static void	umass_reset(struct umass_softc *);
-static void	umass_t_bbb_data_clear_stall_callback(struct usb2_xfer *,
-		    uint8_t, uint8_t);
+static void	umass_t_bbb_data_clear_stall_callback(struct usb_xfer *,
+		    uint8_t, uint8_t, usb_error_t);
 static void	umass_command_start(struct umass_softc *, uint8_t, void *,
 		    uint32_t, uint32_t, umass_callback_t *, union ccb *);
 static uint8_t	umass_bbb_get_max_lun(struct umass_softc *);
 static void	umass_cbi_start_status(struct umass_softc *);
-static void	umass_t_cbi_data_clear_stall_callback(struct usb2_xfer *,
-		    uint8_t, uint8_t);
+static void	umass_t_cbi_data_clear_stall_callback(struct usb_xfer *,
+		    uint8_t, uint8_t, usb_error_t);
 static int	umass_cam_attach_sim(struct umass_softc *);
-static void	umass_cam_rescan_callback(struct cam_periph *, union ccb *);
-static void	umass_cam_rescan(struct umass_softc *);
 static void	umass_cam_attach(struct umass_softc *);
 static void	umass_cam_detach_sim(struct umass_softc *);
 static void	umass_cam_action(struct cam_sim *, union ccb *);
@@ -1044,7 +488,7 @@ static uint8_t	umass_no_transform(struct umass_softc *, uint8_t *, uint8_t);
 static uint8_t	umass_std_transform(struct umass_softc *, union ccb *, uint8_t
 		    *, uint8_t);
 
-#if USB_DEBUG
+#ifdef USB_DEBUG
 static void	umass_bbb_dump_cbw(struct umass_softc *, umass_bbb_cbw_t *);
 static void	umass_bbb_dump_csw(struct umass_softc *, umass_bbb_csw_t *);
 static void	umass_cbi_dump_cmd(struct umass_softc *, void *, uint8_t);
@@ -1052,207 +496,194 @@ static void	umass_dump_buffer(struct umass_softc *, uint8_t *, uint32_t,
 		    uint32_t);
 #endif
 
-struct usb2_config umass_bbb_config[UMASS_T_BBB_MAX] = {
+static struct usb_config umass_bbb_config[UMASS_T_BBB_MAX] = {
 
 	[UMASS_T_BBB_RESET1] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_reset1_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 500,	/* 500 milliseconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_bbb_reset1_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 500,	/* 500 milliseconds */
 	},
 
 	[UMASS_T_BBB_RESET2] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_reset2_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 50,	/* 50 milliseconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_bbb_reset2_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 50,	/* 50 milliseconds */
 	},
 
 	[UMASS_T_BBB_RESET3] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_reset3_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 50,	/* 50 milliseconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_bbb_reset3_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 50,	/* 50 milliseconds */
 	},
 
 	[UMASS_T_BBB_COMMAND] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_OUT,
-		.mh.bufsize = sizeof(umass_bbb_cbw_t),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_command_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.bufsize = sizeof(umass_bbb_cbw_t),
+		.callback = &umass_t_bbb_command_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_BBB_DATA_READ] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_IN,
-		.mh.bufsize = UMASS_BULK_SIZE,
-		.mh.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
-		.mh.callback = &umass_t_bbb_data_read_callback,
-		.mh.timeout = 0,	/* overwritten later */
+		.bufsize = UMASS_BULK_SIZE,
+		.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
+		.callback = &umass_t_bbb_data_read_callback,
+		.timeout = 0,	/* overwritten later */
 	},
 
 	[UMASS_T_BBB_DATA_RD_CS] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_data_rd_cs_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_bbb_data_rd_cs_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_BBB_DATA_WRITE] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_OUT,
-		.mh.bufsize = UMASS_BULK_SIZE,
-		.mh.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
-		.mh.callback = &umass_t_bbb_data_write_callback,
-		.mh.timeout = 0,	/* overwritten later */
+		.bufsize = UMASS_BULK_SIZE,
+		.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
+		.callback = &umass_t_bbb_data_write_callback,
+		.timeout = 0,	/* overwritten later */
 	},
 
 	[UMASS_T_BBB_DATA_WR_CS] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_bbb_data_wr_cs_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_bbb_data_wr_cs_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_BBB_STATUS] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_IN,
-		.mh.bufsize = sizeof(umass_bbb_csw_t),
-		.mh.flags = {.short_xfer_ok = 1,},
-		.mh.callback = &umass_t_bbb_status_callback,
-		.mh.timeout = 5000,	/* ms */
+		.bufsize = sizeof(umass_bbb_csw_t),
+		.flags = {.short_xfer_ok = 1,},
+		.callback = &umass_t_bbb_status_callback,
+		.timeout = 5000,	/* ms */
 	},
 };
 
-struct usb2_config umass_cbi_config[UMASS_T_CBI_MAX] = {
+static struct usb_config umass_cbi_config[UMASS_T_CBI_MAX] = {
 
 	[UMASS_T_CBI_RESET1] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = (sizeof(struct usb2_device_request) +
+		.bufsize = (sizeof(struct usb_device_request) +
 		    UMASS_CBI_DIAGNOSTIC_CMDLEN),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_reset1_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 500,	/* 500 milliseconds */
+		.callback = &umass_t_cbi_reset1_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 500,	/* 500 milliseconds */
 	},
 
 	[UMASS_T_CBI_RESET2] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_reset2_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 50,	/* 50 milliseconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_cbi_reset2_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 50,	/* 50 milliseconds */
 	},
 
 	[UMASS_T_CBI_RESET3] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_reset3_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
-		.mh.interval = 50,	/* 50 milliseconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_cbi_reset3_callback,
+		.timeout = 5000,	/* 5 seconds */
+		.interval = 50,	/* 50 milliseconds */
 	},
 
 	[UMASS_T_CBI_COMMAND] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = (sizeof(struct usb2_device_request) +
+		.bufsize = (sizeof(struct usb_device_request) +
 		    UMASS_MAX_CMDLEN),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_command_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.callback = &umass_t_cbi_command_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_CBI_DATA_READ] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_IN,
-		.mh.bufsize = UMASS_BULK_SIZE,
-		.mh.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
-		.mh.callback = &umass_t_cbi_data_read_callback,
-		.mh.timeout = 0,	/* overwritten later */
+		.bufsize = UMASS_BULK_SIZE,
+		.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
+		.callback = &umass_t_cbi_data_read_callback,
+		.timeout = 0,	/* overwritten later */
 	},
 
 	[UMASS_T_CBI_DATA_RD_CS] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_data_rd_cs_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_cbi_data_rd_cs_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_CBI_DATA_WRITE] = {
 		.type = UE_BULK,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_OUT,
-		.mh.bufsize = UMASS_BULK_SIZE,
-		.mh.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
-		.mh.callback = &umass_t_cbi_data_write_callback,
-		.mh.timeout = 0,	/* overwritten later */
+		.bufsize = UMASS_BULK_SIZE,
+		.flags = {.proxy_buffer = 1,.short_xfer_ok = 1, UMASS_USB_FLAGS},
+		.callback = &umass_t_cbi_data_write_callback,
+		.timeout = 0,	/* overwritten later */
 	},
 
 	[UMASS_T_CBI_DATA_WR_CS] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_data_wr_cs_callback,
-		.mh.timeout = 5000,	/* 5 seconds */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_cbi_data_wr_cs_callback,
+		.timeout = 5000,	/* 5 seconds */
 	},
 
 	[UMASS_T_CBI_STATUS] = {
 		.type = UE_INTERRUPT,
 		.endpoint = UE_ADDR_ANY,
 		.direction = UE_DIR_IN,
-		.mh.flags = {.short_xfer_ok = 1,},
-		.mh.bufsize = sizeof(umass_cbi_sbl_t),
-		.mh.callback = &umass_t_cbi_status_callback,
-		.mh.timeout = 5000,	/* ms */
+		.flags = {.short_xfer_ok = 1,.no_pipe_ok = 1,},
+		.bufsize = sizeof(umass_cbi_sbl_t),
+		.callback = &umass_t_cbi_status_callback,
+		.timeout = 5000,	/* ms */
 	},
 
 	[UMASS_T_CBI_RESET4] = {
 		.type = UE_CONTROL,
 		.endpoint = 0x00,	/* Control pipe */
 		.direction = UE_DIR_ANY,
-		.mh.bufsize = sizeof(struct usb2_device_request),
-		.mh.flags = {},
-		.mh.callback = &umass_t_cbi_reset4_callback,
-		.mh.timeout = 5000,	/* ms */
+		.bufsize = sizeof(struct usb_device_request),
+		.callback = &umass_t_cbi_reset4_callback,
+		.timeout = 5000,	/* ms */
 	},
 };
 
@@ -1289,135 +720,153 @@ MODULE_DEPEND(umass, cam, 1, 1, 1);
  * USB device probe/attach/detach
  */
 
-/*
- * Match the device we are seeing with the
- * devices supported.
- */
-static struct umass_probe_proto
-umass_probe_proto(device_t dev, struct usb2_attach_arg *uaa)
+static uint16_t
+umass_get_proto(struct usb_interface *iface)
 {
-	const struct umass_devdescr *udd = umass_devdescr;
-	struct usb2_interface_descriptor *id;
-	struct umass_probe_proto ret;
+	struct usb_interface_descriptor *id;
+	uint16_t retval;
 
-	bzero(&ret, sizeof(ret));
-
-	/*
-	 * An entry specifically for Y-E Data devices as they don't fit in
-	 * the device description table.
-	 */
-	if ((uaa->info.idVendor == USB_VENDOR_YEDATA) &&
-	    (uaa->info.idProduct == USB_PRODUCT_YEDATA_FLASHBUSTERU)) {
-
-		/*
-		 * Revisions < 1.28 do not handle the interrupt endpoint
-		 * very well.
-		 */
-		if (uaa->info.bcdDevice < 0x128) {
-			ret.proto = UMASS_PROTO_UFI | UMASS_PROTO_CBI;
-		} else {
-			ret.proto = UMASS_PROTO_UFI | UMASS_PROTO_CBI_I;
-		}
-
-		/*
-		 * Revisions < 1.28 do not have the TEST UNIT READY command
-		 * Revisions == 1.28 have a broken TEST UNIT READY
-		 */
-		if (uaa->info.bcdDevice <= 0x128) {
-			ret.quirks |= NO_TEST_UNIT_READY;
-		}
-		ret.quirks |= RS_NO_CLEAR_UA | FLOPPY_SPEED;
-		ret.error = 0;
-		goto done;
-	}
-	/*
-	 * Check the list of supported devices for a match. While looking,
-	 * check for wildcarded and fully matched. First match wins.
-	 */
-	for (; udd->vid != VID_EOT; udd++) {
-		if ((udd->vid == VID_WILDCARD) &&
-		    (udd->pid == PID_WILDCARD) &&
-		    (udd->rid == RID_WILDCARD)) {
-			device_printf(dev, "ignoring invalid "
-			    "wildcard quirk\n");
-			continue;
-		}
-		if (((udd->vid == uaa->info.idVendor) ||
-		    (udd->vid == VID_WILDCARD)) &&
-		    ((udd->pid == uaa->info.idProduct) ||
-		    (udd->pid == PID_WILDCARD))) {
-			if (udd->rid == RID_WILDCARD) {
-				ret.proto = udd->proto;
-				ret.quirks = udd->quirks;
-				ret.error = 0;
-				goto done;
-			} else if (udd->rid == uaa->info.bcdDevice) {
-				ret.proto = udd->proto;
-				ret.quirks = udd->quirks;
-				ret.error = 0;
-				goto done;
-			}		/* else RID does not match */
-		}
-	}
+	retval = 0;
 
 	/* Check for a standards compliant device */
-	id = usb2_get_interface_descriptor(uaa->iface);
+	id = usbd_get_interface_descriptor(iface);
 	if ((id == NULL) ||
 	    (id->bInterfaceClass != UICLASS_MASS)) {
-		ret.error = ENXIO;
 		goto done;
 	}
 	switch (id->bInterfaceSubClass) {
 	case UISUBCLASS_SCSI:
-		ret.proto |= UMASS_PROTO_SCSI;
+		retval |= UMASS_PROTO_SCSI;
 		break;
 	case UISUBCLASS_UFI:
-		ret.proto |= UMASS_PROTO_UFI;
+		retval |= UMASS_PROTO_UFI;
 		break;
 	case UISUBCLASS_RBC:
-		ret.proto |= UMASS_PROTO_RBC;
+		retval |= UMASS_PROTO_RBC;
 		break;
 	case UISUBCLASS_SFF8020I:
 	case UISUBCLASS_SFF8070I:
-		ret.proto |= UMASS_PROTO_ATAPI;
+		retval |= UMASS_PROTO_ATAPI;
 		break;
 	default:
-		device_printf(dev, "unsupported command "
-		    "protocol %d\n", id->bInterfaceSubClass);
-		ret.error = ENXIO;
 		goto done;
 	}
 
 	switch (id->bInterfaceProtocol) {
 	case UIPROTO_MASS_CBI:
-		ret.proto |= UMASS_PROTO_CBI;
+		retval |= UMASS_PROTO_CBI;
 		break;
 	case UIPROTO_MASS_CBI_I:
-		ret.proto |= UMASS_PROTO_CBI_I;
+		retval |= UMASS_PROTO_CBI_I;
 		break;
 	case UIPROTO_MASS_BBB_OLD:
 	case UIPROTO_MASS_BBB:
-		ret.proto |= UMASS_PROTO_BBB;
+		retval |= UMASS_PROTO_BBB;
 		break;
 	default:
-		device_printf(dev, "unsupported wire "
-		    "protocol %d\n", id->bInterfaceProtocol);
+		goto done;
+	}
+done:
+	return (retval);
+}
+
+/*
+ * Match the device we are seeing with the devices supported.
+ */
+static struct umass_probe_proto
+umass_probe_proto(device_t dev, struct usb_attach_arg *uaa)
+{
+	struct umass_probe_proto ret;
+	uint32_t quirks = NO_QUIRKS;
+	uint32_t proto = umass_get_proto(uaa->iface);
+
+	memset(&ret, 0, sizeof(ret));
+
+	/* Search for protocol enforcement */
+
+	if (usb_test_quirk(uaa, UQ_MSC_FORCE_WIRE_BBB)) {
+		proto &= ~UMASS_PROTO_WIRE;
+		proto |= UMASS_PROTO_BBB;
+	} else if (usb_test_quirk(uaa, UQ_MSC_FORCE_WIRE_CBI)) {
+		proto &= ~UMASS_PROTO_WIRE;
+		proto |= UMASS_PROTO_CBI;
+	} else if (usb_test_quirk(uaa, UQ_MSC_FORCE_WIRE_CBI_I)) {
+		proto &= ~UMASS_PROTO_WIRE;
+		proto |= UMASS_PROTO_CBI_I;
+	}
+
+	if (usb_test_quirk(uaa, UQ_MSC_FORCE_PROTO_SCSI)) {
+		proto &= ~UMASS_PROTO_COMMAND;
+		proto |= UMASS_PROTO_SCSI;
+	} else if (usb_test_quirk(uaa, UQ_MSC_FORCE_PROTO_ATAPI)) {
+		proto &= ~UMASS_PROTO_COMMAND;
+		proto |= UMASS_PROTO_ATAPI;
+	} else if (usb_test_quirk(uaa, UQ_MSC_FORCE_PROTO_UFI)) {
+		proto &= ~UMASS_PROTO_COMMAND;
+		proto |= UMASS_PROTO_UFI;
+	} else if (usb_test_quirk(uaa, UQ_MSC_FORCE_PROTO_RBC)) {
+		proto &= ~UMASS_PROTO_COMMAND;
+		proto |= UMASS_PROTO_RBC;
+	}
+
+	/* Check if the protocol is invalid */
+
+	if ((proto & UMASS_PROTO_COMMAND) == 0) {
 		ret.error = ENXIO;
 		goto done;
 	}
 
-	ret.error = 0;
+	if ((proto & UMASS_PROTO_WIRE) == 0) {
+		ret.error = ENXIO;
+		goto done;
+	}
+
+	/* Search for quirks */
+
+	if (usb_test_quirk(uaa, UQ_MSC_NO_TEST_UNIT_READY))
+		quirks |= NO_TEST_UNIT_READY;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_RS_CLEAR_UA))
+		quirks |= RS_NO_CLEAR_UA;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_START_STOP))
+		quirks |= NO_START_STOP;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_GETMAXLUN))
+		quirks |= NO_GETMAXLUN;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_INQUIRY))
+		quirks |= NO_INQUIRY;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_INQUIRY_EVPD))
+		quirks |= NO_INQUIRY_EVPD;
+	if (usb_test_quirk(uaa, UQ_MSC_NO_SYNC_CACHE))
+		quirks |= NO_SYNCHRONIZE_CACHE;
+	if (usb_test_quirk(uaa, UQ_MSC_SHUTTLE_INIT))
+		quirks |= SHUTTLE_INIT;
+	if (usb_test_quirk(uaa, UQ_MSC_ALT_IFACE_1))
+		quirks |= ALT_IFACE_1;
+	if (usb_test_quirk(uaa, UQ_MSC_FLOPPY_SPEED))
+		quirks |= FLOPPY_SPEED;
+	if (usb_test_quirk(uaa, UQ_MSC_IGNORE_RESIDUE))
+		quirks |= IGNORE_RESIDUE;
+	if (usb_test_quirk(uaa, UQ_MSC_WRONG_CSWSIG))
+		quirks |= WRONG_CSWSIG;
+	if (usb_test_quirk(uaa, UQ_MSC_RBC_PAD_TO_12))
+		quirks |= RBC_PAD_TO_12;
+	if (usb_test_quirk(uaa, UQ_MSC_READ_CAP_OFFBY1))
+		quirks |= READ_CAPACITY_OFFBY1;
+	if (usb_test_quirk(uaa, UQ_MSC_FORCE_SHORT_INQ))
+		quirks |= FORCE_SHORT_INQUIRY;
+
 done:
+	ret.quirks = quirks;
+	ret.proto = proto;
 	return (ret);
 }
 
 static int
 umass_probe(device_t dev)
 {
-	struct usb2_attach_arg *uaa = device_get_ivars(dev);
+	struct usb_attach_arg *uaa = device_get_ivars(dev);
 	struct umass_probe_proto temp;
 
-	if (uaa->usb2_mode != USB_MODE_HOST) {
+	if (uaa->usb_mode != USB_MODE_HOST) {
 		return (ENXIO);
 	}
 	if (uaa->use_generic == 0) {
@@ -1433,9 +882,9 @@ static int
 umass_attach(device_t dev)
 {
 	struct umass_softc *sc = device_get_softc(dev);
-	struct usb2_attach_arg *uaa = device_get_ivars(dev);
+	struct usb_attach_arg *uaa = device_get_ivars(dev);
 	struct umass_probe_proto temp = umass_probe_proto(dev, uaa);
-	struct usb2_interface_descriptor *id;
+	struct usb_interface_descriptor *id;
 	int32_t err;
 
 	/*
@@ -1453,14 +902,14 @@ umass_attach(device_t dev)
 	snprintf(sc->sc_name, sizeof(sc->sc_name),
 	    "%s", device_get_nameunit(dev));
 
-	device_set_usb2_desc(dev);
+	device_set_usb_desc(dev);
 
         mtx_init(&sc->sc_mtx, device_get_nameunit(dev), 
 	    NULL, MTX_DEF | MTX_RECURSE);
 
 	/* get interface index */
 
-	id = usb2_get_interface_descriptor(uaa->iface);
+	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id == NULL) {
 		device_printf(dev, "failed to get "
 		    "interface number\n");
@@ -1468,7 +917,7 @@ umass_attach(device_t dev)
 	}
 	sc->sc_iface_no = id->bInterfaceNumber;
 
-#if USB_DEBUG
+#ifdef USB_DEBUG
 	device_printf(dev, " ");
 
 	switch (sc->sc_proto & UMASS_PROTO_COMMAND) {
@@ -1511,7 +960,7 @@ umass_attach(device_t dev)
 #endif
 
 	if (sc->sc_quirks & ALT_IFACE_1) {
-		err = usb2_set_alt_interface_index
+		err = usbd_set_alt_interface_index
 		    (uaa->device, uaa->info.bIfaceIndex, 1);
 
 		if (err) {
@@ -1524,7 +973,7 @@ umass_attach(device_t dev)
 
 	if (sc->sc_proto & UMASS_PROTO_BBB) {
 
-		err = usb2_transfer_setup(uaa->device,
+		err = usbd_transfer_setup(uaa->device,
 		    &uaa->info.bIfaceIndex, sc->sc_xfer, umass_bbb_config,
 		    UMASS_T_BBB_MAX, sc, &sc->sc_mtx);
 
@@ -1533,11 +982,9 @@ umass_attach(device_t dev)
 
 	} else if (sc->sc_proto & (UMASS_PROTO_CBI | UMASS_PROTO_CBI_I)) {
 
-		err = usb2_transfer_setup(uaa->device,
+		err = usbd_transfer_setup(uaa->device,
 		    &uaa->info.bIfaceIndex, sc->sc_xfer, umass_cbi_config,
-		    (sc->sc_proto & UMASS_PROTO_CBI_I) ?
-		    UMASS_T_CBI_MAX : (UMASS_T_CBI_MAX - 2), sc,
-		    &sc->sc_mtx);
+		    UMASS_T_CBI_MAX, sc, &sc->sc_mtx);
 
 		/* skip reset first time */
 		sc->sc_last_xfer_index = UMASS_T_CBI_COMMAND;
@@ -1548,7 +995,7 @@ umass_attach(device_t dev)
 
 	if (err) {
 		device_printf(dev, "could not setup required "
-		    "transfers, %s\n", usb2_errstr(err));
+		    "transfers, %s\n", usbd_errstr(err));
 		goto detach;
 	}
 	sc->sc_transform =
@@ -1579,7 +1026,7 @@ umass_attach(device_t dev)
 	 * some devices need a delay after that the configuration value is
 	 * set to function properly:
 	 */
-	usb2_pause_mtx(&Giant, hz);
+	usb_pause_mtx(NULL, hz);
 
 	/* register the SIM */
 	err = umass_cam_attach_sim(sc);
@@ -1607,7 +1054,7 @@ umass_detach(device_t dev)
 
 	/* teardown our statemachine */
 
-	usb2_transfer_unsetup(sc->sc_xfer, UMASS_T_MAX);
+	usbd_transfer_unsetup(sc->sc_xfer, UMASS_T_MAX);
 
 #if (__FreeBSD_version >= 700037)
 	mtx_lock(&sc->sc_mtx);
@@ -1617,6 +1064,7 @@ umass_detach(device_t dev)
 #if (__FreeBSD_version >= 700037)
 	mtx_unlock(&sc->sc_mtx);
 #endif
+	mtx_destroy(&sc->sc_mtx);
 
 	return (0);			/* success */
 }
@@ -1624,8 +1072,8 @@ umass_detach(device_t dev)
 static void
 umass_init_shuttle(struct umass_softc *sc)
 {
-	struct usb2_device_request req;
-	usb2_error_t err;
+	struct usb_device_request req;
+	usb_error_t err;
 	uint8_t status[2] = {0, 0};
 
 	/*
@@ -1638,7 +1086,7 @@ umass_init_shuttle(struct umass_softc *sc)
 	req.wIndex[0] = sc->sc_iface_no;
 	req.wIndex[1] = 0;
 	USETW(req.wLength, sizeof(status));
-	err = usb2_do_request(sc->sc_udev, &Giant, &req, &status);
+	err = usbd_do_request(sc->sc_udev, NULL, &req, &status);
 
 	DPRINTF(sc, UDMASS_GEN, "Shuttle init returned 0x%02x%02x\n",
 	    status[0], status[1]);
@@ -1656,7 +1104,7 @@ umass_transfer_start(struct umass_softc *sc, uint8_t xfer_index)
 
 	if (sc->sc_xfer[xfer_index]) {
 		sc->sc_last_xfer_index = xfer_index;
-		usb2_transfer_start(sc->sc_xfer[xfer_index]);
+		usbd_transfer_start(sc->sc_xfer[xfer_index]);
 	} else {
 		umass_cancel_ccb(sc);
 	}
@@ -1670,7 +1118,7 @@ umass_reset(struct umass_softc *sc)
 	/*
 	 * stop the last transfer, if not already stopped:
 	 */
-	usb2_transfer_stop(sc->sc_xfer[sc->sc_last_xfer_index]);
+	usbd_transfer_stop(sc->sc_xfer[sc->sc_last_xfer_index]);
 	umass_transfer_start(sc, 0);
 }
 
@@ -1693,14 +1141,14 @@ umass_cancel_ccb(struct umass_softc *sc)
 }
 
 static void
-umass_tr_error(struct usb2_xfer *xfer)
+umass_tr_error(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 
-	if (xfer->error != USB_ERR_CANCELLED) {
+	if (error != USB_ERR_CANCELLED) {
 
 		DPRINTF(sc, UDMASS_GEN, "transfer error, %s -> "
-		    "reset\n", usb2_errstr(xfer->error));
+		    "reset\n", usbd_errstr(error));
 	}
 	umass_cancel_ccb(sc);
 }
@@ -1710,10 +1158,11 @@ umass_tr_error(struct usb2_xfer *xfer)
  */
 
 static void
-umass_t_bbb_reset1_callback(struct usb2_xfer *xfer)
+umass_t_bbb_reset1_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	struct usb2_device_request req;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	struct usb_device_request req;
+	struct usb_page_cache *pc;
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
@@ -1744,40 +1193,40 @@ umass_t_bbb_reset1_callback(struct usb2_xfer *xfer)
 		req.wIndex[1] = 0;
 		USETW(req.wLength, 0);
 
-		usb2_copy_in(xfer->frbuffers, 0, &req, sizeof(req));
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_in(pc, 0, &req, sizeof(req));
 
-		xfer->frlengths[0] = sizeof(req);
-		xfer->nframes = 1;
-		usb2_start_hardware(xfer);
+		usbd_xfer_set_frame_len(xfer, 0, sizeof(req));
+		usbd_xfer_set_frames(xfer, 1);
+		usbd_transfer_submit(xfer);
 		return;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
+		umass_tr_error(xfer, error);
 		return;
 
 	}
 }
 
 static void
-umass_t_bbb_reset2_callback(struct usb2_xfer *xfer)
+umass_t_bbb_reset2_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_bbb_data_clear_stall_callback(xfer, UMASS_T_BBB_RESET3,
-	    UMASS_T_BBB_DATA_READ);
+	    UMASS_T_BBB_DATA_READ, error);
 }
 
 static void
-umass_t_bbb_reset3_callback(struct usb2_xfer *xfer)
+umass_t_bbb_reset3_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_bbb_data_clear_stall_callback(xfer, UMASS_T_BBB_COMMAND,
-	    UMASS_T_BBB_DATA_WRITE);
+	    UMASS_T_BBB_DATA_WRITE, error);
 }
 
 static void
-umass_t_bbb_data_clear_stall_callback(struct usb2_xfer *xfer,
-    uint8_t next_xfer,
-    uint8_t stall_xfer)
+umass_t_bbb_data_clear_stall_callback(struct usb_xfer *xfer,
+    uint8_t next_xfer, uint8_t stall_xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
@@ -1786,23 +1235,24 @@ tr_transferred:
 		return;
 
 	case USB_ST_SETUP:
-		if (usb2_clear_stall_callback(xfer, sc->sc_xfer[stall_xfer])) {
+		if (usbd_clear_stall_callback(xfer, sc->sc_xfer[stall_xfer])) {
 			goto tr_transferred;
 		}
 		return;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
+		umass_tr_error(xfer, error);
 		return;
 
 	}
 }
 
 static void
-umass_t_bbb_command_callback(struct usb2_xfer *xfer)
+umass_t_bbb_command_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 	union ccb *ccb = sc->sc_transfer.ccb;
+	struct usb_page_cache *pc;
 	uint32_t tag;
 
 	switch (USB_GET_STATE(xfer)) {
@@ -1866,37 +1316,44 @@ umass_t_bbb_command_callback(struct usb2_xfer *xfer)
 
 			DIF(UDMASS_BBB, umass_bbb_dump_cbw(sc, &sc->cbw));
 
-			usb2_copy_in(xfer->frbuffers, 0, &sc->cbw, sizeof(sc->cbw));
+			pc = usbd_xfer_get_frame(xfer, 0);
+			usbd_copy_in(pc, 0, &sc->cbw, sizeof(sc->cbw));
+			usbd_xfer_set_frame_len(xfer, 0, sizeof(sc->cbw));
 
-			xfer->frlengths[0] = sizeof(sc->cbw);
-			usb2_start_hardware(xfer);
+			usbd_transfer_submit(xfer);
 		}
 		return;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
+		umass_tr_error(xfer, error);
 		return;
 
 	}
 }
 
 static void
-umass_t_bbb_data_read_callback(struct usb2_xfer *xfer)
+umass_t_bbb_data_read_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	uint32_t max_bulk = xfer->max_data_length;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	uint32_t max_bulk = usbd_xfer_max_len(xfer);
+#ifndef UMASS_EXT_BUFFER
+	struct usb_page_cache *pc;
+#endif
+	int actlen, sumlen;
+
+	usbd_xfer_status(xfer, &actlen, &sumlen, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
-		if (!xfer->flags.ext_buffer) {
-			usb2_copy_out(xfer->frbuffers, 0,
-			    sc->sc_transfer.data_ptr, xfer->actlen);
-		}
-		sc->sc_transfer.data_rem -= xfer->actlen;
-		sc->sc_transfer.data_ptr += xfer->actlen;
-		sc->sc_transfer.actlen += xfer->actlen;
+#ifndef UMASS_EXT_BUFFER
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_out(pc, 0, sc->sc_transfer.data_ptr, actlen);
+#endif
+		sc->sc_transfer.data_rem -= actlen;
+		sc->sc_transfer.data_ptr += actlen;
+		sc->sc_transfer.actlen += actlen;
 
-		if (xfer->actlen < xfer->sumlen) {
+		if (actlen < sumlen) {
 			/* short transfer */
 			sc->sc_transfer.data_rem = 0;
 		}
@@ -1911,18 +1368,20 @@ umass_t_bbb_data_read_callback(struct usb2_xfer *xfer)
 		if (max_bulk > sc->sc_transfer.data_rem) {
 			max_bulk = sc->sc_transfer.data_rem;
 		}
-		xfer->timeout = sc->sc_transfer.data_timeout;
-		xfer->frlengths[0] = max_bulk;
+		usbd_xfer_set_timeout(xfer, sc->sc_transfer.data_timeout);
 
-		if (xfer->flags.ext_buffer) {
-			usb2_set_frame_data(xfer, sc->sc_transfer.data_ptr, 0);
-		}
-		usb2_start_hardware(xfer);
+#ifdef UMASS_EXT_BUFFER
+		usbd_xfer_set_frame_data(xfer, 0, sc->sc_transfer.data_ptr,
+		    max_bulk);
+#else
+		usbd_xfer_set_frame_len(xfer, 0, max_bulk);
+#endif
+		usbd_transfer_submit(xfer);
 		return;
 
 	default:			/* Error */
-		if (xfer->error == USB_ERR_CANCELLED) {
-			umass_tr_error(xfer);
+		if (error == USB_ERR_CANCELLED) {
+			umass_tr_error(xfer, error);
 		} else {
 			umass_transfer_start(sc, UMASS_T_BBB_DATA_RD_CS);
 		}
@@ -1932,25 +1391,31 @@ umass_t_bbb_data_read_callback(struct usb2_xfer *xfer)
 }
 
 static void
-umass_t_bbb_data_rd_cs_callback(struct usb2_xfer *xfer)
+umass_t_bbb_data_rd_cs_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_bbb_data_clear_stall_callback(xfer, UMASS_T_BBB_STATUS,
-	    UMASS_T_BBB_DATA_READ);
+	    UMASS_T_BBB_DATA_READ, error);
 }
 
 static void
-umass_t_bbb_data_write_callback(struct usb2_xfer *xfer)
+umass_t_bbb_data_write_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	uint32_t max_bulk = xfer->max_data_length;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	uint32_t max_bulk = usbd_xfer_max_len(xfer);
+#ifndef UMASS_EXT_BUFFER
+	struct usb_page_cache *pc;
+#endif
+	int actlen, sumlen;
+
+	usbd_xfer_status(xfer, &actlen, &sumlen, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
-		sc->sc_transfer.data_rem -= xfer->actlen;
-		sc->sc_transfer.data_ptr += xfer->actlen;
-		sc->sc_transfer.actlen += xfer->actlen;
+		sc->sc_transfer.data_rem -= actlen;
+		sc->sc_transfer.data_ptr += actlen;
+		sc->sc_transfer.actlen += actlen;
 
-		if (xfer->actlen < xfer->sumlen) {
+		if (actlen < sumlen) {
 			/* short transfer */
 			sc->sc_transfer.data_rem = 0;
 		}
@@ -1965,22 +1430,23 @@ umass_t_bbb_data_write_callback(struct usb2_xfer *xfer)
 		if (max_bulk > sc->sc_transfer.data_rem) {
 			max_bulk = sc->sc_transfer.data_rem;
 		}
-		xfer->timeout = sc->sc_transfer.data_timeout;
-		xfer->frlengths[0] = max_bulk;
+		usbd_xfer_set_timeout(xfer, sc->sc_transfer.data_timeout);
 
-		if (xfer->flags.ext_buffer) {
-			usb2_set_frame_data(xfer, sc->sc_transfer.data_ptr, 0);
-		} else {
-			usb2_copy_in(xfer->frbuffers, 0,
-			    sc->sc_transfer.data_ptr, max_bulk);
-		}
+#ifdef UMASS_EXT_BUFFER
+		usbd_xfer_set_frame_data(xfer, 0, sc->sc_transfer.data_ptr,
+		    max_bulk);
+#else
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_in(pc, 0, sc->sc_transfer.data_ptr, max_bulk);
+		usbd_xfer_set_frame_len(xfer, 0, max_bulk);
+#endif
 
-		usb2_start_hardware(xfer);
+		usbd_transfer_submit(xfer);
 		return;
 
 	default:			/* Error */
-		if (xfer->error == USB_ERR_CANCELLED) {
-			umass_tr_error(xfer);
+		if (error == USB_ERR_CANCELLED) {
+			umass_tr_error(xfer, error);
 		} else {
 			umass_transfer_start(sc, UMASS_T_BBB_DATA_WR_CS);
 		}
@@ -1990,18 +1456,22 @@ umass_t_bbb_data_write_callback(struct usb2_xfer *xfer)
 }
 
 static void
-umass_t_bbb_data_wr_cs_callback(struct usb2_xfer *xfer)
+umass_t_bbb_data_wr_cs_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_bbb_data_clear_stall_callback(xfer, UMASS_T_BBB_STATUS,
-	    UMASS_T_BBB_DATA_WRITE);
+	    UMASS_T_BBB_DATA_WRITE, error);
 }
 
 static void
-umass_t_bbb_status_callback(struct usb2_xfer *xfer)
+umass_t_bbb_status_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 	union ccb *ccb = sc->sc_transfer.ccb;
+	struct usb_page_cache *pc;
 	uint32_t residue;
+	int actlen;
+
+	usbd_xfer_status(xfer, &actlen, NULL, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
@@ -2013,16 +1483,17 @@ umass_t_bbb_status_callback(struct usb2_xfer *xfer)
 
 		/* Zero missing parts of the CSW: */
 
-		if (xfer->actlen < sizeof(sc->csw)) {
+		if (actlen < sizeof(sc->csw)) {
 			bzero(&sc->csw, sizeof(sc->csw));
 		}
-		usb2_copy_out(xfer->frbuffers, 0, &sc->csw, xfer->actlen);
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_out(pc, 0, &sc->csw, actlen);
 
 		DIF(UDMASS_BBB, umass_bbb_dump_csw(sc, &sc->csw));
 
 		residue = UGETDW(sc->csw.dCSWDataResidue);
 
-		if (!residue) {
+		if ((!residue) || (sc->sc_quirks & IGNORE_RESIDUE)) {
 			residue = (sc->sc_transfer.data_len -
 			    sc->sc_transfer.actlen);
 		}
@@ -2089,18 +1560,18 @@ umass_t_bbb_status_callback(struct usb2_xfer *xfer)
 		return;
 
 	case USB_ST_SETUP:
-		xfer->frlengths[0] = xfer->max_data_length;
-		usb2_start_hardware(xfer);
+		usbd_xfer_set_frame_len(xfer, 0, usbd_xfer_max_len(xfer));
+		usbd_transfer_submit(xfer);
 		return;
 
 	default:
 tr_error:
 		DPRINTF(sc, UDMASS_BBB, "Failed to read CSW: %s, try %d\n",
-		    usb2_errstr(xfer->error), sc->sc_status_try);
+		    usbd_errstr(error), sc->sc_status_try);
 
-		if ((xfer->error == USB_ERR_CANCELLED) ||
+		if ((error == USB_ERR_CANCELLED) ||
 		    (sc->sc_status_try)) {
-			umass_tr_error(xfer);
+			umass_tr_error(xfer, error);
 		} else {
 			sc->sc_status_try = 1;
 			umass_transfer_start(sc, UMASS_T_BBB_DATA_RD_CS);
@@ -2135,7 +1606,7 @@ umass_command_start(struct umass_softc *sc, uint8_t dir,
 	sc->sc_transfer.ccb = ccb;
 
 	if (sc->sc_xfer[sc->sc_last_xfer_index]) {
-		usb2_transfer_start(sc->sc_xfer[sc->sc_last_xfer_index]);
+		usbd_transfer_start(sc->sc_xfer[sc->sc_last_xfer_index]);
 	} else {
 		ccb->ccb_h.status = CAM_TID_INVALID;
 		xpt_done(ccb);
@@ -2145,8 +1616,8 @@ umass_command_start(struct umass_softc *sc, uint8_t dir,
 static uint8_t
 umass_bbb_get_max_lun(struct umass_softc *sc)
 {
-	struct usb2_device_request req;
-	usb2_error_t err;
+	struct usb_device_request req;
+	usb_error_t err;
 	uint8_t buf = 0;
 
 	/* The Get Max Lun command is a class-specific request. */
@@ -2157,13 +1628,13 @@ umass_bbb_get_max_lun(struct umass_softc *sc)
 	req.wIndex[1] = 0;
 	USETW(req.wLength, 1);
 
-	err = usb2_do_request(sc->sc_udev, &Giant, &req, &buf);
+	err = usbd_do_request(sc->sc_udev, NULL, &req, &buf);
 	if (err) {
 		buf = 0;
 
 		/* Device doesn't support Get Max Lun request. */
 		printf("%s: Get Max Lun not supported (%s)\n",
-		    sc->sc_name, usb2_errstr(err));
+		    sc->sc_name, usbd_errstr(err));
 	}
 	return (buf);
 }
@@ -2191,10 +1662,11 @@ umass_cbi_start_status(struct umass_softc *sc)
 }
 
 static void
-umass_t_cbi_reset1_callback(struct usb2_xfer *xfer)
+umass_t_cbi_reset1_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	struct usb2_device_request req;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	struct usb_device_request req;
+	struct usb_page_cache *pc;
 	uint8_t buf[UMASS_CBI_DIAGNOSTIC_CMDLEN];
 
 	uint8_t i;
@@ -2202,7 +1674,7 @@ umass_t_cbi_reset1_callback(struct usb2_xfer *xfer)
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
 		umass_transfer_start(sc, UMASS_T_CBI_RESET2);
-		return;
+		break;
 
 	case USB_ST_SETUP:
 		/*
@@ -2240,54 +1712,58 @@ umass_t_cbi_reset1_callback(struct usb2_xfer *xfer)
 			buf[i] = 0xff;
 		}
 
-		usb2_copy_in(xfer->frbuffers, 0, &req, sizeof(req));
-		usb2_copy_in(xfer->frbuffers + 1, 0, buf, sizeof(buf));
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_in(pc, 0, &req, sizeof(req));
+		pc = usbd_xfer_get_frame(xfer, 1);
+		usbd_copy_in(pc, 0, buf, sizeof(buf));
 
-		xfer->frlengths[0] = sizeof(req);
-		xfer->frlengths[1] = sizeof(buf);
-		xfer->nframes = 2;
-		usb2_start_hardware(xfer);
-		return;
+		usbd_xfer_set_frame_len(xfer, 0, sizeof(req));
+		usbd_xfer_set_frame_len(xfer, 1, sizeof(buf));
+		usbd_xfer_set_frames(xfer, 2);
+		usbd_transfer_submit(xfer);
+		break;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
-		return;
+		if (error == USB_ERR_CANCELLED)
+			umass_tr_error(xfer, error);
+		else
+			umass_transfer_start(sc, UMASS_T_CBI_RESET2);
+		break;
 
 	}
 }
 
 static void
-umass_t_cbi_reset2_callback(struct usb2_xfer *xfer)
+umass_t_cbi_reset2_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_cbi_data_clear_stall_callback(xfer, UMASS_T_CBI_RESET3,
-	    UMASS_T_CBI_DATA_READ);
+	    UMASS_T_CBI_DATA_READ, error);
 }
 
 static void
-umass_t_cbi_reset3_callback(struct usb2_xfer *xfer)
+umass_t_cbi_reset3_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 
 	umass_t_cbi_data_clear_stall_callback
 	    (xfer, (sc->sc_xfer[UMASS_T_CBI_RESET4] &&
 	    sc->sc_xfer[UMASS_T_CBI_STATUS]) ?
 	    UMASS_T_CBI_RESET4 : UMASS_T_CBI_COMMAND,
-	    UMASS_T_CBI_DATA_WRITE);
+	    UMASS_T_CBI_DATA_WRITE, error);
 }
 
 static void
-umass_t_cbi_reset4_callback(struct usb2_xfer *xfer)
+umass_t_cbi_reset4_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_cbi_data_clear_stall_callback(xfer, UMASS_T_CBI_COMMAND,
-	    UMASS_T_CBI_STATUS);
+	    UMASS_T_CBI_STATUS, error);
 }
 
 static void
-umass_t_cbi_data_clear_stall_callback(struct usb2_xfer *xfer,
-    uint8_t next_xfer,
-    uint8_t stall_xfer)
+umass_t_cbi_data_clear_stall_callback(struct usb_xfer *xfer,
+    uint8_t next_xfer, uint8_t stall_xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
@@ -2297,27 +1773,28 @@ tr_transferred:
 		} else {
 			umass_transfer_start(sc, next_xfer);
 		}
-		return;
+		break;
 
 	case USB_ST_SETUP:
-		if (usb2_clear_stall_callback(xfer, sc->sc_xfer[stall_xfer])) {
+		if (usbd_clear_stall_callback(xfer, sc->sc_xfer[stall_xfer])) {
 			goto tr_transferred;	/* should not happen */
 		}
-		return;
+		break;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
-		return;
+		umass_tr_error(xfer, error);
+		break;
 
 	}
 }
 
 static void
-umass_t_cbi_command_callback(struct usb2_xfer *xfer)
+umass_t_cbi_command_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 	union ccb *ccb = sc->sc_transfer.ccb;
-	struct usb2_device_request req;
+	struct usb_device_request req;
+	struct usb_page_cache *pc;
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
@@ -2329,7 +1806,7 @@ umass_t_cbi_command_callback(struct usb2_xfer *xfer)
 			    (sc, (sc->sc_transfer.dir == DIR_IN) ?
 			    UMASS_T_CBI_DATA_READ : UMASS_T_CBI_DATA_WRITE);
 		}
-		return;
+		break;
 
 	case USB_ST_SETUP:
 
@@ -2350,47 +1827,57 @@ umass_t_cbi_command_callback(struct usb2_xfer *xfer)
 			req.wLength[0] = sc->sc_transfer.cmd_len;
 			req.wLength[1] = 0;
 
-			usb2_copy_in(xfer->frbuffers, 0, &req, sizeof(req));
-			usb2_copy_in(xfer->frbuffers + 1, 0, sc->sc_transfer.cmd_data,
+			pc = usbd_xfer_get_frame(xfer, 0);
+			usbd_copy_in(pc, 0, &req, sizeof(req));
+			pc = usbd_xfer_get_frame(xfer, 1);
+			usbd_copy_in(pc, 0, sc->sc_transfer.cmd_data,
 			    sc->sc_transfer.cmd_len);
 
-			xfer->frlengths[0] = sizeof(req);
-			xfer->frlengths[1] = sc->sc_transfer.cmd_len;
-			xfer->nframes = xfer->frlengths[1] ? 2 : 1;
+			usbd_xfer_set_frame_len(xfer, 0, sizeof(req));
+			usbd_xfer_set_frame_len(xfer, 1, sc->sc_transfer.cmd_len);
+			usbd_xfer_set_frames(xfer,
+			    sc->sc_transfer.cmd_len ? 2 : 1);
 
 			DIF(UDMASS_CBI,
 			    umass_cbi_dump_cmd(sc,
 			    sc->sc_transfer.cmd_data,
 			    sc->sc_transfer.cmd_len));
 
-			usb2_start_hardware(xfer);
+			usbd_transfer_submit(xfer);
 		}
-		return;
+		break;
 
 	default:			/* Error */
-		umass_tr_error(xfer);
-		return;
-
+		umass_tr_error(xfer, error);
+		/* skip reset */
+		sc->sc_last_xfer_index = UMASS_T_CBI_COMMAND;
+		break;
 	}
 }
 
 static void
-umass_t_cbi_data_read_callback(struct usb2_xfer *xfer)
+umass_t_cbi_data_read_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	uint32_t max_bulk = xfer->max_data_length;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	uint32_t max_bulk = usbd_xfer_max_len(xfer);
+#ifndef UMASS_EXT_BUFFER
+	struct usb_page_cache *pc;
+#endif
+	int actlen, sumlen;
+
+	usbd_xfer_status(xfer, &actlen, &sumlen, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
-		if (!xfer->flags.ext_buffer) {
-			usb2_copy_out(xfer->frbuffers, 0,
-			    sc->sc_transfer.data_ptr, xfer->actlen);
-		}
-		sc->sc_transfer.data_rem -= xfer->actlen;
-		sc->sc_transfer.data_ptr += xfer->actlen;
-		sc->sc_transfer.actlen += xfer->actlen;
+#ifndef UMASS_EXT_BUFFER
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_out(pc, 0, sc->sc_transfer.data_ptr, actlen);
+#endif
+		sc->sc_transfer.data_rem -= actlen;
+		sc->sc_transfer.data_ptr += actlen;
+		sc->sc_transfer.actlen += actlen;
 
-		if (xfer->actlen < xfer->sumlen) {
+		if (actlen < sumlen) {
 			/* short transfer */
 			sc->sc_transfer.data_rem = 0;
 		}
@@ -2400,52 +1887,60 @@ umass_t_cbi_data_read_callback(struct usb2_xfer *xfer)
 
 		if (sc->sc_transfer.data_rem == 0) {
 			umass_cbi_start_status(sc);
-			return;
+			break;
 		}
 		if (max_bulk > sc->sc_transfer.data_rem) {
 			max_bulk = sc->sc_transfer.data_rem;
 		}
-		xfer->timeout = sc->sc_transfer.data_timeout;
+		usbd_xfer_set_timeout(xfer, sc->sc_transfer.data_timeout);
 
-		if (xfer->flags.ext_buffer) {
-			usb2_set_frame_data(xfer, sc->sc_transfer.data_ptr, 0);
-		}
-		xfer->frlengths[0] = max_bulk;
-		usb2_start_hardware(xfer);
-		return;
+#ifdef UMASS_EXT_BUFFER
+		usbd_xfer_set_frame_data(xfer, 0, sc->sc_transfer.data_ptr,
+		    max_bulk);
+#else
+		usbd_xfer_set_frame_len(xfer, 0, max_bulk);
+#endif
+		usbd_transfer_submit(xfer);
+		break;
 
 	default:			/* Error */
-		if ((xfer->error == USB_ERR_CANCELLED) ||
+		if ((error == USB_ERR_CANCELLED) ||
 		    (sc->sc_transfer.callback != &umass_cam_cb)) {
-			umass_tr_error(xfer);
+			umass_tr_error(xfer, error);
 		} else {
 			umass_transfer_start(sc, UMASS_T_CBI_DATA_RD_CS);
 		}
-		return;
+		break;
 
 	}
 }
 
 static void
-umass_t_cbi_data_rd_cs_callback(struct usb2_xfer *xfer)
+umass_t_cbi_data_rd_cs_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_cbi_data_clear_stall_callback(xfer, UMASS_T_CBI_STATUS,
-	    UMASS_T_CBI_DATA_READ);
+	    UMASS_T_CBI_DATA_READ, error);
 }
 
 static void
-umass_t_cbi_data_write_callback(struct usb2_xfer *xfer)
+umass_t_cbi_data_write_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
-	uint32_t max_bulk = xfer->max_data_length;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
+	uint32_t max_bulk = usbd_xfer_max_len(xfer);
+#ifndef UMASS_EXT_BUFFER
+	struct usb_page_cache *pc;
+#endif
+	int actlen, sumlen;
+
+	usbd_xfer_status(xfer, &actlen, &sumlen, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
-		sc->sc_transfer.data_rem -= xfer->actlen;
-		sc->sc_transfer.data_ptr += xfer->actlen;
-		sc->sc_transfer.actlen += xfer->actlen;
+		sc->sc_transfer.data_rem -= actlen;
+		sc->sc_transfer.data_ptr += actlen;
+		sc->sc_transfer.actlen += actlen;
 
-		if (xfer->actlen < xfer->sumlen) {
+		if (actlen < sumlen) {
 			/* short transfer */
 			sc->sc_transfer.data_rem = 0;
 		}
@@ -2455,58 +1950,64 @@ umass_t_cbi_data_write_callback(struct usb2_xfer *xfer)
 
 		if (sc->sc_transfer.data_rem == 0) {
 			umass_cbi_start_status(sc);
-			return;
+			break;
 		}
 		if (max_bulk > sc->sc_transfer.data_rem) {
 			max_bulk = sc->sc_transfer.data_rem;
 		}
-		xfer->timeout = sc->sc_transfer.data_timeout;
+		usbd_xfer_set_timeout(xfer, sc->sc_transfer.data_timeout);
 
-		if (xfer->flags.ext_buffer) {
-			usb2_set_frame_data(xfer, sc->sc_transfer.data_ptr, 0);
-		} else {
-			usb2_copy_in(xfer->frbuffers, 0,
-			    sc->sc_transfer.data_ptr, max_bulk);
-		}
+#ifdef UMASS_EXT_BUFFER
+		usbd_xfer_set_frame_data(xfer, 0, sc->sc_transfer.data_ptr,
+		    max_bulk);
+#else
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_in(pc, 0, sc->sc_transfer.data_ptr, max_bulk);
+		usbd_xfer_set_frame_len(xfer, 0, max_bulk);
+#endif
 
-		xfer->frlengths[0] = max_bulk;
-		usb2_start_hardware(xfer);
-		return;
+		usbd_transfer_submit(xfer);
+		break;
 
 	default:			/* Error */
-		if ((xfer->error == USB_ERR_CANCELLED) ||
+		if ((error == USB_ERR_CANCELLED) ||
 		    (sc->sc_transfer.callback != &umass_cam_cb)) {
-			umass_tr_error(xfer);
+			umass_tr_error(xfer, error);
 		} else {
 			umass_transfer_start(sc, UMASS_T_CBI_DATA_WR_CS);
 		}
-		return;
+		break;
 
 	}
 }
 
 static void
-umass_t_cbi_data_wr_cs_callback(struct usb2_xfer *xfer)
+umass_t_cbi_data_wr_cs_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	umass_t_cbi_data_clear_stall_callback(xfer, UMASS_T_CBI_STATUS,
-	    UMASS_T_CBI_DATA_WRITE);
+	    UMASS_T_CBI_DATA_WRITE, error);
 }
 
 static void
-umass_t_cbi_status_callback(struct usb2_xfer *xfer)
+umass_t_cbi_status_callback(struct usb_xfer *xfer, usb_error_t error)
 {
-	struct umass_softc *sc = xfer->priv_sc;
+	struct umass_softc *sc = usbd_xfer_softc(xfer);
 	union ccb *ccb = sc->sc_transfer.ccb;
+	struct usb_page_cache *pc;
 	uint32_t residue;
 	uint8_t status;
+	int actlen;
+
+	usbd_xfer_status(xfer, &actlen, NULL, NULL, NULL);
 
 	switch (USB_GET_STATE(xfer)) {
 	case USB_ST_TRANSFERRED:
 
-		if (xfer->actlen < sizeof(sc->sbl)) {
+		if (actlen < sizeof(sc->sbl)) {
 			goto tr_setup;
 		}
-		usb2_copy_out(xfer->frbuffers, 0, &sc->sbl, sizeof(sc->sbl));
+		pc = usbd_xfer_get_frame(xfer, 0);
+		usbd_copy_out(pc, 0, &sc->sbl, sizeof(sc->sbl));
 
 		residue = (sc->sc_transfer.data_len -
 		    sc->sc_transfer.actlen);
@@ -2536,7 +2037,7 @@ umass_t_cbi_status_callback(struct usb2_xfer *xfer)
 			(sc->sc_transfer.callback)
 			    (sc, ccb, residue, status);
 
-			return;
+			break;
 
 		} else {
 
@@ -2561,7 +2062,7 @@ umass_t_cbi_status_callback(struct usb2_xfer *xfer)
 				(sc->sc_transfer.callback)
 				    (sc, ccb, residue, status);
 
-				return;
+				break;
 			}
 		}
 
@@ -2569,15 +2070,15 @@ umass_t_cbi_status_callback(struct usb2_xfer *xfer)
 
 	case USB_ST_SETUP:
 tr_setup:
-		xfer->frlengths[0] = xfer->max_data_length;
-		usb2_start_hardware(xfer);
-		return;
+		usbd_xfer_set_frame_len(xfer, 0, usbd_xfer_max_len(xfer));
+		usbd_transfer_submit(xfer);
+		break;
 
 	default:			/* Error */
 		DPRINTF(sc, UDMASS_CBI, "Failed to read CSW: %s\n",
-		    usb2_errstr(xfer->error));
-		umass_tr_error(xfer);
-		return;
+		    usbd_errstr(error));
+		umass_tr_error(xfer, error);
+		break;
 
 	}
 }
@@ -2644,68 +2145,6 @@ umass_cam_attach_sim(struct umass_softc *sc)
 }
 
 static void
-umass_cam_rescan_callback(struct cam_periph *periph, union ccb *ccb)
-{
-#if USB_DEBUG
-	struct umass_softc *sc = NULL;
-
-	if (ccb->ccb_h.status != CAM_REQ_CMP) {
-		DPRINTF(sc, UDMASS_SCSI, "%s:%d Rescan failed, 0x%04x\n",
-		    periph->periph_name, periph->unit_number,
-		    ccb->ccb_h.status);
-	} else {
-		DPRINTF(sc, UDMASS_SCSI, "%s%d: Rescan succeeded\n",
-		    periph->periph_name, periph->unit_number);
-	}
-#endif
-
-	xpt_free_path(ccb->ccb_h.path);
-	free(ccb, M_USBDEV);
-}
-
-static void
-umass_cam_rescan(struct umass_softc *sc)
-{
-	struct cam_path *path;
-	union ccb *ccb;
-
-	DPRINTF(sc, UDMASS_SCSI, "scbus%d: scanning for %d:%d:%d\n",
-	    cam_sim_path(sc->sc_sim),
-	    cam_sim_path(sc->sc_sim),
-	    sc->sc_unit, CAM_LUN_WILDCARD);
-
-	ccb = malloc(sizeof(*ccb), M_USBDEV, M_WAITOK | M_ZERO);
-
-	if (ccb == NULL) {
-		return;
-	}
-#if (__FreeBSD_version >= 700037)
-	mtx_lock(&sc->sc_mtx);
-#endif
-
-	if (xpt_create_path(&path, xpt_periph, cam_sim_path(sc->sc_sim),
-	    CAM_TARGET_WILDCARD, CAM_LUN_WILDCARD)
-	    != CAM_REQ_CMP) {
-#if (__FreeBSD_version >= 700037)
-		mtx_unlock(&sc->sc_mtx);
-#endif
-		free(ccb, M_USBDEV);
-		return;
-	}
-	xpt_setup_ccb(&ccb->ccb_h, path, 5 /* priority (low) */ );
-	ccb->ccb_h.func_code = XPT_SCAN_BUS;
-	ccb->ccb_h.cbfcnp = &umass_cam_rescan_callback;
-	ccb->crcn.flags = CAM_FLAG_NONE;
-	xpt_action(ccb);
-
-#if (__FreeBSD_version >= 700037)
-	mtx_unlock(&sc->sc_mtx);
-#endif
-
-	/* The scan is in progress now. */
-}
-
-static void
 umass_cam_attach(struct umass_softc *sc)
 {
 #ifndef USB_DEBUG
@@ -2715,19 +2154,6 @@ umass_cam_attach(struct umass_softc *sc)
 		    sc->sc_name, cam_sim_path(sc->sc_sim),
 		    sc->sc_unit, CAM_LUN_WILDCARD,
 		    cam_sim_path(sc->sc_sim));
-
-	if (!cold) {
-		/*
-		 * Notify CAM of the new device after a short delay. Any
-		 * failure is benign, as the user can still do it by hand
-		 * (camcontrol rescan <busno>). Only do this if we are not
-		 * booting, because CAM does a scan after booting has
-		 * completed, when interrupts have been enabled.
-		 */
-
-		/* scan the new sim */
-		umass_cam_rescan(sc);
-	}
 }
 
 /* umass_cam_detach
@@ -2743,7 +2169,7 @@ umass_cam_detach_sim(struct umass_softc *sc)
 			sc->sc_sim->softc = UMASS_GONE;
 			cam_sim_free(sc->sc_sim, /* free_devq */ TRUE);
 		} else {
-			panic("%s: CAM layer is busy!\n",
+			panic("%s: CAM layer is busy\n",
 			    sc->sc_name);
 		}
 		sc->sc_sim = NULL;
@@ -2759,8 +2185,9 @@ umass_cam_action(struct cam_sim *sim, union ccb *ccb)
 {
 	struct umass_softc *sc = (struct umass_softc *)sim->softc;
 
-	if (sc == UMASS_GONE) {
-		ccb->ccb_h.status = CAM_TID_INVALID;
+	if (sc == UMASS_GONE ||
+	    (sc != NULL && !usbd_device_attached(sc->sc_udev))) {
+		ccb->ccb_h.status = CAM_SEL_TIMEOUT;
 		xpt_done(ccb);
 		return;
 	}
@@ -2878,6 +2305,28 @@ umass_cam_action(struct cam_sim *sim, union ccb *ccb)
 				if (sc->sc_transfer.cmd_data[0] == INQUIRY) {
 
 					/*
+					 * Umass devices don't generally report their serial numbers
+					 * in the usual SCSI way.  Emulate it here.
+					 */
+					if ((sc->sc_transfer.cmd_data[1] & SI_EVPD) &&
+					    sc->sc_transfer.cmd_data[2] == SVPD_UNIT_SERIAL_NUMBER &&
+					    sc->sc_udev != NULL &&
+					    sc->sc_udev->serial != NULL &&
+					    sc->sc_udev->serial[0] != '\0') {
+						struct scsi_vpd_unit_serial_number *vpd_serial;
+
+						vpd_serial = (struct scsi_vpd_unit_serial_number *)ccb->csio.data_ptr;
+						vpd_serial->length = strlen(sc->sc_udev->serial);
+						if (vpd_serial->length > sizeof(vpd_serial->serial_num))
+							vpd_serial->length = sizeof(vpd_serial->serial_num);
+						memcpy(vpd_serial->serial_num, sc->sc_udev->serial, vpd_serial->length);
+						ccb->csio.scsi_status = SCSI_STATUS_OK;
+						ccb->ccb_h.status = CAM_REQ_CMP;
+						xpt_done(ccb);
+						goto done;
+					}
+
+					/*
 					 * Handle EVPD inquiry for broken devices first
 					 * NO_INQUIRY also implies NO_INQUIRY_EVPD
 					 */
@@ -2961,7 +2410,7 @@ umass_cam_action(struct cam_sim *sim, union ccb *ccb)
 				if (sc->sc_quirks & FLOPPY_SPEED) {
 					cpi->base_transfer_speed =
 					    UMASS_FLOPPY_TRANSFER_SPEED;
-				} else if (usb2_get_speed(sc->sc_udev) ==
+				} else if (usbd_get_speed(sc->sc_udev) ==
 				    USB_SPEED_HIGH) {
 					cpi->base_transfer_speed =
 					    UMASS_HIGH_TRANSFER_SPEED;
@@ -3066,7 +2515,7 @@ umass_cam_poll(struct cam_sim *sim)
 
 	DPRINTF(sc, UDMASS_SCSI, "CAM poll\n");
 
-	usb2_do_poll(sc->sc_xfer, UMASS_T_MAX);
+	usbd_transfer_poll(sc->sc_xfer, UMASS_T_MAX);
 }
 
 
@@ -3092,6 +2541,29 @@ umass_cam_cb(struct umass_softc *sc, union ccb *ccb, uint32_t residue,
 			rcap = (void *)(ccb->csio.data_ptr);
 			maxsector = scsi_4btoul(rcap->addr) - 1;
 			scsi_ulto4b(maxsector, rcap->addr);
+		}
+		/*
+		 * We have to add SVPD_UNIT_SERIAL_NUMBER to the list
+		 * of pages supported by the device - otherwise, CAM
+		 * will never ask us for the serial number if the
+		 * device cannot handle that by itself.
+		 */
+		if (ccb->ccb_h.func_code == XPT_SCSI_IO &&
+		    sc->sc_transfer.cmd_data[0] == INQUIRY &&
+		    (sc->sc_transfer.cmd_data[1] & SI_EVPD) &&
+		    sc->sc_transfer.cmd_data[2] == SVPD_SUPPORTED_PAGE_LIST &&
+		    sc->sc_udev != NULL &&
+		    sc->sc_udev->serial != NULL &&
+		    sc->sc_udev->serial[0] != '\0') {
+			struct ccb_scsiio *csio;
+			struct scsi_vpd_supported_page_list *page_list;
+
+			csio = &ccb->csio;
+			page_list = (struct scsi_vpd_supported_page_list *)csio->data_ptr;
+			if (page_list->length + 1 < SVPD_SUPPORTED_PAGES_SIZE) {
+				page_list->list[page_list->length] = SVPD_UNIT_SERIAL_NUMBER;
+				page_list->length++;
+			}
 		}
 		xpt_done(ccb);
 		break;
@@ -3122,11 +2594,19 @@ umass_cam_cb(struct umass_softc *sc, union ccb *ccb, uint32_t residue,
 
 	default:
 		/*
-		 * the wire protocol failed and will have recovered
-		 * (hopefully).  We return an error to CAM and let CAM retry
-		 * the command if necessary.
+		 * The wire protocol failed and will hopefully have
+		 * recovered. We return an error to CAM and let CAM
+		 * retry the command if necessary. In case of SCSI IO
+		 * commands we ask the CAM layer to check the
+		 * condition first. This is a quick hack to make
+		 * certain devices work.
 		 */
-		ccb->ccb_h.status = CAM_REQ_CMP_ERR;
+		if (ccb->ccb_h.func_code == XPT_SCSI_IO) {
+			ccb->ccb_h.status = CAM_SCSI_STATUS_ERROR;
+			ccb->csio.scsi_status = SCSI_STATUS_CHECK_COND;
+		} else {
+			ccb->ccb_h.status = CAM_REQ_CMP_ERR;
+		}
 		xpt_done(ccb);
 		break;
 	}
@@ -3489,7 +2969,7 @@ umass_atapi_transform(struct umass_softc *sc, uint8_t *cmd_ptr,
 	case 0xad:			/* READ_DVD_STRUCTURE */
 	case 0xbb:			/* SET_CD_SPEED */
 	case 0xe5:			/* READ_TRACK_INFO_PHILIPS */
-		break;;
+		break;
 
 	case READ_12:
 	case WRITE_12:
@@ -3497,7 +2977,7 @@ umass_atapi_transform(struct umass_softc *sc, uint8_t *cmd_ptr,
 		DPRINTF(sc, UDMASS_SCSI, "Unsupported ATAPI "
 		    "command 0x%02x - trying anyway\n",
 		    cmd_ptr[0]);
-		break;;
+		break;
 	}
 
 	bcopy(cmd_ptr, sc->sc_transfer.cmd_data, cmd_len);
@@ -3532,7 +3012,7 @@ umass_std_transform(struct umass_softc *sc, union ccb *ccb,
 	return (1);
 }
 
-#if USB_DEBUG
+#ifdef USB_DEBUG
 static void
 umass_bbb_dump_cbw(struct umass_softc *sc, umass_bbb_cbw_t *cbw)
 {

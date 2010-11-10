@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/mem.c,v 1.22 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/mem.c,v 1.23 2009/12/29 21:51:28 rnoland Exp $");
 
 /*
  * Memory special file
@@ -148,7 +148,8 @@ kmemphys:
  * instead of going through read/write
  */
 int
-memmmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr, int prot)
+memmmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int prot, vm_memattr_t *memattr)
 {
 	/*
 	 * /dev/mem is the only one that makes sense through this

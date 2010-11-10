@@ -41,36 +41,30 @@
  *
  *	from: @(#)cpu.h	8.4 (Berkeley) 1/4/94
  *	JNPR: cpu.h,v 1.9.2.2 2007/09/10 08:23:46 girish
- * $FreeBSD: src/sys/mips/include/cpu.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/cpu.h,v 1.9 2010/06/17 05:03:01 jchandra Exp $
  */
 
 #ifndef _MACHINE_CPU_H_
 #define	_MACHINE_CPU_H_
 
-#include <machine/psl.h>
 #include <machine/endian.h>
 
-#define	MIPS_CACHED_MEMORY_ADDR		0x80000000
-#define	MIPS_UNCACHED_MEMORY_ADDR	0xa0000000
-#define	MIPS_MAX_MEM_ADDR		0xbe000000
-#define	MIPS_RESERVED_ADDR		0xbfc80000
-
 #define MIPS_KSEG0_LARGEST_PHYS         0x20000000
-#define	MIPS_CACHED_TO_PHYS(x)		((unsigned)(x) & 0x1fffffff)
-#define	MIPS_PHYS_TO_CACHED(x)		((unsigned)(x) | MIPS_CACHED_MEMORY_ADDR)
-#define	MIPS_UNCACHED_TO_PHYS(x)	((unsigned)(x) & 0x1fffffff)
-#define	MIPS_PHYS_TO_UNCACHED(x)	((unsigned)(x) | MIPS_UNCACHED_MEMORY_ADDR)
-
 #define	MIPS_PHYS_MASK			(0x1fffffff)
-#define	MIPS_PA_2_K1VA(x)		(MIPS_KSEG1_START | ((x) & MIPS_PHYS_MASK))
 
-#define	MIPS_VA_TO_CINDEX(x)		((unsigned)(x) & 0xffffff | MIPS_CACHED_MEMORY_ADDR)
-#define	MIPS_CACHED_TO_UNCACHED(x)	(MIPS_PHYS_TO_UNCACHED(MIPS_CACHED_TO_PHYS(x)))
+#define	MIPS_PHYS_TO_KSEG0(x)		((uintptr_t)(x) | MIPS_KSEG0_START)
+#define	MIPS_PHYS_TO_KSEG1(x)		((uintptr_t)(x) | MIPS_KSEG1_START)
+#define	MIPS_KSEG0_TO_PHYS(x)		((uintptr_t)(x) & MIPS_PHYS_MASK)
+#define	MIPS_KSEG1_TO_PHYS(x)		((uintptr_t)(x) & MIPS_PHYS_MASK)
 
-#define	MIPS_PHYS_TO_KSEG0(x)		((unsigned)(x) | MIPS_KSEG0_START)
-#define	MIPS_PHYS_TO_KSEG1(x)		((unsigned)(x) | MIPS_KSEG1_START)
-#define	MIPS_KSEG0_TO_PHYS(x)		((unsigned)(x) & MIPS_PHYS_MASK)
-#define	MIPS_KSEG1_TO_PHYS(x)		((unsigned)(x) & MIPS_PHYS_MASK)
+#define	MIPS_IS_KSEG0_ADDR(x)					\
+	(((vm_offset_t)(x) >= MIPS_KSEG0_START) &&		\
+	    ((vm_offset_t)(x) <= MIPS_KSEG0_END))
+#define	MIPS_IS_KSEG1_ADDR(x)					\
+	(((vm_offset_t)(x) >= MIPS_KSEG1_START) &&		\
+	    ((vm_offset_t)(x) <= MIPS_KSEG1_END))
+#define	MIPS_IS_VALID_PTR(x)		(MIPS_IS_KSEG0_ADDR(x) || \
+						MIPS_IS_KSEG1_ADDR(x))
 
 /*
  *  Status register.
@@ -113,6 +107,8 @@
 #define	SOFT_INT_MASK		(SOFT_INT_MASK_0 | SOFT_INT_MASK_1)
 #define	HW_INT_MASK		(ALL_INT_MASK & ~SOFT_INT_MASK)
 
+#define	soft_int_mask(softintr)	(1 << ((softintr) + 8))
+#define	hard_int_mask(hardintr)	(1 << ((hardintr) + 10))
 
 /*
  * The bits in the cause register.
@@ -155,6 +151,7 @@
  */
 #define CFG_K0_UNCACHED	2
 #define	CFG_K0_CACHED	3
+#define	CFG_K0_MASK	0x7
 
 /*
  * The bits in the context register.
@@ -277,43 +274,22 @@
 #define	OPCODE_C1		0x11
 
 /*
- * The low part of the TLB entry.
- */
-#define	VMTLB_PF_NUM		0x3fffffc0
-#define	VMTLB_ATTR_MASK		0x00000038
-#define	VMTLB_MOD_BIT		0x00000004
-#define	VMTLB_VALID_BIT		0x00000002
-#define	VMTLB_GLOBAL_BIT	0x00000001
-
-#define	VMTLB_PHYS_PAGE_SHIFT	6
-
-/*
- * The high part of the TLB entry.
- */
-#define	VMTLB_VIRT_PAGE_NUM		0xffffe000
-#define	VMTLB_PID			0x000000ff
-#define	VMTLB_PID_R9K			0x00000fff
-#define	VMTLB_PID_SHIFT			0
-#define	VMTLB_VIRT_PAGE_SHIFT		12
-#define	VMTLB_VIRT_PAGE_SHIFT_R9K	13
-
-/*
  * The first TLB entry that write random hits.
+ * TLB entry 0 maps the kernel stack of the currently running thread
+ * TLB entry 1 maps the pcpu area of processor (only for SMP builds)
  */
+#define	KSTACK_TLB_ENTRY	0
+#ifdef SMP
+#define	PCPU_TLB_ENTRY		1
+#define	VMWIRED_ENTRIES		2
+#else
 #define	VMWIRED_ENTRIES		1
+#endif	/* SMP */
 
 /*
  * The number of process id entries.
  */
 #define	VMNUM_PIDS		256
-
-/*
- * TLB probe return codes.
- */
-#define	VMTLB_NOT_FOUND		0
-#define	VMTLB_FOUND		1
-#define	VMTLB_FOUND_WITH_PATCH	2
-#define	VMTLB_PROBE_ERROR	3
 
 /*
  * Exported definitions unique to mips cpu support.
@@ -328,7 +304,9 @@
 #define	cpu_swapout(p)		panic("cpu_swapout: can't get here");
 
 #ifndef _LOCORE
+#include <machine/cpufunc.h>
 #include <machine/frame.h>
+
 /*
  * Arguments to hardclock and gatherstats encapsulate the previous
  * machine state in an opaque clockframe.
@@ -336,13 +314,17 @@
 #define	clockframe trapframe	/* Use normal trap frame */
 
 #define	CLKF_USERMODE(framep)	((framep)->sr & SR_KSU_USER)
-#define	CLKF_BASEPRI(framep)	((framep)->cpl == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
 #define	CLKF_INTR(framep)	(0)
 #define	MIPS_CLKF_INTR()	(intr_nesting_level >= 1)
 #define	TRAPF_USERMODE(framep)  (((framep)->sr & SR_KSU_USER) != 0)
 #define	TRAPF_PC(framep)	((framep)->pc)
 #define	cpu_getstack(td)	((td)->td_frame->sp)
+
+/*
+ * A machine-independent interface to the CPU's counter.
+ */
+#define	get_cyclecount()	mips_rd_count()
 
 /*
  * CPU identification, from PRID register.
@@ -445,16 +427,9 @@ extern union cpuprid cpu_id;
 #if defined(_KERNEL) && !defined(_LOCORE)
 extern union cpuprid fpu_id;
 
-struct tlb;
 struct user;
 
-u_int32_t mips_cp0_config1_read(void);
 int Mips_ConfigCache(void);
-void Mips_SetWIRED(int);
-void Mips_SetPID(int);
-u_int Mips_GetCOUNT(void);
-void Mips_SetCOMPARE(u_int);
-u_int Mips_GetCOMPARE(void);
 
 void Mips_SyncCache(void);
 void Mips_SyncDCache(vm_offset_t, int);
@@ -465,12 +440,6 @@ void Mips_HitInvalidateDCache(vm_offset_t, int);
 void Mips_SyncICache(vm_offset_t, int);
 void Mips_InvalidateICache(vm_offset_t, int);
 
-void Mips_TLBFlush(int);
-void Mips_TLBFlushAddr(vm_offset_t);
-void Mips_TLBWriteIndexed(int, struct tlb *);
-void Mips_TLBUpdate(vm_offset_t, unsigned);
-void Mips_TLBRead(int, struct tlb *);
-void mips_TBIAP(int);
 void wbflush(void);
 
 extern u_int32_t cpu_counter_interval;	/* Number of counter ticks/tick */
@@ -510,16 +479,6 @@ extern int intr_nesting_level;
 			: "r" (func), "r" (arg0), "r" (arg1), "r" (arg2)  /* inputs */ \
 			: "$31", "$4", "$5", "$6");
 
-#define	MachSetPID			Mips_SetPID
-#define	MachTLBUpdate   		Mips_TLBUpdate
-#define	mips_TBIS			Mips_TLBFlushAddr
-#define	MIPS_TBIAP()			mips_TBIAP(num_tlbentries)
-#define	MachSetWIRED(index)		Mips_SetWIRED(index)
-#define	MachTLBFlush(count)		Mips_TLBFlush(count)
-#define	MachTLBGetPID(pid)		(pid = Mips_TLBGetPID())
-#define	MachTLBRead(tlbno, tlbp)	Mips_TLBRead(tlbno, tlbp)
-#define	MachFPTrap(sr, cause, pc)	MipsFPTrap(sr, cause, pc)
-
 /*
  * Enable realtime clock (always enabled).
  */
@@ -536,27 +495,12 @@ extern int intr_nesting_level;
  *  Low level access routines to CPU registers
  */
 
-void setsoftintr0(void);
-void clearsoftintr0(void);
-void setsoftintr1(void);
-void clearsoftintr1(void);
-
-
-u_int32_t mips_cp0_status_read(void);
-void mips_cp0_status_write(u_int32_t);
-
-int disableintr(void);
-void restoreintr(int);
-int enableintr(void);
-int Mips_TLBGetPID(void);
-
 void swi_vm(void *);
 void cpu_halt(void);
 void cpu_reset(void);
 
 u_int32_t set_intr_mask(u_int32_t);
 u_int32_t get_intr_mask(void);
-u_int32_t get_cyclecount(void);
 
 #define	cpu_spinwait()		/* nothing */
 

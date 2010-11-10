@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_bus.c,v 1.123 2009/02/08 07:02:42 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_bus.c,v 1.124 2009/07/13 21:36:31 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -386,6 +386,7 @@ DRIVER_MODULE(pcib, legacy, legacy_pcib_driver, hostb_devclass, 0, 0);
  */
 static struct isa_pnp_id pcibus_pnp_ids[] = {
 	{ 0x030ad041 /* PNP0A03 */, "PCI Bus" },
+	{ 0x080ad041 /* PNP0A08 */, "PCIe Bus" },
 	{ 0 }
 };
 

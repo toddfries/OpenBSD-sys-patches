@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2006 Konstantin Dimitrov <kosio.dimitrov@gmail.com>
  * Copyright (c) 2001 Katsurajima Naoto <raven@katsurajima.seya.yokohama.jp>
  * All rights reserved.
@@ -24,8 +24,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THEPOSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pci/spicds.c,v 1.7 2009/02/11 10:29:45 netchild Exp $
+ * $FreeBSD: src/sys/dev/sound/pci/spicds.c,v 1.9 2010/03/29 20:27:17 joel Exp $
  */
+
+#ifdef HAVE_KERNEL_OPTION_HEADERS
+#include "opt_snd.h"
+#endif
 
 #include <dev/sound/pcm/sound.h>
 

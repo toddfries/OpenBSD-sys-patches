@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.52 2009/01/31 17:34:55 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.56 2010/09/20 19:42:14 mdf Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -169,7 +169,11 @@ passcleanup(struct cam_periph *periph)
 		xpt_print(periph->path, "removing device entry\n");
 	devstat_remove_entry(softc->device_stats);
 	cam_periph_unlock(periph);
-	destroy_dev(softc->dev);
+	/*
+	 * passcleanup() is indirectly a d_close method via passclose,
+	 * so using destroy_dev(9) directly can result in deadlock.
+	 */
+	destroy_dev_sched(softc->dev);
 	cam_periph_lock(periph);
 	free(softc, M_DEVBUF);
 }
@@ -179,7 +183,6 @@ passasync(void *callback_arg, u_int32_t code,
 	  struct cam_path *path, void *arg)
 {
 	struct cam_periph *periph;
-	struct cam_sim *sim;
 
 	periph = (struct cam_periph *)callback_arg;
 
@@ -198,7 +201,6 @@ passasync(void *callback_arg, u_int32_t code,
 		 * this device and start the probe
 		 * process.
 		 */
-		sim = xpt_path_sim(cgd->ccb_h.path);
 		status = cam_periph_alloc(passregister, passoninvalidate,
 					  passcleanup, passstart, "pass",
 					  CAM_PERIPH_BIO, cgd->ccb_h.path,
@@ -530,7 +532,8 @@ passsendccb(struct cam_periph *periph, union ccb *ccb, union ccb *inccb)
 	 * ready), it will save a few cycles if we check for it here.
 	 */
 	if (((ccb->ccb_h.flags & CAM_DATA_PHYS) == 0)
-	 && (((ccb->ccb_h.func_code == XPT_SCSI_IO)
+	 && (((ccb->ccb_h.func_code == XPT_SCSI_IO ||
+	       ccb->ccb_h.func_code == XPT_ATA_IO)
 	    && ((ccb->ccb_h.flags & CAM_DIR_MASK) != CAM_DIR_NONE))
 	  || (ccb->ccb_h.func_code == XPT_DEV_MATCH))) {
 
@@ -564,12 +567,10 @@ passsendccb(struct cam_periph *periph, union ccb *ccb, union ccb *inccb)
 	 * that request.  Otherwise, it's up to the user to perform any
 	 * error recovery.
 	 */
-	error = cam_periph_runccb(ccb,
-				  (ccb->ccb_h.flags & CAM_PASS_ERR_RECOVER) ?
-				  passerror : NULL,
-				  /* cam_flags */ CAM_RETRY_SELTO,
-				  /* sense_flags */SF_RETRY_UA,
-				  softc->device_stats);
+	cam_periph_runccb(ccb,
+	    (ccb->ccb_h.flags & CAM_PASS_ERR_RECOVER) ? passerror : NULL,
+	    /* cam_flags */ CAM_RETRY_SELTO, /* sense_flags */SF_RETRY_UA,
+	    softc->device_stats);
 
 	if (need_unmap != 0)
 		cam_periph_unmapmem(ccb, &mapinfo);
@@ -578,7 +579,7 @@ passsendccb(struct cam_periph *periph, union ccb *ccb, union ccb *inccb)
 	ccb->ccb_h.periph_priv = inccb->ccb_h.periph_priv;
 	bcopy(ccb, inccb, sizeof(union ccb));
 
-	return(error);
+	return(0);
 }
 
 static int

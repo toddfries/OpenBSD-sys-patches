@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/elf.h,v 1.18 2008/12/17 06:56:58 imp Exp $
+ * $FreeBSD: src/sys/i386/include/elf.h,v 1.20 2009/10/10 15:31:24 kib Exp $
  */
 
 #ifndef _MACHINE_ELF_H_
@@ -84,16 +84,14 @@ __ElfType(Auxinfo);
 #define	AT_BASE		7	/* Interpreter's base address. */
 #define	AT_FLAGS	8	/* Flags (unused for i386). */
 #define	AT_ENTRY	9	/* Where interpreter should transfer control. */
-/*
- * The following non-standard values are used in Linux ELF binaries.
- */
 #define	AT_NOTELF	10	/* Program is not ELF ?? */
 #define	AT_UID		11	/* Real uid. */
 #define	AT_EUID		12	/* Effective uid. */
 #define	AT_GID		13	/* Real gid. */
 #define	AT_EGID		14	/* Effective gid. */
+#define	AT_EXECPATH	15	/* Path to the executable. */
 
-#define	AT_COUNT	15	/* Count of defined aux entry types. */
+#define	AT_COUNT	16	/* Count of defined aux entry types. */
 
 /*
  * Relocation types.
@@ -106,5 +104,7 @@ __ElfType(Auxinfo);
 #define	ELF_TARG_DATA	ELFDATA2LSB
 #define	ELF_TARG_MACH	EM_386
 #define	ELF_TARG_VER	1
+
+#define	ET_DYN_LOAD_ADDR 0x01001000
 
 #endif /* !_MACHINE_ELF_H_ */

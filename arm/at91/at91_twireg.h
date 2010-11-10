@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  */
 
-/* $FreeBSD: src/sys/arm/at91/at91_twireg.h,v 1.4 2009/01/22 21:55:37 imp Exp $ */
+/* $FreeBSD: src/sys/arm/at91/at91_twireg.h,v 1.5 2010/10/06 22:25:21 cognet Exp $ */
 
 #ifndef ARM_AT91_AT91_TWIREG_H
 #define ARM_AT91_AT91_TWIREG_H
@@ -63,7 +63,10 @@
 #define TWI_CWGR_CKDIV(x) ((x) << 16)	/* Clock Divider */
 #define TWI_CWGR_CHDIV(x) ((x) << 8)	/* Clock High Divider */
 #define TWI_CWGR_CLDIV(x) ((x) << 0)	/* Clock Low Divider */
-#define TWI_CWGR_DIV(rate) ((at91_master_clock /(4*(rate))) - 2)
+#define TWI_CWGR_DIV(rate) 		 		\
+	(at91_is_sam9() ? 				\
+	    ((at91_master_clock /(4*(rate))) - 3) :	\
+	    ((at91_master_clock /(4*(rate))) - 2))
 
 /* TWI_SR */
 /* TWI_IER */

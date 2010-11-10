@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_state.c,v 1.3 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_state.c,v 1.4 2009/10/21 15:54:45 brueffer Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -826,7 +826,7 @@ int mach64_dma_vertex(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv)
 {
 	drm_mach64_private_t *dev_priv = dev->dev_private;
-	drm_mach64_sarea_t *sarea_priv = dev_priv->sarea_priv;
+	drm_mach64_sarea_t *sarea_priv;
 	drm_mach64_vertex_t *vertex = data;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
@@ -835,6 +835,7 @@ int mach64_dma_vertex(struct drm_device *dev, void *data,
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
 	}
+	sarea_priv = dev_priv->sarea_priv;
 
 	DRM_DEBUG("pid=%d buf=%p used=%lu discard=%d\n",
 		  DRM_CURRENTPID,

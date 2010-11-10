@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ie/if_ie.c,v 1.111 2008/08/01 21:33:07 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ie/if_ie.c,v 1.113 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  * Intel 82586 Ethernet chip
@@ -318,7 +318,7 @@ ie_attach(device_t dev)
 	ifp->if_start = iestart;
 	ifp->if_ioctl = ieioctl;
 	ifp->if_init = ieinit;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 	ether_ifattach(ifp, sc->enaddr);
 
@@ -1675,7 +1675,7 @@ ie_mc_reset(struct ie_softc *sc)
 	 * Step through the list of addresses.
 	 */
 	sc->mcast_count = 0;
-	IF_ADDR_LOCK(sc->ifp);
+	if_maddr_rlock(sc->ifp);
 	TAILQ_FOREACH(ifma, &sc->ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -1691,7 +1691,7 @@ ie_mc_reset(struct ie_softc *sc)
 		      &(sc->mcast_addrs[sc->mcast_count]), 6);
 		sc->mcast_count++;
 	}
-	IF_ADDR_UNLOCK(sc->ifp);
+	if_maddr_runlock(sc->ifp);
 
 setflag:
 	sc->want_mcsetup = 1;

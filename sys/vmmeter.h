@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)vmmeter.h	8.2 (Berkeley) 7/10/94
- * $FreeBSD: src/sys/sys/vmmeter.h,v 1.35 2008/07/19 22:35:13 alc Exp $
+ * $FreeBSD: src/sys/sys/vmmeter.h,v 1.37 2010/05/08 20:34:01 alc Exp $
  */
 
 #ifndef _SYS_VMMETER_H_
@@ -72,9 +72,9 @@ struct vmmeter {
 	u_int v_pdwakeups;	/* (f) times daemon has awaken from sleep */
 	u_int v_pdpages;	/* (q) pages analyzed by daemon */
 
-	u_int v_tcached;	/* (q) total pages cached */
+	u_int v_tcached;	/* (p) total pages cached */
 	u_int v_dfree;		/* (q) pages freed by daemon */
-	u_int v_pfree;		/* (q) pages freed by exiting processes */
+	u_int v_pfree;		/* (p) pages freed by exiting processes */
 	u_int v_tfree;		/* (p) total pages freed */
 	/*
 	 * Distribution of page usages.

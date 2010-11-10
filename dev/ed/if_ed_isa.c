@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ed/if_ed_isa.c,v 1.31 2007/02/23 12:18:38 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ed/if_ed_isa.c,v 1.34 2009/04/20 01:19:59 imp Exp $");
 
 #include "opt_ed.h"
 
@@ -163,20 +163,23 @@ ed_isa_attach(device_t dev)
 	int error;
 	
 	if (sc->port_used > 0)
-		ed_alloc_port(dev, sc->port_rid, sc->port_used);
+		ed_alloc_port(dev, 0, sc->port_used);
 	if (sc->mem_used)
-		ed_alloc_memory(dev, sc->mem_rid, sc->mem_used);
+		ed_alloc_memory(dev, 0, sc->mem_used);
+	ed_alloc_irq(dev, 0, 0);
 
-	ed_alloc_irq(dev, sc->irq_rid, 0);
-
-	error = bus_setup_intr(dev, sc->irq_res, INTR_TYPE_NET | INTR_MPSAFE,
-	    NULL, edintr, sc, &sc->irq_handle);
+	if (sc->sc_media_ioctl == NULL)
+		ed_gen_ifmedia_init(sc);
+	error = ed_attach(dev);
 	if (error) {
 		ed_release_resources(dev);
 		return (error);
 	}
-
-	return ed_attach(dev);
+	error = bus_setup_intr(dev, sc->irq_res, INTR_TYPE_NET | INTR_MPSAFE,
+	    NULL, edintr, sc, &sc->irq_handle);
+	if (error)
+		ed_release_resources(dev);
+	return (error);
 }
 
 static device_method_t ed_isa_methods[] = {

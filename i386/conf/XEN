@@ -1,7 +1,7 @@
 #
 # XEN -- Kernel configuration for i386 XEN DomU
 #
-# $FreeBSD: src/sys/i386/conf/XEN,v 1.8 2008/12/29 06:31:03 kmacy Exp $
+# $FreeBSD: src/sys/i386/conf/XEN,v 1.13 2010/03/13 09:21:00 ed Exp $
 
 cpu		I686_CPU
 ident		XEN
@@ -11,7 +11,7 @@ makeoptions	MODULES_OVERRIDE=""
 
 options 	SCHED_ULE		# ULE scheduler
 options 	PREEMPTION		# Enable kernel thread preemption
-#options		SCHED_4BSD		 
+#options 	SCHED_4BSD		 
 
 options 	INET			# InterNETworking
 options 	INET6			# IPv6 communications protocols
@@ -31,7 +31,6 @@ options 	PROCFS			# Process filesystem (requires PSEUDOFS)
 options 	PSEUDOFS		# Pseudo-filesystem framework
 options 	GEOM_PART_GPT		# GUID Partition Tables.
 options 	GEOM_LABEL		# Provides labelization
-options 	COMPAT_43TTY		# BSD 4.3 TTY compat (sgtty)
 options 	COMPAT_FREEBSD4		# Compatible with FreeBSD4
 options 	COMPAT_FREEBSD5		# Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		# Compatible with FreeBSD6
@@ -49,29 +48,30 @@ options 	AUDIT			# Security event auditing
 options 	KDB			# Enable kernel debugger support.
 options 	DDB			# Support DDB.
 options 	GDB			# Support remote GDB.
+options 	DEADLKRES		# Enable the deadlock resolver
 options 	INVARIANTS		# Enable calls of extra sanity checking
 options 	INVARIANT_SUPPORT	# Extra sanity checks of internal structures, required by INVARIANTS
 options 	WITNESS			# Enable checks to detect deadlocks and cycles
 options 	WITNESS_SKIPSPIN	# Don't run witness on spinlocks for speed
 
-options		PAE
+options 	PAE
 nooption	NATIVE
 option		XEN
 nodevice	atpic
 nodevice	isa
-options		MCLSHIFT=12
+options 	MCLSHIFT=12
 
 # To make an SMP kernel, the next two lines are needed
 options 	SMP			# Symmetric MultiProcessor Kernel
 device		apic			# I/O APIC
 
 
-device         atkbdc          # AT keyboard controller
-device         atkbd           # AT keyboard
-device         psm             # PS/2 mouse
-device         pci
+#device		atkbdc		# AT keyboard controller
+#device		atkbd		# AT keyboard
+device		psm		# PS/2 mouse
+device		pci
 
-device		kbdmux		# keyboard multiplexer
+#device		kbdmux		# keyboard multiplexer
 
 # Pseudo devices.
 device		loop		# Network loopback

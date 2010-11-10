@@ -26,7 +26,7 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/bfe/if_bfe.c,v 1.54 2008/08/22 06:46:55 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/bfe/if_bfe.c,v 1.55 2009/06/26 11:45:06 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1111,14 +1111,14 @@ bfe_set_rx_mode(struct bfe_softc *sc)
 		val |= BFE_RXCONF_ALLMULTI;
 	else {
 		val &= ~BFE_RXCONF_ALLMULTI;
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 			if (ifma->ifma_addr->sa_family != AF_LINK)
 				continue;
 			bfe_cam_write(sc,
 			    LLADDR((struct sockaddr_dl *)ifma->ifma_addr), i++);
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 	}
 
 	CSR_WRITE_4(sc, BFE_RXCONF, val);

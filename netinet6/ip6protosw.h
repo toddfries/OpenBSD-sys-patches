@@ -59,7 +59,7 @@
  *
  *	@(#)protosw.h	8.1 (Berkeley) 6/2/93
  *	BSDI protosw.h,v 2.3 1996/10/11 16:02:40 pjd Exp
- * $FreeBSD: src/sys/netinet6/ip6protosw.h,v 1.15 2009/01/04 21:13:51 rwatson Exp $
+ * $FreeBSD: src/sys/netinet6/ip6protosw.h,v 1.16 2009/06/08 17:15:40 zec Exp $
  */
 
 #ifndef _NETINET6_IP6PROTOSW_H_
@@ -128,6 +128,8 @@ struct ip6protosw {
 
 /* utility hooks */
 	void	(*pr_init)		/* initialization hook */
+			__P((void));
+	void	(*pr_destroy)		/* cleanup hook */
 			__P((void));
 
 	void	(*pr_fasttimo)		/* fast timeout (200ms) */

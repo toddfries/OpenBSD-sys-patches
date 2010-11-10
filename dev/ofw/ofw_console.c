@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ofw/ofw_console.c,v 1.41 2008/10/27 11:45:31 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ofw/ofw_console.c,v 1.42 2009/05/29 06:41:23 ed Exp $");
 
 #include "opt_comconsole.h"
 #include "opt_ofw.h"
@@ -95,7 +95,7 @@ cn_drvinit(void *unused)
 		 * XXX: This is a hack and it may result in two /dev/ttya
 		 * XXX: devices on platforms where the sab driver works.
 		 */
-		tp = tty_alloc(&ofw_ttydevsw, NULL, NULL);
+		tp = tty_alloc(&ofw_ttydevsw, NULL);
 		tty_makedev(tp, NULL, "%s", output);
 		tty_makealias(tp, "ofwcons");
 	}

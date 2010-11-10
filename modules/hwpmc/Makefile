@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/modules/hwpmc/Makefile,v 1.7 2008/11/27 09:00:47 jkoshy Exp $
+# $FreeBSD: src/sys/modules/hwpmc/Makefile,v 1.8 2010/04/02 13:23:49 fabient Exp $
 #
 
 .PATH: ${.CURDIR}/../../dev/hwpmc
@@ -10,7 +10,7 @@ SRCS=	hwpmc_mod.c hwpmc_logging.c vnode_if.h
 
 .if ${MACHINE_ARCH} == "amd64"
 SRCS+=	hwpmc_amd.c hwpmc_core.c hwpmc_intel.c hwpmc_piv.c hwpmc_tsc.c
-SRCS+=	hwpmc_x86.c
+SRCS+=	hwpmc_x86.c hwpmc_uncore.c
 SRCS+=	device_if.h bus_if.h
 .endif
 
@@ -20,7 +20,7 @@ SRCS+=	hwpmc_arm.c
 
 .if ${MACHINE_ARCH} == "i386"
 SRCS+=	hwpmc_amd.c hwpmc_core.c hwpmc_intel.c hwpmc_piv.c hwpmc_ppro.c
-SRCS+=	hwpmc_pentium.c hwpmc_tsc.c hwpmc_x86.c
+SRCS+=	hwpmc_pentium.c hwpmc_tsc.c hwpmc_x86.c hwpmc_uncore.c
 SRCS+=	device_if.h bus_if.h
 .endif
 

@@ -23,14 +23,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/flash/at45d.c,v 1.2 2007/10/20 23:23:15 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/flash/at45d.c,v 1.3 2009/05/13 18:31:28 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bio.h>
 #include <sys/bus.h>
 #include <sys/conf.h>
-#include <sys/gpio.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
 #include <sys/lock.h>

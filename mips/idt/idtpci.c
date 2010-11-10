@@ -62,7 +62,7 @@
  */ 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/idt/idtpci.c,v 1.3 2009/01/14 22:46:13 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/idt/idtpci.c,v 1.4 2009/06/17 10:26:37 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -287,7 +287,7 @@ idtpci_maxslots(device_t dev)
 }
 
 static uint32_t
-idtpci_read_config(device_t dev, int bus, int slot, int func, int reg,
+idtpci_read_config(device_t dev, u_int bus, u_int slot, u_int func, u_int reg,
     int bytes)
 {
 	uint32_t data;
@@ -343,7 +343,7 @@ idtpci_read_config(device_t dev, int bus, int slot, int func, int reg,
 }
 
 static void
-idtpci_write_config(device_t dev, int bus, int slot, int func, int reg,
+idtpci_write_config(device_t dev, u_int bus, u_int slot, u_int func, u_int reg,
     uint32_t data, int bytes)
 {
 	bus_addr_t addr;

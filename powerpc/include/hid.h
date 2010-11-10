@@ -24,7 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $NetBSD: hid.h,v 1.2 2001/08/22 21:05:25 matt Exp $
- * $FreeBSD: src/sys/powerpc/include/hid.h,v 1.5 2008/03/02 17:05:57 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/hid.h,v 1.9 2009/10/24 18:33:01 nwhitehorn Exp $
  */
 
 #ifndef _POWERPC_HID_H_
@@ -32,7 +32,7 @@
 
 /* Hardware Implementation Dependent registers for the PowerPC */
 
-#define HID0_EMCP	0x80000000  /* Enable MCP */
+#define HID0_EMCP	0x80000000  /* Enable machine check pin */
 #define HID0_DBP	0x40000000  /* Disable 60x bus parity generation */
 #define HID0_EBA	0x20000000  /* Enable 60x bus address parity checking */
 #define HID0_EBD	0x10000000  /* Enable 60x bus data parity checking */
@@ -41,12 +41,14 @@
 #define HID0_ECLK	0x02000000  /* CLK_OUT clock type selection */
 #define HID0_PAR	0x01000000  /* Disable precharge of ARTRY */
 #define HID0_STEN	0x01000000  /* Software table search enable (7450) */
+#define HID0_DEEPNAP	0x01000000  /* Enable deep nap mode (970) */
 #define HID0_HBATEN	0x00800000  /* High BAT enable (74[45][578])  */
 #define HID0_DOZE	0x00800000  /* Enable doze mode */
 #define HID0_NAP	0x00400000  /* Enable nap mode */
 #define HID0_SLEEP	0x00200000  /* Enable sleep mode */
 #define HID0_DPM	0x00100000  /* Enable Dynamic power management */
 #define HID0_RISEG	0x00080000  /* Read I-SEG */
+#define HID0_TG		0x00040000  /* Timebase Granularity (OEA64) */
 #define HID0_BHTCLR	0x00040000  /* Clear branch history table (7450) */
 #define HID0_EIEC	0x00040000  /* Enable internal error checking */
 #define HID0_XAEN	0x00020000  /* Enable eXtended Addressing (7450) */
@@ -72,9 +74,9 @@
 
 #define HID0_AIM_TBEN	0x04000000  /* Time base enable (7450) */
 
-#define HID0_BOOKE_TBEN		0x00004000 /* Time Base and decr. enable */
-#define HID0_BOOKE_SEL_TBCLK	0x00002000 /* Select Time Base clock */
-#define HID0_BOOKE_MAS7UPDEN	0x00000080 /* Enable MAS7 update (e500v2) */
+#define HID0_E500_TBEN		0x00004000 /* Time Base and decr. enable */
+#define HID0_E500_SEL_TBCLK	0x00002000 /* Select Time Base clock */
+#define HID0_E500_MAS7UPDEN	0x00000080 /* Enable MAS7 update (e500v2) */
 
 #define HID0_BITMASK							\
     "\20"								\
@@ -96,6 +98,12 @@
     "\030DOZE\027NAP\026SLEEP\025b11\024b12\023b13\022b14\021b15"	\
     "\020b16\017TBEN\016SEL_TBCLK\015b19\014b20\013b21\012b22\011b23"	\
     "\010EN_MAS7_UPDATE\007DCFA\006b26\005b27\004b28\003b29\002b30\001NOPTI"
+
+#define HID0_970_BITMASK						\
+    "\20"								\
+    "\040ONEPPC\037SINGLE\036ISYNCSC\035SERGP\031DEEPNAP\030DOZE"	\
+    "\027NAP\025DPM\023TG\022HANGDETECT\021NHR\020INORDER"		\
+    "\016TBCTRL\015TBEN\012CIABREN\011HDICEEN\001ENATTN"		
 
 /*
  *  HID0 bit definitions per cpu model
@@ -145,5 +153,14 @@
  * 7457: HBATEN = High BAT Enable
  * 7457: XBSEN = Extended BAT Block Size Enable
  */
+
+#define HID1_E500_ABE	0x00001000  /* Address broadcast enable */
+#define HID1_E500_ASTME	0x00002000  /* Address bus streaming mode enable */
+#define HID1_E500_RFXE	0x00020000  /* Read fault exception enable */
+
+#define HID0_E500_DEFAULT_SET	(HID0_EMCP | HID0_E500_TBEN)
+#define HID1_E500_DEFAULT_SET	(HID1_E500_ABE | HID1_E500_ASTME)
+
+#define HID5_970_DCBZ_SIZE_HI	0x01000000	/* dcbz does a 32-byte store */
 
 #endif /* _POWERPC_HID_H_ */

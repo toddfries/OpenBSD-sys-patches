@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.401 2009/02/21 20:57:25 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.423 2010/05/24 14:26:57 alc Exp $");
 
 #include "opt_vm.h"
 
@@ -77,6 +77,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.401 2009/02/21 20:57:25 alc Exp $
 #include <sys/mutex.h>
 #include <sys/proc.h>		/* for curproc, pageproc */
 #include <sys/socket.h>
+#include <sys/resourcevar.h>
 #include <sys/vnode.h>
 #include <sys/vmmeter.h>
 #include <sys/sx.h>
@@ -221,7 +222,10 @@ _vm_object_allocate(objtype_t type, vm_pindex_t size, vm_object_t object)
 	object->size = size;
 	object->generation = 1;
 	object->ref_count = 1;
+	object->memattr = VM_MEMATTR_DEFAULT;
 	object->flags = 0;
+	object->uip = NULL;
+	object->charge = 0;
 	if ((object->type == OBJT_DEFAULT) || (object->type == OBJT_SWAP))
 		object->flags = OBJ_ONEMAPPING;
 	object->pg_color = 0;
@@ -285,6 +289,37 @@ vm_object_clear_flag(vm_object_t object, u_short bits)
 
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
 	object->flags &= ~bits;
+}
+
+/*
+ *	Sets the default memory attribute for the specified object.  Pages
+ *	that are allocated to this object are by default assigned this memory
+ *	attribute.
+ *
+ *	Presently, this function must be called before any pages are allocated
+ *	to the object.  In the future, this requirement may be relaxed for
+ *	"default" and "swap" objects.
+ */
+int
+vm_object_set_memattr(vm_object_t object, vm_memattr_t memattr)
+{
+
+	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
+	switch (object->type) {
+	case OBJT_DEFAULT:
+	case OBJT_DEVICE:
+	case OBJT_PHYS:
+	case OBJT_SG:
+	case OBJT_SWAP:
+	case OBJT_VNODE:
+		if (!TAILQ_EMPTY(&object->memq))
+			return (KERN_FAILURE);
+		break;
+	case OBJT_DEAD:
+		return (KERN_INVALID_ARGUMENT);
+	}
+	object->memattr = memattr;
+	return (KERN_SUCCESS);
 }
 
 void
@@ -609,6 +644,20 @@ vm_object_destroy(vm_object_t object)
 	mtx_unlock(&vm_object_list_mtx);
 
 	/*
+	 * Release the allocation charge.
+	 */
+	if (object->uip != NULL) {
+		KASSERT(object->type == OBJT_DEFAULT ||
+		    object->type == OBJT_SWAP,
+		    ("vm_object_terminate: non-swap obj %p has uip",
+		     object));
+		swap_release_by_uid(object->charge, object->uip);
+		object->charge = 0;
+		uifree(object->uip);
+		object->uip = NULL;
+	}
+
+	/*
 	 * Free the space for the object.
 	 */
 	uma_zfree(obj_zone, object);
@@ -668,19 +717,18 @@ vm_object_terminate(vm_object_t object)
 	 * removes them from paging queues. Don't free wired pages, just
 	 * remove them from the object. 
 	 */
-	vm_page_lock_queues();
 	while ((p = TAILQ_FIRST(&object->memq)) != NULL) {
 		KASSERT(!p->busy && (p->oflags & VPO_BUSY) == 0,
 			("vm_object_terminate: freeing busy page %p "
 			"p->busy = %d, p->oflags %x\n", p, p->busy, p->oflags));
+		vm_page_lock(p);
 		if (p->wire_count == 0) {
 			vm_page_free(p);
-			cnt.v_pfree++;
-		} else {
+			PCPU_INC(cnt.v_pfree);
+		} else
 			vm_page_remove(p);
-		}
+		vm_page_unlock(p);
 	}
-	vm_page_unlock_queues();
 
 #if VM_NRESERVLEVEL > 0
 	if (__predict_false(!LIST_EMPTY(&object->rvq)))
@@ -723,10 +771,11 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 	int pagerflags;
 	int curgeneration;
 
+	mtx_assert(&vm_page_queue_mtx, MA_NOTOWNED);
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
-	if (object->type != OBJT_VNODE ||
-		(object->flags & OBJ_MIGHTBEDIRTY) == 0)
+	if ((object->flags & OBJ_MIGHTBEDIRTY) == 0)
 		return;
+	KASSERT(object->type == OBJT_VNODE, ("Not a vnode object"));
 
 	pagerflags = (flags & (OBJPC_SYNC | OBJPC_INVAL)) ? VM_PAGER_PUT_SYNC : VM_PAGER_CLUSTER_OK;
 	pagerflags |= (flags & OBJPC_INVAL) ? VM_PAGER_PUT_INVAL : 0;
@@ -740,7 +789,6 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 		tend = end;
 	}
 
-	vm_page_lock_queues();
 	/*
 	 * If the caller is smart and only msync()s a range he knows is
 	 * dirty, we may be able to avoid an object scan.  This results in
@@ -770,7 +818,7 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 				continue;
 			}
 			vm_page_test_dirty(p);
-			if ((p->dirty & p->valid) == 0) {
+			if (p->dirty == 0) {
 				if (--scanlimit == 0)
 					break;
 				++tscan;
@@ -793,6 +841,7 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 			 * page (i.e. had to sleep).
 			 */
 			tscan += vm_object_page_collect_flush(object, p, curgeneration, pagerflags);
+
 		}
 
 		/*
@@ -802,7 +851,6 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 		 * return immediately.
 		 */
 		if (tscan >= tend && (tstart || tend < object->size)) {
-			vm_page_unlock_queues();
 			vm_object_clear_flag(object, OBJ_CLEANING);
 			return;
 		}
@@ -826,18 +874,8 @@ vm_object_page_clean(vm_object_t object, vm_pindex_t start, vm_pindex_t end, int
 			pmap_remove_write(p);
 	}
 
-	if (clearobjflags && (tstart == 0) && (tend == object->size)) {
-		struct vnode *vp;
-
+	if (clearobjflags && (tstart == 0) && (tend == object->size))
 		vm_object_clear_flag(object, OBJ_MIGHTBEDIRTY);
-		if (object->type == OBJT_VNODE &&
-		    (vp = (struct vnode *)object->handle) != NULL) {
-			VI_LOCK(vp);
-			if (vp->v_iflag & VI_OBJDIRTY)
-				vp->v_iflag &= ~VI_OBJDIRTY;
-			VI_UNLOCK(vp);
-		}
-	}
 
 rescan:
 	curgeneration = object->generation;
@@ -857,11 +895,10 @@ again:
 		}
 
 		vm_page_test_dirty(p);
-		if ((p->dirty & p->valid) == 0) {
+		if (p->dirty == 0) {
 			p->oflags &= ~VPO_CLEANCHK;
 			continue;
 		}
-
 		/*
 		 * If we have been asked to skip nosync pages and this is a
 		 * nosync page, skip it.  Note that the object flags were
@@ -884,12 +921,10 @@ again:
 		 * Try to optimize the next page.  If we can't we pick up
 		 * our (random) scan where we left off.
 		 */
-		if (msync_flush_flags & MSYNC_FLUSH_SOFTSEQ) {
+		if (msync_flush_flags & MSYNC_FLUSH_SOFTSEQ)
 			if ((p = vm_page_lookup(object, pi + n)) != NULL)
 				goto again;
-		}
 	}
-	vm_page_unlock_queues();
 #if 0
 	VOP_FSYNC(vp, (pagerflags & VM_PAGER_PUT_SYNC)?MNT_WAIT:0, curproc);
 #endif
@@ -911,10 +946,11 @@ vm_object_page_collect_flush(vm_object_t object, vm_page_t p, int curgeneration,
 	vm_page_t mab[vm_pageout_page_count];
 	vm_page_t ma[vm_pageout_page_count];
 
-	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	mtx_assert(&vm_page_queue_mtx, MA_NOTOWNED);
+	vm_page_lock_assert(p, MA_NOTOWNED);
+	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
 	pi = p->pindex;
 	while (vm_page_sleep_if_busy(p, TRUE, "vpcwai")) {
-		vm_page_lock_queues();
 		if (object->generation != curgeneration) {
 			return(0);
 		}
@@ -930,7 +966,7 @@ vm_object_page_collect_flush(vm_object_t object, vm_page_t p, int curgeneration,
 				(tp->busy != 0))
 				break;
 			vm_page_test_dirty(tp);
-			if ((tp->dirty & tp->valid) == 0) {
+			if (tp->dirty == 0) {
 				tp->oflags &= ~VPO_CLEANCHK;
 				break;
 			}
@@ -954,7 +990,7 @@ vm_object_page_collect_flush(vm_object_t object, vm_page_t p, int curgeneration,
 					(tp->busy != 0))
 					break;
 				vm_page_test_dirty(tp);
-				if ((tp->dirty & tp->valid) == 0) {
+				if (tp->dirty == 0) {
 					tp->oflags &= ~VPO_CLEANCHK;
 					break;
 				}
@@ -982,7 +1018,7 @@ vm_object_page_collect_flush(vm_object_t object, vm_page_t p, int curgeneration,
 
 	vm_pageout_flush(ma, runlen, pagerflags);
 	for (i = 0; i < runlen; i++) {
-		if (ma[i]->valid & ma[i]->dirty) {
+		if (ma[i]->dirty) {
 			pmap_remove_write(ma[i]);
 			ma[i]->oflags |= VPO_CLEANCHK;
 
@@ -1123,7 +1159,8 @@ shadowlookup:
 			    (tobject->flags & OBJ_ONEMAPPING) == 0) {
 				goto unlock_tobject;
 			}
-		}
+		} else if (tobject->type == OBJT_PHYS)
+			goto unlock_tobject;
 		m = vm_page_lookup(tobject, tpindex);
 		if (m == NULL && advise == MADV_WILLNEED) {
 			/*
@@ -1150,28 +1187,35 @@ shadowlookup:
 				VM_OBJECT_UNLOCK(tobject);
 			tobject = backing_object;
 			goto shadowlookup;
-		}
+		} else if (m->valid != VM_PAGE_BITS_ALL)
+			goto unlock_tobject;
 		/*
-		 * If the page is busy or not in a normal active state,
-		 * we skip it.  If the page is not managed there are no
-		 * page queues to mess with.  Things can break if we mess
-		 * with pages in any of the below states.
+		 * If the page is not in a normal state, skip it.
 		 */
-		vm_page_lock_queues();
-		if (m->hold_count ||
-		    m->wire_count ||
-		    (m->flags & PG_UNMANAGED) ||
-		    m->valid != VM_PAGE_BITS_ALL) {
-			vm_page_unlock_queues();
+		vm_page_lock(m);
+		if (m->hold_count != 0 || m->wire_count != 0) {
+			vm_page_unlock(m);
 			goto unlock_tobject;
 		}
+		KASSERT((m->flags & (PG_FICTITIOUS | PG_UNMANAGED)) == 0,
+		    ("vm_object_madvise: page %p is not managed", m));
 		if ((m->oflags & VPO_BUSY) || m->busy) {
-			vm_page_flag_set(m, PG_REFERENCED);
-			vm_page_unlock_queues();
+			if (advise == MADV_WILLNEED) {
+				/*
+				 * Reference the page before unlocking and
+				 * sleeping so that the page daemon is less
+				 * likely to reclaim it. 
+				 */
+				vm_page_lock_queues();
+				vm_page_flag_set(m, PG_REFERENCED);
+				vm_page_unlock_queues();
+			}
+			vm_page_unlock(m);
 			if (object != tobject)
 				VM_OBJECT_UNLOCK(object);
 			m->oflags |= VPO_WANTED;
-			msleep(m, VM_OBJECT_MTX(tobject), PDROP | PVM, "madvpo", 0);
+			msleep(m, VM_OBJECT_MTX(tobject), PDROP | PVM, "madvpo",
+			    0);
 			VM_OBJECT_LOCK(object);
   			goto relookup;
 		}
@@ -1200,7 +1244,7 @@ shadowlookup:
 			m->act_count = 0;
 			vm_page_dontneed(m);
 		}
-		vm_page_unlock_queues();
+		vm_page_unlock(m);
 		if (advise == MADV_FREE && tobject->type == OBJT_SWAP)
 			swap_pager_freespace(tobject, tpindex, 1);
 unlock_tobject:
@@ -1347,6 +1391,14 @@ vm_object_split(vm_map_entry_t entry)
 			orig_object->backing_object_offset + entry->offset;
 		new_object->backing_object = source;
 	}
+	if (orig_object->uip != NULL) {
+		new_object->uip = orig_object->uip;
+		uihold(orig_object->uip);
+		new_object->charge = ptoa(size);
+		KASSERT(orig_object->charge >= ptoa(size),
+		    ("orig_object->charge < 0"));
+		orig_object->charge -= ptoa(size);
+	}
 retry:
 	if ((m = TAILQ_FIRST(&orig_object->memq)) != NULL) {
 		if (m->pindex < offidxstart) {
@@ -1355,7 +1407,6 @@ retry:
 				m = TAILQ_NEXT(m, listq);
 		}
 	}
-	vm_page_lock_queues();
 	for (; m != NULL && (idx = m->pindex - offidxstart) < size;
 	    m = m_next) {
 		m_next = TAILQ_NEXT(m, listq);
@@ -1368,19 +1419,18 @@ retry:
 		 * not be changed by this operation.
 		 */
 		if ((m->oflags & VPO_BUSY) || m->busy) {
-			vm_page_flag_set(m, PG_REFERENCED);
-			vm_page_unlock_queues();
 			VM_OBJECT_UNLOCK(new_object);
 			m->oflags |= VPO_WANTED;
 			msleep(m, VM_OBJECT_MTX(orig_object), PVM, "spltwt", 0);
 			VM_OBJECT_LOCK(new_object);
 			goto retry;
 		}
+		vm_page_lock(m);
 		vm_page_rename(m, new_object, idx);
+		vm_page_unlock(m);
 		/* page automatically made dirty by rename and cache handled */
 		vm_page_busy(m);
 	}
-	vm_page_unlock_queues();
 	if (orig_object->type == OBJT_SWAP) {
 		/*
 		 * swap_pager_copy() can sleep, in which case the orig_object's
@@ -1506,9 +1556,6 @@ vm_object_backing_scan(vm_object_t object, int op)
 				}
 			} else if (op & OBSC_COLLAPSE_WAIT) {
 				if ((p->oflags & VPO_BUSY) || p->busy) {
-					vm_page_lock_queues();
-					vm_page_flag_set(p, PG_REFERENCED);
-					vm_page_unlock_queues();
 					VM_OBJECT_UNLOCK(object);
 					p->oflags |= VPO_WANTED;
 					msleep(p, VM_OBJECT_MTX(backing_object),
@@ -1551,14 +1598,14 @@ vm_object_backing_scan(vm_object_t object, int op)
 				 * Page is out of the parent object's range, we 
 				 * can simply destroy it. 
 				 */
-				vm_page_lock_queues();
+				vm_page_lock(p);
 				KASSERT(!pmap_page_is_mapped(p),
 				    ("freeing mapped page %p", p));
 				if (p->wire_count == 0)
 					vm_page_free(p);
 				else
 					vm_page_remove(p);
-				vm_page_unlock_queues();
+				vm_page_unlock(p);
 				p = next;
 				continue;
 			}
@@ -1575,14 +1622,14 @@ vm_object_backing_scan(vm_object_t object, int op)
 				 *
 				 * Leave the parent's page alone
 				 */
-				vm_page_lock_queues();
+				vm_page_lock(p);
 				KASSERT(!pmap_page_is_mapped(p),
 				    ("freeing mapped page %p", p));
 				if (p->wire_count == 0)
 					vm_page_free(p);
 				else
 					vm_page_remove(p);
-				vm_page_unlock_queues();
+				vm_page_unlock(p);
 				p = next;
 				continue;
 			}
@@ -1602,9 +1649,9 @@ vm_object_backing_scan(vm_object_t object, int op)
 			 * If the page was mapped to a process, it can remain 
 			 * mapped through the rename.
 			 */
-			vm_page_lock_queues();
+			vm_page_lock(p);
 			vm_page_rename(p, object, new_pindex);
-			vm_page_unlock_queues();
+			vm_page_unlock(p);
 			/* page automatically made dirty by rename */
 		}
 		p = next;
@@ -1757,18 +1804,11 @@ vm_object_collapse(vm_object_t object)
 			 * and no object references within it, all that is
 			 * necessary is to dispose of it.
 			 */
-			KASSERT(backing_object->ref_count == 1, ("backing_object %p was somehow re-referenced during collapse!", backing_object));
+			KASSERT(backing_object->ref_count == 1, (
+"backing_object %p was somehow re-referenced during collapse!",
+			    backing_object));
 			VM_OBJECT_UNLOCK(backing_object);
-
-			mtx_lock(&vm_object_list_mtx);
-			TAILQ_REMOVE(
-			    &vm_object_list, 
-			    backing_object,
-			    object_list
-			);
-			mtx_unlock(&vm_object_list_mtx);
-
-			uma_zfree(obj_zone, backing_object);
+			vm_object_destroy(backing_object);
 
 			object_collapses++;
 		} else {
@@ -1843,7 +1883,8 @@ vm_object_collapse(vm_object_t object)
  *	that contain managed pages.  There are two exceptions.  First,
  *	it may be performed on the kernel and kmem objects.  Second,
  *	it may be used by msync(..., MS_INVALIDATE) to invalidate
- *	device-backed pages.
+ *	device-backed pages.  In both of these cases, "clean_only"
+ *	must be FALSE.
  *
  *	The object must be locked.
  */
@@ -1876,7 +1917,7 @@ again:
 				p = TAILQ_NEXT(p, listq);
 		}
 	}
-	vm_page_lock_queues();
+
 	/*
 	 * Assert: the variable p is either (1) the page with the
 	 * least pindex greater than or equal to the parameter pindex
@@ -1895,6 +1936,7 @@ again:
 		 * cannot be freed.  They can, however, be invalidated
 		 * if "clean_only" is FALSE.
 		 */
+		vm_page_lock(p);
 		if ((wirings = p->wire_count) != 0 &&
 		    (wirings = pmap_page_wired_mappings(p)) != p->wire_count) {
 			/* Fictitious pages do not have managed mappings. */
@@ -1902,8 +1944,11 @@ again:
 				pmap_remove_all(p);
 			/* Account for removal of managed, wired mappings. */
 			p->wire_count -= wirings;
-			if (!clean_only)
+			if (!clean_only) {
 				p->valid = 0;
+				vm_page_undirty(p);
+			}
+			vm_page_unlock(p);
 			continue;
 		}
 		if (vm_page_sleep_if_busy(p, TRUE, "vmopar"))
@@ -1912,20 +1957,71 @@ again:
 		    ("vm_object_page_remove: page %p is fictitious", p));
 		if (clean_only && p->valid) {
 			pmap_remove_write(p);
-			if (p->valid & p->dirty)
+			if (p->dirty) {
+				vm_page_unlock(p);
 				continue;
+			}
 		}
 		pmap_remove_all(p);
 		/* Account for removal of managed, wired mappings. */
 		if (wirings != 0)
 			p->wire_count -= wirings;
 		vm_page_free(p);
+		vm_page_unlock(p);
 	}
-	vm_page_unlock_queues();
 	vm_object_pip_wakeup(object);
 skipmemq:
 	if (__predict_false(object->cache != NULL))
 		vm_page_cache_free(object, start, end);
+}
+
+/*
+ *	Populate the specified range of the object with valid pages.  Returns
+ *	TRUE if the range is successfully populated and FALSE otherwise.
+ *
+ *	Note: This function should be optimized to pass a larger array of
+ *	pages to vm_pager_get_pages() before it is applied to a non-
+ *	OBJT_DEVICE object.
+ *
+ *	The object must be locked.
+ */
+boolean_t
+vm_object_populate(vm_object_t object, vm_pindex_t start, vm_pindex_t end)
+{
+	vm_page_t m, ma[1];
+	vm_pindex_t pindex;
+	int rv;
+
+	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
+	for (pindex = start; pindex < end; pindex++) {
+		m = vm_page_grab(object, pindex, VM_ALLOC_NORMAL |
+		    VM_ALLOC_RETRY);
+		if (m->valid != VM_PAGE_BITS_ALL) {
+			ma[0] = m;
+			rv = vm_pager_get_pages(object, ma, 1, 0);
+			m = vm_page_lookup(object, pindex);
+			if (m == NULL)
+				break;
+			if (rv != VM_PAGER_OK) {
+				vm_page_lock(m);
+				vm_page_free(m);
+				vm_page_unlock(m);
+				break;
+			}
+		}
+		/*
+		 * Keep "m" busy because a subsequent iteration may unlock
+		 * the object.
+		 */
+	}
+	if (pindex > start) {
+		m = vm_page_lookup(object, start);
+		while (m != NULL && m->pindex < pindex) {
+			vm_page_wakeup(m);
+			m = TAILQ_NEXT(m, listq);
+		}
+	}
+	return (pindex == end);
 }
 
 /*
@@ -1943,13 +2039,15 @@ skipmemq:
  *		prev_offset	Offset into prev_object
  *		prev_size	Size of reference to prev_object
  *		next_size	Size of reference to the second object
+ *		reserved	Indicator that extension region has
+ *				swap accounted for
  *
  *	Conditions:
  *	The object must *not* be locked.
  */
 boolean_t
 vm_object_coalesce(vm_object_t prev_object, vm_ooffset_t prev_offset,
-	vm_size_t prev_size, vm_size_t next_size)
+    vm_size_t prev_size, vm_size_t next_size, boolean_t reserved)
 {
 	vm_pindex_t next_pindex;
 
@@ -1988,6 +2086,28 @@ vm_object_coalesce(vm_object_t prev_object, vm_ooffset_t prev_offset,
 	}
 
 	/*
+	 * Account for the charge.
+	 */
+	if (prev_object->uip != NULL) {
+
+		/*
+		 * If prev_object was charged, then this mapping,
+		 * althought not charged now, may become writable
+		 * later. Non-NULL uip in the object would prevent
+		 * swap reservation during enabling of the write
+		 * access, so reserve swap now. Failed reservation
+		 * cause allocation of the separate object for the map
+		 * entry, and swap reservation for this entry is
+		 * managed in appropriate time.
+		 */
+		if (!reserved && !swap_reserve_by_uid(ptoa(next_size),
+		    prev_object->uip)) {
+			return (FALSE);
+		}
+		prev_object->charge += ptoa(next_size);
+	}
+
+	/*
 	 * Remove any pages that may still be in the object from a previous
 	 * deallocation.
 	 */
@@ -1998,6 +2118,16 @@ vm_object_coalesce(vm_object_t prev_object, vm_ooffset_t prev_offset,
 		if (prev_object->type == OBJT_SWAP)
 			swap_pager_freespace(prev_object,
 					     next_pindex, next_size);
+#if 0
+		if (prev_object->uip != NULL) {
+			KASSERT(prev_object->charge >=
+			    ptoa(prev_object->size - next_pindex),
+			    ("object %p overcharged 1 %jx %jx", prev_object,
+				(uintmax_t)next_pindex, (uintmax_t)next_size));
+			prev_object->charge -= ptoa(prev_object->size -
+			    next_pindex);
+		}
+#endif
 	}
 
 	/*
@@ -2013,18 +2143,12 @@ vm_object_coalesce(vm_object_t prev_object, vm_ooffset_t prev_offset,
 void
 vm_object_set_writeable_dirty(vm_object_t object)
 {
-	struct vnode *vp;
 
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
-	if ((object->flags & OBJ_MIGHTBEDIRTY) != 0)
+	if (object->type != OBJT_VNODE ||
+	    (object->flags & OBJ_MIGHTBEDIRTY) != 0)
 		return;
 	vm_object_set_flag(object, OBJ_MIGHTBEDIRTY);
-	if (object->type == OBJT_VNODE &&
-	    (vp = (struct vnode *)object->handle) != NULL) {
-		VI_LOCK(vp);
-		vp->v_iflag |= VI_OBJDIRTY;
-		VI_UNLOCK(vp);
-	}
 }
 
 #include "opt_ddb.h"
@@ -2147,9 +2271,10 @@ DB_SHOW_COMMAND(object, vm_object_print_static)
 		return;
 
 	db_iprintf(
-	    "Object %p: type=%d, size=0x%jx, res=%d, ref=%d, flags=0x%x\n",
+	    "Object %p: type=%d, size=0x%jx, res=%d, ref=%d, flags=0x%x uip %d charge %jx\n",
 	    object, (int)object->type, (uintmax_t)object->size,
-	    object->resident_page_count, object->ref_count, object->flags);
+	    object->resident_page_count, object->ref_count, object->flags,
+	    object->uip ? object->uip->ui_uid : -1, (uintmax_t)object->charge);
 	db_iprintf(" sref=%d, backing_object(%d)=(%p)+0x%jx\n",
 	    object->shadow_count, 
 	    object->backing_object ? object->backing_object->ref_count : 0,
@@ -2196,16 +2321,13 @@ vm_object_print(
 DB_SHOW_COMMAND(vmopag, vm_object_print_pages)
 {
 	vm_object_t object;
-	int nl = 0;
-	int c;
+	vm_pindex_t fidx;
+	vm_paddr_t pa;
+	vm_page_t m, prev_m;
+	int rcount, nl, c;
 
+	nl = 0;
 	TAILQ_FOREACH(object, &vm_object_list, object_list) {
-		vm_pindex_t idx, fidx;
-		vm_pindex_t osize;
-		vm_paddr_t pa = -1;
-		int rcount;
-		vm_page_t m;
-
 		db_printf("new object: %p\n", (void *)object);
 		if (nl > 18) {
 			c = cngetc();
@@ -2216,12 +2338,12 @@ DB_SHOW_COMMAND(vmopag, vm_object_print_pages)
 		nl++;
 		rcount = 0;
 		fidx = 0;
-		osize = object->size;
-		if (osize > 128)
-			osize = 128;
-		for (idx = 0; idx < osize; idx++) {
-			m = vm_page_lookup(object, idx);
-			if (m == NULL) {
+		pa = -1;
+		TAILQ_FOREACH(m, &object->memq, listq) {
+			if (m->pindex > 128)
+				break;
+			if ((prev_m = TAILQ_PREV(m, pglist, listq)) != NULL &&
+			    prev_m->pindex + 1 != m->pindex) {
 				if (rcount) {
 					db_printf(" index(%ld)run(%d)pa(0x%lx)\n",
 						(long)fidx, rcount, (long)pa);
@@ -2234,10 +2356,7 @@ DB_SHOW_COMMAND(vmopag, vm_object_print_pages)
 					nl++;
 					rcount = 0;
 				}
-				continue;
-			}
-
-				
+			}				
 			if (rcount &&
 				(VM_PAGE_TO_PHYS(m) == pa + rcount * PAGE_SIZE)) {
 				++rcount;
@@ -2254,7 +2373,7 @@ DB_SHOW_COMMAND(vmopag, vm_object_print_pages)
 				}
 				nl++;
 			}
-			fidx = idx;
+			fidx = m->pindex;
 			pa = VM_PAGE_TO_PHYS(m);
 			rcount = 1;
 		}

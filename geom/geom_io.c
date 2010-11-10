@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_io.c,v 1.78 2008/09/18 15:02:19 sbruno Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_io.c,v 1.85 2010/06/10 17:49:36 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -58,6 +58,15 @@ static struct g_bioq g_bio_run_task;
 
 static u_int pace;
 static uma_zone_t	biozone;
+
+/*
+ * The head of the list of classifiers used in g_io_request.
+ * Use g_register_classifier() and g_unregister_classifier()
+ * to add/remove entries to the list.
+ * Classifiers are invoked in registration order.
+ */
+static TAILQ_HEAD(g_classifier_tailq, g_classifier_hook)
+    g_classifier_tailq = TAILQ_HEAD_INITIALIZER(g_classifier_tailq);
 
 #include <machine/atomic.h>
 
@@ -172,6 +181,9 @@ g_clone_bio(struct bio *bp)
 		bp2->bio_offset = bp->bio_offset;
 		bp2->bio_data = bp->bio_data;
 		bp2->bio_attribute = bp->bio_attribute;
+		/* Inherit classification info from the parent */
+		bp2->bio_classifier1 = bp->bio_classifier1;
+		bp2->bio_classifier2 = bp->bio_classifier2;
 		bp->bio_children++;
 	}
 #ifdef KTR
@@ -297,8 +309,8 @@ g_io_check(struct bio *bp)
 	case BIO_READ:
 	case BIO_WRITE:
 	case BIO_DELETE:
-		/* Zero sectorsize is a probably lack of media */
-		if (pp->sectorsize == 0)
+		/* Zero sectorsize or mediasize is probably a lack of media. */
+		if (pp->sectorsize == 0 || pp->mediasize == 0)
 			return (ENXIO);
 		/* Reject I/O not on sector boundary */
 		if (bp->bio_offset % pp->sectorsize)
@@ -318,10 +330,68 @@ g_io_check(struct bio *bp)
 	return (0);
 }
 
+/*
+ * bio classification support.
+ *
+ * g_register_classifier() and g_unregister_classifier()
+ * are used to add/remove a classifier from the list.
+ * The list is protected using the g_bio_run_down lock,
+ * because the classifiers are called in this path.
+ *
+ * g_io_request() passes bio's that are not already classified
+ * (i.e. those with bio_classifier1 == NULL) to g_run_classifiers().
+ * Classifiers can store their result in the two fields
+ * bio_classifier1 and bio_classifier2.
+ * A classifier that updates one of the fields should
+ * return a non-zero value.
+ * If no classifier updates the field, g_run_classifiers() sets
+ * bio_classifier1 = BIO_NOTCLASSIFIED to avoid further calls.
+ */
+
+int
+g_register_classifier(struct g_classifier_hook *hook)
+{
+
+	g_bioq_lock(&g_bio_run_down);
+	TAILQ_INSERT_TAIL(&g_classifier_tailq, hook, link);
+	g_bioq_unlock(&g_bio_run_down);
+
+	return (0);
+}
+
+void
+g_unregister_classifier(struct g_classifier_hook *hook)
+{
+	struct g_classifier_hook *entry;
+
+	g_bioq_lock(&g_bio_run_down);
+	TAILQ_FOREACH(entry, &g_classifier_tailq, link) {
+		if (entry == hook) {
+			TAILQ_REMOVE(&g_classifier_tailq, hook, link);
+			break;
+		}
+	}
+	g_bioq_unlock(&g_bio_run_down);
+}
+
+static void
+g_run_classifiers(struct bio *bp)
+{
+	struct g_classifier_hook *hook;
+	int classified = 0;
+
+	TAILQ_FOREACH(hook, &g_classifier_tailq, link)
+		classified |= hook->func(hook->arg, bp);
+
+	if (!classified)
+		bp->bio_classifier1 = BIO_NOTCLASSIFIED;
+}
+
 void
 g_io_request(struct bio *bp, struct g_consumer *cp)
 {
 	struct g_provider *pp;
+	int first;
 
 	KASSERT(cp != NULL, ("NULL cp in g_io_request"));
 	KASSERT(bp != NULL, ("NULL bp in g_io_request"));
@@ -373,14 +443,23 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 	    ("Bio already on queue bp=%p", bp));
 	bp->bio_flags |= BIO_ONQUEUE;
 
-	binuptime(&bp->bio_t0);
+	if (g_collectstats)
+		binuptime(&bp->bio_t0);
+	else
+		getbinuptime(&bp->bio_t0);
 
 	/*
 	 * The statistics collection is lockless, as such, but we
 	 * can not update one instance of the statistics from more
 	 * than one thread at a time, so grab the lock first.
+	 *
+	 * We also use the lock to protect the list of classifiers.
 	 */
 	g_bioq_lock(&g_bio_run_down);
+
+	if (!TAILQ_EMPTY(&g_classifier_tailq) && !bp->bio_classifier1)
+		g_run_classifiers(bp);
+
 	if (g_collectstats & 1)
 		devstat_start_transaction(pp->stat, &bp->bio_t0);
 	if (g_collectstats & 2)
@@ -388,12 +467,14 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 
 	pp->nstart++;
 	cp->nstart++;
+	first = TAILQ_EMPTY(&g_bio_run_down.bio_queue);
 	TAILQ_INSERT_TAIL(&g_bio_run_down.bio_queue, bp, bio_queue);
 	g_bio_run_down.bio_queue_length++;
 	g_bioq_unlock(&g_bio_run_down);
 
 	/* Pass it on down. */
-	wakeup(&g_wait_down);
+	if (first)
+		wakeup(&g_wait_down);
 }
 
 void
@@ -401,18 +482,11 @@ g_io_deliver(struct bio *bp, int error)
 {
 	struct g_consumer *cp;
 	struct g_provider *pp;
+	int first;
 
 	KASSERT(bp != NULL, ("NULL bp in g_io_deliver"));
 	pp = bp->bio_to;
 	KASSERT(pp != NULL, ("NULL bio_to in g_io_deliver"));
-#ifdef DIAGNOSTIC
-	KASSERT(bp->bio_caller1 == bp->_bio_caller1,
-	    ("bio_caller1 used by the provider %s", pp->name));
-	KASSERT(bp->bio_caller2 == bp->_bio_caller2,
-	    ("bio_caller2 used by the provider %s", pp->name));
-	KASSERT(bp->bio_cflags == bp->_bio_cflags,
-	    ("bio_cflags used by the provider %s", pp->name));
-#endif
 	cp = bp->bio_from;
 	if (cp == NULL) {
 		bp->bio_error = error;
@@ -421,6 +495,21 @@ g_io_deliver(struct bio *bp, int error)
 	}
 	KASSERT(cp != NULL, ("NULL bio_from in g_io_deliver"));
 	KASSERT(cp->geom != NULL, ("NULL bio_from->geom in g_io_deliver"));
+#ifdef DIAGNOSTIC
+	/*
+	 * Some classes - GJournal in particular - can modify bio's
+	 * private fields while the bio is in transit; G_GEOM_VOLATILE_BIO
+	 * flag means it's an expected behaviour for that particular geom.
+	 */
+	if ((cp->geom->flags & G_GEOM_VOLATILE_BIO) == 0) {
+		KASSERT(bp->bio_caller1 == bp->_bio_caller1,
+		    ("bio_caller1 used by the provider %s", pp->name));
+		KASSERT(bp->bio_caller2 == bp->_bio_caller2,
+		    ("bio_caller2 used by the provider %s", pp->name));
+		KASSERT(bp->bio_cflags == bp->_bio_cflags,
+		    ("bio_cflags used by the provider %s", pp->name));
+	}
+#endif
 	KASSERT(bp->bio_completed >= 0, ("bio_completed can't be less than 0"));
 	KASSERT(bp->bio_completed <= bp->bio_length,
 	    ("bio_completed can't be greater than bio_length"));
@@ -454,11 +543,13 @@ g_io_deliver(struct bio *bp, int error)
 	pp->nend++;
 	if (error != ENOMEM) {
 		bp->bio_error = error;
+		first = TAILQ_EMPTY(&g_bio_run_up.bio_queue);
 		TAILQ_INSERT_TAIL(&g_bio_run_up.bio_queue, bp, bio_queue);
 		bp->bio_flags |= BIO_ONQUEUE;
 		g_bio_run_up.bio_queue_length++;
 		g_bioq_unlock(&g_bio_run_up);
-		wakeup(&g_wait_up);
+		if (first)
+			wakeup(&g_wait_up);
 		return;
 	}
 	g_bioq_unlock(&g_bio_run_up);
@@ -485,7 +576,7 @@ g_io_schedule_down(struct thread *tp __unused)
 		if (bp == NULL) {
 			CTR0(KTR_GEOM, "g_down going to sleep");
 			msleep(&g_wait_down, &g_bio_run_down.bio_queue_lock,
-			    PRIBIO | PDROP, "-", hz/10);
+			    PRIBIO | PDROP, "-", 0);
 			continue;
 		}
 		CTR0(KTR_GEOM, "g_down has work to do");
@@ -590,7 +681,7 @@ g_io_schedule_up(struct thread *tp __unused)
 		}
 		CTR0(KTR_GEOM, "g_up going to sleep");
 		msleep(&g_wait_up, &g_bio_run_up.bio_queue_lock,
-		    PRIBIO | PDROP, "-", hz/10);
+		    PRIBIO | PDROP, "-", 0);
 	}
 }
 
@@ -688,19 +779,18 @@ g_print_bio(struct bio *bp)
 		return;
 	case BIO_READ:
 		cmd = "READ";
+		break;
 	case BIO_WRITE:
-		if (cmd == NULL)
-			cmd = "WRITE";
+		cmd = "WRITE";
+		break;
 	case BIO_DELETE:
-		if (cmd == NULL)
-			cmd = "DELETE";
-		printf("%s[%s(offset=%jd, length=%jd)]", pname, cmd,
-		    (intmax_t)bp->bio_offset, (intmax_t)bp->bio_length);
-		return;
+		cmd = "DELETE";
+		break;
 	default:
 		cmd = "UNKNOWN";
 		printf("%s[%s()]", pname, cmd);
 		return;
 	}
-	/* NOTREACHED */
+	printf("%s[%s(offset=%jd, length=%jd)]", pname, cmd,
+	    (intmax_t)bp->bio_offset, (intmax_t)bp->bio_length);
 }

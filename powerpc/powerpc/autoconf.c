@@ -24,8 +24,10 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_isa.h"
+
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/autoconf.c,v 1.18 2008/09/15 01:03:16 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/autoconf.c,v 1.19 2009/04/24 03:51:11 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,6 +36,12 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powerpc/autoconf.c,v 1.18 2008/09/15 01:03:1
 #include <sys/kernel.h>
 
 #include <machine/intr_machdep.h>
+
+#ifdef DEV_ISA
+extern void isa_probe_children(device_t dev);
+
+device_t isa_bus_device;
+#endif
 
 static device_t nexusdev;
 
@@ -62,6 +70,10 @@ configure(void *dummy)
 {
 
 	root_bus_configure();
+#ifdef DEV_ISA
+	if (isa_bus_device)
+		isa_probe_children(isa_bus_device);
+#endif
 }
 
 static void

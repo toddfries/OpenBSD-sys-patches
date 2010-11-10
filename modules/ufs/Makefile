@@ -1,9 +1,9 @@
-# $FreeBSD: src/sys/modules/ufs/Makefile,v 1.5 2006/12/21 21:35:49 yar Exp $
+# $FreeBSD: src/sys/modules/ufs/Makefile,v 1.6 2009/06/06 17:01:44 rwatson Exp $
 
 .PATH:	${.CURDIR}/../../ufs/ufs ${.CURDIR}/../../ufs/ffs
 
 KMOD=	ufs
-SRCS=	opt_ddb.h opt_directio.h opt_ffs.h opt_ffs_broken_fixme.h opt_mac.h \
+SRCS=	opt_ddb.h opt_directio.h opt_ffs.h opt_ffs_broken_fixme.h \
 	opt_quota.h opt_suiddir.h opt_ufs.h \
 	vnode_if.h ufs_acl.c ufs_bmap.c ufs_dirhash.c ufs_extattr.c \
 	ufs_gjournal.c ufs_inode.c ufs_lookup.c ufs_quota.c ufs_vfsops.c \

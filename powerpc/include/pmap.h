@@ -26,7 +26,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.23 2009/01/13 15:41:58 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.29 2010/05/18 21:23:51 raj Exp $
  */
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -71,6 +71,13 @@
 #include <machine/pte.h>
 #include <machine/tlb.h>
 
+struct pmap_md {
+	u_int		md_index;
+	vm_paddr_t      md_paddr;
+	vm_offset_t     md_vaddr;
+	vm_size_t       md_size;
+};
+
 #if defined(AIM)
 
 #if !defined(NPMAPS)
@@ -81,6 +88,8 @@ struct	pmap {
 	struct	mtx	pm_mtx;
 	u_int		pm_sr[16];
 	u_int		pm_active;
+	uint32_t	pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int		pm_retries;
 	u_int		pm_context;
 
 	struct pmap	*pmap_phys;
@@ -106,7 +115,9 @@ struct	md_page {
 	struct	pvo_head mdpg_pvoh;
 };
 
+#define	pmap_page_get_memattr(m)	VM_MEMATTR_DEFAULT
 #define	pmap_page_is_mapped(m)	(!LIST_EMPTY(&(m)->md.mdpg_pvoh))
+#define	pmap_page_set_memattr(m, ma)	(void)0
 
 #else
 
@@ -114,6 +125,8 @@ struct pmap {
 	struct mtx		pm_mtx;		/* pmap mutex */
 	tlbtid_t		pm_tid[MAXCPU];	/* TID to identify this pmap entries in TLB */
 	u_int			pm_active;	/* active on cpus */
+	uint32_t		pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int			pm_retries;
 	int			pm_refs;	/* ref count */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 
@@ -136,8 +149,9 @@ struct md_page {
 	TAILQ_HEAD(, pv_entry) pv_list;
 };
 
-#define MEM_REGIONS	8
+#define	pmap_page_get_memattr(m)	VM_MEMATTR_DEFAULT
 #define	pmap_page_is_mapped(m)	(!TAILQ_EMPTY(&(m)->md.pv_list))
+#define	pmap_page_set_memattr(m, ma)	(void)0
 
 #endif /* AIM */
 
@@ -161,7 +175,6 @@ void		pmap_bootstrap(vm_offset_t, vm_offset_t);
 void		pmap_kenter(vm_offset_t va, vm_offset_t pa);
 void		pmap_kremove(vm_offset_t);
 void		*pmap_mapdev(vm_offset_t, vm_size_t);
-boolean_t	pmap_page_executable(vm_page_t);
 void		pmap_unmapdev(vm_offset_t, vm_size_t);
 void		pmap_deactivate(struct thread *);
 vm_offset_t	pmap_kextract(vm_offset_t);
@@ -178,6 +191,11 @@ extern	vm_offset_t virtual_end;
 extern	vm_offset_t msgbuf_phys;
 
 extern	int pmap_bootstrapped;
+
+extern vm_offset_t pmap_dumpsys_map(struct pmap_md *, vm_size_t, vm_size_t *);
+extern void pmap_dumpsys_unmap(struct pmap_md *, vm_size_t, vm_offset_t);
+
+extern struct pmap_md *pmap_scan_md(struct pmap_md *);
 
 #endif
 

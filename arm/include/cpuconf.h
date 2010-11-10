@@ -34,7 +34,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/cpuconf.h,v 1.12 2007/11/01 10:01:15 kevlo Exp $
+ * $FreeBSD: src/sys/arm/include/cpuconf.h,v 1.16 2010/11/09 09:34:21 kevlo Exp $
  *
  */
 
@@ -61,6 +61,8 @@
 			 defined(CPU_XSCALE_80200) +			\
 			 defined(CPU_XSCALE_80321) +			\
 			 defined(CPU_XSCALE_PXA2X0) +			\
+			 defined(CPU_FA526) +				\
+			 defined(CPU_FA626TE) +				\
 			 defined(CPU_XSCALE_IXP425))
 
 /*
@@ -68,7 +70,7 @@
  */
 #if (defined(CPU_ARM7TDMI) || defined(CPU_ARM8) || defined(CPU_ARM9) ||	\
      defined(CPU_SA110) || defined(CPU_SA1100) || defined(CPU_SA1110) || \
-    defined(CPU_IXP12X0) || defined(CPU_XSCALE_IXP425))
+     defined(CPU_IXP12X0) || defined(CPU_FA526))
 #define	ARM_ARCH_4	1
 #else
 #define	ARM_ARCH_4	0
@@ -77,7 +79,8 @@
 #if (defined(CPU_ARM9E) || defined(CPU_ARM10) ||			\
      defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
      defined(CPU_XSCALE_80219) || defined(CPU_XSCALE_81342) ||		\
-     defined(CPU_XSCALE_PXA2X0))
+     defined(CPU_XSCALE_PXA2X0) || defined(CPU_XSCALE_IXP425) ||	\
+     defined(CPU_FA626TE))
 #define	ARM_ARCH_5	1
 #else
 #define	ARM_ARCH_5	0
@@ -125,7 +128,8 @@
 
 #if (defined(CPU_ARM6) || defined(CPU_ARM7) || defined(CPU_ARM7TDMI) ||	\
      defined(CPU_ARM8) || defined(CPU_ARM9) || defined(CPU_ARM9E) ||	\
-     defined(CPU_ARM10) || defined(CPU_ARM11))
+     defined(CPU_ARM10) || defined(CPU_ARM11) || defined(CPU_FA526) ||	\
+     defined(CPU_FA626TE))
 #define	ARM_MMU_GENERIC		1
 #else
 #define	ARM_MMU_GENERIC		0
@@ -138,9 +142,9 @@
 #define	ARM_MMU_SA1		0
 #endif
 
-#if(defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
-    defined(CPU_XSCALE_PXA2X0) || defined(CPU_XSCALE_IXP425) ||		\
-    defined(CPU_XSCALE_80219)) || defined(CPU_XSCALE_81342)
+#if (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) ||		\
+     defined(CPU_XSCALE_PXA2X0) || defined(CPU_XSCALE_IXP425) ||	\
+     defined(CPU_XSCALE_80219) || defined(CPU_XSCALE_81342))
 #define	ARM_MMU_XSCALE		1
 #else
 #define	ARM_MMU_XSCALE		0
@@ -159,7 +163,7 @@
  */
 
 #if (defined(CPU_XSCALE_80200) || defined(CPU_XSCALE_80321) || \
-     defined(CPU_XSCALE_80219)) || defined(CPU_XSCALE_81342)
+     defined(CPU_XSCALE_80219) || defined(CPU_XSCALE_81342))
 #define ARM_XSCALE_PMU	1
 #else
 #define ARM_XSCALE_PMU	0

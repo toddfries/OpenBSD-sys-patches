@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/ttydisc.h,v 1.6 2008/09/22 19:25:14 ed Exp $
+ * $FreeBSD: src/sys/sys/ttydisc.h,v 1.7 2009/08/23 08:04:40 ed Exp $
  */
 
 #ifndef _SYS_TTYDISC_H_
@@ -52,6 +52,7 @@ void	ttydisc_optimize(struct tty *tp);
 void	ttydisc_modem(struct tty *tp, int open);
 #define ttydisc_can_bypass(tp) ((tp)->t_flags & TF_BYPASS)
 int	ttydisc_rint(struct tty *tp, char c, int flags);
+size_t	ttydisc_rint_simple(struct tty *tp, const void *buf, size_t len);
 size_t	ttydisc_rint_bypass(struct tty *tp, const void *buf, size_t len);
 void	ttydisc_rint_done(struct tty *tp);
 size_t	ttydisc_rint_poll(struct tty *tp);

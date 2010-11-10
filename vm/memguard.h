@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2005,
  *     Bosko Milekic <bmilekic@FreeBSD.org>.  All rights reserved.
  *
@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/vm/memguard.h,v 1.3 2005/12/30 11:45:07 pjd Exp $
+ * $FreeBSD: src/sys/vm/memguard.h,v 1.4 2010/04/07 16:29:10 joel Exp $
  */
 
 extern u_int vm_memguard_divisor;

@@ -39,7 +39,7 @@
  *	from: @(#)cache.h	8.1 (Berkeley) 6/11/93
  *	from: NetBSD: cache.h,v 1.3 2000/08/01 00:28:02 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/include/cache.h,v 1.15 2008/09/02 21:13:54 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/cache.h,v 1.17 2010/05/02 19:38:17 marius Exp $
  */
 
 #ifndef _MACHINE_CACHE_H_
@@ -91,7 +91,7 @@ struct cacheinfo {
 
 struct pcpu;
 
-typedef void cache_enable_t(void);
+typedef void cache_enable_t(u_int cpu_impl);
 typedef void cache_flush_t(void);
 typedef void dcache_page_inval_t(vm_paddr_t pa);
 typedef void icache_page_inval_t(vm_paddr_t pa);
@@ -112,6 +112,10 @@ extern cache_enable_t *cache_enable;
 extern cache_flush_t *cache_flush;
 extern dcache_page_inval_t *dcache_page_inval;
 extern icache_page_inval_t *icache_page_inval;
+
+cache_flush_t zeus_cache_flush;
+dcache_page_inval_t zeus_dcache_page_inval;
+icache_page_inval_t zeus_icache_page_inval;
 
 #endif /* KERNEL */
 

@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.15 2009/02/27 13:29:18 bz Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.20 2009/08/01 19:26:27 rwatson Exp $	*/
 
 /*
  * Copyright (C) 1993-2003 by Darren Reed.
@@ -63,7 +63,7 @@ static const char rcsid[] = "@(#)$Id: ip_fil_freebsd.c,v 2.53.2.50 2007/09/20 12
 # include <sys/select.h>
 #endif
 #if __FreeBSD_version >= 800044
-# include <sys/vimage.h>
+# include <netinet/tcp_var.h>
 #else
 #define V_path_mtu_discovery path_mtu_discovery
 #define V_ipforwarding ipforwarding
@@ -92,9 +92,6 @@ static const char rcsid[] = "@(#)$Id: ip_fil_freebsd.c,v 2.53.2.50 2007/09/20 12
 #include <netinet/udp.h>
 #include <netinet/tcpip.h>
 #include <netinet/ip_icmp.h>
-#if defined(__FreeBSD_version) && (__FreeBSD_version >= 800056)
-# include <netinet/vinet.h>
-#endif
 #ifndef _KERNEL
 # include "netinet/ipf.h"
 #endif
@@ -316,8 +313,10 @@ int iplioctl(dev, cmd, data, mode
 #  if (__FreeBSD_version >= 500024)
 struct thread *p;
 #   if (__FreeBSD_version >= 500043)
+#    define	p_cred	td_ucred
 #    define	p_uid	td_ucred->cr_ruid
 #   else
+#    define	p_cred	t_proc->p_cred
 #    define	p_uid	t_proc->p_cred->p_ruid
 #   endif
 #  else
@@ -340,7 +339,11 @@ int mode;
 	SPL_INT(s);
 
 #if (BSD >= 199306) && defined(_KERNEL)
+# if (__FreeBSD_version >= 500034)
+	if (securelevel_ge(p->p_cred, 3) && (mode & FWRITE))
+# else
 	if ((securelevel >= 3) && (mode & FWRITE))
+# endif
 		return EPERM;
 #endif
 
@@ -1046,7 +1049,7 @@ frdest_t *fdp;
 		if (!ip->ip_sum)
 			ip->ip_sum = in_cksum(m, hlen);
 		error = (*ifp->if_output)(ifp, m, (struct sockaddr *)dst,
-					  ro->ro_rt);
+					  ro);
 		goto done;
 	}
 	/*
@@ -1127,7 +1130,7 @@ sendorfree:
 		m->m_act = 0;
 		if (error == 0)
 			error = (*ifp->if_output)(ifp, m,
-			    (struct sockaddr *)dst, ro->ro_rt);
+			    (struct sockaddr *)dst, ro);
 		else
 			FREE_MB_T(m);
 	}

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci.c,v 1.32 2007/10/27 14:54:43 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci.c,v 1.34 2009/11/16 21:47:12 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,7 +36,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci.c,v 1.32 2007/10/27 14:54:43 jhb
 #include <sys/malloc.h>
 #include <sys/module.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 
 #include <sys/pciio.h>
@@ -312,7 +314,7 @@ acpi_pci_attach(device_t dev)
 	 */
 	pci_add_children(dev, domain, busno, sizeof(struct acpi_pci_devinfo));
 	AcpiWalkNamespace(ACPI_TYPE_DEVICE, acpi_get_handle(dev), 1,
-	    acpi_pci_save_handle, dev, NULL);
+	    acpi_pci_save_handle, NULL, dev, NULL);
 
 	return (bus_generic_attach(dev));
 }

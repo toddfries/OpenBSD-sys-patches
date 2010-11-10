@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/dcr.h,v 1.1 2008/09/04 19:58:52 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/dcr.h,v 1.3 2010/04/10 11:13:51 marius Exp $
  */
 
 #ifndef	_MACHINE_DCR_H_
@@ -43,8 +43,8 @@
 #define	DCR_OBSDATA_CT_MASK						\
 	(((1UL << DCR_OBSDATA_CT_BITS) - 1) << DCR_OBSDATA_SHIFT)
 
-/* The following bits are valid for the UltraSPARC-III+/IV+ only. */
-#define	DCR_IPE			(1UL << 5)
+/* The following bits are valid for the UltraSPARC-III++/IV+ only. */
+#define	DCR_IPE			(1UL << 2)
 
 #define	DCR_OBSDATA_CTP_BITS	6
 #define	DCR_OBSDATA_CTP_MASK						\
@@ -57,6 +57,10 @@
 #define	DCR_BPM_BITS		2
 #define	DCR_BPM_MASK							\
 	(((1UL << DCR_BPM_BITS) - 1) << DCR_BPM_SHIFT)
+#define	DCR_BPM_1HIST_GSHARE	(0UL << DCR_BPM_SHIFT)
+#define	DCR_BPM_2HIST_GSHARE	(1UL << DCR_BPM_SHIFT)
+#define	DCR_BPM_PC		(2UL << DCR_BPM_SHIFT)
+#define	DCR_BPM_2HIST_MIXED	(3UL << DCR_BPM_SHIFT)
 
 #define	DCR_JPE			(1UL << 15)
 #define	DCR_ITPE		(1UL << 16)

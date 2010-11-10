@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/idt/if_kr.c,v 1.3 2008/11/02 02:58:24 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/idt/if_kr.c,v 1.4 2009/06/17 10:23:25 bz Exp $");
 
 /*
  * RC32434 Ethernet interface driver
@@ -89,7 +89,7 @@ static void kr_reset(struct kr_softc *);
 static int kr_resume(device_t);
 static int kr_rx_ring_init(struct kr_softc *);
 static int kr_tx_ring_init(struct kr_softc *);
-static void kr_shutdown(device_t);
+static int kr_shutdown(device_t);
 static void kr_start(struct ifnet *);
 static void kr_start_locked(struct ifnet *);
 static void kr_stop(struct kr_softc *);
@@ -392,7 +392,7 @@ kr_resume(device_t dev)
 	return 0;
 }
 
-static void
+static int
 kr_shutdown(device_t dev)
 {
 	struct kr_softc	*sc;
@@ -402,6 +402,8 @@ kr_shutdown(device_t dev)
 	KR_LOCK(sc);
 	kr_stop(sc);
 	KR_UNLOCK(sc);
+
+	return (0);
 }
 
 static int

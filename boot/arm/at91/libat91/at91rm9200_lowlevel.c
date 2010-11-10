@@ -24,7 +24,7 @@
  * This software is derived from software provide by Kwikbyte who specifically
  * disclaimed copyright on the code.
  *
- * $FreeBSD: src/sys/boot/arm/at91/libat91/at91rm9200_lowlevel.c,v 1.6 2007/07/13 14:27:04 imp Exp $
+ * $FreeBSD: src/sys/boot/arm/at91/libat91/at91rm9200_lowlevel.c,v 1.7 2010/03/09 00:50:58 ticso Exp $
  */
 
 #include "at91rm9200.h"
@@ -136,7 +136,7 @@ _init(void)
 	AT91C_BASE_EBI->EBI_CSA = value;
 
 	AT91C_BASE_SDRC->SDRC_CR =
-#ifdef KB9202_B
+#if defined(KB9202_B) || defined(SDRAM_128M)
 	    AT91C_SDRC_NC_10 |
 #else
 	    AT91C_SDRC_NC_9 |

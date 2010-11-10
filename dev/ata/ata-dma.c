@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.159 2009/02/19 00:32:55 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.163 2009/12/06 00:10:13 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,9 +40,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.159 2009/02/19 00:32:55 mav Ex
 #include <sys/bus.h>
 #include <machine/bus.h>
 #include <sys/rman.h>
-#include <dev/pci/pcivar.h>
 #include <dev/ata/ata-all.h>
-#include <dev/ata/ata-pci.h>
 
 /* prototypes */
 static void ata_dmasetupc_cb(void *xsc, bus_dma_segment_t *segs, int nsegs, int error);
@@ -78,9 +76,9 @@ ata_dmainit(device_t dev)
     ch->dma.alignment = 2;
     ch->dma.boundary = 65536;
     ch->dma.segsize = 65536;
-    ch->dma.max_iosize = 128 * DEV_BSIZE;
+    ch->dma.max_iosize = MIN((ATA_DMA_ENTRIES - 1) * PAGE_SIZE, MAXPHYS);
     ch->dma.max_address = BUS_SPACE_MAXADDR_32BIT;
-    ch->dma.dma_slots = 6;
+    ch->dma.dma_slots = 1;
 
     if (bus_dma_tag_create(bus_get_dma_tag(dev), ch->dma.alignment, 0,
 			   ch->dma.max_address, BUS_SPACE_MAXADDR,
@@ -258,37 +256,36 @@ static int
 ata_dmaload(struct ata_request *request, void *addr, int *entries)
 {
     struct ata_channel *ch = device_get_softc(request->parent);
-    struct ata_device *atadev = device_get_softc(request->dev);
     struct ata_dmasetprd_args dspa;
     int error;
 
     ATA_DEBUG_RQ(request, "dmaload");
 
     if (request->dma) {
-	device_printf(request->dev,
+	device_printf(request->parent,
 		      "FAILURE - already active DMA on this device\n");
 	return EIO;
     }
     if (!request->bytecount) {
-	device_printf(request->dev,
+	device_printf(request->parent,
 		      "FAILURE - zero length DMA transfer attempted\n");
 	return EIO;
     }
-    if (((uintptr_t)(request->data) & (ch->dma.alignment - 1)) ||
-	(request->bytecount & (ch->dma.alignment - 1))) {
-	device_printf(request->dev,
-		      "FAILURE - non aligned DMA transfer attempted\n");
+    if (request->bytecount & (ch->dma.alignment - 1)) {
+	device_printf(request->parent,
+		      "FAILURE - odd-sized DMA transfer attempt %d %% %d\n",
+		      request->bytecount, ch->dma.alignment);
 	return EIO;
     }
     if (request->bytecount > ch->dma.max_iosize) {
-	device_printf(request->dev,
+	device_printf(request->parent,
 		      "FAILURE - oversized DMA transfer attempt %d > %d\n",
 		      request->bytecount, ch->dma.max_iosize);
 	return EIO;
     }
 
-    /* set our slot, unit for simplicity XXX SOS NCQ will change that */
-    request->dma = &ch->dma.slot[atadev->unit];
+    /* set our slot. XXX SOS NCQ will change that */
+    request->dma = &ch->dma.slot[0];
 
     if (addr)
 	dspa.dmatab = addr;
@@ -299,7 +296,7 @@ ata_dmaload(struct ata_request *request, void *addr, int *entries)
 				 request->data, request->bytecount,
 				 ch->dma.setprd, &dspa, BUS_DMA_NOWAIT)) ||
 				 (error = dspa.error)) {
-	device_printf(request->dev, "FAILURE - load data\n");
+	device_printf(request->parent, "FAILURE - load data\n");
 	goto error;
     }
 

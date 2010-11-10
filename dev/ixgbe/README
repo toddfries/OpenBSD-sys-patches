@@ -1,6 +1,8 @@
 FreeBSD Driver for 10 Gigabit PCI Express Server Adapters
 =============================================
-$FreeBSD: src/sys/dev/ixgbe/README,v 1.1 2008/05/16 18:46:30 jfv Exp $
+/*$FreeBSD: src/sys/dev/ixgbe/README,v 1.2 2009/04/10 00:22:48 jfv Exp $*/
+
+May 14, 2008
 
 
 Contents
@@ -258,7 +260,7 @@ For general information and support, go to the Intel support website at:
 
 If an issue is identified with the released source code on the supported
 kernel with a supported adapter, email the specific information related to 
-the issue to freebsdnic@mailbox.intel.com.
+the issue to freebsd@intel.com.
 
 
 

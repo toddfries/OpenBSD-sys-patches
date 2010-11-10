@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysvec.c,v 1.34 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysvec.c,v 1.35 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -86,7 +86,10 @@ struct sysentvec ibcs2_svr3_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_UNDEF | SV_IA32 | SV_ILP32
+	.sv_flags	= SV_ABI_UNDEF | SV_IA32 | SV_ILP32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = NULL,
 };
 
 static int

@@ -32,7 +32,7 @@
  *
  *      from: @(#)proc.h        7.1 (Berkeley) 5/15/91
  *	from: FreeBSD: src/sys/i386/include/proc.h,v 1.11 2001/06/29
- * $FreeBSD: src/sys/arm/include/proc.h,v 1.6 2009/02/12 23:23:30 cognet Exp $
+ * $FreeBSD: src/sys/arm/include/proc.h,v 1.8 2010/04/27 09:48:43 kib Exp $
  */
 
 #ifndef	_MACHINE_PROC_H_
@@ -59,5 +59,7 @@ struct mdproc {
 	struct	md_utrap *md_utrap;
 	void	*md_sigtramp;
 };
+
+#define	KINFO_PROC_SIZE 792
 
 #endif /* !_MACHINE_PROC_H_ */

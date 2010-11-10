@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/md_var.h,v 1.33 2008/09/24 00:28:46 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/include/md_var.h,v 1.37 2009/11/28 17:33:19 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_MD_VAR_H_
@@ -46,6 +46,7 @@ extern	u_long	ns_per_tick;
 
 extern	int powerpc_pow_enabled;
 extern	int cacheline_size;
+extern  int hw_direct_map;
 
 void	__syncicache(void *, int);
 
@@ -53,13 +54,13 @@ void	busdma_swi(void);
 int	is_physical_memory(vm_offset_t addr);
 int	mem_valid(vm_offset_t addr, int len);
 
-void	decr_config(unsigned long);
 void	decr_init(void);
+void	decr_ap_init(void);
 void	decr_tc_init(void);
 
 void	cpu_setup(u_int);
 
-struct trapframe;
+struct	trapframe;
 void	powerpc_interrupt(struct trapframe *);
 
 #endif /* !_MACHINE_MD_VAR_H_ */

@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/hvcons.c,v 1.9 2008/08/20 08:31:58 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/hvcons.c,v 1.10 2009/05/29 06:41:23 ed Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -327,7 +327,7 @@ hvcn_dev_attach(device_t dev)
 	    hvcn_consdev.cn_name[0] == '\0') 
 		return (ENXIO);
 
-	tp = tty_alloc(&hvcn_class, NULL, NULL);
+	tp = tty_alloc(&hvcn_class, NULL);
 	tty_makedev(tp, NULL, "v%r", 1);
 	tty_makealias(tp, "hvcn");
 	

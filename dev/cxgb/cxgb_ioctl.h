@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/cxgb_ioctl.h,v 1.8 2008/09/02 07:47:14 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_ioctl.h,v 1.10 2010/05/05 00:41:40 np Exp $
 
 ***************************************************************************/
 #ifndef __CHIOCTL_H__
@@ -57,6 +57,11 @@ enum {
 	CH_SET_HW_SCHED,
 	CH_LOAD_BOOT,
 	CH_CLEAR_STATS,
+	CH_GET_UP_LA,
+	CH_GET_UP_IOQS,
+	CH_SET_FILTER,
+	CH_DEL_FILTER,
+	CH_GET_FILTER,
 };
 
 /* statistics categories */
@@ -188,6 +193,54 @@ struct ch_eeprom {
 	uint8_t  *data;
 };
 
+#define LA_BUFSIZE	(2 * 1024)
+struct ch_up_la {
+	uint32_t stopped;
+	uint32_t idx;
+	uint32_t bufsize;
+	uint32_t *data;
+};
+
+struct t3_ioq_entry {
+	uint32_t ioq_cp;
+	uint32_t ioq_pp;
+	uint32_t ioq_alen;
+	uint32_t ioq_stats;
+};
+
+#define IOQS_BUFSIZE	(1024)
+struct ch_up_ioqs {
+	uint32_t ioq_rx_enable;
+	uint32_t ioq_tx_enable;
+	uint32_t ioq_rx_status;
+	uint32_t ioq_tx_status;
+	uint32_t bufsize;
+	struct t3_ioq_entry *data;
+};
+
+struct ch_filter_tuple {
+	uint32_t sip;
+	uint32_t dip;
+	uint16_t sport;
+	uint16_t dport;
+	uint16_t vlan:12;
+	uint16_t vlan_prio:3;
+};
+
+struct ch_filter {
+	uint32_t filter_id;
+	struct ch_filter_tuple val;
+	struct ch_filter_tuple mask;
+	uint16_t mac_addr_idx;
+	uint8_t mac_hit:1;
+	uint8_t proto:2;
+
+	uint8_t want_filter_id:1;
+	uint8_t pass:1;
+	uint8_t rss:1;
+	uint8_t qset;
+};
+
 #define CHELSIO_SETREG		_IOW('f', CH_SETREG, struct ch_reg)
 #define CHELSIO_GETREG		_IOWR('f', CH_GETREG, struct ch_reg)
 #define CHELSIO_GETMTUTAB	_IOR('f', CH_GETMTUTAB, struct ch_mtus)
@@ -210,4 +263,9 @@ struct ch_eeprom {
 #define CHELSIO_GET_MIIREG	_IOWR('f', CH_GET_MIIREG, struct ch_mii_data)
 #define CHELSIO_SET_MIIREG	_IOW('f', CH_SET_MIIREG, struct ch_mii_data)
 #define CHELSIO_GET_EEPROM	_IOWR('f', CH_GET_EEPROM, struct ch_eeprom)
+#define CHELSIO_GET_UP_LA	_IOWR('f', CH_GET_UP_LA, struct ch_up_la)
+#define CHELSIO_GET_UP_IOQS	_IOWR('f', CH_GET_UP_IOQS, struct ch_up_ioqs)
+#define CHELSIO_SET_FILTER	_IOW('f', CH_SET_FILTER, struct ch_filter)
+#define CHELSIO_DEL_FILTER	_IOW('f', CH_DEL_FILTER, struct ch_filter)
+#define CHELSIO_GET_FILTER	_IOWR('f', CH_GET_FILTER, struct ch_filter)
 #endif

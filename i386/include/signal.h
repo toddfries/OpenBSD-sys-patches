@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)signal.h	8.1 (Berkeley) 6/11/93
- * $FreeBSD: src/sys/i386/include/signal.h,v 1.23 2005/08/20 16:44:41 stefanf Exp $
+ * $FreeBSD: src/sys/i386/include/signal.h,v 1.24 2009/04/01 13:44:28 kib Exp $
  */
 
 #ifndef _MACHINE_SIGNAL_H_
@@ -116,7 +116,11 @@ struct sigcontext {
 	int	sc_ownedfp;
 	int	sc_spare1[1];
 	int	sc_fpstate[128] __aligned(16);
-	int	sc_spare2[8];
+
+	int	sc_fsbase;
+	int	sc_gsbase;
+
+	int	sc_spare2[6];
 };
 
 #define	sc_sp		sc_esp

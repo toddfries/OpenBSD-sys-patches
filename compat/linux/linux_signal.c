@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_signal.c,v 1.66 2008/10/19 10:02:26 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_signal.c,v 1.69 2010/06/29 20:41:52 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -501,7 +501,7 @@ linux_rt_sigtimedwait(struct thread *td,
 	/* Repost if we got an error. */
 	if (error && info.ksi_signo) {
 		PROC_LOCK(td->td_proc);
-		tdsignal(td->td_proc, td, info.ksi_signo, &info);
+		tdksignal(td, info.ksi_signo, &info);
 		PROC_UNLOCK(td->td_proc);
 	} else
 		td->td_retval[0] = info.ksi_signo; 
@@ -546,8 +546,8 @@ linux_do_tkill(struct thread *td, l_int tgid, l_int pid, l_int signum)
 	ksiginfo_t ksi;
 	int error;
 
-	AUDIT_ARG(signum, signum);
-	AUDIT_ARG(pid, pid);
+	AUDIT_ARG_SIGNUM(signum);
+	AUDIT_ARG_PID(pid);
 
 	/*
 	 * Allow signal 0 as a means to check for privileges
@@ -563,9 +563,9 @@ linux_do_tkill(struct thread *td, l_int tgid, l_int pid, l_int signum)
 			return (ESRCH);
 	}
 
-	AUDIT_ARG(process, p);
+	AUDIT_ARG_PROCESS(p);
 	error = p_cansignal(td, p, signum);
-	if (error)
+	if (error != 0 || signum == 0)
 		goto out;
 
 	error = ESRCH;
@@ -587,7 +587,7 @@ linux_do_tkill(struct thread *td, l_int tgid, l_int pid, l_int signum)
 	ksi.ksi_pid = proc->p_pid;
 	ksi.ksi_uid = proc->p_ucred->cr_ruid;
 
-	error = tdsignal(p, NULL, ksi.ksi_signo, &ksi);
+	error = pksignal(p, ksi.ksi_signo, &ksi);
 
 out:
 	PROC_UNLOCK(p);

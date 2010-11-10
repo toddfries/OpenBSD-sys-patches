@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/adb/adb_bus.c,v 1.4 2008/12/06 23:26:02 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/adb/adb_bus.c,v 1.7 2009/11/28 17:48:25 nwhitehorn Exp $
  */
 
 #include <sys/cdefs.h>
@@ -402,3 +402,21 @@ adb_read_register(device_t dev, u_char reg, void *data)
 	return (result);
 }
 
+size_t 
+adb_write_register(device_t dev, u_char reg, size_t len, void *data) 
+{
+	struct adb_softc *sc;
+	struct adb_devinfo *dinfo;
+	size_t result;
+	
+	dinfo = device_get_ivars(dev);
+	sc = device_get_softc(device_get_parent(dev));
+	
+	result = adb_send_raw_packet_sync(sc->sc_dev,dinfo->address,
+		   ADB_COMMAND_LISTEN, reg, len, (u_char *)data, NULL);
+	
+	result = adb_send_raw_packet_sync(sc->sc_dev,dinfo->address,
+	           ADB_COMMAND_TALK, reg, 0, NULL, NULL);
+
+	return (result);
+}

@@ -31,7 +31,7 @@
 /* $KAME: sctp_structs.h,v 1.13 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_structs.h,v 1.30 2009/02/20 15:03:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_structs.h,v 1.38 2010/05/16 17:03:56 rrs Exp $");
 
 #ifndef __sctp_structs_h__
 #define __sctp_structs_h__
@@ -51,6 +51,7 @@ struct sctp_timer {
 	void *ep;
 	void *tcb;
 	void *net;
+	void *vnet;
 
 	/* for sanity checking */
 	void *self;
@@ -107,9 +108,11 @@ typedef void (*end_func) (void *ptr, uint32_t val);
 
 struct sctp_iterator {
 	TAILQ_ENTRY(sctp_iterator) sctp_nxt_itr;
+	struct vnet *vn;
 	struct sctp_timer tmr;
 	struct sctp_inpcb *inp;	/* current endpoint */
 	struct sctp_tcb *stcb;	/* current* assoc */
+	struct sctp_inpcb *next_inp;	/* special hook to skip to */
 	asoc_func function_assoc;	/* per assoc function */
 	inp_func function_inp;	/* per endpoint function */
 	inp_func function_inp_end;	/* end INP function */
@@ -128,6 +131,7 @@ struct sctp_iterator {
 #define SCTP_ITERATOR_DO_ALL_INP	0x00000001
 #define SCTP_ITERATOR_DO_SINGLE_INP	0x00000002
 
+
 TAILQ_HEAD(sctpiterators, sctp_iterator);
 
 struct sctp_copy_all {
@@ -144,8 +148,23 @@ struct sctp_asconf_iterator {
 	int cnt;
 };
 
+struct iterator_control {
+	struct mtx ipi_iterator_wq_mtx;
+	struct mtx it_mtx;
+	SCTP_PROCESS_STRUCT thread_proc;
+	struct sctpiterators iteratorhead;
+	struct sctp_iterator *cur_it;
+	uint32_t iterator_running;
+	uint32_t iterator_flags;
+};
+
+#define SCTP_ITERATOR_MUST_EXIT   	0x00000001
+#define SCTP_ITERATOR_STOP_CUR_IT  	0x00000002
+#define SCTP_ITERATOR_STOP_CUR_INP  	0x00000004
+
 struct sctp_net_route {
 	sctp_rtentry_t *ro_rt;
+	void *ro_lle;
 	union sctp_sockstore _l_addr;	/* remote peer addr */
 	struct sctp_ifa *_s_addr;	/* our selected src addr */
 };
@@ -196,6 +215,7 @@ struct sctp_nets {
 	/* smoothed average things for RTT and RTO itself */
 	int lastsa;
 	int lastsv;
+	int rtt;		/* last measured rtt value in ms */
 	unsigned int RTO;
 
 	/* This is used for SHUTDOWN/SHUTDOWN-ACK/SEND or INIT timers */
@@ -309,7 +329,7 @@ struct sctp_data_chunkrec {
 
 	/* ECN Nonce: Nonce Value for this chunk */
 	uint8_t ect_nonce;
-
+	uint8_t fwd_tsn_cnt;
 	/*
 	 * part of the Highest sacked algorithm to be able to stroke counts
 	 * on ones that are FR'd.
@@ -361,9 +381,6 @@ struct sctp_tmit_chunk {
 	uint8_t pad_inplace;
 	uint8_t do_rtt;
 	uint8_t book_size_scale;
-	uint8_t addr_over;	/* flag which is set if the dest address for
-				 * this chunk is overridden by user. Used for
-				 * CMT (iyengar@cis.udel.edu, 2005/06/21) */
 	uint8_t no_fr_allowed;
 	uint8_t pr_sctp_on;
 	uint8_t copy_by_ref;
@@ -441,10 +458,10 @@ struct sctp_stream_queue_pending {
 	uint8_t holds_key_ref;
 	uint8_t msg_is_complete;
 	uint8_t some_taken;
-	uint8_t addr_over;
 	uint8_t pr_sctp_on;
 	uint8_t sender_all_done;
 	uint8_t put_last_out;
+	uint8_t discard_rest;
 };
 
 /*
@@ -477,7 +494,6 @@ struct sctp_asconf_addr {
 	struct sctp_ifa *ifa;	/* save the ifa for add/del ip */
 	uint8_t sent;		/* has this been sent yet? */
 	uint8_t special_del;	/* not to be used in lookup */
-
 };
 
 struct sctp_scoping {
@@ -676,7 +692,7 @@ struct sctp_association {
 	/* primary destination to use */
 	struct sctp_nets *primary_destination;
 	/* For CMT */
-	struct sctp_nets *last_net_data_came_from;
+	struct sctp_nets *last_net_cmt_send_started;
 	/* last place I got a data chunk from */
 	struct sctp_nets *last_data_chunk_from;
 	/* last place I got a control from */
@@ -771,9 +787,7 @@ struct sctp_association {
 
 	/* EY - new NR variables used for nr_sack based on mapping_array */
 	uint8_t *nr_mapping_array;
-	uint32_t nr_mapping_array_base_tsn;
 	uint32_t highest_tsn_inside_nr_map;
-	uint16_t nr_mapping_array_size;
 
 	uint32_t last_echo_tsn;
 	uint32_t last_cwr_tsn;
@@ -1043,8 +1057,6 @@ struct sctp_association {
 	uint8_t delayed_connection;
 	uint8_t ifp_had_enobuf;
 	uint8_t saw_sack_with_frags;
-	/* EY */
-	uint8_t saw_sack_with_nr_frags;
 	uint8_t in_asocid_hash;
 	uint8_t assoc_up_sent;
 	uint8_t adaptation_needed;

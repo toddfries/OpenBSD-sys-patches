@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/pci/pcireg.h,v 1.71 2009/03/05 15:33:04 jhb Exp $
+ * $FreeBSD: src/sys/dev/pci/pcireg.h,v 1.75 2010/02/01 20:50:49 yongari Exp $
  *
  */
 
@@ -39,11 +39,12 @@
  */
 
 /* some PCI bus constants */
-
-#define	PCI_BUSMAX	255
-#define	PCI_SLOTMAX	31
-#define	PCI_FUNCMAX	7
-#define	PCI_REGMAX	255
+#define	PCI_DOMAINMAX	65535	/* highest supported domain number */
+#define	PCI_BUSMAX	255	/* highest supported bus number */
+#define	PCI_SLOTMAX	31	/* highest supported slot number */
+#define	PCI_FUNCMAX	7	/* highest supported function number */
+#define	PCI_REGMAX	255	/* highest supported config register addr. */
+#define	PCIE_REGMAX	4095	/* highest supported config register addr. */
 #define	PCI_MAXHDRTYPE	2
 
 /* PCI config header registers for all devices */
@@ -596,8 +597,44 @@
 #define	PCIM_EXP_TYPE_UPSTREAM_PORT	0x0050
 #define	PCIM_EXP_TYPE_DOWNSTREAM_PORT	0x0060
 #define	PCIM_EXP_TYPE_PCI_BRIDGE	0x0070
+#define	PCIM_EXP_TYPE_PCIE_BRIDGE	0x0080
+#define	PCIM_EXP_TYPE_ROOT_INT_EP	0x0090
+#define	PCIM_EXP_TYPE_ROOT_EC		0x00a0
 #define	PCIM_EXP_FLAGS_SLOT		0x0100
 #define	PCIM_EXP_FLAGS_IRQ		0x3e00
+#define	PCIR_EXPRESS_DEVICE_CAP	0x4
+#define	PCIM_EXP_CAP_MAX_PAYLOAD	0x0007
+#define	PCIR_EXPRESS_DEVICE_CTL	0x8
+#define	PCIM_EXP_CTL_RELAXED_ORD_ENABLE	0x0010
+#define	PCIM_EXP_CTL_MAX_PAYLOAD	0x00e0
+#define	PCIM_EXP_CTL_NOSNOOP_ENABLE	0x0800
+#define	PCIM_EXP_CTL_MAX_READ_REQUEST	0x7000
+#define	PCIR_EXPRESS_DEVICE_STA	0xa
+#define	PCIM_EXP_STA_CORRECTABLE_ERROR	0x0001
+#define	PCIM_EXP_STA_NON_FATAL_ERROR	0x0002
+#define	PCIM_EXP_STA_FATAL_ERROR	0x0004
+#define	PCIM_EXP_STA_UNSUPPORTED_REQ	0x0008
+#define	PCIM_EXP_STA_AUX_POWER		0x0010
+#define	PCIM_EXP_STA_TRANSACTION_PND	0x0020
+#define	PCIR_EXPRESS_LINK_CAP	0xc
+#define	PCIM_LINK_CAP_MAX_SPEED		0x0000000f
+#define	PCIM_LINK_CAP_MAX_WIDTH		0x000003f0
+#define	PCIM_LINK_CAP_ASPM		0x00000c00
+#define	PCIM_LINK_CAP_L0S_EXIT		0x00007000
+#define	PCIM_LINK_CAP_L1_EXIT		0x00038000
+#define	PCIM_LINK_CAP_PORT		0xff000000
+#define	PCIR_EXPRESS_LINK_CTL	0x10
+#define	PCIR_EXPRESS_LINK_STA	0x12
+#define	PCIM_LINK_STA_SPEED		0x000f
+#define	PCIM_LINK_STA_WIDTH		0x03f0
+#define	PCIM_LINK_STA_TRAINING_ERROR	0x0400
+#define	PCIM_LINK_STA_TRAINING		0x0800
+#define	PCIM_LINK_STA_SLOT_CLOCK	0x1000
+#define	PCIR_EXPRESS_SLOT_CAP	0x14
+#define	PCIR_EXPRESS_SLOT_CTL	0x18
+#define	PCIR_EXPRESS_SLOT_STA	0x1a
+#define	PCIR_EXPRESS_ROOT_CTL	0x1c
+#define	PCIR_EXPRESS_ROOT_STA	0x20
 
 /* MSI-X definitions */
 #define	PCIR_MSIX_CTRL		0x2

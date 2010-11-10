@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/nlm/nlm.h,v 1.3 2008/11/03 10:38:00 dfr Exp $
+ * $FreeBSD: src/sys/nlm/nlm.h,v 1.5 2009/10/07 19:50:14 zml Exp $
  */
 
 #ifndef _NLM_NLM_H_
@@ -47,6 +47,12 @@ struct vnode;
 
 extern struct timeval nlm_zero_tv;
 extern int nlm_nsm_state;
+
+/*
+ * Make a struct netobj.
+ */ 
+extern void nlm_make_netobj(struct netobj *dst, caddr_t srt,
+    size_t srcsize, struct malloc_type *type);
 
 /*
  * Copy a struct netobj.
@@ -193,6 +199,12 @@ extern int nlm_do_granted(nlm4_testargs *argp, nlm4_res *result,
     struct svc_req *rqstp, CLIENT **rpcp);
 
 /*
+ * Implementation for the granted result RPC. The client may reject the granted
+ * message, in which case we need to handle it appropriately.
+ */
+extern void nlm_do_granted_res(nlm4_res *argp, struct svc_req *rqstp);
+
+/*
  * Free all locks associated with the hostname argp->name.
  */
 extern void nlm_do_free_all(nlm4_notify *argp);
@@ -209,6 +221,11 @@ struct vop_advlock_args;
 struct vop_reclaim_args;
 extern int nlm_advlock(struct vop_advlock_args *ap);
 extern int nlm_reclaim(struct vop_reclaim_args *ap);
+
+/*
+ * Acquire the next sysid for remote locks not handled by the NLM.
+ */
+extern uint32_t nlm_acquire_next_sysid(void);
 
 #endif
 

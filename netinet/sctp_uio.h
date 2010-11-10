@@ -30,7 +30,7 @@
 
 /* $KAME: sctp_uio.h,v 1.11 2005/03/06 16:04:18 itojun Exp $	 */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_uio.h,v 1.38 2009/02/20 15:03:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_uio.h,v 1.47 2010/03/24 20:02:40 rrs Exp $");
 
 #ifndef __sctp_uio_h__
 #define __sctp_uio_h__
@@ -45,6 +45,9 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_uio.h,v 1.38 2009/02/20 15:03:54 rrs Ex
 
 typedef uint32_t sctp_assoc_t;
 
+/* Compatibility to previous define's */
+#define sctp_stream_reset_events sctp_stream_reset_event
+
 /* On/Off setup for subscription to events */
 struct sctp_event_subscribe {
 	uint8_t sctp_data_io_event;
@@ -57,7 +60,7 @@ struct sctp_event_subscribe {
 	uint8_t sctp_adaptation_layer_event;
 	uint8_t sctp_authentication_event;
 	uint8_t sctp_sender_dry_event;
-	uint8_t sctp_stream_reset_events;
+	uint8_t sctp_stream_reset_event;
 };
 
 /* ancillary data types */
@@ -68,8 +71,8 @@ struct sctp_event_subscribe {
  * ancillary data structures
  */
 struct sctp_initmsg {
-	uint32_t sinit_num_ostreams;
-	uint32_t sinit_max_instreams;
+	uint16_t sinit_num_ostreams;
+	uint16_t sinit_max_instreams;
 	uint16_t sinit_max_attempts;
 	uint16_t sinit_max_init_timeo;
 };
@@ -95,7 +98,6 @@ struct sctp_sndrcvinfo {
 	uint16_t sinfo_stream;
 	uint16_t sinfo_ssn;
 	uint16_t sinfo_flags;
-	uint16_t sinfo_pr_policy;
 	uint32_t sinfo_ppid;
 	uint32_t sinfo_context;
 	uint32_t sinfo_timetolive;
@@ -274,7 +276,7 @@ struct sctp_send_failed {
 	uint32_t ssf_error;
 	struct sctp_sndrcvinfo ssf_info;
 	sctp_assoc_t ssf_assoc_id;
-	uint8_t ssf_data[0];
+	uint8_t ssf_data[];
 };
 
 /* flag that indicates state of data */
@@ -368,7 +370,7 @@ struct sctp_stream_reset_event {
 	uint16_t strreset_flags;
 	uint32_t strreset_length;
 	sctp_assoc_t strreset_assoc_id;
-	uint16_t strreset_list[0];
+	uint16_t strreset_list[];
 };
 
 /* flags in strreset_flags field */
@@ -403,19 +405,19 @@ union sctp_notification {
 };
 
 /* notification types */
-#define SCTP_ASSOC_CHANGE		0x0001
-#define SCTP_PEER_ADDR_CHANGE		0x0002
-#define SCTP_REMOTE_ERROR		0x0003
-#define SCTP_SEND_FAILED		0x0004
-#define SCTP_SHUTDOWN_EVENT		0x0005
-#define SCTP_ADAPTATION_INDICATION	0x0006
+#define SCTP_ASSOC_CHANGE			0x0001
+#define SCTP_PEER_ADDR_CHANGE			0x0002
+#define SCTP_REMOTE_ERROR			0x0003
+#define SCTP_SEND_FAILED			0x0004
+#define SCTP_SHUTDOWN_EVENT			0x0005
+#define SCTP_ADAPTATION_INDICATION		0x0006
 /* same as above */
-#define SCTP_ADAPTION_INDICATION	0x0006
-#define SCTP_PARTIAL_DELIVERY_EVENT	0x0007
-#define SCTP_AUTHENTICATION_EVENT	0x0008
-#define SCTP_STREAM_RESET_EVENT		0x0009
-#define SCTP_SENDER_DRY_EVENT           0x000a
-
+#define SCTP_ADAPTION_INDICATION		0x0006
+#define SCTP_PARTIAL_DELIVERY_EVENT		0x0007
+#define SCTP_AUTHENTICATION_EVENT		0x0008
+#define SCTP_STREAM_RESET_EVENT			0x0009
+#define SCTP_SENDER_DRY_EVENT			0x000a
+#define SCTP__NOTIFICATIONS_STOPPED_EVENT	0x000b	/* we dont send this */
 /*
  * socket option structs
  */
@@ -515,19 +517,18 @@ struct sctp_authchunk {
 struct sctp_authkey {
 	sctp_assoc_t sca_assoc_id;
 	uint16_t sca_keynumber;
-	uint8_t sca_key[0];
+	uint8_t sca_key[];
 };
 
 /* SCTP_HMAC_IDENT */
 struct sctp_hmacalgo {
 	uint32_t shmac_number_of_idents;
-	uint16_t shmac_idents[0];
+	uint16_t shmac_idents[];
 };
 
 /* AUTH hmac_id */
 #define SCTP_AUTH_HMAC_ID_RSVD		0x0000
 #define SCTP_AUTH_HMAC_ID_SHA1		0x0001	/* default, mandatory */
-#define SCTP_AUTH_HMAC_ID_MD5		0x0002	/* deprecated */
 #define SCTP_AUTH_HMAC_ID_SHA256	0x0003
 #define SCTP_AUTH_HMAC_ID_SHA224	0x0004
 #define SCTP_AUTH_HMAC_ID_SHA384	0x0005
@@ -543,7 +544,7 @@ struct sctp_authkeyid {
 /* SCTP_PEER_AUTH_CHUNKS / SCTP_LOCAL_AUTH_CHUNKS */
 struct sctp_authchunks {
 	sctp_assoc_t gauth_assoc_id;
-	uint8_t gauth_chunks[0];
+	uint8_t gauth_chunks[];
 };
 
 struct sctp_assoc_value {
@@ -553,7 +554,7 @@ struct sctp_assoc_value {
 
 struct sctp_assoc_ids {
 	uint32_t gaids_number_of_ids;
-	sctp_assoc_t gaids_assoc_id[0];
+	sctp_assoc_t gaids_assoc_id[];
 };
 
 struct sctp_sack_info {
@@ -565,9 +566,9 @@ struct sctp_sack_info {
 struct sctp_cwnd_args {
 	struct sctp_nets *net;	/* network to *//* FIXME: LP64 issue */
 	uint32_t cwnd_new_value;/* cwnd in k */
-	uint32_t inflight;	/* flightsize in k */
 	uint32_t pseudo_cumack;
-	uint32_t cwnd_augment;	/* increment to it */
+	uint16_t inflight;	/* flightsize in k */
+	uint16_t cwnd_augment;	/* increment to it */
 	uint8_t meets_pseudo_cumack;
 	uint8_t need_new_pseudo_cumack;
 	uint8_t cnt_in_send;
@@ -602,7 +603,7 @@ struct sctp_stream_reset {
 	sctp_assoc_t strrst_assoc_id;
 	uint16_t strrst_flags;
 	uint16_t strrst_num_streams;	/* 0 == ALL */
-	uint16_t strrst_list[0];/* list if strrst_num_streams is not 0 */
+	uint16_t strrst_list[];	/* list if strrst_num_streams is not 0 */
 };
 
 
@@ -755,7 +756,7 @@ struct sctp_cwnd_log_req {
 	int32_t num_ret;	/* Number returned */
 	int32_t start_at;	/* start at this one */
 	int32_t end_at;		/* end at this one */
-	struct sctp_cwnd_log log[0];
+	struct sctp_cwnd_log log[];
 };
 
 struct sctp_timeval {
@@ -764,6 +765,8 @@ struct sctp_timeval {
 };
 
 struct sctpstat {
+	struct sctp_timeval sctps_discontinuitytime;	/* sctpStats 18
+							 * (TimeStamp) */
 	/* MIB according to RFC 3873 */
 	uint32_t sctps_currestab;	/* sctpStats  1   (Gauge32) */
 	uint32_t sctps_activeestab;	/* sctpStats  2 (Counter32) */
@@ -948,15 +951,19 @@ struct sctpstat {
 	uint32_t sctps_fwdtsn_map_over;	/* number of map array over-runs via
 					 * fwd-tsn's */
 
-	struct sctp_timeval sctps_discontinuitytime;	/* sctpStats 18
-							 * (TimeStamp) */
+	uint32_t sctps_reserved[32];	/* Future ABI compat - remove int's
+					 * from here when adding new */
 };
 
 #define SCTP_STAT_INCR(_x) SCTP_STAT_INCR_BY(_x,1)
 #define SCTP_STAT_DECR(_x) SCTP_STAT_DECR_BY(_x,1)
+#if defined(__FreeBSD__) && defined(SMP) && defined(SCTP_USE_PERCPU_STAT)
+#define SCTP_STAT_INCR_BY(_x,_d) (SCTP_BASE_STATS[PCPU_GET(cpuid)]._x += _d)
+#define SCTP_STAT_DECR_BY(_x,_d) (SCTP_BASE_STATS[PCPU_GET(cpuid)]._x -= _d)
+#else
 #define SCTP_STAT_INCR_BY(_x,_d) atomic_add_int(&SCTP_BASE_STAT(_x), _d)
 #define SCTP_STAT_DECR_BY(_x,_d) atomic_subtract_int(&SCTP_BASE_STAT(_x), _d)
-
+#endif
 /* The following macros are for handling MIB values, */
 #define SCTP_STAT_INCR_COUNTER32(_x) SCTP_STAT_INCR(_x)
 #define SCTP_STAT_INCR_COUNTER64(_x) SCTP_STAT_INCR(_x)
@@ -986,7 +993,7 @@ struct xsctp_inpcb {
 	uint16_t local_port;
 	uint16_t qlen;
 	uint16_t maxqlen;
-	uint32_t extra_padding[8];	/* future */
+	uint32_t extra_padding[32];	/* future */
 };
 
 struct xsctp_tcb {
@@ -1017,14 +1024,14 @@ struct xsctp_tcb {
 	struct sctp_timeval discontinuity_time;	/* sctpAssocEntry 17  */
 	uint32_t peers_rwnd;
 	sctp_assoc_t assoc_id;	/* sctpAssocEntry 1   */
-	uint32_t extra_padding[8];	/* future */
+	uint32_t extra_padding[32];	/* future */
 };
 
 struct xsctp_laddr {
 	union sctp_sockstore address;	/* sctpAssocLocalAddrEntry 1/2 */
 	uint32_t last;
 	struct sctp_timeval start_time;	/* sctpAssocLocalAddrEntry 3   */
-	uint32_t extra_padding[8];	/* future */
+	uint32_t extra_padding[32];	/* future */
 };
 
 struct xsctp_raddr {
@@ -1041,7 +1048,8 @@ struct xsctp_raddr {
 	uint8_t confirmed;	/* */
 	uint8_t heartbeat_enabled;	/* sctpAssocLocalRemEntry 4   */
 	struct sctp_timeval start_time;	/* sctpAssocLocalRemEntry 8   */
-	uint32_t extra_padding[8];	/* future */
+	uint32_t rtt;
+	uint32_t extra_padding[32];	/* future */
 };
 
 #define SCTP_MAX_LOGGING_SIZE 30000

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.38 2009/03/07 19:08:58 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.42 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -41,11 +41,12 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.38 2009/03/07 19:08:58 marius
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/errno.h>
+#include <sys/kernel.h>
 #include <sys/queue.h>
 #include <sys/syslog.h>
+#include <sys/sysctl.h>
 #include <sys/protosw.h>
 #include <sys/malloc.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -66,10 +67,16 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.38 2009/03/07 19:08:58 marius
 #include <netinet/ip_ecn.h>
 #ifdef INET6
 #include <netinet6/ip6_ecn.h>
-#include <netinet6/vinet6.h>
 #endif
 
 #include <net/if_gif.h>
+
+VNET_DEFINE(int, ip6_gif_hlim) = GIF_HLIM;
+#define	V_ip6_gif_hlim			VNET(ip6_gif_hlim)
+
+SYSCTL_DECL(_net_inet6_ip6);
+SYSCTL_VNET_INT(_net_inet6_ip6, IPV6CTL_GIF_HLIM, gifhlim, CTLFLAG_RW,
+    &VNET_NAME(ip6_gif_hlim), 0, "");
 
 static int gif_validate6(const struct ip6_hdr *, struct gif_softc *,
 			 struct ifnet *);
@@ -91,7 +98,6 @@ in6_gif_output(struct ifnet *ifp,
     int family,			/* family of the packet to be encapsulate */
     struct mbuf *m)
 {
-	INIT_VNET_GIF(ifp->if_vnet);
 	struct gif_softc *sc = ifp->if_softc;
 	struct sockaddr_in6 *dst = (struct sockaddr_in6 *)&sc->gif_ro6.ro_dst;
 	struct sockaddr_in6 *sin6_src = (struct sockaddr_in6 *)sc->gif_psrc;
@@ -144,8 +150,22 @@ in6_gif_output(struct ifnet *ifp,
 #endif
 	case AF_LINK:
 		proto = IPPROTO_ETHERIP;
-		eiphdr.eip_ver = ETHERIP_VERSION & ETHERIP_VER_VERS_MASK;
-		eiphdr.eip_pad = 0;
+
+		/*
+		 * GIF_SEND_REVETHIP (disabled by default) intentionally
+		 * sends an EtherIP packet with revered version field in
+		 * the header.  This is a knob for backward compatibility
+		 * with FreeBSD 7.2R or prior.
+		 */
+		if ((sc->gif_options & GIF_SEND_REVETHIP)) {
+			eiphdr.eip_ver = 0;
+			eiphdr.eip_resvl = ETHERIP_VERSION;
+			eiphdr.eip_resvh = 0;
+		} else {
+			eiphdr.eip_ver = ETHERIP_VERSION;
+			eiphdr.eip_resvl = 0;
+			eiphdr.eip_resvh = 0;
+		}
 		/* prepend Ethernet-in-IP header */
 		M_PREPEND(m, sizeof(struct etherip_header), M_DONTWAIT);
 		if (m && m->m_len < sizeof(struct etherip_header))
@@ -265,7 +285,6 @@ in6_gif_output(struct ifnet *ifp,
 int
 in6_gif_input(struct mbuf **mp, int *offp, int proto)
 {
-	INIT_VNET_INET6(curvnet);
 	struct mbuf *m = *mp;
 	struct ifnet *gifp = NULL;
 	struct gif_softc *sc;

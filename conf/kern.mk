@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.mk,v 1.59 2009/03/03 18:53:47 imp Exp $
+# $FreeBSD: src/sys/conf/kern.mk,v 1.63 2010/04/02 06:55:31 netchild Exp $
 
 #
 # Warning flags for compiling the kernel and components of the kernel.
@@ -12,13 +12,7 @@ CWARNFLAGS=
 .else
 CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Winline -Wcast-qual \
-		${_wundef} ${_Wno_pointer_sign} -fformat-extensions
-.if !defined(WITH_GCC3)
-_Wno_pointer_sign=-Wno-pointer-sign
-.endif
-.if !defined(NO_UNDEF)
-_wundef=	-Wundef
-.endif
+		-Wundef -Wno-pointer-sign -fformat-extensions
 .endif
 #
 # The following flags are next up for working on:
@@ -86,11 +80,10 @@ INLINE_LIMIT?=	15000
 .endif
 
 #
-# For MIPS we also tell gcc to use floating point emulation and 
-# disable MIPS DSP ASE Instruction set.
+# For MIPS we also tell gcc to use floating point emulation
 #
 .if ${MACHINE_ARCH} == "mips"
-CFLAGS+=	-msoft-float -mno-dsp
+CFLAGS+=	-msoft-float
 INLINE_LIMIT?=	8000
 .endif
 
@@ -115,3 +108,11 @@ CFLAGS+=	-restrict
 	${MACHINE_ARCH} != "arm" && ${MACHINE_ARCH} != "mips"
 CFLAGS+=	-fstack-protector
 .endif
+
+#
+# Enable CTF conversation on request.
+#
+.if defined(WITH_CTF)
+.undef NO_CTF
+.endif
+

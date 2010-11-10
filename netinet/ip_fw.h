@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2002 Luigi Rizzo, Universita` di Pisa
+ * Copyright (c) 2002-2009 Luigi Rizzo, Universita` di Pisa
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.123 2009/03/02 22:11:48 luigi Exp $
+ * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.138 2010/03/15 17:14:27 luigi Exp $
  */
 
 #ifndef _IPFW2_H
@@ -41,6 +41,20 @@
  * (IPFW_TABLES_MAX - 1).
  */
 #define	IPFW_TABLES_MAX		128
+
+/*
+ * Most commands (queue, pipe, tag, untag, limit...) can have a 16-bit
+ * argument between 1 and 65534. The value 0 is unused, the value
+ * 65535 (IP_FW_TABLEARG) is used to represent 'tablearg', i.e. the
+ * can be 1..65534, or 65535 to indicate the use of a 'tablearg'
+ * result of the most recent table() lookup.
+ * Note that 16bit is only a historical limit, resulting from
+ * the use of a 16-bit fields for that value. In reality, we can have
+ * 2^32 pipes, queues, tag values and so on, and use 0 as a tablearg.
+ */
+#define	IPFW_ARG_MIN		1
+#define	IPFW_ARG_MAX		65534
+#define IP_FW_TABLEARG		65535	/* XXX should use 0 */
 
 /*
  * The kernel representation of ipfw rules is made of a list of
@@ -139,7 +153,8 @@ enum ipfw_opcodes {		/* arguments (4 byte each)	*/
 	O_FORWARD_IP,		/* fwd sockaddr			*/
 	O_FORWARD_MAC,		/* fwd mac			*/
 	O_NAT,                  /* nope                         */
-
+	O_REASS,                /* none                         */
+	
 	/*
 	 * More opcodes.
 	 */
@@ -222,7 +237,7 @@ enum ipfw_opcodes {		/* arguments (4 byte each)	*/
  *
  */
 typedef struct	_ipfw_insn {	/* template for instructions */
-	enum ipfw_opcodes	opcode:8;
+	u_int8_t 	opcode;
 	u_int8_t	len;	/* number of 32-bit words */
 #define	F_NOT		0x80
 #define	F_OR		0x40
@@ -237,8 +252,6 @@ typedef struct	_ipfw_insn {	/* template for instructions */
  * a given type.
  */
 #define	F_INSN_SIZE(t)	((sizeof (t))/sizeof(u_int32_t))
-
-#define MTAG_IPFW	1148380143	/* IPFW-tagged cookie */
 
 /*
  * This is used to store an array of 16-bit entries (ports etc.)
@@ -448,21 +461,22 @@ typedef struct _ipfw_insn_icmp6 {
  */
 
 struct ip_fw {
-	struct ip_fw	*next;		/* linked list of rules		*/
+	struct ip_fw	*x_next;	/* linked list of rules		*/
 	struct ip_fw	*next_rule;	/* ptr to next [skipto] rule	*/
 	/* 'next_rule' is used to pass up 'set_disable' status		*/
 
-	u_int16_t	act_ofs;	/* offset of action in 32-bit units */
-	u_int16_t	cmd_len;	/* # of 32-bit words in cmd	*/
-	u_int16_t	rulenum;	/* rule number			*/
-	u_int8_t	set;		/* rule set (0..31)		*/
+	uint16_t	act_ofs;	/* offset of action in 32-bit units */
+	uint16_t	cmd_len;	/* # of 32-bit words in cmd	*/
+	uint16_t	rulenum;	/* rule number			*/
+	uint8_t	set;		/* rule set (0..31)		*/
 #define	RESVD_SET	31	/* set for default and persistent rules */
-	u_int8_t	_pad;		/* padding			*/
+	uint8_t		_pad;		/* padding			*/
+	uint32_t	id;		/* rule id */
 
 	/* These fields are present in all rules.			*/
-	u_int64_t	pcnt;		/* Packet counter		*/
-	u_int64_t	bcnt;		/* Byte counter			*/
-	u_int32_t	timestamp;	/* tv_sec of last match		*/
+	uint64_t	pcnt;		/* Packet counter		*/
+	uint64_t	bcnt;		/* Byte counter			*/
+	uint32_t	timestamp;	/* tv_sec of last match		*/
 
 	ipfw_insn	cmd[1];		/* storage for commands		*/
 };
@@ -473,24 +487,29 @@ struct ip_fw {
 #define RULESIZE(rule)  (sizeof(struct ip_fw) + \
 	((struct ip_fw *)(rule))->cmd_len * 4 - 4)
 
+#if 1 // should be moved to in.h
 /*
  * This structure is used as a flow mask and a flow id for various
  * parts of the code.
+ * addr_type is used in userland and kernel to mark the address type.
+ * fib is used in the kernel to record the fib in use.
+ * _flags is used in the kernel to store tcp flags for dynamic rules.
  */
 struct ipfw_flow_id {
-	u_int32_t	dst_ip;
-	u_int32_t	src_ip;
-	u_int16_t	dst_port;
-	u_int16_t	src_port;
-	u_int8_t	fib;
-	u_int8_t	proto;
-	u_int8_t	flags;	/* protocol-specific flags */
-	uint8_t		addr_type; /* 4 = ipv4, 6 = ipv6, 1=ether ? */
-	struct in6_addr dst_ip6;	/* could also store MAC addr! */
+	uint32_t	dst_ip;
+	uint32_t	src_ip;
+	uint16_t	dst_port;
+	uint16_t	src_port;
+	uint8_t		fib;
+	uint8_t		proto;
+	uint8_t		_flags;	/* protocol-specific flags */
+	uint8_t		addr_type; /* 4=ip4, 6=ip6, 1=ether ? */
+	struct in6_addr dst_ip6;
 	struct in6_addr src_ip6;
-	u_int32_t	flow_id6;
-	u_int32_t	frag_id6;
+	uint32_t	flow_id6;
+	uint32_t	extra; /* queue/pipe or frag_id */
 };
+#endif
 
 #define IS_IP6_FLOW_ID(id)	((id)->addr_type == 6)
 
@@ -557,208 +576,4 @@ typedef struct	_ipfw_table {
 	ipfw_table_entry ent[0];	/* entries			*/
 } ipfw_table;
 
-#define IP_FW_TABLEARG	65535
-
-/*
- * Main firewall chains definitions and global var's definitions.
- */
-#ifdef _KERNEL
-
-/* Return values from ipfw_chk() */
-enum {
-	IP_FW_PASS = 0,
-	IP_FW_DENY,
-	IP_FW_DIVERT,
-	IP_FW_TEE,
-	IP_FW_DUMMYNET,
-	IP_FW_NETGRAPH,
-	IP_FW_NGTEE,
-	IP_FW_NAT,
-};
-
-/* flags for divert mtag */
-#define	IP_FW_DIVERT_LOOPBACK_FLAG	0x00080000
-#define	IP_FW_DIVERT_OUTPUT_FLAG	0x00100000
-
-/*
- * Structure for collecting parameters to dummynet for ip6_output forwarding
- */
-struct _ip6dn_args {
-       struct ip6_pktopts *opt_or;
-       struct route_in6 ro_or;
-       int flags_or;
-       struct ip6_moptions *im6o_or;
-       struct ifnet *origifp_or;
-       struct ifnet *ifp_or;
-       struct sockaddr_in6 dst_or;
-       u_long mtu_or;
-       struct route_in6 ro_pmtu_or;
-};
-
-/*
- * Arguments for calling ipfw_chk() and dummynet_io(). We put them
- * all into a structure because this way it is easier and more
- * efficient to pass variables around and extend the interface.
- */
-struct ip_fw_args {
-	struct mbuf	*m;		/* the mbuf chain		*/
-	struct ifnet	*oif;		/* output interface		*/
-	struct sockaddr_in *next_hop;	/* forward address		*/
-	struct ip_fw	*rule;		/* matching rule		*/
-	struct ether_header *eh;	/* for bridged packets		*/
-
-	struct ipfw_flow_id f_id;	/* grabbed from IP header	*/
-	u_int32_t	cookie;		/* a cookie depending on rule action */
-	struct inpcb	*inp;
-
-	struct _ip6dn_args	dummypar; /* dummynet->ip6_output */
-	struct sockaddr_in hopstore;	/* store here if cannot use a pointer */
-};
-
-/*
- * Function definitions.
- */
-
-/* Firewall hooks */
-struct sockopt;
-struct dn_flow_set;
-
-int ipfw_check_in(void *, struct mbuf **, struct ifnet *, int, struct inpcb *inp);
-int ipfw_check_out(void *, struct mbuf **, struct ifnet *, int, struct inpcb *inp);
-
-int ipfw_chk(struct ip_fw_args *);
-
-int ipfw_init(void);
-void ipfw_destroy(void);
-#ifdef NOTYET
-void ipfw_nat_destroy(void);
-#endif
-
-typedef int ip_fw_ctl_t(struct sockopt *);
-extern ip_fw_ctl_t *ip_fw_ctl_ptr;
-
-#ifdef VIMAGE_GLOBALS
-extern int fw_one_pass;
-extern int fw_enable;
-#ifdef INET6
-extern int fw6_enable;
-#endif
-#endif
-
-/* For kernel ipfw_ether and ipfw_bridge. */
-typedef	int ip_fw_chk_t(struct ip_fw_args *args);
-extern	ip_fw_chk_t	*ip_fw_chk_ptr;
-#define	IPFW_LOADED	(ip_fw_chk_ptr != NULL)
-
-struct ip_fw_chain {
-	struct ip_fw	*rules;		/* list of rules */
-	struct ip_fw	*reap;		/* list of rules to reap */
-	LIST_HEAD(, cfg_nat) nat;       /* list of nat entries */
-	struct radix_node_head *tables[IPFW_TABLES_MAX];
-	struct rwlock	rwmtx;
-};
-
-#ifdef IPFW_INTERNAL
-
-#define	IPFW_LOCK_INIT(_chain) \
-	rw_init(&(_chain)->rwmtx, "IPFW static rules")
-#define	IPFW_LOCK_DESTROY(_chain)	rw_destroy(&(_chain)->rwmtx)
-#define	IPFW_WLOCK_ASSERT(_chain)	rw_assert(&(_chain)->rwmtx, RA_WLOCKED)
-
-#define IPFW_RLOCK(p) rw_rlock(&(p)->rwmtx)
-#define IPFW_RUNLOCK(p) rw_runlock(&(p)->rwmtx)
-#define IPFW_WLOCK(p) rw_wlock(&(p)->rwmtx)
-#define IPFW_WUNLOCK(p) rw_wunlock(&(p)->rwmtx)
-
-#define LOOKUP_NAT(l, i, p) do {					\
-		LIST_FOREACH((p), &(l.nat), _next) {			\
-			if ((p)->id == (i)) {				\
-				break;					\
-			} 						\
-		}							\
-	} while (0)
-
-typedef int ipfw_nat_t(struct ip_fw_args *, struct cfg_nat *, struct mbuf *);
-typedef int ipfw_nat_cfg_t(struct sockopt *);
-#endif
-
-struct eventhandler_entry;
-/*
- * Stack virtualization support.
- */
-struct vnet_ipfw {
-	int	_fw_enable;
-	int	_fw6_enable;
-	u_int32_t _set_disable;
-	int	_fw_deny_unknown_exthdrs;
-	int	_fw_verbose;
-	int	_verbose_limit;
-	int	_fw_debug;		/* actually unused */
-	int	_autoinc_step;
-	ipfw_dyn_rule **_ipfw_dyn_v;
-	struct ip_fw_chain _layer3_chain;
-	u_int32_t _dyn_buckets;
-	u_int32_t _curr_dyn_buckets;
-	u_int32_t _dyn_ack_lifetime;
-	u_int32_t _dyn_syn_lifetime;
-	u_int32_t _dyn_fin_lifetime;
-	u_int32_t _dyn_rst_lifetime;
-	u_int32_t _dyn_udp_lifetime;
-	u_int32_t _dyn_short_lifetime;
-	u_int32_t _dyn_keepalive_interval;
-	u_int32_t _dyn_keepalive_period;
-	u_int32_t _dyn_keepalive;
-	u_int32_t _static_count;
-	u_int32_t _static_len;
-	u_int32_t _dyn_count;
-	u_int32_t _dyn_max;
-	u_int64_t _norule_counter;
-	struct callout _ipfw_timeout;
-	struct eventhandler_entry *_ifaddr_event_tag;
-};
-
-#ifndef VIMAGE
-#ifndef VIMAGE_GLOBALS
-extern struct vnet_ipfw vnet_ipfw_0;
-#endif
-#endif
-
-/*
- * Symbol translation macros
- */
-#define	INIT_VNET_IPFW(vnet) \
-	INIT_FROM_VNET(vnet, VNET_MOD_IPFW, struct vnet_ipfw, vnet_ipfw)
- 
-#define	VNET_IPFW(sym)		VSYM(vnet_ipfw, sym)
- 
-#define	V_fw_enable		VNET_IPFW(fw_enable)
-#define	V_fw6_enable		VNET_IPFW(fw6_enable)
-#define	V_set_disable		VNET_IPFW(set_disable)
-#define	V_fw_deny_unknown_exthdrs VNET_IPFW(fw_deny_unknown_exthdrs)
-#define	V_fw_verbose		VNET_IPFW(fw_verbose)
-#define	V_verbose_limit		VNET_IPFW(verbose_limit)
-#define	V_fw_debug		VNET_IPFW(fw_debug)
-#define	V_autoinc_step		VNET_IPFW(autoinc_step)
-#define	V_ipfw_dyn_v		VNET_IPFW(ipfw_dyn_v)
-#define	V_layer3_chain		VNET_IPFW(layer3_chain)
-#define	V_dyn_buckets		VNET_IPFW(dyn_buckets)
-#define	V_curr_dyn_buckets	VNET_IPFW(curr_dyn_buckets)
-#define	V_dyn_ack_lifetime	VNET_IPFW(dyn_ack_lifetime)
-#define	V_dyn_syn_lifetime	VNET_IPFW(dyn_syn_lifetime)
-#define	V_dyn_fin_lifetime	VNET_IPFW(dyn_fin_lifetime)
-#define	V_dyn_rst_lifetime	VNET_IPFW(dyn_rst_lifetime)
-#define	V_dyn_udp_lifetime	VNET_IPFW(dyn_udp_lifetime)
-#define	V_dyn_short_lifetime	VNET_IPFW(dyn_short_lifetime)
-#define	V_dyn_keepalive_interval VNET_IPFW(dyn_keepalive_interval)
-#define	V_dyn_keepalive_period	VNET_IPFW(dyn_keepalive_period)
-#define	V_dyn_keepalive		VNET_IPFW(dyn_keepalive)
-#define	V_static_count		VNET_IPFW(static_count)
-#define	V_static_len		VNET_IPFW(static_len)
-#define	V_dyn_count		VNET_IPFW(dyn_count)
-#define	V_dyn_max		VNET_IPFW(dyn_max)
-#define	V_norule_counter	VNET_IPFW(norule_counter)
-#define	V_ipfw_timeout		VNET_IPFW(ipfw_timeout)
-#define	V_ifaddr_event_tag	VNET_IPFW(ifaddr_event_tag)
-
-#endif /* _KERNEL */
 #endif /* _IPFW2_H */

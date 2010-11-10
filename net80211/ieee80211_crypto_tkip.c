@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_tkip.c,v 1.20 2008/12/18 23:00:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_tkip.c,v 1.23 2010/04/10 13:54:00 bschmidt Exp $");
 
 /*
  * IEEE 802.11i TKIP crypto support.
@@ -144,6 +144,7 @@ tkip_setkey(struct ieee80211_key *k)
 		return 0;
 	}
 	k->wk_keytsc = 1;		/* TSC starts at 1 */
+	ctx->rx_phase1_done = 0;
 	return 1;
 }
 
@@ -280,11 +281,18 @@ tkip_decap(struct ieee80211_key *k, struct mbuf *m, int hdrlen)
 
 	tid = ieee80211_gettid(wh);
 	ctx->rx_rsc = READ_6(ivp[2], ivp[0], ivp[4], ivp[5], ivp[6], ivp[7]);
-	if (ctx->rx_rsc <= k->wk_keyrsc[tid]) {
+	/*
+	 * NB: Multiple stations are using the same key in
+	 * IBSS mode, there is currently no way to sync keyrsc
+	 * counters without discarding too many frames.
+	 */
+	if (vap->iv_opmode != IEEE80211_M_IBSS &&
+	    vap->iv_opmode != IEEE80211_M_AHDEMO &&
+	    ctx->rx_rsc <= k->wk_keyrsc[tid]) {
 		/*
 		 * Replay violation; notify upper layer.
 		 */
-		ieee80211_notify_replay_failure(vap, wh, k, ctx->rx_rsc);
+		ieee80211_notify_replay_failure(vap, wh, k, ctx->rx_rsc, tid);
 		vap->iv_stats.is_rx_tkipreplay++;
 		return 0;
 	}

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/ibcs2/Makefile,v 1.34 2002/08/12 07:20:15 alfred Exp $
+# $FreeBSD: src/sys/modules/ibcs2/Makefile,v 1.35 2009/06/06 17:01:44 rwatson Exp $
 
 .PATH: ${.CURDIR}/../../i386/ibcs2
 
@@ -8,7 +8,7 @@ SRCS=	ibcs2_errno.c ibcs2_ipc.c ibcs2_stat.c ibcs2_misc.c \
 	ibcs2_socksys.c ibcs2_util.c ibcs2_xenix.c ibcs2_xenix_sysent.c \
 	ibcs2_isc.c ibcs2_isc_sysent.c \
 	ibcs2_msg.c ibcs2_other.c ibcs2_sysi86.c ibcs2_sysvec.c \
-	vnode_if.h opt_mac.h opt_spx_hack.h
+	vnode_if.h opt_spx_hack.h
 
 CFLAGS+= -DCOMPAT_IBCS2
 

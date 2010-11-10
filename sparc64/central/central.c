@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/central/central.c,v 1.13 2008/08/23 16:07:20 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/central/central.c,v 1.17 2009/12/22 21:02:46 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,14 +76,15 @@ static device_method_t central_methods[] = {
 	/* Bus interface */
 	DEVMETHOD(bus_print_child,	central_print_child),
 	DEVMETHOD(bus_probe_nomatch,	central_probe_nomatch),
-	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
-	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
 	DEVMETHOD(bus_alloc_resource,	central_alloc_resource),
-	DEVMETHOD(bus_release_resource,	bus_generic_rl_release_resource),
 	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
 	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
-	DEVMETHOD(bus_get_resource_list, central_get_resource_list),
+	DEVMETHOD(bus_release_resource,	bus_generic_rl_release_resource),
+	DEVMETHOD(bus_setup_intr,	bus_generic_setup_intr),
+	DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
+	DEVMETHOD(bus_get_resource_list, central_get_resource_list),
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	central_get_devinfo),
@@ -93,7 +94,7 @@ static device_method_t central_methods[] = {
 	DEVMETHOD(ofw_bus_get_node,	ofw_bus_gen_get_node),
 	DEVMETHOD(ofw_bus_get_type,	ofw_bus_gen_get_type),
 
-	{ NULL, NULL }
+	KOBJMETHOD_END
 };
 
 static driver_t central_driver = {
@@ -104,7 +105,9 @@ static driver_t central_driver = {
 
 static devclass_t central_devclass;
 
-DRIVER_MODULE(central, nexus, central_driver, central_devclass, 0, 0);
+EARLY_DRIVER_MODULE(central, nexus, central_driver, central_devclass, 0, 0,
+    BUS_PASS_BUS);
+MODULE_DEPEND(fhc, nexus, 1, 1, 1);
 MODULE_VERSION(central, 1);
 
 static int

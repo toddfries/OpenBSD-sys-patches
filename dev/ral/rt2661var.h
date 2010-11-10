@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/ral/rt2661var.h,v 1.4 2008/04/20 20:35:37 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/ral/rt2661var.h,v 1.7 2010/04/07 15:29:13 rpaulo Exp $	*/
 
 /*-
  * Copyright (c) 2005
@@ -24,7 +24,8 @@ struct rt2661_rx_radiotap_header {
 	uint8_t		wr_rate;
 	uint16_t	wr_chan_freq;
 	uint16_t	wr_chan_flags;
-	uint8_t		wr_antsignal;
+	int8_t		wr_antsignal;
+	int8_t		wr_antnoise;
 } __packed;
 
 #define RT2661_RX_RADIOTAP_PRESENT					\
@@ -32,7 +33,8 @@ struct rt2661_rx_radiotap_header {
 	 (1 << IEEE80211_RADIOTAP_FLAGS) |				\
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
-	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL))
+	 (1 << IEEE80211_RADIOTAP_DBM_ANTSIGNAL) |			\
+	 (1 << IEEE80211_RADIOTAP_DBM_ANTNOISE))
 
 struct rt2661_tx_radiotap_header {
 	struct ieee80211_radiotap_header wt_ihdr;
@@ -86,15 +88,8 @@ struct rt2661_rx_ring {
 	int			next;
 };
 
-struct rt2661_node {
-	struct ieee80211_node	ni;
-	struct ieee80211_amrr_node amrr;
-};
-#define	RT2661_NODE(ni)		((struct rt2661_node *)(ni))
-
 struct rt2661_vap {
 	struct ieee80211vap	ral_vap;
-	struct ieee80211_amrr	amrr;
 
 	int			(*ral_newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
@@ -114,8 +109,6 @@ struct rt2661_softc {
 	int				sc_tx_timer;
 	int                             sc_invalid;
 	int				sc_debug;
-
-	const struct ieee80211_rate_table *sc_rates;
 /*
  * The same in both up to here
  * ------------------------------------------------

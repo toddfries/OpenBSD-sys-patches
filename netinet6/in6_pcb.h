@@ -58,7 +58,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_pcb.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet6/in6_pcb.h,v 1.24 2008/11/27 12:04:35 bz Exp $
+ * $FreeBSD: src/sys/netinet6/in6_pcb.h,v 1.25 2009/06/23 22:08:55 bz Exp $
  */
 
 #ifndef _NETINET6_IN6_PCB_H_
@@ -74,8 +74,7 @@ void	in6_losing __P((struct inpcb *));
 int	in6_pcbbind __P((struct inpcb *, struct sockaddr *, struct ucred *));
 int	in6_pcbconnect __P((struct inpcb *, struct sockaddr *, struct ucred *));
 void	in6_pcbdisconnect __P((struct inpcb *));
-int	in6_pcbladdr __P((struct inpcb *, struct sockaddr *,
-			  struct in6_addr **));
+int	in6_pcbladdr(struct inpcb *, struct sockaddr *, struct in6_addr *);
 struct	inpcb *
 	in6_pcblookup_local __P((struct inpcbinfo *,
 				 struct in6_addr *, u_short, int,

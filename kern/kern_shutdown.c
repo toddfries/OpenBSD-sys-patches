@@ -35,11 +35,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.194 2008/11/23 21:05:22 dwmalone Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.204 2010/04/20 12:22:06 attilio Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kdb.h"
-#include "opt_mac.h"
 #include "opt_panic.h"
 #include "opt_show_busybufs.h"
 #include "opt_sched.h"
@@ -51,6 +50,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.194 2008/11/23 21:05:22 dwm
 #include <sys/conf.h>
 #include <sys/cons.h>
 #include <sys/eventhandler.h>
+#include <sys/jail.h>
 #include <sys/kdb.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
@@ -62,10 +62,9 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.194 2008/11/23 21:05:22 dwm
 #include <sys/reboot.h>
 #include <sys/resourcevar.h>
 #include <sys/sched.h>
-#include <sys/smp.h>		/* smp_active */
+#include <sys/smp.h>
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
-#include <sys/vimage.h>
 
 #include <ddb/ddb.h>
 
@@ -143,7 +142,7 @@ shutdown_conf(void *unused)
 {
 
 	EVENTHANDLER_REGISTER(shutdown_final, poweroff_wait, NULL,
-	    SHUTDOWN_PRI_FIRST);
+	    SHUTDOWN_PRI_FIRST + 100);
 	EVENTHANDLER_REGISTER(shutdown_final, shutdown_halt, NULL,
 	    SHUTDOWN_PRI_LAST + 100);
 	EVENTHANDLER_REGISTER(shutdown_final, shutdown_panic, NULL,
@@ -413,9 +412,6 @@ boot(int howto)
 	 */
 	EVENTHANDLER_INVOKE(shutdown_post_sync, howto);
 
-	/* XXX This doesn't disable interrupts any more.  Reconsider? */
-	splhigh();
-
 	if ((howto & (RB_HALT|RB_DUMP)) == RB_DUMP && !cold && !dumping) 
 		doadump();
 
@@ -491,6 +487,24 @@ shutdown_reset(void *junk, int howto)
 
 	printf("Rebooting...\n");
 	DELAY(1000000);	/* wait 1 sec for printf's to complete and be read */
+
+	/*
+	 * Acquiring smp_ipi_mtx here has a double effect:
+	 * - it disables interrupts avoiding CPU0 preemption
+	 *   by fast handlers (thus deadlocking  against other CPUs)
+	 * - it avoids deadlocks against smp_rendezvous() or, more 
+	 *   generally, threads busy-waiting, with this spinlock held,
+	 *   and waiting for responses by threads on other CPUs
+	 *   (ie. smp_tlb_shootdown()).
+	 *
+	 * For the !SMP case it just needs to handle the former problem.
+	 */
+#ifdef SMP
+	mtx_lock_spin(&smp_ipi_mtx);
+#else
+	spinlock_enter();
+#endif
+
 	/* cpu_boot(howto); */ /* doesn't do anything at the moment */
 	cpu_reset();
 	/* NOTREACHED */ /* assuming reset worked */
@@ -578,6 +592,10 @@ panic(const char *fmt, ...)
 
 /*
  * Support for poweroff delay.
+ *
+ * Please note that setting this delay too short might power off your machine
+ * before the write cache on your hard disk has been flushed, leading to
+ * soft-updates inconsistencies.
  */
 #ifndef POWEROFF_DELAY
 # define POWEROFF_DELAY 5000
@@ -611,16 +629,14 @@ void
 kproc_shutdown(void *arg, int howto)
 {
 	struct proc *p;
-	char procname[MAXCOMLEN + 1];
 	int error;
 
 	if (panicstr)
 		return;
 
 	p = (struct proc *)arg;
-	strlcpy(procname, p->p_comm, sizeof(procname));
 	printf("Waiting (max %d seconds) for system process `%s' to stop...",
-	    kproc_shutdown_wait, procname);
+	    kproc_shutdown_wait, p->p_comm);
 	error = kproc_suspend(p, kproc_shutdown_wait * hz);
 
 	if (error == EWOULDBLOCK)
@@ -633,16 +649,14 @@ void
 kthread_shutdown(void *arg, int howto)
 {
 	struct thread *td;
-	char procname[MAXCOMLEN + 1];
 	int error;
 
 	if (panicstr)
 		return;
 
 	td = (struct thread *)arg;
-	strlcpy(procname, td->td_name, sizeof(procname));
 	printf("Waiting (max %d seconds) for system thread `%s' to stop...",
-	    kproc_shutdown_wait, procname);
+	    kproc_shutdown_wait, td->td_name);
 	error = kthread_suspend(td, kproc_shutdown_wait * hz);
 
 	if (error == EWOULDBLOCK)
@@ -680,15 +694,6 @@ dump_write(struct dumperinfo *di, void *virtual, vm_offset_t physical,
 	return (di->dumper(di->priv, virtual, physical, offset, length));
 }
 
-#if defined(__powerpc__)
-void
-dumpsys(struct dumperinfo *di __unused)
-{
-
-	printf("Kernel dumps not implemented on this architecture\n");
-}
-#endif
-
 void
 mkdumpheader(struct kerneldumpheader *kdh, char *magic, uint32_t archver,
     uint64_t dumplen, uint32_t blksz)
@@ -702,7 +707,7 @@ mkdumpheader(struct kerneldumpheader *kdh, char *magic, uint32_t archver,
 	kdh->dumplength = htod64(dumplen);
 	kdh->dumptime = htod64(time_second);
 	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, G_hostname, sizeof(kdh->hostname));
+	strncpy(kdh->hostname, prison0.pr_hostname, sizeof(kdh->hostname));
 	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
 	if (panicstr != NULL)
 		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_proc.c,v 1.279 2009/02/18 21:52:13 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_proc.c,v 1.300 2010/05/27 08:10:12 attilio Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_proc.c,v 1.279 2009/02/18 21:52:13 attilio
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
@@ -78,6 +79,11 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_proc.c,v 1.279 2009/02/18 21:52:13 attilio
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/uma.h>
+
+#ifdef COMPAT_FREEBSD32
+#include <compat/freebsd32/freebsd32.h>
+#include <compat/freebsd32/freebsd32_util.h>
+#endif
 
 SDT_PROVIDER_DEFINE(proc);
 SDT_PROBE_DEFINE(proc, kernel, ctor, entry);
@@ -140,12 +146,14 @@ struct sx allproc_lock;
 struct sx proctree_lock;
 struct mtx ppeers_lock;
 uma_zone_t proc_zone;
-uma_zone_t ithread_zone;
 
 int kstack_pages = KSTACK_PAGES;
 SYSCTL_INT(_kern, OID_AUTO, kstack_pages, CTLFLAG_RD, &kstack_pages, 0, "");
 
 CTASSERT(sizeof(struct kinfo_proc) == KINFO_PROC_SIZE);
+#ifdef COMPAT_FREEBSD32
+CTASSERT(sizeof(struct kinfo_proc32) == KINFO_PROC32_SIZE);
+#endif
 
 /*
  * Initialize global process hashing structures.
@@ -203,14 +211,6 @@ proc_dtor(void *mem, int size, void *arg)
 #endif
 		/* Free all OSD associated to this thread. */
 		osd_thread_exit(td);
-
-		/* Dispose of an alternate kstack, if it exists.
-		 * XXX What if there are more than one thread in the proc?
-		 *     The first thread in the proc is special and not
-		 *     freed, so you gotta do this here.
-		 */
-		if (((p->p_flag & P_KTHREAD) != 0) && (td->td_altkstack != 0))
-			vm_thread_dispose_altkstack(td);
 	}
 	EVENTHANDLER_INVOKE(process_dtor, p);
 	if (p->p_ksi != NULL)
@@ -366,6 +366,7 @@ enterpgrp(p, pgid, pgrp, sess)
 		sess->s_sid = p->p_pid;
 		refcount_init(&sess->s_count, 1);
 		sess->s_ttyvp = NULL;
+		sess->s_ttydp = NULL;
 		sess->s_ttyp = NULL;
 		bcopy(p->p_session->s_login, sess->s_login,
 			    sizeof(sess->s_login));
@@ -684,11 +685,9 @@ fill_kinfo_aggregate(struct proc *p, struct kinfo_proc *kp)
 
 	kp->ki_estcpu = 0;
 	kp->ki_pctcpu = 0;
-	kp->ki_runtime = 0;
 	FOREACH_THREAD_IN_PROC(p, td) {
 		thread_lock(td);
 		kp->ki_pctcpu += sched_pctcpu(td);
-		kp->ki_runtime += cputick2usec(td->td_runtime);
 		kp->ki_estcpu += td->td_estcpu;
 		thread_unlock(td);
 	}
@@ -730,8 +729,13 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 		kp->ki_uid = cred->cr_uid;
 		kp->ki_ruid = cred->cr_ruid;
 		kp->ki_svuid = cred->cr_svuid;
+		kp->ki_cr_flags = cred->cr_flags;
 		/* XXX bde doesn't like KI_NGROUPS */
-		kp->ki_ngroups = min(cred->cr_ngroups, KI_NGROUPS);
+		if (cred->cr_ngroups > KI_NGROUPS) {
+			kp->ki_ngroups = KI_NGROUPS;
+			kp->ki_cr_flags |= KI_CRF_GRP_OVERFLOW;
+		} else
+			kp->ki_ngroups = cred->cr_ngroups;
 		bcopy(cred->cr_groups, kp->ki_groups,
 		    kp->ki_ngroups * sizeof(gid_t));
 		kp->ki_rgid = cred->cr_rgid;
@@ -739,8 +743,8 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 		/* If jailed(cred), emulate the old P_JAILED flag. */
 		if (jailed(cred)) {
 			kp->ki_flag |= P_JAILED;
-			/* If inside a jail, use 0 as a jail ID. */
-			if (!jailed(curthread->td_ucred))
+			/* If inside the jail, use 0 as a jail ID. */
+			if (cred->cr_prison != curthread->td_ucred->cr_prison)
 				kp->ki_jid = cred->cr_prison->pr_id;
 		}
 	}
@@ -762,8 +766,6 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 		FOREACH_THREAD_IN_PROC(p, td0) {
 			if (!TD_IS_SWAPPED(td0))
 				kp->ki_rssize += td0->td_kstack_pages;
-			if (td0->td_altkstack_obj != NULL)
-				kp->ki_rssize += td0->td_altkstack_pages;
 		}
 		kp->ki_swrss = vm->vm_swrss;
 		kp->ki_tsize = vm->vm_tsize;
@@ -835,9 +837,10 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 }
 
 /*
- * Fill in information that is thread specific.  Must be called with p_slock
- * locked.  If 'preferthread' is set, overwrite certain process-related
- * fields that are maintained for both threads and processes.
+ * Fill in information that is thread specific.  Must be called with
+ * target process locked.  If 'preferthread' is set, overwrite certain
+ * process-related fields that are maintained for both threads and
+ * processes.
  */
 static void
 fill_kinfo_thread(struct thread *td, struct kinfo_proc *kp, int preferthread)
@@ -852,8 +855,7 @@ fill_kinfo_thread(struct thread *td, struct kinfo_proc *kp, int preferthread)
 		strlcpy(kp->ki_wmesg, td->td_wmesg, sizeof(kp->ki_wmesg));
 	else
 		bzero(kp->ki_wmesg, sizeof(kp->ki_wmesg));
-	if (td->td_name[0] != '\0')
-		strlcpy(kp->ki_ocomm, td->td_name, sizeof(kp->ki_ocomm));
+	strlcpy(kp->ki_ocomm, td->td_name, sizeof(kp->ki_ocomm));
 	if (TD_ON_LOCK(td)) {
 		kp->ki_kiflag |= KI_LOCKBLOCK;
 		strlcpy(kp->ki_lockname, td->td_lockname,
@@ -899,7 +901,7 @@ fill_kinfo_thread(struct thread *td, struct kinfo_proc *kp, int preferthread)
 	kp->ki_pri.pri_user = td->td_user_pri;
 
 	if (preferthread) {
-		kp->ki_runtime = cputick2usec(td->td_runtime);
+		kp->ki_runtime = cputick2usec(td->td_rux.rux_runtime);
 		kp->ki_pctcpu = sched_pctcpu(td);
 		kp->ki_estcpu = td->td_estcpu;
 	}
@@ -907,7 +909,8 @@ fill_kinfo_thread(struct thread *td, struct kinfo_proc *kp, int preferthread)
 	/* We can't get this anymore but ps etc never used it anyway. */
 	kp->ki_rqindex = 0;
 
-	SIGSETOR(kp->ki_siglist, td->td_siglist);
+	if (preferthread)
+		kp->ki_siglist = td->td_siglist;
 	kp->ki_sigmask = td->td_sigmask;
 	thread_unlock(td);
 }
@@ -975,6 +978,126 @@ zpfind(pid_t pid)
 #define KERN_PROC_ZOMBMASK	0x3
 #define KERN_PROC_NOTHREADS	0x4
 
+#ifdef COMPAT_FREEBSD32
+
+/*
+ * This function is typically used to copy out the kernel address, so
+ * it can be replaced by assignment of zero.
+ */
+static inline uint32_t
+ptr32_trim(void *ptr)
+{
+	uintptr_t uptr;
+
+	uptr = (uintptr_t)ptr;
+	return ((uptr > UINT_MAX) ? 0 : uptr);
+}
+
+#define PTRTRIM_CP(src,dst,fld) \
+	do { (dst).fld = ptr32_trim((src).fld); } while (0)
+
+static void
+freebsd32_kinfo_proc_out(const struct kinfo_proc *ki, struct kinfo_proc32 *ki32)
+{
+	int i;
+
+	bzero(ki32, sizeof(struct kinfo_proc32));
+	ki32->ki_structsize = sizeof(struct kinfo_proc32);
+	CP(*ki, *ki32, ki_layout);
+	PTRTRIM_CP(*ki, *ki32, ki_args);
+	PTRTRIM_CP(*ki, *ki32, ki_paddr);
+	PTRTRIM_CP(*ki, *ki32, ki_addr);
+	PTRTRIM_CP(*ki, *ki32, ki_tracep);
+	PTRTRIM_CP(*ki, *ki32, ki_textvp);
+	PTRTRIM_CP(*ki, *ki32, ki_fd);
+	PTRTRIM_CP(*ki, *ki32, ki_vmspace);
+	PTRTRIM_CP(*ki, *ki32, ki_wchan);
+	CP(*ki, *ki32, ki_pid);
+	CP(*ki, *ki32, ki_ppid);
+	CP(*ki, *ki32, ki_pgid);
+	CP(*ki, *ki32, ki_tpgid);
+	CP(*ki, *ki32, ki_sid);
+	CP(*ki, *ki32, ki_tsid);
+	CP(*ki, *ki32, ki_jobc);
+	CP(*ki, *ki32, ki_tdev);
+	CP(*ki, *ki32, ki_siglist);
+	CP(*ki, *ki32, ki_sigmask);
+	CP(*ki, *ki32, ki_sigignore);
+	CP(*ki, *ki32, ki_sigcatch);
+	CP(*ki, *ki32, ki_uid);
+	CP(*ki, *ki32, ki_ruid);
+	CP(*ki, *ki32, ki_svuid);
+	CP(*ki, *ki32, ki_rgid);
+	CP(*ki, *ki32, ki_svgid);
+	CP(*ki, *ki32, ki_ngroups);
+	for (i = 0; i < KI_NGROUPS; i++)
+		CP(*ki, *ki32, ki_groups[i]);
+	CP(*ki, *ki32, ki_size);
+	CP(*ki, *ki32, ki_rssize);
+	CP(*ki, *ki32, ki_swrss);
+	CP(*ki, *ki32, ki_tsize);
+	CP(*ki, *ki32, ki_dsize);
+	CP(*ki, *ki32, ki_ssize);
+	CP(*ki, *ki32, ki_xstat);
+	CP(*ki, *ki32, ki_acflag);
+	CP(*ki, *ki32, ki_pctcpu);
+	CP(*ki, *ki32, ki_estcpu);
+	CP(*ki, *ki32, ki_slptime);
+	CP(*ki, *ki32, ki_swtime);
+	CP(*ki, *ki32, ki_runtime);
+	TV_CP(*ki, *ki32, ki_start);
+	TV_CP(*ki, *ki32, ki_childtime);
+	CP(*ki, *ki32, ki_flag);
+	CP(*ki, *ki32, ki_kiflag);
+	CP(*ki, *ki32, ki_traceflag);
+	CP(*ki, *ki32, ki_stat);
+	CP(*ki, *ki32, ki_nice);
+	CP(*ki, *ki32, ki_lock);
+	CP(*ki, *ki32, ki_rqindex);
+	CP(*ki, *ki32, ki_oncpu);
+	CP(*ki, *ki32, ki_lastcpu);
+	bcopy(ki->ki_ocomm, ki32->ki_ocomm, OCOMMLEN + 1);
+	bcopy(ki->ki_wmesg, ki32->ki_wmesg, WMESGLEN + 1);
+	bcopy(ki->ki_login, ki32->ki_login, LOGNAMELEN + 1);
+	bcopy(ki->ki_lockname, ki32->ki_lockname, LOCKNAMELEN + 1);
+	bcopy(ki->ki_comm, ki32->ki_comm, COMMLEN + 1);
+	bcopy(ki->ki_emul, ki32->ki_emul, KI_EMULNAMELEN + 1);
+	CP(*ki, *ki32, ki_cr_flags);
+	CP(*ki, *ki32, ki_jid);
+	CP(*ki, *ki32, ki_numthreads);
+	CP(*ki, *ki32, ki_tid);
+	CP(*ki, *ki32, ki_pri);
+	freebsd32_rusage_out(&ki->ki_rusage, &ki32->ki_rusage);
+	freebsd32_rusage_out(&ki->ki_rusage_ch, &ki32->ki_rusage_ch);
+	PTRTRIM_CP(*ki, *ki32, ki_pcb);
+	PTRTRIM_CP(*ki, *ki32, ki_kstack);
+	PTRTRIM_CP(*ki, *ki32, ki_udata);
+	CP(*ki, *ki32, ki_sflag);
+	CP(*ki, *ki32, ki_tdflags);
+}
+
+static int
+sysctl_out_proc_copyout(struct kinfo_proc *ki, struct sysctl_req *req)
+{
+	struct kinfo_proc32 ki32;
+	int error;
+
+	if (req->flags & SCTL_MASK32) {
+		freebsd32_kinfo_proc_out(ki, &ki32);
+		error = SYSCTL_OUT(req, &ki32, sizeof(struct kinfo_proc32));
+	} else
+		error = SYSCTL_OUT(req, ki, sizeof(struct kinfo_proc));
+	return (error);
+}
+#else
+static int
+sysctl_out_proc_copyout(struct kinfo_proc *ki, struct sysctl_req *req)
+{
+
+	return (SYSCTL_OUT(req, ki, sizeof(struct kinfo_proc)));
+}
+#endif
+
 /*
  * Must be called with the process locked and will return with it unlocked.
  */
@@ -992,13 +1115,11 @@ sysctl_out_proc(struct proc *p, struct sysctl_req *req, int flags)
 
 	fill_kinfo_proc(p, &kinfo_proc);
 	if (flags & KERN_PROC_NOTHREADS)
-		error = SYSCTL_OUT(req, (caddr_t)&kinfo_proc,
-		    sizeof(kinfo_proc));
+		error = sysctl_out_proc_copyout(&kinfo_proc, req);
 	else {
 		FOREACH_THREAD_IN_PROC(p, td) {
 			fill_kinfo_thread(td, &kinfo_proc, 1);
-			error = SYSCTL_OUT(req, (caddr_t)&kinfo_proc,
-			    sizeof(kinfo_proc));
+			error = sysctl_out_proc_copyout(&kinfo_proc, req);
 			if (error)
 				break;
 		}
@@ -1456,6 +1577,8 @@ sysctl_kern_proc_ovmmap(SYSCTL_HANDLER_ARGS)
 			kve->kve_flags |= KVME_FLAG_COW;
 		if (entry->eflags & MAP_ENTRY_NEEDS_COPY)
 			kve->kve_flags |= KVME_FLAG_NEEDS_COPY;
+		if (entry->eflags & MAP_ENTRY_NOCOREDUMP)
+			kve->kve_flags |= KVME_FLAG_NOCOREDUMP;
 
 		last_timestamp = map->timestamp;
 		vm_map_unlock_read(map);
@@ -1486,6 +1609,9 @@ sysctl_kern_proc_ovmmap(SYSCTL_HANDLER_ARGS)
 				break;
 			case OBJT_DEAD:
 				kve->kve_type = KVME_TYPE_DEAD;
+				break;
+			case OBJT_SG:
+				kve->kve_type = KVME_TYPE_SG;
 				break;
 			default:
 				kve->kve_type = KVME_TYPE_UNKNOWN;
@@ -1628,6 +1754,8 @@ sysctl_kern_proc_vmmap(SYSCTL_HANDLER_ARGS)
 			kve->kve_flags |= KVME_FLAG_COW;
 		if (entry->eflags & MAP_ENTRY_NEEDS_COPY)
 			kve->kve_flags |= KVME_FLAG_NEEDS_COPY;
+		if (entry->eflags & MAP_ENTRY_NOCOREDUMP)
+			kve->kve_flags |= KVME_FLAG_NOCOREDUMP;
 
 		last_timestamp = map->timestamp;
 		vm_map_unlock_read(map);
@@ -1658,6 +1786,9 @@ sysctl_kern_proc_vmmap(SYSCTL_HANDLER_ARGS)
 				break;
 			case OBJT_DEAD:
 				kve->kve_type = KVME_TYPE_DEAD;
+				break;
+			case OBJT_SG:
+				kve->kve_type = KVME_TYPE_SG;
 				break;
 			default:
 				kve->kve_type = KVME_TYPE_UNKNOWN;
@@ -1815,6 +1946,43 @@ repeat:
 }
 #endif
 
+/*
+ * This sysctl allows a process to retrieve the full list of groups from
+ * itself or another process.
+ */
+static int
+sysctl_kern_proc_groups(SYSCTL_HANDLER_ARGS)
+{
+	pid_t *pidp = (pid_t *)arg1;
+	unsigned int arglen = arg2;
+	struct proc *p;
+	struct ucred *cred;
+	int error;
+
+	if (arglen != 1)
+		return (EINVAL);
+	if (*pidp == -1) {	/* -1 means this process */
+		p = req->td->td_proc;
+	} else {
+		p = pfind(*pidp);
+		if (p == NULL)
+			return (ESRCH);
+		if ((error = p_cansee(curthread, p)) != 0) {
+			PROC_UNLOCK(p);
+			return (error);
+		}
+	}
+
+	cred = crhold(p->p_ucred);
+	if (*pidp != -1)
+		PROC_UNLOCK(p);
+
+	error = SYSCTL_OUT(req, cred->cr_groups,
+	    cred->cr_ngroups * sizeof(gid_t));
+	crfree(cred);
+	return (error);
+}
+
 SYSCTL_NODE(_kern, KERN_PROC, proc, CTLFLAG_RD,  0, "Process table");
 
 SYSCTL_PROC(_kern_proc, KERN_PROC_ALL, all, CTLFLAG_RD|CTLTYPE_STRUCT|
@@ -1899,3 +2067,6 @@ static SYSCTL_NODE(_kern_proc, KERN_PROC_VMMAP, vmmap, CTLFLAG_RD |
 static SYSCTL_NODE(_kern_proc, KERN_PROC_KSTACK, kstack, CTLFLAG_RD |
 	CTLFLAG_MPSAFE, sysctl_kern_proc_kstack, "Process kernel stacks");
 #endif
+
+static SYSCTL_NODE(_kern_proc, KERN_PROC_GROUPS, groups, CTLFLAG_RD |
+	CTLFLAG_MPSAFE, sysctl_kern_proc_groups, "Process groups");

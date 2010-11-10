@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_unix.c,v 1.48 2009/02/24 20:57:43 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_unix.c,v 1.49 2009/04/11 22:34:08 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -117,7 +117,7 @@ obreak(td, uap)
 			goto done;
 		}
 		rv = vm_map_insert(&vm->vm_map, NULL, 0, old, new,
-		    VM_PROT_ALL, VM_PROT_ALL, 0);
+		    VM_PROT_RW, VM_PROT_ALL, 0);
 		if (rv != KERN_SUCCESS) {
 			error = ENOMEM;
 			goto done;

@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/advansys/advlib.h,v 1.13 2007/06/17 05:55:46 scottl Exp $
+ * $FreeBSD: src/sys/dev/advansys/advlib.h,v 1.14 2009/07/10 08:18:08 scottl Exp $
  */
 /*-
  * Ported from:
@@ -57,6 +57,8 @@ typedef u_int8_t target_bit_vector;
 #define ADV_SCSI_ID_BITS	3
 #define ADV_MAX_TID		7
 #define ADV_MAX_LUN		7
+
+#define ADV_MAXPHYS		(128 * 1024)
 
 /* Enumeration of board types */
 typedef enum {

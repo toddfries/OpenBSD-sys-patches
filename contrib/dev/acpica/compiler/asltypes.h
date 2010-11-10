@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: asltypes.h - compiler data types and struct definitions
- *              $Revision: 1.89 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -189,21 +188,6 @@ typedef struct asl_mapping_entry
 } ASL_MAPPING_ENTRY;
 
 
-/* An entry in the Reserved Name information table */
-
-#define ASL_RSVD_RETURN_VALUE   0x01
-#define ASL_RSVD_RESOURCE_NAME  0x02
-#define ASL_RSVD_SCOPE          0x04
-
-typedef struct asl_reserved_info
-{
-    char                        *Name;
-    UINT8                       NumArguments;
-    UINT8                       Flags;
-
-} ASL_RESERVED_INFO;
-
-
 /* Parse tree walk info structure */
 
 typedef struct asl_walk_info
@@ -254,6 +238,14 @@ typedef enum
 
 #define ASL_MAX_FILE_TYPE       12
 #define ASL_NUM_FILES           (ASL_MAX_FILE_TYPE + 1)
+
+
+typedef struct asl_include_dir
+{
+    char                        *Dir;
+    struct asl_include_dir      *Next;
+
+} ASL_INCLUDE_DIR;
 
 
 /* An entry in the exception list, one for each error/warning */
@@ -340,6 +332,7 @@ typedef enum
     ASL_MSG_EARLY_EOF,
     ASL_MSG_ENCODING_LENGTH,
     ASL_MSG_EX_INTERRUPT_LIST,
+    ASL_MSG_EX_INTERRUPT_LIST_MIN,
     ASL_MSG_EX_INTERRUPT_NUMBER,
     ASL_MSG_FIELD_ACCESS_WIDTH,
     ASL_MSG_FIELD_UNIT_ACCESS_WIDTH,
@@ -361,7 +354,8 @@ typedef enum
     ASL_MSG_INVALID_TIME,
     ASL_MSG_INVALID_TYPE,
     ASL_MSG_INVALID_UUID,
-    ASL_MSG_LIST_LENGTH,
+    ASL_MSG_LIST_LENGTH_LONG,
+    ASL_MSG_LIST_LENGTH_SHORT,
     ASL_MSG_LISTING_FILE_OPEN,
     ASL_MSG_LISTING_FILENAME,
     ASL_MSG_LOCAL_INIT,
@@ -422,7 +416,20 @@ typedef enum
     ASL_MSG_RESULT_NOT_USED,
     ASL_MSG_NOT_REFERENCED,
     ASL_MSG_NON_ZERO,
-    ASL_MSG_STRING_LENGTH
+    ASL_MSG_STRING_LENGTH,
+    ASL_MSG_SERIALIZED,
+    ASL_MSG_COMPILER_RESERVED,
+    ASL_MSG_NAMED_OBJECT_IN_WHILE,
+    ASL_MSG_LOCAL_OUTSIDE_METHOD,
+    ASL_MSG_ALIGNMENT,
+    ASL_MSG_ISA_ADDRESS,
+    ASL_MSG_INVALID_MIN_MAX,
+    ASL_MSG_INVALID_LENGTH,
+    ASL_MSG_INVALID_LENGTH_FIXED,
+    ASL_MSG_INVALID_GRANULARITY,
+    ASL_MSG_INVALID_GRAN_FIXED,
+    ASL_MSG_INVALID_ACCESS_SIZE,
+    ASL_MSG_INVALID_ADDR_FLAGS
 
 } ASL_MESSAGE_IDS;
 
@@ -454,6 +461,7 @@ char                        *AslMessages [] = {
 /*    ASL_MSG_EARLY_EOF */                  "Premature end-of-file reached",
 /*    ASL_MSG_ENCODING_LENGTH */            "Package length too long to encode",
 /*    ASL_MSG_EX_INTERRUPT_LIST */          "Too many interrupts (255 max)",
+/*    ASL_MSG_EX_INTERRUPT_LIST_MIN */      "Too few interrupts (1 minimum required)",
 /*    ASL_MSG_EX_INTERRUPT_NUMBER */        "Invalid interrupt number (must be 32 bits)",
 /*    ASL_MSG_FIELD_ACCESS_WIDTH */         "Access width is greater than region size",
 /*    ASL_MSG_FIELD_UNIT_ACCESS_WIDTH */    "Access width of Field Unit extends beyond region limit",
@@ -475,7 +483,8 @@ char                        *AslMessages [] = {
 /*    ASL_MSG_INVALID_TIME */               "Time parameter too long (255 max)",
 /*    ASL_MSG_INVALID_TYPE */               "Invalid type",
 /*    ASL_MSG_INVALID_UUID */               "UUID string must be of the form \"aabbccdd-eeff-gghh-iijj-kkllmmnnoopp\"",
-/*    ASL_MSG_LIST_LENGTH */                "Initializer list too long",
+/*    ASL_MSG_LIST_LENGTH_LONG */           "Initializer list longer than declared package length",
+/*    ASL_MSG_LIST_LENGTH_SHORT */          "Initializer list shorter than declared package length",
 /*    ASL_MSG_LISTING_FILE_OPEN */          "Could not open listing file",
 /*    ASL_MSG_LISTING_FILENAME */           "Could not create listing filename",
 /*    ASL_MSG_LOCAL_INIT */                 "Method local variable is not initialized",
@@ -507,10 +516,10 @@ char                        *AslMessages [] = {
 /*    ASL_MSG_RESERVED_ARG_COUNT_HI */      "Reserved method has too many arguments",
 /*    ASL_MSG_RESERVED_ARG_COUNT_LO */      "Reserved method has too few arguments",
 /*    ASL_MSG_RESERVED_METHOD */            "Reserved name must be a control method",
-/*    ASL_MSG_RESERVED_OPERAND_TYPE */      "Invalid operand type for reserved name, must be",
+/*    ASL_MSG_RESERVED_OPERAND_TYPE */      "Invalid object type for reserved name",
 /*    ASL_MSG_RESERVED_RETURN_VALUE */      "Reserved method must return a value",
 /*    ASL_MSG_RESERVED_USE */               "Invalid use of reserved name",
-/*    ASL_MSG_RESERVED_WORD */              "Use of reserved word",
+/*    ASL_MSG_RESERVED_WORD */              "Use of reserved name",
 /*    ASL_MSG_RESOURCE_FIELD */             "Resource field name cannot be used as a target",
 /*    ASL_MSG_RESOURCE_INDEX */             "Missing ResourceSourceIndex (required)",
 /*    ASL_MSG_RESOURCE_LIST */              "Too many resource items (internal error)",
@@ -536,7 +545,20 @@ char                        *AslMessages [] = {
 /*    ASL_MSG_RESULT_NOT_USED */            "Result is not used, operator has no effect",
 /*    ASL_MSG_NOT_REFERENCED */             "Namespace object is not referenced",
 /*    ASL_MSG_NON_ZERO */                   "Operand evaluates to zero",
-/*    ASL_MSG_STRING_LENGTH */              "String literal too long"
+/*    ASL_MSG_STRING_LENGTH */              "String literal too long",
+/*    ASL_MSG_SERIALIZED */                 "Control Method marked Serialized",
+/*    ASL_MSG_COMPILER_RESERVED */          "Use of compiler reserved name",
+/*    ASL_MSG_NAMED_OBJECT_IN_WHILE */      "Creating a named object in a While loop",
+/*    ASL_MSG_LOCAL_OUTSIDE_METHOD */       "Local or Arg used outside a control method",
+/*    ASL_MSG_ALIGNMENT */                  "Must be a multiple of alignment/granularity value",
+/*    ASL_MSG_ISA_ADDRESS */                "Maximum 10-bit ISA address (0x3FF)",
+/*    ASL_MSG_INVALID_MIN_MAX */            "Address Min is greater than Address Max",
+/*    ASL_MSG_INVALID_LENGTH */             "Length is larger than Min/Max window",
+/*    ASL_MSG_INVALID_LENGTH_FIXED */       "Length is not equal to fixed Min/Max window",
+/*    ASL_MSG_INVALID_GRANULARITY */        "Granularity must be zero or a power of two minus one",
+/*    ASL_MSG_INVALID_GRAN_FIXED */         "Granularity must be zero for fixed Min/Max",
+/*    ASL_MSG_INVALID_ACCESS_SIZE */        "Invalid AccessSize (Maximum is 4 - QWord access)",
+/*    ASL_MSG_INVALID_ADDR_FLAGS */         "Invalid combination of Length and Min/Max fixed flags"
 
 };
 
@@ -552,11 +574,6 @@ char                    *AslErrorLevel [ASL_NUM_REPORT_LEVELS] = {
 
 #define ASL_ERROR_LEVEL_LENGTH          8       /* Length of strings above */
 
-/* Exception counters */
-
-UINT32                  Gbl_ExceptionCount[ASL_NUM_REPORT_LEVELS] = {0,0,0,0,0,0};
-
-#endif
-
+#endif  /* ASL_EXCEPTIONS */
 
 #endif  /* __ASLTYPES_H */

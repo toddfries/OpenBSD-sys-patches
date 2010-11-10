@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_interrupts.c,v 1.2 2009/02/24 00:33:08 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_interrupts.c,v 1.6 2010/06/01 15:33:10 rpaulo Exp $
  */
 #include "opt_ah.h"
 
@@ -104,7 +104,7 @@ ar5416GetPendingInterrupts(struct ath_hal *ah, HAL_INT *masked)
 		isr = OS_REG_READ(ah, AR_ISR_RAC);
 		if (isr == 0xffffffff) {
 			*masked = 0;
-			return AH_FALSE;;
+			return AH_FALSE;
 		}
 
 		*masked = isr & HAL_INT_COMMON;
@@ -118,6 +118,13 @@ ar5416GetPendingInterrupts(struct ath_hal *ah, HAL_INT *masked)
 			isr1 = OS_REG_READ(ah, AR_ISR_S1_S);
 			ahp->ah_intrTxqs |= MS(isr1, AR_ISR_S1_QCU_TXERR);
 			ahp->ah_intrTxqs |= MS(isr1, AR_ISR_S1_QCU_TXEOL);
+		}
+
+		if (AR_SREV_MERLIN(ah) || AR_SREV_KITE(ah)) {
+			uint32_t isr5;
+			isr5 = OS_REG_READ(ah, AR_ISR_S5_S);
+			if (isr5 & AR_ISR_S5_TIM_TIMER)
+				*masked |= HAL_INT_TIM_TIMER;
 		}
 
 		/* Interrupt Mitigation on AR5416 */

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/patm/if_patm_attach.c,v 1.14 2007/02/23 12:18:48 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/patm/if_patm_attach.c,v 1.15 2009/11/06 14:55:01 jhb Exp $");
 
 #include "opt_inet.h"
 #include "opt_natm.h"
@@ -197,11 +197,9 @@ patm_attach(device_t dev)
 	ifp->if_softc = sc;
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	ifp->if_flags = IFF_SIMPLEX;
-	ifp->if_watchdog = NULL;
 	ifp->if_init = patm_init;
 	ifp->if_ioctl = patm_ioctl;
 	ifp->if_start = patm_start;
-	ifp->if_watchdog = NULL;
 
 	/* do this early so we can destroy unconditionally */
 	mtx_init(&sc->mtx, device_get_nameunit(dev),

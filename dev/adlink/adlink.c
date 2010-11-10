@@ -43,7 +43,7 @@
 
 #ifdef _KERNEL
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/adlink/adlink.c,v 1.17 2007/08/04 17:43:11 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/adlink/adlink.c,v 1.18 2009/12/29 21:51:28 rnoland Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -161,7 +161,8 @@ adlink_intr(void *arg)
 }
 
 static int
-adlink_mmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr, int nprot)
+adlink_mmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int nprot, vm_memattr_t *memattr)
 {
 	struct softc *sc;
 	vm_offset_t o;

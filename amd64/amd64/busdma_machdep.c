@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/busdma_machdep.c,v 1.88 2009/02/09 18:03:31 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/busdma_machdep.c,v 1.93 2010/09/29 21:53:11 neel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -95,7 +95,6 @@ struct bounce_zone {
 	int		total_deferred;
 	int		map_count;
 	bus_size_t	alignment;
-	bus_size_t	boundary;
 	bus_addr_t	lowaddr;
 	char		zoneid[8];
 	char		lowaddrid[20];
@@ -240,8 +239,7 @@ bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 	newtag->alignment = alignment;
 	newtag->boundary = boundary;
 	newtag->lowaddr = trunc_page((vm_paddr_t)lowaddr) + (PAGE_SIZE - 1);
-	newtag->highaddr = trunc_page((vm_paddr_t)highaddr) +
-	    (PAGE_SIZE - 1);
+	newtag->highaddr = trunc_page((vm_paddr_t)highaddr) + (PAGE_SIZE - 1);
 	newtag->filter = filter;
 	newtag->filterarg = filterarg;
 	newtag->maxsize = maxsize;
@@ -528,7 +526,7 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		CTR4(KTR_BUSDMA, "%s: tag %p tag flags 0x%x error %d",
 		    __func__, dmat, dmat->flags, ENOMEM);
 		return (ENOMEM);
-	} else if ((uintptr_t)*vaddr & (dmat->alignment - 1)) {
+	} else if (vtophys(*vaddr) & (dmat->alignment - 1)) {
 		printf("bus_dmamem_alloc failed to align memory properly.\n");
 	}
 	if (flags & BUS_DMA_NOCACHE)
@@ -606,10 +604,18 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
-			paddr = pmap_kextract(vaddr);
-			if (run_filter(dmat, paddr) != 0)
+			bus_size_t sg_len;
+
+			sg_len = PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK);
+			if (pmap)
+				paddr = pmap_extract(pmap, vaddr);
+			else
+				paddr = pmap_kextract(vaddr);
+			if (run_filter(dmat, paddr) != 0) {
+				sg_len = roundup2(sg_len, dmat->alignment);
 				map->pagesneeded++;
-			vaddr += (PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK));
+			}
+			vaddr += sg_len;
 		}
 		CTR1(KTR_BUSDMA, "pagesneeded= %d\n", map->pagesneeded);
 	}
@@ -642,6 +648,8 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 	bmask = ~(dmat->boundary - 1);
 
 	for (seg = *segp; buflen > 0 ; ) {
+		bus_size_t max_sgsize;
+
 		/*
 		 * Get the physical address for this segment.
 		 */
@@ -653,11 +661,15 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 		/*
 		 * Compute the segment size, and adjust counts.
 		 */
-		sgsize = PAGE_SIZE - ((u_long)curaddr & PAGE_MASK);
-		if (sgsize > dmat->maxsegsz)
-			sgsize = dmat->maxsegsz;
-		if (buflen < sgsize)
-			sgsize = buflen;
+		max_sgsize = MIN(buflen, dmat->maxsegsz);
+		sgsize = PAGE_SIZE - ((vm_offset_t)curaddr & PAGE_MASK);
+		if (map->pagesneeded != 0 && run_filter(dmat, curaddr)) {
+			sgsize = roundup2(sgsize, dmat->alignment);
+			sgsize = MIN(sgsize, max_sgsize);
+			curaddr = add_bounce_page(dmat, map, vaddr, sgsize);
+		} else {
+			sgsize = MIN(sgsize, max_sgsize);
+		}
 
 		/*
 		 * Make sure we don't cross any boundaries.
@@ -667,9 +679,6 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 			if (sgsize > (baddr - curaddr))
 				sgsize = (baddr - curaddr);
 		}
-
-		if (map->pagesneeded != 0 && run_filter(dmat, curaddr))
-			curaddr = add_bounce_page(dmat, map, vaddr, sgsize);
 
 		/*
 		 * Insert chunk into a segment, coalescing with
@@ -975,7 +984,6 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	/* Check to see if we already have a suitable zone */
 	STAILQ_FOREACH(bz, &bounce_zone_list, links) {
 		if ((dmat->alignment <= bz->alignment)
-		 && (dmat->boundary <= bz->boundary)
 		 && (dmat->lowaddr >= bz->lowaddr)) {
 			dmat->bounce_zone = bz;
 			return (0);
@@ -991,8 +999,7 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	bz->reserved_bpages = 0;
 	bz->active_bpages = 0;
 	bz->lowaddr = dmat->lowaddr;
-	bz->alignment = dmat->alignment;
-	bz->boundary = dmat->boundary;
+	bz->alignment = MAX(dmat->alignment, PAGE_SIZE);
 	bz->map_count = 0;
 	snprintf(bz->zoneid, 8, "zone%d", busdma_zonecount);
 	busdma_zonecount++;
@@ -1039,9 +1046,6 @@ alloc_bounce_zone(bus_dma_tag_t dmat)
 	SYSCTL_ADD_INT(busdma_sysctl_tree(bz),
 	    SYSCTL_CHILDREN(busdma_sysctl_tree_top(bz)), OID_AUTO,
 	    "alignment", CTLFLAG_RD, &bz->alignment, 0, "");
-	SYSCTL_ADD_INT(busdma_sysctl_tree(bz),
-	    SYSCTL_CHILDREN(busdma_sysctl_tree_top(bz)), OID_AUTO,
-	    "boundary", CTLFLAG_RD, &bz->boundary, 0, "");
 
 	return (0);
 }
@@ -1066,7 +1070,7 @@ alloc_bounce_pages(bus_dma_tag_t dmat, u_int numpages)
 							 M_NOWAIT, 0ul,
 							 bz->lowaddr,
 							 PAGE_SIZE,
-							 bz->boundary);
+							 0);
 		if (bpage->vaddr == 0) {
 			free(bpage, M_DEVBUF);
 			break;
@@ -1134,9 +1138,7 @@ add_bounce_page(bus_dma_tag_t dmat, bus_dmamap_t map, vm_offset_t vaddr,
 	mtx_unlock(&bounce_lock);
 
 	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
-		/* page offset needs to be preserved */
-		bpage->vaddr &= ~PAGE_MASK;
-		bpage->busaddr &= ~PAGE_MASK;
+		/* Page offset needs to be preserved. */
 		bpage->vaddr |= vaddr & PAGE_MASK;
 		bpage->busaddr |= vaddr & PAGE_MASK;
 	}
@@ -1155,6 +1157,15 @@ free_bounce_page(bus_dma_tag_t dmat, struct bounce_page *bpage)
 	bz = dmat->bounce_zone;
 	bpage->datavaddr = 0;
 	bpage->datacount = 0;
+	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
+		/*
+		 * Reset the bounce page to start at offset 0.  Other uses
+		 * of this bounce page may need to store a full page of
+		 * data and/or assume it starts on a page boundary.
+		 */
+		bpage->vaddr &= ~PAGE_MASK;
+		bpage->busaddr &= ~PAGE_MASK;
+	}
 
 	mtx_lock(&bounce_lock);
 	STAILQ_INSERT_HEAD(&bz->bounce_page_list, bpage, links);

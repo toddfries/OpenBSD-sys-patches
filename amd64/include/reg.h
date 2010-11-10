@@ -31,11 +31,15 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)reg.h	5.5 (Berkeley) 1/18/91
- * $FreeBSD: src/sys/amd64/include/reg.h,v 1.38 2006/11/17 20:27:01 jhb Exp $
+ * $FreeBSD: src/sys/amd64/include/reg.h,v 1.41 2010/03/29 18:47:04 jhb Exp $
  */
 
 #ifndef _MACHINE_REG_H_
 #define	_MACHINE_REG_H_
+
+#if defined(_KERNEL) && !defined(_STANDALONE)
+#include "opt_compat.h"
+#endif
 
 /*
  * Register set accessible via /proc/$pid/regs and PT_{SET,GET}REGS.
@@ -56,8 +60,12 @@ struct reg {
 	register_t	r_rdx;
 	register_t	r_rcx;
 	register_t	r_rax;
-	register_t	r_trapno;
-	register_t	r_err;
+	uint32_t	r_trapno;
+	uint16_t	r_fs;
+	uint16_t	r_gs;
+	uint32_t	r_err;
+	uint16_t	r_es;
+	uint16_t	r_ds;
 	register_t	r_rip;
 	register_t	r_cs;
 	register_t	r_rflags;
@@ -101,7 +109,7 @@ struct dbreg {
 #define	DBREG_DR7_EXEC		0x00	/* break on execute       */
 #define	DBREG_DR7_WRONLY	0x01	/* break on write         */
 #define	DBREG_DR7_RDWR		0x03	/* break on read or write */
-#define	DBREG_DR7_MASK(i)	((u_long)0xf << ((i) * 4 + 16) | 0x3 << (i) * 2)
+#define	DBREG_DR7_MASK(i)	(0xful << ((i) * 4 + 16) | 0x3 << (i) * 2)
 #define	DBREG_DR7_SET(i, len, access, enable)				\
 	((u_long)((len) << 2 | (access)) << ((i) * 4 + 16) | (enable) << (i) * 2)
 #define	DBREG_DR7_GD		0x2000
@@ -111,6 +119,11 @@ struct dbreg {
 
 #define	DBREG_DRX(d,x)	((d)->dr[(x)])	/* reference dr0 - dr15 by
 					   register number */
+
+#ifdef COMPAT_FREEBSD32
+#include <machine/fpu.h>
+#include <compat/ia32/ia32_reg.h>
+#endif
 
 #ifdef _KERNEL
 /*

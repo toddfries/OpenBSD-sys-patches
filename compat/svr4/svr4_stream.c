@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stream.c,v 1.64 2008/09/15 15:09:35 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stream.c,v 1.65 2009/05/29 05:58:46 delphij Exp $");
 
 #include "opt_compat.h"
 #include "opt_ktrace.h"
@@ -1442,7 +1442,7 @@ svr4_stream_ioctl(fp, td, retval, fd, cmd, dat)
 
 int
 svr4_sys_putmsg(td, uap)
-	register struct thread *td;
+	struct thread *td;
 	struct svr4_sys_putmsg_args *uap;
 {
 	struct file     *fp;
@@ -1633,7 +1633,7 @@ svr4_sys_getmsg(td, uap)
 
 int
 svr4_do_getmsg(td, uap, fp)
-	register struct thread *td;
+	struct thread *td;
 	struct svr4_sys_getmsg_args *uap;
 	struct file *fp;
 {

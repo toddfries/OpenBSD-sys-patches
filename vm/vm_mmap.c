@@ -41,11 +41,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.228 2009/02/24 20:57:43 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.241 2010/05/26 18:00:44 alc Exp $");
 
 #include "opt_compat.h"
 #include "opt_hwpmc_hooks.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -65,6 +64,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.228 2009/02/24 20:57:43 kib Exp $")
 #include <sys/mount.h>
 #include <sys/conf.h>
 #include <sys/stat.h>
+#include <sys/sysent.h>
 #include <sys/vmmeter.h>
 #include <sys/sysctl.h>
 
@@ -117,9 +117,9 @@ vmmapentry_rsrc_init(dummy)
 }
 
 static int vm_mmap_vnode(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct vnode *, vm_ooffset_t, vm_object_t *);
+    int *, struct vnode *, vm_ooffset_t *, vm_object_t *);
 static int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct cdev *, vm_ooffset_t, vm_object_t *);
+    int *, struct cdev *, vm_ooffset_t *, vm_object_t *);
 static int vm_mmap_shm(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
     int *, struct shmfd *, vm_ooffset_t, vm_object_t *);
 
@@ -229,9 +229,11 @@ mmap(td, uap)
 	pos = uap->pos;
 
 	fp = NULL;
-	/* make sure mapping fits into numeric range etc */
-	if ((ssize_t) uap->len < 0 ||
-	    ((flags & MAP_ANON) && uap->fd != -1))
+
+	/* Make sure mapping fits into numeric range, etc. */
+	if ((uap->len == 0 && !SV_CURPROC_FLAG(SV_AOUT) &&
+	     curproc->p_osrel >= 800104) ||
+	    ((flags & MAP_ANON) && (uap->fd != -1 || pos != 0)))
 		return (EINVAL);
 
 	if (flags & MAP_STACK) {
@@ -266,6 +268,7 @@ mmap(td, uap)
 		addr -= pageoff;
 		if (addr & PAGE_MASK)
 			return (EINVAL);
+
 		/* Address range must be all in user VM space. */
 		if (addr < vm_map_min(&vms->vm_map) ||
 		    addr + size > vm_map_max(&vms->vm_map))
@@ -297,7 +300,6 @@ mmap(td, uap)
 		handle = NULL;
 		handle_type = OBJT_DEFAULT;
 		maxprot = VM_PROT_ALL;
-		pos = 0;
 	} else {
 		/*
 		 * Mapping file, get fp for validation and
@@ -620,10 +622,6 @@ mprotect(td, uap)
 	addr = (vm_offset_t) uap->addr;
 	size = uap->len;
 	prot = uap->prot & VM_PROT_ALL;
-#if defined(VM_PROT_READ_IS_EXEC)
-	if (prot & VM_PROT_READ)
-		prot |= VM_PROT_EXECUTE;
-#endif
 
 	pageoff = (addr & PAGE_MASK);
 	addr -= pageoff;
@@ -638,6 +636,8 @@ mprotect(td, uap)
 		return (0);
 	case KERN_PROTECTION_FAILURE:
 		return (EACCES);
+	case KERN_RESOURCE_SHORTAGE:
+		return (ENOMEM);
 	}
 	return (EINVAL);
 }
@@ -772,8 +772,13 @@ mincore(td, uap)
 	int vecindex, lastvecindex;
 	vm_map_entry_t current;
 	vm_map_entry_t entry;
+	vm_object_t object;
+	vm_paddr_t locked_pa;
+	vm_page_t m;
+	vm_pindex_t pindex;
 	int mincoreinfo;
 	unsigned int timestamp;
+	boolean_t locked;
 
 	/*
 	 * Make sure that the addresses presented are valid for user
@@ -847,38 +852,81 @@ RestartScan:
 			 * it can provide info as to whether we are the
 			 * one referencing or modifying the page.
 			 */
-			mincoreinfo = pmap_mincore(pmap, addr);
-			if (!mincoreinfo) {
-				vm_pindex_t pindex;
-				vm_ooffset_t offset;
-				vm_page_t m;
+			object = NULL;
+			locked_pa = 0;
+		retry:
+			m = NULL;
+			mincoreinfo = pmap_mincore(pmap, addr, &locked_pa);
+			if (locked_pa != 0) {
 				/*
-				 * calculate the page index into the object
+				 * The page is mapped by this process but not
+				 * both accessed and modified.  It is also
+				 * managed.  Acquire the object lock so that
+				 * other mappings might be examined.
 				 */
-				offset = current->offset + (addr - current->start);
-				pindex = OFF_TO_IDX(offset);
-				VM_OBJECT_LOCK(current->object.vm_object);
-				m = vm_page_lookup(current->object.vm_object,
-					pindex);
-				/*
-				 * if the page is resident, then gather information about
-				 * it.
-				 */
-				if (m != NULL && m->valid != 0) {
-					mincoreinfo = MINCORE_INCORE;
-					vm_page_lock_queues();
-					if (m->dirty ||
-						pmap_is_modified(m))
-						mincoreinfo |= MINCORE_MODIFIED_OTHER;
-					if ((m->flags & PG_REFERENCED) ||
-						pmap_ts_referenced(m)) {
-						vm_page_flag_set(m, PG_REFERENCED);
-						mincoreinfo |= MINCORE_REFERENCED_OTHER;
+				m = PHYS_TO_VM_PAGE(locked_pa);
+				if (m->object != object) {
+					if (object != NULL)
+						VM_OBJECT_UNLOCK(object);
+					object = m->object;
+					locked = VM_OBJECT_TRYLOCK(object);
+					vm_page_unlock(m);
+					if (!locked) {
+						VM_OBJECT_LOCK(object);
+						vm_page_lock(m);
+						goto retry;
 					}
-					vm_page_unlock_queues();
+				} else
+					vm_page_unlock(m);
+				KASSERT(m->valid == VM_PAGE_BITS_ALL,
+				    ("mincore: page %p is mapped but invalid",
+				    m));
+			} else if (mincoreinfo == 0) {
+				/*
+				 * The page is not mapped by this process.  If
+				 * the object implements managed pages, then
+				 * determine if the page is resident so that
+				 * the mappings might be examined.
+				 */
+				if (current->object.vm_object != object) {
+					if (object != NULL)
+						VM_OBJECT_UNLOCK(object);
+					object = current->object.vm_object;
+					VM_OBJECT_LOCK(object);
 				}
-				VM_OBJECT_UNLOCK(current->object.vm_object);
+				if (object->type == OBJT_DEFAULT ||
+				    object->type == OBJT_SWAP ||
+				    object->type == OBJT_VNODE) {
+					pindex = OFF_TO_IDX(current->offset +
+					    (addr - current->start));
+					m = vm_page_lookup(object, pindex);
+					if (m != NULL && m->valid == 0)
+						m = NULL;
+					if (m != NULL)
+						mincoreinfo = MINCORE_INCORE;
+				}
 			}
+			if (m != NULL) {
+				/* Examine other mappings to the page. */
+				if (m->dirty == 0 && pmap_is_modified(m))
+					vm_page_dirty(m);
+				if (m->dirty != 0)
+					mincoreinfo |= MINCORE_MODIFIED_OTHER;
+				/*
+				 * The first test for PG_REFERENCED is an
+				 * optimization.  The second test is
+				 * required because a concurrent pmap
+				 * operation could clear the last reference
+				 * and set PG_REFERENCED before the call to
+				 * pmap_is_referenced(). 
+				 */
+				if ((m->flags & PG_REFERENCED) != 0 ||
+				    pmap_is_referenced(m) ||
+				    (m->flags & PG_REFERENCED) != 0)
+					mincoreinfo |= MINCORE_REFERENCED_OTHER;
+			}
+			if (object != NULL)
+				VM_OBJECT_UNLOCK(object);
 
 			/*
 			 * subyte may page fault.  In case it needs to modify
@@ -1146,15 +1194,14 @@ munlock(td, uap)
 int
 vm_mmap_vnode(struct thread *td, vm_size_t objsize,
     vm_prot_t prot, vm_prot_t *maxprotp, int *flagsp,
-    struct vnode *vp, vm_ooffset_t foff, vm_object_t *objp)
+    struct vnode *vp, vm_ooffset_t *foffp, vm_object_t *objp)
 {
 	struct vattr va;
-	void *handle;
 	vm_object_t obj;
+	vm_offset_t foff;
 	struct mount *mp;
-	struct cdevsw *dsw;
 	struct ucred *cred;
-	int error, flags, type;
+	int error, flags;
 	int vfslocked;
 
 	mp = vp->v_mount;
@@ -1164,6 +1211,7 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 		VFS_UNLOCK_GIANT(vfslocked);
 		return (error);
 	}
+	foff = *foffp;
 	flags = *flagsp;
 	obj = vp->v_object;
 	if (vp->v_type == VREG) {
@@ -1179,41 +1227,12 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 			vp = (struct vnode*)obj->handle;
 			vget(vp, LK_SHARED, td);
 		}
-		type = OBJT_VNODE;
-		handle = vp;
 	} else if (vp->v_type == VCHR) {
-		type = OBJT_DEVICE;
-		handle = vp->v_rdev;
-
-		dsw = dev_refthread(handle);
-		if (dsw == NULL) {
-			error = ENXIO;
-			goto done;
-		}
-		if (dsw->d_flags & D_MMAP_ANON) {
-			dev_relthread(handle);
-			*maxprotp = VM_PROT_ALL;
-			*flagsp |= MAP_ANON;
-			error = 0;
-			goto done;
-		}
-		dev_relthread(handle);
-		/*
-		 * cdevs does not provide private mappings of any kind.
-		 */
-		if ((*maxprotp & VM_PROT_WRITE) == 0 &&
-		    (prot & PROT_WRITE) != 0) {
-			error = EACCES;
-			goto done;
-		}
-		if (flags & (MAP_PRIVATE|MAP_COPY)) {
-			error = EINVAL;
-			goto done;
-		}
-		/*
-		 * Force device mappings to be shared.
-		 */
-		flags |= MAP_SHARED;
+		error = vm_mmap_cdev(td, objsize, prot, maxprotp, flagsp,
+		    vp->v_rdev, foffp, objp);
+		if (error == 0)
+			goto mark_atime;
+		goto done;
 	} else {
 		error = EINVAL;
 		goto done;
@@ -1239,18 +1258,18 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	 * we do not need to sync it.
 	 * Adjust object size to be the size of actual file.
 	 */
-	if (vp->v_type == VREG) {
-		objsize = round_page(va.va_size);
-		if (va.va_nlink == 0)
-			flags |= MAP_NOSYNC;
-	}
-	obj = vm_pager_allocate(type, handle, objsize, prot, foff);
+	objsize = round_page(va.va_size);
+	if (va.va_nlink == 0)
+		flags |= MAP_NOSYNC;
+	obj = vm_pager_allocate(OBJT_VNODE, vp, objsize, prot, foff, td->td_ucred);
 	if (obj == NULL) {
-		error = (type == OBJT_DEVICE ? EINVAL : ENOMEM);
+		error = ENOMEM;
 		goto done;
 	}
 	*objp = obj;
 	*flagsp = flags;
+
+mark_atime:
 	vfs_mark_atime(vp, cred);
 
 done:
@@ -1270,11 +1289,11 @@ done:
 int
 vm_mmap_cdev(struct thread *td, vm_size_t objsize,
     vm_prot_t prot, vm_prot_t *maxprotp, int *flagsp,
-    struct cdev *cdev, vm_ooffset_t foff, vm_object_t *objp)
+    struct cdev *cdev, vm_ooffset_t *foff, vm_object_t *objp)
 {
 	vm_object_t obj;
 	struct cdevsw *dsw;
-	int flags;
+	int error, flags;
 
 	flags = *flagsp;
 
@@ -1287,25 +1306,44 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 		*flagsp |= MAP_ANON;
 		return (0);
 	}
-	dev_relthread(cdev);
 	/*
-	 * cdevs does not provide private mappings of any kind.
+	 * cdevs do not provide private mappings of any kind.
 	 */
 	if ((*maxprotp & VM_PROT_WRITE) == 0 &&
-	    (prot & PROT_WRITE) != 0)
+	    (prot & PROT_WRITE) != 0) {
+		dev_relthread(cdev);
 		return (EACCES);
-	if (flags & (MAP_PRIVATE|MAP_COPY))
+	}
+	if (flags & (MAP_PRIVATE|MAP_COPY)) {
+		dev_relthread(cdev);
 		return (EINVAL);
+	}
 	/*
 	 * Force device mappings to be shared.
 	 */
 	flags |= MAP_SHARED;
 #ifdef MAC_XXX
-	error = mac_check_cdev_mmap(td->td_ucred, cdev, prot);
-	if (error != 0)
+	error = mac_cdev_check_mmap(td->td_ucred, cdev, prot);
+	if (error != 0) {
+		dev_relthread(cdev);
 		return (error);
+	}
 #endif
-	obj = vm_pager_allocate(OBJT_DEVICE, cdev, objsize, prot, foff);
+	/*
+	 * First, try d_mmap_single().  If that is not implemented
+	 * (returns ENODEV), fall back to using the device pager.
+	 * Note that d_mmap_single() must return a reference to the
+	 * object (it needs to bump the reference count of the object
+	 * it returns somehow).
+	 *
+	 * XXX assumes VM_PROT_* == PROT_*
+	 */
+	error = dsw->d_mmap_single(cdev, foff, objsize, objp, (int)prot);
+	dev_relthread(cdev);
+	if (error != ENODEV)
+		return (error);
+	obj = vm_pager_allocate(OBJT_DEVICE, cdev, objsize, prot, *foff,
+	    td->td_ucred);
 	if (obj == NULL)
 		return (EINVAL);
 	*objp = obj;
@@ -1400,11 +1438,11 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	switch (handle_type) {
 	case OBJT_DEVICE:
 		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
-		    handle, foff, &object);
+		    handle, &foff, &object);
 		break;
 	case OBJT_VNODE:
 		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags,
-		    handle, foff, &object);
+		    handle, &foff, &object);
 		break;
 	case OBJT_SWAP:
 		error = vm_mmap_shm(td, size, prot, &maxprot, &flags,
@@ -1440,14 +1478,6 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		docow |= MAP_DISABLE_SYNCER;
 	if (flags & MAP_NOCORE)
 		docow |= MAP_DISABLE_COREDUMP;
-
-#if defined(VM_PROT_READ_IS_EXEC)
-	if (prot & VM_PROT_READ)
-		prot |= VM_PROT_EXECUTE;
-
-	if (maxprot & VM_PROT_READ)
-		maxprot |= VM_PROT_EXECUTE;
-#endif
 
 	if (flags & MAP_STACK)
 		rv = vm_map_stack(map, *addr, size, prot, maxprot,

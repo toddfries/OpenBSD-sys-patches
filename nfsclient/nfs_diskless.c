@@ -33,9 +33,8 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.24 2009/02/27 14:12:05 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.30 2009/08/01 19:26:27 rwatson Exp $");
 
-#include "opt_route.h"
 #include "opt_bootp.h"
 
 #include <sys/param.h>
@@ -44,19 +43,15 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.24 2009/02/27 14:12:05 
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_var.h>
 #include <net/ethernet.h>
-#include <net/route.h>
 #include <net/vnet.h>
 
 #include <netinet/in.h>
-#include <rpc/rpcclnt.h>
-#include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfsclient/nfs.h>
 #include <nfsclient/nfsdiskless.h>
@@ -153,7 +148,6 @@ nfs_parse_options(const char *envopts, struct nfs_args *nd)
 void
 nfs_setup_diskless(void)
 {
-	INIT_VNET_NET(curvnet);
 	struct nfs_diskless *nd = &nfs_diskless;
 	struct ifnet *ifp;
 	struct ifaddr *ifa;

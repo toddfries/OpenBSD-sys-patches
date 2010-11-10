@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/tty.h,v 1.113 2009/02/11 16:28:49 ed Exp $
+ * $FreeBSD: src/sys/sys/tty.h,v 1.118 2010/01/04 20:59:52 ed Exp $
  */
 
 #ifndef _SYS_TTY_H_
@@ -38,7 +38,7 @@
 #include <sys/mutex.h>
 #include <sys/condvar.h>
 #include <sys/selinfo.h>
-#include <sys/termios.h>
+#include <sys/_termios.h>
 #include <sys/ttycom.h>
 #include <sys/ttyqueue.h>
 
@@ -97,6 +97,7 @@ struct tty {
 	/* Sleeping mechanisms. */
 	struct cv	t_inwait;	/* (t) Input wait queue. */
 	struct cv	t_outwait;	/* (t) Output wait queue. */
+	struct cv	t_outserwait;	/* (t) Serial output wait queue. */
 	struct cv	t_bgwait;	/* (t) Background wait queue. */
 	struct cv	t_dcdwait;	/* (t) Carrier Detect wait queue. */
 
@@ -152,7 +153,8 @@ struct xtty {
 #ifdef _KERNEL
 
 /* Allocation and deallocation. */
-struct tty *tty_alloc(struct ttydevsw *tsw, void *softc, struct mtx *mtx);
+struct tty *tty_alloc(struct ttydevsw *tsw, void *softc);
+struct tty *tty_alloc_mutex(struct ttydevsw *tsw, void *softc, struct mtx *mtx);
 void	tty_rel_pgrp(struct tty *tp, struct pgrp *pgrp);
 void	tty_rel_sess(struct tty *tp, struct session *sess);
 void	tty_rel_gone(struct tty *tp);
@@ -180,9 +182,10 @@ void	tty_wakeup(struct tty *tp, int flags);
 int	tty_checkoutq(struct tty *tp);
 int	tty_putchar(struct tty *tp, char c);
 
-int	tty_ioctl(struct tty *tp, u_long cmd, void *data, struct thread *td);
-int	tty_ioctl_compat(struct tty *tp, u_long cmd, caddr_t data,
+int	tty_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
     struct thread *td);
+int	tty_ioctl_compat(struct tty *tp, u_long cmd, caddr_t data,
+    int fflag, struct thread *td);
 void	tty_init_console(struct tty *tp, speed_t speed);
 void	tty_flush(struct tty *tp, int flags);
 void	tty_hiwat_in_block(struct tty *tp);
@@ -200,6 +203,7 @@ void	tty_info(struct tty *tp);
 void	ttyconsdev_select(const char *name);
 
 /* Pseudo-terminal hooks. */
+int	pts_alloc(int fflags, struct thread *td, struct file *fp);
 int	pts_alloc_external(int fd, struct thread *td, struct file *fp,
     struct cdev *dev, const char *name);
 

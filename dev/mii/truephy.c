@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  * 
  * $DragonFly: src/sys/dev/netif/mii_layer/truephy.c,v 1.3 2008/02/10 07:29:27 sephe Exp $
- * $FreeBSD: src/sys/dev/mii/truephy.c,v 1.2 2008/11/28 23:44:13 bz Exp $
+ * $FreeBSD: src/sys/dev/mii/truephy.c,v 1.3 2010/04/13 20:07:52 yongari Exp $
  */
 
 #include <sys/param.h>
@@ -76,6 +76,7 @@ static device_method_t truephy_methods[] = {
 };
 
 static const struct mii_phydesc truephys[] = {
+	MII_PHY_DESC(AGERE,	ET1011),
 	MII_PHY_DESC(AGERE,	ET1011C),
 	MII_PHY_END
 };
@@ -161,7 +162,10 @@ truephy_attach(device_t dev)
 
 	mii->mii_instance++;
 
-	truephy_reset(sc);
+	if (MII_MODEL(ma->mii_id2) == MII_MODEL_AGERE_ET1011)
+		mii_phy_reset(sc);
+	else
+		truephy_reset(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT) {

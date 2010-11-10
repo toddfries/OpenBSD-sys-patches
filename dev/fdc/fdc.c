@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fdc/fdc.c,v 1.321 2008/11/15 01:43:34 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fdc/fdc.c,v 1.326 2009/11/09 20:29:10 rdivacky Exp $");
 
 #include "opt_fdc.h"
 
@@ -781,11 +781,9 @@ fdc_worker(struct fdc_data *fdc)
 
 	/* Disable ISADMA if we bailed while it was active */
 	if (fd != NULL && (fd->flags & FD_ISADMA)) {
-		mtx_lock(&Giant);
 		isa_dmadone(
 		    bp->bio_cmd & BIO_READ ? ISADMA_READ : ISADMA_WRITE,
 		    fd->fd_ioptr, fd->fd_iosize, fdc->dmachan);
-		mtx_unlock(&Giant);
 		mtx_lock(&fdc->fdc_mtx);
 		fd->flags &= ~FD_ISADMA;
 		mtx_unlock(&fdc->fdc_mtx);
@@ -864,7 +862,7 @@ fdc_worker(struct fdc_data *fdc)
 		fd->flags |= FD_NEWDISK;
 		mtx_unlock(&fdc->fdc_mtx);
 		g_topology_lock();
-		g_orphan_provider(fd->fd_provider, EXDEV);
+		g_orphan_provider(fd->fd_provider, ENXIO);
 		fd->fd_provider->flags |= G_PF_WITHER;
 		fd->fd_provider =
 		    g_new_providerf(fd->fd_geom, fd->fd_geom->name);
@@ -958,11 +956,9 @@ fdc_worker(struct fdc_data *fdc)
 	/* Setup ISADMA if we need it and have it */
 	if ((bp->bio_cmd & (BIO_READ|BIO_WRITE|BIO_FMT))
 	     && !(fdc->flags & FDC_NODMA)) {
-		mtx_lock(&Giant);
 		isa_dmastart(
 		    bp->bio_cmd & BIO_READ ? ISADMA_READ : ISADMA_WRITE,
 		    fd->fd_ioptr, fd->fd_iosize, fdc->dmachan);
-		mtx_unlock(&Giant);
 		mtx_lock(&fdc->fdc_mtx);
 		fd->flags |= FD_ISADMA;
 		mtx_unlock(&fdc->fdc_mtx);
@@ -1040,11 +1036,9 @@ fdc_worker(struct fdc_data *fdc)
 
 	/* Finish DMA */
 	if (fd->flags & FD_ISADMA) {
-		mtx_lock(&Giant);
 		isa_dmadone(
 		    bp->bio_cmd & BIO_READ ? ISADMA_READ : ISADMA_WRITE,
 		    fd->fd_ioptr, fd->fd_iosize, fdc->dmachan);
-		mtx_unlock(&Giant);
 		mtx_lock(&fdc->fdc_mtx);
 		fd->flags &= ~FD_ISADMA;
 		mtx_unlock(&fdc->fdc_mtx);
@@ -1498,8 +1492,6 @@ fd_ioctl(struct g_provider *pp, u_long cmd, void *data, int fflag, struct thread
 		return (0);
 
 	case FD_STYPE:                  /* set drive type */
-		if (!(fflag & FWRITE))
-			return (EPERM);
 		/*
 		 * Allow setting drive type temporarily iff
 		 * currently unset.  Used for fdformat so any
@@ -1521,8 +1513,6 @@ fd_ioctl(struct g_provider *pp, u_long cmd, void *data, int fflag, struct thread
 		return (0);
 
 	case FD_SOPTS:			/* set drive options */
-		if (!(fflag & FWRITE))
-			return (EPERM);
 		fd->options = *(int *)data;
 		return (0);
 
@@ -1737,6 +1727,10 @@ fdc_detach(device_t dev)
 	/* have our children detached first */
 	if ((error = bus_generic_detach(dev)))
 		return (error);
+
+	if (fdc->fdc_intr)
+		bus_teardown_intr(dev, fdc->res_irq, fdc->fdc_intr);
+	fdc->fdc_intr = NULL;
 
 	/* kill worker thread */
 	mtx_lock(&fdc->fdc_mtx);
@@ -2035,15 +2029,22 @@ fd_attach(device_t dev)
 	return (0);
 }
 
+static void
+fd_detach_geom(void *arg, int flag)
+{
+	struct	fd_data *fd = arg;
+
+	g_topology_assert();
+	g_wither_geom(fd->fd_geom, ENXIO);
+}
+
 static int
 fd_detach(device_t dev)
 {
 	struct	fd_data *fd;
 
 	fd = device_get_softc(dev);
-	g_topology_lock();
-	g_wither_geom(fd->fd_geom, ENXIO);
-	g_topology_unlock();
+	g_waitfor_event(fd_detach_geom, fd, M_WAITOK, NULL);
 	while (device_get_state(dev) == DS_BUSY)
 		tsleep(fd, PZERO, "fdd", hz/10);
 	callout_drain(&fd->toffhandle);
@@ -2072,8 +2073,7 @@ static int
 fdc_modevent(module_t mod, int type, void *data)
 {
 
-	g_modevent(NULL, type, &g_fd_class);
-	return (0);
+	return (g_modevent(NULL, type, &g_fd_class));
 }
 
 DRIVER_MODULE(fd, fdc, fd_driver, fd_devclass, fdc_modevent, 0);

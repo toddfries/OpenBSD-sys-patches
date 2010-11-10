@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/intr.h,v 1.12 2008/12/20 03:26:09 sam Exp $
+ * $FreeBSD: src/sys/arm/include/intr.h,v 1.13 2009/06/09 18:18:41 marcel Exp $
  *
  */
 
@@ -56,7 +56,7 @@
 
 #include <machine/psl.h>
 
-int arm_get_next_irq(void);
+int arm_get_next_irq(int);
 void arm_mask_irq(uintptr_t);
 void arm_unmask_irq(uintptr_t);
 void arm_setup_irqhandler(const char *, int (*)(void*), void (*)(void*), 

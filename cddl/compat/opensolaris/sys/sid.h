@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sid.h,v 1.1 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sid.h,v 1.2 2010/07/12 23:49:04 mm Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_SID_H_
@@ -49,6 +49,13 @@ ksiddomain_rele(ksiddomain_t *kd)
 {
 
 	kmem_free(kd, sizeof(*kd));
+}
+
+static __inline int
+ksid_getid(void *ksid)
+{
+
+	panic("%s has been unexpectedly called", __func__);
 }
 
 #endif	/* _OPENSOLARIS_SYS_SID_H_ */

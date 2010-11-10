@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/time.c,v 1.3 2008/09/03 15:39:50 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/time.c,v 1.4 2010/02/25 15:30:26 raj Exp $");
 
 #include <stand.h>
 
@@ -48,7 +48,7 @@ time(time_t *tloc)
 }
 
 int
-getsecs()
+getsecs(void)
 {
 
 	return (time(NULL));

@@ -1,5 +1,6 @@
 /*-
- * Copyright (c) 1999 Cameron Grant <cg@freebsd.org>
+ * Copyright (c) 2005-2009 Ariff Abdullah <ariff@FreeBSD.org>
+ * Copyright (c) 1999 Cameron Grant <cg@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pcm/mixer.h,v 1.20 2008/11/04 02:31:03 alfred Exp $
+ * $FreeBSD: src/sys/dev/sound/pcm/mixer.h,v 1.22 2009/06/11 09:06:09 ariff Exp $
  */
 
 struct snd_mixer *mixer_create(device_t dev, kobj_class_t cls, void *devinfo,

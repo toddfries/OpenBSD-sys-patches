@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/uart/uart_bus_pci.c,v 1.14 2009/03/09 13:23:54 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/uart/uart_bus_pci.c,v 1.17 2010/03/01 20:41:27 delphij Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,7 +110,11 @@ static struct pci_id pci_ns8250_ids[] = {
 { 0x1415, 0x950b, 0xffff, 0, "Oxford Semiconductor OXCB950 Cardbus 16950 UART",
 	0x10, 16384000 },
 { 0x151f, 0x0000, 0xffff, 0, "TOPIC Semiconductor TP560 56k modem", 0x10 },
+{ 0x9710, 0x9820, 0x1000, 1, "NetMos NM9820 Serial Port", 0x10 },
 { 0x9710, 0x9835, 0x1000, 1, "NetMos NM9835 Serial Port", 0x10 },
+{ 0x9710, 0x9865, 0xa000, 0x1000, "NetMos NM9865 Serial Port", 0x10 },
+{ 0x9710, 0x9901, 0xa000, 0x1000,
+	"MosChip MCS9901 PCIe to Peripheral Controller", 0x10 },
 { 0xdeaf, 0x9051, 0xffff, 0, "Middle Digital PC Weasel Serial Port", 0x10 },
 { 0xffff, 0, 0xffff, 0, NULL, 0, 0}
 };

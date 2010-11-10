@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/linker.h,v 1.51 2008/05/23 00:49:38 jb Exp $
+ * $FreeBSD: src/sys/sys/linker.h,v 1.52 2009/06/23 22:42:39 jeff Exp $
  */
 
 #ifndef _SYS_LINKER_H_
@@ -264,6 +264,7 @@ typedef Elf_Addr elf_lookup_fn(linker_file_t, Elf_Size, int);
 /* Support functions */
 int	elf_reloc(linker_file_t _lf, Elf_Addr base, const void *_rel, int _type, elf_lookup_fn _lu);
 int	elf_reloc_local(linker_file_t _lf, Elf_Addr base, const void *_rel, int _type, elf_lookup_fn _lu);
+Elf_Addr elf_relocaddr(linker_file_t _lf, Elf_Addr addr);
 const Elf_Sym *elf_get_sym(linker_file_t _lf, Elf_Size _symidx);
 const char *elf_get_symname(linker_file_t _lf, Elf_Size _symidx);
 

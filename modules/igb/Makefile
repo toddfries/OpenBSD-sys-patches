@@ -1,4 +1,4 @@
-#$FreeBSD: src/sys/modules/igb/Makefile,v 1.5 2008/11/12 21:33:45 bz Exp $
+#$FreeBSD: src/sys/modules/igb/Makefile,v 1.6 2009/06/24 17:41:29 jfv Exp $
 .PATH:  ${.CURDIR}/../../dev/e1000
 KMOD    = if_igb
 SRCS    = device_if.h bus_if.h pci_if.h opt_inet.h
@@ -8,7 +8,7 @@ SHARED_SRCS += e1000_80003es2lan.c e1000_82542.c e1000_82541.c e1000_82543.c
 SHARED_SRCS += e1000_82540.c e1000_ich8lan.c e1000_82571.c e1000_osdep.c
 SHARED_SRCS += e1000_82575.c
 
-CFLAGS += -I${.CURDIR}/../../dev/e1000
+CFLAGS += -I${.CURDIR}/../../dev/e1000 -DSMP
 
 # DEVICE_POLLING gives you non-interrupt handling
 # not advisable since MSIX gives better results

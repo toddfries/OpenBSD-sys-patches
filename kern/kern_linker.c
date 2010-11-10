@@ -25,11 +25,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.166 2009/02/10 15:50:19 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.179 2009/11/17 21:56:12 gonzo Exp $");
 
 #include "opt_ddb.h"
 #include "opt_hwpmc_hooks.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -46,12 +45,14 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.166 2009/02/10 15:50:19 attil
 #include <sys/mount.h>
 #include <sys/linker.h>
 #include <sys/fcntl.h>
+#include <sys/jail.h>
 #include <sys/libkern.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
-#include <sys/vimage.h>
+
+#include <net/vnet.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -63,6 +64,8 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.166 2009/02/10 15:50:19 attil
 
 #ifdef KLD_DEBUG
 int kld_debug = 0;
+SYSCTL_INT(_debug, OID_AUTO, kld_debug, CTLFLAG_RW,
+        &kld_debug, 0, "Set various levels of KLD debug");
 #endif
 
 #define	KLD_LOCK()		sx_xlock(&kld_sx)
@@ -375,7 +378,7 @@ linker_load_file(const char *filename, linker_file_t *result)
 	int foundfile, error;
 
 	/* Refuse to load modules if securelevel raised */
-	if (securelevel > 0)
+	if (prison0.pr_securelevel > 0)
 		return (EPERM);
 
 	KLD_LOCK_ASSERT();
@@ -580,7 +583,7 @@ linker_file_unload(linker_file_t file, int flags)
 	int error, i;
 
 	/* Refuse to unload modules if securelevel raised. */
-	if (securelevel > 0)
+	if (prison0.pr_securelevel > 0)
 		return (EPERM);
 
 	KLD_LOCK_ASSERT();
@@ -631,7 +634,7 @@ linker_file_unload(linker_file_t file, int flags)
 		 */
 		if ((error = module_unload(mod)) != 0) {
 			KLD_DPF(FILE, ("linker_file_unload: module %s"
-			    " failed unload\n", mod));
+			    " failed unload\n", module_getname(mod)));
 			return (error);
 		}
 		MOD_XLOCK;
@@ -708,6 +711,9 @@ linker_file_add_dependency(linker_file_t file, linker_file_t dep)
 	file->deps = newdeps;
 	file->deps[file->ndeps] = dep;
 	file->ndeps++;
+	KLD_DPF(FILE, ("linker_file_add_dependency:"
+	    " adding %s as dependency for %s\n", 
+	    dep->filename, file->filename));
 	return (0);
 }
 
@@ -993,6 +999,12 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 		return (error);
 
 	/*
+	 * It is possible that kldloaded module will attach a new ifnet,
+	 * so vnet context must be set when this ocurs.
+	 */
+	CURVNET_SET(TD_TO_VNET(td));
+
+	/*
 	 * If file does not contain a qualified name or any dot in it
 	 * (kldname.ko, or kldname.ver.ko) treat it as an interface
 	 * name.
@@ -1019,6 +1031,7 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 		*fileid = lf->id;
 unlock:
 	KLD_UNLOCK();
+	CURVNET_RESTORE();
 	return (error);
 }
 
@@ -1056,6 +1069,7 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 	if ((error = priv_check(td, PRIV_KLD_UNLOAD)) != 0)
 		return (error);
 
+	CURVNET_SET(TD_TO_VNET(td));
 	KLD_LOCK();
 	lf = linker_find_file_by_id(fileid);
 	if (lf) {
@@ -1092,6 +1106,7 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 		PMC_CALL_HOOK(td, PMC_FN_KLD_UNLOAD, (void *) &pkm);
 #endif
 	KLD_UNLOCK();
+	CURVNET_RESTORE();
 	return (error);
 }
 
@@ -1313,23 +1328,8 @@ kldsym(struct thread *td, struct kldsym_args *uap)
 				break;
 			}
 		}
-#ifndef VIMAGE_GLOBALS
-		/*
-		 * If the symbol is not found in global namespace,
-		 * try to look it up in the current vimage namespace.
-		 */
-		if (lf == NULL) {
-			CURVNET_SET(TD_TO_VNET(td));
-			error = vi_symlookup(&lookup, symstr);
-			CURVNET_RESTORE();
-			if (error == 0)
-				error = copyout(&lookup, uap->data,
-						sizeof(lookup));
-		}
-#else
 		if (lf == NULL)
 			error = ENOENT;
-#endif
 	}
 	KLD_UNLOCK();
 out:
@@ -1906,61 +1906,41 @@ linker_basename(const char *path)
 }
 
 #ifdef HWPMC_HOOKS
-
-struct hwpmc_context {
-	int	nobjects;
-	int	nmappings;
-	struct pmckern_map_in *kobase;
-};
-
-static int
-linker_hwpmc_list_object(linker_file_t lf, void *arg)
-{
-	struct hwpmc_context *hc;
-
-	hc = arg;
-
-	/* If we run out of mappings, fail. */
-	if (hc->nobjects >= hc->nmappings)
-		return (1);
-
-	/* Save the info for this linker file. */
-	hc->kobase[hc->nobjects].pm_file = lf->filename;
-	hc->kobase[hc->nobjects].pm_address = (uintptr_t)lf->address;
-	hc->nobjects++;
-	return (0);
-}
-
 /*
  * Inform hwpmc about the set of kernel modules currently loaded.
  */
 void *
 linker_hwpmc_list_objects(void)
 {
-	struct hwpmc_context hc;
+	linker_file_t lf;
+	struct pmckern_map_in *kobase;
+	int i, nmappings;
 
-	hc.nmappings = 15;	/* a reasonable default */
+	nmappings = 0;
+	KLD_LOCK();
+	TAILQ_FOREACH(lf, &linker_files, link)
+		nmappings++;
 
- retry:
-	/* allocate nmappings+1 entries */
-	hc.kobase = malloc((hc.nmappings + 1) * sizeof(struct pmckern_map_in),
+	/* Allocate nmappings + 1 entries. */
+	kobase = malloc((nmappings + 1) * sizeof(struct pmckern_map_in),
 	    M_LINKER, M_WAITOK | M_ZERO);
+	i = 0;
+	TAILQ_FOREACH(lf, &linker_files, link) {
 
-	hc.nobjects = 0;
-	if (linker_file_foreach(linker_hwpmc_list_object, &hc) != 0) {
-		hc.nmappings = hc.nobjects;
-		free(hc.kobase, M_LINKER);
-		goto retry;
+		/* Save the info for this linker file. */
+		kobase[i].pm_file = lf->filename;
+		kobase[i].pm_address = (uintptr_t)lf->address;
+		i++;
 	}
+	KLD_UNLOCK();
 
-	KASSERT(hc.nobjects > 0, ("linker_hpwmc_list_objects: no kernel "
-		"objects?"));
+	KASSERT(i > 0, ("linker_hpwmc_list_objects: no kernel objects?"));
 
 	/* The last entry of the malloced area comprises of all zeros. */
-	KASSERT(hc.kobase[hc.nobjects].pm_file == NULL,
+	KASSERT(kobase[i].pm_file == NULL,
 	    ("linker_hwpmc_list_objects: last object not NULL"));
 
-	return ((void *)hc.kobase);
+	return ((void *)kobase);
 }
 #endif
 
@@ -2105,8 +2085,8 @@ linker_load_dependencies(linker_file_t lf)
 		}
 		error = linker_load_module(NULL, modname, lf, verinfo, NULL);
 		if (error) {
-			printf("KLD %s: depends on %s - not available\n",
-			    lf->filename, modname);
+			printf("KLD %s: depends on %s - not available or"
+			    " version mismatch\n", lf->filename, modname);
 			break;
 		}
 	}

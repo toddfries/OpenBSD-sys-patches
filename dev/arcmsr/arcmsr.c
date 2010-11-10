@@ -55,8 +55,10 @@
 **     1.20.00.14   02/05/2007         Erich Chen        bug fix for incorrect ccb_h.status report
 **                                                       and cause g_vfs_done() read write error
 **     1.20.00.15   10/10/2007         Erich Chen        support new RAID adapter type ARC120x
+**     1.20.00.16   10/10/2009         Erich Chen        Bug fix for RAID adapter type ARC120x
+**                                                       bus_dmamem_alloc() with BUS_DMA_ZERO
 ******************************************************************************************
-* $FreeBSD: src/sys/dev/arcmsr/arcmsr.c,v 1.30 2009/02/20 07:40:54 scottl Exp $
+* $FreeBSD: src/sys/dev/arcmsr/arcmsr.c,v 1.33 2010/01/07 21:01:37 mbr Exp $
 */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -249,7 +251,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		static int arcmsr_open(dev_t dev, int flags, int fmt, struct thread *proc)
 	#else
-		static int arcmsr_open(struct cdev *dev, int flags, int fmt, d_thread_t *proc)
+		static int arcmsr_open(struct cdev *dev, int flags, int fmt, struct thread *proc)
 	#endif 
 #endif
 {
@@ -274,7 +276,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		static int arcmsr_close(dev_t dev, int flags, int fmt, struct thread *proc)
 	#else
-		static int arcmsr_close(struct cdev *dev, int flags, int fmt, d_thread_t *proc)
+		static int arcmsr_close(struct cdev *dev, int flags, int fmt, struct thread *proc)
 	#endif 
 #endif
 {
@@ -299,7 +301,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		static int arcmsr_ioctl(dev_t dev, u_long ioctl_cmd, caddr_t arg, int flags, struct thread *proc)
 	#else
-		static int arcmsr_ioctl(struct cdev *dev, u_long ioctl_cmd, caddr_t arg, int flags, d_thread_t *proc)
+		static int arcmsr_ioctl(struct cdev *dev, u_long ioctl_cmd, caddr_t arg, int flags, struct thread *proc)
 	#endif 
 #endif
 {
@@ -1938,7 +1940,7 @@ static void arcmsr_handle_virtual_command(struct AdapterControlBlock *acb,
 	switch (pccb->csio.cdb_io.cdb_bytes[0]) {
 	case INQUIRY: {
 		unsigned char inqdata[36];
-		char *buffer=pccb->csio.data_ptr;;
+		char *buffer=pccb->csio.data_ptr;
 	
 		if (pccb->ccb_h.target_lun) {
 			pccb->ccb_h.status |= CAM_SEL_TIMEOUT;
@@ -2903,7 +2905,7 @@ static u_int32_t arcmsr_initialize(device_t dev)
 	}
 	/* Allocation for our srbs */
 	if(bus_dmamem_alloc(acb->srb_dmat, (void **)&acb->uncacheptr
-		, BUS_DMA_WAITOK | BUS_DMA_COHERENT, &acb->srb_dmamap) != 0) {
+		, BUS_DMA_WAITOK | BUS_DMA_COHERENT | BUS_DMA_ZERO, &acb->srb_dmamap) != 0) {
 		bus_dma_tag_destroy(acb->srb_dmat);
 		bus_dma_tag_destroy(acb->dm_segs_dmat);
 		bus_dma_tag_destroy(acb->parent_dmat);

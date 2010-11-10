@@ -33,7 +33,7 @@
  *	from: hp300: @(#)pmap.h 7.2 (Berkeley) 12/16/90
  *	from: @(#)pmap.h        7.4 (Berkeley) 5/12/91
  *	from: FreeBSD: src/sys/i386/include/pmap.h,v 1.70 2000/11/30
- * $FreeBSD: src/sys/sparc64/include/pmap.h,v 1.47 2006/07/20 17:48:40 alc Exp $
+ * $FreeBSD: src/sys/sparc64/include/pmap.h,v 1.51 2010/04/30 00:46:43 kmacy Exp $
  */
 
 #ifndef	_MACHINE_PMAP_H_
@@ -62,6 +62,8 @@ struct pmap {
 	struct	tte *pm_tsb;
 	vm_object_t pm_tsb_obj;
 	u_int	pm_active;
+	uint32_t	pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int			pm_retries;
 	u_int	pm_context[MAXCPU];
 	struct	pmap_statistics pm_stats;
 };
@@ -77,7 +79,10 @@ struct pmap {
 #define	PMAP_TRYLOCK(pmap)	mtx_trylock(&(pmap)->pm_mtx)
 #define	PMAP_UNLOCK(pmap)	mtx_unlock(&(pmap)->pm_mtx)
 
-void	pmap_bootstrap(vm_offset_t ekva);
+#define	pmap_page_get_memattr(m)	VM_MEMATTR_DEFAULT
+#define	pmap_page_set_memattr(m, ma)	(void)0
+
+void	pmap_bootstrap(u_int cpu_impl);
 vm_paddr_t pmap_kextract(vm_offset_t va);
 void	pmap_kenter(vm_offset_t va, vm_page_t m);
 void	pmap_kremove(vm_offset_t);
@@ -102,8 +107,6 @@ extern	struct pmap kernel_pmap_store;
 extern	vm_paddr_t phys_avail[];
 extern	vm_offset_t virtual_avail;
 extern	vm_offset_t virtual_end;
-
-extern	vm_paddr_t msgbuf_phys;
 
 #ifdef PMAP_STATS
 

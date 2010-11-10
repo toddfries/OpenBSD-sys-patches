@@ -24,13 +24,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/pcpu.h,v 1.30 2009/02/20 17:48:40 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/include/pcpu.h,v 1.32 2009/10/23 03:17:02 nwhitehorn Exp $
  */
 
 #ifndef	_MACHINE_PCPU_H_
 #define	_MACHINE_PCPU_H_
 
 #include <machine/cpufunc.h>
+#include <machine/tlb.h>
 
 struct pmap;
 #define	CPUSAVE_LEN	8
@@ -42,8 +43,8 @@ struct pmap;
 	struct thread	*pc_vecthread;		/* current vec user */  \
 	uintptr_t	pc_hwref;					\
 	uint32_t	pc_pir;						\
-	int		pc_bsp:1;					\
-	int		pc_awake:1;					\
+	int		pc_bsp;						\
+	volatile int	pc_awake;					\
 	uint32_t	pc_ipimask;					\
 	register_t	pc_tempsave[CPUSAVE_LEN];			\
 	register_t	pc_disisave[CPUSAVE_LEN];			\
@@ -61,6 +62,7 @@ struct pmap;
 	register_t	pc_booke_mchksave[CPUSAVE_LEN];			\
 	register_t	pc_booke_tlbsave[BOOKE_TLBSAVE_LEN];		\
 	register_t	pc_booke_tlb_level;				\
+	uint32_t	*pc_booke_tlb_lock;				\
 	int		pc_tid_next;
 
 /* Definitions for register offsets within the exception tmp save areas */

@@ -23,12 +23,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_null.h,v 1.8 2009/01/29 16:51:09 rdivacky Exp $
+ * $FreeBSD: src/sys/sys/_null.h,v 1.10 2009/05/11 21:13:00 jhb Exp $
  */
 
 #ifndef NULL
 
-#if defined(_KERNEL) || !defined(__cplusplus)
+#if !defined(__cplusplus)
 #define	NULL	((void *)0)
 #else
 #if defined(__GNUG__) && defined(__GNUC__) && __GNUC__ >= 4
@@ -40,6 +40,6 @@
 #define	NULL	0
 #endif	/* __LP64__ */
 #endif	/* __GNUG__ */
-#endif	/* _KERNEL || !__cplusplus */
+#endif	/* !__cplusplus */
 
 #endif

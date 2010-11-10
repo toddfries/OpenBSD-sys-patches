@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/stge/if_stge.c,v 1.12 2008/01/18 08:32:08 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/stge/if_stge.c,v 1.16 2010/03/01 16:52:11 joel Exp $");
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_device_polling.h"
@@ -160,7 +153,7 @@ static void	stge_link_task(void *, int);
 static void	stge_intr(void *);
 static __inline int stge_tx_error(struct stge_softc *);
 static void	stge_txeof(struct stge_softc *);
-static void	stge_rxeof(struct stge_softc *);
+static int	stge_rxeof(struct stge_softc *);
 static __inline void stge_discard_rxbuf(struct stge_softc *, int);
 static int	stge_newbuf(struct stge_softc *, int);
 #ifndef __NO_STRICT_ALIGNMENT
@@ -184,7 +177,7 @@ static void	stge_dma_wait(struct stge_softc *);
 static void	stge_init_tx_ring(struct stge_softc *);
 static int	stge_init_rx_ring(struct stge_softc *);
 #ifdef DEVICE_POLLING
-static void	stge_poll(struct ifnet *, enum poll_cmd, int);
+static int	stge_poll(struct ifnet *, enum poll_cmd, int);
 #endif
 
 static void	stge_setwol(struct stge_softc *);
@@ -722,8 +715,6 @@ stge_attach(device_t dev)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = stge_ioctl;
 	ifp->if_start = stge_start;
-	ifp->if_timer = 0;
-	ifp->if_watchdog = NULL;
 	ifp->if_init = stge_init;
 	ifp->if_mtu = ETHERMTU;
 	ifp->if_snd.ifq_drv_maxlen = STGE_TX_RING_CNT - 1;
@@ -1772,7 +1763,7 @@ stge_fixup_rx(struct stge_softc *sc, struct mbuf *m)
  *
  *	Helper; handle receive interrupts.
  */
-static void
+static int
 stge_rxeof(struct stge_softc *sc)
 {
 	struct ifnet *ifp;
@@ -1780,10 +1771,11 @@ stge_rxeof(struct stge_softc *sc)
 	struct mbuf *mp, *m;
 	uint64_t status64;
 	uint32_t status;
-	int cons, prog;
+	int cons, prog, rx_npkts;
 
 	STGE_LOCK_ASSERT(sc);
 
+	rx_npkts = 0;
 	ifp = sc->sc_ifp;
 
 	bus_dmamap_sync(sc->sc_cdata.stge_rx_ring_tag,
@@ -1901,6 +1893,7 @@ stge_rxeof(struct stge_softc *sc)
 			/* Pass it on. */
 			(*ifp->if_input)(ifp, m);
 			STGE_LOCK(sc);
+			rx_npkts++;
 
 			STGE_RXCHAIN_RESET(sc);
 		}
@@ -1913,24 +1906,27 @@ stge_rxeof(struct stge_softc *sc)
 		    sc->sc_cdata.stge_rx_ring_map,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 	}
+	return (rx_npkts);
 }
 
 #ifdef DEVICE_POLLING
-static void
+static int
 stge_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 {
 	struct stge_softc *sc;
 	uint16_t status;
+	int rx_npkts;
 
+	rx_npkts = 0;
 	sc = ifp->if_softc;
 	STGE_LOCK(sc);
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 		STGE_UNLOCK(sc);
-		return;
+		return (rx_npkts);
 	}
 
 	sc->sc_cdata.stge_rxcycles = count;
-	stge_rxeof(sc);
+	rx_npkts = stge_rxeof(sc);
 	stge_txeof(sc);
 
 	if (cmd == POLL_AND_CHECK_STATUS) {
@@ -1954,6 +1950,7 @@ stge_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 		stge_start_locked(ifp);
 
 	STGE_UNLOCK(sc);
+	return (rx_npkts);
 }
 #endif	/* DEVICE_POLLING */
 
@@ -2677,7 +2674,7 @@ stge_set_multi(struct stge_softc *sc)
 	bzero(mchash, sizeof(mchash));
 
 	count = 0;
-	IF_ADDR_LOCK(sc->sc_ifp);
+	if_maddr_rlock(sc->sc_ifp);
 	TAILQ_FOREACH(ifma, &sc->sc_ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -2691,7 +2688,7 @@ stge_set_multi(struct stge_softc *sc)
 		mchash[crc >> 5] |= 1 << (crc & 0x1f);
 		count++;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	mode &= ~(RM_ReceiveMulticast | RM_ReceiveAllFrames);
 	if (count > 0)

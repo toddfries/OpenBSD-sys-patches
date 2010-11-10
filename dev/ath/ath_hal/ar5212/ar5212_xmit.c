@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5212/ar5212_xmit.c,v 1.2 2009/01/28 18:00:22 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5212/ar5212_xmit.c,v 1.6 2010/03/03 17:42:39 rpaulo Exp $
  */
 #include "opt_ah.h"
 
@@ -48,16 +48,19 @@ ar5212UpdateTxTrigLevel(struct ath_hal *ah, HAL_BOOL bIncTrigLevel)
 	uint32_t txcfg, curLevel, newLevel;
 	HAL_INT omask;
 
+	if (ahp->ah_txTrigLev >= ahp->ah_maxTxTrigLev)
+		return AH_FALSE;
+
 	/*
 	 * Disable interrupts while futzing with the fifo level.
 	 */
-	omask = ar5212SetInterrupts(ah, ahp->ah_maskReg &~ HAL_INT_GLOBAL);
+	omask = ath_hal_setInterrupts(ah, ahp->ah_maskReg &~ HAL_INT_GLOBAL);
 
 	txcfg = OS_REG_READ(ah, AR_TXCFG);
 	curLevel = MS(txcfg, AR_FTRIG);
 	newLevel = curLevel;
 	if (bIncTrigLevel) {		/* increase the trigger level */
-		if (curLevel < MAX_TX_FIFO_THRESHOLD)
+		if (curLevel < ahp->ah_maxTxTrigLev)
 			newLevel++;
 	} else if (curLevel > MIN_TX_FIFO_THRESHOLD)
 		newLevel--;
@@ -66,8 +69,10 @@ ar5212UpdateTxTrigLevel(struct ath_hal *ah, HAL_BOOL bIncTrigLevel)
 		OS_REG_WRITE(ah, AR_TXCFG,
 			(txcfg &~ AR_FTRIG) | SM(newLevel, AR_FTRIG));
 
+	ahp->ah_txTrigLev = newLevel;
+
 	/* re-enable chip interrupts */
-	ar5212SetInterrupts(ah, omask);
+	ath_hal_setInterrupts(ah, omask);
 
 	return (newLevel != curLevel);
 }
@@ -869,16 +874,13 @@ ar5212ProcTxDesc(struct ath_hal *ah,
 		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate0);
 		break;
 	case 1:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate1) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate1);
 		break;
 	case 2:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate2) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate2);
 		break;
 	case 3:
-		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate3) |
-			HAL_TXSTAT_ALTRATE;
+		ts->ts_rate = MS(ads->ds_ctl3, AR_XmitRate3);
 		break;
 	}
 	ts->ts_rssi = MS(ads->ds_txstatus1, AR_AckSigStrength);

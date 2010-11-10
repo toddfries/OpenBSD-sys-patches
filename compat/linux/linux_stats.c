@@ -27,17 +27,15 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.95 2009/02/20 13:05:29 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.99 2010/03/28 13:13:22 ed Exp $");
 
 #include "opt_compat.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/dirent.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/proc.h>
-#include <sys/jail.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
@@ -59,8 +57,6 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.95 2009/02/20 13:05:2
 
 #include <compat/linux/linux_util.h>
 #include <compat/linux/linux_file.h>
-
-#include <security/mac/mac_framework.h>
 
 static void
 translate_vnhook_major_minor(struct vnode *vp, struct stat *sb)
@@ -177,9 +173,12 @@ newstat_copyout(struct stat *buf, void *ubuf)
 	tbuf.st_gid = buf->st_gid;
 	tbuf.st_rdev = buf->st_rdev;
 	tbuf.st_size = buf->st_size;
-	tbuf.st_atime = buf->st_atime;
-	tbuf.st_mtime = buf->st_mtime;
-	tbuf.st_ctime = buf->st_ctime;
+	tbuf.st_atim.tv_sec = buf->st_atim.tv_sec;
+	tbuf.st_atim.tv_nsec = buf->st_atim.tv_nsec;
+	tbuf.st_mtim.tv_sec = buf->st_mtim.tv_sec;
+	tbuf.st_mtim.tv_nsec = buf->st_mtim.tv_nsec;
+	tbuf.st_ctim.tv_sec = buf->st_ctim.tv_sec;
+	tbuf.st_ctim.tv_nsec = buf->st_ctim.tv_nsec;
 	tbuf.st_blksize = buf->st_blksize;
 	tbuf.st_blocks = buf->st_blocks;
 
@@ -264,9 +263,12 @@ stat_copyout(struct stat *buf, void *ubuf)
 		lbuf.st_size = buf->st_size;
 	else
 		lbuf.st_size = -2;
-	lbuf.st_atime = buf->st_atime;
-	lbuf.st_mtime = buf->st_mtime;
-	lbuf.st_ctime = buf->st_ctime;
+	lbuf.st_atim.tv_sec = buf->st_atim.tv_sec;
+	lbuf.st_atim.tv_nsec = buf->st_atim.tv_nsec;
+	lbuf.st_mtim.tv_sec = buf->st_mtim.tv_sec;
+	lbuf.st_mtim.tv_nsec = buf->st_mtim.tv_nsec;
+	lbuf.st_ctim.tv_sec = buf->st_ctim.tv_sec;
+	lbuf.st_ctim.tv_nsec = buf->st_ctim.tv_nsec;
 	lbuf.st_blksize = buf->st_blksize;
 	lbuf.st_blocks = buf->st_blocks;
 	lbuf.st_flags = buf->st_flags;
@@ -502,9 +504,12 @@ stat64_copyout(struct stat *buf, void *ubuf)
 	lbuf.st_gid = buf->st_gid;
 	lbuf.st_rdev = buf->st_rdev;
 	lbuf.st_size = buf->st_size;
-	lbuf.st_atime = buf->st_atime;
-	lbuf.st_mtime = buf->st_mtime;
-	lbuf.st_ctime = buf->st_ctime;
+	lbuf.st_atim.tv_sec = buf->st_atim.tv_sec;
+	lbuf.st_atim.tv_nsec = buf->st_atim.tv_nsec;
+	lbuf.st_mtim.tv_sec = buf->st_mtim.tv_sec;
+	lbuf.st_mtim.tv_nsec = buf->st_mtim.tv_nsec;
+	lbuf.st_ctim.tv_sec = buf->st_ctim.tv_sec;
+	lbuf.st_ctim.tv_nsec = buf->st_ctim.tv_nsec;
 	lbuf.st_blksize = buf->st_blksize;
 	lbuf.st_blocks = buf->st_blocks;
 

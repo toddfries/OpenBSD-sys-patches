@@ -25,14 +25,14 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/ata_machdep.c,v 1.1 2008/02/11 21:40:22 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/ata_machdep.c,v 1.2 2010/05/20 12:46:19 marius Exp $");
 
 #include <sys/param.h>
 #include <geom/geom_disk.h>
 #include <machine/md_var.h>
 
 void
-sparc64_ad_firmware_geom_adjust(device_t dev, struct disk *disk)
+sparc64_ata_disk_firmware_geom_adjust(struct disk *disk)
 {
 
 	/*

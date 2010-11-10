@@ -44,9 +44,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/common/ufsread.c,v 1.18 2008/06/07 05:49:24 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/common/ufsread.c,v 1.20 2010/08/24 12:56:45 rpaulo Exp $");
 
 #include <ufs/ufs/dinode.h>
+#include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
 #ifdef UFS_SMALL_CGBASE
 /* XXX: Revert to old (broken for over 1.5Tb filesystems) version of cgbase
@@ -93,7 +94,7 @@ static __inline int
 fsfind(const char *name, ino_t * ino)
 {
 	char buf[DEV_BSIZE];
-	struct dirent *d;
+	struct direct *d;
 	char *s;
 	ssize_t n;
 
@@ -104,7 +105,7 @@ fsfind(const char *name, ino_t * ino)
 			if (ls)
 				printf("%s ", d->d_name);
 			else if (!strcmp(name, d->d_name)) {
-				*ino = d->d_fileno;
+				*ino = d->d_ino;
 				return d->d_type;
 			}
 			s += d->d_reclen;
@@ -222,14 +223,19 @@ fsread(ino_t inode, void *buf, size_t nbyte)
 			return -1;
 		n = INO_TO_VBO(n, inode);
 #if defined(UFS1_ONLY)
-		dp1 = ((struct ufs1_dinode *)blkbuf)[n];
+		memcpy(&dp1, (struct ufs1_dinode *)blkbuf + n,
+		    sizeof(struct ufs1_dinode));
 #elif defined(UFS2_ONLY)
-		dp2 = ((struct ufs2_dinode *)blkbuf)[n];
+		memcpy(&dp2, (struct ufs2_dinode *)blkbuf + n,
+		    sizeof(struct ufs2_dinode));
 #else
 		if (fs->fs_magic == FS_UFS1_MAGIC)
-			dp1 = ((struct ufs1_dinode *)blkbuf)[n];
+			memcpy(&dp1, (struct ufs1_dinode *)blkbuf + n,
+			    sizeof(struct ufs1_dinode));
 		else
-			dp2 = ((struct ufs2_dinode *)blkbuf)[n];
+			memcpy(&dp2, (struct ufs2_dinode *)blkbuf + n,
+			    sizeof(struct ufs2_dinode));
+
 #endif
 		inomap = inode;
 		fs_off = 0;

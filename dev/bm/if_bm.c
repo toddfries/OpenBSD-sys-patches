@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/bm/if_bm.c,v 1.6 2009/02/04 22:16:27 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/bm/if_bm.c,v 1.7 2009/06/26 11:45:06 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1072,7 +1072,7 @@ bm_setladrf(struct bm_softc *sc)
 		/* Clear the hash table. */
 		memset(hash, 0, sizeof(hash));
 
-		IF_ADDR_LOCK(ifp);
+		if_maddr_rlock(ifp);
 		TAILQ_FOREACH(inm, &ifp->if_multiaddrs, ifma_link) {
 			if (inm->ifma_addr->sa_family != AF_LINK)
 				continue;
@@ -1085,7 +1085,7 @@ bm_setladrf(struct bm_softc *sc)
 			/* Set the corresponding bit in the filter. */
 			hash[crc >> 4] |= 1 << (crc & 0xf);
 		}
-		IF_ADDR_UNLOCK(ifp);
+		if_maddr_runlock(ifp);
 	}
 
 	/* Write out new hash table */

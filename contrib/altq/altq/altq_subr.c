@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.19 2009/02/27 14:12:05 bz Exp $	*/
+/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.26 2009/08/23 20:40:19 rwatson Exp $	*/
 /*	$KAME: altq_subr.c,v 1.21 2003/11/06 06:32:53 kjc Exp $	*/
 
 /*
@@ -32,7 +32,6 @@
 #include "opt_inet.h"
 #ifdef __FreeBSD__
 #include "opt_inet6.h"
-#include "opt_route.h"
 #endif
 #endif /* __FreeBSD__ || __NetBSD__ */
 
@@ -48,15 +47,11 @@
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
 #include <sys/queue.h>
-#ifdef __FreeBSD__
-#include <sys/vimage.h>
-#endif
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #ifdef __FreeBSD__
-#include <net/route.h>
 #include <net/vnet.h>
 #endif
 
@@ -454,6 +449,9 @@ static void
 tbr_timeout(arg)
 	void *arg;
 {
+#if defined(__FreeBSD__)
+	VNET_ITERATOR_DECL(vnet_iter);
+#endif
 	struct ifnet *ifp;
 	int active, s;
 
@@ -464,18 +462,26 @@ tbr_timeout(arg)
 	s = splimp();
 #endif
 #if defined(__FreeBSD__) && (__FreeBSD_version >= 500000)
-	IFNET_RLOCK();
+	IFNET_RLOCK_NOSLEEP();
+	VNET_LIST_RLOCK_NOSLEEP();
+	VNET_FOREACH(vnet_iter) {
+		CURVNET_SET(vnet_iter);
 #endif
-	for (ifp = TAILQ_FIRST(&V_ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
-		/* read from if_snd unlocked */
-		if (!TBR_IS_ENABLED(&ifp->if_snd))
-			continue;
-		active++;
-		if (!IFQ_IS_EMPTY(&ifp->if_snd) && ifp->if_start != NULL)
-			(*ifp->if_start)(ifp);
-	}
+		for (ifp = TAILQ_FIRST(&V_ifnet); ifp;
+		    ifp = TAILQ_NEXT(ifp, if_list)) {
+			/* read from if_snd unlocked */
+			if (!TBR_IS_ENABLED(&ifp->if_snd))
+				continue;
+			active++;
+			if (!IFQ_IS_EMPTY(&ifp->if_snd) &&
+			    ifp->if_start != NULL)
+				(*ifp->if_start)(ifp);
+		}
 #if defined(__FreeBSD__) && (__FreeBSD_version >= 500000)
-	IFNET_RUNLOCK();
+		CURVNET_RESTORE();
+	}
+	VNET_LIST_RUNLOCK_NOSLEEP();
+	IFNET_RUNLOCK_NOSLEEP();
 #endif
 	splx(s);
 	if (active > 0)

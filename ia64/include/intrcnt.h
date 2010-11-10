@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/ia64/include/intrcnt.h,v 1.6 2005/01/06 22:18:23 imp Exp $ */
+/* $FreeBSD: src/sys/ia64/include/intrcnt.h,v 1.7 2010/03/17 00:37:15 marcel Exp $ */
 /* $NetBSD: intrcnt.h,v 1.17 1998/11/19 01:48:04 ross Exp $ */
 
 /*-
@@ -29,11 +29,7 @@
  */
 
 #define	INTRCNT_CLOCK		0
-#define	INTRCNT_ISA_IRQ		(INTRCNT_CLOCK + 1)
-#define	INTRCNT_ISA_IRQ_LEN	16
-#define	INTRCNT_OTHER_BASE	(INTRCNT_ISA_IRQ + INTRCNT_ISA_IRQ_LEN)
-#define	INTRCNT_OTHER_LEN	240
-#define	INTRCNT_COUNT		(INTRCNT_OTHER_BASE + INTRCNT_OTHER_LEN)
+#define	INTRCNT_COUNT		256
 
 /*
  * Maximum name length in intrnames table (including terminating '\0'.

@@ -27,7 +27,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/linux32/linux.h,v 1.23 2009/03/04 12:14:33 dchagin Exp $
+ * $FreeBSD: src/sys/amd64/linux32/linux.h,v 1.30 2010/03/28 13:13:22 ed Exp $
  */
 
 #ifndef _AMD64_LINUX_H_
@@ -96,7 +96,7 @@ typedef struct {
 typedef struct {
 	l_time_t	tv_sec;
 	l_suseconds_t	tv_usec;
-} __packed l_timeval;
+} l_timeval;
 
 #define	l_fd_set	fd_set
 
@@ -179,8 +179,8 @@ struct l_mmap_argv {
 	l_int		prot;
 	l_int		flags;
 	l_int		fd;
-	l_off_t		pgoff;
-} __packed;
+	l_ulong		pgoff;
+};
 
 /*
  * stat family of syscalls
@@ -203,9 +203,9 @@ struct l_newstat {
 	l_ulong		st_size;
 	l_ulong		st_blksize;
 	l_ulong		st_blocks;
-	struct l_timespec	st_atimespec;
-	struct l_timespec	st_mtimespec;
-	struct l_timespec	st_ctimespec;
+	struct l_timespec	st_atim;
+	struct l_timespec	st_mtim;
+	struct l_timespec	st_ctim;
 	l_ulong		__unused4;
 	l_ulong		__unused5;
 } __packed;
@@ -219,9 +219,9 @@ struct l_stat {
 	l_ushort	st_gid;
 	l_ushort	st_rdev;
 	l_long		st_size;
-	struct l_timespec	st_atimespec;
-	struct l_timespec	st_mtimespec;
-	struct l_timespec	st_ctimespec;
+	struct l_timespec	st_atim;
+	struct l_timespec	st_mtim;
+	struct l_timespec	st_ctim;
 	l_long		st_blksize;
 	l_long		st_blocks;
 	l_ulong		st_flags;
@@ -242,9 +242,9 @@ struct l_stat64 {
 	l_ulong		st_blksize;
 	l_ulong		st_blocks;
 	l_ulong		__pad4;
-	struct l_timespec	st_atimespec;
-	struct l_timespec	st_mtimespec;
-	struct l_timespec	st_ctimespec;
+	struct l_timespec	st_atim;
+	struct l_timespec	st_mtim;
+	struct l_timespec	st_ctim;
 	l_ulonglong	st_ino;
 } __packed;
 
@@ -571,6 +571,7 @@ int	linux_ioctl_unregister_handler(struct linux_ioctl_handler *h);
 #define	LINUX_O_DIRECTORY	00200000	/* Must be a directory */
 #define	LINUX_O_NOFOLLOW	00400000	/* Do not follow links */
 #define	LINUX_O_NOATIME		01000000
+#define	LINUX_O_CLOEXEC		02000000
 
 #define	LINUX_F_DUPFD		0
 #define	LINUX_F_GETFD		1
@@ -668,14 +669,7 @@ union l_semun {
 #define	LINUX_GETSOCKOPT	15
 #define	LINUX_SENDMSG		16
 #define	LINUX_RECVMSG		17
-
-#define	LINUX_AF_UNSPEC		0
-#define	LINUX_AF_UNIX		1
-#define	LINUX_AF_INET		2
-#define	LINUX_AF_AX25		3
-#define	LINUX_AF_IPX		4
-#define	LINUX_AF_APPLETALK	5
-#define	LINUX_AF_INET6		10
+#define	LINUX_ACCEPT4		18
 
 #define	LINUX_SOL_SOCKET	1
 #define	LINUX_SOL_IP		0

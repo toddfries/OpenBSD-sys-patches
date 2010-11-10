@@ -21,7 +21,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/smc/if_smcvar.h,v 1.5 2008/06/13 00:48:09 benno Exp $
+ * $FreeBSD: src/sys/dev/smc/if_smcvar.h,v 1.6 2009/06/11 17:14:54 avg Exp $
  *
  */
 
@@ -71,7 +71,7 @@ int	smc_attach(device_t);
 int	smc_detach(device_t);
 
 int	smc_miibus_readreg(device_t, int, int);
-void	smc_miibus_writereg(device_t, int, int, int);
+int	smc_miibus_writereg(device_t, int, int, int);
 void	smc_miibus_statchg(device_t);
 
 #endif /* _IF_SMCVAR_H_ */

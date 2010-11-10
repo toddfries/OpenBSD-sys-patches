@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_fujitsu.c,v 1.6 2008/09/08 06:29:24 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_fujitsu.c,v 1.8 2010/06/11 19:53:42 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -37,7 +37,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_fujitsu.c,v 1.6 2008/09/08 06:
 #include <sys/module.h>
 #include <sys/sysctl.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 
 /* Hooks for the ACPI CA debugging infrastructure */
@@ -378,7 +380,6 @@ acpi_fujitsu_init(struct acpi_fujitsu_softc *sc)
 	    OID_AUTO, "fujitsu", CTLFLAG_RD, 0, "");
 
 	for (i = 0; sysctl_table[i].name != NULL; i++) {
-		exists = 0;
 		switch(sysctl_table[i].method) {
 			case METHOD_GMOU:
 				exists = sc->gmou.exists;
@@ -564,9 +565,6 @@ static uint8_t
 acpi_fujitsu_check_hardware(struct acpi_fujitsu_softc *sc)
 {
 	int val;
-	struct acpi_softc *acpi_sc;
-
-	acpi_sc = acpi_device_get_parent_softc(sc->dev);
 
 	ACPI_SERIAL_ASSERT(fujitsu);
 	/* save the hotkey bitmask */

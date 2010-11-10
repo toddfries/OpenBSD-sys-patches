@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.21 2009/01/25 18:20:15 nwhitehorn Exp $
+# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.24 2009/06/23 04:28:32 nwhitehorn Exp $
 #
 # This file contains machine dependent kernel configuration notes.  For
 # machine independent notes, look in /sys/conf/NOTES.
@@ -19,7 +19,10 @@ options 	FPU_EMU
 options 	POWERMAC		#NewWorld Apple PowerMacs
 options 	PSIM			#GDB PSIM ppc simulator
 
-options		SC_OFWFB		# OFW frame buffer
+options 	SC_OFWFB		# OFW frame buffer
+
+# The cpufreq(4) driver provides support for CPU frequency control
+device		cpufreq
 
 # Standard busses
 device		pci
@@ -30,6 +33,7 @@ device		ofwd		# Open Firmware disks
 device		adb		# Apple Desktop Bus
 device		cuda		# VIA-CUDA ADB interface
 device		pmu		# Apple Power Management Unit
+device		smu		# Apple System Management Unit
 device		snd_ai2s	# Apple I2S Audio
 device		snd_davbus	# Apple Davbus Audio
 

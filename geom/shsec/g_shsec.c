@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/shsec/g_shsec.c,v 1.6 2006/11/01 12:30:51 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/shsec/g_shsec.c,v 1.7 2009/10/09 09:42:22 pjd Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -637,6 +637,10 @@ g_shsec_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 
 	g_trace(G_T_TOPOLOGY, "%s(%s, %s)", __func__, mp->name, pp->name);
 	g_topology_assert();
+
+	/* Skip providers that are already open for writing. */
+	if (pp->acw > 0)
+		return (NULL);
 
 	G_SHSEC_DEBUG(3, "Tasting %s.", pp->name);
 

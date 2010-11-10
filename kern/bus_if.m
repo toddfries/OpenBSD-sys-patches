@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/kern/bus_if.m,v 1.36 2008/11/18 21:01:54 jhb Exp $
+# $FreeBSD: src/sys/kern/bus_if.m,v 1.39 2010/06/14 07:10:37 mav Exp $
 #
 
 #include <sys/bus.h>
@@ -46,6 +46,15 @@ CODE {
 	    u_long count, u_int flags)
 	{
 	    return (0);
+	}
+
+	static int
+	null_remap_intr(device_t bus, device_t dev, u_int irq)
+	{
+
+		if (dev != NULL)
+			return (BUS_REMAP_INTR(dev, NULL, irq));
+		return (ENXIO);
 	}
 };
 
@@ -509,7 +518,6 @@ METHOD int bind_intr {
 	int		_cpu;
 } DEFAULT bus_generic_bind_intr;
 
-
 /**
  * @brief Allow (bus) drivers to specify the trigger mode and polarity
  * of the specified interrupt.
@@ -525,6 +533,25 @@ METHOD int config_intr {
 	enum intr_trigger _trig;
 	enum intr_polarity _pol;
 } DEFAULT bus_generic_config_intr;
+
+/**
+ * @brief Allow drivers to associate a description with an active
+ * interrupt handler.
+ *
+ * @param _dev		the parent device of @p _child
+ * @param _child	the device which allocated the resource
+ * @param _irq		the resource representing the interrupt
+ * @param _cookie	the cookie value returned when the interrupt
+ *			was originally registered
+ * @param _descr	the description to associate with the interrupt
+ */
+METHOD int describe_intr {
+	device_t	_dev;
+	device_t	_child;
+	struct resource *_irq;
+	void		*_cookie;
+	const char	*_descr;
+} DEFAULT bus_generic_describe_intr;
 
 /**
  * @brief Notify a (bus) driver about a child that the hints mechanism
@@ -574,3 +601,24 @@ METHOD void hint_device_unit {
 	int		*_unitp;
 };
 
+/**
+ * @brief Notify a bus that the bus pass level has been changed
+ *
+ * @param _dev		the bus device
+ */
+METHOD void new_pass {
+	device_t	_dev;
+} DEFAULT bus_generic_new_pass;
+
+/**
+ * @brief Notify a bus that specified child's IRQ should be remapped.
+ *
+ * @param _dev		the bus device
+ * @param _child	the child device
+ * @param _irq		the irq number
+ */
+METHOD int remap_intr {
+	device_t	_dev;
+	device_t	_child;
+	u_int		_irq;
+} DEFAULT null_remap_intr;

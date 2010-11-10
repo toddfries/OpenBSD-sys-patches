@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp_amd64.c,v 1.18 2009/03/09 13:27:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp_amd64.c,v 1.19 2009/03/20 18:30:20 rnoland Exp $");
 
 #include "opt_bus.h"
 
@@ -337,7 +337,7 @@ agp_amd64_bind_page(device_t dev, vm_offset_t offset, vm_offset_t physical)
 {
 	struct agp_amd64_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
 		return (EINVAL);
 
 	sc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] =
@@ -351,7 +351,7 @@ agp_amd64_unbind_page(device_t dev, vm_offset_t offset)
 {
 	struct agp_amd64_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
 		return (EINVAL);
 
 	sc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;

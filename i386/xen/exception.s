@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/xen/exception.s,v 1.5 2008/10/23 07:20:43 kmacy Exp $
+ * $FreeBSD: src/sys/i386/xen/exception.s,v 1.6 2009/11/27 01:02:17 attilio Exp $
  */
 
 #include "opt_apic.h"
@@ -295,10 +295,6 @@ ENTRY(fork_trampoline)
 	SUPERALIGN_TEXT
 MCOUNT_LABEL(bintr)
 
-#ifdef DEV_ATPIC	
-#include <i386/isa/atpic_vector.s>
-#endif
-	
 #ifdef DEV_APIC
 	.data
 	.p2align 4

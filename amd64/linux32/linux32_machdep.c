@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_machdep.c,v 1.52 2009/02/18 16:11:39 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_machdep.c,v 1.58 2010/07/26 14:38:51 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -60,10 +60,9 @@ __FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_machdep.c,v 1.52 2009/02/18 16
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
-#include <vm/vm_extern.h>
-#include <vm/vm_kern.h>
 #include <vm/vm_map.h>
 
+#include <compat/freebsd32/freebsd32_util.h>
 #include <amd64/linux32/linux.h>
 #include <amd64/linux32/linux32_proto.h>
 #include <compat/linux/linux_ipc.h>
@@ -91,6 +90,10 @@ linux_to_bsd_sigaltstack(int lsa)
 	return (bsa);
 }
 
+static int	linux_mmap_common(struct thread *td, l_uintptr_t addr,
+		    l_size_t len, l_int prot, l_int flags, l_int fd,
+		    l_loff_t pos);
+
 int
 bsd_to_linux_sigaltstack(int bsa)
 {
@@ -101,105 +104,6 @@ bsd_to_linux_sigaltstack(int bsa)
 	if (bsa & SS_ONSTACK)
 		lsa |= LINUX_SS_ONSTACK;
 	return (lsa);
-}
-
-/*
- * Custom version of exec_copyin_args() so that we can translate
- * the pointers.
- */
-static int
-linux_exec_copyin_args(struct image_args *args, char *fname,
-    enum uio_seg segflg, char **argv, char **envv)
-{
-	char *argp, *envp;
-	u_int32_t *p32, arg;
-	size_t length;
-	int error;
-
-	bzero(args, sizeof(*args));
-	if (argv == NULL)
-		return (EFAULT);
-
-	/*
-	 * Allocate temporary demand zeroed space for argument and
-	 *	environment strings
-	 */
-	args->buf = (char *)kmem_alloc_wait(exec_map,
-	    PATH_MAX + ARG_MAX + MAXSHELLCMDLEN);
-	if (args->buf == NULL)
-		return (ENOMEM);
-	args->begin_argv = args->buf;
-	args->endp = args->begin_argv;
-	args->stringspace = ARG_MAX;
-
-	args->fname = args->buf + ARG_MAX;
-
-	/*
-	 * Copy the file name.
-	 */
-	error = (segflg == UIO_SYSSPACE) ?
-	    copystr(fname, args->fname, PATH_MAX, &length) :
-	    copyinstr(fname, args->fname, PATH_MAX, &length);
-	if (error != 0)
-		goto err_exit;
-
-	/*
-	 * extract arguments first
-	 */
-	p32 = (u_int32_t *)argv;
-	for (;;) {
-		error = copyin(p32++, &arg, sizeof(arg));
-		if (error)
-			goto err_exit;
-		if (arg == 0)
-			break;
-		argp = PTRIN(arg);
-		error = copyinstr(argp, args->endp, args->stringspace, &length);
-		if (error) {
-			if (error == ENAMETOOLONG)
-				error = E2BIG;
-
-			goto err_exit;
-		}
-		args->stringspace -= length;
-		args->endp += length;
-		args->argc++;
-	}
-
-	args->begin_envv = args->endp;
-
-	/*
-	 * extract environment strings
-	 */
-	if (envv) {
-		p32 = (u_int32_t *)envv;
-		for (;;) {
-			error = copyin(p32++, &arg, sizeof(arg));
-			if (error)
-				goto err_exit;
-			if (arg == 0)
-				break;
-			envp = PTRIN(arg);
-			error = copyinstr(envp, args->endp, args->stringspace,
-			    &length);
-			if (error) {
-				if (error == ENAMETOOLONG)
-					error = E2BIG;
-				goto err_exit;
-			}
-			args->stringspace -= length;
-			args->endp += length;
-			args->envc++;
-		}
-	}
-
-	return (0);
-
-err_exit:
-	kmem_free_wakeup(exec_map, (vm_offset_t)args->buf,
-	    PATH_MAX + ARG_MAX + MAXSHELLCMDLEN);
-	args->buf = NULL;
-	return (error);
 }
 
 int
@@ -216,8 +120,8 @@ linux_execve(struct thread *td, struct linux_execve_args *args)
 		printf(ARGS(execve, "%s"), path);
 #endif
 
-	error = linux_exec_copyin_args(&eargs, path, UIO_SYSSPACE, args->argp,
-	    args->envp);
+	error = freebsd32_exec_copyin_args(&eargs, path, UIO_SYSSPACE,
+	    args->argp, args->envp);
 	free(path, M_TEMP);
 	if (error == 0)
 		error = kern_execve(td, &eargs, NULL);
@@ -716,8 +620,8 @@ linux_clone(struct thread *td, struct linux_clone_args *args)
 				    sd.sd_long, sd.sd_def32, sd.sd_gran);
 #endif
 			td2->td_pcb->pcb_gsbase = (register_t)info.base_addr;
-			td2->td_pcb->pcb_gs32sd = sd;
-			td2->td_pcb->pcb_gs = GSEL(GUGS32_SEL, SEL_UPL);
+/* XXXKIB		td2->td_pcb->pcb_gs32sd = sd; */
+			td2->td_frame->tf_gs = GSEL(GUGS32_SEL, SEL_UPL);
 			td2->td_pcb->pcb_flags |= PCB_GS32BIT | PCB_32BIT;
 		}
 	}
@@ -759,12 +663,9 @@ linux_clone(struct thread *td, struct linux_clone_args *args)
 #define STACK_SIZE  (2 * 1024 * 1024)
 #define GUARD_SIZE  (4 * PAGE_SIZE)
 
-static int linux_mmap_common(struct thread *, struct l_mmap_argv *);
-
 int
 linux_mmap2(struct thread *td, struct linux_mmap2_args *args)
 {
-	struct l_mmap_argv linux_args;
 
 #ifdef DEBUG
 	if (ldebug(mmap2))
@@ -773,14 +674,9 @@ linux_mmap2(struct thread *td, struct linux_mmap2_args *args)
 		    args->flags, args->fd, args->pgoff);
 #endif
 
-	linux_args.addr = PTROUT(args->addr);
-	linux_args.len = args->len;
-	linux_args.prot = args->prot;
-	linux_args.flags = args->flags;
-	linux_args.fd = args->fd;
-	linux_args.pgoff = args->pgoff;
-
-	return (linux_mmap_common(td, &linux_args));
+	return (linux_mmap_common(td, PTROUT(args->addr), args->len, args->prot,
+		args->flags, args->fd, (uint64_t)(uint32_t)args->pgoff *
+		PAGE_SIZE));
 }
 
 int
@@ -799,15 +695,15 @@ linux_mmap(struct thread *td, struct linux_mmap_args *args)
 		    linux_args.addr, linux_args.len, linux_args.prot,
 		    linux_args.flags, linux_args.fd, linux_args.pgoff);
 #endif
-	if ((linux_args.pgoff % PAGE_SIZE) != 0)
-		return (EINVAL);
-	linux_args.pgoff /= PAGE_SIZE;
 
-	return (linux_mmap_common(td, &linux_args));
+	return (linux_mmap_common(td, linux_args.addr, linux_args.len,
+	    linux_args.prot, linux_args.flags, linux_args.fd,
+	    (uint32_t)linux_args.pgoff));
 }
 
 static int
-linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
+linux_mmap_common(struct thread *td, l_uintptr_t addr, l_size_t len, l_int prot,
+    l_int flags, l_int fd, l_loff_t pos)
 {
 	struct proc *p = td->td_proc;
 	struct mmap_args /* {
@@ -830,21 +726,24 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 	 * Linux mmap(2):
 	 * You must specify exactly one of MAP_SHARED and MAP_PRIVATE
 	 */
-	if (! ((linux_args->flags & LINUX_MAP_SHARED) ^
-	    (linux_args->flags & LINUX_MAP_PRIVATE)))
+	if (!((flags & LINUX_MAP_SHARED) ^ (flags & LINUX_MAP_PRIVATE)))
 		return (EINVAL);
 
-	if (linux_args->flags & LINUX_MAP_SHARED)
+	if (flags & LINUX_MAP_SHARED)
 		bsd_args.flags |= MAP_SHARED;
-	if (linux_args->flags & LINUX_MAP_PRIVATE)
+	if (flags & LINUX_MAP_PRIVATE)
 		bsd_args.flags |= MAP_PRIVATE;
-	if (linux_args->flags & LINUX_MAP_FIXED)
+	if (flags & LINUX_MAP_FIXED)
 		bsd_args.flags |= MAP_FIXED;
-	if (linux_args->flags & LINUX_MAP_ANON)
+	if (flags & LINUX_MAP_ANON) {
+		/* Enforce pos to be on page boundary, then ignore. */
+		if ((pos & PAGE_MASK) != 0)
+			return (EINVAL);
+		pos = 0;
 		bsd_args.flags |= MAP_ANON;
-	else
+	} else
 		bsd_args.flags |= MAP_NOSYNC;
-	if (linux_args->flags & LINUX_MAP_GROWSDOWN)
+	if (flags & LINUX_MAP_GROWSDOWN)
 		bsd_args.flags |= MAP_STACK;
 
 	/*
@@ -852,12 +751,12 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 	 * on Linux/i386. We do this to ensure maximum compatibility.
 	 * Linux/ia64 does the same in i386 emulation mode.
 	 */
-	bsd_args.prot = linux_args->prot;
+	bsd_args.prot = prot;
 	if (bsd_args.prot & (PROT_READ | PROT_WRITE | PROT_EXEC))
 		bsd_args.prot |= PROT_READ | PROT_EXEC;
 
 	/* Linux does not check file descriptor when MAP_ANONYMOUS is set. */
-	bsd_args.fd = (bsd_args.flags & MAP_ANON) ? -1 : linux_args->fd;
+	bsd_args.fd = (bsd_args.flags & MAP_ANON) ? -1 : fd;
 	if (bsd_args.fd != -1) {
 		/*
 		 * Linux follows Solaris mmap(2) description:
@@ -882,7 +781,7 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 		fdrop(fp, td);
 	}
 
-	if (linux_args->flags & LINUX_MAP_GROWSDOWN) {
+	if (flags & LINUX_MAP_GROWSDOWN) {
 		/*
 		 * The Linux MAP_GROWSDOWN option does not limit auto
 		 * growth of the region.  Linux mmap with this option
@@ -905,8 +804,7 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 		 * fixed size of (STACK_SIZE - GUARD_SIZE).
 		 */
 
-		if ((caddr_t)PTRIN(linux_args->addr) + linux_args->len >
-		    p->p_vmspace->vm_maxsaddr) {
+		if ((caddr_t)PTRIN(addr) + len > p->p_vmspace->vm_maxsaddr) {
 			/*
 			 * Some Linux apps will attempt to mmap
 			 * thread stacks near the top of their
@@ -937,19 +835,19 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 		 * we map the full stack, since we don't have a way
 		 * to autogrow it.
 		 */
-		if (linux_args->len > STACK_SIZE - GUARD_SIZE) {
-			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
-			bsd_args.len = linux_args->len;
+		if (len > STACK_SIZE - GUARD_SIZE) {
+			bsd_args.addr = (caddr_t)PTRIN(addr);
+			bsd_args.len = len;
 		} else {
-			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr) -
-			    (STACK_SIZE - GUARD_SIZE - linux_args->len);
+			bsd_args.addr = (caddr_t)PTRIN(addr) -
+			    (STACK_SIZE - GUARD_SIZE - len);
 			bsd_args.len = STACK_SIZE - GUARD_SIZE;
 		}
 	} else {
-		bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
-		bsd_args.len  = linux_args->len;
+		bsd_args.addr = (caddr_t)PTRIN(addr);
+		bsd_args.len  = len;
 	}
-	bsd_args.pos = (off_t)linux_args->pgoff * PAGE_SIZE;
+	bsd_args.pos = pos;
 
 #ifdef DEBUG
 	if (ldebug(mmap))
@@ -1359,12 +1257,9 @@ linux_set_thread_area(struct thread *td,
 		    sd.sd_gran);
 #endif
 
-	critical_enter();
 	td->td_pcb->pcb_gsbase = (register_t)info.base_addr;
-	td->td_pcb->pcb_gs32sd = *PCPU_GET(gs32p) = sd;
 	td->td_pcb->pcb_flags |= PCB_32BIT | PCB_GS32BIT;
-	wrmsr(MSR_KGSBASE, td->td_pcb->pcb_gsbase);
-	critical_exit();
+	update_gdt_gsbase(td, info.base_addr);
 
 	return (0);
 }

@@ -1,12 +1,13 @@
 # $Id: Makefile,v 1.2 2003/03/22 23:44:34 max Exp $
-# $FreeBSD: src/sys/modules/netgraph/bluetooth/ubt/Makefile,v 1.9 2009/02/23 18:32:59 thompsa Exp $
+# $FreeBSD: src/sys/modules/netgraph/bluetooth/ubt/Makefile,v 1.10 2009/05/27 16:43:40 thompsa Exp $
 
-S=	${.CURDIR}/../../../..
+.PATH: ${.CURDIR}/../../../../netgraph/bluetooth/drivers/ubt
 
-.PATH: $S/dev/usb/bluetooth
+CFLAGS+=	-I${.CURDIR}/../../../../netgraph/bluetooth/include \
+		-I${.CURDIR}/../../../../netgraph/bluetooth/drivers/ubt
 
-KMOD=	ng_ubt
-SRCS=	opt_bus.h opt_usb.h device_if.h bus_if.h usb_if.h usbdevs.h \
-	ng_ubt.c
+KMOD=		ng_ubt
+SRCS=		ng_ubt.c opt_bus.h opt_usb.h device_if.h bus_if.h \
+		usb_if.h usbdevs.h
 
 .include <bsd.kmod.mk>

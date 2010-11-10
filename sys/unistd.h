@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)unistd.h	8.2 (Berkeley) 1/7/94
- * $FreeBSD: src/sys/sys/unistd.h,v 1.50 2009/01/31 10:04:36 trhodes Exp $
+ * $FreeBSD: src/sys/sys/unistd.h,v 1.51 2009/06/25 12:46:59 trasz Exp $
  */
 
 #ifndef _SYS_UNISTD_H_
@@ -153,6 +153,7 @@
 #define	_PC_CAP_PRESENT		61
 #define	_PC_INF_PRESENT		62
 #define	_PC_MAC_PRESENT		63
+#define	_PC_ACL_NFS4		64
 #endif
 
 /* From OpenSolaris, used by SEEK_DATA/SEEK_HOLE. */

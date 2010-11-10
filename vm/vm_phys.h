@@ -28,7 +28,7 @@
  * WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/vm/vm_phys.h,v 1.4 2007/12/20 22:45:54 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_phys.h,v 1.6 2009/07/12 23:31:20 alc Exp $
  */
 
 /*

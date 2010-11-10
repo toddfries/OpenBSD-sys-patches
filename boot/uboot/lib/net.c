@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/net.c,v 1.7 2008/11/19 17:34:28 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/net.c,v 1.8 2009/05/30 19:28:38 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -45,12 +45,6 @@ __FBSDID("$FreeBSD: src/sys/boot/uboot/lib/net.c,v 1.7 2008/11/19 17:34:28 raj E
 #include "api_public.h"
 #include "glue.h"
 #include "libuboot.h"
-
-#define NETIF_DEBUG
-#define NETIF_VERBOSE_DEBUG
-#undef NETIF_DEBUG
-#undef NETIF_VERBOSE_DEBUG
-
 
 static int	net_probe(struct netif *, void *);
 static int	net_match(struct netif *, void *);
@@ -138,7 +132,7 @@ net_put(struct iodesc *desc, void *pkt, size_t len)
 #if defined(NETIF_DEBUG)
 	struct ether_header *eh;
 
-	printf("net_put: desc 0x%x, pkt 0x%x, len %d\n", desc, pkt, len);
+	printf("net_put: desc %p, pkt %p, len %d\n", desc, pkt, len);
 	eh = pkt;
 	printf("dst: %s ", ether_sprintf(eh->ether_dhost));
 	printf("src: %s ", ether_sprintf(eh->ether_shost));
@@ -175,7 +169,7 @@ net_get(struct iodesc *desc, void *pkt, size_t len, time_t timeout)
 	int err, rlen;
 
 #if defined(NETIF_DEBUG)
-	printf("net_get: pkt %x, len %d, timeout %d\n", pkt, len, timeout);
+	printf("net_get: pkt %p, len %d, timeout %d\n", pkt, len, timeout);
 #endif
 	t = getsecs();
 	do {

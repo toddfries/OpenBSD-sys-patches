@@ -57,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_glue.c,v 1.232 2008/08/05 20:02:31 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_glue.c,v 1.247 2010/05/06 18:58:32 alc Exp $");
 
 #include "opt_vm.h"
 #include "opt_kstack_pages.h"
@@ -77,6 +77,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_glue.c,v 1.232 2008/08/05 20:02:31 jhb Exp $")
 #include <sys/sx.h>
 #include <sys/sysctl.h>
 
+#include <sys/eventhandler.h>
 #include <sys/kernel.h>
 #include <sys/ktr.h>
 #include <sys/unistd.h>
@@ -98,12 +99,6 @@ extern int maxslp;
 /*
  * System initialization
  *
- * Note: proc0 from proc.h
- */
-static void vm_init_limits(void *);
-SYSINIT(vm_limits, SI_SUB_VM_CONF, SI_ORDER_FIRST, vm_init_limits, &proc0);
-
-/*
  * THIS MUST BE THE LAST INITIALIZATION ITEM!!!
  *
  * Note: run scheduling should be divorced from the vm system.
@@ -114,6 +109,8 @@ SYSINIT(scheduler, SI_SUB_RUN_SCHEDULER, SI_ORDER_ANY, scheduler, NULL);
 #ifndef NO_SWAPPING
 static int swapout(struct proc *);
 static void swapclear(struct proc *);
+static void vm_thread_swapin(struct thread *td);
+static void vm_thread_swapout(struct thread *td);
 #endif
 
 /*
@@ -253,23 +250,23 @@ vm_imgact_hold_page(vm_object_t object, vm_ooffset_t offset)
 	VM_OBJECT_LOCK(object);
 	pindex = OFF_TO_IDX(offset);
 	m = vm_page_grab(object, pindex, VM_ALLOC_NORMAL | VM_ALLOC_RETRY);
-	if ((m->valid & VM_PAGE_BITS_ALL) != VM_PAGE_BITS_ALL) {
+	if (m->valid != VM_PAGE_BITS_ALL) {
 		ma[0] = m;
 		rv = vm_pager_get_pages(object, ma, 1, 0);
 		m = vm_page_lookup(object, pindex);
 		if (m == NULL)
 			goto out;
-		if (m->valid == 0 || rv != VM_PAGER_OK) {
-			vm_page_lock_queues();
+		if (rv != VM_PAGER_OK) {
+			vm_page_lock(m);
 			vm_page_free(m);
-			vm_page_unlock_queues();
+			vm_page_unlock(m);
 			m = NULL;
 			goto out;
 		}
 	}
-	vm_page_lock_queues();
+	vm_page_lock(m);
 	vm_page_hold(m);
-	vm_page_unlock_queues();
+	vm_page_unlock(m);
 	vm_page_wakeup(m);
 out:
 	VM_OBJECT_UNLOCK(object);
@@ -303,10 +300,31 @@ vm_imgact_unmap_page(struct sf_buf *sf)
 	m = sf_buf_page(sf);
 	sf_buf_free(sf);
 	sched_unpin();
-	vm_page_lock_queues();
+	vm_page_lock(m);
 	vm_page_unhold(m);
-	vm_page_unlock_queues();
+	vm_page_unlock(m);
 }
+
+void
+vm_sync_icache(vm_map_t map, vm_offset_t va, vm_offset_t sz)
+{
+
+	pmap_sync_icache(map->pmap, va, sz);
+}
+
+struct kstack_cache_entry {
+	vm_object_t ksobj;
+	struct kstack_cache_entry *next_ks_entry;
+};
+
+static struct kstack_cache_entry *kstack_cache;
+static int kstack_cache_size = 128;
+static int kstacks;
+static struct mtx kstack_cache_mtx;
+SYSCTL_INT(_vm, OID_AUTO, kstack_cache_size, CTLFLAG_RW, &kstack_cache_size, 0,
+    "");
+SYSCTL_INT(_vm, OID_AUTO, kstacks, CTLFLAG_RD, &kstacks, 0,
+    "");
 
 #ifndef KSTACK_MAX_PAGES
 #define KSTACK_MAX_PAGES 32
@@ -323,6 +341,7 @@ vm_thread_new(struct thread *td, int pages)
 	vm_object_t ksobj;
 	vm_offset_t ks;
 	vm_page_t m, ma[KSTACK_MAX_PAGES];
+	struct kstack_cache_entry *ks_ce;
 	int i;
 
 	/* Bounds check */
@@ -330,6 +349,22 @@ vm_thread_new(struct thread *td, int pages)
 		pages = KSTACK_PAGES;
 	else if (pages > KSTACK_MAX_PAGES)
 		pages = KSTACK_MAX_PAGES;
+
+	if (pages == KSTACK_PAGES) {
+		mtx_lock(&kstack_cache_mtx);
+		if (kstack_cache != NULL) {
+			ks_ce = kstack_cache;
+			kstack_cache = ks_ce->next_ks_entry;
+			mtx_unlock(&kstack_cache_mtx);
+
+			td->td_kstack_obj = ks_ce->ksobj;
+			td->td_kstack = (vm_offset_t)ks_ce;
+			td->td_kstack_pages = KSTACK_PAGES;
+			return (1);
+		}
+		mtx_unlock(&kstack_cache_mtx);
+	}
+
 	/*
 	 * Allocate an object for the kstack.
 	 */
@@ -338,14 +373,24 @@ vm_thread_new(struct thread *td, int pages)
 	/*
 	 * Get a kernel virtual address for this thread's kstack.
 	 */
+#if defined(__mips__)
+	/*
+	 * We need to align the kstack's mapped address to fit within
+	 * a single TLB entry.
+	 */
+	ks = kmem_alloc_nofault_space(kernel_map,
+	    (pages + KSTACK_GUARD_PAGES) * PAGE_SIZE, VMFS_TLB_ALIGNED_SPACE);
+#else
 	ks = kmem_alloc_nofault(kernel_map,
 	   (pages + KSTACK_GUARD_PAGES) * PAGE_SIZE);
+#endif
 	if (ks == 0) {
 		printf("vm_thread_new: kstack allocation failed\n");
 		vm_object_deallocate(ksobj);
 		return (0);
 	}
-	
+
+	atomic_add_int(&kstacks, 1);
 	if (KSTACK_GUARD_PAGES != 0) {
 		pmap_qremove(ks, KSTACK_GUARD_PAGES);
 		ks += KSTACK_GUARD_PAGES * PAGE_SIZE;
@@ -376,6 +421,30 @@ vm_thread_new(struct thread *td, int pages)
 	return (1);
 }
 
+static void
+vm_thread_stack_dispose(vm_object_t ksobj, vm_offset_t ks, int pages)
+{
+	vm_page_t m;
+	int i;
+
+	atomic_add_int(&kstacks, -1);
+	pmap_qremove(ks, pages);
+	VM_OBJECT_LOCK(ksobj);
+	for (i = 0; i < pages; i++) {
+		m = vm_page_lookup(ksobj, i);
+		if (m == NULL)
+			panic("vm_thread_dispose: kstack already missing?");
+		vm_page_lock(m);
+		vm_page_unwire(m, 0);
+		vm_page_free(m);
+		vm_page_unlock(m);
+	}
+	VM_OBJECT_UNLOCK(ksobj);
+	vm_object_deallocate(ksobj);
+	kmem_free(kernel_map, ks - (KSTACK_GUARD_PAGES * PAGE_SIZE),
+	    (pages + KSTACK_GUARD_PAGES) * PAGE_SIZE);
+}
+
 /*
  * Dispose of a thread's kernel stack.
  */
@@ -384,34 +453,61 @@ vm_thread_dispose(struct thread *td)
 {
 	vm_object_t ksobj;
 	vm_offset_t ks;
-	vm_page_t m;
-	int i, pages;
+	struct kstack_cache_entry *ks_ce;
+	int pages;
 
 	pages = td->td_kstack_pages;
 	ksobj = td->td_kstack_obj;
 	ks = td->td_kstack;
-	pmap_qremove(ks, pages);
-	VM_OBJECT_LOCK(ksobj);
-	for (i = 0; i < pages; i++) {
-		m = vm_page_lookup(ksobj, i);
-		if (m == NULL)
-			panic("vm_thread_dispose: kstack already missing?");
-		vm_page_lock_queues();
-		vm_page_unwire(m, 0);
-		vm_page_free(m);
-		vm_page_unlock_queues();
-	}
-	VM_OBJECT_UNLOCK(ksobj);
-	vm_object_deallocate(ksobj);
-	kmem_free(kernel_map, ks - (KSTACK_GUARD_PAGES * PAGE_SIZE),
-	    (pages + KSTACK_GUARD_PAGES) * PAGE_SIZE);
 	td->td_kstack = 0;
+	td->td_kstack_pages = 0;
+	if (pages == KSTACK_PAGES && kstacks <= kstack_cache_size) {
+		ks_ce = (struct kstack_cache_entry *)ks;
+		ks_ce->ksobj = ksobj;
+		mtx_lock(&kstack_cache_mtx);
+		ks_ce->next_ks_entry = kstack_cache;
+		kstack_cache = ks_ce;
+		mtx_unlock(&kstack_cache_mtx);
+		return;
+	}
+	vm_thread_stack_dispose(ksobj, ks, pages);
 }
 
+static void
+vm_thread_stack_lowmem(void *nulll)
+{
+	struct kstack_cache_entry *ks_ce, *ks_ce1;
+
+	mtx_lock(&kstack_cache_mtx);
+	ks_ce = kstack_cache;
+	kstack_cache = NULL;
+	mtx_unlock(&kstack_cache_mtx);
+
+	while (ks_ce != NULL) {
+		ks_ce1 = ks_ce;
+		ks_ce = ks_ce->next_ks_entry;
+
+		vm_thread_stack_dispose(ks_ce1->ksobj, (vm_offset_t)ks_ce1,
+		    KSTACK_PAGES);
+	}
+}
+
+static void
+kstack_cache_init(void *nulll)
+{
+
+	EVENTHANDLER_REGISTER(vm_lowmem, vm_thread_stack_lowmem, NULL,
+	    EVENTHANDLER_PRI_ANY);
+}
+
+MTX_SYSINIT(kstack_cache, &kstack_cache_mtx, "kstkch", MTX_DEF);
+SYSINIT(vm_kstacks, SI_SUB_KTHREAD_INIT, SI_ORDER_ANY, kstack_cache_init, NULL);
+
+#ifndef NO_SWAPPING
 /*
  * Allow a thread's kernel stack to be paged out.
  */
-void
+static void
 vm_thread_swapout(struct thread *td)
 {
 	vm_object_t ksobj;
@@ -427,10 +523,10 @@ vm_thread_swapout(struct thread *td)
 		m = vm_page_lookup(ksobj, i);
 		if (m == NULL)
 			panic("vm_thread_swapout: kstack already missing?");
-		vm_page_lock_queues();
 		vm_page_dirty(m);
+		vm_page_lock(m);
 		vm_page_unwire(m, 0);
-		vm_page_unlock_queues();
+		vm_page_unlock(m);
 	}
 	VM_OBJECT_UNLOCK(ksobj);
 }
@@ -438,66 +534,47 @@ vm_thread_swapout(struct thread *td)
 /*
  * Bring the kernel stack for a specified thread back in.
  */
-void
+static void
 vm_thread_swapin(struct thread *td)
 {
 	vm_object_t ksobj;
-	vm_page_t m, ma[KSTACK_MAX_PAGES];
-	int i, pages, rv;
+	vm_page_t ma[KSTACK_MAX_PAGES];
+	int i, j, k, pages, rv;
 
 	pages = td->td_kstack_pages;
 	ksobj = td->td_kstack_obj;
 	VM_OBJECT_LOCK(ksobj);
+	for (i = 0; i < pages; i++)
+		ma[i] = vm_page_grab(ksobj, i, VM_ALLOC_NORMAL | VM_ALLOC_RETRY |
+		    VM_ALLOC_WIRED);
 	for (i = 0; i < pages; i++) {
-		m = vm_page_grab(ksobj, i, VM_ALLOC_NORMAL | VM_ALLOC_RETRY);
-		if (m->valid != VM_PAGE_BITS_ALL) {
-			rv = vm_pager_get_pages(ksobj, &m, 1, 0);
+		if (ma[i]->valid != VM_PAGE_BITS_ALL) {
+			KASSERT(ma[i]->oflags & VPO_BUSY,
+			    ("lost busy 1"));
+			vm_object_pip_add(ksobj, 1);
+			for (j = i + 1; j < pages; j++) {
+				KASSERT(ma[j]->valid == VM_PAGE_BITS_ALL ||
+				    (ma[j]->oflags & VPO_BUSY),
+				    ("lost busy 2"));
+				if (ma[j]->valid == VM_PAGE_BITS_ALL)
+					break;
+			}
+			rv = vm_pager_get_pages(ksobj, ma + i, j - i, 0);
 			if (rv != VM_PAGER_OK)
-				panic("vm_thread_swapin: cannot get kstack for proc: %d", td->td_proc->p_pid);
-			m = vm_page_lookup(ksobj, i);
-			m->valid = VM_PAGE_BITS_ALL;
-		}
-		ma[i] = m;
-		vm_page_lock_queues();
-		vm_page_wire(m);
-		vm_page_unlock_queues();
-		vm_page_wakeup(m);
+	panic("vm_thread_swapin: cannot get kstack for proc: %d",
+				    td->td_proc->p_pid);
+			vm_object_pip_wakeup(ksobj);
+			for (k = i; k < j; k++)
+				ma[k] = vm_page_lookup(ksobj, k);
+			vm_page_wakeup(ma[i]);
+		} else if (ma[i]->oflags & VPO_BUSY)
+			vm_page_wakeup(ma[i]);
 	}
 	VM_OBJECT_UNLOCK(ksobj);
 	pmap_qenter(td->td_kstack, ma, pages);
 	cpu_thread_swapin(td);
 }
-
-/*
- * Set up a variable-sized alternate kstack.
- */
-int
-vm_thread_new_altkstack(struct thread *td, int pages)
-{
-
-	td->td_altkstack = td->td_kstack;
-	td->td_altkstack_obj = td->td_kstack_obj;
-	td->td_altkstack_pages = td->td_kstack_pages;
-
-	return (vm_thread_new(td, pages));
-}
-
-/*
- * Restore the original kstack.
- */
-void
-vm_thread_dispose_altkstack(struct thread *td)
-{
-
-	vm_thread_dispose(td);
-
-	td->td_kstack = td->td_altkstack;
-	td->td_kstack_obj = td->td_altkstack_obj;
-	td->td_kstack_pages = td->td_altkstack_pages;
-	td->td_altkstack = 0;
-	td->td_altkstack_obj = NULL;
-	td->td_altkstack_pages = 0;
-}
+#endif /* !NO_SWAPPING */
 
 /*
  * Implement fork's actions on an address space.
@@ -569,38 +646,6 @@ vm_waitproc(p)
 {
 
 	vmspace_exitfree(p);		/* and clean-out the vmspace */
-}
-
-/*
- * Set default limits for VM system.
- * Called for proc 0, and then inherited by all others.
- *
- * XXX should probably act directly on proc0.
- */
-static void
-vm_init_limits(udata)
-	void *udata;
-{
-	struct proc *p = udata;
-	struct plimit *limp;
-	int rss_limit;
-
-	/*
-	 * Set up the initial limits on process VM. Set the maximum resident
-	 * set size to be half of (reasonably) available memory.  Since this
-	 * is a soft limit, it comes into effect only when the system is out
-	 * of memory - half of main memory helps to favor smaller processes,
-	 * and reduces thrashing of the object cache.
-	 */
-	limp = p->p_limit;
-	limp->pl_rlimit[RLIMIT_STACK].rlim_cur = dflssiz;
-	limp->pl_rlimit[RLIMIT_STACK].rlim_max = maxssiz;
-	limp->pl_rlimit[RLIMIT_DATA].rlim_cur = dfldsiz;
-	limp->pl_rlimit[RLIMIT_DATA].rlim_max = maxdsiz;
-	/* limit the limit to no less than 2MB */
-	rss_limit = max(cnt.v_free_count, 512);
-	limp->pl_rlimit[RLIMIT_RSS].rlim_cur = ptoa(rss_limit);
-	limp->pl_rlimit[RLIMIT_RSS].rlim_max = RLIM_INFINITY;
 }
 
 void

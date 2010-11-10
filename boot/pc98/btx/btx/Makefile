@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/pc98/btx/btx/Makefile,v 1.13 2008/02/28 17:33:05 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/btx/btx/Makefile,v 1.14 2010/06/03 17:42:32 ed Exp $
 
 PROG=	btx
 INTERNALPROG=
@@ -24,6 +24,6 @@ CFLAGS+=-DBTX_SERIAL -DSIOPRT=${BOOT_COMCONSOLE_PORT} \
 
 ORG=	0x9000
 
-LDFLAGS=-N -e start -Ttext ${ORG} -Wl,-S,--oformat,binary
+LDFLAGS=-e start -Ttext ${ORG} -Wl,-N,-S,--oformat,binary
 
 .include <bsd.prog.mk>

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/sys/kobj.h,v 1.14 2009/02/11 04:52:46 imp Exp $
+ *	$FreeBSD: src/sys/sys/kobj.h,v 1.16 2009/06/12 09:05:23 avg Exp $
  */
 
 #ifndef _SYS_KOBJ_H_
@@ -91,13 +91,11 @@ struct kobjop_desc {
 
 /*
  * Shorthand for constructing method tables.
+ * The ternary operator is (ab)used to provoke a warning when FUNC
+ * has a signature that is not compatible with kobj method signature.
  */
-#if 1
-#define KOBJMETHOD(NAME, FUNC) { &NAME##_desc, (kobjop_t) FUNC }
-#else /* notyet */
 #define KOBJMETHOD(NAME, FUNC) \
-{ &NAME##_desc, (kobjop_t) (FUNC != (NAME##_t *)NULL ? FUNC : NULL) }
-#endif
+	{ &NAME##_desc, (kobjop_t) (1 ? FUNC : (NAME##_t *)NULL) }
 
 /*
  *

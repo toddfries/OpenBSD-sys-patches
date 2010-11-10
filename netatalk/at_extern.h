@@ -23,7 +23,7 @@
  *	+1-313-764-2278
  *	netatalk@umich.edu
  *
- * $FreeBSD: src/sys/netatalk/at_extern.h,v 1.19 2008/05/09 23:02:56 julian Exp $
+ * $FreeBSD: src/sys/netatalk/at_extern.h,v 1.20 2009/06/24 10:32:44 rwatson Exp $
  */
 
 #ifndef _NETATALK_AT_EXTERN_H_
@@ -55,6 +55,8 @@ u_short		 at_cksum(struct mbuf *m, int skip);
 int		 at_control(struct socket *so, u_long cmd, caddr_t data,
 		    struct ifnet *ifp, struct thread *td);
 struct at_ifaddr	*at_ifawithnet(struct sockaddr_at *);
+struct at_ifaddr	*at_ifawithnet_locked(struct sockaddr_at  *sat);
+
 int		 at_inithead(void**, int);
 void		 ddp_init(void);
 int		 ddp_output(struct mbuf *m, struct socket *so); 

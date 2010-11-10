@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.11 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.12 2009/06/23 22:42:39 jeff Exp $");
 
 #include "opt_trap_trace.h"
 
@@ -324,6 +324,8 @@ cpu_mp_start(void)
 		va = kmem_alloc(kernel_map, PCPU_PAGES * PAGE_SIZE);
 		pc = (struct pcpu *)(va + (PCPU_PAGES * PAGE_SIZE)) - 1;
 		pcpu_init(pc, cpuid, sizeof(*pc));
+		dpcpu_init((void *)kmem_alloc(kernel_map, DPCPU_SIZE),
+		    cpuid);
 		pc->pc_addr = va;
 
 		all_cpus |= 1 << cpuid;

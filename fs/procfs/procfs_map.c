@@ -32,7 +32,7 @@
  *
  *	@(#)procfs_status.c	8.3 (Berkeley) 2/17/94
  *
- * $FreeBSD: src/sys/fs/procfs/procfs_map.c,v 1.49 2008/12/29 12:45:11 kib Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs_map.c,v 1.52 2010/03/11 14:49:06 nwhitehorn Exp $
  */
 
 #include "opt_compat.h"
@@ -45,8 +45,9 @@
 #include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/resourcevar.h>
 #include <sys/sbuf.h>
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
 #include <sys/sysent.h>
 #endif
 #include <sys/uio.h>
@@ -82,9 +83,10 @@ procfs_doprocmap(PFS_FILL_ARGS)
 	vm_map_entry_t entry, tmp_entry;
 	struct vnode *vp;
 	char *fullpath, *freepath;
+	struct uidinfo *uip;
 	int error, vfslocked;
 	unsigned int last_timestamp;
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
 	int wrap32 = 0;
 #endif
 
@@ -97,7 +99,7 @@ procfs_doprocmap(PFS_FILL_ARGS)
 	if (uio->uio_rw != UIO_READ)
 		return (EOPNOTSUPP);
 
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
         if (curproc->p_sysent->sv_flags & SV_ILP32) {
                 if (!(p->p_sysent->sv_flags & SV_ILP32))
                         return (EOPNOTSUPP);
@@ -134,6 +136,7 @@ procfs_doprocmap(PFS_FILL_ARGS)
 			if (obj->shadow_count == 1)
 				privateresident = obj->resident_page_count;
 		}
+		uip = (entry->uip) ? entry->uip : (obj ? obj->uip : NULL);
 
 		resident = 0;
 		addr = entry->start;
@@ -171,6 +174,7 @@ procfs_doprocmap(PFS_FILL_ARGS)
 				type = "swap";
 				vp = NULL;
 				break;
+			case OBJT_SG:
 			case OBJT_DEVICE:
 				type = "device";
 				vp = NULL;
@@ -198,13 +202,14 @@ procfs_doprocmap(PFS_FILL_ARGS)
 
 		/*
 		 * format:
-		 *  start, end, resident, private resident, cow, access, type.
+		 *  start, end, resident, private resident, cow, access, type,
+		 *         charged, charged uid.
 		 */
 		error = sbuf_printf(sb,
-		    "0x%lx 0x%lx %d %d %p %s%s%s %d %d 0x%x %s %s %s %s\n",
+		    "0x%lx 0x%lx %d %d %p %s%s%s %d %d 0x%x %s %s %s %s %s %d\n",
 			(u_long)e_start, (u_long)e_end,
 			resident, privateresident,
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
 			wrap32 ? NULL : obj,	/* Hide 64 bit value */
 #else
 			obj,
@@ -215,7 +220,8 @@ procfs_doprocmap(PFS_FILL_ARGS)
 			ref_count, shadow_count, flags,
 			(e_eflags & MAP_ENTRY_COW)?"COW":"NCOW",
 			(e_eflags & MAP_ENTRY_NEEDS_COPY)?"NC":"NNC",
-			type, fullpath);
+			type, fullpath,
+			uip ? "CH":"NCH", uip ? uip->ui_uid : -1);
 
 		if (freepath != NULL)
 			free(freepath, M_TEMP);

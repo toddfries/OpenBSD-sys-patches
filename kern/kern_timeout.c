@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_timeout.c,v 1.118 2009/01/24 10:22:49 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_timeout.c,v 1.121 2010/06/11 18:46:34 jhb Exp $");
 
 #include "opt_kdtrace.h"
 
@@ -82,6 +82,23 @@ SYSCTL_INT(_debug, OID_AUTO, to_avg_mpcalls, CTLFLAG_RD, &avg_mpcalls, 0,
  */
 int callwheelsize, callwheelbits, callwheelmask;
 
+/*
+ * There is one struct callout_cpu per cpu, holding all relevant
+ * state for the callout processing thread on the individual CPU.
+ * In particular:
+ *	cc_ticks is incremented once per tick in callout_cpu().
+ *	It tracks the global 'ticks' but in a way that the individual
+ *	threads should not worry about races in the order in which
+ *	hardclock() and hardclock_cpu() run on the various CPUs.
+ *	cc_softclock is advanced in callout_cpu() to point to the
+ *	first entry in cc_callwheel that may need handling. In turn,
+ *	a softclock() is scheduled so it can serve the various entries i
+ *	such that cc_softclock <= i <= cc_ticks .
+ *	XXX maybe cc_softclock and cc_ticks should be volatile ?
+ *
+ *	cc_ticks is also used in callout_reset_cpu() to determine
+ *	when the callout should be served.
+ */
 struct callout_cpu {
 	struct mtx		cc_lock;
 	struct callout		*cc_callout;
@@ -90,6 +107,7 @@ struct callout_cpu {
 	struct callout		*cc_next;
 	struct callout		*cc_curr;
 	void			*cc_cookie;
+	int 			cc_ticks;
 	int 			cc_softticks;
 	int			cc_cancel;
 	int			cc_waiting;
@@ -210,10 +228,8 @@ start_softclock(void *dummy)
 		panic("died while creating standard software ithreads");
 	cc->cc_cookie = softclock_ih;
 #ifdef SMP
-	for (cpu = 0; cpu <= mp_maxid; cpu++) {
+	CPU_FOREACH(cpu) {
 		if (cpu == timeout_cpu)
-			continue;
-		if (CPU_ABSENT(cpu))
 			continue;
 		cc = CC_CPU(cpu);
 		if (swi_add(NULL, "clock", softclock, cc, SWI_CLOCK,
@@ -244,7 +260,8 @@ callout_tick(void)
 	need_softclock = 0;
 	cc = CC_SELF();
 	mtx_lock_spin_flags(&cc->cc_lock, MTX_QUIET);
-	for (; (cc->cc_softticks - ticks) < 0; cc->cc_softticks++) {
+	cc->cc_ticks++;
+	for (; (cc->cc_softticks - cc->cc_ticks) <= 0; cc->cc_softticks++) {
 		bucket = cc->cc_softticks & callwheelmask;
 		if (!TAILQ_EMPTY(&cc->cc_callwheel[bucket])) {
 			need_softclock = 1;
@@ -323,7 +340,7 @@ softclock(void *arg)
 	steps = 0;
 	cc = (struct callout_cpu *)arg;
 	CC_LOCK(cc);
-	while (cc->cc_softticks != ticks) {
+	while (cc->cc_softticks - 1 != cc->cc_ticks) {
 		/*
 		 * cc_softticks may be modified by hard clock, so cache
 		 * it while we work on a given bucket.
@@ -622,7 +639,7 @@ retry:
 	c->c_arg = arg;
 	c->c_flags |= (CALLOUT_ACTIVE | CALLOUT_PENDING);
 	c->c_func = ftn;
-	c->c_time = ticks + to_ticks;
+	c->c_time = cc->cc_ticks + to_ticks;
 	TAILQ_INSERT_TAIL(&cc->cc_callwheel[c->c_time & callwheelmask], 
 			  c, c_links.tqe);
 	CTR5(KTR_CALLOUT, "%sscheduled %p func %p arg %p in %d",

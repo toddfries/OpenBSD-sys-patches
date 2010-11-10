@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/ocpbus.h,v 1.2 2008/03/12 16:32:07 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/ocpbus.h,v 1.3 2009/06/06 09:37:55 raj Exp $
  */
 
 #ifndef _MACHINE_OCPBUS_H_
@@ -42,5 +42,6 @@
 #define	OCPBUS_DEVTYPE_PCIB	5 
 #define	OCPBUS_DEVTYPE_LBC	6
 #define	OCPBUS_DEVTYPE_I2C	7
+#define	OCPBUS_DEVTYPE_SEC	8
 
 #endif /* _MACHINE_OCPBUS_H_ */

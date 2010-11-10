@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.192 2009/02/27 20:00:15 jhb Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.199 2010/05/06 18:43:19 trasz Exp $ */
 /*	$NetBSD: msdosfs_vnops.c,v 1.68 1998/02/10 14:10:04 mrg Exp $	*/
 
 /*-
@@ -61,9 +61,6 @@
 #include <sys/mutex.h>
 #include <sys/namei.h>
 #include <sys/priv.h>
-#include <sys/proc.h>
-#include <sys/resourcevar.h>
-#include <sys/signalvar.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 #include <sys/vnode.h>
@@ -214,7 +211,7 @@ msdosfs_open(ap)
 		int a_mode;
 		struct ucred *a_cred;
 		struct thread *a_td;
-		int a_fdidx;
+		struct file *a_fp;
 	} */ *ap;
 {
 	struct denode *dep = VTODE(ap->a_vp);
@@ -655,7 +652,6 @@ msdosfs_write(ap)
 	struct buf *bp;
 	int ioflag = ap->a_ioflag;
 	struct uio *uio = ap->a_uio;
-	struct thread *td = uio->uio_td;
 	struct vnode *vp = ap->a_vp;
 	struct vnode *thisvp;
 	struct denode *dep = VTODE(vp);
@@ -699,16 +695,8 @@ msdosfs_write(ap)
 	/*
 	 * If they've exceeded their filesize limit, tell them about it.
 	 */
-	if (td != NULL) {
-		PROC_LOCK(td->td_proc);
-		if ((uoff_t)uio->uio_offset + uio->uio_resid >
-		    lim_cur(td->td_proc, RLIMIT_FSIZE)) {
-			psignal(td->td_proc, SIGXFSZ);
-			PROC_UNLOCK(td->td_proc);
-			return (EFBIG);
-		}
-		PROC_UNLOCK(td->td_proc);
-	}
+	if (vn_rlimit_fsize(vp, uio, uio->uio_td))
+		return (EFBIG);
 
 	/*
 	 * If the offset we are starting the write at is beyond the end of
@@ -1072,7 +1060,7 @@ abortit:
 	/*
 	 * If ".." must be changed (ie the directory gets a new
 	 * parent) then the source directory must not be in the
-	 * directory heirarchy above the target, as this would
+	 * directory hierarchy above the target, as this would
 	 * orphan everything below the source directory. Also
 	 * the user must have write permission in the source so
 	 * as to be able to change "..". We must repeat the call
@@ -1287,7 +1275,7 @@ static struct {
 	struct direntry dot;
 	struct direntry dotdot;
 } dosdirtemplate = {
-	{	".       ", "   ",			/* the . entry */
+	{	".          ",				/* the . entry */
 		ATTR_DIRECTORY,				/* file attribute */
 		0,					/* reserved */
 		0, { 0, 0 }, { 0, 0 },			/* create time & date */
@@ -1297,7 +1285,7 @@ static struct {
 		{ 0, 0 },				/* startcluster */
 		{ 0, 0, 0, 0 }				/* filesize */
 	},
-	{	"..      ", "   ",			/* the .. entry */
+	{	"..         ",				/* the .. entry */
 		ATTR_DIRECTORY,				/* file attribute */
 		0,					/* reserved */
 		0, { 0, 0 }, { 0, 0 },			/* create time & date */
@@ -1468,14 +1456,12 @@ msdosfs_rmdir(ap)
 	 * the name cache.
 	 */
 	cache_purge(dvp);
-	VOP_UNLOCK(dvp, 0);
 	/*
 	 * Truncate the directory that is being deleted.
 	 */
 	error = detrunc(ip, (u_long)0, IO_SYNC, cnp->cn_cred, td);
 	cache_purge(vp);
 
-	vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 out:
 	return (error);
 }
@@ -1729,7 +1715,7 @@ msdosfs_readdir(ap)
 			} else
 				dirbuf.d_fileno = (uint32_t)fileno;
 
-			if (chksum != winChksum(dentp)) {
+			if (chksum != winChksum(dentp->deName)) {
 				dirbuf.d_namlen = dos2unixfn(dentp->deName,
 				    (u_char *)dirbuf.d_name,
 				    dentp->deLowerCase |

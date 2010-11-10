@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/ia64/genassym.c,v 1.44 2006/11/18 21:48:13 marcel Exp $
+ * $FreeBSD: src/sys/ia64/ia64/genassym.c,v 1.47 2010/03/11 14:49:06 nwhitehorn Exp $
  */
 
 #include "opt_compat.h"
@@ -61,8 +61,8 @@
 #include <net/if.h>
 #include <netinet/in.h>
 
-#ifdef COMPAT_IA32
-ASSYM(COMPAT_IA32,	COMPAT_IA32);
+#ifdef COMPAT_FREEBSD32
+ASSYM(COMPAT_FREEBSD32,	COMPAT_FREEBSD32);
 #endif
 
 ASSYM(DT_NULL,		DT_NULL);
@@ -91,8 +91,7 @@ ASSYM(MC_SPECIAL_RNAT,	offsetof(mcontext_t, mc_special.rnat));
 ASSYM(PAGE_SHIFT,	PAGE_SHIFT);
 ASSYM(PAGE_SIZE,	PAGE_SIZE);
 
-ASSYM(PC_CPUID,		offsetof(struct pcpu, pc_cpuid));
-ASSYM(PC_CURRENT_PMAP,	offsetof(struct pcpu, pc_current_pmap));
+ASSYM(PC_CURRENT_PMAP,	offsetof(struct pcpu, pc_md.current_pmap));
 ASSYM(PC_CURTHREAD,	offsetof(struct pcpu, pc_curthread));
 ASSYM(PC_IDLETHREAD,	offsetof(struct pcpu, pc_idlethread));
 

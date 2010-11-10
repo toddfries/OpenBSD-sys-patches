@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_int.h,v 1.6 2008/06/16 17:34:59 kib Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_int.h,v 1.9 2010/05/06 19:22:50 kib Exp $
  */
 
 /*
@@ -70,7 +70,7 @@ struct cdev_priv {
 
 #define	cdev2priv(c)	member2struct(cdev_priv, cdp_c, c)
 
-struct cdev *devfs_alloc(void);
+struct cdev *devfs_alloc(int);
 void devfs_free(struct cdev *);
 void devfs_create(struct cdev *dev);
 void devfs_destroy(struct cdev *dev);

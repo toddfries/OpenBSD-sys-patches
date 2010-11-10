@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ia64/common/exec.c,v 1.17 2007/05/27 19:02:46 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ia64/common/exec.c,v 1.18 2010/07/07 19:06:53 marcel Exp $");
 
 #include <stand.h>
 #include <string.h>
@@ -106,11 +106,12 @@ elf64_exec(struct preloaded_file *fp)
 
 	pte = PTE_PRESENT | PTE_MA_WB | PTE_ACCESSED | PTE_DIRTY |
 	    PTE_PL_KERN | PTE_AR_RWX | PTE_ED;
+	pte |= IA64_RR_MASK(hdr->e_entry) & PTE_PPN_MASK;
 
-	__asm __volatile("mov cr.ifa=%0" :: "r"(IA64_RR_BASE(7)));
+	__asm __volatile("mov cr.ifa=%0" :: "r"(hdr->e_entry));
 	__asm __volatile("mov cr.itir=%0" :: "r"(28 << 2));
-	__asm __volatile("ptr.i %0,%1" :: "r"(IA64_RR_BASE(7)), "r"(28<<2));
-	__asm __volatile("ptr.d %0,%1" :: "r"(IA64_RR_BASE(7)), "r"(28<<2));
+	__asm __volatile("ptr.i %0,%1" :: "r"(hdr->e_entry), "r"(28<<2));
+	__asm __volatile("ptr.d %0,%1" :: "r"(hdr->e_entry), "r"(28<<2));
 	__asm __volatile("srlz.i;;");
 	__asm __volatile("itr.i itr[%0]=%1;;" :: "r"(0), "r"(pte));
 	__asm __volatile("srlz.i;;");

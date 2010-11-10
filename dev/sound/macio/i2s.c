@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/macio/i2s.c,v 1.3 2009/02/07 01:15:13 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/sound/macio/i2s.c,v 1.4 2009/06/07 19:12:08 ariff Exp $
  */
 /*-
  * Copyright (c) 2002, 2003 Tsubai Masanari.  All rights reserved.
@@ -72,8 +72,14 @@
 #include <machine/pio.h>
 #include <sys/rman.h>
 #include <dev/ofw/ofw_bus.h>
+
+#ifdef HAVE_KERNEL_OPTION_HEADERS
+#include "opt_snd.h"
+#endif
+
 #include <dev/sound/pcm/sound.h>
 #include <dev/sound/macio/aoa.h>
+
 #include <powerpc/powermac/macgpiovar.h>
 
 struct i2s_softc {
@@ -530,7 +536,7 @@ i2s_setup(struct i2s_softc *sc, u_int rate, u_int wordsize, u_int sclk_fs)
 		 *	to set sane defaults (44100).
 		 */
 		printf("i2s_setup: changing format not supported yet.\n");
-		return (EOPNOTSUPP);
+		return (ENOTSUP);
 
 #ifdef notyet
 		if (obio_fcr_isset(OBIO_FCR1, I2S0CLKEN)) {

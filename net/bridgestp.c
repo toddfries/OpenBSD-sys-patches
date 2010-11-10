@@ -35,9 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.44 2009/02/27 14:12:05 bz Exp $");
-
-#include "opt_route.h"
+__FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.51 2009/08/23 20:40:19 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,14 +49,12 @@ __FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.44 2009/02/27 14:12:05 bz Exp $"
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/taskqueue.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_llc.h>
 #include <net/if_media.h>
-#include <net/route.h>
 #include <net/vnet.h>
 
 #include <netinet/in.h>
@@ -70,7 +66,7 @@ __FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.44 2009/02/27 14:12:05 bz Exp $"
 #ifdef	BRIDGESTP_DEBUG
 #define	DPRINTF(fmt, arg...)	printf("bstp: " fmt, ##arg)
 #else
-#define	DPRINTF(fmt, arg...)
+#define	DPRINTF(fmt, arg...)	(void)0
 #endif
 
 #define	PV2ADDR(pv, eaddr)	do {		\
@@ -98,7 +94,6 @@ static void	bstp_decode_bpdu(struct bstp_port *, struct bstp_cbpdu *,
 		    struct bstp_config_unit *);
 static void	bstp_send_bpdu(struct bstp_state *, struct bstp_port *,
 		    struct bstp_cbpdu *);
-static void	bstp_enqueue(struct ifnet *, struct mbuf *);
 static int	bstp_pdu_flags(struct bstp_port *);
 static void	bstp_received_stp(struct bstp_state *, struct bstp_port *,
 		    struct mbuf **, struct bstp_tbpdu *);
@@ -262,7 +257,7 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	memcpy(mtod(m, caddr_t) + sizeof(*eh), &bpdu, sizeof(bpdu));
 
 	bp->bp_txcount++;
-	bstp_enqueue(ifp, m);
+	ifp->if_transmit(ifp, m);
 }
 
 static void
@@ -391,18 +386,7 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	m->m_len = m->m_pkthdr.len;
 
 	bp->bp_txcount++;
-	bstp_enqueue(ifp, m);
-}
-
-static void
-bstp_enqueue(struct ifnet *dst_ifp, struct mbuf *m)
-{
-	int err = 0;
-
-	IFQ_ENQUEUE(&dst_ifp->if_snd, m, err);
-
-	if ((dst_ifp->if_drv_flags & IFF_DRV_OACTIVE) == 0)
-		(*dst_ifp->if_start)(dst_ifp);
+	ifp->if_transmit(ifp, m);
 }
 
 static int
@@ -2021,7 +2005,6 @@ bstp_same_bridgeid(uint64_t id1, uint64_t id2)
 void
 bstp_reinit(struct bstp_state *bs)
 {
-	INIT_VNET_NET(curvnet);
 	struct bstp_port *bp;
 	struct ifnet *ifp, *mif;
 	u_char *e_addr;
@@ -2036,7 +2019,7 @@ bstp_reinit(struct bstp_state *bs)
 	 * not need to be part of the bridge, it just needs to be a unique
 	 * value.
 	 */
-	IFNET_RLOCK();
+	IFNET_RLOCK_NOSLEEP();
 	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		if (ifp->if_type != IFT_ETHER)
 			continue;
@@ -2053,7 +2036,7 @@ bstp_reinit(struct bstp_state *bs)
 			continue;
 		}
 	}
-	IFNET_RUNLOCK();
+	IFNET_RUNLOCK_NOSLEEP();
 
 	if (LIST_EMPTY(&bs->bs_bplist) || mif == NULL) {
 		/* Set the bridge and root id (lower bits) to zero */

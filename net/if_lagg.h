@@ -15,7 +15,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/net/if_lagg.h,v 1.11 2007/10/12 03:03:16 thompsa Exp $
+ * $FreeBSD: src/sys/net/if_lagg.h,v 1.13 2010/02/06 13:49:35 eri Exp $
  */
 
 #ifndef _NET_LAGG_H
@@ -198,6 +198,10 @@ struct lagg_softc {
 	void	(*sc_lladdr)(struct lagg_softc *);
 	void	(*sc_req)(struct lagg_softc *, caddr_t);
 	void	(*sc_portreq)(struct lagg_port *, caddr_t);
+#if __FreeBSD_version >= 800000
+	eventhandler_tag vlan_attach;
+	eventhandler_tag vlan_detach;
+#endif
 };
 
 struct lagg_port {
@@ -218,7 +222,7 @@ struct lagg_port {
 	/* Redirected callbacks */
 	int	(*lp_ioctl)(struct ifnet *, u_long, caddr_t);
 	int	(*lp_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
-		     struct rtentry *);
+		     struct route *);
 
 	SLIST_ENTRY(lagg_port)		lp_entries;
 };

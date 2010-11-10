@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)libkern.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/sys/libkern.h,v 1.60 2009/02/14 11:34:57 rrs Exp $
+ * $FreeBSD: src/sys/sys/libkern.h,v 1.61 2010/06/02 17:27:23 raj Exp $
  */
 
 #ifndef _SYS_LIBKERN_H_
@@ -92,6 +92,7 @@ int	 flsl(long);
 int	 fnmatch(const char *, const char *, int);
 void	 gets(char *, size_t, int);
 int	 locc(int, char *, u_int);
+void	*memchr(const void *s, int c, size_t n);
 int	 memcmp(const void *b1, const void *b2, size_t len);
 void	 qsort(void *base, size_t nmemb, size_t size,
 	    int (*compar)(const void *, const void *));

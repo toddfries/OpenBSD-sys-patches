@@ -28,12 +28,7 @@
  *
  * from: svr4_util.h,v 1.5 1994/11/18 02:54:31 christos Exp
  * from: linux_util.h,v 1.2 1995/03/05 23:23:50 fvdl Exp
- * $FreeBSD: src/sys/compat/linux/linux_util.h,v 1.30 2008/04/08 09:45:47 kib Exp $
- */
-
-/*
- * This file is pretty much the same as Christos' svr4_util.h
- * (for now).
+ * $FreeBSD: src/sys/compat/linux/linux_util.h,v 1.32 2010/10/14 19:30:44 kib Exp $
  */
 
 #ifndef	_LINUX_UTIL_H_
@@ -105,5 +100,34 @@ char	*linux_driver_get_name_dev(device_t dev);
 int	linux_driver_get_major_minor(char *node, int *major, int *minor);
 char	*linux_get_char_devices(void);
 void	linux_free_get_char_devices(char *string);
+
+#if defined(KTR)
+
+#define	KTR_LINUX				KTR_SUBSYS
+#define	LINUX_CTRFMT(nm, fmt)	#nm"("fmt")"
+
+#define	LINUX_CTR6(f, m, p1, p2, p3, p4, p5, p6) do {			\
+	if (ldebug(f))							\
+		CTR6(KTR_LINUX, LINUX_CTRFMT(f, m),			\
+		    p1, p2, p3, p4, p5, p6);				\
+} while (0)
+
+#define	LINUX_CTR(f)			LINUX_CTR6(f, "", 0, 0, 0, 0, 0, 0)
+#define	LINUX_CTR0(f, m)		LINUX_CTR6(f, m, 0, 0, 0, 0, 0, 0)
+#define	LINUX_CTR1(f, m, p1)		LINUX_CTR6(f, m, p1, 0, 0, 0, 0, 0)
+#define	LINUX_CTR2(f, m, p1, p2)	LINUX_CTR6(f, m, p1, p2, 0, 0, 0, 0)
+#define	LINUX_CTR3(f, m, p1, p2, p3)	LINUX_CTR6(f, m, p1, p2, p3, 0, 0, 0)
+#define	LINUX_CTR4(f, m, p1, p2, p3, p4)	LINUX_CTR6(f, m, p1, p2, p3, p4, 0, 0)
+#define	LINUX_CTR5(f, m, p1, p2, p3, p4, p5)	LINUX_CTR6(f, m, p1, p2, p3, p4, p5, 0)
+#else
+#define	LINUX_CTR(f)
+#define	LINUX_CTR0(f, m)
+#define	LINUX_CTR1(f, m, p1)
+#define	LINUX_CTR2(f, m, p1, p2)
+#define	LINUX_CTR3(f, m, p1, p2, p3)
+#define	LINUX_CTR4(f, m, p1, p2, p3, p4)
+#define	LINUX_CTR5(f, m, p1, p2, p3, p4, p5)
+#define	LINUX_CTR6(f, m, p1, p2, p3, p4, p5, p6)
+#endif
 
 #endif /* !_LINUX_UTIL_H_ */

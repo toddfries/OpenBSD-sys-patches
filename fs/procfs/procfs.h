@@ -33,12 +33,13 @@
  *	@(#)procfs.h	8.9 (Berkeley) 5/14/95
  *
  * From:
- * $FreeBSD: src/sys/fs/procfs/procfs.h,v 1.47 2005/01/06 18:10:40 imp Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs.h,v 1.48 2009/09/23 12:08:08 kib Exp $
  */
 
 #ifdef _KERNEL
 
 int	 procfs_docurproc(PFS_FILL_ARGS);
+int	 procfs_doosrel(PFS_FILL_ARGS);
 int	 procfs_doproccmdline(PFS_FILL_ARGS);
 int	 procfs_doprocctl(PFS_FILL_ARGS);
 int	 procfs_doprocdbregs(PFS_FILL_ARGS);

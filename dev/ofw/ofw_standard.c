@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ofw/ofw_standard.c,v 1.1 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ofw/ofw_standard.c,v 1.9 2010/05/28 10:43:56 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -65,11 +65,12 @@ __FBSDID("$FreeBSD: src/sys/dev/ofw/ofw_standard.c,v 1.1 2008/12/20 00:33:10 nwh
 
 #include <machine/stdarg.h>
 
-#include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofwvar.h>
+#include <dev/ofw/openfirm.h>
+
 #include "ofw_if.h"
 
-static void ofw_std_init(ofw_t ofw, void *openfirm);
+static int ofw_std_init(ofw_t ofw, void *openfirm);
 static int ofw_std_test(ofw_t ofw, const char *name);
 static int ofw_std_interpret(ofw_t ofw, const char *cmd, int nreturns,
     unsigned long *returns);
@@ -83,8 +84,8 @@ static ssize_t ofw_std_getprop(ofw_t ofw, phandle_t package,
     const char *propname, void *buf, size_t buflen);
 static int ofw_std_nextprop(ofw_t ofw, phandle_t package, const char *previous,
     char *buf, size_t);
-static int ofw_std_setprop(ofw_t ofw, phandle_t package, char *propname,
-    void *buf, size_t len);
+static int ofw_std_setprop(ofw_t ofw, phandle_t package, const char *propname,
+    const void *buf, size_t len);
 static ssize_t ofw_std_canon(ofw_t ofw, const char *device, char *buf,
     size_t len);
 static phandle_t ofw_std_finddevice(ofw_t ofw, const char *device);
@@ -101,7 +102,7 @@ static ssize_t ofw_std_read(ofw_t ofw, ihandle_t instance, void *addr,
     size_t len);
 static ssize_t ofw_std_write(ofw_t ofw, ihandle_t instance, const void *addr,
     size_t len);
-static int ofw_std_seek(ofw_t ofw, ihandle_t instance, u_int64_t pos);
+static int ofw_std_seek(ofw_t ofw, ihandle_t instance, uint64_t pos);
 static caddr_t ofw_std_claim(ofw_t ofw, void *virt, size_t size, u_int align);
 static void ofw_std_release(ofw_t ofw, void *virt, size_t size);
 static void ofw_std_enter(ofw_t ofw);
@@ -147,12 +148,14 @@ OFW_DEF(ofw_std);
 
 static int (*openfirmware)(void *);
 
-/* Initialiser */
+/* Initializer */
 
-static void
+static int
 ofw_std_init(ofw_t ofw, void *openfirm)
 {
+
 	openfirmware = (int (*)(void *))openfirm;
+	return (0);
 }
 
 /*
@@ -163,7 +166,7 @@ ofw_std_init(ofw_t ofw, void *openfirm)
 static int
 ofw_std_test(ofw_t ofw, const char *name)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -185,7 +188,7 @@ static int
 ofw_std_interpret(ofw_t ofw, const char *cmd, int nreturns,
     unsigned long *returns)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -199,12 +202,11 @@ ofw_std_interpret(ofw_t ofw, const char *cmd, int nreturns,
 
 	args.nreturns = ++nreturns;
 	args.slot[i++] = (cell_t)cmd;
-	if (openfirmware(&args) == -1) {
+	if (openfirmware(&args) == -1)
 		return (-1);
-	}
 	status = args.slot[i++];
 	while (i < 1 + nreturns)
-		returns[j] = args.slot[i++];
+		returns[j++] = args.slot[i++];
 	return (status);
 }
 
@@ -216,7 +218,7 @@ ofw_std_interpret(ofw_t ofw, const char *cmd, int nreturns,
 static phandle_t
 ofw_std_peer(ofw_t ofw, phandle_t node)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -238,7 +240,7 @@ ofw_std_peer(ofw_t ofw, phandle_t node)
 static phandle_t
 ofw_std_child(ofw_t ofw, phandle_t node)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -260,7 +262,7 @@ ofw_std_child(ofw_t ofw, phandle_t node)
 static phandle_t
 ofw_std_parent(ofw_t ofw, phandle_t node)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -282,7 +284,7 @@ ofw_std_parent(ofw_t ofw, phandle_t node)
 static phandle_t
 ofw_std_instance_to_package(ofw_t ofw, ihandle_t instance)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -304,7 +306,7 @@ ofw_std_instance_to_package(ofw_t ofw, ihandle_t instance)
 static ssize_t
 ofw_std_getproplen(ofw_t ofw, phandle_t package, const char *propname)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -329,7 +331,7 @@ static ssize_t
 ofw_std_getprop(ofw_t ofw, phandle_t package, const char *propname, void *buf,
     size_t buflen)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -358,7 +360,7 @@ static int
 ofw_std_nextprop(ofw_t ofw, phandle_t package, const char *previous, char *buf,
     size_t size)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -383,10 +385,10 @@ ofw_std_nextprop(ofw_t ofw, phandle_t package, const char *previous, char *buf,
 /* Set the value of a property of a package. */
 /* XXX Has a bug on FirePower */
 static int
-ofw_std_setprop(ofw_t ofw, phandle_t package, char *propname, void *buf,
-    size_t len)
+ofw_std_setprop(ofw_t ofw, phandle_t package, const char *propname,
+    const void *buf, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -414,7 +416,7 @@ ofw_std_setprop(ofw_t ofw, phandle_t package, char *propname, void *buf,
 static ssize_t
 ofw_std_canon(ofw_t ofw, const char *device, char *buf, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -440,7 +442,7 @@ ofw_std_canon(ofw_t ofw, const char *device, char *buf, size_t len)
 static phandle_t
 ofw_std_finddevice(ofw_t ofw, const char *device)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -462,7 +464,7 @@ ofw_std_finddevice(ofw_t ofw, const char *device)
 static ssize_t
 ofw_std_instance_to_path(ofw_t ofw, ihandle_t instance, char *buf, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -488,7 +490,7 @@ ofw_std_instance_to_path(ofw_t ofw, ihandle_t instance, char *buf, size_t len)
 static ssize_t
 ofw_std_package_to_path(ofw_t ofw, phandle_t package, char *buf, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -515,7 +517,7 @@ static int
 ofw_std_call_method(ofw_t ofw, ihandle_t instance, const char *method,
     int nargs, int nreturns, unsigned long *args_and_returns)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -558,7 +560,7 @@ ofw_std_call_method(ofw_t ofw, ihandle_t instance, const char *method,
 static ihandle_t
 ofw_std_open(ofw_t ofw, const char *device)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -571,9 +573,8 @@ ofw_std_open(ofw_t ofw, const char *device)
 	};
 
 	args.device = (cell_t)device;
-	if (openfirmware(&args) == -1 || args.instance == 0) {
+	if (openfirmware(&args) == -1 || args.instance == 0)
 		return (-1);
-	}
 	return (args.instance);
 }
 
@@ -581,7 +582,7 @@ ofw_std_open(ofw_t ofw, const char *device)
 static void
 ofw_std_close(ofw_t ofw, ihandle_t instance)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -589,6 +590,7 @@ ofw_std_close(ofw_t ofw, ihandle_t instance)
 	} args = {
 		(cell_t)"close",
 		1,
+		0,
 	};
 
 	args.instance = instance;
@@ -599,7 +601,7 @@ ofw_std_close(ofw_t ofw, ihandle_t instance)
 static ssize_t
 ofw_std_read(ofw_t ofw, ihandle_t instance, void *addr, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -626,7 +628,7 @@ ofw_std_read(ofw_t ofw, ihandle_t instance, void *addr, size_t len)
 static ssize_t
 ofw_std_write(ofw_t ofw, ihandle_t instance, const void *addr, size_t len)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -650,9 +652,9 @@ ofw_std_write(ofw_t ofw, ihandle_t instance, const void *addr, size_t len)
 
 /* Seek to a position. */
 static int
-ofw_std_seek(ofw_t ofw, ihandle_t instance, u_int64_t pos)
+ofw_std_seek(ofw_t ofw, ihandle_t instance, uint64_t pos)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -682,7 +684,7 @@ ofw_std_seek(ofw_t ofw, ihandle_t instance, u_int64_t pos)
 static caddr_t
 ofw_std_claim(ofw_t ofw, void *virt, size_t size, u_int align)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -708,7 +710,7 @@ ofw_std_claim(ofw_t ofw, void *virt, size_t size, u_int align)
 static void
 ofw_std_release(ofw_t ofw, void *virt, size_t size)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
@@ -717,6 +719,7 @@ ofw_std_release(ofw_t ofw, void *virt, size_t size)
 	} args = {
 		(cell_t)"release",
 		2,
+		0,
 	};
 
 	args.virt = (cell_t)virt;
@@ -732,12 +735,14 @@ ofw_std_release(ofw_t ofw, void *virt, size_t size)
 static void
 ofw_std_enter(ofw_t ofw)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
 	} args = {
 		(cell_t)"enter",
+		0,
+		0,
 	};
 
 	openfirmware(&args);
@@ -748,16 +753,17 @@ ofw_std_enter(ofw_t ofw)
 static void
 ofw_std_exit(ofw_t ofw)
 {
-	static struct {
+	struct {
 		cell_t name;
 		cell_t nargs;
 		cell_t nreturns;
 	} args = {
 		(cell_t)"exit",
+		0,
+		0,
 	};
 
 	openfirmware(&args);
 	for (;;)			/* just in case */
 		;
 }
-

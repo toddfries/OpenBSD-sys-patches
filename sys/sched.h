@@ -56,7 +56,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sched.h,v 1.40 2009/01/17 07:17:57 jeff Exp $
+ * $FreeBSD: src/sys/sys/sched.h,v 1.42 2009/06/25 01:33:51 jeff Exp $
  */
 
 #ifndef _SCHED_H_
@@ -162,18 +162,31 @@ sched_unpin(void)
 
 /* Scheduler stats. */
 #ifdef SCHED_STATS
-extern long sched_switch_stats[SWT_COUNT];
+DPCPU_DECLARE(long, sched_switch_stats[SWT_COUNT]);
 
 #define	SCHED_STAT_DEFINE_VAR(name, ptr, descr)				\
-    SYSCTL_LONG(_kern_sched_stats, OID_AUTO, name, CTLFLAG_RD, ptr, 0, descr)
+static void name ## _add_proc(void *dummy __unused)			\
+{									\
+									\
+	SYSCTL_ADD_PROC(NULL,						\
+	    SYSCTL_STATIC_CHILDREN(_kern_sched_stats), OID_AUTO,	\
+	    #name, CTLTYPE_LONG|CTLFLAG_RD|CTLFLAG_MPSAFE,		\
+	    ptr, 0, sysctl_dpcpu_long, "LU", descr);			\
+}									\
+SYSINIT(name, SI_SUB_RUN_SCHEDULER, SI_ORDER_ANY, name ## _add_proc, NULL);
+
 #define	SCHED_STAT_DEFINE(name, descr)					\
-    unsigned long name;							\
-    SCHED_STAT_DEFINE_VAR(name, &name, descr)
-#define SCHED_STAT_INC(var)     atomic_add_long(&(var), 1)
+    DPCPU_DEFINE(unsigned long, name);					\
+    SCHED_STAT_DEFINE_VAR(name, &DPCPU_NAME(name), descr)
+/*
+ * Sched stats are always incremented in critical sections so no atomic
+ * is necesssary to increment them.
+ */
+#define SCHED_STAT_INC(var)     DPCPU_GET(var)++;
 #else
 #define	SCHED_STAT_DEFINE_VAR(name, descr, ptr)
 #define	SCHED_STAT_DEFINE(name, descr)
-#define SCHED_STAT_INC(var)
+#define SCHED_STAT_INC(var)			(void)0
 #endif
 
 /*

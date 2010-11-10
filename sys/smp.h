@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/sys/smp.h,v 1.88 2008/05/23 04:05:26 jb Exp $
+ * $FreeBSD: src/sys/sys/smp.h,v 1.93 2010/06/11 15:56:18 jhb Exp $
  */
 
 #ifndef _SYS_SMP_H_
@@ -54,7 +54,8 @@ struct cpu_group {
  * Behavior modifiers for load balancing and affinity.
  */
 #define	CG_FLAG_HTT	0x01		/* Schedule the alternate core last. */
-#define	CG_FLAG_THREAD	0x02		/* New age htt, less crippled. */
+#define	CG_FLAG_SMT	0x02		/* New age htt, less crippled. */
+#define	CG_FLAG_THREAD	(CG_FLAG_HTT | CG_FLAG_SMT)	/* Any threading. */
 
 /*
  * Convenience routines for building topologies.
@@ -90,6 +91,44 @@ extern cpumask_t all_cpus;
  */
 #define	CPU_ABSENT(x_cpu)	((all_cpus & (1 << (x_cpu))) == 0)
 
+/*
+ * Macros to iterate over non-absent CPUs.  CPU_FOREACH() takes an
+ * integer iterator and iterates over the available set of CPUs.
+ * CPU_FIRST() returns the id of the first non-absent CPU.  CPU_NEXT()
+ * returns the id of the next non-absent CPU.  It will wrap back to
+ * CPU_FIRST() once the end of the list is reached.  The iterators are
+ * currently implemented via inline functions.
+ */
+#define	CPU_FOREACH(i)							\
+	for ((i) = 0; (i) <= mp_maxid; (i)++)				\
+		if (!CPU_ABSENT((i)))
+
+static __inline int
+cpu_first(void)
+{
+	int i;
+
+	for (i = 0;; i++)
+		if (!CPU_ABSENT(i))
+			return (i);
+}
+
+static __inline int
+cpu_next(int i)
+{
+
+	for (;;) {
+		i++;
+		if (i > mp_maxid)
+			i = 0;
+		if (!CPU_ABSENT(i))
+			return (i);
+	}
+}
+
+#define	CPU_FIRST()	cpu_first()
+#define	CPU_NEXT(i)	cpu_next((i))
+
 #ifdef SMP
 /*
  * Machine dependent functions used to initialize MP support.
@@ -119,9 +158,12 @@ void	cpu_mp_setmaxid(void);
 void	cpu_mp_start(void);
 
 void	forward_signal(struct thread *);
-void	forward_roundrobin(void);
 int	restart_cpus(cpumask_t);
 int	stop_cpus(cpumask_t);
+int	stop_cpus_hard(cpumask_t);
+#if defined(__amd64__)
+int	suspend_cpus(cpumask_t);
+#endif
 void	smp_rendezvous_action(void);
 extern	struct mtx smp_ipi_mtx;
 

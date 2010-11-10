@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp_sis.c,v 1.22 2007/11/12 21:51:37 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp_sis.c,v 1.23 2009/06/11 17:06:07 avg Exp $");
 
 #include "opt_bus.h"
 
@@ -227,11 +227,11 @@ agp_sis_set_aperture(device_t dev, u_int32_t aperture)
 }
 
 static int
-agp_sis_bind_page(device_t dev, int offset, vm_offset_t physical)
+agp_sis_bind_page(device_t dev, vm_offset_t offset, vm_offset_t physical)
 {
 	struct agp_sis_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
 		return EINVAL;
 
 	sc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical;
@@ -239,11 +239,11 @@ agp_sis_bind_page(device_t dev, int offset, vm_offset_t physical)
 }
 
 static int
-agp_sis_unbind_page(device_t dev, int offset)
+agp_sis_unbind_page(device_t dev, vm_offset_t offset)
 {
 	struct agp_sis_softc *sc = device_get_softc(dev);
 
-	if (offset < 0 || offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
+	if (offset >= (sc->gatt->ag_entries << AGP_PAGE_SHIFT))
 		return EINVAL;
 
 	sc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;

@@ -35,10 +35,9 @@
 #if defined(__FreeBSD__)
 #include "opt_inet.h"
 #include "opt_inet6.h"
-#include "opt_route.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.20 2009/02/27 14:12:05 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.25 2009/08/25 19:30:32 mlaier Exp $");
 #endif
 
 #include <sys/param.h>
@@ -55,14 +54,10 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.20 2009/02/27 14:12:05 bz
 #include <sys/device.h>
 #endif
 #include <sys/time.h>
-#ifdef __FreeBSD__
-#include <sys/vimage.h>
-#endif
 
 #include <net/if.h>
 #include <net/if_types.h>
 #ifdef __FreeBSD__
-#include <net/route.h>
 #include <net/vnet.h>
 #endif
 
@@ -117,9 +112,6 @@ void		 pfi_change_group_event(void * __unused, char *);
 void		 pfi_detach_group_event(void * __unused, struct ifg_group *);
 void		 pfi_ifaddr_event(void * __unused, struct ifnet *);
 
-#ifdef VIMAGE_GLOBALS
-extern struct ifgrouphead ifg_head;
-#endif
 #endif
 
 RB_PROTOTYPE(pfi_ifhead, pfi_kif, pfik_tree, pfi_if_compare);
@@ -131,7 +123,6 @@ RB_GENERATE(pfi_ifhead, pfi_kif, pfik_tree, pfi_if_compare);
 void
 pfi_initialize(void)
 {
-	INIT_VNET_NET(curvnet);
 
 	if (pfi_all != NULL)	/* already initialized */
 		return;
@@ -672,7 +663,7 @@ pfi_address_add(struct sockaddr *sa, int af, int net)
 			    "(%d/%d)\n", pfi_buffer_cnt, PFI_BUFFER_MAX);
 			return;
 		}
-		memcpy(pfi_buffer, p, pfi_buffer_cnt * sizeof(*pfi_buffer));
+		memcpy(p, pfi_buffer, pfi_buffer_max * sizeof(*pfi_buffer));
 		/* no need to zero buffer */
 		free(pfi_buffer, PFI_MTYPE);
 		pfi_buffer = p;

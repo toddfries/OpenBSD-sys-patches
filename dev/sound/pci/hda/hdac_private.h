@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pci/hda/hdac_private.h,v 1.10 2008/11/23 20:03:58 mav Exp $
+ * $FreeBSD: src/sys/dev/sound/pci/hda/hdac_private.h,v 1.12 2010/01/11 22:57:52 mav Exp $
  */
 
 #ifndef _HDAC_PRIVATE_H_
@@ -221,6 +221,7 @@ struct hdac_audio_as {
 	u_char pincnt;
 	u_char fakeredir;
 	u_char digital;
+	uint16_t pinset;
 	nid_t hpredir;
 	nid_t pins[16];
 	nid_t dacs[16];
@@ -281,7 +282,7 @@ struct hdac_chan {
 	struct hdac_devinfo *devinfo;
 	struct hdac_pcm_devinfo *pdevinfo;
 	struct hdac_dma	bdl_dma;
-	uint32_t spd, fmt, fmtlist[8], pcmrates[16];
+	uint32_t spd, fmt, fmtlist[16], pcmrates[16];
 	uint32_t supp_stream_formats, supp_pcm_size_rate;
 	uint32_t ptr, prevptr, blkcnt, blksz;
 	uint32_t *dmapos;
@@ -339,6 +340,7 @@ struct hdac_softc {
 	int		num_iss;
 	int		num_oss;
 	int		num_bss;
+	int		num_sdo;
 	int		support_64bit;
 	int		streamcnt;
 

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/include/elf.h,v 1.16 2008/12/17 06:56:58 imp Exp $
+ * $FreeBSD: src/sys/ia64/include/elf.h,v 1.19 2010/03/11 14:49:06 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_ELF_H_
@@ -43,6 +43,7 @@
 #include <sys/elf_generic.h>
 
 #define	ELF_ARCH	EM_IA_64
+#define	ELF_ARCH32	EM_386
 
 #define	ELF_MACHINE_OK(x) ((x) == EM_IA_64)
 
@@ -82,16 +83,14 @@ __ElfType(Auxinfo);
 #define	AT_BASE		7	/* Interpreter's base address. */
 #define	AT_FLAGS	8	/* Flags (unused for i386). */
 #define	AT_ENTRY	9	/* Where interpreter should transfer control. */
-/*
- * The following non-standard values are used in Linux ELF binaries.
- */
 #define	AT_NOTELF	10	/* Program is not ELF ?? */
 #define	AT_UID		11	/* Real uid. */
 #define	AT_EUID		12	/* Effective uid. */
 #define	AT_GID		13	/* Real gid. */
 #define	AT_EGID		14	/* Effective gid. */
+#define	AT_EXECPATH	15	/* Path to the executable. */
 
-#define	AT_COUNT	15	/* Count of defined aux entry types. */
+#define	AT_COUNT	16	/* Count of defined aux entry types. */
 
 /*
  * Values for e_flags.
@@ -142,5 +141,7 @@ __ElfType(Auxinfo);
 /* Processor specific dynmamic section tags. */
 
 #define	DT_IA_64_PLT_RESERVE	0x70000000
+
+#define	ET_DYN_LOAD_ADDR 0x2500000000000000
 
 #endif /* !_MACHINE_ELF_H_ */

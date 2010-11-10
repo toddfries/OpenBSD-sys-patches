@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sx.h,v 1.39 2008/08/13 09:20:52 ed Exp $
+ * $FreeBSD: src/sys/sys/sx.h,v 1.43 2009/09/30 13:26:31 attilio Exp $
  */
 
 #ifndef	_SYS_SX_H_
@@ -38,6 +38,7 @@
 #ifdef	_KERNEL
 #include <sys/pcpu.h>
 #include <sys/lock_profile.h>
+#include <sys/lockstat.h>
 #include <machine/atomic.h>
 #endif
 
@@ -62,13 +63,6 @@
  *
  * When the lock is not locked by any thread, it is encoded as a
  * shared lock with zero waiters.
- *
- * A note about memory barriers.  Exclusive locks need to use the same
- * memory barriers as mutexes: _acq when acquiring an exclusive lock
- * and _rel when releasing an exclusive lock.  On the other side,
- * shared lock needs to use an _acq barrier when acquiring the lock
- * but, since they don't update any locked data, no memory barrier is
- * needed when releasing a shared lock.
  */
 
 #define	SX_LOCK_SHARED			0x01
@@ -152,9 +146,9 @@ __sx_xlock(struct sx *sx, struct thread *td, int opts, const char *file,
 
 	if (!atomic_cmpset_acq_ptr(&sx->sx_lock, SX_LOCK_UNLOCKED, tid))
 		error = _sx_xlock_hard(sx, tid, opts, file, line);
-	else
-		lock_profile_obtain_lock_success(&sx->lock_object, 0, 0, file,
-		    line);
+	else 
+		LOCKSTAT_PROFILE_OBTAIN_LOCK_SUCCESS(LS_SX_XLOCK_ACQUIRE,
+		    sx, 0, 0, file, line);
 
 	return (error);
 }
@@ -180,8 +174,8 @@ __sx_slock(struct sx *sx, int opts, const char *file, int line)
 	    !atomic_cmpset_acq_ptr(&sx->sx_lock, x, x + SX_ONE_SHARER))
 		error = _sx_slock_hard(sx, opts, file, line);
 	else
-		lock_profile_obtain_lock_success(&sx->lock_object, 0, 0, file,
-		    line);
+		LOCKSTAT_PROFILE_OBTAIN_LOCK_SUCCESS(LS_SX_SLOCK_ACQUIRE, sx, 0,
+		    0, file, line);
 
 	return (error);
 }
@@ -199,7 +193,7 @@ __sx_sunlock(struct sx *sx, const char *file, int line)
 	uintptr_t x = sx->sx_lock;
 
 	if (x == (SX_SHARERS_LOCK(1) | SX_LOCK_EXCLUSIVE_WAITERS) ||
-	    !atomic_cmpset_ptr(&sx->sx_lock, x, x - SX_ONE_SHARER))
+	    !atomic_cmpset_rel_ptr(&sx->sx_lock, x, x - SX_ONE_SHARER))
 		_sx_sunlock_hard(sx, file, line);
 }
 
@@ -264,7 +258,7 @@ __sx_sunlock(struct sx *sx, const char *file, int line)
 #define	SX_NOPROFILE		0x02
 #define	SX_NOWITNESS		0x04
 #define	SX_QUIET		0x08
-#define	SX_ADAPTIVESPIN		0x10
+#define	SX_NOADAPTIVE		0x10
 #define	SX_RECURSE		0x20
 
 /*
@@ -292,7 +286,7 @@ __sx_sunlock(struct sx *sx, const char *file, int line)
 #ifdef INVARIANTS
 #define	sx_assert(sx, what)	_sx_assert((sx), (what), LOCK_FILE, LOCK_LINE)
 #else
-#define	sx_assert(sx, what)
+#define	sx_assert(sx, what)	(void)0
 #endif
 
 #endif /* _KERNEL */

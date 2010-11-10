@@ -30,7 +30,7 @@
 /*	$KAME: sctp6_usrreq.c,v 1.38 2005/08/24 08:08:56 suz Exp $	*/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/sctp6_usrreq.c,v 1.48 2009/02/03 11:04:03 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/sctp6_usrreq.c,v 1.50 2010/04/03 15:40:14 tuexen Exp $");
 
 #include <netinet/sctp_os.h>
 #include <sys/proc.h>
@@ -223,7 +223,7 @@ sctp_skip_csum:
 	 */
 	if (in6p_ip && (ipsec6_in_reject(m, in6p_ip))) {
 /* XXX */
-		MODULE_GLOBAL(MOD_IPSEC, ipsec6stat).in_polvio++;
+		MODULE_GLOBAL(ipsec6stat).in_polvio++;
 		goto bad;
 	}
 #endif				/* IPSEC */
@@ -695,7 +695,7 @@ sctp6_attach(struct socket *so, int proto, struct thread *p)
 	 * socket as well, because the socket may be bound to an IPv6
 	 * wildcard address, which may match an IPv4-mapped IPv6 address.
 	 */
-	inp6->inp_ip_ttl = MODULE_GLOBAL(MOD_INET, ip_defttl);
+	inp6->inp_ip_ttl = MODULE_GLOBAL(ip_defttl);
 #endif
 	/*
 	 * Hmm what about the IPSEC stuff that is missing here but in
@@ -859,7 +859,7 @@ sctp6_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *addr,
 		}
 	}
 	if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-		if (!MODULE_GLOBAL(MOD_INET6, ip6_v6only)) {
+		if (!MODULE_GLOBAL(ip6_v6only)) {
 			struct sockaddr_in sin;
 
 			/* convert v4-mapped into v4 addr and send */
@@ -990,7 +990,7 @@ sctp6_connect(struct socket *so, struct sockaddr *addr, struct thread *p)
 		}
 	}
 	if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-		if (!MODULE_GLOBAL(MOD_INET6, ip6_v6only)) {
+		if (!MODULE_GLOBAL(ip6_v6only)) {
 			/* convert v4-mapped into v4 addr */
 			in6_sin6_2_sin((struct sockaddr_in *)&ss, sin6);
 			addr = (struct sockaddr *)&ss;
@@ -1033,7 +1033,7 @@ sctp6_connect(struct socket *so, struct sockaddr *addr, struct thread *p)
 		return (EALREADY);
 	}
 	/* We are GOOD to go */
-	stcb = sctp_aloc_assoc(inp, addr, 1, &error, 0, vrf_id, p);
+	stcb = sctp_aloc_assoc(inp, addr, &error, 0, vrf_id, p);
 	SCTP_ASOC_CREATE_UNLOCK(inp);
 	if (stcb == NULL) {
 		/* Gak! no memory */

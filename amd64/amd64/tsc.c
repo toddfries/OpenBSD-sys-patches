@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/tsc.c,v 1.209 2008/10/21 00:38:00 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/tsc.c,v 1.210 2010/08/08 20:34:53 dwmalone Exp $");
 
 #include "opt_clock.h"
 
@@ -222,7 +222,7 @@ sysctl_machdep_tsc_freq(SYSCTL_HANDLER_ARGS)
 }
 
 SYSCTL_PROC(_machdep, OID_AUTO, tsc_freq, CTLTYPE_QUAD | CTLFLAG_RW,
-    0, sizeof(u_int), sysctl_machdep_tsc_freq, "QU", "");
+    0, 0, sysctl_machdep_tsc_freq, "QU", "");
 
 static unsigned
 tsc_get_timecount(struct timecounter *tc)

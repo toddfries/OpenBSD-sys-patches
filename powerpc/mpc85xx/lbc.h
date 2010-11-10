@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/mpc85xx/lbc.h,v 1.2 2008/12/18 18:27:12 raj Exp $
+ * $FreeBSD: src/sys/powerpc/mpc85xx/lbc.h,v 1.3 2009/07/21 08:38:45 raj Exp $
  */
 
 #ifndef _MACHINE_LBC_H_
@@ -39,10 +39,10 @@
 #define	LBC_DEVTYPE_RTC		2
 
 /* Local access registers */
-#define	LBC85XX_BR(n)	(OCP85XX_LBC_OFF + (8 * n))
-#define	LBC85XX_OR(n)	(OCP85XX_LBC_OFF + 4 + (8 * n))
-#define	LBC85XX_LBCR	(OCP85XX_LBC_OFF + 0xd0)
-#define	LBC85XX_LCRR	(OCP85XX_LBC_OFF + 0xd4)
+#define	LBC85XX_BR(n)	(8 * n)
+#define	LBC85XX_OR(n)	(4 + (8 * n))
+#define	LBC85XX_LBCR	(0xd0)
+#define	LBC85XX_LCRR	(0xd4)
 
 /* LBC machine select */
 #define	LBCRES_MSEL_GPCM	0

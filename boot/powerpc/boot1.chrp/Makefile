@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/powerpc/boot1.chrp/Makefile,v 1.1 2008/10/14 03:32:41 nwhitehorn Exp $
+# $FreeBSD: src/sys/boot/powerpc/boot1.chrp/Makefile,v 1.2 2010/07/12 00:49:22 nwhitehorn Exp $
 
 WITHOUT_SSP=
 
@@ -13,7 +13,7 @@ SRCS=		boot1.c ashldi3.c
 INTERNALPROG=
 NO_MAN=
 
-CFLAGS= -ffreestanding -msoft-float -Os -D_KERNEL \
+CFLAGS= -ffreestanding -msoft-float -Os \
 	-I${.CURDIR}/../../common -I${.CURDIR}/../../../
 LDFLAGS=-nostdlib -static -N
 

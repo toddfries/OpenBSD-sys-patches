@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia32/ia32_signal.c,v 1.11 2006/10/06 19:33:44 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia32/ia32_signal.c,v 1.12 2010/03/25 14:24:00 nwhitehorn Exp $");
 
 #include "opt_compat.h"
 
@@ -120,7 +120,7 @@ freebsd32_sigreturn(struct thread *td, struct freebsd32_sigreturn_args *uap)
 
 
 void
-ia32_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
+ia32_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *tf = td->td_frame;
 	vm_offset_t gdt, ldt;
@@ -129,7 +129,7 @@ ia32_setregs(struct thread *td, u_long entry, u_long stack, u_long ps_strings)
 	struct segment_descriptor desc;
 	struct vmspace *vmspace = td->td_proc->p_vmspace;
 
-	exec_setregs(td, entry, stack, ps_strings);
+	exec_setregs(td, imgp, stack);
 
 	/* Non-syscall frames are cleared by exec_setregs() */
 	if (tf->tf_flags & FRAME_SYSCALL) {

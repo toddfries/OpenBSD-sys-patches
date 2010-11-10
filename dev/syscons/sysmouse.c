@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/syscons/sysmouse.c,v 1.33 2008/11/08 20:40:39 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/syscons/sysmouse.c,v 1.35 2009/11/28 16:25:55 ed Exp $");
 
 #include "opt_syscons.h"
 
@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/dev/syscons/sysmouse.c,v 1.33 2008/11/08 20:40:39 ed
 #include <sys/priv.h>
 #include <sys/serial.h>
 #include <sys/tty.h>
+#include <sys/ttydefaults.h>
 #include <sys/kernel.h>
 #include <sys/consio.h>
 #include <sys/mouse.h>
@@ -164,7 +165,7 @@ static struct ttydevsw smdev_ttydevsw = {
 static void
 sm_attach_mouse(void *unused)
 {
-	sysmouse_tty = tty_alloc(&smdev_ttydevsw, NULL, NULL);
+	sysmouse_tty = tty_alloc(&smdev_ttydevsw, NULL);
 	tty_makedev(sysmouse_tty, NULL, "sysmouse");
 }
 

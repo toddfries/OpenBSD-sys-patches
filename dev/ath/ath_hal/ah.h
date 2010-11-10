@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ah.h,v 1.6 2009/02/24 01:07:06 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah.h,v 1.14 2010/06/01 15:33:10 rpaulo Exp $
  */
 
 #ifndef _ATH_AH_H_
@@ -109,6 +109,8 @@ typedef enum {
 	HAL_CAP_RXTSTAMP_PREC	= 34,	/* rx desc tstamp precision (bits) */
 	HAL_CAP_BB_HANG		= 35,	/* can baseband hang */
 	HAL_CAP_MAC_HANG	= 36,	/* can MAC hang */
+	HAL_CAP_INTRMASK	= 37,	/* bitmask of supported interrupts */
+	HAL_CAP_BSSIDMATCH	= 38,	/* hardware has disable bssid match */
 } HAL_CAPABILITY_TYPE;
 
 /* 
@@ -295,6 +297,7 @@ typedef enum {
 	HAL_RX_FILTER_PHYERR	= 0x00000100,	/* Allow phy errors */
 	HAL_RX_FILTER_PHYRADAR	= 0x00000200,	/* Allow phy radar errors */
 	HAL_RX_FILTER_COMPBAR	= 0x00000400,	/* Allow compressed BAR */
+	HAL_RX_FILTER_BSSID	= 0x00000800,	/* Disable BSSID match */
 } HAL_RX_FILTER;
 
 typedef enum {
@@ -321,19 +324,21 @@ typedef enum {
 	HAL_INT_RXORN	= 0x00000020,
 	HAL_INT_TX	= 0x00000040,	/* Non-common mapping */
 	HAL_INT_TXDESC	= 0x00000080,
+	HAL_INT_TIM_TIMER= 0x00000100,
 	HAL_INT_TXURN	= 0x00000800,
 	HAL_INT_MIB	= 0x00001000,
 	HAL_INT_RXPHY	= 0x00004000,
 	HAL_INT_RXKCM	= 0x00008000,
 	HAL_INT_SWBA	= 0x00010000,
 	HAL_INT_BMISS	= 0x00040000,
-	HAL_INT_BNR	= 0x00100000,	/* Non-common mapping */
+	HAL_INT_BNR	= 0x00100000,
 	HAL_INT_TIM	= 0x00200000,	/* Non-common mapping */
 	HAL_INT_DTIM	= 0x00400000,	/* Non-common mapping */
 	HAL_INT_DTIMSYNC= 0x00800000,	/* Non-common mapping */
 	HAL_INT_GPIO	= 0x01000000,
 	HAL_INT_CABEND	= 0x02000000,	/* Non-common mapping */
 	HAL_INT_TSFOOR	= 0x04000000,	/* Non-common mapping */
+	HAL_INT_TBTT	= 0x08000000,	/* Non-common mapping */
 	HAL_INT_CST	= 0x10000000,	/* Non-common mapping */
 	HAL_INT_GTT	= 0x20000000,	/* Non-common mapping */
 	HAL_INT_FATAL	= 0x40000000,	/* Non-common mapping */
@@ -341,20 +346,22 @@ typedef enum {
 	HAL_INT_BMISC	= HAL_INT_TIM
 			| HAL_INT_DTIM
 			| HAL_INT_DTIMSYNC
-			| HAL_INT_CABEND,
+			| HAL_INT_CABEND
+			| HAL_INT_TBTT,
 
 	/* Interrupt bits that map directly to ISR/IMR bits */
 	HAL_INT_COMMON  = HAL_INT_RXNOFRM
 			| HAL_INT_RXDESC
 			| HAL_INT_RXEOL
 			| HAL_INT_RXORN
-			| HAL_INT_TXURN
 			| HAL_INT_TXDESC
+			| HAL_INT_TXURN
 			| HAL_INT_MIB
 			| HAL_INT_RXPHY
 			| HAL_INT_RXKCM
 			| HAL_INT_SWBA
 			| HAL_INT_BMISS
+			| HAL_INT_BNR
 			| HAL_INT_GPIO,
 } HAL_INT;
 
@@ -598,8 +605,6 @@ struct ieee80211_channel;
  */
 struct ath_hal {
 	uint32_t	ah_magic;	/* consistency check magic number */
-	uint32_t	ah_abi;		/* HAL ABI version */
-#define	HAL_ABI_VERSION	0x08112800	/* YYMMDDnn */
 	uint16_t	ah_devid;	/* PCI device ID */
 	uint16_t	ah_subvendorid;	/* PCI subvendor ID */
 	HAL_SOFTC	ah_sc;		/* back pointer to driver/os state */
@@ -634,7 +639,11 @@ struct ath_hal {
 			HAL_BOOL longCal, HAL_BOOL *isCalDone);
 	HAL_BOOL  __ahdecl(*ah_resetCalValid)(struct ath_hal *,
 			const struct ieee80211_channel *);
+	HAL_BOOL  __ahdecl(*ah_setTxPower)(struct ath_hal *,
+	    		const struct ieee80211_channel *, uint16_t *);
 	HAL_BOOL  __ahdecl(*ah_setTxPowerLimit)(struct ath_hal *, uint32_t);
+	HAL_BOOL  __ahdecl(*ah_setBoardValues)(struct ath_hal *,
+	    		const struct ieee80211_channel *);
 
 	/* Transmit functions */
 	HAL_BOOL  __ahdecl(*ah_updateTxTrigLevel)(struct ath_hal*,

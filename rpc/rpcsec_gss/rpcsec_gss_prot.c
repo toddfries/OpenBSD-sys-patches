@@ -36,7 +36,7 @@
 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/rpcsec_gss/rpcsec_gss_prot.c,v 1.1 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/rpcsec_gss/rpcsec_gss_prot.c,v 1.2 2010/01/08 23:26:10 brooks Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -307,7 +307,7 @@ xdr_rpc_gss_unwrap_data(struct mbuf **resultsp,
 }
 
 #ifdef DEBUG
-#include <ctype.h>
+#include <machine/stdarg.h>
 
 void
 rpc_gss_log_debug(const char *fmt, ...)
@@ -315,9 +315,9 @@ rpc_gss_log_debug(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	fprintf(stderr, "rpcsec_gss: ");
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
+	printf("rpcsec_gss: ");
+	vprintf(fmt, ap);
+	printf("\n");
 	va_end(ap);
 }
 
@@ -328,7 +328,7 @@ rpc_gss_log_status(const char *m, gss_OID mech, OM_uint32 maj_stat, OM_uint32 mi
 	gss_buffer_desc msg;
 	int msg_ctx = 0;
 
-	fprintf(stderr, "rpcsec_gss: %s: ", m);
+	printf("rpcsec_gss: %s: ", m);
 	
 	gss_display_status(&min, maj_stat, GSS_C_GSS_CODE, GSS_C_NULL_OID,
 			   &msg_ctx, &msg);

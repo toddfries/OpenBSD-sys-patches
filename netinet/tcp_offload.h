@@ -24,7 +24,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/tcp_offload.h,v 1.5 2008/07/21 21:22:56 kmacy Exp $
+ * $FreeBSD: src/sys/netinet/tcp_offload.h,v 1.6 2009/07/13 11:51:02 lstewart Exp $
  */
 
 #ifndef _NETINET_TCP_OFFLOAD_H_
@@ -182,6 +182,19 @@ struct toe_usrreqs {
 	int (*tu_reset)(struct tcpcb *tp);
 	void (*tu_detach)(struct tcpcb *tp);
 	void (*tu_syncache_event)(int event, void *toep);
+};
+
+/*
+ * Proxy for struct tcpopt between TOE drivers and TCP functions.
+ */
+struct toeopt {
+	u_int64_t	to_flags;	/* see tcpopt in tcp_var.h */
+	u_int16_t	to_mss;		/* maximum segment size */
+	u_int8_t	to_wscale;	/* window scaling */
+
+	u_int8_t	_pad1;		/* explicit pad for 64bit alignment */
+	u_int32_t	_pad2;		/* explicit pad for 64bit alignment */
+	u_int64_t	_pad3[4];	/* TBD */
 };
 
 #define	TOE_SC_ENTRY_PRESENT		1	/* 4-tuple already present */

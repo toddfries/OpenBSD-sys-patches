@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_lockmgr.h,v 1.2 2008/05/15 20:10:06 attilio Exp $
+ * $FreeBSD: src/sys/sys/_lockmgr.h,v 1.3 2009/12/12 21:31:07 attilio Exp $
  */
 
 #ifndef _SYS__LOCKMGR_H_
@@ -38,6 +38,7 @@
 struct lock {
 	struct lock_object	lock_object;
 	volatile uintptr_t	lk_lock;
+	u_int			lk_exslpfail;
 	int			lk_timo;
 	int			lk_pri;
 #ifdef DEBUG_LOCKS

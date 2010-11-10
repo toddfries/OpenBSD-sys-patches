@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/spitfire.c,v 1.8 2008/09/02 21:13:54 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/spitfire.c,v 1.9 2010/02/20 23:24:19 marius Exp $");
 
 #include "opt_pmap.h"
 
@@ -56,7 +56,7 @@ PMAP_STATS_VAR(spitfire_icache_npage_inval_match);
  * Enable the level 1 caches.
  */
 void
-spitfire_cache_enable(void)
+spitfire_cache_enable(u_int cpu_impl __unused)
 {
 	u_long lsu;
 

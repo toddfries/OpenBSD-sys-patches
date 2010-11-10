@@ -32,40 +32,20 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioctl.h	8.6 (Berkeley) 3/28/94
- * $FreeBSD: src/sys/sys/ioctl.h,v 1.16 2008/06/14 10:42:18 ed Exp $
+ * $FreeBSD: src/sys/sys/ioctl.h,v 1.17 2009/05/09 19:01:24 ed Exp $
  */
 
 #ifndef	_SYS_IOCTL_H_
 #define	_SYS_IOCTL_H_
 
 #ifdef _KERNEL
-#ifndef _SYS_CDEFS_H_
-#error this file needs sys/cdefs.h as a prerequisite
-#endif
-#ifdef __CC_SUPPORTS_WARNING
-#warning "Don't #include ioctl.h in the kernel.  Include xxxio.h instead."
-#endif
+#error "Don't #include ioctl.h in the kernel.  Include xxxio.h instead."
 #endif /* _KERNEL */
-
-#include <sys/ttycom.h>
-
-/*
- * Pun for SunOS prior to 3.2.  SunOS 3.2 and later support TIOCGWINSZ
- * and TIOCSWINSZ (yes, even 3.2-3.5, the fact that it wasn't documented
- * notwithstanding).
- */
-struct ttysize {
-	unsigned short	ts_lines;
-	unsigned short	ts_cols;
-	unsigned short	ts_xxx;
-	unsigned short	ts_yyy;
-};
-#define	TIOCGSIZE	TIOCGWINSZ
-#define	TIOCSSIZE	TIOCSWINSZ
 
 #include <sys/ioccom.h>
 
 #include <sys/filio.h>
 #include <sys/sockio.h>
+#include <sys/ttycom.h>
 
 #endif /* !_SYS_IOCTL_H_ */

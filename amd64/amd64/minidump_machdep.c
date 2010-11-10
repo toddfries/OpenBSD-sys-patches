@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/minidump_machdep.c,v 1.9 2008/10/31 10:11:35 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/minidump_machdep.c,v 1.10 2009/05/29 21:27:12 jamie Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,7 +34,6 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/minidump_machdep.c,v 1.9 2008/10/31 10:1
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
 #include <sys/msgbuf.h>
-#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/atomic.h>

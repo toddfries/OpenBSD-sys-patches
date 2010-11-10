@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/busdma_machdep.c,v 1.48 2009/02/08 22:54:58 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/busdma_machdep.c,v 1.51 2010/06/11 03:00:32 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,7 +48,7 @@ __FBSDID("$FreeBSD: src/sys/ia64/ia64/busdma_machdep.c,v 1.48 2009/02/08 22:54:5
 #include <machine/bus.h>
 #include <machine/md_var.h>
 
-#define MAX_BPAGES 256
+#define	MAX_BPAGES	1024
 
 struct bus_dma_tag {
 	bus_dma_tag_t	  parent;
@@ -77,7 +77,7 @@ struct bounce_page {
 	STAILQ_ENTRY(bounce_page) links;
 };
 
-int busdma_swi_pending;
+u_int busdma_swi_pending;
 
 static struct mtx bounce_lock;
 static STAILQ_HEAD(bp_list, bounce_page) bounce_page_list;
@@ -527,7 +527,10 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
-			paddr = pmap_kextract(vaddr);
+			if (pmap != NULL)
+				paddr = pmap_extract(pmap, vaddr);
+			else
+				paddr = pmap_kextract(vaddr);
 			if (run_filter(dmat, paddr, 0) != 0)
 				map->pagesneeded++;
 			vaddr += PAGE_SIZE;
@@ -937,9 +940,7 @@ add_bounce_page(bus_dma_tag_t dmat, bus_dmamap_t map, vm_offset_t vaddr,
 	mtx_unlock(&bounce_lock);
 
 	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
-		/* page offset needs to be preserved */
-		bpage->vaddr &= ~PAGE_MASK;
-		bpage->busaddr &= ~PAGE_MASK;
+		/* Page offset needs to be preserved. */
 		bpage->vaddr |= vaddr & PAGE_MASK;
 		bpage->busaddr |= vaddr & PAGE_MASK;
 	}
@@ -956,6 +957,15 @@ free_bounce_page(bus_dma_tag_t dmat, struct bounce_page *bpage)
 
 	bpage->datavaddr = 0;
 	bpage->datacount = 0;
+	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
+		/*
+		 * Reset the bounce page to start at offset 0.  Other uses
+		 * of this bounce page may need to store a full page of
+		 * data and/or assume it starts on a page boundary.
+		 */
+		bpage->vaddr &= ~PAGE_MASK;
+		bpage->busaddr &= ~PAGE_MASK;
+	}
 
 	mtx_lock(&bounce_lock);
 	STAILQ_INSERT_HEAD(&bounce_page_list, bpage, links);

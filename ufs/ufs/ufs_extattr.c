@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_extattr.c,v 1.95 2009/01/08 12:49:55 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_extattr.c,v 1.96 2009/05/11 15:33:26 attilio Exp $");
 
 #include "opt_ufs.h"
 
@@ -93,8 +93,10 @@ static int	ufs_extattr_set(struct vnode *vp, int attrnamespace,
 		    struct thread *td);
 static int	ufs_extattr_rm(struct vnode *vp, int attrnamespace,
 		    const char *name, struct ucred *cred, struct thread *td);
+#ifdef UFS_EXTATTR_AUTOSTART
 static int	ufs_extattr_autostart_locked(struct mount *mp,
 		    struct thread *td);
+#endif
 static int	ufs_extattr_start_locked(struct ufsmount *ump,
 		    struct thread *td);
 
@@ -478,7 +480,7 @@ ufs_extattr_autostart_locked(struct mount *mp, struct thread *td)
 	 * Does UFS_EXTATTR_FSROOTSUBDIR exist off the filesystem root?
 	 * If so, automatically start EA's.
 	 */
-	error = VFS_ROOT(mp, LK_EXCLUSIVE, &rvp, td);
+	error = VFS_ROOT(mp, LK_EXCLUSIVE, &rvp);
 	if (error) {
 		printf("ufs_extattr_autostart.VFS_ROOT() returned %d\n",
 		    error);
@@ -714,9 +716,10 @@ ufs_extattr_disable(struct ufsmount *ump, int attrnamespace,
  */
 int
 ufs_extattrctl(struct mount *mp, int cmd, struct vnode *filename_vp,
-    int attrnamespace, const char *attrname, struct thread *td)
+    int attrnamespace, const char *attrname)
 {
 	struct ufsmount *ump = VFSTOUFS(mp);
+	struct thread *td = curthread;
 	int error;
 
 	/*

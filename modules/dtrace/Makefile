@@ -1,12 +1,14 @@
-# $FreeBSD: src/sys/modules/dtrace/Makefile,v 1.4 2008/05/31 09:37:40 jb Exp $
+# $FreeBSD: src/sys/modules/dtrace/Makefile,v 1.6 2009/05/26 20:28:22 sson Exp $
 
 .include <bsd.own.mk>
 .include "Makefile.inc"
 
 SUBDIR=		dtmalloc	\
+		dtnfsclient	\
 		dtrace		\
 		dtraceall	\
 		dtrace_test	\
+		lockstat	\
 		profile		\
 		prototype	\
 		sdt		\

@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ah_eeprom_v3.c,v 1.2 2008/12/13 03:47:42 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah_eeprom_v3.c,v 1.5 2009/09/08 13:19:05 phk Exp $
  */
 #include "opt_ah.h"
 
@@ -1759,7 +1759,7 @@ legacyEepromDetach(struct ath_hal *ah)
 	HAL_EEPROM *ee = AH_PRIVATE(ah)->ah_eeprom;
 
         if (ee->ee_version >= AR_EEPROM_VER4_0 && ee->ee_eepMap == 1)
-		return freeEepromRawPowerCalInfo5112(ah, ee);
+		freeEepromRawPowerCalInfo5112(ah, ee);
 	ath_hal_free(ee);
 	AH_PRIVATE(ah)->ah_eeprom = AH_NULL;
 }

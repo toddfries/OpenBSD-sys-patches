@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ioctl.c,v 1.32 2008/08/20 08:31:58 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ioctl.c,v 1.33 2009/05/08 20:06:37 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,7 +36,6 @@ __FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ioctl.c,v 1.32 2008/08/20 08:31:58 
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/filio.h>
-#include <sys/ioctl_compat.h>
 #include <sys/kbio.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -55,34 +54,6 @@ static void stios2btios(struct ibcs2_termios *, struct termios *);
 static void btios2stios(struct termios *, struct ibcs2_termios *);
 static void stios2stio(struct ibcs2_termios *, struct ibcs2_termio *);
 static void stio2stios(struct ibcs2_termio *, struct ibcs2_termios *);
-
-
-#ifndef BURN_BRIDGES
-int
-ibcs2_gtty(struct thread *td, struct ibcs2_gtty_args *args)
-{
-	struct ioctl_args ioctl_arg;
-
-	ioctl_arg.fd = args->fd;
-	ioctl_arg.com = TIOCGETC;
-	ioctl_arg.data = (caddr_t)args->buf;
-
-	return ioctl(td, &ioctl_arg);
-}
-
-int
-ibcs2_stty(struct thread *td, struct ibcs2_stty_args *args)
-{
-	struct ioctl_args ioctl_arg;
-
-	ioctl_arg.fd = args->fd;
-	ioctl_arg.com = TIOCSETC;
-	ioctl_arg.data = (caddr_t)args->buf;
-
-	return ioctl(td, &ioctl_arg);
-}
-#endif /* BURN BRIDGES */
-
 
 /*
  * iBCS2 ioctl calls.

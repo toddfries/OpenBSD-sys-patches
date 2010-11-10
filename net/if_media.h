@@ -1,5 +1,5 @@
 /*	$NetBSD: if_media.h,v 1.3 1997/03/26 01:19:27 thorpej Exp $	*/
-/* $FreeBSD: src/sys/net/if_media.h,v 1.44 2008/12/17 22:59:29 gnn Exp $ */
+/* $FreeBSD: src/sys/net/if_media.h,v 1.48 2010/03/23 13:15:11 rpaulo Exp $ */
 
 /*-
  * Copyright (c) 1997
@@ -145,10 +145,11 @@ uint64_t	ifmedia_baudrate(int);
 #define	IFM_10G_SR	19		/* 10GBase-SR 850nm Multi-mode */
 #define	IFM_10G_CX4	20		/* 10GBase CX4 copper */
 #define IFM_2500_SX	21		/* 2500BaseSX - multi-mode fiber */
-#define IFM_10G_TWINAX 22   /* 10GBase Twinax copper */
-#define IFM_10G_TWINAX_LONG 23 /* 10GBase Twinax Long copper */
-#define IFM_10G_LRM 24      /* 10GBase-LRM 850nm Multi-mode */
-#define IFM_UNKNOWN 25      /* New media types that have not been defined yet */
+#define IFM_10G_TWINAX	22		/* 10GBase Twinax copper */
+#define IFM_10G_TWINAX_LONG	23	/* 10GBase Twinax Long copper */
+#define IFM_10G_LRM	24		/* 10GBase-LRM 850nm Multi-mode */
+#define IFM_UNKNOWN	25		/* media types not defined yet */
+#define IFM_10G_T	26		/* 10GBase-T - RJ45 */
 
 
 /* note 31 is the max! */
@@ -216,6 +217,7 @@ uint64_t	ifmedia_baudrate(int);
 #define	IFM_IEEE80211_WDS	0x00000800	/* Operate in WDS mode */
 #define	IFM_IEEE80211_TURBO	0x00001000	/* Operate in turbo mode */
 #define	IFM_IEEE80211_MONITOR	0x00002000	/* Operate in monitor mode */
+#define	IFM_IEEE80211_MBSS	0x00004000	/* Operate in MBSS mode */
 
 /* operating mode for multi-mode devices */
 #define	IFM_IEEE80211_11A	0x00010000	/* 5Ghz, OFDM mode */
@@ -354,10 +356,11 @@ struct ifmedia_description {
 	{ IFM_10G_SR,	"10Gbase-SR" },					\
 	{ IFM_10G_CX4,	"10Gbase-CX4" },				\
 	{ IFM_2500_SX,	"2500BaseSX" },					\
-	{ IFM_10G_LRM,  "10Gbase-LRM" },                \
-	{ IFM_10G_TWINAX,   "10Gbase-Twinax" },         \
-	{ IFM_10G_TWINAX_LONG, "10Gbase-Twinax-Long" }, \
-	{ IFM_UNKNOWN,  "Unknown" },                    \
+	{ IFM_10G_LRM,	"10Gbase-LRM" },				\
+	{ IFM_10G_TWINAX,	"10Gbase-Twinax" },			\
+	{ IFM_10G_TWINAX_LONG,	"10Gbase-Twinax-Long" },		\
+	{ IFM_UNKNOWN,	"Unknown" },					\
+	{ IFM_10G_T,	"10Gbase-T" },					\
 	{ 0, NULL },							\
 }
 
@@ -459,6 +462,7 @@ struct ifmedia_description {
 	{ IFM_IEEE80211_OFDM3, "OFDM/3Mbps" },				\
 	{ IFM_IEEE80211_OFDM4, "OFDM/4.5Mbps" },			\
 	{ IFM_IEEE80211_OFDM27, "OFDM/27Mbps" },			\
+	{ IFM_IEEE80211_MCS, "MCS" },					\
 	{ 0, NULL },							\
 }
 
@@ -497,6 +501,7 @@ struct ifmedia_description {
 	{ IFM_IEEE80211_OFDM3, "OFDM3" },				\
 	{ IFM_IEEE80211_OFDM4, "OFDM4.5" },				\
 	{ IFM_IEEE80211_OFDM27, "OFDM27" },				\
+	{ IFM_IEEE80211_MCS, "MCS" },					\
 	{ 0, NULL },							\
 }
 
@@ -507,6 +512,7 @@ struct ifmedia_description {
 	{ IFM_IEEE80211_WDS, "wds" },					\
 	{ IFM_IEEE80211_TURBO, "turbo" },				\
 	{ IFM_IEEE80211_MONITOR, "monitor" },				\
+	{ IFM_IEEE80211_MBSS, "mesh" },					\
 	{ 0, NULL },							\
 }
 
@@ -613,8 +619,9 @@ struct ifmedia_baudrate {
 	{ IFM_ETHER | IFM_10G_CX4,	IF_Gbps(10ULL) },		\
 	{ IFM_ETHER | IFM_2500_SX,	IF_Mbps(2500ULL) },		\
 	{ IFM_ETHER | IFM_10G_TWINAX,	IF_Gbps(10ULL) },		\
-	{ IFM_ETHER | IFM_10G_TWINAX_LONG,	IF_Gbps(10ULL) },		\
+	{ IFM_ETHER | IFM_10G_TWINAX_LONG,	IF_Gbps(10ULL) },	\
 	{ IFM_ETHER | IFM_10G_LRM,	IF_Gbps(10ULL) },		\
+	{ IFM_ETHER | IFM_10G_T,	IF_Gbps(10ULL) },		\
 									\
 	{ IFM_TOKEN | IFM_TOK_STP4,	IF_Mbps(4) },			\
 	{ IFM_TOKEN | IFM_TOK_STP16,	IF_Mbps(16) },			\

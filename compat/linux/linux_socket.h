@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/linux/linux_socket.h,v 1.3 2008/11/29 17:14:06 kib Exp $
+ * $FreeBSD: src/sys/compat/linux/linux_socket.h,v 1.8 2009/05/18 04:07:46 dchagin Exp $
  */
 
 #ifndef _LINUX_SOCKET_H_
@@ -48,6 +48,7 @@
 #define LINUX_MSG_RST		0x1000
 #define LINUX_MSG_ERRQUEUE	0x2000
 #define LINUX_MSG_NOSIGNAL	0x4000
+#define LINUX_MSG_CMSG_CLOEXEC	0x40000000
 
 /* Socket-level control message types */
 
@@ -79,5 +80,38 @@
 
 #define CMSG_HDRSZ		CMSG_LEN(0)
 #define L_CMSG_HDRSZ		LINUX_CMSG_LEN(0)
+
+/* Supported address families */
+
+#define	LINUX_AF_UNSPEC		0
+#define	LINUX_AF_UNIX		1
+#define	LINUX_AF_INET		2
+#define	LINUX_AF_AX25		3
+#define	LINUX_AF_IPX		4
+#define	LINUX_AF_APPLETALK	5
+#define	LINUX_AF_INET6		10
+
+/* Supported socket types */
+
+#define	LINUX_SOCK_STREAM	1
+#define	LINUX_SOCK_DGRAM	2
+#define	LINUX_SOCK_RAW		3
+#define	LINUX_SOCK_RDM		4
+#define	LINUX_SOCK_SEQPACKET	5
+
+#define	LINUX_SOCK_MAX		LINUX_SOCK_SEQPACKET
+
+#define	LINUX_SOCK_TYPE_MASK	0xf
+
+/* Flags for socket, socketpair, accept4 */
+
+#define	LINUX_SOCK_CLOEXEC	LINUX_O_CLOEXEC
+#define	LINUX_SOCK_NONBLOCK	LINUX_O_NONBLOCK
+
+struct l_ucred {
+	uint32_t	pid;
+	uint32_t	uid;
+	uint32_t	gid;
+};
 
 #endif /* _LINUX_SOCKET_H_ */

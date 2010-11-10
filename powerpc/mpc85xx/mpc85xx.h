@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/mpc85xx/mpc85xx.h,v 1.2 2008/12/18 18:27:12 raj Exp $
+ * $FreeBSD: src/sys/powerpc/mpc85xx/mpc85xx.h,v 1.3 2009/03/13 06:28:20 raj Exp $
  */
 
 #ifndef _MPC85XX_H_
@@ -33,5 +33,6 @@ uint32_t ccsr_read4(uintptr_t addr);
 void ccsr_write4(uintptr_t addr, uint32_t val);
 int law_enable(int trgt, u_long addr, u_long size);
 int law_disable(int trgt, u_long addr, u_long size);
+int law_getmax(void);
 
 #endif /* _MPC85XX_H_ */

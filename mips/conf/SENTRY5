@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/mips/conf/SENTRY5,v 1.7 2008/12/01 16:53:01 sam Exp $
+# $FreeBSD: src/sys/mips/conf/SENTRY5,v 1.12 2010/04/22 21:31:34 thompsa Exp $
 #
 # The Broadcom Sentry5 series of processors and boards is very commonly
 # used in COTS hardware including the Netgear WGT634U.
@@ -26,7 +26,6 @@
 
 ident		SENTRY5
 cpu		CPU_MIPS4KC
-options		CPU_NOFPU
 options 	ISA_MIPS32
 options		CPU_SENTRY5			# XXX should this be a
 						# sub-cpu option?
@@ -40,13 +39,6 @@ hints		"SENTRY5.hints"
 options		CFE
 options		CFE_CONSOLE
 options		ALT_BREAK_TO_DEBUGGER
-
-# cfe loader expects kernel at 0x80001000 for mips32 w/o backwards
-# offsets in the linked elf image (see ldscript hack)
-# XXX can we conditionalize the linker stuff on options CFE?
-options		KERNVIRTADDR=0x80001000
-
-makeoptions	LDSCRIPT_NAME=	ldscript.mips.cfe
 
 #makeoptions	ARCH_FLAGS=-march=mips32
 makeoptions	MIPS_LITTLE_ENDIAN=defined
@@ -64,6 +56,7 @@ options		PSEUDOFS		#Pseudo-filesystem framework
 options		_KPOSIX_PRIORITY_SCHEDULING #Posix P1003_1B real-time extensions
 
 # Debugging for use in -current
+#options		DEADLKRES
 options		INVARIANTS
 options		INVARIANT_SUPPORT
 
@@ -73,8 +66,8 @@ options		INVARIANT_SUPPORT
 device		siba			# Sonics SiliconBackplane
 device		pci			# siba_pcib
 
-device		bfe			# XXX will build both pci and siba
-device		miibus			# attachments
+# device		bfe			# XXX will build both pci and siba
+# device		miibus			# attachments
 
 # pci devices
 # notyet:
@@ -82,6 +75,7 @@ device		miibus			# attachments
 #device		ath_hal			# pci chip support
 #options		AH_SUPPORT_AR5416	# enable AR5416 tx/rx descriptors
 
+options 	USB_DEBUG		# enable debug msgs
 device		usb			# USB Bus (required)
 device		uhci			# UHCI PCI->USB interface
 device		ehci			# EHCI PCI->USB interface (USB 2.0)

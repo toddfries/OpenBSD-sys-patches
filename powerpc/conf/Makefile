@@ -1,3 +1,5 @@
-# $FreeBSD: src/sys/powerpc/conf/Makefile,v 1.1 2005/12/21 02:51:41 sam Exp $
+# $FreeBSD: src/sys/powerpc/conf/Makefile,v 1.2 2010/01/08 18:57:31 bz Exp $
+
+TARGET=powerpc
 
 .include "${.CURDIR}/../../conf/makeLINT.mk"

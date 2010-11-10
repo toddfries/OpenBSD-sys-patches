@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/ubsec/ubsecreg.h,v 1.6 2005/01/06 01:43:27 imp Exp $ */
+/* $FreeBSD: src/sys/dev/ubsec/ubsecreg.h,v 1.7 2009/05/07 18:03:47 philip Exp $ */
 /*	$OpenBSD: ubsecreg.h,v 1.27 2002/09/11 22:40:31 jason Exp $	*/
 
 /*-
@@ -62,6 +62,7 @@
 #define	PCI_PRODUCT_BROADCOM_5821	0x5821		/* 5821 */
 #define	PCI_PRODUCT_BROADCOM_5822	0x5822		/* 5822 */
 #define	PCI_PRODUCT_BROADCOM_5823	0x5823		/* 5823 */
+#define	PCI_PRODUCT_BROADCOM_5825	0x5825		/* 5825 */
 
 /* Sun Microsystems */
 #define PCI_PRODUCT_SUN_5821		0x5454		/* Crypto 5821 */

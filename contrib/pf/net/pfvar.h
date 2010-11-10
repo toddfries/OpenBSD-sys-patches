@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/pf/net/pfvar.h,v 1.18 2008/10/02 15:37:58 zec Exp $	*/
+/*	$FreeBSD: src/sys/contrib/pf/net/pfvar.h,v 1.21 2009/12/24 00:43:44 delphij Exp $	*/
 /*	$OpenBSD: pfvar.h,v 1.244 2007/02/23 21:31:51 deraadt Exp $ */
 
 /*
@@ -700,6 +700,7 @@ struct pf_rule {
 
 /* rule flags again */
 #define PFRULE_IFBOUND		0x00010000	/* if-bound */
+#define PFRULE_STATESLOPPY	0x00020000	/* sloppy state tracking */
 
 #define PFSTATE_HIWAT		10000	/* default state table size */
 #define PFSTATE_ADAPT_START	6000	/* default adaptive timeout start */
@@ -800,7 +801,9 @@ struct pf_state {
 	u_int8_t	 pad;
 #endif
 	u_int8_t	 log;
-	u_int8_t	 allow_opts;
+	u_int8_t	 state_flags;
+#define	PFSTATE_ALLOWOPTS	0x01
+#define	PFSTATE_SLOPPY		0x02
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 #define	PFSTATE_NOSYNC	 0x01
@@ -1593,8 +1596,13 @@ extern struct pool		 pf_state_pl, pf_altq_pl, pf_pooladdr_pl;
 extern struct pool		 pf_state_scrub_pl;
 #endif
 extern void			 pf_purge_thread(void *);
+#ifdef __FreeBSD__
+extern int			 pf_purge_expired_src_nodes(int);
+extern int			 pf_purge_expired_states(u_int32_t, int);
+#else
 extern void			 pf_purge_expired_src_nodes(int);
 extern void			 pf_purge_expired_states(u_int32_t);
+#endif
 extern void			 pf_unlink_state(struct pf_state *);
 extern void			 pf_free_state(struct pf_state *);
 extern int			 pf_insert_state(struct pfi_kif *,
@@ -1854,13 +1862,5 @@ void	pf_osfp_initialize(void);
 int	pf_osfp_match(struct pf_osfp_enlist *, pf_osfp_t);
 struct pf_os_fingerprint *
 	pf_osfp_validate(void);
-
-/*
- * Symbol translation macros
- */
-#define	INIT_VNET_PF(vnet) \
-	INIT_FROM_VNET(vnet, VNET_MOD_PF, struct vnet_pf, vnet_pf)
-
-#define	VNET_PF(sym)	VSYM(vnet_pf, sym)
 
 #endif /* _NET_PFVAR_H_ */

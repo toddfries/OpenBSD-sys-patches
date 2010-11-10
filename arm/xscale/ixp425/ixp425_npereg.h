@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425_npereg.h,v 1.1 2006/11/19 23:55:23 sam Exp $
+ * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425_npereg.h,v 1.2 2009/06/17 02:55:53 sam Exp $
  */
 
 /*-
@@ -95,7 +95,6 @@
 /*
  * Instruction and Data Memory Size (in words) for each NPE 
  */
-#ifndef __ixp46X
 #define IX_NPEDL_INS_MEMSIZE_WORDS_NPEA     4096
 #define IX_NPEDL_INS_MEMSIZE_WORDS_NPEB     2048
 #define IX_NPEDL_INS_MEMSIZE_WORDS_NPEC     2048
@@ -103,15 +102,9 @@
 #define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEA    2048
 #define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEB    2048
 #define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEC    2048
-#else
-#define IX_NPEDL_INS_MEMSIZE_WORDS_NPEA     4096
-#define IX_NPEDL_INS_MEMSIZE_WORDS_NPEB     4096
-#define IX_NPEDL_INS_MEMSIZE_WORDS_NPEC     4096
 
-#define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEA    4096
-#define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEB    4096
-#define IX_NPEDL_DATA_MEMSIZE_WORDS_NPEC    4096
-#endif
+#define IXP46X_NPEDL_INS_MEMSIZE_WORDS      4096
+#define IXP46X_NPEDL_DATA_MEMSIZE_WORDS     4096
 
 /* BAR offsets */
 #define IX_NPEDL_REG_OFFSET_EXAD             0x00000000	/* Execution Address */

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_smp.c,v 1.212 2009/03/03 17:34:09 dchagin Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_smp.c,v 1.219 2010/06/11 18:46:34 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -104,12 +104,6 @@ SYSCTL_INT(_kern_smp, OID_AUTO, forward_signal_enabled, CTLFLAG_RW,
 	   &forward_signal_enabled, 0,
 	   "Forwarding of a signal to a process on a different CPU");
 
-/* Enable forwarding of roundrobin to all other cpus */
-static int forward_roundrobin_enabled = 1;
-SYSCTL_INT(_kern_smp, OID_AUTO, forward_roundrobin_enabled, CTLFLAG_RW,
-	   &forward_roundrobin_enabled, 0,
-	   "Forwarding of roundrobin to all other CPUs");
-
 /* Variables needed for SMP rendezvous. */
 static volatile int smp_rv_ncpus;
 static void (*volatile smp_rv_setup_func)(void *arg);
@@ -143,6 +137,8 @@ static void
 mp_start(void *dummy)
 {
 
+	mtx_init(&smp_ipi_mtx, "smp rendezvous", NULL, MTX_SPIN);
+
 	/* Probe for MP hardware. */
 	if (smp_disabled != 0 || cpu_mp_probe() == 0) {
 		mp_ncpus = 1;
@@ -150,7 +146,6 @@ mp_start(void *dummy)
 		return;
 	}
 
-	mtx_init(&smp_ipi_mtx, "smp rendezvous", NULL, MTX_SPIN);
 	cpu_mp_start();
 	printf("FreeBSD/SMP: Multiprocessor System Detected: %d CPUs\n",
 	    mp_ncpus);
@@ -189,33 +184,6 @@ forward_signal(struct thread *td)
 	ipi_selected(1 << id, IPI_AST);
 }
 
-void
-forward_roundrobin(void)
-{
-	struct pcpu *pc;
-	struct thread *td;
-	cpumask_t id, map, me;
-
-	CTR0(KTR_SMP, "forward_roundrobin()");
-
-	if (!smp_started || cold || panicstr)
-		return;
-	if (!forward_roundrobin_enabled)
-		return;
-	map = 0;
-	me = PCPU_GET(cpumask);
-	SLIST_FOREACH(pc, &cpuhead, pc_allcpu) {
-		td = pc->pc_curthread;
-		id = pc->pc_cpumask;
-		if (id != me && (id & stopped_cpus) == 0 &&
-		    !TD_IS_IDLETHREAD(td)) {
-			td->td_flags |= TDF_NEEDRESCHED;
-			map |= id;
-		}
-	}
-	ipi_selected(map, IPI_AST);
-}
-
 /*
  * When called the executing CPU will send an IPI to all other CPUs
  *  requesting that they halt execution.
@@ -233,18 +201,21 @@ forward_roundrobin(void)
  * XXX FIXME: this is not MP-safe, needs a lock to prevent multiple CPUs
  *            from executing at same time.
  */
-int
-stop_cpus(cpumask_t map)
+static int
+generic_stop_cpus(cpumask_t map, u_int type)
 {
 	int i;
+
+	KASSERT(type == IPI_STOP || type == IPI_STOP_HARD,
+	    ("%s: invalid stop type", __func__));
 
 	if (!smp_started)
 		return 0;
 
-	CTR1(KTR_SMP, "stop_cpus(%x)", map);
+	CTR2(KTR_SMP, "stop_cpus(%x) with %u type", map, type);
 
 	/* send the stop IPI to all CPUs in map */
-	ipi_selected(map, IPI_STOP);
+	ipi_selected(map, type);
 
 	i = 0;
 	while ((stopped_cpus & map) != map) {
@@ -261,6 +232,68 @@ stop_cpus(cpumask_t map)
 
 	return 1;
 }
+
+int
+stop_cpus(cpumask_t map)
+{
+
+	return (generic_stop_cpus(map, IPI_STOP));
+}
+
+int
+stop_cpus_hard(cpumask_t map)
+{
+
+	return (generic_stop_cpus(map, IPI_STOP_HARD));
+}
+
+#if defined(__amd64__)
+/*
+ * When called the executing CPU will send an IPI to all other CPUs
+ *  requesting that they halt execution.
+ *
+ * Usually (but not necessarily) called with 'other_cpus' as its arg.
+ *
+ *  - Signals all CPUs in map to suspend.
+ *  - Waits for each to suspend.
+ *
+ * Returns:
+ *  -1: error
+ *   0: NA
+ *   1: ok
+ *
+ * XXX FIXME: this is not MP-safe, needs a lock to prevent multiple CPUs
+ *            from executing at same time.
+ */
+int
+suspend_cpus(cpumask_t map)
+{
+	int i;
+
+	if (!smp_started)
+		return (0);
+
+	CTR1(KTR_SMP, "suspend_cpus(%x)", map);
+
+	/* send the suspend IPI to all CPUs in map */
+	ipi_selected(map, IPI_SUSPEND);
+
+	i = 0;
+	while ((stopped_cpus & map) != map) {
+		/* spin */
+		cpu_spinwait();
+		i++;
+#ifdef DIAGNOSTIC
+		if (i == 100000) {
+			printf("timeout suspending cpus\n");
+			break;
+		}
+#endif
+	}
+
+	return (1);
+}
+#endif
 
 /*
  * Called by a CPU to restart stopped CPUs. 
@@ -362,9 +395,10 @@ smp_rendezvous_cpus(cpumask_t map,
 		return;
 	}
 
-	for (i = 0; i <= mp_maxid; i++)
-		if (((1 << i) & map) != 0 && !CPU_ABSENT(i))
+	CPU_FOREACH(i) {
+		if (((1 << i) & map) != 0)
 			ncpus++;
+	}
 	if (ncpus == 0)
 		panic("ncpus is 0 with map=0x%x", map);
 
@@ -443,7 +477,7 @@ smp_topo(void)
 	case 7:
 		/* quad core with a shared l3, 8 threads sharing L2.  */
 		top = smp_topo_2level(CG_SHARE_L3, 4, CG_SHARE_L2, 8,
-		    CG_FLAG_THREAD);
+		    CG_FLAG_SMT);
 		break;
 	default:
 		/* Default, ask the system what it wants. */
@@ -470,7 +504,10 @@ smp_topo_none(void)
 	top = &group[0];
 	top->cg_parent = NULL;
 	top->cg_child = NULL;
-	top->cg_mask = (1 << mp_ncpus) - 1;
+	if (mp_ncpus == sizeof(top->cg_mask) * 8)
+		top->cg_mask = -1;
+	else
+		top->cg_mask = (1 << mp_ncpus) - 1;
 	top->cg_count = mp_ncpus;
 	top->cg_children = 0;
 	top->cg_level = CG_SHARE_NONE;

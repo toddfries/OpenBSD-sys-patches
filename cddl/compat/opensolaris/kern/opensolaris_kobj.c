@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_kobj.c,v 1.9 2008/11/25 21:14:00 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_kobj.c,v 1.12 2009/09/08 09:17:34 kib Exp $");
 
 #include <sys/types.h>
 #include <sys/systm.h>
@@ -69,7 +69,7 @@ kobj_open_file_vnode(const char *file)
 	struct thread *td = curthread;
 	struct filedesc *fd;
 	struct nameidata nd;
-	int error, flags;
+	int error, flags, vfslocked;
 
 	fd = td->td_proc->p_fd;
 	FILEDESC_XLOCK(fd);
@@ -83,14 +83,16 @@ kobj_open_file_vnode(const char *file)
 	}
 	FILEDESC_XUNLOCK(fd);
 
-	flags = FREAD;
+	flags = FREAD | O_NOFOLLOW;
 	NDINIT(&nd, LOOKUP, MPSAFE, UIO_SYSSPACE, file, td);
-	error = vn_open_cred(&nd, &flags, O_NOFOLLOW, curthread->td_ucred, NULL);
-	NDFREE(&nd, NDF_ONLY_PNBUF);
+	error = vn_open_cred(&nd, &flags, 0, 0, curthread->td_ucred, NULL);
 	if (error != 0)
 		return (NULL);
+	vfslocked = NDHASGIANT(&nd);
+	NDFREE(&nd, NDF_ONLY_PNBUF);
 	/* We just unlock so we hold a reference. */
 	VOP_UNLOCK(nd.ni_vp, 0);
+	VFS_UNLOCK_GIANT(vfslocked);
 	return (nd.ni_vp);
 }
 

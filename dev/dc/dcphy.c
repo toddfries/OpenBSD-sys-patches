@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/dc/dcphy.c,v 1.34 2008/09/30 20:53:15 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/dc/dcphy.c,v 1.35 2009/03/19 22:34:55 marius Exp $");
 
 /*
  * Pseudo-driver for internal NWAY support on DEC 21143 and workalike
@@ -154,13 +154,12 @@ dcphy_attach(device_t dev)
 	sc->mii_service = dcphy_service;
 	sc->mii_pdata = mii;
 
-	sc->mii_flags |= MIIF_NOISOLATE;
+	/*
+	 * Apparently, we can neither isolate nor do loopback.
+	 */
+	sc->mii_flags |= MIIF_NOISOLATE | MIIF_NOLOOP;
+
 	mii->mii_instance++;
-
-#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
-
-	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
-	    BMCR_ISO);
 
 	/*dcphy_reset(sc);*/
 	dc_sc = mii->mii_ifp->if_softc;
@@ -186,9 +185,8 @@ dcphy_attach(device_t dev)
 
 	sc->mii_capabilities &= ma->mii_capmask;
 	device_printf(dev, " ");
-	mii_add_media(sc);
+	mii_phy_add_media(sc);
 	printf("\n");
-#undef ADD
 
 	MIIBUS_MEDIAINIT(sc->mii_dev);
 	return (0);

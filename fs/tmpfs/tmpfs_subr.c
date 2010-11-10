@@ -34,7 +34,7 @@
  * Efficient memory file system supporting functions.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_subr.c,v 1.21 2009/02/08 19:18:33 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_subr.c,v 1.26 2010/01/20 16:56:20 jh Exp $");
 
 #include <sys/param.h>
 #include <sys/namei.h>
@@ -82,7 +82,7 @@ __FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_subr.c,v 1.21 2009/02/08 19:18:33 kib
 int
 tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
     uid_t uid, gid_t gid, mode_t mode, struct tmpfs_node *parent,
-    char *target, dev_t rdev, struct thread *p, struct tmpfs_node **node)
+    char *target, dev_t rdev, struct tmpfs_node **node)
 {
 	struct tmpfs_node *nnode;
 
@@ -93,7 +93,7 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 	MPASS(IFF(type == VLNK, target != NULL));
 	MPASS(IFF(type == VBLK || type == VCHR, rdev != VNOVAL));
 
-	if (tmp->tm_nodes_inuse > tmp->tm_nodes_max)
+	if (tmp->tm_nodes_inuse >= tmp->tm_nodes_max)
 		return (ENOSPC);
 
 	nnode = (struct tmpfs_node *)uma_zalloc_arg(
@@ -124,7 +124,9 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 		nnode->tn_dir.tn_readdir_lastn = 0;
 		nnode->tn_dir.tn_readdir_lastp = NULL;
 		nnode->tn_links++;
+		TMPFS_NODE_LOCK(nnode->tn_dir.tn_parent);
 		nnode->tn_dir.tn_parent->tn_links++;
+		TMPFS_NODE_UNLOCK(nnode->tn_dir.tn_parent);
 		break;
 
 	case VFIFO:
@@ -142,7 +144,8 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 
 	case VREG:
 		nnode->tn_reg.tn_aobj =
-		    vm_pager_allocate(OBJT_SWAP, NULL, 0, VM_PROT_DEFAULT, 0);
+		    vm_pager_allocate(OBJT_SWAP, NULL, 0, VM_PROT_DEFAULT, 0,
+			NULL /* XXXKIB - tmpfs needs swap reservation */);
 		nnode->tn_reg.tn_aobj_pages = 0;
 		break;
 
@@ -186,6 +189,7 @@ tmpfs_free_node(struct tmpfs_mount *tmp, struct tmpfs_node *node)
 #ifdef INVARIANTS
 	TMPFS_NODE_LOCK(node);
 	MPASS(node->tn_vnode == NULL);
+	MPASS((node->tn_vpstate & TMPFS_VNODE_ALLOCATING) == 0);
 	TMPFS_NODE_UNLOCK(node);
 #endif
 
@@ -303,7 +307,7 @@ tmpfs_free_dirent(struct tmpfs_mount *tmp, struct tmpfs_dirent *de,
  */
 int
 tmpfs_alloc_vp(struct mount *mp, struct tmpfs_node *node, int lkflag,
-    struct vnode **vpp, struct thread *td)
+    struct vnode **vpp)
 {
 	int error = 0;
 	struct vnode *vp;
@@ -311,10 +315,11 @@ tmpfs_alloc_vp(struct mount *mp, struct tmpfs_node *node, int lkflag,
 loop:
 	TMPFS_NODE_LOCK(node);
 	if ((vp = node->tn_vnode) != NULL) {
+		MPASS((node->tn_vpstate & TMPFS_VNODE_DOOMED) == 0);
 		VI_LOCK(vp);
 		TMPFS_NODE_UNLOCK(node);
 		vholdl(vp);
-		(void) vget(vp, lkflag | LK_INTERLOCK | LK_RETRY, td);
+		(void) vget(vp, lkflag | LK_INTERLOCK | LK_RETRY, curthread);
 		vdrop(vp);
 
 		/*
@@ -326,6 +331,14 @@ loop:
 			goto loop;
 		}
 
+		goto out;
+	}
+
+	if ((node->tn_vpstate & TMPFS_VNODE_DOOMED) ||
+	    (node->tn_type == VDIR && node->tn_dir.tn_parent == NULL)) {
+		TMPFS_NODE_UNLOCK(node);
+		error = ENOENT;
+		vp = NULL;
 		goto out;
 	}
 
@@ -374,6 +387,7 @@ loop:
 		vp->v_op = &tmpfs_fifoop_entries;
 		break;
 	case VDIR:
+		MPASS(node->tn_dir.tn_parent != NULL);
 		if (node->tn_dir.tn_parent == node)
 			vp->v_vflag |= VV_ROOT;
 		break;
@@ -427,10 +441,9 @@ tmpfs_free_vp(struct vnode *vp)
 
 	node = VP_TO_TMPFS_NODE(vp);
 
-	TMPFS_NODE_LOCK(node);
+	mtx_assert(TMPFS_NODE_MTX(node), MA_OWNED);
 	node->tn_vnode = NULL;
 	vp->v_data = NULL;
-	TMPFS_NODE_UNLOCK(node);
 }
 
 /* --------------------------------------------------------------------- */
@@ -482,8 +495,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 
 	/* Allocate a node that represents the new file. */
 	error = tmpfs_alloc_node(tmp, vap->va_type, cnp->cn_cred->cr_uid,
-	    dnode->tn_gid, vap->va_mode, parent, target, vap->va_rdev,
-	    cnp->cn_thread, &node);
+	    dnode->tn_gid, vap->va_mode, parent, target, vap->va_rdev, &node);
 	if (error != 0)
 		goto out;
 
@@ -496,8 +508,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	}
 
 	/* Allocate a vnode for the new file. */
-	error = tmpfs_alloc_vp(dvp->v_mount, node, LK_EXCLUSIVE, vpp,
-	    cnp->cn_thread);
+	error = tmpfs_alloc_vp(dvp->v_mount, node, LK_EXCLUSIVE, vpp);
 	if (error != 0) {
 		tmpfs_free_dirent(tmp, de, TRUE);
 		tmpfs_free_node(tmp, node);
@@ -654,7 +665,18 @@ tmpfs_dir_getdotdotdent(struct tmpfs_node *node, struct uio *uio)
 	TMPFS_VALIDATE_DIR(node);
 	MPASS(uio->uio_offset == TMPFS_DIRCOOKIE_DOTDOT);
 
+	/*
+	 * Return ENOENT if the current node is already removed.
+	 */
+	TMPFS_ASSERT_LOCKED(node);
+	if (node->tn_dir.tn_parent == NULL) {
+		return (ENOENT);
+	}
+
+	TMPFS_NODE_LOCK(node->tn_dir.tn_parent);
 	dent.d_fileno = node->tn_dir.tn_parent->tn_id;
+	TMPFS_NODE_UNLOCK(node->tn_dir.tn_parent);
+
 	dent.d_type = DT_DIR;
 	dent.d_namlen = 2;
 	dent.d_name[0] = '.';
@@ -884,10 +906,9 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize)
 
 		if (zerolen > 0) {
 			m = vm_page_grab(uobj, OFF_TO_IDX(newsize),
-					VM_ALLOC_NORMAL | VM_ALLOC_RETRY);
+			    VM_ALLOC_NOBUSY | VM_ALLOC_NORMAL | VM_ALLOC_RETRY);
 			pmap_zero_page_area(m, PAGE_SIZE - zerolen,
 				zerolen);
-			vm_page_wakeup(m);
 		}
 		VM_OBJECT_UNLOCK(uobj);
 

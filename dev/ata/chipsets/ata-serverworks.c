@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-serverworks.c,v 1.4 2009/02/19 00:32:55 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-serverworks.c,v 1.14 2010/06/06 14:09:48 nwhitehorn Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -41,6 +41,9 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-serverworks.c,v 1.4 2009/02/19 
 #include <sys/sema.h>
 #include <sys/taskqueue.h>
 #include <vm/uma.h>
+#ifdef __powerpc__
+#include <machine/intr_machdep.h>
+#endif
 #include <machine/stdarg.h>
 #include <machine/resource.h>
 #include <machine/bus.h>
@@ -57,7 +60,10 @@ static int ata_serverworks_ch_attach(device_t dev);
 static int ata_serverworks_ch_detach(device_t dev);
 static void ata_serverworks_tf_read(struct ata_request *request);
 static void ata_serverworks_tf_write(struct ata_request *request);
-static void ata_serverworks_setmode(device_t dev, int mode);
+static int ata_serverworks_setmode(device_t dev, int target, int mode);
+#ifdef __powerpc__
+static int ata_serverworks_status(device_t dev);
+#endif
 
 /* misc defines */
 #define SWKS_33		0
@@ -74,7 +80,7 @@ ata_serverworks_probe(device_t dev)
 {
     struct ata_pci_controller *ctlr = device_get_softc(dev);
     static struct ata_chip_id ids[] =
-    {{ ATA_ROSB4,     0x00, SWKS_33,  0, ATA_UDMA2, "ROSB4" },
+    {{ ATA_ROSB4,     0x00, SWKS_33,  0, ATA_WDMA2, "ROSB4" },
      { ATA_CSB5,      0x92, SWKS_100, 0, ATA_UDMA5, "CSB5" },
      { ATA_CSB5,      0x00, SWKS_66,  0, ATA_UDMA4, "CSB5" },
      { ATA_CSB6,      0x00, SWKS_100, 0, ATA_UDMA5, "CSB6" },
@@ -95,8 +101,32 @@ ata_serverworks_probe(device_t dev)
 
     ata_set_desc(dev);
     ctlr->chipinit = ata_serverworks_chipinit;
-    return 0;
+    return (BUS_PROBE_DEFAULT);
 }
+
+#ifdef __powerpc__
+static int
+ata_serverworks_status(device_t dev)
+{
+    struct ata_channel *ch = device_get_softc(dev);
+    struct ata_pci_controller *ctlr = device_get_softc(device_get_parent(dev));
+
+    /*
+     * Check if this interrupt belongs to our channel.
+     */
+    if (!(ATA_INL(ctlr->r_res2, 0x1f80) & (1 << ch->unit)))
+	return (0);
+
+    /*
+     * We need to do a 4-byte read on the status reg before the values
+     * will report correctly
+     */
+
+    ATA_IDX_INL(ch,ATA_STATUS);
+
+    return ata_pci_status(dev);
+}
+#endif
 
 static int
 ata_serverworks_chipinit(device_t dev)
@@ -117,6 +147,7 @@ ata_serverworks_chipinit(device_t dev)
 	ctlr->ch_attach = ata_serverworks_ch_attach;
 	ctlr->ch_detach = ata_serverworks_ch_detach;
 	ctlr->setmode = ata_sata_setmode;
+	ctlr->getrev = ata_sata_getrev;
 	return 0;
     }
     else if (ctlr->chip->cfg1 == SWKS_33) {
@@ -183,9 +214,44 @@ ata_serverworks_ch_attach(device_t dev)
     ch->r_io[ATA_SCONTROL].offset = ch_offset + 0x48;
 
     ch->flags |= ATA_NO_SLAVE;
+    ch->flags |= ATA_SATA;
     ata_pci_hw(dev);
     ch->hw.tf_read = ata_serverworks_tf_read;
     ch->hw.tf_write = ata_serverworks_tf_write;
+#ifdef __powerpc__
+    ch->hw.status = ata_serverworks_status;
+
+    /* Make sure that our interrupt is level low */
+    powerpc_config_intr(bus_get_resource_start(device_get_parent(dev),
+	SYS_RES_IRQ, 0), INTR_TRIGGER_LEVEL, INTR_POLARITY_LOW);
+#endif
+
+    if (ctlr->chip->chipid == ATA_K2) {
+	/*
+	 * The revision 1 K2 SATA controller has interesting bugs. Patch them.
+	 * These magic numbers regulate interrupt delivery in the first few
+	 * cases and are pure magic in the last case.
+	 *
+	 * Values obtained from the Darwin driver.
+	 */
+
+	ATA_IDX_OUTB(ch, ATA_BMSTAT_PORT, 0x04);
+	ATA_IDX_OUTL(ch, ATA_SERROR, 0xffffffff);
+	ATA_IDX_OUTL(ch, ATA_SCONTROL, 0x00000300);
+	ATA_OUTL(ctlr->r_res2, ch_offset + 0x88, 0);
+	ATA_OUTL(ctlr->r_res2, ch_offset + 0x80,
+	    ATA_INL(ctlr->r_res2, ch_offset + 0x80) & ~0x00040000);
+
+	/*
+	 * Some controllers have a bug where they will send the command
+	 * to the drive before seeing a DMA start, and then can begin
+	 * receiving data before the DMA start arrives. The controller
+	 * will then become confused and either corrupt the data or crash.
+	 * Remedy this by starting DMA before sending the drive command.
+	 */
+
+	ch->flags |= ATA_DMA_BEFORE_CMD;
+    }
 
     /* chip does not reliably do 64K DMA transfers */
     ch->dma.max_iosize = 64 * DEV_BSIZE;
@@ -205,9 +271,8 @@ static void
 ata_serverworks_tf_read(struct ata_request *request)
 {
     struct ata_channel *ch = device_get_softc(request->parent);
-    struct ata_device *atadev = device_get_softc(request->dev);
 
-    if (atadev->flags & ATA_D_48BIT_ACTIVE) {
+    if (request->flags & ATA_R_48BIT) {
 	u_int16_t temp;
 
 	request->u.ata.count = ATA_IDX_INW(ch, ATA_COUNT);
@@ -234,9 +299,11 @@ static void
 ata_serverworks_tf_write(struct ata_request *request)
 {
     struct ata_channel *ch = device_get_softc(request->parent);
+#ifndef ATA_CAM
     struct ata_device *atadev = device_get_softc(request->dev);
+#endif
 
-    if (atadev->flags & ATA_D_48BIT_ACTIVE) {
+    if (request->flags & ATA_R_48BIT) {
 	ATA_IDX_OUTW(ch, ATA_FEATURE, request->u.ata.feature);
 	ATA_IDX_OUTW(ch, ATA_COUNT, request->u.ata.count);
 	ATA_IDX_OUTW(ch, ATA_SECTOR, ((request->u.ata.lba >> 16) & 0xff00) |
@@ -245,11 +312,12 @@ ata_serverworks_tf_write(struct ata_request *request)
 				       ((request->u.ata.lba >> 8) & 0x00ff));
 	ATA_IDX_OUTW(ch, ATA_CYL_MSB, ((request->u.ata.lba >> 32) & 0xff00) | 
 				       ((request->u.ata.lba >> 16) & 0x00ff));
-	ATA_IDX_OUTW(ch, ATA_DRIVE, ATA_D_LBA | ATA_DEV(atadev->unit));
+	ATA_IDX_OUTW(ch, ATA_DRIVE, ATA_D_LBA | ATA_DEV(request->unit));
     }
     else {
 	ATA_IDX_OUTW(ch, ATA_FEATURE, request->u.ata.feature);
 	ATA_IDX_OUTW(ch, ATA_COUNT, request->u.ata.count);
+#ifndef ATA_CAM
 	if (atadev->flags & ATA_D_USE_CHS) {
 	    int heads, sectors;
     
@@ -266,79 +334,81 @@ ata_serverworks_tf_write(struct ata_request *request)
 			 (request->u.ata.lba / (sectors * heads)));
 	    ATA_IDX_OUTW(ch, ATA_CYL_MSB,
 			 (request->u.ata.lba / (sectors * heads)) >> 8);
-	    ATA_IDX_OUTW(ch, ATA_DRIVE, ATA_D_IBM | ATA_DEV(atadev->unit) | 
+	    ATA_IDX_OUTW(ch, ATA_DRIVE, ATA_D_IBM | ATA_DEV(request->unit) | 
 			 (((request->u.ata.lba% (sectors * heads)) /
 			   sectors) & 0xf));
 	}
 	else {
+#endif
 	    ATA_IDX_OUTW(ch, ATA_SECTOR, request->u.ata.lba);
 	    ATA_IDX_OUTW(ch, ATA_CYL_LSB, request->u.ata.lba >> 8);
 	    ATA_IDX_OUTW(ch, ATA_CYL_MSB, request->u.ata.lba >> 16);
 	    ATA_IDX_OUTW(ch, ATA_DRIVE,
-			 ATA_D_IBM | ATA_D_LBA | ATA_DEV(atadev->unit) |
+			 ATA_D_IBM | ATA_D_LBA | ATA_DEV(request->unit) |
 			 ((request->u.ata.lba >> 24) & 0x0f));
+#ifndef ATA_CAM
 	}
+#endif
     }
 }
 
-static void
-ata_serverworks_setmode(device_t dev, int mode)
+static int
+ata_serverworks_setmode(device_t dev, int target, int mode)
 {
-    device_t gparent = GRANDPARENT(dev);
-    struct ata_pci_controller *ctlr = device_get_softc(gparent);
-    struct ata_channel *ch = device_get_softc(device_get_parent(dev));
-    struct ata_device *atadev = device_get_softc(dev);
-    int devno = (ch->unit << 1) + atadev->unit;
-    int offset = (devno ^ 0x01) << 3;
-    int error;
-    u_int8_t piotimings[] = { 0x5d, 0x47, 0x34, 0x22, 0x20, 0x34, 0x22, 0x20,
-			      0x20, 0x20, 0x20, 0x20, 0x20, 0x20 };
-    u_int8_t dmatimings[] = { 0x77, 0x21, 0x20 };
+	device_t parent = device_get_parent(dev);
+        struct ata_pci_controller *ctlr = device_get_softc(parent);
+	struct ata_channel *ch = device_get_softc(dev);
+        int devno = (ch->unit << 1) + target;
+        int offset = (devno ^ 0x01) << 3;
+	int piomode;
+	u_int8_t piotimings[] = { 0x5d, 0x47, 0x34, 0x22, 0x20 };
+	u_int8_t dmatimings[] = { 0x77, 0x21, 0x20 };
 
-    mode = ata_limit_mode(dev, mode, ctlr->chip->max_dma);
-
-    mode = ata_check_80pin(dev, mode);
-
-    error = ata_controlcmd(dev, ATA_SETFEATURES, ATA_SF_SETXFER, 0, mode);
-
-    if (bootverbose)
-	device_printf(dev, "%ssetting %s on %s chip\n",
-		      (error) ? "FAILURE " : "",
-		      ata_mode2str(mode), ctlr->chip->text);
-    if (!error) {
+	mode = min(mode, ctlr->chip->max_dma);
 	if (mode >= ATA_UDMA0) {
-	    pci_write_config(gparent, 0x56, 
-			     (pci_read_config(gparent, 0x56, 2) &
+	    /* Set UDMA mode, enable UDMA, set WDMA2/PIO4 */
+	    pci_write_config(parent, 0x56, 
+			     (pci_read_config(parent, 0x56, 2) &
 			      ~(0xf << (devno << 2))) |
 			     ((mode & ATA_MODE_MASK) << (devno << 2)), 2);
-	    pci_write_config(gparent, 0x54,
-			     pci_read_config(gparent, 0x54, 1) |
+	    pci_write_config(parent, 0x54,
+			     pci_read_config(parent, 0x54, 1) |
 			     (0x01 << devno), 1);
-	    pci_write_config(gparent, 0x44, 
-			     (pci_read_config(gparent, 0x44, 4) &
+	    pci_write_config(parent, 0x44, 
+			     (pci_read_config(parent, 0x44, 4) &
 			      ~(0xff << offset)) |
 			     (dmatimings[2] << offset), 4);
-	}
-	else if (mode >= ATA_WDMA0) {
-	    pci_write_config(gparent, 0x54,
-			     pci_read_config(gparent, 0x54, 1) &
+	    piomode = ATA_PIO4;
+	} else if (mode >= ATA_WDMA0) {
+	    /* Disable UDMA, set WDMA mode and timings, calculate PIO. */
+	    pci_write_config(parent, 0x54,
+			     pci_read_config(parent, 0x54, 1) &
 			      ~(0x01 << devno), 1);
-	    pci_write_config(gparent, 0x44, 
-			     (pci_read_config(gparent, 0x44, 4) &
+	    pci_write_config(parent, 0x44, 
+			     (pci_read_config(parent, 0x44, 4) &
 			      ~(0xff << offset)) |
 			     (dmatimings[mode & ATA_MODE_MASK] << offset), 4);
-	}
-	else
-	    pci_write_config(gparent, 0x54,
-			     pci_read_config(gparent, 0x54, 1) &
+	    piomode = (mode == ATA_WDMA0) ? ATA_PIO0 :
+		(mode == ATA_WDMA1) ? ATA_PIO3 : ATA_PIO4;
+	} else {
+	    /* Disable UDMA, set requested PIO. */
+	    pci_write_config(parent, 0x54,
+			     pci_read_config(parent, 0x54, 1) &
 			     ~(0x01 << devno), 1);
-
-	pci_write_config(gparent, 0x40, 
-			 (pci_read_config(gparent, 0x40, 4) &
+	    piomode = mode;
+	}
+	/* Set PIO mode and timings, calculated above. */
+	if (ctlr->chip->cfg1 != SWKS_33) {
+		pci_write_config(parent, 0x4a,
+			 (pci_read_config(parent, 0x4a, 2) &
+			  ~(0xf << (devno << 2))) |
+			 ((piomode - ATA_PIO0) << (devno<<2)),2);
+	}
+	pci_write_config(parent, 0x40, 
+			 (pci_read_config(parent, 0x40, 4) &
 			  ~(0xff << offset)) |
-			 (piotimings[ata_mode2idx(mode)] << offset), 4);
-	atadev->mode = mode;
-    }
+			 (piotimings[ata_mode2idx(piomode)] << offset), 4);
+	return (mode);
 }
 
 ATA_DECLARE_DRIVER(ata_serverworks);

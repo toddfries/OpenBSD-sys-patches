@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/powerpc/ofw/conf.c,v 1.13 2008/02/11 12:30:32 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/powerpc/ofw/conf.c,v 1.14 2010/07/12 00:49:22 nwhitehorn Exp $");
 
 #include <stand.h>
 #include "bootstrap.h"
@@ -96,6 +96,7 @@ struct netif_driver *netif_drivers[] = {
 
 struct file_format *file_formats[] = {
     &ofw_elf,
+    &ofw_elf64,
     NULL
 };
 

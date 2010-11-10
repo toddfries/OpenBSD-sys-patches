@@ -29,9 +29,8 @@
  * SUCH DAMAGE.
  */
 
-#ident "$Id: iir_pci.c 1.2 2003/08/26 12:29:55 achim Exp $"
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iir/iir_pci.c,v 1.20 2007/06/17 05:55:50 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iir/iir_pci.c,v 1.22 2010/01/08 20:40:28 trasz Exp $");
 
 /*
  *  iir_pci.c:  PCI Bus Attachment for Intel Integrated RAID Controller driver
@@ -202,7 +201,7 @@ iir_pci_attach(device_t dev)
     rid = 0;
     irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
                                  RF_ACTIVE | RF_SHAREABLE);
-    if (io == NULL) {
+    if (irq == NULL) {
         device_printf(dev, "can't find IRQ value\n");
         error = ENOMEM;
         goto err;

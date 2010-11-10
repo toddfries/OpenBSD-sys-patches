@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/loader/conf.c,v 1.27 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/loader/conf.c,v 1.28 2009/11/27 03:55:42 sobomax Exp $");
 
 #include <stand.h>
 #include <bootstrap.h>
@@ -128,6 +128,7 @@ extern struct console comconsole;
 extern struct console dconsole;
 #endif
 extern struct console nullconsole;
+extern struct console spinconsole;
 
 struct console *consoles[] = {
     &vidconsole,
@@ -136,6 +137,7 @@ struct console *consoles[] = {
     &dconsole,
 #endif
     &nullconsole,
+    &spinconsole,
     NULL
 };
 

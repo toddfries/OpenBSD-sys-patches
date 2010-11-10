@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo.c,v 1.4 2008/05/12 00:15:29 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo.c,v 1.13 2010/05/03 07:32:50 sobomax Exp $");
 #endif
 
 #include "opt_malo.h"
@@ -135,7 +135,7 @@ static	int	malo_setup_hwdma(struct malo_softc *);
 static	void	malo_txq_init(struct malo_softc *, struct malo_txq *, int);
 static	void	malo_tx_cleanupq(struct malo_softc *, struct malo_txq *);
 static	void	malo_start(struct ifnet *);
-static	void	malo_watchdog(struct ifnet *);
+static	void	malo_watchdog(void *);
 static	int	malo_ioctl(struct ifnet *, u_long, caddr_t);
 static	void	malo_updateslot(struct ifnet *);
 static	int	malo_newstate(struct ieee80211vap *, enum ieee80211_state, int);
@@ -144,7 +144,6 @@ static	void	malo_scan_end(struct ieee80211com *);
 static	void	malo_set_channel(struct ieee80211com *);
 static	int	malo_raw_xmit(struct ieee80211_node *, struct mbuf *,
 		    const struct ieee80211_bpf_params *);
-static	void	malo_bpfattach(struct malo_softc *);
 static	void	malo_sysctlattach(struct malo_softc *);
 static	void	malo_announce(struct malo_softc *);
 static	void	malo_dma_cleanup(struct malo_softc *);
@@ -169,22 +168,16 @@ malo_bar0_read4(struct malo_softc *sc, bus_size_t off)
 static void
 malo_bar0_write4(struct malo_softc *sc, bus_size_t off, uint32_t val)
 {
-	DPRINTF(sc, MALO_DEBUG_FW, "%s: off 0x%zx val 0x%x\n",
-	    __func__, off, val);
+	DPRINTF(sc, MALO_DEBUG_FW, "%s: off 0x%jx val 0x%x\n",
+	    __func__, (intmax_t)off, val);
 
 	bus_space_write_4(sc->malo_io0t, sc->malo_io0h, off, val);
-}
-
-static uint8_t
-malo_bar1_read1(struct malo_softc *sc, bus_size_t off)
-{
-	return bus_space_read_1(sc->malo_io1t, sc->malo_io1h, off);
 }
 
 int
 malo_attach(uint16_t devid, struct malo_softc *sc)
 {
-	int error, i;
+	int error;
 	struct ieee80211com *ic;
 	struct ifnet *ifp;
 	struct malo_hal *mh;
@@ -198,20 +191,11 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	ic = ifp->if_l2com;
 
 	MALO_LOCK_INIT(sc);
+	callout_init_mtx(&sc->malo_watchdog_timer, &sc->malo_mtx, 0);
 
 	/* set these up early for if_printf use */
 	if_initname(ifp, device_get_name(sc->malo_dev),
 	    device_get_unit(sc->malo_dev));
-
-	/*
-	 * NB: get mac address from hardware directly here before we set DMAs
-	 * for HAL because we don't want to disturb operations of HAL at BAR 1.
-	 */
-	for (i = 0; i < IEEE80211_ADDR_LEN; i++) {
-		/* XXX remove a magic number but we don't have documents.  */
-		ic->ic_myaddr[i] = malo_bar1_read1(sc, 0xa528 + i);
-		DELAY(1000);
-	}
 
 	mh = malo_hal_attach(sc->malo_dev, devid,
 	    sc->malo_io1h, sc->malo_io1t, sc->malo_dmat);
@@ -276,7 +260,7 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	}
 	error = malo_setup_hwdma(sc);	/* push to firmware */
 	if (error != 0)			/* NB: malo_setupdma prints msg */
-		goto bad1;
+		goto bad2;
 
 	sc->malo_tq = taskqueue_create_fast("malo_taskq", M_NOWAIT,
 		taskqueue_thread_enqueue, &sc->malo_tq);
@@ -289,11 +273,10 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 	ifp->if_start = malo_start;
-	ifp->if_watchdog = malo_watchdog;
 	ifp->if_ioctl = malo_ioctl;
 	ifp->if_init = malo_init;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
-	ifp->if_snd.ifq_drv_maxlen = IFQ_MAXLEN;
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	ifp->if_snd.ifq_drv_maxlen = ifqmaxlen;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ic->ic_ifp = ifp;
@@ -319,11 +302,8 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	ic->ic_headroom = sizeof(struct malo_txrec) -
 		sizeof(struct ieee80211_frame);
 
-	/* get mac address from hardware */
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, sc->malo_hwspecs.macaddr);
-
 	/* call MI attach routine. */
-	ieee80211_ifattach(ic);
+	ieee80211_ifattach(ic, sc->malo_hwspecs.macaddr);
 	/* override default methods */
 	ic->ic_vap_create = malo_vap_create;
 	ic->ic_vap_delete = malo_vap_delete;
@@ -336,7 +316,11 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 
 	sc->malo_invalid = 0;		/* ready to go, enable int handling */
 
-	malo_bpfattach(sc);
+	ieee80211_radiotap_attach(ic,
+	    &sc->malo_tx_th.wt_ihdr, sizeof(sc->malo_tx_th),
+		MALO_TX_RADIOTAP_PRESENT,
+	    &sc->malo_rx_th.wr_ihdr, sizeof(sc->malo_rx_th),
+		MALO_RX_RADIOTAP_PRESENT);
 
 	/*
 	 * Setup dynamic sysctl's.
@@ -348,6 +332,8 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	malo_announce(sc);
 
 	return 0;
+bad2:
+	malo_dma_cleanup(sc);
 bad1:
 	malo_hal_detach(mh);
 bad:
@@ -1090,7 +1076,7 @@ malo_tx_proc(void *arg, int npending)
 
 	if (nreaped != 0) {
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
-		ifp->if_timer = 0;
+		sc->malo_timer = 0;
 		malo_start(ifp);
 	}
 }
@@ -1108,6 +1094,7 @@ malo_tx_start(struct malo_softc *sc, struct ieee80211_node *ni,
 	struct ieee80211_frame *wh;
 	struct ifnet *ifp = sc->malo_ifp;
 	struct ieee80211com *ic = ifp->if_l2com;
+	struct ieee80211vap *vap = ni->ni_vap;
 	struct malo_txdesc *ds;
 	struct malo_txrec *tr;
 	struct malo_txq *txq;
@@ -1165,14 +1152,14 @@ malo_tx_start(struct malo_softc *sc, struct ieee80211_node *ni,
 		wh = mtod(m0, struct ieee80211_frame *);
 	}
 
-	if (bpf_peers_present(ifp->if_bpf)) {
+	if (ieee80211_radiotap_active_vap(vap)) {
 		sc->malo_tx_th.wt_flags = 0;	/* XXX */
 		if (iswep)
 			sc->malo_tx_th.wt_flags |= IEEE80211_RADIOTAP_F_WEP;
 		sc->malo_tx_th.wt_txpower = ni->ni_txpower;
 		sc->malo_tx_th.wt_antenna = sc->malo_txantenna;
 
-		bpf_mtap2(ifp->if_bpf, &sc->malo_tx_th, sc->malo_tx_th_len, m0);
+		ieee80211_radiotap_tx(vap, m0);
 	}
 
 	/*
@@ -1273,7 +1260,7 @@ malo_tx_start(struct malo_softc *sc, struct ieee80211_node *ni,
 	MALO_TXDESC_SYNC(txq, ds, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 	ifp->if_opackets++;
-	ifp->if_timer = 5;
+	sc->malo_timer = 5;
 	MALO_TXQ_UNLOCK(txq);
 	return 0;
 #undef IEEE80211_DIR_DSTODS
@@ -1307,20 +1294,9 @@ malo_start(struct ifnet *ifp)
 			break;
 		}
 		/*
-		 * Encapsulate the packet in prep for transmission.
-		 */
-		m = ieee80211_encap(ni, m);
-		if (m == NULL) {
-			DPRINTF(sc, MALO_DEBUG_XMIT,
-			    "%s: encapsulation failure\n", __func__);
-			sc->malo_stats.mst_tx_encap++;
-			goto bad;
-		}
-		/*
 		 * Pass the frame to the h/w for transmission.
 		 */
 		if (malo_tx_start(sc, ni, bf, m)) {
-	bad:
 			ifp->if_oerrors++;
 			if (bf != NULL) {
 				bf->bf_m = NULL;
@@ -1363,10 +1339,17 @@ malo_start(struct ifnet *ifp)
 }
 
 static void
-malo_watchdog(struct ifnet *ifp)
+malo_watchdog(void *arg)
 {
-	struct malo_softc *sc = ifp->if_softc;
+	struct malo_softc *sc;
+	struct ifnet *ifp;
 
+	sc = arg;
+	callout_reset(&sc->malo_watchdog_timer, hz, malo_watchdog, sc);
+	if (sc->malo_timer == 0 || --sc->malo_timer > 0)
+		return;
+
+	ifp = sc->malo_ifp;
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) && !sc->malo_invalid) {
 		if_printf(ifp, "watchdog timeout\n");
 
@@ -1560,6 +1543,7 @@ malo_init_locked(struct malo_softc *sc)
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	malo_hal_intrset(mh, sc->malo_imask);
+	callout_reset(&sc->malo_watchdog_timer, hz, malo_watchdog, sc);
 }
 
 static void
@@ -1601,14 +1585,14 @@ malo_setmcastfilter(struct malo_softc *sc)
 	    (ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)))
 		goto all;
 	
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
 
 		if (nmc == MALO_HAL_MCAST_MAX) {
 			ifp->if_flags |= IFF_ALLMULTI;
-			IF_ADDR_UNLOCK(ifp);
+			if_maddr_runlock(ifp);
 			goto all;
 		}
 		IEEE80211_ADDR_COPY(mp,
@@ -1616,7 +1600,7 @@ malo_setmcastfilter(struct malo_softc *sc)
 
 		mp += IEEE80211_ADDR_LEN, nmc++;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	malo_hal_setmcast(sc->malo_mh, nmc, macs);
 
@@ -1634,14 +1618,6 @@ malo_mode_init(struct malo_softc *sc)
 	struct ifnet *ifp = sc->malo_ifp;
 	struct ieee80211com *ic = ifp->if_l2com;
 	struct malo_hal *mh = sc->malo_mh;
-
-	/*
-	 * Handle any link-level address change.  Note that we only
-	 * need to force ic_myaddr; any other addresses are handled
-	 * as a byproduct of the ifnet code marking the interface
-	 * down then up.
-	 */
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, IF_LLADDR(ifp));
 
 	/*
 	 * NB: Ignore promisc in hostap mode; it's set by the
@@ -1731,7 +1707,8 @@ malo_stop_locked(struct ifnet *ifp, int disable)
 	 * is gone (invalid).
 	 */
 	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
-	ifp->if_timer = 0;
+	callout_stop(&sc->malo_watchdog_timer);
+	sc->malo_timer = 0;
 	/* diable interrupt.  */
 	malo_hal_intrset(mh, 0);
 	/* turn off the radio.  */
@@ -1936,32 +1913,6 @@ malo_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 }
 
 static void
-malo_bpfattach(struct malo_softc *sc)
-{
-	struct ifnet *ifp = sc->malo_ifp;
-
-	bpfattach(ifp, DLT_IEEE802_11_RADIO,
-	    sizeof(struct ieee80211_frame) + sizeof(sc->malo_tx_th));
-
-	/*
-	 * Initialize constant fields.
-	 * XXX make header lengths a multiple of 32-bits so subsequent
-	 *     headers are properly aligned; this is a kludge to keep
-	 *     certain applications happy.
-	 *
-	 * NB: the channel is setup each time we transition to the
-	 *     RUN state to avoid filling it in for each frame.
-	 */
-	sc->malo_tx_th_len = roundup(sizeof(sc->malo_tx_th), sizeof(uint32_t));
-	sc->malo_tx_th.wt_ihdr.it_len = htole16(sc->malo_tx_th_len);
-	sc->malo_tx_th.wt_ihdr.it_present = htole32(MALO_TX_RADIOTAP_PRESENT);
-
-	sc->malo_rx_th_len = roundup(sizeof(sc->malo_rx_th), sizeof(uint32_t));
-	sc->malo_rx_th.wr_ihdr.it_len = htole16(sc->malo_rx_th_len);
-	sc->malo_rx_th.wr_ihdr.it_present = htole32(MALO_RX_RADIOTAP_PRESENT);
-}
-
-static void
 malo_sysctlattach(struct malo_softc *sc)
 {
 #ifdef	MALO_DEBUG
@@ -2157,7 +2108,7 @@ malo_rx_proc(void *arg, int npending)
 		 * payload prior to constructing the header.
 		 */
 		m = bf->bf_m;
-		data = mtod(m, uint8_t *);;
+		data = mtod(m, uint8_t *);
 		hdrlen = ieee80211_anyhdrsize(data + sizeof(uint16_t));
 		off = sizeof(uint16_t) + sizeof(struct ieee80211_frame_addr4);
 
@@ -2209,14 +2160,11 @@ malo_rx_proc(void *arg, int npending)
 				*(uint16_t *)wh->i_qos = ds->qosctrl;
 			}
 		}
-		if (sc->malo_drvbpf != NULL) {
+		if (ieee80211_radiotap_active(ic)) {
 			sc->malo_rx_th.wr_flags = 0;
 			sc->malo_rx_th.wr_rate = ds->rate;
 			sc->malo_rx_th.wr_antsignal = rssi;
 			sc->malo_rx_th.wr_antnoise = ds->nf;
-
-			bpf_mtap2(ifp->if_bpf, &sc->malo_rx_th,
-			    sc->malo_rx_th_len, m);
 		}
 #ifdef MALO_DEBUG
 		if (IFF_DUMPPKTS_RECV(sc, wh)) {
@@ -2230,10 +2178,10 @@ malo_rx_proc(void *arg, int npending)
 		ni = ieee80211_find_rxnode(ic,
 		    (struct ieee80211_frame_min *)wh);
 		if (ni != NULL) {
-			(void) ieee80211_input(ni, m, rssi, ds->nf, 0);
+			(void) ieee80211_input(ni, m, rssi, ds->nf);
 			ieee80211_free_node(ni);
 		} else
-			(void) ieee80211_input_all(ic, m, rssi, ds->nf, 0);
+			(void) ieee80211_input_all(ic, m, rssi, ds->nf);
 rx_next:
 		/* NB: ignore ENOMEM so we process more descriptors */
 		(void) malo_rxbuf_init(sc, bf);
@@ -2289,8 +2237,6 @@ malo_detach(struct malo_softc *sc)
 		sc->malo_tq = NULL;
 	}
 
-	bpfdetach(ifp);
-
 	/*
 	 * NB: the order of these is important:
 	 * o call the 802.11 layer before detaching the hal to
@@ -2304,6 +2250,7 @@ malo_detach(struct malo_softc *sc)
 	 * Other than that, it's straightforward...
 	 */
 	ieee80211_ifdetach(ic);
+	callout_drain(&sc->malo_watchdog_timer);
 	malo_dma_cleanup(sc);
 	malo_tx_cleanup(sc);
 	malo_hal_detach(sc->malo_mh);

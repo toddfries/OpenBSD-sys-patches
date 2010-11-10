@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.106 2009/02/26 20:54:43 thompsa Exp $
+# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.110 2010/04/22 09:20:17 netchild Exp $
 
 # Part of a unified Makefile for building kernels.  This part contains all
 # of the definitions that need to be before %BEFORE_DEPEND.
@@ -53,11 +53,7 @@ C_DIALECT= -std=c99
 NOSTDINC= -nostdinc
 .endif
 
-.if defined(WITH_LEGACY)
-LEGACY_INC= -I$S/legacy
-.endif
-
-INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. ${LEGACY_INC} -I$S
+INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
 
 # This hack lets us use the OpenBSD altq code without spamming a new
 # include path into contrib'ed source files.
@@ -132,11 +128,8 @@ NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${PROF} ${.IMPSRC}
 NORMAL_M= ${AWK} -f $S/tools/makeobjops.awk ${.IMPSRC} -c ; \
 	  ${CC} -c ${CFLAGS} ${WERROR} ${PROF} ${.PREFIX}.c
 
-.if defined(CTFCONVERT)
-NORMAL_CTFCONVERT= ${CTFCONVERT} ${CTFFLAGS} ${.TARGET}
-.else
-NORMAL_CTFCONVERT=
-.endif
+NORMAL_CTFCONVERT= [ -z "${CTFCONVERT}" -o -n "${NO_CTF}" ] || \
+		   ${CTFCONVERT} ${CTFFLAGS} ${.TARGET}
 
 NORMAL_LINT=	${LINT} ${LINTFLAGS} ${CFLAGS:M-[DIU]*} ${.IMPSRC}
 
@@ -146,10 +139,7 @@ SYSTEM_DEP= Makefile ${SYSTEM_OBJS}
 SYSTEM_OBJS= locore.o ${MDOBJS} ${OBJS}
 SYSTEM_OBJS+= ${SYSTEM_CFILES:.c=.o}
 SYSTEM_OBJS+= hack.So
-.if defined(CTFMERGE)
-SYSTEM_CTFMERGE= ${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${SYSTEM_OBJS} vers.o
-LD+= -g
-.endif
+SYSTEM_CTFMERGE= [ -z "${CTFMERGE}" -o -n "${NO_CTF}" ] || ${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${SYSTEM_OBJS} vers.o
 SYSTEM_LD= @${LD} -Bdynamic -T ${LDSCRIPT} \
 	-warn-common -export-dynamic -dynamic-linker /red/herring \
 	-o ${.TARGET} -X ${SYSTEM_OBJS} vers.o

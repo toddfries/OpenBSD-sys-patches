@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/ia32/ia32_sigtramp.S,v 1.4 2009/01/31 11:37:21 obrien Exp $
+ * $FreeBSD: src/sys/amd64/ia32/ia32_sigtramp.S,v 1.5 2009/04/01 13:09:26 kib Exp $
  */
 
 #include "opt_compat.h"
@@ -45,8 +45,6 @@ ia32_sigcode:
 	calll	*IA32_SIGF_HANDLER(%esp)
 	leal	IA32_SIGF_UC(%esp),%eax	/* get ucontext */
 	pushl	%eax
-	mov	IA32_UC_ES(%eax),%es	/* restore %es */
-	mov	IA32_UC_DS(%eax),%ds	/* restore %ds */
 	movl	$SYS_sigreturn,%eax
 	pushl	%eax			/* junk to fake return addr. */
 	int	$0x80			/* enter kernel with args */
@@ -60,8 +58,6 @@ freebsd4_ia32_sigcode:
 	calll	*IA32_SIGF_HANDLER(%esp)
 	leal	IA32_SIGF_UC4(%esp),%eax/* get ucontext */
 	pushl	%eax
-	mov	IA32_UC4_ES(%eax),%es	/* restore %es */
-	mov	IA32_UC4_DS(%eax),%ds	/* restore %ds */
 	movl	$344,%eax		/* 4.x SYS_sigreturn */
 	pushl	%eax			/* junk to fake return addr. */
 	int	$0x80			/* enter kernel with args */

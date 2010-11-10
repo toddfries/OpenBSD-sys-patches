@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_socket.c,v 1.27 2006/07/21 20:40:13 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_socket.c,v 1.28 2009/05/29 06:04:26 delphij Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,7 +120,8 @@ svr4_add_socket(td, path, st)
 	struct stat *st;
 {
 	struct svr4_sockcache_entry *e;
-	int len, error;
+	size_t len;
+	int error;
 
 	e = malloc(sizeof(*e), M_TEMP, M_WAITOK);
 	e->cookie = NULL;

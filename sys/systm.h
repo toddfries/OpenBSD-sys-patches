@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)systm.h	8.7 (Berkeley) 3/29/95
- * $FreeBSD: src/sys/sys/systm.h,v 1.272 2009/03/06 15:35:37 kib Exp $
+ * $FreeBSD: src/sys/sys/systm.h,v 1.286 2010/05/24 11:40:49 mav Exp $
  */
 
 #ifndef _SYS_SYSTM_H_
@@ -45,8 +45,6 @@
 #include <sys/queue.h>
 #include <sys/stdint.h>		/* for people using printf mainly */
 
-extern int securelevel;		/* system security level (see init(8)) */
-
 extern int cold;		/* nonzero if we are doing a cold boot */
 extern int rebooting;		/* boot() has been called. */
 extern const char *panicstr;	/* panic message */
@@ -54,8 +52,7 @@ extern char version[];		/* system version */
 extern char copyright[];	/* system copyright */
 extern int kstack_pages;	/* number of kernel stack pages */
 
-extern int nswap;		/* size of swap space */
-
+extern u_long pagesizes[];	/* supported page sizes */
 extern long physmem;		/* physical memory */
 extern long realmem;		/* 'real' memory */
 
@@ -65,6 +62,15 @@ extern int boothowto;		/* reboot flags, from console subsystem */
 extern int bootverbose;		/* nonzero to print verbose messages */
 
 extern int maxusers;		/* system tune hint */
+extern int ngroups_max;		/* max # of supplemental groups */
+extern int vm_guest;		/* Running as virtual machine guest? */
+
+/*
+ * Detected virtual machine guest types. The intention is to expand
+ * and/or add to the VM_GUEST_VM type if specific VM functionality is
+ * ever implemented (e.g. vendor-specific paravirtualization features).
+ */
+enum VM_GUEST { VM_GUEST_NO = 0, VM_GUEST_VM, VM_GUEST_XEN };
 
 #ifdef	INVARIANTS		/* The option is always available */
 #define	KASSERT(exp,msg) do {						\
@@ -90,6 +96,17 @@ extern int maxusers;		/* system tune hint */
 #define	_CTASSERT(x, y)		__CTASSERT(x, y)
 #define	__CTASSERT(x, y)	typedef char __assert ## y[(x) ? 1 : -1]
 #endif
+
+/*
+ * Assert that a pointer can be loaded from memory atomically.
+ *
+ * This assertion enforces stronger alignment than necessary.  For example,
+ * on some architectures, atomicity for unaligned loads will depend on
+ * whether or not the load spans multiple cache lines.
+ */
+#define	ASSERT_ATOMIC_LOAD_PTR(var, msg)				\
+	KASSERT(sizeof(var) == sizeof(void *) &&			\
+	    ((uintptr_t)&(var) & (sizeof(void *) - 1)) == 0, msg)
 
 /*
  * XXX the hints declarations are even more misplaced than most declarations
@@ -147,12 +164,14 @@ void	panic(const char *, ...) __dead2 __printflike(1, 2);
 #endif
 
 void	cpu_boot(int);
+void	cpu_flush_dcache(void *, size_t);
 void	cpu_rootconf(void);
 void	critical_enter(void);
 void	critical_exit(void);
 void	init_param1(void);
 void	init_param2(long physpages);
 void	init_param3(long kmempages);
+void	init_static_kenv(char *, size_t);
 void	tablefull(const char *);
 int	kvprintf(char const *, void (*)(int, void*), void *, int,
 	    __va_list) __printflike(1, 0);
@@ -221,6 +240,8 @@ void	hardclock_cpu(int usermode);
 void	softclock(void *);
 void	statclock(int usermode);
 void	profclock(int usermode, uintfptr_t pc);
+void	timer1clock(int usermode, uintfptr_t pc);
+void	timer2clock(int usermode, uintfptr_t pc);
 
 void	startprofclock(struct proc *);
 void	stopprofclock(struct proc *);

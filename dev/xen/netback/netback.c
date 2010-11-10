@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xen/netback/netback.c,v 1.2 2009/02/03 11:00:43 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xen/netback/netback.c,v 1.5 2010/03/12 22:58:52 rrs Exp $");
 #include "opt_sctp.h"
 
 #include <sys/param.h>
@@ -302,7 +302,7 @@ fixup_checksum(struct mbuf *m)
 		m->m_pkthdr.csum_flags &= ~CSUM_TCP;
 #ifdef SCTP
 	} else if (sw_csum & CSUM_SCTP) {
-		sctp_delayed_cksum(m);
+		sctp_delayed_cksum(m, iphlen);
 		sw_csum &= ~CSUM_SCTP;
 #endif
 	} else {

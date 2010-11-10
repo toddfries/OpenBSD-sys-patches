@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli_key.c,v 1.3 2006/06/05 21:38:54 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli_key.c,v 1.4 2010/01/25 16:58:58 trasz Exp $");
 
 #include <sys/param.h>
 #ifdef _KERNEL
@@ -120,7 +120,6 @@ g_eli_mkey_decrypt(const struct g_eli_metadata *md, const unsigned char *key,
 	g_eli_crypto_hmac(key, G_ELI_USERKEYLEN, "\x01", 1, enckey, 0);
 
 	mmkey = md->md_mkeys;
-	nkey = 0;
 	for (nkey = 0; nkey < G_ELI_MAXMKEYS; nkey++, mmkey += G_ELI_MKEYLEN) {
 		bit = (1 << nkey);
 		if (!(md->md_keys & bit))

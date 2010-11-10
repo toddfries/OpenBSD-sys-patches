@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2004-2008 University of Zagreb
  * Copyright (c) 2007-2008 FreeBSD Foundation
  *
@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_pipe.c,v 1.2 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_pipe.c,v 1.5 2010/04/30 07:09:13 trasz Exp $
  */
 
 /*
@@ -46,9 +46,10 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/time.h>
-#include <sys/vimage.h>
 
 #include <vm/uma.h>
+
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -815,14 +816,17 @@ pipe_dequeue(struct hookinfo *hinfo, struct timeval *now) {
 		}
 
 		/* Randomly discard the frame, according to BER setting */
-		if (hinfo->cfg.ber && 
-		    ((oldrand = rand) ^ (rand = random())<<17) >=
-		    hinfo->ber_p[priv->overhead + m->m_pkthdr.len] ) {
-			hinfo->stats.out_disc_frames++;
-			hinfo->stats.out_disc_octets += m->m_pkthdr.len;
-			uma_zfree(ngp_zone, ngp_h);
-			m_freem(m);
-			continue;
+		if (hinfo->cfg.ber) {
+			oldrand = rand;
+			rand = random();
+			if (((oldrand ^ rand) << 17) >=
+			    hinfo->ber_p[priv->overhead + m->m_pkthdr.len]) {
+				hinfo->stats.out_disc_frames++;
+				hinfo->stats.out_disc_octets += m->m_pkthdr.len;
+				uma_zfree(ngp_zone, ngp_h);
+				m_freem(m);
+				continue;
+			}
 		}
 
 		/* Discard frame if outbound queue size limit exceeded */

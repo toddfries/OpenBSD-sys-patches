@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/pci/psycho.c,v 1.81 2008/12/15 15:31:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/pci/psycho.c,v 1.88 2010/03/31 22:32:56 marius Exp $");
 
 /*
  * Support for `Hummingbird' (UltraSPARC IIe), `Psycho' and `Psycho+'
@@ -83,7 +83,7 @@ static void psycho_set_intr(struct psycho_softc *, u_int, bus_addr_t,
     driver_filter_t, driver_intr_t);
 static int psycho_find_intrmap(struct psycho_softc *, u_int, bus_addr_t *,
     bus_addr_t *, u_long *);
-static driver_filter_t psycho_dmasync;
+static driver_filter_t psycho_dma_sync_stub;
 static void psycho_intr_enable(void *);
 static void psycho_intr_disable(void *);
 static void psycho_intr_assign(void *);
@@ -115,6 +115,7 @@ static bus_alloc_resource_t psycho_alloc_resource;
 static bus_activate_resource_t psycho_activate_resource;
 static bus_deactivate_resource_t psycho_deactivate_resource;
 static bus_release_resource_t psycho_release_resource;
+static bus_describe_intr_t psycho_describe_intr;
 static bus_get_dma_tag_t psycho_get_dma_tag;
 static pcib_maxslots_t psycho_maxslots;
 static pcib_read_config_t psycho_read_config;
@@ -139,6 +140,7 @@ static device_method_t psycho_methods[] = {
 	DEVMETHOD(bus_activate_resource,	psycho_activate_resource),
 	DEVMETHOD(bus_deactivate_resource,	psycho_deactivate_resource),
 	DEVMETHOD(bus_release_resource,	psycho_release_resource),
+	DEVMETHOD(bus_describe_intr,	psycho_describe_intr),
 	DEVMETHOD(bus_get_dma_tag,	psycho_get_dma_tag),
 
 	/* pcib interface */
@@ -150,7 +152,7 @@ static device_method_t psycho_methods[] = {
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_node,	psycho_get_node),
 
-	{ 0, 0 }
+	KOBJMETHOD_END
 };
 
 static devclass_t psycho_devclass;
@@ -175,24 +177,24 @@ struct psycho_icarg {
 	bus_addr_t		pica_clr;
 };
 
-struct psycho_dmasync {
+struct psycho_dma_sync {
 	struct psycho_softc	*pds_sc;
 	driver_filter_t		*pds_handler;	/* handler to call */
 	void			*pds_arg;	/* argument for the handler */
 	void			*pds_cookie;	/* parent bus int. cookie */
 	device_t		pds_ppb;	/* farest PCI-PCI bridge */
-	uint8_t			pds_bus;	/* bus of farest PCI device */
-	uint8_t			pds_slot;	/* slot of farest PCI device */
-	uint8_t			pds_func;	/* func. of farest PCI device */
+	uint8_t			pds_bus;	/* bus of farest PCI dev. */
+	uint8_t			pds_slot;	/* slot of farest PCI dev. */
+	uint8_t			pds_func;	/* func. of farest PCI dev. */
 };
 
-#define	PSYCHO_READ8(sc, off) \
+#define	PSYCHO_READ8(sc, off)						\
 	bus_read_8((sc)->sc_mem_res, (off))
-#define	PSYCHO_WRITE8(sc, off, v) \
+#define	PSYCHO_WRITE8(sc, off, v)					\
 	bus_write_8((sc)->sc_mem_res, (off), (v))
-#define	PCICTL_READ8(sc, off) \
+#define	PCICTL_READ8(sc, off)						\
 	PSYCHO_READ8((sc), (sc)->sc_pcictl + (off))
-#define	PCICTL_WRITE8(sc, off, v) \
+#define	PCICTL_WRITE8(sc, off, v)					\
 	PSYCHO_WRITE8((sc), (sc)->sc_pcictl + (off), (v))
 
 /*
@@ -205,8 +207,8 @@ struct psycho_dmasync {
  * "Hummingbird" is the UltraSPARC IIe onboard UPA to PCI bridge. It's
  * basically the same as Sabre but without an APB underneath it.
  *
- * "Psycho" and "Psycho+" are dual UPA to PCI bridges.  They sit on the UPA bus
- * and manage two PCI buses.  "Psycho" has two 64-bit 33MHz buses, while
+ * "Psycho" and "Psycho+" are dual UPA to PCI bridges.  They sit on the UPA
+ * bus and manage two PCI buses.  "Psycho" has two 64-bit 33MHz buses, while
  * "Psycho+" controls both a 64-bit 33Mhz and a 64-bit 66Mhz PCI bus.  You
  * will usually find a "Psycho+" since I don't think the original "Psycho"
  * ever shipped, and if it did it would be in the U30.
@@ -224,22 +226,20 @@ struct psycho_dmasync {
  * providing two PCI buses.
  */
 
-#define	OFW_PCI_TYPE		"pci"
-
 struct psycho_desc {
 	const char	*pd_string;
 	int		pd_mode;
 	const char	*pd_name;
 };
 
-static const struct psycho_desc psycho_compats[] = {
+static const struct psycho_desc const psycho_compats[] = {
 	{ "pci108e,8000", PSYCHO_MODE_PSYCHO,	"Psycho compatible" },
 	{ "pci108e,a000", PSYCHO_MODE_SABRE,	"Sabre compatible" },
 	{ "pci108e,a001", PSYCHO_MODE_SABRE,	"Hummingbird compatible" },
 	{ NULL,		  0,			NULL }
 };
 
-static const struct psycho_desc psycho_models[] = {
+static const struct psycho_desc const psycho_models[] = {
 	{ "SUNW,psycho",  PSYCHO_MODE_PSYCHO,	"Psycho" },
 	{ "SUNW,sabre",   PSYCHO_MODE_SABRE,	"Sabre" },
 	{ NULL,		  0,			NULL }
@@ -265,7 +265,8 @@ psycho_get_desc(device_t dev)
 
 	rv = psycho_find_desc(psycho_models, ofw_bus_get_model(dev));
 	if (rv == NULL)
-		rv = psycho_find_desc(psycho_compats, ofw_bus_get_compat(dev));
+		rv = psycho_find_desc(psycho_compats,
+		    ofw_bus_get_compat(dev));
 	return (rv);
 }
 
@@ -275,7 +276,7 @@ psycho_probe(device_t dev)
 	const char *dtype;
 
 	dtype = ofw_bus_get_type(dev);
-	if (dtype != NULL && strcmp(dtype, OFW_PCI_TYPE) == 0 &&
+	if (dtype != NULL && strcmp(dtype, OFW_TYPE_PCI) == 0 &&
 	    psycho_get_desc(dev) != NULL) {
 		device_set_desc(dev, "U2P UPA-PCI bridge");
 		return (0);
@@ -296,8 +297,8 @@ psycho_attach(device_t dev)
 	phandle_t child, node;
 	uint32_t dvmabase, prop, prop_array[2];
 	int32_t rev;
-	u_int ver;
-	int i, n, nrange, rid;
+	u_int rerun, ver;
+	int i, j;
 
 	node = ofw_bus_get_node(dev);
 	sc = device_get_softc(dev);
@@ -315,7 +316,7 @@ psycho_attach(device_t dev)
 	 * (2) the shared Psycho configuration registers
 	 */
 	if (sc->sc_mode == PSYCHO_MODE_PSYCHO) {
-		rid = 2;
+		i = 2;
 		sc->sc_pcictl =
 		    bus_get_resource_start(dev, SYS_RES_MEMORY, 0) -
 		    bus_get_resource_start(dev, SYS_RES_MEMORY, 2);
@@ -332,18 +333,18 @@ psycho_attach(device_t dev)
 			/* NOTREACHED */
 		}
 	} else {
-		rid = 0;
+		i = 0;
 		sc->sc_pcictl = PSR_PCICTL0;
 		sc->sc_half = 0;
 	}
-	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
+	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &i,
 	    (sc->sc_mode == PSYCHO_MODE_PSYCHO ? RF_SHAREABLE : 0) |
 	    RF_ACTIVE);
 	if (sc->sc_mem_res == NULL)
 		panic("%s: could not allocate registers", __func__);
 
 	/*
-	 * Match other Psycho's that are already configured against
+	 * Match other Psychos that are already configured against
 	 * the base physical address.  This will be the same for a
 	 * pair of devices that share register space.
 	 */
@@ -363,6 +364,8 @@ psycho_attach(device_t dev)
 			panic("%s: could not malloc mutex", __func__);
 		mtx_init(sc->sc_mtx, "pcib_mtx", NULL, MTX_SPIN);
 	} else {
+		if (sc->sc_mode != PSYCHO_MODE_PSYCHO)
+			panic("%s: no partner expected", __func__);
 		if (mtx_initialized(osc->sc_mtx) == 0)
 			panic("%s: mutex not initialized", __func__);
 		sc->sc_mtx = osc->sc_mtx;
@@ -408,16 +411,17 @@ psycho_attach(device_t dev)
 	case 0:
 		dr |= DIAG_RTRY_DIS;
 		dr &= ~DIAG_DWSYNC_DIS;
-		/* XXX need to also disable rerun of the streaming buffers. */
+		rerun = 0;
 		break;
 	case 1:
 		csr &= ~PCICTL_ARB_PARK;
 		dr |= DIAG_RTRY_DIS | DIAG_DWSYNC_DIS;
-		/* XXX need to also disable rerun of the streaming buffers. */
+		rerun = 0;
 		break;
 	default:
 		dr |= DIAG_DWSYNC_DIS;
 		dr &= ~DIAG_RTRY_DIS;
+		rerun = 1;
 		break;
 	}
 
@@ -460,13 +464,12 @@ psycho_attach(device_t dev)
 	    rman_manage_region(&sc->sc_pci_mem_rman, 0, PSYCHO_MEM_SIZE) != 0)
 		panic("%s: failed to set up memory rman", __func__);
 
-	nrange = OF_getprop_alloc(node, "ranges", sizeof(*range),
-	    (void **)&range);
+	i = OF_getprop_alloc(node, "ranges", sizeof(*range), (void **)&range);
 	/*
 	 * Make sure that the expected ranges are present.  The
 	 * OFW_PCI_CS_MEM64 one is not currently used though.
 	 */
-	if (nrange != PSYCHO_NRANGE)
+	if (i != PSYCHO_NRANGE)
 		panic("%s: unsupported number of ranges", __func__);
 	/*
 	 * Find the addresses of the various bus spaces.
@@ -474,11 +477,12 @@ psycho_attach(device_t dev)
 	 * The physical start addresses of the ranges are the configuration,
 	 * memory and I/O handles.
 	 */
-	for (n = 0; n < PSYCHO_NRANGE; n++) {
-		i = OFW_PCI_RANGE_CS(&range[n]);
-		if (sc->sc_pci_bh[i] != 0)
-			panic("%s: duplicate range for space %d", __func__, i);
-		sc->sc_pci_bh[i] = OFW_PCI_RANGE_PHYS(&range[n]);
+	for (i = 0; i < PSYCHO_NRANGE; i++) {
+		j = OFW_PCI_RANGE_CS(&range[i]);
+		if (sc->sc_pci_bh[j] != 0)
+			panic("%s: duplicate range for space %d",
+			    __func__, j);
+		sc->sc_pci_bh[j] = OFW_PCI_RANGE_PHYS(&range[i]);
 	}
 	free(range, M_OFWPROP);
 
@@ -493,10 +497,11 @@ psycho_attach(device_t dev)
 		/*
 		 * Hunt through all the interrupt mapping regs and register
 		 * our interrupt controller for the corresponding interrupt
-		 * vectors.
+		 * vectors.  We do this early in order to be able to catch
+		 * stray interrupts.
 		 */
-		for (n = 0; n <= PSYCHO_MAX_INO; n++) {
-			if (psycho_find_intrmap(sc, n, &intrmap, &intrclr,
+		for (i = 0; i <= PSYCHO_MAX_INO; i++) {
+			if (psycho_find_intrmap(sc, i, &intrmap, &intrclr,
 			    NULL) == 0)
 				continue;
 			pica = malloc(sizeof(*pica), M_DEVBUF, M_NOWAIT);
@@ -514,31 +519,32 @@ psycho_attach(device_t dev)
 			 */
 			device_printf(dev,
 			    "intr map (INO %d, %s) %#lx: %#lx, clr: %#lx\n",
-			    n, intrmap <= PSR_PCIB3_INT_MAP ? "PCI" : "OBIO",
-			    (u_long)intrmap, (u_long)PSYCHO_READ8(sc, intrmap),
-			    (u_long)intrclr);
-			PSYCHO_WRITE8(sc, intrmap, INTMAP_VEC(sc->sc_ign, n));
-			PSYCHO_WRITE8(sc, intrclr, 0);
+			    i, intrmap <= PSR_PCIB3_INT_MAP ? "PCI" : "OBIO",
+			    (u_long)intrmap, (u_long)PSYCHO_READ8(sc,
+			    intrmap), (u_long)intrclr);
+			PSYCHO_WRITE8(sc, intrmap, INTMAP_VEC(sc->sc_ign, i));
+			PSYCHO_WRITE8(sc, intrclr, INTCLR_IDLE);
 			PSYCHO_WRITE8(sc, intrmap,
-			    INTMAP_ENABLE(INTMAP_VEC(sc->sc_ign, n),
+			    INTMAP_ENABLE(INTMAP_VEC(sc->sc_ign, i),
 			    PCPU_GET(mid)));
 #endif
-			if (intr_controller_register(INTMAP_VEC(sc->sc_ign, n),
-			    &psycho_ic, pica) != 0)
-				panic("%s: could not register interrupt "
-				    "controller for INO %d", __func__, n);
+			j = intr_controller_register(INTMAP_VEC(sc->sc_ign,
+			    i), &psycho_ic, pica);
+			if (j != 0)
+				device_printf(dev, "could not register "
+				    "interrupt controller for INO %d (%d)\n",
+				    i, j);
 		}
 
-		if (sc->sc_mode == PSYCHO_MODE_PSYCHO) {
-			/* Initialize the counter-timer. */
+		if (sc->sc_mode == PSYCHO_MODE_PSYCHO)
 			sparc64_counter_init(device_get_nameunit(dev),
 			    rman_get_bustag(sc->sc_mem_res),
 			    rman_get_bushandle(sc->sc_mem_res), PSR_TC0);
-		}
 
 		/*
 		 * Set up IOMMU and PCI configuration if we're the first
-		 * of a pair of Psycho's to arrive here.
+		 * of a pair of Psychos to arrive here or a Hummingbird
+		 * or Sabre.
 		 *
 		 * We should calculate a TSB size based on amount of RAM
 		 * and number of bus controllers and number and type of
@@ -550,16 +556,17 @@ psycho_attach(device_t dev)
 		    M_NOWAIT | M_ZERO);
 		if (sc->sc_is == NULL)
 			panic("%s: malloc iommu_state failed", __func__);
+		sc->sc_is->is_flags = IOMMU_PRESERVE_PROM;
 		if (sc->sc_mode == PSYCHO_MODE_SABRE)
 			sc->sc_is->is_pmaxaddr =
 			    IOMMU_MAXADDR(SABRE_IOMMU_BITS);
 		else
 			sc->sc_is->is_pmaxaddr =
 			    IOMMU_MAXADDR(PSYCHO_IOMMU_BITS);
-		sc->sc_is->is_sb[0] = 0;
-		sc->sc_is->is_sb[1] = 0;
+		sc->sc_is->is_sb[0] = sc->sc_is->is_sb[1] = 0;
 		if (OF_getproplen(node, "no-streaming-cache") < 0)
 			sc->sc_is->is_sb[0] = sc->sc_pcictl + PCR_STRBUF;
+		sc->sc_is->is_flags |= (rerun != 1) ? IOMMU_RERUN_DISABLE : 0;
 		psycho_iommu_init(sc, 3, dvmabase);
 	} else {
 		/* Just copy IOMMU state, config tag and address. */
@@ -581,16 +588,17 @@ psycho_attach(device_t dev)
 	sc->sc_pci_dmat->dt_cookie = sc->sc_is;
 	sc->sc_pci_dmat->dt_mt = &iommu_dma_methods;
 
-	n = OF_getprop(node, "bus-range", (void *)prop_array,
+	i = OF_getprop(node, "bus-range", (void *)prop_array,
 	    sizeof(prop_array));
-	if (n == -1)
+	if (i == -1)
 		panic("%s: could not get bus-range", __func__);
-	if (n != sizeof(prop_array))
-		panic("%s: broken bus-range (%d)", __func__, n);
+	if (i != sizeof(prop_array))
+		panic("%s: broken bus-range (%d)", __func__, i);
+	sc->sc_pci_secbus = prop_array[0];
+	sc->sc_pci_subbus = prop_array[1];
 	if (bootverbose)
 		device_printf(dev, "bus range %u to %u; PCI bus %d\n",
-		    prop_array[0], prop_array[1], prop_array[0]);
-	sc->sc_pci_secbus = prop_array[0];
+		    sc->sc_pci_secbus, sc->sc_pci_subbus, sc->sc_pci_secbus);
 
 	/* Clear any pending PCI error bits. */
 	PCIB_WRITE_CONFIG(dev, sc->sc_pci_secbus, PCS_DEVICE, PCS_FUNC,
@@ -655,15 +663,15 @@ psycho_attach(device_t dev)
 	PCIB_WRITE_CONFIG(dev, sc->sc_pci_secbus, PCS_DEVICE, PCS_FUNC,
 	    PCIR_LATTIMER, OFW_PCI_LATENCY, 1);
 
-	for (n = PCIR_VENDOR; n < PCIR_STATUS; n += sizeof(uint16_t))
-		le16enc(&sc->sc_pci_hpbcfg[n], bus_space_read_2(
+	for (i = PCIR_VENDOR; i < PCIR_STATUS; i += sizeof(uint16_t))
+		le16enc(&sc->sc_pci_hpbcfg[i], bus_space_read_2(
 		    sc->sc_pci_cfgt, sc->sc_pci_bh[OFW_PCI_CS_CONFIG],
 		    PSYCHO_CONF_OFF(sc->sc_pci_secbus, PCS_DEVICE,
-		    PCS_FUNC, n)));
-	for (n = PCIR_REVID; n <= PCIR_BIST; n += sizeof(uint8_t))
-		sc->sc_pci_hpbcfg[n] = bus_space_read_1(sc->sc_pci_cfgt,
+		    PCS_FUNC, i)));
+	for (i = PCIR_REVID; i <= PCIR_BIST; i += sizeof(uint8_t))
+		sc->sc_pci_hpbcfg[i] = bus_space_read_1(sc->sc_pci_cfgt,
 		    sc->sc_pci_bh[OFW_PCI_CS_CONFIG], PSYCHO_CONF_OFF(
-		    sc->sc_pci_secbus, PCS_DEVICE, PCS_FUNC, n));
+		    sc->sc_pci_secbus, PCS_DEVICE, PCS_FUNC, i));
 
 	ofw_bus_setup_iinfo(node, &sc->sc_pci_iinfo, sizeof(ofw_pci_intr_t));
 	/*
@@ -692,20 +700,29 @@ psycho_set_intr(struct psycho_softc *sc, u_int index, bus_addr_t intrmap,
 	int rid;
 
 	rid = index;
-	sc->sc_irq_res[index] = bus_alloc_resource_any(sc->sc_dev, SYS_RES_IRQ,
-	    &rid, RF_ACTIVE);
+	sc->sc_irq_res[index] = bus_alloc_resource_any(sc->sc_dev,
+	    SYS_RES_IRQ, &rid, RF_ACTIVE);
+	if (sc->sc_irq_res[index] == NULL && intrmap >= PSR_POWER_INT_MAP) {
+		/*
+		 * These interrupts aren't mandatory and not available
+		 * with all controllers (not even Psychos).
+		 */
+		return;
+	}
 	if (sc->sc_irq_res[index] == NULL ||
-	    INTIGN(vec = rman_get_start(sc->sc_irq_res[index])) != sc->sc_ign ||
+	    INTIGN(vec = rman_get_start(sc->sc_irq_res[index])) !=
+	    sc->sc_ign ||
 	    INTVEC(PSYCHO_READ8(sc, intrmap)) != vec ||
 	    intr_vectors[vec].iv_ic != &psycho_ic ||
-	    bus_setup_intr(sc->sc_dev, sc->sc_irq_res[index], INTR_TYPE_MISC,
-	    filt, intr, sc, &sc->sc_ihand[index]) != 0)
+	    bus_setup_intr(sc->sc_dev, sc->sc_irq_res[index],
+	    INTR_TYPE_MISC | INTR_FAST, filt, intr, sc,
+	    &sc->sc_ihand[index]) != 0)
 		panic("%s: failed to set up interrupt %d", __func__, index);
 }
 
 static int
-psycho_find_intrmap(struct psycho_softc *sc, u_int ino, bus_addr_t *intrmapptr,
-    bus_addr_t *intrclrptr, bus_addr_t *intrdiagptr)
+psycho_find_intrmap(struct psycho_softc *sc, u_int ino,
+    bus_addr_t *intrmapptr, bus_addr_t *intrclrptr, bus_addr_t *intrdiagptr)
 {
 	bus_addr_t intrclr, intrmap;
 	uint64_t diag;
@@ -791,7 +808,7 @@ psycho_ue(void *arg)
 	if ((afsr & UEAFSR_P_DTE) != 0)
 		iommu_decode_fault(sc->sc_is, afar);
 	panic("%s: uncorrectable DMA error AFAR %#lx AFSR %#lx",
-	    device_get_name(sc->sc_dev), (u_long)afar, (u_long)afsr);
+	    device_get_nameunit(sc->sc_dev), (u_long)afar, (u_long)afsr);
 	return (FILTER_HANDLED);
 }
 
@@ -821,7 +838,7 @@ psycho_pci_bus(void *arg)
 	afar = PCICTL_READ8(sc, PCR_AFA);
 	afsr = PCICTL_READ8(sc, PCR_AFS);
 	panic("%s: PCI bus %c error AFAR %#lx AFSR %#lx",
-	    device_get_name(sc->sc_dev), 'A' + sc->sc_half, (u_long)afar,
+	    device_get_nameunit(sc->sc_dev), 'A' + sc->sc_half, (u_long)afar,
 	    (u_long)afsr);
 	return (FILTER_HANDLED);
 }
@@ -865,7 +882,7 @@ psycho_wakeup(void *arg)
 {
 	struct psycho_softc *sc = arg;
 
-	/* Gee, we don't really have a framework to deal with this properly. */
+	/* We don't really have a framework to deal with this properly. */
 	device_printf(sc->sc_dev, "power management wakeup\n");
 	return (FILTER_HANDLED);
 }
@@ -910,6 +927,10 @@ psycho_read_config(device_t dev, u_int bus, u_int slot, u_int func, u_int reg,
 	int i;
 
 	sc = device_get_softc(dev);
+	if (bus < sc->sc_pci_secbus || bus > sc->sc_pci_subbus ||
+	    slot > PCI_SLOTMAX || func > PCI_FUNCMAX || reg > PCI_REGMAX)
+		return (-1);
+
 	bh = sc->sc_pci_bh[OFW_PCI_CS_CONFIG];
 
 	/*
@@ -982,14 +1003,18 @@ psycho_read_config(device_t dev, u_int bus, u_int slot, u_int func, u_int reg,
 }
 
 static void
-psycho_write_config(device_t dev, u_int bus, u_int slot, u_int func, u_int reg,
-    uint32_t val, int width)
+psycho_write_config(device_t dev, u_int bus, u_int slot, u_int func,
+    u_int reg, uint32_t val, int width)
 {
 	struct psycho_softc *sc;
 	bus_space_handle_t bh;
 	u_long offset = 0;
 
 	sc = device_get_softc(dev);
+	if (bus < sc->sc_pci_secbus || bus > sc->sc_pci_subbus ||
+	    slot > PCI_SLOTMAX || func > PCI_FUNCMAX || reg > PCI_REGMAX)
+		return;
+
 	offset = PSYCHO_CONF_OFF(bus, slot, func, reg);
 	bh = sc->sc_pci_bh[OFW_PCI_CS_CONFIG];
 	switch (width) {
@@ -1019,8 +1044,9 @@ psycho_route_interrupt(device_t bridge, device_t dev, int pin)
 
 	sc = device_get_softc(bridge);
 	pintr = pin;
-	if (ofw_bus_lookup_imap(ofw_bus_get_node(dev), &sc->sc_pci_iinfo, &reg,
-	    sizeof(reg), &pintr, sizeof(pintr), &mintr, sizeof(mintr), maskbuf))
+	if (ofw_bus_lookup_imap(ofw_bus_get_node(dev), &sc->sc_pci_iinfo,
+	    &reg, sizeof(reg), &pintr, sizeof(pintr), &mintr, sizeof(mintr),
+	    maskbuf))
 		return (mintr);
 	/*
 	 * If this is outside of the range for an intpin, it's likely a full
@@ -1042,7 +1068,8 @@ psycho_route_interrupt(device_t bridge, device_t dev, int pin)
 	intrmap = PSR_PCIA0_INT_MAP +
 	    8 * (pci_get_slot(dev) - 1 + 3 * sc->sc_half);
 	mintr = INTINO(PSYCHO_READ8(sc, intrmap)) + pin - 1;
-	device_printf(bridge, "guessing interrupt %d for device %d.%d pin %d\n",
+	device_printf(bridge,
+	    "guessing interrupt %d for device %d.%d pin %d\n",
 	    (int)mintr, pci_get_slot(dev), pci_get_function(dev), pin);
 	return (mintr);
 }
@@ -1065,9 +1092,9 @@ psycho_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 }
 
 static int
-psycho_dmasync(void *arg)
+psycho_dma_sync_stub(void *arg)
 {
-	struct psycho_dmasync *pds = arg;
+	struct psycho_dma_sync *pds = arg;
 
 	(void)PCIB_READ_CONFIG(pds->pds_ppb, pds->pds_bus, pds->pds_slot,
 	    pds->pds_func, PCIR_VENDOR, 2);
@@ -1110,7 +1137,7 @@ psycho_intr_clear(void *arg)
 	struct intr_vector *iv = arg;
 	struct psycho_icarg *pica = iv->iv_icarg;
 
-	PSYCHO_WRITE8(pica->pica_sc, pica->pica_clr, 0);
+	PSYCHO_WRITE8(pica->pica_sc, pica->pica_clr, INTCLR_IDLE);
 }
 
 static int
@@ -1125,7 +1152,7 @@ psycho_setup_intr(device_t dev, device_t child, struct resource *ires,
 	devclass_t pci_devclass;
 	device_t cdev, pdev, pcidev;
 	struct psycho_softc *sc;
-	struct psycho_dmasync *pds;
+	struct psycho_dma_sync *pds;
 	u_long vec;
 	int error;
 
@@ -1142,17 +1169,12 @@ psycho_setup_intr(device_t dev, device_t child, struct resource *ires,
 	}
 
 	/*
-	 * The Sabre-APB-combination has a bug where it does not drain
-	 * DMA write data for devices behind additional PCI-PCI bridges
-	 * underneath the APB PCI-PCI bridge.  The workaround is to do
-	 * a read on the farest PCI-PCI bridge followed by a read of the
-	 * PCI DMA write sync register of the Sabre.
-	 * XXX installing the wrapper for an affected device and the
-	 * actual workaround in psycho_dmasync() should be moved to
-	 * psycho(4)-specific bus_dma_tag_create() and bus_dmamap_sync()
-	 * methods, respectively, once DMA tag creation is newbus'ified,
-	 * so the workaround isn't only applied for interrupt handlers
-	 * but also for polling(4) callbacks.
+	 * The Sabre-APB-combination does not automatically flush DMA
+	 * write data for devices behind additional PCI-PCI bridges
+	 * underneath the APB PCI-PCI bridge.  The procedure for a
+	 * manual flush is to do a PIO read on the far side of the
+	 * farthest PCI-PCI bridge followed by a read of the PCI DMA
+	 * write sync register of the Sabre.
 	 */
 	if (sc->sc_mode == PSYCHO_MODE_SABRE) {
 		pds = malloc(sizeof(*pds), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -1191,20 +1213,20 @@ psycho_setup_intr(device_t dev, device_t child, struct resource *ires,
 			pds->pds_func = pci_get_function(pcidev);
 			if (bootverbose)
 				device_printf(dev, "installed DMA sync "
-				    "workaround for device %d.%d on bus %d\n",
+				    "wrapper for device %d.%d on bus %d\n",
 				    pds->pds_slot, pds->pds_func,
 				    pds->pds_bus);
 			if (intr == NULL) {
 				pds->pds_handler = filt;
 				error = bus_generic_setup_intr(dev, child,
-				    ires, flags, psycho_dmasync, intr, pds,
-				    cookiep);
+				    ires, flags, psycho_dma_sync_stub, intr,
+				    pds, cookiep);
 			} else {
 				pds->pds_handler = (driver_filter_t *)intr;
 				error = bus_generic_setup_intr(dev, child,
 				    ires, flags, filt,
-				    (driver_intr_t *)psycho_dmasync, pds,
-				    cookiep);
+				    (driver_intr_t *)psycho_dma_sync_stub,
+				    pds, cookiep);
 			}
 		} else
 			error = bus_generic_setup_intr(dev, child, ires,
@@ -1226,7 +1248,7 @@ psycho_teardown_intr(device_t dev, device_t child, struct resource *vec,
     void *cookie)
 {
 	struct psycho_softc *sc;
-	struct psycho_dmasync *pds;
+	struct psycho_dma_sync *pds;
 	int error;
 
 	sc = device_get_softc(dev);
@@ -1239,6 +1261,18 @@ psycho_teardown_intr(device_t dev, device_t child, struct resource *vec,
 		return (error);
 	}
 	return (bus_generic_teardown_intr(dev, child, vec, cookie));
+}
+
+static int
+psycho_describe_intr(device_t dev, device_t child, struct resource *vec,
+    void *cookie, const char *descr)
+{
+	struct psycho_softc *sc;
+
+	sc = device_get_softc(dev);
+	if (sc->sc_mode == PSYCHO_MODE_SABRE)
+		cookie = ((struct psycho_dma_sync *)cookie)->pds_cookie;
+	return (bus_generic_describe_intr(dev, child, vec, cookie, descr));
 }
 
 static struct resource *
@@ -1266,8 +1300,8 @@ psycho_alloc_resource(device_t bus, device_t child, int type, int *rid,
 		if (start != end)
 			panic("%s: XXX: interrupt range", __func__);
 		start = end = INTMAP_VEC(sc->sc_ign, end);
-		return (BUS_ALLOC_RESOURCE(device_get_parent(bus), child, type,
-		    rid, start, end, count, flags));
+		return (BUS_ALLOC_RESOURCE(device_get_parent(bus), child,
+		    type, rid, start, end, count, flags));
 	}
 	switch (type) {
 	case SYS_RES_MEMORY:
@@ -1314,8 +1348,8 @@ psycho_activate_resource(device_t bus, device_t child, int type, int rid,
 		    type, rid, r));
 	if (type == SYS_RES_MEMORY) {
 		/*
-		 * Need to memory-map the device space, as some drivers depend
-		 * on the virtual address being set and useable.
+		 * Need to memory-map the device space, as some drivers
+		 * depend on the virtual address being set and usable.
 		 */
 		error = sparc64_bus_mem_map(rman_get_bustag(r),
 		    rman_get_bushandle(r), rman_get_size(r), 0, 0, &p);
@@ -1382,7 +1416,8 @@ psycho_alloc_bus_tag(struct psycho_softc *sc, int type)
 {
 	bus_space_tag_t bt;
 
-	bt = malloc(sizeof(struct bus_space_tag), M_DEVBUF, M_NOWAIT | M_ZERO);
+	bt = malloc(sizeof(struct bus_space_tag), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("%s: out of memory", __func__);
 

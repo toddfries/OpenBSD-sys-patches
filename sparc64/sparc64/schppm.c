@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/schppm.c,v 1.1 2008/09/10 20:22:27 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/schppm.c,v 1.2 2009/03/19 20:38:45 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -73,7 +73,7 @@ static device_method_t schppm_methods[] = {
 	DEVMETHOD(device_probe,		schppm_probe),
 	DEVMETHOD(device_attach,	schppm_attach),
 
-	{ NULL, NULL }
+	KOBJMETHOD_END
 };
 
 static devclass_t schppm_devclass;

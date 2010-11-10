@@ -36,7 +36,7 @@
 #include "opt_uart.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/adm5120/uart_cpu_adm5120.c,v 1.2 2008/09/10 03:49:08 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/adm5120/uart_cpu_adm5120.c,v 1.3 2010/01/10 20:11:10 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -67,7 +67,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 
 	di->ops = uart_getops(&uart_adm5120_uart_class);
 	di->bas.chan = 0;
-	di->bas.bst = 0;
+	di->bas.bst = mips_bus_space_generic;
 	di->bas.regshft = 0;
 	di->bas.rclk = 0;
 	di->baudrate = 115200;
@@ -76,7 +76,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	di->parity = UART_PARITY_NONE;
 
 	uart_bus_space_io = 0;
-	uart_bus_space_mem = MIPS_PHYS_TO_KSEG1(ADM5120_BASE_UART0);
+	uart_bus_space_mem = mips_bus_space_generic;
 	di->bas.bsh = MIPS_PHYS_TO_KSEG1(ADM5120_BASE_UART0);
 
 	return (0);

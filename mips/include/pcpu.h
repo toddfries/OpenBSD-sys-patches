@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  *
  *	from: src/sys/alpha/include/pcpu.h,v 1.15 2004/11/05 19:16:44 jhb
- * $FreeBSD: src/sys/mips/include/pcpu.h,v 1.2 2008/08/19 19:53:52 jhb Exp $
+ * $FreeBSD: src/sys/mips/include/pcpu.h,v 1.4 2010/02/09 06:24:43 neel Exp $
  */
 
 #ifndef _MACHINE_PCPU_H_
@@ -38,35 +38,15 @@
 	struct	pmap	*pc_curpmap;		/* pmap of curthread */	\
 	u_int32_t	pc_next_asid;		/* next ASID to alloc */ \
 	u_int32_t	pc_asid_generation;	/* current ASID generation */ \
-	u_int		pc_pending_ipis;	/* the IPIs pending to this CPU */ \
-	void		*pc_boot_stack;
+	u_int		pc_pending_ipis;	/* IPIs pending to this CPU */
 
 #ifdef _KERNEL
 
-#ifdef SMP
-static __inline struct pcpu*
-get_pcpup(void)
-{
-	/*
-	 * FREEBSD_DEVELOPERS_FIXME
-	 * In multiprocessor case, store/retrieve the pcpu structure
-	 * address for current CPU in scratch register for fast access.
-	 *
-	 * In this routine, read the scratch register to retrieve the PCPU
-	 * structure for this CPU
-	 */
-	struct pcpu *ret;
+extern char pcpu_space[MAXCPU][PAGE_SIZE * 2];
+#define	PCPU_ADDR(cpu)		(struct pcpu *)(pcpu_space[(cpu)])
 
-	/* ret should contain the pointer to the PCPU structure for this CPU */
-	return(ret);
-}
-
-#define	PCPUP	((struct pcpu *)get_pcpup())
-#else
-/* Uni processor systems */
 extern struct pcpu *pcpup;
 #define	PCPUP	pcpup
-#endif /* SMP */
 
 #define	PCPU_ADD(member, value)	(PCPUP->pc_ ## member += (value))
 #define	PCPU_GET(member)	(PCPUP->pc_ ## member)
@@ -74,6 +54,13 @@ extern struct pcpu *pcpup;
 #define	PCPU_PTR(member)	(&PCPUP->pc_ ## member)
 #define	PCPU_SET(member,value)	(PCPUP->pc_ ## member = (value))
 #define PCPU_LAZY_INC(member)   (++PCPUP->pc_ ## member)
+
+#ifdef SMP
+/*
+ * Instantiate the wired TLB entry at PCPU_TLB_ENTRY to map 'pcpu' at 'pcpup'.
+ */
+void	mips_pcpu_tlb_init(struct pcpu *pcpu);
+#endif
 
 #endif	/* _KERNEL */
 

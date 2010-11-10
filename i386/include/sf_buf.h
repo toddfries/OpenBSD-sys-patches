@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/sf_buf.h,v 1.4 2005/02/13 06:23:13 alc Exp $
+ * $FreeBSD: src/sys/i386/include/sf_buf.h,v 1.5 2009/07/29 08:49:58 kib Exp $
  */
 
 #ifndef _MACHINE_SF_BUF_H_
@@ -57,5 +57,7 @@ sf_buf_page(struct sf_buf *sf)
 
 	return (sf->m);
 }
+
+boolean_t sf_buf_invalidate_cache(vm_page_t m);
 
 #endif /* !_MACHINE_SF_BUF_H_ */

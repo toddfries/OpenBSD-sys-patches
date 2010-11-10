@@ -1,13 +1,13 @@
 #
 # DEFAULTS -- Default kernel configuration file for FreeBSD/i386
 #
-# $FreeBSD: src/sys/i386/conf/DEFAULTS,v 1.16 2009/02/10 00:08:39 marcel Exp $
+# $FreeBSD: src/sys/i386/conf/DEFAULTS,v 1.22 2010/01/04 21:30:04 imp Exp $
 
 machine		i386
 
 # Bus support.
 device		isa
-options		ISAPNP
+options 	ISAPNP
 
 # Floating point support.
 device		npx
@@ -22,6 +22,7 @@ device		uart_ns8250
 # Default partitioning schemes
 options 	GEOM_PART_BSD
 options 	GEOM_PART_EBR
+options 	GEOM_PART_EBR_COMPAT
 options 	GEOM_PART_MBR
 
 # enable support for native hardware

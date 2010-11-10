@@ -34,7 +34,7 @@
  *
  * From:
  *	$Id: procfs_status.c,v 3.1 1993/12/15 09:40:17 jsp Exp $
- * $FreeBSD: src/sys/fs/procfs/procfs_status.c,v 1.63 2008/03/12 10:11:57 jeff Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs_status.c,v 1.65 2010/01/09 23:23:52 brooks Exp $
  */
 
 #include <sys/param.h>
@@ -82,7 +82,7 @@ procfs_doprocstatus(PFS_FILL_ARGS)
 	sid = sess->s_leader ? sess->s_leader->p_pid : 0;
 
 /* comm pid ppid pgid sid tty ctty,sldr start ut st wmsg
-				euid ruid rgid,egid,groups[1 .. NGROUPS]
+				euid ruid rgid,egid,groups[1 .. ngroups]
 */
 
 	pc = p->p_comm;
@@ -151,10 +151,11 @@ procfs_doprocstatus(PFS_FILL_ARGS)
 		sbuf_printf(sb, ",%lu", (u_long)cr->cr_groups[i]);
 	}
 
-	if (jailed(p->p_ucred)) {
-		mtx_lock(&p->p_ucred->cr_prison->pr_mtx);
-		sbuf_printf(sb, " %s", p->p_ucred->cr_prison->pr_host);
-		mtx_unlock(&p->p_ucred->cr_prison->pr_mtx);
+	if (jailed(cr)) {
+		mtx_lock(&cr->cr_prison->pr_mtx);
+		sbuf_printf(sb, " %s",
+		    prison_name(td->td_ucred->cr_prison, cr->cr_prison));
+		mtx_unlock(&cr->cr_prison->pr_mtx);
 	} else {
 		sbuf_printf(sb, " -");
 	}

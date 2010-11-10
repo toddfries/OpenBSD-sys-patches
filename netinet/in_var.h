@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_var.h	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/netinet/in_var.h,v 1.68 2009/03/09 17:53:05 bms Exp $
+ * $FreeBSD: src/sys/netinet/in_var.h,v 1.75 2009/07/16 21:13:04 rwatson Exp $
  */
 
 #ifndef _NETINET_IN_VAR_H_
@@ -95,22 +95,37 @@ struct	in_aliasreq {
 #ifdef	_KERNEL
 extern	u_char	inetctlerrmap[];
 
+#define LLTABLE(ifp)	\
+	((struct in_ifinfo *)(ifp)->if_afdata[AF_INET])->ii_llt
 /*
  * Hash table for IP addresses.
  */
 TAILQ_HEAD(in_ifaddrhead, in_ifaddr);
 LIST_HEAD(in_ifaddrhashhead, in_ifaddr);
-#ifdef VIMAGE_GLOBALS
-extern	struct in_ifaddrhashhead *in_ifaddrhashtbl;
-extern	struct in_ifaddrhead in_ifaddrhead;
-extern	u_long in_ifaddrhmask;			/* mask for hash table */
-#endif
+
+VNET_DECLARE(struct in_ifaddrhashhead *, in_ifaddrhashtbl);
+VNET_DECLARE(struct in_ifaddrhead, in_ifaddrhead);
+VNET_DECLARE(u_long, in_ifaddrhmask);		/* mask for hash table */
+
+#define	V_in_ifaddrhashtbl	VNET(in_ifaddrhashtbl)
+#define	V_in_ifaddrhead		VNET(in_ifaddrhead)
+#define	V_in_ifaddrhmask	VNET(in_ifaddrhmask)
 
 #define INADDR_NHASH_LOG2       9
 #define INADDR_NHASH		(1 << INADDR_NHASH_LOG2)
 #define INADDR_HASHVAL(x)	fnv_32_buf((&(x)), sizeof(x), FNV1_32_INIT)
 #define INADDR_HASH(x) \
 	(&V_in_ifaddrhashtbl[INADDR_HASHVAL(x) & V_in_ifaddrhmask])
+
+extern	struct rwlock in_ifaddr_lock;
+
+#define	IN_IFADDR_LOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_LOCKED)
+#define	IN_IFADDR_RLOCK()	rw_rlock(&in_ifaddr_lock)
+#define	IN_IFADDR_RLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_RLOCKED)
+#define	IN_IFADDR_RUNLOCK()	rw_runlock(&in_ifaddr_lock)
+#define	IN_IFADDR_WLOCK()	rw_wlock(&in_ifaddr_lock)
+#define	IN_IFADDR_WLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_WLOCKED)
+#define	IN_IFADDR_WUNLOCK()	rw_wunlock(&in_ifaddr_lock)
 
 /*
  * Macro for finding the internet address structure (in_ifaddr)
@@ -144,14 +159,16 @@ do { \
  * Macro for finding the internet address structure (in_ifaddr) corresponding
  * to a given interface (ifnet structure).
  */
-#define IFP_TO_IA(ifp, ia) \
-	/* struct ifnet *ifp; */ \
-	/* struct in_ifaddr *ia; */ \
-{ \
-	for ((ia) = TAILQ_FIRST(&V_in_ifaddrhead); \
-	    (ia) != NULL && (ia)->ia_ifp != (ifp); \
-	    (ia) = TAILQ_NEXT((ia), ia_link)) \
-		continue; \
+#define IFP_TO_IA(ifp, ia)						\
+	/* struct ifnet *ifp; */					\
+	/* struct in_ifaddr *ia; */					\
+{									\
+	for ((ia) = TAILQ_FIRST(&V_in_ifaddrhead);			\
+	    (ia) != NULL && (ia)->ia_ifp != (ifp);			\
+	    (ia) = TAILQ_NEXT((ia), ia_link))				\
+		continue;						\
+	if ((ia) != NULL)						\
+		ifa_ref(&(ia)->ia_ifa);					\
 }
 #endif
 
@@ -330,11 +347,6 @@ SYSCTL_DECL(_net_inet);
 SYSCTL_DECL(_net_inet_ip);
 SYSCTL_DECL(_net_inet_raw);
 #endif
-
-LIST_HEAD(in_multihead, in_multi);	/* XXX unused */
-#ifdef VIMAGE_GLOBALS
-extern struct in_multihead in_multihead;
-#endif /* BURN_BRIDGES */
 
 /*
  * Lock macros for IPv4 layer multicast address lists.  IPv4 lock goes

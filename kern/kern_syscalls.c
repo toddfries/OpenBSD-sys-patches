@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_syscalls.c,v 1.13 2008/09/18 20:10:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_syscalls.c,v 1.14 2010/03/19 10:56:30 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -134,4 +134,34 @@ syscall_module_handler(struct module *mod, int what, void *arg)
 		return (data->chainevh(mod, what, data->chainarg));
 	else
 		return (0);
+}
+
+int
+syscall_helper_register(struct syscall_helper_data *sd)
+{
+	struct syscall_helper_data *sd1;
+	int error;
+
+	for (sd1 = sd; sd1->syscall_no != NO_SYSCALL; sd1++) {
+		error = syscall_register(&sd1->syscall_no, &sd1->new_sysent,
+		    &sd1->old_sysent);
+		if (error != 0) {
+			syscall_helper_unregister(sd);
+			return (error);
+		}
+		sd1->registered = 1;
+	}
+	return (0);
+}
+
+int
+syscall_helper_unregister(struct syscall_helper_data *sd)
+{
+	struct syscall_helper_data *sd1;
+
+	for (sd1 = sd; sd1->registered != 0; sd1++) {
+		syscall_deregister(&sd1->syscall_no, &sd1->old_sysent);
+		sd1->registered = 0;
+	}
+	return (0);
 }

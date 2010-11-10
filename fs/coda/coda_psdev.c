@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/coda/coda_psdev.c,v 1.48 2008/02/17 14:33:28 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/coda/coda_psdev.c,v 1.49 2009/06/25 18:46:30 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -331,7 +331,7 @@ vc_write(struct cdev *dev, struct uio *uiop, int flag)
 	 * Get the rest of the data.
 	 */
 	if (vmp->vm_outSize < uiop->uio_resid) {
-		myprintf(("vcwrite: more data than asked for (%d < %d)\n",
+		myprintf(("vcwrite: more data than asked for (%d < %zd)\n",
 		    vmp->vm_outSize, uiop->uio_resid));
 
 		/*

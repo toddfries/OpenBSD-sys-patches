@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_mv88e1xxx.c,v 1.5 2008/09/23 03:16:54 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_mv88e1xxx.c,v 1.6 2009/10/05 20:21:41 np Exp $");
 
 #include <cxgb_include.h>
 
@@ -294,12 +294,13 @@ static struct cphy_ops mv88e1xxx_ops = {
 };
 #endif
 
-int t3_mv88e1xxx_phy_prep(struct cphy *phy, adapter_t *adapter, int phy_addr,
+int t3_mv88e1xxx_phy_prep(pinfo_t *pinfo, int phy_addr,
 			  const struct mdio_ops *mdio_ops)
 {
+	struct cphy *phy = &pinfo->phy;
 	int err;
 
-	cphy_init(phy, adapter, phy_addr, &mv88e1xxx_ops, mdio_ops,
+	cphy_init(phy, pinfo->adapter, pinfo, phy_addr, &mv88e1xxx_ops, mdio_ops,
 		  SUPPORTED_10baseT_Full | SUPPORTED_100baseT_Full |
 		  SUPPORTED_1000baseT_Full | SUPPORTED_Autoneg | SUPPORTED_MII |
 		  SUPPORTED_TP | SUPPORTED_IRQ, "10/100/1000BASE-T");

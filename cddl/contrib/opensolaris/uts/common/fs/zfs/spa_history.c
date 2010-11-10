@@ -20,11 +20,9 @@
  */
 
 /*
- * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+ * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include <sys/spa.h>
 #include <sys/spa_impl.h>
@@ -127,12 +125,12 @@ spa_history_advance_bof(spa_t *spa, spa_history_phys_t *shpp)
 	firstread = MIN(sizeof (reclen), shpp->sh_phys_max_off - phys_bof);
 
 	if ((err = dmu_read(mos, spa->spa_history, phys_bof, firstread,
-	    buf)) != 0)
+	    buf, DMU_READ_PREFETCH)) != 0)
 		return (err);
 	if (firstread != sizeof (reclen)) {
 		if ((err = dmu_read(mos, spa->spa_history,
 		    shpp->sh_pool_create_len, sizeof (reclen) - firstread,
-		    buf + firstread)) != 0)
+		    buf + firstread, DMU_READ_PREFETCH)) != 0)
 			return (err);
 	}
 
@@ -179,9 +177,9 @@ static char *
 spa_history_zone()
 {
 #ifdef _KERNEL
-	/* XXX: pr_host can be changed by default from within a jail! */
+	/* XXX: pr_hostname can be changed by default from within a jail! */
 	if (jailed(curthread->td_ucred))
-		return (curthread->td_ucred->cr_prison->pr_host);
+		return (curthread->td_ucred->cr_prison->pr_hostname);
 #endif
 	return ("global");
 }
@@ -381,10 +379,11 @@ spa_history_get(spa_t *spa, uint64_t *offp, uint64_t *len, char *buf)
 		return (0);
 	}
 
-	err = dmu_read(mos, spa->spa_history, phys_read_off, read_len, buf);
+	err = dmu_read(mos, spa->spa_history, phys_read_off, read_len, buf,
+	    DMU_READ_PREFETCH);
 	if (leftover && err == 0) {
 		err = dmu_read(mos, spa->spa_history, shpp->sh_pool_create_len,
-		    leftover, buf + read_len);
+		    leftover, buf + read_len, DMU_READ_PREFETCH);
 	}
 	mutex_exit(&spa->spa_history_lock);
 

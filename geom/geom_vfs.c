@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.14 2009/01/11 13:51:04 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.19 2010/04/03 08:53:53 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,7 +106,7 @@ g_vfs_strategy(struct bufobj *bo, struct buf *bp)
 	int vfslocked;
 
 	cp = bo->bo_private;
-	G_VALID_CONSUMER(cp);
+	/* G_VALID_CONSUMER(cp); We likely lack topology lock */
 
 	/*
 	 * If the the provider has orphaned us, just return EXIO.
@@ -134,12 +134,10 @@ static void
 g_vfs_orphan(struct g_consumer *cp)
 {
 	struct g_geom *gp;
-	struct bufobj *bo;
 
 	g_topology_assert();
 
 	gp = cp->geom;
-	bo = gp->softc;
 	g_trace(G_T_TOPOLOGY, "g_vfs_orphan(%p(%s))", cp, gp->name);
 	if (cp->acr > 0 || cp->acw > 0 || cp->ace > 0)
 		g_access(cp, -cp->acr, -cp->acw, -cp->ace);
@@ -163,6 +161,10 @@ g_vfs_open(struct vnode *vp, struct g_consumer **cpp, const char *fsname, int wr
 	g_topology_assert();
 
 	*cpp = NULL;
+	bo = &vp->v_bufobj;
+	if (bo->bo_private != vp)
+		return (EBUSY);
+
 	pp = g_dev_getprovider(vp->v_rdev);
 	if (pp == NULL)
 		return (ENOENT);
@@ -178,7 +180,7 @@ g_vfs_open(struct vnode *vp, struct g_consumer **cpp, const char *fsname, int wr
 	vnode_create_vobject(vp, pp->mediasize, curthread);
 	VFS_UNLOCK_GIANT(vfslocked);
 	*cpp = cp;
-	bo = &vp->v_bufobj;
+	cp->private = vp;
 	bo->bo_ops = g_vfs_bufops;
 	bo->bo_private = cp;
 	bo->bo_bsize = pp->sectorsize;
@@ -198,5 +200,6 @@ g_vfs_close(struct g_consumer *cp)
 	gp = cp->geom;
 	bo = gp->softc;
 	bufobj_invalbuf(bo, V_SAVE, 0, 0);
+	bo->bo_private = cp->private;
 	g_wither_geom_close(gp, ENXIO);
 }

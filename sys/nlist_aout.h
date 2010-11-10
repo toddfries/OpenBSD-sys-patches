@@ -33,7 +33,7 @@
  *
  *	@(#)nlist.h	8.2 (Berkeley) 1/21/94
  *
- * $FreeBSD: src/sys/sys/nlist_aout.h,v 1.11 2004/04/07 04:19:49 imp Exp $
+ * $FreeBSD: src/sys/sys/nlist_aout.h,v 1.12 2010/06/10 14:19:51 bz Exp $
  */
 
 #ifndef _SYS_NLIST_AOUT_H_
@@ -51,11 +51,11 @@
 struct nlist {
 #ifdef _AOUT_INCLUDE_
 	union {
-		char *n_name;	/* symbol name (in memory) */
+		const char *n_name; /* symbol name (in memory) */
 		long n_strx;	/* file string table offset (on disk) */
 	} n_un;
 #else
-	char *n_name;		/* symbol name (in memory) */
+	const char *n_name;	/* symbol name (in memory) */
 	int : 8 * (sizeof(long) > sizeof(char *) ?
 	    sizeof(long) - sizeof(char *) : sizeof(char *) - sizeof(long));
 #endif

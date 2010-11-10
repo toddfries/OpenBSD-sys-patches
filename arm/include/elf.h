@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/elf.h,v 1.9 2008/12/17 06:56:58 imp Exp $
+ * $FreeBSD: src/sys/arm/include/elf.h,v 1.12 2010/08/17 08:55:45 kib Exp $
  */
 
 #ifndef _MACHINE_ELF_H_
@@ -75,8 +75,15 @@ __ElfType(Auxinfo);
 #define AT_EUID         12      /* Effective uid. */
 #define AT_GID          13      /* Real gid. */
 #define AT_EGID         14      /* Effective gid. */
+#define	AT_EXECPATH	15	/* Path to the executable. */
+#define	AT_CANARY	16	/* Canary for SSP */
+#define	AT_CANARYLEN	17	/* Length of the canary. */
+#define	AT_OSRELDATE	18	/* OSRELDATE. */
+#define	AT_NCPUS	19	/* Number of CPUs. */
+#define	AT_PAGESIZES	20	/* Pagesizes. */
+#define	AT_PAGESIZESLEN	21	/* Number of pagesizes. */
 
-#define AT_COUNT        15      /* Count of defined aux entry types. */
+#define AT_COUNT        22      /* Count of defined aux entry types. */
 
 #define	R_ARM_COUNT		33	/* Count of defined relocation types. */
 
@@ -96,4 +103,7 @@ __ElfType(Auxinfo);
  * value.
  */
 #define MAGIC_TRAMP_NUMBER	0x5c000003
+
+#define	ET_DYN_LOAD_ADDR 0x12000
+
 #endif /* !_MACHINE_ELF_H_ */

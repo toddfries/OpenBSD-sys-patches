@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_kern.c,v 1.140 2009/02/24 20:57:43 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_kern.c,v 1.144 2010/05/03 07:08:16 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -111,6 +111,35 @@ kmem_alloc_nofault(map, size)
 	size = round_page(size);
 	addr = vm_map_min(map);
 	result = vm_map_find(map, NULL, 0, &addr, size, VMFS_ANY_SPACE,
+	    VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
+	if (result != KERN_SUCCESS) {
+		return (0);
+	}
+	return (addr);
+}
+
+/*
+ *	kmem_alloc_nofault_space:
+ *
+ *	Allocate a virtual address range with no underlying object and
+ *	no initial mapping to physical memory within the specified
+ *	address space.  Any mapping from this range to physical memory
+ *	must be explicitly created prior to its use, typically with
+ *	pmap_qenter().  Any attempt to create a mapping on demand
+ *	through vm_fault() will result in a panic. 
+ */
+vm_offset_t
+kmem_alloc_nofault_space(map, size, find_space)
+	vm_map_t map;
+	vm_size_t size;
+	int find_space;
+{
+	vm_offset_t addr;
+	int result;
+
+	size = round_page(size);
+	addr = vm_map_min(map);
+	result = vm_map_find(map, NULL, 0, &addr, size, find_space,
 	    VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
 	if (result != KERN_SUCCESS) {
 		return (0);
@@ -235,7 +264,8 @@ kmem_suballoc(vm_map_t parent, vm_offset_t *min, vm_offset_t *max,
 
 	*min = vm_map_min(parent);
 	ret = vm_map_find(parent, NULL, 0, min, size, superpage_align ?
-	    VMFS_ALIGNED_SPACE : VMFS_ANY_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
+	    VMFS_ALIGNED_SPACE : VMFS_ANY_SPACE, VM_PROT_ALL, VM_PROT_ALL,
+	    MAP_ACC_NO_CHARGE);
 	if (ret != KERN_SUCCESS)
 		panic("kmem_suballoc: bad status return of %d", ret);
 	*max = *min + size;
@@ -350,10 +380,8 @@ retry:
 				i -= PAGE_SIZE;
 				m = vm_page_lookup(kmem_object,
 						   OFF_TO_IDX(offset + i));
-				vm_page_lock_queues();
 				vm_page_unwire(m, 0);
 				vm_page_free(m);
-				vm_page_unlock_queues();
 			}
 			VM_OBJECT_UNLOCK(kmem_object);
 			vm_map_delete(map, addr, addr + size);
@@ -422,6 +450,8 @@ kmem_alloc_wait(map, size)
 	vm_offset_t addr;
 
 	size = round_page(size);
+	if (!swap_reserve(size))
+		return (0);
 
 	for (;;) {
 		/*
@@ -434,12 +464,14 @@ kmem_alloc_wait(map, size)
 		/* no space now; see if we can ever get space */
 		if (vm_map_max(map) - vm_map_min(map) < size) {
 			vm_map_unlock(map);
+			swap_release(size);
 			return (0);
 		}
 		map->needs_wakeup = TRUE;
 		vm_map_unlock_and_wait(map, 0);
 	}
-	vm_map_insert(map, NULL, 0, addr, addr + size, VM_PROT_ALL, VM_PROT_ALL, 0);
+	vm_map_insert(map, NULL, 0, addr, addr + size, VM_PROT_ALL,
+	    VM_PROT_ALL, MAP_ACC_CHARGED);
 	vm_map_unlock(map);
 	return (addr);
 }

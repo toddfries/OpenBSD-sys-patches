@@ -22,7 +22,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_sysctl.c,v 1.6 2009/03/09 07:50:27 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_sysctl.c,v 1.9 2010/04/22 18:21:25 rnoland Exp $");
 
 /** @file drm_sysctl.c
  * Implementation of various sysctls for controlling DRM behavior and reporting
@@ -38,6 +38,7 @@ static int	   drm_name_info DRM_SYSCTL_HANDLER_ARGS;
 static int	   drm_vm_info DRM_SYSCTL_HANDLER_ARGS;
 static int	   drm_clients_info DRM_SYSCTL_HANDLER_ARGS;
 static int	   drm_bufs_info DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_vblank_info DRM_SYSCTL_HANDLER_ARGS;
 
 struct drm_sysctl_list {
 	const char *name;
@@ -47,6 +48,7 @@ struct drm_sysctl_list {
 	{"vm",	    drm_vm_info},
 	{"clients", drm_clients_info},
 	{"bufs",    drm_bufs_info},
+	{"vblank",    drm_vblank_info},
 };
 #define DRM_SYSCTL_ENTRIES (sizeof(drm_sysctl_list)/sizeof(drm_sysctl_list[0]))
 
@@ -186,7 +188,7 @@ static int drm_vm_info DRM_SYSCTL_HANDLER_ARGS
 	DRM_UNLOCK();
 
 	DRM_SYSCTL_PRINT("\nslot offset	        size       "
-	    "type flags address            mtrr\n");
+	    "type flags address            handle mtrr\n");
 
 	for (i = 0; i < mapcount; i++) {
 		map = &tempmaps[i];
@@ -202,9 +204,11 @@ static int drm_vm_info DRM_SYSCTL_HANDLER_ARGS
 			yesno = "yes";
 
 		DRM_SYSCTL_PRINT(
-		    "%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx %s\n", i,
-		    map->offset, map->size, type, map->flags,
-		    (unsigned long)map->handle, yesno);
+		    "%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx %6d %s\n",
+		    i, map->offset, map->size, type, map->flags,
+		    (unsigned long)map->virtual,
+		    (unsigned int)((unsigned long)map->handle >>
+		    DRM_MAP_HANDLE_SHIFT), yesno);
 	}
 	SYSCTL_OUT(req, "", 1);
 
@@ -296,12 +300,13 @@ static int drm_clients_info DRM_SYSCTL_HANDLER_ARGS
 
 	DRM_UNLOCK();
 
-	DRM_SYSCTL_PRINT("\na dev	pid    uid	magic	  ioctls\n");
+	DRM_SYSCTL_PRINT(
+	    "\na dev            pid   uid      magic     ioctls\n");
 	for (i = 0; i < privcount; i++) {
 		priv = &tempprivs[i];
-		DRM_SYSCTL_PRINT("%c %3d %5d %5d %10u %10lu\n",
+		DRM_SYSCTL_PRINT("%c %-12s %5d %5d %10u %10lu\n",
 			       priv->authenticated ? 'y' : 'n',
-			       priv->minor,
+			       devtoname(priv->dev->devnode),
 			       priv->pid,
 			       priv->uid,
 			       priv->magic,
@@ -311,5 +316,27 @@ static int drm_clients_info DRM_SYSCTL_HANDLER_ARGS
 	SYSCTL_OUT(req, "", 1);
 done:
 	free(tempprivs, DRM_MEM_DRIVER);
+	return retcode;
+}
+
+static int drm_vblank_info DRM_SYSCTL_HANDLER_ARGS
+{
+	struct drm_device *dev = arg1;
+	char buf[128];
+	int retcode;
+	int i;
+
+	DRM_SYSCTL_PRINT("\ncrtc ref count    last     enabled inmodeset\n");
+	for(i = 0 ; i < dev->num_crtcs ; i++) {
+		DRM_SYSCTL_PRINT("  %02d  %02d %08d %08d %02d      %02d\n",
+		    i, atomic_load_acq_32(&dev->vblank[i].refcount),
+		    atomic_load_acq_32(&dev->vblank[i].count),
+		    atomic_load_acq_32(&dev->vblank[i].last),
+		    atomic_load_acq_int(&dev->vblank[i].enabled),
+		    atomic_load_acq_int(&dev->vblank[i].inmodeset));
+	}
+
+	SYSCTL_OUT(req, "", -1);
+done:
 	return retcode;
 }

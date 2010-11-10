@@ -72,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pccbb/pccbb_pci.c,v 1.34 2009/02/17 02:14:04 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pccbb/pccbb_pci.c,v 1.36 2009/04/10 04:08:34 thompsa Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>

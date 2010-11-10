@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/if_ic.c,v 1.29 2009/02/10 22:50:23 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/if_ic.c,v 1.31 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  * I2C bus IP driver
@@ -103,7 +103,7 @@ static int icattach(device_t);
 
 static int icioctl(struct ifnet *, u_long, caddr_t);
 static int icoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-		struct rtentry *);
+               struct route *);
 
 static int icintr(device_t, int, char *);
 
@@ -181,7 +181,7 @@ icattach(device_t dev)
 	ifp->if_output = icoutput;
 	ifp->if_hdrlen = 0;
 	ifp->if_addrlen = 0;
-	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	ifp->if_snd.ifq_maxlen = ifqmaxlen;
 
 	ic_alloc_buffers(sc, ICMTU);
 
@@ -354,7 +354,7 @@ icintr(device_t dev, int event, char *ptr)
  */
 static int
 icoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-    struct rtentry *rt)
+    struct route *ro)
 {
 	struct ic_softc *sc = ifp->if_softc;
 	device_t icdev = sc->ic_dev;

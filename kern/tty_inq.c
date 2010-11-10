@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/tty_inq.c,v 1.4 2009/02/26 10:28:32 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/tty_inq.c,v 1.8 2010/02/07 15:42:15 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -61,13 +61,9 @@ __FBSDID("$FreeBSD: src/sys/kern/tty_inq.c,v 1.4 2009/02/26 10:28:32 ed Exp $");
  * the outq, we'll stick to 128 byte blocks here.
  */
 
-/* Statistics. */
-static unsigned long ttyinq_nfast = 0;
-SYSCTL_ULONG(_kern, OID_AUTO, tty_inq_nfast, CTLFLAG_RD,
-	&ttyinq_nfast, 0, "Unbuffered reads to userspace on input");
-static unsigned long ttyinq_nslow = 0;
-SYSCTL_ULONG(_kern, OID_AUTO, tty_inq_nslow, CTLFLAG_RD,
-	&ttyinq_nslow, 0, "Buffered reads to userspace on input");
+static int ttyinq_flush_secure = 1;
+SYSCTL_INT(_kern, OID_AUTO, tty_inq_flush_secure, CTLFLAG_RW,
+	&ttyinq_flush_secure, 0, "Zero buffers while flushing");
 
 #define TTYINQ_QUOTESIZE	(TTYINQ_DATASIZE / BMSIZE)
 #define BMSIZE			32
@@ -198,8 +194,6 @@ ttyinq_read_uio(struct ttyinq *ti, struct tty *tp, struct uio *uio,
 		 *   the write pointer to a new block.
 		 */
 		if (cend == TTYINQ_DATASIZE || cend == ti->ti_end) {
-			atomic_add_long(&ttyinq_nfast, 1);
-
 			/*
 			 * Fast path: zero copy. Remove the first block,
 			 * so we can unlock the TTY temporarily.
@@ -236,7 +230,6 @@ ttyinq_read_uio(struct ttyinq *ti, struct tty *tp, struct uio *uio,
 			TTYINQ_RECYCLE(ti, tib);
 		} else {
 			char ob[TTYINQ_DATASIZE - 1];
-			atomic_add_long(&ttyinq_nslow, 1);
 
 			/*
 			 * Slow path: store data in a temporary buffer.
@@ -376,28 +369,19 @@ ttyinq_findchar(struct ttyinq *ti, const char *breakc, size_t maxlen,
 void
 ttyinq_flush(struct ttyinq *ti)
 {
+	struct ttyinq_block *tib;
 
 	ti->ti_begin = 0;
 	ti->ti_linestart = 0;
 	ti->ti_reprint = 0;
 	ti->ti_end = 0;
-}
 
-#if 0
-void
-ttyinq_flush_safe(struct ttyinq *ti)
-{
-	struct ttyinq_block *tib;
-
-	ttyinq_flush(ti);
-
-	/* Zero all data in the input queue to make it more safe */
-	TAILQ_FOREACH(tib, &ti->ti_list, tib_list) {
-		bzero(&tib->tib_quotes, sizeof tib->tib_quotes);
-		bzero(&tib->tib_data, sizeof tib->tib_data);
+	/* Zero all data in the input queue to get rid of passwords. */
+	if (ttyinq_flush_secure) {
+		for (tib = ti->ti_firstblock; tib != NULL; tib = tib->tib_next)
+			bzero(&tib->tib_data, sizeof tib->tib_data);
 	}
 }
-#endif
 
 int
 ttyinq_peekchar(struct ttyinq *ti, char *c, int *quote)

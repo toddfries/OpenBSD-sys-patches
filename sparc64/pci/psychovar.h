@@ -27,7 +27,7 @@
  *
  *	from: NetBSD: psychovar.h,v 1.6 2001/07/20 00:07:13 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/pci/psychovar.h,v 1.18 2008/04/17 12:38:00 marius Exp $
+ * $FreeBSD: src/sys/sparc64/pci/psychovar.h,v 1.20 2010/01/02 15:19:33 marius Exp $
  */
 
 #ifndef _SPARC64_PCI_PSYCHOVAR_H_
@@ -49,8 +49,8 @@ struct psycho_softc {
 
 	phandle_t			sc_node;	/* Firmware node */
 	u_int				sc_mode;
-#define	PSYCHO_MODE_SABRE	1
-#define	PSYCHO_MODE_PSYCHO	2
+#define	PSYCHO_MODE_SABRE		0
+#define	PSYCHO_MODE_PSYCHO		1
 
 	/* Bus A or B of a psycho pair? */
 	u_int				sc_half;
@@ -75,6 +75,7 @@ struct psycho_softc {
 	struct rman			sc_pci_io_rman;
 
 	uint8_t				sc_pci_secbus;
+	uint8_t				sc_pci_subbus;
 
 	uint8_t				sc_pci_hpbcfg[16];
 

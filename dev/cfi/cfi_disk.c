@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cfi/cfi_disk.c,v 1.1 2009/03/09 23:16:02 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cfi/cfi_disk.c,v 1.2 2009/03/10 22:29:42 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -99,9 +99,16 @@ cfi_disk_attach(device_t dev)
 	sc->disk->d_mediasize = sc->parent->sc_size;
 	sc->disk->d_maxsize = CFI_DISK_MAXIOSIZE;
 	/* NB: use stripesize to hold the erase/region size */
-	if (sc->parent->sc_regions)
-		sc->disk->d_stripesize = sc->parent->sc_region->r_blksz;
-	else
+	if (sc->parent->sc_regions) {
+		/*
+		 * Multiple regions, use the last one.  This is a
+		 * total hack as it's (presently) used only by
+		 * geom_redboot to locate the FIS directory which
+		 * lies at the start of the last erase region.
+		 */
+		sc->disk->d_stripesize =
+		    sc->parent->sc_region[sc->parent->sc_regions-1].r_blksz;
+	} else
 		sc->disk->d_stripesize = sc->disk->d_mediasize;
 	sc->disk->d_drv1 = sc;
 	disk_create(sc->disk, DISK_VERSION);

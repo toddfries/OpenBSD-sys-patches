@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/quicc/quicc_bfe.h,v 1.1 2008/03/03 18:20:16 raj Exp $
+ * $FreeBSD: src/sys/dev/quicc/quicc_bfe.h,v 1.2 2010/05/02 19:05:57 marius Exp $
  */
 
 #ifndef _DEV_QUICC_BFE_H_
@@ -50,7 +50,6 @@ struct quicc_softc {
 	u_int		sc_clock;
 
 	int		sc_fastintr:1;
-	int		sc_leaving:1;
 	int		sc_polled:1;
 };
 

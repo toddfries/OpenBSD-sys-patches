@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_target.c,v 1.76 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_target.c,v 1.82 2010/08/02 18:06:49 bcr Exp $");
 
 
 #include <sys/param.h>
@@ -42,6 +42,9 @@ __FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_target.c,v 1.76 2008/10/23 15:53:51 de
 #include <sys/mutex.h>
 #include <sys/devicestat.h>
 #include <sys/proc.h>
+/* Includes to support callout */
+#include <sys/types.h>
+#include <sys/systm.h>
 
 #include <cam/cam.h>
 #include <cam/cam_ccb.h>
@@ -49,6 +52,7 @@ __FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_target.c,v 1.76 2008/10/23 15:53:51 de
 #include <cam/cam_xpt_periph.h>
 #include <cam/cam_sim.h>
 #include <cam/scsi/scsi_targetio.h>
+
 
 /* Transaction information attached to each CCB sent by the user */
 struct targ_cmd_descr {
@@ -92,6 +96,8 @@ struct targ_softc {
 	targ_state		 state;
 	struct selinfo		 read_select;
 	struct devstat		 device_stats;
+	struct callout		destroy_dev_callout;
+	struct mtx		destroy_mtx;
 };
 
 static d_open_t		targopen;
@@ -103,8 +109,11 @@ static d_poll_t		targpoll;
 static d_kqfilter_t	targkqfilter;
 static void		targreadfiltdetach(struct knote *kn);
 static int		targreadfilt(struct knote *kn, long hint);
-static struct filterops targread_filtops =
-	{ 1, NULL, targreadfiltdetach, targreadfilt };
+static struct filterops targread_filtops = {
+	.f_isfd = 1,
+	.f_detach = targreadfiltdetach,
+	.f_event = targreadfilt,
+};
 
 static struct cdevsw targ_cdevsw = {
 	.d_version =	D_VERSION,
@@ -151,6 +160,7 @@ static void		abort_all_pending(struct targ_softc *softc);
 static void		notify_user(struct targ_softc *softc);
 static int		targcamstatus(cam_status status);
 static size_t		targccblen(xpt_opcode func_code);
+static void		targdestroy(void *);
 
 static struct periph_driver targdriver =
 {
@@ -194,7 +204,7 @@ targopen(struct cdev *dev, int flags, int fmt, struct thread *td)
 	TAILQ_INIT(&softc->work_queue);
 	TAILQ_INIT(&softc->abort_queue);
 	TAILQ_INIT(&softc->user_ccb_queue);
-	knlist_init(&softc->read_select.si_note, NULL, NULL, NULL, NULL);
+	knlist_init_mtx(&softc->read_select.si_note, NULL);
 
 	return (0);
 }
@@ -208,10 +218,18 @@ targclose(struct cdev *dev, int flag, int fmt, struct thread *td)
 	int    error;
 
 	softc = (struct targ_softc *)dev->si_drv1;
-	if ((softc->periph == NULL) ||
-	    (softc->state & TARG_STATE_LUN_ENABLED) == 0) {
+	mtx_init(&softc->destroy_mtx, "targ_destroy", "SCSI Target dev destroy", MTX_DEF);
+ 	callout_init_mtx(&softc->destroy_dev_callout, &softc->destroy_mtx, CALLOUT_RETURNUNLOCKED);
+	if (softc->periph == NULL) {
+#if 0
 		destroy_dev(dev);
 		free(softc, M_TARG);
+#endif
+		printf("%s: destroying non-enabled target\n", __func__);
+		mtx_lock(&softc->destroy_mtx);
+       		callout_reset(&softc->destroy_dev_callout, hz / 2,
+                        (void *)targdestroy, (void *)dev);
+		mtx_unlock(&softc->destroy_mtx);
 		return (0);
 	}
 
@@ -223,18 +241,23 @@ targclose(struct cdev *dev, int flag, int fmt, struct thread *td)
 	cam_periph_acquire(periph);
 	cam_periph_lock(periph);
 	error = targdisable(softc);
-	if (error == CAM_REQ_CMP) {
-		dev->si_drv1 = 0;
-		if (softc->periph != NULL) {
-			cam_periph_invalidate(softc->periph);
-			softc->periph = NULL;
-		}
-		destroy_dev(dev);
-		free(softc, M_TARG);
+	if (softc->periph != NULL) {
+		cam_periph_invalidate(softc->periph);
+		softc->periph = NULL;
 	}
 	cam_periph_unlock(periph);
 	cam_periph_release(periph);
 
+#if 0
+	destroy_dev(dev);
+	free(softc, M_TARG);
+#endif
+
+	printf("%s: close finished error(%d)\n", __func__, error);
+	mtx_lock(&softc->destroy_mtx);
+      	callout_reset(&softc->destroy_dev_callout, hz / 2,
+		(void *)targdestroy, (void *)dev);
+	mtx_unlock(&softc->destroy_mtx);
 	return (error);
 }
 
@@ -296,7 +319,7 @@ targioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *t
 		else
 			cdbg.flags = CAM_DEBUG_NONE;
 		cam_periph_lock(softc->periph);
-		xpt_setup_ccb(&cdbg.ccb_h, softc->path, /*priority*/0);
+		xpt_setup_ccb(&cdbg.ccb_h, softc->path, CAM_PRIORITY_NORMAL);
 		cdbg.ccb_h.func_code = XPT_DEBUG;
 		cdbg.ccb_h.cbfcnp = targdone;
 
@@ -387,7 +410,7 @@ targendislun(struct cam_path *path, int enable, int grp6_len, int grp7_len)
 	cam_status	  status;
 
 	/* Tell the lun to begin answering selects */
-	xpt_setup_ccb(&en_ccb.ccb_h, path, /*priority*/1);
+	xpt_setup_ccb(&en_ccb.ccb_h, path, CAM_PRIORITY_NORMAL);
 	en_ccb.ccb_h.func_code = XPT_EN_LUN;
 	/* Don't need support for any vendor specific commands */
 	en_ccb.grp6_len = grp6_len;
@@ -415,7 +438,7 @@ targenable(struct targ_softc *softc, struct cam_path *path, int grp6_len,
 		return (CAM_LUN_ALRDY_ENA);
 
 	/* Make sure SIM supports target mode */
-	xpt_setup_ccb(&cpi.ccb_h, path, /*priority*/1);
+	xpt_setup_ccb(&cpi.ccb_h, path, CAM_PRIORITY_NORMAL);
 	cpi.ccb_h.func_code = XPT_PATH_INQ;
 	xpt_action((union ccb *)&cpi);
 	status = cpi.ccb_h.status & CAM_STATUS_MASK;
@@ -552,7 +575,7 @@ targwrite(struct cdev *dev, struct uio *uio, int ioflag)
 	softc = (struct targ_softc *)dev->si_drv1;
 	write_len = error = 0;
 	CAM_DEBUG(softc->path, CAM_DEBUG_PERIPH,
-		  ("write - uio_resid %d\n", uio->uio_resid));
+		  ("write - uio_resid %zd\n", uio->uio_resid));
 	while (uio->uio_resid >= sizeof(user_ccb) && error == 0) {
 		union ccb *ccb;
 
@@ -563,7 +586,7 @@ targwrite(struct cdev *dev, struct uio *uio, int ioflag)
 			break;
 		}
 		priority = fuword32(&user_ccb->ccb_h.pinfo.priority);
-		if (priority == -1) {
+		if (priority == CAM_PRIORITY_NONE) {
 			error = EINVAL;
 			break;
 		}
@@ -818,7 +841,9 @@ targdone(struct cam_periph *periph, union ccb *done_ccb)
 	case XPT_CONT_TARGET_IO:
 		TAILQ_INSERT_TAIL(&softc->user_ccb_queue, &done_ccb->ccb_h,
 				  periph_links.tqe);
+ 		cam_periph_unlock(softc->periph);
 		notify_user(softc);
+ 		cam_periph_lock(softc->periph);
 		break;
 	default:
 		panic("targdone: impossible xpt opcode %#x",
@@ -966,13 +991,19 @@ targgetccb(struct targ_softc *softc, xpt_opcode type, int priority)
 	int ccb_len;
 
 	ccb_len = targccblen(type);
-	ccb = malloc(ccb_len, M_TARG, M_WAITOK);
+	ccb = malloc(ccb_len, M_TARG, M_NOWAIT);
 	CAM_DEBUG(softc->path, CAM_DEBUG_PERIPH, ("getccb %p\n", ccb));
-
+	if (ccb == NULL) {
+		return (ccb);
+	}
 	xpt_setup_ccb(&ccb->ccb_h, softc->path, priority);
 	ccb->ccb_h.func_code = type;
 	ccb->ccb_h.cbfcnp = targdone;
 	ccb->ccb_h.targ_descr = targgetdescr(softc);
+	if (ccb->ccb_h.targ_descr == NULL) {
+		free (ccb, M_TARG);
+		ccb = NULL;
+	}
 	return (ccb);
 }
 
@@ -1010,8 +1041,10 @@ targgetdescr(struct targ_softc *softc)
 	struct targ_cmd_descr *descr;
 
 	descr = malloc(sizeof(*descr), M_TARG,
-	       M_WAITOK);
-	descr->mapinfo.num_bufs_used = 0;
+	       M_NOWAIT);
+	if (descr) {
+		descr->mapinfo.num_bufs_used = 0;
+	}
 	return (descr);
 }
 
@@ -1067,7 +1100,7 @@ abort_all_pending(struct targ_softc *softc)
 	 * Then abort all pending CCBs.
 	 * targdone() will return the aborted CCB via user_ccb_queue
 	 */
-	xpt_setup_ccb(&cab.ccb_h, softc->path, /*priority*/0);
+	xpt_setup_ccb(&cab.ccb_h, softc->path, CAM_PRIORITY_NORMAL);
 	cab.ccb_h.func_code = XPT_ABORT;
 	cab.ccb_h.status = CAM_REQ_CMP_ERR;
 	TAILQ_FOREACH(ccb_h, &softc->pending_ccb_queue, periph_links.tqe) {
@@ -1091,8 +1124,11 @@ abort_all_pending(struct targ_softc *softc)
 
 	/* If we aborted anything from the work queue, wakeup user. */
 	if (!TAILQ_EMPTY(&softc->user_ccb_queue)
-	 || !TAILQ_EMPTY(&softc->abort_queue))
+	 || !TAILQ_EMPTY(&softc->abort_queue)) {
+		cam_periph_unlock(softc->periph);
 		notify_user(softc);
+		cam_periph_lock(softc->periph);
+	}
 }
 
 /* Notify the user that data is ready */
@@ -1138,7 +1174,7 @@ targcamstatus(cam_status status)
 		return (EINVAL);
 	case CAM_RESRC_UNAVAIL:	/* Resource Unavailable */
 		return (ENOMEM);
-	case CAM_BUSY:		/* CAM subsytem is busy */
+	case CAM_BUSY:		/* CAM subsystem is busy */
 	case CAM_UA_ABORT:	/* Unable to abort CCB request */
 		return (EBUSY);
 	default:
@@ -1184,4 +1220,26 @@ targccblen(xpt_opcode func_code)
 	}
 
 	return (len);
+}
+
+/*
+ * work around to destroy targ device
+ * outside of targclose
+ */
+static void
+targdestroy(void *dev)
+{
+	struct cdev *device = (struct cdev *)dev;
+	struct targ_softc *softc = (struct targ_softc *)device->si_drv1;
+
+#if 0
+	callout_stop(&softc->destroy_dev_callout);
+#endif
+
+	mtx_unlock(&softc->destroy_mtx);
+	mtx_destroy(&softc->destroy_mtx);
+	free(softc, M_TARG);
+	device->si_drv1 = 0;
+	destroy_dev(device);
+	printf("%s: destroyed dev\n", __func__);
 }

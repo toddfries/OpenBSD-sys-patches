@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/if_llatbl.h,v 1.2 2008/12/16 00:20:15 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/net/if_llatbl.h,v 1.7 2010/03/12 05:03:26 kmacy Exp $");
 
 #ifndef	_NET_IF_LLATBL_H_
 #define	_NET_IF_LLATBL_H_
@@ -40,6 +40,13 @@ struct rt_addrinfo;
 
 struct llentry;
 LIST_HEAD(llentries, llentry);
+
+extern struct rwlock lltable_rwlock;
+#define	LLTABLE_RLOCK()		rw_rlock(&lltable_rwlock)
+#define	LLTABLE_RUNLOCK()	rw_runlock(&lltable_rwlock)
+#define	LLTABLE_WLOCK()		rw_wlock(&lltable_rwlock)
+#define	LLTABLE_WUNLOCK()	rw_wunlock(&lltable_rwlock)
+#define	LLTABLE_LOCK_ASSERT()	rw_assert(&lltable_rwlock, RA_LOCKED)
 
 /*
  * Code referencing llentry must at least hold
@@ -147,9 +154,12 @@ struct lltable {
 
 	struct llentry *	(*llt_new)(const struct sockaddr *, u_int);
 	void			(*llt_free)(struct lltable *, struct llentry *);
+	void			(*llt_prefix_free)(struct lltable *,
+				    const struct sockaddr *prefix,
+				    const struct sockaddr *mask);
 	struct llentry *	(*llt_lookup)(struct lltable *, u_int flags,
 				    const struct sockaddr *l3addr);
-	int			(*llt_rtcheck)(struct ifnet *,
+	int			(*llt_rtcheck)(struct ifnet *, u_int flags,
 				    const struct sockaddr *);
 	int			(*llt_dump)(struct lltable *,
 				     struct sysctl_req *);
@@ -174,10 +184,14 @@ MALLOC_DECLARE(M_LLTABLE);
 
 struct lltable *lltable_init(struct ifnet *, int);
 void		lltable_free(struct lltable *);
+void		lltable_prefix_free(int, struct sockaddr *, 
+                       struct sockaddr *);
 void		lltable_drain(int);
 int		lltable_sysctl_dumparp(int, struct sysctl_req *);
 
 void		llentry_free(struct llentry *);
+int		llentry_update(struct llentry **, struct lltable *,
+                       struct sockaddr_storage *, struct ifnet *);
 
 /*
  * Generic link layer address lookup function.

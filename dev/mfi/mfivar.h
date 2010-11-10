@@ -54,7 +54,7 @@
 #define _MFIVAR_H
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfivar.h,v 1.12 2008/11/12 22:44:50 ambrisko Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfivar.h,v 1.13 2009/07/10 08:18:08 scottl Exp $");
 
 #include <sys/lock.h>
 #include <sys/sx.h>
@@ -379,6 +379,7 @@ mfi_print_sense(struct mfi_softc *sc, void *sense)
 MALLOC_DECLARE(M_MFIBUF);
 
 #define MFI_CMD_TIMEOUT 30
+#define MFI_MAXPHYS (128 * 1024)
 
 #ifdef MFI_DEBUG
 extern void mfi_print_cmd(struct mfi_command *cm);

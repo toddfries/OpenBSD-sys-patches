@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/atkbdc/atkbdc_ebus.c,v 1.1 2005/06/10 20:56:37 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/atkbdc/atkbdc_ebus.c,v 1.2 2010/04/29 06:16:00 sobomax Exp $");
 
 #include "opt_kbd.h"
 
@@ -202,6 +202,7 @@ atkbdc_ebus_attach(device_t dev)
 		    "cannot determine command/data port resource\n");
 		return (ENXIO);
 	}
+	sc->retry = 5000;
 	sc->port0 = bus_alloc_resource(dev, SYS_RES_MEMORY, &rid, start, start,
 	    1, RF_ACTIVE);
 	if (sc->port0 == NULL) {

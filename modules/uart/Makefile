@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/uart/Makefile,v 1.17 2008/11/22 21:24:07 marcel Exp $
+# $FreeBSD: src/sys/modules/uart/Makefile,v 1.19 2010/05/23 20:08:41 marius Exp $
 
 .PATH: ${.CURDIR}/../../dev/uart
 
@@ -16,7 +16,7 @@ SRCS=	uart_bus_acpi.c ${uart_bus_ebus} uart_bus_isa.c uart_bus_pccard.c \
 	uart_if.c uart_if.h uart_subr.c uart_tty.c
 .if ${MACHINE} == "sun4v"
 SRCS+=	uart_cpu_sparc64.c
-.else
+.elif exists(${.CURDIR}/../../dev/uart/uart_cpu_${MACHINE}.c)
 SRCS+=	uart_cpu_${MACHINE}.c
 .endif
 SRCS+=	bus_if.h card_if.h device_if.h isa_if.h ${ofw_bus_if} pci_if.h \

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_hub.h,v 1.1 2004/04/17 12:42:16 ru Exp $
+ * $FreeBSD: src/sys/netgraph/ng_hub.h,v 1.2 2010/05/05 22:06:05 zec Exp $
  */
 
 #ifndef _NETGRAPH_NG_HUB_H_
@@ -32,5 +32,10 @@
 /* Node type name and magic cookie. */
 #define	NG_HUB_NODE_TYPE	"hub"
 #define	NGM_HUB_COOKIE		1082189597
+
+/* Netgraph control messages */
+enum {
+	NGM_HUB_SET_PERSISTENT = 1,	/* set persistent mode */
+};
 
 #endif /* _NETGRAPH_NG_HUB_H_ */

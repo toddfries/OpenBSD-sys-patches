@@ -30,7 +30,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************
- * $FreeBSD: src/sys/dev/amd/amd.c,v 1.36 2007/06/17 05:55:47 scottl Exp $
+ * $FreeBSD: src/sys/dev/amd/amd.c,v 1.37 2010/01/07 21:01:37 mbr Exp $
  */
 
 /*
@@ -1657,7 +1657,7 @@ amdhandlemsgreject(struct amd_softc *amd)
 				    tinfo_sync_period[pDCB->SyncPeriod - 4];
 				pDCB->tinfo.goal.offset = pDCB->SyncOffset;
 				pDCB->tinfo.current.period =
-				    tinfo_sync_period[pDCB->SyncPeriod - 4];;
+				    tinfo_sync_period[pDCB->SyncPeriod - 4];
 				pDCB->tinfo.current.offset = pDCB->SyncOffset;
 
 				/*

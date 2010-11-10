@@ -1,13 +1,13 @@
 # Common defines for all of /sys/boot/pc98/
 #
-# $FreeBSD: src/sys/boot/pc98/Makefile.inc,v 1.8 2008/06/25 21:33:28 ru Exp $
+# $FreeBSD: src/sys/boot/pc98/Makefile.inc,v 1.10 2009/12/31 12:17:38 nyan Exp $
 
 BINDIR?=	/boot
 
-LOADER_ADDRESS?=0x100000
+LOADER_ADDRESS?=0x200000
 CFLAGS+=	-ffreestanding -mpreferred-stack-boundary=2 \
 		-mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-sse3 \
-		-Os
+		-Os -DPC98
 LDFLAGS+=	-nostdlib
 
 # BTX components

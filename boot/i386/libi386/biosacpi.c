@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosacpi.c,v 1.12 2007/03/22 18:16:39 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosacpi.c,v 1.15 2010/11/08 21:50:45 jhb Exp $");
 
 #include <stand.h>
 #include <machine/stdarg.h>
@@ -33,14 +33,14 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosacpi.c,v 1.12 2007/03/22 18:16
 #include <btxv86.h>
 #include "libi386.h"
 
-#include "acfreebsd.h"
+#include "platform/acfreebsd.h"
 #include "acconfig.h"
 #define ACPI_SYSTEM_XFACE
 #include "actypes.h"
 #include "actbl.h"
 
 /*
- * Detect ACPI and export information about the APCI BIOS into the
+ * Detect ACPI and export information about the ACPI BIOS into the
  * environment.
  */
 
@@ -55,8 +55,6 @@ biosacpi_detect(void)
     ACPI_TABLE_RSDP	*rsdp;
     char		buf[24];
     int			revision;
-
-    /* XXX check the BIOS datestamp */
 
     /* locate and validate the RSDP */
     if ((rsdp = biosacpi_find_rsdp()) == NULL)
@@ -82,9 +80,6 @@ biosacpi_detect(void)
 	sprintf(buf, "%d", rsdp->Length);
 	setenv("hint.acpi.0.xsdt_length", buf, 1);
     }
-    /* XXX other tables? */
-
-    setenv("acpi_load", "YES", 1);
 }
 
 /*
@@ -125,10 +120,8 @@ biosacpi_search_rsdp(char *base, int length)
 	    sum = 0;
 	    for (idx = 0; idx < RSDP_CHECKSUM_LENGTH; idx++)
 		sum += *(cp + idx);
-	    if (sum != 0) {
-		printf("acpi: bad RSDP checksum (%d)\n", sum);
+	    if (sum != 0)
 		continue;
-	    }
 	    return(rsdp);
 	}
     }

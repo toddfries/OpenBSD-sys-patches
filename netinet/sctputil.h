@@ -32,13 +32,15 @@
 /* $KAME: sctputil.h,v 1.15 2005/03/06 16:04:19 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.35 2009/02/03 11:04:03 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.41 2010/04/03 15:40:14 tuexen Exp $");
 #ifndef __sctputil_h__
 #define __sctputil_h__
 
 
 #if defined(_KERNEL) || defined(__Userspace__)
 
+#define SCTP_READ_LOCK_HELD 1
+#define SCTP_READ_LOCK_NOT_HELD 0
 
 #ifdef SCTP_ASOCLOG_OF_TSNS
 void sctp_print_out_track_log(struct sctp_tcb *stcb);
@@ -79,7 +81,7 @@ uint32_t sctp_select_initial_TSN(struct sctp_pcb *);
 
 uint32_t sctp_select_a_tag(struct sctp_inpcb *, uint16_t lport, uint16_t rport, int);
 
-int sctp_init_asoc(struct sctp_inpcb *, struct sctp_tcb *, int, uint32_t, uint32_t);
+int sctp_init_asoc(struct sctp_inpcb *, struct sctp_tcb *, uint32_t, uint32_t);
 
 void sctp_fill_random_store(struct sctp_pcb *);
 
@@ -103,6 +105,7 @@ sctp_add_to_readq(struct sctp_inpcb *inp,
     struct sctp_queued_to_read *control,
     struct sockbuf *sb,
     int end,
+    int inpread_locked,
     int so_locked
 #if !defined(__APPLE__) && !defined(SCTP_SO_LOCK_TESTING)
     SCTP_UNUSED
@@ -166,8 +169,6 @@ sctp_report_all_outbound(struct sctp_tcb *, int, int
 
 int sctp_expand_mapping_array(struct sctp_association *, uint32_t);
 
-/* EY nr_sack version of the above method, expands nr_mapping_array */
-int sctp_expand_nr_mapping_array(struct sctp_association *, uint32_t);
 void 
 sctp_abort_notification(struct sctp_tcb *, int, int
 #if !defined(__APPLE__) && !defined(SCTP_SO_LOCK_TESTING)
@@ -231,13 +232,9 @@ int sctp_cmpaddr(struct sockaddr *, struct sockaddr *);
 void sctp_print_address(struct sockaddr *);
 void sctp_print_address_pkt(struct ip *, struct sctphdr *);
 
-void
-sctp_notify_partial_delivery_indication(struct sctp_tcb *stcb,
-    uint32_t error, int no_lock, uint32_t strseq);
-
 int
 sctp_release_pr_sctp_chunk(struct sctp_tcb *, struct sctp_tmit_chunk *,
-    int, struct sctpchunk_listhead *, int
+    int, int
 #if !defined(__APPLE__) && !defined(SCTP_SO_LOCK_TESTING)
     SCTP_UNUSED
 #endif
@@ -287,7 +284,6 @@ do { \
 #define sctp_free_spbufspace(stcb, asoc, sp)  \
 do { \
  	if (sp->data != NULL) { \
-                atomic_subtract_int(&(asoc)->chunks_on_out_queue, 1); \
 		if ((asoc)->total_output_queue_size >= sp->length) { \
 			atomic_subtract_int(&(asoc)->total_output_queue_size, sp->length); \
 		} else { \
@@ -378,7 +374,7 @@ int sctp_fill_stat_log(void *, size_t *);
 void sctp_log_fr(uint32_t, uint32_t, uint32_t, int);
 void sctp_log_sack(uint32_t, uint32_t, uint32_t, uint16_t, uint16_t, int);
 void sctp_log_map(uint32_t, uint32_t, uint32_t, int);
-
+void sctp_print_mapping_array(struct sctp_association *asoc);
 void sctp_clr_stat_log(void);
 
 

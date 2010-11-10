@@ -23,12 +23,13 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/acpica/acpi_if.m,v 1.8 2005/09/11 18:39:01 obrien Exp $
+# $FreeBSD: src/sys/dev/acpica/acpi_if.m,v 1.10 2010/01/21 21:14:28 jkim Exp $
 #
 
 #include <sys/bus.h>
 #include <sys/types.h>
-#include <contrib/dev/acpica/acpi.h>
+
+#include <contrib/dev/acpica/include/acpi.h>
 
 INTERFACE acpi;
 
@@ -176,13 +177,13 @@ STATICMETHOD int get_features {
 #
 # device_t dev:  EC device
 # u_int addr:  Address to read from in EC space
-# ACPI_INTEGER *val:  Location to store read value
+# UINT64 *val:  Location to store read value
 # int width:  Size of area to read in bytes
 #
 METHOD int ec_read {
 	device_t	dev;
 	u_int		addr;
-	ACPI_INTEGER	*val;
+	UINT64		*val;
 	int		width;
 };
 
@@ -191,13 +192,13 @@ METHOD int ec_read {
 #
 # device_t dev:  EC device
 # u_int addr:  Address to write to in EC space
-# ACPI_INTEGER val:  Value to write
+# UINT64 val:  Value to write
 # int width:  Size of value to write in bytes
 #
 METHOD int ec_write {
 	device_t	dev;
 	u_int		addr;
-	ACPI_INTEGER	val;
+	UINT64		val;
 	int		width;
 };
 

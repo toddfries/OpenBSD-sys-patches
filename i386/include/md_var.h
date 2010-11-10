@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/md_var.h,v 1.78 2008/11/26 19:25:13 jkim Exp $
+ * $FreeBSD: src/sys/i386/include/md_var.h,v 1.80 2010/03/24 03:07:35 alc Exp $
  */
 
 #ifndef _MACHINE_MD_VAR_H_
@@ -52,6 +52,7 @@ extern	u_int	amd_feature2;
 extern	u_int	amd_pminfo;
 extern	u_int	via_feature_rng;
 extern	u_int	via_feature_xcrypt;
+extern	u_int	cpu_clflush_line_size;
 extern	u_int	cpu_fxsr;
 extern	u_int	cpu_high;
 extern	u_int	cpu_id;
@@ -72,6 +73,7 @@ extern	int	szosigcode;
 #endif
 extern	uint32_t *vm_page_dump;
 extern	int	vm_page_dump_size;
+extern	int	workaround_erratum383;
 
 typedef void alias_for_inthand_t(u_int cs, u_int ef, u_int esp, u_int ss);
 struct	thread;

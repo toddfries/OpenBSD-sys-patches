@@ -43,7 +43,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_mqueue.c,v 1.39 2008/11/28 14:53:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_mqueue.c,v 1.46 2010/03/28 13:13:22 ed Exp $");
+
+#include "opt_compat.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -256,10 +258,16 @@ static void	filt_mqdetach(struct knote *kn);
 static int	filt_mqread(struct knote *kn, long hint);
 static int	filt_mqwrite(struct knote *kn, long hint);
 
-struct filterops mq_rfiltops =
-	{ 1, NULL, filt_mqdetach, filt_mqread };
-struct filterops mq_wfiltops =
-	{ 1, NULL, filt_mqdetach, filt_mqwrite };
+struct filterops mq_rfiltops = {
+	.f_isfd = 1,
+	.f_detach = filt_mqdetach,
+	.f_event = filt_mqread,
+};
+struct filterops mq_wfiltops = {
+	.f_isfd = 1,
+	.f_detach = filt_mqdetach,
+	.f_event = filt_mqwrite,
+};
 
 /*
  * Initialize fileno bitmap
@@ -561,7 +569,7 @@ mqfs_destroy(struct mqfs_node *node)
  * Mount a mqfs instance
  */
 static int
-mqfs_mount(struct mount *mp, struct thread *td)
+mqfs_mount(struct mount *mp)
 {
 	struct statfs *sbp;
 
@@ -591,11 +599,12 @@ mqfs_mount(struct mount *mp, struct thread *td)
  * Unmount a mqfs instance
  */
 static int
-mqfs_unmount(struct mount *mp, int mntflags, struct thread *td)
+mqfs_unmount(struct mount *mp, int mntflags)
 {
 	int error;
 
-	error = vflush(mp, 0, (mntflags & MNT_FORCE) ?  FORCECLOSE : 0, td);
+	error = vflush(mp, 0, (mntflags & MNT_FORCE) ?  FORCECLOSE : 0,
+	    curthread);
 	return (error);
 }
 
@@ -603,7 +612,7 @@ mqfs_unmount(struct mount *mp, int mntflags, struct thread *td)
  * Return a root vnode
  */
 static int
-mqfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
+mqfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	struct mqfs_info *mqfs;
 	int ret;
@@ -617,7 +626,7 @@ mqfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
  * Return filesystem stats
  */
 static int
-mqfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
+mqfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	/* XXX update statistics */
 	return (0);
@@ -1091,7 +1100,7 @@ struct vop_open_args {
 	int a_mode;
 	struct ucred *a_cred;
 	struct thread *a_td;
-	int a_fdidx;
+	struct file *a_fp;
 };
 #endif
 
@@ -1530,8 +1539,8 @@ mqueue_alloc(const struct mq_attr *attr)
 		mq->mq_msgsize = default_msgsize;
 	}
 	mtx_init(&mq->mq_mutex, "mqueue lock", NULL, MTX_DEF);
-	knlist_init(&mq->mq_rsel.si_note, &mq->mq_mutex, NULL, NULL, NULL);
-	knlist_init(&mq->mq_wsel.si_note, &mq->mq_mutex, NULL, NULL, NULL);
+	knlist_init_mtx(&mq->mq_rsel.si_note, &mq->mq_mutex);
+	knlist_init_mtx(&mq->mq_wsel.si_note, &mq->mq_mutex);
 	atomic_add_int(&curmq, 1);
 	return (mq);
 }
@@ -1615,7 +1624,7 @@ mqueue_send(struct mqueue *mq, const char *msg_ptr,
 	const struct timespec *abs_timeout)
 {
 	struct mqueue_msg *msg;
-	struct timespec ets, ts, ts2;
+	struct timespec ts, ts2;
 	struct timeval tv;
 	int error;
 
@@ -1651,15 +1660,12 @@ mqueue_send(struct mqueue *mq, const char *msg_ptr,
 	if (error != EAGAIN)
 		goto bad;
 
-	error = copyin(abs_timeout, &ets, sizeof(ets));
-	if (error != 0)
-		goto bad;
-	if (ets.tv_nsec >= 1000000000 || ets.tv_nsec < 0) {
+	if (abs_timeout->tv_nsec >= 1000000000 || abs_timeout->tv_nsec < 0) {
 		error = EINVAL;
 		goto bad;
 	}
 	for (;;) {
-		ts2 = ets;
+		ts2 = *abs_timeout;
 		getnanotime(&ts);
 		timespecsub(&ts2, &ts);
 		if (ts2.tv_sec < 0 || (ts2.tv_sec == 0 && ts2.tv_nsec <= 0)) {
@@ -1766,7 +1772,7 @@ mqueue_receive(struct mqueue *mq, char *msg_ptr,
 	const struct timespec *abs_timeout)
 {
 	struct mqueue_msg *msg;
-	struct timespec ets, ts, ts2;
+	struct timespec ts, ts2;
 	struct timeval tv;
 	int error;
 
@@ -1797,16 +1803,13 @@ mqueue_receive(struct mqueue *mq, char *msg_ptr,
 	if (error != EAGAIN)
 		return (error);
 
-	error = copyin(abs_timeout, &ets, sizeof(ets));
-	if (error != 0)
-		return (error);
-	if (ets.tv_nsec >= 1000000000 || ets.tv_nsec < 0) {
+	if (abs_timeout->tv_nsec >= 1000000000 || abs_timeout->tv_nsec < 0) {
 		error = EINVAL;
 		return (error);
 	}
 
 	for (;;) {
-		ts2 = ets;
+		ts2 = *abs_timeout;
 		getnanotime(&ts);
 		timespecsub(&ts2, &ts);
 		if (ts2.tv_sec < 0 || (ts2.tv_sec == 0 && ts2.tv_nsec <= 0)) {
@@ -1927,40 +1930,28 @@ notifier_remove(struct proc *p, struct mqueue *mq, int fd)
 	PROC_UNLOCK(p);
 }
 
-/*
- * Syscall to open a message queue.
- */
-int
-kmq_open(struct thread *td, struct kmq_open_args *uap)
+static int
+kern_kmq_open(struct thread *td, const char *upath, int flags, mode_t mode,
+    const struct mq_attr *attr)
 {
 	char path[MQFS_NAMELEN + 1];
-	struct mq_attr attr, *pattr;
 	struct mqfs_node *pn;
 	struct filedesc *fdp;
 	struct file *fp;
 	struct mqueue *mq;
-	int fd, error, len, flags, cmode;
-
-	if ((uap->flags & O_ACCMODE) == O_ACCMODE)
-		return (EINVAL);
+	int fd, error, len, cmode;
 
 	fdp = td->td_proc->p_fd;
-	flags = FFLAGS(uap->flags);
-	cmode = (((uap->mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT);
+	cmode = (((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT);
 	mq = NULL;
-	if ((flags & O_CREAT) && (uap->attr != NULL)) {
-		error = copyin(uap->attr, &attr, sizeof(attr));
-		if (error)
-			return (error);
-		if (attr.mq_maxmsg <= 0 || attr.mq_maxmsg > maxmsg)
+	if ((flags & O_CREAT) != 0 && attr != NULL) {
+		if (attr->mq_maxmsg <= 0 || attr->mq_maxmsg > maxmsg)
 			return (EINVAL);
-		if (attr.mq_msgsize <= 0 || attr.mq_msgsize > maxmsgsize)
+		if (attr->mq_msgsize <= 0 || attr->mq_msgsize > maxmsgsize)
 			return (EINVAL);
-		pattr = &attr;
-	} else
-		pattr = NULL;
+	}
 
-	error = copyinstr(uap->path, path, MQFS_NAMELEN + 1, NULL);
+	error = copyinstr(upath, path, MQFS_NAMELEN + 1, NULL);
         if (error)
 		return (error);
 
@@ -1983,7 +1974,7 @@ kmq_open(struct thread *td, struct kmq_open_args *uap)
 		if (!(flags & O_CREAT)) {
 			error = ENOENT;
 		} else {
-			mq = mqueue_alloc(pattr);
+			mq = mqueue_alloc(attr);
 			if (mq == NULL) {
 				error = ENFILE;
 			} else {
@@ -2035,6 +2026,27 @@ kmq_open(struct thread *td, struct kmq_open_args *uap)
 	td->td_retval[0] = fd;
 	fdrop(fp, td);
 	return (0);
+}
+
+/*
+ * Syscall to open a message queue.
+ */
+int
+kmq_open(struct thread *td, struct kmq_open_args *uap)
+{
+	struct mq_attr attr;
+	int flags, error;
+
+	if ((uap->flags & O_ACCMODE) == O_ACCMODE)
+		return (EINVAL);
+	flags = FFLAGS(uap->flags);
+	if ((flags & O_CREAT) != 0 && uap->attr != NULL) {
+		error = copyin(uap->attr, &attr, sizeof(attr));
+		if (error)
+			return (error);
+	}
+	return (kern_kmq_open(td, uap->path, flags, uap->mode,
+	    uap->attr != NULL ? &attr : NULL));
 }
 
 /*
@@ -2113,39 +2125,52 @@ getmq_write(struct thread *td, int fd, struct file **fpp,
 	return _getmq(td, fd, fget_write, fpp, ppn, pmq);
 }
 
-int
-kmq_setattr(struct thread *td, struct kmq_setattr_args *uap)
+static int
+kern_kmq_setattr(struct thread *td, int mqd, const struct mq_attr *attr,
+    struct mq_attr *oattr)
 {
 	struct mqueue *mq;
 	struct file *fp;
-	struct mq_attr attr, oattr;
 	u_int oflag, flag;
 	int error;
 
-	if (uap->attr) {
-		error = copyin(uap->attr, &attr, sizeof(attr));
-		if (error)
-			return (error);
-		if (attr.mq_flags & ~O_NONBLOCK)
-			return (EINVAL);
-	}
-	error = getmq(td, uap->mqd, &fp, NULL, &mq);
+	if (attr != NULL && (attr->mq_flags & ~O_NONBLOCK) != 0)
+		return (EINVAL);
+	error = getmq(td, mqd, &fp, NULL, &mq);
 	if (error)
 		return (error);
-	oattr.mq_maxmsg  = mq->mq_maxmsg;
-	oattr.mq_msgsize = mq->mq_msgsize;
-	oattr.mq_curmsgs = mq->mq_curmsgs;
-	if (uap->attr) {
+	oattr->mq_maxmsg  = mq->mq_maxmsg;
+	oattr->mq_msgsize = mq->mq_msgsize;
+	oattr->mq_curmsgs = mq->mq_curmsgs;
+	if (attr != NULL) {
 		do {
 			oflag = flag = fp->f_flag;
 			flag &= ~O_NONBLOCK;
-			flag |= (attr.mq_flags & O_NONBLOCK);
+			flag |= (attr->mq_flags & O_NONBLOCK);
 		} while (atomic_cmpset_int(&fp->f_flag, oflag, flag) == 0);
 	} else
 		oflag = fp->f_flag;
-	oattr.mq_flags = (O_NONBLOCK & oflag);
+	oattr->mq_flags = (O_NONBLOCK & oflag);
 	fdrop(fp, td);
-	if (uap->oattr)
+	return (error);
+}
+
+int
+kmq_setattr(struct thread *td, struct kmq_setattr_args *uap)
+{
+	struct mq_attr attr, oattr;
+	int error;
+
+	if (uap->attr != NULL) {
+		error = copyin(uap->attr, &attr, sizeof(attr));
+		if (error != 0)
+			return (error);
+	}
+	error = kern_kmq_setattr(td, uap->mqd, uap->attr != NULL ? &attr : NULL,
+	    &oattr);
+	if (error != 0)
+		return (error);
+	if (uap->oattr != NULL)
 		error = copyout(&oattr, uap->oattr, sizeof(oattr));
 	return (error);
 }
@@ -2155,15 +2180,23 @@ kmq_timedreceive(struct thread *td, struct kmq_timedreceive_args *uap)
 {
 	struct mqueue *mq;
 	struct file *fp;
+	struct timespec *abs_timeout, ets;
 	int error;
 	int waitok;
 
 	error = getmq_read(td, uap->mqd, &fp, NULL, &mq);
 	if (error)
 		return (error);
+	if (uap->abs_timeout != NULL) {
+		error = copyin(uap->abs_timeout, &ets, sizeof(ets));
+		if (error != 0)
+			return (error);
+		abs_timeout = &ets;
+	} else
+		abs_timeout = NULL;
 	waitok = !(fp->f_flag & O_NONBLOCK);
 	error = mqueue_receive(mq, uap->msg_ptr, uap->msg_len,
-		uap->msg_prio, waitok, uap->abs_timeout);
+		uap->msg_prio, waitok, abs_timeout);
 	fdrop(fp, td);
 	return (error);
 }
@@ -2173,14 +2206,22 @@ kmq_timedsend(struct thread *td, struct kmq_timedsend_args *uap)
 {
 	struct mqueue *mq;
 	struct file *fp;
+	struct timespec *abs_timeout, ets;
 	int error, waitok;
 
 	error = getmq_write(td, uap->mqd, &fp, NULL, &mq);
 	if (error)
 		return (error);
+	if (uap->abs_timeout != NULL) {
+		error = copyin(uap->abs_timeout, &ets, sizeof(ets));
+		if (error != 0)
+			return (error);
+		abs_timeout = &ets;
+	} else
+		abs_timeout = NULL;
 	waitok = !(fp->f_flag & O_NONBLOCK);
 	error = mqueue_send(mq, uap->msg_ptr, uap->msg_len,
-		uap->msg_prio, waitok, uap->abs_timeout);
+		uap->msg_prio, waitok, abs_timeout);
 	fdrop(fp, td);
 	return (error);
 }
@@ -2406,10 +2447,10 @@ mqf_stat(struct file *fp, struct stat *st, struct ucred *active_cred,
 	struct mqfs_node *pn = fp->f_data;
 
 	bzero(st, sizeof *st);
-	st->st_atimespec = pn->mn_atime;
-	st->st_mtimespec = pn->mn_mtime;
-	st->st_ctimespec = pn->mn_ctime;
-	st->st_birthtimespec = pn->mn_birth;
+	st->st_atim = pn->mn_atime;
+	st->st_mtim = pn->mn_mtime;
+	st->st_ctim = pn->mn_ctime;
+	st->st_birthtim = pn->mn_birth;
 	st->st_uid = pn->mn_uid;
 	st->st_gid = pn->mn_gid;
 	st->st_mode = S_IFIFO | pn->mn_mode;
@@ -2504,12 +2545,219 @@ static struct vfsops mqfs_vfsops = {
 	.vfs_statfs		= mqfs_statfs,
 };
 
-SYSCALL_MODULE_HELPER(kmq_open);
-SYSCALL_MODULE_HELPER(kmq_setattr);
-SYSCALL_MODULE_HELPER(kmq_timedsend);
-SYSCALL_MODULE_HELPER(kmq_timedreceive);
-SYSCALL_MODULE_HELPER(kmq_notify);
-SYSCALL_MODULE_HELPER(kmq_unlink);
+static struct vfsconf mqueuefs_vfsconf = {
+	.vfc_version = VFS_VERSION,
+	.vfc_name = "mqueuefs",
+	.vfc_vfsops = &mqfs_vfsops,
+	.vfc_typenum = -1,
+	.vfc_flags = VFCF_SYNTHETIC
+};
 
-VFS_SET(mqfs_vfsops, mqueuefs, VFCF_SYNTHETIC);
+static struct syscall_helper_data mq_syscalls[] = {
+	SYSCALL_INIT_HELPER(kmq_open),
+	SYSCALL_INIT_HELPER(kmq_setattr),
+	SYSCALL_INIT_HELPER(kmq_timedsend),
+	SYSCALL_INIT_HELPER(kmq_timedreceive),
+	SYSCALL_INIT_HELPER(kmq_notify),
+	SYSCALL_INIT_HELPER(kmq_unlink),
+	SYSCALL_INIT_LAST
+};
+
+#ifdef COMPAT_FREEBSD32
+#include <compat/freebsd32/freebsd32.h>
+#include <compat/freebsd32/freebsd32_proto.h>
+#include <compat/freebsd32/freebsd32_syscall.h>
+#include <compat/freebsd32/freebsd32_util.h>
+
+static void
+mq_attr_from32(const struct mq_attr32 *from, struct mq_attr *to)
+{
+
+	to->mq_flags = from->mq_flags;
+	to->mq_maxmsg = from->mq_maxmsg;
+	to->mq_msgsize = from->mq_msgsize;
+	to->mq_curmsgs = from->mq_curmsgs;
+}
+
+static void
+mq_attr_to32(const struct mq_attr *from, struct mq_attr32 *to)
+{
+
+	to->mq_flags = from->mq_flags;
+	to->mq_maxmsg = from->mq_maxmsg;
+	to->mq_msgsize = from->mq_msgsize;
+	to->mq_curmsgs = from->mq_curmsgs;
+}
+
+int
+freebsd32_kmq_open(struct thread *td, struct freebsd32_kmq_open_args *uap)
+{
+	struct mq_attr attr;
+	struct mq_attr32 attr32;
+	int flags, error;
+
+	if ((uap->flags & O_ACCMODE) == O_ACCMODE)
+		return (EINVAL);
+	flags = FFLAGS(uap->flags);
+	if ((flags & O_CREAT) != 0 && uap->attr != NULL) {
+		error = copyin(uap->attr, &attr32, sizeof(attr32));
+		if (error)
+			return (error);
+		mq_attr_from32(&attr32, &attr);
+	}
+	return (kern_kmq_open(td, uap->path, flags, uap->mode,
+	    uap->attr != NULL ? &attr : NULL));
+}
+
+int
+freebsd32_kmq_setattr(struct thread *td, struct freebsd32_kmq_setattr_args *uap)
+{
+	struct mq_attr attr, oattr;
+	struct mq_attr32 attr32, oattr32;
+	int error;
+
+	if (uap->attr != NULL) {
+		error = copyin(uap->attr, &attr32, sizeof(attr32));
+		if (error != 0)
+			return (error);
+		mq_attr_from32(&attr32, &attr);
+	}
+	error = kern_kmq_setattr(td, uap->mqd, uap->attr != NULL ? &attr : NULL,
+	    &oattr);
+	if (error != 0)
+		return (error);
+	if (uap->oattr != NULL) {
+		mq_attr_to32(&oattr, &oattr32);
+		error = copyout(&oattr32, uap->oattr, sizeof(oattr32));
+	}
+	return (error);
+}
+
+int
+freebsd32_kmq_timedsend(struct thread *td,
+    struct freebsd32_kmq_timedsend_args *uap)
+{
+	struct mqueue *mq;
+	struct file *fp;
+	struct timespec32 ets32;
+	struct timespec *abs_timeout, ets;
+	int error;
+	int waitok;
+
+	error = getmq_read(td, uap->mqd, &fp, NULL, &mq);
+	if (error)
+		return (error);
+	if (uap->abs_timeout != NULL) {
+		error = copyin(uap->abs_timeout, &ets32, sizeof(ets32));
+		if (error != 0)
+			return (error);
+		CP(ets32, ets, tv_sec);
+		CP(ets32, ets, tv_nsec);
+		abs_timeout = &ets;
+	} else
+		abs_timeout = NULL;
+	waitok = !(fp->f_flag & O_NONBLOCK);
+	error = mqueue_send(mq, uap->msg_ptr, uap->msg_len,
+		uap->msg_prio, waitok, abs_timeout);
+	fdrop(fp, td);
+	return (error);
+}
+
+int
+freebsd32_kmq_timedreceive(struct thread *td,
+    struct freebsd32_kmq_timedreceive_args *uap)
+{
+	struct mqueue *mq;
+	struct file *fp;
+	struct timespec32 ets32;
+	struct timespec *abs_timeout, ets;
+	int error, waitok;
+
+	error = getmq_write(td, uap->mqd, &fp, NULL, &mq);
+	if (error)
+		return (error);
+	if (uap->abs_timeout != NULL) {
+		error = copyin(uap->abs_timeout, &ets32, sizeof(ets32));
+		if (error != 0)
+			return (error);
+		CP(ets32, ets, tv_sec);
+		CP(ets32, ets, tv_nsec);
+		abs_timeout = &ets;
+	} else
+		abs_timeout = NULL;
+	waitok = !(fp->f_flag & O_NONBLOCK);
+	error = mqueue_receive(mq, uap->msg_ptr, uap->msg_len,
+		uap->msg_prio, waitok, abs_timeout);
+	fdrop(fp, td);
+	return (error);
+}
+
+static struct syscall_helper_data mq32_syscalls[] = {
+	SYSCALL32_INIT_HELPER(freebsd32_kmq_open),
+	SYSCALL32_INIT_HELPER(freebsd32_kmq_setattr),
+	SYSCALL32_INIT_HELPER(freebsd32_kmq_timedsend),
+	SYSCALL32_INIT_HELPER(freebsd32_kmq_timedreceive),
+	SYSCALL32_INIT_HELPER(kmq_notify),
+	SYSCALL32_INIT_HELPER(kmq_unlink),
+	SYSCALL_INIT_LAST
+};
+#endif
+
+static int
+mqinit(void)
+{
+	int error;
+
+	error = syscall_helper_register(mq_syscalls);
+	if (error != 0)
+		return (error);
+#ifdef COMPAT_FREEBSD32
+	error = syscall32_helper_register(mq32_syscalls);
+	if (error != 0)
+		return (error);
+#endif
+	return (0);
+}
+
+static int
+mqunload(void)
+{
+
+#ifdef COMPAT_FREEBSD32
+	syscall32_helper_unregister(mq32_syscalls);
+#endif
+	syscall_helper_unregister(mq_syscalls);
+	return (0);
+}
+
+static int
+mq_modload(struct module *module, int cmd, void *arg)
+{
+	int error = 0;
+
+	error = vfs_modevent(module, cmd, arg);
+	if (error != 0)
+		return (error);
+
+	switch (cmd) {
+	case MOD_LOAD:
+		error = mqinit();
+		if (error != 0)
+			mqunload();
+		break;
+	case MOD_UNLOAD:
+		error = mqunload();
+		break;
+	default:
+		break;
+	}
+	return (error);
+}
+
+static moduledata_t mqueuefs_mod = {
+	"mqueuefs",
+	mq_modload,
+	&mqueuefs_vfsconf
+};
+DECLARE_MODULE(mqueuefs, mqueuefs_mod, SI_SUB_VFS, SI_ORDER_MIDDLE);
 MODULE_VERSION(mqueuefs, 1);

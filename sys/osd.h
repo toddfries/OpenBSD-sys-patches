@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/osd.h,v 1.2 2009/02/21 11:15:38 jamie Exp $
+ * $FreeBSD: src/sys/sys/osd.h,v 1.3 2009/04/29 21:14:15 jamie Exp $
  */
 
 #ifndef _SYS_OSD_H_
@@ -81,8 +81,8 @@ void osd_exit(u_int type, struct osd *osd);
 #define	osd_thread_exit(td)						\
 	osd_exit(OSD_THREAD, &(td)->td_osd)
 
-#define	osd_jail_register(destructor)					\
-	osd_register(OSD_JAIL, (destructor), NULL)
+#define	osd_jail_register(destructor, methods)				\
+	osd_register(OSD_JAIL, (destructor), (methods))
 #define	osd_jail_deregister(slot)					\
 	osd_deregister(OSD_JAIL, (slot))
 #define	osd_jail_set(pr, slot, value)					\

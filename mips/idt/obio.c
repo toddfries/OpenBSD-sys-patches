@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/idt/obio.c,v 1.3 2008/09/19 04:10:09 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/idt/obio.c,v 1.4 2010/01/10 19:39:08 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,8 +76,10 @@ static int	obio_setup_intr(device_t, device_t, struct resource *, int,
 static int	obio_teardown_intr(device_t, device_t, struct resource *,
 		    void *);
 
-static void obio_mask_irq(unsigned int irq)
+static void 
+obio_mask_irq(void *arg)
 {
+	unsigned int irq = (unsigned int)arg;
 	int ip_bit, mask, mask_register;
 
 	/* mask IRQ */
@@ -88,8 +90,10 @@ static void obio_mask_irq(unsigned int irq)
 	ICU_REG_WRITE(mask_register, mask | ip_bit);
 }
 
-static void obio_unmask_irq(unsigned int irq)
+static void 
+obio_unmask_irq(void *arg)
 {
+	unsigned int irq = (unsigned int)arg;
 	int ip_bit, mask, mask_register;
 
 	/* unmask IRQ */
@@ -274,7 +278,7 @@ obio_setup_intr(device_t dev, device_t child, struct resource *ires,
 	event = sc->sc_eventstab[irq];
 	if (event == NULL) {
 		error = intr_event_create(&event, (void *)irq, 0, irq, 
-		    (mask_fn)obio_mask_irq, (mask_fn)obio_unmask_irq,
+		    obio_mask_irq, obio_unmask_irq,
 		    NULL, NULL,
 		    "obio intr%d:", irq);
 

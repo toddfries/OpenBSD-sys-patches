@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/cambria_fled.c,v 1.1 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/cambria_fled.c,v 1.4 2010/03/26 18:49:43 rpaulo Exp $");
 /*
  * Cambria Front Panel LED sitting on the I2C bus.
  */
@@ -73,6 +73,8 @@ fled_attach(device_t dev)
 	struct fled_softc *sc = device_get_softc(dev);
 
 	sc->sc_led = led_create(fled_cb, dev, "front");
+
+	fled_cb(dev, 1);		/* Turn on LED */
 
 	return 0;
 }

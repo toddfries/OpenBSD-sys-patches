@@ -25,9 +25,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_misc.c,v 1.4 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_misc.c,v 1.7 2010/08/21 11:41:32 rpaulo Exp $");
 
 #include <sys/param.h>
+#include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/libkern.h>
 #include <sys/limits.h>
@@ -37,7 +38,8 @@ __FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_misc.c,v 1.
 char hw_serial[11] = "0";
 
 struct opensolaris_utsname utsname = {
-	.nodename = hostname
+	.nodename = "unset",
+	.sysname  = "SunOS"
 };
 
 int
@@ -57,7 +59,7 @@ ddi_strtoul(const char *str, char **nptr, int base, unsigned long *result)
 {
 
 	if (str == hw_serial) {
-		*result = hostid;
+		*result = prison0.pr_hostid;
 		return (0);
 	}
 

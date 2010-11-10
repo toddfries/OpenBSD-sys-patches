@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec6.h,v 1.7 2009/02/08 09:27:07 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec6.h,v 1.11 2010/04/29 11:52:42 bz Exp $	*/
 /*	$KAME: ipsec.h,v 1.44 2001/03/23 08:08:47 itojun Exp $	*/
 
 /*-
@@ -41,12 +41,19 @@
 #include <netipsec/keydb.h>
 
 #ifdef _KERNEL
-extern struct ipsecstat ipsec6stat;
-extern int ip6_esp_trans_deflev;
-extern int ip6_esp_net_deflev;
-extern int ip6_ah_trans_deflev;
-extern int ip6_ah_net_deflev;
-extern int ip6_ipsec_ecn;
+VNET_DECLARE(struct ipsecstat, ipsec6stat);
+VNET_DECLARE(int, ip6_esp_trans_deflev);
+VNET_DECLARE(int, ip6_esp_net_deflev);
+VNET_DECLARE(int, ip6_ah_trans_deflev);
+VNET_DECLARE(int, ip6_ah_net_deflev);
+VNET_DECLARE(int, ip6_ipsec_ecn);
+
+#define	V_ipsec6stat		VNET(ipsec6stat)
+#define	V_ip6_esp_trans_deflev	VNET(ip6_esp_trans_deflev)
+#define	V_ip6_esp_net_deflev	VNET(ip6_esp_net_deflev)
+#define	V_ip6_ah_trans_deflev	VNET(ip6_ah_trans_deflev)
+#define	V_ip6_ah_net_deflev	VNET(ip6_ah_net_deflev)
+#define	V_ip6_ipsec_ecn		VNET(ip6_ipsec_ecn)
 
 struct inpcb;
 

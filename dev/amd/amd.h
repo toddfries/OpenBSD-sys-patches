@@ -30,7 +30,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************
- * $FreeBSD: src/sys/dev/amd/amd.h,v 1.6 2005/01/06 01:42:27 imp Exp $
+ * $FreeBSD: src/sys/dev/amd/amd.h,v 1.7 2009/07/10 08:18:08 scottl Exp $
  */
 
 #ifndef AMD_H
@@ -95,7 +95,8 @@ struct amd_sg {
 #define AMD_MAX_SYNC_OFFSET	15
 #define AMD_TARGET_MAX	7
 #define AMD_LUN_MAX		7
-#define AMD_NSEG		(btoc(MAXPHYS) + 1)
+#define AMD_MAXPHYS		(128 * 1024) /* legacy MAXPHYS */
+#define AMD_NSEG		(btoc(AMD_MAXPHYS) + 1)
 #define AMD_MAXTRANSFER_SIZE	0xFFFFFF /* restricted by 24 bit counter */
 #define MAX_DEVICES		10
 #define MAX_TAGS_CMD_QUEUE	256

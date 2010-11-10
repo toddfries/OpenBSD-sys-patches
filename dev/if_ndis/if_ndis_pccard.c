@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pccard.c,v 1.17 2009/03/07 07:26:22 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pccard.c,v 1.18 2009/06/23 02:19:59 thompsa Exp $");
 
 #include <sys/ctype.h>
 #include <sys/param.h>
@@ -52,7 +52,7 @@ __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pccard.c,v 1.17 2009/03/07 07:26
 #include <sys/rman.h>
 
 #include <dev/usb/usb.h>
-#include <dev/usb/usb_core.h>
+#include <dev/usb/usbdi.h>
 
 #include <net80211/ieee80211_var.h>
 

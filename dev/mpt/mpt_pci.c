@@ -99,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_pci.c,v 1.53 2008/07/01 19:44:38 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_pci.c,v 1.56 2010/04/27 18:41:16 marius Exp $");
 
 #include <dev/mpt/mpt.h>
 #include <dev/mpt/mpt_cam.h>
@@ -460,6 +460,11 @@ mpt_pci_attach(device_t dev)
 	mpt->raid_queue_depth = MPT_RAID_QUEUE_DEPTH_DEFAULT;
 	mpt->verbose = MPT_PRT_NONE;
 	mpt->role = MPT_ROLE_NONE;
+	mpt->mpt_ini_id = MPT_INI_ID_NONE;
+#ifdef __sparc64__
+	if (mpt->is_spi)
+		mpt->mpt_ini_id = OF_getscsinitid(dev);
+#endif
 	mpt_set_options(mpt);
 	if (mpt->verbose == MPT_PRT_NONE) {
 		mpt->verbose = MPT_PRT_WARN;
@@ -485,7 +490,7 @@ mpt_pci_attach(device_t dev)
 	 * Make sure we've disabled the ROM.
 	 */
 	data = pci_read_config(dev, PCIR_BIOS, 4);
-	data &= ~1;
+	data &= ~PCIM_BIOS_ENABLE;
 	pci_write_config(dev, PCIR_BIOS, data, 4);
 
 	/*
@@ -795,9 +800,9 @@ mpt_dma_mem_alloc(struct mpt_softc *mpt)
 	/*
 	 * XXX: we should say that nsegs is 'unrestricted, but that
 	 * XXX: tickles a horrible bug in the busdma code. Instead,
-	 * XXX: we'll derive a reasonable segment limit from MAXPHYS
+	 * XXX: we'll derive a reasonable segment limit from MPT_MAXPHYS
 	 */
-	nsegs = (MAXPHYS / PAGE_SIZE) + 1;
+	nsegs = (MPT_MAXPHYS / PAGE_SIZE) + 1;
 	if (mpt_dma_tag_create(mpt, mpt->parent_dmat, 1,
 	    0, BUS_SPACE_MAXADDR, BUS_SPACE_MAXADDR,
 	    NULL, NULL, MAXBSIZE, nsegs, BUS_SPACE_MAXSIZE_32BIT, 0,

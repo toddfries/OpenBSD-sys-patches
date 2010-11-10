@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.3 2009/01/12 19:23:46 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.5 2010/06/05 16:00:53 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,12 +34,14 @@ __FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.3 2009/01/12 19:23:46 
 #include <sys/malloc.h>
 #include <sys/libkern.h>
 #include <sys/endian.h>
+#include <sys/pcpu.h>
 #if defined(__amd64__) || (defined(__i386__) && !defined(PC98))
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
 #endif
+#include <machine/pcb.h>
 
 #include <opencrypto/cryptodev.h>
 #include <opencrypto/cryptosoft.h> /* for hmac_ipad_buffer and hmac_opad_buffer */
@@ -171,7 +173,9 @@ padlock_sha_update(struct padlock_sha_ctx *ctx, uint8_t *buf, uint16_t bufsize)
 	if (ctx->psc_size - ctx->psc_offset < bufsize) {
 		ctx->psc_size = MAX(ctx->psc_size * 2, ctx->psc_size + bufsize);
 		ctx->psc_buf = realloc(ctx->psc_buf, ctx->psc_size, M_PADLOCK,
-		    M_WAITOK);
+		    M_NOWAIT);
+		if(ctx->psc_buf == NULL)
+			return (ENOMEM);
 	}
 	bcopy(buf, ctx->psc_buf + ctx->psc_offset, bufsize);
 	ctx->psc_offset += bufsize;
@@ -361,12 +365,18 @@ int
 padlock_hash_process(struct padlock_session *ses, struct cryptodesc *maccrd,
     struct cryptop *crp)
 {
+	struct thread *td;
 	int error;
 
+	td = curthread;
+	error = fpu_kern_enter(td, &ses->ses_fpu_ctx, FPU_KERN_NORMAL);
+	if (error != 0)
+		return (error);
 	if ((maccrd->crd_flags & CRD_F_KEY_EXPLICIT) != 0)
 		padlock_hash_key_setup(ses, maccrd->crd_key, maccrd->crd_klen);
 
 	error = padlock_authcompute(ses, maccrd, crp->crp_buf, crp->crp_flags);
+	fpu_kern_leave(td, &ses->ses_fpu_ctx);
 	return (error);
 }
 

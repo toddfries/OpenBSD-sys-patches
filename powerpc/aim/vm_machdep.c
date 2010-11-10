@@ -38,7 +38,7 @@
  *
  *	from: @(#)vm_machdep.c	7.3 (Berkeley) 5/13/91
  *	Utah $Hdr: vm_machdep.c 1.16.1.1 89/06/23$
- * $FreeBSD: src/sys/powerpc/aim/vm_machdep.c,v 1.122 2008/08/30 18:48:17 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/aim/vm_machdep.c,v 1.125 2009/11/10 11:43:07 kib Exp $
  */
 /*-
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -81,7 +81,9 @@
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
 #include <sys/sf_buf.h>
+#include <sys/syscall.h>
 #include <sys/sysctl.h>
+#include <sys/sysent.h>
 #include <sys/unistd.h>
 
 #include <machine/cpu.h>
@@ -89,7 +91,6 @@
 #include <machine/frame.h>
 #include <machine/md_var.h>
 #include <machine/pcb.h>
-#include <machine/powerpc.h>
 
 #include <dev/ofw/openfirm.h>
 
@@ -99,6 +100,37 @@
 #include <vm/vm_page.h>
 #include <vm/vm_map.h>
 #include <vm/vm_extern.h>
+
+/*
+ * On systems without a direct mapped region (e.g. PPC64),
+ * we use the same code as the Book E implementation. Since
+ * we need to have runtime detection of this, define some machinery
+ * for sf_bufs in this case, and ignore it on systems with direct maps.
+ */
+
+#ifndef NSFBUFS
+#define NSFBUFS         (512 + maxusers * 16)
+#endif
+
+static void sf_buf_init(void *arg);
+SYSINIT(sock_sf, SI_SUB_MBUF, SI_ORDER_ANY, sf_buf_init, NULL);
+ 
+LIST_HEAD(sf_head, sf_buf);
+ 
+/* A hash table of active sendfile(2) buffers */
+static struct sf_head *sf_buf_active;
+static u_long sf_buf_hashmask;
+
+#define SF_BUF_HASH(m)  (((m) - vm_page_array) & sf_buf_hashmask)
+
+static TAILQ_HEAD(, sf_buf) sf_buf_freelist;
+static u_int sf_buf_alloc_want;
+
+/*
+ * A lock used to synchronize access to the hash table and free list
+ */
+static struct mtx sf_buf_lock;
+
 
 /*
  * Finish a fork operation, with process p2 nearly set up.
@@ -202,24 +234,122 @@ cpu_reset()
 }
 
 /*
- * Allocate an sf_buf for the given vm_page.  On this machine, however, there
- * is no sf_buf object.  Instead, an opaque pointer to the given vm_page is
- * returned.
+ * Allocate a pool of sf_bufs (sendfile(2) or "super-fast" if you prefer. :-))
  */
-struct sf_buf *
-sf_buf_alloc(struct vm_page *m, int pri)
+static void
+sf_buf_init(void *arg)
 {
+        struct sf_buf *sf_bufs;
+        vm_offset_t sf_base;
+        int i;
 
-	return ((struct sf_buf *)m);
+	/* Don't bother on systems with a direct map */
+
+	if (hw_direct_map)
+		return;
+
+        nsfbufs = NSFBUFS;
+        TUNABLE_INT_FETCH("kern.ipc.nsfbufs", &nsfbufs);
+
+        sf_buf_active = hashinit(nsfbufs, M_TEMP, &sf_buf_hashmask);
+        TAILQ_INIT(&sf_buf_freelist);
+        sf_base = kmem_alloc_nofault(kernel_map, nsfbufs * PAGE_SIZE);
+        sf_bufs = malloc(nsfbufs * sizeof(struct sf_buf), M_TEMP, M_NOWAIT | M_ZERO);
+
+        for (i = 0; i < nsfbufs; i++) {
+                sf_bufs[i].kva = sf_base + i * PAGE_SIZE;
+                TAILQ_INSERT_TAIL(&sf_buf_freelist, &sf_bufs[i], free_entry);
+        }
+        sf_buf_alloc_want = 0;
+        mtx_init(&sf_buf_lock, "sf_buf", NULL, MTX_DEF);
 }
 
 /*
- * Free the sf_buf.  In fact, do nothing because there are no resources
- * associated with the sf_buf.
+ * Get an sf_buf from the freelist. Will block if none are available.
+ */
+struct sf_buf *
+sf_buf_alloc(struct vm_page *m, int flags)
+{
+        struct sf_head *hash_list;
+        struct sf_buf *sf;
+        int error;
+
+	if (hw_direct_map) {
+		/* Shortcut the direct mapped case */
+
+		return ((struct sf_buf *)m);
+	}
+
+        hash_list = &sf_buf_active[SF_BUF_HASH(m)];
+        mtx_lock(&sf_buf_lock);
+        LIST_FOREACH(sf, hash_list, list_entry) {
+                if (sf->m == m) {
+                        sf->ref_count++;
+                        if (sf->ref_count == 1) {
+                                TAILQ_REMOVE(&sf_buf_freelist, sf, free_entry);
+                                nsfbufsused++;
+                                nsfbufspeak = imax(nsfbufspeak, nsfbufsused);
+                        }
+                        goto done;
+                }
+        }
+
+        while ((sf = TAILQ_FIRST(&sf_buf_freelist)) == NULL) {
+                if (flags & SFB_NOWAIT)
+                        goto done;
+
+                sf_buf_alloc_want++;
+                mbstat.sf_allocwait++;
+                error = msleep(&sf_buf_freelist, &sf_buf_lock,
+                    (flags & SFB_CATCH) ? PCATCH | PVM : PVM, "sfbufa", 0);
+                sf_buf_alloc_want--;
+
+                /*
+                 * If we got a signal, don't risk going back to sleep.
+                 */
+                if (error)
+                        goto done;
+        }
+
+        TAILQ_REMOVE(&sf_buf_freelist, sf, free_entry);
+        if (sf->m != NULL)
+                LIST_REMOVE(sf, list_entry);
+
+        LIST_INSERT_HEAD(hash_list, sf, list_entry);
+        sf->ref_count = 1;
+        sf->m = m;
+        nsfbufsused++;
+        nsfbufspeak = imax(nsfbufspeak, nsfbufsused);
+        pmap_qenter(sf->kva, &sf->m, 1);
+done:
+        mtx_unlock(&sf_buf_lock);
+        return (sf);
+}
+
+/*
+ * Detatch mapped page and release resources back to the system.
+ *
+ * Remove a reference from the given sf_buf, adding it to the free
+ * list when its reference count reaches zero. A freed sf_buf still,
+ * however, retains its virtual-to-physical mapping until it is
+ * recycled or reactivated by sf_buf_alloc(9).
  */
 void
 sf_buf_free(struct sf_buf *sf)
 {
+	if (hw_direct_map)
+		return;
+
+        mtx_lock(&sf_buf_lock);
+        sf->ref_count--;
+        if (sf->ref_count == 0) {
+                TAILQ_INSERT_TAIL(&sf_buf_freelist, sf, free_entry);
+                nsfbufsused--;
+
+                if (sf_buf_alloc_want > 0)
+                        wakeup_one(&sf_buf_freelist);
+        }
+        mtx_unlock(&sf_buf_lock);
 }
 
 /*
@@ -291,6 +421,59 @@ cpu_thread_swapin(struct thread *td)
 void
 cpu_thread_swapout(struct thread *td)
 {
+}
+
+void
+cpu_set_syscall_retval(struct thread *td, int error)
+{
+	struct proc *p;
+	struct trapframe *tf;
+	int fixup;
+
+	if (error == EJUSTRETURN)
+		return;
+
+	p = td->td_proc;
+	tf = td->td_frame;
+
+	if (tf->fixreg[0] == SYS___syscall) {
+		int code = tf->fixreg[FIRSTARG + 1];
+		if (p->p_sysent->sv_mask)
+			code &= p->p_sysent->sv_mask;
+		fixup = (code != SYS_freebsd6_lseek && code != SYS_lseek) ?
+		    1 : 0;
+	} else
+		fixup = 0;
+
+	switch (error) {
+	case 0:
+		if (fixup) {
+			/*
+			 * 64-bit return, 32-bit syscall. Fixup byte order
+			 */
+			tf->fixreg[FIRSTARG] = 0;
+			tf->fixreg[FIRSTARG + 1] = td->td_retval[0];
+		} else {
+			tf->fixreg[FIRSTARG] = td->td_retval[0];
+			tf->fixreg[FIRSTARG + 1] = td->td_retval[1];
+		}
+		tf->cr &= ~0x10000000;		/* XXX: Magic number */
+		break;
+	case ERESTART:
+		/*
+		 * Set user's pc back to redo the system call.
+		 */
+		tf->srr0 -= 4;
+		break;
+	default:
+		if (p->p_sysent->sv_errsize) {
+			error = (error < p->p_sysent->sv_errsize) ?
+			    p->p_sysent->sv_errtbl[error] : -1;
+		}
+		tf->fixreg[FIRSTARG] = error;
+		tf->cr |= 0x10000000;		/* XXX: Magic number */
+		break;
+	}
 }
 
 void

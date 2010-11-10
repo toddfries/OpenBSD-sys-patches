@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/tsc.c,v 1.210 2008/10/21 04:31:07 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/tsc.c,v 1.211 2010/06/12 13:10:03 mav Exp $");
 
 #include "opt_clock.h"
 
@@ -123,6 +123,10 @@ init_TSC(void)
 void
 init_TSC_tc(void)
 {
+
+	if (!tsc_present) 
+		return;
+
 	/*
 	 * We can not use the TSC if we support APM.  Precise timekeeping
 	 * on an APM'ed machine is at best a fools pursuit, since 
@@ -152,7 +156,7 @@ init_TSC_tc(void)
 		tsc_timecounter.tc_quality = -100;
 #endif
 
-	if (tsc_present && tsc_freq != 0 && !tsc_is_broken) {
+	if (tsc_freq != 0 && !tsc_is_broken) {
 		tsc_timecounter.tc_frequency = tsc_freq;
 		tc_init(&tsc_timecounter);
 	}

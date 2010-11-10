@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)dead_vnops.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/fs/deadfs/dead_vnops.c,v 1.51 2008/12/12 00:59:36 marcus Exp $
+ * $FreeBSD: src/sys/fs/deadfs/dead_vnops.c,v 1.52 2010/04/02 14:03:01 kib Exp $
  */
 
 #include <sys/param.h>
@@ -225,13 +225,7 @@ dead_rename(ap)
 		struct componentname *a_tcnp;
 	} */ *ap;
 {
-	if (ap->a_tvp)
-		vput(ap->a_tvp);
-	if (ap->a_tdvp == ap->a_tvp)
-		vrele(ap->a_tdvp);
-	else
-		vput(ap->a_tdvp);
-	vrele(ap->a_fdvp);
-	vrele(ap->a_fvp);
+
+	vop_rename_fail(ap);
 	return (EXDEV);
 }

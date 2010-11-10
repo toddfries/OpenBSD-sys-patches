@@ -32,7 +32,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.9 2008/12/13 22:04:52 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.11 2009/08/01 19:26:27 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.9 2008/12/13 22:04:52 b
 #include <sys/socketvar.h>
 #include <sys/systm.h>
 #include <sys/time.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -65,7 +64,6 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.9 2008/12/13 22:04:52 b
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/if_ether.h>
-#include <netinet/vinet.h>
 #include <net/pfvar.h>
 
 /*

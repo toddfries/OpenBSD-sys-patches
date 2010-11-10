@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_net.c,v 1.11 2007/06/17 00:17:15 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_net.c,v 1.12 2010/10/29 00:36:44 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -230,7 +230,10 @@ punt:
 static void
 ofwn_end(struct netif *nif)
 {
+#ifdef BROKEN
+	/* dma-free freezes at least some Apple ethernet controllers */
 	OF_call_method("dma-free", netinstance, 2, 0, dmabuf, MAXPHYS);
+#endif
 	OF_close(netinstance);
 }
 

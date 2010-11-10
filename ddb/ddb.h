@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ddb/ddb.h,v 1.48 2008/09/15 22:45:14 sam Exp $
+ * $FreeBSD: src/sys/ddb/ddb.h,v 1.50 2010/05/11 17:01:14 attilio Exp $
  */
 
 /*
@@ -200,7 +200,7 @@ int		db_md_clr_watchpoint(db_expr_t addr, db_expr_t size);
 void		db_md_list_watchpoints(void);
 void		db_print_loc_and_inst(db_addr_t loc);
 void		db_print_thread(void);
-void		db_printf(const char *fmt, ...) __printflike(1, 2);
+int		db_printf(const char *fmt, ...) __printflike(1, 2);
 int		db_read_bytes(vm_offset_t addr, size_t size, char *data);
 				/* machine-dependent */
 int		db_readline(char *lstart, int lsize);
@@ -213,6 +213,8 @@ boolean_t	db_stop_at_pc(boolean_t *is_breakpoint);
 void		db_trace_self(void);
 int		db_trace_thread(struct thread *, int);
 int		db_value_of_name(const char *name, db_expr_t *valuep);
+int		db_value_of_name_pcpu(const char *name, db_expr_t *valuep);
+int		db_value_of_name_vnet(const char *name, db_expr_t *valuep);
 int		db_write_bytes(vm_offset_t addr, size_t size, char *data);
 void		db_command_register(struct command_table *, struct command *);
 void		db_command_unregister(struct command_table *, struct command *);

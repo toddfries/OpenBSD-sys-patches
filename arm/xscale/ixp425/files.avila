@@ -1,7 +1,9 @@
-#$FreeBSD: src/sys/arm/xscale/ixp425/files.avila,v 1.5 2008/12/20 03:26:09 sam Exp $
+#$FreeBSD: src/sys/arm/xscale/ixp425/files.avila,v 1.8 2010/11/07 20:38:14 thompsa Exp $
 arm/xscale/ixp425/avila_machdep.c	standard
 arm/xscale/ixp425/avila_ata.c		optional avila_ata
 arm/xscale/ixp425/avila_led.c		optional avila_led
-arm/xscale/ixp425/cambria_led.c		optional cambria_led
+arm/xscale/ixp425/avila_gpio.c		optional avila_gpio
+arm/xscale/ixp425/cambria_exp_space.c	standard
 arm/xscale/ixp425/cambria_fled.c	optional cambria_fled
+arm/xscale/ixp425/cambria_led.c		optional cambria_led
 arm/xscale/ixp425/ixdp425_pci.c		optional pci

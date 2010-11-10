@@ -1,4 +1,4 @@
-#  $FreeBSD: src/sys/boot/arm/ixp425/boot2/Makefile,v 1.2 2008/10/07 16:39:17 sam Exp $
+#  $FreeBSD: src/sys/boot/arm/ixp425/boot2/Makefile,v 1.3 2010/08/23 22:24:11 imp Exp $
 
 # We get a lot of the std lib functions from here.
 .PATH: ${.CURDIR}/../../at91/libat91
@@ -20,7 +20,7 @@ NO_MAN=
 KERNPHYSADDR=0x180000
 KERNVIRTADDR=${KERNPHYSADDR}
 BOOT_STACK=0x200000-4
-M=${MACHINE_ARCH}
+M=${MACHINE}
 LDFLAGS=-e ${KERNPHYSADDR} -EB -T ldscript.${M}
 OBJS+=  ${SRCS:N*.h:R:S/$/.o/g}
 S=${.CURDIR}/../../../..

@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/ia32/ia32_signal.c,v 1.21 2009/03/05 19:42:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/ia32/ia32_signal.c,v 1.31 2010/08/07 11:57:13 kib Exp $");
 
 #include "opt_compat.h"
 
@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/ia32/ia32_signal.c,v 1.21 2009/03/05 19:42:11 
 #include <sys/stat.h>
 #include <sys/sx.h>
 #include <sys/syscall.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 #include <sys/sysent.h>
 #include <sys/vnode.h>
@@ -85,8 +86,6 @@ static void freebsd4_ia32_sendsig(sig_t, ksiginfo_t *, sigset_t *);
 static void ia32_get_fpcontext(struct thread *td, struct ia32_mcontext *mcp);
 static int ia32_set_fpcontext(struct thread *td, const struct ia32_mcontext *mcp);
 
-extern int _ucode32sel, _udatasel;
-
 #define	CS_SECURE(cs)		(ISPL(cs) == SEL_UPL)
 #define	EFL_SECURE(ef, oef)	((((ef) ^ (oef)) & ~PSL_USERCHANGE) == 0)
 
@@ -94,7 +93,14 @@ static void
 ia32_get_fpcontext(struct thread *td, struct ia32_mcontext *mcp)
 {
 
-	mcp->mc_ownedfp = fpugetregs(td, (struct savefpu *)&mcp->mc_fpstate);
+	/*
+	 * XXX Format of 64bit and 32bit FXSAVE areas differs. FXSAVE
+	 * in 32bit mode saves %cs and %ds, while on 64bit it saves
+	 * 64bit instruction and data pointers. Ignore the difference
+	 * for now, it should be irrelevant for most applications.
+	 */
+	mcp->mc_ownedfp = fpugetuserregs(td,
+	    (struct savefpu *)&mcp->mc_fpstate);
 	mcp->mc_fpformat = fpuformat();
 }
 
@@ -111,11 +117,7 @@ ia32_set_fpcontext(struct thread *td, const struct ia32_mcontext *mcp)
 		fpstate_drop(td);
 	else if (mcp->mc_ownedfp == _MC_FPOWNED_FPU ||
 	    mcp->mc_ownedfp == _MC_FPOWNED_PCB) {
-		/*
-		 * XXX we violate the dubious requirement that fpusetregs()
-		 * be called with interrupts disabled.
-		 */
-		fpusetregs(td, (struct savefpu *)&mcp->mc_fpstate);
+		fpusetuserregs(td, (struct savefpu *)&mcp->mc_fpstate);
 	} else
 		return (EINVAL);
 	return (0);
@@ -134,17 +136,20 @@ ia32_get_mcontext(struct thread *td, struct ia32_mcontext *mcp, int flags)
 	PROC_LOCK(curthread->td_proc);
 	mcp->mc_onstack = sigonstack(tp->tf_rsp);
 	PROC_UNLOCK(curthread->td_proc);
-	mcp->mc_gs = td->td_pcb->pcb_gs;
-	mcp->mc_fs = td->td_pcb->pcb_fs;
-	mcp->mc_es = td->td_pcb->pcb_es;
-	mcp->mc_ds = td->td_pcb->pcb_ds;
+	/* Entry into kernel always sets TF_HASSEGS */
+	mcp->mc_gs = tp->tf_gs;
+	mcp->mc_fs = tp->tf_fs;
+	mcp->mc_es = tp->tf_es;
+	mcp->mc_ds = tp->tf_ds;
 	mcp->mc_edi = tp->tf_rdi;
 	mcp->mc_esi = tp->tf_rsi;
 	mcp->mc_ebp = tp->tf_rbp;
 	mcp->mc_isp = tp->tf_rsp;
+	mcp->mc_eflags = tp->tf_rflags;
 	if (flags & GET_MC_CLEAR_RET) {
 		mcp->mc_eax = 0;
 		mcp->mc_edx = 0;
+		mcp->mc_eflags &= ~PSL_C;
 	} else {
 		mcp->mc_eax = tp->tf_rax;
 		mcp->mc_edx = tp->tf_rdx;
@@ -153,11 +158,13 @@ ia32_get_mcontext(struct thread *td, struct ia32_mcontext *mcp, int flags)
 	mcp->mc_ecx = tp->tf_rcx;
 	mcp->mc_eip = tp->tf_rip;
 	mcp->mc_cs = tp->tf_cs;
-	mcp->mc_eflags = tp->tf_rflags;
 	mcp->mc_esp = tp->tf_rsp;
 	mcp->mc_ss = tp->tf_ss;
 	mcp->mc_len = sizeof(*mcp);
 	ia32_get_fpcontext(td, mcp);
+	mcp->mc_fsbase = td->td_pcb->pcb_fsbase;
+	mcp->mc_gsbase = td->td_pcb->pcb_gsbase;
+	td->td_pcb->pcb_full_iret = 1;
 	return (0);
 }
 
@@ -182,11 +189,11 @@ ia32_set_mcontext(struct thread *td, const struct ia32_mcontext *mcp)
 	ret = ia32_set_fpcontext(td, mcp);
 	if (ret != 0)
 		return (ret);
-#if 0	/* XXX deal with load_fs() and friends */
+	tp->tf_gs = mcp->mc_gs;
 	tp->tf_fs = mcp->mc_fs;
 	tp->tf_es = mcp->mc_es;
 	tp->tf_ds = mcp->mc_ds;
-#endif
+	tp->tf_flags = TF_HASSEGS;
 	tp->tf_rdi = mcp->mc_edi;
 	tp->tf_rsi = mcp->mc_esi;
 	tp->tf_rbp = mcp->mc_ebp;
@@ -199,10 +206,8 @@ ia32_set_mcontext(struct thread *td, const struct ia32_mcontext *mcp)
 	tp->tf_rflags = rflags;
 	tp->tf_rsp = mcp->mc_esp;
 	tp->tf_ss = mcp->mc_ss;
-#if 0	/* XXX deal with load_gs() and friends */
-	td->td_pcb->pcb_gs = mcp->mc_gs;
-#endif
 	td->td_pcb->pcb_flags |= PCB_FULLCTX;
+	td->td_pcb->pcb_full_iret = 1;
 	return (0);
 }
 
@@ -244,10 +249,8 @@ freebsd32_setcontext(struct thread *td, struct freebsd32_setcontext_args *uap)
 		if (ret == 0) {
 			ret = ia32_set_mcontext(td, &uc.uc_mcontext);
 			if (ret == 0) {
-				SIG_CANTMASK(uc.uc_sigmask);
-				PROC_LOCK(td->td_proc);
-				td->td_sigmask = uc.uc_sigmask;
-				PROC_UNLOCK(td->td_proc);
+				kern_sigprocmask(td, SIG_SETMASK,
+				    &uc.uc_sigmask, NULL, 0);
 			}
 		}
 	}
@@ -273,10 +276,8 @@ freebsd32_swapcontext(struct thread *td, struct freebsd32_swapcontext_args *uap)
 			if (ret == 0) {
 				ret = ia32_set_mcontext(td, &uc.uc_mcontext);
 				if (ret == 0) {
-					SIG_CANTMASK(uc.uc_sigmask);
-					PROC_LOCK(td->td_proc);
-					td->td_sigmask = uc.uc_sigmask;
-					PROC_UNLOCK(td->td_proc);
+					kern_sigprocmask(td, SIG_SETMASK,
+					    &uc.uc_sigmask, NULL, 0);
 				}
 			}
 		}
@@ -326,10 +327,6 @@ freebsd4_ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_stack.ss_flags = (td->td_pflags & TDP_ALTSTACK)
 	    ? ((oonstack) ? SS_ONSTACK : 0) : SS_DISABLE;
 	sf.sf_uc.uc_mcontext.mc_onstack = (oonstack) ? 1 : 0;
-	sf.sf_uc.uc_mcontext.mc_gs = rgs();
-	sf.sf_uc.uc_mcontext.mc_fs = rfs();
-	__asm __volatile("mov %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
-	__asm __volatile("mov %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
 	sf.sf_uc.uc_mcontext.mc_edi = regs->tf_rdi;
 	sf.sf_uc.uc_mcontext.mc_esi = regs->tf_rsi;
 	sf.sf_uc.uc_mcontext.mc_ebp = regs->tf_rbp;
@@ -345,6 +342,10 @@ freebsd4_ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_mcontext.mc_eflags = regs->tf_rflags;
 	sf.sf_uc.uc_mcontext.mc_esp = regs->tf_rsp;
 	sf.sf_uc.uc_mcontext.mc_ss = regs->tf_ss;
+	sf.sf_uc.uc_mcontext.mc_ds = regs->tf_ds;
+	sf.sf_uc.uc_mcontext.mc_es = regs->tf_es;
+	sf.sf_uc.uc_mcontext.mc_fs = regs->tf_fs;
+	sf.sf_uc.uc_mcontext.mc_gs = regs->tf_gs;
 
 	/* Allocate space for the signal handler context. */
 	if ((td->td_pflags & TDP_ALTSTACK) != 0 && !oonstack &&
@@ -390,14 +391,13 @@ freebsd4_ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	}
 
 	regs->tf_rsp = (uintptr_t)sfp;
-	regs->tf_rip = FREEBSD32_PS_STRINGS - sz_freebsd4_ia32_sigcode;
+	regs->tf_rip = p->p_sysent->sv_psstrings - sz_freebsd4_ia32_sigcode;
 	regs->tf_rflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucode32sel;
 	regs->tf_ss = _udatasel;
-	load_ds(_udatasel);
-	td->td_pcb->pcb_ds = _udatasel;
-	load_es(_udatasel);
-	td->td_pcb->pcb_es = _udatasel;
+	regs->tf_ds = _udatasel;
+	regs->tf_es = _udatasel;
+	td->td_pcb->pcb_full_iret = 1;
 	/* leave user %fs and %gs untouched */
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
@@ -441,10 +441,6 @@ ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_stack.ss_flags = (td->td_pflags & TDP_ALTSTACK)
 	    ? ((oonstack) ? SS_ONSTACK : 0) : SS_DISABLE;
 	sf.sf_uc.uc_mcontext.mc_onstack = (oonstack) ? 1 : 0;
-	sf.sf_uc.uc_mcontext.mc_gs = rgs();
-	sf.sf_uc.uc_mcontext.mc_fs = rfs();
-	__asm __volatile("mov %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
-	__asm __volatile("mov %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
 	sf.sf_uc.uc_mcontext.mc_edi = regs->tf_rdi;
 	sf.sf_uc.uc_mcontext.mc_esi = regs->tf_rsi;
 	sf.sf_uc.uc_mcontext.mc_ebp = regs->tf_rbp;
@@ -460,9 +456,15 @@ ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_mcontext.mc_eflags = regs->tf_rflags;
 	sf.sf_uc.uc_mcontext.mc_esp = regs->tf_rsp;
 	sf.sf_uc.uc_mcontext.mc_ss = regs->tf_ss;
+	sf.sf_uc.uc_mcontext.mc_ds = regs->tf_ds;
+	sf.sf_uc.uc_mcontext.mc_es = regs->tf_es;
+	sf.sf_uc.uc_mcontext.mc_fs = regs->tf_fs;
+	sf.sf_uc.uc_mcontext.mc_gs = regs->tf_gs;
 	sf.sf_uc.uc_mcontext.mc_len = sizeof(sf.sf_uc.uc_mcontext); /* magic */
 	ia32_get_fpcontext(td, &sf.sf_uc.uc_mcontext);
 	fpstate_drop(td);
+	sf.sf_uc.uc_mcontext.mc_fsbase = td->td_pcb->pcb_fsbase;
+	sf.sf_uc.uc_mcontext.mc_gsbase = td->td_pcb->pcb_gsbase;
 
 	/* Allocate space for the signal handler context. */
 	if ((td->td_pflags & TDP_ALTSTACK) != 0 && !oonstack &&
@@ -510,15 +512,14 @@ ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	}
 
 	regs->tf_rsp = (uintptr_t)sfp;
-	regs->tf_rip = FREEBSD32_PS_STRINGS - *(p->p_sysent->sv_szsigcode);
+	regs->tf_rip = p->p_sysent->sv_psstrings - *(p->p_sysent->sv_szsigcode);
 	regs->tf_rflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucode32sel;
 	regs->tf_ss = _udatasel;
-	load_ds(_udatasel);
-	td->td_pcb->pcb_ds = _udatasel;
-	load_es(_udatasel);
-	td->td_pcb->pcb_es = _udatasel;
-	/* leave user %fs and %gs untouched */
+	regs->tf_ds = _udatasel;
+	regs->tf_es = _udatasel;
+	td->td_pcb->pcb_full_iret = 1;
+	/* XXXKIB leave user %fs and %gs untouched */
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
 }
@@ -544,9 +545,8 @@ freebsd4_freebsd32_sigreturn(td, uap)
 	} */ *uap;
 {
 	struct ia32_ucontext4 uc;
-	struct proc *p = td->td_proc;
 	struct trapframe *regs;
-	const struct ia32_ucontext4 *ucp;
+	struct ia32_ucontext4 *ucp;
 	int cs, eflags, error;
 	ksiginfo_t ksi;
 
@@ -570,7 +570,8 @@ freebsd4_freebsd32_sigreturn(td, uap)
 	 * one less debugger trap, so allowing it is fairly harmless.
 	 */
 	if (!EFL_SECURE(eflags & ~PSL_RF, regs->tf_rflags & ~PSL_RF)) {
-		printf("freebsd4_freebsd32_sigreturn: eflags = 0x%x\n", eflags);
+		uprintf("pid %d (%s): freebsd4_freebsd32_sigreturn eflags = 0x%x\n",
+		    td->td_proc->p_pid, td->td_name, eflags);
 		return (EINVAL);
 	}
 
@@ -581,7 +582,8 @@ freebsd4_freebsd32_sigreturn(td, uap)
 	 */
 	cs = ucp->uc_mcontext.mc_cs;
 	if (!CS_SECURE(cs)) {
-		printf("freebsd4_sigreturn: cs = 0x%x\n", cs);
+		uprintf("pid %d (%s): freebsd4_sigreturn cs = 0x%x\n",
+		    td->td_proc->p_pid, td->td_name, cs);
 		ksiginfo_init_trap(&ksi);
 		ksi.ksi_signo = SIGBUS;
 		ksi.ksi_code = BUS_OBJERR;
@@ -591,7 +593,6 @@ freebsd4_freebsd32_sigreturn(td, uap)
 		return (EINVAL);
 	}
 
-	/* Segment selectors restored by sigtramp.S */
 	regs->tf_rdi = ucp->uc_mcontext.mc_edi;
 	regs->tf_rsi = ucp->uc_mcontext.mc_esi;
 	regs->tf_rbp = ucp->uc_mcontext.mc_ebp;
@@ -606,12 +607,13 @@ freebsd4_freebsd32_sigreturn(td, uap)
 	regs->tf_rflags = ucp->uc_mcontext.mc_eflags;
 	regs->tf_rsp = ucp->uc_mcontext.mc_esp;
 	regs->tf_ss = ucp->uc_mcontext.mc_ss;
+	regs->tf_ds = ucp->uc_mcontext.mc_ds;
+	regs->tf_es = ucp->uc_mcontext.mc_es;
+	regs->tf_fs = ucp->uc_mcontext.mc_fs;
+	regs->tf_gs = ucp->uc_mcontext.mc_gs;
 
-	PROC_LOCK(p);
-	td->td_sigmask = ucp->uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &ucp->uc_sigmask, NULL, 0);
+	td->td_pcb->pcb_full_iret = 1;
 	return (EJUSTRETURN);
 }
 #endif	/* COMPAT_FREEBSD4 */
@@ -627,9 +629,8 @@ freebsd32_sigreturn(td, uap)
 	} */ *uap;
 {
 	struct ia32_ucontext uc;
-	struct proc *p = td->td_proc;
 	struct trapframe *regs;
-	const struct ia32_ucontext *ucp;
+	struct ia32_ucontext *ucp;
 	int cs, eflags, error, ret;
 	ksiginfo_t ksi;
 
@@ -653,7 +654,8 @@ freebsd32_sigreturn(td, uap)
 	 * one less debugger trap, so allowing it is fairly harmless.
 	 */
 	if (!EFL_SECURE(eflags & ~PSL_RF, regs->tf_rflags & ~PSL_RF)) {
-		printf("freebsd32_sigreturn: eflags = 0x%x\n", eflags);
+		uprintf("pid %d (%s): freebsd32_sigreturn eflags = 0x%x\n",
+		    td->td_proc->p_pid, td->td_name, eflags);
 		return (EINVAL);
 	}
 
@@ -664,7 +666,8 @@ freebsd32_sigreturn(td, uap)
 	 */
 	cs = ucp->uc_mcontext.mc_cs;
 	if (!CS_SECURE(cs)) {
-		printf("sigreturn: cs = 0x%x\n", cs);
+		uprintf("pid %d (%s): sigreturn cs = 0x%x\n",
+		    td->td_proc->p_pid, td->td_name, cs);
 		ksiginfo_init_trap(&ksi);
 		ksi.ksi_signo = SIGBUS;
 		ksi.ksi_code = BUS_OBJERR;
@@ -678,7 +681,6 @@ freebsd32_sigreturn(td, uap)
 	if (ret != 0)
 		return (ret);
 
-	/* Segment selectors restored by sigtramp.S */
 	regs->tf_rdi = ucp->uc_mcontext.mc_edi;
 	regs->tf_rsi = ucp->uc_mcontext.mc_esi;
 	regs->tf_rbp = ucp->uc_mcontext.mc_ebp;
@@ -693,12 +695,14 @@ freebsd32_sigreturn(td, uap)
 	regs->tf_rflags = ucp->uc_mcontext.mc_eflags;
 	regs->tf_rsp = ucp->uc_mcontext.mc_esp;
 	regs->tf_ss = ucp->uc_mcontext.mc_ss;
+	regs->tf_ds = ucp->uc_mcontext.mc_ds;
+	regs->tf_es = ucp->uc_mcontext.mc_es;
+	regs->tf_fs = ucp->uc_mcontext.mc_fs;
+	regs->tf_gs = ucp->uc_mcontext.mc_gs;
+	regs->tf_flags = TF_HASSEGS;
 
-	PROC_LOCK(p);
-	td->td_sigmask = ucp->uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &ucp->uc_sigmask, NULL, 0);
+	td->td_pcb->pcb_full_iret = 1;
 	return (EJUSTRETURN);
 }
 
@@ -706,43 +710,40 @@ freebsd32_sigreturn(td, uap)
  * Clear registers on exec
  */
 void
-ia32_setregs(td, entry, stack, ps_strings)
-	struct thread *td;
-	u_long entry;
-	u_long stack;
-	u_long ps_strings;
+ia32_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *regs = td->td_frame;
 	struct pcb *pcb = td->td_pcb;
 	
-	critical_enter();
-	wrmsr(MSR_FSBASE, 0);
-	wrmsr(MSR_KGSBASE, 0);	/* User value while we're in the kernel */
+	mtx_lock(&dt_lock);
+	if (td->td_proc->p_md.md_ldt != NULL)
+		user_ldt_free(td);
+	else
+		mtx_unlock(&dt_lock);
+
 	pcb->pcb_fsbase = 0;
 	pcb->pcb_gsbase = 0;
-	critical_exit();
-	load_ds(_udatasel);
-	load_es(_udatasel);
-	load_fs(_udatasel);
-	load_gs(_udatasel);
-	pcb->pcb_ds = _udatasel;
-	pcb->pcb_es = _udatasel;
-	pcb->pcb_fs = _udatasel;
-	pcb->pcb_gs = _udatasel;
 	pcb->pcb_initial_fpucw = __INITIAL_FPUCW_I386__;
 
 	bzero((char *)regs, sizeof(struct trapframe));
-	regs->tf_rip = entry;
+	regs->tf_rip = imgp->entry_addr;
 	regs->tf_rsp = stack;
 	regs->tf_rflags = PSL_USER | (regs->tf_rflags & PSL_T);
 	regs->tf_ss = _udatasel;
 	regs->tf_cs = _ucode32sel;
-	regs->tf_rbx = ps_strings;
+	regs->tf_rbx = imgp->ps_strings;
+	regs->tf_ds = _udatasel;
+	regs->tf_es = _udatasel;
+	regs->tf_fs = _ufssel;
+	regs->tf_gs = _ugssel;
+	regs->tf_flags = TF_HASSEGS;
+
 	load_cr0(rcr0() | CR0_MP | CR0_TS);
 	fpstate_drop(td);
 
 	/* Return via doreti so that we can change to a different %cs */
 	pcb->pcb_flags |= PCB_FULLCTX | PCB_32BIT;
 	pcb->pcb_flags &= ~PCB_GS32BIT;
+	td->td_pcb->pcb_full_iret = 1;
 	td->td_retval[1] = 0;
 }

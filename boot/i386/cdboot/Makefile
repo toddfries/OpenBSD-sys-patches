@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/i386/cdboot/Makefile,v 1.13 2004/12/21 08:47:14 ru Exp $
+# $FreeBSD: src/sys/boot/i386/cdboot/Makefile,v 1.14 2010/06/03 17:42:32 ed Exp $
 
 PROG=	cdboot
 STRIP=
@@ -8,6 +8,6 @@ SRCS=	${PROG}.s
 
 ORG=	0x7c00
 
-LDFLAGS=-N -e start -Ttext ${ORG} -Wl,-S,--oformat,binary
+LDFLAGS=-e start -Ttext ${ORG} -Wl,-N,-S,--oformat,binary
 
 .include <bsd.prog.mk>

@@ -22,7 +22,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_pci.c,v 1.7 2009/03/09 07:47:03 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_pci.c,v 1.8 2009/03/30 18:01:42 rnoland Exp $");
 
 /**
  * \file drm_pci.h
@@ -91,7 +91,7 @@ drm_pci_alloc(struct drm_device *dev, size_t size,
 	}
 
 	ret = bus_dmamem_alloc(dmah->tag, &dmah->vaddr,
-	    BUS_DMA_WAITOK | BUS_DMA_ZERO, &dmah->map);
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO | BUS_DMA_NOCACHE, &dmah->map);
 	if (ret != 0) {
 		bus_dma_tag_destroy(dmah->tag);
 		free(dmah, DRM_MEM_DMA);

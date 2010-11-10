@@ -42,7 +42,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/mainbus.c,v 1.2 2008/04/15 02:50:07 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/mainbus.c,v 1.4 2010/01/10 20:29:20 imp Exp $");
+
+#include "opt_cputype.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,7 +78,7 @@ static	int mainbus_deactivate_resource(device_t, device_t, int, int,
 static	int mainbus_release_resource(device_t, device_t, int, int,
 	    struct resource *);
 static	int mainbus_setup_intr(device_t, device_t, struct resource *,
-	    int flags, int (*)(void *), void *, void **);
+	    int flags, driver_filter_t, void (*)(void *), void *, void **);
 static	int mainbus_teardown_intr(device_t, device_t, struct resource *,
 	    void *);
 
@@ -265,7 +267,6 @@ mainbus_activate_resource(device_t bus, device_t child, int type, int rid,
 			    + poffs;
 		}
 		rman_set_virtual(r, vaddr);
-		/* IBM-PC: the type of bus_space_handle_t is u_int */
 #ifdef TARGET_OCTEON
 		temp = 0x0000000000000000;
 		temp |= (uint32_t)vaddr;
@@ -319,7 +320,8 @@ mainbus_release_resource(device_t bus, device_t child, int type, int rid,
  */
 static int
 mainbus_setup_intr(device_t bus, device_t child, struct resource *irq,
-    int flags, int (*ihand)(void *), void *arg, void **cookiep)
+    int flags, driver_filter_t filter, void (*ihand)(void *), void *arg,
+    void **cookiep)
 {
 	panic("can never mainbus_setup_intr");
 }

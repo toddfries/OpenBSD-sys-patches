@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/arm/conf/AVILA.hints,v 1.5 2009/02/03 19:16:04 sam Exp $
+# $FreeBSD: src/sys/arm/conf/AVILA.hints,v 1.9 2010/11/07 20:33:39 thompsa Exp $
 
 #
 # Device wiring for the Gateworks Avila 2384.
@@ -9,10 +9,12 @@ hint.uart.0.at="ixp0"
 hint.uart.0.addr=0xc8000000
 hint.uart.0.irq=15
 hint.uart.0.flags=0x10
+hint.uart.0.ier_rxbits=0x5d	# NB: need UUE+RTOIE
 # USART0 is unit 1
 hint.uart.1.at="ixp0"
 hint.uart.1.addr=0xc8001000
 hint.uart.1.irq=13
+hint.uart.1.ier_rxbits=0x5d	# NB: need UUE+RTOIE
 
 # NPE Hardware Queue Manager
 hint.ixpqmgr.0.at="ixp0"
@@ -39,10 +41,13 @@ hint.ata_avila.0.at="ixp0"
 # Front Panel LED
 hint.led_avila.0.at="ixp0"
 
+# GPIO pins
+hint.gpio_avila.0.at="ixp0"
+
 # Analog Devices AD7418 temperature sensor
 hint.ad7418.0.at="iicbus0"
 hint.ad7418.0.addr=0x50
 
 # Dallas Semiconductor DS1672 RTC
-hint.ds1672.0.at="iicbus0"
-hint.ds1672.0.addr=0xd0
+hint.ds1672_rtc.0.at="iicbus0"
+hint.ds1672_rtc.0.addr=0xd0

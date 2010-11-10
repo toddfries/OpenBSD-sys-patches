@@ -1,5 +1,6 @@
 /*-
- * Copyright (c) 2001 Cameron Grant <cg@freebsd.org>
+ * Copyright (c) 2005-2009 Ariff Abdullah <ariff@FreeBSD.org>
+ * Copyright (c) 2001 Cameron Grant <cg@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,14 +25,16 @@
  * SUCH DAMAGE.
  */
 
-#include <dev/sound/pcm/sound.h>
-#include <dev/sound/pcm/vchan.h>
-#include <dev/sound/version.h>
-#ifdef	USING_MUTEX
-#include <sys/sx.h>
+#ifdef HAVE_KERNEL_OPTION_HEADERS
+#include "opt_snd.h"
 #endif
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/sndstat.c,v 1.28 2007/06/16 03:37:28 ariff Exp $");
+#include <dev/sound/pcm/sound.h>
+#include <dev/sound/pcm/pcm.h>
+#include <dev/sound/version.h>
+#include <sys/sx.h>
+
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/sndstat.c,v 1.31 2010/01/13 22:22:16 mav Exp $");
 
 #define	SS_TYPE_MODULE		0
 #define	SS_TYPE_FIRST		1
@@ -60,9 +63,7 @@ struct sndstat_entry {
 	int type, unit;
 };
 
-#ifdef	USING_MUTEX
 static struct mtx sndstat_lock;
-#endif
 static struct sbuf sndstat_sbuf;
 static struct cdev *sndstat_dev = NULL;
 static int sndstat_bufptr = -1;
@@ -76,16 +77,12 @@ static int sndstat_files = 0;
 		sbuf_delete(&sndstat_sbuf);				\
 		sndstat_bufptr = -1;					\
 	}								\
-} while(0)
+} while (0)
 
-static SLIST_HEAD(, sndstat_entry) sndstat_devlist = SLIST_HEAD_INITIALIZER(none);
+static SLIST_HEAD(, sndstat_entry) sndstat_devlist = SLIST_HEAD_INITIALIZER(sndstat_devlist);
 
-int snd_verbose = 1;
-#ifdef	USING_MUTEX
+int snd_verbose = 0;
 TUNABLE_INT("hw.snd.verbose", &snd_verbose);
-#else
-TUNABLE_INT_DECL("hw.snd.verbose", 1, snd_verbose);
-#endif
 
 #ifdef SND_DEBUG
 static int
@@ -354,7 +351,7 @@ sndstat_prepare(struct sbuf *s)
     	int i, j;
 
 	sbuf_printf(s, "FreeBSD Audio Driver (newpcm: %ubit %d/%s)\n",
-	    (u_int)sizeof(intpcm_t) << 3, SND_DRV_VERSION, MACHINE_ARCH);
+	    (u_int)sizeof(intpcm32_t) << 3, SND_DRV_VERSION, MACHINE_ARCH);
 	if (SLIST_EMPTY(&sndstat_devlist)) {
 		sbuf_printf(s, "No devices installed.\n");
 		sbuf_finish(s);
@@ -375,12 +372,10 @@ sndstat_prepare(struct sbuf *s)
 			PCM_ACQUIRE_QUICK(d);
 			sbuf_printf(s, "%s:", device_get_nameunit(ent->dev));
 			sbuf_printf(s, " <%s>", device_get_desc(ent->dev));
-			sbuf_printf(s, " %s [%s]", ent->str,
-			    (d->flags & SD_F_MPSAFE) ? "MPSAFE" : "GIANT");
+			if (snd_verbose > 0)
+				sbuf_printf(s, " %s", ent->str);
 			if (ent->handler)
 				ent->handler(s, ent->dev, snd_verbose);
-			else
-				sbuf_printf(s, " [no handler]");
 			sbuf_printf(s, "\n");
 			PCM_RELEASE_QUICK(d);
 		}

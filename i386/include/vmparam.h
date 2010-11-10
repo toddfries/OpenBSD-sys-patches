@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)vmparam.h	5.9 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/i386/include/vmparam.h,v 1.48 2008/08/15 20:51:31 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/vmparam.h,v 1.49 2009/04/04 23:12:14 alc Exp $
  */
 
 
@@ -42,10 +42,6 @@
 /*
  * Machine dependent constants for 386.
  */
-
-#ifndef PAE
-#define VM_PROT_READ_IS_EXEC	/* if you can read -- then you can exec */
-#endif
 
 /*
  * Virtual memory related constants, all in bytes

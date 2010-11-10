@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: asltree - parse tree management
- *              $Revision: 1.63 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -491,7 +490,7 @@ TrCreateLeafNode (
 ACPI_PARSE_OBJECT *
 TrCreateValuedLeafNode (
     UINT32                  ParseOpcode,
-    ACPI_INTEGER            Value)
+    UINT64                  Value)
 {
     ACPI_PARSE_OBJECT       *Op;
 
@@ -914,6 +913,7 @@ TrLinkPeerNodes (
         This->Asl.Next = Next;
         This = Next;
     }
+    va_end (ap);
 
     DbgPrint (ASL_PARSE_OUTPUT,"\n\n");
     return (Start);

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/stack_machdep.c,v 1.3 2008/10/27 21:31:14 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/stack_machdep.c,v 1.4 2009/12/08 20:18:54 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -36,15 +36,20 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/stack_machdep.c,v 1.3 2008/10/27 21:
 #include <machine/stack.h>
 #include <machine/vmparam.h>
 
-static void stack_capture(struct stack *st, struct frame *fp);
+static void stack_capture(struct stack *st, struct frame *frame);
 
 static void
-stack_capture(struct stack *st, struct frame *fp)
+stack_capture(struct stack *st, struct frame *frame)
 {
+	struct frame *fp;
 	vm_offset_t callpc;
 
 	stack_zero(st);
-	while (1) {
+	fp = frame;
+	for (;;) {
+		if (!INKERNEL((vm_offset_t)fp) ||
+		    !ALIGNED_POINTER(fp, uint64_t))
+                        break;
 		callpc = fp->fr_pc;
 		if (!INKERNEL(callpc))
 			break;
@@ -55,6 +60,9 @@ stack_capture(struct stack *st, struct frame *fp)
 		    callpc < (uint64_t)tl_text_end))
 			break;
 		if (stack_put(st, callpc) == -1)
+			break;
+		if (v9next_frame(fp) <= fp ||
+		    v9next_frame(fp) >= frame + KSTACK_PAGES * PAGE_SIZE)
 			break;
 		fp = v9next_frame(fp);
 	}

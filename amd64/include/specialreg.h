@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)specialreg.h	7.1 (Berkeley) 5/9/91
- * $FreeBSD: src/sys/amd64/include/specialreg.h,v 1.53 2009/01/12 19:17:35 jkim Exp $
+ * $FreeBSD: src/sys/amd64/include/specialreg.h,v 1.66 2010/10/05 15:31:56 kib Exp $
  */
 
 #ifndef _MACHINE_SPECIALREG_H_
@@ -113,6 +113,7 @@
 #define	CPUID_PBE	0x80000000
 
 #define	CPUID2_SSE3	0x00000001
+#define	CPUID2_PCLMULQDQ 0x00000002
 #define	CPUID2_DTES64	0x00000004
 #define	CPUID2_MON	0x00000008
 #define	CPUID2_DS_CPL	0x00000010
@@ -125,11 +126,14 @@
 #define	CPUID2_CX16	0x00002000
 #define	CPUID2_XTPR	0x00004000
 #define	CPUID2_PDCM	0x00008000
+#define	CPUID2_PCID	0x00020000
 #define	CPUID2_DCA	0x00040000
 #define	CPUID2_SSE41	0x00080000
 #define	CPUID2_SSE42	0x00100000
 #define	CPUID2_X2APIC	0x00200000
+#define	CPUID2_MOVBE	0x00400000
 #define	CPUID2_POPCNT	0x00800000
+#define	CPUID2_AESNI	0x02000000
 
 /*
  * Important bits in the AMD extended cpuid flags
@@ -168,10 +172,10 @@
 #define	CPUID_FAMILY		0x00000f00
 #define	CPUID_EXT_MODEL		0x000f0000
 #define	CPUID_EXT_FAMILY	0x0ff00000
-#define	AMD64_CPU_MODEL(id) \
+#define	CPUID_TO_MODEL(id) \
     ((((id) & CPUID_MODEL) >> 4) | \
     (((id) & CPUID_EXT_MODEL) >> 12))
-#define	AMD64_CPU_FAMILY(id) \
+#define	CPUID_TO_FAMILY(id) \
     ((((id) & CPUID_FAMILY) >> 8) + \
     (((id) & CPUID_EXT_FAMILY) >> 20))
 
@@ -182,6 +186,13 @@
 #define	CPUID_CLFUSH_SIZE	0x0000ff00
 #define	CPUID_HTT_CORES		0x00ff0000
 #define	CPUID_LOCAL_APIC_ID	0xff000000
+
+/* 
+ * CPUID instruction 0xb ebx info.
+ */
+#define	CPUID_TYPE_INVAL	0
+#define	CPUID_TYPE_SMT		1
+#define	CPUID_TYPE_CORE		2
 
 /*
  * AMD extended function 8000_0007h edx info
@@ -248,6 +259,7 @@
 #define	MSR_THERM_INTERRUPT	0x19b
 #define	MSR_THERM_STATUS	0x19c
 #define	MSR_IA32_MISC_ENABLE	0x1a0
+#define	MSR_IA32_TEMPERATURE_TARGET	0x1a2
 #define	MSR_DEBUGCTLMSR		0x1d9
 #define	MSR_LASTBRANCHFROMIP	0x1db
 #define	MSR_LASTBRANCHTOIP	0x1dc
@@ -259,6 +271,7 @@
 #define	MSR_MTRR16kBase		0x258
 #define	MSR_MTRR4kBase		0x268
 #define	MSR_PAT			0x277
+#define	MSR_MC0_CTL2		0x280
 #define	MSR_MTRRdefType		0x2ff
 #define	MSR_MC0_CTL		0x400
 #define	MSR_MC0_STATUS		0x401
@@ -312,16 +325,16 @@
 #define	MTRR_N64K		8	/* numbers of fixed-size entries */
 #define	MTRR_N16K		16
 #define	MTRR_N4K		64
-#define	MTRR_CAP_WC		0x0000000000000400UL
-#define	MTRR_CAP_FIXED		0x0000000000000100UL
-#define	MTRR_CAP_VCNT		0x00000000000000ffUL
-#define	MTRR_DEF_ENABLE		0x0000000000000800UL
-#define	MTRR_DEF_FIXED_ENABLE	0x0000000000000400UL
-#define	MTRR_DEF_TYPE		0x00000000000000ffUL
-#define	MTRR_PHYSBASE_PHYSBASE	0x000ffffffffff000UL
-#define	MTRR_PHYSBASE_TYPE	0x00000000000000ffUL
-#define	MTRR_PHYSMASK_PHYSMASK	0x000ffffffffff000UL
-#define	MTRR_PHYSMASK_VALID	0x0000000000000800UL
+#define	MTRR_CAP_WC		0x0000000000000400
+#define	MTRR_CAP_FIXED		0x0000000000000100
+#define	MTRR_CAP_VCNT		0x00000000000000ff
+#define	MTRR_DEF_ENABLE		0x0000000000000800
+#define	MTRR_DEF_FIXED_ENABLE	0x0000000000000400
+#define	MTRR_DEF_TYPE		0x00000000000000ff
+#define	MTRR_PHYSBASE_PHYSBASE	0x000ffffffffff000
+#define	MTRR_PHYSBASE_TYPE	0x00000000000000ff
+#define	MTRR_PHYSMASK_PHYSMASK	0x000ffffffffff000
+#define	MTRR_PHYSMASK_VALID	0x0000000000000800
 
 /* Performance Control Register (5x86 only). */
 #define	PCR0			0x20
@@ -337,6 +350,45 @@
 /* Device Identification Registers */
 #define	DIR0			0xfe
 #define	DIR1			0xff
+
+/*
+ * Machine Check register constants.
+ */
+#define	MCG_CAP_COUNT		0x000000ff
+#define	MCG_CAP_CTL_P		0x00000100
+#define	MCG_CAP_EXT_P		0x00000200
+#define	MCG_CAP_CMCI_P		0x00000400
+#define	MCG_CAP_TES_P		0x00000800
+#define	MCG_CAP_EXT_CNT		0x00ff0000
+#define	MCG_CAP_SER_P		0x01000000
+#define	MCG_STATUS_RIPV		0x00000001
+#define	MCG_STATUS_EIPV		0x00000002
+#define	MCG_STATUS_MCIP		0x00000004
+#define	MCG_CTL_ENABLE		0xffffffffffffffff
+#define	MCG_CTL_DISABLE		0x0000000000000000
+#define	MSR_MC_CTL(x)		(MSR_MC0_CTL + (x) * 4)
+#define	MSR_MC_STATUS(x)	(MSR_MC0_STATUS + (x) * 4)
+#define	MSR_MC_ADDR(x)		(MSR_MC0_ADDR + (x) * 4)
+#define	MSR_MC_MISC(x)		(MSR_MC0_MISC + (x) * 4)
+#define	MSR_MC_CTL2(x)		(MSR_MC0_CTL2 + (x))	/* If MCG_CAP_CMCI_P */
+#define	MC_STATUS_MCA_ERROR	0x000000000000ffff
+#define	MC_STATUS_MODEL_ERROR	0x00000000ffff0000
+#define	MC_STATUS_OTHER_INFO	0x01ffffff00000000
+#define	MC_STATUS_COR_COUNT	0x001fffc000000000	/* If MCG_CAP_CMCI_P */
+#define	MC_STATUS_TES_STATUS	0x0060000000000000	/* If MCG_CAP_TES_P */
+#define	MC_STATUS_AR		0x0080000000000000	/* If MCG_CAP_TES_P */
+#define	MC_STATUS_S		0x0100000000000000	/* If MCG_CAP_TES_P */
+#define	MC_STATUS_PCC		0x0200000000000000
+#define	MC_STATUS_ADDRV		0x0400000000000000
+#define	MC_STATUS_MISCV		0x0800000000000000
+#define	MC_STATUS_EN		0x1000000000000000
+#define	MC_STATUS_UC		0x2000000000000000
+#define	MC_STATUS_OVER		0x4000000000000000
+#define	MC_STATUS_VAL		0x8000000000000000
+#define	MC_MISC_RA_LSB		0x000000000000003f	/* If MCG_CAP_SER_P */
+#define	MC_MISC_ADDRESS_MODE	0x00000000000001c0	/* If MCG_CAP_SER_P */
+#define	MC_CTL2_THRESHOLD	0x0000000000007fff
+#define	MC_CTL2_CMCI_EN		0x0000000040000000
 
 /*
  * The following four 3-byte registers control the non-cacheable regions.
@@ -458,6 +510,7 @@
 #define	MSR_TOP_MEM	0xc001001a	/* boundary for ram below 4G */
 #define	MSR_TOP_MEM2	0xc001001d	/* boundary for ram above 4G */
 #define	MSR_K8_UCODE_UPDATE	0xc0010020	/* update microcode */
+#define	MSR_MC0_CTL_MASK	0xc0010044
 
 /* VIA ACE crypto featureset: for via_feature_rng */
 #define	VIA_HAS_RNG		1	/* cpu has RNG */

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/i386/boot0/Makefile,v 1.35 2008/12/30 09:40:50 luigi Exp $
+# $FreeBSD: src/sys/boot/i386/boot0/Makefile,v 1.36 2010/06/03 17:42:32 ed Exp $
 
 PROG?=	boot0
 STRIP=
@@ -74,6 +74,6 @@ CFLAGS+=-DFLAGS=${BOOT_BOOT0_FLAGS} \
 	-DTICKS=${BOOT_BOOT0_TICKS} \
 	-DCOMSPEED=${BOOT_BOOT0_COMCONSOLE_SPEED}
 
-LDFLAGS=-N -e start -Ttext ${BOOT_BOOT0_ORG} -Wl,-S,--oformat,binary
+LDFLAGS=-e start -Ttext ${BOOT_BOOT0_ORG} -Wl,-N,-S,--oformat,binary
 
 .include <bsd.prog.mk>

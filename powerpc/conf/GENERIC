@@ -16,13 +16,10 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/powerpc/conf/GENERIC,v 1.88 2009/02/23 18:34:56 thompsa Exp $
+# $FreeBSD: src/sys/powerpc/conf/GENERIC,v 1.104 2010/04/22 21:31:34 thompsa Exp $
 
 cpu		AIM
 ident		GENERIC
-
-#To statically compile in device wiring instead of /boot/device.hints
-#hints		"GENERIC.hints"
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 
@@ -50,7 +47,6 @@ options 	PROCFS			#Process filesystem (requires PSEUDOFS)
 options 	PSEUDOFS		#Pseudo-filesystem framework
 options 	GEOM_PART_GPT		#GUID Partition Tables.
 options 	GEOM_LABEL		#Provides labelization
-options 	COMPAT_43TTY		#BSD 4.3 TTY compat (sgtty)
 options 	COMPAT_FREEBSD4		#Keep this for a while
 options 	COMPAT_FREEBSD5		#Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		#Compatible with FreeBSD6
@@ -61,13 +57,17 @@ options 	STACK			#stack(9) support
 options 	SYSVSHM			#SYSV-style shared memory
 options 	SYSVMSG			#SYSV-style message queues
 options 	SYSVSEM			#SYSV-style semaphores
+options 	P1003_1B_SEMAPHORES	# POSIX-style semaphores
 options 	_KPOSIX_PRIORITY_SCHEDULING #Posix P1003_1B real-time extensions
 options 	HWPMC_HOOKS		# Necessary kernel hooks for hwpmc(4)
 options 	AUDIT			# Security event auditing
+options 	MAC			# TrustedBSD MAC Framework
+options 	INCLUDE_CONFIG_FILE     # Include this file in kernel
 
 # Debugging for use in -current
 options 	KDB			#Enable the kernel debugger
 options 	DDB			#Support DDB
+#options 	DEADLKRES		#Enable the deadlock resolver
 options 	INVARIANTS		#Enable calls of extra sanity checking
 options 	INVARIANT_SUPPORT	#Extra sanity checks of internal structures, required by INVARIANTS
 options 	WITNESS			#Enable checks to detect deadlocks and cycles
@@ -75,6 +75,9 @@ options 	WITNESS_SKIPSPIN	#Don't run witness on spinlocks for speed
 
 # To make an SMP kernel, the next line is needed
 #options 	SMP			# Symmetric MultiProcessor Kernel
+
+# CPU frequency control
+device		cpufreq
 
 # Standard busses
 device		pci
@@ -85,6 +88,16 @@ device		atadisk		# ATA disk drives
 device		atapicd		# ATAPI CDROM drives
 #device		atapifd		# ATAPI floppy drives
 #device		atapist		# ATAPI tape drives
+
+# SCSI Controllers
+device		ahc		# AHA2940 and onboard AIC7xxx devices
+options 	AHC_ALLOW_MEMIO	# Attempt to use memory mapped I/O
+options 	AHC_REG_PRETTY_PRINT	# Print register bitfields in debug
+					# output.  Adds ~128k to driver.
+device		isp		# Qlogic family
+device		ispfw		# Firmware module for Qlogic host adapters
+device		mpt		# LSI-Logic MPT-Fusion
+device		sym		# NCR/Symbios/LSI Logic 53C8XX/53C1010/53C1510D
 
 # SCSI peripherals
 device		scbus		# SCSI bus (required for SCSI)
@@ -116,12 +129,14 @@ device		fxp		# Intel EtherExpress PRO/100B (82557, 82558)
 device		loop		# Network loopback
 device		random		# Entropy device
 device		ether		# Ethernet support
+device		vlan		# 802.1Q VLAN support
 device		tun		# Packet tunnel.
 device		pty		# BSD-style compatibility pseudo ttys
 device		md		# Memory "disks"
 device		ofwd		# Open Firmware disks
 device		gif		# IPv6 and IPv4 tunneling
 device		faith		# IPv6-to-IPv4 relaying/(translation)
+device		firmware	# firmware assist module
 
 # The `bpf' device enables the Berkeley Packet Filter.
 # Be aware of the administrative consequences of enabling this!
@@ -129,18 +144,19 @@ device		faith		# IPv6-to-IPv4 relaying/(translation)
 device		bpf		#Berkeley packet filter
 
 # USB support
+options 	USB_DEBUG	# enable debug msgs
 device		uhci		# UHCI PCI->USB interface
 device		ohci		# OHCI PCI->USB interface
 device		ehci		# EHCI PCI->USB interface
 device		usb		# USB Bus (required)
 device		uhid		# "Human Interface Devices"
 device		ukbd		# Keyboard
-options         KBD_INSTALL_CDEV # install a CDEV entry in /dev
+options 	KBD_INSTALL_CDEV # install a CDEV entry in /dev
 device		ulpt		# Printer
 device		umass		# Disks/Mass storage - Requires scbus and da0
 device		ums		# Mouse
+device		atp		# Apple USB touchpad
 device		urio		# Diamond Rio 500 MP3 player
-device		uscanner	# Scanners
 # USB Ethernet
 device		aue		# ADMtek USB Ethernet
 device		axe		# ASIX Electronics USB Ethernet
@@ -155,6 +171,7 @@ device		fwe		# Ethernet over FireWire (non-standard!)
 
 # Misc
 device		powermac_nvram	# Open Firmware configuration NVRAM
+device		smu		# Apple System Management Unit
 
 # ADB support
 device		adb
@@ -165,7 +182,3 @@ device		pmu
 device		iicbus		# I2C bus code
 device		kiic		# Keywest I2C
 
-options 	KTR
-options 	KTR_COMPILE=0xffffffff
-#options 	KTR_MASK=KTR_SIG
-options 	KTR_VERBOSE

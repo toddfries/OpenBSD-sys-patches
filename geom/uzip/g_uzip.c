@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/uzip/g_uzip.c,v 1.12 2007/04/24 06:30:06 simokawa Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/uzip/g_uzip.c,v 1.14 2010/01/06 13:14:37 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -363,6 +363,11 @@ g_uzip_taste(struct g_class *mp, struct g_provider *pp, int flags)
 
 	g_trace(G_T_TOPOLOGY, "g_uzip_taste(%s,%s)", mp->name, pp->name);
 	g_topology_assert();
+
+	/* Skip providers that are already open for writing. */
+	if (pp->acw > 0)
+		return (NULL);
+
 	buf = NULL;
 
 	/*
@@ -462,10 +467,8 @@ g_uzip_taste(struct g_class *mp, struct g_provider *pp, int flags)
 	pp2->sectorsize = 512;
 	pp2->mediasize = (off_t)sc->nblocks * sc->blksz;
         pp2->flags = pp->flags & G_PF_CANDELETE;
-        if (pp->stripesize > 0) {
-                pp2->stripesize = pp->stripesize;
-                pp2->stripeoffset = pp->stripeoffset;
-        }
+        pp2->stripesize = pp->stripesize;
+        pp2->stripeoffset = pp->stripeoffset;
 	g_error_provider(pp2, 0);
 	g_access(cp, -1, 0, 0);
 

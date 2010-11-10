@@ -28,25 +28,14 @@
  *
  *	@(#)time.h	8.5 (Berkeley) 5/4/95
  * from: FreeBSD: src/sys/sys/time.h,v 1.43 2000/03/20 14:09:05 phk Exp
- *	$FreeBSD: src/sys/sys/timespec.h,v 1.5 2005/10/23 04:22:56 davidxu Exp $
- */
-
-/*
- * Prerequisites: <sys/cdefs.h>, <sys/_types.h>
+ *	$FreeBSD: src/sys/sys/timespec.h,v 1.6 2010/03/28 13:13:22 ed Exp $
  */
 
 #ifndef _SYS_TIMESPEC_H_
 #define _SYS_TIMESPEC_H_
 
-#ifndef _TIME_T_DECLARED
-typedef	__time_t	time_t;
-#define	_TIME_T_DECLARED
-#endif
-
-struct timespec {
-	time_t	tv_sec;		/* seconds */
-	long	tv_nsec;	/* and nanoseconds */
-};
+#include <sys/cdefs.h>
+#include <sys/_timespec.h>
 
 #if __BSD_VISIBLE
 #define	TIMEVAL_TO_TIMESPEC(tv, ts)					\

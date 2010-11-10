@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/sr.h,v 1.5 2005/01/07 02:29:19 imp Exp $
+ * $FreeBSD: src/sys/powerpc/include/sr.h,v 1.6 2010/02/20 16:23:29 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_SR_H_
@@ -45,6 +45,7 @@
 #define	USER_SR		12
 #define	KERNEL_SR	13
 #define	KERNEL2_SR	14
+#define	KERNEL3_SR	15
 #define	KERNEL_VSIDBITS	0xfffff
 #define	KERNEL_SEGMENT	(0xfffff0 + KERNEL_SR)
 #define	KERNEL2_SEGMENT	(0xfffff0 + KERNEL2_SR)

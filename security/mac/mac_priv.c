@@ -36,7 +36,7 @@
  */
 
 #include "sys/cdefs.h"
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_priv.c,v 1.5 2009/03/08 00:50:37 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_priv.c,v 1.7 2009/05/01 21:05:40 rwatson Exp $");
 
 #include "opt_kdtrace.h"
 #include "opt_mac.h"
@@ -72,7 +72,7 @@ mac_priv_check(struct ucred *cred, int priv)
 {
 	int error;
 
-	MAC_CHECK(priv_check, cred, priv);
+	MAC_POLICY_CHECK_NOSLEEP(priv_check, cred, priv);
 	MAC_CHECK_PROBE2(priv_check, error, cred, priv);
 
 	return (error);
@@ -89,7 +89,7 @@ mac_priv_grant(struct ucred *cred, int priv)
 {
 	int error;
 
-	MAC_GRANT(priv_grant, cred, priv);
+	MAC_POLICY_GRANT_NOSLEEP(priv_grant, cred, priv);
 	MAC_GRANT_PROBE2(priv_grant, error, cred, priv);
 
 	return (error);

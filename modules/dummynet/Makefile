@@ -1,10 +1,13 @@
-# $FreeBSD: src/sys/modules/dummynet/Makefile,v 1.6 2006/03/17 18:54:36 ru Exp $
+# $FreeBSD: src/sys/modules/dummynet/Makefile,v 1.9 2010/04/07 13:02:20 luigi Exp $
 
 .include <bsd.own.mk>
 
-.PATH:  ${.CURDIR}/../../netinet
+.PATH:  ${.CURDIR}/../../netinet/ipfw
 KMOD=   dummynet
 SRCS=   ip_dummynet.c
+SRCS+= ip_dn_glue.c ip_dn_io.c
+SRCS+= dn_heap.c dn_sched_fifo.c dn_sched_qfq.c dn_sched_rr.c dn_sched_wf2q.c 
+SRCS+= dn_sched_prio.c
 SRCS+=	opt_inet6.h
 
 .if !defined(KERNBUILDDIR)

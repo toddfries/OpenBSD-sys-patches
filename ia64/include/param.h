@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/ia64/include/param.h,v 1.25 2008/03/27 05:03:25 jb Exp $ */
+/* $FreeBSD: src/sys/ia64/include/param.h,v 1.34 2009/12/07 00:54:02 marcel Exp $ */
 /* From: NetBSD: param.h,v 1.20 1997/09/19 13:52:53 leo Exp */
 
 /*-
@@ -39,37 +39,17 @@
  *	@(#)param.h	8.1 (Berkeley) 6/10/93
  */
 
+#ifndef _IA64_INCLUDE_PARAM_H_
+#define	_IA64_INCLUDE_PARAM_H_
+
 /*
  * Machine dependent constants for the IA64.
  */
-/*
- * Round p (pointer or byte index) up to a correctly-aligned value for all
- * data types (int, long, ...).   The result is u_long and must be cast to
- * any desired pointer type.
- *
- * ALIGNED_POINTER is a boolean macro that checks whether an address
- * is valid to fetch data elements of type t from on this architecture.
- * This does not reflect the optimal alignment, just the possibility
- * (within reasonable limits). 
- *
- */
-#ifndef _ALIGNBYTES
-#define	_ALIGNBYTES		15
-#endif
-#ifndef _ALIGN
-#define	_ALIGN(p)		(((u_long)(p) + _ALIGNBYTES) &~ _ALIGNBYTES)
-#endif
-#ifndef _ALIGNED_POINTER
-#define _ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
-#endif
 
-#ifndef _NO_NAMESPACE_POLLUTION
+#include <machine/_align.h>
 
 #define __HAVE_ACPI
 #define __PCI_REROUTE_INTERRUPT
-
-#ifndef _MACHINE_PARAM_H_
-#define	_MACHINE_PARAM_H_
 
 #ifndef MACHINE
 #define	MACHINE		"ia64"
@@ -79,25 +59,27 @@
 #endif
 
 #if defined(SMP) || defined(KLD_MODULE)
-#define	MAXCPU		4
+#define	MAXCPU		32
 #else
 #define MAXCPU		1
 #endif
 
+#define	ALIGNBYTES		_ALIGNBYTES
+#define	ALIGN(p)		_ALIGN(p)
 /*
- * Round p (pointer or byte index) up to a correctly-aligned value for all
- * data types (int, long, ...).   The result is u_long and must be cast to
- * any desired pointer type.
- *
  * ALIGNED_POINTER is a boolean macro that checks whether an address
  * is valid to fetch data elements of type t from on this architecture.
  * This does not reflect the optimal alignment, just the possibility
  * (within reasonable limits). 
- *
  */
-#define	ALIGNBYTES		_ALIGNBYTES
-#define	ALIGN(p)		_ALIGN(p)
-#define ALIGNED_POINTER(p,t)	_ALIGNED_POINTER(p,t)
+#define	ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
+
+/*
+ * CACHE_LINE_SIZE is the compile-time maximum cache line size for an
+ * architecture.  It should be used with appropriate caution.
+ */
+#define	CACHE_LINE_SHIFT	7
+#define	CACHE_LINE_SIZE		(1 << CACHE_LINE_SHIFT)
 
 #ifndef LOG2_PAGE_SIZE
 #define	LOG2_PAGE_SIZE		13		/* 8K pages by default. */
@@ -106,6 +88,8 @@
 #define	PAGE_SIZE	(1<<(LOG2_PAGE_SIZE))
 #define PAGE_MASK	(PAGE_SIZE-1)
 #define NPTEPG		(PAGE_SIZE/(sizeof (pt_entry_t)))
+
+#define	MAXPAGESIZES	1		/* maximum number of supported page sizes */
 
 #ifndef	KSTACK_PAGES
 #define	KSTACK_PAGES	4		/* pages of kernel stack */
@@ -126,5 +110,4 @@
 
 #define pgtok(x)                ((x) * (PAGE_SIZE / 1024)) 
 
-#endif	/* !_MACHINE_PARAM_H_ */
-#endif	/* !_NO_NAMESPACE_POLLUTION */
+#endif	/* !_IA64_INCLUDE_PARAM_H_ */

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mii/ip1000phy.c,v 1.7 2009/03/09 08:17:46 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mii/ip1000phy.c,v 1.8 2009/12/18 21:57:51 yongari Exp $");
 
 /*
  * Driver for the IC Plus IP1000A/IP1001 10/100/1000 PHY.
@@ -398,8 +398,10 @@ ip1000phy_mii_phy_auto(struct mii_softc *sc)
 
 	isc = (struct ip1000phy_softc *)sc;
 	reg = 0;
-	if (isc->model == MII_MODEL_ICPLUS_IP1001)
+	if (isc->model == MII_MODEL_ICPLUS_IP1001) {
 		reg = PHY_READ(sc, IP1000PHY_MII_ANAR);
+		reg |= IP1000PHY_ANAR_NP;
+	}
 	reg |= IP1000PHY_ANAR_10T | IP1000PHY_ANAR_10T_FDX |
 	    IP1000PHY_ANAR_100TX | IP1000PHY_ANAR_100TX_FDX |
 	    IP1000PHY_ANAR_PAUSE | IP1000PHY_ANAR_APAUSE;

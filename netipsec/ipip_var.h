@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipip_var.h,v 1.3 2008/12/13 19:13:03 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipip_var.h,v 1.6 2010/04/29 11:52:42 bz Exp $	*/
 /*	$OpenBSD: ip_ipip.h,v 1.5 2002/06/09 16:26:10 itojun Exp $ */
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -59,9 +59,10 @@ struct ipipstat
 };
 
 #ifdef _KERNEL
-extern	int ipip_allow;
-#ifdef VIMAGE_GLOBALS
-extern	struct ipipstat ipipstat;
-#endif
+VNET_DECLARE(int, ipip_allow);
+VNET_DECLARE(struct ipipstat, ipipstat);
+
+#define	V_ipip_allow		VNET(ipip_allow)
+#define	V_ipipstat		VNET(ipipstat)
 #endif /* _KERNEL */
 #endif /* _NETINET_IPIP_H_ */

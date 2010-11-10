@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)inode.h	8.9 (Berkeley) 5/14/95
- * $FreeBSD: src/sys/ufs/ufs/inode.h,v 1.54 2008/09/16 19:06:44 jhb Exp $
+ * $FreeBSD: src/sys/ufs/ufs/inode.h,v 1.57 2010/04/24 07:05:35 jeff Exp $
  */
 
 #ifndef _UFS_UFS_INODE_H_
@@ -74,7 +74,6 @@ struct inode {
 
 	struct	 fs *i_fs;	/* Associated filesystem superblock. */
 	struct	 dquot *i_dquot[MAXQUOTAS]; /* Dquot structures. */
-	u_quad_t i_modrev;	/* Revision level for NFS lease. */
 	/*
 	 * Side effects; used during directory lookup.
 	 */
@@ -94,6 +93,7 @@ struct inode {
 	u_char	  *i_ea_area;	/* Pointer to malloced copy of EA area */
 	unsigned  i_ea_len;	/* Length of i_ea_area */
 	int	  i_ea_error;	/* First errno in transaction */
+	int	  i_ea_refs;	/* Number of users of EA area */
 
 	/*
 	 * Copies from the on-disk dinode itself.
@@ -120,11 +120,13 @@ struct inode {
 #define	IN_CHANGE	0x0002		/* Inode change time update request. */
 #define	IN_UPDATE	0x0004		/* Modification time update request. */
 #define	IN_MODIFIED	0x0008		/* Inode has been modified. */
-#define	IN_RENAME	0x0010		/* Inode is being renamed. */
+#define	IN_NEEDSYNC	0x0010		/* Inode requires fsync. */
 #define	IN_LAZYMOD	0x0040		/* Modified, but don't write yet. */
 #define	IN_SPACECOUNTED	0x0080		/* Blocks to be freed in free count. */
 #define	IN_LAZYACCESS	0x0100		/* Process IN_ACCESS after the
 					   suspension finished */
+#define	IN_EA_LOCKED	0x0200
+#define	IN_EA_LOCKWAIT	0x0400
 
 #define i_devvp i_ump->um_devvp
 #define i_umbufobj i_ump->um_bo
@@ -173,6 +175,7 @@ struct indir {
 /* Determine if soft dependencies are being done */
 #define DOINGSOFTDEP(vp)	((vp)->v_mount->mnt_flag & MNT_SOFTDEP)
 #define DOINGASYNC(vp)		((vp)->v_mount->mnt_kern_flag & MNTK_ASYNC)
+#define DOINGSUJ(vp)		((vp)->v_mount->mnt_kern_flag & MNTK_SUJ)
 
 /* This overlays the fid structure (see mount.h). */
 struct ufid {

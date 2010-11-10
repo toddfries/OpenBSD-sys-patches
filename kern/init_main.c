@@ -42,17 +42,17 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/init_main.c,v 1.297 2008/10/28 11:33:06 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/init_main.c,v 1.310 2010/05/23 18:32:02 kib Exp $");
 
 #include "opt_ddb.h"
 #include "opt_init_path.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/exec.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
+#include <sys/jail.h>
 #include <sys/ktr.h>
 #include <sys/lock.h>
 #include <sys/mount.h>
@@ -284,15 +284,28 @@ restart:
  ***************************************************************************
  */
 static void
-print_caddr_t(void *data __unused)
+print_caddr_t(void *data)
 {
 	printf("%s", (char *)data);
 }
+
+static void
+print_version(void *data __unused)
+{
+	int len;
+
+	/* Strip a trailing newline from version. */
+	len = strlen(version);
+	while (len > 0 && version[len - 1] == '\n')
+		len--;
+	printf("%.*s %s\n", len, version, machine);
+}
+
 SYSINIT(announce, SI_SUB_COPYRIGHT, SI_ORDER_FIRST, print_caddr_t,
     copyright);
 SYSINIT(trademark, SI_SUB_COPYRIGHT, SI_ORDER_SECOND, print_caddr_t,
     trademark);
-SYSINIT(version, SI_SUB_COPYRIGHT, SI_ORDER_THIRD, print_caddr_t, version);
+SYSINIT(version, SI_SUB_COPYRIGHT, SI_ORDER_THIRD, print_version, NULL);
 
 #ifdef WITNESS
 static char wit_warn[] =
@@ -321,6 +334,21 @@ set_boot_verbose(void *data __unused)
 }
 SYSINIT(boot_verbose, SI_SUB_TUNABLES, SI_ORDER_ANY, set_boot_verbose, NULL);
 
+static int
+null_fetch_syscall_args(struct thread *td __unused,
+    struct syscall_args *sa __unused)
+{
+
+	panic("null_fetch_syscall_args");
+}
+
+static void
+null_set_syscall_retval(struct thread *td __unused, int error __unused)
+{
+
+	panic("null_set_syscall_retval");
+}
+
 struct sysentvec null_sysvec = {
 	.sv_size	= 0,
 	.sv_table	= NULL,
@@ -348,7 +376,11 @@ struct sysentvec null_sysvec = {
 	.sv_copyout_strings	= NULL,
 	.sv_setregs	= NULL,
 	.sv_fixlimit	= NULL,
-	.sv_maxssiz	= NULL
+	.sv_maxssiz	= NULL,
+	.sv_flags	= 0,
+	.sv_set_syscall_retval = null_set_syscall_retval,
+	.sv_fetch_syscall_args = null_fetch_syscall_args,
+	.sv_syscallnames = NULL,
 };
 
 /*
@@ -369,8 +401,9 @@ static void
 proc0_init(void *dummy __unused)
 {
 	struct proc *p;
-	unsigned i;
 	struct thread *td;
+	vm_paddr_t pageablemem;
+	int i;
 
 	GIANT_REQUIRED;
 	p = &proc0;
@@ -422,7 +455,7 @@ proc0_init(void *dummy __unused)
 	p->p_sysent = &null_sysvec;
 	p->p_flag = P_SYSTEM | P_INMEM;
 	p->p_state = PRS_NORMAL;
-	knlist_init(&p->p_klist, &p->p_mtx, NULL, NULL, NULL);
+	knlist_init_mtx(&p->p_klist, &p->p_mtx);
 	STAILQ_INIT(&p->p_ktr);
 	p->p_nice = NZERO;
 	td->td_tid = PID_MAX + 1;
@@ -435,6 +468,7 @@ proc0_init(void *dummy __unused)
 	td->td_oncpu = 0;
 	td->td_flags = TDF_INMEM|TDP_KTHREAD;
 	td->td_cpuset = cpuset_thread0();
+	prison0.pr_cpuset = cpuset_ref(td->td_cpuset);
 	p->p_peers = 0;
 	p->p_leader = p;
 
@@ -451,7 +485,7 @@ proc0_init(void *dummy __unused)
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
 	p->p_ucred->cr_uidinfo = uifind(0);
 	p->p_ucred->cr_ruidinfo = uifind(0);
-	p->p_ucred->cr_prison = NULL;	/* Don't jail it. */
+	p->p_ucred->cr_prison = &prison0;
 #ifdef AUDIT
 	audit_cred_kproc0(p->p_ucred);
 #endif
@@ -479,10 +513,16 @@ proc0_init(void *dummy __unused)
 	    p->p_limit->pl_rlimit[RLIMIT_NOFILE].rlim_max = maxfiles;
 	p->p_limit->pl_rlimit[RLIMIT_NPROC].rlim_cur =
 	    p->p_limit->pl_rlimit[RLIMIT_NPROC].rlim_max = maxproc;
-	i = ptoa(cnt.v_free_count);
-	p->p_limit->pl_rlimit[RLIMIT_RSS].rlim_max = i;
-	p->p_limit->pl_rlimit[RLIMIT_MEMLOCK].rlim_max = i;
-	p->p_limit->pl_rlimit[RLIMIT_MEMLOCK].rlim_cur = i / 3;
+	p->p_limit->pl_rlimit[RLIMIT_DATA].rlim_cur = dfldsiz;
+	p->p_limit->pl_rlimit[RLIMIT_DATA].rlim_max = maxdsiz;
+	p->p_limit->pl_rlimit[RLIMIT_STACK].rlim_cur = dflssiz;
+	p->p_limit->pl_rlimit[RLIMIT_STACK].rlim_max = maxssiz;
+	/* Cast to avoid overflow on i386/PAE. */
+	pageablemem = ptoa((vm_paddr_t)cnt.v_free_count);
+	p->p_limit->pl_rlimit[RLIMIT_RSS].rlim_cur =
+	    p->p_limit->pl_rlimit[RLIMIT_RSS].rlim_max = pageablemem;
+	p->p_limit->pl_rlimit[RLIMIT_MEMLOCK].rlim_cur = pageablemem / 3;
+	p->p_limit->pl_rlimit[RLIMIT_MEMLOCK].rlim_max = pageablemem;
 	p->p_cpulimit = RLIM_INFINITY;
 
 	p->p_stats = pstats_alloc();
@@ -491,9 +531,13 @@ proc0_init(void *dummy __unused)
 	pmap_pinit0(vmspace_pmap(&vmspace0));
 	p->p_vmspace = &vmspace0;
 	vmspace0.vm_refcnt = 1;
-	vm_map_init(&vmspace0.vm_map, p->p_sysent->sv_minuser,
-	    p->p_sysent->sv_maxuser);
-	vmspace0.vm_map.pmap = vmspace_pmap(&vmspace0);
+
+	/*
+	 * proc0 is not expected to enter usermode, so there is no special
+	 * handling for sv_minuser here, like is done for exec_new_vmspace().
+	 */
+	vm_map_init(&vmspace0.vm_map, vmspace_pmap(&vmspace0),
+	    p->p_sysent->sv_minuser, p->p_sysent->sv_maxuser);
 
 	/*-
 	 * call the init and ctor for the new thread and proc
@@ -550,6 +594,19 @@ proc0_post(void *dummy __unused)
 	srandom(ts.tv_sec ^ ts.tv_nsec);
 }
 SYSINIT(p0post, SI_SUB_INTRINSIC_POST, SI_ORDER_FIRST, proc0_post, NULL);
+
+static void
+random_init(void *dummy __unused)
+{
+
+	/*
+	 * After CPU has been started we have some randomness on most
+	 * platforms via get_cyclecount().  For platforms that don't
+	 * we will reseed random(9) in proc0_post() as well.
+	 */
+	srandom(get_cyclecount());
+}
+SYSINIT(random, SI_SUB_RANDOM, SI_ORDER_FIRST, random_init, NULL);
 
 /*
  ***************************************************************************

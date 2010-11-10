@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/dev/cyclic/i386/cyclic_machdep.c,v 1.1 2008/05/23 22:21:58 jb Exp $
+ * $FreeBSD: src/sys/cddl/dev/cyclic/i386/cyclic_machdep.c,v 1.2 2010/04/20 17:03:30 rpaulo Exp $
  *
  */
 
@@ -67,7 +67,7 @@ cyclic_machdep_uninit(void)
 
 	for (i = 0; i <= mp_maxid; i++)
 		/* Reset the cyclic clock callback hook. */
-		lapic_cyclic_clock_func[i] = NULL;
+		cyclic_clock_func[i] = NULL;
 
 	/* De-register the cyclic backend. */
 	cyclic_uninit();
@@ -105,13 +105,13 @@ cyclic_clock(struct trapframe *frame)
 static void enable(cyb_arg_t arg)
 {
 	/* Register the cyclic clock callback function. */
-	lapic_cyclic_clock_func[curcpu] = cyclic_clock;
+	cyclic_clock_func[curcpu] = cyclic_clock;
 }
 
 static void disable(cyb_arg_t arg)
 {
 	/* Reset the cyclic clock callback function. */
-	lapic_cyclic_clock_func[curcpu] = NULL;
+	cyclic_clock_func[curcpu] = NULL;
 }
 
 static void reprogram(cyb_arg_t arg, hrtime_t exp)

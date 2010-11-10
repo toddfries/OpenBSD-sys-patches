@@ -32,13 +32,13 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/mips/malta/yamon.h,v 1.1 2008/07/06 21:09:29 imp Exp $
+ * $FreeBSD: src/sys/mips/malta/yamon.h,v 1.2 2010/01/10 20:06:14 imp Exp $
  */
 
 #ifndef _MALTA_YAMON_H_
 #define _MALTA_YAMON_H_
 
-#define YAMON_FUNCTION_BASE	0x1fc00500
+#define YAMON_FUNCTION_BASE	0x1fc00500ul
 
 #define YAMON_PRINT_COUNT_OFS	(YAMON_FUNCTION_BASE + 0x04)
 #define YAMON_EXIT_OFS		(YAMON_FUNCTION_BASE + 0x20)
@@ -53,7 +53,7 @@
 #define YAMON_GETCHAR_OFS	(YAMON_FUNCTION_BASE + 0x50)
 #define YAMON_SYSCON_READ_OFS	(YAMON_FUNCTION_BASE + 0x54)
 
-#define YAMON_FUNC(ofs)		(*(uint32_t *)(MIPS_PHYS_TO_KSEG0(ofs)))
+#define YAMON_FUNC(ofs)		((long)(*(int32_t *)(MIPS_PHYS_TO_KSEG0(ofs))))
 
 typedef void (*t_yamon_print_count)(uint32_t port, char *s, uint32_t count);
 #define YAMON_PRINT_COUNT(s, count) \

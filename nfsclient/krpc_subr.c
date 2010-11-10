@@ -43,10 +43,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/krpc_subr.c,v 1.32 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/krpc_subr.c,v 1.36 2009/12/27 10:10:38 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/jail.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
@@ -55,11 +56,13 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/krpc_subr.c,v 1.32 2008/10/23 15:53:51 des
 #include <sys/uio.h>
 
 #include <net/if.h>
+#include <net/vnet.h>
+
 #include <netinet/in.h>
 
-#include <rpc/rpcclnt.h>
-
-#include <nfs/rpcv2.h>
+#include <rpc/types.h>
+#include <rpc/auth.h>
+#include <rpc/rpc_msg.h>
 #include <nfsclient/krpc.h>
 #include <nfs/xdr_subs.h>
 
@@ -213,6 +216,8 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 	nam = mhead = NULL;
 	from = NULL;
 
+	CURVNET_SET(TD_TO_VNET(td));
+
 	/*
 	 * Create socket and set its recieve timeout.
 	 */
@@ -286,7 +291,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 	call->rp_vers = txdr_unsigned(vers);
 	call->rp_proc = txdr_unsigned(func);
 	/* rpc_auth part (auth_unix as root) */
-	call->rpc_auth.authtype = txdr_unsigned(RPCAUTH_UNIX);
+	call->rpc_auth.authtype = txdr_unsigned(AUTH_UNIX);
 	call->rpc_auth.authlen  = txdr_unsigned(sizeof(struct auth_unix));
 	/* rpc_verf part (auth_null) */
 	call->rpc_verf.authtype = 0;
@@ -361,7 +366,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 			reply = mtod(m, struct krpc_reply *);
 
 			/* Is it the right reply? */
-			if (reply->rp_direction != txdr_unsigned(RPC_REPLY))
+			if (reply->rp_direction != txdr_unsigned(REPLY))
 				continue;
 
 			if (reply->rp_xid != txdr_unsigned(xid))
@@ -377,7 +382,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 			/* Did the call succeed? */
 			if (reply->rp_status != 0) {
 				error = fxdr_unsigned(u_int32_t, reply->rp_status);
-				if (error == RPC_PROGMISMATCH) {
+				if (error == PROG_MISMATCH) {
 				  error = EBADRPC;
 				  goto out;
 				}
@@ -425,6 +430,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 	if (mhead) m_freem(mhead);
 	if (from) free(from, M_SONAME);
 	soclose(so);
+	CURVNET_RESTORE();
 	return error;
 }
 

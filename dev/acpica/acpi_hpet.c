@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_hpet.c,v 1.15 2008/11/19 20:31:38 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_hpet.c,v 1.20 2010/05/23 08:31:15 mav Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -36,9 +36,14 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_hpet.c,v 1.15 2008/11/19 20:31:38 jk
 #include <sys/time.h>
 #include <sys/timetc.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpi_hpet.h>
+
+#define HPET_VENDID_AMD		0x4353
+#define HPET_VENDID_INTEL	0x8086
 
 ACPI_SERIAL_DECL(hpet, "ACPI HPET support");
 
@@ -58,8 +63,6 @@ static u_int hpet_get_timecount(struct timecounter *tc);
 static void acpi_hpet_test(struct acpi_hpet_softc *sc);
 
 static char *hpet_ids[] = { "PNP0103", NULL };
-
-#define DEV_HPET(x)	(acpi_get_magic(x) == (uintptr_t)&acpi_hpet_devclass)
 
 struct timecounter hpet_timecounter = {
 	.tc_get_timecount =	hpet_get_timecount,
@@ -98,43 +101,60 @@ hpet_disable(struct acpi_hpet_softc *sc)
 	bus_write_4(sc->mem_res, HPET_CONFIG, val);
 }
 
+static ACPI_STATUS
+acpi_hpet_find(ACPI_HANDLE handle, UINT32 level, void *context,
+    void **status)
+{
+	char 		**ids;
+	uint32_t	id = (uint32_t)(uintptr_t)context;
+	uint32_t	uid = 0;
+
+	for (ids = hpet_ids; *ids != NULL; ids++) {
+		if (acpi_MatchHid(handle, *ids))
+		        break;
+	}
+	if (*ids == NULL)
+		return (AE_OK);
+	if (ACPI_FAILURE(acpi_GetInteger(handle, "_UID", &uid)))
+		uid = 0;
+	if (id == uid)
+		*((int *)status) = 1;
+	return (AE_OK);
+}
+
 /* Discover the HPET via the ACPI table of the same name. */
 static void 
 acpi_hpet_identify(driver_t *driver, device_t parent)
 {
 	ACPI_TABLE_HPET *hpet;
-	ACPI_TABLE_HEADER *hdr;
 	ACPI_STATUS	status;
 	device_t	child;
+	int 		i, found;
 
 	/* Only one HPET device can be added. */
 	if (devclass_get_device(acpi_hpet_devclass, 0))
 		return;
-
-	/* Currently, ID and minimum clock tick info is unused. */
-
-	status = AcpiGetTable(ACPI_SIG_HPET, 1, (ACPI_TABLE_HEADER **)&hdr);
-	if (ACPI_FAILURE(status))
-		return;
-
-	/*
-	 * The unit number could be derived from hdr->Sequence but we only
-	 * support one HPET device.
-	 */
-	hpet = (ACPI_TABLE_HPET *)hdr;
-	if (hpet->Sequence != 0)
-		printf("ACPI HPET table warning: Sequence is non-zero (%d)\n",
-		    hpet->Sequence);
-	child = BUS_ADD_CHILD(parent, ACPI_DEV_BASE_ORDER, "acpi_hpet", 0);
-	if (child == NULL) {
-		printf("%s: can't add child\n", __func__);
-		return;
+	for (i = 1; ; i++) {
+		/* Search for HPET table. */
+		status = AcpiGetTable(ACPI_SIG_HPET, i, (ACPI_TABLE_HEADER **)&hpet);
+		if (ACPI_FAILURE(status))
+			return;
+		/* Search for HPET device with same ID. */
+		found = 0;
+		AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
+		    100, acpi_hpet_find, NULL, (void *)(uintptr_t)hpet->Sequence, (void *)&found);
+		/* If found - let it be probed in normal way. */
+		if (found)
+			continue;
+		/* If not - create it from table info. */
+		child = BUS_ADD_CHILD(parent, ACPI_DEV_BASE_ORDER, "acpi_hpet", 0);
+		if (child == NULL) {
+			printf("%s: can't add child\n", __func__);
+			continue;
+		}
+		bus_set_resource(child, SYS_RES_MEMORY, 0, hpet->Address.Address,
+		    HPET_MEM_WIDTH);
 	}
-
-	/* Record a magic value so we can detect this device later. */
-	acpi_set_magic(child, (uintptr_t)&acpi_hpet_devclass);
-	bus_set_resource(child, SYS_RES_MEMORY, 0, hpet->Address.Address,
-	    HPET_MEM_WIDTH);
 }
 
 static int
@@ -144,9 +164,8 @@ acpi_hpet_probe(device_t dev)
 
 	if (acpi_disabled("hpet"))
 		return (ENXIO);
-	if (!DEV_HPET(dev) &&
-	    (ACPI_ID_PROBE(device_get_parent(dev), dev, hpet_ids) == NULL ||
-	    device_get_unit(dev) != 0))
+	if (acpi_get_handle(dev) != NULL &&
+	    ACPI_ID_PROBE(device_get_parent(dev), dev, hpet_ids) == NULL)
 		return (ENXIO);
 
 	device_set_desc(dev, "High Precision Event Timer");
@@ -157,9 +176,10 @@ static int
 acpi_hpet_attach(device_t dev)
 {
 	struct acpi_hpet_softc *sc;
-	int rid;
+	int rid, num_timers;
 	uint32_t val, val2;
 	uintmax_t freq;
+	uint16_t vendor;
 
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t) __func__);
 
@@ -196,10 +216,21 @@ acpi_hpet_attach(device_t dev)
 	freq = (1000000000000000LL + val / 2) / val;
 	if (bootverbose) {
 		val = bus_read_4(sc->mem_res, HPET_CAPABILITIES);
+
+		/*
+		 * ATI/AMD violates IA-PC HPET (High Precision Event Timers)
+		 * Specification and provides an off by one number
+		 * of timers/comparators.
+		 * Additionally, they use unregistered value in VENDOR_ID field.
+		 */
+		num_timers = 1 + ((val & HPET_CAP_NUM_TIM) >> 8);
+		vendor = val >> 16;
+		if (vendor == HPET_VENDID_AMD && num_timers > 0)
+			num_timers--;
 		device_printf(dev,
 		    "vend: 0x%x rev: 0x%x num: %d hz: %jd opts:%s%s\n",
-		    val >> 16, val & HPET_CAP_REV_ID,
-		    (val & HPET_CAP_NUM_TIM) >> 8, freq,
+		    vendor, val & HPET_CAP_REV_ID,
+		    num_timers, freq,
 		    (val & HPET_CAP_LEG_RT) ? " legacy_route" : "",
 		    (val & HPET_CAP_COUNT_SIZE) ? " 64-bit" : "");
 	}
@@ -220,11 +251,12 @@ acpi_hpet_attach(device_t dev)
 		bus_free_resource(dev, SYS_RES_MEMORY, sc->mem_res);
 		return (ENXIO);
 	}
-
-	hpet_timecounter.tc_frequency = freq;
-	hpet_timecounter.tc_priv = sc;
-	tc_init(&hpet_timecounter);
-
+	/* Announce first HPET as timecounter. */
+	if (device_get_unit(dev) == 0) {
+		hpet_timecounter.tc_frequency = freq;
+		hpet_timecounter.tc_priv = sc;
+		tc_init(&hpet_timecounter);
+	}
 	return (0);
 }
 

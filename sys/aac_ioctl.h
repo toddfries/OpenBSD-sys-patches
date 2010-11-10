@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/sys/aac_ioctl.h,v 1.13 2008/03/28 19:07:25 emaste Exp $
+ *	$FreeBSD: src/sys/sys/aac_ioctl.h,v 1.14 2009/10/29 17:21:41 emaste Exp $
  */
 
 /*
@@ -192,7 +192,10 @@ struct aac_query_disk {
 typedef union {
 	struct {
 		u_int32_t largeLBA  : 1;	/* disk support greater 2TB */
-		u_int32_t fReserved : 31;
+		u_int32_t IoctlBuf  : 1;	/* ARCIOCTL call support */
+		u_int32_t AIFSupport: 1;	/* AIF support */
+		u_int32_t JBODSupport:1;	/* fw + driver support JBOD */
+		u_int32_t fReserved : 28;
 	} fBits;
 	u_int32_t fValue;
 } featuresState;

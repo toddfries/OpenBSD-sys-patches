@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/ofw/libofw/libofw.h,v 1.12 2006/11/02 01:23:18 marcel Exp $
+ * $FreeBSD: src/sys/boot/ofw/libofw/libofw.h,v 1.13 2010/07/12 00:49:22 nwhitehorn Exp $
  */
 
 #include "openfirm.h"
@@ -62,6 +62,9 @@ int	ofw_elf_loadfile(char *, vm_offset_t, struct preloaded_file **);
 int	ofw_elf_exec(struct preloaded_file *);
 
 extern struct file_format	ofw_elf;
+#ifdef __powerpc__
+extern struct file_format	ofw_elf64;
+#endif
 
 extern void	reboot(void);
 

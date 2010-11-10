@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_cam.c,v 1.3 2007/10/12 16:52:55 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_cam.c,v 1.4 2010/03/02 17:34:11 kib Exp $");
 
 #include "opt_mfi.h"
 
@@ -95,6 +95,7 @@ static driver_t mfip_driver = {
 };
 DRIVER_MODULE(mfip, mfi, mfip_driver, mfip_devclass, 0, 0);
 MODULE_DEPEND(mfip, cam, 1, 1, 1);
+MODULE_DEPEND(mfip, mfi, 1, 1, 1);
 
 #define ccb_mfip_ptr sim_priv.entries[0].ptr
 

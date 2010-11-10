@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_gpio.c,v 1.4 2009/02/24 15:43:42 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5416/ar5416_gpio.c,v 1.5 2010/01/29 10:10:14 rpaulo Exp $
  */
 #include "opt_ah.h"
 
@@ -146,7 +146,9 @@ ar5416GpioGet(struct ath_hal *ah, uint32_t gpio)
 	 * Read output value for all gpio's, shift it,
 	 * and verify whether the specific bit is set.
 	 */
-	if (AR_SREV_MERLIN_10_OR_LATER(ah))
+	if (AR_SREV_KITE_10_OR_LATER(ah))
+		bits = MS(OS_REG_READ(ah, AR_GPIO_IN_OUT), AR9285_GPIO_IN_VAL);
+	else if (AR_SREV_MERLIN_10_OR_LATER(ah))
 		bits = MS(OS_REG_READ(ah, AR_GPIO_IN_OUT), AR928X_GPIO_IN_VAL);
 	else
 		bits = MS(OS_REG_READ(ah, AR_GPIO_IN_OUT), AR_GPIO_IN_VAL);

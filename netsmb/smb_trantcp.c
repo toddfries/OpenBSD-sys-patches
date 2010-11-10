@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -31,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netsmb/smb_trantcp.c,v 1.29 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/netsmb/smb_trantcp.c,v 1.31 2010/04/07 16:50:38 joel Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -100,14 +94,15 @@ nb_intr(struct nbpcb *nbp, struct proc *p)
 	return 0;
 }
 
-static void
+static int
 nb_upcall(struct socket *so, void *arg, int waitflag)
 {
 	struct nbpcb *nbp = arg;
 
 	if (arg == NULL || nbp->nbp_selectid == NULL)
-		return;
+		return (SU_OK);
 	wakeup(nbp->nbp_selectid);
+	return (SU_OK);
 }
 
 static int
@@ -152,10 +147,8 @@ nb_connect_in(struct nbpcb *nbp, struct sockaddr_in *to, struct thread *td)
 	if (error)
 		return error;
 	nbp->nbp_tso = so;
-	so->so_upcallarg = (caddr_t)nbp;
-	so->so_upcall = nb_upcall;
 	SOCKBUF_LOCK(&so->so_rcv);
-	so->so_rcv.sb_flags |= SB_UPCALL;
+	soupcall_set(so, SO_RCV, nb_upcall, nbp);
 	SOCKBUF_UNLOCK(&so->so_rcv);
 	so->so_rcv.sb_timeo = (5 * hz);
 	so->so_snd.sb_timeo = (5 * hz);

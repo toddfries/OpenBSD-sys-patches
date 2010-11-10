@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/geode.c,v 1.11 2008/02/10 19:14:42 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/geode.c,v 1.12 2010/05/15 10:31:11 phk Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -208,14 +208,11 @@ geode_watchdog(void *foo __unused, u_int cmd, int *error)
 static void
 cs5536_watchdog(void *foo __unused, u_int cmd, int *error)
 {
-	u_int u, p;
+	u_int u, p, s;
 	uint16_t a;
 	uint32_t m;
 
 	a = rdmsr(0x5140000d);
-	m = rdmsr(0x51400029);
-	m &= ~(1 << 24);
-	wrmsr(0x51400029, m);
 
 	u = cmd & WD_INTERVAL;
 	if (u >= 30 && u <= 44) {
@@ -228,12 +225,24 @@ cs5536_watchdog(void *foo __unused, u_int cmd, int *error)
 		/* reset counter */
 		outw(a + 4, 0);
 		/* Arm reset mechanism */
+		m = rdmsr(0x51400029);
 		m |= (1 << 24);
 		wrmsr(0x51400029, m);
 		/* Start counter */
 		outw(a + 6, 0x8000);
 
 		*error = 0;
+	} else {
+		/* 
+		 * MFGPT_SETUP is write-once
+		 * Check if the counter has been setup
+		 */
+		s = inw(a + 6);
+		if (s & (1 << 12)) {
+			/* Stop and reset counter */
+			outw(a + 6, 0);
+			outw(a + 4, 0);
+		}
 	}
 }
 

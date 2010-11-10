@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_cuseeme.c,v 1.13 2006/09/26 23:26:53 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_cuseeme.c,v 1.14 2009/04/08 11:56:49 piso Exp $");
 
 #ifdef _KERNEL
 #include <sys/param.h>
@@ -64,7 +64,7 @@ AliasHandleCUSeeMeIn(struct libalias *la, struct ip *pip,
 		     struct in_addr original_addr);
 
 static int 
-fingerprint(struct libalias *la, struct ip *pip, struct alias_data *ah)
+fingerprint(struct libalias *la, struct alias_data *ah)
 {
 
 	if (ah->dport == NULL || ah->oaddr == NULL)

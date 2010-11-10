@@ -31,7 +31,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  * 
- * $FreeBSD: src/sys/dev/firewire/sbp.c,v 1.100 2009/02/18 18:41:34 sbruno Exp $
+ * $FreeBSD: src/sys/dev/firewire/sbp.c,v 1.102 2010/03/29 17:24:23 imp Exp $
  *
  */
 
@@ -1573,7 +1573,7 @@ END_DEBUG
 		bcopy(&sbp_cmd_status->s_keydep[0],
 		    &sense->sense_key_spec[0], 3);
 
-		ocb->ccb->csio.scsi_status = sbp_cmd_status->status;;
+		ocb->ccb->csio.scsi_status = sbp_cmd_status->status;
 		ocb->ccb->ccb_h.status = CAM_SCSI_STATUS_ERROR
 							| CAM_AUTOSNS_VALID;
 /*
@@ -2148,7 +2148,7 @@ sbp_free_target(struct sbp_target *target)
 	}
 	STAILQ_INIT(&target->xferlist);
 	free(target->luns, M_SBP);
-	target->num_lun = 0;;
+	target->num_lun = 0;
 	target->luns = NULL;
 	target->fwdev = NULL;
 }
@@ -2318,7 +2318,7 @@ sbp_timeout(void *arg)
 		sbp_cam_detach_target(target);
 		if (target->luns != NULL)
 			free(target->luns, M_SBP);
-		target->num_lun = 0;;
+		target->num_lun = 0;
 		target->luns = NULL;
 		target->fwdev = NULL;
 #endif
@@ -2698,7 +2698,7 @@ SBP_DEBUG(0)
 #else
 					"segment length(%zd) is less than 16."
 #endif
-					"(seg=%d/%d)\n", s->ds_len, i+1, seg);
+					"(seg=%d/%d)\n", (size_t)s->ds_len, i+1, seg);
 END_DEBUG
 			if (s->ds_len > SBP_SEG_MAX)
 				panic("ds_len > SBP_SEG_MAX, fix busdma code");

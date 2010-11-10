@@ -130,7 +130,6 @@
 #include <cam/cam_ccb.h>
 #include <cam/cam_sim.h>
 #include <cam/cam_xpt_sim.h>
-#include <cam/cam_xpt_periph.h>
 
 #include <cam/scsi/scsi_all.h>
 #include <cam/scsi/scsi_message.h>
@@ -142,11 +141,9 @@
 #include "opt_asr.h"
 #include <i386/include/cputypes.h>
 
-#ifndef BURN_BRIDGES
 #if defined(ASR_COMPAT)
 #define ASR_IOCTL_COMPAT
 #endif /* ASR_COMPAT */
-#endif /* !BURN_BRIDGES */
 #endif
 #include <machine/vmparam.h>
 
@@ -163,7 +160,7 @@
 
 #include	<dev/asr/sys_info.h>
 
-__FBSDID("$FreeBSD: src/sys/dev/asr/asr.c,v 1.86 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/asr/asr.c,v 1.88 2010/01/28 08:41:30 mav Exp $");
 
 #define	ASR_VERSION	1
 #define	ASR_REVISION	'1'

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/time.h,v 1.4 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/time.h,v 1.5 2010/01/25 07:52:54 delphij Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_TIME_H_
@@ -40,8 +40,13 @@ typedef longlong_t	hrtime_t;
 
 #define	LBOLT	((gethrtime() * hz) / NANOSEC)
 
+#if defined(__i386__) || defined(__powerpc__)
 #define	TIMESPEC_OVERFLOW(ts)						\
 	((ts)->tv_sec < INT32_MIN || (ts)->tv_sec > INT32_MAX)
+#else
+#define	TIMESPEC_OVERFLOW(ts)						\
+	((ts)->tv_sec < INT64_MIN || (ts)->tv_sec > INT64_MAX)
+#endif
 
 #ifdef _KERNEL
 #define	lbolt64	(int64_t)(LBOLT)

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/snc/if_snc.c,v 1.8 2008/08/04 19:19:18 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/snc/if_snc.c,v 1.9 2009/06/11 17:14:28 avg Exp $");
 
 /*
  *	National Semiconductor  DP8393X SONIC Driver
@@ -252,7 +252,7 @@ snc_attach(dev)
   Shutdown routine
  ****************************************************************/
 
-void
+int
 snc_shutdown(dev)
 	device_t dev;
 {
@@ -261,4 +261,6 @@ snc_shutdown(dev)
 	SNC_LOCK(sc);
 	sncshutdown(sc);
 	SNC_UNLOCK(sc);
+
+	return (0);
 }

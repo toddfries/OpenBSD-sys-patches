@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netinet/ip_carp.h,v 1.3 2006/12/01 18:37:41 imp Exp $	*/
+/*	$FreeBSD: src/sys/netinet/ip_carp.h,v 1.4 2009/04/12 14:19:37 rwatson Exp $	*/
 /*	$OpenBSD: ip_carp.h,v 1.8 2004/07/29 22:12:15 mcbride Exp $	*/
 
 /*
@@ -116,6 +116,11 @@ struct carpstats {
 
 	uint64_t	carps_preempt;		/* if enabled, preemptions */
 };
+
+#ifdef _KERNEL
+#define	CARPSTATS_ADD(name, val)	carpstats.name += (val)
+#define	CARPSTATS_INC(name)		CARPSTATS_ADD(name, 1)
+#endif
 
 /*
  * Configuration structure for SIOCSVH SIOCGVH

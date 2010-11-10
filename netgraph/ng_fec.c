@@ -34,7 +34,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_fec.c,v 1.32 2008/10/23 20:26:15 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_fec.c,v 1.36 2010/05/03 07:32:50 sobomax Exp $
  */
 /*-
  * Copyright (c) 1996-1999 Whistle Communications, Inc.
@@ -107,6 +107,7 @@
 #include <net/if_media.h>
 #include <net/bpf.h>
 #include <net/ethernet.h>
+#include <net/route.h>
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -165,7 +166,7 @@ struct ng_fec_bundle {
 	int			(*fec_if_output) (struct ifnet *,
 						  struct mbuf *,
 						  struct sockaddr *,
-						  struct rtentry *);
+						  struct route *);
 };
 
 #define FEC_BTYPE_MAC		0x01
@@ -197,7 +198,7 @@ static int	ng_fec_ifmedia_upd(struct ifnet *ifp);
 static void	ng_fec_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
 static int	ng_fec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
 static int	ng_fec_output(struct ifnet *ifp, struct mbuf *m0,
-			struct sockaddr *dst, struct rtentry *rt0);
+			struct sockaddr *dst, struct route *ro);
 static void	ng_fec_tick(void *arg);
 static int	ng_fec_addport(struct ng_fec_private *priv, char *iface);
 static int	ng_fec_delport(struct ng_fec_private *priv, char *iface);
@@ -432,6 +433,7 @@ ng_fec_addport(struct ng_fec_private *priv, char *iface)
 
 	/* Set up phony MAC address. */
 	if_setlladdr(bifp, IF_LLADDR(ifp), ETHER_ADDR_LEN);
+	EVENTHANDLER_INVOKE(iflladdr_event, bifp);
 
 	/* Save original input vector */
 	new->fec_if_input = bifp->if_input;
@@ -923,7 +925,7 @@ ng_fec_input(struct ifnet *ifp, struct mbuf *m0)
 
 static int
 ng_fec_output(struct ifnet *ifp, struct mbuf *m,
-		struct sockaddr *dst, struct rtentry *rt0)
+		struct sockaddr *dst, struct route *ro)
 {
 	const priv_p priv = (priv_p) ifp->if_softc;
 	struct ng_fec_bundle *b;
@@ -977,7 +979,7 @@ ng_fec_output(struct ifnet *ifp, struct mbuf *m,
 	 * for us.
 	 */
 	priv->if_error = 0;
-	error = (*b->fec_if_output)(ifp, m, dst, rt0);
+	error = (*b->fec_if_output)(ifp, m, dst, ro);
 	if (priv->if_error && !error)
 		error = priv->if_error;
 
@@ -1225,8 +1227,7 @@ ng_fec_constructor(node_p node)
 	ifp->if_start = ng_fec_start;
 	ifp->if_ioctl = ng_fec_ioctl;
 	ifp->if_init = ng_fec_init;
-	ifp->if_watchdog = NULL;
-	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	ifp->if_snd.ifq_maxlen = ifqmaxlen;
 	ifp->if_mtu = NG_FEC_MTU_DEFAULT;
 	ifp->if_flags = (IFF_SIMPLEX|IFF_BROADCAST|IFF_MULTICAST);
 	ifp->if_addrlen = 0;			/* XXX */

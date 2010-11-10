@@ -1,13 +1,14 @@
-# $FreeBSD: src/sys/boot/pc98/libpc98/Makefile,v 1.25 2008/02/29 05:06:06 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/libpc98/Makefile,v 1.27 2009/12/31 12:05:48 nyan Exp $
 #
 LIB=			pc98
 INTERNALLIB=
 
 .PATH:	${.CURDIR}/../../i386/libi386
 
-SRCS=	bioscd.c biosdisk.c biosmem.c biospnp.c biospci.c biossmap.c \
-	bootinfo.c bootinfo32.c comconsole.c devicename.c elf32_freebsd.c \
-	i386_copy.c i386_module.c nullconsole.c pxe.c pxetramp.s \
+SRCS=	bioscd.c biosdisk.c biosmem.c biospnp.c \
+	biospci.c biossmap.c bootinfo.c bootinfo32.c \
+	comconsole.c devicename.c elf32_freebsd.c \
+	i386_copy.c i386_module.c nullconsole.c pc98_sys.c pxe.c pxetramp.s \
 	time.c vidconsole.c
 
 # Enable PXE TFTP or NFS support, not both.

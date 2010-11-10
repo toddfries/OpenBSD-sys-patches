@@ -27,20 +27,18 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cam/cam_xpt_periph.h,v 1.7 2007/04/18 04:58:52 scottl Exp $
+ * $FreeBSD: src/sys/cam/cam_xpt_periph.h,v 1.9 2010/01/28 08:41:30 mav Exp $
  */
 
 #ifndef _CAM_CAM_XPT_PERIPH_H
 #define _CAM_CAM_XPT_PERIPH_H 1
 
+#include <cam/cam_queue.h>
 #include <cam/cam_xpt.h>
 
 /* Functions accessed by the peripheral drivers */
 #ifdef _KERNEL
 void		xpt_polled_action(union ccb *ccb);
-union ccb	*xpt_alloc_ccb(void);
-union ccb	*xpt_alloc_ccb_nowait(void);
-void		xpt_free_ccb(union ccb *free_ccb);
 void		xpt_release_ccb(union ccb *released_ccb);
 void		xpt_schedule(struct cam_periph *perph, u_int32_t new_priority);
 int32_t		xpt_add_periph(struct cam_periph *periph);

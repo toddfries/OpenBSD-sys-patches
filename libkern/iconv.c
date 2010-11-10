@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2000-2001, Boris Popov
+ * Copyright (c) 2000-2001 Boris Popov
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -31,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/libkern/iconv.c,v 1.13 2008/12/05 21:19:24 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/libkern/iconv.c,v 1.15 2010/04/07 16:50:38 joel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -307,6 +301,18 @@ iconv_convchr_case(void *handle, const char **inbuf,
 	return ICONV_CONVERTER_CONV(handle, inbuf, inbytesleft, outbuf, outbytesleft, 1, casetype);
 }
 
+int
+towlower(int c, void *handle)
+{
+	return ICONV_CONVERTER_TOLOWER(handle, c);
+}
+
+int
+towupper(int c, void *handle)
+{
+	return ICONV_CONVERTER_TOUPPER(handle, c);
+}
+
 /*
  * Give a list of loaded converters. Each name terminated with 0.
  * An empty string terminates the list.
@@ -439,6 +445,12 @@ int
 iconv_converter_donestub(struct iconv_converter_class *dp)
 {
 	return 0;
+}
+
+int
+iconv_converter_tolowerstub(int c, void *handle)
+{
+	return (c);
 }
 
 int

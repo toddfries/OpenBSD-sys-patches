@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/elan-mmcr.c,v 1.35 2007/06/04 18:25:06 dwmalone Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/elan-mmcr.c,v 1.36 2009/12/29 21:51:28 rnoland Exp $");
 
 #include "opt_cpu.h"
 #include <sys/param.h>
@@ -416,7 +416,8 @@ elan_watchdog(void *foo __unused, u_int spec, int *error)
 }
 
 static int
-elan_mmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr, int nprot)
+elan_mmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int nprot, vm_memattr_t *memattr)
 {
 
 	if (offset >= 0x1000) 

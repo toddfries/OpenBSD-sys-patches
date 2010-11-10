@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/net/if_cuereg.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $
+ * $FreeBSD: src/sys/dev/usb/net/if_cuereg.h,v 1.2 2009/05/28 17:36:36 thompsa Exp $
  */
 
 /*
@@ -119,9 +119,9 @@ enum {
 };
 
 struct cue_softc {
-	struct usb2_ether	sc_ue;
+	struct usb_ether	sc_ue;
 	struct mtx		sc_mtx;
-	struct usb2_xfer	*sc_xfer[CUE_N_TRANSFER];
+	struct usb_xfer	*sc_xfer[CUE_N_TRANSFER];
 
 	int			sc_flags;
 #define	CUE_FLAG_LINK		0x0001	/* got a link */

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/k6_mem.c,v 1.15 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/k6_mem.c,v 1.16 2009/03/17 00:48:11 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -70,6 +70,7 @@ static struct mem_range_ops k6_mrops =
 {
 	k6_mrinit,
 	k6_mrset,
+	NULL,
 	NULL
 };
 

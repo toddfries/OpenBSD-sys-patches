@@ -30,12 +30,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.159 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.167 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_mac.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -49,10 +48,10 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.159 2008/12/02 21:37:28 bz 
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -75,7 +74,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.159 2008/12/02 21:37:28 bz 
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif
-#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -89,44 +87,48 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.159 2008/12/02 21:37:28 bz 
 extern struct mbuf *m_copypack();
 #endif
 
-#ifdef VIMAGE_GLOBALS
-int path_mtu_discovery;
-int ss_fltsz;
-int ss_fltsz_local;
-int tcp_do_newreno;
-int tcp_do_tso;
-int tcp_do_autosndbuf;
-int tcp_autosndbuf_inc;
-int tcp_autosndbuf_max;
-#endif
+VNET_DEFINE(int, path_mtu_discovery) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, path_mtu_discovery, CTLFLAG_RW,
+	&VNET_NAME(path_mtu_discovery), 1,
+	"Enable Path MTU Discovery");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, path_mtu_discovery,
-	CTLFLAG_RW, path_mtu_discovery, 1, "Enable Path MTU Discovery");
+VNET_DEFINE(int, ss_fltsz) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, slowstart_flightsize, CTLFLAG_RW,
+	&VNET_NAME(ss_fltsz), 1,
+	"Slow start flight size");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO,
-	slowstart_flightsize, CTLFLAG_RW,
-	ss_fltsz, 1, "Slow start flight size");
+VNET_DEFINE(int, ss_fltsz_local) = 4;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, local_slowstart_flightsize,
+	CTLFLAG_RW, &VNET_NAME(ss_fltsz_local), 1,
+	"Slow start flight size for local networks");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO,
-	local_slowstart_flightsize, CTLFLAG_RW,
-	ss_fltsz_local, 1, "Slow start flight size for local networks");
+VNET_DEFINE(int, tcp_do_newreno) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, newreno, CTLFLAG_RW,
+	&VNET_NAME(tcp_do_newreno), 0,
+	"Enable NewReno Algorithms");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, newreno, CTLFLAG_RW,
-	tcp_do_newreno, 0, "Enable NewReno Algorithms");
+VNET_DEFINE(int, tcp_do_tso) = 1;
+#define	V_tcp_do_tso		VNET(tcp_do_tso)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, tso, CTLFLAG_RW,
+	&VNET_NAME(tcp_do_tso), 0,
+	"Enable TCP Segmentation Offload");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, tso, CTLFLAG_RW,
-	tcp_do_tso, 0, "Enable TCP Segmentation Offload");
+VNET_DEFINE(int, tcp_do_autosndbuf) = 1;
+#define	V_tcp_do_autosndbuf	VNET(tcp_do_autosndbuf)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_auto, CTLFLAG_RW,
+	&VNET_NAME(tcp_do_autosndbuf), 0,
+	"Enable automatic send buffer sizing");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, sendbuf_auto,
-	CTLFLAG_RW,
-	tcp_do_autosndbuf, 0, "Enable automatic send buffer sizing");
-
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, sendbuf_inc,
-	CTLFLAG_RW, tcp_autosndbuf_inc, 0,
+VNET_DEFINE(int, tcp_autosndbuf_inc) = 8*1024;
+#define	V_tcp_autosndbuf_inc	VNET(tcp_autosndbuf_inc)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_inc, CTLFLAG_RW,
+	&VNET_NAME(tcp_autosndbuf_inc), 0,
 	"Incrementor step size of automatic send buffer");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, sendbuf_max,
-	CTLFLAG_RW, tcp_autosndbuf_max, 0,
+VNET_DEFINE(int, tcp_autosndbuf_max) = 256*1024;
+#define	V_tcp_autosndbuf_max	VNET(tcp_autosndbuf_max)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_max, CTLFLAG_RW,
+	&VNET_NAME(tcp_autosndbuf_max), 0,
 	"Max size of automatic send buffer");
 
 
@@ -136,7 +138,6 @@ SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, sendbuf_max,
 int
 tcp_output(struct tcpcb *tp)
 {
-	INIT_VNET_INET(tp->t_inpcb->inp_vnet);
 	struct socket *so = tp->t_inpcb->inp_socket;
 	long len, recwin, sendwin;
 	int off, flags, error;
@@ -173,7 +174,7 @@ tcp_output(struct tcpcb *tp)
 	 * to send, then transmit; otherwise, investigate further.
 	 */
 	idle = (tp->t_flags & TF_LASTIDLE) || (tp->snd_max == tp->snd_una);
-	if (idle && (ticks - tp->t_rcvtime) >= tp->t_rxtcur) {
+	if (idle && ticks - tp->t_rcvtime >= tp->t_rxtcur) {
 		/*
 		 * We have been idle for "a while" and no acks are
 		 * expected to clock out any data we send --
@@ -264,9 +265,9 @@ again:
 		if (len > 0) {
 			sack_rxmit = 1;
 			sendalot = 1;
-			V_tcpstat.tcps_sack_rexmits++;
-			V_tcpstat.tcps_sack_rexmit_bytes +=
-			    min(len, tp->t_maxseg);
+			TCPSTAT_INC(tcps_sack_rexmits);
+			TCPSTAT_ADD(tcps_sack_rexmit_bytes,
+			    min(len, tp->t_maxseg));
 		}
 	}
 after_sack_rexmit:
@@ -768,13 +769,13 @@ send:
 		u_int moff;
 
 		if ((tp->t_flags & TF_FORCEDATA) && len == 1)
-			V_tcpstat.tcps_sndprobe++;
+			TCPSTAT_INC(tcps_sndprobe);
 		else if (SEQ_LT(tp->snd_nxt, tp->snd_max) || sack_rxmit) {
-			V_tcpstat.tcps_sndrexmitpack++;
-			V_tcpstat.tcps_sndrexmitbyte += len;
+			TCPSTAT_INC(tcps_sndrexmitpack);
+			TCPSTAT_ADD(tcps_sndrexmitbyte, len);
 		} else {
-			V_tcpstat.tcps_sndpack++;
-			V_tcpstat.tcps_sndbyte += len;
+			TCPSTAT_INC(tcps_sndpack);
+			TCPSTAT_ADD(tcps_sndbyte, len);
 		}
 #ifdef notyet
 		if ((m = m_copypack(so->so_snd.sb_mb, off,
@@ -841,13 +842,13 @@ send:
 	} else {
 		SOCKBUF_UNLOCK(&so->so_snd);
 		if (tp->t_flags & TF_ACKNOW)
-			V_tcpstat.tcps_sndacks++;
+			TCPSTAT_INC(tcps_sndacks);
 		else if (flags & (TH_SYN|TH_FIN|TH_RST))
-			V_tcpstat.tcps_sndctrl++;
+			TCPSTAT_INC(tcps_sndctrl);
 		else if (SEQ_GT(tp->snd_up, tp->snd_una))
-			V_tcpstat.tcps_sndurg++;
+			TCPSTAT_INC(tcps_sndurg);
 		else
-			V_tcpstat.tcps_sndwinup++;
+			TCPSTAT_INC(tcps_sndwinup);
 
 		MGETHDR(m, M_DONTWAIT, MT_DATA);
 		if (m == NULL) {
@@ -919,7 +920,7 @@ send:
 			else
 #endif
 				ip->ip_tos |= IPTOS_ECN_ECT0;
-			V_tcpstat.tcps_ecn_ect0++;
+			TCPSTAT_INC(tcps_ecn_ect0);
 		}
 		
 		/*
@@ -994,7 +995,7 @@ send:
 	 * to read more data than can be buffered prior to transmitting on
 	 * the connection.
 	 */
-	if (recwin == 0)
+	if (th->th_win == 0)
 		tp->t_flags |= TF_RXWIN0SENT;
 	else
 		tp->t_flags &= ~TF_RXWIN0SENT;
@@ -1050,7 +1051,7 @@ send:
 	 * XXX: Fixme: This is currently not the case for IPv6.
 	 */
 	if (tso) {
-		m->m_pkthdr.csum_flags = CSUM_TSO;
+		m->m_pkthdr.csum_flags |= CSUM_TSO;
 		m->m_pkthdr.tso_segsz = tp->t_maxopd - optlen;
 	}
 
@@ -1085,7 +1086,7 @@ send:
 			if (tp->t_rtttime == 0) {
 				tp->t_rtttime = ticks;
 				tp->t_rtseq = startseq;
-				V_tcpstat.tcps_segstimed++;
+				TCPSTAT_INC(tcps_segstimed);
 			}
 		}
 
@@ -1262,7 +1263,7 @@ out:
 			return (error);
 		}
 	}
-	V_tcpstat.tcps_sndtotal++;
+	TCPSTAT_INC(tcps_sndtotal);
 
 	/*
 	 * Data sent (as far as we can tell).
@@ -1329,7 +1330,6 @@ tcp_setpersist(struct tcpcb *tp)
 int
 tcp_addoptions(struct tcpopt *to, u_char *optp)
 {
-	INIT_VNET_INET(curvnet);
 	u_int mask, optlen = 0;
 
 	for (mask = 1; mask < TOF_MAXOPT; mask <<= 1) {
@@ -1437,7 +1437,7 @@ tcp_addoptions(struct tcpopt *to, u_char *optp)
 				optlen += TCPOLEN_SACK;
 				sack++;
 			}
-			V_tcpstat.tcps_sack_send_blocks++;
+			TCPSTAT_INC(tcps_sack_send_blocks);
 			break;
 			}
 		default:

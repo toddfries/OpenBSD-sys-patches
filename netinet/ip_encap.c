@@ -57,7 +57,7 @@
 /* XXX is M_NETADDR correct? */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_encap.c,v 1.24 2007/10/07 20:44:23 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_encap.c,v 1.25 2009/12/28 22:56:30 antoine Exp $");
 
 #include "opt_mrouting.h"
 #include "opt_inet.h"
@@ -103,7 +103,7 @@ static void encap_fillarg(struct mbuf *, const struct encaptab *);
  */
 static struct mtx encapmtx;
 MTX_SYSINIT(encapmtx, &encapmtx, "encapmtx", MTX_DEF);
-LIST_HEAD(, encaptab) encaptab = LIST_HEAD_INITIALIZER(&encaptab);
+LIST_HEAD(, encaptab) encaptab = LIST_HEAD_INITIALIZER(encaptab);
 
 /*
  * We currently keey encap_init() for source code compatibility reasons --

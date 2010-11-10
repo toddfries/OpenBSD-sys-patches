@@ -28,7 +28,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.59 2010/01/16 20:04:17 tuexen Exp $");
 #ifndef __sctp_os_bsd_h__
 #define __sctp_os_bsd_h__
 /*
@@ -38,7 +38,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs
 #include "opt_compat.h"
 #include "opt_inet6.h"
 #include "opt_inet.h"
-#include "opt_route.h"
 #include "opt_sctp.h"
 
 #include <sys/param.h>
@@ -62,7 +61,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs
 #include <sys/random.h>
 #include <sys/limits.h>
 #include <sys/queue.h>
-#include <sys/vimage.h>
 #include <machine/cpu.h>
 
 #include <net/if.h>
@@ -79,7 +77,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp_var.h>
-#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -98,7 +95,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs
 #include <netinet6/ip6protosw.h>
 #include <netinet6/nd6.h>
 #include <netinet6/scope6_var.h>
-#include <netinet6/vinet6.h>
 #endif				/* INET6 */
 
 
@@ -137,31 +133,26 @@ MALLOC_DECLARE(SCTP_M_SOCKOPT);
 #define SCTP_CTR6 CTR6
 #endif
 
-#define SCTP_BASE_INFO(__m) system_base_info.sctppcbinfo.__m
-#define SCTP_BASE_STATS system_base_info.sctpstat
-#define SCTP_BASE_STAT(__m)     system_base_info.sctpstat.__m
-#define SCTP_BASE_SYSCTL(__m) system_base_info.sctpsysctl.__m
-#define SCTP_BASE_VAR(__m) system_base_info.__m
-
 /*
  * Macros to expand out globals defined by various modules
  * to either a real global or a virtualized instance of one,
  * depending on whether VIMAGE is defined.
  */
-/* first define modules that supply us information */
-#define MOD_NET net
-#define MOD_INET inet
-#define MOD_INET6 inet6
-#define MOD_IPSEC ipsec
-
 /* then define the macro(s) that hook into the vimage macros */
-#define MODULE_GLOBAL(__MODULE, __SYMBOL) V_ ## __SYMBOL
+#define MODULE_GLOBAL(__SYMBOL) V_##__SYMBOL
+
+#define V_system_base_info VNET(system_base_info)
+#define SCTP_BASE_INFO(__m) V_system_base_info.sctppcbinfo.__m
+#define SCTP_BASE_STATS V_system_base_info.sctpstat
+#define SCTP_BASE_STATS_SYSCTL VNET_NAME(system_base_info.sctpstat)
+#define SCTP_BASE_STAT(__m)     V_system_base_info.sctpstat.__m
+#define SCTP_BASE_SYSCTL(__m) VNET_NAME(system_base_info.sctpsysctl.__m)
+#define SCTP_BASE_VAR(__m) V_system_base_info.__m
 
 /*
  *
  */
 #define USER_ADDR_NULL	(NULL)	/* FIX ME: temp */
-#define SCTP_LIST_EMPTY(list)	LIST_EMPTY(list)
 
 #if defined(SCTP_DEBUG)
 #define SCTPDBG(level, params...)					\
@@ -263,10 +254,9 @@ MALLOC_DECLARE(SCTP_M_SOCKOPT);
 /* SCTP_ZONE_INIT: initialize the zone */
 typedef struct uma_zone *sctp_zone_t;
 
-#define UMA_ZFLAG_FULL	0x0020
 #define SCTP_ZONE_INIT(zone, name, size, number) { \
 	zone = uma_zcreate(name, size, NULL, NULL, NULL, NULL, UMA_ALIGN_PTR,\
-		UMA_ZFLAG_FULL); \
+		0); \
 	uma_zone_set_max(zone, number); \
 }
 
@@ -487,12 +477,6 @@ sctp_get_mbuf_for_msg(unsigned int space_needed,
 #if defined(HAVE_SHA2)
 #include <crypto/sha2/sha2.h>
 #endif
-
-#include <sys/md5.h>
-/* map standard crypto API names */
-#define MD5_Init	MD5Init
-#define MD5_Update	MD5Update
-#define MD5_Final	MD5Final
 
 #endif
 

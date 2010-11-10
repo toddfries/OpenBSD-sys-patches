@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.20 2009/01/10 10:58:41 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.21 2009/03/14 20:40:06 pjd Exp $
  */
 
 /*
@@ -341,10 +341,12 @@ sysctl_rules(SYSCTL_HANDLER_ARGS)
 	int error;
 
 	new_string = NULL;
-	if (req->newptr == NULL) {
+	if (req->newptr != NULL) {
 		new_string = malloc(MAC_RULE_STRING_LEN, M_PORTACL,
 		    M_WAITOK | M_ZERO);
+		mtx_lock(&rule_mtx);
 		strcpy(new_string, rule_string);
+		mtx_unlock(&rule_mtx);
 		string = new_string;
 	} else
 		string = rule_string;

@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/keysock.h,v 1.4 2008/11/28 23:30:51 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/keysock.h,v 1.6 2009/07/16 21:13:04 rwatson Exp $	*/
 /*	$KAME: keysock.h,v 1.8 2000/03/27 05:11:06 sumikawa Exp $	*/
 
 /*-
@@ -58,11 +58,6 @@ struct pfkeystat {
 	u_quad_t sockerr;		/* # of socket related errors */
 };
 
-struct key_cb {
-	int key_count;
-	int any_count;
-};
-
 #define KEY_SENDUP_ONE		0
 #define KEY_SENDUP_ALL		1
 #define KEY_SENDUP_REGISTERED	2
@@ -74,7 +69,8 @@ struct keycb {
 	int kp_registered;	/* registered socket */
 };
 
-extern struct pfkeystat pfkeystat;
+VNET_DECLARE(struct pfkeystat, pfkeystat);
+#define	V_pfkeystat		VNET(pfkeystat)
 
 extern int key_output(struct mbuf *m, struct socket *so);
 extern int key_usrreq __P((struct socket *,

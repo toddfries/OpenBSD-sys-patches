@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/mips/include/sysarch.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/sysarch.h,v 1.2 2010/01/09 04:59:57 imp Exp $
  */
 
 /*
@@ -35,15 +35,11 @@
 #ifndef _MACHINE_SYSARCH_H_
 #define _MACHINE_SYSARCH_H_
 
+#define	MIPS_SET_TLS	1
+#define	MIPS_GET_TLS	2
+
 #ifndef _KERNEL
 #include <sys/cdefs.h>
-
-#if 0
-/* Something useful for each MIPS platform. */
-#else
-#define	mips_tcb_set(tcb)	do {} while (0)
-#define	mips_tcb_get()		NULL
-#endif /* _MIPS_ARCH_XLR */
 
 __BEGIN_DECLS
 int sysarch(int, void *);

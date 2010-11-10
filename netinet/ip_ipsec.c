@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.15 2009/02/08 09:27:07 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.24 2010/03/12 22:58:52 rrs Exp $");
 
 #include "opt_ipsec.h"
 #include "opt_sctp.h"
@@ -43,10 +43,10 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.15 2009/02/08 09:27:07 bz Exp
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -56,7 +56,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.15 2009/02/08 09:27:07 bz Exp
 #include <netinet/ip_var.h>
 #include <netinet/ip_options.h>
 #include <netinet/ip_ipsec.h>
-#include <netinet/vinet.h>
 #ifdef SCTP
 #include <netinet/sctp_crc32.h>
 #endif
@@ -71,6 +70,20 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.15 2009/02/08 09:27:07 bz Exp
 
 extern	struct protosw inetsw[];
 
+#ifdef IPSEC
+#ifdef IPSEC_FILTERTUNNEL
+static VNET_DEFINE(int, ip4_ipsec_filtertunnel) = 1;
+#else
+static VNET_DEFINE(int, ip4_ipsec_filtertunnel) = 0;
+#endif
+#define	V_ip4_ipsec_filtertunnel VNET(ip4_ipsec_filtertunnel)
+
+SYSCTL_DECL(_net_inet_ipsec);
+SYSCTL_VNET_INT(_net_inet_ipsec, OID_AUTO, filtertunnel,
+	CTLFLAG_RW, &VNET_NAME(ip4_ipsec_filtertunnel), 0,
+	"If set filter packets from an IPsec tunnel.");
+#endif /* IPSEC */
+
 /*
  * Check if we have to jump over firewall processing for this packet.
  * Called from ip_input().
@@ -79,11 +92,13 @@ extern	struct protosw inetsw[];
 int
 ip_ipsec_filtertunnel(struct mbuf *m)
 {
-#if defined(IPSEC) && !defined(IPSEC_FILTERTUNNEL)
+#if defined(IPSEC)
+
 	/*
 	 * Bypass packet filtering for packets from a tunnel.
 	 */
-	if (m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL) != NULL)
+	if (!V_ip4_ipsec_filtertunnel &&
+	    m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL) != NULL)
 		return 1;
 #endif
 	return 0;
@@ -99,8 +114,6 @@ int
 ip_ipsec_fwd(struct mbuf *m)
 {
 #ifdef IPSEC
-	INIT_VNET_INET(curvnet);
-	INIT_VNET_IPSEC(curvnet);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -129,7 +142,7 @@ ip_ipsec_fwd(struct mbuf *m)
 	KEY_FREESP(&sp);
 	splx(s);
 	if (error) {
-		V_ipstat.ips_cantforward++;
+		IPSTAT_INC(ips_cantforward);
 		return 1;
 	}
 #endif /* IPSEC */
@@ -146,9 +159,8 @@ ip_ipsec_fwd(struct mbuf *m)
 int
 ip_ipsec_input(struct mbuf *m)
 {
-	struct ip *ip = mtod(m, struct ip *);
 #ifdef IPSEC
-	INIT_VNET_IPSEC(curvnet);
+	struct ip *ip = mtod(m, struct ip *);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -248,9 +260,7 @@ ip_ipsec_mtu(struct mbuf *m, int mtu)
  * -1 = packet was reinjected and stop processing packet
  */
 int
-ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
-    struct route **ro, struct route *iproute, struct sockaddr_in **dst,
-    struct in_ifaddr **ia, struct ifnet **ifp)
+ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error)
 {
 #ifdef IPSEC
 	struct secpolicy *sp = NULL;
@@ -332,7 +342,7 @@ ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 		}
 #ifdef SCTP
 		if ((*m)->m_pkthdr.csum_flags & CSUM_SCTP) {
-			sctp_delayed_cksum(*m);
+			sctp_delayed_cksum(*m, (uint32_t)(ip->ip_hl << 2));
 			(*m)->m_pkthdr.csum_flags &= ~CSUM_SCTP;
 		}
 #endif
@@ -379,19 +389,6 @@ ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 		} else {
 			/* No IPsec processing for this packet. */
 		}
-#ifdef notyet
-		/*
-		 * If deferred crypto processing is needed, check that
-		 * the interface supports it.
-		 */ 
-		mtag = m_tag_find(*m, PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL);
-		if (mtag != NULL && ((*ifp)->if_capenable & IFCAP_IPSEC) == 0) {
-			/* notify IPsec to do its own crypto */
-			ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
-			*error = EHOSTUNREACH;
-			goto bad;
-		}
-#endif
 	}
 done:
 	if (sp != NULL)

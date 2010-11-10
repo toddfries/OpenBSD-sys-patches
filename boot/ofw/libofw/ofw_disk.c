@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_disk.c,v 1.14 2008/10/13 17:14:29 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_disk.c,v 1.15 2009/12/28 22:56:30 antoine Exp $");
 
 /*
  * Disk I/O routines using Open Firmware
@@ -67,7 +67,7 @@ struct opened_dev {
 	SLIST_ENTRY(opened_dev)	link;
 };
 
-SLIST_HEAD(, opened_dev) opened_devs = SLIST_HEAD_INITIALIZER(opened_dev);
+SLIST_HEAD(, opened_dev) opened_devs = SLIST_HEAD_INITIALIZER(opened_devs);
 
 static int
 ofwd_init(void)

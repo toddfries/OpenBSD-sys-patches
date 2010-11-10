@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.9 2009/02/15 06:36:02 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.12 2010/02/25 14:13:39 attilio Exp $");
 
 /* #define DELAYDEBUG */
 /*
@@ -74,8 +74,8 @@ __FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.9 2009/02/15 06:36:02 kmacy Exp
 #include <machine/specialreg.h>
 #include <machine/timerreg.h>
 
-#include <i386/isa/icu.h>
-#include <i386/isa/isa.h>
+#include <x86/isa/icu.h>
+#include <x86/isa/isa.h>
 #include <isa/rtc.h>
 
 #include <xen/xen_intr.h>
@@ -87,6 +87,7 @@ __FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.9 2009/02/15 06:36:02 kmacy Exp
 #include <machine/xen/xenfunc.h>
 #include <xen/interface/vcpu.h>
 #include <machine/cpu.h>
+#include <machine/xen/xen_clock_util.h>
 
 /*
  * 32-bit time_t's can't reach leap years before 1904 or after 2036, so we
@@ -120,7 +121,6 @@ int adjkerntz;		/* local offset from GMT in seconds */
 int clkintr_pending;
 int pscnt = 1;
 int psdiv = 1;
-int statclock_disable;
 int wall_cmos_clock;
 u_int timer_freq = TIMER_FREQ;
 static int independent_wallclock;
@@ -237,6 +237,15 @@ static void update_wallclock(void)
 
 }
 
+static void
+add_uptime_to_wallclock(void)
+{
+	struct timespec ut;
+
+	xen_fetch_uptime(&ut);
+	timespecadd(&shadow_tv, &ut);
+}
+
 /*
  * Reads a consistent set of time-base values from Xen, into a shadow data
  * area. Must be called with the xtime_lock held for writing.
@@ -332,7 +341,9 @@ clkintr(void *arg)
 	 */
 	
 	if (shadow_tv_version != HYPERVISOR_shared_info->wc_version) {
+		printf("[XEN] hypervisor wallclock nudged; nudging TOD.\n");
 		update_wallclock();
+		add_uptime_to_wallclock();
 		tc_setclock(&shadow_tv);
 	}
 	
@@ -543,6 +554,7 @@ domu_inittodr(time_t base)
 	struct timespec ts;
 
 	update_wallclock();
+	add_uptime_to_wallclock();
 	
 	RTC_LOCK;
 	
@@ -592,6 +604,7 @@ domu_resettodr(void)
 		op.u.settime.system_time = shadow->system_timestamp;
 		HYPERVISOR_dom0_op(&op);
 		update_wallclock();
+		add_uptime_to_wallclock();
 	} else if (independent_wallclock) {
 		/* notyet */
 		;

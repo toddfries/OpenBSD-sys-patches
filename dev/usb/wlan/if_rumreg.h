@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/usb/wlan/if_rumreg.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/wlan/if_rumreg.h,v 1.3 2009/09/08 13:19:05 phk Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 Damien Bergamini <damien.bergamini@free.fr>

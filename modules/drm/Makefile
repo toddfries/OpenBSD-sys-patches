@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/drm/Makefile,v 1.6 2005/12/03 01:23:50 anholt Exp $
+# $FreeBSD: src/sys/modules/drm/Makefile,v 1.7 2010/01/31 14:30:39 rnoland Exp $
 
 SUBDIR = \
 	drm \
@@ -9,6 +9,7 @@ SUBDIR = \
 	radeon \
 	savage \
 	sis \
-	tdfx
+	tdfx \
+	via
 
 .include <bsd.subdir.mk>

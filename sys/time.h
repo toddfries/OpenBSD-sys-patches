@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)time.h	8.5 (Berkeley) 5/4/95
- * $FreeBSD: src/sys/sys/time.h,v 1.78 2008/05/18 22:11:47 jb Exp $
+ * $FreeBSD: src/sys/sys/time.h,v 1.81 2010/06/15 19:28:44 jkim Exp $
  */
 
 #ifndef _SYS_TIME_H_
@@ -264,6 +264,7 @@ void	resettodr(void);
 
 extern time_t	time_second;
 extern time_t	time_uptime;
+extern struct bintime boottimebin;
 extern struct timeval boottime;
 
 /*
@@ -283,7 +284,7 @@ extern struct timeval boottime;
  *
  * Functions with the "get" prefix returns a less precise result
  * much faster than the functions without "get" prefix and should
- * be used where a precision of 10 msec is acceptable or where
+ * be used where a precision of 1/hz seconds is acceptable or where
  * performance is priority. (NB: "precision", _not_ "resolution" !) 
  * 
  */
@@ -316,17 +317,25 @@ int	tvtohz(struct timeval *tv);
 #include <time.h>
 
 #include <sys/cdefs.h>
+#include <sys/select.h>
 
 __BEGIN_DECLS
+int	setitimer(int, const struct itimerval *, struct itimerval *);
+int	utimes(const char *, const struct timeval *);
+
+#if __BSD_VISIBLE
 int	adjtime(const struct timeval *, struct timeval *);
 int	futimes(int, const struct timeval *);
+int	futimesat(int, const char *, const struct timeval [2]);
+int	lutimes(const char *, const struct timeval *);
+int	settimeofday(const struct timeval *, const struct timezone *);
+#endif
+
+#if __XSI_VISIBLE
 int	getitimer(int, struct itimerval *);
 int	gettimeofday(struct timeval *, struct timezone *);
-int	lutimes(const char *, const struct timeval *);
-int	setitimer(int, const struct itimerval *, struct itimerval *);
-int	settimeofday(const struct timeval *, const struct timezone *);
-int	utimes(const char *, const struct timeval *);
-int	futimesat(int, const char *, const struct timeval [2]);
+#endif
+
 __END_DECLS
 
 #endif /* !_KERNEL */

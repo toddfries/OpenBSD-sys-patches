@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright (c) 2001-2008, Intel Corporation 
+  Copyright (c) 2001-2009, Intel Corporation 
   All rights reserved.
   
   Redistribution and use in source and binary forms, with or without 
@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_osdep.h,v 1.5 2008/11/26 23:41:18 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_osdep.h,v 1.8 2009/12/07 21:30:54 jfv Exp $*/
 
 #ifndef _IXGBE_OS_H_
 #define _IXGBE_OS_H_
@@ -83,6 +83,8 @@
 #define true                1
 #define CMD_MEM_WRT_INVALIDATE          0x0010  /* BIT_4 */
 #define PCI_COMMAND_REGISTER            PCIR_COMMAND
+#define UNREFERENCED_PARAMETER(_p)
+
 
 #define IXGBE_HTONL	htonl
 
@@ -96,6 +98,7 @@ typedef boolean_t	bool;
 
 #define le16_to_cpu 
 
+#if __FreeBSD_version < 800000
 #if defined(__i386__) || defined(__amd64__)
 #define mb()	__asm volatile("mfence" ::: "memory")
 #define wmb()	__asm volatile("sfence" ::: "memory")
@@ -105,6 +108,17 @@ typedef boolean_t	bool;
 #define rmb()
 #define wmb()
 #endif
+#endif
+
+#if defined(__i386__) || defined(__amd64__)
+static __inline
+void prefetch(void *x)
+{
+	__asm volatile("prefetcht0 %0" :: "m" (*(unsigned long *)x));
+}
+#else
+#define prefetch(x)
+#endif
 
 struct ixgbe_osdep
 {
@@ -113,10 +127,13 @@ struct ixgbe_osdep
 	struct device     *dev;
 };
 
-/* This is needed by the shared code */
+/* These routines are needed by the shared code */
 struct ixgbe_hw; 
 extern u16 ixgbe_read_pci_cfg(struct ixgbe_hw *, u32);
 #define IXGBE_READ_PCIE_WORD ixgbe_read_pci_cfg
+
+extern void ixgbe_write_pci_cfg(struct ixgbe_hw *, u32, u16);
+#define IXGBE_WRITE_PCIE_WORD ixgbe_write_pci_cfg
 
 #define IXGBE_WRITE_FLUSH(a) IXGBE_READ_REG(a, IXGBE_STATUS)
 

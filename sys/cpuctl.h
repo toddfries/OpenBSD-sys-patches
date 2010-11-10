@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/cpuctl.h,v 1.1 2008/08/08 16:26:53 stas Exp $
+ * $FreeBSD: src/sys/sys/cpuctl.h,v 1.2 2009/06/30 12:35:47 stas Exp $
  */
 
 #ifndef _CPUCTL_H_
@@ -48,5 +48,7 @@ typedef struct {
 #define	CPUCTL_WRMSR	_IOWR('c', 2, cpuctl_msr_args_t)
 #define	CPUCTL_CPUID	_IOWR('c', 3, cpuctl_cpuid_args_t)
 #define	CPUCTL_UPDATE	_IOWR('c', 4, cpuctl_update_args_t)
+#define	CPUCTL_MSRSBIT	_IOWR('c', 5, cpuctl_msr_args_t)
+#define	CPUCTL_MSRCBIT	_IOWR('c', 6, cpuctl_msr_args_t)
 
 #endif /* _CPUCTL_H_ */

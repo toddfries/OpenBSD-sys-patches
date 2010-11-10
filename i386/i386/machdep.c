@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.677 2009/03/05 19:42:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.700 2010/06/05 15:59:59 kib Exp $");
 
 #include "opt_apic.h"
 #include "opt_atalk.h"
@@ -113,6 +113,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.677 2009/03/05 19:42:11 jhb 
 #include <machine/cpu.h>
 #include <machine/cputypes.h>
 #include <machine/intr_machdep.h>
+#include <machine/mca.h>
 #include <machine/md_var.h>
 #include <machine/metadata.h>
 #include <machine/pc/bios.h>
@@ -131,7 +132,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.677 2009/03/05 19:42:11 jhb 
 #endif
 
 #ifdef DEV_ISA
-#include <i386/isa/icu.h>
+#include <x86/isa/icu.h>
 #endif
 
 #ifdef XBOX
@@ -243,6 +244,7 @@ static void
 cpu_startup(dummy)
 	void *dummy;
 {
+	uintmax_t memsize;
 	char *sysenv;
 	
 	/*
@@ -255,7 +257,12 @@ cpu_startup(dummy)
 	 */
 	sysenv = getenv("smbios.system.product");
 	if (sysenv != NULL) {
-		if (strncmp(sysenv, "MacBook", 7) == 0) {
+		if (strncmp(sysenv, "MacBook1,1", 10) == 0 ||
+		    strncmp(sysenv, "MacBook3,1", 10) == 0 ||
+		    strncmp(sysenv, "MacBookPro1,1", 13) == 0 ||
+		    strncmp(sysenv, "MacBookPro1,2", 13) == 0 ||
+		    strncmp(sysenv, "MacBookPro3,1", 13) == 0 ||
+		    strncmp(sysenv, "Macmini1,1", 10) == 0) {
 			if (bootverbose)
 				printf("Disabling LEGACY_USB_EN bit on "
 				    "Intel ICH.\n");
@@ -273,9 +280,21 @@ cpu_startup(dummy)
 #ifdef PERFMON
 	perfmon_init();
 #endif
-	printf("real memory  = %ju (%ju MB)\n", ptoa((uintmax_t)Maxmem),
-	    ptoa((uintmax_t)Maxmem) / 1048576);
 	realmem = Maxmem;
+
+	/*
+	 * Display physical memory if SMBIOS reports reasonable amount.
+	 */
+	memsize = 0;
+	sysenv = getenv("smbios.memory.enabled");
+	if (sysenv != NULL) {
+		memsize = (uintmax_t)strtoul(sysenv, (char **)NULL, 10) << 10;
+		freeenv(sysenv);
+	}
+	if (memsize < ptoa((uintmax_t)cnt.v_free_count))
+		memsize = ptoa((uintmax_t)Maxmem);
+	printf("real memory  = %ju (%ju MB)\n", memsize, memsize >> 20);
+
 	/*
 	 * Display any holes after the first chunk of extended memory.
 	 */
@@ -578,6 +597,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	struct sigacts *psp;
 	char *sp;
 	struct trapframe *regs;
+	struct segment_descriptor *sdp;
 	int sig;
 	int oonstack;
 
@@ -612,8 +632,24 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_mcontext.mc_gs = rgs();
 	bcopy(regs, &sf.sf_uc.uc_mcontext.mc_fs, sizeof(*regs));
 	sf.sf_uc.uc_mcontext.mc_len = sizeof(sf.sf_uc.uc_mcontext); /* magic */
+
+	/*
+	 * The get_fpcontext() call must be placed before assignments
+	 * to mc_fsbase and mc_gsbase due to the alignment-override
+	 * code in get_fpcontext() that possibly clobbers 12 bytes of
+	 * mcontext after mc_fpstate.
+	 */
 	get_fpcontext(td, &sf.sf_uc.uc_mcontext);
 	fpstate_drop(td);
+	/*
+	 * Unconditionally fill the fsbase and gsbase into the mcontext.
+	 */
+	sdp = &td->td_pcb->pcb_gsd;
+	sf.sf_uc.uc_mcontext.mc_fsbase = sdp->sd_hibase << 24 |
+	    sdp->sd_lobase;
+	sdp = &td->td_pcb->pcb_fsd;
+	sf.sf_uc.uc_mcontext.mc_gsbase = sdp->sd_hibase << 24 |
+	    sdp->sd_lobase;
 
 	/* Allocate space for the signal handler context. */
 	if ((td->td_pflags & TDP_ALTSTACK) != 0 && !oonstack &&
@@ -726,7 +762,6 @@ osigreturn(td, uap)
 	struct osigcontext sc;
 	struct trapframe *regs;
 	struct osigcontext *scp;
-	struct proc *p = td->td_proc;
 	int eflags, error;
 	ksiginfo_t ksi;
 
@@ -826,17 +861,14 @@ osigreturn(td, uap)
 	regs->tf_eip = scp->sc_pc;
 	regs->tf_eflags = eflags;
 
-	PROC_LOCK(p);
 #if defined(COMPAT_43)
 	if (scp->sc_onstack & 1)
 		td->td_sigstk.ss_flags |= SS_ONSTACK;
 	else
 		td->td_sigstk.ss_flags &= ~SS_ONSTACK;
 #endif
-	SIGSETOLD(td->td_sigmask, scp->sc_mask);
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, (sigset_t *)&scp->sc_mask, NULL,
+	    SIGPROCMASK_OLD);
 	return (EJUSTRETURN);
 }
 #endif /* COMPAT_43 */
@@ -853,9 +885,8 @@ freebsd4_sigreturn(td, uap)
 	} */ *uap;
 {
 	struct ucontext4 uc;
-	struct proc *p = td->td_proc;
 	struct trapframe *regs;
-	const struct ucontext4 *ucp;
+	struct ucontext4 *ucp;
 	int cs, eflags, error;
 	ksiginfo_t ksi;
 
@@ -919,7 +950,8 @@ freebsd4_sigreturn(td, uap)
 		 * one less debugger trap, so allowing it is fairly harmless.
 		 */
 		if (!EFL_SECURE(eflags & ~PSL_RF, regs->tf_eflags & ~PSL_RF)) {
-			printf("freebsd4_sigreturn: eflags = 0x%x\n", eflags);
+			uprintf("pid %d (%s): freebsd4_sigreturn eflags = 0x%x\n",
+			    td->td_proc->p_pid, td->td_name, eflags);
 	    		return (EINVAL);
 		}
 
@@ -930,7 +962,8 @@ freebsd4_sigreturn(td, uap)
 		 */
 		cs = ucp->uc_mcontext.mc_cs;
 		if (!CS_SECURE(cs)) {
-			printf("freebsd4_sigreturn: cs = 0x%x\n", cs);
+			uprintf("pid %d (%s): freebsd4_sigreturn cs = 0x%x\n",
+			    td->td_proc->p_pid, td->td_name, cs);
 			ksiginfo_init_trap(&ksi);
 			ksi.ksi_signo = SIGBUS;
 			ksi.ksi_code = BUS_OBJERR;
@@ -943,18 +976,13 @@ freebsd4_sigreturn(td, uap)
 		bcopy(&ucp->uc_mcontext.mc_fs, regs, sizeof(*regs));
 	}
 
-	PROC_LOCK(p);
 #if defined(COMPAT_43)
 	if (ucp->uc_mcontext.mc_onstack & 1)
 		td->td_sigstk.ss_flags |= SS_ONSTACK;
 	else
 		td->td_sigstk.ss_flags &= ~SS_ONSTACK;
 #endif
-
-	td->td_sigmask = ucp->uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &ucp->uc_sigmask, NULL, 0);
 	return (EJUSTRETURN);
 }
 #endif	/* COMPAT_FREEBSD4 */
@@ -970,9 +998,8 @@ sigreturn(td, uap)
 	} */ *uap;
 {
 	ucontext_t uc;
-	struct proc *p = td->td_proc;
 	struct trapframe *regs;
-	const ucontext_t *ucp;
+	ucontext_t *ucp;
 	int cs, eflags, error, ret;
 	ksiginfo_t ksi;
 
@@ -1037,7 +1064,8 @@ sigreturn(td, uap)
 		 * one less debugger trap, so allowing it is fairly harmless.
 		 */
 		if (!EFL_SECURE(eflags & ~PSL_RF, regs->tf_eflags & ~PSL_RF)) {
-			printf("sigreturn: eflags = 0x%x\n", eflags);
+			uprintf("pid %d (%s): sigreturn eflags = 0x%x\n",
+			    td->td_proc->p_pid, td->td_name, eflags);
 	    		return (EINVAL);
 		}
 
@@ -1048,7 +1076,8 @@ sigreturn(td, uap)
 		 */
 		cs = ucp->uc_mcontext.mc_cs;
 		if (!CS_SECURE(cs)) {
-			printf("sigreturn: cs = 0x%x\n", cs);
+			uprintf("pid %d (%s): sigreturn cs = 0x%x\n",
+			    td->td_proc->p_pid, td->td_name, cs);
 			ksiginfo_init_trap(&ksi);
 			ksi.ksi_signo = SIGBUS;
 			ksi.ksi_code = BUS_OBJERR;
@@ -1064,7 +1093,6 @@ sigreturn(td, uap)
 		bcopy(&ucp->uc_mcontext.mc_fs, regs, sizeof(*regs));
 	}
 
-	PROC_LOCK(p);
 #if defined(COMPAT_43)
 	if (ucp->uc_mcontext.mc_onstack & 1)
 		td->td_sigstk.ss_flags |= SS_ONSTACK;
@@ -1072,10 +1100,7 @@ sigreturn(td, uap)
 		td->td_sigstk.ss_flags &= ~SS_ONSTACK;
 #endif
 
-	td->td_sigmask = ucp->uc_sigmask;
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	kern_sigprocmask(td, SIG_SETMASK, &ucp->uc_sigmask, NULL, 0);
 	return (EJUSTRETURN);
 }
 
@@ -1088,6 +1113,16 @@ sigreturn(td, uap)
 void
 cpu_boot(int howto)
 {
+}
+
+/*
+ * Flush the D-cache for non-DMA I/O so that the I-cache can
+ * be made coherent later.
+ */
+void
+cpu_flush_dcache(void *ptr, size_t len)
+{
+	/* Not applicable */
 }
 
 /* Get current clock frequency for the given cpu id. */
@@ -1198,6 +1233,70 @@ cpu_idle_acpi(int busy)
 		__asm __volatile("sti; hlt");
 }
 
+static int cpu_ident_amdc1e = 0;
+
+static int
+cpu_probe_amdc1e(void)
+{ 
+#ifdef DEV_APIC
+	int i;
+
+	/*
+	 * Forget it, if we're not using local APIC timer.
+	 */
+	if (resource_disabled("apic", 0) ||
+	    (resource_int_value("apic", 0, "clock", &i) == 0 && i == 0))
+		return (0);
+
+	/*
+	 * Detect the presence of C1E capability mostly on latest
+	 * dual-cores (or future) k8 family.
+	 */
+	if (cpu_vendor_id == CPU_VENDOR_AMD &&
+	    (cpu_id & 0x00000f00) == 0x00000f00 &&
+	    (cpu_id & 0x0fff0000) >=  0x00040000) {
+		cpu_ident_amdc1e = 1;
+		return (1);
+	}
+#endif
+	return (0);
+}
+
+/*
+ * C1E renders the local APIC timer dead, so we disable it by
+ * reading the Interrupt Pending Message register and clearing
+ * both C1eOnCmpHalt (bit 28) and SmiOnCmpHalt (bit 27).
+ * 
+ * Reference:
+ *   "BIOS and Kernel Developer's Guide for AMD NPT Family 0Fh Processors"
+ *   #32559 revision 3.00+
+ */
+#define	MSR_AMDK8_IPM		0xc0010055
+#define	AMDK8_SMIONCMPHALT	(1ULL << 27)
+#define	AMDK8_C1EONCMPHALT	(1ULL << 28)
+#define	AMDK8_CMPHALT		(AMDK8_SMIONCMPHALT | AMDK8_C1EONCMPHALT)
+
+static void
+cpu_idle_amdc1e(int busy)
+{
+
+	disable_intr();
+	if (sched_runnable())
+		enable_intr();
+	else {
+		uint64_t msr;
+
+		msr = rdmsr(MSR_AMDK8_IPM);
+		if (msr & AMDK8_CMPHALT)
+			wrmsr(MSR_AMDK8_IPM, msr & ~AMDK8_CMPHALT);
+
+		if (cpu_idle_hook)
+			cpu_idle_hook();
+		else
+			__asm __volatile("sti; hlt");
+	}
+}
+
 static void
 cpu_idle_spin(int busy)
 {
@@ -1299,6 +1398,7 @@ struct {
 	{ cpu_idle_spin, "spin" },
 	{ cpu_idle_mwait, "mwait" },
 	{ cpu_idle_mwait_hlt, "mwait_hlt" },
+	{ cpu_idle_amdc1e, "amdc1e" },
 	{ cpu_idle_hlt, "hlt" },
 	{ cpu_idle_acpi, "acpi" },
 	{ NULL, NULL }
@@ -1316,6 +1416,9 @@ idle_sysctl_available(SYSCTL_HANDLER_ARGS)
 	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
 		if (strstr(idle_tbl[i].id_name, "mwait") &&
 		    (cpu_feature2 & CPUID2_MON) == 0)
+			continue;
+		if (strcmp(idle_tbl[i].id_name, "amdc1e") == 0 &&
+		    cpu_ident_amdc1e == 0)
 			continue;
 		p += sprintf(p, "%s, ", idle_tbl[i].id_name);
 	}
@@ -1347,6 +1450,9 @@ idle_sysctl(SYSCTL_HANDLER_ARGS)
 		if (strstr(idle_tbl[i].id_name, "mwait") &&
 		    (cpu_feature2 & CPUID2_MON) == 0)
 			continue;
+		if (strcmp(idle_tbl[i].id_name, "amdc1e") == 0 &&
+		    cpu_ident_amdc1e == 0)
+			continue;
 		if (strcmp(idle_tbl[i].id_name, buf))
 			continue;
 		cpu_idle_fn = idle_tbl[i].id_fn;
@@ -1365,11 +1471,7 @@ SYSCTL_PROC(_machdep, OID_AUTO, idle, CTLTYPE_STRING | CTLFLAG_RW, 0, 0,
  * Reset registers to default values on exec.
  */
 void
-exec_setregs(td, entry, stack, ps_strings)
-	struct thread *td;
-	u_long entry;
-	u_long stack;
-	u_long ps_strings;
+exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *regs = td->td_frame;
 	struct pcb *pcb = td->td_pcb;
@@ -1385,7 +1487,7 @@ exec_setregs(td, entry, stack, ps_strings)
 		mtx_unlock_spin(&dt_lock);
   
 	bzero((char *)regs, sizeof(struct trapframe));
-	regs->tf_eip = entry;
+	regs->tf_eip = imgp->entry_addr;
 	regs->tf_esp = stack;
 	regs->tf_eflags = PSL_USER | (regs->tf_eflags & PSL_T);
 	regs->tf_ss = _udatasel;
@@ -1395,7 +1497,7 @@ exec_setregs(td, entry, stack, ps_strings)
 	regs->tf_cs = _ucodesel;
 
 	/* PS_STRINGS value for BSD/OS binaries.  It is 0 for non-BSD/OS. */
-	regs->tf_ebx = ps_strings;
+	regs->tf_ebx = imgp->ps_strings;
 
         /*
          * Reset the hardware debug registers if they were in use.
@@ -1515,236 +1617,236 @@ extern  vm_offset_t	proc0kstack;
  */
 struct soft_segment_descriptor gdt_segs[] = {
 /* GNULL_SEL	0 Null Descriptor */
-{	0x0,			/* segment base address  */
-	0x0,			/* length */
-	0,			/* segment type */
-	SEL_KPL,		/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = SEL_KPL,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 /* GPRIV_SEL	1 SMP Per-Processor Private Data Descriptor */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_KPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_KPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GUFS_SEL	2 %fs Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GUGS_SEL	3 %gs Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GCODE_SEL	4 Code Descriptor for kernel */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMERA,		/* segment type */
-	SEL_KPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMERA,
+	.ssd_dpl = SEL_KPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GDATA_SEL	5 Data Descriptor for kernel */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_KPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_KPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GUCODE_SEL	6 Code Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMERA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMERA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GUDATA_SEL	7 Data Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GBIOSLOWMEM_SEL 8 BIOS access to realmode segment 0x40, must be #8 in GDT */
-{	0x400,			/* segment base address */
-	0xfffff,		/* length */
-	SDT_MEMRWA,		/* segment type */
-	SEL_KPL,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x400,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_KPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 #ifndef XEN
 /* GPROC0_SEL	9 Proc 0 Tss Descriptor */
 {
-	0x0,			/* segment base address */
-	sizeof(struct i386tss)-1,/* length  */
-	SDT_SYS386TSS,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* unused - default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+	.ssd_base = 0x0,
+	.ssd_limit = sizeof(struct i386tss)-1,
+	.ssd_type = SDT_SYS386TSS,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 /* GLDT_SEL	10 LDT Descriptor */
-{	(int) ldt,		/* segment base address  */
-	sizeof(ldt)-1,		/* length - all address space */
-	SDT_SYSLDT,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* unused - default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = (int) ldt,
+	.ssd_limit = sizeof(ldt)-1,
+	.ssd_type = SDT_SYSLDT,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 /* GUSERLDT_SEL	11 User LDT Descriptor per process */
-{	(int) ldt,		/* segment base address  */
-	(512 * sizeof(union descriptor)-1),		/* length */
-	SDT_SYSLDT,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* unused - default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = (int) ldt,
+	.ssd_limit = (512 * sizeof(union descriptor)-1),
+	.ssd_type = SDT_SYSLDT,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 /* GPANIC_SEL	12 Panic Tss Descriptor */
-{	(int) &dblfault_tss,	/* segment base address  */
-	sizeof(struct i386tss)-1,/* length - all address space */
-	SDT_SYS386TSS,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* unused - default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = (int) &dblfault_tss,
+	.ssd_limit = sizeof(struct i386tss)-1,
+	.ssd_type = SDT_SYS386TSS,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 /* GBIOSCODE32_SEL 13 BIOS 32-bit interface (32bit Code) */
-{	0,			/* segment base address (overwritten)  */
-	0xfffff,		/* length */
-	SDT_MEMERA,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMERA,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 1		},
 /* GBIOSCODE16_SEL 14 BIOS 32-bit interface (16bit Code) */
-{	0,			/* segment base address (overwritten)  */
-	0xfffff,		/* length */
-	SDT_MEMERA,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMERA,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 1		},
 /* GBIOSDATA_SEL 15 BIOS 32-bit interface (Data) */
-{	0,			/* segment base address (overwritten) */
-	0xfffff,		/* length */
-	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 /* GBIOSUTIL_SEL 16 BIOS 16-bit interface (Utility) */
-{	0,			/* segment base address (overwritten) */
-	0xfffff,		/* length */
-	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 1		},
 /* GBIOSARGS_SEL 17 BIOS 16-bit interface (Arguments) */
-{	0,			/* segment base address (overwritten) */
-	0xfffff,		/* length */
-	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = 0,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 1		},
 /* GNDIS_SEL	18 NDIS Descriptor */
-{	0x0,			/* segment base address  */
-	0x0,			/* length */
-	0,			/* segment type */
-	0,			/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = 0,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 #endif /* !XEN */
 };
 
 static struct soft_segment_descriptor ldt_segs[] = {
 	/* Null Descriptor - overwritten by call gate */
-{	0x0,			/* segment base address  */
-	0x0,			/* length - all address space */
-	0,			/* segment type */
-	0,			/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = 0,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 	/* Null Descriptor - overwritten by call gate */
-{	0x0,			/* segment base address  */
-	0x0,			/* length - all address space */
-	0,			/* segment type */
-	0,			/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = 0,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 	/* Null Descriptor - overwritten by call gate */
-{	0x0,			/* segment base address  */
-	0x0,			/* length - all address space */
-	0,			/* segment type */
-	0,			/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = 0,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 	/* Code Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMERA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMERA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 	/* Null Descriptor - overwritten by call gate */
-{	0x0,			/* segment base address  */
-	0x0,			/* length - all address space */
-	0,			/* segment type */
-	0,			/* segment descriptor priority level */
-	0,			/* segment descriptor present */
-	0, 0,
-	0,			/* default 32 vs 16 bit size */
-	0  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0x0,
+	.ssd_type = 0,
+	.ssd_dpl = 0,
+	.ssd_p = 0,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 0,
+	.ssd_gran = 0		},
 	/* Data Descriptor for user */
-{	0x0,			/* segment base address  */
-	0xfffff,		/* length - all address space */
-	SDT_MEMRWA,		/* segment type */
-	SEL_UPL,		/* segment descriptor priority level */
-	1,			/* segment descriptor present */
-	0, 0,
-	1,			/* default 32 vs 16 bit size */
-	1  			/* limit granularity (byte/page units)*/ },
+{	.ssd_base = 0x0,
+	.ssd_limit = 0xfffff,
+	.ssd_type = SDT_MEMRWA,
+	.ssd_dpl = SEL_UPL,
+	.ssd_p = 1,
+	.ssd_xx = 0, .ssd_xx1 = 0,
+	.ssd_def32 = 1,
+	.ssd_gran = 1		},
 };
 
 void
@@ -1835,7 +1937,7 @@ sdtossd(sd, ssd)
 static int
 add_smap_entry(struct bios_smap *smap, vm_paddr_t *physmap, int *physmap_idxp)
 {
-	int i, physmap_idx;
+	int i, insert_idx, physmap_idx;
 
 	physmap_idx = *physmap_idxp;
 	
@@ -1857,17 +1959,34 @@ add_smap_entry(struct bios_smap *smap, vm_paddr_t *physmap, int *physmap_idxp)
 	}
 #endif
 
+	/*
+	 * Find insertion point while checking for overlap.  Start off by
+	 * assuming the new entry will be added to the end.
+	 */
+	insert_idx = physmap_idx + 2;
 	for (i = 0; i <= physmap_idx; i += 2) {
 		if (smap->base < physmap[i + 1]) {
+			if (smap->base + smap->length <= physmap[i]) {
+				insert_idx = i;
+				break;
+			}
 			if (boothowto & RB_VERBOSE)
 				printf(
-	"Overlapping or non-monotonic memory region, ignoring second region\n");
+		    "Overlapping memory regions, ignoring second region\n");
 			return (1);
 		}
 	}
 
-	if (smap->base == physmap[physmap_idx + 1]) {
-		physmap[physmap_idx + 1] += smap->length;
+	/* See if we can prepend to the next entry. */
+	if (insert_idx <= physmap_idx &&
+	    smap->base + smap->length == physmap[insert_idx]) {
+		physmap[insert_idx] = smap->base;
+		return (1);
+	}
+
+	/* See if we can append to the previous entry. */
+	if (insert_idx > 0 && smap->base == physmap[insert_idx - 1]) {
+		physmap[insert_idx - 1] += smap->length;
 		return (1);
 	}
 
@@ -1878,8 +1997,19 @@ add_smap_entry(struct bios_smap *smap, vm_paddr_t *physmap, int *physmap_idxp)
 		"Too many segments in the physical address map, giving up\n");
 		return (0);
 	}
-	physmap[physmap_idx] = smap->base;
-	physmap[physmap_idx + 1] = smap->base + smap->length;
+
+	/*
+	 * Move the last 'N' entries down to make room for the new
+	 * entry if needed.
+	 */
+	for (i = physmap_idx; i > insert_idx; i -= 2) {
+		physmap[i] = physmap[i - 2];
+		physmap[i + 1] = physmap[i - 1];
+	}
+
+	/* Insert the new entry. */
+	physmap[insert_idx] = smap->base;
+	physmap[insert_idx + 1] = smap->base + smap->length;
 	return (1);
 }
 
@@ -2308,6 +2438,9 @@ do_next:
 #else
 	phys_avail[0] = physfree;
 	phys_avail[1] = xen_start_info->nr_pages*PAGE_SIZE;
+	dump_avail[0] = 0;	
+	dump_avail[1] = xen_start_info->nr_pages*PAGE_SIZE;
+	
 #endif
 	
 	/*
@@ -2344,7 +2477,7 @@ init386(first)
 	int first;
 {
 	unsigned long gdtmachpfn;
-	int error, gsel_tss, metadata_missing, x;
+	int error, gsel_tss, metadata_missing, x, pa;
 	struct pcpu *pc;
 	struct callback_register event = {
 		.type = CALLBACKTYPE_event,
@@ -2428,6 +2561,11 @@ init386(first)
 		    GSEL(GCODE_SEL, SEL_KPL), (unsigned long)failsafe_callback);
 #endif
 	pcpu_init(pc, 0, sizeof(struct pcpu));
+	for (pa = first; pa < first + DPCPU_SIZE; pa += PAGE_SIZE)
+		pmap_kenter(pa + KERNBASE, pa);
+	dpcpu_init((void *)(first + KERNBASE), 0);
+	first += DPCPU_SIZE;
+
 	PCPU_SET(prvspace, pc);
 	PCPU_SET(curthread, &thread0);
 	PCPU_SET(curpcb, thread0.td_pcb);
@@ -2454,7 +2592,7 @@ init386(first)
 	default_proc_ldt.ldt_base = (caddr_t)ldt;
 	default_proc_ldt.ldt_len = 6;
 	_default_ldt = (int)&default_proc_ldt;
-	PCPU_SET(currentldt, _default_ldt)
+	PCPU_SET(currentldt, _default_ldt);
 	PT_SET_MA(ldt, *vtopte((unsigned long)ldt) & ~PG_RW);
 	xen_set_ldt((unsigned long) ldt, (sizeof ldt_segs / sizeof ldt_segs[0]));
 	
@@ -2550,6 +2688,9 @@ init386(first)
 	thread0.td_frame = &proc0_tf;
 	thread0.td_pcb->pcb_fsd = PCPU_GET(fsgs_gdt)[0];
 	thread0.td_pcb->pcb_gsd = PCPU_GET(fsgs_gdt)[1];
+
+	if (cpu_probe_amdc1e())
+		cpu_idle_fn = cpu_idle_amdc1e;
 }
 
 #else
@@ -2558,7 +2699,7 @@ init386(first)
 	int first;
 {
 	struct gate_descriptor *gdp;
-	int gsel_tss, metadata_missing, x;
+	int gsel_tss, metadata_missing, x, pa;
 	struct pcpu *pc;
 
 	thread0.td_kstack = proc0kstack;
@@ -2611,6 +2752,10 @@ init386(first)
 	lgdt(&r_gdt);
 
 	pcpu_init(pc, 0, sizeof(struct pcpu));
+	for (pa = first; pa < first + DPCPU_SIZE; pa += PAGE_SIZE)
+		pmap_kenter(pa + KERNBASE, pa);
+	dpcpu_init((void *)(first + KERNBASE), 0);
+	first += DPCPU_SIZE;
 	PCPU_SET(prvspace, pc);
 	PCPU_SET(curthread, &thread0);
 	PCPU_SET(curpcb, thread0.td_pcb);
@@ -2814,6 +2959,9 @@ init386(first)
 #endif
 	thread0.td_pcb->pcb_ext = 0;
 	thread0.td_frame = &proc0_tf;
+
+	if (cpu_probe_amdc1e())
+		cpu_idle_fn = cpu_idle_amdc1e;
 }
 #endif
 
@@ -3037,12 +3185,12 @@ fill_fpregs(struct thread *td, struct fpreg *fpregs)
 {
 #ifdef CPU_ENABLE_SSE
 	if (cpu_fxsr) {
-		fill_fpregs_xmm(&td->td_pcb->pcb_save.sv_xmm,
+		fill_fpregs_xmm(&td->td_pcb->pcb_user_save.sv_xmm,
 						(struct save87 *)fpregs);
 		return (0);
 	}
 #endif /* CPU_ENABLE_SSE */
-	bcopy(&td->td_pcb->pcb_save.sv_87, fpregs, sizeof *fpregs);
+	bcopy(&td->td_pcb->pcb_user_save.sv_87, fpregs, sizeof *fpregs);
 	return (0);
 }
 
@@ -3052,11 +3200,11 @@ set_fpregs(struct thread *td, struct fpreg *fpregs)
 #ifdef CPU_ENABLE_SSE
 	if (cpu_fxsr) {
 		set_fpregs_xmm((struct save87 *)fpregs,
-					   &td->td_pcb->pcb_save.sv_xmm);
+		    &td->td_pcb->pcb_user_save.sv_xmm);
 		return (0);
 	}
 #endif /* CPU_ENABLE_SSE */
-	bcopy(fpregs, &td->td_pcb->pcb_save.sv_87, sizeof *fpregs);
+	bcopy(fpregs, &td->td_pcb->pcb_user_save.sv_87, sizeof *fpregs);
 	return (0);
 }
 
@@ -3067,6 +3215,7 @@ int
 get_mcontext(struct thread *td, mcontext_t *mcp, int flags)
 {
 	struct trapframe *tp;
+	struct segment_descriptor *sdp;
 
 	tp = td->td_frame;
 
@@ -3097,7 +3246,19 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int flags)
 	mcp->mc_esp = tp->tf_esp;
 	mcp->mc_ss = tp->tf_ss;
 	mcp->mc_len = sizeof(*mcp);
+
+	/*
+	 * The get_fpcontext() call must be placed before assignments
+	 * to mc_fsbase and mc_gsbase due to the alignment-override
+	 * code in get_fpcontext() that possibly clobbers 12 bytes of
+	 * mcontext after mc_fpstate.
+	 */
 	get_fpcontext(td, mcp);
+	sdp = &td->td_pcb->pcb_gsd;
+	mcp->mc_fsbase = sdp->sd_hibase << 24 | sdp->sd_lobase;
+	sdp = &td->td_pcb->pcb_fsd;
+	mcp->mc_gsbase = sdp->sd_hibase << 24 | sdp->sd_lobase;
+
 	return (0);
 }
 
@@ -3170,7 +3331,7 @@ get_fpcontext(struct thread *td, mcontext_t *mcp)
 			addr = (void *)((char *)addr + 4);
 		while ((uintptr_t)(void *)addr & 0xF);
 	}
-	mcp->mc_ownedfp = npxgetregs(td, addr);
+	mcp->mc_ownedfp = npxgetuserregs(td, addr);
 	if (addr != (union savefpu *)&mcp->mc_fpstate) {
 		bcopy(addr, &mcp->mc_fpstate, sizeof(mcp->mc_fpstate));
 		bzero(&mcp->mc_spare2, sizeof(mcp->mc_spare2));
@@ -3215,7 +3376,7 @@ set_fpcontext(struct thread *td, const mcontext_t *mcp)
 		 * XXX we violate the dubious requirement that npxsetregs()
 		 * be called with interrupts disabled.
 		 */
-		npxsetregs(td, addr);
+		npxsetuserregs(td, addr);
 #endif
 		/*
 		 * Don't bother putting things back where they were in the
@@ -3232,6 +3393,7 @@ fpstate_drop(struct thread *td)
 {
 	register_t s;
 
+	KASSERT(PCB_USER_FPU(td->td_pcb), ("fpstate_drop: kernel-owned fpu"));
 	s = intr_disable();
 #ifdef DEV_NPX
 	if (PCPU_GET(fpcurthread) == td)
@@ -3247,7 +3409,8 @@ fpstate_drop(struct thread *td)
 	 * sendsig() is the only caller of npxgetregs()... perhaps we just
 	 * have too many layers.
 	 */
-	curthread->td_pcb->pcb_flags &= ~PCB_NPXINITDONE;
+	curthread->td_pcb->pcb_flags &= ~(PCB_NPXINITDONE |
+	    PCB_NPXUSERINITDONE);
 	intr_restore(s);
 }
 
@@ -3528,45 +3691,24 @@ lapic_set_lvt_triggermode(u_int apic_id, u_int lvt, enum intr_trigger trigger)
 #ifdef KDB
 
 /*
- * Provide inb() and outb() as functions.  They are normally only
- * available as macros calling inlined functions, thus cannot be
- * called from the debugger.
- *
- * The actual code is stolen from <machine/cpufunc.h>, and de-inlined.
+ * Provide inb() and outb() as functions.  They are normally only available as
+ * inline functions, thus cannot be called from the debugger.
  */
 
-#undef inb
-#undef outb
-
 /* silence compiler warnings */
-u_char inb(u_int);
-void outb(u_int, u_char);
+u_char inb_(u_short);
+void outb_(u_short, u_char);
 
 u_char
-inb(u_int port)
+inb_(u_short port)
 {
-	u_char	data;
-	/*
-	 * We use %%dx and not %1 here because i/o is done at %dx and not at
-	 * %edx, while gcc generates inferior code (movw instead of movl)
-	 * if we tell it to load (u_short) port.
-	 */
-	__asm __volatile("inb %%dx,%0" : "=a" (data) : "d" (port));
-	return (data);
+	return inb(port);
 }
 
 void
-outb(u_int port, u_char data)
+outb_(u_short port, u_char data)
 {
-	u_char	al;
-	/*
-	 * Use an unnecessary assignment to help gcc's register allocator.
-	 * This make a large difference for gcc-1.40 and a tiny difference
-	 * for gcc-2.6.0.  For gcc-1.40, al had to be ``asm("ax")'' for
-	 * best results.  gcc-2.6.0 can't handle this.
-	 */
-	al = data;
-	__asm __volatile("outb %0,%%dx" : : "a" (al), "d" (port));
+	outb(port, data);
 }
 
 #endif /* KDB */

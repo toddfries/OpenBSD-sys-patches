@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fb/vga.c,v 1.38 2008/04/14 08:00:00 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fb/vga.c,v 1.42 2010/03/24 15:37:47 jkim Exp $");
 
 #include "opt_vga.h"
 #include "opt_fb.h"
@@ -144,10 +144,10 @@ vga_ioctl(struct cdev *dev, vga_softc_t *sc, u_long cmd, caddr_t arg, int flag,
 }
 
 int
-vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_offset_t offset, vm_offset_t *paddr,
-	 int prot)
+vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_ooffset_t offset,
+    vm_offset_t *paddr, int prot, vm_memattr_t *memattr)
 {
-	return genfbmmap(&sc->gensc, sc->adp, offset, paddr, prot);
+	return genfbmmap(&sc->gensc, sc->adp, offset, paddr, prot, memattr);
 }
 
 #endif /* FB_INSTALL_CDEV */
@@ -156,7 +156,7 @@ vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_offset_t offset, vm_offset_t *pad
 
 #include <isa/rtc.h>
 #ifdef __i386__
-#include <machine/pc/vesa.h>
+#include <dev/fb/vesa.h>
 #endif
 
 #define probe_done(adp)		((adp)->va_flags & V_ADP_PROBED)
@@ -177,7 +177,7 @@ vga_mmap(struct cdev *dev, vga_softc_t *sc, vm_offset_t offset, vm_offset_t *pad
 #endif
 
 /* architecture dependent option */
-#ifndef __i386__
+#if !defined(__i386__) && !defined(__amd64__)
 #define VGA_NO_BIOS		1
 #endif
 
@@ -1979,6 +1979,7 @@ vga_show_font(video_adapter_t *adp, int page)
 static int
 vga_save_palette(video_adapter_t *adp, u_char *palette)
 {
+    int bits;
     int i;
 
     prologue(adp, V_ADP_PALETTE, ENODEV);
@@ -1988,8 +1989,9 @@ vga_save_palette(video_adapter_t *adp, u_char *palette)
      * VGA has 6 bit DAC .
      */
     outb(PALRADR, 0x00);
+    bits = (adp->va_flags & V_ADP_DAC8) != 0 ? 0 : 2;
     for (i = 0; i < 256*3; ++i)
-	palette[i] = inb(PALDATA) << 2; 
+	palette[i] = inb(PALDATA) << bits; 
     inb(adp->va_crtc_addr + 6);	/* reset flip/flop */
     return 0;
 }
@@ -1998,15 +2000,17 @@ static int
 vga_save_palette2(video_adapter_t *adp, int base, int count,
 		  u_char *r, u_char *g, u_char *b)
 {
+    int bits;
     int i;
 
     prologue(adp, V_ADP_PALETTE, ENODEV);
 
     outb(PALRADR, base);
+    bits = (adp->va_flags & V_ADP_DAC8) != 0 ? 0 : 2;
     for (i = 0; i < count; ++i) {
-	r[i] = inb(PALDATA) << 2; 
-	g[i] = inb(PALDATA) << 2; 
-	b[i] = inb(PALDATA) << 2; 
+	r[i] = inb(PALDATA) << bits; 
+	g[i] = inb(PALDATA) << bits; 
+	b[i] = inb(PALDATA) << bits;
     }
     inb(adp->va_crtc_addr + 6);		/* reset flip/flop */
     return 0;
@@ -2021,14 +2025,16 @@ vga_save_palette2(video_adapter_t *adp, int base, int count,
 static int
 vga_load_palette(video_adapter_t *adp, u_char *palette)
 {
+    int bits;
     int i;
 
     prologue(adp, V_ADP_PALETTE, ENODEV);
 
     outb(PIXMASK, 0xff);		/* no pixelmask */
     outb(PALWADR, 0x00);
+    bits = (adp->va_flags & V_ADP_DAC8) != 0 ? 0 : 2;
     for (i = 0; i < 256*3; ++i)
-	outb(PALDATA, palette[i] >> 2);
+	outb(PALDATA, palette[i] >> bits);
     inb(adp->va_crtc_addr + 6);	/* reset flip/flop */
     outb(ATC, 0x20);			/* enable palette */
     return 0;
@@ -2038,16 +2044,18 @@ static int
 vga_load_palette2(video_adapter_t *adp, int base, int count,
 		  u_char *r, u_char *g, u_char *b)
 {
+    int bits;
     int i;
 
     prologue(adp, V_ADP_PALETTE, ENODEV);
 
     outb(PIXMASK, 0xff);		/* no pixelmask */
     outb(PALWADR, base);
+    bits = (adp->va_flags & V_ADP_DAC8) != 0 ? 0 : 2;
     for (i = 0; i < count; ++i) {
-	outb(PALDATA, r[i] >> 2);
-	outb(PALDATA, g[i] >> 2);
-	outb(PALDATA, b[i] >> 2);
+	outb(PALDATA, r[i] >> bits);
+	outb(PALDATA, g[i] >> bits);
+	outb(PALDATA, b[i] >> bits);
     }
     inb(adp->va_crtc_addr + 6);		/* reset flip/flop */
     outb(ATC, 0x20);			/* enable palette */
@@ -2465,8 +2473,8 @@ vga_blank_display(video_adapter_t *adp, int mode)
  * all adapters
  */
 static int
-vga_mmap_buf(video_adapter_t *adp, vm_offset_t offset, vm_paddr_t *paddr,
-   	     int prot)
+vga_mmap_buf(video_adapter_t *adp, vm_ooffset_t offset, vm_paddr_t *paddr,
+   	     int prot, vm_memattr_t *memattr)
 {
     if (adp->va_info.vi_flags & V_INFO_LINEAR)
 	return -1;

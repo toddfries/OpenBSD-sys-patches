@@ -31,11 +31,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_sysvec.c,v 1.43 2009/03/05 19:42:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_sysvec.c,v 1.59 2010/10/12 09:18:17 kib Exp $");
 #include "opt_compat.h"
 
-#ifndef COMPAT_IA32
-#error "Unable to compile Linux-emulator due to missing COMPAT_IA32 option!"
+#ifndef COMPAT_FREEBSD32
+#error "Unable to compile Linux-emulator due to missing COMPAT_FREEBSD32 option!"
 #endif
 
 #define	__ELF_WORD_SIZE	32
@@ -76,6 +76,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_sysvec.c,v 1.43 2009/03/05 19:
 
 #include <amd64/linux32/linux.h>
 #include <amd64/linux32/linux32_proto.h>
+#include <compat/linux/linux_futex.h>
 #include <compat/linux/linux_emul.h>
 #include <compat/linux/linux_mib.h>
 #include <compat/linux/linux_misc.h>
@@ -120,15 +121,11 @@ SET_DECLARE(linux_device_handler_set, struct linux_device_handler);
 static int	elf_linux_fixup(register_t **stack_base,
 		    struct image_params *iparams);
 static register_t *linux_copyout_strings(struct image_params *imgp);
-static void	linux_prepsyscall(struct trapframe *tf, int *args, u_int *code,
-		    caddr_t *params);
 static void     linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask);
-static void	exec_linux_setregs(struct thread *td, u_long entry,
-				   u_long stack, u_long ps_strings);
+static void	exec_linux_setregs(struct thread *td, 
+				   struct image_params *imgp, u_long stack);
 static void	linux32_fixlimit(struct rlimit *rl, int which);
-
-extern LIST_HEAD(futex_list, futex) futex_list;
-extern struct sx futex_sx;
+static boolean_t linux32_trans_osrel(const Elf_Note *note, int32_t *osrel);
 
 static eventhandler_tag linux_exit_tag;
 static eventhandler_tag linux_schedtail_tag;
@@ -263,7 +260,17 @@ elf_linux_fixup(register_t **stack_base, struct image_params *imgp)
 	pos = base + (imgp->args->argc + imgp->args->envc + 2);
 
 	AUXARGS_ENTRY_32(pos, LINUX_AT_HWCAP, cpu_feature);
-	AUXARGS_ENTRY_32(pos, LINUX_AT_CLKTCK, hz);
+
+	/*
+	 * Do not export AT_CLKTCK when emulating Linux kernel prior to 2.4.0,
+	 * as it has appeared in the 2.4.0-rc7 first time.
+	 * Being exported, AT_CLKTCK is returned by sysconf(_SC_CLK_TCK),
+	 * glibc falls back to the hard-coded CLK_TCK value when aux entry
+	 * is not present.
+	 * Also see linux_times() implementation.
+	 */
+	if (linux_kernver(curthread) >= LINUX_KERNVER_2004000)
+		AUXARGS_ENTRY_32(pos, LINUX_AT_CLKTCK, stclohz);
 	AUXARGS_ENTRY_32(pos, AT_PHDR, args->phdr);
 	AUXARGS_ENTRY_32(pos, AT_PHENT, args->phent);
 	AUXARGS_ENTRY_32(pos, AT_PHNUM, args->phnum);
@@ -290,7 +297,6 @@ elf_linux_fixup(register_t **stack_base, struct image_params *imgp)
 	return 0;
 }
 
-extern int _ucodesel, _ucode32sel, _udatasel;
 extern unsigned long linux_sznonrtsigcode;
 
 static void
@@ -360,13 +366,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	bsd_to_linux_sigset(mask, &frame.sf_sc.uc_sigmask);
 
-	frame.sf_sc.uc_mcontext.sc_mask	= frame.sf_sc.uc_sigmask.__bits[0];
-	frame.sf_sc.uc_mcontext.sc_gs     = rgs();
-	frame.sf_sc.uc_mcontext.sc_fs     = rfs();
-	__asm __volatile("mov %%es,%0" :
-	    "=rm" (frame.sf_sc.uc_mcontext.sc_es));
-	__asm __volatile("mov %%ds,%0" :
-	    "=rm" (frame.sf_sc.uc_mcontext.sc_ds));
+	frame.sf_sc.uc_mcontext.sc_mask   = frame.sf_sc.uc_sigmask.__bits[0];
 	frame.sf_sc.uc_mcontext.sc_edi    = regs->tf_rdi;
 	frame.sf_sc.uc_mcontext.sc_esi    = regs->tf_rsi;
 	frame.sf_sc.uc_mcontext.sc_ebp    = regs->tf_rbp;
@@ -376,6 +376,10 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	frame.sf_sc.uc_mcontext.sc_eax    = regs->tf_rax;
 	frame.sf_sc.uc_mcontext.sc_eip    = regs->tf_rip;
 	frame.sf_sc.uc_mcontext.sc_cs     = regs->tf_cs;
+	frame.sf_sc.uc_mcontext.sc_gs     = regs->tf_gs;
+	frame.sf_sc.uc_mcontext.sc_fs     = regs->tf_fs;
+	frame.sf_sc.uc_mcontext.sc_es     = regs->tf_es;
+	frame.sf_sc.uc_mcontext.sc_ds     = regs->tf_ds;
 	frame.sf_sc.uc_mcontext.sc_eflags = regs->tf_rflags;
 	frame.sf_sc.uc_mcontext.sc_esp_at_signal = regs->tf_rsp;
 	frame.sf_sc.uc_mcontext.sc_ss     = regs->tf_ss;
@@ -413,11 +417,12 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	regs->tf_rflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucode32sel;
 	regs->tf_ss = _udatasel;
-	load_ds(_udatasel);
-	td->td_pcb->pcb_ds = _udatasel;
-	load_es(_udatasel);
-	td->td_pcb->pcb_es = _udatasel;
-	/* leave user %fs and %gs untouched */
+	regs->tf_ds = _udatasel;
+	regs->tf_es = _udatasel;
+	regs->tf_fs = _ufssel;
+	regs->tf_gs = _ugssel;
+	regs->tf_flags = TF_HASSEGS;
+	td->td_pcb->pcb_full_iret = 1;
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
 }
@@ -495,10 +500,10 @@ linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	 * Build the signal context to be used by sigreturn.
 	 */
 	frame.sf_sc.sc_mask   = lmask.__bits[0];
-	frame.sf_sc.sc_gs     = rgs();
-	frame.sf_sc.sc_fs     = rfs();
-	__asm __volatile("mov %%es,%0" : "=rm" (frame.sf_sc.sc_es));
-	__asm __volatile("mov %%ds,%0" : "=rm" (frame.sf_sc.sc_ds));
+	frame.sf_sc.sc_gs     = regs->tf_gs;
+	frame.sf_sc.sc_fs     = regs->tf_fs;
+	frame.sf_sc.sc_es     = regs->tf_es;
+	frame.sf_sc.sc_ds     = regs->tf_ds;
 	frame.sf_sc.sc_edi    = regs->tf_rdi;
 	frame.sf_sc.sc_esi    = regs->tf_rsi;
 	frame.sf_sc.sc_ebp    = regs->tf_rbp;
@@ -535,11 +540,12 @@ linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	regs->tf_rflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucode32sel;
 	regs->tf_ss = _udatasel;
-	load_ds(_udatasel);
-	td->td_pcb->pcb_ds = _udatasel;
-	load_es(_udatasel);
-	td->td_pcb->pcb_es = _udatasel;
-	/* leave user %fs and %gs untouched */
+	regs->tf_ds = _udatasel;
+	regs->tf_es = _udatasel;
+	regs->tf_fs = _ufssel;
+	regs->tf_gs = _ugssel;
+	regs->tf_flags = TF_HASSEGS;
+	td->td_pcb->pcb_full_iret = 1;
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
 }
@@ -557,9 +563,9 @@ linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 int
 linux_sigreturn(struct thread *td, struct linux_sigreturn_args *args)
 {
-	struct proc *p = td->td_proc;
 	struct l_sigframe frame;
 	struct trapframe *regs;
+	sigset_t bmask;
 	l_sigset_t lmask;
 	int eflags, i;
 	ksiginfo_t ksi;
@@ -615,16 +621,12 @@ linux_sigreturn(struct thread *td, struct linux_sigreturn_args *args)
 	lmask.__bits[0] = frame.sf_sc.sc_mask;
 	for (i = 0; i < (LINUX_NSIG_WORDS-1); i++)
 		lmask.__bits[i+1] = frame.sf_extramask[i];
-	PROC_LOCK(p);
-	linux_to_bsd_sigset(&lmask, &td->td_sigmask);
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	linux_to_bsd_sigset(&lmask, &bmask);
+	kern_sigprocmask(td, SIG_SETMASK, &bmask, NULL, 0);
 
 	/*
 	 * Restore signal context.
 	 */
-	/* Selectors were restored by the trampoline. */
 	regs->tf_rdi    = frame.sf_sc.sc_edi;
 	regs->tf_rsi    = frame.sf_sc.sc_esi;
 	regs->tf_rbp    = frame.sf_sc.sc_ebp;
@@ -634,9 +636,14 @@ linux_sigreturn(struct thread *td, struct linux_sigreturn_args *args)
 	regs->tf_rax    = frame.sf_sc.sc_eax;
 	regs->tf_rip    = frame.sf_sc.sc_eip;
 	regs->tf_cs     = frame.sf_sc.sc_cs;
+	regs->tf_ds     = frame.sf_sc.sc_ds;
+	regs->tf_es     = frame.sf_sc.sc_es;
+	regs->tf_fs     = frame.sf_sc.sc_fs;
+	regs->tf_gs     = frame.sf_sc.sc_gs;
 	regs->tf_rflags = eflags;
 	regs->tf_rsp    = frame.sf_sc.sc_esp_at_signal;
 	regs->tf_ss     = frame.sf_sc.sc_ss;
+	td->td_pcb->pcb_full_iret = 1;
 
 	return (EJUSTRETURN);
 }
@@ -654,9 +661,9 @@ linux_sigreturn(struct thread *td, struct linux_sigreturn_args *args)
 int
 linux_rt_sigreturn(struct thread *td, struct linux_rt_sigreturn_args *args)
 {
-	struct proc *p = td->td_proc;
 	struct l_ucontext uc;
 	struct l_sigcontext *context;
+	sigset_t bmask;
 	l_stack_t *lss;
 	stack_t ss;
 	struct trapframe *regs;
@@ -713,16 +720,16 @@ linux_rt_sigreturn(struct thread *td, struct linux_rt_sigreturn_args *args)
 		return(EINVAL);
 	}
 
-	PROC_LOCK(p);
-	linux_to_bsd_sigset(&uc.uc_sigmask, &td->td_sigmask);
-	SIG_CANTMASK(td->td_sigmask);
-	signotify(td);
-	PROC_UNLOCK(p);
+	linux_to_bsd_sigset(&uc.uc_sigmask, &bmask);
+	kern_sigprocmask(td, SIG_SETMASK, &bmask, NULL, 0);
 
 	/*
 	 * Restore signal context
 	 */
-	/* Selectors were restored by the trampoline. */
+	regs->tf_gs	= context->sc_gs;
+	regs->tf_fs	= context->sc_fs;
+	regs->tf_es	= context->sc_es;
+	regs->tf_ds	= context->sc_ds;
 	regs->tf_rdi    = context->sc_edi;
 	regs->tf_rsi    = context->sc_esi;
 	regs->tf_rbp    = context->sc_ebp;
@@ -735,6 +742,7 @@ linux_rt_sigreturn(struct thread *td, struct linux_rt_sigreturn_args *args)
 	regs->tf_rflags = eflags;
 	regs->tf_rsp    = context->sc_esp_at_signal;
 	regs->tf_ss     = context->sc_ss;
+	td->td_pcb->pcb_full_iret = 1;
 
 	/*
 	 * call sigaltstack & ignore results..
@@ -754,19 +762,33 @@ linux_rt_sigreturn(struct thread *td, struct linux_rt_sigreturn_args *args)
 	return (EJUSTRETURN);
 }
 
-/*
- * MPSAFE
- */
-static void
-linux_prepsyscall(struct trapframe *tf, int *args, u_int *code, caddr_t *params)
+static int
+linux32_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
 {
-	args[0] = tf->tf_rbx;
-	args[1] = tf->tf_rcx;
-	args[2] = tf->tf_rdx;
-	args[3] = tf->tf_rsi;
-	args[4] = tf->tf_rdi;
-	args[5] = tf->tf_rbp;	/* Unconfirmed */
-	*params = NULL;		/* no copyin */
+	struct proc *p;
+	struct trapframe *frame;
+
+	p = td->td_proc;
+	frame = td->td_frame;
+
+	sa->args[0] = frame->tf_rbx;
+	sa->args[1] = frame->tf_rcx;
+	sa->args[2] = frame->tf_rdx;
+	sa->args[3] = frame->tf_rsi;
+	sa->args[4] = frame->tf_rdi;
+	sa->args[5] = frame->tf_rbp;	/* Unconfirmed */
+	sa->code = frame->tf_rax;
+
+	if (sa->code >= p->p_sysent->sv_size)
+		sa->callp = &p->p_sysent->sv_table[0];
+	else
+		sa->callp = &p->p_sysent->sv_table[sa->code];
+	sa->narg = sa->callp->sy_narg;
+
+	td->td_retval[0] = 0;
+	td->td_retval[1] = frame->tf_rdx;
+
+	return (0);
 }
 
 /*
@@ -782,7 +804,7 @@ exec_linux_imgact_try(struct image_params *imgp)
 {
 	const char *head = (const char *)imgp->image_header;
 	char *rpath;
-	int error = -1, len;
+	int error = -1;
 
 	/*
 	* The interpreter for shell scripts run from a linux binary needs
@@ -799,18 +821,12 @@ exec_linux_imgact_try(struct image_params *imgp)
 			linux_emul_convpath(FIRST_THREAD_IN_PROC(imgp->proc),
 			    imgp->interpreter_name, UIO_SYSSPACE, &rpath, 0,
 			    AT_FDCWD);
-			if (rpath != NULL) {
-				len = strlen(rpath) + 1;
-
-				if (len <= MAXSHELLCMDLEN) {
-					memcpy(imgp->interpreter_name, rpath,
-					    len);
-				}
-				free(rpath, M_TEMP);
-			}
+			if (rpath != NULL)
+				imgp->args->fname_buf =
+				    imgp->interpreter_name = rpath;
 		}
 	}
-	return(error);
+	return (error);
 }
 
 /*
@@ -818,14 +834,16 @@ exec_linux_imgact_try(struct image_params *imgp)
  * XXX copied from ia32_signal.c.
  */
 static void
-exec_linux_setregs(td, entry, stack, ps_strings)
-	struct thread *td;
-	u_long entry;
-	u_long stack;
-	u_long ps_strings;
+exec_linux_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 {
 	struct trapframe *regs = td->td_frame;
 	struct pcb *pcb = td->td_pcb;
+
+	mtx_lock(&dt_lock);
+	if (td->td_proc->p_md.md_ldt != NULL)
+		user_ldt_free(td);
+	else
+		mtx_unlock(&dt_lock);
 
 	critical_enter();
 	wrmsr(MSR_FSBASE, 0);
@@ -833,23 +851,21 @@ exec_linux_setregs(td, entry, stack, ps_strings)
 	pcb->pcb_fsbase = 0;
 	pcb->pcb_gsbase = 0;
 	critical_exit();
-	load_ds(_udatasel);
-	load_es(_udatasel);
-	load_fs(_udatasel);
-	load_gs(_udatasel);
-	pcb->pcb_ds = _udatasel;
-	pcb->pcb_es = _udatasel;
-	pcb->pcb_fs = _udatasel;
-	pcb->pcb_gs = _udatasel;
 	pcb->pcb_initial_fpucw = __LINUX_NPXCW__;
 
 	bzero((char *)regs, sizeof(struct trapframe));
-	regs->tf_rip = entry;
+	regs->tf_rip = imgp->entry_addr;
 	regs->tf_rsp = stack;
 	regs->tf_rflags = PSL_USER | (regs->tf_rflags & PSL_T);
+	regs->tf_gs = _ugssel;
+	regs->tf_fs = _ufssel;
+	regs->tf_es = _udatasel;
+	regs->tf_ds = _udatasel;
 	regs->tf_ss = _udatasel;
+	regs->tf_flags = TF_HASSEGS;
 	regs->tf_cs = _ucode32sel;
-	regs->tf_rbx = ps_strings;
+	regs->tf_rbx = imgp->ps_strings;
+	td->td_pcb->pcb_full_iret = 1;
 	load_cr0(rcr0() | CR0_MP | CR0_TS);
 	fpstate_drop(td);
 
@@ -1029,7 +1045,7 @@ struct sysentvec elf_linux_sysvec = {
 	.sv_sendsig	= linux_sendsig,
 	.sv_sigcode	= linux_sigcode,
 	.sv_szsigcode	= &linux_szsigcode,
-	.sv_prepsyscall	= linux_prepsyscall,
+	.sv_prepsyscall	= NULL,
 	.sv_name	= "Linux ELF32",
 	.sv_coredump	= elf32_coredump,
 	.sv_imgact_try	= exec_linux_imgact_try,
@@ -1044,7 +1060,44 @@ struct sysentvec elf_linux_sysvec = {
 	.sv_setregs	= exec_linux_setregs,
 	.sv_fixlimit	= linux32_fixlimit,
 	.sv_maxssiz	= &linux32_maxssiz,
-	.sv_flags	= SV_ABI_LINUX | SV_ILP32 | SV_IA32
+	.sv_flags	= SV_ABI_LINUX | SV_ILP32 | SV_IA32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = linux32_fetch_syscall_args,
+	.sv_syscallnames = NULL,
+};
+
+static char GNU_ABI_VENDOR[] = "GNU";
+static int GNULINUX_ABI_DESC = 0;
+
+static boolean_t
+linux32_trans_osrel(const Elf_Note *note, int32_t *osrel)
+{
+	const Elf32_Word *desc;
+	uintptr_t p;
+
+	p = (uintptr_t)(note + 1);
+	p += roundup2(note->n_namesz, sizeof(Elf32_Addr));
+
+	desc = (const Elf32_Word *)p;
+	if (desc[0] != GNULINUX_ABI_DESC)
+		return (FALSE);
+
+	/*
+	 * For linux we encode osrel as follows (see linux_mib.c):
+	 * VVVMMMIII (version, major, minor), see linux_mib.c.
+	 */
+	*osrel = desc[1] * 1000000 + desc[2] * 1000 + desc[3];
+
+	return (TRUE);
+}
+
+static Elf_Brandnote linux32_brandnote = {
+	.hdr.n_namesz	= sizeof(GNU_ABI_VENDOR),
+	.hdr.n_descsz	= 16,	/* XXX at least 16 */
+	.hdr.n_type	= 1,
+	.vendor		= GNU_ABI_VENDOR,
+	.flags		= BN_TRANSLATE_OSREL,
+	.trans_osrel	= linux32_trans_osrel
 };
 
 static Elf32_Brandinfo linux_brand = {
@@ -1055,7 +1108,8 @@ static Elf32_Brandinfo linux_brand = {
 	.interp_path	= "/lib/ld-linux.so.1",
 	.sysvec		= &elf_linux_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &linux32_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
 static Elf32_Brandinfo linux_glibc2brand = {
@@ -1066,7 +1120,8 @@ static Elf32_Brandinfo linux_glibc2brand = {
 	.interp_path	= "/lib/ld-linux.so.2",
 	.sysvec		= &elf_linux_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &linux32_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
 Elf32_Brandinfo *linux_brandlist[] = {
@@ -1099,7 +1154,7 @@ linux_elf_modevent(module_t mod, int type, void *data)
 			mtx_init(&emul_lock, "emuldata lock", NULL, MTX_DEF);
 			sx_init(&emul_shared_lock, "emuldata->shared lock");
 			LIST_INIT(&futex_list);
-			sx_init(&futex_sx, "futex protection lock");
+			mtx_init(&futex_mtx, "ftllk", NULL, MTX_DEF);
 			linux_exit_tag = EVENTHANDLER_REGISTER(process_exit,
 			    linux_proc_exit, NULL, 1000);
 			linux_schedtail_tag = EVENTHANDLER_REGISTER(schedtail,
@@ -1108,6 +1163,8 @@ linux_elf_modevent(module_t mod, int type, void *data)
 			    linux_proc_exec, NULL, 1000);
 			linux_szplatform = roundup(strlen(linux_platform) + 1,
 			    sizeof(char *));
+			linux_osd_jail_register();
+			stclohz = (stathz ? stathz : hz);
 			if (bootverbose)
 				printf("Linux ELF exec handler installed\n");
 		} else
@@ -1131,10 +1188,11 @@ linux_elf_modevent(module_t mod, int type, void *data)
 				linux_device_unregister_handler(*ldhp);
 			mtx_destroy(&emul_lock);
 			sx_destroy(&emul_shared_lock);
-			sx_destroy(&futex_sx);
+			mtx_destroy(&futex_mtx);
 			EVENTHANDLER_DEREGISTER(process_exit, linux_exit_tag);
 			EVENTHANDLER_DEREGISTER(schedtail, linux_schedtail_tag);
 			EVENTHANDLER_DEREGISTER(process_exec, linux_exec_tag);
+			linux_osd_jail_deregister();
 			if (bootverbose)
 				printf("Linux ELF exec handler removed\n");
 		} else
@@ -1152,4 +1210,4 @@ static moduledata_t linux_elf_mod = {
 	0
 };
 
-DECLARE_MODULE(linuxelf, linux_elf_mod, SI_SUB_EXEC, SI_ORDER_ANY);
+DECLARE_MODULE_TIED(linuxelf, linux_elf_mod, SI_SUB_EXEC, SI_ORDER_ANY);

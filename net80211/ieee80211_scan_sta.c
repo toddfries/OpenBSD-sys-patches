@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan_sta.c,v 1.23 2009/03/04 22:05:25 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan_sta.c,v 1.31 2010/06/01 14:17:08 rpaulo Exp $");
 
 /*
  * IEEE 802.11 station scanning support.
@@ -32,10 +32,10 @@ __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan_sta.c,v 1.23 2009/03/04 22:0
 #include "opt_wlan.h"
 
 #include <sys/param.h>
-#include <sys/systm.h> 
+#include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
- 
+
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -47,6 +47,9 @@ __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan_sta.c,v 1.23 2009/03/04 22:0
 #include <net80211/ieee80211_regdomain.h>
 #ifdef IEEE80211_SUPPORT_TDMA
 #include <net80211/ieee80211_tdma.h>
+#endif
+#ifdef IEEE80211_SUPPORT_MESH
+#include <net80211/ieee80211_mesh.h>
 #endif
 
 #include <net/bpf.h>
@@ -94,7 +97,7 @@ struct sta_entry {
 CTASSERT(MAX_IEEE_CHAN >= 256);
 
 struct sta_table {
-	struct mtx	st_lock;		/* on scan table */
+	ieee80211_scan_table_lock_t st_lock;	/* on scan table */
 	TAILQ_HEAD(, sta_entry) st_entry;	/* all entries */
 	LIST_HEAD(, sta_entry) st_hash[STA_HASHSIZE];
 	struct mtx	st_scanlock;		/* on st_scaniter */
@@ -112,20 +115,23 @@ static void sta_flush_table(struct sta_table *);
  * contents explains why.  The following flags are or'd to to this
  * mask and can be used to figure out why the entry was rejected.
  */
-#define	MATCH_CHANNEL		0x0001	/* channel mismatch */
-#define	MATCH_CAPINFO		0x0002	/* capabilities mismatch, e.g. no ess */
-#define	MATCH_PRIVACY		0x0004	/* privacy mismatch */
-#define	MATCH_RATE		0x0008	/* rate set mismatch */
-#define	MATCH_SSID		0x0010	/* ssid mismatch */
-#define	MATCH_BSSID		0x0020	/* bssid mismatch */
-#define	MATCH_FAILS		0x0040	/* too many failed auth attempts */
-#define	MATCH_NOTSEEN		0x0080	/* not seen in recent scans */
-#define	MATCH_RSSI		0x0100	/* rssi deemed too low to use */
-#define	MATCH_CC		0x0200	/* country code mismatch */
-#define	MATCH_TDMA_NOIE		0x0400	/* no TDMA ie */
-#define	MATCH_TDMA_NOTMASTER	0x0800	/* not TDMA master */
-#define	MATCH_TDMA_NOSLOT	0x1000	/* all TDMA slots occupied */
-#define	MATCH_TDMA_LOCAL	0x2000	/* local address */
+#define	MATCH_CHANNEL		0x00001	/* channel mismatch */
+#define	MATCH_CAPINFO		0x00002	/* capabilities mismatch, e.g. no ess */
+#define	MATCH_PRIVACY		0x00004	/* privacy mismatch */
+#define	MATCH_RATE		0x00008	/* rate set mismatch */
+#define	MATCH_SSID		0x00010	/* ssid mismatch */
+#define	MATCH_BSSID		0x00020	/* bssid mismatch */
+#define	MATCH_FAILS		0x00040	/* too many failed auth attempts */
+#define	MATCH_NOTSEEN		0x00080	/* not seen in recent scans */
+#define	MATCH_RSSI		0x00100	/* rssi deemed too low to use */
+#define	MATCH_CC		0x00200	/* country code mismatch */
+#define	MATCH_TDMA_NOIE		0x00400	/* no TDMA ie */
+#define	MATCH_TDMA_NOTMASTER	0x00800	/* not TDMA master */
+#define	MATCH_TDMA_NOSLOT	0x01000	/* all TDMA slots occupied */
+#define	MATCH_TDMA_LOCAL	0x02000	/* local address */
+#define	MATCH_TDMA_VERSION	0x04000	/* protocol version mismatch */
+#define	MATCH_MESH_NOID		0x10000	/* no MESHID ie */
+#define	MATCH_MESHID		0x20000	/* meshid mismatch */
 static int match_bss(struct ieee80211vap *,
 	const struct ieee80211_scan_state *, struct sta_entry *, int);
 static void adhoc_age(struct ieee80211_scan_state *);
@@ -138,6 +144,10 @@ isocmp(const uint8_t cc1[], const uint8_t cc2[])
 
 /* number of references from net80211 layer */
 static	int nrefs = 0;
+/*
+ * Module glue.
+ */
+IEEE80211_SCANNER_MODULE(sta, 1);
 
 /*
  * Attach prior to any scanning work.
@@ -151,7 +161,7 @@ sta_attach(struct ieee80211_scan_state *ss)
 		M_80211_SCAN, M_NOWAIT | M_ZERO);
 	if (st == NULL)
 		return 0;
-	mtx_init(&st->st_lock, "scantable", "802.11 scan table", MTX_DEF);
+	IEEE80211_SCAN_TABLE_LOCK_INIT(st, "scantable");
 	mtx_init(&st->st_scanlock, "scangen", "802.11 scangen", MTX_DEF);
 	TAILQ_INIT(&st->st_entry);
 	ss->ss_priv = st;
@@ -169,7 +179,7 @@ sta_detach(struct ieee80211_scan_state *ss)
 
 	if (st != NULL) {
 		sta_flush_table(st);
-		mtx_destroy(&st->st_lock);
+		IEEE80211_SCAN_TABLE_LOCK_DESTROY(st);
 		mtx_destroy(&st->st_scanlock);
 		free(st, M_80211_SCAN);
 		KASSERT(nrefs > 0, ("imbalanced attach/detach"));
@@ -186,9 +196,9 @@ sta_flush(struct ieee80211_scan_state *ss)
 {
 	struct sta_table *st = ss->ss_priv;
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	sta_flush_table(st);
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 	ss->ss_last = 0;
 	return 0;
 }
@@ -218,7 +228,7 @@ static int
 sta_add(struct ieee80211_scan_state *ss, 
 	const struct ieee80211_scanparams *sp,
 	const struct ieee80211_frame *wh,
-	int subtype, int rssi, int noise, int rstamp)
+	int subtype, int rssi, int noise)
 {
 #define	ISPROBE(_st)	((_st) == IEEE80211_FC0_SUBTYPE_PROBE_RESP)
 #define	PICK1ST(_ss) \
@@ -234,14 +244,14 @@ sta_add(struct ieee80211_scan_state *ss,
 
 	hash = STA_HASH(macaddr);
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	LIST_FOREACH(se, &st->st_hash[hash], se_hash)
 		if (IEEE80211_ADDR_EQ(se->base.se_macaddr, macaddr))
 			goto found;
 	se = (struct sta_entry *) malloc(sizeof(struct sta_entry),
 		M_80211_SCAN, M_NOWAIT | M_ZERO);
 	if (se == NULL) {
-		mtx_unlock(&st->st_lock);
+		IEEE80211_SCAN_TABLE_UNLOCK(st);
 		return 0;
 	}
 	se->se_scangen = st->st_scaniter-1;
@@ -277,10 +287,13 @@ found:
 		ise->se_rssi = IEEE80211_RSSI_GET(se->se_avgrssi);
 		ise->se_noise = noise;
 	}
-	ise->se_rstamp = rstamp;
 	memcpy(ise->se_tstamp.data, sp->tstamp, sizeof(ise->se_tstamp));
 	ise->se_intval = sp->bintval;
 	ise->se_capinfo = sp->capinfo;
+#ifdef IEEE80211_SUPPORT_MESH
+	if (sp->meshid != NULL && sp->meshid[1] != 0)
+		memcpy(ise->se_meshid, sp->meshid, 2+sp->meshid[1]);
+#endif
 	/*
 	 * Beware of overriding se_chan for frames seen
 	 * off-channel; this can cause us to attempt an
@@ -357,7 +370,7 @@ found:
 	if (rssi > st->st_maxrssi[sp->bchan])
 		st->st_maxrssi[sp->bchan] = rssi;
 
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
 	/*
 	 * If looking for a quick choice and nothing's
@@ -895,6 +908,12 @@ back:
 #undef RV
 }
 
+static __inline int
+match_id(const uint8_t *ie, const uint8_t *val, int len)
+{
+	return (ie[1] == len && memcmp(ie+2, val, len) == 0);
+}
+
 static int
 match_ssid(const uint8_t *ie,
 	int nssid, const struct ieee80211_scan_ssid ssids[])
@@ -902,8 +921,7 @@ match_ssid(const uint8_t *ie,
 	int i;
 
 	for (i = 0; i < nssid; i++) {
-		if (ie[1] == ssids[i].len &&
-		     memcmp(ie+2, ssids[i].ssid, ie[1]) == 0)
+		if (match_id(ie, ssids[i].ssid, ssids[i].len))
 			return 1;
 	}
 	return 0;
@@ -970,9 +988,12 @@ match_bss(struct ieee80211vap *vap,
 		if (vap->iv_caps & IEEE80211_C_TDMA) {
 			const struct ieee80211_tdma_param *tdma =
 			    (const struct ieee80211_tdma_param *)se->se_ies.tdma_ie;
+			const struct ieee80211_tdma_state *ts = vap->iv_tdma;
 
 			if (tdma == NULL)
 				fail |= MATCH_TDMA_NOIE;
+			else if (tdma->tdma_version != ts->tdma_version)
+				fail |= MATCH_TDMA_VERSION;
 			else if (tdma->tdma_slot != 0)
 				fail |= MATCH_TDMA_NOTMASTER;
 			else if (tdma_isfull(tdma))
@@ -983,6 +1004,21 @@ match_bss(struct ieee80211vap *vap,
 #endif
 		}
 #endif /* IEEE80211_SUPPORT_TDMA */
+#ifdef IEEE80211_SUPPORT_MESH
+	} else if (vap->iv_opmode == IEEE80211_M_MBSS) {
+		const struct ieee80211_mesh_state *ms = vap->iv_mesh;
+		/*
+		 * Mesh nodes have IBSS & ESS bits in capinfo turned off
+		 * and two special ie's that must be present.
+		 */
+		if (se->se_capinfo & (IEEE80211_CAPINFO_IBSS|IEEE80211_CAPINFO_ESS))
+			fail |= MATCH_CAPINFO;
+		else if (&se->se_meshid == NULL)
+			fail |= MATCH_MESH_NOID;
+		else if (ms->ms_idlen != 0 &&
+		    match_id(se->se_meshid, ms->ms_id, ms->ms_idlen))
+			fail |= MATCH_MESHID;
+#endif
 	} else {
 		if ((se->se_capinfo & IEEE80211_CAPINFO_ESS) == 0)
 			fail |= MATCH_CAPINFO;
@@ -1062,10 +1098,12 @@ match_bss(struct ieee80211vap *vap,
 		    fail & MATCH_CC ? '$' :
 #ifdef IEEE80211_SUPPORT_TDMA
 		    fail & MATCH_TDMA_NOIE ? '&' :
-		    fail & MATCH_TDMA_NOTMASTER ? ':' :
-		    fail & MATCH_TDMA_NOSLOT ? '@' :
-		    fail & MATCH_TDMA_LOCAL ? '#' :
+		    fail & MATCH_TDMA_VERSION ? 'v' :
+		    fail & MATCH_TDMA_NOTMASTER ? 's' :
+		    fail & MATCH_TDMA_NOSLOT ? 'f' :
+		    fail & MATCH_TDMA_LOCAL ? 'l' :
 #endif
+		    fail & MATCH_MESH_NOID ? 'm' :
 		    fail ? '-' : '+', ether_sprintf(se->se_macaddr));
 		printf(" %s%c", ether_sprintf(se->se_bssid),
 		    fail & MATCH_BSSID ? '!' : ' ');
@@ -1076,15 +1114,14 @@ match_bss(struct ieee80211vap *vap,
 		    fail & MATCH_RATE ? '!' : ' ');
 		printf(" %4s%c",
 		    (se->se_capinfo & IEEE80211_CAPINFO_ESS) ? "ess" :
-		    (se->se_capinfo & IEEE80211_CAPINFO_IBSS) ? "ibss" :
-		    "????",
+		    (se->se_capinfo & IEEE80211_CAPINFO_IBSS) ? "ibss" : "",
 		    fail & MATCH_CAPINFO ? '!' : ' ');
 		printf(" %3s%c ",
 		    (se->se_capinfo & IEEE80211_CAPINFO_PRIVACY) ?
 		    "wep" : "no",
 		    fail & MATCH_PRIVACY ? '!' : ' ');
 		ieee80211_print_essid(se->se_ssid+2, se->se_ssid[1]);
-		printf("%s\n", fail & MATCH_SSID ? "!" : "");
+		printf("%s\n", fail & (MATCH_SSID | MATCH_MESHID) ? "!" : "");
 	}
 #endif
 	return fail;
@@ -1095,7 +1132,7 @@ sta_update_notseen(struct sta_table *st)
 {
 	struct sta_entry *se;
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	TAILQ_FOREACH(se, &st->st_entry, se_list) {
 		/*
 		 * If seen the reset and don't bump the count;
@@ -1109,7 +1146,7 @@ sta_update_notseen(struct sta_table *st)
 		else
 			se->se_notseen++;
 	}
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 }
 
 static void
@@ -1117,11 +1154,11 @@ sta_dec_fails(struct sta_table *st)
 {
 	struct sta_entry *se;
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	TAILQ_FOREACH(se, &st->st_entry, se_list)
 		if (se->se_fails)
 			se->se_fails--;
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 }
 
 static struct sta_entry *
@@ -1132,7 +1169,7 @@ select_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap, int debug)
 
 	IEEE80211_DPRINTF(vap, debug, " %s\n",
 	    "macaddr          bssid         chan  rssi  rate flag  wep  essid");
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	TAILQ_FOREACH(se, &st->st_entry, se_list) {
 		ieee80211_ies_expand(&se->base.se_ies);
 		if (match_bss(vap, ss, se, debug) == 0) {
@@ -1142,7 +1179,7 @@ select_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap, int debug)
 				selbs = se;
 		}
 	}
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
 	return selbs;
 }
@@ -1221,11 +1258,11 @@ sta_lookup(struct sta_table *st, const uint8_t macaddr[IEEE80211_ADDR_LEN])
 	struct sta_entry *se;
 	int hash = STA_HASH(macaddr);
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	LIST_FOREACH(se, &st->st_hash[hash], se_hash)
 		if (IEEE80211_ADDR_EQ(se->base.se_macaddr, macaddr))
 			break;
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
 	return se;		/* NB: unlocked */
 }
@@ -1345,18 +1382,18 @@ sta_iterate(struct ieee80211_scan_state *ss,
 	mtx_lock(&st->st_scanlock);
 	gen = st->st_scaniter++;
 restart:
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	TAILQ_FOREACH(se, &st->st_entry, se_list) {
 		if (se->se_scangen != gen) {
 			se->se_scangen = gen;
 			/* update public state */
 			se->base.se_age = ticks - se->se_lastupdate;
-			mtx_unlock(&st->st_lock);
+			IEEE80211_SCAN_TABLE_UNLOCK(st);
 			(*f)(arg, &se->base);
 			goto restart;
 		}
 	}
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
 	mtx_unlock(&st->st_scanlock);
 }
@@ -1412,6 +1449,7 @@ static const struct ieee80211_scanner sta_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
+IEEE80211_SCANNER_ALG(sta, IEEE80211_M_STA, sta_default);
 
 /*
  * Adhoc mode-specific support.
@@ -1472,7 +1510,7 @@ adhoc_pick_channel(struct ieee80211_scan_state *ss, int flags)
 	bestchan = NULL;
 	bestrssi = -1;
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	for (i = 0; i < ss->ss_last; i++) {
 		c = ss->ss_chans[i];
 		/* never consider a channel with radar */
@@ -1494,7 +1532,7 @@ adhoc_pick_channel(struct ieee80211_scan_state *ss, int flags)
 		if (bestchan == NULL || maxrssi < bestrssi)
 			bestchan = c;
 	}
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 
 	return bestchan;
 }
@@ -1511,7 +1549,8 @@ adhoc_pick_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 	struct ieee80211_channel *chan;
 
 	KASSERT(vap->iv_opmode == IEEE80211_M_IBSS ||
-		vap->iv_opmode == IEEE80211_M_AHDEMO,
+		vap->iv_opmode == IEEE80211_M_AHDEMO ||
+		vap->iv_opmode == IEEE80211_M_MBSS,
 		("wrong opmode %u", vap->iv_opmode));
 
 	if (st->st_newscan) {
@@ -1558,7 +1597,7 @@ notfound:
 				chan = adhoc_pick_channel(ss, 0);
 				if (chan != NULL)
 					chan = ieee80211_ht_adjust_channel(ic,
-					    chan, vap->iv_flags_ext);
+					    chan, vap->iv_flags_ht);
 			} else
 				chan = vap->iv_des_chan;
 			if (chan != NULL) {
@@ -1599,7 +1638,7 @@ adhoc_age(struct ieee80211_scan_state *ss)
 	struct sta_table *st = ss->ss_priv;
 	struct sta_entry *se, *next;
 
-	mtx_lock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_LOCK(st);
 	TAILQ_FOREACH_SAFE(se, &st->st_entry, se_list, next) {
 		if (se->se_notseen > STA_PURGE_SCANS) {
 			TAILQ_REMOVE(&st->st_entry, se, se_list);
@@ -1608,7 +1647,7 @@ adhoc_age(struct ieee80211_scan_state *ss)
 			free(se, M_80211_SCAN);
 		}
 	}
-	mtx_unlock(&st->st_lock);
+	IEEE80211_SCAN_TABLE_UNLOCK(st);
 }
 
 static const struct ieee80211_scanner adhoc_default = {
@@ -1627,6 +1666,8 @@ static const struct ieee80211_scanner adhoc_default = {
 	.scan_assoc_fail	= sta_assoc_fail,
 	.scan_assoc_success	= sta_assoc_success,
 };
+IEEE80211_SCANNER_ALG(ibss, IEEE80211_M_IBSS, adhoc_default);
+IEEE80211_SCANNER_ALG(ahdemo, IEEE80211_M_AHDEMO, adhoc_default);
 
 static void
 ap_force_promisc(struct ieee80211com *ic)
@@ -1636,7 +1677,7 @@ ap_force_promisc(struct ieee80211com *ic)
 	IEEE80211_LOCK(ic);
 	/* set interface into promiscuous mode */
 	ifp->if_flags |= IFF_PROMISC;
-	ic->ic_update_promisc(ifp);
+	ieee80211_runtask(ic, &ic->ic_promisc_task);
 	IEEE80211_UNLOCK(ic);
 }
 
@@ -1758,7 +1799,7 @@ ap_end(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
 		return 1;
 	}
 	ieee80211_create_ibss(vap,
-	    ieee80211_ht_adjust_channel(ic, bestchan, vap->iv_flags_ext));
+	    ieee80211_ht_adjust_channel(ic, bestchan, vap->iv_flags_ht));
 	return 1;
 }
 
@@ -1778,12 +1819,108 @@ static const struct ieee80211_scanner ap_default = {
 	.scan_assoc_success	= sta_assoc_success,
 	.scan_assoc_fail	= sta_assoc_fail,
 };
-
-/*
- * Module glue.
- */
-IEEE80211_SCANNER_MODULE(sta, 1);
-IEEE80211_SCANNER_ALG(sta, IEEE80211_M_STA, sta_default);
-IEEE80211_SCANNER_ALG(ibss, IEEE80211_M_IBSS, adhoc_default);
-IEEE80211_SCANNER_ALG(ahdemo, IEEE80211_M_AHDEMO, adhoc_default);
 IEEE80211_SCANNER_ALG(ap, IEEE80211_M_HOSTAP, ap_default);
+
+#ifdef IEEE80211_SUPPORT_MESH
+/*
+ * Pick an mbss network to join or find a channel
+ * to use to start an mbss network.
+ */
+static int
+mesh_pick_bss(struct ieee80211_scan_state *ss, struct ieee80211vap *vap)
+{
+	struct sta_table *st = ss->ss_priv;
+	struct ieee80211_mesh_state *ms = vap->iv_mesh;
+	struct sta_entry *selbs;
+	struct ieee80211_channel *chan;
+
+	KASSERT(vap->iv_opmode == IEEE80211_M_MBSS,
+		("wrong opmode %u", vap->iv_opmode));
+
+	if (st->st_newscan) {
+		sta_update_notseen(st);
+		st->st_newscan = 0;
+	}
+	if (ss->ss_flags & IEEE80211_SCAN_NOPICK) {
+		/*
+		 * Manual/background scan, don't select+join the
+		 * bss, just return.  The scanning framework will
+		 * handle notification that this has completed.
+		 */
+		ss->ss_flags &= ~IEEE80211_SCAN_NOPICK;
+		return 1;
+	}
+	/*
+	 * Automatic sequencing; look for a candidate and
+	 * if found join the network.
+	 */
+	/* NB: unlocked read should be ok */
+	if (TAILQ_FIRST(&st->st_entry) == NULL) {
+		IEEE80211_DPRINTF(vap, IEEE80211_MSG_SCAN,
+			"%s: no scan candidate\n", __func__);
+		if (ss->ss_flags & IEEE80211_SCAN_NOJOIN)
+			return 0;
+notfound:
+		if (ms->ms_idlen != 0) {
+			/*
+			 * No existing mbss network to join and we have
+			 * a meshid; start one up.  If no channel was
+			 * specified, try to select a channel.
+			 */
+			if (vap->iv_des_chan == IEEE80211_CHAN_ANYC ||
+			    IEEE80211_IS_CHAN_RADAR(vap->iv_des_chan)) {
+				struct ieee80211com *ic = vap->iv_ic;
+
+				chan = adhoc_pick_channel(ss, 0);
+				if (chan != NULL)
+					chan = ieee80211_ht_adjust_channel(ic,
+					    chan, vap->iv_flags_ht);
+			} else
+				chan = vap->iv_des_chan;
+			if (chan != NULL) {
+				ieee80211_create_ibss(vap, chan);
+				return 1;
+			}
+		}
+		/*
+		 * If nothing suitable was found decrement
+		 * the failure counts so entries will be
+		 * reconsidered the next time around.  We
+		 * really want to do this only for sta's
+		 * where we've previously had some success.
+		 */
+		sta_dec_fails(st);
+		st->st_newscan = 1;
+		return 0;			/* restart scan */
+	}
+	selbs = select_bss(ss, vap, IEEE80211_MSG_SCAN);
+	if (ss->ss_flags & IEEE80211_SCAN_NOJOIN)
+		return (selbs != NULL);
+	if (selbs == NULL)
+		goto notfound;
+	chan = selbs->base.se_chan;
+	if (selbs->se_flags & STA_DEMOTE11B)
+		chan = demote11b(vap, chan);
+	if (!ieee80211_sta_join(vap, chan, &selbs->base))
+		goto notfound;
+	return 1;				/* terminate scan */
+}
+
+static const struct ieee80211_scanner mesh_default = {
+	.scan_name		= "default",
+	.scan_attach		= sta_attach,
+	.scan_detach		= sta_detach,
+	.scan_start		= adhoc_start,
+	.scan_restart		= sta_restart,
+	.scan_cancel		= sta_cancel,
+	.scan_end		= mesh_pick_bss,
+	.scan_flush		= sta_flush,
+	.scan_pickchan		= adhoc_pick_channel,
+	.scan_add		= sta_add,
+	.scan_age		= adhoc_age,
+	.scan_iterate		= sta_iterate,
+	.scan_assoc_fail	= sta_assoc_fail,
+	.scan_assoc_success	= sta_assoc_success,
+};
+IEEE80211_SCANNER_ALG(mesh, IEEE80211_M_MBSS, mesh_default);
+#endif /* IEEE80211_SUPPORT_MESH */

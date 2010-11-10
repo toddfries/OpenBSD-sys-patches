@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mga_irq.c,v 1.8 2009/02/28 02:37:55 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_irq.c,v 1.9 2009/03/19 08:36:08 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -138,6 +138,9 @@ int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
 	DRM_WAIT_ON(ret, dev_priv->fence_queue, 3 * DRM_HZ,
 		    (((cur_fence = atomic_read(&dev_priv->last_fence_retired))
 		      - *sequence) <= (1 << 23)));
+
+	if (ret == -ERESTART)
+		DRM_DEBUG("restarting syscall\n");
 
 	*sequence = cur_fence;
 

@@ -1,4 +1,4 @@
-#$FreeBSD: src/sys/arm/xscale/ixp425/files.ixp425,v 1.10 2009/03/06 23:22:09 sam Exp $
+#$FreeBSD: src/sys/arm/xscale/ixp425/files.ixp425,v 1.12 2009/12/23 23:16:54 rpaulo Exp $
 arm/arm/bus_space_generic.c		standard
 arm/arm/cpufunc_asm_xscale.S		standard
 arm/arm/irq_dispatch.S			standard
@@ -16,6 +16,7 @@ arm/xscale/ixp425/uart_bus_ixp425.c	optional	uart
 arm/xscale/ixp425/ixp425_a4x_space.c	optional	uart
 arm/xscale/ixp425/ixp425_a4x_io.S	optional	uart
 dev/cfi/cfi_bus_ixp4xx.c		optional	cfi
+dev/hwpmc/hwpmc_xscale.c		optional	hwpmc
 dev/uart/uart_dev_ns8250.c		optional	uart
 #
 # NPE-based Ethernet support (requires qmgr also).
@@ -47,4 +48,3 @@ IxNpeMicrocode.dat			optional npe_fw			\
 arm/xscale/ixp425/ixp425_qmgr.c		optional qmgr
 #
 dev/usb/controller/ehci_ixp4xx.c	optional ehci usb
-legacy/dev/usb/ehci_ixp4xx.c		optional oehci ousb

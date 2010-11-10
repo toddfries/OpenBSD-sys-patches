@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/in_cksum.c,v 1.3 2009/02/08 23:43:36 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/in_cksum.c,v 1.4 2010/01/10 20:29:20 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -226,7 +226,7 @@ skip_start:
 		if (len < mlen)
 			mlen = len;
 
-		if ((clen ^ (int) addr) & 1)
+		if ((clen ^ (uintptr_t) addr) & 1)
 			sum += in_cksumdata(addr, mlen) << 8;
 		else
 			sum += in_cksumdata(addr, mlen);

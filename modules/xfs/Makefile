@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/xfs/Makefile,v 1.3 2006/06/09 06:10:17 rodrigc Exp $
+# $FreeBSD: src/sys/modules/xfs/Makefile,v 1.4 2009/05/18 17:20:24 kan Exp $
 
 .PATH:	${.CURDIR}/../../gnu/fs/xfs \
 	${.CURDIR}/../../gnu/fs/xfs/FreeBSD \
@@ -54,9 +54,6 @@ SRCS =  vnode_if.h \
 	xfs_iget.c \
 	xfs_attr_leaf.c \
 	xfs_attr.c \
-	xfsrtstubs.c \
-	xfsquotasstubs.c \
-	xfsdmapistubs.c \
 	xfs_dmops.c \
 	xfs_qmops.c \
 	xfs_mountops.c \

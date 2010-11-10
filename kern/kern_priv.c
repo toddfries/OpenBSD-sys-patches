@@ -29,10 +29,9 @@
  */
 
 #include "opt_kdtrace.h"
-#include "opt_mac.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_priv.c,v 1.8 2009/03/03 17:15:05 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_priv.c,v 1.9 2009/06/05 14:55:22 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/jail.h>

@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.115 2009/02/27 14:12:05 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.142 2010/05/16 21:48:39 kmacy Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -81,7 +81,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.115 2009/02/27 14:12:05 bz 
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -97,7 +96,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.115 2009/02/27 14:12:05 bz 
 #ifdef INET
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
-#include <netinet/vinet.h>
 #endif /* INET */
 #include <netinet/ip6.h>
 #include <netinet6/in6_var.h>
@@ -107,7 +105,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.115 2009/02/27 14:12:05 bz 
 #include <netinet6/scope6_var.h>
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/nd6.h>
-#include <netinet6/vinet6.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -117,36 +114,33 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.115 2009/02/27 14:12:05 bz 
 
 #include <netinet6/ip6protosw.h>
 
+#ifdef FLOWTABLE
+#include <net/flowtable.h>
+VNET_DECLARE(int, ip6_output_flowtable_size);
+#define	V_ip6_output_flowtable_size	VNET(ip6_output_flowtable_size)
+#endif
+
 extern struct domain inet6domain;
 
 u_char ip6_protox[IPPROTO_MAX];
-static struct ifqueue ip6intrq;
+VNET_DEFINE(struct in6_ifaddrhead, in6_ifaddrhead);
 
-#ifndef VIMAGE
-#ifndef VIMAGE_GLOBALS
-struct vnet_inet6 vnet_inet6_0;
-#endif
-#endif
+static struct netisr_handler ip6_nh = {
+	.nh_name = "ip6",
+	.nh_handler = ip6_input,
+	.nh_proto = NETISR_IPV6,
+	.nh_policy = NETISR_POLICY_FLOW,
+};
 
-#ifdef VIMAGE_GLOBALS
-static int ip6qmaxlen;
-struct in6_ifaddr *in6_ifaddr;
-struct ip6stat ip6stat;
+VNET_DECLARE(struct callout, in6_tmpaddrtimer_ch);
+#define	V_in6_tmpaddrtimer_ch		VNET(in6_tmpaddrtimer_ch)
 
-extern struct callout in6_tmpaddrtimer_ch;
+VNET_DEFINE(struct pfil_head, inet6_pfil_hook);
 
-extern int dad_init;
-extern int pmtu_expire;
-extern int pmtu_probe;
-extern u_long rip6_sendspace;
-extern u_long rip6_recvspace;
-extern int icmp6errppslim;
-extern int icmp6_nodeinfo;
-extern int udp6_sendspace;
-extern int udp6_recvspace;
-#endif
+VNET_DEFINE(struct ip6stat, ip6stat);
 
-struct pfil_head inet6_pfil_hook;
+struct rwlock in6_ifaddr_lock;
+RW_SYSINIT(in6_ifaddr_lock, &in6_ifaddr_lock, "in6_ifaddr_lock");
 
 static void ip6_init2(void *);
 static struct ip6aux *ip6_setdstifaddr(struct mbuf *, struct in6_ifaddr *);
@@ -162,84 +156,56 @@ static struct mbuf *ip6_pullexthdr(struct mbuf *, size_t, int);
 void
 ip6_init(void)
 {
-	INIT_VNET_INET6(curvnet);
 	struct ip6protosw *pr;
 	int i;
 
-	V_ip6qmaxlen = IFQ_MAXLEN;
-	V_in6_maxmtu = 0;
-#ifdef IP6_AUTO_LINKLOCAL
-	V_ip6_auto_linklocal = IP6_AUTO_LINKLOCAL;
-#else
-	V_ip6_auto_linklocal = 1;	/* enable by default */
-#endif
 	TUNABLE_INT_FETCH("net.inet6.ip6.auto_linklocal",
 	    &V_ip6_auto_linklocal);
 
-#ifndef IPV6FORWARDING
-#ifdef GATEWAY6
-#define IPV6FORWARDING	1	/* forward IP6 packets not for us */
-#else
-#define IPV6FORWARDING	0	/* don't forward IP6 packets not for us */
-#endif /* GATEWAY6 */
-#endif /* !IPV6FORWARDING */
+	TAILQ_INIT(&V_in6_ifaddrhead);
 
-#ifndef IPV6_SENDREDIRECTS
-#define IPV6_SENDREDIRECTS	1
-#endif
+	/* Initialize packet filter hooks. */
+	V_inet6_pfil_hook.ph_type = PFIL_TYPE_AF;
+	V_inet6_pfil_hook.ph_af = AF_INET6;
+	if ((i = pfil_head_register(&V_inet6_pfil_hook)) != 0)
+		printf("%s: WARNING: unable to register pfil hook, "
+			"error %d\n", __func__, i);
 
-	V_ip6_forwarding = IPV6FORWARDING; /* act as router? */
-	V_ip6_sendredirects = IPV6_SENDREDIRECTS;
-	V_ip6_defhlim = IPV6_DEFHLIM;
-	V_ip6_defmcasthlim = IPV6_DEFAULT_MULTICAST_HOPS;
-	V_ip6_accept_rtadv = 0;	 /* "IPV6FORWARDING ? 0 : 1" is dangerous */
-	V_ip6_log_interval = 5;
-	V_ip6_hdrnestlimit = 15; /* How many header options will we process? */
-	V_ip6_dad_count = 1;	 /* DupAddrDetectionTransmits */
-	V_ip6_auto_flowlabel = 1;
-	V_ip6_use_deprecated = 1;/* allow deprecated addr (RFC2462 5.5.4) */
-	V_ip6_rr_prune = 5;	 /* router renumbering prefix
-                                  * walk list every 5 sec. */
-	V_ip6_mcast_pmtu = 0;	 /* enable pMTU discovery for multicast? */
-	V_ip6_v6only = 1;
-	V_ip6_keepfaith = 0;
-	V_ip6_log_time = (time_t)0L;
-#ifdef IPSTEALTH
-	V_ip6stealth = 0;
-#endif
-	V_nd6_onlink_ns_rfc4861 = 0; /* allow 'on-link' nd6 NS (RFC 4861) */
+	scope6_init();
+	addrsel_policy_init();
+	nd6_init();
+	frag6_init();
 
-	V_pmtu_expire = 60*10;
-	V_pmtu_probe = 60*2;
+#ifdef FLOWTABLE
+	if (TUNABLE_INT_FETCH("net.inet6.ip6.output_flowtable_size",
+		&V_ip6_output_flowtable_size)) {
+		if (V_ip6_output_flowtable_size < 256)
+			V_ip6_output_flowtable_size = 256;
+		if (!powerof2(V_ip6_output_flowtable_size)) {
+			printf("flowtable must be power of 2 size\n");
+			V_ip6_output_flowtable_size = 2048;
+		}
+	} else {
+		/*
+		 * round up to the next power of 2
+		 */
+		V_ip6_output_flowtable_size = 1 << fls((1024 + maxusers * 64)-1);
+	}
+	V_ip6_ft = flowtable_alloc("ipv6", V_ip6_output_flowtable_size, FL_IPV6|FL_PCPU);
+#endif	
+	
+	V_ip6_desync_factor = arc4random() % MAX_TEMP_DESYNC_FACTOR;
 
-	/* raw IP6 parameters */
-	/*
-	 * Nominal space allocated to a raw ip socket.
-	 */
-#define RIPV6SNDQ	8192
-#define RIPV6RCVQ	8192
-	V_rip6_sendspace = RIPV6SNDQ;
-	V_rip6_recvspace = RIPV6RCVQ;
-
-	/* ICMPV6 parameters */
-	V_icmp6_rediraccept = 1;	/* accept and process redirects */
-	V_icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
-	V_icmp6errppslim = 100;		/* 100pps */
-	/* control how to respond to NI queries */
-	V_icmp6_nodeinfo = (ICMP6_NODEINFO_FQDNOK|ICMP6_NODEINFO_NODEADDROK);
-
-	/* UDP on IP6 parameters */
-	V_udp6_sendspace = 9216;	/* really max datagram size */
-	V_udp6_recvspace = 40 * (1024 + sizeof(struct sockaddr_in6));
-					/* 40 1K datagrams */
-	V_dad_init = 0;
+	/* Skip global initialization stuff for non-default instances. */
+	if (!IS_DEFAULT_VNET(curvnet))
+		return;
 
 #ifdef DIAGNOSTIC
 	if (sizeof(struct protosw) != sizeof(struct ip6protosw))
 		panic("sizeof(protosw) != sizeof(ip6protosw)");
 #endif
 	pr = (struct ip6protosw *)pffindproto(PF_INET6, IPPROTO_RAW, SOCK_RAW);
-	if (pr == 0)
+	if (pr == NULL)
 		panic("ip6_init");
 
 	/* Initialize the entire ip6_protox[] array to IPPROTO_RAW. */
@@ -258,38 +224,42 @@ ip6_init(void)
 				ip6_protox[pr->pr_protocol] = pr - inet6sw;
 		}
 
-	/* Initialize packet filter hooks. */
-	inet6_pfil_hook.ph_type = PFIL_TYPE_AF;
-	inet6_pfil_hook.ph_af = AF_INET6;
-	if ((i = pfil_head_register(&inet6_pfil_hook)) != 0)
-		printf("%s: WARNING: unable to register pfil hook, "
-			"error %d\n", __func__, i);
-
-	ip6intrq.ifq_maxlen = V_ip6qmaxlen;
-	mtx_init(&ip6intrq.ifq_mtx, "ip6_inq", NULL, MTX_DEF);
-	netisr_register(NETISR_IPV6, ip6_input, &ip6intrq, 0);
-	scope6_init();
-	addrsel_policy_init();
-	nd6_init();
-	frag6_init();
-	V_ip6_desync_factor = arc4random() % MAX_TEMP_DESYNC_FACTOR;
+	netisr_register(&ip6_nh);
 }
 
-static void
-ip6_init2(void *dummy)
+#ifdef VIMAGE
+void
+ip6_destroy()
 {
-	INIT_VNET_INET6(curvnet);
+
+	nd6_destroy();
+	callout_drain(&V_in6_tmpaddrtimer_ch);
+}
+#endif
+
+static int
+ip6_init2_vnet(const void *unused __unused)
+{
 
 	/* nd6_timer_init */
 	callout_init(&V_nd6_timer_ch, 0);
-	callout_reset(&V_nd6_timer_ch, hz, nd6_timer, NULL);
+	callout_reset(&V_nd6_timer_ch, hz, nd6_timer, curvnet);
 
 	/* timer for regeneranation of temporary addresses randomize ID */
 	callout_init(&V_in6_tmpaddrtimer_ch, 0);
 	callout_reset(&V_in6_tmpaddrtimer_ch,
 		      (V_ip6_temp_preferred_lifetime - V_ip6_desync_factor -
 		       V_ip6_temp_regen_advance) * hz,
-		      in6_tmpaddrtimer, NULL);
+		      in6_tmpaddrtimer, curvnet);
+
+	return (0);
+}
+
+static void
+ip6_init2(void *dummy)
+{
+
+	ip6_init2_vnet(NULL);
 }
 
 /* cheat */
@@ -299,8 +269,6 @@ SYSINIT(netinet6init2, SI_SUB_PROTO_DOMAIN, SI_ORDER_MIDDLE, ip6_init2, NULL);
 void
 ip6_input(struct mbuf *m)
 {
-	INIT_VNET_NET(curvnet);
-	INIT_VNET_INET6(curvnet);
 	struct ip6_hdr *ip6;
 	int off = sizeof(struct ip6_hdr), nest;
 	u_int32_t plen;
@@ -343,7 +311,7 @@ ip6_input(struct mbuf *m)
 #define M2MMAX	(sizeof(V_ip6stat.ip6s_m2m)/sizeof(V_ip6stat.ip6s_m2m[0]))
 		if (m->m_next) {
 			if (m->m_flags & M_LOOP) {
-				V_ip6stat.ip6s_m2m[V_loif[0].if_index]++; /* XXX */
+				V_ip6stat.ip6s_m2m[V_loif->if_index]++;
 			} else if (m->m_pkthdr.rcvif->if_index < M2MMAX)
 				V_ip6stat.ip6s_m2m[m->m_pkthdr.rcvif->if_index]++;
 			else
@@ -489,10 +457,11 @@ ip6_input(struct mbuf *m)
 	odst = ip6->ip6_dst;
 
 	/* Jump over all PFIL processing if hooks are not active. */
-	if (!PFIL_HOOKED(&inet6_pfil_hook))
+	if (!PFIL_HOOKED(&V_inet6_pfil_hook))
 		goto passin;
 
-	if (pfil_run_hooks(&inet6_pfil_hook, &m, m->m_pkthdr.rcvif, PFIL_IN, NULL))
+	if (pfil_run_hooks(&V_inet6_pfil_hook, &m,
+	    m->m_pkthdr.rcvif, PFIL_IN, NULL))
 		return;
 	if (m == NULL)			/* consumed by filter */
 		return;
@@ -521,25 +490,12 @@ passin:
 	}
 
 	/*
-	 * Multicast check
+	 * Multicast check. Assume packet is for us to avoid
+	 * prematurely taking locks.
 	 */
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
-		struct in6_multi *in6m = 0;
-
+		ours = 1;
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_mcast);
-		/*
-		 * See if we belong to the destination multicast group on the
-		 * arrival interface.
-		 */
-		IN6_LOOKUP_MULTI(ip6->ip6_dst, m->m_pkthdr.rcvif, in6m);
-		if (in6m)
-			ours = 1;
-		else if (!ip6_mrouter) {
-			V_ip6stat.ip6s_notmember++;
-			V_ip6stat.ip6s_cantforward++;
-			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
-			goto bad;
-		}
 		deliverifp = m->m_pkthdr.rcvif;
 		goto hbhcheck;
 	}
@@ -615,8 +571,27 @@ passin:
 	    &rt6_key(rin6.ro_rt)->sin6_addr)
 #endif
 	    rin6.ro_rt->rt_ifp->if_type == IFT_LOOP) {
-		struct in6_ifaddr *ia6 =
-			(struct in6_ifaddr *)rin6.ro_rt->rt_ifa;
+		int free_ia6 = 0;
+		struct in6_ifaddr *ia6;
+
+		/*
+		 * found the loopback route to the interface address
+		 */
+		if (rin6.ro_rt->rt_gateway->sa_family == AF_LINK) {
+			struct sockaddr_in6 dest6;
+
+			bzero(&dest6, sizeof(dest6));
+			dest6.sin6_family = AF_INET6;
+			dest6.sin6_len = sizeof(dest6);
+			dest6.sin6_addr = ip6->ip6_dst;
+			ia6 = (struct in6_ifaddr *)
+			    ifa_ifwithaddr((struct sockaddr *)&dest6);
+			if (ia6 == NULL)
+				goto bad;
+			free_ia6 = 1;
+		}
+		else
+			ia6 = (struct in6_ifaddr *)rin6.ro_rt->rt_ifa;
 
 		/*
 		 * record address information into m_tag.
@@ -634,6 +609,8 @@ passin:
 			/* Count the packet in the ip address stats */
 			ia6->ia_ifa.if_ipackets++;
 			ia6->ia_ifa.if_ibytes += m->m_pkthdr.len;
+			if (ia6 != NULL && free_ia6 != 0)
+				ifa_free(&ia6->ia_ifa);
 			goto hbhcheck;
 		} else {
 			char ip6bufs[INET6_ADDRSTRLEN];
@@ -644,6 +621,8 @@ passin:
 			    ip6_sprintf(ip6bufs, &ip6->ip6_src),
 			    ip6_sprintf(ip6bufd, &ip6->ip6_dst)));
 
+			if (ia6 != NULL && free_ia6 != 0)
+				ifa_free(&ia6->ia_ifa);
 			goto bad;
 		}
 	}
@@ -690,6 +669,7 @@ passin:
 				 * to the upper layers.
 				 */
 			}
+			ifa_free(&ia6->ia_ifa);
 		}
 	}
 
@@ -751,10 +731,11 @@ passin:
 		 * case we should pass the packet to the multicast routing
 		 * daemon.
 		 */
-		if (rtalert != ~0 && V_ip6_forwarding) {
+		if (rtalert != ~0) {
 			switch (rtalert) {
 			case IP6OPT_RTALERT_MLD:
-				ours = 1;
+				if (V_ip6_forwarding)
+					ours = 1;
 				break;
 			default:
 				/*
@@ -789,7 +770,8 @@ passin:
 	/*
 	 * Forward if desirable.
 	 */
-	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
+	if (V_ip6_mrouter &&
+	    IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
 		/*
 		 * If we are acting as a multicast router, all
 		 * incoming multicast packets are passed to the
@@ -797,14 +779,16 @@ passin:
 		 * The packet is returned (relatively) intact; if
 		 * ip6_mforward() returns a non-zero value, the packet
 		 * must be discarded, else it may be accepted below.
+		 *
+		 * XXX TODO: Check hlim and multicast scope here to avoid
+		 * unnecessarily calling into ip6_mforward().
 		 */
-		if (ip6_mrouter && ip6_mforward &&
+		if (ip6_mforward &&
 		    ip6_mforward(ip6, m->m_pkthdr.rcvif, m)) {
-			V_ip6stat.ip6s_cantforward++;
+			IP6STAT_INC(ip6s_cantforward);
+			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
 			goto bad;
 		}
-		if (!ours)
-			goto bad;
 	} else if (!ours) {
 		ip6_forward(m, srcrt);
 		goto out;
@@ -860,6 +844,14 @@ passin:
 		if (ip6_ipsec_input(m, nxt))
 			goto bad;
 #endif /* IPSEC */
+
+		/*
+		 * Use mbuf flags to propagate Router Alert option to
+		 * ICMPv6 layer, as hop-by-hop options have been stripped.
+		 */
+		if (nxt == IPPROTO_ICMPV6 && rtalert != ~0)
+			m->m_flags |= M_RTALERT_MLD;
+
 		nxt = (*inet6sw[ip6_protox[nxt]].pr_input)(&m, &off, nxt);
 	}
 	goto out;
@@ -873,6 +865,11 @@ out:
 /*
  * set/grab in6_ifaddr correspond to IPv6 destination address.
  * XXX backward compatibility wrapper
+ *
+ * XXXRW: We should bump the refcount on ia6 before sticking it in the m_tag,
+ * and then bump it when the tag is copied, and release it when the tag is
+ * freed.  Unfortunately, m_tags don't support deep copies (yet), so instead
+ * we just bump the ia refcount when we receive it.  This should be fixed.
  */
 static struct ip6aux *
 ip6_setdstifaddr(struct mbuf *m, struct in6_ifaddr *ia6)
@@ -889,11 +886,14 @@ struct in6_ifaddr *
 ip6_getdstifaddr(struct mbuf *m)
 {
 	struct ip6aux *ip6a;
+	struct in6_ifaddr *ia;
 
 	ip6a = ip6_findaux(m);
-	if (ip6a)
-		return ip6a->ip6a_dstia6;
-	else
+	if (ip6a) {
+		ia = ip6a->ip6a_dstia6;
+		ifa_ref(&ia->ia_ifa);
+		return ia;
+	} else
 		return NULL;
 }
 
@@ -907,7 +907,6 @@ static int
 ip6_hopopts_input(u_int32_t *plenp, u_int32_t *rtalertp,
     struct mbuf **mp, int *offp)
 {
-	INIT_VNET_INET6(curvnet);
 	struct mbuf *m = *mp;
 	int off = *offp, hbhlen;
 	struct ip6_hbh *hbh;
@@ -963,7 +962,6 @@ int
 ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen,
     u_int32_t *rtalertp, u_int32_t *plenp)
 {
-	INIT_VNET_INET6(curvnet);
 	struct ip6_hdr *ip6;
 	int optlen = 0;
 	u_int8_t *opt = opthead;
@@ -1096,7 +1094,6 @@ ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen,
 int
 ip6_unknown_opt(u_int8_t *optp, struct mbuf *m, int off)
 {
-	INIT_VNET_INET6(curvnet);
 	struct ip6_hdr *ip6;
 
 	switch (IP6OPT_TYPE(*optp)) {
@@ -1351,7 +1348,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 					mp = &(*mp)->m_next;
 				break;
 			case IPPROTO_ROUTING:
-				if (!in6p->inp_flags & IN6P_RTHDR)
+				if (!(in6p->inp_flags & IN6P_RTHDR))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,

@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -29,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_smb.c,v 1.18 2007/02/27 17:23:28 jhb Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_smb.c,v 1.20 2010/04/07 16:50:38 joel Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -137,116 +131,6 @@ smbfs_smb_lock(struct smbnode *np, int op, caddr_t id,
 		return EINVAL;
 	else
 		return smbfs_smb_lockandx(np, op, (uintptr_t)id, start, end, scred);
-}
-
-static int
-smbfs_smb_qpathinfo(struct smbnode *np, struct smbfattr *fap,
-		    struct smb_cred *scred, short infolevel)
-{
-	struct smb_share *ssp = np->n_mount->sm_share;
-	struct smb_vc *vcp = SSTOVC(ssp);
-	struct smb_t2rq *t2p;
-	int error, svtz, timesok = 1;
-	struct mbchain *mbp;
-	struct mdchain *mdp;
-	u_int16_t date, time, wattr;
-	int64_t lint;
-	u_int32_t size, dattr;
-
-	error = smb_t2_alloc(SSTOCP(ssp), SMB_TRANS2_QUERY_PATH_INFORMATION,
-			     scred, &t2p);
-	if (error)
-		return error;
-	mbp = &t2p->t2_tparam;
-	mb_init(mbp);
-	if (!infolevel) {
-		if (SMB_DIALECT(vcp) < SMB_DIALECT_NTLM0_12)
-			infolevel = SMB_QUERY_FILE_STANDARD;
-		else
-			infolevel = SMB_QUERY_FILE_BASIC_INFO;
-	}
-	mb_put_uint16le(mbp, infolevel);
-	mb_put_uint32le(mbp, 0);
-	/* mb_put_uint8(mbp, SMB_DT_ASCII); specs are wrong */
-	error = smbfs_fullpath(mbp, vcp, np, NULL, 0);
-	if (error) {
-		smb_t2_done(t2p);
-		return error;
-	}
-	t2p->t2_maxpcount = 2;
-	t2p->t2_maxdcount = vcp->vc_txmax;
-	error = smb_t2_request(t2p);
-	if (error) {
-		smb_t2_done(t2p);
-		if (infolevel == SMB_QUERY_FILE_STANDARD || error != EINVAL)
-			return error;
-		return smbfs_smb_qpathinfo(np, fap, scred,
-					   SMB_QUERY_FILE_STANDARD);
-	}
-	mdp = &t2p->t2_rdata;
-	svtz = vcp->vc_sopt.sv_tz;
-	switch (infolevel) {
-	    case SMB_QUERY_FILE_STANDARD:
-		timesok = 0;
-		md_get_uint16le(mdp, NULL);
-		md_get_uint16le(mdp, NULL);	/* creation time */
-		md_get_uint16le(mdp, &date);
-		md_get_uint16le(mdp, &time);	/* access time */
-		if (date || time) {
-			timesok++;
-			smb_dos2unixtime(date, time, 0, svtz, &fap->fa_atime);
-		}
-		md_get_uint16le(mdp, &date);
-		md_get_uint16le(mdp, &time);	/* modify time */
-		if (date || time) {
-			timesok++;
-			smb_dos2unixtime(date, time, 0, svtz, &fap->fa_mtime);
-		}
-		md_get_uint32le(mdp, &size);
-		fap->fa_size = size;
-		md_get_uint32(mdp, NULL);	/* allocation size */
-		md_get_uint16le(mdp, &wattr);
-		fap->fa_attr = wattr;
-		break;
-	    case SMB_QUERY_FILE_BASIC_INFO:
-		timesok = 0;
-		md_get_int64(mdp, NULL);	/* creation time */
-		md_get_int64le(mdp, &lint);
-		if (lint) {
-			timesok++;
-			smb_time_NT2local(lint, svtz, &fap->fa_atime);
-		}
-		md_get_int64le(mdp, &lint);
-		if (lint) {
-			timesok++;
-			smb_time_NT2local(lint, svtz, &fap->fa_mtime);
-		}
-		md_get_int64le(mdp, &lint);
-		if (lint) {
-			timesok++;
-			smb_time_NT2local(lint, svtz, &fap->fa_ctime);
-		}
-		md_get_uint32le(mdp, &dattr);
-		fap->fa_attr = dattr;
-		md_get_uint32(mdp, NULL);
-		/* XXX could use ALL_INFO to get size */
-		break;
-	    default:
-		SMBERROR("unexpected info level %d\n", infolevel);
-		error = EINVAL;
-	}
-	smb_t2_done(t2p);
-	/*
-	 * if all times are zero (observed with FAT on NT4SP6)
-	 * then fall back to older info level
-	 */
-	if (!timesok) {
-		if (infolevel != SMB_QUERY_FILE_STANDARD)
-			return smbfs_smb_qpathinfo(np, fap, scred,
-						   SMB_QUERY_FILE_STANDARD);
-		error = EINVAL;
-	}
-	return error;
 }
 
 int

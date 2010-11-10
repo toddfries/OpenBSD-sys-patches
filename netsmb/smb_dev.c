@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -31,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netsmb/smb_dev.c,v 1.37 2008/11/03 14:23:15 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netsmb/smb_dev.c,v 1.39 2010/04/07 16:50:38 joel Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -352,7 +346,6 @@ nsmb_dev_load(module_t mod, int cmd, void *arg)
 		}
 		clone_setup(&nsmb_clones);
 		nsmb_dev_tag = EVENTHANDLER_REGISTER(dev_clone, nsmb_dev_clone, 0, 1000);
-		printf("netsmb_dev: loaded\n");
 		break;
 	    case MOD_UNLOAD:
 		smb_iod_done();
@@ -363,7 +356,6 @@ nsmb_dev_load(module_t mod, int cmd, void *arg)
 		drain_dev_clone_events();
 		clone_cleanup(&nsmb_clones);
 		destroy_dev_drain(&nsmb_cdevsw);
-		printf("netsmb_dev: unloaded\n");
 		break;
 	    default:
 		error = EINVAL;

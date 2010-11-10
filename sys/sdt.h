@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sdt.h,v 1.3 2009/03/03 18:23:16 rwatson Exp $
+ * $FreeBSD: src/sys/sys/sdt.h,v 1.4 2009/11/28 16:47:42 bz Exp $
  *
  * Statically Defined Tracing (SDT) definitions.
  *
@@ -58,6 +58,12 @@
 #define	SDT_PROBE_DEFINE3(prov, mod, func, name, arg0, arg1, arg2)
 #define	SDT_PROBE_DEFINE4(prov, mod, func, name, arg0, arg1, arg2, arg3)
 #define	SDT_PROBE_DEFINE5(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4)
+
+#define	SDT_PROBE1(prov, mod, func, name, arg0)
+#define	SDT_PROBE2(prov, mod, func, name, arg0, arg1)
+#define	SDT_PROBE3(prov, mod, func, name, arg0, arg1, arg2)
+#define	SDT_PROBE4(prov, mod, func, name, arg0, arg1, arg2, arg3)
+#define	SDT_PROBE5(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4)
 
 #else
 
@@ -191,6 +197,17 @@ struct sdt_provider {
 	SDT_PROBE_ARGTYPE(prov, mod, func, name, 2, arg2);		\
 	SDT_PROBE_ARGTYPE(prov, mod, func, name, 3, arg3);		\
 	SDT_PROBE_ARGTYPE(prov, mod, func, name, 4, arg4)
+
+#define	SDT_PROBE1(prov, mod, func, name, arg0)				\
+	SDT_PROBE(prov, mod, func, name, arg0, 0, 0, 0, 0)
+#define	SDT_PROBE2(prov, mod, func, name, arg0, arg1)			\
+	SDT_PROBE(prov, mod, func, name, arg0, arg1, 0, 0, 0)
+#define	SDT_PROBE3(prov, mod, func, name, arg0, arg1, arg2)		\
+	SDT_PROBE(prov, mod, func, name, arg0, arg1, arg2,  0, 0)
+#define	SDT_PROBE4(prov, mod, func, name, arg0, arg1, arg2, arg3)	\
+	SDT_PROBE(prov, mod, func, name, arg0, arg1, arg2, arg3, 0)
+#define	SDT_PROBE5(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4) \
+	SDT_PROBE(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4)
 
 typedef int (*sdt_argtype_listall_func_t)(struct sdt_argtype *, void *);
 typedef int (*sdt_probe_listall_func_t)(struct sdt_probe *, void *);

@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_resource.c,v 1.193 2008/10/24 01:09:24 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_resource.c,v 1.198 2010/05/24 10:23:49 kib Exp $");
 
 #include "opt_compat.h"
 
@@ -76,6 +76,7 @@ static void	calcru1(struct proc *p, struct rusage_ext *ruxp,
 		    struct timeval *up, struct timeval *sp);
 static int	donice(struct thread *td, struct proc *chgp, int n);
 static struct uidinfo *uilookup(uid_t uid);
+static void	ruxagg_locked(struct rusage_ext *rux, struct thread *td);
 
 /*
  * Resource controls and accounting.
@@ -471,14 +472,20 @@ rtp_to_pri(struct rtprio *rtp, struct thread *td)
 	u_char	newpri;
 	u_char	oldpri;
 
-	if (rtp->prio > RTP_PRIO_MAX)
-		return (EINVAL);
 	thread_lock(td);
 	switch (RTP_PRIO_BASE(rtp->type)) {
 	case RTP_PRIO_REALTIME:
+		if (rtp->prio > RTP_PRIO_MAX) {
+			thread_unlock(td);
+			return (EINVAL);
+		}
 		newpri = PRI_MIN_REALTIME + rtp->prio;
 		break;
 	case RTP_PRIO_NORMAL:
+		if (rtp->prio >  (PRI_MAX_TIMESHARE - PRI_MIN_TIMESHARE)) {
+			thread_unlock(td);
+			return (EINVAL);
+		}
 		newpri = PRI_MIN_TIMESHARE + rtp->prio;
 		break;
 	case RTP_PRIO_IDLE:
@@ -623,9 +630,7 @@ lim_cb(void *arg)
 		return;
 	PROC_SLOCK(p);
 	FOREACH_THREAD_IN_PROC(p, td) {
-		thread_lock(td);
-		ruxagg(&p->p_rux, td);
-		thread_unlock(td);
+		ruxagg(p, td);
 	}
 	PROC_SUNLOCK(p);
 	if (p->p_rux.rux_runtime > p->p_cpulimit * cpu_tickrate()) {
@@ -836,9 +841,7 @@ calcru(struct proc *p, struct timeval *up, struct timeval *sp)
 	FOREACH_THREAD_IN_PROC(p, td) {
 		if (td->td_incruntime == 0)
 			continue;
-		thread_lock(td);
-		ruxagg(&p->p_rux, td);
-		thread_unlock(td);
+		ruxagg(p, td);
 	}
 	calcru1(p, &p->p_rux, up, sp);
 }
@@ -939,10 +942,7 @@ getrusage(td, uap)
 }
 
 int
-kern_getrusage(td, who, rup)
-	struct thread *td;
-	int who;
-	struct rusage *rup;
+kern_getrusage(struct thread *td, int who, struct rusage *rup)
 {
 	struct proc *p;
 	int error;
@@ -959,6 +959,16 @@ kern_getrusage(td, who, rup)
 	case RUSAGE_CHILDREN:
 		*rup = p->p_stats->p_cru;
 		calccru(p, &rup->ru_utime, &rup->ru_stime);
+		break;
+
+	case RUSAGE_THREAD:
+		PROC_SLOCK(p);
+		ruxagg(p, td);
+		PROC_SUNLOCK(p);
+		thread_lock(td);
+		*rup = td->td_ru;
+		calcru1(p, &td->td_rux, &rup->ru_utime, &rup->ru_stime);
+		thread_unlock(td);
 		break;
 
 	default:
@@ -1000,8 +1010,8 @@ ruadd(struct rusage *ru, struct rusage_ext *rux, struct rusage *ru2,
 /*
  * Aggregate tick counts into the proc's rusage_ext.
  */
-void
-ruxagg(struct rusage_ext *rux, struct thread *td)
+static void
+ruxagg_locked(struct rusage_ext *rux, struct thread *td)
 {
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
@@ -1010,10 +1020,20 @@ ruxagg(struct rusage_ext *rux, struct thread *td)
 	rux->rux_uticks += td->td_uticks;
 	rux->rux_sticks += td->td_sticks;
 	rux->rux_iticks += td->td_iticks;
+}
+
+void
+ruxagg(struct proc *p, struct thread *td)
+{
+
+	thread_lock(td);
+	ruxagg_locked(&p->p_rux, td);
+	ruxagg_locked(&td->td_rux, td);
 	td->td_incruntime = 0;
 	td->td_uticks = 0;
 	td->td_iticks = 0;
 	td->td_sticks = 0;
+	thread_unlock(td);
 }
 
 /*
@@ -1030,9 +1050,7 @@ rufetch(struct proc *p, struct rusage *ru)
 	*ru = p->p_ru;
 	if (p->p_numthreads > 0)  {
 		FOREACH_THREAD_IN_PROC(p, td) {
-			thread_lock(td);
-			ruxagg(&p->p_rux, td);
-			thread_unlock(td);
+			ruxagg(p, td);
 			rucollect(ru, &td->td_ru);
 		}
 	}
@@ -1213,6 +1231,8 @@ uifind(uid)
 		} else {
 			refcount_init(&uip->ui_ref, 0);
 			uip->ui_uid = uid;
+			mtx_init(&uip->ui_vmsize_mtx, "ui_vmsize", NULL,
+			    MTX_DEF);
 			LIST_INSERT_HEAD(UIHASH(uid), uip, ui_hash);
 		}
 	}
@@ -1269,6 +1289,10 @@ uifree(uip)
 		if (uip->ui_proccnt != 0)
 			printf("freeing uidinfo: uid = %d, proccnt = %ld\n",
 			    uip->ui_uid, uip->ui_proccnt);
+		if (uip->ui_vmsize != 0)
+			printf("freeing uidinfo: uid = %d, swapuse = %lld\n",
+			    uip->ui_uid, (unsigned long long)uip->ui_vmsize);
+		mtx_destroy(&uip->ui_vmsize_mtx);
 		free(uip, M_UIDINFO);
 		return;
 	}

@@ -1,9 +1,20 @@
 /*
- * $FreeBSD: src/sys/dev/xen/console/xencons_ring.h,v 1.1 2008/08/12 20:01:57 kmacy Exp $
+ * $FreeBSD: src/sys/dev/xen/console/xencons_ring.h,v 1.2 2009/05/11 22:55:49 kmacy Exp $
  *
  */
 #ifndef _XENCONS_RING_H
 #define _XENCONS_RING_H
+
+#define CN_LOCK(l)        								\
+		do {											\
+				if (panicstr == NULL)					\
+                        mtx_lock_spin(&(l));			\
+		} while (0)
+#define CN_UNLOCK(l)        							\
+		do {											\
+				if (panicstr == NULL)					\
+                        mtx_unlock_spin(&(l));			\
+		} while (0)
 
 int xencons_ring_init(void);
 int xencons_ring_send(const char *data, unsigned len);

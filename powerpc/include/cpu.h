@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: cpu.h,v 1.11 2000/05/26 21:19:53 thorpej Exp $
- * $FreeBSD: src/sys/powerpc/include/cpu.h,v 1.22 2008/10/27 00:26:07 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/include/cpu.h,v 1.23 2009/11/28 17:33:19 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_CPU_H_
@@ -38,6 +38,27 @@
 #include <machine/frame.h>
 #include <machine/pcb.h>
 #include <machine/psl.h>
+
+/*
+ * CPU Feature Attributes
+ *
+ * These are defined in the PowerPC ELF ABI for the AT_HWCAP vector,
+ * and are exported to userland via the machdep.cpu_features
+ * sysctl.
+ */
+
+extern int cpu_features;
+
+#define	PPC_FEATURE_32		0x80000000	/* Always true */
+#define	PPC_FEATURE_64		0x40000000	/* Defined on a 64-bit CPU */
+#define	PPC_FEATURE_HAS_ALTIVEC	0x10000000	
+#define	PPC_FEATURE_HAS_FPU	0x08000000
+#define	PPC_FEATURE_HAS_MMU	0x04000000
+#define PPC_FEATURE_UNIFIED_CACHE 0x01000000
+
+#define	PPC_FEATURE_BITMASK						\
+	"\20"								\
+	"\040PPC32\037PPC64\035ALTIVEC\034FPU\033MMU\031UNIFIEDCACHE"
 
 #define	TRAPF_USERMODE(frame)	(((frame)->srr1 & PSL_PR) != 0)
 #define	TRAPF_PC(frame)		((frame)->srr0)

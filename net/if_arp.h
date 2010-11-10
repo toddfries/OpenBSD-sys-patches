@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_arp.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_arp.h,v 1.24 2005/11/11 16:04:48 ru Exp $
+ * $FreeBSD: src/sys/net/if_arp.h,v 1.25 2009/09/03 21:10:57 gnn Exp $
  */
 
 #ifndef _NET_IF_ARP_H_
@@ -108,6 +108,31 @@ struct	arpcom {
 #define IFP2AC(ifp) ((struct arpcom *)(ifp->if_l2com))
 #define AC2IFP(ac) ((ac)->ac_ifp)
 
-#endif
+#endif /* _KERNEL */
+
+struct arpstat {
+	/* Normal things that happen: */
+	u_long txrequests;	/* # of ARP requests sent by this host. */
+	u_long txreplies;	/* # of ARP replies sent by this host. */
+	u_long rxrequests;	/* # of ARP requests received by this host. */
+	u_long rxreplies;	/* # of ARP replies received by this host. */
+	u_long received;	/* # of ARP packets received by this host. */
+
+	u_long arp_spares[4];	/* For either the upper or lower half. */
+	/* Abnormal event and error  counting: */
+	u_long dropped;		/* # of packets dropped waiting for a reply. */
+	u_long timeouts;	/* # of times with entries removed */
+				/* due to timeout. */
+	u_long dupips;		/* # of duplicate IPs detected. */
+};
+
+/*
+ * In-kernel consumers can use these accessor macros directly to update
+ * stats.
+ */
+#define	ARPSTAT_ADD(name, val)	V_arpstat.name += (val)
+#define	ARPSTAT_SUB(name, val)	V_arpstat.name -= (val)
+#define	ARPSTAT_INC(name)	ARPSTAT_ADD(name, 1)
+#define	ARPSTAT_DEC(name)	ARPSTAT_SUB(name, 1)
 
 #endif /* !_NET_IF_ARP_H_ */

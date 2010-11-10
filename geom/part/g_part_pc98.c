@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/part/g_part_pc98.c,v 1.10 2009/03/10 11:14:03 nyan Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/part/g_part_pc98.c,v 1.13 2010/04/23 03:11:39 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -44,14 +44,6 @@ __FBSDID("$FreeBSD: src/sys/geom/part/g_part_pc98.c,v 1.10 2009/03/10 11:14:03 n
 #include <geom/part/g_part.h>
 
 #include "g_part_if.h"
-
-#define	PC98_MID_BOOTABLE	0x80
-#define	PC98_MID_MASK		0x7f
-#define	PC98_MID_386BSD		0x14
-
-#define	PC98_SID_ACTIVE		0x80
-#define	PC98_SID_MASK		0x7f
-#define	PC98_SID_386BSD		0x44
 
 #define	SECSIZE		512
 
@@ -85,6 +77,8 @@ static int g_part_pc98_setunset(struct g_part_table *, struct g_part_entry *,
 static const char *g_part_pc98_type(struct g_part_table *,
     struct g_part_entry *, char *, size_t);
 static int g_part_pc98_write(struct g_part_table *, struct g_consumer *);
+static int g_part_pc98_resize(struct g_part_table *, struct g_part_entry *,  
+    struct g_part_parms *);
 
 static kobj_method_t g_part_pc98_methods[] = {
 	KOBJMETHOD(g_part_add,		g_part_pc98_add),
@@ -94,6 +88,7 @@ static kobj_method_t g_part_pc98_methods[] = {
 	KOBJMETHOD(g_part_dumpconf,	g_part_pc98_dumpconf),
 	KOBJMETHOD(g_part_dumpto,	g_part_pc98_dumpto),
 	KOBJMETHOD(g_part_modify,	g_part_pc98_modify),
+	KOBJMETHOD(g_part_resize,	g_part_pc98_resize),
 	KOBJMETHOD(g_part_name,		g_part_pc98_name),
 	KOBJMETHOD(g_part_probe,	g_part_pc98_probe),
 	KOBJMETHOD(g_part_read,		g_part_pc98_read),
@@ -226,8 +221,7 @@ g_part_pc98_create(struct g_part_table *basetable, struct g_part_parms *gpp)
 	struct g_consumer *cp;
 	struct g_provider *pp;
 	struct g_part_pc98_table *table;
-	uint64_t msize;
-	uint32_t cyl;
+	uint32_t cyl, msize;
 
 	pp = gpp->gpp_provider;
 	cp = LIST_FIRST(&pp->consumers);
@@ -239,7 +233,7 @@ g_part_pc98_create(struct g_part_table *basetable, struct g_part_parms *gpp)
 
 	cyl = basetable->gpt_heads * basetable->gpt_sectors;
 
-	msize = pp->mediasize / SECSIZE;
+	msize = MIN(pp->mediasize / SECSIZE, 0xffffffff);
 	basetable->gpt_first = cyl;
 	basetable->gpt_last = msize - (msize % cyl) - 1;
 
@@ -314,6 +308,31 @@ g_part_pc98_modify(struct g_part_table *basetable,
 	if (gpp->gpp_parms & G_PART_PARM_TYPE)
 		return (pc98_parse_type(gpp->gpp_type, &entry->ent.dp_mid,
 		    &entry->ent.dp_sid));
+	return (0);
+}
+
+static int
+g_part_pc98_resize(struct g_part_table *basetable,
+    struct g_part_entry *baseentry, struct g_part_parms *gpp)
+{
+	struct g_part_pc98_entry *entry;
+	uint32_t size, cyl;
+
+	cyl = basetable->gpt_heads * basetable->gpt_sectors;
+	size = gpp->gpp_size;
+
+	if (size < cyl)
+		return (EINVAL);
+	if (size % cyl)
+		size = size - (size % cyl);
+	if (size < cyl)
+		return (EINVAL);
+
+	entry = (struct g_part_pc98_entry *)baseentry;
+	baseentry->gpe_end = baseentry->gpe_start + size - 1;
+	pc98_set_chs(basetable, baseentry->gpe_end, &entry->ent.dp_ecyl,
+	    &entry->ent.dp_ehd, &entry->ent.dp_esect);
+
 	return (0);
 }
 

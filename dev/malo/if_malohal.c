@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/dev/malo/if_malohal.c,v 1.2 2008/04/01 01:48:08 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/malo/if_malohal.c,v 1.4 2009/03/30 11:23:14 weongyo Exp $");
 #endif
 
 #include <sys/param.h>
@@ -128,7 +128,7 @@ malo_hal_attach(device_t dev, uint16_t devid,
 		       NULL,			/* lockarg */
 		       &mh->mh_dmat);
 	if (error != 0) {
-		device_printf(dev, "unable to allocate memory for cmd buffer, "
+		device_printf(dev, "unable to allocate memory for cmd tag, "
 			"error %u\n", error);
 		goto fail;
 	}
@@ -163,8 +163,6 @@ malo_hal_attach(device_t dev, uint16_t devid,
 	return (mh);
 
 fail:
-	free(mh, M_DEVBUF);
-
 	if (mh->mh_dmamap != NULL) {
 		bus_dmamap_unload(mh->mh_dmat, mh->mh_dmamap);
 		if (mh->mh_cmdbuf != NULL)
@@ -174,6 +172,7 @@ fail:
 	}
 	if (mh->mh_dmat)
 		bus_dma_tag_destroy(mh->mh_dmat);
+	free(mh, M_DEVBUF);
 
 	return (NULL);
 }

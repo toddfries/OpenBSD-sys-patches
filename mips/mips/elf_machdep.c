@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/elf_machdep.c,v 1.4 2008/12/16 20:04:02 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/elf_machdep.c,v 1.13 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD: src/sys/mips/mips/elf_machdep.c,v 1.4 2008/12/16 20:04:02 im
 #include <sys/linker.h>
 #include <sys/sysent.h>
 #include <sys/imgact_elf.h>
+#include <sys/proc.h>
 #include <sys/syscall.h>
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
@@ -46,7 +47,64 @@ __FBSDID("$FreeBSD: src/sys/mips/mips/elf_machdep.c,v 1.4 2008/12/16 20:04:02 im
 
 #include <machine/elf.h>
 #include <machine/md_var.h>
+#include <machine/cache.h>
 
+#ifdef __mips_n64
+struct sysentvec elf64_freebsd_sysvec = {
+	.sv_size	= SYS_MAXSYSCALL,
+	.sv_table	= sysent,
+	.sv_mask	= 0,
+	.sv_sigsize	= 0,
+	.sv_sigtbl	= NULL,
+	.sv_errsize	= 0,
+	.sv_errtbl	= NULL,
+	.sv_transtrap	= NULL,
+	.sv_fixup	= __elfN(freebsd_fixup),
+	.sv_sendsig	= sendsig,
+	.sv_sigcode	= sigcode,
+	.sv_szsigcode	= &szsigcode,
+	.sv_prepsyscall	= NULL,
+	.sv_name	= "FreeBSD ELF64",
+	.sv_coredump	= __elfN(coredump),
+	.sv_imgact_try	= NULL,
+	.sv_minsigstksz	= MINSIGSTKSZ,
+	.sv_pagesize	= PAGE_SIZE,
+	.sv_minuser	= VM_MIN_ADDRESS,
+	.sv_maxuser	= VM_MAXUSER_ADDRESS,
+	.sv_usrstack	= USRSTACK,
+	.sv_psstrings	= PS_STRINGS,
+	.sv_stackprot	= VM_PROT_ALL,
+	.sv_copyout_strings = exec_copyout_strings,
+	.sv_setregs	= exec_setregs,
+	.sv_fixlimit	= NULL,
+	.sv_maxssiz	= NULL,
+	.sv_flags	= SV_ABI_FREEBSD | SV_LP64,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = NULL, /* XXXKIB */
+	.sv_syscallnames = syscallnames,
+};
+
+static Elf64_Brandinfo freebsd_brand_info = {
+	.brand		= ELFOSABI_FREEBSD,
+	.machine	= EM_MIPS,
+	.compat_3_brand	= "FreeBSD",
+	.emul_path	= NULL,
+	.interp_path	= "/libexec/ld-elf.so.1",
+	.sysvec		= &elf64_freebsd_sysvec,
+	.interp_newpath	= NULL,
+	.flags		= 0
+};
+
+SYSINIT(elf64, SI_SUB_EXEC, SI_ORDER_ANY,
+    (sysinit_cfunc_t) elf64_insert_brand_entry,
+    &freebsd_brand_info);
+
+void
+elf64_dump_thread(struct thread *td __unused, void *dst __unused,
+    size_t *off __unused)
+{
+}
+#else
 struct sysentvec elf32_freebsd_sysvec = {
 	.sv_size	= SYS_MAXSYSCALL,
 	.sv_table	= sysent,
@@ -75,7 +133,10 @@ struct sysentvec elf32_freebsd_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_FREEBSD | SV_ILP32
+	.sv_flags	= SV_ABI_FREEBSD | SV_ILP32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = NULL, /* XXXKIB */
+	.sv_syscallnames = syscallnames,
 };
 
 static Elf32_Brandinfo freebsd_brand_info = {
@@ -89,7 +150,7 @@ static Elf32_Brandinfo freebsd_brand_info = {
 	.flags		= 0
 };
 
-SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_ANY,
+SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_FIRST,
     (sysinit_cfunc_t) elf32_insert_brand_entry,
     &freebsd_brand_info);
 
@@ -98,18 +159,24 @@ elf32_dump_thread(struct thread *td __unused, void *dst __unused,
     size_t *off __unused)
 {
 }
+#endif
 
 /* Process one elf relocation with addend. */
 static int
 elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
     int type, int local, elf_lookup_fn lookup)
 {
-	Elf_Addr *where = (Elf_Addr *)NULL;;
+	Elf_Addr *where = (Elf_Addr *)NULL;
 	Elf_Addr addr;
 	Elf_Addr addend = (Elf_Addr)0;
 	Elf_Word rtype = (Elf_Word)0, symidx;
 	const Elf_Rel *rel;
-	const Elf_Rela *rela;
+
+	/*
+	 * Stash R_MIPS_HI16 info so we can use it when processing R_MIPS_LO16
+	 */
+	static Elf_Addr ahl;
+	static Elf_Addr *where_hi16;
 
 	switch (type) {
 	case ELF_RELOC_REL:
@@ -119,108 +186,63 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 		rtype = ELF_R_TYPE(rel->r_info);
 		symidx = ELF_R_SYM(rel->r_info);
 		break;
-	case ELF_RELOC_RELA:
-		rela = (const Elf_Rela *)data;
-		where = (Elf_Addr *) (relocbase + rela->r_offset);
-		addend = rela->r_addend;
-		rtype = ELF_R_TYPE(rela->r_info);
-		symidx = ELF_R_SYM(rela->r_info);
-		break;
 	default:
 		panic("unknown reloc type %d\n", type);
 	}
 
-	if (local) {
-#if 0 /* TBD  */
-		if (rtype == R_386_RELATIVE) {	/* A + B */
-			addr = relocbase + addend;
-			if (*where != addr)
-				*where = addr;
-		}
-		return (0);
-#endif
-	}
-
 	switch (rtype) {
+	case R_MIPS_NONE:	/* none */
+		break;
 
-		case R_MIPS_NONE:	/* none */
-			break;
-
-		case R_MIPS_16:	    /* S + sign-extend(A) */
-			/*
-			 * There shouldn't be R_MIPS_16 relocs in kernel objects.
-			 */
-			printf("kldload: unexpected R_MIPS_16 relocation\n");
-			return -1;
-			break;
-
-		case R_MIPS_32: /* S + A - P */
-			addr = lookup(lf, symidx, 1);
-			if (addr == 0)
-				return -1;
-			addr += addend;
-			if (*where != addr)
-				*where = addr;
-			break;
-
-		case R_MIPS_REL32:		/* A - EA + S */
-			/*
-			 * There shouldn't be R_MIPS_REL32 relocs in kernel objects?
-			 */
-			printf("kldload: unexpected R_MIPS_REL32 relocation\n");
-			return -1;
-			break;
-
-		case R_MIPS_26:	     /* ((A << 2) | (P & 0xf0000000) + S) >> 2 */
-			break;
-
-		case R_MIPS_HI16:
-			/* extern/local: ((AHL + S) - ((short)(AHL + S)) >> 16 */
-			/* _gp_disp: ((AHL + GP - P) - (short)(AHL + GP - P)) >> 16 */
-			break;
-
-		case R_MIPS_LO16:
-			/* extern/local: AHL + S */
-			/* _gp_disp: AHL + GP - P + 4 */
-			break;
-
-		case R_MIPS_GPREL16:
-			/* extern/local: ((AHL + S) - ((short)(AHL + S)) >> 16 */
-			/* _gp_disp: ((AHL + GP - P) - (short)(AHL + GP - P)) >> 16 */
-			break;
-
-		case R_MIPS_LITERAL: /* sign-extend(A) + L */
-			break;
-
-		case R_MIPS_GOT16: /* external: G */
-			/* local: tbd */
-			break;
-
-		case R_MIPS_PC16: /* sign-extend(A) + S - P */
-			break;
-
-		case R_MIPS_CALL16: /* G */
-			break;
-
-		case R_MIPS_GPREL32: /* A + S + GP0 - GP */
-			break;
-
-		case R_MIPS_GOTHI16: /* (G - (short)G) >> 16 + A */
-			break;
-
-		case R_MIPS_GOTLO16: /* G & 0xffff */
-			break;
-
-		case R_MIPS_CALLHI16: /* (G - (short)G) >> 16 + A */
-			break;
-
-		case R_MIPS_CALLLO16: /* G & 0xffff */
-			break;
-
-		default:
-			printf("kldload: unexpected relocation type %d\n",
-			    rtype);
+	case R_MIPS_32:		/* S + A */
+		addr = lookup(lf, symidx, 1);
+		if (addr == 0)
 			return (-1);
+		addr += addend;
+		if (*where != addr)
+			*where = addr;
+		break;
+
+	case R_MIPS_26:		/* ((A << 2) | (P & 0xf0000000) + S) >> 2 */
+		addr = lookup(lf, symidx, 1);
+		if (addr == 0)
+			return (-1);
+
+		addend &= 0x03ffffff;
+		addend <<= 2;
+
+		addr += ((Elf_Addr)where & 0xf0000000) | addend;
+		addr >>= 2;
+
+		*where &= ~0x03ffffff;
+		*where |= addr & 0x03ffffff;
+		break;
+
+	case R_MIPS_HI16:	/* ((AHL + S) - ((short)(AHL + S)) >> 16 */
+		ahl = addend << 16;
+		where_hi16 = where;
+		break;
+
+	case R_MIPS_LO16:	/* AHL + S */
+		ahl += (int16_t)addend;
+		addr = lookup(lf, symidx, 1);
+		if (addr == 0)
+			return (-1);
+
+		addend &= 0xffff0000;
+		addend |= (uint16_t)(ahl + addr);
+		*where = addend;
+
+		addend = *where_hi16;
+		addend &= 0xffff0000;
+		addend |= ((ahl + addr) - (int16_t)(ahl + addr)) >> 16;
+		*where_hi16 = addend;
+		break;
+
+	default:
+		printf("kldload: unexpected relocation type %d\n",
+			rtype);
+		return (-1);
 	}
 	return(0);
 }
@@ -244,6 +266,11 @@ elf_reloc_local(linker_file_t lf, Elf_Addr relocbase, const void *data,
 int
 elf_cpu_load_file(linker_file_t lf __unused)
 {
+
+	/*
+	 * Sync the I and D caches to make sure our relocations are visible.
+	 */
+	mips_icache_sync_all();
 
 	return (0);
 }

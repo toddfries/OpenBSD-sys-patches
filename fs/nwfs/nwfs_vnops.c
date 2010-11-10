@@ -10,12 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Boris Popov.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -29,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.49 2009/01/31 18:06:34 bz Exp $
+ * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.51 2010/04/07 16:50:38 joel Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -231,24 +225,24 @@ nwfs_close(ap)
 
 	if (vp->v_type == VDIR) return 0;	/* nothing to do now */
 	error = 0;
-	mtx_lock(&vp->v_interlock);
+	VI_LOCK(vp);
 	if (np->opened == 0) {
-		mtx_unlock(&vp->v_interlock);
+		VI_UNLOCK(vp);
 		return 0;
 	}
-	mtx_unlock(&vp->v_interlock);
+	VI_UNLOCK(vp);
 	error = nwfs_vinvalbuf(vp, ap->a_td);
-	mtx_lock(&vp->v_interlock);
+	VI_LOCK(vp);
 	if (np->opened == 0) {
-		mtx_unlock(&vp->v_interlock);
+		VI_UNLOCK(vp);
 		return 0;
 	}
 	if (--np->opened == 0) {
-		mtx_unlock(&vp->v_interlock);
+		VI_UNLOCK(vp);
 		error = ncp_close_file(NWFSTOCONN(VTONWFS(vp)), &np->n_fh, 
 		   ap->a_td, ap->a_cred);
 	} else
-		mtx_unlock(&vp->v_interlock);
+		VI_UNLOCK(vp);
 	np->n_atime = 0;
 	return (error);
 }

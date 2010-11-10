@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
- * $FreeBSD: src/sys/sys/mbuf.h,v 1.229 2009/03/04 02:55:04 bms Exp $
+ * $FreeBSD: src/sys/sys/mbuf.h,v 1.236 2010/05/07 22:09:17 fabient Exp $
  */
 
 #ifndef _SYS_MBUF_H_
@@ -60,12 +60,12 @@
 
 #ifdef _KERNEL
 /*-
- * Macros for type conversion:
+ * Macro for type conversion: convert mbuf pointer to data pointer of correct
+ * type:
+ *
  * mtod(m, t)	-- Convert mbuf pointer to data pointer of correct type.
- * dtom(x)	-- Convert data pointer within mbuf to mbuf pointer (XXX).
  */
 #define	mtod(m, t)	((t)((m)->m_data))
-#define	dtom(x)		((struct mbuf *)((intptr_t)(x) & ~(MSIZE-1)))
 
 /*
  * Argument structure passed to UMA routines during mbuf and packet
@@ -199,6 +199,7 @@ struct mbuf {
 #define	M_PROTO6	0x00080000 /* protocol-specific */
 #define	M_PROTO7	0x00100000 /* protocol-specific */
 #define	M_PROTO8	0x00200000 /* protocol-specific */
+#define	M_FLOWID	0x00400000 /* flowid is valid */
 /*
  * For RELENG_{6,7} steal these flags for limited multiple routing table
  * support. In RELENG_8 and beyond, use just one flag and a tag.
@@ -365,12 +366,15 @@ static __inline struct mbuf	*m_gethdr(int how, short type);
 static __inline struct mbuf	*m_getjcl(int how, short type, int flags,
 				    int size);
 static __inline struct mbuf	*m_getclr(int how, short type);	/* XXX */
+static __inline int		 m_init(struct mbuf *m, uma_zone_t zone,
+				    int size, int how, short type, int flags);
 static __inline struct mbuf	*m_free(struct mbuf *m);
 static __inline void		 m_clget(struct mbuf *m, int how);
 static __inline void		*m_cljget(struct mbuf *m, int how, int size);
 static __inline void		 m_chtype(struct mbuf *m, short new_type);
 void				 mb_free_ext(struct mbuf *);
 static __inline struct mbuf	*m_last(struct mbuf *m);
+int				 m_pkthdr_init(struct mbuf *m, int how);
 
 static __inline int
 m_gettype(int size)
@@ -432,6 +436,33 @@ m_getzone(int size)
 	return (zone);
 }
 
+/*
+ * Initialize an mbuf with linear storage.
+ *
+ * Inline because the consumer text overhead will be roughly the same to
+ * initialize or call a function with this many parameters and M_PKTHDR
+ * should go away with constant propagation for !MGETHDR.
+ */
+static __inline int
+m_init(struct mbuf *m, uma_zone_t zone, int size, int how, short type,
+    int flags)
+{
+	int error;
+
+	m->m_next = NULL;
+	m->m_nextpkt = NULL;
+	m->m_data = m->m_dat;
+	m->m_len = 0;
+	m->m_flags = flags;
+	m->m_type = type;
+	if (flags & M_PKTHDR) {
+		if ((error = m_pkthdr_init(m, how)) != 0)
+			return (error);
+	}
+
+	return (0);
+}
+
 static __inline struct mbuf *
 m_get(int how, short type)
 {
@@ -491,6 +522,9 @@ m_getjcl(int how, short type, int flags, int size)
 	struct mb_args args;
 	struct mbuf *m, *n;
 	uma_zone_t zone;
+
+	if (size == MCLBYTES)
+		return m_getcl(how, type, flags);
 
 	args.flags = flags;
 	args.type = type;
@@ -782,6 +816,7 @@ void		 m_freem(struct mbuf *);
 struct mbuf	*m_getm2(struct mbuf *, int, int, short, int);
 struct mbuf	*m_getptr(struct mbuf *, int, int *);
 u_int		 m_length(struct mbuf *, struct mbuf **);
+int		 m_mbuftouio(struct uio *, struct mbuf *, int);
 void		 m_move_pkthdr(struct mbuf *, struct mbuf *);
 struct mbuf	*m_prepend(struct mbuf *, int, int);
 void		 m_print(const struct mbuf *, int);
@@ -866,7 +901,8 @@ struct mbuf	*m_unshare(struct mbuf *, int how);
 #define	PACKET_TAG_PF				21 /* PF + ALTQ information */
 #define	PACKET_TAG_RTSOCKFAM			25 /* rtsock sa family */
 #define	PACKET_TAG_IPOPTIONS			27 /* Saved IP options */
-#define	PACKET_TAG_CARP                         28 /* CARP info */
+#define	PACKET_TAG_CARP				28 /* CARP info */
+#define	PACKET_TAG_IPSEC_NAT_T_PORTS		29 /* two uint16_t */
 
 /* Specific cookies and tags. */
 

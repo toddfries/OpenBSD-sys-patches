@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.7 2008/09/16 16:23:56 jhb Exp $
+ * $FreeBSD: src/sys/ufs/ufs/dirhash.h,v 1.8 2009/06/03 09:44:22 snb Exp $
  */
 
 #ifndef _UFS_UFS_DIRHASH_H_
@@ -104,6 +104,8 @@ struct dirhash {
 	int	dh_score;	/* access count for this dirhash */
 
 	int	dh_onlist;	/* true if on the ufsdirhash_list chain */
+
+	time_t	dh_lastused;	/* time the dirhash was last read or written*/
 
 	/* Protected by ufsdirhash_mtx. */
 	TAILQ_ENTRY(dirhash) dh_list;	/* chain of all dirhashes */

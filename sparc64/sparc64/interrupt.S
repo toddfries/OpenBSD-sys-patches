@@ -25,7 +25,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/interrupt.S,v 1.10 2007/01/19 11:15:33 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/interrupt.S,v 1.12 2010/05/02 12:08:15 marius Exp $");
 
 #include <machine/asi.h>
 #include <machine/asmacros.h>
@@ -83,8 +83,11 @@ ENTRY(intr_vector)
 	 * The 2nd word points to code to execute and the 3rd is an argument
 	 * to pass.  Jump to it.
 	 */
-	brnz,a,pt %g3, 1f
-	 nop
+	brnz,pt %g3, 1f
+	/*
+	 * NB: Zeus CPUs set some undocumented bits in the first data word.
+	 */
+	 and	%g3, IV_MAX - 1, %g3
 	jmpl	%g4, %g0
 	 nop
 	/* NOTREACHED */
@@ -176,7 +179,7 @@ ENTRY(intr_fast)
 
 3:	ldx	[%l0 + IR_FUNC], %o0
 	ldx	[%l0 + IR_ARG], %o1
-	lduw	[%l0 + IR_VEC], %o2
+	lduw	[%l0 + IR_VEC], %l2
 
 	ldx	[PCPU(IRFREE)], %l1
 	stx	%l1, [%l0 + IR_NEXT]
@@ -188,17 +191,17 @@ ENTRY(intr_fast)
 	call	%o0
 	 mov	%o1, %o0
 
-	/* intrcnt[intr_countp[%o2]]++ */
-	SET(intrcnt, %l7, %l2)		/* %l2 = intrcnt */
-	prefetcha [%l2] ASI_N, 1
-	SET(intr_countp, %l7, %l3)	/* %l3 = intr_countp */
-	sllx	%o2, 1, %l4		/* %l4 = vec << 1 */
-	lduh	[%l4 + %l3], %l5	/* %l5 = intr_countp[%o2] */
-	sllx	%l5, 3, %l6		/* %l6 = intr_countp[%o2] << 3 */
-	add	%l6, %l2, %l7		/* %l7 = intrcnt[intr_countp[%o2]] */
-	ldx	[%l7], %l2
+	/* intrcnt[intr_countp[%l2]]++ */
+	SET(intrcnt, %l7, %l3)		/* %l3 = intrcnt */
+	prefetcha [%l3] ASI_N, 1
+	SET(intr_countp, %l7, %l4)	/* %l4 = intr_countp */
+	sllx	%l2, 1, %l2		/* %l2 = vec << 1 */
+	lduh	[%l4 + %l2], %l4	/* %l4 = intr_countp[%l2] */
+	sllx	%l4, 3, %l4		/* %l4 = intr_countp[%l2] << 3 */
+	add	%l4, %l3, %l4		/* %l4 = intrcnt[intr_countp[%l2]] */
+	ldx	[%l4], %l2
 	inc	%l2
-	stx	%l2, [%l7]
+	stx	%l2, [%l4]
 
 	ba,a	%xcc, 1b
 	 nop

@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_map.h,v 1.128 2009/02/24 20:57:43 kib Exp $
+ * $FreeBSD: src/sys/vm/vm_map.h,v 1.134 2010/04/18 22:32:07 jmallett Exp $
  */
 
 /*
@@ -114,6 +114,7 @@ struct vm_map_entry {
 	vm_inherit_t inheritance;	/* inheritance */
 	int wired_count;		/* can be paged if = 0 */
 	vm_pindex_t lastr;		/* last read */
+	struct uidinfo *uip;		/* tmp storage for creator ref */
 };
 
 #define MAP_ENTRY_NOSYNC		0x0001
@@ -136,6 +137,8 @@ struct vm_map_entry {
 
 #define	MAP_ENTRY_GROWS_DOWN		0x1000	/* Top-down stacks */
 #define	MAP_ENTRY_GROWS_UP		0x2000	/* Bottom-up stacks */
+
+#define	MAP_ENTRY_WIRE_SKIPPED		0x4000
 
 #ifdef	_KERNEL
 static __inline u_char
@@ -308,15 +311,14 @@ long vmspace_wired_count(struct vmspace *vmspace);
 #define MAP_PREFAULT_MADVISE	0x0200	/* from (user) madvise request */
 #define	MAP_STACK_GROWS_DOWN	0x1000
 #define	MAP_STACK_GROWS_UP	0x2000
+#define	MAP_ACC_CHARGED		0x4000
+#define	MAP_ACC_NO_CHARGE	0x8000
 
 /*
  * vm_fault option flags
  */
 #define VM_FAULT_NORMAL 0		/* Nothing special */
 #define VM_FAULT_CHANGE_WIRING 1	/* Change the wiring as appropriate */
-#define VM_FAULT_USER_WIRE 2		/* Likewise, but for user purposes */
-#define VM_FAULT_WIRE_MASK (VM_FAULT_CHANGE_WIRING|VM_FAULT_USER_WIRE)
-#define VM_FAULT_DIRTY 8		/* Dirty the page */
 
 /*
  * The following "find_space" options are supported by vm_map_find()
@@ -324,6 +326,9 @@ long vmspace_wired_count(struct vmspace *vmspace);
 #define	VMFS_NO_SPACE		0	/* don't find; use the given range */
 #define	VMFS_ANY_SPACE		1	/* find a range with any alignment */
 #define	VMFS_ALIGNED_SPACE	2	/* find a superpage-aligned range */
+#if defined(__mips__)
+#define	VMFS_TLB_ALIGNED_SPACE	3	/* find a TLB entry aligned range */
+#endif
 
 /*
  * vm_map_wire and vm_map_unwire option flags
@@ -344,7 +349,7 @@ int vm_map_fixed(vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t, vm_size_t,
     vm_prot_t, vm_prot_t, int);
 int vm_map_findspace (vm_map_t, vm_offset_t, vm_size_t, vm_offset_t *);
 int vm_map_inherit (vm_map_t, vm_offset_t, vm_offset_t, vm_inherit_t);
-void vm_map_init (struct vm_map *, vm_offset_t, vm_offset_t);
+void vm_map_init(vm_map_t, pmap_t, vm_offset_t, vm_offset_t);
 int vm_map_insert (vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t, vm_offset_t, vm_prot_t, vm_prot_t, int);
 int vm_map_lookup (vm_map_t *, vm_offset_t, vm_prot_t, vm_map_entry_t *, vm_object_t *,
     vm_pindex_t *, vm_prot_t *, boolean_t *);

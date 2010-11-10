@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ah.c,v 1.7 2009/02/23 23:41:12 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ah.c,v 1.13 2009/09/08 13:19:05 phk Exp $
  */
 #include "opt_ah.h"
 
@@ -287,8 +287,7 @@ ath_hal_computetxtime(struct ath_hal *ah,
 				+ (numSymbols * OFDM_QUARTER_SYMBOL_TIME);
 		break;
 	case IEEE80211_T_TURBO:
-		/* we still save OFDM rates in kbps - so double them */
-		bitsPerSymbol = ((kbps << 1) * TURBO_SYMBOL_TIME) / 1000;
+		bitsPerSymbol	= (kbps * TURBO_SYMBOL_TIME) / 1000;
 		HALASSERT(bitsPerSymbol != 0);
 
 		numBits		= TURBO_PLCP_BITS + (frameLen << 3);
@@ -501,6 +500,11 @@ ath_hal_getcapability(struct ath_hal *ah, HAL_CAPABILITY_TYPE type,
 	case HAL_CAP_RXTSTAMP_PREC:	/* rx desc tstamp precision (bits) */
 		*result = pCap->halTstampPrecision;
 		return HAL_OK;
+	case HAL_CAP_INTRMASK:		/* mask of supported interrupts */
+		*result = pCap->halIntrMask;
+		return HAL_OK;
+	case HAL_CAP_BSSIDMATCH:	/* hardware has disable bssid match */
+		return pCap->halBssidMatchSupport ? HAL_OK : HAL_ENOTSUPP;
 	default:
 		return HAL_EINVAL;
 	}
@@ -844,6 +848,7 @@ ath_hal_ini_write(struct ath_hal *ah, const HAL_INI_ARRAY *ia,
 {
 	int r;
 
+	HALASSERT(col < ia->cols);
 	for (r = 0; r < ia->rows; r++) {
 		OS_REG_WRITE(ah, HAL_INI_VAL(ia, r, 0),
 		    HAL_INI_VAL(ia, r, col));
@@ -857,6 +862,7 @@ ath_hal_ini_bank_setup(uint32_t data[], const HAL_INI_ARRAY *ia, int col)
 {
 	int r;
 
+	HALASSERT(col < ia->cols);
 	for (r = 0; r < ia->rows; r++)
 		data[r] = HAL_INI_VAL(ia, r, col);
 }

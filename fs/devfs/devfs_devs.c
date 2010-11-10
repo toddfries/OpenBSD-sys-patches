@@ -25,10 +25,8 @@
  *
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vfsops.c 1.36
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.56 2009/01/28 19:58:05 ed Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.62 2010/06/09 15:29:12 jh Exp $
  */
-
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,8 +72,8 @@ SYSCTL_UINT(_vfs_devfs, OID_AUTO, rule_depth, CTLFLAG_RW,
 	&devfs_rule_depth, 0, "Max depth of ruleset include");
 
 /*
- * Helper sysctl for devname(3).  We're given a struct cdev * and return
- * the name, if any, registered by the device driver.
+ * Helper sysctl for devname(3).  We're given a dev_t and return the
+ * name, if any, registered by the device driver.
  */
 static int
 sysctl_devname(SYSCTL_HANDLER_ARGS)
@@ -83,23 +81,26 @@ sysctl_devname(SYSCTL_HANDLER_ARGS)
 	int error;
 	dev_t ud;
 	struct cdev_priv *cdp;
+	struct cdev *dev;
 
 	error = SYSCTL_IN(req, &ud, sizeof (ud));
 	if (error)
 		return (error);
 	if (ud == NODEV)
-		return(EINVAL);
-/*
-	ud ^ devfs_random();
-*/
+		return (EINVAL);
+	dev = NULL;
 	dev_lock();
 	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list)
-		if (cdp->cdp_inode == ud)
+		if (cdp->cdp_inode == ud) {
+			dev = &cdp->cdp_c;
+			dev_refl(dev);
 			break;
+		}
 	dev_unlock();
-	if (cdp == NULL)
-		return(ENOENT);
-	return(SYSCTL_OUT(req, cdp->cdp_c.si_name, strlen(cdp->cdp_c.si_name) + 1));
+	if (dev == NULL)
+		return (ENOENT);
+	error = SYSCTL_OUT(req, dev->si_name, strlen(dev->si_name) + 1);
+	dev_rel(dev);
 	return (error);
 }
 
@@ -114,17 +115,21 @@ SYSCTL_INT(_debug_sizeof, OID_AUTO, cdev_priv, CTLFLAG_RD,
     0, sizeof(struct cdev_priv), "sizeof(struct cdev_priv)");
 
 struct cdev *
-devfs_alloc(void)
+devfs_alloc(int flags)
 {
 	struct cdev_priv *cdp;
 	struct cdev *cdev;
 	struct timespec ts;
 
-	cdp = malloc(sizeof *cdp, M_CDEVP, M_USE_RESERVE | M_ZERO | M_WAITOK);
+	cdp = malloc(sizeof *cdp, M_CDEVP, M_USE_RESERVE | M_ZERO |
+	    ((flags & MAKEDEV_NOWAIT) ? M_NOWAIT : M_WAITOK));
+	if (cdp == NULL)
+		return (NULL);
 
 	cdp->cdp_dirents = &cdp->cdp_dirent0;
 	cdp->cdp_dirent0 = NULL;
 	cdp->cdp_maxdirent = 0;
+	cdp->cdp_inode = 0;
 
 	cdev = &cdp->cdp_c;
 
@@ -132,6 +137,7 @@ devfs_alloc(void)
 	LIST_INIT(&cdev->si_children);
 	vfs_timestamp(&ts);
 	cdev->si_atime = cdev->si_mtime = cdev->si_ctime = ts;
+	cdev->si_cred = NULL;
 
 	return (cdev);
 }
@@ -189,6 +195,26 @@ devfs_newdirent(char *name, int namelen)
 	mac_devfs_init(de);
 #endif
 	return (de);
+}
+
+struct devfs_dirent *
+devfs_parent_dirent(struct devfs_dirent *de)
+{
+
+	if (de->de_dirent->d_type != DT_DIR)
+		return (de->de_dir);
+
+	if (de->de_flags & (DE_DOT | DE_DOTDOT))
+		return (NULL);
+
+	de = TAILQ_FIRST(&de->de_dlist);	/* "." */
+	if (de == NULL)
+		return (NULL);
+	de = TAILQ_NEXT(de, de_list);		/* ".." */
+	if (de == NULL)
+		return (NULL);
+
+	return (de->de_dir);
 }
 
 struct devfs_dirent *

@@ -1,7 +1,7 @@
 /*
  * Memory range attribute operations, peformed on /dev/mem
  *
- * $FreeBSD: src/sys/sys/memrange.h,v 1.7 2004/08/04 18:30:31 markm Exp $
+ * $FreeBSD: src/sys/sys/memrange.h,v 1.8 2009/03/17 00:48:11 jkim Exp $
  */
 
 /* Memory range attributes */
@@ -52,6 +52,7 @@ struct mem_range_ops
 	void	(*init)(struct mem_range_softc *sc);
 	int	(*set)(struct mem_range_softc *sc, struct mem_range_desc *mrd, int *arg);
     	void	(*initAP)(struct mem_range_softc *sc);
+    	void	(*reinit)(struct mem_range_softc *sc);
 };
 
 struct mem_range_softc 
@@ -68,4 +69,3 @@ extern int mem_range_attr_get(struct mem_range_desc *mrd, int *arg);
 extern int mem_range_attr_set(struct mem_range_desc *mrd, int *arg);
 
 #endif
-

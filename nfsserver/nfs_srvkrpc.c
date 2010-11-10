@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvkrpc.c,v 1.4 2008/11/13 14:36:52 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvkrpc.c,v 1.15 2010/02/09 23:45:14 marius Exp $");
 
 #include "opt_inet6.h"
 #include "opt_kgssapi.h"
@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvkrpc.c,v 1.4 2008/11/13 14:36:52 df
 #include <sys/sysctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
+#include <sys/jail.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
@@ -74,14 +75,13 @@ __FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvkrpc.c,v 1.4 2008/11/13 14:36:52 df
 #include <rpc/replay.h>
 
 #include <nfs/xdr_subs.h>
-#include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfsserver/nfs.h>
 #include <nfsserver/nfsm_subs.h>
 #include <nfsserver/nfsrvcache.h>
 #include <nfsserver/nfs_fha.h>
 
-#ifndef NFS_LEGACYRPC
+#include <security/mac/mac_framework.h>
 
 static MALLOC_DEFINE(M_NFSSVC, "nfss_srvsock", "Nfs server structure");
 
@@ -96,8 +96,6 @@ SYSCTL_DECL(_vfs_nfsrv);
 SVCPOOL		*nfsrv_pool;
 int		nfsd_waiting = 0;
 int		nfsrv_numnfsd = 0;
-static int	nfs_realign_test;
-static int	nfs_realign_count;
 struct callout	nfsrv_callout;
 static eventhandler_tag nfsrv_nmbclusters_tag;
 
@@ -111,10 +109,6 @@ SYSCTL_INT(_vfs_nfsrv, OID_AUTO, gatherdelay, CTLFLAG_RW,
 SYSCTL_INT(_vfs_nfsrv, OID_AUTO, gatherdelay_v3, CTLFLAG_RW,
     &nfsrvw_procrastinate_v3, 0,
     "Delay in seconds for NFSv3 write gathering");
-SYSCTL_INT(_vfs_nfsrv, OID_AUTO, realign_test, CTLFLAG_RW,
-	    &nfs_realign_test, 0, "");
-SYSCTL_INT(_vfs_nfsrv, OID_AUTO, realign_count, CTLFLAG_RW,
-	    &nfs_realign_count, 0, "");
 
 static int	nfssvc_addsock(struct file *, struct thread *);
 static int	nfssvc_nfsd(struct thread *, struct nfsd_nfsd_args *);
@@ -151,6 +145,9 @@ int32_t (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *nd,
 /*
  * NFS server system calls
  */
+/*
+ * This is now called from nfssvc() in nfs/nfs_nfssvc.c.
+ */
 
 /*
  * Nfs server psuedo system call for the nfsd's
@@ -163,25 +160,14 @@ int32_t (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *nd,
  *  - sockaddr with no IPv4-mapped addresses
  *  - mask for both INET and INET6 families if there is IPv4-mapped overlap
  */
-#ifndef _SYS_SYSPROTO_H_
-struct nfssvc_args {
-	int flag;
-	caddr_t argp;
-};
-#endif
 int
-nfssvc(struct thread *td, struct nfssvc_args *uap)
+nfssvc_nfsserver(struct thread *td, struct nfssvc_args *uap)
 {
 	struct file *fp;
 	struct nfsd_addsock_args addsockarg;
 	struct nfsd_nfsd_args nfsdarg;
 	int error;
 
-	KASSERT(!mtx_owned(&Giant), ("nfssvc(): called with Giant"));
-
-	error = priv_check(td, PRIV_NFS_DAEMON);
-	if (error)
-		return (error);
 	if (uap->flag & NFSSVC_ADDSOCK) {
 		error = copyin(uap->argp, (caddr_t)&addsockarg,
 		    sizeof(addsockarg));
@@ -195,21 +181,18 @@ nfssvc(struct thread *td, struct nfssvc_args *uap)
 		}
 		error = nfssvc_addsock(fp, td);
 		fdrop(fp, td);
-	} else if (uap->flag & NFSSVC_OLDNFSD) {
+	} else if (uap->flag & NFSSVC_OLDNFSD)
 		error = nfssvc_nfsd(td, NULL);
-	} else if (uap->flag & NFSSVC_NFSD) {
-		if (!uap->argp) 
+	else if (uap->flag & NFSSVC_NFSD) {
+		if (!uap->argp)
 			return (EINVAL);
 		error = copyin(uap->argp, (caddr_t)&nfsdarg,
 		    sizeof(nfsdarg));
 		if (error)
 			return (error);
 		error = nfssvc_nfsd(td, &nfsdarg);
-	} else {
+	} else
 		error = ENXIO;
-	}
-	if (error == EINTR || error == ERESTART)
-		error = 0;
 	return (error);
 }
 
@@ -261,57 +244,6 @@ nfs_rephead(int siz, struct nfsrv_descript *nd, int err,
 	return (mreq);
 }
 
-/*
- *	nfs_realign:
- *
- *	Check for badly aligned mbuf data and realign by copying the unaligned
- *	portion of the data into a new mbuf chain and freeing the portions
- *	of the old chain that were replaced.
- *
- *	We cannot simply realign the data within the existing mbuf chain
- *	because the underlying buffers may contain other rpc commands and
- *	we cannot afford to overwrite them.
- *
- *	We would prefer to avoid this situation entirely.  The situation does
- *	not occur with NFS/UDP and is supposed to only occassionally occur
- *	with TCP.  Use vfs.nfs.realign_count and realign_test to check this.
- */
-static void
-nfs_realign(struct mbuf **pm)	/* XXX COMMON */
-{
-	struct mbuf *m;
-	struct mbuf *n = NULL;
-	int off = 0;
-
-	++nfs_realign_test;
-	while ((m = *pm) != NULL) {
-		if ((m->m_len & 0x3) || (mtod(m, intptr_t) & 0x3)) {
-			MGET(n, M_WAIT, MT_DATA);
-			if (m->m_len >= MINCLSIZE) {
-				MCLGET(n, M_WAIT);
-			}
-			n->m_len = 0;
-			break;
-		}
-		pm = &m->m_next;
-	}
-
-	/*
-	 * If n is non-NULL, loop on m copying data, then replace the
-	 * portion of the chain that had to be realigned.
-	 */
-	if (n != NULL) {
-		++nfs_realign_count;
-		while (m) {
-			m_copyback(n, off, m->m_len, mtod(m, caddr_t));
-			off += m->m_len;
-			m = m->m_next;
-		}
-		m_freem(*pm);
-		*pm = n;
-	}
-}
-
 static void
 nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 {
@@ -345,7 +277,7 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 	mreq = mrep = NULL;
 	mreq = rqst->rq_args;
 	rqst->rq_args = NULL;
-	nfs_realign(&mreq);
+	(void)nfs_realign(&mreq, M_WAIT);
 
 	/*
 	 * Note: we want rq_addr, not svc_getrpccaller for nd_nam2 -
@@ -397,6 +329,7 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 #endif
 #endif
 			    inet_ntoa(sin->sin_addr), port);
+			m_freem(mreq);
 			svcerr_weakauth(rqst);
 			svc_freereq(rqst);
 			return;
@@ -405,6 +338,7 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 
 	if (proc != nfsrv_null) {
 		if (!svc_getcred(rqst, &nd.nd_cr, &nd.nd_credflavor)) {
+			m_freem(mreq);
 			svcerr_weakauth(rqst);
 			svc_freereq(rqst);
 			return;
@@ -455,9 +389,8 @@ nfssvc_addsock(struct file *fp, struct thread *td)
 
 	siz = sb_max_adj;
 	error = soreserve(so, siz, siz);
-	if (error) {
+	if (error)
 		return (error);
-	}
 
 	/*
 	 * Steal the socket from userland so that it doesn't close
@@ -472,13 +405,14 @@ nfssvc_addsock(struct file *fp, struct thread *td)
 		fp->f_data = NULL;
 		svc_reg(xprt, NFS_PROG, NFS_VER2, nfssvc_program, NULL);
 		svc_reg(xprt, NFS_PROG, NFS_VER3, nfssvc_program, NULL);
+		SVC_RELEASE(xprt);
 	}
 
 	return (0);
 }
 
 /*
- * Called by nfssvc() for nfsds. Just loops around servicing rpc requests
+ * Called by nfssvc() for nfsds.  Just loops around servicing rpc requests
  * until it is killed by a signal.
  */
 static int
@@ -496,14 +430,16 @@ nfssvc_nfsd(struct thread *td, struct nfsd_nfsd_args *args)
 		if (error)
 			return (error);
 	} else {
-		snprintf(principal, sizeof(principal), "nfs@%s", hostname);
+		memcpy(principal, "nfs@", 4);
+		getcredhostname(td->td_ucred, principal + 4,
+		    sizeof(principal) - 4);
 	}
 #endif
 
 	/*
-	 * Only the first nfsd actually does any work. The RPC code
-	 * adds threads to it as needed. Any extra processes offered
-	 * by nfsd just exit. If nfsd is new enough, it will call us
+	 * Only the first nfsd actually does any work.  The RPC code
+	 * adds threads to it as needed.  Any extra processes offered
+	 * by nfsd just exit.  If nfsd is new enough, it will call us
 	 * once with a structure that specifies how many threads to
 	 * use.
 	 */
@@ -527,7 +463,7 @@ nfssvc_nfsd(struct thread *td, struct nfsd_nfsd_args *args)
 			nfsrv_pool->sp_minthreads = 4;
 			nfsrv_pool->sp_maxthreads = 4;
 		}
-			
+
 		svc_run(nfsrv_pool);
 
 #ifdef KGSSAPI
@@ -546,7 +482,7 @@ nfssvc_nfsd(struct thread *td, struct nfsd_nfsd_args *args)
 
 /*
  * Size the NFS server's duplicate request cache at 1/2 the
- * nmbclusters, floating within a (64, 2048) range. This is to
+ * nmbclusters, floating within a (64, 2048) range.  This is to
  * prevent all mbuf clusters being tied up in the NFS dupreq
  * cache for small values of nmbclusters.
  */
@@ -609,5 +545,3 @@ nfsrv_init(int terminating)
 
 	NFSD_LOCK();
 }
-
-#endif /* !NFS_LEGACYRPC */

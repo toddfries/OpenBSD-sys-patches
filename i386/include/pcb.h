@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)pcb.h	5.10 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/i386/include/pcb.h,v 1.57 2009/03/05 19:42:11 jhb Exp $
+ * $FreeBSD: src/sys/i386/include/pcb.h,v 1.58 2010/06/05 15:59:59 kib Exp $
  */
 
 #ifndef _I386_PCB_H_
@@ -60,7 +60,7 @@ struct pcb {
 	int     pcb_dr6;
 	int     pcb_dr7;
 
-	union	savefpu	pcb_save;
+	union	savefpu	pcb_user_save;
 	uint16_t pcb_initial_npxcw;
 	u_int	pcb_flags;
 #define	FP_SOFTFP	0x01	/* process using software fltng pnt emulator */
@@ -68,6 +68,8 @@ struct pcb {
 #define	PCB_NPXTRAP	0x04	/* npx trap pending */
 #define	PCB_NPXINITDONE	0x08	/* fpu state is initialized */
 #define	PCB_VM86CALL	0x10	/* in vm86 call */
+#define	PCB_NPXUSERINITDONE 0x20 /* user fpu state is initialized */
+#define	PCB_KERNNPX	0x40	/* kernel uses npx */
 
 	caddr_t	pcb_onfault;	/* copyin/out fault recovery */
 	int	pcb_gs;
@@ -76,6 +78,7 @@ struct pcb {
 	struct	pcb_ext	*pcb_ext;	/* optional pcb extension */
 	int	pcb_psl;	/* process status long */
 	u_long	pcb_vm86[2];	/* vm86bios scratch space */
+	union	savefpu *pcb_save;
 };
 
 #ifdef _KERNEL

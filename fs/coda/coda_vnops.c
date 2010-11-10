@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/coda/coda_vnops.c,v 1.100 2009/02/13 18:18:14 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/coda/coda_vnops.c,v 1.102 2010/04/05 20:12:54 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -331,7 +331,7 @@ coda_rdwr(struct vnode *vp, struct uio *uiop, enum uio_rw rw, int ioflag,
 	int error = 0;
 
 	MARK_ENTRY(CODA_RDWR_STATS);
-	CODADEBUG(CODA_RDWR, myprintf(("coda_rdwr(%d, %p, %d, %lld, %d)\n",
+	CODADEBUG(CODA_RDWR, myprintf(("coda_rdwr(%d, %p, %zd, %lld, %d)\n",
 	    rw, (void *)uiop->uio_iov->iov_base, uiop->uio_resid,
 	    (long long)uiop->uio_offset, uiop->uio_segflg)););
 
@@ -872,7 +872,7 @@ coda_lookup(struct vop_cachedlookup_args *ap)
 	struct cnode *cp;
 	const char *nm = cnp->cn_nameptr;
 	int len = cnp->cn_namelen;
-	CodaFid VFid;
+	struct CodaFid VFid;
 	int vtype;
 	int error = 0;
 
@@ -1009,7 +1009,7 @@ coda_create(struct vop_create_args *ap)
 	struct cnode *cp;
 	const char *nm = cnp->cn_nameptr;
 	int len = cnp->cn_namelen;
-	CodaFid VFid;
+	struct CodaFid VFid;
 	struct vattr attr;
 
 	MARK_ENTRY(CODA_CREATE_STATS);
@@ -1278,7 +1278,7 @@ coda_mkdir(struct vop_mkdir_args *ap)
 	const char *nm = cnp->cn_nameptr;
 	int len = cnp->cn_namelen;
 	struct cnode *cp;
-	CodaFid VFid;
+	struct CodaFid VFid;
 	struct vattr ova;
 
 	MARK_ENTRY(CODA_MKDIR_STATS);
@@ -1470,7 +1470,7 @@ coda_readdir(struct vop_readdir_args *ap)
 	int opened_internally = 0;
 
 	MARK_ENTRY(CODA_READDIR_STATS);
-	CODADEBUG(CODA_READDIR, myprintf(("coda_readdir(%p, %d, %lld, %d)\n",
+	CODADEBUG(CODA_READDIR, myprintf(("coda_readdir(%p, %zd, %lld, %d)\n",
 	    (void *)uiop->uio_iov->iov_base, uiop->uio_resid,
 	    (long long)uiop->uio_offset, uiop->uio_segflg)););
 
@@ -1687,7 +1687,7 @@ coda_print_cred(struct ucred *cred)
  * coda_unsave.
  */
 struct cnode *
-make_coda_node(CodaFid *fid, struct mount *vfsp, short type)
+make_coda_node(struct CodaFid *fid, struct mount *vfsp, short type)
 {
 	struct cnode *cp;
 	struct vnode *vp;

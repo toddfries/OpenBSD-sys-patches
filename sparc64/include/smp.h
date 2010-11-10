@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/smp.h,v 1.25 2008/09/18 13:56:30 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/smp.h,v 1.27 2010/02/20 23:24:19 marius Exp $
  */
 
 #ifndef	_MACHINE_SMP_H_
@@ -56,6 +56,7 @@
 #define	IPI_RENDEZVOUS	PIL_RENDEZVOUS
 #define	IPI_PREEMPT	PIL_PREEMPT
 #define	IPI_STOP	PIL_STOP
+#define	IPI_STOP_HARD	PIL_STOP
 
 #define	IPI_RETRIES	5000
 
@@ -93,7 +94,7 @@ void	cpu_mp_shutdown(void);
 typedef	void cpu_ipi_selected_t(u_int, u_long, u_long, u_long);
 extern	cpu_ipi_selected_t *cpu_ipi_selected;
 
-void	mp_init(void);
+void	mp_init(u_int cpu_impl);
 
 extern	struct mtx ipi_mtx;
 extern	struct ipi_cache_args ipi_cache_args;

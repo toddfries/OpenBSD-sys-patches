@@ -58,7 +58,7 @@
  *
  *	@(#)ipx_var.h
  *
- * $FreeBSD: src/sys/netipx/ipx_var.h,v 1.24 2007/05/11 10:38:34 rwatson Exp $
+ * $FreeBSD: src/sys/netipx/ipx_var.h,v 1.26 2009/06/21 16:11:40 rwatson Exp $
  */
 
 #ifndef _NETIPX_IPX_VAR_H_
@@ -97,7 +97,6 @@ extern struct sockaddr_ipx ipx_netmask;
 extern struct sockaddr_ipx ipx_hostmask;
 
 extern const union ipx_net ipx_zeronet;
-extern const union ipx_host ipx_zerohost;
 extern const union ipx_net ipx_broadnet;
 extern const union ipx_host ipx_broadhost;
 
@@ -124,7 +123,6 @@ int	ipx_output_type20(struct mbuf *);
 int	ipx_peeraddr(struct socket *so, struct sockaddr **nam);
 void	ipx_printhost(struct ipx_addr *addr);
 int	ipx_sockaddr(struct socket *so, struct sockaddr **nam);
-void	ipx_watch_output(struct mbuf *m, struct ifnet *ifp);
 
 #endif /* _KERNEL */
 

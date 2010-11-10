@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/audit/audit_worker.c,v 1.31 2008/11/10 22:06:24 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_worker.c,v 1.32 2009/05/11 15:33:26 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -131,7 +131,7 @@ audit_record_write(struct vnode *vp, struct ucred *cred, void *data,
 	 * that we know how we're doing on space.  Consider failure of these
 	 * operations to indicate a future inability to write to the file.
 	 */
-	error = VFS_STATFS(vp->v_mount, mnt_stat, curthread);
+	error = VFS_STATFS(vp->v_mount, mnt_stat);
 	if (error)
 		goto fail;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);

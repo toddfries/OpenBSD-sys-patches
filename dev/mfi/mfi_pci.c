@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_pci.c,v 1.15 2008/12/15 17:11:40 ambrisko Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_pci.c,v 1.16 2010/03/02 17:34:11 kib Exp $");
 
 /* PCI/PCI-X/PCIe bus interface for the LSI MegaSAS controllers */
 
@@ -105,6 +105,7 @@ static driver_t mfi_pci_driver = {
 
 static devclass_t	mfi_devclass;
 DRIVER_MODULE(mfi, pci, mfi_pci_driver, mfi_devclass, 0, 0);
+MODULE_VERSION(mfi, 1);
 
 struct mfi_ident {
 	uint16_t	vendor;

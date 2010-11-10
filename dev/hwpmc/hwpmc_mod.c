@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_mod.c,v 1.42 2008/12/13 13:07:12 jkoshy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_mod.c,v 1.51 2010/06/05 23:05:08 fabient Exp $");
 
 #include <sys/param.h>
 #include <sys/eventhandler.h>
@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_mod.c,v 1.42 2008/12/13 13:07:12 jko
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
+#include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/pmc.h>
 #include <sys/pmckern.h>
@@ -62,6 +63,12 @@ __FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_mod.c,v 1.42 2008/12/13 13:07:12 jko
 
 #include <machine/atomic.h>
 #include <machine/md_var.h>
+
+#include <vm/vm.h>
+#include <vm/vm_extern.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
 
 /*
  * Types
@@ -504,7 +511,7 @@ pmc_ri_to_classdep(struct pmc_mdep *md, int ri, int *adjri)
 	pcd = pmc_rowindex_to_classdep[ri];
 
 	KASSERT(pcd != NULL,
-	    ("[amd,%d] ri %d null pcd", __LINE__, ri));
+	    ("[pmc,%d] ri %d null pcd", __LINE__, ri));
 
 	*adjri = ri - pcd->pcd_ri;
 
@@ -790,7 +797,7 @@ pmc_link_target_process(struct pmc *pm, struct pmc_process *pp)
 	KASSERT(PMC_IS_VIRTUAL_MODE(PMC_TO_MODE(pm)),
 	    ("[pmc,%d] Attaching a non-process-virtual pmc=%p to pid=%d",
 		__LINE__, pm, pp->pp_proc->p_pid));
-	KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt < ((int) md->pmd_npmc - 1),
+	KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt <= ((int) md->pmd_npmc - 1),
 	    ("[pmc,%d] Illegal reference count %d for process record %p",
 		__LINE__, pp->pp_refcnt, (void *) pp));
 
@@ -843,7 +850,7 @@ pmc_unlink_target_process(struct pmc *pm, struct pmc_process *pp)
 	KASSERT(pm != NULL && pp != NULL,
 	    ("[pmc,%d] Null pm %p or pp %p", __LINE__, pm, pp));
 
-	KASSERT(pp->pp_refcnt >= 1 && pp->pp_refcnt < (int) md->pmd_npmc,
+	KASSERT(pp->pp_refcnt >= 1 && pp->pp_refcnt <= (int) md->pmd_npmc,
 	    ("[pmc,%d] Illegal ref count %d on process record %p",
 		__LINE__, pp->pp_refcnt, (void *) pp));
 
@@ -1110,7 +1117,7 @@ pmc_detach_one_process(struct proc *p, struct pmc *pm, int flags)
 	 * descriptor from the target hash table and unset the P_HWPMC
 	 * flag in the struct proc.
 	 */
-	KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt < (int) md->pmd_npmc,
+	KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt <= (int) md->pmd_npmc,
 	    ("[pmc,%d] Illegal refcnt %d for process struct %p",
 		__LINE__, pp->pp_refcnt, pp));
 
@@ -1241,7 +1248,7 @@ pmc_process_csw_in(struct thread *td)
 			continue;
 
 		/* increment PMC runcount */
-		atomic_add_rel_32(&pm->pm_runcount, 1);
+		atomic_add_rel_int(&pm->pm_runcount, 1);
 
 		/* configure the HWPMC we are going to use. */
 		pcd = pmc_ri_to_classdep(md, ri, &adjri);
@@ -1380,7 +1387,7 @@ pmc_process_csw_out(struct thread *td)
 			pcd->pcd_stop_pmc(cpu, adjri);
 
 		/* reduce this PMC's runcount */
-		atomic_subtract_rel_32(&pm->pm_runcount, 1);
+		atomic_subtract_rel_int(&pm->pm_runcount, 1);
 
 		/*
 		 * If this PMC is associated with this process,
@@ -1401,7 +1408,7 @@ pmc_process_csw_out(struct thread *td)
 
 			tmp = newvalue - PMC_PCPU_SAVED(cpu,ri);
 
-			PMCDBG(CSW,SWI,1,"cpu=%d ri=%d tmp=%jd", cpu, ri,
+			PMCDBG(CSW,SWO,1,"cpu=%d ri=%d tmp=%jd", cpu, ri,
 			    tmp);
 
 			if (mode == PMC_MODE_TS) {
@@ -1619,6 +1626,156 @@ pmc_log_kernel_mappings(struct pmc *pm)
 static void
 pmc_log_process_mappings(struct pmc_owner *po, struct proc *p)
 {
+	int locked;
+	vm_map_t map;
+	struct vnode *vp;
+	struct vmspace *vm;
+	vm_map_entry_t entry;
+	vm_offset_t last_end;
+	u_int last_timestamp;
+	struct vnode *last_vp;
+	vm_offset_t start_addr;
+	vm_object_t obj, lobj, tobj;
+	char *fullpath, *freepath;
+
+	last_vp = NULL;
+	last_end = (vm_offset_t) 0;
+	fullpath = freepath = NULL;
+
+	if ((vm = vmspace_acquire_ref(p)) == NULL)
+		return;
+
+	map = &vm->vm_map;
+	vm_map_lock_read(map);
+
+	for (entry = map->header.next; entry != &map->header; entry = entry->next) {
+
+		if (entry == NULL) {
+			PMCDBG(LOG,OPS,2, "hwpmc: vm_map entry unexpectedly "
+			    "NULL! pid=%d vm_map=%p\n", p->p_pid, map);
+			break;
+		}
+
+		/*
+		 * We only care about executable map entries.
+		 */
+		if ((entry->eflags & MAP_ENTRY_IS_SUB_MAP) ||
+		    !(entry->protection & VM_PROT_EXECUTE) ||
+		    (entry->object.vm_object == NULL)) {
+			continue;
+		}
+
+		obj = entry->object.vm_object;
+		VM_OBJECT_LOCK(obj);
+
+		/* 
+		 * Walk the backing_object list to find the base
+		 * (non-shadowed) vm_object.
+		 */
+		for (lobj = tobj = obj; tobj != NULL; tobj = tobj->backing_object) {
+			if (tobj != obj)
+				VM_OBJECT_LOCK(tobj);
+			if (lobj != obj)
+				VM_OBJECT_UNLOCK(lobj);
+			lobj = tobj;
+		}
+
+		/*
+		 * At this point lobj is the base vm_object and it is locked.
+		 */
+		if (lobj == NULL) {
+			PMCDBG(LOG,OPS,2, "hwpmc: lobj unexpectedly NULL! pid=%d "
+			    "vm_map=%p vm_obj=%p\n", p->p_pid, map, obj);
+			VM_OBJECT_UNLOCK(obj);
+			continue;
+		}
+
+		if (lobj->type != OBJT_VNODE || lobj->handle == NULL) {
+			if (lobj != obj)
+				VM_OBJECT_UNLOCK(lobj);
+			VM_OBJECT_UNLOCK(obj);
+			continue;
+		}
+
+		/*
+		 * Skip contiguous regions that point to the same
+		 * vnode, so we don't emit redundant MAP-IN
+		 * directives.
+		 */
+		if (entry->start == last_end && lobj->handle == last_vp) {
+			last_end = entry->end;
+			if (lobj != obj)
+				VM_OBJECT_UNLOCK(lobj);
+			VM_OBJECT_UNLOCK(obj);
+			continue;
+		}
+
+		/* 
+		 * We don't want to keep the proc's vm_map or this
+		 * vm_object locked while we walk the pathname, since
+		 * vn_fullpath() can sleep.  However, if we drop the
+		 * lock, it's possible for concurrent activity to
+		 * modify the vm_map list.  To protect against this,
+		 * we save the vm_map timestamp before we release the
+		 * lock, and check it after we reacquire the lock
+		 * below.
+		 */
+		start_addr = entry->start;
+		last_end = entry->end;
+		last_timestamp = map->timestamp;
+		vm_map_unlock_read(map);
+
+		vp = lobj->handle;
+		vref(vp);
+		if (lobj != obj)
+			VM_OBJECT_UNLOCK(lobj);
+
+		VM_OBJECT_UNLOCK(obj);
+
+		freepath = NULL;
+		pmc_getfilename(vp, &fullpath, &freepath);
+		last_vp = vp;
+
+		locked = VFS_LOCK_GIANT(vp->v_mount);
+		vrele(vp);
+		VFS_UNLOCK_GIANT(locked);
+
+		vp = NULL;
+		pmclog_process_map_in(po, p->p_pid, start_addr, fullpath);
+		if (freepath)
+			free(freepath, M_TEMP);
+
+		vm_map_lock_read(map);
+
+		/*
+		 * If our saved timestamp doesn't match, this means
+		 * that the vm_map was modified out from under us and
+		 * we can't trust our current "entry" pointer.  Do a
+		 * new lookup for this entry.  If there is no entry
+		 * for this address range, vm_map_lookup_entry() will
+		 * return the previous one, so we always want to go to
+		 * entry->next on the next loop iteration.
+		 * 
+		 * There is an edge condition here that can occur if
+		 * there is no entry at or before this address.  In
+		 * this situation, vm_map_lookup_entry returns
+		 * &map->header, which would cause our loop to abort
+		 * without processing the rest of the map.  However,
+		 * in practice this will never happen for process
+		 * vm_map.  This is because the executable's text
+		 * segment is the first mapping in the proc's address
+		 * space, and this mapping is never removed until the
+		 * process exits, so there will always be a non-header
+		 * entry at or before the requested address for
+		 * vm_map_lookup_entry to return.
+		 */
+		if (map->timestamp != last_timestamp)
+			vm_map_lookup_entry(map, last_end - 1, &entry);
+	}
+
+	vm_map_unlock_read(map);
+	vmspace_free(vm);
+	return;
 }
 
 /*
@@ -1785,7 +1942,7 @@ pmc_hook_handler(struct thread *td, int function, void *arg)
 					pmc_detach_one_process(td->td_proc,
 					    pm, PMC_FLAG_NONE);
 
-		KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt < (int) md->pmd_npmc,
+		KASSERT(pp->pp_refcnt >= 0 && pp->pp_refcnt <= (int) md->pmd_npmc,
 		    ("[pmc,%d] Illegal ref count %d on pp %p", __LINE__,
 			pp->pp_refcnt, pp));
 
@@ -1897,7 +2054,7 @@ pmc_allocate_owner_descriptor(struct proc *p)
 
 	/* allocate space for N pointers and one descriptor struct */
 	po = malloc(sizeof(struct pmc_owner), M_PMC, M_WAITOK|M_ZERO);
-	po->po_sscount = po->po_error = po->po_flags = 0;
+	po->po_sscount = po->po_error = po->po_flags = po->po_logprocmaps = 0;
 	po->po_file  = NULL;
 	po->po_owner = p;
 	po->po_kthread = NULL;
@@ -2518,10 +2675,17 @@ pmc_start(struct pmc *pm)
 			PMCDBG(PMC,OPS,1, "po=%p in global list", po);
 		}
 		po->po_sscount++;
-	}
 
-	/* Log mapping information for all processes in the system. */
-	pmc_log_all_process_mappings(po);
+		/*
+		 * Log mapping information for all existing processes in the
+		 * system.  Subsequent mappings are logged as they happen;
+		 * see pmc_process_mmap().
+		 */
+		if (po->po_logprocmaps == 0) {
+			pmc_log_all_process_mappings(po);
+			po->po_logprocmaps = 1;
+		}
+	}
 
 	/*
 	 * Move to the CPU associated with this
@@ -2663,7 +2827,7 @@ static const char *pmc_op_to_name[] = {
 static int
 pmc_syscall_handler(struct thread *td, void *syscall_args)
 {
-	int error, is_sx_downgraded, op;
+	int error, is_sx_downgraded, is_sx_locked, op;
 	struct pmc_syscall_args *c;
 	void *arg;
 
@@ -2672,6 +2836,7 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 	DROP_GIANT();
 
 	is_sx_downgraded = 0;
+	is_sx_locked = 1;
 
 	c = (struct pmc_syscall_args *) syscall_args;
 
@@ -2720,9 +2885,11 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 		 * a log file configured, flush its buffers and
 		 * de-configure it.
 		 */
-		if (cl.pm_logfd >= 0)
+		if (cl.pm_logfd >= 0) {
+			sx_xunlock(&pmc_sx);
+			is_sx_locked = 0;
 			error = pmclog_configure_log(md, po, cl.pm_logfd);
-		else if (po->po_flags & PMC_PO_OWNS_LOGFILE) {
+		} else if (po->po_flags & PMC_PO_OWNS_LOGFILE) {
 			pmclog_process_closelog(po);
 			error = pmclog_flush(po);
 			if (error == 0) {
@@ -3084,9 +3251,6 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 					break;
 			}
 		}
-
-		if (error)
-			break;
 
 		/*
 		 * Look for valid values for 'pm_flags'
@@ -3772,10 +3936,12 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 		break;
 	}
 
-	if (is_sx_downgraded)
-		sx_sunlock(&pmc_sx);
-	else
-		sx_xunlock(&pmc_sx);
+	if (is_sx_locked != 0) {
+		if (is_sx_downgraded)
+			sx_sunlock(&pmc_sx);
+		else
+			sx_xunlock(&pmc_sx);
+	}
 
 	if (error)
 		atomic_add_int(&pmc_stats.pm_syscall_errors, 1);
@@ -3803,9 +3969,11 @@ pmc_post_callchain_callback(void)
 
 	td = curthread;
 
-	KASSERT((td->td_pflags & TDP_CALLCHAIN) == 0,
-	    ("[pmc,%d] thread %p already marked for callchain capture",
-		__LINE__, (void *) td));
+	/*
+	 * If there is multiple PMCs for the same interrupt ignore new post
+	 */
+	if (td->td_pflags & TDP_CALLCHAIN)
+		return;
 
 	/*
 	 * Mark this thread as needing callchain capture.
@@ -3874,7 +4042,7 @@ pmc_process_interrupt(int cpu, struct pmc *pm, struct trapframe *tf,
 	    ("[pmc,%d] pm=%p runcount %d", __LINE__, (void *) pm,
 		pm->pm_runcount));
 
-	atomic_add_rel_32(&pm->pm_runcount, 1);	/* hold onto PMC */
+	atomic_add_rel_int(&pm->pm_runcount, 1);	/* hold onto PMC */
 	ps->ps_pmc = pm;
 	if ((td = curthread) && td->td_proc)
 		ps->ps_pid = td->td_proc->p_pid;
@@ -4075,7 +4243,7 @@ pmc_process_samples(int cpu)
 
 	entrydone:
 		ps->ps_nsamples = 0;	/* mark entry as free */
-		atomic_subtract_rel_32(&pm->pm_runcount, 1);
+		atomic_subtract_rel_int(&pm->pm_runcount, 1);
 
 		/* increment read pointer, modulo sample size */
 		if (++ps == psb->ps_fence)
@@ -4247,7 +4415,7 @@ pmc_process_exit(void *arg __unused, struct proc *p)
 				mtx_pool_unlock_spin(pmc_mtxpool, pm);
 			}
 
-			atomic_subtract_rel_32(&pm->pm_runcount,1);
+			atomic_subtract_rel_int(&pm->pm_runcount,1);
 
 			KASSERT((int) pm->pm_runcount >= 0,
 			    ("[pmc,%d] runcount is %d", __LINE__, ri));

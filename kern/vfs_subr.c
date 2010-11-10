@@ -39,10 +39,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_subr.c,v 1.759 2009/03/02 20:51:39 kan Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_subr.c,v 1.784 2010/06/03 10:20:08 kib Exp $");
 
 #include "opt_ddb.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -111,17 +110,9 @@ static void	vnlru_free(int);
 static void	vgonel(struct vnode *);
 static void	vfs_knllock(void *arg);
 static void	vfs_knlunlock(void *arg);
-static int	vfs_knllocked(void *arg);
+static void	vfs_knl_assert_locked(void *arg);
+static void	vfs_knl_assert_unlocked(void *arg);
 static void	destroy_vpollinfo(struct vpollinfo *vi);
-
-/*
- * Enable Giant pushdown based on whether or not the vm is mpsafe in this
- * build.  Without mpsafevm the buffer cache can not run Giant free.
- */
-int mpsafe_vfs = 1;
-TUNABLE_INT("debug.mpsafevfs", &mpsafe_vfs);
-SYSCTL_INT(_debug, OID_AUTO, mpsafevfs, CTLFLAG_RD, &mpsafe_vfs, 0,
-    "MPSAFE VFS");
 
 /*
  * Number of vnodes in existence.  Increased whenever getnewvnode()
@@ -160,6 +151,10 @@ SYSCTL_LONG(_vfs, OID_AUTO, wantfreevnodes, CTLFLAG_RW, &wantfreevnodes, 0, "");
 /* Number of vnodes in the free list. */
 static u_long freevnodes;
 SYSCTL_LONG(_vfs, OID_AUTO, freevnodes, CTLFLAG_RD, &freevnodes, 0, "");
+
+static int vlru_allow_cache_src;
+SYSCTL_INT(_vfs, OID_AUTO, vlru_allow_cache_src, CTLFLAG_RW,
+    &vlru_allow_cache_src, 0, "Allow vlru to reclaim source vnode");
 
 /*
  * Various variables used for debugging the new implementation of
@@ -467,20 +462,11 @@ vfs_suser(struct mount *mp, struct thread *td)
 		return (EPERM);
 
 	/*
-	 * If the file system was mounted outside a jail and a jailed thread
-	 * tries to access it, deny immediately.
+	 * If the file system was mounted outside the jail of the calling
+	 * thread, deny immediately.
 	 */
-	if (!jailed(mp->mnt_cred) && jailed(td->td_ucred))
+	if (prison_check(td->td_ucred, mp->mnt_cred) != 0)
 		return (EPERM);
-
-	/*
-	 * If the file system was mounted inside different jail that the jail of
-	 * the calling thread, deny immediately.
-	 */
-	if (jailed(mp->mnt_cred) && jailed(td->td_ucred) &&
-	    mp->mnt_cred->cr_prison != td->td_ucred->cr_prison) {
-		return (EPERM);
-	}
 
 	/*
 	 * If file system supports delegated administration, we don't check
@@ -661,7 +647,9 @@ vlrureclaim(struct mount *mp)
 		 * If it's been deconstructed already, it's still
 		 * referenced, or it exceeds the trigger, skip it.
 		 */
-		if (vp->v_usecount || !LIST_EMPTY(&(vp)->v_cache_src) ||
+		if (vp->v_usecount ||
+		    (!vlru_allow_cache_src &&
+			!LIST_EMPTY(&(vp)->v_cache_src)) ||
 		    (vp->v_iflag & VI_DOOMED) != 0 || (vp->v_object != NULL &&
 		    vp->v_object->resident_page_count > trigger)) {
 			VI_UNLOCK(vp);
@@ -686,7 +674,9 @@ vlrureclaim(struct mount *mp)
 		 * interlock, the other thread will be unable to drop the
 		 * vnode lock before our VOP_LOCK() call fails.
 		 */
-		if (vp->v_usecount || !LIST_EMPTY(&(vp)->v_cache_src) ||
+		if (vp->v_usecount ||
+		    (!vlru_allow_cache_src &&
+			!LIST_EMPTY(&(vp)->v_cache_src)) ||
 		    (vp->v_object != NULL &&
 		    vp->v_object->resident_page_count > trigger)) {
 			VOP_UNLOCK(vp, LK_INTERLOCK);
@@ -810,7 +800,6 @@ vnlru_proc(void)
 		}
 		mtx_unlock(&mountlist_mtx);
 		if (done == 0) {
-			EVENTHANDLER_INVOKE(vfs_lowvnodes, desiredvnodes / 10);
 #if 0
 			/* These messages are temporary debugging aids */
 			if (vnlru_nowhere < 5)
@@ -832,6 +821,19 @@ static struct kproc_desc vnlru_kp = {
 };
 SYSINIT(vnlru, SI_SUB_KTHREAD_UPDATE, SI_ORDER_FIRST, kproc_start,
     &vnlru_kp);
+ 
+static void
+vfs_lowmem(void *arg __unused)
+{
+
+	/*
+	 * On low memory condition free 1/8th of the free vnodes.
+	 */
+	mtx_lock(&vnode_free_list_mtx);
+	vnlru_free(freevnodes / 8);
+	mtx_unlock(&vnode_free_list_mtx);
+}
+EVENTHANDLER_DEFINE(vm_lowmem, vfs_lowmem, NULL, 0);
 
 /*
  * Routines having to do with the management of the vnode table.
@@ -860,6 +862,7 @@ vdestroy(struct vnode *vp)
 	VNASSERT(bo->bo_dirty.bv_root == NULL, vp, ("dirtyblkroot not NULL"));
 	VNASSERT(TAILQ_EMPTY(&vp->v_cache_dst), vp, ("vp has namecache dst"));
 	VNASSERT(LIST_EMPTY(&vp->v_cache_src), vp, ("vp has namecache src"));
+	VNASSERT(vp->v_cache_dd == NULL, vp, ("vp has namecache for .."));
 	VI_UNLOCK(vp);
 #ifdef MAC
 	mac_vnode_destroy(vp);
@@ -1387,7 +1390,7 @@ restartsync:
 
 /*
  * buf_splay() - splay tree core for the clean/dirty list of buffers in
- * 		 a vnode.
+ *		 a vnode.
  *
  *	NOTE: We have to deal with the special case of a background bitmap
  *	buffer, a situation where two buffers will have the same logical
@@ -2109,13 +2112,13 @@ vget(struct vnode *vp, int flags, struct thread *td)
 	/* Upgrade our holdcnt to a usecount. */
 	v_upgrade_usecount(vp);
 	/*
- 	 * We don't guarantee that any particular close will
+	 * We don't guarantee that any particular close will
 	 * trigger inactive processing so just make a best effort
 	 * here at preventing a reference to a removed file.  If
 	 * we don't succeed no harm is done.
 	 */
 	if (vp->v_iflag & VI_OWEINACT) {
-		if (VOP_ISLOCKED(vp) == LK_EXCLUSIVE && 
+		if (VOP_ISLOCKED(vp) == LK_EXCLUSIVE &&
 		    (flags & LK_NOWAIT) == 0)
 			vinactive(vp, td);
 		vp->v_iflag &= ~VI_OWEINACT;
@@ -2158,37 +2161,44 @@ vrefcnt(struct vnode *vp)
 	return (usecnt);
 }
 
+#define	VPUTX_VRELE	1
+#define	VPUTX_VPUT	2
+#define	VPUTX_VUNREF	3
 
-/*
- * Vnode put/release.
- * If count drops to zero, call inactive routine and return to freelist.
- */
-void
-vrele(struct vnode *vp)
+static void
+vputx(struct vnode *vp, int func)
 {
-	struct thread *td = curthread;	/* XXX */
+	int error;
 
-	KASSERT(vp != NULL, ("vrele: null vp"));
+	KASSERT(vp != NULL, ("vputx: null vp"));
+	if (func == VPUTX_VUNREF)
+		ASSERT_VOP_ELOCKED(vp, "vunref");
+	else if (func == VPUTX_VPUT)
+		ASSERT_VOP_LOCKED(vp, "vput");
+	else
+		KASSERT(func == VPUTX_VRELE, ("vputx: wrong func"));
 	VFS_ASSERT_GIANT(vp->v_mount);
-
+	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	VI_LOCK(vp);
 
 	/* Skip this v_writecount check if we're going to panic below. */
 	VNASSERT(vp->v_writecount < vp->v_usecount || vp->v_usecount < 1, vp,
-	    ("vrele: missed vn_close"));
-	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
+	    ("vputx: missed vn_close"));
+	error = 0;
 
 	if (vp->v_usecount > 1 || ((vp->v_iflag & VI_DOINGINACT) &&
 	    vp->v_usecount == 1)) {
+		if (func == VPUTX_VPUT)
+			VOP_UNLOCK(vp, 0);
 		v_decr_usecount(vp);
 		return;
 	}
+
 	if (vp->v_usecount != 1) {
 #ifdef DIAGNOSTIC
-		vprint("vrele: negative ref count", vp);
+		vprint("vputx: negative ref count", vp);
 #endif
-		VI_UNLOCK(vp);
-		panic("vrele: negative ref cnt");
+		panic("vputx: negative ref cnt");
 	}
 	CTR2(KTR_VFS, "%s: return vnode %p to the freelist", __func__, vp);
 	/*
@@ -2202,19 +2212,33 @@ vrele(struct vnode *vp)
 	 * as VI_DOINGINACT to avoid recursion.
 	 */
 	vp->v_iflag |= VI_OWEINACT;
-	if (vn_lock(vp, LK_EXCLUSIVE | LK_INTERLOCK) == 0) {
+	if (func == VPUTX_VRELE) {
+		error = vn_lock(vp, LK_EXCLUSIVE | LK_INTERLOCK);
 		VI_LOCK(vp);
-		if (vp->v_usecount > 0)
-			vp->v_iflag &= ~VI_OWEINACT;
+	} else if (func == VPUTX_VPUT && VOP_ISLOCKED(vp) != LK_EXCLUSIVE) {
+		error = VOP_LOCK(vp, LK_UPGRADE | LK_INTERLOCK | LK_NOWAIT);
+		VI_LOCK(vp);
+	}
+	if (vp->v_usecount > 0)
+		vp->v_iflag &= ~VI_OWEINACT;
+	if (error == 0) {
 		if (vp->v_iflag & VI_OWEINACT)
-			vinactive(vp, td);
-		VOP_UNLOCK(vp, 0);
-	} else {
-		VI_LOCK(vp);
-		if (vp->v_usecount > 0)
-			vp->v_iflag &= ~VI_OWEINACT;
+			vinactive(vp, curthread);
+		if (func != VPUTX_VUNREF)
+			VOP_UNLOCK(vp, 0);
 	}
 	vdropl(vp);
+}
+
+/*
+ * Vnode put/release.
+ * If count drops to zero, call inactive routine and return to freelist.
+ */
+void
+vrele(struct vnode *vp)
+{
+
+	vputx(vp, VPUTX_VRELE);
 }
 
 /*
@@ -2225,56 +2249,18 @@ vrele(struct vnode *vp)
 void
 vput(struct vnode *vp)
 {
-	struct thread *td = curthread;	/* XXX */
-	int error;
 
-	KASSERT(vp != NULL, ("vput: null vp"));
-	ASSERT_VOP_LOCKED(vp, "vput");
-	VFS_ASSERT_GIANT(vp->v_mount);
-	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
-	VI_LOCK(vp);
-	/* Skip this v_writecount check if we're going to panic below. */
-	VNASSERT(vp->v_writecount < vp->v_usecount || vp->v_usecount < 1, vp,
-	    ("vput: missed vn_close"));
-	error = 0;
+	vputx(vp, VPUTX_VPUT);
+}
 
-	if (vp->v_usecount > 1 || ((vp->v_iflag & VI_DOINGINACT) &&
-	    vp->v_usecount == 1)) {
-		VOP_UNLOCK(vp, 0);
-		v_decr_usecount(vp);
-		return;
-	}
+/*
+ * Release an exclusively locked vnode. Do not unlock the vnode lock.
+ */
+void
+vunref(struct vnode *vp)
+{
 
-	if (vp->v_usecount != 1) {
-#ifdef DIAGNOSTIC
-		vprint("vput: negative ref count", vp);
-#endif
-		panic("vput: negative ref cnt");
-	}
-	CTR2(KTR_VFS, "%s: return to freelist the vnode %p", __func__, vp);
-	/*
-	 * We want to hold the vnode until the inactive finishes to
-	 * prevent vgone() races.  We drop the use count here and the
-	 * hold count below when we're done.
-	 */
-	v_decr_useonly(vp);
-	vp->v_iflag |= VI_OWEINACT;
-	if (VOP_ISLOCKED(vp) != LK_EXCLUSIVE) {
-		error = VOP_LOCK(vp, LK_UPGRADE|LK_INTERLOCK|LK_NOWAIT);
-		VI_LOCK(vp);
-		if (error) {
-			if (vp->v_usecount > 0)
-				vp->v_iflag &= ~VI_OWEINACT;
-			goto done;
-		}
-	}
-	if (vp->v_usecount > 0)
-		vp->v_iflag &= ~VI_OWEINACT;
-	if (vp->v_iflag & VI_OWEINACT)
-		vinactive(vp, td);
-	VOP_UNLOCK(vp, 0);
-done:
-	vdropl(vp);
+	vputx(vp, VPUTX_VUNREF);
 }
 
 /*
@@ -2388,7 +2374,7 @@ SYSCTL_INT(_debug, OID_AUTO, busyprt, CTLFLAG_RW, &busyprt, 0, "");
 #endif
 
 int
-vflush( struct mount *mp, int rootrefs, int flags, struct thread *td)
+vflush(struct mount *mp, int rootrefs, int flags, struct thread *td)
 {
 	struct vnode *vp, *mvp, *rootvp = NULL;
 	struct vattr vattr;
@@ -2403,18 +2389,16 @@ vflush( struct mount *mp, int rootrefs, int flags, struct thread *td)
 		 * Get the filesystem root vnode. We can vput() it
 		 * immediately, since with rootrefs > 0, it won't go away.
 		 */
-		if ((error = VFS_ROOT(mp, LK_EXCLUSIVE, &rootvp, td)) != 0) {
+		if ((error = VFS_ROOT(mp, LK_EXCLUSIVE, &rootvp)) != 0) {
 			CTR2(KTR_VFS, "%s: vfs_root lookup failed with %d",
 			    __func__, error);
 			return (error);
 		}
 		vput(rootvp);
-
 	}
 	MNT_ILOCK(mp);
 loop:
 	MNT_VNODE_FOREACH(vp, mp, mvp) {
-
 		VI_LOCK(vp);
 		vholdl(vp);
 		MNT_IUNLOCK(mp);
@@ -2601,7 +2585,7 @@ vgonel(struct vnode *vp)
 	/*
 	 * Clear the advisory locks and wake up waiting threads.
 	 */
-	lf_purgelocks(vp, &(vp->v_lockf));
+	(void)VOP_ADVLOCKPURGE(vp);
 	/*
 	 * Delete from old mount point vnode list.
 	 */
@@ -2706,14 +2690,12 @@ vn_printf(struct vnode *vp, const char *fmt, ...)
 		strlcat(buf, "|VI_DOOMED", sizeof(buf));
 	if (vp->v_iflag & VI_FREE)
 		strlcat(buf, "|VI_FREE", sizeof(buf));
-	if (vp->v_iflag & VI_OBJDIRTY)
-		strlcat(buf, "|VI_OBJDIRTY", sizeof(buf));
 	if (vp->v_iflag & VI_DOINGINACT)
 		strlcat(buf, "|VI_DOINGINACT", sizeof(buf));
 	if (vp->v_iflag & VI_OWEINACT)
 		strlcat(buf, "|VI_OWEINACT", sizeof(buf));
 	flags = vp->v_iflag & ~(VI_MOUNT | VI_AGE | VI_DOOMED | VI_FREE |
-	    VI_OBJDIRTY | VI_DOINGINACT | VI_OWEINACT);
+	    VI_DOINGINACT | VI_OWEINACT);
 	if (flags != 0) {
 		snprintf(buf2, sizeof(buf2), "|VI(0x%lx)", flags);
 		strlcat(buf, buf2, sizeof(buf));
@@ -2778,6 +2760,7 @@ DB_SHOW_COMMAND(vnode, db_show_vnode)
 DB_SHOW_COMMAND(mount, db_show_mount)
 {
 	struct mount *mp;
+	struct vfsopt *opt;
 	struct statfs *sp;
 	struct vnode *vp;
 	char buf[512];
@@ -2826,6 +2809,7 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_FLAG(MNT_NOATIME);
 	MNT_FLAG(MNT_NOCLUSTERR);
 	MNT_FLAG(MNT_NOCLUSTERW);
+	MNT_FLAG(MNT_NFS4ACLS);
 	MNT_FLAG(MNT_EXRDONLY);
 	MNT_FLAG(MNT_EXPORTED);
 	MNT_FLAG(MNT_DEFEXPORTED);
@@ -2843,6 +2827,7 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_FLAG(MNT_FORCE);
 	MNT_FLAG(MNT_SNAPSHOT);
 	MNT_FLAG(MNT_BYFSID);
+	MNT_FLAG(MNT_SOFTDEP);
 #undef MNT_FLAG
 	if (flags != 0) {
 		if (buf[0] != '\0')
@@ -2866,14 +2851,18 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 	MNT_KERN_FLAG(MNTK_ASYNC);
 	MNT_KERN_FLAG(MNTK_SOFTDEP);
 	MNT_KERN_FLAG(MNTK_NOINSMNTQ);
+	MNT_KERN_FLAG(MNTK_DRAINING);
+	MNT_KERN_FLAG(MNTK_REFEXPIRE);
+	MNT_KERN_FLAG(MNTK_EXTENDED_SHARED);
+	MNT_KERN_FLAG(MNTK_SHARED_WRITES);
 	MNT_KERN_FLAG(MNTK_UNMOUNT);
 	MNT_KERN_FLAG(MNTK_MWAIT);
 	MNT_KERN_FLAG(MNTK_SUSPEND);
 	MNT_KERN_FLAG(MNTK_SUSPEND2);
 	MNT_KERN_FLAG(MNTK_SUSPENDED);
 	MNT_KERN_FLAG(MNTK_MPSAFE);
-	MNT_KERN_FLAG(MNTK_NOKNOTE);
 	MNT_KERN_FLAG(MNTK_LOOKUP_SHARED);
+	MNT_KERN_FLAG(MNTK_NOKNOTE);
 #undef MNT_KERN_FLAG
 	if (flags != 0) {
 		if (buf[0] != '\0')
@@ -2882,6 +2871,18 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 		    "0x%08x", flags);
 	}
 	db_printf("    mnt_kern_flag = %s\n", buf);
+
+	db_printf("    mnt_opt = ");
+	opt = TAILQ_FIRST(mp->mnt_opt);
+	if (opt != NULL) {
+		db_printf("%s", opt->name);
+		opt = TAILQ_NEXT(opt, link);
+		while (opt != NULL) {
+			db_printf(", %s", opt->name);
+			opt = TAILQ_NEXT(opt, link);
+		}
+	}
+	db_printf("\n");
 
 	sp = &mp->mnt_stat;
 	db_printf("    mnt_stat = { version=%u type=%u flags=0x%016jx "
@@ -2899,7 +2900,7 @@ DB_SHOW_COMMAND(mount, db_show_mount)
 
 	db_printf("    mnt_cred = { uid=%u ruid=%u",
 	    (u_int)mp->mnt_cred->cr_uid, (u_int)mp->mnt_cred->cr_ruid);
-	if (mp->mnt_cred->cr_prison != NULL)
+	if (jailed(mp->mnt_cred))
 		db_printf(", jail=%d", mp->mnt_cred->cr_prison->pr_id);
 	db_printf(" }\n");
 	db_printf("    mnt_ref = %d\n", mp->mnt_ref);
@@ -3194,7 +3195,8 @@ vfs_msync(struct mount *mp, int flags)
 	MNT_ILOCK(mp);
 	MNT_VNODE_FOREACH(vp, mp, mvp) {
 		VI_LOCK(vp);
-		if ((vp->v_iflag & VI_OBJDIRTY) &&
+		obj = vp->v_object;
+		if (obj != NULL && (obj->flags & OBJ_MIGHTBEDIRTY) != 0 &&
 		    (flags == MNT_WAIT || VOP_ISLOCKED(vp) == 0)) {
 			MNT_IUNLOCK(mp);
 			if (!vget(vp,
@@ -3288,7 +3290,7 @@ v_addpollinfo(struct vnode *vp)
 	vi = uma_zalloc(vnodepoll_zone, M_WAITOK);
 	mtx_init(&vi->vpi_lock, "vnode pollinfo", NULL, MTX_DEF);
 	knlist_init(&vi->vpi_selinfo.si_note, vp, vfs_knllock,
-	    vfs_knlunlock, vfs_knllocked);
+	    vfs_knlunlock, vfs_knl_assert_locked, vfs_knl_assert_unlocked);
 	VI_LOCK(vp);
 	if (vp->v_pollinfo != NULL) {
 		VI_UNLOCK(vp);
@@ -3447,7 +3449,7 @@ sync_fsync(struct vop_fsync_args *ap)
 	mp->mnt_kern_flag &= ~MNTK_ASYNC;
 	MNT_IUNLOCK(mp);
 	vfs_msync(mp, MNT_NOWAIT);
-	error = VFS_SYNC(mp, MNT_LAZY, ap->a_td);
+	error = VFS_SYNC(mp, MNT_LAZY);
 	MNT_ILOCK(mp);
 	mp->mnt_noasync--;
 	if ((mp->mnt_flag & MNT_ASYNC) != 0 && mp->mnt_noasync == 0)
@@ -3536,6 +3538,11 @@ vaccess(enum vtype type, mode_t file_mode, uid_t file_uid, gid_t file_gid,
 {
 	accmode_t dac_granted;
 	accmode_t priv_granted;
+
+	KASSERT((accmode & ~(VEXEC | VWRITE | VREAD | VADMIN | VAPPEND)) == 0,
+	    ("invalid bit in accmode"));
+	KASSERT((accmode & VAPPEND) == 0 || (accmode & VWRITE),
+	    ("VAPPEND without VWRITE"));
 
 	/*
 	 * Look for a normal, non-privileged way to access the file/directory
@@ -3760,6 +3767,20 @@ assert_vop_slocked(struct vnode *vp, const char *str)
 #endif /* DEBUG_VFS_LOCKS */
 
 void
+vop_rename_fail(struct vop_rename_args *ap)
+{
+
+	if (ap->a_tvp != NULL)
+		vput(ap->a_tvp);
+	if (ap->a_tdvp == ap->a_tvp)
+		vrele(ap->a_tdvp);
+	else
+		vput(ap->a_tdvp);
+	vrele(ap->a_fdvp);
+	vrele(ap->a_fvp);
+}
+
+void
 vop_rename_pre(void *ap)
 {
 	struct vop_rename_args *a = ap;
@@ -3772,9 +3793,10 @@ vop_rename_pre(void *ap)
 	ASSERT_VI_UNLOCKED(a->a_fdvp, "VOP_RENAME");
 
 	/* Check the source (from). */
-	if (a->a_tdvp != a->a_fdvp && a->a_tvp != a->a_fdvp)
+	if (a->a_tdvp->v_vnlock != a->a_fdvp->v_vnlock &&
+	    (a->a_tvp == NULL || a->a_tvp->v_vnlock != a->a_fdvp->v_vnlock))
 		ASSERT_VOP_UNLOCKED(a->a_fdvp, "vop_rename: fdvp locked");
-	if (a->a_tvp != a->a_fvp)
+	if (a->a_tvp == NULL || a->a_tvp->v_vnlock != a->a_fvp->v_vnlock)
 		ASSERT_VOP_UNLOCKED(a->a_fvp, "vop_rename: fvp locked");
 
 	/* Check the target. */
@@ -4003,7 +4025,7 @@ static struct knlist fs_knlist;
 static void
 vfs_event_init(void *arg)
 {
-	knlist_init(&fs_knlist, NULL, NULL, NULL, NULL);
+	knlist_init_mtx(&fs_knlist, NULL);
 }
 /* XXX - correct order? */
 SYSINIT(vfs_knlist, SI_SUB_VFS, SI_ORDER_ANY, vfs_event_init, NULL);
@@ -4019,8 +4041,12 @@ static int	filt_fsattach(struct knote *kn);
 static void	filt_fsdetach(struct knote *kn);
 static int	filt_fsevent(struct knote *kn, long hint);
 
-struct filterops fs_filtops =
-	{ 0, filt_fsattach, filt_fsdetach, filt_fsevent };
+struct filterops fs_filtops = {
+	.f_isfd = 0,
+	.f_attach = filt_fsattach,
+	.f_detach = filt_fsdetach,
+	.f_event = filt_fsevent
+};
 
 static int
 filt_fsattach(struct knote *kn)
@@ -4093,12 +4119,21 @@ static int	filt_vfsread(struct knote *kn, long hint);
 static int	filt_vfswrite(struct knote *kn, long hint);
 static int	filt_vfsvnode(struct knote *kn, long hint);
 static void	filt_vfsdetach(struct knote *kn);
-static struct filterops vfsread_filtops =
-	{ 1, NULL, filt_vfsdetach, filt_vfsread };
-static struct filterops vfswrite_filtops =
-	{ 1, NULL, filt_vfsdetach, filt_vfswrite };
-static struct filterops vfsvnode_filtops =
-	{ 1, NULL, filt_vfsdetach, filt_vfsvnode };
+static struct filterops vfsread_filtops = {
+	.f_isfd = 1,
+	.f_detach = filt_vfsdetach,
+	.f_event = filt_vfsread
+};
+static struct filterops vfswrite_filtops = {
+	.f_isfd = 1,
+	.f_detach = filt_vfsdetach,
+	.f_event = filt_vfswrite
+};
+static struct filterops vfsvnode_filtops = {
+	.f_isfd = 1,
+	.f_detach = filt_vfsdetach,
+	.f_event = filt_vfsvnode
+};
 
 static void
 vfs_knllock(void *arg)
@@ -4116,12 +4151,24 @@ vfs_knlunlock(void *arg)
 	VOP_UNLOCK(vp, 0);
 }
 
-static int
-vfs_knllocked(void *arg)
+static void
+vfs_knl_assert_locked(void *arg)
 {
+#ifdef DEBUG_VFS_LOCKS
 	struct vnode *vp = arg;
 
-	return (VOP_ISLOCKED(vp) == LK_EXCLUSIVE);
+	ASSERT_VOP_LOCKED(vp, "vfs_knl_assert_locked");
+#endif
+}
+
+static void
+vfs_knl_assert_unlocked(void *arg)
+{
+#ifdef DEBUG_VFS_LOCKS
+	struct vnode *vp = arg;
+
+	ASSERT_VOP_UNLOCKED(vp, "vfs_knl_assert_unlocked");
+#endif
 }
 
 int
@@ -4174,27 +4221,37 @@ filt_vfsread(struct knote *kn, long hint)
 {
 	struct vnode *vp = (struct vnode *)kn->kn_hook;
 	struct vattr va;
+	int res;
 
 	/*
 	 * filesystem is gone, so set the EOF flag and schedule
 	 * the knote for deletion.
 	 */
 	if (hint == NOTE_REVOKE) {
+		VI_LOCK(vp);
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		VI_UNLOCK(vp);
 		return (1);
 	}
 
 	if (VOP_GETATTR(vp, &va, curthread->td_ucred))
 		return (0);
 
+	VI_LOCK(vp);
 	kn->kn_data = va.va_size - kn->kn_fp->f_offset;
-	return (kn->kn_data != 0);
+	res = (kn->kn_data != 0);
+	VI_UNLOCK(vp);
+	return (res);
 }
 
 /*ARGSUSED*/
 static int
 filt_vfswrite(struct knote *kn, long hint)
 {
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+
+	VI_LOCK(vp);
+
 	/*
 	 * filesystem is gone, so set the EOF flag and schedule
 	 * the knote for deletion.
@@ -4203,19 +4260,27 @@ filt_vfswrite(struct knote *kn, long hint)
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
 
 	kn->kn_data = 0;
+	VI_UNLOCK(vp);
 	return (1);
 }
 
 static int
 filt_vfsvnode(struct knote *kn, long hint)
 {
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+	int res;
+
+	VI_LOCK(vp);
 	if (kn->kn_sfflags & hint)
 		kn->kn_fflags |= hint;
 	if (hint == NOTE_REVOKE) {
 		kn->kn_flags |= EV_EOF;
+		VI_UNLOCK(vp);
 		return (1);
 	}
-	return (kn->kn_fflags != 0);
+	res = (kn->kn_fflags != 0);
+	VI_UNLOCK(vp);
+	return (res);
 }
 
 int
@@ -4256,7 +4321,58 @@ vfs_read_dirent(struct vop_readdir_args *ap, struct dirent *dp, off_t off)
 void
 vfs_mark_atime(struct vnode *vp, struct ucred *cred)
 {
+	struct mount *mp;
 
-	if ((vp->v_mount->mnt_flag & (MNT_NOATIME | MNT_RDONLY)) == 0)
+	mp = vp->v_mount;
+	VFS_ASSERT_GIANT(mp);
+	ASSERT_VOP_LOCKED(vp, "vfs_mark_atime");
+	if (mp != NULL && (mp->mnt_flag & (MNT_NOATIME | MNT_RDONLY)) == 0)
 		(void)VOP_MARKATIME(vp);
+}
+
+/*
+ * The purpose of this routine is to remove granularity from accmode_t,
+ * reducing it into standard unix access bits - VEXEC, VREAD, VWRITE,
+ * VADMIN and VAPPEND.
+ *
+ * If it returns 0, the caller is supposed to continue with the usual
+ * access checks using 'accmode' as modified by this routine.  If it
+ * returns nonzero value, the caller is supposed to return that value
+ * as errno.
+ *
+ * Note that after this routine runs, accmode may be zero.
+ */
+int
+vfs_unixify_accmode(accmode_t *accmode)
+{
+	/*
+	 * There is no way to specify explicit "deny" rule using
+	 * file mode or POSIX.1e ACLs.
+	 */
+	if (*accmode & VEXPLICIT_DENY) {
+		*accmode = 0;
+		return (0);
+	}
+
+	/*
+	 * None of these can be translated into usual access bits.
+	 * Also, the common case for NFSv4 ACLs is to not contain
+	 * either of these bits. Caller should check for VWRITE
+	 * on the containing directory instead.
+	 */
+	if (*accmode & (VDELETE_CHILD | VDELETE))
+		return (EPERM);
+
+	if (*accmode & VADMIN_PERMS) {
+		*accmode &= ~VADMIN_PERMS;
+		*accmode |= VADMIN;
+	}
+
+	/*
+	 * There is no way to deny VREAD_ATTRIBUTES, VREAD_ACL
+	 * or VSYNCHRONIZE using file mode or POSIX.1e ACL.
+	 */
+	*accmode &= ~(VSTAT_PERMS | VSYNCHRONIZE);
+
+	return (0);
 }

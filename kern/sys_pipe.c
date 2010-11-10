@@ -89,9 +89,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.200 2009/03/09 19:35:20 jhb Exp $");
-
-#include "opt_mac.h"
+__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.209 2010/05/08 23:01:47 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -164,10 +162,16 @@ static void	filt_pipedetach(struct knote *kn);
 static int	filt_piperead(struct knote *kn, long hint);
 static int	filt_pipewrite(struct knote *kn, long hint);
 
-static struct filterops pipe_rfiltops =
-	{ 1, NULL, filt_pipedetach, filt_piperead };
-static struct filterops pipe_wfiltops =
-	{ 1, NULL, filt_pipedetach, filt_pipewrite };
+static struct filterops pipe_rfiltops = {
+	.f_isfd = 1,
+	.f_detach = filt_pipedetach,
+	.f_event = filt_piperead
+};
+static struct filterops pipe_wfiltops = {
+	.f_isfd = 1,
+	.f_detach = filt_pipedetach,
+	.f_event = filt_pipewrite
+};
 
 /*
  * Default pipe buffer size(s), this can be kind-of large now because pipe
@@ -178,15 +182,15 @@ static struct filterops pipe_wfiltops =
 #define MINPIPESIZE (PIPE_SIZE/3)
 #define MAXPIPESIZE (2*PIPE_SIZE/3)
 
-static int amountpipekva;
+static long amountpipekva;
 static int pipefragretry;
 static int pipeallocfail;
 static int piperesizefail;
 static int piperesizeallowed = 1;
 
-SYSCTL_ULONG(_kern_ipc, OID_AUTO, maxpipekva, CTLFLAG_RDTUN,
+SYSCTL_LONG(_kern_ipc, OID_AUTO, maxpipekva, CTLFLAG_RDTUN,
 	   &maxpipekva, 0, "Pipe KVA limit");
-SYSCTL_INT(_kern_ipc, OID_AUTO, pipekva, CTLFLAG_RD,
+SYSCTL_LONG(_kern_ipc, OID_AUTO, pipekva, CTLFLAG_RD,
 	   &amountpipekva, 0, "Pipe KVA usage");
 SYSCTL_INT(_kern_ipc, OID_AUTO, pipefragretry, CTLFLAG_RD,
 	  &pipefragretry, 0, "Pipe allocation retries due to fragmentation");
@@ -330,10 +334,8 @@ kern_pipe(struct thread *td, int fildes[2])
 	rpipe = &pp->pp_rpipe;
 	wpipe = &pp->pp_wpipe;
 
-	knlist_init(&rpipe->pipe_sel.si_note, PIPE_MTX(rpipe), NULL, NULL,
-	    NULL);
-	knlist_init(&wpipe->pipe_sel.si_note, PIPE_MTX(wpipe), NULL, NULL,
-	    NULL);
+	knlist_init_mtx(&rpipe->pipe_sel.si_note, PIPE_MTX(rpipe));
+	knlist_init_mtx(&wpipe->pipe_sel.si_note, PIPE_MTX(wpipe));
 
 	/* Only the forward direction pipe is backed by default */
 	if ((error = pipe_create(rpipe, 1)) != 0 ||
@@ -463,7 +465,7 @@ retry:
 	cpipe->pipe_buffer.in = cnt;
 	cpipe->pipe_buffer.out = 0;
 	cpipe->pipe_buffer.cnt = cnt;
-	atomic_add_int(&amountpipekva, cpipe->pipe_buffer.size);
+	atomic_add_long(&amountpipekva, cpipe->pipe_buffer.size);
 	return (0);
 }
 
@@ -761,18 +763,19 @@ pipe_build_write_buffer(wpipe, uio)
 	pmap = vmspace_pmap(curproc->p_vmspace);
 	endaddr = round_page((vm_offset_t)uio->uio_iov->iov_base + size);
 	addr = trunc_page((vm_offset_t)uio->uio_iov->iov_base);
+	if (endaddr < addr)
+		return (EFAULT);
 	for (i = 0; addr < endaddr; addr += PAGE_SIZE, i++) {
 		/*
-		 * vm_fault_quick() can sleep.  Consequently,
-		 * vm_page_lock_queue() and vm_page_unlock_queue()
-		 * should not be performed outside of this loop.
+		 * vm_fault_quick() can sleep.
 		 */
 	race:
 		if (vm_fault_quick((caddr_t)addr, VM_PROT_READ) < 0) {
-			vm_page_lock_queues();
-			for (j = 0; j < i; j++)
+			for (j = 0; j < i; j++) {
+				vm_page_lock(wpipe->pipe_map.ms[j]);
 				vm_page_unhold(wpipe->pipe_map.ms[j]);
-			vm_page_unlock_queues();
+				vm_page_unlock(wpipe->pipe_map.ms[j]);
+			}
 			return (EFAULT);
 		}
 		wpipe->pipe_map.ms[i] = pmap_extract_and_hold(pmap, addr,
@@ -812,11 +815,11 @@ pipe_destroy_write_buffer(wpipe)
 	int i;
 
 	PIPE_LOCK_ASSERT(wpipe, MA_OWNED);
-	vm_page_lock_queues();
 	for (i = 0; i < wpipe->pipe_map.npages; i++) {
+		vm_page_lock(wpipe->pipe_map.ms[i]);
 		vm_page_unhold(wpipe->pipe_map.ms[i]);
+		vm_page_unlock(wpipe->pipe_map.ms[i]);
 	}
-	vm_page_unlock_queues();
 	wpipe->pipe_map.npages = 0;
 }
 
@@ -1355,8 +1358,7 @@ pipe_poll(fp, events, active_cred, td)
 #endif
 	if (events & (POLLIN | POLLRDNORM))
 		if ((rpipe->pipe_state & PIPE_DIRECTW) ||
-		    (rpipe->pipe_buffer.cnt > 0) ||
-		    (rpipe->pipe_state & PIPE_EOF))
+		    (rpipe->pipe_buffer.cnt > 0))
 			revents |= events & (POLLIN | POLLRDNORM);
 
 	if (events & (POLLOUT | POLLWRNORM))
@@ -1366,10 +1368,14 @@ pipe_poll(fp, events, active_cred, td)
 		     (wpipe->pipe_buffer.size - wpipe->pipe_buffer.cnt) >= PIPE_BUF))
 			revents |= events & (POLLOUT | POLLWRNORM);
 
-	if ((rpipe->pipe_state & PIPE_EOF) ||
-	    wpipe->pipe_present != PIPE_ACTIVE ||
-	    (wpipe->pipe_state & PIPE_EOF))
-		revents |= POLLHUP;
+	if ((events & POLLINIGNEOF) == 0) {
+		if (rpipe->pipe_state & PIPE_EOF) {
+			revents |= (events & (POLLIN | POLLRDNORM));
+			if (wpipe->pipe_present != PIPE_ACTIVE ||
+			    (wpipe->pipe_state & PIPE_EOF))
+				revents |= POLLHUP;
+		}
+	}
 
 	if (revents == 0) {
 		if (events & (POLLIN | POLLRDNORM)) {
@@ -1421,9 +1427,9 @@ pipe_stat(fp, ub, active_cred, td)
 	else
 		ub->st_size = pipe->pipe_buffer.cnt;
 	ub->st_blocks = (ub->st_size + ub->st_blksize - 1) / ub->st_blksize;
-	ub->st_atimespec = pipe->pipe_atime;
-	ub->st_mtimespec = pipe->pipe_mtime;
-	ub->st_ctimespec = pipe->pipe_ctime;
+	ub->st_atim = pipe->pipe_atime;
+	ub->st_mtim = pipe->pipe_mtime;
+	ub->st_ctim = pipe->pipe_ctime;
 	ub->st_uid = fp->f_cred->cr_uid;
 	ub->st_gid = fp->f_cred->cr_gid;
 	/*
@@ -1457,7 +1463,7 @@ pipe_free_kmem(cpipe)
 	    ("pipe_free_kmem: pipe mutex locked"));
 
 	if (cpipe->pipe_buffer.buffer != NULL) {
-		atomic_subtract_int(&amountpipekva, cpipe->pipe_buffer.size);
+		atomic_subtract_long(&amountpipekva, cpipe->pipe_buffer.size);
 		vm_map_remove(pipe_map,
 		    (vm_offset_t)cpipe->pipe_buffer.buffer,
 		    (vm_offset_t)cpipe->pipe_buffer.buffer + cpipe->pipe_buffer.size);

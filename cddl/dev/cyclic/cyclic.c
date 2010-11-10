@@ -21,7 +21,7 @@
  *
  * Portions Copyright 2008 John Birrell <jb@freebsd.org>
  *
- * $FreeBSD: src/sys/cddl/dev/cyclic/cyclic.c,v 1.2 2008/11/25 19:25:54 ganbold Exp $
+ * $FreeBSD: src/sys/cddl/dev/cyclic/cyclic.c,v 1.3 2010/06/11 18:46:34 jhb Exp $
  *
  * This is a simplified version of the cyclic timer subsystem from
  * OpenSolaris. In the FreeBSD version, we don't use interrupt levels.
@@ -1344,10 +1344,7 @@ cyclic_uninit(void)
 	cpu_t *c;
 	int id;
 
-	for (id = 0; id <= mp_maxid; id++) {
-		if (pcpu_find(id) == NULL)
-			continue;
-
+	CPU_FOREACH(id) {
 		c = &solaris_cpu[id];
 
 		if (c->cpu_cyclic == NULL)

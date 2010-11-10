@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/lge/if_lge.c,v 1.53 2008/03/05 05:36:09 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/lge/if_lge.c,v 1.56 2009/11/19 22:14:23 jhb Exp $");
 
 /*
  * Level 1 LXT1001 gigabit ethernet driver for FreeBSD. Public
@@ -137,7 +137,7 @@ static int lge_ioctl(struct ifnet *, u_long, caddr_t);
 static void lge_init(void *);
 static void lge_init_locked(struct lge_softc *);
 static void lge_stop(struct lge_softc *);
-static void lge_watchdog(struct ifnet *);
+static void lge_watchdog(struct lge_softc *);
 static int lge_shutdown(device_t);
 static int lge_ifmedia_upd(struct ifnet *);
 static void lge_ifmedia_upd_locked(struct ifnet *);
@@ -393,7 +393,7 @@ lge_setmulti(sc)
 	CSR_WRITE_4(sc, LGE_MAR1, 0);
 
 	/* now program new ones */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
 	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
@@ -404,7 +404,7 @@ lge_setmulti(sc)
 		else
 			hashes[1] |= (1 << (h - 32));
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	CSR_WRITE_4(sc, LGE_MAR0, hashes[0]);
 	CSR_WRITE_4(sc, LGE_MAR1, hashes[1]);
@@ -544,7 +544,6 @@ lge_attach(dev)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = lge_ioctl;
 	ifp->if_start = lge_start;
-	ifp->if_watchdog = lge_watchdog;
 	ifp->if_init = lge_init;
 	ifp->if_snd.ifq_maxlen = LGE_TX_LIST_CNT - 1;
 	ifp->if_capabilities = IFCAP_RXCSUM;
@@ -1000,7 +999,7 @@ lge_txeof(sc)
 	ifp = sc->lge_ifp;
 
 	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
+	sc->lge_timer = 0;
 
 	/*
 	 * Go through our tx list and free mbufs for those
@@ -1021,7 +1020,7 @@ lge_txeof(sc)
 
 		txdone--;
 		LGE_INC(idx, LGE_TX_LIST_CNT);
-		ifp->if_timer = 0;
+		sc->lge_timer = 0;
 	}
 
 	sc->lge_cdata.lge_tx_cons = idx;
@@ -1064,6 +1063,8 @@ lge_tick(xsc)
 		}
 	}
 
+	if (sc->lge_timer != 0 && --sc->lge_timer == 0)
+		lge_watchdog(sc);
 	callout_reset(&sc->lge_stat_callout, hz, lge_tick, sc);
 
 	return;
@@ -1236,7 +1237,7 @@ lge_start_locked(ifp)
 	/*
 	 * Set a timeout in case the chip goes out to lunch.
 	 */
-	ifp->if_timer = 5;
+	sc->lge_timer = 5;
 
 	return;
 }
@@ -1257,7 +1258,6 @@ lge_init_locked(sc)
 	struct lge_softc	*sc;
 {
 	struct ifnet		*ifp = sc->lge_ifp;
-	struct mii_data		*mii;
 
 	LGE_LOCK_ASSERT(sc);
 	if (ifp->if_drv_flags & IFF_DRV_RUNNING)
@@ -1268,8 +1268,6 @@ lge_init_locked(sc)
 	 */
 	lge_stop(sc);
 	lge_reset(sc);
-
-	mii = device_get_softc(sc->lge_miibus);
 
 	/* Set MAC address */
 	CSR_WRITE_4(sc, LGE_PAR0, *(u_int32_t *)(&IF_LLADDR(sc->lge_ifp)[0]));
@@ -1509,14 +1507,14 @@ lge_ioctl(ifp, command, data)
 }
 
 static void
-lge_watchdog(ifp)
-	struct ifnet		*ifp;
-{
+lge_watchdog(sc)
 	struct lge_softc	*sc;
+{
+	struct ifnet		*ifp;
 
-	sc = ifp->if_softc;
+	LGE_LOCK_ASSERT(sc);
+	ifp = sc->lge_ifp;
 
-	LGE_LOCK(sc);
 	ifp->if_oerrors++;
 	if_printf(ifp, "watchdog timeout\n");
 
@@ -1527,9 +1525,6 @@ lge_watchdog(ifp)
 
 	if (ifp->if_snd.ifq_head != NULL)
 		lge_start_locked(ifp);
-	LGE_UNLOCK(sc);
-
-	return;
 }
 
 /*
@@ -1545,7 +1540,7 @@ lge_stop(sc)
 
 	LGE_LOCK_ASSERT(sc);
 	ifp = sc->lge_ifp;
-	ifp->if_timer = 0;
+	sc->lge_timer = 0;
 	callout_stop(&sc->lge_stat_callout);
 	CSR_WRITE_4(sc, LGE_IMR, LGE_IMR_INTR_ENB);
 

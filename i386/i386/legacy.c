@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/legacy.c,v 1.65 2008/03/13 20:39:04 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/legacy.c,v 1.66 2010/06/11 18:46:34 jhb Exp $");
 
 /*
  * This code implements a system driver for legacy systems that do not
@@ -290,12 +290,11 @@ cpu_identify(driver_t *driver, device_t parent)
 	 * so that these devices are attached after the Host-PCI
 	 * bridges (which are added at order 100).
 	 */
-	for (i = 0; i <= mp_maxid; i++)
-		if (!CPU_ABSENT(i)) {
-			child = BUS_ADD_CHILD(parent, 150, "cpu", i);
-			if (child == NULL)
-				panic("legacy_attach cpu");
-		}
+	CPU_FOREACH(i) {
+		child = BUS_ADD_CHILD(parent, 150, "cpu", i);
+		if (child == NULL)
+			panic("legacy_attach cpu");
+	}
 }
 
 static device_t

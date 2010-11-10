@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)syslog.h	8.1 (Berkeley) 6/2/93
- * $FreeBSD: src/sys/sys/syslog.h,v 1.26 2005/01/07 02:29:24 imp Exp $
+ * $FreeBSD: src/sys/sys/syslog.h,v 1.27 2009/03/14 19:07:25 das Exp $
  */
 
 #ifndef _SYS_SYSLOG_H_
@@ -193,7 +193,9 @@ void	closelog(void);
 void	openlog(const char *, int, int);
 int	setlogmask(int);
 void	syslog(int, const char *, ...) __printflike(2, 3);
+#if __BSD_VISIBLE
 void	vsyslog(int, const char *, __va_list) __printflike(2, 0);
+#endif
 __END_DECLS
 
 #endif /* !_KERNEL */

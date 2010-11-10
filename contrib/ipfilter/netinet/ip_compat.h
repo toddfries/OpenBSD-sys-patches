@@ -4,7 +4,7 @@
  * See the IPFILTER.LICENCE file for details on licencing.
  *
  * @(#)ip_compat.h	1.8 1/14/96
- * $FreeBSD: src/sys/contrib/ipfilter/netinet/ip_compat.h,v 1.38 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/contrib/ipfilter/netinet/ip_compat.h,v 1.39 2010/04/14 20:50:07 imp Exp $
  * Id: ip_compat.h,v 2.142.2.57 2007/10/10 09:51:42 darrenr Exp $
  */
 
@@ -975,7 +975,6 @@ typedef	u_int32_t	u_32_t;
 #   define	SPL_NET(x)	;
 #   define	SPL_IMP(x)	;
 #   define	SPL_SCHED(x)	;
-extern	int	in_cksum __P((struct mbuf *, int));
 #  else
 #   define	SPL_SCHED(x)	x = splhigh()
 #  endif /* __FreeBSD_version >= 500043 */

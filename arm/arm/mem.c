@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/mem.c,v 1.6 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/mem.c,v 1.7 2009/12/29 21:51:28 rnoland Exp $");
 
 /*
  * Memory special file
@@ -153,8 +153,8 @@ memrw(struct cdev *dev, struct uio *uio, int flags)
 /* ARGSUSED */
 
 int
-memmmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr,
-    int prot __unused)
+memmmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int prot __unused, vm_memattr_t *memattr __unused)
 {
 	if (dev2unit(dev) == CDEV_MINOR_MEM)
 		*paddr = offset;

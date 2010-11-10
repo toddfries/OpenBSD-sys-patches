@@ -30,14 +30,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.351 2009/03/09 17:53:05 bms Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.384 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_bootp.h"
 #include "opt_ipfw.h"
 #include "opt_ipstealth.h"
 #include "opt_ipsec.h"
 #include "opt_route.h"
-#include "opt_mac.h"
 #include "opt_carp.h"
 
 #include <sys/param.h>
@@ -54,7 +53,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.351 2009/03/09 17:53:05 bms E
 #include <sys/rwlock.h>
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
-#include <sys/vimage.h>
 
 #include <net/pfil.h>
 #include <net/if.h>
@@ -64,6 +62,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.351 2009/03/09 17:53:05 bms E
 #include <net/route.h>
 #include <net/netisr.h>
 #include <net/vnet.h>
+#include <net/flowtable.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -71,10 +70,10 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.351 2009/03/09 17:53:05 bms E
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
+#include <netinet/ip_fw.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_options.h>
 #include <machine/in_cksum.h>
-#include <netinet/vinet.h>
 #ifdef DEV_CARP
 #include <netinet/ip_carp.h>
 #endif
@@ -84,65 +83,49 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.351 2009/03/09 17:53:05 bms E
 
 #include <sys/socketvar.h>
 
-/* XXX: Temporary until ipfw_ether and ipfw_bridge are converted. */
-#include <netinet/ip_fw.h>
-#include <netinet/ip_dummynet.h>
-
 #include <security/mac/mac_framework.h>
 
 #ifdef CTASSERT
 CTASSERT(sizeof(struct ip) == 20);
 #endif
 
-#ifndef VIMAGE
-#ifndef VIMAGE_GLOBALS
-struct vnet_inet vnet_inet_0;
-#endif
-#endif
+struct	rwlock in_ifaddr_lock;
+RW_SYSINIT(in_ifaddr_lock, &in_ifaddr_lock, "in_ifaddr_lock");
 
-#ifdef VIMAGE_GLOBALS
-static int	ipsendredirects;
-static int	ip_checkinterface;
-static int	ip_keepfaith;
-static int	ip_sendsourcequench;
-int	ip_defttl;
-int	ip_do_randomid;
-int	ipforwarding;
-struct	in_ifaddrhead in_ifaddrhead; 		/* first inet address */
-struct	in_ifaddrhashhead *in_ifaddrhashtbl;	/* inet addr hash table  */
-u_long 	in_ifaddrhmask;				/* mask for hash table */
-struct ipstat ipstat;
-static int ip_rsvp_on;
-struct socket *ip_rsvpd;
-int	rsvp_on;
-static struct ipqhead ipq[IPREASS_NHASH];
-static int	maxnipq;	/* Administrative limit on # reass queues. */
-static int	maxfragsperpacket;
-int	ipstealth;
-static int	nipq;	/* Total # of reass queues */
-#endif
+VNET_DEFINE(int, rsvp_on);
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_FORWARDING,
-    forwarding, CTLFLAG_RW, ipforwarding, 0,
+VNET_DEFINE(int, ipforwarding);
+SYSCTL_VNET_INT(_net_inet_ip, IPCTL_FORWARDING, forwarding, CTLFLAG_RW,
+    &VNET_NAME(ipforwarding), 0,
     "Enable IP forwarding between interfaces");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_SENDREDIRECTS,
-    redirect, CTLFLAG_RW, ipsendredirects, 0,
+static VNET_DEFINE(int, ipsendredirects) = 1;	/* XXX */
+#define	V_ipsendredirects	VNET(ipsendredirects)
+SYSCTL_VNET_INT(_net_inet_ip, IPCTL_SENDREDIRECTS, redirect, CTLFLAG_RW,
+    &VNET_NAME(ipsendredirects), 0,
     "Enable sending IP redirects");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_DEFTTL,
-    ttl, CTLFLAG_RW, ip_defttl, 0, "Maximum TTL on IP packets");
+VNET_DEFINE(int, ip_defttl) = IPDEFTTL;
+SYSCTL_VNET_INT(_net_inet_ip, IPCTL_DEFTTL, ttl, CTLFLAG_RW,
+    &VNET_NAME(ip_defttl), 0,
+    "Maximum TTL on IP packets");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_KEEPFAITH,
-    keepfaith, CTLFLAG_RW, ip_keepfaith,	0,
+static VNET_DEFINE(int, ip_keepfaith);
+#define	V_ip_keepfaith		VNET(ip_keepfaith)
+SYSCTL_VNET_INT(_net_inet_ip, IPCTL_KEEPFAITH, keepfaith, CTLFLAG_RW,
+    &VNET_NAME(ip_keepfaith), 0,
     "Enable packet capture for FAITH IPv4->IPv6 translater daemon");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO,
-    sendsourcequench, CTLFLAG_RW, ip_sendsourcequench, 0,
+static VNET_DEFINE(int, ip_sendsourcequench);
+#define	V_ip_sendsourcequench	VNET(ip_sendsourcequench)
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, sendsourcequench, CTLFLAG_RW,
+    &VNET_NAME(ip_sendsourcequench), 0,
     "Enable the transmission of source quench packets");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, random_id,
-    CTLFLAG_RW, ip_do_randomid, 0, "Assign random ip_id values");
+VNET_DEFINE(int, ip_do_randomid);
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, random_id, CTLFLAG_RW,
+    &VNET_NAME(ip_do_randomid), 0,
+    "Assign random ip_id values");
 
 /*
  * XXX - Setting ip_checkinterface mostly implements the receive side of
@@ -157,32 +140,39 @@ SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, random_id,
  * to the loopback interface instead of the interface where the
  * packets for those addresses are received.
  */
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO,
-    check_interface, CTLFLAG_RW, ip_checkinterface, 0,
+static VNET_DEFINE(int, ip_checkinterface);
+#define	V_ip_checkinterface	VNET(ip_checkinterface)
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, check_interface, CTLFLAG_RW,
+    &VNET_NAME(ip_checkinterface), 0,
     "Verify packet arrives on correct interface");
 
-struct pfil_head inet_pfil_hook;	/* Packet filter hooks */
+VNET_DEFINE(struct pfil_head, inet_pfil_hook);	/* Packet filter hooks */
 
-static struct	ifqueue ipintrq;
-static int	ipqmaxlen = IFQ_MAXLEN;
+static struct netisr_handler ip_nh = {
+	.nh_name = "ip",
+	.nh_handler = ip_input,
+	.nh_proto = NETISR_IP,
+	.nh_policy = NETISR_POLICY_FLOW,
+};
 
 extern	struct domain inetdomain;
 extern	struct protosw inetsw[];
 u_char	ip_protox[IPPROTO_MAX];
+VNET_DEFINE(struct in_ifaddrhead, in_ifaddrhead);  /* first inet address */
+VNET_DEFINE(struct in_ifaddrhashhead *, in_ifaddrhashtbl); /* inet addr hash table  */
+VNET_DEFINE(u_long, in_ifaddrhmask);		/* mask for hash table */
 
-SYSCTL_INT(_net_inet_ip, IPCTL_INTRQMAXLEN, intr_queue_maxlen, CTLFLAG_RW,
-    &ipintrq.ifq_maxlen, 0, "Maximum size of the IP input queue");
-SYSCTL_INT(_net_inet_ip, IPCTL_INTRQDROPS, intr_queue_drops, CTLFLAG_RD,
-    &ipintrq.ifq_drops, 0,
-    "Number of packets dropped from the IP input queue");
+VNET_DEFINE(struct ipstat, ipstat);
+SYSCTL_VNET_STRUCT(_net_inet_ip, IPCTL_STATS, stats, CTLFLAG_RW,
+    &VNET_NAME(ipstat), ipstat,
+    "IP statistics (struct ipstat, netinet/ip_var.h)");
 
-SYSCTL_V_STRUCT(V_NET, vnet_inet, _net_inet_ip, IPCTL_STATS, stats, CTLFLAG_RW,
-    ipstat, ipstat, "IP statistics (struct ipstat, netinet/ip_var.h)");
-
-#ifdef VIMAGE_GLOBALS
-static uma_zone_t ipq_zone;
-#endif
+static VNET_DEFINE(uma_zone_t, ipq_zone);
+static VNET_DEFINE(TAILQ_HEAD(ipqhead, ipq), ipq[IPREASS_NHASH]);
 static struct mtx ipqlock;
+
+#define	V_ipq_zone		VNET(ipq_zone)
+#define	V_ipq			VNET(ipq)
 
 #define	IPQ_LOCK()	mtx_lock(&ipqlock)
 #define	IPQ_UNLOCK()	mtx_unlock(&ipqlock)
@@ -191,13 +181,20 @@ static struct mtx ipqlock;
 
 static void	maxnipq_update(void);
 static void	ipq_zone_change(void *);
+static void	ip_drain_locked(void);
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, fragpackets,
-    CTLFLAG_RD, nipq, 0,
+static VNET_DEFINE(int, maxnipq);  /* Administrative limit on # reass queues. */
+static VNET_DEFINE(int, nipq);			/* Total # of reass queues */
+#define	V_maxnipq		VNET(maxnipq)
+#define	V_nipq			VNET(nipq)
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, fragpackets, CTLFLAG_RD,
+    &VNET_NAME(nipq), 0,
     "Current number of IPv4 fragment reassembly queue entries");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, maxfragsperpacket,
-    CTLFLAG_RW, maxfragsperpacket, 0,
+static VNET_DEFINE(int, maxfragsperpacket);
+#define	V_maxfragsperpacket	VNET(maxfragsperpacket)
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, maxfragsperpacket, CTLFLAG_RW,
+    &VNET_NAME(maxfragsperpacket), 0,
     "Maximum number of IPv4 fragments allowed per packet");
 
 struct callout	ipport_tick_callout;
@@ -208,21 +205,84 @@ SYSCTL_INT(_net_inet_ip, IPCTL_DEFMTU, mtu, CTLFLAG_RW,
 #endif
 
 #ifdef IPSTEALTH
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, stealth, CTLFLAG_RW,
-    ipstealth, 0, "IP stealth mode, no TTL decrementation on forwarding");
+VNET_DEFINE(int, ipstealth);
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, stealth, CTLFLAG_RW,
+    &VNET_NAME(ipstealth), 0,
+    "IP stealth mode, no TTL decrementation on forwarding");
 #endif
 
-/*
- * ipfw_ether and ipfw_bridge hooks.
- * XXX: Temporary until those are converted to pfil_hooks as well.
- */
-ip_fw_chk_t *ip_fw_chk_ptr = NULL;
-ip_dn_io_t *ip_dn_io_ptr = NULL;
-#ifdef VIMAGE_GLOBALS
-int fw_one_pass;
+#ifdef FLOWTABLE
+static VNET_DEFINE(int, ip_output_flowtable_size) = 2048;
+VNET_DEFINE(struct flowtable *, ip_ft);
+#define	V_ip_output_flowtable_size	VNET(ip_output_flowtable_size)
+
+SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, output_flowtable_size, CTLFLAG_RDTUN,
+    &VNET_NAME(ip_output_flowtable_size), 2048,
+    "number of entries in the per-cpu output flow caches");
 #endif
+
+VNET_DEFINE(int, fw_one_pass) = 1;
 
 static void	ip_freef(struct ipqhead *, struct ipq *);
+
+/*
+ * Kernel module interface for updating ipstat.  The argument is an index
+ * into ipstat treated as an array of u_long.  While this encodes the general
+ * layout of ipstat into the caller, it doesn't encode its location, so that
+ * future changes to add, for example, per-CPU stats support won't cause
+ * binary compatibility problems for kernel modules.
+ */
+void
+kmod_ipstat_inc(int statnum)
+{
+
+	(*((u_long *)&V_ipstat + statnum))++;
+}
+
+void
+kmod_ipstat_dec(int statnum)
+{
+
+	(*((u_long *)&V_ipstat + statnum))--;
+}
+
+static int
+sysctl_netinet_intr_queue_maxlen(SYSCTL_HANDLER_ARGS)
+{
+	int error, qlimit;
+
+	netisr_getqlimit(&ip_nh, &qlimit);
+	error = sysctl_handle_int(oidp, &qlimit, 0, req);
+	if (error || !req->newptr)
+		return (error);
+	if (qlimit < 1)
+		return (EINVAL);
+	return (netisr_setqlimit(&ip_nh, qlimit));
+}
+SYSCTL_PROC(_net_inet_ip, IPCTL_INTRQMAXLEN, intr_queue_maxlen,
+    CTLTYPE_INT|CTLFLAG_RW, 0, 0, sysctl_netinet_intr_queue_maxlen, "I",
+    "Maximum size of the IP input queue");
+
+static int
+sysctl_netinet_intr_queue_drops(SYSCTL_HANDLER_ARGS)
+{
+	u_int64_t qdrops_long;
+	int error, qdrops;
+
+	netisr_getqdrops(&ip_nh, &qdrops_long);
+	qdrops = qdrops_long;
+	error = sysctl_handle_int(oidp, &qdrops, 0, req);
+	if (error || !req->newptr)
+		return (error);
+	if (qdrops != 0)
+		return (EINVAL);
+	netisr_clearqdrops(&ip_nh);
+	return (0);
+}
+
+SYSCTL_PROC(_net_inet_ip, IPCTL_INTRQDROPS, intr_queue_drops,
+    CTLTYPE_INT|CTLFLAG_RD, 0, 0, sysctl_netinet_intr_queue_drops, "I",
+    "Number of packets dropped from the IP input queue");
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -231,45 +291,52 @@ static void	ip_freef(struct ipqhead *, struct ipq *);
 void
 ip_init(void)
 {
-	INIT_VNET_INET(curvnet);
 	struct protosw *pr;
 	int i;
 
-	V_ipsendredirects = 1; /* XXX */
-	V_ip_checkinterface = 0;
-	V_ip_keepfaith = 0;
-	V_ip_sendsourcequench = 0;
-	V_rsvp_on = 0;
-	V_ip_defttl = IPDEFTTL;
-	V_ip_do_randomid = 0;
-	V_ipforwarding = 0;
-	V_ipstealth = 0;
-	V_nipq = 0;	/* Total # of reass queues */
-
-	V_ipport_lowfirstauto = IPPORT_RESERVED - 1;	/* 1023 */
-	V_ipport_lowlastauto = IPPORT_RESERVEDSTART;	/* 600 */
-	V_ipport_firstauto = IPPORT_EPHEMERALFIRST;	/* 10000 */
-	V_ipport_lastauto = IPPORT_EPHEMERALLAST;	/* 65535 */
-	V_ipport_hifirstauto = IPPORT_HIFIRSTAUTO;	/* 49152 */
-	V_ipport_hilastauto = IPPORT_HILASTAUTO;	/* 65535 */
-	V_ipport_reservedhigh = IPPORT_RESERVED - 1;	/* 1023 */
-	V_ipport_reservedlow = 0;
-	V_ipport_randomized = 1;	/* user controlled via sysctl */
-	V_ipport_randomcps = 10;	/* user controlled via sysctl */
-	V_ipport_randomtime = 45;	/* user controlled via sysctl */
-	V_ipport_stoprandom = 0;	/* toggled by ipport_tick */
-
-	V_fw_one_pass = 1;
-
-#ifdef NOTYET
-	/* XXX global static but not instantiated in this file */
-	V_ipfastforward_active = 0;
-	V_subnetsarelocal = 0;
-	V_sameprefixcarponly = 0;
-#endif
+	V_ip_id = time_second & 0xffff;
 
 	TAILQ_INIT(&V_in_ifaddrhead);
 	V_in_ifaddrhashtbl = hashinit(INADDR_NHASH, M_IFADDR, &V_in_ifaddrhmask);
+
+	/* Initialize IP reassembly queue. */
+	for (i = 0; i < IPREASS_NHASH; i++)
+		TAILQ_INIT(&V_ipq[i]);
+	V_maxnipq = nmbclusters / 32;
+	V_maxfragsperpacket = 16;
+	V_ipq_zone = uma_zcreate("ipq", sizeof(struct ipq), NULL, NULL, NULL,
+	    NULL, UMA_ALIGN_PTR, 0);
+	maxnipq_update();
+
+	/* Initialize packet filter hooks. */
+	V_inet_pfil_hook.ph_type = PFIL_TYPE_AF;
+	V_inet_pfil_hook.ph_af = AF_INET;
+	if ((i = pfil_head_register(&V_inet_pfil_hook)) != 0)
+		printf("%s: WARNING: unable to register pfil hook, "
+			"error %d\n", __func__, i);
+
+#ifdef FLOWTABLE
+	if (TUNABLE_INT_FETCH("net.inet.ip.output_flowtable_size",
+		&V_ip_output_flowtable_size)) {
+		if (V_ip_output_flowtable_size < 256)
+			V_ip_output_flowtable_size = 256;
+		if (!powerof2(V_ip_output_flowtable_size)) {
+			printf("flowtable must be power of 2 size\n");
+			V_ip_output_flowtable_size = 2048;
+		}
+	} else {
+		/*
+		 * round up to the next power of 2
+		 */
+		V_ip_output_flowtable_size = 1 << fls((1024 + maxusers * 64)-1);
+	}
+	V_ip_ft = flowtable_alloc("ipv4", V_ip_output_flowtable_size, FL_PCPU);
+#endif
+
+	/* Skip initialization of globals for non-default instances. */
+	if (!IS_DEFAULT_VNET(curvnet))
+		return;
+
 	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW);
 	if (pr == NULL)
 		panic("ip_init: PF_INET not found");
@@ -290,37 +357,34 @@ ip_init(void)
 				ip_protox[pr->pr_protocol] = pr - inetsw;
 		}
 
-	/* Initialize packet filter hooks. */
-	inet_pfil_hook.ph_type = PFIL_TYPE_AF;
-	inet_pfil_hook.ph_af = AF_INET;
-	if ((i = pfil_head_register(&inet_pfil_hook)) != 0)
-		printf("%s: WARNING: unable to register pfil hook, "
-			"error %d\n", __func__, i);
-
-	/* Initialize IP reassembly queue. */
-	IPQ_LOCK_INIT();
-	for (i = 0; i < IPREASS_NHASH; i++)
-	    TAILQ_INIT(&V_ipq[i]);
-	V_maxnipq = nmbclusters / 32;
-	V_maxfragsperpacket = 16;
-	V_ipq_zone = uma_zcreate("ipq", sizeof(struct ipq), NULL, NULL, NULL,
-	    NULL, UMA_ALIGN_PTR, 0);
-	maxnipq_update();
-
 	/* Start ipport_tick. */
 	callout_init(&ipport_tick_callout, CALLOUT_MPSAFE);
-	ipport_tick(NULL);
+	callout_reset(&ipport_tick_callout, 1, ipport_tick, NULL);
 	EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, NULL,
 		SHUTDOWN_PRI_DEFAULT);
 	EVENTHANDLER_REGISTER(nmbclusters_change, ipq_zone_change,
 		NULL, EVENTHANDLER_PRI_ANY);
 
 	/* Initialize various other remaining things. */
-	V_ip_id = time_second & 0xffff;
-	ipintrq.ifq_maxlen = ipqmaxlen;
-	mtx_init(&ipintrq.ifq_mtx, "ip_inq", NULL, MTX_DEF);
-	netisr_register(NETISR_IP, ip_input, &ipintrq, 0);
+	IPQ_LOCK_INIT();
+	netisr_register(&ip_nh);
 }
+
+#ifdef VIMAGE
+void
+ip_destroy(void)
+{
+
+	/* Cleanup in_ifaddr hash table; should be empty. */
+	hashdestroy(V_in_ifaddrhashtbl, M_IFADDR, V_in_ifaddrhmask);
+
+	IPQ_LOCK();
+	ip_drain_locked();
+	IPQ_UNLOCK();
+
+	uma_zdestroy(V_ipq_zone);
+}
+#endif
 
 void
 ip_fini(void *xtp)
@@ -336,10 +400,10 @@ ip_fini(void *xtp)
 void
 ip_input(struct mbuf *m)
 {
-	INIT_VNET_INET(curvnet);
 	struct ip *ip = NULL;
 	struct in_ifaddr *ia = NULL;
 	struct ifaddr *ifa;
+	struct ifnet *ifp;
 	int    checkif, hlen = 0;
 	u_short sum;
 	int dchg = 0;				/* dest changed after fw */
@@ -359,41 +423,42 @@ ip_input(struct mbuf *m)
 		goto ours;
 	}
 
-	V_ipstat.ips_total++;
+	IPSTAT_INC(ips_total);
 
 	if (m->m_pkthdr.len < sizeof(struct ip))
 		goto tooshort;
 
 	if (m->m_len < sizeof (struct ip) &&
 	    (m = m_pullup(m, sizeof (struct ip))) == NULL) {
-		V_ipstat.ips_toosmall++;
+		IPSTAT_INC(ips_toosmall);
 		return;
 	}
 	ip = mtod(m, struct ip *);
 
 	if (ip->ip_v != IPVERSION) {
-		V_ipstat.ips_badvers++;
+		IPSTAT_INC(ips_badvers);
 		goto bad;
 	}
 
 	hlen = ip->ip_hl << 2;
 	if (hlen < sizeof(struct ip)) {	/* minimum header length */
-		V_ipstat.ips_badhlen++;
+		IPSTAT_INC(ips_badhlen);
 		goto bad;
 	}
 	if (hlen > m->m_len) {
 		if ((m = m_pullup(m, hlen)) == NULL) {
-			V_ipstat.ips_badhlen++;
+			IPSTAT_INC(ips_badhlen);
 			return;
 		}
 		ip = mtod(m, struct ip *);
 	}
 
 	/* 127/8 must not appear on wire - RFC1122 */
+	ifp = m->m_pkthdr.rcvif;
 	if ((ntohl(ip->ip_dst.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET ||
 	    (ntohl(ip->ip_src.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET) {
-		if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) {
-			V_ipstat.ips_badaddr++;
+		if ((ifp->if_flags & IFF_LOOPBACK) == 0) {
+			IPSTAT_INC(ips_badaddr);
 			goto bad;
 		}
 	}
@@ -408,7 +473,7 @@ ip_input(struct mbuf *m)
 		}
 	}
 	if (sum) {
-		V_ipstat.ips_badsum++;
+		IPSTAT_INC(ips_badsum);
 		goto bad;
 	}
 
@@ -423,7 +488,7 @@ ip_input(struct mbuf *m)
 	 */
 	ip->ip_len = ntohs(ip->ip_len);
 	if (ip->ip_len < hlen) {
-		V_ipstat.ips_badlen++;
+		IPSTAT_INC(ips_badlen);
 		goto bad;
 	}
 	ip->ip_off = ntohs(ip->ip_off);
@@ -436,7 +501,7 @@ ip_input(struct mbuf *m)
 	 */
 	if (m->m_pkthdr.len < ip->ip_len) {
 tooshort:
-		V_ipstat.ips_tooshort++;
+		IPSTAT_INC(ips_tooshort);
 		goto bad;
 	}
 	if (m->m_pkthdr.len > ip->ip_len) {
@@ -463,18 +528,18 @@ tooshort:
 	 */
 
 	/* Jump over all PFIL processing if hooks are not active. */
-	if (!PFIL_HOOKED(&inet_pfil_hook))
+	if (!PFIL_HOOKED(&V_inet_pfil_hook))
 		goto passin;
 
 	odst = ip->ip_dst;
-	if (pfil_run_hooks(&inet_pfil_hook, &m, m->m_pkthdr.rcvif,
-	    PFIL_IN, NULL) != 0)
+	if (pfil_run_hooks(&V_inet_pfil_hook, &m, ifp, PFIL_IN, NULL) != 0)
 		return;
 	if (m == NULL)			/* consumed by filter */
 		return;
 
 	ip = mtod(m, struct ip *);
 	dchg = (odst.s_addr != ip->ip_dst.s_addr);
+	ifp = m->m_pkthdr.rcvif;
 
 #ifdef IPFIREWALL_FORWARD
 	if (m->m_flags & M_FASTFWD_OURS) {
@@ -483,9 +548,9 @@ tooshort:
 	}
 	if ((dchg = (m_tag_find(m, PACKET_TAG_IPFORWARD, NULL) != NULL)) != 0) {
 		/*
-		 * Directly ship on the packet.  This allows to forward packets
-		 * that were destined for us to some other directly connected
-		 * host.
+		 * Directly ship the packet on.  This allows forwarding
+		 * packets originally destined to us to some other directly
+		 * connected host.
 		 */
 		ip_forward(m, dchg);
 		return;
@@ -540,16 +605,16 @@ passin:
 	 * checked with carp_iamatch() and carp_forus().
 	 */
 	checkif = V_ip_checkinterface && (V_ipforwarding == 0) && 
-	    m->m_pkthdr.rcvif != NULL &&
-	    ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) &&
+	    ifp != NULL && ((ifp->if_flags & IFF_LOOPBACK) == 0) &&
 #ifdef DEV_CARP
-	    !m->m_pkthdr.rcvif->if_carp &&
+	    !ifp->if_carp &&
 #endif
 	    (dchg == 0);
 
 	/*
 	 * Check for exact addresses in the hash bucket.
 	 */
+	/* IN_IFADDR_RLOCK(); */
 	LIST_FOREACH(ia, INADDR_HASH(ip->ip_dst.s_addr), ia_hash) {
 		/*
 		 * If the address matches, verify that the packet
@@ -557,9 +622,14 @@ passin:
 		 * enabled.
 		 */
 		if (IA_SIN(ia)->sin_addr.s_addr == ip->ip_dst.s_addr && 
-		    (!checkif || ia->ia_ifp == m->m_pkthdr.rcvif))
+		    (!checkif || ia->ia_ifp == ifp)) {
+			ifa_ref(&ia->ia_ifa);
+			/* IN_IFADDR_RUNLOCK(); */
 			goto ours;
+		}
 	}
+	/* IN_IFADDR_RUNLOCK(); */
+
 	/*
 	 * Check for broadcast addresses.
 	 *
@@ -568,26 +638,37 @@ passin:
 	 * be handled via ip_forward() and ether_output() with the loopback
 	 * into the stack for SIMPLEX interfaces handled by ether_output().
 	 */
-	if (m->m_pkthdr.rcvif != NULL &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_BROADCAST) {
-	        TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrhead, ifa_link) {
+	if (ifp != NULL && ifp->if_flags & IFF_BROADCAST) {
+		IF_ADDR_LOCK(ifp);
+	        TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 			if (ifa->ifa_addr->sa_family != AF_INET)
 				continue;
 			ia = ifatoia(ifa);
 			if (satosin(&ia->ia_broadaddr)->sin_addr.s_addr ==
-			    ip->ip_dst.s_addr)
+			    ip->ip_dst.s_addr) {
+				ifa_ref(ifa);
+				IF_ADDR_UNLOCK(ifp);
 				goto ours;
-			if (ia->ia_netbroadcast.s_addr == ip->ip_dst.s_addr)
+			}
+			if (ia->ia_netbroadcast.s_addr == ip->ip_dst.s_addr) {
+				ifa_ref(ifa);
+				IF_ADDR_UNLOCK(ifp);
 				goto ours;
+			}
 #ifdef BOOTP_COMPAT
-			if (IA_SIN(ia)->sin_addr.s_addr == INADDR_ANY)
+			if (IA_SIN(ia)->sin_addr.s_addr == INADDR_ANY) {
+				ifa_ref(ifa);
+				IF_ADDR_UNLOCK(ifp);
 				goto ours;
+			}
 #endif
 		}
+		IF_ADDR_UNLOCK(ifp);
+		ia = NULL;
 	}
 	/* RFC 3927 2.7: Do not forward datagrams for 169.254.0.0/16. */
 	if (IN_LINKLOCAL(ntohl(ip->ip_dst.s_addr))) {
-		V_ipstat.ips_cantforward++;
+		IPSTAT_INC(ips_cantforward);
 		m_freem(m);
 		return;
 	}
@@ -601,9 +682,8 @@ passin:
 			 * ip_mforward() returns a non-zero value, the packet
 			 * must be discarded, else it may be accepted below.
 			 */
-			if (ip_mforward &&
-			    ip_mforward(ip, m->m_pkthdr.rcvif, m, 0) != 0) {
-				V_ipstat.ips_cantforward++;
+			if (ip_mforward && ip_mforward(ip, ifp, m, 0) != 0) {
+				IPSTAT_INC(ips_cantforward);
 				m_freem(m);
 				return;
 			}
@@ -615,7 +695,7 @@ passin:
 			 */
 			if (ip->ip_p == IPPROTO_IGMP)
 				goto ours;
-			V_ipstat.ips_forward++;
+			IPSTAT_INC(ips_forward);
 		}
 		/*
 		 * Assume the packet is for us, to avoid prematurely taking
@@ -632,7 +712,7 @@ passin:
 	/*
 	 * FAITH(Firewall Aided Internet Translator)
 	 */
-	if (m->m_pkthdr.rcvif && m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
+	if (ifp && ifp->if_type == IFT_FAITH) {
 		if (V_ip_keepfaith) {
 			if (ip->ip_p == IPPROTO_TCP || ip->ip_p == IPPROTO_ICMP) 
 				goto ours;
@@ -645,7 +725,7 @@ passin:
 	 * Not for us; forward if possible and desirable.
 	 */
 	if (V_ipforwarding == 0) {
-		V_ipstat.ips_cantforward++;
+		IPSTAT_INC(ips_cantforward);
 		m_freem(m);
 	} else {
 #ifdef IPSEC
@@ -662,15 +742,18 @@ ours:
 	 * IPSTEALTH: Process non-routing options only
 	 * if the packet is destined for us.
 	 */
-	if (V_ipstealth && hlen > sizeof (struct ip) &&
-	    ip_dooptions(m, 1))
+	if (V_ipstealth && hlen > sizeof (struct ip) && ip_dooptions(m, 1)) {
+		if (ia != NULL)
+			ifa_free(&ia->ia_ifa);
 		return;
+	}
 #endif /* IPSTEALTH */
 
 	/* Count the packet in the ip address stats */
 	if (ia != NULL) {
 		ia->ia_ifa.if_ipackets++;
 		ia->ia_ifa.if_ibytes += m->m_pkthdr.len;
+		ifa_free(&ia->ia_ifa);
 	}
 
 	/*
@@ -705,7 +788,7 @@ ours:
 	/*
 	 * Switch out to protocol's input routine.
 	 */
-	V_ipstat.ips_delivered++;
+	IPSTAT_INC(ips_delivered);
 
 	(*inetsw[ip_protox[ip->ip_p]].pr_input)(m, hlen);
 	return;
@@ -721,7 +804,6 @@ bad:
 static void
 maxnipq_update(void)
 {
-	INIT_VNET_INET(curvnet);
 
 	/*
 	 * -1 for unlimited allocation.
@@ -745,7 +827,6 @@ maxnipq_update(void)
 static void
 ipq_zone_change(void *tag)
 {
-	INIT_VNET_INET(curvnet);
 
 	if (V_maxnipq > 0 && V_maxnipq < (nmbclusters / 32)) {
 		V_maxnipq = nmbclusters / 32;
@@ -756,7 +837,6 @@ ipq_zone_change(void *tag)
 static int
 sysctl_maxnipq(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
 	int error, i;
 
 	i = V_maxnipq;
@@ -792,7 +872,6 @@ SYSCTL_PROC(_net_inet_ip, OID_AUTO, maxfragpackets, CTLTYPE_INT|CTLFLAG_RW,
 struct mbuf *
 ip_reass(struct mbuf *m)
 {
-	INIT_VNET_INET(curvnet);
 	struct ip *ip;
 	struct mbuf *p, *q, *nq, *t;
 	struct ipq *fp = NULL;
@@ -803,8 +882,8 @@ ip_reass(struct mbuf *m)
 
 	/* If maxnipq or maxfragsperpacket are 0, never accept fragments. */
 	if (V_maxnipq == 0 || V_maxfragsperpacket == 0) {
-		V_ipstat.ips_fragments++;
-		V_ipstat.ips_fragdropped++;
+		IPSTAT_INC(ips_fragments);
+		IPSTAT_INC(ips_fragdropped);
 		m_freem(m);
 		return (NULL);
 	}
@@ -846,14 +925,14 @@ ip_reass(struct mbuf *m)
 			for (i = 0; i < IPREASS_NHASH; i++) {
 				struct ipq *r = TAILQ_LAST(&V_ipq[i], ipqhead);
 				if (r) {
-					V_ipstat.ips_fragtimeout +=
-					    r->ipq_nfrags;
+					IPSTAT_ADD(ips_fragtimeout,
+					    r->ipq_nfrags);
 					ip_freef(&V_ipq[i], r);
 					break;
 				}
 			}
 		} else {
-			V_ipstat.ips_fragtimeout += q->ipq_nfrags;
+			IPSTAT_ADD(ips_fragtimeout, q->ipq_nfrags);
 			ip_freef(head, q);
 		}
 	}
@@ -870,7 +949,7 @@ found:
 		 * that's a non-zero multiple of 8 bytes.
 		 */
 		if (ip->ip_len == 0 || (ip->ip_len & 0x7) != 0) {
-			V_ipstat.ips_toosmall++; /* XXX */
+			IPSTAT_INC(ips_toosmall); /* XXX */
 			goto dropfrag;
 		}
 		m->m_flags |= M_FRAG;
@@ -883,7 +962,7 @@ found:
 	 * Attempt reassembly; if it succeeds, proceed.
 	 * ip_reass() will return a different mbuf.
 	 */
-	V_ipstat.ips_fragments++;
+	IPSTAT_INC(ips_fragments);
 	m->m_pkthdr.header = ip;
 
 	/* Previous ip_reass() started here. */
@@ -994,7 +1073,7 @@ found:
 		}
 		nq = q->m_nextpkt;
 		m->m_nextpkt = nq;
-		V_ipstat.ips_fragdropped++;
+		IPSTAT_INC(ips_fragdropped);
 		fp->ipq_nfrags--;
 		m_freem(q);
 	}
@@ -1013,7 +1092,7 @@ found:
 	for (p = NULL, q = fp->ipq_frags; q; p = q, q = q->m_nextpkt) {
 		if (GETIP(q)->ip_off != next) {
 			if (fp->ipq_nfrags > V_maxfragsperpacket) {
-				V_ipstat.ips_fragdropped += fp->ipq_nfrags;
+				IPSTAT_ADD(ips_fragdropped, fp->ipq_nfrags);
 				ip_freef(head, fp);
 			}
 			goto done;
@@ -1023,7 +1102,7 @@ found:
 	/* Make sure the last packet didn't have the IP_MF flag */
 	if (p->m_flags & M_FRAG) {
 		if (fp->ipq_nfrags > V_maxfragsperpacket) {
-			V_ipstat.ips_fragdropped += fp->ipq_nfrags;
+			IPSTAT_ADD(ips_fragdropped, fp->ipq_nfrags);
 			ip_freef(head, fp);
 		}
 		goto done;
@@ -1035,8 +1114,8 @@ found:
 	q = fp->ipq_frags;
 	ip = GETIP(q);
 	if (next + (ip->ip_hl << 2) > IP_MAXPACKET) {
-		V_ipstat.ips_toolong++;
-		V_ipstat.ips_fragdropped += fp->ipq_nfrags;
+		IPSTAT_INC(ips_toolong);
+		IPSTAT_ADD(ips_fragdropped, fp->ipq_nfrags);
 		ip_freef(head, fp);
 		goto done;
 	}
@@ -1085,12 +1164,12 @@ found:
 	/* some debugging cruft by sklower, below, will go away soon */
 	if (m->m_flags & M_PKTHDR)	/* XXX this should be done elsewhere */
 		m_fixhdr(m);
-	V_ipstat.ips_reassembled++;
+	IPSTAT_INC(ips_reassembled);
 	IPQ_UNLOCK();
 	return (m);
 
 dropfrag:
-	V_ipstat.ips_fragdropped++;
+	IPSTAT_INC(ips_fragdropped);
 	if (fp != NULL)
 		fp->ipq_nfrags--;
 	m_freem(m);
@@ -1108,7 +1187,6 @@ done:
 static void
 ip_freef(struct ipqhead *fhp, struct ipq *fp)
 {
-	INIT_VNET_INET(curvnet);
 	struct mbuf *q;
 
 	IPQ_LOCK_ASSERT();
@@ -1135,11 +1213,10 @@ ip_slowtimo(void)
 	struct ipq *fp;
 	int i;
 
+	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
-		INIT_VNET_INET(vnet_iter);
 		for (i = 0; i < IPREASS_NHASH; i++) {
 			for(fp = TAILQ_FIRST(&V_ipq[i]); fp;) {
 				struct ipq *fpp;
@@ -1147,8 +1224,8 @@ ip_slowtimo(void)
 				fpp = fp;
 				fp = TAILQ_NEXT(fp, ipq_list);
 				if(--fpp->ipq_ttl == 0) {
-					V_ipstat.ips_fragtimeout +=
-					    fpp->ipq_nfrags;
+					IPSTAT_ADD(ips_fragtimeout,
+					    fpp->ipq_nfrags);
 					ip_freef(&V_ipq[i], fpp);
 				}
 			}
@@ -1162,8 +1239,8 @@ ip_slowtimo(void)
 			for (i = 0; i < IPREASS_NHASH; i++) {
 				while (V_nipq > V_maxnipq &&
 				    !TAILQ_EMPTY(&V_ipq[i])) {
-					V_ipstat.ips_fragdropped +=
-					    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags;
+					IPSTAT_ADD(ips_fragdropped,
+					    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
 					ip_freef(&V_ipq[i],
 					    TAILQ_FIRST(&V_ipq[i]));
 				}
@@ -1171,35 +1248,43 @@ ip_slowtimo(void)
 		}
 		CURVNET_RESTORE();
 	}
-	VNET_LIST_RUNLOCK();
 	IPQ_UNLOCK();
+	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 /*
  * Drain off all datagram fragments.
  */
+static void
+ip_drain_locked(void)
+{
+	int     i;
+
+	IPQ_LOCK_ASSERT();
+
+	for (i = 0; i < IPREASS_NHASH; i++) {
+		while(!TAILQ_EMPTY(&V_ipq[i])) {
+			IPSTAT_ADD(ips_fragdropped,
+			    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
+			ip_freef(&V_ipq[i], TAILQ_FIRST(&V_ipq[i]));
+		}
+	}
+}
+
 void
 ip_drain(void)
 {
 	VNET_ITERATOR_DECL(vnet_iter);
-	int     i;
 
+	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
-		INIT_VNET_INET(vnet_iter);
-		for (i = 0; i < IPREASS_NHASH; i++) {
-			while(!TAILQ_EMPTY(&V_ipq[i])) {
-				V_ipstat.ips_fragdropped +=
-				    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags;
-				ip_freef(&V_ipq[i], TAILQ_FIRST(&V_ipq[i]));
-			}
-		}
+		ip_drain_locked();
 		CURVNET_RESTORE();
 	}
-	VNET_LIST_RUNLOCK();
 	IPQ_UNLOCK();
+	VNET_LIST_RUNLOCK_NOSLEEP();
 	in_rtqdrain();
 }
 
@@ -1264,15 +1349,15 @@ ipproto_unregister(u_char ipproto)
 }
 
 /*
- * Given address of next destination (final or next hop),
- * return internet address info of interface to be used to get there.
+ * Given address of next destination (final or next hop), return (referenced)
+ * internet address info of interface to be used to get there.
  */
 struct in_ifaddr *
 ip_rtaddr(struct in_addr dst, u_int fibnum)
 {
 	struct route sro;
 	struct sockaddr_in *sin;
-	struct in_ifaddr *ifa;
+	struct in_ifaddr *ia;
 
 	bzero(&sro, sizeof(sro));
 	sin = (struct sockaddr_in *)&sro.ro_dst;
@@ -1284,9 +1369,10 @@ ip_rtaddr(struct in_addr dst, u_int fibnum)
 	if (sro.ro_rt == NULL)
 		return (NULL);
 
-	ifa = ifatoia(sro.ro_rt->rt_ifa);
+	ia = ifatoia(sro.ro_rt->rt_ifa);
+	ifa_ref(&ia->ia_ifa);
 	RTFREE(sro.ro_rt);
-	return (ifa);
+	return (ia);
 }
 
 u_char inetctlerrmap[PRC_NCMDS] = {
@@ -1315,16 +1401,15 @@ u_char inetctlerrmap[PRC_NCMDS] = {
 void
 ip_forward(struct mbuf *m, int srcrt)
 {
-	INIT_VNET_INET(curvnet);
 	struct ip *ip = mtod(m, struct ip *);
-	struct in_ifaddr *ia = NULL;
+	struct in_ifaddr *ia;
 	struct mbuf *mcopy;
 	struct in_addr dest;
 	struct route ro;
 	int error, type = 0, code = 0, mtu = 0;
 
 	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
-		V_ipstat.ips_cantforward++;
+		IPSTAT_INC(ips_cantforward);
 		m_freem(m);
 		return;
 	}
@@ -1341,10 +1426,17 @@ ip_forward(struct mbuf *m, int srcrt)
 #endif
 
 	ia = ip_rtaddr(ip->ip_dst, M_GETFIB(m));
+#ifndef IPSEC
+	/*
+	 * 'ia' may be NULL if there is no route for this destination.
+	 * In case of IPsec, Don't discard it just yet, but pass it to
+	 * ip_output in case of outgoing IPsec policy.
+	 */
 	if (!srcrt && ia == NULL) {
 		icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, 0, 0);
 		return;
 	}
+#endif
 
 	/*
 	 * Save the IP header and at most 8 bytes of the payload,
@@ -1396,7 +1488,8 @@ ip_forward(struct mbuf *m, int srcrt)
 	 * or a route modified by a redirect.
 	 */
 	dest.s_addr = 0;
-	if (!srcrt && V_ipsendredirects && ia->ia_ifp == m->m_pkthdr.rcvif) {
+	if (!srcrt && V_ipsendredirects &&
+	    ia != NULL && ia->ia_ifp == m->m_pkthdr.rcvif) {
 		struct sockaddr_in *sin;
 		struct rtentry *rt;
 
@@ -1443,19 +1536,24 @@ ip_forward(struct mbuf *m, int srcrt)
 		RTFREE(ro.ro_rt);
 
 	if (error)
-		V_ipstat.ips_cantforward++;
+		IPSTAT_INC(ips_cantforward);
 	else {
-		V_ipstat.ips_forward++;
+		IPSTAT_INC(ips_forward);
 		if (type)
-			V_ipstat.ips_redirectsent++;
+			IPSTAT_INC(ips_redirectsent);
 		else {
 			if (mcopy)
 				m_freem(mcopy);
+			if (ia != NULL)
+				ifa_free(&ia->ia_ifa);
 			return;
 		}
 	}
-	if (mcopy == NULL)
+	if (mcopy == NULL) {
+		if (ia != NULL)
+			ifa_free(&ia->ia_ifa);
 		return;
+	}
 
 	switch (error) {
 
@@ -1463,7 +1561,7 @@ ip_forward(struct mbuf *m, int srcrt)
 		/* type, code set above */
 		break;
 
-	case ENETUNREACH:		/* shouldn't happen, checked above */
+	case ENETUNREACH:
 	case EHOSTUNREACH:
 	case ENETDOWN:
 	case EHOSTDOWN:
@@ -1481,7 +1579,7 @@ ip_forward(struct mbuf *m, int srcrt)
 		 * If IPsec is configured for this path,
 		 * override any possibly mtu value set by ip_output.
 		 */ 
-		mtu = ip_ipsec_mtu(m, mtu);
+		mtu = ip_ipsec_mtu(mcopy, mtu);
 #endif /* IPSEC */
 		/*
 		 * If the MTU was set before make sure we are below the
@@ -1499,7 +1597,7 @@ ip_forward(struct mbuf *m, int srcrt)
 			else
 				mtu = ip_next_mtu(ip->ip_len, 0);
 		}
-		V_ipstat.ips_cantfrag++;
+		IPSTAT_INC(ips_cantfrag);
 		break;
 
 	case ENOBUFS:
@@ -1513,6 +1611,8 @@ ip_forward(struct mbuf *m, int srcrt)
 		 */
 		if (V_ip_sendsourcequench == 0) {
 			m_freem(mcopy);
+			if (ia != NULL)
+				ifa_free(&ia->ia_ifa);
 			return;
 		} else {
 			type = ICMP_SOURCEQUENCH;
@@ -1522,8 +1622,12 @@ ip_forward(struct mbuf *m, int srcrt)
 
 	case EACCES:			/* ipfw denied packet */
 		m_freem(mcopy);
+		if (ia != NULL)
+			ifa_free(&ia->ia_ifa);
 		return;
 	}
+	if (ia != NULL)
+		ifa_free(&ia->ia_ifa);
 	icmp_error(mcopy, type, code, dest.s_addr, mtu);
 }
 
@@ -1531,7 +1635,6 @@ void
 ip_savecontrol(struct inpcb *inp, struct mbuf **mp, struct ip *ip,
     struct mbuf *m)
 {
-	INIT_VNET_NET(inp->inp_vnet);
 
 	if (inp->inp_socket->so_options & (SO_BINTIME | SO_TIMESTAMP)) {
 		struct bintime bt;
@@ -1626,10 +1729,14 @@ makedummy:
  * locking.  This code remains in ip_input.c as ip_mroute.c is optionally
  * compiled.
  */
+static VNET_DEFINE(int, ip_rsvp_on);
+VNET_DEFINE(struct socket *, ip_rsvpd);
+
+#define	V_ip_rsvp_on		VNET(ip_rsvp_on)
+
 int
 ip_rsvp_init(struct socket *so)
 {
-	INIT_VNET_INET(so->so_vnet);
 
 	if (so->so_type != SOCK_RAW ||
 	    so->so_proto->pr_protocol != IPPROTO_RSVP)
@@ -1654,7 +1761,6 @@ ip_rsvp_init(struct socket *so)
 int
 ip_rsvp_done(void)
 {
-	INIT_VNET_INET(curvnet);
 
 	V_ip_rsvpd = NULL;
 	/*
@@ -1671,7 +1777,6 @@ ip_rsvp_done(void)
 void
 rsvp_input(struct mbuf *m, int off)	/* XXX must fixup manually */
 {
-	INIT_VNET_INET(curvnet);
 
 	if (rsvp_input_p) { /* call the real one if loaded */
 		rsvp_input_p(m, off);

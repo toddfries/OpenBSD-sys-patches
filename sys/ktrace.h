@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ktrace.h	8.1 (Berkeley) 6/2/93
- * $FreeBSD: src/sys/sys/ktrace.h,v 1.34 2008/02/23 01:01:48 des Exp $
+ * $FreeBSD: src/sys/sys/ktrace.h,v 1.36 2009/10/23 15:10:41 jhb Exp $
  */
 
 #ifndef _SYS_KTRACE_H_
@@ -52,7 +52,7 @@ struct ktr_header {
 	int	ktr_len;		/* length of buf */
 	short	ktr_type;		/* trace record type */
 	pid_t	ktr_pid;		/* process id */
-	char	ktr_comm[MAXCOMLEN+1];	/* command name */
+	char	ktr_comm[MAXCOMLEN + 1];/* command name */
 	struct	timeval ktr_time;	/* timestamp */
 	intptr_t	ktr_tid;	/* was ktr_buffer */
 };
@@ -158,6 +158,12 @@ struct sockaddr;
 struct stat;
 
 /*
+ * KTR_SYSCTL - name of a sysctl MIB
+ */
+#define	KTR_SYSCTL	9
+	/* record contains null-terminated MIB name */
+
+/*
  * KTR_DROP - If this bit is set in ktr_type, then at least one event
  * between the previous record and this record was dropped.
  */
@@ -175,6 +181,8 @@ struct stat;
 #define KTRFAC_CSW	(1<<KTR_CSW)
 #define KTRFAC_USER	(1<<KTR_USER)
 #define KTRFAC_STRUCT	(1<<KTR_STRUCT)
+#define KTRFAC_SYSCTL	(1<<KTR_SYSCTL)
+
 /*
  * trace flags (also in p_traceflags)
  */
@@ -190,6 +198,7 @@ void	ktrcsw(int, int);
 void	ktrpsig(int, sig_t, sigset_t *, int);
 void	ktrgenio(int, enum uio_rw, struct uio *, int);
 void	ktrsyscall(int, int narg, register_t args[]);
+void	ktrsysctl(int *name, u_int namelen);
 void	ktrsysret(int, int, register_t);
 void	ktrprocexit(struct thread *);
 void	ktruserret(struct thread *);

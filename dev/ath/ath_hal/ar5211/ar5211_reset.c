@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5211/ar5211_reset.c,v 1.3 2009/01/28 18:00:22 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5211/ar5211_reset.c,v 1.5 2010/05/29 16:14:02 rpaulo Exp $
  */
 #include "opt_ah.h"
 
@@ -46,7 +46,7 @@ typedef struct {
 } CHAN_INFO_2GHZ;
 
 #define CI_2GHZ_INDEX_CORRECTION 19
-const static CHAN_INFO_2GHZ chan2GHzData[] = {
+static const CHAN_INFO_2GHZ chan2GHzData[] = {
 	{ 1, 0x46, 96  },	/* 2312 -19 */
 	{ 1, 0x46, 97  },	/* 2317 -18 */
 	{ 1, 0x46, 98  },	/* 2322 -17 */
@@ -136,7 +136,7 @@ static void ar5211GetLowerUpperPcdacs(uint16_t pcdac,
 		uint16_t channel, const PCDACS_EEPROM *pSrcStruct,
 		uint16_t *pLowerPcdac, uint16_t *pUpperPcdac);
 
-static void ar5211SetRfgain(struct ath_hal *, const GAIN_VALUES *);;
+static void ar5211SetRfgain(struct ath_hal *, const GAIN_VALUES *);
 static void ar5211RequestRfgain(struct ath_hal *);
 static HAL_BOOL ar5211InvalidGainReadback(struct ath_hal *, GAIN_VALUES *);
 static HAL_BOOL ar5211IsGainAdjustNeeded(struct ath_hal *, const GAIN_VALUES *);
@@ -926,9 +926,10 @@ ar5211IsNfGood(struct ath_hal *ah, struct ieee80211_channel *chan)
 
 	if (!getNoiseFloorThresh(ah, chan, &nfThresh))
 		return AH_FALSE;
-	if (OS_REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF)
+	if (OS_REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF) {
 		HALDEBUG(ah, HAL_DEBUG_ANY,
 		    "%s: NF did not complete in calibration window\n", __func__);
+	}
 	nf = ar5211GetNoiseFloor(ah);
 	if (nf > nfThresh) {
 		HALDEBUG(ah, HAL_DEBUG_ANY,

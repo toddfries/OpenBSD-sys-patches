@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/i386/swtch.s,v 1.158 2009/01/31 11:37:21 obrien Exp $
+ * $FreeBSD: src/sys/i386/i386/swtch.s,v 1.159 2010/06/05 15:59:59 kib Exp $
  */
 
 #include "opt_npx.h"
@@ -156,8 +156,7 @@ ENTRY(cpu_switch)
 	/* have we used fp, and need a save? */
 	cmpl	%ecx,PCPU(FPCURTHREAD)
 	jne	1f
-	addl	$PCB_SAVEFPU,%edx		/* h/w bugs make saving complicated */
-	pushl	%edx
+	pushl	PCB_SAVEFPU(%edx)		/* h/w bugs make saving complicated */
 	call	npxsave				/* do it in a big C function */
 	popl	%eax
 1:
@@ -408,7 +407,7 @@ ENTRY(savectx)
 
 	pushl	%ecx
 	movl	TD_PCB(%eax),%eax
-	leal	PCB_SAVEFPU(%eax),%eax
+	movl	PCB_SAVEFPU(%eax),%eax
 	pushl	%eax
 	pushl	%eax
 	call	npxsave
@@ -417,7 +416,7 @@ ENTRY(savectx)
 	popl	%ecx
 
 	pushl	$PCB_SAVEFPU_SIZE
-	leal	PCB_SAVEFPU(%ecx),%ecx
+	movl	PCB_SAVEFPU(%ecx),%ecx
 	pushl	%ecx
 	pushl	%eax
 	call	bcopy

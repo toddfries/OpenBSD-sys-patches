@@ -40,7 +40,7 @@
  *	from: @(#)pmap.h	7.4 (Berkeley) 5/12/91
  *	from: src/sys/i386/include/pmap.h,v 1.65.2.2 2000/11/30 01:54:42 peter
  *	JNPR: pmap.h,v 1.7.2.1 2007/09/10 07:44:12 girish
- *      $FreeBSD: src/sys/mips/include/pmap.h,v 1.6 2009/02/10 06:08:28 alc Exp $
+ *      $FreeBSD: src/sys/mips/include/pmap.h,v 1.14 2010/06/17 05:03:01 jchandra Exp $
  */
 
 #ifndef _MACHINE_PMAP_H_
@@ -49,15 +49,7 @@
 #include <machine/vmparam.h>
 #include <machine/pte.h>
 
-#define	VADDR(pdi, pti)	((vm_offset_t)(((pdi)<<PDRSHIFT)|((pti)<<PAGE_SHIFT)))
-
 #define	NKPT		120	/* actual number of kernel page tables */
-
-#ifndef NKPDE
-#define	NKPDE		255	/* addressable number of page tables/pde's */
-#endif
-
-#define	KPTDI		(VM_MIN_KERNEL_ADDRESS >> SEGSHIFT)
 #define	NUSERPGTBLS	(VM_MAXUSER_ADDRESS >> SEGSHIFT)
 
 #ifndef LOCORE
@@ -74,7 +66,7 @@ struct pv_entry;
 struct md_page {
 	int pv_list_count;
 	int pv_flags;
-	    TAILQ_HEAD(, pv_entry)pv_list;
+	TAILQ_HEAD(, pv_entry) pv_list;
 };
 
 #define	PV_TABLE_MOD		0x01	/* modified */
@@ -86,8 +78,10 @@ struct md_page {
 
 struct pmap {
 	pd_entry_t *pm_segtab;	/* KVA of segment table */
-	           TAILQ_HEAD(, pv_entry)pm_pvlist;	/* list of mappings in
-							 * pmap */
+	TAILQ_HEAD(, pv_entry) pm_pvlist;	/* list of mappings in
+						 * pmap */
+	uint32_t	pm_gen_count;	/* generation count (pmap lock dropped) */
+	u_int		pm_retries;
 	int pm_active;		/* active on cpus */
 	struct {
 		u_int32_t asid:ASID_BITS;	/* TLB address space tag */
@@ -105,9 +99,12 @@ typedef struct pmap *pmap_t;
 pt_entry_t *pmap_pte(pmap_t, vm_offset_t);
 pd_entry_t pmap_segmap(pmap_t pmap, vm_offset_t va);
 vm_offset_t pmap_kextract(vm_offset_t va);
-extern pmap_t kernel_pmap;
 
 #define	vtophys(va)	pmap_kextract(((vm_offset_t) (va)))
+#define	pmap_asid(pmap)	(pmap)->pm_asid[PCPU_GET(cpuid)].asid
+
+extern struct pmap	kernel_pmap_store;
+#define kernel_pmap	(&kernel_pmap_store)
 
 #define	PMAP_LOCK(pmap)		mtx_lock(&(pmap)->pm_mtx)
 #define	PMAP_LOCK_ASSERT(pmap, type)	mtx_assert(&(pmap)->pm_mtx, (type))
@@ -132,8 +129,8 @@ extern pmap_t kernel_pmap;
 typedef struct pv_entry {
 	pmap_t pv_pmap;		/* pmap where mapping lies */
 	vm_offset_t pv_va;	/* virtual address for mapping */
-	            TAILQ_ENTRY(pv_entry)pv_list;
-	            TAILQ_ENTRY(pv_entry)pv_plist;
+	TAILQ_ENTRY(pv_entry) pv_list;
+	TAILQ_ENTRY(pv_entry) pv_plist;
 	vm_page_t pv_ptem;	/* VM page for pte */
 	boolean_t pv_wired;	/* whether this entry is wired */
 }       *pv_entry_t;
@@ -143,19 +140,27 @@ typedef struct pv_entry {
 #define	PMAP_DIAGNOSTIC
 #endif
 
-extern vm_offset_t avail_end;
-extern vm_offset_t avail_start;
-extern vm_offset_t phys_avail[];
-extern char *ptvmmap;		/* poor name! */
+/*
+ * physmem_desc[] is a superset of phys_avail[] and describes all the
+ * memory present in the system.
+ *
+ * phys_avail[] is similar but does not include the memory stolen by
+ * pmap_steal_memory().
+ *
+ * Each memory region is described by a pair of elements in the array
+ * so we can describe up to (PHYS_AVAIL_ENTRIES / 2) distinct memory
+ * regions.
+ */
+#define	PHYS_AVAIL_ENTRIES	10
+extern vm_offset_t phys_avail[PHYS_AVAIL_ENTRIES + 2];
+extern vm_offset_t physmem_desc[PHYS_AVAIL_ENTRIES + 2];
+
 extern vm_offset_t virtual_avail;
 extern vm_offset_t virtual_end;
-extern pd_entry_t *segbase;
 
-extern vm_paddr_t mips_wired_tlb_physmem_start;
-extern vm_paddr_t mips_wired_tlb_physmem_end;
-extern u_int need_wired_tlb_page_pool;
-
+#define	pmap_page_get_memattr(m)	VM_MEMATTR_DEFAULT
 #define	pmap_page_is_mapped(m)	(!TAILQ_EMPTY(&(m)->md.pv_list))
+#define	pmap_page_set_memattr(m, ma)	(void)0
 
 void pmap_bootstrap(void);
 void *pmap_mapdev(vm_offset_t, vm_size_t);
@@ -163,44 +168,13 @@ void pmap_unmapdev(vm_offset_t, vm_size_t);
 vm_offset_t pmap_steal_memory(vm_size_t size);
 void pmap_set_modified(vm_offset_t pa);
 int page_is_managed(vm_offset_t pa);
-void pmap_page_is_free(vm_page_t m);
 void pmap_kenter(vm_offset_t va, vm_paddr_t pa);
 void pmap_kremove(vm_offset_t va);
 void *pmap_kenter_temporary(vm_paddr_t pa, int i);
 void pmap_kenter_temporary_free(vm_paddr_t pa);
 int pmap_compute_pages_to_dump(void);
 void pmap_update_page(pmap_t pmap, vm_offset_t va, pt_entry_t pte);
-
-/*
- * floating virtual pages (FPAGES)
- *
- * These are the reserved virtual memory areas which can be
- * mapped to any physical memory.
- */
-#define	FPAGES			2
-#define	FPAGES_SHARED		2
-#define	FSPACE			((FPAGES * MAXCPU + FPAGES_SHARED)  * PAGE_SIZE)
-#define	PMAP_FPAGE1		0x00	/* Used by pmap_zero_page &
-					 * pmap_copy_page */
-#define	PMAP_FPAGE2		0x01	/* Used by pmap_copy_page */
-
-#define	PMAP_FPAGE3		0x00	/* Used by pmap_zero_page_idle */
-#define	PMAP_FPAGE_KENTER_TEMP	0x01	/* Used by coredump */
-
-struct fpage {
-	vm_offset_t kva;
-	u_int state;
-};
-
-struct sysmaps {
-	struct mtx lock;
-	struct fpage fp[FPAGES];
-};
-
-vm_offset_t 
-pmap_map_fpage(vm_paddr_t pa, struct fpage *fp,
-    boolean_t check_unmaped);
-void pmap_unmap_fpage(vm_paddr_t pa, struct fpage *fp);
+void pmap_flush_pvcache(vm_page_t m);
 
 #endif				/* _KERNEL */
 

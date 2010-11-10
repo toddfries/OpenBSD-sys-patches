@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/AVILA,v 1.27 2009/03/09 23:25:34 sam Exp $
+# $FreeBSD: src/sys/arm/conf/AVILA,v 1.38 2010/11/07 20:33:39 thompsa Exp $
 
 ident		AVILA
 
@@ -39,6 +39,7 @@ options 	DEVICE_POLLING
 options 	KDB
 #options 	GDB
 options 	DDB			#Enable the kernel debugger
+#options 	DEADLKRES		#Enable the deadlock resolver
 options 	INVARIANTS		#Enable calls of extra sanity checking
 options 	INVARIANT_SUPPORT	#Extra sanity checks of internal structures, required by INVARIANTS
 #options 	WITNESS			#Enable checks to detect deadlocks and cycles
@@ -61,6 +62,10 @@ options 	BOOTP_COMPAT
 #options 	PREEMPTION
 #options 	VERBOSE_SYSINIT
 
+# Hardware performance counters
+options 	HWPMC_HOOKS
+device		hwpmc
+
 #device		saarm
 
 device		pci
@@ -82,6 +87,10 @@ device		ad7418		# AD7418 on I2C bus
 
 device		avila_led
 
+device		gpio
+device		gpioled
+device		avila_gpio	# GPIO pins on J8
+
 device		ata
 device		atadisk         # ATA disk drives
 device		avila_ata	# Gateworks CF/IDE support
@@ -99,26 +108,26 @@ device		loop
 device		if_bridge
 
 device		md
-device          random          # Entropy device
+device		random		# Entropy device
 
 # Wireless NIC cards
 device		wlan		# 802.11 support
-options		IEEE80211_DEBUG
-options		IEEE80211_SUPPORT_TDMA
+options 	IEEE80211_DEBUG
+options 	IEEE80211_SUPPORT_TDMA
+options 	IEEE80211_SUPPORT_MESH
 device		wlan_wep	# 802.11 WEP support
 device		wlan_ccmp	# 802.11 CCMP support
 device		wlan_tkip	# 802.11 TKIP support
 device		wlan_xauth
 
 device		ath		# Atheros pci/cardbus NIC's
-options		ATH_SUPPORT_TDMA
 options 	ATH_DEBUG
-options		ATH_DIAGAPI
-#options		ATH_TX99_DIAG
+options 	ATH_DIAGAPI
+#options 	ATH_TX99_DIAG
 device		ath_rate_sample	# SampleRate tx rate control for ath
 
-#options		AH_DEBUG
-#options		AH_ASSERT
+#options 	AH_DEBUG
+#options 	AH_ASSERT
 #device		ath_ar5210
 #device		ath_ar5211
 device		ath_ar5212
@@ -130,18 +139,18 @@ device		ath_rf5112
 device		ath_rf5413
 #
 device		ath_ar5416
-options		AH_SUPPORT_AR5416
+options 	AH_SUPPORT_AR5416
 device		ath_ar9160
+device		ath_ar9280
 
-makeoptions	WITH_LEGACY
-device		ousb
+device		usb
 #options 	USB_DEBUG
-device		oohci
-device		oehci
-device		oumass
+device		ohci
+device		ehci
+device		umass
 device		scbus		# SCSI bus (required for SCSI)
 device		da		# Direct Access (disks)
 
-#device		oural
-#device		ozyd
+#device		ural
+#device		zyd
 #device		wlan_amrr

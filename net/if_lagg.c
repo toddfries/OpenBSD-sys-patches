@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/if_lagg.c,v 1.35 2008/12/17 21:04:43 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/net/if_lagg.c,v 1.41 2010/03/09 00:52:16 delphij Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD: src/sys/net/if_lagg.c,v 1.35 2008/12/17 21:04:43 thompsa Exp
 #include <sys/lock.h>
 #include <sys/rwlock.h>
 #include <sys/taskqueue.h>
+#include <sys/eventhandler.h>
 
 #include <net/ethernet.h>
 #include <net/if.h>
@@ -93,9 +94,11 @@ static void	lagg_linkstate(struct lagg_softc *);
 static void	lagg_port_state(struct ifnet *, int);
 static int	lagg_port_ioctl(struct ifnet *, u_long, caddr_t);
 static int	lagg_port_output(struct ifnet *, struct mbuf *,
-		    struct sockaddr *, struct rtentry *);
+		    struct sockaddr *, struct route *);
 static void	lagg_port_ifdetach(void *arg __unused, struct ifnet *);
+#ifdef LAGG_PORT_STACKING
 static int	lagg_port_checkstacking(struct lagg_softc *);
+#endif
 static void	lagg_port2req(struct lagg_port *, struct lagg_reqport *);
 static void	lagg_init(void *);
 static void	lagg_stop(struct lagg_softc *);
@@ -196,6 +199,50 @@ static moduledata_t lagg_mod = {
 
 DECLARE_MODULE(if_lagg, lagg_mod, SI_SUB_PSEUDO, SI_ORDER_ANY);
 
+#if __FreeBSD_version >= 800000
+/*
+ * This routine is run via an vlan
+ * config EVENT
+ */
+static void
+lagg_register_vlan(void *arg, struct ifnet *ifp, u_int16_t vtag)
+{
+        struct lagg_softc       *sc = ifp->if_softc;
+        struct lagg_port        *lp;
+
+        if (ifp->if_softc !=  arg)   /* Not our event */
+                return;
+
+        LAGG_RLOCK(sc);
+        if (!SLIST_EMPTY(&sc->sc_ports)) {
+                SLIST_FOREACH(lp, &sc->sc_ports, lp_entries)
+                        EVENTHANDLER_INVOKE(vlan_config, lp->lp_ifp, vtag);
+        }
+        LAGG_RUNLOCK(sc);
+}
+
+/*
+ * This routine is run via an vlan
+ * unconfig EVENT
+ */
+static void
+lagg_unregister_vlan(void *arg, struct ifnet *ifp, u_int16_t vtag)
+{
+        struct lagg_softc       *sc = ifp->if_softc;
+        struct lagg_port        *lp;
+
+        if (ifp->if_softc !=  arg)   /* Not our event */
+                return;
+
+        LAGG_RLOCK(sc);
+        if (!SLIST_EMPTY(&sc->sc_ports)) {
+                SLIST_FOREACH(lp, &sc->sc_ports, lp_entries)
+                        EVENTHANDLER_INVOKE(vlan_unconfig, lp->lp_ifp, vtag);
+        }
+        LAGG_RUNLOCK(sc);
+}
+#endif
+
 static int
 lagg_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 {
@@ -251,6 +298,13 @@ lagg_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	 */
 	ether_ifattach(ifp, eaddr);
 
+#if __FreeBSD_version >= 800000
+	sc->vlan_attach = EVENTHANDLER_REGISTER(vlan_config,
+		lagg_register_vlan, sc, EVENTHANDLER_PRI_FIRST);
+	sc->vlan_detach = EVENTHANDLER_REGISTER(vlan_unconfig,
+		lagg_unregister_vlan, sc, EVENTHANDLER_PRI_FIRST);
+#endif
+
 	/* Insert into the global list of laggs */
 	mtx_lock(&lagg_list_mtx);
 	SLIST_INSERT_HEAD(&lagg_list, sc, sc_entries);
@@ -269,6 +323,11 @@ lagg_clone_destroy(struct ifnet *ifp)
 
 	lagg_stop(sc);
 	ifp->if_flags &= ~IFF_UP;
+
+#if __FreeBSD_version >= 800000
+	EVENTHANDLER_DEREGISTER(vlan_config, sc->vlan_attach);
+	EVENTHANDLER_DEREGISTER(vlan_unconfig, sc->vlan_detach);
+#endif
 
 	/* Shutdown and remove lagg ports */
 	while ((lp = SLIST_FIRST(&sc->sc_ports)) != NULL)
@@ -303,6 +362,7 @@ lagg_lladdr(struct lagg_softc *sc, uint8_t *lladdr)
 	/* Let the protocol know the MAC has changed */
 	if (sc->sc_lladdr != NULL)
 		(*sc->sc_lladdr)(sc);
+	EVENTHANDLER_INVOKE(iflladdr_event, ifp);
 }
 
 static void
@@ -424,10 +484,6 @@ lagg_port_create(struct lagg_softc *sc, struct ifnet *ifp)
 	if (sc->sc_count >= LAGG_MAX_PORTS)
 		return (ENOSPC);
 
-	/* New lagg port has to be in an idle state */
-	if (ifp->if_drv_flags & IFF_DRV_OACTIVE)
-		return (EBUSY);
-
 	/* Check if port has already been associated to a lagg */
 	if (ifp->if_lagg != NULL)
 		return (EBUSY);
@@ -456,7 +512,8 @@ lagg_port_create(struct lagg_softc *sc, struct ifnet *ifp)
 			mtx_unlock(&lagg_list_mtx);
 			free(lp, M_DEVBUF);
 			return (EINVAL);
-			/* XXX disable stacking for the moment, its untested
+			/* XXX disable stacking for the moment, its untested */
+#ifdef LAGG_PORT_STACKING
 			lp->lp_flags |= LAGG_PORT_STACK;
 			if (lagg_port_checkstacking(sc_ptr) >=
 			    LAGG_MAX_STACKING) {
@@ -464,7 +521,7 @@ lagg_port_create(struct lagg_softc *sc, struct ifnet *ifp)
 				free(lp, M_DEVBUF);
 				return (E2BIG);
 			}
-			*/
+#endif
 		}
 	}
 	mtx_unlock(&lagg_list_mtx);
@@ -515,6 +572,7 @@ lagg_port_create(struct lagg_softc *sc, struct ifnet *ifp)
 	return (error);
 }
 
+#ifdef LAGG_PORT_STACKING
 static int
 lagg_port_checkstacking(struct lagg_softc *sc)
 {
@@ -533,6 +591,7 @@ lagg_port_checkstacking(struct lagg_softc *sc)
 
 	return (m + 1);
 }
+#endif
 
 static int
 lagg_port_destroy(struct lagg_port *lp, int runpd)
@@ -676,7 +735,7 @@ fallback:
 
 static int
 lagg_port_output(struct ifnet *ifp, struct mbuf *m,
-	struct sockaddr *dst, struct rtentry *rt0)
+	struct sockaddr *dst, struct route *ro)
 {
 	struct lagg_port *lp = ifp->if_lagg;
 	struct ether_header *eh;
@@ -696,7 +755,7 @@ lagg_port_output(struct ifnet *ifp, struct mbuf *m,
 	 */
 	switch (ntohs(type)) {
 		case ETHERTYPE_PAE:	/* EAPOL PAE/802.1x */
-			return ((*lp->lp_output)(ifp, m, dst, rt0));
+			return ((*lp->lp_output)(ifp, m, dst, ro));
 	}
 
 	/* drop any other frames */
@@ -1604,7 +1663,10 @@ lagg_lb_start(struct lagg_softc *sc, struct mbuf *m)
 	struct lagg_port *lp = NULL;
 	uint32_t p = 0;
 
-	p = lagg_hashmbuf(m, lb->lb_key);
+	if (m->m_flags & M_FLOWID)
+		p = m->m_pkthdr.flowid;
+	else
+		p = lagg_hashmbuf(m, lb->lb_key);
 	p %= sc->sc_count;
 	lp = lb->lb_ports[p];
 

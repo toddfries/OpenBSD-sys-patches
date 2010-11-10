@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/arm/ixp425/boot2/ixp425_board.c,v 1.2 2008/12/20 03:26:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/arm/ixp425/boot2/ixp425_board.c,v 1.3 2010/11/09 10:59:09 brucec Exp $");
 #include <sys/param.h>
 #include <sys/ata.h>
 #include <sys/linker_set.h>
@@ -88,7 +88,7 @@ board_init(void)
 
 /*
  * This should be called just before starting the kernel. This is so
- * that one can undo incompatable hardware settings.
+ * that one can undo incompatible hardware settings.
  */
 void
 clr_board(void)
@@ -504,7 +504,7 @@ cfaltwait(u_int8_t mask)
 	while (tout <= 5000000) {
 		status = cfaltread8(CF_ALT_STATUS);
 		if (status == 0xff) {
-			printf("cfaltwait: master: no status, reselectin\n");
+			printf("cfaltwait: master: no status, reselecting\n");
 			cfwrite8(CF_DRV_HEAD, CF_D_IBM);
 			DELAY(1);
 			status = cfread8(CF_STATUS);

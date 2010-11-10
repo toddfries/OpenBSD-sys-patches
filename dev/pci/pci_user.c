@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pci/pci_user.c,v 1.27 2009/02/02 19:54:16 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pci/pci_user.c,v 1.28 2009/09/11 18:48:49 avg Exp $");
 
 #include "opt_bus.h"	/* XXX trim includes */
 #include "opt_compat.h"
@@ -605,9 +605,8 @@ getconfexit:
 		case 4:
 		case 2:
 		case 1:
-			/* Make sure register is in bounds and aligned. */
+			/* Make sure register is not negative and aligned. */
 			if (io->pi_reg < 0 ||
-			    io->pi_reg + io->pi_width > PCI_REGMAX + 1 ||
 			    io->pi_reg & (io->pi_width - 1)) {
 				error = EINVAL;
 				break;

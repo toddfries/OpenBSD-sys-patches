@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)buf.h	8.9 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/sys/buf.h,v 1.208 2009/03/09 19:35:20 jhb Exp $
+ * $FreeBSD: src/sys/sys/buf.h,v 1.213 2010/06/11 17:03:26 mdf Exp $
  */
 
 #ifndef _SYS_BUF_H_
@@ -215,7 +215,7 @@ struct buf {
 #define	B_DIRTY		0x00200000	/* Needs writing later (in EXT2FS). */
 #define	B_RELBUF	0x00400000	/* Release VMIO buffer. */
 #define	B_00800000	0x00800000	/* Available flag. */
-#define	B_01000000	0x01000000	/* Available flag. */
+#define	B_NOCOPY	0x01000000	/* Don't copy-on-write this buf. */
 #define	B_NEEDSGIANT	0x02000000	/* Buffer's vnode needs giant. */
 #define	B_PAGING	0x04000000	/* volatile paging I/O -- bypass VMIO */
 #define B_MANAGED	0x08000000	/* Managed by FS. */
@@ -247,6 +247,7 @@ struct buf {
 #define	BV_SCANNED	0x00000001	/* VOP_FSYNC funcs mark written bufs */
 #define	BV_BKGRDINPROG	0x00000002	/* Background write in progress */
 #define	BV_BKGRDWAIT	0x00000004	/* Background write waiting */
+#define	BV_INFREECNT	0x80000000	/* buf is counted in numfreebufs */
 
 #ifdef _KERNEL
 /*
@@ -443,6 +444,7 @@ buf_countdeps(struct buf *bp, int i)
  */
 #define	GB_LOCK_NOWAIT	0x0001		/* Fail if we block on a buf lock. */
 #define	GB_NOCREAT	0x0002		/* Don't create a buf if not found. */
+#define	GB_NOWAIT_BD	0x0004		/* Do not wait for bufdaemon */
 
 #ifdef _KERNEL
 extern int	nbuf;			/* The number of buffer headers */
@@ -487,17 +489,18 @@ struct buf *     getpbuf(int *);
 struct buf *incore(struct bufobj *, daddr_t);
 struct buf *gbincore(struct bufobj *, daddr_t);
 struct buf *getblk(struct vnode *, daddr_t, int, int, int, int);
-struct buf *geteblk(int);
+struct buf *geteblk(int, int);
 int	bufwait(struct buf *);
 int	bufwrite(struct buf *);
 void	bufdone(struct buf *);
 void	bufdone_finish(struct buf *);
+void	bd_speedup(void);
 
 int	cluster_read(struct vnode *, u_quad_t, daddr_t, long,
 	    struct ucred *, long, int, struct buf **);
 int	cluster_wbuild(struct vnode *, long, daddr_t, int);
 void	cluster_write(struct vnode *, struct buf *, u_quad_t, int);
-void	vfs_bio_set_validclean(struct buf *, int base, int size);
+void	vfs_bio_set_valid(struct buf *, int base, int size);
 void	vfs_bio_clrbuf(struct buf *);
 void	vfs_busy_pages(struct buf *, int clear_modify);
 void	vfs_unbusy_pages(struct buf *);

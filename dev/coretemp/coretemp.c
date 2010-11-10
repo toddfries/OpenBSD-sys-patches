@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.9 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.10 2009/09/06 12:01:29 nork Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -47,6 +47,8 @@ __FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.9 2008/11/26 19:25:13 jk
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
 #include <machine/md_var.h>
+
+#define	TZ_ZEROC	2732
 
 struct coretemp_softc {
 	device_t	sc_dev;
@@ -193,8 +195,8 @@ coretemp_attach(device_t dev)
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(pdev)),
 	    OID_AUTO, "temperature",
 	    CTLTYPE_INT | CTLFLAG_RD,
-	    dev, 0, coretemp_get_temp_sysctl, "I",
-	    "Current temperature in degC");
+	    dev, 0, coretemp_get_temp_sysctl, "IK",
+	    "Current temperature");
 
 	return (0);
 }
@@ -283,7 +285,7 @@ coretemp_get_temp_sysctl(SYSCTL_HANDLER_ARGS)
 	device_t dev = (device_t) arg1;
 	int temp;
 
-	temp = coretemp_get_temp(dev);
+	temp = coretemp_get_temp(dev) * 10 + TZ_ZEROC;
 
 	return (sysctl_handle_int(oidp, &temp, 0, req));
 }

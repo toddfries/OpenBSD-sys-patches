@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_lookup.c,v 1.1 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/cddl/compat/opensolaris/kern/opensolaris_lookup.c,v 1.2 2009/05/11 15:33:26 attilio Exp $");
  
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -66,7 +66,6 @@ lookupnameat(char *dirname, enum uio_seg seg, enum symfollow follow,
 int
 traverse(vnode_t **cvpp, int lktype)
 {
-	kthread_t *td = curthread;
 	vnode_t *cvp;
 	vnode_t *tvp;
 	vfs_t *vfsp;
@@ -101,7 +100,7 @@ traverse(vnode_t **cvpp, int lktype)
 		 * The read lock must be held across the call to VFS_ROOT() to
 		 * prevent a concurrent unmount from destroying the vfs.
 		 */
-		error = VFS_ROOT(vfsp, lktype, &tvp, td);
+		error = VFS_ROOT(vfsp, lktype, &tvp);
 		if (error != 0)
 			return (error);
 		cvp = tvp;

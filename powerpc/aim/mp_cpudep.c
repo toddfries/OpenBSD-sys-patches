@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/aim/mp_cpudep.c,v 1.4 2008/09/16 17:22:16 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/aim/mp_cpudep.c,v 1.9 2010/06/12 21:14:22 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,7 +35,6 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/mp_cpudep.c,v 1.4 2008/09/16 17:22:16 ma
 #include <sys/proc.h>
 #include <sys/smp.h>
 
-#include <machine/bat.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/hid.h>
@@ -49,101 +48,48 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/mp_cpudep.c,v 1.4 2008/09/16 17:22:16 ma
 #include <dev/ofw/openfirm.h>
 #include <machine/ofw_machdep.h>
 
-extern void *rstcode;
-extern register_t l2cr_config;
-extern register_t l3cr_config;
-
 void *ap_pcpu;
 
-static int
-powerpc_smp_fill_cpuref(struct cpuref *cpuref, phandle_t cpu)
+static register_t bsp_state[8] __aligned(8);
+
+static void cpudep_save_config(void *dummy);
+SYSINIT(cpu_save_config, SI_SUB_CPU, SI_ORDER_ANY, cpudep_save_config, NULL);
+
+uintptr_t
+cpudep_ap_bootstrap(void)
 {
-	int cpuid, res;
+	register_t msr, sp;
 
-	cpuref->cr_hwref = cpu;
-	res = OF_getprop(cpu, "reg", &cpuid, sizeof(cpuid));
-	if (res < 0)
-		return (ENOENT);
+	msr = PSL_KERNSET & ~PSL_EE;
+	mtmsr(msr);
+	isync();
 
-	cpuref->cr_cpuid = cpuid & 0xff;
-	return (0);
-}
+	__asm __volatile("mtsprg 0, %0" :: "r"(ap_pcpu));
+	powerpc_sync();
 
-int
-powerpc_smp_first_cpu(struct cpuref *cpuref)
-{
-	char buf[8];
-	phandle_t cpu, dev, root;
-	int res;
+	pcpup->pc_curthread = pcpup->pc_idlethread;
+	pcpup->pc_curpcb = pcpup->pc_curthread->td_pcb;
+	sp = pcpup->pc_curpcb->pcb_sp;
 
-	root = OF_peer(0);
-
-	dev = OF_child(root);
-	while (dev != 0) {
-		res = OF_getprop(dev, "name", buf, sizeof(buf));
-		if (res > 0 && strcmp(buf, "cpus") == 0)
-			break;
-		dev = OF_peer(dev);
-	}
-	if (dev == 0)
-		return (ENOENT);
-
-	cpu = OF_child(dev);
-	while (cpu != 0) {
-		res = OF_getprop(cpu, "device_type", buf, sizeof(buf));
-		if (res > 0 && strcmp(buf, "cpu") == 0)
-			break;
-		cpu = OF_peer(cpu);
-	}
-	if (cpu == 0)
-		return (ENOENT);
-
-	return (powerpc_smp_fill_cpuref(cpuref, cpu));
-}
-
-int
-powerpc_smp_next_cpu(struct cpuref *cpuref)
-{
-	char buf[8];
-	phandle_t cpu;
-	int res;
-
-	cpu = OF_peer(cpuref->cr_hwref);
-	while (cpu != 0) {
-		res = OF_getprop(cpu, "device_type", buf, sizeof(buf));
-		if (res > 0 && strcmp(buf, "cpu") == 0)
-			break;
-		cpu = OF_peer(cpu);
-	}
-	if (cpu == 0)
-		return (ENOENT);
-
-	return (powerpc_smp_fill_cpuref(cpuref, cpu));
-}
-
-int
-powerpc_smp_get_bsp(struct cpuref *cpuref)
-{
-	ihandle_t inst;
-	phandle_t bsp, chosen;
-	int res;
-
-	chosen = OF_finddevice("/chosen");
-	if (chosen == 0)
-		return (ENXIO);
-
-	res = OF_getprop(chosen, "cpu", &inst, sizeof(inst));
-	if (res < 0)
-		return (ENXIO);
-
-	bsp = OF_instance_to_package(inst);
-	return (powerpc_smp_fill_cpuref(cpuref, bsp));
+	return (sp);
 }
 
 static register_t
-l2_enable(void)
+mpc74xx_l2_enable(register_t l2cr_config)
 {
-	register_t ccr;
+	register_t ccr, bit;
+	uint16_t	vers;
+
+	vers = mfpvr() >> 16;
+	switch (vers) {
+	case MPC7400:
+	case MPC7410:
+		bit = L2CR_L2IP;
+		break;
+	default:
+		bit = L2CR_L2I;
+		break;
+	}
 
 	ccr = mfspr(SPR_L2CR);
 	if (ccr & L2CR_L2E)
@@ -154,7 +100,7 @@ l2_enable(void)
 	mtspr(SPR_L2CR, ccr | L2CR_L2I);
 	do {
 		ccr = mfspr(SPR_L2CR);
-	} while (ccr & L2CR_L2I);
+	} while (ccr & bit);
 	powerpc_sync();
 	mtspr(SPR_L2CR, l2cr_config);
 	powerpc_sync();
@@ -163,7 +109,7 @@ l2_enable(void)
 }
 
 static register_t
-l3_enable(void)
+mpc745x_l3_enable(register_t l3cr_config)
 {
 	register_t ccr;
 
@@ -195,7 +141,7 @@ l3_enable(void)
 }
 
 static register_t
-l1d_enable(void)
+mpc74xx_l1d_enable(void)
 {
 	register_t hid;
 
@@ -213,7 +159,7 @@ l1d_enable(void)
 }
 
 static register_t
-l1i_enable(void)
+mpc74xx_l1i_enable(void)
 {
 	register_t hid;
 
@@ -230,69 +176,118 @@ l1i_enable(void)
 	return (hid);
 }
 
-uint32_t
-cpudep_ap_bootstrap(void)
+static void
+cpudep_save_config(void *dummy)
 {
-	uint32_t hid, msr, reg, sp;
+	uint16_t	vers;
 
-	// reg = mfspr(SPR_MSSCR0);
-	// mtspr(SPR_MSSCR0, reg | 0x3);
+	vers = mfpvr() >> 16;
 
-	__asm __volatile("mtsprg 0, %0" :: "r"(ap_pcpu));
-	powerpc_sync();
+	switch(vers) {
+	case IBM970:
+	case IBM970FX:
+	case IBM970MP:
+		__asm __volatile ("mfspr %0,%2; mr %1,%0; srdi %0,%0,32"
+		    : "=r" (bsp_state[0]),"=r" (bsp_state[1]) : "K" (SPR_HID0));
+		__asm __volatile ("mfspr %0,%2; mr %1,%0; srdi %0,%0,32"
+		    : "=r" (bsp_state[2]),"=r" (bsp_state[3]) : "K" (SPR_HID1));
+		__asm __volatile ("mfspr %0,%2; mr %1,%0; srdi %0,%0,32"
+		    : "=r" (bsp_state[4]),"=r" (bsp_state[5]) : "K" (SPR_HID4));
+		__asm __volatile ("mfspr %0,%2; mr %1,%0; srdi %0,%0,32"
+		    : "=r" (bsp_state[6]),"=r" (bsp_state[7]) : "K" (SPR_HID5));
 
-	__asm __volatile("mtspr 1023,%0" :: "r"(PCPU_GET(cpuid)));
-	__asm __volatile("mfspr %0,1023" : "=r"(pcpup->pc_pir));
+		powerpc_sync();
 
-	msr = PSL_FP | PSL_IR | PSL_DR | PSL_ME | PSL_RI;
-	powerpc_sync();
-	isync();
-	mtmsr(msr);
-	isync();
+		break;
+	case MPC7450:
+	case MPC7455:
+	case MPC7457:
+		/* Only MPC745x CPUs have an L3 cache. */
+		bsp_state[3] = mfspr(SPR_L3CR);
 
-	reg = l3_enable();
-	reg = l2_enable();
-	reg = l1d_enable();
-	reg = l1i_enable();
-
-	hid = mfspr(SPR_HID0);
-	hid &= ~(HID0_DOZE | HID0_SLEEP);
-	hid |= HID0_NAP | HID0_DPM;
-	mtspr(SPR_HID0, hid);
-	isync();
-
-	pcpup->pc_curthread = pcpup->pc_idlethread;
-	pcpup->pc_curpcb = pcpup->pc_curthread->td_pcb;
-	sp = pcpup->pc_curpcb->pcb_sp;
-
-	return (sp);
+		/* Fallthrough */
+	case MPC7400:
+	case MPC7410:
+	case MPC7447A:
+	case MPC7448:
+		bsp_state[2] = mfspr(SPR_L2CR);
+		bsp_state[1] = mfspr(SPR_HID1);
+		bsp_state[0] = mfspr(SPR_HID0);
+		break;
+	}
 }
 
-int
-powerpc_smp_start_cpu(struct pcpu *pc)
-{
-	phandle_t cpu;
-	volatile uint8_t *rstvec;
-	int res, reset, timeout;
+void
+cpudep_ap_setup()
+{ 
+	register_t	reg;
+	uint16_t	vers;
 
-	cpu = pc->pc_hwref;
-	res = OF_getprop(cpu, "soft-reset", &reset, sizeof(reset));
-	if (res < 0)
-		return (ENXIO);
+	vers = mfpvr() >> 16;
 
-	ap_pcpu = pc;
+	switch(vers) {
+	case IBM970:
+	case IBM970FX:
+	case IBM970MP:
+		/* Set HIOR to 0 */
+		__asm __volatile("mtspr 311,%0" :: "r"(0));
+		powerpc_sync();
 
-	rstvec = (uint8_t *)(0x80000000 + reset);
+		/*
+		 * The 970 has strange rules about how to update HID registers.
+		 * See Table 2-3, 970MP manual
+		 */
 
-	*rstvec = 4;
-	powerpc_sync();
-	DELAY(1);
-	*rstvec = 0;
-	powerpc_sync();
+		__asm __volatile("mtasr %0; sync" :: "r"(0));
+		__asm __volatile(" \
+			ld	%0,0(%2);				\
+			sync; isync;					\
+			mtspr	%1, %0;					\
+			mfspr	%0, %1;	mfspr	%0, %1;	mfspr	%0, %1;	\
+			mfspr	%0, %1;	mfspr	%0, %1;	mfspr	%0, %1; \
+			sync; isync" 
+		    : "=r"(reg) : "K"(SPR_HID0), "r"(bsp_state));
+		__asm __volatile("ld %0, 8(%2); sync; isync;	\
+		    mtspr %1, %0; mtspr %1, %0; sync; isync"
+		    : "=r"(reg) : "K"(SPR_HID1), "r"(bsp_state));
+		__asm __volatile("ld %0, 16(%2); sync; isync;	\
+		    mtspr %1, %0; sync; isync;"
+		    : "=r"(reg) : "K"(SPR_HID4), "r"(bsp_state));
+		__asm __volatile("ld %0, 24(%2); sync; isync;	\
+		    mtspr %1, %0; sync; isync;"
+		    : "=r"(reg) : "K"(SPR_HID5), "r"(bsp_state));
 
-	timeout = 1000;
-	while (!pc->pc_awake && timeout--)
-		DELAY(100);
+		powerpc_sync();
+		break;
+	case MPC7450:
+	case MPC7455:
+	case MPC7457:
+		/* Only MPC745x CPUs have an L3 cache. */
+		reg = mpc745x_l3_enable(bsp_state[3]);
+		
+		/* Fallthrough */
+	case MPC7400:
+	case MPC7410:
+	case MPC7447A:
+	case MPC7448:
+		/* XXX: Program the CPU ID into PIR */
+		__asm __volatile("mtspr 1023,%0" :: "r"(PCPU_GET(cpuid)));
 
-	return ((pc->pc_awake) ? 0 : EBUSY);
+		powerpc_sync();
+		isync();
+
+		mtspr(SPR_HID0, bsp_state[0]); isync();
+		mtspr(SPR_HID1, bsp_state[1]); isync();
+
+		reg = mpc74xx_l2_enable(bsp_state[2]);
+		reg = mpc74xx_l1d_enable();
+		reg = mpc74xx_l1i_enable();
+
+		break;
+	default:
+		printf("WARNING: Unknown CPU type. Cache performace may be "
+		    "suboptimal.\n");
+		break;
+	}
 }
+

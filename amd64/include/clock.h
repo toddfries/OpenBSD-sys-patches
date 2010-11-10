@@ -3,7 +3,7 @@
  * Garrett Wollman, September 1994.
  * This file is in the public domain.
  *
- * $FreeBSD: src/sys/amd64/include/clock.h,v 1.61 2008/10/21 00:38:00 jkim Exp $
+ * $FreeBSD: src/sys/amd64/include/clock.h,v 1.65 2010/07/15 17:49:35 mav Exp $
  */
 
 #ifndef _MACHINE_CLOCK_H_
@@ -15,7 +15,6 @@
  * XXX large parts of the driver and its interface are misplaced.
  */
 extern int	clkintr_pending;
-extern int	statclock_disable;
 extern u_int	i8254_freq;
 extern int	i8254_max_count;
 extern uint64_t	tsc_freq;

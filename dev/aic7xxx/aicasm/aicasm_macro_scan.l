@@ -40,7 +40,7 @@
  *
  * $Id: //depot/aic7xxx/aic7xxx/aicasm/aicasm_macro_scan.l#8 $
  *
- * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_macro_scan.l,v 1.6 2005/01/06 01:42:27 imp Exp $
+ * $FreeBSD: src/sys/dev/aic7xxx/aicasm/aicasm_macro_scan.l,v 1.8 2009/12/30 16:56:50 ed Exp $
  */
 
 #include <sys/types.h>
@@ -65,7 +65,9 @@
 static char string_buf[MAX_STR_CONST];
 static char *string_buf_ptr;
 static int  parren_count;
-static char buf[255];
+static char msgbuf[255];
+
+extern int mmlex(void);
 %}
 
 WORD		[A-Za-z_][-A-Za-z_0-9]*
@@ -143,14 +145,15 @@ MCARG		[^(), \t]+
 				return T_SYMBOL;
 			}
 .			{ 
-				snprintf(buf, sizeof(buf), "Invalid character "
+				snprintf(msgbuf, sizeof(msgbuf), "Invalid character "
 					 "'%c'", mmtext[0]);
-				stop(buf, EX_DATAERR);
+				stop(msgbuf, EX_DATAERR);
 			}
 %%
 
 int
-mmwrap()
+mmwrap(void)
 {
 	stop("EOF encountered in macro call", EX_DATAERR);
+	return (1);
 }

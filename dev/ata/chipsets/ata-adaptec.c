@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-adaptec.c,v 1.1 2008/10/09 12:56:57 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-adaptec.c,v 1.3 2009/10/30 20:28:49 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-adaptec.c,v 1.1 2008/10/09 12:5
 
 /* misc defines */
 #define MV_60XX		60		//must match ata_marvell.c's definition
+#define MV_7042		72		//must match ata_marvell.c's definition
 
 
 /*
@@ -64,6 +65,7 @@ ata_adaptec_probe(device_t dev)
     struct ata_pci_controller *ctlr = device_get_softc(dev);
     static struct ata_chip_id ids[] =
     {{ ATA_ADAPTEC_1420, 0, 4, MV_60XX, ATA_SA300, "1420SA" },
+     { ATA_ADAPTEC_1430, 0, 4, MV_7042, ATA_SA300, "1430SA" },
      { 0, 0, 0, 0, 0, 0}};
 
     if (pci_get_vendor(dev) != ATA_ADAPTEC_ID)
@@ -75,7 +77,7 @@ ata_adaptec_probe(device_t dev)
     ata_set_desc(dev);
     ctlr->chipinit = ata_marvell_edma_chipinit;
 
-    return 0;
+    return (BUS_PROBE_DEFAULT);
 }
 
 ATA_DECLARE_DRIVER(ata_adaptec);

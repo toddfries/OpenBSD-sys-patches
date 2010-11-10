@@ -31,7 +31,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425reg.h,v 1.6 2009/03/06 23:32:45 sam Exp $
+ * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425reg.h,v 1.9 2010/11/07 20:33:39 thompsa Exp $
  *
  */
 
@@ -88,10 +88,10 @@
  *           SDRAM/DDR Memory Controller
  * F020 0000 --------------------------- IXP425_MCU_VBASE
  *
- *           EHCI USB 2 (IXP435)
- * F001 D000 --------------------------- IXP435_USB2_VBASE
- *           EHCI USB 1 (IXP435)
- * F001 C000 --------------------------- IXP435_USB1_VBASE
+ * F001 F000 RS485 (Cambria)		 CAMBRIA_RS485_VBASE
+ * F001 E000 GPS (Cambria)		 CAMBRIA_GPS_VBASE
+ * F001 D000 EHCI USB 2 (IXP435)	 IXP435_USB2_VBASE
+ * F001 C000 EHCI USB 1 (IXP435)	 IXP435_USB1_VBASE
  *           Queue manager
  * F001 8000 --------------------------- IXP425_QMGR_VBASE
  *           PCI Configuration and Status
@@ -322,6 +322,8 @@
 #define	GPIO_TYPE_MASK		0x7
 #define	GPIO_TYPE(b,v)		((v) << (((b) & 0x7) * 3))
 #define	GPIO_TYPE_REG(b)	(((b)&8)?IXP425_GPIO_GPIT2R:IXP425_GPIO_GPIT1R)
+
+#define	IXP4XX_GPIO_PINS	16
 
 /*
  * Expansion Bus Configuration Space.
@@ -660,7 +662,11 @@
 /* NB: CS0 is special; it maps flash */
 #define	IXP425_EXP_BUS_CS0_HWBASE	IXP425_EXP_BUS_CSx_HWBASE(0)
 #define IXP425_EXP_BUS_CS0_VBASE	0xFD000000UL
+#ifndef IXP4XX_FLASH_SIZE
 #define IXP425_EXP_BUS_CS0_SIZE		0x01000000	/* NB: 16M */
+#else
+#define IXP425_EXP_BUS_CS0_SIZE		IXP4XX_FLASH_SIZE
+#endif
 #define	IXP425_EXP_BUS_CS1_HWBASE	IXP425_EXP_BUS_CSx_HWBASE(1)
 #define IXP425_EXP_BUS_CS1_VBASE	IXP425_EXP_BUS_CSx_VBASE(1)
 #define IXP425_EXP_BUS_CS1_SIZE		IXP425_EXP_BUS_CSx_SIZE
@@ -682,23 +688,27 @@
 /*
  * IXP435/Gateworks Cambria
  */
+#define IXP435_USB1_HWBASE	0xCD000000UL	/* USB host controller 1 */
+#define IXP435_USB1_VBASE	0xF001C000UL
+#define IXP435_USB1_SIZE	0x1000		/* NB: only uses 0x300 */
+
+#define IXP435_USB2_HWBASE	0xCE000000UL	/* USB host controller 2 */
+#define IXP435_USB2_VBASE	0xF001D000UL
+#define IXP435_USB2_SIZE	0x1000		/* NB: only uses 0x300 */
+
 #define	CAMBRIA_GPS_HWBASE	0x53FC0000UL	/* optional GPS Serial Port */
-#define	CAMBRIA_GPS_SIZE	0x40000
+#define	CAMBRIA_GPS_VBASE	0xF001E000UL
+#define	CAMBRIA_GPS_SIZE	0x1000
 #define	CAMBRIA_RS485_HWBASE	0x53F80000UL	/* optional RS485 Serial Port */
-#define	CAMBRIA_RS485_SIZE	0x40000
+#define	CAMBRIA_RS485_VBASE	0xF001F000UL
+#define	CAMBRIA_RS485_SIZE	0x1000
+
+/* NB: these are mapped on the fly, so no fixed virtual addresses */
 #define	CAMBRIA_OCTAL_LED_HWBASE 0x53F40000UL	/* Octal Status LED Latch */
 #define	CAMBRIA_OCTAL_LED_SIZE	0x1000
 #define	CAMBRIA_CFSEL1_HWBASE	0x53E40000UL	/* Compact Flash Socket Sel 0 */
 #define	CAMBRIA_CFSEL1_SIZE	0x40000
 #define	CAMBRIA_CFSEL0_HWBASE	0x53E00000UL	/* Compact Flash Socket Sel 1 */
 #define	CAMBRIA_CFSEL0_SIZE	0x40000
-
-#define IXP435_USB1_HWBASE	0xcd000000UL	/* USB host controller 1 */
-#define IXP435_USB1_VBASE	0xf001C000UL
-#define IXP435_USB1_SIZE	0x1000		/* NB: only uses 0x300 */
-
-#define IXP435_USB2_HWBASE	0xce000000UL	/* USB host controller 2 */
-#define IXP435_USB2_VBASE	0xf001D000UL
-#define IXP435_USB2_SIZE	0x1000		/* NB: only uses 0x300 */
 
 #endif /* _IXP425REG_H_ */

@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sleepqueue.h,v 1.16 2008/08/07 20:47:01 jhb Exp $
+ * $FreeBSD: src/sys/sys/sleepqueue.h,v 1.19 2010/01/09 01:46:38 attilio Exp $
  */
 
 #ifndef _SYS_SLEEPQUEUE_H_
@@ -93,6 +93,8 @@ struct thread;
 #define	SLEEPQ_SX		0x03		/* Used by an sx lock. */
 #define	SLEEPQ_LK		0x04		/* Used by a lockmgr. */
 #define	SLEEPQ_INTERRUPTIBLE	0x100		/* Sleep is interruptible. */
+#define	SLEEPQ_STOP_ON_BDRY	0x200		/* Stop sleeping thread on
+						   user mode boundary */
 
 void	init_sleepqueues(void);
 int	sleepq_abort(struct thread *td, int intrval);
@@ -107,8 +109,10 @@ void	sleepq_release(void *wchan);
 void	sleepq_remove(struct thread *td, void *wchan);
 int	sleepq_signal(void *wchan, int flags, int pri, int queue);
 void	sleepq_set_timeout(void *wchan, int timo);
+u_int	sleepq_sleepcnt(void *wchan, int queue);
 int	sleepq_timedwait(void *wchan, int pri);
 int	sleepq_timedwait_sig(void *wchan, int pri);
+int	sleepq_type(void *wchan);
 void	sleepq_wait(void *wchan, int pri);
 int	sleepq_wait_sig(void *wchan, int pri);
 

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/orion/db88f5xxx.c,v 1.4 2009/01/09 10:20:51 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/orion/db88f5xxx.c,v 1.7 2010/06/13 13:28:53 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,12 +41,14 @@ __FBSDID("$FreeBSD: src/sys/arm/mv/orion/db88f5xxx.c,v 1.4 2009/01/09 10:20:51 r
 #include <vm/pmap.h>
 
 #include <machine/bus.h>
+#include <machine/intr.h>
 #include <machine/pte.h>
 #include <machine/pmap.h>
 #include <machine/vmparam.h>
 
 #include <arm/mv/mvreg.h>
 #include <arm/mv/mvvar.h>
+#include <arm/mv/mvwin.h>
 
 /*
  * Virtual address space layout:
@@ -68,12 +70,12 @@ __FBSDID("$FreeBSD: src/sys/arm/mv/orion/db88f5xxx.c,v 1.4 2009/01/09 10:20:51 r
  * 0xffff_2000 - 0xffff_ffff	: unused (~55KB)
  */
 
-const struct pmap_devmap *pmap_devmap_bootstrap_table;
-vm_offset_t pmap_bootstrap_lastaddr;
+
+#if 0
 int platform_pci_get_irq(u_int bus, u_int slot, u_int func, u_int pin);
 
 /* Static device mappings. */
-static const struct pmap_devmap pmap_devmap[] = {
+const struct pmap_devmap pmap_devmap[] = {
 	/*
 	 * Map the on-board devices VA == PA so that we can access them
 	 * with the MMU on or off.
@@ -140,7 +142,6 @@ const struct obio_pci_irq_map pci_irq_map[] = {
 	{ -1, -1, -1 }
 };
 
-#if 0
 /* PCI IRQ Map for DB-88F5182 */
 const struct obio_pci_irq_map pci_irq_map[] = {
 	{ 7, -1, GPIO2IRQ(0) },
@@ -150,6 +151,7 @@ const struct obio_pci_irq_map pci_irq_map[] = {
 };
 #endif
 
+#if 0
 /*
  * mv_gpio_config row structure:
  *	<GPIO number>, <GPIO flags>, <GPIO mode>
@@ -182,82 +184,4 @@ const struct gpio_config mv_gpio_config[] = {
 };
 #endif
 
-int
-platform_pmap_init(void)
-{
-
-	pmap_bootstrap_lastaddr = MV_BASE - ARM_NOCACHE_KVA_SIZE;
-	pmap_devmap_bootstrap_table = &pmap_devmap[0];
-
-	return (0);
-}
-
-void
-platform_mpp_init(void)
-{
-
-	/*
-	 * MPP configuration for DB-88F5281
-	 *
-	 * MPP[2]:  PCI_REQn[3]
-	 * MPP[3]:  PCI_GNTn[3]
-	 * MPP[4]:  PCI_REQn[4]
-	 * MPP[5]:  PCI_GNTn[4]
-	 * MPP[6]:  <UNKNOWN>
-	 * MPP[7]:  <UNKNOWN>
-	 * MPP[8]:  <UNKNOWN>
-	 * MPP[9]:  <UNKNOWN>
-	 * MPP[14]: NAND Flash REn[2]
-	 * MPP[15]: NAND Flash WEn[2]
-	 * MPP[16]: UA1_RXD
-	 * MPP[17]: UA1_TXD
-	 * MPP[18]: UA1_CTS
-	 * MPP[19]: UA1_RTS
-	 *
-	 * Others:  GPIO
-	 *
-	 * <UNKNOWN> entries are not documented, not on the schematics etc.
-	 */
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL0, 0x33222203);
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL1, 0x44000033);
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL2, 0x00000000);
-
-#if 0
-	/*
-	 * MPP configuration for DB-88F5182
-	 *
-	 * MPP[2]:  PCI_REQn[3]
-	 * MPP[3]:  PCI_GNTn[3]
-	 * MPP[4]:  PCI_REQn[4]
-	 * MPP[5]:  PCI_GNTn[4]
-	 * MPP[6]:  SATA0_ACT
-	 * MPP[7]:  SATA1_ACT
-	 * MPP[12]: SATA0_PRESENT
-	 * MPP[13]: SATA1_PRESENT
-	 * MPP[14]: NAND_FLASH_REn[2]
-	 * MPP[15]: NAND_FLASH_WEn[2]
-	 * MPP[16]: UA1_RXD
-	 * MPP[17]: UA1_TXD
-	 * MPP[18]: UA1_CTS
-	 * MPP[19]: UA1_RTS
-	 *
-	 * Others:  GPIO
-	 */
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL0, 0x55222203);
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL1, 0x44550000);
-	bus_space_write_4(obio_tag, MV_MPP_BASE, MPP_CONTROL2, 0x00000000);
 #endif
-}
-
-static void
-platform_identify(void *dummy)
-{
-
-	soc_identify();
-
-	/*
-	 * XXX Board identification e.g. read out from FPGA or similar should
-	 * go here
-	 */
-}
-SYSINIT(platform_identify, SI_SUB_CPU, SI_ORDER_SECOND, platform_identify, NULL);

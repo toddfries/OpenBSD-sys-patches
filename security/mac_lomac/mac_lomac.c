@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2009 Robert N. M. Watson
  * Copyright (c) 2001-2005 Networks Associates Technology, Inc.
  * Copyright (c) 2006 SPARTA, Inc.
  * All rights reserved.
@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_lomac/mac_lomac.c,v 1.75 2009/03/08 12:32:06 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_lomac/mac_lomac.c,v 1.80 2010/03/02 15:05:48 rwatson Exp $
  */
 
 /*
@@ -1043,6 +1043,7 @@ lomac_devfs_create_device(struct ucred *cred, struct mount *mp,
 		lomac_type = MAC_LOMAC_TYPE_EQUAL;
 	else if (ptys_equal &&
 	    (strncmp(dev->si_name, "ttyp", strlen("ttyp")) == 0 ||
+	    strncmp(dev->si_name, "pts/", strlen("pts/")) == 0 ||
 	    strncmp(dev->si_name, "ptyp", strlen("ptyp")) == 0))
 		lomac_type = MAC_LOMAC_TYPE_EQUAL;
 	else
@@ -1314,6 +1315,8 @@ lomac_inpcb_sosetlabel(struct socket *so, struct label *solabel,
     struct inpcb *inp, struct label *inplabel)
 {
 	struct mac_lomac *source, *dest;
+
+	SOCK_LOCK_ASSERT(so);
 
 	source = SLOT(solabel);
 	dest = SLOT(inplabel);
@@ -1779,7 +1782,6 @@ lomac_priv_check(struct ucred *cred, int priv)
 	case PRIV_TTY_DRAINWAIT:
 	case PRIV_TTY_DTRWAIT:
 	case PRIV_TTY_EXCLUSIVE:
-	case PRIV_TTY_PRISON:
 	case PRIV_TTY_STI:
 	case PRIV_TTY_SETA:
 
@@ -1821,6 +1823,8 @@ lomac_priv_check(struct ucred *cred, int priv)
 	case PRIV_VM_MADV_PROTECT:
 	case PRIV_VM_MLOCK:
 	case PRIV_VM_MUNLOCK:
+	case PRIV_VM_SWAP_NOQUOTA:
+	case PRIV_VM_SWAP_NORLIMIT:
 
 	/*
 	 * Allow some but not all network privileges.  In general, dont allow
@@ -1930,6 +1934,7 @@ lomac_socket_check_deliver(struct socket *so, struct label *solabel,
     struct mbuf *m, struct label *mlabel)
 {
 	struct mac_lomac *p, *s;
+	int error;
 
 	if (!lomac_enabled)
 		return (0);
@@ -1937,7 +1942,10 @@ lomac_socket_check_deliver(struct socket *so, struct label *solabel,
 	p = SLOT(mlabel);
 	s = SLOT(solabel);
 
-	return (lomac_equal_single(p, s) ? 0 : EACCES);
+	SOCK_LOCK(so);
+	error = lomac_equal_single(p, s) ? 0 : EACCES;
+	SOCK_UNLOCK(so);
+	return (error);
 }
 
 static int
@@ -1946,6 +1954,8 @@ lomac_socket_check_relabel(struct ucred *cred, struct socket *so,
 {
 	struct mac_lomac *subj, *obj, *new;
 	int error;
+
+	SOCK_LOCK_ASSERT(so);
 
 	new = SLOT(newlabel);
 	subj = SLOT(cred->cr_label);
@@ -2003,8 +2013,12 @@ lomac_socket_check_visible(struct ucred *cred, struct socket *so,
 	subj = SLOT(cred->cr_label);
 	obj = SLOT(solabel);
 
-	if (!lomac_dominate_single(obj, subj))
+	SOCK_LOCK(so);
+	if (!lomac_dominate_single(obj, subj)) {
+		SOCK_UNLOCK(so);
 		return (ENOENT);
+	}
+	SOCK_UNLOCK(so);
 
 	return (0);
 }
@@ -2030,19 +2044,26 @@ lomac_socket_create_mbuf(struct socket *so, struct label *solabel,
 	source = SLOT(solabel);
 	dest = SLOT(mlabel);
 
+	SOCK_LOCK(so);
 	lomac_copy_single(source, dest);
+	SOCK_UNLOCK(so);
 }
 
 static void
 lomac_socket_newconn(struct socket *oldso, struct label *oldsolabel,
     struct socket *newso, struct label *newsolabel)
 {
-	struct mac_lomac *source, *dest;
+	struct mac_lomac source, *dest;
 
-	source = SLOT(oldsolabel);
+	SOCK_LOCK(oldso);
+	source = *SLOT(oldsolabel);
+	SOCK_UNLOCK(oldso);
+
 	dest = SLOT(newsolabel);
 
-	lomac_copy_single(source, dest);
+	SOCK_LOCK(newso);
+	lomac_copy_single(&source, dest);
+	SOCK_UNLOCK(newso);
 }
 
 static void
@@ -2050,6 +2071,8 @@ lomac_socket_relabel(struct ucred *cred, struct socket *so,
     struct label *solabel, struct label *newlabel)
 {
 	struct mac_lomac *source, *dest;
+
+	SOCK_LOCK_ASSERT(so);
 
 	source = SLOT(newlabel);
 	dest = SLOT(solabel);
@@ -2066,7 +2089,9 @@ lomac_socketpeer_set_from_mbuf(struct mbuf *m, struct label *mlabel,
 	source = SLOT(mlabel);
 	dest = SLOT(sopeerlabel);
 
+	SOCK_LOCK(so);
 	lomac_copy_single(source, dest);
+	SOCK_UNLOCK(so);
 }
 
 static void
@@ -2074,12 +2099,17 @@ lomac_socketpeer_set_from_socket(struct socket *oldso,
     struct label *oldsolabel, struct socket *newso,
     struct label *newsopeerlabel)
 {
-	struct mac_lomac *source, *dest;
+	struct mac_lomac source, *dest;
 
-	source = SLOT(oldsolabel);
+	SOCK_LOCK(oldso);
+	source = *SLOT(oldsolabel);
+	SOCK_UNLOCK(oldso);
+
 	dest = SLOT(newsopeerlabel);
 
-	lomac_copy_single(source, dest);
+	SOCK_LOCK(newso);
+	lomac_copy_single(&source, dest);
+	SOCK_UNLOCK(newso);
 }
 
 static void
@@ -2441,7 +2471,7 @@ lomac_vnode_check_open(struct ucred *cred, struct vnode *vp,
 	obj = SLOT(vplabel);
 
 	/* XXX privilege override for admin? */
-	if (accmode & (VWRITE | VAPPEND | VADMIN)) {
+	if (accmode & VMODIFY_PERMS) {
 		if (!lomac_subject_dominate(subj, obj))
 			return (EACCES);
 	}

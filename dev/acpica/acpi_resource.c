@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_resource.c,v 1.40 2007/03/22 18:16:40 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_resource.c,v 1.41 2009/06/05 18:44:36 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -39,7 +39,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_resource.c,v 1.40 2007/03/22 18:16:4
 #include <machine/resource.h>
 #include <sys/rman.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+#include <contrib/dev/acpica/include/accommon.h>
+
 #include <dev/acpica/acpivar.h>
 
 /* Hooks for the ACPI CA debugging infrastructure */

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.3 2009/02/19 00:32:55 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.6 2010/02/01 15:22:22 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -54,8 +54,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.3 2009/02/19 00:3
 /* local prototypes */
 static int ata_netcell_chipinit(device_t dev);
 static int ata_netcell_ch_attach(device_t dev);
-static void ata_netcell_setmode(device_t dev, int mode);
-
+static int ata_netcell_setmode(device_t dev, int target, int mode);
 
 /*
  * NetCell chipset support functions
@@ -68,7 +67,7 @@ ata_netcell_probe(device_t dev)
     if (pci_get_devid(dev) == ATA_NETCELL_SR) {
 	device_set_desc(dev, "Netcell SyncRAID SR3000/5000 RAID Controller");
 	ctlr->chipinit = ata_netcell_chipinit;
-	return 0;
+	return (BUS_PROBE_DEFAULT);
     }
     return ENXIO;
 }
@@ -82,7 +81,6 @@ ata_netcell_chipinit(device_t dev)
         return ENXIO;
 
     ctlr->ch_attach = ata_netcell_ch_attach;
-    ctlr->ch_detach = ata_pci_ch_detach;
     ctlr->setmode = ata_netcell_setmode;
     return 0;
 }
@@ -98,19 +96,16 @@ ata_netcell_ch_attach(device_t dev)
  
     /* the NetCell only supports 16 bit PIO transfers */
     ch->flags |= ATA_USE_16BIT;
-
+    /* It is a hardware RAID without cable. */
+    ch->flags |= ATA_CHECKS_CABLE;
     return 0;
 }
 
-static void
-ata_netcell_setmode(device_t dev, int mode)
+static int
+ata_netcell_setmode(device_t dev, int target, int mode)
 {
-    struct ata_device *atadev = device_get_softc(dev);
 
-    mode = ata_limit_mode(dev, mode, ATA_UDMA2);
-    mode = ata_check_80pin(dev, mode);
-    if (!ata_controlcmd(dev, ATA_SETFEATURES, ATA_SF_SETXFER, 0, mode))
-        atadev->mode = mode;
+	return (min(mode, ATA_UDMA6));
 }
 
 ATA_DECLARE_DRIVER(ata_netcell);

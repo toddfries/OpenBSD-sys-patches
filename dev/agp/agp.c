@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp.c,v 1.63 2009/03/09 13:27:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp.c,v 1.69 2010/05/05 03:45:46 alc Exp $");
 
 #include "opt_agp.h"
 #include "opt_bus.h"
@@ -81,7 +81,6 @@ static struct cdevsw agp_cdevsw = {
 };
 
 static devclass_t agp_devclass;
-#define KDEV2DEV(kdev)	devclass_get_device(agp_devclass, dev2unit(kdev))
 
 /* Helper functions for implementing chipset mini drivers. */
 
@@ -254,11 +253,8 @@ agp_generic_attach(device_t dev)
 	sc->as_nextid = 1;
 
 	sc->as_devnode = make_dev(&agp_cdevsw,
-				  device_get_unit(dev),
-				  UID_ROOT,
-				  GID_WHEEL,
-				  0600,
-				  "agpgart");
+	    0, UID_ROOT, GID_WHEEL, 0600, "agpgart");
+	sc->as_devnode->si_drv1 = dev;
 
 	return 0;
 }
@@ -532,7 +528,7 @@ agp_generic_bind_memory(device_t dev, struct agp_memory *mem,
 	int error;
 
 	/* Do some sanity checks first. */
-	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0 ||
+	if ((offset & (AGP_PAGE_SIZE - 1)) != 0 ||
 	    offset + mem->am_size > AGP_GET_APERTURE(dev)) {
 		device_printf(dev, "binding memory at bad offset %#x\n",
 		    (int)offset);
@@ -627,9 +623,9 @@ bad:
 		m = vm_page_lookup(mem->am_obj, OFF_TO_IDX(k));
 		if (k >= i)
 			vm_page_wakeup(m);
-		vm_page_lock_queues();
+		vm_page_lock(m);
 		vm_page_unwire(m, 0);
-		vm_page_unlock_queues();
+		vm_page_unlock(m);
 	}
 	VM_OBJECT_UNLOCK(mem->am_obj);
 
@@ -661,9 +657,9 @@ agp_generic_unbind_memory(device_t dev, struct agp_memory *mem)
 	VM_OBJECT_LOCK(mem->am_obj);
 	for (i = 0; i < mem->am_size; i += PAGE_SIZE) {
 		m = vm_page_lookup(mem->am_obj, atop(i));
-		vm_page_lock_queues();
+		vm_page_lock(m);
 		vm_page_unwire(m, 0);
-		vm_page_unlock_queues();
+		vm_page_unlock(m);
 	}
 	VM_OBJECT_UNLOCK(mem->am_obj);
 		
@@ -767,7 +763,7 @@ agp_allocate_user(device_t dev, agp_allocate *alloc)
 static int
 agp_deallocate_user(device_t dev, int id)
 {
-	struct agp_memory *mem = agp_find_memory(dev, id);;
+	struct agp_memory *mem = agp_find_memory(dev, id);
 
 	if (mem) {
 		AGP_FREE_MEMORY(dev, mem);
@@ -802,7 +798,7 @@ agp_unbind_user(device_t dev, agp_unbind *unbind)
 static int
 agp_open(struct cdev *kdev, int oflags, int devtype, struct thread *td)
 {
-	device_t dev = KDEV2DEV(kdev);
+	device_t dev = kdev->si_drv1;
 	struct agp_softc *sc = device_get_softc(dev);
 
 	if (!sc->as_isopen) {
@@ -816,7 +812,7 @@ agp_open(struct cdev *kdev, int oflags, int devtype, struct thread *td)
 static int
 agp_close(struct cdev *kdev, int fflag, int devtype, struct thread *td)
 {
-	device_t dev = KDEV2DEV(kdev);
+	device_t dev = kdev->si_drv1;
 	struct agp_softc *sc = device_get_softc(dev);
 	struct agp_memory *mem;
 
@@ -839,7 +835,7 @@ agp_close(struct cdev *kdev, int fflag, int devtype, struct thread *td)
 static int
 agp_ioctl(struct cdev *kdev, u_long cmd, caddr_t data, int fflag, struct thread *td)
 {
-	device_t dev = KDEV2DEV(kdev);
+	device_t dev = kdev->si_drv1;
 
 	switch (cmd) {
 	case AGPIOC_INFO:
@@ -872,9 +868,10 @@ agp_ioctl(struct cdev *kdev, u_long cmd, caddr_t data, int fflag, struct thread 
 }
 
 static int
-agp_mmap(struct cdev *kdev, vm_offset_t offset, vm_paddr_t *paddr, int prot)
+agp_mmap(struct cdev *kdev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int prot, vm_memattr_t *memattr)
 {
-	device_t dev = KDEV2DEV(kdev);
+	device_t dev = kdev->si_drv1;
 	struct agp_softc *sc = device_get_softc(dev);
 
 	if (offset > AGP_GET_APERTURE(dev))

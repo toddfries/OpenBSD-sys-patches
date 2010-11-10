@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/snc/dp83932.c,v 1.25 2008/08/04 19:19:18 jhb Exp $	*/
+/*	$FreeBSD: src/sys/dev/snc/dp83932.c,v 1.27 2010/05/03 07:32:50 sobomax Exp $	*/
 /*	$NecBSD: dp83932.c,v 1.5 1999/07/29 05:08:44 kmatsuda Exp $	*/
 /*	$NetBSD: if_snc.c,v 1.18 1998/04/25 21:27:40 scottr Exp $	*/
 
@@ -177,7 +177,7 @@ sncconfig(sc, media, nmedia, defmedia, myea)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
         ifp->if_init = sncinit;
         ifp->if_mtu = ETHERMTU;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 	/* Initialize media goo. */
 	ifmedia_init(&sc->sc_media, 0, snc_mediachange,
@@ -691,7 +691,7 @@ camprogram(sc)
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	/* Loop through multicast addresses */
-	IF_ADDR_LOCK(ifp);
+	if_maddr_rlock(ifp);
         TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
                 if (ifma->ifma_addr->sa_family != AF_LINK)
                         continue;
@@ -705,7 +705,7 @@ camprogram(sc)
 			 LLADDR((struct sockaddr_dl *)ifma->ifma_addr));
 		mcount++;
 	}
-	IF_ADDR_UNLOCK(ifp);
+	if_maddr_runlock(ifp);
 
 	NIC_PUT(sc, SNCR_CDP, LOWER(sc->v_cda));
 	NIC_PUT(sc, SNCR_CDC, MAXCAM);

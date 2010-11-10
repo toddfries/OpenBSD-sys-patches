@@ -30,13 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.397 2009/01/15 06:44:22 lstewart Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.416 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_ipfw.h"		/* for ipfw_fwd	*/
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_mac.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -51,7 +50,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.397 2009/01/15 06:44:22 lste
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
-#include <sys/vimage.h>
 
 #include <machine/cpu.h>	/* before tcp_seq.h, for tcp_random18() */
 
@@ -59,6 +57,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.397 2009/01/15 06:44:22 lste
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #define TCPSTATES		/* for logging */
 
@@ -87,11 +86,6 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.397 2009/01/15 06:44:22 lste
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif /* TCPDEBUG */
-#include <netinet/vinet.h>
-
-#ifdef INET6
-#include <netinet6/vinet6.h>
-#endif
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -104,106 +98,100 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_input.c,v 1.397 2009/01/15 06:44:22 lste
 
 static const int tcprexmtthresh = 3;
 
-#ifdef VIMAGE_GLOBALS
-struct	tcpstat tcpstat;
-int	blackhole;
-int	tcp_delack_enabled;
-int	drop_synfin;
-int	tcp_do_rfc3042;
-int	tcp_do_rfc3390;
-int	tcp_do_ecn;
-int	tcp_ecn_maxretries;
-int	tcp_insecure_rst;
-int	tcp_do_autorcvbuf;
-int	tcp_autorcvbuf_inc;
-int	tcp_autorcvbuf_max;
-int	tcp_do_rfc3465;
-int	tcp_abc_l_var;
-#endif
-
-SYSCTL_V_STRUCT(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_STATS, stats,
-    CTLFLAG_RW, tcpstat , tcpstat,
+VNET_DEFINE(struct tcpstat, tcpstat);
+SYSCTL_VNET_STRUCT(_net_inet_tcp, TCPCTL_STATS, stats, CTLFLAG_RW,
+    &VNET_NAME(tcpstat), tcpstat,
     "TCP statistics (struct tcpstat, netinet/tcp_var.h)");
 
 int tcp_log_in_vain = 0;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, log_in_vain, CTLFLAG_RW,
-    &tcp_log_in_vain, 0, "Log all incoming TCP segments to closed ports");
+    &tcp_log_in_vain, 0,
+    "Log all incoming TCP segments to closed ports");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, blackhole, CTLFLAG_RW,
-    blackhole, 0, "Do not send RST on segments to closed ports");
+VNET_DEFINE(int, blackhole) = 0;
+#define	V_blackhole		VNET(blackhole)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, blackhole, CTLFLAG_RW,
+    &VNET_NAME(blackhole), 0,
+    "Do not send RST on segments to closed ports");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, delayed_ack,
-    CTLFLAG_RW, tcp_delack_enabled, 0,
+VNET_DEFINE(int, tcp_delack_enabled) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, delayed_ack, CTLFLAG_RW,
+    &VNET_NAME(tcp_delack_enabled), 0,
     "Delay ACK to try and piggyback it onto a data packet");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, drop_synfin,
-    CTLFLAG_RW, drop_synfin, 0, "Drop TCP packets with SYN+FIN set");
+VNET_DEFINE(int, drop_synfin) = 0;
+#define	V_drop_synfin		VNET(drop_synfin)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, drop_synfin, CTLFLAG_RW,
+    &VNET_NAME(drop_synfin), 0,
+    "Drop TCP packets with SYN+FIN set");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, rfc3042, CTLFLAG_RW,
-    tcp_do_rfc3042, 0, "Enable RFC 3042 (Limited Transmit)");
+VNET_DEFINE(int, tcp_do_rfc3042) = 1;
+#define	V_tcp_do_rfc3042	VNET(tcp_do_rfc3042)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, rfc3042, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_rfc3042), 0,
+    "Enable RFC 3042 (Limited Transmit)");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, rfc3390, CTLFLAG_RW,
-    tcp_do_rfc3390, 0,
+VNET_DEFINE(int, tcp_do_rfc3390) = 1;
+#define	V_tcp_do_rfc3390	VNET(tcp_do_rfc3390)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, rfc3390, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_rfc3390), 0,
     "Enable RFC 3390 (Increasing TCP's Initial Congestion Window)");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, rfc3465, CTLFLAG_RW,
-    tcp_do_rfc3465, 0,
+VNET_DEFINE(int, tcp_do_rfc3465) = 1;
+#define	V_tcp_do_rfc3465	VNET(tcp_do_rfc3465)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, rfc3465, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_rfc3465), 0,
     "Enable RFC 3465 (Appropriate Byte Counting)");
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, abc_l_var, CTLFLAG_RW,
-    tcp_abc_l_var, 2,
+
+VNET_DEFINE(int, tcp_abc_l_var) = 2;
+#define	V_tcp_abc_l_var		VNET(tcp_abc_l_var)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, abc_l_var, CTLFLAG_RW,
+    &VNET_NAME(tcp_abc_l_var), 2,
     "Cap the max cwnd increment during slow-start to this number of segments");
 
 SYSCTL_NODE(_net_inet_tcp, OID_AUTO, ecn, CTLFLAG_RW, 0, "TCP ECN");
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_ecn, OID_AUTO, enable,
-    CTLFLAG_RW, tcp_do_ecn, 0, "TCP ECN support");
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_ecn, OID_AUTO, maxretries,
-    CTLFLAG_RW, tcp_ecn_maxretries, 0, "Max retries before giving up on ECN");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, insecure_rst,
-    CTLFLAG_RW, tcp_insecure_rst, 0,
+VNET_DEFINE(int, tcp_do_ecn) = 0;
+SYSCTL_VNET_INT(_net_inet_tcp_ecn, OID_AUTO, enable, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_ecn), 0,
+    "TCP ECN support");
+
+VNET_DEFINE(int, tcp_ecn_maxretries) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp_ecn, OID_AUTO, maxretries, CTLFLAG_RW,
+    &VNET_NAME(tcp_ecn_maxretries), 0,
+    "Max retries before giving up on ECN");
+
+VNET_DEFINE(int, tcp_insecure_rst) = 0;
+#define	V_tcp_insecure_rst	VNET(tcp_insecure_rst)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, insecure_rst, CTLFLAG_RW,
+    &VNET_NAME(tcp_insecure_rst), 0,
     "Follow the old (insecure) criteria for accepting RST packets");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, recvbuf_auto,
-    CTLFLAG_RW, tcp_do_autorcvbuf, 0,
+VNET_DEFINE(int, tcp_do_autorcvbuf) = 1;
+#define	V_tcp_do_autorcvbuf	VNET(tcp_do_autorcvbuf)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, recvbuf_auto, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_autorcvbuf), 0,
     "Enable automatic receive buffer sizing");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, recvbuf_inc,
-    CTLFLAG_RW, tcp_autorcvbuf_inc, 0,
+VNET_DEFINE(int, tcp_autorcvbuf_inc) = 16*1024;
+#define	V_tcp_autorcvbuf_inc	VNET(tcp_autorcvbuf_inc)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, recvbuf_inc, CTLFLAG_RW,
+    &VNET_NAME(tcp_autorcvbuf_inc), 0,
     "Incrementor step size of automatic receive buffer");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, recvbuf_max,
-    CTLFLAG_RW, tcp_autorcvbuf_max, 0,
+VNET_DEFINE(int, tcp_autorcvbuf_max) = 256*1024;
+#define	V_tcp_autorcvbuf_max	VNET(tcp_autorcvbuf_max)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, recvbuf_max, CTLFLAG_RW,
+    &VNET_NAME(tcp_autorcvbuf_max), 0,
     "Max size of automatic receive buffer");
 
 int	tcp_read_locking = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, read_locking, CTLFLAG_RW,
     &tcp_read_locking, 0, "Enable read locking strategy");
 
-int	tcp_rlock_atfirst;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, rlock_atfirst, CTLFLAG_RD,
-    &tcp_rlock_atfirst, 0, "");
-
-int	tcp_wlock_atfirst;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, tcp_wlock_atfirst, CTLFLAG_RD,
-    &tcp_wlock_atfirst, 0, "");
-
-int	tcp_wlock_upgraded;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, wlock_upgraded, CTLFLAG_RD,
-    &tcp_wlock_upgraded, 0, "");
-
-int	tcp_wlock_relocked;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, wlock_relocked, CTLFLAG_RD,
-    &tcp_wlock_relocked, 0, "");
-
-int	tcp_wlock_looped;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, wlock_looped, CTLFLAG_RD,
-    &tcp_wlock_looped, 0, "");
-
-#ifdef VIMAGE_GLOBALS
-struct inpcbhead tcb;
-struct inpcbinfo tcbinfo;
-#endif
+VNET_DEFINE(struct inpcbhead, tcb);
 #define	tcb6	tcb  /* for KAME src sync over BSD*'s */
+VNET_DEFINE(struct inpcbinfo, tcbinfo);
 
 static void	 tcp_dooptions(struct tcpopt *, u_char *, int, int);
 static void	 tcp_do_segment(struct mbuf *, struct tcphdr *,
@@ -217,6 +205,20 @@ static void	 tcp_xmit_timer(struct tcpcb *, int);
 static void	 tcp_newreno_partial_ack(struct tcpcb *, struct tcphdr *);
 static void inline
 		 tcp_congestion_exp(struct tcpcb *);
+
+/*
+ * Kernel module interface for updating tcpstat.  The argument is an index
+ * into tcpstat treated as an array of u_long.  While this encodes the
+ * general layout of tcpstat into the caller, it doesn't encode its location,
+ * so that future changes to add, for example, per-CPU stats support won't
+ * cause binary compatibility problems for kernel modules.
+ */
+void
+kmod_tcpstat_inc(int statnum)
+{
+
+	(*((u_long *)&V_tcpstat + statnum))++;
+}
 
 static void inline
 tcp_congestion_exp(struct tcpcb *tp)
@@ -272,7 +274,6 @@ do { \
 int
 tcp6_input(struct mbuf **mp, int *offp, int proto)
 {
-	INIT_VNET_INET6(curvnet);
 	struct mbuf *m = *mp;
 	struct in6_ifaddr *ia6;
 
@@ -286,6 +287,7 @@ tcp6_input(struct mbuf **mp, int *offp, int proto)
 	if (ia6 && (ia6->ia6_flags & IN6_IFF_ANYCAST)) {
 		struct ip6_hdr *ip6;
 
+		ifa_free(&ia6->ia_ifa);
 		ip6 = mtod(m, struct ip6_hdr *);
 		icmp6_error(m, ICMP6_DST_UNREACH, ICMP6_DST_UNREACH_ADDR,
 			    (caddr_t)&ip6->ip6_dst - (caddr_t)ip6);
@@ -300,13 +302,6 @@ tcp6_input(struct mbuf **mp, int *offp, int proto)
 void
 tcp_input(struct mbuf *m, int off0)
 {
-	INIT_VNET_INET(curvnet);
-#ifdef INET6
-	INIT_VNET_INET6(curvnet);
-#endif
-#ifdef IPSEC
-	INIT_VNET_IPSEC(curvnet);
-#endif
 	struct tcphdr *th;
 	struct ip *ip = NULL;
 	struct ipovly *ipov;
@@ -352,7 +347,7 @@ tcp_input(struct mbuf *m, int off0)
 #endif
 
 	to.to_flags = 0;
-	V_tcpstat.tcps_rcvtotal++;
+	TCPSTAT_INC(tcps_rcvtotal);
 
 	if (isipv6) {
 #ifdef INET6
@@ -360,7 +355,7 @@ tcp_input(struct mbuf *m, int off0)
 		ip6 = mtod(m, struct ip6_hdr *);
 		tlen = sizeof(*ip6) + ntohs(ip6->ip6_plen) - off0;
 		if (in6_cksum(m, IPPROTO_TCP, off0, tlen)) {
-			V_tcpstat.tcps_rcvbadsum++;
+			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
 		th = (struct tcphdr *)((caddr_t)ip6 + off0);
@@ -392,7 +387,7 @@ tcp_input(struct mbuf *m, int off0)
 		if (m->m_len < sizeof (struct tcpiphdr)) {
 			if ((m = m_pullup(m, sizeof (struct tcpiphdr)))
 			    == NULL) {
-				V_tcpstat.tcps_rcvshort++;
+				TCPSTAT_INC(tcps_rcvshort);
 				return;
 			}
 		}
@@ -426,7 +421,7 @@ tcp_input(struct mbuf *m, int off0)
 			th->th_sum = in_cksum(m, len);
 		}
 		if (th->th_sum) {
-			V_tcpstat.tcps_rcvbadsum++;
+			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
 		/* Re-initialization for later version check */
@@ -446,7 +441,7 @@ tcp_input(struct mbuf *m, int off0)
 	 */
 	off = th->th_off << 2;
 	if (off < sizeof (struct tcphdr) || off > tlen) {
-		V_tcpstat.tcps_rcvbadoff++;
+		TCPSTAT_INC(tcps_rcvbadoff);
 		goto drop;
 	}
 	tlen -= off;	/* tlen is used instead of ti->ti_len */
@@ -461,7 +456,7 @@ tcp_input(struct mbuf *m, int off0)
 			if (m->m_len < sizeof(struct ip) + off) {
 				if ((m = m_pullup(m, sizeof (struct ip) + off))
 				    == NULL) {
-					V_tcpstat.tcps_rcvshort++;
+					TCPSTAT_INC(tcps_rcvshort);
 					return;
 				}
 				ip = mtod(m, struct ip *);
@@ -499,11 +494,9 @@ tcp_input(struct mbuf *m, int off0)
 	    tcp_read_locking == 0) {
 		INP_INFO_WLOCK(&V_tcbinfo);
 		ti_locked = TI_WLOCKED;
-		tcp_wlock_atfirst++;
 	} else {
 		INP_INFO_RLOCK(&V_tcbinfo);
 		ti_locked = TI_RLOCKED;
-		tcp_rlock_atfirst++;
 	}
 
 findpcb:
@@ -594,7 +587,14 @@ findpcb:
 		goto dropwithreset;
 	}
 	INP_WLOCK(inp);
-
+	if (!(inp->inp_flags & INP_HW_FLOWID)
+	    && (m->m_flags & M_FLOWID)
+	    && ((inp->inp_socket == NULL)
+		|| !(inp->inp_socket->so_options & SO_ACCEPTCONN))) {
+		inp->inp_flags |= INP_HW_FLOWID;
+		inp->inp_flags &= ~INP_SW_FLOWID;
+		inp->inp_flowid = m->m_pkthdr.flowid;
+	}
 #ifdef IPSEC
 #ifdef INET6
 	if (isipv6 && ipsec6_in_reject(m, inp)) {
@@ -635,12 +635,13 @@ findpcb:
 	 * tried to free the inpcb, in which case we need to loop back and
 	 * try to find a new inpcb to deliver to.
 	 */
-	if (inp->inp_vflag & INP_TIMEWAIT) {
+relocked:
+	if (inp->inp_flags & INP_TIMEWAIT) {
 		KASSERT(ti_locked == TI_RLOCKED || ti_locked == TI_WLOCKED,
 		    ("%s: INP_TIMEWAIT ti_locked %d", __func__, ti_locked));
 
 		if (ti_locked == TI_RLOCKED) {
-			if (rw_try_upgrade(&V_tcbinfo.ipi_lock) == 0) {
+			if (INP_INFO_TRY_UPGRADE(&V_tcbinfo) == 0) {
 				in_pcbref(inp);
 				INP_WUNLOCK(inp);
 				INP_INFO_RUNLOCK(&V_tcbinfo);
@@ -648,15 +649,11 @@ findpcb:
 				ti_locked = TI_WLOCKED;
 				INP_WLOCK(inp);
 				if (in_pcbrele(inp)) {
-					tcp_wlock_looped++;
 					inp = NULL;
 					goto findpcb;
 				}
-				tcp_wlock_relocked++;
-			} else {
+			} else
 				ti_locked = TI_WLOCKED;
-				tcp_wlock_upgraded++;
-			}
 		}
 		INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 
@@ -685,7 +682,8 @@ findpcb:
 	 * We've identified a valid inpcb, but it could be that we need an
 	 * inpcbinfo write lock and have only a read lock.  In this case,
 	 * attempt to upgrade/relock using the same strategy as the TIMEWAIT
-	 * case above.
+	 * case above.  If we relock, we have to jump back to 'relocked' as
+	 * the connection might now be in TIMEWAIT.
 	 */
 	if (tp->t_state != TCPS_ESTABLISHED ||
 	    (thflags & (TH_SYN | TH_FIN | TH_RST)) != 0 ||
@@ -694,7 +692,7 @@ findpcb:
 		    ("%s: upgrade check ti_locked %d", __func__, ti_locked));
 
 		if (ti_locked == TI_RLOCKED) {
-			if (rw_try_upgrade(&V_tcbinfo.ipi_lock) == 0) {
+			if (INP_INFO_TRY_UPGRADE(&V_tcbinfo) == 0) {
 				in_pcbref(inp);
 				INP_WUNLOCK(inp);
 				INP_INFO_RUNLOCK(&V_tcbinfo);
@@ -702,15 +700,12 @@ findpcb:
 				ti_locked = TI_WLOCKED;
 				INP_WLOCK(inp);
 				if (in_pcbrele(inp)) {
-					tcp_wlock_looped++;
 					inp = NULL;
 					goto findpcb;
 				}
-				tcp_wlock_relocked++;
-			} else {
+				goto relocked;
+			} else
 				ti_locked = TI_WLOCKED;
-				tcp_wlock_upgraded++;
-			}
 		}
 		INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 	}
@@ -759,6 +754,7 @@ findpcb:
 		}
 		inc.inc_fport = th->th_sport;
 		inc.inc_lport = th->th_dport;
+		inc.inc_fibnum = so->so_fibnum;
 
 		/*
 		 * Check for an existing connection attempt in syncache if
@@ -853,7 +849,7 @@ findpcb:
 				log(LOG_DEBUG, "%s; %s: Listen socket: "
 				    "SYN is missing, segment ignored\n",
 				    s, __func__);
-			V_tcpstat.tcps_badsyn++;
+			TCPSTAT_INC(tcps_badsyn);
 			goto dropunlock;
 		}
 		/*
@@ -865,7 +861,7 @@ findpcb:
 				    "SYN|ACK invalid, segment rejected\n",
 				    s, __func__);
 			syncache_badack(&inc);	/* XXX: Not needed! */
-			V_tcpstat.tcps_badsyn++;
+			TCPSTAT_INC(tcps_badsyn);
 			rstreason = BANDLIM_RST_OPENPORT;
 			goto dropwithreset;
 		}
@@ -885,7 +881,7 @@ findpcb:
 				log(LOG_DEBUG, "%s; %s: Listen socket: "
 				    "SYN|FIN segment ignored (based on "
 				    "sysctl setting)\n", s, __func__);
-			V_tcpstat.tcps_badsyn++;
+			TCPSTAT_INC(tcps_badsyn);
                 	goto dropunlock;
 		}
 		/*
@@ -933,8 +929,10 @@ findpcb:
 		if (isipv6 && !V_ip6_use_deprecated) {
 			struct in6_ifaddr *ia6;
 
-			if ((ia6 = ip6_getdstifaddr(m)) &&
+			ia6 = ip6_getdstifaddr(m);
+			if (ia6 != NULL &&
 			    (ia6->ia6_flags & IN6_IFF_DEPRECATED)) {
+				ifa_free(&ia6->ia_ifa);
 				if ((s = tcp_log_addrs(&inc, th, NULL, NULL)))
 				    log(LOG_DEBUG, "%s; %s: Listen socket: "
 					"Connection attempt to deprecated "
@@ -943,6 +941,7 @@ findpcb:
 				rstreason = BANDLIM_RST_OPENPORT;
 				goto dropwithreset;
 			}
+			ifa_free(&ia6->ia_ifa);
 		}
 #endif
 		/*
@@ -1073,7 +1072,6 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
     int ti_locked)
 {
-	INIT_VNET_INET(tp->t_vnet);
 	int thflags, acked, ourfinisacked, needoutput = 0;
 	int rstreason, todrop, win;
 	u_long tiwin;
@@ -1145,29 +1143,27 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * TCP ECN processing.
 	 */
 	if (tp->t_flags & TF_ECN_PERMIT) {
+		if (thflags & TH_CWR)
+			tp->t_flags &= ~TF_ECN_SND_ECE;
 		switch (iptos & IPTOS_ECN_MASK) {
 		case IPTOS_ECN_CE:
 			tp->t_flags |= TF_ECN_SND_ECE;
-			V_tcpstat.tcps_ecn_ce++;
+			TCPSTAT_INC(tcps_ecn_ce);
 			break;
 		case IPTOS_ECN_ECT0:
-			V_tcpstat.tcps_ecn_ect0++;
+			TCPSTAT_INC(tcps_ecn_ect0);
 			break;
 		case IPTOS_ECN_ECT1:
-			V_tcpstat.tcps_ecn_ect1++;
+			TCPSTAT_INC(tcps_ecn_ect1);
 			break;
 		}
-
-		if (thflags & TH_CWR)
-			tp->t_flags &= ~TF_ECN_SND_ECE;
-
 		/*
 		 * Congestion experienced.
 		 * Ignore if we are already trying to recover.
 		 */
 		if ((thflags & TH_ECE) &&
 		    SEQ_LEQ(th->th_ack, tp->snd_recover)) {
-			V_tcpstat.tcps_ecn_rcwnd++;
+			TCPSTAT_INC(tcps_ecn_rcwnd);
 			tcp_congestion_exp(tp);
 		}
 	}
@@ -1284,14 +1280,14 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 					    __func__, ti_locked);
 				ti_locked = TI_UNLOCKED;
 
-				++V_tcpstat.tcps_predack;
+				TCPSTAT_INC(tcps_predack);
 
 				/*
 				 * "bad retransmit" recovery.
 				 */
 				if (tp->t_rxtshift == 1 &&
-				    ticks < tp->t_badrxtwin) {
-					++V_tcpstat.tcps_sndrexmitbad;
+				    (int)(ticks - tp->t_badrxtwin) < 0) {
+					TCPSTAT_INC(tcps_sndrexmitbad);
 					tp->snd_cwnd = tp->snd_cwnd_prev;
 					tp->snd_ssthresh =
 					    tp->snd_ssthresh_prev;
@@ -1327,8 +1323,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				}
 				tcp_xmit_bandwidth_limit(tp, th->th_ack);
 				acked = th->th_ack - tp->snd_una;
-				V_tcpstat.tcps_rcvackpack++;
-				V_tcpstat.tcps_rcvackbyte += acked;
+				TCPSTAT_INC(tcps_rcvackpack);
+				TCPSTAT_ADD(tcps_rcvackbyte, acked);
 				sbdrop(&so->so_snd, acked);
 				if (SEQ_GT(tp->snd_una, tp->snd_recover) &&
 				    SEQ_LEQ(th->th_ack, tp->snd_recover))
@@ -1389,7 +1385,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			/* Clean receiver SACK report if present */
 			if ((tp->t_flags & TF_SACK_PERMIT) && tp->rcv_numsacks)
 				tcp_clean_sackreport(tp);
-			++V_tcpstat.tcps_preddat;
+			TCPSTAT_INC(tcps_preddat);
 			tp->rcv_nxt += tlen;
 			/*
 			 * Pull snd_wl1 up to prevent seq wrap relative to
@@ -1401,8 +1397,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			 * rcv_nxt.
 			 */
 			tp->rcv_up = tp->rcv_nxt;
-			V_tcpstat.tcps_rcvpack++;
-			V_tcpstat.tcps_rcvbyte += tlen;
+			TCPSTAT_INC(tcps_rcvpack);
+			TCPSTAT_ADD(tcps_rcvbyte, tlen);
 			ND6_HINT(tp);	/* Some progress has been made */
 #ifdef TCPDEBUG
 			if (so->so_options & SO_DEBUG)
@@ -1552,12 +1548,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		tp->irs = th->th_seq;
 		tcp_rcvseqinit(tp);
 		if (thflags & TH_ACK) {
-			V_tcpstat.tcps_connects++;
+			TCPSTAT_INC(tcps_connects);
 			soisconnected(so);
 #ifdef MAC
-			SOCK_LOCK(so);
 			mac_socketpeer_set_from_mbuf(m, so);
-			SOCK_UNLOCK(so);
 #endif
 			/* Do window scaling on this connection? */
 			if ((tp->t_flags & (TF_RCVD_SCALE|TF_REQ_SCALE)) ==
@@ -1578,7 +1572,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 
 			if ((thflags & TH_ECE) && V_tcp_do_ecn) {
 				tp->t_flags |= TF_ECN_PERMIT;
-				V_tcpstat.tcps_ecn_shs++;
+				TCPSTAT_INC(tcps_ecn_shs);
 			}
 			
 			/*
@@ -1628,8 +1622,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			m_adj(m, -todrop);
 			tlen = tp->rcv_wnd;
 			thflags &= ~TH_FIN;
-			V_tcpstat.tcps_rcvpackafterwin++;
-			V_tcpstat.tcps_rcvbyteafterwin += todrop;
+			TCPSTAT_INC(tcps_rcvpackafterwin);
+			TCPSTAT_ADD(tcps_rcvbyteafterwin, todrop);
 		}
 		tp->snd_wl1 = th->th_seq - 1;
 		tp->rcv_up = th->th_seq;
@@ -1733,7 +1727,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				    SEQ_LEQ(th->th_seq, tp->rcv_nxt + 1)) &&
 				    !(SEQ_GEQ(th->th_seq, tp->last_ack_sent - 1) &&
 				    SEQ_LEQ(th->th_seq, tp->last_ack_sent + 1))) {
-					V_tcpstat.tcps_badrst++;
+					TCPSTAT_INC(tcps_badrst);
 					goto drop;
 				}
 				/* FALLTHROUGH */
@@ -1748,7 +1742,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 
 				tp->t_state = TCPS_CLOSED;
-				V_tcpstat.tcps_drops++;
+				TCPSTAT_INC(tcps_drops);
 				tp = tcp_close(tp);
 				break;
 
@@ -1774,7 +1768,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	    TSTMP_LT(to.to_tsval, tp->ts_recent)) {
 
 		/* Check to see if ts_recent is over 24 days old.  */
-		if ((int)(ticks - tp->ts_recent_age) > TCP_PAWS_IDLE) {
+		if (ticks - tp->ts_recent_age > TCP_PAWS_IDLE) {
 			/*
 			 * Invalidate ts_recent.  If this segment updates
 			 * ts_recent, the age will be reset later and ts_recent
@@ -1788,9 +1782,9 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			 */
 			tp->ts_recent = 0;
 		} else {
-			V_tcpstat.tcps_rcvduppack++;
-			V_tcpstat.tcps_rcvdupbyte += tlen;
-			V_tcpstat.tcps_pawsdrop++;
+			TCPSTAT_INC(tcps_rcvduppack);
+			TCPSTAT_ADD(tcps_rcvdupbyte, tlen);
+			TCPSTAT_INC(tcps_pawsdrop);
 			if (tlen)
 				goto dropafterack;
 			goto drop;
@@ -1811,7 +1805,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 
 	todrop = tp->rcv_nxt - th->th_seq;
 	if (todrop > 0) {
-		if (thflags & TH_SYN) {
+		/*
+		 * If this is a duplicate SYN for our current connection,
+		 * advance over it and pretend and it's not a SYN.
+		 */
+		if (thflags & TH_SYN && th->th_seq == tp->irs) {
 			thflags &= ~TH_SYN;
 			th->th_seq++;
 			if (th->th_urp > 1)
@@ -1838,11 +1836,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			 */
 			tp->t_flags |= TF_ACKNOW;
 			todrop = tlen;
-			V_tcpstat.tcps_rcvduppack++;
-			V_tcpstat.tcps_rcvdupbyte += todrop;
+			TCPSTAT_INC(tcps_rcvduppack);
+			TCPSTAT_ADD(tcps_rcvdupbyte, todrop);
 		} else {
-			V_tcpstat.tcps_rcvpartduppack++;
-			V_tcpstat.tcps_rcvpartdupbyte += todrop;
+			TCPSTAT_INC(tcps_rcvpartduppack);
+			TCPSTAT_ADD(tcps_rcvpartdupbyte, todrop);
 		}
 		drop_hdrlen += todrop;	/* drop from the top afterwards */
 		th->th_seq += todrop;
@@ -1874,7 +1872,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			free(s, M_TCPLOG);
 		}
 		tp = tcp_close(tp);
-		V_tcpstat.tcps_rcvafterclose++;
+		TCPSTAT_INC(tcps_rcvafterclose);
 		rstreason = BANDLIM_UNLIMITED;
 		goto dropwithreset;
 	}
@@ -1885,9 +1883,9 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 */
 	todrop = (th->th_seq + tlen) - (tp->rcv_nxt + tp->rcv_wnd);
 	if (todrop > 0) {
-		V_tcpstat.tcps_rcvpackafterwin++;
+		TCPSTAT_INC(tcps_rcvpackafterwin);
 		if (todrop >= tlen) {
-			V_tcpstat.tcps_rcvbyteafterwin += tlen;
+			TCPSTAT_ADD(tcps_rcvbyteafterwin, tlen);
 			/*
 			 * If window is closed can only take segments at
 			 * window edge, and have to drop data and PUSH from
@@ -1897,11 +1895,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			 */
 			if (tp->rcv_wnd == 0 && th->th_seq == tp->rcv_nxt) {
 				tp->t_flags |= TF_ACKNOW;
-				V_tcpstat.tcps_rcvwinprobe++;
+				TCPSTAT_INC(tcps_rcvwinprobe);
 			} else
 				goto dropafterack;
 		} else
-			V_tcpstat.tcps_rcvbyteafterwin += todrop;
+			TCPSTAT_ADD(tcps_rcvbyteafterwin, todrop);
 		m_adj(m, -todrop);
 		tlen -= todrop;
 		thflags &= ~(TH_PUSH|TH_FIN);
@@ -1974,7 +1972,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 */
 	case TCPS_SYN_RECEIVED:
 
-		V_tcpstat.tcps_connects++;
+		TCPSTAT_INC(tcps_connects);
 		soisconnected(so);
 		/* Do window scaling? */
 		if ((tp->t_flags & (TF_RCVD_SCALE|TF_REQ_SCALE)) ==
@@ -2020,7 +2018,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	case TCPS_CLOSING:
 	case TCPS_LAST_ACK:
 		if (SEQ_GT(th->th_ack, tp->snd_max)) {
-			V_tcpstat.tcps_rcvacktoomuch++;
+			TCPSTAT_INC(tcps_rcvacktoomuch);
 			goto dropafterack;
 		}
 		if ((tp->t_flags & TF_SACK_PERMIT) &&
@@ -2029,7 +2027,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tcp_sack_doack(tp, &to, th->th_ack);
 		if (SEQ_LEQ(th->th_ack, tp->snd_una)) {
 			if (tlen == 0 && tiwin == tp->snd_wnd) {
-				V_tcpstat.tcps_rcvdupack++;
+				TCPSTAT_INC(tcps_rcvdupack);
 				/*
 				 * If we have outstanding data (other than
 				 * a window probe), this is a completely
@@ -2112,7 +2110,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 					tcp_timer_activate(tp, TT_REXMT, 0);
 					tp->t_rtttime = 0;
 					if (tp->t_flags & TF_SACK_PERMIT) {
-						V_tcpstat.tcps_sack_recovery_episode++;
+						TCPSTAT_INC(
+						    tcps_sack_recovery_episode);
 						tp->sack_newdata = tp->snd_nxt;
 						tp->snd_cwnd = tp->t_maxseg;
 						(void) tcp_output(tp);
@@ -2234,8 +2233,8 @@ process_ACK:
 		INP_WLOCK_ASSERT(tp->t_inpcb);
 
 		acked = th->th_ack - tp->snd_una;
-		V_tcpstat.tcps_rcvackpack++;
-		V_tcpstat.tcps_rcvackbyte += acked;
+		TCPSTAT_INC(tcps_rcvackpack);
+		TCPSTAT_ADD(tcps_rcvackbyte, acked);
 
 		/*
 		 * If we just performed our first retransmit, and the ACK
@@ -2244,8 +2243,8 @@ process_ACK:
 		 * original cwnd and ssthresh, and proceed to transmit where
 		 * we left off.
 		 */
-		if (tp->t_rxtshift == 1 && ticks < tp->t_badrxtwin) {
-			++V_tcpstat.tcps_sndrexmitbad;
+		if (tp->t_rxtshift == 1 && (int)(ticks - tp->t_badrxtwin) < 0) {
+			TCPSTAT_INC(tcps_sndrexmitbad);
 			tp->snd_cwnd = tp->snd_cwnd_prev;
 			tp->snd_ssthresh = tp->snd_ssthresh_prev;
 			tp->snd_recover = tp->snd_recover_prev;
@@ -2469,7 +2468,7 @@ step6:
 		/* keep track of pure window updates */
 		if (tlen == 0 &&
 		    tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd)
-			V_tcpstat.tcps_rcvwinupd++;
+			TCPSTAT_INC(tcps_rcvwinupd);
 		tp->snd_wnd = tiwin;
 		tp->snd_wl1 = th->th_seq;
 		tp->snd_wl2 = th->th_ack;
@@ -2579,8 +2578,8 @@ dodata:							/* XXX */
 				tp->t_flags |= TF_ACKNOW;
 			tp->rcv_nxt += tlen;
 			thflags = th->th_flags & TH_FIN;
-			V_tcpstat.tcps_rcvpack++;
-			V_tcpstat.tcps_rcvbyte += tlen;
+			TCPSTAT_INC(tcps_rcvpack);
+			TCPSTAT_ADD(tcps_rcvbyte, tlen);
 			ND6_HINT(tp);
 			SOCKBUF_LOCK(&so->so_rcv);
 			if (so->so_rcv.sb_state & SBS_CANTRCVMORE)
@@ -2855,7 +2854,6 @@ drop:
 static void
 tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, int flags)
 {
-	INIT_VNET_INET(curvnet);
 	int opt, optlen;
 
 	to->to_flags = 0;
@@ -2933,7 +2931,7 @@ tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, int flags)
 			to->to_flags |= TOF_SACK;
 			to->to_nsacks = (optlen - 2) / TCPOLEN_SACK;
 			to->to_sacks = cp + 2;
-			V_tcpstat.tcps_sack_rcv_blocks++;
+			TCPSTAT_INC(tcps_sack_rcv_blocks);
 			break;
 		default:
 			continue;
@@ -2983,12 +2981,11 @@ tcp_pulloutofband(struct socket *so, struct tcphdr *th, struct mbuf *m,
 static void
 tcp_xmit_timer(struct tcpcb *tp, int rtt)
 {
-	INIT_VNET_INET(tp->t_inpcb->inp_vnet);
 	int delta;
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
 
-	V_tcpstat.tcps_rttupdated++;
+	TCPSTAT_INC(tcps_rttupdated);
 	tp->t_rttupdated++;
 	if (tp->t_srtt != 0) {
 		/*
@@ -3090,7 +3087,6 @@ void
 tcp_mss_update(struct tcpcb *tp, int offer,
     struct hc_metrics_lite *metricptr, int *mtuflags)
 {
-	INIT_VNET_INET(tp->t_inpcb->inp_vnet);
 	int mss;
 	u_long maxmtu;
 	struct inpcb *inp = tp->t_inpcb;
@@ -3256,7 +3252,6 @@ tcp_mss(struct tcpcb *tp, int offer)
 	int isipv6;
 #endif
 	KASSERT(tp != NULL, ("%s: tp == NULL", __func__));
-	INIT_VNET_INET(tp->t_vnet);
 	
 	tcp_mss_update(tp, offer, &metrics, &mtuflags);
 
@@ -3310,10 +3305,10 @@ tcp_mss(struct tcpcb *tp, int offer)
 	if (tp->t_srtt == 0 && (rtt = metrics.rmx_rtt)) {
 		tp->t_srtt = rtt;
 		tp->t_rttbest = tp->t_srtt + TCP_RTT_SCALE;
-		V_tcpstat.tcps_usedrtt++;
+		TCPSTAT_INC(tcps_usedrtt);
 		if (metrics.rmx_rttvar) {
 			tp->t_rttvar = metrics.rmx_rttvar;
-			V_tcpstat.tcps_usedrttvar++;
+			TCPSTAT_INC(tcps_usedrttvar);
 		} else {
 			/* default variation is +- 1 rtt */
 			tp->t_rttvar =
@@ -3331,7 +3326,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 		 * threshold to no less than 2*mss.
 		 */
 		tp->snd_ssthresh = max(2 * mss, metrics.rmx_ssthresh);
-		V_tcpstat.tcps_usedssthresh++;
+		TCPSTAT_INC(tcps_usedssthresh);
 	}
 	if (metrics.rmx_bandwidth)
 		tp->snd_bandwidth = metrics.rmx_bandwidth;
@@ -3383,7 +3378,6 @@ tcp_mss(struct tcpcb *tp, int offer)
 int
 tcp_mssopt(struct in_conninfo *inc)
 {
-	INIT_VNET_INET(curvnet);
 	int mss = 0;
 	u_long maxmtu = 0;
 	u_long thcmtu = 0;

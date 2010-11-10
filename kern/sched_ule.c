@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sched_ule.c,v 1.252 2009/01/25 07:35:10 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sched_ule.c,v 1.270 2010/06/11 18:46:34 jhb Exp $");
 
 #include "opt_hwpmc_hooks.h"
 #include "opt_kdtrace.h"
@@ -80,7 +80,7 @@ dtrace_vtime_switch_func_t	dtrace_vtime_switch_func;
 #include <machine/cpu.h>
 #include <machine/smp.h>
 
-#if defined(__sparc64__) || defined(__mips__)
+#if defined(__sparc64__)
 #error "This architecture is not currently compatible with ULE"
 #endif
 
@@ -103,6 +103,7 @@ struct td_sched {
 	u_int		ts_slptime;	/* Number of ticks we vol. slept */
 	u_int		ts_runtime;	/* Number of ticks we were running */
 	int		ts_ltick;	/* Last tick that we were running on */
+	int		ts_incrtick;	/* Last tick that we incremented on */
 	int		ts_ftick;	/* First tick that we were running on */
 	int		ts_ticks;	/* Tick count */
 #ifdef KTR
@@ -213,7 +214,6 @@ struct tdq {
 	volatile int	tdq_load;		/* Aggregate load. */
 	int		tdq_sysload;		/* For loadavg, !ITHD load. */
 	int		tdq_transferable;	/* Transferable thread count. */
-	volatile int	tdq_idlestate;		/* State of the idle thread. */
 	short		tdq_switchcnt;		/* Switches this tick. */
 	short		tdq_oldswitchcnt;	/* Switches last tick. */
 	u_char		tdq_lowpri;		/* Lowest priority thread. */
@@ -301,7 +301,6 @@ static int sched_pickcpu(struct thread *, int);
 static void sched_balance(void);
 static int sched_balance_pair(struct tdq *, struct tdq *);
 static inline struct tdq *sched_setcpu(struct thread *, int, int);
-static inline struct mtx *thread_block_switch(struct thread *);
 static inline void thread_unblock_switch(struct thread *, struct mtx *);
 static struct mtx *sched_switch_migrate(struct tdq *, struct thread *, int);
 static int sysctl_kern_sched_topology_spec(SYSCTL_HANDLER_ARGS);
@@ -360,7 +359,6 @@ tdq_print(int cpu)
 	printf("\tload:           %d\n", tdq->tdq_load);
 	printf("\tswitch cnt:     %d\n", tdq->tdq_switchcnt);
 	printf("\told switch cnt: %d\n", tdq->tdq_oldswitchcnt);
-	printf("\tidle state:     %d\n", tdq->tdq_idlestate);
 	printf("\ttimeshare idx:  %d\n", tdq->tdq_idx);
 	printf("\ttimeshare ridx: %d\n", tdq->tdq_ridx);
 	printf("\tload transferable: %d\n", tdq->tdq_transferable);
@@ -497,7 +495,7 @@ tdq_load_add(struct tdq *tdq, struct thread *td)
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
 
 	tdq->tdq_load++;
-	if ((td->td_proc->p_flag & P_NOLOAD) == 0)
+	if ((td->td_flags & TDF_NOLOAD) == 0)
 		tdq->tdq_sysload++;
 	KTR_COUNTER0(KTR_SCHED, "load", tdq->tdq_loadname, tdq->tdq_load);
 }
@@ -516,7 +514,7 @@ tdq_load_rem(struct tdq *tdq, struct thread *td)
 	    ("tdq_load_rem: Removing with 0 load on queue %d", TDQ_ID(tdq)));
 
 	tdq->tdq_load--;
-	if ((td->td_proc->p_flag & P_NOLOAD) == 0)
+	if ((td->td_flags & TDF_NOLOAD) == 0)
 		tdq->tdq_sysload--;
 	KTR_COUNTER0(KTR_SCHED, "load", tdq->tdq_loadname, tdq->tdq_load);
 }
@@ -542,7 +540,7 @@ tdq_setlowpri(struct tdq *tdq, struct thread *ctd)
 
 #ifdef SMP
 struct cpu_search {
-	cpumask_t cs_mask;	/* Mask of valid cpus. */
+	cpuset_t cs_mask;
 	u_int	cs_load;
 	u_int	cs_cpu;
 	int	cs_limit;	/* Min priority for low min load for high. */
@@ -552,8 +550,8 @@ struct cpu_search {
 #define	CPU_SEARCH_HIGHEST	0x2
 #define	CPU_SEARCH_BOTH		(CPU_SEARCH_LOWEST|CPU_SEARCH_HIGHEST)
 
-#define	CPUMASK_FOREACH(cpu, mask)				\
-	for ((cpu) = 0; (cpu) < sizeof((mask)) * 8; (cpu)++)	\
+#define	CPUSET_FOREACH(cpu, mask)				\
+	for ((cpu) = 0; (cpu) <= mp_maxid; (cpu)++)		\
 		if ((mask) & 1 << (cpu))
 
 static __inline int cpu_search(struct cpu_group *cg, struct cpu_search *low,
@@ -576,14 +574,14 @@ cpu_compare(int cpu, struct cpu_search *low, struct cpu_search *high,
 
 	tdq = TDQ_CPU(cpu);
 	if (match & CPU_SEARCH_LOWEST)
-		if (low->cs_mask & (1 << cpu) &&
+		if (CPU_ISSET(cpu, &low->cs_mask) &&
 		    tdq->tdq_load < low->cs_load &&
 		    tdq->tdq_lowpri > low->cs_limit) {
 			low->cs_cpu = cpu;
 			low->cs_load = tdq->tdq_load;
 		}
 	if (match & CPU_SEARCH_HIGHEST)
-		if (high->cs_mask & (1 << cpu) &&
+		if (CPU_ISSET(cpu, &high->cs_mask) &&
 		    tdq->tdq_load >= high->cs_limit && 
 		    tdq->tdq_load > high->cs_load &&
 		    tdq->tdq_transferable) {
@@ -658,7 +656,7 @@ cpu_search(struct cpu_group *cg, struct cpu_search *low,
 	} else {
 		int cpu;
 
-		CPUMASK_FOREACH(cpu, cg->cg_mask)
+		CPUSET_FOREACH(cpu, cg->cg_mask)
 			total += cpu_compare(cpu, low, high, match);
 	}
 	return (total);
@@ -693,7 +691,7 @@ cpu_search_both(struct cpu_group *cg, struct cpu_search *low,
  * acceptable.
  */
 static inline int
-sched_lowest(struct cpu_group *cg, cpumask_t mask, int pri)
+sched_lowest(struct cpu_group *cg, cpuset_t mask, int pri)
 {
 	struct cpu_search low;
 
@@ -709,7 +707,7 @@ sched_lowest(struct cpu_group *cg, cpumask_t mask, int pri)
  * Find the cpu with the highest load via the highest loaded path.
  */
 static inline int
-sched_highest(struct cpu_group *cg, cpumask_t mask, int minload)
+sched_highest(struct cpu_group *cg, cpuset_t mask, int minload)
 {
 	struct cpu_search high;
 
@@ -726,7 +724,7 @@ sched_highest(struct cpu_group *cg, cpumask_t mask, int minload)
  * cg.
  */
 static inline void 
-sched_both(struct cpu_group *cg, cpumask_t mask, int *lowcpu, int *highcpu)
+sched_both(struct cpu_group *cg, cpuset_t mask, int *lowcpu, int *highcpu)
 {
 	struct cpu_search high;
 	struct cpu_search low;
@@ -748,12 +746,12 @@ sched_both(struct cpu_group *cg, cpumask_t mask, int *lowcpu, int *highcpu)
 static void
 sched_balance_group(struct cpu_group *cg)
 {
-	cpumask_t mask;
+	cpuset_t mask;
 	int high;
 	int low;
 	int i;
 
-	mask = -1;
+	CPU_FILL(&mask);
 	for (;;) {
 		sched_both(cg, mask, &low, &high);
 		if (low == high || low == -1 || high == -1)
@@ -765,9 +763,9 @@ sched_balance_group(struct cpu_group *cg)
 		 * to kick out of the set and try again.
 	 	 */
 		if (TDQ_CPU(high)->tdq_transferable == 0)
-			mask &= ~(1 << high);
+			CPU_CLR(high, &mask);
 		else
-			mask &= ~(1 << low);
+			CPU_CLR(low, &mask);
 	}
 
 	for (i = 0; i < cg->cg_children; i++)
@@ -775,7 +773,7 @@ sched_balance_group(struct cpu_group *cg)
 }
 
 static void
-sched_balance()
+sched_balance(void)
 {
 	struct tdq *tdq;
 
@@ -902,18 +900,18 @@ tdq_idled(struct tdq *tdq)
 {
 	struct cpu_group *cg;
 	struct tdq *steal;
-	cpumask_t mask;
+	cpuset_t mask;
 	int thresh;
 	int cpu;
 
 	if (smp_started == 0 || steal_idle == 0)
 		return (1);
-	mask = -1;
-	mask &= ~PCPU_GET(cpumask);
+	CPU_FILL(&mask);
+	CPU_CLR(PCPU_GET(cpuid), &mask);
 	/* We don't want to be preempted while we're iterating. */
 	spinlock_enter();
 	for (cg = tdq->tdq_cg; cg != NULL; ) {
-		if ((cg->cg_flags & (CG_FLAG_HTT | CG_FLAG_THREAD)) == 0)
+		if ((cg->cg_flags & CG_FLAG_THREAD) == 0)
 			thresh = steal_thresh;
 		else
 			thresh = 1;
@@ -923,7 +921,7 @@ tdq_idled(struct tdq *tdq)
 			continue;
 		}
 		steal = TDQ_CPU(cpu);
-		mask &= ~(1 << cpu);
+		CPU_CLR(cpu, &mask);
 		tdq_lock_pair(tdq, steal);
 		if (steal->tdq_load < thresh || steal->tdq_transferable == 0) {
 			tdq_unlock_pair(tdq, steal);
@@ -968,13 +966,6 @@ tdq_notify(struct tdq *tdq, struct thread *td)
 	if (!sched_shouldpreempt(pri, ctd->td_priority, 1))
 		return;
 	if (TD_IS_IDLETHREAD(ctd)) {
-		/*
-		 * If the idle thread is still 'running' it's probably
-		 * waiting on us to release the tdq spinlock already.  No
-		 * need to ipi.
-		 */
-		if (tdq->tdq_idlestate == TDQ_RUNNING)
-			return;
 		/*
 		 * If the MD code has an idle wakeup routine try that before
 		 * falling back to IPI.
@@ -1114,9 +1105,11 @@ sched_setcpu(struct thread *td, int cpu, int flags)
 	 * The hard case, migration, we need to block the thread first to
 	 * prevent order reversals with other cpus locks.
 	 */
+	spinlock_enter();
 	thread_lock_block(td);
 	TDQ_LOCK(tdq);
 	thread_lock_unblock(td, TDQ_LOCKPTR(tdq));
+	spinlock_exit();
 	return (tdq);
 }
 
@@ -1133,7 +1126,7 @@ sched_pickcpu(struct thread *td, int flags)
 	struct cpu_group *cg;
 	struct td_sched *ts;
 	struct tdq *tdq;
-	cpumask_t mask;
+	cpuset_t mask;
 	int self;
 	int pri;
 	int cpu;
@@ -1180,7 +1173,7 @@ sched_pickcpu(struct thread *td, int flags)
 		if (SCHED_AFFINITY(ts, cg->cg_level))
 			break;
 	cpu = -1;
-	mask = td->td_cpuset->cs_mask.__bits[0];
+	mask = td->td_cpuset->cs_mask;
 	if (cg)
 		cpu = sched_lowest(cg, mask, pri);
 	if (cpu == -1)
@@ -1261,9 +1254,7 @@ sched_setup_smp(void)
 	int i;
 
 	cpu_top = smp_topo();
-	for (i = 0; i < MAXCPU; i++) {
-		if (CPU_ABSENT(i))
-			continue;
+	CPU_FOREACH(i) {
 		tdq = TDQ_CPU(i);
 		tdq_setup(tdq);
 		tdq->tdq_cg = smp_topo_find(cpu_top, i);
@@ -1337,11 +1328,11 @@ sched_initticks(void *dummy)
 	 */
 	balance_interval = realstathz;
 	/*
-	 * Set steal thresh to log2(mp_ncpu) but no greater than 4.  This
-	 * prevents excess thrashing on large machines and excess idle on
-	 * smaller machines.
+	 * Set steal thresh to roughly log2(mp_ncpu) but no greater than 4. 
+	 * This prevents excess thrashing on large machines and excess idle 
+	 * on smaller machines.
 	 */
-	steal_thresh = min(ffs(mp_ncpus) - 1, 3);
+	steal_thresh = min(fls(mp_ncpus) - 1, 3);
 	affinity = SCHED_AFFINITY_DEFAULT;
 #endif
 }
@@ -1415,7 +1406,7 @@ sched_priority(struct thread *td)
 	 * score.  Negative nice values make it easier for a thread to be
 	 * considered interactive.
 	 */
-	score = imax(0, sched_interact_score(td) - td->td_proc->p_nice);
+	score = imax(0, sched_interact_score(td) + td->td_proc->p_nice);
 	if (score < sched_interact) {
 		pri = PRI_MIN_REALTIME;
 		pri += ((PRI_MAX_REALTIME - PRI_MIN_REALTIME) / sched_interact)
@@ -1723,23 +1714,6 @@ sched_unlend_user_prio(struct thread *td, u_char prio)
 }
 
 /*
- * Block a thread for switching.  Similar to thread_block() but does not
- * bump the spin count.
- */
-static inline struct mtx *
-thread_block_switch(struct thread *td)
-{
-	struct mtx *lock;
-
-	THREAD_LOCK_ASSERT(td, MA_OWNED);
-	lock = td->td_lock;
-	td->td_lock = &blocked_lock;
-	mtx_unlock_spin(lock);
-
-	return (lock);
-}
-
-/*
  * Handle migration from sched_switch().  This happens only for
  * cpu binding.
  */
@@ -1757,27 +1731,28 @@ sched_switch_migrate(struct tdq *tdq, struct thread *td, int flags)
 	 * not holding either run-queue lock.
 	 */
 	spinlock_enter();
-	thread_block_switch(td);	/* This releases the lock on tdq. */
-	TDQ_LOCK(tdn);
+	thread_lock_block(td);	/* This releases the lock on tdq. */
+
+	/*
+	 * Acquire both run-queue locks before placing the thread on the new
+	 * run-queue to avoid deadlocks created by placing a thread with a
+	 * blocked lock on the run-queue of a remote processor.  The deadlock
+	 * occurs when a third processor attempts to lock the two queues in
+	 * question while the target processor is spinning with its own
+	 * run-queue lock held while waiting for the blocked lock to clear.
+	 */
+	tdq_lock_pair(tdn, tdq);
 	tdq_add(tdn, td, flags);
 	tdq_notify(tdn, td);
-	/*
-	 * After we unlock tdn the new cpu still can't switch into this
-	 * thread until we've unblocked it in cpu_switch().  The lock
-	 * pointers may match in the case of HTT cores.  Don't unlock here
-	 * or we can deadlock when the other CPU runs the IPI handler.
-	 */
-	if (TDQ_LOCKPTR(tdn) != TDQ_LOCKPTR(tdq)) {
-		TDQ_UNLOCK(tdn);
-		TDQ_LOCK(tdq);
-	}
+	TDQ_UNLOCK(tdn);
 	spinlock_exit();
 #endif
 	return (TDQ_LOCKPTR(tdn));
 }
 
 /*
- * Release a thread that was blocked with thread_block_switch().
+ * Variadic version of thread_lock_unblock() that does not assume td_lock
+ * is blocked.
  */
 static inline void
 thread_unblock_switch(struct thread *td, struct mtx *mtx)
@@ -1833,7 +1808,7 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 	} else {
 		/* This thread must be going to sleep. */
 		TDQ_LOCK(tdq);
-		mtx = thread_block_switch(td);
+		mtx = thread_lock_block(td);
 		tdq_load_rem(tdq, td);
 	}
 	/*
@@ -1917,7 +1892,7 @@ sched_sleep(struct thread *td, int prio)
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
 
 	td->td_slptick = ticks;
-	if (TD_IS_SUSPENDED(td) || prio <= PSOCK)
+	if (TD_IS_SUSPENDED(td) || prio >= PSOCK)
 		td->td_flags |= TDF_CANSWAP;
 	if (static_boost == 1 && prio)
 		sched_prio(td, prio);
@@ -2000,6 +1975,7 @@ sched_fork_thread(struct thread *td, struct thread *child)
 	 */
 	ts2->ts_ticks = ts->ts_ticks;
 	ts2->ts_ltick = ts->ts_ltick;
+	ts2->ts_incrtick = ts->ts_incrtick;
 	ts2->ts_ftick = ts->ts_ftick;
 	child->td_user_pri = td->td_user_pri;
 	child->td_base_user_pri = td->td_base_user_pri;
@@ -2191,11 +2167,12 @@ sched_tick(void)
 	 * Ticks is updated asynchronously on a single cpu.  Check here to
 	 * avoid incrementing ts_ticks multiple times in a single tick.
 	 */
-	if (ts->ts_ltick == ticks)
+	if (ts->ts_incrtick == ticks)
 		return;
 	/* Adjust ticks for pctcpu */
 	ts->ts_ticks += 1 << SCHED_TICK_SHIFT;
 	ts->ts_ltick = ticks;
+	ts->ts_incrtick = ticks;
 	/*
 	 * Update if we've exceeded our desired tick threshhold by over one
 	 * second.
@@ -2388,7 +2365,7 @@ sched_pctcpu(struct thread *td)
 	if (ts == NULL)
 		return (0);
 
-	thread_lock(td);
+	THREAD_LOCK_ASSERT(td, MA_OWNED);
 	if (ts->ts_ticks) {
 		int rtick;
 
@@ -2397,7 +2374,6 @@ sched_pctcpu(struct thread *td)
 		rtick = min(SCHED_TICK_HZ(ts) / SCHED_TICK_SECS, hz);
 		pctcpu = (FSCALE * ((FSCALE * rtick)/hz)) >> FSHIFT;
 	}
-	thread_unlock(td);
 
 	return (pctcpu);
 }
@@ -2417,6 +2393,11 @@ sched_affinity(struct thread *td)
 	ts = td->td_sched;
 	if (THREAD_CAN_SCHED(td, ts->ts_cpu))
 		return;
+	if (TD_ON_RUNQ(td)) {
+		sched_rem(td);
+		sched_add(td, SRQ_BORING);
+		return;
+	}
 	if (!TD_IS_RUNNING(td))
 		return;
 	td->td_flags |= TDF_NEEDRESCHED;
@@ -2443,6 +2424,7 @@ sched_bind(struct thread *td, int cpu)
 	struct td_sched *ts;
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED|MA_NOTRECURSED);
+	KASSERT(td == curthread, ("sched_bind: can only bind curthread"));
 	ts = td->td_sched;
 	if (ts->ts_flags & TSF_BOUND)
 		sched_unbind(td);
@@ -2464,6 +2446,7 @@ sched_unbind(struct thread *td)
 	struct td_sched *ts;
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
+	KASSERT(td == curthread, ("sched_unbind: can only bind curthread"));
 	ts = td->td_sched;
 	if ((ts->ts_flags & TSF_BOUND) == 0)
 		return;
@@ -2500,7 +2483,7 @@ sched_load(void)
 	int i;
 
 	total = 0;
-	for (i = 0; i <= mp_maxid; i++)
+	CPU_FOREACH(i)
 		total += TDQ_CPU(i)->tdq_sysload;
 	return (total);
 #else
@@ -2520,6 +2503,13 @@ sched_sizeof_thread(void)
 	return (sizeof(struct thread) + sizeof(struct td_sched));
 }
 
+#ifdef SMP
+#define	TDQ_IDLESPIN(tdq)						\
+    ((tdq)->tdq_cg != NULL && ((tdq)->tdq_cg->cg_flags & CG_FLAG_THREAD) == 0)
+#else
+#define	TDQ_IDLESPIN(tdq)	1
+#endif
+
 /*
  * The actual idle process.
  */
@@ -2531,12 +2521,10 @@ sched_idletd(void *dummy)
 	int switchcnt;
 	int i;
 
+	mtx_assert(&Giant, MA_NOTOWNED);
 	td = curthread;
 	tdq = TDQ_SELF();
-	mtx_assert(&Giant, MA_NOTOWNED);
-	/* ULE relies on preemption for idle interruption. */
 	for (;;) {
-		tdq->tdq_idlestate = TDQ_RUNNING;
 #ifdef SMP
 		if (tdq_idled(tdq) == 0)
 			continue;
@@ -2545,26 +2533,20 @@ sched_idletd(void *dummy)
 		/*
 		 * If we're switching very frequently, spin while checking
 		 * for load rather than entering a low power state that 
-		 * requires an IPI.
+		 * may require an IPI.  However, don't do any busy
+		 * loops while on SMT machines as this simply steals
+		 * cycles from cores doing useful work.
 		 */
-		if (switchcnt > sched_idlespinthresh) {
+		if (TDQ_IDLESPIN(tdq) && switchcnt > sched_idlespinthresh) {
 			for (i = 0; i < sched_idlespins; i++) {
 				if (tdq->tdq_load)
 					break;
 				cpu_spinwait();
 			}
 		}
-		/*
-		 * We must set our state to IDLE before checking
-		 * tdq_load for the last time to avoid a race with
-		 * tdq_notify().
-		 */
-		if (tdq->tdq_load == 0) {
-			switchcnt = tdq->tdq_switchcnt + tdq->tdq_oldswitchcnt;
-			tdq->tdq_idlestate = TDQ_IDLE;
-			if (tdq->tdq_load == 0)
-				cpu_idle(switchcnt > 1);
-		}
+		switchcnt = tdq->tdq_switchcnt + tdq->tdq_oldswitchcnt;
+		if (tdq->tdq_load == 0)
+			cpu_idle(switchcnt > 1);
 		if (tdq->tdq_load) {
 			thread_lock(td);
 			mi_switch(SW_VOL | SWT_IDLE, NULL);
@@ -2677,9 +2659,11 @@ sysctl_kern_sched_topology_spec_internal(struct sbuf *sb, struct cpu_group *cg,
 	sbuf_printf(sb, "%*s <flags>", indent, "");
 	if (cg->cg_flags != 0) {
 		if ((cg->cg_flags & CG_FLAG_HTT) != 0)
-			sbuf_printf(sb, "<flag name=\"HTT\">HTT group</flag>\n");
+			sbuf_printf(sb, "<flag name=\"HTT\">HTT group</flag>");
 		if ((cg->cg_flags & CG_FLAG_THREAD) != 0)
-			sbuf_printf(sb, "<flag name=\"THREAD\">SMT group</flag>\n");
+			sbuf_printf(sb, "<flag name=\"THREAD\">THREAD group</flag>");
+		if ((cg->cg_flags & CG_FLAG_SMT) != 0)
+			sbuf_printf(sb, "<flag name=\"SMT\">SMT group</flag>");
 	}
 	sbuf_printf(sb, "</flags>\n");
 

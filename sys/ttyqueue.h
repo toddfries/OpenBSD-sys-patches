@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/ttyqueue.h,v 1.4 2009/02/03 19:58:28 ed Exp $
+ * $FreeBSD: src/sys/sys/ttyqueue.h,v 1.5 2009/10/19 07:17:37 ed Exp $
  */
 
 #ifndef _SYS_TTYQUEUE_H_
@@ -93,6 +93,13 @@ ttyinq_getsize(struct ttyinq *ti)
 }
 
 static __inline size_t
+ttyinq_getallocatedsize(struct ttyinq *ti)
+{
+
+	return (ti->ti_quota * TTYINQ_DATASIZE);
+}
+
+static __inline size_t
 ttyinq_bytesleft(struct ttyinq *ti)
 {
 	size_t len;
@@ -140,6 +147,13 @@ static __inline size_t
 ttyoutq_getsize(struct ttyoutq *to)
 {
 	return (to->to_nblocks * TTYOUTQ_DATASIZE);
+}
+
+static __inline size_t
+ttyoutq_getallocatedsize(struct ttyoutq *to)
+{
+
+	return (to->to_quota * TTYOUTQ_DATASIZE);
 }
 
 static __inline size_t

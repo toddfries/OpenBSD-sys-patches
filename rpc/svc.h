@@ -30,7 +30,7 @@
  *
  *	from: @(#)svc.h 1.35 88/12/17 SMI
  *	from: @(#)svc.h      1.27    94/04/25 SMI
- * $FreeBSD: src/sys/rpc/svc.h,v 1.2 2008/11/03 10:38:00 dfr Exp $
+ * $FreeBSD: src/sys/rpc/svc.h,v 1.4 2009/06/04 14:13:06 rmacklem Exp $
  */
 
 /*
@@ -165,6 +165,8 @@ typedef struct __rpc_svcxprt {
 	int		xp_type;	/* transport type */
 	int		xp_idletimeout; /* idle time before closing */
 	time_t		xp_lastactive;	/* time of last RPC */
+	u_int64_t	xp_sockref;	/* set by nfsv4 to identify socket */
+	int		xp_upcallset;	/* socket upcall is set up */
 #else
 	int		xp_fd;
 	u_short		xp_port;	 /* associated port number */

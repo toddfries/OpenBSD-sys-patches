@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_param.h,v 1.23 2007/10/16 11:32:57 ru Exp $
+ * $FreeBSD: src/sys/vm/vm_param.h,v 1.24 2010/04/30 00:46:43 kmacy Exp $
  */
 
 /*
@@ -125,6 +125,14 @@ struct xswdev {
 #define	KERN_RESOURCE_SHORTAGE	6
 #define	KERN_NOT_RECEIVER	7
 #define	KERN_NO_ACCESS		8
+
+#ifndef PA_LOCK_COUNT
+#ifdef SMP
+#define	PA_LOCK_COUNT	32
+#else
+#define PA_LOCK_COUNT	1
+#endif	/* !SMP */
+#endif	/* !PA_LOCK_COUNT */
 
 #ifndef ASSEMBLER
 #ifdef _KERNEL

@@ -40,7 +40,7 @@
  *	from: @(#)vm_machdep.c	7.3 (Berkeley) 5/13/91
  *	Utah $Hdr: vm_machdep.c 1.16.1.1 89/06/23$
  * 	from: FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.167 2001/07/12
- * $FreeBSD: src/sys/sun4v/sun4v/vm_machdep.c,v 1.8 2007/11/14 20:21:54 marcel Exp $
+ * $FreeBSD: src/sys/sun4v/sun4v/vm_machdep.c,v 1.9 2009/11/10 11:43:07 kib Exp $
  */
 
 #include "opt_pmap.h"
@@ -57,6 +57,7 @@
 #include <sys/mutex.h>
 #include <sys/sf_buf.h>
 #include <sys/sysctl.h>
+#include <sys/sysent.h>
 #include <sys/unistd.h>
 #include <sys/vmmeter.h>
 
@@ -139,6 +140,42 @@ cpu_thread_swapin(struct thread *td)
 void
 cpu_thread_swapout(struct thread *td)
 {
+}
+
+void
+cpu_set_syscall_retval(struct thread *td, int error)
+{
+
+	switch (error) {
+	case 0:
+		td->td_frame->tf_out[0] = td->td_retval[0];
+		td->td_frame->tf_out[1] = td->td_retval[1];
+		td->td_frame->tf_tstate &= ~TSTATE_XCC_C;
+		break;
+
+	case ERESTART:
+		/*
+		 * Undo the tpc advancement we have done on syscall
+		 * enter, we want to reexecute the system call.
+		 */
+		td->td_frame->tf_tpc = td->td_pcb->pcb_tpc;
+		td->td_frame->tf_tnpc -= 4;
+		break;
+
+	case EJUSTRETURN:
+		break;
+
+	default:
+		if (td->td_proc->p_sysent->sv_errsize) {
+			if (error >= td->td_proc->p_sysent->sv_errsize)
+				error = -1;	/* XXX */
+			else
+				error = td->td_proc->p_sysent->sv_errtbl[error];
+		}
+		td->td_frame->tf_out[0] = error;
+		td->td_frame->tf_tstate |= TSTATE_XCC_C;
+		break;
+	}
 }
 
 void

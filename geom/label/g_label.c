@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label.c,v 1.21 2006/08/12 15:30:24 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label.c,v 1.27 2010/05/31 09:10:39 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,7 +34,6 @@ __FBSDID("$FreeBSD: src/sys/geom/label/g_label.c,v 1.21 2006/08/12 15:30:24 pjd 
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/bio.h>
-#include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/libkern.h>
 #include <geom/geom.h>
@@ -77,12 +76,15 @@ struct g_class g_label_class = {
  * 6. Add your file system to manual page sbin/geom/class/label/glabel.8.
  */
 const struct g_label_desc *g_labels[] = {
-	&g_label_ufs,
+	&g_label_ufs_id,
+	&g_label_ufs_volume,
 	&g_label_iso9660,
 	&g_label_msdosfs,
 	&g_label_ext2fs,
 	&g_label_reiserfs,
 	&g_label_ntfs,
+	&g_label_gpt,
+	&g_label_gpt_uuid,
 	NULL
 };
 
@@ -103,7 +105,7 @@ static void
 g_label_orphan(struct g_consumer *cp)
 {
 
-	G_LABEL_DEBUG(0, "Label %s removed.",
+	G_LABEL_DEBUG(1, "Label %s removed.",
 	    LIST_FIRST(&cp->geom->provider)->name);
 	g_slice_orphan(cp);
 }
@@ -112,7 +114,7 @@ static void
 g_label_spoiled(struct g_consumer *cp)
 {
 
-	G_LABEL_DEBUG(0, "Label %s removed.",
+	G_LABEL_DEBUG(1, "Label %s removed.",
 	    LIST_FIRST(&cp->geom->provider)->name);
 	g_slice_spoiled(cp);
 }
@@ -180,7 +182,7 @@ g_label_create(struct gctl_req *req, struct g_class *mp, struct g_provider *pp,
 	g_access(cp, -1, 0, 0);
 	g_slice_config(gp, 0, G_SLICE_CONFIG_SET, (off_t)0, mediasize,
 	    pp->sectorsize, name);
-	G_LABEL_DEBUG(0, "Label for provider %s is %s.", pp->name, name);
+	G_LABEL_DEBUG(1, "Label for provider %s is %s.", pp->name, name);
 	return (gp);
 }
 
@@ -201,10 +203,8 @@ g_label_destroy(struct g_geom *gp, boolean_t force)
 			    pp->acr, pp->acw, pp->ace);
 			return (EBUSY);
 		}
-	} else {
-		G_LABEL_DEBUG(0, "Label %s removed.",
-		    LIST_FIRST(&gp->provider)->name);
-	}
+	} else if (pp != NULL)
+		G_LABEL_DEBUG(1, "Label %s removed.", pp->name);
 	g_slice_spoiled(LIST_FIRST(&gp->consumer));
 	return (0);
 }
@@ -268,6 +268,10 @@ g_label_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 
 	G_LABEL_DEBUG(2, "Tasting %s.", pp->name);
 
+	/* Skip providers that are already open for writing. */
+	if (pp->acw > 0)
+		return (NULL);
+
 	if (strcmp(pp->geom->class->name, mp->name) == 0)
 		return (NULL);
 
@@ -309,6 +313,8 @@ g_label_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 	for (i = 0; g_labels[i] != NULL; i++) {
 		char label[64];
 
+		if (g_labels[i]->ld_enabled == 0)
+			continue;
 		g_topology_unlock();
 		g_labels[i]->ld_taste(cp, label, sizeof(label));
 		g_topology_lock();

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosdisk.c,v 1.57 2009/03/09 17:16:29 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosdisk.c,v 1.64 2010/09/17 22:59:15 pjd Exp $");
 
 /*
  * BIOS disk device handling.
@@ -83,7 +83,7 @@ struct open_disk {
     int			od_cyl;			/* BIOS geometry */
     int			od_hds;
     int			od_sec;
-    int			od_boff;		/* block offset from beginning of BIOS disk */
+    daddr_t			od_boff;		/* block offset from beginning of BIOS disk */
     int			od_flags;
 #define BD_MODEINT13		0x0000
 #define BD_MODEEDD1		0x0001
@@ -214,10 +214,12 @@ bd_init(void)
     /* sequence 0, 0x80 */
     for (base = 0; base <= 0x80; base += 0x80) {
 	for (unit = base; (nbdinfo < MAXBDDEV); unit++) {
+#ifndef VIRTUALBOX
 	    /* check the BIOS equipment list for number of fixed disks */
 	    if((base == 0x80) &&
 	       (nfd >= *(unsigned char *)PTOV(BIOS_NUMDRIVES)))
-	        break;
+		break;
+#endif
 
 	    bdinfo[nbdinfo].bd_unit = unit;
 	    bdinfo[nbdinfo].bd_flags = (unit < 0x80) ? BD_FLOPPY : 0;
@@ -387,6 +389,7 @@ bd_printgptpart(struct open_disk *od, struct gpt_part *gp, char *prefix,
 	sprintf(line, "%s: FreeBSD swap%s\n", prefix, stats);
     else
 	sprintf(line, "%s: %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x%s\n",
+	    prefix,
 	    gp->gp_type.time_low, gp->gp_type.time_mid,
 	    gp->gp_type.time_hi_and_version,
 	    gp->gp_type.clock_seq_hi_and_reserved, gp->gp_type.clock_seq_low,
@@ -879,7 +882,7 @@ bd_open_gpt(struct open_disk *od, struct i386_devdesc *dev)
     for (i = 0; i < NDOSPART; i++) {
 	if (dp[i].dp_typ == 0xee)
 	    part++;
-	else if (dp[i].dp_typ != 0x00)
+	else if ((part != 1) && (dp[i].dp_typ != 0x00))
 	    return (EINVAL);
     }
     if (part != 1)
@@ -989,7 +992,8 @@ bd_open_gpt(struct open_disk *od, struct i386_devdesc *dev)
 
 out:
     if (error) {
-	free(od->od_partitions);
+	if (od->od_nparts > 0)
+	    free(od->od_partitions);
 	od->od_flags &= ~BD_GPTOK;
     }
     return (error);
@@ -1043,7 +1047,7 @@ bd_closedisk(struct open_disk *od)
 	delay(3000000);
 #endif
 #ifdef LOADER_GPT_SUPPORT
-    if (od->od_flags & BD_GPTOK)
+    if (od->od_flags & BD_GPTOK && od->od_nparts > 0)
 	free(od->od_partitions);
 #endif
     free(od);
@@ -1124,14 +1128,6 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf, siz
 
 /* Max number of sectors to bounce-buffer if the request crosses a 64k boundary */
 #define FLOPPY_BOUNCEBUF	18
-
-struct edd_packet {
-    uint16_t	len;
-    uint16_t	count;
-    uint16_t	offset;
-    uint16_t	seg;
-    uint64_t	lba;
-};
 
 static int
 bd_edd_io(struct open_disk *od, daddr_t dblk, int blks, caddr_t dest, int write)
@@ -1272,11 +1268,11 @@ bd_io(struct open_disk *od, daddr_t dblk, int blks, caddr_t dest, int write)
 	}
 
 	if (write)
-	    DEBUG("%d sectors from %lld to %p (0x%x) %s", x, dblk, p, VTOP(p),
-		result ? "failed" : "ok");
+	    DEBUG("Write %d sector(s) from %p (0x%x) to %lld %s", x,
+		p, VTOP(p), dblk, result ? "failed" : "ok");
 	else
-	    DEBUG("%d sectors from %p (0x%x) to %lld %s", x, p, VTOP(p), dblk,
-		result ? "failed" : "ok");
+	    DEBUG("Read %d sector(s) from %lld to %p (0x%x) %s", x,
+		dblk, p, VTOP(p), result ? "failed" : "ok");
 	if (result) {
 	    return(-1);
 	}

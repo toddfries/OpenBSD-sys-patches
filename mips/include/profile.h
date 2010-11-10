@@ -32,7 +32,7 @@
  *
  *	from: @(#)profile.h	8.1 (Berkeley) 6/10/93
  *	JNPR: profile.h,v 1.4 2006/12/02 09:53:41 katta
- * $FreeBSD: src/sys/mips/include/profile.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/profile.h,v 1.3 2010/04/17 01:17:31 jmallett Exp $
  */
 #ifndef _MACHINE_PROFILE_H_
 #define	_MACHINE_PROFILE_H_
@@ -40,6 +40,8 @@
 #define	_MCOUNT_DECL void ___mcount
 
 /*XXX The cprestore instruction is a "dummy" to shut up as(1). */
+
+/*XXX This is not MIPS64 safe. */
 
 #define	MCOUNT \
 	__asm(".globl _mcount;"		\
@@ -82,17 +84,17 @@
 #ifdef SMP
 extern int	mcount_lock;
 #define	MCOUNT_ENTER(s)	{					\
-	s = disable_intr();					\
+	s = intr_disable();					\
 	while (!atomic_cmpset_acq_int(&mcount_lock, 0, 1))	\
 		/* nothing */ ;					\
 }
 #define	MCOUNT_EXIT(s)	{					\
 	atomic_store_rel_int(&mcount_lock, 0);			\
-	enableintr(s);						\
+	intr_restore(s);						\
 }
 #else
-#define	MCOUNT_ENTER(s)	{ s = disable_intr(); }
-#define	MCOUNT_EXIT(s)	(enableintr(s))
+#define	MCOUNT_ENTER(s)	{ s = intr_disable(); }
+#define	MCOUNT_EXIT(s)	(intr_restore(s))
 #endif
 
 /* REVISIT for mips */

@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to ethernet.
  *
- * $FreeBSD: src/sys/net/ethernet.h,v 1.36 2008/08/27 17:10:37 emaste Exp $
+ * $FreeBSD: src/sys/net/ethernet.h,v 1.37 2009/04/16 20:30:28 kmacy Exp $
  *
  */
 
@@ -365,7 +365,7 @@ struct ether_addr {
 
 struct ifnet;
 struct mbuf;
-struct rtentry;
+struct route;
 struct sockaddr;
 struct bpf_if;
 
@@ -376,7 +376,7 @@ extern	void ether_ifattach(struct ifnet *, const u_int8_t *);
 extern	void ether_ifdetach(struct ifnet *);
 extern	int  ether_ioctl(struct ifnet *, u_long, caddr_t);
 extern	int  ether_output(struct ifnet *,
-		   struct mbuf *, struct sockaddr *, struct rtentry *);
+		   struct mbuf *, struct sockaddr *, struct route *);
 extern	int  ether_output_frame(struct ifnet *, struct mbuf *);
 extern	char *ether_sprintf(const u_int8_t *);
 void	ether_vlan_mtap(struct bpf_if *, struct mbuf *,

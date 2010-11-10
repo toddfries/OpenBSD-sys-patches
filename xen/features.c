@@ -1,10 +1,12 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/xen/features.c,v 1.2 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/xen/features.c,v 1.3 2009/03/11 15:30:12 dfr Exp $");
 
-#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+
 #include <machine/xen/xen-os.h>
 #include <xen/hypervisor.h>
-#include <machine/xen/features.h>
+#include <xen/features.h>
 
 uint8_t xen_features[XENFEAT_NR_SUBMAPS * 32] /* __read_mostly */;
 

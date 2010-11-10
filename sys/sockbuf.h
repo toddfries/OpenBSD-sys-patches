@@ -28,7 +28,7 @@
  *
  *	@(#)socketvar.h	8.3 (Berkeley) 2/19/95
  *
- * $FreeBSD: src/sys/sys/sockbuf.h,v 1.5 2008/07/31 20:27:50 kmacy Exp $
+ * $FreeBSD: src/sys/sys/sockbuf.h,v 1.6 2009/06/01 21:17:03 jhb Exp $
  */
 #ifndef _SYS_SOCKBUF_H_
 #define _SYS_SOCKBUF_H_
@@ -99,6 +99,8 @@ struct	sockbuf {
 	int	sb_lowat;	/* (c/d) low water mark */
 	int	sb_timeo;	/* (c/d) timeout for read/write */
 	short	sb_flags;	/* (c/d) flags, see below */
+	int	(*sb_upcall)(struct socket *, void *, int); /* (c/d) */
+	void	*sb_upcallarg;	/* (c/d) */
 };
 
 #ifdef _KERNEL

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_conv.c,v 1.54 2009/01/13 22:35:26 trasz Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_conv.c,v 1.57 2010/02/13 12:41:07 kib Exp $ */
 /*	$NetBSD: msdosfs_conv.c,v 1.25 1997/11/17 15:36:40 ws Exp $	*/
 
 /*-
@@ -741,22 +741,13 @@ win2unixfn(nbp, wep, chksum, pmp)
  * Compute the unrolled checksum of a DOS filename for Win95 LFN use.
  */
 u_int8_t
-winChksum(struct direntry *dep)
+winChksum(u_int8_t *name)
 {
+	int i;
 	u_int8_t s;
 
-	s = dep->deName[0];
-	s = ((s << 7) | (s >> 1)) + dep->deName[1];
-	s = ((s << 7) | (s >> 1)) + dep->deName[2];
-	s = ((s << 7) | (s >> 1)) + dep->deName[3];
-	s = ((s << 7) | (s >> 1)) + dep->deName[4];
-	s = ((s << 7) | (s >> 1)) + dep->deName[5];
-	s = ((s << 7) | (s >> 1)) + dep->deName[6];
-	s = ((s << 7) | (s >> 1)) + dep->deName[7];
-	s = ((s << 7) | (s >> 1)) + dep->deExtension[0];
-	s = ((s << 7) | (s >> 1)) + dep->deExtension[1];
-	s = ((s << 7) | (s >> 1)) + dep->deExtension[2];
-
+	for (s = 0, i = 11; --i >= 0; s += *name++)
+		s = (s << 7)|(s >> 1);
 	return (s);
 }
 

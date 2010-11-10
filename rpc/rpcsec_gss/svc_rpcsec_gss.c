@@ -61,16 +61,18 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/rpcsec_gss/svc_rpcsec_gss.c,v 1.1 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/rpcsec_gss/svc_rpcsec_gss.c,v 1.10 2010/01/08 23:26:10 brooks Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/kobj.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
+#include <sys/proc.h>
 #include <sys/sx.h>
 #include <sys/ucred.h>
 
@@ -98,7 +100,7 @@ struct svc_rpc_gss_callback {
 	rpc_gss_callback_t	cb_callback;
 };
 static SLIST_HEAD(svc_rpc_gss_callback_list, svc_rpc_gss_callback)
-	svc_rpc_gss_callbacks = SLIST_HEAD_INITIALIZER(&svc_rpc_gss_callbacks);
+	svc_rpc_gss_callbacks = SLIST_HEAD_INITIALIZER(svc_rpc_gss_callbacks);
 
 struct svc_rpc_gss_svc_name {
 	SLIST_ENTRY(svc_rpc_gss_svc_name) sn_link;
@@ -110,7 +112,7 @@ struct svc_rpc_gss_svc_name {
 	u_int			sn_version;
 };
 static SLIST_HEAD(svc_rpc_gss_svc_name_list, svc_rpc_gss_svc_name)
-	svc_rpc_gss_svc_names = SLIST_HEAD_INITIALIZER(&svc_rpc_gss_svc_names);
+	svc_rpc_gss_svc_names = SLIST_HEAD_INITIALIZER(svc_rpc_gss_svc_names);
 
 enum svc_rpc_gss_client_state {
 	CLIENT_NEW,				/* still authenticating */
@@ -119,9 +121,12 @@ enum svc_rpc_gss_client_state {
 };
 
 #define SVC_RPC_GSS_SEQWINDOW	128
+#ifndef RPCAUTH_UNIXGIDS
+#define RPCAUTH_UNIXGIDS	16
+#endif
 
 struct svc_rpc_gss_clientid {
-	uint32_t		ci_hostid;
+	unsigned long		ci_hostid;
 	uint32_t		ci_boottime;
 	uint32_t		ci_id;
 };
@@ -145,7 +150,7 @@ struct svc_rpc_gss_client {
 	int			cl_rpcflavor;	/* RPC pseudo sec flavor */
 	bool_t			cl_done_callback; /* TRUE after call */
 	void			*cl_cookie;	/* user cookie from callback */
-	gid_t			cl_gid_storage[NGROUPS];
+	gid_t			cl_gid_storage[RPCAUTH_UNIXGIDS];
 	gss_OID			cl_mech;	/* mechanism */
 	gss_qop_t		cl_qop;		/* quality of protection */
 	uint32_t		cl_seqlast;	/* sequence window origin */
@@ -427,7 +432,6 @@ rpc_gss_svc_getcred(struct svc_req *req, struct ucred **crp, int *flavorp)
 	struct svc_rpc_gss_cookedcred *cc;
 	struct svc_rpc_gss_client *client;
 	rpc_gss_ucred_t *uc;
-	int i;
 
 	if (req->rq_cred.oa_flavor != RPCSEC_GSS)
 		return (FALSE);
@@ -447,11 +451,9 @@ rpc_gss_svc_getcred(struct svc_req *req, struct ucred **crp, int *flavorp)
 	cr = client->cl_cred = crget();
 	cr->cr_uid = cr->cr_ruid = cr->cr_svuid = uc->uid;
 	cr->cr_rgid = cr->cr_svgid = uc->gid;
-	cr->cr_ngroups = uc->gidlen;
-	if (cr->cr_ngroups > NGROUPS)
-		cr->cr_ngroups = NGROUPS;
-	for (i = 0; i < cr->cr_ngroups; i++)
-		cr->cr_groups[i] = uc->gidlist[i];
+	crsetgroups(cr, uc->gidlen, uc->gidlist);
+	cr->cr_prison = &prison0;
+	prison_hold(cr->cr_prison);
 	*crp = crhold(cr);
 
 	return (TRUE);
@@ -505,9 +507,11 @@ svc_rpc_gss_find_client(struct svc_rpc_gss_clientid *id)
 {
 	struct svc_rpc_gss_client *client;
 	struct svc_rpc_gss_client_list *list;
+	unsigned long hostid;
 
 	rpc_gss_log_debug("in svc_rpc_gss_find_client(%d)", id->ci_id);
 
+	getcredhostid(curthread->td_ucred, &hostid);
 	if (id->ci_hostid != hostid || id->ci_boottime != boottime.tv_sec)
 		return (NULL);
 
@@ -536,6 +540,7 @@ svc_rpc_gss_create_client(void)
 {
 	struct svc_rpc_gss_client *client;
 	struct svc_rpc_gss_client_list *list;
+	unsigned long hostid;
 
 	rpc_gss_log_debug("in svc_rpc_gss_create_client()");
 
@@ -543,6 +548,7 @@ svc_rpc_gss_create_client(void)
 	memset(client, 0, sizeof(struct svc_rpc_gss_client));
 	refcount_init(&client->cl_refs, 1);
 	sx_init(&client->cl_lock, "GSS-client");
+	getcredhostid(curthread->td_ucred, &hostid);
 	client->cl_id.ci_hostid = hostid;
 	client->cl_id.ci_boottime = boottime.tv_sec;
 	client->cl_id.ci_id = svc_rpc_gss_next_clientid++;
@@ -732,7 +738,7 @@ svc_rpc_gss_build_ucred(struct svc_rpc_gss_client *client,
 	uc->gid = 65534;
 	uc->gidlist = client->cl_gid_storage;
 
-	numgroups = NGROUPS;
+	numgroups = RPCAUTH_UNIXGIDS;
 	maj_stat = gss_pname_to_unix_cred(&min_stat, name, client->cl_mech,
 	    &uc->uid, &uc->gid, &numgroups, &uc->gidlist[0]);
 	if (GSS_ERROR(maj_stat))
@@ -929,7 +935,7 @@ svc_rpc_gss_accept_sec_context(struct svc_rpc_gss_client *client,
 			    "<mech %.*s, qop %d, svc %d>",
 			    client->cl_rawcred.client_principal->name,
 			    mechname.length, (char *)mechname.value,
-			    client->cl_qop, client->rawcred.service);
+			    client->cl_qop, client->cl_rawcred.service);
 
 			gss_release_buffer(&min_stat, &mechname);
 		}
@@ -1442,7 +1448,7 @@ svc_rpc_gss_wrap(SVCAUTH *auth, struct mbuf **mp)
 	cc = (struct svc_rpc_gss_cookedcred *) auth->svc_ah_private;
 	client = cc->cc_client;
 	if (client->cl_state != CLIENT_ESTABLISHED
-	    || cc->cc_service == rpc_gss_svc_none) {
+	    || cc->cc_service == rpc_gss_svc_none || *mp == NULL) {
 		return (TRUE);
 	}
 	

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/mips/malta/files.malta,v 1.2 2008/09/03 18:40:02 obrien Exp $
+# $FreeBSD: src/sys/mips/malta/files.malta,v 1.3 2010/01/10 20:06:14 imp Exp $
 mips/malta/gt.c				standard
 mips/malta/gt_pci.c			standard
 mips/malta/obio.c			optional uart
@@ -7,3 +7,5 @@ mips/malta/uart_bus_maltausart.c	optional uart
 dev/uart/uart_dev_ns8250.c		optional uart
 mips/malta/malta_machdep.c		standard
 mips/malta/yamon.c			standard
+mips/mips/intr_machdep.c		standard
+mips/mips/tick.c			standard

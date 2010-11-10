@@ -17,7 +17,7 @@
  * Cronyx Id: ng_sppp.c,v 1.1.2.10 2004/03/01 15:17:21 rik Exp $
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netgraph/ng_sppp.c,v 1.12 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/netgraph/ng_sppp.c,v 1.13 2009/11/06 14:55:01 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -279,7 +279,6 @@ ng_sppp_constructor (node_p node)
 	if_initname (SP2IFP(pp), NG_SPPP_IFACE_NAME, priv->unit);
 	ifp->if_start = ng_sppp_start;
 	ifp->if_ioctl = ng_sppp_ioctl;
-	ifp->if_watchdog = NULL;
 	ifp->if_flags = (IFF_POINTOPOINT|IFF_MULTICAST);
 
 	/* Give this node the same name as the interface (if possible) */

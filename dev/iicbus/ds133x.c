@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/ds133x.c,v 1.4 2008/09/08 15:49:07 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/ds133x.c,v 1.5 2009/04/21 22:48:12 stas Exp $");
 /*
  * Dallas Semiconductor DS133X RTC sitting on the I2C bus.
  */
@@ -46,7 +46,7 @@ __FBSDID("$FreeBSD: src/sys/dev/iicbus/ds133x.c,v 1.4 2008/09/08 15:49:07 raj Ex
 #include "iicbus_if.h"
 #include "clock_if.h"
 
-#define DS133X_DEVNAME		"rtc"
+#define DS133X_DEVNAME		"ds133x_rtc"
 
 #define	DS133X_ADDR		0xd0	/* slave address */
 #define	DS133X_DATE_REG		0x0

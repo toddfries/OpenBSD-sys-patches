@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/openfirm.c,v 1.15 2007/06/17 00:17:15 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/openfirm.c,v 1.16 2010/10/28 23:46:05 nwhitehorn Exp $");
 
 #include <machine/stdarg.h>
 
@@ -80,8 +80,13 @@ OF_init(int (*openfirm)(void *))
 
 	if ((chosen = OF_finddevice("/chosen")) == -1)
 		OF_exit();
-	if (OF_getprop(chosen, "memory", &memory, sizeof(memory)) == -1)
-		OF_exit();
+	if (OF_getprop(chosen, "memory", &memory, sizeof(memory)) == -1) {
+		memory = OF_open("/memory");
+		if (memory == -1)
+			memory = OF_open("/memory@0");
+		if (memory == -1)
+			OF_exit();
+	}
 	if (OF_getprop(chosen, "mmu", &mmu, sizeof(mmu)) == -1)
 		OF_exit();
 }

@@ -36,47 +36,31 @@
  * SUCH DAMAGE.
  *
  *	@(#)param.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/amd64/include/param.h,v 1.24 2008/10/01 21:59:04 jhb Exp $
+ * $FreeBSD: src/sys/amd64/include/param.h,v 1.35 2010/07/22 09:13:49 kib Exp $
  */
+
+
+#ifndef _AMD64_INCLUDE_PARAM_H_
+#define	_AMD64_INCLUDE_PARAM_H_
+
+#include <machine/_align.h>
 
 /*
  * Machine dependent constants for AMD64.
  */
 
-/*
- * Round p (pointer or byte index) up to a correctly-aligned value
- * for all data types (int, long, ...).   The result is u_long and
- * must be cast to any desired pointer type.
- *
- * ALIGNED_POINTER is a boolean macro that checks whether an address
- * is valid to fetch data elements of type t from on this architecture.
- * This does not reflect the optimal alignment, just the possibility
- * (within reasonable limits). 
- *
- */
-#ifndef _ALIGNBYTES
-#define	_ALIGNBYTES	(sizeof(long) - 1)
-#endif
-#ifndef _ALIGN
-#define	_ALIGN(p)	(((u_long)(p) + _ALIGNBYTES) &~ _ALIGNBYTES)
-#endif
-#ifndef _ALIGNED_POINTER
-#define	_ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
-#endif
-
-#ifndef _NO_NAMESPACE_POLLUTION
 
 #define __HAVE_ACPI
 #define __PCI_REROUTE_INTERRUPT
-
-#ifndef _MACHINE_PARAM_H_
-#define	_MACHINE_PARAM_H_
 
 #ifndef MACHINE
 #define	MACHINE		"amd64"
 #endif
 #ifndef MACHINE_ARCH
 #define	MACHINE_ARCH	"amd64"
+#endif
+#ifndef MACHINE_ARCH32
+#define	MACHINE_ARCH32	"i386"
 #endif
 
 #if defined(SMP) || defined(KLD_MODULE)
@@ -87,8 +71,20 @@
 
 #define	ALIGNBYTES		_ALIGNBYTES
 #define	ALIGN(p)		_ALIGN(p)
-#define	ALIGNED_POINTER(p,t)	_ALIGNED_POINTER(p,t)
+/*
+ * ALIGNED_POINTER is a boolean macro that checks whether an address
+ * is valid to fetch data elements of type t from on this architecture.
+ * This does not reflect the optimal alignment, just the possibility
+ * (within reasonable limits). 
+ */
+#define	ALIGNED_POINTER(p, t)	1
 
+/*
+ * CACHE_LINE_SIZE is the compile-time maximum cache line size for an
+ * architecture.  It should be used with appropriate caution.
+ */
+#define	CACHE_LINE_SHIFT	7
+#define	CACHE_LINE_SIZE		(1 << CACHE_LINE_SHIFT)
 
 /* Size of the level 1 page table units */
 #define NPTEPG		(PAGE_SIZE/(sizeof (pt_entry_t)))
@@ -112,8 +108,10 @@
 #define	NPML4EPG	(PAGE_SIZE/(sizeof (pml4_entry_t)))
 #define	NPML4EPGSHIFT	9		/* LOG2(NPML4EPG) */
 #define	PML4SHIFT	39		/* LOG2(NBPML4) */
-#define	NBPML4		(1ul<<PML4SHIFT)/* bytes/page map lev4 table */
+#define	NBPML4		(1UL<<PML4SHIFT)/* bytes/page map lev4 table */
 #define	PML4MASK	(NBPML4-1)
+
+#define	MAXPAGESIZES	3	/* maximum number of supported page sizes */
 
 #define IOPAGES	2		/* pages of i/o permission bitmap */
 
@@ -128,15 +126,6 @@
  */
 #ifndef VM_SWZONE_SIZE_MAX
 #define	VM_SWZONE_SIZE_MAX	(32 * 1024 * 1024)
-#endif
-
-/*
- * Ceiling on size of buffer cache (really only effects write queueing,
- * the VM page cache is not effected), can be changed via
- * the kern.maxbcache /boot/loader.conf variable.
- */
-#ifndef VM_BCACHE_SIZE_MAX
-#define	VM_BCACHE_SIZE_MAX	(1024 * 1024 * 1024)
 #endif
 
 /*
@@ -156,5 +145,4 @@
 
 #define	pgtok(x)	((unsigned long)(x) * (PAGE_SIZE / 1024)) 
 
-#endif /* !_MACHINE_PARAM_H_ */
-#endif /* !_NO_NAMESPACE_POLLUTION */
+#endif /* !_AMD64_INCLUDE_PARAM_H_ */

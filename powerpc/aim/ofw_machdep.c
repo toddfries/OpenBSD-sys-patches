@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/aim/ofw_machdep.c,v 1.22 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/aim/ofw_machdep.c,v 1.30 2010/05/21 20:46:01 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/ofw_machdep.c,v 1.22 2008/12/20 00:33:10
 #include <sys/disk.h>
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
+#include <sys/smp.h>
 #include <sys/stat.h>
 
 #include <net/ethernet.h>
@@ -54,13 +55,20 @@ __FBSDID("$FreeBSD: src/sys/powerpc/aim/ofw_machdep.c,v 1.22 2008/12/20 00:33:10
 #include <vm/vm_page.h>
 
 #include <machine/bus.h>
+#include <machine/cpu.h>
 #include <machine/md_var.h>
-#include <machine/powerpc.h>
+#include <machine/platform.h>
 #include <machine/ofw_machdep.h>
 
 #define	OFMEM_REGIONS	32
 static struct mem_region OFmem[OFMEM_REGIONS + 1], OFavail[OFMEM_REGIONS + 3];
 static struct mem_region OFfree[OFMEM_REGIONS + 3];
+
+struct mem_region64 {
+        vm_offset_t     mr_start_hi;
+        vm_offset_t     mr_start_lo;
+        vm_size_t       mr_size;
+};	
 
 extern register_t ofmsr[5];
 extern struct	pmap ofw_pmap;
@@ -68,6 +76,7 @@ static int	(*ofwcall)(void *);
 static void	*fdt;
 int		ofw_real_mode;
 
+static void	ofw_quiesce(void);
 static int	openfirmware(void *args);
 
 /*
@@ -138,27 +147,89 @@ memr_merge(struct mem_region *from, struct mem_region *to)
  * to provide space for two additional entry beyond the terminating one.
  */
 void
-mem_regions(struct mem_region **memp, int *memsz,
+ofw_mem_regions(struct mem_region **memp, int *memsz,
 		struct mem_region **availp, int *availsz)
 {
-	int phandle;
+	phandle_t phandle;
 	int asz, msz, fsz;
 	int i, j;
 	int still_merging;
+	cell_t address_cells;
+
+	asz = msz = 0;
+
+	/*
+	 * Get #address-cells from root node, defaulting to 1 if it cannot
+	 * be found.
+	 */
+	phandle = OF_finddevice("/");
+	if (OF_getprop(phandle, "#address-cells", &address_cells, 
+	    sizeof(address_cells)) < sizeof(address_cells))
+		address_cells = 1;
 	
 	/*
 	 * Get memory.
 	 */
 	if ((phandle = OF_finddevice("/memory")) == -1
-	    || (msz = OF_getprop(phandle, "reg",
-			  OFmem, sizeof OFmem[0] * OFMEM_REGIONS))
-	       <= 0
 	    || (asz = OF_getprop(phandle, "available",
-			  OFavail, sizeof OFavail[0] * OFMEM_REGIONS))
-	       <= 0)
-		panic("no memory?");
+		  OFavail, sizeof OFavail[0] * OFMEM_REGIONS)) <= 0)
+	{
+		if (ofw_real_mode) {
+			/* XXX MAMBO */
+			printf("Physical memory unknown -- guessing 128 MB\n");
+
+			/* Leave the first 0xA000000 bytes for the kernel */
+			OFavail[0].mr_start = 0xA00000;
+			OFavail[0].mr_size = 0x75FFFFF;
+			asz = sizeof(OFavail[0]);
+		} else {
+			panic("no memory?");
+		}
+	}
+
+	if (address_cells == 2) {
+	    struct mem_region64 OFmem64[OFMEM_REGIONS + 1];
+	    if ((phandle == -1) || (msz = OF_getprop(phandle, "reg",
+			  OFmem64, sizeof OFmem64[0] * OFMEM_REGIONS)) <= 0) {
+		if (ofw_real_mode) {
+			/* XXX MAMBO */
+			OFmem64[0].mr_start_hi = 0;
+			OFmem64[0].mr_start_lo = 0x0;
+			OFmem64[0].mr_size = 0x7FFFFFF;
+			msz = sizeof(OFmem64[0]);
+		} else {
+			panic("Physical memory map not found");
+		}
+	    }
+
+	    for (i = 0, j = 0; i < msz/sizeof(OFmem64[0]); i++) {
+		if (OFmem64[i].mr_start_hi == 0) {
+			OFmem[i].mr_start = OFmem64[i].mr_start_lo;
+			OFmem[i].mr_size = OFmem64[i].mr_size;
+
+			/*
+			 * Check for memory regions extending above 32-bit
+			 * memory space, and restrict them to stay there.
+			 */
+			if (((uint64_t)OFmem[i].mr_start +
+			    (uint64_t)OFmem[i].mr_size) >
+			    BUS_SPACE_MAXADDR_32BIT) {
+				OFmem[i].mr_size = BUS_SPACE_MAXADDR_32BIT -
+				    OFmem[i].mr_start;
+			}
+			j++;
+		}
+	    }
+	    msz = j*sizeof(OFmem[0]);
+	} else {
+	    if ((msz = OF_getprop(phandle, "reg",
+			  OFmem, sizeof OFmem[0] * OFMEM_REGIONS)) <= 0)
+		panic("Physical memory map not found");
+	}
+
 	*memp = OFmem;
 	*memsz = msz / sizeof(struct mem_region);
+	
 
 	/*
 	 * OFavail may have overlapping regions - collapse these
@@ -222,6 +293,12 @@ OF_bootstrap()
 			return status;
 
 		OF_init(openfirmware);
+
+		/*
+		 * On some machines, we need to quiesce OF to turn off
+		 * background processes.
+		 */
+		ofw_quiesce();
 	} else {
 		status = OF_install(OFW_FDT, 0);
 
@@ -234,16 +311,46 @@ OF_bootstrap()
 	return (status);
 }
 
+static void
+ofw_quiesce(void)
+{
+	phandle_t rootnode;
+	char model[32];
+	struct {
+		cell_t name;
+		cell_t nargs;
+		cell_t nreturns;
+	} args;
+
+	/*
+	 * Only quiesce Open Firmware on PowerMac11,2 and 12,1. It is
+	 * necessary there to shut down a background thread doing fan
+	 * management, and is harmful on other machines.
+	 *
+	 * Note: we don't need to worry about which OF module we are
+	 * using since this is called only from very early boot, within
+	 * OF's boot context.
+	 */
+
+	rootnode = OF_finddevice("/");
+	if (OF_getprop(rootnode, "model", model, sizeof(model)) > 0) {
+		if (strcmp(model, "PowerMac11,2") == 0 ||
+		    strcmp(model, "PowerMac12,1") == 0) {
+			args.name = (cell_t)(uintptr_t)"quiesce";
+			args.nargs = 0;
+			args.nreturns = 0;
+			openfirmware(&args);
+		}
+	}
+}
+
 static int
-openfirmware(void *args)
+openfirmware_core(void *args)
 {
 	long	oldmsr;
 	int	result;
 	u_int	srsave[16];
 	u_int   i;
-
-	if (pmap_bootstrapped && ofw_real_mode)
-		args = (void *)pmap_kextract((vm_offset_t)args);
 
 	__asm __volatile(	"\t"
 		"sync\n\t"
@@ -268,8 +375,10 @@ openfirmware(void *args)
 		/*
 		 * Clear battable[] translations
 		 */
-		__asm __volatile("mtdbatu 2, %0\n"
-				 "mtdbatu 3, %0" : : "r" (0));
+		if (!(cpu_features & PPC_FEATURE_64)) {
+			__asm __volatile("mtdbatu 2, %0\n"
+					 "mtdbatu 3, %0" : : "r" (0));
+		}
 		isync();
 	}
 
@@ -294,6 +403,61 @@ openfirmware(void *args)
 		"isync\n"
 		: : "r" (oldmsr)
 	);
+
+	return (result);
+}
+
+#ifdef SMP
+struct ofw_rv_args {
+	void *args;
+	int retval;
+	volatile int in_progress;
+};
+
+static void
+ofw_rendezvous_dispatch(void *xargs)
+{
+	struct ofw_rv_args *rv_args = xargs;
+
+	/* NOTE: Interrupts are disabled here */
+
+	if (PCPU_GET(cpuid) == 0) {
+		/*
+		 * Execute all OF calls on CPU 0
+		 */
+		rv_args->retval = openfirmware_core(rv_args->args);
+		rv_args->in_progress = 0;
+	} else {
+		/*
+		 * Spin with interrupts off on other CPUs while OF has
+		 * control of the machine.
+		 */
+		while (rv_args->in_progress)
+			cpu_spinwait();
+	}
+}
+#endif
+
+static int
+openfirmware(void *args)
+{
+	int result;
+	#ifdef SMP
+	struct ofw_rv_args rv_args;
+	#endif
+
+	if (pmap_bootstrapped && ofw_real_mode)
+		args = (void *)pmap_kextract((vm_offset_t)args);
+
+	#ifdef SMP
+	rv_args.args = args;
+	rv_args.in_progress = 1;
+	smp_rendezvous(smp_no_rendevous_barrier, ofw_rendezvous_dispatch,
+	    smp_no_rendevous_barrier, &rv_args);
+	result = rv_args.retval;
+	#else
+	result = openfirmware_core(args);
+	#endif
 
 	return (result);
 }
@@ -469,3 +633,4 @@ mem_valid(vm_offset_t addr, int len)
 
 	return (EFAULT);
 }
+

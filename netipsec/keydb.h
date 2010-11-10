@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/keydb.h,v 1.6 2006/03/25 13:38:52 gnn Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/keydb.h,v 1.8 2010/02/18 22:34:29 pjd Exp $	*/
 /*	$KAME: keydb.h,v 1.14 2000/08/02 17:58:26 sakane Exp $	*/
 
 /*-
@@ -52,7 +52,7 @@ union sockaddr_union {
 /* Security Assocciation Index */
 /* NOTE: Ensure to be same address family */
 struct secasindex {
-	union sockaddr_union src;	/* srouce address for SA */
+	union sockaddr_union src;	/* source address for SA */
 	union sockaddr_union dst;	/* destination address for SA */
 	u_int16_t proto;		/* IPPROTO_ESP or IPPROTO_AH */
 	u_int8_t mode;			/* mode of protocol, see ipsec.h */
@@ -151,6 +151,12 @@ struct secasvar {
 	struct auth_hash *tdb_authalgxform;	/* authentication algorithm */
 	struct comp_algo *tdb_compalgxform;	/* compression algorithm */
 	u_int64_t tdb_cryptoid;		/* crypto session id */
+
+	/*
+	 * NAT-Traversal.
+	 */
+	u_int16_t natt_type;		/* IKE/ESP-marker in output. */
+	u_int16_t natt_esp_frag_len;	/* MTU for payload fragmentation. */
 };
 
 #define	SECASVAR_LOCK_INIT(_sav) \

@@ -1,5 +1,5 @@
 /*
- * $FreeBSD: src/sys/dev/lmc/if_lmc.c,v 1.36 2009/02/05 19:37:49 imp Exp $
+ * $FreeBSD: src/sys/dev/lmc/if_lmc.c,v 1.42 2010/01/08 15:57:56 trasz Exp $
  *
  * Copyright (c) 2002-2004 David Boggs. <boggs@boggs.palo-alto.ca.us>
  * All rights reserved.
@@ -114,6 +114,7 @@
 # include <net/if_types.h>
 # include <net/if_media.h>
 # include <net/netisr.h>
+# include <net/route.h>
 # include <machine/bus.h>
 # include <machine/resource.h>
 # include <sys/rman.h>
@@ -3959,7 +3960,7 @@ user_interrupt(softc_t *sc, int check_status)
 # if (defined(__FreeBSD__) && defined(DEVICE_POLLING))
 
 /* Service the card from the kernel idle loop without interrupts. */
-static void
+static int
 fbsd_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
   {
   softc_t *sc = IFP2SC(ifp);
@@ -3975,12 +3976,13 @@ fbsd_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
     {
     /* Last call -- reenable card interrupts. */
     WRITE_CSR(TLP_INT_ENBL, TLP_INT_TXRX);
-    return;
+    return 0;
     }
 #endif
 
   sc->quota = count;
   core_interrupt(sc, (cmd==POLL_AND_CHECK_STATUS));
+  return 0;
   }
 
 # endif  /* (__FreeBSD__ && DEVICE_POLLING) */
@@ -4583,7 +4585,7 @@ lmc_ifnet_start(struct ifnet *ifp)
 /* Called from a syscall (user context; no spinlocks). */
 static int
 lmc_raw_output(struct ifnet *ifp, struct mbuf *m,
- struct sockaddr *dst, struct rtentry *rt)
+ struct sockaddr *dst, struct route *ro)
   {
   softc_t *sc = IFP2SC(ifp);
   int error = 0;
@@ -4640,8 +4642,9 @@ lmc_raw_output(struct ifnet *ifp, struct mbuf *m,
 
 /* Called from a softirq once a second. */
 static void
-lmc_ifnet_watchdog(struct ifnet *ifp)
+lmc_watchdog(void *arg)
   {
+  struct ifnet *ifp = arg;
   softc_t *sc = IFP2SC(ifp);
   u_int8_t old_oper_status = sc->status.oper_status;
   struct event_cntrs *cntrs = &sc->status.cntrs;
@@ -4732,7 +4735,7 @@ lmc_ifnet_watchdog(struct ifnet *ifp)
 # endif
 
   /* Call this procedure again after one second. */
-  ifp->if_timer = 1;
+  callout_reset(&sc->callout, hz, lmc_watchdog, ifp);
   }
 
 # ifdef __OpenBSD__
@@ -4820,13 +4823,12 @@ setup_ifnet(struct ifnet *ifp)
   ifp->if_start    = lmc_ifnet_start;	/* sppp changes this */
   ifp->if_output   = lmc_raw_output;	/* sppp & p2p change this */
   ifp->if_input    = lmc_raw_input;
-  ifp->if_watchdog = lmc_ifnet_watchdog;
-  ifp->if_timer    = 1;
   ifp->if_mtu      = MAX_DESC_LEN;	/* sppp & p2p change this */
   ifp->if_type     = IFT_PTPSERIAL;	/* p2p changes this */
 
 # if (defined(__FreeBSD__) && defined(DEVICE_POLLING))
   ifp->if_capabilities |= IFCAP_POLLING;
+  ifp->if_capenable    |= IFCAP_POLLING_NOCOUNT;
 # if (__FreeBSD_version < 500000)
   ifp->if_capenable    |= IFCAP_POLLING;
 # endif
@@ -4840,7 +4842,7 @@ setup_ifnet(struct ifnet *ifp)
   if_initname(ifp, device_get_name(sc->dev), device_get_unit(sc->dev));
 # elif defined(__NetBSD__)
   strcpy(ifp->if_xname, sc->dev.dv_xname);
-# elif __OpenBSD__
+# elif defined(__OpenBSD__)
   bcopy(sc->dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 # elif defined(__bsdi__)
   ifp->if_name  = sc->dev.dv_cfdata->cf_driver->cd_name;
@@ -4913,6 +4915,8 @@ lmc_ifnet_attach(softc_t *sc)
     ifmedia_set(&sc->ifm, IFM_TDM | IFM_NONE);
     }
 # endif  /* __OpenBSD__ */
+
+  callout_reset(&sc->callout, hz, lmc_watchdog, sc);
 
   return 0;
   }
@@ -5241,7 +5245,7 @@ ng_watchdog(void *arg)
   sc->status.line_prot = 0;
 
   /* Call this procedure again after one second. */
-  callout_reset(&sc->ng_callout, hz, ng_watchdog, sc);
+  callout_reset(&sc->callout, hz, ng_watchdog, sc);
   }
 # endif
 
@@ -5298,16 +5302,9 @@ ng_attach(softc_t *sc)
   IFQ_SET_MAXLEN(&sc->ng_sndq,  SNDQ_MAXLEN);
   IFQ_SET_READY(&sc->ng_sndq);
 
-  /* If ifnet is present, it will call watchdog. */
-  /* Otherwise, arrange to call watchdog here. */
 # if (IFNET == 0)
   /* Arrange to call ng_watchdog() once a second. */
-#  if (__FreeBSD_version >= 500000)
-  callout_init(&sc->ng_callout, 0);
-#  else  /* FreeBSD-4 */
-  callout_init(&sc->ng_callout);
-#  endif
-  callout_reset(&sc->ng_callout, hz, ng_watchdog, sc);
+  callout_reset(&sc->callout, hz, ng_watchdog, sc);
 # endif
 
   return 0;
@@ -5316,9 +5313,7 @@ ng_attach(softc_t *sc)
 static void
 ng_detach(softc_t *sc)
   {
-# if (IFNET == 0)
-  callout_stop(&sc->ng_callout);
-# endif
+  callout_drain(&sc->callout);
 # if (__FreeBSD_version >= 500000)
   mtx_destroy(&sc->ng_sndq.ifq_mtx);
   mtx_destroy(&sc->ng_fastq.ifq_mtx);
@@ -5489,6 +5484,12 @@ attach_card(softc_t *sc, const char *intrstr)
 
   /* Start the card. */
   if ((error = startup_card(sc))) return error;
+
+#  if (__FreeBSD_version >= 500000)
+  callout_init(&sc->callout, 0);
+#  else  /* FreeBSD-4 */
+  callout_init(&sc->callout);
+#  endif
 
   /* Attach a kernel interface. */
 #if NETGRAPH
@@ -5750,14 +5751,14 @@ static driver_t driver =
 
 static devclass_t devclass;
 
-DRIVER_MODULE(if_lmc, pci, driver, devclass, 0, 0);
-MODULE_VERSION(if_lmc, 2);
-MODULE_DEPEND(if_lmc, pci, 1, 1, 1);
+DRIVER_MODULE(lmc, pci, driver, devclass, 0, 0);
+MODULE_VERSION(lmc, 2);
+MODULE_DEPEND(lmc, pci, 1, 1, 1);
 # if NETGRAPH
-MODULE_DEPEND(if_lmc, netgraph, NG_ABI_VERSION, NG_ABI_VERSION, NG_ABI_VERSION);
+MODULE_DEPEND(lmc, netgraph, NG_ABI_VERSION, NG_ABI_VERSION, NG_ABI_VERSION);
 # endif
 # if NSPPP
-MODULE_DEPEND(if_lmc, sppp, 1, 1, 1);
+MODULE_DEPEND(lmc, sppp, 1, 1, 1);
 # endif
 
 #endif  /* __FreeBSD__ */

@@ -30,10 +30,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/i915_drv.c,v 1.13 2009/03/09 07:55:18 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/i915_drv.c,v 1.17 2010/01/31 14:25:29 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
+#include "dev/drm/drm_mm.h"
 #include "dev/drm/i915_drm.h"
 #include "dev/drm/i915_drv.h"
 #include "dev/drm/drm_pciids.h"
@@ -46,16 +47,16 @@ static drm_pci_id_list_t i915_pciidlist[] = {
 static int i915_suspend(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
-	struct drm_i915_private *dev_priv = dev->dev_private;
 
-	if (!dev || !dev_priv) {
-		DRM_ERROR("dev: 0x%lx, dev_priv: 0x%lx\n",
-			(unsigned long) dev, (unsigned long) dev_priv);
+	if (!dev || !dev->dev_private) {
 		DRM_ERROR("DRM not initialized, aborting suspend.\n");
 		return -ENODEV;
 	}
 
+	DRM_LOCK();
+	DRM_DEBUG("starting suspend\n");
 	i915_save_state(dev);
+	DRM_UNLOCK();
 
 	return (bus_generic_suspend(kdev));
 }
@@ -64,7 +65,10 @@ static int i915_resume(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
+	DRM_LOCK();
 	i915_restore_state(dev);
+	DRM_DEBUG("finished resume\n");
+	DRM_UNLOCK();
 
 	return (bus_generic_resume(kdev));
 }

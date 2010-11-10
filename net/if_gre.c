@@ -1,5 +1,5 @@
 /*	$NetBSD: if_gre.c,v 1.49 2003/12/11 00:22:29 itojun Exp $ */
-/*	 $FreeBSD: src/sys/net/if_gre.c,v 1.53 2008/12/02 21:37:28 bz Exp $ */
+/*	 $FreeBSD: src/sys/net/if_gre.c,v 1.59 2010/05/03 07:32:50 sobomax Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,6 +63,7 @@
 #include <net/if_clone.h>
 #include <net/if_types.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -79,7 +73,6 @@
 #include <netinet/ip_gre.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_encap.h>
-#include <netinet/vinet.h>
 #else
 #error "Huh? if_gre without inet?"
 #endif
@@ -110,7 +103,7 @@ static int	gre_clone_create(struct if_clone *, int, caddr_t);
 static void	gre_clone_destroy(struct ifnet *);
 static int	gre_ioctl(struct ifnet *, u_long, caddr_t);
 static int	gre_output(struct ifnet *, struct mbuf *, struct sockaddr *,
-		    struct rtentry *rt);
+		    struct route *ro);
 
 IFC_SIMPLE_DECLARE(gre, 0);
 
@@ -191,7 +184,7 @@ gre_clone_create(ifc, unit, params)
 	GRE2IFP(sc)->if_softc = sc;
 	if_initname(GRE2IFP(sc), ifc->ifc_name, unit);
 
-	GRE2IFP(sc)->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	GRE2IFP(sc)->if_snd.ifq_maxlen = ifqmaxlen;
 	GRE2IFP(sc)->if_addrlen = 0;
 	GRE2IFP(sc)->if_hdrlen = 24; /* IP + GRE */
 	GRE2IFP(sc)->if_mtu = GREMTU;
@@ -240,11 +233,8 @@ gre_clone_destroy(ifp)
  */
 static int
 gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
-	   struct rtentry *rt)
+	   struct route *ro)
 {
-#ifdef INET6
-	INIT_VNET_INET(ifp->if_vnet);
-#endif
 	int error = 0;
 	struct gre_softc *sc = ifp->if_softc;
 	struct greip *gh;

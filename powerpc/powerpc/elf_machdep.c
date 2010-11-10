@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powerpc/elf_machdep.c,v 1.26 2008/11/22 12:36:15 kib Exp $
+ * $FreeBSD: src/sys/powerpc/powerpc/elf_machdep.c,v 1.31 2010/05/23 18:32:02 kib Exp $
  */
 
 #include <sys/param.h>
@@ -76,7 +76,10 @@ struct sysentvec elf32_freebsd_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_FREEBSD | SV_ILP32
+	.sv_flags	= SV_ABI_FREEBSD | SV_ILP32,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = syscallnames,
 };
 
 static Elf32_Brandinfo freebsd_brand_info = {
@@ -87,10 +90,11 @@ static Elf32_Brandinfo freebsd_brand_info = {
 	.interp_path	= "/libexec/ld-elf.so.1",
 	.sysvec		= &elf32_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf32_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
-SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_ANY,
+SYSINIT(elf32, SI_SUB_EXEC, SI_ORDER_FIRST,
     (sysinit_cfunc_t) elf32_insert_brand_entry,
     &freebsd_brand_info);
 
@@ -102,7 +106,8 @@ static Elf32_Brandinfo freebsd_brand_oinfo = {
 	.interp_path	= "/usr/libexec/ld-elf.so.1",
 	.sysvec		= &elf32_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf32_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
 SYSINIT(oelf32, SI_SUB_EXEC, SI_ORDER_ANY,
@@ -192,7 +197,7 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 		break;
 
 	case R_PPC_RELATIVE: /* word32 B + A */
-       		*where = relocbase + addend;
+       		*where = elf_relocaddr(lf, relocbase + addend);
 	       	break;
 
 	default:

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/pc98/loader/main.c,v 1.26 2008/08/08 19:41:20 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/pc98/loader/main.c,v 1.30 2009/12/31 12:05:48 nyan Exp $");
 
 /*
  * MD bootstrap main() and assorted miscellaneous
@@ -40,6 +40,7 @@ __FBSDID("$FreeBSD: src/sys/boot/pc98/loader/main.c,v 1.26 2008/08/08 19:41:20 j
 
 #include "bootstrap.h"
 #include "libi386/libi386.h"
+#include "libpc98/libpc98.h"
 #include "btxv86.h"
 
 #define	KARGS_FLAGS_CD		0x1
@@ -81,6 +82,9 @@ main(void)
 {
     int			i;
 
+    /* Set machine type to PC98_SYSTEM_PARAMETER. */
+    set_machine_type();
+
     /* Pick up arguments */
     kargs = (void *)__args;
     initial_howto = kargs->howto;
@@ -96,14 +100,18 @@ main(void)
      */
     bios_getmem();
 
-#ifdef LOADER_BZIP2_SUPPORT
-    heap_top = PTOV(memtop_copyin);
-    memtop_copyin -= 0x300000;
-    heap_bottom = PTOV(memtop_copyin);
-#else
-    heap_top = (void *)bios_basemem;
-    heap_bottom = (void *)end;
+#if defined(LOADER_BZIP2_SUPPORT)
+    if (high_heap_size > 0) {
+	heap_top = PTOV(high_heap_base + high_heap_size);
+	heap_bottom = PTOV(high_heap_base);
+	if (high_heap_base < memtop_copyin)
+	    memtop_copyin = high_heap_base;
+    } else
 #endif
+    {
+	heap_top = (void *)PTOV(bios_basemem);
+	heap_bottom = (void *)end;
+    }
     setheap(heap_bottom, heap_top);
 
     /* 
@@ -145,6 +153,14 @@ main(void)
 	    bc_add(initial_bootdev);
     }
 
+    archsw.arch_autoload = i386_autoload;
+    archsw.arch_getdev = i386_getdev;
+    archsw.arch_copyin = i386_copyin;
+    archsw.arch_copyout = i386_copyout;
+    archsw.arch_readin = i386_readin;
+    archsw.arch_isainb = isa_inb;
+    archsw.arch_isaoutb = isa_outb;
+
     /*
      * March through the device switch probing for things.
      */
@@ -163,14 +179,6 @@ main(void)
 
     extract_currdev();				/* set $currdev and $loaddev */
     setenv("LINES", "24", 1);			/* optional */
-    
-    archsw.arch_autoload = i386_autoload;
-    archsw.arch_getdev = i386_getdev;
-    archsw.arch_copyin = i386_copyin;
-    archsw.arch_copyout = i386_copyout;
-    archsw.arch_readin = i386_readin;
-    archsw.arch_isainb = isa_inb;
-    archsw.arch_isaoutb = isa_outb;
 
     interact();			/* doesn't return */
 
@@ -188,7 +196,8 @@ static void
 extract_currdev(void)
 {
     struct i386_devdesc	new_currdev;
-    int			major, biosdev = -1;
+    int			major;
+    int			biosdev = -1;
 
     /* Assume we are booting from a BIOS disk by default */
     new_currdev.d_dev = &biosdisk;

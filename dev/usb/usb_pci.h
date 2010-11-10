@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb/usb_pci.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb/usb_pci.h,v 1.2 2009/06/15 01:09:19 thompsa Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -24,8 +24,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _USB2_PCI_H_
-#define	_USB2_PCI_H_
+#ifndef _USB_PCI_H_
+#define	_USB_PCI_H_
 
 /*
  * We don't want the following files included everywhere, that's why
@@ -36,4 +36,4 @@
 
 #include <sys/rman.h>
 
-#endif					/* _USB2_PCI_H_ */
+#endif					/* _USB_PCI_H_ */

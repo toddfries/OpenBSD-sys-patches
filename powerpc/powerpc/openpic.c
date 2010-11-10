@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powerpc/openpic.c,v 1.20 2008/09/14 21:30:01 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/powerpc/openpic.c,v 1.23 2010/05/16 15:18:25 nwhitehorn Exp $
  */
 
 #include <sys/param.h>
@@ -100,6 +100,16 @@ openpic_attach(device_t dev)
 	sc->sc_bt = rman_get_bustag(sc->sc_memr);
 	sc->sc_bh = rman_get_bushandle(sc->sc_memr);
 
+	/* Reset the PIC */
+	x = openpic_read(sc, OPENPIC_CONFIG);
+	x |= OPENPIC_CONFIG_RESET;
+	openpic_write(sc, OPENPIC_CONFIG, x);
+
+	while (openpic_read(sc, OPENPIC_CONFIG) & OPENPIC_CONFIG_RESET) {
+		powerpc_sync();
+		DELAY(100);
+	}
+
 	x = openpic_read(sc, OPENPIC_FEATURE);
 	switch (x & OPENPIC_FEATURE_VERSION_MASK) {
 	case 1:
@@ -122,10 +132,12 @@ openpic_attach(device_t dev)
 	    OPENPIC_FEATURE_LAST_IRQ_SHIFT) + 1;
 
 	/*
-	 * PSIM seems to report 1 too many IRQs
+	 * PSIM seems to report 1 too many IRQs and CPUs
 	 */
-	if (sc->sc_psim)
+	if (sc->sc_psim) {
 		sc->sc_nirq--;
+		sc->sc_ncpu--;
+	}
 
 	if (bootverbose)
 		device_printf(dev,
@@ -205,6 +217,8 @@ openpic_dispatch(device_t dev, struct trapframe *tf)
 {
 	struct openpic_softc *sc;
 	u_int cpuid, vector;
+
+	CTR1(KTR_INTR, "%s: got interrupt", __func__);
 
 	cpuid = PCPU_GET(cpuid);
 	sc = device_get_softc(dev);

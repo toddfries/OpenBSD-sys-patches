@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2009 Robert N. M. Watson
  * Copyright (c) 2001-2005 McAfee, Inc.
  * Copyright (c) 2006 SPARTA, Inc.
  * All rights reserved.
@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.111 2009/03/08 12:32:06 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.114 2010/03/02 15:05:48 rwatson Exp $
  */
 
 /*
@@ -918,6 +918,7 @@ mls_devfs_create_device(struct ucred *cred, struct mount *mp,
 		mls_type = MAC_MLS_TYPE_HIGH;
 	else if (ptys_equal &&
 	    (strncmp(dev->si_name, "ttyp", strlen("ttyp")) == 0 ||
+	    strncmp(dev->si_name, "pts/", strlen("pts/")) == 0 ||
 	    strncmp(dev->si_name, "ptyp", strlen("ptyp")) == 0))
 		mls_type = MAC_MLS_TYPE_EQUAL;
 	else
@@ -1115,6 +1116,8 @@ mls_inpcb_sosetlabel(struct socket *so, struct label *solabel,
     struct inpcb *inp, struct label *inplabel)
 {
 	struct mac_mls *source, *dest;
+
+	SOCK_LOCK_ASSERT(so);
 
 	source = SLOT(solabel);
 	dest = SLOT(inplabel);
@@ -1623,6 +1626,7 @@ mls_socket_check_deliver(struct socket *so, struct label *solabel,
     struct mbuf *m, struct label *mlabel)
 {
 	struct mac_mls *p, *s;
+	int error;
 
 	if (!mls_enabled)
 		return (0);
@@ -1630,7 +1634,11 @@ mls_socket_check_deliver(struct socket *so, struct label *solabel,
 	p = SLOT(mlabel);
 	s = SLOT(solabel);
 
-	return (mls_equal_effective(p, s) ? 0 : EACCES);
+	SOCK_LOCK(so);
+	error = mls_equal_effective(p, s) ? 0 : EACCES;
+	SOCK_UNLOCK(so);
+
+	return (error);
 }
 
 static int
@@ -1639,6 +1647,8 @@ mls_socket_check_relabel(struct ucred *cred, struct socket *so,
 {
 	struct mac_mls *subj, *obj, *new;
 	int error;
+
+	SOCK_LOCK_ASSERT(so);
 
 	new = SLOT(newlabel);
 	subj = SLOT(cred->cr_label);
@@ -1696,8 +1706,12 @@ mls_socket_check_visible(struct ucred *cred, struct socket *so,
 	subj = SLOT(cred->cr_label);
 	obj = SLOT(solabel);
 
-	if (!mls_dominate_effective(subj, obj))
+	SOCK_LOCK(so);
+	if (!mls_dominate_effective(subj, obj)) {
+		SOCK_UNLOCK(so);
 		return (ENOENT);
+	}
+	SOCK_UNLOCK(so);
 
 	return (0);
 }
@@ -1723,19 +1737,26 @@ mls_socket_create_mbuf(struct socket *so, struct label *solabel,
 	source = SLOT(solabel);
 	dest = SLOT(mlabel);
 
+	SOCK_LOCK(so);
 	mls_copy_effective(source, dest);
+	SOCK_UNLOCK(so);
 }
 
 static void
 mls_socket_newconn(struct socket *oldso, struct label *oldsolabel,
     struct socket *newso, struct label *newsolabel)
 {
-	struct mac_mls *source, *dest;
+	struct mac_mls source, *dest;
 
-	source = SLOT(oldsolabel);
+	SOCK_LOCK(oldso);
+	source = *SLOT(oldsolabel);
+	SOCK_UNLOCK(oldso);
+
 	dest = SLOT(newsolabel);
 
-	mls_copy_effective(source, dest);
+	SOCK_LOCK(newso);
+	mls_copy_effective(&source, dest);
+	SOCK_UNLOCK(newso);
 }
 
 static void
@@ -1743,6 +1764,8 @@ mls_socket_relabel(struct ucred *cred, struct socket *so,
     struct label *solabel, struct label *newlabel)
 {
 	struct mac_mls *source, *dest;
+
+	SOCK_LOCK_ASSERT(so);
 
 	source = SLOT(newlabel);
 	dest = SLOT(solabel);
@@ -1759,7 +1782,9 @@ mls_socketpeer_set_from_mbuf(struct mbuf *m, struct label *mlabel,
 	source = SLOT(mlabel);
 	dest = SLOT(sopeerlabel);
 
+	SOCK_LOCK(so);
 	mls_copy_effective(source, dest);
+	SOCK_UNLOCK(so);
 }
 
 static void
@@ -1767,12 +1792,17 @@ mls_socketpeer_set_from_socket(struct socket *oldso,
     struct label *oldsolabel, struct socket *newso,
     struct label *newsopeerlabel)
 {
-	struct mac_mls *source, *dest;
+	struct mac_mls source, *dest;
 
-	source = SLOT(oldsolabel);
+	SOCK_LOCK(oldso);
+	source = *SLOT(oldsolabel);
+	SOCK_UNLOCK(oldso);
+
 	dest = SLOT(newsopeerlabel);
 
-	mls_copy_effective(source, dest);
+	SOCK_LOCK(newso);
+	mls_copy_effective(&source, dest);
+	SOCK_UNLOCK(newso);
 }
 
 static void
@@ -2515,11 +2545,11 @@ mls_vnode_check_open(struct ucred *cred, struct vnode *vp,
 	obj = SLOT(vplabel);
 
 	/* XXX privilege override for admin? */
-	if (accmode & (VREAD | VEXEC | VSTAT)) {
+	if (accmode & (VREAD | VEXEC | VSTAT_PERMS)) {
 		if (!mls_dominate_effective(subj, obj))
 			return (EACCES);
 	}
-	if (accmode & (VWRITE | VAPPEND | VADMIN)) {
+	if (accmode & VMODIFY_PERMS) {
 		if (!mls_dominate_effective(obj, subj))
 			return (EACCES);
 	}

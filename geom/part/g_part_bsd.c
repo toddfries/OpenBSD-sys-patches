@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/part/g_part_bsd.c,v 1.14 2009/02/21 07:01:21 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/part/g_part_bsd.c,v 1.18 2010/06/02 17:17:11 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -73,6 +73,8 @@ static int g_part_bsd_read(struct g_part_table *, struct g_consumer *);
 static const char *g_part_bsd_type(struct g_part_table *, struct g_part_entry *,
     char *, size_t);
 static int g_part_bsd_write(struct g_part_table *, struct g_consumer *);
+static int g_part_bsd_resize(struct g_part_table *, struct g_part_entry *,
+    struct g_part_parms *);
 
 static kobj_method_t g_part_bsd_methods[] = {
 	KOBJMETHOD(g_part_add,		g_part_bsd_add),
@@ -82,6 +84,7 @@ static kobj_method_t g_part_bsd_methods[] = {
 	KOBJMETHOD(g_part_dumpconf,	g_part_bsd_dumpconf),
 	KOBJMETHOD(g_part_dumpto,	g_part_bsd_dumpto),
 	KOBJMETHOD(g_part_modify,	g_part_bsd_modify),
+	KOBJMETHOD(g_part_resize,	g_part_bsd_resize),
 	KOBJMETHOD(g_part_name,		g_part_bsd_name),
 	KOBJMETHOD(g_part_probe,	g_part_bsd_probe),
 	KOBJMETHOD(g_part_read,		g_part_bsd_read),
@@ -186,24 +189,21 @@ g_part_bsd_bootcode(struct g_part_table *basetable, struct g_part_parms *gpp)
 static int
 g_part_bsd_create(struct g_part_table *basetable, struct g_part_parms *gpp)
 {
-	struct g_consumer *cp;
 	struct g_provider *pp;
 	struct g_part_entry *baseentry;
 	struct g_part_bsd_entry *entry;
 	struct g_part_bsd_table *table;
 	u_char *ptr;
-	uint64_t msize;
-	uint32_t ncyls, secpercyl;
+	uint32_t msize, ncyls, secpercyl;
 
 	pp = gpp->gpp_provider;
-	cp = LIST_FIRST(&pp->consumers);
 
 	if (pp->sectorsize < sizeof(struct disklabel))
 		return (ENOSPC);
 	if (BBSIZE % pp->sectorsize)
 		return (ENOTBLK);
 
-	msize = pp->mediasize / pp->sectorsize;
+	msize = MIN(pp->mediasize / pp->sectorsize, 0xffffffff);
 	secpercyl = basetable->gpt_sectors * basetable->gpt_heads;
 	ncyls = msize / secpercyl;
 
@@ -240,6 +240,12 @@ g_part_bsd_create(struct g_part_table *basetable, struct g_part_parms *gpp)
 static int
 g_part_bsd_destroy(struct g_part_table *basetable, struct g_part_parms *gpp)
 {
+	struct g_part_bsd_table *table;
+
+	table = (struct g_part_bsd_table *)basetable;
+	if (table->bbarea != NULL)
+		g_free(table->bbarea);
+	table->bbarea = NULL;
 
 	/* Wipe the second sector to clear the partitioning. */
 	basetable->gpt_smhead |= 2;
@@ -288,6 +294,19 @@ g_part_bsd_modify(struct g_part_table *basetable,
 	entry = (struct g_part_bsd_entry *)baseentry;
 	if (gpp->gpp_parms & G_PART_PARM_TYPE)
 		return (bsd_parse_type(gpp->gpp_type, &entry->part.p_fstype));
+	return (0);
+}
+
+static int
+g_part_bsd_resize(struct g_part_table *basetable,
+    struct g_part_entry *baseentry, struct g_part_parms *gpp)
+{
+	struct g_part_bsd_entry *entry;
+
+	entry = (struct g_part_bsd_entry *)baseentry;
+	baseentry->gpe_end = baseentry->gpe_start + gpp->gpp_size - 1;
+	entry->part.p_size = gpp->gpp_size;
+
 	return (0);
 }
 

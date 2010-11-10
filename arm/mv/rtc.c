@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/rtc.c,v 1.1 2008/10/13 20:07:13 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/rtc.c,v 1.2 2010/06/13 13:28:53 raj Exp $");
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/lock.h>
@@ -44,6 +44,9 @@ __FBSDID("$FreeBSD: src/sys/arm/mv/rtc.c,v 1.1 2008/10/13 20:07:13 raj Exp $");
 
 #include <machine/bus.h>
 #include <machine/resource.h>
+
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
 #include "clock_if.h"
 
@@ -88,14 +91,17 @@ static driver_t mv_rtc_driver = {
 };
 static devclass_t mv_rtc_devclass;
 
-DRIVER_MODULE(mv_rtc, mbus, mv_rtc_driver, mv_rtc_devclass, 0, 0);
+DRIVER_MODULE(mv_rtc, simplebus, mv_rtc_driver, mv_rtc_devclass, 0, 0);
 
 static int
 mv_rtc_probe(device_t dev)
 {
 
+	if (!ofw_bus_is_compatible(dev, "mrvl,rtc"))
+		return (ENXIO);
+
 	device_set_desc(dev, "Marvell Integrated RTC");
-	return (0);
+	return (BUS_PROBE_DEFAULT);
 }
 
 static int

@@ -5,7 +5,7 @@
  *
  *	JNPR: clock.h,v 1.6.2.1 2007/08/29 09:36:05 girish
  *	from: src/sys/alpha/include/clock.h,v 1.5 1999/12/29 04:27:55 peter
- * $FreeBSD: src/sys/mips/include/clock.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/clock.h,v 1.2 2010/03/20 05:49:06 neel Exp $
  */
 
 #ifndef _MACHINE_CLOCK_H_
@@ -33,6 +33,14 @@ void	mips_timer_init_params(uint64_t, int);
 
 extern uint64_t	counter_freq;
 extern int	clocks_running;
+
+/*
+ * The 'platform_timecounter' pointer may be used to register a
+ * platform-specific timecounter.
+ *
+ * A default timecounter based on the CP0 COUNT register is always registered.
+ */
+extern struct timecounter *platform_timecounter;
 
 #endif
 

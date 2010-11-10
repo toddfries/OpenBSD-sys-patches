@@ -32,13 +32,9 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_crc32.c,v 1.15 2009/02/27 20:54:45 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_crc32.c,v 1.18 2010/03/12 22:58:52 rrs Exp $");
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-#include <sys/uio.h>
-#include <sys/libkern.h>
+#include <netinet/sctp_os.h>
 #include <netinet/sctp.h>
 #include <netinet/sctp_crc32.h>
 #include <netinet/sctp_pcb.h>
@@ -131,14 +127,12 @@ sctp_calculate_cksum(struct mbuf *m, uint32_t offset)
 
 
 void
-sctp_delayed_cksum(struct mbuf *m)
+sctp_delayed_cksum(struct mbuf *m, uint32_t offset)
 {
 	struct ip *ip;
 	uint32_t checksum;
-	uint32_t offset;
 
 	ip = mtod(m, struct ip *);
-	offset = ip->ip_hl << 2;
 	checksum = sctp_calculate_cksum(m, offset);
 	SCTP_STAT_DECR(sctps_sendhwcrc);
 	SCTP_STAT_INCR(sctps_sendswcrc);

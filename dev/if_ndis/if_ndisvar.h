@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/if_ndis/if_ndisvar.h,v 1.36 2009/03/07 07:26:22 weongyo Exp $
+ * $FreeBSD: src/sys/dev/if_ndis/if_ndisvar.h,v 1.41 2009/05/29 18:46:57 thompsa Exp $
  */
 
 #define NDIS_DEFAULT_NODENAME	"FreeBSD NDIS node"
@@ -121,7 +121,7 @@ struct ndis_vap {
 #define	NDISUSB_TX_TIMEOUT			10000
 struct ndisusb_xfer;
 struct ndisusb_ep {
-	struct usb2_xfer	*ne_xfer[1];
+	struct usb_xfer	*ne_xfer[1];
 	list_entry		ne_active;
 	list_entry		ne_pending;
 	kspin_lock		ne_lock;
@@ -138,8 +138,17 @@ struct ndisusb_xfer {
 };
 struct ndisusb_xferdone {
 	struct ndisusb_xfer	*nd_xfer;
-	usb2_error_t		nd_status;
+	usb_error_t		nd_status;
 	list_entry		nd_donelist;
+};
+
+struct ndisusb_task {
+	unsigned		nt_type;
+#define	NDISUSB_TASK_TSTART	0
+#define	NDISUSB_TASK_IRPCANCEL	1
+#define	NDISUSB_TASK_VENDOR	2
+	void			*nt_ctx;
+	list_entry		nt_tasklist;
 };
 
 struct ndis_softc {
@@ -171,6 +180,7 @@ struct ndis_softc {
 	ndis_miniport_block	*ndis_block;
 	ndis_miniport_characteristics	*ndis_chars;
 	interface_type		ndis_type;
+	struct callout		ndis_scan_callout;
 	struct callout		ndis_stat_callout;
 	int			ndis_maxpkts;
 	ndis_oid		*ndis_oids;
@@ -210,16 +220,15 @@ struct ndis_softc {
 	struct ifqueue		ndis_rxqueue;
 	kspin_lock		ndis_rxlock;
 
-	struct taskqueue	*ndis_tq;		/* private task queue */
-	struct task		ndis_scantask;
-	struct task		ndis_authtask;
-	struct task		ndis_assoctask;
 	int			(*ndis_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
 	int			ndis_tx_timer;
 	int			ndis_hang_timer;
 
-	struct usb2_device	*ndisusb_dev;
+	struct usb_device	*ndisusb_dev;
+	struct mtx		ndisusb_mtx;
+	struct ndisusb_ep	ndisusb_dread_ep;
+	struct ndisusb_ep	ndisusb_dwrite_ep;
 #define	NDISUSB_GET_ENDPT(addr) \
 	((UE_GET_DIR(addr) >> 7) | (UE_GET_ADDR(addr) << 1))
 #define	NDISUSB_ENDPT_MAX	((UE_ADDR + 1) * 2)
@@ -227,10 +236,18 @@ struct ndis_softc {
 	io_workitem		*ndisusb_xferdoneitem;
 	list_entry		ndisusb_xferdonelist;
 	kspin_lock		ndisusb_xferdonelock;
+	io_workitem		*ndisusb_taskitem;
+	list_entry		ndisusb_tasklist;
+	kspin_lock		ndisusb_tasklock;
 	int			ndisusb_status;
 #define NDISUSB_STATUS_DETACH	0x1
+#define	NDISUSB_STATUS_SETUP_EP	0x2
 };
 
 #define	NDIS_LOCK(_sc)		mtx_lock(&(_sc)->ndis_mtx)
 #define	NDIS_UNLOCK(_sc)	mtx_unlock(&(_sc)->ndis_mtx)
 #define	NDIS_LOCK_ASSERT(_sc, t)	mtx_assert(&(_sc)->ndis_mtx, t)
+#define	NDISUSB_LOCK(_sc)	mtx_lock(&(_sc)->ndisusb_mtx)
+#define	NDISUSB_UNLOCK(_sc)	mtx_unlock(&(_sc)->ndisusb_mtx)
+#define	NDISUSB_LOCK_ASSERT(_sc, t)	mtx_assert(&(_sc)->ndisusb_mtx, t)
+

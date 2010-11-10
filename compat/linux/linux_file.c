@@ -27,10 +27,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_file.c,v 1.117 2009/02/13 18:18:14 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_file.c,v 1.121 2010/03/21 20:43:23 ed Exp $");
 
 #include "opt_compat.h"
-#include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -129,6 +128,8 @@ linux_common_open(struct thread *td, int dirfd, char *path, int l_flags, int mod
 	bsd_flags |= O_DIRECT;
     if (l_flags & LINUX_O_NOFOLLOW)
 	bsd_flags |= O_NOFOLLOW;
+    if (l_flags & LINUX_O_DIRECTORY)
+	bsd_flags |= O_DIRECTORY;
     /* XXX LINUX_O_NOATIME: unable to be easily implemented. */
 
     error = kern_openat(td, dirfd, path, UIO_SYSSPACE, bsd_flags, mode);
@@ -154,12 +155,6 @@ linux_common_open(struct thread *td, int dirfd, char *path, int l_flags, int mod
 		    } else {
 			    PROC_UNLOCK(p);
 			    sx_sunlock(&proctree_lock);
-		    }
-		    if (l_flags & LINUX_O_DIRECTORY) {
-			    if (fp->f_type != DTYPE_VNODE ||
-				fp->f_vnode->v_type != VDIR) {
-				    error = ENOTDIR;
-			    }
 		    }
 		    fdrop(fp, td);
 		    /*
@@ -653,7 +648,7 @@ linux_unlinkat(struct thread *td, struct linux_unlinkat_args *args)
 	if (args->flag & LINUX_AT_REMOVEDIR)
 		error = kern_rmdirat(td, dfd, path, UIO_SYSSPACE);
 	else
-		error = kern_unlinkat(td, dfd, path, UIO_SYSSPACE);
+		error = kern_unlinkat(td, dfd, path, UIO_SYSSPACE, 0);
 	if (error == EPERM && !(args->flag & LINUX_AT_REMOVEDIR)) {
 		/* Introduce POSIX noncompliant behaviour of Linux */
 		if (kern_statat(td, AT_SYMLINK_NOFOLLOW, dfd, path,
@@ -1109,6 +1104,9 @@ linux_mount(struct thread *td, struct linux_mount_args *args)
 	} else if (strcmp(fstypename, "proc") == 0) {
 		strcpy(fstypename, "linprocfs");
 		fsdata = NULL;
+	} else if (strcmp(fstypename, "vfat") == 0) {
+		strcpy(fstypename, "msdosfs");
+		fsdata = NULL;
 	} else {
 		return (ENODEV);
 	}
@@ -1134,6 +1132,12 @@ linux_mount(struct thread *td, struct linux_mount_args *args)
 		error = kernel_vmount(fsflags,
 			"fstype", fstypename,
 			"fspath", mntonname,
+			NULL);
+	} else if (strcmp(fstypename, "msdosfs") == 0) {
+		error = kernel_vmount(fsflags,
+			"fstype", fstypename,
+			"fspath", mntonname,
+			"from", mntfromname,
 			NULL);
 	} else
 		error = EOPNOTSUPP;

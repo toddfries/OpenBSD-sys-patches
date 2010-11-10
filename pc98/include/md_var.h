@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/include/md_var.h,v 1.3 2006/08/09 18:25:07 imp Exp $
+ * $FreeBSD: src/sys/pc98/include/md_var.h,v 1.4 2010/05/20 12:46:19 marius Exp $
  */
 
 #ifndef _PC98_INCLUDE_MD_VAR_H_
@@ -41,13 +41,11 @@ extern	int	need_post_dma_flush;
 /*
  * The ad driver maps the IDE disk's actual geometry to the firmware's
  * notion of geometry.  However, PC98 machines need to do something
- * different sometimes, so override the hook so we can do so.  We have to
- * have a knowledge that a device_t is a struct device * here to avoid
- * including too many things from this file.
+ * different sometimes, so override the hook so we can do so.
  */
 struct disk;
-struct device;
-void	pc98_ad_firmware_geom_adjust(struct device *, struct disk *);
-#define ad_firmware_geom_adjust(dev, dsk) pc98_ad_firmware_geom_adjust(dev, dsk)
+void	pc98_ata_disk_firmware_geom_adjust(struct disk *);
+#define	ata_disk_firmware_geom_adjust(disk)				\
+	pc98_ata_disk_firmware_geom_adjust(disk)
 
 #endif /* !_PC98_INCLUDE_MD_VAR_H_ */

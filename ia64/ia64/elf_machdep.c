@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/ia64/elf_machdep.c,v 1.27 2008/11/22 12:36:15 kib Exp $
+ * $FreeBSD: src/sys/ia64/ia64/elf_machdep.c,v 1.33 2010/05/23 18:32:02 kib Exp $
  */
 
 #include <sys/param.h>
@@ -81,7 +81,10 @@ struct sysentvec elf64_freebsd_sysvec = {
 	.sv_setregs	= exec_setregs,
 	.sv_fixlimit	= NULL,
 	.sv_maxssiz	= NULL,
-	.sv_flags	= SV_ABI_FREEBSD | SV_LP64
+	.sv_flags	= SV_ABI_FREEBSD | SV_LP64,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = syscallnames,
 };
 
 static Elf64_Brandinfo freebsd_brand_info = {
@@ -92,9 +95,10 @@ static Elf64_Brandinfo freebsd_brand_info = {
 	.interp_path	= "/libexec/ld-elf.so.1",
 	.sysvec		= &elf64_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf64_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
-SYSINIT(elf64, SI_SUB_EXEC, SI_ORDER_ANY,
+SYSINIT(elf64, SI_SUB_EXEC, SI_ORDER_FIRST,
     (sysinit_cfunc_t)elf64_insert_brand_entry, &freebsd_brand_info);
 
 static Elf64_Brandinfo freebsd_brand_oinfo = {
@@ -105,7 +109,8 @@ static Elf64_Brandinfo freebsd_brand_oinfo = {
 	.interp_path	= "/usr/libexec/ld-elf.so.1",
 	.sysvec		= &elf64_freebsd_sysvec,
 	.interp_newpath	= NULL,
-	.flags		= BI_CAN_EXEC_DYN,
+	.brand_note	= &elf64_freebsd_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 SYSINIT(oelf64, SI_SUB_EXEC, SI_ORDER_ANY,
     (sysinit_cfunc_t)elf64_insert_brand_entry, &freebsd_brand_oinfo);
@@ -209,7 +214,7 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 
 	if (local) {
 		if (rtype == R_IA_64_REL64LSB)
-			*where = relocbase + addend;
+			*where = elf_relocaddr(lf, relocbase + addend);
 		return (0);
 	}
 
@@ -298,9 +303,12 @@ elf_cpu_load_file(linker_file_t lf)
 		++ph;
 	}
 
-	/* Invalidate the I-cache, but not for the kernel itself. */
+	/*
+	 * Make the I-cache coherent, but don't worry obout the kernel
+	 * itself because the loader needs to do that.
+	 */
 	if (lf->id != 1)
-		ia64_invalidate_icache((uintptr_t)lf->address, lf->size);
+		ia64_sync_icache((uintptr_t)lf->address, lf->size);
 
 	return (0);
 }

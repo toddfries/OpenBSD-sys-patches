@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)sockio.h	8.1 (Berkeley) 3/28/94
- * $FreeBSD: src/sys/sys/sockio.h,v 1.32 2008/07/30 21:01:51 jhb Exp $
+ * $FreeBSD: src/sys/sys/sockio.h,v 1.38 2010/01/27 00:30:07 delphij Exp $
  */
 
 #ifndef _SYS_SOCKIO_H_
@@ -82,6 +82,8 @@
 #define	SIOCGIFMAC	_IOWR('i', 38, struct ifreq)	/* get IF MAC label */
 #define	SIOCSIFMAC	 _IOW('i', 39, struct ifreq)	/* set IF MAC label */
 #define	SIOCSIFNAME	 _IOW('i', 40, struct ifreq)	/* set IF name */
+#define	SIOCSIFDESCR	 _IOW('i', 41, struct ifreq)	/* set ifnet descr */ 
+#define	SIOCGIFDESCR	_IOWR('i', 42, struct ifreq)	/* get ifnet descr */ 
 
 #define	SIOCADDMULTI	 _IOW('i', 49, struct ifreq)	/* add m'cast addr */
 #define	SIOCDELMULTI	 _IOW('i', 50, struct ifreq)	/* del m'cast addr */
@@ -107,6 +109,9 @@
 
 #define	SIOCGPRIVATE_0	_IOWR('i', 80, struct ifreq)	/* device private 0 */
 #define	SIOCGPRIVATE_1	_IOWR('i', 81, struct ifreq)	/* device private 1 */
+
+#define	SIOCSIFVNET	_IOWR('i', 90, struct ifreq)	/* move IF jail/vnet */
+#define	SIOCSIFRVNET	_IOWR('i', 91, struct ifreq)	/* reclaim vnet IF */
 
 #define	SIOCSDRVSPEC	_IOW('i', 123, struct ifdrv)	/* set driver-specific
 								  parameters */

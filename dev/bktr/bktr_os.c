@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/bktr/bktr_os.c,v 1.55 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/bktr/bktr_os.c,v 1.60 2009/12/29 21:51:28 rnoland Exp $");
 
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)
@@ -470,7 +470,7 @@ fail:
 	if (bktr->res_irq)
 		bus_release_resource(dev, SYS_RES_IRQ, bktr->irq_rid, bktr->res_irq);
 	if (bktr->res_mem)
-		bus_release_resource(dev, SYS_RES_IRQ, bktr->mem_rid, bktr->res_mem);
+		bus_release_resource(dev, SYS_RES_MEMORY, bktr->mem_rid, bktr->res_mem);
 	return error;
 
 }
@@ -794,7 +794,8 @@ bktr_ioctl( struct cdev *dev, ioctl_cmd_t cmd, caddr_t arg, int flag, struct thr
  * 
  */
 static int
-bktr_mmap( struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr, int nprot )
+bktr_mmap( struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
+    int nprot, vm_memattr_t *memattr )
 {
 	int		unit;
 	bktr_ptr_t	bktr;

@@ -19,7 +19,7 @@
  *
  * CDDL HEADER END
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sysmacros.h,v 1.5 2009/02/28 16:21:25 ed Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sysmacros.h,v 1.6 2010/05/13 20:32:56 mm Exp $
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
@@ -43,6 +43,10 @@ extern "C" {
 #define	ABS(a)	((a) < 0 ? -(a) : (a))
 #endif
 
+#ifndef	SIGNOF
+#define	SIGNOF(a)	((a) < 0 ? -1 : (a) > 0)
+#endif
+
 /*
  * Macro for checking power of 2 address alignment.
  */
@@ -63,7 +67,7 @@ extern "C" {
 #define	P2ROUNDUP(x, align)		(-(-(x) & -(align)))
 #define	P2END(x, align)			(-(~(x) & -(align)))
 #define	P2PHASEUP(x, align, phase)	((phase) - (((phase) - (x)) & -(align)))
-#define	P2CROSS(x, y, align)		(((x) ^ (y)) > (align) - 1)
+#define	P2BOUNDARY(off, len, align)	(((off) ^ ((off) + (len) - 1)) > (align) - 1)
 /*
  * Determine whether two numbers have the same high-order bit.
  */

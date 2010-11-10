@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425_qmgr.h,v 1.1 2006/11/19 23:55:23 sam Exp $
+ * $FreeBSD: src/sys/arm/xscale/ixp425/ixp425_qmgr.h,v 1.2 2009/05/30 15:14:44 attilio Exp $
  */
 
 /*-
@@ -229,8 +229,10 @@
 #define IX_QMGR_ENTRY2_OFFSET 1
 #define IX_QMGR_ENTRY4_OFFSET 3
 
+typedef void qconfig_hand_t(int, void *);
+
 int	ixpqmgr_qconfig(int qId, int qSizeInWords, int ne, int nf, int srcSel,
-	    void (*cb)(int, void *), void *cbarg);
+	    qconfig_hand_t *cb, void *cbarg);
 int	ixpqmgr_qwrite(int qId, uint32_t entry);
 int	ixpqmgr_qread(int qId, uint32_t *entry);
 int	ixpqmgr_qreadm(int qId, uint32_t n, uint32_t *p);

@@ -41,13 +41,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.76 2009/02/27 14:12:05 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.89 2010/01/07 21:01:37 mbr Exp $");
 
-#include "opt_route.h"
 #include "opt_bootp.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/sockio.h>
 #include <sys/malloc.h>
@@ -58,7 +58,6 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.76 2009/02/27 14:12:05 bz
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -68,9 +67,6 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.76 2009/02/27 14:12:05 bz
 #include <net/if_dl.h>
 #include <net/vnet.h>
 
-#include <rpc/rpcclnt.h>
-
-#include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfsclient/nfs.h>
 #include <nfsclient/nfsdiskless.h>
@@ -244,7 +240,6 @@ static void bootpc_tag_helper(struct bootpc_tagcontext *tctx,
 
 #ifdef BOOTP_DEBUG
 void bootpboot_p_sa(struct sockaddr *sa, struct sockaddr *ma);
-void bootpboot_p_ma(struct sockaddr *ma);
 void bootpboot_p_rtentry(struct rtentry *rt);
 void bootpboot_p_tree(struct radix_node *rn);
 void bootpboot_p_rtlist(void);
@@ -328,23 +323,10 @@ bootpboot_p_sa(struct sockaddr *sa, struct sockaddr *ma)
 }
 
 void
-bootpboot_p_ma(struct sockaddr *ma)
-{
-
-	if (ma == NULL) {
-		printf("<null>");
-		return;
-	}
-	printf("%x", *(int *)ma);
-}
-
-void
 bootpboot_p_rtentry(struct rtentry *rt)
 {
 
 	bootpboot_p_sa(rt_key(rt), rt_mask(rt));
-	printf(" ");
-	bootpboot_p_ma(rt->rt_genmask);
 	printf(" ");
 	bootpboot_p_sa(rt->rt_gateway, NULL);
 	printf(" ");
@@ -375,11 +357,15 @@ bootpboot_p_tree(struct radix_node *rn)
 void
 bootpboot_p_rtlist(void)
 {
+	struct radix_node_head *rnh;
 
 	printf("Routing table:\n");
-	RADIX_NODE_LOCK(V_rt_tables[AF_INET]);	/* could sleep XXX */
-	bootpboot_p_tree(V_rt_tables[AF_INET]->rnh_treetop);
-	RADIX_NODE_UNLOCK(V_rt_tables[AF_INET]);
+	rnh = rt_tables_get_rnh(0, AF_INET);
+	if (rnh == NULL)
+		return;
+	RADIX_NODE_HEAD_RLOCK(rnh);	/* could sleep XXX */
+	bootpboot_p_tree(rnh->rnh_treetop);
+	RADIX_NODE_HEAD_RUNLOCK(rnh);
 }
 
 void
@@ -403,7 +389,7 @@ bootpboot_p_iflist(void)
 	struct ifaddr *ifa;
 
 	printf("Interface list:\n");
-	IFNET_RLOCK(); /* could sleep, but okay for debugging XXX */
+	IFNET_RLOCK();
 	for (ifp = TAILQ_FIRST(&V_ifnet);
 	     ifp != NULL;
 	     ifp = TAILQ_NEXT(ifp, if_link)) {
@@ -597,6 +583,8 @@ bootpc_call(struct bootpc_globalcontext *gctx, struct thread *td)
 	int gotrootpath;
 	int retry;
 	const char *s;
+
+	CURVNET_SET(TD_TO_VNET(td));
 
 	/*
 	 * Create socket and set its recieve timeout.
@@ -974,6 +962,7 @@ gotreply:
 out:
 	soclose(so);
 out0:
+	CURVNET_RESTORE();
 	return error;
 }
 
@@ -987,6 +976,8 @@ bootpc_fakeup_interface(struct bootpc_ifcontext *ifctx,
 	struct socket *so;
 	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
+
+	CURVNET_SET(TD_TO_VNET(td));
 
 	error = socreate(AF_INET, &ifctx->so, SOCK_DGRAM, 0, td->td_ucred, td);
 	if (error != 0)
@@ -1061,6 +1052,8 @@ bootpc_fakeup_interface(struct bootpc_ifcontext *ifctx,
 		panic("bootpc: Unable to find HW address for %s",
 		      ifctx->ireq.ifr_name);
 	ifctx->sdl = sdl;
+
+	CURVNET_RESTORE();
 
 	return error;
 }
@@ -1339,7 +1332,7 @@ bootpc_compose_query(struct bootpc_ifcontext *ifctx,
 	*vendp++ = TAG_VENDOR_INDENTIFIER;
 	*vendp++ = vendor_client_len;
 	memcpy(vendp, vendor_client, vendor_client_len);
-	vendp += vendor_client_len;;
+	vendp += vendor_client_len;
 	ifctx->dhcpquerytype = DHCP_NOMSG;
 	switch (ifctx->state) {
 	case IF_DHCP_UNRESOLVED:
@@ -1572,10 +1565,10 @@ bootpc_decode_reply(struct nfsv3_diskless *nd, struct bootpc_ifcontext *ifctx,
 			printf("hostname %s (ignored) ", p);
 		} else {
 			strcpy(nd->my_hostnam, p);
-			mtx_lock(&hostname_mtx);
-			strcpy(G_hostname, p);
-			printf("hostname %s ", G_hostname);
-			mtx_unlock(&hostname_mtx);
+			mtx_lock(&prison0.pr_mtx);
+			strcpy(prison0.pr_hostname, p);
+			mtx_unlock(&prison0.pr_mtx);
+			printf("hostname %s ", p);
 			gctx->sethostname = ifctx;
 		}
 	}
@@ -1785,6 +1778,13 @@ md_mount(struct sockaddr_in *mdsin, char *path, u_char *fhp, int *fhsizep,
 	int authcount;
 	int authver;
 
+#define	RPCPROG_MNT	100005
+#define	RPCMNT_VER1	1
+#define RPCMNT_VER3	3
+#define	RPCMNT_MOUNT	1
+#define	AUTH_SYS	1		/* unix style (uid, gids) */
+#define AUTH_UNIX	AUTH_SYS
+
 	/* XXX honor v2/v3 flags in args->flags? */
 #ifdef BOOTP_NFSV3
 	/* First try NFS v3 */
@@ -1845,7 +1845,7 @@ md_mount(struct sockaddr_in *mdsin, char *path, u_char *fhp, int *fhsizep,
 		while (authcount > 0) {
 			if (xdr_int_decode(&m, &authver) != 0)
 				goto bad;
-			if (authver == RPCAUTH_UNIX)
+			if (authver == AUTH_UNIX)
 				authunixok = 1;
 			authcount--;
 		}

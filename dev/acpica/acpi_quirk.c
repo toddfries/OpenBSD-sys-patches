@@ -25,12 +25,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_quirk.c,v 1.5 2008/09/19 15:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_quirk.c,v 1.6 2009/06/05 18:44:36 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 
 enum ops_t {

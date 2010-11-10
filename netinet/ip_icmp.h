@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip_icmp.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/ip_icmp.h,v 1.28 2009/02/13 15:14:43 luigi Exp $
+ * $FreeBSD: src/sys/netinet/ip_icmp.h,v 1.29 2010/04/29 11:52:42 bz Exp $
  */
 
 #ifndef _NETINET_IP_ICMP_H_
@@ -208,7 +208,6 @@ struct icmp {
 #ifdef _KERNEL
 void	icmp_error(struct mbuf *, int, int, uint32_t, int);
 void	icmp_input(struct mbuf *, int);
-void	icmp_init(void);
 int	ip_next_mtu(int, int);
 #endif
 

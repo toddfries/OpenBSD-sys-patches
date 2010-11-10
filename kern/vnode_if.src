@@ -27,7 +27,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)vnode_if.src	8.12 (Berkeley) 5/14/95
-# $FreeBSD: src/sys/kern/vnode_if.src,v 1.96 2009/01/21 14:42:00 jhb Exp $
+# $FreeBSD: src/sys/kern/vnode_if.src,v 1.103 2010/05/12 21:24:46 zml Exp $
 #
 
 #
@@ -133,7 +133,7 @@ vop_open {
 };
 
 
-%% close	vp	E E E
+%% close	vp	L L L
 
 vop_close {
 	IN struct vnode *vp;
@@ -146,6 +146,16 @@ vop_close {
 %% access	vp	L L L
 
 vop_access {
+	IN struct vnode *vp;
+	IN accmode_t accmode;
+	IN struct ucred *cred;
+	IN struct thread *td;
+};
+
+
+%% accessx	vp	L L L
+
+vop_accessx {
 	IN struct vnode *vp;
 	IN accmode_t accmode;
 	IN struct ucred *cred;
@@ -187,7 +197,7 @@ vop_read {
 };
 
 
-%% write	vp	E E E
+%% write	vp	L L L
 %! write	pre	VOP_WRITE_PRE
 %! write	post	VOP_WRITE_POST
 
@@ -196,16 +206,6 @@ vop_write {
 	INOUT struct uio *uio;
 	IN int ioflag;
 	IN struct ucred *cred;
-};
-
-
-%% lease	vp	= = =
-
-vop_lease {
-	IN struct vnode *vp;
-	IN struct thread *td;
-	IN struct ucred *cred;
-	IN int flag;
 };
 
 
@@ -247,7 +247,7 @@ vop_revoke {
 };
 
 
-%% fsync	vp	E E E
+%% fsync	vp	L L L
 
 vop_fsync {
 	IN struct vnode *vp;
@@ -453,6 +453,13 @@ vop_advlockasync {
 };
 
 
+%% advlockpurge	vp	E E E
+
+vop_advlockpurge {
+	IN struct vnode *vp;
+};
+
+
 %% reallocblks	vp	E E E
 
 vop_reallocblks {
@@ -607,6 +614,7 @@ vop_vptofh {
 vop_vptocnp {
 	IN struct vnode *vp;
 	OUT struct vnode **vpp;
+	IN struct ucred *cred;
 	INOUT char *buf;
 	INOUT int *buflen;
 };

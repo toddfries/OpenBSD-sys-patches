@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.22 2008/10/31 10:38:30 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.23 2009/04/19 13:48:42 dchagin Exp $");
 
 #include "opt_compat.h"
 
@@ -86,6 +86,7 @@ linux_proc_init(struct thread *td, pid_t child, int flags)
 		em = malloc(sizeof *em, M_LINUX, M_WAITOK | M_ZERO);
 		em->pid = child;
 		em->pdeath_signal = 0;
+		em->used_requeue = 0;
 		em->robust_futexes = NULL;
 		if (flags & LINUX_CLONE_THREAD) {
 			/* handled later in the code */

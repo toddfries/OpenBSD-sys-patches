@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_idle.c,v 1.54 2008/03/16 10:58:05 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_idle.c,v 1.55 2009/11/03 16:46:52 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -74,10 +74,9 @@ idle_setup(void *dummy)
 		if (error)
 			panic("idle_setup: kproc_create error %d\n", error);
 
-		p->p_flag |= P_NOLOAD;
 		thread_lock(td);
 		TD_SET_CAN_RUN(td);
-		td->td_flags |= TDF_IDLETD;
+		td->td_flags |= TDF_IDLETD | TDF_NOLOAD;
 		sched_class(td, PRI_IDLE);
 		sched_prio(td, PRI_MAX_IDLE);
 		thread_unlock(td);

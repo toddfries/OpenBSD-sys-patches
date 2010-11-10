@@ -1,5 +1,5 @@
 /* $NetBSD: pcmcia_cis.c,v 1.17 2000/02/10 09:01:52 chopps Exp $ */
-/* $FreeBSD: src/sys/dev/pccard/pccard_cis.c,v 1.44 2009/02/06 07:49:03 imp Exp $ */
+/* $FreeBSD: src/sys/dev/pccard/pccard_cis.c,v 1.45 2009/03/11 08:14:44 imp Exp $ */
 
 /*-
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -1198,8 +1198,7 @@ pccard_parse_cis_tuple(const struct pccard_tuple *tuple, void *arg)
 
 					if (lengthsize == 0) {
 						DPRINTF(("cfe memspace "
-						    "lengthsize == 0"));
-						state->card->error++;
+						    "lengthsize == 0\n"));
 					}
 					for (i = 0; i < cfe->num_memspace; i++) {
 						if (lengthsize) {
@@ -1211,9 +1210,8 @@ pccard_parse_cis_tuple(const struct pccard_tuple *tuple, void *arg)
 							cfe->memspace[i].length = 0;
 						}
 						if (cfe->memspace[i].length == 0) {
-							DPRINTF(("cfe->memspace[%d].length == 0",
+							DPRINTF(("cfe->memspace[%d].length == 0\n",
 								 i));
-							state->card->error++;
 						}
 						if (cardaddrsize) {
 							cfe->memspace[i].cardaddr =

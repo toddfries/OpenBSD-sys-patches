@@ -30,13 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.334 2009/02/13 15:14:43 luigi Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.357 2010/04/29 11:52:42 bz Exp $");
 
 #include "opt_compat.h"
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_mac.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -44,6 +43,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.334 2009/02/13 15:14:43 luigi
 #include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
+#include <sys/jail.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #ifdef INET6
@@ -55,12 +55,12 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.334 2009/02/13 15:14:43 luigi
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/random.h>
-#include <sys/vimage.h>
 
 #include <vm/uma.h>
 
 #include <net/route.h>
 #include <net/if.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -94,9 +94,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.334 2009/02/13 15:14:43 luigi
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif
-#include <netinet/vinet.h>
 #include <netinet6/ip6protosw.h>
-#include <netinet6/vinet6.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -113,26 +111,14 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.334 2009/02/13 15:14:43 luigi
 
 #include <security/mac/mac_framework.h>
 
-#ifdef VIMAGE_GLOBALS
-int	tcp_mssdflt;
+VNET_DEFINE(int, tcp_mssdflt) = TCP_MSS;
 #ifdef INET6
-int	tcp_v6mssdflt;
-#endif
-int	tcp_minmss;
-int	tcp_do_rfc1323;
-static int	icmp_may_rst;
-static int	tcp_isn_reseed_interval;
-static int	tcp_inflight_enable;
-static int	tcp_inflight_rttthresh;
-static int	tcp_inflight_min;
-static int	tcp_inflight_max;
-static int	tcp_inflight_stab;
+VNET_DEFINE(int, tcp_v6mssdflt) = TCP6_MSS;
 #endif
 
 static int
 sysctl_net_inet_tcp_mss_check(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
 	int error, new;
 
 	new = V_tcp_mssdflt;
@@ -146,8 +132,8 @@ sysctl_net_inet_tcp_mss_check(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_MSSDFLT, mssdflt,
-    CTLTYPE_INT|CTLFLAG_RW, tcp_mssdflt, 0,
+SYSCTL_VNET_PROC(_net_inet_tcp, TCPCTL_MSSDFLT, mssdflt,
+    CTLTYPE_INT|CTLFLAG_RW, &VNET_NAME(tcp_mssdflt), 0,
     &sysctl_net_inet_tcp_mss_check, "I",
     "Default TCP Maximum Segment Size");
 
@@ -155,7 +141,6 @@ SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_MSSDFLT, mssdflt,
 static int
 sysctl_net_inet_tcp_mss_v6_check(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
 	int error, new;
 
 	new = V_tcp_v6mssdflt;
@@ -169,11 +154,19 @@ sysctl_net_inet_tcp_mss_v6_check(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
-    CTLTYPE_INT|CTLFLAG_RW, tcp_v6mssdflt, 0,
+SYSCTL_VNET_PROC(_net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
+    CTLTYPE_INT|CTLFLAG_RW, &VNET_NAME(tcp_v6mssdflt), 0,
     &sysctl_net_inet_tcp_mss_v6_check, "I",
    "Default TCP Maximum Segment Size for IPv6");
 #endif
+
+static int
+vnet_sysctl_msec_to_ticks(SYSCTL_HANDLER_ARGS)
+{
+
+	VNET_SYSCTL_ARG(req, arg1);
+	return (sysctl_msec_to_ticks(oidp, arg1, arg2, req));
+}
 
 /*
  * Minimum MSS we accept and use. This prevents DoS attacks where
@@ -183,11 +176,14 @@ SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
  * with packet generation and sending. Set to zero to disable MINMSS
  * checking. This setting prevents us from sending too small packets.
  */
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, minmss,
-    CTLFLAG_RW, tcp_minmss , 0, "Minmum TCP Maximum Segment Size");
+VNET_DEFINE(int, tcp_minmss) = TCP_MINMSS;
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, minmss, CTLFLAG_RW,
+     &VNET_NAME(tcp_minmss), 0,
+    "Minmum TCP Maximum Segment Size");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_DO_RFC1323, rfc1323,
-    CTLFLAG_RW, tcp_do_rfc1323, 0,
+VNET_DEFINE(int, tcp_do_rfc1323) = 1;
+SYSCTL_VNET_INT(_net_inet_tcp, TCPCTL_DO_RFC1323, rfc1323, CTLFLAG_RW,
+    &VNET_NAME(tcp_do_rfc1323), 0,
     "Enable rfc1323 (high performance TCP) extensions");
 
 static int	tcp_log_debug = 0;
@@ -202,15 +198,19 @@ static int	do_tcpdrain = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, do_tcpdrain, CTLFLAG_RW, &do_tcpdrain, 0,
     "Enable tcp_drain routine for extra help when low on mbufs");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, pcbcount,
-    CTLFLAG_RD, tcbinfo.ipi_count, 0, "Number of active PCBs");
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, pcbcount, CTLFLAG_RD,
+    &VNET_NAME(tcbinfo.ipi_count), 0, "Number of active PCBs");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, icmp_may_rst,
-    CTLFLAG_RW, icmp_may_rst, 0,
+static VNET_DEFINE(int, icmp_may_rst) = 1;
+#define	V_icmp_may_rst			VNET(icmp_may_rst)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, icmp_may_rst, CTLFLAG_RW,
+    &VNET_NAME(icmp_may_rst), 0,
     "Certain ICMP unreachable messages may abort connections in SYN_SENT");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, isn_reseed_interval,
-    CTLFLAG_RW, tcp_isn_reseed_interval, 0,
+static VNET_DEFINE(int, tcp_isn_reseed_interval) = 0;
+#define	V_tcp_isn_reseed_interval	VNET(tcp_isn_reseed_interval)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, isn_reseed_interval, CTLFLAG_RW,
+    &VNET_NAME(tcp_isn_reseed_interval), 0,
     "Seconds between reseeding of ISN secret");
 
 /*
@@ -221,29 +221,50 @@ SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, isn_reseed_interval,
 SYSCTL_NODE(_net_inet_tcp, OID_AUTO, inflight, CTLFLAG_RW, 0,
     "TCP inflight data limiting");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, enable,
-    CTLFLAG_RW, tcp_inflight_enable, 0,
+static VNET_DEFINE(int, tcp_inflight_enable) = 1;
+#define	V_tcp_inflight_enable		VNET(tcp_inflight_enable)
+SYSCTL_VNET_INT(_net_inet_tcp_inflight, OID_AUTO, enable, CTLFLAG_RW,
+    &VNET_NAME(tcp_inflight_enable), 0,
     "Enable automatic TCP inflight data limiting");
 
 static int	tcp_inflight_debug = 0;
 SYSCTL_INT(_net_inet_tcp_inflight, OID_AUTO, debug, CTLFLAG_RW,
-    &tcp_inflight_debug, 0, "Debug TCP inflight calculations");
+    &tcp_inflight_debug, 0,
+    "Debug TCP inflight calculations");
 
-SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, rttthresh,
-    CTLTYPE_INT|CTLFLAG_RW, tcp_inflight_rttthresh, 0, sysctl_msec_to_ticks,
-    "I", "RTT threshold below which inflight will deactivate itself");
+static VNET_DEFINE(int, tcp_inflight_rttthresh);
+#define	V_tcp_inflight_rttthresh	VNET(tcp_inflight_rttthresh)
+SYSCTL_VNET_PROC(_net_inet_tcp_inflight, OID_AUTO, rttthresh,
+    CTLTYPE_INT|CTLFLAG_RW, &VNET_NAME(tcp_inflight_rttthresh), 0,
+    vnet_sysctl_msec_to_ticks, "I",
+    "RTT threshold below which inflight will deactivate itself");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, min,
-    CTLFLAG_RW, tcp_inflight_min, 0, "Lower-bound for TCP inflight window");
+static VNET_DEFINE(int, tcp_inflight_min) = 6144;
+#define	V_tcp_inflight_min		VNET(tcp_inflight_min)
+SYSCTL_VNET_INT(_net_inet_tcp_inflight, OID_AUTO, min, CTLFLAG_RW,
+    &VNET_NAME(tcp_inflight_min), 0,
+    "Lower-bound for TCP inflight window");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, max,
-    CTLFLAG_RW, tcp_inflight_max, 0, "Upper-bound for TCP inflight window");
+static VNET_DEFINE(int, tcp_inflight_max) = TCP_MAXWIN << TCP_MAX_WINSHIFT;
+#define	V_tcp_inflight_max		VNET(tcp_inflight_max)
+SYSCTL_VNET_INT(_net_inet_tcp_inflight, OID_AUTO, max, CTLFLAG_RW,
+    &VNET_NAME(tcp_inflight_max), 0,
+    "Upper-bound for TCP inflight window");
 
-SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, stab,
-    CTLFLAG_RW, tcp_inflight_stab, 0,
+static VNET_DEFINE(int, tcp_inflight_stab) = 20;
+#define	V_tcp_inflight_stab		VNET(tcp_inflight_stab)
+SYSCTL_VNET_INT(_net_inet_tcp_inflight, OID_AUTO, stab, CTLFLAG_RW,
+    &VNET_NAME(tcp_inflight_stab), 0,
     "Inflight Algorithm Stabilization 20 = 2 packets");
 
-uma_zone_t sack_hole_zone;
+#ifdef TCP_SORECEIVE_STREAM
+static int	tcp_soreceive_stream = 0;
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, soreceive_stream, CTLFLAG_RDTUN,
+    &tcp_soreceive_stream, 0, "Using soreceive_stream for TCP sockets");
+#endif
+
+VNET_DEFINE(uma_zone_t, sack_hole_zone);
+#define	V_sack_hole_zone		VNET(sack_hole_zone)
 
 static struct inpcb *tcp_notify(struct inpcb *, int);
 static void	tcp_isn_tick(void *);
@@ -269,7 +290,9 @@ struct tcpcb_mem {
 	struct	tcp_timer	tt;
 };
 
-static uma_zone_t tcpcb_zone;
+static VNET_DEFINE(uma_zone_t, tcpcb_zone);
+#define	V_tcpcb_zone			VNET(tcpcb_zone)
+
 MALLOC_DEFINE(M_TCPLOG, "tcplog", "TCP address and flags print buffers");
 struct callout isn_callout;
 static struct mtx isn_mtx;
@@ -286,7 +309,7 @@ tcp_zone_change(void *tag)
 {
 
 	uma_zone_set_max(V_tcbinfo.ipi_zone, maxsockets);
-	uma_zone_set_max(tcpcb_zone, maxsockets);
+	uma_zone_set_max(V_tcpcb_zone, maxsockets);
 	tcp_tw_zone_change();
 }
 
@@ -302,52 +325,40 @@ tcp_inpcb_init(void *mem, int size, int flags)
 void
 tcp_init(void)
 {
-	INIT_VNET_INET(curvnet);
 	int hashsize;
 
-	V_blackhole = 0;
-	V_tcp_delack_enabled = 1;
-	V_drop_synfin = 0;
-	V_tcp_do_rfc3042 = 1;
-	V_tcp_do_rfc3390 = 1;
-	V_tcp_do_ecn = 0;
-	V_tcp_ecn_maxretries = 1;
-	V_tcp_insecure_rst = 0;
-	V_tcp_do_autorcvbuf = 1;
-	V_tcp_autorcvbuf_inc = 16*1024;
-	V_tcp_autorcvbuf_max = 256*1024;
-	V_tcp_do_rfc3465 = 1;
-	V_tcp_abc_l_var = 2;
+	hashsize = TCBHASHSIZE;
+	TUNABLE_INT_FETCH("net.inet.tcp.tcbhashsize", &hashsize);
+	if (!powerof2(hashsize)) {
+		printf("WARNING: TCB hash size not a power of 2\n");
+		hashsize = 512; /* safe default */
+	}
+	in_pcbinfo_init(&V_tcbinfo, "tcp", &V_tcb, hashsize, hashsize,
+	    "tcp_inpcb", tcp_inpcb_init, NULL, UMA_ZONE_NOFREE);
 
-	V_tcp_mssdflt = TCP_MSS;
-#ifdef INET6
-	V_tcp_v6mssdflt = TCP6_MSS;
-#endif
-	V_tcp_minmss = TCP_MINMSS;
-	V_tcp_do_rfc1323 = 1;
-	V_icmp_may_rst = 1;
-	V_tcp_isn_reseed_interval = 0;
-	V_tcp_inflight_enable = 1;
-	V_tcp_inflight_min = 6144;
-	V_tcp_inflight_max = TCP_MAXWIN << TCP_MAX_WINSHIFT;
-	V_tcp_inflight_stab = 20;
+	V_tcp_inflight_rttthresh = TCPTV_INFLIGHT_RTTTHRESH;
 
-	V_path_mtu_discovery = 1;
-	V_ss_fltsz = 1;
-	V_ss_fltsz_local = 4;
-	V_tcp_do_newreno = 1;
-	V_tcp_do_tso = 1;
-	V_tcp_do_autosndbuf = 1;
-	V_tcp_autosndbuf_inc = 8*1024;
-	V_tcp_autosndbuf_max = 256*1024;
+	/*
+	 * These have to be type stable for the benefit of the timers.
+	 */
+	V_tcpcb_zone = uma_zcreate("tcpcb", sizeof(struct tcpcb_mem),
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
+	uma_zone_set_max(V_tcpcb_zone, maxsockets);
 
-	V_nolocaltimewait = 0;
+	tcp_tw_init();
+	syncache_init();
+	tcp_hc_init();
+	tcp_reass_init();
 
-	V_tcp_do_sack = 1;
-	V_tcp_sack_maxholes = 128;
-	V_tcp_sack_globalmaxholes = 65536;
-	V_tcp_sack_globalholes = 0;
+	TUNABLE_INT_FETCH("net.inet.tcp.sack.enable", &V_tcp_do_sack);
+	V_sack_hole_zone = uma_zcreate("sackhole", sizeof(struct sackhole),
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
 
+	/* Skip initialization of globals for non-default instances. */
+	if (!IS_DEFAULT_VNET(curvnet))
+		return;
+
+	/* XXX virtualize those bellow? */
 	tcp_delacktime = TCPTV_DELACK;
 	tcp_keepinit = TCPTV_KEEP_INIT;
 	tcp_keepidle = TCPTV_KEEP_IDLE;
@@ -358,28 +369,17 @@ tcp_init(void)
 	if (tcp_rexmit_min < 1)
 		tcp_rexmit_min = 1;
 	tcp_rexmit_slop = TCPTV_CPU_VAR;
-	V_tcp_inflight_rttthresh = TCPTV_INFLIGHT_RTTTHRESH;
 	tcp_finwait2_timeout = TCPTV_FINWAIT2_TIMEOUT;
-
-	TUNABLE_INT_FETCH("net.inet.tcp.sack.enable", &V_tcp_do_sack);
-
-	INP_INFO_LOCK_INIT(&V_tcbinfo, "tcp");
-	LIST_INIT(&V_tcb);
-	V_tcbinfo.ipi_listhead = &V_tcb;
-	hashsize = TCBHASHSIZE;
-	TUNABLE_INT_FETCH("net.inet.tcp.tcbhashsize", &hashsize);
-	if (!powerof2(hashsize)) {
-		printf("WARNING: TCB hash size not a power of 2\n");
-		hashsize = 512; /* safe default */
-	}
 	tcp_tcbhashsize = hashsize;
-	V_tcbinfo.ipi_hashbase = hashinit(hashsize, M_PCB,
-	    &V_tcbinfo.ipi_hashmask);
-	V_tcbinfo.ipi_porthashbase = hashinit(hashsize, M_PCB,
-	    &V_tcbinfo.ipi_porthashmask);
-	V_tcbinfo.ipi_zone = uma_zcreate("inpcb", sizeof(struct inpcb),
-	    NULL, NULL, tcp_inpcb_init, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
-	uma_zone_set_max(V_tcbinfo.ipi_zone, maxsockets);
+
+#ifdef TCP_SORECEIVE_STREAM
+	TUNABLE_INT_FETCH("net.inet.tcp.soreceive_stream", &tcp_soreceive_stream);
+	if (tcp_soreceive_stream) {
+		tcp_usrreqs.pru_soreceive = soreceive_stream;
+		tcp6_usrreqs.pru_soreceive = soreceive_stream;
+	}
+#endif
+
 #ifdef INET6
 #define TCP_MINPROTOHDR (sizeof(struct ip6_hdr) + sizeof(struct tcphdr))
 #else /* INET6 */
@@ -390,26 +390,30 @@ tcp_init(void)
 	if (max_linkhdr + TCP_MINPROTOHDR > MHLEN)
 		panic("tcp_init");
 #undef TCP_MINPROTOHDR
-	/*
-	 * These have to be type stable for the benefit of the timers.
-	 */
-	tcpcb_zone = uma_zcreate("tcpcb", sizeof(struct tcpcb_mem),
-	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
-	uma_zone_set_max(tcpcb_zone, maxsockets);
-	tcp_tw_init();
-	syncache_init();
-	tcp_hc_init();
-	tcp_reass_init();
+
 	ISN_LOCK_INIT();
 	callout_init(&isn_callout, CALLOUT_MPSAFE);
-	tcp_isn_tick(NULL);
+	callout_reset(&isn_callout, hz/100, tcp_isn_tick, NULL);
 	EVENTHANDLER_REGISTER(shutdown_pre_sync, tcp_fini, NULL,
 		SHUTDOWN_PRI_DEFAULT);
-	sack_hole_zone = uma_zcreate("sackhole", sizeof(struct sackhole),
-	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
 	EVENTHANDLER_REGISTER(maxsockets_change, tcp_zone_change, NULL,
 		EVENTHANDLER_PRI_ANY);
 }
+
+#ifdef VIMAGE
+void
+tcp_destroy(void)
+{
+
+	tcp_reass_destroy();
+	tcp_hc_destroy();
+	syncache_destroy();
+	tcp_tw_destroy();
+	in_pcbinfo_destroy(&V_tcbinfo);
+	uma_zdestroy(V_sack_hole_zone);
+	uma_zdestroy(V_tcpcb_zone);
+}
+#endif
 
 void
 tcp_fini(void *xtp)
@@ -508,7 +512,6 @@ void
 tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
     tcp_seq ack, tcp_seq seq, int flags)
 {
-	INIT_VNET_INET(curvnet);
 	int tlen;
 	int win = 0;
 	struct ip *ip;
@@ -679,17 +682,19 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 struct tcpcb *
 tcp_newtcpcb(struct inpcb *inp)
 {
-	INIT_VNET_INET(inp->inp_vnet);
 	struct tcpcb_mem *tm;
 	struct tcpcb *tp;
 #ifdef INET6
 	int isipv6 = (inp->inp_vflag & INP_IPV6) != 0;
 #endif /* INET6 */
 
-	tm = uma_zalloc(tcpcb_zone, M_NOWAIT | M_ZERO);
+	tm = uma_zalloc(V_tcpcb_zone, M_NOWAIT | M_ZERO);
 	if (tm == NULL)
 		return (NULL);
 	tp = &tm->tcb;
+#ifdef VIMAGE
+	tp->t_vnet = inp->inp_vnet;
+#endif
 	tp->t_timers = &tm->tt;
 	/*	LIST_INIT(&tp->t_segq); */	/* XXX covered by M_ZERO */
 	tp->t_maxseg = tp->t_maxopd =
@@ -743,7 +748,6 @@ tcp_newtcpcb(struct inpcb *inp)
 struct tcpcb *
 tcp_drop(struct tcpcb *tp, int errno)
 {
-	INIT_VNET_INET(tp->t_inpcb->inp_vnet);
 	struct socket *so = tp->t_inpcb->inp_socket;
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
@@ -752,9 +756,9 @@ tcp_drop(struct tcpcb *tp, int errno)
 	if (TCPS_HAVERCVDSYN(tp->t_state)) {
 		tp->t_state = TCPS_CLOSED;
 		(void) tcp_output_reset(tp);
-		V_tcpstat.tcps_drops++;
+		TCPSTAT_INC(tcps_drops);
 	} else
-		V_tcpstat.tcps_conndrops++;
+		TCPSTAT_INC(tcps_conndrops);
 	if (errno == ETIMEDOUT && tp->t_softerror)
 		errno = tp->t_softerror;
 	so->so_error = errno;
@@ -764,7 +768,6 @@ tcp_drop(struct tcpcb *tp, int errno)
 void
 tcp_discardcb(struct tcpcb *tp)
 {
-	INIT_VNET_INET(tp->t_vnet);
 	struct tseg_qent *q;
 	struct inpcb *inp = tp->t_inpcb;
 	struct socket *so = inp->inp_socket;
@@ -775,8 +778,19 @@ tcp_discardcb(struct tcpcb *tp)
 	INP_WLOCK_ASSERT(inp);
 
 	/*
-	 * Make sure that all of our timers are stopped before we
-	 * delete the PCB.
+	 * Make sure that all of our timers are stopped before we delete the
+	 * PCB.
+	 *
+	 * XXXRW: Really, we would like to use callout_drain() here in order
+	 * to avoid races experienced in tcp_timer.c where a timer is already
+	 * executing at this point.  However, we can't, both because we're
+	 * running in a context where we can't sleep, and also because we
+	 * hold locks required by the timers.  What we instead need to do is
+	 * test to see if callout_drain() is required, and if so, defer some
+	 * portion of the remainder of tcp_discardcb() to an asynchronous
+	 * context that can callout_drain() and then continue.  Some care
+	 * will be required to ensure that no further processing takes place
+	 * on the tcpcb, even though it hasn't been freed (a flag?).
 	 */
 	callout_stop(&tp->t_timers->tt_rexmt);
 	callout_stop(&tp->t_timers->tt_persist);
@@ -846,7 +860,7 @@ tcp_discardcb(struct tcpcb *tp)
 	while ((q = LIST_FIRST(&tp->t_segq)) != NULL) {
 		LIST_REMOVE(q, tqe_q);
 		m_freem(q->tqe_m);
-		uma_zfree(tcp_reass_zone, q);
+		uma_zfree(V_tcp_reass_zone, q);
 		tp->t_segqlen--;
 		V_tcp_reass_qsize--;
 	}
@@ -856,7 +870,7 @@ tcp_discardcb(struct tcpcb *tp)
 	tcp_free_sackholes(tp);
 	inp->inp_ppcb = NULL;
 	tp->t_inpcb = NULL;
-	uma_zfree(tcpcb_zone, tp);
+	uma_zfree(V_tcpcb_zone, tp);
 }
 
 /*
@@ -866,7 +880,6 @@ tcp_discardcb(struct tcpcb *tp)
 struct tcpcb *
 tcp_close(struct tcpcb *tp)
 {
-	INIT_VNET_INET(tp->t_inpcb->inp_vnet);
 	struct inpcb *inp = tp->t_inpcb;
 	struct socket *so;
 
@@ -877,14 +890,14 @@ tcp_close(struct tcpcb *tp)
 	if (tp->t_state == TCPS_LISTEN)
 		tcp_offload_listen_close(tp);
 	in_pcbdrop(inp);
-	V_tcpstat.tcps_closed++;
+	TCPSTAT_INC(tcps_closed);
 	KASSERT(inp->inp_socket != NULL, ("tcp_close: inp_socket NULL"));
 	so = inp->inp_socket;
 	soisdisconnected(so);
-	if (inp->inp_vflag & INP_SOCKREF) {
+	if (inp->inp_flags & INP_SOCKREF) {
 		KASSERT(so->so_state & SS_PROTOREF,
 		    ("tcp_close: !SS_PROTOREF"));
-		inp->inp_vflag &= ~INP_SOCKREF;
+		inp->inp_flags &= ~INP_SOCKREF;
 		INP_WUNLOCK(inp);
 		ACCEPT_LOCK();
 		SOCK_LOCK(so);
@@ -903,10 +916,9 @@ tcp_drain(void)
 	if (!do_tcpdrain)
 		return;
 
-	VNET_LIST_RLOCK();
+	VNET_LIST_RLOCK_NOSLEEP();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
-		INIT_VNET_INET(vnet_iter);
 		struct inpcb *inpb;
 		struct tcpcb *tcpb;
 		struct tseg_qent *te;
@@ -921,7 +933,7 @@ tcp_drain(void)
 	 */
 		INP_INFO_RLOCK(&V_tcbinfo);
 		LIST_FOREACH(inpb, V_tcbinfo.ipi_listhead, inp_list) {
-			if (inpb->inp_vflag & INP_TIMEWAIT)
+			if (inpb->inp_flags & INP_TIMEWAIT)
 				continue;
 			INP_WLOCK(inpb);
 			if ((tcpb = intotcpcb(inpb)) != NULL) {
@@ -929,7 +941,7 @@ tcp_drain(void)
 			            != NULL) {
 					LIST_REMOVE(te, tqe_q);
 					m_freem(te->tqe_m);
-					uma_zfree(tcp_reass_zone, te);
+					uma_zfree(V_tcp_reass_zone, te);
 					tcpb->t_segqlen--;
 					V_tcp_reass_qsize--;
 				}
@@ -940,7 +952,7 @@ tcp_drain(void)
 		INP_INFO_RUNLOCK(&V_tcbinfo);
 		CURVNET_RESTORE();
 	}
-	VNET_LIST_RUNLOCK();
+	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 /*
@@ -955,15 +967,12 @@ static struct inpcb *
 tcp_notify(struct inpcb *inp, int error)
 {
 	struct tcpcb *tp;
-#ifdef INVARIANTS
-	INIT_VNET_INET(inp->inp_vnet); /* V_tcbinfo WLOCK ASSERT */
-#endif
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 	INP_WLOCK_ASSERT(inp);
 
-	if ((inp->inp_vflag & INP_TIMEWAIT) ||
-	    (inp->inp_vflag & INP_DROPPED))
+	if ((inp->inp_flags & INP_TIMEWAIT) ||
+	    (inp->inp_flags & INP_DROPPED))
 		return (inp);
 
 	tp = intotcpcb(inp);
@@ -1001,7 +1010,6 @@ tcp_notify(struct inpcb *inp, int error)
 static int
 tcp_pcblist(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
 	int error, i, m, n, pcb_count;
 	struct inpcb *inp, **inp_list;
 	inp_gen_t gencnt;
@@ -1056,14 +1064,14 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 	INP_INFO_RLOCK(&V_tcbinfo);
 	for (inp = LIST_FIRST(V_tcbinfo.ipi_listhead), i = 0;
 	    inp != NULL && i < n; inp = LIST_NEXT(inp, inp_list)) {
-		INP_RLOCK(inp);
+		INP_WLOCK(inp);
 		if (inp->inp_gencnt <= gencnt) {
 			/*
 			 * XXX: This use of cr_cansee(), introduced with
 			 * TCP state changes, is not quite right, but for
 			 * now, better than nothing.
 			 */
-			if (inp->inp_vflag & INP_TIMEWAIT) {
+			if (inp->inp_flags & INP_TIMEWAIT) {
 				if (intotw(inp) != NULL)
 					error = cr_cansee(req->td->td_ucred,
 					    intotw(inp)->tw_cred);
@@ -1071,10 +1079,12 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 					error = EINVAL;	/* Skip this inp. */
 			} else
 				error = cr_canseeinpcb(req->td->td_ucred, inp);
-			if (error == 0)
+			if (error == 0) {
+				in_pcbref(inp);
 				inp_list[i++] = inp;
+			}
 		}
-		INP_RUNLOCK(inp);
+		INP_WUNLOCK(inp);
 	}
 	INP_INFO_RUNLOCK(&V_tcbinfo);
 	n = i;
@@ -1094,11 +1104,14 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 			inp_ppcb = inp->inp_ppcb;
 			if (inp_ppcb == NULL)
 				bzero((char *) &xt.xt_tp, sizeof xt.xt_tp);
-			else if (inp->inp_vflag & INP_TIMEWAIT) {
+			else if (inp->inp_flags & INP_TIMEWAIT) {
 				bzero((char *) &xt.xt_tp, sizeof xt.xt_tp);
 				xt.xt_tp.t_state = TCPS_TIME_WAIT;
-			} else
+			} else {
 				bcopy(inp_ppcb, &xt.xt_tp, sizeof xt.xt_tp);
+				if (xt.xt_tp.t_timers)
+					tcp_timer_to_xtimer(&xt.xt_tp, xt.xt_tp.t_timers, &xt.xt_timer);
+			}
 			if (inp->inp_socket != NULL)
 				sotoxsocket(inp->inp_socket, &xt.xt_socket);
 			else {
@@ -1110,8 +1123,16 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 			error = SYSCTL_OUT(req, &xt, sizeof xt);
 		} else
 			INP_RUNLOCK(inp);
-	
 	}
+	INP_INFO_WLOCK(&V_tcbinfo);
+	for (i = 0; i < n; i++) {
+		inp = inp_list[i];
+		INP_WLOCK(inp);
+		if (!in_pcbrele(inp))
+			INP_WUNLOCK(inp);
+	}
+	INP_INFO_WUNLOCK(&V_tcbinfo);
+
 	if (!error) {
 		/*
 		 * Give the user an updated idea of our state.
@@ -1137,7 +1158,6 @@ SYSCTL_PROC(_net_inet_tcp, TCPCTL_PCBLIST, pcblist, CTLFLAG_RD, 0, 0,
 static int
 tcp_getcred(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
 	struct xucred xuc;
 	struct sockaddr_in addrs[2];
 	struct inpcb *inp;
@@ -1179,8 +1199,6 @@ SYSCTL_PROC(_net_inet_tcp, OID_AUTO, getcred,
 static int
 tcp6_getcred(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
-	INIT_VNET_INET6(curvnet);
 	struct xucred xuc;
 	struct sockaddr_in6 addrs[2];
 	struct inpcb *inp;
@@ -1243,7 +1261,6 @@ SYSCTL_PROC(_net_inet6_tcp6, OID_AUTO, getcred,
 void
 tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 {
-	INIT_VNET_INET(curvnet);
 	struct ip *ip = vip;
 	struct tcphdr *th;
 	struct in_addr faddr;
@@ -1293,8 +1310,8 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 		    ip->ip_src, th->th_sport, 0, NULL);
 		if (inp != NULL)  {
 			INP_WLOCK(inp);
-			if (!(inp->inp_vflag & INP_TIMEWAIT) &&
-			    !(inp->inp_vflag & INP_DROPPED) &&
+			if (!(inp->inp_flags & INP_TIMEWAIT) &&
+			    !(inp->inp_flags & INP_DROPPED) &&
 			    !(inp->inp_socket == NULL)) {
 				icmp_tcp_seq = htonl(th->th_seq);
 				tp = intotcpcb(inp);
@@ -1360,7 +1377,6 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 void
 tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 {
-	INIT_VNET_INET(curvnet);
 	struct tcphdr th;
 	struct inpcb *(*notify)(struct inpcb *, int) = tcp_notify;
 	struct ip6_hdr *ip6;
@@ -1482,16 +1498,19 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 #define ISN_STATIC_INCREMENT 4096
 #define ISN_RANDOM_INCREMENT (4096 - 1)
 
-#ifdef VIMAGE_GLOBALS
-static u_char isn_secret[32];
-static int isn_last_reseed;
-static u_int32_t isn_offset, isn_offset_old;
-#endif
+static VNET_DEFINE(u_char, isn_secret[32]);
+static VNET_DEFINE(int, isn_last_reseed);
+static VNET_DEFINE(u_int32_t, isn_offset);
+static VNET_DEFINE(u_int32_t, isn_offset_old);
+
+#define	V_isn_secret			VNET(isn_secret)
+#define	V_isn_last_reseed		VNET(isn_last_reseed)
+#define	V_isn_offset			VNET(isn_offset)
+#define	V_isn_offset_old		VNET(isn_offset_old)
 
 tcp_seq
 tcp_new_isn(struct tcpcb *tp)
 {
-	INIT_VNET_INET(tp->t_vnet);
 	MD5_CTX isn_ctx;
 	u_int32_t md5_buffer[4];
 	tcp_seq new_isn;
@@ -1546,11 +1565,10 @@ tcp_isn_tick(void *xtp)
 	VNET_ITERATOR_DECL(vnet_iter);
 	u_int32_t projected_offset;
 
+	VNET_LIST_RLOCK_NOSLEEP();
 	ISN_LOCK();
-	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter); /* XXX appease INVARIANTS */
-		INIT_VNET_INET(curvnet);
 		projected_offset =
 		    V_isn_offset_old + ISN_BYTES_PER_SECOND / 100;
 
@@ -1560,9 +1578,9 @@ tcp_isn_tick(void *xtp)
 		V_isn_offset_old = V_isn_offset;
 		CURVNET_RESTORE();
 	}
-	VNET_LIST_RUNLOCK();
-	callout_reset(&isn_callout, hz/100, tcp_isn_tick, NULL);
 	ISN_UNLOCK();
+	VNET_LIST_RUNLOCK_NOSLEEP();
+	callout_reset(&isn_callout, hz/100, tcp_isn_tick, NULL);
 }
 
 /*
@@ -1573,16 +1591,13 @@ tcp_isn_tick(void *xtp)
 struct inpcb *
 tcp_drop_syn_sent(struct inpcb *inp, int errno)
 {
-#ifdef INVARIANTS
-	INIT_VNET_INET(inp->inp_vnet);
-#endif
 	struct tcpcb *tp;
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 	INP_WLOCK_ASSERT(inp);
 
-	if ((inp->inp_vflag & INP_TIMEWAIT) ||
-	    (inp->inp_vflag & INP_DROPPED))
+	if ((inp->inp_flags & INP_TIMEWAIT) ||
+	    (inp->inp_flags & INP_DROPPED))
 		return (inp);
 
 	tp = intotcpcb(inp);
@@ -1605,13 +1620,12 @@ tcp_drop_syn_sent(struct inpcb *inp, int errno)
 struct inpcb *
 tcp_mtudisc(struct inpcb *inp, int errno)
 {
-	INIT_VNET_INET(inp->inp_vnet);
 	struct tcpcb *tp;
 	struct socket *so;
 
 	INP_WLOCK_ASSERT(inp);
-	if ((inp->inp_vflag & INP_TIMEWAIT) ||
-	    (inp->inp_vflag & INP_DROPPED))
+	if ((inp->inp_flags & INP_TIMEWAIT) ||
+	    (inp->inp_flags & INP_DROPPED))
 		return (inp);
 
 	tp = intotcpcb(inp);
@@ -1626,7 +1640,7 @@ tcp_mtudisc(struct inpcb *inp, int errno)
 		tp->t_maxseg = so->so_snd.sb_hiwat;
 	SOCKBUF_UNLOCK(&so->so_snd);
 
-	V_tcpstat.tcps_mturesent++;
+	TCPSTAT_INC(tcps_mturesent);
 	tp->t_rtttime = 0;
 	tp->snd_nxt = tp->snd_una;
 	tcp_free_sackholes(tp);
@@ -1812,7 +1826,6 @@ ipsec_hdrsiz_tcp(struct tcpcb *tp)
 void
 tcp_xmit_bandwidth_limit(struct tcpcb *tp, tcp_seq ack_seq)
 {
-	INIT_VNET_INET(tp->t_vnet);
 	u_long bw;
 	u_long bwnd;
 	int save_ticks;
@@ -1949,7 +1962,6 @@ int
 tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
     u_char *buf, u_int direction)
 {
-	INIT_VNET_IPSEC(curvnet);
 	union sockaddr_union dst;
 	struct ippseudo ippseudo;
 	MD5_CTX ctx;
@@ -2102,10 +2114,6 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 static int
 sysctl_drop(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(curvnet);
-#ifdef INET6
-	INIT_VNET_INET6(curvnet);
-#endif
 	/* addrs[0] is a foreign socket, addrs[1] is a local one. */
 	struct sockaddr_storage addrs[2];
 	struct inpcb *inp;
@@ -2114,7 +2122,6 @@ sysctl_drop(SYSCTL_HANDLER_ARGS)
 	struct sockaddr_in *fin, *lin;
 #ifdef INET6
 	struct sockaddr_in6 *fin6, *lin6;
-	struct in6_addr f6, l6;
 #endif
 	int error;
 
@@ -2174,8 +2181,9 @@ sysctl_drop(SYSCTL_HANDLER_ARGS)
 	switch (addrs[0].ss_family) {
 #ifdef INET6
 	case AF_INET6:
-		inp = in6_pcblookup_hash(&V_tcbinfo, &f6, fin6->sin6_port,
-		    &l6, lin6->sin6_port, 0, NULL);
+		inp = in6_pcblookup_hash(&V_tcbinfo, &fin6->sin6_addr,
+		    fin6->sin6_port, &lin6->sin6_addr, lin6->sin6_port, 0,
+		    NULL);
 		break;
 #endif
 	case AF_INET:
@@ -2185,7 +2193,7 @@ sysctl_drop(SYSCTL_HANDLER_ARGS)
 	}
 	if (inp != NULL) {
 		INP_WLOCK(inp);
-		if (inp->inp_vflag & INP_TIMEWAIT) {
+		if (inp->inp_flags & INP_TIMEWAIT) {
 			/*
 			 * XXXRW: There currently exists a state where an
 			 * inpcb is present, but its timewait state has been
@@ -2197,7 +2205,7 @@ sysctl_drop(SYSCTL_HANDLER_ARGS)
 				tcp_twclose(tw, 0);
 			else
 				INP_WUNLOCK(inp);
-		} else if (!(inp->inp_vflag & INP_DROPPED) &&
+		} else if (!(inp->inp_flags & INP_DROPPED) &&
 			   !(inp->inp_socket->so_options & SO_ACCEPTCONN)) {
 			tp = intotcpcb(inp);
 			tp = tcp_drop(tp, ECONNABORTED);

@@ -27,7 +27,7 @@
  * Mellon the rights to redistribute these changes without encumbrance.
  *
  * 	@(#) src/sys/cfs/coda_vfsops.h,v 1.1.1.1 1998/08/29 21:14:52 rvb Exp $
- * $FreeBSD: src/sys/fs/coda/coda_vfsops.h,v 1.14 2008/02/10 11:18:12 rwatson Exp $
+ * $FreeBSD: src/sys/fs/coda/coda_vfsops.h,v 1.15 2010/04/05 20:12:54 rwatson Exp $
  */
 
 #ifndef _CODA_VFSOPS_H_
@@ -42,7 +42,7 @@
 struct cfid {
 	u_short	cfid_len;
 	u_short	padding;
-	CodaFid	cfid_fid;
+	struct CodaFid	cfid_fid;
 };
 
 struct mbuf;

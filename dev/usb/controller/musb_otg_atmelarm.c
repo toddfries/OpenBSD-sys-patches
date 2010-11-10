@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb/controller/musb_otg_atmelarm.c,v 1.2 2009/03/09 20:05:46 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb/controller/musb_otg_atmelarm.c,v 1.7 2009/06/23 02:19:59 thompsa Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -24,14 +24,32 @@
  * SUCH DAMAGE.
  */
 
-#include <dev/usb/usb_mfunc.h>
-#include <dev/usb/usb_defs.h>
+#include <sys/stdint.h>
+#include <sys/stddef.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/bus.h>
+#include <sys/linker_set.h>
+#include <sys/module.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+#include <sys/sysctl.h>
+#include <sys/sx.h>
+#include <sys/unistd.h>
+#include <sys/callout.h>
+#include <sys/malloc.h>
+#include <sys/priv.h>
+
 #include <dev/usb/usb.h>
+#include <dev/usb/usbdi.h>
 
 #include <dev/usb/usb_core.h>
 #include <dev/usb/usb_busdma.h>
 #include <dev/usb/usb_process.h>
-#include <dev/usb/usb_sw_transfer.h>
 #include <dev/usb/usb_util.h>
 
 #include <dev/usb/usb_controller.h>
@@ -101,7 +119,7 @@ musbotg_attach(device_t dev)
 	sc->sc_otg.sc_bus.devices_max = MUSB2_MAX_DEVICES;
 
 	/* get all DMA memory */
-	if (usb2_bus_mem_alloc_all(&sc->sc_otg.sc_bus,
+	if (usb_bus_mem_alloc_all(&sc->sc_otg.sc_bus,
 	    USB_GET_DMA_TAG(dev), NULL)) {
 		return (ENOMEM);
 	}
@@ -131,10 +149,10 @@ musbotg_attach(device_t dev)
 
 #if (__FreeBSD_version >= 700031)
 	err = bus_setup_intr(dev, sc->sc_otg.sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
-	    NULL, (void *)musbotg_interrupt, sc, &sc->sc_otg.sc_intr_hdl);
+	    NULL, (driver_intr_t *)musbotg_interrupt, sc, &sc->sc_otg.sc_intr_hdl);
 #else
 	err = bus_setup_intr(dev, sc->sc_otg.sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
-	    (void *)musbotg_interrupt, sc, &sc->sc_otg.sc_intr_hdl);
+	    (driver_intr_t *)musbotg_interrupt, sc, &sc->sc_otg.sc_intr_hdl);
 #endif
 	if (err) {
 		sc->sc_otg.sc_intr_hdl = NULL;
@@ -194,7 +212,7 @@ musbotg_detach(device_t dev)
 		    sc->sc_otg.sc_io_res);
 		sc->sc_otg.sc_io_res = NULL;
 	}
-	usb2_bus_mem_free_all(&sc->sc_otg.sc_bus, NULL);
+	usb_bus_mem_free_all(&sc->sc_otg.sc_bus, NULL);
 
 	return (0);
 }

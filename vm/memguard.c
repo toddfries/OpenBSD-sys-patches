@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2005,
  *     Bosko Milekic <bmilekic@FreeBSD.org>.  All rights reserved.
  *
@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/memguard.c,v 1.7 2008/05/10 23:39:27 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/memguard.c,v 1.8 2010/04/07 16:29:10 joel Exp $");
 
 /*
  * MemGuard is a simple replacement allocator for debugging only

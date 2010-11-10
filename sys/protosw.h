@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)protosw.h	8.1 (Berkeley) 6/2/93
- * $FreeBSD: src/sys/sys/protosw.h,v 1.62 2009/01/06 11:02:17 bz Exp $
+ * $FreeBSD: src/sys/sys/protosw.h,v 1.63 2009/06/08 17:15:40 zec Exp $
  */
 
 #ifndef _SYS_PROTOSW_H_
@@ -70,6 +70,7 @@ typedef int	pr_output_t (struct mbuf *, struct socket *);
 typedef void	pr_ctlinput_t (int, struct sockaddr *, void *);
 typedef int	pr_ctloutput_t (struct socket *, struct sockopt *);
 typedef	void	pr_init_t (void);
+typedef	void	pr_destroy_t (void);
 typedef	void	pr_fasttimo_t (void);
 typedef	void	pr_slowtimo_t (void);
 typedef	void	pr_drain_t (void);
@@ -86,6 +87,7 @@ struct protosw {
 	pr_ctloutput_t *pr_ctloutput;	/* control output (from above) */
 /* utility hooks */
 	pr_init_t *pr_init;
+	pr_destroy_t *pr_destroy;
 	pr_fasttimo_t *pr_fasttimo;	/* fast timeout (200ms) */
 	pr_slowtimo_t *pr_slowtimo;	/* slow timeout (500ms) */
 	pr_drain_t *pr_drain;		/* flush any excess space possible */

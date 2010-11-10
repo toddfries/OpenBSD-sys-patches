@@ -49,6 +49,7 @@ extern "C" {
 #include <sys/conf.h>
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
+#include <sys/kcondvar.h>
 #include <sys/random.h>
 #include <sys/byteorder.h>
 #include <sys/systm.h>
@@ -132,5 +133,7 @@ extern struct mtx zfs_debug_mtx;
 		mtx_unlock(&zfs_debug_mtx);				\
 	}								\
 } while (0)
+
+#define	sys_shutdown	rebooting
 
 #endif	/* _SYS_ZFS_CONTEXT_H */

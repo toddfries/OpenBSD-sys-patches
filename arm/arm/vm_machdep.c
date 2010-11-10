@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/vm_machdep.c,v 1.38 2009/02/02 20:09:14 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/vm_machdep.c,v 1.45 2010/03/11 21:16:54 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,6 +51,8 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/vm_machdep.c,v 1.38 2009/02/02 20:09:14 cogn
 #include <sys/proc.h>
 #include <sys/socketvar.h>
 #include <sys/sf_buf.h>
+#include <sys/syscall.h>
+#include <sys/sysent.h>
 #include <sys/unistd.h>
 #include <machine/cpu.h>
 #include <machine/pcb.h>
@@ -119,9 +121,6 @@ cpu_fork(register struct thread *td1, register struct proc *p2,
 #ifdef __XSCALE__
 #ifndef CPU_XSCALE_CORE3
 	pmap_use_minicache(td2->td_kstack, td2->td_kstack_pages * PAGE_SIZE);
-	if (td2->td_altkstack)
-		pmap_use_minicache(td2->td_altkstack, td2->td_altkstack_pages *
-		    PAGE_SIZE);
 #endif
 #endif
 	td2->td_pcb = pcb2;
@@ -172,6 +171,9 @@ sf_buf_free(struct sf_buf *sf)
 	 if (sf->ref_count == 0) {
 		 TAILQ_INSERT_TAIL(&sf_buf_freelist, sf, free_entry);
 		 nsfbufsused--;
+		 pmap_kremove(sf->kva);
+		 sf->m = NULL;
+		 LIST_REMOVE(sf, list_entry);
 		 if (sf_buf_alloc_want > 0)
 			 wakeup_one(&sf_buf_freelist);
 	 }
@@ -262,6 +264,57 @@ done:
 	mtx_unlock(&sf_buf_lock);
 	return (sf);
 #endif
+}
+
+void
+cpu_set_syscall_retval(struct thread *td, int error)
+{
+	trapframe_t *frame;
+	int fixup;
+#ifdef __ARMEB__
+	uint32_t insn;
+#endif
+
+	frame = td->td_frame;
+	fixup = 0;
+
+#ifdef __ARMEB__
+	insn = *(u_int32_t *)(frame->tf_pc - INSN_SIZE);
+	if ((insn & 0x000fffff) == SYS___syscall) {
+		register_t *ap = &frame->tf_r0;
+		register_t code = ap[_QUAD_LOWWORD];
+		if (td->td_proc->p_sysent->sv_mask)
+			code &= td->td_proc->p_sysent->sv_mask;
+		fixup = (code != SYS_freebsd6_lseek && code != SYS_lseek)
+		    ? 1 : 0;
+	}
+#endif
+
+	switch (error) {
+	case 0:
+		if (fixup) {
+			frame->tf_r0 = 0;
+			frame->tf_r1 = td->td_retval[0];
+		} else {
+			frame->tf_r0 = td->td_retval[0];
+			frame->tf_r1 = td->td_retval[1];
+		}
+		frame->tf_spsr &= ~PSR_C_bit;   /* carry bit */
+		break;
+	case ERESTART:
+		/*
+		 * Reconstruct the pc to point at the swi.
+		 */
+		frame->tf_pc -= INSN_SIZE;
+		break;
+	case EJUSTRETURN:
+		/* nothing to do */
+		break;
+	default:
+		frame->tf_r0 = error;
+		frame->tf_spsr |= PSR_C_bit;    /* carry bit */
+		break;
+	}
 }
 
 /*
@@ -426,10 +479,15 @@ arm_remap_nocache(void *addr, vm_size_t size)
 		vm_offset_t tomap = arm_nocache_startaddr + i * PAGE_SIZE;
 		void *ret = (void *)tomap;
 		vm_paddr_t physaddr = vtophys((vm_offset_t)addr);
+		vm_offset_t vaddr = (vm_offset_t) addr;
 		
+		vaddr = vaddr & ~PAGE_MASK;
 		for (; tomap < (vm_offset_t)ret + size; tomap += PAGE_SIZE,
-		    physaddr += PAGE_SIZE, i++) {
+		    vaddr += PAGE_SIZE, physaddr += PAGE_SIZE, i++) {
+			cpu_idcache_wbinv_range(vaddr, PAGE_SIZE);
+			cpu_l2cache_wbinv_range(vaddr, PAGE_SIZE);
 			pmap_kenter_nocache(tomap, physaddr);
+			cpu_tlb_flushID_SE(vaddr);
 			arm_nocache_allocated[i / BITS_PER_INT] |= 1 << (i % 
 			    BITS_PER_INT);
 		}
@@ -447,9 +505,12 @@ arm_unmap_nocache(void *addr, vm_size_t size)
 
 	size = round_page(size);
 	i = (raddr - arm_nocache_startaddr) / (PAGE_SIZE);
-	for (; size > 0; size -= PAGE_SIZE, i++)
+	for (; size > 0; size -= PAGE_SIZE, i++) {
 		arm_nocache_allocated[i / BITS_PER_INT] &= ~(1 << (i % 
 		    BITS_PER_INT));
+		pmap_kremove(raddr);
+		raddr += PAGE_SIZE;
+	}
 }
 
 #ifdef ARM_USE_SMALL_ALLOC
@@ -483,7 +544,7 @@ arm_ptovirt(vm_paddr_t pa)
 	int i;
 	vm_offset_t addr = alloc_firstaddr;
 
-	KASSERT(alloc_firstaddr != 0, ("arm_ptovirt called to early ?"));
+	KASSERT(alloc_firstaddr != 0, ("arm_ptovirt called too early ?"));
 	for (i = 0; dump_avail[i + 1]; i += 2) {
 		if (pa >= dump_avail[i] && pa < dump_avail[i + 1])
 			break;

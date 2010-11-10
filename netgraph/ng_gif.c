@@ -62,14 +62,12 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.24 2009/02/27 14:12:05 bz Exp $
+ * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.29 2009/08/23 20:40:19 rwatson Exp $
  */
 
 /*
  * ng_gif(4) netgraph node type
  */
-#include "opt_route.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -78,7 +76,6 @@
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/socket.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -563,19 +560,18 @@ ng_gif_mod_event(module_t mod, int event, void *data)
 		ng_gif_input_orphan_p = ng_gif_input_orphan;
 
 		/* Create nodes for any already-existing gif interfaces */
-		IFNET_RLOCK();
 		VNET_LIST_RLOCK();
+		IFNET_RLOCK();
 		VNET_FOREACH(vnet_iter) {
 			CURVNET_SET_QUIET(vnet_iter); /* XXX revisit quiet */
-			INIT_VNET_NET(curvnet);
 			TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 				if (ifp->if_type == IFT_GIF)
 					ng_gif_attach(ifp);
 			}
 			CURVNET_RESTORE();
 		}
-		VNET_LIST_RUNLOCK();
 		IFNET_RUNLOCK();
+		VNET_LIST_RUNLOCK();
 		break;
 
 	case MOD_UNLOAD:

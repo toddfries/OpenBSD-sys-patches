@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket_rfcomm.h,v 1.10 2003/03/29 22:27:42 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/include/ng_btsocket_rfcomm.h,v 1.8 2006/07/21 17:11:13 rwatson Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/include/ng_btsocket_rfcomm.h,v 1.9 2009/09/10 23:30:13 emax Exp $
  */
 
 #ifndef _NETGRAPH_BTSOCKET_RFCOMM_H_
@@ -85,8 +85,8 @@
 
 /* RPN parameters - data bits */
 #define RFCOMM_RPN_DATA_5		0x0
-#define RFCOMM_RPN_DATA_6		0x1
-#define RFCOMM_RPN_DATA_7		0x2
+#define RFCOMM_RPN_DATA_6		0x2
+#define RFCOMM_RPN_DATA_7		0x1
 #define RFCOMM_RPN_DATA_8		0x3
 
 /* RPN parameters - stop bit */

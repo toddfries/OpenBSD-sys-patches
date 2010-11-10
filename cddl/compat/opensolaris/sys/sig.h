@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sig.h,v 1.1 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sig.h,v 1.2 2009/07/14 22:52:46 kib Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_SIG_H_
@@ -55,7 +55,7 @@ issig(int why)
 		p = td->td_proc;
 		PROC_LOCK(p);
 		mtx_lock(&p->p_sigacts->ps_mtx);
-		sig = cursig(td);
+		sig = cursig(td, SIG_STOP_ALLOWED);
 		mtx_unlock(&p->p_sigacts->ps_mtx);
 		PROC_UNLOCK(p);
 		if (sig != 0)

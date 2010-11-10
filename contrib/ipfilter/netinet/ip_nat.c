@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_nat.c,v 1.46 2008/07/26 19:46:00 darrenr Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_nat.c,v 1.47 2009/05/27 14:11:23 jamie Exp $	*/
 
 /*
  * Copyright (C) 1995-2003 by Darren Reed.
@@ -117,7 +117,7 @@ extern struct ifnet vpnif;
 
 #if !defined(lint)
 static const char sccsid[] = "@(#)ip_nat.c	1.11 6/5/96 (C) 1995 Darren Reed";
-static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_nat.c,v 1.46 2008/07/26 19:46:00 darrenr Exp $";
+static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_nat.c,v 1.47 2009/05/27 14:11:23 jamie Exp $";
 /* static const char rcsid[] = "@(#)$Id: ip_nat.c,v 2.195.2.102 2007/10/16 10:08:10 darrenr Exp $"; */
 #endif
 
@@ -662,7 +662,11 @@ void *ctx;
 		return EPERM;
 	}
 # else
+#  if defined(__FreeBSD_version) && (__FreeBSD_version >= 500034)
+	if (securelevel_ge(curthread->td_ucred, 3) && (mode & FWRITE)) {
+#  else
 	if ((securelevel >= 3) && (mode & FWRITE)) {
+#  endif
 		return EPERM;
 	}
 # endif

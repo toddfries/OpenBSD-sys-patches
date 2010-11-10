@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_object.h,v 1.117 2009/02/08 22:17:24 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_object.h,v 1.122 2009/12/21 12:29:38 kib Exp $
  */
 
 /*
@@ -92,6 +92,7 @@ struct vm_object {
 	int generation;			/* generation ID */
 	int ref_count;			/* How many refs?? */
 	int shadow_count;		/* how many objects that this is a shadow for */
+	vm_memattr_t memattr;		/* default memory attribute for pages */
 	objtype_t type;			/* type of pager */
 	u_short flags;			/* see below */
 	u_short pg_color;		/* (c) color of first page in obj */
@@ -123,6 +124,15 @@ struct vm_object {
 		} devp;
 
 		/*
+		 * SG pager
+		 *
+		 *	sgp_pglist - list of allocated pages
+		 */
+		struct {
+			TAILQ_HEAD(, vm_page) sgp_pglist;
+		} sgp;
+
+		/*
 		 * Swap pager
 		 *
 		 *	swp_bcount - number of swap 'swblock' metablocks, each
@@ -133,6 +143,8 @@ struct vm_object {
 			int swp_bcount;
 		} swp;
 	} un_pager;
+	struct uidinfo *uip;
+	vm_ooffset_t charge;
 };
 
 /*
@@ -142,7 +154,7 @@ struct vm_object {
 #define OBJ_DEAD	0x0008		/* dead objects (during rundown) */
 #define	OBJ_NOSPLIT	0x0010		/* dont split this object */
 #define OBJ_PIPWNT	0x0040		/* paging in progress wanted */
-#define OBJ_MIGHTBEDIRTY 0x0100		/* object might be dirty */
+#define OBJ_MIGHTBEDIRTY 0x0100		/* object might be dirty, only for vnode */
 #define OBJ_CLEANING	0x0200
 #define	OBJ_COLORED	0x1000		/* pg_color is defined */
 #define	OBJ_ONEMAPPING	0x2000		/* One USE (a single, non-forked) mapping flag */
@@ -198,7 +210,8 @@ void vm_object_pip_wait(vm_object_t object, char *waitid);
 
 vm_object_t vm_object_allocate (objtype_t, vm_pindex_t);
 void _vm_object_allocate (objtype_t, vm_pindex_t, vm_object_t);
-boolean_t vm_object_coalesce(vm_object_t, vm_ooffset_t, vm_size_t, vm_size_t);
+boolean_t vm_object_coalesce(vm_object_t, vm_ooffset_t, vm_size_t, vm_size_t,
+   boolean_t);
 void vm_object_collapse (vm_object_t);
 void vm_object_deallocate (vm_object_t);
 void vm_object_destroy (vm_object_t);
@@ -207,8 +220,10 @@ void vm_object_set_writeable_dirty (vm_object_t);
 void vm_object_init (void);
 void vm_object_page_clean (vm_object_t, vm_pindex_t, vm_pindex_t, boolean_t);
 void vm_object_page_remove (vm_object_t, vm_pindex_t, vm_pindex_t, boolean_t);
+boolean_t vm_object_populate(vm_object_t, vm_pindex_t, vm_pindex_t);
 void vm_object_reference (vm_object_t);
 void vm_object_reference_locked(vm_object_t);
+int  vm_object_set_memattr(vm_object_t object, vm_memattr_t memattr);
 void vm_object_shadow (vm_object_t *, vm_ooffset_t *, vm_size_t);
 void vm_object_split(vm_map_entry_t);
 void vm_object_sync(vm_object_t, vm_ooffset_t, vm_size_t, boolean_t,

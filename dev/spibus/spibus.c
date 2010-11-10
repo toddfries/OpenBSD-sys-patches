@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/spibus/spibus.c,v 1.2 2006/10/20 07:11:52 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/spibus/spibus.c,v 1.4 2009/06/11 17:06:58 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -112,7 +112,7 @@ spibus_child_pnpinfo_str(device_t bus, device_t child, char *buf,
 }
 
 static int
-spibus_read_ivar(device_t bus, device_t child, int which, u_char *result)
+spibus_read_ivar(device_t bus, device_t child, int which, u_int *result)
 {
 	struct spibus_ivar *devi = SPIBUS_IVAR(child);
 
@@ -194,5 +194,5 @@ static driver_t spibus_driver = {
 
 devclass_t	spibus_devclass;
 
-DRIVER_MODULE(spibus, at91_spi, spibus_driver, spibus_devclass, 0, 0);
+DRIVER_MODULE(spibus, spi, spibus_driver, spibus_devclass, 0, 0);
 MODULE_VERSION(spibus, 1);

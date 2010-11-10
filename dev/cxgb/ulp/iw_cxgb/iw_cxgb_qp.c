@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb_qp.c,v 1.3 2008/09/24 01:19:08 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb_qp.c,v 1.4 2010/02/20 10:19:19 uqs Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -675,7 +675,7 @@ static void __flush_qp(struct iwch_qp *qhp)
 	qhp->refcnt++;
 	mtx_unlock(&qhp->lock);
 
-	/* locking heirarchy: cq lock first, then qp lock. */
+	/* locking hierarchy: cq lock first, then qp lock. */
 	mtx_lock(&rchp->lock);
 	mtx_lock(&qhp->lock);
 	cxio_flush_hw_cq(&rchp->cq);
@@ -685,7 +685,7 @@ static void __flush_qp(struct iwch_qp *qhp)
 	mtx_unlock(&rchp->lock);
  	(*rchp->ibcq.comp_handler)(&rchp->ibcq, rchp->ibcq.cq_context);
 
-	/* locking heirarchy: cq lock first, then qp lock. */
+	/* locking hierarchy: cq lock first, then qp lock. */
 	mtx_lock(&schp->lock);
 	mtx_lock(&qhp->lock);
 	cxio_flush_hw_cq(&schp->cq);

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/aic/aic.c,v 1.27 2007/06/17 05:55:46 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/aic/aic.c,v 1.28 2009/05/13 22:31:25 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -168,7 +168,7 @@ aic_action(struct cam_sim *sim, union ccb *ccb)
 	}
 	case XPT_SET_TRAN_SETTINGS:
 	{
-		struct ccb_trans_settings *cts = cts = &ccb->cts;
+		struct ccb_trans_settings *cts = &ccb->cts;
 		struct aic_tinfo *ti = &aic->tinfo[ccb->ccb_h.target_id];
 		struct ccb_trans_settings_scsi *scsi =
 		    &cts->proto_specific.scsi;

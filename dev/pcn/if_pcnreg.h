@@ -30,7 +30,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/pcn/if_pcnreg.h,v 1.1 2008/08/14 20:34:46 imp Exp $
+ * $FreeBSD: src/sys/dev/pcn/if_pcnreg.h,v 1.2 2009/11/19 22:14:23 jhb Exp $
  */
 
 /*
@@ -465,6 +465,7 @@ struct pcn_softc {
 	struct pcn_ring_data	pcn_cdata;
 	struct callout		pcn_stat_callout;
 	struct mtx		pcn_mtx;
+	int			pcn_timer;
 };
 
 #define	PCN_LOCK(_sc)		mtx_lock(&(_sc)->pcn_mtx)

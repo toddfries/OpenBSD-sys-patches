@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/common/bootstrap.h,v 1.46 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/boot/common/bootstrap.h,v 1.47 2010/01/09 22:54:29 marcel Exp $
  */
 
 #include <sys/types.h>
@@ -45,6 +45,7 @@ struct devdesc
 #define	DEVT_CD		3
 #define DEVT_ZFS	4
     int			d_unit;
+    void		*d_opendata;
 };
 
 /* Commands and return values; nonzero return sets command_errmsg != NULL */

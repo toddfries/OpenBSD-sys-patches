@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.165 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.166 2009/06/30 19:03:27 dfr Exp $");
 
 #include "opt_apic.h"
 #include "opt_compat.h"
@@ -67,7 +67,6 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.165 2008/12/29 06:31:03 kma
 #include <net/if.h>
 #include <netinet/in.h>
 #include <nfs/nfsproto.h>
-#include <nfs/rpcv2.h>
 #include <nfsclient/nfs.h>
 #include <nfsclient/nfsdiskless.h>
 #ifdef DEV_APIC

@@ -2,7 +2,6 @@
 /******************************************************************************
  *
  * Module Name: aslutils -- compiler utilities
- *              $Revision: 1.72 $
  *
  *****************************************************************************/
 
@@ -10,7 +9,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2007, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2010, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -118,8 +117,8 @@
 
 #include <contrib/dev/acpica/compiler/aslcompiler.h>
 #include "aslcompiler.y.h"
-#include <contrib/dev/acpica/acnamesp.h>
-#include <contrib/dev/acpica/amlcode.h>
+#include <contrib/dev/acpica/include/acnamesp.h>
+#include <contrib/dev/acpica/include/amlcode.h>
 
 #define _COMPONENT          ACPI_COMPILER
         ACPI_MODULE_NAME    ("aslutils")
@@ -131,13 +130,19 @@ static const char * const       *yytname = &AslCompilername[254];
 extern const char * const       yytname[];
 #endif
 
+char                    HexLookup[] =
+{
+    '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
+};
+
+
 /* Local prototypes */
 
 static ACPI_STATUS
 UtStrtoul64 (
     char                    *String,
     UINT32                  Base,
-    ACPI_INTEGER            *RetInteger);
+    UINT64                  *RetInteger);
 
 static void
 UtPadNameWithUnderscores (
@@ -333,8 +338,8 @@ UtConvertByteToHex (
     Buffer[0] = '0';
     Buffer[1] = 'x';
 
-    Buffer[2] = (UINT8) hex[(RawByte >> 4) & 0xF];
-    Buffer[3] = (UINT8) hex[RawByte & 0xF];
+    Buffer[2] = (UINT8) HexLookup[(RawByte >> 4) & 0xF];
+    Buffer[3] = (UINT8) HexLookup[RawByte & 0xF];
 }
 
 
@@ -359,8 +364,8 @@ UtConvertByteToAsmHex (
 {
 
     Buffer[0] = '0';
-    Buffer[1] = (UINT8) hex[(RawByte >> 4) & 0xF];
-    Buffer[2] = (UINT8) hex[RawByte & 0xF];
+    Buffer[1] = (UINT8) HexLookup[(RawByte >> 4) & 0xF];
+    Buffer[2] = (UINT8) HexLookup[RawByte & 0xF];
     Buffer[3] = 'h';
 }
 
@@ -514,8 +519,8 @@ UtDisplaySummary (
     {
         /* Compiler name and version number */
 
-        FlPrintFile (FileId, "%s version %X [%s]\n",
-            CompilerId, (UINT32) ACPI_CA_VERSION, __DATE__);
+        FlPrintFile (FileId, "%s version %X\n",
+            CompilerId, (UINT32) ACPI_CA_VERSION);
     }
 
     /* Input/Output summary */
@@ -530,7 +535,7 @@ UtDisplaySummary (
     if ((Gbl_ExceptionCount[ASL_ERROR] == 0) || (Gbl_IgnoreErrors))
     {
         FlPrintFile (FileId,
-            "AML Output: %s - %d bytes %d named objects %d executable opcodes\n\n",
+            "AML Output: %s - %d bytes, %d named objects, %d executable opcodes\n\n",
             Gbl_Files[ASL_FILE_AML_OUTPUT].Filename, Gbl_TableLength,
             TotalNamedObjects, TotalExecutableOpcodes);
     }
@@ -841,12 +846,12 @@ UtAttachNamepathToOwner (
  *
  ******************************************************************************/
 
-ACPI_INTEGER
+UINT64
 UtDoConstant (
     char                    *String)
 {
     ACPI_STATUS             Status;
-    ACPI_INTEGER            Converted;
+    UINT64                  Converted;
     char                    ErrBuf[64];
 
 
@@ -883,11 +888,11 @@ static ACPI_STATUS
 UtStrtoul64 (
     char                    *String,
     UINT32                  Base,
-    ACPI_INTEGER            *RetInteger)
+    UINT64                  *RetInteger)
 {
     UINT32                  Index;
     UINT32                  Sign;
-    ACPI_INTEGER            ReturnValue = 0;
+    UINT64                  ReturnValue = 0;
     ACPI_STATUS             Status = AE_OK;
 
 
@@ -911,7 +916,7 @@ UtStrtoul64 (
 
     /* Skip over any white space in the buffer: */
 
-    while (isspace (*String) || *String == '\t')
+    while (isspace ((int) *String) || *String == '\t')
     {
         ++String;
     }
@@ -943,7 +948,7 @@ UtStrtoul64 (
     {
         if (*String == '0')
         {
-            if (tolower (*(++String)) == 'x')
+            if (tolower ((int) *(++String)) == 'x')
             {
                 Base = 16;
                 ++String;
@@ -970,7 +975,7 @@ UtStrtoul64 (
 
     if (Base == 16 &&
         *String == '0' &&
-        tolower (*(++String)) == 'x')
+        tolower ((int) *(++String)) == 'x')
     {
         String++;
     }
@@ -979,14 +984,14 @@ UtStrtoul64 (
 
     while (*String)
     {
-        if (isdigit (*String))
+        if (isdigit ((int) *String))
         {
             Index = ((UINT8) *String) - '0';
         }
         else
         {
-            Index = (UINT8) toupper (*String);
-            if (isupper ((char) Index))
+            Index = (UINT8) toupper ((int) *String);
+            if (isupper ((int) Index))
             {
                 Index = Index - 'A' + 10;
             }
@@ -1003,8 +1008,8 @@ UtStrtoul64 (
 
         /* Check to see if value is out of range: */
 
-        if (ReturnValue > ((ACPI_INTEGER_MAX - (ACPI_INTEGER) Index) /
-                            (ACPI_INTEGER) Base))
+        if (ReturnValue > ((ACPI_UINT64_MAX - (UINT64) Index) /
+                            (UINT64) Base))
         {
             goto ErrorExit;
         }

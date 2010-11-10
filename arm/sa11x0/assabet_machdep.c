@@ -47,7 +47,7 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/sa11x0/assabet_machdep.c,v 1.28 2009/02/02 20:24:29 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/sa11x0/assabet_machdep.c,v 1.31 2009/11/04 04:41:03 alc Exp $");
 
 #include "opt_md.h"
 
@@ -82,7 +82,6 @@ __FBSDID("$FreeBSD: src/sys/arm/sa11x0/assabet_machdep.c,v 1.28 2009/02/02 20:24
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
 #include <vm/vm_map.h>
-#include <vm/vnode_pager.h>
 #include <machine/pmap.h>
 #include <machine/vmparam.h>
 #include <machine/pcb.h>
@@ -209,6 +208,7 @@ initarm(void *arg, void *arg2)
 	struct pv_addr  kernel_l1pt;
 	struct pv_addr	md_addr;
 	struct pv_addr	md_bla;
+	struct pv_addr  dpcpu;
 	int loop;
 	u_int l1pagetable;
 	vm_offset_t freemempos;
@@ -268,6 +268,10 @@ initarm(void *arg, void *arg2)
 	 */
 	valloc_pages(systempage, 1);
 
+	/* Allocate dynamic per-cpu area. */
+	valloc_pages(dpcpu, DPCPU_SIZE / PAGE_SIZE);
+	dpcpu_init((void *)dpcpu.pv_va, 0);
+
 	/* Allocate stacks for all modes */
 	valloc_pages(irqstack, IRQ_STACK_SIZE);
 	valloc_pages(abtstack, ABT_STACK_SIZE);
@@ -308,6 +312,9 @@ initarm(void *arg, void *arg2)
 	pmap_map_chunk(l1pagetable, KERNBASE, KERNBASE,
 	    ((uint32_t)lastaddr - KERNBASE), VM_PROT_READ|VM_PROT_WRITE,
 	    PTE_CACHE);
+	/* Map the DPCPU pages */
+	pmap_map_chunk(l1pagetable, dpcpu.pv_va, dpcpu.pv_pa, DPCPU_SIZE,
+	    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
 	/* Map the stack pages */
 	pmap_map_chunk(l1pagetable, irqstack.pv_va, irqstack.pv_pa,
 	    IRQ_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);

@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/modules/usb/ucom/Makefile,v 1.1 2009/02/23 18:32:59 thompsa Exp $
+# $FreeBSD: src/sys/modules/usb/ucom/Makefile,v 1.2 2009/10/19 21:54:41 thompsa Exp $
 #
 # Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
 #
@@ -30,7 +30,7 @@ S=     ${.CURDIR}/../../..
 .PATH: $S/dev/usb/serial
 
 KMOD=	ucom
-SRCS=	opt_bus.h opt_usb.h device_if.h bus_if.h usb_if.h usbdevs.h \
+SRCS=	opt_bus.h opt_usb.h opt_gdb.h device_if.h bus_if.h usb_if.h usbdevs.h \
 	usb_serial.c
 
 .include <bsd.kmod.mk>

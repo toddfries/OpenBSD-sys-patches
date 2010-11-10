@@ -31,7 +31,7 @@
 /* $KAME: sctp_asconf.c,v 1.24 2005/03/06 16:04:16 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_asconf.c,v 1.40 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_asconf.c,v 1.46 2010/06/14 21:25:07 tuexen Exp $");
 #include <netinet/sctp_os.h>
 #include <netinet/sctp_var.h>
 #include <netinet/sctp_sysctl.h>
@@ -556,9 +556,9 @@ sctp_process_asconf_set_primary(struct mbuf *m,
 		 * PRIMARY with DELETE IP ADDRESS of the previous primary
 		 * destination, unacknowledged DATA are retransmitted
 		 * immediately to the new primary destination for seamless
-		 * handover.  If the destination is UNCONFIRMED and marked
-		 * to REQ_PRIM, The retransmission occur when reception of
-		 * the HEARTBEAT-ACK.  (See sctp_handle_heartbeat_ack in
+		 * handover. If the destination is UNCONFIRMED and marked to
+		 * REQ_PRIM, The retransmission occur when reception of the
+		 * HEARTBEAT-ACK.  (See sctp_handle_heartbeat_ack in
 		 * sctp_input.c) Also, when change of the primary
 		 * destination, it is better that all subsequent new DATA
 		 * containing already queued DATA are transmitted to the new
@@ -826,6 +826,7 @@ send_reply:
 	ack->serial_number = serial_num;
 	ack->last_sent_to = NULL;
 	ack->data = m_ack;
+	ack->len = 0;
 	n = m_ack;
 	while (n) {
 		ack->len += SCTP_BUF_LEN(n);
@@ -881,7 +882,7 @@ send_reply:
 				/* we probably don't need these operations */
 				(void)sa6_recoverscope(from6);
 				sa6_embedscope(from6,
-				    MODULE_GLOBAL(MOD_INET6, ip6_use_defzone));
+				    MODULE_GLOBAL(ip6_use_defzone));
 
 				break;
 			}
@@ -1025,7 +1026,8 @@ sctp_asconf_nets_cleanup(struct sctp_tcb *stcb, struct sctp_ifn *ifn)
 		 * address.
 		 */
 		if (SCTP_ROUTE_HAS_VALID_IFN(&net->ro) &&
-		    SCTP_GET_IF_INDEX_FROM_ROUTE(&net->ro) != ifn->ifn_index) {
+		    ((ifn == NULL) ||
+		    (SCTP_GET_IF_INDEX_FROM_ROUTE(&net->ro) != ifn->ifn_index))) {
 			/* clear any cached route */
 			RTFREE(net->ro.ro_rt);
 			net->ro.ro_rt = NULL;
@@ -1113,7 +1115,7 @@ sctp_assoc_immediate_retrans(struct sctp_tcb *stcb, struct sctp_nets *dstnet)
 		}
 		SCTP_TCB_LOCK_ASSERT(stcb);
 #ifdef SCTP_AUDITING_ENABLED
-		sctp_auditing(4, stcb->sctp_ep, stcb->asoc.deleted_primary);
+		sctp_auditing(4, stcb->sctp_ep, stcb, stcb->asoc.deleted_primary);
 #endif
 		sctp_chunk_output(stcb->sctp_ep, stcb, SCTP_OUTPUT_FROM_T3, SCTP_SO_NOT_LOCKED);
 		if ((stcb->asoc.num_send_timers_up == 0) &&
@@ -1166,7 +1168,7 @@ sctp_path_check_and_react(struct sctp_tcb *stcb, struct sctp_ifa *newifa)
 
 	/*
 	 * If number of local valid addresses is 1, the valid address is
-	 * probably newly added address.  Several valid addresses in this
+	 * probably newly added address. Several valid addresses in this
 	 * association.  A source address may not be changed.  Additionally,
 	 * they can be configured on a same interface as "alias" addresses.
 	 * (by micchie)
@@ -1210,7 +1212,7 @@ sctp_path_check_and_react(struct sctp_tcb *stcb, struct sctp_ifa *newifa)
 		/*
 		 * Check if the nexthop is corresponding to the new address.
 		 * If the new address is corresponding to the current
-		 * nexthop, the path will be changed.  If the new address is
+		 * nexthop, the path will be changed. If the new address is
 		 * NOT corresponding to the current nexthop, the path will
 		 * not be changed.
 		 */
@@ -2224,7 +2226,7 @@ sctp_asconf_iterator_stcb(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 				}
 				if (stcb->asoc.ipv4_local_scope == 0 &&
 				    IN4_ISPRIVATE_ADDRESS(&sin->sin_addr)) {
-					continue;;
+					continue;
 				}
 				if ((inp->sctp_flags & SCTP_PCB_FLAGS_BOUND_V6) &&
 				    SCTP_IPV6_V6ONLY(inp6)) {
@@ -3180,24 +3182,6 @@ sctp_addr_mgmt_ep_sa(struct sctp_inpcb *inp, struct sockaddr *sa,
 		ifa = NULL;
 	}
 	if (ifa != NULL) {
-		/* add this address */
-		struct sctp_asconf_iterator *asc;
-		struct sctp_laddr *wi;
-
-		SCTP_MALLOC(asc, struct sctp_asconf_iterator *,
-		    sizeof(struct sctp_asconf_iterator),
-		    SCTP_M_ASC_IT);
-		if (asc == NULL) {
-			SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_ASCONF, ENOMEM);
-			return (ENOMEM);
-		}
-		wi = SCTP_ZONE_GET(SCTP_BASE_INFO(ipi_zone_laddr),
-		    struct sctp_laddr);
-		if (wi == NULL) {
-			SCTP_FREE(asc, SCTP_M_ASC_IT);
-			SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_ASCONF, ENOMEM);
-			return (ENOMEM);
-		}
 		if (type == SCTP_ADD_IP_ADDRESS) {
 			sctp_add_local_addr_ep(inp, ifa, type);
 		} else if (type == SCTP_DEL_IP_ADDRESS) {
@@ -3205,8 +3189,6 @@ sctp_addr_mgmt_ep_sa(struct sctp_inpcb *inp, struct sockaddr *sa,
 
 			if (inp->laddr_count < 2) {
 				/* can't delete the last local address */
-				SCTP_FREE(asc, SCTP_M_ASC_IT);
-				SCTP_ZONE_FREE(SCTP_BASE_INFO(ipi_zone_laddr), wi);
 				SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_ASCONF, EINVAL);
 				return (EINVAL);
 			}
@@ -3218,27 +3200,49 @@ sctp_addr_mgmt_ep_sa(struct sctp_inpcb *inp, struct sockaddr *sa,
 				}
 			}
 		}
-		LIST_INIT(&asc->list_of_work);
-		asc->cnt = 1;
-		SCTP_INCR_LADDR_COUNT();
-		wi->ifa = ifa;
-		wi->action = type;
-		atomic_add_int(&ifa->refcount, 1);
-		LIST_INSERT_HEAD(&asc->list_of_work, wi, sctp_nxt_addr);
-		(void)sctp_initiate_iterator(sctp_asconf_iterator_ep,
-		    sctp_asconf_iterator_stcb,
-		    sctp_asconf_iterator_ep_end,
-		    SCTP_PCB_ANY_FLAGS,
-		    SCTP_PCB_ANY_FEATURES,
-		    SCTP_ASOC_ANY_STATE,
-		    (void *)asc, 0,
-		    sctp_asconf_iterator_end, inp, 0);
+		if (!LIST_EMPTY(&inp->sctp_asoc_list)) {
+			/*
+			 * There is no need to start the iterator if the inp
+			 * has no associations.
+			 */
+			struct sctp_asconf_iterator *asc;
+			struct sctp_laddr *wi;
+
+			SCTP_MALLOC(asc, struct sctp_asconf_iterator *,
+			    sizeof(struct sctp_asconf_iterator),
+			    SCTP_M_ASC_IT);
+			if (asc == NULL) {
+				SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_ASCONF, ENOMEM);
+				return (ENOMEM);
+			}
+			wi = SCTP_ZONE_GET(SCTP_BASE_INFO(ipi_zone_laddr), struct sctp_laddr);
+			if (wi == NULL) {
+				SCTP_FREE(asc, SCTP_M_ASC_IT);
+				SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_ASCONF, ENOMEM);
+				return (ENOMEM);
+			}
+			LIST_INIT(&asc->list_of_work);
+			asc->cnt = 1;
+			SCTP_INCR_LADDR_COUNT();
+			wi->ifa = ifa;
+			wi->action = type;
+			atomic_add_int(&ifa->refcount, 1);
+			LIST_INSERT_HEAD(&asc->list_of_work, wi, sctp_nxt_addr);
+			(void)sctp_initiate_iterator(sctp_asconf_iterator_ep,
+			    sctp_asconf_iterator_stcb,
+			    sctp_asconf_iterator_ep_end,
+			    SCTP_PCB_ANY_FLAGS,
+			    SCTP_PCB_ANY_FEATURES,
+			    SCTP_ASOC_ANY_STATE,
+			    (void *)asc, 0,
+			    sctp_asconf_iterator_end, inp, 0);
+		}
+		return (0);
 	} else {
 		/* invalid address! */
 		SCTP_LTRACE_ERR_RET(NULL, NULL, NULL, SCTP_FROM_SCTP_ASCONF, EADDRNOTAVAIL);
 		return (EADDRNOTAVAIL);
 	}
-	return (0);
 }
 
 void

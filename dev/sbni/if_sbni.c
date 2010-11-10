@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sbni/if_sbni.c,v 1.28 2008/09/10 18:42:19 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sbni/if_sbni.c,v 1.29 2010/05/03 07:32:50 sobomax Exp $");
 
 /*
  * Device driver for Granch SBNI12 leased line adapters
@@ -235,7 +235,7 @@ sbni_attach(struct sbni_softc *sc, int unit, struct sbni_flags flags)
 	ifp->if_init	= sbni_init;
 	ifp->if_start	= sbni_start;
 	ifp->if_ioctl	= sbni_ioctl;
-	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 
 	/* report real baud rate */
 	csr0 = sbni_inb(sc, CSR0);

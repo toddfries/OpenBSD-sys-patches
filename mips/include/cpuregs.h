@@ -52,7 +52,7 @@
  * from: Header: /sprite/src/kernel/vm/ds3100.md/RCS/vmPmaxConst.h,
  *	v 9.1 89/09/18 17:33:00 shirriff Exp  SPRITE (DECWRL)
  *
- * $FreeBSD: src/sys/mips/include/cpuregs.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/cpuregs.h,v 1.6 2010/04/19 06:01:58 jmallett Exp $
  */
 
 #ifndef _MIPS_CPUREGS_H_
@@ -78,33 +78,48 @@
  * Caching of mapped addresses is controlled by bits in the TLB entry.
  */
 
-#define	MIPS_KUSEG_START		0x0
-#define	MIPS_KSEG0_START		0x80000000
-#define	MIPS_KSEG0_END			0x9fffffff
-#define	MIPS_KSEG1_START		0xa0000000
-#define	MIPS_KSEG1_END			0xbfffffff
-#define	MIPS_KSSEG_START		0xc0000000
-#define	MIPS_KSSEG_END			0xdfffffff
+#if !defined(_LOCORE)
+#define	MIPS_KUSEG_START		0x00000000
+#define	MIPS_KSEG0_START		((intptr_t)(int32_t)0x80000000)
+#define	MIPS_KSEG0_END			((intptr_t)(int32_t)0x9fffffff)
+#define	MIPS_KSEG1_START		((intptr_t)(int32_t)0xa0000000)
+#define	MIPS_KSEG1_END			((intptr_t)(int32_t)0xbfffffff)
+#define	MIPS_KSSEG_START		((intptr_t)(int32_t)0xc0000000)
+#define	MIPS_KSSEG_END			((intptr_t)(int32_t)0xdfffffff)
+#define	MIPS_KSEG3_START		((intptr_t)(int32_t)0xe0000000)
+#define	MIPS_KSEG3_END			((intptr_t)(int32_t)0xffffffff)
+
 #define MIPS_KSEG2_START		MIPS_KSSEG_START
 #define MIPS_KSEG2_END			MIPS_KSSEG_END
-#define	MIPS_KSEG3_START		0xe0000000
-#define	MIPS_KSEG3_END			0xffffffff
-#define	MIPS_MAX_MEM_ADDR		0xbe000000
-#define	MIPS_RESERVED_ADDR		0xbfc80000
+#endif
 
-/* Map virtual address to index in mips3 r4k virtually-indexed cache */
-#define	MIPS3_VA_TO_CINDEX(x) \
-		((unsigned)(x) & 0xffffff | MIPS_KSEG0_START)
+#define	MIPS_XKPHYS_START		0x8000000000000000
+#define	MIPS_XKPHYS_END			0xbfffffffffffffff
+
+#define	MIPS_XKPHYS_CCA_UC		0x02	/* Uncached.  */
+#define	MIPS_XKPHYS_CCA_CNC		0x03	/* Cacheable non-coherent.  */
 
 #define	MIPS_PHYS_TO_XKPHYS(cca,x) \
 	((0x2ULL << 62) | ((unsigned long long)(cca) << 59) | (x))
-#define	MIPS_XKPHYS_TO_PHYS(x)	((x) & 0x0effffffffffffffULL)
+#define	MIPS_XKPHYS_TO_PHYS(x)	((x) & 0x07ffffffffffffffULL)
+
+#define	MIPS_XUSEG_START		0x0000000000000000
+#define	MIPS_XUSEG_END			0x0000010000000000
+
+#define	MIPS_XKSEG_START		0xc000000000000000
+#define	MIPS_XKSEG_END			0xc00000ff80000000
 
 /* CPU dependent mtc0 hazard hook */
 #ifdef TARGET_OCTEON
 #define	COP0_SYNC  nop; nop; nop; nop; nop;
+#elif defined(CPU_SB1)
+#define COP0_SYNC  ssnop; ssnop; ssnop; ssnop; ssnop; ssnop; ssnop; ssnop; ssnop
 #else
-#define	COP0_SYNC		/* nothing */
+/*
+ * Pick a reasonable default based on the "typical" spacing described in the
+ * "CP0 Hazards" chapter of MIPS Architecture Book Vol III.
+ */
+#define	COP0_SYNC  ssnop; ssnop; ssnop; ssnop; ssnop
 #endif
 #define	COP0_HAZARD_FPUENABLE	nop; nop; nop; nop;
 
@@ -471,7 +486,6 @@
  *				     (3=32bit, 6=64bit, i=impl dep)
  *  0	MIPS_COP_0_TLB_INDEX	3333 TLB Index.
  *  1	MIPS_COP_0_TLB_RANDOM	3333 TLB Random.
- *  2	MIPS_COP_0_TLB_LOW	3... r3k TLB entry low.
  *  2	MIPS_COP_0_TLB_LO0	.636 r4k TLB entry low.
  *  3	MIPS_COP_0_TLB_LO1	.636 r4k TLB entry low, extended.
  *  4	MIPS_COP_0_TLB_CONTEXT	3636 TLB Context.
@@ -531,10 +545,6 @@
 #define	MIPS_COP_0_EXC_PC	_(14)
 #define	MIPS_COP_0_PRID		_(15)
 
-
-/* MIPS-I */
-#define	MIPS_COP_0_TLB_LOW	_(2)
-
 /* MIPS-III */
 #define	MIPS_COP_0_TLB_LO0	_(2)
 #define	MIPS_COP_0_TLB_LO1	_(3)
@@ -577,6 +587,8 @@
 
 #define MIPS_CONFIG1_TLBSZ_MASK		0x7E000000	/* bits 30..25 # tlb entries minus one */
 #define MIPS_CONFIG1_TLBSZ_SHIFT	25
+#define	MIPS_MAX_TLB_ENTRIES		64
+
 #define MIPS_CONFIG1_IS_MASK		0x01C00000	/* bits 24..22 icache sets per way */
 #define MIPS_CONFIG1_IS_SHIFT		22
 #define MIPS_CONFIG1_IL_MASK		0x00380000	/* bits 21..19 icache line size */
@@ -848,6 +860,10 @@
 #define	MIPS_4KEc_R2	0x90	/* MIPS 4KEc_R2			ISA 32  Rel 2 */
 #define	MIPS_4KEmp_R2	0x91	/* MIPS 4KEm/4KEp_R2		ISA 32  Rel 2 */
 #define	MIPS_4KSd	0x92	/* MIPS 4KSd			ISA 32  Rel 2 */
+#define	MIPS_24K	0x93	/* MIPS 24Kc/24Kf		ISA 32  Rel 2 */
+#define	MIPS_34K	0x95	/* MIPS 34K			ISA 32  R2 MT */
+#define	MIPS_24KE	0x96	/* MIPS 24KEc			ISA 32  Rel 2 */
+#define	MIPS_74K	0x97	/* MIPS 74Kc/74Kf		ISA 32  Rel 2 */
 
 /*
  * AMD (company ID 3) use the processor ID field to donote the CPU core

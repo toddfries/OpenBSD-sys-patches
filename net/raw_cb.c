@@ -28,10 +28,8 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_cb.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_cb.c,v 1.44 2009/02/27 14:12:05 bz Exp $
+ * $FreeBSD: src/sys/net/raw_cb.c,v 1.48 2009/08/01 19:26:27 rwatson Exp $
  */
-
-#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -44,11 +42,9 @@
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
-#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/raw_cb.h>
-#include <net/route.h>
 #include <net/vnet.h>
 
 /*
@@ -61,9 +57,7 @@
  */
 
 struct mtx rawcb_mtx;
-#ifdef VIMAGE_GLOBALS
-struct rawcb_list_head rawcb_list;
-#endif
+VNET_DEFINE(struct rawcb_list_head, rawcb_list);
 
 SYSCTL_NODE(_net, OID_AUTO, raw, CTLFLAG_RW, 0, "Raw socket infrastructure");
 
@@ -82,7 +76,6 @@ SYSCTL_ULONG(_net_raw, OID_AUTO, recvspace, CTLFLAG_RW, &raw_recvspace, 0,
 int
 raw_attach(struct socket *so, int proto)
 {
-	INIT_VNET_NET(so->so_vnet);
 	struct rawcb *rp = sotorawcb(so);
 	int error;
 

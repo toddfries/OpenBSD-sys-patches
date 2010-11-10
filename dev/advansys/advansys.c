@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/advansys/advansys.c,v 1.35 2007/06/17 05:55:46 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/advansys/advansys.c,v 1.36 2009/07/10 08:18:08 scottl Exp $");
  
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1345,7 +1345,7 @@ adv_attach(adv)
 			/* highaddr	*/ BUS_SPACE_MAXADDR,
 			/* filter	*/ NULL,
 			/* filterarg	*/ NULL,
-			/* maxsize	*/ MAXPHYS,
+			/* maxsize	*/ ADV_MAXPHYS,
 			/* nsegments	*/ max_sg,
 			/* maxsegsz	*/ BUS_SPACE_MAXSIZE_32BIT,
 			/* flags	*/ BUS_DMA_ALLOCNOW,

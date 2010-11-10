@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.148 2009/03/08 19:05:53 marcus Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.160 2010/05/12 21:24:46 zml Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,6 +55,8 @@ __FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.148 2009/03/08 19:05:53 marcu
 #include <sys/dirent.h>
 #include <sys/poll.h>
 
+#include <security/mac/mac_framework.h>
+
 #include <vm/vm.h>
 #include <vm/vm_object.h>
 #include <vm/vm_extern.h>
@@ -65,6 +67,7 @@ __FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.148 2009/03/08 19:05:53 marcu
 #include <vm/vnode_pager.h>
 
 static int	vop_nolookup(struct vop_lookup_args *);
+static int	vop_norename(struct vop_rename_args *);
 static int	vop_nostrategy(struct vop_strategy_args *);
 static int	get_next_dirent(struct vnode *vp, struct dirent **dpp,
 				char *dirbuf, int dirbuflen, off_t *off,
@@ -81,14 +84,21 @@ static int	dirent_exists(struct vnode *vp, const char *dirname,
  *
  * If there is no specific entry here, we will return EOPNOTSUPP.
  *
+ * Note that every filesystem has to implement either vop_access
+ * or vop_accessx; failing to do so will result in immediate crash
+ * due to stack overflow, as vop_stdaccess() calls vop_stdaccessx(),
+ * which calls vop_stdaccess() etc.
  */
 
 struct vop_vector default_vnodeops = {
 	.vop_default =		NULL,
 	.vop_bypass =		VOP_EOPNOTSUPP,
 
+	.vop_access =		vop_stdaccess,
+	.vop_accessx =		vop_stdaccessx,
 	.vop_advlock =		vop_stdadvlock,
 	.vop_advlockasync =	vop_stdadvlockasync,
+	.vop_advlockpurge =	vop_stdadvlockpurge,
 	.vop_bmap =		vop_stdbmap,
 	.vop_close =		VOP_NULL,
 	.vop_fsync =		VOP_NULL,
@@ -98,7 +108,6 @@ struct vop_vector default_vnodeops = {
 	.vop_ioctl =		VOP_ENOTTY,
 	.vop_kqfilter =		vop_stdkqfilter,
 	.vop_islocked =		vop_stdislocked,
-	.vop_lease =		VOP_NULL,
 	.vop_lock1 =		vop_stdlock,
 	.vop_lookup =		vop_nolookup,
 	.vop_open =		VOP_NULL,
@@ -106,6 +115,7 @@ struct vop_vector default_vnodeops = {
 	.vop_poll =		vop_nopoll,
 	.vop_putpages =		vop_stdputpages,
 	.vop_readlink =		VOP_EINVAL,
+	.vop_rename =		vop_norename,
 	.vop_revoke =		VOP_PANIC,
 	.vop_strategy =		vop_nostrategy,
 	.vop_unlock =		vop_stdunlock,
@@ -196,6 +206,20 @@ vop_nolookup(ap)
 
 	*ap->a_vpp = NULL;
 	return (ENOTDIR);
+}
+
+/*
+ * vop_norename:
+ *
+ * Handle unlock and reference counting for arguments of vop_rename
+ * for filesystems that do not implement rename operation.
+ */
+static int
+vop_norename(struct vop_rename_args *ap)
+{
+
+	vop_rename_fail(ap);
+	return (EOPNOTSUPP);
 }
 
 /*
@@ -323,6 +347,32 @@ out:
 	return (found);
 }
 
+int
+vop_stdaccess(struct vop_access_args *ap)
+{
+
+	KASSERT((ap->a_accmode & ~(VEXEC | VWRITE | VREAD | VADMIN |
+	    VAPPEND)) == 0, ("invalid bit in accmode"));
+
+	return (VOP_ACCESSX(ap->a_vp, ap->a_accmode, ap->a_cred, ap->a_td));
+}
+
+int
+vop_stdaccessx(struct vop_accessx_args *ap)
+{
+	int error;
+	accmode_t accmode = ap->a_accmode;
+
+	error = vfs_unixify_accmode(&accmode);
+	if (error != 0)
+		return (error);
+
+	if (accmode == 0)
+		return (0);
+
+	return (VOP_ACCESS(ap->a_vp, accmode, ap->a_cred, ap->a_td));
+}
+
 /*
  * Advisory record locking support
  */
@@ -362,6 +412,16 @@ vop_stdadvlockasync(struct vop_advlockasync_args *ap)
 		return (error);
 
 	return (lf_advlockasync(ap, &(vp->v_lockf), vattr.va_size));
+}
+
+int
+vop_stdadvlockpurge(struct vop_advlockpurge_args *ap)
+{
+	struct vnode *vp;
+
+	vp = ap->a_vp;
+	lf_purgelocks(vp, &vp->v_lockf);
+	return (0);
 }
 
 /*
@@ -675,6 +735,7 @@ vop_stdvptocnp(struct vop_vptocnp_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
 	struct vnode **dvp = ap->a_vpp;
+	struct ucred *cred = ap->a_cred;
 	char *buf = ap->a_buf;
 	int *buflen = ap->a_buflen;
 	char *dirbuf, *cpos;
@@ -695,7 +756,7 @@ vop_stdvptocnp(struct vop_vptocnp_args *ap)
 	if (vp->v_type != VDIR)
 		return (ENOENT);
 
-	error = VOP_GETATTR(vp, &va, td->td_ucred);
+	error = VOP_GETATTR(vp, &va, cred);
 	if (error)
 		return (error);
 
@@ -705,7 +766,7 @@ vop_stdvptocnp(struct vop_vptocnp_args *ap)
 	NDINIT_ATVP(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE,
 	    "..", vp, td);
 	flags = FREAD;
-	error = vn_open(&nd, &flags, 0, NULL);
+	error = vn_open_cred(&nd, &flags, 0, VN_OPEN_NOAUDIT, cred, NULL);
 	if (error) {
 		vn_lock(vp, locked | LK_RETRY);
 		return (error);
@@ -720,7 +781,7 @@ vop_stdvptocnp(struct vop_vptocnp_args *ap)
 		*dvp = (*dvp)->v_mount->mnt_vnodecovered;
 		VREF(mvp);
 		VOP_UNLOCK(mvp, 0);
-		vn_close(mvp, FREAD, td->td_ucred, td);
+		vn_close(mvp, FREAD, cred, td);
 		VREF(*dvp);
 		vn_lock(*dvp, LK_EXCLUSIVE | LK_RETRY);
 		covered = 1;
@@ -785,7 +846,7 @@ out:
 		vrele(mvp);
 	} else {
 		VOP_UNLOCK(mvp, 0);
-		vn_close(mvp, FREAD, td->td_ucred, td);
+		vn_close(mvp, FREAD, cred, td);
 	}
 	vn_lock(vp, locked | LK_RETRY);
 	return (error);
@@ -796,47 +857,45 @@ out:
  * used to fill the vfs function table to get reasonable default return values.
  */
 int
-vfs_stdroot (mp, flags, vpp, td)
+vfs_stdroot (mp, flags, vpp)
 	struct mount *mp;
 	int flags;
 	struct vnode **vpp;
-	struct thread *td;
 {
 
 	return (EOPNOTSUPP);
 }
 
 int
-vfs_stdstatfs (mp, sbp, td)
+vfs_stdstatfs (mp, sbp)
 	struct mount *mp;
 	struct statfs *sbp;
-	struct thread *td;
 {
 
 	return (EOPNOTSUPP);
 }
 
 int
-vfs_stdquotactl (mp, cmds, uid, arg, td)
+vfs_stdquotactl (mp, cmds, uid, arg)
 	struct mount *mp;
 	int cmds;
 	uid_t uid;
 	void *arg;
-	struct thread *td;
 {
 
 	return (EOPNOTSUPP);
 }
 
 int
-vfs_stdsync(mp, waitfor, td)
+vfs_stdsync(mp, waitfor)
 	struct mount *mp;
 	int waitfor;
-	struct thread *td;
 {
 	struct vnode *vp, *mvp;
+	struct thread *td;
 	int error, lockreq, allerror = 0;
 
+	td = curthread;
 	lockreq = LK_EXCLUSIVE | LK_INTERLOCK;
 	if (waitfor != MNT_WAIT)
 		lockreq |= LK_NOWAIT;
@@ -862,10 +921,7 @@ loop:
 		error = VOP_FSYNC(vp, waitfor, td);
 		if (error)
 			allerror = error;
-
-		/* Do not turn this into vput.  td is not always curthread. */
-		VOP_UNLOCK(vp, 0);
-		vrele(vp);
+		vput(vp);
 		MNT_ILOCK(mp);
 	}
 	MNT_IUNLOCK(mp);
@@ -873,10 +929,9 @@ loop:
 }
 
 int
-vfs_stdnosync (mp, waitfor, td)
+vfs_stdnosync (mp, waitfor)
 	struct mount *mp;
 	int waitfor;
-	struct thread *td;
 {
 
 	return (0);
@@ -920,13 +975,12 @@ vfs_stduninit (vfsp)
 }
 
 int
-vfs_stdextattrctl(mp, cmd, filename_vp, attrnamespace, attrname, td)
+vfs_stdextattrctl(mp, cmd, filename_vp, attrnamespace, attrname)
 	struct mount *mp;
 	int cmd;
 	struct vnode *filename_vp;
 	int attrnamespace;
 	const char *attrname;
-	struct thread *td;
 {
 
 	if (filename_vp != NULL)

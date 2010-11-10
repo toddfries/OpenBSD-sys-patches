@@ -25,7 +25,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/boot/pc98/boot0.5/selector.s,v 1.3 2007/04/07 08:37:04 kato Exp $
+# $FreeBSD: src/sys/boot/pc98/boot0.5/selector.s,v 1.4 2010/01/02 17:32:40 mbr Exp $
 #
 
 	.code16
@@ -35,7 +35,7 @@
 # Display partition table.
 #
 showpartitions:
-	# Clear partion table area
+	# Clear partition table area
 	movw	$16, %cx
 clear_part:
 	push	%cx

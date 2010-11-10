@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/imgact_aout.c,v 1.106 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/imgact_aout.c,v 1.107 2010/05/23 18:32:02 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/exec.h>
@@ -89,6 +89,10 @@ struct sysentvec aout_sysvec = {
 #else
 #error Choose SV_XXX flags for the platform
 #endif
+	,
+	.sv_set_syscall_retval = cpu_set_syscall_retval,
+	.sv_fetch_syscall_args = cpu_fetch_syscall_args,
+	.sv_syscallnames = syscallnames,
 };
 
 static int

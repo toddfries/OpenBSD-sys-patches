@@ -30,15 +30,18 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/linux/linux_futex.h,v 1.5 2008/10/14 07:59:23 kib Exp $
+ * $FreeBSD: src/sys/compat/linux/linux_futex.h,v 1.7 2009/05/02 10:06:49 dchagin Exp $
  */
 
 #ifndef _LINUX_FUTEX_H
 #define _LINUX_FUTEX_H
 
+extern LIST_HEAD(futex_list, futex) futex_list;
+extern struct mtx futex_mtx;
+
 #define LINUX_FUTEX_WAIT	0
 #define LINUX_FUTEX_WAKE	1
-#define LINUX_FUTEX_FD		2
+#define LINUX_FUTEX_FD		2	/* unused */
 #define LINUX_FUTEX_REQUEUE	3
 #define LINUX_FUTEX_CMP_REQUEUE	4
 #define LINUX_FUTEX_WAKE_OP	5

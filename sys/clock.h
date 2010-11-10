@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +41,7 @@
  *
  * All that code should go here for service.
  *
- * $FreeBSD: src/sys/sys/clock.h,v 1.8 2008/04/22 19:38:30 phk Exp $
+ * $FreeBSD: src/sys/sys/clock.h,v 1.9 2010/03/03 17:55:51 joel Exp $
  */
 
 #ifndef _SYS_CLOCK_H_

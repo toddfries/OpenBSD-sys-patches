@@ -28,15 +28,17 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/syscons/scterm-teken.c,v 1.4 2009/03/10 11:28:54 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/syscons/scterm-teken.c,v 1.18 2009/11/13 11:28:54 ed Exp $");
 
 #include "opt_syscons.h"
+#include "opt_teken.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/consio.h>
+#include <sys/kbio.h>
 
 #if defined(__sparc64__) || defined(__powerpc__)
 #include <machine/sc_machdep.h>
@@ -46,19 +48,20 @@ __FBSDID("$FreeBSD: src/sys/dev/syscons/scterm-teken.c,v 1.4 2009/03/10 11:28:54
 
 #include <dev/syscons/syscons.h>
 
-#include <dev/syscons/teken/teken.h>
+#include <teken/teken.h>
 
 static void scteken_revattr(unsigned char, teken_attr_t *);
 static unsigned int scteken_attr(const teken_attr_t *);
 
-static sc_term_init_t	scteken_init;
-static sc_term_term_t	scteken_term;
-static sc_term_puts_t	scteken_puts;
-static sc_term_ioctl_t	scteken_ioctl;
-static sc_term_default_attr_t scteken_default_attr;
-static sc_term_clear_t	scteken_clear;
-static sc_term_input_t	scteken_input;
-static void		scteken_nop(void);
+static sc_term_init_t		scteken_init;
+static sc_term_term_t		scteken_term;
+static sc_term_puts_t		scteken_puts;
+static sc_term_ioctl_t		scteken_ioctl;
+static sc_term_default_attr_t	scteken_default_attr;
+static sc_term_clear_t		scteken_clear;
+static sc_term_input_t		scteken_input;
+static sc_term_fkeystr_t	scteken_fkeystr;
+static void			scteken_nop(void);
 
 typedef struct {
 	teken_t		ts_teken;
@@ -83,6 +86,7 @@ static sc_term_sw_t sc_term_scteken = {
 	scteken_clear,
 	(sc_term_notify_t *)scteken_nop,
 	scteken_input,
+	scteken_fkeystr,
 };
 
 SCTERM_MODULE(scteken, sc_term_scteken);
@@ -125,14 +129,23 @@ scteken_init(scr_stat *scp, void **softc, int code)
 		/* FALLTHROUGH */
 	case SC_TE_WARM_INIT:
 		teken_init(&ts->ts_teken, &scteken_funcs, scp);
+#ifndef TEKEN_UTF8
+		teken_set_8bit(&ts->ts_teken);
+#endif /* !TEKEN_UTF8 */
+#ifdef TEKEN_CONS25
+		teken_set_cons25(&ts->ts_teken);
+#endif /* TEKEN_CONS25 */
 
 		tp.tp_row = scp->ysize;
 		tp.tp_col = scp->xsize;
 		teken_set_winsize(&ts->ts_teken, &tp);
 
-		tp.tp_row = scp->cursor_pos / scp->xsize;
-		tp.tp_col = scp->cursor_pos % scp->xsize;
-		teken_set_cursor(&ts->ts_teken, &tp);
+		if (scp->cursor_pos < scp->ysize * scp->xsize) {
+			/* Valid old cursor position. */
+			tp.tp_row = scp->cursor_pos / scp->xsize;
+			tp.tp_col = scp->cursor_pos % scp->xsize;
+			teken_set_cursor(&ts->ts_teken, &tp);
+		}
 		break;
 	}
 
@@ -231,6 +244,56 @@ scteken_input(scr_stat *scp, int c, struct tty *tp)
 	return FALSE;
 }
 
+static const char *
+scteken_fkeystr(scr_stat *scp, int c)
+{
+	teken_stat *ts = scp->ts;
+	unsigned int k;
+
+	switch (c) {
+	case FKEY | F(1):  case FKEY | F(2):  case FKEY | F(3):
+	case FKEY | F(4):  case FKEY | F(5):  case FKEY | F(6):
+	case FKEY | F(7):  case FKEY | F(8):  case FKEY | F(9):
+	case FKEY | F(10): case FKEY | F(11): case FKEY | F(12):
+		k = TKEY_F1 + c - (FKEY | F(1));
+		break;
+	case FKEY | F(49):
+		k = TKEY_HOME;
+		break;
+	case FKEY | F(50):
+		k = TKEY_UP;
+		break;
+	case FKEY | F(51):
+		k = TKEY_PAGE_UP;
+		break;
+	case FKEY | F(53):
+		k = TKEY_LEFT;
+		break;
+	case FKEY | F(55):
+		k = TKEY_RIGHT;
+		break;
+	case FKEY | F(57):
+		k = TKEY_END;
+		break;
+	case FKEY | F(58):
+		k = TKEY_DOWN;
+		break;
+	case FKEY | F(59):
+		k = TKEY_PAGE_DOWN;
+		break;
+	case FKEY | F(60):
+		k = TKEY_INSERT;
+		break;
+	case FKEY | F(61):
+		k = TKEY_DELETE;
+		break;
+	default:
+		return (NULL);
+	}
+
+	return (teken_get_sequence(&ts->ts_teken, k));
+}
+
 static void
 scteken_nop(void)
 {
@@ -300,12 +363,20 @@ static unsigned int
 scteken_attr(const teken_attr_t *a)
 {
 	unsigned int attr = 0;
+	teken_color_t fg, bg;
 
+	if (a->ta_format & TF_REVERSE) {
+		fg = teken_256to8(a->ta_bgcolor);
+		bg = teken_256to8(a->ta_fgcolor);
+	} else {
+		fg = teken_256to8(a->ta_fgcolor);
+		bg = teken_256to8(a->ta_bgcolor);
+	}
 	if (a->ta_format & TF_BOLD)
-		attr |= fgcolors_bold[a->ta_fgcolor];
+		attr |= fgcolors_bold[fg];
 	else
-		attr |= fgcolors_normal[a->ta_fgcolor];
-	attr |= bgcolors[a->ta_bgcolor];
+		attr |= fgcolors_normal[fg];
+	attr |= bgcolors[bg];
 
 #ifdef FG_UNDERLINE
 	if (a->ta_format & TF_UNDERLINE)
@@ -335,6 +406,132 @@ scteken_cursor(void *arg, const teken_pos_t *p)
 	sc_move_cursor(scp, p->tp_col, p->tp_row);
 }
 
+#ifdef TEKEN_UTF8
+struct unicp437 {
+	uint16_t	unicode_base;
+	uint8_t		cp437_base;
+	uint8_t		length;
+};
+
+static const struct unicp437 cp437table[] = {
+	{ 0x0020, 0x20, 0x5e }, { 0x00a0, 0x20, 0x00 },
+	{ 0x00a1, 0xad, 0x00 }, { 0x00a2, 0x9b, 0x00 },
+	{ 0x00a3, 0x9c, 0x00 }, { 0x00a5, 0x9d, 0x00 },
+	{ 0x00a7, 0x15, 0x00 }, { 0x00aa, 0xa6, 0x00 },
+	{ 0x00ab, 0xae, 0x00 }, { 0x00ac, 0xaa, 0x00 },
+	{ 0x00b0, 0xf8, 0x00 }, { 0x00b1, 0xf1, 0x00 },
+	{ 0x00b2, 0xfd, 0x00 }, { 0x00b5, 0xe6, 0x00 },
+	{ 0x00b6, 0x14, 0x00 }, { 0x00b7, 0xfa, 0x00 },
+	{ 0x00ba, 0xa7, 0x00 }, { 0x00bb, 0xaf, 0x00 },
+	{ 0x00bc, 0xac, 0x00 }, { 0x00bd, 0xab, 0x00 },
+	{ 0x00bf, 0xa8, 0x00 }, { 0x00c4, 0x8e, 0x01 },
+	{ 0x00c6, 0x92, 0x00 }, { 0x00c7, 0x80, 0x00 },
+	{ 0x00c9, 0x90, 0x00 }, { 0x00d1, 0xa5, 0x00 },
+	{ 0x00d6, 0x99, 0x00 }, { 0x00dc, 0x9a, 0x00 },
+	{ 0x00df, 0xe1, 0x00 }, { 0x00e0, 0x85, 0x00 },
+	{ 0x00e1, 0xa0, 0x00 }, { 0x00e2, 0x83, 0x00 },
+	{ 0x00e4, 0x84, 0x00 }, { 0x00e5, 0x86, 0x00 },
+	{ 0x00e6, 0x91, 0x00 }, { 0x00e7, 0x87, 0x00 },
+	{ 0x00e8, 0x8a, 0x00 }, { 0x00e9, 0x82, 0x00 },
+	{ 0x00ea, 0x88, 0x01 }, { 0x00ec, 0x8d, 0x00 },
+	{ 0x00ed, 0xa1, 0x00 }, { 0x00ee, 0x8c, 0x00 },
+	{ 0x00ef, 0x8b, 0x00 }, { 0x00f0, 0xeb, 0x00 },
+	{ 0x00f1, 0xa4, 0x00 }, { 0x00f2, 0x95, 0x00 },
+	{ 0x00f3, 0xa2, 0x00 }, { 0x00f4, 0x93, 0x00 },
+	{ 0x00f6, 0x94, 0x00 }, { 0x00f7, 0xf6, 0x00 },
+	{ 0x00f8, 0xed, 0x00 }, { 0x00f9, 0x97, 0x00 },
+	{ 0x00fa, 0xa3, 0x00 }, { 0x00fb, 0x96, 0x00 },
+	{ 0x00fc, 0x81, 0x00 }, { 0x00ff, 0x98, 0x00 },
+	{ 0x0192, 0x9f, 0x00 }, { 0x0393, 0xe2, 0x00 },
+	{ 0x0398, 0xe9, 0x00 }, { 0x03a3, 0xe4, 0x00 },
+	{ 0x03a6, 0xe8, 0x00 }, { 0x03a9, 0xea, 0x00 },
+	{ 0x03b1, 0xe0, 0x01 }, { 0x03b4, 0xeb, 0x00 },
+	{ 0x03b5, 0xee, 0x00 }, { 0x03bc, 0xe6, 0x00 },
+	{ 0x03c0, 0xe3, 0x00 }, { 0x03c3, 0xe5, 0x00 },
+	{ 0x03c4, 0xe7, 0x00 }, { 0x03c6, 0xed, 0x00 },
+	{ 0x03d5, 0xed, 0x00 }, { 0x2010, 0x2d, 0x00 },
+	{ 0x2014, 0x2d, 0x00 }, { 0x2018, 0x60, 0x00 },
+	{ 0x2019, 0x27, 0x00 }, { 0x201c, 0x22, 0x00 },
+	{ 0x201d, 0x22, 0x00 }, { 0x2022, 0x07, 0x00 },
+	{ 0x203c, 0x13, 0x00 }, { 0x207f, 0xfc, 0x00 },
+	{ 0x20a7, 0x9e, 0x00 }, { 0x20ac, 0xee, 0x00 },
+	{ 0x2126, 0xea, 0x00 }, { 0x2190, 0x1b, 0x00 },
+	{ 0x2191, 0x18, 0x00 }, { 0x2192, 0x1a, 0x00 },
+	{ 0x2193, 0x19, 0x00 }, { 0x2194, 0x1d, 0x00 },
+	{ 0x2195, 0x12, 0x00 }, { 0x21a8, 0x17, 0x00 },
+	{ 0x2202, 0xeb, 0x00 }, { 0x2208, 0xee, 0x00 },
+	{ 0x2211, 0xe4, 0x00 }, { 0x2212, 0x2d, 0x00 },
+	{ 0x2219, 0xf9, 0x00 }, { 0x221a, 0xfb, 0x00 },
+	{ 0x221e, 0xec, 0x00 }, { 0x221f, 0x1c, 0x00 },
+	{ 0x2229, 0xef, 0x00 }, { 0x2248, 0xf7, 0x00 },
+	{ 0x2261, 0xf0, 0x00 }, { 0x2264, 0xf3, 0x00 },
+	{ 0x2265, 0xf2, 0x00 }, { 0x2302, 0x7f, 0x00 },
+	{ 0x2310, 0xa9, 0x00 }, { 0x2320, 0xf4, 0x00 },
+	{ 0x2321, 0xf5, 0x00 }, { 0x2500, 0xc4, 0x00 },
+	{ 0x2502, 0xb3, 0x00 }, { 0x250c, 0xda, 0x00 },
+	{ 0x2510, 0xbf, 0x00 }, { 0x2514, 0xc0, 0x00 },
+	{ 0x2518, 0xd9, 0x00 }, { 0x251c, 0xc3, 0x00 },
+	{ 0x2524, 0xb4, 0x00 }, { 0x252c, 0xc2, 0x00 },
+	{ 0x2534, 0xc1, 0x00 }, { 0x253c, 0xc5, 0x00 },
+	{ 0x2550, 0xcd, 0x00 }, { 0x2551, 0xba, 0x00 },
+	{ 0x2552, 0xd5, 0x00 }, { 0x2553, 0xd6, 0x00 },
+	{ 0x2554, 0xc9, 0x00 }, { 0x2555, 0xb8, 0x00 },
+	{ 0x2556, 0xb7, 0x00 }, { 0x2557, 0xbb, 0x00 },
+	{ 0x2558, 0xd4, 0x00 }, { 0x2559, 0xd3, 0x00 },
+	{ 0x255a, 0xc8, 0x00 }, { 0x255b, 0xbe, 0x00 },
+	{ 0x255c, 0xbd, 0x00 }, { 0x255d, 0xbc, 0x00 },
+	{ 0x255e, 0xc6, 0x01 }, { 0x2560, 0xcc, 0x00 },
+	{ 0x2561, 0xb5, 0x00 }, { 0x2562, 0xb6, 0x00 },
+	{ 0x2563, 0xb9, 0x00 }, { 0x2564, 0xd1, 0x01 },
+	{ 0x2566, 0xcb, 0x00 }, { 0x2567, 0xcf, 0x00 },
+	{ 0x2568, 0xd0, 0x00 }, { 0x2569, 0xca, 0x00 },
+	{ 0x256a, 0xd8, 0x00 }, { 0x256b, 0xd7, 0x00 },
+	{ 0x256c, 0xce, 0x00 }, { 0x2580, 0xdf, 0x00 },
+	{ 0x2584, 0xdc, 0x00 }, { 0x2588, 0xdb, 0x00 },
+	{ 0x258c, 0xdd, 0x00 }, { 0x2590, 0xde, 0x00 },
+	{ 0x2591, 0xb0, 0x02 }, { 0x25a0, 0xfe, 0x00 },
+	{ 0x25ac, 0x16, 0x00 }, { 0x25b2, 0x1e, 0x00 },
+	{ 0x25ba, 0x10, 0x00 }, { 0x25bc, 0x1f, 0x00 },
+	{ 0x25c4, 0x11, 0x00 }, { 0x25cb, 0x09, 0x00 },
+	{ 0x25d8, 0x08, 0x00 }, { 0x25d9, 0x0a, 0x00 },
+	{ 0x263a, 0x01, 0x01 }, { 0x263c, 0x0f, 0x00 },
+	{ 0x2640, 0x0c, 0x00 }, { 0x2642, 0x0b, 0x00 },
+	{ 0x2660, 0x06, 0x00 }, { 0x2663, 0x05, 0x00 },
+	{ 0x2665, 0x03, 0x01 }, { 0x266a, 0x0d, 0x01 },
+};
+
+static void
+scteken_get_cp437(teken_char_t *c, int *attr)
+{
+	int min, mid, max;
+
+	min = 0;
+	max = (sizeof(cp437table) / sizeof(struct unicp437)) - 1;
+
+	if (*c < cp437table[0].unicode_base ||
+	    *c > cp437table[max].unicode_base + cp437table[max].length)
+		goto bad;
+
+	while (max >= min) {
+		mid = (min + max) / 2;
+		if (*c < cp437table[mid].unicode_base) {
+			max = mid - 1;
+		} else if (*c > cp437table[mid].unicode_base +
+		    cp437table[mid].length) {
+			min = mid + 1;
+		} else {
+			*c -= cp437table[mid].unicode_base;
+			*c += cp437table[mid].cp437_base;
+			return;
+		}
+	}
+bad:
+	/* Character not present in CP437. */
+	*attr = (FG_RED|BG_BLACK) << 8;
+	*c = '?';
+}
+#endif /* TEKEN_UTF8 */
+
 static void
 scteken_putchar(void *arg, const teken_pos_t *tp, teken_char_t c,
     const teken_attr_t *a)
@@ -345,17 +542,11 @@ scteken_putchar(void *arg, const teken_pos_t *tp, teken_char_t c,
 	vm_offset_t p;
 	int cursor, attr;
 
+	attr = scteken_attr(a) << 8;
 #ifdef TEKEN_UTF8
-	if (c >= 0x80) {
-		/* XXX: Don't display UTF-8 yet. */
-		attr = (FG_YELLOW|BG_RED) << 8;
-		ch = '?';
-	} else
+	scteken_get_cp437(&c, &attr);
 #endif /* TEKEN_UTF8 */
-	{
-		attr = scteken_attr(a) << 8;
-		ch = c;
-	}
+	ch = c;
 
 	map = scp->sc->scr_map;
 
@@ -381,17 +572,11 @@ scteken_fill(void *arg, const teken_rect_t *r, teken_char_t c,
 	unsigned int width;
 	int attr, row;
 
+	attr = scteken_attr(a) << 8;
 #ifdef TEKEN_UTF8
-	if (c >= 0x80) {
-		/* XXX: Don't display UTF-8 yet. */
-		attr = (FG_YELLOW|BG_RED) << 8;
-		ch = '?';
-	} else
+	scteken_get_cp437(&c, &attr);
 #endif /* TEKEN_UTF8 */
-	{
-		attr = scteken_attr(a) << 8;
-		ch = c;
-	}
+	ch = c;
 
 	map = scp->sc->scr_map;
 
@@ -491,7 +676,7 @@ scteken_copy(void *arg, const teken_rect_t *r, const teken_pos_t *p)
 }
 
 static void
-scteken_param(void *arg, int cmd, int value)
+scteken_param(void *arg, int cmd, unsigned int value)
 {
 	scr_stat *scp = arg;
 
@@ -508,6 +693,13 @@ scteken_param(void *arg, int cmd, int value)
 	case TP_SWITCHVT:
 		sc_switch_scr(scp->sc, value);
 		break;
+	case TP_SETBELLPD:
+		scp->bell_pitch = TP_SETBELLPD_PITCH(value);
+		scp->bell_duration = TP_SETBELLPD_DURATION(value);
+		break;
+	case TP_MOUSE:
+		scp->mouse_level = value;
+		break;
 	}
 }
 
@@ -516,5 +708,5 @@ scteken_respond(void *arg, const void *buf, size_t len)
 {
 	scr_stat *scp = arg;
 
-	sc_respond(scp, buf, len);
+	sc_respond(scp, buf, len, 0);
 }

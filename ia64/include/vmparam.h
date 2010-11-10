@@ -35,7 +35,7 @@
  *
  *	@(#)vmparam.h	8.2 (Berkeley) 4/22/94
  *
- * $FreeBSD: src/sys/ia64/include/vmparam.h,v 1.19 2008/04/18 02:21:11 marcel Exp $
+ * $FreeBSD: src/sys/ia64/include/vmparam.h,v 1.21 2010/05/19 00:23:10 marcel Exp $
  */
 
 #ifndef	_MACHINE_VMPARAM_H_
@@ -129,10 +129,9 @@
 /*
  * Manipulating region bits of an address.
  */
-#define IA64_RR_BASE(n)         (((u_int64_t) (n)) << 61)
+#define IA64_RR_BASE(n)         (((uint64_t) (n)) << 61)
 #define IA64_RR_MASK(x)         ((x) & ((1L << 61) - 1))
 
-#define IA64_PHYS_TO_RR6(x)     ((x) | IA64_RR_BASE(6))
 #define IA64_PHYS_TO_RR7(x)     ((x) | IA64_RR_BASE(7))
 
 /*

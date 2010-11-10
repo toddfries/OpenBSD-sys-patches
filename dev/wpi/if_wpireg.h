@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/wpi/if_wpireg.h,v 1.3 2008/03/10 23:16:48 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/wpi/if_wpireg.h,v 1.4 2009/03/27 03:17:25 jmallett Exp $	*/
 
 /*-
  * Copyright (c) 2006,2007
@@ -235,12 +235,10 @@ struct wpi_rx_head {
 
 struct wpi_rx_tail {
 	uint32_t	flags;
-#if 0
 #define WPI_RX_NO_CRC_ERR	(1 << 0)
 #define WPI_RX_NO_OVFL_ERR	(1 << 1)
 /* shortcut for the above */
 #define WPI_RX_NOERROR		(WPI_RX_NO_CRC_ERR | WPI_RX_NO_OVFL_ERR)
-#endif
 	uint64_t	tstamp;
 	uint32_t	tbeacon;
 } __packed;

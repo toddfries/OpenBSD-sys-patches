@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/kthread.h,v 1.12 2007/10/26 17:03:22 julian Exp $
+ * $FreeBSD: src/sys/sys/kthread.h,v 1.14 2010/05/21 17:14:36 jhb Exp $
  */
 
 #ifndef _SYS_KTHREAD_H_
@@ -63,7 +63,7 @@ int     kproc_kthread_add(void (*)(void *), void *,
 	    struct proc **,
 	    struct thread **,
 	    int flags, int pages,
-	    char * procname, const char *, ...) __printflike(8, 9);
+	    const char *procname, const char *, ...) __printflike(8, 9);
 
 int     kthread_add(void (*)(void *), void *,
 	    struct proc *, struct thread **,
@@ -73,7 +73,7 @@ int	kthread_resume(struct thread *);
 void	kthread_shutdown(void *, int);
 void	kthread_start(const void *);
 int	kthread_suspend(struct thread *, int);
-void	kthread_suspend_check(struct thread *);
+void	kthread_suspend_check(void);
 
 
 #endif /* !_SYS_KTHREAD_H_ */

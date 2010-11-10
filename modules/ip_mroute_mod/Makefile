@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/ip_mroute_mod/Makefile,v 1.17 2008/12/02 21:37:28 bz Exp $
+# $FreeBSD: src/sys/modules/ip_mroute_mod/Makefile,v 1.20 2009/06/08 19:57:35 bz Exp $
 
 .include <bsd.own.mk>
 
@@ -7,22 +7,13 @@
 KMOD=	ip_mroute
 
 SRCS=	ip_mroute.c
-SRCS+=	opt_inet.h opt_mac.h opt_mrouting.h opt_route.h
-SRCS+=	opt_inet6.h
-
-.if ${MK_INET6_SUPPORT} != "no"
-SRCS+=	ip6_mroute.c
-.endif
+SRCS+=	opt_inet.h opt_mrouting.h
 
 .if !defined(KERNBUILDDIR)
 opt_inet.h:
 	echo "#define INET 1" > ${.TARGET}
 opt_mrouting.h:
 	echo "#define MROUTING 1" > ${.TARGET}
-.if ${MK_INET6_SUPPORT} != "no"
-opt_inet6.h:
-	echo "#define INET6 1" > ${.TARGET}
-.endif
 .endif
 
 .include <bsd.kmod.mk>

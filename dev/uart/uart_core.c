@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.25 2008/08/20 08:31:58 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.27 2009/11/28 11:13:50 ed Exp $");
 
 #ifndef KLD_MODULE
 #include "opt_comconsole.h"
@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.25 2008/08/20 08:31:58 ed E
 #include <sys/reboot.h>
 #include <machine/bus.h>
 #include <sys/rman.h>
-#include <sys/termios.h>
 #include <machine/resource.h>
 #include <machine/stdarg.h>
 
@@ -91,7 +90,7 @@ uart_getrange(struct uart_class *uc)
  * Schedule a soft interrupt. We do this on the 0 to !0 transition
  * of the TTY pending interrupt status.
  */
-static void
+void
 uart_sched_softih(struct uart_softc *sc, uint32_t ipend)
 {
 	uint32_t new, old;

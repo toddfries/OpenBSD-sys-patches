@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_usb.c,v 1.12 2009/03/07 07:26:22 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_usb.c,v 1.22 2010/01/07 21:01:37 mbr Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,7 +53,7 @@ __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_usb.c,v 1.12 2009/03/07 07:26:22
 #include <sys/bus.h>
 #include <machine/bus.h>
 #include <dev/usb/usb.h>
-#include <dev/usb/usb_core.h>
+#include <dev/usb/usbdi.h>
 
 #include <net80211/ieee80211_var.h>
 
@@ -111,7 +111,7 @@ DRIVER_MODULE(ndis, uhub, ndis_driver, ndis_devclass, ndisdrv_modevent, 0);
 static int
 ndisusb_devcompare(interface_type bustype, struct ndis_usb_type *t, device_t dev)
 {
-	struct usb2_attach_arg *uaa;
+	struct usb_attach_arg *uaa;
 
 	if (bustype != PNPBus)
 		return (FALSE);
@@ -134,9 +134,9 @@ static int
 ndisusb_match(device_t self)
 {
 	struct drvdb_ent *db;
-	struct usb2_attach_arg *uaa = device_get_ivars(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 
-	if (uaa->usb2_mode != USB_MODE_HOST)
+	if (uaa->usb_mode != USB_MODE_HOST)
 		return (ENXIO);
 	if (uaa->info.bConfigIndex != NDISUSB_CONFIG_NO)
 		return (ENXIO);
@@ -149,7 +149,7 @@ ndisusb_match(device_t self)
 	db = windrv_match((matchfuncptr)ndisusb_devcompare, self);
 	if (db == NULL)
 		return (ENXIO);
-	uaa->driver_info = db;
+	uaa->driver_ivar = db;
 
 	return (0);
 }
@@ -159,15 +159,17 @@ ndisusb_attach(device_t self)
 {
 	const struct drvdb_ent	*db;
 	struct ndisusb_softc *dummy = device_get_softc(self);
-	struct usb2_attach_arg *uaa = device_get_ivars(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 	struct ndis_softc	*sc;
 	struct ndis_usb_type	*t;
 	driver_object		*drv;
 	int			devidx = 0;
 
-	db = uaa->driver_info;
+	device_set_usb_desc(self);
+	db = uaa->driver_ivar;
 	sc = (struct ndis_softc *)dummy;
 	sc->ndis_dev = self;
+	mtx_init(&sc->ndisusb_mtx, "NDIS USB", MTX_NETWORK_LOCK, MTX_DEF);
 	sc->ndis_dobj = db->windrv_object;
 	sc->ndis_regvals = db->windrv_regvals;
 	sc->ndis_iftype = PNPBus;
@@ -193,9 +195,9 @@ ndisusb_attach(device_t self)
 	}
 
 	if (ndis_attach(self) != 0)
-		return ENXIO;
+		return (ENXIO);
 
-	return 0;
+	return (0);
 }
 
 static int
@@ -203,18 +205,25 @@ ndisusb_detach(device_t self)
 {
 	int i;
 	struct ndis_softc       *sc = device_get_softc(self);
-	struct ndisusb_ep	*ne;;
+	struct ndisusb_ep	*ne;
 
 	sc->ndisusb_status |= NDISUSB_STATUS_DETACH;
 
-	for (i = 0; i < NDISUSB_ENDPT_MAX; i++) {
-		ne = &sc->ndisusb_ep[i];
-		usb2_transfer_unsetup(ne->ne_xfer, 1);
-	}
-
 	ndis_pnpevent_nic(self, NDIS_PNP_EVENT_SURPRISE_REMOVED);
 
-	return ndis_detach(self);
+	if (sc->ndisusb_status & NDISUSB_STATUS_SETUP_EP) {
+		usbd_transfer_unsetup(sc->ndisusb_dread_ep.ne_xfer, 1);
+		usbd_transfer_unsetup(sc->ndisusb_dwrite_ep.ne_xfer, 1);
+	}
+	for (i = 0; i < NDISUSB_ENDPT_MAX; i++) {
+		ne = &sc->ndisusb_ep[i];
+		usbd_transfer_unsetup(ne->ne_xfer, 1);
+	}
+
+	(void)ndis_detach(self);
+
+	mtx_destroy(&sc->ndisusb_mtx);
+	return (0);
 }
 
 static struct resource_list *

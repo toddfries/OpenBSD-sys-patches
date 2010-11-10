@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci_link.c,v 1.58 2007/10/27 22:14:17 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci_link.c,v 1.59 2009/06/05 18:44:36 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -35,7 +35,8 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_pci_link.c,v 1.58 2007/10/27 22:14:1
 #include <sys/malloc.h>
 #include <sys/module.h>
 
-#include <contrib/dev/acpica/acpi.h>
+#include <contrib/dev/acpica/include/acpi.h>
+
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpi_pcibvar.h>
 

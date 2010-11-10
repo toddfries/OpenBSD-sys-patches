@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/lpbb.c,v 1.23 2009/01/21 23:10:06 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/lpbb.c,v 1.24 2009/03/12 06:32:30 imp Exp $");
 
 /*
  * I2C Bit-Banging over parallel port
@@ -93,7 +93,7 @@ lpbb_attach(device_t dev)
 }
 
 static int
-lpbb_callback(device_t dev, int index, caddr_t *data)
+lpbb_callback(device_t dev, int index, caddr_t data)
 {
 	device_t ppbus = device_get_parent(dev);
 	int error = 0;
@@ -165,7 +165,7 @@ lpbb_getsda(device_t dev)
 }
 
 static void
-lpbb_setsda(device_t dev, char val)
+lpbb_setsda(device_t dev, int val)
 {
 	device_t ppbus = device_get_parent(dev);
 
@@ -178,7 +178,7 @@ lpbb_setsda(device_t dev, char val)
 }
 
 static void
-lpbb_setscl(device_t dev, unsigned char val)
+lpbb_setscl(device_t dev, int val)
 {
 	device_t ppbus = device_get_parent(dev);
 

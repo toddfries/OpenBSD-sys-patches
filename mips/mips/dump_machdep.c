@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2006 Fill this file and put your name here
+ * Copyright (c) 2006 Oleksandr Tymoshenko
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/dump_machdep.c,v 1.1 2008/04/13 07:27:37 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/dump_machdep.c,v 1.2 2009/06/29 16:45:50 imp Exp $");
 
 /* Note to writer, when using pmap_kenter_temporary() you must,
  * after using the va to write out the page, call 

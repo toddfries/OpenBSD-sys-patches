@@ -29,7 +29,7 @@
  *	from: @(#)float.h	7.1 (Berkeley) 5/8/90
  *	from: src/sys/i386/include/float.h,v 1.8 1999/08/28 00:44:11 peter
  *	JNPR: float.h,v 1.4 2006/12/02 09:53:41 katta
- * $FreeBSD: src/sys/mips/include/float.h,v 1.2 2008/05/03 21:04:21 gonzo Exp $
+ * $FreeBSD: src/sys/mips/include/float.h,v 1.3 2010/01/10 19:50:24 imp Exp $
  */
 
 #ifndef _MACHINE_FLOAT_H_
@@ -42,10 +42,10 @@ extern int __flt_rounds(void);
 __END_DECLS
 
 #define	FLT_RADIX	2		/* b */
-#ifdef SOFTFLOAT
-#define	FLT_ROUNDS	-1
-#else
+#ifdef CPU_HAVEFPU
 #define	FLT_ROUNDS	__flt_rounds() /* FP addition rounds to nearest */
+#else
+#define	FLT_ROUNDS	-1
 #endif
 /*
  * XXXMIPS: MIPS32 has both float and double type, so set FLT_EVAL_METHOD

@@ -27,7 +27,7 @@
 #include "opt_compat.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_module.c,v 1.57 2008/12/05 16:47:30 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_module.c,v 1.58 2010/03/11 14:49:06 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -446,7 +446,7 @@ modfind(struct thread *td, struct modfind_args *uap)
 
 MODULE_VERSION(kernel, __FreeBSD_version);
 
-#ifdef COMPAT_IA32
+#ifdef COMPAT_FREEBSD32
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <compat/freebsd32/freebsd32_util.h>

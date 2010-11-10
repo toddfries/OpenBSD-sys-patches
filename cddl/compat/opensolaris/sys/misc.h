@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/misc.h,v 1.4 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/misc.h,v 1.6 2010/08/21 14:09:24 rpaulo Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_MISC_H_
@@ -43,10 +43,14 @@
 #define	_FIO_SEEK_DATA	FIOSEEKDATA
 #define	_FIO_SEEK_HOLE	FIOSEEKHOLE
 
+#ifdef _KERNEL
 struct opensolaris_utsname {
 	char *nodename;
+	char *sysname;
 };
 
 extern char hw_serial[11];
 extern struct opensolaris_utsname utsname;
+#endif
+
 #endif	/* _OPENSOLARIS_SYS_MISC_H_ */

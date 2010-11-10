@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/vnode.h,v 1.9 2008/11/29 12:32:42 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/vnode.h,v 1.17 2010/09/15 19:55:26 mm Exp $
  */
 
 #ifndef _OPENSOLARIS_SYS_VNODE_H_
@@ -49,6 +49,7 @@ enum symfollow { NO_FOLLOW = NOFOLLOW };
 #include <sys/syscallsubr.h>
 
 typedef	struct vop_vector	vnodeops_t;
+#define	VOP_FID		VOP_VPTOFH
 #define	vop_fid		vop_vptofh
 #define	vop_fid_args	vop_vptofh_args
 #define	a_fid		a_fhp
@@ -56,6 +57,8 @@ typedef	struct vop_vector	vnodeops_t;
 #define	IS_XATTRDIR(dvp)	(0)
 
 #define	v_count	v_usecount
+
+#define	V_APPEND	VAPPEND
 
 static __inline int
 vn_is_readonly(vnode_t *vp)
@@ -66,11 +69,14 @@ vn_is_readonly(vnode_t *vp)
 #define	vn_vfsunlock(vp)	do { } while (0)
 #define	vn_ismntpt(vp)		((vp)->v_type == VDIR && (vp)->v_mountedhere != NULL)
 #define	vn_mountedvfs(vp)	((vp)->v_mountedhere)
-#define	vn_has_cached_data(vp)	((vp)->v_object != NULL && (vp)->v_object->resident_page_count > 0)
+#define	vn_has_cached_data(vp)	\
+	((vp)->v_object != NULL && ((vp)->v_object->resident_page_count > 0 \
+				    || (vp)->v_object->cache != NULL))
 #define	vn_exists(vp)		do { } while (0)
 #define	vn_invalid(vp)		do { } while (0)
 #define	vn_renamepath(tdvp, svp, tnm, lentnm)	do { } while (0)
 #define	vn_free(vp)		do { } while (0)
+#define	vn_matchops(vp, vops)	((vp)->v_op == &(vops))
 
 #define	VN_HOLD(v)	vref(v)
 #define	VN_RELE(v)	vrele(v)
@@ -181,7 +187,7 @@ vn_openat(char *pnamep, enum uio_seg seg, int filemode, int createmode,
 		vref(startvp);
 	NDINIT_ATVP(&nd, operation, MPSAFE, UIO_SYSSPACE, pnamep, startvp, td);
 	filemode |= O_NOFOLLOW;
-	error = vn_open_cred(&nd, &filemode, createmode, td->td_ucred, NULL);
+	error = vn_open_cred(&nd, &filemode, createmode, 0, td->td_ucred, NULL);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	if (error == 0) {
 		/* We just unlock so we hold a reference. */
@@ -217,7 +223,6 @@ zfs_vn_rdwr(enum uio_rw rw, vnode_t *vp, caddr_t base, ssize_t len,
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 	if (rw == UIO_WRITE) {
 		ioflag = IO_SYNC;
-		VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
 	} else {
 		ioflag = IO_DIRECT;
 	}

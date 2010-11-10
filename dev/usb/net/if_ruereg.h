@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/net/if_ruereg.h,v 1.1 2009/02/23 18:31:00 thompsa Exp $
+ * $FreeBSD: src/sys/dev/usb/net/if_ruereg.h,v 1.3 2009/06/15 01:02:43 thompsa Exp $
  */
 
 #define	RUE_CONFIG_IDX		0	/* config number 1 */
@@ -144,7 +144,7 @@
 #define	RUE_RXSTAT_PMATCH	(0x04 << 12)
 #define	RUE_RXSTAT_MCAST	(0x08 << 12)
 
-#define	GET_MII(sc)		usb2_ether_getmii(&(sc)->sc_ue)
+#define	GET_MII(sc)		uether_getmii(&(sc)->sc_ue)
 
 struct rue_intrpkt {
 	uint8_t	rue_tsr;
@@ -170,9 +170,9 @@ enum {
 };
 
 struct rue_softc {
-	struct usb2_ether	sc_ue;
+	struct usb_ether	sc_ue;
 	struct mtx		sc_mtx;
-	struct usb2_xfer	*sc_xfer[RUE_N_TRANSFER];
+	struct usb_xfer	*sc_xfer[RUE_N_TRANSFER];
 
 	int			sc_flags;
 #define	RUE_FLAG_LINK		0x0001

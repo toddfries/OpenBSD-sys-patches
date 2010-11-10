@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powermac/pmu.c,v 1.5 2008/12/09 01:01:02 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powermac/pmu.c,v 1.8 2010/03/23 03:14:44 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powermac/pmu.c,v 1.5 2008/12/09 01:01:02 nwh
 #include <sys/bus.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/clock.h>
 #include <sys/sysctl.h>
 
 #include <dev/ofw/ofw_bus.h>
@@ -55,23 +56,35 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powermac/pmu.c,v 1.5 2008/12/09 01:01:02 nwh
 
 #include <dev/adb/adb.h>
 
+#include "clock_if.h"
 #include "pmuvar.h"
 #include "viareg.h"
 
 /*
- * MacIO interface
+ * Bus interface
  */
 static int	pmu_probe(device_t);
 static int	pmu_attach(device_t);
 static int	pmu_detach(device_t);
 
+/*
+ * Clock interface
+ */
+static int	pmu_gettime(device_t dev, struct timespec *ts);
+static int	pmu_settime(device_t dev, struct timespec *ts);
+
+/*
+ * ADB Interface
+ */
+
 static u_int	pmu_adb_send(device_t dev, u_char command_byte, int len, 
 		    u_char *data, u_char poll);
 static u_int	pmu_adb_autopoll(device_t dev, uint16_t mask);
-static void	pmu_poll(device_t dev);
+static u_int	pmu_poll(device_t dev);
 
 static void	pmu_set_sleepled(void *xsc, int onoff);
 static int	pmu_server_mode(SYSCTL_HANDLER_ARGS);
+static int	pmu_acline_state(SYSCTL_HANDLER_ARGS);
 static int	pmu_query_battery(struct pmu_softc *sc, int batt, 
 		    struct pmu_battstate *info);
 static int	pmu_battquery_sysctl(SYSCTL_HANDLER_ARGS);
@@ -108,6 +121,10 @@ static device_method_t  pmu_methods[] = {
 	DEVMETHOD(adb_hb_send_raw_packet,   pmu_adb_send),
 	DEVMETHOD(adb_hb_controller_poll,   pmu_poll),
 	DEVMETHOD(adb_hb_set_autopoll_mask, pmu_adb_autopoll),
+
+	/* Clock interface */
+	DEVMETHOD(clock_gettime,	pmu_gettime),
+	DEVMETHOD(clock_settime,	pmu_settime),
 
 	{ 0, 0 },
 };
@@ -393,6 +410,10 @@ pmu_attach(device_t dev)
 		struct sysctl_oid *oid, *battroot;
 		char battnum[2];
 
+		SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "acline", CTLTYPE_INT | CTLFLAG_RD, sc, 0,
+		    pmu_acline_state, "I", "AC Line Status");
+
 		battroot = SYSCTL_ADD_NODE(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
 		    "batteries", CTLFLAG_RD, 0, "Battery Information");
 
@@ -447,6 +468,12 @@ pmu_attach(device_t dev)
 	 */
 
 	sc->sc_leddev = led_create(pmu_set_sleepled, sc, "sleepled");
+
+	/*
+	 * Register RTC
+	 */
+
+	clock_register(dev, 1000);
 
 	return (bus_generic_attach(dev));
 }
@@ -570,10 +597,11 @@ done:
 }
 
 
-static void
+static u_int
 pmu_poll(device_t dev)
 {
 	pmu_intr(dev);
+	return (0);
 }
 
 static void
@@ -843,6 +871,27 @@ pmu_query_battery(struct pmu_softc *sc, int batt, struct pmu_battstate *info)
 }
 
 static int
+pmu_acline_state(SYSCTL_HANDLER_ARGS)
+{
+	struct pmu_softc *sc;
+	struct pmu_battstate batt;
+	int error, result;
+
+	sc = arg1;
+
+	/* The PMU treats the AC line status as a property of the battery */
+	error = pmu_query_battery(sc, 0, &batt);
+
+	if (error != 0)
+		return (error);
+	
+	result = (batt.state & PMU_PWR_AC_PRESENT) ? 1 : 0;
+	error = sysctl_handle_int(oidp, &result, 0, req);
+
+	return (error);
+}
+
+static int
 pmu_battquery_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	struct pmu_softc *sc;
@@ -897,5 +946,40 @@ pmu_battquery_sysctl(SYSCTL_HANDLER_ARGS)
 	error = sysctl_handle_int(oidp, &result, 0, req);
 
 	return (error);
+}
+
+#define DIFF19041970	2082844800
+
+static int
+pmu_gettime(device_t dev, struct timespec *ts)
+{
+	struct pmu_softc *sc = device_get_softc(dev);
+	uint8_t resp[16];
+	uint32_t sec;
+
+	mtx_lock(&sc->sc_mutex);
+	pmu_send(sc, PMU_READ_RTC, 0, NULL, 16, resp);
+	mtx_unlock(&sc->sc_mutex);
+
+	memcpy(&sec, &resp[1], 4);
+	ts->tv_sec = sec - DIFF19041970;
+	ts->tv_nsec = 0;
+
+	return (0);
+}
+
+static int
+pmu_settime(device_t dev, struct timespec *ts)
+{
+	struct pmu_softc *sc = device_get_softc(dev);
+	uint32_t sec;
+
+	sec = ts->tv_sec + DIFF19041970;
+
+	mtx_lock(&sc->sc_mutex);
+	pmu_send(sc, PMU_SET_RTC, sizeof(sec), (uint8_t *)&sec, 0, NULL);
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
 }
 

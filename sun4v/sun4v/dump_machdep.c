@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sun4v/sun4v/dump_machdep.c,v 1.4 2008/10/01 22:08:53 peter Exp $
+ * $FreeBSD: src/sys/sun4v/sun4v/dump_machdep.c,v 1.5 2009/05/29 21:27:12 jamie Exp $
  */
 
 #include <sys/param.h>
@@ -33,7 +33,6 @@
 #include <sys/cons.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
-#include <sys/vimage.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>

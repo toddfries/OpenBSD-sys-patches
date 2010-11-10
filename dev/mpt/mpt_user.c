@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_user.c,v 1.3 2009/01/07 21:52:47 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_user.c,v 1.4 2009/05/20 17:29:21 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -173,14 +173,14 @@ mpt_user_detach(struct mpt_softc *mpt)
 }
 
 static int
-mpt_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+mpt_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
 
 	return (0);
 }
 
 static int
-mpt_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
+mpt_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
 
 	return (0);
@@ -585,7 +585,7 @@ mpt_user_raid_action(struct mpt_softc *mpt, struct mpt_raid_action *raid_act,
 #endif
 
 static int
-mpt_ioctl(struct cdev *dev, u_long cmd, caddr_t arg, int flag, d_thread_t *td)
+mpt_ioctl(struct cdev *dev, u_long cmd, caddr_t arg, int flag, struct thread *td)
 {
 	struct mpt_softc *mpt;
 	struct mpt_cfg_page_req *page_req;

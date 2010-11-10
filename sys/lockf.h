@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)lockf.h	8.1 (Berkeley) 6/11/93
- * $FreeBSD: src/sys/sys/lockf.h,v 1.23 2008/06/26 10:21:54 dfr Exp $
+ * $FreeBSD: src/sys/sys/lockf.h,v 1.24 2009/05/24 12:39:38 kib Exp $
  */
 
 #ifndef _SYS_LOCKF_H_
@@ -80,6 +80,7 @@ struct lockf_entry {
 	LIST_ENTRY(lockf_entry) lf_link;  /* (s) Linkage for lock lists */
 	struct lockf_edge_list lf_outedges; /* (s) list of out-edges */
 	struct lockf_edge_list lf_inedges; /* (s) list of out-edges */
+	int	lf_refs;	    /* (s) ref count */
 };
 LIST_HEAD(lockf_entry_list, lockf_entry);
 

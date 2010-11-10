@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netipsec/ipsec_mbuf.c,v 1.16 2009/01/28 10:41:10 vanhu Exp $
+ * $FreeBSD: src/sys/netipsec/ipsec_mbuf.c,v 1.19 2009/11/28 21:01:26 bz Exp $
  */
 
 /*
@@ -36,9 +36,10 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/vimage.h>
 
 #include <net/route.h>
+#include <net/vnet.h>
+
 #include <netinet/in.h>
 
 #include <netipsec/ipsec.h>
@@ -54,7 +55,6 @@
 struct mbuf *
 m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct mbuf *m;
 	unsigned remain;
 
@@ -69,7 +69,7 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 	 * At this point skip is the offset into the mbuf m
 	 * where the new header should be placed.  Figure out
 	 * if there's space to insert the new header.  If so,
-	 * and copying the remainder makese sense then do so.
+	 * and copying the remainder makes sense then do so.
 	 * Otherwise insert a new mbuf in the chain, splitting
 	 * the contents of m as needed.
 	 */
@@ -158,7 +158,6 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 caddr_t
 m_pad(struct mbuf *m, int n)
 {
-	INIT_VNET_IPSEC(curvnet);
 	register struct mbuf *m0, *m1;
 	register int len, pad;
 	caddr_t retval;
@@ -231,7 +230,6 @@ m_pad(struct mbuf *m, int n)
 int
 m_striphdr(struct mbuf *m, int skip, int hlen)
 {
-	INIT_VNET_IPSEC(curvnet);
 	struct mbuf *m1;
 	int roff;
 

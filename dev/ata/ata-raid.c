@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-raid.c,v 1.133 2009/02/28 22:07:15 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-raid.c,v 1.140 2010/03/26 10:18:19 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -273,7 +273,7 @@ ata_raid_flush(struct bio *bp)
 	request->u.ata.lba = 0;
 	request->u.ata.count = 0;
 	request->u.ata.feature = 0;
-	request->timeout = 1;
+	request->timeout = ATA_REQUEST_TIMEOUT;
 	request->retries = 0;
 	request->flags |= ATA_R_ORDERED | ATA_R_DIRECT;
 	ata_queue_request(request);
@@ -407,7 +407,7 @@ ata_raid_strategy(struct bio *bp)
 	    if (rdp->status & AR_S_REBUILDING)
 		blk = ((lba / rdp->interleave) * rdp->width) * rdp->interleave +
 		      (rdp->interleave * (drv % rdp->width)) +
-		      lba % rdp->interleave;;
+		      lba % rdp->interleave;
 
 	    if (bp->bio_cmd == BIO_READ) {
 		int src_online =
@@ -2544,30 +2544,39 @@ ata_raid_intel_read_meta(device_t dev, struct ar_softc **raidp)
 
 	    /* clear out any old info */
 	    for (disk = 0; disk < raid->total_disks; disk++) {
+		u_int disk_idx = map->disk_idx[disk] & 0xffff;
+
 		raid->disks[disk].dev = NULL;
-		bcopy(meta->disk[map->disk_idx[disk]].serial,
+		bcopy(meta->disk[disk_idx].serial,
 		      raid->disks[disk].serial,
 		      sizeof(raid->disks[disk].serial));
 		raid->disks[disk].sectors =
-		    meta->disk[map->disk_idx[disk]].sectors;
+		    meta->disk[disk_idx].sectors;
 		raid->disks[disk].flags = 0;
-		if (meta->disk[map->disk_idx[disk]].flags & INTEL_F_ONLINE)
+		if (meta->disk[disk_idx].flags & INTEL_F_ONLINE)
 		    raid->disks[disk].flags |= AR_DF_ONLINE;
-		if (meta->disk[map->disk_idx[disk]].flags & INTEL_F_ASSIGNED)
+		if (meta->disk[disk_idx].flags & INTEL_F_ASSIGNED)
 		    raid->disks[disk].flags |= AR_DF_ASSIGNED;
-		if (meta->disk[map->disk_idx[disk]].flags & INTEL_F_SPARE) {
+		if (meta->disk[disk_idx].flags & INTEL_F_SPARE) {
 		    raid->disks[disk].flags &= ~(AR_DF_ONLINE | AR_DF_ASSIGNED);
 		    raid->disks[disk].flags |= AR_DF_SPARE;
 		}
-		if (meta->disk[map->disk_idx[disk]].flags & INTEL_F_DOWN)
+		if (meta->disk[disk_idx].flags & INTEL_F_DOWN)
 		    raid->disks[disk].flags &= ~AR_DF_ONLINE;
 	    }
 	}
 	if (meta->generation >= raid->generation) {
 	    for (disk = 0; disk < raid->total_disks; disk++) {
 		struct ata_device *atadev = device_get_softc(parent);
+		int len;
 
-		if (!strncmp(raid->disks[disk].serial, atadev->param.serial,
+		for (len = 0; len < sizeof(atadev->param.serial); len++) {
+		    if (atadev->param.serial[len] < 0x20)
+			break;
+		}
+		len = (len > sizeof(raid->disks[disk].serial)) ?
+		    len - sizeof(raid->disks[disk].serial) : 0;
+		if (!strncmp(raid->disks[disk].serial, atadev->param.serial + len,
 		    sizeof(raid->disks[disk].serial))) {
 		    raid->disks[disk].dev = parent;
 		    raid->disks[disk].flags |= (AR_DF_PRESENT | AR_DF_ONLINE);
@@ -2637,8 +2646,15 @@ ata_raid_intel_write_meta(struct ar_softc *rdp)
 		device_get_softc(device_get_parent(rdp->disks[disk].dev));
 	    struct ata_device *atadev =
 		device_get_softc(rdp->disks[disk].dev);
+	    int len;
 
-	    bcopy(atadev->param.serial, meta->disk[disk].serial,
+	    for (len = 0; len < sizeof(atadev->param.serial); len++) {
+		if (atadev->param.serial[len] < 0x20)
+		    break;
+	    }
+	    len = (len > sizeof(rdp->disks[disk].serial)) ?
+	        len - sizeof(rdp->disks[disk].serial) : 0;
+	    bcopy(atadev->param.serial + len, meta->disk[disk].serial,
 		  sizeof(rdp->disks[disk].serial));
 	    meta->disk[disk].sectors = rdp->disks[disk].sectors;
 	    meta->disk[disk].id = (ch->unit << 16) | atadev->unit;
@@ -4371,7 +4387,7 @@ ata_raid_init_request(device_t dev, struct ar_softc *rdp, struct bio *bio)
 	return NULL;
     }
     request->dev = dev;
-    request->timeout = 5;
+    request->timeout = ATA_REQUEST_TIMEOUT;
     request->retries = 2;
     request->callback = ata_raid_done;
     request->driver = rdp;
@@ -4445,7 +4461,7 @@ ata_raid_rw(device_t dev, u_int64_t lba, void *data, u_int bcount, int flags)
 
     /* setup request */
     request->dev = dev;
-    request->timeout = 10;
+    request->timeout = ATA_REQUEST_TIMEOUT;
     request->retries = 0;
     request->data = data;
     request->bytecount = bcount;
