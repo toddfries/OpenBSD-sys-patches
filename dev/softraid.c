@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.215 2010/10/12 00:53:32 krw Exp $ */
+/* $OpenBSD: softraid.c,v 1.216 2010/11/06 23:01:56 marco Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -2824,7 +2824,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 	SLIST_INIT(&sd->sd_meta_opt);
 	sd->sd_workq = workq_create("srdis", 1, IPL_BIO);
 	if (sd->sd_workq == NULL) {
-		printf("%s: could not create workq\n");
+		printf("%s: could not create workq\n", DEVNAME(sc));
 		goto unwind;
 	}
 	if (sr_discipline_init(sd, bc->bc_level)) {
