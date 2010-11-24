@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.226 2010/10/25 11:33:06 blambert Exp $	*/
+/*	$OpenBSD: if.c,v 1.230 2010/11/17 19:43:23 henning Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -157,6 +157,9 @@ int	if_group_egress_build(void);
 int	ifai_cmp(struct ifaddr_item *,  struct ifaddr_item *);
 void	ifa_item_insert(struct sockaddr *, struct ifaddr *, struct ifnet *);
 void	ifa_item_remove(struct sockaddr *, struct ifaddr *, struct ifnet *);
+#ifndef SMALL_KERNEL
+void	ifa_print_rb(void);
+#endif
 RB_HEAD(ifaddr_items, ifaddr_item) ifaddr_items = RB_INITIALIZER(&ifaddr_items);
 RB_PROTOTYPE(ifaddr_items, ifaddr_item, ifai_entry, ifai_cmp);
 RB_GENERATE(ifaddr_items, ifaddr_item, ifai_entry, ifai_cmp);
@@ -876,31 +879,21 @@ if_congestion_clear(void *arg)
 struct ifaddr *
 ifa_ifwithaddr(struct sockaddr *addr, u_int rdomain)
 {
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
+	struct ifaddr_item *ifai, key;
+
+	bzero(&key, sizeof(key));
+	key.ifai_addr = addr;
+	key.ifai_rdomain = rtable_l2(rdomain);
+
+	ifai = RB_FIND(ifaddr_items, &ifaddr_items, &key);
+	if (ifai)
+		return (ifai->ifai_ifa);
+	return (NULL);	
+}
 
 #define	equal(a1, a2)	\
 	(bcmp((caddr_t)(a1), (caddr_t)(a2),	\
 	((struct sockaddr *)(a1))->sa_len) == 0)
-
-	rdomain = rtable_l2(rdomain);
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-	    if (ifp->if_rdomain != rdomain)
-		continue;
-	    TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family != addr->sa_family)
-			continue;
-		if (equal(addr, ifa->ifa_addr))
-			return (ifa);
-		if ((ifp->if_flags & IFF_BROADCAST) && ifa->ifa_broadaddr &&
-		    /* IP6 doesn't have broadcast */
-		    ifa->ifa_broadaddr->sa_len != 0 &&
-		    equal(ifa->ifa_broadaddr, addr))
-			return (ifa);
-	    }
-	}
-	return (NULL);
-}
 
 /*
  * Locate the point to point interface with a given destination address.
@@ -2184,12 +2177,26 @@ ifa_add(struct ifnet *ifp, struct ifaddr *ifa)
 		TAILQ_INSERT_HEAD(&ifp->if_addrlist, ifa, ifa_list);
 	else
 		TAILQ_INSERT_TAIL(&ifp->if_addrlist, ifa, ifa_list);
+	ifa_item_insert(ifa->ifa_addr, ifa, ifp);
+	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
+		ifa_item_insert(ifa->ifa_broadaddr, ifa, ifp);
 }
 
 void
 ifa_del(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
+	ifa_item_remove(ifa->ifa_addr, ifa, ifp);
+	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
+		ifa_item_remove(ifa->ifa_broadaddr, ifa, ifp);
+}
+
+void
+ifa_update_broadaddr(struct ifnet *ifp, struct ifaddr *ifa, struct sockaddr *sa)
+{
+	ifa_item_remove(ifa->ifa_broadaddr, ifa, ifp);
+	ifa->ifa_broadaddr = sa;
+	ifa_item_insert(ifa->ifa_broadaddr, ifa, ifp);
 }
 
 int
@@ -2248,6 +2255,34 @@ ifa_item_remove(struct sockaddr *sa, struct ifaddr *ifa, struct ifnet *ifp)
 		ifai_last->ifai_next = ifai->ifai_next;
 	pool_put(&ifaddr_item_pl, ifai);
 }
+
+#ifndef SMALL_KERNEL
+/* debug function, can be called from ddb> */
+void
+ifa_print_rb(void)
+{
+	struct ifaddr_item *ifai, *p;
+	RB_FOREACH(p, ifaddr_items, &ifaddr_items) {
+		for (ifai = p; ifai; ifai = ifai->ifai_next) {
+			switch (ifai->ifai_addr->sa_family) {
+			case AF_INET:
+				printf("%s", inet_ntoa((satosin(
+				    ifai->ifai_addr))->sin_addr));
+				break;
+			case AF_INET6:
+				printf("%s", ip6_sprintf(&(satosin6(
+				    ifai->ifai_addr))->sin6_addr));
+				break;
+			case AF_LINK:
+				printf("%s",
+				    ether_sprintf(ifai->ifai_addr->sa_data));
+				break;
+			}
+			printf(" on %s\n", ifai->ifai_ifa->ifa_ifp->if_xname);
+		}
+	}
+}
+#endif /* SMALL_KERNEL */
 
 void
 ifnewlladdr(struct ifnet *ifp)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: segments.h,v 1.7 2010/10/26 05:49:10 guenther Exp $	*/
+/*	$OpenBSD: segments.h,v 1.9 2010/11/20 20:11:17 miod Exp $	*/
 /*	$NetBSD: segments.h,v 1.1 2003/04/26 18:39:47 fvdl Exp $	*/
 
 /*-
@@ -61,16 +61,14 @@
 #define	ISLDT(s)	((s) & SEL_LDT)	/* is it local or global */
 #define	SEL_LDT		4		/* local descriptor table */	
 
-/* Dynamically allocated TSSs start (byte offset) */
 #define SYSSEL_START	(NGDT_MEM << 3)
-#define DYNSEL_START	(SYSSEL_START + (NGDT_SYS << 4))
+#define GDT_SIZE	(SYSSEL_START + (NGDT_SYS << 4))
 
 /*
  * These define the index not from the start of the GDT, but from
  * the part of the GDT that they're allocated from.
  * First NGDT_MEM entries are 8-byte descriptors for CS and DS.
- *
- * The rest is 16-byte descriptors for TSSs
+ * Next NGDT_SYS entries are 16-byte descriptors defining TSSs.
  */
 
 #define	IDXSEL(s)	(((s) >> 3) & 0x1fff)
@@ -107,7 +105,7 @@ struct sys_segment_descriptor {
 /*BITFIELDTYPE*/ u_int64_t sd_xx2:8;	/* reserved */
 /*BITFIELDTYPE*/ u_int64_t sd_zero:5;	/* must be zero */
 /*BITFIELDTYPE*/ u_int64_t sd_xx3:19;	/* reserved */
-} __attribute__((packed));
+} __packed;
 
 /*
  * Below is used for cs, ds, etc.
@@ -124,7 +122,7 @@ struct mem_segment_descriptor {
 	unsigned int sd_def32:1;            /* default 32 vs 16 bit size */
 	unsigned int sd_gran:1;             /* limit granularity (byte/page) */
 	unsigned int sd_hibase:8;           /* segment base address (msb) */
-} __attribute__((packed));
+} __packed;
 
 /*
  * Gate descriptors (e.g. indirect descriptors)
@@ -141,7 +139,7 @@ struct gate_descriptor {
 /*BITFIELDTYPE*/ u_int64_t gd_xx2:8;	/* reserved */
 /*BITFIELDTYPE*/ u_int64_t gd_zero:5;	/* must be zero */
 /*BITFIELDTYPE*/ u_int64_t gd_xx3:19;	/* reserved */
-} __attribute__((packed));
+} __packed;
 
 /*
  * region descriptors, used to load gdt/idt tables before segments yet exist.
@@ -149,7 +147,7 @@ struct gate_descriptor {
 struct region_descriptor {
 	u_int16_t rd_limit;		/* segment extent */
 	u_int64_t rd_base;		/* base address  */
-} __attribute__((packed));
+} __packed;
 
 #ifdef _KERNEL
 #if 0
@@ -249,7 +247,7 @@ void cpu_init_idt(void);
  * The code and data descriptors must come first. There
  * are NGDT_MEM of them.
  *
- * Then come the predefined LDT (and possibly TSS) descriptors.
+ * Then comes the predefined TSS descriptor.
  * There are NGDT_SYS of them.
  *
  * The particular order of the UCODE32, UDATA, and UCODE descriptors is 
@@ -263,7 +261,8 @@ void cpu_init_idt(void);
 #define	GUCODE_SEL	5	/* User code descriptor */
 #define NGDT_MEM 6
 
-#define NGDT_SYS	0
+#define	GPROC0_SEL	0	/* common TSS */
+#define NGDT_SYS	1
 
 #define GDT_SYS_OFFSET	(NGDT_MEM << 3)
 
