@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.25 2010/09/23 05:02:14 claudio Exp $ */
+/*	$OpenBSD: conf.c,v 1.27 2010/11/22 21:10:45 miod Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -129,6 +129,8 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
+#include "uscanner.h"
+
 #include "vscsi.h"
 #include "pppx.h"
 
@@ -213,6 +215,8 @@ struct cdevsw	cdevsw[] =
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 68: vscsi */
 	cdev_disk_init(1,diskmap),	/* 69: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 70: pppx */
+	cdev_notdef(),			/* 71: */
+	cdev_usbdev_init(NUSCANNER,uscanner),	/* 72: USB scanners */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
@@ -290,12 +294,6 @@ int chrtoblktbl[] =  {
 
 int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(int);
 
-/*
- * This entire table could be autoconfig()ed but that would mean that
- * the kernel's idea of the console would be out of sync with that of
- * the standalone boot.  I think it best that they both use the same
- * known algorithm unless we see a pressing need otherwise.
- */
 #include <dev/cons.h>
 
 cons_decl(ws);
