@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.26 2010/09/26 20:39:08 miod Exp $
+#	$OpenBSD: GENERIC,v 1.28 2010/11/19 20:53:44 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -125,6 +125,8 @@ umass*		at uhub?	# USB Mass Storage devices
 atapiscsi*	at umass?
 scsibus*	at atapiscsi?
 scsibus*	at umass?
+urio*		at uhub?	# Diamond Multimedia Rio 500
+uscanner*	at uhub?	# USB Scanners
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
 wsmouse*	at ums? mux 0
@@ -149,6 +151,7 @@ upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
 ural*		at uhub?	# Ralink RT2500USB
 url*		at uhub?	# Realtek RTL8150L based adapters
 urtw*		at uhub?	# RealTek 8187
+urtwn*		at uhub?	# Realtek RTL8188CU/RTL8192CU
 wi*		at uhub?	# WaveLAN IEEE 802.11DS
 zyd*		at uhub?	# Zydas ZD1211
 uberry*		at uhub?	# Research In Motion Blackberry 
