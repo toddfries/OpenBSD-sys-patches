@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.4 2010/11/06 12:27:43 damien Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.7 2010/11/16 19:28:56 damien Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -89,6 +89,8 @@ static const struct usb_devno urtwn_devs[] = {
 	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8192CU_3 },
 	{ USB_VENDOR_EDIMAX,	USB_PRODUCT_EDIMAX_RTL8188CU },
 	{ USB_VENDOR_EDIMAX,	USB_PRODUCT_EDIMAX_RTL8192CU },
+	{ USB_VENDOR_FEIXUN,	USB_PRODUCT_FEIXUN_RTL8188CU },
+	{ USB_VENDOR_FEIXUN,	USB_PRODUCT_FEIXUN_RTL8192CU },
 	{ USB_VENDOR_GUILLEMOT,	USB_PRODUCT_GUILLEMOT_HWNUP150 },
 	{ USB_VENDOR_HP3,	USB_PRODUCT_HP3_RTL8188CU },
 	{ USB_VENDOR_NOVATECH,	USB_PRODUCT_NOVATECH_RTL8188CU },
@@ -196,6 +198,7 @@ int		urtwn_iq_calib_chain(struct urtwn_softc *, int, uint16_t[],
 		    uint16_t[]);
 void		urtwn_iq_calib(struct urtwn_softc *);
 void		urtwn_lc_calib(struct urtwn_softc *);
+void		urtwn_temp_calib(struct urtwn_softc *);
 int		urtwn_init(struct ifnet *);
 void		urtwn_stop(struct ifnet *);
 
@@ -271,9 +274,13 @@ urtwn_attach(struct device *parent, struct device *self, void *aux)
 	}
 	urtwn_read_rom(sc);
 
-	printf("%s: board type 0x%x, RF 6052 %dT%dR, address %s\n",
-	    sc->sc_dev.dv_xname, sc->board_type, sc->ntxchains,
-	    sc->nrxchains, ether_sprintf(ic->ic_myaddr));
+	printf("%s: MAC/BB RTL%s, RF 6052 %dT%dR, address %s\n",
+	    sc->sc_dev.dv_xname,
+	    (sc->chip & URTWN_CHIP_92C) ? "8192CU" :
+	    (sc->board_type == R92C_BOARD_TYPE_HIGHPA) ? "8188RU" :
+	    (sc->board_type == R92C_BOARD_TYPE_MINICARD) ? "8188CE-VAU" :
+	    "8188CUS", sc->ntxchains, sc->nrxchains,
+	    ether_sprintf(ic->ic_myaddr));
 
 	if (urtwn_open_pipes(sc) != 0)
 		return;
@@ -1015,7 +1022,7 @@ urtwn_tsf_sync_enable(struct urtwn_softc *sc)
 	tsf = letoh64(tsf);
 	tsf = tsf - (tsf % (ni->ni_intval * IEEE80211_DUR_TU));
 	tsf -= IEEE80211_DUR_TU;
-	urtwn_write_4(sc, R92C_TSFTR, tsf);
+	urtwn_write_4(sc, R92C_TSFTR + 0, tsf);
 	urtwn_write_4(sc, R92C_TSFTR + 4, tsf >> 32);
 
 	urtwn_write_1(sc, R92C_BCN_CTRL,
@@ -1059,6 +1066,9 @@ urtwn_calib_cb(struct urtwn_softc *sc, void *arg)
 		DPRINTFN(3, ("sending RSSI command avg=%d\n", sc->avg_pwdb));
 		urtwn_fw_cmd(sc, R92C_CMD_RSSI_SETTING, &cmd, sizeof(cmd));
 	}
+
+	/* Do temperature compensation. */
+	urtwn_temp_calib(sc);
 
 	timeout_add_sec(&sc->calib_to, 2);
 }
@@ -1236,6 +1246,9 @@ urtwn_newstate_cb(struct urtwn_softc *sc, void *arg)
 		urtwn_set_led(sc, URTWN_LED_LINK, 1);
 
 		sc->avg_pwdb = -1;	/* Reset average RSSI. */
+		/* Reset temperature calibration state machine. */
+		sc->thcal_state = 0;
+		sc->thcal_lctemp = 0;
 		/* Start periodic calibration. */
 		timeout_add_sec(&sc->calib_to, 2);
 		break;
@@ -2514,7 +2527,7 @@ urtwn_rxfilter_init(struct urtwn_softc *sc)
 	    R92C_RCR_APP_ICV | R92C_RCR_AMF | R92C_RCR_HTC_LOC_CTRL |
 	    R92C_RCR_APP_MIC | R92C_RCR_APP_PHYSTS);
 	/* Accept all multicast frames. */
-	urtwn_write_4(sc, R92C_MAR, 0xffffffff);
+	urtwn_write_4(sc, R92C_MAR + 0, 0xffffffff);
 	urtwn_write_4(sc, R92C_MAR + 4, 0xffffffff);
 	/* Accept all management frames. */
 	urtwn_write_2(sc, R92C_RXFLTMAP0, 0xffff);
@@ -2893,6 +2906,41 @@ urtwn_lc_calib(struct urtwn_softc *sc)
 	} else {
 		/* Unblock all Tx queues. */
 		urtwn_write_1(sc, R92C_TXPAUSE, 0x00);
+	}
+}
+
+void
+urtwn_temp_calib(struct urtwn_softc *sc)
+{
+	int temp;
+
+	if (sc->thcal_state == 0) {
+		/* Start measuring temperature. */
+		urtwn_rf_write(sc, 0, R92C_RF_T_METER, 0x60);
+		sc->thcal_state = 1;
+		return;
+	}
+	sc->thcal_state = 0;
+
+	/* Read measured temperature. */
+	temp = urtwn_rf_read(sc, 0, R92C_RF_T_METER) & 0x1f;
+	if (temp == 0)	/* Read failed, skip. */
+		return;
+	DPRINTFN(2, ("temperature=%d\n", temp));
+
+	/*
+	 * Redo LC calibration if temperature changed significantly since
+	 * last calibration.
+	 */
+	if (sc->thcal_lctemp == 0) {
+		/* First LC calibration is performed in urtwn_init(). */
+		sc->thcal_lctemp = temp;
+	} else if (abs(temp - sc->thcal_lctemp) > 1) {
+		DPRINTF(("LC calib triggered by temp: %d -> %d\n",
+		    sc->thcal_lctemp, temp));
+		urtwn_lc_calib(sc);
+		/* Record temperature of last LC calibration. */
+		sc->thcal_lctemp = temp;
 	}
 }
 
