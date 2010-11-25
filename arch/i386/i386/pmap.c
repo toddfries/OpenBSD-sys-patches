@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.148 2010/05/08 16:54:08 oga Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.150 2010/11/20 20:33:24 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -243,16 +243,6 @@ int pmap_pg_g = 0;
  * UC- so mtrrs can override the cacheability;
  */
 int pmap_pg_wc = PG_UCMINUS;
-
-/*
- * i386 physical memory comes in a big contig chunk with a small
- * hole toward the front of it...  the following 4 paddr_t's
- * (shared with machdep.c) describe the physical address space
- * of this machine.
- */
-paddr_t avail_start;	/* PA of first available physical page */
-paddr_t hole_start;	/* PA of start of "hole" */
-paddr_t hole_end;	/* PA of end of "hole" */
 
 /*
  * other data structures
@@ -1597,6 +1587,10 @@ pmap_fork(struct pmap *pmap1, struct pmap *pmap2)
 
 		len = pmap1->pm_ldt_len * sizeof(union descriptor);
 		new_ldt = (union descriptor *)uvm_km_alloc(kernel_map, len);
+		if (new_ldt == NULL) {
+			/* XXX needs to be able to fail properly */
+			panic("pmap_fork: out of kva");
+		}
 		bcopy(pmap1->pm_ldt, new_ldt, len);
 		pmap2->pm_ldt = new_ldt;
 		pmap2->pm_ldt_len = pmap1->pm_ldt_len;

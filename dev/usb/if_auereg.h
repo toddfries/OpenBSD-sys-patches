@@ -247,8 +247,6 @@ struct aue_softc {
 	u_int16_t		aue_flags;
 
 	int			aue_refcnt;
-	char			aue_dying;
-	char			aue_attached;
 	u_int			aue_rx_errs;
 	u_int			aue_intr_errs;
 	struct timeval		aue_rx_notice;

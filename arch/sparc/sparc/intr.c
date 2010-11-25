@@ -161,10 +161,7 @@ intr_init()
 	level10.ih_vec = level10.ih_ipl >> 8;
 	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec);
 	level14.ih_vec = level14.ih_ipl >> 8;
-	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec,
-	    &evcount_intr);
-
-	softnet_ih = softintr_establish(IPL_SOFTNET, softnet, NULL);
+	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec);
 }
 
 /*

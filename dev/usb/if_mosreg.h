@@ -183,8 +183,6 @@ struct mos_softc {
 	struct timeout		mos_stat_ch;
 
 	int			mos_refcnt;
-	char			mos_dying;
-	char			mos_attached;
 
 	int			mos_link;
 	unsigned char		mos_ipgs[2];

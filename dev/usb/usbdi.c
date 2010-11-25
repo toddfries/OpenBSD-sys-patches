@@ -85,6 +85,18 @@ usbd_finish(void)
 		usb_end_tasks();
 }
 
+int
+usbd_is_dying(usbd_device_handle dev)
+{
+	return (dev->dying || dev->bus->dying);
+}
+
+void
+usbd_deactivate(usbd_device_handle dev)
+{
+	dev->dying = 1;
+}
+
 static __inline int
 usbd_xfer_isread(usbd_xfer_handle xfer)
 {
@@ -268,6 +280,9 @@ usbd_transfer(usbd_xfer_handle xfer)
 	usbd_status err;
 	u_int size;
 	int s;
+
+	if (usbd_is_dying(pipe->device))
+		return (USBD_IOERROR);
 
 	DPRINTFN(5,("usbd_transfer: xfer=%p, flags=%d, pipe=%p, running=%d\n",
 	    xfer, xfer->flags, pipe, pipe->running));
@@ -923,7 +938,7 @@ usbd_do_request_flags_pipe(usbd_device_handle dev, usbd_pipe_handle pipe,
 #endif
 
 	/* If the bus is gone, don't go any further. */
-	if (dev->bus->dying)
+	if (usbd_is_dying(dev))
 		return (USBD_IOERROR);
 
 	xfer = usbd_alloc_xfer(dev);

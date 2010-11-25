@@ -1461,6 +1461,10 @@ usb_disconnect_port(struct usbd_port *up, struct device *parent)
 			    parent->dv_xname));
 			if (up->portno != 0)
 				DPRINTF((" port %d", up->portno));
+			DPRINTF((" (addr %d) deactivated\n", dev->address));
+			config_deactivate(dev->subdevs[i]);
+		}
+		for (i = 0; dev->subdevs[i]; i++) {
 			DPRINTF((" (addr %d) disconnected\n", dev->address));
 			config_detach(dev->subdevs[i], DETACH_FORCE);
 			dev->subdevs[i] = 0;

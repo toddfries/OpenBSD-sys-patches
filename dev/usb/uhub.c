@@ -353,8 +353,8 @@ uhub_explore(usbd_device_handle dev)
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
-	if (dev->bus->dying) {
-		DPRINTF(("%s: root hub gone at start\n", __func__));
+	if (usbd_is_dying(dev)) {
+		DPRINTF(("%s: dying\n", __func__));
 		return (USBD_IOERROR);
 	}
 

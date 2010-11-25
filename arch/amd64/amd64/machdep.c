@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.127 2010/11/13 04:16:42 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.129 2010/11/22 21:07:16 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -222,7 +222,8 @@ pid_t sigpid = 0;
 #define SDB_FOLLOW      0x01
 #endif
 
-extern	paddr_t avail_start, avail_end;
+paddr_t avail_start;
+paddr_t avail_end;
 
 void (*delay_func)(int) = i8254_delay;
 void (*initclock_func)(void) = i8254_initclocks;
@@ -1184,7 +1185,6 @@ int bigmem = 0;
 void
 init_x86_64(paddr_t first_avail)
 {
-	extern void consinit(void);
 	struct region_descriptor region;
 	bios_memmap_t *bmp;
 	int x, ist;

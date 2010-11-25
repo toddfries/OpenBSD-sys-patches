@@ -2588,11 +2588,14 @@ zyd_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 int
 zyd_activate(struct device *self, int act)
 {
+	struct zyd_softc *sc = (struct zyd_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return 0;
