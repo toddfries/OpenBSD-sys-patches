@@ -226,8 +226,6 @@ struct axe_softc {
 	struct timeout		axe_stat_ch;
 
 	int			axe_refcnt;
-	char			axe_dying;
-	char			axe_attached;
 
 	struct usb_task		axe_tick_task;
 	struct usb_task		axe_stop_task;

@@ -803,10 +803,13 @@ urtw_detach(struct device *self, int flags)
 int
 urtw_activate(struct device *self, int act)
 {
+	struct urtw_softc *sc = (struct urtw_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 	case DVACT_DEACTIVATE:
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 

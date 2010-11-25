@@ -183,8 +183,6 @@ struct cue_softc {
 	u_int16_t		cue_rxfilt;
 	struct cue_cdata	cue_cdata;
 
-	char			cue_dying;
-	char			cue_attached;
 	u_int			cue_rx_errs;
 	struct timeval		cue_rx_notice;
 

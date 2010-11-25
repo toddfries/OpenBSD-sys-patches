@@ -421,7 +421,6 @@ struct upgt_softc {
 	unsigned		 sc_cur_chan;
 	uint8_t			 sc_cur_rateset[8];
 
-	int			 sc_flags;
 	uint8_t			*sc_fw;
 	size_t			 sc_fw_size;
 	int			 sc_fw_type;
