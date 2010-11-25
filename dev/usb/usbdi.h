@@ -165,6 +165,9 @@ usbd_status usbd_reload_device_desc(usbd_device_handle);
 
 int usbd_ratecheck(struct timeval *last);
 
+int usbd_is_dying(usbd_device_handle);
+void usbd_deactivate(usbd_device_handle);
+
 /* An iterator for descriptors. */
 typedef struct {
 	const uByte *cur;

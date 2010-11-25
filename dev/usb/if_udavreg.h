@@ -185,8 +185,6 @@ struct udav_softc {
 #define	sc_media udav_mii.mii_media
 	struct udav_cdata	sc_cdata;
 
-	int                     sc_attached;
-	int			sc_dying;
         int                     sc_refcnt;
 
 	struct usb_task		sc_tick_task;

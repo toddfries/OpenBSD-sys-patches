@@ -184,8 +184,6 @@ struct ueagle_softc {
 	uint16_t		isize;
 	char			ibuf[32];
 
-	int			gone;
-
 	uint16_t		index;
 	uint32_t		data;
 };
