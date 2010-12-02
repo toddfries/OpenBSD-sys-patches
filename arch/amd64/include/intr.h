@@ -172,11 +172,6 @@ void splassert_check(int, const char *);
 #define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
 
-/*
- * XXX
- */
-#define	setsoftnet()	softintr(SIR_NET)
-
 #define IPLSHIFT 4			/* The upper nibble of vectors is the IPL.      */
 #define IPL(level) ((level) >> IPLSHIFT)	/* Extract the IPL.    */
 
