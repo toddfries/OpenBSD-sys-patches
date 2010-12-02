@@ -39,17 +39,12 @@
 #include <sys/param.h>
 #include <sys/malloc.h>
 
-/* XXX Network interrupts should be converted to new softintrs. */
-#include <net/netisr.h>
-
 #include <uvm/uvm_extern.h>
 
 #include <machine/atomic.h>
 #include <machine/intr.h>
 
 struct soft_intrq soft_intrq[SI_NQUEUES];
-
-struct soft_intrhand *softnet_intrhand;
 
 void	netintr(void);
 
@@ -68,10 +63,6 @@ softintr_init(void)
 		siq->siq_si = i;
 		mtx_init(&siq->siq_mtx, IPL_HIGH);
 	}
-
-	/* XXX Establish legacy software interrupt handlers. */
-	softnet_intrhand = softintr_establish(IPL_SOFTNET,
-	    (void (*)(void *))netintr, NULL);
 }
 
 /*
@@ -178,25 +169,6 @@ softintr_schedule(void *arg)
 		atomic_setbits_int(&ci->ci_softpending, SINTMASK(siq->siq_si));
 	}
 	mtx_leave(&siq->siq_mtx);
-}
-
-int netisr; 
-
-void
-netintr(void)
-{
-	int n;
-
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-#define	DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << (bit)))				\
-				fn();					\
-		} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-	}
 }
 
 void
