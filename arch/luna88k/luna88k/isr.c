@@ -42,8 +42,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <net/netisr.h>
-
 #include <machine/cpu.h>
 
 #include <luna88k/luna88k/isr.h>
