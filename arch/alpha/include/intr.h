@@ -264,11 +264,6 @@ void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_init(void);
 void	 softintr_schedule(void *);
 
-/* XXX For legacy software interrupts. */
-extern struct alpha_soft_intrhand *softnet_intrhand;
-
-#define	setsoftnet()	softintr_schedule(softnet_intrhand)
-
 struct alpha_shared_intr *alpha_shared_intr_alloc(unsigned int);
 int	alpha_shared_intr_dispatch(struct alpha_shared_intr *,
 	    unsigned int);
