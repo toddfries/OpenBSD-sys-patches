@@ -115,11 +115,6 @@ void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_init(void);
 void	 softintr_schedule(void *);
 
-/* XXX For legacy software interrupts. */
-extern struct soft_intrhand *softnet_intrhand;
-
-#define	setsoftnet()	softintr_schedule(softnet_intrhand)
-
 #define	SINT_CLOCK	SINTMASK(SI_SOFTCLOCK)
 #define	SINT_NET	SINTMASK(SI_SOFTNET)
 #define	SINT_TTY	SINTMASK(SI_SOFTTTY)

@@ -126,9 +126,6 @@ void splassert_check(int, const char *);
 #define spllock() 	splhigh()
 #define	spl0()		spllower(IPL_NONE)
 
-#define	setsoftnet()	softintr(SIR_NET)
-#define	setsofttty()	softintr(SIR_TTY)
-
 #include <machine/pic.h>
 
 struct cpu_info;
