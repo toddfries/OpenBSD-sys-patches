@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.19 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: conf.c,v 1.21 2010/12/06 22:51:46 jasper Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove
@@ -27,6 +27,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>

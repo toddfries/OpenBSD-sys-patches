@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.4 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: conf.c,v 1.6 2010/12/06 22:51:46 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff
@@ -17,6 +17,7 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <libsa.h>
 #include <lib/libsa/ufs.h>

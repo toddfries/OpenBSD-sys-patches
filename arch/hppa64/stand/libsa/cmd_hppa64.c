@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd_hppa64.c,v 1.2 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: cmd_hppa64.c,v 1.4 2010/12/06 22:51:45 jasper Exp $	*/
 
 /*
  * Copyright (c) 2002 Miodrag Vallat

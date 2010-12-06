@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.4 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.6 2010/12/06 22:51:45 jasper Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff

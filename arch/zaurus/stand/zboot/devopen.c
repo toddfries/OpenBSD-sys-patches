@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.7 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.9 2010/12/06 22:51:46 jasper Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff

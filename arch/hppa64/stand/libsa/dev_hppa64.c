@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_hppa64.c,v 1.3 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: dev_hppa64.c,v 1.5 2010/12/06 22:51:45 jasper Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

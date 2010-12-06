@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdboot.c,v 1.8 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: cdboot.c,v 1.10 2010/12/06 22:51:45 jasper Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff

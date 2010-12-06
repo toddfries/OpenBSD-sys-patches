@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.42 2010/12/06 18:44:49 jasper Exp $	*/
+/*	$OpenBSD: conf.c,v 1.44 2010/12/06 22:51:45 jasper Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -26,6 +26,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>
