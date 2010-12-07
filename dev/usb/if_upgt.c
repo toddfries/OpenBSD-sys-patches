@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.53 2010/10/27 17:51:11 jakemsr Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.54 2010/12/06 04:41:39 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>

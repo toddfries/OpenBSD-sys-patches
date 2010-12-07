@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axereg.h,v 1.19 2010/09/21 08:02:49 jsg Exp $	*/
+/*	$OpenBSD: if_axereg.h,v 1.20 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.103 2010/11/14 20:38:43 weerd Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.104 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>

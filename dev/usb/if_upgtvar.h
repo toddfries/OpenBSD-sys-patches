@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgtvar.h,v 1.15 2009/08/10 20:02:19 deraadt Exp $ */
+/*	$OpenBSD: if_upgtvar.h,v 1.16 2010/12/06 04:41:39 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>

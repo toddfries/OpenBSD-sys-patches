@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.82 2010/10/27 17:51:11 jakemsr Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.83 2010/12/06 04:41:39 jakemsr Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
