@@ -49,6 +49,8 @@
 #include <sys/systm.h>
 #include <sys/user.h>
 
+#include <net/netisr.h>
+
 #include <machine/bat.h>
 #include <machine/bugio.h>
 #include <machine/pmap.h>
@@ -592,6 +594,22 @@ dumpsys()
 
 volatile int cpl, ipending, astpending;
 int imask[IPL_NUM];
+int netisr;
+
+/*
+ * Soft networking interrupts.
+ */
+void
+softnet(isr)
+	int isr;
+{
+#define	DONETISR(flag, func) \
+	if (isr & (1 << (flag))) \
+		(func)();
+
+#include <net/netisr_dispatch.h>
+#undef	DONETISR
+}
 
 int
 lcsplx(ipl)
