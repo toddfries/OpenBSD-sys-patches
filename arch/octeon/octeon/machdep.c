@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.4 2010/10/24 15:40:03 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.7 2010/11/28 20:53:41 syuu Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -77,10 +77,76 @@
 
 #include <mips64/archtype.h>
 
-#include <machine/octeon_pcmap_regs.h>
-
 #include <octeon/dev/obiovar.h>
 #include <octeon/dev/octeonreg.h>
+
+struct boot_desc {
+	uint32_t desc_ver;
+	uint32_t desc_size;
+	uint64_t stack_top;
+	uint64_t heap_start;
+	uint64_t heap_end;
+	uint64_t __unused17;
+	uint64_t __unused16;
+	uint32_t __unused18;
+	uint32_t __unused15;
+	uint32_t __unused14;
+	uint32_t argc;
+	uint32_t argv[64];
+	uint32_t flags;
+	uint32_t core_mask;
+	uint32_t dram_size;
+	uint32_t phy_mem_desc_addr;
+	uint32_t debugger_flag_addr;
+	uint32_t eclock;
+	uint32_t __unused10;
+	uint32_t __unused9;
+	uint16_t __unused8;
+	uint8_t __unused7;
+	uint8_t __unused6;
+	uint16_t __unused5;
+	uint8_t __unused4;
+	uint8_t __unused3;
+	uint8_t __unused2[20];
+	uint8_t __unused1[6];
+	uint8_t __unused0;
+	uint64_t boot_info_addr;
+};
+
+struct boot_info {
+	uint32_t ver_major;
+	uint32_t ver_minor;
+	uint64_t stack_top;
+	uint64_t heap_start;
+	uint64_t heap_end;
+	uint64_t boot_desc_addr;
+	uint32_t exception_base_addr;
+	uint32_t stack_size;
+	uint32_t flags;
+	uint32_t core_mask;
+	uint32_t dram_size;
+	uint32_t phys_mem_desc_addr;
+	uint32_t debugger_flags_addr;
+	uint32_t eclock;
+	uint32_t dclock;
+	uint32_t __unused0;
+	uint16_t board_type;
+	uint8_t board_rev_major;
+	uint8_t board_rev_minor;
+	uint16_t __unused1;
+	uint8_t __unused2;
+	uint8_t __unused3;
+	char board_serial[20];
+	uint8_t mac_addr_base[6];
+	uint8_t mac_addr_count;
+	uint64_t cf_common_addr;
+	uint64_t cf_attr_addr;
+	uint64_t led_display_addr;
+	uint32_t dfaclock;
+	uint32_t config_flags;
+};
+
+#define BOARD_TYPE_SIM 1
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
@@ -138,21 +204,25 @@ void	dumpconf(void);
 extern	void parsepmonbp(void);
 vaddr_t	mips_init(__register_t, __register_t, __register_t, __register_t);
 boolean_t is_memory_range(paddr_t, psize_t, psize_t);
-void	octeon_memory_init(void);
+void	octeon_memory_init(struct boot_info *);
 
 cons_decl(com_oct);
 struct consdev octcons = cons_init(com_oct);
 
 #define btoc(x) (((x)+PAGE_MASK)>>PAGE_SHIFT)
 
+#define OCTEON_DRAM_FIRST_256_END	0xfffffffull
+
 void
-octeon_memory_init(void)
+octeon_memory_init(struct boot_info *boot_info)
 {
-	uint64_t phys_avail[10 + 2];
+	uint64_t phys_avail[10 + 2] = {0,};
 	uint64_t startpfn, endpfn;
 	uint32_t realmem;
 	extern char end[];
 	int i;
+	uint32_t realmem_bytes;
+
 	startpfn = atop(CKSEG0_TO_PHYS((vaddr_t)&end) + PAGE_SIZE);
 	endpfn = atop(96 << 20);
 	mem_layout[0].mem_first_page = startpfn;
@@ -160,24 +230,22 @@ octeon_memory_init(void)
 	mem_layout[0].mem_freelist = VM_FREELIST_DEFAULT;
 
 	physmem = endpfn - startpfn;
-	uint32_t realmem_bytes;
 
-#if 0
-	if (octeon_board_real()) {
-		realmem_bytes = (octeon_dram - PAGE_SIZE);
-		realmem_bytes &= ~(PAGE_SIZE - 1);
-	} else 
-#endif
-	{
-		/* Simulator we limit to 96 meg */
+	/* Simulator we limit to 96 meg */
+	if (boot_info->board_type == BOARD_TYPE_SIM) {
 		realmem_bytes = (96 << 20);
+	}else{
+		realmem_bytes = ((boot_info->dram_size << 20) - PAGE_SIZE);
+		realmem_bytes &= ~(PAGE_SIZE - 1);
 	}
 	/* phys_avail regions are in bytes */
-	memset((void*)phys_avail,0,sizeof(phys_avail));
 	phys_avail[0] = (CKSEG0_TO_PHYS((uint64_t)&end) + 
 			 PAGE_SIZE ) & ~(PAGE_SIZE - 1);
-#if 0
-	if (octeon_board_real()) {
+
+	/* Simulator gets 96Meg period. */
+	if (boot_info->board_type == BOARD_TYPE_SIM) {
+		phys_avail[1] = (96 << 20);
+	}else{
 		if (realmem_bytes > OCTEON_DRAM_FIRST_256_END)
 			phys_avail[1] = OCTEON_DRAM_FIRST_256_END;
 		else
@@ -185,12 +253,8 @@ octeon_memory_init(void)
 		realmem_bytes -= OCTEON_DRAM_FIRST_256_END;
 		realmem_bytes &= ~(PAGE_SIZE - 1);
 		mem_layout[0].mem_last_page = atop(phys_avail[1]);
-	} else
-#endif
-	{
-		/* Simulator gets 96Meg period. */
-		phys_avail[1] = (96 << 20);
 	}
+
 	/*-
 	 * Octeon Memory looks as follows:
          *   PA
@@ -206,9 +270,10 @@ octeon_memory_init(void)
 	 *
 	 */
 	physmem = btoc(phys_avail[1] - phys_avail[0]);
-#if 0
-	if (octeon_board_real()){
+
+	if (boot_info->board_type != BOARD_TYPE_SIM) {
 		if(realmem_bytes > OCTEON_DRAM_FIRST_256_END){
+#if 0
 			/* take out the upper non-cached 1/2 */
 			phys_avail[2] = 0x410000000ULL;
 			phys_avail[3] = (0x410000000ULL 
@@ -218,6 +283,7 @@ octeon_memory_init(void)
 			mem_layout[1].mem_last_page = atop(phys_avail[3]-1);
 			mem_layout[1].mem_freelist = VM_FREELIST_DEFAULT;
 			realmem_bytes -= OCTEON_DRAM_FIRST_256_END;
+#endif
 			/* Now map the rest of the memory */
 			phys_avail[4] = 0x20000000ULL;
 			phys_avail[5] = (0x20000000ULL + realmem_bytes);
@@ -237,11 +303,11 @@ octeon_memory_init(void)
 			realmem_bytes=0;
 		}
  	}
-#endif
+
  	realmem = physmem;
-#if 0
-	printf("Total DRAM Size 0x%016X\n", (uint32_t) octeon_dram);
-#endif
+
+	printf("Total DRAM Size 0x%016X\n", (uint32_t) (boot_info->dram_size << 20));
+
 	for(i=0;phys_avail[i];i+=2){
 		printf("Bank %d = 0x%016lX   ->  0x%016lX\n",i>>1, 
 		       (long)phys_avail[i], (long)phys_avail[i+1]);
@@ -264,10 +330,16 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	uint prid;
 	vaddr_t xtlb_handler;
 	int i;
+	struct boot_desc *boot_desc;
+	struct boot_info *boot_info;
 
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern void xtlb_miss;
+
+	boot_desc = (struct boot_desc *)a3;
+	boot_info = 
+		(struct boot_info *)PHYS_TO_CKSEG0(boot_desc->boot_info_addr);
 
 #ifdef MULTIPROCESSOR
 	/*
@@ -306,8 +378,7 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 
 	prid = cp0_get_prid();
 
-	/* XXX: We should get clockrate from boot descriptor */
-	bootcpu_hwinfo.clock = 500000000;
+	bootcpu_hwinfo.clock = boot_desc->eclock;
 
 	/*
 	 * Look at arguments passed to us and compute boothowto.
@@ -316,7 +387,7 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 
 	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
 
-	octeon_memory_init();
+	octeon_memory_init(boot_info);
 
 	/*
 	 * Set pagesize to enable use of page macros and functions.
@@ -391,6 +462,52 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 
 	consinit();
 	printf("Initial setup done, switching console.\n");
+
+#ifdef DEBUG
+#define DUMP_BOOT_DESC(field, format) \
+	printf("boot_desc->" #field ":" #format "\n", boot_desc->field)
+#define DUMP_BOOT_INFO(field, format) \
+	printf("boot_info->" #field ":" #format "\n", boot_info->field)
+
+	DUMP_BOOT_DESC(desc_ver, %d);
+	DUMP_BOOT_DESC(desc_size, %d);
+	DUMP_BOOT_DESC(stack_top, %d);
+	DUMP_BOOT_DESC(heap_start, %d);
+	DUMP_BOOT_DESC(heap_end, %d);
+	DUMP_BOOT_DESC(argc, %d);
+	DUMP_BOOT_DESC(flags, %x);
+	DUMP_BOOT_DESC(core_mask, %x);
+	DUMP_BOOT_DESC(dram_size, %d);
+	DUMP_BOOT_DESC(phy_mem_desc_addr, %x);
+	DUMP_BOOT_DESC(debugger_flag_addr, %x);
+	DUMP_BOOT_DESC(eclock, %d);
+	DUMP_BOOT_DESC(boot_info_addr, %x);
+
+	DUMP_BOOT_INFO(ver_major, %d);
+	DUMP_BOOT_INFO(ver_minor, %d);
+	DUMP_BOOT_INFO(stack_top, %x);
+	DUMP_BOOT_INFO(heap_start, %x);
+	DUMP_BOOT_INFO(heap_end, %x);
+	DUMP_BOOT_INFO(boot_desc_addr, %x);
+	DUMP_BOOT_INFO(exception_base_addr, %x);
+	DUMP_BOOT_INFO(stack_size, %d);
+	DUMP_BOOT_INFO(flags, %x);
+	DUMP_BOOT_INFO(core_mask, %x);
+	DUMP_BOOT_INFO(dram_size, %d);
+	DUMP_BOOT_INFO(phys_mem_desc_addr, %x);
+	DUMP_BOOT_INFO(debugger_flags_addr, %x);
+	DUMP_BOOT_INFO(eclock, %d);
+	DUMP_BOOT_INFO(dclock, %d);
+	DUMP_BOOT_INFO(board_type, %d);
+	DUMP_BOOT_INFO(board_rev_major, %d);
+	DUMP_BOOT_INFO(board_rev_minor, %d);
+	DUMP_BOOT_INFO(mac_addr_count, %d);
+	DUMP_BOOT_INFO(cf_common_addr, %x);
+	DUMP_BOOT_INFO(cf_attr_addr, %x);
+	DUMP_BOOT_INFO(led_display_addr, %x);
+	DUMP_BOOT_INFO(dfaclock, %d);
+	DUMP_BOOT_INFO(config_flags, %x);
+#endif
 
 	/*
 	 * Init message buffer.
@@ -664,8 +781,15 @@ is_memory_range(paddr_t pa, psize_t len, psize_t limit)
 }
 
 #ifdef MULTIPROCESSOR
-unsigned octeon_ap_boot = ~0;
-struct cpu_info *cpu_info_boot_secondary = NULL;
+uint32_t cpu_spinup_mask = 0;
+uint64_t cpu_spinup_a0, cpu_spinup_sp;
+static int (*ipi_handler)(void *);
+
+uint32_t ipi_intr(uint32_t, struct trap_frame *);
+
+extern bus_space_t obio_tag;
+extern bus_space_handle_t obio_h;
+
 void
 hw_cpu_boot_secondary(struct cpu_info *ci)
 {
@@ -675,10 +799,9 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
 	if (kstack == NULL)
 		panic("unable to allocate idle stack\n");
 	ci->ci_curprocpaddr = (void *)kstack;
-
-	cpu_info_boot_secondary = ci;
-	
-	octeon_ap_boot = ci->ci_cpuid;
+	cpu_spinup_a0 = (uint64_t)ci;
+	cpu_spinup_sp = (uint64_t)(kstack + USPACE);
+	cpu_spinup_mask = (uint32_t)ci->ci_cpuid;
 
 	while (!cpuset_isset(&cpus_running, ci))
 		;
@@ -719,14 +842,14 @@ hw_cpu_hatch(struct cpu_info *ci)
 	Octeon_ConfigCache(ci);
 	Mips_SyncCache(ci);
 
-	cpu_startclock(ci);
+	printf("cpu%d launched\n", cpu_number());
 
+	cpu_startclock(ci);
 	ncpus++;
 	cpuset_add(&cpus_running, ci);
-
+	obio_intr_init();
 	mips64_ipi_init();
 	obio_setintrmask(0);
-
 	spl0();
 	(void)updateimask(0);
 
@@ -734,24 +857,67 @@ hw_cpu_hatch(struct cpu_info *ci)
 	cpu_switchto(NULL, sched_chooseproc());
 }
 
+/*
+ * IPI dispatcher.
+ */
+uint32_t
+ipi_intr(uint32_t hwpend, struct trap_frame *frame)
+{
+	u_long cpuid = cpu_number();
+
+	/*
+	 * Mask all pending interrupts.
+	 */
+	bus_space_write_8(&obio_tag, obio_h, CIU_IP3_EN0(cpuid), 0);
+
+	ipi_handler((void *)cpuid);
+
+	/*
+	 * Reenable interrupts which have been serviced.
+	 */
+	bus_space_write_8(&obio_tag, obio_h, CIU_IP3_EN0(cpuid),
+		(1ULL << CIU_INT_MBOX0)|(1ULL << CIU_INT_MBOX1));
+	return hwpend;
+}
+
 int
 hw_ipi_intr_establish(int (*func)(void *), u_long cpuid)
 {
-	obio_intr_establish(CIU_INT_MBOX(cpuid), IPL_IPI, func,
-		(void *)cpuid, NULL);
+	if (cpuid == 0)
+		ipi_handler = func;
+
+	bus_space_write_8(&obio_tag, obio_h, CIU_MBOX_CLR(cpuid),
+		0xffffffff);
+	bus_space_write_8(&obio_tag, obio_h, CIU_IP3_EN0(cpuid),
+		(1ULL << CIU_INT_MBOX0)|(1ULL << CIU_INT_MBOX1));
+	set_intr(INTPRI_IPI, CR_INT_1, ipi_intr);
+
 	return 0;
 };
 
 void
 hw_ipi_intr_set(u_long cpuid)
 {
-	*(uint64_t *)OCTEON_CIU_MBOX_SETX(cpuid) = 1;
+	bus_space_write_8(&obio_tag, obio_h, CIU_MBOX_SET(cpuid), 1);
 }
 
 void
 hw_ipi_intr_clear(u_long cpuid)
 {
-	*(uint64_t *)OCTEON_CIU_MBOX_CLRX(cpuid) = 1;
+	uint64_t clr =
+		bus_space_read_8(&obio_tag, obio_h, CIU_MBOX_CLR(cpuid));
+	bus_space_write_8(&obio_tag, obio_h, CIU_MBOX_CLR(cpuid), clr);
 }
 
+void
+hw_cpu_init_secondary(struct cpu_info *ci)
+{
+	ci->ci_cacheways = 2;
+	ci->ci_l1instcachesize = 32 * 1024;
+	ci->ci_l1instcacheline = 64;
+	ci->ci_l1datacachesize = 32 * 1024;
+	ci->ci_l1datacacheline = 64;
+	ci->ci_l2size = ci->ci_hw.l2size;
+	ci->ci_l3size = 0;
+}
 #endif
