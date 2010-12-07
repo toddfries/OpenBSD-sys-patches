@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.38 2010/11/13 04:16:42 guenther Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.40 2010/11/27 13:03:04 kettenis Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -135,8 +135,6 @@ struct cpu_info cpu_info_primary = { 0, &cpu_info_primary };
 
 struct cpu_info *cpu_info_list = &cpu_info_primary;
 
-u_int32_t cpus_attached = 0;
-
 #ifdef MULTIPROCESSOR
 /*
  * Array of CPU info structures.  Must be statically-allocated because
@@ -168,9 +166,13 @@ cpu_match(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 	struct cpu_attach_args *caa = aux;
 
-	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) == 0)
-		return 1;
-	return 0;
+	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) != 0)
+		return 0;
+
+	if (cf->cf_unit >= MAXCPUS)
+		return 0;
+
+	return 1;
 }
 
 static void
@@ -345,8 +347,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		panic("unknown processor type??");
 	}
 	cpu_vm_init(ci);
-
-	cpus_attached |= (1 << ci->ci_cpuid);
 
 #if defined(MULTIPROCESSOR)
 	if (mp_verbose) {
