@@ -30,10 +30,14 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <net/netisr.h>
+
 	.data
-	.globl	_C_LABEL(imen)
+	.globl	_C_LABEL(imen),_C_LABEL(netisr)
 _C_LABEL(imen):
 	.long	0xffff		# interrupt mask enable (all off)
+_C_LABEL(netisr):
+	.long	0		# scheduling bits for network
 
 	.text
 /*
@@ -132,6 +136,13 @@ IDTVEC(softtty)
 #endif
 	jmp	*%esi
 
+#define DONETISR(s, c) \
+	.globl  _C_LABEL(c)	;\
+	testl	$(1 << s),%edi	;\
+	jz	1f		;\
+	call	_C_LABEL(c)	;\
+1:
+
 IDTVEC(softnet)
 	movl	$IPL_SOFTNET,%eax
 	movl	%eax,CPL
@@ -139,6 +150,11 @@ IDTVEC(softnet)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
+	xorl	%edi,%edi
+	xchgl	_C_LABEL(netisr),%edi
+
+#include <net/netisr_dispatch.h>
+
 	pushl	$I386_SOFTINTR_SOFTNET
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
