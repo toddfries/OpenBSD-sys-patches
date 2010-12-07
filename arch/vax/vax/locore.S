@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.3 2010/06/29 18:46:34 tedu Exp $   */
+/*	$OpenBSD: locore.S,v 1.4 2010/11/27 18:04:23 miod Exp $   */
 /*	$NetBSD: intvec.s,v 1.39 1999/06/28 08:20:48 itojun Exp $   */
 
 /*
@@ -35,6 +35,7 @@
 #include "assym.h"
 
 #include <machine/asm.h>
+#include <net/netisr.h>
 
 #define JSBENTRY(x) \
 	.text;	_ALIGN_TEXT;	.globl x;	x:
@@ -277,6 +278,11 @@ JSBENTRY(sbiflt)
 TRAPCALL(astintr, T_ASTFLT)
 
 FASTINTR(softintr,softintr_dispatch)
+
+	.data
+	.global _netisr
+_netisr:
+	.long	0	# scheduling bits for network
 
 TRAPCALL(ddbtrap, T_KDBTRAP)
 
@@ -609,10 +615,10 @@ ENTRY_NOPROFILE(copyout, R2|R3|R4|R5|R6)
 3:	movl	$EFAULT, r0
 	ret
 
-/* kcopy:  just like bcopy, except return -1 upon failure */	
+/* kcopy:  just like bcopy, except return EFAULT upon failure */	
 ENTRY_NOPROFILE(kcopy,R2|R3|R4|R5|R6)
 	movl	*pcbtrap,-(sp)
-	movab	2f,*pcbtrap
+	movab	1f,*pcbtrap
 	movl	4(ap), r0
 	movl	8(ap), r1
 	movzwl	12(ap), r2
@@ -627,17 +633,11 @@ ENTRY_NOPROFILE(kcopy,R2|R3|R4|R5|R6)
 	sobgtr	r6, 0b
 	
 	/* 
-	 * If there is a failure, trap.c will set r1 to -1, and jump
-	 * to the following 2.  If not, we return 0.  We duplicate a 
-	 * minuscule amount of code in the interest of speed; movc3
-	 * sets r0 to 0 anyway.
+	 * If there is a failure, trap.c will set r0 to EFAULT, and jump
+	 * to the following 1.  If not, we return 0 (movc3 sets r0 to 0).
 	 */
 1:
 	movl	(sp)+,*pcbtrap
-	ret
-	
-2:	movl	(sp)+,*pcbtrap
-	movl	r1,r0
 	ret
 
 ENTRY_NOPROFILE(copyinstr,0)
