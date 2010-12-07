@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.179 2010/08/18 21:01:14 jasper Exp $	*/
+/*	$OpenBSD: locore.S,v 1.180 2010/11/28 20:09:14 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -93,7 +93,6 @@
 	.import	bootdev, data
 	.import	esym, data
 	.import cpu_info, data
-	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
 	.import	panic, code
@@ -102,6 +101,13 @@
 #define	FPEMU_STACKSIZE	(1*NBPG)
 
 	.data
+
+	.export netisr, data
+	.align 16
+netisr
+	.word	0
+	.size	netisr, .-netisr
+	.align	16
 
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
