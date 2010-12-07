@@ -76,6 +76,7 @@
 
 #include <uvm/uvm.h>
 
+#include <net/netisr.h>
 #include <net/if.h>
 
 #ifdef INET
