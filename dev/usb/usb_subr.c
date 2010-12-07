@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.74 2010/09/24 00:12:36 deraadt Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.75 2010/12/06 04:30:57 jakemsr Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 

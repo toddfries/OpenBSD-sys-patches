@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.96 2010/10/27 17:51:11 jakemsr Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.97 2010/12/06 04:41:39 jakemsr Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.

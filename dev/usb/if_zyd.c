@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.85 2010/10/27 17:51:11 jakemsr Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.86 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>

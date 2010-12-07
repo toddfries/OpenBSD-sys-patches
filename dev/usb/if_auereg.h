@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_auereg.h,v 1.14 2009/08/10 20:02:19 deraadt Exp $ */
+/*	$OpenBSD: if_auereg.h,v 1.15 2010/12/06 04:41:39 jakemsr Exp $ */
 /*	$NetBSD: if_auereg.h,v 1.16 2001/10/10 02:14:17 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999

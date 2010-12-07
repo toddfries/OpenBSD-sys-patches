@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mos.c,v 1.11 2010/10/27 17:51:11 jakemsr Exp $	*/
+/*	$OpenBSD: if_mos.c,v 1.12 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urlreg.h,v 1.12 2007/11/25 16:40:03 jmc Exp $ */
+/*	$OpenBSD: if_urlreg.h,v 1.13 2010/12/06 04:41:39 jakemsr Exp $ */
 /*	$NetBSD: if_urlreg.h,v 1.1 2002/03/28 21:09:11 ichiro Exp $	*/
 /*
  * Copyright (c) 2001, 2002

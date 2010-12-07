@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mosreg.h,v 1.3 2008/11/22 09:46:12 deraadt Exp $	*/
+/*	$OpenBSD: if_mosreg.h,v 1.4 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>

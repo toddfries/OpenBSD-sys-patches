@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.55 2010/09/23 05:44:15 jakemsr Exp $ */
+/*	$OpenBSD: uhub.c,v 1.56 2010/12/06 04:41:40 jakemsr Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
