@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.156 2010/09/27 23:45:48 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.159 2010/11/29 06:48:09 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -93,31 +93,25 @@
 	sizeof(struct ip) + \
 	sizeof(struct pfsync_header))
 
-struct pfsync_pkt {
-	struct ip *ip;
-	struct in_addr src;
-	u_int8_t flags;
-};
-
 int	pfsync_upd_tcp(struct pf_state *, struct pfsync_state_peer *,
 	    struct pfsync_state_peer *);
 
-int	pfsync_in_clr(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_iack(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_upd_c(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_ureq(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_del(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_del_c(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_bus(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_tdb(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_ins(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_upd(struct pfsync_pkt *, caddr_t, int, int);
-int	pfsync_in_eof(struct pfsync_pkt *, caddr_t, int, int);
+int	pfsync_in_clr(caddr_t, int, int, int);
+int	pfsync_in_iack(caddr_t, int, int, int);
+int	pfsync_in_upd_c(caddr_t, int, int, int);
+int	pfsync_in_ureq(caddr_t, int, int, int);
+int	pfsync_in_del(caddr_t, int, int, int);
+int	pfsync_in_del_c(caddr_t, int, int, int);
+int	pfsync_in_bus(caddr_t, int, int, int);
+int	pfsync_in_tdb(caddr_t, int, int, int);
+int	pfsync_in_ins(caddr_t, int, int, int);
+int	pfsync_in_upd(caddr_t, int, int, int);
+int	pfsync_in_eof(caddr_t, int, int, int);
 
-int	pfsync_in_error(struct pfsync_pkt *, caddr_t, int, int);
+int	pfsync_in_error(caddr_t, int, int, int);
 
 struct {
-	int	(*in)(struct pfsync_pkt *, caddr_t, int, int);
+	int	(*in)(caddr_t, int, int, int);
 	size_t	len;
 } pfsync_acts[] = {
 	/* PFSYNC_ACT_CLR */
@@ -477,7 +471,7 @@ pfsync_state_export(struct pfsync_state *sp, struct pf_state *st)
 }
 
 int
-pfsync_state_import(struct pfsync_state *sp, u_int8_t flags)
+pfsync_state_import(struct pfsync_state *sp, int flags)
 {
 	struct pf_state	*st = NULL;
 	struct pf_state_key *skw = NULL, *sks = NULL;
@@ -641,13 +635,12 @@ void
 pfsync_input(struct mbuf *m, ...)
 {
 	struct pfsync_softc *sc = pfsyncif;
-	struct pfsync_pkt pkt;
 	struct ip *ip = mtod(m, struct ip *);
 	struct mbuf *mp;
 	struct pfsync_header *ph;
 	struct pfsync_subheader subh;
 
-	int offset, offp, len, count, mlen;
+	int offset, offp, len, count, mlen, flags = 0;
 
 	pfsyncstats.pfsyncs_ipackets++;
 
@@ -672,19 +665,12 @@ pfsync_input(struct mbuf *m, ...)
 	}
 
 	offset = ip->ip_hl << 2;
-	if (m->m_pkthdr.len < offset + sizeof(*ph)) {
+	mp = m_pulldown(m, offset, sizeof(*ph), &offp);
+	if (mp == NULL) {
 		pfsyncstats.pfsyncs_hdrops++;
-		goto done;
+		return;
 	}
-
-	if (offset + sizeof(*ph) > m->m_len) {
-		if (m_pullup(m, offset + sizeof(*ph)) == NULL) {
-			pfsyncstats.pfsyncs_hdrops++;
-			return;
-		}
-		ip = mtod(m, struct ip *);
-	}
-	ph = (struct pfsync_header *)((char *)ip + offset);
+	ph = (struct pfsync_header *)(mp->m_data + offp);
 
 	/* verify the version */
 	if (ph->version != PFSYNC_VERSION) {
@@ -697,13 +683,8 @@ pfsync_input(struct mbuf *m, ...)
 		goto done;
 	}
 
-	/* Cheaper to grab this now than having to mess with mbufs later */
-	pkt.ip = ip;
-	pkt.src = ip->ip_src;
-	pkt.flags = 0;
-
 	if (!bcmp(&ph->pfcksum, &pf_status.pf_chksum, PF_MD5_DIGEST_LENGTH))
-		pkt.flags |= PFSYNC_SI_CKSUM;
+		flags = PFSYNC_SI_CKSUM;
 
 	offset += sizeof(*ph);
 	while (offset <= len - sizeof(subh)) {
@@ -736,8 +717,8 @@ pfsync_input(struct mbuf *m, ...)
 			return;
 		}
 
-		if (pfsync_acts[subh.action].in(&pkt, mp->m_data + offp,
-		    mlen, count) != 0)
+		if (pfsync_acts[subh.action].in(mp->m_data + offp,
+		    mlen, count, flags) != 0)
 			goto done;
 
 		offset += mlen * count;
@@ -748,7 +729,7 @@ done:
 }
 
 int
-pfsync_in_clr(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_clr(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_clr *clr;
 	int i;
@@ -757,9 +738,7 @@ pfsync_in_clr(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	struct pf_state_key *sk, *nextsk;
 	struct pf_state_item *si;
 	u_int32_t creatorid;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		clr = (struct pfsync_clr *)buf + len * i;
 		creatorid = clr->creatorid;
@@ -792,20 +771,16 @@ pfsync_in_clr(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 			}
 		}
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_ins(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_ins(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_state *sp;
 	int i;
 
-	int s;
-
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		sp = (struct pfsync_state *)(buf + len * i);
 
@@ -821,26 +796,23 @@ pfsync_in_ins(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 			continue;
 		}
 
-		if (pfsync_state_import(sp, pkt->flags) == ENOMEM) {
+		if (pfsync_state_import(sp, flags) == ENOMEM) {
 			/* drop out, but process the rest of the actions */
 			break;
 		}
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_iack(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_iack(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_ins_ack *ia;
 	struct pf_state_cmp id_key;
 	struct pf_state *st;
 	int i;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		ia = (struct pfsync_ins_ack *)(buf + len * i);
 
@@ -854,7 +826,6 @@ pfsync_in_iack(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 		if (ISSET(st->state_flags, PFSTATE_ACK))
 			pfsync_deferred(st, 0);
 	}
-	splx(s);
 
 	return (0);
 }
@@ -892,7 +863,7 @@ pfsync_upd_tcp(struct pf_state *st, struct pfsync_state_peer *src,
 }
 
 int
-pfsync_in_upd(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_upd(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_state *sp;
 	struct pf_state_cmp id_key;
@@ -900,10 +871,7 @@ pfsync_in_upd(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	int sync;
 
 	int i;
-	int s;
 
-
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		sp = (struct pfsync_state *)(buf + len * i);
 
@@ -987,13 +955,12 @@ pfsync_in_upd(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 			schednetisr(NETISR_PFSYNC);
 		}
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_upd_c(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_upd_c(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_upd_c *up;
 	struct pf_state_cmp id_key;
@@ -1002,9 +969,7 @@ pfsync_in_upd_c(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	int sync;
 
 	int i;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		up = (struct pfsync_upd_c *)(buf + len * i);
 
@@ -1064,13 +1029,12 @@ pfsync_in_upd_c(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 			schednetisr(NETISR_PFSYNC);
 		}
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_ureq(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_ureq(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_upd_req *ur;
 	int i;
@@ -1103,15 +1067,13 @@ pfsync_in_ureq(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 }
 
 int
-pfsync_in_del(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_del(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_state *sp;
 	struct pf_state_cmp id_key;
 	struct pf_state *st;
 	int i;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		sp = (struct pfsync_state *)(buf + len * i);
 
@@ -1126,21 +1088,18 @@ pfsync_in_del(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 		SET(st->state_flags, PFSTATE_NOSYNC);
 		pf_unlink_state(st);
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_del_c(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_del_c(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_del_c *sp;
 	struct pf_state_cmp id_key;
 	struct pf_state *st;
 	int i;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		sp = (struct pfsync_del_c *)(buf + len * i);
 
@@ -1156,13 +1115,12 @@ pfsync_in_del_c(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 		SET(st->state_flags, PFSTATE_NOSYNC);
 		pf_unlink_state(st);
 	}
-	splx(s);
 
 	return (0);
 }
 
 int
-pfsync_in_bus(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_bus(caddr_t buf, int len, int count, int flags)
 {
 	struct pfsync_softc *sc = pfsyncif;
 	struct pfsync_bus *bus;
@@ -1207,19 +1165,16 @@ pfsync_in_bus(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 }
 
 int
-pfsync_in_tdb(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_tdb(caddr_t buf, int len, int count, int flags)
 {
 #if defined(IPSEC)
 	struct pfsync_tdb *tp;
 	int i;
-	int s;
 
-	s = splsoftnet();
 	for (i = 0; i < count; i++) {
 		tp = (struct pfsync_tdb *)(buf + len * i);
 		pfsync_update_net_tdb(tp);
 	}
-	splx(s);
 #endif
 
 	return (0);
@@ -1268,7 +1223,7 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 
 
 int
-pfsync_in_eof(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_eof(caddr_t buf, int len, int count, int flags)
 {
 	if (len > 0 || count > 0)
 		pfsyncstats.pfsyncs_badact++;
@@ -1278,7 +1233,7 @@ pfsync_in_eof(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 }
 
 int
-pfsync_in_error(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
+pfsync_in_error(caddr_t buf, int len, int count, int flags)
 {
 	pfsyncstats.pfsyncs_badact++;
 	return (-1);
