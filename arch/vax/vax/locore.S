@@ -35,6 +35,7 @@
 #include "assym.h"
 
 #include <machine/asm.h>
+#include <net/netisr.h>
 
 #define JSBENTRY(x) \
 	.text;	_ALIGN_TEXT;	.globl x;	x:
@@ -277,6 +278,11 @@ JSBENTRY(sbiflt)
 TRAPCALL(astintr, T_ASTFLT)
 
 FASTINTR(softintr,softintr_dispatch)
+
+	.data
+	.global _netisr
+_netisr:
+	.long	0	# scheduling bits for network
 
 TRAPCALL(ddbtrap, T_KDBTRAP)
 
