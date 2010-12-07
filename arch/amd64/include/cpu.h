@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.60 2010/11/22 21:07:18 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.62 2010/11/29 00:04:09 dlg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -159,7 +159,7 @@ extern void need_resched(struct cpu_info *);
 
 #if defined(MULTIPROCESSOR)
 
-#define MAXCPUS		32	/* bitmask; can be bumped to 64 */
+#define MAXCPUS		64	/* bitmask; can be bumped to 64 */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
@@ -210,8 +210,6 @@ extern struct cpu_info cpu_info_primary;
 #endif
 
 #define aston(p)	((p)->p_md.md_astpending = 1)
-
-extern u_int32_t cpus_attached;
 
 #define curpcb		curcpu()->ci_curpcb
 
