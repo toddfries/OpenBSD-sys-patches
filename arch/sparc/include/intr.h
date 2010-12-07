@@ -94,5 +94,9 @@ void	 softintr_disestablish(void *);
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_schedule(void *);
 
+/* XXX legacy software interrupts */
+extern void *softnet_ih;
+#define	 setsoftnet()	softintr_schedule(softnet_ih)
+
 #endif /* _KERNEL */
 #endif /* _SPARC_INTR_H_ */
