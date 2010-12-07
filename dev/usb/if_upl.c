@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.44 2010/09/24 08:33:59 yuo Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.45 2010/12/06 05:46:17 jakemsr Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

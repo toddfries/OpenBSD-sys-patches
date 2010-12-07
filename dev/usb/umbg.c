@@ -1,4 +1,4 @@
-/*	$OpenBSD: umbg.c,v 1.14 2010/10/23 16:14:07 jakemsr Exp $ */
+/*	$OpenBSD: umbg.c,v 1.15 2010/12/06 04:41:40 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>

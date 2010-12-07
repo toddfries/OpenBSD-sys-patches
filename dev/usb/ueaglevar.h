@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueaglevar.h,v 1.2 2007/06/06 19:25:49 mk Exp $	*/
+/*	$OpenBSD: ueaglevar.h,v 1.3 2010/12/06 04:41:40 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2003-2005

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.93 2010/10/27 17:51:11 jakemsr Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.94 2010/12/06 04:41:39 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>

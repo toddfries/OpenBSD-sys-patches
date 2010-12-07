@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci.c,v 1.86 2010/11/21 01:29:07 matthew Exp $	*/
+/*	$OpenBSD: uhci.c,v 1.88 2010/12/06 06:09:08 jakemsr Exp $	*/
 /*	$NetBSD: uhci.c,v 1.172 2003/02/23 04:19:26 simonb Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhci.c,v 1.33 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -627,6 +627,11 @@ uhci_detach(struct uhci_softc *sc, int flags)
 	if (sc->sc_shutdownhook != NULL)
 		shutdownhook_disestablish(sc->sc_shutdownhook);
 
+	if (sc->sc_intr_xfer != NULL) {
+		timeout_del(&sc->sc_poll_handle);
+		sc->sc_intr_xfer = NULL;
+	}
+
 	/* Free all xfers associated with this HC. */
 	for (;;) {
 		xfer = SIMPLEQ_FIRST(&sc->sc_free_xfers);
@@ -956,6 +961,9 @@ uhci_poll_hub(void *addr)
 	u_char *p;
 
 	DPRINTFN(20, ("uhci_poll_hub\n"));
+
+	if (sc->sc_dying)
+		return;
 
 	timeout_del(&sc->sc_poll_handle);
 	timeout_set(&sc->sc_poll_handle, uhci_poll_hub, xfer);
@@ -1310,6 +1318,9 @@ uhci_softintr(void *v)
 
 	DPRINTFN(10,("%s: uhci_softintr (%d)\n", sc->sc_bus.bdev.dv_xname,
 		     sc->sc_bus.intr_context));
+
+	if (sc->sc_dying)
+		return;
 
 	sc->sc_bus.intr_context++;
 
