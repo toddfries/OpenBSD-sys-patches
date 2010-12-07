@@ -91,6 +91,11 @@ do {									\
 	mtx_leave(&__siq->siq_mtx);					\
 } while (/*CONSTCOND*/0)
 
+/* XXX For legacy software interrupts. */
+extern struct soft_intrhand *softnet_intrhand;
+
+#define	setsoftnet()	softintr_schedule(softnet_intrhand)
+
 #endif /* _KERNEL */
 
 #endif	/* _ARM_SOFTINTR_H_ */

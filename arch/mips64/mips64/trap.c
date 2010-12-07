@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.70 2010/10/24 15:39:18 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.72 2010/11/24 21:16:28 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -136,7 +136,9 @@ extern int kdb_trap(int, db_regs_t *);
 void	ast(void);
 void	trap(struct trap_frame *);
 #ifdef PTRACE
-int	cpu_singlestep(struct proc *);
+int	ptrace_read_insn(struct proc *, vaddr_t, uint32_t *);
+int	ptrace_write_insn(struct proc *, vaddr_t, uint32_t);
+int	process_sstep(struct proc *, int);
 #endif
 
 static __inline__ void
@@ -559,8 +561,6 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			locr0->v0 = i;
 			locr0->a3 = 1;
 		}
-		if (code == SYS_ptrace)
-			Mips_SyncCache(curcpu());
 #ifdef SYSCALL_DEBUG
 		KERNEL_PROC_LOCK(p);
 		scdebug_ret(p, code, i, rval);
@@ -600,12 +600,6 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		/* read break instruction */
 		copyin(va, &instr, sizeof(int32_t));
 
-#if 0
-		printf("trap: %s (%d) breakpoint %x at %x: (adr %x ins %x)\n",
-			p->p_comm, p->p_pid, instr, trapframe->pc,
-			p->p_md.md_ss_addr, p->p_md.md_ss_instr); /* XXX */
-#endif
-
 		switch ((instr & BREAK_VAL_MASK) >> BREAK_VAL_SHIFT) {
 		case 6:	/* gcc range error */
 			i = SIGFPE;
@@ -630,38 +624,47 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 #ifdef PTRACE
 		case BREAK_SSTEP_VAL:
 			if (p->p_md.md_ss_addr == (long)va) {
-				struct uio uio;
-				struct iovec iov;
-				int error;
+#ifdef DEBUG
+				printf("trap: %s (%d): breakpoint at %p "
+				    "(insn %08x)\n",
+				    p->p_comm, p->p_pid,
+				    p->p_md.md_ss_addr, p->p_md.md_ss_instr);
+#endif
 
-				/*
-				 * Restore original instruction and clear BP
-				 */
-				iov.iov_base = (caddr_t)&p->p_md.md_ss_instr;
-				iov.iov_len = sizeof(int);
-				uio.uio_iov = &iov;
-				uio.uio_iovcnt = 1;
-				uio.uio_offset = (off_t)(long)va;
-				uio.uio_resid = sizeof(int);
-				uio.uio_segflg = UIO_SYSSPACE;
-				uio.uio_rw = UIO_WRITE;
-				uio.uio_procp = curproc;
-				error = process_domem(curproc, p, &uio,
-				    PT_WRITE_I);
-				Mips_SyncCache(curcpu());
-
-				if (error)
-					printf("Warning: can't restore instruction at %x: %x\n",
-					    p->p_md.md_ss_addr,
-					    p->p_md.md_ss_instr);
-
-				p->p_md.md_ss_addr = 0;
+				/* Restore original instruction and clear BP */
+				process_sstep(p, 0);
 				typ = TRAP_BRKPT;
 			} else {
 				typ = TRAP_TRACE;
 			}
 			i = SIGTRAP;
 			break;
+#endif
+#ifdef FPUEMUL
+		case BREAK_FPUEMUL_VAL:
+			/*
+			 * If this is a genuine FP emulation break,
+			 * resume execution to our branch destination.
+			 */
+			if ((p->p_md.md_flags & MDP_FPUSED) != 0 &&
+			    p->p_md.md_fppgva + 4 == (vaddr_t)va) {
+				struct vm_map *map = &p->p_vmspace->vm_map;
+
+				p->p_md.md_flags &= ~MDP_FPUSED;
+				locr0->pc = p->p_md.md_fpbranchva;
+
+				/*
+				 * Prevent access to the relocation page.
+				 * XXX needs to be fixed to work with rthreads
+				 */
+				uvm_fault_unwire(map, p->p_md.md_fppgva,
+				    p->p_md.md_fppgva + PAGE_SIZE);
+				(void)uvm_map_protect(map, p->p_md.md_fppgva,
+				    p->p_md.md_fppgva + PAGE_SIZE,
+				    UVM_PROT_NONE, FALSE);
+				goto out;
+			}
+			/* FALLTHROUGH */
 #endif
 		default:
 			typ = TRAP_TRACE;
@@ -753,8 +756,11 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			typ = ILL_ILLOPC;
 			break;
 		}
-
+#ifdef FPUEMUL
+		MipsFPTrap(trapframe);
+#else
 		enable_fpu(p);
+#endif
 		goto out;
 
 	case T_FPE:
@@ -796,6 +802,16 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 #endif
 		panic("trap");
 	}
+#ifdef FPUEMUL
+	/*
+	 * If a relocated delay slot causes an exception, blame the
+	 * original delay slot address - userland is not supposed to
+	 * know anything about emulation bowels.
+	 */
+	if ((p->p_md.md_flags & MDP_FPUSED) != 0 &&
+	    trapframe->badvaddr == p->p_md.md_fppgva)
+		trapframe->badvaddr = p->p_md.md_fpslotva;
+#endif
 	p->p_md.md_regs->pc = trapframe->pc;
 	p->p_md.md_regs->cause = trapframe->cause;
 	p->p_md.md_regs->badvaddr = trapframe->badvaddr;
@@ -1012,87 +1028,112 @@ MipsEmulateBranch(struct trap_frame *tf, vaddr_t instPC, uint32_t fsr,
 
 #ifdef PTRACE
 
+int
+ptrace_read_insn(struct proc *p, vaddr_t va, uint32_t *insn)
+{
+	struct iovec iov;
+	struct uio uio;
+
+	iov.iov_base = (caddr_t)insn;
+	iov.iov_len = sizeof(uint32_t);
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;
+	uio.uio_offset = (off_t)va;
+	uio.uio_resid = sizeof(uint32_t);
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_READ;
+	uio.uio_procp = p;
+	return process_domem(p, p, &uio, PT_READ_I);
+}
+
+int
+ptrace_write_insn(struct proc *p, vaddr_t va, uint32_t insn)
+{
+	struct iovec iov;
+	struct uio uio;
+
+	iov.iov_base = (caddr_t)&insn;
+	iov.iov_len = sizeof(uint32_t);
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;
+	uio.uio_offset = (off_t)va;
+	uio.uio_resid = sizeof(uint32_t);
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_WRITE;
+	uio.uio_procp = p;
+	return process_domem(p, p, &uio, PT_WRITE_I);
+}
+
 /*
  * This routine is called by procxmt() to single step one instruction.
  * We do this by storing a break instruction after the current instruction,
  * resuming execution, and then restoring the old instruction.
  */
 int
-cpu_singlestep(p)
-	struct proc *p;
+process_sstep(struct proc *p, int sstep)
 {
-	vaddr_t va;
 	struct trap_frame *locr0 = p->p_md.md_regs;
-	int error;
-	int bpinstr = BREAK_SSTEP;
+	int rc;
 	uint32_t curinstr;
-	struct uio uio;
-	struct iovec iov;
+	vaddr_t va;
 
-	/*
-	 * Fetch what's at the current location.
-	 */
-	iov.iov_base = (caddr_t)&curinstr;
-	iov.iov_len = sizeof(uint32_t);
-	uio.uio_iov = &iov;
-	uio.uio_iovcnt = 1;
-	uio.uio_offset = (off_t)locr0->pc;
-	uio.uio_resid = sizeof(uint32_t);
-	uio.uio_segflg = UIO_SYSSPACE;
-	uio.uio_rw = UIO_READ;
-	uio.uio_procp = curproc;
-	process_domem(curproc, p, &uio, PT_READ_I);
+	if (sstep == 0) {
+		/* clear the breakpoint */
+		if (p->p_md.md_ss_addr != 0) {
+			rc = ptrace_write_insn(p, p->p_md.md_ss_addr,
+			    p->p_md.md_ss_instr);
+#ifdef DIAGNOSTIC
+			if (rc != 0)
+				printf("WARNING: %s (%d): can't restore "
+				    "instruction at %p: %08x\n",
+				    p->p_comm, p->p_pid,
+				    p->p_md.md_ss_addr, p->p_md.md_ss_instr);
+#endif
+			p->p_md.md_ss_addr = 0;
+		} else
+			rc = 0;
+		return rc;
+	}
+
+	/* read current instruction */
+	rc = ptrace_read_insn(p, locr0->pc, &curinstr);
+	if (rc != 0)
+		return rc;
 
 	/* compute next address after current location */
-	if (curinstr != 0)
+	if (curinstr != 0 /* nop */)
 		va = (vaddr_t)MipsEmulateBranch(locr0,
 		    locr0->pc, locr0->fsr, curinstr);
 	else
 		va = locr0->pc + 4;
-	if (p->p_md.md_ss_addr) {
-		printf("SS %s (%d): breakpoint already set at %x (va %x)\n",
-			p->p_comm, p->p_pid, p->p_md.md_ss_addr, va); /* XXX */
-		return (EFAULT);
+#ifdef DIAGNOSTIC
+	/* should not happen */
+	if (p->p_md.md_ss_addr != 0) {
+		printf("WARNING: %s (%d): breakpoint request "
+		    "at %p, already set at %p\n",
+		    p->p_comm, p->p_pid, va, p->p_md.md_ss_addr);
+		return EFAULT;
 	}
+#endif
 
-	/*
-	 * Fetch what's at the current location.
-	 */
-	iov.iov_base = (caddr_t)&p->p_md.md_ss_instr;
-	iov.iov_len = sizeof(int);
-	uio.uio_iov = &iov;
-	uio.uio_iovcnt = 1;
-	uio.uio_offset = (off_t)va;
-	uio.uio_resid = sizeof(int);
-	uio.uio_segflg = UIO_SYSSPACE;
-	uio.uio_rw = UIO_READ;
-	uio.uio_procp = curproc;
-	process_domem(curproc, p, &uio, PT_READ_I);
+	/* read next instruction */
+	rc = ptrace_read_insn(p, va, &p->p_md.md_ss_instr);
+	if (rc != 0)
+		return rc;
 
-	/*
-	 * Store breakpoint instruction at the "next" location now.
-	 */
-	iov.iov_base = (caddr_t)&bpinstr;
-	iov.iov_len = sizeof(int);
-	uio.uio_iov = &iov;
-	uio.uio_iovcnt = 1;
-	uio.uio_offset = (off_t)va;
-	uio.uio_resid = sizeof(int);
-	uio.uio_segflg = UIO_SYSSPACE;
-	uio.uio_rw = UIO_WRITE;
-	uio.uio_procp = curproc;
-	error = process_domem(curproc, p, &uio, PT_WRITE_I);
-	Mips_SyncCache(curcpu());
-	if (error)
-		return (EFAULT);
+	/* replace with a breakpoint instruction */
+	rc = ptrace_write_insn(p, va, BREAK_SSTEP);
+	if (rc != 0)
+		return rc;
 
 	p->p_md.md_ss_addr = va;
-#if 0
-	printf("SS %s (%d): breakpoint set at %x: %x (pc %x) br %x\n",
-		p->p_comm, p->p_pid, p->p_md.md_ss_addr,
-		p->p_md.md_ss_instr, locr0[PC], curinstr); /* XXX */
+
+#ifdef DEBUG
+	printf("%s (%d): breakpoint set at %p: %08x (pc %p %08x)\n",
+		p->p_comm, p->p_pid,
+		p->p_md.md_ss_addr, p->p_md.md_ss_instr, locr0->pc, curinstr);
 #endif
-	return (0);
+	return 0;
 }
 
 #endif /* PTRACE */
@@ -1359,3 +1400,135 @@ fn_name(vaddr_t addr)
 #endif	/* !DDB */
 
 #endif /* DDB || DEBUG */
+
+#ifdef FPUEMUL
+/*
+ * Set up a successful branch emulation.
+ * The delay slot instruction is copied to a reserved page, followed by a
+ * trap instruction to get control back, and resume at the branch
+ * destination.
+ */
+int
+fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
+    vaddr_t dest)
+{
+	struct vm_map *map = &p->p_vmspace->vm_map;
+	InstFmt inst;
+	int rc;
+
+	/*
+	 * Check the delay slot instruction: since it will run as a
+	 * non-delay slot instruction, we want to reject branch instructions
+	 * (which behaviour, when in a delay slot, is undefined anyway).
+	 */
+
+	inst = *(InstFmt *)&insn;
+	rc = 0;
+	switch ((int)inst.JType.op) {
+	case OP_SPECIAL:
+		switch ((int)inst.RType.func) {
+		case OP_JR:
+		case OP_JALR:
+			rc = EINVAL;
+			break;
+		}
+		break;
+	case OP_BCOND:
+		switch ((int)inst.IType.rt) {
+		case OP_BLTZ:
+		case OP_BLTZL:
+		case OP_BLTZAL:
+		case OP_BLTZALL:
+		case OP_BGEZ:
+		case OP_BGEZL:
+		case OP_BGEZAL:
+		case OP_BGEZALL:
+			rc = EINVAL;
+			break;
+		}
+		break;
+	case OP_J:
+	case OP_JAL:
+	case OP_BEQ:
+	case OP_BEQL:
+	case OP_BNE:
+	case OP_BNEL:
+	case OP_BLEZ:
+	case OP_BLEZL:
+	case OP_BGTZ:
+	case OP_BGTZL:
+		rc = EINVAL;
+		break;
+	case OP_COP1:
+		if (inst.RType.rs == OP_BC)	/* oh the irony */
+			rc = EINVAL;
+		break;
+	}
+
+	if (rc != 0) {
+#ifdef DEBUG
+		printf("%s: bogus delay slot insn %08x\n", __func__, insn);
+#endif
+		return rc;
+	}
+
+	/*
+	 * Temporarily change protection over the page used to relocate
+	 * the delay slot, and fault it in.
+	 */
+
+	rc = uvm_map_protect(map, p->p_md.md_fppgva,
+	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RWX, FALSE);
+	if (rc != 0) {
+#ifdef DEBUG
+		printf("%s: uvm_map_protect on %p failed: %d\n",
+		    __func__, p->p_md.md_fppgva, rc);
+#endif
+		return rc;
+	}
+	rc = uvm_fault_wire(map, p->p_md.md_fppgva,
+	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RWX);
+	if (rc != 0) {
+#ifdef DEBUG
+		printf("%s: uvm_fault_wire on %p failed: %d\n",
+		    __func__, p->p_md.md_fppgva, rc);
+#endif
+		goto err2;
+	}
+
+	rc = copyout(&insn, (void *)p->p_md.md_fppgva, sizeof insn);
+	if (rc != 0) {
+#ifdef DEBUG
+		printf("%s: copyout %p failed %d\n",
+		    __func__, p->p_md.md_fppgva, rc);
+#endif
+		goto err;
+	}
+	insn = BREAK_FPUEMUL;
+	rc = copyout(&insn, (void *)(p->p_md.md_fppgva + 4), sizeof insn);
+	if (rc != 0) {
+#ifdef DEBUG
+		printf("%s: copyout %p failed %d\n",
+		    __func__, p->p_md.md_fppgva + 4, rc);
+#endif
+		goto err;
+	}
+
+	(void)uvm_map_protect(map, p->p_md.md_fppgva,
+	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RX, FALSE);
+	p->p_md.md_fpbranchva = dest;
+	p->p_md.md_fpslotva = (vaddr_t)tf->pc + 4;
+	p->p_md.md_flags |= MDP_FPUSED;
+	tf->pc = p->p_md.md_fppgva;
+	pmap_proc_iflush(p, tf->pc, 2 * 4);
+
+	return 0;
+
+err:
+	uvm_fault_unwire(map, p->p_md.md_fppgva, p->p_md.md_fppgva + PAGE_SIZE);
+err2:
+	(void)uvm_map_protect(map, p->p_md.md_fppgva,
+	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_NONE, FALSE);
+	return rc;
+}
+#endif
