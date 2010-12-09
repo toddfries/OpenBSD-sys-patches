@@ -1469,6 +1469,7 @@ upgt_start(struct ifnet *ifp)
 		/* process the TX queue in process context */
 		ifp->if_timer = 5;
 		ifp->if_flags |= IFF_OACTIVE;
+		usb_rem_task(sc->sc_udev, &sc->sc_task_tx);
 		usb_add_task(sc->sc_udev, &sc->sc_task_tx);
 	}
 }
