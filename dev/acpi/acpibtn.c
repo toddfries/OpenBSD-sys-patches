@@ -167,6 +167,8 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 	int64_t lid;
 #endif
 
+	printf("acpibtn notify: %s %x\n", aml_nodename(sc->sc_devnode),
+		notify_type);
 	dnprintf(10, "acpibtn_notify: %.2x %s\n", notify_type,
 	    sc->sc_devnode->name);
 
@@ -198,14 +200,16 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 sleep:
 			/* Request to go to sleep */
 			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ))
-				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
+				acpi_addtask(sc->sc_acpi, acpi_sleep_task,
+				    sc->sc_acpi, ACPI_STATE_S3);
 			break;
 		}
 #endif /* SMALL_KERNEL */
 		break;
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)
-			sc->sc_acpi->sc_powerdown = 1;
+			acpi_addtask(sc->sc_acpi, acpi_powerdown_task,
+			    sc->sc_acpi, 0);
 		break;
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),

@@ -274,7 +274,6 @@ int			aml_rdpciaddr(struct aml_node *pcidev,
 #ifndef SMALL_KERNEL
 void			acpi_getdevlist(struct acpi_devlist_head *,
 			    struct aml_node *, struct aml_value *, int);
-void			acpi_poll_notify(void);
 void			aml_notify_dev(const char *, int);
 #endif
 
