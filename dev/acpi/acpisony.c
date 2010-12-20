@@ -198,7 +198,8 @@ acpisony_notify(struct aml_node *node, int notify, void *arg)
 		DPRINTF(("suspend-pressed\n"));
 #ifndef SMALL_KERNEL
 		if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ))
-			sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
+			acpi_addtask(sc->sc_acpi, acpi_sleep_task,
+			    sc->sc_acpi, ACPI_STATE_S3);
 #endif
 		break;
 	case SONY_NOTIFY_SUSPEND_RELEASED:

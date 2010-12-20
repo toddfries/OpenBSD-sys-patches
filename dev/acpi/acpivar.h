@@ -82,6 +82,13 @@ struct acpi_q {
 	u_int8_t		 q_data[0];
 };
 
+struct acpi_taskq {
+	SIMPLEQ_ENTRY(acpi_taskq)	next;
+	void 				(*handler)(void *, int);
+	void				*arg0;
+	int				arg1;
+};
+
 struct acpi_wakeq {
 	SIMPLEQ_ENTRY(acpi_wakeq)	 q_next;
 	struct aml_node			*q_node;
@@ -206,12 +213,6 @@ struct acpi_softc {
 
 	void			*sc_interrupt;
 
-	int			sc_powerbtn;
-	int			sc_sleepbtn;
-
-	int			sc_sleepmode;
-	int			sc_powerdown;
-
 	struct rwlock		sc_lck;
 
 	struct {
@@ -241,7 +242,6 @@ struct acpi_softc {
 	struct acpi_bat_head	sc_bat;
 
 	struct timeout		sc_dev_timeout;
-	int			sc_poll;
 
 	int			sc_revision;
 
@@ -332,6 +332,12 @@ void	acpi_sleep(int, char *);
 int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
 
 int	acpi_record_event(struct acpi_softc *, u_int);
+
+void	acpi_addtask(struct acpi_softc *, void (*)(void *, int), void *, int);
+int	acpi_dotask(struct acpi_softc *);
+
+void	acpi_powerdown_task(void *, int);
+void	acpi_sleep_task(void *, int);
 
 #endif
 
