@@ -437,7 +437,7 @@ usbd_bulk_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
 		splx(s);
 		return (err);
 	}
-	pri = timeout == USBD_NO_TIMEOUT ? (PZERO | PCATCH) : PWAIT;
+	pri = timeout == 0 ? (PZERO | PCATCH) : PZERO;
 	error = tsleep((caddr_t)xfer, pri, lbl, 0);
 	splx(s);
 	if (error) {
@@ -479,7 +479,7 @@ usbd_intr_transfer(usbd_xfer_handle xfer, usbd_pipe_handle pipe,
 		splx(s);
 		return (err);
 	}
-	pri = timeout == USBD_NO_TIMEOUT ? (PZERO | PCATCH) : PWAIT;
+	pri = timeout == 0 ? (PZERO | PCATCH) : PZERO;
 	error = tsleep(xfer, pri, lbl, 0);
 	splx(s);
 	if (error) {
