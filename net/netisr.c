@@ -20,6 +20,13 @@
 
 #include <machine/intr.h>
 
+#include "bluetooth.h"
+#include "ether.h"
+#include "ppp.h"
+#include "bridge.h"
+#include "pppoe.h"
+#include "pfsync.h"
+
 void	 netintr(void *);
 
 int	 netisr;
@@ -31,14 +38,53 @@ netintr(void *unused) /* ARGSUSED */
 	int n;
 	while ((n = netisr) != 0) {
 		atomic_clearbits_int(&netisr, n);
-#define DONETISR(bit, fn)			\
-		do {				\
-			if (n & 1 << (bit))	\
-				fn();		\
-		} while ( /* CONSTCOND */ 0)
-#include <net/netisr_dispatch.h>
 
-#undef DONETISR
+#ifdef INET
+#if NETHER > 0
+		if (n & (1 << NETISR_ARP))
+			arpintr();
+#endif
+		if (n & (1 << NETISR_IP))
+			ipintr();
+#endif
+#ifdef INET6
+		if (n & (1 << NETISR_IPV6))
+			ip6intr();
+#endif
+#ifdef MPLS
+		if (n & (1 << NETISR_MPLS))
+			mplsintr();
+#endif
+#ifdef NETATALK
+		if (n & (1 << NETISR_ATALK))
+			atintr();
+#endif
+#if NATM > 0
+		if (n & (1 << NETISR_NATM))
+			natmintr();
+#endif
+#if NPPP > 0
+		if (n & (1 << NETISR_PPP))
+			pppintr();
+#endif
+#if NBRIDGE > 0
+		if (n & (1 << NETISR_BRIDGE))
+			bridgeintr();
+#endif
+#if NPPPOE > 0
+		if (n & (1 << NETISR_PPPOE))
+			pppoeintr();
+#endif
+#if NBLUETOOTH > 0
+		if (n & (1 << NETISR_BT))
+			btintr();
+#endif
+#if NPFSYNC > 0
+		if (n & (1 << NETISR_PFSYNC))
+			pfsyncintr();
+#endif
+		if (n & (1 << NETISR_TX))
+			nettxintr();
 	}
 }
 
