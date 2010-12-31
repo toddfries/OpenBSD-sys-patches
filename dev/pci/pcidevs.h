@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1578 2010/12/01 17:07:37 damien Exp 
+ *	OpenBSD: pcidevs,v 1.1581 2010/12/24 06:10:14 shadchin Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -317,6 +317,7 @@
 #define	PCI_VENDOR_AWT	0x1a3b		/* AWT */
 #define	PCI_VENDOR_FUSIONIO	0x1aed		/* Fusion-io */
 #define	PCI_VENDOR_QUMRANET	0x1af4		/* Qumranet */
+#define	PCI_VENDOR_MARVELL2	0x1b4b		/* Marvell */
 #define	PCI_VENDOR_SYMPHONY2	0x1c1c		/* Symphony Labs */
 #define	PCI_VENDOR_TEKRAM2	0x1de1		/* Tekram */
 #define	PCI_VENDOR_TEHUTI	0x1fc9		/* Tehuti Networks */
@@ -1207,6 +1208,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_X700_SE_S	0x5e6f		/* Radeon X700 SE Sec */
 #define	PCI_PRODUCT_ATI_RADEON_HD5800	0x6899		/* Radeon HD 5800 */
 #define	PCI_PRODUCT_ATI_RADEON_HD5700	0x68b8		/* Radeon HD 5700 */
+#define	PCI_PRODUCT_ATI_RADEON_HD5670	0x68d8		/* Radeon HD 5670 */
 #define	PCI_PRODUCT_ATI_RS100_PCI	0x700f		/* RS100 PCI */
 #define	PCI_PRODUCT_ATI_RS200_PCI	0x7010		/* RS200 PCI */
 #define	PCI_PRODUCT_ATI_RADEON_X1800A	0x7100		/* Radeon X1800 */
@@ -1371,6 +1373,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_HD4000_HDA	0xaa38		/* Radeon HD 4000 HD Audio */
 #define	PCI_PRODUCT_ATI_RADEON_HD5800_HDA	0xaa50		/* Radeon HD 5800 Audio */
 #define	PCI_PRODUCT_ATI_RADEON_HD5700_HDA	0xaa58		/* Radeon HD 5700 Audio */
+#define	PCI_PRODUCT_ATI_RADEON_HD5600_HDA	0xaa60		/* Radeon HD 5600 Audio */
 #define	PCI_PRODUCT_ATI_RS100_AGP	0xcab0		/* RS100 AGP */
 #define	PCI_PRODUCT_ATI_RS200_AGP	0xcab2		/* RS200 AGP */
 #define	PCI_PRODUCT_ATI_RS250_AGP	0xcab3		/* RS250 AGP */
@@ -2237,10 +2240,11 @@
 /* Intel products */
 #define	PCI_PRODUCT_INTEL_EESISA	0x0008		/* EES ISA */
 #define	PCI_PRODUCT_INTEL_21145	0x0039		/* 21145 */
-#define	PCI_PRODUCT_INTEL_CORE_HB	0x0040		/* Core Host */
+#define	PCI_PRODUCT_INTEL_CORE_HB_0	0x0040		/* Core Host */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_0	0x0041		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CLARKDALE_IGD	0x0042		/* HD graphics */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_1	0x0043		/* Core PCIE */
+#define	PCI_PRODUCT_INTEL_CORE_HB_1	0x0044		/* Core Host */
 #define	PCI_PRODUCT_INTEL_ARRANDALE_IGD	0x0046		/* Mobile HD graphics */
 #define	PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_1	0x0082		/* Centrino Advanced-N 6205a */
 #define	PCI_PRODUCT_INTEL_WIFI_LINK_1000_1	0x0083		/* WiFi Link 1000 */
@@ -3257,15 +3261,16 @@
 #define	PCI_PRODUCT_INTEL_21154	0xb154		/* 21154AE/BE PCI-PCI */
 #define	PCI_PRODUCT_INTEL_CORE_DMI_0	0xd130		/* Core DMI */
 #define	PCI_PRODUCT_INTEL_CORE_DMI_1	0xd131		/* Core DMI */
+#define	PCI_PRODUCT_INTEL_CORE_DMI_2	0xd132		/* Core DMI */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_2	0xd138		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_3	0xd139		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_4	0xd13a		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CORE_PCIE_5	0xd13b		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CORE_QPI_L	0xd150		/* Core QPI Link */
 #define	PCI_PRODUCT_INTEL_CORE_QPI_R	0xd151		/* Core QPI Routing */
-#define	PCI_PRODUCT_INTEL_CORE_DMI_2	0xd152		/* Core DMI */
-#define	PCI_PRODUCT_INTEL_CORE_DMI_3	0xd153		/* Core DMI */
-#define	PCI_PRODUCT_INTEL_CORE_DMI_4	0xd154		/* Core DMI */
+#define	PCI_PRODUCT_INTEL_CORE_DMI_3	0xd152		/* Core DMI */
+#define	PCI_PRODUCT_INTEL_CORE_DMI_4	0xd153		/* Core DMI */
+#define	PCI_PRODUCT_INTEL_CORE_DMI_5	0xd154		/* Core DMI */
 #define	PCI_PRODUCT_INTEL_CORE_MANAGEMENT	0xd155		/* Core Management */
 #define	PCI_PRODUCT_INTEL_CORE_SCRATCH	0xd156		/* Core Scratch */
 #define	PCI_PRODUCT_INTEL_CORE_CONTROL	0xd157		/* Core Control */
@@ -3318,6 +3323,10 @@
 #define	PCI_PRODUCT_JMICRON_SDMMC	0x2382		/* SD/MMC */
 #define	PCI_PRODUCT_JMICRON_MS	0x2383		/* Memory Stick */
 #define	PCI_PRODUCT_JMICRON_XD	0x2384		/* xD */
+#define	PCI_PRODUCT_JMICRON_SD_2	0x2391		/* SD Host Controller */
+#define	PCI_PRODUCT_JMICRON_SDMMC_2	0x2392		/* SD/MMC */
+#define	PCI_PRODUCT_JMICRON_MS_2	0x2393		/* Memory Stick */
+#define	PCI_PRODUCT_JMICRON_XD_2	0x2394		/* xD */
 
 /* KTI */
 #define	PCI_PRODUCT_KTI_KTIE	0x3000		/* KTI */
@@ -3495,6 +3504,7 @@
 #define	PCI_PRODUCT_MARVELL_88SE6141	0x6141		/* 88SE6141 SATA */
 #define	PCI_PRODUCT_MARVELL_88SE6145	0x6145		/* 88SE6145 SATA */
 #define	PCI_PRODUCT_MARVELL_88SX7042	0x7042		/* 88SX7042 SATA */
+#define	PCI_PRODUCT_MARVELL2_88SE9123	0x9123		/* 88SE9123 SATA */
 
 /* Matrox products */
 #define	PCI_PRODUCT_MATROX_ATLAS	0x0518		/* MGA PX2085 (Atlas) */
@@ -4376,6 +4386,7 @@
 #define	PCI_PRODUCT_NVIDIA_MCP77_AHCI_10	0x0ad9		/* MCP77 AHCI */
 #define	PCI_PRODUCT_NVIDIA_MCP77_AHCI_11	0x0ada		/* MCP77 AHCI */
 #define	PCI_PRODUCT_NVIDIA_MCP77_AHCI_12	0x0adb		/* MCP77 AHCI */
+#define	PCI_PRODUCT_NVIDIA_GF108_HDA	0x0bea		/* GF108 HD Audio */
 #define	PCI_PRODUCT_NVIDIA_MCP89_HB	0x0d60		/* MCP89 Host */
 #define	PCI_PRODUCT_NVIDIA_MCP89_MEM_1	0x0d68		/* MCP89 Memory */
 #define	PCI_PRODUCT_NVIDIA_MCP89_MEM_2	0x0d69		/* MCP89 Memory */
@@ -4405,6 +4416,7 @@
 #define	PCI_PRODUCT_NVIDIA_MCP89_PPB_3	0x0d9b		/* MCP89 PCIE */
 #define	PCI_PRODUCT_NVIDIA_MCP89_OHCI	0x0d9c		/* MCP89 USB */
 #define	PCI_PRODUCT_NVIDIA_MCP89_EHCI	0x0d9d		/* MCP89 USB */
+#define	PCI_PRODUCT_NVIDIA_GEFORCE_425M	0x0df0		/* GeForce 425M */
 
 /* Oak Technologies products */
 #define	PCI_PRODUCT_OAKTECH_OTI1007	0x0107		/* OTI107 */

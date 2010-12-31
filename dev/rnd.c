@@ -1,13 +1,10 @@
-/*	$OpenBSD: rnd.c,v 1.105 2010/12/22 18:16:24 deraadt Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.114 2010/12/30 22:05:45 deraadt Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
  *
  * Copyright (c) 1996, 1997, 2000-2002 Michael Shalayeff.
  * Copyright (c) 2008 Damien Miller.
- *
- * Version 1.89, last modified 19-Sep-99
- *
  * Copyright Theodore Ts'o, 1994, 1995, 1996, 1997, 1998, 1999.
  * All rights reserved.
  *
@@ -47,11 +44,8 @@
  * (now, with legal B.S. out of the way.....)
  *
  * This routine gathers environmental noise from device drivers, etc.,
- * and returns good random numbers, suitable for cryptographic use.
- * Besides the obvious cryptographic uses, these numbers are also good
- * for seeding TCP sequence numbers, and other places where it is
- * desirable to have numbers which are not only random, but hard to
- * predict by an attacker.
+ * and returns good random numbers, suitable for cryptographic or
+ * other use.
  *
  * Theory of operation
  * ===================
@@ -99,29 +93,18 @@
  * Nonetheless, these numbers should be useful for the vast majority
  * of purposes.
  *
- * Exported interfaces ---- output
- * ===============================
+ * However, this MD5 output is not exported outside the subsystem.  It
+ * is next used as input to seed a RC4 stream cipher.  Attempts are
+ * made to follow best practice regarding this stream cipher - the first
+ * chunk of output is discarded and the cipher is re-seeded from time to
+ * time.  This design provides very high amounts of output data from a
+ * potentially small entropy base, at high enough speeds to encourage
+ * use of random numbers in nearly any situation.
  *
- * There are three exported interfaces.
- * The first set are designed to be used from within the kernel:
- *
- *	void get_random_bytes(void *buf, int nbytes);
- *
- * This interface will return the requested number of random bytes,
- * and place it in the requested buffer.
- *
- * Two other interfaces are two character devices /dev/random and
- * /dev/urandom.  /dev/random is suitable for use when very high
- * quality randomness is desired (for example, for key generation or
- * one-time pads), as it will only return a maximum of the number of
- * bits of randomness (as estimated by the random number generator)
- * contained in the entropy pool.
- *
- * The /dev/urandom device does not have this limit, and will return
- * as many bytes as were requested.  As more and more random bytes
- * requested without giving time for the entropy pool to recharge,
- * this will result in random numbers that are merely cryptographically
- * strong.  For many applications, however, this is acceptable.
+ * The output of this single RC4 engine is then shared amongst many
+ * consumers in the kernel and userland via various interfaces:
+ * arc4random_buf(), arc4random(), arc4random_uniform(), the set of
+ * /dev/random nodes, and the sysctl kern.arandom.
  *
  * Exported interfaces ---- input
  * ==============================
@@ -166,59 +149,6 @@
  * randomness source.  They do this by keeping track of the first and
  * second order deltas of the event timings.
  *
- * Ensuring unpredictability at system startup
- * ============================================
- *
- * When any operating system starts up, it will go through a sequence
- * of actions that are fairly predictable by an adversary, especially
- * if the start-up does not involve interaction with a human operator.
- * This reduces the actual number of bits of unpredictability in the
- * entropy pool below the value in entropy_count.  In order to
- * counteract this effect, it helps to carry information in the
- * entropy pool across shut-downs and start-ups.  To do this, put the
- * following lines in appropriate script which is run during the boot
- * sequence:
- *
- *	echo "Initializing random number generator..."
- *	# Carry a random seed from start-up to start-up
- *	# Load and then save 512 bytes, which is the size of the entropy pool
- *	if [ -f /etc/random-seed ]; then
- *		cat /etc/random-seed >/dev/urandom
- *	fi
- *	dd if=/dev/urandom of=/etc/random-seed count=1
- *
- * and the following lines in appropriate script which is run when
- * the system is shutting down:
- *
- *	# Carry a random seed from shut-down to start-up
- *	# Save 512 bytes, which is the size of the entropy pool
- *	echo "Saving random seed..."
- *	dd if=/dev/urandom of=/etc/random-seed count=1
- *
- * For example, on OpenBSD systems, the appropriate scripts are
- * usually /etc/rc.local and /etc/rc.shutdown, respectively.
- *
- * Effectively, these commands cause the contents of the entropy pool
- * to be saved at shutdown time and reloaded into the entropy pool at
- * start-up.  (The 'dd' in the addition to the bootup script is to
- * make sure that /etc/random-seed is different for every start-up,
- * even if the system crashes without executing rc.shutdown) Even with
- * complete knowledge of the start-up activities, predicting the state
- * of the entropy pool requires knowledge of the previous history of
- * the system.
- *
- * Configuring the random(4) driver under OpenBSD
- * ==============================================
- *
- * The special files for the random(4) driver should have been created
- * during the installation process.  However, if your system does not have
- * /dev/random and /dev/[s|u|p|a]random created already, they can be created
- * by using the MAKEDEV(8) script in /dev:
- *
- *	/dev/MAKEDEV random
- *
- * Check MAKEDEV for information about major and minor numbers.
- *
  * Acknowledgements:
  * =================
  *
@@ -235,6 +165,9 @@
  * Further background information on this topic may be obtained from
  * RFC 1750, "Randomness Recommendations for Security", by Donald
  * Eastlake, Steve Crocker, and Jeff Schiller.
+ * 
+ * Using a RC4 stream cipher as 2nd stage after the MD5 output
+ * is the result of work by David Mazieres.
  */
 
 #include <sys/param.h>
@@ -243,6 +176,7 @@
 #include <sys/conf.h>
 #include <sys/disk.h>
 #include <sys/limits.h>
+#include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
@@ -256,14 +190,6 @@
 #include <crypto/arc4.h>
 
 #include <dev/rndvar.h>
-#include <dev/rndioctl.h>
-
-#ifdef	RNDEBUG
-int	rnd_debug = 0x0000;
-#define	RD_INPUT	0x000f	/* input data */
-#define	RD_OUTPUT	0x00f0	/* output data */
-#define	RD_WAIT		0x0100	/* sleep/wakeup for good data */
-#endif
 
 /*
  * Master random number pool functions
@@ -437,7 +363,6 @@ add_entropy_words(const u_int32_t *buf, u_int n)
 static void
 extract_entropy(u_int8_t *buf, int nbytes)
 {
-	struct random_bucket *rs = &random_state;
 	u_char buffer[16];
 	MD5_CTX tmp;
 	u_int i;
@@ -453,11 +378,12 @@ extract_entropy(u_int8_t *buf, int nbytes)
 		/* Hash the pool to get the output */
 		MD5Init(&tmp);
 		mtx_enter(&rndlock);
-		MD5Update(&tmp, (u_int8_t*)rs->pool, sizeof(rs->pool));
-		if (rs->entropy_count / 8 > i)
-			rs->entropy_count -= i * 8;
+		MD5Update(&tmp, (u_int8_t*)random_state.pool,
+		    sizeof(random_state.pool));
+		if (random_state.entropy_count / 8 > i)
+			random_state.entropy_count -= i * 8;
 		else
-			rs->entropy_count = 0;
+			random_state.entropy_count = 0;
 		mtx_leave(&rndlock);
 		MD5Final(buffer, &tmp);
 
@@ -481,7 +407,7 @@ extract_entropy(u_int8_t *buf, int nbytes)
 
 		/* Modify pool so next hash will produce different results */
 		add_timer_randomness(nbytes);
-		dequeue_randomness(&random_state);
+		dequeue_randomness(NULL);
 	}
 
 	/* Wipe data from memory */
@@ -580,7 +506,7 @@ enqueue_randomness(int state, int val)
 {
 	struct timer_rand_state *p;
 	struct rand_event *rep;
-	struct timespec	tv;
+	struct timespec	ts;
 	u_int	time, nbits;
 
 #ifdef DIAGNOSTIC
@@ -604,8 +530,8 @@ enqueue_randomness(int state, int val)
 		return;
 	}
 
-	nanotime(&tv);
-	time = (tv.tv_nsec >> 10) + (tv.tv_sec << 20);
+	nanotime(&ts);
+	time = (ts.tv_nsec >> 10) + (ts.tv_sec << 20);
 	nbits = 0;
 
 	/*
@@ -680,7 +606,7 @@ enqueue_randomness(int state, int val)
 
 	rep->re_state = p;
 	rep->re_nbits = nbits;
-	rep->re_time = tv.tv_nsec ^ (tv.tv_sec << 20);
+	rep->re_time = ts.tv_nsec ^ (ts.tv_sec << 20);
 	rep->re_val = val;
 
 	rndstats.rnd_enqs++;
@@ -695,10 +621,10 @@ enqueue_randomness(int state, int val)
 	mtx_leave(&rndlock);
 }
 
+/* ARGSUSED */
 static void
 dequeue_randomness(void *v)
 {
-	struct random_bucket *rs = v;
 	struct rand_event *rep;
 	u_int32_t buf[2];
 	u_int nbits;
@@ -717,26 +643,20 @@ dequeue_randomness(void *v)
 		add_entropy_words(buf, 2);
 
 		rndstats.rnd_total += nbits;
-		rs->entropy_count += nbits;
-		if (rs->entropy_count > POOLBITS)
-			rs->entropy_count = POOLBITS;
+		random_state.entropy_count += nbits;
+		if (random_state.entropy_count > POOLBITS)
+			random_state.entropy_count = POOLBITS;
 
-		if (rs->asleep && rs->entropy_count > 8) {
-#ifdef	RNDEBUG
-			if (rnd_debug & RD_WAIT)
-				printf("rnd: wakeup[%u]{%u}\n",
-				    rs->asleep,
-				    rs->entropy_count);
-#endif
-			rs->asleep--;
-			wakeup((void *)&rs->asleep);
+		if (random_state.asleep && random_state.entropy_count > 8) {
+			random_state.asleep--;
+			wakeup((void *)&random_state.asleep);
 			selwakeup(&rnd_rsel);
 		}
 
 		mtx_enter(&rndlock);
 	}
 
-	rs->tmo = 0;
+	random_state.tmo = 0;
 	mtx_leave(&rndlock);
 }
 
@@ -761,39 +681,33 @@ dequeue_randomness(void *v)
 struct timeout arc4_timeout;
 struct rc4_ctx arc4random_state;
 int arc4random_initialized;
-u_long arc4random_count = 0;
-
-/*
- * This function returns some number of good random numbers but is quite
- * slow. Please use arc4random_buf() instead unless very high quality
- * randomness is required.
- * XXX: rename this
- */
-void
-get_random_bytes(void *buf, size_t nbytes)
-{
-	extract_entropy((u_int8_t *) buf, nbytes);
-	rndstats.rnd_used += nbytes * 8;
-}
 
 static void
 arc4_stir(void)
 {
-	u_int8_t buf[256];
-	int len;
+	struct timespec ts;
+	u_int8_t buf[256], *p;
+	int i;
 
-	nanotime((struct timespec *) buf);
-	len = sizeof(buf) - sizeof(struct timespec);
-	get_random_bytes(buf + sizeof (struct timespec), len);
-	len += sizeof(struct timespec);
+	/*
+	 * Use MD5 PRNG data and a system timespec; early in the boot
+	 * process this is the best we can do -- some architectures do
+	 * not collect entropy very well during this time, but may have
+	 * clock information which is better than nothing.
+	 */
+	extract_entropy((u_int8_t *)buf, sizeof buf);
+	nanotime(&ts);
+	for (p = (u_int8_t *)&ts, i = 0; i < sizeof(ts); i++)
+		buf[i] ^= p[i];
 
 	mtx_enter(&rndlock);
+	rndstats.rnd_used += sizeof(buf) * 8;
+
 	if (rndstats.arc4_nstirs > 0)
 		rc4_crypt(&arc4random_state, buf, buf, sizeof(buf));
 
 	rc4_keysetup(&arc4random_state, buf, sizeof(buf));
-	arc4random_count = 0;
-	rndstats.arc4_stirs += len;
+	rndstats.arc4_stirs += sizeof(buf);
 	rndstats.arc4_nstirs++;
 
 	/*
@@ -834,14 +748,10 @@ arc4maybeinit(void)
 void
 randomattach(void)
 {
-	if (rnd_attached) {
-#ifdef RNDEBUG
-		printf("random: second attach\n");
-#endif
+	if (rnd_attached)
 		return;
-	}
 
-	timeout_set(&rnd_timeout, dequeue_randomness, &random_state);
+	timeout_set(&rnd_timeout, dequeue_randomness, NULL);
 	timeout_set(&arc4_timeout, arc4_reinit, NULL);
 
 	random_state.add_ptr = 0;
@@ -867,9 +777,8 @@ arc4random(void)
 
 	arc4maybeinit();
 	mtx_enter(&rndlock);
-	rc4_getbytes(&arc4random_state, (u_char*)&ret, sizeof(ret));
+	rc4_getbytes(&arc4random_state, (u_char *)&ret, sizeof(ret));
 	rndstats.arc4_reads += sizeof(ret);
-	arc4random_count += sizeof(ret);
 	mtx_leave(&rndlock);
 	return ret;
 }
@@ -887,12 +796,11 @@ arc4random_buf_large(void *buf, size_t n)
 	mtx_enter(&rndlock);
 	rc4_getbytes(&arc4random_state, lbuf, sizeof(lbuf));
 	rndstats.arc4_reads += n;
-	arc4random_count += sizeof(lbuf);
 	mtx_leave(&rndlock);
 
 	rc4_keysetup(&lctx, lbuf, sizeof(lbuf));
 	rc4_skip(&lctx, 256 * 4);
-	rc4_getbytes(&lctx, (u_char*)buf, n);
+	rc4_getbytes(&lctx, (u_char *)buf, n);
 	bzero(lbuf, sizeof(lbuf));
 	bzero(&lctx, sizeof(lctx));
 }
@@ -912,9 +820,8 @@ arc4random_buf(void *buf, size_t n)
 	}
 
 	mtx_enter(&rndlock);
-	rc4_getbytes(&arc4random_state, (u_char*)buf, n);
+	rc4_getbytes(&arc4random_state, (u_char *)buf, n);
 	rndstats.arc4_reads += n;
-	arc4random_count += n;
 	mtx_leave(&rndlock);
 }
 
@@ -1008,13 +915,12 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 	while (!ret && uio->uio_resid > 0) {
 		int	n = min(POOLBYTES, uio->uio_resid);
 
-		switch(minor(dev)) {
+		switch (minor(dev)) {
 		case RND_RND:
 			ret = EIO;	/* no chip -- error */
 			break;
 		case RND_SRND:
 		case RND_URND:
-		case RND_ARND_OLD:
 		case RND_ARND:
 			arc4random_buf(buf, n);
 			break;
@@ -1082,10 +988,8 @@ filt_rndrdetach(struct knote *kn)
 int
 filt_rndread(struct knote *kn, long hint)
 {
-	struct random_bucket *rs = (struct random_bucket *)kn->kn_hook;
-
-	kn->kn_data = (int)rs->entropy_count;
-	return rs->entropy_count > 0;
+	kn->kn_data = (int)random_state.entropy_count;
+	return random_state.entropy_count > 0;
 }
 
 void
@@ -1123,7 +1027,7 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 		if (ret)
 			break;
 		while (n % sizeof(u_int32_t))
-			((u_int8_t *) buf)[n++] = 0;
+			((u_int8_t *)buf)[n++] = 0;
 		add_entropy_words(buf, n / 4);
 		newdata = 1;
 	}
@@ -1142,7 +1046,6 @@ int
 randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	int	ret = 0;
-	u_int	cnt;
 
 	switch (cmd) {
 	case FIOASYNC:
@@ -1153,52 +1056,6 @@ randomioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		/* Handled in the upper FS layer. */
 		break;
 
-	case RNDGETENTCNT:
-		mtx_enter(&rndlock);
-		*(u_int *)data = random_state.entropy_count;
-		mtx_leave(&rndlock);
-		break;
-	case RNDADDTOENTCNT:
-		if (suser(p, 0) != 0)
-			ret = EPERM;
-		else {
-			cnt = *(u_int *)data;
-			mtx_enter(&rndlock);
-			random_state.entropy_count += cnt;
-			if (random_state.entropy_count > POOLBITS)
-				random_state.entropy_count = POOLBITS;
-			mtx_leave(&rndlock);
-		}
-		break;
-	case RNDZAPENTCNT:
-		if (suser(p, 0) != 0)
-			ret = EPERM;
-		else {
-			mtx_enter(&rndlock);
-			random_state.entropy_count = 0;
-			mtx_leave(&rndlock);
-		}
-		break;
-	case RNDSTIRARC4:
-		if (suser(p, 0) != 0)
-			ret = EPERM;
-		else if (random_state.entropy_count < 64)
-			ret = EAGAIN;
-		else {
-			mtx_enter(&rndlock);
-			arc4random_initialized = 0;
-			mtx_leave(&rndlock);
-		}
-		break;
-	case RNDCLRSTATS:
-		if (suser(p, 0) != 0)
-			ret = EPERM;
-		else {
-			mtx_enter(&rndlock);
-			bzero(&rndstats, sizeof(rndstats));
-			mtx_leave(&rndlock);
-		}
-		break;
 	default:
 		ret = ENOTTY;
 	}

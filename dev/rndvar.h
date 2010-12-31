@@ -1,4 +1,4 @@
-/*	$OpenBSD: rndvar.h,v 1.22 2008/10/10 20:13:11 deraadt Exp $	*/
+/*	$OpenBSD: rndvar.h,v 1.24 2010/12/29 18:19:42 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996,2000 Michael Shalayeff.
@@ -36,9 +36,8 @@
 #define	RND_RND		0	/* real randomness like nuclear chips */
 #define	RND_SRND	1	/* strong random source */
 #define	RND_URND	2	/* less strong random source */
-#define RND_ARND	3	/* aRC4 based random number generator */
-#define RND_ARND_OLD	4	/* old: delete when we reach OpenBSD 4.6 */
-#define RND_NODEV	5	/* First invalid minor device number */
+#define	RND_ARND	3	/* aRC4 based random number generator */
+#define	RND_NODEV	4	/* First invalid minor device number */
 
 #define	RND_SRC_TRUE	0
 #define	RND_SRC_TIMER	1
@@ -84,7 +83,6 @@ extern struct rndstats rndstats;
 #define	add_video_randomness(d)	enqueue_randomness(RND_SRC_VIDEO, (int)(d))
 
 void enqueue_randomness(int, int);
-void get_random_bytes(void *, size_t);
 void arc4random_buf(void *, size_t);
 u_int32_t arc4random(void);
 u_int32_t arc4random_uniform(u_int32_t);

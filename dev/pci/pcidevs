@@ -1,4 +1,4 @@
-$OpenBSD: pcidevs,v 1.1578 2010/12/01 17:07:37 damien Exp $
+$OpenBSD: pcidevs,v 1.1581 2010/12/24 06:10:14 shadchin Exp $
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
 /*
@@ -312,6 +312,7 @@ vendor	ASPEED		0x1a03	ASPEED Technology
 vendor	AWT		0x1a3b	AWT
 vendor	FUSIONIO	0x1aed	Fusion-io
 vendor	QUMRANET	0x1af4	Qumranet
+vendor	MARVELL2	0x1b4b	Marvell
 vendor	SYMPHONY2	0x1c1c	Symphony Labs
 vendor	TEKRAM2		0x1de1	Tekram
 vendor	TEHUTI		0x1fc9	Tehuti Networks
@@ -1202,6 +1203,7 @@ product ATI RADEON_X700_SE	0x5e4f	Radeon X700 SE
 product ATI RADEON_X700_SE_S	0x5e6f	Radeon X700 SE Sec
 product ATI RADEON_HD5800	0x6899	Radeon HD 5800
 product ATI RADEON_HD5700	0x68b8	Radeon HD 5700
+product ATI RADEON_HD5670	0x68d8	Radeon HD 5670
 product ATI RS100_PCI		0x700f	RS100 PCI
 product ATI RS200_PCI		0x7010	RS200 PCI
 product ATI RADEON_X1800A	0x7100	Radeon X1800
@@ -1366,6 +1368,7 @@ product ATI RADEON_HD48xx_HDA	0xaa30	Radeon HD 48xx HD Audio
 product ATI RADEON_HD4000_HDA	0xaa38	Radeon HD 4000 HD Audio
 product ATI RADEON_HD5800_HDA	0xaa50	Radeon HD 5800 Audio
 product ATI RADEON_HD5700_HDA	0xaa58	Radeon HD 5700 Audio
+product ATI RADEON_HD5600_HDA	0xaa60	Radeon HD 5600 Audio
 product ATI RS100_AGP		0xcab0	RS100 AGP
 product ATI RS200_AGP		0xcab2	RS200 AGP
 product ATI RS250_AGP		0xcab3	RS250 AGP
@@ -2232,10 +2235,11 @@ product IMS TT3D		0x9135	Twin Turbo 3D
 /* Intel products */
 product INTEL EESISA		0x0008	EES ISA
 product INTEL 21145		0x0039	21145
-product INTEL CORE_HB		0x0040	Core Host
+product INTEL CORE_HB_0		0x0040	Core Host
 product INTEL CORE_PCIE_0	0x0041	Core PCIE
 product INTEL CLARKDALE_IGD	0x0042	HD graphics
 product INTEL CORE_PCIE_1	0x0043	Core PCIE
+product INTEL CORE_HB_1		0x0044	Core Host
 product INTEL ARRANDALE_IGD	0x0046	Mobile HD graphics
 product INTEL WIFI_LINK_6005A_2X2_1	0x0082	Centrino Advanced-N 6205a
 product INTEL WIFI_LINK_1000_1	0x0083	WiFi Link 1000
@@ -3252,15 +3256,16 @@ product INTEL 21152		0xb152	S21152BB PCI-PCI
 product INTEL 21154		0xb154	21154AE/BE PCI-PCI
 product INTEL CORE_DMI_0	0xd130	Core DMI
 product INTEL CORE_DMI_1	0xd131	Core DMI
+product INTEL CORE_DMI_2	0xd132	Core DMI
 product INTEL CORE_PCIE_2	0xd138	Core PCIE
 product INTEL CORE_PCIE_3	0xd139	Core PCIE
 product INTEL CORE_PCIE_4	0xd13a	Core PCIE
 product INTEL CORE_PCIE_5	0xd13b	Core PCIE
 product INTEL CORE_QPI_L	0xd150	Core QPI Link
 product INTEL CORE_QPI_R	0xd151	Core QPI Routing
-product INTEL CORE_DMI_2	0xd152	Core DMI
-product INTEL CORE_DMI_3	0xd153	Core DMI
-product INTEL CORE_DMI_4	0xd154	Core DMI
+product INTEL CORE_DMI_3	0xd152	Core DMI
+product INTEL CORE_DMI_4	0xd153	Core DMI
+product INTEL CORE_DMI_5	0xd154	Core DMI
 product INTEL CORE_MANAGEMENT	0xd155	Core Management
 product INTEL CORE_SCRATCH	0xd156	Core Scratch
 product INTEL CORE_CONTROL	0xd157	Core Control
@@ -3313,6 +3318,10 @@ product JMICRON SD		0x2381	SD Host Controller
 product JMICRON SDMMC		0x2382	SD/MMC
 product JMICRON MS		0x2383	Memory Stick
 product JMICRON XD		0x2384	xD
+product JMICRON SD_2		0x2391	SD Host Controller
+product JMICRON SDMMC_2		0x2392	SD/MMC
+product JMICRON MS_2		0x2393	Memory Stick
+product JMICRON XD_2		0x2394	xD
 
 /* KTI */
 product KTI KTIE		0x3000	KTI
@@ -3490,6 +3499,7 @@ product MARVELL 88SE6140	0x6140	88SE6140 SATA
 product MARVELL 88SE6141	0x6141	88SE6141 SATA
 product MARVELL 88SE6145	0x6145	88SE6145 SATA
 product MARVELL 88SX7042	0x7042	88SX7042 SATA
+product MARVELL2 88SE9123	0x9123	88SE9123 SATA
 
 /* Matrox products */
 product MATROX ATLAS		0x0518	MGA PX2085 (Atlas)
@@ -4371,6 +4381,7 @@ product NVIDIA MCP77_AHCI_9	0x0ad8	MCP77 AHCI
 product NVIDIA MCP77_AHCI_10	0x0ad9	MCP77 AHCI
 product NVIDIA MCP77_AHCI_11	0x0ada	MCP77 AHCI
 product NVIDIA MCP77_AHCI_12	0x0adb	MCP77 AHCI
+product NVIDIA GF108_HDA	0x0bea	GF108 HD Audio
 product NVIDIA MCP89_HB		0x0d60	MCP89 Host
 product NVIDIA MCP89_MEM_1	0x0d68	MCP89 Memory
 product NVIDIA MCP89_MEM_2	0x0d69	MCP89 Memory
@@ -4400,6 +4411,7 @@ product NVIDIA MCP89_PPB_2	0x0d9a	MCP89 PCIE
 product NVIDIA MCP89_PPB_3	0x0d9b	MCP89 PCIE
 product NVIDIA MCP89_OHCI	0x0d9c	MCP89 USB
 product NVIDIA MCP89_EHCI	0x0d9d	MCP89 USB
+product NVIDIA GEFORCE_425M	0x0df0	GeForce 425M 
 
 /* Oak Technologies products */
 product OAKTECH OTI1007		0x0107	OTI107
