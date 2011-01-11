@@ -1,4 +1,4 @@
-/* $OpenBSD: acpisony.c,v 1.3 2010/08/07 16:21:20 deraadt Exp $ */
+/* $OpenBSD: acpisony.c,v 1.4 2011/01/02 04:56:57 jordan Exp $ */
 /*
  * Copyright (c) 2010 Paul Irofti <pirofti@openbsd.org>
  *
