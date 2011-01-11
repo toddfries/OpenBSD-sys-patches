@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.716 2010/12/31 12:21:36 bluhm Exp $ */
+/*	$OpenBSD: pf.c,v 1.720 2011/01/11 13:35:58 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -125,14 +125,14 @@ struct pf_anchor_stackframe {
 } pf_anchor_stack[64];
 
 /* cannot fold into pf_pdesc directly, unknown storage size outside pf.c */
-union {
+union pf_headers {
 	struct tcphdr		tcp;
 	struct udphdr		udp;
 	struct icmp		icmp;
 #ifdef INET6
 	struct icmp6_hdr	icmp6;
 #endif /* INET6 */
-} pf_hdrs;
+};
 
 
 struct pool		 pf_src_tree_pl, pf_rule_pl;
@@ -3000,6 +3000,18 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	    rtable_l2(act.rtableid) != pd->rdomain)
 		pd->destchg = 1;
 
+	if (r->action == PF_PASS && af == AF_INET && ! r->allow_opts) {
+		struct ip	*h4 = mtod(m, struct ip *);
+			
+		if (h4->ip_hl > 5) {
+			REASON_SET(&reason, PFRES_IPOPTIONS);
+			pd->pflog |= PF_LOG_FORCE;
+			DPFPRINTF(LOG_NOTICE, "dropping packet with "
+			    "ip options in pf_test_rule()");
+			goto cleanup;
+		}
+	}
+
 	if (!state_icmp && r->keep_state) {
 		int action;
 
@@ -4304,7 +4316,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, ipoff2, &h2, sizeof(h2),
 			    NULL, reason, pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short (ip)");
+				    "ICMP error message too short (ip)");
 				return (PF_DROP);
 			}
 			/*
@@ -4332,7 +4344,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, ipoff2, &h2_6, sizeof(h2_6),
 			    NULL, reason, pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short (ip6)");
+				    "ICMP error message too short (ip6)");
 				return (PF_DROP);
 			}
 			pd2.proto = h2_6.ip6_nxt;
@@ -4360,7 +4372,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 					    sizeof(opt6), NULL, reason,
 					    pd2.af)) {
 						DPFPRINTF(LOG_NOTICE,
-						    "pf: ICMPv6 short opt");
+						    "ICMPv6 short opt");
 						return (PF_DROP);
 					}
 					if (pd2.proto == IPPROTO_AH)
@@ -4396,7 +4408,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, off2, &th, 8, NULL, reason,
 			    pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short (tcp)");
+				    "ICMP error message too short (tcp)");
 				return (PF_DROP);
 			}
 
@@ -4525,7 +4537,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, off2, &uh, sizeof(uh),
 			    NULL, reason, pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short (udp)");
+				    "ICMP error message too short (udp)");
 				return (PF_DROP);
 			}
 
@@ -4600,7 +4612,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, off2, &iih, ICMP_MINLEN,
 			    NULL, reason, pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short (icmp)");
+				    "ICMP error message too short (icmp)");
 				return (PF_DROP);
 			}
 
@@ -4663,8 +4675,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			if (!pf_pull_hdr(m, off2, &iih,
 			    sizeof(struct icmp6_hdr), NULL, reason, pd2.af)) {
 				DPFPRINTF(LOG_NOTICE,
-				    "pf: ICMP error message too short "
-				    "(icmp6)");
+				    "ICMP error message too short (icmp6)");
 				return (PF_DROP);
 			}
 
@@ -5613,7 +5624,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf *m,
 
 				if (pd->rh_cnt++) {
 					DPFPRINTF(LOG_NOTICE,
-					    "pf: IPv6 more than one rthdr");
+					    "IPv6 more than one rthdr");
 					*action = PF_DROP;
 					REASON_SET(reason, PFRES_IPOPTIONS);
 					return (-1);
@@ -5621,14 +5632,14 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf *m,
 				if (!pf_pull_hdr(m, *off, &rthdr, sizeof(rthdr),
 				    NULL, reason, pd->af)) {
 					DPFPRINTF(LOG_NOTICE,
-					    "pf: IPv6 short rthdr");
+					    "IPv6 short rthdr");
 					*action = PF_DROP;
 					REASON_SET(reason, PFRES_SHORT);
 					return (-1);
 				}
 				if (rthdr.ip6r_type == IPV6_RTHDR_TYPE_0) {
 					DPFPRINTF(LOG_NOTICE,
-					    "pf: IPv6 rthdr0");
+					    "IPv6 rthdr0");
 					*action = PF_DROP;
 					REASON_SET(reason, PFRES_IPOPTIONS);
 					return (-1);
@@ -5644,7 +5655,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf *m,
 				if (!pf_pull_hdr(m, *off, &opt6, sizeof(opt6),
 				    NULL, reason, pd->af)) {
 					DPFPRINTF(LOG_NOTICE,
-					    "pf: IPv6 short opt");
+					    "IPv6 short opt");
 					*action = PF_DROP;
 					return (-1);
 				}
@@ -5786,13 +5797,14 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
     struct ether_header *eh)
 {
 	struct pfi_kif		*kif;
-	u_short			 action, reason = 0, pflog = 0;
+	u_short			 action, reason = 0;
 	struct mbuf		*m = *m0;
 	struct ip		*h;
 	struct pf_rule		*a = NULL, *r = &pf_default_rule;
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
+	union pf_headers	 hdrs;
 	int			 off, hdrlen;
 	u_int32_t		 qid, pqid = 0;
 
@@ -5800,7 +5812,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		return (PF_PASS);
 
 	memset(&pd, 0, sizeof(pd));
-	pd.hdr.any = &pf_hdrs;
+	pd.hdr.any = &hdrs;
 	if (ifp->if_type == IFT_CARP && ifp->if_carpdev)
 		kif = (struct pfi_kif *)ifp->if_carpdev->if_pf_kif;
 	else
@@ -5822,7 +5834,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.len < (int)sizeof(*h)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_SHORT);
-		pflog |= PF_LOG_FORCE;
+		pd.pflog |= PF_LOG_FORCE;
 		goto done;
 	}
 
@@ -5845,7 +5857,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (pf_setup_pdesc(AF_INET, dir, &pd, m, &action, &reason, kif, &a, &r,
 	    &ruleset, &off, &hdrlen) == -1) {
 		if (action != PF_PASS)
-			pflog |= PF_LOG_FORCE;
+			pd.pflog |= PF_LOG_FORCE;
 		goto done;
 	}
 	pd.eh = eh;
@@ -5873,7 +5885,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
@@ -5895,7 +5907,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
@@ -5911,7 +5923,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
@@ -5921,7 +5933,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	case IPPROTO_ICMPV6: {
 		action = PF_DROP;
 		DPFPRINTF(LOG_NOTICE,
-		    "pf: dropping IPv4 packet with ICMPv6 payload");
+		    "dropping IPv4 packet with ICMPv6 payload");
 		goto done;
 	}
 
@@ -5933,7 +5945,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif, m, off,
 			    &pd, &a, &ruleset, &ipintrq, hdrlen);
@@ -5941,16 +5953,18 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 done:
-	if (action == PF_PASS && h->ip_hl > 5 &&
-	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
-		action = PF_DROP;
-		REASON_SET(&reason, PFRES_IPOPTIONS);
-		pflog |= PF_LOG_FORCE;
-		DPFPRINTF(LOG_NOTICE,
-		    "pf: dropping packet with ip options");
-	}
 
 	if (s) {
+		/* The non-state case is handled in pf_test_rule() */
+		if (action == PF_PASS && h->ip_hl > 5 &&
+	    	    !(s->state_flags & PFSTATE_ALLOWOPTS)) {
+			action = PF_DROP;
+			REASON_SET(&reason, PFRES_IPOPTIONS);
+			pd.pflog |= PF_LOG_FORCE;
+			DPFPRINTF(LOG_NOTICE, "dropping packet with "
+			    "ip options in pf_test()");
+		}
+
 		pf_scrub_ip(&m, s->state_flags, s->min_ttl, s->set_tos);
 		pf_tag_packet(m, s->tag, s->rtableid[pd.didx]);
 		if (pqid || (pd.tos & IPTOS_LOWDELAY))
@@ -6006,10 +6020,10 @@ done:
 		action = PF_DIVERT;
 	}
 
-	if (pflog) {
+	if (pd.pflog) {
 		struct pf_rule_item	*ri;
 
-		if (pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
+		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
 			PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, r, a,
 			    ruleset, &pd);
 		if (s) {
@@ -6051,20 +6065,21 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
     struct ether_header *eh)
 {
 	struct pfi_kif		*kif;
-	u_short			 action, reason = 0, pflog = 0;
-	struct mbuf		*m = *m0, *n = NULL;
+	u_short			 action, reason = 0;
+	struct mbuf		*m = *m0;
 	struct ip6_hdr		*h;
 	struct pf_rule		*a = NULL, *r = &pf_default_rule;
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
+	union pf_headers	 hdrs;
 	int			 off, hdrlen;
 
 	if (!pf_status.running)
 		return (PF_PASS);
 
 	memset(&pd, 0, sizeof(pd));
-	pd.hdr.any = &pf_hdrs;
+	pd.hdr.any = &hdrs;
 	if (ifp->if_type == IFT_CARP && ifp->if_carpdev)
 		kif = (struct pfi_kif *)ifp->if_carpdev->if_pf_kif;
 	else
@@ -6086,7 +6101,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.len < (int)sizeof(*h)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_SHORT);
-		pflog |= PF_LOG_FORCE;
+		pd.pflog |= PF_LOG_FORCE;
 		goto done;
 	}
 
@@ -6112,18 +6127,15 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (htons(h->ip6_plen) == 0) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_NORM);
-		pflog |= PF_LOG_FORCE;
+		pd.pflog |= PF_LOG_FORCE;
 		goto done;
 	}
 #endif
 
-	/* ptr to original, normalization can get us a new one */
-	n = m;
-
 	if (pf_setup_pdesc(AF_INET6, dir, &pd, m, &action, &reason, kif, &a, &r,
 	    &ruleset, &off, &hdrlen) == -1) {
 		if (action != PF_PASS)
-			pflog |= PF_LOG_FORCE;
+			pd.pflog |= PF_LOG_FORCE;
 		goto done;
 	}
 	pd.eh = eh;
@@ -6142,7 +6154,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
@@ -6164,7 +6176,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
@@ -6174,7 +6186,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	case IPPROTO_ICMP: {
 		action = PF_DROP;
 		DPFPRINTF(LOG_NOTICE,
-		    "pf: dropping IPv6 packet with ICMPv4 payload");
+		    "dropping IPv6 packet with ICMPv4 payload");
 		goto done;
 	}
 
@@ -6187,7 +6199,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
@@ -6202,7 +6214,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			pflog |= s->log;
+			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif, m, off,
 			    &pd, &a, &ruleset, &ip6intrq, hdrlen);
@@ -6210,20 +6222,14 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 done:
-	/* if normalization got us a new mbuf, free original */
-	if (n != m) {
-		m_freem(n);
-		n = NULL;
-	}
-
 	/* handle dangerous IPv6 extension headers. */
 	if (action == PF_PASS && pd.rh_cnt &&
 	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
-		pflog |= PF_LOG_FORCE;
+		pd.pflog |= PF_LOG_FORCE;
 		DPFPRINTF(LOG_NOTICE,
-		    "pf: dropping packet with dangerous v6 headers");
+		    "dropping packet with dangerous v6 headers");
 	}
 
 	if (s)
@@ -6274,10 +6280,10 @@ done:
 		action = PF_DIVERT;
 	}
 
-	if (pflog) {
+	if (pd.pflog) {
 		struct pf_rule_item	*ri;
 
-		if (pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
+		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
 			PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, r, a,
 			    ruleset, &pd);
 		if (s) {

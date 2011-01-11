@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.66 2010/12/31 17:17:14 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.71 2011/01/08 15:05:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -21,6 +21,7 @@
  * Driver for Atheros 802.11a/g/n chipsets.
  */
 
+#include "athn_usb.h"
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -71,6 +72,7 @@ void		athn_get_chanlist(struct athn_softc *);
 const char *	athn_get_mac_name(struct athn_softc *);
 const char *	athn_get_rf_name(struct athn_softc *);
 void		athn_led_init(struct athn_softc *);
+void		athn_set_led(struct athn_softc *, int);
 void		athn_btcoex_init(struct athn_softc *);
 void		athn_btcoex_enable(struct athn_softc *);
 void		athn_btcoex_disable(struct athn_softc *);
@@ -120,7 +122,7 @@ void		athn_enable_interrupts(struct athn_softc *);
 void		athn_disable_interrupts(struct athn_softc *);
 void		athn_init_qos(struct athn_softc *);
 int		athn_hw_reset(struct athn_softc *, struct ieee80211_channel *,
-		    struct ieee80211_channel *);
+		    struct ieee80211_channel *, int);
 struct		ieee80211_node *athn_node_alloc(struct ieee80211com *);
 void		athn_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		    int);
@@ -151,7 +153,6 @@ int		ar9280_attach(struct athn_softc *);
 int		ar9285_attach(struct athn_softc *);
 int		ar9287_attach(struct athn_softc *);
 int		ar9380_attach(struct athn_softc *);
-void		ar9271_load_ani(struct athn_softc *);
 int		ar5416_init_calib(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 int		ar9285_init_calib(struct athn_softc *,
@@ -174,6 +175,9 @@ athn_attach(struct athn_softc *sc)
 	struct ifnet *ifp = &ic->ic_if;
 	int error;
 
+	/* Read hardware revision. */
+	athn_get_chipid(sc);
+
 	if ((error = athn_reset_power_on(sc)) != 0) {
 		printf("%s: could not reset chip\n", sc->sc_dev.dv_xname);
 		return (error);
@@ -188,8 +192,12 @@ athn_attach(struct athn_softc *sc)
 		error = ar5416_attach(sc);
 	else if (AR_SREV_9280(sc))
 		error = ar9280_attach(sc);
-	else if (AR_SREV_9285(sc) || AR_SREV_9271(sc))
+	else if (AR_SREV_9285(sc))
 		error = ar9285_attach(sc);
+#if NATHN_USB > 0
+	else if (AR_SREV_9271(sc))
+		error = ar9285_attach(sc);
+#endif
 	else if (AR_SREV_9287(sc))
 		error = ar9287_attach(sc);
 	else if (AR_SREV_9380(sc) || AR_SREV_9485(sc))
@@ -602,7 +610,6 @@ athn_reset_power_on(struct athn_softc *sc)
 	AR_WRITE(sc, AR_RTC_FORCE_WAKE,
 	    AR_RTC_FORCE_WAKE_EN | AR_RTC_FORCE_WAKE_ON_INT);
 
-	/* XXX on first call, we do not know the chip id yet. */
 	if (!AR_SREV_9380_10_OR_LATER(sc)) {
 		/* Make sure no DMA is active by doing an AHB reset. */
 		AR_WRITE(sc, AR_RC, AR_RC_AHB);
@@ -626,10 +633,6 @@ athn_reset_power_on(struct athn_softc *sc)
 		DPRINTF(("RTC not waking up\n"));
 		return (ETIMEDOUT);
 	}
-
-	/* Read hardware revision. */
-	athn_get_chipid(sc);
-
 	return (athn_reset(sc, 0));
 }
 
@@ -863,7 +866,7 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		athn_tx_reclaim(sc, qid);
 
 	/* Stop Rx. */
-	AR_SETBITS(sc, AR_DIAG_SW, AR_DIAG_RX_DIS);
+	AR_SETBITS(sc, AR_DIAG_SW, AR_DIAG_RX_DIS | AR_DIAG_RX_ABORT);
 	AR_WRITE(sc, AR_MIBC, AR_MIBC_FMC);
 	AR_WRITE(sc, AR_MIBC, AR_MIBC_CMC);
 	AR_WRITE(sc, AR_FILT_OFDM, 0);
@@ -874,8 +877,8 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		goto reset;
 
 #ifdef notyet
-	/* AR9280 (but not AR9280+AR7010) needs a full reset. */
-	if (AR_SREV_9280(sc) && !(sc->flags & ATHN_FLAG_USB))
+	/* AR9280 needs a full reset. */
+	if (AR_SREV_9280(sc))
 #endif
 		goto reset;
 
@@ -890,12 +893,10 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		goto reset;
 
 	error = athn_set_chan(sc, c, extc);
-	if (AR_SREV_9271(sc) && error == 0)
-		ar9271_load_ani(sc);
 	if (error != 0) {
  reset:		/* Error found, try a full reset. */
 		DPRINTFN(3, ("needs a full reset\n"));
-		error = athn_hw_reset(sc, c, extc);
+		error = athn_hw_reset(sc, c, extc, 0);
 		if (error != 0)	/* Hopeless case. */
 			return (error);
 	}
@@ -1061,7 +1062,16 @@ athn_led_init(struct athn_softc *sc)
 
 	ops->gpio_config_output(sc, sc->led_pin, AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
 	/* LED off, active low. */
-	ops->gpio_write(sc, sc->led_pin, 1);
+	athn_set_led(sc, 0);
+}
+
+void
+athn_set_led(struct athn_softc *sc, int on)
+{
+	struct athn_ops *ops = &sc->ops;
+
+	sc->led_state = on;
+	ops->gpio_write(sc, sc->led_pin, !sc->led_state);
 }
 
 #ifdef ATHN_BT_COEXISTENCE
@@ -1261,8 +1271,14 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 			/* Support temperature compensation calibration. */
 			sc->sup_calib_mask |= ATHN_CAL_TEMP;
 		} else if (IEEE80211_IS_CHAN_5GHZ(c) || extc != NULL) {
-			/* Support ADC gain calibration. */
-			sc->sup_calib_mask |= ATHN_CAL_ADC_GAIN;
+			/*
+			 * ADC gain calibration causes uplink throughput
+			 * drops in HT40 mode on AR9287.
+			 */
+			if (!AR_SREV_9287(sc)) {
+				/* Support ADC gain calibration. */
+				sc->sup_calib_mask |= ATHN_CAL_ADC_GAIN;
+			}
 			/* Support ADC DC offset calibration. */
 			sc->sup_calib_mask |= ATHN_CAL_ADC_DC;
 		}
@@ -1636,7 +1652,7 @@ athn_inc_tx_trigger_level(struct athn_softc *sc)
 	 * NB: The AR9285 and all single-stream parts have an issue that
 	 * limits the size of the PCU Tx FIFO to 2KB instead of 4KB.
 	 */
-	if (ftrig == (AR_SREV_9285(sc) ? 0x1f : 0x3f))
+	if (ftrig == ((AR_SREV_9285(sc) || AR_SREV_9271(sc)) ? 0x1f : 0x3f))
 		return;		/* Already at max. */
 	reg = RW(reg, AR_TXCFG_FTRIG, ftrig + 1);
 	AR_WRITE(sc, AR_TXCFG, reg);
@@ -2046,7 +2062,7 @@ athn_init_qos(struct athn_softc *sc)
 
 int
 athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
-    struct ieee80211_channel *extc)
+    struct ieee80211_channel *extc, int init)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct athn_ops *ops = &sc->ops;
@@ -2071,6 +2087,11 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 	/* Mark PHY as inactive. */
 	ops->disable_phy(sc);
 
+	if (init && AR_SREV_9271(sc)) {
+		AR_WRITE(sc, AR9271_RESET_POWER_DOWN_CONTROL,
+		    AR9271_RADIO_RF_RST);
+		DELAY(50);
+	}
 	if (AR_SREV_9280(sc) && (sc->flags & ATHN_FLAG_OLPC)) {
 		/* Save TSF before it gets cleared. */
 		tsfhi = AR_READ(sc, AR_TSF_U32);
@@ -2105,6 +2126,11 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 			    sc->sc_dev.dv_xname);
 			return (EPERM);
 		}
+	}
+	if (init && AR_SREV_9271(sc)) {
+		AR_WRITE(sc, AR9271_RESET_POWER_DOWN_CONTROL,
+		    AR9271_GATE_MAC_CTL);
+		DELAY(50);
 	}
 	if (AR_SREV_9280(sc) && (sc->flags & ATHN_FLAG_OLPC)) {
 		/* Restore TSF if it got cleared. */
@@ -2236,9 +2262,17 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	AR_WRITE(sc, AR_CFG_LED, cfg_led | AR_CFG_SCLK_32KHZ);
 
+	if (sc->flags & ATHN_FLAG_USB) {
+		if (AR_SREV_9271(sc))
+			AR_WRITE(sc, AR_CFG, AR_CFG_SWRB | AR_CFG_SWTB);
+		else
+			AR_WRITE(sc, AR_CFG, AR_CFG_SWTD | AR_CFG_SWRD);
+	}
 #if BYTE_ORDER == BIG_ENDIAN
-	/* Default is little-endian, turn on swapping for big-endian. */
-	AR_WRITE(sc, AR_CFG, AR_CFG_SWTD | AR_CFG_SWRD);
+	else {
+		/* Default is LE, turn on swapping for BE. */
+		AR_WRITE(sc, AR_CFG, AR_CFG_SWTD | AR_CFG_SWRD);
+	}
 #endif
 	AR_WRITE_BARRIER(sc);
 
@@ -2334,27 +2368,25 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct ifnet *ifp = &ic->ic_if;
 	struct athn_softc *sc = ifp->if_softc;
-	struct athn_ops *ops = &sc->ops;
 	uint32_t reg;
 	int error;
 
 	timeout_del(&sc->calib_to);
-	if (nstate != IEEE80211_S_SCAN)
-		ops->gpio_write(sc, sc->led_pin, 1);
 
 	switch (nstate) {
 	case IEEE80211_S_INIT:
+		athn_set_led(sc, 0);
 		break;
 	case IEEE80211_S_SCAN:
 		/* Make the LED blink while scanning. */
-		ops->gpio_write(sc, sc->led_pin,
-		    !ops->gpio_read(sc, sc->led_pin));
+		athn_set_led(sc, !sc->led_state);
 		error = athn_switch_chan(sc, ic->ic_bss->ni_chan, NULL);
 		if (error != 0)
 			return (error);
 		timeout_add_msec(&sc->scan_to, 200);
 		break;
 	case IEEE80211_S_AUTH:
+		athn_set_led(sc, 0);
 		error = athn_switch_chan(sc, ic->ic_bss->ni_chan, NULL);
 		if (error != 0)
 			return (error);
@@ -2362,7 +2394,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	case IEEE80211_S_ASSOC:
 		break;
 	case IEEE80211_S_RUN:
-		ops->gpio_write(sc, sc->led_pin, 0);
+		athn_set_led(sc, 1);
 
 		if (ic->ic_opmode == IEEE80211_M_MONITOR)
 			break;
@@ -2709,7 +2741,7 @@ athn_init(struct ifnet *ifp)
 	if (sc->flags & ATHN_FLAG_RFSILENT)
 		ops->rfsilent_init(sc);
 
-	if ((error = athn_hw_reset(sc, c, extc)) != 0) {
+	if ((error = athn_hw_reset(sc, c, extc, 1)) != 0) {
 		printf("%s: unable to reset hardware; reset status %d\n",
 		    sc->sc_dev.dv_xname, error);
 		goto fail;
@@ -2783,7 +2815,7 @@ athn_stop(struct ifnet *ifp, int disable)
 		athn_tx_reclaim(sc, qid);
 
 	/* Stop Rx. */
-	AR_SETBITS(sc, AR_DIAG_SW, AR_DIAG_RX_DIS);
+	AR_SETBITS(sc, AR_DIAG_SW, AR_DIAG_RX_DIS | AR_DIAG_RX_ABORT);
 	AR_WRITE(sc, AR_MIBC, AR_MIBC_FMC);
 	AR_WRITE(sc, AR_MIBC, AR_MIBC_CMC);
 	AR_WRITE(sc, AR_FILT_OFDM, 0);

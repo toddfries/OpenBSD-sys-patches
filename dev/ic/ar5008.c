@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5008.c,v 1.17 2010/12/31 17:50:48 damien Exp $	*/
+/*	$OpenBSD: ar5008.c,v 1.19 2011/01/06 07:27:15 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -66,7 +66,7 @@
 #include <dev/ic/ar5008reg.h>
 
 int	ar5008_attach(struct athn_softc *);
-int	ar5008_read_rom_word(struct athn_softc *, uint32_t, uint16_t *);
+int	ar5008_read_eep_word(struct athn_softc *, uint32_t, uint16_t *);
 int	ar5008_read_rom(struct athn_softc *);
 void	ar5008_swap_rom(struct athn_softc *);
 int	ar5008_gpio_read(struct athn_softc *, int);
@@ -204,7 +204,7 @@ ar5008_attach(struct athn_softc *sc)
 
 	/* Read entire ROM content in memory. */
 	if ((error = ar5008_read_rom(sc)) != 0) {
-		printf(": could not read ROM\n");
+		printf("%s: could not read ROM\n", sc->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -215,8 +215,8 @@ ar5008_attach(struct athn_softc *sc)
 	eep_ver = (base->version >> 12) & 0xf;
 	sc->eep_rev = (base->version & 0xfff);
 	if (eep_ver != AR_EEP_VER || sc->eep_rev == 0) {
-		printf(": unsupported ROM version %d.%d\n",  eep_ver,
-		    sc->eep_rev);
+		printf("%s: unsupported ROM version %d.%d\n",
+		    sc->sc_dev.dv_xname, eep_ver, sc->eep_rev);
 		return (EINVAL);
 	}
 
@@ -258,10 +258,10 @@ ar5008_attach(struct athn_softc *sc)
 }
 
 /*
- * Read 16-bit value from ROM.
+ * Read 16-bit word from ROM.
  */
 int
-ar5008_read_rom_word(struct athn_softc *sc, uint32_t addr, uint16_t *val)
+ar5008_read_eep_word(struct athn_softc *sc, uint32_t addr, uint16_t *val)
 {
 	uint32_t reg;
 	int ntries;
@@ -289,7 +289,7 @@ ar5008_read_rom(struct athn_softc *sc)
 	int error;
 
 	/* Determine ROM endianness. */
-	error = ar5008_read_rom_word(sc, AR_EEPROM_MAGIC_OFFSET, &magic);
+	error = ar5008_read_eep_word(sc, AR_EEPROM_MAGIC_OFFSET, &magic);
 	if (error != 0)
 		return (error);
 	if (magic != AR_EEPROM_MAGIC) {
@@ -312,7 +312,7 @@ ar5008_read_rom(struct athn_softc *sc)
 	eep = sc->eep;
 	end = sc->eep_base + sc->eep_size / sizeof(uint16_t);
 	for (addr = sc->eep_base; addr < end; addr++, eep++) {
-		if ((error = ar5008_read_rom_word(sc, addr, eep)) != 0) {
+		if ((error = ar5008_read_eep_word(sc, addr, eep)) != 0) {
 			DPRINTF(("could not read ROM at 0x%x\n", addr));
 			return (error);
 		}
@@ -2297,6 +2297,12 @@ ar5008_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 	if (sc->tx_gain != NULL)
 		ar9280_reset_tx_gain(sc, c);
 
+	if (AR_SREV_9271_10(sc)) {
+		AR_WRITE(sc, AR_PHY(68), 0x30002311);
+		AR_WRITE(sc, AR_PHY_RF_CTL3, 0x0a020001);
+	}
+	AR_WRITE_BARRIER(sc);
+
 	/* Second initialization step (common to all channels). */
 	DPRINTFN(4, ("writing common init vals\n"));
 	for (i = 0; i < ini->ncmregs; i++) {
@@ -2308,6 +2314,7 @@ ar5008_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 		if ((i & 0x1f) == 0)
 			DELAY(1);
 	}
+	AR_WRITE_BARRIER(sc);
 
 	if (!AR_SINGLE_CHIP(sc))
 		ar5416_reset_bb_gain(sc, c);

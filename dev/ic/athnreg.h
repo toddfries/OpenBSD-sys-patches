@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnreg.h,v 1.15 2010/12/31 17:17:14 damien Exp $	*/
+/*	$OpenBSD: athnreg.h,v 1.17 2011/01/06 07:27:15 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -421,6 +421,7 @@
 /* Bits for AR_ISR_S2. */
 #define AR_ISR_S2_QCU_TXURN_M		0x000003ff
 #define AR_ISR_S2_QCU_TXURN_S		0
+#define AR_ISR_S2_BB_WATCHDOG		0x00010000
 #define AR_ISR_S2_CST			0x00400000
 #define AR_ISR_S2_GTT			0x00800000
 #define AR_ISR_S2_TIM			0x01000000
@@ -1272,6 +1273,18 @@
 #define AR_KEYTABLE_ANT		0x00000008
 #define AR_KEYTABLE_VALID	0x00008000
 
+/*
+ * AR9271 specific registers.
+ */
+#define AR9271_RESET_POWER_DOWN_CONTROL	0x050044
+#define AR9271_FIRMWARE			0x501000
+#define AR9271_FIRMWARE_TEXT		0x903000
+#define AR7010_FIRMWARE_TEXT		0x906000
+
+/* Bits for AR9271_RESET_POWER_DOWN_CONTROL. */
+#define AR9271_RADIO_RF_RST	0x00000020
+#define AR9271_GATE_MAC_CTL	0x00004000
+
 
 #define AR_BASE_PHY_ACTIVE_DELAY	100
 
@@ -1362,6 +1375,9 @@
 
 #define AR_SREV_9271(sc) \
 	((sc)->mac_ver == AR_SREV_VERSION_9271)
+#define AR_SREV_9271_10(sc) \
+	(AR_SREV_9271(sc) && \
+	 (sc)->mac_rev == AR_SREV_REVISION_9271_10)
 
 #define AR_SREV_9287(sc) \
 	((sc)->mac_ver == AR_SREV_VERSION_9287)

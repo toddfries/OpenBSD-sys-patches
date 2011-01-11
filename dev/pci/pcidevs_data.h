@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1581 2010/12/24 06:10:14 shadchin Exp 
+ *	OpenBSD: pcidevs,v 1.1584 2011/01/08 18:49:51 deraadt Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3760,6 +3760,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 3450",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450_AGP,
+	    "Radeon HD 3450 AGP",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS780_HB,
 	    "RS780 Host",
 	},
@@ -3802,6 +3806,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200_M,
 	    "Mobility Radeon HD 4200",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4250,
+	    "Radeon HD 4250",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_HDA,
@@ -6648,48 +6656,44 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Mobile HD graphics",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_1,
-	    "Centrino Advanced-N 6205a",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6005_1,
+	    "Centrino Advanced-N 6005",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1000_1,
 	    "WiFi Link 1000",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1000_2,
 	    "WiFi Link 1000",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_2,
-	    "Centrino Advanced-N 6205a",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6005_2,
+	    "Centrino Advanced-N 6205",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_1,
 	    "Centrino Advanced-N 6250",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_2,
 	    "Centrino Advanced-N 6250",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_1,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_1,
+	    "WiFi Link 1030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_2,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_2,
+	    "WiFi Link 1030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_1,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6030_1,
+	    "Centrino Advanced-N 6030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_2,
-	    "Centrino Advanced-N 6205b",
-	},
-	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_3,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6030_2,
+	    "Centrino Advanced-N 6030",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80303,
@@ -6774,6 +6778,30 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_GDT_RAID2,
 	    "GDT RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_1,
+	    "WiFi Link 6150",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_2,
+	    "WiFi Link 6150",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_1,
+	    "WiFi Link 130",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_2,
+	    "WiFi Link 130",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1,
+	    "WiFi Link 100",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2,
+	    "WiFi Link 100",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80960RP,
@@ -10196,59 +10224,59 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRO/Wireless 3945ABG",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_4965_1,
 	    "Wireless WiFi Link 4965",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3X3_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6300_1,
 	    "Centrino Ultimate-N 6300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6200_1,
 	    "Centrino Advanced-N 6200",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_4965_2,
 	    "Wireless WiFi Link 4965",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5100_1,
 	    "WiFi Link 5100",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5300_1,
 	    "WiFi Link 5300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5300_2,
 	    "WiFi Link 5300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5100_2,
 	    "WiFi Link 5100",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3X3_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6300_2,
 	    "Centrino Ultimate-N 6300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6200_2,
 	    "Centrino Advanced-N 6200",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5350_1,
 	    "WiFi Link 5350",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5350_2,
 	    "WiFi Link 5350",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5150_1,
 	    "WiFi Link 5150",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5150_2,
 	    "WiFi Link 5150",
 	},
 	{
