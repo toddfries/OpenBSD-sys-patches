@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.95 2010/09/22 01:18:57 matthew Exp $ */
+/*	$OpenBSD: wd.c,v 1.97 2010/12/31 22:58:40 kettenis Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/dkio.h>
+#include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -548,7 +549,7 @@ __wdstart(struct wd_softc *wd, struct buf *bp)
 	nblks = bp->b_bcount / wd->sc_dk.dk_label->d_secsize;
 	if ((wd->sc_flags & WDF_LBA48) &&
 	    /* use LBA48 only if really need */
-	    ((wd->sc_wdc_bio.blkno + nblks - 1 > LBA48_THRESHOLD) ||
+	    ((wd->sc_wdc_bio.blkno + nblks - 1 >= LBA48_THRESHOLD) ||
 	     (nblks > 0xff)))
 		wd->sc_wdc_bio.flags |= ATA_LBA48;
 	if (wd->sc_flags & WDF_LBA)
@@ -1240,4 +1241,6 @@ wd_shutdown(void *arg)
 	struct wd_softc *wd = arg;
 
 	wd_flushcache(wd, AT_POLL);
+	if (boothowto & RB_POWERDOWN)
+		wd_standby(wd, AT_POLL);
 }
