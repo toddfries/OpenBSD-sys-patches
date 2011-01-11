@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.64 2010/10/16 07:06:20 maja Exp $ */
+/*	$OpenBSD: udl.c,v 1.66 2010/12/27 03:03:50 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -487,11 +487,13 @@ udl_detach(struct device *self, int flags)
 int
 udl_activate(struct device *self, int act)
 {
+	struct udl_softc *sc = (struct udl_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 	case DVACT_DEACTIVATE:
-		/* XXX sc->sc_dying = 1; */
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 
@@ -593,11 +595,7 @@ udl_mmap(void *v, off_t off, int prot)
 		udl_fbmem_free(sc);
 		return (-1);
 	}
-#if defined(__powerpc__) || defined(__sparc64__)
 	return (pa);
-#else
-	return (atop(pa));
-#endif
 }
 
 int
