@@ -224,12 +224,12 @@ cdce_attach(struct device *parent, struct device *self, void *aux)
 		DPRINTF(("cdce_attach: union interface: ctl=%d, data=%d\n",
 		    ctl_ifcno, data_ifcno));
 		for (i = 0; i < uaa->nifaces; i++) {
-			if (uaa->ifaces[i] == NULL)
+			if (usbd_iface_claimed(sc->cdce_udev, i))
 				continue;
 			id = usbd_get_interface_descriptor(uaa->ifaces[i]);
 			if (id != NULL && id->bInterfaceNumber == data_ifcno) {
 				sc->cdce_data_iface = uaa->ifaces[i];
-				uaa->ifaces[i] = NULL;
+				usbd_claim_iface(sc->cdce_udev, i);
 			}
 		}
 	}

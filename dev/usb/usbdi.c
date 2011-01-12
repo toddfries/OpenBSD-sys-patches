@@ -117,6 +117,24 @@ usbd_ref_wait(usbd_device_handle dev)
 		tsleep(&dev->ref_cnt, PWAIT, "usbref", hz * 60);
 }
 
+int
+usbd_get_devcnt(usbd_device_handle dev)
+{
+	return (dev->ndevs);
+}
+
+void
+usbd_claim_iface(usbd_device_handle dev, int ifaceidx)
+{
+	dev->ifaces[ifaceidx].claimed = 1;
+}
+
+int
+usbd_iface_claimed(usbd_device_handle dev, int ifaceidx)
+{
+	return (dev->ifaces[ifaceidx].claimed);
+}
+
 static __inline int
 usbd_xfer_isread(usbd_xfer_handle xfer)
 {

@@ -103,6 +103,7 @@ struct ugen_softc {
 
 	int sc_refcnt;
 	u_char sc_dying;
+	u_char sc_secondary;
 };
 
 void ugenintr(usbd_xfer_handle xfer, usbd_private_handle addr,
@@ -166,13 +167,18 @@ ugen_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_udev = udev = uaa->device;
 
-	/* First set configuration index 0, the default one for ugen. */
-	err = usbd_set_config_index(udev, 0, 0);
-	if (err) {
-		printf("%s: setting configuration index 0 failed\n",
-		       sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
-		return;
+	if (usbd_get_devcnt(udev) > 0)
+		sc->sc_secondary = 1;
+
+	if (!sc->sc_secondary) {
+		/* First set configuration index 0, the default one for ugen. */
+		err = usbd_set_config_index(udev, 0, 0);
+		if (err) {
+			printf("%s: setting configuration index 0 failed\n",
+			       sc->sc_dev.dv_xname);
+			sc->sc_dying = 1;
+			return;
+		}
 	}
 	conf = usbd_get_config_descriptor(udev)->bConfigurationValue;
 
@@ -220,9 +226,15 @@ ugen_set_config(struct ugen_softc *sc, int configno)
 	/* Avoid setting the current value. */
 	cdesc = usbd_get_config_descriptor(dev);
 	if (!cdesc || cdesc->bConfigurationValue != configno) {
-		err = usbd_set_config_no(dev, configno, 1);
-		if (err)
-			return (err);
+		if (sc->sc_secondary) {
+			printf("%s: secondary, not changing config to %d\n",
+			    __func__, configno);
+			return (USBD_IN_USE);
+		} else {
+			err = usbd_set_config_no(dev, configno, 1);
+			if (err)
+				return (err);
+		}
 	}
 
 	err = usbd_interface_count(dev, &niface);
@@ -231,6 +243,10 @@ ugen_set_config(struct ugen_softc *sc, int configno)
 	memset(sc->sc_endpoints, 0, sizeof sc->sc_endpoints);
 	for (ifaceno = 0; ifaceno < niface; ifaceno++) {
 		DPRINTFN(1,("ugen_set_config: ifaceno %d\n", ifaceno));
+		if (usbd_iface_claimed(dev, ifaceno)) {
+			DPRINTF(("%s: iface %d claimed\n", __func__, ifaceno));
+			continue;
+		}
 		err = usbd_device2interface_handle(dev, ifaceno, &iface);
 		if (err)
 			return (err);
