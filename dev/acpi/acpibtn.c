@@ -167,8 +167,6 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 	int64_t lid;
 #endif
 
-	printf("acpibtn notify: %s %x\n", aml_nodename(sc->sc_devnode),
-		notify_type);
 	dnprintf(10, "acpibtn_notify: %.2x %s\n", notify_type,
 	    sc->sc_devnode->name);
 
