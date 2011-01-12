@@ -280,12 +280,12 @@ umodem_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Get the data interface too. */
 	for (i = 0; i < uaa->nifaces; i++) {
-		if (uaa->ifaces[i] != NULL) {
+		if (!usbd_iface_claimed(sc->sc_udev, i)) {
 			id = usbd_get_interface_descriptor(uaa->ifaces[i]);
 			if (id != NULL &&
                             id->bInterfaceNumber == data_iface_no) {
 				sc->sc_data_iface = uaa->ifaces[i];
-				uaa->ifaces[i] = NULL;
+				usbd_claim_iface(sc->sc_udev, i);
 			}
 		}
 	}

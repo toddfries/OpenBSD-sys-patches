@@ -147,6 +147,7 @@ struct usbd_device {
 	const struct usbd_quirks     *quirks;  /* device quirks, always set */
 	struct usbd_hub	       *hub;           /* only if this is a hub */
 	struct device         **subdevs;       /* sub-devices, 0 terminated */
+	int			ndevs;	       /* # of subdevs */
 };
 
 struct usbd_interface {
@@ -157,6 +158,7 @@ struct usbd_interface {
 	struct usbd_endpoint   *endpoints;
 	void		       *priv;
 	LIST_HEAD(, usbd_pipe)	pipes;
+	u_int8_t		claimed;
 };
 
 struct usbd_pipe {
