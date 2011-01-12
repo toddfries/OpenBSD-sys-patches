@@ -546,17 +546,6 @@ aml_notify_task(void *node, int notify_value)
 }
 
 void
-aml_notify_task(void *node, int notify_value)
-{
-	struct aml_notify_data	*pdata = NULL;
-
-	dnprintf(10,"run notify: %s %x\n", aml_nodename(node), notify_value);
-	SLIST_FOREACH(pdata, &aml_notify_list, link)
-		if (pdata->node == node)
-			pdata->cbproc(pdata->node, notify_value, pdata->cbarg);
-}
-
-void
 aml_register_notify(struct aml_node *node, const char *pnpid,
     int (*proc)(struct aml_node *, int, void *), void *arg, int poll)
 {
