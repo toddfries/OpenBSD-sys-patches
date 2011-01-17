@@ -1428,6 +1428,7 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	default:
 		xa->flags = ATA_F_PACKET;
 	}
+	xa->flags |= ATA_F_GET_RFIS;
 
 	ap = atascsi_lookup_port(link);
 	xa->data = xs->data;
