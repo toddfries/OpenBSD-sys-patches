@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1584 2011/01/08 18:49:51 deraadt Exp 
+ *	OpenBSD: pcidevs,v 1.1586 2011/01/17 09:59:23 kevlo Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3184,6 +3184,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 5670",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_HD5470,
+	    "Radeon Mobility HD 5470",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS100_PCI,
 	    "RS100 PCI",
 	},
@@ -3852,6 +3856,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 5600 Audio",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5470_HDA,
+	    "Radeon HD 5470 Audio",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS100_AGP,
 	    "RS100 AGP",
 	},
@@ -4246,6 +4254,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5705M_ALT,
 	    "BCM5705M Alt",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57712,
+	    "BCM57712",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57712E,
+	    "BCM57712E",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5714,
@@ -6650,6 +6666,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_HB_1,
 	    "Core Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_PCIE_ROOT,
+	    "3400 PCIE Root",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,
@@ -15738,6 +15758,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R1010_IDE,
 	    "R1010 IDE",
+	},
+	{
+	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R1011_IDE,
+	    "R1011 IDE",
 	},
 	{
 	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6021_HB,

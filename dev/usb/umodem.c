@@ -1,4 +1,4 @@
-/*	$OpenBSD: umodem.c,v 1.39 2010/12/02 01:37:45 jakemsr Exp $ */
+/*	$OpenBSD: umodem.c,v 1.40 2011/01/16 22:35:29 jakemsr Exp $ */
 /*	$NetBSD: umodem.c,v 1.45 2002/09/23 05:51:23 simonb Exp $	*/
 
 /*
