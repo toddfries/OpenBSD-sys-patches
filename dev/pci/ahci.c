@@ -2248,6 +2248,8 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 		ahci_pwrite(ap, AHCI_PREG_IS, -1);
 
 		ahci_enable_interrupts(ap);
+
+		ahci_port_portreset(ap, 0);
 	}
 
 err:
