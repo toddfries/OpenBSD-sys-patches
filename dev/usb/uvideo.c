@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.147 2010/11/24 19:53:07 jakemsr Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.148 2011/01/16 22:35:29 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>

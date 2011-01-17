@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdce.c,v 1.47 2010/10/27 17:51:11 jakemsr Exp $ */
+/*	$OpenBSD: if_cdce.c,v 1.48 2011/01/16 22:35:29 jakemsr Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
