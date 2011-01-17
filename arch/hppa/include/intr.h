@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.35 2010/12/21 14:56:23 claudio Exp $	*/
+/*	$OpenBSD: intr.h,v 1.37 2011/01/14 13:20:06 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -57,9 +57,10 @@
 
 #ifdef MULTIPROCESSOR
 #define	HPPA_IPI_NOP		0
-#define	HPPA_IPI_FPU_SAVE	1
-#define	HPPA_IPI_FPU_FLUSH	2
-#define	HPPA_NIPI		3
+#define	HPPA_IPI_HALT		1
+#define	HPPA_IPI_FPU_SAVE	2
+#define	HPPA_IPI_FPU_FLUSH	3
+#define	HPPA_NIPI		4
 #endif
 
 #if !defined(_LOCORE) && defined(_KERNEL)
@@ -153,6 +154,7 @@ hppa_intr_enable(register_t eiem)
 #ifdef MULTIPROCESSOR
 void	 hppa_ipi_init(struct cpu_info *);
 int	 hppa_ipi_send(struct cpu_info *, u_long);
+int	 hppa_ipi_broadcast(u_long);
 #endif
 
 #define	setsoftast(p)	(p->p_md.md_astpending = 1)
