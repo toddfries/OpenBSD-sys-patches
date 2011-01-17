@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.12 2010/11/19 20:55:48 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.14 2011/01/14 19:04:08 jasper Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -74,7 +74,7 @@ struct bdevsw bdevsw[] = {
 	bdev_notdef(),			/* 18 unknown*/
 	bdev_disk_init(NRAID,raid),	/* 19 RAIDframe disk driver */
 };
-int nblkdev = sizeof bdevsw / sizeof bdevsw[0];
+int nblkdev = nitems(bdevsw);
 
 #include "pty.h"
 
@@ -88,6 +88,8 @@ cdev_decl(com);
 #include "bpfilter.h"
 
 #include "tun.h"
+
+#include "inet.h"
 
 #include "wsmux.h"
 
@@ -168,7 +170,7 @@ struct cdevsw cdevsw[] = {
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_notdef(),			/* 45 */
 	cdev_notdef(),			/* 46 */
-	cdev_notdef(),			/* 47 */
+	cdev_crypto_init(NCRYPTO,crypto), /* 47: /dev/crypto */
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
@@ -213,7 +215,7 @@ struct cdevsw cdevsw[] = {
 	cdev_pppx_init(NPPPX,pppx),	/* 83: pppx */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 84: devices hot plugging */
 };
-int nchrdev = sizeof cdevsw / sizeof cdevsw[0];
+int nchrdev = nitems(cdevsw);
 
 int mem_no = 2;				/* major number of /dev/mem */
 
@@ -305,7 +307,7 @@ int chrtoblktbl[] = {
 	/* 53 */	NODEV,
 	/* 54 */	19,		/* raid */
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 #include <dev/cons.h>
 
