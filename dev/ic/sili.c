@@ -36,7 +36,7 @@
 #include <dev/ic/silivar.h>
 
 /* use SILI_DEBUG for dmesg spam */
-#define SILI_DEBUG
+#define NO_SILI_DEBUG
 
 #ifdef SILI_DEBUG
 #define SILI_D_VERBOSE		(1<<0)

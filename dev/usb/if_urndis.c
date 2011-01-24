@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.27 2010/10/27 17:51:11 jakemsr Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.28 2011/01/16 22:35:29 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>

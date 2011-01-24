@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.62 2010/09/24 08:33:59 yuo Exp $ */
+/*	$OpenBSD: ugen.c,v 1.63 2011/01/16 22:35:29 jakemsr Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -243,8 +243,9 @@ ugen_set_config(struct ugen_softc *sc, int configno)
 	memset(sc->sc_endpoints, 0, sizeof sc->sc_endpoints);
 	for (ifaceno = 0; ifaceno < niface; ifaceno++) {
 		DPRINTFN(1,("ugen_set_config: ifaceno %d\n", ifaceno));
-		if (usbd_iface_claimed(dev, ifaceno)) {
-			DPRINTF(("%s: iface %d claimed\n", __func__, ifaceno));
+		if (usbd_iface_claimed(sc->sc_udev, ifaceno)) {
+			DPRINTF(("%s: iface %d not available\n", __func__,
+			    ifaceno));
 			continue;
 		}
 		err = usbd_device2interface_handle(dev, ifaceno, &iface);
@@ -913,7 +914,8 @@ ugen_set_interface(struct ugen_softc *sc, int ifaceidx, int altno)
 	err = usbd_interface_count(sc->sc_udev, &niface);
 	if (err)
 		return (err);
-	if (ifaceidx < 0 || ifaceidx >= niface)
+	if (ifaceidx < 0 || ifaceidx >= niface ||
+	    usbd_iface_claimed(sc->sc_udev, ifaceidx))
 		return (USBD_INVAL);
 
 	err = usbd_device2interface_handle(sc->sc_udev, ifaceidx, &iface);
