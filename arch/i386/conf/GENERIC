@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.704 2010/12/15 11:24:29 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.708 2011/01/15 04:39:27 kevlo Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -57,6 +57,7 @@ acpicpu*	at acpi?
 acpidock*	at acpi?
 acpiec*		at acpi?
 acpimadt0	at acpi?
+acpimcfg*	at acpi?
 acpiprt*	at acpi?
 acpitz*		at acpi?
 acpiasus*	at acpi?
@@ -293,6 +294,7 @@ ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 otus*	at uhub?		# Atheros AR9001U
+athn*	at uhub?		# Atheros AR9002U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 urtw*	at uhub?		# RealTek 8187
@@ -571,7 +573,6 @@ sm0	at isa? port 0x300 irq 10		# SMC 91cxx-based ethernet
 #tr0	at isa? port 0xa20 iomem 0xd8000	# IBM TROPIC based Token-Ring
 #tr1	at isa? port 0xa24 iomem 0xd0000	# IBM TROPIC based Token-Ring
 #tr*	at isa?				# 3COM TROPIC based Token-Ring
-ep0	at eisa?
 ep*	at eisa?			# 3C579 ethernet
 fea*	at eisa?			# DEC DEFEA FDDI
 lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
@@ -582,7 +583,6 @@ de*	at pci?				# DC21X4X-based ethernet
 fxp*	at pci?				# EtherExpress 10/100B ethernet
 fxp*	at cardbus?			# Intel PRO/100 ethernet
 ne*	at pci?				# NE2000-compat ethernet
-ep0	at pci?				# 3C59x ethernet
 ep*	at pci?				# 3C59x ethernet
 ne*	at pcmcia?			# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?			# PCMCIA based 3C5xx ethernet
@@ -638,6 +638,7 @@ alc*	at pci?				# Attansic L1C/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
+vte*	at pci?				# RDC R6040 Ethernet
 
 # Wireless network cards
 acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
@@ -701,6 +702,7 @@ gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 etphy*	at mii?				# Agere/LSI ET1011 TruePHY
 jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
 atphy*	at mii?				# Attansic F1 PHYs
+rdcphy*	at mii?				# RDC R6040 PHY
 ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 

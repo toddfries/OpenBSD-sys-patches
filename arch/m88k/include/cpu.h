@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.50 2010/09/28 20:27:55 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.52 2011/01/05 22:16:14 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -104,6 +104,12 @@ struct cpu_info {
 			    (__cpu_simple_lock_t *lock, uint *csr);
 	void		(*ci_mp_atomic_end)
 			    (uint32_t psr, __cpu_simple_lock_t *lock, uint csr);
+
+	/*
+	 * Other processor-dependent routines
+	 */
+	void		(*ci_zeropage)(vaddr_t);
+	void		(*ci_copypage)(vaddr_t, vaddr_t);
 
 	/*
 	 * The following fields are used differently depending on
@@ -276,6 +282,8 @@ void	signotify(struct proc *);
 void	softipi(void);
 
 int	badaddr(vaddr_t addr, int size);
+void	set_vbr(register_t);
+extern register_t kernel_vbr;
 
 #endif /* _KERNEL */
 #endif /* __M88K_CPU_H__ */
