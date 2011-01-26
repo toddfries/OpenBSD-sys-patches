@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.114 2010/10/06 22:19:20 mikeb Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.116 2011/01/11 15:42:05 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -297,13 +297,13 @@ esp_zeroize(struct tdb *tdbp)
 	int err;
 
 	if (tdbp->tdb_amxkey) {
-		bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
+		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 		free(tdbp->tdb_amxkey, M_XDATA);
 		tdbp->tdb_amxkey = NULL;
 	}
 
 	if (tdbp->tdb_emxkey) {
-		bzero(tdbp->tdb_emxkey, tdbp->tdb_emxkeylen);
+		explicit_bzero(tdbp->tdb_emxkey, tdbp->tdb_emxkeylen);
 		free(tdbp->tdb_emxkey, M_XDATA);
 		tdbp->tdb_emxkey = NULL;
 	}
@@ -932,6 +932,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	if (mo == NULL) {
 		DPRINTF(("esp_output(): m_inject failed for SA %s/%08x\n",
 		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		m_freem(m);
 		return ENOBUFS;
 	}
 	pad = mtod(mo, u_char *);

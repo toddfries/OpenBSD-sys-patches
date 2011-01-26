@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptosoft.c,v 1.57 2010/10/06 22:19:20 mikeb Exp $	*/
+/*	$OpenBSD: cryptosoft.c,v 1.63 2011/01/11 23:00:21 markus Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -80,11 +80,19 @@ u_int32_t swcr_sesnum = 0;
 int32_t swcr_id = -1;
 
 #define COPYBACK(x, a, b, c, d) \
-	(x) == CRYPTO_BUF_MBUF ? m_copyback((struct mbuf *)a,b,c,d,M_NOWAIT) \
-	: cuio_copyback((struct uio *)a,b,c,d)
+	do { \
+		if ((x) == CRYPTO_BUF_MBUF) \
+			m_copyback((struct mbuf *)a,b,c,d,M_NOWAIT); \
+		else \
+			cuio_copyback((struct uio *)a,b,c,d); \
+	} while (0)
 #define COPYDATA(x, a, b, c, d) \
-	(x) == CRYPTO_BUF_MBUF ? m_copydata((struct mbuf *)a,b,c,d) \
-	: cuio_copydata((struct uio *)a,b,c,d)
+	do { \
+		if ((x) == CRYPTO_BUF_MBUF) \
+			m_copydata((struct mbuf *)a,b,c,d); \
+		else \
+			cuio_copydata((struct uio *)a,b,c,d); \
+	} while (0)
 
 /*
  * Apply a symmetric encryption/decryption algorithm.
@@ -94,7 +102,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
     int outtype)
 {
 	unsigned char iv[EALG_MAX_BLOCK_LEN], blk[EALG_MAX_BLOCK_LEN], *idat;
-	unsigned char *ivp, piv[EALG_MAX_BLOCK_LEN];
+	unsigned char *ivp, *nivp, iv2[EALG_MAX_BLOCK_LEN];
 	struct enc_xform *exf;
 	int i, k, j, blks, ind, count, ivlen;
 	struct mbuf *m = NULL;
@@ -122,9 +130,8 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 			arc4random_buf(iv, ivlen);
 
 		/* Do we need to write the IV */
-		if (!(crd->crd_flags & CRD_F_IV_PRESENT)) {
+		if (!(crd->crd_flags & CRD_F_IV_PRESENT))
 			COPYBACK(outtype, buf, crd->crd_inject, ivlen, iv);
-		}
 
 	} else {	/* Decryption */
 			/* IV explicitly provided ? */
@@ -188,21 +195,15 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, blk);
 
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
@@ -260,21 +261,15 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, idat);
 
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
@@ -298,7 +293,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 			 */
 			if (uio->uio_iov[ind].iov_len < k + blks &&
 			    uio->uio_iov[ind].iov_len != k) {
-				cuio_copydata(uio, k, blks, blk);
+				cuio_copydata(uio, count, blks, blk);
 
 				/* Actual encryption/decryption */
 				if (exf->reinit) {
@@ -327,25 +322,19 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, blk);
 
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
-				cuio_copyback(uio, k, blks, blk);
+				cuio_copyback(uio, count, blks, blk);
 
 				count += blks;
 
@@ -390,27 +379,34 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, idat);
 
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
 				count += blks;
 				k += blks;
 				i -= blks;
+			}
+
+			/*
+			 * Advance to the next iov if the end of the current iov
+			 * is aligned with the end of a cipher block.
+			 * Note that the code is equivalent to calling:
+			 *	ind = cuio_getptr(uio, count, &k);
+			 */
+			if (i > 0 && k == uio->uio_iov[ind].iov_len) {
+				k = 0;
+				ind++;
+				if (ind >= uio->uio_iovcnt)
+					return (EINVAL);
 			}
 		}
 	}
@@ -562,9 +558,8 @@ swcr_combined(struct cryptop *crp)
 			arc4random_buf(iv, ivlen);
 
 		/* Do we need to write the IV */
-		if (!(crde->crd_flags & CRD_F_IV_PRESENT)) {
+		if (!(crde->crd_flags & CRD_F_IV_PRESENT))
 			COPYBACK(outtype, buf, crde->crd_inject, ivlen, iv);
-		}
 
 	} else {	/* Decryption */
 			/* IV explicitly provided ? */
@@ -1002,11 +997,11 @@ swcr_freesession(u_int64_t tid)
 			axf = swd->sw_axf;
 
 			if (swd->sw_ictx) {
-				bzero(swd->sw_ictx, axf->ctxsize);
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
 			}
 			if (swd->sw_octx) {
-				bzero(swd->sw_octx, axf->ctxsize);
+				explicit_bzero(swd->sw_octx, axf->ctxsize);
 				free(swd->sw_octx, M_CRYPTO_DATA);
 			}
 			break;
@@ -1016,11 +1011,11 @@ swcr_freesession(u_int64_t tid)
 			axf = swd->sw_axf;
 
 			if (swd->sw_ictx) {
-				bzero(swd->sw_ictx, axf->ctxsize);
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
 			}
 			if (swd->sw_octx) {
-				bzero(swd->sw_octx, swd->sw_klen);
+				explicit_bzero(swd->sw_octx, swd->sw_klen);
 				free(swd->sw_octx, M_CRYPTO_DATA);
 			}
 			break;
@@ -1033,7 +1028,7 @@ swcr_freesession(u_int64_t tid)
 			axf = swd->sw_axf;
 
 			if (swd->sw_ictx) {
-				bzero(swd->sw_ictx, axf->ctxsize);
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
 			}
 			break;

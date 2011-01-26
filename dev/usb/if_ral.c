@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.117 2010/12/06 04:41:39 jakemsr Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.119 2010/12/30 05:22:51 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -363,16 +363,19 @@ ural_detach(struct device *self, int flags)
 
 	s = splusb();
 
-	if (ifp->if_softc != NULL) {
-		ieee80211_ifdetach(ifp);	/* free all nodes */
-		if_detach(ifp);
-	}
-
-	usb_rem_task(sc->sc_udev, &sc->sc_task);
 	if (timeout_initialized(&sc->scan_to))
 		timeout_del(&sc->scan_to);
 	if (timeout_initialized(&sc->amrr_to))
 		timeout_del(&sc->amrr_to);
+
+	usb_rem_wait_task(sc->sc_udev, &sc->sc_task);
+
+	usbd_ref_wait(sc->sc_udev);
+
+	if (ifp->if_softc != NULL) {
+		ieee80211_ifdetach(ifp);	/* free all nodes */
+		if_detach(ifp);
+	}
 
 	if (sc->amrr_xfer != NULL) {
 		usbd_free_xfer(sc->amrr_xfer);
@@ -547,8 +550,15 @@ ural_next_scan(void *arg)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 
+	if (usbd_is_dying(sc->sc_udev))
+		return;
+
+	usbd_ref_incr(sc->sc_udev);
+
 	if (ic->ic_state == IEEE80211_S_SCAN)
 		ieee80211_next_scan(ifp);
+
+	usbd_ref_decr(sc->sc_udev);
 }
 
 void
@@ -558,6 +568,9 @@ ural_task(void *arg)
 	struct ieee80211com *ic = &sc->sc_ic;
 	enum ieee80211_state ostate;
 	struct ieee80211_node *ni;
+
+	if (usbd_is_dying(sc->sc_udev))
+		return;
 
 	ostate = ic->ic_state;
 
@@ -574,7 +587,8 @@ ural_task(void *arg)
 
 	case IEEE80211_S_SCAN:
 		ural_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add_msec(&sc->scan_to, 200);
+		if (!usbd_is_dying(sc->sc_udev))
+			timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -1324,6 +1338,11 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr;
 	int s, error = 0;
 
+	if (usbd_is_dying(sc->sc_udev))
+		return ENXIO;
+
+	usbd_ref_incr(sc->sc_udev);
+
 	s = splnet();
 
 	switch (cmd) {
@@ -1386,6 +1405,8 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
+
+	usbd_ref_decr(sc->sc_udev);
 
 	return error;
 }
@@ -1852,7 +1873,6 @@ ural_read_eeprom(struct ural_softc *sc)
 int
 ural_bbp_init(struct ural_softc *sc)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	int i, ntries;
 
 	/* wait for BBP to be ready */
@@ -1867,7 +1887,7 @@ ural_bbp_init(struct ural_softc *sc)
 	}
 
 	/* initialize BBP registers to default values */
-	for (i = 0; i < N(ural_def_bbp); i++)
+	for (i = 0; i < nitems(ural_def_bbp); i++)
 		ural_bbp_write(sc, ural_def_bbp[i].reg, ural_def_bbp[i].val);
 
 #if 0
@@ -1880,7 +1900,6 @@ ural_bbp_init(struct ural_softc *sc)
 #endif
 
 	return 0;
-#undef N
 }
 
 void
@@ -1935,7 +1954,6 @@ ural_set_rxantenna(struct ural_softc *sc, int antenna)
 int
 ural_init(struct ifnet *ifp)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	struct ural_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint16_t tmp;
@@ -1945,7 +1963,7 @@ ural_init(struct ifnet *ifp)
 	ural_stop(ifp, 0);
 
 	/* initialize MAC registers to default values */
-	for (i = 0; i < N(ural_def_mac); i++)
+	for (i = 0; i < nitems(ural_def_mac); i++)
 		ural_write(sc, ural_def_mac[i].reg, ural_def_mac[i].val);
 
 	/* wait for BBP and RF to wake up (this can take a long time!) */
@@ -2083,7 +2101,6 @@ ural_init(struct ifnet *ifp)
 
 fail:	ural_stop(ifp, 1);
 	return error;
-#undef N
 }
 
 void
@@ -2147,7 +2164,8 @@ ural_amrr_start(struct ural_softc *sc, struct ieee80211_node *ni)
 	     i--);
 	ni->ni_txrate = i;
 
-	timeout_add_sec(&sc->amrr_to, 1);
+	if (!usbd_is_dying(sc->sc_udev))
+		timeout_add_sec(&sc->amrr_to, 1);
 }
 
 void
@@ -2156,6 +2174,11 @@ ural_amrr_timeout(void *arg)
 	struct ural_softc *sc = arg;
 	usb_device_request_t req;
 	int s;
+
+	if (usbd_is_dying(sc->sc_udev))
+		return;
+
+	usbd_ref_incr(sc->sc_udev);
 
 	s = splusb();
 
@@ -2174,6 +2197,8 @@ ural_amrr_timeout(void *arg)
 	(void)usbd_transfer(sc->amrr_xfer);
 
 	splx(s);
+
+	usbd_ref_decr(sc->sc_udev);
 }
 
 void
@@ -2203,7 +2228,8 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	ieee80211_amrr_choose(&sc->amrr, sc->sc_ic.ic_bss, &sc->amn);
 
-	timeout_add_sec(&sc->amrr_to, 1);
+	if (!usbd_is_dying(sc->sc_udev))
+		timeout_add_sec(&sc->amrr_to, 1);
 }
 
 int

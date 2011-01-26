@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.171 2010/09/08 14:15:56 jsing Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.174 2011/01/08 19:45:09 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -89,6 +89,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/netisr.h>
 
 #if defined(CRYPTO)
 #include <crypto/cryptodev.h>
@@ -106,7 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2011 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -218,6 +219,8 @@ main(void *framep)
 
 	KERNEL_LOCK_INIT();
 	SCHED_LOCK_INIT();
+
+	random_init();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -344,6 +347,8 @@ main(void *framep)
 	/* Initialize work queues */
 	workq_init();
 
+	random_start();
+
 	/* Initialize the interface/address trees */
 	ifinit();
 
@@ -381,7 +386,6 @@ main(void *framep)
 #endif
 
 	/* Attach pseudo-devices. */
-	randomattach();
 	for (pdev = pdevinit; pdev->pdev_attach != NULL; pdev++)
 		if (pdev->pdev_count > 0)
 			(*pdev->pdev_attach)(pdev->pdev_count);
@@ -396,6 +400,7 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
+	netisr_init();
 	domaininit();
 	if_attachdomain();
 	splx(s);

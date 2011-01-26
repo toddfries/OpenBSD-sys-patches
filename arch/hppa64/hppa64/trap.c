@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.11 2010/11/27 19:57:23 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.13 2011/01/02 13:16:53 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -27,8 +27,6 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 
-#include <net/netisr.h>
-
 #include "systrace.h"
 #include <dev/systrace.h>
 
@@ -38,11 +36,11 @@
 #include <machine/psl.h>
 
 #ifdef DDB
-#ifdef TRAPDEBUG
-#include <ddb/db_output.h>
-#else
 #include <machine/db_machdep.h>
 #endif
+
+#ifdef TRAPDEBUG
+#include <ddb/db_output.h>
 #endif
 
 static __inline int inst_store(u_int ins) {

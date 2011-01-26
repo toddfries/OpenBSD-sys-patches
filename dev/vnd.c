@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.103 2010/09/22 01:18:57 matthew Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.106 2011/01/06 17:32:42 thib Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -125,6 +125,9 @@ struct pool     vndbufpl;
 struct vnd_softc {
 	struct device	 sc_dev;
 	struct disk	 sc_dk;
+	char		 sc_dk_name[16];
+
+	struct bufq	 sc_bufq;
 
 	char		 sc_file[VNDNLEN];	/* file we're covering */
 	int		 sc_flags;		/* flags */
@@ -134,7 +137,6 @@ struct vnd_softc {
 	size_t		 sc_ntracks;		/* # of tracks per cylinder */
 	struct vnode	*sc_vp;			/* vnode */
 	struct ucred	*sc_cred;		/* credentials */
-	struct buf	 sc_tab;		/* transfer queue */
 	blf_ctx		*sc_keyctx;		/* key context */
 	struct rwlock	 sc_rwlock;
 };
@@ -488,8 +490,8 @@ vndstrategy(struct buf *bp)
 			biodone(bp);
 			splx(s);
 
-			/* If nothing more is queued, we are done.  */
-			if (!vnd->sc_tab.b_active)
+			/* If nothing more is queued, we are done. */
+			if (!bufq_peek(&vnd->sc_bufq))
 				return;
 
 			/*
@@ -497,9 +499,8 @@ vndstrategy(struct buf *bp)
 			 * routine might queue using same links.
 			 */
 			s = splbio();
-			bp = vnd->sc_tab.b_actf;
-			vnd->sc_tab.b_actf = bp->b_actf;
-			vnd->sc_tab.b_active--;
+			bp = bufq_dequeue(&vnd->sc_bufq);
+			KASSERT(bp != NULL);
 			splx(s);
 		}
 	}
@@ -595,13 +596,9 @@ vndstrategy(struct buf *bp)
 			splx(s);
 			return;
 		}
-		/*
-		 * Just sort by block number
-		 */
-		nbp->vb_buf.b_cylinder = nbp->vb_buf.b_blkno;
+
+		bufq_queue(&vnd->sc_bufq, &nbp->vb_buf);
 		s = splbio();
-		disksort(&vnd->sc_tab, &nbp->vb_buf);
-		vnd->sc_tab.b_active++;
 		vndstart(vnd);
 		splx(s);
 		bn += sz;
@@ -624,8 +621,9 @@ vndstart(struct vnd_softc *vnd)
 	 * Dequeue now since lower level strategy routine might
 	 * queue using same links
 	 */
-	bp = vnd->sc_tab.b_actf;
-	vnd->sc_tab.b_actf = bp->b_actf;
+	bp = bufq_dequeue(&vnd->sc_bufq);
+	if (bp == NULL)
+		return;
 
 	DNPRINTF(VDB_IO,
 	    "vndstart(%d): bp %p vp %p blkno %lld addr %p cnt %lx\n",
@@ -674,13 +672,8 @@ vndiodone(struct buf *bp)
 
 out:
 	putvndbuf(vbp);
-
-	if (vnd->sc_tab.b_active) {
-		disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
-		    (pbp->b_flags & B_READ));
-		if (!vnd->sc_tab.b_actf)
-			vnd->sc_tab.b_active--;
-	}
+	disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
+	    (pbp->b_flags & B_READ));
 }
 
 /* ARGSUSED */
@@ -780,10 +773,21 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			return (error);
 		}
 
+		/* Set device name. */
 		bzero(vnd->sc_dev.dv_xname, sizeof(vnd->sc_dev.dv_xname));
 		if (snprintf(vnd->sc_dev.dv_xname, sizeof(vnd->sc_dev.dv_xname),
 		    "vnd%d", unit) >= sizeof(vnd->sc_dev.dv_xname)) {
 			printf("VNDIOCSET: device name too long\n");
+			vndunlock(vnd);
+			return(ENXIO);
+		}
+
+		/* Set disk name depending on how we were created. */
+		bzero(vnd->sc_dk_name, sizeof(vnd->sc_dk_name));
+		if (snprintf(vnd->sc_dk_name, sizeof(vnd->sc_dk_name),
+		    "%svnd%d", ((vnd->sc_flags & VNF_SIMPLE) ? "s" : ""),
+		    unit) >= sizeof(vnd->sc_dk_name)) {
+			printf("VNDIOCSET: disk name too long\n");
 			vndunlock(vnd);
 			return(ENXIO);
 		}
@@ -865,8 +869,9 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    vnd->sc_vp, (unsigned long long)vnd->sc_size);
 
 		/* Attach the disk. */
-		vnd->sc_dk.dk_name = vnd->sc_dev.dv_xname;
+		vnd->sc_dk.dk_name = vnd->sc_dk_name;
 		disk_attach(&vnd->sc_dev, &vnd->sc_dk);
+		bufq_init(&vnd->sc_bufq, BUFQ_DEFAULT);
 
 		vndunlock(vnd);
 
@@ -903,6 +908,7 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		}
 
 		/* Detach the disk. */
+		bufq_destroy(&vnd->sc_bufq);
 		disk_detach(&vnd->sc_dk);
 
 		/* This must be atomic. */
