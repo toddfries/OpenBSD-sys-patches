@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.99 2011/01/12 21:00:04 kettenis Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.100 2011/01/26 21:41:00 drahn Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

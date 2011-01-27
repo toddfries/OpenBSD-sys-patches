@@ -1,4 +1,4 @@
-/*	$OpenBSD: silireg.h,v 1.20 2007/04/07 13:02:52 pascoe Exp $ */
+/*	$OpenBSD: silireg.h,v 1.21 2011/01/26 21:41:00 drahn Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

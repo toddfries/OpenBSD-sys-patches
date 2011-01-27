@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.46 2010/08/05 20:21:36 kettenis Exp $ */
+/*	$OpenBSD: sili.c,v 1.47 2011/01/26 21:41:00 drahn Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
