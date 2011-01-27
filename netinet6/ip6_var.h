@@ -290,6 +290,7 @@ void	ip6_forward(struct mbuf *, int);
 void	ip6_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in6 *);
 int	ip6_output(struct mbuf *, struct ip6_pktopts *, struct route_in6 *, int,
 	    struct ip6_moptions *, struct ifnet **, struct inpcb *);
+int	ip6_fragment(struct mbuf *, int, u_char, u_long);
 int	ip6_ctloutput(int, struct socket *, int, int, struct mbuf **);
 int	ip6_raw_ctloutput(int, struct socket *, int, int, struct mbuf **);
 void	ip6_initpktopts(struct ip6_pktopts *);
@@ -303,6 +304,7 @@ int	route6_input(struct mbuf **, int *, int);
 
 void	frag6_init(void);
 int	frag6_input(struct mbuf **, int *, int);
+int	frag6_deletefraghdr(struct mbuf *, int);
 void	frag6_slowtimo(void);
 void	frag6_drain(void);
 

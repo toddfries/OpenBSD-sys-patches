@@ -297,8 +297,6 @@ enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_SOLICITED, PF_ICMP_MULTI_LINK };
 			mrm->r->states_cur--;			\
 	} while (0)
 
-static __inline int pf_addr_compare(struct pf_addr *, struct pf_addr *,
-	sa_family_t);
 static __inline int pf_src_compare(struct pf_src_node *, struct pf_src_node *);
 static __inline int pf_state_compare_key(struct pf_state_key *,
 	struct pf_state_key *);
@@ -315,7 +313,7 @@ RB_GENERATE(pf_state_tree, pf_state_key, entry, pf_state_compare_key);
 RB_GENERATE(pf_state_tree_id, pf_state,
     entry_id, pf_state_compare_id);
 
-static __inline int
+__inline int
 pf_addr_compare(struct pf_addr *a, struct pf_addr *b, sa_family_t af)
 {
 	switch (af) {
@@ -6064,12 +6062,13 @@ done:
 
 #ifdef INET6
 int
-pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
+pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
     struct ether_header *eh)
 {
 	struct pfi_kif		*kif;
 	u_short			 action, reason = 0;
 	struct mbuf		*m = *m0;
+	struct m_tag		*mtag;
 	struct ip6_hdr		*h;
 	struct pf_rule		*a = NULL, *r = &pf_default_rule;
 	struct pf_state		*s = NULL;
@@ -6077,6 +6076,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pf_pdesc		 pd;
 	union pf_headers	 hdrs;
 	int			 off, hdrlen;
+	int			 dir = (fwdir == PF_FWD) ? PF_OUT : fwdir;
 
 	if (!pf_status.running)
 		return (PF_PASS);
@@ -6114,8 +6114,14 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED_PACKET)
 		return (PF_PASS);
 
+	if (m->m_pkthdr.pf.flags & PF_TAG_REFRAGMENTED) {
+		m->m_pkthdr.pf.flags &= ~PF_TAG_REFRAGMENTED;
+		return (PF_PASS);
+	}
+
 	/* packet reassembly */
-	if (pf_normalize_ip6(m0, dir, kif, &reason, &pd) != PF_PASS) {
+	if (pf_status.reass &&
+	    pf_normalize_ip6(m0, fwdir, kif, &reason, &pd) != PF_PASS) {
 		action = PF_DROP;
 		goto done;
 	}
@@ -6320,6 +6326,11 @@ done:
 			pf_route6(m0, r, dir, kif->pfik_ifp, s);
 		break;
 	}
+
+	/* if reassembled packet passed, create new fragments */
+	if (pf_status.reass && action == PF_PASS && *m0 && fwdir == PF_FWD &&
+	    (mtag = m_tag_find(m, PACKET_TAG_PF_REASSEMBLED, NULL)) != NULL)
+		action = pf_refragment6(m0, mtag, fwdir);
 
 	return (action);
 }
