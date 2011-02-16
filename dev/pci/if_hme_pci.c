@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_hme_pci.c,v 1.11 2006/10/15 14:46:13 kettenis Exp $	*/
+=======
+/*	$OpenBSD: if_hme_pci.c,v 1.16 2009/10/15 17:54:56 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_hme_pci.c,v 1.3 2000/12/28 22:59:13 sommerfeld Exp $	*/
 
 /*
@@ -71,15 +75,18 @@ struct hme_pci_softc {
 	struct	hme_softc	hsc_hme;	/* HME device */
 	bus_space_tag_t		hsc_memt;
 	bus_space_handle_t	hsc_memh;
+	bus_size_t		hsc_memsize;
 	void			*hsc_ih;
+	pci_chipset_tag_t	hsc_pc;
 };
 
 int	hmematch_pci(struct device *, void *, void *);
 void	hmeattach_pci(struct device *, struct device *, void *);
+int	hmedetach_pci(struct device *, int);
 int	hme_pci_enaddr(struct hme_softc *, struct pci_attach_args *);
 
 struct cfattach hme_pci_ca = {
-	sizeof(struct hme_pci_softc), hmematch_pci, hmeattach_pci
+	sizeof(struct hme_pci_softc), hmematch_pci, hmeattach_pci, hmedetach_pci
 };
 
 int
@@ -98,22 +105,19 @@ hmematch_pci(parent, vcf, aux)
 }
 
 #define	PCI_EBUS2_BOOTROM	0x10
+#define	PCI_EBUS2_BOOTROM_SIZE	0x20000
 #define	PROMHDR_PTR_DATA	0x18
 #define	PROMDATA_PTR_VPD	0x08
-#define	PROMDATA_DATA2		0x0a
+#define	PROMDATA_LENGTH		0x0a
+#define	PROMDATA_REVISION	0x0c
+#define	PROMDATA_SUBCLASS	0x0e
+#define	PROMDATA_CLASS		0x0f
 
 static const u_int8_t hme_promhdr[] = { 0x55, 0xaa };
 static const u_int8_t hme_promdat[] = {
 	'P', 'C', 'I', 'R',
 	PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
 	PCI_PRODUCT_SUN_HME & 0xff, PCI_PRODUCT_SUN_HME >> 8
-};
-static const u_int8_t hme_promdat2[] = {
-	0x18, 0x00,			/* structure length */
-	0x00,				/* structure revision */
-	0x00,				/* interface revision */
-	PCI_SUBCLASS_NETWORK_ETHERNET,	/* subclass code */
-	PCI_CLASS_NETWORK		/* class code */
 };
 
 int
@@ -126,7 +130,7 @@ hme_pci_enaddr(struct hme_softc *sc, struct pci_attach_args *hpa)
 	bus_space_tag_t romt;
 	bus_size_t romsize = 0;
 	u_int8_t buf[32];
-	int dataoff, vpdoff;
+	int dataoff, vpdoff, length;
 
 	/*
 	 * Dig out VPD (vital product data) and acquire Ethernet address.
@@ -147,7 +151,7 @@ hme_pci_enaddr(struct hme_softc *sc, struct pci_attach_args *hpa)
 		goto fail;
 
 	if (pci_mapreg_map(&epa, PCI_EBUS2_BOOTROM, PCI_MAPREG_TYPE_MEM, 0,
-	    &romt, &romh, 0, &romsize, 0))
+	    &romt, &romh, 0, &romsize, PCI_EBUS2_BOOTROM_SIZE))
 		goto fail;
 
 	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
@@ -159,8 +163,17 @@ hme_pci_enaddr(struct hme_softc *sc, struct pci_attach_args *hpa)
 		goto fail;
 
 	bus_space_read_region_1(romt, romh, dataoff, buf, sizeof(buf));
-	if (bcmp(buf, hme_promdat, sizeof(hme_promdat)) ||
-	    bcmp(buf + PROMDATA_DATA2, hme_promdat2, sizeof(hme_promdat2)))
+	if (bcmp(buf, hme_promdat, sizeof(hme_promdat)))
+		goto fail;
+
+	/*
+	 * Don't check the interface part of the class code, since
+	 * some cards have a bogus value there.
+	 */
+	length = buf[PROMDATA_LENGTH] | (buf[PROMDATA_LENGTH + 1] << 8);
+	if (length != 0x18 || buf[PROMDATA_REVISION] != 0x00 ||
+	    buf[PROMDATA_SUBCLASS] != PCI_SUBCLASS_NETWORK_ETHERNET ||
+	    buf[PROMDATA_CLASS] != PCI_CLASS_NETWORK)
 		goto fail;
 
 	vpdoff = buf[PROMDATA_PTR_VPD] | (buf[PROMDATA_PTR_VPD + 1] << 8);
@@ -206,8 +219,9 @@ hmeattach_pci(parent, self, aux)
 	extern void myetheraddr(u_char *);
 	pcireg_t csr;
 	const char *intrstr = NULL;
-	bus_size_t size;
 	int type, gotenaddr = 0;
+
+	hsc->hsc_pc = pa->pa_pc;
 
 	/*
 	 * enable io/memory-space accesses.  this is kinda of gross; but
@@ -246,8 +260,8 @@ hmeattach_pci(parent, self, aux)
 
 #define PCI_HME_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_HME_BASEADDR, type, 0,
-	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, &size, 0) != 0) {
-		printf(": could not map hme registers\n");
+	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, &hsc->hsc_memsize, 0) != 0) {
+		printf(": can't map registers\n");
 		return;
 	}
 	sc->sc_seb = hsc->hsc_memh;
@@ -282,7 +296,7 @@ hmeattach_pci(parent, self, aux)
 
 	if (pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
-		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
+		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, hsc->hsc_memsize);
 		return;
 	}	
 	intrstr = pci_intr_string(pa->pa_pc, ih);
@@ -293,7 +307,7 @@ hmeattach_pci(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
+		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, hsc->hsc_memsize);
 		return;
 	}
 
@@ -303,4 +317,18 @@ hmeattach_pci(parent, self, aux)
 	 * call the main configure
 	 */
 	hme_config(sc);
+}
+
+int
+hmedetach_pci(struct device *self, int flags)
+{
+	struct hme_pci_softc *hsc = (void *)self;
+	struct hme_softc *sc = &hsc->hsc_hme;
+
+	timeout_del(&sc->sc_tick_ch);
+	pci_intr_disestablish(hsc->hsc_pc, hsc->hsc_ih);
+
+	hme_unconfig(sc);
+	bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, hsc->hsc_memsize);
+	return (0);
 }

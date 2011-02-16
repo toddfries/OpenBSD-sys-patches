@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.32 2005/04/11 15:13:01 deraadt Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.37 2010/12/15 05:30:19 tedu Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -49,6 +49,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024UL)	/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
 #endif
@@ -59,7 +62,7 @@
 #define STACKGAP_RANDOM	256*1024
 
 #ifndef USRIOSIZE
-#define	USRIOSIZE	((2*HPPA_PGALIAS)/PAGE_SIZE)	/* 2mb */
+#define	USRIOSIZE	((2*HPPA_PGALIAS)/PAGE_SIZE)	/* 8mb */
 #endif
 
 /*
@@ -77,6 +80,10 @@
 #define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xc0001000)
 #define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)0xef000000)
 
+/* use a small range for PIE to minimize mmap pressure */
+#define	VM_PIE_MIN_ADDR		PAGE_SIZE
+#define	VM_PIE_MAX_ADDR		0x40000UL
+
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
@@ -90,6 +97,9 @@
 #define	VM_FREELIST_ARCH	1
 
 #if defined(_KERNEL) && !defined(_LOCORE)
+
+#include <sys/lock.h>
+
 #define __HAVE_VM_PAGE_MD
 struct pv_entry;
 struct vm_page_md {

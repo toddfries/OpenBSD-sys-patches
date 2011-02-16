@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom.c,v 1.1.1.1 2006/05/08 16:34:56 miod Exp $	*/
+/*	$OpenBSD: prom.c,v 1.4 2010/04/24 18:46:51 miod Exp $	*/
 
 /*
  * Copyright (c) 2006, Miodrag Vallat.
@@ -274,3 +274,26 @@ scm_sysid()
 
 	return (ret);
 }
+
+#ifdef MULTIPROCESSOR
+u_int
+scm_jpstart(cpuid_t cpu, vaddr_t addr)
+{
+	SCM_DECL;
+	u_int ret;
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+	SCM_CONTEXT();
+	SCM_VBR();
+	__asm__ __volatile__ ("or r2, r0, %0; or r3, r0, %1" : :
+	    "r" (cpu), "r" (addr));
+	SCM_CALL(SCM_JPSTART);
+	__asm__ __volatile__ ("or %0, r0, r2" : "=r" (ret));
+	OS_CONTEXT();
+	OS_VBR();
+	set_psr(psr);
+
+	return (ret);
+}
+#endif

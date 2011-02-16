@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: if_atm.h,v 1.11 2002/03/14 01:27:09 millert Exp $       */
+=======
+/*      $OpenBSD: if_atm.h,v 1.14 2010/05/07 13:33:16 claudio Exp $       */
+>>>>>>> origin/master
 
 /*
  *
@@ -38,8 +42,6 @@
 #ifndef _NET_IF_ATM_H_
 #define _NET_IF_ATM_H_
 
-#define RTALLOC1(A,B)		rtalloc1((A),(B), 0)
-
 /*
  * pseudo header for packet transmission
  */
@@ -51,10 +53,10 @@ struct atm_pseudohdr {
 #define ATM_PH_FLAGS(X)	((X)->atm_ph[0])
 #define ATM_PH_VPI(X)	((X)->atm_ph[1])
 #define ATM_PH_VCI(X)	((((X)->atm_ph[2]) << 8) | ((X)->atm_ph[3]))
-#define ATM_PH_SETVCI(X,V) { \
+#define ATM_PH_SETVCI(X,V) do { \
 	(X)->atm_ph[2] = ((V) >> 8) & 0xff; \
 	(X)->atm_ph[3] = ((V) & 0xff); \
-}
+} while (/* CONSTCOND */0)
 
 #define ATM_PH_AAL5    0x01	/* use AAL5? (0 == aal0) */
 #define ATM_PH_LLCSNAP 0x02	/* use the LLC SNAP encoding (iff aal5) */
@@ -89,10 +91,10 @@ struct atmllc {
 
 /* ATM_LLC macros: note type code in host byte order */
 #define ATM_LLC_TYPE(X) (((X)->type[0] << 8) | ((X)->type[1]))
-#define ATM_LLC_SETTYPE(X,V) { \
+#define ATM_LLC_SETTYPE(X,V) do { \
 	(X)->type[0] = ((V) >> 8) & 0xff; \
 	(X)->type[1] = ((V) & 0xff); \
-}
+} while (/* CONSTCOND */0)
 
 #ifdef _KERNEL
 void	atm_ifattach(struct ifnet *);

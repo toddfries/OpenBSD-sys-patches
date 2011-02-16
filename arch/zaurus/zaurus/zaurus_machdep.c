@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zaurus_machdep.c,v 1.25 2006/06/20 18:24:04 todd Exp $	*/
+=======
+/*	$OpenBSD: zaurus_machdep.c,v 1.36 2010/10/02 23:31:34 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -148,7 +152,7 @@
 #include <arm/xscale/pxa2x0var.h>
 #include <arm/xscale/pxa2x0_gpio.h>
 #include <arm/sa11x0/sa1111_reg.h>
-#include <machine/zaurus_reg.h>
+#include <machine/machine_reg.h>
 #include <machine/zaurus_var.h>
 
 #include <zaurus/dev/zaurus_scoopreg.h>
@@ -239,6 +243,12 @@ pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
 extern struct user *proc0paddr;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
 /* Prototypes */
 
 #define	BOOT_STRING_MAGIC 0x4f425344
@@ -271,7 +281,7 @@ int comcnmode = CONMODE;
 
 
 /*
- * void boot(int howto, char *bootstr)
+ * void boot(int howto)
  *
  * Reboots the system
  *
@@ -281,29 +291,20 @@ int comcnmode = CONMODE;
 void
 boot(int howto)
 {
-	/*
-	 * If we are still cold then hit the air brakes
-	 * and crash to earth fast
-	 */
-	if (cold) {
-		doshutdownhooks();
-		if ((howto & (RB_HALT | RB_USERREQ)) != RB_USERREQ) {
-			printf("The operating system has halted.\n");
-			printf("Please press any key to reboot.\n\n");
-			cngetc();
-		}
-		printf("rebooting...\n");
-		delay(6000000);
-#if NAPM > 0
-		zapm_restart();
-#endif
-		printf("reboot failed; spinning\n");
-		while(1);
-		/*NOTREACHED*/
-	}
+	extern int lid_suspend;
 
-	/* Disable console buffering */
-/*	cnpollc(1);*/
+	if (howto & RB_POWERDOWN)
+		lid_suspend = 0;
+
+	if (cold) {
+		/*
+		 * If the system is cold, just halt, unless the user
+		 * explicitely asked for reboot.
+		 */
+		if ((howto & RB_USERREQ) == 0)
+			howto |= RB_HALT;
+		goto haltsys;
+	}
 
 	/*
 	 * If RB_NOSYNC was not specified sync the discs.
@@ -322,7 +323,7 @@ boot(int howto)
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 	
-	/* Run any shutdown hooks */
+haltsys:
 	doshutdownhooks();
 
 	/* Make sure IRQ's are disabled */
@@ -340,7 +341,9 @@ boot(int howto)
 
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	printf("rebooting...\n");
@@ -444,7 +447,7 @@ static vaddr_t section_free = ZAURUS_VBASE_FREE;
 
 static int
 bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	u_long startpa;
 	vaddr_t va;

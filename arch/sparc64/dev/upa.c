@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: upa.c,v 1.4 2003/06/02 20:02:49 jason Exp $	*/
+=======
+/*	$OpenBSD: upa.c,v 1.9 2010/11/11 17:58:23 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -167,9 +171,13 @@ upa_alloc_bus_tag(struct upa_softc *sc)
 	if (bt == NULL)
 		panic("upa: couldn't alloc bus tag");
 
+<<<<<<< HEAD
 	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s",
 			sc->sc_dev.dv_xname);
+=======
+	strlcpy(bt->name, sc->sc_dev.dv_xname, sizeof(bt->name));
+>>>>>>> origin/master
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;
 	bt->asi = bt->parent->asi;

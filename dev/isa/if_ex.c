@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ex.c,v 1.14 2005/11/09 05:46:21 brad Exp $	*/
+=======
+/*	$OpenBSD: if_ex.c,v 1.36 2010/07/02 02:29:45 tedu Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1997, Donald A. Schmidt
  * Copyright (c) 1996, Javier Martín Rueda (jmrueda@diatel.upm.es)
@@ -141,6 +145,7 @@ struct cfdriver ex_cd = {
 	NULL, "ex", DV_IFNET
 };
 
+<<<<<<< HEAD
 #define BANK_SEL(X) bus_space_write_1(sc->sc_iot, sc->sc_ioh, CMD_REG, \
 	(X))
 #define ISA_GET(offset) bus_space_read_1(sc->sc_iot, sc->sc_ioh, (offset))
@@ -160,6 +165,26 @@ static int
 look_for_card(ia, sc)
 	struct isa_attach_args *ia;
 	struct ex_softc *sc;
+=======
+#define CSR_READ_1(sc, off) \
+	bus_space_read_1((sc)->sc_iot, (sc)->sc_ioh, (off))
+#define CSR_READ_2(sc, off) \
+	bus_space_read_2((sc)->sc_iot, (sc)->sc_ioh, (off))
+#define CSR_READ_MULTI_2(sc, off, addr, count) \
+	bus_space_read_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off),	\
+	    (u_int16_t *)(addr), (count))
+
+#define CSR_WRITE_1(sc, off, value) \
+	bus_space_write_1((sc)->sc_iot, (sc)->sc_ioh, (off), (value))
+#define CSR_WRITE_2(sc, off, value) \
+	bus_space_write_2((sc)->sc_iot, (sc)->sc_ioh, (off), (value))
+#define CSR_WRITE_MULTI_2(sc, off, addr, count) \
+	bus_space_write_multi_2((sc)->sc_iot, (sc)->sc_ioh, (off),	\
+	    (u_int16_t *)(addr), (count))
+
+int 
+ex_look_for_card(struct isa_attach_args *ia, struct ex_softc *sc)
+>>>>>>> origin/master
 {
 	int count1, count2;
 
@@ -598,7 +623,7 @@ exintr(arg)
 	struct ex_softc *sc = arg;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int int_status, send_pkts;
-	int handled;
+	int handled = 0;
 
 	DODEBUG(Start_End, printf("exintr: start\n"););
 
@@ -619,8 +644,7 @@ exintr(arg)
 			handled = 1;
 			ex_tx_intr(sc);
 			send_pkts = 1;
-  		} else
-			handled = 0;
+		}
    	}
 
   	/*
@@ -779,8 +803,12 @@ ex_ioctl(ifp, cmd, data)
 	u_long cmd;
 	caddr_t data;
 {
+<<<<<<< HEAD
 	register struct ifaddr *ifa = (struct ifaddr *) data;
+=======
+>>>>>>> origin/master
 	struct ex_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq *ifr = (struct ifreq *) data;
 	int s, error = 0;
 
@@ -800,6 +828,7 @@ ex_ioctl(ifp, cmd, data)
 					arp_ifinit((struct arpcom *) ifp, ifa);
 					break;
 #endif
+<<<<<<< HEAD
 #ifdef IPX_NOTYET
 				case AF_IPX:
 				{
@@ -876,6 +905,34 @@ ex_ioctl(ifp, cmd, data)
 
   DODEBUG(Start_End, printf("\nex_ioctl: finish\n"););
   return(error);
+=======
+		break;
+	case SIOCSIFFLAGS:
+		DODEBUG(Start_End, printf("SIOCSIFFLAGS"););
+		if ((ifp->if_flags & IFF_UP) == 0 && ifp->if_flags & IFF_RUNNING) {
+			ifp->if_flags &= ~IFF_RUNNING;
+			ex_stop(sc);
+		} else
+			ex_init(sc);
+		break;
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, cmd);
+		break;
+	default:
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ex_init(sc);
+		error = 0;
+	}
+
+	splx(s);
+	DODEBUG(Start_End, printf("\nex_ioctl: finish\n"););
+	return(error);
+>>>>>>> origin/master
 }
 
 

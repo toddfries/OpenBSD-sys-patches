@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: ueaglevar.h,v 1.3 2010/12/06 04:41:40 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003-2005
@@ -183,8 +187,6 @@ struct ueagle_softc {
 
 	uint16_t		isize;
 	char			ibuf[32];
-
-	int			gone;
 
 	uint16_t		index;
 	uint32_t		data;

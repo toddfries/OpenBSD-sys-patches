@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ulpt.c,v 1.20 2005/08/01 05:36:49 brad Exp $ */
+=======
+/*	$OpenBSD: ulpt.c,v 1.38 2011/01/25 20:03:36 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ulpt.c,v 1.57 2003/01/05 10:19:42 scw Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.24 1999/11/17 22:33:44 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -177,7 +174,26 @@ void ieee1284_print_id(char *);
 #define	ULPTFLAGS(s)	(minor(s) & 0xe0)
 
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(ulpt);
+=======
+int ulpt_match(struct device *, void *, void *); 
+void ulpt_attach(struct device *, struct device *, void *); 
+int ulpt_detach(struct device *, int); 
+int ulpt_activate(struct device *, int); 
+
+struct cfdriver ulpt_cd = { 
+	NULL, "ulpt", DV_DULL 
+}; 
+
+const struct cfattach ulpt_ca = { 
+	sizeof(struct ulpt_softc), 
+	ulpt_match, 
+	ulpt_attach, 
+	ulpt_detach, 
+	ulpt_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(ulpt)
 {
@@ -340,6 +356,7 @@ USB_ATTACH(ulpt)
 	}
 	}
 #endif
+<<<<<<< HEAD
 
 #if defined(__FreeBSD__)
 	sc->dev = make_dev(&ulpt_cdevsw, device_get_unit(self),
@@ -353,11 +370,17 @@ USB_ATTACH(ulpt)
 			   USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 int
+<<<<<<< HEAD
 ulpt_activate(device_ptr_t self, enum devact act)
+=======
+ulpt_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct ulpt_softc *sc = (struct ulpt_softc *)self;
 
@@ -385,7 +408,6 @@ USB_DETACH(ulpt)
 
 	DPRINTF(("ulpt_detach: sc=%p\n", sc));
 
-	sc->sc_dying = 1;
 	if (sc->sc_out_pipe != NULL)
 		usbd_abort_pipe(sc->sc_out_pipe);
 	if (sc->sc_in_pipe != NULL)
@@ -425,9 +447,12 @@ USB_DETACH(ulpt)
 	destroy_dev(sc->dev_noprime);
 #endif
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
@@ -499,7 +524,7 @@ ulptopen(dev_t dev, int flag, int mode, usb_proc_ptr p)
 	u_char flags = ULPTFLAGS(dev);
 	struct ulpt_softc *sc;
 	usbd_status err;
-	int spin, error;
+	int error;
 
 	USB_GET_SC_OPEN(ulpt, ULPTUNIT(dev), sc);
 
@@ -524,24 +549,8 @@ ulptopen(dev_t dev, int flag, int mode, usb_proc_ptr p)
 	error = 0;
 	sc->sc_refcnt++;
 
-	if ((flags & ULPT_NOPRIME) == 0)
+	if ((flags & ULPT_NOPRIME) == 0) {
 		ulpt_reset(sc);
-
-	for (spin = 0; (ulpt_status(sc) & LPS_SELECT) == 0; spin += STEP) {
-		DPRINTF(("ulpt_open: waiting a while\n"));
-		if (spin >= TIMEOUT) {
-			error = EBUSY;
-			sc->sc_state = 0;
-			goto done;
-		}
-
-		/* wait 1/4 second, give up if we get a signal */
-		error = tsleep((caddr_t)sc, LPTPRI | PCATCH, "ulptop", STEP);
-		if (error != EWOULDBLOCK) {
-			sc->sc_state = 0;
-			goto done;
-		}
-
 		if (sc->sc_dying) {
 			error = ENXIO;
 			sc->sc_state = 0;

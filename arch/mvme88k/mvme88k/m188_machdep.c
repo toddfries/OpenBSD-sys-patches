@@ -1,4 +1,19 @@
-/*	$OpenBSD: m188_machdep.c,v 1.24 2006/11/20 21:51:33 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.54 2010/12/31 21:38:08 miod Exp $	*/
+/*
+ * Copyright (c) 2009 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -114,6 +129,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
+#include <sys/timetc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -126,7 +142,9 @@
 #include <machine/m88100.h>
 #include <machine/mvme188.h>
 
-#include <mvme88k/dev/sysconreg.h>
+#include <mvme88k/dev/sysconvar.h>
+#include <dev/ic/z8536reg.h>
+#include <mvme88k/mvme88k/clockvar.h>
 
 #include <mvme88k/mvme88k/clockvar.h>
 
@@ -134,13 +152,13 @@ void	m188_reset(void);
 u_int	safe_level(u_int mask, u_int curlevel);
 
 void	m188_bootstrap(void);
-void	m188_ext_int(u_int, struct trapframe *);
+void	m188_clock_ipi_handler(struct trapframe *);
+void	m188_ext_int(struct trapframe *);
 u_int	m188_getipl(void);
 void	m188_init_clocks(void);
 vaddr_t	m188_memsize(void);
 u_int	m188_raiseipl(u_int);
 u_int	m188_setipl(u_int);
-void	m188_startup(void);
 
 /*
  * The MVME188 interrupt arbiter has 25 orthogonal interrupt sources.
@@ -181,9 +199,9 @@ const unsigned int int_mask_val[INT_LEVEL] = {
  * the range. Since memory is packed at low addresses, we will hit all memory
  * boards in order until reaching either a VME space or a non-claimed space.
  *
- * As a safety measure, we never check for more than 256MB - the 188 can
+ * As a safety measure, we never check for more than 512MB - the 188 can
  * only have up to 4 memory boards, which theoretically can not be larger
- * than 64MB, and I am not aware of third-party larger memory boards.
+ * than 128MB, and I am not aware of third-party larger memory boards.
  */
 vaddr_t
 m188_memsize()
@@ -191,7 +209,7 @@ m188_memsize()
 	unsigned int pgnum;
 	int32_t rmad;
 
-#define	MVME188_MAX_MEMORY	((4 * 64) / 4)	/* 4 64MB boards */
+#define	MVME188_MAX_MEMORY	((4 * 128) / 4)	/* 4 128MB boards */
 	for (pgnum = 0; pgnum <	MVME188_MAX_MEMORY; pgnum++) {
 		*(volatile int32_t *)MVME188_RMAD = (pgnum << 22);
 		rmad = *(volatile int32_t *)MVME188_RMAD;
@@ -201,11 +219,6 @@ m188_memsize()
 	}
 
 	return (pgnum << 22);
-}
-
-void
-m188_startup()
-{
 }
 
 void
@@ -219,6 +232,13 @@ m188_bootstrap()
 	md_setipl = m188_setipl;
 	md_raiseipl = m188_raiseipl;
 	md_init_clocks = m188_init_clocks;
+#ifdef MULTIPROCESSOR
+	md_send_ipi = m188_send_ipi;
+#endif
+	md_delay = m188_delay;
+#ifdef MULTIPROCESSOR
+	md_smp_setup = m88100_smp_setup;
+#endif
 
 	/* clear and disable all interrupts */
 	*(volatile u_int32_t *)MVME188_IENALL = 0;
@@ -359,7 +379,7 @@ const unsigned int obio_vec[32] = {
 #define VME_BERR_MASK		0x100 	/* timeout during VME IACK cycle */
 
 void
-m188_ext_int(u_int v, struct trapframe *eframe)
+m188_ext_int(struct trapframe *eframe)
 {
 	int cpu = cpu_number();
 	unsigned int cur_mask, ign_mask;
@@ -538,7 +558,8 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 				continue;
 			}
 		}
-	} while (((cur_mask = ISR_GET_CURRENT_MASK(cpu)) & ~ign_mask) != 0);
+	} while (((cur_mask = ISR_GET_CURRENT_MASK(cpu)) & ~ign_mask &
+	    ~IPI_MASK) != 0);
 
 #ifdef DIAGNOSTIC
 	if (ign_mask != 0) {
@@ -579,11 +600,15 @@ void	write_cio(int, u_int);
 
 int	m188_clockintr(void *);
 int	m188_statintr(void *);
+u_int	m188_cio_get_timecount(struct timecounter *);
 
 struct simplelock m188_cio_lock;
 
-#define	CIO_LOCK	simple_lock(&m188_cio_lock)
-#define	CIO_UNLOCK	simple_unlock(&m188_cio_lock)
+uint32_t	cio_step;
+uint32_t	cio_refcnt;
+uint32_t	cio_lastcnt;
+
+struct mutex cio_mutex = MUTEX_INITIALIZER(IPL_CLOCK);
 
 /*
  * Notes on the MVME188 clock usage:
@@ -626,13 +651,21 @@ struct simplelock m188_cio_lock;
 #define	DART_CTLR		0xfff8201f	/* counter/timer LSB */
 #define	DART_OPCR		0xfff82037	/* output port config*/
 
+struct timecounter m188_cio_timecounter = {
+	m188_cio_get_timecount,
+	NULL,
+	0xffffffff,
+	0,
+	"cio",
+	0,
+	NULL
+};
+
 void
 m188_init_clocks(void)
 {
 	volatile u_int8_t imr;
 	int statint, minint;
-
-	simple_lock_init(&m188_cio_lock);
 
 #ifdef DIAGNOSTIC
 	if (1000000 % hz) {
@@ -684,18 +717,51 @@ m188_init_clocks(void)
 	clock_ih.ih_ipl = IPL_CLOCK;
 	sysconintr_establish(SYSCV_TIMER2, &clock_ih, "clock");
 
-	statclock_ih.ih_fn = m188_statintr;
-	statclock_ih.ih_arg = 0;
-	statclock_ih.ih_wantframe = 1;
-	statclock_ih.ih_ipl = IPL_CLOCK;
-	sysconintr_establish(SYSCV_TIMER1, &statclock_ih, "stat");
+	m188_delay_const = 1;
+	set_psr(psr);
+	while (m188_calibrate_phase == 0)
+		;
+
+	iter = 0;
+	while (m188_calibrate_phase == 1) {
+		delay(10000);
+		iter++;
+	}
+
+	divisor = 1000000 / 10000;
+	m188_delay_const = (iter * hz + divisor - 1) / divisor;
+
+	set_psr(psr | PSR_IND);
+
+	sysconintr_disestablish(INTSRC_CIO, &clock_ih);
+	clock_ih.ih_fn = m188_clockintr;
+	sysconintr_establish(INTSRC_CIO, &clock_ih, "clock");
+
+	set_psr(psr);
+
+	tc_init(&m188_cio_timecounter);
+}
+
+int
+m188_calibrateintr(void *eframe)
+{
+	/* no need to grab the mutex, only one processor is running for now */
+	/* ack the interrupt */
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_C_IP); 
+
+	m188_calibrate_phase++;
+
+	return (1);
 }
 
 int
 m188_clockintr(void *eframe)
 {
-	CIO_LOCK;
-	write_cio(CIO_CSR1, CIO_GCB | CIO_CIP);  /* Ack the interrupt */
+	mtx_enter(&cio_mutex);
+	/* ack the interrupt */
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_C_IP); 
+	cio_refcnt += cio_step;
+	mtx_leave(&cio_mutex);
 
 	hardclock(eframe);
 
@@ -794,30 +860,70 @@ m188_cio_init(unsigned period)
 	CIO_LOCK;
 
 	/* Start by forcing chip into known state */
-	read_cio(CIO_MICR);
-	write_cio(CIO_MICR, CIO_MICR_RESET);	/* Reset the CTC */
+	read_cio(ZCIO_MIC);
+	write_cio(ZCIO_MIC, ZCIO_MIC_RESET);	/* Reset the CTC */
 	for (i = 0; i < 1000; i++)	 	/* Loop to delay */
 		;
 
 	/* Clear reset and start init seq. */
-	write_cio(CIO_MICR, 0x00);
+	write_cio(ZCIO_MIC, 0x00);
 
 	/* Wait for chip to come ready */
-	while ((read_cio(CIO_MICR) & CIO_MICR_RJA) == 0)
+	while ((read_cio(ZCIO_MIC) & ZCIO_MIC_RJA) == 0)
 		;
 
 	/* Initialize the 8536 for real */
-	write_cio(CIO_MICR,
-	    CIO_MICR_MIE /* | CIO_MICR_NV */ | CIO_MICR_RJA | CIO_MICR_DLC);
-	write_cio(CIO_CTMS1, CIO_CTMS_CSC);	/* Continuous count */
-	write_cio(CIO_PDCB, 0xff);		/* set port B to input */
+	write_cio(ZCIO_MIC,
+	    ZCIO_MIC_MIE /* | ZCIO_MIC_NV */ | ZCIO_MIC_RJA | ZCIO_MIC_DLC);
+	write_cio(ZCIO_CT1MD, ZCIO_CTMD_CSC);	/* Continuous count */
+	write_cio(ZCIO_PBDIR, 0xff);		/* set port B to input */
 
 	period <<= 1;	/* CT#1 runs at PCLK/2, hence 2MHz */
-	write_cio(CIO_CT1MSB, period >> 8);
-	write_cio(CIO_CT1LSB, period);
+	write_cio(ZCIO_CT1TCM, period >> 8);
+	write_cio(ZCIO_CT1TCL, period);
 	/* enable counter #1 */
-	write_cio(CIO_MCCR, CIO_MCCR_CT1E | CIO_MCCR_PBE);
-	write_cio(CIO_CSR1, CIO_GCB | CIO_TCB | CIO_IE);
+	write_cio(ZCIO_MCC, ZCIO_MCC_CT1E | ZCIO_MCC_PBE);
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_TCB | ZCIO_CTCS_S_IE);
 
-	CIO_UNLOCK;
+	cio_step = period;
+	m188_cio_timecounter.tc_frequency = (u_int64_t)cio_step * hz;
+}
+
+u_int
+m188_cio_get_timecount(struct timecounter *tc)
+{
+	u_int cmsb, clsb, counter, curcnt;
+
+	/*
+	 * The CIO counter is free running, but by setting the
+	 * RCC bit in its control register, we can read a frozen
+	 * value of the counter.
+	 * The counter will automatically unfreeze after reading
+	 * its LSB.
+	 */
+
+	mtx_enter(&cio_mutex);
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_RCC);
+	cmsb = read_cio(ZCIO_CT1CCM);
+	clsb = read_cio(ZCIO_CT1CCL);
+	curcnt = cio_refcnt;
+
+	counter = (cmsb << 8) | clsb;
+#if 0	/* this will never happen unless the period itself is 65536 */
+	if (counter == 0)
+		counter = 65536;
+#endif
+
+	/*
+	 * The counter counts down from its initialization value to 1.
+	 */
+	counter = cio_step - counter;
+
+	curcnt += counter;
+	if (curcnt < cio_lastcnt)
+		curcnt += cio_step;
+
+	cio_lastcnt = curcnt;
+	mtx_leave(&cio_mutex);
+	return curcnt;
 }

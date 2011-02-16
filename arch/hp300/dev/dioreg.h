@@ -1,4 +1,4 @@
-/*	$OpenBSD: dioreg.h,v 1.3 2005/01/15 21:13:08 miod Exp $	*/
+/*	$OpenBSD: dioreg.h,v 1.6 2010/04/15 20:38:09 miod Exp $	*/
 /*	$NetBSD: dioreg.h,v 1.3 1997/01/30 09:18:40 thorpej Exp $	*/
 
 /*-
@@ -20,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -97,12 +90,6 @@
  * Base of DIO-II select codes.
  */
 #define	DIOII_SCBASE		132
-
-/*
- * Macro that returns true if a select code lies within
- * the select code `hole'.
- */
-#define	DIO_INHOLE(scode)	((scode) >= 32 && (scode) < DIOII_SCBASE)
 
 /*
  * Macros to determine if device is DIO or DIO-II.

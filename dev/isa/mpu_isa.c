@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mpu_isa.c,v 1.2 2003/01/29 20:32:23 mickey Exp $	*/
+=======
+/*	$OpenBSD: mpu_isa.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Sergey Smitienko. All rights reserved.
@@ -79,7 +83,7 @@ mpu_test (iot, iobase)
 
 	rc = 0;
 	if (bus_space_map(iot, iobase, MPU401_NPORT, 0, &ioh)) {
-		DPRINTF(("mpu_test: can`t map: %x/2\n", iobase));
+		DPRINTF(("mpu_test: can't map: %x/2\n", iobase));
 		return (0);
 	}
 
@@ -144,7 +148,7 @@ mpu_isa_attach(parent, self, aux)
 
 	if (bus_space_map (ia->ia_iot, ia->ia_iobase, MPU401_NPORT,
 	    0, &sc->sc_mpu.ioh)) {
-		printf(": can`t map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

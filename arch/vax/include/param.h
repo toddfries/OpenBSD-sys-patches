@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: param.h,v 1.31 2006/03/19 01:47:24 martin Exp $ */
+=======
+/*	$OpenBSD: param.h,v 1.34 2008/08/14 11:41:30 martin Exp $ */
+>>>>>>> origin/master
 /*      $NetBSD: param.h,v 1.39 1999/10/22 21:14:34 ragge Exp $    */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -128,16 +132,12 @@
 #define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
 
-/* clicks to bytes */
-#define	ctob(x)		((x) << PGSHIFT)
-#define	btoc(x)		(((unsigned)(x) + PGOFSET) >> PGSHIFT)
-
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 
 /* MD conversion macros */
-#define	vax_btoc(x)	(((unsigned)(x) + VAX_PGOFSET) >> VAX_PGSHIFT)
+#define	vax_atop(x)	(((unsigned)(x) + VAX_PGOFSET) >> VAX_PGSHIFT)
 #define	vax_btop(x)	(((unsigned)(x)) >> VAX_PGSHIFT)
 
 #define       ovbcopy(x,y,z)  bcopy(x, y, z)

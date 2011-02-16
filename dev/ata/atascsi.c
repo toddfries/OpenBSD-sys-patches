@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 /*	$OpenBSD: atascsi.c,v 1.39 2007/04/10 23:37:06 dlg Exp $ */
+=======
+/*	$OpenBSD: atascsi.c,v 1.101 2011/02/03 21:22:19 matthew Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
+ * Copyright (c) 2010 Conformal Systems LLC <info@conformal.com>
+ * Copyright (c) 2010 Jonathan Matthew <jonathan@d14n.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,12 +36,20 @@
 #include <scsi/scsiconf.h>
 
 #include <dev/ata/atascsi.h>
+#include <dev/ata/pmreg.h>
 
+<<<<<<< HEAD
+=======
+#include <sys/ataio.h>
+
+struct atascsi_port;
+
+>>>>>>> origin/master
 struct atascsi {
 	struct device		*as_dev;
 	void			*as_cookie;
 
-	struct ata_port		**as_ports;
+	struct atascsi_host_port **as_host_ports;
 
 	struct atascsi_methods	*as_methods;
 	struct scsi_adapter	as_switch;
@@ -43,13 +57,60 @@ struct atascsi {
 	struct scsibus_softc	*as_scsibus;
 
 	int			as_capability;
+	int			as_ncqdepth;
 };
 
+/*
+ * atascsi_host_port is a port attached to the host controller, and
+ * only holds the details relevant to the host controller.
+ * atascsi_port is any port, including ports on port multipliers, and
+ * it holds details of the device attached to the port.
+ *
+ * When there is a port multiplier attached to a port, the ahp_ports
+ * array in the atascsi_host_port struct contains one atascsi_port for
+ * each port, and one for the control port (port 15).  The index into
+ * the array is the LUN used to address the port.  For the control port,
+ * the LUN is 0, and for the port multiplier ports, the LUN is the
+ * port number plus one.
+ *
+ * When there is no port multiplier attached to a port, the ahp_ports
+ * array contains a single entry for the device.  The LUN and port number
+ * for this entry are both 0.
+ */
+
+struct atascsi_host_port {
+	struct scsi_iopool	ahp_iopool;
+	struct atascsi		*ahp_as;
+	int			ahp_port;
+	int			ahp_nports;
+
+	struct atascsi_port	**ahp_ports;
+};
+
+struct atascsi_port {
+	struct ata_identify	ap_identify;
+	struct atascsi_host_port *ap_host_port;
+	struct atascsi		*ap_as;
+	int			ap_pmp_port;
+	int			ap_type;
+	int			ap_ncqdepth;
+	int			ap_features;
+#define ATA_PORT_F_NCQ			0x1
+#define ATA_PORT_F_TRIM			0x2
+};
+
+<<<<<<< HEAD
 int		atascsi_cmd(struct scsi_xfer *);
+=======
+void		atascsi_cmd(struct scsi_xfer *);
+int		atascsi_probe(struct scsi_link *);
+void		atascsi_free(struct scsi_link *);
+>>>>>>> origin/master
 
 /* template */
 struct scsi_adapter atascsi_switch = {
 	atascsi_cmd,		/* scsi_cmd */
+<<<<<<< HEAD
 	minphys,		/* scsi_minphys */
 	NULL,
 	NULL,
@@ -66,17 +127,44 @@ struct ata_xfer *ata_setup_identify(struct ata_port *, int);
 void		ata_free_identify(struct ata_xfer *);
 void		ata_complete_identify(struct ata_xfer *,
 		    struct ata_identify *);
+=======
+	scsi_minphys,		/* scsi_minphys */
+	atascsi_probe,		/* dev_probe */
+	atascsi_free,		/* dev_free */
+	NULL,			/* ioctl */
+};
 
-int		atascsi_disk_cmd(struct scsi_xfer *);
+void		ata_swapcopy(void *, void *, size_t);
+>>>>>>> origin/master
+
+void		atascsi_disk_cmd(struct scsi_xfer *);
 void		atascsi_disk_cmd_done(struct ata_xfer *);
+<<<<<<< HEAD
 int		atascsi_disk_inq(struct scsi_xfer *);
 void		atascsi_disk_inq_done(struct ata_xfer *);
 int		atascsi_disk_capacity(struct scsi_xfer *);
 void		atascsi_disk_capacity_done(struct ata_xfer *);
 int		atascsi_disk_sync(struct scsi_xfer *);
+=======
+void		atascsi_disk_inq(struct scsi_xfer *);
+void		atascsi_disk_inquiry(struct scsi_xfer *);
+void		atascsi_disk_vpd_supported(struct scsi_xfer *);
+void		atascsi_disk_vpd_serial(struct scsi_xfer *);
+void		atascsi_disk_vpd_ident(struct scsi_xfer *);
+void		atascsi_disk_vpd_limits(struct scsi_xfer *);
+void		atascsi_disk_vpd_info(struct scsi_xfer *);
+void		atascsi_disk_write_same_16(struct scsi_xfer *);
+void		atascsi_disk_write_same_16_done(struct ata_xfer *);
+void		atascsi_disk_capacity(struct scsi_xfer *);
+void		atascsi_disk_capacity16(struct scsi_xfer *);
+void		atascsi_disk_sync(struct scsi_xfer *);
+>>>>>>> origin/master
 void		atascsi_disk_sync_done(struct ata_xfer *);
-int		atascsi_disk_sense(struct scsi_xfer *);
+void		atascsi_disk_sense(struct scsi_xfer *);
+void		atascsi_disk_start_stop(struct scsi_xfer *);
+void		atascsi_disk_start_stop_done(struct ata_xfer *);
 
+<<<<<<< HEAD
 void		atascsi_empty_done(struct ata_xfer *);
 
 int		atascsi_atapi_cmd(struct scsi_xfer *);
@@ -84,13 +172,42 @@ void		atascsi_atapi_cmd_done(struct ata_xfer *);
 
 int		atascsi_stuffup(struct scsi_xfer *);
 
+=======
+void		atascsi_atapi_cmd(struct scsi_xfer *);
+void		atascsi_atapi_cmd_done(struct ata_xfer *);
 
-int		ata_running = 0;
+void		atascsi_pmp_cmd(struct scsi_xfer *);
+void		atascsi_pmp_cmd_done(struct ata_xfer *);
+void		atascsi_pmp_sense(struct scsi_xfer *xs);
+void		atascsi_pmp_inq(struct scsi_xfer *xs);
 
-int		ata_exec(struct atascsi *, struct ata_xfer *);
 
+void		atascsi_passthru_12(struct scsi_xfer *);
+void		atascsi_passthru_16(struct scsi_xfer *);
+int		atascsi_passthru_map(struct scsi_xfer *, u_int8_t, u_int8_t);
+void		atascsi_passthru_done(struct ata_xfer *);
+
+void		atascsi_done(struct scsi_xfer *, int);
+>>>>>>> origin/master
+
+void		ata_exec(struct atascsi *, struct ata_xfer *);
+
+void		ata_polled_complete(struct ata_xfer *);
+int		ata_polled(struct ata_xfer *);
+
+<<<<<<< HEAD
 struct ata_xfer	*ata_get_xfer(struct ata_port *, int);
 void		ata_put_xfer(struct ata_xfer *);
+=======
+u_int64_t	ata_identify_blocks(struct ata_identify *);
+u_int		ata_identify_blocksize(struct ata_identify *);
+u_int		ata_identify_block_l2p_exp(struct ata_identify *);
+u_int		ata_identify_block_logical_align(struct ata_identify *);
+
+void		*atascsi_io_get(void *);
+void		atascsi_io_put(void *, void *);
+struct atascsi_port * atascsi_lookup_port(struct scsi_link *);
+>>>>>>> origin/master
 
 struct atascsi *
 atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
@@ -106,22 +223,22 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 	as->as_cookie = aaa->aaa_cookie;
 	as->as_methods = aaa->aaa_methods;
 	as->as_capability = aaa->aaa_capability;
+	as->as_ncqdepth = aaa->aaa_ncmds;
 
 	/* copy from template and modify for ourselves */
 	as->as_switch = atascsi_switch;
-	as->as_switch.scsi_minphys = aaa->aaa_minphys;
+	if (aaa->aaa_minphys != NULL)
+		as->as_switch.scsi_minphys = aaa->aaa_minphys;
 
 	/* fill in our scsi_link */
-	as->as_link.device = &atascsi_device;
 	as->as_link.adapter = &as->as_switch;
 	as->as_link.adapter_softc = as;
 	as->as_link.adapter_buswidth = aaa->aaa_nports;
-	as->as_link.luns = 1; /* XXX port multiplier as luns */
+	as->as_link.luns = SATA_PMP_MAX_PORTS;
 	as->as_link.adapter_target = aaa->aaa_nports;
-	as->as_link.openings = aaa->aaa_ncmds;
-	if (as->as_capability & ASAA_CAP_NEEDS_RESERVED)
-		as->as_link.openings--;
+	as->as_link.openings = 1;
 
+<<<<<<< HEAD
 	as->as_ports = malloc(sizeof(struct ata_port *) * aaa->aaa_nports,
 	    M_DEVBUF, M_WAITOK);
 	bzero(as->as_ports, sizeof(struct ata_port *) * aaa->aaa_nports);
@@ -129,6 +246,10 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 	/* fill in the port array with the type of devices there */
 	for (i = 0; i < as->as_link.adapter_buswidth; i++)
 		atascsi_probe(as, i);
+=======
+	as->as_host_ports = malloc(sizeof(struct atascsi_host_port *) *
+	    aaa->aaa_nports, M_DEVBUF, M_WAITOK | M_ZERO);
+>>>>>>> origin/master
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &as->as_link;
@@ -143,26 +264,101 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 int
 atascsi_detach(struct atascsi *as)
 {
+<<<<<<< HEAD
+=======
+	int				rv;
+
+	rv = config_detach((struct device *)as->as_scsibus, flags);
+	if (rv != 0)
+		return (rv);
+
+	free(as->as_host_ports, M_DEVBUF);
+	free(as, M_DEVBUF);
+
+>>>>>>> origin/master
 	return (0);
 }
 
 int
+<<<<<<< HEAD
 atascsi_probe(struct atascsi *as, int port)
 {
 	struct ata_port		*ap;
 	struct ata_xfer		*xa;
 	int			type, s;
+=======
+atascsi_probe_dev(struct atascsi *as, int port, int lun)
+{
+	if (lun == 0) {
+		return (scsi_probe_target(as->as_scsibus, port));
+	} else {
+		return (scsi_probe_lun(as->as_scsibus, port, lun));
+	}
+}
+
+int
+atascsi_detach_dev(struct atascsi *as, int port, int lun, int flags)
+{
+	if (lun == 0) {
+		return (scsi_detach_target(as->as_scsibus, port, flags));
+	} else {
+		return (scsi_detach_lun(as->as_scsibus, port, lun, flags));
+	}
+}
+
+struct atascsi_port *
+atascsi_lookup_port(struct scsi_link *link)
+{
+	struct atascsi 			*as = link->adapter_softc;
+	struct atascsi_host_port 	*ahp;
+
+	if (link->target > as->as_link.adapter_buswidth)
+		return (NULL);
+
+	ahp = as->as_host_ports[link->target];
+	if (link->lun >= ahp->ahp_nports)
+		return (NULL);
+
+	return (ahp->ahp_ports[link->lun]);
+}
+
+int
+atascsi_probe(struct scsi_link *link)
+{
+	struct atascsi			*as = link->adapter_softc;
+	struct atascsi_host_port 	*ahp;
+	struct atascsi_port		*ap;
+	struct ata_xfer			*xa;
+	struct ata_identify		*identify;
+	int				port, type, qdepth;
+	int				rv;
+	u_int16_t			cmdset;
+>>>>>>> origin/master
 
 	if (port > as->as_link.adapter_buswidth)
 		return (ENXIO);
 
-	type = as->as_methods->probe(as->as_cookie, port);
+	/* if this is a PMP port, check it's valid */
+	if (link->lun > 0) {
+		if (link->lun > as->as_host_ports[port]->ahp_nports)
+			return (ENXIO);
+	}
+
+	type = as->as_methods->probe(as->as_cookie, port, link->lun);
 	switch (type) {
 	case ATA_PORT_T_DISK:
 		break;
 	case ATA_PORT_T_ATAPI:
 		as->as_link.flags |= SDEV_ATAPI;
 		as->as_link.quirks |= SDEV_ONLYBIG;
+		break;
+	case ATA_PORT_T_PM:
+		if (link->lun != 0) {
+			printf("%s.%d.%d: Port multipliers cannot be nested\n",
+			    as->as_dev->dv_xname, port, link->lun);
+			rv = ENODEV;
+			goto unsupported;
+		}
 		break;
 	default:
 		return (ENODEV);
@@ -171,9 +367,8 @@ atascsi_probe(struct atascsi *as, int port)
 	ap = malloc(sizeof(struct ata_port), M_DEVBUF, M_WAITOK);
 	bzero(ap, sizeof(struct ata_port));
 	ap->ap_as = as;
-	ap->ap_port = port;
-	ap->ap_type = type;
 
+<<<<<<< HEAD
 	as->as_ports[port] = ap;
 
 	s = splbio();
@@ -181,6 +376,154 @@ atascsi_probe(struct atascsi *as, int port)
 	splx(s);
 	if (xa == NULL)
 		return (EBUSY);
+=======
+	if (link->lun == 0) {
+		ahp = malloc(sizeof(*ahp), M_DEVBUF, M_WAITOK | M_ZERO);
+		ahp->ahp_as = as;
+		ahp->ahp_port = port;
+
+		scsi_iopool_init(&ahp->ahp_iopool, ahp, atascsi_io_get,
+		    atascsi_io_put);
+
+		as->as_host_ports[port] = ahp;
+
+		if (type == ATA_PORT_T_PM) {
+			ahp->ahp_nports = SATA_PMP_MAX_PORTS;
+			ap->ap_pmp_port = SATA_PMP_CONTROL_PORT;
+		} else {
+			ahp->ahp_nports = 1;
+			ap->ap_pmp_port = 0;
+		}
+		ahp->ahp_ports = malloc(sizeof(struct atascsi_port *) *
+		    ahp->ahp_nports, M_DEVBUF, M_WAITOK | M_ZERO);
+	} else {
+		ahp = as->as_host_ports[port];
+		ap->ap_pmp_port = link->lun - 1;
+	}
+
+	ap->ap_host_port = ahp;
+	ap->ap_type = type;
+
+	link->pool = &ahp->ahp_iopool;
+
+	/* fetch the device info, except for port multipliers */
+	if (type != ATA_PORT_T_PM) {
+
+		/* devices attached to port multipliers tend not to be
+		 * spun up at this point, and sometimes this prevents
+		 * identification from working, so we retry a few times
+		 * with a fairly long delay.
+		 */
+		int count = 5;
+		do {
+			xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
+			if (xa == NULL)
+				panic("no free xfers on a new port");
+			/* XXX dma reachable */
+			identify = malloc(sizeof(*identify), M_TEMP, M_WAITOK);
+			xa->pmp_port = ap->ap_pmp_port;
+			xa->data = identify;
+			xa->datalen = sizeof(*identify);
+			xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+			xa->fis->command = (type == ATA_PORT_T_DISK) ?
+			    ATA_C_IDENTIFY : ATA_C_IDENTIFY_PACKET;
+			xa->fis->device = 0;
+			xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
+			xa->timeout = 1000;
+			xa->complete = ata_polled_complete;
+			xa->atascsi_private = &ahp->ahp_iopool;
+			ata_exec(as, xa);
+			rv = ata_polled(xa);
+			if (rv == 0) {
+				bcopy(identify, &ap->ap_identify,
+				    sizeof(ap->ap_identify));
+				free(identify, M_TEMP);
+				break;
+			}
+			free(identify, M_TEMP);
+			delay(5000000);
+		} while (count--);
+
+		if (rv != 0) {
+			goto error;
+		}
+	}
+
+	ahp->ahp_ports[link->lun] = ap;
+
+	if (type != ATA_PORT_T_DISK)
+		return (0);
+
+	if (as->as_capability & ASAA_CAP_NCQ &&
+	    ISSET(letoh16(ap->ap_identify.satacap), ATA_SATACAP_NCQ) &&
+	    (link->lun == 0 || as->as_capability & ASAA_CAP_PMP_NCQ)) {
+		ap->ap_ncqdepth = ATA_QDEPTH(letoh16(ap->ap_identify.qdepth));
+		qdepth = MIN(ap->ap_ncqdepth, as->as_ncqdepth);
+		if (ISSET(as->as_capability, ASAA_CAP_NEEDS_RESERVED))
+			qdepth--;
+
+		if (qdepth > 1) {
+			SET(ap->ap_features, ATA_PORT_F_NCQ);
+
+			/* Raise the number of openings */
+			link->openings = qdepth;
+
+			/*
+			 * XXX for directly attached devices, throw away any xfers
+			 * that have tag numbers higher than what the device supports.
+			 */
+			if (link->lun == 0) {
+				while (qdepth--) {
+					xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
+					if (xa->tag < link->openings) {
+						xa->state = ATA_S_COMPLETE;
+						scsi_io_put(&ahp->ahp_iopool, xa);
+					}
+				}
+			}
+		}
+	}
+
+	if (ISSET(letoh16(ap->ap_identify.data_set_mgmt), 
+	    ATA_ID_DATA_SET_MGMT_TRIM))
+		SET(ap->ap_features, ATA_PORT_F_TRIM);
+
+	cmdset = letoh16(ap->ap_identify.cmdset82);
+
+	/* Enable write cache if supported */
+	if (ISSET(cmdset, ATA_IDENTIFY_WRITECACHE)) {
+		xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
+		if (xa == NULL)
+			panic("no free xfers on a new port");
+		xa->fis->command = ATA_C_SET_FEATURES;
+		xa->fis->features = ATA_SF_WRITECACHE_EN;
+		xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+		xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
+		xa->timeout = 1000;
+		xa->complete = ata_polled_complete;
+		xa->pmp_port = ap->ap_pmp_port;
+		xa->atascsi_private = &ahp->ahp_iopool;
+		ata_exec(as, xa);
+		ata_polled(xa); /* we dont care if it doesnt work */
+	}
+
+	/* Enable read lookahead if supported */
+	if (ISSET(cmdset, ATA_IDENTIFY_LOOKAHEAD)) {
+		xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
+		if (xa == NULL)
+			panic("no free xfers on a new port");
+		xa->fis->command = ATA_C_SET_FEATURES;
+		xa->fis->features = ATA_SF_LOOKAHEAD_EN;
+		xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+		xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
+		xa->timeout = 1000;
+		xa->complete = ata_polled_complete;
+		xa->pmp_port = ap->ap_pmp_port;
+		xa->atascsi_private = &ahp->ahp_iopool;
+		ata_exec(as, xa);
+		ata_polled(xa); /* we dont care if it doesnt work */
+	}
+>>>>>>> origin/master
 
 	/*
 	 * FREEZE LOCK the device so malicous users can't lock it on us.
@@ -189,6 +532,7 @@ atascsi_probe(struct atascsi *as, int port)
 	 * checking if the device sends a command abort to tell us it doesn't
 	 * support it
 	 */
+<<<<<<< HEAD
 	xa->fis->command = ATA_C_SEC_FREEZE_LOCK;
 	xa->fis->flags = ATA_H2D_FLAGS_CMD;
 	xa->complete = atascsi_empty_done;
@@ -197,11 +541,34 @@ atascsi_probe(struct atascsi *as, int port)
 	ata_exec(as, xa);
 
 	return (0);
+=======
+	xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
+	if (xa == NULL)
+		panic("no free xfers on a new port");
+	xa->fis->command = ATA_C_SEC_FREEZE_LOCK;
+	xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
+	xa->timeout = 1000;
+	xa->complete = ata_polled_complete;
+	xa->pmp_port = ap->ap_pmp_port;
+	xa->atascsi_private = &ahp->ahp_iopool;
+	ata_exec(as, xa);
+	ata_polled(xa); /* we dont care if it doesnt work */
+
+	return (0);
+error:
+	free(ap, M_DEVBUF);
+unsupported:
+
+	as->as_methods->free(as->as_cookie, port, link->lun);
+	return (rv);
+>>>>>>> origin/master
 }
 
 struct ata_xfer *
 ata_setup_identify(struct ata_port *ap, int nosleep)
 {
+<<<<<<< HEAD
 	struct ata_xfer		*xa;
 	int			s;
 
@@ -210,6 +577,12 @@ ata_setup_identify(struct ata_port *ap, int nosleep)
 	splx(s);
 	if (xa == NULL)
 		return (NULL);
+=======
+	struct atascsi			*as = link->adapter_softc;
+	struct atascsi_host_port	*ahp;
+	struct atascsi_port		*ap;
+	int				port;
+>>>>>>> origin/master
 
 	xa->data = malloc(512, M_TEMP, nosleep ? M_NOWAIT : M_WAITOK);
 	if (xa->data == NULL) {
@@ -222,6 +595,7 @@ ata_setup_identify(struct ata_port *ap, int nosleep)
 	bzero(xa->data, 512);
 	xa->datalen = 512;
 
+<<<<<<< HEAD
 	xa->fis->flags = ATA_H2D_FLAGS_CMD;
 	xa->fis->command = ATA_C_IDENTIFY;
 	xa->fis->device = 0;
@@ -250,75 +624,141 @@ ata_complete_identify(struct ata_xfer *xa, struct ata_identify *id)
 	swap = (u_int16_t *)id->serial;
 	for (i = 0; i < sizeof(id->serial) / sizeof(u_int16_t); i++)
 		swap[i] = swap16(swap[i]);
+=======
+	ahp = as->as_host_ports[port];
+	if (ahp == NULL)
+		return;
 
-	swap = (u_int16_t *)id->firmware;
-	for (i = 0; i < sizeof(id->firmware) / sizeof(u_int16_t); i++)
-		swap[i] = swap16(swap[i]);
+	if (link->lun >= ahp->ahp_nports)
+		return;
 
-	swap = (u_int16_t *)id->model;
-	for (i = 0; i < sizeof(id->model) / sizeof(u_int16_t); i++)
-		swap[i] = swap16(swap[i]);
-}
+	ap = ahp->ahp_ports[link->lun];
+	free(ap, M_DEVBUF);
+	ahp->ahp_ports[link->lun] = NULL;
+>>>>>>> origin/master
 
-int
-atascsi_cmd(struct scsi_xfer *xs)
-{
-	struct scsi_link	*link = xs->sc_link;
-	struct atascsi		*as = link->adapter_softc;
-	struct ata_port		*ap = as->as_ports[link->target];
+	as->as_methods->free(as->as_cookie, port, link->lun);
 
-	if (ap == NULL)
-		return (atascsi_stuffup(xs));
-
-	switch (ap->ap_type) {
-	case ATA_PORT_T_DISK:
-		return (atascsi_disk_cmd(xs));
-	case ATA_PORT_T_ATAPI:
-		return (atascsi_atapi_cmd(xs));
-
-	case ATA_PORT_T_NONE:
-	default:
-		return (atascsi_stuffup(xs));
+	if (link->lun == ahp->ahp_nports - 1) {
+		/* we've already freed all of ahp->ahp_ports, now
+		 * free ahp itself.  this relies on the order luns are
+		 * detached in scsi_detach_target().
+		 */
+		free(ahp, M_DEVBUF);
+		as->as_host_ports[port] = NULL;
 	}
 }
 
-int
+void
+atascsi_cmd(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi_port	*ap;
+
+<<<<<<< HEAD
+	if (ap == NULL)
+		return (atascsi_stuffup(xs));
+=======
+	ap = atascsi_lookup_port(link);
+	if (ap == NULL) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+>>>>>>> origin/master
+
+	switch (ap->ap_type) {
+	case ATA_PORT_T_DISK:
+		atascsi_disk_cmd(xs);
+		break;
+	case ATA_PORT_T_ATAPI:
+		atascsi_atapi_cmd(xs);
+		break;
+	case ATA_PORT_T_PM:
+		atascsi_pmp_cmd(xs);
+		break;
+
+	case ATA_PORT_T_NONE:
+	default:
+<<<<<<< HEAD
+		return (atascsi_stuffup(xs));
+=======
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		break;
+>>>>>>> origin/master
+	}
+}
+
+void
 atascsi_disk_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
 	struct atascsi		*as = link->adapter_softc;
+<<<<<<< HEAD
 	struct ata_port		*ap = as->as_ports[link->target];
 	int			s, flags = 0;
 	struct scsi_rw		*rw;
 	struct scsi_rw_big	*rwb;
 	struct ata_xfer		*xa;
+=======
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	int			flags = 0;
+>>>>>>> origin/master
 	struct ata_fis_h2d	*fis;
 	u_int64_t		lba;
 	u_int32_t		sector_count;
 
+	ap = atascsi_lookup_port(link);
+
 	switch (xs->cmd->opcode) {
-	case READ_BIG:
 	case READ_COMMAND:
+	case READ_BIG:
+	case READ_12:
+	case READ_16:
 		flags = ATA_F_READ;
 		break;
-	case WRITE_BIG:
 	case WRITE_COMMAND:
+	case WRITE_BIG:
+	case WRITE_12:
+	case WRITE_16:
 		flags = ATA_F_WRITE;
 		/* deal with io outside the switch */
 		break;
 
+	case WRITE_SAME_16:
+		atascsi_disk_write_same_16(xs);
+		return;
+
 	case SYNCHRONIZE_CACHE:
-		return (atascsi_disk_sync(xs));
+		atascsi_disk_sync(xs);
+		return;
 	case REQUEST_SENSE:
-		return (atascsi_disk_sense(xs));
+		atascsi_disk_sense(xs);
+		return;
 	case INQUIRY:
-		return (atascsi_disk_inq(xs));
+		atascsi_disk_inq(xs);
+		return;
 	case READ_CAPACITY:
-		return (atascsi_disk_capacity(xs));
+		atascsi_disk_capacity(xs);
+		return;
+	case READ_CAPACITY_16:
+		atascsi_disk_capacity16(xs);
+		return;
+
+	case ATA_PASSTHRU_12:
+		atascsi_passthru_12(xs);
+		return;
+	case ATA_PASSTHRU_16:
+		atascsi_passthru_16(xs);
+		return;
+
+	case START_STOP:
+		atascsi_disk_start_stop(xs);
+		return;
 
 	case TEST_UNIT_READY:
-	case START_STOP:
 	case PREVENT_ALLOW:
+<<<<<<< HEAD
 		return (COMPLETE);
 
 	default:
@@ -331,25 +771,33 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 	if (xa == NULL)
 		return (NO_CCB);
 
+=======
+		atascsi_done(xs, XS_NOERROR);
+		return;
+
+	default:
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+>>>>>>> origin/master
 	xa->flags = flags;
-	if (xs->cmdlen == 6) {
-		rw = (struct scsi_rw *)xs->cmd;
-		lba = _3btol(rw->addr) & (SRW_TOPADDR << 16 | 0xffff);
-		sector_count = rw->length ? rw->length : 0x100;
-	} else {
-		rwb = (struct scsi_rw_big *)xs->cmd;
-		lba = _4btol(rwb->addr);
-		sector_count = _2btol(rwb->length);
+	scsi_cmd_rw_decode(xs->cmd, &lba, &sector_count);
+	if ((lba >> 48) != 0 || (sector_count >> 16) != 0) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
 	}
 
 	fis = xa->fis;
 
-	fis->flags = ATA_H2D_FLAGS_CMD;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
 	fis->lba_low = lba & 0xff;
 	fis->lba_mid = (lba >> 8) & 0xff;
 	fis->lba_high = (lba >> 16) & 0xff;
 
-	if (ap->ap_ncqdepth && !(xs->flags & SCSI_POLL)) {
+	if (ISSET(ap->ap_features, ATA_PORT_F_NCQ) &&
+	    (xa->tag < ap->ap_ncqdepth) &&
+	    !(xs->flags & SCSI_POLL)) {
 		/* Use NCQ */
 		xa->flags |= ATA_F_NCQ;
 		fis->command = (xa->flags & ATA_F_WRITE) ?
@@ -383,11 +831,12 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 	xa->datalen = xs->datalen;
 	xa->complete = atascsi_disk_cmd_done;
 	xa->timeout = xs->timeout;
+	xa->pmp_port = ap->ap_pmp_port;
 	xa->atascsi_private = xs;
 	if (xs->flags & SCSI_POLL)
 		xa->flags |= ATA_F_POLL;
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -419,15 +868,14 @@ atascsi_disk_cmd_done(struct ata_xfer *xa)
 	}
 
 	xs->resid = xa->resid;
-	ata_put_xfer(xa);
 
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
-int
+void
 atascsi_disk_inq(struct scsi_xfer *xs)
 {
+<<<<<<< HEAD
 	struct scsi_link	*link = xs->sc_link;
 	struct atascsi		*as = link->adapter_softc;
 	struct ata_port		*ap = as->as_ports[link->target];
@@ -456,12 +904,67 @@ atascsi_disk_inq_done(struct ata_xfer *xa)
 	struct ata_identify	id;
 	struct scsi_inquiry_data inq;
 	int			host_ncqdepth, complete = 0;
+=======
+	struct scsi_inquiry	*inq = (struct scsi_inquiry *)xs->cmd;
+
+	if (xs->cmdlen != sizeof(*inq)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	if (ISSET(inq->flags, SI_EVPD)) {
+		switch (inq->pagecode) {
+		case SI_PG_SUPPORTED:
+			atascsi_disk_vpd_supported(xs);
+			break;
+		case SI_PG_SERIAL:
+			atascsi_disk_vpd_serial(xs);
+			break;
+		case SI_PG_DEVID:
+			atascsi_disk_vpd_ident(xs);
+			break;
+		case SI_PG_DISK_LIMITS:
+			atascsi_disk_vpd_limits(xs);
+			break;
+		case SI_PG_DISK_INFO:
+			atascsi_disk_vpd_info(xs);
+			break;
+		default:
+			atascsi_done(xs, XS_DRIVER_STUFFUP);
+			break;
+		}
+	} else
+		atascsi_disk_inquiry(xs);
+}
+
+void
+atascsi_disk_inquiry(struct scsi_xfer *xs)
+{
+	struct scsi_inquiry_data inq;
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+
+	ap = atascsi_lookup_port(link);
+>>>>>>> origin/master
 
 	switch (xa->state) {
 	case ATA_S_COMPLETE:
 		ata_complete_identify(xa, &id);
 
+<<<<<<< HEAD
 		bzero(&inq, sizeof(inq));
+=======
+	inq.device = T_DIRECT;
+	inq.version = 0x05; /* SPC-3 */
+	inq.response_format = 2;
+	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
+	bcopy("ATA     ", inq.vendor, sizeof(inq.vendor));
+	ata_swapcopy(ap->ap_identify.model, inq.product,
+	    sizeof(inq.product));
+	ata_swapcopy(ap->ap_identify.firmware, inq.revision,
+	    sizeof(inq.revision));
+>>>>>>> origin/master
 
 		inq.device = T_DIRECT;
 		inq.version = 2;
@@ -471,6 +974,7 @@ atascsi_disk_inq_done(struct ata_xfer *xa)
 		bcopy(id.model, inq.product, sizeof(inq.product));
 		bcopy(id.firmware, inq.revision, sizeof(inq.revision));
 
+<<<<<<< HEAD
 		bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
 		xs->error = XS_NOERROR;
 		complete = 1;
@@ -527,13 +1031,241 @@ atascsi_disk_inq_done(struct ata_xfer *xa)
 			}
 		}
 	}
+=======
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
+atascsi_disk_vpd_supported(struct scsi_xfer *xs)
+{
+	struct {
+		struct scsi_vpd_hdr	hdr;
+		u_int8_t		list[5];
+	}			pg;
+
+	bzero(&pg, sizeof(pg));
+
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_SUPPORTED;
+	_lto2b(sizeof(pg.list), pg.hdr.page_length);
+	pg.list[0] = SI_PG_SUPPORTED;
+	pg.list[1] = SI_PG_SERIAL;
+	pg.list[2] = SI_PG_DEVID;
+	pg.list[3] = SI_PG_DISK_LIMITS;
+	pg.list[4] = SI_PG_DISK_INFO;
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_vpd_serial(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_vpd_serial	pg;
+
+	ap = atascsi_lookup_port(link);
+	bzero(&pg, sizeof(pg));
+
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_SERIAL;
+	_lto2b(sizeof(ap->ap_identify.serial), pg.hdr.page_length);
+	ata_swapcopy(ap->ap_identify.serial, pg.serial,
+	    sizeof(ap->ap_identify.serial));
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_vpd_ident(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct {
+		struct scsi_vpd_hdr	hdr;
+		struct scsi_vpd_devid_hdr devid_hdr;
+		u_int8_t		devid[68];
+	}			pg;
+	u_int8_t		*p;
+	size_t			pg_len;
+
+	ap = atascsi_lookup_port(link);
+	bzero(&pg, sizeof(pg));
+	if (letoh16(ap->ap_identify.features87) & ATA_ID_F87_WWN) {
+		pg_len = 8;
+
+		pg.devid_hdr.pi_code = VPD_DEVID_CODE_BINARY;
+		pg.devid_hdr.flags = VPD_DEVID_ASSOC_LU | VPD_DEVID_TYPE_NAA;
+
+		ata_swapcopy(&ap->ap_identify.naa_ieee_oui, pg.devid, pg_len);
+	} else {
+		pg_len = 68;
+
+		pg.devid_hdr.pi_code = VPD_DEVID_CODE_ASCII;
+		pg.devid_hdr.flags = VPD_DEVID_ASSOC_LU | VPD_DEVID_TYPE_T10;
+
+		p = pg.devid;
+		bcopy("ATA     ", p, 8);
+		p += 8;
+		ata_swapcopy(ap->ap_identify.model, p,
+		    sizeof(ap->ap_identify.model));
+		p += sizeof(ap->ap_identify.model);
+		ata_swapcopy(ap->ap_identify.serial, p,
+		    sizeof(ap->ap_identify.serial));
+	}
+
+	pg.devid_hdr.len = pg_len;
+	pg_len += sizeof(pg.devid_hdr);
+
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_DEVID;
+	_lto2b(pg_len, pg.hdr.page_length);
+	pg_len += sizeof(pg.hdr);
+
+	bcopy(&pg, xs->data, MIN(pg_len, xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+>>>>>>> origin/master
+}
+
+void
+atascsi_disk_vpd_limits(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_vpd_disk_limits pg;
+
+	ap = atascsi_lookup_port(link);
+	bzero(&pg, sizeof(pg));
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_DISK_LIMITS;
+	_lto2b(SI_PG_DISK_LIMITS_LEN_THIN, pg.hdr.page_length);
+
+	_lto2b(1 << ata_identify_block_l2p_exp(&ap->ap_identify),
+	    pg.optimal_xfer_granularity);
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_vpd_info(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_vpd_disk_info pg;
+
+	ap = atascsi_lookup_port(link);
+	bzero(&pg, sizeof(pg));
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_DISK_INFO;
+	_lto2b(sizeof(pg) - sizeof(pg.hdr), pg.hdr.page_length);
+
+	_lto2b(letoh16(ap->ap_identify.rpm), pg.rpm);
+	pg.form_factor = letoh16(ap->ap_identify.form) & ATA_ID_FORM_MASK;
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_write_same_16(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct scsi_write_same_16 *cdb;
+	struct ata_xfer		*xa = xs->io;
+	struct ata_fis_h2d	*fis;
+	u_int64_t		lba;
+	u_int32_t		length;
+	u_int64_t		desc;
+
+	if (xs->cmdlen != sizeof(*cdb)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	ap = atascsi_lookup_port(link);
+	cdb = (struct scsi_write_same_16 *)xs->cmd;
+
+	if (cdb->flags != WRITE_SAME_F_UNMAP ||
+	   !ISSET(ap->ap_features, ATA_PORT_F_TRIM)) {
+		/* generate sense data */
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	lba = _8btol(cdb->lba);
+	length = _4btol(cdb->length);
+
+	if (length > 0xffff) {
+		/* XXX we dont support requests over 65535 blocks */
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	xa->data = xs->data;
+	xa->datalen = xs->datalen;
+	xa->flags = ATA_F_WRITE;
+	xa->pmp_port = ap->ap_pmp_port;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+	xa->complete = atascsi_disk_write_same_16_done;
+	xa->atascsi_private = xs;
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+
+	/* TRIM sends a list of blocks to discard in the databuf. */
+	memset(xa->data, 0, xa->datalen);
+	desc = htole64(((u_int64_t)length << 48) | lba);
+	memcpy(xa->data, &desc, sizeof(desc));
+
+	fis = xa->fis;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	fis->command = ATA_C_DSM;
+	fis->features = ATA_DSM_TRIM;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_disk_write_same_16_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		xs->error = XS_NOERROR;
+		break;
+
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		printf("atascsi_disk_write_same_16_done: %s\n",
+		    xa->state == ATA_S_TIMEOUT ? "timeout" : "error");
+		xs->error = (xa->state == ATA_S_TIMEOUT ? XS_TIMEOUT :
+		    XS_DRIVER_STUFFUP);
+		break;
+
+	default:
+		panic("atascsi_disk_write_same_16_done: "
+		    "unexpected ata_xfer state (%d)", xa->state);
+	}
+
+	scsi_done(xs);
+}
+
+void
 atascsi_disk_sync(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
 	struct atascsi		*as = link->adapter_softc;
+<<<<<<< HEAD
 	struct ata_port		*ap = as->as_ports[link->target];
 	struct ata_xfer		*xa;
 	int			s;
@@ -543,21 +1275,32 @@ atascsi_disk_sync(struct scsi_xfer *xs)
 	splx(s);
 	if (xa == NULL)
 		return (NO_CCB);
+=======
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
 
+	if (xs->cmdlen != sizeof(struct scsi_synchronize_cache)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+>>>>>>> origin/master
+
+	ap = atascsi_lookup_port(link);
 	xa->datalen = 0;
 	xa->flags = ATA_F_READ;
 	xa->complete = atascsi_disk_sync_done;
 	/* Spec says flush cache can take >30 sec, so give it at least 45. */
 	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
 	xa->atascsi_private = xs;
+	xa->pmp_port = ap->ap_pmp_port;
 	if (xs->flags & SCSI_POLL)
 		xa->flags |= ATA_F_POLL;
 
-	xa->fis->flags = ATA_H2D_FLAGS_CMD;
+	xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
 	xa->fis->command = ATA_C_FLUSH_CACHE;
 	xa->fis->device = 0;
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -583,15 +1326,13 @@ atascsi_disk_sync_done(struct ata_xfer *xa)
 		    xa->state);
 	}
 
-	ata_put_xfer(xa);
-
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
-int
-atascsi_disk_capacity(struct scsi_xfer *xs)
+u_int64_t
+ata_identify_blocks(struct ata_identify *id)
 {
+<<<<<<< HEAD
 	struct scsi_link	*link = xs->sc_link;
 	struct atascsi		*as = link->adapter_softc;
 	struct ata_port		*ap = as->as_ports[link->target];
@@ -661,11 +1402,47 @@ atascsi_disk_capacity_done(struct ata_xfer *xa)
 
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
+=======
+	u_int64_t		blocks = 0;
+	int			i;
+
+	if (letoh16(id->cmdset83) & 0x0400) {
+		/* LBA48 feature set supported */
+		for (i = 3; i >= 0; --i) {
+			blocks <<= 16;
+			blocks += letoh16(id->addrsecxt[i]);
+		}
+	} else {
+		blocks = letoh16(id->addrsec[1]);
+		blocks <<= 16;
+		blocks += letoh16(id->addrsec[0]);
+	}
+
+	return (blocks - 1);
 }
 
-int
-atascsi_disk_sense(struct scsi_xfer *xs)
+u_int
+ata_identify_blocksize(struct ata_identify *id)
 {
+	u_int			blocksize = 512;
+	u_int16_t		p2l_sect = letoh16(id->p2l_sect);
+	
+	if ((p2l_sect & ATA_ID_P2L_SECT_MASK) == ATA_ID_P2L_SECT_VALID &&
+	    ISSET(p2l_sect, ATA_ID_P2L_SECT_SIZESET)) {
+		blocksize = letoh16(id->words_lsec[1]);
+		blocksize <<= 16;
+		blocksize += letoh16(id->words_lsec[0]);
+		blocksize <<= 1;
+	}
+
+	return (blocksize);
+>>>>>>> origin/master
+}
+
+u_int
+ata_identify_block_l2p_exp(struct ata_identify *id)
+{
+<<<<<<< HEAD
 	struct scsi_sense_data	*sd = (struct scsi_sense_data *)xs->data;
 	int			s;
 
@@ -681,11 +1458,23 @@ atascsi_disk_sense(struct scsi_xfer *xs)
 	scsi_done(xs);
 	splx(s);
 	return (COMPLETE);
+=======
+	u_int			exponent = 0;
+	u_int16_t		p2l_sect = letoh16(id->p2l_sect);
+	
+	if ((p2l_sect & ATA_ID_P2L_SECT_MASK) == ATA_ID_P2L_SECT_VALID &&
+	    ISSET(p2l_sect, ATA_ID_P2L_SECT_SET)) {
+		exponent = (p2l_sect & ATA_ID_P2L_SECT_SIZE);
+	}
+
+	return (exponent);
+>>>>>>> origin/master
 }
 
-int
-atascsi_atapi_cmd(struct scsi_xfer *xs)
+u_int
+ata_identify_block_logical_align(struct ata_identify *id)
 {
+<<<<<<< HEAD
 	struct scsi_link	*link = xs->sc_link;
 	struct atascsi		*as = link->adapter_softc;
 	struct ata_port		*ap = as->as_ports[link->target];
@@ -698,6 +1487,340 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	splx(s);
 	if (xa == NULL)
 		return (NO_CCB);
+=======
+	u_int			align = 0;
+	u_int16_t		p2l_sect = letoh16(id->p2l_sect);
+	u_int16_t		logical_align = letoh16(id->logical_align);
+	
+	if ((p2l_sect & ATA_ID_P2L_SECT_MASK) == ATA_ID_P2L_SECT_VALID &&
+	    ISSET(p2l_sect, ATA_ID_P2L_SECT_SET) &&
+	    (logical_align & ATA_ID_LALIGN_MASK) == ATA_ID_LALIGN_VALID)
+		align = logical_align & ATA_ID_LALIGN;
+
+	return (align);
+}
+
+void
+atascsi_disk_capacity(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_read_cap_data rcd;
+	u_int64_t		capacity;
+
+	ap = atascsi_lookup_port(link);
+	if (xs->cmdlen != sizeof(struct scsi_read_capacity)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	bzero(&rcd, sizeof(rcd));
+	capacity = ata_identify_blocks(&ap->ap_identify);
+	if (capacity > 0xffffffff)
+		capacity = 0xffffffff;
+
+	_lto4b(capacity, rcd.addr);
+	_lto4b(ata_identify_blocksize(&ap->ap_identify), rcd.length);
+
+	bcopy(&rcd, xs->data, MIN(sizeof(rcd), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_capacity16(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_read_cap_data_16 rcd;
+	u_int			align;
+	u_int16_t		lowest_aligned = 0;
+
+	ap = atascsi_lookup_port(link);
+	if (xs->cmdlen != sizeof(struct scsi_read_capacity_16)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	bzero(&rcd, sizeof(rcd));
+
+	_lto8b(ata_identify_blocks(&ap->ap_identify), rcd.addr);
+	_lto4b(ata_identify_blocksize(&ap->ap_identify), rcd.length);
+	rcd.logical_per_phys = ata_identify_block_l2p_exp(&ap->ap_identify);
+	align = ata_identify_block_logical_align(&ap->ap_identify);
+	if (align > 0)
+		lowest_aligned = (1 << rcd.logical_per_phys) - align;
+
+	if (ISSET(ap->ap_features, ATA_PORT_F_TRIM)) {
+		SET(lowest_aligned, READ_CAP_16_TPE);
+
+		if (ISSET(letoh16(ap->ap_identify.add_support), 
+		    ATA_ID_ADD_SUPPORT_DRT))
+			SET(lowest_aligned, READ_CAP_16_TPRZ);
+	}
+	_lto2b(lowest_aligned, rcd.lowest_aligned);
+
+	bcopy(&rcd, xs->data, MIN(sizeof(rcd), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+int
+atascsi_passthru_map(struct scsi_xfer *xs, u_int8_t count_proto, u_int8_t flags)
+{
+	struct ata_xfer		*xa = xs->io;
+
+	xa->data = xs->data;
+	xa->datalen = xs->datalen;
+	xa->timeout = xs->timeout;
+	xa->flags = 0;
+	if (xs->flags & SCSI_DATA_IN)
+		xa->flags |= ATA_F_READ;
+	if (xs->flags & SCSI_DATA_OUT)
+		xa->flags |= ATA_F_WRITE;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	switch (count_proto & ATA_PASSTHRU_PROTO_MASK) {
+	case ATA_PASSTHRU_PROTO_NON_DATA:
+	case ATA_PASSTHRU_PROTO_PIO_DATAIN:
+	case ATA_PASSTHRU_PROTO_PIO_DATAOUT:
+		xa->flags |= ATA_F_PIO;
+		break;
+	default:
+		/* we dont support this yet */
+		return (1);
+	}
+
+	xa->atascsi_private = xs;
+	xa->complete = atascsi_passthru_done;
+
+	return (0);
+}
+
+void
+atascsi_passthru_12(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	struct scsi_ata_passthru_12 *cdb;
+	struct ata_fis_h2d	*fis;
+
+	if (xs->cmdlen != sizeof(*cdb)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	cdb = (struct scsi_ata_passthru_12 *)xs->cmd;
+	/* validate cdb */
+
+	if (atascsi_passthru_map(xs, cdb->count_proto, cdb->flags) != 0) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	ap = atascsi_lookup_port(link);
+	fis = xa->fis;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	fis->command = cdb->command;
+	fis->features = cdb->features;
+	fis->lba_low = cdb->lba_low;
+	fis->lba_mid = cdb->lba_mid;
+	fis->lba_high = cdb->lba_high;
+	fis->device = cdb->device;
+	fis->sector_count = cdb->sector_count;
+	xa->pmp_port = ap->ap_pmp_port;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_passthru_16(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	struct scsi_ata_passthru_16 *cdb;
+	struct ata_fis_h2d	*fis;
+
+	if (xs->cmdlen != sizeof(*cdb)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	cdb = (struct scsi_ata_passthru_16 *)xs->cmd;
+	/* validate cdb */
+
+	if (atascsi_passthru_map(xs, cdb->count_proto, cdb->flags) != 0) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	ap = atascsi_lookup_port(link);
+	fis = xa->fis;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	fis->command = cdb->command;
+	fis->features = cdb->features[1];
+	fis->lba_low = cdb->lba_low[1];
+	fis->lba_mid = cdb->lba_mid[1];
+	fis->lba_high = cdb->lba_high[1];
+	fis->device = cdb->device;
+	fis->lba_low_exp = cdb->lba_low[0];
+	fis->lba_mid_exp = cdb->lba_mid[0];
+	fis->lba_high_exp = cdb->lba_high[0];
+	fis->features_exp = cdb->features[0];
+	fis->sector_count = cdb->sector_count[1];
+	fis->sector_count_exp = cdb->sector_count[0];
+	xa->pmp_port = ap->ap_pmp_port;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_passthru_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+
+	/*
+	 * XXX need to generate sense if cdb wants it
+	 */
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		xs->error = XS_NOERROR;
+		break;
+	case ATA_S_ERROR:
+		xs->error = XS_DRIVER_STUFFUP;
+		break;
+	case ATA_S_TIMEOUT:
+		printf("atascsi_passthru_done, timeout\n");
+		xs->error = XS_TIMEOUT;
+		break;
+	default:
+		panic("atascsi_atapi_cmd_done: unexpected ata_xfer state (%d)",
+		    xa->state);
+	}
+
+	xs->resid = xa->resid;
+
+	scsi_done(xs);
+}
+
+void
+atascsi_disk_sense(struct scsi_xfer *xs)
+{
+	struct scsi_sense_data	*sd = (struct scsi_sense_data *)xs->data;
+
+	bzero(xs->data, xs->datalen);
+	/* check datalen > sizeof(struct scsi_sense_data)? */
+	sd->error_code = SSD_ERRCODE_CURRENT;
+	sd->flags = SKEY_NO_SENSE;
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_disk_start_stop(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
+
+	if (xs->cmdlen != sizeof(*ss)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	if (ss->how != SSS_STOP) {
+		atascsi_done(xs, XS_NOERROR);
+		return;
+	}
+
+	/*
+	 * A SCSI START STOP UNIT command with the START bit set to
+	 * zero gets translated into an ATA FLUSH CACHE command
+	 * followed by an ATA STANDBY IMMEDIATE command.
+	 */
+	ap = atascsi_lookup_port(link);
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->complete = atascsi_disk_start_stop_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->pmp_port = ap->ap_pmp_port;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	xa->fis->command = ATA_C_FLUSH_CACHE;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_disk_start_stop_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		break;
+
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		xs->error = (xa->state == ATA_S_TIMEOUT ? XS_TIMEOUT :
+		    XS_DRIVER_STUFFUP);
+		xs->resid = xa->resid;
+		scsi_done(xs);
+		return;
+
+	default:
+		panic("atascsi_disk_start_stop_done: unexpected ata_xfer state (%d)",
+		    xa->state);
+	}
+
+	/*
+	 * The FLUSH CACHE command completed succesfully; now issue
+	 * the STANDBY IMMEDATE command.
+	 */
+	ap = atascsi_lookup_port(link);
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->state = ATA_S_SETUP;
+	xa->complete = atascsi_disk_cmd_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->pmp_port = ap->ap_pmp_port;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	xa->fis->command = ATA_C_STANDBY_IMMED;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_atapi_cmd(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	struct ata_fis_h2d	*fis;
+>>>>>>> origin/master
 
 	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
 	case SCSI_DATA_IN:
@@ -709,17 +1832,20 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	default:
 		xa->flags = ATA_F_PACKET;
 	}
+	xa->flags |= ATA_F_GET_RFIS;
 
+	ap = atascsi_lookup_port(link);
 	xa->data = xs->data;
 	xa->datalen = xs->datalen;
 	xa->complete = atascsi_atapi_cmd_done;
 	xa->timeout = xs->timeout;
+	xa->pmp_port = ap->ap_pmp_port;
 	xa->atascsi_private = xs;
 	if (xs->flags & SCSI_POLL)
 		xa->flags |= ATA_F_POLL;
 
 	fis = xa->fis;
-	fis->flags = ATA_H2D_FLAGS_CMD;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
 	fis->command = ATA_C_PACKET;
 	fis->device = 0;
 	fis->sector_count = xa->tag << 3;
@@ -731,7 +1857,7 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	/* Copy SCSI command into ATAPI packet. */
 	memcpy(xa->packetcmd, xs->cmd, xs->cmdlen);
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -766,12 +1892,11 @@ atascsi_atapi_cmd_done(struct ata_xfer *xa)
 	}
 
 	xs->resid = xa->resid;
-	ata_put_xfer(xa);
 
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
+<<<<<<< HEAD
 int
 atascsi_stuffup(struct scsi_xfer *xs)
 {
@@ -787,29 +1912,99 @@ atascsi_stuffup(struct scsi_xfer *xs)
 }
 
 int
-ata_exec(struct atascsi *as, struct ata_xfer *xa)
+=======
+void
+atascsi_pmp_cmd(struct scsi_xfer *xs)
 {
-	int polled = xa->flags & ATA_F_POLL;
+	switch (xs->cmd->opcode) {
+	case REQUEST_SENSE:
+		atascsi_pmp_sense(xs);
+		return;
+	case INQUIRY:
+		atascsi_pmp_inq(xs);
+		return;
 
-	switch (as->as_methods->ata_cmd(xa)) {
-	case ATA_COMPLETE:
-	case ATA_ERROR:
-		return (COMPLETE);
-	case ATA_QUEUED:
-		if (!polled)
-			return (SUCCESSFULLY_QUEUED);
+	case TEST_UNIT_READY:
+	case PREVENT_ALLOW:
+		atascsi_done(xs, XS_NOERROR);
+		return;
+
 	default:
-		panic("unexpected return from ata_exec");
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
 	}
 }
 
+void
+atascsi_pmp_sense(struct scsi_xfer *xs)
+{
+	struct scsi_sense_data *sd = (struct scsi_sense_data *)xs->data;
+
+	bzero(xs->data, xs->datalen);
+	sd->error_code = SSD_ERRCODE_CURRENT;
+	sd->flags = SKEY_NO_SENSE;
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_pmp_inq(struct scsi_xfer *xs)
+{
+	struct scsi_inquiry_data inq;
+	struct scsi_inquiry *in_inq = (struct scsi_inquiry *)xs->cmd;
+
+	if (ISSET(in_inq->flags, SI_EVPD)) {
+		/* any evpd pages we need to support here? */
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	bzero(&inq, sizeof(inq));
+	inq.device = 0x1E;	/* "well known logical unit" seems reasonable */
+	inq.version = 0x05;	/* SPC-3? */
+	inq.response_format = 2;
+	inq.additional_length = 32;
+	inq.flags |= SID_CmdQue;
+	bcopy("ATA     ", inq.vendor, sizeof(inq.vendor));
+
+	/* should use the data from atascsi_pmp_identify here?
+	 * not sure how useful the chip id is, but maybe it'd be
+	 * nice to include the number of ports.
+	 */
+	bcopy("Port Multiplier", inq.product, sizeof(inq.product));
+	bcopy("    ", inq.revision, sizeof(inq.revision));
+
+	bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
+atascsi_done(struct scsi_xfer *xs, int error)
+{
+	xs->error = error;
+	scsi_done(xs);
+}
+
+void
+>>>>>>> origin/master
+ata_exec(struct atascsi *as, struct ata_xfer *xa)
+{
+	as->as_methods->ata_cmd(xa);
+}
+
+<<<<<<< HEAD
 struct ata_xfer *
 ata_get_xfer(struct ata_port *ap, int nosleep /* XXX unused */)
+=======
+void *
+atascsi_io_get(void *cookie)
+>>>>>>> origin/master
 {
-	struct atascsi		*as = ap->ap_as;
-	struct ata_xfer		*xa;
+	struct atascsi_host_port	*ahp = cookie;
+	struct atascsi			*as = ahp->ahp_as;
+	struct ata_xfer			*xa;
 
-	xa = as->as_methods->ata_get_xfer(as->as_cookie, ap->ap_port);
+	xa = as->as_methods->ata_get_xfer(as->as_cookie, ahp->ahp_port);
 	if (xa != NULL)
 		xa->fis->type = ATA_FIS_TYPE_H2D;
 
@@ -817,7 +2012,61 @@ ata_get_xfer(struct ata_port *ap, int nosleep /* XXX unused */)
 }
 
 void
-ata_put_xfer(struct ata_xfer *xa)
+atascsi_io_put(void *cookie, void *io)
 {
+	struct ata_xfer		*xa = io;
+
+	xa->state = ATA_S_COMPLETE; /* XXX this state machine is dumb */
 	xa->ata_put_xfer(xa);
+}
+
+void
+ata_polled_complete(struct ata_xfer *xa)
+{
+	/* do nothing */
+}
+
+int
+ata_polled(struct ata_xfer *xa)
+{
+	int			rv;
+
+	if (!ISSET(xa->flags, ATA_F_DONE))
+		panic("ata_polled: xa isnt complete");
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		rv = 0;
+		break;
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		rv = EIO;
+		break;
+	default:
+		panic("ata_polled: xa state (%d)",
+		    xa->state);
+	}
+
+	scsi_io_put(xa->atascsi_private, xa);
+
+	return (rv);
+}
+
+void
+ata_complete(struct ata_xfer *xa)
+{
+	SET(xa->flags, ATA_F_DONE);
+	xa->complete(xa);
+}
+
+void
+ata_swapcopy(void *src, void *dst, size_t len)
+{
+	u_int16_t *s = src, *d = dst;
+	int i;
+
+	len /= 2;
+
+	for (i = 0; i < len; i++)
+		d[i] = swap16(s[i]);
 }

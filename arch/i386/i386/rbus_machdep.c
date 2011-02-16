@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.17 2005/04/09 00:41:27 reyk Exp $ */
+/*	$OpenBSD: rbus_machdep.c,v 1.27 2010/09/22 02:28:37 jsg Exp $ */
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,99 +26,67 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "pcibios.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
 #include <sys/extent.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <sys/sysctl.h>
-
-#include <sys/device.h>
-
 #include <machine/bus.h>
 #include <dev/cardbus/rbus.h>
 
-#include <dev/isa/isareg.h>
-#include <dev/isa/isavar.h>
-
 #include <dev/pci/pcivar.h>
-#include <arch/i386/pci/pcibiosvar.h>
 
+#ifndef RBUS_MEM_START
+/* Avoid the ISA hole and everything below it. */
+#define RBUS_MEM_START	0x00100000
+#endif
 
-/**********************************************************************
- * rbus_tag_t rbus_fakeparent_mem(struct pci_attach_args *pa)
- *
- *   This function makes an rbus tag for memory space.  This rbus tag
- *   shares the all memory region of ex_iomem.
- **********************************************************************/
-#define RBUS_MEM_START	0x40000000
-#define RBUS_MEM_SIZE	0x00100000
+#ifndef RBUS_IO_START
+/* Try to avoid onboard legacy devices; just a guess. */
+#define RBUS_IO_START	0xa000
+#endif
+
+struct rbustag rbus_null;
 
 rbus_tag_t
 rbus_pccbb_parent_mem(struct device *self, struct pci_attach_args *pa)
 {
-	bus_addr_t start, min_start;
+	struct extent *ex = pa->pa_memex;
+	bus_addr_t start;
 	bus_size_t size;
-	struct extent *ex;
 
-	size = RBUS_MEM_SIZE;
-	start = min_start = max(RBUS_MEM_START, ctob(physmem));
-#if NPCIBIOS > 0
-	if ((ex = pciaddr_search(PCIADDR_SEARCH_MEM, &start, size)) == NULL)
-#endif
-	{
-		extern struct extent *iomem_ex;
-		ex = iomem_ex;
-		start = ex->ex_start;
+	if (ex == NULL)
+		return &rbus_null;
 
-		/* XXX: unfortunately, iomem_ex cannot be used for the
-		 * dynamic bus_space allocatoin.  There are some
-		 * hidden memory (or some obstacles which do not
-		 * recognised by the kernel) in the region governed by
-		 * iomem_ex.  So I decide to use only very high
-		 * address region.
-		 *
-		 * if defined PCIBIOS_ADDR_FIXUP, PCI device using
-		 * area which is not recognised by the kernel are
-		 * already reserved.
-		 */
+	start = RBUS_MEM_START;
+	size = ex->ex_end - start;
 
-		if (start < min_start) {
-			start = min_start;
-		}
-
-		size = ex->ex_end - start;
-	}
-
-	return rbus_new_root_share(pa->pa_memt, ex, start, size, 0);
+	return (rbus_new_root_share(pa->pa_memt, ex, start, size));
 }
-
-
-/**********************************************************************
- * rbus_tag_t rbus_pccbb_parent_io(struct pci_attach_args *pa)
- **********************************************************************/
-#define RBUS_IO_START	0xa000
-#define RBUS_IO_SIZE	0x1000
 
 rbus_tag_t
 rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 {
-	struct extent *ex;
+	struct extent *ex = pa->pa_ioex;
 	bus_addr_t start;
 	bus_size_t size;
 
-	size =  RBUS_IO_SIZE;
-	start = RBUS_IO_START;
-#if NPCIBIOS > 0
-	if ((ex = pciaddr_search(PCIADDR_SEARCH_IO, &start, size)) == NULL)
-#endif
-	{
-		extern struct extent *ioport_ex;
-		ex = ioport_ex;
-	}
+	if (ex == NULL)
+		return &rbus_null;
 
-	return rbus_new_root_share(pa->pa_iot, ex, start, size, 0);
+	start = ex->ex_start;
+	if (ex == pciio_ex) {
+		/*
+		 * We're on the root bus, or behind a subtractive
+		 * decode PCI-PCI bridge.  To avoid conflicts with
+		 * onboard legacy devices, we only make a subregion
+		 * available.
+		 */
+		start = max(start, RBUS_IO_START);
+	}
+	size = ex->ex_end - start;
+
+	return (rbus_new_root_share(pa->pa_iot, ex, start, size));
 }

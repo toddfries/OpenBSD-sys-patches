@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uhub.c,v 1.36 2007/03/18 20:14:51 mglocker Exp $ */
+=======
+/*	$OpenBSD: uhub.c,v 1.57 2011/01/25 20:03:36 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -78,7 +75,8 @@ struct uhub_softc {
 	USBBASEDEVICE		sc_dev;		/* base device */
 	usbd_device_handle	sc_hub;		/* USB device */
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
-	u_int8_t		sc_status[1];	/* XXX more ports */
+	u_int8_t		*sc_statusbuf;	/* per port status buffer */
+	size_t			sc_statuslen;	/* status bufferlen */
 	u_char			sc_running;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
@@ -99,8 +97,27 @@ Static bus_child_detached_t uhub_child_detached;
  * Every other driver only connects to hubs
  */
 
+<<<<<<< HEAD
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 USB_DECLARE_DRIVER(uhub);
+=======
+int uhub_match(struct device *, void *, void *); 
+void uhub_attach(struct device *, struct device *, void *); 
+int uhub_detach(struct device *, int); 
+int uhub_activate(struct device *, int); 
+
+struct cfdriver uhub_cd = { 
+	NULL, "uhub", DV_DULL 
+}; 
+
+const struct cfattach uhub_ca = { 
+	sizeof(struct uhub_softc), 
+	uhub_match, 
+	uhub_attach, 
+	uhub_detach, 
+	uhub_activate, 
+};
+>>>>>>> origin/master
 
 #if defined(__NetBSD__)
 /* Create the driver instance for the hub connected to hub case */
@@ -222,10 +239,19 @@ USB_ATTACH(uhub)
 		goto bad;
 	}
 
-	hub = malloc(sizeof(*hub) + (nports-1) * sizeof(struct usbd_port),
-		     M_USBDEV, M_NOWAIT);
+	hub = malloc(sizeof(*hub), M_USBDEV, M_NOWAIT);
 	if (hub == NULL)
+<<<<<<< HEAD
 		USB_ATTACH_ERROR_RETURN;
+=======
+		return;
+	hub->ports = malloc(sizeof(struct usbd_port) * nports,
+	    M_USBDEV, M_NOWAIT);
+	if (hub->ports == NULL) {
+		free(hub, M_USBDEV);
+		return;
+	}
+>>>>>>> origin/master
 	dev->hub = hub;
 	dev->hub->hubsoftc = sc;
 	hub->explore = uhub_explore;
@@ -260,9 +286,14 @@ USB_ATTACH(uhub)
 		goto bad;
 	}
 
+	sc->sc_statuslen = (nports + 1 + 7) / 8;
+	sc->sc_statusbuf = malloc(sc->sc_statuslen, M_USBDEV, M_NOWAIT);
+	if (!sc->sc_statusbuf)
+		goto bad;
+
 	err = usbd_open_pipe_intr(iface, ed->bEndpointAddress,
-		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_status,
-		  sizeof(sc->sc_status), uhub_intr, UHUB_INTR_INTERVAL);
+		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_statusbuf,
+		  sc->sc_statuslen, uhub_intr, UHUB_INTR_INTERVAL);
 	if (err) {
 		printf("%s: cannot open interrupt pipe\n",
 		       USBDEVNAME(sc->sc_dev));
@@ -272,8 +303,11 @@ USB_ATTACH(uhub)
 	/* Wait with power off for a while. */
 	usbd_delay_ms(dev, USB_POWER_DOWN_TIME);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	/*
 	 * To have the best chance of success we do things in the exact same
 	 * order as Windoze98.  This should not be necessary, but some
@@ -351,6 +385,10 @@ USB_ATTACH(uhub)
 	USB_ATTACH_SUCCESS_RETURN;
 
  bad:
+	if (sc->sc_statusbuf)
+		free(sc->sc_statusbuf, M_USBDEV);
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	if (hub)
 		free(hub, M_USBDEV);
 	dev->hub = NULL;
@@ -370,6 +408,11 @@ uhub_explore(usbd_device_handle dev)
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
+	if (usbd_is_dying(dev)) {
+		DPRINTF(("%s: dying\n", __func__));
+		return (USBD_IOERROR);
+	}
+
 	if (!sc->sc_running)
 		return (USBD_NOT_STARTED);
 
@@ -377,7 +420,7 @@ uhub_explore(usbd_device_handle dev)
 	if (dev->depth > USB_HUB_MAX_DEPTH)
 		return (USBD_TOO_DEEP);
 
-	for(port = 1; port <= hd->bNbrPorts; port++) {
+	for (port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
 		err = usbd_get_port_status(dev, port, &up->status);
 		if (err) {
@@ -530,7 +573,11 @@ uhub_explore(usbd_device_handle dev)
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 int
+<<<<<<< HEAD
 uhub_activate(device_ptr_t self, enum devact act)
+=======
+uhub_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uhub_softc *sc = (struct uhub_softc *)self;
 	struct usbd_hub *hub = sc->sc_hub->hub;
@@ -588,11 +635,18 @@ USB_DETACH(uhub)
 			usb_disconnect_port(rup, self);
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_hub,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	if (hub->ports[0].tt)
 		free(hub->ports[0].tt, M_USBDEV);
+	if (sc->sc_statusbuf)
+		free(sc->sc_statusbuf, M_USBDEV);
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	free(hub, M_USBDEV);
 	sc->sc_hub->hub = NULL;
 
@@ -646,7 +700,9 @@ uhub_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	if (status == USBD_STALLED)
 		usbd_clear_endpoint_stall_async(sc->sc_ipipe);
 	else if (status == USBD_NORMAL_COMPLETION)
-		usb_needs_explore(sc->sc_hub);
+		usb_needs_explore(sc->sc_hub, 0);
+	else
+		DPRINTFN(8, ("uhub_intr: unknown status, %d\n", status));
 }
 
 #if defined(__FreeBSD__)

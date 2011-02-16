@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ieee80211_radiotap.h,v 1.7 2005/07/30 17:13:17 reyk Exp $ */
+=======
+/* $OpenBSD: ieee80211_radiotap.h,v 1.11 2010/07/17 16:25:09 damien Exp $ */
+>>>>>>> origin/master
 /* $FreeBSD: src/sys/net80211/ieee80211_radiotap.h,v 1.3 2004/04/05 22:13:21 sam Exp $ */
 /* $NetBSD: ieee80211_radiotap.h,v 1.9 2004/06/06 04:13:28 dyoung Exp $ */
 
@@ -13,9 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of David Young may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY DAVID YOUNG ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
@@ -188,6 +189,19 @@ enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_EXT = 31
 };
 
+#ifndef _KERNEL
+/* For IEEE80211_RADIOTAP_CHANNEL */
+#define IEEE80211_CHAN_TURBO	0x0010	/* Turbo channel */
+#define IEEE80211_CHAN_CCK	0x0020	/* CCK channel */
+#define IEEE80211_CHAN_OFDM	0x0040	/* OFDM channel */
+#define IEEE80211_CHAN_2GHZ	0x0080	/* 2 GHz spectrum channel */
+#define IEEE80211_CHAN_5GHZ	0x0100	/* 5 GHz spectrum channel */
+#define IEEE80211_CHAN_PASSIVE	0x0200	/* Only passive scan allowed */
+#define IEEE80211_CHAN_DYN	0x0400	/* Dynamic CCK-OFDM channel */
+#define IEEE80211_CHAN_GFSK	0x0800	/* GFSK channel (FHSS PHY) */
+#define IEEE80211_CHAN_XR	0x1000	/* Extended range OFDM channel */
+#endif	/* !_KERNEL */
+
 /* For IEEE80211_RADIOTAP_FLAGS */
 #define	IEEE80211_RADIOTAP_F_CFP	0x01	/* sent/received
 						 * during CFP
@@ -202,5 +216,6 @@ enum ieee80211_radiotap_type {
 #define	IEEE80211_RADIOTAP_F_FRAG	0x08	/* sent/received
 						 * with fragmentation
 						 */
+#define	IEEE80211_RADIOTAP_F_FCS	0x10	/* frame includes FCS */
 
 #endif /* _NET_IF_IEEE80211RADIOTAP_H_ */

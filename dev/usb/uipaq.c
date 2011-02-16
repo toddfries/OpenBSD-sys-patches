@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uipaq.c,v 1.3 2006/04/16 04:01:12 brad Exp $	*/
+=======
+/*	$OpenBSD: uipaq.c,v 1.19 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -130,7 +127,26 @@ static const struct uipaq_type uipaq_devs[] = {
 
 #define uipaq_lookup(v, p) ((struct uipaq_type *)usb_lookup(uipaq_devs, v, p))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uipaq);
+=======
+int uipaq_match(struct device *, void *, void *); 
+void uipaq_attach(struct device *, struct device *, void *); 
+int uipaq_detach(struct device *, int); 
+int uipaq_activate(struct device *, int); 
+
+struct cfdriver uipaq_cd = { 
+	NULL, "uipaq", DV_DULL 
+}; 
+
+const struct cfattach uipaq_ca = { 
+	sizeof(struct uipaq_softc), 
+	uipaq_match, 
+	uipaq_attach, 
+	uipaq_detach, 
+	uipaq_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uipaq)
 {
@@ -206,9 +222,12 @@ USB_ATTACH(uipaq)
 		goto bad;
 	}*/
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	uca.bulkin = uca.bulkout = -1;
 	for (i=0; i<id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(iface, i);
@@ -352,7 +371,11 @@ uipaq_set(void *addr, int portno, int reg, int onoff)
 
 
 int
+<<<<<<< HEAD
 uipaq_activate(device_ptr_t self, enum devact act)
+=======
+uipaq_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
 	int rv = 0;
@@ -377,15 +400,17 @@ uipaq_detach(device_ptr_t self, int flags)
 	int rv = 0;
 
 	DPRINTF(("uipaq_detach: sc=%p flags=%d\n", sc, flags));
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv |= config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 

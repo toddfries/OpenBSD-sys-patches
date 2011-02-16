@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ie.c,v 1.36 2006/05/27 23:59:07 jason Exp $	*/
+=======
+/*	$OpenBSD: if_ie.c,v 1.41 2010/04/21 03:03:26 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_ie.c,v 1.33 1997/07/29 17:55:38 fair Exp $	*/
 
 /*-
@@ -110,6 +114,7 @@ Mode of operation:
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -843,19 +848,14 @@ ietint(sc)
 		sc->sc_arpcom.ac_if.if_collisions +=
 		  SWAP(status & IE_XS_MAXCOLL);
 	} else if (status & IE_STAT_ABORT) {
-		printf("%s: send aborted\n", sc->sc_dev.dv_xname);
 		sc->sc_arpcom.ac_if.if_oerrors++;
 	} else if (status & IE_XS_NOCARRIER) {
-		printf("%s: no carrier\n", sc->sc_dev.dv_xname);
 		sc->sc_arpcom.ac_if.if_oerrors++;
 	} else if (status & IE_XS_LOSTCTS) {
-		printf("%s: lost CTS\n", sc->sc_dev.dv_xname);
 		sc->sc_arpcom.ac_if.if_oerrors++;
 	} else if (status & IE_XS_UNDERRUN) {
-		printf("%s: DMA underrun\n", sc->sc_dev.dv_xname);
 		sc->sc_arpcom.ac_if.if_oerrors++;
 	} else if (status & IE_XS_EXCMAX) {
-		printf("%s: too many collisions\n", sc->sc_dev.dv_xname);
 		sc->sc_arpcom.ac_if.if_collisions += 16;
 		sc->sc_arpcom.ac_if.if_oerrors++;
 	}
@@ -1647,9 +1647,11 @@ run_tdr(sc, cmd)
 
 	if (result & 0x10000)
 		printf("%s: TDR command failed\n", sc->sc_dev.dv_xname);
-	else if (result & IE_TDR_XCVR)
+	else if (result & IE_TDR_XCVR) {
+#ifdef IEDEBUG
 		printf("%s: transceiver problem\n", sc->sc_dev.dv_xname);
-	else if (result & IE_TDR_OPEN)
+#endif
+	} else if (result & IE_TDR_OPEN)
 		printf("%s: TDR detected an open %d clocks away\n",
 		    sc->sc_dev.dv_xname, result & IE_TDR_TIME);
 	else if (result & IE_TDR_SHORT)
@@ -1948,13 +1950,11 @@ ieioctl(ifp, cmd, data)
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
 
 	switch(cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -2004,26 +2004,16 @@ ieioctl(ifp, cmd, data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mc_reset(sc);
-			error = 0;
-		}
-		break;
-
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mc_reset(sc);   
+		error = 0;
+	}
+
 	splx(s);
 	return error;
 }

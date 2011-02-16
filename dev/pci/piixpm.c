@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: piixpm.c,v 1.24 2006/09/28 18:19:14 grange Exp $	*/
+=======
+/*	$OpenBSD: piixpm.c,v 1.34 2010/04/08 00:23:53 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -24,8 +28,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -86,16 +94,28 @@ struct cfdriver piixpm_cd = {
 };
 
 const struct pci_matchid piixpm_ids[] = {
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB200_SMB },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB300_SMB },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB400_SMB },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SBX00_SMB },
+
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82440MX_PM },
-	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_OSB4 },
+
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB5 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB6 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1000 },
+<<<<<<< HEAD
 	{ PCI_VENDOR_SMSC, PCI_PRODUCT_SMSC_VICTORY66_PM },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB200_SMB },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_SMB_300 },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_SMB_400 }
+=======
+	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1100 },
+	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_OSB4 },
+
+	{ PCI_VENDOR_SMSC, PCI_PRODUCT_SMSC_VICTORY66_PM }
+>>>>>>> origin/master
 };
 
 int
@@ -130,7 +150,7 @@ piixpm_attach(struct device *parent, struct device *self, void *aux)
 	if (PCI_MAPREG_IO_ADDR(base) == 0 ||
 	    bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(base),
 	    PIIX_SMB_SIZE, 0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

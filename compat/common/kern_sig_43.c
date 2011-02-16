@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_sig_43.c,v 1.6 2001/11/06 19:53:17 miod Exp $	*/
+=======
+/*	$OpenBSD: kern_sig_43.c,v 1.9 2010/06/28 23:00:30 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_sig_43.c,v 1.7 1996/03/14 19:31:47 christos Exp $	*/
 
 /*
@@ -44,7 +48,6 @@
 #include <sys/vnode.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/buf.h>
 #include <sys/acct.h>
@@ -62,7 +65,6 @@
 #include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
-#include <sys/user.h>		/* for coredump */
 
 int
 compat_43_sys_sigblock(p, v, retval)

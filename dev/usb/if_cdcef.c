@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_cdcef.c,v 1.10 2007/02/26 15:41:28 drahn Exp $	*/
+=======
+/*	$OpenBSD: if_cdcef.c,v 1.27 2010/12/30 03:06:31 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -109,7 +113,7 @@ struct cfattach cdcef_ca = {
 };
 
 struct cfdriver cdcef_cd = {
-	NULL, "cdcef", DV_DULL
+	NULL, "cdcef", DV_IFNET
 };
 
 struct usbf_function_methods cdcef_methods = {
@@ -124,6 +128,8 @@ struct usbf_function_methods cdcef_methods = {
 #endif
 
 #define DEVNAME(sc)	USBDEVNAME((sc)->sc_dev.bdev)
+
+extern int ticks;
 
 /*
  * USB function match/attach/detach
@@ -293,7 +299,7 @@ cdcef_start(struct ifnet *ifp)
 
 	if (sc->sc_listening == 0 || m_head->m_pkthdr.len > CDCEF_BUFSZ) {
 		/*
-		 * drop packet because reciever is not listening,
+		 * drop packet because receiver is not listening,
 		 * or if packet is larger than xmit buffer
 		 */
 		IFQ_DEQUEUE(&ifp->if_snd, m_head);
@@ -478,7 +484,6 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cdcef_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 s, error = 0;
 
 	s = splnet();
@@ -494,13 +499,6 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
@@ -512,23 +510,14 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = 0;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET)
-			error = 0;
-		break;
-
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
-	splx(s);
+	if (error == ENETRESET)
+		error = 0;
 
+	splx(s);
 	return (error);
 }
 
@@ -550,7 +539,7 @@ cdcef_watchdog(struct ifnet *ifp)
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	/* cancel recieve pipe? */
+	/* cancel receive pipe? */
 	usbf_abort_pipe(sc->sc_pipe_in); /* in is tx pipe */
 	splx(s);
 }
@@ -602,7 +591,7 @@ cdcef_stop(struct cdcef_softc *sc)
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
-	/* cancel recieve pipe? */
+	/* cancel receive pipe? */
 
 	if (sc->sc_xmit_mbuf != NULL) {
 		m_freem(sc->sc_xmit_mbuf);

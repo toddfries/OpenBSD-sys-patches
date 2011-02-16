@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: lcspx.c,v 1.10 2006/08/27 16:55:41 miod Exp $	*/
+=======
+/*	$OpenBSD: lcspx.c,v 1.16 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -400,7 +404,7 @@ lcspx_mmap(void *v, off_t offset, int prot)
 	if (offset >= LCSPX_FBSIZE || offset < 0)
 		return (-1);
 
-	return (LCSPX_FB_ADDR + offset) >> PGSHIFT;
+	return (LCSPX_FB_ADDR + offset);
 }
 
 int
@@ -541,8 +545,43 @@ lcspxcnprobe()
 {
 	extern vaddr_t virtual_avail;
 	volatile u_int8_t *ch;
+	u_short status;
+	int rc;
 
 	switch (vax_boardtype) {
+<<<<<<< HEAD
+=======
+	case VAX_BTYP_410:
+	case VAX_BTYP_420:
+	case VAX_BTYP_43:
+		if ((vax_confdata & KA420_CFG_L3CON) != 0)
+			break; /* doesn't use graphics console */
+
+		/* not present on microvaxes */
+		if ((vax_confdata & KA420_CFG_MULTU) != 0)
+			break;
+
+		if ((vax_confdata & KA420_CFG_VIDOPT) == 0)
+			break;
+
+		/*
+		 * We can not check for video memory at the SPX address,
+		 * because if no SPX board is installed, the probe will
+		 * just hang.
+		 * Instead, check for a GPX board and skip probe if the
+		 * video option really is a GPX.
+		 */
+		ioaccess(virtual_avail, GPXADDR + GPX_ADDER_OFFSET, 1);
+		adder = (volatile struct adder *)virtual_avail;
+		adder->status = 0;
+		status = adder->status;
+		iounaccess(virtual_avail, 1);
+		if (status != offsetof(struct adder, status))
+			break;
+
+		return (1);
+
+>>>>>>> origin/master
 	case VAX_BTYP_49:
 		if ((vax_confdata & 8) != 0)
 			break; /* doesn't use graphics console */
@@ -559,13 +598,18 @@ lcspxcnprobe()
 		/*
 		 * Check for video memory at SPX address.
 		 */
+		rc = 0;
 		ioaccess(virtual_avail, LCSPX_FB_ADDR, 1);
 		ch = (volatile u_int8_t *)virtual_avail;
 		*ch = 0x01;
-		if ((*ch & 0x01) == 0)
-			break;
-		*ch = 0x00;
-		if ((*ch & 0x01) != 0)
+		if ((*ch & 0x01) != 0) {
+			*ch = 0x00;
+			if ((*ch & 0x01) == 0)
+				rc = 1;
+		}
+		iounaccess(virtual_avail, 1);
+
+		if (rc == 0)
 			break;
 
 		return (1);
@@ -588,29 +632,93 @@ lcspxcninit()
 	struct lcspx_screen *ss = &lcspx_consscr;
 	extern vaddr_t virtual_avail;
 	int i;
+<<<<<<< HEAD
 	long defattr;
 	struct rasops_info *ri;
 
 	ss->ss_addr = (caddr_t)virtual_avail;
 	virtual_avail += LCSPX_FBSIZE;
 	ioaccess((vaddr_t)ss->ss_addr, LCSPX_FB_ADDR, LCSPX_FBSIZE / VAX_NBPG);
+=======
+	u_int width, height;
+	vaddr_t ova, reg1;
+	u_int32_t magic;
+	long defattr;
+	struct rasops_info *ri;
+
+	ova = virtual_avail;
+
+	switch (vax_boardtype) {
+	case VAX_BTYP_410:
+	case VAX_BTYP_420:
+	case VAX_BTYP_43:
+		/*
+		 * XXX EVIL KLUGE ALERT!
+		 *
+		 * The spx jumper settings do not show up in vax_confdata.
+		 * I don't know which spx register sports their values,
+		 * but I have noticed that, after the ROM has initialized
+		 * the board, bit 0x80 at 39b0011c will reflect the
+		 * resolution setting.
+		 *
+		 * This register is not read-only, so one could DEPOSIT
+		 * a bogus value in it from the console before starting
+		 * OpenBSD.  If you do this, you deserve to be bitten
+		 * if things go wrong.
+		 */
+		reg1 = virtual_avail;
+		ioaccess(virtual_avail, LCSPX_REG1_ADDR, 1);
+		magic = *(u_int32_t *)(reg1 + 0x11c);
+		iounaccess(virtual_avail, 1);
+
+		if (magic & 0x80) {
+			width = 1280;
+			height = 1024;
+		} else {
+			width = 1024;
+			height = 864;
+		}
+		break;
+	default:
+		width = 1280;
+		height = 1024;
+		break;
+	}
+
+	ss->ss_fbsize = width * height;
+	ss->ss_addr = (caddr_t)virtual_avail;
+	ioaccess(virtual_avail, LCSPX_FB_ADDR, ss->ss_fbsize / VAX_NBPG);
+	virtual_avail += ss->ss_fbsize;
+>>>>>>> origin/master
 
 	ss->ss_reg = virtual_avail;
+	ioaccess(virtual_avail, LCSPX_REG_ADDR, LCSPX_REG_SIZE / VAX_NBPG);
 	virtual_avail += LCSPX_REG_SIZE;
-	ioaccess(ss->ss_reg, LCSPX_REG_ADDR, LCSPX_REG_SIZE / VAX_NBPG);
 
 	for (i = 0; i < 4; i++) {
 		ss->ss_ramdac[i] = (volatile u_int8_t *)virtual_avail;
-		virtual_avail += VAX_NBPG;
-		ioaccess((vaddr_t)ss->ss_ramdac[i],
+		ioaccess(virtual_avail,
 		    LCSPX_RAMDAC_ADDR + i * LCSPX_RAMDAC_INTERLEAVE, 1);
+		virtual_avail += VAX_NBPG;
 	}
 
 	virtual_avail = round_page(virtual_avail);
 
+<<<<<<< HEAD
 	/* this had better not fail as we can't recover there */
 	if (lcspx_setup_screen(ss) != 0)
 		panic(__func__);
+=======
+	/* this had better not fail */
+	if (lcspx_setup_screen(ss, width, height) != 0) {
+		for (i = 3; i >= 0; i--)
+			iounaccess((vaddr_t)ss->ss_ramdac[i], 1);
+		iounaccess(ss->ss_reg, LCSPX_REG_SIZE / VAX_NBPG);
+		iounaccess((vaddr_t)ss->ss_addr, ss->ss_fbsize / VAX_NBPG);
+		virtual_avail = ova;
+		return (1);
+	}
+>>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);

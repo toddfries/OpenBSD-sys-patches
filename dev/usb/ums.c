@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ums.c,v 1.17 2006/06/23 06:27:12 miod Exp $ */
+=======
+/*	$OpenBSD: ums.c,v 1.33 2010/08/02 23:17:34 miod Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,12 +45,6 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/tty.h>
-#include <sys/file.h>
-#include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
-#include <sys/poll.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbhid.h>
@@ -68,6 +59,7 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsmousevar.h>
 
+<<<<<<< HEAD
 #ifdef USB_DEBUG
 #define DPRINTF(x)	do { if (umsdebug) logprintf x; } while (0)
 #define DPRINTFN(n,x)	do { if (umsdebug>(n)) logprintf x; } while (0)
@@ -113,6 +105,17 @@ struct ums_softc {
 #define MOUSE_FLAGS (HIO_RELATIVE)
 
 Static void ums_intr(struct uhidev *addr, void *ibuf, u_int len);
+=======
+#include <dev/usb/hidmsvar.h>
+
+struct ums_softc {
+	struct uhidev	sc_hdev;
+	struct hidms	sc_ms;
+	char		sc_dying;
+};
+
+void ums_intr(struct uhidev *addr, void *ibuf, u_int len);
+>>>>>>> origin/master
 
 Static int	ums_enable(void *);
 Static void	ums_disable(void *);
@@ -124,7 +127,26 @@ const struct wsmouse_accessops ums_accessops = {
 	ums_disable,
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(ums);
+=======
+int ums_match(struct device *, void *, void *); 
+void ums_attach(struct device *, struct device *, void *); 
+int ums_detach(struct device *, int); 
+int ums_activate(struct device *, int); 
+
+struct cfdriver ums_cd = { 
+	NULL, "ums", DV_DULL 
+}; 
+
+const struct cfattach ums_ca = { 
+	sizeof(struct ums_softc), 
+	ums_match, 
+	ums_attach, 
+	ums_detach, 
+	ums_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(ums)
 {
@@ -143,27 +165,44 @@ USB_MATCH(ums)
 
 USB_ATTACH(ums)
 {
+<<<<<<< HEAD
 	USB_ATTACH_START(ums, sc, uaa);
+=======
+	struct ums_softc *sc = (struct ums_softc *)self;
+	struct hidms *ms = &sc->sc_ms;
+	struct usb_attach_arg *uaa = aux;
+>>>>>>> origin/master
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	struct wsmousedev_attach_args a;
-	int size;
+	int size, repid;
 	void *desc;
+<<<<<<< HEAD
 	u_int32_t flags, quirks;
 	int i;
 	struct hid_location loc_btn;
+=======
+	u_int32_t quirks;
+>>>>>>> origin/master
 
 	sc->sc_hdev.sc_intr = ums_intr;
 	sc->sc_hdev.sc_parent = uha->parent;
 	sc->sc_hdev.sc_report_id = uha->reportid;
 
 	quirks = usbd_get_quirks(uha->parent->sc_udev)->uq_flags;
+<<<<<<< HEAD
 	if (quirks & UQ_MS_REVZ)
 		sc->flags |= UMS_REVZ;
 	if (quirks & UQ_SPUR_BUT_UP)
 		sc->flags |= UMS_SPUR_BUT_UP;
 
+=======
+>>>>>>> origin/master
 	uhidev_get_report_desc(uha->parent, &desc, &size);
+	repid = uha->reportid;
+	sc->sc_hdev.sc_isize = hid_report_size(desc, size, hid_input, repid);
+	sc->sc_hdev.sc_osize = hid_report_size(desc, size, hid_output, repid);
+	sc->sc_hdev.sc_fsize = hid_report_size(desc, size, hid_feature, repid);
 
+<<<<<<< HEAD
 	if (!hid_locate(desc, size, HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_X),
 	       uha->reportid, hid_input, &sc->sc_loc_x, &flags)) {
 		printf("\n%s: mouse has no X report\n",
@@ -267,8 +306,39 @@ USB_ATTACH(ums)
 
 int
 ums_activate(device_ptr_t self, enum devact act)
+=======
+	if (hidms_setup(self, ms, quirks, uha->reportid, desc, size) != 0)
+		return;
+
+	/*
+	 * The Microsoft Wireless Notebook Optical Mouse 3000 Model 1049 has
+	 * five Report IDs: 19, 23, 24, 17, 18 (in the order they appear in
+	 * report descriptor), it seems that report 17 contains the necessary
+	 * mouse information (3-buttons, X, Y, wheel) so we specify it
+	 * manually.
+	 */
+	if (uaa->vendor == USB_VENDOR_MICROSOFT &&
+	    uaa->product == USB_PRODUCT_MICROSOFT_WLNOTEBOOK3) {
+		ms->sc_flags = HIDMS_Z;
+		ms->sc_num_buttons = 3;
+		/* XXX change sc_hdev isize to 5? */
+		ms->sc_loc_x.pos = 8;
+		ms->sc_loc_y.pos = 16;
+		ms->sc_loc_z.pos = 24;
+		ms->sc_loc_btn[0].pos = 0;
+		ms->sc_loc_btn[1].pos = 1;
+		ms->sc_loc_btn[2].pos = 2;
+	}
+
+	hidms_attach(ms, &ums_accessops);
+}
+
+int
+ums_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct ums_softc *sc = (struct ums_softc *)self;
+	struct hidms *ms = &sc->sc_ms;
 	int rv = 0;
 
 	switch (act) {
@@ -276,8 +346,8 @@ ums_activate(device_ptr_t self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
-		if (sc->sc_wsmousedev != NULL)
-			rv = config_deactivate(sc->sc_wsmousedev);
+		if (ms->sc_wsmousedev != NULL)
+			rv = config_deactivate(ms->sc_wsmousedev);
 		sc->sc_dying = 1;
 		break;
 	}
@@ -286,22 +356,22 @@ ums_activate(device_ptr_t self, enum devact act)
 
 USB_DETACH(ums)
 {
+<<<<<<< HEAD
 	USB_DETACH_START(ums, sc);
 	int rv = 0;
+=======
+	struct ums_softc *sc = (struct ums_softc *)self;
+	struct hidms *ms = &sc->sc_ms;
+>>>>>>> origin/master
 
-	DPRINTF(("ums_detach: sc=%p flags=%d\n", sc, flags));
-
-	/* No need to do reference counting of ums, wsmouse has all the goo. */
-	if (sc->sc_wsmousedev != NULL)
-		rv = config_detach(sc->sc_wsmousedev, flags);
-
-	return (rv);
+	return hidms_detach(ms, flags);
 }
 
 void
 ums_intr(struct uhidev *addr, void *ibuf, u_int len)
 {
 	struct ums_softc *sc = (struct ums_softc *)addr;
+<<<<<<< HEAD
 	int dx, dy, dz, dw;
 	u_int32_t buttons = 0;
 	int i;
@@ -331,53 +401,62 @@ ums_intr(struct uhidev *addr, void *ibuf, u_int len)
 			splx(s);
 		}
 	}
+=======
+	struct hidms *ms = &sc->sc_ms;
+
+	if (ms->sc_enabled != 0)
+		hidms_input(ms, (uint8_t *)buf, len);
+>>>>>>> origin/master
 }
 
 Static int
 ums_enable(void *v)
 {
 	struct ums_softc *sc = v;
-
-	DPRINTFN(1,("ums_enable: sc=%p\n", sc));
+	struct hidms *ms = &sc->sc_ms;
+	int rv;
 
 	if (sc->sc_dying)
-		return (EIO);
+		return EIO;
 
-	if (sc->sc_enabled)
-		return (EBUSY);
+	if ((rv = hidms_enable(ms)) != 0)
+		return rv;
 
-	sc->sc_enabled = 1;
-	sc->sc_buttons = 0;
-
-	return (uhidev_open(&sc->sc_hdev));
+	return uhidev_open(&sc->sc_hdev);
 }
 
 Static void
 ums_disable(void *v)
 {
 	struct ums_softc *sc = v;
+	struct hidms *ms = &sc->sc_ms;
 
-	DPRINTFN(1,("ums_disable: sc=%p\n", sc));
-#ifdef DIAGNOSTIC
-	if (!sc->sc_enabled) {
-		printf("ums_disable: not enabled\n");
-		return;
-	}
-#endif
-
-	sc->sc_enabled = 0;
+	hidms_disable(ms);
 	uhidev_close(&sc->sc_hdev);
 }
 
+<<<<<<< HEAD
 Static int
 ums_ioctl(void *v, u_long cmd, caddr_t data, int flag, usb_proc_ptr p)
 
+=======
+int
+ums_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
+>>>>>>> origin/master
 {
+	struct ums_softc *sc = v;
+	struct hidms *ms = &sc->sc_ms;
+	int rc;
+
 	switch (cmd) {
 	case WSMOUSEIO_GTYPE:
 		*(u_int *)data = WSMOUSE_TYPE_USB;
-		return (0);
+		return 0;
+	default:
+		rc = uhidev_ioctl(&sc->sc_hdev, cmd, data, flag, p);
+		if (rc != -1)
+			return rc;
+		else
+			return hidms_ioctl(ms, cmd, data, flag, p);
 	}
-
-	return (-1);
 }

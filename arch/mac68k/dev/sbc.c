@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbc.c,v 1.15 2004/12/02 06:43:25 miod Exp $	*/
+/*	$OpenBSD: sbc.c,v 1.20 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: sbc.c,v 1.24 1997/04/18 17:38:08 scottr Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_debug.h>
@@ -76,22 +75,13 @@ int	sbc_debug = 0 /* | SBC_DB_INTR | SBC_DB_DMA */;
 int	sbc_link_flags = 0 /* | SDEV_DB2 */;
 int	sbc_options = 0 /* | SBC_PDMA */;
 
-static	void	sbc_minphys(struct buf *bp);
+static	void	sbc_minphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter	sbc_ops = {
 	ncr5380_scsi_cmd,		/* scsi_cmd()		*/
 	sbc_minphys,			/* scsi_minphys()	*/
 	NULL,				/* open_target_lu()	*/
 	NULL,				/* close_target_lu()	*/
-};
-
-/* This is copied from julian's bt driver */
-/* "so we have a default dev struct for our link struct." */
-struct scsi_device sbc_dev = {
-	NULL,		/* Use default error handler.	    */
-	NULL,		/* Use default start handler.		*/
-	NULL,		/* Use default async handler.	    */
-	NULL,		/* Use default "done" routine.	    */
 };
 
 struct cfdriver sbc_cd = {
@@ -102,11 +92,11 @@ static	int	sbc_ready(struct ncr5380_softc *);
 static	void	sbc_wait_not_req(struct ncr5380_softc *);
 
 static void
-sbc_minphys(struct buf *bp)
+sbc_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > MAX_DMA_LEN)
 		bp->b_bcount = MAX_DMA_LEN;
-	return (minphys(bp));
+	minphys(bp);
 }
 
 

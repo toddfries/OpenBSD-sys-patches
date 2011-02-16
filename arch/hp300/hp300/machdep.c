@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.109 2006/06/07 22:02:00 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.129 2010/07/02 19:57:14 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -66,9 +66,6 @@
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
 #include <sys/syslog.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <machine/db_machdep.h>
 #ifdef DDB
@@ -88,6 +85,7 @@
 #include <dev/cons.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #ifdef USELEDS
 #include <hp300/hp300/leds.h>
@@ -122,6 +120,10 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -131,13 +133,6 @@ int	safepri = PSL_LOWIPL;
 extern	u_int lowram;
 extern	short exframesize[];
 
-#ifdef COMPAT_HPUX
-extern struct emul emul_hpux;
-#endif
-#ifdef COMPAT_SUNOS
-extern struct emul emul_sunos;
-#endif
-
 /*
  * Some storage space must be allocated statically because of the
  * early console initialization.
@@ -146,7 +141,6 @@ char	extiospace[EXTENT_FIXED_STORAGE_SIZE(8)];
 extern int eiomapsize;
 
 /* prototypes for local functions */
-caddr_t	allocsys(caddr_t);
 void	parityenable(void);
 int	parityerror(struct frame *);
 int	parityerrorfind(void);
@@ -243,10 +237,7 @@ cpu_startup()
 {
 	extern char *etext;
 	unsigned i;
-	caddr_t v;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -277,57 +268,6 @@ cpu_startup()
 	printf(version);
 	identifycpu();
 	printf("real mem  = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if ((allocsys(v) - v) != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				UVM_ADV_NORMAL, 0)))
-		panic("startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -390,58 +330,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num)	\
-	    (name) = (type *)v; v = (caddr_t)((name)+(num))
-#define	valloclim(name, type, num, lim) \
-	    (name) = (type *)v; v = (caddr_t)((lim) = ((name)+(num)))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate (enough to
-	 * hold 5% of total physical memory, but at least 16).
-	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-	return (v);
 }
 
 /*
@@ -750,7 +638,9 @@ haltsys:
 	/* Finally, halt/reboot the system. */
 	if (howto & RB_HALT) {
 		printf("System halted.  Hit any key to reboot.\n\n");
+		cnpollc(1);
 		while (cngetc() == 0);
+		cnpollc(0);
 	}
 
 	printf("rebooting...\n");
@@ -857,6 +747,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
@@ -1162,52 +1056,4 @@ done:
 	pmap_update(pmap_kernel());
 	splx(s);
 	return(found);
-}
-
-/*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-#if defined(COMPAT_44) || defined(COMPAT_SUNOS)
-	u_long midmag, magic;
-	u_short mid;
-	int error;
-	struct exec *execp = epp->ep_hdr;
-#ifdef COMPAT_SUNOS
-	extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-#endif
-
-	midmag = ntohl(execp->a_midmag);
-	mid = (midmag >> 16) & 0xffff;
-	magic = midmag & 0xffff;
-
-	midmag = mid << 16 | magic;
-
-	switch (midmag) {
-#ifdef COMPAT_44
-	case (MID_HP300 << 16) | ZMAGIC:
-		error = exec_aout_prep_oldzmagic(p, epp);
-		break;
-#endif
-	default:
-#ifdef COMPAT_SUNOS
-		/* Hand it over to the SunOS emulation package. */
-		error = sunos_exec_aout_makecmds(p, epp);
-#else
-		error = ENOEXEC;
-#endif
-	}
-
-	return error;
-#else /* !(defined(COMPAT_44) || defined(COMPAT_SUNOS)) */
-	return ENOEXEC;
-#endif
 }

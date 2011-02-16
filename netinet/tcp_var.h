@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tcp_var.h,v 1.80 2005/12/11 17:21:53 deraadt Exp $	*/
+=======
+/*	$OpenBSD: tcp_var.h,v 1.98 2011/01/07 17:50:42 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -96,6 +100,8 @@ struct tcpcb {
 #define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
 #define TF_DEAD		0x00200000	/* dead and to-be-released */
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
+#define TF_NEEDOUTPUT	0x00800000	/* call tcp_output after tcp_input */
+#define TF_BLOCKOUTPUT	0x01000000	/* avert tcp_output during tcp_input */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -152,6 +158,11 @@ struct tcpcb {
 					 * for slow start exponential to
 					 * linear switch
 					 */
+
+/* auto-sizing variables */
+	u_int	rfbuf_cnt;	/* recv buffer autoscaling byte count */
+	u_int32_t rfbuf_ts;	/* recv buffer autoscaling time stamp */
+
 	u_short	t_maxopd;		/* mss plus options */
 	u_short	t_peermss;		/* peer's maximum segment size */
 
@@ -219,7 +230,7 @@ do {									\
 		(tp)->t_flags |= TF_DELACK;				\
 		TCP_RESTART_DELACK(tp);					\
 	}								\
-} while (/*CONSTCOND*/0)
+} while (/* CONSTCOND */ 0)
 
 #define	TCP_CLEAR_DELACK(tp)						\
 do {									\
@@ -227,7 +238,7 @@ do {									\
 		(tp)->t_flags &= ~TF_DELACK;				\
 		timeout_del(&(tp)->t_delack_to);			\
 	}								\
-} while (/*CONSTCOND*/0)
+} while (/* CONSTCOND */ 0)
 
 /*
  * Handy way of passing around TCP option info.
@@ -275,6 +286,7 @@ struct syn_cache {
 	union syn_cache_sa sc_dst;
 	tcp_seq sc_irs;
 	tcp_seq sc_iss;
+	u_int sc_rtableid;
 	u_int sc_rxtcur;			/* current rxt timeout */
 	u_int sc_rxttot;			/* total time spend on queues */
 	u_short sc_rxtshift;			/* for computing backoff */
@@ -504,8 +516,8 @@ struct	tcpstat {
 	{ "keepintvl",	CTLTYPE_INT }, \
 	{ "slowhz",	CTLTYPE_INT }, \
 	{ "baddynamic", CTLTYPE_STRUCT }, \
-	{ "recvspace",	CTLTYPE_INT }, \
-	{ "sendspace",	CTLTYPE_INT }, \
+	{ NULL,	0 }, \
+	{ NULL,	0 }, \
 	{ "ident", 	CTLTYPE_STRUCT }, \
 	{ "sack",	CTLTYPE_INT }, \
 	{ "mssdflt",	CTLTYPE_INT }, \
@@ -528,8 +540,8 @@ struct	tcpstat {
 	&tcp_keepintvl, \
 	NULL, \
 	NULL, \
-	&tcp_recvspace, \
-	&tcp_sendspace, \
+	NULL, \
+	NULL, \
 	NULL, \
 	NULL, \
 	&tcp_mssdflt, \
@@ -547,6 +559,7 @@ struct	tcpstat {
 struct tcp_ident_mapping {
 	struct sockaddr_storage faddr, laddr;
 	int euid, ruid;
+	u_int rdomain;
 };
 
 #ifdef _KERNEL
@@ -580,20 +593,24 @@ struct tcpcb *
 	 tcp_close(struct tcpcb *);
 void	 tcp_reaper(void *);
 int	 tcp_freeq(struct tcpcb *);
-#if defined(INET6) && !defined(TCP6)
+#ifdef INET6
 void	 tcp6_ctlinput(int, struct sockaddr *, void *);
 #endif
-void	 *tcp_ctlinput(int, struct sockaddr *, void *);
+void	 *tcp_ctlinput(int, struct sockaddr *, u_int, void *);
 int	 tcp_ctloutput(int, struct socket *, int, int, struct mbuf **);
 struct tcpcb *
 	 tcp_disconnect(struct tcpcb *);
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
+<<<<<<< HEAD
 		struct mbuf *, int, struct tcp_opt_info *);
 void	 tcp_drain(void);
+=======
+		struct mbuf *, int, struct tcp_opt_info *, u_int);
+>>>>>>> origin/master
 void	 tcp_init(void);
-#if defined(INET6) && !defined(TCP6)
+#ifdef INET6
 int	 tcp6_input(struct mbuf **, int *, int);
 #endif
 void	 tcp_input(struct mbuf *, ...);
@@ -613,9 +630,16 @@ int	 tcp_output(struct tcpcb *);
 void	 tcp_pulloutofband(struct socket *, u_int, struct mbuf *, int);
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, struct mbuf *, int *);
 void	 tcp_rscale(struct tcpcb *, u_long);
+<<<<<<< HEAD
 void	 tcp_respond(struct tcpcb *, caddr_t, struct mbuf *, tcp_seq,
 		tcp_seq, int);
+=======
+void	 tcp_respond(struct tcpcb *, caddr_t, struct tcphdr *, tcp_seq,
+		tcp_seq, int, u_int);
+>>>>>>> origin/master
 void	 tcp_setpersist(struct tcpcb *);
+void	 tcp_update_sndspace(struct tcpcb *);
+void	 tcp_update_rcvspace(struct tcpcb *);
 void	 tcp_slowtimo(void);
 struct mbuf *
 	 tcp_template(struct tcpcb *);
@@ -662,16 +686,16 @@ int	 syn_cache_add(struct sockaddr *, struct sockaddr *,
 		struct tcphdr *, unsigned int, struct socket *,
 		struct mbuf *, u_char *, int, struct tcp_opt_info *);
 void	 syn_cache_unreach(struct sockaddr *, struct sockaddr *,
-	   struct tcphdr *);
+	   struct tcphdr *, u_int);
 struct socket *syn_cache_get(struct sockaddr *, struct sockaddr *,
 		struct tcphdr *, unsigned int, unsigned int,
 		struct socket *so, struct mbuf *);
 void	 syn_cache_init(void);
 void	 syn_cache_insert(struct syn_cache *, struct tcpcb *);
 struct syn_cache *syn_cache_lookup(struct sockaddr *, struct sockaddr *,
-		struct syn_cache_head **);
+		struct syn_cache_head **, u_int);
 void	 syn_cache_reset(struct sockaddr *, struct sockaddr *,
-		struct tcphdr *);
+		struct tcphdr *, u_int);
 int	 syn_cache_respond(struct syn_cache *, struct mbuf *);
 void	 syn_cache_timer(void *);
 void	 syn_cache_cleanup(struct tcpcb *);

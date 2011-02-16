@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: signalvar.h,v 1.15 2005/06/17 22:33:34 niklas Exp $	*/
+=======
+/*	$OpenBSD: signalvar.h,v 1.19 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: signalvar.h,v 1.17 1996/04/22 01:23:31 christos Exp $	*/
 
 /*
@@ -138,6 +142,7 @@ int sigprop[NSIG + 1] = {
 	SA_IGNORE,		/* SIGINFO */
 	SA_KILL,		/* SIGUSR1 */
 	SA_KILL,		/* SIGUSR2 */
+	SA_IGNORE,		/* SIGTHR */
 };
 
 #define	contsigmask	(sigmask(SIGCONT))
@@ -149,6 +154,8 @@ int sigprop[NSIG + 1] = {
 #define	sigcantmask	(sigmask(SIGKILL) | sigmask(SIGSTOP))
 
 #ifdef _KERNEL
+enum signal_type { SPROCESS, STHREAD, SPROPAGATED };
+
 /*
  * Machine-independent functions:
  */
@@ -160,6 +167,8 @@ int	issignal(struct proc *p);
 void	pgsignal(struct pgrp *pgrp, int sig, int checkctty);
 void	postsig(int sig);
 void	psignal(struct proc *p, int sig);
+void	ptsignal(struct proc *p, int sig, enum signal_type type);
+#define prsignal(pr,sig)	ptsignal((pr)->ps_mainproc, (sig), SPROCESS)
 void	siginit(struct proc *p);
 void	trapsignal(struct proc *p, int sig, u_long code, int type,
 	    union sigval val);

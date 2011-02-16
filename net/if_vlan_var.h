@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_vlan_var.h,v 1.17 2006/01/05 14:57:24 norby Exp $	*/
+=======
+/*	$OpenBSD: if_vlan_var.h,v 1.20 2010/06/03 16:15:00 naddy Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -53,6 +57,7 @@ struct	ifvlan {
 		u_int16_t ifvm_proto; /* encapsulation ethertype */
 		u_int16_t ifvm_tag; /* tag to apply on packets leaving if */
 		u_int16_t ifvm_prio; /* prio to apply on packet leaving if */
+		u_int16_t ifvm_type; /* non-standard ethertype or 0x8100 */
 	}	ifv_mib;
 	LIST_HEAD(__vlan_mchead, vlan_mc_entry)	vlan_mc_listhead;
 	LIST_ENTRY(ifvlan) ifv_list;
@@ -64,6 +69,7 @@ struct	ifvlan {
 #define	ifv_if		ifv_ac.ac_if
 #define	ifv_tag		ifv_mib.ifvm_tag
 #define	ifv_prio	ifv_mib.ifvm_prio
+#define	ifv_type	ifv_mib.ifvm_type
 #define	IFVF_PROMISC	0x01
 #endif /* _KERNEL */
 
@@ -77,7 +83,7 @@ struct	ether_vlan_header {
 
 #define	EVL_VLID_MASK	0x0FFF
 #define	EVL_VLANOFTAG(tag) ((tag) & EVL_VLID_MASK)
-#define	EVL_PRIOFTAG(tag) (((tag) >> 13) & 7)
+#define	EVL_PRIOFTAG(tag) (((tag) >> EVL_PRIO_BITS) & 7)
 #define	EVL_ENCAPLEN	4	/* length in octets of encapsulation */
 #define	EVL_PRIO_MAX	7
 #define	EVL_PRIO_BITS	13

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bpf.c,v 1.64 2007/03/04 23:36:34 canacar Exp $	*/
+=======
+/*	$OpenBSD: bpf.c,v 1.77 2011/01/04 15:24:11 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -59,9 +63,22 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
+#include "vlan.h"
+#if NVLAN > 0
+#include <net/if_vlan_var.h>
+#endif
+
+#include "pflog.h"
+#if NPFLOG > 0
+#include <net/if_pflog.h>
+#endif
+
 #define BPF_BUFSIZE 32768
 
 #define PRINET  26			/* interruptible */
+
+/* from kern/kern_clock.c; incremented each clock tick. */
+extern int ticks;
 
 /*
  * The default read buffer size is patchable.
@@ -87,7 +104,7 @@ void	bpf_detachd(struct bpf_d *);
 int	bpf_setif(struct bpf_d *, struct ifreq *);
 int	bpfpoll(dev_t, int, struct proc *);
 int	bpfkqfilter(dev_t, struct knote *);
-static __inline void bpf_wakeup(struct bpf_d *);
+void	bpf_wakeup(struct bpf_d *);
 void	bpf_catchpacket(struct bpf_d *, u_char *, size_t, size_t,
 	    void (*)(const void *, void *, size_t));
 void	bpf_reset_d(struct bpf_d *);
@@ -171,9 +188,9 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 		return (EIO);
 	}
 
-	len = uio->uio_resid;
-	if (len > MCLBYTES)
+	if (uio->uio_resid > MCLBYTES)
 		return (EIO);
+	len = uio->uio_resid;
 
 	MGETHDR(m, M_WAIT, MT_DATA);
 	m->m_pkthdr.rcvif = 0;
@@ -487,7 +504,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 /*
  * If there are processes sleeping on this descriptor, wake them up.
  */
-static __inline void
+void
 bpf_wakeup(struct bpf_d *d)
 {
 	wakeup((caddr_t)d);
@@ -496,7 +513,12 @@ bpf_wakeup(struct bpf_d *d)
 		    d->bd_siguid, d->bd_sigeuid);
 
 	selwakeup(&d->bd_sel);
+<<<<<<< HEAD
 	KNOTE(&d->bd_sel.si_note, 0);
+=======
+	/* XXX */
+	d->bd_sel.si_selpid = 0;
+>>>>>>> origin/master
 }
 
 int
@@ -529,6 +551,8 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 		m_freem(m);
 		return (EMSGSIZE);
 	}
+
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (d->bd_hdrcmplt)
 		dst.ss_family = pseudo_AF_HDRCMPLT;
@@ -1051,6 +1075,7 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 	kn->kn_hook = (caddr_t)((u_long)dev);
 
 	s = splnet();
+	D_GET(d);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 	splx(s);
 
@@ -1067,6 +1092,7 @@ filt_bpfrdetach(struct knote *kn)
 	d = bpfilter_lookup(minor(dev));
 	s = splnet();
 	SLIST_REMOVE(&d->bd_sel.si_note, kn, knote, kn_selnext);
+	D_PUT(d);
 	splx(s);
 }
 
@@ -1226,6 +1252,89 @@ bpf_mtap_af(caddr_t arg, u_int32_t af, struct mbuf *m, u_int direction)
 }
 
 /*
+ * Incoming linkage from device drivers, where we have a mbuf chain
+ * but need to prepend a VLAN encapsulation header.
+ *
+ * Con up a minimal dummy header to pacify bpf.  Allocate (only) a
+ * struct m_hdr on the stack.  This is safe as bpf only reads from the
+ * fields in this header that we initialize, and will not try to free
+ * it or keep a pointer to it.
+ */
+void
+bpf_mtap_ether(caddr_t arg, struct mbuf *m, u_int direction)
+{
+#if NVLAN > 0
+	struct m_hdr mh;
+	struct ether_vlan_header evh;
+
+	if ((m->m_flags & M_VLANTAG) == 0)
+#endif
+	{
+		bpf_mtap(arg, m, direction);
+		return;
+	}
+
+#if NVLAN > 0
+	bcopy(mtod(m, char *), &evh, ETHER_HDR_LEN);
+	evh.evl_proto = evh.evl_encap_proto;
+	evh.evl_encap_proto = htons(ETHERTYPE_VLAN);
+	evh.evl_tag = htons(m->m_pkthdr.ether_vtag);
+	m->m_len -= ETHER_HDR_LEN;
+	m->m_data += ETHER_HDR_LEN;
+
+	mh.mh_flags = 0;
+	mh.mh_next = m;
+	mh.mh_len = sizeof(evh);
+	mh.mh_data = (caddr_t)&evh;
+
+	bpf_mtap(arg, (struct mbuf *) &mh, direction);
+	m->m_flags |= mh.mh_flags & M_FILDROP;
+
+	m->m_len += ETHER_HDR_LEN;
+	m->m_data -= ETHER_HDR_LEN;
+#endif
+}
+
+void
+bpf_mtap_pflog(caddr_t arg, caddr_t data, struct mbuf *m)
+{
+#if NPFLOG > 0
+	struct m_hdr mh;
+	struct bpf_if *bp = (struct bpf_if *)arg;
+	struct bpf_d *d;
+	size_t pktlen, slen;
+	struct mbuf *m0;
+
+	if (m == NULL)
+		return;
+
+	mh.mh_flags = 0;
+	mh.mh_next = m;
+	mh.mh_len = PFLOG_HDRLEN;
+	mh.mh_data = data;
+
+	pktlen = mh.mh_len;
+	for (m0 = m; m0 != 0; m0 = m0->m_next)
+		pktlen += m0->m_len;
+
+	for (d = bp->bif_dlist; d != 0; d = d->bd_next) {
+		++d->bd_rcount;
+		if ((BPF_DIRECTION_OUT & d->bd_dirfilt) != 0)
+			slen = 0;
+		else
+			slen = bpf_filter(d->bd_rfilter, (u_char *)&mh,
+			    pktlen, 0);
+
+		if (slen == 0)
+		    continue;
+
+		bpf_catchpacket(d, (u_char *)&mh, pktlen, slen, pflog_bpfcopy);
+	}
+#endif
+}
+
+
+/*
  * Move the packet data from interface memory (pkt) into the
  * store buffer.  Return 1 if it's time to wakeup a listener (buffer full),
  * otherwise 0.  "copy" is the routine called to do the actual data
@@ -1308,7 +1417,6 @@ bpf_catchpacket(struct bpf_d *d, u_char *pkt, size_t pktlen, size_t snaplen,
 			d->bd_rdStart = 0;
 			ROTATE_BUFFERS(d);
 			bpf_wakeup(d);
-			curlen = 0;
 		}
 	}
 }

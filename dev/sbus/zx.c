@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zx.c,v 1.12 2006/12/17 22:18:16 miod Exp $	*/
+=======
+/*	$OpenBSD: zx.c,v 1.17 2009/09/05 14:09:35 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: zx.c,v 1.5 2002/10/02 16:52:46 thorpej Exp $	*/
 
 /*
@@ -43,13 +47,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. All advertising materials mentioning features or use of this software
- *     must display the following acknowledgement:
- *         This product includes software developed by the NetBSD
- *         Foundation, Inc. and its contributors.
- *  4. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -128,10 +125,6 @@ struct zx_softc {
 };
 
 int zx_ioctl(void *, u_long, caddr_t, int, struct proc *);
-int zx_alloc_screen(void *, const struct wsscreen_descr *, void **,
-    int *, int *, long *);
-void zx_free_screen(void *, void *);
-int zx_show_screen(void *, void *, int, void (*)(void *, int, int), void *);
 paddr_t zx_mmap(void *, off_t, int);
 void zx_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 void zx_reset(struct zx_softc *, u_int);
@@ -140,9 +133,9 @@ void zx_burner(void *, u_int, u_int);
 struct wsdisplay_accessops zx_accessops = {
 	zx_ioctl,
 	zx_mmap,
-	zx_alloc_screen,
-	zx_free_screen,
-	zx_show_screen,
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
 	NULL,	/* load_font */
 	NULL,	/* scrollback */
 	NULL,	/* getchar */
@@ -171,12 +164,12 @@ void	zx_fillrect(struct rasops_info *, int, int, int, int, long, int);
 int	zx_intr(void *);
 void	zx_prom(void *);
 
-void	zx_putchar(void *, int, int, u_int, long);
-void	zx_copycols(void *, int, int, int, int);
-void	zx_erasecols(void *, int, int, int, long);
-void	zx_copyrows(void *, int, int, int);
-void	zx_eraserows(void *, int, int, long);
-void	zx_do_cursor(struct rasops_info *);
+int	zx_putchar(void *, int, int, u_int, long);
+int	zx_copycols(void *, int, int, int, int);
+int	zx_erasecols(void *, int, int, int, long);
+int	zx_copyrows(void *, int, int, int);
+int	zx_eraserows(void *, int, int, long);
+int	zx_do_cursor(struct rasops_info *);
 
 struct cfattach zx_ca = {
 	sizeof(struct zx_softc), zx_match, zx_attach
@@ -285,7 +278,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	ri->ri_bits = bus_space_vaddr(bt, bh);
 	ri->ri_hw = sc;
 
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, 0, isconsole);
 
  	/*
 	 * Watch out! rasops_init() invoked via fbwscons_init() did not
@@ -340,7 +333,7 @@ zx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 	 */
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUN24;
+		*(u_int *)data = WSDISPLAY_TYPE_SUNLEO;
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;
@@ -372,39 +365,6 @@ zx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		return (-1);
 	}
 
-	return (0);
-}
-
-int
-zx_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
-    int *curxp, int *curyp, long *attrp)
-{
-	struct zx_softc *sc = v;
-
-	if (sc->sc_nscreens > 0)
-		return (ENOMEM);
-
-	*cookiep = &sc->sc_sunfb.sf_ro;
-	*curyp = 0;
-	*curxp = 0;
-	sc->sc_sunfb.sf_ro.ri_ops.alloc_attr(&sc->sc_sunfb.sf_ro,
-	    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
-	sc->sc_nscreens++;
-	return (0);
-}
-
-void
-zx_free_screen(void *v, void *cookie)
-{
-	struct zx_softc *sc = v;
-
-	sc->sc_nscreens--;
-}
-
-int
-zx_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
-    void *cbarg)
-{
 	return (0);
 }
 
@@ -679,16 +639,18 @@ zx_copyrect(struct rasops_info *ri, int sx, int sy, int dx, int dy, int w,
 	SETREG(zc->zc_copy, ZX_COORDS(dx, dy));
 }
 
-void
+int
 zx_do_cursor(struct rasops_info *ri)
 {
 
 	zx_fillrect(ri, ri->ri_ccol, ri->ri_crow, 1, 1, WSCOL_BLACK << 16,
 	    ZX_ROP_NEW_XOR_OLD | ZX_ATTR_WE_ENABLE | ZX_ATTR_OE_ENABLE |
 	    ZX_ATTR_FORCE_WID);
+
+	return 0;
 }
 
-void
+int
 zx_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri;
@@ -696,9 +658,11 @@ zx_erasecols(void *cookie, int row, int col, int num, long attr)
 	ri = (struct rasops_info *)cookie;
 
 	zx_fillrect(ri, col, row, num, 1, attr, ZX_STD_ROP);
+
+	return 0;
 }
 
-void
+int
 zx_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri;
@@ -726,9 +690,11 @@ zx_eraserows(void *cookie, int row, int num, long attr)
 		SETREG(zc->zc_fill, ZX_COORDS(0, 0) | ZX_EXTENT_DIR_BACKWARDS);
 	} else
 		zx_fillrect(ri, 0, row, ri->ri_cols, num, attr, ZX_STD_ROP);
+
+	return 0;
 }
 
-void
+int
 zx_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri;
@@ -736,9 +702,11 @@ zx_copyrows(void *cookie, int src, int dst, int num)
 	ri = (struct rasops_info *)cookie;
 
 	zx_copyrect(ri, 0, src, 0, dst, ri->ri_cols, num);
+
+	return 0;
 }
 
-void
+int
 zx_copycols(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_info *ri;
@@ -746,9 +714,11 @@ zx_copycols(void *cookie, int row, int src, int dst, int num)
 	ri = (struct rasops_info *)cookie;
 
 	zx_copyrect(ri, src, row, dst, row, num, 1);
+
+	return 0;
 }
 
-void
+int
 zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri;
@@ -772,7 +742,7 @@ zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	if (uc == ' ') {
 		zx_fillrect(ri, col, row, 1, 1, attr, ZX_STD_ROP);
 		if (ul == 0)
-			return;
+			return 0;
 
 		dp += font->fontheight << ZX_WWIDTH;
 
@@ -820,4 +790,6 @@ zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 		dp -= 2 << ZX_WWIDTH;
 		*dp = 0xffffffff;
 	}
+
+	return 0;
 }

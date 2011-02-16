@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: intr.h,v 1.5 2006/06/02 17:39:58 miod Exp $	*/
+=======
+/*	$OpenBSD: intr.h,v 1.13 2010/12/21 14:56:24 claudio Exp $	*/
+>>>>>>> origin/master
 /* 	$NetBSD: intr.h,v 1.1 1998/08/18 23:55:00 matt Exp $	*/
 
 /*
@@ -38,15 +42,18 @@
 /* Interrupt Priority Levels are not mutually exclusive. */
 
 #define IPL_NONE	0x00
-#define	IPL_SOFTCLOCK	0x08
-#define	IPL_SOFTNET	0x0c
+#define	IPL_SOFT	0x08
+#define	IPL_SOFTCLOCK	0x09
+#define	IPL_SOFTNET	0x0a
+#define	IPL_SOFTTTY	0x0b
 #define IPL_BIO		0x15	/* block I/O */
 #define IPL_NET		0x15	/* network */
-#define IPL_TTY		0x15	/* terminal */
+#define IPL_TTY		0x16	/* terminal */
 #define IPL_VM		0x17	/* memory allocation */
 #define	IPL_AUDIO	0x15	/* audio */
 #define IPL_CLOCK	0x18	/* clock */
 #define IPL_STATCLOCK	0x18	/* statclock */
+#define	IPL_SCHED	0x1f
 #define	IPL_HIGH	0x1f
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
@@ -114,8 +121,43 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
 #else
 #define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
 #endif
+
+#define	SI_SOFT			0	/* for IPL_SOFT */
+#define	SI_SOFTCLOCK		1	/* for IPL_SOFTCLOCK */
+#define	SI_SOFTNET		2	/* for IPL_SOFTNET */
+#define	SI_SOFTTTY		3	/* for IPL_SOFTTTY */
+
+#define	SI_NQUEUES		4
+
+#ifndef _LOCORE
+
+#include <machine/mutex.h>
+#include <sys/queue.h>
+
+struct soft_intrhand {
+	TAILQ_ENTRY(soft_intrhand) sih_list;
+	void (*sih_func)(void *);
+	void *sih_arg;
+	struct soft_intrq *sih_siq;
+	int sih_pending;
+};
+
+struct soft_intrq {
+	TAILQ_HEAD(, soft_intrhand) siq_list;
+	int siq_si;
+	struct mutex siq_mtx;
+};
+
+void	 softintr_disestablish(void *);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
+
+#endif	/* _LOCORE */
 
 #endif	/* _VAX_INTR_H */

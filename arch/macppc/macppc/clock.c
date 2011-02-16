@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.18 2007/03/20 20:59:54 kettenis Exp $	*/
+/*	$OpenBSD: clock.c,v 1.31 2010/09/20 06:33:47 matthew Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -224,8 +224,8 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
-	if (curcpu()->ci_cpl & SPL_CLOCK) {
-		statspending += nstats;
+	if (ci->ci_cpl & SPL_CLOCKMASK) {
+		ci->ci_statspending += nstats;
 	} else {
 		nstats += statspending;
 		statspending = 0;
@@ -292,21 +292,8 @@ cpu_initclocks()
 
 	statmin = statint - (statvar >> 1);
 
-
-	lasttb = ppc_mftb();
-	nexttimerevent = lasttb + ticks_per_intr;
-	do {
-		r = random() & (statvar -1);
-	} while (r == 0); /* random == 0 not allowed */
-	nextstatevent = lasttb + statmin + r;
-
-	if (nexttimerevent < nextstatevent)
-		nextevent = nexttimerevent;
-	else
-		nextevent = nextstatevent;
-
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-	evcount_attach(&stat_count, "stat", (void *)&stat_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+	evcount_attach(&stat_count, "stat", &stat_irq);
 
 	tb_timecounter.tc_frequency = ticks_per_sec;
 	tc_init(&tb_timecounter);
@@ -318,7 +305,7 @@ cpu_initclocks()
 void
 calc_delayconst(void)
 {
-	int qhandle, phandle;
+	int qhandle, phandle = 0;
 	char name[32];
 	int s;
 

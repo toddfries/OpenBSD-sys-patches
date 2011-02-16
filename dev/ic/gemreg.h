@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gemreg.h,v 1.11 2005/08/01 05:45:03 brad Exp $	*/
+=======
+/*	$OpenBSD: gemreg.h,v 1.17 2009/07/12 15:54:32 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: gemreg.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -57,6 +61,7 @@
 #define	GEM_PCI_BANK2_SIZE	0x14
 /* This is the same as the GEM_STATUS reg but reading it does not clear bits. */
 #define	GEM_ERROR_STATUS	0x0000  /* PCI error status R/C */
+#define	GEM_SBUS_RESET		0x0000	/* Sbus Reset */
 #define	GEM_ERROR_MASK		0x0004
 #define	GEM_SBUS_CONFIG		0x0004
 #define	GEM_BIF_CONFIG		0x0008  /* BIF config reg */
@@ -68,6 +73,9 @@
 #define	GEM_SEB_RXWON		0x000000004
 
 /* Bits in GEM_SBUS_CONFIG register */
+#define GEM_SBUS_CFG_BSIZE32	0x00000001
+#define GEM_SBUS_CFG_BSIZE64	0x00000002
+#define GEM_SBUS_CFG_BSIZE128	0x00000004
 #define GEM_SBUS_CFG_BMODE64	0x00000008
 #define GEM_SBUS_CFG_PARITY	0x00000200
 
@@ -76,6 +84,12 @@
 #define	GEM_CONFIG_BURST_INF	0x000000001	/* 0->infinity, 1->64KB */
 #define	GEM_CONFIG_TXDMA_LIMIT	0x00000003e
 #define	GEM_CONFIG_RXDMA_LIMIT	0x0000007c0
+/* GEM_CONFIG_RONPAULBIT and GEM_CONFIG_BUG2FIX are Apple only. */
+#define	GEM_CONFIG_RONPAULBIT	0x000000800	/* after infinite burst use
+						 * memory read multiple for
+						 * PCI commands */
+#define	GEM_CONFIG_BUG2FIX	0x000001000	/* fix RX hang after overflow */
+
 
 #define	GEM_CONFIG_TXDMA_LIMIT_SHIFT	1
 #define	GEM_CONFIG_RXDMA_LIMIT_SHIFT	6
@@ -366,6 +380,9 @@
 #define	GEM_MAC_CC_TX_PAUSE	0x00000001	/* send pause enabled */
 #define	GEM_MAC_CC_RX_PAUSE	0x00000002	/* receive pause enabled */
 #define	GEM_MAC_CC_PASS_PAUSE	0x00000004	/* pass pause up */
+
+/* GEM_MAC_MAC_STATE register bits */
+#define GEM_MAC_STATE_OVERFLOW	0x03800000
 
 /* GEM MIF registers */
 /* Bit bang registers use low bit only */

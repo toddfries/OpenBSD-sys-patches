@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: oosiopvar.h,v 1.1 2004/03/12 00:04:57 miod Exp $ */
+=======
+/* $OpenBSD: oosiopvar.h,v 1.4 2010/04/20 20:21:56 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: oosiopvar.h,v 1.2 2003/05/03 18:11:23 wiz Exp $ */
 
 /*
@@ -145,6 +149,11 @@ struct oosiop_softc {
 
 	int sc_active;
 	int sc_nextdsp;
+
+	uint8_t	sc_scntl0;
+	uint8_t sc_dmode;
+	uint8_t sc_dwt;
+	uint8_t sc_ctest7;
 };
 
 #define	oosiop_read_1(sc, addr)						\

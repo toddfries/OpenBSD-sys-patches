@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.13 2006/06/19 22:42:33 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.20 2010/11/22 21:09:32 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.17 2001/06/19 13:42:15 wiz Exp $	*/
 
 /*
@@ -170,16 +170,12 @@ struct cfattach zsc_ca = {
 extern struct cfdriver zsc_cd;
 
 int zshard(void *);
-int zssoft(void *);
+void zssoft(void *);
 #ifdef ZS_TXDMA
 int zs_txdma_int(void *);
 #endif
 
-void zscnprobe(struct consdev *);
-void zscninit(struct consdev *);
-int  zscngetc(dev_t);
-void zscnputc(dev_t, int);
-void zscnpollc(dev_t, int);
+cons_decl(zs);
 
 /*
  * Is the zs chip present?
@@ -393,6 +389,9 @@ zsc_attach(struct device *parent, struct device *self, void *aux)
 	mac_intr_establish(parent, intr[1][1], IST_LEVEL, IPL_TTY,
 	    zs_txdma_int, (void *)1, "zsdma1");
 #endif
+	zsc->zsc_softintr = softintr_establish(IPL_SOFTTTY, zssoft, zsc);
+	if (zsc->zsc_softintr == NULL)
+		panic("zsattach: could not establish soft interrupt");
 
 	/*
 	 * Set the master interrupt enable and interrupt vector.
@@ -476,8 +475,7 @@ zshard(void *arg)
 			/* We are at splzs here, so no need to lock. */
 			if (zssoftpending == 0) {
 				zssoftpending = 1;
-				/* XXX setsoftserial(); */
-				setsofttty(); /* UGLY HACK!!! */
+				softintr_schedule(zsc->zsc_softintr);
 			}
 		}
 	}
@@ -487,7 +485,7 @@ zshard(void *arg)
 /*
  * Similar scheme as for zshard (look at all of them)
  */
-int
+void
 zssoft(arg)
 	void *arg;
 {
@@ -496,7 +494,7 @@ zssoft(arg)
 
 	/* This is not the only ISR on this IPL. */
 	if (zssoftpending == 0)
-		return (0);
+		return;
 
 	/*
 	 * The soft intr. bit will be set by zshard only if
@@ -510,7 +508,6 @@ zssoft(arg)
 			continue;
 		(void) zsc_intr_soft(zsc);
 	}
-	return (1);
 }
 
 #ifdef ZS_TXDMA
@@ -534,7 +531,7 @@ zs_txdma_int(arg)
 	if (cs->cs_softreq) {
 		if (zssoftpending == 0) {
 			zssoftpending = 1;
-			setsoftserial();
+			softintr_schedule(zsc->zsc_softintr);
 		}
 	}
 	return 1;
@@ -1061,14 +1058,14 @@ zscnprobe(cp)
 	if ((pkg = OF_instance_to_package(stdin)) == -1)
 		return;
 
-	memset(name, 0, sizeof(name));
+	bzero(name, sizeof(name));
 	if (OF_getprop(pkg, "device_type", name, sizeof(name)) == -1)
 		return;
 
 	if (strcmp(name, "serial") != 0)
 		return;
 
-	memset(name, 0, sizeof(name));
+	bzero(name, sizeof(name));
 	if (OF_getprop(pkg, "name", name, sizeof(name)) == -1)
 		return;
 
@@ -1098,7 +1095,7 @@ zscninit(cp)
 	if ((escc_ch = OF_instance_to_package(stdin)) == -1)
 		return;
 
-	memset(name, 0, sizeof(name));
+	bzero(name, sizeof(name));
 	if (OF_getprop(escc_ch, "name", name, sizeof(name)) == -1)
 		return;
 
@@ -1123,7 +1120,24 @@ zscninit(cp)
 void
 zs_abort(struct zs_chanstate *channel)
 {
+	volatile struct zschan *zc = zs_conschan;
+	int rr0;
 
+	/* Wait for end of break to avoid PROM abort. */
+	/* XXX - Limit the wait? */
+	do {
+		rr0 = zc->zc_csr;
+		ZS_DELAY();
+	} while (rr0 & ZSRR0_BREAK);
+
+#if defined(DDB)
+	{
+		extern int db_active;
+
+		if (!db_active)
+			Debugger();
+	}
+#endif
 }
 
 /* copied from sparc - XXX? */

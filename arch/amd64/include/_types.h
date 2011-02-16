@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.1 2006/01/06 18:50:08 millert Exp $	*/
+/*	$OpenBSD: _types.h,v 1.6 2009/11/04 19:14:09 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -93,6 +93,8 @@ typedef unsigned long		__psize_t;
 /* Standard system types */
 typedef int			__clock_t;
 typedef int			__clockid_t;
+typedef	double			__double_t;
+typedef	float			__float_t;
 typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;
@@ -115,9 +117,6 @@ typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
 
 /* Feature test macros */
-#define __HAVE_GENERIC_SOFT_INTERRUPTS
-#define __HAVE_CPUINFO
-#define __HAVE_MUTEX
 #define __HAVE_TIMECOUNTER
 
 #endif	/* _AMD64__TYPES_H_ */

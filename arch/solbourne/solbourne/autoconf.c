@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: autoconf.c,v 1.4 2006/03/15 20:20:40 miod Exp $	*/
+=======
+/*	$OpenBSD: autoconf.c,v 1.12 2010/11/18 21:13:19 miod Exp $	*/
+>>>>>>> origin/master
 /*	OpenBSD: autoconf.c,v 1.64 2005/03/23 17:10:24 miod Exp 	*/
 
 /*
@@ -50,13 +54,11 @@
 #include <sys/disklabel.h>
 #include <sys/device.h>
 #include <sys/disk.h>
-#include <sys/dkstat.h>
 #include <sys/conf.h>
 #include <sys/reboot.h>
 #include <sys/socket.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
-#include <sys/user.h>
 
 #include <net/if.h>
 
@@ -149,7 +151,7 @@ bootstrap()
 	asize += (1 + nenv) * sizeof(const char *);
 	
 	/*
-	 * Setup the intial mappings.
+	 * Setup the initial mappings.
 	 */
 	pmap_bootstrap(asize);
 
@@ -333,6 +335,28 @@ cpu_configure()
 	splx(s);
 }
 
+<<<<<<< HEAD
+=======
+void
+diskconf(void)
+{
+	struct bootpath *bp;
+	struct device *bootdv;
+	int bootpart;
+
+	/*
+	 * Configure swap area and related system
+	 * parameter based on device(s) used.
+	 */
+	bp = nbootpath == 0 ? NULL : &bootpath[nbootpath-1];
+	bootdv = (bp == NULL) ? NULL : bp->dev;
+	bootpart = (bp == NULL) ? 0 : bp->val[2];
+
+	setroot(bootdv, bootpart, RB_USERREQ | RB_HALT);
+	dumpconf();
+}
+
+>>>>>>> origin/master
 /*
  * Console `sync' command.  SunOS just does a `panic: zero' so I guess
  * no one really wants anything fancy...

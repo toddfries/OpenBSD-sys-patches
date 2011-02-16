@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in_var.h,v 1.8 2005/01/15 09:09:27 pascoe Exp $	*/
+=======
+/*	$OpenBSD: in_var.h,v 1.16 2010/11/17 19:25:49 henning Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: in_var.h,v 1.16 1996/02/13 23:42:15 christos Exp $	*/
 
 /*
@@ -47,12 +51,9 @@ struct in_ifaddr {
 	struct	ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define ia_flags	ia_ifa.ifa_flags
-					/* ia_{,sub}net{,mask} in host order */
+					/* ia_net{,mask} in host order */
 	u_int32_t ia_net;		/* network number of interface */
 	u_int32_t ia_netmask;		/* mask of net part */
-	u_int32_t ia_subnet;		/* subnet number, including net */
-	u_int32_t ia_subnetmask;	/* mask of subnet part */
-	struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
 	TAILQ_ENTRY(in_ifaddr) ia_list;	/* list of internet addresses */
 	struct	sockaddr_in ia_addr;	/* reserve space for interface name */
 	struct	sockaddr_in ia_dstaddr;	/* reserve space for broadcast addr */
@@ -89,32 +90,33 @@ void	in_socktrim(struct sockaddr_in *);
  * Macro for finding the interface (ifnet structure) corresponding to one
  * of our IP addresses.
  */
-#define INADDR_TO_IFP(addr, ifp) \
-	/* struct in_addr addr; */ \
-	/* struct ifnet *ifp; */ \
-{ \
-	struct in_ifaddr *ia; \
-\
+#define INADDR_TO_IFP(addr, ifp, rdomain)				\
+	/* struct in_addr addr; */					\
+	/* struct ifnet *ifp; */					\
+do {									\
+	struct in_ifaddr *ia;						\
+									\
 	for (ia = TAILQ_FIRST(&in_ifaddr); ia != TAILQ_END(&in_ifaddr) && \
-	    ia->ia_addr.sin_addr.s_addr != (addr).s_addr; \
-	    ia = TAILQ_NEXT(ia, ia_list)) \
-		 continue; \
-	(ifp) = (ia == NULL) ? NULL : ia->ia_ifp; \
-}
+	    (ia->ia_ifp->if_rdomain != rtable_l2(rdomain) || 		\
+	    ia->ia_addr.sin_addr.s_addr != (addr).s_addr);		\
+	    ia = TAILQ_NEXT(ia, ia_list))				\
+		 continue;						\
+	(ifp) = (ia == NULL) ? NULL : ia->ia_ifp;			\
+} while (/* CONSTCOND */ 0)
 
 /*
  * Macro for finding the internet address structure (in_ifaddr) corresponding
  * to a given interface (ifnet structure).
  */
-#define IFP_TO_IA(ifp, ia) \
-	/* struct ifnet *ifp; */ \
-	/* struct in_ifaddr *ia; */ \
-{ \
-	for ((ia) = TAILQ_FIRST(&in_ifaddr); \
-	    (ia) != TAILQ_END(&in_ifaddr) && (ia)->ia_ifp != (ifp); \
-	    (ia) = TAILQ_NEXT((ia), ia_list)) \
-		continue; \
-}
+#define IFP_TO_IA(ifp, ia)						\
+	/* struct ifnet *ifp; */					\
+	/* struct in_ifaddr *ia; */					\
+do {									\
+	for ((ia) = TAILQ_FIRST(&in_ifaddr);				\
+	    (ia) != TAILQ_END(&in_ifaddr) && (ia)->ia_ifp != (ifp);	\
+	    (ia) = TAILQ_NEXT((ia), ia_list))				\
+		continue;						\
+} while (/* CONSTCOND */ 0)
 #endif
 
 /*
@@ -158,23 +160,23 @@ struct in_multistep {
  * Macro for looking up the in_multi record for a given IP multicast address
  * on a given interface.  If no matching record is found, "inm" returns NULL.
  */
-#define IN_LOOKUP_MULTI(addr, ifp, inm) \
-	/* struct in_addr addr; */ \
-	/* struct ifnet *ifp; */ \
-	/* struct in_multi *inm; */ \
-{ \
-	struct in_ifaddr *ia; \
-\
-	IFP_TO_IA((ifp), ia); \
-	if (ia == NULL) \
-		(inm) = NULL; \
-	else \
-		for ((inm) = LIST_FIRST(&ia->ia_multiaddrs); \
-		     (inm) != LIST_END(&ia->ia_multiaddrs) && \
-		      (inm)->inm_addr.s_addr != (addr).s_addr; \
-		     (inm) = LIST_NEXT(inm, inm_list)) \
-			 continue; \
-}
+#define IN_LOOKUP_MULTI(addr, ifp, inm)					\
+	/* struct in_addr addr; */					\
+	/* struct ifnet *ifp; */					\
+	/* struct in_multi *inm; */					\
+do {									\
+	struct in_ifaddr *ia;						\
+									\
+	IFP_TO_IA((ifp), ia);						\
+	if (ia == NULL)							\
+		(inm) = NULL;						\
+	else								\
+		for ((inm) = LIST_FIRST(&ia->ia_multiaddrs);		\
+		     (inm) != LIST_END(&ia->ia_multiaddrs) &&		\
+		      (inm)->inm_addr.s_addr != (addr).s_addr;		\
+		     (inm) = LIST_NEXT(inm, inm_list))			\
+			 continue;					\
+} while (/* CONSTCOND */ 0)
 
 /*
  * Macro to step through all of the in_multi records, one at a time.
@@ -183,34 +185,34 @@ struct in_multistep {
  * and get the first record.  Both macros return a NULL "inm" when there
  * are no remaining records.
  */
-#define IN_NEXT_MULTI(step, inm) \
-	/* struct in_multistep  step; */ \
-	/* struct in_multi *inm; */ \
-{ \
-	if (((inm) = (step).i_inm) != NULL) \
-		(step).i_inm = LIST_NEXT((inm), inm_list); \
-	else \
-		while ((step).i_ia != NULL) { \
+#define IN_NEXT_MULTI(step, inm)					\
+	/* struct in_multistep  step; */				\
+	/* struct in_multi *inm; */					\
+do {									\
+	if (((inm) = (step).i_inm) != NULL)				\
+		(step).i_inm = LIST_NEXT((inm), inm_list);		\
+	else								\
+		while ((step).i_ia != NULL) {				\
 			(inm) = LIST_FIRST(&(step).i_ia->ia_multiaddrs); \
-			(step).i_ia = TAILQ_NEXT((step).i_ia, ia_list); \
-			if ((inm) != NULL) { \
+			(step).i_ia = TAILQ_NEXT((step).i_ia, ia_list);	\
+			if ((inm) != NULL) {				\
 				(step).i_inm = LIST_NEXT((inm), inm_list); \
-				break; \
-			} \
-		} \
-}
+				break;					\
+			}						\
+		}							\
+} while (/* CONSTCOND */ 0)
 
-#define IN_FIRST_MULTI(step, inm) \
-	/* struct in_multistep step; */ \
-	/* struct in_multi *inm; */ \
-{ \
-	(step).i_ia = TAILQ_FIRST(&in_ifaddr); \
-	(step).i_inm = NULL; \
-	IN_NEXT_MULTI((step), (inm)); \
-}
+#define IN_FIRST_MULTI(step, inm)					\
+	/* struct in_multistep step; */					\
+	/* struct in_multi *inm; */					\
+do {									\
+	(step).i_ia = TAILQ_FIRST(&in_ifaddr);				\
+	(step).i_inm = NULL;						\
+	IN_NEXT_MULTI((step), (inm));					\
+} while (/* CONSTCOND */ 0)
 
 int	in_ifinit(struct ifnet *,
-	    struct in_ifaddr *, struct sockaddr_in *, int);
+	    struct in_ifaddr *, struct sockaddr_in *, int, int);
 struct	in_multi *in_addmulti(struct in_addr *, struct ifnet *);
 void	in_delmulti(struct in_multi *);
 void	in_ifscrub(struct ifnet *, struct in_ifaddr *);

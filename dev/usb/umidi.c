@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: umidi.c,v 1.15 2006/04/07 22:41:33 jsg Exp $	*/
+=======
+/*	$OpenBSD: umidi.c,v 1.28 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: umidi.c,v 1.16 2002/07/11 21:14:32 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -137,7 +134,26 @@ struct midi_hw_if umidi_hw_if = {
 	0,		/* ioctl */
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(umidi);
+=======
+int umidi_match(struct device *, void *, void *); 
+void umidi_attach(struct device *, struct device *, void *); 
+int umidi_detach(struct device *, int); 
+int umidi_activate(struct device *, int); 
+
+struct cfdriver umidi_cd = { 
+	NULL, "umidi", DV_DULL 
+}; 
+
+const struct cfattach umidi_ca = { 
+	sizeof(struct umidi_softc), 
+	umidi_match, 
+	umidi_attach, 
+	umidi_detach, 
+	umidi_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(umidi)
 {
@@ -217,10 +233,14 @@ USB_ATTACH(umidi)
 		(void)start_input_transfer(&sc->sc_in_ep[i]);
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH,
 			   sc->sc_udev, USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+	return;
+>>>>>>> origin/master
 error:
 	printf("%s: disabled.\n", USBDEVNAME(sc->sc_dev));
 	sc->sc_dying = 1;
@@ -228,7 +248,11 @@ error:
 }
 
 int
+<<<<<<< HEAD
 umidi_activate(device_ptr_t self, enum devact act)
+=======
+umidi_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct umidi_softc *sc = (struct umidi_softc *)self;
 
@@ -251,15 +275,17 @@ USB_DETACH(umidi)
 
 	DPRINTFN(1,("umidi_detach\n"));
 
-	sc->sc_dying = 1;
 	detach_all_mididevs(sc, flags);
 	free_all_mididevs(sc);
 	free_all_jacks(sc);
 	free_all_endpoints(sc);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return 0;
 }
 

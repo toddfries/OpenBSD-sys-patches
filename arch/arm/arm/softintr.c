@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.7 2010/12/21 14:56:23 claudio Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -39,18 +39,11 @@
 #include <sys/param.h>
 #include <sys/malloc.h>
 
-/* XXX Network interrupts should be converted to new softintrs. */
-#include <net/netisr.h>
-
 #include <uvm/uvm_extern.h>
 
 #include <machine/intr.h>
 
 struct soft_intrq soft_intrq[SI_NQUEUES];
-
-struct soft_intrhand *softnet_intrhand;
-
-void	netintr(void);
 
 /*
  * softintr_init:
@@ -69,18 +62,9 @@ softintr_init(void)
 	for (i = 0; i < SI_NQUEUES; i++) {
 		siq = &soft_intrq[i];
 		TAILQ_INIT(&siq->siq_list);
-#if 0
-		evcnt_attach_dynamic(&siq->siq_evcnt, EVCNT_TYPE_INTR,
-		    NULL, "soft", softintr_names[i]);
-#endif
+		mtx_init(&siq->siq_mtx, IPL_HIGH);
 		siq->siq_si = i;
 	}
-
-	/* XXX Establish legacy software interrupt handlers. */
-	softnet_intrhand = softintr_establish(IPL_SOFTNET,
-	    (void (*)(void *))netintr, NULL);
-
-	assert(softnet_intrhand != NULL);
 }
 
 /*
@@ -95,14 +79,13 @@ softintr_dispatch(int si)
 {
 	struct soft_intrq *siq = &soft_intrq[si];
 	struct soft_intrhand *sih;
-	int oldirqstate;
 
 	siq->siq_evcnt.ev_count++;
 	for (;;) {
-		oldirqstate = disable_interrupts(I32_bit);
+		mtx_enter(&siq->siq_mtx);
 		sih = TAILQ_FIRST(&siq->siq_list);
 		if (sih == NULL) {
-			restore_interrupts(oldirqstate);
+			mtx_leave(&siq->siq_mtx);
 			break;
 		}
 
@@ -110,8 +93,7 @@ softintr_dispatch(int si)
 		sih->sih_pending = 0;
 
 		uvmexp.softs++;
-
-		restore_interrupts(oldirqstate);
+		mtx_leave(&siq->siq_mtx);
 
 		(*sih->sih_func)(sih->sih_arg);
 	}
@@ -142,8 +124,8 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 		break;
 
 	case IPL_TTY:
-	case IPL_SOFTSERIAL:
-		si = SI_SOFTSERIAL;
+	case IPL_SOFTTTY:
+		si = SI_SOFTTTY;
 		break;
 
 	default:
@@ -170,37 +152,13 @@ softintr_disestablish(void *arg)
 {
 	struct soft_intrhand *sih = arg;
 	struct soft_intrq *siq = sih->sih_siq;
-	int oldirqstate;
 
-	oldirqstate = disable_interrupts(I32_bit);
+	mtx_enter(&siq->siq_mtx);
 	if (sih->sih_pending) {
 		TAILQ_REMOVE(&siq->siq_list, sih, sih_list);
 		sih->sih_pending = 0;
 	}
-	restore_interrupts(oldirqstate);
+	mtx_leave(&siq->siq_mtx);
 
 	free(sih, M_DEVBUF);
-}
-
-int netisr; 
-
-void
-netintr(void)
-{
-	int n, s;
-
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
-
-#define	DONETISR(bit, fn)						\
-	do {								\
-		if (n & (1 << (bit)))					\
-			fn();						\
-	} while (/*CONSTCOND*/0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
 }

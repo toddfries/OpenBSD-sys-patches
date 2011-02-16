@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cryptodev.c,v 1.65 2006/05/31 23:01:44 tedu Exp $	*/
+=======
+/*	$OpenBSD: cryptodev.c,v 1.77 2011/01/11 16:06:40 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -34,7 +38,6 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/sysctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/errno.h>
@@ -45,7 +48,6 @@
 #include <crypto/sha1.h>
 #include <crypto/rmd160.h>
 #include <crypto/cast.h>
-#include <crypto/skipjack.h>
 #include <crypto/blf.h>
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -116,8 +118,8 @@ int	cryptodev_dokey(struct crypt_kop *kop, struct crparam kvp[]);
 int	cryptodev_cb(struct cryptop *);
 int	cryptodevkey_cb(struct cryptkop *);
 
-int	usercrypto = 1;		/* userland may do crypto requests */
-int	userasymcrypto = 1;	/* userland may do asymmetric crypto reqs */
+int	usercrypto = 0;		/* userland may do crypto requests */
+int	userasymcrypto = 0;	/* userland may do asymmetric crypto reqs */
 int	cryptodevallowsoft = 0;	/* only use hardware crypto */
 
 /* ARGSUSED */
@@ -167,14 +169,14 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 		case CRYPTO_CAST_CBC:
 			txform = &enc_xform_cast5;
 			break;
-		case CRYPTO_SKIPJACK_CBC:
-			txform = &enc_xform_skipjack;
-			break;
 		case CRYPTO_AES_CBC:
 			txform = &enc_xform_rijndael128;
 			break;
 		case CRYPTO_AES_CTR:
 			txform = &enc_xform_aes_ctr;
+			break;
+		case CRYPTO_AES_XTS:
+			txform = &enc_xform_aes_xts;
 			break;
 		case CRYPTO_ARC4:
 			txform = &enc_xform_arc4;
@@ -267,10 +269,21 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 
 bail:
 		if (error) {
+<<<<<<< HEAD
 			if (crie.cri_key)
 				FREE(crie.cri_key, M_XDATA);
 			if (cria.cri_key)
 				FREE(cria.cri_key, M_XDATA);
+=======
+			if (crie.cri_key) {
+				explicit_bzero(crie.cri_key, crie.cri_klen / 8);
+				free(crie.cri_key, M_XDATA);
+			}
+			if (cria.cri_key) {
+				explicit_bzero(cria.cri_key, cria.cri_klen / 8);
+				free(cria.cri_key, M_XDATA);
+			}
+>>>>>>> origin/master
 		}
 		break;
 	case CIOCFSESSION:
@@ -305,7 +318,7 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 {
 	struct cryptop *crp = NULL;
 	struct cryptodesc *crde = NULL, *crda = NULL;
-	int i, s, error;
+	int s, error;
 	u_int32_t hid;
 
 	if (cop->len > 64*1024-4)
@@ -318,16 +331,14 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 
 	bzero(&cse->uio, sizeof(cse->uio));
 	cse->uio.uio_iovcnt = 1;
-	cse->uio.uio_resid = 0;
 	cse->uio.uio_segflg = UIO_SYSSPACE;
 	cse->uio.uio_rw = UIO_WRITE;
 	cse->uio.uio_procp = p;
 	cse->uio.uio_iov = cse->iovec;
 	bzero(&cse->iovec, sizeof(cse->iovec));
 	cse->uio.uio_iov[0].iov_len = cop->len;
-	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK);
-	for (i = 0; i < cse->uio.uio_iovcnt; i++)
-		cse->uio.uio_resid += cse->uio.uio_iov[0].iov_len;
+	cse->uio.uio_iov[0].iov_base = malloc(cop->len, M_XDATA, M_WAITOK); /* XXX dma accessible */
+	cse->uio.uio_resid = cse->uio.uio_iov[0].iov_len;
 
 	/* number of requests, not logical and */
 	crp = crypto_getreq((cse->txform != NULL) + (cse->thash != NULL));
@@ -583,8 +594,11 @@ fail:
 	if (krp) {
 		kop->crk_status = krp->krp_status;
 		for (i = 0; i < CRK_MAXPARAM; i++) {
-			if (krp->krp_param[i].crp_p)
+			if (krp->krp_param[i].crp_p) {
+				explicit_bzero(krp->krp_param[i].crp_p,
+				    (krp->krp_param[i].crp_nbits + 7) / 8);
 				free(krp->krp_param[i].crp_p, M_XDATA);
+			}
 		}
 		free(krp, M_XDATA);
 	}
@@ -652,18 +666,6 @@ cryptoclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-cryptoread(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
-cryptowrite(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
 cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct file *f;
@@ -694,12 +696,6 @@ cryptoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 	return (error);
-}
-
-int
-cryptopoll(dev_t dev, int events, struct proc *p)
-{
-	return (seltrue(dev, events, p));
 }
 
 struct csession *

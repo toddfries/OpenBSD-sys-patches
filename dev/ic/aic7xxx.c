@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: aic7xxx.c,v 1.72 2006/02/06 17:29:10 jmc Exp $	*/
+=======
+/*	$OpenBSD: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -40,7 +44,11 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
+<<<<<<< HEAD
  * $Id: aic7xxx.c,v 1.73 2006/07/30 14:21:14 krw Exp $
+=======
+ * $Id: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $
+>>>>>>> origin/master
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
@@ -441,6 +449,8 @@ ahc_handle_brkadrint(struct ahc_softc *ahc)
 	error = ahc_inb(ahc, ERROR);
 	for (i = 0; error != 1 && i < num_errors; i++)
 		error >>= 1;
+	if (i >= num_errors)
+		panic("invalid error code");
 	printf("%s: brkadrint, %s at seqaddr = 0x%x\n",
 	       ahc_name(ahc), ahc_hard_errors[i].errmesg,
 	       ahc_inb(ahc, SEQADDR0) |
@@ -887,26 +897,28 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 			if (lastphase == ahc_phase_table[i].phase)
 				break;
 		}
-		ahc_print_path(ahc, scb);
-		printf("data overrun detected %s."
-		       "  Tag == 0x%x.\n",
-		       ahc_phase_table[i].phasemsg,
-  		       scb->hscb->tag);
-#ifndef SMALL_KERNEL
-		ahc_print_path(ahc, scb);
-		printf("%s seen Data Phase.  Length = %ld.  NumSGs = %d.\n",
-		       ahc_inb(ahc, SEQ_FLAGS) & DPHASE ? "Have" : "Haven't",
-		       ahc_get_transfer_length(scb), scb->sg_count);
-		if (scb->sg_count > 0) {
-			for (i = 0; i < scb->sg_count; i++) {
+#ifdef AHC_DEBUG
+		if ((ahc_debug & AHC_SHOW_MESSAGES) != 0) {
+			ahc_print_path(ahc, scb);
+			printf("data overrun detected %s."
+			       "  Tag == 0x%x.\n",
+			       ahc_phase_table[i].phasemsg,
+			       scb->hscb->tag);
+			ahc_print_path(ahc, scb);
+			printf("%s seen Data Phase.  Length = %ld.  NumSGs = %d.\n",
+			       ahc_inb(ahc, SEQ_FLAGS) & DPHASE ? "Have" : "Haven't",
+			       ahc_get_transfer_length(scb), scb->sg_count);
+			if (scb->sg_count > 0) {
+				for (i = 0; i < scb->sg_count; i++) {
 
-				printf("sg[%d] - Addr 0x%x%x : Length %d\n",
-				       i,
-				       (aic_le32toh(scb->sg_list[i].len) >> 24
-				        & SG_HIGH_ADDR_BITS),
-				       aic_le32toh(scb->sg_list[i].addr),
-				       aic_le32toh(scb->sg_list[i].len)
-				       & AHC_SG_LEN_MASK);
+					printf("sg[%d] - Addr 0x%x%x : Length %d\n",
+					       i,
+					       (aic_le32toh(scb->sg_list[i].len) >> 24
+						& SG_HIGH_ADDR_BITS),
+					       aic_le32toh(scb->sg_list[i].addr),
+					       aic_le32toh(scb->sg_list[i].len)
+					       & AHC_SG_LEN_MASK);
+				}
 			}
 		}
 #endif
@@ -4034,15 +4046,8 @@ ahc_free(struct ahc_softc *ahc)
 		free(ahc->black_hole, M_DEVBUF);
 	}
 #endif
-#ifndef __NetBSD__
-	if (ahc->name != NULL)
-		free(ahc->name, M_DEVBUF);
-#endif
 	if (ahc->seep_config != NULL)
 		free(ahc->seep_config, M_DEVBUF);
-#ifndef __FreeBSD__
-	free(ahc, M_DEVBUF);
-#endif
 	return;
 }
 
@@ -4480,8 +4485,7 @@ ahc_controller_info(struct ahc_softc *ahc, char *buf, size_t buf_len)
 	len = strlen(buf);
 	if ((ahc->features & AHC_TWIN) != 0)
 		snprintf(buf + len, buf_len - len,
-			 "Twin Channel, A SCSI Id=%d, B SCSI Id=%d, "
-			 "primary %c, ", ahc->our_id, ahc->our_id_b,
+			 "Twin Channel, primary %c, ",
 			 (ahc->flags & AHC_PRIMARY_CHANNEL) + 'A');
 	else {
 		const char *speed;
@@ -4501,8 +4505,8 @@ ahc_controller_info(struct ahc_softc *ahc, char *buf, size_t buf_len)
 			type = "Single";
 		}
 		snprintf(buf + len, buf_len - len,
-			 "%s%s Channel %c, SCSI Id=%d, ",
-			 speed, type, ahc->channel, ahc->our_id);
+			 "%s%s Channel %c, ",
+			 speed, type, ahc->channel);
 	}
 	len = strlen(buf);
 

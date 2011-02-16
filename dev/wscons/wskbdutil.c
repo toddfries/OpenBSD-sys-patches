@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wskbdutil.c,v 1.5 2003/12/06 14:46:44 grange Exp $	*/
+=======
+/*	$OpenBSD: wskbdutil.c,v 1.9 2010/08/28 12:48:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: wskbdutil.c,v 1.7 1999/12/21 11:59:13 drochner Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -181,18 +178,16 @@ static struct compose_tab_s {
 	{ { KS_acute,			KS_y },			KS_yacute }
 };
 
-#define COMPOSE_SIZE	sizeof(compose_tab)/sizeof(compose_tab[0])
+#define COMPOSE_SIZE	nitems(compose_tab)
 
 static int compose_tab_inorder = 0;
 
-inline int compose_tab_cmp(struct compose_tab_s *,
-				struct compose_tab_s *);
+inline int compose_tab_cmp(struct compose_tab_s *, struct compose_tab_s *);
 keysym_t ksym_upcase(keysym_t);
 void fillmapentry(const keysym_t *, int, struct wscons_keymap *);
 
 inline int
-compose_tab_cmp(i, j)
-	struct compose_tab_s *i, *j;
+compose_tab_cmp(struct compose_tab_s *i, struct compose_tab_s *j)
 {
 	if (i->elem[0] == j->elem[0])
 		return(i->elem[1] - j->elem[1]);
@@ -201,18 +196,18 @@ compose_tab_cmp(i, j)
 }
 
 keysym_t
-wskbd_compose_value(compose_buf)
-	keysym_t *compose_buf;
+wskbd_compose_value(keysym_t *compose_buf)
 {
 	int i, j, r;
 	struct compose_tab_s v;
 
-	if (! compose_tab_inorder) {
+	if (!compose_tab_inorder) {
 		/* Insertion sort. */
 		for (i = 1; i < COMPOSE_SIZE; i++) {
 			v = compose_tab[i];
 			/* find correct slot, moving others up */
-			for (j = i; --j >= 0 && compose_tab_cmp(& v, & compose_tab[j]) < 0; )
+			for (j = i; --j >= 0 &&
+			    compose_tab_cmp(&v, &compose_tab[j]) < 0;)
 				compose_tab[j + 1] = compose_tab[j];
 			compose_tab[j + 1] = v;
 		}
@@ -272,8 +267,7 @@ static const u_char latin1_to_upper[256] = {
 };
 
 keysym_t
-ksym_upcase(ksym)
-	keysym_t ksym;
+ksym_upcase(keysym_t ksym)
 {
 	if (ksym >= KS_f1 && ksym <= KS_f20)
 		return(KS_F1 - KS_f1 + ksym);
@@ -286,10 +280,7 @@ ksym_upcase(ksym)
 }
 
 void
-fillmapentry(kp, len, mapentry)
-	const keysym_t *kp;
-	int len;
-	struct wscons_keymap *mapentry;
+fillmapentry(const keysym_t *kp, int len, struct wscons_keymap *mapentry)
 {
 	switch (len) {
 	case 0:
@@ -331,10 +322,8 @@ fillmapentry(kp, len, mapentry)
 }
 
 void
-wskbd_get_mapentry(mapdata, kc, mapentry)
-	const struct wskbd_mapdata *mapdata;
-	int kc;
-	struct wscons_keymap *mapentry;
+wskbd_get_mapentry(const struct wskbd_mapdata *mapdata, int kc,
+    struct wscons_keymap *mapentry)
 {
 	kbd_t cur;
 	const keysym_t *kp;
@@ -389,10 +378,7 @@ wskbd_get_mapentry(mapdata, kc, mapentry)
 }
 
 void
-wskbd_init_keymap(newlen, map, maplen)
-	int newlen;
-	struct wscons_keymap **map;
-	int *maplen;
+wskbd_init_keymap(int newlen, struct wscons_keymap **map, int *maplen)
 {
 	int i;
 
@@ -414,10 +400,8 @@ wskbd_init_keymap(newlen, map, maplen)
 }
 
 int
-wskbd_load_keymap(mapdata, map, maplen)
-	const struct wskbd_mapdata *mapdata;
-	struct wscons_keymap **map;
-	int *maplen;
+wskbd_load_keymap(const struct wskbd_mapdata *mapdata,
+    struct wscons_keymap **map, int *maplen)
 {
 	int i, s, kc, stack_ptr;
 	const keysym_t *kp;
@@ -435,7 +419,7 @@ wskbd_load_keymap(mapdata, map, maplen)
 			mp++;
 		}
 
-		if (stack_ptr == sizeof(stack)/sizeof(stack[0]))
+		if (stack_ptr == nitems(stack))
 			panic("wskbd_load_keymap: %d: recursion too deep",
 			      mapdata->layout);
 		if (mp->map_size <= 0)

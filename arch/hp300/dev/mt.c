@@ -1,4 +1,4 @@
-/*	$OpenBSD: mt.c,v 1.16 2005/12/27 18:34:58 miod Exp $	*/
+/*	$OpenBSD: mt.c,v 1.25 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: mt.c,v 1.8 1997/03/31 07:37:29 scottr Exp $	*/
 
 /*
@@ -75,7 +75,6 @@ struct	mt_softc {
 	short	sc_type;	/* tape drive model (hardware IDs) */
 	struct	hpibqueue sc_hq; /* HPIB device queue member */
 	struct buf sc_tab;	/* buf queue */
-	struct buf sc_bufstore;	/* XXX buffer storage */
 	struct timeout sc_start_to; /* spl_mtstart timeout */
 	struct timeout sc_intr_to; /* spl_mtintr timeout */
 };
@@ -396,30 +395,22 @@ mtcommand(dev, cmd, cnt)
 	int cmd;
 	int cnt;
 {
-	struct mt_softc *sc = mt_cd.cd_devs[UNIT(dev)];
-	struct buf *bp = &sc->sc_bufstore;
+	struct buf b;
 	int error = 0;
 
-#if 1
-	if (bp->b_flags & B_BUSY)
-		return (EBUSY);
-#endif
-	bp->b_cmd = cmd;
-	bp->b_dev = dev;
+	bzero(&b, sizeof(b));
+	b.b_cmd = cmd;
+	b.b_dev = dev;
 	do {
-		bp->b_flags = B_BUSY | B_CMD;
-		mtstrategy(bp);
-		biowait(bp);
-		if (bp->b_flags & B_ERROR) {
-			error = (int) (unsigned) bp->b_error;
+		b.b_flags = B_BUSY | B_CMD | B_RAW;
+		mtstrategy(&b);
+		biowait(&b);
+		if (b.b_flags & B_ERROR) {
+			error = (int) (unsigned) b.b_error;
 			break;
 		}
 	} while (--cnt > 0);
-#if 0
-	bp->b_flags = 0 /*&= ~B_BUSY*/;
-#else
-	bp->b_flags &= ~B_BUSY;
-#endif
+
 	return (error);
 }
 
@@ -555,7 +546,7 @@ mtstart(arg)
 			 * but not otherwise.
 			 */
 			if (sc->sc_flags & (MTF_DSJTIMEO | MTF_STATTIMEO)) {
-				timeout_add(&sc->sc_start_to, hz >> 5);
+				timeout_add_msec(&sc->sc_start_to, 1000 >> 5);
 				return;
 			}
 		    case 2:
@@ -641,7 +632,7 @@ mtstart(arg)
 				break;
 
 			    case -2:
-				timeout_add(&sc->sc_start_to, hz >> 5);
+				timeout_add_msec(&sc->sc_start_to, 1000 >> 5);
 				return;
 			}
 
@@ -656,7 +647,7 @@ mtstart(arg)
 				    sc->sc_dev.dv_xname);
 				goto fatalerror;
 			}
-			timeout_add(&sc->sc_intr_to, 4 * hz);
+			timeout_add_sec(&sc->sc_intr_to, 4);
 			hpibawait(sc->sc_hpibno);
 			return;
 
@@ -797,7 +788,7 @@ mtintr(arg)
 		 * to the request for DSJ.  It's probably just "busy" figuring
 		 * it out and will know in a little bit...
 		 */
-		timeout_add(&sc->sc_intr_to, hz >> 5);
+		timeout_add_msec(&sc->sc_intr_to, 1000 >> 5);
 		return;
 
 	    default:
@@ -923,10 +914,7 @@ mtread(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	struct mt_softc *sc = mt_cd.cd_devs[UNIT(dev)];
-
-	return(physio(mtstrategy, &sc->sc_bufstore,
-	    dev, B_READ, minphys, uio));
+	return (physio(mtstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -935,10 +923,7 @@ mtwrite(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	struct mt_softc *sc = mt_cd.cd_devs[UNIT(dev)];
-
-	return(physio(mtstrategy, &sc->sc_bufstore,
-	    dev, B_WRITE, minphys, uio));
+	return (physio(mtstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int

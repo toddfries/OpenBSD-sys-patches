@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: psl.h,v 1.21 2006/05/20 14:18:35 miod Exp $	*/
+=======
+/*	$OpenBSD: psl.h,v 1.27 2010/05/31 21:39:56 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: psl.h,v 1.20 2001/04/13 23:30:05 thorpej Exp $ */
 
 /*
@@ -51,7 +55,6 @@
 #define PIL_BIO		5
 #define PIL_VIDEO	5
 #define PIL_TTY		6
-#define PIL_LPT		6
 #define PIL_NET		6
 #define PIL_VM		7
 #define	PIL_AUD		8
@@ -216,7 +219,7 @@
  * stack pointer and then vector to the real handler.  We could optimize this
  * if we could guarantee only 32-bit or 64-bit stacks.
  */
-#define WSTATE_KERN	026
+#define WSTATE_KERN	027
 #define WSTATE_USER	022
 
 #define CWP		0x01f
@@ -245,8 +248,10 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
 #else
-#define splassert(wantipl) do { /* nada */ } while (0)
+#define splassert(wantipl)	do { /* nada */ } while (0)
+#define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
 
 /*
@@ -412,9 +417,6 @@ SPLHOLD(splnet, PIL_NET)
 /* tty input runs at software level 6 */
 SPLHOLD(spltty, PIL_TTY)
 
-/* parallel port runs at software level 6 */
-SPLHOLD(spllpt, PIL_LPT)
-
 /*
  * Memory allocation (must be as high as highest network, tty, or disk device)
  */
@@ -450,7 +452,6 @@ SPLHOLD(splhigh, PIL_HIGH)
 #define	splbio()	splbioX(__FILE__, __LINE__)
 #define	splnet()	splnetX(__FILE__, __LINE__)
 #define	spltty()	splttyX(__FILE__, __LINE__)
-#define	spllpt()	spllptX(__FILE__, __LINE__)
 #define	splvm()		splvmX(__FILE__, __LINE__)
 #define	splclock()	splclockX(__FILE__, __LINE__)
 #define	splfd()		splfdX(__FILE__, __LINE__)

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_san_xilinx.c,v 1.17 2005/12/13 05:56:22 canacar Exp $	*/
+=======
+/*	$OpenBSD: if_san_xilinx.c,v 1.24 2008/11/26 18:01:43 dlg Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -191,6 +195,8 @@ typedef struct {
 
 extern void disable_irq(unsigned int);
 extern void enable_irq(unsigned int);
+
+extern int ticks;
 
 /**SECTOIN**************************************************
  *
@@ -1978,7 +1984,8 @@ xilinx_dma_tx_complete(sdla_t *card, xilinx_softc_t *sc)
 	}
 
 	sc->pci_retry = 0;
-	sc->tx_dma_mbuf->m_pkthdr.csum_flags = reg;
+	sc->tx_dma_mbuf->m_pkthdr.csum_flags = reg & 0xFFFF;
+	sc->tx_dma_mbuf->m_pkthdr.ether_vtag = (reg >> 16) & 0xFFFF;
 	IF_ENQUEUE(&sc->wp_tx_complete_list, sc->tx_dma_mbuf);
 	sc->tx_dma_mbuf = NULL;
 
@@ -1991,9 +1998,10 @@ static void
 xilinx_tx_post_complete(sdla_t *card, xilinx_softc_t *sc, struct mbuf *m)
 {
 	struct ifnet	*ifp;
-	unsigned long	reg = m->m_pkthdr.csum_flags;
+	u_int32_t reg;
 
 	WAN_ASSERT1(sc == NULL);
+	reg = (m->m_pkthdr.ether_vtag << 16) + m->m_pkthdr.csum_flags;
 	ifp = (struct ifnet *)&sc->common.ifp;
 	if ((bit_test((u_int8_t *)&reg, TxDMA_HI_DMA_GO_READY_BIT)) ||
 	    (reg & TxDMA_HI_DMA_DATA_LENGTH_MASK) ||
@@ -3536,7 +3544,7 @@ aft_led_timer(void *data)
 		}
 
 		splx(s);
-		timeout_add(&card->u.xilinx.led_timer, hz);
+		timeout_add_sec(&card->u.xilinx.led_timer, 1);
 	}
 }
 

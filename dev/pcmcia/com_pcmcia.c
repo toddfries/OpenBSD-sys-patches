@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: com_pcmcia.c,v 1.45 2006/04/20 20:31:13 miod Exp $	*/
+=======
+/*	$OpenBSD: com_pcmcia.c,v 1.51 2010/08/30 20:33:18 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: com_pcmcia.c,v 1.15 1998/08/22 17:47:58 msaitoh Exp $	*/
 
 /*
@@ -43,13 +47,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -101,7 +98,6 @@
 #include <sys/selinfo.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/uio.h>
@@ -147,7 +143,7 @@ int com_pcmcia_match(struct device *, void *, void *);
 void com_pcmcia_attach(struct device *, struct device *, void *);
 int com_pcmcia_detach(struct device *, int);
 void com_pcmcia_cleanup(void *);
-int com_pcmcia_activate(struct device *, enum devact);
+int com_pcmcia_activate(struct device *, int);
 
 int com_pcmcia_enable(struct com_softc *);
 void com_pcmcia_disable(struct com_softc *);
@@ -230,25 +226,35 @@ com_pcmcia_match(parent, match, aux)
 int
 com_pcmcia_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct com_pcmcia_softc *sc = (void *) dev;
-	int s;
 
-	s = spltty();
 	switch (act) {
 	case DVACT_ACTIVATE:
 		pcmcia_function_enable(sc->sc_pf);
 		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_TTY,
 		    comintr, sc, sc->sc_com.sc_dev.dv_xname);
 		break;
-
+	case DVACT_SUSPEND:
+		if (sc->sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
+		pcmcia_function_enable(sc->sc_pf);
+		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_TTY,
+		    comintr, sc, sc->sc_com.sc_dev.dv_xname);
+		com_resume(&sc->sc_com);
+		break;
 	case DVACT_DEACTIVATE:
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		if (sc->sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 

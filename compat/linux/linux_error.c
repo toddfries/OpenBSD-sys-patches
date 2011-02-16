@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: linux_error.c,v 1.2 1996/04/17 05:23:45 mickey Exp $	*/
+=======
+/*	$OpenBSD: linux_error.c,v 1.5 2009/10/28 16:38:43 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: linux_error.c,v 1.2 1995/04/22 19:48:32 christos Exp $	*/
 
 /*
@@ -129,6 +133,7 @@ int linux_error[] = {
 
 	-LINUX_ENOMSG,
 	-LINUX_EIDRM,
+<<<<<<< HEAD
 	-LINUX_ECHRNG,
 	-LINUX_EL2NSYNC,
 	-LINUX_EL3HLT,
@@ -176,4 +181,8 @@ int linux_error[] = {
 	-LINUX_ENAVAIL,
 	-LINUX_EISNAM,
 	-LINUX_EREMOTEIO
+=======
+	-LINUX_ENOMSG,
+	-LINUX_ENOSYS		/* not mapped (ENOTSUP) */
+>>>>>>> origin/master
 };

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: scb.h,v 1.8 2006/07/19 20:22:36 miod Exp $	*/
+=======
+/*	$OpenBSD: scb.h,v 1.10 2008/08/18 23:19:24 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: scb.h,v 1.11 2000/07/10 09:14:34 ragge Exp $	*/
 
 /*
@@ -131,10 +135,11 @@ extern	const struct ivec_dsp idsptch;
 extern	struct scb *scb;
 extern	struct ivec_dsp *scb_vec;
 
-extern	paddr_t scb_init (paddr_t);
-extern	int scb_vecref (int *, int *);
-extern	void scb_fake (int, int);
-extern	void scb_vecalloc (int, void(*)(void *), void *, int, struct evcount *);
+extern	paddr_t scb_init(paddr_t);
+extern	int scb_vecref(int *, int *);
+extern	void scb_fake(int, int);
+extern	void scb_stray(void *);
+extern	void scb_vecalloc(int, void(*)(void *), void *, int, struct evcount *);
 #endif /* _KERNEL */
 
 #endif /* _VAX_SCB_H */

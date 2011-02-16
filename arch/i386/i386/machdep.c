@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.381 2007/04/03 10:14:47 art Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.487 2011/01/27 21:27:44 jsg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -97,9 +90,7 @@
 #include <sys/syscallargs.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
+#include <sys/sensors.h>
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -109,8 +100,8 @@
 #include <stand/boot/bootarg.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
-#define _I386_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/cpu.h>
@@ -123,6 +114,9 @@
 #include <machine/reg.h>
 #include <machine/specialreg.h>
 #include <machine/biosvar.h>
+#ifdef MULTIPROCESSOR
+#include <machine/mpbiosvar.h>
+#endif /* MULTIPROCESSOR */
 
 #include <dev/rndvar.h>
 #include <dev/isa/isareg.h>
@@ -216,6 +210,14 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	&dma_constraint,
+	NULL
+};
+
 extern int	boothowto;
 int	physmem;
 
@@ -251,6 +253,19 @@ struct vm_map *phys_map = NULL;
 int kbd_reset;
 int p4_model;
 int p3_early;
+void (*update_cpuspeed)(void) = NULL;
+void	via_update_sensor(void *args);
+#endif
+int kbd_reset;
+int lid_suspend;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
+
+#if !defined(SMALL_KERNEL)
 int bus_clock;
 void (*setperf_setup)(struct cpu_info *);
 int setperf_prio = 0;		/* for concurrent handlers */
@@ -277,8 +292,6 @@ struct	extent *ioport_ex;
 struct	extent *iomem_ex;
 static	int ioport_malloc_safe;
 
-caddr_t	allocsys(caddr_t);
-void	setup_buffers(vaddr_t *);
 void	dumpsys(void);
 int	cpu_dump(void);
 void	init386(paddr_t);
@@ -287,8 +300,6 @@ void	(*cpuresetfn)(void);
 
 int	bus_mem_add_mapping(bus_addr_t, bus_size_t,
 	    int, bus_space_handle_t *);
-int	_bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
-    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 
 #ifdef KGDB
 #ifndef KGDB_DEVNAME
@@ -390,8 +401,6 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
-	int sz;
 	vaddr_t minaddr, maxaddr, va;
 	paddr_t pa;
 
@@ -410,7 +419,7 @@ cpu_startup()
 	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
-	startrtclock();
+	startclocks();
 
 	/*
 	 * We need to call identifycpu here early, so users have at least some
@@ -426,20 +435,11 @@ cpu_startup()
 	    ctob((paddr_t)physmem)/1024U);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
+	 * Determine how many buffers to allocate.  We use bufcachepercent%
+	 * of the memory below 4GB.
 	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	setup_buffers(&maxaddr);
+	if (bufpages == 0)
+		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -525,160 +525,6 @@ i386_init_pcb_tss_ldt(struct cpu_info *ci)
 	ci->ci_idle_tss_sel = tss_alloc(pcb);
 }
 #endif	/* MULTIPROCESSOR */
-
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest of below 4G memory,
-	 * with a minimum of 16 buffers.  We allocate 1/2 as many swap
-	 * buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024 + avail_end)) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 35% filled kvm */
-	/* XXX - This needs UBC... */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-	return v;
-}
-
-void
-setup_buffers(vaddr_t *maxaddr)
-{
-	vsize_t size;
-	vaddr_t addr;
-	int base, residual, left, chunk, i;
-	struct pglist pgs, saved_pgs;
-	struct vm_page *pg;
-
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	addr = (vaddr_t)buffers;
-
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE / PAGE_SIZE) {
-		/* don't want to alloc more physical mem than needed */
-		base = MAXBSIZE / PAGE_SIZE;
-		residual = 0;
-	}
-
-	/*
-	 * In case we might need DMA bouncing we have to make sure there
-	 * is some memory below 16MB available.  On machines with many
-	 * pages reserved for the buffer cache we risk filling all of that
-	 * area with buffer pages.  We still want much of the buffers
-	 * reside there as that lowers the probability of them needing to
-	 * bounce, but we have to set aside some space for DMA buffers too.
-	 *
-	 * The current strategy is to grab hold of one 3MB chunk below 16MB
-	 * first, which we are saving for DMA buffers, then try to get
-	 * one chunk at a time for fs buffers, until that is not possible
-	 * anymore, at which point we get the rest wherever we may find it.
-	 * After that we give our saved area back. That will guarantee at
-	 * least 3MB below 16MB left for drivers' attach routines, among
-	 * them isadma.  However we still have a potential problem of PCI
-	 * devices attached earlier snatching that memory.  This can be
-	 * solved by making the PCI DMA memory allocation routines go for
-	 * memory above 16MB first.
-	 */
-
-	left = bufpages;
-
-	/*
-	 * First, save ISA DMA bounce buffer area so we won't lose that
-	 * capability.
-	 */
-	TAILQ_INIT(&saved_pgs);
-	TAILQ_INIT(&pgs);
-	if (!ALLOC_PGS(CHUNKSZ, ISADMA_LIMIT, saved_pgs)) {
-		/*
-		 * Then, grab as much ISA DMAable memory as possible
-		 * for the buffer cache as it is nice to not need to
-		 * bounce all buffer I/O.
-		 */
-		for (left = bufpages; left > 0; left -= chunk) {
-			chunk = min(left, CHUNKSZ / PAGE_SIZE);
-			if (ALLOC_PGS(chunk * PAGE_SIZE, ISADMA_LIMIT, pgs))
-				break;
-		}
-	}
-
-	/*
-	 * If we need more pages for the buffer cache, get them from anywhere.
-	 */
-	if (left > 0 && ALLOC_PGS(left * PAGE_SIZE, avail_end, pgs))
-		panic("cannot get physical memory for buffer cache");
-
-	/*
-	 * Finally, give back the ISA DMA bounce buffer area, so it can be
-	 * allocated by the isadma driver later.
-	 */
-	if (!TAILQ_EMPTY(&saved_pgs))
-		FREE_PGS(saved_pgs);
-
-	pg = TAILQ_FIRST(&pgs);
-	for (i = 0; i < nbuf; i++) {
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		addr = (vaddr_t)buffers + i * MAXBSIZE;
-		for (size = PAGE_SIZE * (i < residual ? base + 1 : base);
-		    size > 0; size -= PAGE_SIZE, addr += PAGE_SIZE) {
-			pmap_kenter_pa(addr, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			pg = TAILQ_NEXT(pg, pageq);
-		}
-	}
-	pmap_update(pmap_kernel());
-}
 
 /*
  * Info for CTL_HW
@@ -1133,14 +979,29 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
+	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" },
 };
 
 void
@@ -1213,7 +1074,23 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		/*
 		 * C3 Nehemiah: fall through.
 		 */
-	case 10:
+	
+	case 10: /* C7-M Type A */
+	case 13: /* C7-M Type D */
+	case 15: /* Nano */
+#if !defined(SMALL_KERNEL)
+		if (model == 10 || model == 13 || model == 15) {
+			/* Setup the sensors structures */
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, via_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
+#endif
+
+	default:
 		/*
 		 * C3 Nehemiah/Esther:
 		 * First we check for extended feature flags, and then
@@ -1307,6 +1184,30 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 #endif
 }
 
+#if !defined(SMALL_KERNEL)
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	switch (ci->ci_model) {
+	case 0xa:
+	case 0xd:
+		msr = rdmsr(MSR_C7M_TMTEMPERATURE);
+		break;
+	case 0xf:
+		msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+		break;
+	}
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
+
 void
 cyrix6x86_cpu_setup(struct cpu_info *ci)
 {
@@ -1324,7 +1225,7 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		/* cyrix's workaround  for the "coma bug" */
 		cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
 		cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
-		cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
+		cyrix_read_reg(0x33); cyrix_write_reg(0x33, 0);
 		cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
 		/* disable access to ccr4/ccr5 */
 		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
@@ -1441,6 +1342,66 @@ amd_family6_setup(struct cpu_info *ci)
 #if !defined(MULTIPROCESSOR)
 	setperf_setup = amd_family6_setperf_setup;
 #endif
+}
+
+#if !defined(SMALL_KERNEL)
+/*
+ * Temperature read on the CPU is relative to the maximum
+ * temperature supported by the CPU, Tj(Max).
+ * Poorly documented, refer to:
+ * http://softwarecommunity.intel.com/isn/Community/
+ * en-US/forums/thread/30228638.aspx
+ * Basically, depending on a bit in one msr, the max is either 85 or 100.
+ * Then we subtract the temperature portion of thermal status from
+ * max to get current temperature.
+ */
+void
+intelcore_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+	int max = 100;
+
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
+		max = 85;
+
+	msr = rdmsr(MSR_THERM_STATUS);
+	if (msr & MSR_THERM_STATUS_VALID_BIT) {
+		ci->ci_sensor.value = max - MSR_THERM_STATUS_TEMP(msr);
+		/* micro degrees */
+		ci->ci_sensor.value *= 1000000;
+		/* kelvin */
+		ci->ci_sensor.value += 273150000;
+		ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+	} else {
+		ci->ci_sensor.value = 0;
+		ci->ci_sensor.flags |= SENSOR_FINVALID;
+	}
+}
+
+void
+intel686_cpusensors_setup(struct cpu_info *ci)
+{
+	u_int regs[4];
+
+	if (cpuid_level < 0x06)
+		return;
+
+	/* CPUID.06H.EAX[0] = 1 tells us if we have on-die sensor */
+	cpuid(0x06, regs);
+	if ((regs[0] & 0x01) != 1)
+		return;
+
+	/* Setup the sensors structures */
+	strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+	    sizeof(ci->ci_sensordev.xname));
+	ci->ci_sensor.type = SENSOR_TEMP;
+	sensor_task_register(ci, intelcore_update_sensor, 5);
+	sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+	sensordev_install(&ci->ci_sensordev);
+}
 #endif
 }
 
@@ -1652,7 +1613,9 @@ identifycpu(struct cpu_info *ci)
 		max = sizeof (i386_cpuid_cpus) / sizeof (i386_cpuid_cpus[0]);
 		modif = (ci->ci_signature >> 12) & 3;
 		family = (ci->ci_signature >> 8) & 15;
+		ci->ci_family = family;
 		model = (ci->ci_signature >> 4) & 15;
+		ci->ci_model = model;
 		step = ci->ci_signature & 15;
 #ifdef CPUDEBUG
 		printf("%s: family %x model %x step %x\n", cpu_device, family,
@@ -1709,6 +1672,16 @@ identifycpu(struct cpu_info *ci)
 				model = CPU_DEFMODEL;
 			i = family - CPU_MINFAMILY;
 
+			/* store extended family/model values for later use */
+			if ((vendor == CPUVENDOR_INTEL &&
+			    (family == 0x6 || family == 0xf)) ||
+			    (vendor == CPUVENDOR_AMD && family == 0xf)) {
+				ci->ci_family += (ci->ci_signature >> 20) &
+				    0xff;
+				ci->ci_model += ((ci->ci_signature >> 16) &
+				    0x0f) << 4;
+			}
+
 			/* Special hack for the PentiumII/III series. */
 			if (vendor == CPUVENDOR_INTEL && family == 6 &&
 			    (model == 5 || model == 7)) {
@@ -1747,6 +1720,29 @@ identifycpu(struct cpu_info *ci)
 		if (regs[0] >= 0x80000006) {
 			cpuid(0x80000006, regs);
 			cachesize = (regs[2] >> 16);
+		}
+	}
+
+	if (vendor == CPUVENDOR_INTEL) {
+		/*
+		 * PIII, Core Solo and Core Duo CPUs have known
+		 * errata stating:
+		 * "Page with PAT set to WC while associated MTRR is UC
+		 * may consolidate to UC".
+		 * Because of this it is best we just fallback to mtrrs
+		 * in this case.
+		 */
+		if (ci->ci_family == 6 && ci->ci_model < 15)
+		    ci->ci_feature_flags &= ~CPUID_PAT;
+
+		if (ci->ci_feature_flags & CPUID_CFLUSH) {
+			/* to get the cacheline size you must do cpuid
+			 * with eax 0x01
+			 */
+			u_int regs[4];
+
+			cpuid(0x01, regs); 
+			ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
 		}
 	}
 
@@ -1840,12 +1836,6 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
-#ifndef MULTIPROCESSOR
-	/* configure the CPU if needed */
-	if (ci->cpu_setup != NULL)
-		(ci->cpu_setup)(ci);
-#endif
-
 #ifndef SMALL_KERNEL
 #if defined(I586_CPU) || defined(I686_CPU)
 	if (cpuspeed != 0 && cpu_cpuspeed == NULL)
@@ -1901,17 +1891,8 @@ identifycpu(struct cpu_info *ci)
 
 	ci->cpu_class = class;
 
-	if (cpu == CPU_486DLC) {
-#ifndef CYRIX_CACHE_WORKS
+	if (cpu == CPU_486DLC)
 		printf("WARNING: CYRIX 486DLC CACHE UNCHANGED.\n");
-#else
-#ifndef CYRIX_CACHE_REALLY_WORKS
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED IN HOLD-FLUSH MODE.\n");
-#else
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED.\n");
-#endif
-#endif
-	}
 
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
@@ -2044,10 +2025,9 @@ void
 p3_get_bus_clock(struct cpu_info *ci)
 {
 	u_int64_t msr;
-	int model, bus;
+	int bus;
 
-	model = (ci->ci_signature >> 4) & 15;
-	switch (model) {
+	switch (ci->ci_model) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
 		bus_clock = 10000;
 		break;
@@ -2067,8 +2047,12 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	case 0x15:	/* EP80579 no FSB */
+		break;
 	case 0xe: /* Core Duo/Solo */
 	case 0xf: /* Core Xeon */
+	case 0x16: /* 65nm Celeron */
+	case 0x17: /* Core 2 Extreme/45nm Xeon */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2089,6 +2073,28 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		default:
 			printf("%s: unknown Core FSB_FREQ value %d",
+			    ci->ci_dev.dv_xname, bus);
+			goto print_msr;
+		}
+		break;
+	case 0x1c: /* Atom */
+		msr = rdmsr(MSR_FSB_FREQ);
+		bus = (msr >> 0) & 0x7;
+		switch (bus) {
+		case 5:
+			bus_clock = BUS100;
+			break;
+		case 1:
+			bus_clock = BUS133;
+			break;
+		case 3:
+			bus_clock = BUS166;
+			break;
+		case 2:
+			bus_clock = BUS200;
+			break;
+		default:
+			printf("%s: unknown Atom FSB_FREQ value %d",
 			    ci->ci_dev.dv_xname, bus);
 			goto print_msr;
 		}
@@ -2119,9 +2125,15 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	case 0x1a: /* Core i7, Xeon 3500/5500 */
+	case 0x1e: /* Core i5/i7, Xeon 3400 */
+	case 0x25: /* Core i3/i5, Xeon 3400 */
+	case 0x2c: /* Core i7, Xeon 3600/5600 */
+	case 0x2e: /* Xeon 6500/7500 */
+		break;
 	default: 
-		printf("%s: unknown i686 model %d, can't get bus clock",
-		    ci->ci_dev.dv_xname, model);
+		printf("%s: unknown i686 model 0x%x, can't get bus clock",
+		    ci->ci_dev.dv_xname, ci->ci_model);
 print_msr:
 		/*
 		 * Show the EBL_CR_POWERON MSR, so we'll at least have
@@ -2182,19 +2194,6 @@ pentium_cpuspeed(int *freq)
 #endif
 #endif	/* !SMALL_KERNEL */
 
-#ifdef COMPAT_IBCS2
-void ibcs2_sendsig(sig_t, int, int, u_long, int, union sigval);
-
-void
-ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
-    union sigval val)
-{
-	extern int bsd_to_ibcs2_sig[];
-
-	sendsig(catcher, bsd_to_ibcs2_sig[sig], mask, code, type, val);
-}
-#endif
-
 /*
  * To send an AST to a process on another cpu we send an IPI to that cpu,
  * the IPI schedules a special soft interrupt (that does nothing) and then
@@ -2232,9 +2231,6 @@ void
 sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
-#ifdef I686_CPU
-	extern char sigcode, sigcode_xmm;
-#endif
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
@@ -2257,11 +2253,18 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	} else
 		sp = tf->tf_esp;
 
-	frame.sf_fpstate = NULL;
+	frame.sf_sc.sc_fpstate = NULL;
 	if (p->p_md.md_flags & MDP_USEDFPU) {
+		npxsave_proc(p, 1);
 		sp -= sizeof(union savefpu);
-		sp &= ~0xf;	/* foe XMM regs */
-		frame.sf_fpstate = (void *)sp;
+		sp &= ~0xf;	/* for XMM regs */
+		frame.sf_sc.sc_fpstate = (void *)sp;
+		if (copyout(&p->p_addr->u_pcb.pcb_savefpu,
+		    (void *)sp, sizeof(union savefpu)))
+			sigexit(p, SIGILL);
+
+		/* Signal handlers get a completely clean FP state */
+		p->p_md.md_flags &= ~MDP_USEDFPU;
 	}
 
 	fp = (struct sigframe *)sp - 1;
@@ -2332,11 +2335,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_eip = p->p_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-#ifdef I686_CPU
-	if (i386_use_fxsave)
-		tf->tf_eip += &sigcode_xmm - &sigcode;
-#endif
-	tf->tf_eflags &= ~(PSL_T|PSL_VM|PSL_AC);
+	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 }
@@ -2358,9 +2357,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct sigcontext *) sigcntxp;
 	} */ *uap = v;
 	struct sigcontext *scp, context;
-	struct trapframe *tf;
-
-	tf = p->p_md.md_regs;
+	struct trapframe *tf = p->p_md.md_regs;
+	int error;
 
 	/*
 	 * The trampoline code hands us the context.
@@ -2412,6 +2410,16 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	tf->tf_esp = context.sc_esp;
 	tf->tf_ss = context.sc_ss;
 
+	if (p->p_md.md_flags & MDP_USEDFPU)
+		npxsave_proc(p, 0);
+
+	if (context.sc_fpstate) {
+		if ((error = copyin(context.sc_fpstate,
+		    &p->p_addr->u_pcb.pcb_savefpu, sizeof (union savefpu))))
+			return (error);
+		p->p_md.md_flags |= MDP_USEDFPU;
+	}
+
 	if (context.sc_onstack & 01)
 		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
 	else
@@ -2421,12 +2429,35 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+	cpu_unidle(p->p_cpu);
+}
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		i386_send_ipi(ci, I386_IPI_NOP);
+}
+#endif
+
 int	waittime = -1;
 struct pcb dumppcb;
 
 void
 boot(int howto)
 {
+	if (howto & RB_POWERDOWN)
+		lid_suspend = 0;
+
 	if (cold) {
 		/*
 		 * If the system is cold, just halt, unless the user
@@ -2630,6 +2661,10 @@ dumpsys()
 		return;
 	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	error = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
 	if (error == -1) {
@@ -2729,6 +2764,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	/* If we were using the FPU, forget about it. */
 	if (pcb->pcb_fpcpu != NULL)
 		npxsave_proc(p, 0);
+	p->p_md.md_flags &= ~MDP_USEDFPU;
 #endif
 
 #ifdef USER_LDT
@@ -2744,39 +2780,32 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	    SDT_MEMERA, SEL_UPL, 1, 1);
 
 	/*
-	 * And update the GDT and LDT since we return to the user process
+	 * And update the GDT since we return to the user process
 	 * by leaving the syscall (we don't do another pmap_activate()).
 	 */
-#ifdef MULTIPROCESSOR
-	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-	    pmap->pm_codeseg;
-#else
-	gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd = pmap->pm_codeseg;
-#endif
+	curcpu()->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
 
 	/*
 	 * And reset the hiexec marker in the pmap.
 	 */
 	pmap->pm_hiexec = 0;
 
-	p->p_md.md_flags &= ~MDP_USEDFPU;
-	if (i386_use_fxsave) {
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-	} else
-		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
-
-	tf->tf_fs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_gs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_es = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_ds = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_edi = 0;
+	tf->tf_esi = 0;
 	tf->tf_ebp = 0;
 	tf->tf_ebx = (int)PS_STRINGS;
+	tf->tf_edx = 0;
+	tf->tf_ecx = 0;
+	tf->tf_eax = 0;
 	tf->tf_eip = pack->ep_entry;
-	tf->tf_cs = LSEL(LUCODE_SEL, SEL_UPL);
+	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags = PSL_USERSET;
 	tf->tf_esp = stack;
-	tf->tf_ss = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 
 	retval[1] = 0;
 }
@@ -2966,13 +2995,6 @@ init386(paddr_t first_avail)
 	setsegment(&gdt[GCPU_SEL].sd, &cpu_info_primary,
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
 
-	/* make ldt gates and memory segments */
-	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-	ldt[LUCODE_SEL] = gdt[GUCODE_SEL];
-	ldt[LUDATA_SEL] = gdt[GUDATA_SEL];
-	ldt[LBSDICALLS_SEL] = ldt[LSYS5CALLS_SEL];
-
 	/* exceptions */
 	setgate(&idt[  0], &IDTVEC(div),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
 	setgate(&idt[  1], &IDTVEC(dbg),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
@@ -3052,12 +3074,8 @@ init386(paddr_t first_avail)
 #endif
  
 #if defined(MULTIPROCESSOR)
-	/* install the page after boot args as PT page for first 4M */
-	pmap_enter(pmap_kernel(), (u_long)vtopte(0),
-	   round_page((vaddr_t)(bootargv + bootargc)),
-		VM_PROT_READ|VM_PROT_WRITE,
-		VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
-	memset(vtopte(0), 0, NBPG);  /* make sure it is clean before using */
+	/* install the lowmem ptp after boot args for 1:1 mappings */
+	pmap_prealloc_lowmem_ptp(round_page((paddr_t)(bootargv + bootargc)));
 #endif
 
 	/*
@@ -3104,6 +3122,24 @@ init386(paddr_t first_avail)
 #endif
 				continue;
 			}
+
+			/*
+			 * XXX Some buggy ACPI BIOSes use memory that
+			 * they declare as free.  Typically the
+			 * affected memory areas are small blocks
+			 * between areas reserved for ACPI and other
+			 * BIOS goo.  So skip areas smaller than 1 MB
+			 * above the 16 MB boundary (to avoid
+			 * affecting legacy stuff).
+			 */
+			if (a > 16*1024*1024 && (e - a) < 1*1024*1024) {
+#ifdef DEBUG
+				printf("-X");
+#endif
+				continue;
+			}
+
+			/* skip legacy IO region */
 			if ((a > IOM_BEGIN && a < IOM_END) ||
 			    (e > IOM_BEGIN && e < IOM_END)) {
 #ifdef DEBUG
@@ -3133,7 +3169,9 @@ init386(paddr_t first_avail)
 	if (physmem < atop(4 * 1024 * 1024)) {
 		printf("\awarning: too little memory available;"
 		    "running in degraded mode\npress a key to confirm\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 #ifdef DEBUG
@@ -3186,6 +3224,25 @@ init386(paddr_t first_avail)
 #ifdef DEBUG
 	printf("\n");
 #endif
+
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && !defined(SMALL_KERNEL))
+	/* install the lowmem ptp after boot args for 1:1 mappings */
+	pmap_prealloc_lowmem_ptp(PTP0_PA);
+#endif
+
+#ifdef MULTIPROCESSOR
+	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,  /* virtual */
+	    (paddr_t)MP_TRAMPOLINE,             /* physical */
+	    VM_PROT_ALL);                       /* protection */
+#endif
+
+#if NACPI > 0 && !defined(SMALL_KERNEL)
+	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,/* virtual */
+	    (paddr_t)ACPI_TRAMPOLINE,           /* physical */
+	    VM_PROT_ALL);                       /* protection */
+#endif
+
 	tlbflush();
 #if 0
 #if NISADMA > 0
@@ -3312,30 +3369,21 @@ cpu_reset()
 void
 cpu_initclocks(void)
 {
-	(*initclock_func)();
-
-	if (initclock_func == i8254_initclocks)
-		i8254_inittimecounter();
-	else
-		i8254_inittimecounter_simple();
+	(*initclock_func)();		/* lapic or i8254 */
 }
 
 void
 need_resched(struct cpu_info *ci)
 {
-	struct proc *p;
-
 	ci->ci_want_resched = 1;
 
-	/*
-	 * Need to catch the curproc in case it's cleared just
-	 * between the check and the aston().
-	 */
-	if ((p = ci->ci_curproc) != NULL)
-		aston(p);
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
+		aston(ci->ci_curproc);
+		cpu_unidle(ci);
+	}
 }
 
-#ifdef MULTIPROCESSOR
 /* Allocate an IDT vector slot within the given range.
  * XXX needs locking to avoid MP allocation races.
  */
@@ -3362,7 +3410,6 @@ idt_vec_free(int vec)
 {
 	unsetgate(&idt[vec]);
 }
-#endif	/* MULTIPROCESSOR */
 
 /*
  * machine dependent system variables.
@@ -3441,6 +3488,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_sse2));
 	case CPU_XCRYPT:
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_xcrypt));
+	case CPU_LIDSUSPEND:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &lid_suspend));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -3600,13 +3649,10 @@ int
 bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
+	paddr_t pa, endpa;
 	vaddr_t va;
-	pt_entry_t *pte;
 	bus_size_t map_size;
-#ifdef MULTIPROCESSOR
-	u_int32_t cpumask = 0;
-#endif
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -3624,32 +3670,15 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
-	for (; map_size > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
 
-		/*
-		 * PG_N doesn't exist on 386's, so we assume that
-		 * the mainboard has wired up device space non-cacheable
-		 * on those machines.
-		 */
-		if (cpu_class != CPUCLASS_386) {
-			pte = kvtopte(va);
-			if (cacheable)
-				*pte &= ~PG_N;
-			else
-				*pte |= PG_N;
-#ifdef MULTIPROCESSOR
-			pmap_tlb_shootdown(pmap_kernel(), va, *pte,
-			    &cpumask);
-#else
-			pmap_update_pg(va);
-#endif
-		}
-	}
-#ifdef MULTIPROCESSOR
-	pmap_tlb_shootnow(cpumask);
-#endif
+	for (; map_size > 0;
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3754,532 +3783,6 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
 	*nbshp = bsh + offset;
-	return (0);
-}
-
-/*
- * Common function for DMA map creation.  May be called by bus-specific
- * DMA map creation functions.
- */
-int
-_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
-    bus_size_t maxsegsz, bus_size_t boundary, int flags, bus_dmamap_t *dmamp)
-{
-	struct i386_bus_dmamap *map;
-	void *mapstore;
-	size_t mapsize;
-
-	/*
-	 * Allocate and initialize the DMA map.  The end of the map
-	 * is a variable-sized array of segments, so we allocate enough
-	 * room for them in one shot.
-	 *
-	 * Note we don't preserve the WAITOK or NOWAIT flags.  Preservation
-	 * of ALLOCNOW notifies others that we've reserved these resources,
-	 * and they are not to be freed.
-	 *
-	 * The bus_dmamap_t includes one bus_dma_segment_t, hence
-	 * the (nsegments - 1).
-	 */
-	mapsize = sizeof(struct i386_bus_dmamap) +
-	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
-		return (ENOMEM);
-
-	bzero(mapstore, mapsize);
-	map = (struct i386_bus_dmamap *)mapstore;
-	map->_dm_size = size;
-	map->_dm_segcnt = nsegments;
-	map->_dm_maxsegsz = maxsegsz;
-	map->_dm_boundary = boundary;
-	map->_dm_flags = flags & ~(BUS_DMA_WAITOK|BUS_DMA_NOWAIT);
-	map->dm_mapsize = 0;		/* no valid mappings */
-	map->dm_nsegs = 0;
-
-	*dmamp = map;
-	return (0);
-}
-
-/*
- * Common function for DMA map destruction.  May be called by bus-specific
- * DMA map destruction functions.
- */
-void
-_bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
-{
-
-	free(map, M_DEVBUF);
-}
-
-/*
- * Common function for loading a DMA map with a linear buffer.  May
- * be called by bus-specific DMA map load functions.
- */
-int
-_bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-    bus_size_t buflen, struct proc *p, int flags)
-{
-	bus_addr_t lastaddr;
-	int seg, error;
-
-	/*
-	 * Make sure that on error condition we return "no valid mappings".
-	 */
-	map->dm_mapsize = 0;
-	map->dm_nsegs = 0;
-
-	if (buflen > map->_dm_size)
-		return (EINVAL);
-
-	seg = 0;
-	error = _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags,
-	    &lastaddr, &seg, 1);
-	if (error == 0) {
-		map->dm_mapsize = buflen;
-		map->dm_nsegs = seg + 1;
-	}
-	return (error);
-}
-
-/*
- * Like _bus_dmamap_load(), but for mbufs.
- */
-int
-_bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
-    int flags)
-{
-	paddr_t lastaddr;
-	int seg, error, first;
-	struct mbuf *m;
-
-	/*
-	 * Make sure that on error condition we return "no valid mappings".
-	 */
-	map->dm_mapsize = 0;
-	map->dm_nsegs = 0;
-
-#ifdef DIAGNOSTIC
-	if ((m0->m_flags & M_PKTHDR) == 0)
-		panic("_bus_dmamap_load_mbuf: no packet header");
-#endif
-
-	if (m0->m_pkthdr.len > map->_dm_size)
-		return (EINVAL);
-
-	first = 1;
-	seg = 0;
-	error = 0;
-	for (m = m0; m != NULL && error == 0; m = m->m_next) {
-		if (m->m_len == 0)
-			continue;
-		error = _bus_dmamap_load_buffer(t, map, m->m_data, m->m_len,
-		    NULL, flags, &lastaddr, &seg, first);
-		first = 0;
-	}
-	if (error == 0) {
-		map->dm_mapsize = m0->m_pkthdr.len;
-		map->dm_nsegs = seg + 1;
-	}
-	return (error);
-}
-
-/*
- * Like _bus_dmamap_load(), but for uios.
- */
-int
-_bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
-    int flags)
-{
-	paddr_t lastaddr;
-	int seg, i, error, first;
-	bus_size_t minlen, resid;
-	struct proc *p = NULL;
-	struct iovec *iov;
-	caddr_t addr;
-
-	/*
-	 * Make sure that on error condition we return "no valid mappings".
-	 */
-	map->dm_mapsize = 0;
-	map->dm_nsegs = 0;
-
-	resid = uio->uio_resid;
-	iov = uio->uio_iov;
-
-	if (resid > map->_dm_size)
-		return (EINVAL);
-
-	if (uio->uio_segflg == UIO_USERSPACE) {
-		p = uio->uio_procp;
-#ifdef DIAGNOSTIC
-		if (p == NULL)
-			panic("_bus_dmamap_load_uio: USERSPACE but no proc");
-#endif
-	}
-
-	first = 1;
-	seg = 0;
-	error = 0;
-	for (i = 0; i < uio->uio_iovcnt && resid != 0 && error == 0; i++) {
-		/*
-		 * Now at the first iovec to load.  Load each iovec
-		 * until we have exhausted the residual count.
-		 */
-		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
-		addr = (caddr_t)iov[i].iov_base;
-
-		error = _bus_dmamap_load_buffer(t, map, addr, minlen,
-		    p, flags, &lastaddr, &seg, first);
-		first = 0;
-
-		resid -= minlen;
-	}
-	if (error == 0) {
-		map->dm_mapsize = uio->uio_resid;
-		map->dm_nsegs = seg + 1;
-	}
-	return (error);
-}
-
-/*
- * Like _bus_dmamap_load(), but for raw memory allocated with
- * bus_dmamem_alloc().
- */
-int
-_bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
-    int nsegs, bus_size_t size, int flags)
-{
-	if (nsegs > map->_dm_segcnt || size > map->_dm_size)
-		return (EINVAL);
-
-	/*
-	 * Make sure we don't cross any boundaries.
-	 */
-	if (map->_dm_boundary) {
-		bus_addr_t bmask = ~(map->_dm_boundary - 1);
-		int i;
-
-		for (i = 0; i < nsegs; i++) {
-			if (segs[i].ds_len > map->_dm_maxsegsz)
-				return (EINVAL);
-			if ((segs[i].ds_addr & bmask) !=
-			    ((segs[i].ds_addr + segs[i].ds_len - 1) & bmask))
-				return (EINVAL);
-		}
-	}
-
-	bcopy(segs, map->dm_segs, nsegs * sizeof(*segs));
-	map->dm_nsegs = nsegs;
-	return (0);
-}
-
-/*
- * Common function for unloading a DMA map.  May be called by
- * bus-specific DMA map unload functions.
- */
-void
-_bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
-{
-
-	/*
-	 * No resources to free; just mark the mappings as
-	 * invalid.
-	 */
-	map->dm_mapsize = 0;
-	map->dm_nsegs = 0;
-}
-
-/*
- * Common function for DMA map synchronization.  May be called
- * by bus-specific DMA map synchronization functions.
- */
-void
-_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
-    bus_size_t size, int op)
-{
-	/* Nothing to do here. */
-}
-
-/*
- * Common function for DMA-safe memory allocation.  May be called
- * by bus-specific DMA memory allocation functions.
- */
-int
-_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
-    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags)
-{
-
-	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, 0, trunc_page(avail_end)));
-}
-
-/*
- * Common function for freeing DMA-safe memory.  May be called by
- * bus-specific DMA memory free functions.
- */
-void
-_bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
-{
-	struct vm_page *m;
-	bus_addr_t addr;
-	struct pglist mlist;
-	int curseg;
-
-	/*
-	 * Build a list of pages to free back to the VM system.
-	 */
-	TAILQ_INIT(&mlist);
-	for (curseg = 0; curseg < nsegs; curseg++) {
-		for (addr = segs[curseg].ds_addr;
-		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
-		    addr += PAGE_SIZE) {
-			m = PHYS_TO_VM_PAGE(addr);
-			TAILQ_INSERT_TAIL(&mlist, m, pageq);
-		}
-	}
-
-	uvm_pglistfree(&mlist);
-}
-
-/*
- * Common function for mapping DMA-safe memory.  May be called by
- * bus-specific DMA memory map functions.
- */
-int
-_bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
-    size_t size, caddr_t *kvap, int flags)
-{
-	vaddr_t va;
-	bus_addr_t addr;
-	int curseg;
-
-	size = round_page(size);
-	va = uvm_km_valloc(kernel_map, size);
-	if (va == 0)
-		return (ENOMEM);
-
-	*kvap = (caddr_t)va;
-
-	for (curseg = 0; curseg < nsegs; curseg++) {
-		for (addr = segs[curseg].ds_addr;
-		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
-		    addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
-			if (size == 0)
-				panic("_bus_dmamem_map: size botch");
-			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
-		}
-	}
-	pmap_update(pmap_kernel());
-
-	return (0);
-}
-
-/*
- * Common function for unmapping DMA-safe memory.  May be called by
- * bus-specific DMA memory unmapping functions.
- */
-void
-_bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
-{
-
-#ifdef DIAGNOSTIC
-	if ((u_long)kva & PGOFSET)
-		panic("_bus_dmamem_unmap");
-#endif
-
-	size = round_page(size);
-	uvm_km_free(kernel_map, (vaddr_t)kva, size);
-}
-
-/*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
- * bus-specific DMA mmap(2)'ing functions.
- */
-paddr_t
-_bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
-    int prot, int flags)
-{
-	int i;
-
-	for (i = 0; i < nsegs; i++) {
-#ifdef DIAGNOSTIC
-		if (off & PGOFSET)
-			panic("_bus_dmamem_mmap: offset unaligned");
-		if (segs[i].ds_addr & PGOFSET)
-			panic("_bus_dmamem_mmap: segment unaligned");
-		if (segs[i].ds_len & PGOFSET)
-			panic("_bus_dmamem_mmap: segment size not multiple"
-			    " of page size");
-#endif
-		if (off >= segs[i].ds_len) {
-			off -= segs[i].ds_len;
-			continue;
-		}
-
-		return (atop(segs[i].ds_addr + off));
-	}
-
-	/* Page not found. */
-	return (-1);
-}
-
-/**********************************************************************
- * DMA utility functions
- **********************************************************************/
-/*
- * Utility function to load a linear buffer.  lastaddrp holds state
- * between invocations (for multiple-buffer loads).  segp contains
- * the starting segment on entrace, and the ending segment on exit.
- * first indicates if this is the first invocation of this function.
- */
-int
-_bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-    bus_size_t buflen, struct proc *p, int flags, paddr_t *lastaddrp, int *segp,
-    int first)
-{
-	bus_size_t sgsize;
-	bus_addr_t curaddr, lastaddr, baddr, bmask;
-	vaddr_t vaddr = (vaddr_t)buf;
-	int seg;
-	pmap_t pmap;
-
-	if (p != NULL)
-		pmap = p->p_vmspace->vm_map.pmap;
-	else
-		pmap = pmap_kernel();
-
-	lastaddr = *lastaddrp;
-	bmask  = ~(map->_dm_boundary - 1);
-
-	for (seg = *segp; buflen > 0 ; ) {
-		/*
-		 * Get the physical address for this segment.
-		 */
-		pmap_extract(pmap, vaddr, (paddr_t *)&curaddr);
-
-		/*
-		 * Compute the segment size, and adjust counts.
-		 */
-		sgsize = PAGE_SIZE - ((u_long)vaddr & PGOFSET);
-		if (buflen < sgsize)
-			sgsize = buflen;
-
-		/*
-		 * Make sure we don't cross any boundaries.
-		 */
-		if (map->_dm_boundary > 0) {
-			baddr = (curaddr + map->_dm_boundary) & bmask;
-			if (sgsize > (baddr - curaddr))
-				sgsize = (baddr - curaddr);
-		}
-
-		/*
-		 * Insert chunk into a segment, coalescing with
-		 * previous segment if possible.
-		 */
-		if (first) {
-			map->dm_segs[seg].ds_addr = curaddr;
-			map->dm_segs[seg].ds_len = sgsize;
-			first = 0;
-		} else {
-			if (curaddr == lastaddr &&
-			    (map->dm_segs[seg].ds_len + sgsize) <=
-			     map->_dm_maxsegsz &&
-			    (map->_dm_boundary == 0 ||
-			     (map->dm_segs[seg].ds_addr & bmask) ==
-			     (curaddr & bmask)))
-				map->dm_segs[seg].ds_len += sgsize;
-			else {
-				if (++seg >= map->_dm_segcnt)
-					break;
-				map->dm_segs[seg].ds_addr = curaddr;
-				map->dm_segs[seg].ds_len = sgsize;
-			}
-		}
-
-		lastaddr = curaddr + sgsize;
-		vaddr += sgsize;
-		buflen -= sgsize;
-	}
-
-	*segp = seg;
-	*lastaddrp = lastaddr;
-
-	/*
-	 * Did we fit?
-	 */
-	if (buflen != 0)
-		return (EFBIG);		/* XXX better return value here? */
-	return (0);
-}
-
-/*
- * Allocate physical memory from the given physical address range.
- * Called by DMA-safe memory allocation methods.
- */
-int
-_bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
-    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags, paddr_t low, paddr_t high)
-{
-	paddr_t curaddr, lastaddr;
-	struct vm_page *m;
-	struct pglist mlist;
-	int curseg, error;
-
-	/* Always round the size. */
-	size = round_page(size);
-
-	TAILQ_INIT(&mlist);
-	/*
-	 * Allocate pages from the VM system.
-	 * For non-ISA mappings first try higher memory segments.
-	 */
-	if (high <= ISA_DMA_BOUNCE_THRESHOLD || (error = uvm_pglistalloc(size,
-	    round_page(ISA_DMA_BOUNCE_THRESHOLD), high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0)))
-		error = uvm_pglistalloc(size, low, high, alignment, boundary,
-		    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
-	if (error)
-		return (error);
-
-	/*
-	 * Compute the location, size, and number of segments actually
-	 * returned by the VM code.
-	 */
-	m = TAILQ_FIRST(&mlist);
-	curseg = 0;
-	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
-	segs[curseg].ds_len = PAGE_SIZE;
-
-	for (m = TAILQ_NEXT(m, pageq); m != NULL; m = TAILQ_NEXT(m, pageq)) {
-		curaddr = VM_PAGE_TO_PHYS(m);
-#ifdef DIAGNOSTIC
-		if (curseg == nsegs) {
-			printf("uvm_pglistalloc returned too many\n");
-			panic("_bus_dmamem_alloc_range");
-		}
-		if (curaddr < low || curaddr >= high) {
-			printf("uvm_pglistalloc returned non-sensical"
-			    " address 0x%lx\n", curaddr);
-			panic("_bus_dmamem_alloc_range");
-		}
-#endif
-		if (curaddr == (lastaddr + PAGE_SIZE))
-			segs[curseg].ds_len += PAGE_SIZE;
-		else {
-			curseg++;
-			segs[curseg].ds_addr = curaddr;
-			segs[curseg].ds_len = PAGE_SIZE;
-		}
-		lastaddr = curaddr;
-	}
-	*rsegs = curseg + 1;
-
 	return (0);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.37 2006/01/13 19:36:46 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.43 2010/11/20 20:33:24 miod Exp $	*/
 /*	$NetBSD: pmap_bootstrap.c,v 1.50 1999/04/07 06:14:33 scottr Exp $	*/
 
 /* 
@@ -42,7 +42,7 @@
 #include <sys/systm.h>
 
 #include <uvm/uvm_extern.h>
-#include <uvm/uvm_pmap.h>
+#include <uvm/uvm_km.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
@@ -50,8 +50,6 @@
 #include <machine/pmap.h>
 #include <machine/pte.h>
 #include <machine/vmparam.h>
-
-#include <ufs/mfs/mfs_extern.h>
 
 #include "zsc.h"
 
@@ -108,9 +106,6 @@ void	bootstrap_mac68k(int);
 	 */
 #define	PMAP_MD_LOCALS \
 	paddr_t vidpa; \
-	paddr_t avail_next; \
-	int avail_remaining; \
-	int avail_range; \
 	int i; \
 	\
 	vidlen = round_page(((videosize >> 16) & 0xffff) * videorowbytes + \
@@ -158,23 +153,12 @@ do { \
  */
 #define	PMAP_MD_MEMSIZE() \
 do { \
-	avail_next = avail_start; \
-	avail_remaining = 0; \
-	avail_range = -1; \
-	for (i = 0; i < numranges; i++) { \
-		if (low[i] <= avail_next && avail_next < high[i]) { \
-			avail_range = i; \
-			avail_remaining = high[i] - avail_next; \
-		} else if (avail_range != -1) { \
-			avail_remaining += (high[i] - low[i]); \
-		} \
-	} \
-	physmem = atop(avail_remaining + nextpa - firstpa); \
- \
-	maxaddr = high[numranges - 1] - ptoa(1); \
-	high[numranges - 1] -= \
-	    (round_page(MSGBUFSIZE) + ptoa(1)); \
-	avail_end = high[numranges - 1]; \
+	physmem = 0; \
+	for (i = 0; i < numranges; i++) \
+		physmem += atop(high[i] - low[i]); \
+	/* reserve one page for the message buffer */ \
+	maxaddr = high[numranges - 1] - PAGE_SIZE; \
+	high[numranges - 1] -= round_page(MSGBUFSIZE); \
 } while (0)
 
 #define PMAP_MD_RELOC3()	/* nothing */

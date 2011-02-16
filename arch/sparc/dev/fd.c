@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: fd.c,v 1.46 2006/11/29 12:24:17 miod Exp $	*/
+=======
+/*	$OpenBSD: fd.c,v 1.80 2010/11/18 21:13:19 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -84,7 +81,6 @@
 #include <sys/ioctl.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
-#include <sys/dkstat.h>
 #include <sys/disk.h>
 #include <sys/buf.h>
 #include <sys/malloc.h>
@@ -96,6 +92,7 @@
 #include <sys/queue.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <dev/cons.h>
 
@@ -145,7 +142,6 @@ enum fdc_state {
 /* software state, per controller */
 struct fdc_softc {
 	struct device	sc_dev;		/* boilerplate */
-	struct intrhand sc_sih;
 	caddr_t		sc_reg;
 	struct fd_softc *sc_fd[4];	/* pointers to children */
 	TAILQ_HEAD(drivehead, fd_softc) sc_drives;
@@ -170,6 +166,7 @@ struct fdc_softc {
 #define sc_nstat	sc_io.fdcio_nstat
 #define sc_status	sc_io.fdcio_status
 #define	sc_hih		sc_io.fdcio_ih
+#define	sc_sih		sc_io.fdcio_sih
 	struct timeout	fdctimeout_to;
 	struct timeout	fdcpseudointr_to;
 };
@@ -244,13 +241,15 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
+<<<<<<< HEAD
 void fdgetdisklabel(dev_t);
+=======
+int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
+>>>>>>> origin/master
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
 int fdprint(void *, const char *);
-
-struct dkdriver fddkdriver = { fdstrategy };
 
 struct	fd_type *fd_nvtotype(char *, int, int);
 void	fd_set_motor(struct fdc_softc *fdc);
@@ -268,32 +267,13 @@ int	fdc_c_hwintr(struct fdc_softc *);
 #else
 void	fdchwintr(void);
 #endif
-int	fdcswintr(struct fdc_softc *);
+void	fdcswintr(void *);
 int	fdcstate(struct fdc_softc *);
 void	fdcretry(struct fdc_softc *fdc);
 void	fdfinish(struct fd_softc *fd, struct buf *bp);
 int	fdformat(dev_t, struct fd_formb *, struct proc *);
 void	fd_do_eject(struct fd_softc *);
 static int fdconf(struct fdc_softc *);
-
-#if IPL_FDSOFT == 4
-#define IE_FDSOFT	IE_L4
-#else
-#error 4
-#endif
-
-#ifdef FDC_C_HANDLER
-#if defined(SUN4M)
-#define FD_SET_SWINTR do {		\
-	if (CPU_ISSUN4M)		\
-		raise(0, IPL_FDSOFT);	\
-	else				\
-		ienab_bis(IE_FDSOFT);	\
-} while(0)
-#else
-#define FD_SET_SWINTR ienab_bis(IE_FDSOFT)
-#endif /* defined(SUN4M) */
-#endif /* FDC_C_HANDLER */
 
 #define OBP_FDNAME	(CPU_ISSUN4M ? "SUNW,fdtwo" : "fd")
 
@@ -306,9 +286,9 @@ fdcmatch(parent, match, aux)
 	register struct romaux *ra = &ca->ca_ra;
 
 	/*
-	 * Floppy doesn't exist on sun4.
+	 * Floppy doesn't exist on sun4 and sun4e.
 	 */
-	if (CPU_ISSUN4)
+	if (CPU_ISSUN4OR4E)
 		return (0);
 
 	/*
@@ -453,11 +433,9 @@ fdcattach(parent, self, aux)
 		return;
 	}
 	evcount_attach(&fdc->sc_hih.ih_count, self->dv_xname,
-	    &fdc->sc_hih.ih_vec, &evcount_intr);
+	    &fdc->sc_hih.ih_vec);
 #endif
-	fdc->sc_sih.ih_fun = (void *)fdcswintr;
-	fdc->sc_sih.ih_arg = fdc;
-	intr_establish(IPL_FDSOFT, &fdc->sc_sih, IPL_BIO, self->dv_xname);
+	fdc->sc_sih = softintr_establish(IPL_FDSOFT, fdcswintr, fdc);
 
 	/* Assume a 82077 */
 	fdc->sc_reg_msr = &((struct fdreg_77 *)fdc->sc_reg)->fd_msr;
@@ -670,9 +648,9 @@ fdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
+	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dv.dv_xname;
-	fd->sc_dk.dk_driver = &fddkdriver;
-	disk_attach(&fd->sc_dk);
+	disk_attach(&fd->sc_dv, &fd->sc_dk);
 
 	/*
 	 * We're told if we're the boot device in fdcattach().
@@ -744,7 +722,7 @@ fdstrategy(bp)
 
 #ifdef FD_DEBUG
 	if (fdc_debug > 1)
-	    printf("fdstrategy: b_blkno %d b_bcount %ld blkno %d cylin %ld\n",
+	    printf("fdstrategy: b_blkno %d b_bcount %ld blkno %lld cylin %ld\n",
 		    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder);
 #endif
 
@@ -818,7 +796,7 @@ fdfinish(fd, bp)
 
 	biodone(bp);
 	/* turn off motor 5s from now */
-	timeout_add(&fd->fd_motor_off_to, 5 * hz);
+	timeout_add_sec(&fd->fd_motor_off_to, 5);
 	fdc->sc_state = DEVIDLE;
 }
 
@@ -1037,7 +1015,7 @@ fdread(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_READ, minphys, uio));
+        return (physio(fdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -1047,7 +1025,7 @@ fdwrite(dev, uio, flag)
 	int flag;
 {
 
-        return (physio(fdstrategy, NULL, dev, B_WRITE, minphys, uio));
+        return (physio(fdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 void
@@ -1175,14 +1153,14 @@ fdc_c_hwintr(fdc)
 			fdc->sc_istatus = FDC_ISTATUS_ERROR;
 		else
 			fdc->sc_istatus = FDC_ISTATUS_DONE;
-		FD_SET_SWINTR;
+		softintr_schedule(fdc->sc_sih);
 		goto done;
 	case FDC_ITASK_RESULT:
 		if (fdcresult(fdc) == -1)
 			fdc->sc_istatus = FDC_ISTATUS_ERROR;
 		else
 			fdc->sc_istatus = FDC_ISTATUS_DONE;
-		FD_SET_SWINTR;
+		softintr_schedule(fdc->sc_sih);
 		goto done;
 	case FDC_ITASK_DMA:
 		/* Proceed with pseudo-DMA below */
@@ -1190,7 +1168,7 @@ fdc_c_hwintr(fdc)
 	default:
 		printf("fdc: stray hard interrupt: itask=%d\n", fdc->sc_itask);
 		fdc->sc_istatus = FDC_ISTATUS_SPURIOUS;
-		FD_SET_SWINTR;
+		softintr_schedule(fdc->sc_sih);
 		goto done;
 	}
 
@@ -1209,7 +1187,7 @@ fdc_c_hwintr(fdc)
 		if ((msr & NE7_NDM) == 0) {
 			fdcresult(fdc);
 			fdc->sc_istatus = FDC_ISTATUS_DONE;
-			FD_SET_SWINTR;
+			softintr_schedule(fdc->sc_sih);
 #ifdef FD_DEBUG
 			if (fdc_debug > 1)
 				printf("fdc: overrun: tc = %d\n", fdc->sc_tc);
@@ -1226,7 +1204,7 @@ fdc_c_hwintr(fdc)
 			fdc->sc_istatus = FDC_ISTATUS_DONE;
 			FTC_FLIP;
 			fdcresult(fdc);
-			FD_SET_SWINTR;
+			softintr_schedule(fdc->sc_sih);
 			break;
 		}
 	}
@@ -1235,15 +1213,15 @@ done:
 }
 #endif
 
-int
-fdcswintr(fdc)
-	struct fdc_softc *fdc;
+void
+fdcswintr(void *arg)
 {
+	struct fdc_softc *fdc = (struct fdc_softc *)arg;
 	int s;
 
 	if (fdc->sc_istatus == FDC_ISTATUS_NONE)
 		/* This (software) interrupt is not for us */
-		return (0);
+		return;
 
 	switch (fdc->sc_istatus) {
 	case FDC_ISTATUS_ERROR:
@@ -1257,7 +1235,6 @@ fdcswintr(fdc)
 	s = splbio();
 	fdcstate(fdc);
 	splx(s);
-	return (1);
 }
 
 int
@@ -1336,7 +1313,7 @@ loop:
 			fdc->sc_state = MOTORWAIT;
 			if ((fdc->sc_flags & FDC_NEEDMOTORWAIT) != 0) { /* XXX */
 				/* Allow .25s for motor to stabilize. */
-				timeout_add(&fd->fd_motor_on_to, hz / 4);
+				timeout_add_msec(&fd->fd_motor_on_to, 250);
 			} else {
 				fd->sc_flags &= ~FD_MOTOR_WAIT;
 				goto loop;
@@ -1366,7 +1343,7 @@ loop:
 		fd->sc_dk.dk_seek++;
 
 		disk_busy(&fd->sc_dk);
-		timeout_add(&fdc->fdctimeout_to, 4 * hz);
+		timeout_add_sec(&fdc->fdctimeout_to, 4);
 
 		/* specify command */
 		FDC_WRFIFO(fdc, NE7CMD_SPECIFY);
@@ -1400,7 +1377,7 @@ loop:
 		{int block;
 		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
 		 if (block != fd->sc_blkno) {
-			 printf("fdcintr: block %d != blkno %d\n", block, fd->sc_blkno);
+			 printf("fdcintr: block %d != blkno %lld\n", block, fd->sc_blkno);
 #if defined(FD_DEBUG) && defined(DDB)
 			 Debugger();
 #endif
@@ -1428,7 +1405,7 @@ loop:
 		disk_busy(&fd->sc_dk);
 
 		/* allow 3 seconds for operation */
-		timeout_add(&fdc->fdctimeout_to, 3 * hz);
+		timeout_add_sec(&fdc->fdctimeout_to, 3);
 
 		if (finfo != NULL) {
 			/* formatting */
@@ -1460,7 +1437,7 @@ loop:
 		fdc->sc_state = SEEKCOMPLETE;
 		if (fdc->sc_flags & FDC_NEEDHEADSETTLE) {
 			/* allow 1/50 second for heads to settle */
-			timeout_add(&fdc->fdcpseudointr_to, hz / 50);
+			timeout_add_msec(&fdc->fdcpseudointr_to, 20);
 			return (1);		/* will return later */
 		}
 		/*FALLTHROUGH*/
@@ -1490,7 +1467,7 @@ loop:
 		fdc->sc_state = IOCLEANUPWAIT;
 		fdc->sc_nstat = 0;
 		/* 1/10 second should be enough */
-		timeout_add(&fdc->fdctimeout_to, hz / 10);
+		timeout_add_msec(&fdc->fdctimeout_to, 100);
 		return (1);
 
 	case IOCLEANUPTIMEDOUT:
@@ -1527,7 +1504,7 @@ loop:
 				fdcstatus(fdc,
 					bp->b_flags & B_READ
 					? "read failed" : "write failed");
-				printf("blkno %d nblks %d nstat %d tc %d\n",
+				printf("blkno %lld nblks %d nstat %d tc %d\n",
 				       fd->sc_blkno, fd->sc_nblks,
 				       fdc->sc_nstat, fdc->sc_tc);
 			}
@@ -1598,7 +1575,7 @@ loop:
 		fdc->sc_nstat = 0;
 		fdc->sc_itask = FDC_ITASK_SENSEI;
 		fdc->sc_state = RESETCOMPLETE;
-		timeout_add(&fdc->fdctimeout_to, hz / 2);
+		timeout_add_msec(&fdc->fdctimeout_to, 500);
 		fdc_reset(fdc);
 		return (1);			/* will return later */
 
@@ -1611,7 +1588,7 @@ loop:
 		fdc->sc_state = RECALWAIT;
 		fdc->sc_itask = FDC_ITASK_SENSEI;
 		fdc->sc_nstat = 0;
-		timeout_add(&fdc->fdctimeout_to, 5 * hz);
+		timeout_add_sec(&fdc->fdctimeout_to, 5);
 		/* recalibrate function */
 		FDC_WRFIFO(fdc, NE7CMD_RECAL);
 		FDC_WRFIFO(fdc, fd->sc_drive);
@@ -1782,10 +1759,12 @@ fdioctl(dev, cmd, addr, flag, p)
 		return (0);
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
+<<<<<<< HEAD
 				    (struct disklabel *)addr, 0,
 				    fd->sc_dk.dk_cpulabel);
 		if (error)
@@ -1794,6 +1773,14 @@ fdioctl(dev, cmd, addr, flag, p)
 		error = writedisklabel(dev, fdstrategy,
 				       fd->sc_dk.dk_label,
 				       fd->sc_dk.dk_cpulabel);
+=======
+		    (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
+>>>>>>> origin/master
 		return (error);
 
 	case DIOCLOCK:
@@ -1806,9 +1793,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		if (((struct mtop *)addr)->mt_op != MTOFFL)
 			return EIO;
 
-#ifdef COMPAT_SUNOS
-	case SUNOS_FDIOCEJECT:
-#endif
 	case DIOCEJECT:
 		fd_do_eject(fd);
 		return (0);
@@ -1895,8 +1879,12 @@ fdformat(dev, finfo, p)
 	if (bp == 0)
 		return (ENOBUFS);
 
+<<<<<<< HEAD
 	bzero((void *)bp, sizeof(struct buf));
 	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
+=======
+	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT | B_RAW;
+>>>>>>> origin/master
 	bp->b_proc = p;
 	bp->b_dev = dev;
 
@@ -1945,6 +1933,7 @@ fdformat(dev, finfo, p)
 	return (rv);
 }
 
+<<<<<<< HEAD
 void
 fdgetdisklabel(dev)
 	dev_t dev;
@@ -1955,6 +1944,12 @@ fdgetdisklabel(dev)
 	struct cpu_disklabel *clp = fd->sc_dk.dk_cpulabel;
 	char *errstring;
 
+=======
+int
+fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
+    int spoofonly)
+{
+>>>>>>> origin/master
 	bzero(lp, sizeof(struct disklabel));
 	bzero(clp, sizeof(struct cpu_disklabel));
 
@@ -1964,6 +1959,7 @@ fdgetdisklabel(dev)
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
+<<<<<<< HEAD
 	lp->d_secperunit = fd->sc_type->size;
 	lp->d_rpm = 300;	/* XXX like it matters... */
 
@@ -1975,6 +1971,13 @@ fdgetdisklabel(dev)
 	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
+=======
+	DL_SETDSIZE(lp, fd->sc_type->size);
+
+	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
+	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
+	lp->d_version = 1;
+>>>>>>> origin/master
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -1983,10 +1986,14 @@ fdgetdisklabel(dev)
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
+<<<<<<< HEAD
 	errstring = readdisklabel(dev, fdstrategy, lp, clp, 0);
 	if (errstring) {
 		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
 	}
+=======
+	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
+>>>>>>> origin/master
 }
 
 void

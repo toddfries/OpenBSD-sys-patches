@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ddp_usrreq.c,v 1.6 2002/03/14 01:27:10 millert Exp $	*/
+=======
+/*	$OpenBSD: ddp_usrreq.c,v 1.14 2010/06/30 20:37:54 claudio Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.
@@ -56,11 +60,11 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/mbuf.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/sysctl.h>
 #include <sys/protosw.h>
 #include <net/if.h>
 #include <net/route.h>

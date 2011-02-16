@@ -1,4 +1,4 @@
-/*	$OpenBSD: ht.c,v 1.9 2006/03/13 20:10:49 brad Exp $	*/
+/*	$OpenBSD: ht.c,v 1.14 2010/12/04 17:06:31 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -39,13 +39,14 @@ void	 ht_attach_hook(struct device *, struct device *,
 int	 ht_bus_maxdevs(void *, int);
 pcitag_t ht_make_tag(void *, int, int, int);
 void	 ht_decompose_tag(void *, pcitag_t, int *, int *, int *);
+int	 ht_conf_size(void *, pcitag_t);
 pcireg_t ht_conf_read(void *, pcitag_t, int);
 void	 ht_conf_write(void *, pcitag_t, int, pcireg_t);
 int	 ht_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
 const char *ht_intr_string(void *, pci_intr_handle_t);
 int	 ht_intr_line(void *, pci_intr_handle_t);
 void	*ht_intr_establish(void *, pci_intr_handle_t, int, int (*)(void *),
-	     void *, char *);
+	     void *, const char *);
 void	 ht_intr_disestablish(void *, void *);
 
 int	 ht_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
@@ -173,6 +174,7 @@ ht_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc.pc_bus_maxdevs = ht_bus_maxdevs;
 	sc->sc_pc.pc_make_tag = ht_make_tag;
 	sc->sc_pc.pc_decompose_tag = ht_decompose_tag;
+	sc->sc_pc.pc_conf_size = ht_conf_size;
 	sc->sc_pc.pc_conf_read = ht_conf_read;
 	sc->sc_pc.pc_conf_write = ht_conf_write;
 
@@ -184,6 +186,7 @@ ht_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc.pc_intr_disestablish = ht_intr_disestablish;
 	sc->sc_pc.pc_ether_hw_addr = ht_ether_hw_addr;
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = sc->sc_iot;
 	pba.pba_memt = sc->sc_memt;
@@ -191,7 +194,6 @@ ht_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
-	pba.pba_bridgetag = NULL;
 
 	printf(": %d devices\n", sc->sc_maxdevs);
 
@@ -247,6 +249,12 @@ ht_decompose_tag(void *cpv, pcitag_t tag, int *busp, int *devp, int *fncp)
 		*devp = (tag >> DEVICE_SHIFT) & 0x1f;
 	if (fncp != NULL)
 		*fncp = (tag >> FNC_SHIFT) & 0x7;
+}
+
+int
+ht_conf_size(void *cpv, pcitag_t tag)
+{
+	return PCI_CONFIG_SPACE_SIZE;
 }
 
 pcireg_t
@@ -353,7 +361,7 @@ ht_intr_line(void *cpv, pci_intr_handle_t ih)
 
 void *
 ht_intr_establish(void *cpv, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	return (*intr_establish_func)(cpv, ih, IST_LEVEL, level, func, arg,
 		name);

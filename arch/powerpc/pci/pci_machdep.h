@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.14 2002/09/15 09:01:59 deraadt Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.19 2010/12/04 17:06:31 miod Exp $	*/
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -50,6 +50,7 @@ struct ppc_pci_chipset {
 	pcitag_t	(*pc_make_tag)(void *, int, int, int);
 	void		(*pc_decompose_tag)(void *, pcitag_t, int *,
 			    int *, int *);
+	int		(*pc_conf_size)(void *, pcitag_t);
 	pcireg_t	(*pc_conf_read)(void *, pcitag_t, int);
 	void		(*pc_conf_write)(void *, pcitag_t, int, pcireg_t);
 
@@ -59,12 +60,10 @@ struct ppc_pci_chipset {
 	const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
 	int		(*pc_intr_line)(void *, pci_intr_handle_t);
 	void		*(*pc_intr_establish)(void *, pci_intr_handle_t,
-			    int, int (*)(void *), void *, char *);
+			    int, int (*)(void *), void *, const char *);
 	void		(*pc_intr_disestablish)(void *, void *);
 	int		(*pc_ether_hw_addr)(struct ppc_pci_chipset *, u_int8_t *);
 };
-
-int		pci_intr_line(pci_intr_handle_t ih);
 
 /*
  * Functions provided to machine-independent PCI code.
@@ -77,6 +76,8 @@ int		pci_intr_line(pci_intr_handle_t ih);
     (*(c)->pc_make_tag)((c)->pc_conf_v, (b), (d), (f))
 #define	pci_decompose_tag(c, t, bp, dp, fp)				\
     (*(c)->pc_decompose_tag)((c)->pc_conf_v, (t), (bp), (dp), (fp))
+#define	pci_conf_size(c, t)						\
+    (*(c)->pc_conf_size)((c)->pc_conf_v, (t))
 #define	pci_conf_read(c, t, r)						\
     (*(c)->pc_conf_read)((c)->pc_conf_v, (t), (r))
 #define	pci_conf_write(c, t, r, v)					\
@@ -84,9 +85,10 @@ int		pci_intr_line(pci_intr_handle_t ih);
 #define	pci_intr_map(pa, ihp)						\
     (*((pa)->pa_pc)->pc_intr_map)((pa)->pa_pc->pc_intr_v, 		\
 	(pa)->pa_intrtag, (pa)->pa_intrpin, (pa)->pa_intrline, (ihp))
-#define	pci_intr_line(ih)	(ih)
 #define	pci_intr_string(c, ih)						\
     (*(c)->pc_intr_string)((c)->pc_intr_v, (ih))
+#define	pci_intr_line(c, ih)						\
+    (*(c)->pc_intr_line)((c)->pc_intr_v, (ih))
 #define	pci_intr_establish(c, ih, l, h, a, nm)				\
     (*(c)->pc_intr_establish)((c)->pc_intr_v, (ih), (l), (h), (a), (nm))
 #define	pci_intr_disestablish(c, iv)					\
@@ -94,3 +96,4 @@ int		pci_intr_line(pci_intr_handle_t ih);
 #define	pci_ether_hw_addr(c, s)						\
     (*(c)->pc_ether_hw_addr)((c), (s))
 
+#define	pci_dev_postattach(a, b)

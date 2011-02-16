@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: raw_ip.c,v 1.39 2006/05/29 20:42:27 claudio Exp $	*/
+=======
+/*	$OpenBSD: raw_ip.c,v 1.50 2010/09/08 08:34:42 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -87,6 +91,8 @@
 #include <netinet/in_var.h>
 #include <netinet/ip_icmp.h>
 
+#include "pf.h"
+
 struct inpcbtable rawcbtable;
 
 /*
@@ -129,8 +135,26 @@ rip_input(struct mbuf *m, ...)
 		if (inp->inp_flags & INP_IPV6)
 			continue;
 #endif
+		if (rtable_l2(inp->inp_rtableid) !=
+		    rtable_l2(m->m_pkthdr.rdomain))
+			continue;
+
 		if (inp->inp_ip.ip_p && inp->inp_ip.ip_p != ip->ip_p)
 			continue;
+<<<<<<< HEAD
+=======
+#if NPF > 0
+		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+			struct pf_divert *divert;
+
+			/* XXX rdomain support */
+			if ((divert = pf_find_divert(m)) == NULL)
+				continue;
+			if (inp->inp_laddr.s_addr != divert->addr.ipv4.s_addr)
+				continue;
+		} else
+#endif
+>>>>>>> origin/master
 		if (inp->inp_laddr.s_addr &&
 		    inp->inp_laddr.s_addr != ip->ip_dst.s_addr)
 			continue;
@@ -187,7 +211,7 @@ rip_output(struct mbuf *m, ...)
 	u_long dst;
 	struct ip *ip;
 	struct inpcb *inp;
-	int flags;
+	int flags, error;
 	va_list ap;
 
 	va_start(ap, m);
@@ -252,8 +276,14 @@ rip_output(struct mbuf *m, ...)
 	 *             ip_output should be guarded against v6/v4 problems.
 	 */
 #endif
-	return (ip_output(m, inp->inp_options, &inp->inp_route, flags,
-	    inp->inp_moptions, inp));
+	/* force routing domain */
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
+
+	error = ip_output(m, inp->inp_options, &inp->inp_route, flags,
+	    inp->inp_moptions, inp);
+	if (error == EACCES)	/* translate pf(4) error for userland */
+		error = EHOSTUNREACH;
+	return (error);
 }
 
 /*
@@ -395,7 +425,13 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		    ((addr->sin_family != AF_INET) &&
 		     (addr->sin_family != AF_IMPLINK)) ||
 		    (addr->sin_addr.s_addr &&
+<<<<<<< HEAD
 		     ifa_ifwithaddr(sintosa(addr)) == 0)) {
+=======
+		     (!(so->so_options & SO_BINDANY) &&
+		     in_iawithaddr(addr->sin_addr, NULL, inp->inp_rtableid) ==
+		     0))) {
+>>>>>>> origin/master
 			error = EADDRNOTAVAIL;
 			break;
 		}

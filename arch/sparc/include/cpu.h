@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cpu.h,v 1.27 2006/12/24 20:30:35 miod Exp $	*/
+=======
+/*	$OpenBSD: cpu.h,v 1.33 2010/11/27 19:41:45 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.24 1997/03/15 22:25:15 pk Exp $ */
 
 /*
@@ -66,15 +70,13 @@
  * Exported definitions unique to SPARC cpu support.
  */
 
-#include <sys/evcount.h>
 #include <machine/psl.h>
+<<<<<<< HEAD
+=======
+#include <machine/reg.h>
+#include <machine/intr.h>
+>>>>>>> origin/master
 #include <sparc/sparc/intreg.h>
-
-/*
- * definitions of cpu-dependent requirements
- * referenced in generic code
- */
-#define cpu_wait(p)	/* nothing */
 
 /*
  * Arguments to hardclock, softclock and gatherstats encapsulate the
@@ -98,37 +100,12 @@ extern int eintstack[];
 #define	CLKF_INTR(framep)	((framep)->fp < (u_int)eintstack)
 
 /*
- * Software interrupt request `register'.
- */
-union sir {
-	int	sir_any;
-	char	sir_which[4];
-};
-extern union sir sir;
-
-#define SIR_NET		0
-#define SIR_CLOCK	1
-
-#if defined(SUN4M)
-extern void	raise(int, int);
-#if !(defined(SUN4) || defined(SUN4C))
-#define setsoftint()	raise(0,1)
-#else /* both defined */
-#define setsoftint()	(cputyp == CPU_SUN4M ? raise(0,1) : ienab_bis(IE_L1))
-#endif /* !4,!4c */
-#else	/* 4m not defined */
-#define setsoftint()	ienab_bis(IE_L1)
-#endif /* SUN4M */
-
-#define setsoftnet()	(sir.sir_which[SIR_NET] = 1, setsoftint())
-#define setsoftclock()	(sir.sir_which[SIR_CLOCK] = 1, setsoftint())
-
-/*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
 extern int	want_resched;		/* resched() was called */
 #define	need_resched(ci)		(want_resched = 1, want_ast = 1)
+#define clear_resched(ci) 	want_resched = 0
 extern int	want_ast;
 
 /*
@@ -151,34 +128,6 @@ extern int	want_ast;
 
 extern int	foundfpu;		/* true => we have an FPU */
 
-/*
- * Interrupt handler chains.  Interrupt handlers should return 0 for
- * ``not me'' or 1 (``I took care of it'').  intr_establish() inserts a
- * handler into the list.  The handler is called with its (single)
- * argument, or with a pointer to a clockframe if ih_arg is NULL.
- * ih_ipl specifies the interrupt level that should be blocked when
- * executing this handler.
- */
-struct intrhand {
-	int	(*ih_fun)(void *);
-	void	*ih_arg;
-	int	ih_ipl;
-	int	ih_vec;			/* human readable ipl for vmstat */
-	struct	evcount ih_count;
-	struct	intrhand *ih_next;
-};
-extern struct intrhand *intrhand[15];
-void	intr_establish(int level, struct intrhand *, int, const char *);
-void	vmeintr_establish(int vec, int level, struct intrhand *, int, const char *);
-
-/*
- * intr_fasttrap() is a lot like intr_establish, but is used for ``fast''
- * interrupt vectors (vectors that are not shared and are handled in the
- * trap window).  Such functions must be written in assembly.
- */
-int	intr_fasttrap(int, void (*)(void), int (*)(void *), void *);
-void	intr_fastuntrap(int);
-
 /* auxreg.c */
 void led_blink(void *);
 /* scf.c */
@@ -189,7 +138,6 @@ int isbad(struct dkbad *bt, int, int, int);
 /* machdep.c */
 int	ldcontrolb(caddr_t);
 void	dumpconf(void);
-void	intr_init(void);
 caddr_t	reserve_dumppages(caddr_t);
 /* clock.c */
 struct timeval;
@@ -238,7 +186,6 @@ void	iommu_enter(u_int, u_int);
 void	iommu_remove(u_int, u_int);
 /* emul.c */
 struct trapframe;
-int fixalign(struct proc *, struct trapframe *);
 int emulinstr(int, struct trapframe *);
 
 /*

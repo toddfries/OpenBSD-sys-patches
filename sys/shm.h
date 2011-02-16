@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: shm.h,v 1.19 2004/07/15 11:24:46 millert Exp $	*/
+=======
+/*	$OpenBSD: shm.h,v 1.23 2011/01/03 23:08:07 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: shm.h,v 1.20 1996/04/09 20:55:35 cgd Exp $	*/
 
 /*
@@ -109,32 +113,6 @@ struct shmid_ds {
 	void		*shm_internal;	/* implementation specific data */
 };
 
-#ifdef _KERNEL
-struct shmid_ds23 {
-	struct ipc_perm23 shm_perm;	/* operation permission structure */
-	int		shm_segsz;	/* size of segment in bytes */
-	pid_t		shm_lpid;	/* process ID of last shm op */
-	pid_t		shm_cpid;	/* process ID of creator */
-	shmatt_t	shm_nattch;	/* number of current attaches */
-	time_t		shm_atime;	/* time of last shmat() */
-	time_t		shm_dtime;	/* time of last shmdt() */
-	time_t		shm_ctime;	/* time of last change by shmctl() */
-	void		*shm_internal;	/* implementation specific data */
-};
-
-struct shmid_ds35 {
-	struct ipc_perm35 shm_perm;	/* operation permission structure */
-	int		  shm_segsz;	/* size of segment in bytes */
-	pid_t		  shm_lpid;	/* process ID of last shm op */
-	pid_t		  shm_cpid;	/* process ID of creator */
-	shmatt_t	  shm_nattch;	/* number of current attaches */
-	time_t		  shm_atime;	/* time of last shmat() */
-	time_t		  shm_dtime;	/* time of last shmdt() */
-	time_t		  shm_ctime;	/* time of last change by shmctl() */
-	void		  *shm_internal;/* implementation specific data */
-};
-#endif
-
 #if __BSD_VISIBLE
 /*
  * System V style catch-all structure for shared memory constants that
@@ -157,10 +135,6 @@ struct shm_sysctl_info {
 #ifdef _KERNEL
 extern struct shminfo shminfo;
 extern struct shmid_ds **shmsegs;
-
-/* initial values for machdep.c */
-extern int shmseg;
-extern int shmmaxpgs;
 
 struct proc;
 struct vmspace;

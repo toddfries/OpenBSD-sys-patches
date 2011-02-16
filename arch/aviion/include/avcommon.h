@@ -1,4 +1,4 @@
-/*	$OpenBSD: avcommon.h,v 1.1 2006/05/21 12:22:03 miod Exp $	*/
+/*	$OpenBSD: avcommon.h,v 1.5 2010/04/21 19:33:47 miod Exp $	*/
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -62,10 +62,6 @@
 
 #define	AV_IST		0xfff84040 	/* interrupt status register */
 
-#define INT_LEVEL	        8		/* # of interrupt level + 1 */
-#define ISR_GET_CURRENT_MASK(cpu) \
-	(*(volatile u_int *)AV_IST & int_mask_reg[cpu])
-
 #define	AV_ISTATE	0xfff84088 	/* HW interrupt status */
 #define	AV_CLRINT	0xfff8408c 	/* reset HW interrupt */
 
@@ -123,63 +119,25 @@
 #define VTO128US		0x10	/* 128 usec */
 #define VTODISABLE		0x18	/* disabled */
 
-/* these are the various Z8536 CIO counter/timer registers */
+/* Z8536 counter/timer register (not found on all models) */
 #define CIO_BASE		0xfff83000
 #define CIO_PORTC		0xfff83000
 #define CIO_PORTB		0xfff83004
 #define CIO_PORTA		0xfff83008
 #define CIO_CTRL		0xfff8300c
 
-#define CIO_MICR		0x00	/* Master interrupt control register */
-#define CIO_MICR_MIE		0x80
-#define CIO_MICR_DLC		0x40
-#define CIO_MICR_NV		0x20
-#define CIO_MICR_PAVIS		0x10
-#define CIO_MICR_PBVIS		0x08
-#define CIO_MICR_CTVIS		0x04
-#define CIO_MICR_RJA		0x02
-#define CIO_MICR_RESET		0x01
+#define CONSOLE_DART_BASE	0xfff82000
 
-#define CIO_MCCR		0x01	/* Master config control register */
-#define CIO_MCCR_PBE		0x80
-#define CIO_MCCR_CT1E		0x40
-#define CIO_MCCR_CT2E		0x20
-#define CIO_MCCR_CT3E		0x10
-#define CIO_MCCR_PLC		0x08
-#define CIO_MCCR_PAE		0x04
+#if defined(_KERNEL) && !defined(_LOCORE)
 
-#define CIO_CTMS1		0x1c	/* Counter/timer mode specification #1 */
-#define CIO_CTMS2		0x1d	/* Counter/timer mode specification #2 */
-#define CIO_CTMS3		0x1e	/* Counter/timer mode specification #3 */
-#define CIO_CTMS_CSC		0x80	/* Continuous Single Cycle */
-#define CIO_CTMS_EOE		0x40	/* External Output Enable  */
-#define CIO_CTMS_ECE		0x20	/* External Count Enable   */
-#define CIO_CTMS_ETE		0x10	/* External Trigger Enable */
-#define CIO_CTMS_EGE		0x08	/* External Gate Enable    */
-#define CIO_CTMS_REB		0x04	/* Retrigger Enable Bit    */
-#define CIO_CTMS_PO		0x00	/* Pulse Output            */
-#define CIO_CTMS_OSO		0x01	/* One Shot Output         */
-#define CIO_CTMS_SWO		0x02	/* Square Wave Output      */
+#include <machine/intr.h>
 
-#define CIO_IVR			0x04	/* Interrupt vector register */
+/*
+ * Interrupt masks, one per IPL level.
+ */
+extern u_int32_t int_mask_val[NIPLS];
+extern u_int32_t ext_int_mask_val[NIPLS];
 
-#define CIO_CSR1		0x0a	/* Command and status register CTC #1 */
-#define CIO_CSR2		0x0b	/* Command and status register CTC #2 */
-#define CIO_CSR3		0x0c	/* Command and status register CTC #3 */
-
-#define CIO_CT1MSB		0x16	/* CTC #1 Timer constant - MSB */
-#define CIO_CT1LSB		0x17	/* CTC #1 Timer constant - LSB */
-#define CIO_CT2MSB		0x18	/* CTC #2 Timer constant - MSB */
-#define CIO_CT2LSB		0x19	/* CTC #2 Timer constant - LSB */
-#define CIO_CT3MSB		0x1a	/* CTC #3 Timer constant - MSB */
-#define CIO_CT3LSB		0x1b	/* CTC #3 Timer constant - LSB */
-#define CIO_PDCA		0x23	/* Port A data direction control */
-#define CIO_PDCB		0x2b	/* Port B data direction control */
-
-#define CIO_GCB			0x04	/* CTC Gate command bit */
-#define CIO_TCB			0x02	/* CTC Trigger command bit */
-#define CIO_IE			0xc0	/* CTC Interrupt enable (set) */
-#define CIO_CIP			0x20	/* CTC Clear interrupt pending */
-#define CIO_IP			0x20	/* CTC Interrupt pending */
+#endif
 
 #endif	/* __MACHINE_AVCOMMON_H__ */

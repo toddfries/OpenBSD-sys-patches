@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_machdep.c,v 1.8 2006/08/01 15:44:24 deraadt Exp $ */
+/*	$OpenBSD: armish_machdep.c,v 1.16 2010/06/27 08:05:59 drahn Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -199,6 +199,12 @@ pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
 extern struct user *proc0paddr;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
 /* Prototypes */
 
 #define	BOOT_STRING_MAGIC 0x4f425344
@@ -226,7 +232,7 @@ int comcnmode = CONMODE;
 
 
 /*
- * void boot(int howto, char *bootstr)
+ * void boot(int howto)
  *
  * Reboots the system
  *
@@ -238,27 +244,15 @@ void	board_powerdown(void);
 void
 boot(int howto)
 {
-	/*
-	 * If we are still cold then hit the air brakes
-	 * and crash to earth fast
-	 */
 	if (cold) {
-		doshutdownhooks();
-		if ((howto & (RB_HALT | RB_USERREQ)) != RB_USERREQ) {
-			printf("The operating system has halted.\n");
-			printf("Please press any key to reboot.\n\n");
-			cngetc();
-		}
-		printf("rebooting...\n");
-		delay(60000);
-		cpu_reset();
-		printf("reboot failed; spinning\n");
-		while(1);
-		/*NOTREACHED*/
+		/*
+		 * If the system is cold, just halt, unless the user
+		 * explicitely asked for reboot.
+		 */
+		if ((howto & RB_USERREQ) == 0)
+			howto |=  RB_HALT;
+		goto haltsys;
 	}
-
-	/* Disable console buffering */
-/*	cnpollc(1);*/
 
 	/*
 	 * If RB_NOSYNC was not specified sync the discs.
@@ -277,7 +271,7 @@ boot(int howto)
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 	
-	/* Run any shutdown hooks */
+haltsys:
 	doshutdownhooks();
 
 	/* Make sure IRQ's are disabled */
@@ -291,7 +285,9 @@ boot(int howto)
 
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	printf("rebooting...\n");

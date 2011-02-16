@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: cacheinfo.c,v 1.5 2009/02/16 15:50:05 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -163,22 +156,14 @@ amd_cpu_cacheinfo(struct cpu_info *ci)
 	u_int descs[4];
 	u_int lfunc;
 
-	family = (ci->ci_signature >> 8) & 15;
-	model = CPUID2MODEL(ci->ci_signature);
+	family = ci->ci_family;
+	model = ci->ci_model;
 
 	/*
 	 * K5 model 0 has none of this info.
 	 */
 	if (family == 5 && model == 0)
 		return;
-
-	/*
-	 * Get extended values for K8 and up.
-	 */
-	if (family == 0xf) {
-		family += (ci->ci_signature >> 20) & 0xff;
-		model += (ci->ci_signature >> 16) & 0xf;
-	}
 
 	/*
 	 * Determine the largest extended function value.

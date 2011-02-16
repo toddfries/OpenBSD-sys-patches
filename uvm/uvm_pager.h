@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_pager.h,v 1.19 2002/03/15 01:20:04 millert Exp $	*/
+=======
+/*	$OpenBSD: uvm_pager.h,v 1.27 2009/07/22 21:05:37 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_pager.h,v 1.20 2000/11/27 08:40:05 chs Exp $	*/
 
 /*
@@ -109,8 +113,6 @@ struct uvm_pagerops {
 	struct vm_page **	(*pgo_mk_pcluster)(struct uvm_object *,
 				 struct vm_page **, int *, struct vm_page *,
 				 int, voff_t, voff_t);
-						/* release page */
-	boolean_t		(*pgo_releasepg)(struct vm_page *, struct vm_page **);
 };
 
 /* pager flags [mostly for flush] */
@@ -126,9 +128,6 @@ struct uvm_pagerops {
 #define PGO_LOCKED	0x040	/* fault data structures are locked [get] */
 #define PGO_PDFREECLUST	0x080	/* daemon's free cluster flag [uvm_pager_put] */
 #define PGO_REALLOCSWAP	0x100	/* reallocate swap area [pager_dropcluster] */
-#define PGO_OVERWRITE	0x200	/* pages will be overwritten before unlocked */
-#define PGO_WEAK	0x400	/* "weak" put, for nfs */
-#define PGO_PASTEOF	0x800	/* allow allocation of pages past EOF */
 
 /* page we are not interested in getting */
 #define PGO_DONTCARE ((struct vm_page *) -1L)	/* [get only] */
@@ -136,35 +135,20 @@ struct uvm_pagerops {
 #ifdef _KERNEL
 
 /*
- * handle inline options
- */
-
-#ifdef UVM_PAGER_INLINE
-#define PAGER_INLINE static __inline
-#else 
-#define PAGER_INLINE /* nothing */
-#endif /* UVM_PAGER_INLINE */
-
-/*
  * prototypes
  */
 
-void		uvm_pager_dropcluster(struct uvm_object *, 
-					struct vm_page *, struct vm_page **, 
-					int *, int);
+void		uvm_pager_dropcluster(struct uvm_object *, struct vm_page *,
+		    struct vm_page **, int *, int);
 void		uvm_pager_init(void);
 int		uvm_pager_put(struct uvm_object *, struct vm_page *, 
-				   struct vm_page ***, int *, int, 
-				   voff_t, voff_t);
+		    struct vm_page ***, int *, int, voff_t, voff_t);
 
-PAGER_INLINE struct vm_page *uvm_pageratop(vaddr_t);
 
 vaddr_t		uvm_pagermapin(struct vm_page **, int, int);
 void		uvm_pagermapout(vaddr_t, int);
 struct vm_page **uvm_mk_pcluster(struct uvm_object *, struct vm_page **,
-				       int *, struct vm_page *, int, 
-				       voff_t, voff_t);
-int		uvm_errno2vmerror(int);
+		    int *, struct vm_page *, int, voff_t, voff_t);
 
 /* Flags to uvm_pagermapin() */
 #define	UVMPAGER_MAPIN_WAITOK	0x01	/* it's okay to wait */

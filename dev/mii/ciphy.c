@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ciphy.c,v 1.17 2006/12/30 23:04:39 kettenis Exp $	*/
+=======
+/*	$OpenBSD: ciphy.c,v 1.22 2009/07/30 09:24:26 sthen Exp $	*/
+>>>>>>> origin/master
 /*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -43,23 +47,16 @@
 #include <sys/socket.h>
 #include <sys/errno.h>
 
+#include <machine/bus.h>
+
 #include <net/if.h>
 #include <net/if_media.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#endif
-
-#include <dev/pci/pcivar.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/miidevs.h>
 
 #include <dev/mii/ciphyreg.h>
-
-#include <machine/bus.h>
 
 int	ciphymatch(struct device *, void *, void *);
 void	ciphyattach(struct device *, struct device *, void *);
@@ -92,8 +89,19 @@ static const struct mii_phydesc ciphys[] = {
 	  MII_STR_CICADA_CS8201A },
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201B,
 	  MII_STR_CICADA_CS8201B },
+<<<<<<< HEAD
+=======
+	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8204,
+	  MII_STR_CICADA_CS8204 },
+	{ MII_OUI_CICADA,		MII_MODEL_CICADA_VSC8211,
+	  MII_STR_CICADA_VSC8211 },
+	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8244,
+	  MII_STR_CICADA_CS8244 },
+>>>>>>> origin/master
 	{ MII_OUI_xxCICADA,		MII_MODEL_xxCICADA_CS8201B,
 	  MII_STR_xxCICADA_CS8201B },
+	{ MII_OUI_VITESSE,		MII_MODEL_VITESSE_VSC8601,
+	  MII_STR_VITESSE_VSC8601 },
 
 	{ 0,			0,
 	  NULL },
@@ -214,7 +222,6 @@ setit:
 		case IFM_NONE:
 			PHY_WRITE(sc, MII_BMCR, BMCR_ISO|BMCR_PDOWN);
 			break;
-		case IFM_100_T4:
 		default:
 			return (EINVAL);
 		}
@@ -367,6 +374,10 @@ ciphy_fixup(struct mii_softc *sc)
 			PHY_CLRBIT(sc, CIPHY_MII_10BTCSR, CIPHY_10BTCSR_ECHO);
 		}
 
+		break;
+	case MII_MODEL_CICADA_VSC8211:
+	case MII_MODEL_CICADA_CS8244:
+	case MII_MODEL_VITESSE_VSC8601:
 		break;
 	default:
 		printf("%s: unknown CICADA PHY model %x\n",

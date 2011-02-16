@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: aic6360.c,v 1.12 2006/06/03 01:51:54 martin Exp $	*/
+=======
+/*	$OpenBSD: aic6360.c,v 1.25 2010/06/28 18:31:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 #ifdef DDB
@@ -131,7 +135,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -154,11 +157,11 @@
 int aic_debug = 0x00; /* AIC_SHOWSTART|AIC_SHOWMISC|AIC_SHOWTRACE; */
 #endif
 
-void	aic_minphys(struct buf *);
+void	aic_minphys(struct buf *, struct scsi_link *);
 void 	aic_init(struct aic_softc *);
 void	aic_done(struct aic_softc *, struct aic_acb *);
 void	aic_dequeue(struct aic_softc *, struct aic_acb *);
-int	aic_scsi_cmd(struct scsi_xfer *);
+void	aic_scsi_cmd(struct scsi_xfer *);
 int	aic_poll(struct aic_softc *, struct scsi_xfer *, int);
 integrate void	aic_sched_msgout(struct aic_softc *, u_char);
 integrate void	aic_setsync(struct aic_softc *, struct aic_tinfo *);
@@ -193,19 +196,11 @@ struct scsi_adapter aic_switch = {
 #ifdef notyet
 	aic_minphys,
 #else
-	minphys,
+	scsi_minphys,
 #endif
 	0,
 	0,
 };
-
-struct scsi_device aic_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 
 /*
  * Do the real search-for-device.
@@ -291,7 +286,6 @@ aicattach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_initiator;
 	sc->sc_link.adapter = &aic_switch;
-	sc->sc_link.device = &aic_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -515,9 +509,14 @@ aic_get_acb(sc, flags)
  * This function is called by the higher level SCSI-driver to queue/run
  * SCSI-commands.
  */
+<<<<<<< HEAD
 int
 aic_scsi_cmd(xs)
 	struct scsi_xfer *xs;
+=======
+void
+aic_scsi_cmd(struct scsi_xfer *xs)
+>>>>>>> origin/master
 {
 	struct scsi_link *sc_link = xs->sc_link;
 	struct aic_softc *sc = sc_link->adapter_softc;
@@ -530,7 +529,9 @@ aic_scsi_cmd(xs)
 
 	flags = xs->flags;
 	if ((acb = aic_get_acb(sc, flags)) == NULL) {
-		return TRY_AGAIN_LATER;
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	/* Initialize acb */
@@ -559,7 +560,7 @@ aic_scsi_cmd(xs)
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return SUCCESSFULLY_QUEUED;
+		return;
 
 	/* Not allowed to use interrupts, use polling instead */
 	if (aic_poll(sc, xs, acb->timeout)) {
@@ -567,7 +568,6 @@ aic_scsi_cmd(xs)
 		if (aic_poll(sc, xs, acb->timeout))
 			aic_timeout(acb);
 	}
-	return COMPLETE;
 }
 
 #ifdef notyet
@@ -575,8 +575,12 @@ aic_scsi_cmd(xs)
  * Adjust transfer size in buffer structure
  */
 void
+<<<<<<< HEAD
 aic_minphys(bp)
 	struct buf *bp;
+=======
+aic_minphys(struct buf *bp, struct scsi_link *sl)
+>>>>>>> origin/master
 {
 
 	AIC_TRACE(("aic_minphys  "));
@@ -867,8 +871,6 @@ aic_done(sc, acb)
 		}
 	}
 
-	xs->flags |= ITSDONE;
-
 #ifdef AIC_DEBUG
 	if ((aic_debug & AIC_SHOWMISC) != 0) {
 		if (xs->resid != 0)
@@ -913,10 +915,6 @@ aic_dequeue(sc, acb)
 /*
  * INTERRUPT/PROTOCOL ENGINE
  */
-
-#define IS1BYTEMSG(m) (((m) != 0x01 && (m) < 0x20) || (m) >= 0x80)
-#define IS2BYTEMSG(m) (((m) & 0xf0) == 0x20)
-#define ISEXTMSG(m) ((m) == 0x01)
 
 /*
  * Precondition:
@@ -1802,8 +1800,7 @@ loop:
 
 			/* On our first connection, schedule a timeout. */
 			if ((acb->xs->flags & SCSI_POLL) == 0)
-				timeout_add(&acb->xs->stimeout,
-				    (acb->timeout * hz) / 1000);
+				timeout_add_msec(&acb->xs->stimeout, acb->timeout);
 
 			sc->sc_state = AIC_CONNECTED;
 		} else if ((sstat1 & SELTO) != 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.9 2007/03/03 21:37:27 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.23 2010/06/27 12:41:23 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,7 +70,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/sysctl.h>
@@ -85,7 +78,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -99,6 +92,7 @@
 
 #include <machine/cpu.h>
 #include <machine/kcore.h>
+#include <machine/pcb.h>
 
 #include <landisk/landisk/landiskreg.h>
 
@@ -117,13 +111,21 @@ void	cpu_init_kcore_hdr(void);
 
 extern u_int32_t getramsize(void);
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
 void
 cpu_startup(void)
 {
 	extern char cpu_model[120];
 
-	/* XXX: show model (LANDISK/USL-5P) */
-	strlcpy(cpu_model, "I-O DATA USL-5P", sizeof cpu_model);
+	strlcpy(cpu_model, "SH4 SH7751R", sizeof cpu_model);
 
         sh_startup();
 }
@@ -231,7 +233,9 @@ haltsys:
 		printf("\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	printf("rebooting...\n");

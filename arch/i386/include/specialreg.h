@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.29 2007/02/13 00:22:48 jsg Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.39 2010/04/29 17:00:48 oga Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.7 1994/10/27 04:16:26 cgd Exp $	*/
 
 /*-
@@ -132,14 +132,29 @@
 #define CPUID_LONG	0x20000000	/* long mode (AMD64, ext cpuid) */
 
 #define CPUIDECX_SSE3	0x00000001	/* has SSE3 instructions */
+#define CPUIDECX_PCLMUL	0x00000002	/* Carryless Multiplication */
 #define CPUIDECX_MWAIT	0x00000008	/* Monitor/Mwait */
 #define CPUIDECX_DSCPL	0x00000010	/* CPL Qualified Debug Store */
 #define CPUIDECX_VMX	0x00000020	/* Virtual Machine Extensions */
+#define CPUIDECX_SMX	0x00000040	/* Safer Mode Extensions */
 #define CPUIDECX_EST	0x00000080	/* enhanced SpeedStep */
 #define CPUIDECX_TM2	0x00000100	/* thermal monitor 2 */
+#define CPUIDECX_SSSE3	0x00000200	/* Supplemental Streaming SIMD Ext. 3 */
 #define CPUIDECX_CNXTID	0x00000400	/* Context ID */
+#define CPUIDECX_FMA3	0x00001000	/* Fused Multiply Add */
 #define CPUIDECX_CX16	0x00002000	/* has CMPXCHG16B instruction */
 #define CPUIDECX_XTPR	0x00004000	/* xTPR Update Control */
+#define CPUIDECX_PDCM	0x00008000	/* Perfmon and Debug Capability */
+#define CPUIDECX_DCA	0x00040000	/* Direct Cache Access */
+#define CPUIDECX_SSE41	0x00080000	/* Streaming SIMD Extensions 4.1 */
+#define CPUIDECX_SSE42	0x00100000	/* Streaming SIMD Extensions 4.2 */
+#define CPUIDECX_X2APIC	0x00200000	/* Extended xAPIC Support */
+#define CPUIDECX_MOVBE	0x00400000	/* MOVBE Instruction */
+#define CPUIDECX_POPCNT	0x00800000	/* POPCNT Instruction */
+#define CPUIDECX_AES	0x02000000	/* AES Instruction */
+#define CPUIDECX_XSAVE	0x04000000	/* XSAVE/XSTOR States */
+#define CPUIDECX_OSXSAVE	0x08000000	/* OSXSAVE */
+#define CPUIDECX_AVX	0x10000000	/* Advanced Vector Extensions */
 
 /*
  * Model-specific registers for the i386 family
@@ -217,6 +232,7 @@
 #define	MSR_MTRRfix4K_E8000	0x26d
 #define	MSR_MTRRfix4K_F0000	0x26e
 #define	MSR_MTRRfix4K_F8000	0x26f
+#define MSR_CR_PAT		0x277
 #define MSR_MTRRdefType		0x2ff
 #define MSR_MC0_CTL		0x400
 #define MSR_MC0_STATUS		0x401
@@ -238,6 +254,10 @@
 #define MSR_MC3_STATUS		0x411
 #define MSR_MC3_ADDR		0x412
 #define MSR_MC3_MISC		0x413
+
+/* VIA MSRs */
+#define MSR_CENT_TMTEMPERATURE	0x1423	/* Thermal monitor temperature */
+#define MSR_C7M_TMTEMPERATURE	0x1169
 
 /* AMD MSRs */
 #define MSR_K6_EPMR		0xc0000086
@@ -261,6 +281,10 @@
 #define MSR_FSBASE	0xc0000100		/* 64bit offset for fs: */
 #define MSR_GSBASE	0xc0000101		/* 64bit offset for gs: */
 #define MSR_KERNELGSBASE 0xc0000102		/* storage for swapgs ins */
+#define MSR_INT_PEN_MSG	0xc0010055		/* Interrupt pending message */
+
+#define IPM_C1E_CMP_HLT	0x10000000
+#define IPM_SMI_CMP_HLT	0x08000000
 
 /*
  * These require a 'passcode' for access.  See cpufunc.h.

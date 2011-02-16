@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_vfsops.c,v 1.102 2007/03/31 15:30:07 pedro Exp $	*/
+=======
+/*	$OpenBSD: ffs_vfsops.c,v 1.128 2010/12/21 20:14:44 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -49,6 +53,8 @@
 #include <sys/malloc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
+#include <sys/dkio.h>
+#include <sys/disk.h>
 
 #include <dev/rndvar.h>
 
@@ -172,6 +178,7 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 	int ronly;
 	mode_t accessmode;
 	size_t size;
+	char *fspec = NULL;
 
 	error = copyin(data, &args, sizeof (struct ufs_args));
 	if (error)
@@ -279,9 +286,9 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 			if (fs->fs_clean == 0) {
 #if 0
 				/*
-				 * It is safe mount unclean file system
+				 * It is safe to mount an unclean file system
 				 * if it was previously mounted with softdep
-				 * but we may loss space and must
+				 * but we may lose space and must
 				 * sometimes run fsck manually.
 				 */
 				if (fs->fs_flags & FS_DOSOFTDEP)
@@ -327,11 +334,16 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 				goto success;
 		}
 	}
+
 	/*
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
+	fspec = malloc(MNAMELEN, M_MOUNT, M_WAITOK);
+	copyinstr(args.fspec, fspec, MNAMELEN - 1, &size);
+	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
 	if ((error = namei(ndp)) != 0)
 		goto error_1;
 
@@ -384,10 +396,8 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 			/*
 			 * Save "mounted from" info for mount point (NULL pad)
 			 */
-			copyinstr(args.fspec,
-				  mp->mnt_stat.f_mntfromname,
-				  MNAMELEN - 1,
-				  &size);
+			size = strlcpy(mp->mnt_stat.f_mntfromname, fspec,
+			    MNAMELEN - 1);
 			bzero(mp->mnt_stat.f_mntfromname + size,
 			      MNAMELEN - size);
 		}
@@ -406,10 +416,7 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 		bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
 
 		/* Save "mounted from" info for mount point (NULL pad)*/
-		copyinstr(args.fspec,			/* device name*/
-			  mp->mnt_stat.f_mntfromname,	/* save area*/
-			  MNAMELEN - 1,			/* max size*/
-			  &size);			/* real size*/
+		size = strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN - 1);
 		bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
 
 		error = ffs_mountfs(devvp, mp, p);
@@ -450,7 +457,12 @@ success:
 
 error_2:	/* error with devvp held */
 	vrele (devvp);
+
 error_1:	/* no state to back out */
+
+	if (fspec)
+		free(fspec, M_MOUNT);
+
 	return (error);
 }
 
@@ -553,7 +565,14 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	else
 		size = dpart.disklab->d_secsize;
 
+<<<<<<< HEAD
 	error = bread(devvp, (daddr_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
+=======
+	fs = VFSTOUFS(mountp)->um_fs;
+
+	error = bread(devvp, (daddr64_t)(fs->fs_sblockloc / DEV_BSIZE), SBSIZE,
+	    NOCRED, &bp);
+>>>>>>> origin/master
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -714,7 +733,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 			bp = NULL;
 		}
 
-		error = bread(devvp, sbtry[i] / size, SBSIZE, cred, &bp);
+		error = bread(devvp, sbtry[i] / DEV_BSIZE, SBSIZE, cred, &bp);
 		if (error)
 			goto out;
 
@@ -752,9 +771,9 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		fs->fs_flags |= FS_UNCLEAN;
 #if 0
 		/*
-		 * It is safe mount unclean file system
+		 * It is safe to mount an unclean file system
 		 * if it was previously mounted with softdep
-		 * but we may loss space and must
+		 * but we may lose space and must
 		 * sometimes run fsck manually.
 		 */
 		if (fs->fs_flags & FS_DOSOFTDEP)
@@ -890,7 +909,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	 * a little added paranoia never hurts.
 	 */
 	ump->um_savedmaxfilesize = fs->fs_maxfilesize;		/* XXX */
-	maxfilesize = (u_int64_t)0x80000000 * MIN(PAGE_SIZE, fs->fs_bsize) - 1;
+	maxfilesize = FS_KERNMAXFILESIZE(PAGE_SIZE, fs);
 	if (fs->fs_maxfilesize > maxfilesize)			/* XXX */
 		fs->fs_maxfilesize = maxfilesize;		/* XXX */
 	if (ronly == 0) {
@@ -913,9 +932,17 @@ out:
 	devvp->v_specmountpoint = NULL;
 	if (bp)
 		brelse(bp);
+<<<<<<< HEAD
 	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, cred, p);
 	VOP_UNLOCK(devvp, 0, p);
+=======
+
+	vn_lock(devvp, LK_EXCLUSIVE|LK_RETRY, p);
+	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, cred, p);
+	VOP_UNLOCK(devvp, 0, p);
+
+>>>>>>> origin/master
 	if (ump) {
 		free(ump->um_fs, M_UFSMNT);
 		free(ump, M_UFSMNT);
@@ -1108,8 +1135,9 @@ ffs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	sbp->f_iosize = fs->fs_bsize;
 	sbp->f_blocks = fs->fs_dsize;
 	sbp->f_bfree = fs->fs_cstotal.cs_nbfree * fs->fs_frag +
-		fs->fs_cstotal.cs_nffree;
-	sbp->f_bavail = sbp->f_bfree - ((int64_t)fs->fs_dsize * fs->fs_minfree / 100);
+	    fs->fs_cstotal.cs_nffree;
+	sbp->f_bavail = sbp->f_bfree -
+	    ((int64_t)fs->fs_dsize * fs->fs_minfree / 100);
 	sbp->f_files = fs->fs_ncg * fs->fs_ipg - ROOTINO;
 	sbp->f_ffree = fs->fs_cstotal.cs_nifree;
 	if (sbp != &mp->mnt_stat) {
@@ -1260,19 +1288,17 @@ retry:
 		return (0);
 
 	/* Allocate a new vnode/inode. */
-	if ((error = getnewvnode(VT_UFS, mp, ffs_vnodeop_p, &vp)) != 0) {
+	if ((error = getnewvnode(VT_UFS, mp, &ffs_vops, &vp)) != 0) {
 		*vpp = NULL;
 		return (error);
 	}
 #ifdef VFSDEBUG
 	vp->v_flag |= VLOCKSWORK;
 #endif
-	/* XXX - we use the same pool for ffs and mfs */
-	ip = pool_get(&ffs_ino_pool, PR_WAITOK);
-	bzero((caddr_t)ip, sizeof(struct inode));
+	ip = pool_get(&ffs_ino_pool, PR_WAITOK|PR_ZERO);
 	lockinit(&ip->i_lock, PINOD, "inode", 0, 0);
 	ip->i_ump = ump;
-	VREF(ip->i_devvp);
+	vref(ip->i_devvp);
 	vp->v_data = ip;
 	ip->i_vnode = vp;
 	ip->i_fs = fs = ump->um_fs;
@@ -1342,7 +1368,7 @@ retry:
 	 * Initialize the vnode from the inode, check for aliases.
 	 * Note that the underlying vnode may have changed.
 	 */
-	error = ufs_vinit(mp, ffs_specop_p, FFS_FIFOOPS, &vp);
+	error = ufs_vinit(mp, &ffs_specvops, FFS_FIFOOPS, &vp);
 	if (error) {
 		vput(vp);
 		*vpp = NULL;
@@ -1400,7 +1426,6 @@ ffs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 /*
  * Vnode pointer to File handle
  */
-/* ARGSUSED */
 int
 ffs_vptofh(struct vnode *vp, struct fid *fhp)
 {

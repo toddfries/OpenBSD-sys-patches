@@ -1,4 +1,4 @@
-#	$OpenBSD: files.hppa64,v 1.2 2005/05/01 21:36:56 brad Exp $
+#	$OpenBSD: files.hppa64,v 1.13 2011/01/02 13:08:36 jsing Exp $
 #
 # hppa64-specific configuration info
 
@@ -56,6 +56,11 @@ include	"dev/pcmcia/files.pcmcia"
 include "dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
 # Machine-independent 1-Wire drivers
 #
 include "dev/onewire/files.onewire"
@@ -107,17 +112,6 @@ major	{rd = 3}
 include	"dev/pckbc/files.pckbc"
 
 #
-# Compatibility
-#
-#include "compat/hpux/hppa64/files.hpux"
-#file	arch/hppa64/hppa64/hpux_machdep.c	compat_hpux
-#include "compat/osf1/files.osf1"
-#file	arch/hppa64/hppa64/osf1_machdep.c	compat_osf1
-#include	"compat/linux/files.linux"
-#include "compat/ossaudio/files.ossaudio"
-#file	arch/hppa64/hppa64/linux_machdep.c	compat_linux
-
-#
 # Non-device files
 #
 
@@ -126,6 +120,7 @@ file	arch/hppa64/hppa64/conf.c
 file	arch/hppa64/hppa64/db_interface.c	ddb
 file	arch/hppa64/hppa64/db_disasm.c		ddb
 file	arch/hppa64/hppa64/disksubr.c		disk
+file	arch/hppa64/hppa64/intr.c
 file	arch/hppa64/hppa64/machdep.c
 file	arch/hppa64/hppa64/pmap.c
 file	arch/hppa64/hppa64/process_machdep.c

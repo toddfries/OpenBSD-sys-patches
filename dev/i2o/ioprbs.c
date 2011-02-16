@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ioprbs.c,v 1.10 2005/12/04 04:05:25 krw Exp $	*/
+=======
+/*	$OpenBSD: ioprbs.c,v 1.25 2010/11/20 20:11:19 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -41,13 +45,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -98,7 +95,6 @@
 #define	DPRINTF(x)
 #endif
 
-void	ioprbsminphys(struct buf *);
 void	ioprbs_adjqparam(struct device *, int);
 void	ioprbs_attach(struct device *, struct device *, void *);
 void	ioprbs_copy_internal_data(struct scsi_xfer *, u_int8_t *,
@@ -113,7 +109,7 @@ void	ioprbs_internal_cache_cmd(struct scsi_xfer *);
 void	ioprbs_intr(struct device *, struct iop_msg *, void *);
 void	ioprbs_intr_event(struct device *, struct iop_msg *, void *);
 int	ioprbs_match(struct device *, void *, void *);
-int	ioprbs_scsi_cmd(struct scsi_xfer *);
+void	ioprbs_scsi_cmd(struct scsi_xfer *);
 int	ioprbs_start(struct ioprbs_ccb *);
 void	ioprbs_start_ccbs(struct ioprbs_softc *);
 void	ioprbs_timeout(void *);
@@ -129,11 +125,7 @@ struct cfattach ioprbs_ca = {
 };
 
 struct scsi_adapter ioprbs_switch = {
-	ioprbs_scsi_cmd, ioprbsminphys, 0, 0,
-};
-
-struct scsi_device ioprbs_dev = {
-	NULL, NULL, NULL, NULL
+	ioprbs_scsi_cmd, scsi_minphys, 0, 0,
 };
 
 #ifdef I2OVERBOSE
@@ -192,7 +184,7 @@ ioprbs_attach(struct device *parent, struct device *self, void *aux)
 			struct	i2o_param_rbs_device_info bdi;
 			struct	i2o_param_rbs_operation op;
 		} p;
-	} param /* XXX gcc __attribute__ ((__packed__)) */;
+	} __packed param;
 	int i;
 
 	TAILQ_INIT(&sc->sc_free_ccb);
@@ -353,7 +345,6 @@ ioprbs_attach(struct device *parent, struct device *self, void *aux)
 	/* Fill in the prototype scsi_link. */
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &ioprbs_switch;
-	sc->sc_link.device = &ioprbs_dev;
 	sc->sc_link.openings = 1;
 	sc->sc_link.adapter_buswidth = 1;
 	sc->sc_link.adapter_target = 1;
@@ -405,7 +396,7 @@ ioprbs_unconfig(struct ioprbs_softc *sc, int evreg)
 	iop_initiator_unregister(iop, &sc->sc_ii);
 }
 
-int
+void
 ioprbs_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -415,8 +406,12 @@ ioprbs_scsi_cmd(xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
+<<<<<<< HEAD
 	ioprbs_lock_t lock;
 	int retval = SUCCESSFULLY_QUEUED;
+=======
+	int s;
+>>>>>>> origin/master
 
 	lock = IOPRBS_LOCK(sc);
 
@@ -440,7 +435,6 @@ ioprbs_scsi_cmd(xs)
 		case VERIFY:
 #endif
 			ioprbs_internal_cache_cmd(xs);
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -448,7 +442,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("PREVENT/ALLOW "));
 			/* XXX Not yet implemented */
 			xs->error = XS_NOERROR;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -456,7 +449,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("SYNCHRONIZE_CACHE "));
 			/* XXX Not yet implemented */
 			xs->error = XS_NOERROR;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -464,7 +456,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("unknown opc %d ", xs->cmd->opcode));
 			/* XXX Not yet implemented */
 			xs->error = XS_DRIVER_STUFFUP;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -499,7 +490,6 @@ ioprbs_scsi_cmd(xs)
 					 * sense too.
 					 */
 					xs->error = XS_DRIVER_STUFFUP;
-					xs->flags |= ITSDONE;
 					scsi_done(xs);
 					goto ready;
 				}
@@ -511,8 +501,15 @@ ioprbs_scsi_cmd(xs)
 			 * We are out of commands, try again in a little while.
 			 */
 			if (ccb == NULL) {
+<<<<<<< HEAD
 				IOPRBS_UNLOCK(sc, lock);
 				return (TRY_AGAIN_LATER);
+=======
+				xs->error = XS_NO_CCB;
+				scsi_done(xs);
+				splx(s);
+				return;
+>>>>>>> origin/master
 			}
 
 			ccb->ic_blockno = blockno;
@@ -529,9 +526,11 @@ ioprbs_scsi_cmd(xs)
 					IOPRBS_UNLOCK(sc, lock);
 					printf("%s: command timed out\n",
 					    sc->sc_dv.dv_xname);
-					return (TRY_AGAIN_LATER);
+					xs->error = XS_NO_CCB;
+					scsi_done(xs);
+					splx(s);
+					return;
 				}
-				xs->flags |= ITSDONE;
 				scsi_done(xs);
 #endif
 			}
@@ -542,11 +541,11 @@ ioprbs_scsi_cmd(xs)
 		 * Don't process the queue if we are polling.
 		 */
 		if (xs->flags & SCSI_POLL) {
-			retval = COMPLETE;
 			break;
 		}
 	}
 
+<<<<<<< HEAD
 	IOPRBS_UNLOCK(sc, lock);
 	return (retval);
 }
@@ -556,6 +555,9 @@ ioprbsminphys(bp)
 	struct buf *bp;
 {
 	minphys(bp);
+=======
+	splx(s);
+>>>>>>> origin/master
 }
 
 void
@@ -563,7 +565,7 @@ ioprbs_intr(struct device *dv, struct iop_msg *im, void *reply)
 {
 	struct i2o_rbs_reply *rb = reply;
 	struct ioprbs_ccb *ccb = im->im_dvcontext;
-	struct buf *bp = ccb->ic_xs->bp;
+	struct scsi_xfer *xs = ccb->ic_xs;
 	struct ioprbs_softc *sc = (struct ioprbs_softc *)dv;
 	struct iop_softc *iop = (struct iop_softc *)dv->dv_parent;
 	int err, detail;
@@ -573,14 +575,14 @@ ioprbs_intr(struct device *dv, struct iop_msg *im, void *reply)
 
 	DPRINTF(("ioprbs_intr(%p, %p, %p) ", dv, im, reply));
 
-	timeout_del(&ccb->ic_xs->stimeout);
+	timeout_del(&xs->stimeout);
 
 	err = ((rb->msgflags & I2O_MSGFLAGS_FAIL) != 0);
 
 	if (!err && rb->reqstatus != I2O_STATUS_SUCCESS) {
 		detail = letoh16(rb->detail);
 #ifdef I2OVERBOSE
-		if (detail > sizeof(ioprbs_errors) / sizeof(ioprbs_errors[0]))
+		if (detail >= sizeof(ioprbs_errors) / sizeof(ioprbs_errors[0]))
 			errstr = "<unknown>";
 		else
 			errstr = ioprbs_errors[detail];
@@ -591,18 +593,14 @@ ioprbs_intr(struct device *dv, struct iop_msg *im, void *reply)
 		err = 1;
 	}
 
-	if (bp) {
-		if (err) {
-			bp->b_flags |= B_ERROR;
-			bp->b_error = EIO;
-			bp->b_resid = bp->b_bcount;
-		} else
-			bp->b_resid = bp->b_bcount - letoh32(rb->transfercount);
-	}
+	if (err)
+		xs->error = XS_DRIVER_STUFFUP;
+	else
+		xs->resid = xs->datalen - letoh32(rb->transfercount);
 
 	iop_msg_unmap(iop, im);
 	iop_msg_free(iop, im);
-	scsi_done(ccb->ic_xs);
+	scsi_done(xs);
 	ioprbs_free_ccb(sc, ccb);
 }
 
@@ -742,7 +740,7 @@ ioprbs_internal_cache_cmd(xs)
 	case REQUEST_SENSE:
 		DPRINTF(("REQUEST SENSE tgt %d ", target));
 		bzero(&sd, sizeof sd);
-		sd.error_code = 0x70;
+		sd.error_code = SSD_ERRCODE_CURRENT;
 		sd.segment = 0;
 		sd.flags = SKEY_NO_SENSE;
 		bzero(sd.info, sizeof sd.info);
@@ -759,6 +757,7 @@ ioprbs_internal_cache_cmd(xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
+		inq.flags |= SID_CmdQue;
 		strlcpy(inq.vendor, "I2O", sizeof inq.vendor);
 		snprintf(inq.product, sizeof inq.product, "Container #%02d",
 		    target);
@@ -866,8 +865,7 @@ ioprbs_start_ccbs(sc)
 			ccb->ic_flags |= IOPRBS_ICF_WATCHDOG;
 			timeout_set(&ccb->ic_xs->stimeout, ioprbs_watchdog,
 			    ccb);
-			timeout_add(&xs->stimeout,
-			    (IOPRBS_WATCH_TIMEOUT * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, IOPRBS_WATCH_TIMEOUT);
 			break;
 		}
 		TAILQ_REMOVE(&sc->sc_ccbq, ccb, ic_chain);
@@ -875,8 +873,7 @@ ioprbs_start_ccbs(sc)
 		if ((xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&ccb->ic_xs->stimeout, ioprbs_timeout,
 			    ccb);
-			timeout_add(&xs->stimeout,
-			    (ccb->ic_timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->ic_timeout);
 		}
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.32 2006/11/29 12:13:54 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.38 2010/11/27 18:31:53 miod Exp $	*/
 /*	$NetBSD: vga.c,v 1.3 1996/12/02 22:24:54 cgd Exp $	*/
 
 /*
@@ -177,7 +177,7 @@ vgafb_common_setup(bus_space_tag_t iot, bus_space_tag_t  memt,
 	memsize = cons_height * cons_linebytes;
         if (bus_space_map(vc->vc_memt, membase, memsize, 
 	    /* XXX */ppc_proc_is_64b ? 0 : 1, &vc->vc_memh))
-		panic("vgafb_common_setup: couldn't map memory"); 
+		panic("vgafb_common_setup: can't map mem space"); 
 	cons_display_mem_h = vc->vc_memh;
 	vc->vc_ofh = cons_display_ofh;
 
@@ -361,7 +361,7 @@ vgafb_mmap(void *v, off_t offset, int prot)
 		else if (offset >= 0x10040000 && offset < 0x10080000)
 			/* 256KB of iohc */
 			h = vc->vc_ioh_c;
-		else if (offset >= 0x18880000 && offset < 0x100c0000)
+		else if (offset >= 0x10080000 && offset < 0x100c0000)
 			/* 256KB of iohd */
 			h = vc->vc_ioh_d;
 		else if (offset >= 0x20000000 && offset < 0x20000000+vc->mmiosize)
@@ -374,7 +374,6 @@ vgafb_mmap(void *v, off_t offset, int prot)
 		    (offset < vc->mmiobase+vc->mmiosize)) {
 			/* allow mmapping of mmio space */
 			h = offset;
-			
 		} else {
 			h = -1;
 		}
@@ -383,20 +382,12 @@ vgafb_mmap(void *v, off_t offset, int prot)
 	case WSDISPLAYIO_MODE_DUMBFB:
 		if (offset >= 0x00000 && offset < vc->memsize)
 			h = vc->vc_paddr + offset;
+		else
+			h = -1;
 		break;
 
 	}
 	return h;
-}
-
-
-void
-vgafb_cnprobe(struct consdev *cp)
-{
-	if (cons_displaytype != 1)
-		return;
-
-	cp->cn_pri = CN_INTERNAL;
 }
 
 void

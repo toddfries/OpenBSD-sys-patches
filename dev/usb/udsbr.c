@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udsbr.c,v 1.8 2005/08/01 05:36:48 brad Exp $	*/
+=======
+/*	$OpenBSD: udsbr.c,v 1.22 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: udsbr.c,v 1.7 2002/07/11 21:14:27 augustss Exp $	*/
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -94,12 +91,37 @@ struct udsbr_softc {
 	char			sc_dying;
 };
 
+<<<<<<< HEAD
 Static	int	udsbr_req(struct udsbr_softc *sc, int ureq, int value,
 			  int index);
 Static	void	udsbr_start(struct udsbr_softc *sc);
 Static	void	udsbr_stop(struct udsbr_softc *sc);
 Static	void	udsbr_setfreq(struct udsbr_softc *sc, int freq);
 Static	int	udsbr_status(struct udsbr_softc *sc);
+=======
+int	udsbr_req(struct udsbr_softc *sc, int ureq, int value, int index);
+void	udsbr_start(struct udsbr_softc *sc);
+void	udsbr_stop(struct udsbr_softc *sc);
+void	udsbr_setfreq(struct udsbr_softc *sc, int freq);
+int	udsbr_status(struct udsbr_softc *sc);
+
+int udsbr_match(struct device *, void *, void *); 
+void udsbr_attach(struct device *, struct device *, void *); 
+int udsbr_detach(struct device *, int); 
+int udsbr_activate(struct device *, int); 
+
+struct cfdriver udsbr_cd = { 
+	NULL, "udsbr", DV_DULL 
+}; 
+
+const struct cfattach udsbr_ca = { 
+	sizeof(struct udsbr_softc), 
+	udsbr_match, 
+	udsbr_attach, 
+	udsbr_detach, 
+	udsbr_activate, 
+};
+>>>>>>> origin/master
 
 USB_DECLARE_DRIVER(udsbr);
 
@@ -143,12 +165,16 @@ USB_ATTACH(udsbr)
 
 	DPRINTFN(10, ("udsbr_attach: %p\n", sc->sc_udev));
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
 	sc->sc_child = radio_attach_mi(&udsbr_hw_if, sc, USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+	sc->sc_child = radio_attach_mi(&udsbr_hw_if, sc, &sc->sc_dev);
+>>>>>>> origin/master
 }
 
 USB_DETACH(udsbr)
@@ -159,14 +185,21 @@ USB_DETACH(udsbr)
 	if (sc->sc_child != NULL)
 		rv = config_detach(sc->sc_child, flags);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 udsbr_activate(device_ptr_t self, enum devact act)
+=======
+udsbr_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct udsbr_softc *sc = (struct udsbr_softc *)self;
 	int rv = 0;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: iha.c,v 1.25 2005/12/03 16:53:16 krw Exp $ */
+=======
+/*	$OpenBSD: iha.c,v 1.40 2010/10/03 21:14:40 krw Exp $ */
+>>>>>>> origin/master
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -60,13 +64,6 @@ struct scsi_adapter iha_switch = {
 	NULL		/*  int (*close_target_lu)(void);        */
 };
 
-struct scsi_device iha_dev = {
-	NULL,		/* Use default error handler    */
-	NULL,		/* have a queue, served by this */
-	NULL,		/* have no async handler	*/
-	NULL,		/* Use default 'done' routine   */
-};
-
 /*
  * SCSI Rate Table, indexed by FLAG_SCSI_RATE field of
  * TCS_Flags.
@@ -106,8 +103,8 @@ void iha_scsi(struct iha_softc *, bus_space_tag_t, bus_space_handle_t);
 int  iha_wait(struct iha_softc *, bus_space_tag_t, bus_space_handle_t,
 		      u_int8_t);
 void iha_mark_busy_scb(struct iha_scb *);
-void iha_append_free_scb(struct iha_softc *, struct iha_scb *);
-struct iha_scb *iha_pop_free_scb(struct iha_softc *);
+void *iha_scb_alloc(void *);
+void iha_scb_free(void *, void *);
 void iha_append_done_scb(struct iha_softc *, struct iha_scb *,
 				 u_int8_t);
 struct iha_scb *iha_pop_done_scb(struct iha_softc *);
@@ -259,7 +256,7 @@ iha_setup_sg_list(sc, pScb)
  *		  from the generic SCSI driver via the field
  *		  sc_adapter.scsi_cmd of iha_softc.
  */
-int
+void
 iha_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -270,15 +267,11 @@ iha_scsi_cmd(xs)
 
 	if ((xs->cmdlen > 12) || (sc_link->target >= IHA_MAX_TARGETS)) {
 		xs->error = XS_DRIVER_STUFFUP;
-		return (COMPLETE);
+		scsi_done(xs);
+		return;
 	}
 
-	pScb = iha_pop_free_scb(sc);
-	if (pScb == NULL) {
-		/* XXX - different xs->error/return if
-		 * SCSI_POLL/_NOSLEEP? */
-		return (TRY_AGAIN_LATER);
-	}
+	pScb = xs->io;
 
 	pScb->SCB_Target = sc_link->target;
 	pScb->SCB_Lun	 = sc_link->lun;
@@ -298,18 +291,10 @@ iha_scsi_cmd(xs)
 	pScb->SCB_BufCharsLeft = pScb->SCB_BufChars = xs->datalen;
 
 	if ((pScb->SCB_Flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) != 0) {
-#ifdef TFS
-		if (pScb->SCB_Flags & SCSI_DATA_UIO)
-			error = bus_dmamap_load_uio(sc->sc_dmat,
-			    pScb->SCB_DataDma, (struct uio *)xs->data,
-			    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
-			    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
-		else
-#endif /* TFS */
-			error = bus_dmamap_load(sc->sc_dmat, pScb->SCB_DataDma,
-			    xs->data, pScb->SCB_BufChars, NULL,
-			    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
-			    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
+		error = bus_dmamap_load(sc->sc_dmat, pScb->SCB_DataDma,
+		    xs->data, pScb->SCB_BufChars, NULL,
+		    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
+		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
 
 		if (error) {
 			sc_print_addr(xs->sc_link);
@@ -320,10 +305,9 @@ iha_scsi_cmd(xs)
 				printf("error %d loading buffer dma map\n",
 				    error);
 
-			iha_append_free_scb(sc, pScb); 
-
 			xs->error = XS_DRIVER_STUFFUP;
-			return (COMPLETE);
+			scsi_done(xs);
+			return;
 		}
 		bus_dmamap_sync(sc->sc_dmat, pScb->SCB_DataDma, 
 			0, pScb->SCB_BufChars,
@@ -334,7 +318,8 @@ iha_scsi_cmd(xs)
 		if (error) {
 			bus_dmamap_unload(sc->sc_dmat, pScb->SCB_DataDma);
 			xs->error = XS_DRIVER_STUFFUP;
-			return (COMPLETE);
+			scsi_done(xs);
+			return;
 		}
 
 	}
@@ -346,14 +331,17 @@ iha_scsi_cmd(xs)
 	 */
 	timeout_set(&xs->stimeout, iha_timeout, pScb);
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	iha_exec_scb(sc, pScb);
+<<<<<<< HEAD
 
 	if ((xs->flags & ITSDONE) == 0)
 		return (SUCCESSFULLY_QUEUED);
 	else
 		return (COMPLETE);
+=======
+>>>>>>> origin/master
 }
 
 /*
@@ -378,15 +366,22 @@ iha_init_tulip(sc)
 
 	pScsi = &iha_nvram.NVM_Scsi[0];
 
+	TAILQ_INIT(&sc->HCS_FreeScb);
+	TAILQ_INIT(&sc->HCS_PendScb);
+	TAILQ_INIT(&sc->HCS_DoneScb);
+
+	mtx_init(&sc->sc_scb_mtx, IPL_BIO);
+	scsi_iopool_init(&sc->sc_iopool, sc, iha_scb_alloc, iha_scb_free);
+
 	/*
 	 * fill in the prototype scsi_link.
 	 */
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter	     = &iha_switch;
-	sc->sc_link.device	     = &iha_dev;
 	sc->sc_link.openings	     = 4; /* # xs's allowed per device */
 	sc->sc_link.adapter_target   = pScsi->NVM_SCSI_Id;
 	sc->sc_link.adapter_buswidth = pScsi->NVM_SCSI_Targets;
+	sc->sc_link.pool             = &sc->sc_iopool;
 
 	/*
 	 * fill in the rest of the iha_softc fields
@@ -394,10 +389,6 @@ iha_init_tulip(sc)
 	sc->HCS_Semaph	  = ~SEMAPH_IN_MAIN;
 	sc->HCS_JSStatus0 = 0;
 	sc->HCS_ActScb	  = NULL;
-
-	TAILQ_INIT(&sc->HCS_FreeScb);
-	TAILQ_INIT(&sc->HCS_PendScb);
-	TAILQ_INIT(&sc->HCS_DoneScb);
 
 	error = iha_alloc_scbs(sc);
 	if (error != 0)
@@ -481,8 +472,7 @@ iha_init_tulip(sc)
  *		 via sc->sc_adapter.scsi_minphys.
  */
 void
-iha_minphys(bp)
-	struct buf *bp;
+iha_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE))
 		bp->b_bcount = ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE);
@@ -510,45 +500,42 @@ iha_reset_dma(iot, ioh)
 }
 
 /*
- * iha_pop_free_scb - return the first free SCB, or NULL if there are none.
+ * iha_scb_alloc - return the first free SCB, or NULL if there are none.
  */
-struct iha_scb *
-iha_pop_free_scb(sc)
-	struct iha_softc *sc;
+void *
+iha_scb_alloc(xsc)
+	void *xsc;
 {
+	struct iha_softc *sc = xsc;
 	struct iha_scb *pScb;
-	int s;
 
-	s = splbio();
-
+	mtx_enter(&sc->sc_scb_mtx);
 	pScb = TAILQ_FIRST(&sc->HCS_FreeScb);
-
 	if (pScb != NULL) {
 		pScb->SCB_Status = STATUS_RENT;
 		TAILQ_REMOVE(&sc->HCS_FreeScb, pScb, SCB_ScbList);
 	}
-
-	splx(s);
+	mtx_leave(&sc->sc_scb_mtx);
 
 	return (pScb);
 }
 
 /*
- * iha_append_free_scb - append the supplied SCB to the tail of the
- *                       HCS_FreeScb queue after clearing and resetting
- *			 everything possible.
+ * iha_scb_free - append the supplied SCB to the tail of the
+ *                HCS_FreeScb queue after clearing and resetting
+ *		  everything possible.
  */
 void
-iha_append_free_scb(sc, pScb)
-	struct iha_softc *sc;
-	struct iha_scb *pScb;
+iha_scb_free(void *xsc, void *xscb)
 {
+	struct iha_softc *sc = xsc;
+	struct iha_scb *pScb = xscb;
 	int s;
 
 	s = splbio();
-
 	if (pScb == sc->HCS_ActScb)
 		sc->HCS_ActScb = NULL;
+	splx(s);
 
 	pScb->SCB_Status = STATUS_QUEUED;
 	pScb->SCB_HaStat = HOST_OK;
@@ -574,9 +561,9 @@ iha_append_free_scb(sc, pScb)
 	 * SCB_TagId is set at initialization and never changes
 	 */
 
+	mtx_enter(&sc->sc_scb_mtx);
 	TAILQ_INSERT_TAIL(&sc->HCS_FreeScb, pScb, SCB_ScbList);
-
-	splx(s);
+	mtx_leave(&sc->sc_scb_mtx);
 }
 
 void
@@ -885,8 +872,8 @@ iha_push_sense_request(sc, pScb)
 	sensecmd->length = sizeof(pScb->SCB_ScsiSenseData);
 
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&pScb->SCB_Xs->stimeout,
-		    (pScb->SCB_Xs->timeout/1000) * hz);
+		timeout_add_msec(&pScb->SCB_Xs->stimeout,
+		    pScb->SCB_Xs->timeout);
 
 	iha_push_pend_scb(sc, pScb);
 
@@ -2560,12 +2547,13 @@ iha_done_scb(sc, pScb)
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
 		}
+<<<<<<< HEAD
 
 		xs->flags |= ITSDONE;
+=======
+>>>>>>> origin/master
 		scsi_done(xs);
 	}
-	
-	iha_append_free_scb(sc, pScb);
 }
 
 void
@@ -2682,7 +2670,7 @@ iha_alloc_scbs(sc)
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat,
 		 sizeof(struct iha_scb)*IHA_MAX_SCB,
-		 NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT))
+		 NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO))
 	    != 0) {
 		printf("%s: unable to allocate SCBs,"
 		       " error = %d\n", sc->sc_dev.dv_xname, error);
@@ -2696,7 +2684,6 @@ iha_alloc_scbs(sc)
 		       sc->sc_dev.dv_xname, error);
 		return (error);
 	}
-	bzero(sc->HCS_Scb, sizeof(struct iha_scb)*IHA_MAX_SCB);
 
 	return (0);
 }

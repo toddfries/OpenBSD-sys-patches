@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: if_gre.h,v 1.9 2003/12/03 14:52:23 markus Exp $ */
+=======
+/*      $OpenBSD: if_gre.h,v 1.13 2010/06/26 19:49:54 claudio Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_gre.h,v 1.5 1999/11/19 20:41:19 thorpej Exp $ */
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *    
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,15 +38,27 @@
 #define _NET_IF_GRE_H
 
 struct gre_softc {
-	struct ifnet sc_if;
-	LIST_ENTRY(gre_softc) sc_list;
-	int gre_unit;
-	int gre_flags;
-	struct    in_addr g_src;  /* source address of gre packets */
-	struct    in_addr g_dst;  /* destination address of gre packets */
-	struct route route;	/* routing entry that determines, where a
-                                   encapsulated packet should go */
-	u_char g_proto;		/* protocol of encapsulator */
+	struct ifnet		sc_if;
+	LIST_ENTRY(gre_softc)	sc_list;
+	struct timeout		sc_ka_hold;
+	struct timeout		sc_ka_snd;
+	struct in_addr		g_src;  /* source address of gre packets */
+	struct in_addr		g_dst;  /* destination address of gre packets */
+	struct route		route;	/* routing entry that determines, where
+					   an encapsulated packet should go */
+	u_int  g_rtableid;	/* routing table used for the tunnel */
+	int			gre_unit;
+	int			gre_flags;
+	int			sc_ka_timout;
+	int			sc_ka_holdmax;
+	int			sc_ka_holdcnt;
+	int			sc_ka_cnt;
+	u_char			g_proto;	/* protocol of encapsulator */
+	u_char			sc_ka_state;
+#define GRE_STATE_UKNWN	0
+#define GRE_STATE_DOWN	1
+#define GRE_STATE_HOLD	2
+#define GRE_STATE_UP	3
 };	
 
 
@@ -149,5 +158,6 @@ int     gre_ioctl(struct ifnet *, u_long, caddr_t);
 int     gre_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 	    struct rtentry *);
 u_int16_t gre_in_cksum(u_int16_t *, u_int);
+void	gre_recv_keepalive(struct gre_softc *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_GRE_H_ */

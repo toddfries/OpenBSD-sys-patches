@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in_proto.c,v 1.44 2005/07/14 02:09:46 uwe Exp $	*/
+=======
+/*	$OpenBSD: in_proto.c,v 1.55 2011/01/07 17:50:42 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
@@ -154,9 +158,9 @@
 
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
-#include <netinet/ip_ether.h>
 #endif
 
+#include <netinet/ip_ether.h>
 #include <netinet/ip_ipip.h>
 
 #include "gre.h"
@@ -176,6 +180,11 @@
 #include <net/if_pfsync.h>
 #endif
 
+#include "pf.h"
+#if NPF > 0
+#include <netinet/ip_divert.h>
+#endif
+
 extern	struct domain inetdomain;
 
 struct protosw inetsw[] = {
@@ -189,7 +198,7 @@ struct protosw inetsw[] = {
   udp_usrreq,
   udp_init,	0,		0,		0,		udp_sysctl
 },
-{ SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS,
+{ SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp_input,	0,		tcp_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
   tcp_init,	0,		tcp_slowtimo,	tcp_drain,	tcp_sysctl
@@ -210,13 +219,25 @@ struct protosw inetsw[] = {
   rip_usrreq,
   0,		0,		0,		0,		ipip_sysctl
 },
+{ SOCK_RAW,   &inetdomain,    IPPROTO_ETHERIP, PR_ATOMIC|PR_ADDR,
+  etherip_input,  rip_output, 0,              rip_ctloutput,
+  rip_usrreq,
+  0,          0,              0,              0,		etherip_sysctl
+},
 #ifdef INET6
 { SOCK_RAW,	&inetdomain,	IPPROTO_IPV6,	PR_ATOMIC|PR_ADDR,
   in_gif_input,	rip_output,	 0,		0,
   rip_usrreq,	/*XXX*/
   0,		0,		0,		0,
 },
-#endif /* INET6 */
+#endif
+#ifdef MPLS
+{ SOCK_RAW,	&inetdomain,	IPPROTO_MPLS,	PR_ATOMIC|PR_ADDR,
+  etherip_input,  rip_output,	 0,		0,
+  rip_usrreq,
+  0,		0,		0,		0,
+},
+#endif
 #else /* NGIF */
 { SOCK_RAW,	&inetdomain,	IPPROTO_IPIP,	PR_ATOMIC|PR_ADDR,
   ip4_input,	rip_output,	0,		rip_ctloutput,
@@ -229,7 +250,7 @@ struct protosw inetsw[] = {
   rip_usrreq,	/*XXX*/
   0,		0,		0,		0,
 },
-#endif /* INET6 */
+#endif
 #endif /*NGIF*/
 { SOCK_RAW,	&inetdomain,	IPPROTO_IGMP,	PR_ATOMIC|PR_ADDR,
   igmp_input,	rip_output,	0,		rip_ctloutput,
@@ -261,11 +282,6 @@ struct protosw inetsw[] = {
   rip_usrreq,
   0,          0,              0,              0,		esp_sysctl
 },
-{ SOCK_RAW,   &inetdomain,    IPPROTO_ETHERIP, PR_ATOMIC|PR_ADDR,
-  etherip_input,  rip_output, 0,              rip_ctloutput,
-  rip_usrreq,
-  0,          0,              0,              0,		etherip_sysctl
-},
 { SOCK_RAW,   &inetdomain,    IPPROTO_IPCOMP, PR_ATOMIC|PR_ADDR,
   ipcomp4_input,  rip_output, 0,              rip_ctloutput,
   rip_usrreq,
@@ -275,7 +291,7 @@ struct protosw inetsw[] = {
 #if NGRE > 0
 { SOCK_RAW,     &inetdomain,    IPPROTO_GRE,    PR_ATOMIC|PR_ADDR,
   gre_input,    rip_output,     0,              rip_ctloutput,
-  rip_usrreq,
+  gre_usrreq,
   0,            0,              0,             0,		gre_sysctl
 },
 { SOCK_RAW,     &inetdomain,    IPPROTO_MOBILE, PR_ATOMIC|PR_ADDR,
@@ -298,6 +314,13 @@ struct protosw inetsw[] = {
   0,		0,		0,		0,
 },
 #endif /* NPFSYNC > 0 */
+#if NPF > 0
+{ SOCK_RAW,	&inetdomain,	IPPROTO_DIVERT,	PR_ATOMIC|PR_ADDR,
+  divert_input,	0,		0,		rip_ctloutput,
+  divert_usrreq,
+  divert_init,	0,		0,		0,		divert_sysctl
+},
+#endif /* NPF > 0 */
 /* raw wildcard */
 { SOCK_RAW,	&inetdomain,	0,		PR_ATOMIC|PR_ADDR,
   rip_input,	rip_output,	0,		rip_ctloutput,

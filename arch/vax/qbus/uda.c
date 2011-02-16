@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uda.c,v 1.5 2004/07/07 23:10:46 deraadt Exp $	*/
+=======
+/*	$OpenBSD: uda.c,v 1.8 2010/09/20 06:33:48 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uda.c,v 1.36 2000/06/04 06:17:05 matt Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -200,8 +204,7 @@ udaattach(parent, self, aux)
 	    udaintr, sc, &sc->sc_intrcnt);
 	uba_reset_establish(udareset, &sc->sc_dev);
 	sc->sc_cvec = ua->ua_cvec;
-	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_cvec, &evcount_intr);
+	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname, &sc->sc_cvec);
 
 	sc->sc_iot = ua->ua_iot;
 	sc->sc_iph = ua->ua_ioh;
@@ -250,7 +253,7 @@ err2:		bus_dmamem_unmap(sc->sc_dmat, (caddr_t)&sc->sc_uda,
 
 	/*
 	 * The only thing that differ UDA's and Tape ctlr's is
-	 * their vcid. Beacuse there are no way to determine which
+	 * their vcid. Because there is no way to determine which
 	 * ctlr type it is, we check what is generated and later
 	 * set the correct vcid.
 	 */

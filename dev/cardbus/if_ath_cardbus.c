@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: if_ath_cardbus.c,v 1.9 2006/06/21 11:27:03 fkr Exp $   */
+=======
+/*      $OpenBSD: if_ath_cardbus.c,v 1.16 2010/09/06 19:20:21 deraadt Exp $   */
+>>>>>>> origin/master
 /*	$NetBSD: if_ath_cardbus.c,v 1.4 2004/08/02 19:14:28 mycroft Exp $ */
 
 /*
@@ -38,8 +42,6 @@
  * CardBus bus front-end for the AR5001 Wireless LAN 802.11a/b/g CardBus.
  */
 
-#include "bpfilter.h"
-
 #include <sys/param.h>
 #include <sys/systm.h> 
 #include <sys/mbuf.h>   
@@ -65,10 +67,6 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_rssadapt.h>
 
-#if NBPFILTER > 0 
-#include <net/bpf.h>
-#endif 
-
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -93,12 +91,12 @@ struct ath_cardbus_softc {
 	/* CardBus-specific goo. */
 	void	*sc_ih;			/* interrupt handle */
 	cardbus_devfunc_t sc_ct;	/* our CardBus devfuncs */
-	cardbustag_t sc_tag;		/* our CardBus tag */
-	bus_size_t sc_mapsize;		/* the size of mapped bus space region */
+	pcitag_t sc_tag;		/* our CardBus tag */
 
 	pcireg_t sc_bar_val;		/* value of the BAR */
 
 	int	sc_intrline;		/* interrupt line */
+	pci_chipset_tag_t sc_pc;
 };
 
 int	ath_cardbus_match(struct device *, void *, void *);
@@ -146,6 +144,7 @@ ath_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
+	csc->sc_pc = ca->ca_pc;
 
 	/*
 	 * Power management hooks.
@@ -157,9 +156,9 @@ ath_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Map the device.
 	 */
-	if (Cardbus_mapreg_map(ct, ATH_PCI_MMBA, CARDBUS_MAPREG_TYPE_MEM, 0,
-	    &sc->sc_st, &sc->sc_sh, &adr, &csc->sc_mapsize) == 0) {
-		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_MEM;
+	if (Cardbus_mapreg_map(ct, ATH_PCI_MMBA, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->sc_st, &sc->sc_sh, &adr, &sc->sc_ss) == 0) {
+		csc->sc_bar_val = adr | PCI_MAPREG_TYPE_MEM;
 	}
 
 	else {
@@ -217,7 +216,7 @@ ath_cardbus_detach(struct device *self, int flags)
 	 * Release bus space and close window.
 	 */
 	Cardbus_mapreg_unmap(ct, ATH_PCI_MMBA,
-		    sc->sc_st, sc->sc_sh, csc->sc_mapsize);
+		    sc->sc_st, sc->sc_sh, sc->sc_ss);
 
 	return (0);
 }
@@ -273,7 +272,7 @@ ath_cardbus_disable(struct ath_softc *sc)
 void
 ath_cardbus_power(struct ath_softc *sc, int why)
 {
-	if (why == PWR_RESUME)
+	if (why == DVACT_RESUME)
 		ath_enable(sc);
 }
 
@@ -282,7 +281,7 @@ ath_cardbus_setup(struct ath_cardbus_softc *csc)
 {
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
-	cardbus_function_tag_t cf = ct->ct_cf;
+	pci_chipset_tag_t pc = csc->sc_pc;
 	pcireg_t reg;
 
 #ifdef notyet
@@ -291,7 +290,7 @@ ath_cardbus_setup(struct ath_cardbus_softc *csc)
 #endif
 
 	/* Program the BAR. */
-	cardbus_conf_write(cc, cf, csc->sc_tag, ATH_PCI_MMBA,
+	pci_conf_write(pc, csc->sc_tag, ATH_PCI_MMBA,
 	    csc->sc_bar_val);
 
 	/* Make sure the right access type is on the CardBus bridge. */
@@ -299,20 +298,20 @@ ath_cardbus_setup(struct ath_cardbus_softc *csc)
 	(*ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the appropriate bits in the PCI CSR. */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag,
-	    CARDBUS_COMMAND_STATUS_REG);
-	reg |= CARDBUS_COMMAND_MASTER_ENABLE | CARDBUS_COMMAND_MEM_ENABLE;
-	cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_COMMAND_STATUS_REG,
+	reg = pci_conf_read(pc, csc->sc_tag,
+	    PCI_COMMAND_STATUS_REG);
+	reg |= PCI_COMMAND_MASTER_ENABLE | PCI_COMMAND_MEM_ENABLE;
+	pci_conf_write(pc, csc->sc_tag, PCI_COMMAND_STATUS_REG,
 	    reg);
 
 	/*
 	 * Make sure the latency timer is set to some reasonable
 	 * value.
 	 */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG);
-	if (CARDBUS_LATTIMER(reg) < 0x20) {
-		reg &= ~(CARDBUS_LATTIMER_MASK << CARDBUS_LATTIMER_SHIFT);
-		reg |= (0x20 << CARDBUS_LATTIMER_SHIFT);
-		cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG, reg);
+	reg = pci_conf_read(pc, csc->sc_tag, PCI_BHLC_REG);
+	if (PCI_LATTIMER(reg) < 0x20) {
+		reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+		reg |= (0x20 << PCI_LATTIMER_SHIFT);
+		pci_conf_write(pc, csc->sc_tag, PCI_BHLC_REG, reg);
 	}
 }

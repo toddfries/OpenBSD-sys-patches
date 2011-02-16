@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: files.pci,v 1.227 2007/03/22 02:48:42 dlg Exp $
+=======
+#	$OpenBSD: files.pci,v 1.277 2011/01/15 04:35:34 kevlo Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -111,8 +115,10 @@ device	eso {}: audio, auconv, mulaw, midibus
 attach	eso at pci
 file	dev/pci/eso.c			eso
 
-attach	opl at eso with opl_eso
-file	dev/pci/opl_eso.c		opl_eso
+# Acer Labs M5455
+device	auacer: audio, auconv, mulaw, ac97
+attach	auacer at pci
+file	dev/pci/auacer.c		auacer
 
 # Intel 810/820/440MX ICH audio with AC'97
 device	auich: audio, auconv, mulaw, ac97
@@ -125,6 +131,14 @@ attach	azalia at pci
 file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
+<<<<<<< HEAD
+=======
+# VIA Envy24 (aka ICE1712)
+device	envy: audio, ac97, midibus
+attach	envy at pci
+file	dev/pci/envy.c			envy
+
+>>>>>>> origin/master
 # Creative Labs EMU10k1 (SBLive! series and PCI512)
 device	emu: audio, auconv, mulaw, ac97
 attach	emu at pci
@@ -135,7 +149,7 @@ device	autri: audio, auconv, mulaw, ac97, midibus
 attach	autri at pci
 file	dev/pci/autri.c			autri
 
-# ATI IXP 200/300/400 series AC'97 Audio
+# ATI SB200/300/400 series AC'97 Audio
 device	auixp: audio, auconv, mulaw, ac97
 attach	auixp at pci
 file	dev/pci/auixp.c			auixp
@@ -164,9 +178,6 @@ file	dev/pci/esa.c			esa
 device	yds {}: audio, auconv, mulaw, ac97, firmload
 attach	yds at pci
 file	dev/pci/yds.c			yds
-
-attach	opl at yds with opl_yds
-file	dev/pci/opl_yds.c		opl_yds
 
 # Forte Media FM801
 device	fms: audio, auconv, mulaw, ac97, midibus, tea5757, radiobus
@@ -207,6 +218,18 @@ file	dev/pci/isp_pci.c		isp_pci
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
 
+<<<<<<< HEAD
+=======
+# LSI Logic Fusion-MPT Message Passing Interface 2.0
+device	mpii: scsi
+attach	mpii at pci
+file	dev/pci/mpii.c			mpii
+
+# Emulex Light Pulse Fibre Channel (Service Level Interface)
+attach	sli at pci with sli_pci
+file	dev/pci/sli_pci.c		sli_pci
+
+>>>>>>> origin/master
 # Silicon Image 3124/3132/3531 SATALink
 attach	sili at pci with sili_pci
 file	dev/pci/sili_pci.c		sili_pci
@@ -215,12 +238,6 @@ file	dev/pci/sili_pci.c		sili_pci
 device	de: ether, ifnet, ifmedia
 attach	de at pci
 file	dev/pci/if_de.c			de
-
-# ENI ATM driver
-device	en: atm, ifnet
-attach	en at pci with en_pci
-file	dev/pci/if_en_pci.c		en
-file	dev/ic/midway.c			en
 
 # 3Com 3c590 and 3c595 Ethernet controllers
 # device declaration in sys/conf/files
@@ -290,6 +307,11 @@ device	vr: ether, ifnet, mii, ifmedia
 attach	vr at pci
 file	dev/pci/if_vr.c			vr
 
+# RDC R6040
+device	vte: ether, ifnet, mii, ifmedia, mii_phy
+attach	vte at pci
+file	dev/pci/if_vte.c		vte
+
 # Texas Instruments ThunderLAN
 device	tl: ether, ifnet, mii, ifmedia
 attach	tl at pci
@@ -327,6 +349,7 @@ device	em: ether, ifnet, ifmedia
 attach	em at pci
 file	dev/pci/if_em.c			em
 file	dev/pci/if_em_hw.c		em
+file	dev/pci/if_em_soc.c		em
 
 # Intel Pro/10GbE
 device	ixgb: ether, ifnet, ifmedia
@@ -334,6 +357,15 @@ attach	ixgb at pci
 file	dev/pci/if_ixgb.c		ixgb   
 file	dev/pci/ixgb_ee.c		ixgb
 file	dev/pci/ixgb_hw.c		ixgb
+
+# Intel 82598 10GbE
+device	ix: ether, ifnet, ifmedia
+attach	ix at pci
+file	dev/pci/if_ix.c			ix
+file	dev/pci/ixgbe.c			ix
+file	dev/pci/ixgbe_82598.c		ix
+file	dev/pci/ixgbe_82599.c		ix
+file	dev/pci/ixgbe_phy.c		ix
 
 # Neterion Xframe 10 Gigabit ethernet 
 device	xge: ether, ifnet, ifmedia
@@ -349,9 +381,8 @@ attach	epic at pci with epic_pci
 file	dev/pci/if_epic_pci.c		epic_pci
 
 # Alteon Tigon I & II
-device	ti: ether, ifnet, ifmedia, firmload
-attach	ti at pci
-file	dev/pci/if_ti.c			ti
+attach	ti at pci with ti_pci
+file	dev/pci/if_ti_pci.c		ti_pci
 
 # NE2000-compatible PCI Ethernet cards
 attach	ne at pci with ne_pci: rtl80x9
@@ -415,6 +446,11 @@ device	sis: ether, ifnet, mii, ifmedia
 attach	sis at pci
 file	dev/pci/if_sis.c		sis
 
+# SiS 190/191 ethernet
+device	se: ether, ifnet, mii, ifmedia
+attach	se at pci
+file	dev/pci/if_se.c			se
+
 # Sundance ST201 ethernet
 device	ste: ether, ifnet, mii, ifmedia
 attach	ste at pci
@@ -424,6 +460,11 @@ file	dev/pci/if_ste.c		ste
 device	wdt: pcibus
 attach	wdt at pci
 file	dev/pci/wdt.c			wdt	needs-flag
+
+# Berkshire PCI-PC Watchdog
+device	berkwdt: pcibus
+attach	berkwdt at pci
+file	dev/pci/berkwdt.c		berkwdt
 
 # Quancom PWDOG1
 device	pwdog: pcibus
@@ -504,9 +545,6 @@ device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
 file	dev/pci/cmpci.c			cmpci
 
-attach	opl at cmpci with opl_cmpci
-file	dev/pci/opl_cmpci.c		opl_cmpci
-
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 attach	iha at pci with iha_pci
 file	dev/pci/iha_pci.c		iha_pci
@@ -565,6 +603,34 @@ device	nfe: ether, ifnet, mii, ifmedia, mii_phy
 attach	nfe at pci
 file	dev/pci/if_nfe.c		nfe
 
+<<<<<<< HEAD
+=======
+# Agere ET1310 Ethernet
+device	et: ether, ifnet, mii, ifmedia, mii_phy
+attach	et at pci
+file	dev/pci/if_et.c			et
+
+# JMicron JMC250/JMC260 Ethernet
+device	jme: ether, ifnet, mii, ifmedia, mii_phy
+attach	jme at pci
+file	dev/pci/if_jme.c		jme
+
+# Attansic/Atheros L1 Gigabit Ethernet
+device	age: ether, ifnet, mii, ifmedia, mii_phy
+attach	age at pci
+file	dev/pci/if_age.c		age
+
+# Attansic/Atheros L1C/L2C Gigabit Ethernet
+device	alc: ether, ifnet, mii, ifmedia, mii_phy
+attach	alc at pci
+file	dev/pci/if_alc.c		alc
+
+# Attansic/Atheros L1E Gigabit Ethernet
+device	ale: ether, ifnet, mii, ifmedia, mii_phy
+attach	ale at pci
+file	dev/pci/if_ale.c		ale
+
+>>>>>>> origin/master
 # AMD-76x PM and SMBus controller
 device	amdpm: i2cbus
 attach	amdpm at pci
@@ -583,6 +649,10 @@ file	dev/pci/if_bce.c		bce
 # Atheros AR5k (802.11a/b/g) PCI/Mini-PCI
 attach	ath at pci with ath_pci
 file	dev/pci/if_ath_pci.c		ath_pci
+
+# Atheros AR9k (802.11a/g/n)
+attach	athn at pci with athn_pci
+file	dev/pci/if_athn_pci.c		athn_pci
 
 # ADMtek ADM8211 PCI/Mini-PCI
 attach	atw at pci with atw_pci
@@ -678,3 +748,36 @@ file	dev/pci/nviic.c			nviic
 # SD Host Controller
 attach	sdhc at pci with sdhc_pci
 file	dev/pci/sdhc_pci.c		sdhc
+<<<<<<< HEAD
+=======
+
+# AMD NPT Family 0Fh Processors, Function 3 -- Miscellaneous Control
+device	kate
+attach	kate at pci
+file	dev/pci/kate.c			kate
+
+# AMD Family 10h Processors, Function 3 -- Miscellaneous Control
+device	km
+attach	km at pci
+file	dev/pci/km.c			km
+
+# Intel SOC GCU
+device	gcu
+attach	gcu at pci
+file	dev/pci/gcu.c			gcu
+
+# AMD Geode CS5536 Audio
+device	auglx: audio, ac97
+attach	auglx at pci
+file	dev/pci/auglx.c			auglx
+
+# Intel 3400 Thermal 
+device	itherm
+attach	itherm at pci
+file	dev/pci/itherm.c		itherm
+
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib
+>>>>>>> origin/master

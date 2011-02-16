@@ -1,4 +1,4 @@
-/* $OpenBSD: siotty.c,v 1.4 2006/08/12 21:08:49 miod Exp $ */
+/* $OpenBSD: siotty.c,v 1.15 2010/09/29 13:39:03 miod Exp $ */
 /* $NetBSD: siotty.c,v 1.9 2002/03/17 19:40:43 atatat Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,7 +36,6 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/fcntl.h>
@@ -206,13 +198,7 @@ siostart(tp)
 	s = spltty();
 	if (tp->t_state & (TS_BUSY|TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (tp->t_outq.c_cc == 0)
 		goto out;
 
@@ -366,10 +352,10 @@ sioopen(dev, flag, mode, p)
 	if ((sc = siotty_cd.cd_devs[minor(dev)]) == NULL)
 		return ENXIO;
 	if ((tp = sc->sc_tty) == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	}		
 	else if ((tp->t_state & TS_ISOPEN) && (tp->t_state & TS_XCLUDE)
-	    && p->p_ucred->cr_uid != 0)
+	    && suser(p, 0) != 0)
 		return EBUSY;
 
 	tp->t_oproc = siostart;
@@ -401,13 +387,13 @@ sioopen(dev, flag, mode, p)
 #endif
 	}
 
-	error = ttyopen(dev, tp);
+	error = ttyopen(dev, tp, p);
 	if (error > 0)
 		return error;
 /*
 	return (*tp->t_linesw->l_open)(dev, tp);
 */
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
  
 int
@@ -423,7 +409,7 @@ sioclose(dev, flag, mode, p)
 /*
 	(*tp->t_linesw->l_close)(tp, flag);
 */
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 	siomctl(sc, TIOCM_BREAK, DMBIC);

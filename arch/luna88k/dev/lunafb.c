@@ -1,4 +1,4 @@
-/* $OpenBSD: lunafb.c,v 1.7 2006/08/06 13:04:33 miod Exp $ */
+/* $OpenBSD: lunafb.c,v 1.11 2010/12/26 15:40:59 miod Exp $ */
 /* $NetBSD: lunafb.c,v 1.7.6.1 2002/08/07 01:48:34 lukem Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -113,12 +106,12 @@ struct om_hwdevconfig omfb_console_dc;
 void omfb_getdevconfig(paddr_t, struct om_hwdevconfig *);
 
 /* in omrasops.c */
-void	om_cursor(void *, int, int, int);
-void	om_putchar(void *, int, int, u_int, long);
-void	om_copycols(void *, int, int, int, int);
-void	om_copyrows(void *, int, int, int num);
-void	om_erasecols(void *, int, int, int, long);
-void	om_eraserows(void *, int, int, long);
+int	om_cursor(void *, int, int, int);
+int	om_putchar(void *, int, int, u_int, long);
+int	om_copycols(void *, int, int, int, int);
+int	om_copyrows(void *, int, int, int num);
+int	om_erasecols(void *, int, int, int, long);
+int	om_eraserows(void *, int, int, long);
 
 struct wsscreen_descr omfb_stdscreen = {
 	"std"
@@ -300,7 +293,7 @@ omfbmmap(v, offset, prot)
 	if (offset >= OMFB_SIZE || offset < 0)
 		return (-1);
 
-	return atop(trunc_page(sc->sc_dc->dc_videobase) + offset);
+	return (trunc_page(sc->sc_dc->dc_videobase) + offset);
 }
 
 int

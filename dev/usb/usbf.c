@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbf.c,v 1.1 2006/11/25 18:10:29 uwe Exp $	*/
+=======
+/*	$OpenBSD: usbf.c,v 1.12 2010/10/28 16:07:53 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -72,12 +76,23 @@ int usbfdebug = 0;
 #endif
 
 struct usbf_softc {
+<<<<<<< HEAD
 	USBBASEDEVICE	 sc_dev;	/* base device */
 	usbf_bus_handle	 sc_bus;	/* USB device controller */
 	struct usbf_port sc_port;	/* dummy port for function */
 	usb_proc_ptr	 sc_proc;	/* task thread */
 	TAILQ_HEAD(,usbf_task) sc_tskq;	/* task queue head */
 	int		 sc_dying;
+=======
+	struct device	 	 sc_dev;	/* base device */
+	usbf_bus_handle	 	 sc_bus;	/* USB device controller */
+	struct usbf_port 	 sc_port;	/* dummy port for function */
+	struct proc		*sc_proc;	/* task thread */
+	TAILQ_HEAD(,usbf_task)	 sc_tskq;	/* task queue head */
+	int			 sc_dying;
+
+	u_int8_t		*sc_hs_config;
+>>>>>>> origin/master
 };
 
 #define DEVNAME(sc)	USBDEVNAME((sc)->sc_dev)
@@ -283,9 +298,6 @@ usbf_host_reset(usbf_bus_handle bus)
  * Device request handling
  */
 
-/* XXX */
-static u_int8_t hs_config[65536];
-
 usbf_status
 usbf_get_descriptor(usbf_device_handle dev, usb_device_request_t *req,
     void **data)
@@ -295,12 +307,13 @@ usbf_get_descriptor(usbf_device_handle dev, usb_device_request_t *req,
 	usb_device_descriptor_t *dd;
 	usb_config_descriptor_t *cd;
 	usb_string_descriptor_t *sd;
+	struct usbf_softc *sc;
 
 	switch (type) {
 	case UDESC_DEVICE:
 		dd = usbf_device_descriptor(dev);
 		*data = dd;
-		USETW(req->wLength, MIN(UGETW(req->wLength), dd->bLength));;
+		USETW(req->wLength, MIN(UGETW(req->wLength), dd->bLength));
 		return USBF_NORMAL_COMPLETION;
 
 	case UDESC_DEVICE_QUALIFIER: {
@@ -317,7 +330,7 @@ usbf_get_descriptor(usbf_device_handle dev, usb_device_request_t *req,
 		dq.bMaxPacketSize0 = dd->bMaxPacketSize;
 		dq.bNumConfigurations = dd->bNumConfigurations;
 		*data = &dq;
-		USETW(req->wLength, MIN(UGETW(req->wLength), dq.bLength));;
+		USETW(req->wLength, MIN(UGETW(req->wLength), dq.bLength));
 		return USBF_NORMAL_COMPLETION;
 	}
 
@@ -335,9 +348,17 @@ usbf_get_descriptor(usbf_device_handle dev, usb_device_request_t *req,
 		cd = usbf_config_descriptor(dev, index);
 		if (cd == NULL)
 			return USBF_INVAL;
-		bcopy(cd, &hs_config, UGETW(cd->wTotalLength));
-		*data = &hs_config;
-		((usb_config_descriptor_t *)&hs_config)->bDescriptorType =
+		sc = dev->bus->usbfctl;
+		if (sc->sc_hs_config == NULL) {
+			/* XXX should allocate more dynamically */
+			sc->sc_hs_config =
+			    (u_int8_t *)malloc(65536, M_USB, M_NOWAIT);
+		}
+		if (sc->sc_hs_config == NULL)
+			return USBF_INVAL;
+		bcopy(cd, sc->sc_hs_config, UGETW(cd->wTotalLength));
+		*data = sc->sc_hs_config;
+		((usb_config_descriptor_t *)sc->sc_hs_config)->bDescriptorType =
 		    UDESC_OTHER_SPEED_CONFIGURATION;
 		USETW(req->wLength, MIN(UGETW(req->wLength),
 		    UGETW(cd->wTotalLength)));
@@ -465,7 +486,7 @@ usbf_do_request(usbf_xfer_handle xfer, usbf_private_handle priv,
 			data = &zero;
 		} else
 			data = &cfg->uc_cdesc->bConfigurationValue;
-		USETW(req->wLength, MIN(UGETW(req->wLength), 1));;
+		USETW(req->wLength, MIN(UGETW(req->wLength), 1));
 	}
 		break;
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_txp.c,v 1.83 2006/06/29 21:36:40 deraadt Exp $	*/
+=======
+/*	$OpenBSD: if_txp.c,v 1.102 2010/09/20 07:40:38 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001
@@ -89,7 +93,6 @@ void txp_attach(struct device *, struct device *, void *);
 void txp_attachhook(void *vsc);
 int txp_intr(void *);
 void txp_tick(void *);
-void txp_shutdown(void *);
 int txp_ioctl(struct ifnet *, u_long, caddr_t);
 void txp_start(struct ifnet *);
 void txp_stop(struct txp_softc *);
@@ -133,7 +136,7 @@ struct cfattach txp_ca = {
 };
 
 struct cfdriver txp_cd = {
-	0, "txp", DV_IFNET
+	NULL, "txp", DV_IFNET
 };
 
 const struct pci_matchid txp_devices[] = {
@@ -246,7 +249,6 @@ txp_attachhook(void *vsc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	shutdownhook_establish(txp_shutdown, sc);
 	splx(s);
 }
 
@@ -410,6 +412,11 @@ txp_download_fw(sc)
 
 	/* Tell boot firmware to get ready for image */
 	WRITE_REG(sc, TXP_H2A_1, letoh32(fileheader->addr));
+	WRITE_REG(sc, TXP_H2A_2, letoh32(fileheader->hmac[0]));
+	WRITE_REG(sc, TXP_H2A_3, letoh32(fileheader->hmac[1]));
+	WRITE_REG(sc, TXP_H2A_4, letoh32(fileheader->hmac[2]));
+	WRITE_REG(sc, TXP_H2A_5, letoh32(fileheader->hmac[3]));
+	WRITE_REG(sc, TXP_H2A_6, letoh32(fileheader->hmac[4]));
 	WRITE_REG(sc, TXP_H2A_0, TXP_BOOTCMD_RUNTIME_IMAGE);
 
 	if (txp_download_fw_wait(sc)) {
@@ -626,7 +633,8 @@ txp_rx_reclaim(sc, r, dma)
 	struct mbuf *m;
 	struct txp_swdesc *sd;
 	u_int32_t roff, woff;
-	int sumflags = 0, idx;
+	int idx;
+	u_int16_t sumflags = 0;
 
 	roff = letoh32(*r->r_roff);
 	woff = letoh32(*r->r_woff);
@@ -656,31 +664,6 @@ txp_rx_reclaim(sc, r, dma)
 		m = sd->sd_mbuf;
 		free(sd, M_DEVBUF);
 		m->m_pkthdr.len = m->m_len = letoh16(rxd->rx_len);
-
-#if NVLAN > 0
-		/*
-		 * XXX Another firmware bug: the vlan encapsulation
-		 * is always removed, even when we tell the card not
-		 * to do that.  Restore the vlan encapsulation below.
-		 */
-		if (rxd->rx_stat & htole32(RX_STAT_VLAN)) {
-			struct ether_vlan_header vh;
-
-			if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-				m_freem(m);
-				goto next;
-			}
-			m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-			vh.evl_proto = vh.evl_encap_proto;
-			vh.evl_tag = rxd->rx_vlan >> 16;
-			vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-			m_adj(m, ETHER_HDR_LEN);
-			M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-			if (m == NULL)
-				goto next;
-			m_copyback(m, 0, sizeof(vh), &vh);
-		}
-#endif
 
 #ifdef __STRICT_ALIGNMENT
 		{
@@ -714,12 +697,24 @@ txp_rx_reclaim(sc, r, dma)
 		}
 #endif
 
+#if NVLAN > 0
+		/*
+		 * XXX Another firmware bug: the vlan encapsulation
+		 * is always removed, even when we tell the card not
+		 * to do that.  Restore the vlan encapsulation below.
+		 */
+		if (rxd->rx_stat & htole32(RX_STAT_VLAN)) {
+			m->m_pkthdr.ether_vtag = ntohs(rxd->rx_vlan >> 16);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMBAD))
@@ -792,10 +787,8 @@ txp_rxbuf_reclaim(sc)
 		MCLGET(sd->sd_mbuf, M_DONTWAIT);
 		if ((sd->sd_mbuf->m_flags & M_EXT) == 0)
 			goto err_mbuf;
-		/* reserve some space for a possible VLAN header */
-		sd->sd_mbuf->m_data += 8;
-		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES - 8;
 		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
+		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map))
 			goto err_mbuf;
@@ -898,6 +891,7 @@ txp_tx_reclaim(sc, r, dma)
 		ifp->if_timer = 0;
 }
 
+<<<<<<< HEAD
 void
 txp_shutdown(vsc)
 	void *vsc;
@@ -915,6 +909,8 @@ txp_shutdown(vsc)
 	txp_command(sc, TXP_CMD_HALT, 0, 0, 0, NULL, NULL, NULL, 0);
 }
 
+=======
+>>>>>>> origin/master
 int
 txp_alloc_rings(sc)
 	struct txp_softc *sc;
@@ -1080,9 +1076,7 @@ txp_alloc_rings(sc)
 		if ((sd->sd_mbuf->m_flags & M_EXT) == 0) {
 			goto bail_rxbufring;
 		}
-		/* reserve some space for a possible VLAN header */
-		sd->sd_mbuf->m_data += 8;
-		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES - 8;
+		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
 		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map)) {
@@ -1236,16 +1230,11 @@ txp_ioctl(ifp, command, data)
 	caddr_t data;
 {
 	struct txp_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifaddr *ifa = (struct ifaddr *) data;
+	struct ifreq *ifr = (struct ifreq *) data;
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1262,6 +1251,7 @@ txp_ioctl(ifp, command, data)
 			break;
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			txp_init(sc);
@@ -1270,33 +1260,23 @@ txp_ioctl(ifp, command, data)
 				txp_stop(sc);
 		}
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				txp_set_filter(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			txp_set_filter(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1328,7 +1308,7 @@ txp_init(sc)
 	ifp->if_timer = 0;
 
 	if (!timeout_pending(&sc->sc_tick))
-		timeout_add(&sc->sc_tick, hz);
+		timeout_add_sec(&sc->sc_tick, 1);
 
 	splx(s);
 }
@@ -1370,7 +1350,7 @@ out:
 		free(rsp, M_DEVBUF);
 
 	splx(s);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 void
@@ -1385,9 +1365,6 @@ txp_start(ifp)
 	struct mbuf *m, *mnew;
 	struct txp_swdesc *sd;
 	u_int32_t firstprod, firstcnt, prod, cnt, i;
-#if NVLAN > 0
-	struct ifvlan		*ifv;
-#endif
 
 	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1449,11 +1426,9 @@ txp_start(ifp)
 			goto oactive;
 
 #if NVLAN > 0
-		if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-		    m->m_pkthdr.rcvif != NULL) {
-			ifv = m->m_pkthdr.rcvif->if_softc;
+		if (m->m_flags & M_VLANTAG) {
 			txd->tx_pflags = TX_PFLAGS_VLAN |
-			    (htons(ifv->ifv_tag) << TX_PFLAGS_VLANTAG_S);
+			    (htons(m->m_pkthdr.ether_vtag) << TX_PFLAGS_VLANTAG_S);
 		}
 #endif
 
@@ -1516,7 +1491,7 @@ txp_start(ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		txd->tx_flags |= TX_FLAGS_VALID;
@@ -1868,10 +1843,17 @@ txp_ifmedia_sts(ifp, ifmr)
 			return;
 		}
 
+<<<<<<< HEAD
 		if (anlpar & ANLPAR_T4)
 			ifmr->ifm_active |= IFM_100_T4;
 		else if (anlpar & ANLPAR_TX_FD)
+=======
+		anlpar &= anar;
+		if (anlpar & ANLPAR_TX_FD)
+>>>>>>> origin/master
 			ifmr->ifm_active |= IFM_100_TX|IFM_FDX;
+		else if (anlpar & ANLPAR_T4)
+			ifmr->ifm_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX)
 			ifmr->ifm_active |= IFM_100_TX;
 		else if (anlpar & ANLPAR_10_FD)
@@ -2022,6 +2004,7 @@ txp_capabilities(sc)
 #if NVLAN > 0
 	if (rsp->rsp_par2 & rsp->rsp_par3 & OFFLOAD_VLAN) {
 		sc->sc_tx_capability |= OFFLOAD_VLAN;
+		sc->sc_rx_capability |= OFFLOAD_VLAN;
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 	}
 #endif

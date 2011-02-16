@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ste.c,v 1.37 2006/05/28 00:04:24 jason Exp $ */
+=======
+/*	$OpenBSD: if_ste.c,v 1.45 2009/08/13 14:24:47 jasper Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -79,6 +83,7 @@
 
 #include <dev/pci/if_stereg.h>
 
+<<<<<<< HEAD
 int ste_probe(struct device *, void *, void *);
 void ste_attach(struct device *, struct device *, void *);
 int ste_intr(void *);
@@ -119,6 +124,47 @@ void ste_wait(struct ste_softc *);
 void ste_setmulti(struct ste_softc *);
 int ste_init_rx_list(struct ste_softc *);
 void ste_init_tx_list(struct ste_softc *);
+=======
+int	ste_probe(struct device *, void *, void *);
+void	ste_attach(struct device *, struct device *, void *);
+int	ste_intr(void *);
+void	ste_init(void *);
+void	ste_rxeoc(struct ste_softc *);
+void	ste_rxeof(struct ste_softc *);
+void	ste_txeoc(struct ste_softc *);
+void	ste_txeof(struct ste_softc *);
+void	ste_stats_update(void *);
+void	ste_stop(struct ste_softc *);
+void	ste_reset(struct ste_softc *);
+int	ste_ioctl(struct ifnet *, u_long, caddr_t);
+int	ste_encap(struct ste_softc *, struct ste_chain *,
+	    struct mbuf *);
+void	ste_start(struct ifnet *);
+void	ste_watchdog(struct ifnet *);
+int	ste_newbuf(struct ste_softc *,
+	    struct ste_chain_onefrag *,
+	    struct mbuf *);
+int	ste_ifmedia_upd(struct ifnet *);
+void	ste_ifmedia_sts(struct ifnet *, struct ifmediareq *);
+
+void	ste_mii_sync(struct ste_softc *);
+void	ste_mii_send(struct ste_softc *, u_int32_t, int);
+int	ste_mii_readreg(struct ste_softc *,
+	    struct ste_mii_frame *);
+int	ste_mii_writereg(struct ste_softc *,
+	    struct ste_mii_frame *);
+int	ste_miibus_readreg(struct device *, int, int);
+void	ste_miibus_writereg(struct device *, int, int, int);
+void	ste_miibus_statchg(struct device *);
+
+int	ste_eeprom_wait(struct ste_softc *);
+int	ste_read_eeprom(struct ste_softc *, caddr_t, int,
+	    int, int);
+void	ste_wait(struct ste_softc *);
+void	ste_setmulti(struct ste_softc *);
+int	ste_init_rx_list(struct ste_softc *);
+void	ste_init_tx_list(struct ste_softc *);
+>>>>>>> origin/master
 
 #define STE_SETBIT4(sc, reg, x)				\
 	CSR_WRITE_4(sc, reg, CSR_READ_4(sc, reg) | x)
@@ -142,6 +188,17 @@ void ste_init_tx_list(struct ste_softc *);
 #define MII_SET(x)		STE_SETBIT1(sc, STE_PHYCTL, x)
 #define MII_CLR(x)		STE_CLRBIT1(sc, STE_PHYCTL, x) 
 
+<<<<<<< HEAD
+=======
+struct cfattach ste_ca = {
+	sizeof(struct ste_softc), ste_probe, ste_attach
+};
+
+struct cfdriver ste_cd = {
+	NULL, "ste", DV_IFNET
+};
+
+>>>>>>> origin/master
 /*
  * Sync the PHYs by setting data bit and strobing the clock 32 times.
  */
@@ -820,7 +877,7 @@ void ste_stats_update(xsc)
 		}
 	}
 
-	timeout_add(&sc->sc_stats_tmo, hz);
+	timeout_add_sec(&sc->sc_stats_tmo, 1);
 	splx(s);
 
 	return;
@@ -992,8 +1049,6 @@ void ste_attach(parent, self, aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(ste_shutdown, sc);
 	return;
 
 fail_2:
@@ -1205,7 +1260,7 @@ void ste_init(xsc)
 	splx(s);
 
 	timeout_set(&sc->sc_stats_tmo, ste_stats_update, sc);
-	timeout_add(&sc->sc_stats_tmo, hz);
+	timeout_add_sec(&sc->sc_stats_tmo, 1);
 
 	return;
 }
@@ -1286,17 +1341,12 @@ int ste_ioctl(ifp, command, data)
 	caddr_t			data;
 {
 	struct ste_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1311,6 +1361,7 @@ int ste_ioctl(ifp, command, data)
 			break;
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1338,34 +1389,24 @@ int ste_ioctl(ifp, command, data)
 		sc->ste_if_flags = ifp->if_flags;
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ste_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ste_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1532,6 +1573,7 @@ void ste_watchdog(ifp)
 
 	return;
 }
+<<<<<<< HEAD
 
 void ste_shutdown(v)
 	void			*v;
@@ -1549,3 +1591,5 @@ struct cfdriver ste_cd = {
 	0, "ste", DV_IFNET
 };
 
+=======
+>>>>>>> origin/master

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.2 2004/08/11 06:09:07 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.7 2010/11/22 21:08:57 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -131,7 +124,7 @@ int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 
 int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,
 	    bus_space_handle_t *bshp);
 
 /*
@@ -143,19 +136,6 @@ int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 
 void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
-
-/*
- *	int luna88k_bus_space_probe(bus_space_tag_t t,
- *	    bus_space_handle_t bsh, bus_size_t offset, int sz);
- *
- * Probe the bus at t/bsh/offset, using sz as the size of the load.
- *
- * This is a machine-dependent extension, and is not to be used by
- * machine-independent code.
- */
-
-int	luna88k_bus_space_probe(bus_space_tag_t t,
-	    bus_space_handle_t bsh, bus_size_t offset, int sz);
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -449,15 +429,15 @@ bus_space_set_region_4(bus_space_tag_t tag, bus_space_handle_t handle,
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-#define	__LUNA88K_copy_region_N(BYTES)					\
-static __inline void __CONCAT(bus_space_copy_region_,BYTES)		\
+#define	__LUNA88K_copy_N(BYTES)					\
+static __inline void __CONCAT(bus_space_copy_,BYTES)		\
 	    (bus_space_tag_t,						\
 	    bus_space_handle_t bsh1, bus_size_t off1,			\
 	    bus_space_handle_t bsh2, bus_size_t off2,			\
 	    bus_size_t count);						\
 									\
 static __inline void							\
-__CONCAT(bus_space_copy_region_,BYTES)(t, h1, o1, h2, o2, c)		\
+__CONCAT(bus_space_copy_,BYTES)(t, h1, o1, h2, o2, c)		\
 	bus_space_tag_t t;						\
 	bus_space_handle_t h1, h2;					\
 	bus_size_t o1, o2, c;						\
@@ -476,15 +456,15 @@ __CONCAT(bus_space_copy_region_,BYTES)(t, h1, o1, h2, o2, c)		\
 			    __CONCAT(bus_space_read_,BYTES)(t, h1, o1 + o)); \
 	}								\
 }
-__LUNA88K_copy_region_N(1)
-__LUNA88K_copy_region_N(2)
-__LUNA88K_copy_region_N(4)
+__LUNA88K_copy_N(1)
+__LUNA88K_copy_N(2)
+__LUNA88K_copy_N(4)
 #if 0	/* Cause a link error for bus_space_copy_8 */
 #define	bus_space_copy_8						\
 			!!! bus_space_copy_8 unimplemented !!!
 #endif
 
-#undef __LUNA88K_copy_region_N
+#undef __LUNA88K_copy_N
 
 /*
  * Bus read/write barrier methods.

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_synch.c,v 1.78 2007/03/21 09:09:52 art Exp $	*/
+=======
+/*	$OpenBSD: kern_synch.c,v 1.96 2011/01/25 18:42:45 stsp Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -81,7 +85,7 @@ struct slpque {
  * that is safe for use on the interrupt stack; it can be made
  * higher to block network software interrupts after panics.
  */
-int safepri;
+extern int safepri;
 
 /*
  * General sleep call.  Suspends the current process until a wakeup is
@@ -95,7 +99,7 @@ int safepri;
  * call should be interrupted by the signal (return EINTR).
  */
 int
-tsleep(void *ident, int priority, const char *wmesg, int timo)
+tsleep(const volatile void *ident, int priority, const char *wmesg, int timo)
 {
 	struct sleep_state sls;
 	int error, error1;
@@ -129,8 +133,55 @@ tsleep(void *ident, int priority, const char *wmesg, int timo)
 	return (error);
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * Same as tsleep, but if we have a mutex provided, then once we've 
+ * entered the sleep queue we drop the mutex. After sleeping we re-lock.
+ */
+int
+msleep(const volatile void *ident, struct mutex *mtx, int priority,
+    const char *wmesg, int timo)
+{
+	struct sleep_state sls;
+	int error, error1, spl;
+
+	sleep_setup(&sls, ident, priority, wmesg);
+	sleep_setup_timeout(&sls, timo);
+	sleep_setup_signal(&sls, priority);
+
+	if (mtx) {
+		/* XXX - We need to make sure that the mutex doesn't
+		 * unblock splsched. This can be made a bit more 
+		 * correct when the sched_lock is a mutex.
+		 */
+		spl = MUTEX_OLDIPL(mtx);
+		MUTEX_OLDIPL(mtx) = splsched();
+		mtx_leave(mtx);
+	}
+
+	sleep_finish(&sls, 1);
+	error1 = sleep_finish_timeout(&sls);
+	error = sleep_finish_signal(&sls);
+
+	if (mtx) {
+		if ((priority & PNORELOCK) == 0) {
+			mtx_enter(mtx);
+			MUTEX_OLDIPL(mtx) = spl; /* put the ipl back */
+		} else
+			splx(spl);
+	}
+	/* Signal errors are higher priority than timeouts. */
+	if (error == 0 && error1 != 0)
+		error = error1;
+
+	return (error);
+}
+
+>>>>>>> origin/master
 void
-sleep_setup(struct sleep_state *sls, void *ident, int prio, const char *wmesg)
+sleep_setup(struct sleep_state *sls, const volatile void *ident, int prio,
+    const char *wmesg)
 {
 	struct proc *p = curproc;
 	struct slpque *qp;
@@ -318,7 +369,7 @@ unsleep(struct proc *p)
  * Make a number of processes sleeping on the specified identifier runnable.
  */
 void
-wakeup_n(void *ident, int n)
+wakeup_n(const volatile void *ident, int n)
 {
 	struct slpque *qp;
 	struct proc *p, **q;
@@ -346,19 +397,13 @@ restart:
 					updatepri(p);
 				p->p_slptime = 0;
 				p->p_stat = SRUN;
-
-				/*
-				 * Since curpriority is a user priority,
-				 * p->p_priority is always better than
-				 * curpriority on the last CPU on
-				 * which it ran.
-				 *
-				 * XXXSMP See affinity comment in
-				 * resched_proc().
-				 */
+				p->p_cpu = sched_choosecpu(p);
 				setrunqueue(p);
+<<<<<<< HEAD
 #ifdef __HAVE_CPUINFO
 				KASSERT(p->p_cpu != NULL);
+=======
+>>>>>>> origin/master
 				need_resched(p->p_cpu);
 #else
 				need_resched(NULL);
@@ -380,7 +425,7 @@ restart:
  * Make all processes sleeping on the specified identifier runnable.
  */
 void
-wakeup(void *chan)
+wakeup(const volatile void *chan)
 {
 	wakeup_n(chan, -1);
 }
@@ -392,29 +437,57 @@ sys_sched_yield(struct proc *p, void *v, register_t *retval)
 	return (0);
 }
 
-#ifdef RTHREADS
-
 int
 sys_thrsleep(struct proc *p, void *v, register_t *revtal)
 {
-	struct sys_thrsleep_args *uap = v;
+	struct sys_thrsleep_args /* {
+		syscallarg(void *) ident;
+		syscallarg(clockid_t) clock_id;
+		syscallarg(struct timespec *) tp;
+		syscallarg(void *) lock;
+	} */ *uap = v;
 	long ident = (long)SCARG(uap, ident);
-	int timo = SCARG(uap, timeout);
 	_spinlock_lock_t *lock = SCARG(uap, lock);
-	_spinlock_lock_t unlocked = _SPINLOCK_UNLOCKED;
+	static _spinlock_lock_t unlocked = _SPINLOCK_UNLOCKED;
+	long long to_ticks = 0;
 	int error;
+
+	if (!rthreads_enabled)
+		return (ENOTSUP);
+	if (SCARG(uap, tp) != NULL) {
+		struct timespec now, ats;
+
+		if ((error = copyin(SCARG(uap, tp), &ats, sizeof(ats))) != 0 ||
+		    (error = clock_gettime(p, SCARG(uap, clock_id), &now)) != 0)
+			return (error);
+
+		if (timespeccmp(&ats, &now, <)) {
+			/* already passed: still do the unlock */
+			if (lock) {
+				if ((error = copyout(&unlocked, lock,
+				    sizeof(unlocked))) != 0)
+					return (error);
+			}
+			return (EWOULDBLOCK);
+		}
+
+		timespecsub(&ats, &now, &ats);
+		to_ticks = (long long)hz * ats.tv_sec +
+		    ats.tv_nsec / (tick * 1000);
+		if (to_ticks > INT_MAX)
+			to_ticks = INT_MAX;
+		if (to_ticks == 0)
+			to_ticks = 1;
+	}
 
 	p->p_thrslpid = ident;
 
-	if (lock)
-		copyout(&unlocked, lock, sizeof(unlocked));
-	if (hz > 1000)
-		timo = timo * (hz / 1000);
-	else
-		timo = timo / (1000 / hz);
-	if (timo < 0)
-		timo = 0;
-	error = tsleep(&p->p_thrslpid, PUSER | PCATCH, "thrsleep", timo);
+	if (lock) {
+		if ((error = copyout(&unlocked, lock, sizeof(unlocked))) != 0)
+			return (error);
+	}
+	error = tsleep(&p->p_thrslpid, PUSER | PCATCH, "thrsleep",
+	    (int)to_ticks);
 
 	if (error == ERESTART)
 		error = EINTR;
@@ -426,15 +499,20 @@ sys_thrsleep(struct proc *p, void *v, register_t *revtal)
 int
 sys_thrwakeup(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_thrwakeup_args *uap = v;
+	struct sys_thrwakeup_args /* {
+		syscallarg(void *) ident;
+		syscallarg(int) n;
+	} */ *uap = v;
 	long ident = (long)SCARG(uap, ident);
 	int n = SCARG(uap, n);
 	struct proc *q;
 	int found = 0;
-	
+
+	if (!rthreads_enabled)
+		return (ENOTSUP);
 	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 		if (q->p_thrslpid == ident) {
-			wakeup(&q->p_thrslpid);
+			wakeup_one(&q->p_thrslpid);
 			q->p_thrslpid = 0;
 			if (++found == n)
 				return (0);
@@ -445,4 +523,3 @@ sys_thrwakeup(struct proc *p, void *v, register_t *retval)
 
 	return (0);
 }
-#endif

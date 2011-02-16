@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ppp.c,v 1.47 2006/12/28 20:06:11 deraadt Exp $	*/
+=======
+/*	$OpenBSD: if_ppp.c,v 1.58 2010/05/02 22:34:31 stsp Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -125,7 +129,7 @@
 #include <net/route.h>
 #include <net/bpf.h>
 
-#if INET
+#ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -342,7 +346,7 @@ pppdealloc(sc)
 {
     struct mbuf *m;
 
-    splassert(IPL_SOFTNET);
+    splsoftassert(IPL_SOFTNET);
 
     if_down(&sc->sc_if);
     sc->sc_if.if_flags &= ~(IFF_UP|IFF_RUNNING);
@@ -698,7 +702,7 @@ pppsioctl(ifp, cmd, data)
 #endif /* PPP_COMPRESS */
 
     default:
-	error = EINVAL;
+	error = ENOTTY;
     }
     splx(s);
     return (error);
@@ -729,6 +733,14 @@ pppoutput(ifp, m0, dst, rtp)
 	error = ENETDOWN;	/* sort of */
 	goto bad;
     }
+
+#ifdef DIAGNOSTIC
+    if (ifp->if_rdomain != rtable_l2(m0->m_pkthdr.rdomain)) {
+	printf("%s: trying to send packet on wrong domain. "
+	    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
+	    rtable_l2(m0->m_pkthdr.rdomain), dst->sa_family);
+    }
+#endif
 
     /*
      * Compute PPP header.
@@ -898,7 +910,7 @@ ppp_requeue(sc)
     enum NPmode mode;
     int error;
 
-    splassert(IPL_SOFTNET);
+    splsoftassert(IPL_SOFTNET);
 
     for (mpp = &sc->sc_npqueue; (m = *mpp) != NULL; ) {
 	switch (PPP_PROTOCOL(mtod(m, u_char *))) {
@@ -1054,12 +1066,12 @@ ppp_dequeue(sc)
     if (protocol != PPP_LCP && protocol != PPP_CCP
 	&& sc->sc_xc_state && (sc->sc_flags & SC_COMP_RUN)) {
 	struct mbuf *mcomp = NULL;
-	int slen, clen;
+	int slen;
 
 	slen = 0;
 	for (mp = m; mp != NULL; mp = mp->m_next)
 	    slen += mp->m_len;
-	clen = (*sc->sc_xcomp->compress)
+	(*sc->sc_xcomp->compress)
 	    (sc->sc_xc_state, &mcomp, m, slen,
 	     (sc->sc_flags & SC_CCP_UP ? sc->sc_if.if_mtu + PPP_HDRLEN : 0));
 	if (mcomp != NULL) {
@@ -1110,7 +1122,7 @@ pppintr()
     int s, s2;
     struct mbuf *m;
 
-    splassert(IPL_SOFTNET);
+    splsoftassert(IPL_SOFTNET);
 
     s = splsoftnet();	/* XXX - what's the point of this? see comment above */
     LIST_FOREACH(sc, &ppp_softc_list, sc_list) {
@@ -1468,6 +1480,9 @@ ppp_inproc(sc, m)
     }
     m->m_pkthdr.len = ilen;
     m->m_pkthdr.rcvif = ifp;
+
+    /* mark incoming routing domain */
+    m->m_pkthdr.rdomain = ifp->if_rdomain;
 
     if ((proto & 0x8000) == 0) {
 #if NBPFILTER > 0

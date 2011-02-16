@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gpx.c,v 1.15 2006/11/29 12:13:54 miod Exp $	*/
+=======
+/*	$OpenBSD: gpx.c,v 1.21 2009/09/05 14:09:35 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -220,12 +224,12 @@ void	gpx_upload_font(struct gpx_screen *);
 int	gpx_viper_write(struct gpx_screen *, u_int, u_int16_t);
 int	gpx_wait(struct gpx_screen *, int);
 
-void	gpx_copycols(void *, int, int, int, int);
-void	gpx_copyrows(void *, int, int, int);
-void	gpx_do_cursor(struct rasops_info *);
-void	gpx_erasecols(void *, int, int, int, long);
-void	gpx_eraserows(void *, int, int, long);
-void	gpx_putchar(void *, int, int, u_int, long);
+int	gpx_copycols(void *, int, int, int, int);
+int	gpx_copyrows(void *, int, int, int);
+int	gpx_do_cursor(struct rasops_info *);
+int	gpx_erasecols(void *, int, int, int, long);
+int	gpx_eraserows(void *, int, int, long);
+int	gpx_putchar(void *, int, int, u_int, long);
 
 /*
  * Autoconf glue
@@ -495,7 +499,7 @@ gpx_burner(void *v, u_int on, u_int flags)
  * wsdisplay emulops
  */
 
-void
+int
 gpx_putchar(void *v, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri = v;
@@ -548,9 +552,11 @@ gpx_putchar(void *v, int row, int col, u_int uc, long attr)
 		gpx_fillrect(ss, dx, dy + font->fontheight - 2, font->fontwidth,
 		    1, attr, LF_R3);	/* fg fill */
 	}
+
+	return 0;
 }
 
-void
+int
 gpx_copycols(void *v, int row, int src, int dst, int cnt)
 {
 	struct rasops_info *ri = v;
@@ -565,9 +571,11 @@ gpx_copycols(void *v, int row, int src, int dst, int cnt)
 	h = font->fontheight;
 
 	gpx_copyrect(ss, sx, y, dx, y, w, h);
+
+	return 0;
 }
 
-void
+int
 gpx_erasecols(void *v, int row, int col, int cnt, long attr)
 {
 	struct rasops_info *ri = v;
@@ -581,9 +589,11 @@ gpx_erasecols(void *v, int row, int col, int cnt, long attr)
 	dy = font->fontheight;
 
 	gpx_fillrect(ss, x, y, dx, dy, attr, LF_R2); /* bg fill */
+
+	return 0;
 }
 
-void
+int
 gpx_copyrows(void *v, int src, int dst, int cnt)
 {
 	struct rasops_info *ri = v;
@@ -598,9 +608,11 @@ gpx_copyrows(void *v, int src, int dst, int cnt)
 	h = cnt * font->fontheight;
 
 	gpx_copyrect(ss, x, sy, x, dy, w, h);
+
+	return 0;
 }
 
-void
+int
 gpx_eraserows(void *v, int row, int cnt, long attr)
 {
 	struct rasops_info *ri = v;
@@ -614,9 +626,11 @@ gpx_eraserows(void *v, int row, int cnt, long attr)
 	dy = cnt * font->fontheight;
 
 	gpx_fillrect(ss, x, y, dx, dy, attr, LF_R2); /* bg fill */
+
+	return 0;
 }
 
-void
+int
 gpx_do_cursor(struct rasops_info *ri)
 {
 	struct gpx_screen *ss = ri->ri_hw;
@@ -628,6 +642,8 @@ gpx_do_cursor(struct rasops_info *ri)
 	h = ri->ri_font->fontheight;
 
 	gpx_fillrect(ss, x, y, w, h, WSCOL_WHITE << 24, LF_R4);	/* invert */
+
+	return 0;
 }
 
 /*
@@ -684,7 +700,7 @@ gpx_reset_viper(struct gpx_screen *ss)
 	ss->ss_adder->sync_phase_adj = 0x0100;
 	ss->ss_adder->x_scan_conf = 0x00c8;
 	/*
-	 * got a bug in secound pass ADDER! lets take care of it...
+	 * got a bug in second pass ADDER! lets take care of it...
 	 *
 	 * normally, just use the code in the following bug fix code, but to
 	 * make repeated demos look pretty, load the registers as if there was
@@ -1225,6 +1241,7 @@ gpxcnprobe()
 	extern vaddr_t virtual_avail;
 	vaddr_t tmp;
 	int depth;
+	u_short status;
 
 	switch (vax_boardtype) {
 	case VAX_BTYP_410:
@@ -1236,11 +1253,25 @@ gpxcnprobe()
 		if ((vax_confdata & KA420_CFG_VIDOPT) == 0)
 			break; /* no color option */
 
+<<<<<<< HEAD
+=======
+		/* Check for hardware */
+		tmp = virtual_avail;
+		ioaccess(tmp, vax_trunc_page(GPXADDR + GPX_ADDER_OFFSET), 1);
+		adder = (struct adder *)tmp;
+		adder->status = 0;
+		status = adder->status;
+		iounaccess(tmp, 1);
+		if (status == offsetof(struct adder, status))
+			return (0);
+
+>>>>>>> origin/master
 		/* Check for a recognized color depth */
 		tmp = virtual_avail;
 		ioaccess(tmp, vax_trunc_page(GPXADDR + GPX_READBACK_OFFSET), 1);
 		depth = *(u_int16_t *)
 		    (tmp + (GPX_READBACK_OFFSET & VAX_PGOFSET)) & 0x00f0;
+		iounaccess(tmp, 1);
 		if (depth == 0x00f0 || depth == 0x0080)
 			return (1);
 
@@ -1263,14 +1294,16 @@ gpxcninit()
 {
 	struct gpx_screen *ss = &gpx_consscr;
 	extern vaddr_t virtual_avail;
-	vaddr_t tmp;
+	vaddr_t ova;
 	long defattr;
 	struct rasops_info *ri;
 
-	tmp = virtual_avail;
-	ioaccess(tmp, vax_trunc_page(GPXADDR + GPX_READBACK_OFFSET), 1);
-	ss->ss_depth = (0x00f0 & *(u_int16_t *)
-	    (tmp + (GPX_READBACK_OFFSET & VAX_PGOFSET))) == 0x00f0 ? 4 : 8;
+	ova = virtual_avail;
+
+	ioaccess(virtual_avail,
+	    vax_trunc_page(GPXADDR + GPX_READBACK_OFFSET), 1);
+	ss->ss_depth = (0x00f0 & *(u_int16_t *)(virtual_avail +
+	    (GPX_READBACK_OFFSET & VAX_PGOFSET))) == 0x00f0 ? 4 : 8;
 
 	ioaccess(virtual_avail, GPXADDR + GPX_ADDER_OFFSET, 1);
 	ss->ss_adder = (struct adder *)virtual_avail;
@@ -1288,9 +1321,22 @@ gpxcninit()
 
 	virtual_avail = round_page(virtual_avail);
 
+<<<<<<< HEAD
 	/* this had better not fail as we can't recover there */
 	if (gpx_setup_screen(ss) != 0)
 		panic(__func__);
+=======
+	/* this had better not fail */
+	if (gpx_setup_screen(ss) != 0) {
+#if 0
+		iounaccess((vaddr_t)ss->ss_cursor, 1);
+#endif
+		iounaccess((vaddr_t)ss->ss_vdac, 1);
+		iounaccess((vaddr_t)ss->ss_adder, 1);
+		virtual_avail = ova;
+		return (1);
+	}
+>>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);

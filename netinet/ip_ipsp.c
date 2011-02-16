@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_ipsp.c,v 1.167 2007/01/18 20:00:19 henning Exp $	*/
+=======
+/*	$OpenBSD: ip_ipsp.c,v 1.181 2010/07/09 16:58:06 reyk Exp $	*/
+>>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -38,11 +42,13 @@
  */
 
 #include "pf.h"
+#include "pfsync.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -50,6 +56,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#if NPFSYNC > 0
+#include <net/if_pfsync.h>
 #endif
 
 #ifdef INET
@@ -82,13 +92,13 @@ void tdb_hashstats(void);
 #define	DPRINTF(x)
 #endif
 
-int		ipsp_kern(int, char **, int);
 u_int8_t	get_sa_require(struct inpcb *);
 void		tdb_rehash(void);
 void		tdb_timeout(void *v);
 void		tdb_firstuse(void *v);
 void		tdb_soft_timeout(void *v);
 void		tdb_soft_firstuse(void *v);
+int		tdb_hash(u_int, u_int32_t, union sockaddr_union *, u_int8_t);
 
 extern int	ipsec_auth_default_level;
 extern int	ipsec_esp_trans_default_level;
@@ -149,7 +159,8 @@ static int tdb_count;
  * so we cannot be DoS-attacked via choosing of the data to hash.
  */
 int
-tdb_hash(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
+tdb_hash(u_int rdomain, u_int32_t spi, union sockaddr_union *dst,
+    u_int8_t proto)
 {
 	static u_int32_t mult1 = 0, mult2 = 0;
 	u_int8_t *ptr = (u_int8_t *) dst;
@@ -162,7 +173,7 @@ tdb_hash(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
 	while (mult2 == 0)
 		mult2 = arc4random();
 
-	hash = (spi ^ proto) * mult1;
+	hash = (spi ^ proto ^ rdomain) * mult1;
 	for (i = 0; i < SA_LEN(&dst->sa); i++) {
 		val32 = (val32 << 8) | ptr[i];
 		if (i % 4 == 3) {
@@ -186,8 +197,9 @@ tdb_hash(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
  * an error return value.
  */
 u_int32_t
-reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
-    union sockaddr_union *dst, u_int8_t sproto, int *errval)
+reserve_spi(u_int rdomain, u_int32_t sspi, u_int32_t tspi,
+    union sockaddr_union *src, union sockaddr_union *dst,
+    u_int8_t sproto, int *errval)
 {
 	struct tdb *tdbp;
 	u_int32_t spi;
@@ -242,13 +254,13 @@ reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
 
 		/* Check whether we're using this SPI already. */
 		s = spltdb();
-		tdbp = gettdb(spi, dst, sproto);
+		tdbp = gettdb(rdomain, spi, dst, sproto);
 		splx(s);
 
 		if (tdbp != (struct tdb *) NULL)
 			continue;
 
-		tdbp = tdb_alloc();
+		tdbp = tdb_alloc(rdomain);
 
 		tdbp->tdb_spi = spi;
 		bcopy(&dst->sa, &tdbp->tdb_dst.sa, SA_LEN(&dst->sa));
@@ -262,8 +274,8 @@ reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
 		if (ipsec_keep_invalid > 0) {
 			tdbp->tdb_flags |= TDBF_TIMER;
 			tdbp->tdb_exp_timeout = ipsec_keep_invalid;
-			timeout_add(&tdbp->tdb_timer_tmo,
-			    hz * ipsec_keep_invalid);
+			timeout_add_sec(&tdbp->tdb_timer_tmo,
+			    ipsec_keep_invalid);
 		}
 
 		return spi;
@@ -283,7 +295,7 @@ reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
  * Caller is responsible for setting at least spltdb().
  */
 struct tdb *
-gettdb(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
+gettdb(u_int rdomain, u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
 {
 	u_int32_t hashval;
 	struct tdb *tdbp;
@@ -291,10 +303,11 @@ gettdb(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
 	if (tdbh == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(spi, dst, proto);
+	hashval = tdb_hash(rdomain, spi, dst, proto);
 
 	for (tdbp = tdbh[hashval]; tdbp != NULL; tdbp = tdbp->tdb_hnext)
 		if ((tdbp->tdb_spi == spi) && (tdbp->tdb_sproto == proto) &&
+		    (tdbp->tdb_rdomain == rdomain) &&
 		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))
 			break;
 
@@ -307,7 +320,7 @@ gettdb(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
  * matches all SPIs.
  */
 struct tdb *
-gettdbbysrcdst(u_int32_t spi, union sockaddr_union *src,
+gettdbbysrcdst(u_int rdomain, u_int32_t spi, union sockaddr_union *src,
     union sockaddr_union *dst, u_int8_t proto)
 {
 	u_int32_t hashval;
@@ -317,11 +330,12 @@ gettdbbysrcdst(u_int32_t spi, union sockaddr_union *src,
 	if (tdbsrc == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(0, src, proto);
+	hashval = tdb_hash(rdomain, 0, src, proto);
 
 	for (tdbp = tdbsrc[hashval]; tdbp != NULL; tdbp = tdbp->tdb_snext)
 		if (tdbp->tdb_sproto == proto &&
 		    (spi == 0 || tdbp->tdb_spi == spi) &&
+		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (tdbp->tdb_dst.sa.sa_family == AF_UNSPEC ||
 		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
@@ -333,11 +347,12 @@ gettdbbysrcdst(u_int32_t spi, union sockaddr_union *src,
 
 	bzero(&su_null, sizeof(su_null));
 	su_null.sa.sa_len = sizeof(struct sockaddr);
-	hashval = tdb_hash(0, &su_null, proto);
+	hashval = tdb_hash(rdomain, 0, &su_null, proto);
 
 	for (tdbp = tdbsrc[hashval]; tdbp != NULL; tdbp = tdbp->tdb_snext)
 		if (tdbp->tdb_sproto == proto &&
 		    (spi == 0 || tdbp->tdb_spi == spi) &&
+		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (tdbp->tdb_dst.sa.sa_family == AF_UNSPEC ||
 		    !bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa))) &&
@@ -406,7 +421,7 @@ ipsp_aux_match(struct tdb *tdb,
  * the desired IDs.
  */
 struct tdb *
-gettdbbyaddr(union sockaddr_union *dst, u_int8_t sproto,
+gettdbbyaddr(u_int rdomain, union sockaddr_union *dst, u_int8_t sproto,
     struct ipsec_ref *srcid, struct ipsec_ref *dstid,
     struct ipsec_ref *local_cred, struct mbuf *m, int af,
     struct sockaddr_encap *filter, struct sockaddr_encap *filtermask)
@@ -417,10 +432,11 @@ gettdbbyaddr(union sockaddr_union *dst, u_int8_t sproto,
 	if (tdbaddr == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(0, dst, sproto);
+	hashval = tdb_hash(rdomain, 0, dst, sproto);
 
 	for (tdbp = tdbaddr[hashval]; tdbp != NULL; tdbp = tdbp->tdb_anext)
 		if ((tdbp->tdb_sproto == sproto) &&
+		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))) {
 			/* Do IDs and local credentials match ? */
@@ -438,7 +454,7 @@ gettdbbyaddr(union sockaddr_union *dst, u_int8_t sproto,
  * the desired IDs.
  */
 struct tdb *
-gettdbbysrc(union sockaddr_union *src, u_int8_t sproto,
+gettdbbysrc(u_int rdomain, union sockaddr_union *src, u_int8_t sproto,
     struct ipsec_ref *srcid, struct ipsec_ref *dstid,
     struct mbuf *m, int af, struct sockaddr_encap *filter,
     struct sockaddr_encap *filtermask)
@@ -449,10 +465,11 @@ gettdbbysrc(union sockaddr_union *src, u_int8_t sproto,
 	if (tdbsrc == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(0, src, sproto);
+	hashval = tdb_hash(rdomain, 0, src, sproto);
 
 	for (tdbp = tdbsrc[hashval]; tdbp != NULL; tdbp = tdbp->tdb_snext)
 		if ((tdbp->tdb_sproto == sproto) &&
+		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!bcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))) {
 			/* Check whether IDs match */
@@ -466,10 +483,12 @@ gettdbbysrc(union sockaddr_union *src, u_int8_t sproto,
 }
 
 #if DDB
+
+#define NBUCKETS 16
 void
 tdb_hashstats(void)
 {
-	int i, cnt, buckets[16];
+	int i, cnt, buckets[NBUCKETS];
 	struct tdb *tdbp;
 
 	if (tdbh == NULL) {
@@ -480,17 +499,17 @@ tdb_hashstats(void)
 	bzero (buckets, sizeof(buckets));
 	for (i = 0; i <= tdb_hashmask; i++) {
 		cnt = 0;
-		for (tdbp = tdbh[i]; cnt < 16 && tdbp != NULL;
+		for (tdbp = tdbh[i]; cnt < NBUCKETS - 1 && tdbp != NULL;
 		    tdbp = tdbp->tdb_hnext)
 			cnt++;
 		buckets[cnt]++;
 	}
 
 	db_printf("tdb cnt\t\tbucket cnt\n");
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < NBUCKETS; i++)
 		if (buckets[i] > 0)
-			db_printf("%d%c\t\t%d\n", i, i == 15 ? "+" : "",
-			    buckets[i]);
+			db_printf("%d%s\t\t%d\n", i, i == NBUCKETS - 1 ?
+			    "+" : "", buckets[i]);
 }
 #endif	/* DDB */
 
@@ -498,7 +517,7 @@ tdb_hashstats(void)
  * Caller is responsible for setting at least spltdb().
  */
 int
-tdb_walk(int (*walker)(struct tdb *, void *, int), void *arg)
+tdb_walk(u_int rdomain, int (*walker)(struct tdb *, void *, int), void *arg)
 {
 	int i, rval = 0;
 	struct tdb *tdbp, *next;
@@ -509,6 +528,10 @@ tdb_walk(int (*walker)(struct tdb *, void *, int), void *arg)
 	for (i = 0; i <= tdb_hashmask; i++)
 		for (tdbp = tdbh[i]; rval == 0 && tdbp != NULL; tdbp = next) {
 			next = tdbp->tdb_hnext;
+
+			if (rdomain != tdbp->tdb_rdomain)
+				continue;
+
 			if (i == tdb_hashmask && next == NULL)
 				rval = walker(tdbp, (void *)arg, 1);
 			else
@@ -602,7 +625,8 @@ tdb_rehash(void)
 	for (i = 0; i <= old_hashmask; i++) {
 		for (tdbp = tdbh[i]; tdbp != NULL; tdbp = tdbnp) {
 			tdbnp = tdbp->tdb_hnext;
-			hashval = tdb_hash(tdbp->tdb_spi, &tdbp->tdb_dst,
+			hashval = tdb_hash(tdbp->tdb_rdomain,
+			    tdbp->tdb_spi, &tdbp->tdb_dst,
 			    tdbp->tdb_sproto);
 			tdbp->tdb_hnext = new_tdbh[hashval];
 			new_tdbh[hashval] = tdbp;
@@ -610,7 +634,8 @@ tdb_rehash(void)
 
 		for (tdbp = tdbaddr[i]; tdbp != NULL; tdbp = tdbnp) {
 			tdbnp = tdbp->tdb_anext;
-			hashval = tdb_hash(0, &tdbp->tdb_dst,
+			hashval = tdb_hash(tdbp->tdb_rdomain,
+			    0, &tdbp->tdb_dst,
 			    tdbp->tdb_sproto);
 			tdbp->tdb_anext = new_tdbaddr[hashval];
 			new_tdbaddr[hashval] = tdbp;
@@ -618,7 +643,8 @@ tdb_rehash(void)
 
 		for (tdbp = tdbsrc[i]; tdbp != NULL; tdbp = tdbnp) {
 			tdbnp = tdbp->tdb_snext;
-			hashval = tdb_hash(0, &tdbp->tdb_src,
+			hashval = tdb_hash(tdbp->tdb_rdomain,
+			    0, &tdbp->tdb_src,
 			    tdbp->tdb_sproto);
 			tdbp->tdb_snext = new_srcaddr[hashval];
 			new_srcaddr[hashval] = tdbp;
@@ -660,7 +686,8 @@ puttdb(struct tdb *tdbp)
 		bzero(tdbsrc, sizeof(struct tdb *) * (tdb_hashmask + 1));
 	}
 
-	hashval = tdb_hash(tdbp->tdb_spi, &tdbp->tdb_dst, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
+	    &tdbp->tdb_dst, tdbp->tdb_sproto);
 
 	/*
 	 * Rehash if this tdb would cause a bucket to have more than
@@ -673,18 +700,20 @@ puttdb(struct tdb *tdbp)
 	if (tdbh[hashval] != NULL && tdbh[hashval]->tdb_hnext != NULL &&
 	    tdb_count * 10 > tdb_hashmask + 1) {
 		tdb_rehash();
-		hashval = tdb_hash(tdbp->tdb_spi, &tdbp->tdb_dst,
-		    tdbp->tdb_sproto);
+		hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
+		    &tdbp->tdb_dst, tdbp->tdb_sproto);
 	}
 
 	tdbp->tdb_hnext = tdbh[hashval];
 	tdbh[hashval] = tdbp;
 
-	hashval = tdb_hash(0, &tdbp->tdb_dst, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_dst,
+	    tdbp->tdb_sproto);
 	tdbp->tdb_anext = tdbaddr[hashval];
 	tdbaddr[hashval] = tdbp;
 
-	hashval = tdb_hash(0, &tdbp->tdb_src, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_src,
+	    tdbp->tdb_sproto);
 	tdbp->tdb_snext = tdbsrc[hashval];
 	tdbsrc[hashval] = tdbp;
 
@@ -708,18 +737,17 @@ tdb_delete(struct tdb *tdbp)
 	if (tdbh == NULL)
 		return;
 
-	hashval = tdb_hash(tdbp->tdb_spi, &tdbp->tdb_dst, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
+	    &tdbp->tdb_dst, tdbp->tdb_sproto);
 
 	s = spltdb();
 	if (tdbh[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbh[hashval] = tdbp->tdb_hnext;
 	} else {
 		for (tdbpp = tdbh[hashval]; tdbpp != NULL;
 		    tdbpp = tdbpp->tdb_hnext) {
 			if (tdbpp->tdb_hnext == tdbp) {
 				tdbpp->tdb_hnext = tdbp->tdb_hnext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
@@ -727,26 +755,25 @@ tdb_delete(struct tdb *tdbp)
 
 	tdbp->tdb_hnext = NULL;
 
-	hashval = tdb_hash(0, &tdbp->tdb_dst, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_dst,
+	    tdbp->tdb_sproto);
 
 	if (tdbaddr[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbaddr[hashval] = tdbp->tdb_anext;
 	} else {
 		for (tdbpp = tdbaddr[hashval]; tdbpp != NULL;
 		    tdbpp = tdbpp->tdb_anext) {
 			if (tdbpp->tdb_anext == tdbp) {
 				tdbpp->tdb_anext = tdbp->tdb_anext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
 	}
 
-	hashval = tdb_hash(0, &tdbp->tdb_src, tdbp->tdb_sproto);
+	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_src,
+	    tdbp->tdb_sproto);
 
 	if (tdbsrc[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbsrc[hashval] = tdbp->tdb_snext;
 	}
 	else {
@@ -754,7 +781,6 @@ tdb_delete(struct tdb *tdbp)
 		    tdbpp = tdbpp->tdb_snext) {
 			if (tdbpp->tdb_snext == tdbp) {
 				tdbpp->tdb_snext = tdbp->tdb_snext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
@@ -771,7 +797,7 @@ tdb_delete(struct tdb *tdbp)
  * Allocate a TDB and initialize a few basic fields.
  */
 struct tdb *
-tdb_alloc(void)
+tdb_alloc(u_int rdomain)
 {
 	struct tdb *tdbp;
 
@@ -786,6 +812,9 @@ tdb_alloc(void)
 
 	/* Record establishment time. */
 	tdbp->tdb_established = time_second;
+
+	/* Save routing domain */
+	tdbp->tdb_rdomain = rdomain;
 
 	/* Initialize timeouts. */
 	timeout_set(&tdbp->tdb_timer_tmo, tdb_timeout, tdbp);
@@ -806,6 +835,11 @@ tdb_free(struct tdb *tdbp)
 		(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
 		tdbp->tdb_xform = NULL;
 	}
+
+#if NPFSYNC > 0
+	/* Cleanup pfsync references */
+	pfsync_delete_tdb(tdbp);
+#endif
 
 	/* Cleanup inp references. */
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;
@@ -983,12 +1017,12 @@ char *
 ipsp_address(union sockaddr_union sa)
 {
 	switch (sa.sa.sa_family) {
-#if INET
+#ifdef INET
 	case AF_INET:
 		return inet_ntoa4(sa.sin.sin_addr);
 #endif /* INET */
 
-#if INET6
+#ifdef INET6
 	case AF_INET6:
 		return ip6_sprintf(&sa.sin6.sin6_addr);
 #endif /* INET6 */
@@ -1046,7 +1080,7 @@ ipsp_skipcrypto_mark(struct tdb_ident *tdbi)
 	struct tdb *tdb;
 	int s = spltdb();
 
-	tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
 		tdb->tdb_flags |= TDBF_SKIPCRYPTO;
 		tdb->tdb_last_marked = time_second;
@@ -1061,7 +1095,7 @@ ipsp_skipcrypto_unmark(struct tdb_ident *tdbi)
 	struct tdb *tdb;
 	int s = spltdb();
 
-	tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
 		tdb->tdb_flags &= ~TDBF_SKIPCRYPTO;
 		tdb->tdb_last_marked = time_second;
@@ -1168,6 +1202,8 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 					tdbi->dst.sin6.sin6_len =
 					    sizeof(struct sockaddr_in6);
 					tdbi->dst.sin6.sin6_addr = ip6_dst;
+					tdbi->rdomain =
+					    rtable_l2(m->m_pkthdr.rdomain);
 					SLIST_INSERT_HEAD(&tags,
 					    mtag, m_tag_link);
 				}
@@ -1236,7 +1272,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 
 			/* Update the length of trailing ESP authenticators. */
 			if (tdb->tdb_authalgxform)
-				trail += AH_HMAC_HASHLEN;
+				trail += tdb->tdb_authalgxform->authsize;
 
 			splx(s);
 
@@ -1275,6 +1311,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 				    (caddr_t) &tdbi->spi);
 
 			tdbi->proto = proto; /* AH or ESP */
+			tdbi->rdomain = rtable_l2(m->m_pkthdr.rdomain);
 
 #ifdef INET
 			/* Last network header was IPv4. */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: iopvar.h,v 1.6 2001/06/26 20:05:22 niklas Exp $	*/
+=======
+/*	$OpenBSD: iopvar.h,v 1.10 2009/04/02 18:44:49 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: iopvar.h,v 1.5 2001/03/20 13:01:49 ad Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,6 +36,8 @@
 
 #ifndef _I2O_IOPVAR_H_
 #define	_I2O_IOPVAR_H_
+
+#include <sys/rwlock.h>
 
 /*
  * Transfer descriptor.
@@ -113,7 +112,7 @@ struct iop_softc {
 	bus_space_tag_t	sc_iot;		/* bus space tag */
 	bus_dma_tag_t	sc_dmat;	/* bus DMA tag */
 	void	 	*sc_ih;		/* interrupt handler cookie */
-	struct lock	sc_conflock;	/* autoconfiguration lock */
+	struct rwlock	sc_conflock;	/* autoconfiguration lock */
 	bus_addr_t	sc_memaddr;	/* register window address */
 	bus_size_t	sc_memsize;	/* register window size */
 

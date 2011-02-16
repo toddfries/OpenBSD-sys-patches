@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgfour.c,v 1.26 2006/07/25 21:23:30 miod Exp $	*/
+=======
+/*	$OpenBSD: cgfour.c,v 1.29 2010/06/07 19:43:45 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cgfour.c,v 1.13 1997/05/24 20:16:06 pk Exp $	*/
 
 /*
@@ -162,7 +166,7 @@ cgfourattach(struct device *parent, struct device *self, void *args)
 		 * Assume this is the console if there's no eeprom info
 		 * to be found.
 		 */
-		if (eep == NULL || eep->eeConsole == EE_CONS_P4OPT)
+		if (eep == NULL || eep->ee_diag.eed_console == EED_CONS_P4)
 			isconsole = 1;
 	}
 
@@ -193,14 +197,13 @@ cgfourattach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_ro.ri_bits = mapiodev(ca->ca_ra.ra_reg,
 	    PFOUR_COLOR_OFF_COLOR, round_page(sc->sc_sunfb.sf_fbsize));
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
-	fbwscons_setcolormap(&sc->sc_sunfb, cgfour_setcolor);
 
 	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
-	if (isconsole) {
+	fbwscons_init(&sc->sc_sunfb, isconsole);
+	fbwscons_setcolormap(&sc->sc_sunfb, cgfour_setcolor);
+	if (isconsole)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
 
 	fbwscons_attach(&sc->sc_sunfb, &cgfour_accessops, isconsole);
 }

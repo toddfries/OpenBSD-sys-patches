@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.43 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.56 2010/12/26 15:40:59 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -272,7 +272,6 @@ struct pmap {
 	union descriptor *pm_ldt;	/* user-set LDT */
 	int pm_ldt_len;			/* number of LDT entries */
 	int pm_ldt_sel;			/* LDT selector */
-	uint32_t pm_cpus;		/* mask of CPUs using map */
 };
 
 /* pm_flags */
@@ -299,6 +298,21 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 	vaddr_t pv_va;			/* the virtual address */
 	struct vm_page *pv_ptp;		/* the vm_page of the PTP */
 };
+/*
+ * MD flags to pmap_enter:
+ */
+
+/* to get just the pa from params to pmap_enter */
+#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK)
+#define	PMAP_NOCACHE	0x1		/* map uncached */
+#define	PMAP_WC		0x2		/* map write combining. */
+
+/*
+ * We keep mod/ref flags in struct vm_page->pg_flags.
+ */
+#define	PG_PMAP_MOD	PG_PMAP0
+#define	PG_PMAP_REF	PG_PMAP1
+#define	PG_PMAP_WC	PG_PMAP2
 
 /*
  * pv_entrys are dynamically allocated in chunks from a single page.
@@ -348,6 +362,7 @@ extern int pmap_pg_g;			/* do we support PG_G? */
  */
 
 #define	pmap_kernel()			(&kernel_pmap_store)
+#define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_update(pm)			/* nada */
 
@@ -356,7 +371,6 @@ extern int pmap_pg_g;			/* do we support PG_G? */
 #define pmap_copy(DP,SP,D,L,S)
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
-#define pmap_phys_address(ppn)		ptoa(ppn)
 #define pmap_valid_entry(E) 		((E) & PG_V) /* is PDE or PTE valid? */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
@@ -381,12 +395,29 @@ void		pmap_write_protect(struct pmap *, vaddr_t,
 				vaddr_t, vm_prot_t);
 int		pmap_exec_fixup(struct vm_map *, struct trapframe *,
 		    struct pcb *);
+void		pmap_switch(struct proc *, struct proc *);
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
-void	pmap_tlb_shootdown(pmap_t, vaddr_t, pt_entry_t, int32_t *);
-void	pmap_tlb_shootnow(int32_t);
-void	pmap_do_tlb_shootdown(struct cpu_info *);
+void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
+void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
+void	pmap_tlb_shoottlb(void);
+#ifdef MULTIPROCESSOR
+void	pmap_tlb_droppmap(struct pmap *);
+void	pmap_tlb_shootwait(void);
+#else
+#define pmap_tlb_shootwait()
+#endif
+
+void	pmap_prealloc_lowmem_ptp(paddr_t);
+
+/* 
+ * functions for flushing the cache for vaddrs and pages.
+ * these functions are not part of the MI pmap interface and thus
+ * should not be used as such.
+ */
+void	pmap_flush_cache(vaddr_t, vsize_t);
+void	pmap_flush_page(paddr_t);
 
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 

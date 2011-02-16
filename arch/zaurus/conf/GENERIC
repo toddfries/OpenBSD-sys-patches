@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: GENERIC,v 1.61 2007/02/28 21:54:43 grange Exp $
+=======
+#	$OpenBSD: GENERIC,v 1.81 2010/11/26 20:13:55 miod Exp $
+>>>>>>> origin/master
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,7 +24,6 @@ options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0xa0200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
-makeoptions	BOARDTYPE="zaurus"
 
 # CPU options
 options		CPU_XSCALE_PXA2X0	# Support the XScale core
@@ -116,16 +119,17 @@ axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*		at uhub?		# CDC Ethernet
+urndis*		at uhub?		# Remote NDIS devices
 upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 ural*		at uhub?		# Ralink RT2500USB
 rum*		at uhub?		# Ralink RT2501USB/RT2601USB
+run*		at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*		at uhub?		# Zydas ZD1211
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 urio*		at uhub?		# Diamond Multimedia Rio 500
-uscanner*	at uhub?		# USB Scanners
-usscanner*	at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus*	at usscanner?
+uscanner*	at uhub? disable	# USB Scanners
 #uyap*		at uhub?		# Y@P firmware loader
 udsbr*		at uhub?		# D-Link DSB-R100 radio
 radio*		at udsbr?		# USB radio
@@ -133,13 +137,13 @@ radio*		at udsbr?		# USB radio
 ugen*		at uhub?		# USB Generic driver
 udcf*		at uhub?		# Gude Expert mouseCLOCK
 uow*		at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
-onewire* at uow?
+onewire*	at uow?
+utwitch*	at uhidev?		# YUREX BBU sensor
 
 sd*		at scsibus?		# SCSI disk drives
 #st*		at scsibus?		# SCSI tape drives
 cd*		at scsibus?		# SCSI CD-ROM drives
 #ch*		at scsibus?		# SCSI autochangers
-#ss*		at scsibus?		# SCSI scanners
 #uk*		at scsibus?		# unknown SCSI
 
 # integrated 16550 UARTs
@@ -206,11 +210,33 @@ pxammc0		at pxaip?		# MMC/SD/SDIO controller
 sdmmc*		at pxammc?		# SD/MMC bus
 scsibus*	at sdmmc?		# SCSI emulation
 
+<<<<<<< HEAD
+=======
+# Bluetooth controllers
+sbt*	at sdmmc?			# SDIO Bluetooth
+bthub*	at sbt?
+ubt*	at uhub?			# USB Bluetooth
+bthub*	at ubt?
+
+# USB Video
+uvideo* at uhub?
+video*  at uvideo?
+
+bthidev* at bthub?			# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?			# Bluetooth audio support
+audio*	at btsco?
+
+>>>>>>> origin/master
 # 1-Wire devices
 option ONEWIREVERBOSE
 owid*	at onewire?			# ID
 owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
+owctr*	at onewire?			# Counter device
 
 # Pseudo-Devices
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

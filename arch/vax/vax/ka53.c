@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ka53.c,v 1.4 2001/08/25 13:33:37 hugh Exp $	*/
+=======
+/*	$OpenBSD: ka53.c,v 1.7 2008/08/18 23:05:38 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ka53.c,v 1.2 2000/06/04 02:19:27 matt Exp $	*/
 /*
  * Copyright (c) 2002 Hugh Graham.
@@ -48,14 +52,14 @@ static void    ka53_memerr(void);
 static int     ka53_mchk(caddr_t);
 static void    ka53_softmem(void *);
 static void    ka53_hardmem(void *);
-static void    ka53_steal_pages(void);
+static void    ka53_init(void);
 static void    ka53_cache_enable(void);
 
 /* 
  * Declaration of 680-specific calls.
  */
 struct cpu_dep ka53_calls = {
-	ka53_steal_pages,
+	ka53_init,
 	ka53_mchk,
 	ka53_memerr, 
 	ka53_conf,
@@ -65,6 +69,9 @@ struct cpu_dep ka53_calls = {
 	2,	/* SCB pages */
 	generic_halt,
 	generic_reboot,
+	NULL,
+	NULL,
+	hardclock
 };
 
 void
@@ -221,7 +228,7 @@ ka53_mchk(caddr_t addr)
 }
 
 void
-ka53_steal_pages()
+ka53_init()
 {
 
 	/*

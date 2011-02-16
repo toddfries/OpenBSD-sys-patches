@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rmd160.c,v 1.3 2001/09/26 21:40:13 markus Exp $	*/
+=======
+/*	$OpenBSD: rmd160.c,v 1.5 2011/01/11 15:42:05 deraadt Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
  *
@@ -150,7 +154,7 @@ RMD160Final(u_char digest[20], RMD160_CTX *ctx)
 		for (i = 0; i < 5; i++)
 			PUT_32BIT_LE(digest + i*4, ctx->state[i]);
 
-	memset(ctx, 0, sizeof (*ctx));
+	explicit_bzero(ctx, sizeof (*ctx));
 }
 
 void

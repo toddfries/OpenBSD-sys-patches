@@ -1,4 +1,4 @@
-/* $OpenBSD: dec_kn300.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
+/* $OpenBSD: dec_kn300.c,v 1.6 2010/11/23 04:07:55 shadchin Exp $ */
 /* $NetBSD: dec_kn300.c,v 1.34 2007/03/04 15:18:10 yamt Exp $ */
 
 /*
@@ -72,9 +72,9 @@ static int comcnrate = CONSPEED;
 
 #ifdef DEBUG
 int bootdev_debug;
-#define DPRINTF(x)	if (bootdev_debug) printf x
+#define DPRINTF(x)	do { if (bootdev_debug) printf x; } while (0)
 #else
-#define DPRINTF(x)
+#define DPRINTF(x)	do { } while (0)
 #endif
 
 void dec_kn300_init (void);
@@ -180,8 +180,7 @@ dec_kn300_cons_init()
 #if NPCKBD > 0
 		/* display console ... */
 		/* XXX */
-		(void) pckbc_cnattach(&ccp->cc_iot, IO_KBD, KBCMDP,
-		    PCKBC_KBD_SLOT);
+		(void) pckbc_cnattach(&ccp->cc_iot, IO_KBD, KBCMDP, 0);
 
 		if (CTB_TURBOSLOT_TYPE(ctb->ctb_turboslot) ==
 		    CTB_TURBOSLOT_TYPE_ISA)
@@ -231,7 +230,7 @@ dec_kn300_device_register(dev, aux)
 		DPRINTF(("proto:%s bus:%d slot:%d chan:%d", b->protocol,
 		    b->bus, b->slot, b->channel));
 		if (b->remote_address)
-			printf(" remote_addr:%s", b->remote_address);
+			DPRINTF((" remote_addr:%s", b->remote_address));
 		DPRINTF((" un:%d bdt:%d", b->unit, b->boot_dev_type));
 		if (b->ctrl_dev_type)
 			DPRINTF((" cdt:%s\n", b->ctrl_dev_type));

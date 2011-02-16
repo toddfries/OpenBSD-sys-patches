@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_skreg.h,v 1.43 2007/02/10 22:49:46 kettenis Exp $	*/
+=======
+/*	$OpenBSD: if_skreg.h,v 1.55 2010/11/17 13:19:39 kevlo Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -350,13 +354,24 @@
 #define SK_YUKON_EX		0xB5
 #define SK_YUKON_EC		0xB6
 #define SK_YUKON_FE		0xB7
+<<<<<<< HEAD
+=======
+#define SK_YUKON_FE_P		0xB8
+#define SK_YUKON_SUPR		0xB9
+#define SK_YUKON_ULTRA2		0xBA
+#define SK_YUKON_OPTIMA		0xBC
+>>>>>>> origin/master
 
 #define SK_IS_GENESIS(sc) \
     ((sc)->sk_type == SK_GENESIS)
 #define SK_IS_YUKON(sc) \
     ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_LP)
 #define SK_IS_YUKON2(sc) \
+<<<<<<< HEAD
     ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_FE)
+=======
+    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_OPTIMA)
+>>>>>>> origin/master
 
 /* Known revisions in SK_CONFIG */
 #define SK_YUKON_LITE_REV_A0	0x0 /* invented, see test in skc_attach */
@@ -374,6 +389,17 @@
 
 #define SK_YUKON_EC_U_REV_A0	0x1
 #define SK_YUKON_EC_U_REV_A1	0x2
+#define SK_YUKON_EC_U_REV_B0	0x3
+
+#define SK_YUKON_FE_REV_A1	0x1
+#define SK_YUKON_FE_REV_A2	0x2
+
+#define SK_YUKON_FE_P_REV_A0	0x0
+
+#define SK_YUKON_EX_REV_A0	0x1
+#define SK_YUKON_EX_REV_B0	0x2
+
+#define SK_YUKON_SUPR_REV_A0	0x0
 
 #define SK_IMCTL_IRQ_CLEAR	0x01
 #define SK_IMCTL_STOP		0x02
@@ -1015,7 +1041,7 @@
 #define SK_RBCTL_STORENFWD_OFF	0x00000010
 #define SK_RBCTL_STORENFWD_ON	0x00000020
 
-/* Block 24 -- RX MAC FIFO 1 regisrers and LINK_SYNC counter */
+/* Block 24 -- RX MAC FIFO 1 registers and LINK_SYNC counter */
 #define SK_RXF1_END		0x0C00
 #define SK_RXF1_WPTR		0x0C04
 #define SK_RXF1_RPTR		0x0C0C
@@ -1064,7 +1090,7 @@
 
 #define SK_RFCTL_FIFO_THRESHOLD	0x0a	/* flush threshold (default) */
 
-/* Block 25 -- RX MAC FIFO 2 regisrers and LINK_SYNC counter */
+/* Block 25 -- RX MAC FIFO 2 registers and LINK_SYNC counter */
 #define SK_RXF2_END		0x0C80
 #define SK_RXF2_WPTR		0x0C84
 #define SK_RXF2_RPTR		0x0C8C
@@ -1110,7 +1136,7 @@
 #define SK_LINKLED_BLINK_OFF		0x0010
 #define SK_LINKLED_BLINK_ON		0x0020
 
-/* Block 26 -- TX MAC FIFO 1 regisrers  */
+/* Block 26 -- TX MAC FIFO 1 registers  */
 #define SK_TXF1_END		0x0D00
 #define SK_TXF1_WPTR		0x0D04
 #define SK_TXF1_RPTR		0x0D0C
@@ -1149,7 +1175,7 @@
 #define SK_TFCTL_RESET_CLEAR	0x00000002	/* MAC FIFO Reset Clear */
 #define SK_TFCTL_RESET_SET	0x00000001	/* MAC FIFO Reset Set */
 
-/* Block 27 -- TX MAC FIFO 2 regisrers  */
+/* Block 27 -- TX MAC FIFO 2 registers  */
 #define SK_TXF2_END		0x0D80
 #define SK_TXF2_WPTR		0x0D84
 #define SK_TXF2_RPTR		0x0D8C
@@ -1277,6 +1303,9 @@
 #define SK_PAT_CTR6		0x0f3e	/* Pattern Counter 6 */
 #define SK_PAT_CTR7		0x0f3f	/* Pattern Counter 7 */
 
+#define SK_GMAC_BYP_MACSECRX	0x00002000	/* Bypass macsec for Rx */
+#define SK_GMAC_BYP_MACSECTX	0x00000800	/* Bypass macsec for Tx */
+#define SK_GMAC_BYP_RETR_FIFO	0x00000200	/* Bypass retransmit FIFO */
 #define SK_GMAC_LOOP_ON		0x00000020	/* Loopback mode for testing */
 #define SK_GMAC_LOOP_OFF	0x00000010	/* purposes */
 #define SK_GMAC_PAUSE_ON	0x00000008	/* enable forward of pause */
@@ -1613,7 +1642,6 @@ struct msk_status_desc {
 
 #define SK_JRAWLEN	(SK_JUMBO_FRAMELEN + ETHER_ALIGN)
 #define SK_JLEN		SK_JRAWLEN
-#define SK_MCLBYTES	SK_JLEN
 #define SK_JPAGESZ	PAGE_SIZE
 #define SK_RESID	(SK_JPAGESZ - (SK_JLEN * SK_JSLOTS) % SK_JPAGESZ)
 #define SK_JMEM		((SK_JLEN * SK_JSLOTS) + SK_RESID)
@@ -1623,7 +1651,6 @@ struct msk_status_desc {
 #define MSK_RESID	(SK_JPAGESZ - (SK_JLEN * MSK_JSLOTS) % SK_JPAGESZ)
 #define MSK_JMEM	((SK_JLEN * MSK_JSLOTS) + MSK_RESID)
 
-#define SK_MAXUNIT	256
 #define SK_TIMEOUT	1000
 
 /* YUKON registers */

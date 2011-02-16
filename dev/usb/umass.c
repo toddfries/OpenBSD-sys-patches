@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: umass.c,v 1.43 2005/08/01 05:36:49 brad Exp $ */
+=======
+/*	$OpenBSD: umass.c,v 1.60 2011/01/25 20:03:36 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: umass.c,v 1.116 2004/06/30 05:53:46 mycroft Exp $	*/
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -191,8 +188,28 @@ char *states[TSTATE_STATES+1] = {
 #endif
 
 /* USB device probe/attach/detach functions */
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(umass);
 Static void umass_disco(struct umass_softc *sc);
+=======
+int umass_match(struct device *, void *, void *); 
+void umass_attach(struct device *, struct device *, void *); 
+int umass_detach(struct device *, int); 
+int umass_activate(struct device *, int); 
+
+struct cfdriver umass_cd = { 
+	NULL, "umass", DV_DULL 
+}; 
+
+const struct cfattach umass_ca = { 
+	sizeof(struct umass_softc), 
+	umass_match, 
+	umass_attach, 
+	umass_detach, 
+	umass_activate, 
+};
+void umass_disco(struct umass_softc *sc);
+>>>>>>> origin/master
 
 /* generic transfer functions */
 Static usbd_status umass_polled_transfer(struct umass_softc *sc,
@@ -634,12 +651,16 @@ USB_ATTACH(umass)
 		USB_ATTACH_ERROR_RETURN;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
 	DPRINTF(UDMASS_GEN, ("%s: Attach finished\n", USBDEVNAME(sc->sc_dev)));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+	DPRINTF(UDMASS_GEN, ("%s: Attach finished\n", sc->sc_dev.dv_xname));
+>>>>>>> origin/master
 }
 
 USB_DETACH(umass)
@@ -682,14 +703,17 @@ USB_DETACH(umass)
 
 	umass_disco(sc);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
-umass_activate(struct device *dev, enum devact act)
+umass_activate(struct device *dev, int act)
 {
 	struct umass_softc *sc = (struct umass_softc *)dev;
 	struct umassbus_softc *scbus = sc->bus;
@@ -1748,8 +1772,6 @@ umass_cbi_state(usbd_xfer_handle xfer, usbd_private_handle priv,
 			sc->transfer_cb(sc, sc->transfer_priv,
 			    sc->transfer_datalen - sc->transfer_actlen, status);
 		} else {
-			int status;
-
 			/* Command Interrupt Data Block */
 
 			DPRINTF(UDMASS_CBI, ("%s: type=0x%02x, value=0x%02x\n",
@@ -1757,6 +1779,7 @@ umass_cbi_state(usbd_xfer_handle xfer, usbd_private_handle priv,
 				sc->sbl.common.type, sc->sbl.common.value));
 
 			if (sc->sbl.common.type == IDB_TYPE_CCI) {
+				int status;
 				switch (sc->sbl.common.value &
 				    IDB_VALUE_STATUS_MASK) {
 				case IDB_VALUE_PASS:
@@ -1767,6 +1790,7 @@ umass_cbi_state(usbd_xfer_handle xfer, usbd_private_handle priv,
 					status = STATUS_CMD_FAILED;
 					break;
 				case IDB_VALUE_PHASE:
+				default:
 					status = STATUS_WIRE_FAILED;
 					break;
  				}

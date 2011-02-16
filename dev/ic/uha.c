@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uha.c,v 1.8 2005/12/03 16:53:16 krw Exp $	*/
+=======
+/*	$OpenBSD: uha.c,v 1.21 2010/08/07 03:50:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG
@@ -69,7 +73,7 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -80,32 +84,20 @@
 #include <dev/ic/uhareg.h>
 #include <dev/ic/uhavar.h>
 
-#ifndef	DDB
-#define Debugger() panic("should call debugger here (ultra14f.c)")
-#endif /* ! DDB */
-
 #define KVTOPHYS(x)	vtophys((vaddr_t)x)
 
 integrate void uha_reset_mscp(struct uha_softc *, struct uha_mscp *);
 void uha_free_mscp(struct uha_softc *, struct uha_mscp *);
 integrate void uha_init_mscp(struct uha_softc *, struct uha_mscp *);
 struct uha_mscp *uha_get_mscp(struct uha_softc *, int);
-void uhaminphys(struct buf *);
-int uha_scsi_cmd(struct scsi_xfer *);
+void uhaminphys(struct buf *, struct scsi_link *);
+void uha_scsi_cmd(struct scsi_xfer *);
 
 struct scsi_adapter uha_switch = {
 	uha_scsi_cmd,
 	uhaminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device uha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 struct cfdriver uha_cd = {
@@ -139,7 +131,7 @@ uha_attach(sc)
 	struct scsibus_attach_args saa;
 
 	(sc->init)(sc);
-	TAILQ_INIT(&sc->sc_free_mscp);
+	SLIST_INIT(&sc->sc_free_mscp);
 
 	/*
 	 * fill in the prototype scsi_link.
@@ -147,7 +139,6 @@ uha_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &uha_switch;
-	sc->sc_link.device = &uha_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -181,13 +172,13 @@ uha_free_mscp(sc, mscp)
 	s = splbio();
 
 	uha_reset_mscp(sc, mscp);
-	TAILQ_INSERT_HEAD(&sc->sc_free_mscp, mscp, chain);
+	SLIST_INSERT_HEAD(&sc->sc_free_mscp, mscp, chain);
 
 	/*
 	 * If there were none, wake anybody waiting for one to come free,
 	 * starting with queued entries.
 	 */
-	if (TAILQ_NEXT(mscp, chain) == NULL)
+	if (SLIST_NEXT(mscp, chain) == NULL)
 		wakeup(&sc->sc_free_mscp);
 
 	splx(s);
@@ -233,9 +224,9 @@ uha_get_mscp(sc, flags)
 	 * but only if we can't allocate a new one
 	 */
 	for (;;) {
-		mscp = TAILQ_FIRST(&sc->sc_free_mscp);
+		mscp = SLIST_FIRST(&sc->sc_free_mscp);
 		if (mscp) {
-			TAILQ_REMOVE(&sc->sc_free_mscp, mscp, chain);
+			SLIST_REMOVE_HEAD(&sc->sc_free_mscp, chain);
 			break;
 		}
 		if (sc->sc_nummscps < UHA_MSCP_MAX) {
@@ -299,8 +290,7 @@ uha_done(sc, mscp)
 	 * into the xfer and call whoever started it
 	 */
 	if ((mscp->flags & MSCP_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n", sc->sc_dev.dv_xname);
-		Debugger();
+		panic("%s: exiting ccb not allocated!", sc->sc_dev.dv_xname);
 		return;
 	}
 	if (xs->error == XS_NOERROR) {
@@ -334,15 +324,12 @@ uha_done(sc, mscp)
 			xs->resid = 0;
 	}
 	uha_free_mscp(sc, mscp);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
 void
-uhaminphys(bp)
-	struct buf *bp;
+uhaminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((UHA_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((UHA_NSEG - 1) << PGSHIFT);
 	minphys(bp);
@@ -352,7 +339,7 @@ uhaminphys(bp)
  * start a scsi operation given the command and the data address.  Also
  * needs the unit, target and lu.
  */
-int
+void
 uha_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -373,7 +360,9 @@ uha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((mscp = uha_get_mscp(sc, flags)) == NULL) {
-		return (TRY_AGAIN_LATER);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 	mscp->xs = xs;
 	mscp->timeout = xs->timeout;
@@ -405,76 +394,56 @@ uha_scsi_cmd(xs)
 	if (xs->datalen) {
 		sg = mscp->uha_dma;
 		seg = 0;
-#ifdef	TFS
-		if (flags & SCSI_DATA_UIO) {
-			struct iovec *iovp;
-			iovp = ((struct uio *) xs->data)->uio_iov;
-			datalen = ((struct uio *) xs->data)->uio_iovcnt;
-			xs->datalen = 0;
-			while (datalen && seg < UHA_NSEG) {
-				sg->seg_addr = (physaddr)iovp->iov_base;
-				sg->seg_len = iovp->iov_len;
-				xs->datalen += iovp->iov_len;
-				SC_DEBUGN(sc_link, SDEV_DB4, ("(0x%x@0x%x)",
-				    iovp->iov_len, iovp->iov_base));
-				sg++;
-				iovp++;
-				seg++;
-				datalen--;
-			}
-		} else
-#endif /*TFS */
-		{
-			/*
-			 * Set up the scatter gather block
-			 */
-			SC_DEBUG(sc_link, SDEV_DB4,
-			    ("%d @0x%x:- ", xs->datalen, xs->data));
-			datalen = xs->datalen;
-			thiskv = (int) xs->data;
-			thisphys = KVTOPHYS(thiskv);
 
-			while (datalen && seg < UHA_NSEG) {
-				bytes_this_seg = 0;
+		/*
+		 * Set up the scatter gather block
+		 */
+		SC_DEBUG(sc_link, SDEV_DB4,
+		    ("%d @0x%x:- ", xs->datalen, xs->data));
+		datalen = xs->datalen;
+		thiskv = (int) xs->data;
+		thisphys = KVTOPHYS(thiskv);
 
-				/* put in the base address */
-				sg->seg_addr = thisphys;
+		while (datalen && seg < UHA_NSEG) {
+			bytes_this_seg = 0;
 
-				SC_DEBUGN(sc_link, SDEV_DB4, ("0x%x", thisphys));
+			/* put in the base address */
+			sg->seg_addr = thisphys;
 
-				/* do it at least once */
-				nextphys = thisphys;
-				while (datalen && thisphys == nextphys) {
-					/*
-					 * This page is contiguous (physically)
-					 * with the last, just extend the
-					 * length
-					 */
-					/* how far to the end of the page */
-					nextphys = (thisphys & ~PGOFSET) + NBPG;
-					bytes_this_page = nextphys - thisphys;
-					/**** or the data ****/
-					bytes_this_page = min(bytes_this_page,
-							      datalen);
-					bytes_this_seg += bytes_this_page;
-					datalen -= bytes_this_page;
+			SC_DEBUGN(sc_link, SDEV_DB4, ("0x%x", thisphys));
 
-					/* get more ready for the next page */
-					thiskv = (thiskv & ~PGOFSET) + NBPG;
-					if (datalen)
-						thisphys = KVTOPHYS(thiskv);
-				}
+			/* do it at least once */
+			nextphys = thisphys;
+			while (datalen && thisphys == nextphys) {
 				/*
-				 * next page isn't contiguous, finish the seg
+				 * This page is contiguous (physically)
+				 * with the last, just extend the
+				 * length
 				 */
-				SC_DEBUGN(sc_link, SDEV_DB4,
-				    ("(0x%x)", bytes_this_seg));
-				sg->seg_len = bytes_this_seg;
-				sg++;
-				seg++;
+				/* how far to the end of the page */
+				nextphys = (thisphys & ~PGOFSET) + NBPG;
+				bytes_this_page = nextphys - thisphys;
+				/**** or the data ****/
+				bytes_this_page = min(bytes_this_page,
+						      datalen);
+				bytes_this_seg += bytes_this_page;
+				datalen -= bytes_this_page;
+
+				/* get more ready for the next page */
+				thiskv = (thiskv & ~PGOFSET) + NBPG;
+				if (datalen)
+					thisphys = KVTOPHYS(thiskv);
 			}
+			/*
+			 * next page isn't contiguous, finish the seg
+			 */
+			SC_DEBUGN(sc_link, SDEV_DB4,
+			    ("(0x%x)", bytes_this_seg));
+			sg->seg_len = bytes_this_seg;
+			sg++;
+			seg++;
 		}
-		/* end of iov/kv decision */
+
 		SC_DEBUGN(sc_link, SDEV_DB4, ("\n"));
 		if (datalen) {
 			/*
@@ -505,7 +474,7 @@ uha_scsi_cmd(xs)
 	 * Usually return SUCCESSFULLY QUEUED
 	 */
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/*
 	 * If we can't use interrupts, poll on completion
@@ -515,12 +484,13 @@ uha_scsi_cmd(xs)
 		if ((sc->poll)(sc, xs, mscp->timeout))
 			uha_timeout(mscp);
 	}
-	return (COMPLETE);
+	return;
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
+	scsi_done(xs);
 	uha_free_mscp(sc, mscp);
-	return (COMPLETE);
+	return;
 }
 
 void

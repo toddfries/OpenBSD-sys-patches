@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: installboot.c,v 1.5 2004/01/11 23:59:22 pvalchev Exp $	*/
+=======
+/*	$OpenBSD: installboot.c,v 1.9 2010/11/20 13:10:42 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: installboot.c,v 1.8 2001/02/19 22:48:59 cgd Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -201,8 +198,10 @@ main(argc, argv)
 		if ((protofd = open(proto, O_RDONLY)) < 0)
 			err(1, "open: %s", proto);
 
-		if (fstat(protofd, &sb) < 0)
+		if (fstat(protofd, &sb) == -1)
 			err(1, "fstat: %s", proto);
+		if (sb.st_size == 0)
+			errx(1, "%s is empty", proto);
 
 		/* there must be a better way */
 		blanklen = DEV_BSIZE - ((sb.st_size + DEV_BSIZE) & (DEV_BSIZE - 1));

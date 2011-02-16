@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_interface.h,v 1.8 2006/07/11 21:17:58 mickey Exp $	*/
+=======
+/*	$OpenBSD: db_interface.h,v 1.16 2010/11/05 15:17:50 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_interface.h,v 1.1 1996/02/05 01:57:03 christos Exp $	*/
 
 /*
@@ -46,15 +50,23 @@ void db_show_all_procs(db_expr_t, int, db_expr_t, char *);
 void db_show_callout(db_expr_t, int, db_expr_t, char *);
 
 struct mount;
-struct vnode;
 
 /* kern/vfs_subr.c */
-void vfs_buf_print(struct buf *, int, int (*)(const char *, ...));
-void vfs_vnode_print(struct vnode *, int, int (*)(const char *, ...));
+void vfs_buf_print(void *, int, int (*)(const char *, ...));
+void vfs_vnode_print(void *, int, int (*)(const char *, ...));
 void vfs_mount_print(struct mount *, int, int (*)(const char *, ...));
 
 /* kern/subr_pool.c */
 void db_show_all_pools(db_expr_t, int, db_expr_t, char *);
+
+/* kern/uipc_mbuf.c */
+void m_print(void *, int (*)(const char *, ...));
+
+/* nfs/nfs_debug.c */
+void db_show_all_nfsreqs(db_expr_t, int, db_expr_t, char *);
+void nfs_request_print(void *, int, int (*)(const char *, ...));
+void db_show_all_nfsnodes(db_expr_t, int, db_expr_t, char *);
+void nfs_node_print(void *, int, int (*)(const char *, ...));
 
 /* ufs/ffs/ffs_softdep.c */
 struct worklist;

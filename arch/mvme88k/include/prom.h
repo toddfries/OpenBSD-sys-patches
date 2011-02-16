@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom.h,v 1.15 2005/12/11 21:45:31 miod Exp $ */
+/*	$OpenBSD: prom.h,v 1.18 2010/12/23 20:05:08 miod Exp $ */
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -167,8 +167,6 @@ struct mvmeprom_dskio {
 	u_char	addr_mod;
 };
 #define MVMEPROM_BLOCK_SIZE	256
-
-extern unsigned long bugvec[2], sysbugvec[2];	/* BUG trap vector copies */
 
 #endif	/* _LOCORE */
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: acxvar.h,v 1.16 2007/03/29 12:59:29 claudio Exp $ */
+=======
+/*	$OpenBSD: acxvar.h,v 1.19 2008/07/21 04:12:21 kevlo Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -352,7 +356,6 @@ struct acx_softc {
 	/*
 	 * MMIO 1
 	 */
-	struct resource		*sc_mem1_res;
 	bus_space_tag_t		sc_mem1_bt;
 	bus_space_handle_t	sc_mem1_bh;
 	int			chip_mem1_rid;
@@ -360,14 +363,9 @@ struct acx_softc {
 	/*
 	 * MMIO 2
 	 */
-	struct resource		*sc_mem2_res;
 	bus_space_tag_t		sc_mem2_bt;
 	bus_space_handle_t	sc_mem2_bh;
 	int			chip_mem2_rid;
-
-	struct resource		*sc_irq_res;
-	void			*sc_irq_handle;
-	int			sc_irq_rid;
 
 	int			(*sc_enable)(struct acx_softc *);
 	void			(*sc_disable)(struct acx_softc *);

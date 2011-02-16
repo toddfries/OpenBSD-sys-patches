@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mc.c,v 1.8 2007/03/23 17:17:23 gwk Exp $	*/
+/*	$OpenBSD: if_mc.c,v 1.14 2010/04/21 03:03:26 deraadt Exp $	*/
 /*	$NetBSD: if_mc.c,v 1.9.16.1 2006/06/21 14:53:13 yamt Exp $	*/
 
 /*-
@@ -44,6 +44,7 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -496,12 +497,11 @@ mc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct mc_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr;
+	int s, err = 0;
 
-	int s = splnet(), err = 0;
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
@@ -537,26 +537,16 @@ mc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		ifr = (struct ifreq *) data;
-		err = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (err == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly. But remember UP flag!
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mc_reset(sc);
-			err = 0;
-		}
-		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (err == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mc_reset(sc);
+		err = 0;
+	}
+
 	splx(s);
 	return (err);
 }

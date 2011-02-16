@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: auixp.c,v 1.7 2007/02/14 01:12:16 jsg Exp $ */
+=======
+/* $OpenBSD: auixp.c,v 1.28 2010/09/21 02:09:15 jakemsr Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: auixp.c,v 1.9 2005/06/27 21:13:09 thorpej Exp $ */
 
 /*
@@ -90,9 +94,10 @@
 #define	DMAADDR(p)	((p)->map->dm_segs[0].ds_addr)
 
 const struct pci_matchid auixp_pci_devices[] = {
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_200 },
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_300 },
-	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_AUDIO_400 },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB200_AUDIO },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB300_AUDIO },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB400_AUDIO },
+	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB600_AUDIO }
 };
 
 struct cfdriver auixp_cd = {
@@ -103,8 +108,11 @@ int	auixp_match( struct device *, void *, void *);
 void	auixp_attach(struct device *, struct device *, void *);
 int	auixp_detach(struct device *, int);
 
+int	auixp_activate(struct device *, int);
+
 struct cfattach auixp_ca = {
-	sizeof(struct auixp_softc), auixp_match, auixp_attach
+	sizeof(struct auixp_softc), auixp_match, auixp_attach,
+	NULL, auixp_activate
 };
 
 int	auixp_open(void *v, int flags);
@@ -134,6 +142,7 @@ int	auixp_allocmem(struct auixp_softc *, size_t, size_t,
 int	auixp_freemem(struct auixp_softc *, struct auixp_dma *);
 paddr_t	auixp_mappage(void *, void *, off_t, int);
 
+<<<<<<< HEAD
 
 /* power management (do we support that already?) */
 int	auixp_power(struct auixp_softc *, int);
@@ -144,6 +153,8 @@ int	auixp_resume(struct auixp_softc *);
 #endif
 
 
+=======
+>>>>>>> origin/master
 /* Supporting subroutines */
 int	auixp_init(struct auixp_softc *);
 void	auixp_autodetect_codecs(struct auixp_softc *);
@@ -225,52 +236,56 @@ auixp_query_encoding(void *hdl, struct audio_encoding *aep)
 		aep->encoding = AUDIO_ENCODING_ULINEAR;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 1:
 		strlcpy(aep->name, AudioEmulaw, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(aep->name, AudioEalaw, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ALAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(aep->name, AudioEslinear, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(aep->name, AudioEslinear_le, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		aep->precision = 16;
 		aep->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(aep->name, AudioEulinear_le, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(aep->name, AudioEslinear_be, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(aep->name, AudioEulinear_be, sizeof aep->name);
 		aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	aep->bps = AUDIO_BPS(aep->precision);
+	aep->msb = 1;
+
+	return (0);
 }
 
 
@@ -363,14 +378,16 @@ auixp_set_params(void *hdl, int setmode, int usemode,
     struct audio_params *play, struct audio_params *rec)
 {
 	struct auixp_codec *co;
-	struct auixp_softc *sc;
 	int error;
 
 	co = (struct auixp_codec *) hdl;
-	sc = co->sc;
 	if (setmode & AUMODE_PLAY) {
 		play->factor = 1;
 		play->sw_code = NULL;
+		if (play->channels > 2)
+			play->channels = 2;
+		if (play->precision > 16)
+			play->precision = 16;
 		switch(play->encoding) {
 		case AUDIO_ENCODING_ULAW:
 			switch (play->channels) {
@@ -534,15 +551,21 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+		play->bps = AUDIO_BPS(play->precision);
+		play->msb = 1;
 
 		error = ac97_set_rate(co->codec_if, play, AUMODE_PLAY);
 		if (error)
 			return (error);
 	}
 
-	if (setmode & AUMODE_RECORD) {
+	if (setmode & AUMODE_RECORD) {		
 		rec->factor = 1;
 		rec->sw_code = 0;
+		if (rec->channels > 2)
+			rec->channels = 2;
+		if (rec->precision > 16)
+			rec->precision = 16;
 		switch(rec->encoding) {
 		case AUDIO_ENCODING_ULAW:
 			rec->sw_code = ulinear8_to_mulaw;
@@ -571,6 +594,8 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+		rec->bps = AUDIO_BPS(rec->precision);
+		rec->msb = 1;
 
 		error = ac97_set_rate(co->codec_if, rec, AUMODE_RECORD);
 		if (error)
@@ -1204,6 +1229,32 @@ auixp_match(struct device *dev, void *match, void *aux)
 	    sizeof(auixp_pci_devices)/sizeof(auixp_pci_devices[0])));
 }
 
+int
+auixp_activate(struct device *self, int act)
+{
+	struct auixp_softc *sc = (struct auixp_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		auixp_disable_interrupts(sc);
+		break;
+	case DVACT_RESUME:
+		auixp_init(sc);
+		ac97_resume(&sc->sc_codec.host_if, sc->sc_codec.codec_if);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		break;
+	}
+	return (rv);
+}
+
 void
 auixp_attach(struct device *parent, struct device *self, void *aux)
 {
@@ -1213,7 +1264,6 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	pci_chipset_tag_t pc;
 	pci_intr_handle_t ih;
 	const char *intrstr;
-	int len;
 
 	sc = (struct auixp_softc *)self;
 	pa = (struct pci_attach_args *)aux;
@@ -1223,7 +1273,7 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	/* map memory; its not sized -> what is the size? max PCI slot size? */
 	if (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_iot, &sc->sc_ioh, &sc->sc_iob, &sc->sc_ios, 0)) {
-		printf(": can't map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -1294,27 +1344,6 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	/* XXX set up power hooks; not implemented yet XXX */
-
-	len = 1;	/* shut up gcc */
-#ifdef notyet
-	/* create suspend save area */
-	len = sizeof(u_int16_t) * (ESA_REV_B_CODE_MEMORY_LENGTH
-	    + ESA_REV_B_DATA_MEMORY_LENGTH + 1);
-	sc->savemem = (u_int16_t *)malloc(len, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc->savemem == NULL) {
-		printf("%s: unable to allocate suspend buffer\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
-
-	sc->powerhook = powerhook_establish(auixp_powerhook, sc);
-	if (sc->powerhook == NULL)
-		printf("%s: WARNING: unable to establish powerhook\n",
-		    sc->sc_dev.dv_xname);
-
-#endif
-
 	/*
 	 * delay further configuration of codecs and audio after interrupts
 	 * are enabled.
@@ -1327,27 +1356,53 @@ void
 auixp_post_config(void *self)
 {
 	struct auixp_softc *sc;
-	struct auixp_codec *codec;
-	int codec_nr;
 
 	sc = (struct auixp_softc *)self;
 	/* detect the AC97 codecs */
 	auixp_autodetect_codecs(sc);
 
+	/* Bail if no codecs attached. */
+	if (!sc->sc_codec.present) {
+		printf("%s: no codecs detected or initialised\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
+
+	audio_attach_mi(&auixp_hw_if, &sc->sc_codec, &sc->sc_dev);
+
 #if notyet
 	/* copy formats and invalidate entries not suitable for codec0 */
-	sc->has_4ch   = AC97_IS_4CH(codec->codec_if);
-	sc->has_6ch   = AC97_IS_6CH(codec->codec_if);
-	sc->is_fixed  = AC97_IS_FIXED_RATE(codec->codec_if);
-	sc->has_spdif = AC97_HAS_SPDIF(codec->codec_if);
+	sc->has_4ch   = AC97_IS_4CH(sc->sc_codec.codec_if);
+	sc->has_6ch   = AC97_IS_6CH(sc->sc_codec.codec_if);
+	sc->is_fixed  = AC97_IS_FIXED_RATE(sc->sc_codec.codec_if);
+	sc->has_spdif = AC97_HAS_SPDIF(sc->sc_codec.codec_if);
 #endif
 
+<<<<<<< HEAD
 	/* attach audio devices for all detected codecs */
 	for (codec_nr = 0; codec_nr < ATI_IXP_CODECS; codec_nr++) {
 		codec = &sc->sc_codec[codec_nr];
 		if (codec->present)
 			audio_attach_mi(&auixp_hw_if, codec, &sc->sc_dev);
 	}
+=======
+	if (sc->has_spdif)
+		sc->has_spdif = 0;
+
+	/* fill in the missing details about the dma channels. */
+	/* for output */
+	sc->sc_output_dma->linkptr        = ATI_REG_OUT_DMA_LINKPTR;
+	sc->sc_output_dma->dma_enable_bit = ATI_REG_CMD_OUT_DMA_EN |
+					    ATI_REG_CMD_SEND_EN;
+	/* have spdif? then this too! XXX not seeing LED yet! XXX */
+	if (sc->has_spdif)
+		sc->sc_output_dma->dma_enable_bit |= ATI_REG_CMD_SPDF_OUT_EN;
+
+	/* and for input */
+	sc->sc_input_dma->linkptr         = ATI_REG_IN_DMA_LINKPTR;
+	sc->sc_input_dma->dma_enable_bit  = ATI_REG_CMD_IN_DMA_EN  |
+					    ATI_REG_CMD_RECEIVE_EN;
+>>>>>>> origin/master
 
 	/* done! now enable all interrupts we can service */
 	auixp_enable_interrupts(sc);
@@ -1416,10 +1471,6 @@ auixp_detach(struct device *self, int flags)
 		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
 	if (sc->sc_ios)
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
-
-	if (sc->savemem)
-		free(sc->savemem, M_DEVBUF);
-
 	return 0;
 }
 
@@ -1440,7 +1491,6 @@ auixp_attach_codec(void *aux, struct ac97_codec_if *codec_if)
 
 	ixp_codec = aux;
 	ixp_codec->codec_if = codec_if;
-	ixp_codec->present  = 1;
 
 	return 0;
 }
@@ -1570,7 +1620,7 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 	bus_space_handle_t   ioh;
 	pcireg_t subdev;
 	struct auixp_codec  *codec;
-	int timeout, codec_nr;
+	int timeout;
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
@@ -1578,7 +1628,6 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 
 	/* ATI IXP can have upto 3 codecs; mark all codecs as not existing */
 	sc->sc_codec_not_ready_bits = 0;
-	sc->sc_num_codecs = 0;
 
 	/* enable all codecs to interrupt as well as the new frame interrupt */
 	bus_space_write_4(iot, ioh, ATI_REG_IER, CODEC_CHECK_BITS);
@@ -1602,6 +1651,7 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 	auixp_disable_interrupts(sc);
 
 	/* Attach AC97 host interfaces */
+<<<<<<< HEAD
 	for (codec_nr = 0; codec_nr < ATI_IXP_CODECS; codec_nr++) {
 		codec = &sc->sc_codec[codec_nr];
 		bzero(codec, sizeof(struct auixp_codec));
@@ -1621,35 +1671,57 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 			codec->codec_flags = AC97_HOST_DONT_ENABLE_SPDIF;
 			break;
 		}
+=======
+	codec = &sc->sc_codec;
+	bzero(codec, sizeof(struct auixp_codec));
+
+	codec->sc       = sc;
+
+	codec->host_if.arg    = codec;
+	codec->host_if.attach = auixp_attach_codec;
+	codec->host_if.read   = auixp_read_codec;
+	codec->host_if.write  = auixp_write_codec;
+	codec->host_if.reset  = auixp_reset_codec;
+	codec->host_if.flags  = auixp_flags_codec;
+	switch (subdev) {
+	case 0x1311462: /* MSI S270 */
+	case 0x1611462: /* LG K1 Express */
+	case 0x3511462: /* MSI L725 */
+	case 0x4711462: /* MSI L720 */
+	case 0x0611462: /* MSI S250 */
+		codec->codec_flags = AC97_HOST_ALC650_PIN47_IS_EAPD;
+		break;
+>>>>>>> origin/master
 	}
 
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC0_NOT_READY)) {
 		/* codec 0 present */
 		DPRINTF(("auixp : YAY! codec 0 present!\n"));
-		if (ac97_attach(&sc->sc_codec[0].host_if) == 0)
-			sc->sc_num_codecs++;
+		if (ac97_attach(&sc->sc_codec.host_if) == 0) {
+			sc->sc_codec.codec_nr = 0;
+			sc->sc_codec.present = 1;
+			return;
+		}
 	}
 
-#ifdef notyet
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC1_NOT_READY)) {
 		/* codec 1 present */
 		DPRINTF(("auixp : YAY! codec 1 present!\n"));
-		if (ac97_attach(&sc->sc_codec[1].host_if, &sc->sc_dev) == 0)
-			sc->sc_num_codecs++;
+		if (ac97_attach(&sc->sc_codec.host_if) == 0) {
+			sc->sc_codec.codec_nr = 1;
+			sc->sc_codec.present = 1;
+			return;
+		}
 	}
 
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC2_NOT_READY)) {
 		/* codec 2 present */
 		DPRINTF(("auixp : YAY! codec 2 present!\n"));
-		if (ac97_attach(&sc->sc_codec[2].host_if, &sc->sc_dev) == 0)
-			sc->sc_num_codecs++;
-	}
-#endif
-
-	if (sc->sc_num_codecs == 0) {
-		printf("%s: no codecs detected or initialised\n",
-		    sc->sc_dev.dv_xname);
-		return;
+		if (ac97_attach(&sc->sc_codec.host_if) == 0) {
+			sc->sc_codec.codec_nr = 2;
+			sc->sc_codec.present = 1;
+			return;
+		}
 	}
 }
 
@@ -1800,6 +1872,7 @@ auixp_init(struct auixp_softc *sc)
 
 	return 0;
 }
+<<<<<<< HEAD
 
 /*
  * TODO power saving and suspend / resume support
@@ -1859,3 +1932,5 @@ auixp_resume(struct auixp_softc *sc)
 	return 0;
 }
 #endif /* 0 */
+=======
+>>>>>>> origin/master

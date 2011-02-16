@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sched.h,v 1.13 2005/06/17 22:33:34 niklas Exp $	*/
+=======
+/*	$OpenBSD: sched.h,v 1.28 2010/05/14 18:47:56 kettenis Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -92,6 +89,8 @@
 #define CP_IDLE		4
 #define CPUSTATES	5
 
+#define	SCHED_NQS	32			/* 32 run queues. */
+
 /*
  * Per-CPU scheduler state.
  * XXX - expose to userland for now.
@@ -105,6 +104,21 @@ struct schedstate_percpu {
 	int spc_rrticks;		/* ticks until roundrobin() */
 	int spc_pscnt;			/* prof/stat counter */
 	int spc_psdiv;			/* prof/stat divisor */	
+<<<<<<< HEAD
+=======
+	struct proc *spc_idleproc;	/* idle proc for this cpu */
+
+	u_int spc_nrun;			/* procs on the run queues */
+	fixpt_t spc_ldavg;		/* shortest load avg. for this cpu */
+
+	TAILQ_HEAD(prochead, proc) spc_qs[SCHED_NQS];
+	volatile uint32_t spc_whichqs;
+
+#ifdef notyet
+	struct proc *spc_reaper;	/* dead proc reaper */
+#endif
+	LIST_HEAD(,proc) spc_deadproc;
+>>>>>>> origin/master
 };
 
 #ifdef	_KERNEL
@@ -113,10 +127,16 @@ struct schedstate_percpu {
 #define SPCF_SEENRR             0x0001  /* process has seen roundrobin() */
 #define SPCF_SHOULDYIELD        0x0002  /* process should yield the CPU */
 #define SPCF_SWITCHCLEAR        (SPCF_SEENRR|SPCF_SHOULDYIELD)
+#define SPCF_SHOULDHALT		0x0004	/* CPU should be vacated */
+#define SPCF_HALTED		0x0008	/* CPU has been halted */
 
+<<<<<<< HEAD
 #define	PPQ	(128 / NQS)		/* priorities per queue */
+=======
+#define	SCHED_PPQ	(128 / SCHED_NQS)	/* priorities per queue */
+>>>>>>> origin/master
 #define NICE_WEIGHT 2			/* priorities per nice level */
-#define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - PPQ)
+#define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - SCHED_PPQ)
 
 extern int schedhz;			/* ideally: 16 */
 extern int rrticks_init;		/* ticks per roundrobin() */
@@ -126,7 +146,34 @@ void schedclock(struct proc *);
 #ifdef __HAVE_CPUINFO
 struct cpu_info;
 void roundrobin(struct cpu_info *);
+<<<<<<< HEAD
 #endif
+=======
+
+void sched_init_cpu(struct cpu_info *);
+void sched_idle(void *);
+void sched_exit(struct proc *);
+void mi_switch(void);
+void cpu_switchto(struct proc *, struct proc *);
+struct proc *sched_chooseproc(void);
+struct cpu_info *sched_choosecpu(struct proc *);
+struct cpu_info *sched_choosecpu_fork(struct proc *parent, int);
+void cpu_idle_enter(void);
+void cpu_idle_cycle(void);
+void cpu_idle_leave(void);
+void sched_peg_curproc(struct cpu_info *ci);
+
+#ifdef MULTIPROCESSOR
+void sched_start_secondary_cpus(void);
+void sched_stop_secondary_cpus(void);
+#endif
+
+#define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
+
+void sched_init_runqueues(void);
+void setrunqueue(struct proc *);
+void remrunqueue(struct proc *);
+>>>>>>> origin/master
 
 /* Inherit the parent's scheduler history */
 #define scheduler_fork_hook(parent, child) do {				\
@@ -138,6 +185,7 @@ void roundrobin(struct cpu_info *);
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
 
+<<<<<<< HEAD
 #if !defined(__HAVE_CPUINFO) && !defined(splsched)
 #define splsched() splhigh()
 #endif
@@ -145,6 +193,8 @@ void roundrobin(struct cpu_info *);
 #define IPL_SCHED IPL_HIGH
 #endif
 
+=======
+>>>>>>> origin/master
 #if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
 #include <sys/lock.h>
 
@@ -158,6 +208,8 @@ extern struct __mp_lock sched_lock;
 
 #define	SCHED_ASSERT_LOCKED()	KASSERT(__mp_lock_held(&sched_lock))
 #define	SCHED_ASSERT_UNLOCKED()	KASSERT(__mp_lock_held(&sched_lock) == 0)
+
+#define	SCHED_LOCK_INIT()	__mp_lock_init(&sched_lock)
 
 #define	SCHED_LOCK(s)							\
 do {									\
@@ -179,6 +231,8 @@ void	sched_unlock_idle(void);
 
 #define	SCHED_ASSERT_LOCKED()		splassert(IPL_SCHED);
 #define	SCHED_ASSERT_UNLOCKED()		/* nothing */
+
+#define	SCHED_LOCK_INIT()		/* nothing */
 
 #define	SCHED_LOCK(s)			s = splsched()
 #define	SCHED_UNLOCK(s)			splx(s)

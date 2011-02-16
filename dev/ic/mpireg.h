@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mpireg.h,v 1.30 2006/09/18 13:01:26 dlg Exp $ */
+=======
+/*	$OpenBSD: mpireg.h,v 1.40 2010/09/13 05:28:29 dlg Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -635,6 +639,39 @@ struct mpi_evt_change {
 	u_int8_t		reserved[3];
 } __packed;
 
+struct mpi_evt_link_status_change {
+	u_int8_t		state;
+#define MPI_EVT_LINK_STATUS_CHANGE_OFFLINE		0x00
+#define MPI_EVT_LINK_STATUS_CHANGE_ACTIVE		0x01
+	u_int8_t		_reserved1[3];
+
+	u_int8_t		_reserved2[1];
+	u_int8_t		port;
+	u_int8_t		_reserved3[2];
+} __packed;
+
+struct mpi_evt_loop_status_change {
+	u_int8_t		character4;
+	u_int8_t		character3;
+	u_int8_t		type;
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LIP		0x01
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LPE		0x02
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LPB		0x03
+	u_int8_t		_reserved1[1];
+
+	u_int8_t		_reserved2[1];
+	u_int8_t		port;
+	u_int8_t		_reserved3[2];
+} __packed;
+
+struct mpi_evt_logout {
+	u_int32_t		n_portid;
+
+	u_int8_t		alias_index;
+	u_int8_t		port;
+	u_int8_t		_reserved[2];
+} __packed;
+
 struct mpi_evt_sas_phy {
 	u_int8_t		phy_num;
 	u_int8_t		link_rates;
@@ -901,6 +938,73 @@ struct mpi_msg_scsi_task_reply {
 	u_int32_t		termination_count;
 } __packed;
 
+struct mpi_msg_raid_action_request {
+	u_int8_t		action;
+#define MPI_MSG_RAID_ACTION_STATUS			(0x00)
+#define MPI_MSG_RAID_ACTION_INDICATOR_STRUCT		(0x01)
+#define MPI_MSG_RAID_ACTION_CREATE_VOLUME		(0x02)
+#define MPI_MSG_RAID_ACTION_DELETE_VOLUME		(0x03)
+#define MPI_MSG_RAID_ACTION_DISABLE_VOLUME		(0x04)
+#define MPI_MSG_RAID_ACTION_ENABLE_VOLUME		(0x05)
+#define MPI_MSG_RAID_ACTION_QUIESCE_PHYSIO		(0x06)
+#define MPI_MSG_RAID_ACTION_ENABLE_PHYSIO		(0x07)
+#define MPI_MSG_RAID_ACTION_CH_VOL_SETTINGS		(0x08)
+#define MPI_MSG_RAID_ACTION_PHYSDISK_OFFLINE		(0x0a)
+#define MPI_MSG_RAID_ACTION_PHYSDISK_ONLINE		(0x0b)
+#define MPI_MSG_RAID_ACTION_CH_PHYSDISK_SETTINGS	(0x0c)
+#define MPI_MSG_RAID_ACTION_CREATE_PHYSDISK		(0x0d)
+#define MPI_MSG_RAID_ACTION_DELETE_PHYSDISK		(0x0e)
+#define MPI_MSG_RAID_ACTION_PHYSDISK_FAIL		(0x0f)
+#define MPI_MSG_RAID_ACTION_ACTIVATE_VOLUME		(0x11)
+#define MPI_MSG_RAID_ACTION_DEACTIVATE_VOLUME		(0x12)
+#define MPI_MSG_RAID_ACTION_SET_RESYNC_RATE		(0x13)
+#define MPI_MSG_RAID_ACTION_SET_SCRUB_RATE		(0x14)
+#define MPI_MSG_RAID_ACTION_DEVICE_FW_UPDATE_MODE	(0x15)
+#define MPI_MSG_RAID_ACTION_SET_VOL_NAME		(0x16)
+	u_int8_t		_reserved1;
+	u_int8_t		chain_offset;
+	u_int8_t		function;
+
+	u_int8_t		vol_id;
+	u_int8_t		vol_bus;
+	u_int8_t		phys_disk_num;
+	u_int8_t		message_flags;
+
+	u_int32_t		msg_context;
+
+	u_int32_t		_reserved2;
+
+	u_int32_t		data_word;
+	u_int32_t		data_sge;
+} __packed;
+
+struct mpi_msg_raid_action_reply {
+	u_int8_t		action;
+	u_int8_t		_reserved1;
+	u_int8_t		message_length;
+	u_int8_t		function;
+
+	u_int8_t		vol_id;
+	u_int8_t		vol_bus;
+	u_int8_t		phys_disk_num;
+	u_int8_t		message_flags;
+
+	u_int32_t		message_context;
+
+	u_int16_t		action_status;
+#define MPI_RAID_ACTION_STATUS_OK			(0x0000)
+#define MPI_RAID_ACTION_STATUS_INVALID			(0x0001)
+#define MPI_RAID_ACTION_STATUS_FAILURE			(0x0002)
+#define MPI_RAID_ACTION_STATUS_IN_PROGRESS		(0x0004)
+	u_int16_t		ioc_status;
+
+	u_int32_t		ioc_log_info;
+
+	u_int32_t		volume_status;
+
+	u_int32_t		action_data;
+} __packed;
+
 struct mpi_cfg_hdr {
 	u_int8_t		page_version;
 	u_int8_t		page_length;
@@ -921,6 +1025,17 @@ struct mpi_cfg_hdr {
 #define MPI_CONFIG_REQ_PAGE_TYPE_RAID_PD		(0x0A)
 #define MPI_CONFIG_REQ_PAGE_TYPE_INBAND			(0x0B)
 #define MPI_CONFIG_REQ_PAGE_TYPE_EXTENDED		(0x0F)
+} __packed;
+
+struct mpi_ecfg_hdr {
+	u_int8_t		page_version;
+	u_int8_t		reserved1;
+	u_int8_t		page_number;
+	u_int8_t		page_type;
+
+	u_int16_t		ext_page_length;
+	u_int8_t		ext_page_type;
+	u_int8_t		reserved2;
 } __packed;
 
 struct mpi_msg_config_request {
@@ -1159,6 +1274,20 @@ struct mpi_cfg_manufacturing_pg0 {
 	char			board_tracer_number[16];
 } __packed;
 
+struct mpi_cfg_ioc_pg1 {
+	struct mpi_cfg_hdr	config_header;
+
+	u_int32_t		flags;
+#define MPI_CFG_IOC_1_REPLY_COALESCING			(1<<0)
+#define MPI_CFG_IOC_1_CTX_REPLY_DISABLE			(1<<4)
+
+	u_int32_t		coalescing_timeout;
+
+	u_int8_t		coalescing_depth;
+	u_int8_t		pci_slot_num;
+	u_int8_t		_reserved[2];
+} __packed;
+
 struct mpi_cfg_ioc_pg2 {
 	struct mpi_cfg_hdr	config_header;
 
@@ -1178,7 +1307,7 @@ struct mpi_cfg_ioc_pg2 {
 	u_int8_t		active_physdisks;
 	u_int8_t		max_physdisks;
 
-	/* followed by a list of mpi_cf_raid_vol structs */
+	/* followed by a list of mpi_cfg_raid_vol structs */
 } __packed;
 
 struct mpi_cfg_raid_vol {
@@ -1191,6 +1320,10 @@ struct mpi_cfg_raid_vol {
 #define MPI_CFG_RAID_TYPE_RAID_IS			(0x00)
 #define MPI_CFG_RAID_TYPE_RAID_IME			(0x01)
 #define MPI_CFG_RAID_TYPE_RAID_IM			(0x02)
+#define MPI_CFG_RAID_TYPE_RAID_5			(0x03)
+#define MPI_CFG_RAID_TYPE_RAID_6			(0x04)
+#define MPI_CFG_RAID_TYPE_RAID_10			(0x05)
+#define MPI_CFG_RAID_TYPE_RAID_50			(0x06)
 	u_int8_t		flags;
 #define MPI_CFG_RAID_VOL_INACTIVE	(1<<3)
 	u_int16_t		reserved;
@@ -1202,7 +1335,7 @@ struct mpi_cfg_ioc_pg3 {
 	u_int8_t		no_phys_disks;
 	u_int8_t		reserved[3];
 
-	/* followed by a list of mpi_cf_raid_physdisk structs */
+	/* followed by a list of mpi_cfg_raid_physdisk structs */
 } __packed;
 
 struct mpi_cfg_raid_physdisk {
@@ -1250,6 +1383,50 @@ struct mpi_cfg_fc_port_pg0 {
 	u_int8_t		reserved2;
 } __packed;
 
+<<<<<<< HEAD
+=======
+struct mpi_cfg_fc_port_pg1 {
+	struct mpi_cfg_hdr	config_header;
+
+	u_int32_t		flags;
+#define MPI_CFG_FC_PORT_0_FLAGS_MAP_BY_D_ID		(1<<0)
+#define MPI_CFG_FC_PORT_0_FLAGS_MAINTAIN_LOGINS		(1<<1)
+#define MPI_CFG_FC_PORT_0_FLAGS_PLOGI_AFTER_LOGO	(1<<2)
+#define MPI_CFG_FC_PORT_0_FLAGS_SUPPRESS_PROT_REG	(1<<3)
+#define MPI_CFG_FC_PORT_0_FLAGS_MASK_RR_TOV_UNITS	(0x7<<4)
+#define MPI_CFG_FC_PORT_0_FLAGS_MASK_RR_TOV_UNIT_NONE		(0x0<<4)
+#define MPI_CFG_FC_PORT_0_FLAGS_MASK_RR_TOV_UNIT_0_001_SEC	(0x1<<4)
+#define MPI_CFG_FC_PORT_0_FLAGS_MASK_RR_TOV_UNIT_0_1_SEC	(0x3<<4)
+#define MPI_CFG_FC_PORT_0_FLAGS_MASK_RR_TOV_UNIT_10_SEC		(0x5<<4)
+#define MPI_CFG_FC_PORT_0_FLAGS_TGT_LARGE_CDB_EN	(1<<7)
+#define MPI_CFG_FC_PORT_0_FLAGS_SOFT_ALPA_FALLBACK	(1<<21)
+#define MPI_CFG_FC_PORT_0_FLAGS_PORT_OFFLINE		(1<<22)
+#define MPI_CFG_FC_PORT_0_FLAGS_TGT_MODE_OXID		(1<<23)
+#define MPI_CFG_FC_PORT_0_FLAGS_VERBOSE_RESCAN		(1<<24)
+#define MPI_CFG_FC_PORT_0_FLAGS_FORCE_NOSEEPROM_WWNS	(1<<25)
+#define MPI_CFG_FC_PORT_0_FLAGS_IMMEDIATE_ERROR		(1<<26)
+#define MPI_CFG_FC_PORT_0_FLAGS_EXT_FCP_STATUS_EN	(1<<27)
+#define MPI_CFG_FC_PORT_0_FLAGS_REQ_PROT_LOG_BUS_ADDR	(1<<28)
+#define MPI_CFG_FC_PORT_0_FLAGS_REQ_PROT_LAN		(1<<29)
+#define MPI_CFG_FC_PORT_0_FLAGS_REQ_PROT_TARGET		(1<<30)
+#define MPI_CFG_FC_PORT_0_FLAGS_REQ_PROT_INITIATOR	(1<<31)
+
+	u_int64_t		noseepromwwnn;
+
+	u_int64_t		noseepromwwpn;
+
+	u_int8_t		hard_alpa;
+	u_int8_t		link_config;
+	u_int8_t		topology_config;
+	u_int8_t		alt_connector;
+
+	u_int8_t		num_req_aliases;
+	u_int8_t		rr_tov;
+	u_int8_t		initiator_dev_to;
+	u_int8_t		initiator_lo_pend_to;
+} __packed;
+
+>>>>>>> origin/master
 struct mpi_cfg_fc_device_pg0 {
 	struct mpi_cfg_hdr	config_header;
 
@@ -1273,6 +1450,20 @@ struct mpi_cfg_fc_device_pg0 {
 	u_int8_t		current_bus;
 } __packed;
 
+struct mpi_raid_settings {
+	u_int16_t		volume_settings;
+#define MPI_CFG_RAID_VOL_0_SETTINGS_WRITE_CACHE_EN	(1<<0)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_OFFLINE_SMART_ERR	(1<<1)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_OFFLINE_SMART	(1<<2)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_AUTO_SWAP		(1<<3)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_HI_PRI_RESYNC	(1<<4)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_PROD_SUFFIX		(1<<5)
+#define MPI_CFG_RAID_VOL_0_SETTINGS_FAST_SCRUB		(1<<6) /* obsolete */
+#define MPI_CFG_RAID_VOL_0_SETTINGS_DEFAULTS		(1<<15)
+	u_int8_t		hot_spare_pool;
+	u_int8_t		reserved2;
+} __packed;
+
 struct mpi_cfg_raid_vol_pg0 {
 	struct mpi_cfg_hdr	config_header;
 
@@ -1286,33 +1477,25 @@ struct mpi_cfg_raid_vol_pg0 {
 #define MPI_CFG_RAID_VOL_0_STATUS_QUIESCED		(1<<1)
 #define MPI_CFG_RAID_VOL_0_STATUS_RESYNCING		(1<<2)
 #define MPI_CFG_RAID_VOL_0_STATUS_ACTIVE		(1<<3)
+#define MPI_CFG_RAID_VOL_0_STATUS_BADBLOCK_FULL		(1<<4)
 	u_int8_t		volume_state;
 #define MPI_CFG_RAID_VOL_0_STATE_OPTIMAL		(0x00)
 #define MPI_CFG_RAID_VOL_0_STATE_DEGRADED		(0x01)
 #define MPI_CFG_RAID_VOL_0_STATE_FAILED			(0x02)
-	u_int16_t		reserved1;
+#define MPI_CFG_RAID_VOL_0_STATE_MISSING		(0x03)
+	u_int16_t		_reserved1;
 
-	u_int16_t		volume_settings;
-#define MPI_CFG_RAID_VOL_0_SETTINGS_WRITE_CACHE_EN	(1<<0)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_OFFLINE_SMART_ERR	(1<<1)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_OFFLINE_SMART	(1<<2)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_AUTO_SWAP		(1<<3)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_HI_PRI_RESYNC	(1<<4)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_PROD_SUFFIX		(1<<5)
-#define MPI_CFG_RAID_VOL_0_SETTINGS_FAST_SCRUB		(1<<6) /* obsolete */
-#define MPI_CFG_RAID_VOL_0_SETTINGS_DEFAULTS		(1<<15)
-	u_int8_t		hot_spare_pool;
-	u_int8_t		reserved2;
+	struct mpi_raid_settings settings;
 
 	u_int32_t		max_lba;
 
-	u_int32_t		reserved3;
+	u_int32_t		_reserved2;
 
 	u_int32_t		stripe_size;
 
-	u_int32_t		reserved4;
+	u_int32_t		_reserved3;
 
-	u_int32_t		reserved5;
+	u_int32_t		_reserved4;
 
 	u_int8_t		num_phys_disks;
 	u_int8_t		data_scrub_rate;
@@ -1438,4 +1621,113 @@ struct mpi_cfg_raid_physdisk_path {
 	u_int16_t		flags;
 #define MPI_CFG_RAID_PHYDISK_PATH_INVALID		(1<<0)
 #define MPI_CFG_RAID_PHYDISK_PATH_BROKEN		(1<<1)
+} __packed;
+
+struct mpi_cfg_sas_iou_pg0 {
+	struct mpi_ecfg_hdr	config_header;
+
+	u_int16_t		nvdata_version_default;
+	u_int16_t		nvdata_version_persistent;
+
+	u_int8_t		num_phys;
+	u_int8_t		_reserved1[3];
+
+	/* followed by mpi_cfg_sas_iou_pg0_phy structs */
+} __packed;
+
+struct mpi_cfg_sas_iou_pg0_phy {
+	u_int8_t		port;
+	u_int8_t		port_flags;
+	u_int8_t		phy_flags;
+	u_int8_t		negotiated_link_rate;
+
+	u_int32_t		controller_phy_dev_info;
+
+	u_int16_t		attached_dev_handle;
+	u_int16_t		controller_dev_handle;
+
+	u_int32_t		discovery_status;
+} __packed;
+
+struct mpi_cfg_sas_iou_pg1 {
+	struct mpi_ecfg_hdr	config_header;
+
+	u_int16_t		control_flags;
+	u_int16_t		max_sata_targets;
+
+	u_int16_t		additional_control_flags;
+	u_int16_t		_reserved1;
+
+	u_int8_t		num_phys;
+	u_int8_t		max_sata_q_depth;
+	u_int8_t		report_dev_missing_delay;
+	u_int8_t		io_dev_missing_delay;
+
+	/* followed by mpi_cfg_sas_iou_pg1_phy structs */
+} __packed;
+
+struct mpi_cfg_sas_iou_pg1_phy {
+	u_int8_t		port;
+	u_int8_t		port_flags;
+	u_int8_t		phy_flags;
+	u_int8_t		max_min_link_rate;
+
+	u_int32_t		controller_phy_dev_info;
+
+	u_int16_t		max_target_port_connect_time;
+	u_int16_t		_reserved1;
+} __packed;
+
+#define MPI_CFG_SAS_DEV_ADDR_NEXT		(0<<28)
+#define MPI_CFG_SAS_DEV_ADDR_BUS		(1<<28)
+#define MPI_CFG_SAS_DEV_ADDR_HANDLE		(2<<28)
+
+struct mpi_cfg_sas_dev_pg0 {
+	struct mpi_ecfg_hdr	config_header;
+
+	u_int16_t		slot;
+	u_int16_t		enc_handle;
+
+	u_int64_t		sas_addr;
+
+	u_int16_t		parent_dev_handle;
+	u_int8_t		phy_num;
+	u_int8_t		access_status;
+
+	u_int16_t		dev_handle;
+	u_int8_t		target;
+	u_int8_t		bus;
+
+	u_int32_t		device_info;
+#define MPI_CFG_SAS_DEV_0_DEVINFO_TYPE			(0x7)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_TYPE_NONE		(0x0)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_TYPE_END		(0x1)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_TYPE_EDGE_EXPANDER	(0x2)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_TYPE_FANOUT_EXPANDER	(0x3)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SATA_HOST		(1<<3)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SMP_INITIATOR		(1<<4)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_STP_INITIATOR		(1<<5)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SSP_INITIATOR		(1<<6)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SATA_DEVICE		(1<<7)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SMP_TARGET		(1<<8)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_STP_TARGET		(1<<9)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SSP_TARGET		(1<<10)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_DIRECT_ATTACHED	(1<<11)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_LSI_DEVICE		(1<<12)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_ATAPI_DEVICE		(1<<13)
+#define MPI_CFG_SAS_DEV_0_DEVINFO_SEP_DEVICE		(1<<14)
+
+	u_int16_t		flags;
+#define MPI_CFG_SAS_DEV_0_FLAGS_DEV_PRESENT		(1<<0)
+#define MPI_CFG_SAS_DEV_0_FLAGS_DEV_MAPPED		(1<<1)
+#define MPI_CFG_SAS_DEV_0_FLAGS_DEV_MAPPED_PERSISTENT	(1<<2)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_PORT_SELECTOR	(1<<3)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_FUA		(1<<4)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_NCQ		(1<<5)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_SMART		(1<<6)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_LBA48		(1<<7)
+#define MPI_CFG_SAS_DEV_0_FLAGS_UNSUPPORTED		(1<<8)
+#define MPI_CFG_SAS_DEV_0_FLAGS_SATA_SETTINGS		(1<<9)
+	u_int8_t		physical_port;
+	u_int8_t		reserved;
 } __packed;

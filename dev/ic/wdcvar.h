@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: wdcvar.h,v 1.38 2006/02/10 21:45:41 kettenis Exp $     */
+=======
+/*      $OpenBSD: wdcvar.h,v 1.46 2010/08/29 18:40:33 deraadt Exp $     */
+>>>>>>> origin/master
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,8 +58,10 @@ struct channel_softc { /* Per channel data */
 	/* Our registers */
 	bus_space_tag_t       cmd_iot;
 	bus_space_handle_t    cmd_ioh;
+	bus_size_t            cmd_iosz;
 	bus_space_tag_t       ctl_iot;
 	bus_space_handle_t    ctl_ioh;
+	bus_size_t            ctl_iosz;
 	/* data32{iot,ioh} are only used for 32 bit xfers */
 	bus_space_tag_t         data32iot;
 	bus_space_handle_t      data32ioh;
@@ -230,7 +229,7 @@ struct wdc_xfer {
 #define C_DMA		0x0040 /* cmd uses DMA */
 #define C_SENSE		0x0080 /* cmd is a internal command */
 #define C_MEDIA_ACCESS	0x0100 /* is a media access command */
-#define C_POLL_MACHINE	0x0200 /* machine has a poll hander */
+#define C_POLL_MACHINE	0x0200 /* machine has a poll handler */
 
 	/* Informations about our location */
 	struct channel_softc *chp;
@@ -267,7 +266,6 @@ struct wdc_xfer {
 int   wdcprobe(struct channel_softc *);
 void  wdcattach(struct channel_softc *);
 int   wdcdetach(struct channel_softc *, int);
-int   wdcactivate(struct device *, enum devact);
 int   wdcintr(void *);
 void  wdc_exec_xfer(struct channel_softc *, struct wdc_xfer *);
 struct wdc_xfer *wdc_get_xfer(int); /* int = WDC_NOSLEEP/CANSLEEP */

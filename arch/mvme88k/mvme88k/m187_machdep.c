@@ -1,4 +1,4 @@
-/*	$OpenBSD: m187_machdep.c,v 1.12 2006/05/06 22:17:20 miod Exp $	*/
+/*	$OpenBSD: m187_machdep.c,v 1.22 2010/12/31 21:38:08 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -60,17 +60,15 @@
 #include <machine/mvme187.h>
 
 #include <mvme88k/dev/memcreg.h>
+#include <mvme88k/dev/pcctworeg.h>
 #include <mvme88k/mvme88k/clockvar.h>
 
 void	m187_bootstrap(void);
-void	m187_ext_int(u_int, struct trapframe *);
+void	m187_ext_int(struct trapframe *);
 u_int	m187_getipl(void);
 vaddr_t	m187_memsize(void);
 u_int	m187_raiseipl(u_int);
 u_int	m187_setipl(u_int);
-void	m187_startup(void);
-
-vaddr_t bugromva;
 
 /*
  * Figure out how much memory is available, by querying the memory controllers.
@@ -91,27 +89,12 @@ m187_memsize()
 	return x;
 }
 
-void
-m187_startup()
-{
-	/*
-	 * Grab the BUGROM space that we hardwired in pmap_bootstrap
-	 */
-	bugromva = BUG187_START;
-	uvm_map(kernel_map, (vaddr_t *)&bugromva, BUG187_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (bugromva != BUG187_START)
-		panic("bugromva %lx: BUGROM not free", bugromva);
-}
-
 /*
  * Device interrupt handler for MVME187
  */
 
 void
-m187_ext_int(u_int v, struct trapframe *eframe)
+m187_ext_int(struct trapframe *eframe)
 {
 	int mask, level;
 	struct intrhand *intr;
@@ -218,7 +201,14 @@ m187_raiseipl(u_int level)
 void
 m187_bootstrap()
 {
+	extern int cpuspeed;
 	extern struct cmmu_p cmmu8820x;
+
+	/*
+	 * Find out the processor speed, from the PCC2 prescaler
+	 * adjust register.
+	 */
+	cpuspeed = 256 - *(volatile u_int8_t *)(PCC2_BASE + PCCTWO_PSCALEADJ);
 
 	cmmu = &cmmu8820x;
 	md_interrupt_func_ptr = m187_ext_int;
@@ -226,4 +216,8 @@ m187_bootstrap()
 	md_setipl = m187_setipl;
 	md_raiseipl = m187_raiseipl;
 	md_init_clocks = m1x7_init_clocks;
+	md_delay = m1x7_delay;
+#ifdef MULTIPROCESSOR
+	md_smp_setup = m88100_smp_setup;
+#endif
 }

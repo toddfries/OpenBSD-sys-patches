@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_subr.c,v 1.18 2006/06/17 16:30:58 miod Exp $	*/
+=======
+/*	$OpenBSD: ffs_subr.c,v 1.24 2009/08/14 13:05:08 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ffs_subr.c,v 1.6 1996/03/17 02:16:23 christos Exp $	*/
 
 /*
@@ -80,10 +84,17 @@ ffs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 #else
 /* Prototypes for userland */
 void	ffs_fragacct(struct fs *, int, int32_t[], int);
+<<<<<<< HEAD
 int	ffs_isfreeblock(struct fs *, unsigned char *, daddr_t);
 int	ffs_isblock(struct fs *, unsigned char *, daddr_t);
 void	ffs_clrblock(struct fs *, u_char *, daddr_t);
 void	ffs_setblock(struct fs *, unsigned char *, daddr_t);
+=======
+int	ffs_isfreeblock(struct fs *, u_char *, daddr64_t);
+int	ffs_isblock(struct fs *, u_char *, daddr64_t);
+void	ffs_clrblock(struct fs *, u_char *, daddr64_t);
+void	ffs_setblock(struct fs *, u_char *, daddr64_t);
+>>>>>>> origin/master
 __dead void panic(const char *, ...);
 #endif
 
@@ -142,7 +153,7 @@ ffs_checkoverlap(struct buf *bp, struct inode *ip)
 		    ep->b_blkno + btodb(ep->b_bcount) <= start)
 			continue;
 		vprint("Disk overlap", vp);
-		(void)printf("\tstart %d, end %d overlap start %d, end %ld\n",
+		(void)printf("\tstart %lld, end %lld overlap start %llu, end %llu\n",
 			start, last, ep->b_blkno,
 			ep->b_blkno + btodb(ep->b_bcount) - 1);
 		panic("Disk buffer overlap");
@@ -156,9 +167,13 @@ ffs_checkoverlap(struct buf *bp, struct inode *ip)
  * check if a block is available
  */
 int
+<<<<<<< HEAD
 ffs_isblock(struct fs *fs, unsigned char *cp, daddr_t h)
+=======
+ffs_isblock(struct fs *fs, u_char *cp, daddr64_t h)
+>>>>>>> origin/master
 {
-	unsigned char mask;
+	u_char mask;
 
 	switch (fs->fs_frag) {
 	default:
@@ -204,7 +219,11 @@ ffs_clrblock(struct fs *fs, u_char *cp, daddr_t h)
  * put a block into the map
  */
 void
+<<<<<<< HEAD
 ffs_setblock(struct fs *fs, unsigned char *cp, daddr_t h)
+=======
+ffs_setblock(struct fs *fs, u_char *cp, daddr64_t h)
+>>>>>>> origin/master
 {
 
 	switch (fs->fs_frag) {
@@ -228,7 +247,11 @@ ffs_setblock(struct fs *fs, unsigned char *cp, daddr_t h)
  * check if a block is free
  */
 int
+<<<<<<< HEAD
 ffs_isfreeblock(struct fs *fs, unsigned char *cp, daddr_t h)
+=======
+ffs_isfreeblock(struct fs *fs, u_char *cp, daddr64_t h)
+>>>>>>> origin/master
 {
 
 	switch (fs->fs_frag) {

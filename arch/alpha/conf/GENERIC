@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.189 2007/02/28 21:54:43 grange Exp $
+#	$OpenBSD: GENERIC,v 1.218 2010/11/26 20:13:53 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -28,9 +28,6 @@ option		DEC_1000	# Mikasa etc:	Digital AlphaServer 1000
 option		DEC_1000A	# Corelle etc:	Digital AlphaServer 800/1000A
 option		DEC_6600	# EV6:		XP1000, 264DP OEM Board
 option		API_UP1000	# EV6:		Alpha Processor UP1000
-
-option		COMPAT_OSF1	# OSF/1 binary compatibility
-option		COMPAT_NETBSD	# NetBSD compatibility
 
 # Misc. options
 option		EISAVERBOSE		# recognize "unknown" EISA devices
@@ -107,14 +104,13 @@ axe*	at uhub?			# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?			# CATC USB-EL1201A based Ethernet
 kue*	at uhub?			# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?			# CDC Ethernet
+urndis*	at uhub?			# Remote NDIS Ethernet
 udav*	at uhub?			# Davicom DM9601 based Ethernet
 upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
 wi*	at uhub?			# WaveLAN IEEE 802.11DS
 urio*	at uhub?			# Diamond Multimedia Rio 500
-uscanner* at uhub?			# USB Scanners
-usscanner* at uhub?			# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
+uscanner* at uhub? disable		# USB Scanners
 #uyap*	at uhub?			# Y@P firmware loader
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
@@ -123,8 +119,27 @@ ugen*	at uhub?			# USB Generic driver
 uath*	at uhub?			# Atheros AR5005UG/AR5005UX
 ural*	at uhub?			# Ralink RT2500USB
 rum*	at uhub?			# Ralink RT2501USB/RT2601USB
+run*	at uhub?			# Ralink RT2700U/RT2800U/RT3000U
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+uthum*	at uhidev?			# TEMPerHUM sensor
+utwitch* at uhidev?			# yurex BBU sensor
+
+# USB Video
+uvideo* at uhub?
+video*  at uvideo?
+
+# Bluetooth controllers
+ubt*	at uhub?			# USB Bluetooth
+bthub*	at ubt?
+
+bthidev* at bthub?			# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?			# Bluetooth audio support
+audio*	at btsco?
 
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
@@ -256,7 +271,7 @@ vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
 
 # Media Independent Interface (mii) drivers
-eephy*	at mii?				# Marvell PHYs for Intel GigE
+eephy*	at mii?				# Marvell PHYs
 exphy*	at mii?				# 3Com internal PHYs
 inphy*	at mii?				# Intel 82555 PHYs
 iophy*	at mii?				# Intel 82553 PHYs
@@ -279,6 +294,7 @@ xmphy*	at mii?				# XaQti XMAC-II PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
+ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 # sensors
@@ -309,11 +325,9 @@ isapnp0	at	isa?
 mcclock* at isa? port 0x70
 pcppi*	at isa?				# PC prog. periph. interface
 spkr0	at pcppi?			# IBM BASIC emulation
-midi*	at pcppi?
 pckbc*	at isa?				# PC keyboard controller
 pckbd*	at pckbc?			# PC keyboard (kbd port)
 pms*	at pckbc?			# PS/2-style mouse (aux port)
-pmsi*	at pckbc?			# PS/2 "Intelli"mouse
 com*	at isa? port 0x3f8 irq 4	# standard serial ports
 com*	at isa? port 0x2f8 irq 3
 lpt*	at isa? port 0x3bc irq 7	# standard parallel port
@@ -349,7 +363,6 @@ ahc*	at eisa?			# Adaptec 274x, aic7770 SCSI
 # SCSI devices
 cd*	at scsibus?
 sd*	at scsibus?
-ss*	at scsibus?
 st*	at scsibus?
 ch*	at scsibus?
 safte*	at scsibus?
@@ -383,12 +396,7 @@ fms*	at pci?				# Forte Media FM801
 auvia*	at pci?				# VIA VT82C686A
 ##
 
-# OPL[23] FM synthesizers
-opl*	at eso?
-opl*	at cmpci?
-
 # MIDI support
-midi*	at opl?				# OPL FM synth
 midi*	at eap?
 
 #Audio Support
@@ -413,7 +421,6 @@ wsdisplay*	at	vga?
 wsdisplay*	at	tga?
 wskbd*		at	pckbd? mux 1
 wsmouse*	at	pms? mux 0
-wsmouse*	at	pmsi? mux 0
 
 # crypto support
 hifn*	at pci?				# Hi/fn 7751 crypto card
@@ -428,6 +435,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?			# ID
 owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
+owctr*	at onewire?			# Counter device
 
 #pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	crypto		1

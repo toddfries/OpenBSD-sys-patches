@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.9 2005/10/26 18:46:07 martin Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.37 2010/12/26 15:40:59 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -218,8 +218,6 @@
 
 #define NPDPG			(PAGE_SIZE / sizeof (pd_entry_t))
 
-#define ptei(VA)	(((VA_SIGN_POS(VA)) & L1_MASK) >> L1_SHIFT)
-
 /*
  * pl*_pi: index in the ptp page for a pde mapping a VA.
  * (pl*_i below is the index in the virtual array of all pdes per level)
@@ -316,16 +314,22 @@ struct pmap {
 					/* pointer to a PTP in our pmap */
 	struct pmap_statistics pm_stats;  /* pmap stats (lck by object lock) */
 
-	int pm_flags;			/* see below */
-
-	union descriptor *pm_ldt;	/* user-set LDT */
-	int pm_ldt_len;			/* number of LDT entries */
-	int pm_ldt_sel;			/* LDT selector */
-	u_int32_t pm_cpus;		/* mask of CPUs using pmap */
+	u_int64_t pm_cpus;		/* mask of CPUs using pmap */
 };
 
-/* pm_flags */
-#define	PMF_USER_LDT	0x01	/* pmap has user-set LDT */
+/*
+ * MD flags that we use for pmap_enter (in the pa):
+ */
+#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK) /* to remove the flags */
+#define	PMAP_NOCACHE	0x1 /* set the non-cacheable bit. */
+#define	PMAP_WC		0x2 /* set page write combining. */
+
+/*
+ * We keep mod/ref flags in struct vm_page->pg_flags.
+ */
+#define	PG_PMAP_MOD	PG_PMAP0
+#define	PG_PMAP_REF	PG_PMAP1
+#define	PG_PMAP_WC      PG_PMAP2
 
 /*
  * for each managed physical page we maintain a list of <PMAP,VA>'s
@@ -391,7 +395,6 @@ extern pd_entry_t *pdes[];
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
 #define pmap_move(DP,SP,D,L,S)		
-#define pmap_phys_address(ppn)		ptoa(ppn)
 #define pmap_valid_entry(E) 		((E) & PG_V) /* is PDE or PTE valid? */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
@@ -402,8 +405,8 @@ extern pd_entry_t *pdes[];
  * prototypes
  */
 
-void		pmap_bootstrap(vaddr_t, paddr_t);
-boolean_t	pmap_clear_attrs(struct vm_page *, unsigned);
+paddr_t		pmap_bootstrap(paddr_t, paddr_t);
+boolean_t	pmap_clear_attrs(struct vm_page *, unsigned long);
 static void	pmap_page_protect(struct vm_page *, vm_prot_t);
 void		pmap_page_remove (struct vm_page *);
 static void	pmap_protect(struct pmap *, vaddr_t,
@@ -417,13 +420,31 @@ void		pmap_write_protect(struct pmap *, vaddr_t,
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
-void	pmap_tlb_shootdown(pmap_t, vaddr_t, pt_entry_t, int32_t *);
-void	pmap_tlb_shootnow(int32_t);
-void	pmap_do_tlb_shootdown(struct cpu_info *);
-void	pmap_prealloc_lowmem_ptps(void);
+void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
+void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
+void	pmap_tlb_shoottlb(void);
+#ifdef MULTIPROCESSOR
+void	pmap_tlb_shootwait(void);
+#else
+#define	pmap_tlb_shootwait()
+#endif
+
+paddr_t	pmap_prealloc_lowmem_ptps(paddr_t);
 
 void	pagezero(vaddr_t);
 
+/* 
+ * functions for flushing the cache for vaddrs and pages.
+ * these functions are not part of the MI pmap interface and thus
+ * should not be used as such.
+ */
+void	pmap_flush_cache(vaddr_t, vsize_t);
+#define pmap_flush_page(paddr) do {					\
+	KDASSERT(PHYS_TO_VM_PAGE(paddr) != NULL);			\
+	pmap_flush_cache(PMAP_DIRECT_MAP(paddr), PAGE_SIZE);		\
+} while (/* CONSTCOND */ 0)
+
+#define	PMAP_STEAL_MEMORY	/* enable pmap_steal_memory() */
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 
 /*
@@ -546,13 +567,6 @@ kvtopte(vaddr_t va)
 #define pmap_pte_setbits(p, b)		x86_atomic_setbits_u64(p, b)
 #define pmap_cpu_has_pg_n()		(1)
 #define pmap_cpu_has_invlpg		(1)
-
-vaddr_t	pmap_map(vaddr_t, paddr_t, paddr_t, vm_prot_t);
-
-#if 0   /* XXXfvdl was USER_LDT, need to check if that can be supported */
-void	pmap_ldt_cleanup(struct proc *);
-#define	PMAP_FORK
-#endif /* USER_LDT */
 
 #define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + pa)
 #define PMAP_DIRECT_UNMAP(va)	((paddr_t)va - PMAP_DIRECT_BASE)

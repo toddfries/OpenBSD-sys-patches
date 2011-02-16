@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rt2661var.h,v 1.8 2006/08/03 09:28:13 damien Exp $	*/
+=======
+/*	$OpenBSD: rt2661var.h,v 1.13 2010/09/07 16:21:42 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006
@@ -97,7 +101,6 @@ struct rt2661_softc {
 
 	int				(*sc_enable)(struct rt2661_softc *);
 	void				(*sc_disable)(struct rt2661_softc *);
-	void				(*sc_power)(struct rt2661_softc *, int);
 
 	bus_dma_tag_t			sc_dmat;
 	bus_space_tag_t			sc_st;
@@ -109,13 +112,15 @@ struct rt2661_softc {
 	int				sc_id;
 	int				sc_flags;
 #define RT2661_ENABLED		(1 << 0)
-#define RT2661_FWLOADED		(1 << 1)
-#define RT2661_UPDATE_SLOT	(1 << 2)
-#define RT2661_SET_SLOTTIME	(1 << 3)
+#define RT2661_UPDATE_SLOT	(1 << 1)
+#define RT2661_SET_SLOTTIME	(1 << 2)
 
 	int				sc_tx_timer;
 
 	struct ieee80211_channel	*sc_curchan;
+
+	u_char				*ucode;
+	size_t				ucsize;
 
 	uint8_t				rf_rev;
 
@@ -173,11 +178,10 @@ struct rt2661_softc {
 #define sc_txtap			sc_txtapu.th
 	int				sc_txtap_len;
 #endif
-	void				*sc_sdhook;
-	void				*sc_powerhook;
 };
 
 int	rt2661_attach(void *, int);
 int	rt2661_detach(void *);
+void	rt2661_suspend(void *);
+void	rt2661_resume(void *);
 int	rt2661_intr(void *);
-void	rt2661_shutdown(void *);

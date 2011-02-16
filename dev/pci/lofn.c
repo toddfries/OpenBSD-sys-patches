@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: lofn.c,v 1.26 2004/05/04 16:59:31 grange Exp $	*/
+=======
+/*	$OpenBSD: lofn.c,v 1.29 2011/01/12 17:01:26 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001-2002 Jason L. Wright (jason@thought.net)
@@ -37,7 +41,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -448,7 +451,7 @@ lofn_modexp_start(sc, q)
 	return (0);
 
 errout:
-	bzero(&sc->sc_tmp, sizeof(sc->sc_tmp));
+	explicit_bzero(&sc->sc_tmp, sizeof(sc->sc_tmp));
 	lofn_zero_reg(sc, 0);
 	lofn_zero_reg(sc, 1);
 	lofn_zero_reg(sc, 2);
@@ -481,7 +484,7 @@ lofn_modexp_finish(sc, q)
 		bzero(krp->krp_param[krp->krp_iparams].crp_p + reglen,
 		    crplen - reglen);
 	}
-	bzero(&sc->sc_tmp, sizeof(sc->sc_tmp));
+	explicit_bzero(&sc->sc_tmp, sizeof(sc->sc_tmp));
 	lofn_zero_reg(sc, 0);
 	lofn_zero_reg(sc, 1);
 	lofn_zero_reg(sc, 2);

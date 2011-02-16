@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ieee80211_ioctl.h,v 1.6 2006/06/23 21:34:15 reyk Exp $	*/
+=======
+/*	$OpenBSD: ieee80211_ioctl.h,v 1.17 2009/02/15 08:34:36 damien Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ieee80211_ioctl.h,v 1.7 2004/04/30 22:51:04 dyoung Exp $	*/
 
 /*-
@@ -84,6 +88,24 @@ struct ieee80211_stats {
 	u_int32_t	is_scan_passive;	/* passive scans started */
 	u_int32_t	is_node_timeout;	/* nodes timed out inactivity */
 	u_int32_t	is_crypto_nomem;	/* no memory for crypto ctx */
+<<<<<<< HEAD
+=======
+	u_int32_t	is_rx_assoc_badrsnie;	/* rx assoc w/ bad RSN IE */
+	u_int32_t	is_rx_unauth;		/* rx port not valid */
+	u_int32_t	is_tx_noauth;		/* tx port not valid */
+	u_int32_t	is_rx_eapol_key;	/* rx eapol-key frames */
+	u_int32_t	is_rx_eapol_replay;	/* rx replayed eapol frames */
+	u_int32_t	is_rx_eapol_badmic;	/* rx eapol frames w/ bad mic */
+	u_int32_t	is_rx_remmicfail;	/* rx tkip remote mic fails */
+	u_int32_t	is_rx_locmicfail;	/* rx tkip local mic fails */
+	u_int32_t	is_tkip_replays;
+	u_int32_t	is_tkip_icv_errs;
+	u_int32_t	is_ccmp_replays;
+	u_int32_t	is_ccmp_dec_errs;
+	u_int32_t	is_cmac_replays;
+	u_int32_t	is_cmac_icv_errs;
+	u_int32_t	is_pbac_errs;
+>>>>>>> origin/master
 };
 
 #define	SIOCG80211STATS		_IOWR('i', 242, struct ifreq)
@@ -144,12 +166,40 @@ struct ieee80211chanreq {
 	u_int16_t	i_channel;
 };
 
+#ifndef _KERNEL
+/*
+ * Channels are specified by frequency and attributes.
+ */
+struct ieee80211_channel {
+	u_int16_t	ic_freq;	/* setting in MHz */
+	u_int16_t	ic_flags;	/* see below */
+};
+
+/*
+ * Channel attributes (XXX must keep in sync with radiotap flags).
+ */
+#define IEEE80211_CHAN_TURBO	0x0010	/* Turbo channel */
+#define IEEE80211_CHAN_CCK	0x0020	/* CCK channel */
+#define IEEE80211_CHAN_OFDM	0x0040	/* OFDM channel */
+#define IEEE80211_CHAN_2GHZ	0x0080	/* 2 GHz spectrum channel */
+#define IEEE80211_CHAN_5GHZ	0x0100	/* 5 GHz spectrum channel */
+#define IEEE80211_CHAN_PASSIVE	0x0200	/* Only passive scan allowed */
+#define IEEE80211_CHAN_DYN	0x0400	/* Dynamic CCK-OFDM channel */
+#define IEEE80211_CHAN_XR	0x1000	/* Extended range OFDM channel */
+#endif	/* !_KERNEL */
+
+struct ieee80211_chanreq_all {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	struct ieee80211_channel *i_chans;
+};
+
 #ifndef IEEE80211_CHAN_ANY
 #define	IEEE80211_CHAN_ANY	0xffff
 #endif
 
 #define	SIOCS80211CHANNEL	 _IOW('i', 238, struct ieee80211chanreq)
 #define	SIOCG80211CHANNEL	_IOWR('i', 239, struct ieee80211chanreq)
+#define	SIOCG80211ALLCHANS	_IOWR('i', 215, struct ieee80211_chanreq_all)
 
 /* BSS identifier */
 struct ieee80211_bssid {
@@ -173,6 +223,69 @@ struct ieee80211_txpower {
 #define IEEE80211_TXPOWER_MODE_FIXED	0	/* fixed tx power value */
 #define IEEE80211_TXPOWER_MODE_AUTO	1	/* auto level control */
 
+<<<<<<< HEAD
+=======
+struct ieee80211_wpapsk {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	int		i_enabled;
+	u_int8_t	i_psk[32];
+};
+
+#define SIOCS80211WPAPSK	 _IOW('i', 245, struct ieee80211_wpapsk)
+#define SIOCG80211WPAPSK	_IOWR('i', 246, struct ieee80211_wpapsk)
+
+#define IEEE80211_WPA_PROTO_WPA1	0x01
+#define IEEE80211_WPA_PROTO_WPA2	0x02
+
+#define IEEE80211_WPA_CIPHER_NONE	0x00
+#define IEEE80211_WPA_CIPHER_USEGROUP	0x01
+#define IEEE80211_WPA_CIPHER_WEP40	0x02
+#define IEEE80211_WPA_CIPHER_TKIP	0x04
+#define IEEE80211_WPA_CIPHER_CCMP	0x08
+#define IEEE80211_WPA_CIPHER_WEP104	0x10
+
+#define IEEE80211_WPA_AKM_PSK		0x01
+#define IEEE80211_WPA_AKM_8021X		0x02
+#define IEEE80211_WPA_AKM_SHA256_PSK	0x04
+#define IEEE80211_WPA_AKM_SHA256_8021X	0x08
+
+struct ieee80211_wpaparams {
+	char	i_name[IFNAMSIZ];		/* if_name, e.g. "wi0" */
+	int	i_enabled;
+	u_int	i_protos;
+	u_int	i_akms;
+	u_int	i_ciphers;
+	u_int	i_groupcipher;
+};
+
+#define SIOCS80211WPAPARMS	 _IOW('i', 247, struct ieee80211_wpaparams)
+#define SIOCG80211WPAPARMS	_IOWR('i', 248, struct ieee80211_wpaparams)
+
+struct ieee80211_wmmparams {
+	char	i_name[IFNAMSIZ];		/* if_name, e.g. "wi0" */
+	int	i_enabled;
+	/* XXX more */
+};
+
+#define SIOCS80211WMMPARMS	 _IOW('i', 249, struct ieee80211_wmmparams)
+#define SIOCG80211WMMPARMS	_IOWR('i', 250, struct ieee80211_wmmparams)
+
+struct ieee80211_keyavail {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	u_int8_t	i_macaddr[IEEE80211_ADDR_LEN];
+	u_int8_t	i_key[32];
+	u_int32_t	i_lifetime;
+};
+
+struct ieee80211_keyrun {
+	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
+	u_int8_t	i_macaddr[IEEE80211_ADDR_LEN];
+};
+
+#define SIOCS80211KEYAVAIL	 _IOW('i', 251, struct ieee80211_keyavail)
+#define SIOCS80211KEYRUN	 _IOW('i', 252, struct ieee80211_keyrun)
+
+>>>>>>> origin/master
 /* scan request (will block) */
 #define IEEE80211_SCAN_TIMEOUT	30	/* timeout in seconds */
 

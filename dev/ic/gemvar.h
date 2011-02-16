@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gemvar.h,v 1.15 2006/11/25 02:12:04 brad Exp $	*/
+=======
+/*	$OpenBSD: gemvar.h,v 1.26 2010/09/20 07:40:41 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: gemvar.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -142,8 +146,6 @@ struct gem_softc {
 	int		sc_burst;	/* DVMA burst size in effect */
 	int		sc_phys[2];	/* MII instance -> PHY map */
 
-	int		sc_if_flags;
-
 	int		sc_mif_config;	/* Selected MII reg setting */
 	u_int		sc_tcvr;
 
@@ -163,9 +165,6 @@ struct gem_softc {
 #define	GEM_GIGABIT		0x0001	/* has a gigabit PHY */
 
 
-	void *sc_sdhook;		/* shutdown hook */
-	void *sc_powerhook;		/* power management hook */
-
 	struct gem_stats sc_stats;	/* debugging stats */
 
 	/*
@@ -183,6 +182,7 @@ struct gem_softc {
 	u_int32_t sc_tx_cnt, sc_tx_prod, sc_tx_cons;
 
 	struct gem_rxsoft sc_rxsoft[GEM_NRXDESC];
+	u_int32_t sc_rx_cnt, sc_rx_prod, sc_rx_cons;
 
 	/*
 	 * Control data structures.
@@ -199,13 +199,15 @@ struct gem_softc {
 
 	u_int32_t		sc_setup_fsls;	/* FS|LS on setup descriptor */
 
-	int			sc_rxptr;		/* next ready RX descriptor/descsoft */
 	int			sc_rxfifosize;
+
+	u_int32_t		sc_rx_fifo_wr_ptr;
+	u_int32_t		sc_rx_fifo_rd_ptr;
+	struct timeout		sc_rx_watchdog;
 
 	/* ========== */
 	int			sc_inited;
 	int			sc_debug;
-	void			*sc_sh;		/* shutdownhook cookie */
 
 	/* Special hardware hooks */
 	void	(*sc_hwreset)(struct gem_softc *);
@@ -270,7 +272,6 @@ do {									\
 	struct gem_desc *__rxd = &sc->sc_rxdescs[(x)];			\
 	struct mbuf *__m = __rxs->rxs_mbuf;				\
 									\
-	__m->m_data = __m->m_ext.ext_buf;				\
 	__rxd->gd_addr =						\
 	    GEM_DMA_WRITE((sc), __rxs->rxs_dmamap->dm_segs[0].ds_addr);	\
 	__rxd->gd_flags =						\
@@ -280,13 +281,9 @@ do {									\
 	GEM_CDRXSYNC((sc), (x), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE); \
 } while (0)
 
-#define GEM_IS_APPLE(sc)	\
-    ((sc)->sc_variant >= GEM_APPLE_INTREPID2_GMAC &&	\
-    (sc)->sc_variant <= GEM_APPLE_UNINORTH2GMAC)
-
 #ifdef _KERNEL
 void	gem_attach(struct gem_softc *, const u_int8_t *);
-int	gem_activate(struct device *, enum devact);
+int	gem_activate(struct device *, int);
 int	gem_detach(struct gem_softc *);
 int	gem_intr(void *);
 int	gem_read_srom(struct gem_softc *);
@@ -299,9 +296,9 @@ int	gem_mediachange(struct ifnet *);
 void	gem_mediastatus(struct ifnet *, struct ifmediareq *);
 
 void	gem_config(struct gem_softc *);
+void	gem_unconfig(struct gem_softc *);
 void	gem_reset(struct gem_softc *);
 int	gem_intr(void *);
 #endif /* _KERNEL */
-
 
 #endif

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_sensors.c,v 1.16 2006/12/23 17:41:26 deraadt Exp $	*/
+=======
+/*	$OpenBSD: kern_sensors.c,v 1.24 2010/04/20 20:49:33 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -31,6 +35,7 @@
 #include <sys/sensors.h>
 #include "hotplug.h"
 
+<<<<<<< HEAD
 int			sensordev_count = 0;
 SLIST_HEAD(, ksensordev) sensordev_list = SLIST_HEAD_INITIALIZER(sensordev_list);
 
@@ -49,6 +54,11 @@ void	sensor_task_thread(void *);
 void	sensor_task_schedule(struct sensor_task *);
 
 TAILQ_HEAD(, sensor_task) tasklist = TAILQ_HEAD_INITIALIZER(tasklist);
+=======
+int			sensordev_count;
+SLIST_HEAD(, ksensordev) sensordev_list =
+    SLIST_HEAD_INITIALIZER(sensordev_list);
+>>>>>>> origin/master
 
 void
 sensordev_install(struct ksensordev *sensdev)
@@ -145,35 +155,42 @@ sensor_detach(struct ksensordev *sensdev, struct ksensor *sens)
 	splx(s);
 }
 
-struct ksensordev *
-sensordev_get(int num)
+int
+sensordev_get(int num, struct ksensordev **sensdev)
 {
 	struct ksensordev *sd;
 
-	SLIST_FOREACH(sd, &sensordev_list, list)
-		if (sd->num == num)
-			return (sd);
-
-	return (NULL);
+	SLIST_FOREACH(sd, &sensordev_list, list) {
+		if (sd->num == num) {
+			*sensdev = sd;
+			return (0);
+		}
+		if (sd->num > num)
+			return (ENXIO);
+	}
+	return (ENOENT);
 }
 
-struct ksensor *
-sensor_find(int dev, enum sensor_type type, int numt)
+int
+sensor_find(int dev, enum sensor_type type, int numt, struct ksensor **ksensorp)
 {
 	struct ksensor *s;
 	struct ksensordev *sensdev;
 	struct ksensors_head *sh;
+	int ret;
 
-	sensdev = sensordev_get(dev);
-	if (sensdev == NULL)
-		return (NULL);
+	ret = sensordev_get(dev, &sensdev);
+	if (ret)
+		return (ret);
 
 	sh = &sensdev->sensors_list;
 	SLIST_FOREACH(s, sh, list)
-		if (s->type == type && s->numt == numt)
-			return (s);
+		if (s->type == type && s->numt == numt) {
+			*ksensorp = s;
+			return (0);
+		}
 
-	return (NULL);
+	return (ENOENT);
 }
 
 int
@@ -215,8 +232,18 @@ sensor_task_unregister(void *arg)
 void
 sensor_task_create(void *arg)
 {
+<<<<<<< HEAD
 	if (kthread_create(sensor_task_thread, NULL, NULL, "sensors") != 0)
 		panic("sensors kthread");
+=======
+	struct sensor_task *st = arg;
+
+	/* try to schedule the task */
+	if (workq_add_task(NULL, 0, sensor_task_work, st, NULL) != 0)
+		timeout_add_msec(&st->timeout, 500);
+
+	st->state = ST_WORKQ;
+>>>>>>> origin/master
 }
 
 void
@@ -255,6 +282,7 @@ sensor_task_thread(void *arg)
 	kthread_exit(0);
 }
 
+<<<<<<< HEAD
 void
 sensor_task_schedule(struct sensor_task *st)
 {
@@ -267,6 +295,14 @@ sensor_task_schedule(struct sensor_task *st)
 			TAILQ_INSERT_BEFORE(cst, st, entry);
 			return;
 		}
+=======
+	if (st->state == ST_DYING) {
+		st->state = ST_DEAD;
+		wakeup(st);
+	} else {
+		st->state = ST_TICKING;
+		timeout_add_sec(&st->timeout, st->period);
+>>>>>>> origin/master
 	}
 
 	/* must be an empty list, or at the end of the list */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: linux_blkio.c,v 1.4 2002/02/13 19:08:06 art Exp $	*/
+=======
+/*	$OpenBSD: linux_blkio.c,v 1.8 2010/05/18 04:41:14 dlg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: linux_blkio.c,v 1.3 2001/01/18 17:48:04 tv Exp $	*/
 
 /*
@@ -44,6 +48,7 @@
 #include <sys/mount.h>
 #include <sys/proc.h>
 #include <sys/disklabel.h>
+#include <sys/dkio.h>
 
 #include <sys/syscallargs.h>
 

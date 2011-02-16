@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp.c,v 1.25 2006/01/22 18:37:56 miod Exp $	*/
+/*	$OpenBSD: esp.c,v 1.31 2010/11/11 17:55:32 miod Exp $	*/
 /*	$NetBSD: esp.c,v 1.17 1998/09/05 15:15:35 pk Exp $	*/
 
 /*
@@ -81,7 +81,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <scsi/scsi_all.h>
@@ -110,16 +109,9 @@ struct cfattach esp_ca = {
 
 struct scsi_adapter esp_switch = {
 	ncr53c9x_scsi_cmd,
-	minphys,		/* no max at this level; handled by DMA code */
+	scsi_minphys,		/* no max at this level; handled by DMA code */
 	NULL,
 	NULL,
-};
-
-struct scsi_device esp_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 /*
@@ -254,15 +246,15 @@ espattach(parent, self, aux)
 		esc->irq_mask = V2IF_SCSIIRQ;
 		if (reg_offset == 0x10000) {
 			/* From the Q650 developer's note */
-			sc->sc_freq = 16500000;
+			sc->sc_freq = 16500;
 		} else {
-			sc->sc_freq = 25000000;
+			sc->sc_freq = 25000;
 		}
 	} else {
 		esc->sc_reg = (volatile u_char *) SCSIBase + 0x402;
 		via2_register_irq(&esc->sc_ih, self->dv_xname);
 		esc->irq_mask = 0;
-		sc->sc_freq = 25000000;
+		sc->sc_freq = 25000;
 	}
 
 	if (quick) {
@@ -291,10 +283,10 @@ espattach(parent, self, aux)
 	 * in "clocks per byte", and has a minimum value of 4.
 	 * The SCSI period used in negotiation is one-fourth
 	 * of the time (in nanoseconds) needed to transfer one byte.
-	 * Since the chip's clock is given in MHz, we have the following
-	 * formula: 4 * period = (1000 / freq) * 4
+	 * Since the chip's clock is given in kHz, we have the following
+	 * formula: 4 * period = (1000000 / freq) * 4
 	 */
-	sc->sc_minsync = (1000 * 1000000) / sc->sc_freq;
+	sc->sc_minsync = 1000000 / sc->sc_freq;
 
 	/* We need this to fit into the TCR... */
 	sc->sc_maxxfer = 64 * 1024;
@@ -304,8 +296,8 @@ espattach(parent, self, aux)
 		sc->sc_maxxfer = 8 * 1024;
 	}
 
-	/* gimme MHz */
-	sc->sc_freq /= 1000000;
+	/* convert sc_freq to MHz */
+	sc->sc_freq /= 1000;
 
 	/*
 	 * Configure interrupts.
@@ -319,7 +311,7 @@ espattach(parent, self, aux)
 	/*
 	 * Now try to attach all the sub-devices
 	 */
-	ncr53c9x_attach(sc, &esp_switch, &esp_dev);
+	ncr53c9x_attach(sc, &esp_switch);
 }
 
 /*

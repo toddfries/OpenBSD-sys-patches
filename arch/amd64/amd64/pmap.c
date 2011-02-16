@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.19 2007/04/13 10:36:00 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.60 2010/11/30 19:30:16 kettenis Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -120,6 +120,7 @@
 #include <uvm/uvm.h>
 
 #include <machine/atomic.h>
+#include <machine/lock.h>
 #include <machine/cpu.h>
 #include <machine/specialreg.h>
 #include <machine/gdt.h>
@@ -210,36 +211,6 @@
  *	If we fail, we simply let pmap_enter() tell UVM about it.
  */
 
-/*
- * locking
- *
- * we have the following locks that we must contend with:
- *
- * "simple" locks:
- *
- * - pmap lock (per pmap, part of uvm_object)
- *   this lock protects the fields in the pmap structure including
- *   the non-kernel PDEs in the PDP, and the PTEs.  it also locks
- *   in the alternate PTE space (since that is determined by the
- *   entry in the PDP).
- *
- * - pvh_lock (per pv_head)
- *   this lock protects the pv_entry list which is chained off the
- *   pv_head structure for a specific managed PA.   it is locked
- *   when traversing the list (e.g. adding/removing mappings,
- *   syncing R/M bits, etc.)
- *
- * - pmaps_lock
- *   this lock protects the list of active pmaps (headed by "pmaps").
- *   we lock it when adding or removing pmaps from this list.
- *
- * XXX: would be nice to have per-CPU VAs for the above 4
- */
-
-/*
- * locking data structures
- */
-
 vaddr_t ptp_masks[] = PTP_MASK_INITIALIZER;
 int ptp_shifts[] = PTP_SHIFT_INITIALIZER;
 long nkptp[] = NKPTP_INITIALIZER;
@@ -328,13 +299,11 @@ struct pmap kernel_pmap_store;	/* the kernel's pmap (proc0) */
 int pmap_pg_g = 0;
 
 /*
- * i386 physical memory comes in a big contig chunk with a small
- * hole toward the front of it...  the following 4 paddr_t's
- * (shared with machdep.c) describe the physical address space
- * of this machine.
+ * pmap_pg_wc: if our processor supports PAT then we set this
+ * to be the pte bits for Write Combining. Else we fall back to
+ * UC- so mtrrs can override the cacheability;
  */
-paddr_t avail_start;	/* PA of first available physical page */
-paddr_t avail_end;	/* PA of last available physical page */
+int pmap_pg_wc = PG_UCMINUS;
 
 /*
  * other data structures
@@ -437,7 +406,7 @@ static __inline boolean_t
 pmap_is_active(struct pmap *pmap, int cpu_id)
 {
 	return (pmap == pmap_kernel() ||
-	    (pmap->pm_cpus & (1U << cpu_id)) != 0);
+	    (pmap->pm_cpus & (1ULL << cpu_id)) != 0);
 }
 
 void
@@ -568,8 +537,14 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 	else
 		pte = kvtopte(va);
 
-	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) |
-	     PG_V | pmap_pg_g;
+	npte = (pa & PMAP_PA_MASK) | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) |
+	    ((pa & PMAP_NOCACHE) ? PG_N : 0) |
+	    ((pa & PMAP_WC) ? pmap_pg_wc : 0) | PG_V;
+
+	/* special 1:1 mappings in the first 2MB must not be global */
+	if (va >= (vaddr_t)NBPD_L2)
+		npte |= pmap_pg_g;
+
 	if ((cpu_feature & CPUID_NXE) && !(prot & VM_PROT_EXECUTE))
 		npte |= PG_NX;
 	opte = pmap_pte_set(pte, npte); /* zap! */
@@ -579,15 +554,11 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 		panic("pmap_kenter_pa: PG_PS");
 #endif
 	if (pmap_valid_entry(opte)) {
-#if defined(MULTIPROCESSOR)
-		int32_t cpumask = 0;
-
-		pmap_tlb_shootdown(pmap_kernel(), va, opte, &cpumask);
-		pmap_tlb_shootnow(cpumask);
-#else
-		/* Don't bother deferring in the single CPU case. */
-		pmap_update_pg(va);
-#endif
+		if (pa & PMAP_NOCACHE && (opte & PG_N) == 0)
+			wbinvd();
+		/* This shouldn't happen */
+		pmap_tlb_shootpage(pmap_kernel(), va);
+		pmap_tlb_shootwait();
 	}
 }
 
@@ -648,10 +619,10 @@ pmap_kremove(vaddr_t va, vsize_t len)
  * => kva_start is the first free virtual address in kernel space
  */
 
-void
-pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
+paddr_t
+pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 {
-	vaddr_t kva, kva_end;
+	vaddr_t kva, kva_end, kva_start = VM_MIN_KERNEL_ADDRESS;
 	struct pmap *kpm;
 	pt_entry_t *tmppte;
 	vaddr_t tmpva;
@@ -662,7 +633,7 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 	paddr_t dmpd, dmpdp;
 
 	/*
-	 * define the voundaries of the managed kernel virtual address
+	 * define the boundaries of the managed kernel virtual address
 	 * space.
 	 */
 
@@ -697,16 +668,12 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 
 	kpm = pmap_kernel();
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
-		simple_lock_init(&kpm->pm_obj[i].vmobjlock);
-		kpm->pm_obj[i].pgops = NULL;
-		TAILQ_INIT(&kpm->pm_obj[i].memq);
-		kpm->pm_obj[i].uo_npages = 0;
-		kpm->pm_obj[i].uo_refs = 1;
+		uvm_objinit(&kpm->pm_obj[i], NULL, 1);
 		kpm->pm_ptphint[i] = NULL;
 	}
 	memset(&kpm->pm_list, 0, sizeof(kpm->pm_list));  /* pm_list not used */
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
-	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
+	kpm->pm_pdirpa = proc0.p_addr->u_pcb.pcb_cr3;
 	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count =
 		atop(kva_start - VM_MIN_KERNEL_ADDRESS);
 
@@ -738,55 +705,39 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 	/*
 	 * Temporary mapping for setting up the direct map.
 	 */
-	tmpva = (KERNBASE + NKL2_KIMG_ENTRIES * NBPD_L2);
-	virtual_avail += PAGE_SIZE;
-	tmppte = PTE_BASE + pl1_i(tmpva);
-
-	/*
-	 * Map the direct map. We steal pages for the page tables from
-	 * avail_start, then we create temporary mappings using the
-	 * early_zerop. Scary, slow, but we only do it once.
-	 */
 	ndmpdp = (max_pa + NBPD_L3 - 1) >> L3_SHIFT;
-	if (ndmpdp < 4)
-		ndmpdp = 4;	/* At least 4GB */
+	if (ndmpdp < NDML2_ENTRIES)
+		ndmpdp = NDML2_ENTRIES;		/* At least 4GB */
 
-	dmpdp = avail_start;	avail_start += PAGE_SIZE;
-	dmpd = avail_start;	avail_start += ndmpdp * PAGE_SIZE;
+	dmpdp = kpm->pm_pdir[PDIR_SLOT_DIRECT] & PG_FRAME;
 
-	for (i = 0; i < NPDPG * ndmpdp; i++) {
+	dmpd = first_avail; first_avail += ndmpdp * PAGE_SIZE;
+
+	for (i = NDML2_ENTRIES; i < NPDPG * ndmpdp; i++) {
 		paddr_t pdp;
-		paddr_t off;
 		vaddr_t va;
 
 		pdp = (paddr_t)&(((pd_entry_t *)dmpd)[i]);
-		off = pdp - trunc_page(pdp);
-		*tmppte = (trunc_page(pdp) & PG_FRAME) | PG_V | PG_RW;
-		pmap_update_pg(tmpva);
+		va = PMAP_DIRECT_MAP(pdp);
 
-		va = tmpva + off;
-		*((pd_entry_t *)va) = (paddr_t)i << L2_SHIFT;
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_PS | PG_G;
+		*((pd_entry_t *)va) = ((paddr_t)i << L2_SHIFT);
+		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_PS | PG_G | PG_U |
+		    PG_M;
 	}
 
-	for (i = 0; i < ndmpdp; i++) {
+	for (i = NDML2_ENTRIES; i < ndmpdp; i++) {
 		paddr_t pdp;
-		paddr_t off;
 		vaddr_t va;
 
 		pdp = (paddr_t)&(((pd_entry_t *)dmpdp)[i]);
-		off = pdp - trunc_page(pdp);
-		*tmppte = (trunc_page(pdp) & PG_FRAME) | PG_V | PG_RW;
-		pmap_update_pg(tmpva);
+		va = PMAP_DIRECT_MAP(pdp);
 
-		va = tmpva + off;
 		*((pd_entry_t *)va) = dmpd + (i << PAGE_SHIFT);
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_U;
+		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_U | PG_M;
 	}
-	*tmppte = 0;
-	
-	DMPDpa = dmpdp;
-	kpm->pm_pdir[PDIR_SLOT_DIRECT] = DMPDpa | PG_V | PG_KW | PG_U;
+
+	kpm->pm_pdir[PDIR_SLOT_DIRECT] = dmpdp | PG_V | PG_KW | PG_U |
+	    PG_M;
 
 	tlbflush();
 
@@ -795,8 +746,8 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 
 	idt_vaddr = virtual_avail;
 	virtual_avail += 2 * PAGE_SIZE;
-	idt_paddr = avail_start;			/* steal a page */
-	avail_start += 2 * PAGE_SIZE;
+	idt_paddr = first_avail;			/* steal a page */
+	first_avail += 2 * PAGE_SIZE;
 
 #ifdef _LP64
 	/*
@@ -805,16 +756,9 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 	 */
 	lo32_vaddr = virtual_avail;
 	virtual_avail += PAGE_SIZE;
-	lo32_paddr = avail_start;
-	avail_start += PAGE_SIZE;
+	lo32_paddr = first_avail;
+	first_avail += PAGE_SIZE;
 #endif
-
-	/*
-	 * now we reserve some VM for mapping pages when doing a crash dump
-	 */
-
-	virtual_avail = reserve_dumppages(virtual_avail);
-
 	/*
 	 * init the static-global locks and global lists.
 	 */
@@ -854,14 +798,16 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 	 */
 
 	tlbflush();
+
+	return first_avail;
 }
 
 /*
  * Pre-allocate PTPs for low memory, so that 1:1 mappings for various
  * trampoline code can be entered.
  */
-void
-pmap_prealloc_lowmem_ptps(void)
+paddr_t
+pmap_prealloc_lowmem_ptps(paddr_t first_avail)
 {
 	pd_entry_t *pdes;
 	int level;
@@ -870,8 +816,7 @@ pmap_prealloc_lowmem_ptps(void)
 	pdes = pmap_kernel()->pm_pdir;
 	level = PTP_LEVELS;
 	for (;;) {
-		newp = avail_start;
-		avail_start += PAGE_SIZE;
+		newp = first_avail; first_avail += PAGE_SIZE;
 		memset((void *)PMAP_DIRECT_MAP(newp), 0, PAGE_SIZE);
 		pdes[pl_i(0, level)] = (newp & PG_FRAME) | PG_V | PG_RW;
 		level--;
@@ -879,6 +824,8 @@ pmap_prealloc_lowmem_ptps(void)
 			break;
 		pdes = normal_pdes[level - 2];
 	}
+
+	return first_avail;
 }
 
 /*
@@ -1073,11 +1020,10 @@ pmap_freepage(struct pmap *pmap, struct vm_page *ptp, int level)
 	if (lidx != 0)
 		simple_lock(&obj->vmobjlock);
 	if (pmap->pm_ptphint[lidx] == ptp)
-		pmap->pm_ptphint[lidx] = TAILQ_FIRST(&obj->memq);
+		pmap->pm_ptphint[lidx] = RB_ROOT(&obj->memt);
 	ptp->wire_count = 0;
-	uvm_pagefree(ptp);
-	if (lidx != 0)
-		simple_unlock(&obj->vmobjlock);
+	uvm_pagerealloc(ptp, NULL, 0);
+	TAILQ_INSERT_TAIL(pagelist, ptp, pageq);
 }
 
 void
@@ -1248,7 +1194,7 @@ pmap_pdp_ctor(void *arg, void *object, int flags)
 	memset(&pdir[PDIR_SLOT_KERN + npde], 0,
 	    (NTOPLEVEL_PDES - (PDIR_SLOT_KERN + npde)) * sizeof(pd_entry_t));
 
-	pdir[PDIR_SLOT_DIRECT] = DMPDpa | PG_V | PG_KW | PG_U;
+	pdir[PDIR_SLOT_DIRECT] = pmap_kernel()->pm_pdir[PDIR_SLOT_DIRECT];
 
 #if VM_MIN_KERNEL_ADDRESS != KERNBASE
 	pdir[pl4_pi(KERNBASE)] = PDP_BASE[pl4_pi(KERNBASE)];
@@ -1275,21 +1221,12 @@ pmap_create(void)
 
 	/* init uvm_object */
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
-		simple_lock_init(&pmap->pm_obj[i].vmobjlock);
-		pmap->pm_obj[i].pgops = NULL;	/* not a mappable object */
-		TAILQ_INIT(&pmap->pm_obj[i].memq);
-		pmap->pm_obj[i].uo_npages = 0;
-		pmap->pm_obj[i].uo_refs = 1;
+		uvm_objinit(&pmap->pm_obj[i], NULL, 1);
 		pmap->pm_ptphint[i] = NULL;
 	}
 	pmap->pm_stats.wired_count = 0;
 	pmap->pm_stats.resident_count = 1;	/* count the PDP allocd below */
-	pmap->pm_flags = 0;
-
-	/* init the LDT */
-	pmap->pm_ldt = NULL;
-	pmap->pm_ldt_len = 0;
-	pmap->pm_ldt_sel = GSYSSEL(GLDT_SEL, SEL_KPL);
+	pmap->pm_cpus = 0;
 
 	/* allocate PDP */
 
@@ -1351,6 +1288,12 @@ pmap_destroy(struct pmap *pmap)
 	 * reference count is zero, free pmap resources and then free pmap.
 	 */
 
+#ifdef DIAGNOSTIC
+	if (pmap->pm_cpus != 0)
+		printf("pmap_destroy: pmap %p cpus=0x%lx\n",
+		    (void *)pmap, pmap->pm_cpus);
+#endif
+
 	/*
 	 * remove it from global list of pmaps
 	 */
@@ -1364,7 +1307,7 @@ pmap_destroy(struct pmap *pmap)
 	 */
 
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
-		while ((pg = TAILQ_FIRST(&pmap->pm_obj[i].memq)) != NULL) {
+		while ((pg = RB_ROOT(&pmap->pm_obj[i].memt)) != NULL) {
 			KASSERT((pg->pg_flags & PG_BUSY) == 0);
 
 			pg->wire_count = 0;
@@ -1479,9 +1422,9 @@ pmap_ldt_cleanup(struct proc *p)
 #endif /* USER_LDT */
 
 /*
- * pmap_activate: activate a process' pmap (fill in %cr3 and LDT info)
+ * pmap_activate: activate a process' pmap (fill in %cr3)
  *
- * => called from cpu_switch()
+ * => called from cpu_fork() and when switching pmaps during exec
  * => if p is the curproc, then load it into the MMU
  */
 
@@ -1492,17 +1435,15 @@ pmap_activate(struct proc *p)
 	struct pmap *pmap = p->p_vmspace->vm_map.pmap;
 
 	pcb->pcb_pmap = pmap;
-	pcb->pcb_ldt_sel = pmap->pm_ldt_sel;
 	pcb->pcb_cr3 = pmap->pm_pdirpa;
-	if (p == curproc)
+	if (p == curproc) {
 		lcr3(pcb->pcb_cr3);
-	if (pcb == curpcb)
-		lldt(pcb->pcb_ldt_sel);
 
-	/*
-	 * mark the pmap in use by this processor.
-	 */
-	x86_atomic_setbits_ul(&pmap->pm_cpus, (1U << cpu_number()));
+		/*
+		 * mark the pmap in use by this processor.
+		 */
+		x86_atomic_setbits_u64(&pmap->pm_cpus, (1ULL << cpu_number()));
+	}
 }
 
 /*
@@ -1517,8 +1458,7 @@ pmap_deactivate(struct proc *p)
 	/*
 	 * mark the pmap no longer in use by this processor. 
 	 */
-	x86_atomic_clearbits_ul(&pmap->pm_cpus, (1U << cpu_number()));
-
+	x86_atomic_clearbits_u64(&pmap->pm_cpus, (1ULL << cpu_number()));
 }
 
 /*
@@ -1588,26 +1528,6 @@ pmap_extract(struct pmap *pmap, vaddr_t va, paddr_t *pap)
 }
 
 /*
- * pmap_map: map a range of PAs into kvm
- *
- * => used during crash dump
- * => XXX: pmap_map() should be phased out?
- */
-
-vaddr_t
-pmap_map(vaddr_t va, paddr_t spa, paddr_t epa, vm_prot_t prot)
-{
-	while (spa < epa) {
-		pmap_enter(pmap_kernel(), va, spa, prot, 0);
-		va += PAGE_SIZE;
-		spa += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-	return va;
-}
-
-
-/*
  * pmap_zero_page: zero a page
  */
 
@@ -1615,6 +1535,26 @@ void
 pmap_zero_page(struct vm_page *pg)
 {
 	pagezero(pmap_map_direct(pg));
+}
+
+/*
+ * pmap_flush_cache: flush the cache for a virtual address.
+ */
+void
+pmap_flush_cache(vaddr_t addr, vsize_t len)
+{
+	vaddr_t	i;
+
+	if (curcpu()->ci_cflushsz == 0) {
+		wbinvd();
+		return;
+	}
+
+	/* all cpus that have clflush also have mfence. */
+	mfence();
+	for (i = addr; i < addr + len; i += curcpu()->ci_cflushsz)
+		clflush(i);
+	mfence();
 }
 
 /*
@@ -1638,7 +1578,7 @@ pmap_pageidlezero(struct vm_page *pg)
 	 *       with uncached mappings.
 	 */
 	for (i = 0, ptr = (long *) va; i < PAGE_SIZE / sizeof(long); i++) {
-		if (whichqs != 0) {
+		if (!curcpu_is_idle()) {
 
 			/*
 			 * A process has become ready.  Abort now,
@@ -1906,6 +1846,12 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 		pmap_tlb_shootnow(cpumask);
 		pmap_unmap_ptes(pmap);		/* unlock pmap */
 		PMAP_MAP_TO_HEAD_UNLOCK();
+
+		while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+			TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+			uvm_pagefree(ptp);
+                }
+
 		return;
 	}
 
@@ -1967,6 +1913,11 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 	pmap_tlb_shootnow(cpumask);
 	pmap_unmap_ptes(pmap);
 	PMAP_MAP_TO_HEAD_UNLOCK();
+
+	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+		uvm_pagefree(ptp);
+	}
 }
 
 /*
@@ -2054,7 +2005,12 @@ pmap_page_remove(struct vm_page *pg)
 	pvh->pvh_list = NULL;
 	simple_unlock(&pvh->pvh_lock);
 	PMAP_HEAD_TO_MAP_UNLOCK();
-	pmap_tlb_shootnow(cpumask);
+	pmap_tlb_shootwait();
+
+	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+		uvm_pagefree(ptp);
+	}
 }
 
 /*
@@ -2302,7 +2258,7 @@ pmap_unwire(struct pmap *pmap, vaddr_t va)
 			panic("pmap_unwire: invalid (unmapped) va 0x%lx", va);
 #endif
 		if ((ptes[pl1_i(va)] & PG_W) != 0) {
-			ptes[pl1_i(va)] &= ~PG_W;
+			pmap_pte_clearbits(&ptes[pl1_i(va)], PG_W);
 			pmap->pm_stats.wired_count--;
 		}
 #ifdef DIAGNOSTIC
@@ -2369,6 +2325,12 @@ pmap_enter(struct pmap *pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	int bank, off, error;
 	int ptpdelta, wireddelta, resdelta;
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
+	boolean_t nocache = (pa & PMAP_NOCACHE) != 0;
+	boolean_t wc = (pa & PMAP_WC) != 0;
+	int error;
+
+	KASSERT(!(wc && nocache));
+	pa &= PMAP_PA_MASK;
 
 #ifdef DIAGNOSTIC
 	/* sanity check: totally out of range? */
@@ -2532,10 +2494,23 @@ enter_now:
 	if (ptp)
 		ptp->wire_count += ptpdelta;
 	npte = pa | protection_codes[prot] | PG_V;
-	if (pvh)
+	if (pg != NULL) {
 		npte |= PG_PVLIST;
+		/*
+		 * make sure that if the page is write combined all 
+		 * instances of pmap_enter make it so.
+		 */
+		if (pg->pg_flags & PG_PMAP_WC) {
+			KASSERT(nocache == 0);
+			wc = TRUE;
+		}
+	}
+	if (wc)
+		npte |= pmap_pg_wc;
 	if (wired)
 		npte |= PG_W;
+	if (nocache)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)
@@ -2549,17 +2524,11 @@ enter_now:
 	 * If we changed anything other than modified/used bits,
 	 * flush the TLB.  (is this overkill?)
 	 */
-	if ((opte & ~(PG_M|PG_U)) != npte) {
-#if defined(MULTIPROCESSOR)
-		int32_t cpumask = 0;
-
-		pmap_tlb_shootdown(pmap, va, opte, &cpumask);
-		pmap_tlb_shootnow(cpumask);
-#else
-		/* Don't bother deferring in the single CPU case. */
-		if (pmap_is_curpmap(pmap))
-			pmap_update_pg(va);
-#endif
+	if (opte & PG_V) {
+		if (nocache && (opte & PG_N) == 0)
+			wbinvd();
+		pmap_tlb_shootpage(pmap, va);
+		pmap_tlb_shootwait();
 	}
 
 	error = 0;
@@ -2795,10 +2764,13 @@ pmap_tlb_shootnow(int32_t cpumask)
 	self->ci_tlb_ipi_mask = cpumask;
 #endif
 
-	pmap_do_tlb_shootdown(0);	/* do *our* work. */
-
-#ifdef MULTIPROCESSOR
-	splx(s);
+void
+pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)
+{
+	struct cpu_info *ci, *self = curcpu();
+	CPU_INFO_ITERATOR cii;
+	long wait = 0;
+	u_int64_t mask = 0;
 
 	/*
 	 * Send the TLB IPI to other CPUs pending shootdowns.
@@ -2806,22 +2778,29 @@ pmap_tlb_shootnow(int32_t cpumask)
 	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self)
 			continue;
-		if (cpumask & (1U << ci->ci_cpuid))
-			if (x86_send_ipi(ci, X86_IPI_TLB) != 0)
-			     x86_atomic_clearbits_ul(&self->ci_tlb_ipi_mask,
-				    (1U << ci->ci_cpuid));
+		mask |= (1ULL << ci->ci_cpuid);
+		wait++;
 	}
 
-	while (self->ci_tlb_ipi_mask != 0)
-#ifdef DIAGNOSTIC
-		if (count++ > 1000000000)
-			panic("TLB IPI rendezvous failed (mask %x)",
-			    self->ci_tlb_ipi_mask);
-#else
-		/* XXX insert pause instruction */
-		;
-#endif
-#endif
+	if (wait > 0) {
+		int s = splvm();
+
+		while (x86_atomic_cas_ul(&tlb_shoot_wait, 0, wait) != 0) {
+			while (tlb_shoot_wait != 0)
+				SPINLOCK_SPIN_HOOK;
+		}
+		tlb_shoot_addr1 = va;
+		CPU_INFO_FOREACH(cii, ci) {
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
+				continue;
+			if (x86_fast_ipi(ci, LAPIC_IPI_INVLPG) != 0)
+				panic("pmap_tlb_shootpage: ipi failed");
+		}
+		splx(s);
+	}
+
+	if (pmap_is_curpmap(pm))
+		pmap_update_pg(va);
 }
 
 /*
@@ -2836,15 +2815,16 @@ pmap_tlb_shootdown(pmap_t pmap, vaddr_t va, pt_entry_t pte, int32_t *cpumaskp)
 	struct pmap_tlb_shootdown_q *pq;
 	struct pmap_tlb_shootdown_job *pj;
 	CPU_INFO_ITERATOR cii;
+	long wait = 0;
+	u_int64_t mask = 0;
+	vaddr_t va;
 
-#ifdef LARGEPAGES
-	if (pte & PG_PS)
-		va &= PG_LGFRAME;
-#endif
-
-	if (pmap_initialized == FALSE || cpus_attached == 0) {
-		pmap_update_pg(va);
-		return;
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == self || !pmap_is_active(pm, ci->ci_cpuid) ||
+		    !(ci->ci_flags & CPUF_RUNNING))
+			continue;
+		mask |= (1ULL << ci->ci_cpuid);
+		wait++;
 	}
 
 #if 0
@@ -2870,37 +2850,13 @@ pmap_tlb_shootdown(pmap_t pmap, vaddr_t va, pt_entry_t pte, int32_t *cpumaskp)
 			mtx_leave(&pq->pq_mutex);
 			continue;
 		}
-
-		pj = pmap_tlb_shootdown_job_get(pq);
-		pq->pq_pte |= pte;
-		if (pj == NULL) {
-			/*
-			 * Couldn't allocate a job entry.
-			 * Kill it now for this cpu, unless the failure
-			 * was due to too many pending flushes; otherwise,
-			 * tell other cpus to kill everything..
-			 */
-			if (ci == self && pq->pq_count < PMAP_TLB_MAXJOBS) {
-				pmap_update_pg(va);
-			} else {
-				if (pq->pq_pte & pmap_pg_g)
-					pq->pq_flushg++;
-				else
-					pq->pq_flushu++;
-				/*
-				 * Since we've nailed the whole thing,
-				 * drain the job entries pending for that
-				 * processor.
-				 */
-				pmap_tlb_shootdown_q_drain(pq);
-				*cpumaskp |= 1U << ci->ci_cpuid;
-			}
-		} else {
-			pj->pj_pmap = pmap;
-			pj->pj_va = va;
-			pj->pj_pte = pte;
-			TAILQ_INSERT_TAIL(&pq->pq_head, pj, pj_list);
-			*cpumaskp |= 1U << ci->ci_cpuid;
+		tlb_shoot_addr1 = sva;
+		tlb_shoot_addr2 = eva;
+		CPU_INFO_FOREACH(cii, ci) {
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
+				continue;
+			if (x86_fast_ipi(ci, LAPIC_IPI_INVLRANGE) != 0)
+				panic("pmap_tlb_shootrange: ipi failed");
 		}
 		mtx_leave(&pq->pq_mutex);
 	}
@@ -2920,7 +2876,15 @@ pmap_do_tlb_shootdown(struct cpu_info *self)
 #ifdef MULTIPROCESSOR
 	struct cpu_info *ci;
 	CPU_INFO_ITERATOR cii;
-#endif
+	long wait = 0;
+	u_int64_t mask = 0;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == self || !(ci->ci_flags & CPUF_RUNNING))
+			continue;
+		mask |= (1ULL << ci->ci_cpuid);
+		wait++;
+	}
 
 	mtx_enter(&pq->pq_mutex);
 
@@ -2942,11 +2906,11 @@ pmap_do_tlb_shootdown(struct cpu_info *self)
 		while ((pj = TAILQ_FIRST(&pq->pq_head)) != NULL) {
 			TAILQ_REMOVE(&pq->pq_head, pj, pj_list);
 
-			if ((!pq->pq_flushu && pmap_is_curpmap(pj->pj_pmap)) ||
-			    (pj->pj_pte & pmap_pg_g))
-				pmap_update_pg(pj->pj_va);
-
-			pmap_tlb_shootdown_job_put(pq, pj);
+		CPU_INFO_FOREACH(cii, ci) {
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
+				continue;
+			if (x86_fast_ipi(ci, LAPIC_IPI_INVLTLB) != 0)
+				panic("pmap_tlb_shoottlb: ipi failed");
 		}
 
 		pq->pq_flushu = pq->pq_pte = 0;

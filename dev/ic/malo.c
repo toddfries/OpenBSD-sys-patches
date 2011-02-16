@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: malo.c,v 1.63 2007/02/14 20:52:26 mglocker Exp $ */
+=======
+/*	$OpenBSD: malo.c,v 1.92 2010/08/27 17:08:00 jsg Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -26,6 +30,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -257,10 +262,8 @@ int	malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	    int count);
 void	malo_reset_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
 void	malo_free_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
-int	malo_init(struct ifnet *ifp);
 int	malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
 void	malo_start(struct ifnet *ifp);
-void	malo_stop(struct malo_softc *sc);
 void	malo_watchdog(struct ifnet *ifp);
 int	malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	    int arg);
@@ -370,7 +373,6 @@ malo_attach(struct malo_softc *sc)
 
 	/* setup interface */
 	ifp->if_softc = sc;
-	ifp->if_init = malo_init;
 	ifp->if_ioctl = malo_ioctl;
 	ifp->if_start = malo_start;
 	ifp->if_watchdog = malo_watchdog;
@@ -569,7 +571,8 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
 	    count * sizeof(struct malo_rx_desc),
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs,
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -580,7 +583,7 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 	    count * sizeof(struct malo_rx_desc), (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -593,7 +596,6 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 		goto fail;
 	}
 
-	bzero(ring->desc, count * sizeof(struct malo_rx_desc));
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct malo_rx_data), M_DEVBUF,
@@ -728,8 +730,8 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat,
-	    count * sizeof(struct malo_tx_desc),
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    count * sizeof(struct malo_tx_desc), PAGE_SIZE, 0,
+	    &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -740,7 +742,7 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	    count * sizeof(struct malo_tx_desc), (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -753,7 +755,6 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * sizeof(struct malo_tx_desc));
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof(struct malo_tx_data), M_DEVBUF,
@@ -960,9 +961,15 @@ malo_init(struct ifnet *ifp)
 
 fail:
 	/* reset adapter */
+<<<<<<< HEAD
 	DPRINTF(("%s: malo_init failed, reseting card\n",
 	    sc->sc_dev.dv_xname));
 	malo_ctl_write4(sc, 0x0c18, (1 << 15));
+=======
+	DPRINTF(1, "%s: malo_init failed, resetting card\n",
+	    sc->sc_dev.dv_xname);
+	malo_stop(sc);
+>>>>>>> origin/master
 	return (error);
 }
 
@@ -1146,7 +1153,7 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 			malo_cmd_set_channel(sc, chan);
 		}
-		timeout_add(&sc->sc_scan_to, hz / 2);
+		timeout_add_msec(&sc->sc_scan_to, 500);
 		break;
 	case IEEE80211_S_AUTH:
 		DPRINTF(("newstate AUTH\n"));
@@ -1240,15 +1247,19 @@ malo_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_STA:
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		imr->ifm_active |= IFM_IEEE80211_ADHOC;
-		break;
-	case IEEE80211_M_MONITOR:
-		imr->ifm_active |= IFM_IEEE80211_MONITOR;
 		break;
 	case IEEE80211_M_AHDEMO:
 		break;
 	case IEEE80211_M_HOSTAP:
+		break;
+#endif
+	case IEEE80211_M_MONITOR:
+		imr->ifm_active |= IFM_IEEE80211_MONITOR;
+		break;
+	default:
 		break;
 	}
 
@@ -1373,7 +1384,7 @@ malo_tx_intr(struct malo_softc *sc)
 		/* save last used TX rate */
 		sc->sc_last_txrate = malo_chip2rate(desc->datarate);
 
-		/* cleanup TX data and TX descritpor */
+		/* cleanup TX data and TX descriptor */
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
 		    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, data->map);
@@ -1478,7 +1489,7 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return (error);
@@ -1596,7 +1607,7 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return (error);
@@ -1646,6 +1657,7 @@ malo_rx_intr(struct malo_softc *sc)
 	struct malo_rx_desc *desc;
 	struct malo_rx_data *data;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *mnew, *m;
 	uint32_t rxRdPtr, rxWrPtr;
@@ -1755,7 +1767,10 @@ malo_rx_intr(struct malo_softc *sc)
 		ni = ieee80211_find_rxnode(ic, wh);
 
 		/* send the frame to the 802.11 layer */
-		ieee80211_input(ifp, m, ni, desc->rssi, 0);
+		rxi.rxi_flags = 0;
+		rxi.rxi_rssi = desc->rssi;
+		rxi.rxi_tstamp = 0;	/* unused */
+		ieee80211_input(ifp, m, ni, &rxi);
 
 		/* node is no longer needed */
 		ieee80211_release_node(ic, ni);
@@ -1773,13 +1788,6 @@ skip:
 	}
 
 	malo_mem_write4(sc, sc->sc_RxPdRdPtr, rxRdPtr);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		(*ifp->if_start)(ifp);
 }
 
 int
@@ -1973,9 +1981,11 @@ malo_update_slot(struct ieee80211com *ic)
 
 	malo_set_slot(sc);
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 		/* TODO */
 	}
+#endif
 }
 
 void
@@ -2327,9 +2337,12 @@ malo_cmd_set_rate(struct malo_softc *sc, uint8_t rate)
 
 	bzero(body, sizeof(*body));
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 		/* TODO */
-	} else {
+	} else
+#endif
+	{
 		body->aprates[0] = 2;
 		body->aprates[1] = 4;
 		body->aprates[2] = 11;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.28 2007/03/23 16:03:52 art Exp $	*/
+/*	$OpenBSD: intr.h,v 1.41 2010/12/27 19:51:27 guenther Exp $	*/
 /*	$NetBSD: intr.h,v 1.5 1996/05/13 06:11:28 mycroft Exp $	*/
 
 /*
@@ -36,12 +36,8 @@
 #include <machine/intrdefs.h>
 
 #ifndef _LOCORE
-
-#ifdef MULTIPROCESSOR
-#include <machine/i82489reg.h>
-#include <machine/i82489var.h>
+#include <sys/mutex.h>
 #include <machine/cpu.h>
-#endif
 
 extern volatile u_int32_t lapic_tpr;	/* Current interrupt priority level. */
 
@@ -83,8 +79,10 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
 #else
-#define splassert(wantipl) do { /* nada */ } while (0)
+#define splassert(wantipl)	do { /* nada */ } while (0)
+#define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
 
 /*
@@ -129,16 +127,13 @@ void splassert_check(int, const char *);
 #define spllock() 	splhigh()
 #define	spl0()		spllower(IPL_NONE)
 
-#define	setsoftclock()	softintr(1 << SIR_CLOCK, IPL_SOFTCLOCK)
-#define	setsoftnet()	softintr(1 << SIR_NET, IPL_SOFTNET)
-#define	setsofttty()	softintr(1 << SIR_TTY, IPL_SOFTTTY)
+#include <machine/pic.h>
 
 struct cpu_info;
 
 #ifdef MULTIPROCESSOR
 int i386_send_ipi(struct cpu_info *, int);
 void i386_broadcast_ipi(int);
-void i386_multicast_ipi(int, int);
 void i386_ipi_handler(void);
 void i386_ipi_microset(struct cpu_info *);
 void i386_intlock(int);
@@ -150,5 +145,53 @@ extern void (*ipifunc[I386_NIPI])(struct cpu_info *);
 #endif
 
 #endif /* !_LOCORE */
+
+/*
+ * Generic software interrupt support.
+ */
+
+#define	I386_SOFTINTR_SOFTCLOCK		0
+#define	I386_SOFTINTR_SOFTNET		1
+#define	I386_SOFTINTR_SOFTTTY		2
+#define	I386_NSOFTINTR			3
+
+#ifndef _LOCORE
+#include <sys/queue.h>
+
+struct i386_soft_intrhand {
+	TAILQ_ENTRY(i386_soft_intrhand)
+		sih_q;
+	struct i386_soft_intr *sih_intrhead;
+	void	(*sih_fn)(void *);
+	void	*sih_arg;
+	int	sih_pending;
+};
+
+struct i386_soft_intr {
+	TAILQ_HEAD(, i386_soft_intrhand)
+			softintr_q;
+	int		softintr_ssir;
+	struct mutex	softintr_lock;
+};
+
+void	*softintr_establish(int, void (*)(void *), void *);
+void	softintr_disestablish(void *);
+void	softintr_init(void);
+void	softintr_dispatch(int);
+
+#define	softintr_schedule(arg)						\
+do {									\
+	struct i386_soft_intrhand *__sih = (arg);			\
+	struct i386_soft_intr *__si = __sih->sih_intrhead;		\
+									\
+	mtx_enter(&__si->softintr_lock);				\
+	if (__sih->sih_pending == 0) {					\
+		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
+		__sih->sih_pending = 1;					\
+		softintr(__si->softintr_ssir);				\
+	}								\
+	mtx_leave(&__si->softintr_lock);				\
+} while (/*CONSTCOND*/ 0)
+#endif /* _LOCORE */
 
 #endif /* !_I386_INTR_H_ */

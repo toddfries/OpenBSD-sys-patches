@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: portal_vnops.c,v 1.21 2004/06/24 19:35:25 tholo Exp $	*/
+=======
+/*	$OpenBSD: portal_vnops.c,v 1.31 2009/08/14 16:32:21 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: portal_vnops.c,v 1.17 1996/02/13 13:12:57 mycroft Exp $	*/
 
 /*
@@ -106,6 +110,7 @@ int	portal_poll(void *);
 
 int (**portal_vnodeop_p)(void *);
 struct vnodeopv_entry_desc portal_vnodeop_entries[] = {
+<<<<<<< HEAD
 	{ &vop_default_desc, vn_default_error },
 	{ &vop_lookup_desc, portal_lookup },		/* lookup */
 	{ &vop_create_desc, portal_create },		/* create */
@@ -141,6 +146,43 @@ struct vnodeopv_entry_desc portal_vnodeop_entries[] = {
 	{ &vop_pathconf_desc, portal_pathconf },	/* pathconf */
 	{ &vop_advlock_desc, portal_advlock },		/* advlock */
 	{ &vop_bwrite_desc, portal_bwrite },		/* bwrite */
+=======
+	{ &vop_default_desc, eopnotsupp },
+	{ &vop_lookup_desc, portal_lookup },
+	{ &vop_create_desc, eopnotsupp },
+	{ &vop_mknod_desc, eopnotsupp },
+	{ &vop_open_desc, portal_open },
+	{ &vop_close_desc, nullop },
+	{ &vop_access_desc, nullop },
+	{ &vop_getattr_desc, portal_getattr },
+	{ &vop_setattr_desc, portal_setattr },
+	{ &vop_read_desc, eopnotsupp },
+	{ &vop_write_desc, eopnotsupp },
+	{ &vop_ioctl_desc, (int (*)(void *))enoioctl },
+	{ &vop_poll_desc, portal_poll },
+	{ &vop_revoke_desc, vop_generic_revoke },
+	{ &vop_fsync_desc, nullop },
+	{ &vop_remove_desc, eopnotsupp },
+	{ &vop_link_desc, portal_link },
+	{ &vop_rename_desc, eopnotsupp },
+	{ &vop_mkdir_desc, eopnotsupp },
+	{ &vop_rmdir_desc, eopnotsupp },
+	{ &vop_symlink_desc, portal_symlink },
+	{ &vop_readdir_desc, portal_readdir },
+	{ &vop_readlink_desc, eopnotsupp },
+	{ &vop_abortop_desc, vop_generic_abortop },
+	{ &vop_inactive_desc, portal_inactive },
+	{ &vop_reclaim_desc, portal_reclaim },
+	{ &vop_lock_desc, vop_generic_lock },
+	{ &vop_unlock_desc, vop_generic_unlock },
+	{ &vop_bmap_desc, portal_badop },
+	{ &vop_strategy_desc, portal_badop },
+	{ &vop_print_desc, portal_print },
+	{ &vop_islocked_desc, vop_generic_islocked },
+	{ &vop_pathconf_desc, portal_pathconf },
+	{ &vop_advlock_desc, eopnotsupp },
+	{ &vop_bwrite_desc, eopnotsupp },
+>>>>>>> origin/master
 	{ NULL, NULL }
 };
 struct vnodeopv_desc portal_vnodeop_opv_desc =
@@ -198,7 +240,7 @@ portal_lookup(v)
 
 	if (cnp->cn_namelen == 1 && *pname == '.') {
 		*vpp = dvp;
-		VREF(dvp);
+		vref(dvp);
 		return (0);
 	}
 
@@ -411,7 +453,7 @@ portal_open(v)
 		int flags = MSG_WAITALL;
 		fdpunlock(p->p_fd);
 		error = soreceive(so, (struct mbuf **) 0, &auio,
-					&m, &cm, &flags);
+					&m, &cm, &flags, 0);
 		fdplock(p->p_fd);
 		if (error)
 			goto bad;
@@ -455,6 +497,10 @@ portal_open(v)
 	 * than a single mbuf in it.  What to do?
 	 */
 	cmsg = mtod(cm, struct cmsghdr *);
+	if (cmsg->cmsg_len < CMSG_LEN(0)) {
+		error = EMSGSIZE;
+		goto bad;
+	}
 	newfds = (cmsg->cmsg_len - sizeof(*cmsg)) / sizeof (int);
 	if (newfds == 0) {
 		error = ECONNREFUSED;
@@ -466,7 +512,7 @@ portal_open(v)
 	 * integer file descriptors.  The fds were allocated by the action
 	 * of receiving the control message.
 	 */
-	ip = (int *)(cmsg + 1);
+	ip = (int *)CMSG_DATA(cmsg);
 	fd = *ip++;
 	if (newfds > 1) {
 		/*

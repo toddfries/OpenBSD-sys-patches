@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in6.h,v 1.43 2006/12/09 01:12:28 itojun Exp $	*/
+=======
+/*	$OpenBSD: in6.h,v 1.52 2010/09/23 04:45:15 yasuoka Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -224,7 +228,6 @@ extern const struct in6_addr in6addr_loopback;
 #if __BSD_VISIBLE
 extern const struct in6_addr in6addr_intfacelocal_allnodes;
 extern const struct in6_addr in6addr_linklocal_allnodes;
-extern const struct in6_addr in6addr_linklocal_allrouters;
 #endif
 
 /*
@@ -390,6 +393,7 @@ extern const struct in6_addr in6addr_linklocal_allrouters;
 #if __BSD_VISIBLE
 struct route_in6 {
 	struct	rtentry *ro_rt;
+	u_long		 ro_tableid;	/* padded to long for alignment */
 	struct	sockaddr_in6 ro_dst;
 };
 #endif
@@ -477,6 +481,7 @@ struct route_in6 {
 
 #define IPV6_TCLASS		61   /* int; send traffic class value */
 #define IPV6_DONTFRAG		62   /* bool; disable IPv6 fragmentation */
+#define IPV6_PIPEX		63   /* bool; using PIPEX */
 
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
 
@@ -529,7 +534,7 @@ struct ip6_mtuinfo {
  * Third level is protocol number.
  * Fourth level is desired variable within that protocol.
  */
-#define IPV6PROTO_MAXID	(IPPROTO_PIM + 1)	/* don't list to IPV6PROTO_MAX */
+#define IPV6PROTO_MAXID	(IPPROTO_DIVERT + 1)	/* don't list to IPV6PROTO_MAX */
 
 #define CTL_IPV6PROTO_NAMES { \
 	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
@@ -576,6 +581,49 @@ struct ip6_mtuinfo {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "pim6", CTLTYPE_NODE }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+/*110*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*120*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*130*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*140*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*150*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*160*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*170*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*180*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*190*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*200*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*210*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*220*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*230*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*240*/	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, \
+/*250*/	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ "divert", CTLTYPE_NODE }, \
 }
 
 /*
@@ -614,7 +662,13 @@ struct ip6_mtuinfo {
 #define IPV6CTL_MFORWARDING	42
 #define IPV6CTL_MULTIPATH	43
 #define IPV6CTL_MCAST_PMTU	44	/* path MTU discovery for multicast */
-#define IPV6CTL_MAXID		45
+#define IPV6CTL_NEIGHBORGCTHRESH 45
+#define IPV6CTL_MAXIFPREFIXES	46
+#define IPV6CTL_MAXIFDEFROUTERS 47
+#define IPV6CTL_MAXDYNROUTES	48
+#define IPV6CTL_DAD_PENDING	49
+#define IPV6CTL_MAXID		50
+
 /* New entries should be added here from current IPV6CTL_MAXID value. */
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
 
@@ -664,6 +718,11 @@ struct ip6_mtuinfo {
 	{ "mforwarding", CTLTYPE_INT }, \
 	{ "multipath", CTLTYPE_INT }, \
 	{ "multicast_mtudisc", CTLTYPE_INT }, \
+	{ "neighborgcthresh", CTLTYPE_INT }, \
+	{ "maxifprefixes", CTLTYPE_INT }, \
+	{ "maxifdefrouters", CTLTYPE_INT }, \
+	{ "maxdynroutes", CTLTYPE_INT }, \
+	{ "dad_pending", CTLTYPE_INT }, \
 }
 
 #define IPV6CTL_VARS { \
@@ -712,6 +771,11 @@ struct ip6_mtuinfo {
 	&ip6_mforwarding, \
 	&ip6_multipath, \
 	&ip6_mcast_pmtu, \
+	&ip6_neighborgcthresh, \
+	&ip6_maxifprefixes, \
+	&ip6_maxifdefrouters, \
+	&ip6_maxdynroutes, \
+	NULL, \
 }
 
 #endif /* __BSD_VISIBLE */
@@ -723,8 +787,8 @@ int	in6_cksum(struct mbuf *, u_int8_t, u_int32_t, u_int32_t);
 int	in6_localaddr(struct in6_addr *);
 int	in6_addrscope(struct in6_addr *);
 struct	in6_ifaddr *in6_ifawithscope(struct ifnet *, struct in6_addr *);
-struct	in6_ifaddr *in6_ifawithifp(struct ifnet *, struct in6_addr *);
 extern void in6_if_up(struct ifnet *);
+void 	in6_get_rand_ifid(struct ifnet *, struct in6_addr *);
 
 #define	satosin6(sa)	((struct sockaddr_in6 *)(sa))
 #define	sin6tosa(sin6)	((struct sockaddr *)(sin6))

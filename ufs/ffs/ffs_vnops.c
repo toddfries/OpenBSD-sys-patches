@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_vnops.c,v 1.42 2007/02/26 11:25:23 pedro Exp $	*/
+=======
+/*	$OpenBSD: ffs_vnops.c,v 1.60 2010/12/29 21:28:45 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -62,6 +66,7 @@
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
+<<<<<<< HEAD
 /* Global vfs data structures for ufs. */
 int (**ffs_vnodeop_p)(void *);
 struct vnodeopv_entry_desc ffs_vnodeop_entries[] = {
@@ -103,56 +108,130 @@ struct vnodeopv_entry_desc ffs_vnodeop_entries[] = {
 	{ &vop_reallocblks_desc, ffs_reallocblks },	/* reallocblks */
 	{ &vop_bwrite_desc, vop_generic_bwrite },
 	{ NULL, NULL }
+=======
+struct vops ffs_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_lookup	= ufs_lookup,
+	.vop_create	= ufs_create,
+	.vop_mknod	= ufs_mknod,
+	.vop_open	= ufs_open,
+	.vop_close	= ufs_close,
+	.vop_access	= ufs_access,
+	.vop_getattr	= ufs_getattr,
+	.vop_setattr	= ufs_setattr,
+	.vop_read	= ffs_read,
+	.vop_write	= ffs_write,
+	.vop_ioctl	= ufs_ioctl,
+	.vop_poll	= ufs_poll,
+	.vop_kqfilter	= ufs_kqfilter,
+	.vop_revoke	= vop_generic_revoke,
+	.vop_fsync	= ffs_fsync,
+	.vop_remove	= ufs_remove,
+	.vop_link	= ufs_link,
+	.vop_rename	= ufs_rename,
+	.vop_mkdir	= ufs_mkdir,
+	.vop_rmdir	= ufs_rmdir,
+	.vop_symlink	= ufs_symlink,
+	.vop_readdir	= ufs_readdir,
+	.vop_readlink	= ufs_readlink,
+	.vop_abortop	= vop_generic_abortop,
+	.vop_inactive	= ufs_inactive,
+	.vop_reclaim	= ffs_reclaim,
+	.vop_lock	= ufs_lock,
+	.vop_unlock	= ufs_unlock,
+	.vop_bmap	= ufs_bmap,
+	.vop_strategy	= ufs_strategy,
+	.vop_print	= ufs_print,
+	.vop_islocked	= ufs_islocked,
+	.vop_pathconf	= ufs_pathconf,
+	.vop_advlock	= ufs_advlock,
+	.vop_reallocblks = ffs_reallocblks,
+	.vop_bwrite	= vop_generic_bwrite
+>>>>>>> origin/master
 };
 
-struct vnodeopv_desc ffs_vnodeop_opv_desc =
-	{ &ffs_vnodeop_p, ffs_vnodeop_entries };
+struct vops ffs_specvops = {
+	.vop_default	= eopnotsupp,
+	.vop_close	= ufsspec_close,
+	.vop_access	= ufs_access,
+	.vop_getattr	= ufs_getattr,
+	.vop_setattr	= ufs_setattr,
+	.vop_read	= ufsspec_read,
+	.vop_write	= ufsspec_write,
+	.vop_fsync	= ffs_fsync,
+	.vop_inactive	= ufs_inactive,
+	.vop_reclaim	= ffs_reclaim,
+	.vop_lock	= ufs_lock,
+	.vop_unlock	= ufs_unlock,
+	.vop_print	= ufs_print,
+	.vop_islocked	= ufs_islocked,
 
-int (**ffs_specop_p)(void *);
-struct vnodeopv_entry_desc ffs_specop_entries[] = {
-	{ &vop_default_desc, spec_vnoperate },
-	{ &vop_close_desc, ufsspec_close },		/* close */
-	{ &vop_access_desc, ufs_access },		/* access */
-	{ &vop_getattr_desc, ufs_getattr },		/* getattr */
-	{ &vop_setattr_desc, ufs_setattr },		/* setattr */
-	{ &vop_read_desc, ufsspec_read },		/* read */
-	{ &vop_write_desc, ufsspec_write },		/* write */
-	{ &vop_fsync_desc, ffs_fsync },			/* fsync */
-	{ &vop_inactive_desc, ufs_inactive },		/* inactive */
-	{ &vop_reclaim_desc, ffs_reclaim },		/* reclaim */
-	{ &vop_lock_desc, ufs_lock },			/* lock */
-	{ &vop_unlock_desc, ufs_unlock },		/* unlock */
-	{ &vop_print_desc, ufs_print },			/* print */
-	{ &vop_islocked_desc, ufs_islocked },		/* islocked */
-	{ NULL, NULL }
+	/* XXX: Keep in sync with spec_vops */
+	.vop_lookup	= vop_generic_lookup,
+	.vop_create	= spec_badop,
+	.vop_mknod	= spec_badop,
+	.vop_open	= spec_open,
+	.vop_ioctl	= spec_ioctl,
+	.vop_poll	= spec_poll,
+	.vop_kqfilter	= spec_kqfilter,
+	.vop_revoke	= vop_generic_revoke,
+	.vop_remove	= spec_badop,
+	.vop_link	= spec_badop,
+	.vop_rename	= spec_badop,
+	.vop_mkdir	= spec_badop,
+	.vop_rmdir	= spec_badop,
+	.vop_symlink	= spec_badop,
+	.vop_readdir	= spec_badop,
+	.vop_readlink	= spec_badop,
+	.vop_abortop	= spec_badop,
+	.vop_bmap	= vop_generic_bmap,
+	.vop_strategy	= spec_strategy,
+	.vop_pathconf	= spec_pathconf,
+	.vop_advlock	= spec_advlock,
+	.vop_bwrite	= vop_generic_bwrite,
 };
-
-struct vnodeopv_desc ffs_specop_opv_desc =
-	{ &ffs_specop_p, ffs_specop_entries };
 
 #ifdef FIFO
-int (**ffs_fifoop_p)(void *);
-struct vnodeopv_entry_desc ffs_fifoop_entries[] = {
-	{ &vop_default_desc, fifo_vnoperate },
-	{ &vop_close_desc, ufsfifo_close },		/* close */
-	{ &vop_access_desc, ufs_access },		/* access */
-	{ &vop_getattr_desc, ufs_getattr },		/* getattr */
-	{ &vop_setattr_desc, ufs_setattr },		/* setattr */
-	{ &vop_read_desc, ufsfifo_read },		/* read */
-	{ &vop_write_desc, ufsfifo_write },		/* write */
-	{ &vop_fsync_desc, ffs_fsync },			/* fsync */
-	{ &vop_inactive_desc, ufs_inactive },		/* inactive */
-	{ &vop_reclaim_desc, ffsfifo_reclaim },		/* reclaim */
-	{ &vop_lock_desc, ufs_lock },			/* lock */
-	{ &vop_unlock_desc, ufs_unlock },		/* unlock */
-	{ &vop_print_desc, ufs_print },			/* print */
-	{ &vop_islocked_desc, ufs_islocked },		/* islocked */
-	{ &vop_bwrite_desc, vop_generic_bwrite },
-	{ NULL, NULL }
-};
+struct vops ffs_fifovops = {
+	.vop_default	= eopnotsupp,
+	.vop_close	= ufsfifo_close,
+	.vop_access	= ufs_access,
+	.vop_getattr	= ufs_getattr,
+	.vop_setattr	= ufs_setattr,
+	.vop_read	= ufsfifo_read,
+	.vop_write	= ufsfifo_write,
+	.vop_fsync	= ffs_fsync,
+	.vop_inactive	= ufs_inactive,
+	.vop_reclaim	= ffsfifo_reclaim,
+	.vop_lock	= ufs_lock,
+	.vop_unlock	= ufs_unlock,
+	.vop_print	= ufs_print,
+	.vop_islocked	= ufs_islocked,
+	.vop_bwrite	= vop_generic_bwrite,
 
-struct vnodeopv_desc ffs_fifoop_opv_desc =
-	{ &ffs_fifoop_p, ffs_fifoop_entries };
+	/* XXX: Keep in sync with fifo_vops */
+	.vop_lookup	= vop_generic_lookup,
+	.vop_create	= fifo_badop,
+	.vop_mknod	= fifo_badop,
+	.vop_open	= fifo_open,
+	.vop_ioctl	= fifo_ioctl,
+	.vop_poll	= fifo_poll,
+	.vop_kqfilter	= fifo_kqfilter,
+	.vop_revoke	= vop_generic_revoke,
+	.vop_remove	= fifo_badop,
+	.vop_link	= fifo_badop,
+	.vop_rename	= fifo_badop,
+	.vop_mkdir	= fifo_badop,
+	.vop_rmdir	= fifo_badop,
+	.vop_symlink	= fifo_badop,
+	.vop_readdir	= fifo_badop,
+	.vop_readlink	= fifo_badop,
+	.vop_abortop	= fifo_badop,
+	.vop_bmap	= vop_generic_bmap,
+	.vop_strategy	= fifo_badop,
+	.vop_pathconf	= fifo_pathconf,
+	.vop_advlock	= fifo_advlock
+};
 #endif /* FIFO */
 
 /*
@@ -164,7 +243,6 @@ int doclusterwrite = 1;
 /*
  * Vnode op for reading.
  */
-/* ARGSUSED */
 int
 ffs_read(void *v)
 {
@@ -391,7 +469,7 @@ ffs_write(void *v)
 	 * tampering.
 	 */
 	if (resid > uio->uio_resid && ap->a_cred && ap->a_cred->cr_uid != 0)
-		DIP(ip, mode) &= ~(ISUID | ISGID);
+		DIP_ASSIGN(ip, mode, DIP(ip, mode) & ~(ISUID | ISGID));
 	if (resid > uio->uio_resid)
 		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0));
 	if (error) {
@@ -410,7 +488,6 @@ ffs_write(void *v)
 /*
  * Synch an open file.
  */
-/* ARGSUSED */
 int
 ffs_fsync(void *v)
 {
@@ -466,7 +543,8 @@ loop:
 		}
 
 		bremfree(bp);
-		bp->b_flags |= B_BUSY | B_SCANNED;
+		buf_acquire(bp);
+		bp->b_flags |= B_SCANNED;
 		splx(s);
 		/*
 		 * On our final pass through, do all I/O synchronously

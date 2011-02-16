@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: linux_exec.c,v 1.24 2005/12/30 19:46:55 miod Exp $	*/
+=======
+/*	$OpenBSD: linux_exec.c,v 1.31 2009/03/05 19:52:24 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -46,6 +43,7 @@
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
 #include <sys/exec_olf.h>
@@ -108,6 +106,7 @@ struct emul emul_linux_aout = {
 	linux_aout_copyargs,
 	setregs,
 	NULL,
+	coredump_trad,
 	linux_sigcode,
 	linux_esigcode,
 	0,
@@ -133,6 +132,7 @@ struct emul emul_linux_elf = {
 	elf32_copyargs,
 	setregs,
 	exec_elf32_fixup,
+	coredump_trad,
 	linux_sigcode,
 	linux_esigcode,
 	0,
@@ -482,9 +482,30 @@ linux_elf_probe(p, epp, itp, pos, os)
 	int error;
 	size_t len;
 
+	if (!(emul_linux_elf.e_flags & EMUL_ENABLED))
+		return (ENOEXEC);
+
+	/*
+	 * Modern Linux binaries carry an identification note.
+	 */
+	if (ELFNAME(os_pt_note)(p, epp, epp->ep_hdr, "GNU", 4, 0x10) == 0) {
+		goto recognized;
+	}
+
 	brand = elf32_check_brand(eh);
-	if (brand && strcmp(brand, "Linux"))
+	if (brand != NULL && strcmp(brand, "Linux") != 0)
 		return (EINVAL);
+
+	/*
+	 * If this is a static binary, do not allow it to run, as it
+	 * has not been identified. We'll give non-static binaries a
+	 * chance to run, as the Linux ld.so name is usually unique
+	 * enough to clear any amibiguity.
+	 */
+	if (itp == NULL)
+		return (EINVAL);
+
+recognized:
 	if (itp) {
 		if ((error = emul_find(p, NULL, linux_emul_path, itp, &bp, 0)))
 			return (error);

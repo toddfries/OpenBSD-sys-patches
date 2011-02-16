@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: ata_wdc.c,v 1.29 2006/10/04 00:52:55 krw Exp $	*/
+=======
+/*      $OpenBSD: ata_wdc.c,v 1.35 2010/11/06 16:53:15 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ata_wdc.c,v 1.21 1999/08/09 09:43:11 bouyer Exp $	*/
 
 /*
@@ -12,12 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -47,13 +45,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -167,7 +158,7 @@ wdc_ata_bio_start(struct channel_softc *chp, struct wdc_xfer *xfer)
 
 	/* start timeout machinery */
 	if ((ata_bio->flags & ATA_POLL) == 0)
-		timeout_add(&chp->ch_timo, ATA_DELAY / 1000 * hz);
+		timeout_add_msec(&chp->ch_timo, ATA_DELAY);
 	_wdc_ata_bio_start(chp, xfer);
 }
 
@@ -180,7 +171,7 @@ _wdc_ata_bio_start(struct channel_softc *chp, struct wdc_xfer *xfer)
 	u_int8_t head, sect, cmd = 0;
 	int nblks;
 	int ata_delay;
-	int dma_flags = 0;
+	int error, dma_flags = 0;
 
 	WDCDEBUG_PRINT(("_wdc_ata_bio_start %s:%d:%d\n",
 	    chp->wdc->sc_dev.dv_xname, chp->channel, xfer->drive),
@@ -262,10 +253,21 @@ again:
 				cmd = (ata_bio->flags & ATA_READ) ?
 				    WDCC_READDMA : WDCC_WRITEDMA;
 	    		/* Init the DMA channel. */
-			if ((*chp->wdc->dma_init)(chp->wdc->dma_arg,
+			error = (*chp->wdc->dma_init)(chp->wdc->dma_arg,
 			    chp->channel, xfer->drive,
 			    (char *)xfer->databuf + xfer->c_skip,
-			    ata_bio->nbytes, dma_flags) != 0) {
+			    ata_bio->nbytes, dma_flags);
+			if (error) {
+				if (error == EINVAL) {
+					/*
+					 * We can't do DMA on this transfer
+					 * for some reason.  Fall back to
+					 * PIO.
+					 */
+					xfer->c_flags &= ~C_DMA;
+					error = 0;
+					goto do_pio;
+				}
 				ata_bio->error = ERR_DMA;
 				ata_bio->r_error = 0;
 				wdc_ata_bio_done(chp, xfer);
@@ -289,6 +291,7 @@ again:
 			/* wait for irq */
 			goto intr;
 		} /* else not DMA */
+ do_pio:
 		ata_bio->nblks = min(nblks, ata_bio->multi);
 		ata_bio->nbytes = ata_bio->nblks * ata_bio->lp->d_secsize;
 		if (ata_bio->nblks > 1 && (ata_bio->flags & ATA_SINGLE) == 0) {

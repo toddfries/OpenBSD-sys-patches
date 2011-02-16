@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio_pic.c,v 1.25 2006/01/29 10:47:35 martin Exp $	*/
+/*	$OpenBSD: sio_pic.c,v 1.31 2009/09/30 20:16:31 miod Exp $	*/
 /* $NetBSD: sio_pic.c,v 1.28 2000/06/06 03:10:13 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -454,11 +447,11 @@ sio_intr_establish(v, irq, type, level, fn, arg, name)
         int type;
         int level;
         int (*fn)(void *);
-	char *name;
+	const char *name;
 {
 	void *cookie;
 
-	if (irq > ICU_LEN || type == IST_NONE)
+	if (irq >= ICU_LEN || type == IST_NONE)
 		panic("sio_intr_establish: bogus irq or type");
 
 	cookie = alpha_shared_intr_establish(sio_intr, irq, type, level, fn,
@@ -485,7 +478,7 @@ sio_intr_disestablish(v, cookie)
 	s = splhigh();
 
 	/* Remove it from the link. */
-	alpha_shared_intr_disestablish(sio_intr, cookie, "isa irq");
+	alpha_shared_intr_disestablish(sio_intr, cookie);
 
 	/*
 	 * Decide if we should disable the interrupt.  We must ensure
@@ -632,8 +625,10 @@ static void
 specific_eoi(irq)
 	int irq;
 {
-	if (irq > 7)
+	if (irq > 7) {
 		bus_space_write_1(sio_iot,
-		    sio_ioh_icu2, 0, 0x20 | (irq & 0x07));	/* XXX */
-	bus_space_write_1(sio_iot, sio_ioh_icu1, 0, 0x20 | (irq > 7 ? 2 : irq));
+		    sio_ioh_icu2, 0, 0x60 | (irq & 0x07));	/* XXX */
+		irq = 2;
+	}
+	bus_space_write_1(sio_iot, sio_ioh_icu1, 0, 0x60 | irq);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2005/12/14 21:46:30 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.7 2010/07/03 04:54:32 kettenis Exp $	*/
 /*	$NetBSD: signal.h,v 1.6 1996/01/08 13:51:43 mycroft Exp $	*/
 
 /*
@@ -78,6 +78,8 @@ struct	sigcontext {
 
 	int	sc_trapno;		/* XXX should be above */
 	int	sc_err;
+
+	union savefpu *sc_fpstate;
 };
 
 #define sc_sp sc_esp

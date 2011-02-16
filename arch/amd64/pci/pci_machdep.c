@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.10 2006/12/14 17:14:01 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.40 2011/01/10 16:26:27 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,14 +63,6 @@
 
 /*
  * Machine-specific functions for PCI autoconfiguration.
- *
- * On PCs, there are two methods of generating PCI configuration cycles.
- * We try to detect the appropriate mechanism for this machine and set
- * up a few function pointers to access the correct method directly.
- *
- * The configuration method can be hard-coded in the config file by
- * using `options PCI_CONF_MODE=N', where `N' is the configuration mode
- * as defined section 3.6.4.1, `Generating Configuration Cycles'.
  */
 
 #include <sys/types.h>
@@ -86,15 +71,16 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <sys/lock.h>
+#include <sys/extent.h>
+#include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
 
-#define _X86_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/pio.h>
 #include <machine/intr.h>
+#include <machine/biosvar.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -109,59 +95,41 @@
 #include <machine/mpbiosvar.h>
 #endif
 
-int pci_mode = -1;
+/*
+ * Memory Mapped Configuration space access.
+ *
+ * Since mapping the whole configuration space will cost us up to
+ * 256MB of kernel virtual memory, we use seperate mappings per bus.
+ * The mappings are created on-demand, such that we only use kernel
+ * virtual memory for busses that are actually present.
+ */
+bus_addr_t pci_mcfg_addr;
+int pci_mcfg_min_bus, pci_mcfg_max_bus;
+bus_space_tag_t pci_mcfgt = X86_BUS_SPACE_MEM;
+bus_space_handle_t pci_mcfgh[256];
+void pci_mcfg_map_bus(int);
 
-#if defined(MULTIPROCESSOR) && 0
-struct simplelock pci_conf_slock = SIMPLELOCK_INITIALIZER;
-#else
-struct simplelock pci_conf_slock = { 0 };
-#endif
+struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
 
-#define	PCI_CONF_LOCK(s)						\
+#define	PCI_CONF_LOCK()						\
 do {									\
-	(s) = splhigh();						\
-	simple_lock(&pci_conf_slock);					\
+	mtx_enter(&pci_conf_lock);					\
 } while (0)
 
-#define	PCI_CONF_UNLOCK(s)						\
+#define	PCI_CONF_UNLOCK()						\
 do {									\
-	simple_unlock(&pci_conf_slock);					\
-	splx((s));							\
+	mtx_leave(&pci_conf_lock);					\
 } while (0)
 
 #define	PCI_MODE1_ENABLE	0x80000000UL
 #define	PCI_MODE1_ADDRESS_REG	0x0cf8
 #define	PCI_MODE1_DATA_REG	0x0cfc
 
-#define	PCI_MODE2_ENABLE_REG	0x0cf8
-#define	PCI_MODE2_FORWARD_REG	0x0cfa
-
-#define _m1tag(b, d, f) \
-	(PCI_MODE1_ENABLE | ((b) << 16) | ((d) << 11) | ((f) << 8))
-#define _qe(bus, dev, fcn, vend, prod) \
-	{_m1tag(bus, dev, fcn), PCI_ID_CODE(vend, prod)}
-struct {
-	u_int32_t tag;
-	pcireg_t id;
-} pcim1_quirk_tbl[] = {
-	_qe(0, 0, 0, PCI_VENDOR_COMPAQ, PCI_PRODUCT_COMPAQ_TRIFLEX1),
-	/* XXX Triflex2 not tested */
-	_qe(0, 0, 0, PCI_VENDOR_COMPAQ, PCI_PRODUCT_COMPAQ_TRIFLEX2),
-	_qe(0, 0, 0, PCI_VENDOR_COMPAQ, PCI_PRODUCT_COMPAQ_TRIFLEX4),
-	/* Triton needed for Connectix Virtual PC */
-	_qe(0, 0, 0, PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437FX),
-	/* Connectix Virtual PC 5 has a 440BX */
-	_qe(0, 0, 0, PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82443BX_NOAGP),
-	{0, 0xffffffff} /* patchable */
-};
-#undef _m1tag
-#undef _qe
-
 /*
  * PCI doesn't have any special needs; just use the generic versions
  * of these functions.
  */
-struct x86_bus_dma_tag pci_bus_dma_tag = {
+struct bus_dma_tag pci_bus_dma_tag = {
 	NULL,			/* _may_bounce */
 	_bus_dmamap_create,
 	_bus_dmamap_destroy,
@@ -170,7 +138,7 @@ struct x86_bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamap_load_uio,
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
-	NULL,
+	_bus_dmamap_sync,
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -184,105 +152,85 @@ void
 pci_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
-	if (pba->pba_bus == 0) {
-		printf(": configuration mode %d", pci_mode);
+#ifndef SMALL_KERNEL
+	if (pba->pba_bus == 0)
 		amdgart_probe(pba);
-	}
+#endif /* !SMALL_KERNEL */
 }
 
 int
 pci_bus_maxdevs(pci_chipset_tag_t pc, int busno)
 {
-
-	/*
-	 * Bus number is irrelevant.  If Configuration Mechanism 2 is in
-	 * use, can only have devices 0-15 on any bus.  If Configuration
-	 * Mechanism 1 is in use, can have devices 0-32 (i.e. the `normal'
-	 * range).
-	 */
-	if (pci_mode == 2)
-		return (16);
-	else
-		return (32);
+	return (32);
 }
 
 pcitag_t
 pci_make_tag(pci_chipset_tag_t pc, int bus, int device, int function)
 {
-	pcitag_t tag;
+	if (bus >= 256 || device >= 32 || function >= 8)
+		panic("pci_make_tag: bad request");
 
-	switch (pci_mode) {
-	case 1:
-		if (bus >= 256 || device >= 32 || function >= 8)
-			panic("pci_make_tag: bad request");
-
-		tag.mode1 = PCI_MODE1_ENABLE |
-		    	(bus << 16) | (device << 11) | (function << 8);
-		break;
-	case 2:
-		if (bus >= 256 || device >= 16 || function >= 8)
-			panic("pci_make_tag: bad request");
-
-		tag.mode2.port = 0xc000 | (device << 8);
-		tag.mode2.enable = 0xf0 | (function << 1);
-		tag.mode2.forward = bus;
-		break;
-	default:
-		panic("pci_make_tag: mode not configured");
-	}
-
-	return tag;
+	return (PCI_MODE1_ENABLE |
+	    (bus << 16) | (device << 11) | (function << 8));
 }
 
 void
 pci_decompose_tag(pci_chipset_tag_t pc, pcitag_t tag, int *bp, int *dp, int *fp)
 {
+	if (bp != NULL)
+		*bp = (tag >> 16) & 0xff;
+	if (dp != NULL)
+		*dp = (tag >> 11) & 0x1f;
+	if (fp != NULL)
+		*fp = (tag >> 8) & 0x7;
+}
 
-	switch (pci_mode) {
-	case 1:
-		if (bp != NULL)
-			*bp = (tag.mode1 >> 16) & 0xff;
-		if (dp != NULL)
-			*dp = (tag.mode1 >> 11) & 0x1f;
-		if (fp != NULL)
-			*fp = (tag.mode1 >> 8) & 0x7;
-		break;
-	case 2:
-		if (bp != NULL)
-			*bp = tag.mode2.forward & 0xff;
-		if (dp != NULL)
-			*dp = (tag.mode2.port >> 8) & 0xf;
-		if (fp != NULL)
-			*fp = (tag.mode2.enable >> 1) & 0x7;
-		break;
-	default:
-		panic("pci_decompose_tag: mode not configured");
+int
+pci_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	int bus;
+
+	if (pci_mcfg_addr) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus)
+			return PCIE_CONFIG_SPACE_SIZE;
 	}
+
+	return PCI_CONFIG_SPACE_SIZE;
+}
+
+void
+pci_mcfg_map_bus(int bus)
+{
+	if (pci_mcfgh[bus])
+		return;
+
+	if (bus_space_map(pci_mcfgt, pci_mcfg_addr + (bus << 20), 1 << 20,
+	    0, &pci_mcfgh[bus]))
+		panic("pci_conf_read: cannot map mcfg space");
 }
 
 pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
-	int s;
+	int bus;
 
-	PCI_CONF_LOCK(s);
-	switch (pci_mode) {
-	case 1:
-		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
-		data = inl(PCI_MODE1_DATA_REG);
-		outl(PCI_MODE1_ADDRESS_REG, 0);
-		break;
-	case 2:
-		outb(PCI_MODE2_ENABLE_REG, tag.mode2.enable);
-		outb(PCI_MODE2_FORWARD_REG, tag.mode2.forward);
-		data = inl(tag.mode2.port | reg);
-		outb(PCI_MODE2_ENABLE_REG, 0);
-		break;
-	default:
-		panic("pci_conf_read: mode not configured");
+	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
+			pci_mcfg_map_bus(bus);
+			data = bus_space_read_4(pci_mcfgt, pci_mcfgh[bus],
+			    (tag & 0x000ff00) << 4 | reg);
+			return data;
+		}
 	}
-	PCI_CONF_UNLOCK(s);
+
+	PCI_CONF_LOCK();
+	outl(PCI_MODE1_ADDRESS_REG, tag | reg);
+	data = inl(PCI_MODE1_DATA_REG);
+	outl(PCI_MODE1_ADDRESS_REG, 0);
+	PCI_CONF_UNLOCK();
 
 	return data;
 }
@@ -290,123 +238,31 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
-	int s;
+	int bus;
 
-	PCI_CONF_LOCK(s);
-	switch (pci_mode) {
-	case 1:
-		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
-		outl(PCI_MODE1_DATA_REG, data);
-		outl(PCI_MODE1_ADDRESS_REG, 0);
-		break;
-	case 2:
-		outb(PCI_MODE2_ENABLE_REG, tag.mode2.enable);
-		outb(PCI_MODE2_FORWARD_REG, tag.mode2.forward);
-		outl(tag.mode2.port | reg, data);
-		outb(PCI_MODE2_ENABLE_REG, 0);
-		break;
-	default:
-		panic("pci_conf_write: mode not configured");
-	}
-	PCI_CONF_UNLOCK(s);
-}
-
-int
-pci_mode_detect(void)
-{
-
-#ifdef PCI_CONF_MODE
-#if (PCI_CONF_MODE == 1) || (PCI_CONF_MODE == 2)
-	return (pci_mode = PCI_CONF_MODE);
-#else
-#error Invalid PCI configuration mode.
-#endif
-#else
-	u_int32_t sav, val;
-	int i;
-	pcireg_t idreg;
-
-	if (pci_mode != -1)
-		return pci_mode;
-
-	/*
-	 * We try to divine which configuration mode the host bridge wants.
-	 */
-
-	sav = inl(PCI_MODE1_ADDRESS_REG);
-
-	pci_mode = 1; /* assume this for now */
-	/*
-	 * catch some known buggy implementations of mode 1
-	 */
-	for (i = 0; i < sizeof(pcim1_quirk_tbl) / sizeof(pcim1_quirk_tbl[0]);
-	     i++) {
-		pcitag_t t;
-
-		if (!pcim1_quirk_tbl[i].tag)
-			break;
-		t.mode1 = pcim1_quirk_tbl[i].tag;
-		idreg = pci_conf_read(0, t, PCI_ID_REG); /* needs "pci_mode" */
-		if (idreg == pcim1_quirk_tbl[i].id) {
-#ifdef DEBUG
-			printf("known mode 1 PCI chipset (%08x)\n",
-			       idreg);
-#endif
-			return (pci_mode);
+	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
+			pci_mcfg_map_bus(bus);
+			bus_space_write_4(pci_mcfgt, pci_mcfgh[bus],
+			    (tag & 0x000ff00) << 4 | reg, data);
+			return;
 		}
 	}
 
-	/*
-	 * Strong check for standard compliant mode 1:
-	 * 1. bit 31 ("enable") can be set
-	 * 2. byte/word access does not affect register
-	 */
-	outl(PCI_MODE1_ADDRESS_REG, PCI_MODE1_ENABLE);
-	outb(PCI_MODE1_ADDRESS_REG + 3, 0);
-	outw(PCI_MODE1_ADDRESS_REG + 2, 0);
-	val = inl(PCI_MODE1_ADDRESS_REG);
-	if ((val & 0x80fffffc) != PCI_MODE1_ENABLE) {
-#ifdef DEBUG
-		printf("pci_mode_detect: mode 1 enable failed (%x)\n",
-		       val);
-#endif
-		goto not1;
-	}
+	PCI_CONF_LOCK();
+	outl(PCI_MODE1_ADDRESS_REG, tag | reg);
+	outl(PCI_MODE1_DATA_REG, data);
 	outl(PCI_MODE1_ADDRESS_REG, 0);
-	val = inl(PCI_MODE1_ADDRESS_REG);
-	if ((val & 0x80fffffc) != 0)
-		goto not1;
-	return (pci_mode);
-not1:
-	outl(PCI_MODE1_ADDRESS_REG, sav);
-
-	/*
-	 * This mode 2 check is quite weak (and known to give false
-	 * positives on some Compaq machines).
-	 * However, this doesn't matter, because this is the
-	 * last test, and simply no PCI devices will be found if
-	 * this happens.
-	 */
-	outb(PCI_MODE2_ENABLE_REG, 0);
-	outb(PCI_MODE2_FORWARD_REG, 0);
-	if (inb(PCI_MODE2_ENABLE_REG) != 0 ||
-	    inb(PCI_MODE2_FORWARD_REG) != 0)
-		goto not2;
-	return (pci_mode = 2);
-not2:
-
-	return (pci_mode = 0);
-#endif
+	PCI_CONF_UNLOCK();
 }
 
 int
 pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
-	int pin = pa->pa_intrpin;
+	int pin = pa->pa_rawintrpin;
 	int line = pa->pa_intrline;
 #if NIOAPIC > 0
-	int rawpin = pa->pa_rawintrpin;
-	pci_chipset_tag_t pc = pa->pa_pc;
 	int bus, dev, func;
 	int mppin;
 #endif
@@ -421,22 +277,23 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		goto bad;
 	}
 
+	ihp->tag = pa->pa_tag;
+	ihp->line = line;
+	ihp->pin = pin;
+
 #if NIOAPIC > 0
-	pci_decompose_tag(pc, pa->pa_tag, &bus, &dev, &func);
+	pci_decompose_tag(pa->pa_pc, pa->pa_tag, &bus, &dev, &func);
 	if (mp_busses != NULL) {
-		mppin = (dev << 2)|(rawpin - 1);
-		if (intr_find_mpmapping(bus, mppin, ihp) == 0) {
-			*ihp |= line;
+		mppin = (dev << 2)|(pin - 1);
+		if (intr_find_mpmapping(bus, mppin, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 		if (pa->pa_bridgetag) {
-			int bridgebus, bridgedev;
-
-			pci_decompose_tag(pc, *pa->pa_bridgetag,
-			    &bridgebus, &bridgedev, NULL);
-			mppin = (bridgedev << 2)|((rawpin + dev - 1) & 0x3);
-			if (intr_find_mpmapping(bridgebus, mppin, ihp) == 0) {
-				*ihp |= line;
+			int swizpin = PPB_INTERRUPT_SWIZZLE(pin, dev);
+			if (pa->pa_bridgeih[swizpin - 1].line != -1) {
+				ihp->line = pa->pa_bridgeih[swizpin - 1].line;
+				ihp->line |= line;
 				return 0;
 			}
 		}
@@ -477,13 +334,15 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	}
 #if NIOAPIC > 0
 	if (mp_busses != NULL) {
-		if (intr_find_mpmapping(mp_isa_bus->mb_idx, line, ihp) == 0) {
-			*ihp |= line;
+		if (mp_isa_bus != NULL &&
+		    intr_find_mpmapping(mp_isa_bus->mb_idx, line, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 #if NEISA > 0
-		if (intr_find_mpmapping(mp_eisa_bus->mb_idx, line, ihp) == 0) {
-			*ihp |= line;
+		if (mp_eisa_bus != NULL &&
+		    intr_find_mpmapping(mp_eisa_bus->mb_idx, line, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 #endif
@@ -493,11 +352,10 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	}
 #endif
 
-	*ihp = line;
 	return 0;
 
 bad:
-	*ihp = -1;
+	ihp->line = -1;
 	return 1;
 }
 
@@ -506,46 +364,55 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	static char irqstr[64];
 
-	if (ih == 0)
-		panic("pci_intr_string: bogus handle 0x%x", ih);
-
+	if (ih.line == 0)
+		panic("pci_intr_string: bogus handle 0x%x", ih.line);
 
 #if NIOAPIC > 0
-	if (ih & APIC_INT_VIA_APIC)
+	if (ih.line & APIC_INT_VIA_APIC)
 		snprintf(irqstr, sizeof(irqstr), "apic %d int %d (irq %d)",
-		    APIC_IRQ_APIC(ih),
-		    APIC_IRQ_PIN(ih),
-		    ih&0xff);
+		    APIC_IRQ_APIC(ih.line),
+		    APIC_IRQ_PIN(ih.line),
+		    pci_intr_line(pc, ih));
 	else
-		snprintf(irqstr, sizeof(irqstr), "irq %d", ih&0xff);
+		snprintf(irqstr, sizeof(irqstr), "irq %d",
+		    pci_intr_line(pc, ih));
 #else
-
-	snprintf(irqstr, sizeof(irqstr), "irq %d", ih&0xff);
+	snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(pc, ih));
 #endif
 	return (irqstr);
-
 }
+
+#include "acpiprt.h"
+#if NACPIPRT > 0
+void	acpiprt_route_interrupt(int bus, int dev, int pin);
+#endif
 
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *what)
+    int (*func)(void *), void *arg, const char *what)
 {
 	int pin, irq;
+	int bus, dev;
 	struct pic *pic;
 
+	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
+#if NACPIPRT > 0
+	acpiprt_route_interrupt(bus, dev, ih.pin);
+#endif
+
 	pic = &i8259_pic;
-	pin = irq = ih;
+	pin = irq = ih.line;
 
 #if NIOAPIC > 0
-	if (ih & APIC_INT_VIA_APIC) {
-		pic = (struct pic *)ioapic_find(APIC_IRQ_APIC(ih));
+	if (ih.line & APIC_INT_VIA_APIC) {
+		pic = (struct pic *)ioapic_find(APIC_IRQ_APIC(ih.line));
 		if (pic == NULL) {
 			printf("pci_intr_establish: bad ioapic %d\n",
-			    APIC_IRQ_APIC(ih));
+			    APIC_IRQ_APIC(ih.line));
 			return NULL;
 		}
-		pin = APIC_IRQ_PIN(ih);
-		irq = APIC_IRQ_LEGACY_IRQ(ih);
+		pin = APIC_IRQ_PIN(ih.line);
+		irq = APIC_IRQ_LEGACY_IRQ(ih.line);
 		if (irq < 0 || irq >= NUM_LEGACY_IRQS)
 			irq = -1;
 	}
@@ -560,48 +427,70 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 	intr_disestablish(cookie);
 }
 
-/*
- * Determine which flags should be passed to the primary PCI bus's
- * autoconfiguration node.  We use this to detect broken chipsets
- * which cannot safely use memory-mapped device access.
- */
-int
-pci_bus_flags(void)
+struct extent *pciio_ex;
+struct extent *pcimem_ex;
+
+void
+pci_init_extents(void)
 {
-	int rval = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
-	int device, maxndevs;
-	pcitag_t tag;
-	pcireg_t id;
+	bios_memmap_t *bmp;
+	u_int64_t size;
 
-	maxndevs = pci_bus_maxdevs(NULL, 0);
-
-	for (device = 0; device < maxndevs; device++) {
-		tag = pci_make_tag(NULL, 0, device, 0);
-		id = pci_conf_read(NULL, tag, PCI_ID_REG);
-
-		/* Invalid vendor ID value? */
-		if (PCI_VENDOR(id) == PCI_VENDOR_INVALID)
-			continue;
-		/* XXX Not invalid, but we've done this ~forever. */
-		if (PCI_VENDOR(id) == 0)
-			continue;
-
-		switch (PCI_VENDOR(id)) {
-		case PCI_VENDOR_SIS:
-			switch (PCI_PRODUCT(id)) {
-			case PCI_PRODUCT_SIS_85C496:
-				goto disable_mem;
-			}
-			break;
-		}
+	if (pciio_ex == NULL) {
+		/*
+		 * We only have 64K of addressable I/O space.
+		 * However, since BARs may contain garbage, we cover
+		 * the full 32-bit address space defined by PCI of
+		 * which we only make the first 64K available.
+		 */
+		pciio_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT | EX_FILLED);
+		if (pciio_ex == NULL)
+			return;
+		extent_free(pciio_ex, 0, 0x10000, M_NOWAIT);
 	}
 
-	return (rval);
+	if (pcimem_ex == NULL) {
+		pcimem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT);
+		if (pcimem_ex == NULL)
+			return;
 
- disable_mem:
-	printf("Warning: broken PCI-Host bridge detected; "
-	    "disabling memory-mapped access\n");
-	rval &= ~(PCI_FLAGS_MEM_ENABLED);
-	return (rval);
+		for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
+			/*
+			 * Ignore address space beyond 4G.
+			 */
+			if (bmp->addr >= 0x100000000ULL)
+				continue;
+			size = bmp->size;
+			if (bmp->addr + size >= 0x100000000ULL)
+				size = 0x100000000ULL - bmp->addr;
+
+			/* Ignore zero-sized regions. */
+			if (size == 0)
+				continue;
+
+			if (extent_alloc_region(pcimem_ex, bmp->addr, size,
+			    EX_NOWAIT))
+				printf("memory map conflict 0x%llx/0x%llx\n",
+				    bmp->addr, bmp->size);
+		}
+
+		/* Take out the video buffer area and BIOS areas. */
+		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
+		    EX_CONFLICTOK | EX_NOWAIT);
+	}
 }
 
+#include "acpi.h"
+#if NACPI > 0
+void acpi_pci_match(struct device *, struct pci_attach_args *);
+#endif
+
+void
+pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
+{
+#if NACPI > 0
+	acpi_pci_match(dev, pa);
+#endif
+}

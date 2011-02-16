@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_vge.c,v 1.31 2006/11/23 02:00:54 brad Exp $	*/
+=======
+/*	$OpenBSD: if_vge.c,v 1.48 2010/08/27 17:08:00 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -128,10 +132,12 @@
 
 int vge_probe		(struct device *, void *, void *);
 void vge_attach		(struct device *, struct device *, void *);
+int vge_detach		(struct device *, int);
 
 int vge_encap		(struct vge_softc *, struct mbuf *, int);
 
 int vge_allocmem		(struct vge_softc *);
+void vge_freemem	(struct vge_softc *);
 int vge_newbuf		(struct vge_softc *, int, struct mbuf *);
 int vge_rx_list_init	(struct vge_softc *);
 int vge_tx_list_init	(struct vge_softc *);
@@ -164,11 +170,11 @@ void vge_setmulti	(struct vge_softc *);
 void vge_reset		(struct vge_softc *);
 
 struct cfattach vge_ca = {
-	sizeof(struct vge_softc), vge_probe, vge_attach
+	sizeof(struct vge_softc), vge_probe, vge_attach, vge_detach
 };
 
 struct cfdriver vge_cd = {
-	0, "vge", DV_IFNET
+	NULL, "vge", DV_IFNET
 };
 
 #define VGE_PCI_LOIO             0x10
@@ -559,11 +565,6 @@ vge_reset(struct vge_softc *sc)
 			break;
 	}
 
-	if (i == VGE_TIMEOUT) {
-		printf("%s: EEPROM reload timed out\n", sc->vge_dev.dv_xname);
-		return;
-	}
-
 	CSR_CLRBIT_1(sc, VGE_CHIPCFG0, VGE_CHIPCFG0_PACPI);
 }
 
@@ -693,6 +694,32 @@ vge_allocmem(struct vge_softc *sc)
 	return (0);
 }
 
+void
+vge_freemem(struct vge_softc *sc)
+{
+	int i;
+
+	for (i = 0; i < VGE_RX_DESC_CNT; i++)
+		bus_dmamap_destroy(sc->sc_dmat,
+		    sc->vge_ldata.vge_rx_dmamap[i]);
+
+	bus_dmamap_unload(sc->sc_dmat, sc->vge_ldata.vge_rx_list_map);
+	bus_dmamap_destroy(sc->sc_dmat, sc->vge_ldata.vge_rx_list_map);
+	bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->vge_ldata.vge_rx_list,
+	    VGE_RX_LIST_SZ);
+	bus_dmamem_free(sc->sc_dmat, &sc->vge_ldata.vge_rx_listseg, 1);
+
+	for (i = 0; i < VGE_TX_DESC_CNT; i++)
+		bus_dmamap_destroy(sc->sc_dmat,
+		    sc->vge_ldata.vge_tx_dmamap[i]);
+
+	bus_dmamap_unload(sc->sc_dmat, sc->vge_ldata.vge_tx_list_map);
+	bus_dmamap_destroy(sc->sc_dmat, sc->vge_ldata.vge_tx_list_map);
+	bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->vge_ldata.vge_tx_list,
+	    VGE_TX_LIST_SZ);
+	bus_dmamem_free(sc->sc_dmat, &sc->vge_ldata.vge_tx_listseg, 1);
+}
+
 /*
  * Attach the interface. Allocate softc structures, do ifmedia
  * setup and ethernet/BPF attach.
@@ -701,23 +728,21 @@ void
 vge_attach(struct device *parent, struct device *self, void *aux)
 {
 	u_char			eaddr[ETHER_ADDR_LEN];
-	u_int16_t		as[3];
 	struct vge_softc	*sc = (struct vge_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
 	struct ifnet		*ifp;
-	int			error = 0, i;
-	bus_size_t		iosize;
+	int			error = 0;
 
 	/*
 	 * Map control/status registers.
 	 */
 	if (pci_mapreg_map(pa, VGE_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
-	    &sc->vge_btag, &sc->vge_bhandle, NULL, &iosize, 0)) {
+	    &sc->vge_btag, &sc->vge_bhandle, NULL, &sc->vge_bsize, 0)) {
 		if (pci_mapreg_map(pa, VGE_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
-		    &sc->vge_btag, &sc->vge_bhandle, NULL, &iosize, 0)) {
+		    &sc->vge_btag, &sc->vge_bhandle, NULL, &sc->vge_bsize, 0)) {
 			printf(": can't map mem or i/o space\n");
 			return;
 		}
@@ -740,6 +765,7 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	printf(": %s", intrstr);
 
 	sc->sc_dmat = pa->pa_dmat;
+	sc->sc_pc = pa->pa_pc;
 
 	/* Reset the adapter. */
 	vge_reset(sc);
@@ -747,11 +773,7 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Get station address from the EEPROM.
 	 */
-	vge_read_eeprom(sc, (caddr_t)as, VGE_EE_EADDR, 3, 0);
-	for (i = 0; i < 3; i++) {
-		eaddr[(i * 2) + 0] = as[i] & 0xff;
-		eaddr[(i * 2) + 1] = as[i] >> 8;
-	}
+	vge_read_eeprom(sc, eaddr, VGE_EE_EADDR, 3, 1);
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
@@ -769,7 +791,6 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vge_ioctl;
 	ifp->if_start = vge_start;
 	ifp->if_watchdog = vge_watchdog;
-	ifp->if_init = vge_init;
 	ifp->if_baudrate = 1000000000;
 #ifdef VGE_JUMBO
 	ifp->if_hardmtu = VGE_JUMBO_MTU;
@@ -780,7 +801,11 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
 				IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
+<<<<<<< HEAD
 #ifdef VGE_VLAN
+=======
+#if NVLAN > 0
+>>>>>>> origin/master
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -811,6 +836,31 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
+}
+
+int
+vge_detach(struct device *self, int flags)
+{
+	struct vge_softc *sc = (void *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+
+	pci_intr_disestablish(sc->sc_pc, sc->vge_intrhand);
+
+	vge_stop(sc);
+
+	/* Detach all PHYs */
+	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete any remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	vge_freemem(sc);
+
+	bus_space_unmap(sc->vge_btag, sc->vge_bhandle, sc->vge_bsize);
+	return (0);
 }
 
 int
@@ -1039,15 +1089,13 @@ vge_rxeof(struct vge_softc *sc)
 				sc->vge_head = sc->vge_tail = NULL;
 			}
 
-			m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-			    total_len - ETHER_CRC_LEN + ETHER_ALIGN,
-			    0, ifp, NULL);
+			m0 = m_devget(mtod(m, char *),
+			    total_len - ETHER_CRC_LEN, ETHER_ALIGN, ifp, NULL);
 			vge_newbuf(sc, i, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
-			m_adj(m0, ETHER_ALIGN);
 			m = m0;
 
 			VGE_RX_DESC_INC(i);
@@ -1100,9 +1148,16 @@ vge_rxeof(struct vge_softc *sc)
 		    (rxctl & VGE_RDCTL_PROTOCSUMOK))
 			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 
+#if NVLAN > 0
+		if (rxstat & VGE_RDSTS_VTAG) {
+			m->m_pkthdr.ether_vtag = swap16(rxctl & VGE_RDCTL_VLANID);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 
@@ -1209,7 +1264,7 @@ vge_tick(void *xsc)
 				vge_start(ifp);
 		}
 	}
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	splx(s);
 }
 
@@ -1383,6 +1438,14 @@ repack:
 	if (m_head->m_pkthdr.len > ETHERMTU + ETHER_HDR_LEN)
 		d->vge_ctl |= htole32(VGE_TDCTL_JUMBO);
 
+#if NVLAN > 0
+	/* Set up hardware VLAN tagging. */
+	if (m_head->m_flags & M_VLANTAG) {
+		d->vge_ctl |= htole32(m_head->m_pkthdr.ether_vtag |
+		    VGE_TDCTL_VTAG);
+	}
+#endif
+
 	sc->vge_ldata.vge_tx_dmamap[idx] = txmap;
 	sc->vge_ldata.vge_tx_mbuf[idx] = m_head;
 	sc->vge_ldata.vge_tx_free--;
@@ -1441,7 +1504,7 @@ vge_start(struct ifnet *ifp)
 		 */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		if (vge_encap(sc, m_head, idx)) {
@@ -1526,6 +1589,15 @@ vge_init(struct ifnet *ifp)
 	 */
 	CSR_CLRBIT_1(sc, VGE_RXCFG, VGE_RXCFG_FIFO_THR|VGE_RXCFG_VTAGOPT);
 	CSR_SETBIT_1(sc, VGE_RXCFG, VGE_RXFIFOTHR_128BYTES|VGE_VTAG_OPT2);
+
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING) {
+		/*
+		 * Allow transmission and reception of VLAN tagged
+		 * frames.
+		 */
+		CSR_CLRBIT_1(sc, VGE_RXCFG, VGE_RXCFG_VTAGOPT);
+		CSR_SETBIT_1(sc, VGE_RXCFG, VGE_VTAG_OPT2);
+	}
 
 	/* Set DMA burst length */
 	CSR_CLRBIT_1(sc, VGE_DMACFG0, VGE_DMACFG0_BURSTLEN);
@@ -1651,7 +1723,7 @@ vge_init(struct ifnet *ifp)
 	sc->vge_link = 0;
 
 	if (!timeout_pending(&sc->timer_handle))
-		timeout_add(&sc->timer_handle, hz);
+		timeout_add_sec(&sc->timer_handle, 1);
 
 	return (0);
 }
@@ -1730,16 +1802,11 @@ int
 vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct vge_softc	*sc = ifp->if_softc;
-	struct ifreq		*ifr = (struct ifreq *) data;
 	struct ifaddr		*ifa = (struct ifaddr *) data;
+	struct ifreq		*ifr = (struct ifreq *) data;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (command) {
 	case SIOCSIFADDR:
@@ -1756,12 +1823,7 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			break;
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1784,25 +1846,20 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->vge_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				vge_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			vge_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

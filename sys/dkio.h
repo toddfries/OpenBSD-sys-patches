@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dkio.h,v 1.5 2003/06/02 23:28:21 millert Exp $	*/
+=======
+/*	$OpenBSD: dkio.h,v 1.8 2010/06/08 12:46:49 jsing Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dkio.h,v 1.1 1996/01/30 18:21:48 thorpej Exp $	*/
 
 /*
@@ -67,5 +71,21 @@ struct dk_inquiry {
 };
 
 #define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
+
+struct dk_cache {
+	unsigned int	wrcache;
+	unsigned int	rdcache;
+};
+
+#define DIOCGCACHE	_IOR('d', 117, struct dk_cache)	/* get cache enabled */
+#define DIOCSCACHE	_IOW('d', 118, struct dk_cache)	/* set cache enabled */
+
+struct dk_diskmap {
+	char		*device;
+	int		fd;
+	int		flags;
+};
+
+#define	DIOCMAP		_IOWR('d', 119, struct dk_diskmap)
 
 #endif /* _SYS_DKIO_H_ */

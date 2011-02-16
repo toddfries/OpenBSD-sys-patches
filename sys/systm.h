@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: systm.h,v 1.69 2006/04/27 02:17:21 tedu Exp $	*/
+=======
+/*	$OpenBSD: systm.h,v 1.87 2011/01/10 23:23:56 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -79,7 +83,8 @@ extern const char osversion[];
 extern const char osrelease[];
 extern int cold;		/* cold start flag initialized in locore */
 
-extern int ncpus;		/* number of CPUs */
+extern int ncpus;		/* number of CPUs used */
+extern int ncpusfound;		/* number of CPUs found */
 extern int nblkdev;		/* number of entries in bdevsw */
 extern int nchrdev;		/* number of entries in cdevsw */
 
@@ -104,6 +109,9 @@ extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
 struct proc;
+#define curproc curcpu()->ci_curproc
+
+extern int rthreads_enabled;
 
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
@@ -148,6 +156,7 @@ void vfs_opv_init_default(struct vnodeopv_desc *);
 void vfs_op_init(void);
 
 int	seltrue(dev_t dev, int which, struct proc *);
+int	selfalse(dev_t dev, int which, struct proc *);
 void	*hashinit(int, int, int, u_long *);
 int	sys_nosys(struct proc *, void *, register_t *);
 
@@ -170,6 +179,8 @@ void	ttyprintf(struct tty *, const char *, ...)
 void	splassert_fail(int, int, const char *);
 extern	int splassert_ctl;
 
+void	assertwaitok(void);
+
 void	tablefull(const char *);
 
 int	kcopy(const void *, void *, size_t)
@@ -183,6 +194,8 @@ void	ovbcopy(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,3)))
 		__attribute__ ((__bounded__(__buffer__,2,3)));
 void	bzero(void *, size_t)
+		__attribute__ ((__bounded__(__buffer__,1,2)));
+void	explicit_bzero(void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,2)));
 int	bcmp(const void *, const void *, size_t);
 void	*memcpy(void *, const void *, size_t)
@@ -204,13 +217,13 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
-int	hzto(struct timeval *);
-int	tvtohz(struct timeval *);
+int	hzto(const struct timeval *);
+int	tvtohz(const struct timeval *);
 void	realitexpire(void *);
 
 struct clockframe;
 void	hardclock(struct clockframe *);
-void	softclock(void);
+void	softclock(void *);
 void	statclock(struct clockframe *);
 
 void	initclocks(void);
@@ -221,6 +234,24 @@ void	cpu_initclocks(void);
 void	startprofclock(struct proc *);
 void	stopprofclock(struct proc *);
 void	setstatclockrate(int);
+
+struct sleep_state;
+void	sleep_setup(struct sleep_state *, const volatile void *, int,
+	    const char *);
+void	sleep_setup_timeout(struct sleep_state *, int);
+void	sleep_setup_signal(struct sleep_state *, int);
+void	sleep_finish(struct sleep_state *, int);
+int	sleep_finish_timeout(struct sleep_state *);
+int	sleep_finish_signal(struct sleep_state *);
+void	sleep_queue_init(void);
+
+struct mutex;
+void    wakeup_n(const volatile void *, int);
+void    wakeup(const volatile void *);
+#define wakeup_one(c) wakeup_n((c), 1)
+int	tsleep(const volatile void *, int, const char *, int);
+int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
+void	yield(void);
 
 void	wdog_register(void *, int (*)(void *, int));
 
@@ -262,20 +293,10 @@ void	dohooks(struct hook_desc_head *, int);
 #define doshutdownhooks() dohooks(&shutdownhook_list, HOOK_REMOVE)
 
 #define mountroothook_establish(fn, arg) \
-	hook_establish(&mountroothook_list, 0, (fn), (arg))
+	hook_establish(&mountroothook_list, 1, (fn), (arg))
 #define mountroothook_disestablish(vhook) \
 	hook_disestablish(&mountroothook_list, (vhook))
 #define domountroothooks() dohooks(&mountroothook_list, HOOK_REMOVE|HOOK_FREE)
-
-/*
- * Power management hooks.
- */
-void	*powerhook_establish(void (*)(int, void *), void *);
-void	powerhook_disestablish(void *);
-void	dopowerhooks(int);
-#define PWR_RESUME 0
-#define PWR_SUSPEND 1
-#define PWR_STANDBY 2
 
 struct uio;
 int	uiomove(void *, int, struct uio *);

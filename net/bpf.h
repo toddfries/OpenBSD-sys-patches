@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bpf.h,v 1.32 2005/11/03 20:00:18 reyk Exp $	*/
+=======
+/*	$OpenBSD: bpf.h,v 1.41 2010/10/29 03:43:35 canacar Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*
@@ -49,7 +53,7 @@ typedef u_int32_t	bpf_u_int32;
  * Alignment macros.  BPF_WORDALIGN rounds up to the next even multiple of
  * BPF_ALIGNMENT (which is at least as much as what a timeval needs).
  */
-#define BPF_ALIGNMENT sizeof(long)
+#define BPF_ALIGNMENT sizeof(u_int32_t)
 #define BPF_WORDALIGN(x) (((x) + (BPF_ALIGNMENT - 1)) & ~(BPF_ALIGNMENT - 1))
 
 #define BPF_MAXINSNS 512
@@ -152,7 +156,7 @@ struct bpf_hdr {
 #ifdef _KERNEL
 #if defined(__arm32__) || defined(__i386__) || defined(__m68k__) || \
     defined(__mips__) || defined(__ns32k__) || defined(__sparc__) || \
-    defined(__vax__)
+    defined(__sparc64__) || defined(__vax__)
 #define SIZEOF_BPF_HDR 18
 #else
 #define SIZEOF_BPF_HDR sizeof(struct bpf_hdr)
@@ -179,12 +183,15 @@ struct bpf_hdr {
 #define DLT_RAW			14	/* raw IP */
 #define DLT_SLIP_BSDOS		15	/* BSD/OS Serial Line IP */
 #define DLT_PPP_BSDOS		16	/* BSD/OS Point-to-point Protocol */
-#define DLT_OLD_PFLOG		17	/* Packet filter logging, old (XXX remove?) */
 #define DLT_PFSYNC		18	/* Packet filter state syncing */
 #define DLT_PPP_ETHER		51	/* PPP over Ethernet; session only w/o ether header */
 #define DLT_IEEE802_11		105	/* IEEE 802.11 wireless */
 #define DLT_PFLOG		117	/* Packet filter logging, by pcap people */
 #define DLT_IEEE802_11_RADIO	127	/* IEEE 802.11 plus WLAN header */
+<<<<<<< HEAD
+=======
+#define DLT_MPLS		219	/* MPLS Provider Edge header */
+>>>>>>> origin/master
 
 /*
  * The instruction encodings.
@@ -272,6 +279,8 @@ int	 bpf_tap(caddr_t, u_char *, u_int, u_int);
 void	 bpf_mtap(caddr_t, struct mbuf *, u_int);
 void	 bpf_mtap_hdr(caddr_t, caddr_t, u_int, struct mbuf *, u_int);
 void	 bpf_mtap_af(caddr_t, u_int32_t, struct mbuf *, u_int);
+void	 bpf_mtap_ether(caddr_t, struct mbuf *, u_int);
+void	 bpf_mtap_pflog(caddr_t, caddr_t, struct mbuf *);
 void	 bpfattach(caddr_t *, struct ifnet *, u_int, u_int);
 void	 bpfdetach(struct ifnet *);
 void	 bpfilterattach(int);
@@ -282,8 +291,5 @@ u_int	 bpf_filter(struct bpf_insn *, u_char *, u_int, u_int);
  * Number of scratch memory words (for BPF_LD|BPF_MEM and BPF_ST).
  */
 #define BPF_MEMWORDS 16
-
-extern int ticks;	/* from kern/kern_clock.c; incremented each */
-			/* clock tick. */
 
 #endif /* _NET_BPF_H_ */

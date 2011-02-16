@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.c,v 1.49 2007/02/03 16:48:21 miod Exp $ */
+/* $OpenBSD: pmap.c,v 1.60 2010/11/28 21:01:41 miod Exp $ */
 /* $NetBSD: pmap.c,v 1.154 2000/12/07 22:18:55 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -223,8 +216,7 @@ u_long		kernel_pmap_asngen_store[ALPHA_MAXPROCS];
 
 paddr_t    	avail_start;	/* PA of first available physical page */
 paddr_t		avail_end;	/* PA of last available physical page */
-vaddr_t		virtual_avail;  /* VA of first avail page (after kernel bss)*/
-vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
+vaddr_t		pmap_maxkvaddr;	/* VA of last avail page (pmap_growkernel) */
 
 boolean_t	pmap_initialized;	/* Has pmap_init completed? */
 
@@ -268,7 +260,9 @@ struct pool pmap_pv_pool;
 /*
  * Canonical names for PGU_* constants.
  */
+#ifdef DIAGNOSTIC
 const char *pmap_pgu_strings[] = PGU_STRINGS;
+#endif
 
 /*
  * Address Space Numbers.
@@ -356,7 +350,7 @@ u_long	pmap_asn_generation[ALPHA_MAXPROCS]; /* current ASN generation */
  *	  lock is held.
  *
  *	* pmap_growkernel_slock - This lock protects pmap_growkernel()
- *	  and the virtual_end variable.
+ *	  and the pmap_maxkvaddr variable.
  *
  *	Address space number management (global ASN counters and per-pmap
  *	ASN state) are not locked; they use arrays of values indexed
@@ -473,7 +467,7 @@ void	pmap_l3pt_delref(pmap_t, vaddr_t, pt_entry_t *, cpuid_t,
 void	pmap_l2pt_delref(pmap_t, pt_entry_t *, pt_entry_t *, cpuid_t);
 void	pmap_l1pt_delref(pmap_t, pt_entry_t *, cpuid_t);
 
-void	*pmap_l1pt_alloc(struct pool *, int);
+void	*pmap_l1pt_alloc(struct pool *, int, int *);
 void	pmap_l1pt_free(struct pool *, void *);
 
 struct pool_allocator pmap_l1pt_allocator = {
@@ -490,7 +484,7 @@ void	pmap_pv_remove(pmap_t, paddr_t, vaddr_t, boolean_t,
 	    struct pv_entry **);
 struct	pv_entry *pmap_pv_alloc(void);
 void	pmap_pv_free(struct pv_entry *);
-void	*pmap_pv_page_alloc(struct pool *, int);
+void	*pmap_pv_page_alloc(struct pool *, int, int *);
 void	pmap_pv_page_free(struct pool *, void *);
 struct pool_allocator pmap_pv_allocator = {
 	pmap_pv_page_alloc, pmap_pv_page_free, 0,
@@ -900,14 +894,12 @@ pmap_bootstrap(paddr_t ptaddr, u_int maxasn, u_long ncpuids)
 	 */
 	avail_start = ptoa(vm_physmem[0].start);
 	avail_end = ptoa(vm_physmem[vm_nphysseg - 1].end);
-	virtual_avail = VM_MIN_KERNEL_ADDRESS;
-	virtual_end = VM_MIN_KERNEL_ADDRESS + lev3mapsize * PAGE_SIZE;
+
+	pmap_maxkvaddr = VM_MIN_KERNEL_ADDRESS + lev3mapsize * PAGE_SIZE;
 
 #if 0
 	printf("avail_start = 0x%lx\n", avail_start);
 	printf("avail_end = 0x%lx\n", avail_end);
-	printf("virtual_avail = 0x%lx\n", virtual_avail);
-	printf("virtual_end = 0x%lx\n", virtual_end);
 #endif
 
 	/*
@@ -1006,13 +998,6 @@ pmap_uses_prom_console(void)
 }
 #endif /* _PMAP_MAY_USE_PROM_CONSOLE */
 
-void
-pmap_virtual_space(vaddr_t *vstartp, vaddr_t *vendp)
-{
-	*vstartp = VM_MIN_KERNEL_ADDRESS;
-	*vendp = VM_MAX_KERNEL_ADDRESS;
-}
-
 /*
  * pmap_steal_memory:		[ INTERFACE ]
  *
@@ -1098,7 +1083,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 		 * but the upper layers still want to know.
 		 */
 		if (vstartp)
-			*vstartp = round_page(virtual_avail);
+			*vstartp = VM_MIN_KERNEL_ADDRESS;
 		if (vendp)
 			*vendp = VM_MAX_KERNEL_ADDRESS;
 
@@ -1191,8 +1176,7 @@ pmap_create(void)
 		printf("pmap_create()\n");
 #endif
 
-	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
-	memset(pmap, 0, sizeof(*pmap));
+	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK|PR_ZERO);
 
 	pmap->pm_asn = pool_get(&pmap_asn_pool, PR_WAITOK);
 	pmap->pm_asngen = pool_get(&pmap_asngen_pool, PR_WAITOK);
@@ -1257,17 +1241,17 @@ pmap_destroy(pmap_t pmap)
 	 * mappings at this point, this should never happen.
 	 */
 	if (pmap->pm_lev1map != kernel_lev1map) {
-		printf("pmap_release: pmap still contains valid mappings!\n");
+		printf("pmap_destroy: pmap still contains valid mappings!\n");
 		if (pmap->pm_nlev2)
-			printf("pmap_release: %ld level 2 tables left\n",
+			printf("pmap_destroy: %ld level 2 tables left\n",
 			    pmap->pm_nlev2);
 		if (pmap->pm_nlev3)
-			printf("pmap_release: %ld level 3 tables left\n",
+			printf("pmap_destroy: %ld level 3 tables left\n",
 			    pmap->pm_nlev3);
 		pmap_remove(pmap, VM_MIN_ADDRESS, VM_MAX_ADDRESS);
 		pmap_update(pmap);
 		if (pmap->pm_lev1map != kernel_lev1map)
-			panic("pmap_release: pmap_remove() didn't");
+			panic("pmap_destroy: pmap_remove() didn't");
 	}
 #endif
 
@@ -2147,6 +2131,25 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	if (pmapdebug & PDB_FOLLOW)
 		printf("pmap_extract(%p, %lx) -> ", pmap, va);
 #endif
+
+	if (pmap == pmap_kernel()) {
+		if (va < ALPHA_K0SEG_BASE) {
+			/* nothing */
+		} else if (va <= ALPHA_K0SEG_END) {
+			pa = ALPHA_K0SEG_TO_PHYS(va);
+			*pap = pa;
+			rv = TRUE;
+		} else {
+			l3pte = PMAP_KERNEL_PTE(va);
+			if (pmap_pte_v(l3pte)) {
+				pa = pmap_pte_pa(l3pte) | (va & PGOFSET);
+				*pap = pa;
+				rv = TRUE;
+			}
+		}
+		goto out_nolock;
+	}
+
 	PMAP_LOCK(pmap);
 
 	l1pte = pmap_l1pte(pmap, va);
@@ -2727,15 +2730,6 @@ pmap_changebit(paddr_t pa, u_long set, u_long mask, cpuid_t cpu_id)
 	     pv = LIST_NEXT(pv, pv_list)) {
 		va = pv->pv_va;
 
-		/*
-		 * XXX don't write protect pager mappings
-		 */
-		if (pv->pv_pmap == pmap_kernel() &&
-/* XXX */	    mask == ~(PG_KWE | PG_UWE)) {
-			if (va >= uvm.pager_sva && va < uvm.pager_eva)
-				continue;
-		}
-
 		PMAP_LOCK(pv->pv_pmap);
 
 		pte = pv->pv_pte;
@@ -3178,10 +3172,11 @@ pmap_pv_free(struct pv_entry *pv)
  *	Allocate a page for the pv_entry pool.
  */
 void *
-pmap_pv_page_alloc(struct pool *pp, int flags)
+pmap_pv_page_alloc(struct pool *pp, int flags, int *slowdown)
 {
 	paddr_t pg;
 
+	*slowdown = 0;
 	if (pmap_physpage_alloc(PGU_PVENT, &pg))
 		return ((void *)ALPHA_PHYS_TO_K0SEG(pg));
 	return (NULL);
@@ -3355,13 +3350,13 @@ pmap_growkernel(vaddr_t maxkvaddr)
 	vaddr_t va;
 	int s, l1idx;
 
-	if (maxkvaddr <= virtual_end)
+	if (maxkvaddr <= pmap_maxkvaddr)
 		goto out;		/* we are OK */
 
 	s = splhigh();			/* to be safe */
 	simple_lock(&pmap_growkernel_slock);
 
-	va = virtual_end;
+	va = pmap_maxkvaddr;
 
 	while (va < maxkvaddr) {
 		/*
@@ -3431,13 +3426,13 @@ pmap_growkernel(vaddr_t maxkvaddr)
 	/* Invalidate the L1 PT cache. */
 	pool_cache_invalidate(&pmap_l1pt_cache);
 
-	virtual_end = va;
+	pmap_maxkvaddr = va;
 
 	simple_unlock(&pmap_growkernel_slock);
 	splx(s);
 
  out:
-	return (virtual_end);
+	return (pmap_maxkvaddr);
 
  die:
 	panic("pmap_growkernel: out of memory");
@@ -3575,23 +3570,16 @@ pmap_l1pt_ctor(void *arg, void *object, int flags)
  *	Page allocator for L1 PT pages.
  */
 void *
-pmap_l1pt_alloc(struct pool *pp, int flags)
+pmap_l1pt_alloc(struct pool *pp, int flags, int *slowdown)
 {
 	paddr_t ptpa;
 
 	/*
 	 * Attempt to allocate a free page.
 	 */
-	if (pmap_physpage_alloc(PGU_L1PT, &ptpa) == FALSE) {
-#if 0
-		/*
-		 * Yow!  No free pages!  Try to steal a PT page from
-		 * another pmap!
-		 */
-		if (pmap_ptpage_steal(pmap, PGU_L1PT, &ptpa) == FALSE)
-#endif
-			return (NULL);
-	}
+	*slowdown = 0;
+	if (pmap_physpage_alloc(PGU_L1PT, &ptpa) == FALSE)
+		return (NULL);
 
 	return ((void *) ALPHA_PHYS_TO_K0SEG(ptpa));
 }

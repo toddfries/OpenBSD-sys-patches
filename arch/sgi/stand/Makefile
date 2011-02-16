@@ -1,9 +1,10 @@
-# $OpenBSD: Makefile,v 1.3 2004/08/23 14:33:34 deraadt Exp $
+# $OpenBSD: Makefile,v 1.6 2009/05/14 18:57:41 miod Exp $
 
 SUBDIR=	sgivol
 
 .if ${MACHINE} == "sgi"
-SUBDIR+=	libsa libkern libz boot
+SUBDIR+=	libsa libsa32 libz libz32
+SUBDIR+=	boot64 boot32
 .endif
 
 .include <bsd.subdir.mk>

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: RAMDISKU1,v 1.17 2006/06/26 22:16:23 miod Exp $
+=======
+#	$OpenBSD: RAMDISKU1,v 1.20 2009/07/12 19:17:50 kettenis Exp $
+>>>>>>> origin/master
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -50,6 +54,7 @@ le*		at lebuffer?
 #be*	at qec?
 
 hme*		at sbus?
+gem*		at sbus?
 
 #
 # Note the flags on the esp entries below, that work around

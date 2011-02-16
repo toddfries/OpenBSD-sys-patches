@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: route.h,v 1.45 2006/06/16 16:52:08 henning Exp $	*/
+=======
+/*	$OpenBSD: route.h,v 1.75 2010/10/28 17:18:35 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -51,6 +55,7 @@
  */
 struct route {
 	struct	rtentry *ro_rt;
+	u_long		 ro_tableid;	/* u_long because of alignment */
 	struct	sockaddr ro_dst;
 };
 
@@ -114,7 +119,8 @@ struct rtentry {
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface to use */
 	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
-	caddr_t	rt_llinfo;		/* pointer to link level info cache */
+	caddr_t	rt_llinfo;		/* pointer to link level info cache or
+					   to an MPLS structure */ 
 	struct	rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
 	struct	rtentry *rt_gwroute;	/* implied entry for gatewayed routes */
 	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
@@ -143,6 +149,7 @@ struct rtentry {
 #define RTF_SOURCE	0x20000		/* this route has a source selector */
 #define RTF_MPATH	0x40000		/* multipath route or operation */
 #define RTF_JUMBO	0x80000		/* try to use jumbo frames */
+#define RTF_MPLS	0x100000	/* MPLS additional infos */
 
 /* mask of RTF flags that are allowed to be modified by RTM_CHANGE */
 #define RTF_FMASK	\
@@ -154,6 +161,23 @@ struct rtentry {
 #define	RTF_TUNNEL	0x100000	/* Tunnelling bit. */
 #endif
 
+<<<<<<< HEAD
+=======
+/* Routing priorities used by the different routing protocols */
+#define RTP_NONE	0	/* unset priority use sane default */
+#define RTP_CONNECTED	4	/* directly connected routes */
+#define RTP_STATIC	8	/* static routes base priority */
+#define RTP_OSPF	32	/* OSPF routes */
+#define RTP_ISIS	36	/* IS-IS routes */
+#define RTP_RIP		40	/* RIP routes */
+#define RTP_BGP		48	/* BGP routes */
+#define RTP_DEFAULT	56	/* routes that have nothing set */
+#define RTP_MAX		63	/* maximum priority */
+#define RTP_ANY		64	/* any of the above */
+#define RTP_MASK	0x7f
+#define RTP_DOWN	0x80	/* route/link is down */
+
+>>>>>>> origin/master
 /*
  * Routing statistics.
  */
@@ -166,12 +190,21 @@ struct	rtstat {
 };
 
 /*
+ * Routing Table Info.
+ */
+struct rt_tableinfo {
+	u_short rti_tableid;	/* routing table id */
+	u_short rti_domainid;	/* routing domain id */
+};
+
+/*
  * Structures for routing messages.
  */
 struct rt_msghdr {
 	u_short	rtm_msglen;	/* to skip over non-understood messages */
 	u_char	rtm_version;	/* future binary compatibility */
 	u_char	rtm_type;	/* message type */
+<<<<<<< HEAD
 	u_short	rtm_index;	/* index for associated ifp */
 	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
 	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
@@ -187,6 +220,28 @@ struct rt_msghdr {
 #define rtm_tableid	rtm_rmx.rmx_rt_tableid
 
 #define RTM_VERSION	3	/* Up the ante and ignore older versions */
+=======
+	u_short	rtm_hdrlen;	/* sizeof(rt_msghdr) to skip over the header */
+	u_short	rtm_index;	/* index for associated ifp */
+	u_short rtm_tableid;	/* routing table id */
+	u_char	rtm_priority;	/* routing priority */
+	u_char	rtm_mpls;	/* MPLS additional infos */
+	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
+	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
+	int	rtm_fmask;	/* bitmask used in RTM_CHANGE message */
+	pid_t	rtm_pid;	/* identify sender */
+	int	rtm_seq;	/* for sender to identify action */
+	int	rtm_errno;	/* why failed */
+	u_int	rtm_inits;	/* which metrics we are initializing */
+	struct	rt_metrics rtm_rmx; /* metrics themselves */
+};
+/* overload no longer used field */
+#define rtm_use	rtm_rmx.rmx_pksent
+
+#define RTM_VERSION	4	/* Up the ante and ignore older versions */
+>>>>>>> origin/master
+
+#define RTM_MAXSIZE	2048	/* Maximum size of an accepted route msg */
 
 #define RTM_ADD		0x1	/* Add Route */
 #define RTM_DELETE	0x2	/* Delete Route */
@@ -201,6 +256,7 @@ struct rt_msghdr {
 #define RTM_DELADDR	0xd	/* address being removed from iface */
 #define RTM_IFINFO	0xe	/* iface going up/down etc. */
 #define RTM_IFANNOUNCE	0xf	/* iface arrival/departure */
+#define RTM_DESYNC	0x10	/* route socket buffer overflow */
 
 #define RTV_MTU		0x1	/* init or lock _mtu */
 #define RTV_HOPCOUNT	0x2	/* init or lock _hopcount */
@@ -242,6 +298,17 @@ struct rt_msghdr {
 #define RTAX_LABEL	10	/* route label present */
 #define RTAX_MAX	11	/* size of array to allocate */
 
+/*
+ * setsockopt defines used for the filtering.
+ */
+#define ROUTE_MSGFILTER	1	/* bitmask to specifiy which types should be
+				   sent to the client. */
+#define ROUTE_TABLEFILTER 2	/* change routing table the socket is listening
+				   on, RTABLE_ANY listens on all tables. */
+
+#define ROUTE_FILTER(m)	(1 << (m))
+#define RTABLE_ANY	0xffffffff
+
 struct rt_addrinfo {
 	int	rti_addrs;
 	struct	sockaddr *rti_info[RTAX_MAX];
@@ -249,6 +316,7 @@ struct rt_addrinfo {
 	struct	ifaddr *rti_ifa;
 	struct	ifnet *rti_ifp;
 	struct	rt_msghdr *rti_rtm;
+	u_char	rti_mpls;
 };
 
 struct route_cb {
@@ -271,6 +339,7 @@ struct rttimer {
 	void            	(*rtt_func)(struct rtentry *, 
 						 struct rttimer *);
 	time_t          	rtt_time; /* When this timer was registered */
+	u_int			rtt_tableid;	/* routing table id of rtt_rt */
 };
 
 struct rttimer_queue {
@@ -288,26 +357,24 @@ struct sockaddr_rtlabel {
 	char		sr_label[RTLABEL_LEN];
 };
 
-#define	RT_TABLEID_MAX	255
-
 #ifdef _KERNEL
 const char	*rtlabel_id2name(u_int16_t);
 u_int16_t	 rtlabel_name2id(char *);
+struct sockaddr	*rtlabel_id2sa(u_int16_t, struct sockaddr_rtlabel *);
 void		 rtlabel_unref(u_int16_t);
 
-#define	RTFREE(rt) do { \
-	if ((rt)->rt_refcnt <= 1) \
-		rtfree(rt); \
-	else \
-		(rt)->rt_refcnt--; \
-} while (0)
+#define	RTFREE(rt) do {							\
+	if ((rt)->rt_refcnt <= 1)					\
+		rtfree(rt);						\
+	else								\
+		(rt)->rt_refcnt--;					\
+} while (/* CONSTCOND */0)
 
 /*
- * Values for additional argument to rtalloc_noclone() and rtalloc2()
+ * Values for additional argument to rtalloc1()
  */
-#define	ALL_CLONING 0
-#define	ONNET_CLONING 1
-#define	NO_CLONING 2
+#define	RT_REPORT	0x1
+#define	RT_NOCLONING	0x2
 
 extern struct route_cb route_cb;
 extern struct rtstat rtstat;
@@ -316,6 +383,8 @@ extern const struct sockaddr_rtin rt_defmask4;
 struct	socket;
 void	 route_init(void);
 int	 rtable_add(u_int);
+u_int	 rtable_l2(u_int);
+void	 rtable_l2set(u_int, u_int);
 int	 rtable_exists(u_int);
 int	 route_output(struct mbuf *, ...);
 int	 route_usrreq(struct socket *, int, struct mbuf *,
@@ -333,7 +402,7 @@ void	 rt_setmetrics(u_long, struct rt_metrics *, struct rt_kmetrics *);
 void	 rt_getmetrics(struct rt_kmetrics *, struct rt_metrics *);
 int      rt_timer_add(struct rtentry *,
              void(*)(struct rtentry *, struct rttimer *),
-	     struct rttimer_queue *);
+	     struct rttimer_queue *, u_int);
 void	 rt_timer_init(void);
 struct rttimer_queue *
 	 rt_timer_queue_create(u_int);
@@ -342,29 +411,38 @@ void	 rt_timer_queue_destroy(struct rttimer_queue *, int);
 void	 rt_timer_remove_all(struct rtentry *);
 unsigned long	rt_timer_count(struct rttimer_queue *);
 void	 rt_timer_timer(void *);
+void	 rtalloc_noclone(struct route *);
 void	 rtalloc(struct route *);
 #ifdef SMALL_KERNEL
-#define	rtalloc_mpath(r, s, t)	rtalloc(r)
+#define	rtalloc_mpath(r, s)	rtalloc(r)
 #endif
 struct rtentry *
 	 rtalloc1(struct sockaddr *, int, u_int);
-void	 rtalloc_noclone(struct route *, int);
-struct rtentry *
-	 rtalloc2(struct sockaddr *, int, int);
 void	 rtfree(struct rtentry *);
-int	 rt_getifa(struct rt_addrinfo *);
+int	 rt_getifa(struct rt_addrinfo *, u_int);
 int	 rtinit(struct ifaddr *, int, int);
 int	 rtioctl(u_long, caddr_t, struct proc *);
 void	 rtredirect(struct sockaddr *, struct sockaddr *,
 			 struct sockaddr *, int, struct sockaddr *,
+<<<<<<< HEAD
 			 struct rtentry **);
 int	 rtrequest(int, struct sockaddr *,
 			struct sockaddr *, struct sockaddr *, int,
 			struct rtentry **, u_int);
 int	 rtrequest1(int, struct rt_addrinfo *, struct rtentry **, u_int);
+=======
+			 struct rtentry **, u_int);
+int	 rtrequest1(int, struct rt_addrinfo *, u_int8_t, struct rtentry **,
+	     u_int);
+>>>>>>> origin/master
 void	 rt_if_remove(struct ifnet *);
+#ifndef SMALL_KERNEL
+void	 rt_if_track(struct ifnet *);
+int	 rt_if_linkstate_change(struct radix_node *, void *, u_int);
+#endif
+int	 rtdeletemsg(struct rtentry *, u_int);
 
 struct radix_node_head	*rt_gettable(sa_family_t, u_int);
-struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, int);
+struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, u_int);
 #endif /* _KERNEL */
 #endif /* _NET_ROUTE_H_ */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: atomic.h,v 1.6 2010/07/07 15:36:18 kettenis Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -51,6 +55,18 @@ atomic_clearbits_int(volatile unsigned int *uip, unsigned int v)
 	do {
 		e = r;
 		r = sparc64_casa(uip, e, e & ~v);
+	} while (r != e);
+}
+
+static __inline void
+atomic_add_ulong(volatile unsigned long *ulp, unsigned long v)
+{
+	volatile unsigned long e, r;
+
+	r = *ulp;
+	do {
+		e = r;
+		r = sparc64_casx(ulp, e, e + v);
 	} while (r != e);
 }
 

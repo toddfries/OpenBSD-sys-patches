@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: esp_sbus.c,v 1.19 2006/06/21 22:25:17 miod Exp $	*/
+=======
+/*	$OpenBSD: esp_sbus.c,v 1.23 2010/06/28 18:31:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: esp_sbus.c,v 1.14 2001/04/25 17:53:37 bouyer Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,16 +60,9 @@
 
 struct scsi_adapter esp_switch = {
 	ncr53c9x_scsi_cmd,
-	minphys,		/* no max at this level; handled by DMA code */
+	scsi_minphys,		/* no max at this level; handled by DMA code */
 	NULL,
 	NULL,
-};
-
-struct scsi_device esp_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 /* #define ESP_SBUS_DEBUG */
@@ -521,7 +511,7 @@ espattach(struct esp_softc *esc, struct ncr53c9x_glue *gluep)
 		sc->sc_features |= NCR_F_DMASELECT;
 
 	/* Do the common parts of attachment. */
-	ncr53c9x_attach(sc, &esp_switch, &esp_dev);
+	ncr53c9x_attach(sc, &esp_switch);
 }
 
 /*

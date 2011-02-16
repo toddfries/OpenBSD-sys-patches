@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tc.c,v 1.15 2004/06/28 02:28:43 aaron Exp $	*/
+=======
+/*	$OpenBSD: tc.c,v 1.20 2010/11/11 17:54:54 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tc.c,v 1.29 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*
@@ -81,8 +85,10 @@ tcattach(parent, self, aux)
 	tc_addr_t tcaddr;
 	int i;
 
-	printf(": %s MHz clock\n",
-	    tba->tba_speed == TC_SPEED_25_MHZ ? "25" : "12.5");
+	if (tba->tba_speed & 1)
+		printf(": %d.5 MHz clock\n", tba->tba_speed / 2);
+	else
+		printf(": %d MHz clock\n", tba->tba_speed / 2);
 
 	/*
 	 * Save important CPU/chipset information.
@@ -261,25 +267,27 @@ tc_checkslot(slotbase, namep)
 }
 
 void
-tc_intr_establish(dev, cookie, level, handler, arg)
+tc_intr_establish(dev, cookie, level, handler, arg, name)
 	struct device *dev;
 	void *cookie, *arg;
 	int level;
 	int (*handler)(void *);
+	const char *name;
 {
 	struct tc_softc *sc = tc_cd.cd_devs[0];
 
-	(*sc->sc_intr_establish)(dev, cookie, level, handler, arg);
+	(*sc->sc_intr_establish)(dev, cookie, level, handler, arg, name);
 }
 
 void
-tc_intr_disestablish(dev, cookie)
+tc_intr_disestablish(dev, cookie, name)
 	struct device *dev;
 	void *cookie;
+	const char *name;
 {
 	struct tc_softc *sc = tc_cd.cd_devs[0];
 
-	(*sc->sc_intr_disestablish)(dev, cookie);
+	(*sc->sc_intr_disestablish)(dev, cookie, name);
 }
 
 #ifdef TCVERBOSE

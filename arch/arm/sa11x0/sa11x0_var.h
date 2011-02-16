@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa11x0_var.h,v 1.2 2005/01/02 19:52:36 drahn Exp $ */
+/*	$OpenBSD: sa11x0_var.h,v 1.5 2009/08/22 02:54:50 mk Exp $ */
 /*      $NetBSD: sa11x0_var.h,v 1.4 2003/04/14 14:18:41 rjs Exp $        */
 
 /*-
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -71,7 +64,7 @@ struct sa11x0_attach_args {
 };
 
 void *sa11x0_intr_establish(sa11x0_chipset_tag_t, int, int, int, 
-			    int (*)(void *), void *, char *);
+			    int (*)(void *), void *, const char *);
 void sa11x0_intr_disestablish(sa11x0_chipset_tag_t, void *);
 
 #endif /* _SA11X0_VAR_H */

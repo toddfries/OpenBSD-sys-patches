@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios_intr_fixup.c,v 1.2 2006/07/17 19:15:45 kettenis Exp $	*/
+/*	$OpenBSD: mpbios_intr_fixup.c,v 1.5 2009/08/13 13:24:48 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis
@@ -40,7 +40,7 @@ const struct mpbios_icu_table {
 } mpbios_icu_table[] = {
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8237_ISA,
 	  via8237_mpbios_fixup },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE4_ISA,
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE4_ISA1,
 	  nforce4_mpbios_fixup },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE4_ISA2,
 	  nforce4_mpbios_fixup },
@@ -156,7 +156,7 @@ mpbios_pin_fixup(int bus, int dev, int rawpin, int pin)
 			if (mp_verbose) {
 
 				printf("%s: int%d attached to %s",
-				    mip->ioapic->sc_dev.dv_xname,
+				    mip->ioapic->sc_pic.pic_name,
 				    pin, mpb->mb_name);
 
 				if (mpb->mb_idx != -1)

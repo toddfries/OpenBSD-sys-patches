@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cache.c,v 1.17 2005/04/19 21:30:20 miod Exp $	*/
+=======
+/*	$OpenBSD: cache.c,v 1.20 2010/07/10 19:32:24 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cache.c,v 1.34 1997/09/26 22:17:23 pk Exp $	*/
 
 /*
@@ -89,10 +93,10 @@ sun4_cache_enable()
 {
 	u_int i, lim, ls, ts;
 
-	cache_alias_bits = CPU_ISSUN4
+	cache_alias_bits = CPU_ISSUN4OR4E
 				? CACHE_ALIAS_BITS_SUN4
 				: CACHE_ALIAS_BITS_SUN4C;
-	cache_alias_dist = CPU_ISSUN4
+	cache_alias_dist = CPU_ISSUN4OR4E
 				? CACHE_ALIAS_DIST_SUN4
 				: CACHE_ALIAS_DIST_SUN4C;
 
@@ -289,32 +293,27 @@ cypress_cache_enable()
 {
 	int i, ls, ts;
 	u_int pcr;
+	extern u_long dvma_cachealign;
 
 	cache_alias_dist = CACHEINFO.c_totalsize;
 	cache_alias_bits = (cache_alias_dist - 1) & ~PGOFSET;
+	dvma_cachealign = cache_alias_dist;
 
 	pcr = lda(SRMMU_PCR, ASI_SRMMU);
-	pcr &= ~(CYPRESS_PCR_CE | CYPRESS_PCR_CM);
+	pcr &= ~CYPRESS_PCR_CM;
 
 	/* Now reset cache tag memory if cache not yet enabled */
-	ls = CACHEINFO.c_linesize;
-	ts = CACHEINFO.c_totalsize;
-	if ((pcr & CYPRESS_PCR_CE) == 0)
-		for (i = 0; i < ts; i += ls) {
+	if ((pcr & CYPRESS_PCR_CE) == 0) {
+		ls = CACHEINFO.c_linesize;
+		ts = CACHEINFO.c_totalsize;
+		for (i = 0; i < ts; i += ls)
 			sta(i, ASI_DCACHETAG, 0);
-			while (lda(i, ASI_DCACHETAG))
-				sta(i, ASI_DCACHETAG, 0);
-		}
+		pcr |= CYPRESS_PCR_CE;
+	}
 
-	pcr |= CYPRESS_PCR_CE;
-
-#if 1
-	pcr &= ~CYPRESS_PCR_CM;		/* XXX Disable write-back mode */
-#else
 	/* If put in write-back mode, turn it on */
 	if (CACHEINFO.c_vactype == VAC_WRITEBACK)
 		pcr |= CYPRESS_PCR_CM;
-#endif
 
 	sta(SRMMU_PCR, ASI_SRMMU, pcr);
 	CACHEINFO.c_enabled = 1;
@@ -362,7 +361,7 @@ turbosparc_cache_enable()
 }
 #endif /* defined(SUN4M) */
 
-#if defined(SUN4) || defined(SUN4C)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 /*
  * Flush the current context from the cache.
  *
@@ -553,7 +552,7 @@ sun4_cache_flush(base, len)
 			sun4_vcache_flush_context();
 	}
 }
-#endif /* defined(SUN4) || defined(SUN4C) */
+#endif /* SUN4 || SUN4C || SUN4E */
 
 #if defined(SUN4M)
 /*

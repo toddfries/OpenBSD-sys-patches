@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_fpa.c,v 1.23 2004/05/12 06:35:11 tedu Exp $	*/
+=======
+/*	$OpenBSD: if_fpa.c,v 1.27 2010/09/20 07:40:38 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_fpa.c,v 1.15 1996/10/21 22:56:40 thorpej Exp $	*/
 
 /*-
@@ -129,13 +133,13 @@ pdq_pci_attach(parent, self, aux)
 #ifdef PDQ_IOMAPPED
 	if (pci_mapreg_map(pa, DEFPA_CBIO, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_csrtag, &sc->sc_csrhandle, NULL, &csrsize, 0)) {
-		printf(": can't map I/O space!\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 #else
 	if (pci_mapreg_map(pa, DEFPA_CBMA, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_csrtag, &sc->sc_csrhandle, NULL, &csrsize, 0)) {
-		printf(": can't map memory space!\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 #endif
@@ -170,12 +174,6 @@ pdq_pci_attach(parent, self, aux)
 	bcopy((caddr_t) sc->sc_pdq->pdq_hwaddr.lanaddr_bytes,
 	    sc->sc_arpcom.ac_enaddr, 6);
 	pdq_ifattach(sc, NULL);
-
-	sc->sc_ats = shutdownhook_establish((void (*)(void *)) pdq_hwreset,
-	    sc->sc_pdq);
-	if (sc->sc_ats == NULL)
-		printf("%s: warning: couldn't establish shutdown hook\n",
-		    self->dv_xname);
 }
 
 struct cfattach fpa_ca = {
@@ -183,5 +181,5 @@ struct cfattach fpa_ca = {
 };
 
 struct cfdriver fpa_cd = {
-	0, "fpa", DV_IFNET
+	NULL, "fpa", DV_IFNET
 };

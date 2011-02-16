@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udp6_output.c,v 1.12 2004/06/12 04:58:48 itojun Exp $	*/
+=======
+/*	$OpenBSD: udp6_output.c,v 1.16 2008/11/23 13:30:59 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
 
 /*
@@ -112,10 +116,8 @@
 #define udp6s_opackets	udps_opackets
 
 int
-udp6_output(in6p, m, addr6, control)
-	struct in6pcb *in6p;
-	struct mbuf *m;
-	struct mbuf *addr6, *control;
+udp6_output(struct in6pcb *in6p, struct mbuf *m, struct mbuf *addr6, 
+	struct mbuf *control)
 {
 	u_int32_t ulen = m->m_pkthdr.len;
 	u_int32_t plen = sizeof(struct udphdr) + ulen;
@@ -130,6 +132,7 @@ udp6_output(in6p, m, addr6, control)
 	int flags;
 	struct sockaddr_in6 tmp;
 	struct proc *p = curproc;	/* XXX */
+	struct ifnet *ifp;
 
 	priv = 0;
 	if ((in6p->in6p_socket->so_state & SS_PRIV) != 0)
@@ -251,9 +254,11 @@ udp6_output(in6p, m, addr6, control)
 		ip6->ip6_plen	= htons((u_short)plen);
 #endif
 		ip6->ip6_nxt	= IPPROTO_UDP;
-		ip6->ip6_hlim	= in6_selecthlim(in6p,
-						 in6p->in6p_route.ro_rt ?
-						 in6p->in6p_route.ro_rt->rt_ifp : NULL);
+		ifp = NULL;
+		if (in6p->in6p_route.ro_rt &&
+		    in6p->in6p_route.ro_rt->rt_flags & RTF_UP)
+			ifp = in6p->in6p_route.ro_rt->rt_ifp;
+		ip6->ip6_hlim	= in6_selecthlim(in6p, ifp);
 		ip6->ip6_src	= *laddr;
 		ip6->ip6_dst	= *faddr;
 

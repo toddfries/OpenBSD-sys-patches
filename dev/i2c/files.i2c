@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # $OpenBSD: files.i2c,v 1.35 2006/06/15 20:50:44 drahn Exp $
+=======
+# $OpenBSD: files.i2c,v 1.49 2010/03/22 21:20:58 miod Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.i2c,v 1.3 2003/10/20 16:24:10 briggs Exp $
 
 define	i2c {[addr = -1], [size = -1]}
@@ -122,3 +126,40 @@ file	dev/i2c/fintek.c			fintek
 device	pcaled: gpiobus
 attach	pcaled at i2c
 file	dev/i2c/pca9532.c			pcaled
+<<<<<<< HEAD
+=======
+
+# Andigilog aSC7621
+device	adl
+attach	adl at i2c
+file	dev/i2c/asc7621.c			adl
+
+# Andigilog aSC7611
+device	andl
+attach	andl at i2c
+file	dev/i2c/asc7611.c			andl
+
+# TI TMHC50 / Analog ADM1022
+device	thmc
+attach	thmc at i2c
+file	dev/i2c/thmc50.c			thmc
+
+# SPD Memory EEPROM
+attach	spdmem at i2c with spdmem_iic
+file	dev/i2c/spdmem_i2c.c			spdmem
+
+# SO-DIMM (JC-42.4) temperature sensor
+device	sdtemp
+attach	sdtemp at i2c
+file	dev/i2c/sdtemp.c			sdtemp
+
+device	adtfsm
+attach	adtfsm at i2c
+file	dev/i2c/adt7462.c			adtfsm
+
+# STMicroelectronics LIS331DL MEMS motion sensor
+device	lisa
+attach	lisa at i2c
+file	dev/i2c/lis331dl.c			lisa
+
+>>>>>>> origin/master

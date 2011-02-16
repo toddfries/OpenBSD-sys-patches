@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_sn.c,v 1.45 2006/06/24 13:23:27 miod Exp $        */
+/*    $OpenBSD: if_sn.c,v 1.54 2010/03/31 19:46:27 miod Exp $        */
 /*    $NetBSD: if_sn.c,v 1.13 1997/04/25 03:40:10 briggs Exp $        */
 
 /*
@@ -29,7 +29,6 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/netisr.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -114,8 +113,8 @@ snsetup(struct sn_softc *sc, u_int8_t *lladdr)
 	 * to do that?
 	 */
 	TAILQ_INIT(&pglist);
-	error = uvm_pglistalloc(SN_NPAGES * PAGE_SIZE, 0, -PAGE_SIZE,
-	    PAGE_SIZE, 0, &pglist, 1, 0);
+	error = uvm_pglistalloc(SN_NPAGES * PAGE_SIZE, 0, -1,
+	    PAGE_SIZE, 0, &pglist, 1, UVM_PLA_NOWAIT);
 	if (error != 0) {
 		printf(": could not allocate descriptor memory\n");
 		return (error);
@@ -126,7 +125,7 @@ snsetup(struct sn_softc *sc, u_int8_t *lladdr)
 	 */
 	sc->space = uvm_km_valloc(kernel_map, SN_NPAGES * PAGE_SIZE);
 	if (sc->space == NULL) {
-		printf(": could not map descriptor memory\n");
+		printf(": can't map descriptor memory\n");
 		uvm_pglistfree(&pglist);
 		return (ENOMEM);
 	}
@@ -251,15 +250,14 @@ snsetup(struct sn_softc *sc, u_int8_t *lladdr)
 static int
 snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	struct ifaddr *ifa;
-	struct ifreq *ifr;
 	struct sn_softc *sc = ifp->if_softc;
-	int	s = splnet(), err = 0;
+	struct ifaddr *ifa = (struct ifaddr *) data;
+	int s, err = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
-		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
@@ -300,27 +298,16 @@ snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		ifr = (struct ifreq *) data;
-		if (cmd == SIOCADDMULTI)
-			err = ether_addmulti(ifr, &sc->sc_arpcom);
-		else
-			err = ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (err == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly. But remember UP flag!
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				snreset(sc);
-			err = 0;
-		}
-		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (err == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			snreset(sc);
+		err = 0;
+	}
+
 	splx(s);
 	return (err);
 }

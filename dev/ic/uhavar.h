@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uhavar.h,v 1.1 1996/11/28 23:27:55 niklas Exp $	*/
+=======
+/*	$OpenBSD: uhavar.h,v 1.3 2010/06/30 19:06:16 mk Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uhavar.h,v 1.3 1996/10/21 22:34:43 thorpej Exp $	*/
 
 /*
@@ -49,7 +53,7 @@ struct uha_softc {
 	void (*init)(struct uha_softc *);
 
 	struct uha_mscp *sc_mscphash[MSCP_HASH_SIZE];
-	TAILQ_HEAD(, uha_mscp) sc_free_mscp;
+	SLIST_HEAD(, uha_mscp) sc_free_mscp;
 	int sc_nummscps;
 	int sc_scsi_dev;		/* our scsi id */
 	struct scsi_link sc_link;

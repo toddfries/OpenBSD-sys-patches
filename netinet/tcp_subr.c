@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tcp_subr.c,v 1.92 2005/09/28 15:20:12 brad Exp $	*/
+=======
+/*	$OpenBSD: tcp_subr.c,v 1.112 2011/01/11 15:42:05 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -317,12 +321,17 @@ tcp_template(tp)
 /* This function looks hairy, because it was so IPv4-dependent. */
 #endif /* INET6 */
 void
+<<<<<<< HEAD
 tcp_respond(tp, template, m, ack, seq, flags)
 	struct tcpcb *tp;
 	caddr_t template;
 	struct mbuf *m;
 	tcp_seq ack, seq;
 	int flags;
+=======
+tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
+    tcp_seq ack, tcp_seq seq, int flags, u_int rtableid)
+>>>>>>> origin/master
 {
 	int tlen;
 	int win = 0;
@@ -424,6 +433,12 @@ tcp_respond(tp, template, m, ack, seq, flags)
 	th->th_win = htons((u_int16_t)win);
 	th->th_urp = 0;
 
+	/* force routing domain */
+	if (tp)
+		m->m_pkthdr.rdomain = tp->t_inpcb->inp_rtableid;
+	else
+		m->m_pkthdr.rdomain = rtableid;
+
 	switch (af) {
 #ifdef INET6
 	case AF_INET6:
@@ -469,10 +484,9 @@ tcp_newtcpcb(struct inpcb *inp)
 	struct tcpcb *tp;
 	int i;
 
-	tp = pool_get(&tcpcb_pool, PR_NOWAIT);
+	tp = pool_get(&tcpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (tp == NULL)
 		return ((struct tcpcb *)0);
-	bzero((char *) tp, sizeof(struct tcpcb));
 	TAILQ_INIT(&tp->t_segq);
 	tp->t_maxseg = tcp_mssdflt;
 	tp->t_maxopd = 0;
@@ -794,7 +808,7 @@ tcp6_ctlinput(cmd, sa, d)
 		     inet6ctlerrmap[cmd] == ENETUNREACH ||
 		     inet6ctlerrmap[cmd] == EHOSTDOWN))
 			syn_cache_unreach((struct sockaddr *)sa6_src,
-			    sa, &th);
+			    sa, &th, /* XXX */ 0);
 	} else {
 		(void) in6_pcbnotify(&tcbtable, sa, 0,
 		    (struct sockaddr *)sa6_src, 0, cmd, NULL, notify);
@@ -803,10 +817,7 @@ tcp6_ctlinput(cmd, sa, d)
 #endif
 
 void *
-tcp_ctlinput(cmd, sa, v)
-	int cmd;
-	struct sockaddr *sa;
-	void *v;
+tcp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	struct ip *ip = v;
 	struct tcphdr *th;
@@ -844,7 +855,8 @@ tcp_ctlinput(cmd, sa, v)
 		th = (struct tcphdr *)((caddr_t)ip + (ip->ip_hl << 2));
 		seq = ntohl(th->th_seq);
 		inp = in_pcbhashlookup(&tcbtable,
-		    ip->ip_dst, th->th_dport, ip->ip_src, th->th_sport);
+		    ip->ip_dst, th->th_dport, ip->ip_src, th->th_sport,
+		    rdomain);
 		if (inp && (tp = intotcpcb(inp)) &&
 		    SEQ_GEQ(seq, tp->snd_una) &&
 		    SEQ_LT(seq, tp->snd_max)) {
@@ -866,7 +878,7 @@ tcp_ctlinput(cmd, sa, v)
 				 * route (traditional PMTUD).
 				 */
 				tp->t_flags &= ~TF_PMTUD_PEND;
-				icmp_mtudisc(icp);    
+				icmp_mtudisc(icp, inp->inp_rtableid);
 			} else {
 				/*
 				 * Record the information got in the ICMP
@@ -901,7 +913,8 @@ tcp_ctlinput(cmd, sa, v)
 	if (ip) {
 		th = (struct tcphdr *)((caddr_t)ip + (ip->ip_hl << 2));
 		inp = in_pcbhashlookup(&tcbtable,
-		    ip->ip_dst, th->th_dport, ip->ip_src, th->th_sport);
+		    ip->ip_dst, th->th_dport, ip->ip_src, th->th_sport,
+		    rdomain);
 		if (inp) {
 			seq = ntohl(th->th_seq);
 			if (inp->inp_socket &&
@@ -921,10 +934,10 @@ tcp_ctlinput(cmd, sa, v)
 			sin.sin_port = th->th_sport;
 			sin.sin_addr = ip->ip_src;
 			syn_cache_unreach((struct sockaddr *)&sin,
-			    sa, th);
+			    sa, th, rdomain);
 		}
 	} else
-		in_pcbnotifyall(&tcbtable, sa, errno, notify);
+		in_pcbnotifyall(&tcbtable, sa, rdomain, errno, notify);
 
 	return NULL;
 }
@@ -1009,6 +1022,46 @@ tcp_mtudisc_increase(inp, errno)
 	}
 }
 
+<<<<<<< HEAD
+=======
+#define TCP_ISS_CONN_INC 4096
+int tcp_secret_init;
+u_char tcp_secret[16];
+MD5_CTX tcp_secret_ctx;
+
+void
+tcp_set_iss_tsm(struct tcpcb *tp)
+{
+	MD5_CTX ctx;
+	u_int32_t digest[4];
+
+	if (tcp_secret_init == 0) {
+		arc4random_buf(tcp_secret, sizeof(tcp_secret));
+		MD5Init(&tcp_secret_ctx);
+		MD5Update(&tcp_secret_ctx, tcp_secret, sizeof(tcp_secret));
+		tcp_secret_init = 1;
+	}
+	ctx = tcp_secret_ctx;
+	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_lport, sizeof(u_short));
+	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_fport, sizeof(u_short));
+	if (tp->pf == AF_INET6) {
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr6,
+		    sizeof(struct in6_addr));
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr6,
+		    sizeof(struct in6_addr));
+	} else {
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr,
+		    sizeof(struct in_addr));
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr,
+		    sizeof(struct in_addr));
+	}
+	MD5Final((u_char *)digest, &ctx);
+	tcp_iss += TCP_ISS_CONN_INC;
+	tp->iss = digest[0] + tcp_iss;
+	tp->ts_modulate = digest[1];
+}
+
+>>>>>>> origin/master
 #ifdef TCP_SIGNATURE
 int
 tcp_signature_tdb_attach()
@@ -1039,7 +1092,7 @@ tcp_signature_tdb_zeroize(tdbp)
 	struct tdb *tdbp;
 {
 	if (tdbp->tdb_amxkey) {
-		bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
+		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 		free(tdbp->tdb_amxkey, M_XDATA);
 		tdbp->tdb_amxkey = NULL;
 	}

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2004/01/26 19:48:34 miod Exp $
+#	$OpenBSD: Makefile,v 1.13 2008/09/19 20:18:03 miod Exp $
 
 LIB=sa
 
@@ -10,8 +10,7 @@ S=${.CURDIR}/../../../..
 DIR_SA=$S/lib/libsa
 DIR_KERN=$S/lib/libkern
 
-SRC_net= arp.c ether.c in_cksum.c net.c netif.c rpc.c nfs.c \
-	 rarp.c bootparam.c
+SRCS=	board.c bugdev.c clock.c parse_args.c exec_mvme.c
 
 SRC_sa=	alloc.c memcpy.c exit.c getfile.c gets.c globals.c \
 	printf.c strerror.c memset.c memcmp.c strncpy.c strcmp.c strlen.c \
@@ -44,3 +43,12 @@ all: libsa.a
 install:
 
 .include <bsd.lib.mk>
+
+.if !make(obj)
+.BEGIN:
+	@([ -h dev ] || ln -s ${.CURDIR}/../../../${MACHINE}/dev dev)
+	@([ -h machine ] || ln -s ${.CURDIR}/../../../${MACHINE}/include machine)
+	@([ -h m88k ] || ln -s ${.CURDIR}/../../../m88k/include m88k)
+.NOPATH: dev machine m88k
+CLEANFILES+=	dev machine m88k
+.endif

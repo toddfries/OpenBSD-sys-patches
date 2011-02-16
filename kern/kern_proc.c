@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_proc.c,v 1.32 2007/03/15 10:22:30 art Exp $	*/
+=======
+/*	$OpenBSD: kern_proc.c,v 1.45 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -108,10 +112,6 @@ procinit(void)
 	    &pool_allocator_nointr);
 }
 
-/*
- * Change the count associated with number of processes
- * a given user is using.
- */
 struct uidinfo *
 uid_find(uid_t uid)
 {
@@ -140,6 +140,10 @@ uid_find(uid_t uid)
 	return (nuip);
 }
 
+/*
+ * Change the count associated with number of threads
+ * a given user is using.
+ */
 int
 chgproccnt(uid_t uid, int diff)
 {
@@ -153,20 +157,20 @@ chgproccnt(uid_t uid, int diff)
 }
 
 /*
- * Is p an inferior of the current process?
+ * Is p an inferior of parent?
  */
 int
-inferior(struct proc *p)
+inferior(struct process *pr, struct process *parent)
 {
 
-	for (; p != curproc; p = p->p_pptr)
-		if (p->p_pid == 0)
+	for (; pr != parent; pr = pr->ps_pptr)
+		if (pr->ps_pid == 0 || pr->ps_pid == 1)
 			return (0);
 	return (1);
 }
 
 /*
- * Locate a process by number
+ * Locate a proc (thread) by number
  */
 struct proc *
 pfind(pid_t pid)
@@ -176,6 +180,20 @@ pfind(pid_t pid)
 	LIST_FOREACH(p, PIDHASH(pid), p_hash)
 		if (p->p_pid == pid)
 			return (p);
+	return (NULL);
+}
+
+/*
+ * Locate a process by number
+ */
+struct process *
+prfind(pid_t pid)
+{
+	struct proc *p;
+
+	LIST_FOREACH(p, PIDHASH(pid), p_hash)
+		if (p->p_pid == pid)
+			return (p->p_flag & P_THREAD ? NULL : p->p_p);
 	return (NULL);
 }
 
@@ -195,89 +213,94 @@ pgfind(pid_t pgid)
 
 /*
  * Move p to a new or existing process group (and session)
+ * Caller provides a pre-allocated pgrp and session that should
+ * be freed if they are not used.
+ * XXX need proctree lock
  */
 int
-enterpgrp(struct proc *p, pid_t pgid, int mksess)
+enterpgrp(struct process *pr, pid_t pgid, struct pgrp *newpgrp,
+    struct session *newsess)
 {
 	struct pgrp *pgrp = pgfind(pgid);
 
 #ifdef DIAGNOSTIC
-	if (pgrp != NULL && mksess)	/* firewalls */
+	if (pgrp != NULL && newsess)	/* firewalls */
 		panic("enterpgrp: setsid into non-empty pgrp");
-	if (SESS_LEADER(p))
+	if (SESS_LEADER(pr))
 		panic("enterpgrp: session leader attempted setpgrp");
 #endif
 	if (pgrp == NULL) {
-		pid_t savepid = p->p_pid;
-		struct proc *np;
 		/*
 		 * new process group
 		 */
 #ifdef DIAGNOSTIC
-		if (p->p_pid != pgid)
+		if (pr->ps_pid != pgid)
 			panic("enterpgrp: new pgrp and pid != pgid");
 #endif
-		if ((np = pfind(savepid)) == NULL || np != p)
-			return (ESRCH);
-		pgrp = pool_get(&pgrp_pool, PR_WAITOK);
-		if (mksess) {
-			struct session *sess;
 
+		pgrp = newpgrp;
+		if (newsess) {
 			/*
 			 * new session
 			 */
-			sess = pool_get(&session_pool, PR_WAITOK);
-			sess->s_leader = p;
-			sess->s_count = 1;
-			sess->s_ttyvp = NULL;
-			sess->s_ttyp = NULL;
-			bcopy(p->p_session->s_login, sess->s_login,
-			    sizeof(sess->s_login));
-			atomic_clearbits_int(&p->p_flag, P_CONTROLT);
-			pgrp->pg_session = sess;
+			newsess->s_leader = pr;
+			newsess->s_count = 1;
+			newsess->s_ttyvp = NULL;
+			newsess->s_ttyp = NULL;
+			bcopy(pr->ps_session->s_login, newsess->s_login,
+			    sizeof(newsess->s_login));
+			atomic_clearbits_int(&pr->ps_flags, PS_CONTROLT);
+			pgrp->pg_session = newsess;
 #ifdef DIAGNOSTIC
-			if (p != curproc)
-				panic("enterpgrp: mksession and p != curproc");
+			if (pr != curproc->p_p)
+				panic("enterpgrp: mksession but not curproc");
 #endif
 		} else {
-			pgrp->pg_session = p->p_session;
+			pgrp->pg_session = pr->ps_session;
 			pgrp->pg_session->s_count++;
 		}
 		pgrp->pg_id = pgid;
 		LIST_INIT(&pgrp->pg_members);
 		LIST_INSERT_HEAD(PGRPHASH(pgid), pgrp, pg_hash);
 		pgrp->pg_jobc = 0;
-	} else if (pgrp == p->p_pgrp)
+	} else if (pgrp == pr->ps_pgrp) {
+		if (newsess)
+			pool_put(&session_pool, newsess);
+		pool_put(&pgrp_pool, newpgrp);
 		return (0);
+	} else {
+		if (newsess)
+			pool_put(&session_pool, newsess);
+		pool_put(&pgrp_pool, newpgrp);
+	}
 
 	/*
 	 * Adjust eligibility of affected pgrps to participate in job control.
 	 * Increment eligibility counts before decrementing, otherwise we
 	 * could reach 0 spuriously during the first call.
 	 */
-	fixjobc(p, pgrp, 1);
-	fixjobc(p, p->p_pgrp, 0);
+	fixjobc(pr, pgrp, 1);
+	fixjobc(pr, pr->ps_pgrp, 0);
 
-	LIST_REMOVE(p, p_pglist);
-	if (LIST_EMPTY(&p->p_pgrp->pg_members))
-		pgdelete(p->p_pgrp);
-	p->p_pgrp = pgrp;
-	LIST_INSERT_HEAD(&pgrp->pg_members, p, p_pglist);
+	LIST_REMOVE(pr, ps_pglist);
+	if (LIST_EMPTY(&pr->ps_pgrp->pg_members))
+		pgdelete(pr->ps_pgrp);
+	pr->ps_pgrp = pgrp;
+	LIST_INSERT_HEAD(&pgrp->pg_members, pr, ps_pglist);
 	return (0);
 }
 
 /*
  * remove process from process group
  */
-int
-leavepgrp(struct proc *p)
+void
+leavepgrp(struct process *pr)
 {
 
-	LIST_REMOVE(p, p_pglist);
-	if (LIST_EMPTY(&p->p_pgrp->pg_members))
-		pgdelete(p->p_pgrp);
-	p->p_pgrp = 0;
-	return (0);
+	LIST_REMOVE(pr, ps_pglist);
+	if (LIST_EMPTY(&pr->ps_pgrp->pg_members))
+		pgdelete(pr->ps_pgrp);
+	pr->ps_pgrp = 0;
 }
 
 /*
@@ -302,20 +325,21 @@ pgdelete(struct pgrp *pgrp)
  * process group of the same session).  If that count reaches zero, the
  * process group becomes orphaned.  Check both the specified process'
  * process group and that of its children.
- * entering == 0 => p is leaving specified group.
- * entering == 1 => p is entering specified group.
+ * entering == 0 => pr is leaving specified group.
+ * entering == 1 => pr is entering specified group.
+ * XXX need proctree lock
  */
 void
-fixjobc(struct proc *p, struct pgrp *pgrp, int entering)
+fixjobc(struct process *pr, struct pgrp *pgrp, int entering)
 {
 	struct pgrp *hispgrp;
 	struct session *mysession = pgrp->pg_session;
 
 	/*
-	 * Check p's parent to see whether p qualifies its own process
-	 * group; if so, adjust count for p's process group.
+	 * Check pr's parent to see whether pr qualifies its own process
+	 * group; if so, adjust count for pr's process group.
 	 */
-	if ((hispgrp = p->p_pptr->p_pgrp) != pgrp &&
+	if ((hispgrp = pr->ps_pptr->ps_pgrp) != pgrp &&
 	    hispgrp->pg_session == mysession) {
 		if (entering)
 			pgrp->pg_jobc++;
@@ -328,10 +352,10 @@ fixjobc(struct proc *p, struct pgrp *pgrp, int entering)
 	 * their process groups; if so, adjust counts for children's
 	 * process groups.
 	 */
-	LIST_FOREACH(p, &p->p_children, p_sibling)
-		if ((hispgrp = p->p_pgrp) != pgrp &&
+	LIST_FOREACH(pr, &pr->ps_children, ps_sibling)
+		if ((hispgrp = pr->ps_pgrp) != pgrp &&
 		    hispgrp->pg_session == mysession &&
-		    P_ZOMBIE(p) == 0) {
+		    P_ZOMBIE(pr->ps_mainproc) == 0) {
 			if (entering)
 				hispgrp->pg_jobc++;
 			else if (--hispgrp->pg_jobc == 0)
@@ -347,13 +371,13 @@ fixjobc(struct proc *p, struct pgrp *pgrp, int entering)
 static void
 orphanpg(struct pgrp *pg)
 {
-	struct proc *p;
+	struct process *pr;
 
-	LIST_FOREACH(p, &pg->pg_members, p_pglist) {
-		if (p->p_stat == SSTOP) {
-			LIST_FOREACH(p, &pg->pg_members, p_pglist) {
-				psignal(p, SIGHUP);
-				psignal(p, SIGCONT);
+	LIST_FOREACH(pr, &pg->pg_members, ps_pglist) {
+		if (pr->ps_mainproc->p_stat == SSTOP) {
+			LIST_FOREACH(pr, &pg->pg_members, ps_pglist) {
+				prsignal(pr, SIGHUP);
+				prsignal(pr, SIGCONT);
 			}
 			return;
 		}
@@ -370,6 +394,7 @@ proc_printit(struct proc *p, const char *modif, int (*pr)(const char *, ...))
 	char pstbuf[5];
 	const char *pst = pstbuf;
 
+
 	if (p->p_stat < 1 || p->p_stat > sizeof(pstat) / sizeof(pstat[0]))
 		snprintf(pstbuf, sizeof(pstbuf), "%d", p->p_stat);
 	else
@@ -379,10 +404,17 @@ proc_printit(struct proc *p, const char *modif, int (*pr)(const char *, ...))
 	    p->p_comm, p->p_pid, pst, p->p_flag, P_BITS);
 	(*pr)("    pri=%u, usrpri=%u, nice=%d\n",
 	    p->p_priority, p->p_usrpri, p->p_nice);
+<<<<<<< HEAD
 	(*pr)("    forw=%p, back=%p, list=%p,%p\n",
 	    p->p_forw, p->p_back, p->p_list.le_next, p->p_list.le_prev);
 	(*pr)("    user=%p, vmspace=%p\n",
 	    p->p_addr, p->p_vmspace);
+=======
+	(*pr)("    forw=%p, list=%p,%p\n",
+	    TAILQ_NEXT(p, p_runq), p->p_list.le_next, p->p_list.le_prev);
+	(*pr)("    process=%p user=%p, vmspace=%p\n",
+	    p->p_p, p->p_addr, p->p_vmspace);
+>>>>>>> origin/master
 	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u%, swtime=%u\n",
 	    p->p_estcpu, p->p_cpticks, p->p_pctcpu / 100, p->p_pctcpu % 100,
 	    p->p_swtime);
@@ -399,7 +431,8 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 {
 	char *mode;
 	int doingzomb = 0;
-	struct proc *p, *pp;
+	struct proc *p;
+	struct process *pr, *ppr;
     
 	if (modif[0] == 0)
 		modif[0] = 'n';			/* default == normal mode */
@@ -434,7 +467,8 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 	}
 
 	while (p != 0) {
-		pp = p->p_pptr;
+		pr = p->p_p;
+		ppr = pr->ps_pptr;
 		if (p->p_stat) {
 
 			db_printf("%c%5d  ", p == curproc ? '*' : ' ',
@@ -449,9 +483,16 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 
 			case 'n':
 				db_printf("%5d  %5d  %5d  %d  %#10x  "
+<<<<<<< HEAD
 				    "%-9.9s  %-16s\n",
 				    pp ? pp->p_pid : -1, p->p_pgrp->pg_id,
 				    p->p_cred->p_ruid, p->p_stat, p->p_flag,
+=======
+				    "%-12.12s  %-16s\n",
+				    ppr ? ppr->ps_pid : -1,
+				    pr->ps_pgrp ? pr->ps_pgrp->pg_id : -1,
+				    pr->ps_cred->p_ruid, p->p_stat, p->p_flag,
+>>>>>>> origin/master
 				    (p->p_wchan && p->p_wmesg) ?
 					p->p_wmesg : "", p->p_comm);
 				break;
@@ -479,7 +520,7 @@ void
 pgrpdump(void)
 {
 	struct pgrp *pgrp;
-	struct proc *p;
+	struct process *pr;
 	int i;
 
 	for (i = 0; i <= pgrphash; i++) {
@@ -490,9 +531,9 @@ pgrpdump(void)
 				    pgrp, pgrp->pg_id, pgrp->pg_session,
 				    pgrp->pg_session->s_count,
 				    LIST_FIRST(&pgrp->pg_members));
-				LIST_FOREACH(p, &pgrp->pg_members, p_pglist) {
+				LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist) {
 					printf("\t\tpid %d addr %p pgrp %p\n", 
-					    p->p_pid, p, p->p_pgrp);
+					    pr->ps_pid, pr, pr->ps_pgrp);
 				}
 			}
 		}

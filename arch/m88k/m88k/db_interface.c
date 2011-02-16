@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.5 2006/05/08 14:36:09 miod Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.17 2011/01/05 22:14:29 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -63,8 +63,6 @@ void	kdbprinttrap(int);
 int	m88k_dmx_print(u_int, u_int, u_int, u_int);
 
 void	m88k_db_trap(int, struct trapframe *);
-void	ddb_error_trap(char *, db_regs_t *);
-void	m88k_db_pause(u_int);
 void	m88k_db_print_frame(db_expr_t, int, db_expr_t, char *);
 void	m88k_db_registers(db_expr_t, int, db_expr_t, char *);
 void	m88k_db_where(db_expr_t, int, db_expr_t, char *);
@@ -367,17 +365,6 @@ m88k_db_registers(addr, have_addr, count, modif)
 }
 
 /*
- * pause for 2*ticks many cycles
- */
-void
-m88k_db_pause(ticks)
-	u_int volatile ticks;
-{
-	while (ticks)
-		ticks -= 1;
-}
-
-/*
  * m88k_db_trap - field a TRACE or BPT trap
  * Note that only the tf_regs part of the frame is valid - some ddb routines
  * invoke this function with a promoted struct reg!
@@ -492,24 +479,6 @@ ddb_entry_trap(level, eframe)
 }
 
 /*
- * When the below routine is entered interrupts should be on
- * but spl should be high
- */
-/* error trap - unreturnable */
-void
-ddb_error_trap(error, regs)
-	char *error;
-	db_regs_t *regs;
-{
-	db_printf("KERNEL:  unrecoverable error [%s]\n", error);
-	db_printf("KERNEL:  Exiting debugger will cause abort to rom\n");
-	db_printf("at 0x%x ", regs->sxip & XIP_ADDR);
-	db_printf("dmt0 0x%x dma0 0x%x", regs->dmt0, regs->dma0);
-	m88k_db_pause(1000000);
-	m88k_db_trap(T_KDB_BREAK, (struct trapframe *)regs);
-}
-
-/*
  * Read bytes from kernel address space for debugger.
  */
 void
@@ -540,26 +509,35 @@ db_write_bytes(db_addr_t addr, size_t size, char *data)
 
 	while (size != 0) {
 		va = trunc_page((vaddr_t)dst);
-		pte = pmap_pte(pmap_kernel(), va);
-		opte = *pte;
-
-		pa = (opte & PG_FRAME) | ((vaddr_t)dst & PAGE_MASK);
+#ifdef M88100
+		if (CPU_IS88100 && va >= BATC8_VA)
+			pte = NULL;
+		else
+#endif
+			pte = pmap_pte(pmap_kernel(), va);
+		if (pte != NULL) {
+			opte = *pte;
+			pa = (opte & PG_FRAME) | ((vaddr_t)dst & PAGE_MASK);
+		}
 		len = PAGE_SIZE - ((vaddr_t)dst & PAGE_MASK);
 		if (len > size)
 			len = size;
 		size -= olen = len;
 
-		if (opte & PG_RO) {
+		if (pte != NULL && (opte & PG_RO)) {
 			*pte = opte & ~PG_RO;
-			cmmu_flush_tlb(cpu, TRUE, va, 1);
+			cmmu_tlb_inv(cpu, TRUE, va);
 		}
 		while (len-- != 0)
 			*dst++ = *data++;
-		if (opte & PG_RO) {
+		if (pte != NULL && (opte & PG_RO)) {
 			*pte = opte;
-			cmmu_flush_tlb(cpu, TRUE, va, 1);
+			cmmu_tlb_inv(cpu, TRUE, va);
 		}
-		cmmu_flush_cache(cpu, pa, olen);
+		if (pte != NULL && (opte & (CACHE_INH | CACHE_WT)) == 0) {
+			cmmu_dcache_wb(cpu, pa, olen);
+			cmmu_icache_inv(cpu, pa, olen);
+		}
 	}
 }
 
@@ -623,6 +601,7 @@ m88k_db_cpu_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	cpuid_t cpu;
 	struct cpu_info *ci;
 
+	db_printf(" cpu  flags state          curproc  curpcb   depth    ipi\n");
 	CPU_INFO_FOREACH(cpu, ci) {
 		db_printf("%c%4d: ", (cpu == cpu_number()) ? '*' : ' ',
 		    CPU_INFO_UNIT(ci));
@@ -636,11 +615,18 @@ m88k_db_cpu_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 		case CI_DDB_INDDB:
 			db_printf("ddb\n");
 			break;
+		case CI_DDB_PAUSE:
+			strlcpy(state, "paused", sizeof state);
+			break;
 		default:
 			db_printf("? (%d)\n",
 			    ci->ci_ddb_state);
 			break;
 		}
+		db_printf("%ccpu%1d   %02x  %-14s %08x %08x %3d %08x\n",
+		    (cpu == cpu_number()) ? '*' : ' ', CPU_INFO_UNIT(ci),
+		    ci->ci_flags, state, ci->ci_curproc, ci->ci_curpcb,
+		    ci->ci_intrdepth, ci->ci_ipi);
 	}
 }
 
@@ -652,7 +638,7 @@ m88k_db_cpu_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 
 struct db_command db_machine_cmds[] = {
 #ifdef MULTIPROCESSOR
-	{ "cpu",	m88k_db_cpu_cmd,	0,	NULL },
+	{ "ddbcpu",	m88k_db_cpu_cmd,	0,	NULL },
 #endif
 	{ "frame",	m88k_db_print_frame,	0,	NULL },
 	{ "regs",	m88k_db_registers,	0,	NULL },

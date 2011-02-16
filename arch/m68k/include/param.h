@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.18 2006/03/19 01:47:24 martin Exp $	*/
+/*	$OpenBSD: param.h,v 1.24 2010/06/29 20:30:32 guenther Exp $	*/
 /*	$NetBSD: param.h,v 1.2 1997/06/10 18:21:23 veego Exp $	*/
 
 /*
@@ -145,20 +145,6 @@
 #define	m68k_trunc_seg(x)	((unsigned)(x) & ~SEGOFSET)
 #define	m68k_page_offset(x)	((unsigned)(x) & PGOFSET)
 
-#ifdef COMPAT_HPUX
-/*
- * Constants/macros for HPUX multiple mapping of user address space.
- * Pages in the first 256Mb are mapped in at every 256Mb segment.
- */
-#define HPMMMASK	0xF0000000
-#define ISHPMMADDR(p, v) \
-	(((p)->p_md.md_flags & MDP_HPUXMMAP) && \
-	 ((unsigned)(v) & HPMMMASK) && \
-	 ((unsigned)(v) & HPMMMASK) != HPMMMASK)
-#define HPMMBASEADDR(v) \
-	((unsigned)(v) & ~HPMMMASK)
-#endif	/* COMPAT_HPUX */
-
-#include <machine/intr.h>	/* splXXX() */
+#include <machine/cpu.h>
 
 #endif	/* !_M68K_PARAM_H_ */

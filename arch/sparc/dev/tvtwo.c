@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tvtwo.c,v 1.13 2006/08/14 12:24:30 miod Exp $	*/
+=======
+/*	$OpenBSD: tvtwo.c,v 1.17 2008/12/26 22:30:21 miod Exp $	*/
+
+>>>>>>> origin/master
 /*
  * Copyright (c) 2003, 2006, Miodrag Vallat.
  * All rights reserved.
@@ -254,18 +259,11 @@ tvtwoattach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 	sc->sc_sunfb.sf_ro.ri_bits = (u_char *)sc->sc_m8;
 
-	/*
-	 * If the framebuffer width is under 1024, we will switch from
-	 * the PROM font to the more adequate 8x16 font here.
-	 */
-	fbwscons_init(&sc->sc_sunfb,
-	    isconsole && (width >= 1024) ? RI_CLEARMARGINS : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 	fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
 
-	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb,
-		    width >= 1024 ? -1 : 0);
-	}
+	if (isconsole)
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 
 	printf("%s: %dx%d\n", self->dv_xname,
 	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
@@ -285,7 +283,7 @@ tvtwo_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 	 */
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUN24;
+		*(u_int *)data = WSDISPLAY_TYPE_XVIDEO;
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;

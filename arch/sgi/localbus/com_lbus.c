@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_lbus.c,v 1.3 2004/08/11 15:13:35 deraadt Exp $ */
+/*	$OpenBSD: com_lbus.c,v 1.11 2009/10/26 18:00:06 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -43,6 +43,7 @@
 int	com_localbus_probe(struct device *, void *, void *);
 void	com_localbus_attach(struct device *, struct device *, void *);
 
+#include <sgi/localbus/macebusvar.h>
 
 struct cfattach com_localbus_ca = {
 	sizeof(struct com_softc), com_localbus_probe, com_localbus_attach
@@ -60,34 +61,21 @@ com_localbus_probe(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
-	bus_space_tag_t iot;
+	struct macebus_attach_args *maa = aux;
 	bus_space_handle_t ioh;
-	struct cfdata *cf = match;
-	struct confargs *ca = aux;
-	bus_addr_t iobase, rv = 0;
+	int rv;
 
-	/*
-	 *  Check if this is our com. If low nibble is 0 match
-	 *  against system CLASS. Else a perfect match is checked.
-	 */
-	if ((ca->ca_sys & 0x000f) == 0) {
-		if (ca->ca_sys != (sys_config.system_type & 0xfff0))
-			return 0;
-	} else if (ca->ca_sys != sys_config.system_type)
-		return 0;
+	/* If it's in use as the console, then it's there. */
+	if (maa->maa_baseaddr == comconsaddr && !comconsattached)
+		return (1);
 
-	iobase = (bus_addr_t)sys_config.cons_ioaddr[cf->cf_unit];
-	if (iobase) {
-		iot = sys_config.cons_iot;
-		/* if it's in use as console, it's there. */
-		if (!(iobase == comconsaddr && !comconsattached)) {
-			bus_space_map(iot, iobase, COM_NPORTS, 0, &ioh);
-			rv = comprobe1(iot, ioh);
-		} else {
-			rv = 1;
-		}
-	}
-	return (rv);
+	if (bus_space_map(maa->maa_iot, maa->maa_baseaddr, COM_NPORTS, 0, &ioh))
+		return (0);
+
+	rv = comprobe1(maa->maa_iot, ioh);
+	bus_space_unmap(maa->maa_iot, ioh, COM_NPORTS);
+
+	return rv;
 }
 
 void
@@ -96,24 +84,25 @@ com_localbus_attach(parent, self, aux)
 	void *aux;
 {
 	struct com_softc *sc = (void *)self;
-	int intr;
-	bus_addr_t iobase;
-	bus_space_handle_t ioh;
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 
+	sc->sc_iot = maa->maa_iot;
 	sc->sc_hwflags = 0;
 	sc->sc_swflags = 0;
-	iobase = (bus_addr_t)sys_config.cons_ioaddr[sc->sc_dev.dv_unit];
-	intr = ca->ca_intr;
-	sc->sc_iobase = iobase;
-	sc->sc_frequency = sys_config.cons_baudclk;
+	sc->sc_iobase = maa->maa_baseaddr;
+	sc->sc_frequency = 1843200;
 
-	sc->sc_iot = sys_config.cons_iot;
-
-	/* if it's in use as console, it's there. */
-	if (!(iobase == comconsaddr && !comconsattached)) {
-		if (bus_space_map(sc->sc_iot, iobase, COM_NPORTS, 0, &ioh)) {
-			panic("unexpected bus_space_map failure");
+	/* If it's in use as the console, then it's there. */
+	if (maa->maa_baseaddr == comconsaddr && !comconsattached) {
+		if (comcnattach(sc->sc_iot, sc->sc_iobase, comconsrate,
+		    sc->sc_frequency, (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
+			panic("failed to setup serial console!");
+		sc->sc_ioh = comconsioh;
+	} else {
+		if (bus_space_map(sc->sc_iot, maa->maa_baseaddr, COM_NPORTS, 0,
+		    &sc->sc_ioh)) {
+			printf(": can't map i/o space\n");
+			return;
 		}
 	}
 	else {
@@ -124,11 +113,6 @@ com_localbus_attach(parent, self, aux)
 
 	com_attach_subr(sc);
 
-	/* Enable IE pin. Some boards are not edge sensitive */
-	SET(sc->sc_mcr, MCR_IENABLE);
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, com_mcr, sc->sc_mcr);
-
-	BUS_INTR_ESTABLISH(ca, NULL, intr, IST_EDGE, IPL_TTY,
-				comintr, (void *)sc, sc->sc_dev.dv_xname);
-
+	macebus_intr_establish(maa->maa_intr, maa->maa_mace_intr,
+	    IST_EDGE, IPL_TTY, comintr, (void *)sc, sc->sc_dev.dv_xname);
 }

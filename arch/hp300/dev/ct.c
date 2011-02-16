@@ -1,4 +1,4 @@
-/*	$OpenBSD: ct.c,v 1.16 2006/01/20 23:27:25 miod Exp $	*/
+/*	$OpenBSD: ct.c,v 1.22 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: ct.c,v 1.21 1997/04/02 22:37:23 scottr Exp $	*/
 
 /*
@@ -431,7 +431,7 @@ ctcommand(dev, cmd, cnt)
 	}
 
 	while (cnt-- > 0) {
-		bp->b_flags = B_BUSY;
+		bp->b_flags = B_BUSY | B_RAW;
 		if (cmd == MTBSF) {
 			sc->sc_blkno = sc->sc_eofs[sc->sc_eofp];
 			sc->sc_eofp--;
@@ -864,7 +864,7 @@ ctread(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	return (physio(ctstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(ctstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -874,7 +874,7 @@ ctwrite(dev, uio, flags)
 	int flags;
 {
 	/* XXX: check for hardware write-protect? */
-	return (physio(ctstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(ctstrategy, dev, B_WRITE, minphys, uio));
 }
 
 /*ARGSUSED*/

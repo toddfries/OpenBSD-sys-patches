@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.31 2006/03/12 02:55:58 brad Exp $ */
+/*	$OpenBSD: intr.h,v 1.46 2011/01/08 18:10:20 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -42,6 +42,7 @@
 #define	IPL_TTY		3
 #define	IPL_VM		4
 #define	IPL_CLOCK	5
+#define	IPL_SCHED	6
 #define	IPL_HIGH	6
 #define	IPL_NUM		7
 
@@ -58,102 +59,77 @@
 #define PPC_CLK_IRQ	64
 #define PPC_STAT_IRQ	65
 
-void setsoftclock(void);
-void clearsoftclock(void);
-int  splsoftclock(void);
-void setsoftnet(void);
-void clearsoftnet(void);
-int  splsoftnet(void);
+int	splraise(int);
+int	spllower(int);
+void	splx(int);
+
 
 void do_pending_int(void);
 
-
-extern int imask[IPL_NUM];
+extern int cpu_imask[IPL_NUM];
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */
+#define	splsoftassert(wantipl)	/* nothing */
 
-/*
- * Reorder protection in the following inline functions is
- * achived with an empty asm volatile statement. the compiler
- * will not move instructions past asm volatiles.
- */
-volatile static __inline int
-splraise(int newcpl)
-{
-	struct cpu_info *ci = curcpu();
-	int oldcpl;
+#define SINTBIT(q)	(31 - (q))
+#define SINTMASK(q)	(1 << SINTBIT(q))
 
-	__asm__ volatile("":::"memory");	/* don't reorder.... */
-	oldcpl = ci->ci_cpl;
-	ci->ci_cpl = oldcpl | newcpl;
-	__asm__ volatile("":::"memory");	/* don't reorder.... */
-	return(oldcpl);
-}
+#define	SPL_CLOCKMASK	SINTMASK(SI_NQUEUES)
 
-volatile static __inline void
-splx(int newcpl)
-{
-	struct cpu_info *ci = curcpu();
+/* Soft interrupt masks. */
 
-	__asm__ volatile("":::"memory");	/* reorder protect */
-	ci->ci_cpl = newcpl;
-	if(ci->ci_ipending & ~newcpl)
-		do_pending_int();
-	__asm__ volatile("":::"memory");	/* reorder protect */
-}
+#define	IPL_SOFTCLOCK	0
+#define	IPL_SOFTNET	1
+#define	IPL_SOFTTTY	2
 
-volatile static __inline int
-spllower(int newcpl)
-{
-	struct cpu_info *ci = curcpu();
-	int oldcpl;
+#define	SI_SOFTCLOCK	0	/* for IPL_SOFTCLOCK */
+#define	SI_SOFTNET	1	/* for IPL_SOFTNET */
+#define	SI_SOFTTTY	2	/* for IPL_SOFTTY */
 
-	__asm__ volatile("":::"memory");	/* reorder protect */
-	oldcpl = ci->ci_cpl;
-	ci->ci_cpl = newcpl;
-	if(ci->ci_ipending & ~newcpl)
-		do_pending_int();
-	__asm__ volatile("":::"memory");	/* reorder protect */
-	return(oldcpl);
-}
+#define	SINT_ALLMASK	(SINTMASK(SI_SOFTCLOCK) | \
+			 SINTMASK(SI_SOFTNET) | SINTMASK(SI_SOFTTTY))
+#define	SI_NQUEUES	3
 
-/* Following code should be implemented with lwarx/stwcx to avoid
- * the disable/enable. i need to read the manual once more.... */
-static __inline void
-set_sint(int pending)
-{
-	struct cpu_info *ci = curcpu();
-	int	msrsave;
+#include <machine/mutex.h>
+#include <sys/queue.h>
 
-	__asm__ ("mfmsr %0" : "=r"(msrsave));
-	__asm__ volatile ("mtmsr %0" :: "r"(msrsave & ~PSL_EE));
-	ci->ci_ipending |= pending;
-	__asm__ volatile ("mtmsr %0" :: "r"(msrsave));
-}
+struct soft_intrhand {
+	TAILQ_ENTRY(soft_intrhand) sih_list;
+	void	(*sih_func)(void *);
+	void	*sih_arg;
+	struct soft_intrq *sih_siq;
+	int	sih_pending;
+};
 
-#define	SINT_CLOCK	0x10000000
-#define	SINT_NET	0x20000000
-#define	SINT_TTY	0x40000000
-#define	SPL_CLOCK	0x80000000
-#define	SINT_MASK	(SINT_CLOCK|SINT_NET|SINT_TTY)
+struct soft_intrq {
+	TAILQ_HEAD(, soft_intrhand) siq_list;
+	int siq_si;
+	struct mutex siq_mtx;
+};
 
-#define splbio()	splraise(imask[IPL_BIO])
-#define splnet()	splraise(imask[IPL_NET])
-#define spltty()	splraise(imask[IPL_TTY])
-#define splaudio()	splraise(imask[IPL_AUDIO])
-#define splclock()	splraise(imask[IPL_CLOCK])
-#define splvm()		splraise(imask[IPL_VM])
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(int);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
+
+#define	SINT_CLOCK	SINTMASK(SI_SOFTCLOCK)
+#define	SINT_NET	SINTMASK(SI_SOFTNET)
+#define	SINT_TTY	SINTMASK(SI_SOFTTTY)
+
+#define splbio()	splraise(cpu_imask[IPL_BIO])
+#define splnet()	splraise(cpu_imask[IPL_NET])
+#define spltty()	splraise(cpu_imask[IPL_TTY])
+#define splaudio()	splraise(cpu_imask[IPL_AUDIO])
+#define splclock()	splraise(cpu_imask[IPL_CLOCK])
+#define splvm()		splraise(cpu_imask[IPL_VM])
 #define splsched()	splhigh()
 #define spllock()	splhigh()
 #define splstatclock()	splhigh()
 #define	splsoftclock()	splraise(SINT_CLOCK)
 #define	splsoftnet()	splraise(SINT_NET|SINT_CLOCK)
 #define	splsofttty()	splraise(SINT_TTY|SINT_NET|SINT_CLOCK)
-
-#define	setsoftclock()	set_sint(SINT_CLOCK);
-#define	setsoftnet()	set_sint(SINT_NET);
-#define	setsofttty()	set_sint(SINT_TTY);
 
 #define	splhigh()	splraise(0xffffffff)
 #define	spl0()		spllower(0)
@@ -169,12 +145,17 @@ struct intrhand {
 	struct evcount	ih_count;
 	int		ih_level;
 	int		ih_irq;
-	char		*ih_what;
+	const char	*ih_what;
 };
 extern int ppc_configed_intr_cnt;
 #define MAX_PRECONF_INTR 16
 extern struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 void softnet(int isr);
+
+#define PPC_IPI_NOP		0
+#define PPC_IPI_DDB		1
+
+void ppc_send_ipi(struct cpu_info *, int);
 
 #endif /* _LOCORE */
 #endif /* _POWERPC_INTR_H_ */

@@ -1,4 +1,4 @@
-/* $OpenBSD: esp.c,v 1.1 2006/12/14 21:52:04 gwk Exp $ */
+/* $OpenBSD: esp.c,v 1.7 2010/06/28 18:31:01 krw Exp $ */
 
 /*-
  * Copyright (c) 1997, 1998 The NetBSD Foundation, Inc.
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,7 +80,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
@@ -144,11 +136,7 @@ struct cfattach esp_ca = {
 
 struct scsi_adapter esp_switch = {
 	/* no max at this level; handled by DMA code */
-	ncr53c9x_scsi_cmd, minphys, NULL, NULL,
-};
-
-struct scsi_device esp_dev = {
-	NULL, NULL, NULL, NULL,
+	ncr53c9x_scsi_cmd, scsi_minphys, NULL, NULL,
 };
 
 /*
@@ -278,7 +266,7 @@ espattach(struct device *parent, struct device *self, void *aux)
 	/* Turn on target selection using the `DMA' method */
 	sc->sc_features |= NCR_F_DMASELECT;
 
-	ncr53c9x_attach(sc, &esp_switch, &esp_dev);
+	ncr53c9x_attach(sc, &esp_switch);
 
 }
 

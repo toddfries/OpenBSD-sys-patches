@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmel.c,v 1.13 2005/10/27 16:04:08 martin Exp $ */
+/*	$OpenBSD: vmel.c,v 1.17 2010/12/26 15:40:59 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -27,10 +27,11 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/conf.h>
@@ -170,5 +171,5 @@ vmelmmap(dev, off, prot)
 #endif
 	if (pa == NULL)
 		return (-1);
-	return (atop(pa));
+	return (pa);
 }

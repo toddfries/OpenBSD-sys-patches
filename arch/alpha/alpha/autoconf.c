@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.26 2005/12/27 18:31:05 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.33 2010/11/28 21:00:03 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.16 1996/11/13 21:13:04 cgd Exp $	*/
 
 /*
@@ -56,8 +56,6 @@
 #include <machine/intr.h>
 
 #include <dev/cons.h>
-
-extern char		root_device[17];		/* XXX */
 
 struct device		*booted_device;
 int			booted_partition;
@@ -614,3 +612,15 @@ device_register(dev, aux)
 	if (platform.device_register)
 		(*platform.device_register)(dev, aux);
 }
+
+struct nam2blk nam2blk[] = {
+	{ "st",		2 },
+	{ "cd",		3 },
+	{ "fd",		4 },
+	{ "rd",		6 },
+	{ "sd",		8 },
+	{ "wd",		0 },
+	{ "raid",	16 },
+	{ "vnd",	9 },
+	{ NULL,		-1 }
+};

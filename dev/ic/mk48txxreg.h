@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mk48txxreg.h,v 1.2 2001/08/18 22:08:18 jason Exp $	*/
+=======
+/*	$OpenBSD: mk48txxreg.h,v 1.5 2009/05/15 23:02:25 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mk48txxreg.h,v 1.4 2000/11/11 11:59:42 pk Exp $ */
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -15,13 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -84,6 +81,9 @@
 
 #define MK48T59_CLKSZ		8192
 #define MK48T59_CLKOFF		0x1ff0
+
+#define	MK48T35_CLKSZ		0x8000
+#define	MK48T35_CLKOFF		0x7ff0
 
 /* Chip attach function */
 todr_chip_handle_t mk48txx_attach(bus_space_tag_t, bus_space_handle_t,

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mfs_vnops.c,v 1.26 2006/03/28 13:18:17 pedro Exp $	*/
+=======
+/*	$OpenBSD: mfs_vnops.c,v 1.40 2010/12/21 20:14:44 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mfs_vnops.c,v 1.8 1996/03/17 02:16:32 christos Exp $	*/
 
 /*
@@ -48,6 +52,7 @@
 #include <ufs/mfs/mfsnode.h>
 #include <ufs/mfs/mfs_extern.h>
 
+<<<<<<< HEAD
 /*
  * mfs vnode operations.
  */
@@ -89,9 +94,46 @@ struct vnodeopv_entry_desc mfs_vnodeop_entries[] = {
 	{ &vop_advlock_desc, mfs_advlock },		/* advlock */
 	{ &vop_bwrite_desc, mfs_bwrite },		/* bwrite */
 	{ (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
+=======
+/* mfs vnode operations. */
+struct vops mfs_vops = {
+        .vop_default    = eopnotsupp,
+        .vop_lookup     = mfs_badop,
+        .vop_create     = mfs_badop,
+        .vop_mknod      = mfs_badop,
+        .vop_open       = mfs_open,
+        .vop_close      = mfs_close,
+        .vop_access     = mfs_badop,
+        .vop_getattr    = mfs_badop,
+        .vop_setattr    = mfs_badop,
+        .vop_read       = mfs_badop,
+        .vop_write      = mfs_badop,
+        .vop_ioctl      = mfs_ioctl,
+        .vop_poll       = mfs_badop,
+        .vop_revoke     = mfs_revoke,
+        .vop_fsync      = spec_fsync,
+        .vop_remove     = mfs_badop,
+        .vop_link       = mfs_badop,
+        .vop_rename     = mfs_badop,
+        .vop_mkdir      = mfs_badop,
+        .vop_rmdir      = mfs_badop,
+        .vop_symlink    = mfs_badop,
+        .vop_readdir    = mfs_badop,
+        .vop_readlink   = mfs_badop,
+        .vop_abortop    = mfs_badop,
+        .vop_inactive   = mfs_inactive,
+        .vop_reclaim    = mfs_reclaim,
+        .vop_lock       = vop_generic_lock,
+        .vop_unlock     = vop_generic_unlock,
+        .vop_bmap       = vop_generic_bmap,
+        .vop_strategy   = mfs_strategy,
+        .vop_print      = mfs_print,
+        .vop_islocked   = vop_generic_islocked,
+        .vop_pathconf   = mfs_badop,
+        .vop_advlock    = mfs_badop,
+        .vop_bwrite     = vop_generic_bwrite
+>>>>>>> origin/master
 };
-struct vnodeopv_desc mfs_vnodeop_opv_desc =
-	{ &mfs_vnodeop_p, mfs_vnodeop_entries };
 
 /*
  * Vnode Operations.
@@ -265,15 +307,10 @@ mfs_close(void *v)
 		return (error);
 #ifdef DIAGNOSTIC
 	/*
-	 * There should be no way to have any more uses of this
-	 * vnode, so if we find any other uses, it is a panic.
+	 * There should be no way to have any more buffers on this vnode.
 	 */
-	if (vp->v_usecount > 1)
-		printf("mfs_close: ref count %d > 1\n", vp->v_usecount);
 	if (mfsp->mfs_buflist)
 		printf("mfs_close: dirty buffers\n");
-	if (vp->v_usecount > 1 || mfsp->mfs_buflist)
-		panic("mfs_close");
 #endif
 	/*
 	 * Send a request to the filesystem server to exit.

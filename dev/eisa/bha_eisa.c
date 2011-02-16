@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bha_eisa.c,v 1.3 2002/03/14 01:26:53 millert Exp $	*/
+=======
+/*	$OpenBSD: bha_eisa.c,v 1.6 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bha_eisa.c,v 1.16 1998/08/15 10:10:49 mycroft Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -171,13 +168,13 @@ bha_eisa_attach(parent, self, aux)
 	if (bus_space_map(iot,
 	    EISA_SLOT_ADDR(ea->ea_slot) + BHA_EISA_SLOT_OFFSET, BHA_EISA_IOSIZE,
 	    0, &ioh)) {
-		printf(": could not map EISA slot\n");
+		printf(": can't map EISA slot\n");
 		return;
 	}
 
 	if (bha_eisa_address(iot, ioh, &port) ||
 	    bus_space_map(iot, port, BHA_ISA_IOSIZE, 0, &ioh2)) {
-		printf(": could not map ISA address\n");
+		printf(": can't map ISA address\n");
 		return;
 	}
 

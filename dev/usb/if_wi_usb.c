@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wi_usb.c,v 1.33 2006/11/26 19:46:28 deraadt Exp $ */
+=======
+/*	$OpenBSD: if_wi_usb.c,v 1.50 2011/01/25 20:03:35 jakemsr Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -262,7 +266,26 @@ const struct wi_usb_type {
 };
 #define wi_usb_lookup(v, p) ((struct wi_usb_type *)usb_lookup(wi_usb_devs, v, p))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER_CLASS(wi_usb, DV_IFNET);
+=======
+int wi_usb_match(struct device *, void *, void *); 
+void wi_usb_attach(struct device *, struct device *, void *); 
+int wi_usb_detach(struct device *, int); 
+int wi_usb_activate(struct device *, int); 
+
+struct cfdriver wi_usb_cd = { 
+	NULL, "wi_usb", DV_IFNET 
+}; 
+
+const struct cfattach wi_usb_ca = { 
+	sizeof(struct wi_usb_softc), 
+	wi_usb_match, 
+	wi_usb_attach, 
+	wi_usb_detach, 
+	wi_usb_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(wi_usb)
 {
@@ -375,12 +398,15 @@ USB_ATTACH(wi_usb)
 	sc->wi_usb_attached = 1;
 
 	kthread_create_deferred(wi_usb_start_thread, sc);
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->wi_usb_udev,
 			   USBDEV(sc->wi_usb_dev));
 
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(wi_usb)
@@ -391,7 +417,10 @@ USB_DETACH(wi_usb)
 	int s;
 	int err;
 
-	sc->wi_usb_dying = 1;
+	/* Detached before attach finished, so just bail out. */
+	if (!sc->wi_usb_attached)
+		return (0);
+
 	if (sc->wi_thread_info != NULL) {
 		sc->wi_thread_info->dying = 1;
 
@@ -400,10 +429,6 @@ USB_DETACH(wi_usb)
 			wakeup(sc->wi_thread_info);
 	}
 
-	if (!sc->wi_usb_attached) {
-		/* Detached before attach finished, so just bail out. */
-		return (0);
-	}
 	/* tasks? */
 
 	s = splusb();
@@ -419,8 +444,10 @@ USB_DETACH(wi_usb)
 
 	wsc->wi_flags = 0;
 
-	ether_ifdetach(ifp);
-	if_detach(ifp);
+	if (ifp->if_softc != NULL) {
+		ether_ifdetach(ifp);
+		if_detach(ifp);
+	}
 
 	sc->wi_usb_attached = 0;
 
@@ -450,7 +477,7 @@ USB_DETACH(wi_usb)
 		sc->wi_usb_ep[WI_USB_ENDPT_INTR] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_TX] != NULL) {
-		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
+		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		if (err) {
 			printf("%s: abort tx pipe failed: %s\n",
 			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
@@ -463,7 +490,7 @@ USB_DETACH(wi_usb)
 		sc->wi_usb_ep[WI_USB_ENDPT_TX] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_RX] != NULL) {
-		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
+		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		if (err) {
 			printf("%s: abort rx pipe failed: %s\n",
 			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
@@ -478,8 +505,11 @@ USB_DETACH(wi_usb)
 
 	splx(s);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->wi_usb_udev,
 	    USBDEV(sc->wi_usb_dev));
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
@@ -508,7 +538,6 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 		   (rnd_len > WI_USB_BUFSZ )){
 			printf("invalid packet len: %x memsz %x max %x\n",
 			    total_len, sc->wi_usb_txmemsize[id], WI_USB_BUFSZ);
-			total_len = sc->wi_usb_txmemsize[id];
 
 			err = EIO;
 			goto err_ret;
@@ -619,8 +648,6 @@ wi_cmd_usb(struct wi_softc *wsc, int cmd, int val0, int val1, int val2)
 
 	bzero(((char*)pcmd)+total_len, rnd_len - total_len);
 
-	total_len = rnd_len;
-
 	usbd_setup_xfer(c->wi_usb_xfer, sc->wi_usb_ep[WI_USB_ENDPT_TX],
 	    c, c->wi_usb_buf, rnd_len, USBD_FORCE_SHORT_XFER | USBD_NO_COPY,
 	    WI_USB_TX_TIMEOUT, wi_usb_txeof);
@@ -651,7 +678,7 @@ wi_read_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	struct wi_rridreq	*prid;
 	int			total_len, rnd_len;
 	int			err;
-	struct wi_ltv_gen	*oltv, p2ltv;
+	struct wi_ltv_gen	*oltv = NULL, p2ltv;
 
 	DPRINTFN(5,("%s: %s: enter rid=%x\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__, ltv->wi_type));
@@ -1330,7 +1357,11 @@ wi_get_fid_usb(struct wi_softc *sc, int fid)
 }
 
 int
+<<<<<<< HEAD
 wi_usb_activate(device_ptr_t self, enum devact act)
+=======
+wi_usb_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct wi_usb_softc *sc = (struct wi_usb_softc *)self;
 

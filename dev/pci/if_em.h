@@ -32,7 +32,11 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 /* $FreeBSD: if_em.h,v 1.26 2004/09/01 23:22:41 pdeuskar Exp $ */
+<<<<<<< HEAD
 /* $OpenBSD: if_em.h,v 1.33 2006/11/17 02:03:32 brad Exp $ */
+=======
+/* $OpenBSD: if_em.h,v 1.48 2010/09/07 16:21:44 deraadt Exp $ */
+>>>>>>> origin/master
 
 #ifndef _EM_H_DEFINED_
 #define _EM_H_DEFINED_
@@ -48,6 +52,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -94,7 +99,6 @@ POSSIBILITY OF SUCH DAMAGE.
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct em_tx_desc)) % 128 == 0
  */
-#define EM_MIN_TXD			12
 #define EM_MAX_TXD_82543		256
 #define EM_MAX_TXD			512
 
@@ -111,7 +115,11 @@ POSSIBILITY OF SUCH DAMAGE.
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct em_tx_desc)) % 128 == 0
  */
+<<<<<<< HEAD
 #define EM_MIN_RXD			12
+=======
+#define EM_MAX_RXD_82543		256
+>>>>>>> origin/master
 #define EM_MAX_RXD			256
 
 /*
@@ -187,7 +195,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define EM_TX_OP_THRESHOLD		(sc->num_tx_desc / 32)
 
 /*
- * This parameter controls whether or not autonegotation is enabled.
+ * This parameter controls whether or not autonegotiation is enabled.
  *              0 - Disable autonegotiation
  *              1 - Enable  autonegotiation
  */
@@ -316,9 +324,6 @@ struct em_softc {
 	struct timeout	em_intr_enable;
 	struct timeout	timer_handle;
 	struct timeout	tx_fifo_timer_handle;
-	int		if_flags;
-	void		*sc_powerhook;
-	void		*sc_shutdownhook;
 
 #ifdef __STRICT_ALIGNMENT
 	/* Used for carrying forward alignment adjustments */
@@ -369,11 +374,12 @@ struct em_softc {
 	struct em_dma_alloc	rxdma;		/* bus_dma glue for rx desc */
 	struct em_rx_desc	*rx_desc_base;
 	u_int32_t		next_rx_desc_to_check;
+	u_int32_t		last_rx_desc_filled;
+	int			rx_ndescs;
 	u_int32_t		rx_buffer_len;
 	u_int16_t		num_rx_desc;
 	struct em_buffer	*rx_buffer_area;
 	bus_dma_tag_t		rxtag;
-	bus_dmamap_t		rx_sparemap;
 
 	/*
 	 * First/last mbuf pointers, for
@@ -410,7 +416,6 @@ struct em_softc {
 
 	/* For 82544 PCI-X Workaround */
 	boolean_t	pcix_82544;
-
 	struct em_hw_stats stats;
 };
 

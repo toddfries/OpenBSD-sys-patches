@@ -1,4 +1,4 @@
-#	$OpenBSD: files.armish,v 1.9 2006/07/14 20:41:30 miod Exp $
+#	$OpenBSD: files.armish,v 1.14 2010/12/06 20:10:17 jasper Exp $
 
 maxpartitions   16
 maxusers	2 8 64
@@ -14,7 +14,7 @@ file	arch/armish/armish/armish_machdep.c
 file	arch/armish/armish/autoconf.c
 file	arch/arm/arm/disksubr.c				disk
 
-include "../../../scsi/files.scsi"
+include "scsi/files.scsi"
 
 # Use the generic ARM soft interrupt code.
 file	arch/arm/arm/softintr.c
@@ -54,6 +54,8 @@ include "dev/ata/files.ata"
 
 # Include WSCONS stuff
 include "dev/wscons/files.wscons"
+include "dev/wsfont/files.wsfont"
+include "dev/rasops/files.rasops"
 
 # Include USB stuff
 include "dev/usb/files.usb"
@@ -62,10 +64,11 @@ include "dev/usb/files.usb"
 include "dev/mii/files.mii"
 
 # PCI
-include "../../../dev/pci/files.pci"
+include "dev/pci/files.pci"
 file	arch/armish/dev/pciide_machdep.c	pciide
 
-include "../../../dev/atapiscsi/files.atapiscsi"
+include "dev/puc/files.puc"
+include "dev/atapiscsi/files.atapiscsi"
 
 
 #

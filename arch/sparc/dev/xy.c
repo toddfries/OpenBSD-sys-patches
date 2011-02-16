@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: xy.c,v 1.29 2006/12/03 16:40:43 miod Exp $	*/
+=======
+/*	$OpenBSD: xy.c,v 1.50 2010/09/22 06:40:25 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -75,6 +79,7 @@
 #include <sys/dkbad.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -208,12 +213,6 @@ struct xyc_attach_args {	/* this is the "aux" args to xyattach */
 };
 
 /*
- * dkdriver
- */
-
-struct dkdriver xydkdriver = { xystrategy };
-
-/*
  * start: disk label fix code (XXX)
  */
 
@@ -227,7 +226,6 @@ xydummystrat(bp)
 		panic("xydummystrat");
 	bcopy(xy_labeldata, bp->b_data, XYFM_BPS);
 	bp->b_flags |= B_DONE;
-	bp->b_flags &= ~B_BUSY;
 }
 
 int
@@ -235,12 +233,29 @@ xygetdisklabel(xy, b)
 	struct xy_softc *xy;
 	void *b;
 {
+<<<<<<< HEAD
 	char *err;
 	struct sun_disklabel *sdl;
+=======
+	struct disklabel *lp = xy->sc_dk.dk_label;
+	struct sun_disklabel *sl = b;
+	int error;
+
+	bzero(lp, sizeof(struct disklabel));
+	/* Required parameters for readdisklabel() */
+	lp->d_secsize = XYFM_BPS;
+	if (sl->sl_magic == SUN_DKMAGIC) {
+		lp->d_secpercyl = sl->sl_nsectors * sl->sl_ntracks;
+		DL_SETDSIZE(lp, (daddr64_t)lp->d_secpercyl * sl->sl_ncylinders);
+	} else {
+		lp->d_secpercyl = 1;
+	}
+>>>>>>> origin/master
 
 	/* We already have the label data in `b'; setup for dummy strategy */
 	xy_labeldata = b;
 
+<<<<<<< HEAD
 	/* Required parameters for readdisklabel() */
 	xy->sc_dk.dk_label->d_secsize = XYFM_BPS;
 	xy->sc_dk.dk_label->d_secpercyl = 1;
@@ -252,6 +267,12 @@ xygetdisklabel(xy, b)
 		/*printf("%s: %s\n", xy->sc_dev.dv_xname, err);*/
 		return(XY_ERR_FAIL);
 	}
+=======
+	error = readdisklabel(MAKEDISKDEV(0, xy->sc_dev.dv_unit, RAW_PART),
+	    xydummystrat, lp, 0);
+	if (error)
+		return (error);
+>>>>>>> origin/master
 
 	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
 	sdl = (struct sun_disklabel *)xy->sc_dk.dk_cpulabel->cd_block;
@@ -266,6 +287,7 @@ xygetdisklabel(xy, b)
 		xy->sc_dev.dv_xname, xy->pcyl);
 	}
 
+<<<<<<< HEAD
 	xy->ncyl = xy->sc_dk.dk_label->d_ncylinders;
 	xy->acyl = xy->sc_dk.dk_label->d_acylinders;
 	xy->nhead = xy->sc_dk.dk_label->d_ntracks;
@@ -275,6 +297,14 @@ xygetdisklabel(xy, b)
 	xy->sc_dk.dk_label->d_secsize = XYFM_BPS; /* not handled by
                                           	  * sun->bsd */
 	return(XY_ERR_AOK);
+=======
+	xy->ncyl = lp->d_ncylinders;
+	xy->acyl = lp->d_acylinders;
+	xy->nhead = lp->d_ntracks;
+	xy->nsect = lp->d_nsectors;
+	xy->sectpercyl = lp->d_secpercyl;
+	return (error);
+>>>>>>> origin/master
 }
 
 /*
@@ -396,8 +426,8 @@ xycattach(parent, self, aux)
 		xyc->iopbase[lcv].relo = 1;	/* always the same */
 		xyc->iopbase[lcv].thro = XY_THRO;/* always the same */
 	}
-	xyc->ciorq = &xyc->reqs[XYC_CTLIOPB];    /* short hand name */
-	xyc->ciopb = &xyc->iopbase[XYC_CTLIOPB]; /* short hand name */
+	xyc->ciorq = &xyc->reqs[XYC_CTLIOPB];    /* shorthand name */
+	xyc->ciopb = &xyc->iopbase[XYC_CTLIOPB]; /* shorthand name */
 	xyc->xy_hand = 0;
 
 	/* read controller parameters and insure we have a 450/451 */
@@ -504,7 +534,6 @@ xyattach(parent, self, aux)
 	 * to start with a clean slate.
 	 */
 	bzero(&xy->sc_dk, sizeof(xy->sc_dk));
-	xy->sc_dk.dk_driver = &xydkdriver;
 	xy->sc_dk.dk_name = xy->sc_dev.dv_xname;
 
 	/* if booting, init the xy_softc */
@@ -593,9 +622,9 @@ xyattach(parent, self, aux)
 
 	xy->hw_spt = spt = 0; /* XXX needed ? */
 	/* Attach the disk: must be before getdisklabel to malloc label */
-	disk_attach(&xy->sc_dk);
+	disk_attach(&xy->sc_dev, &xy->sc_dk);
 
-	if (xygetdisklabel(xy, xa->buf) != XY_ERR_AOK)
+	if (xygetdisklabel(xy, xa->buf) != 0)
 		goto done;
 
 	/* inform the user of what is up */
@@ -807,6 +836,7 @@ xyioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCGDINFO:	/* get disk label */
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xy->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
@@ -816,6 +846,7 @@ xyioctl(dev, command, addr, flag, p)
 		    &xy->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
+<<<<<<< HEAD
 	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
@@ -828,6 +859,8 @@ xyioctl(dev, command, addr, flag, p)
 		}
 		return error;
 
+=======
+>>>>>>> origin/master
 	case DIOCWLABEL:	/* change write status of disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
@@ -838,6 +871,7 @@ xyioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:	/* write disk label */
+	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xy->sc_dk.dk_label,
@@ -847,6 +881,7 @@ xyioctl(dev, command, addr, flag, p)
 			if (xy->state == XY_DRIVE_NOLABEL)
 				xy->state = XY_DRIVE_ONLINE;
 
+<<<<<<< HEAD
 			/* Simulate opening partition 0 so write succeeds. */
 			xy->sc_dk.dk_openmask |= (1 << 0);
 			error = writedisklabel(MAKEDISKDEV(major(dev), DISKUNIT(dev), RAW_PART),
@@ -854,6 +889,19 @@ xyioctl(dev, command, addr, flag, p)
 			    xy->sc_dk.dk_cpulabel);
 			xy->sc_dk.dk_openmask =
 			    xy->sc_dk.dk_copenmask | xy->sc_dk.dk_bopenmask;
+=======
+			if (command == DIOCWDINFO) {
+				/*
+				 * Simulate opening partition 0 so write
+				 * succeeds.
+				 */
+				xy->sc_dk.dk_openmask |= (1 << 0);
+				error = writedisklabel(DISKLABELDEV(dev),
+				    xystrategy, xy->sc_dk.dk_label);
+				xy->sc_dk.dk_openmask = xy->sc_dk.dk_copenmask |
+				    xy->sc_dk.dk_bopenmask;
+			}
+>>>>>>> origin/master
 		}
 		return error;
 
@@ -932,7 +980,7 @@ xyread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xystrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(xystrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -942,7 +990,7 @@ xywrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xystrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(xystrategy, dev, B_WRITE, minphys, uio));
 }
 
 

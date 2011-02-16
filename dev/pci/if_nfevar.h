@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_nfevar.h,v 1.10 2006/02/16 17:35:51 damien Exp $	*/
+=======
+/*	$OpenBSD: if_nfevar.h,v 1.14 2010/09/07 16:21:45 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>
@@ -73,7 +77,6 @@ struct nfe_softc {
 	bus_dma_tag_t		sc_dmat;
 	struct mii_data		sc_mii;
 	struct timeout		sc_tick_ch;
-	void			*sc_powerhook;
 
 	int			sc_if_flags;
 	u_int			sc_flags;

@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_3000_300.c,v 1.11 2004/06/28 02:28:43 aaron Exp $ */
+/* $OpenBSD: tc_3000_300.c,v 1.17 2010/09/22 12:36:32 miod Exp $ */
 /* $NetBSD: tc_3000_300.c,v 1.26 2001/07/27 00:25:21 thorpej Exp $ */
 
 /*
@@ -85,7 +85,6 @@ struct tcintr {
 	int	(*tci_func)(void *);
 	void	*tci_arg;
 	struct evcount tci_count;
-	char	tci_name[12];
 } tc_3000_300_intr[TC_3000_300_NCOOKIES];
 
 void
@@ -106,19 +105,16 @@ tc_3000_300_intr_setup()
 	for (i = 0; i < TC_3000_300_NCOOKIES; i++) {
                 tc_3000_300_intr[i].tci_func = tc_3000_300_intrnull;
                 tc_3000_300_intr[i].tci_arg = (void *)i;
-		snprintf(tc_3000_300_intr[i].tci_name,
-		    sizeof tc_3000_300_intr[i].tci_name, "tc slot %u", i);
-		evcount_attach(&tc_3000_300_intr[i].tci_count,
-		    tc_3000_300_intr[i].tci_name, NULL, &evcount_intr);
 	}
 }
 
 void
-tc_3000_300_intr_establish(tcadev, cookie, level, func, arg)
+tc_3000_300_intr_establish(tcadev, cookie, level, func, arg, name)
 	struct device *tcadev;
 	void *cookie, *arg;
 	tc_intrlevel_t level;
 	int (*func)(void *);
+	const char *name;
 {
 	volatile u_int32_t *imskp;
 	u_long dev = (u_long)cookie;
@@ -132,6 +128,8 @@ tc_3000_300_intr_establish(tcadev, cookie, level, func, arg)
 
 	tc_3000_300_intr[dev].tci_func = func;
 	tc_3000_300_intr[dev].tci_arg = arg;
+	if (name != NULL)
+		evcount_attach(&tc_3000_300_intr[dev].tci_count, name, NULL);
 
 	imskp = (volatile u_int32_t *)(DEC_3000_300_IOASIC_ADDR + IOASIC_IMSK);
 	switch (dev) {
@@ -148,9 +146,10 @@ tc_3000_300_intr_establish(tcadev, cookie, level, func, arg)
 }
 
 void
-tc_3000_300_intr_disestablish(tcadev, cookie)
+tc_3000_300_intr_disestablish(tcadev, cookie, name)
 	struct device *tcadev;
 	void *cookie;
+	const char *name;
 {
 	volatile u_int32_t *imskp;
 	u_long dev = (u_long)cookie;
@@ -178,6 +177,8 @@ tc_3000_300_intr_disestablish(tcadev, cookie)
 
 	tc_3000_300_intr[dev].tci_func = tc_3000_300_intrnull;
 	tc_3000_300_intr[dev].tci_arg = (void *)dev;
+	if (name != NULL)
+		evcount_detach(&tc_3000_300_intr[dev].tci_count);
 }
 
 int

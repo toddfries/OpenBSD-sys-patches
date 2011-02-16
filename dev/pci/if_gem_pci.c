@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_gem_pci.c,v 1.26 2006/11/25 17:47:40 brad Exp $	*/
+=======
+/*	$OpenBSD: if_gem_pci.c,v 1.31 2009/10/15 17:54:56 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
 
 /*
@@ -79,15 +83,19 @@ struct gem_pci_softc {
 	struct	gem_softc	gsc_gem;	/* GEM device */
 	bus_space_tag_t		gsc_memt;
 	bus_space_handle_t	gsc_memh;
+	bus_size_t		gsc_memsize;
 	void			*gsc_ih;
+	pci_chipset_tag_t	gsc_pc;
 };
 
 int	gem_match_pci(struct device *, void *, void *);
 void	gem_attach_pci(struct device *, struct device *, void *);
+int	gem_detach_pci(struct device *, int);
 int	gem_pci_enaddr(struct gem_softc *, struct pci_attach_args *);
 
 struct cfattach gem_pci_ca = {
-	sizeof(struct gem_pci_softc), gem_match_pci, gem_attach_pci
+	sizeof(struct gem_pci_softc), gem_match_pci, gem_attach_pci,
+	gem_detach_pci
 };
 
 /*
@@ -137,24 +145,19 @@ gem_pci_enaddr(struct gem_softc *sc, struct pci_attach_args *pa)
 	struct pci_vpd *vpd;
 	bus_space_handle_t romh;
 	bus_space_tag_t romt;
-	bus_size_t romsize;
+	bus_size_t romsize = 0;
 	u_int8_t buf[32];
-	pcireg_t address, mask;
+	pcireg_t address;
 	int dataoff, vpdoff;
 	int rv = -1;
 
+	if (pci_mapreg_map(pa, PCI_ROM_REG, PCI_MAPREG_TYPE_MEM, 0,
+	    &romt, &romh, 0, &romsize, 0))
+		return (-1);
+
 	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, 0xfffffffe);
-	mask = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
 	address |= PCI_ROM_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, address);
-
-	romt = pa->pa_memt;
-	romsize = PCI_ROM_SIZE(mask);
-	if (bus_space_map(romt, PCI_ROM_ADDR(address), romsize, 0, &romh)) {
-		romsize = 0;
-		goto fail;
-	}
 
 	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
 	if (bcmp(buf, gem_promhdr, sizeof(gem_promhdr)))
@@ -212,8 +215,9 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 	extern void myetheraddr(u_char *);
 #endif
 	const char *intrstr = NULL;
-	bus_size_t size;
 	int type, gotenaddr = 0;
+
+	gsc->gsc_pc = pa->pa_pc;
 
 	if (pa->pa_memt) {
 		type = PCI_MAPREG_TYPE_MEM;
@@ -246,8 +250,8 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 
 #define PCI_GEM_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_GEM_BASEADDR, type, 0,
-	    &gsc->gsc_memt, &gsc->gsc_memh, NULL, &size, 0) != 0) {
-		printf(": could not map registers\n");
+	    &gsc->gsc_memt, &gsc->gsc_memh, NULL, &gsc->gsc_memsize, 0) != 0) {
+		printf(": can't map registers\n");
 		return;
 	}
 
@@ -257,7 +261,7 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 	if (bus_space_subregion(sc->sc_bustag, sc->sc_h1,
 	    GEM_PCI_BANK2_OFFSET, GEM_PCI_BANK2_SIZE, &sc->sc_h2)) {
 		printf(": unable to create bank 2 subregion\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, gsc->gsc_memsize);
 		return;
 	}
 
@@ -283,7 +287,7 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 
 	if (pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, gsc->gsc_memsize);
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
@@ -294,7 +298,7 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, size);
+		bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, gsc->gsc_memsize);
 		return;
 	}
 
@@ -304,4 +308,20 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 	 * call the main configure
 	 */
 	gem_config(sc);
+}
+
+int
+gem_detach_pci(struct device *self, int flags)
+{
+	struct gem_pci_softc *gsc = (void *)self;
+	struct gem_softc *sc = &gsc->gsc_gem;
+
+	timeout_del(&sc->sc_tick_ch);
+	timeout_del(&sc->sc_rx_watchdog);
+
+	gem_unconfig(sc);
+	pci_intr_disestablish(gsc->gsc_pc, gsc->gsc_ih);
+	bus_space_unmap(gsc->gsc_memt, gsc->gsc_memh, gsc->gsc_memsize);
+
+	return (0);
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cz.c,v 1.8 2003/08/15 20:32:17 tedu Exp $ */
+=======
+/*	$OpenBSD: cz.c,v 1.18 2010/07/02 17:27:01 nicm Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: cz.c,v 1.15 2001/01/20 19:10:36 thorpej Exp $	*/
 
 /*-
@@ -420,7 +424,7 @@ cz_attach(parent, self, aux)
 
 		timeout_set(&sc->sc_diag_to, cztty_diag, sc);
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_dev = makedev(cztty_major,
 		    (cz->cz_dev.dv_unit * ZFIRM_MAX_CHANNELS) + i);
 		tp->t_oproc = czttystart;
@@ -787,7 +791,7 @@ cz_intr(void *arg)
 			sc->sc_overflows++;
  error_common:
 			if (sc->sc_errors++ == 0)
-				timeout_add(&sc->sc_diag_to, 60 * hz);
+				timeout_add_sec(&sc->sc_diag_to, 60);
 			break;
 
 		case C_CM_RXBRK:
@@ -966,7 +970,7 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	if (ISSET(tp->t_state, TS_ISOPEN) &&
 	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	    suser(p, 0) != 0)
 		return (EBUSY);
 
 	s = spltty();
@@ -1043,7 +1047,7 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 	if (error)
 		goto bad;
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (error)
 		goto bad;
 
@@ -1076,7 +1080,7 @@ czttyclose(dev_t dev, int flags, int mode, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN))
 		return (0);
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 	ttyclose(tp);
 
 	if (!ISSET(tp->t_state, TS_ISOPEN)) {
@@ -1126,7 +1130,7 @@ czttywrite(dev_t dev, struct uio *uio, int flags)
  *	Poll a Cyclades-Z serial port.
  */
 int
-czttypoll(dev_t dev, int events, struct proc p)
+czttypoll(dev_t dev, int events, struct proc *p)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;
@@ -1482,15 +1486,9 @@ czttystart(struct tty *tp)
 	if (ISSET(tp->t_state, TS_BUSY | TS_TIMEOUT | TS_TTSTOP))
 		goto out;
 
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 
 	cztty_transmit(sc, tp);
  out:

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uslcom.c,v 1.3 2006/06/23 06:27:12 miod Exp $	*/
+=======
+/*	$OpenBSD: uslcom.c,v 1.22 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -129,7 +133,26 @@ static const struct usb_devno uslcom_devs[] = {
 	{ USB_VENDOR_USI,		USB_PRODUCT_USI_MC60 }
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uslcom);
+=======
+int uslcom_match(struct device *, void *, void *); 
+void uslcom_attach(struct device *, struct device *, void *); 
+int uslcom_detach(struct device *, int); 
+int uslcom_activate(struct device *, int); 
+
+struct cfdriver uslcom_cd = { 
+	NULL, "uslcom", DV_DULL 
+}; 
+
+const struct cfattach uslcom_ca = { 
+	sizeof(struct uslcom_softc), 
+	uslcom_match, 
+	uslcom_attach, 
+	uslcom_detach, 
+	uslcom_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uslcom)
 {
@@ -212,9 +235,12 @@ USB_ATTACH(uslcom)
 	uca.arg = sc;
 	uca.info = NULL;
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 	
+=======
+>>>>>>> origin/master
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
 
 	USB_ATTACH_SUCCESS_RETURN;
@@ -225,20 +251,26 @@ USB_DETACH(uslcom)
 	USB_DETACH_START(uslcom, sc);
 	int rv = 0;
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 uslcom_activate(device_ptr_t self, enum devact act)
+=======
+uslcom_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uslcom_softc *sc = (struct uslcom_softc *)self;
 	int rv = 0;

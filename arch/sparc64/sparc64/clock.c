@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: clock.c,v 1.31 2007/04/07 19:24:58 kettenis Exp $	*/
+=======
+/*	$OpenBSD: clock.c,v 1.48 2010/07/07 15:37:22 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -114,6 +118,12 @@ struct timecounter tick_timecounter = {
 	tick_get_timecount, NULL, ~0u, 0, "tick", 0, NULL
 };
 
+u_int sys_tick_get_timecount(struct timecounter *);
+
+struct timecounter sys_tick_timecounter = {
+	sys_tick_get_timecount, NULL, ~0u, 0, "sys_tick", 1000, NULL
+};
+
 /*
  * Statistics clock interval and variance, in usec.  Variance must be a
  * power of two.  Since this gives us an even number, not an odd number,
@@ -127,7 +137,15 @@ int statvar = 8192;
 int statmin;			/* statclock interval - 1/2*variance */
 
 static long tick_increment;
-int schedintr(void *);
+
+void	tick_start(void);
+void	sys_tick_start(void);
+void	stick_start(void);
+
+int	tickintr(void *);
+int	sys_tickintr(void *);
+int	stickintr(void *);
+int	schedintr(void *);
 
 static struct intrhand level10 = { clockintr };
 static struct intrhand level0 = { tickintr };
@@ -325,7 +343,14 @@ clockattach_ebus(parent, self, aux)
 	/* hard code to 8K? */
 	sz = ea->ea_regs[0].size;
 
-	if (ebus_bus_map(ea->ea_iotag, 0,
+	if (ea->ea_nvaddrs) {
+		if (bus_space_map(ea->ea_memtag, ea->ea_vaddrs[0], 0,
+		    BUS_SPACE_MAP_PROMADDRESS, &cwi.cwi_bh) != 0) {
+			printf("%s: can't map register\n", self->dv_xname);
+			return;
+		}
+		bt = ea->ea_memtag;
+	} else if (ebus_bus_map(ea->ea_iotag, 0,
 	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]), sz, 0, 0, &cwi.cwi_bh) == 0) {
 		bt = ea->ea_iotag;
 	} else if (ebus_bus_map(ea->ea_memtag, 0,
@@ -532,12 +557,14 @@ myetheraddr(cp)
  * The frequencies of these clocks must be an even number of microseconds.
  */
 void
-cpu_initclocks()
+cpu_initclocks(void)
 {
 	int statint, minint;
 #ifdef DEBUG
 	extern int intrdebug;
 #endif
+	u_int sys_tick_rate;
+	int impl = 0;
 
 #ifdef DEBUG
 	/* Set a 1s clock */
@@ -561,16 +588,36 @@ cpu_initclocks()
 
 	tick_timecounter.tc_frequency = cpu_clockrate;
 	tc_init(&tick_timecounter);
-	
+
+	/*
+	 * UltraSPARC IIe processors do have a STICK register, but it
+	 * lives on the PCI host bridge and isn't accessable through
+	 * ASR24.
+	 */
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
+
+	sys_tick_rate = getpropint(findroot(), "stick-frequency", 0);
+	if (sys_tick_rate > 0 && impl != IMPL_HUMMINGBIRD) {
+		sys_tick_timecounter.tc_frequency = sys_tick_rate;
+		tc_init(&sys_tick_timecounter);
+	}
+
 	/*
 	 * Now handle machines w/o counter-timers.
 	 */
 
 	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr) {
+<<<<<<< HEAD
 		printf("No counter-timer -- using %%tick at %ldMHz as "
 		    "system clock.\n", (long)(cpu_clockrate/1000000));
+=======
+		struct cpu_info *ci;
+
+>>>>>>> origin/master
 		/* We don't have a counter-timer -- use %tick */
 		level0.ih_clr = 0;
+
 		/* 
 		 * Establish a level 10 interrupt handler 
 		 *
@@ -580,9 +627,11 @@ cpu_initclocks()
 		level0.ih_number = 1;
 		strlcpy(level0.ih_name, "clock", sizeof(level0.ih_name));
 		intr_establish(10, &level0);
+
 		/* We only have one timer so we have no statclock */
 		stathz = 0;	
 
+<<<<<<< HEAD
 		/* set the next interrupt time */
 		tick_increment = cpu_clockrate / hz;
 #ifdef DEBUG
@@ -593,6 +642,29 @@ cpu_initclocks()
 #ifdef DEBUG
 		printf("done.\n");
 #endif
+=======
+		if (sys_tick_rate > 0) {
+			tick_increment = sys_tick_rate / hz;
+			if (impl == IMPL_HUMMINGBIRD) {
+				level0.ih_fun = stickintr;
+				cpu_start_clock = stick_start;
+			} else {
+				level0.ih_fun = sys_tickintr;
+				cpu_start_clock = sys_tick_start;
+			}
+		} else {
+			/* set the next interrupt time */
+			tick_increment = cpu_clockrate / hz;
+			level0.ih_fun = tickintr;
+			cpu_start_clock = tick_start;
+		}
+
+		for (ci = cpus; ci != NULL; ci = ci->ci_next)
+			memcpy(&ci->ci_tickintr, &level0, sizeof(level0));
+
+		cpu_start_clock();
+
+>>>>>>> origin/master
 		return;
 	}
 
@@ -720,13 +792,73 @@ tickintr(cap)
 {
 	int s;
 
+<<<<<<< HEAD
 	hardclock((struct clockframe *)cap);
+=======
+	/*
+	 * No need to worry about overflow; %tick is architecturally
+	 * defined not to do that for at least 10 years.
+	 */
+	while (ci->ci_tick < tick()) {
+		ci->ci_tick += tick_increment;
+		hardclock((struct clockframe *)cap);
+		atomic_add_ulong((unsigned long *)&level0.ih_count.ec_count, 1);
+	}
+>>>>>>> origin/master
 
 	s = splhigh();
 	/* Reset the interrupt */
 	next_tick(tick_increment);
 	level0.ih_count.ec_count++;
 	splx(s);
+
+	return (1);
+}
+
+int
+sys_tickintr(cap)
+	void *cap;
+{
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
+
+	/*
+	 * Do we need to worry about overflow here?
+	 */
+	while (ci->ci_tick < sys_tick()) {
+		ci->ci_tick += tick_increment;
+		hardclock((struct clockframe *)cap);
+		atomic_add_ulong((unsigned long *)&level0.ih_count.ec_count, 1);
+	}
+
+	/* Reset the interrupt. */
+	s = intr_disable();
+	sys_tickcmpr_set(ci->ci_tick);
+	intr_restore(s);
+
+	return (1);
+}
+
+int
+stickintr(cap)
+	void *cap;
+{
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
+
+	/*
+	 * Do we need to worry about overflow here?
+	 */
+	while (ci->ci_tick < stick()) {
+		ci->ci_tick += tick_increment;
+		hardclock((struct clockframe *)cap);
+		atomic_add_ulong((unsigned long *)&level0.ih_count.ec_count, 1);
+	}
+
+	/* Reset the interrupt. */
+	s = intr_disable();
+	stickcmpr_set(ci->ci_tick);
+	intr_restore(s);
 
 	return (1);
 }
@@ -886,12 +1018,56 @@ eeprom_uio(uio)
 	return (ENODEV);
 }
 
+void
+sys_tick_start(void)
+{
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
+
+	/*
+	 * Try to make the tick interrupts as synchronously as possible on
+	 * all CPUs to avoid inaccuracies for migrating processes.
+	 */
+
+	s = intr_disable();
+	ci->ci_tick = roundup(sys_tick(), tick_increment);
+	sys_tickcmpr_set(ci->ci_tick);
+	intr_restore(s);
+}
+
+void
+stick_start(void)
+{
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
+
+	/*
+	 * Try to make the tick interrupts as synchronously as possible on
+	 * all CPUs to avoid inaccuracies for migrating processes.
+	 */
+
+	s = intr_disable();
+	ci->ci_tick = roundup(stick(), tick_increment);
+	stickcmpr_set(ci->ci_tick);
+	intr_restore(s);
+}
+
 u_int
 tick_get_timecount(struct timecounter *tc)
 {
 	u_int64_t tick;
 
 	__asm __volatile("rd %%tick, %0" : "=r" (tick) :);
+
+	return (tick & ~0u);
+}
+
+u_int
+sys_tick_get_timecount(struct timecounter *tc)
+{
+	u_int64_t tick;
+
+	__asm __volatile("rd %%sys_tick, %0" : "=r" (tick) :);
 
 	return (tick & ~0u);
 }

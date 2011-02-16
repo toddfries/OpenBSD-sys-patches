@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_lge.c,v 1.44 2006/05/28 00:20:21 brad Exp $	*/
+=======
+/*	$OpenBSD: if_lge.c,v 1.53 2010/05/19 15:27:35 oga Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -123,7 +127,7 @@ struct cfattach lge_ca = {
 };
 
 struct cfdriver lge_cd = {
-	0, "lge", DV_IFNET
+	NULL, "lge", DV_IFNET
 };
 
 int lge_alloc_jumbo_mem(struct lge_softc *);
@@ -142,7 +146,6 @@ int lge_ioctl(struct ifnet *, u_long, caddr_t);
 void lge_init(void *);
 void lge_stop(struct lge_softc *);
 void lge_watchdog(struct ifnet *);
-void lge_shutdown(void *);
 int lge_ifmedia_upd(struct ifnet *);
 void lge_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -511,7 +514,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmatag = pa->pa_dmat;
 	DPRINTFN(5, ("bus_dmamem_alloc\n"));
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct lge_list_data),
-			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
 		goto fail_2;
 	}
@@ -539,7 +542,6 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(5, ("bzero\n"));
 	sc->lge_ldata = (struct lge_list_data *)kva;
-	bzero(sc->lge_ldata, sizeof(struct lge_list_data));
 
 	/* Try to allocate memory for jumbo buffers. */
 	DPRINTFN(5, ("lge_alloc_jumbo_mem\n"));
@@ -601,7 +603,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 	DPRINTFN(5, ("timeout_set\n"));
 	timeout_set(&sc->lge_timeout, lge_tick, sc);
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 	return;
 
 fail_5:
@@ -646,7 +648,7 @@ lge_list_tx_init(struct lge_softc *sc)
 
 /*
  * Initialize the RX descriptors and allocate mbufs for them. Note that
- * we arralge the descriptors in a closed ring, so that the last descriptor
+ * we arrange the descriptors in a closed ring, so that the last descriptor
  * points back to the first.
  */
 int
@@ -677,7 +679,7 @@ lge_list_rx_init(struct lge_softc *sc)
 }
 
 /*
- * Initialize an RX descriptor and attach an MBUF cluster.
+ * Initialize a RX descriptor and attach a MBUF cluster.
  */
 int
 lge_newbuf(struct lge_softc *sc, struct lge_rx_desc *c, struct mbuf *m)
@@ -1041,7 +1043,7 @@ lge_tick(void *xsc)
 		}
 	}
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 
 	splx(s);
 }
@@ -1331,7 +1333,7 @@ lge_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 }
 
 /*
@@ -1372,8 +1374,8 @@ int
 lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct lge_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
@@ -1389,12 +1391,7 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1423,30 +1420,24 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->lge_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->arpcom)
-			: ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				lge_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->lge_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			lge_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1514,17 +1505,4 @@ lge_stop(struct lge_softc *sc)
 
 	bzero((char *)&sc->lge_ldata->lge_tx_list,
 		sizeof(sc->lge_ldata->lge_tx_list));
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-lge_shutdown(void *xsc)
-{
-	struct lge_softc	*sc = (struct lge_softc *)xsc;
-
-	lge_reset(sc);
-	lge_stop(sc);
 }

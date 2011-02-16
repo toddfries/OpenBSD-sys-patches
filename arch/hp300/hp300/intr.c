@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.15 2004/12/25 23:02:24 miod Exp $	*/
+/*	$OpenBSD: intr.c,v 1.24 2010/09/20 06:33:47 matthew Exp $	*/
 /*	$NetBSD: intr.c,v 1.5 1998/02/16 20:58:30 thorpej Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,11 +41,8 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <net/netisr.h>
 #include "ppp.h"
 #include "bridge.h"
-
-void	netintr(void);
 
 #include <machine/cpu.h>
 #include <machine/intr.h>
@@ -67,7 +57,20 @@ void	netintr(void);
 typedef LIST_HEAD(, isr) isr_list_t;
 isr_list_t isr_list[NISR];
 
-u_short	hp300_bioipl, hp300_netipl, hp300_ttyipl, hp300_vmipl;
+/*
+ * Default interrupt priorities.
+ * IPL_BIO, IPL_NET and IPL_TTY will be adjusted when devices attach.
+ */
+u_short	hp300_varpsl[NISR] = {
+	PSL_S | PSL_IPL0,	/* IPL_NONE */
+	PSL_S | PSL_IPL1,	/* IPL_SOFT */
+	PSL_S | PSL_IPL3,	/* IPL_BIO */
+	PSL_S | PSL_IPL3,	/* IPL_NET */
+	PSL_S | PSL_IPL3,	/* IPL_TTY */
+	PSL_S | PSL_IPL5,	/* IPL_VM */
+	PSL_S | PSL_IPL6,	/* IPL_CLOCK */
+	PSL_S | PSL_IPL7	/* IPL_HIGH */
+};
 
 void	intr_computeipl(void);
 
@@ -96,8 +99,8 @@ intr_computeipl()
 	int ipl;
 
 	/* Start with low values. */
-	hp300_bioipl = hp300_netipl = hp300_ttyipl = hp300_vmipl =
-	    (PSL_S|PSL_IPL3);
+	hp300_varpsl[IPL_BIO] = hp300_varpsl[IPL_NET] =
+	    hp300_varpsl[IPL_TTY] = PSL_S | PSL_IPL3;
 
 	for (ipl = 0; ipl < NISR; ipl++) {
 		LIST_FOREACH(isr, &isr_list[ipl], isr_link) {
@@ -136,11 +139,8 @@ intr_computeipl()
 	if (hp300_netipl < hp300_bioipl)
 		hp300_netipl = hp300_bioipl;
 
-	if (hp300_ttyipl < hp300_netipl)
-		hp300_ttyipl = hp300_netipl;
-
-	if (hp300_vmipl < hp300_ttyipl)
-		hp300_vmipl = hp300_ttyipl;
+	if (hp300_varpsl[IPL_TTY] < hp300_varpsl[IPL_NET])
+		hp300_varpsl[IPL_TTY] = hp300_varpsl[IPL_NET];
 }
 
 void
@@ -148,8 +148,9 @@ intr_printlevels()
 {
 
 #ifdef DEBUG
-	printf("psl: bio = 0x%x, net = 0x%x, tty = 0x%x, vm = 0x%x\n",
-	    hp300_bioipl, hp300_netipl, hp300_ttyipl, hp300_vmipl);
+	printf("psl: bio = 0x%x, net = 0x%x, tty = 0x%x\n",
+	    hp300_varpsl[IPL_BIO], hp300_varpsl[IPL_NET],
+	    hp300_varpsl[IPL_TTY]);
 #endif
 
 	printf("interrupt levels: bio = %d, net = %d, tty = %d\n",
@@ -172,8 +173,7 @@ intr_establish(struct isr *isr, const char *name)
 		panic("intr_establish: bad ipl %d", isr->isr_ipl);
 #endif
 
-	evcount_attach(&isr->isr_count, name, &isr->isr_ipl,
-	    &evcount_intr);
+	evcount_attach(&isr->isr_count, name, &isr->isr_ipl);
 
 	/*
 	 * Some devices are particularly sensitive to interrupt
@@ -278,18 +278,23 @@ intr_dispatch(evec)
 		printf("intr_dispatch: stray level %d interrupt\n", ipl);
 }
 
-int netisr;
-
+#ifdef DIAGNOSTIC
 void
-netintr()
+splassert_check(int wantipl, const char *func)
 {
-#define	DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << (bit))) { \
-			netisr &= ~(1 << (bit)); \
-			(fn)(); \
-		} \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef	DONETISR
+	int oldipl, realwantipl;
+
+	__asm __volatile ("movew sr,%0" : "=&d" (oldipl));
+
+	realwantipl = PSLTOIPL(hp300_varpsl[wantipl]);
+	oldipl = PSLTOIPL(oldipl);
+
+	if (oldipl < realwantipl) {
+		splassert_fail(realwantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		_spl(hp300_varpsl[wantipl]);
+	}
 }

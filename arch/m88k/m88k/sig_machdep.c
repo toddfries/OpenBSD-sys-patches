@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.3 2005/04/30 16:44:08 miod Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.10 2010/06/26 23:24:43 guenther Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -49,7 +49,6 @@
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 #include <sys/errno.h>
@@ -211,6 +210,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 
 	tf = p->p_md.md_tf;
 	scp = &ksc;
+
+	if ((scp->sc_regs.epsr ^ tf->tf_regs.epsr) & PSR_USERSTATIC)
+		return (EINVAL);
 
 	bcopy((const void *)&scp->sc_regs, (caddr_t)&tf->tf_regs,
 	    sizeof(scp->sc_regs));

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: i2c_scan.c,v 1.96 2007/01/05 19:25:45 deraadt Exp $	*/
+=======
+/*	$OpenBSD: i2c_scan.c,v 1.137 2010/07/09 08:05:45 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Theo de Raadt <deraadt@openbsd.org>
@@ -17,7 +21,7 @@
  */
 
 /*
- * I2C bus scanning.
+ * I2C bus scanning.  We apologize in advance for the massive overuse of 0x.
  */
 
 #include <sys/param.h>
@@ -714,6 +718,9 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 			case 0x7a:
 				name = "w83792d";
 				break;
+			case 0xc1:
+				name = "w83627dhg";
+				break;
 			}
 		} else {
 			/*
@@ -723,7 +730,21 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 			 */
 			name = "w83781d";
 		}
+<<<<<<< HEAD
 	} else if (addr == iicprobe (0x4a) && iicprobe(0x4e) == 0x50 &&
+=======
+	} else if (addr == (iicprobe(0xfc) & 0x7f) &&
+	    iicprobe(0xfe) == 0x79 && iicprobe(0xfb) == 0x51 &&
+	    ((iicprobe(0xfd) == 0x5c && (iicprobe(0x00) & 0x80)) ||
+	    (iicprobe(0xfd) == 0xa3 && !(iicprobe(0x00) & 0x80)))) {
+		/*
+		 * We could toggle 0x00 bit 0x80, then re-read 0xfd to
+		 * see if the value changes to 0xa3 (indicating Nuvoton).
+		 * But we are trying to avoid writes.
+		 */
+		name = "w83795g";
+	} else if (addr == iicprobe(0x4a) && iicprobe(0x4e) == 0x50 &&
+>>>>>>> origin/master
 	    iicprobe(0x4c) == 0xa3 && iicprobe(0x4d) == 0x5c) {
 		name = "w83l784r";
 	} else if (addr == 0x2d && iicprobe(0x4e) == 0x60 &&
@@ -786,6 +807,57 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 	} else if ((addr == 0x2c || addr == 0x2d || addr == 0x2e) &&
 	      iicprobe(0x16) == 0x41 && ((iicprobe(0x17) & 0xf0) == 0x40)) {
 		name = "adm1026";
+<<<<<<< HEAD
+=======
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x1131 &&
+	    (iicprobew(0x07) & 0xfffc) == 0xa200 &&
+	    (iicprobew(0x00) & 0xfff0) == 0x0010) {
+		name = "se97";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x1131 &&
+	    (iicprobew(0x07) & 0xfffc) == 0xa101 &&
+	    (iicprobew(0x00) & 0xfff0) == 0x0010) {
+		name = "se98";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x004d &&
+	    iicprobew(0x07) == 0x3e00 &&
+	    (iicprobew(0x00) & 0xffe0) == 0x0000) {
+		name = "max6604";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x0054 &&
+	    iicprobew(0x07) == 0x0000 &&
+	    (iicprobew(0x00) & 0xffe0) == 0x0000) {
+		name = "mcp9805";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x0054 &&
+	    (iicprobew(0x07) & 0xfffc) == 0x2000 &&
+	    (iicprobew(0x00) & 0xffe0) == 0x0000) {
+		name = "mcp98242";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x0054 &&
+	    (iicprobew(0x07) & 0xfffc) == 0x2100 &&
+	    (iicprobew(0x00) & 0xffe0) == 0x0000) {
+		name = "mcp98243";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x11d4 &&
+	    iicprobew(0x07) == 0x0800 &&
+	    iicprobew(0x00) == 0x001d) {
+		name = "adt7408";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x104a &&
+	    (iicprobew(0x07) & 0xfffe) == 0x0000 &&
+	    (iicprobew(0x00) == 0x002d || iicprobew(0x00) == 0x002f)) {
+		name = "stts424e02";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x104a &&
+	    (iicprobew(0x07) & 0xfffe) == 0x0101 &&
+	    (iicprobew(0x00) == 0x002d || iicprobew(0x00) == 0x002f)) {
+		name = "stts424";
+	} else if ((addr & 0x78) == 0x18 && iicprobew(0x06) == 0x1b09 &&
+	    (iicprobew(0x07) & 0xffe0) == 0x0800 &&
+	    iicprobew(0x00) == 0x001f) {
+		name = "cat34ts02";		/* or cat6095 */
+	} else if ((addr & 0x7e) == 0x1c && iicprobe(0x0f) == 0x3b &&
+	    (iicprobe(0x21) & 0x60) == 0x00 &&
+	    iicprobe(0x0f) == iicprobe(0x8f) &&	/* registers address is 7 bits */
+	    iicprobe(0x20) == iicprobe(0xa0) &&
+	    iicprobe(0x21) == iicprobe(0xa1) &&
+	    iicprobe(0x22) == iicprobe(0xa2) &&
+	    iicprobe(0x07) == 0x00) {		/* 0x00 to 0x0e are reserved */
+		name = "lis331dl";
+>>>>>>> origin/master
 	} else if (name == NULL &&
 	    (addr & 0x78) == 0x48) {		/* addr 0b1001xxx */
 		name = lm75probe();
@@ -831,6 +903,7 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 	iic_dump(self, addr, name);
 #endif /* I2C_DEBUG */
 
+<<<<<<< HEAD
 #if !defined(I2C_VERBOSE) && !defined(I2C_DEBUG)
 	if (name == NULL)
 		name = "unknown";
@@ -849,6 +922,23 @@ iic_probe(struct device *self, struct i2cbus_attach_args *iba, u_int8_t addr)
 #if defined(I2C_VERBOSE) && !defined(I2C_DEBUG)
 	iic_dump(self, addr, name);
 #endif /* defined(I2C_VERBOSE) && !defined(I2C_DEBUG) */
+=======
+char *
+iic_probe_eeprom(struct device *self, u_int8_t addr)
+{
+	u_int8_t type;
+	char *name = NULL;
+
+	type = iicprobe(0x02);
+	/* limit to SPD types seen in the wild */
+	if (type < 4 || type > 11)
+		return (name);
+
+	/* more matching in driver(s) */
+	name = "eeprom";
+
+	return (name);
+>>>>>>> origin/master
 }
 
 void

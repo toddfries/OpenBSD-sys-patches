@@ -1,8 +1,8 @@
-/*	$OpenBSD: intrdefs.h,v 1.3 2006/03/12 02:34:39 brad Exp $	*/
+/*	$OpenBSD: intrdefs.h,v 1.8 2010/11/13 04:16:42 guenther Exp $	*/
 /*	$NetBSD: intrdefs.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
-#ifndef _i386_INTRDEFS_H
-#define _i386_INTRDEFS_H
+#ifndef _AMD64_INTRDEFS_H
+#define _AMD64_INTRDEFS_H
 
 /*
  * Interrupt priority levels.
@@ -79,15 +79,15 @@
 #define X86_IPI_SYNCH_FPU		0x00000008
 #define X86_IPI_TLB			0x00000010
 #define X86_IPI_MTRR			0x00000020
-#define X86_IPI_GDT			0x00000040
+#define X86_IPI_SETPERF			0x00000040
 #define X86_IPI_DDB			0x00000080
 
-#define X86_NIPI		8
+#define X86_NIPI			8
 
 #define X86_IPI_NAMES { "halt IPI", "nop IPI", "FPU flush IPI", \
 			 "FPU synch IPI", "TLB shootdown IPI", \
-			 "MTRR update IPI", "GDT update IPI", "ddb IPI" }
+			 "MTRR update IPI", "setperf IPI", "ddb IPI" }
 
 #define IREENT_MAGIC	0x18041969
 
-#endif /* _X86_INTRDEFS_H */
+#endif /* _AMD64_INTRDEFS_H */

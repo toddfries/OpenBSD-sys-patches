@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_gif.c,v 1.40 2007/02/10 15:34:22 claudio Exp $	*/
+=======
+/*	$OpenBSD: if_gif.c,v 1.55 2010/07/03 04:44:51 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -49,6 +53,7 @@
 #include <netinet/in_var.h>
 #include <netinet/in_gif.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #endif	/* INET */
 
 #ifdef INET6
@@ -56,6 +61,7 @@
 #include <netinet/in.h>
 #endif
 #include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
 #include <netinet6/in6_gif.h>
 #endif /* INET6 */
 
@@ -69,6 +75,7 @@ extern int ifqmaxlen;
 void	gifattach(int);
 int	gif_clone_create(struct if_clone *, int);
 int	gif_clone_destroy(struct ifnet *);
+int	gif_checkloop(struct ifnet *, struct mbuf *);
 
 /*
  * gif global variable definitions
@@ -79,17 +86,14 @@ struct if_clone gif_cloner =
 
 /* ARGSUSED */
 void
-gifattach(count)
-	int count;
+gifattach(int count)
 {
 	LIST_INIT(&gif_softc_list);
 	if_clone_attach(&gif_cloner);
 }
 
 int
-gif_clone_create(ifc, unit)
-	struct if_clone *ifc;
-	int unit;
+gif_clone_create(struct if_clone *ifc, int unit)
 {
 	struct gif_softc *sc;
 	int s;
@@ -125,8 +129,7 @@ gif_clone_create(ifc, unit)
 }
 
 int
-gif_clone_destroy(ifp)
-	struct ifnet *ifp;
+gif_clone_destroy(struct ifnet *ifp)
 {
 	struct gif_softc *sc = ifp->if_softc;
 	int s;
@@ -148,6 +151,7 @@ gif_clone_destroy(ifp)
 }
 
 void
+<<<<<<< HEAD
 gif_start(ifp)
         struct ifnet *ifp;
 {
@@ -155,26 +159,14 @@ gif_start(ifp)
         struct mbuf *m;
 	struct m_tag *mtag;
 	int family;
+=======
+gif_start(struct ifnet *ifp)
+{
+	struct gif_softc *sc = (struct gif_softc*)ifp;
+	struct mbuf *m;
+>>>>>>> origin/master
 	int s;
-	u_int8_t tp;
-
-	/* is interface up and running? */
-	if ((ifp->if_flags & (IFF_OACTIVE | IFF_UP)) != IFF_UP ||
-	    sc->gif_psrc == NULL || sc->gif_pdst == NULL)
-		return;
-
-	/* are the tunnel endpoints valid? */
-#ifdef INET
-	if (sc->gif_psrc->sa_family != AF_INET)
-#endif
-#ifdef INET6
-		if (sc->gif_psrc->sa_family != AF_INET6)
-#endif
-			return;
-
-	s = splnet();
-	ifp->if_flags |= IFF_OACTIVE;
-	splx(s);
+	sa_family_t family;
 
 	while (1) {
 	        s = splnet();
@@ -184,6 +176,7 @@ gif_start(ifp)
 		if (m == NULL)
 			break;
 
+<<<<<<< HEAD
 		/*
 		 * gif may cause infinite recursion calls when misconfigured.
 		 * We'll prevent this by detecting loops.
@@ -202,13 +195,21 @@ gif_start(ifp)
 
 		mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
 		if (mtag == NULL) {
+=======
+		/* is interface up and usable? */
+		if ((ifp->if_flags & (IFF_OACTIVE | IFF_UP)) != IFF_UP ||
+		    sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
+		    sc->gif_psrc->sa_family != sc->gif_pdst->sa_family) {
+>>>>>>> origin/master
 			m_freem(m);
-			break;
+			continue;
 		}
-		bcopy(&ifp, mtag + 1, sizeof(caddr_t));
-		m_tag_prepend(m, mtag);
+
+		/* get tunnel address family */
+		family = sc->gif_psrc->sa_family;
 
 		/*
+<<<<<<< HEAD
 		 * remove multicast and broadcast flags or encapsulated paket
 		 * ends up as multicast or broadcast packet.
 		 */
@@ -217,14 +218,32 @@ gif_start(ifp)
 		/* extract address family */
 		tp = *mtod(m, u_int8_t *);
 		tp = (tp >> 4) & 0xff;  /* Get the IP version number. */
+=======
+		 * Check if the packet is comming via bridge and needs
+		 * etherip encapsulation or not. bridge(4) directly calls
+		 * the start function and bypasses the if_output function
+		 * so we need to do the encap here.
+		 */
+		if (ifp->if_bridge && (m->m_flags & M_PROTO1)) {
+			int error = 0;
+			/*
+			 * Remove multicast and broadcast flags or encapsulated
+			 * packet ends up as multicast or broadcast packet.
+			 */
+			m->m_flags &= ~(M_BCAST|M_MCAST);
+			switch (sc->gif_psrc->sa_family) {
+>>>>>>> origin/master
 #ifdef INET
-		if (tp == IPVERSION)
-			family = AF_INET;
+			case AF_INET:
+				error = in_gif_output(ifp, AF_LINK, &m);
+				break;
 #endif
 #ifdef INET6
-		if (tp == (IPV6_VERSION >> 4))
-			family = AF_INET6;
+			case AF_INET6:
+				error = in6_gif_output(ifp, AF_LINK, &m);
+				break;
 #endif
+<<<<<<< HEAD
 
 #if NBRIDGE > 0
 		/*
@@ -242,23 +261,91 @@ gif_start(ifp)
 				}
 			}
 #endif
+=======
+			default:
+				error = EAFNOSUPPORT;
+				m_freem(m);
+				break;
+			}
+			if (error)
+				continue;
+			if (gif_checkloop(ifp, m))
+				continue;
+		}
+>>>>>>> origin/master
 
 #if NBPFILTER > 0
-		if (ifp->if_bpf)
+		if (ifp->if_bpf) {
+			int offset;
+			sa_family_t family;
+			u_int8_t proto;
+
+			/* must decapsulate outer header for bpf */
+			switch (sc->gif_psrc->sa_family) {
+#ifdef INET
+			case AF_INET:
+				offset = sizeof(struct ip);
+				proto = mtod(m, struct ip *)->ip_p;
+				break;
+#endif
+#ifdef INET6
+			case AF_INET6:
+				offset = sizeof(struct ip6_hdr);
+				proto = mtod(m, struct ip6_hdr *)->ip6_nxt;
+				break;
+#endif
+			default:
+				proto = 0;
+				break;
+			}
+			switch (proto) {
+			case IPPROTO_IPV4:
+				family = AF_INET;
+				break;
+			case IPPROTO_IPV6:
+				family = AF_INET6;
+				break;
+			case IPPROTO_ETHERIP:
+				family = AF_LINK;
+				break;
+			case IPPROTO_MPLS:
+				family = AF_MPLS;
+				break;
+			default:
+				offset = 0;
+				family = sc->gif_psrc->sa_family;
+				break;
+			}
+			m->m_data += offset;
+			m->m_len -= offset;
+			m->m_pkthdr.len -= offset;
 			bpf_mtap_af(ifp->if_bpf, family, m, BPF_DIRECTION_OUT);
+			m->m_data -= offset;
+			m->m_len += offset;
+			m->m_pkthdr.len += offset;
+		}
 #endif
 		ifp->if_opackets++;
-		ifp->if_obytes += m->m_pkthdr.len;
+
+		/* XXX we should cache the outgoing route */
 
 		switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 		case AF_INET:
-			in_gif_output(ifp, family, m);
+			ip_output(m, (void *)NULL, (void *)NULL, 0,
+			    (void *)NULL, (void *)NULL);
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
-			in6_gif_output(ifp, family, m);
+			/*
+			 * force fragmentation to minimum MTU, to avoid path
+			 * MTU discovery. It is too painful to ask for resend
+			 * of inner packet, to achieve path MTU discovery for
+			 * encapsulated packets.
+			 */
+			ip6_output(m, 0, NULL, IPV6_MINMTU, 0, NULL,
+			     NULL);
 			break;
 #endif
 		default:
@@ -266,58 +353,81 @@ gif_start(ifp)
 			break;
 		}
 	}
-
-	ifp->if_flags &= ~IFF_OACTIVE;
 }
 
 int
-gif_output(ifp, m, dst, rt)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	struct sockaddr *dst;
-	struct rtentry *rt;	/* added in net2 */
+gif_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
+    struct rtentry *rt)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	int error = 0;
 	int s;
+	sa_family_t family = dst->sa_family;
 
 	if (!(ifp->if_flags & IFF_UP) ||
-	    sc->gif_psrc == NULL || sc->gif_pdst == NULL) {
+	    sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
+	    sc->gif_psrc->sa_family != sc->gif_pdst->sa_family) {
 		m_freem(m);
 		error = ENETDOWN;
 		goto end;
 	}
 
+	/*
+	 * Remove multicast and broadcast flags or encapsulated packet
+	 * ends up as multicast or broadcast packet.
+	 */
+	m->m_flags &= ~(M_BCAST|M_MCAST);
+
+	/*
+	 * Encapsulate packet. Add IP or IP6 header depending on tunnel AF.
+	 */
 	switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 	case AF_INET:
+		error = in_gif_output(ifp, family, &m);
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
+		error = in6_gif_output(ifp, family, &m);
 		break;
 #endif
 	default:
+<<<<<<< HEAD
 		m_freem(m);		
 		error = ENETDOWN;
 		goto end;
+=======
+		m_freem(m);
+		error = EAFNOSUPPORT;
+		break;
+>>>>>>> origin/master
 	}
 
-	s = splnet();
+	if (error)
+		goto end;
+
+	if ((error = gif_checkloop(ifp, m)))
+		goto end;
+
 	/*
-	 * Queue message on interface, and start output if interface
-	 * not yet active.
+	 * Queue message on interface, and start output.
 	 */
+	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 	if (error) {
 		/* mbuf is already freed */
 		splx(s);
-		return (error);
+		goto end;
 	}
+<<<<<<< HEAD
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
+=======
+	ifp->if_obytes += m->m_pkthdr.len;
+	if_start(ifp);
+>>>>>>> origin/master
 	splx(s);
-	return (error);
 
   end:
 	if (error)
@@ -326,10 +436,7 @@ gif_output(ifp, m, dst, rt)
 }
 
 int
-gif_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct gif_softc *sc  = (struct gif_softc*)ifp;
 	struct ifreq     *ifr = (struct ifreq*)data;
@@ -622,10 +729,52 @@ gif_ioctl(ifp, cmd, data)
 			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
+	case SIOCSLIFPHYRTABLE:
+		if (ifr->ifr_rdomainid < 0 ||
+		    ifr->ifr_rdomainid > RT_TABLEID_MAX ||
+		    !rtable_exists(ifr->ifr_rdomainid)) {
+			error = EINVAL;
+			break;
+		}
+		sc->gif_rtableid = ifr->ifr_rdomainid;
+		break;
+	case SIOCGLIFPHYRTABLE:
+		ifr->ifr_rdomainid = sc->gif_rtableid;
+		break;
 	default:
 		error = EINVAL;
 		break;
 	}
  bad:
 	return (error);
+}
+
+int
+gif_checkloop(struct ifnet *ifp, struct mbuf *m)
+{
+	struct m_tag *mtag;
+
+	/*
+	 * gif may cause infinite recursion calls when misconfigured.
+	 * We'll prevent this by detecting loops.
+	 */
+	for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
+	    mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
+		if (!bcmp((caddr_t)(mtag + 1), &ifp,
+		    sizeof(struct ifnet *))) {
+			log(LOG_NOTICE, "gif_output: "
+			    "recursively called too many times\n");
+			m_freem(m);
+			return ENETUNREACH;
+		}
+	}
+
+	mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
+	if (mtag == NULL) {
+		m_freem(m);
+		return ENOMEM;
+	}
+	bcopy(&ifp, mtag + 1, sizeof(caddr_t));
+	m_tag_prepend(m, mtag);
+	return 0;
 }

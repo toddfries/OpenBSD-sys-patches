@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.7 2004/10/20 12:49:15 pefo Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.29 2010/03/03 12:25:09 jsing Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -36,11 +36,22 @@
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#include <uvm/uvm_extern.h>
+
+#ifdef TGT_ORIGIN
 #include <machine/mnode.h>
 #endif
 
-int bios_is_32bit = 1;
+int bios_is_32bit;
+/*
+ * If we cannot get the onboard Ethernet address to override this bogus
+ * value, ether_ifattach() will pick a valid address.
+ */
+char bios_enaddr[20] = "ff:ff:ff:ff:ff:ff";
+
+char bios_console[30];			/* Primary console. */
+char bios_graphics[6];			/* Graphics state. */
+char bios_keyboard[6];			/* Keyboard layout. */
 
 extern int	physmem;		/* Total physical memory size */
 extern int	rsvdmem;		/* Total reserved memory size */
@@ -51,7 +62,7 @@ int bios_get_system_type(void);
 arc_dsp_stat_t	displayinfo;		/* Save area for display status info. */
 
 static struct systypes {
-	char *sys_vend;		/* Vendor ID if name is ambigous */
+	char *sys_vend;		/* Vendor ID if name is ambiguous */
 	char *sys_name;		/* May be left NULL if name is sufficient */
 	int  sys_type;
 } sys_types[] = {
@@ -68,8 +79,8 @@ static struct systypes {
     { NULL,		"SGI-IP22",			SGI_INDY },
     { NULL,		"SGI-IP25",			SGI_POWER10 },
     { NULL,		"SGI-IP26",			SGI_POWERI },
-    { NULL,		"SGI-IP27",			SGI_O200 },
-    { NULL,		"SGI-IP32",			SGI_O2 },
+    { NULL,		"SGI-IP30",			SGI_OCTANE },
+    { NULL,		"SGI-IP32",			SGI_O2 }
 };
 
 #define KNOWNSYSTEMS (sizeof(sys_types) / sizeof(struct systypes))
@@ -77,8 +88,9 @@ static struct systypes {
 /*
  *	ARC Bios trampoline code.
  */
+
 #define ARC_Call(Name,Offset)	\
-__asm__("\n"			\
+__asm__("\n"	\
 "	.text\n"		\
 "	.ent	" #Name "\n"	\
 "	.align	3\n"		\
@@ -97,16 +109,45 @@ __asm__("\n"			\
 "	ld	$2, 2*" #Offset "($2)\n"\
 "	jr	$2\n"		\
 "	nop\n"			\
-"	.end	" #Name "\n"	);
+"	.end	" #Name "\n");
+
+/*
+ * Same, which also forces the stack to be in CKSEG0, used for
+ * restart functions, which aren't supposed to return.
+ */
+#define ARC_Call2(Name,Offset)	\
+__asm__("\n"	\
+"	.text\n"		\
+"	.ent	" #Name "\n"	\
+"	.align	3\n"		\
+"	.set	noreorder\n"	\
+"	.globl	" #Name "\n"	\
+#Name":\n"			\
+"	lw	$2, bios_is_32bit\n"\
+"	beqz	$2, 1f\n"	\
+"	nop\n"			\
+"	ld	$2, proc0paddr\n" \
+"	addi	$29, $2, 16384 - 64\n" \
+"2:\n"				\
+"       lw      $2, 0xffffffff80001020\n"\
+"       lw      $2," #Offset "($2)\n"\
+"	jr	$2\n"		\
+"	nop\n"			\
+"1:\n"				\
+"       ld      $2, 0xffffffff80001040\n"\
+"	ld	$2, 2*" #Offset "($2)\n"\
+"	jr	$2\n"		\
+"	nop\n"			\
+"	.end	" #Name "\n");
 
 ARC_Call(Bios_Load,			0x00);
 ARC_Call(Bios_Invoke,			0x04);
 ARC_Call(Bios_Execute,			0x08);
-ARC_Call(Bios_Halt,			0x0c);
-ARC_Call(Bios_PowerDown,		0x10);
-ARC_Call(Bios_Restart,			0x14);
-ARC_Call(Bios_Reboot,			0x18);
-ARC_Call(Bios_EnterInteractiveMode,	0x1c);
+ARC_Call2(Bios_Halt,			0x0c);
+ARC_Call2(Bios_PowerDown,		0x10);
+ARC_Call2(Bios_Restart,			0x14);
+ARC_Call2(Bios_Reboot,			0x18);
+ARC_Call2(Bios_EnterInteractiveMode,	0x1c);
 ARC_Call(Bios_Unused1,			0x20);
 ARC_Call(Bios_GetPeer,			0x24);
 ARC_Call(Bios_GetChild,			0x28);
@@ -145,7 +186,7 @@ int
 bios_getchar()
 {
 	char buf[4];
-	int  cnt;
+	long  cnt;
 
 	if (Bios_Read(0, &buf[0], 1, &cnt) != 0)
 		return(-1);
@@ -157,7 +198,7 @@ bios_putchar(c)
 char c;
 {
 	char buf[4];
-	int  cnt;
+	long  cnt;
 
 	if (c == '\n') {
 		buf[0] = '\r';
@@ -191,82 +232,167 @@ bios_printf(const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	bios_putstring(buf);
+	va_end(ap);
 }
 
 /*
  * Get memory descriptor for the memory configuration and
  * create a layout database used by pmap init to set up
- * the memory system. Note that kernel option "MACHINE_NONCONTIG"
- * must be set for systems with non contigous physical memory.
+ * the memory system.
  *
- * Concatenate obvious adjecent segments.
+ * Concatenate obvious adjacent segments.
  */
 void
 bios_configure_memory()
 {
-	arc_mem_t *descr = 0;
-	struct phys_mem_desc *m;
-	vaddr_t seg_start, seg_end;
-	int	i;
+	arc_mem_t *descr = NULL;
+	uint64_t start, count, prevend = 0;
+	MEMORYTYPE type, prevtype = BadMemory;
+	uint64_t seg_start, seg_end;
+#ifdef TGT_ORIGIN
+	int seen_free = 0;
+#endif
+#ifdef DEBUG
+	int i;
+#endif
 
 	descr = (arc_mem_t *)Bios_GetMemoryDescriptor(descr);
-	while(descr != 0) {
+	while (descr != NULL) {
+		if (bios_is_32bit) {
+			start = descr->BasePage;
+			count = descr->PageCount;
+			type = descr->Type;
+		} else {
+			start = ((arc_mem64_t *)descr)->BasePage;
+			count = ((arc_mem64_t *)descr)->PageCount;
+			type = descr->Type;
 
-		seg_start = descr->BasePage;
-		seg_end = seg_start + descr->PageCount;
+#ifdef TGT_OCTANE
+			/*
+			 * Memory above 1GB physical (address 1.5GB)
+			 * gets reported as reserved on Octane, while
+			 * it isn't.
+			 * Abort scan at this point, platform dependent
+			 * code will add the remaining memory, if any.
+			 */
+			if (sys_config.system_type == SGI_OCTANE &&
+			    type == FirmwarePermanent &&
+			    start >= 0x60000)
+				break;
+#endif
 
-		switch (descr->Type) {
-		case BadMemory:		/* Have no use for theese */
+#ifdef TGT_ORIGIN
+			if (sys_config.system_type == SGI_IP27) {
+				/*
+				 * For the lack of a better way to tell
+				 * IP27 apart from IP35, look at the
+				 * start of the first chunk of free
+				 * memory. On IP27, it starts under
+				 * 0x20000 (which allows us to link
+				 * kernels at 0xa800000000020000).
+				 * On IP35, it starts at 0x40000.
+				 */
+				if (type == FreeMemory && seen_free == 0) {
+					seen_free = 1;
+					if (start >= 0x20)	/* IP35 */
+						sys_config.system_type =
+						    SGI_IP35;
+				}
+
+				/*
+				 * On IP27 and IP35 systems, data after the
+				 * first FirmwarePermanent entry is not
+				 * reliable (entries conflict with each other),
+				 * and memory after 32MB (or 64MB on IP35) is
+				 * not listed anyway.
+				 * So, break from the loop as soon as a
+				 * FirmwarePermanent entry is found, after
+				 * making it span the end of the first 32MB
+				 * (64MB on IP35).
+				 *
+				 * The rest of the memory will be gathered
+				 * from the node structures.  This loses some
+				 * of the first few MB (well... all of them
+				 * but the kernel image), but at least we're
+				 * safe to use ARCBios after going virtual.
+				 */
+				if (type == FirmwarePermanent) {
+					descr = NULL; /* abort loop */
+					count = ((sys_config.system_type ==
+					    SGI_IP27 ?  32 : 64) << (20 - 12)) -
+					    start;
+				}
+			}
+#endif	/* O200 || O300 */
+		}
+
+		switch (type) {
+		case BadMemory:		/* have no use for these */
 			break;
-
+		case LoadedProgram:
+			/*
+			 * LoadedProgram areas are either the boot loader,
+			 * if the kernel has not been directly loaded by
+			 * ARCBios, or the kernel image itself.
+			 * Since we will move the kernel image out of the
+			 * memory segments later anyway, it makes sense to
+			 * claim this memory as free.
+			 */
+			/* FALLTHROUGH */
 		case FreeMemory:
 		case FreeContigous:
-			physmem += descr->PageCount;
-			m = 0;
-			for (i = 0; i < MAXMEMSEGS; i++) {
-				if (mem_layout[i].mem_last_page == 0) {
-					if (m == 0)
-						m = &mem_layout[i]; /* free */
+			/*
+			 * Convert from ARCBios page size to kernel page size.
+			 * As this can yield a smaller range due to possible
+			 * different page size, we try to force coalescing
+			 * with the previous range if this is safe.
+			 */
+			seg_start = atop(round_page(start * ARCBIOS_PAGE_SIZE));
+			seg_end = atop(trunc_page((start + count) *
+			    ARCBIOS_PAGE_SIZE));
+			if (start == prevend)
+				switch (prevtype) {
+				case LoadedProgram:
+				case FreeMemory:
+				case FreeContigous:
+					seg_start = atop(trunc_page(start *
+					    ARCBIOS_PAGE_SIZE));
+					break;
+				default:
+					break;
 				}
-				else if (seg_end == mem_layout[i].mem_first_page) {
-					m = &mem_layout[i];
-					m->mem_first_page = seg_start;
-				}
-				else if (mem_layout[i].mem_last_page == seg_start) {
-					m = &mem_layout[i];
-					m->mem_last_page = seg_end;
-				}
-			}
-			if (m && m->mem_first_page == 0) {
-				m->mem_first_page = seg_start;
-				m->mem_last_page = seg_end;
-			}
+			if (seg_start < seg_end)
+				memrange_register(seg_start, seg_end, 0,
+				    VM_FREELIST_DEFAULT);
 			break;
-
-		case ExeceptionBlock:
+		case ExceptionBlock:
 		case SystemParameterBlock:
 		case FirmwareTemporary:
 		case FirmwarePermanent:
-			rsvdmem += descr->PageCount;
-			physmem += descr->PageCount;
+			rsvdmem += count;
 			break;
-
-		case LoadedProgram:	/* Count this into total memory */
-			physmem += descr->PageCount;
-			break;
-
 		default:		/* Unknown type, leave it alone... */
 			break;
 		}
+		prevtype = type;
+		prevend = start + count;
+#ifdef TGT_ORIGIN
+		if (descr == NULL)
+			break;
+#endif
 		descr = (arc_mem_t *)Bios_GetMemoryDescriptor(descr);
 	}
 
-#ifdef DEBUG_MEM_LAYOUT
-	for ( i = 0; i < MAXMEMSEGS; i++) {
-		if (mem_layout[i].mem_first_page) {
-			bios_printf("MEM %d, 0x%x to  0x%x\n",i,
-				mem_layout[i].mem_first_page * 4096,
-				mem_layout[i].mem_last_page * 4096);
+	/* convert rsvdmem to kernel pages, and count it in physmem */
+	rsvdmem = atop(round_page(rsvdmem * ARCBIOS_PAGE_SIZE));
+	physmem += rsvdmem;
+
+#ifdef DEBUG
+	for (i = 0; i < MAXMEMSEGS; i++) {
+		if (mem_layout[i].mem_last_page) {
+			bios_printf("MEM %d, %p to  %p\n", i,
+			    ptoa(mem_layout[i].mem_first_page),
+			    ptoa(mem_layout[i].mem_last_page));
 	    }
 	}
 #endif
@@ -283,7 +409,8 @@ bios_get_system_type()
 	int		i;
 
 	/*
-	 *  Figure out if this is an ARC Bios machine and if its 32 or 64 bits.
+	 * Figure out if this is an ARC Bios machine and if it is, see if we're
+	 * dealing with a 32 or 64 bit version.
 	 */
 	if ((ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC) ||
 	    (ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
@@ -311,18 +438,20 @@ bios_get_system_type()
 				continue;
 			return (sys_types[i].sys_type);	/* Found it. */
 		}
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	} else if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
-		/* If we find a kldir assume IP27 */
-		return SGI_O200;
+	} else {
+#ifdef TGT_ORIGIN
+		if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
+			/*
+			 * If we find a kldir assume IP27 for now.
+			 * We'll decide whether this is IP27 or IP35 later.
+			 */
+			return SGI_IP27;
+		}
 #endif
 	}
 
-	sid->vendor[8] = 0;
-	sid->prodid[8] = 0;
-	bios_printf("UNRECOGNIZED SYSTEM '%s' VENDOR '%s' PRODUCT '%s'\n",
-		cf ? (char *)(long)cf->id : "??", sid->vendor, sid->prodid);
-	bios_printf("See the www.openbsd.org for further information.\n");
+	bios_printf("UNRECOGNIZED SYSTEM '%s' VENDOR '%8.8s' PRODUCT '%8.8s'\n",
+	    cf == NULL ? "??" : sysid, sid->vendor, sid->prodid);
 	bios_printf("Halting system!\n");
 	Bios_Halt();
 	bios_printf("Halting failed, use manual reset!\n");

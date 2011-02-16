@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: viapm.c,v 1.5 2006/01/12 22:25:46 kettenis Exp $	*/
+=======
+/*	$OpenBSD: viapm.c,v 1.13 2010/04/08 00:23:54 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Mark Kettenis <kettenis@openbsd.org>
@@ -24,8 +28,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -128,7 +136,17 @@ const struct pci_matchid viapm_ids[] = {
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8233_ISA },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8233A_ISA },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8235_ISA },
+<<<<<<< HEAD
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237_ISA }
+=======
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237A_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237S_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8251_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_CX700_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_ISA },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX855_ISA }
+>>>>>>> origin/master
 };
 
 int
@@ -156,7 +174,7 @@ viapm_attach(struct device *parent, struct device *self, void *aux)
 	if (iobase == 0 ||
 	    bus_space_map(sc->sc_iot, iobase & 0xfffe,
 	    VIAPM_SMB_SIZE, 0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

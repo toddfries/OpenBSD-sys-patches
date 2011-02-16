@@ -1,4 +1,4 @@
-/* $OpenBSD: longrun.c,v 1.11 2006/12/12 23:14:27 dim Exp $ */
+/* $OpenBSD: longrun.c,v 1.15 2010/04/20 22:05:41 tedu Exp $ */
 /*
  * Copyright (c) 2003 Ted Unangst
  * Copyright (c) 2001 Tamotsu Hattori
@@ -31,6 +31,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
 
@@ -61,7 +62,7 @@ longrun_init(void)
 	cpu_setperf = longrun_setperf;
 
 	timeout_set(&longrun_timo, longrun_update, NULL);
-	timeout_add(&longrun_timo, hz);
+	timeout_add_sec(&longrun_timo, 1);
 }
 
 /*
@@ -84,7 +85,7 @@ longrun_update(void *arg)
 
 	cpuspeed = regs[0];
 
-	timeout_add(&longrun_timo, hz);
+	timeout_add_sec(&longrun_timo, 1);
 }
 
 /*

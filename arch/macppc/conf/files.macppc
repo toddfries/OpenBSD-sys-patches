@@ -1,4 +1,4 @@
-#	$OpenBSD: files.macppc,v 1.49 2006/09/27 06:33:03 grange Exp $
+#	$OpenBSD: files.macppc,v 1.63 2010/12/06 20:10:18 jasper Exp $
 
 #
 # macppc-specific configuration info
@@ -11,6 +11,7 @@ file	arch/macppc/macppc/autoconf.c
 file	arch/macppc/macppc/clock.c
 file	arch/macppc/macppc/conf.c
 file	arch/macppc/macppc/disksubr.c			disk
+file	arch/macppc/macppc/lock_machdep.c		multiprocessor
 file	arch/macppc/macppc/machdep.c
 file	arch/macppc/macppc/wscons_machdep.c
 file	arch/macppc/macppc/mem.c
@@ -24,7 +25,7 @@ file	arch/macppc/macppc/db_interface.c		ddb
 #
 # Media Independent Interface (mii)
 #
-include "../../../dev/mii/files.mii"
+include "dev/mii/files.mii"
 
 #
 # MAC generic
@@ -58,12 +59,12 @@ major	{wd = 0}
 major	{sd = 2}
 major	{cd = 3}
 
-include "../../../scsi/files.scsi"
+include "scsi/files.scsi"
 
 #
 # I2O
 #
-include "../../../dev/i2o/files.i2o"
+include "dev/i2o/files.i2o"
 
 include "dev/pci/files.pci"
 file	arch/macppc/pci/pciide_machdep.c		pciide
@@ -73,7 +74,6 @@ include "dev/puc/files.puc"
 device	mpcpcibr {} : pcibus
 attach	mpcpcibr at mainbus
 file	arch/macppc/pci/mpcpcibus.c			mpcpcibr
-file	arch/macppc/pci/pci_addr_fixup.c		mpcpcibr
 
 device  ht {} : pcibus
 attach	ht at mainbus
@@ -105,8 +105,8 @@ file	arch/macppc/pci/pchb.c				pchb
 # Machine-independent ATAPI drivers
 #
 
-include "../../../dev/atapiscsi/files.atapiscsi"
-include "../../../dev/ata/files.ata"
+include "dev/atapiscsi/files.atapiscsi"
+include "dev/ata/files.ata"
 
 # MAC periph
 
@@ -226,6 +226,14 @@ device	macgpio {}
 attach	macgpio at macobio with macgpio
 attach	macgpio at macgpio with macgpio_gpio
 file	arch/macppc/dev/macgpio.c			macgpio
+
+device	sysbutton {}
+attach	sysbutton at macgpio
+file	arch/macppc/dev/sysbutton.c
+
+device	pgs {}
+attach	pgs at macgpio
+file	arch/macppc/dev/pgs.c
 
 attach	wdc at mediabay, macobio, kauaiata with wdc_obio
 file	arch/macppc/dev/wdc_obio.c			wdc_obio

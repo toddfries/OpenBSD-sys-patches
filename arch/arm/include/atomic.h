@@ -1,4 +1,4 @@
-/*	$OpenBSD: atomic.h,v 1.4 2007/02/19 17:18:42 deraadt Exp $	*/
+/*	$OpenBSD: atomic.h,v 1.7 2010/04/22 21:03:17 drahn Exp $	*/
 
 /* Public Domain */
 
@@ -12,23 +12,8 @@
  * in the kernel and atomic updates are necessary without full mutexes
  */
 
-static __inline void
-atomic_setbits_int(__volatile unsigned int *uip, unsigned int v)
-{
-	int oldirqstate;
-	oldirqstate = disable_interrupts(I32_bit|F32_bit);
-	*uip |= v;
-	restore_interrupts(oldirqstate);
-}
-
-static __inline void
-atomic_clearbits_int(__volatile unsigned int *uip, unsigned int v)
-{
-	int oldirqstate;
-	oldirqstate = disable_interrupts(I32_bit|F32_bit);
-	*uip &= ~v;
-	restore_interrupts(oldirqstate);
-}
+void atomic_setbits_int(__volatile unsigned int *, unsigned int);
+void atomic_clearbits_int(__volatile unsigned int *, unsigned int);
 
 #endif /* defined(_KERNEL) */
 #endif /* __ARM_ATOMIC_H__ */

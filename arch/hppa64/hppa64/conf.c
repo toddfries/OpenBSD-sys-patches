@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.2 2005/07/31 06:39:07 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.18 2011/01/14 19:04:08 jasper Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -47,7 +47,6 @@
 #include "st.h"
 #include "cd.h"
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 #include "wd.h"
 bdev_decl(wd);
@@ -79,17 +78,19 @@ struct bdevsw   bdevsw[] =
 	bdev_lkm_dummy(),
 	bdev_lkm_dummy(),
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 #include "audio.h"
+#include "video.h"
+#include "bio.h"
 #include "pty.h"
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmouse.h"
 #include "wsmux.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "inet.h"
@@ -107,18 +108,32 @@ cdev_decl(com);
 #include "pf.h"
 
 #include "systrace.h"
+#include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 #ifdef USER_PCICONF
 #include "pci.h"
 cdev_decl(pci);
 #endif
 
+#include "usb.h"
+#include "uhid.h"
+#include "ugen.h"
+#include "ulpt.h"
+#include "urio.h"
+#include "ucom.h"
+#include "uscanner.h"
+
+#include "bthub.h"
+
+
 struct cdevsw   cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/*  0: virtual console */
 	cdev_ctty_init(1,ctty),		/*  1: controlling terminal */
 	cdev_mm_init(1,mm),		/*  2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),		/*  3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/*  3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/*  4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/*  5: pseudo-tty master */
 	cdev_log_init(1,log),		/*  6: /dev/klog */
@@ -129,7 +144,7 @@ struct cdevsw   cdevsw[] =
 	cdev_tape_init(NST,st),		/* 11: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 12: SCSI cd-rom */
 	cdev_ch_init(NCH,ch),		/* 13: SCSI changer */
-	cdev_ss_init(NSS,ss),		/* 14: SCSI scanner */
+	cdev_notdef(),			/* 14 */
 	cdev_uk_init(NUK,uk),		/* 15: SCSI unknown */
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
 	cdev_bpftun_init(NBPFILTER,bpf),/* 17: Berkeley packet filter */
@@ -152,26 +167,38 @@ struct cdevsw   cdevsw[] =
 #else
 	cdev_notdef(),
 #endif
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 32: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 32: nnpfs communication device */
 #else
 	cdev_notdef(),
 #endif
-	cdev_notdef(),			/* 33: ALTQ (deprecated) */
+	cdev_video_init(NVIDEO,video),	/* 33: generic video I/O */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 34: system call tracing */
 	cdev_audio_init(NAUDIO,audio),	/* 35: /dev/audio */
 	cdev_crypto_init(NCRYPTO,crypto), /* 36: /dev/crypto */
 	cdev_notdef(),			/* 37 */
 	cdev_ptm_init(NPTY,ptm),	/* 38: pseudo-tty ptm device */
 	cdev_disk_init(NWD,wd),		/* 39: ST506 disk */
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
-	cdev_lkm_dummy(),
+	cdev_usb_init(NUSB,usb),	/* 40: USB controller */
+	cdev_usbdev_init(NUHID,uhid),	/* 41: USB generic HID */
+	cdev_usbdev_init(NUGEN,ugen),	/* 42: USB generic driver */
+	cdev_ulpt_init(NULPT,ulpt),	/* 43: USB printers */
+	cdev_urio_init(NURIO,urio),	/* 44: USB Diamond Rio 500 */
+	cdev_tty_init(NUCOM,ucom),	/* 45: USB tty */
+	cdev_usbdev_init(NUSCANNER,uscanner), /* 46: USB scanners */
+	cdev_hotplug_init(NHOTPLUG,hotplug), /* 47: devices hot plugging */
+	cdev_lkm_dummy(),		/* 48: */
+	cdev_lkm_dummy(),		/* 49: */
+	cdev_lkm_dummy(),		/* 50: */
+	cdev_lkm_dummy(),		/* 51: */
+	cdev_lkm_dummy(),		/* 52: */
+	cdev_lkm_dummy(),		/* 53: */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 54: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),	/* 55: bthub */
+	cdev_disk_init(1,diskmap),	/* 56: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 57: pppx */
 };
-int nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int nchrdev = nitems(cdevsw);
 
 int mem_no = 2;		/* major device number of memory special file */
 
@@ -230,7 +257,7 @@ int chrtoblktbl[] = {
 	/* 38 */	NODEV,
 	/* 39 */	NODEV,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 /*
  * Returns true if dev is /dev/zero.

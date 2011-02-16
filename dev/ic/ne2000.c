@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ne2000.c,v 1.22 2006/10/20 18:27:25 brad Exp $	*/
+=======
+/*	$OpenBSD: ne2000.c,v 1.25 2010/04/20 20:42:54 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ne2000.c,v 1.12 1998/06/10 01:15:50 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -280,13 +277,6 @@ ne2000_attach(struct ne2000_softc *nsc, u_int8_t *myea)
 		printf(": setup failed\n");
 		return (1);
 	}
-
-	/*
-	 * We need to compute mem_ring a bit differently; override the
-	 * value set up in dp8390_config().
-	 */
-	dsc->mem_ring =
-	    dsc->mem_start + ((dsc->txb_cnt * ED_TXBUF_SIZE) << ED_PAGE_SHIFT);
 
 	return (0);
 }

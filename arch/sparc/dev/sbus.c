@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sbus.c,v 1.14 2006/02/25 23:41:39 kettenis Exp $	*/
+=======
+/*	$OpenBSD: sbus.c,v 1.19 2010/12/26 15:37:20 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sbus.c,v 1.17 1997/06/01 22:10:39 pk Exp $ */
 
 /*
@@ -159,8 +163,11 @@ sbus_attach(parent, self, aux)
 	 * IS THIS THE CORRECT DEFAULT??
 	 */
 	node = ra->ra_node;
-	sc->sc_clockfreq = getpropint(node, "clock-frequency", 25*1000*1000);
-	printf(": clock = %s MHz\n", clockfreq(sc->sc_clockfreq));
+	sc->sc_clockfreq = getpropint(node, "clock-frequency", -1);
+	if (sc->sc_clockfreq <= 0)
+		sc->sc_clockfreq = getpropint(findroot(), "clock-frequency",
+		    25 * 1000 * 1000);
+	printf(": %s MHz\n", clockfreq(sc->sc_clockfreq));
 
 	/*
 	 * Get the SBus burst transfer size if burst transfers are supported
@@ -199,6 +206,10 @@ sbus_attach(parent, self, aux)
 	 */
 	for (node = firstchild(node); node; node = nextsibling(node)) {
 		name = getpropstring(node, "name");
+#ifdef SUN4E
+		if (CPU_ISSUN4E && strcmp(name, "vm") == 0)
+			continue;
+#endif
 		if (!romprop(&oca.ca_ra, name, node))
 			continue;
 
@@ -224,7 +235,7 @@ sbus_translate(dev, ca)
 			ca->ca_slot = SBUS_ABS_TO_SLOT(base);
 			ca->ca_offset = SBUS_ABS_TO_OFFSET(base);
 		} else {
-			if (!CPU_ISSUN4C)
+			if (!CPU_ISSUN4C && !CPU_ISSUN4E)
 				panic("relative sbus addressing not supported");
 			ca->ca_slot = slot = ca->ca_ra.ra_iospace;
 			ca->ca_offset = base;
@@ -251,9 +262,9 @@ sbus_translate(dev, ca)
 
 			for (j = 0; j < sc->sc_nrange; j++) {
 				if (sc->sc_range[j].cspace == cspace) {
-					(int)ca->ca_ra.ra_reg[i].rr_paddr +=
+					ca->ca_ra.ra_reg[i].rr_paddr +=
 						sc->sc_range[j].poffset;
-					(int)ca->ca_ra.ra_reg[i].rr_iospace =
+					ca->ca_ra.ra_reg[i].rr_iospace =
 						sc->sc_range[j].pspace;
 					break;
 				}

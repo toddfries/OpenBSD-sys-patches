@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: linux_misc.c,v 1.59 2006/10/08 19:49:57 sturm Exp $	*/
+=======
+/*	$OpenBSD: linux_misc.c,v 1.66 2011/02/11 21:40:04 pirofti Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -160,7 +157,7 @@ linux_sys_wait4(p, v, retval)
 
 	if (SCARG(uap, status) != NULL) {
 		sg = stackgap_init(p->p_emul);
-		status = (int *) stackgap_alloc(&sg, sizeof status);
+		status = (int *) stackgap_alloc(&sg, sizeof *status);
 	} else
 		status = NULL;
 
@@ -1230,16 +1227,16 @@ linux_sys_getpgid(p, v, retval)
 	struct linux_sys_getpgid_args /* {
 		syscallarg(int) pid;
 	} */ *uap = v;
-	struct proc *targp;
+	struct process *targpr;
 
 	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != p->p_pid) {
-		if ((targp = pfind(SCARG(uap, pid))) == 0)
+		if ((targpr = prfind(SCARG(uap, pid))) == 0)
 			return ESRCH;
 	}
 	else
-		targp = p;
+		targpr = p->p_p;
 
-	retval[0] = targp->p_pgid;
+	retval[0] = targpr->ps_pgid;
 	return 0;
 }
 
@@ -1306,33 +1303,6 @@ linux_sys_setregid16(p, v, retval)
 		(uid_t)-1 : SCARG(uap, egid);
 
 	return sys_setregid(p, &bsa, retval);
-}
-
-int
-linux_sys_getsid(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_getsid_args /* {
-		syscallarg(int) pid;
-	} */ *uap = v;
-	struct proc *p1;
-	pid_t pid;
-
-	pid = (pid_t)SCARG(uap, pid);
-
-	if (pid == 0) {
-		retval[0] = (int)p->p_session;	/* XXX Oh well */
-		return 0;
-	}
-
-	p1 = pfind((int)pid);
-	if (p1 == NULL)
-		return ESRCH;
-
-	retval[0] = (int)p1->p_session;
-	return 0;
 }
 
 int
@@ -1507,4 +1477,14 @@ linux_sys_sysinfo(p, v, retval)
 	si.mem_unit = 1;
 
 	return (copyout(&si, SCARG(uap, sysinfo), sizeof(si)));
+}
+
+int
+linux_sys_mprotect(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_mprotect_args *uap = v;
+
+	if (SCARG(uap, prot) & (PROT_WRITE | PROT_EXEC))
+		SCARG(uap, prot) |= PROT_READ;
+	return (sys_mprotect(p, uap, retval));
 }

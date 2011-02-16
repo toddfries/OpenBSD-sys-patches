@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wi_pci.c,v 1.42 2005/10/31 05:37:13 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_wi_pci.c,v 1.48 2010/09/07 16:21:45 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001-2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -46,6 +50,7 @@
 #include <sys/timeout.h>
 #include <sys/socket.h>
 #include <sys/tree.h>
+#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -76,21 +81,23 @@
 const struct wi_pci_product *wi_pci_lookup(struct pci_attach_args *pa);
 int	wi_pci_match(struct device *, void *, void *);
 void	wi_pci_attach(struct device *, struct device *, void *);
+int	wi_pci_activate(struct device *, int);
+void	wi_pci_resume(void *arg1, void *arg2);
 int	wi_pci_acex_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_plx_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_tmd_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_native_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 int	wi_pci_common_attach(struct pci_attach_args *pa, struct wi_softc *sc);
 void	wi_pci_plx_print_cis(struct wi_softc *);
-void	wi_pci_power(int, void *);
 
 struct wi_pci_softc {
 	struct wi_softc		 sc_wi;		/* real softc */
-	void			*sc_powerhook;
+	struct workq_task	sc_resume_wqt;
 };
 
 struct cfattach wi_pci_ca = {
-	sizeof (struct wi_pci_softc), wi_pci_match, wi_pci_attach
+	sizeof (struct wi_pci_softc), wi_pci_match, wi_pci_attach, NULL,
+	wi_pci_activate
 };
 
 static const struct wi_pci_product {
@@ -142,7 +149,6 @@ wi_pci_match(struct device *parent, void *match, void *aux)
 void
 wi_pci_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct wi_pci_softc *psc = (struct wi_pci_softc *)self;
 	struct wi_softc *sc = (struct wi_softc *)self;
 	struct pci_attach_args *pa = aux;
 	const struct wi_pci_product *pp;
@@ -152,19 +158,46 @@ wi_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	printf("\n");
 	wi_attach(sc, &wi_func_io);
+}
 
-	psc->sc_powerhook = powerhook_establish(wi_pci_power, sc);
+int
+wi_pci_activate(struct device *self, int act)
+{
+	struct wi_pci_softc *psc = (struct wi_pci_softc *)self;
+	struct wi_softc *sc = (struct wi_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			wi_stop(sc);
+		break;
+	case DVACT_RESUME:
+		if (ifp->if_flags & IFF_UP)
+			workq_queue_task(NULL, &psc->sc_resume_wqt, 0,
+			    wi_pci_resume, sc, NULL);
+		break;
+	}
+	return (0);
 }
 
 void
-wi_pci_power(int why, void *arg)
+wi_pci_resume(void *arg1, void *arg2)
 {
-	struct wi_softc *sc = (struct wi_softc *)arg;
+	struct wi_softc *sc = (struct wi_softc *)arg1;
 
-	if (why == PWR_RESUME) {
-		if (sc->sc_ic.ic_if.if_flags & IFF_UP)
-			wi_init(sc);
-	}
+	int s;
+
+	s = splnet();
+	while (sc->wi_flags & WI_FLAGS_BUSY)
+		tsleep(&sc->wi_flags, 0, "wipwr", 0);
+	sc->wi_flags |= WI_FLAGS_BUSY;
+
+	wi_init(sc);
+
+	sc->wi_flags &= ~WI_FLAGS_BUSY;
+	wakeup(&sc->wi_flags);
+	splx(s);
 }
 
 /*
@@ -194,13 +227,13 @@ wi_pci_acex_attach(struct pci_attach_args *pa, struct wi_softc *sc)
 
 	if (pci_mapreg_map(pa, WI_ACEX_CMDRES, PCI_MAPREG_TYPE_IO,
 	    0, &commandt, &commandh, NULL, &commandsize, 0) != 0) {
-		printf(": can't map command I/O space\n");
+		printf(": can't map command i/o space\n");
 		return (ENXIO);
 	}
 
 	if (pci_mapreg_map(pa, WI_ACEX_LOCALRES, PCI_MAPREG_TYPE_IO,
 	    0, &localt, &localh, NULL, &localsize, 0) != 0) {
-		printf(": can't map local I/O space\n");
+		printf(": can't map local i/o space\n");
 		bus_space_unmap(commandt, commandh, commandsize);
 		return (ENXIO);
 	}
@@ -209,7 +242,7 @@ wi_pci_acex_attach(struct pci_attach_args *pa, struct wi_softc *sc)
 
 	if (pci_mapreg_map(pa, WI_TMD_IORES, PCI_MAPREG_TYPE_IO,
 	    0, &iot, &ioh, NULL, &iosize, 0) != 0) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		bus_space_unmap(localt, localh, localsize);
 		bus_space_unmap(commandt, commandh, commandsize);
 		return (ENXIO);
@@ -310,7 +343,7 @@ wi_pci_plx_attach(struct pci_attach_args *pa, struct wi_softc *sc)
 
 	if (pci_mapreg_map(pa, WI_PLX_IORES,
 	    PCI_MAPREG_TYPE_IO, 0, &iot, &ioh, NULL, &iosize, 0) != 0) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		bus_space_unmap(memt, memh, memsize);
 		return (ENXIO);
 	}
@@ -441,7 +474,7 @@ wi_pci_tmd_attach(struct pci_attach_args *pa, struct wi_softc *sc)
 
 	if (pci_mapreg_map(pa, WI_TMD_IORES, PCI_MAPREG_TYPE_IO,
 	    0, &iot, &ioh, NULL, &iosize, 0) != 0) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		bus_space_unmap(localt, localh, localsize);
 		return (ENXIO);
 	}

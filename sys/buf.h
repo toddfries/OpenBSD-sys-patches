@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: buf.h,v 1.54 2007/02/24 11:59:47 miod Exp $	*/
+=======
+/*	$OpenBSD: buf.h,v 1.74 2010/09/22 01:18:57 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -40,17 +44,88 @@
 #ifndef _SYS_BUF_H_
 #define	_SYS_BUF_H_
 #include <sys/queue.h>
+#include <sys/tree.h>
+#include <sys/mutex.h>
+#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
 struct buf;
 struct vnode;
 
+<<<<<<< HEAD
+=======
+struct buf_rb_bufs;
+RB_PROTOTYPE(buf_rb_bufs, buf, b_rbbufs, rb_buf_compare);
+
+LIST_HEAD(bufhead, buf);
+
+>>>>>>> origin/master
 /*
  * To avoid including <ufs/ffs/softdep.h>
  */
 
 LIST_HEAD(workhead, worklist);
+
+/*
+ * Buffer queues
+ */
+#define BUFQ_DISKSORT	0
+#define	BUFQ_FIFO	1
+#define BUFQ_DEFAULT	BUFQ_DISKSORT
+#define BUFQ_HOWMANY	2
+
+struct bufq_impl;
+
+struct bufq {
+	SLIST_ENTRY(bufq)	 bufq_entries;
+	struct mutex	 	 bufq_mtx;
+	void			*bufq_data;
+	u_int			 bufq_outstanding;
+	int			 bufq_stop;
+	int			 bufq_type;
+	const struct bufq_impl	*bufq_impl;
+};
+
+int		 bufq_init(struct bufq *, int);
+int		 bufq_switch(struct bufq *, int);
+void		 bufq_destroy(struct bufq *);
+
+void		 bufq_queue(struct bufq *, struct buf *);
+struct buf	*bufq_dequeue(struct bufq *);
+void		 bufq_requeue(struct bufq *, struct buf *);
+int		 bufq_peek(struct bufq *);
+void		 bufq_drain(struct bufq *);
+
+void		 bufq_done(struct bufq *, struct buf *);
+void		 bufq_quiesce(void);
+void		 bufq_restart(void);
+
+/* disksort */
+struct bufq_disksort {
+	struct buf	 *bqd_actf;
+	struct buf	**bqd_actb;
+};
+
+/* fifo */
+SIMPLEQ_HEAD(bufq_fifo_head, buf);
+struct bufq_fifo {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+};
+
+/* Abuse bufq_fifo, for swapping to regular files. */
+struct bufq_swapreg {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+	struct workq_task	bqf_wqtask;
+
+};
+
+/* bufq link in struct buf */
+union bufq_data {
+	struct bufq_disksort	bufq_data_disksort;
+	struct bufq_fifo	bufq_data_fifo;
+	struct bufq_swapreg	bufq_swapreg;
+};
 
 /*
  * These are currently used only by the soft dependency code, hence
@@ -66,15 +141,21 @@ extern struct bio_ops {
 	int	(*io_countdeps)(struct buf *, int, int);
 } bioops;
 
-/*
- * The buffer header describes an I/O operation in the kernel.
- */
+/* XXX: disksort(); */
+#define b_actf	b_bufq.bufq_data_disksort.bqd_actf
+#define b_actb	b_bufq.bufq_data_disksort.bqd_actb
+
+/* The buffer header describes an I/O operation in the kernel. */
 struct buf {
+<<<<<<< HEAD
 	LIST_ENTRY(buf) b_hash;		/* Hash chain. */
+=======
+	RB_ENTRY(buf) b_rbbufs;		/* vnode "hash" tree */
+	LIST_ENTRY(buf) b_list;		/* All allocated buffers. */
+>>>>>>> origin/master
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
 	time_t	b_synctime;		/* Time this buffer should be flushed */
-	struct	buf *b_actf, **b_actb;	/* Device driver queue when active. */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
 	volatile long	b_flags;	/* B_* flags. */
 	int	b_error;		/* Errno value. */
@@ -82,10 +163,24 @@ struct buf {
 	long	b_bcount;		/* Valid bytes in buffer. */
 	size_t	b_resid;		/* Remaining I/O. */
 	dev_t	b_dev;			/* Device associated with buffer. */
+<<<<<<< HEAD
 	struct {
 		caddr_t	b_addr;		/* Memory, superblocks, indirect etc. */
 	} b_un;
 	void	*b_saveaddr;		/* Original b_addr for physio. */
+=======
+	caddr_t	b_data;			/* associated data */
+	void	*b_saveaddr;		/* Original b_data for physio. */
+
+	TAILQ_ENTRY(buf) b_valist;	/* LRU of va to reuse. */
+
+	union	bufq_data b_bufq;
+	struct	bufq	  *b_bq;	/* What bufq this buf is on */
+
+	struct uvm_object *b_pobj;	/* Object containing the pages */
+	off_t	b_poffs;		/* Offset within object */
+
+>>>>>>> origin/master
 	daddr64_t	b_lblkno;	/* Logical block number. */
 	daddr64_t	b_blkno;	/* Underlying physical block number. */
 					/* Function to call upon completion.
@@ -100,31 +195,6 @@ struct buf {
 
 	void *b_private;		/* private data for owner */
 };
-
-/*
- * bufq
- * flexible buffer queue routines
- */
-struct bufq {
-	void (*bufq_free)(struct bufq *);
-	void (*bufq_add)(struct bufq *, struct buf *);
-	struct buf *(*bufq_get)(struct bufq *);
-};
-
-struct bufq_default {
-	struct bufq bufq;
-	struct buf bufq_head[3];
-};
-
-#define	BUFQ_ALLOC(_type)	bufq_default_alloc()	/* XXX */
-#define	BUFQ_FREE(_bufq)	(_bufq)->bufq_free(_bufq)
-#define	BUFQ_ADD(_bufq, _bp)	(_bufq)->bufq_add(_bufq, _bp)
-#define	BUFQ_GET(_bufq)		(_bufq)->bufq_get(_bufq)
-
-struct bufq *bufq_default_alloc(void);
-void bufq_default_free(struct bufq *);
-void bufq_default_add(struct bufq *, struct buf *);
-struct buf *bufq_default_get(struct bufq *);
 
 /*
  * For portability with historic industry practice, the cylinder number has
@@ -163,6 +233,8 @@ struct buf *bufq_default_get(struct bufq *);
 #define	B_DEFERRED	0x04000000	/* Skipped over for cleaning */
 #define	B_SCANNED	0x08000000	/* Block already pushed during sync */
 #define	B_PDAEMON	0x10000000	/* I/O started by pagedaemon */
+#define B_RELEASED	0x20000000	/* free this buffer after its kvm */
+#define B_NOTMAPPED	0x40000000	/* BUSY, but not necessarily mapped */
 
 #define	B_BITS	"\010\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY\006CACHE" \
     "\007CALL\010DELWRI\012DONE\013EINTR\014ERROR" \
@@ -234,9 +306,28 @@ struct buf *getblk(struct vnode *, daddr64_t, int, int, int);
 struct buf *geteblk(int);
 struct buf *incore(struct vnode *, daddr64_t);
 
+/*
+ * buf_kvm_init initializes the kvm handling for buffers.
+ * buf_acquire sets the B_BUSY flag and ensures that the buffer is
+ * mapped in the kvm.
+ * buf_release clears the B_BUSY flag and allows the buffer to become
+ * unmapped.
+ * buf_unmap is for internal use only. Unmaps the buffer from kvm.
+ */
+void	buf_mem_init(vsize_t);
+void	buf_acquire(struct buf *);
+void	buf_acquire_unmapped(struct buf *);
+void	buf_map(struct buf *);
+void	buf_release(struct buf *);
+int	buf_dealloc_mem(struct buf *);
+void	buf_shrink_mem(struct buf *, vsize_t);
+void	buf_alloc_pages(struct buf *, vsize_t);
+void	buf_free_pages(struct buf *);
+
+
 void	minphys(struct buf *bp);
-int	physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev,
-	    int flags, void (*minphys)(struct buf *), struct uio *uio);
+int	physio(void (*strategy)(struct buf *), dev_t dev, int flags,
+	    void (*minphys)(struct buf *), struct uio *uio);
 void  brelvp(struct buf *);
 void  reassignbuf(struct buf *);
 void  bgetvp(struct vnode *, struct buf *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.c,v 1.8 2005/09/15 21:09:29 miod Exp $	*/
+/*	$OpenBSD: syscall.c,v 1.15 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: syscall.c,v 1.1 2003/04/26 18:39:32 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,7 +33,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/signal.h>
 #ifdef KTRACE
 #include <sys/ktrace.h>
@@ -57,15 +49,14 @@
 #include <machine/psl.h>
 #include <machine/userret.h>
 
-void syscall(struct trapframe);
+void syscall(struct trapframe *);
 
 /*
  * syscall(frame):
  *	System call request from POSIX system call gate interface to kernel.
- * Like trap(), argument is call by reference.
  */
 void
-syscall(struct trapframe frame)
+syscall(struct trapframe *frame)
 {
 	caddr_t params;
 	const struct sysent *callp;
@@ -78,7 +69,7 @@ syscall(struct trapframe frame)
 	uvmexp.syscalls++;
 	p = curproc;
 
-	code = frame.tf_rax;
+	code = frame->tf_rax;
 	callp = p->p_emul->e_sysent;
 	nsys = p->p_emul->e_nsysent;
 	argp = &args[0];
@@ -90,7 +81,7 @@ syscall(struct trapframe frame)
 		/*
 		 * Code is first argument, followed by actual args.
 		 */
-		code = frame.tf_rdi;
+		code = frame->tf_rdi;
 		argp = &args[1];
 		argoff = 1;
 		break;
@@ -107,24 +98,24 @@ syscall(struct trapframe frame)
 	if (argsize) {
 		switch (MIN(argsize, 6)) {
 		case 6:
-			args[5] = frame.tf_r9;
+			args[5] = frame->tf_r9;
 		case 5:
-			args[4] = frame.tf_r8;
+			args[4] = frame->tf_r8;
 		case 4:
-			args[3] = frame.tf_r10;
+			args[3] = frame->tf_r10;
 		case 3:
-			args[2] = frame.tf_rdx;
+			args[2] = frame->tf_rdx;
 		case 2:	
-			args[1] = frame.tf_rsi;
+			args[1] = frame->tf_rsi;
 		case 1:
-			args[0] = frame.tf_rdi;
+			args[0] = frame->tf_rdi;
 			break;
 		default:
 			panic("impossible syscall argsize");
 		}
 		if (argsize > 6) {
 			argsize -= 6;
-			params = (caddr_t)frame.tf_rsp + sizeof(register_t);
+			params = (caddr_t)frame->tf_rsp + sizeof(register_t);
 			error = copyin(params, (caddr_t)&args[6],
 					argsize << 3);
 			if (error != 0)
@@ -142,7 +133,7 @@ syscall(struct trapframe frame)
 #endif
 
 	rval[0] = 0;
-	rval[1] = frame.tf_rdx;
+	rval[1] = frame->tf_rdx;
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE))
 		error = systrace_redirect(code, p, argp, rval);
@@ -152,9 +143,9 @@ syscall(struct trapframe frame)
 	KERNEL_PROC_UNLOCK(p);
 	switch (error) {
 	case 0:
-		frame.tf_rax = rval[0];
-		frame.tf_rdx = rval[1];
-		frame.tf_rflags &= ~PSL_C;	/* carry bit */
+		frame->tf_rax = rval[0];
+		frame->tf_rdx = rval[1];
+		frame->tf_rflags &= ~PSL_C;	/* carry bit */
 		break;
 	case ERESTART:
 		/*
@@ -162,15 +153,15 @@ syscall(struct trapframe frame)
 		 * the kernel through the trap or call gate.  We pushed the
 		 * size of the instruction into tf_err on entry.
 		 */
-		frame.tf_rip -= frame.tf_err;
+		frame->tf_rip -= frame->tf_err;
 		break;
 	case EJUSTRETURN:
 		/* nothing to do */
 		break;
 	default:
 	bad:
-		frame.tf_rax = error;
-		frame.tf_rflags |= PSL_C;	/* carry bit */
+		frame->tf_rax = error;
+		frame->tf_rflags |= PSL_C;	/* carry bit */
 		break;
 	}
 

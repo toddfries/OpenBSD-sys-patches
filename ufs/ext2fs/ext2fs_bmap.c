@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ext2fs_bmap.c,v 1.11 2005/07/03 20:14:01 drahn Exp $	*/
+=======
+/*	$OpenBSD: ext2fs_bmap.c,v 1.18 2008/06/12 06:58:40 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ext2fs_bmap.c,v 1.5 2000/03/30 12:41:11 augustss Exp $	*/
 
 /*
@@ -202,6 +206,7 @@ ext2fs_bmaparray(vp, bn, bnp, ap, nump, runp)
 			bp->b_flags |= B_READ;
 			VOP_STRATEGY(bp);
 			curproc->p_stats->p_ru.ru_inblock++;	/* XXX */
+			bcstats.pendingreads++;
 			if ((error = biowait(bp)) != 0) {
 				brelse(bp);
 				return (error);

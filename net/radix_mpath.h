@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: radix_mpath.h,v 1.4 2006/06/16 16:49:39 henning Exp $	*/
+=======
+/*	$OpenBSD: radix_mpath.h,v 1.9 2010/05/07 13:33:16 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: radix_mpath.h,v 1.9 2004/03/30 11:21:49 keiichi Exp $	*/
 
 /*
@@ -45,12 +49,23 @@ struct route;
 struct rtentry;
 struct sockaddr;
 int	rn_mpath_capable(struct radix_node_head *);
+<<<<<<< HEAD
 struct radix_node *rn_mpath_next(struct radix_node *);
+=======
+struct radix_node *rn_mpath_next(struct radix_node *, int);
+struct radix_node *rn_mpath_prio(struct radix_node *, u_int8_t);
+void	rn_mpath_reprio(struct radix_node *, int);
+>>>>>>> origin/master
 int	rn_mpath_count(struct radix_node *);
 struct rtentry *rt_mpath_matchgate(struct rtentry *, struct sockaddr *);
 int	rt_mpath_conflict(struct radix_node_head *, struct rtentry *,
+<<<<<<< HEAD
 	struct sockaddr *, int);
 void	rtalloc_mpath(struct route *, u_int32_t *, u_int tableid);
+=======
+	    struct sockaddr *, int);
+void	rtalloc_mpath(struct route *, u_int32_t *);
+>>>>>>> origin/master
 int	rn_mpath_inithead(void **, int);
 #endif
 

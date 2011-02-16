@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.19 2005/04/19 15:29:47 mickey Exp $	*/
+/*	$OpenBSD: intr.h,v 1.37 2011/01/14 13:20:06 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -32,7 +32,7 @@
 #include <machine/psl.h>
 
 #define	CPU_NINTS	32
-#define	NIPL		16
+#define	NIPL		17
 
 #define	IPL_NONE	0
 #define	IPL_SOFTCLOCK	1
@@ -45,19 +45,27 @@
 #define	IPL_AUDIO	8
 #define	IPL_CLOCK	9
 #define	IPL_STATCLOCK	10
+#define	IPL_SCHED	10
 #define	IPL_HIGH	10
-#define	IPL_NESTED	11	/* pseudo-level for sub-tables */
+#define	IPL_IPI		11
+#define	IPL_NESTED	12	/* pseudo-level for sub-tables */
 
 #define	IST_NONE	0
 #define	IST_PULSE	1
 #define	IST_EDGE	2
 #define	IST_LEVEL	3
 
+#ifdef MULTIPROCESSOR
+#define	HPPA_IPI_NOP		0
+#define	HPPA_IPI_HALT		1
+#define	HPPA_IPI_FPU_SAVE	2
+#define	HPPA_IPI_FPU_FLUSH	3
+#define	HPPA_NIPI		4
+#endif
+
 #if !defined(_LOCORE) && defined(_KERNEL)
 
-extern volatile int cpl;
-extern volatile u_long ipending, imask[NIPL];
-extern int astpending;
+extern volatile u_long imask[NIPL];
 
 #ifdef DIAGNOSTIC
 void splassert_fail(int, int, const char *);
@@ -68,8 +76,10 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(__wantipl) splassert(__wantipl)
 #else
-#define	splassert(__wantipl)	do { /* nada */ } while (0)
+#define	splassert(__wantipl)		do { /* nada */ } while (0)
+#define	splsoftassert(__wantipl)	do { /* nada */ } while (0)
 #endif /* DIAGNOSTIC */
 
 void	cpu_intr_init(void);
@@ -88,11 +98,12 @@ spllower(int ncpl)
 static __inline int
 splraise(int ncpl)
 {
-	int ocpl = cpl;
+	struct cpu_info *ci = curcpu();
+	int ocpl = ci->ci_cpl;
 
 	if (ocpl < ncpl)
-		cpl = ncpl;
-	__asm __volatile ("sync" : "+r" (cpl));
+		ci->ci_cpl = ncpl;
+	__asm __volatile ("sync" : "+r" (ci->ci_cpl));
 
 	return (ocpl);
 }
@@ -101,6 +112,23 @@ static __inline void
 splx(int ncpl)
 {
 	(void)spllower(ncpl);
+}
+
+static __inline register_t
+hppa_intr_disable(void)
+{
+	register_t eiem;
+
+	__asm __volatile("mfctl %%cr15, %0": "=r" (eiem));
+	__asm __volatile("mtctl %r0, %cr15");
+
+	return eiem;
+}
+
+static __inline void
+hppa_intr_enable(register_t eiem)
+{
+	__asm __volatile("mtctl %0, %%cr15":: "r" (eiem));
 }
 
 #define	splsoftclock()	splraise(IPL_SOFTCLOCK)
@@ -114,8 +142,10 @@ splx(int ncpl)
 #define	splclock()	splraise(IPL_CLOCK)
 #define	splstatclock()	splraise(IPL_STATCLOCK)
 #define	splhigh()	splraise(IPL_HIGH)
+#define	splipi()	splraise(IPL_IPI)
 #define	spl0()		spllower(IPL_NONE)
 
+<<<<<<< HEAD
 static __inline void
 softintr(u_long mask)
 {
@@ -126,14 +156,37 @@ softintr(u_long mask)
 	ipending |= mask;
 	__asm __volatile("mtctl	%0, %%cr15":: "r" (eiem));
 }
+=======
+#define	softintr(mask)	atomic_setbits_long(&curcpu()->ci_ipending, mask)
+>>>>>>> origin/master
 
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))
 
+<<<<<<< HEAD
 #define	setsoftast()	(astpending = 1)
 #define	setsoftclock()	softintr(1 << (IPL_SOFTCLOCK - 1))
 #define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
 #define	setsofttty()	softintr(1 << (IPL_SOFTTTY - 1))
+=======
+#ifdef MULTIPROCESSOR
+void	 hppa_ipi_init(struct cpu_info *);
+int	 hppa_ipi_send(struct cpu_info *, u_long);
+int	 hppa_ipi_broadcast(u_long);
+#endif
+
+#define	setsoftast(p)	(p->p_md.md_astpending = 1)
+
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_disestablish(void *);
+void	 softintr_schedule(void *);
+>>>>>>> origin/master
+
+#ifdef MULTIPROCESSOR
+void	 hppa_ipi_init(struct cpu_info *);
+int	 hppa_ipi_intr(void *arg);
+int	 hppa_ipi_send(struct cpu_info *, u_long);
+#endif
 
 #endif /* !_LOCORE && _KERNEL */
 #endif /* _MACHINE_INTR_H_ */

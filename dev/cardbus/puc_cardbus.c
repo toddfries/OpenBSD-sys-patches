@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: puc_cardbus.c,v 1.1 2006/07/31 11:06:27 mickey Exp $	*/
+=======
+/*	$OpenBSD: puc_cardbus.c,v 1.7 2010/03/27 23:36:36 jsg Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Michael Shalayeff
@@ -56,12 +60,10 @@ int
 puc_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	struct cardbus_attach_args *ca = aux;
-	struct cardbus_devfunc *ct = ca->ca_ct;
-	cardbus_chipset_tag_t cc = ct->ct_cc;
-	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t bhlc, reg;
+	pci_chipset_tag_t pc = ca->ca_pc;
+	pcireg_t bhlc, reg;
 
-	bhlc = cardbus_conf_read(cc, cf, ca->ca_tag, CARDBUS_BHLC_REG);
+	bhlc = pci_conf_read(pc, ca->ca_tag, PCI_BHLC_REG);
 	if (PCI_HDRTYPE_TYPE(bhlc) != 0)
 		return(0);
 
@@ -70,7 +72,7 @@ puc_cardbus_match(struct device *parent, void *match, void *aux)
 	    PCI_PRODUCT(ca->ca_id) == PCI_PRODUCT_OXFORD2_EXSYS_EX41098)
 		return (0);
 
-	reg = cardbus_conf_read(cc, cf, ca->ca_tag, PCI_SUBSYS_ID_REG);
+	reg = pci_conf_read(pc, ca->ca_tag, PCI_SUBSYS_ID_REG);
 	if (puc_find_description(PCI_VENDOR(ca->ca_id),
 	    PCI_PRODUCT(ca->ca_id), PCI_VENDOR(reg), PCI_PRODUCT(reg)))
 		return (10);
@@ -86,16 +88,17 @@ puc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct cardbus_attach_args *ca = aux;
 	struct cardbus_devfunc *ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	struct puc_attach_args paa;
-	cardbusreg_t reg;
+	pcireg_t reg;
 	int i;
 
 	Cardbus_function_enable(ct);
 
 	csc->ct = ct;
 
-	reg = cardbus_conf_read(cc, cf, ca->ca_tag, PCI_SUBSYS_ID_REG);
+	reg = pci_conf_read(pc, ca->ca_tag, PCI_SUBSYS_ID_REG);
 	sc->sc_desc = puc_find_description(PCI_VENDOR(ca->ca_id),
 	    PCI_PRODUCT(ca->ca_id), PCI_VENDOR(reg), PCI_PRODUCT(reg));
 
@@ -103,12 +106,12 @@ puc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* the fifth one is some memory we dunno */
 	for (i = 0; i < PUC_NBARS; i++) {
-		cardbusreg_t type;
+		pcireg_t type;
 		int bar;
 
 		sc->sc_bar_mappings[i].mapped = 0;
 		bar = PCI_MAPREG_START + 4 * i;
-		if (!cardbus_mapreg_probe(cc, cf, ca->ca_tag, bar, &type))
+		if (!pci_mapreg_probe(pc, ca->ca_tag, bar, &type))
 			continue;
 
 		if (!(sc->sc_bar_mappings[i].mapped = !Cardbus_mapreg_map(ct,
@@ -122,13 +125,13 @@ puc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	csc->intrline = ca->ca_intrline;
 
-	if (cardbus_get_capability(cc, cf, ca->ca_tag, PCI_CAP_PWRMGMT, &reg,
+	if (pci_get_capability(pc, ca->ca_tag, PCI_CAP_PWRMGMT, &reg,
 	    0)) {
-		reg = cardbus_conf_read(cc, cf, ca->ca_tag, reg + 4) & 3;
+		reg = pci_conf_read(pc, ca->ca_tag, reg + 4) & 3;
 		if (reg) {
 			printf("%s: awakening from state D%d\n",
 			    sc->sc_dev.dv_xname, reg);
-			cardbus_conf_write(cc, cf, ca->ca_tag, reg + 4, 0);
+			pci_conf_write(pc, ca->ca_tag, reg + 4, 0);
 		}
 	}
 

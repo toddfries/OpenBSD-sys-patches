@@ -1,4 +1,4 @@
-/*	$OpenBSD: sram.c,v 1.16 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: sram.c,v 1.20 2010/12/26 15:40:59 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -86,13 +86,14 @@ sramattach(parent, self, args)
 {
 	struct confargs *ca = args;
 	struct sramsoftc *sc = (struct sramsoftc *)self;
-#ifdef MVME162
+#if defined(MVME162) || defined(MVME172)
 	struct mcreg *mc;
 #endif
 
 	switch (cputyp) {
-#ifdef MVME162
+#if defined(MVME162) || defined(MVME172)
 	case CPU_162:
+	case CPU_172:
 		/* XXX this code will almost never be used. just in case. */
 		mc = sys_mc;
 		if (!mc)
@@ -115,12 +116,13 @@ sramattach(parent, self, args)
 		break;
 #endif
 #ifdef MVME167
-	case CPU_167:
 	case CPU_166:
+	case CPU_167:
 		sc->sc_len = 128*1024;		/* always 128K */
 		break;
 #endif
 #ifdef MVME177
+	case CPU_176:
 	case CPU_177:
 		sc->sc_len = 128*1024;		/* always 128K */
 		break;
@@ -217,5 +219,5 @@ srammmap(dev, off, prot)
 	/* allow access only in RAM */
 	if (off < 0 || off > sc->sc_len)
 		return (-1);
-	return (atop(sc->sc_paddr + off));
+	return (sc->sc_paddr + off);
 }

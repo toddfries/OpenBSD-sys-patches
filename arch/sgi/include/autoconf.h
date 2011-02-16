@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.9 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.31 2010/04/06 19:15:26 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,104 +38,74 @@
 /*
  *  Structure holding all misc config information.
  */
-#define MAX_CPUS	4
+struct cpu_info;
 
 struct sys_rec {
 	int	system_type;
-	struct cpuinfo {
-		u_int16_t type;
-		u_int8_t  vers_maj;
-		u_int8_t  vers_min;
-		u_int16_t fptype;
-		u_int8_t  fpvers_maj;
-		u_int8_t  fpvers_min;
-		u_int32_t clock;
-		u_int32_t clock_bus;
-		u_int32_t tlbsize;
-		u_int32_t tlbwired;
-		u_int32_t cfg_reg;
-		u_int32_t stat_reg;
-	} cpu[MAX_CPUS];
-	/* Published Cache OPS */
-	void    (*_SyncCache)(void);
-	void    (*_InvalidateICache)(vaddr_t, int);
-	void    (*_InvalidateICachePage)(vaddr_t);
-	void    (*_SyncDCachePage)(vaddr_t);
-	void    (*_HitSyncDCache)(vaddr_t, int);
-	void    (*_IOSyncDCache)(vaddr_t, int, int);
-	void    (*_HitInvalidateDCache)(vaddr_t, int);
-	/* BUS mappings */
-	struct mips_bus_space local;
-	struct mips_bus_space isa_io;
-	struct mips_bus_space isa_mem;
-	struct mips_bus_space pci_io[2];
-	struct mips_bus_space pci_mem[2];
-	/* Console/Serial configuration */
-	int	cons_baudclk;
-	struct mips_bus_space console_io;	/* for stupid map designs */
-	struct mips_bus_space *cons_iot;
-	bus_addr_t cons_ioaddr[8];		/* up to eight loclbus tty's */
+	int	system_subtype;		/* IP35 only */
+
+	/* Published cache operations. */
+	void    (*_SyncCache)(struct cpu_info *);
+	void    (*_InvalidateICache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_SyncDCachePage)(struct cpu_info *, vaddr_t);
+	void    (*_HitSyncDCache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_IOSyncDCache)(struct cpu_info *, vaddr_t, size_t, int);
+	void    (*_HitInvalidateDCache)(struct cpu_info *, vaddr_t, size_t);
+
+	/* Serial console configuration. */
+	struct mips_bus_space console_io;
 };
 
 extern struct sys_rec sys_config;
 
 /*
- *  Give com.c method to find console address and speeds
+ * Attachment information for mainbus child devices.
  */
-#define	COM_FREQ	(sys_config.cons_baudclk)
-#define	CONCOM_FREQ	(sys_config.cons_baudclk)
-#define	CONADDR		(sys_config.cons_ioaddr[0])
-
-
-/**/
-struct confargs;
-
-typedef int (*intr_handler_t)(void *);
-
-struct abus {
-	struct	device *ab_dv;		/* back-pointer to device */
-	int	ab_type;		/* bus type (see below) */
-	void	*(*ab_intr_establish)	/* bus's set-handler function */
-		    (void *, u_long, int, int, int (*)(void *), void *, char *);
-	void	(*ab_intr_disestablish)	/* bus's unset-handler function */
-		    (void *, void *);
-	caddr_t	(*ab_cvtaddr)		/* convert slot/offset to address */
-		    (struct confargs *);
-	int	(*ab_matchname)		/* see if name matches driver */
-		    (struct confargs *, char *);
+struct mainbus_attach_args {
+	const char	*maa_name;
+	int16_t		 maa_nasid;
 };
 
-#define	BUS_MAIN	1		/* mainbus */
-#define	BUS_LOCAL	2		/* localbus */
-#define	BUS_ISABR	3		/* ISA Bridge Bus */
-#define	BUS_PLCHLDR	4		/* placeholder */
-#define	BUS_PCIBR	5		/* PCI bridge Bus */
+/*
+ * Device physical location information.  Used to match console and boot
+ * devices.
+ */
+struct sgi_device_location {
+	int16_t		nasid;		/* node identifier */
+	uint		widget;		/* widget number */
 
-#define BUS_INTR_ESTABLISH(ca, a, b, c, d, e, f, h)			\
-	    (*(ca)->ca_bus->ab_intr_establish)((a),(b),(c),(d),(e),(f),(h))
-#define BUS_INTR_DISESTABLISH(ca)					\
-	    (*(ca)->ca_bus->ab_intr_establish)(ca)
-#define BUS_MATCHNAME(ca, name)						\
-	    (((ca)->ca_bus->ab_matchname) ?				\
-	    (*(ca)->ca_bus->ab_matchname)((ca), (name)) :		\
-	    -1)
+	int		bus;		/* bus number if connected to PIC */
+	int		device;		/* device number if PCI */
+	int		fn;		/* function number if PCI */
 
-struct confargs {
-	char		*ca_name;	/* Device name. */
-	struct abus	*ca_bus;	/* Bus device resides on. */
-	bus_space_tag_t ca_iot;
-	bus_space_tag_t ca_memt;
-	bus_dma_tag_t	ca_dmat;
-	u_int32_t	ca_num;		/* which system */
-	u_int32_t	ca_sys;		/* which system */
-	int		ca_nreg;
-	u_int32_t	*ca_reg;
-	int		ca_nintr;
-	int32_t		ca_intr;
-	bus_addr_t	ca_baseaddr;
+	uint32_t	specific;	/* port on dual-scsibus controllers,
+					   device id on serial controllers */
 };
 
-int	badaddr(void *, u_int64_t);
+#include <mips64/autoconf.h>
+
 void	enaddr_aton(const char *, u_int8_t *);
+u_long	bios_getenvint(const char *);
+
+struct device;
+
+void	arcs_device_register(struct device *, void *);
+void	dksc_device_register(struct device *, void *);
+extern	void (*_device_register)(struct device *, void *);
+
+void	ip27_setup(void);
+void	ip27_autoconf(struct device *);
+void	ip30_setup(void);
+void	ip30_autoconf(struct device *);
+void	ip32_setup(void);
+
+extern char osloadpartition[256];
+extern int16_t masternasid;
+extern int16_t currentnasid;
+
+extern struct sgi_device_location console_output, console_input;
+
+int	location_match(struct sgi_device_location *,
+	    struct sgi_device_location *);
 
 #endif /* _MACHINE_AUTOCONF_H_ */

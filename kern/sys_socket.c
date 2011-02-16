@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sys_socket.c,v 1.10 2005/12/13 10:33:14 jsg Exp $	*/
+=======
+/*	$OpenBSD: sys_socket.c,v 1.14 2009/02/22 07:47:22 otto Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sys_socket.c,v 1.13 1995/08/12 23:59:09 mycroft Exp $	*/
 
 /*
@@ -58,7 +62,8 @@ soo_read(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 {
 
 	return (soreceive((struct socket *)fp->f_data, (struct mbuf **)0,
-		uio, (struct mbuf **)0, (struct mbuf **)0, (int *)0));
+		uio, (struct mbuf **)0, (struct mbuf **)0, (int *)0,
+		(socklen_t)0));
 }
 
 /* ARGSUSED */
@@ -167,9 +172,21 @@ soo_stat(struct file *fp, struct stat *ub, struct proc *p)
 
 	bzero((caddr_t)ub, sizeof (*ub));
 	ub->st_mode = S_IFSOCK;
-	return ((*so->so_proto->pr_usrreq)(so, PRU_SENSE,
+	if ((so->so_state & SS_CANTRCVMORE) == 0 ||
+	    so->so_rcv.sb_cc != 0)
+		ub->st_mode |= S_IRUSR | S_IRGRP | S_IROTH;
+	if ((so->so_state & SS_CANTSENDMORE) == 0)
+		ub->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
+	ub->st_uid = so->so_euid;
+	ub->st_gid = so->so_egid;
+	(void) ((*so->so_proto->pr_usrreq)(so, PRU_SENSE,
 	    (struct mbuf *)ub, (struct mbuf *)0, 
+<<<<<<< HEAD
 	    (struct mbuf *)0));
+=======
+	    (struct mbuf *)0, p));
+	return (0);
+>>>>>>> origin/master
 }
 
 /* ARGSUSED */

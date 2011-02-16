@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wdc_pcmcia.c,v 1.16 2005/01/27 17:04:56 millert Exp $	*/
+=======
+/*	$OpenBSD: wdc_pcmcia.c,v 1.24 2010/08/31 17:13:47 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: wdc_pcmcia.c,v 1.19 1999/02/19 21:49:43 abs Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,7 +84,7 @@ struct wdc_pcmcia_softc {
 static int wdc_pcmcia_match(struct device *, void *, void *);
 static void wdc_pcmcia_attach(struct device *, struct device *, void *);
 int    wdc_pcmcia_detach(struct device *, int);
-int    wdc_pcmcia_activate(struct device *, enum devact);
+int    wdc_pcmcia_activate(struct device *, int);
 
 struct cfattach wdc_pcmcia_ca = {
 	sizeof(struct wdc_pcmcia_softc), wdc_pcmcia_match, wdc_pcmcia_attach,
@@ -144,8 +141,6 @@ int	wdc_pcmcia_disk_device_interface_callback(struct pcmcia_tuple *,
 int	wdc_pcmcia_disk_device_interface(struct pcmcia_function *);
 struct wdc_pcmcia_product *
 	wdc_pcmcia_lookup(struct pcmcia_attach_args *);
-
-int	wdc_pcmcia_enable(void *, int);
 
 int
 wdc_pcmcia_disk_device_interface_callback(tuple, arg)
@@ -316,7 +311,7 @@ wdc_pcmcia_attach(parent, self, aux)
 	if (pcmcia_io_map(pa->pf, quirks & WDC_PCMCIA_FORCE_16BIT_IO ?
 	    PCMCIA_WIDTH_IO16 : PCMCIA_WIDTH_AUTO, 0,
 	    sc->sc_pioh.size, &sc->sc_pioh, &sc->sc_iowindow)) {
-		printf(": can't map first I/O space\n");
+		printf(": can't map first i/o space\n");
 		goto iomap_failed;
 	} 
 
@@ -329,7 +324,7 @@ wdc_pcmcia_attach(parent, self, aux)
 		sc->sc_auxiowindow = -1;
 	else if (pcmcia_io_map(pa->pf, PCMCIA_WIDTH_AUTO, 0,
 	    sc->sc_auxpioh.size, &sc->sc_auxpioh, &sc->sc_auxiowindow)) {
-		printf(": can't map second I/O space\n");
+		printf(": can't map second i/o space\n");
 		goto iomapaux_failed;
 	}
 
@@ -361,23 +356,12 @@ wdc_pcmcia_attach(parent, self, aux)
 	if (quirks & WDC_PCMCIA_NO_EXTRA_RESETS)
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_NO_EXTRA_RESETS;
 
-#ifdef notyet
-	/* We can enable and disable the controller. */
-	sc->sc_wdcdev.sc_atapi_adapter.scsipi_enable = wdc_pcmcia_enable;
-
-	/*
-	 * Disable the pcmcia function now; wdcattach() will enable
-	 * us again as it adds references to probe for children.
-	 */
-	pcmcia_function_disable(pa->pf);
-#else
 	/* Establish the interrupt handler. */
 	sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO, wdcintr,
 	    &sc->wdc_channel, sc->sc_wdcdev.sc_dev.dv_xname);
 	intrstr = pcmcia_intr_string(sc->sc_pf, sc->sc_ih);
 	if (*intrstr)
 		printf(": %s", intrstr);
-#endif
 
 	printf("\n");
 
@@ -442,80 +426,50 @@ wdc_pcmcia_detach(self, flags)
 int
 wdc_pcmcia_activate(self, act)
 	struct device *self;
-	enum devact act;
+	int act;
 {
 	struct wdc_pcmcia_softc *sc = (struct wdc_pcmcia_softc *)self;
-	int rv = 0, s;
+	int rv = 0;
 
-	s = splbio();
+	if (sc->sc_iowindow == -1)
+		/* Nothing to activate/deactivate. */
+		return (0);
+
 	switch (act) {
 	case DVACT_ACTIVATE:
-		if (pcmcia_function_enable(sc->sc_pf)) {
-			printf("%s: couldn't enable PCMCIA function\n",
-			    sc->sc_wdcdev.sc_dev.dv_xname);
-			rv = EIO;
-			break;
-		}
-
-		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO, 
-		    wdcintr, &sc->wdc_channel, sc->sc_wdcdev.sc_dev.dv_xname);
 		if (sc->sc_ih == NULL) {
-			printf("%s: "
-			    "couldn't establish interrupt handler\n",
-			    sc->sc_wdcdev.sc_dev.dv_xname);
-			pcmcia_function_disable(sc->sc_pf);
-			rv = EIO;
-			break;
-		}
-
-		wdcreset(&sc->wdc_channel, VERBOSE);
-		rv = wdcactivate(self, act);
-		break;
-
-	case DVACT_DEACTIVATE:
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
-		pcmcia_function_disable(sc->sc_pf);
-		rv = wdcactivate(self, act);
-		break;
-	}
-	splx(s);
-	return (rv);
-}
-
-#if 0
-int
-wdc_pcmcia_enable(arg, onoff)
-	void *arg;
-	int onoff;
-{
-	struct wdc_pcmcia_softc *sc = arg;
-
-	if (onoff) {
-                if ((sc->sc_flags & WDC_PCMCIA_ATTACH) == 0) {
-			if (pcmcia_function_enable(sc->sc_pf)) {
-				printf("%s: couldn't enable PCMCIA function\n",
-				    sc->sc_wdcdev.sc_dev.dv_xname);
-				return (EIO);
-			}
-
+			/* XXX attach function already did the work */
+			pcmcia_function_enable(sc->sc_pf);
 			sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO, 
-			    wdcintr, &sc->wdc_channel, sc->sc_dev.dv_xname);
-			if (sc->sc_ih == NULL) {
-				printf("%s: "
-				    "couldn't establish interrupt handler\n",
-				    sc->sc_wdcdev.sc_dev.dv_xname);
-				pcmcia_function_disable(sc->sc_pf);
-				return (EIO);
-			}
-
+			    wdcintr, &sc->wdc_channel, sc->sc_wdcdev.sc_dev.dv_xname);
 			wdcreset(&sc->wdc_channel, VERBOSE);
 		}
-	} else {
-                if ((sc->sc_flags & WDC_PCMCIA_ATTACH) == 0)
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		if (sc->sc_ih)
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
+		pcmcia_function_enable(sc->sc_pf);
+		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO, 
+		    wdcintr, &sc->wdc_channel, sc->sc_wdcdev.sc_dev.dv_xname);
+		wdcreset(&sc->wdc_channel, VERBOSE);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		rv = config_activate_children(self, act);
+		if (sc->sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
 	}
-
-	return (0);
+	return (rv);
 }
-#endif

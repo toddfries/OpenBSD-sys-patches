@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.88 2007/03/17 21:11:58 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.123 2011/01/08 18:10:23 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,12 +52,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
-
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-#include <net/netisr.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -82,6 +77,7 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
 #include <ddb/db_access.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -112,6 +108,9 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 struct bat battable[16];
 
@@ -147,7 +146,6 @@ int allowaperture = 0;
 
 void ofw_dbg(char *str);
 
-caddr_t allocsys(caddr_t);
 void dumpsys(void);
 void systype(char *name);
 int lcsplx(int ipl);	/* called from LCore */
@@ -155,8 +153,8 @@ int power4e_get_eth_addr(void);
 void ppc_intr_setup(intr_establish_t *establish,
     intr_disestablish_t *disestablish);
 void *ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type,
-    int level, int (*func)(void *), void *arg, char *name);
-int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+    int level, int (*func)(void *), void *arg, const char *name);
+int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp);
 bus_addr_t bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t size);
@@ -194,7 +192,6 @@ initppc(startkernel, endkernel, args)
 #ifdef DDB
 	extern void *ddblow; extern int ddbsize;
 #endif
-	extern void consinit(void);
 	extern void callback(void *);
 	extern void *msgbuf_addr;
 	int exc, scratch;
@@ -396,6 +393,7 @@ initppc(startkernel, endkernel, args)
 
 #ifdef DDB
 	ddb_init();
+	db_machine_init();
 #endif
 
 	/*
@@ -482,71 +480,24 @@ install_extint(void (*handler)(void))
 }
 
 /*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
+/*
  * Machine dependent startup code.
  */
 void
 cpu_startup()
 {
-	int sz, i;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
-	int base, residual;
-	v = (caddr_t)proc0paddr + USPACE;
 
 	proc0.p_addr = proc0paddr;
 
 	printf("%s", version);
 
 	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem)/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	sz = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(sz),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	/*
-	addr = (vaddr_t)buffers;
-	*/
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE) {
-		/* Don't want to alloc more physical mem than ever needed */
-		base = MAXBSIZE;
-		residual = 0;
-	}
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for"
-					" buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-					VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -574,47 +525,6 @@ cpu_startup()
 	bufinit();
 
 	devio_malloc_safe = 1;
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Decide on buffer space to use.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 35% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-
-	return v;
 }
 
 /*
@@ -736,6 +646,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if ((error = copyin(SCARG(uap, sigcntxp), &sc, sizeof sc)))
 		return error;
 	tf = trapframe(p);
+	sc.sc_frame.srr1 &= ~PSL_VEC;
+	sc.sc_frame.srr1 |= (tf->srr1 & PSL_VEC);
 	if ((sc.sc_frame.srr1 & PSL_USERSTATIC) != (tf->srr1 & PSL_USERSTATIC))
 		return EINVAL;
 	bcopy(&sc.sc_frame, tf, sizeof *tf);
@@ -887,6 +799,10 @@ dumpsys()
 		return;
 	printf("dumping to dev %x, offset %ld\n", dumpdev, dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	error = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	if (error == -1) {
 		printf("area unavailable\n");
@@ -937,38 +853,7 @@ dumpsys()
 
 }
 
-int imask[IPL_NUM];
-
-/*
- * this is a hack interface to allow zs to work better until
- * a true soft interrupt mechanism is created.
- */
-#include "zstty.h"
-#if NZSTTY > 0
-	extern void zssoft(void *);
-#endif
-void
-softtty()
-{
-#if NZSTTY > 0
-	zssoft(0);
-#endif
-}
-
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
+int cpu_imask[IPL_NUM];
 
 int
 lcsplx(int ipl)
@@ -1073,6 +958,26 @@ do_pending_int()
 }
 
 /*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+	cpu_unidle(p->p_cpu);
+}
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		ppc_send_ipi(ci, PPC_IPI_NOP);
+}
+#endif
+
+/*
  * set system type from string
  */
 void
@@ -1121,7 +1026,7 @@ struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 
 void *
 ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
 		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;
@@ -1148,23 +1053,39 @@ ppc_intr_setup(intr_establish_t *establish, intr_disestablish_t *disestablish)
 	intr_disestablish_func = disestablish;
 }
 
+intr_send_ipi_t ppc_no_send_ipi;
+intr_send_ipi_t *intr_send_ipi_func = ppc_no_send_ipi;
+
+void
+ppc_no_send_ipi(struct cpu_info *ci, int id)
+{
+	panic("ppc_send_ipi called: no ipi function");
+}
+
+void
+ppc_send_ipi(struct cpu_info *ci, int id)
+{
+	(*intr_send_ipi_func)(ci, id);
+}
+
+
 /* BUS functions */
 int
 bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	int error;
 
 	if  (POWERPC_BUS_TAG_BASE(t) == 0) {
 		/* if bus has base of 0 fail. */
-		return 1;
+		return EINVAL;
 	}
 	bpa |= POWERPC_BUS_TAG_BASE(t);
 	if ((error = extent_alloc_region(devio_ex, bpa, size, EX_NOWAIT |
 	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
 		return error;
 
-	if ((error  = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
+	if ((error = bus_mem_add_mapping(bpa, size, flags, bshp))) {
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
@@ -1218,7 +1139,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	bus_addr_t vaddr;
@@ -1251,8 +1172,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING
@@ -1260,9 +1180,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		bpa, size, *bshp, spa);
 #endif
 	for (; len > 0; len -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE,
-			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_CI);
+		pmap_kenter_cache(vaddr, spa, VM_PROT_READ | VM_PROT_WRITE,
+		    (flags & BUS_SPACE_MAP_CACHEABLE) ?
+		      PMAP_CACHE_WT : PMAP_CACHE_CI);
 		spa += PAGE_SIZE;
 		vaddr += PAGE_SIZE;
 	}
@@ -1271,7 +1191,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int cacheable,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *addrp, bus_space_handle_t *handlep)
 {
 
@@ -1502,4 +1422,25 @@ kcopy(const void *from, void *to, size_t size)
 	curproc->p_addr->u_pcb.pcb_onfault = oldh;
 
 	return 0;
+}
+
+/* prototype for locore function */
+void cpu_switchto_asm(struct proc *oldproc, struct proc *newproc);
+
+void
+cpu_switchto(struct proc *oldproc, struct proc *newproc)
+{
+	/*
+	 * if this CPU is running a new process, flush the
+	 * FPU/Altivec context to avoid an IPI.
+	 */
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	if (ci->ci_fpuproc)
+		save_fpu();
+	if (ci->ci_vecproc)
+		save_vec(ci->ci_vecproc);
+#endif
+
+	cpu_switchto_asm(oldproc, newproc);
 }

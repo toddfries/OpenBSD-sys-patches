@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: qd.c,v 1.11 2006/01/01 11:59:39 miod Exp $	*/
+=======
+/*	$OpenBSD: qd.c,v 1.20 2010/09/22 01:18:57 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: qd.c,v 1.17 2000/01/24 02:40:29 matt Exp $	*/
 
 /*-
@@ -167,7 +171,6 @@ int Qbus_unmap[NQD];		/* Qbus mapper release code */
 struct qdmap qdmap[NQD];	/* QDSS register map structure */
 struct qdflags qdflags[NQD];	/* QDSS register map structure */
 caddr_t qdbase[NQD];		/* base address of each QDSS unit */
-struct buf qdbuf[NQD];		/* buf structs used by strategy */
 short qdopened[NQD];		/* graphics device is open exclusive use */
 
 /*
@@ -826,7 +829,7 @@ qdopen(dev, flag, mode, p)
 	   
 	       /* If not done already, allocate tty structure */
 	       if (qd_tty[minor_dev] == NULL)
-		       qd_tty[minor_dev] = ttymalloc();
+		       qd_tty[minor_dev] = ttymalloc(0);
 	      
 	       /*
 		* this is the console 
@@ -857,7 +860,7 @@ qdopen(dev, flag, mode, p)
 		* enable intrpts, open line discipline 
 		*/
 		dga->csr |= GLOBAL_IE;	/* turn on the interrupts */
-		return ((*linesw[tp->t_line].l_open)(dev, tp));
+		return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 	}
 	dga->csr |= GLOBAL_IE;	/* turn on the interrupts */
 	return(0);
@@ -1046,7 +1049,7 @@ qdclose(dev, flag, mode, p)
 		* this is the console 
 		*/
 		tp = qd_tty[minor_dev];
-		(*linesw[tp->t_line].l_close)(tp, flag);
+		(*linesw[tp->t_line].l_close)(tp, flag, p);
 		ttyclose(tp);
 		tp->t_state = 0;
 		qdflags[unit].inuse &= ~CONS_DEV;
@@ -1602,8 +1605,7 @@ qdwrite(dev, uio, flag)
 	       /*
 		* this is a DMA xfer from user space 
 		*/
-		return (physio(qd_strategy, &qdbuf[unit],
-		dev, B_WRITE, minphys, uio));
+		return (physio(qd_strategy, dev, B_WRITE, minphys, uio));
 	}
 	return (ENXIO);
 }
@@ -1631,8 +1633,7 @@ qdread(dev, uio, flag)
 	       /*
 		* this is a bitmap-to-processor xfer 
 		*/
-		return (physio(qd_strategy, &qdbuf[unit],
-		dev, B_READ, minphys, uio));
+		return (physio(qd_strategy, dev, B_READ, minphys, uio));
 	}
 	return (ENXIO);
 }
@@ -3389,7 +3390,7 @@ setup_dragon(unit)
 	adder->sync_phase_adj = 0x0100;
 	adder->x_scan_conf = 0x00C8;
 	/*
-	 * got a bug in secound pass ADDER! lets take care of it 
+	 * got a bug in second pass ADDER! lets take care of it 
 	 *
 	 * normally, just use the code in the following bug fix code, but to
 	 * make repeated demos look pretty, load the registers as if there was

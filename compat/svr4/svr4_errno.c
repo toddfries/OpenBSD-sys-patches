@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: svr4_errno.c,v 1.2 2000/08/23 16:33:20 brad Exp $	*/
+=======
+/*	$OpenBSD: svr4_errno.c,v 1.5 2009/10/28 16:38:43 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: svr4_errno.c,v 1.7 1998/10/23 04:06:00 erh Exp $	*/
 
 /*
@@ -118,4 +122,17 @@ int native_to_svr4_errno[] = {
 	SVR4_EFTYPE,
 	SVR4_EAUTH,
 	SVR4_ENEEDAUTH,
+<<<<<<< HEAD
+=======
+	SVR4_ENOSYS,			/* EIPSEC */
+	SVR4_ENOSYS,			/* ENOATTR */
+	SVR4_EILSEQ,
+	SVR4_ENOSYS,			/* ENOMEDIUM */
+	SVR4_ENOSYS,			/* EMEDIUMTYPE */
+	SVR4_EOVERFLOW,
+	SVR4_ENOSYS,			/* ECANCELED */
+	SVR4_EIDRM,
+	SVR4_ENOMSG,
+	SVR4_ENOSYS			/* ENOTSUP */
+>>>>>>> origin/master
 };

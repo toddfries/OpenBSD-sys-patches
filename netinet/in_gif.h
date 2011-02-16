@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in_gif.h,v 1.4 2002/03/14 01:27:11 millert Exp $	*/
+=======
+/*	$OpenBSD: in_gif.h,v 1.6 2010/05/11 09:36:07 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: in_gif.h,v 1.5 2000/04/14 08:36:02 itojun Exp $	*/
 
 /*
@@ -34,6 +38,6 @@
 #define _NETINET_IN_GIF_H_
 
 void in_gif_input(struct mbuf *, ...);
-int in_gif_output(struct ifnet *, int, struct mbuf *);
+int in_gif_output(struct ifnet *, int, struct mbuf **);
 
 #endif /*_NETINET_IN_GIF_H_*/

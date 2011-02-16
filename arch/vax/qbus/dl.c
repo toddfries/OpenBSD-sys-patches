@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dl.c,v 1.4 2003/06/02 23:27:58 millert Exp $	*/
+=======
+/*	$OpenBSD: dl.c,v 1.12 2010/07/02 17:27:01 nicm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dl.c,v 1.11 2000/01/24 02:40:29 matt Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -213,7 +210,7 @@ dl_attach (parent, self, aux)
 
 	/* Initialize our softc structure. Should be done in open? */
 	
-	sc->sc_tty = ttymalloc();
+	sc->sc_tty = ttymalloc(0);
 
 	/* Now register the TX & RX interrupt handlers */
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec    , dlxint, sc);
@@ -316,10 +313,10 @@ dlopen(dev, flag, mode, p)
 		dlparam(tp, &tp->t_termios);
 		ttsetwater(tp);
 		
-	} else if ((tp->t_state & TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if ((tp->t_state & TS_XCLUDE) && suser(p, 0) != 0)
 		return EBUSY;
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*ARGSUSED*/
@@ -337,7 +334,7 @@ dlclose(dev, flag, mode, p)
 	sc = dl_cd.cd_devs[unit];
       	tp = sc->sc_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	/* Make sure a BREAK state is not left enabled. */
 	dlbrk(sc, 0);
@@ -463,18 +460,11 @@ dlstart(tp)
 	sc = dl_cd.cd_devs[unit];
 
 	s = spltty();
-        if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
-                goto out;
-        if (tp->t_outq.c_cc <= tp->t_lowat) {
-                if (tp->t_state & TS_ASLEEP) {
-                        tp->t_state &= ~TS_ASLEEP;
-                        wakeup((caddr_t)&tp->t_outq);
-                }
-                selwakeup(&tp->t_wsel);
-        }
-        if (tp->t_outq.c_cc == 0)
-                goto out;
-
+	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
+		goto out;
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 
 	if (DL_READ_WORD(DL_UBA_XCSR) & DL_XCSR_TX_READY) {
 		tp->t_state |= TS_BUSY;

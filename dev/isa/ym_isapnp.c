@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ym_isapnp.c,v 1.7 1999/08/05 05:32:41 deraadt Exp $ */
+=======
+/*	$OpenBSD: ym_isapnp.c,v 1.9 2010/06/30 11:21:35 jakemsr Exp $ */
+>>>>>>> origin/master
 
 
 /*
@@ -113,6 +117,7 @@ ym_isapnp_attach(parent, self, aux)
 	sc->sc_ad1848.sc_iooffs = WSS_CODEC;
 	sc->sc_ad1848.mode = 2;
 	sc->sc_ad1848.MCE_bit = MODE_CHANGE_ENABLE;
+	sc->sc_ad1848.sc_flags = AD1848_FLAG_32REGS;
 
 #if NMIDI > 0
 	sc->sc_mpu_sc.iobase = ia->ipa_io[3].base;

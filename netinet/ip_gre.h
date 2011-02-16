@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: ip_gre.h,v 1.6 2002/06/09 16:26:10 itojun Exp $ */
+=======
+/*      $OpenBSD: ip_gre.h,v 1.9 2010/01/12 23:33:24 yasuoka Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ip_gre.h,v 1.3 1998/10/07 23:33:02 thorpej Exp $ */
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,6 +73,7 @@ void gre_mobile_input(struct mbuf *, ...);
 
 int     ipmobile_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int     gre_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int     gre_usrreq(struct socket *, int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 
 #endif /* _KERNEL */
 #endif /* _NETINET_IP_GRE_H_ */

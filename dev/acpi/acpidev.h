@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: acpidev.h,v 1.20 2007/01/27 19:37:57 marco Exp $ */
+=======
+/* $OpenBSD: acpidev.h,v 1.32 2010/08/06 21:12:27 marco Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
@@ -256,9 +260,6 @@ struct acpicpu_pct {
 struct acpiac_softc {
 	struct device		sc_dev;
 
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
 
@@ -271,9 +272,6 @@ struct acpiac_softc {
 struct acpibat_softc {
 	struct device		sc_dev;
 
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
 
@@ -285,7 +283,10 @@ struct acpibat_softc {
 	struct ksensordev	sc_sensdev;
 };
 
+TAILQ_HEAD(aml_nodelisth, aml_nodelist);
+
 struct acpidock_softc {
+<<<<<<< HEAD
 	struct device           sc_dev;
 
 	bus_space_tag_t         sc_iot;
@@ -295,6 +296,17 @@ struct acpidock_softc {
 	struct aml_node		*sc_devnode;
 
 	struct ksensor		sc_sens[1];
+=======
+	struct device		sc_dev;
+
+	struct acpi_softc	*sc_acpi;
+	struct aml_node		*sc_devnode;
+
+	struct aml_nodelisth	sc_deps_h;
+	struct aml_nodelist	*sc_deps;
+
+	struct ksensor		sc_sens;
+>>>>>>> origin/master
 	struct ksensordev	sc_sensdev;
 
 	int			sc_docked;
@@ -306,7 +318,35 @@ struct acpidock_softc {
 };
 
 #define ACPIDOCK_EVENT_INSERT	0
+#define ACPIDOCK_EVENT_DEVCHECK 1
 #define	ACPIDOCK_EVENT_EJECT	3
 
+#define ACPIEC_MAX_EVENTS	256
 
+struct acpiec_event {
+	struct aml_node *event;
+};
+
+struct acpiec_softc {
+	struct device		sc_dev;
+
+	int			sc_ecbusy;
+
+	/* command/status register */
+	bus_space_tag_t		sc_cmd_bt;
+	bus_space_handle_t	sc_cmd_bh;
+
+	/* data register */
+	bus_space_tag_t		sc_data_bt;
+	bus_space_handle_t	sc_data_bh;
+
+	struct acpi_softc	*sc_acpi;
+	struct aml_node		*sc_devnode;
+	u_int32_t		sc_gpe;
+	struct acpiec_event	sc_events[ACPIEC_MAX_EVENTS];
+	int			sc_gotsci;
+};
+
+void		acpibtn_disable_psw(void);
+void		acpibtn_enable_psw(void);
 #endif /* __DEV_ACPI_ACPIDEV_H__ */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: lemacvar.h,v 1.2 2003/10/21 18:58:49 jmc Exp $ */
+=======
+/*      $OpenBSD: lemacvar.h,v 1.4 2009/08/10 22:08:04 deraadt Exp $ */
+>>>>>>> origin/master
 /*      $NetBSD: lemacvar.h,v 1.6 2001/06/13 10:46:03 wiz Exp $ */
 
 /*
@@ -151,6 +155,5 @@ void	lemac_info_get(const bus_space_tag_t, const bus_space_handle_t,
     bus_addr_t *, bus_size_t *, int *);
 int	lemac_port_check(const bus_space_tag_t, const bus_space_handle_t);
 int	lemac_intr(void *);
-void	lemac_shutdown(void *);
 
 #endif /* _LEMACVAR_H */

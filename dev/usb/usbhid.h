@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbhid.h,v 1.7 2002/05/09 15:06:29 nate Exp $ */
+=======
+/*	$OpenBSD: usbhid.h,v 1.13 2009/12/09 21:27:19 matthieu Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: usbhid.h,v 1.11 2001/12/28 00:20:24 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbhid.h,v 1.7 1999/11/17 22:33:51 n_hibma Exp $ */
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -141,6 +138,9 @@ typedef struct usb_hid_descriptor {
 
 /* Usages Digitizers */
 #define HUD_UNDEFINED		0x0000
+#define HUD_DIGITIZER		0x0001
+#define HUD_PEN			0x0002
+#define HUD_TOUCHSCREEN		0x0004
 #define HUD_TIP_PRESSURE	0x0030
 #define HUD_BARREL_PRESSURE	0x0031
 #define HUD_IN_RANGE		0x0032

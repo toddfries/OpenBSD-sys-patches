@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dz.c,v 1.13 2006/07/29 17:06:27 miod Exp $	*/
+=======
+/*	$OpenBSD: dz.c,v 1.22 2010/06/28 14:13:31 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dz.c,v 1.23 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.
@@ -59,16 +63,6 @@
 #include <arch/vax/qbus/dzreg.h>
 #include <arch/vax/qbus/dzvar.h>
 
-#define	DZ_READ_BYTE(adr) \
-	bus_space_read_1(sc->sc_iot, sc->sc_ioh, sc->sc_dr.adr)
-#define	DZ_READ_WORD(adr) \
-	bus_space_read_2(sc->sc_iot, sc->sc_ioh, sc->sc_dr.adr)
-#define	DZ_WRITE_BYTE(adr, val) \
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, sc->sc_dr.adr, val)
-#define	DZ_WRITE_WORD(adr, val) \
-	bus_space_write_2(sc->sc_iot, sc->sc_ioh, sc->sc_dr.adr, val)
-
-
 /* Flags used to monitor modem bits, make them understood outside driver */
 
 #define DML_DTR		TIOCM_DTR
@@ -126,17 +120,17 @@ dzattach(struct dz_softc *sc)
 	sc->sc_rxint = sc->sc_brk = 0;
 
 	sc->sc_dr.dr_tcrw = sc->sc_dr.dr_tcr;
-	DZ_WRITE_WORD(dr_csr, DZ_CSR_MSE | DZ_CSR_RXIE | DZ_CSR_TXIE);
+	DZ_WRITE_WORD(sc, dr_csr, DZ_CSR_MSE | DZ_CSR_RXIE | DZ_CSR_TXIE);
 	dzdrain(sc);
-	DZ_WRITE_BYTE(dr_dtr, 0);
-	DZ_WRITE_BYTE(dr_break, 0);
+	DZ_WRITE_BYTE(sc, dr_dtr, 0);
+	DZ_WRITE_BYTE(sc, dr_break, 0);
 
 	/* Initialize our softc structure. Should be done in open? */
 
 	for (n = 0; n < sc->sc_type; n++) {
 		sc->sc_dz[n].dz_sc = sc;
 		sc->sc_dz[n].dz_line = n;
-		sc->sc_dz[n].dz_tty = ttymalloc();
+		sc->sc_dz[n].dz_tty = ttymalloc(0);
 	}
 
 	/* Alas no interrupt on modem bit changes, so we manually scan */
@@ -144,7 +138,7 @@ dzattach(struct dz_softc *sc)
 	if (dz_timer == 0) {
 		dz_timer = 1;
 		timeout_set(&dz_timeout, dzscan, NULL);
-		timeout_add(&dz_timeout, hz);
+		timeout_add_sec(&dz_timeout, 1);
 	}
 	printf("\n");
 }
@@ -162,7 +156,7 @@ dzrint(void *arg)
 
 	sc->sc_rxint++;
 
-	while ((c = DZ_READ_WORD(dr_rbuf)) & DZ_RBUF_DATA_VALID) {
+	while ((c = DZ_READ_WORD(sc, dr_rbuf)) & DZ_RBUF_DATA_VALID) {
 		cc = c & 0xFF;
 		line = DZ_PORT(c>>8);
 		tp = sc->sc_dz[line].dz_tty;
@@ -189,7 +183,7 @@ dzrint(void *arg)
 		if (c & DZ_RBUF_PARITY_ERR)
 			cc |= TTY_PE;
 
-#if defined(DDB) && (defined(VAX410) || defined(VAX43) || defined(VAX46) || defined(VAX48) || defined(VAX49) || defined(VAX53))
+#if defined(DDB) && (defined(VAX410) || defined(VAX43) || defined(VAX46) || defined(VAX48) || defined(VAX49) || defined(VAX53) || defined(VAX60))
 		if (tp->t_dev == cn_tab->cn_dev) {
 			int j = kdbrint(cc);
 
@@ -200,6 +194,7 @@ dzrint(void *arg)
 				(*linesw[tp->t_line].l_rint)(27, tp);
 		}
 #endif
+
 		(*linesw[tp->t_line].l_rint)(cc, tp);
 	}
 }
@@ -233,7 +228,7 @@ dzxint(void *arg)
 	 * Remove the pdma stuff; no great need of it right now.
 	 */
 
-	while (((csr = DZ_READ_WORD(dr_csr)) & DZ_CSR_TX_READY) != 0) {
+	while (((csr = DZ_READ_WORD(sc, dr_csr)) & DZ_CSR_TX_READY) != 0) {
 
 		line = DZ_PORT(csr>>8);
 
@@ -246,27 +241,24 @@ dzxint(void *arg)
 		if (cl->c_cc) {
 			tp->t_state |= TS_BUSY;
 			ch = getc(cl);
-			DZ_WRITE_BYTE(dr_tbuf, ch);
+			DZ_WRITE_BYTE(sc, dr_tbuf, ch);
 			continue;
 		} 
 		/* Nothing to send; clear the scan bit */
 		/* Clear xmit scanner bit; dzstart may set it again */
-		tcr = DZ_READ_WORD(dr_tcrw);
+		tcr = DZ_READ_WORD(sc, dr_tcrw);
 		tcr &= 255;
 		tcr &= ~(1 << line);
-		DZ_WRITE_BYTE(dr_tcr, tcr);
+		DZ_WRITE_BYTE(sc, dr_tcr, tcr);
 		if (sc->sc_dz[line].dz_catch)
 			continue;
 
 		if (tp->t_state & TS_FLUSH)
 			tp->t_state &= ~TS_FLUSH;
 		else
-			ndflush (&tp->t_outq, cl->c_cc);
+			ndflush(&tp->t_outq, cl->c_cc);
 
-		if (tp->t_line)
-			(*linesw[tp->t_line].l_start)(tp);
-		else
-			dzstart(tp);
+		(*linesw[tp->t_line].l_start)(tp);
 	}
 }
 
@@ -312,7 +304,7 @@ dzopen(dev_t dev, int flag, int mode, struct proc *p)
 		}
 		(void) dzparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if ((tp->t_state & TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if ((tp->t_state & TS_XCLUDE) && suser(p, 0) != 0)
 		return (EBUSY);
 	/* Use DMBIS and *not* DMSET or else we clobber incoming bits */
 	if (dzmctl(sc, line, DML_DTR, DMBIS) & DML_DCD)
@@ -328,7 +320,7 @@ dzopen(dev_t dev, int flag, int mode, struct proc *p)
 	splx(s);
 	if (error)
 		return (error);
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*ARGSUSED*/
@@ -346,7 +338,7 @@ dzclose(dev_t dev, int flag, int mode, struct proc *p)
 
 	tp = sc->sc_dz[line].dz_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	/* Make sure a BREAK state is not left enabled. */
 	(void) dzmctl(sc, line, DML_BRK, DMBIC);
@@ -458,9 +450,13 @@ dztty(dev_t dev)
 int
 dzstop(struct tty *tp, int flag)
 {
+	int s;
+
+	s = spltty();
 	if (tp->t_state & TS_BUSY)
 		if (!(tp->t_state & TS_TTSTOP))
 			tp->t_state |= TS_FLUSH;
+	splx(s);
 	return(0);
 }
 
@@ -496,9 +492,9 @@ dzstart(struct tty *tp)
 
 	tp->t_state |= TS_BUSY;
 
-	state = DZ_READ_WORD(dr_tcrw) & 255;
+	state = DZ_READ_WORD(sc, dr_tcrw) & 255;
 	if ((state & (1 << line)) == 0) {
-		DZ_WRITE_BYTE(dr_tcr, state | (1 << line));
+		DZ_WRITE_BYTE(sc, dr_tcr, state | (1 << line));
 	}
 	dzxint(sc);
 	splx(s);
@@ -558,7 +554,7 @@ dzparam(struct tty *tp, struct termios *t)
 	if (cflag & CSTOPB)
 		lpr |= DZ_LPR_2_STOP;
 
-	DZ_WRITE_WORD(dr_lpr, lpr);
+	DZ_WRITE_WORD(sc, dr_lpr, lpr);
 
 	splx(s);
 	return (0);
@@ -570,29 +566,31 @@ dzmctl(struct dz_softc *sc, int line, int bits, int how)
 	unsigned status;
 	unsigned mbits;
 	unsigned bit;
+	int8_t tcr;
 	int s;
 
 	s = spltty();
 
-	mbits = 0;
-
+	tcr = DZ_READ_BYTE(sc, dr_tcr);
 	bit = (1 << line);
+
+	mbits = 0;
 
 	/* external signals as seen from the port */
 
-	status = DZ_READ_BYTE(dr_dcd) | sc->sc_dsr;
+	status = DZ_READ_BYTE(sc, dr_dcd) | sc->sc_dsr;
 
 	if (status & bit)
 		mbits |= DML_DCD;
 
-	status = DZ_READ_BYTE(dr_ring);
+	status = DZ_READ_BYTE(sc, dr_ring);
 
 	if (status & bit)
 		mbits |= DML_RI;
 
 	/* internal signals/state delivered to port */
 
-	status = DZ_READ_BYTE(dr_dtr);
+	status = DZ_READ_BYTE(sc, dr_dtr);
 
 	if (status & bit)
 		mbits |= DML_DTR;
@@ -620,18 +618,24 @@ dzmctl(struct dz_softc *sc, int line, int bits, int how)
 	}
 
 	if (mbits & DML_DTR) {
-		DZ_WRITE_BYTE(dr_dtr, DZ_READ_BYTE(dr_dtr) | bit);
+		DZ_WRITE_BYTE(sc, dr_dtr, DZ_READ_BYTE(sc, dr_dtr) | bit);
 	} else {
-		DZ_WRITE_BYTE(dr_dtr, DZ_READ_BYTE(dr_dtr) & ~bit);
+		DZ_WRITE_BYTE(sc, dr_dtr, DZ_READ_BYTE(sc, dr_dtr) & ~bit);
 	}
 
 	if (mbits & DML_BRK) {
 		sc->sc_brk |= bit;
-		DZ_WRITE_BYTE(dr_break, sc->sc_brk);
+		DZ_WRITE_BYTE(sc, dr_break, sc->sc_brk);
 	} else {
 		sc->sc_brk &= ~bit;
-		DZ_WRITE_BYTE(dr_break, sc->sc_brk);
+		DZ_WRITE_BYTE(sc, dr_break, sc->sc_brk);
 	}
+
+	/*
+	 * On VAXstation 35x0/38x0, writing to the DTR register apparently
+	 * affects the TCR register.  Restore its value unconditionally.
+	 */
+	DZ_WRITE_BYTE(sc, dr_tcr, tcr);
 
 	splx(s);
 	return (mbits);
@@ -664,13 +668,13 @@ dzscan(void *arg)
 			tp = sc->sc_dz[port].dz_tty;
 			bit = (1 << port);
 	
-			if ((DZ_READ_BYTE(dr_dcd) | sc->sc_dsr) & bit) {
+			if ((DZ_READ_BYTE(sc, dr_dcd) | sc->sc_dsr) & bit) {
 				if (!(tp->t_state & TS_CARR_ON))
 					(*linesw[tp->t_line].l_modem) (tp, 1);
 			} else if ((tp->t_state & TS_CARR_ON) &&
 			    (*linesw[tp->t_line].l_modem)(tp, 0) == 0) {
-				DZ_WRITE_BYTE(dr_tcr, 
-				    (DZ_READ_WORD(dr_tcrw) & 255) & ~bit);
+				DZ_WRITE_BYTE(sc, dr_tcr, 
+				    (DZ_READ_WORD(sc, dr_tcrw) & 255) & ~bit);
 			}
 	    	}
 
@@ -683,19 +687,19 @@ dzscan(void *arg)
 		 *  if off unless the rate is appropriately low.
 		 */
 
-		csr = DZ_READ_WORD(dr_csr);
+		csr = DZ_READ_WORD(sc, dr_csr);
 
 		if (sc->sc_rxint > (16*10)) {
 			if ((csr & DZ_CSR_SAE) == 0)
-				DZ_WRITE_WORD(dr_csr, csr | DZ_CSR_SAE);
+				DZ_WRITE_WORD(sc, dr_csr, csr | DZ_CSR_SAE);
 	    	} else if ((csr & DZ_CSR_SAE) != 0)
 			if (sc->sc_rxint < 10)
-				DZ_WRITE_WORD(dr_csr, csr & ~(DZ_CSR_SAE));
+				DZ_WRITE_WORD(sc, dr_csr, csr & ~(DZ_CSR_SAE));
 
 		sc->sc_rxint = 0;
 	}
 	splx(s);
-	timeout_add(&dz_timeout, hz);
+	timeout_add_sec(&dz_timeout, 1);
 }
 
 /*
@@ -729,6 +733,6 @@ dzreset(struct device *dev)
 static void
 dzdrain(struct dz_softc *sc)
 {
-	while (DZ_READ_WORD(dr_rbuf) & DZ_RBUF_DATA_VALID)
+	while (DZ_READ_WORD(sc, dr_rbuf) & DZ_RBUF_DATA_VALID)
 		/*EMPTY*/;
 }

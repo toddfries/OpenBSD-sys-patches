@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uplcom.c,v 1.31 2006/07/01 04:23:31 jsg Exp $	*/
+=======
+/*	$OpenBSD: uplcom.c,v 1.55 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -15,13 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -169,6 +166,11 @@ static const struct usb_devno uplcom_devs[] = {
 	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2303X },
 	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2303X2 },
 	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_RSAQ2 },
+<<<<<<< HEAD
+=======
+	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2303BENQ },
+	{ USB_VENDOR_PROLIFIC2, USB_PRODUCT_PROLIFIC2_PL2303 },
+>>>>>>> origin/master
 	{ USB_VENDOR_RADIOSHACK, USB_PRODUCT_RADIOSHACK_PL2303 },
 	{ USB_VENDOR_RATOC, USB_PRODUCT_RATOC_REXUSB60 },
 	{ USB_VENDOR_SAGEM, USB_PRODUCT_SAGEM_SERIAL },
@@ -188,7 +190,26 @@ static const struct usb_devno uplcom_devs[] = {
 };
 #define uplcom_lookup(v, p) usb_lookup(uplcom_devs, v, p)
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uplcom);
+=======
+int uplcom_match(struct device *, void *, void *); 
+void uplcom_attach(struct device *, struct device *, void *); 
+int uplcom_detach(struct device *, int); 
+int uplcom_activate(struct device *, int); 
+
+struct cfdriver uplcom_cd = { 
+	NULL, "uplcom", DV_DULL 
+}; 
+
+const struct cfattach uplcom_ca = { 
+	sizeof(struct uplcom_softc), 
+	uplcom_match, 
+	uplcom_attach, 
+	uplcom_detach, 
+	uplcom_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uplcom)
 {
@@ -391,9 +412,12 @@ USB_ATTACH(uplcom)
 		USB_ATTACH_ERROR_RETURN;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	DPRINTF(("uplcom: in=0x%x out=0x%x intr=0x%x\n",
 			uca.bulkin, uca.bulkout, sc->sc_intr_number ));
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
@@ -415,20 +439,26 @@ USB_DETACH(uplcom)
                 sc->sc_intr_pipe = NULL;
         }
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 uplcom_activate(device_ptr_t self, enum devact act)
+=======
+uplcom_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uplcom_softc *sc = (struct uplcom_softc *)self;
 	int rv = 0;

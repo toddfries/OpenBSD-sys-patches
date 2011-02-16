@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkcsum.c,v 1.20 2006/01/22 00:40:01 miod Exp $	*/
+/*	$OpenBSD: dkcsum.c,v 1.27 2010/12/07 00:44:48 dlg Exp $	*/
 
 /*-
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.
@@ -65,12 +65,19 @@ dkcsumattach(void)
 	if (bios_diskinfo == NULL || bios_cksumlen * DEV_BSIZE > MAXBSIZE)
 		return;
 
+	/* Do nothing if bootdev is a CD drive. */
+	if (B_TYPE(bootdev) == 6)
+		return;
+
 #ifdef DEBUG
 	printf("dkcsum: bootdev=%#x\n", bootdev);
-	for (bdi = bios_diskinfo; bdi->bios_number != -1; bdi++)
-		if (bdi->bios_number & 0x80)
-			printf("dkcsum: BIOS drive %#x checksum is %#x\n",
-			    bdi->bios_number, bdi->checksum);
+	for (bdi = bios_diskinfo; bdi->bios_number != -1; bdi++) {
+		if (bdi->bios_number & 0x80) {
+			printf("dkcsum: BIOS drive %#x bsd_dev=%#x "
+			    "checksum=%#x\n", bdi->bios_number, bdi->bsd_dev,
+			    bdi->checksum);
+		}
+	}
 #endif
 	pribootdev = altbootdev = 0;
 
@@ -106,7 +113,7 @@ dkcsumattach(void)
 		/* Read blocks to cksum.  XXX maybe a d_read should be used. */
 		bp->b_blkno = 0;
 		bp->b_bcount = bios_cksumlen * DEV_BSIZE;
-		bp->b_flags = B_BUSY | B_READ;
+		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		bp->b_cylinder = 0;
 		(*bdsw->d_strategy)(bp);
 		if ((error = biowait(bp))) {
@@ -174,7 +181,9 @@ dkcsumattach(void)
 		 */
 
 		/* B_TYPE dependent hd unit counting bootblocks */
-		if ((B_TYPE(bootdev) == B_TYPE(hit->bsd_dev)) &&
+		if ((B_ADAPTOR(bootdev) == B_ADAPTOR(hit->bsd_dev)) &&
+		    (B_CONTROLLER(bootdev) == B_CONTROLLER(hit->bsd_dev)) &&
+		    (B_TYPE(bootdev) == B_TYPE(hit->bsd_dev)) &&
 		    (B_UNIT(bootdev) == B_UNIT(hit->bsd_dev))) {
 			int type, ctrl, adap, part, unit;
 

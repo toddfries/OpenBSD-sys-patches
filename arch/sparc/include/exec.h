@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: exec.h,v 1.10 2004/07/06 21:05:36 deraadt Exp $	*/
+=======
+/*	$OpenBSD: exec.h,v 1.13 2010/07/02 19:57:15 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: exec.h,v 1.7 1994/11/20 20:53:02 deraadt Exp $ */
 
 /*
@@ -105,6 +109,12 @@ struct relocation_info_sparc {
 #define R_SPARC_7		43
 #define R_SPARC_5		44
 #define R_SPARC_6		45
+#define R_SPARC_TLS_DTPMOD32	74
+#define R_SPARC_TLS_DTPMOD64	75
+#define R_SPARC_TLS_DTPOFF32	76
+#define R_SPARC_TLS_DTPOFF64	77
+#define R_SPARC_TLS_TPOFF32	78
+#define R_SPARC_TLS_TPOFF64	79
 
 #define R_TYPE(name)		__CONCAT(R_SPARC_,name)
 #endif
@@ -120,9 +130,9 @@ struct relocation_info_sparc {
 #define	_NLIST_DO_AOUT
 #define	_NLIST_DO_ELF
 
-#ifdef COMPAT_SUNOS
-#define _KERN_DO_AOUT
-#endif
+#define cpu_exec_aout_makecmds(p, epp)  (ENOEXEC)
+
+
 #define _KERN_DO_ELF
 
 #endif  /* _SPARC_EXEC_H_ */

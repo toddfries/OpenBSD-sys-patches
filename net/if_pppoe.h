@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: $ */
+=======
+/*	$OpenBSD: if_pppoe.h,v 1.5 2008/08/28 13:10:54 brad Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_pppoe.h,v 1.5 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -73,8 +70,8 @@ struct pppoeconnectionstate {
 
 #ifdef _KERNEL
 
-extern struct ifqueue ppoediscinq;
-extern struct ifqueue ppoeinq;
+extern struct ifqueue pppoediscinq;
+extern struct ifqueue pppoeinq;
 
 void pppoeintr(void);
 

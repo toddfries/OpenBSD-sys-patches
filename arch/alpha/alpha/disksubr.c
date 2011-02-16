@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.66 2007/02/18 13:49:22 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.94 2009/08/13 15:23:08 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -123,64 +123,51 @@ readbsdlabel(bp, strat, cyl, sec, off, lp, spoofonly)
  *
  * Returns null on success and an error string on failure.
  */
-char *
-readdisklabel(dev, strat, lp, osdep, spoofonly)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int spoofonly;
+int
+readdisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, int spoofonly)
 {
 	struct buf *bp = NULL;
-	char *msg = "no disk label";
-	int i;
-	struct disklabel minilabel, fallbacklabel;
+	int error;
 
-	/* minimal requirements for archetypal disk label */
-	if (lp->d_secsize < DEV_BSIZE)
-		lp->d_secsize = DEV_BSIZE;
-	if (lp->d_secperunit == 0)
-		lp->d_secperunit = 0x1fffffff;
-	if (lp->d_secpercyl == 0)
-		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
-	for (i = 0; i < RAW_PART; i++) {
-		lp->d_partitions[i].p_size = 0;
-		lp->d_partitions[i].p_offset = 0;
-	}
-	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = lp->d_secperunit;
-	lp->d_partitions[i].p_offset = 0;
-	minilabel = fallbacklabel = *lp;
+	if ((error = initdisklabel(lp)))
+		goto done;
 
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	msg = readbsdlabel(bp, strat, 0, ALPHA_LABELSECTOR, ALPHA_LABELOFFSET,
-	    lp, spoofonly);
-	if (msg)
-		*lp = minilabel;
-	if (msg) {
-		msg = readdoslabel(bp, strat, lp, osdep, 0, 0, spoofonly);
-		if (msg) {
-			/* Fallback alternative */
-			fallbacklabel = *lp;
-			*lp = minilabel;
-		}
-	}
-	/* Record metainformation about the disklabel.  */
-	if (msg == NULL) {
-		osdep->labelsector = bp->b_blkno;
+	if (spoofonly)
+		goto doslabel;
+
+	bp->b_blkno = LABELSECTOR;
+	bp->b_bcount = lp->d_secsize;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	(*strat)(bp);
+	if (biowait(bp)) {
+		error = bp->b_error;
+		goto done;
 	}
 
+	error = checkdisklabel(bp->b_data + LABELOFFSET, lp, 0,
+	    DL_GETDSIZE(lp));
+	if (error == 0)
+		goto done;
+
+doslabel:
+	error = readdoslabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
+		goto done;
+
 #if defined(CD9660)
-	if (msg && iso_disklabelspoof(dev, strat, lp) == 0)
-		msg = NULL;
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 #if defined(UDF)
-	if (msg && udf_disklabelspoof(dev, strat, lp) == 0)
-		msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 
 	/* If there was an error, still provide a decent fake one.  */
@@ -191,7 +178,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
-	return (msg);
+	return (error);
 }
 
 /*
@@ -480,6 +467,7 @@ writedisklabel(dev, strat, lp, osdep)
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
+<<<<<<< HEAD
 	/*
 	 * I once played with the thought of using osdep->label{tag,sector}
 	 * as a cache for knowing where (and what) to write.  However, now I
@@ -507,6 +495,14 @@ writedisklabel(dev, strat, lp, osdep)
 		bp->b_cylinder = cyl;
 		bp->b_bcount = lp->d_secsize;
 	}
+=======
+	bp->b_blkno = LABELSECTOR;
+	bp->b_bcount = lp->d_secsize;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	(*strat)(bp);
+	if ((error = biowait(bp)) != 0)
+		goto done;
+>>>>>>> origin/master
 
 	*(struct disklabel *)(bp->b_data + labeloffset) = *lp;
 
@@ -517,7 +513,7 @@ writedisklabel(dev, strat, lp, osdep)
 		*p = csum;
 	}
 
-	bp->b_flags = B_BUSY | B_WRITE;
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
 	(*strat)(bp);
 	error = biowait(bp);
 

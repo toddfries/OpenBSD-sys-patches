@@ -1,4 +1,4 @@
-/*	$OpenBSD: mc.c,v 1.16 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: mc.c,v 1.19 2010/06/26 23:24:43 guenther Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -32,7 +32,6 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/systm.h>
@@ -105,9 +104,12 @@ mc_scan(parent, child, args)
 {
 	struct cfdata *cf = child;
 	struct mcsoftc *sc = (struct mcsoftc *)parent;
+	struct confargs *ca = args;
 	struct confargs oca;
 
 	bzero(&oca, sizeof oca);
+	oca.ca_iot = ca->ca_iot;
+	oca.ca_dmat =  ca->ca_dmat;
 	oca.ca_offset = cf->cf_loc[0];
 	oca.ca_ipl = cf->cf_loc[1];
 	if (oca.ca_offset != -1 && ISIIOVA(sc->sc_vaddr + oca.ca_offset)) {

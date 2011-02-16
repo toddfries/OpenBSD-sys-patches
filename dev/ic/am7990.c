@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: am7990.c,v 1.40 2006/03/25 22:41:42 djm Exp $	*/
+=======
+/*	$OpenBSD: am7990.c,v 1.44 2009/08/10 20:29:54 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-
@@ -77,8 +81,6 @@ integrate void am7990_tint(struct am7990_softc *);
 integrate int am7990_put(struct am7990_softc *, int, struct mbuf *);
 integrate struct mbuf *am7990_get(struct am7990_softc *, int, int);
 integrate void am7990_read(struct am7990_softc *, int, int); 
-
-hide void am7990_shutdown(void *);
 
 #define	ifp	(&sc->sc_arpcom.ac_if)
 
@@ -187,10 +189,6 @@ am7990_config(sc)
 	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 	printf("%s: %d receive buffers, %d transmit buffers\n",
 	    sc->sc_dev.dv_xname, sc->sc_nrbuf, sc->sc_ntbuf);
-
-	sc->sc_sh = shutdownhook_establish(am7990_shutdown, sc);
-	if (sc->sc_sh == NULL)
-		panic("am7990_config: can't establish shutdownhook");
 
 	mem = 0;
 	sc->sc_initaddr = mem;
@@ -843,13 +841,7 @@ am7990_ioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -898,23 +890,6 @@ am7990_ioctl(ifp, cmd, data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				am7990_reset(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		if (sc->sc_hasifmedia)
@@ -924,20 +899,17 @@ am7990_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			am7990_reset(sc);
+		error = 0;
 	}
 
 	splx(s);
 	return (error);
-}
-
-hide void
-am7990_shutdown(arg)
-	void *arg;
-{
-
-	am7990_stop((struct am7990_softc *)arg);
 }
 
 #ifdef LEDEBUG

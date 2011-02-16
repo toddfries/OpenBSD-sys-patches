@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_rtw_cardbus.c,v 1.10 2006/06/21 11:27:03 fkr Exp $	*/
+=======
+/*	$OpenBSD: if_rtw_cardbus.c,v 1.19 2010/09/06 19:20:21 deraadt Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: if_rtw_cardbus.c,v 1.4 2004/12/20 21:05:34 dyoung Exp $ */
 
 /*-
@@ -47,13 +51,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -130,7 +127,8 @@ struct rtw_cardbus_softc {
 	/* CardBus-specific goo. */
 	void			*sc_ih;		/* interrupt handle */
 	cardbus_devfunc_t	sc_ct;		/* our CardBus devfuncs */
-	cardbustag_t		sc_tag;		/* our CardBus tag */
+	pcitag_t		sc_tag;		/* our CardBus tag */
+	pci_chipset_tag_t	sc_pc;		/* PCI chipset */
 	int			sc_csr;		/* CSR bits */
 	bus_size_t		sc_mapsize;	/* size of the mapped bus space
 						 * region
@@ -160,11 +158,20 @@ int rtw_cardbus_enable(struct rtw_softc *);
 void rtw_cardbus_disable(struct rtw_softc *);
 void rtw_cardbus_power(struct rtw_softc *, int);
 
+<<<<<<< HEAD
 const struct cardbus_matchid rtw_cardbus_devices[] = {
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
+=======
+const struct pci_matchid rtw_cardbus_devices[] = {
+	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
+#ifdef RTW_DEBUG
+	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D7010 },
+#endif
+>>>>>>> origin/master
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6020V3 },
-	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
+	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 }
 };
 
 int
@@ -209,6 +216,7 @@ rtw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
+	csc->sc_pc = ca->ca_pc;
 
 	/*
 	 * Power management hooks.
@@ -225,32 +233,32 @@ rtw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	RTW_DPRINTF(RTW_DEBUG_ATTACH,
 	    ("%s: pass %d.%d signature %08x\n", sc->sc_dev.dv_xname,
 	     (rev >> 4) & 0xf, rev & 0xf,
-	     cardbus_conf_read(ct->ct_cc, ct->ct_cf, csc->sc_tag, 0x80)));
+	     pci_conf_read(ca->ca_pc, csc->sc_tag, 0x80)));
 
 	/*
 	 * Map the device.
 	 */
-	csc->sc_csr = CARDBUS_COMMAND_MASTER_ENABLE;
+	csc->sc_csr = PCI_COMMAND_MASTER_ENABLE;
 	if (Cardbus_mapreg_map(ct, RTW_PCI_MMBA,
-	    CARDBUS_MAPREG_TYPE_MEM, 0, &regs->r_bt, &regs->r_bh, &adr,
+	    PCI_MAPREG_TYPE_MEM, 0, &regs->r_bt, &regs->r_bh, &adr,
 	    &csc->sc_mapsize) == 0) {
 		RTW_DPRINTF(RTW_DEBUG_ATTACH,
 		    ("%s: %s mapped %lu bytes mem space\n",
 		     sc->sc_dev.dv_xname, __func__, (long)csc->sc_mapsize));
 		csc->sc_cben = CARDBUS_MEM_ENABLE;
-		csc->sc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
+		csc->sc_csr |= PCI_COMMAND_MEM_ENABLE;
 		csc->sc_bar_reg = RTW_PCI_MMBA;
-		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_MEM;
+		csc->sc_bar_val = adr | PCI_MAPREG_TYPE_MEM;
 	} else if (Cardbus_mapreg_map(ct, RTW_PCI_IOBA,
-	    CARDBUS_MAPREG_TYPE_IO, 0, &regs->r_bt, &regs->r_bh, &adr,
+	    PCI_MAPREG_TYPE_IO, 0, &regs->r_bt, &regs->r_bh, &adr,
 	    &csc->sc_mapsize) == 0) {
 		RTW_DPRINTF(RTW_DEBUG_ATTACH,
 		    ("%s: %s mapped %lu bytes I/O space\n",
 		     sc->sc_dev.dv_xname, __func__, (long)csc->sc_mapsize));
 		csc->sc_cben = CARDBUS_IO_ENABLE;
-		csc->sc_csr |= CARDBUS_COMMAND_IO_ENABLE;
+		csc->sc_csr |= PCI_COMMAND_IO_ENABLE;
 		csc->sc_bar_reg = RTW_PCI_IOBA;
-		csc->sc_bar_val = adr | CARDBUS_MAPREG_TYPE_IO;
+		csc->sc_bar_val = adr | PCI_MAPREG_TYPE_IO;
 	} else {
 		printf("%s: unable to map device registers\n",
 		    sc->sc_dev.dv_xname);
@@ -385,7 +393,7 @@ rtw_cardbus_power(struct rtw_softc *sc, int why)
 	RTW_DPRINTF(RTW_DEBUG_ATTACH,
 	    ("%s: rtw_cardbus_power\n", sc->sc_dev.dv_xname));
 
-	if (why == PWR_RESUME)
+	if (why == DVACT_RESUME)
 		rtw_enable(sc);
 }
 
@@ -395,13 +403,13 @@ rtw_cardbus_setup(struct rtw_cardbus_softc *csc)
 	struct rtw_softc *sc = &csc->sc_rtw;
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
-	cardbus_function_tag_t cf = ct->ct_cf;
+	pci_chipset_tag_t pc = csc->sc_pc;
 	pcireg_t reg;
 	int pmreg;
 
-	if (cardbus_get_capability(cc, cf, csc->sc_tag,
+	if (pci_get_capability(pc, csc->sc_tag,
 	    PCI_CAP_PWRMGMT, &pmreg, 0)) {
-		reg = cardbus_conf_read(cc, cf, csc->sc_tag, pmreg + 4) & 0x03;
+		reg = pci_conf_read(pc, csc->sc_tag, pmreg + 4) & 0x03;
 #if 1 /* XXX Probably not right for CardBus. */
 		if (reg == 3) {
 			/*
@@ -416,13 +424,13 @@ rtw_cardbus_setup(struct rtw_cardbus_softc *csc)
 		if (reg != 0) {
 			printf("%s: waking up from power state D%d\n",
 			    sc->sc_dev.dv_xname, reg);
-			cardbus_conf_write(cc, cf, csc->sc_tag,
+			pci_conf_write(pc, csc->sc_tag,
 			    pmreg + 4, 0);
 		}
 	}
 
 	/* Program the BAR. */
-	cardbus_conf_write(cc, cf, csc->sc_tag, csc->sc_bar_reg,
+	pci_conf_write(pc, csc->sc_tag, csc->sc_bar_reg,
 	    csc->sc_bar_val);
 
 	/* Make sure the right access type is on the CardBus bridge. */
@@ -430,21 +438,21 @@ rtw_cardbus_setup(struct rtw_cardbus_softc *csc)
 	(*ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the appropriate bits in the PCI CSR. */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag,
-	    CARDBUS_COMMAND_STATUS_REG);
-	reg &= ~(CARDBUS_COMMAND_IO_ENABLE|CARDBUS_COMMAND_MEM_ENABLE);
+	reg = pci_conf_read(pc, csc->sc_tag,
+	    PCI_COMMAND_STATUS_REG);
+	reg &= ~(PCI_COMMAND_IO_ENABLE|PCI_COMMAND_MEM_ENABLE);
 	reg |= csc->sc_csr;
-	cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_COMMAND_STATUS_REG,
+	pci_conf_write(pc, csc->sc_tag, PCI_COMMAND_STATUS_REG,
 	    reg);
 
 	/*
 	 * Make sure the latency timer is set to some reasonable
 	 * value.
 	 */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG);
-	if (CARDBUS_LATTIMER(reg) < 0x20) {
-		reg &= ~(CARDBUS_LATTIMER_MASK << CARDBUS_LATTIMER_SHIFT);
-		reg |= (0x20 << CARDBUS_LATTIMER_SHIFT);
-		cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_BHLC_REG, reg);
+	reg = pci_conf_read(pc, csc->sc_tag, PCI_BHLC_REG);
+	if (PCI_LATTIMER(reg) < 0x20) {
+		reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+		reg |= (0x20 << PCI_LATTIMER_SHIFT);
+		pci_conf_write(pc, csc->sc_tag, PCI_BHLC_REG, reg);
 	}
 }

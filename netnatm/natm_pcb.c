@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: natm_pcb.c,v 1.6 2006/03/04 22:40:16 brad Exp $	*/
+=======
+/*	$OpenBSD: natm_pcb.c,v 1.10 2009/01/28 15:12:03 claudio Exp $	*/
+>>>>>>> origin/master
 
 /*
  *
@@ -53,6 +57,8 @@
 #include <netinet/in.h>
 
 #include <netnatm/natm.h>
+
+struct npcblist	natm_pcbs;
 
 /*
  * npcb_alloc: allocate a npcb [in the free state]

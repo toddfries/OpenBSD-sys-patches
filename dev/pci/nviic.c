@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nviic.c,v 1.8 2006/11/06 04:00:15 brad Exp $ */
+=======
+/*	$OpenBSD: nviic.c,v 1.15 2010/04/08 00:23:53 tedu Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -20,8 +24,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -123,7 +131,14 @@ const struct pci_matchid nviic_ids[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP55_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_SMB },
+<<<<<<< HEAD
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_SMB }
+=======
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_SMB },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_SMB },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_SMB },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_SMB }
+>>>>>>> origin/master
 };
 
 int

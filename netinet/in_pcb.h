@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in_pcb.h,v 1.58 2006/12/09 01:12:28 itojun Exp $	*/
+=======
+/*	$OpenBSD: in_pcb.h,v 1.70 2010/09/23 04:45:15 yasuoka Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -145,6 +149,9 @@ struct inpcb {
 #define inp_csumoffset	in6p_cksum
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
+	void	*inp_pf_sk;
+	u_int	inp_rtableid;
+	int	inp_pipex;		/* pipex indication */
 };
 
 struct inpcbtable {
@@ -219,14 +226,17 @@ struct inpcbtable {
 
 /* macros for handling bitmap of ports not to allocate dynamically */
 #define	DP_MAPBITS	(sizeof(u_int32_t) * NBBY)
-#define	DP_MAPSIZE	(howmany(IPPORT_RESERVED/2, DP_MAPBITS))
-#define	DP_SET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] |= (1 << ((p) % DP_MAPBITS)))
-#define	DP_CLR(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] &= ~(1 << ((p) % DP_MAPBITS)))
-#define	DP_ISSET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
+#define	DP_MAPSIZE	(howmany(65536, DP_MAPBITS))
+#define	DP_SET(m, p)	((m)[(p) / DP_MAPBITS] |= (1 << ((p) % DP_MAPBITS)))
+#define	DP_CLR(m, p)	((m)[(p) / DP_MAPBITS] &= ~(1 << ((p) % DP_MAPBITS)))
+#define	DP_ISSET(m, p)	((m)[(p) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
 
 /* default values for baddynamicports [see ip_init()] */
-#define	DEFBADDYNAMICPORTS_TCP	{ 587, 749, 750, 751, 871, 0 }
-#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 0 }
+#define	DEFBADDYNAMICPORTS_TCP	{ \
+	587, 749, 750, 751, 871, 2049, \
+	6000, 6001, 6002, 6003, 6004, 6005, 6006, 6007, 6008, 6009, 6010, \
+	0 }
+#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 2049, 0 }
 
 struct baddynamicports {
 	u_int32_t tcp[DP_MAPSIZE];
@@ -245,9 +255,14 @@ void	 in_pcbdetach(void *);
 void	 in_pcbdisconnect(void *);
 struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
-			       u_int, struct in_addr, u_int);
+			       u_int, struct in_addr, u_int, u_int);
 struct inpcb *
+<<<<<<< HEAD
 	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int);
+=======
+	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int,
+	    struct mbuf *, u_int);
+>>>>>>> origin/master
 #ifdef INET6
 struct inpcb *
 	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
@@ -263,16 +278,16 @@ int	 in6_setpeeraddr(struct inpcb *, struct mbuf *);
 void	 in_pcbinit(struct inpcbtable *, int);
 struct inpcb *
 	 in_pcblookup(struct inpcbtable *, void *, u_int, void *,
-	    u_int, int);
+	    u_int, int, u_int);
 void	 in_pcbnotifyall(struct inpcbtable *, struct sockaddr *,
-	    int, void (*)(struct inpcb *, int));
+	    u_int, int, void (*)(struct inpcb *, int));
 void	 in_pcbrehash(struct inpcb *);
 void	 in_rtchange(struct inpcb *, int);
 void	 in_setpeeraddr(struct inpcb *, struct mbuf *);
 void	 in_setsockaddr(struct inpcb *, struct mbuf *);
 int	 in_baddynamic(u_int16_t, u_int16_t);
 extern struct sockaddr_in *in_selectsrc(struct sockaddr_in *,
-	struct route *, int, struct ip_moptions *, int *);
+	struct route *, int, struct ip_moptions *, int *, u_int);
 struct rtentry *
 	in_pcbrtentry(struct inpcb *);
 

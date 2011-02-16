@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.5 2004/09/09 22:11:38 pefo Exp $	*/
+/*	$OpenBSD: mem.c,v 1.16 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: mem.c,v 1.6 1995/04/10 11:55:03 mycroft Exp $	*/
 
 /*
@@ -49,7 +49,6 @@
 #include <sys/conf.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/msgbuf.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
@@ -58,13 +57,12 @@
 #include <machine/autoconf.h>
 #include <machine/pte.h>
 #include <machine/cpu.h>
+#include <machine/memconf.h>
 
 #include <uvm/uvm_extern.h>
 
-#ifdef APERTURE
-static int ap_open_count = 0;
-extern int allowaperture;
-#endif
+boolean_t is_memory_range(paddr_t, psize_t, psize_t);
+
 caddr_t zeropage;
 
 #define mmread  mmrw
@@ -142,9 +140,27 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 		case 1:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			if ((v > KSEG0_BASE && v + c <= KSEG0_BASE + ctob(physmem)) ||
-			    uvm_kernacc((caddr_t)v, c,
-			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE)) {
+
+			/* Allow access to RAM through XKPHYS... */
+			if (IS_XKPHYS(v))
+				allowed = is_memory_range(XKPHYS_TO_PHYS(v),
+				    (psize_t)c, 0);
+			/* ...or through CKSEG0... */
+			else if (v >= CKSEG0_BASE &&
+			    v < CKSEG0_BASE + CKSEG_SIZE)
+				allowed = is_memory_range(CKSEG0_TO_PHYS(v),
+				    (psize_t)c, CKSEG_SIZE);
+			/* ...or through CKSEG1... */
+			else if (v >= CKSEG1_BASE &&
+			    v < CKSEG1_BASE + CKSEG_SIZE)
+				allowed = is_memory_range(CKSEG1_TO_PHYS(v),
+				    (psize_t)c, CKSEG_SIZE);
+			/* ...otherwise, check it's within kernel kvm limits. */
+			else
+				allowed = uvm_kernacc((caddr_t)v, c,
+				    uio->uio_rw == UIO_READ ? B_READ : B_WRITE);
+
+			if (allowed) {
 				error = uiomove((caddr_t)v, c, uio);
 				continue;
 			} else {

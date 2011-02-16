@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cdefs.h,v 1.23 2006/04/17 16:36:43 cloder Exp $	*/
+=======
+/*	$OpenBSD: cdefs.h,v 1.31 2010/10/01 04:51:49 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -116,7 +120,7 @@
  * the distribution version of 2.5.5).
  */
 
-#if !__GNUC_PREREQ__(2, 5)
+#if !__GNUC_PREREQ__(2, 5) && !defined(__PCC__)
 #define	__attribute__(x)	/* delete __attribute__ if non-gcc or gcc1 */
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 #define	__dead		__volatile
@@ -127,6 +131,47 @@
 #elif !defined(__STRICT_ANSI__)
 #define __dead		__attribute__((__noreturn__))
 #define __pure		__attribute__((__const__))
+#endif
+
+#if __GNUC_PREREQ__(2, 7)
+#define	__unused	__attribute__((__unused__))
+#else
+#define	__unused	/* delete */
+#endif
+
+#if __GNUC_PREREQ__(3, 1)
+#define	__used		__attribute__((__used__))
+#else
+#define	__used		__unused	/* suppress -Wunused warnings */
+#endif
+
+/*
+ * __returns_twice makes the compiler not assume the function
+ * only returns once.  This affects registerisation of variables:
+ * even local variables need to be in memory across such a call.
+ * Example: setjmp()
+ */
+#if __GNUC_PREREQ__(4, 1)
+#define __returns_twice	__attribute__((returns_twice))
+#else
+#define __returns_twice
+#endif
+
+/*
+ * __only_inline makes the compiler only use this function definition
+ * for inlining; references that can't be inlined will be left as
+ * external references instead of generating a local copy.  The
+ * matching library should include a simple extern definition for
+ * the function to handle those references.  c.f. ctype.h
+ */
+#ifdef __GNUC__
+#  if __GNUC_PREREQ__(4, 2)
+#define __only_inline	extern __inline __attribute__((__gnu_inline__))
+#  else
+#define __only_inline	extern __inline
+#  endif
+#else
+#define __only_inline	static __inline
 #endif
 
 /*
@@ -171,7 +216,7 @@
 #define	__pure
 #endif
 
-#if __GNUC_PREREQ__(2, 7)
+#if __GNUC_PREREQ__(2, 7) || defined(__PCC__)
 #define	__packed	__attribute__((__packed__))
 #elif defined(lint)
 #define	__packed
@@ -181,7 +226,7 @@
 #define	__extension__
 #endif
 
-#if __GNUC_PREREQ__(2, 8)
+#if __GNUC_PREREQ__(2, 8) || defined(__PCC__)
 #define __statement(x)	__extension__(x)
 #elif defined(lint)
 #define __statement(x)	(0)
@@ -223,11 +268,16 @@
  * _XOPEN_SOURCE == 500				XPG5
  * _XOPEN_SOURCE == 520				XPG5v2
  * _XOPEN_SOURCE == 600				POSIX 1003.1-2001 with XSI
+ * _XOPEN_SOURCE == 700				POSIX 1003.1-2008 with XSI
  *
  * The XPG spec implies a specific value for _POSIX_C_SOURCE.
  */
 #ifdef _XOPEN_SOURCE
-# if (_XOPEN_SOURCE - 0 >= 600)
+# if (_XOPEN_SOURCE - 0 >= 700)
+#  define __XPG_VISIBLE		700
+#  undef _POSIX_C_SOURCE
+#  define _POSIX_C_SOURCE	200809L
+# elif (_XOPEN_SOURCE - 0 >= 600)
 #  define __XPG_VISIBLE		600
 #  undef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE	200112L
@@ -258,12 +308,16 @@
  * _POSIX_C_SOURCE == 199506L   1003.1c-1995, 1003.1i-1995,
  *				and the omnibus ISO/IEC 9945-1:1996
  * _POSIX_C_SOURCE == 200112L   1003.1-2001
+ * _POSIX_C_SOURCE == 200809L   1003.1-2008
  *
  * The POSIX spec implies a specific value for __ISO_C_VISIBLE, though
  * this may be overridden by the _ISOC99_SOURCE macro later.
  */
 #ifdef _POSIX_C_SOURCE
-# if (_POSIX_C_SOURCE - 0 >= 200112)
+# if (_POSIX_C_SOURCE - 0 >= 200809)
+#  define __POSIX_VISIBLE	200809
+#  define __ISO_C_VISIBLE	1999
+# elif (_POSIX_C_SOURCE - 0 >= 200112)
 #  define __POSIX_VISIBLE	200112
 #  define __ISO_C_VISIBLE	1999
 # elif (_POSIX_C_SOURCE - 0 >= 199506)
@@ -307,7 +361,7 @@
 
 /*
  * Finally deal with BSD-specific interfaces that are not covered
- * by any standards.  We expose these when one of the POSIX or XPG
+ * by any standards.  We expose these when none of the POSIX or XPG
  * macros is defined or if the user explicitly asks for them.
  */
 #if !defined(_BSD_SOURCE) && \
@@ -319,10 +373,10 @@
  * Default values.
  */
 #ifndef __XPG_VISIBLE
-# define __XPG_VISIBLE		600
+# define __XPG_VISIBLE		700
 #endif
 #ifndef __POSIX_VISIBLE
-# define __POSIX_VISIBLE	200112
+# define __POSIX_VISIBLE	200809
 #endif
 #ifndef __ISO_C_VISIBLE
 # define __ISO_C_VISIBLE	1999

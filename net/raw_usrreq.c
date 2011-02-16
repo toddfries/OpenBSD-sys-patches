@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: raw_usrreq.c,v 1.9 2003/12/10 07:22:42 itojun Exp $	*/
+=======
+/*	$OpenBSD: raw_usrreq.c,v 1.12 2009/11/13 20:54:05 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
 
 /*
@@ -133,9 +137,10 @@ raw_input(struct mbuf *m0, ...)
 
 /*ARGSUSED*/
 void *
-raw_ctlinput(cmd, arg, d)
+raw_ctlinput(cmd, arg, rdomain, d)
 	int cmd;
 	struct sockaddr *arg;
+	u_int rdomain;
 	void *d;
 {
 

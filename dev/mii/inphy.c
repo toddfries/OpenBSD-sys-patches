@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: inphy.c,v 1.13 2005/02/19 06:00:04 brad Exp $	*/
+=======
+/*	$OpenBSD: inphy.c,v 1.18 2010/07/23 07:47:13 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: inphy.c,v 1.18 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,11 +46,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -259,10 +251,10 @@ inphy_status(sc)
 		}
 
 		scr = PHY_READ(sc, MII_INPHY_SCR);
-		if ((bmsr & BMSR_100T4) && (scr & SCR_T4))
-			mii->mii_media_active |= IFM_100_T4;
-		else if (scr & SCR_S100)
+		if (scr & SCR_S100)
 			mii->mii_media_active |= IFM_100_TX;
+		else if ((bmsr & BMSR_100T4) && (scr & SCR_T4))
+			mii->mii_media_active |= IFM_100_T4;
 		else
 			mii->mii_media_active |= IFM_10_T;
 

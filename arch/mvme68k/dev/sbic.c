@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.16 2004/12/25 23:02:24 miod Exp $ */
+/*	$OpenBSD: sbic.c,v 1.29 2010/11/18 21:13:19 miod Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 #include <sys/device.h>
 #include <sys/kernel.h> /* For hz */
 #include <sys/disklabel.h>
-#include <sys/dkstat.h>
 #include <sys/buf.h>
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -149,21 +148,6 @@ void    sbictimeout(struct sbic_softc *dev);
 #else
 #define QPRINTF(a)  /* */
 #endif
-
-
-/*
- * default minphys routine for sbic based controllers
- */
-void
-sbic_minphys(bp)
-    struct buf *bp;
-{
-    /*
-     * No max transfer at this level.
-     */
-    minphys(bp);
-}
-
 
 /*
  * Save DMA pointers.  Take into account partial transfer. Shut down DMA.
@@ -353,7 +337,7 @@ sbic_load_ptrs(dev)
  * so I will too.  I could plug it in, however so could they
  * in scsi_scsi_cmd().
  */
-int
+void
 sbic_scsicmd(xs)
     struct scsi_xfer *xs;
 {
@@ -363,14 +347,8 @@ sbic_scsicmd(xs)
     int                 flags = xs->flags,
                         s;
 
-    if ( flags & SCSI_DATA_UIO )
-        panic("sbic: scsi data uio requested");
-
     if ( dev->sc_nexus && (flags & SCSI_POLL) )
         panic("sbic_scsicmd: busy");
-
-    if ( slp->target == slp->adapter_target )
-        return ESCAPE_NOT_SUPPORTED;
 
     s = splbio();
 
@@ -387,7 +365,9 @@ sbic_scsicmd(xs)
         Debugger();
 #endif
 #endif
-        return(TRY_AGAIN_LATER);
+	xs->error = XS_NO_CCB;
+	scsi_done(xs);
+        return;
     }
 
     if ( flags & SCSI_DATA_IN )
@@ -439,7 +419,7 @@ sbic_scsicmd(xs)
 
         splx(s);
 
-        return(COMPLETE);
+        return;
     }
 
     s = splbio();
@@ -452,8 +432,6 @@ sbic_scsicmd(xs)
         sbic_sched(dev);
 
     splx(s);
-
-    return(SUCCESSFULLY_QUEUED);
 }
 
 /*
@@ -615,15 +593,12 @@ sbic_scsidone(acb, stat)
 
 #ifdef DEBUG
         if (report_sense)
-            printf(" => %02x %02x\n", xs->sense.flags, 
-			xs->sense.extra_bytes[3]);
+            printf(" => %02x\n", xs->sense.flags);
 #endif
 
     } else {
         xs->resid = 0;      /* XXXX */
     }
-
-    xs->flags |= ITSDONE;
 
     /*
      * Remove the ACB from whatever queue it's on.  We have to do a bit of

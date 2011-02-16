@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: mfivar.h,v 1.29 2006/12/23 17:46:39 deraadt Exp $ */
+=======
+/* $OpenBSD: mfivar.h,v 1.40 2010/12/30 08:53:50 dlg Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -14,8 +18,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <sys/sensors.h>
 
 #define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
 
@@ -59,6 +61,7 @@ struct mfi_ccb {
 
 	union mfi_frame		*ccb_frame;
 	paddr_t			ccb_pframe;
+	bus_addr_t		ccb_pframe_offset;
 	uint32_t		ccb_frame_size;
 	uint32_t		ccb_extra_frames;
 
@@ -78,8 +81,7 @@ struct mfi_ccb {
 #define MFI_DATA_IN	1
 #define MFI_DATA_OUT	2
 
-	struct scsi_xfer	*ccb_xs;
-
+	void			*ccb_cookie;
 	void			(*ccb_done)(struct mfi_ccb *);
 
 	volatile enum {
@@ -89,24 +91,38 @@ struct mfi_ccb {
 	}			ccb_state;
 	uint32_t		ccb_flags;
 #define MFI_CCB_F_ERR			(1<<0)
-	TAILQ_ENTRY(mfi_ccb)	ccb_link;
+	SLIST_ENTRY(mfi_ccb)	ccb_link;
 };
 
-TAILQ_HEAD(mfi_ccb_list, mfi_ccb);
+SLIST_HEAD(mfi_ccb_list, mfi_ccb);
 
+<<<<<<< HEAD
+=======
+enum mfi_iop {
+	MFI_IOP_XSCALE,
+	MFI_IOP_PPC,
+	MFI_IOP_GEN2
+};
+
+struct mfi_iop_ops {
+	u_int32_t	(*mio_fw_state)(struct mfi_softc *);
+	void		(*mio_intr_ena)(struct mfi_softc *);
+	int		(*mio_intr)(struct mfi_softc *);
+	void		(*mio_post)(struct mfi_softc *, struct mfi_ccb *);
+};
+
+>>>>>>> origin/master
 struct mfi_softc {
 	struct device		sc_dev;
 	void			*sc_ih;
 	struct scsi_link	sc_link;
+	struct scsi_iopool	sc_iopool;
 
 	u_int32_t		sc_flags;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 	bus_dma_tag_t		sc_dmat;
-
-	/* mgmt lock */
-	struct rwlock		sc_lock;
 
 	/* save some useful information for logical drives that is missing
 	 * in sc_ld_list
@@ -124,10 +140,14 @@ struct mfi_softc {
 	uint32_t		sc_max_sgl;
 	uint32_t		sc_max_ld;
 	uint32_t		sc_ld_cnt;
-	/* XXX these struct should be local to mgmt function */
+
+	/* bio */
+	struct mfi_conf		*sc_cfg;
 	struct mfi_ctrl_info	sc_info;
 	struct mfi_ld_list	sc_ld_list;
-	struct mfi_ld_details	sc_ld_details;
+	struct mfi_ld_details	*sc_ld_details; /* array to all logical disks */
+	int			sc_no_pd; /* used physical disks */
+	int			sc_ld_sz; /* sizeof sc_ld_details */
 
 	/* all commands */
 	struct mfi_ccb		*sc_ccb;
@@ -143,7 +163,12 @@ struct mfi_softc {
 	struct mfi_mem		*sc_sense;
 
 	struct mfi_ccb_list	sc_ccb_freeq;
+	struct mutex		sc_ccb_mtx;
 
+	/* mgmt lock */
+	struct rwlock		sc_lock;
+
+	/* sensors */
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 };

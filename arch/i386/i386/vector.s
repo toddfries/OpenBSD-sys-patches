@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.s,v 1.9 2007/02/09 19:49:47 tom Exp $	*/
+/*	$OpenBSD: vector.s,v 1.14 2009/08/10 16:40:50 oga Exp $	*/
 /*	$NetBSD: vector.s,v 1.32 1996/01/07 21:29:47 mycroft Exp $	*/
 
 /*
@@ -86,11 +86,11 @@
  * On exit, we jump to Xdoreti(), to process soft interrupts and ASTs.
  */
 #define	INTRSTUB(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-IDTVEC(resume_/**/name/**/num)						;\
+IDTVEC(resume_##name##num)						;\
 	push	%ebx							;\
 	cli								;\
 	jmp	1f							;\
-IDTVEC(recurse_/**/name/**/num)						;\
+IDTVEC(recurse_##name##num)						;\
 	pushfl								;\
 	pushl	%cs							;\
 	pushl	%esi							;\
@@ -102,7 +102,7 @@ IDTVEC(recurse_/**/name/**/num)						;\
 	push	%esi							;\
 	cli								;\
 	jmp	1f							;\
-_C_LABEL(Xintr_/**/name/**/num):					;\
+_C_LABEL(Xintr_##name##num):						;\
 	pushl	$0			/* dummy error code */		;\
 	pushl	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
@@ -113,7 +113,7 @@ _C_LABEL(Xintr_/**/name/**/num):					;\
 	movl	_C_LABEL(iminlevel) + (num) * 4, %eax			;\
 	movl	CPL,%ebx						;\
 	cmpl	%eax,%ebx						;\
-	jae	_C_LABEL(Xhold_/**/name/**/num)/* currently masked; hold it */;\
+	jae	_C_LABEL(Xhold_##name##num)/* currently masked; hold it */;\
 	pushl	%ebx			/* cpl to restore on exit */	;\
 1:									;\
 	movl	_C_LABEL(imaxlevel) + (num) * 4,%eax			;\
@@ -121,8 +121,9 @@ _C_LABEL(Xintr_/**/name/**/num):					;\
 	sti				/* safe to take intrs now */	;\
 	movl	_C_LABEL(intrhand) + (num) * 4,%ebx	/* head of chain */ ;\
 	testl	%ebx,%ebx						;\
-	jz	_C_LABEL(Xstray_/**/name/**/num)	/* no handlers; we're stray */	;\
+	jz	_C_LABEL(Xstray_##name##num)	/* no handlers; we're stray */	;\
 	STRAY_INITIALIZE		/* nobody claimed it yet */	;\
+	incl	CPUVAR(IDEPTH)						;\
 	LOCK_KERNEL(IF_PPL(%esp))					;\
 7:	movl	IH_ARG(%ebx),%eax	/* get handler arg */		;\
 	testl	%eax,%eax						;\
@@ -140,17 +141,18 @@ _C_LABEL(Xintr_/**/name/**/num):					;\
 	testl	%ebx,%ebx						;\
 	jnz	7b							;\
 	UNLOCK_KERNEL(IF_PPL(%esp))					;\
+	decl	CPUVAR(IDEPTH)						;\
 	STRAY_TEST(name,num)		/* see if it's a stray */	;\
 6:	unmask(num)			/* unmask it in hardware */	;\
 	late_ack(num)							;\
 	jmp	_C_LABEL(Xdoreti)	/* lower spl and do ASTs */	;\
-IDTVEC(stray_/**/name/**/num)						;\
+IDTVEC(stray_##name##num)						;\
 	pushl	$num							;\
 	call	_C_LABEL(isa_strayintr)					;\
 	addl	$4,%esp							;\
 	jmp	6b							;\
-IDTVEC(hold_/**/name/**/num)						;\
-	orb	$IRQ_BIT(num),_C_LABEL(ipending) + IRQ_BYTE(num)	;\
+IDTVEC(hold_##name##num)						;\
+	orb	$IRQ_BIT(num),CPUVAR(IPENDING) + IRQ_BYTE(num)	;\
 	INTRFASTEXIT
 
 #if defined(DEBUG)
@@ -160,7 +162,7 @@ IDTVEC(hold_/**/name/**/num)						;\
 	orl	%eax,%esi
 #define	STRAY_TEST(name,num) \
 	testl	%esi,%esi						;\
-	jz	_C_LABEL(Xstray_/**/name/**/num)
+	jz	_C_LABEL(Xstray_##name##num)
 #else /* !DEBUG */
 #define	STRAY_INITIALIZE
 #define	STRAY_INTEGRATE

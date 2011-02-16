@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: intr.c,v 1.27 2004/09/29 07:35:14 miod Exp $ */
+=======
+/*	$OpenBSD: intr.c,v 1.37 2010/12/21 14:56:24 claudio Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: intr.c,v 1.20 1997/07/29 09:42:03 fair Exp $ */
 
 /*
@@ -45,14 +49,19 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
+<<<<<<< HEAD
 #include <net/netisr.h>
 #include <net/if.h>
 
+=======
+#include <machine/atomic.h>
+>>>>>>> origin/master
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
@@ -60,22 +69,12 @@
 
 #include <sparc/sparc/cpuvar.h>
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#include <netinet/ip_var.h>
-#endif
+extern void raise(int, int);
 
-#ifdef INET6
-# ifndef INET
-#  include <netinet/in.h>
-# endif
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
-#endif
+void	ih_insert(struct intrhand **, struct intrhand *);
+void	ih_remove(struct intrhand **, struct intrhand *);
 
 void	strayintr(struct clockframe *);
-int	soft01intr(void *);
 
 /*
  * Stray interrupt handler.  Clear it if possible.
@@ -102,6 +101,7 @@ strayintr(fp)
 
 static struct intrhand level10 = { clockintr, NULL, (IPL_CLOCK << 8) };
 static struct intrhand level14 = { statintr, NULL, (IPL_STATCLOCK << 8) };
+<<<<<<< HEAD
 union sir sir;
 int netisr;
 
@@ -140,6 +140,8 @@ soft01intr(fp)
 	}
 	return (1);
 }
+=======
+>>>>>>> origin/master
 
 #if defined(SUN4M)
 void	nmi_hard(void);
@@ -204,20 +206,13 @@ nmi_hard()
 }
 #endif
 
-static struct intrhand level01 = { soft01intr, NULL, (IPL_SOFTINT << 8) };
-
 void
 intr_init()
 {
-	level01.ih_vec = level01.ih_ipl >> 8;
-	evcount_attach(&level01.ih_count, "softintr", &level01.ih_vec,
-	    &evcount_intr);
 	level10.ih_vec = level10.ih_ipl >> 8;
-	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec,
-	    &evcount_intr);
+	evcount_attach(&level10.ih_count, "clock", &level10.ih_vec);
 	level14.ih_vec = level14.ih_ipl >> 8;
-	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec,
-	    &evcount_intr);
+	evcount_attach(&level14.ih_count, "prof", &level14.ih_vec);
 }
 
 /*
@@ -227,9 +222,15 @@ intr_init()
  */
 struct intrhand *intrhand[15] = {
 	NULL,			/*  0 = error */
+<<<<<<< HEAD
 	&level01,		/*  1 = software level 1 + Sbus */
 	NULL,	 		/*  2 = Sbus level 2 (4m: Sbus L1) */
 	NULL,			/*  3 = SCSI + DMA + Sbus level 3 (4m: L2,lpt)*/
+=======
+	NULL,			/*  1 = software level 1 + SBus */
+	NULL,	 		/*  2 = SBus level 2 (4m: SBus L1) */
+	NULL,			/*  3 = SCSI + DMA + SBus level 3 (4m: L2,lpt)*/
+>>>>>>> origin/master
 	NULL,			/*  4 = software level 4 (tty softint) (scsi) */
 	NULL,			/*  5 = Ethernet + Sbus level 4 (4m: Sbus L3) */
 	NULL,			/*  6 = software level 6 (not used) (4m: enet)*/
@@ -242,6 +243,44 @@ struct intrhand *intrhand[15] = {
 	NULL,			/* 13 = audio chip */
 	&level14,		/* 14 = counter 1 = profiling timer */
 };
+
+/*
+ * Soft interrupts use a separate set of handler chains.
+ * This is necessary since soft interrupt handlers do not return a value
+ * and therefore can not be mixed with hardware interrupt handlers on a
+ * shared handler chain.
+ */
+struct intrhand *sintrhand[15];
+
+void
+ih_insert(struct intrhand **head, struct intrhand *ih)
+{
+	struct intrhand **p, *q;
+
+	/*
+	 * This is O(N^2) for long chains, but chains are never long
+	 * and we do want to preserve order.
+	 */
+	for (p = head; (q = *p) != NULL; p = &q->ih_next)
+		continue;
+	*p = ih;
+	ih->ih_next = NULL;
+}
+
+void
+ih_remove(struct intrhand **head, struct intrhand *ih)
+{
+	struct intrhand **p, *q;
+
+	for (p = head; (q = *p) != ih; p = &q->ih_next)
+		continue;
+	if (q == NULL)
+		panic("ih_remove: intrhand %p (fn %p arg %p) not found from %p",
+		    ih, ih->ih_fun, ih->ih_arg, head);
+
+	*p = q->ih_next;
+	q->ih_next = NULL;
+}
 
 static int fastvec;		/* marks fast vectors (see below) */
 static struct {
@@ -265,7 +304,6 @@ intr_establish(level, ih, ipl_block, name)
 	int ipl_block;
 	const char *name;
 {
-	struct intrhand **p, *q;
 #ifdef DIAGNOSTIC
 	struct trapvec *tv;
 	int displ;
@@ -296,7 +334,7 @@ intr_establish(level, ih, ipl_block, name)
 	ih->ih_vec = ipl_block;
 	ih->ih_ipl = (ipl_block << 8);
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, &ih->ih_vec, &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_vec);
 
 	s = splhigh();
 
@@ -308,8 +346,8 @@ intr_establish(level, ih, ipl_block, name)
 	if (fastvec & (1 << level)) {
 		if (fastvec_share[level].cb == NULL ||
 		    (*fastvec_share[level].cb)(fastvec_share[level].data) != 0)
-			panic("intr_establish: level %d interrupt tied to fast vector",
-			    level);
+			panic("intr_establish: level %d interrupt tied to"
+			    " unremovable fast vector", level);
 	}
 
 #ifdef DIAGNOSTIC
@@ -330,14 +368,7 @@ intr_establish(level, ih, ipl_block, name)
 			    I_MOVi(I_L3, level), I_BA(0, displ), I_RDPSR(I_L0));
 	}
 #endif
-	/*
-	 * This is O(N^2) for long chains, but chains are never long
-	 * and we do want to preserve order.
-	 */
-	for (p = &intrhand[level]; (q = *p) != NULL; p = &q->ih_next)
-		continue;
-	*p = ih;
-	ih->ih_next = NULL;
+	ih_insert(&intrhand[level], ih);
 	splx(s);
 }
 
@@ -368,10 +399,12 @@ intr_fasttrap(int level, void (*vec)(void), int (*share)(void *), void *cbdata)
 	s = splhigh();
 
 	/*
-	 * If this interrupt is already being handled, fail; the caller will
-	 * either panic or try to register a slow (shareable) trap.
+	 * If this interrupt is already being handled, or if it is also used
+	 * for software interrupts, we fail; the caller will either panic or
+	 * try to register a slow (shareable) trap.
 	 */
-	if ((fastvec & (1 << level)) != 0 || intrhand[level] != NULL) {
+	if ((fastvec & (1 << level)) != 0 ||
+	    intrhand[level] != NULL || sintrhand[level] != NULL) {
 		splx(s);
 		return (EBUSY);
 	}
@@ -447,6 +480,121 @@ intr_fastuntrap(int level)
 	splx(s);
 }
 
+void
+softintr_disestablish(void *arg)
+{
+	struct sintrhand *sih = (struct sintrhand *)arg;
+
+	ih_remove(&sintrhand[sih->sih_ipl], &sih->sih_ih);
+	free(sih, M_DEVBUF);
+}
+
+void *
+softintr_establish(int level, void (*fn)(void *), void *arg)
+{
+	struct sintrhand *sih;
+	struct intrhand *ih;
+	int ipl, hw;
+	int s;
+
+	/*
+	 * On a sun4m, the interrupt level is stored unmodified
+	 * to be passed to raise().
+	 * On a sun4 or sun4c, the appropriate bit to set
+	 * in the interrupt enable register is stored, to be
+	 * passed to intreg_set_44c().
+	 */
+	ipl = hw = level;
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+	if (CPU_ISSUN4OR4COR4E) {
+		/*
+		 * Select the most suitable of the three available
+		 * softintr levels.
+		 */
+		if (level < 4) {
+			ipl = 1;
+			hw = IE_L1;
+		} else if (level < 6) {
+			ipl = 4;
+			hw = IE_L4;
+		} else {
+			ipl = 6;
+			hw = IE_L6;
+		}
+	}
+#endif
+
+	sih = (struct sintrhand *)malloc(sizeof *sih, M_DEVBUF,
+	    M_NOWAIT|M_ZERO);
+	if (sih == NULL)
+		return NULL;
+
+	sih->sih_ipl = ipl;
+	sih->sih_hw = hw;
+
+	ih = &sih->sih_ih;
+	ih->ih_fun = (int (*)(void *))fn;
+	ih->ih_arg = arg;
+	/*
+	 * We store the ipl pre-shifted so that we can avoid one instruction
+	 * in the interrupt handlers.
+	 */
+	ih->ih_ipl = level << 8;
+
+	s = splhigh();
+
+	/*
+	 * Check if this interrupt is already being handled by a fast trap.
+	 * If so, attempt to change it back to a regular (thus) shareable
+	 * trap.
+	 */
+	if (fastvec & (1 << ipl)) {
+		if (fastvec_share[ipl].cb == NULL ||
+		    (*fastvec_share[ipl].cb)(fastvec_share[ipl].data) != 0)
+			panic("softintr_establish: level %d interrupt tied to"
+			    " unremovable fast vector", ipl);
+	}
+
+	ih_insert(&sintrhand[ipl], ih);
+	splx(s);
+
+	return sih;
+}
+
+void
+softintr_schedule(void *arg)
+{
+	struct sintrhand *sih = (struct sintrhand *)arg;
+	int s;
+
+	s = splhigh();
+	if (sih->sih_pending == 0) {
+		sih->sih_pending++;
+
+		switch (cputyp) {
+		default:
+#if defined(SUN4M)
+		case CPU_SUN4M:
+			raise(0, sih->sih_hw);
+			break;
+#endif
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+		case CPU_SUN4:
+		case CPU_SUN4E:
+		case CPU_SUN4C:
+			intreg_set_44c(sih->sih_hw);
+			break;
+#endif
+#if defined(solbourne)
+		case CPU_KAP:
+			ienab_bis(sih->sih_hw);
+			break;
+#endif
+		}
+	}
+	splx(s);
+}
+
 #ifdef DIAGNOSTIC
 void
 splassert_check(int wantipl, const char *func)
@@ -463,4 +611,3 @@ splassert_check(int wantipl, const char *func)
 	}
 }
 #endif
-

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: freebsd_exec.c,v 1.16 2004/04/15 00:22:42 tedu Exp $	*/
+=======
+/*	$OpenBSD: freebsd_exec.c,v 1.19 2009/03/05 19:52:23 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: freebsd_exec.c,v 1.2 1996/05/18 16:02:08 christos Exp $	*/
 
 /*
@@ -36,6 +40,7 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
 #include <uvm/uvm_extern.h>
@@ -71,6 +76,7 @@ struct emul emul_freebsd_aout = {
 	copyargs,
 	setregs,
 	NULL,
+	coredump_trad,
 	freebsd_sigcode,
 	freebsd_esigcode,
 };
@@ -91,6 +97,7 @@ struct emul emul_freebsd_elf = {
 	elf32_copyargs,
 	setregs,
 	exec_elf32_fixup,
+	coredump_trad,
 	freebsd_sigcode,
 	freebsd_esigcode,
 };
@@ -165,6 +172,9 @@ freebsd_elf_probe(p, epp, itp, pos, os)
 	char *bp, *brand;
 	int error;
 	size_t len;
+
+	if (!(emul_freebsd_elf.e_flags & EMUL_ENABLED))
+		return (ENOEXEC);
 
 	/*
 	 * Older FreeBSD ELF binaries use a brand; newer ones use EI_OSABI

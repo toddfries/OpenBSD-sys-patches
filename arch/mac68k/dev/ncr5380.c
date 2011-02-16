@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr5380.c,v 1.29 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: ncr5380.c,v 1.39 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: ncr5380.c,v 1.38 1996/12/19 21:48:18 scottr Exp $	*/
 
 /*
@@ -73,8 +73,8 @@ static volatile int	main_running = 0;
  */
 static u_char	busy;
 
-static void	ncr5380_minphys(struct buf *bp);
-static int	mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs);
+static void	ncr5380_minphys(struct buf *bp, struct scsi_link *sl);
+static void	mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs);
 static void	ncr5380_show_scsi_cmd(struct scsi_xfer *xs);
 
 struct scsi_adapter ncr5380_switch = {
@@ -82,13 +82,6 @@ struct scsi_adapter ncr5380_switch = {
 	ncr5380_minphys,		/* scsi_minphys()		*/
 	0,				/* open_target_lu()		*/
 	0				/* close_target_lu()		*/
-};
-
-struct scsi_device ncr5380_dev = {
-	NULL,		/* use default error handler		*/
-	NULL,		/* do not have a start functio		*/
-	NULL,		/* have no async handler		*/
-	NULL		/* Use default done routine		*/
 };
 
 
@@ -188,9 +181,7 @@ extern __inline__ void finish_req(SC_REQ *reqp)
 	reqp->next = free_head;
 	free_head  = reqp;
 
-	xs->flags |= ITSDONE;
-	if (!(reqp->dr_flag & DRIVER_LINKCHK))
-		scsi_done(xs);
+	scsi_done(xs);
 	splx(sps);
 }
 
@@ -239,7 +230,6 @@ void		*auxp;
 	sc->sc_link.adapter_softc   = sc;
 	sc->sc_link.adapter_target  = 7;
 	sc->sc_link.adapter         = &ncr5380_switch;
-	sc->sc_link.device          = &ncr5380_dev;
 	sc->sc_link.openings        = NREQ - 1;
 
 	/*
@@ -289,7 +279,7 @@ void		*auxp;
 /*
  * Carry out a request from the high level driver.
  */
-static int
+static void
 mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs)
 {
 	int	sps;
@@ -302,7 +292,7 @@ mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs)
 	if (flags & SCSI_RESET) {
 		scsi_reset_verbose(xs->sc_link->adapter_softc,
 				   "Got reset-command");
-		return (COMPLETE);
+		return;
 	}
 
 	/*
@@ -310,8 +300,10 @@ mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs)
 	 */
 	sps = splbio();
 	if ((reqp = free_head) == 0) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(sps);
-		return (TRY_AGAIN_LATER);
+		return;
 	}
 	free_head  = reqp->next;
 	reqp->next = NULL;
@@ -333,14 +325,6 @@ mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs)
 	reqp->xdata_len = xs->datalen;
 	memcpy(&reqp->xcmd, xs->cmd, sizeof(struct scsi_generic));
 	reqp->xcmd.bytes[0] |= reqp->targ_lun << 5;
-
-	/*
-	 * Sanity check on flags...
-	 */
-	if (flags & ITSDONE) {
-		ncr_tprint(reqp, "scsi_cmd: command already done.....\n");
-		xs->flags &= ~ITSDONE;
-	}
 
 #ifdef REAL_DMA
 	/*
@@ -390,18 +374,14 @@ mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs)
 #endif
 
 	run_main(xs->sc_link->adapter_softc);
-
-	if (xs->flags & (SCSI_POLL|ITSDONE))
-		return (COMPLETE); /* We're booting or run_main has completed */
-	return (SUCCESSFULLY_QUEUED);
 }
 
 static void
-ncr5380_minphys(struct buf *bp)
+ncr5380_minphys(struct buf *bp, struct scsi_link *sl)
 {
-    if (bp->b_bcount > MIN_PHYS)
-	bp->b_bcount = MIN_PHYS;
-    minphys(bp);
+	if (bp->b_bcount > MIN_PHYS)
+		bp->b_bcount = MIN_PHYS;
+	minphys(bp);
 }
 #undef MIN_PHYS
 

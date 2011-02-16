@@ -1,4 +1,4 @@
-/* $OpenBSD: apecs_dma.c,v 1.4 2006/03/20 01:00:58 martin Exp $ */
+/* $OpenBSD: apecs_dma.c,v 1.7 2009/02/01 14:34:00 miod Exp $ */
 /* $NetBSD: apecs_dma.c,v 1.13 2000/06/29 08:58:45 mrg Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,9 +80,6 @@ void	apecs_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
 #define	APECS_SGMAP_MAPPED_BASE	(8*1024*1024)
 #define	APECS_SGMAP_MAPPED_SIZE	(8*1024*1024)
 
-/* APECS has a 256-byte out-bound DMA prefetch threshold. */
-#define	APECS_SGMAP_PFTHRESH	256
-
 /*
  * Macro to flush APECS scatter/gather TLB.
  */
@@ -143,7 +133,6 @@ apecs_dma_init(acp)
 	t->_next_window = NULL;
 	t->_boundary = 0;
 	t->_sgmap = &acp->ac_sgmap;
-	t->_pfthresh = APECS_SGMAP_PFTHRESH;
 	t->_get_tag = apecs_dma_get_tag;
 	t->_dmamap_create = alpha_sgmap_dmamap_create;
 	t->_dmamap_destroy = alpha_sgmap_dmamap_destroy;

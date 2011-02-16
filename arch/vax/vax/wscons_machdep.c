@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wscons_machdep.c,v 1.1 2006/07/29 14:18:57 miod Exp $	*/
+=======
+/*	$OpenBSD: wscons_machdep.c,v 1.6 2008/08/20 19:00:01 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -49,6 +53,7 @@
 #include "gpx.h"
 #include "lcg.h"
 #include "lcspx.h"
+#include "legss.h"
 #include "smg.h"
 
 void (*wsfbcninit)(void) = NULL;
@@ -68,6 +73,7 @@ do { \
 FRAMEBUFFER_PROTOS(gpx);
 FRAMEBUFFER_PROTOS(lcg);
 FRAMEBUFFER_PROTOS(lcspx);
+FRAMEBUFFER_PROTOS(legss);
 FRAMEBUFFER_PROTOS(smg);
 
 #include <dev/cons.h>
@@ -92,6 +98,9 @@ wscnprobe(struct consdev *cp)
 #if NLCSPX > 0
 	FRAMEBUFFER_PROBE(lcspx);
 #endif
+#if NLEGSS > 0
+	FRAMEBUFFER_PROBE(legss);
+#endif
 #if NSMG > 0
 	FRAMEBUFFER_PROBE(smg);
 #endif
@@ -108,9 +117,10 @@ wscninit(struct consdev *cp)
 	(*wsfbcninit)();
 
 	switch (vax_bustype) {
+	case VAX_MBUS:
 	case VAX_VSBUS:
 #if NDZKBD > 0
-		dzkbd_cnattach(0); /* Connect keyboard and screen together */
+		dzkbd_cnattach();
 #endif
 		break;
 	case VAX_VXTBUS:

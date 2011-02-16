@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: tcds.c,v 1.3 2003/09/26 21:43:31 miod Exp $ */
+=======
+/* $OpenBSD: tcds.c,v 1.8 2010/09/20 06:33:48 matthew Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: tcds.c,v 1.3 2001/11/13 06:26:10 lukem Exp $ */
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -206,7 +203,12 @@ tcdsattach(parent, self, aux)
 
 	sc->sc_cookie = ta->ta_cookie;
 
+<<<<<<< HEAD
 	tc_intr_establish(parent, sc->sc_cookie, TC_IPL_BIO, tcds_intr, sc);
+=======
+	tc_intr_establish(parent, sc->sc_cookie, IPL_BIO, tcds_intr, sc,
+	    self->dv_xname);
+>>>>>>> origin/master
 
 	/*
 	 * XXX
@@ -231,9 +233,6 @@ tcdsattach(parent, self, aux)
 	for (i = 0; i < 2; i++) {
 		slotc = &sc->sc_slots[i];
 		bzero(slotc, sizeof *slotc);	/* clear everything */
-
-		evcount_attach(&slotc->sc_count, sc->sc_dv.dv_xname, NULL,
-		    &evcount_intr);
 
 		slotc->sc_slot = i;
 		slotc->sc_bst = sc->sc_bst;
@@ -343,11 +342,12 @@ tcdsprint(aux, pnp)
 }
 
 void
-tcds_intr_establish(tcds, slot, func, arg)
+tcds_intr_establish(tcds, slot, func, arg, name)
 	struct device *tcds;
 	int slot;
 	int (*func)(void *);
 	void *arg;
+	const char *name;
 {
 	struct tcds_softc *sc = (struct tcds_softc *)tcds;
 
@@ -356,6 +356,8 @@ tcds_intr_establish(tcds, slot, func, arg)
 
 	sc->sc_slots[slot].sc_intrhand = func;
 	sc->sc_slots[slot].sc_intrarg = arg;
+	evcount_attach(&sc->sc_slots[slot].sc_count, name, NULL);
+
 	tcds_scsi_reset(&sc->sc_slots[slot]);
 }
 
@@ -372,6 +374,7 @@ tcds_intr_disestablish(tcds, slot)
 
 	sc->sc_slots[slot].sc_intrhand = tcds_intrnull;
 	sc->sc_slots[slot].sc_intrarg = (void *)(u_long)slot;
+	evcount_detach(&sc->sc_slots[slot].sc_count);
 
 	tcds_dma_enable(&sc->sc_slots[slot], 0);
 	tcds_scsi_enable(&sc->sc_slots[slot], 0);

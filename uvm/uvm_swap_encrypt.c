@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_swap_encrypt.c,v 1.14 2005/03/26 15:53:16 deraadt Exp $	*/
+=======
+/*	$OpenBSD: uvm_swap_encrypt.c,v 1.17 2011/01/11 15:42:06 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright 1999 Niels Provos <provos@citi.umich.edu>
@@ -34,6 +38,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/conf.h>
@@ -89,25 +94,12 @@ swap_encrypt_ctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 }
 
 void
-swap_key_create(struct swap_key *key)
-{
-	int i;
-	u_int32_t *p = key->key;
-
-	key->refcount = 0;
-	for (i = 0; i < sizeof(key->key) / sizeof(u_int32_t); i++)
-		*p++ = arc4random();
-
-	uvm_swpkeyscreated++;
-}
-
-void
 swap_key_delete(struct swap_key *key)
 {
 	/* Make sure that this key gets removed if we just used it */
 	swap_key_cleanup(key);
 
-	memset(key, 0, sizeof(*key));
+	explicit_bzero(key, sizeof(*key));
 	uvm_swpkeysdeleted++;
 }
 
@@ -235,7 +227,7 @@ swap_key_cleanup(struct swap_key *key)
 		return;
 
 	/* Zero out the subkeys */
-	memset(&swap_ctxt, 0, sizeof(swap_ctxt));
+	explicit_bzero(&swap_ctxt, sizeof(swap_ctxt));
 
 	kcur = NULL;
 }

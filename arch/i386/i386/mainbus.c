@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.34 2007/03/19 03:02:09 marco Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.48 2010/11/03 10:15:23 dlg Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
@@ -49,15 +49,15 @@
 #include "isa.h"
 #include "apm.h"
 #include "bios.h"
-#include "mpbios.h"
 #include "acpi.h"
 #include "ipmi.h"
 #include "esm.h"
+#include "vmt.h"
 #include "vesabios.h"
+#include "amdmsr.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
 
 #if NBIOS > 0
 #include <machine/biosvar.h>
@@ -70,6 +70,14 @@
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
+#endif
+
+#if NVMT > 0
+#include <dev/vmtvar.h>
+#endif
+
+#if NAMDMSR > 0
+#include <machine/amdmsr.h>
 #endif
 
 #if NESM > 0
@@ -90,7 +98,8 @@ int	mainbus_match(struct device *, void *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
 struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach
+	sizeof(struct device), mainbus_match, mainbus_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver mainbus_cd = {
@@ -183,9 +192,11 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if NMPBIOS > 0
-	if (mpbios_probe(self))
-		mpbios_scan(self);
+#if NVMT > 0
+	if (vmt_probe()) {
+		mba.mba_busname = "vmt";
+		config_found(self, &mba.mba_busname, mainbus_print);
+	}
 #endif
 
 	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
@@ -201,6 +212,12 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 		config_found(self, &caa, mainbus_print);
 	}
+#if NAMDMSR > 0
+	if (amdmsr_probe()) {
+		mba.mba_busname = "amdmsr";
+		config_found(self, &mba.mba_busname, mainbus_print);
+	}
+#endif
 
 #if NACPI > 0
 	if (!acpi_hasprocfvs)
@@ -251,13 +268,17 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	 */
 #if NPCI > 0
 	if (pci_mode_detect() != 0) {
+		pci_init_extents();
+		
+		bzero(&mba.mba_pba, sizeof(mba.mba_pba));
 		mba.mba_pba.pba_busname = "pci";
 		mba.mba_pba.pba_iot = I386_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = I386_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
+		mba.mba_pba.pba_ioex = pciio_ex;
+		mba.mba_pba.pba_memex = pcimem_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
-		mba.mba_pba.pba_bridgetag = NULL;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
 #endif

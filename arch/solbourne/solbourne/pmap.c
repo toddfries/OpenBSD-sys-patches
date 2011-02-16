@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: pmap.c,v 1.4 2010/12/06 20:57:18 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *
@@ -195,7 +199,7 @@ pmap_pte(pmap_t pmap, vaddr_t va)
  * they will be in locore.s after bootstrap() returns.
  */
 void
-pmap_bootstrap(size_t parmdata)
+pmap_bootstrap(size_t promdata)
 {
 	extern caddr_t end;
 	extern vaddr_t esym;
@@ -272,10 +276,10 @@ pmap_bootstrap(size_t parmdata)
 #endif
 
 	/*
-	 * Reserve room for the parameter data we're interested in.
+	 * Reserve room for the prom data we're interested in.
 	 */
 	prom_data = ekern;
-	ekern += parmdata;
+	ekern += promdata;
 	
 	/*
 	 * From then on, all allocations will be multiples of the
@@ -455,7 +459,8 @@ pmap_bootstrap(size_t parmdata)
 #endif
 		uvm_page_physload(
 		    atop(PTW1_TO_PHYS(ekern)), prompa,
-		    atop(PTW1_TO_PHYS(ekern)), prompa, VM_FREELIST_DEFAULT);
+		    atop(PTW1_TO_PHYS(ekern)), prompa,
+		    VM_FREELIST_DEFAULT);
 		uvm_page_physload(
 		    prompa + promlen, atop(PHYSMEM_BASE) + physmem,
 		    prompa + promlen, atop(PHYSMEM_BASE) + physmem,
@@ -504,9 +509,8 @@ pmap_create()
 
 	DPRINTF(PDB_CREATE, ("pmap_create()"));
 
-	pmap = pool_get(&pmappool, PR_WAITOK);
+	pmap = pool_get(&pmappool, PR_WAITOK | PR_ZERO);
 
-	bzero(pmap, sizeof(*pmap));
 	pmap->pm_refcount = 1;
 	simple_lock_init(&pmap->pm_lock);
 
@@ -597,10 +601,11 @@ pmap_release(struct pmap *pmap)
  * Returns a preferred virtual address for the given address, which
  * does not cause a VAC aliasing situation.
  */
-void
-pmap_prefer(vaddr_t foff, vaddr_t *vap)
+vaddr_t
+pmap_prefer(vaddr_t foff, vaddr_t va)
 {
 	/* XXX assume no cache aliasing yet */
+	return va;
 }
 
 /*
@@ -1441,7 +1446,7 @@ pmap_is_modified(struct vm_page *pg)
 /*
  * Flush instruction cache on the given dirty area.
  *
- * The KAP is the only sparc implementation OpenBSD runs on with independant
+ * The KAP is the only sparc implementation OpenBSD runs on with independent
  * instruction and data caches; for now, we won't add a function pointer
  * to the cpu structure, but will directly invoke the necessary operation.
  */
@@ -1495,11 +1500,6 @@ pmap_changeprot(struct pmap *pmap, vaddr_t va, vm_prot_t prot, int wired)
 void
 pmap_redzone()
 {
-	pt_entry_t *pte;
-
-	pte = pmap_pte(pmap_kernel(), VM_MIN_KERNEL_ADDRESS);
-	*pte = PG_NV;
-	tlb_flush(VM_MIN_KERNEL_ADDRESS);
 }
 
 /*

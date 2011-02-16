@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: agten.c,v 1.9 2005/03/23 17:16:34 miod Exp $	*/
+=======
+/*	$OpenBSD: agten.c,v 1.12 2008/12/26 22:30:21 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.
  * All rights reserved.
@@ -204,12 +208,11 @@ agtenattach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_ro.ri_bits = (void *)sc->sc_i128_fb;
 	
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 	fbwscons_setcolormap(&sc->sc_sunfb, agten_setcolor);
 
-	if (isconsole) {
+	if (isconsole)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
 
 	fbwscons_attach(&sc->sc_sunfb, &agten_accessops, isconsole);
 }
@@ -224,7 +227,7 @@ agten_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUN24;
+		*(u_int *)data = WSDISPLAY_TYPE_AGTEN;
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rfx.c,v 1.11 2006/06/02 20:00:54 miod Exp $	*/
+=======
+/*	$OpenBSD: rfx.c,v 1.14 2008/12/26 22:30:21 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -281,14 +285,13 @@ rfxattach(struct device *parent, struct device *self, void *args)
 	if (!isconsole)
 		rfx_initialize(sc, &cf);
 
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 
 	bzero(&sc->sc_cmap, sizeof(sc->sc_cmap));
 	fbwscons_setcolormap(&sc->sc_sunfb, rfx_setcolor);
 
-	if (isconsole) {
+	if (isconsole)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
 
 	/* enable video */
 	rfx_burner(sc, 1, 0);

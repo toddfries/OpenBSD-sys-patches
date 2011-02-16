@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_command.h,v 1.19 2005/01/03 16:49:56 miod Exp $	*/
+=======
+/*	$OpenBSD: db_command.h,v 1.30 2010/11/05 15:17:50 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_command.h,v 1.8 1996/02/05 01:56:55 christos Exp $	*/
 
 /* 
@@ -41,7 +45,14 @@ void db_command(struct db_command **, struct db_command *);
 void db_buf_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_map_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_malloc_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_mbuf_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_mount_print_cmd(db_expr_t, int, db_expr_t, char *);
+<<<<<<< HEAD
+=======
+void db_show_all_mounts(db_expr_t, int, db_expr_t, char *);
+void db_show_all_vnodes(db_expr_t, int, db_expr_t, char *);
+void db_show_all_bufs(db_expr_t, int, db_expr_t, char *);
+>>>>>>> origin/master
 void db_object_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_page_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_extent_print_cmd(db_expr_t, int, db_expr_t, char *);
@@ -49,6 +60,8 @@ void db_pool_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_proc_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_uvmexp_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_vnode_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_nfsreq_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_nfsnode_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_machine_commands_install(struct db_command *);
 void db_help_cmd(db_expr_t, int, db_expr_t, char *);
 void db_command_loop(void);
@@ -63,6 +76,9 @@ void db_boot_poweroff_cmd(db_expr_t, int, db_expr_t, char *);
 void db_stack_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dmesg_cmd(db_expr_t, int, db_expr_t, char *);
 void db_show_panic_cmd(db_expr_t, int, db_expr_t, char *);
+void db_bcstats_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_struct_offset_cmd(db_expr_t, int, db_expr_t, char *);
+void db_struct_layout_cmd(db_expr_t, int, db_expr_t, char *);
 
 extern	db_addr_t db_dot, db_last_addr, db_prev, db_next;
 

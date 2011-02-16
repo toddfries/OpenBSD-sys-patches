@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88410.c,v 1.1 2005/12/12 20:36:33 miod Exp $	*/
+/*	$OpenBSD: m88410.c,v 1.5 2010/12/31 20:54:21 miod Exp $	*/
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.
  * All rights reserved.
@@ -38,14 +38,36 @@
 
 #include <mvme88k/dev/busswreg.h>
 
-#define XCC_NOP		"0x00"
-#define XCC_FLUSH_PAGE	"0x01"
-#define XCC_FLUSH_ALL	"0x02"
-#define XCC_INVAL_ALL	"0x03"
+/*
+ * MVME197-specific 88410 operation.
+ *
+ * 88410 commands are sent by writing a 64-bit word to a specific address.
+ * Since the 88410 is not normally mapped and shares its address range
+ * with the flash memory, it is necessary to program the busswitch chip
+ * before the 88410 command can be sent.
+ */
+
+/*
+ * Writeback physical page number (specified in the low 20 bits of the
+ * address).
+ */
+#define XCC_WB_PAGE	0x01
+/*
+ * Writeback the whole cache.
+ */
+#define XCC_WB_ALL	0x02
+/*
+ * Invalidate the whole cache.
+ */
+#define XCC_INV_ALL	0x03
+
+/*
+ * Base address of the 88410 when mapped.
+ */
 #define XCC_ADDR	0xff800000
 
 void
-mc88410_flush_page(paddr_t physaddr)
+mc88410_wb_page(paddr_t physaddr)
 {
 	paddr_t xccaddr = XCC_ADDR | (physaddr >> PGSHIFT);
 	u_int psr;
@@ -69,9 +91,9 @@ mc88410_flush_page(paddr_t physaddr)
 
 	/* send command */
 	__asm__ __volatile__ (
-	    "or   r2, r0, " XCC_FLUSH_PAGE ";"
-	    "or   r3, r0, r0;"
-	    "st.d r2, %0, 0" : : "r" (xccaddr) : "r2", "r3");
+	    "or   r2, r0, %0\n\t"
+	    "or   r3, r0, r0\n\t"
+	    "st.d r2, %1, 0" : : "i" (XCC_WB_PAGE), "r" (xccaddr) : "r2", "r3");
 
 	/* spin until the operation is complete */
 	while ((*(volatile u_int32_t *)(BS_BASE + BS_XCCR) & BS_XCC_FBSY) != 0)
@@ -85,7 +107,7 @@ mc88410_flush_page(paddr_t physaddr)
 }
 
 void
-mc88410_flush(void)
+mc88410_wb(void)
 {
 	u_int16_t bs_gcsr, bs_romcr;
 
@@ -101,9 +123,9 @@ mc88410_flush(void)
 
 	/* send command */
 	__asm__ __volatile__ (
-	    "or   r2, r0, " XCC_FLUSH_ALL ";"
-	    "or   r3, r0, r0;"
-	    "st.d r2, %0, 0" : : "r" (XCC_ADDR) : "r2", "r3");
+	    "or   r2, r0, %0\n\t"
+	    "or   r3, r0, r0\n\t"
+	    "st.d r2, %1, 0" : : "i" (XCC_WB_ALL), "r" (XCC_ADDR) : "r2", "r3");
 
 	/* spin until the operation is complete */
 	while ((*(volatile u_int32_t *)(BS_BASE + BS_XCCR) & BS_XCC_FBSY) != 0)
@@ -114,7 +136,7 @@ mc88410_flush(void)
 }
 
 void
-mc88410_inval(void)
+mc88410_inv(void)
 {
 	u_int16_t bs_gcsr, bs_romcr;
 	u_int32_t dummy;
@@ -131,9 +153,9 @@ mc88410_inval(void)
 
 	/* send command */
 	__asm__ __volatile__ (
-	    "or   r2, r0, " XCC_INVAL_ALL ";"
-	    "or   r3, r0, r0;"
-	    "st.d r2, %0, 0" : : "r" (XCC_ADDR) : "r2", "r3");
+	    "or   r2, r0, %0\n\t"
+	    "or   r3, r0, r0\n\t"
+	    "st.d r2, %1, 0" : : "i" (XCC_INV_ALL), "r" (XCC_ADDR) : "r2", "r3");
 
 	/*
 	 * The 88410 will not let the 88110 access it until the
@@ -141,6 +163,10 @@ mc88410_inval(void)
 	 * access which will spin as long as necessary.
 	 */
 	dummy = *(volatile u_int32_t *)(BS_BASE + BS_XCCR);
+
+	/* just in case it didn't, spin until the operation is complete */
+	while ((*(volatile u_int32_t *)(BS_BASE + BS_XCCR) & BS_XCC_FBSY) != 0)
+		;
 
 	*(volatile u_int16_t *)(BS_BASE + BS_GCSR) = bs_gcsr;
 	*(volatile u_int16_t *)(BS_BASE + BS_ROMCR) = bs_romcr;

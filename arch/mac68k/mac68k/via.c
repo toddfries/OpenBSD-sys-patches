@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.27 2006/01/16 21:48:22 miod Exp $	*/
+/*	$OpenBSD: via.c,v 1.33 2010/09/20 06:33:47 matthew Exp $	*/
 /*	$NetBSD: via.c,v 1.62 1997/09/10 04:38:48 scottr Exp $	*/
 
 /*-
@@ -201,8 +201,7 @@ via1_intr(void *arg)
 		return (0);
 
 	/*
-	 * Unflag interrupts here.  If we do it after each interrupt,
-	 * the MRG ADB hangs up.
+	 * Unflag interrupts here.
 	 */
 	via_reg(VIA1, vIFR) = intbits;
 
@@ -330,8 +329,8 @@ add_nubus_intr(int slot, int (*func)(void *), void *client_data,
 
 	ih->ih_fn = func;
 	ih->ih_arg = client_data;
-	ih->ih_ipl = slot + 9;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl, &evcount_intr);
+	ih->ih_ipl = ipl;
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 
 	nubus_intr_mask |= (1 << slot);
 
@@ -493,8 +492,7 @@ via1_register_irq(int irq, int (*irq_func)(void *), void *client_data,
 	ih->ih_arg = client_data;
 	ih->ih_ipl = irq;
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 }
 
 int
@@ -508,8 +506,7 @@ via2_register_irq(struct via2hand *vh, const char *name)
 #endif
 
 	if (name != NULL)
-		evcount_attach(&vh->vh_count, name, (void *)&vh->vh_ipl,
-		    &evcount_intr);
+		evcount_attach(&vh->vh_count, name, &vh->vh_ipl);
 	SLIST_INSERT_HEAD(&via2intrs[irq], vh, v2h_link);
 	return (0);
 }

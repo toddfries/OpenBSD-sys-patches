@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: if_le_ioasic.c,v 1.15 2008/08/09 16:42:30 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_le_ioasic.c,v 1.18 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*
@@ -167,8 +171,13 @@ le_ioasic_attach(parent, self, aux)
 	    (u_char *)((struct ioasic_softc *)parent)->sc_base
 	        + IOASIC_SLOT_2_START);
 
+<<<<<<< HEAD
 	ioasic_intr_establish(parent, d->iada_cookie, TC_IPL_NET,
 	    am7990_intr, sc);
+=======
+	ioasic_intr_establish(parent, d->iada_cookie, IPL_NET,
+	    am7990_intr, sc, self->dv_xname);
+>>>>>>> origin/master
 	return;
 
  bad:

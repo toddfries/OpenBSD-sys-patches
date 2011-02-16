@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: adwlib.c,v 1.19 2004/01/09 21:32:23 brad Exp $ */
+=======
+/*	$OpenBSD: adwlib.c,v 1.22 2010/07/02 03:24:50 tedu Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: adwlib.c,v 1.20 2000/07/04 04:17:03 itojun Exp $        */
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -1030,15 +1027,15 @@ AdwLoadMCode(iot, ioh, bios_mem, chip_type)
 	u_int16_t *bios_mem;
 	u_int8_t chip_type;
 {
-	u_int8_t	*mcode_data;
-	u_int32_t	 mcode_chksum;
-	u_int16_t	 mcode_size;
+	u_int8_t	*mcode_data = NULL;
+	u_int32_t	 mcode_chksum = 0;
+	u_int16_t	 mcode_size = 0;
 	u_int32_t	sum;
 	u_int16_t	code_sum;
 	int		begin_addr;
 	int		end_addr;
 	int		word;
-	int		adw_memsize;
+	int		adw_memsize = 0;
 	int		adw_mcode_expanded_size;
 	int		i, j;
 
@@ -1902,7 +1899,7 @@ ADW_SOFTC	*sc;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	int		status;
-	u_int16_t	wdtr_able, sdtr_able, ppr_able, tagqng_able;
+	u_int16_t	wdtr_able, sdtr_able, ppr_able = 0, tagqng_able;
 	u_int8_t	tid, max_cmd[ADW_MAX_TID + 1];
 	u_int16_t	bios_sig;
 

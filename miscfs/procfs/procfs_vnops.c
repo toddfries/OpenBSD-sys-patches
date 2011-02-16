@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: procfs_vnops.c,v 1.37 2005/12/11 21:30:31 miod Exp $	*/
+=======
+/*	$OpenBSD: procfs_vnops.c,v 1.50 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -153,6 +157,7 @@ static pid_t atopid(const char *, u_int);
 /*
  * procfs vnode operations.
  */
+<<<<<<< HEAD
 int (**procfs_vnodeop_p)(void *);
 struct vnodeopv_entry_desc procfs_vnodeop_entries[] = {
 	{ &vop_default_desc, vn_default_error },
@@ -189,9 +194,43 @@ struct vnodeopv_entry_desc procfs_vnodeop_entries[] = {
 	{ &vop_pathconf_desc, procfs_pathconf },	/* pathconf */
 	{ &vop_advlock_desc, procfs_advlock },		/* advlock */
 	{ NULL, NULL }
+=======
+struct vops procfs_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_lookup	= procfs_lookup,
+	.vop_create	= procfs_badop,
+	.vop_mknod	= procfs_badop,
+	.vop_open	= procfs_open,
+	.vop_close	= procfs_close,
+	.vop_access	= procfs_access,
+	.vop_getattr	= procfs_getattr,
+	.vop_setattr	= procfs_setattr,
+	.vop_read	= procfs_rw,
+	.vop_write	= procfs_rw,
+	.vop_ioctl	= procfs_ioctl,
+	.vop_poll	= procfs_poll,
+	.vop_fsync	= procfs_badop,
+	.vop_remove	= procfs_badop,
+	.vop_link	= procfs_link,
+	.vop_rename	= procfs_badop,
+	.vop_mkdir	= procfs_badop,
+	.vop_rmdir	= procfs_badop,
+	.vop_symlink	= procfs_symlink,
+	.vop_readdir	= procfs_readdir,
+	.vop_readlink	= procfs_readlink,
+	.vop_abortop	= vop_generic_abortop,
+	.vop_inactive	= procfs_inactive,
+	.vop_reclaim	= procfs_reclaim,
+	.vop_lock	= nullop,
+	.vop_unlock	= nullop,
+	.vop_bmap	= vop_generic_bmap,
+	.vop_strategy	= procfs_badop,
+	.vop_print	= procfs_print,
+	.vop_islocked	= nullop,
+	.vop_pathconf	= procfs_pathconf,
+	.vop_advlock	= procfs_badop,
+>>>>>>> origin/master
 };
-struct vnodeopv_desc procfs_vnodeop_opv_desc =
-	{ &procfs_vnodeop_p, procfs_vnodeop_entries };
 /*
  * set things up for doing i/o on
  * the pfsnode (vp).  (vp) is locked
@@ -716,8 +755,8 @@ procfs_access(v)
 	if ((error = VOP_GETATTR(ap->a_vp, &va, ap->a_cred, ap->a_p)) != 0)
 		return (error);
 
-	return (vaccess(va.va_mode, va.va_uid, va.va_gid, ap->a_mode,
-			ap->a_cred));
+	return (vaccess(ap->a_vp->v_type, va.va_mode, va.va_uid, va.va_gid,
+			ap->a_mode, ap->a_cred));
 }
 
 /*
@@ -758,7 +797,7 @@ procfs_lookup(v)
 
 	if (cnp->cn_namelen == 1 && *pname == '.') {
 		*vpp = dvp;
-		VREF(dvp);
+		vref(dvp);
 		return (0);
 	}
 
@@ -850,7 +889,7 @@ procfs_lookup(v)
 		if (pt->pt_pfstype == Pfile) {
 			fvp = p->p_textvp;
 			/* We already checked that it exists. */
-			VREF(fvp);
+			vref(fvp);
 			vn_lock(fvp, LK_EXCLUSIVE | LK_RETRY, curp);
 			if (wantpunlock) {
 				VOP_UNLOCK(dvp, 0, curp);

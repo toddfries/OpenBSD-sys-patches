@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.22 2006/10/20 00:55:32 jsg Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.47 2009/08/13 15:23:10 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.9 1997/04/01 03:12:13 scottr Exp $	*/
 
 /*
@@ -51,18 +51,15 @@
  * filled in before calling us.  Returns null on success and an error
  * string on failure.
  */
-char *
-readdisklabel(dev, strat, lp, osdep, spoofonly)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int spoofonly;
+int
+readdisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, int spoofonly)
 {
-	struct buf *bp;
-	struct disklabel *dlp;
-	int i;
-	char *msg = NULL;
+	struct buf *bp = NULL;
+	int error;
+
+	if ((error = initdisklabel(lp)))
+		goto done;
 
 	/* minimal requirements for archetypal disk label */
 	if (lp->d_secsize < DEV_BSIZE)
@@ -80,6 +77,8 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 		lp->d_partitions[i].p_size = lp->d_secperunit;
 	lp->d_partitions[i].p_offset = 0;
 
+	DL_SETBSTART(lp, lp->d_secpercyl);
+
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
 		return (NULL);
@@ -88,24 +87,28 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
-	if (biowait(bp))
-		msg = "disk label I/O error";
-	else for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)((char *)bp->b_data +
-	    DEV_BSIZE - sizeof(*dlp));
-	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
-		if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC) {
-			if (msg == NULL) {
+	if (biowait(bp)) {
+		error = bp->b_error;
+		goto done;
+	}
+
+	error = checkdisklabel(bp->b_data + LABELOFFSET, lp,
+	    DL_GETBSTART(lp), DL_GETDSIZE(lp));
+	if (error == 0)
+		goto done;
+
 #if defined(CD9660)
-				if (iso_disklabelspoof(dev, strat, lp) != 0)
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 					msg = "no disk label";
 #if defined(UDF)
-				if (msg && udf_disklabelspoof(dev, strat, lp) == 0)
-					msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 			}
 		} else if (dlp->d_npartitions > MAXPARTITIONS ||
@@ -117,9 +120,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 			break;
 		}
 	}
-	bp->b_flags = B_INVAL | B_AGE;
-	brelse(bp);
-	return (msg);
+	return (error);
 }
 
 /*
@@ -188,7 +189,7 @@ writedisklabel(dev, strat, lp, osdep)
 	bp->b_dev = MAKEDISKDEV(major(dev), DISKUNIT(dev), labelpart);
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if ((error = biowait(bp)))
 		goto done;
@@ -206,8 +207,9 @@ writedisklabel(dev, strat, lp, osdep)
 		}
 	}
 	/* Write it in the regular place. */
-	*(struct disklabel *)bp->b_data = *lp;
-	bp->b_flags = B_BUSY | B_WRITE;
+	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	*dlp = *lp;
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
 	(*strat)(bp);
 	error = biowait(bp);
 

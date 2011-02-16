@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ne_pcmcia.c,v 1.88 2006/07/09 19:37:00 miod Exp $	*/
+=======
+/*	$OpenBSD: if_ne_pcmcia.c,v 1.94 2010/08/30 20:33:18 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -69,7 +73,7 @@
 int	ne_pcmcia_match(struct device *, void *, void *);
 void	ne_pcmcia_attach(struct device *, struct device *, void *);
 int	ne_pcmcia_detach(struct device *, int);
-int	ne_pcmcia_activate(struct device *, enum devact);
+int	ne_pcmcia_activate(struct device *, int);
 
 int	ne_pcmcia_enable(struct dp8390_softc *);
 void	ne_pcmcia_disable(struct dp8390_softc *);
@@ -292,6 +296,10 @@ const struct ne2000dev {
       PCMCIA_CIS_DLINK_DE650,
       0, -1, { 0x00, 0xe0, 0x98 } },
 
+    { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_ETHERFAST,
+      PCMCIA_CIS_IODATA_PCETTXR,
+      0, -1, { 0x00, 0xa0, 0xb0 } },
+
     { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
       PCMCIA_CIS_DLINK_DFE670TXD,
       0, -1, { 0x00, 0x05, 0x5d } },
@@ -299,6 +307,14 @@ const struct ne2000dev {
     { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
       PCMCIA_CIS_DLINK_DFE670TXD,
       0, -1, { 0x00, 0x50, 0xba } },
+
+     { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
+       PCMCIA_CIS_DLINK_DFE670TXD,
+       0, -1, { 0x00, 0x0d, 0x88 } },
+
+    { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
+      PCMCIA_CIS_DLINK_DFE670TXD,
+      0, -1, { 0x00, 0x40, 0x05 } },
 
     { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_TRUST_COMBO_ECARD,
       PCMCIA_CIS_LINKSYS_TRUST_COMBO_ECARD,
@@ -848,34 +864,52 @@ ne_pcmcia_detach(dev, flags)
 int
 ne_pcmcia_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct ne_pcmcia_softc *sc = (struct ne_pcmcia_softc *)dev;
 	struct dp8390_softc *esc = &sc->sc_ne2000.sc_dp8390;
 	struct ifnet *ifp = &esc->sc_arpcom.ac_if;
-	int s;
 
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
 		pcmcia_function_enable(sc->sc_pf);
 		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
 		    dp8390_intr, sc, esc->sc_dev.dv_xname);
+		/* XXX this is ridiculous */
 		dp8390_init(esc);
+		dp8390_stop(esc);
 		break;
-
+	case DVACT_SUSPEND:
+		ifp->if_timer = 0;
+		if (ifp->if_flags & IFF_RUNNING) {
+			dp8390_stop(esc);
+			ifp->if_flags &= ~IFF_RUNNING;
+		}
+		if (sc->sc_ih != NULL)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
+		pcmcia_function_enable(sc->sc_pf);
+		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
+		    dp8390_intr, sc, esc->sc_dev.dv_xname);
+		dp8390_enable(esc);
+		if (ifp->if_flags & IFF_UP)
+			dp8390_init(esc);
+		break;
 	case DVACT_DEACTIVATE:
 		ifp->if_timer = 0;
-		if (ifp->if_flags & IFF_RUNNING)
+		if (ifp->if_flags & IFF_RUNNING) {
 			dp8390_stop(esc);
-		if (sc->sc_ih != NULL) {
-			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
-			sc->sc_ih = NULL;
+			ifp->if_flags &= ~IFF_RUNNING;
 		}
+		if (sc->sc_ih != NULL)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 

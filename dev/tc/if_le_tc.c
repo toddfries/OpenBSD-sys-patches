@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_le_tc.c,v 1.6 2002/05/02 22:56:06 miod Exp $	*/
+=======
+/*	$OpenBSD: if_le_tc.c,v 1.10 2008/08/09 16:42:30 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_le_tc.c,v 1.12 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*
@@ -109,5 +113,10 @@ le_tc_attach(parent, self, aux)
 	dec_le_common_attach(&lesc->sc_am7990,
 			     (u_char *)(d->ta_addr + LE_OFFSET_ROM + 2));
 
+<<<<<<< HEAD
 	tc_intr_establish(parent, d->ta_cookie, TC_IPL_NET, am7990_intr, sc);
+=======
+	tc_intr_establish(parent, d->ta_cookie, IPL_NET, am7990_intr, sc,
+	    self->dv_xname);
+>>>>>>> origin/master
 }

@@ -1,34 +1,9 @@
+<<<<<<< HEAD
 /*	$OpenBSD: isp_sbus.c,v 1.7 2005/03/02 17:10:03 miod Exp $	*/
+=======
+/*	$OpenBSD: isp_sbus.c,v 1.17 2009/09/02 16:05:16 kettenis Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: isp_sbus.c,v 1.46 2001/09/26 20:53:14 eeh Exp $ */
-
-/*
- * This driver, which is contained in NetBSD in the files:
- *
- *	sys/dev/ic/isp.c
- *	sys/dev/ic/isp_inline.h
- *	sys/dev/ic/isp_netbsd.c
- *	sys/dev/ic/isp_netbsd.h
- *	sys/dev/ic/isp_target.c
- *	sys/dev/ic/isp_target.h
- *	sys/dev/ic/isp_tpublic.h
- *	sys/dev/ic/ispmbox.h
- *	sys/dev/ic/ispreg.h
- *	sys/dev/ic/ispvar.h
- *	sys/microcode/isp/asm_sbus.h
- *	sys/microcode/isp/asm_1040.h
- *	sys/microcode/isp/asm_1080.h
- *	sys/microcode/isp/asm_12160.h
- *	sys/microcode/isp/asm_2100.h
- *	sys/microcode/isp/asm_2200.h
- *	sys/pci/isp_pci.c
- *	sys/sbus/isp_sbus.c
- *
- * Is being actively maintained by Matthew Jacob (mjacob@netbsd.org).
- * This driver also is shared source with FreeBSD, OpenBSD, Linux, Solaris,
- * Linux versions. This tends to be an interesting maintenance problem.
- *
- * Please coordinate with Matthew Jacob on changes you wish to make here.
- */
 /*
  * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
  *
@@ -72,25 +47,41 @@
 #include <machine/autoconf.h>
 
 #include <dev/ic/isp_openbsd.h>
-#if	defined(ISP_COMPILE_FW) || defined(ISP_COMPILE_1000_FW)
-#include <dev/microcode/isp/asm_sbus.h>
+
+#ifndef ISP_NOFIRMWARE
+#define ISP_FIRMWARE_1000
+#define ISP_FIRMWARE_2200
 #endif
+
+#if	defined(ISP_FIRMWARE_1000)
+#include <dev/microcode/isp/asm_sbus.h>
+#else
+#define	ISP_1000_RISC_CODE	NULL
+#endif
+
+#if	defined(ISP_FIRMWARE_2200)
+#define	ISP_2200_RISC_CODE	(u_int16_t *) isp_2200_risc_code
+#include <dev/microcode/isp/asm_2200.h>
+#else
+#define	ISP_2200_RISC_CODE	NULL
+#endif
+
 #include <dev/sbus/sbusvar.h>
 #include <sys/reboot.h>
 
 static int isp_sbus_intr(void *);
 static int
-isp_sbus_rd_isr(struct ispsoftc *, u_int16_t *, u_int16_t *, u_int16_t *);
-static u_int16_t isp_sbus_rd_reg(struct ispsoftc *, int);
-static void isp_sbus_wr_reg (struct ispsoftc *, int, u_int16_t);
+isp_sbus_rd_isr(struct ispsoftc *, u_int32_t *, u_int16_t *, u_int16_t *);
+static int
+isp_sbus_rd_isr_2200(struct ispsoftc *, u_int32_t *, u_int16_t *, u_int16_t *);
+static u_int32_t isp_sbus_rd_reg(struct ispsoftc *, int);
+static void isp_sbus_wr_reg (struct ispsoftc *, int, u_int32_t);
+static u_int32_t isp_sbus_rd_reg_2200(struct ispsoftc *, int);
+static void isp_sbus_wr_reg_2200(struct ispsoftc *, int, u_int32_t);
 static int isp_sbus_mbxdma(struct ispsoftc *);
-static int isp_sbus_dmasetup(struct ispsoftc *, XS_T *, ispreq_t *, u_int16_t *,
-    u_int16_t);
-static void isp_sbus_dmateardown(struct ispsoftc *, XS_T *, u_int16_t);
-
-#ifndef	ISP_1000_RISC_CODE
-#define	ISP_1000_RISC_CODE	NULL
-#endif
+static int isp_sbus_dmasetup(struct ispsoftc *, XS_T *, ispreq_t *, u_int32_t *,
+    u_int32_t);
+static void isp_sbus_dmateardown(struct ispsoftc *, XS_T *, u_int32_t);
 
 static struct ispmdvec mdvec = {
 	isp_sbus_rd_isr,
@@ -102,7 +93,20 @@ static struct ispmdvec mdvec = {
 	NULL,
 	NULL,
 	NULL,
-	(u_int16_t *) ISP_1000_RISC_CODE
+	ISP_1000_RISC_CODE
+};
+
+static struct ispmdvec mdvec_2200 = {
+	isp_sbus_rd_isr_2200,
+	isp_sbus_rd_reg_2200,
+	isp_sbus_wr_reg_2200,
+	isp_sbus_mbxdma,
+	isp_sbus_dmasetup,
+	isp_sbus_dmateardown,
+	NULL,
+	NULL,
+	NULL,
+	ISP_2200_RISC_CODE
 };
 
 struct isp_sbussoftc {
@@ -138,11 +142,17 @@ isp_match(struct device *parent, void *vcf, void *aux)
 		strcmp("PTI,ptisp", sa->sa_name) == 0 ||
 		strcmp("ptisp", sa->sa_name) == 0 ||
 		strcmp("SUNW,isp", sa->sa_name) == 0 ||
-		strcmp("QLGC,isp", sa->sa_name) == 0);
+		strcmp("SUNW,qlc", sa->sa_name) == 0 ||
+		strcmp("QLGC,isp", sa->sa_name) == 0 ||
+		strcmp("QLGC,qla", sa->sa_name) == 0);
 #ifdef DEBUG
 	if (rv && oneshot) {
 		oneshot = 0;
+<<<<<<< HEAD
 		printf("Qlogic ISP Driver, NetBSD (sbus) Platform Version "
+=======
+		printf("QLogic ISP Driver, OpenBSD (sbus) Platform Version "
+>>>>>>> origin/master
 		    "%d.%d Core Version %d.%d\n",
 		    ISP_PLATFORM_VERSION_MAJOR, ISP_PLATFORM_VERSION_MINOR,
 		    ISP_CORE_VERSION_MAJOR, ISP_CORE_VERSION_MINOR);
@@ -249,6 +259,30 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 	sbc->sbus_poff[RISC_BLOCK >> _BLK_REG_SHFT] = SBUS_RISC_REGS_OFF;
 	sbc->sbus_poff[DMA_BLOCK >> _BLK_REG_SHFT] = DMA_REGS_OFF;
 
+	if (strcmp("SUNW,qlc", sa->sa_name) == 0 ||
+	    strcmp("QLGC,qla", sa->sa_name) == 0) {
+		isp->isp_mdvec = &mdvec_2200;
+		isp->isp_bustype = ISP_BT_PCI;
+		isp->isp_type = ISP_HA_FC_2200;
+		isp->isp_param = malloc(sizeof(fcparam), M_DEVBUF,
+		    M_NOWAIT | M_ZERO);
+		if (isp->isp_param == NULL) {
+			printf("%s: no mem for sdparam table\n",
+			    self->dv_xname);
+			return;
+		}
+		sbc->sbus_poff[BIU_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + BIU_REGS_OFF;
+		sbc->sbus_poff[MBOX_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_MBOX_REGS2100_OFF;
+		sbc->sbus_poff[SXP_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_SXP_REGS_OFF;
+		sbc->sbus_poff[RISC_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_RISC_REGS_OFF;
+		sbc->sbus_poff[DMA_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + DMA_REGS_OFF;
+	}
+
 	/* Establish interrupt channel */
 	bus_intr_establish(sbc->sbus_bustag, sbc->sbus_pri, IPL_BIO, 0,
 	    isp_sbus_intr, sbc, self->dv_xname);
@@ -272,9 +306,12 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 	isp->isp_role = ISP_DEFAULT_ROLES;
 
 	/*
-	 * There's no tool on sparc to set NVRAM for ISPs, so ignore it.
+	 * There's no tool on sparc to set NVRAM for ISPs, so ignore
+	 * it if we don't need to read WWNs from it.
 	 */
-	isp->isp_confopts |= ISP_CFG_NONVRAM;
+	if (IS_SCSI(isp))
+	    isp->isp_confopts |= ISP_CFG_NONVRAM;
+
 	ISP_LOCK(isp);
 	isp->isp_osinfo.no_mbox_ints = 1;
 	isp_reset(isp);
@@ -282,7 +319,7 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 		ISP_UNLOCK(isp);
 		return;
 	}
-	ENABLE_INTS(isp);
+	ISP_ENABLE_INTS(isp);
 	isp_init(isp);
 	if (isp->isp_state != ISP_INITSTATE) {
 		isp_uninit(isp);
@@ -305,7 +342,8 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 static int
 isp_sbus_intr(void *arg)
 {
-	u_int16_t isr, sema, mbox;
+	u_int32_t isr;
+	u_int16_t sema, mbox;
 	struct ispsoftc *isp = arg;
 
 	isp->isp_intcnt++;
@@ -328,7 +366,7 @@ isp_sbus_intr(void *arg)
 	bus_space_read_2(sbc->sbus_bustag, sbc->sbus_reg, off)
 
 static int
-isp_sbus_rd_isr(struct ispsoftc *isp, u_int16_t *isrp,
+isp_sbus_rd_isr(struct ispsoftc *isp, u_int32_t *isrp,
     u_int16_t *semap, u_int16_t *mbp)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
@@ -349,7 +387,29 @@ isp_sbus_rd_isr(struct ispsoftc *isp, u_int16_t *isrp,
 	return (1);
 }
 
-static u_int16_t
+static int
+isp_sbus_rd_isr_2200(struct ispsoftc *isp, u_int32_t *isrp,
+    u_int16_t *semap, u_int16_t *mbp)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	u_int16_t isr, sema;
+
+	isr = letoh16(BXR2(sbc, IspVirt2Off(isp, BIU_ISR)));
+	sema = letoh16(BXR2(sbc, IspVirt2Off(isp, BIU_SEMA)));
+	isp_prt(isp, ISP_LOGDEBUG3, "ISR 0x%x SEMA 0x%x", isr, sema);
+	isr &= INT_PENDING_MASK(isp);
+	sema &= BIU_SEMA_LOCK;
+	if (isr == 0 && sema == 0) {
+		return (0);
+	}
+	*isrp = isr;
+	if ((*semap = sema) != 0) {
+		*mbp = letoh16(BXR2(sbc, IspVirt2Off(isp, OUTMAILBOX0)));
+	}
+	return (1);
+}
+
+static u_int32_t
 isp_sbus_rd_reg(struct ispsoftc *isp, int regoff)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
@@ -359,7 +419,7 @@ isp_sbus_rd_reg(struct ispsoftc *isp, int regoff)
 }
 
 static void
-isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int16_t val)
+isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int32_t val)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
 	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
@@ -367,14 +427,34 @@ isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int16_t val)
 	bus_space_write_2(sbc->sbus_bustag, sbc->sbus_reg, offset, val);
 }
 
+static u_int32_t
+isp_sbus_rd_reg_2200(struct ispsoftc *isp, int regoff)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
+	offset += (regoff & 0xff);
+	return (letoh16(bus_space_read_2(sbc->sbus_bustag, sbc->sbus_reg, offset)));
+}
+
+static void
+isp_sbus_wr_reg_2200(struct ispsoftc *isp, int regoff, u_int32_t val)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
+	offset += (regoff & 0xff);
+	bus_space_write_2(sbc->sbus_bustag, sbc->sbus_reg, offset, htole16(val));
+}
+
 static int
 isp_sbus_mbxdma(struct ispsoftc *isp)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
-	bus_dma_segment_t reqseg, rspseg;
-	int reqrs, rsprs, i, progress;
-	size_t n;
+	bus_dma_segment_t seg;
+	bus_addr_t addr;
 	bus_size_t len;
+	caddr_t base;
+	size_t n;
+	int rs, i, progress;
 
 	if (isp->isp_rquest_dma)
 		return (0);
@@ -415,85 +495,68 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 	}
 
 	/*
-	 * Allocate and map the request and response queues
+	 * Allocate and map the request, result queues, plus FC scratch area.
 	 */
 	progress = 0;
 	len = ISP_QUEUE_SIZE(RQUEST_QUEUE_LEN(isp));
-	if (bus_dmamem_alloc(isp->isp_dmatag, len, 0, 0, &reqseg, 1, &reqrs,
+	len += ISP_QUEUE_SIZE(RESULT_QUEUE_LEN(isp));
+	if (IS_FC(isp)) {
+		len += ISP2100_SCRLEN;
+	}
+	if (bus_dmamem_alloc(isp->isp_dmatag, len, 0, 0, &seg, 1, &rs,
 	    BUS_DMA_NOWAIT)) {
 		goto dmafail;
 	}
 	progress++;
-	if (bus_dmamem_map(isp->isp_dmatag, &reqseg, reqrs, len,
-	    (caddr_t *)&isp->isp_rquest, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
+	if (bus_dmamem_map(isp->isp_dmatag, &seg, rs, len,
+	    &base, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
 		goto dmafail;
 	}
 	progress++;
 	if (bus_dmamap_create(isp->isp_dmatag, len, 1, len, 0, BUS_DMA_NOWAIT,
-	    &isp->isp_rqdmap) != 0) {
+	    &isp->isp_cdmap) != 0) {
 		goto dmafail;
 	}
 	progress++;
-	if (bus_dmamap_load(isp->isp_dmatag, isp->isp_rqdmap,
-	    isp->isp_rquest, len, NULL, BUS_DMA_NOWAIT) != 0) {
+	if (bus_dmamap_load(isp->isp_dmatag, isp->isp_cdmap,
+	    base, len, NULL, BUS_DMA_NOWAIT) != 0) {
 		goto dmafail;
 	}
 	progress++;
-	isp->isp_rquest_dma = isp->isp_rqdmap->dm_segs[0].ds_addr;
+	addr = isp->isp_cdmap->dm_segs[0].ds_addr;
+	isp->isp_rquest_dma = addr;
+	addr += ISP_QUEUE_SIZE(RQUEST_QUEUE_LEN(isp));
+	isp->isp_result_dma = addr;
 
-	len = ISP_QUEUE_SIZE(RESULT_QUEUE_LEN(isp));
-	if (bus_dmamem_alloc(isp->isp_dmatag, len, 0, 0, &rspseg, 1, &rsprs,
-	    BUS_DMA_NOWAIT)) {
-		goto dmafail;
-	}
-	progress++;
-	if (bus_dmamem_map(isp->isp_dmatag, &rspseg, rsprs, len,
-	    (caddr_t *)&isp->isp_result, BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) {
-		goto dmafail;
-	}
-	progress++;
-	if (bus_dmamap_create(isp->isp_dmatag, len, 1, len, 0, BUS_DMA_NOWAIT,
-	    &isp->isp_rsdmap) != 0) {
-		goto dmafail;
-	}
-	progress++;
-	if (bus_dmamap_load(isp->isp_dmatag, isp->isp_rsdmap,
-	    isp->isp_result, len, NULL, BUS_DMA_NOWAIT) != 0) {
-		goto dmafail;
-	}
-	isp->isp_result_dma = isp->isp_rsdmap->dm_segs[0].ds_addr;
+	if (IS_FC(isp)) {
+		addr += ISP_QUEUE_SIZE(RESULT_QUEUE_LEN(isp));
+		FCPARAM(isp)->isp_scdma = addr;
 
+	}
+
+	isp->isp_rquest = base;
+	base += ISP_QUEUE_SIZE(RQUEST_QUEUE_LEN(isp));
+	isp->isp_result = base;
+	if (IS_FC(isp)) {
+		base += ISP_QUEUE_SIZE(RESULT_QUEUE_LEN(isp));
+		FCPARAM(isp)->isp_scratch = base;
+	}
 	return (0);
 
 dmafail:
 	isp_prt(isp, ISP_LOGERR, "Mailbox DMA Setup Failure");
 
-	if (progress >= 8) {
-		bus_dmamap_unload(isp->isp_dmatag, isp->isp_rsdmap);
-	}
-	if (progress >= 7) {
-		bus_dmamap_destroy(isp->isp_dmatag, isp->isp_rsdmap);
-	}
-	if (progress >= 6) {
-		bus_dmamem_unmap(isp->isp_dmatag,
-		    isp->isp_result, ISP_QUEUE_SIZE(RESULT_QUEUE_LEN(isp)));
-	}
-	if (progress >= 5) {
-		bus_dmamem_free(isp->isp_dmatag, &rspseg, rsprs);
-	}
-
 	if (progress >= 4) {
-		bus_dmamap_unload(isp->isp_dmatag, isp->isp_rqdmap);
+		bus_dmamap_unload(isp->isp_dmatag, isp->isp_cdmap);
 	}
 	if (progress >= 3) {
-		bus_dmamap_destroy(isp->isp_dmatag, isp->isp_rqdmap);
+		bus_dmamap_destroy(isp->isp_dmatag, isp->isp_cdmap);
 	}
 	if (progress >= 2) {
-		bus_dmamem_unmap(isp->isp_dmatag,
-		    isp->isp_rquest, ISP_QUEUE_SIZE(RQUEST_QUEUE_LEN(isp)));
+		bus_dmamem_unmap(isp->isp_dmatag, isp->isp_rquest, len);
 	}
 	if (progress >= 1) {
-		bus_dmamem_free(isp->isp_dmatag, &reqseg, reqrs);
+		bus_dmamem_free(isp->isp_dmatag, &seg, rs);
 	}
 
 	for (i = 0; i < isp->isp_maxcmds; i++) {
@@ -513,92 +576,159 @@ dmafail:
 
 static int
 isp_sbus_dmasetup(struct ispsoftc *isp, XS_T *xs, ispreq_t *rq,
-    u_int16_t *nxtip, u_int16_t optr)
+    u_int32_t *nxtip, u_int32_t optr)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
 	bus_dmamap_t dmap;
+	u_int16_t nxti = *nxtip;
 	ispreq_t *qep;
-	int cansleep = (xs->flags & SCSI_NOSLEEP) == 0;
-	int in = (xs->flags & SCSI_DATA_IN) != 0;
+	int segcnt, seg, error, ovseg, seglim, drq;
 
 	qep = (ispreq_t *) ISP_QUEUE_ENTRY(isp->isp_rquest, isp->isp_reqidx);
+	dmap = sbc->sbus_dmamap[isp_handle_index(rq->req_handle)];
 	if (xs->datalen == 0) {
 		rq->req_seg_count = 1;
 		goto mbxsync;
 	}
 
-	dmap = sbc->sbus_dmamap[isp_handle_index(rq->req_handle)];
-	if (dmap->dm_nsegs != 0) {
-		panic("%s: dma map already allocated", isp->isp_name);
-		/* NOTREACHED */
+	if (xs->flags & SCSI_DATA_IN) {
+		drq = REQFLAG_DATA_IN;
+	} else {
+		drq = REQFLAG_DATA_OUT;
 	}
-	if (bus_dmamap_load(isp->isp_dmatag, dmap, xs->data, xs->datalen,
-	    NULL, (cansleep ? BUS_DMA_WAITOK : BUS_DMA_NOWAIT) |
-	    BUS_DMA_STREAMING) != 0) {
+
+	if (IS_FC(isp)) {
+		seglim = ISP_RQDSEG_T2;
+		((ispreqt2_t *)rq)->req_totalcnt = xs->datalen;
+		((ispreqt2_t *)rq)->req_flags |= drq;
+	} else {
+		rq->req_flags |= drq;
+		if (XS_CDBLEN(xs) > 12)
+			seglim = 0;
+		else
+			seglim = ISP_RQDSEG;
+	}
+	error = bus_dmamap_load(isp->isp_dmatag, dmap, xs->data, xs->datalen,
+	    NULL, (xs->flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT :
+	    BUS_DMA_WAITOK | BUS_DMA_STREAMING);
+	if (error) {
 		XS_SETERR(xs, HBA_BOTCH);
 		return (CMD_COMPLETE);
 	}
 
-	bus_dmamap_sync(isp->isp_dmatag, dmap, 0, xs->datalen,
-	    in? BUS_DMASYNC_PREREAD : BUS_DMASYNC_PREWRITE);
+	segcnt = dmap->dm_nsegs;
 
-	if (in) {
-		rq->req_flags |= REQFLAG_DATA_IN;
-	} else {
-		rq->req_flags |= REQFLAG_DATA_OUT;
+	isp_prt(isp, ISP_LOGDEBUG2, "%d byte %s %p in %d segs",
+	    xs->datalen, (xs->flags & SCSI_DATA_IN)? "read to" :
+	    "write from", xs->data, segcnt);
+
+	for (seg = 0, rq->req_seg_count = 0;
+	     seg < segcnt && rq->req_seg_count < seglim;
+	     seg++, rq->req_seg_count++) {
+		if (isp->isp_type & ISP_HA_FC) {
+			ispreqt2_t *rq2 = (ispreqt2_t *)rq;
+			rq2->req_dataseg[rq2->req_seg_count].ds_count =
+			    dmap->dm_segs[seg].ds_len;
+			rq2->req_dataseg[rq2->req_seg_count].ds_base =
+			    dmap->dm_segs[seg].ds_addr;
+		} else {
+			rq->req_dataseg[rq->req_seg_count].ds_count =
+			    dmap->dm_segs[seg].ds_len;
+			rq->req_dataseg[rq->req_seg_count].ds_base =
+			    dmap->dm_segs[seg].ds_addr;
+		}
+		isp_prt(isp, ISP_LOGDEBUG2, "seg0.[%d]={0x%lx,%lu}",
+		    rq->req_seg_count, (long) dmap->dm_segs[seg].ds_addr,
+		    (unsigned long) dmap->dm_segs[seg].ds_len);
 	}
 
-	if (XS_CDBLEN(xs) > 12) {
-		u_int16_t onxti;
-		ispcontreq_t local, *crq = &local, *cqe;
+	if (seg == segcnt) {
+		goto dmasync;
+	}
 
-		onxti = *nxtip;
-		cqe = (ispcontreq_t *) ISP_QUEUE_ENTRY(isp->isp_rquest, onxti);
-		*nxtip = ISP_NXT_QENTRY(onxti, RQUEST_QUEUE_LEN(isp));
-		if (*nxtip == optr) {
+	do {
+		u_int16_t onxti;
+		ispcontreq_t *crq, *cqe, local;
+
+		crq = &local;
+
+		cqe = (ispcontreq_t *) ISP_QUEUE_ENTRY(isp->isp_rquest, nxti);
+		onxti = nxti;
+		nxti = ISP_NXT_QENTRY(onxti, RQUEST_QUEUE_LEN(isp));
+		if (nxti == optr) {
 			isp_prt(isp, ISP_LOGDEBUG0, "Request Queue Overflow++");
 			bus_dmamap_unload(isp->isp_dmatag, dmap);
 			XS_SETERR(xs, HBA_BOTCH);
 			return (CMD_EAGAIN);
 		}
-		rq->req_seg_count = 2;
-		MEMZERO((void *)crq, sizeof (*crq));
+		rq->req_header.rqs_entry_count++;
+		bzero((void *)crq, sizeof (*crq));
 		crq->req_header.rqs_entry_count = 1;
-		crq->req_header.rqs_entry_type = RQSTYPE_DATASEG;  
-		crq->req_dataseg[0].ds_count = xs->datalen;
-		crq->req_dataseg[0].ds_base = dmap->dm_segs[0].ds_addr;
+		crq->req_header.rqs_entry_type = RQSTYPE_DATASEG;
+
+		for (ovseg = 0; seg < segcnt && ovseg < ISP_CDSEG;
+		    rq->req_seg_count++, seg++, ovseg++) {
+			crq->req_dataseg[ovseg].ds_count =
+			    dmap->dm_segs[seg].ds_len;
+			crq->req_dataseg[ovseg].ds_base =
+			    dmap->dm_segs[seg].ds_addr;
+			isp_prt(isp, ISP_LOGDEBUG2, "seg%d.[%d]={0x%lx,%lu}",
+			    rq->req_header.rqs_entry_count - 1,
+			    rq->req_seg_count, (long)dmap->dm_segs[seg].ds_addr,
+			    (unsigned long) dmap->dm_segs[seg].ds_len);
+		}
 		isp_put_cont_req(isp, crq, cqe);
 		MEMORYBARRIER(isp, SYNC_REQUEST, onxti, QENTRY_LEN);
-	} else {
-		rq->req_seg_count = 1;
-		rq->req_dataseg[0].ds_count = xs->datalen;
-		rq->req_dataseg[0].ds_base = dmap->dm_segs[0].ds_addr;
-	}
+	} while (seg < segcnt);
+
+dmasync:
+	bus_dmamap_sync(isp->isp_dmatag, dmap, 0, dmap->dm_mapsize,
+	    (xs->flags & SCSI_DATA_IN) ?  BUS_DMASYNC_PREREAD :
+	    BUS_DMASYNC_PREWRITE);
 
 mbxsync:
-	if (XS_CDBLEN(xs) > 12) {
-		isp_put_extended_request(isp,
-		    (ispextreq_t *)rq, (ispextreq_t *) qep);
-	} else {
+	switch (rq->req_header.rqs_entry_type) {
+	case RQSTYPE_REQUEST:
 		isp_put_request(isp, rq, qep);
+		break;
+	case RQSTYPE_CMDONLY:
+		isp_put_extended_request(isp, (ispextreq_t *)rq,
+		    (ispextreq_t *)qep);
+		break;
+	case RQSTYPE_T2RQS:
+		if (FCPARAM(isp)->isp_2klogin) {
+			isp_put_request_t2e(isp,
+			    (ispreqt2e_t *) rq, (ispreqt2e_t *) qep);
+		} else {
+			isp_put_request_t2(isp,
+			    (ispreqt2_t *) rq, (ispreqt2_t *) qep);
+		}
+		break;
+	case RQSTYPE_T3RQS:
+		if (FCPARAM(isp)->isp_2klogin) {
+			isp_put_request_t3e(isp,
+			    (ispreqt3e_t *) rq, (ispreqt3e_t *) qep);
+			break;
+		}
+		/* FALLTHROUGH */
+	case RQSTYPE_A64:
+		isp_put_request_t3(isp, (ispreqt3_t *) rq, (ispreqt3_t *) qep);
+		break;
+	case RQSTYPE_T7RQS:
+		isp_put_request_t7(isp, (ispreqt7_t *) rq, (ispreqt7_t *) qep);
+		break;
 	}
+	*nxtip = nxti;
 	return (CMD_QUEUED);
 }
 
 static void
-isp_sbus_dmateardown(struct ispsoftc *isp, XS_T *xs, u_int16_t handle)
+isp_sbus_dmateardown(struct ispsoftc *isp, XS_T *xs, u_int32_t handle)
 {
-	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
-	bus_dmamap_t dmap;
-
-	dmap = sbc->sbus_dmamap[isp_handle_index(handle)];
-
-	if (dmap->dm_nsegs == 0) {
-		panic("%s: dma map not already allocated", isp->isp_name);
-		/* NOTREACHED */
-	}
-	bus_dmamap_sync(isp->isp_dmatag, dmap, 0,
-	    xs->datalen, (xs->flags & SCSI_DATA_IN)?
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *)isp;
+	bus_dmamap_t dmap = sbc->sbus_dmamap[isp_handle_index(handle)];
+	bus_dmamap_sync(isp->isp_dmatag, dmap, 0, dmap->dm_mapsize,
+	    (xs->flags & SCSI_DATA_IN)?
 	    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 	bus_dmamap_unload(isp->isp_dmatag, dmap);
 }

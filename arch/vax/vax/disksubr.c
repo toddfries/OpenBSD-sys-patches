@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: disksubr.c,v 1.32 2006/10/21 16:01:54 krw Exp $	*/
+=======
+/*	$OpenBSD: disksubr.c,v 1.61 2009/08/13 15:23:13 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: disksubr.c,v 1.21 1999/06/30 18:48:06 ragge Exp $	*/
 
 /*
@@ -113,6 +117,7 @@ bad:
  * (e.g., sector size) must be filled in before calling us.
  * Returns null on success and an error string on failure.
  */
+<<<<<<< HEAD
 char *
 readdisklabel(dev, strat, lp, osdep, spoofonly)
 	dev_t dev;
@@ -125,6 +130,17 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	struct disklabel *dlp;
 	char *msg = NULL;
 	int i;
+=======
+int
+readdisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, int spoofonly)
+{
+	struct buf *bp = NULL;
+	char error;
+
+	if ((error = initdisklabel(lp)))
+		goto done;
+>>>>>>> origin/master
 
 	/* minimal requirements for archetypal disk label */
 	if (lp->d_secsize < DEV_BSIZE)
@@ -144,7 +160,12 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64 * 1024;
 
+<<<<<<< HEAD
 	/* don't read the on-disk label if we are in spoofed-only mode */
+=======
+	DL_SETBSTART(lp, 16);
+
+>>>>>>> origin/master
 	if (spoofonly)
 		return (NULL);
 
@@ -152,6 +173,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
+<<<<<<< HEAD
 	bp->b_flags = B_BUSY | B_READ;
 	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
 	(*strat)(bp);
@@ -181,6 +203,37 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	bp->b_flags = B_INVAL | B_AGE | B_READ;
 	brelse(bp);
 	return (msg);
+=======
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	(*strat)(bp);
+	if (biowait(bp)) {
+		error = bp->b_error;
+		goto done;
+	}
+
+	error = checkdisklabel(bp->b_data + LABELOFFSET, lp,
+	    16, DL_GETDSIZE(lp));
+	if (error == 0)
+		goto done;
+
+#if defined(CD9660)
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
+#endif
+#if defined(UDF)
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
+#endif
+
+done:
+	if (bp) {
+		bp->b_flags |= B_INVAL;
+		brelse(bp);
+	}
+	return (error);
+>>>>>>> origin/master
 }
 
 /*
@@ -257,14 +310,23 @@ writedisklabel(dev, strat, lp, osdep)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
 	bp->b_bcount = lp->d_secsize;
+<<<<<<< HEAD
 	bp->b_flags = B_READ;
+=======
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
+>>>>>>> origin/master
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
 	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+<<<<<<< HEAD
 	bcopy(lp, dlp, sizeof(struct disklabel));
 	bp->b_flags = B_WRITE;
+=======
+	*dlp = *lp;
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+>>>>>>> origin/master
 	(*strat)(bp);
 	error = biowait(bp);
 
@@ -307,7 +369,7 @@ disk_reallymapin(bp, map, reg, flag)
 	caddr_t addr;
 
 	o = (int)bp->b_data & VAX_PGOFSET;
-	npf = vax_btoc(bp->b_bcount + o) + 1;
+	npf = vax_atop(bp->b_bcount + o) + 1;
 	addr = bp->b_data;
 	p = bp->b_proc;
 

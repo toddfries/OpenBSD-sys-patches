@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: Locore.c,v 1.6 2006/08/31 21:28:35 kettenis Exp $	*/
+=======
+/*	$OpenBSD: Locore.c,v 1.9 2009/08/17 14:23:09 jsing Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: Locore.c,v 1.1 2000/08/20 14:58:36 mrg Exp $	*/
 
 /*
@@ -54,12 +58,7 @@ asm (".text; .globl _entry; _entry: .long _start,0,0");
 #endif
 
 __dead void
-_start(vpd, res, openfirm, arg, argl)
-	void *vpd;
-	int res;
-	int (*openfirm)(void *);
-	char *arg;
-	int argl;
+_start(void *vpd, int res, int (*openfirm)(void *), char *arg, int argl)
 {
 	extern char etext[];
 
@@ -74,7 +73,7 @@ _start(vpd, res, openfirm, arg, argl)
 #endif
 
 __dead void
-_rtt()
+_rtt(void)
 {
 	struct {
 		cell_t name;
@@ -90,7 +89,7 @@ _rtt()
 }
 
 void
-OF_enter()
+OF_enter(void)
 {
 	struct {
 		cell_t name;
@@ -105,8 +104,7 @@ OF_enter()
 }
 
 int
-OF_finddevice(name)
-	char *name;
+OF_finddevice(char *name)
 {
 	struct {
 		cell_t name;
@@ -126,8 +124,7 @@ OF_finddevice(name)
 }
 
 int
-OF_instance_to_package(ihandle)
-	int ihandle;
+OF_instance_to_package(int ihandle)
 {
 	struct {
 		cell_t name;
@@ -147,11 +144,7 @@ OF_instance_to_package(ihandle)
 }
 
 int
-OF_getprop(handle, prop, buf, buflen)
-	int handle;
-	char *prop;
-	void *buf;
-	int buflen;
+OF_getprop(int handle, char *prop, void *buf, int buflen)
 {
 	struct {
 		cell_t name;
@@ -178,11 +171,7 @@ OF_getprop(handle, prop, buf, buflen)
 
 #ifdef	__notyet__	/* Has a bug on FirePower */
 int
-OF_setprop(handle, prop, buf, len)
-	u_int handle;
-	char *prop;
-	void *buf;
-	int len;
+OF_setprop(u_int handle, char *prop, void *buf, int len)
 {
 	struct {
 		cell_t name;
@@ -209,8 +198,7 @@ OF_setprop(handle, prop, buf, len)
 #endif
 
 int
-OF_open(dname)
-	char *dname;
+OF_open(char *dname)
 {
 	struct {
 		cell_t name;
@@ -231,8 +219,7 @@ OF_open(dname)
 }
 
 void
-OF_close(handle)
-	int handle;
+OF_close(int handle)
 {
 	struct {
 		cell_t name;
@@ -249,10 +236,7 @@ OF_close(handle)
 }
 
 int
-OF_write(handle, addr, len)
-	int handle;
-	void *addr;
-	int len;
+OF_write(int handle, void *addr, int len)
 {
 	struct {
 		cell_t name;
@@ -276,10 +260,7 @@ OF_write(handle, addr, len)
 }
 
 int
-OF_read(handle, addr, len)
-	int handle;
-	void *addr;
-	int len;
+OF_read(int handle, void *addr, int len)
 {
 	struct {
 		cell_t name;
@@ -304,9 +285,7 @@ OF_read(handle, addr, len)
 }
 
 int
-OF_seek(handle, pos)
-	int handle;
-	u_quad_t pos;
+OF_seek(int handle, u_quad_t pos)
 {
 	struct {
 		cell_t name;
@@ -331,9 +310,7 @@ OF_seek(handle, pos)
 }
 
 void
-OF_release(virt, size)
-	void *virt;
-	u_int size;
+OF_release(void *virt, u_int size)
 {
 	struct {
 		cell_t name;
@@ -352,7 +329,7 @@ OF_release(virt, size)
 }
 
 int
-OF_milliseconds()
+OF_milliseconds(void)
 {
 	struct {
 		cell_t name;
@@ -369,14 +346,10 @@ OF_milliseconds()
 }
 
 void
-OF_chain(virt, size, entry, arg, len)
-	void *virt;
-	u_int size;
-	void (*entry)();
-	void *arg;
-	u_int len;
+OF_chain(void *virt, u_int size, void (*entry)(), void *arg, u_int len)
 {
 	extern int64_t romp;
+#ifdef __notyet
 	extern int debug;
 	struct {
 		cell_t name;
@@ -405,6 +378,7 @@ OF_chain(virt, size, entry, arg, len)
 		printf("Calling entry(0, %p, %x, %lx, %lx)\n", arg, len,
 			(unsigned long)romp, (unsigned long)romp);
 	}
+#endif
 	entry(0, arg, len, (unsigned long)romp, (unsigned long)romp);
 	panic("OF_chain: kernel returned!");
 	__asm("ta 2" : :);
@@ -416,7 +390,7 @@ static u_int mmuh = -1;
 static u_int memh = -1;
 
 void
-setup()
+setup(void)
 {
 	u_int chosen;
 
@@ -439,9 +413,7 @@ setup()
  * Only works while the prom is actively mapping us.
  */
 static vaddr_t
-OF_claim_virt(vaddr, len)
-vaddr_t vaddr;
-int len;
+OF_claim_virt(vaddr_t vaddr, int len)
 {
 	struct {
 		cell_t name;
@@ -481,9 +453,7 @@ int len;
  * Only works while the prom is actively mapping us.
  */
 static vaddr_t
-OF_alloc_virt(len, align)
-int len;
-int align;
+OF_alloc_virt(int len, int align)
 {
 	int retaddr=-1;
 	struct {
@@ -523,9 +493,7 @@ int align;
  * Only works while the prom is actively mapping us.
  */
 static int
-OF_free_virt(vaddr, len)
-vaddr_t vaddr;
-int len;
+OF_free_virt(vaddr_t vaddr, int len)
 {
 	struct {
 		cell_t name;
@@ -560,11 +528,7 @@ int len;
  * Only works while the prom is actively mapping us.
  */
 static vaddr_t
-OF_map_phys(paddr, size, vaddr, mode)
-paddr_t paddr;
-off_t size;
-vaddr_t vaddr;
-int mode;
+OF_map_phys(paddr_t paddr, off_t size, vaddr_t vaddr, int mode)
 {
 	struct {
 		cell_t name;
@@ -612,9 +576,7 @@ int mode;
  * Only works while the prom is actively mapping us.
  */
 static paddr_t
-OF_alloc_phys(len, align)
-int len;
-int align;
+OF_alloc_phys(int len, int align)
 {
 	struct {
 		cell_t name;
@@ -654,9 +616,7 @@ int align;
  * Only works while the prom is actively mapping us.
  */
 static int
-OF_free_phys(phys, len)
-paddr_t phys;
-int len;
+OF_free_phys(paddr_t phys, int len)
 {
 	struct {
 		cell_t name;
@@ -692,10 +652,7 @@ int len;
  */
 
 void *
-OF_claim(virt, size, align)
-	void *virt;
-	u_int size;
-	u_int align;
+OF_claim(void *virt, u_int size, u_int align)
 {
 #define SUNVMOF
 #ifndef SUNVMOF
@@ -763,8 +720,7 @@ OF_claim(virt, size, align)
 
 
 void
-putchar(c)
-	int c;
+putchar(int c)
 {
 	char ch = c;
 
@@ -774,7 +730,7 @@ putchar(c)
 }
 
 int
-getchar()
+getchar(void)
 {
 	unsigned char ch = '\0';
 	int l;

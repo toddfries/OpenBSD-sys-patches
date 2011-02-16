@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pmap.h,v 1.39 2005/04/04 23:40:02 miod Exp $	*/
+=======
+/*	$OpenBSD: pmap.h,v 1.50 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pmap.h,v 1.30 1997/08/04 20:00:47 pk Exp $ */
 
 /*
@@ -58,8 +62,8 @@
  * both into the same structure.  Fortunately, they are almost the same.
  *
  * The kernel begins at 0xf8000000 and runs to 0xffffffff (although
- * some of this is not actually used).  Kernel space, including DVMA
- * space (for now?), is mapped identically into all user contexts.
+ * some of this is not actually used).  Kernel space is mapped identically
+ * into all user contexts.
  * There is no point in duplicating this mapping in each user process
  * so they do not appear in the user structures.
  *
@@ -72,8 +76,8 @@
  * makes no such distinction.
  *
  * Since each virtual segment covers 256 kbytes, the user space
- * requires 3584 segments, while the kernel (including DVMA) requires
- * only 512 segments.
+ * requires 3584 segments, while the kernel (including DVMA on 4/4c)
+ * requires only 512 segments.
  *
  *
  ** FOR THE SUN4/SUN4C
@@ -119,7 +123,7 @@
  * hierarchy of page tables in allocated kernel memory; these tables refer
  * to each other by physical address pointers in SRMMU format (thus they
  * are not very useful to the kernel's management routines). The other set
- * of tables is similar to those used for the Sun4/100's 3-level MMU; it
+ * of tables is similar to those used for the Sun4/400's 3-level MMU; it
  * is a hierarchy of regmap and segmap structures which contain kernel virtual
  * pointers to each other. These must (unfortunately) be kept in sync.
  *
@@ -259,7 +263,7 @@ int             pmap_dumpsize(void);
 int             pmap_dumpmmu(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t);
 
 #define	pmap_kernel()	(&kernel_pmap_store)
-#define	pmap_resident_count(pmap)	pmap_count_ptes(pmap)
+#define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 
 #define PMAP_PREFER(fo, ap)		pmap_prefer((fo), (ap))
 
@@ -270,8 +274,7 @@ int             pmap_dumpmmu(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t);
 struct proc;
 void		pmap_activate(struct proc *);
 void		pmap_bootstrap(int nmmu, int nctx, int nregion);
-int		pmap_count_ptes(struct pmap *);
-void		pmap_prefer(vaddr_t, vaddr_t *);
+vaddr_t		pmap_prefer(vaddr_t, vaddr_t);
 int		pmap_pa_exists(paddr_t);
 void		pmap_unwire(pmap_t, vaddr_t);
 void		pmap_copy(pmap_t, pmap_t, vaddr_t, vsize_t, vaddr_t);
@@ -298,13 +301,12 @@ void		pmap_writetext(unsigned char *, int);
 #define		pmap_collect(pm)		do { /* nothing */ } while (0)
 #define		pmap_copy(DP,SP,D,L,S)		do { /* nothing */ } while (0)
 #define		pmap_deactivate(p)		do { /* nothing */ } while (0)
-#define		pmap_phys_address(frame)	(frame)
 #define		pmap_proc_iflush(p,va,len)	do { /* nothing */ } while (0)
 #define		pmap_update(pm)			do { /* nothing */ } while (0)
 
 /* SUN4/SUN4C SPECIFIC DECLARATIONS */
 
-#if defined(SUN4) || defined(SUN4C)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 boolean_t	pmap_clear_modify4_4c(struct vm_page *);
 boolean_t	pmap_clear_reference4_4c(struct vm_page *);
 int		pmap_enter4_4c(pmap_t, vaddr_t, paddr_t, vm_prot_t, int);
@@ -336,7 +338,7 @@ void		pmap_zero_page4m(struct vm_page *);
 void		pmap_changeprot4m(pmap_t, vaddr_t, vm_prot_t, int);
 #endif /* defined SUN4M */
 
-#if !defined(SUN4M) && (defined(SUN4) || defined(SUN4C))
+#if !(defined(SUN4D) || defined(SUN4M)) && (defined(SUN4) || defined(SUN4C) || defined(SUN4E))
 
 #define		pmap_clear_modify	pmap_clear_modify4_4c
 #define		pmap_clear_reference	pmap_clear_reference4_4c
@@ -351,7 +353,7 @@ void		pmap_changeprot4m(pmap_t, vaddr_t, vm_prot_t, int);
 #define		pmap_zero_page		pmap_zero_page4_4c
 #define		pmap_changeprot		pmap_changeprot4_4c
 
-#elif defined(SUN4M) && !(defined(SUN4) || defined(SUN4C))
+#elif (defined(SUN4D) || defined(SUN4M)) && !(defined(SUN4) || defined(SUN4C) || defined(SUN4E))
 
 #define	  	pmap_clear_modify	pmap_clear_modify4m
 #define		pmap_clear_reference	pmap_clear_reference4m

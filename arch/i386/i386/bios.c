@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.68 2007/01/18 18:32:10 gwk Exp $	*/
+/*	$OpenBSD: bios.c,v 1.88 2010/11/22 21:08:07 miod Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -52,12 +52,15 @@
 #include <machine/pcb.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+#include <machine/mpbiosvar.h>
 #include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
 #include <i386/isa/isa_machdep.h>
 
 #include "apm.h"
+#include "acpi.h"
+#include "mpbios.h"
 #include "pcibios.h"
 #include "pci.h"
 
@@ -71,7 +74,8 @@ int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
-	sizeof(struct bios_softc), biosprobe, biosattach
+	sizeof(struct bios_softc), biosprobe, biosattach, NULL,
+	config_activate_children
 };
 
 struct cfdriver bios_cd = {
@@ -96,6 +100,8 @@ void		*bios_smpinfo;
 #endif
 #ifdef NFSCLIENT
 bios_bootmac_t	*bios_bootmac;
+#ifdef DDB
+extern int	db_console;
 #endif
 
 void		smbios_info(char*);
@@ -121,7 +127,7 @@ biosprobe(struct device *parent, void *match, void *aux)
 
 #ifdef BIOS_DEBUG
 	printf("%s%d: boot API ver %x, %x; args %p[%d]\n",
-	    bia->bios_dev, bios_cd.cd_ndevs,
+	    bia->ba_name, bios_cd.cd_ndevs,
 	    bootapiver, BOOTARG_APIVER, bootargp, bootargc);
 #endif
 	/* there could be only one */
@@ -142,8 +148,8 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct bios_attach_args *bia = aux;
 #endif
 	volatile u_int8_t *va;
-	char *str;
-	int flags;
+	char scratch[64], *str;
+	int flags, smbiosrev = 0, ncpu = 0;
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -261,8 +267,33 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
+			/*
+			 * Unbelievably the SMBIOS version number
+			 * sequence is like 2.3 ... 2.33 ... 2.4 ... 2.5
+			 */
+			smbiosrev = sh->majrev * 100 + sh->minrev;
+			if (sh->minrev < 10)
+				smbiosrev = sh->majrev * 100 + sh->minrev * 10;
 
 			smbios_info(sc->sc_dev.dv_xname);
+
+			/* count cpus so that we can disable apm when cpu > 1 */
+			bzero(&bios, sizeof(bios));
+			while (smbios_find_table(SMBIOS_TYPE_PROCESSOR,&bios)) {
+				struct smbios_cpu *cpu = bios.tblhdr;
+
+				if (cpu->cpu_status & SMBIOS_CPUST_POPULATED) {
+					/* SMBIOS 2.5 added multicore support */
+					if (smbiosrev >= 250 &&
+					    cpu->cpu_core_enabled)
+						ncpu += cpu->cpu_core_enabled;
+					else {
+						ncpu++;
+						if (cpu->cpu_id_edx & CPUID_HTT)
+							ncpu++;
+					}
+				}
+			}
 			break;
 		}
 	}
@@ -270,7 +301,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NAPM > 0
-	if (apm) {
+	if (apm && ncpu < 2 && smbiosrev < 240) {
 		struct bios_attach_args ba;
 #if defined(DEBUG) || defined(APMDEBUG)
 		printf("apminfo: %x, code %x[%x]/%x[%x], data %x[%x], ept %x\n",
@@ -287,6 +318,37 @@ biosattach(struct device *parent, struct device *self, void *aux)
 		config_found(self, &ba, bios_print);
 	}
 #endif
+
+#if NACPI > 0
+#if NPCI > 0
+	if (smbiosrev && pci_mode_detect() != 0)
+#endif
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_func = 0x00;		/* XXX ? */
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+		if (config_found(self, &ba, bios_print))
+			flags |= BIOSF_PCIBIOS;
+	}
+#endif
+
+#if NMPBIOS > 0
+	if (mpbios_probe(self)) {
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "mpbios";
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
+
 #if NPCI > 0 && NPCIBIOS > 0
 	if (!(flags & BIOSF_PCIBIOS)) {
 		struct bios_attach_args ba;
@@ -361,6 +423,7 @@ void
 bios_getopt()
 {
 	bootarg_t *q;
+	bios_ddb_t *bios_ddb;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -404,14 +467,22 @@ bios_getopt()
 			break;
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_consdev_t))
-			{
-				bios_consdev_t *cdp = (bios_consdev_t*)q->ba_arg;
-#include "com.h"
-#include "pccom.h"
-#if NCOM + NPCCOM > 0
-				extern int comdefaultrate; /* ic/com.c */
-				comdefaultrate = cdp->conspeed;
+			if (q->ba_size >= sizeof(bios_consdev_t)) {
+				bios_consdev_t *cdp =
+				    (bios_consdev_t*)q->ba_arg;
+#if NCOM > 0
+				static const int ports[] =
+				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
+				int unit = minor(cdp->consdev);
+				if (major(cdp->consdev) == 8 && unit >= 0 &&
+				    unit < (sizeof(ports)/sizeof(ports[0]))) {
+					comconsunit = unit;
+					comconsaddr = ports[unit];
+					comconsrate = cdp->conspeed;
+
+					/* Probe the serial port this time. */
+					cninit();
+				}
 #endif
 #ifdef BIOS_DEBUG
 				printf(" console 0x%x:%d",
@@ -431,6 +502,12 @@ bios_getopt()
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
+#endif
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
 #endif
 
 		default:
@@ -558,45 +635,6 @@ biosioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	(void)sc;
 
 	return 0;
-}
-
-void
-bioscnprobe(struct consdev *cn)
-{
-#if 0
-	bios_init(I386_BUS_SPACE_MEM); /* XXX */
-	if (!bios_cd.cd_ndevs)
-		return;
-
-	if (0 && bios_call(BOOTC_CHECK, NULL))
-		return;
-
-	cn->cn_pri = CN_NORMAL;
-	cn->cn_dev = makedev(48, 0);
-#endif
-}
-
-void
-bioscninit(struct consdev *cn)
-{
-
-}
-
-void
-bioscnputc(dev_t dev, int ch)
-{
-
-}
-
-int
-bioscngetc(dev_t dev)
-{
-	return -1;
-}
-
-void
-bioscnpollc(dev_t dev, int on)
-{
 }
 
 int
@@ -864,7 +902,7 @@ smbios_info(char * str)
 		 * If the uuid value is all 0xff the uuid is present but not
 		 * set, if its all 0 then the uuid isn't present at all.
 		 */
-		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
+		uuidf = SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
 		for (i = 0; i < sizeof(sys->uuid); i++) {
 			if (sys->uuid[i] != 0xff)
 				uuidf &= ~SMBIOS_UUID_NSET;

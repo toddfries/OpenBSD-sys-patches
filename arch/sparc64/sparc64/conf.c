@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: conf.c,v 1.40 2005/07/31 06:39:07 dlg Exp $	*/
+=======
+/*	$OpenBSD: conf.c,v 1.59 2011/01/14 19:04:08 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -54,11 +58,12 @@
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
+#include "midi.h"
 #include "audio.h"
+#include "video.h"
 #include "vnd.h"
 #include "ccd.h"
 #include "ch.h"
-#include "ss.h"
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -72,6 +77,12 @@
 #include "zstty.h"
 #include "sab.h"
 #include "pcons.h"
+<<<<<<< HEAD
+=======
+#include "vcons.h"
+#include "vcctty.h"
+#include "sbbc.h"
+>>>>>>> origin/master
 #include "com.h"
 #include "lpt.h"
 #include "bpp.h"
@@ -101,11 +112,13 @@ cdev_decl(pci);
 #include "ucom.h"
 #include "uscanner.h"
 
+#include "bthub.h"
+
 #include "pf.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "ksyms.h"
@@ -113,6 +126,8 @@ cdev_decl(xfs_dev);
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -143,7 +158,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 24 */
 	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 struct cdevsw	cdevsw[] =
 {
@@ -154,7 +169,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 4 */
 	cdev_notdef(),			/* 5: tapemaster tape */
 	cdev_notdef(),			/* 6: systech/versatec */
-	cdev_swap_init(1,sw),		/* 7: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 7 was /dev/drum */
 	cdev_notdef(),			/* 8: Archive QIC-11 tape */
 	cdev_notdef(),			/* 9: SMD disk on Xylogics 450/451 */
 	cdev_notdef(),			/* 10: systech multi-terminal board */
@@ -191,15 +206,15 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 41 */
 	cdev_notdef(),			/* 42: SMD disk */
 	cdev_svr4_net_init(NSVR4_NET,svr4_net),	/* 43: svr4 net pseudo-device */
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_notdef(),			/* 45 */
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -214,7 +229,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 56 */
 	cdev_notdef(),			/* 57 */
 	cdev_disk_init(NCD,cd),		/* 58: SCSI CD-ROM */
-	cdev_scanner_init(NSS,ss),	/* 59: SCSI scanner */
+	cdev_notdef(),			/* 59 */
 	cdev_uk_init(NUK,uk),		/* 60: SCSI unknown */
 	cdev_disk_init(NRD,rd),		/* 61: memory disk */
 	cdev_notdef(),			/* 62 */
@@ -223,7 +238,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 65 */
 	cdev_notdef(),			/* 66 */
 	cdev_notdef(),			/* 67 */
-	cdev_notdef(),			/* 68 */
+	cdev_midi_init(NMIDI,midi),	/* 68: /dev/rmidi */
 	cdev_audio_init(NAUDIO,audio),	/* 69: /dev/audio */
 	cdev_openprom_init(1,openprom),	/* 70: /dev/openprom */
 	cdev_tty_init(NMTTY,mtty),	/* 71: magma serial ports */
@@ -281,8 +296,18 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NPCONS,pcons),	/* 122: PROM console */
 	cdev_ptm_init(NPTY,ptm),	/* 123: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
+<<<<<<< HEAD
+=======
+	cdev_tty_init(NVCONS,vcons),	/* 125: virtual console */
+	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
+	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
+>>>>>>> origin/master
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 3; 	/* major device number of memory special file */
 
@@ -450,4 +475,4 @@ int chrtoblktbl[] = {
 	/*121 */	25,
 	/*122 */	NODEV,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfb.c,v 1.17 2006/07/12 15:36:04 martin Exp $	*/
+/*	$OpenBSD: cfb.c,v 1.22 2010/12/26 15:40:58 miod Exp $	*/
 /*	$NetBSD: cfb.c,v 1.7 1996/12/05 01:39:39 cgd Exp $	*/
 
 /*
@@ -212,14 +212,15 @@ cfbattach(parent, self, aux)
 		cfb_getdevconfig(ta->ta_addr, sc->sc_dc);
 	}
 	if (sc->sc_dc->dc_vaddr == NULL) {
-		printf(": couldn't map memory space; punt!\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 	printf(": %d x %d, %dbpp\n", sc->sc_dc->dc_wid, sc->sc_dc->dc_ht,
 	    sc->sc_dc->dc_depth);
 
 	/* Establish an interrupt handler, and clear any pending interrupts */
-        tc_intr_establish(parent, ta->ta_cookie, TC_IPL_TTY, cfbintr, sc);
+        tc_intr_establish(parent, ta->ta_cookie, IPL_TTY, cfbintr, sc,
+	    self->dv_xname);
 	*(volatile u_int32_t *)(sc->sc_dc->dc_vaddr + CFB_IREQCTRL_OFFSET) = 0;
 
 	/* initialize the raster */
@@ -309,7 +310,7 @@ cfbmmap(v, offset, prot)
 
 	if (offset > CFB_SIZE)
 		return (-1);
-	return atop(sc->sc_dc->dc_paddr + offset);
+	return sc->sc_dc->dc_paddr + offset;
 }
 
 int

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_ipsp.h,v 1.134 2006/06/30 21:41:12 deraadt Exp $	*/
+=======
+/*	$OpenBSD: ip_ipsp.h,v 1.146 2010/10/06 22:19:20 mikeb Exp $	*/
+>>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -61,7 +65,7 @@ union sockaddr_union {
 #define	SHA2_384HMAC96_KEYSIZE	48
 #define	SHA2_512HMAC96_KEYSIZE	64
 
-#define	AH_HMAC_HASHLEN		12	/* 96 bits of authenticator */
+#define	AH_HMAC_MAX_HASHLEN	32	/* 256 bits of authenticator for SHA512 */
 #define	AH_HMAC_RPLENGTH	4	/* 32 bits of replay counter */
 #define	AH_HMAC_INITIAL_RPL	1	/* Replay counter initial value */
 
@@ -201,6 +205,7 @@ struct ipsec_policy {
 	u_int8_t		ipo_flags;	/* See IPSP_POLICY_* definitions */
 	u_int8_t		ipo_type;	/* USE/ACQUIRE/... */
 	u_int8_t		ipo_sproto;	/* ESP/AH; if zero, use system dflts */
+	u_int			ipo_rdomain;
 
 	int                     ipo_ref_count;
 
@@ -262,6 +267,7 @@ struct ipsec_policy {
 
 struct route_enc {
 	struct rtentry		*re_rt;
+	u_long			re_tableid; /* u_long because of alignment */
 	struct sockaddr_encap	re_dst;
 };
 
@@ -303,6 +309,8 @@ struct tdb {				/* tunnel descriptor block */
 #define	TDBF_SKIPCRYPTO		0x08000	/* Skip actual crypto processing */
 #define	TDBF_USEDTUNNEL		0x10000	/* Appended a tunnel header in past */
 #define	TDBF_UDPENCAP		0x20000	/* UDP encapsulation */
+#define	TDBF_PFSYNC		0x40000	/* TDB will be synced */
+#define	TDBF_PFSYNC_RPL		0x80000	/* Replay counter should be bumped */
 
 	u_int32_t	tdb_flags;	/* Flags related to this TDB */
 
@@ -342,6 +350,7 @@ struct tdb {				/* tunnel descriptor block */
 	u_int8_t	tdb_sproto;	/* IPsec protocol */
 	u_int8_t	tdb_wnd;	/* Replay window */
 	u_int8_t	tdb_satype;	/* SA type (RFC2367, PF_KEY) */
+	u_int8_t	tdb_updates;	/* pfsync update counter */
 
 	union sockaddr_union	tdb_dst;	/* Destination address */
 	union sockaddr_union	tdb_src;	/* Source address */
@@ -368,6 +377,9 @@ struct tdb {				/* tunnel descriptor block */
 	u_int16_t	tdb_udpencap_port;	/* Peer UDP port */
 
 	u_int16_t	tdb_tag;		/* Packet filter tag */
+	u_int32_t	tdb_tap;		/* Alternate enc(4) interface */
+
+	u_int		tdb_rdomain;		/* Routing domain */
 
 	struct sockaddr_encap   tdb_filter; /* What traffic is acceptable */
 	struct sockaddr_encap   tdb_filtermask; /* And the mask */
@@ -375,12 +387,14 @@ struct tdb {				/* tunnel descriptor block */
 	TAILQ_HEAD(tdb_inp_head_in, inpcb)	tdb_inp_in;
 	TAILQ_HEAD(tdb_inp_head_out, inpcb)	tdb_inp_out;
 	TAILQ_HEAD(tdb_policy_head, ipsec_policy)	tdb_policy_head;
+	TAILQ_ENTRY(tdb)	tdb_sync_entry;
 };
 
 struct tdb_ident {
 	u_int32_t spi;
 	union sockaddr_union dst;
 	u_int8_t proto;
+	u_int rdomain;
 };
 
 struct tdb_crypto {
@@ -390,6 +404,7 @@ struct tdb_crypto {
 	int			tc_protoff;
 	int			tc_skip;
 	caddr_t			tc_ptr;
+	u_int			tc_rdomain;
 };
 
 struct ipsecinit {
@@ -464,7 +479,6 @@ extern struct enc_xform enc_xform_des;
 extern struct enc_xform enc_xform_3des;
 extern struct enc_xform enc_xform_blf;
 extern struct enc_xform enc_xform_cast5;
-extern struct enc_xform enc_xform_skipjack;
 
 extern struct auth_hash auth_hash_hmac_md5_96;
 extern struct auth_hash auth_hash_hmac_sha1_96;
@@ -484,19 +498,20 @@ extern struct xformsw xformsw[], *xformswNXFORMSW;
 
 /* Traverse spi chain and get attributes */
 
-#define	SPI_CHAIN_ATTRIB(have, TDB_DIR, TDBP) do {\
-	int s = spltdb(); \
-	struct tdb *tmptdb = (TDBP); \
-	\
-	(have) = 0; \
-	while (tmptdb && tmptdb->tdb_xform) { \
-	        if (tmptdb == NULL || tmptdb->tdb_flags & TDBF_INVALID) \
-			break; \
-		(have) |= TDB_ATTRIB(tmptdb); \
-		tmptdb = tmptdb->TDB_DIR; \
-	} \
-	splx(s); \
-} while (0)
+#define	SPI_CHAIN_ATTRIB(have, TDB_DIR, TDBP)				\
+do {									\
+	int s = spltdb();						\
+	struct tdb *tmptdb = (TDBP);					\
+									\
+	(have) = 0;							\
+	while (tmptdb && tmptdb->tdb_xform) {				\
+	        if (tmptdb == NULL || tmptdb->tdb_flags & TDBF_INVALID)	\
+			break;						\
+		(have) |= TDB_ATTRIB(tmptdb);				\
+		tmptdb = tmptdb->TDB_DIR;				\
+	}								\
+	splx(s);							\
+} while (/* CONSTCOND */ 0)
 
 /* Misc. */
 extern char *inet_ntoa4(struct in_addr);
@@ -504,24 +519,23 @@ extern char *ipsp_address(union sockaddr_union);
 
 /* TDB management routines */
 extern void tdb_add_inp(struct tdb *, struct inpcb *, int);
-extern u_int32_t reserve_spi(u_int32_t, u_int32_t, union sockaddr_union *,
-    union sockaddr_union *, u_int8_t, int *);
-extern struct tdb *gettdb(u_int32_t, union sockaddr_union *, u_int8_t);
-extern struct tdb *gettdbbyaddr(union sockaddr_union *, u_int8_t,
+extern u_int32_t reserve_spi(u_int, u_int32_t, u_int32_t,
+    union sockaddr_union *, union sockaddr_union *, u_int8_t, int *);
+extern struct tdb *gettdb(u_int, u_int32_t, union sockaddr_union *, u_int8_t);
+extern struct tdb *gettdbbyaddr(u_int, union sockaddr_union *, u_int8_t,
     struct ipsec_ref *, struct ipsec_ref *, struct ipsec_ref *,
     struct mbuf *, int, struct sockaddr_encap *, struct sockaddr_encap *);
-extern struct tdb *gettdbbysrc(union sockaddr_union *, u_int8_t,
+extern struct tdb *gettdbbysrc(u_int, union sockaddr_union *, u_int8_t,
     struct ipsec_ref *, struct ipsec_ref *, struct mbuf *, int,
     struct sockaddr_encap *, struct sockaddr_encap *);
-extern struct tdb *gettdbbysrcdst(u_int32_t, union sockaddr_union *,
+extern struct tdb *gettdbbysrcdst(u_int, u_int32_t, union sockaddr_union *,
     union sockaddr_union *, u_int8_t);
 extern void puttdb(struct tdb *);
 extern void tdb_delete(struct tdb *);
-extern struct tdb *tdb_alloc(void);
+extern struct tdb *tdb_alloc(u_int);
 extern void tdb_free(struct tdb *);
-extern int tdb_hash(u_int32_t, union sockaddr_union *, u_int8_t);
 extern int tdb_init(struct tdb *, u_int16_t, struct ipsecinit *);
-extern int tdb_walk(int (*)(struct tdb *, void *, int), void *);
+extern int tdb_walk(u_int, int (*)(struct tdb *, void *, int), void *);
 
 /* XF_IP4 */
 extern int ipe4_attach(void);
@@ -529,7 +543,7 @@ extern int ipe4_init(struct tdb *, struct xformsw *, struct ipsecinit *);
 extern int ipe4_zeroize(struct tdb *);
 extern int ipip_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 extern void ipe4_input(struct mbuf *, ...);
-extern void ipip_input(struct mbuf *, int, struct ifnet *);
+extern void ipip_input(struct mbuf *, int, struct ifnet *, int);
 
 #ifdef INET
 extern void ip4_input(struct mbuf *, ...);
@@ -538,11 +552,6 @@ extern void ip4_input(struct mbuf *, ...);
 #ifdef INET6
 extern int ip4_input6(struct mbuf **, int *, int);
 #endif /* INET */
-
-/* XF_ETHERIP */
-extern int etherip_output(struct mbuf *, struct tdb *, struct mbuf **,
-    int, int);
-extern void etherip_input(struct mbuf *, ...);
 
 /* XF_AH */
 extern int ah_attach(void);
@@ -558,8 +567,8 @@ extern int ah_massage_headers(struct mbuf **, int, int, int, int);
 #ifdef INET
 extern void ah4_input(struct mbuf *, ...);
 extern int ah4_input_cb(struct mbuf *, ...);
-extern void *ah4_ctlinput(int, struct sockaddr *, void *);
-extern void *udpencap_ctlinput(int, struct sockaddr *, void *);
+extern void *ah4_ctlinput(int, struct sockaddr *, u_int, void *);
+extern void *udpencap_ctlinput(int, struct sockaddr *, u_int, void *);
 #endif /* INET */
 
 #ifdef INET6
@@ -580,7 +589,7 @@ extern int esp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 #ifdef INET
 extern void esp4_input(struct mbuf *, ...);
 extern int esp4_input_cb(struct mbuf *, ...);
-extern void *esp4_ctlinput(int, struct sockaddr *, void *);
+extern void *esp4_ctlinput(int, struct sockaddr *, u_int, void *);
 #endif /* INET */
 
 #ifdef INET6
@@ -617,9 +626,6 @@ extern int tcp_signature_tdb_input(struct mbuf *, struct tdb *, int,
     int);
 extern int tcp_signature_tdb_output(struct mbuf *, struct tdb *,
     struct mbuf **, int, int);
-
-/* Padding */
-extern caddr_t m_pad(struct mbuf *, int);
 
 /* Replay window */
 extern int checkreplaywindow32(u_int32_t, u_int32_t, u_int32_t *, u_int32_t,

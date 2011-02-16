@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uyap.c,v 1.8 2004/12/19 15:20:13 deraadt Exp $ */
+=======
+/*	$OpenBSD: uyap.c,v 1.18 2010/12/27 03:03:50 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: uyap.c,v 1.6 2002/07/11 21:14:37 augustss Exp $	*/
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,7 +52,26 @@ struct uyap_softc {
 	usbd_device_handle	sc_udev;
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uyap);
+=======
+int uyap_match(struct device *, void *, void *); 
+void uyap_attach(struct device *, struct device *, void *); 
+int uyap_detach(struct device *, int); 
+int uyap_activate(struct device *, int); 
+
+struct cfdriver uyap_cd = { 
+	NULL, "uyap", DV_DULL 
+}; 
+
+const struct cfattach uyap_ca = { 
+	sizeof(struct uyap_softc), 
+	uyap_match, 
+	uyap_attach, 
+	uyap_detach, 
+	uyap_activate, 
+};
+>>>>>>> origin/master
 void uyap_attachhook(void *);
 
 USB_MATCH(uyap)
@@ -121,7 +137,22 @@ USB_DETACH(uyap)
 }
 
 int
+<<<<<<< HEAD
 uyap_activate(device_ptr_t self, enum devact act)
+=======
+uyap_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
+	struct uyap_softc *sc = (struct uyap_softc *)self;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+
+	case DVACT_DEACTIVATE:
+		usbd_deactivate(sc->sc_udev);
+		break;
+	}
+
 	return 0;
 }

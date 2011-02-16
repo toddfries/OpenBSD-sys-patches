@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sunkbdvar.h,v 1.9 2005/05/14 15:25:20 miod Exp $	*/
+=======
+/*	$OpenBSD: sunkbdvar.h,v 1.15 2009/01/12 21:11:58 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -31,10 +35,13 @@
  *
  */
 
+#define	SUNKBD_MAX_INPUT_SIZE	64
+
 struct sunkbd_softc {
 	struct device	sc_dev;
 
 	int		(*sc_sendcmd)(void *, u_int8_t *, u_int);
+	void		(*sc_decode)(u_int8_t, u_int *, int *);
 
 	int		sc_leds;		/* LED status */
 	int		sc_id;			/* keyboard type */
@@ -46,12 +53,23 @@ struct sunkbd_softc {
 	struct timeout	sc_bellto;
 
 	struct device	*sc_wskbddev;
+
+#ifdef WSDISPLAY_COMPAT_RAWKBD
+	int		sc_rawkbd;
+	int		sc_nrep;
+	char		sc_rep[SUNKBD_MAX_INPUT_SIZE * 2];
+	struct timeout	sc_rawrepeat_tmo;
+#define	REP_DELAY1	400
+#define	REP_DELAYN	100
+#endif
 };
 
 extern struct wskbd_accessops sunkbd_accessops;
 
+void	sunkbd_attach(struct sunkbd_softc *, struct wskbddev_attach_args *);
 void	sunkbd_bellstop(void *);
 void	sunkbd_decode(u_int8_t, u_int *, int *);
+void	sunkbd_input(struct sunkbd_softc *, u_int8_t *, u_int);
 void	sunkbd_raw(struct sunkbd_softc *, u_int8_t);
 int	sunkbd_setclick(struct sunkbd_softc *, int);
 
@@ -71,3 +89,4 @@ extern struct wskbd_mapdata sunkbd5_keymapdata;
 
 #define	MAXSUNLAYOUT	0x062
 extern const int sunkbd_layouts[MAXSUNLAYOUT];
+extern const u_int8_t sunkbd_rawmap[0x80];

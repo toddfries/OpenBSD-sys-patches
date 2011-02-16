@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: hmevar.h,v 1.8 2004/08/08 19:01:20 brad Exp $	*/
+=======
+/*	$OpenBSD: hmevar.h,v 1.15 2009/10/15 17:54:54 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: hmevar.h,v 1.6 2000/09/28 10:56:57 tsutsui Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -44,11 +41,11 @@
 #define	HME_RX_RING_MAX		256
 #define	HME_TX_RING_MAX		256
 #define	HME_RX_PKTSIZE		1600
+#define	HME_TX_NSEGS		16
 
 struct hme_sxd {
 	struct mbuf *sd_mbuf;		/* descriptor mbuf */
 	bus_dmamap_t sd_map;		/* descriptor dmamap */
-	int sd_loaded;			/* descriptor dmamap loaded? */
 };
 
 struct hme_ring {
@@ -86,8 +83,6 @@ struct hme_softc {
 	struct hme_ring		sc_rb;
 
 	int			sc_debug;
-	void			*sc_sh;		/* shutdownhook cookie */
-	short			sc_if_flags;
 
 	/* Special hardware hooks */
 	void	(*sc_hwreset)(struct hme_softc *);
@@ -96,11 +91,12 @@ struct hme_softc {
 	struct hme_sxd sc_txd[HME_TX_RING_MAX], sc_rxd[HME_RX_RING_MAX];
 	bus_dmamap_t	sc_rxmap_spare;
 	int	sc_tx_cnt, sc_tx_prod, sc_tx_cons;
-	int	sc_last_rd;
+	int	sc_rx_cnt, sc_rx_prod, sc_rx_cons;
 	u_int32_t sc_tcvr;
 };
 
 
 void	hme_config(struct hme_softc *);
+void	hme_unconfig(struct hme_softc *);
 void	hme_reset(struct hme_softc *);
 int	hme_intr(void *);

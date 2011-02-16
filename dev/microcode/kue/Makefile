@@ -1,16 +1,30 @@
+<<<<<<< HEAD
 # $OpenBSD: Makefile,v 1.6 2006/11/07 23:52:45 deraadt Exp $
+=======
+# $OpenBSD: Makefile,v 1.10 2010/01/30 20:48:20 miod Exp $
+>>>>>>> origin/master
 
 NOPROG=
 NOMAN=
 CC=${HOSTCC}
 
 # USB capable systems only
+<<<<<<< HEAD
 .if (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \
     (${MACHINE} == "amd64") || (${MACHINE} == "armish") || \
     (${MACHINE} == "cats") || (${MACHINE} == "hppa") || \
     (${MACHINE} == "hppa64") || (${MACHINE} == "i386") || \
     (${MACHINE} == "sgi") || (${MACHINE} == "sparc64") || \
     (${MACHINE} == "zaurus") || (${MACHINE} == "landisk")
+=======
+.if (${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
+    ${MACHINE} == "armish" || ${MACHINE} == "hppa" || \
+    ${MACHINE} == "hppa64" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "landisk" || ${MACHINE} == "loongson" || \
+    ${MACHINE} == "palm" || ${MACHINE} == "sgi" || \
+    ${MACHINE} == "sparc64" || ${MACHINE} == "zaurus")
+>>>>>>> origin/master
 
 FIRM= 	kue
 

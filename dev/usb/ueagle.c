@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ueagle.c,v 1.11 2006/06/23 06:27:11 miod Exp $	*/
+=======
+/*	$OpenBSD: ueagle.c,v 1.32 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003-2006
@@ -25,7 +29,6 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/sysctl.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
@@ -119,6 +122,7 @@ Static int	ueagle_open_vcc(struct ueagle_softc *,
 		    struct atm_pseudoioctl *);
 Static int	ueagle_close_vcc(struct ueagle_softc *,
 		    struct atm_pseudoioctl *);
+<<<<<<< HEAD
 Static int	ueagle_ioctl(struct ifnet *, u_long, caddr_t);
 Static int	ueagle_open_pipes(struct ueagle_softc *);
 Static void	ueagle_close_pipes(struct ueagle_softc *);
@@ -126,6 +130,30 @@ Static int	ueagle_init(struct ifnet *);
 Static void	ueagle_stop(struct ifnet *, int);
 
 USB_DECLARE_DRIVER(ueagle);
+=======
+int		ueagle_ioctl(struct ifnet *, u_long, caddr_t);
+int		ueagle_open_pipes(struct ueagle_softc *);
+void		ueagle_close_pipes(struct ueagle_softc *);
+int		ueagle_init(struct ifnet *);
+void		ueagle_stop(struct ifnet *, int);
+
+int ueagle_match(struct device *, void *, void *); 
+void ueagle_attach(struct device *, struct device *, void *); 
+int ueagle_detach(struct device *, int); 
+int ueagle_activate(struct device *, int); 
+
+struct cfdriver ueagle_cd = { 
+	NULL, "ueagle", DV_DULL 
+}; 
+
+const struct cfattach ueagle_ca = { 
+	sizeof(struct ueagle_softc), 
+	ueagle_match, 
+	ueagle_attach, 
+	ueagle_detach, 
+	ueagle_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(ueagle)
 {
@@ -200,11 +228,11 @@ USB_ATTACH(ueagle)
 	    USBDEVNAME(sc->sc_dev), addr[0], addr[1], addr[2], addr[3],
 	    addr[4], addr[5]);
 
-	usb_init_task(&sc->sc_swap_task, ueagle_loadpage, sc);
+	usb_init_task(&sc->sc_swap_task, ueagle_loadpage, sc,
+	    USB_TASK_TYPE_GENERIC);
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_SIMPLEX;
-	ifp->if_init = ueagle_init;
 	ifp->if_ioctl = ueagle_ioctl;
 	ifp->if_start = ueagle_start;
 	IFQ_SET_READY(&ifp->if_snd);
@@ -219,11 +247,14 @@ USB_ATTACH(ueagle)
 #if NBPFILTER > 0
 	bpfattach(&ifp->if_bpf, ifp, DLT_RAW, 0);
 #endif
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(ueagle)
@@ -234,7 +265,6 @@ USB_DETACH(ueagle)
 	if (sc->fw != NULL)
 		return 0; /* shortcut for pre-firmware devices */
 
-	sc->gone = 1;
 	ueagle_stop(ifp, 1);
 
 	/* wait for stat thread to exit properly */
@@ -248,10 +278,15 @@ USB_DETACH(ueagle)
 		    USBDEVNAME(sc->sc_dev)));
 	}
 
+<<<<<<< HEAD
 	if_detach(ifp);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
+=======
+	if (ifp->if_softc != NULL)
+		if_detach(ifp);
+>>>>>>> origin/master
 
 	return 0;
 }
@@ -309,6 +344,9 @@ ueagle_loadpage(void *xsc)
 	uint32_t pageoffset;
 	uint8_t *p;
 	int i;
+
+	if (usbd_is_dying(sc->sc_udev))
+		return;
 
 	p = sc->dsp;
 	pagecount = *p++;
@@ -568,6 +606,8 @@ ueagle_stat_thread(void *arg)
 			break;
 
 		usbd_delay_ms(sc->sc_udev, 5000);
+		if (usbd_is_dying(sc->sc_udev))
+			break;
 	}
 
 	wakeup(sc->stat_thread);
@@ -601,11 +641,16 @@ ueagle_boot(struct ueagle_softc *sc)
 	sc->ovl = 0;
 	ueagle_loadpage(sc);
 
-	/* wait until modem reaches operationnal state */
+	/* wait until modem reaches operational state */
 	error = tsleep(UEAGLE_COND_READY(sc), PZERO | PCATCH, "boot", 10 * hz);
 	if (error != 0) {
+<<<<<<< HEAD
 		printf("%s: timeout waiting for operationnal state\n",
 		    USBDEVNAME(sc->sc_dev));
+=======
+		printf("%s: timeout waiting for operational state\n",
+		    sc->sc_dev.dv_xname);
+>>>>>>> origin/master
 		return error;
 	}
 
@@ -1449,8 +1494,13 @@ ueagle_stop(struct ifnet *ifp, int disable)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
+<<<<<<< HEAD
 Static int
 ueagle_activate(device_ptr_t self, enum devact act)
+=======
+int
+ueagle_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct ueagle_softc *sc = (struct ueagle_softc *)self;
 
@@ -1459,8 +1509,12 @@ ueagle_activate(device_ptr_t self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
+<<<<<<< HEAD
 		if_deactivate(&sc->sc_if);
 		sc->gone = 1;
+=======
+		usbd_deactivate(sc->sc_udev);
+>>>>>>> origin/master
 		break;
 	}
 

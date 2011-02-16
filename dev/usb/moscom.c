@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: moscom.c,v 1.1 2006/10/26 04:14:09 jsg Exp $	*/
+=======
+/*	$OpenBSD: moscom.c,v 1.15 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -145,11 +149,18 @@ struct moscom_softc {
 	u_char			sc_dying;
 };
 
+<<<<<<< HEAD
 Static void	moscom_get_status(void *, int, u_char *, u_char *);
 Static void	moscom_set(void *, int, int, int);
 Static int	moscom_param(void *, int, struct termios *);
 Static int	moscom_open(void *, int);
 Static int	moscom_cmd(struct moscom_softc *, int, int);	
+=======
+void	moscom_set(void *, int, int, int);
+int	moscom_param(void *, int, struct termios *);
+int	moscom_open(void *, int);
+int	moscom_cmd(struct moscom_softc *, int, int);	
+>>>>>>> origin/master
 
 struct ucom_methods moscom_methods = {
 	NULL,
@@ -166,7 +177,26 @@ static const struct usb_devno moscom_devs[] = {
 	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7703 }
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(moscom);
+=======
+int moscom_match(struct device *, void *, void *); 
+void moscom_attach(struct device *, struct device *, void *); 
+int moscom_detach(struct device *, int); 
+int moscom_activate(struct device *, int); 
+
+struct cfdriver moscom_cd = { 
+	NULL, "moscom", DV_DULL 
+}; 
+
+const struct cfattach moscom_ca = { 
+	sizeof(struct moscom_softc), 
+	moscom_match, 
+	moscom_attach, 
+	moscom_detach, 
+	moscom_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(moscom)
 {
@@ -248,9 +278,12 @@ USB_ATTACH(moscom)
 	uca.methods = &moscom_methods;
 	uca.arg = sc;
 	uca.info = NULL;
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
+=======
+>>>>>>> origin/master
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
 
@@ -262,20 +295,26 @@ USB_DETACH(moscom)
 	USB_DETACH_START(moscom, sc);
 	int rv = 0;
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 moscom_activate(device_ptr_t self, enum devact act)
+=======
+moscom_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct moscom_softc *sc = (struct moscom_softc *)self;
 	int rv = 0;
@@ -410,6 +449,7 @@ moscom_param(void *vsc, int portno, struct termios *t)
 	return (0);
 }
 
+<<<<<<< HEAD
 Static void
 moscom_get_status(void *vsc, int portno, u_char *lsr, u_char *msr)
 {
@@ -422,6 +462,9 @@ moscom_get_status(void *vsc, int portno, u_char *lsr, u_char *msr)
 }
 
 Static int
+=======
+int
+>>>>>>> origin/master
 moscom_cmd(struct moscom_softc *sc, int reg, int val)
 {
 	usb_device_request_t req;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: machdep.c,v 1.86 2006/12/30 16:25:41 kettenis Exp $	*/
+=======
+/*	$OpenBSD: machdep.c,v 1.127 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -104,10 +101,6 @@
 #include <sys/exec_elf.h>
 #include <dev/rndvar.h>
 
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-
 #define _SPARC_BUS_DMA_PRIVATE
 #include <machine/autoconf.h>
 #include <machine/bus.h>
@@ -167,7 +160,6 @@ int     _bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_dma_tag_t,
 int bus_space_debug = 0;
 
 struct vm_map *exec_map = NULL;
-extern vaddr_t avail_end;
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -188,6 +180,9 @@ int	bufpages = BUFPAGES;
 int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 int	physmem;
 u_long	_randseed;
@@ -222,7 +217,6 @@ extern int64_t cecclast;
 int   safepri = 0;
 
 void blink_led_timeout(void *);
-caddr_t	allocsys(caddr_t);
 void	dumpsys(void);
 void	stackdump(void);
 
@@ -232,10 +226,13 @@ void	stackdump(void);
 void
 cpu_startup()
 {
+<<<<<<< HEAD
 	unsigned i;
 	caddr_t v;
 	long sz;
 	int base, residual;
+=======
+>>>>>>> origin/master
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -255,6 +252,7 @@ cpu_startup()
 	 */
 	printf(version);
 	/*identifycpu();*/
+<<<<<<< HEAD
 	printf("total memory = %ld\n", (long)physmem * PAGE_SIZE);
 	/*
 	 * Find out how much space we need, allocate it,
@@ -312,6 +310,10 @@ cpu_startup()
 		}
 	}
 	pmap_update(pmap_kernel());
+=======
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
+>>>>>>> origin/master
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -338,6 +340,7 @@ cpu_startup()
 #endif
 }
 
+<<<<<<< HEAD
 caddr_t
 allocsys(caddr_t v)
 {
@@ -377,6 +380,8 @@ allocsys(caddr_t v)
 	return (v);
 }
 
+=======
+>>>>>>> origin/master
 /*
  * Set up registers on exec.
  */
@@ -404,8 +409,13 @@ setregs(p, pack, stack, retval)
 	 * Setup the process StackGhost cookie which will be XORed into
 	 * the return pointer as register windows are over/underflowed.
 	 */
+<<<<<<< HEAD
 	p->p_addr->u_pcb.pcb_wcookie = ((u_int64_t)arc4random() << 32) |
 	    arc4random();
+=======
+	arc4random_buf(&p->p_addr->u_pcb.pcb_wcookie,
+	    sizeof(p->p_addr->u_pcb.pcb_wcookie));
+>>>>>>> origin/master
 
 	/* The cookie needs to guarantee invalid alignment after the XOR. */
 	switch (p->p_addr->u_pcb.pcb_wcookie % 3) {
@@ -421,9 +431,6 @@ setregs(p, pack, stack, retval)
 		    (p->p_addr->u_pcb.pcb_wcookie & ~0x3);
 		break;
 	}
-
-	/* Don't allow misaligned code by default */
-	p->p_md.md_flags &= ~MDP_FIXALIGN;
 
 	/*
 	 * Set the registers to 0 except for:
@@ -744,6 +751,20 @@ sys_sigreturn(p, v, retval)
 	return (EJUSTRETURN);
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+	cpu_unidle(p->p_cpu);
+}
+
+>>>>>>> origin/master
 int	waittime = -1;
 struct pcb dumppcb;
 
@@ -925,6 +946,10 @@ dumpsys()
 	}
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	psize = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
@@ -1417,7 +1442,6 @@ _bus_dmamap_sync(t, t0, map, offset, len, ops)
 		membar(MemIssue);
 }
 
-extern paddr_t   vm_first_phys, vm_num_phys;
 /*
  * Common function for DMA-safe memory allocation.  May be called
  * by bus-specific DMA memory allocation functions.
@@ -1431,14 +1455,11 @@ _bus_dmamem_alloc(t, t0, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	int *rsegs;
 	int flags;
 {
-	vaddr_t low, high;
 	struct pglist *mlist;
-	int error;
+	int error, plaflag;
 
 	/* Always round the size. */
 	size = round_page(size);
-	low = vm_first_phys;
-	high = vm_first_phys + vm_num_phys - PAGE_SIZE;
 
 	if ((mlist = malloc(sizeof(*mlist), M_DEVBUF,
 	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
@@ -1457,9 +1478,13 @@ _bus_dmamem_alloc(t, t0, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
 	TAILQ_INIT(mlist);
-	error = uvm_pglistalloc(size, low, high,
-	    alignment, boundary, mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	error = uvm_pglistalloc(size, (paddr_t)0, (paddr_t)-1,
+	    alignment, boundary, mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 
@@ -1495,8 +1520,10 @@ _bus_dmamem_free(t, t0, segs, nsegs)
 	int nsegs;
 {
 
+#ifdef DIAGNOSTIC
 	if (nsegs != 1)
 		panic("bus_dmamem_free: nsegs = %d", nsegs);
+#endif
 
 	/*
 	 * Return the list of pages back to the VM system.
@@ -1518,42 +1545,54 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 	caddr_t *kvap;
 	int flags;
 {
+	struct vm_page *m;
 	vaddr_t va, sva;
-	int r, cbit;
-	size_t oversize;
-	u_long align;
+	size_t ssize;
+	bus_addr_t addr, cbit;
+	struct pglist *mlist;
+	int error;
 
+#ifdef DIAGNOSTIC
 	if (nsegs != 1)
 		panic("_bus_dmamem_map: nsegs = %d", nsegs);
-
-	cbit = PMAP_NC;
-	align = PAGE_SIZE;
+#endif
 
 	size = round_page(size);
-
-	/*
-	 * Find a region of kernel virtual addresses that can accommodate
-	 * our aligment requirements.
-	 */
-	oversize = size + align - PAGE_SIZE;
-	r = uvm_map(kernel_map, &sva, oversize, NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	    UVM_ADV_NORMAL, 0));
-	if (r != 0)
+	va = uvm_km_valloc(kernel_map, size);
+	if (va == 0)
 		return (ENOMEM);
 
-	/* Compute start of aligned region */
-	va = sva;
-	va += ((segs[0].ds_addr & (align - 1)) + align - va) & (align - 1);
-
-	/* Return excess virtual addresses */
-	if (va != sva)
-		uvm_unmap(kernel_map, sva, va);
-	if (va + size != sva + oversize)
-		uvm_unmap(kernel_map, va + size, sva + oversize);
-
-
 	*kvap = (caddr_t)va;
+
+	cbit = 0;
+	if (flags & BUS_DMA_NOCACHE)
+		cbit |= PMAP_NC;
+
+	sva = va;
+	ssize = size;
+	mlist = segs[0]._ds_mlist;
+	TAILQ_FOREACH(m, mlist, pageq) {
+#ifdef DIAGNOSTIC
+		if (size == 0)
+			panic("_bus_dmamem_map: size botch");
+#endif
+		addr = VM_PAGE_TO_PHYS(m);
+		error = pmap_enter(pmap_kernel(), va, addr | cbit,
+		    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+		    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+		if (error) {
+			/*
+			 * Clean up after ourselves.
+			 * XXX uvm_wait on WAITOK
+			 */
+			pmap_update(pmap_kernel());
+			uvm_km_free(kernel_map, va, ssize);
+			return (error);
+		}
+		va += PAGE_SIZE;
+		size -= PAGE_SIZE;
+	}
+	pmap_update(pmap_kernel());
 
 	return (0);
 }
@@ -1575,7 +1614,7 @@ _bus_dmamem_unmap(t, t0, kva, size)
 #endif
 
 	size = round_page(size);
-	uvm_unmap(kernel_map, (vaddr_t)kva, (vaddr_t)kva + size);
+	uvm_km_free(kernel_map, (vaddr_t)kva, size);
 }
 
 /*
@@ -1607,7 +1646,7 @@ _bus_dmamem_mmap(t, t0, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */

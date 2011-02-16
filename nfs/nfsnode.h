@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nfsnode.h,v 1.24 2007/03/18 15:05:33 mickey Exp $	*/
+=======
+/*	$OpenBSD: nfsnode.h,v 1.39 2009/12/15 15:53:48 beck Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -53,7 +57,7 @@ struct sillyrename {
 	struct	ucred *s_cred;
 	struct	vnode *s_dvp;
 	long	s_namlen;
-	char	s_name[20];
+	char	s_name[24];
 };
 
 /*
@@ -86,13 +90,13 @@ struct nfsdmap {
  *     be well aligned and, therefore, tightly packed.
  */
 struct nfsnode {
-	LIST_ENTRY(nfsnode)	n_hash;		/* Hash chain */
+	RB_ENTRY(nfsnode)	n_entry;	/* filehandle/node tree. */
 	u_quad_t		n_size;		/* Current size of file */
 	u_quad_t		n_brev;		/* Modify rev when cached */
 	u_quad_t		n_lrev;		/* Modify rev for lease */
 	struct vattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
-	time_t			n_mtime;	/* Prev modify time. */
+	struct timespec 	n_mtime;	/* Prev modify time. */
 	time_t			n_ctime;	/* Prev create time. */
 	time_t			n_expiry;	/* Lease expiry time */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
@@ -114,6 +118,10 @@ struct nfsnode {
 	short			n_fhsize;	/* size in bytes, of fh */
 	short			n_flag;		/* Flag for locking.. */
 	nfsfh_t			n_fh;		/* Small File Handle */
+	time_t			n_accstamp;	/* Access cache timestamp */
+	uid_t			n_accuid;	/* Last access requester */
+	int			n_accmode;	/* Last mode requested */
+	int			n_accerror;	/* Last returned error */
 	struct ucred		*n_rcred;
 	struct ucred		*n_wcred;
 
@@ -149,6 +157,8 @@ struct nfsnode {
 #define	NUPD		0x0200	/* Special file updated */
 #define	NCHG		0x0400	/* Special file times changed */
 
+#define NFS_INVALIDATE_ATTRCACHE(np)	((np)->n_attrstamp = 0)
+
 /*
  * Convert between nfsnode pointers and vnode pointers
  */
@@ -159,6 +169,7 @@ struct nfsnode {
  * Queue head for nfsiod's
  */
 extern TAILQ_HEAD(nfs_bufqhead, buf) nfs_bufq;
+extern uint32_t nfs_bufqlen, nfs_bufqmax;
 
 #ifdef _KERNEL
 /*

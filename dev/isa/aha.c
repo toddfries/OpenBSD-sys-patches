@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: aha.c,v 1.55 2005/12/03 17:13:22 krw Exp $	*/
+=======
+/*	$OpenBSD: aha.c,v 1.73 2010/08/07 03:50:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -57,7 +61,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <uvm/uvm.h>
@@ -73,15 +76,11 @@
 #include <dev/isa/isadmavar.h>
 #include <dev/isa/ahareg.h>
 
-#ifndef DDB
-#define Debugger() panic("should call debugger here (aha1542.c)")
-#endif /* ! DDB */
-
 /* XXX fixme:
  * on i386 at least, xfers to/from user memory
  * cannot be serviced at interrupt time.
  */
-#ifdef i386
+#ifdef __i386__
 #define VOLATILE_XS(xs) \
 	((xs)->datalen > 0 && (xs)->bp == NULL && \
 	((xs)->flags & SCSI_POLL) == 0)
@@ -154,8 +153,8 @@ void aha_done(struct aha_softc *, struct aha_ccb *);
 int aha_find(struct isa_attach_args *, struct aha_softc *, int);
 void aha_init(struct aha_softc *);
 void aha_inquire_setup_information(struct aha_softc *);
-void ahaminphys(struct buf *);
-int aha_scsi_cmd(struct scsi_xfer *);
+void ahaminphys(struct buf *, struct scsi_link *);
+void aha_scsi_cmd(struct scsi_xfer *);
 int aha_poll(struct aha_softc *, struct scsi_xfer *, int);
 void aha_timeout(void *arg);
 
@@ -164,14 +163,6 @@ struct scsi_adapter aha_switch = {
 	ahaminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device aha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 int	aha_isapnp_probe(struct device *, void *, void *);
@@ -404,7 +395,6 @@ ahaattach(parent, self, aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &aha_switch;
-	sc->sc_link.device = &aha_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -816,7 +806,7 @@ aha_start_ccbs(sc)
 
 		if ((ccb->xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&ccb->xs->stimeout, aha_timeout, ccb);
-			timeout_add(&ccb->xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&ccb->xs->stimeout, ccb->timeout);
 		}
 
 		++sc->sc_mbofull;
@@ -845,19 +835,12 @@ aha_done(sc, ccb)
 	 * into the xfer and call whoever started it
 	 */
 #ifdef AHADIAG
-	if (ccb->flags & CCB_SENDING) {
-		printf("%s: exiting ccb still in transit!\n",
-		    sc->sc_dev.dv_xname);
-		Debugger();
-		return;
-	}
+	if (ccb->flags & CCB_SENDING)
+		panic("%s: exiting ccb still in transit!", sc->sc_dev.dv_xname);
 #endif
-	if ((ccb->flags & CCB_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n",
-		    sc->sc_dev.dv_xname);
-		Debugger();
-		return;
-	}
+	if ((ccb->flags & CCB_ALLOC) == 0)
+		panic("%s: exiting ccb not allocated!", sc->sc_dev.dv_xname);
+
 	if (xs->error == XS_NOERROR) {
 		if (ccb->host_stat != AHA_OK) {
 			switch (ccb->host_stat) {
@@ -892,7 +875,6 @@ aha_done(sc, ccb)
 		} else
 			xs->resid = 0;
 	}
-	xs->flags |= ITSDONE;
 
 	if (VOLATILE_XS(xs)) {
 		wakeup(ccb);
@@ -1122,10 +1104,10 @@ aha_init(sc)
 	 */
 	size = round_page(sizeof(struct aha_mbx));
 	TAILQ_INIT(&pglist);
-	if (uvm_pglistalloc(size, 0, 0xffffff, PAGE_SIZE, 0, &pglist, 1, 0) ||
-	    uvm_map(kernel_map, &va, size, NULL, UVM_UNKNOWN_OFFSET, 0,
-		UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_NONE,
-			UVM_ADV_RANDOM, 0)))
+	if (uvm_pglistalloc(size, 0, 0xffffff, PAGE_SIZE, 0, &pglist, 1,
+	    UVM_PLA_NOWAIT) || uvm_map(kernel_map, &va, size, NULL,
+	    UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
+	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)))
 		panic("aha_init: could not allocate mailbox");
 
 	wmbx = (struct aha_mbx *)va;
@@ -1239,10 +1221,8 @@ noinquire:
 }
 
 void
-ahaminphys(bp)
-	struct buf *bp;
+ahaminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((AHA_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((AHA_NSEG - 1) << PGSHIFT);
 	minphys(bp);
@@ -1252,7 +1232,7 @@ ahaminphys(bp)
  * start a scsi operation given the command and the data address. Also needs
  * the unit, target and lu.
  */
-int
+void
 aha_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -1261,10 +1241,6 @@ aha_scsi_cmd(xs)
 	struct aha_ccb *ccb;
 	struct aha_scat_gath *sg;
 	int seg, flags;
-#ifdef	TFS
-	struct iovec *iovp;
-	int datalen;
-#endif
 	int s;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("aha_scsi_cmd\n"));
@@ -1275,7 +1251,9 @@ aha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((ccb = aha_get_ccb(sc, flags)) == NULL) {
-		return (TRY_AGAIN_LATER);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 	ccb->xs = xs;
 	ccb->timeout = xs->timeout;
@@ -1297,40 +1275,22 @@ aha_scsi_cmd(xs)
 	if (xs->datalen) {
 		sg = ccb->scat_gath;
 		seg = 0;
-#ifdef	TFS
-		if (flags & SCSI_DATA_UIO) {
-			iovp = ((struct uio *)xs->data)->uio_iov;
-			datalen = ((struct uio *)xs->data)->uio_iovcnt;
-			xs->datalen = 0;
-			while (datalen && seg < AHA_NSEG) {
-				ltophys(iovp->iov_base, sg->seg_addr);
-				ltophys(iovp->iov_len, sg->seg_len);
-				xs->datalen += iovp->iov_len;
-				SC_DEBUGN(sc_link, SDEV_DB4, ("UIO(0x%x@0x%x)",
-				    iovp->iov_len, iovp->iov_base));
-				sg++;
-				iovp++;
-				seg++;
-				datalen--;
-			}
-		} else
-#endif /* TFS */
-		{
-			/*
-			 * Set up the scatter-gather block.
-			 */
-			if (bus_dmamap_load(sc->sc_dmat, ccb->dmam, xs->data,
-			    xs->datalen, NULL, BUS_DMA_NOWAIT) != 0) {
-				aha_free_ccb(sc, ccb);
-				xs->error = XS_DRIVER_STUFFUP;
-				return (TRY_AGAIN_LATER);
-			}
-			for (seg = 0; seg < ccb->dmam->dm_nsegs; seg++) {
-				ltophys(ccb->dmam->dm_segs[seg].ds_addr,
-				    sg[seg].seg_addr);
-				ltophys(ccb->dmam->dm_segs[seg].ds_len,
-				    sg[seg].seg_len);
-			}
+
+		/*
+		 * Set up the scatter-gather block.
+		 */
+		if (bus_dmamap_load(sc->sc_dmat, ccb->dmam, xs->data,
+		    xs->datalen, NULL, BUS_DMA_NOWAIT) != 0) {
+			aha_free_ccb(sc, ccb);
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
+			return;
+		}
+		for (seg = 0; seg < ccb->dmam->dm_nsegs; seg++) {
+			ltophys(ccb->dmam->dm_segs[seg].ds_addr,
+			    sg[seg].seg_addr);
+			ltophys(ccb->dmam->dm_segs[seg].ds_len,
+			    sg[seg].seg_len);
 		}
 		if (flags & SCSI_DATA_OUT)
 			bus_dmamap_sync(sc->sc_dmat, ccb->dmam, 0,
@@ -1385,12 +1345,12 @@ aha_scsi_cmd(xs)
 		aha_free_ccb(sc, ccb);
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/*
 	 * If we can't use interrupts, poll on completion
@@ -1400,7 +1360,6 @@ aha_scsi_cmd(xs)
 		if (aha_poll(sc, xs, ccb->timeout))
 			aha_timeout(ccb);
 	}
-	return (COMPLETE);
 }
 
 /*
@@ -1441,11 +1400,11 @@ aha_timeout(arg)
 	int s;
 
 	s = splbio();
-	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
-	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 	xs = ccb->xs;
 	sc_link = xs->sc_link;
 	sc = sc_link->adapter_softc;
+	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
+	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 	sc_print_addr(sc_link);
 	printf("timed out");
@@ -1455,10 +1414,8 @@ aha_timeout(arg)
 	 * If The ccb's mbx is not free, then the board has gone south?
 	 */
 	aha_collect_mbo(sc);
-	if (ccb->flags & CCB_SENDING) {
-		printf("%s: not taking commands!\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (ccb->flags & CCB_SENDING)
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

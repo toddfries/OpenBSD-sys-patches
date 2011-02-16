@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: audiovar.h,v 1.8 2000/05/24 13:44:18 ho Exp $	*/
+=======
+/*	$OpenBSD: audiovar.h,v 1.13 2010/09/21 20:08:11 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: audiovar.h,v 1.18 1998/03/03 09:16:16 augustss Exp $	*/
 
 /*
@@ -66,8 +70,6 @@ struct audio_ringbuffer {
 	u_long	drops;		/* missed samples from over/underrun */
 	u_long	pdrops;		/* paused samples */
 	char	pause;		/* transfer is paused */
-	char	copying;	/* data is being copied */
-	char	needfill;	/* buffer needs filling when copying is done */
 	char	mmapped;	/* device is mmap()-ed */
 };
 
@@ -121,6 +123,9 @@ struct audio_softc {
 	u_char	sc_rbus;	/* input dma in progress */
 	u_char	sc_pbus;	/* output dma in progress */
 
+	u_char	sc_rqui;	/* input dma quiesced */
+	u_char	sc_pqui;	/* output dma quiesced */
+
 	struct	audio_params sc_pparams;	/* play encoding parameters */
 	struct	audio_params sc_rparams;	/* record encoding parameters */
 
@@ -135,6 +140,13 @@ struct audio_softc {
 
 	int     sc_refcnt;
 	int     sc_dying;
+
+	int	sc_quiesce;
+#define	AUDIO_QUIESCE_START	1
+#define	AUDIO_QUIESCE_SILENT	2
+	struct timeout sc_resume_to;
+	struct workq_task sc_resume_task;
+	u_char	sc_mute;
 
 #ifdef AUDIO_INTR_TIME
 	u_long	sc_pfirstintr;	/* first time we saw a play interrupt */

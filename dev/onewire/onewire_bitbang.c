@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: onewire_bitbang.c,v 1.2 2010/07/02 03:13:42 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -58,6 +62,7 @@ onewire_bb_bit(const struct onewire_bbops *ops, void *arg, int value)
 	ops->bb_tx(arg);
 	ops->bb_set(arg, 0);
 	DELAY(2);
+	rv = 0;
 	if (value) {
 		ops->bb_set(arg, 1);
 		ops->bb_rx(arg);

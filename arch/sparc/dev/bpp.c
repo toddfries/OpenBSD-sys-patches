@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bpp.c,v 1.3 2002/03/14 01:26:42 millert Exp $	*/
+=======
+/*	$OpenBSD: bpp.c,v 1.5 2010/08/06 00:00:38 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.
@@ -273,7 +277,9 @@ bppwrite(dev, uio, flags)
 	int error = 0;
 
 	while ((n = min(BPP_BSIZE, uio->uio_resid)) != 0) {
-		uiomove(bpp->sc_cp = bpp->sc_inbuf->b_data, n, uio);
+		error = uiomove(bpp->sc_cp = bpp->sc_inbuf->b_data, n, uio);
+		if (error != 0)
+			return error;
 		bpp->sc_count = n;
 		error = bpppushbytes(bpp);
 		if (error) {

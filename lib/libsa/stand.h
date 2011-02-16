@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: stand.h,v 1.44 2006/01/06 18:53:05 millert Exp $	*/
+=======
+/*	$OpenBSD: stand.h,v 1.50 2010/12/06 22:51:46 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-
@@ -48,7 +52,6 @@ struct open_file;
 /*
  * Useful macros
  */
-#define NENTS(x)	sizeof(x)/sizeof(x[0])
 /* don't define if libkern included */
 #ifndef LIBKERN_INLINE
 #define	max(a,b)	(((a)>(b))? (a) : (b))
@@ -93,7 +96,6 @@ struct devsw {
 extern struct devsw devsw[];	/* device array */
 extern int ndevs;		/* number of elements in devsw[] */
 
-extern struct consdev constab[];
 extern struct consdev *cn_tab;
 
 struct open_file {

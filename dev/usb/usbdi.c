@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbdi.c,v 1.27 2006/08/14 00:32:10 pascoe Exp $ */
+=======
+/*	$OpenBSD: usbdi.c,v 1.43 2011/01/16 22:35:29 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: usbdi.c,v 1.103 2002/09/27 15:37:38 provos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.c,v 1.28 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -89,13 +86,71 @@ Static int usbd_nbuses = 0;
 void
 usbd_init(void)
 {
+<<<<<<< HEAD
+=======
+	if (usbd_nbuses == 0) {
+		rw_init(&usbpalock, "usbpalock");
+		usb_begin_tasks();
+	}
+>>>>>>> origin/master
 	usbd_nbuses++;
 }
 
 void
 usbd_finish(void)
 {
-	--usbd_nbuses;
+	if (--usbd_nbuses == 0)
+		usb_end_tasks();
+}
+
+int
+usbd_is_dying(usbd_device_handle dev)
+{
+	return (dev->dying || dev->bus->dying);
+}
+
+void
+usbd_deactivate(usbd_device_handle dev)
+{
+	dev->dying = 1;
+}
+
+void
+usbd_ref_incr(usbd_device_handle dev)
+{
+	dev->ref_cnt++;
+}
+
+void
+usbd_ref_decr(usbd_device_handle dev)
+{
+	if (--dev->ref_cnt == 0 && dev->dying)
+		wakeup(&dev->ref_cnt);
+}
+
+void
+usbd_ref_wait(usbd_device_handle dev)
+{
+	while (dev->ref_cnt > 0)
+		tsleep(&dev->ref_cnt, PWAIT, "usbref", hz * 60);
+}
+
+int
+usbd_get_devcnt(usbd_device_handle dev)
+{
+	return (dev->ndevs);
+}
+
+void
+usbd_claim_iface(usbd_device_handle dev, int ifaceidx)
+{
+	dev->ifaces[ifaceidx].claimed = 1;
+}
+
+int
+usbd_iface_claimed(usbd_device_handle dev, int ifaceidx)
+{
+	return (dev->ifaces[ifaceidx].claimed);
 }
 
 static __inline int
@@ -283,6 +338,9 @@ usbd_transfer(usbd_xfer_handle xfer)
 	usbd_status err;
 	u_int size;
 	int s;
+
+	if (usbd_is_dying(pipe->device))
+		return (USBD_IOERROR);
 
 	DPRINTFN(5,("usbd_transfer: xfer=%p, flags=%d, pipe=%p, running=%d\n",
 		    xfer, xfer->flags, pipe, pipe->running));
@@ -773,7 +831,7 @@ usb_transfer_complete(usbd_xfer_handle xfer)
 
 #ifdef DIAGNOSTIC
 	if (pipe == NULL) {
-		printf("usbd_transfer_cb: pipe==0, xfer=%p\n", xfer);
+		printf("usbd_transfer_complete: pipe==0, xfer=%p\n", xfer);
 		return;
 	}
 #endif
@@ -823,22 +881,25 @@ usb_transfer_complete(usbd_xfer_handle xfer)
 	xfer->done = 1;
 	if (!xfer->status && xfer->actlen < xfer->length &&
 	    !(xfer->flags & USBD_SHORT_XFER_OK)) {
+<<<<<<< HEAD
 		DPRINTFN(-1,("usbd_transfer_cb: short transfer %d<%d\n",
 			     xfer->actlen, xfer->length));
+=======
+		DPRINTFN(-1,("usbd_transfer_complete: short transfer %d<%d\n",
+		    xfer->actlen, xfer->length));
+>>>>>>> origin/master
 		xfer->status = USBD_SHORT_XFER;
 	}
 
-	if (xfer->callback)
-		xfer->callback(xfer, xfer->priv, xfer->status);
-
-#ifdef DIAGNOSTIC
-	if (pipe->methods->done != NULL)
+	if (repeat) {
+		if (xfer->callback)
+			xfer->callback(xfer, xfer->priv, xfer->status);
 		pipe->methods->done(xfer);
-	else
-		printf("usb_transfer_complete: pipe->methods->done == NULL\n");
-#else
-	pipe->methods->done(xfer);
-#endif
+	} else {
+		pipe->methods->done(xfer);
+		if (xfer->callback)
+			xfer->callback(xfer, xfer->priv, xfer->status);
+	}
 
 	if ((xfer->flags & USBD_SYNCHRONOUS) && !polling)
 		wakeup(xfer);
@@ -951,6 +1012,10 @@ usbd_do_request_flags_pipe(usbd_device_handle dev, usbd_pipe_handle pipe,
 		return (USBD_INVAL);
 	}
 #endif
+
+	/* If the bus is gone, don't go any further. */
+	if (usbd_is_dying(dev))
+		return (USBD_IOERROR);
 
 	xfer = usbd_alloc_xfer(dev);
 	if (xfer == NULL)
@@ -1108,7 +1173,7 @@ usbd_get_endpoint_descriptor(usbd_interface_handle iface, u_int8_t address)
 /*
  * usbd_ratecheck() can limit the number of error messages that occurs.
  * When a device is unplugged it may take up to 0.25s for the hub driver
- * to notice it.  If the driver continuosly tries to do I/O operations
+ * to notice it.  If the driver continuously tries to do I/O operations
  * this can generate a large number of messages.
  */
 int

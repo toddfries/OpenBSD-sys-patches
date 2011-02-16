@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscon.c,v 1.26 2006/04/19 19:41:24 miod Exp $ */
+/*	$OpenBSD: syscon.c,v 1.29 2010/09/20 06:33:47 matthew Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -119,6 +119,46 @@ syscon_scan(parent, child, args)
 		return (0);
 	config_attach(parent, cf, &oca, syscon_print);
 	return (1);
+}
+
+int
+syscon_print(void *args, const char *bus)
+{
+	struct confargs *ca = args;
+
+	if (ca->ca_offset != -1)
+		printf(" offset 0x%x", ca->ca_offset);
+	if (ca->ca_ipl > 0)
+		printf(" ipl %d", ca->ca_ipl);
+	return (UNCONF);
+}
+
+/*
+ * Interrupt related code
+ */
+
+intrhand_t sysconintr_handlers[INTSRC_VME];
+
+int
+sysconintr_establish(u_int intsrc, struct intrhand *ih, const char *name)
+{
+	intrhand_t *list;
+
+	list = &sysconintr_handlers[intsrc];
+	if (!SLIST_EMPTY(list)) {
+#ifdef DIAGNOSTIC
+		printf("%s: interrupt source %u already registered\n",
+		    __func__, intsrc);
+#endif
+		return (EINVAL);
+	}
+
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
+	SLIST_INSERT_HEAD(list, ih, ih_link);
+
+	syscon_intsrc_enable(intsrc, ih->ih_ipl);
+
+	return (0);
 }
 
 void

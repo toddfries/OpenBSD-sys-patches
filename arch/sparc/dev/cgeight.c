@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgeight.c,v 1.27 2006/12/03 16:38:12 miod Exp $	*/
+=======
+/*	$OpenBSD: cgeight.c,v 1.30 2010/06/07 19:43:45 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cgeight.c,v 1.13 1997/05/24 20:16:04 pk Exp $	*/
 
 /*
@@ -164,7 +168,7 @@ cgeightattach(struct device *parent, struct device *self, void *args)
 		 * Assume this is the console if there's no eeprom info
 		 * to be found.
 		 */
-		if (eep == NULL || eep->eeConsole == EE_CONS_P4OPT)
+		if (eep == NULL || eep->ee_diag.eed_console == EED_CONS_P4)
 			isconsole = 1;
 	}
 
@@ -192,13 +196,12 @@ cgeightattach(struct device *parent, struct device *self, void *args)
 	    PFOUR_COLOR_OFF_OVERLAY, round_page(sc->sc_sunfb.sf_fbsize));
 
 	cgeight_reset(sc, WSDISPLAYIO_MODE_EMUL);
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
 	printf(": p4, %dx%d", sc->sc_sunfb.sf_width,
 	    sc->sc_sunfb.sf_height);
 
-	if (isconsole) {
+	fbwscons_init(&sc->sc_sunfb, isconsole);
+	if (isconsole)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
 
 	fbwscons_attach(&sc->sc_sunfb, &cgeight_accessops, isconsole);
 }

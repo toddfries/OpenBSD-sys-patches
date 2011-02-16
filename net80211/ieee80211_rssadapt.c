@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ieee80211_rssadapt.c,v 1.4 2005/09/08 13:24:53 reyk Exp $	*/
+=======
+/*	$OpenBSD: ieee80211_rssadapt.c,v 1.9 2010/07/17 16:25:09 damien Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ieee80211_rssadapt.c,v 1.7 2004/05/25 04:33:59 dyoung Exp $	*/
 
 /*-
@@ -13,9 +17,6 @@
  *    copyright notice, this list of conditions and the following
  *    disclaimer in the documentation and/or other materials provided
  *    with the distribution.
- * 3. The name of David Young may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY David Young ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
@@ -34,7 +35,6 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -73,13 +73,13 @@ int ieee80211_rssadapt_debug = 0;
 #define	RSSADAPT_PRINTF(X)
 #endif
 
-static struct ieee80211_rssadapt_expavgctl master_expavgctl = {
-	rc_decay_denom : 16,
-	rc_decay_old : 15,
-	rc_thresh_denom : 8,
-	rc_thresh_old : 4,
-	rc_avgrssi_denom : 8,
-	rc_avgrssi_old : 4
+static const struct ieee80211_rssadapt_expavgctl master_expavgctl = {
+	.rc_decay_denom		= 16,
+	.rc_decay_old		= 15,
+	.rc_thresh_denom	= 8,
+	.rc_thresh_old		= 4,
+	.rc_avgrssi_denom	= 8,
+	.rc_avgrssi_old		= 4
 };
 
 int
@@ -245,8 +245,8 @@ ieee80211_rssadapt_raise_rate(struct ieee80211com *ic,
 		rate = (rs->rs_rates[id->id_rateidx + 1] & IEEE80211_RATE_VAL);
 
 		RSSADAPT_PRINTF(("%s: threshold[%d, %d.%d] decay %d ",
-		    ic->ic_if.if_xname,
-		    IEEE80211_RSSADAPT_BKT0 << (IEEE80211_RSSADAPT_BKTPOWER* i),
+		    ic->ic_if.if_xname, IEEE80211_RSSADAPT_BKT0 <<
+			(IEEE80211_RSSADAPT_BKTPOWER * i),
 		    rate / 2, rate * 5 % 10, (*thrs)[id->id_rateidx + 1]));
 		oldthr = (*thrs)[id->id_rateidx + 1];
 		if ((*thrs)[id->id_rateidx] == 0)

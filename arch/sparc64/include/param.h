@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: param.h,v 1.22 2007/03/20 14:42:52 deanna Exp $	*/
+=======
+/*	$OpenBSD: param.h,v 1.33 2010/11/22 20:28:31 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -155,7 +159,6 @@ extern int nbpg, pgofset, pgshift;
  */
 #define	KERNBASE	0x001000000	/* start of kernel virtual space */
 #define	KERNEND		0x0e0000000	/* end of kernel virtual space */
-#define	VM_MAX_KERNEL_BUF	((KERNEND-KERNBASE)/4)
 
 #define _MAXNBPG	8192	/* fixed VAs, independent of actual NBPG */
 
@@ -205,16 +208,6 @@ extern int nbpg, pgofset, pgshift;
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 
-/*
- * dvmamap manages a range of DVMA addresses intended to create double
- * mappings of physical memory. In a way, `dvmamap' is a submap of the
- * VM map `phys_map'. The difference is the use of the `resource map'
- * routines to manage page allocation, allowing DVMA addresses to be
- * allocated and freed from within interrupt routines.
- *
- * Note that `phys_map' can still be used to allocate memory-backed pages
- * in DVMA space.
- */
 #ifdef _KERNEL
 #ifndef _LOCORE
 

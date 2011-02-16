@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgthree.c,v 1.32 2006/12/03 16:38:13 miod Exp $	*/
+=======
+/*	$OpenBSD: cgthree.c,v 1.35 2008/12/26 22:30:21 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cgthree.c,v 1.33 1997/05/24 20:16:11 pk Exp $ */
 
 /*
@@ -79,12 +83,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
-#include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/malloc.h>
-#include <sys/mman.h>
-#include <sys/tty.h>
 #include <sys/conf.h>
 
 #include <uvm/uvm_extern.h>
@@ -151,12 +149,12 @@ struct cg3_videoctrl {
 	u_int8_t	vctrl[12];
 } cg3_videoctrl[] = {
 	{	/* cpd-1790 */
-		0x31,
+		FBS_1152X900 | FBS_ID_COLOR,
 		{ 0xbb, 0x2b, 0x04, 0x14, 0xae, 0x03,
 		  0xa8, 0x24, 0x01, 0x05, 0xff, 0x01 },
 	},
 	{	/* gdm-20e20 */
-		0x41,
+		FBS_1280X1024 | FBS_ID_COLOR,
 		{ 0xb7, 0x27, 0x03, 0x0f, 0xae, 0x03,
 		  0xae, 0x2a, 0x01, 0x09, 0xff, 0x01 },
 	},
@@ -216,8 +214,7 @@ cgthreeattach(struct device *parent, struct device *self, void *args)
 
 	/* Transfer video magic to board, if it's not running */
 	if (isrdi == 0 && (sc->sc_fbc->fbc_ctrl & FBC_TIMING) == 0)
-		for (i = 0; i < sizeof(cg3_videoctrl)/sizeof(cg3_videoctrl[0]);
-		     i++) {
+		for (i = 0; i < nitems(cg3_videoctrl); i++) {
 			volatile struct fbcontrol *fbc = sc->sc_fbc;
 			if (cg3_videoctrl[i].sense == 0xff ||
 			    (fbc->fbc_status & FBS_MSENSE) ==
@@ -252,26 +249,11 @@ cgthreeattach(struct device *parent, struct device *self, void *args)
 
 	printf("%dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
-	/*
-	 * If the framebuffer width is under 1024x768, which is the case for
-	 * some clones on laptops, as well as with the VS10-EK, switch from
-	 * the PROM font to the more adequate 8x16 font here.
-	 * However, we need to adjust two things in this case:
-	 * - the display row should be overrided from the current PROM metrics,
-	 *   to prevent us from overwriting the last few lines of text.
-	 * - if the 80x34 screen would make a large margin appear around it,
-	 *   choose to clear the screen rather than keeping old prom output in
-	 *   the margins.
-	 * XXX there should be a rasops "clear margins" feature
-	 */
-	fbwscons_init(&sc->sc_sunfb, isconsole &&
-	    (sc->sc_sunfb.sf_width >= 1024) ? 0 : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 	fbwscons_setcolormap(&sc->sc_sunfb, cgthree_setcolor);
 
-	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb,
-		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0);
-	}
+	if (isconsole)
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 
 	fbwscons_attach(&sc->sc_sunfb, &cgthree_accessops, isconsole);
 }

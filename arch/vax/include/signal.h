@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: signal.h,v 1.4 2005/12/14 21:46:31 millert Exp $   */
+=======
+/*      $OpenBSD: signal.h,v 1.6 2009/06/20 21:02:13 miod Exp $   */
+>>>>>>> origin/master
 /*      $NetBSD: signal.h,v 1.4 1995/01/10 19:01:52 jtc Exp $   */
 
 /*
@@ -57,6 +61,7 @@ struct	sigcontext {
 	int	sc_ap;			/* ap to restore */
 	int	sc_pc;			/* pc to restore */
 	int	sc_ps;			/* psl to restore */
+	int	sc_r[12];		/* registers to restore */
 };
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif	/* !_VAX_SIGNAL_H_ */

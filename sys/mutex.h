@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mutex.h,v 1.2 2004/10/01 04:08:46 jsg Exp $	*/
+=======
+/*	$OpenBSD: mutex.h,v 1.7 2009/08/13 13:24:55 weingart Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
@@ -107,5 +111,6 @@ void mtx_init(struct mutex *, int);
 #endif
 void mtx_enter(struct mutex *);
 void mtx_leave(struct mutex *);
+int mtx_enter_try(struct mutex *);
 
 #endif

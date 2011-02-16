@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gpioow.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
+=======
+/*	$OpenBSD: gpioow.c,v 1.4 2009/10/13 19:33:16 pirofti Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -49,7 +53,7 @@ struct gpioow_softc {
 int	gpioow_match(struct device *, void *, void *);
 void	gpioow_attach(struct device *, struct device *, void *);
 int	gpioow_detach(struct device *, int);
-int	gpioow_activate(struct device *, enum devact);
+int	gpioow_activate(struct device *, int);
 
 int	gpioow_ow_reset(void *);
 int	gpioow_ow_bit(void *, int);
@@ -82,6 +86,10 @@ int
 gpioow_match(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
+	struct gpio_attach_args *ga = aux;
+
+	if (ga->ga_offset == -1)
+		return 0;
 
 	return (strcmp(cf->cf_driver->cd_name, "gpioow") == 0);
 }
@@ -157,6 +165,8 @@ gpioow_detach(struct device *self, int flags)
 	struct gpioow_softc *sc = (struct gpioow_softc *)self;
 	int rv = 0;
 
+	gpio_pin_unmap(sc->sc_gpio, &sc->sc_map);
+
 	if (sc->sc_ow_dev != NULL)
 		rv = config_detach(sc->sc_ow_dev, flags);
 
@@ -164,7 +174,7 @@ gpioow_detach(struct device *self, int flags)
 }
 
 int
-gpioow_activate(struct device *self, enum devact act)
+gpioow_activate(struct device *self, int act)
 {
 	struct gpioow_softc *sc = (struct gpioow_softc *)self;
 	int rv = 0;

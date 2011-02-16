@@ -1,4 +1,4 @@
-/*	$OpenBSD: glxsb.c,v 1.6 2007/01/19 19:59:09 tom Exp $	*/
+/*	$OpenBSD: glxsb.c,v 1.23 2011/01/12 17:15:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Tom Cosgrove <tom@openbsd.org>
@@ -108,15 +108,15 @@
 #define SB_CTL_CBC		0x0020		/* CBC (0 is ECB) */
 
 						/* For SB_AES_INT */
-#define SB_AI_DISABLE_AES_A	0x0001		/* Disable AES A compl int */
-#define SB_AI_ENABLE_AES_A	0x0000		/* Enable AES A compl int */
-#define SB_AI_DISABLE_AES_B	0x0002		/* Disable AES B compl int */
-#define SB_AI_ENABLE_AES_B	0x0000		/* Enable AES B compl int */
-#define SB_AI_DISABLE_EEPROM	0x0004		/* Disable EEPROM op comp int */
-#define SB_AI_ENABLE_EEPROM	0x0000		/* Enable EEPROM op compl int */
-#define SB_AI_AES_A_COMPLETE	0x0100		/* AES A operation complete */
-#define SB_AI_AES_B_COMPLETE	0x0200		/* AES B operation complete */
-#define SB_AI_EEPROM_COMPLETE	0x0400		/* EEPROM operation complete */
+#define SB_AI_DISABLE_AES_A	0x00001		/* Disable AES A compl int */
+#define SB_AI_ENABLE_AES_A	0x00000		/* Enable AES A compl int */
+#define SB_AI_DISABLE_AES_B	0x00002		/* Disable AES B compl int */
+#define SB_AI_ENABLE_AES_B	0x00000		/* Enable AES B compl int */
+#define SB_AI_DISABLE_EEPROM	0x00004		/* Disable EEPROM op comp int */
+#define SB_AI_ENABLE_EEPROM	0x00000		/* Enable EEPROM op compl int */
+#define SB_AI_AES_A_COMPLETE	0x10000		/* AES A operation complete */
+#define SB_AI_AES_B_COMPLETE	0x20000		/* AES B operation complete */
+#define SB_AI_EEPROM_COMPLETE	0x40000		/* EEPROM operation complete */
 
 #define SB_RNS_TRNG_VALID	0x0001		/* in SB_RANDOM_NUM_STATUS */
 
@@ -148,9 +148,10 @@ struct glxsb_dma_map {
 };
 struct glxsb_session {
 	uint32_t	ses_key[4];
-	uint8_t		ses_iv[SB_AES_BLOCK_SIZE];
 	int		ses_klen;
 	int		ses_used;
+	struct swcr_data *ses_swd_auth;
+	struct swcr_data *ses_swd_enc;
 };
 #endif /* CRYPTO */
 
@@ -167,14 +168,18 @@ struct glxsb_softc {
 	int			sc_nsessions;
 	struct glxsb_session	*sc_sessions;
 #endif /* CRYPTO */
+
+	uint64_t		save_gld_msr;	
 };
 
 int	glxsb_match(struct device *, void *, void *);
 void	glxsb_attach(struct device *, struct device *, void *);
+int	glxsb_activate(struct device *, int);
 void	glxsb_rnd(void *);
 
 struct cfattach glxsb_ca = {
-	sizeof(struct glxsb_softc), glxsb_match, glxsb_attach
+	sizeof(struct glxsb_softc), glxsb_match, glxsb_attach, NULL,
+	glxsb_activate
 };
 
 struct cfdriver glxsb_cd = {
@@ -282,12 +287,30 @@ glxsb_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 }
 
+int
+glxsb_activate(struct device *self, int act)
+{
+	struct glxsb_softc *sc = (struct glxsb_softc *)self;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		/* XXX should wait for current crypto op to finish */
+		break;
+	case DVACT_SUSPEND:
+		sc->save_gld_msr = rdmsr(SB_GLD_MSR_CTRL);
+		break;
+	case DVACT_RESUME:
+		wrmsr(SB_GLD_MSR_CTRL, sc->save_gld_msr);
+		break;
+	}
+	return (0);
+}
+
 void
 glxsb_rnd(void *v)
 {
 	struct glxsb_softc *sc = v;
 	uint32_t status, value;
-	extern int hz;
 
 	status = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SB_RANDOM_NUM_STATUS);
 	if (status & SB_RNS_TRNG_VALID) {
@@ -295,7 +318,7 @@ glxsb_rnd(void *v)
 		add_true_randomness(value);
 	}
 
-	timeout_add(&sc->sc_to, (hz > 100) ? (hz / 100) : 1);
+	timeout_add_msec(&sc->sc_to, 10);
 }
 
 #ifdef CRYPTO
@@ -330,7 +353,11 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 {
 	struct glxsb_softc *sc = glxsb_sc;
 	struct glxsb_session *ses = NULL;
-	int sesn;
+	struct auth_hash	*axf;
+	struct enc_xform	*txf;
+	struct cryptoini	*c;
+	struct swcr_data	*swd;
+	int sesn, i;
 
 	if (sc == NULL || sidp == NULL || cri == NULL ||
 	    cri->cri_next != NULL || cri->cri_alg != CRYPTO_AES_CBC ||
@@ -351,7 +378,7 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 			return (ENOMEM);
 		if (sesn != 0) {
 			bcopy(sc->sc_sessions, ses, sesn * sizeof(*ses));
-			bzero(sc->sc_sessions, sesn * sizeof(*ses));
+			explicit_bzero(sc->sc_sessions, sesn * sizeof(*ses));
 			free(sc->sc_sessions, M_DEVBUF);
 		}
 		sc->sc_sessions = ses;
@@ -362,11 +389,103 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 	bzero(ses, sizeof(*ses));
 	ses->ses_used = 1;
 
-	get_random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
-	ses->ses_klen = cri->cri_klen;
+	for (c = cri; c != NULL; c = c->cri_next) {
+		switch (c->cri_alg) {
+		case CRYPTO_AES_CBC:
 
-	/* Copy the key (Geode LX wants the primary key only) */
-	bcopy(cri->cri_key, ses->ses_key, sizeof(ses->ses_key));
+			if (c->cri_klen != 128) {
+				swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+				    M_NOWAIT|M_ZERO);
+				if (swd == NULL) {
+					glxsb_crypto_freesession(sesn);
+					return (ENOMEM);
+				}
+				ses->ses_swd_enc = swd;
+				txf = &enc_xform_rijndael128;
+				if (txf->setkey(&(swd->sw_kschedule), c->cri_key,
+				    c->cri_klen / 8) < 0) {
+					glxsb_crypto_freesession(sesn);
+					return (EINVAL);
+				}
+				swd->sw_exf = txf;
+				break;
+			}
+
+			ses->ses_klen = c->cri_klen;
+
+			/* Copy the key (Geode LX wants the primary key only) */
+			bcopy(c->cri_key, ses->ses_key, sizeof(ses->ses_key));
+			break;
+
+		case CRYPTO_MD5_HMAC:
+			axf = &auth_hash_hmac_md5_96;
+			goto authcommon;
+		case CRYPTO_SHA1_HMAC:
+			axf = &auth_hash_hmac_sha1_96;
+			goto authcommon;
+		case CRYPTO_RIPEMD160_HMAC:
+			axf = &auth_hash_hmac_ripemd_160_96;
+			goto authcommon;
+		case CRYPTO_SHA2_256_HMAC:
+			axf = &auth_hash_hmac_sha2_256_128;
+			goto authcommon;
+		case CRYPTO_SHA2_384_HMAC:
+			axf = &auth_hash_hmac_sha2_384_192;
+			goto authcommon;
+		case CRYPTO_SHA2_512_HMAC:
+			axf = &auth_hash_hmac_sha2_512_256;
+		authcommon:
+			swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+			    M_NOWAIT|M_ZERO);
+			if (swd == NULL) {
+				glxsb_crypto_freesession(sesn);
+				return (ENOMEM);
+			}
+			ses->ses_swd_auth = swd;
+
+			swd->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
+			    M_NOWAIT);
+			if (swd->sw_ictx == NULL) {
+				glxsb_crypto_freesession(sesn);
+				return (ENOMEM);
+			}
+
+			swd->sw_octx = malloc(axf->ctxsize, M_CRYPTO_DATA,
+			    M_NOWAIT);
+			if (swd->sw_octx == NULL) {
+				glxsb_crypto_freesession(sesn);
+				return (ENOMEM);
+			}
+
+			for (i = 0; i < c->cri_klen / 8; i++)
+				c->cri_key[i] ^= HMAC_IPAD_VAL;
+
+			axf->Init(swd->sw_ictx);
+			axf->Update(swd->sw_ictx, c->cri_key, c->cri_klen / 8);
+			axf->Update(swd->sw_ictx, hmac_ipad_buffer,
+			    axf->blocksize - (c->cri_klen / 8));
+
+			for (i = 0; i < c->cri_klen / 8; i++)
+				c->cri_key[i] ^= (HMAC_IPAD_VAL ^
+				    HMAC_OPAD_VAL);
+
+			axf->Init(swd->sw_octx);
+			axf->Update(swd->sw_octx, c->cri_key, c->cri_klen / 8);
+			axf->Update(swd->sw_octx, hmac_opad_buffer,
+			    axf->blocksize - (c->cri_klen / 8));
+
+			for (i = 0; i < c->cri_klen / 8; i++)
+				c->cri_key[i] ^= HMAC_OPAD_VAL;
+
+			swd->sw_axf = axf;
+			swd->sw_alg = c->cri_alg;
+
+			break;
+		default:
+			glxsb_crypto_freesession(sesn);
+			return (EINVAL);
+		}
+	}
 
 	*sidp = GLXSB_SID(0, sesn);
 	return (0);
@@ -376,6 +495,9 @@ int
 glxsb_crypto_freesession(uint64_t tid)
 {
 	struct glxsb_softc *sc = glxsb_sc;
+	struct swcr_data *swd;
+	struct auth_hash *axf;
+	struct enc_xform *txf;
 	int sesn;
 	uint32_t sid = ((uint32_t)tid) & 0xffffffff;
 
@@ -384,7 +506,27 @@ glxsb_crypto_freesession(uint64_t tid)
 	sesn = GLXSB_SESSION(sid);
 	if (sesn >= sc->sc_nsessions)
 		return (EINVAL);
-	bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
+	if ((swd = sc->sc_sessions[sesn].ses_swd_enc)) {
+		txf = swd->sw_exf;
+
+		if (swd->sw_kschedule)
+			txf->zerokey(&(swd->sw_kschedule));
+		free(swd, M_CRYPTO_DATA);
+	}
+	if ((swd = sc->sc_sessions[sesn].ses_swd_auth)) {
+		axf = swd->sw_axf;
+
+		if (swd->sw_ictx) {
+			explicit_bzero(swd->sw_ictx, axf->ctxsize);
+			free(swd->sw_ictx, M_CRYPTO_DATA);
+		}
+		if (swd->sw_octx) {
+			explicit_bzero(swd->sw_octx, axf->ctxsize);
+			free(swd->sw_octx, M_CRYPTO_DATA);
+		}
+		free(swd, M_CRYPTO_DATA);
+	}
+	explicit_bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
 	return (0);
 }
 
@@ -458,16 +600,45 @@ glxsb_aes(struct glxsb_softc *sc, uint32_t control, uint32_t psrc,
 	printf("%s: operation failed to complete\n", sc->sc_dev.dv_xname);
 }
 
-int
-glxsb_crypto_process(struct cryptop *crp)
+static int
+glxsb_crypto_swauth(struct cryptop *crp, struct cryptodesc *crd,
+    struct swcr_data *sw, caddr_t buf)
+{
+	int	type;
+
+	if (crp->crp_flags & CRYPTO_F_IMBUF)
+		type = CRYPTO_BUF_MBUF;
+	else
+		type = CRYPTO_BUF_IOV;
+		
+	return (swcr_authcompute(crp, crd, sw, buf, type));
+}
+
+static int
+glxsb_crypto_swenc(struct cryptop *crp, struct cryptodesc *crd,
+    struct swcr_data *sw, caddr_t buf)
+{
+	int	type;
+
+	if (crp->crp_flags & CRYPTO_F_IMBUF)
+		type = CRYPTO_BUF_MBUF;
+	else
+		type = CRYPTO_BUF_IOV;
+		
+	return (swcr_encdec(crd, sw, buf, type));
+}
+
+static int
+glxsb_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
+    struct glxsb_session *ses, struct glxsb_softc *sc, caddr_t buf)
 {
 	struct glxsb_softc *sc = glxsb_sc;
 	struct glxsb_session *ses;
 	struct cryptodesc *crd;
 	char *op_src, *op_dst;
 	uint32_t op_psrc, op_pdst;
-	uint8_t op_iv[SB_AES_BLOCK_SIZE], *piv;
-	int sesn, err = 0;
+	uint8_t op_iv[SB_AES_BLOCK_SIZE];
+	int err = 0;
 	int len, tlen, xlen;
 	int offset;
 	uint32_t control;
@@ -513,12 +684,13 @@ glxsb_crypto_process(struct cryptop *crp)
 		if (crd->crd_flags & CRD_F_IV_EXPLICIT)
 			bcopy(crd->crd_iv, op_iv, sizeof(op_iv));
 		else
-			bcopy(ses->ses_iv, op_iv, sizeof(op_iv));
+			arc4random_buf(op_iv, sizeof(op_iv));
 
 		if ((crd->crd_flags & CRD_F_IV_PRESENT) == 0) {
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, sizeof(op_iv), op_iv);
+				    crd->crd_inject, sizeof(op_iv), op_iv,
+				    M_NOWAIT);
 			else if (crp->crp_flags & CRYPTO_F_IOV)
 				cuio_copyback((struct uio *)crp->crp_buf,
 				    crd->crd_inject, sizeof(op_iv), op_iv);
@@ -545,7 +717,6 @@ glxsb_crypto_process(struct cryptop *crp)
 
 	offset = 0;
 	tlen = crd->crd_len;
-	piv = op_iv;
 
 	/* Process the data in GLXSB_MAX_AES_LEN chunks */
 	while (tlen > 0) {
@@ -570,7 +741,7 @@ glxsb_crypto_process(struct cryptop *crp)
 
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
-			    crd->crd_skip + offset, len, op_dst);
+			    crd->crd_skip + offset, len, op_dst, M_NOWAIT);
 		else if (crp->crp_flags & CRYPTO_F_IOV)
 			cuio_copyback((struct uio *)crp->crp_buf,
 			    crd->crd_skip + offset, len, op_dst);
@@ -581,30 +752,84 @@ glxsb_crypto_process(struct cryptop *crp)
 		offset += len;
 		tlen -= len;
 
-		if (tlen <= 0) {	/* Ideally, just == 0 */
-			/* Finished - put the IV in session IV */
-			piv = ses->ses_iv;
-		}
-
-		/*
-		 * Copy out last block for use as next iteration/session IV.
-		 *
-		 * piv is set to op_iv[] before the loop starts, but is
-		 * set to ses->ses_iv if we're going to exit the loop this
-		 * time.
-		 */
-		if (crd->crd_flags & CRD_F_ENCRYPT) {
-			bcopy(op_dst + len - sizeof(op_iv), piv, sizeof(op_iv));
-		} else {
-			/* Decryption, only need this if another iteration */
-			if (tlen > 0) {
-				bcopy(op_src + len - sizeof(op_iv), piv,
+		if (tlen > 0) {
+			/* Copy out last block for use as next iteration */
+			if (crd->crd_flags & CRD_F_ENCRYPT)
+				bcopy(op_dst + len - sizeof(op_iv), op_iv,
 				    sizeof(op_iv));
-			}
+			else
+				bcopy(op_src + len - sizeof(op_iv), op_iv,
+				    sizeof(op_iv));
 		}
 	}
 
 	/* All AES processing has now been done. */
+	explicit_bzero(sc->sc_dma.dma_vaddr, xlen * 2);
+
+out:
+	return (err);
+}
+
+int
+glxsb_crypto_process(struct cryptop *crp)
+{
+	struct glxsb_softc *sc = glxsb_sc;
+	struct glxsb_session *ses;
+	struct cryptodesc *crd;
+	int sesn,err = 0;
+	int s;
+
+	s = splnet();
+
+	if (crp == NULL || crp->crp_callback == NULL) {
+		err = EINVAL;
+		goto out;
+	}
+	crd = crp->crp_desc;
+	if (crd == NULL) {
+		err = EINVAL;
+		goto out;
+	}
+
+	sesn = GLXSB_SESSION(crp->crp_sid);
+	if (sesn >= sc->sc_nsessions) {
+		err = EINVAL;
+		goto out;
+	}
+	ses = &sc->sc_sessions[sesn];
+	if (ses->ses_used == 0) {
+		err = EINVAL;
+		goto out;
+	}
+
+	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
+		switch (crd->crd_alg) {
+		case CRYPTO_AES_CBC:
+			if (ses->ses_swd_enc) {
+				if ((err = glxsb_crypto_swenc(crp, crd, ses->ses_swd_enc,
+				    crp->crp_buf)) != 0)
+					goto out;
+			} else if ((err = glxsb_crypto_encdec(crp, crd, ses, sc,
+			    crp->crp_buf)) != 0)
+				goto out;
+			break;
+
+		case CRYPTO_MD5_HMAC:
+		case CRYPTO_SHA1_HMAC:
+		case CRYPTO_RIPEMD160_HMAC:
+		case CRYPTO_SHA2_256_HMAC:
+		case CRYPTO_SHA2_384_HMAC:
+		case CRYPTO_SHA2_512_HMAC:
+			if ((err = glxsb_crypto_swauth(crp, crd, ses->ses_swd_auth,
+			    crp->crp_buf)) != 0)
+				goto out;
+			break;
+
+		default:
+			err = EINVAL;
+			goto out;
+		}
+	}
 
 	bzero(sc->sc_dma.dma_vaddr, xlen * 2);
 out:

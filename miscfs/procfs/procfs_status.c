@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: procfs_status.c,v 1.8 2004/05/05 23:52:10 tedu Exp $	*/
+=======
+/*	$OpenBSD: procfs_status.c,v 1.11 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: procfs_status.c,v 1.11 1996/03/16 23:52:50 christos Exp $	*/
 
 /*
@@ -67,6 +71,7 @@ procfs_stat_gen(p, s, l)
 	char *s;
 	int l;
 {
+	struct process *pr = p->p_p;
 	struct session *sess;
 	struct tty *tp;
 	struct ucred *cr;
@@ -75,11 +80,11 @@ procfs_stat_gen(p, s, l)
 	char ps[256], *sep;
 	int i, n;
 
-	pid = p->p_pid;
-	ppid = p->p_pptr ? p->p_pptr->p_pid : 0;
-	pgid = p->p_pgrp->pg_id;
-	sess = p->p_pgrp->pg_session;
-	sid = sess->s_leader ? sess->s_leader->p_pid : 0;
+	pid = pr->ps_pid;
+	ppid = pr->ps_pptr ? pr->ps_pptr->ps_pid : 0;
+	pgid = pr->ps_pgrp->pg_id;
+	sess = pr->ps_pgrp->pg_session;
+	sid = sess->s_leader ? sess->s_leader->ps_pid : 0;
 
 	n = 0;
 	if (s)
@@ -93,7 +98,7 @@ procfs_stat_gen(p, s, l)
 	    pid, ppid, pgid, sid);
 	COUNTORCAT(s, l, ps, n);
 
-	if ((p->p_flag&P_CONTROLT) && (tp = sess->s_ttyp))
+	if ((pr->ps_flags & PS_CONTROLT) && (tp = sess->s_ttyp))
 		snprintf(ps, sizeof(ps), "%d,%d ",
 		    major(tp->t_dev), minor(tp->t_dev));
 	else
@@ -108,7 +113,7 @@ procfs_stat_gen(p, s, l)
 		COUNTORCAT(s, l, ps, n);
 	}
 
-	if (SESS_LEADER(p)) {
+	if (SESS_LEADER(pr)) {
 		snprintf(ps, sizeof(ps), "%ssldr", sep);
 		sep = ",";
 		COUNTORCAT(s, l, ps, n);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in.h,v 1.71 2006/06/18 11:47:45 pascoe Exp $	*/
+=======
+/*	$OpenBSD: in.h,v 1.85 2010/09/23 04:45:15 yasuoka Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -73,10 +77,15 @@
 #define IPPROTO_PIM		103		/* Protocol indep. multicast */
 #define IPPROTO_IPCOMP		108		/* IP Payload Comp. Protocol */
 #define	IPPROTO_CARP		112		/* CARP */
+#define	IPPROTO_MPLS		137		/* unicast MPLS packet */
 #define	IPPROTO_PFSYNC		240		/* PFSYNC */
 #define	IPPROTO_RAW		255		/* raw IP packet */
 
 #define	IPPROTO_MAX		256
+
+/* Only used internally, so it can be outside the range of valid IP protocols */
+#define	IPPROTO_DIVERT		258		/* Divert sockets */
+
 
 /*
  * From FreeBSD:
@@ -190,6 +199,13 @@ struct in_addr {
 #define	IN_LOCAL_GROUP(i)	(((u_int32_t)(i) & __IPADDR(0xffffff00)) == \
 				 __IPADDR(0xe0000000))
 
+#ifdef _KERNEL
+#define IN_CLASSFULBROADCAST(i, b) \
+				((IN_CLASSC(b) && (b | IN_CLASSC_HOST) == i) ||	\
+				 (IN_CLASSB(b) && (b | IN_CLASSB_HOST) == i) ||	\
+				 (IN_CLASSA(b) && (b | IN_CLASSA_HOST) == i))
+#endif	/* _KERNEL */
+
 #define	INADDR_ANY		__IPADDR(0x00000000)
 #define	INADDR_LOOPBACK		__IPADDR(0x7f000001)
 #define	INADDR_BROADCAST	__IPADDR(0xffffffff)	/* must be masked */
@@ -267,6 +283,11 @@ struct ip_opts {
 #define IP_RECVIF		30   /* bool; receive reception if w/dgram */
 #define IP_RECVTTL		31   /* bool; receive IP TTL w/dgram */
 #define IP_MINTTL		32   /* minimum TTL for packet or drop */
+<<<<<<< HEAD
+=======
+#define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
+#define IP_PIPEX		34   /* bool; using PIPEX */
+>>>>>>> origin/master
 
 /*
  * Security levels - IPsec, not IPSO
@@ -319,7 +340,11 @@ struct ip_mreq {
  * Third level is protocol number.
  * Fourth level is desired variable within that protocol.
  */
+<<<<<<< HEAD
 #define	IPPROTO_MAXID	(IPPROTO_CARP + 1)	/* don't list to IPPROTO_MAX */
+=======
+#define	IPPROTO_MAXID	(IPPROTO_DIVERT + 1)	/* don't list to IPPROTO_MAX */
+>>>>>>> origin/master
 
 #define	CTL_IPPROTO_NAMES { \
 	{ "ip", CTLTYPE_NODE }, \
@@ -435,6 +460,155 @@ struct ip_mreq {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "carp", CTLTYPE_NODE }, \
+<<<<<<< HEAD
+=======
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ "pfsync", CTLTYPE_NODE }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ "divert", CTLTYPE_NODE }, \
+>>>>>>> origin/master
 }
 
 /*
@@ -476,7 +650,15 @@ struct ip_mreq {
 #define	IPCTL_IFQUEUE		30
 #define	IPCTL_MFORWARDING	31
 #define	IPCTL_MULTIPATH		32
+<<<<<<< HEAD
 #define	IPCTL_MAXID		33
+=======
+#define	IPCTL_STATS		33	/* IP statistics */
+#define	IPCTL_MRTPROTO		34	/* type of multicast */
+#define	IPCTL_MRTSTATS		35
+#define	IPCTL_ARPQUEUED		36
+#define	IPCTL_MAXID		37
+>>>>>>> origin/master
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -511,7 +693,15 @@ struct ip_mreq {
 	{ "ipsec-comp-alg", CTLTYPE_STRING }, \
 	{ "ifq", CTLTYPE_NODE }, \
 	{ "mforwarding", CTLTYPE_INT }, \
+<<<<<<< HEAD
 	{ "multipath", CTLTYPE_INT } \
+=======
+	{ "multipath", CTLTYPE_INT }, \
+	{ "stats", CTLTYPE_STRUCT }, \
+	{ "mrtproto", CTLTYPE_INT }, \
+	{ "mrtstats", CTLTYPE_STRUCT }, \
+	{ "arpqueued", CTLTYPE_INT }, \
+>>>>>>> origin/master
 }
 #define	IPCTL_VARS { \
 	NULL, \
@@ -546,7 +736,15 @@ struct ip_mreq {
 	NULL, \
 	NULL, \
 	&ipmforwarding, \
+<<<<<<< HEAD
 	&ipmultipath \
+=======
+	&ipmultipath, \
+	NULL, \
+	NULL, \
+	NULL, \
+	&la_hold_total \
+>>>>>>> origin/master
 }
 
 /* INET6 stuff */
@@ -619,7 +817,7 @@ int	   in_canforward(struct in_addr);
 int	   in_cksum(struct mbuf *, int);
 int	   in4_cksum(struct mbuf *, u_int8_t, int, int);
 void	   in_delayed_cksum(struct mbuf *);
-int	   in_localaddr(struct in_addr);
+int	   in_localaddr(struct in_addr, u_int);
 void	   in_socktrim(struct sockaddr_in *);
 char	  *inet_ntoa(struct in_addr);
 

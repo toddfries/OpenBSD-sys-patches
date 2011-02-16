@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rtc.c,v 1.1 2007/04/09 19:59:06 kettenis Exp $	*/
+=======
+/*	$OpenBSD: rtc.c,v 1.8 2010/04/10 12:52:39 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1992, 1993
@@ -135,11 +139,17 @@ rtc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	model = getpropstring(ea->ea_node, "model");
+<<<<<<< HEAD
 #ifdef DIAGNOSTIC
 	if (model == NULL)
 		panic("rtc_attach: no model property");
 #endif
 	printf(": %s\n", model);
+=======
+	if (*model == '\0')
+		model = getpropstring(ea->ea_node, "compatible");
+	printf(": %s\n", *model != '\0' ? model : "unknown");
+>>>>>>> origin/master
 
 	/* Setup our todr_handle */
 	handle = malloc(sizeof(struct todr_chip_handle), M_DEVBUF, M_NOWAIT);
@@ -169,7 +179,7 @@ rtc_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_ih = bus_intr_establish(sc->sc_iot, ea->ea_intrs[0],
 		    IPL_BIO, 0, rtc_intr, sc, self->dv_xname);
 		if (sc->sc_ih == NULL) {
-			printf("%s: can't establush interrupt\n",
+			printf("%s: can't establish interrupt\n",
 			    self->dv_xname);
 		}
 	}

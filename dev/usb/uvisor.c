@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvisor.c,v 1.26 2006/06/21 01:23:05 jsg Exp $	*/
+=======
+/*	$OpenBSD: uvisor.c,v 1.43 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -201,7 +198,26 @@ static const struct uvisor_type uvisor_devs[] = {
 };
 #define uvisor_lookup(v, p) ((struct uvisor_type *)usb_lookup(uvisor_devs, v, p))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uvisor);
+=======
+int uvisor_match(struct device *, void *, void *); 
+void uvisor_attach(struct device *, struct device *, void *); 
+int uvisor_detach(struct device *, int); 
+int uvisor_activate(struct device *, int); 
+
+struct cfdriver uvisor_cd = { 
+	NULL, "uvisor", DV_DULL 
+}; 
+
+const struct cfattach uvisor_ca = { 
+	sizeof(struct uvisor_softc), 
+	uvisor_match, 
+	uvisor_attach, 
+	uvisor_detach, 
+	uvisor_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uvisor)
 {
@@ -284,9 +300,12 @@ USB_ATTACH(uvisor)
 		goto bad;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	if (sc->sc_flags & VISOR) {
 		sc->sc_numcon = UGETW(coninfo.num_ports);
 		if (sc->sc_numcon > UVISOR_MAX_CONN)
@@ -375,20 +394,25 @@ bad:
 }
 
 int
+<<<<<<< HEAD
 uvisor_activate(device_ptr_t self, enum devact act)
+=======
+uvisor_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
-	int rv = 0;
-	int i;
+	int i, rv = 0, r;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
 	case DVACT_DEACTIVATE:
 		for (i = 0; i < sc->sc_numcon; i++)
-			if (sc->sc_subdevs[i] != NULL)
-				rv = config_deactivate(sc->sc_subdevs[i]);
+			if (sc->sc_subdevs[i] != NULL) {
+				r = config_deactivate(sc->sc_subdevs[i]);
+				if (r)
+					rv = r;
+			}
 		sc->sc_dying = 1;
 		break;
 	}
@@ -403,7 +427,6 @@ uvisor_detach(device_ptr_t self, int flags)
 	int i;
 
 	DPRINTF(("uvisor_detach: sc=%p flags=%d\n", sc, flags));
-	sc->sc_dying = 1;
 	for (i = 0; i < sc->sc_numcon; i++) {
 		if (sc->sc_subdevs[i] != NULL) {
 			rv |= config_detach(sc->sc_subdevs[i], flags);
@@ -411,9 +434,12 @@ uvisor_detach(device_ptr_t self, int flags)
 		}
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
@@ -421,7 +447,7 @@ usbd_status
 uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
     struct uvisor_palm_connection_info *cpi)
 {
-	usbd_status err;
+	usbd_status err = 0;
 	usb_device_request_t req;
 	int actlen;
 	uWord avail;

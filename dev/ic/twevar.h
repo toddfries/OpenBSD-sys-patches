@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: twevar.h,v 1.6 2003/06/02 19:24:22 mickey Exp $	*/
+=======
+/*	$OpenBSD: twevar.h,v 1.9 2009/02/16 21:19:07 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -52,7 +56,6 @@ struct twe_softc {
 	struct device	sc_dev;
 	void		*sc_ih;
 	struct scsi_link sc_link;
-	struct lock	sc_lock;
 	struct proc	*sc_thread;
 	int		sc_thread_on;
 
@@ -84,6 +87,6 @@ struct twe_softc {
 #define TWE_UNLOCK(sc, lock) splx(lock)
 typedef int twe_lock_t;
 
-void	tweminphys(struct buf *bp);
+void	tweminphys(struct buf *bp, struct scsi_link *sl);
 int	twe_attach(struct twe_softc *);
 int	twe_intr(void *);

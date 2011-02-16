@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pte.h,v 1.4 1997/09/17 06:47:14 downsj Exp $	*/
+=======
+/*	$OpenBSD: pte.h,v 1.8 2010/07/10 19:32:24 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pte.h,v 1.19 1997/08/05 11:00:10 pk Exp $ */
 
 /*
@@ -191,7 +195,7 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
 #define	SGOFSET	(NBPSG - 1)	/* mask for segment offset */
 
 /* number of PTEs that map one segment (not number that fit in one segment!) */
-#if defined(SUN4) && (defined(SUN4C) || defined(SUN4M))
+#if (defined(SUN4) || defined(SUN4E)) && (defined(SUN4C) || defined(SUN4D) || defined(SUN4M))
 extern int nptesg;
 #define	NPTESG	nptesg		/* (which someone will have to initialize) */
 #else
@@ -237,28 +241,28 @@ extern int mmu_has_hole;
 #define MMU_HOLE_START	0x20000000
 #define MMU_HOLE_END	0xe0000000
 
-#if defined(SUN4M)		/* Optimization: sun4m, sun4c have same page */
-#if defined(SUN4)		/* size, so they're used interchangeably */
-#define VA_VPG(va)	(cputyp==CPU_SUN4 ? VA_SUN4_VPG(va) : VA_SUN4C_VPG(va))
-#define VA_OFF(va)	(cputyp==CPU_SUN4 ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
+#if defined(SUN4D) || defined(SUN4M) /* Optimization: sun4c/d/m have same */
+#if defined(SUN4) || defined(SUN4E)  /* page size, so they're used interchangeably */
+#define VA_VPG(va)	(CPU_ISSUN4OR4E ? VA_SUN4_VPG(va) : VA_SUN4C_VPG(va))
+#define VA_OFF(va)	(CPU_ISSUN4OR4E ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
 #else
 #define VA_VPG(va)	VA_SUN4M_VPG(va)
 #define VA_OFF(va)	VA_SUN4M_OFF(va)
-#endif /* defined SUN4 */
-#else /* 4m not defined */
-#if defined(SUN4) && defined(SUN4C)
-#define VA_VPG(va)	(cputyp==CPU_SUN4C ? VA_SUN4C_VPG(va) : VA_SUN4_VPG(va))
-#define VA_OFF(va)	(cputyp==CPU_SUN4C ? VA_SUN4C_OFF(va) : VA_SUN4_OFF(va))
+#endif /* defined SUN4 || defined SUN4E */
+#else /* 4d,4m not defined */
+#if (defined(SUN4) || defined(SUN4E)) && defined(SUN4C)
+#define VA_VPG(va)	(CPU_ISSUN4C ? VA_SUN4C_VPG(va) : VA_SUN4_VPG(va))
+#define VA_OFF(va)	(CPU_ISSUN4C ? VA_SUN4C_OFF(va) : VA_SUN4_OFF(va))
 #endif
-#if defined(SUN4C) && !defined(SUN4)
+#if defined(SUN4C) && !(defined(SUN4) || defined(SUN4E))
 #define VA_VPG(va)	VA_SUN4C_VPG(va)
 #define VA_OFF(va)	VA_SUN4C_OFF(va)
 #endif
-#if !defined(SUN4C) && defined(SUN4)
+#if !defined(SUN4C) && (defined(SUN4) || defined(SUN4E))
 #define	VA_VPG(va)	VA_SUN4_VPG(va)
 #define VA_OFF(va)	VA_SUN4_OFF(va)
 #endif
-#endif /* defined 4m */
+#endif /* defined 4d,4m */
 
 /* there is no `struct pte'; we just use `int'; this is for non-4M only */
 #define	PG_V		0x80000000
@@ -272,7 +276,7 @@ extern int mmu_has_hole;
 #define	PG_OBIO		0x04000000	/* on board I/O (incl. Sbus on 4c) */
 #define	PG_VME16	0x08000000	/* 16-bit-data VME space */
 #define	PG_VME32	0x0c000000	/* 32-bit-data VME space */
-#if defined(SUN4M)
+#if defined(SUN4D) || defined(SUN4M)
 #define PG_SUN4M_OBMEM	0x0	       	/* No type bits=>obmem on 4m */
 #define PG_SUN4M_OBIO	0xf		/* obio maps to 0xf on 4M */
 #define SRMMU_PGTYPE	0xf0000000	/* Top 4 bits of pte PPN give type */
@@ -380,12 +384,3 @@ struct srmmu_pte {
 #define SRMMU_L1SIZE	0x100
 #define SRMMU_L2SIZE 	0x40
 #define SRMMU_L3SIZE	0x40
-
-/*
- * IOMMU PTE bits.
- */
-#define IOPTE_PPN_MASK  0x07ffff00
-#define IOPTE_PPN_SHIFT 8
-#define IOPTE_RSVD      0x000000f1
-#define IOPTE_WRITE     0x00000004
-#define IOPTE_VALID     0x00000002

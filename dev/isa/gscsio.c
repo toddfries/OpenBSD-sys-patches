@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gscsio.c,v 1.7 2006/01/01 20:52:26 deraadt Exp $	*/
+=======
+/*	$OpenBSD: gscsio.c,v 1.12 2010/02/16 00:05:23 mk Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -42,9 +46,9 @@ struct gscsio_softc {
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 
-	int sc_ld_en[GSCSIO_LDNUM];
-	bus_space_handle_t sc_ld_ioh0[GSCSIO_LDNUM];
-	bus_space_handle_t sc_ld_ioh1[GSCSIO_LDNUM];
+	int sc_ld_en[GSCSIO_LDN_LAST + 1];
+	bus_space_handle_t sc_ld_ioh0[GSCSIO_LDN_LAST + 1];
+	bus_space_handle_t sc_ld_ioh1[GSCSIO_LDN_LAST + 1];
 
 	/* ACCESS.bus */
 	struct gscsio_acb {
@@ -78,7 +82,7 @@ int	gscsio_acb_acquire_bus(void *, int);
 void	gscsio_acb_release_bus(void *, int);
 int	gscsio_acb_send_start(void *, int);
 int	gscsio_acb_send_stop(void *, int);
-int	gscsio_acb_initiate_xfer(void *, uint16_t, int);
+int	gscsio_acb_initiate_xfer(void *, i2c_addr_t, int);
 int	gscsio_acb_read_byte(void *, uint8_t *, int);
 int	gscsio_acb_write_byte(void *, uint8_t, int);
 
@@ -151,7 +155,7 @@ gscsio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = ia->ia_iot;
 	if (bus_space_map(sc->sc_iot, ia->ipa_io[0].base, GSCSIO_IOSIZE,
 	    0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 	printf(": SC1100 SIO rev %d:",
@@ -366,7 +370,7 @@ gscsio_acb_send_stop(void *cookie, int flags)
 }
 
 int
-gscsio_acb_initiate_xfer(void *cookie, uint16_t addr, int flags)
+gscsio_acb_initiate_xfer(void *cookie, i2c_addr_t addr, int flags)
 {
 	struct gscsio_acb *acb = cookie;
 	struct gscsio_softc *sc = acb->sc;

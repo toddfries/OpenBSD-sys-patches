@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: shpcicvar.h,v 1.2 2006/10/07 20:52:40 miod Exp $	*/
+=======
+/*	$OpenBSD: shpcicvar.h,v 1.6 2010/12/04 17:06:32 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: shpcicvar.h,v 1.6 2005/12/11 12:18:58 christos Exp $	*/
 
 /*-
@@ -39,6 +43,7 @@ bus_dma_tag_t shpcic_get_bus_dma_tag(void);
 int shpcic_bus_maxdevs(void *v, int busno);
 pcitag_t shpcic_make_tag(void *v, int bus, int device, int function);
 void shpcic_decompose_tag(void *v, pcitag_t tag, int *bp, int *dp, int *fp);
+int shpcic_conf_size(void *, pcitag_t);
 pcireg_t shpcic_conf_read(void *v, pcitag_t tag, int reg);
 void shpcic_conf_write(void *v, pcitag_t tag, int reg, pcireg_t data);
 
@@ -80,6 +85,7 @@ int shpcic_iomem_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *bpap, bus_space_handle_t *bshp);
 void shpcic_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size);
+void *shpcic_iomem_vaddr(void *v, bus_space_handle_t bsh);
 
 /* read single */
 uint8_t shpcic_io_read_1(void *v, bus_space_handle_t bsh, bus_size_t offset);
@@ -228,22 +234,22 @@ void shpcic_mem_set_region_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint32_t val, bus_size_t count);
 
 /* copy region */
-void shpcic_io_copy_region_1(void *v, bus_space_handle_t bsh1,
+void shpcic_io_copy_1(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
-void shpcic_io_copy_region_2(void *v, bus_space_handle_t bsh1,
+void shpcic_io_copy_2(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
-void shpcic_io_copy_region_4(void *v, bus_space_handle_t bsh1,
+void shpcic_io_copy_4(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
-void shpcic_mem_copy_region_1(void *v, bus_space_handle_t bsh1,
+void shpcic_mem_copy_1(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
-void shpcic_mem_copy_region_2(void *v, bus_space_handle_t bsh1,
+void shpcic_mem_copy_2(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
-void shpcic_mem_copy_region_4(void *v, bus_space_handle_t bsh1,
+void shpcic_mem_copy_4(void *v, bus_space_handle_t bsh1,
     bus_size_t off1, bus_space_handle_t bsh2, bus_size_t off2,
     bus_size_t count);
 #endif /* SH_DEV_PCICVAR_H */

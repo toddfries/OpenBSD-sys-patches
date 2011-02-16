@@ -1,4 +1,4 @@
-/*	$OpenBSD: dio.c,v 1.11 2005/01/15 22:02:00 miod Exp $	*/
+/*	$OpenBSD: dio.c,v 1.14 2010/04/15 20:38:09 miod Exp $	*/
 /*	$NetBSD: dio.c,v 1.7 1997/05/05 21:00:32 thorpej Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -99,15 +92,15 @@ dioattach(parent, self, aux)
 {
 	struct dio_attach_args da;
 	caddr_t pa, va;
-	int scode, scmax, didmap, scodesize;
+	int scode, sctmp, scmax, didmap, scodesize;
 
 	scmax = DIO_SCMAX(machineid);
 	printf(": ");
 	dmainit();
 
 	for (scode = 0; scode < scmax; ) {
-		if (DIO_INHOLE(scode)) {
-			scode++;
+		if ((sctmp = dio_inhole(scode)) != 0) {
+			scode = sctmp;
 			continue;
 		}
 
@@ -353,4 +346,28 @@ dio_intr_disestablish(struct isr *isr)
 
 	if (isr->isr_priority == IPL_BIO)
 		dmacomputeipl();
+}
+
+/*
+ * Return the next select code if the given select code lies within a hole,
+ * zero otherwise.
+ */
+int
+dio_inhole(int scode)
+{
+	/* unconditionnaly skip the DIO-II hole */
+	if (scode >= 32 && scode < DIOII_SCBASE)
+		return DIOII_SCBASE;
+
+	/* skip the frame buffer memory on 3x2 systems */
+	switch (machineid) {
+	case HP_362:
+	case HP_382:
+		if (scode >= DIOII_SCBASE && scode < DIOII_SCBASE + 4)
+			return DIOII_SCBASE + 4;
+	default:
+		break;
+	}
+
+	return 0;
 }

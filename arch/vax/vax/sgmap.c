@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sgmap.c,v 1.7 2002/10/12 01:09:44 krw Exp $	*/
+=======
+/*	$OpenBSD: sgmap.c,v 1.10 2008/09/30 20:00:29 miod Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: sgmap.c,v 1.8 2000/06/29 07:14:34 mrg Exp $ */
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -191,6 +188,12 @@ vax_sgmap_load(t, map, buf, buflen, p, flags, sgmap)
 	bus_size_t dmalen;
 	long *pte, *page_table = (long *)sgmap->aps_pt;
 	int pteidx, error;
+	struct pmap *pmap;
+
+	if (p != NULL)
+		pmap = p->p_vmspace->vm_map.pmap;
+	else
+		pmap = pmap_kernel();
 
 	/*
 	 * Make sure that on error condition we return "no valid mappings".
@@ -230,7 +233,6 @@ vax_sgmap_load(t, map, buf, buflen, p, flags, sgmap)
 	map->dm_segs[0].ds_addr = map->_dm_sgva + dmaoffset;
 	map->dm_segs[0].ds_len = dmalen;
 
-
 	map->_dm_pteidx = pteidx;
 	map->_dm_ptecnt = 0;
 
@@ -242,10 +244,7 @@ vax_sgmap_load(t, map, buf, buflen, p, flags, sgmap)
 		/*
 		 * Get the physical address for this segment.
 		 */
-		if (p != NULL)
-			pmap_extract(p->p_vmspace->vm_map.pmap, va, &pa);
-		else
-			pa = kvtophys(va);
+		(void)pmap_extract(pmap, va, &pa);
 
 		/*
 		 * Load the current PTE with this page.

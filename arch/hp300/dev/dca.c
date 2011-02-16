@@ -1,4 +1,4 @@
-/*	$OpenBSD: dca.c,v 1.30 2005/12/31 18:13:41 miod Exp $	*/
+/*	$OpenBSD: dca.c,v 1.42 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: dca.c,v 1.35 1997/05/05 20:58:18 thorpej Exp $	*/
 
 /*
@@ -309,7 +309,7 @@ dcaopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (sc->sc_tty == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	} else
 		tp = sc->sc_tty;
 	splx(s);
@@ -350,7 +350,7 @@ dcaopen(dev, flag, mode, p)
 		while ((dca->dca_iir & IIR_IMASK) == IIR_RXRDY)
 			code = dca->dca_data;
 
-	} else if (tp->t_state&TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state&TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	else
 		s = spltty();
@@ -401,7 +401,7 @@ dcaopen(dev, flag, mode, p)
 	splx(s);
 
 	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+		error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	return (error);
 }
@@ -425,7 +425,7 @@ dcaclose(dev, flag, mode, p)
 
 	dca = sc->sc_dca;
 	tp = sc->sc_tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 
@@ -569,8 +569,9 @@ dcaintr(arg)
 					fifoin[fifocnt]++;
 #endif
 			}
-			if (!iflowdone && (tp->t_cflag&CRTS_IFLOW) &&
-			    tp->t_rawq.c_cc > TTYHOG/2) {
+			if (iflowdone == 0 && tp != NULL &&
+			    (tp->t_cflag & CRTS_IFLOW) &&
+			    tp->t_rawq.c_cc > (TTYHOG(tp) / 2)) {
 				dca->dca_mcr &= ~MCR_RTS;
 				iflowdone = 1;
 			}
@@ -861,15 +862,9 @@ dcastart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 	if (dca->dca_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;
 		if (sc->sc_flags & DCA_HASFIFO) {

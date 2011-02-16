@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.5 2005/12/11 20:56:01 kettenis Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.18 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -52,6 +52,17 @@
 # define DPRINTF(x)
 #endif
 
+struct audio_params i2s_audio_default = {
+	44100,		/* sample_rate */
+	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
+	16,		/* precision */
+	2,		/* bps */
+	1,		/* msb */
+	2,		/* channels */
+	NULL,		/* sw_code */
+	1		/* factor */
+};
+
 struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
 void i2s_cs16mts(void *, u_char *, int);
 
@@ -64,8 +75,8 @@ int i2s_cint(void *);
 u_char *i2s_gpio_map(struct i2s_softc *, char *, int *);
 void i2s_init(struct i2s_softc *, int);
 
-static void mono16_to_stereo16(void *, u_char *, int);
-static void swap_bytes_mono16_to_stereo16(void *, u_char *, int);
+int i2s_intr(void *);
+int i2s_iintr(void *);
 
 /* XXX */
 void keylargo_fcr_enable(int, u_int32_t);
@@ -155,8 +166,9 @@ i2s_attach(struct device *parent, struct i2s_softc *sc, struct confargs *ca)
 
 	/* intr_establish(cirq, cirq_type, IPL_AUDIO, i2s_intr, sc); */
 	mac_intr_establish(parent, oirq, oirq_type, IPL_AUDIO, i2s_intr,
-	    sc, "i2s");
-	/* intr_establish(iirq, iirq_type, IPL_AUDIO, i2s_intr, sc); */
+	    sc, sc->sc_dev.dv_xname);
+	mac_intr_establish(parent, iirq, iirq_type, IPL_AUDIO, i2s_iintr,
+	    sc, sc->sc_dev.dv_xname);
 
 	printf(": irq %d,%d,%d\n", cirq, oirq, iirq);
 
@@ -190,6 +202,37 @@ i2s_intr(v)
 		if (status)	/* status == 0x8400 */
 			if (sc->sc_ointr)
 				(*sc->sc_ointr)(sc->sc_oarg);
+	}
+
+	return 1;
+}
+
+int
+i2s_iintr(v)
+	void *v;
+{
+	struct i2s_softc *sc = v;
+	struct dbdma_command *cmd = sc->sc_idmap;
+	u_int16_t c, status;
+
+	/* if not set we are not running */
+	if (!cmd)
+		return (0);
+	DPRINTF(("i2s_intr: cmd %x\n", cmd));
+
+	c = in16rb(&cmd->d_command);
+	status = in16rb(&cmd->d_status);
+
+	if (c >> 12 == DBDMA_CMD_IN_LAST)
+		sc->sc_idmap = sc->sc_idmacmd;
+	else
+		sc->sc_idmap++;
+
+	if (c & (DBDMA_INT_ALWAYS << 4)) {
+		cmd->d_status = 0;
+		if (status)	/* status == 0x8400 */
+			if (sc->sc_iintr)
+				(*sc->sc_iintr)(sc->sc_iarg);
 	}
 
 	return 1;
@@ -285,6 +328,8 @@ i2s_query_encoding(h, ae)
 		err = EINVAL;
 		break;
 	}
+	ae->bps = AUDIO_BPS(ae->precision);
+	ae->msb = 1;
 	return (err);
 }
 
@@ -401,10 +446,14 @@ i2s_set_params(h, setmode, usemode, play, rec)
 
 		p = mode == AUMODE_PLAY ? play : rec;
 
-		if (p->sample_rate < 4000 || p->sample_rate > 50000 ||
-		    (p->precision != 8 && p->precision != 16) ||
-		    (p->channels != 1 && p->channels != 2))
-			return EINVAL;
+		if (p->sample_rate < 4000)
+			p->sample_rate = 4000;
+		if (p->sample_rate > 50000)
+			p->sample_rate = 50000;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
 
 		switch (p->encoding) {
 		case AUDIO_ENCODING_SLINEAR_LE:
@@ -465,7 +514,16 @@ i2s_set_params(h, setmode, usemode, play, rec)
 
 	p->sample_rate = sc->sc_rate;
 
+	p->bps = AUDIO_BPS(p->precision);
+	p->msb = 1;
+
 	return 0;
+}
+
+void
+i2s_get_default_params(struct audio_params *params)
+{
+	*params = i2s_audio_default;
 }
 
 int
@@ -563,14 +621,15 @@ i2s_set_port(h, mc)
 		if (mc->un.mask == sc->sc_record_source)
 			return 0;
 		switch (mc->un.mask) {
-		case 1 << 0: /* CD */
-		case 1 << 1: /* microphone */
-		case 1 << 2: /* line in */
+		case 1 << 0: /* microphone */
+		case 1 << 1: /* line in */
 			/* XXX TO BE DONE */
 			break;
 		default: /* invalid argument */
 			return EINVAL;
 		}
+		if (sc->sc_setinput != NULL)
+			(*sc->sc_setinput)(sc, mc->un.mask);
 		sc->sc_record_source = mc->un.mask;
 		return 0;
 
@@ -606,12 +665,16 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_BASS:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_bass;
-		return (0);
+		return 0;
 
 	case I2S_TREBLE:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_treble;
-		return (0);
+		return 0;
 
 	case I2S_VOL_INPUT:
 		/* XXX TO BE DONE */
@@ -673,16 +736,13 @@ i2s_query_devinfo(h, dip)
 		strlcpy(dip->label.name, AudioNsource, sizeof(dip->label.name));
 		dip->type = AUDIO_MIXER_SET;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
-		dip->un.s.num_mem = 3;
-		strlcpy(dip->un.s.member[0].label.name, AudioNcd,
+		dip->un.s.num_mem = 2;
+		strlcpy(dip->un.s.member[0].label.name, AudioNmicrophone,
 		    sizeof(dip->un.s.member[0].label.name));
 		dip->un.s.member[0].mask = 1 << 0;
-		strlcpy(dip->un.s.member[1].label.name, AudioNmicrophone,
+		strlcpy(dip->un.s.member[1].label.name, AudioNline,
 		    sizeof(dip->un.s.member[1].label.name));
 		dip->un.s.member[1].mask = 1 << 1;
-		strlcpy(dip->un.s.member[2].label.name, AudioNline,
-		    sizeof(dip->un.s.member[2].label.name));
-		dip->un.s.member[2].mask = 1 << 2;
 		return 0;
 
 	case I2S_VOL_INPUT:
@@ -819,9 +879,41 @@ i2s_trigger_input(h, start, end, bsize, intr, arg, param)
 	void *arg;
 	struct audio_params *param;
 {
-	DPRINTF(("i2s_trigger_input called\n"));
+	struct i2s_softc *sc = h;
+	struct i2s_dma *p;
+	struct dbdma_command *cmd = sc->sc_idmacmd;
+	vaddr_t spa, pa, epa;
+	int c;
 
-	return 1;
+	DPRINTF(("trigger_input %p %p 0x%x\n", start, end, bsize));
+
+	for (p = sc->sc_dmas; p && p->addr != start; p = p->next);
+	if (!p)
+		return -1;
+
+	sc->sc_iintr = intr;
+	sc->sc_iarg = arg;
+	sc->sc_idmap = sc->sc_idmacmd;
+   
+	spa = p->segs[0].ds_addr;
+	c = DBDMA_CMD_IN_MORE;
+	for (pa = spa, epa = spa + (end - start);
+	    pa < epa; pa += bsize, cmd++) {
+
+		if (pa + bsize == epa)
+			c = DBDMA_CMD_IN_LAST;
+
+		DBDMA_BUILD(cmd, c, 0, bsize, pa, DBDMA_INT_ALWAYS,
+			DBDMA_WAIT_NEVER, DBDMA_BRANCH_NEVER);
+	}
+
+	DBDMA_BUILD(cmd, DBDMA_CMD_NOP, 0, 0, 0,
+		DBDMA_INT_NEVER, DBDMA_WAIT_NEVER, DBDMA_BRANCH_ALWAYS);
+	dbdma_st32(&cmd->d_cmddep, sc->sc_idbdma->d_paddr);
+		
+	dbdma_start(sc->sc_idma, sc->sc_idbdma);
+		
+	return 0;
 }
 
 #define CLKSRC_49MHz	0x80000000	/* Use 49152000Hz Osc. */
@@ -863,10 +955,10 @@ i2s_set_rate(sc, rate)
 	int timo;
 
 	/* sanify */
-	if (rate > 48000)
+	if (rate > (48000 + 44100) / 2)
 		rate = 48000;
-	else if (rate < 8000)
-		rate = 8000;
+	else
+		rate = 44100;
 
 	switch (rate) {
 	case 8000:
@@ -940,10 +1032,10 @@ i2s_set_rate(sc, rate)
 	keylargo_fcr_disable(I2SClockOffset, I2S0CLKEN);
 
 	/* Wait until clock is stopped */
-	for (timo = 1000; timo > 0; timo--) {
+	for (timo = 50; timo > 0; timo--) {
 		if (in32rb(sc->sc_reg + I2S_INT) & I2S_INT_CLKSTOPPEND)
 			goto done;
-		delay(1);
+		delay(10);
 	}
 
 	printf("i2s_set_rate: timeout\n");

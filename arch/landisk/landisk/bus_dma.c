@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.2 2006/10/19 21:16:54 kettenis Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.9 2010/04/21 03:03:26 deraadt Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -28,6 +28,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -533,24 +534,26 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
     int flags)
 {
-	extern paddr_t avail_start, avail_end;	/* from pmap.c */
 	struct pglist mlist;
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 	DPRINTF(("bus_dmamem_alloc: t = %p, size = %ld, alignment = %ld, boundary = %ld, segs = %p, nsegs = %d, rsegs = %p, flags = %x\n", t, size, alignment, boundary, segs, nsegs, rsegs, flags));
-        DPRINTF(("bus_dmamem_alloc: avail_start = 0x%08lx, avail_end = 0x%08lx\n", avail_start, avail_end));
 
 	/* Always round the size. */
 	size = round_page(size);
 
-	TAILQ_INIT(&mlist);
 	/*
 	 * Allocate the pages from the VM system.
 	 */
-	error = uvm_pglistalloc(size, avail_start, avail_end - PAGE_SIZE,
-	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
+	TAILQ_INIT(&mlist);
+	error = uvm_pglistalloc(size, 0, -1, alignment, boundary,
+	    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 

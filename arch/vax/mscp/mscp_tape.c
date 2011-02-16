@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mscp_tape.c,v 1.8 2002/06/08 08:50:26 art Exp $ */
+=======
+/*	$OpenBSD: mscp_tape.c,v 1.11 2010/09/22 01:18:57 matthew Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: mscp_tape.c,v 1.16 2001/11/13 07:38:28 lukem Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -285,7 +289,7 @@ mtread(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(mtstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(mtstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -294,7 +298,7 @@ mtwrite(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(mtstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(mtstrategy, dev, B_WRITE, minphys, uio));
 }
 
 void

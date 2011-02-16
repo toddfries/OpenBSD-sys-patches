@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus_io.c,v 1.1 2004/02/01 05:09:49 drahn Exp $ */
+/*	$OpenBSD: mainbus_io.c,v 1.5 2010/12/26 15:40:59 miod Exp $ */
 /*	$NetBSD: mainbus_io.c,v 1.14 2003/12/06 22:05:33 bjh21 Exp $	*/
 
 /*
@@ -174,12 +174,12 @@ mainbus_bs_map(t, bpa, size, flags, bshp)
 }
 
 int
-mainbus_bs_alloc(t, rstart, rend, size, alignment, boundary, cacheable,
+mainbus_bs_alloc(t, rstart, rend, size, alignment, boundary, flags,
     bpap, bshp)
 	void *t;
 	bus_addr_t rstart, rend;
 	bus_size_t size, alignment, boundary;
-	int cacheable;
+	int flags;
 	bus_addr_t *bpap;
 	bus_space_handle_t *bshp;
 {
@@ -233,7 +233,7 @@ mainbus_bs_mmap(t, paddr, offset, prot, flags)
 	/*
 	 * mmap from address `paddr+offset' for one page
 	 */
-	 return (atop(paddr + offset));
+	 return (paddr + offset);
 }
 
 void

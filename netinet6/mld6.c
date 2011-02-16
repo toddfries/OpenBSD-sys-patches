@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mld6.c,v 1.22 2006/11/17 01:11:23 itojun Exp $	*/
+=======
+/*	$OpenBSD: mld6.c,v 1.26 2010/03/22 12:23:32 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: mld6.c,v 1.26 2001/02/16 14:50:35 itojun Exp $	*/
 
 /*
@@ -80,19 +84,8 @@
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
+#include <netinet6/mld6.h>
 #include <netinet6/mld6_var.h>
-
-/*
- * Protocol constants
- */
-
-/* denotes that the MLD max response delay field specifies time in milliseconds */
-#define MLD_TIMER_SCALE	1000
-/*
- * time between repetitions of a node's initial report of interest in a
- * multicast address(in seconds)
- */
-#define MLD_UNSOLICITED_REPORT_INTERVAL	10
 
 static struct ip6_pktopts ip6_opts;
 static int mld_timers_are_running;
@@ -125,8 +118,7 @@ mld6_init()
 }
 
 void
-mld6_start_listening(in6m)
-	struct in6_multi *in6m;
+mld6_start_listening(struct in6_multi *in6m)
 {
 	int s = splsoftnet();
 
@@ -146,7 +138,7 @@ mld6_start_listening(in6m)
 	} else {
 		mld6_sendpkt(in6m, MLD_LISTENER_REPORT, NULL);
 		in6m->in6m_timer =
-		    MLD_RANDOM_DELAY(MLD_UNSOLICITED_REPORT_INTERVAL *
+		    MLD_RANDOM_DELAY(MLD_V1_MAX_RI *
 		    PR_FASTHZ);
 		in6m->in6m_state = MLD_IREPORTEDLAST;
 		mld_timers_are_running = 1;
@@ -155,8 +147,7 @@ mld6_start_listening(in6m)
 }
 
 void
-mld6_stop_listening(in6m)
-	struct in6_multi *in6m;
+mld6_stop_listening(struct in6_multi *in6m)
 {
 	mld_all_nodes_linklocal.s6_addr16[1] =
 	    htons(in6m->in6m_ifp->if_index); /* XXX */
@@ -171,9 +162,7 @@ mld6_stop_listening(in6m)
 }
 
 void
-mld6_input(m, off)
-	struct mbuf *m;
-	int off;
+mld6_input(struct mbuf *m, int off)
 {
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct mld_hdr *mldh;
@@ -363,10 +352,7 @@ mld6_fasttimeo()
 }
 
 static void
-mld6_sendpkt(in6m, type, dst)
-	struct in6_multi *in6m;
-	int type;
-	const struct in6_addr *dst;
+mld6_sendpkt(struct in6_multi *in6m, int type, const struct in6_addr *dst)
 {
 	struct mbuf *mh, *md;
 	struct mld_hdr *mldh;

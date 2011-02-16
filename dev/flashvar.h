@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: flashvar.h,v 1.5 2009/10/13 19:33:16 pirofti Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -78,7 +82,7 @@ struct flash_softc {
 	struct device		 sc_dev;
 	/* Disk device information */
 	struct disk		 sc_dk;
-	struct buf		 sc_q;
+	struct buf		 sc_q; 
 	struct buf		*sc_bp;
 	int			 sc_flags;
 	/* Flash controller tag */
@@ -117,7 +121,7 @@ struct flash_softc {
 
 void	 flashattach(struct flash_softc *, struct flash_ctl_tag *, void *);
 int	 flashdetach(struct device *, int);
-int	 flashactivate(struct device *, enum devact);
+int	 flashactivate(struct device *, int);
 
 u_int8_t flash_reg8_read(struct flash_softc *, int);
 void	 flash_reg8_read_page(struct flash_softc *, caddr_t, caddr_t);

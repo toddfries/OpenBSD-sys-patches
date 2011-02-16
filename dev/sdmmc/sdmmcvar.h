@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sdmmcvar.h,v 1.6 2007/03/18 20:53:10 uwe Exp $	*/
+=======
+/*	$OpenBSD: sdmmcvar.h,v 1.18 2010/08/24 14:52:23 blambert Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -20,6 +24,10 @@
 #define _SDMMCVAR_H_
 
 #include <sys/queue.h>
+<<<<<<< HEAD
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -97,6 +105,7 @@ struct sdmmc_command {
 #define SCF_RSP_R5	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
 #define SCF_RSP_R5B	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX|SCF_RSP_BSY)
 #define SCF_RSP_R6	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
+#define SCF_RSP_R7	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
 	int		 c_error;	/* errno value on completion */
 
 	/* Host controller owned fields for data xfer in progress */
@@ -134,6 +143,7 @@ struct sdmmc_function {
 	u_int16_t rca;			/* relative card address */
 	int flags;
 #define SFF_ERROR		0x0001	/* function is poo; ignore it */
+#define SFF_SDHC		0x0002	/* SD High Capacity card */
 	SIMPLEQ_ENTRY(sdmmc_function) sf_list;
 	/* SD card I/O function members */
 	int number;			/* I/O function number or -1 */
@@ -150,7 +160,7 @@ struct sdmmc_function {
  */
 struct sdmmc_softc {
 	struct device sc_dev;		/* base device */
-#define SDMMCDEVNAME(sc)	((sc)->sc_dev.dv_xname)
+#define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
 	sdmmc_chipset_tag_t sct;	/* host controller chipset tag */
 	sdmmc_chipset_handle_t sch;	/* host controller chipset handle */
 	int sc_flags;
@@ -159,6 +169,7 @@ struct sdmmc_softc {
 #define SMF_MEM_MODE		0x0004	/* host in memory mode (SD or MMC) */
 #define SMF_CARD_PRESENT	0x0010	/* card presence noticed */
 #define SMF_CARD_ATTACHED	0x0020	/* card driver(s) attached */
+#define	SMF_STOP_AFTER_MULTIPLE	0x0040	/* send a stop after a multiple cmd */
 	int sc_function_count;		/* number of I/O functions (SDIO) */
 	struct sdmmc_function *sc_card;	/* selected card */
 	struct sdmmc_function *sc_fn0;	/* function 0, the card itself */
@@ -167,23 +178,31 @@ struct sdmmc_softc {
 	struct proc *sc_task_thread;	/* asynchronous tasks */
 	TAILQ_HEAD(, sdmmc_task) sc_tskq;   /* task thread work queue */
 	struct sdmmc_task sc_discover_task; /* card attach/detach task */
+<<<<<<< HEAD
 	struct lock sc_lock;		/* lock around host controller */
 	void *sc_scsibus;		/* SCSI bus emulation softc */
+=======
+	struct sdmmc_task sc_intr_task;	/* card interrupt task */
+	struct rwlock sc_lock;		/* lock around host controller */
+	void *sc_scsibus;		/* SCSI bus emulation softc */
+	TAILQ_HEAD(, sdmmc_intr_handler) sc_intrq; /* interrupt handlers */
+	long sc_max_xfer;		/* maximum transfer size */
+>>>>>>> origin/master
 };
 
 /*
  * Attach devices at the sdmmc bus.
  */
 struct sdmmc_attach_args {
-	struct scsi_link scsi_link;	/* XXX */
+	struct scsi_link *scsi_link;	/* XXX */
 	struct sdmmc_function *sf;
 };
 
 #define IPL_SDMMC	IPL_BIO
 #define splsdmmc()	splbio()
 
-#define SDMMC_LOCK(sc)	 lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL)
-#define SDMMC_UNLOCK(sc) lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL)
+#define	SDMMC_ASSERT_LOCKED(sc) \
+	rw_assert_wrlock(&(sc)->sc_lock)
 
 void	sdmmc_add_task(struct sdmmc_softc *, struct sdmmc_task *);
 void	sdmmc_del_task(struct sdmmc_task *);
@@ -197,6 +216,7 @@ void	sdmmc_go_idle_state(struct sdmmc_softc *);
 int	sdmmc_select_card(struct sdmmc_softc *, struct sdmmc_function *);
 int	sdmmc_set_relative_addr(struct sdmmc_softc *,
 	    struct sdmmc_function *);
+int	sdmmc_send_if_cond(struct sdmmc_softc *, uint32_t);
 
 int	sdmmc_io_enable(struct sdmmc_softc *);
 void	sdmmc_io_scan(struct sdmmc_softc *);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wi.c,v 1.136 2006/11/21 23:00:16 miod Exp $	*/
+=======
+/*	$OpenBSD: if_wi.c,v 1.149 2010/08/30 20:42:27 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -124,11 +128,14 @@ u_int32_t	widebug = WIDEBUG;
 #define DPRINTF(mask,args)
 #endif	/* WIDEBUG */
 
+<<<<<<< HEAD
 #if !defined(lint) && !defined(__OpenBSD__)
 static const char rcsid[] =
 	"$OpenBSD: if_wi.c,v 1.136 2006/11/21 23:00:16 miod Exp $";
 #endif	/* lint */
 
+=======
+>>>>>>> origin/master
 #ifdef foo
 static u_int8_t	wi_mcast_addr[6] = { 0x01, 0x60, 0x1D, 0x00, 0x01, 0x00 };
 #endif
@@ -138,7 +145,6 @@ STATIC int wi_ioctl(struct ifnet *, u_long, caddr_t);
 STATIC void wi_init_io(struct wi_softc *);
 STATIC void wi_start(struct ifnet *);
 STATIC void wi_watchdog(struct ifnet *);
-STATIC void wi_shutdown(void *);
 STATIC void wi_rxeof(struct wi_softc *);
 STATIC void wi_txeof(struct wi_softc *, int);
 STATIC void wi_update_stats(struct wi_softc *);
@@ -446,7 +452,8 @@ wi_attach(struct wi_softc *sc, struct wi_funcs *funcs)
 	BPFATTACH(&ifp->if_bpf, ifp, DLT_EN10MB, sizeof(struct ether_header));
 #endif
 
-	sc->sc_sdhook = shutdownhook_establish(wi_shutdown, sc);
+	if_addgroup(ifp, "wlan");
+	ifp->if_priority = IF_WIRELESS_DEFAULT_PRIORITY;
 
 	wi_init(sc);
 	wi_stop(sc);
@@ -810,7 +817,8 @@ wi_rxeof(struct wi_softc *sc)
 				    (len - WI_SNAPHDR_LEN),
 				    sc->wi_rxbuf + sizeof(struct ether_header) +
 				    IEEE80211_WEP_IVLEN +
-				    IEEE80211_WEP_KIDLEN + WI_SNAPHDR_LEN);
+				    IEEE80211_WEP_KIDLEN + WI_SNAPHDR_LEN,
+				    M_NOWAIT);
 				m_adj(m, -(WI_ETHERTYPE_LEN +
 				    IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN +
 				    WI_SNAPHDR_LEN));
@@ -873,7 +881,7 @@ wi_inquire(void *xsc)
 	sc = xsc;
 	ifp = &sc->sc_ic.ic_if;
 
-	timeout_add(&sc->sc_timo, hz * 60);
+	timeout_add_sec(&sc->sc_timo, 60);
 
 	/* Don't do this while we're transmitting */
 	if (ifp->if_flags & IFF_OACTIVE)
@@ -1548,36 +1556,39 @@ STATIC int
 wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	int			s, error = 0, i, j, len;
-	struct wi_softc		*sc;
-	struct ifreq		*ifr;
+	struct wi_softc		*sc = ifp->if_softc;
+	struct ifreq		*ifr = (struct ifreq *)data;
 	struct proc		*p = curproc;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct wi_scan_res	*res;
 	struct wi_scan_p2_hdr	*p2;
 	struct wi_req		*wreq = NULL;
 	u_int32_t		flags;
-
 	struct ieee80211_nwid		*nwidp = NULL;
 	struct ieee80211_nodereq_all	*na;
 	struct ieee80211_bssid		*bssid;
 
 	s = splnet();
-
-	sc = ifp->if_softc;
-	ifr = (struct ifreq *)data;
-
 	if (!(sc->wi_flags & WI_FLAGS_ATTACHED)) {
-		splx(s);
-		return(ENODEV);
+		error = ENODEV;
+		goto fail;
 	}
 
-	DPRINTF (WID_IOCTL, ("wi_ioctl: command %lu data %p\n",
-	    command, data));
-
-	if ((error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data)) > 0) {
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	while ((sc->wi_flags & WI_FLAGS_BUSY) && error == 0)
+		error = tsleep(&sc->wi_flags, PCATCH, "wiioc", 0);
+	if (error != 0) {
 		splx(s);
 		return error;
 	}
+	sc->wi_flags |= WI_FLAGS_BUSY;
+
+
+	DPRINTF (WID_IOCTL, ("wi_ioctl: command %lu data %p\n",
+	    command, data));
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1594,15 +1605,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			break;
 		}
 		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1621,23 +1623,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			wi_stop(sc);
 		sc->wi_if_flags = ifp->if_flags;
 		error = 0;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/* Update our multicast list. */
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ic.ic_ac) :
-		    ether_delmulti(ifr, &sc->sc_ic.ic_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				wi_setmulti(sc);
-			error = 0;
-		}
 		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
@@ -2064,14 +2049,23 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = wihap_ioctl(sc, command, data);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			wi_setmulti(sc);
+		error = 0;
 	}
 
 	if (wreq)
 		free(wreq, M_DEVBUF);
 	if (nwidp)
 		free(nwidp, M_DEVBUF);
+
+fail:
+	sc->wi_flags &= ~WI_FLAGS_BUSY;
+	wakeup(&sc->wi_flags);
 	splx(s);
 	return(error);
 }
@@ -2264,7 +2258,7 @@ wi_init_io(struct wi_softc *sc)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc->sc_timo, hz * 60);
+	timeout_add_sec(&sc->sc_timo, 60);
 
 	return;
 }
@@ -2537,7 +2531,8 @@ nextpkt:
 
 			/* Do host encryption. */
 			tx_frame.wi_frame_ctl |= htole16(WI_FCTL_WEP);
-			bcopy(&tx_frame.wi_dat[0], &sc->wi_txbuf[4], 8);
+			bcopy(&tx_frame.wi_dat[0], &sc->wi_txbuf[4], 6);
+			bcopy(&tx_frame.wi_type, &sc->wi_txbuf[10], 2);
 
 			m_copydata(m0, sizeof(struct ether_header),
 			    m0->m_pkthdr.len - sizeof(struct ether_header),
@@ -2711,20 +2706,7 @@ wi_detach(struct wi_softc *sc)
 	
 	if (sc->wi_flags & WI_FLAGS_ATTACHED) {
 		sc->wi_flags &= ~WI_FLAGS_ATTACHED;
-		if (sc->sc_sdhook != NULL)
-			shutdownhook_disestablish(sc->sc_sdhook);
 	}
-}
-
-STATIC void
-wi_shutdown(void *arg)
-{
-	struct wi_softc		*sc;
-
-	sc = arg;
-	wi_stop(sc);
-
-	return;
 }
 
 STATIC void

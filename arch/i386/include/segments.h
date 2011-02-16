@@ -1,4 +1,4 @@
-/*	$OpenBSD: segments.h,v 1.13 2004/06/13 21:49:16 niklas Exp $	*/
+/*	$OpenBSD: segments.h,v 1.18 2010/12/24 20:26:30 tedu Exp $	*/
 /*	$NetBSD: segments.h,v 1.23 1996/02/01 22:31:03 mycroft Exp $	*/
 
 /*-
@@ -69,10 +69,6 @@
 
 #ifndef _LOCORE
 
-#if __GNUC__ == 2 && __GNUC_MINOR__ < 7
-#pragma pack(1)
-#endif
-
 /*
  * Memory and System segment descriptors
  */
@@ -118,10 +114,6 @@ struct region_descriptor {
 	unsigned rd_limit:16;		/* segment extent */
 	unsigned rd_base:32;		/* base address  */
 } __packed;
-
-#if __GNUC__ == 2 && __GNUC_MINOR__ < 7
-#pragma pack(4)
-#endif
 
 #ifdef _KERNEL
 extern union descriptor *gdt, ldt[];
@@ -236,12 +228,6 @@ void idt_vec_free(int);
 /*
  * Entries in the Local Descriptor Table (LDT)
  */
-#define	LSYS5CALLS_SEL	0	/* iBCS system call gate */
-#define	LSYS5SIGR_SEL	1	/* iBCS sigreturn gate */
-#define	LUCODE1_SEL	2	/* User code descriptor */
-#define	LUCODE_SEL	3	/* User code descriptor (a stack short) */
-#define	LUDATA_SEL	4	/* User data descriptor */
-#define	LBSDICALLS_SEL	16	/* BSDI system call gate */
 #define	NLDT		17
 
 #endif /* _I386_SEGMENTS_H_ */

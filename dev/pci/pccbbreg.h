@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pccbbreg.h,v 1.8 2005/10/02 18:14:26 fgsch Exp $	*/
+=======
+/*	$OpenBSD: pccbbreg.h,v 1.11 2010/01/13 09:10:33 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pccbbreg.h,v 1.5 2000/06/07 09:02:47 haya Exp $	*/
 /*
  * Copyright (c) 1999 HAYAKAWA Koichi.  All rights reserved.
@@ -11,11 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -143,9 +142,11 @@
 #define PCI12XX_MFUNC_PIN1_INTB		0x20
 #define PCI12XX_MFUNC_PIN2		0x00000F00
 #define PCI12XX_MFUNC_PIN3		0x0000F000
+#define PCI12XX_MFUNC_PIN3_INTSER	0x00001000
 #define PCI12XX_MFUNC_PIN4		0x000F0000
 #define PCI12XX_MFUNC_PIN5		0x00F00000
 #define PCI12XX_MFUNC_PIN6		0x0F000000
+#define PCI12XX_MFUNC_DEFAULT		PCI12XX_MFUNC_PIN3_INTSER
 
 /*  PCI_CBCTRL bits for TI PCI113X */
 #define PCI113X_CBCTRL_INT_SERIAL	0x040000

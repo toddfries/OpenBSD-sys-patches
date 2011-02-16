@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ami_pci.c,v 1.41 2006/08/06 04:40:08 brad Exp $	*/
+=======
+/*	$OpenBSD: ami_pci.c,v 1.43 2008/10/28 11:43:10 marco Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -42,6 +46,7 @@
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
+#include <dev/biovar.h>
 #include <dev/ic/amireg.h>
 #include <dev/ic/amivar.h>
 

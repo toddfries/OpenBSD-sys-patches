@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: wskbd.c,v 1.53 2006/08/14 17:41:08 miod Exp $ */
+=======
+/* $OpenBSD: wskbd.c,v 1.64 2010/11/20 20:52:11 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -207,7 +211,7 @@ keysym_t ksym_upcase(keysym_t);
 int	wskbd_match(struct device *, void *, void *);
 void	wskbd_attach(struct device *, struct device *, void *);
 int	wskbd_detach(struct device *, int);
-int	wskbd_activate(struct device *, enum devact);
+int	wskbd_activate(struct device *, int);
 
 int	wskbd_displayioctl(struct device *, u_long, caddr_t, int, struct proc *);
 
@@ -420,7 +424,7 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 		printf(": console keyboard");
 
 #if NWSDISPLAY > 0
-		wsdisplay_set_console_kbd(&sc->sc_base); /* sets me_dispdv */
+		wsdisplay_set_console_kbd(&sc->sc_base); /* sets sc_displaydv */
 		if (sc->sc_displaydv != NULL)
 			printf(", using %s", sc->sc_displaydv->dv_xname);
 #endif
@@ -502,7 +506,7 @@ wskbd_repeat(void *v)
 	struct wskbd_softc *sc = (struct wskbd_softc *)v;
 	int s = spltty();
 
-	if (!sc->sc_repeating) {
+	if (sc->sc_repeating == 0) {
 		/*
 		 * race condition: a "key up" event came in when wskbd_repeat()
 		 * was already called but not yet spltty()'d
@@ -512,26 +516,22 @@ wskbd_repeat(void *v)
 	}
 	if (sc->sc_translating) {
 		/* deliver keys */
-		if (sc->sc_base.me_dispdv != NULL) {
-			int i;
-			for (i = 0; i < sc->sc_repeating; i++)
-				wsdisplay_kbdinput(sc->sc_base.me_dispdv,
-				    sc->id->t_symbols[i]);
-		}
+		if (sc->sc_displaydv != NULL)
+			wsdisplay_kbdinput(sc->sc_displaydv,
+			    sc->id->t_symbols, sc->sc_repeating);
 	} else {
 		/* queue event */
 		wskbd_deliver_event(sc, sc->sc_repeat_type,
 		    sc->sc_repeat_value);
 	}
 	if (sc->sc_keyrepeat_data.delN != 0)
-		timeout_add(&sc->sc_repeat_ch,
-		    (hz * sc->sc_keyrepeat_data.delN) / 1000);
+		timeout_add_msec(&sc->sc_repeat_ch, sc->sc_keyrepeat_data.delN);
 	splx(s);
 }
 #endif
 
 int
-wskbd_activate(struct device *self, enum devact act)
+wskbd_activate(struct device *self, int act)
 {
 	struct wskbd_softc *sc = (struct wskbd_softc *)self;
 
@@ -607,7 +607,7 @@ wskbd_input(struct device *dev, u_int type, int value)
 {
 	struct wskbd_softc *sc = (struct wskbd_softc *)dev; 
 #if NWSDISPLAY > 0
-	int num, i;
+	int num;
 #endif
 
 #if NWSDISPLAY > 0
@@ -627,24 +627,22 @@ wskbd_input(struct device *dev, u_int type, int value)
 #endif
 		num = wskbd_translate(sc->id, type, value);
 		if (num > 0) {
-			if (sc->sc_base.me_dispdv != NULL) {
+			if (sc->sc_displaydv != NULL) {
 #ifdef SCROLLBACK_SUPPORT
 				/* XXX - Shift_R+PGUP(release) emits PrtSc */
 				if (sc->id->t_symbols[0] != KS_Print_Screen) {
-					wsscrollback(sc->sc_base.me_dispdv,
+					wsscrollback(sc->sc_displaydv,
 					    WSDISPLAY_SCROLL_RESET);
 				}
 #endif
-				for (i = 0; i < num; i++) {
-					wsdisplay_kbdinput(sc->sc_base.me_dispdv,
-					    sc->id->t_symbols[i]);
-				}
+				wsdisplay_kbdinput(sc->sc_displaydv,
+				    sc->id->t_symbols, num);
 			}
 
 			if (sc->sc_keyrepeat_data.del1 != 0) {
 				sc->sc_repeating = num;
-				timeout_add(&sc->sc_repeat_ch,
-				    (hz * sc->sc_keyrepeat_data.del1) / 1000);
+				timeout_add_msec(&sc->sc_repeat_ch,
+				    sc->sc_keyrepeat_data.del1);
 			}
 		}
 		return;
@@ -659,8 +657,7 @@ wskbd_input(struct device *dev, u_int type, int value)
 		sc->sc_repeat_type = type;
 		sc->sc_repeat_value = value;
 		sc->sc_repeating = 1;
-		timeout_add(&sc->sc_repeat_ch,
-		    (hz * sc->sc_keyrepeat_data.del1) / 1000);
+		timeout_add_msec(&sc->sc_repeat_ch, sc->sc_keyrepeat_data.del1);
 	}
 #endif
 }
@@ -712,12 +709,9 @@ wskbd_rawinput(struct device *dev, u_char *buf, int len)
 {
 #if NWSDISPLAY > 0
 	struct wskbd_softc *sc = (struct wskbd_softc *)dev;
-	int i;
 
-	if (sc->sc_base.me_dispdv != NULL)
-		for (i = 0; i < len; i++)
-			wsdisplay_kbdinput(sc->sc_base.me_dispdv, buf[i]);
-	/* this is KS_GROUP_Ascii */
+	if (sc->sc_displaydv != NULL)
+		wsdisplay_rawkbdinput(sc->sc_displaydv, buf, len);
 #endif
 }
 #endif /* WSDISPLAY_COMPAT_RAWKBD */
@@ -728,8 +722,8 @@ wskbd_holdscreen(struct wskbd_softc *sc, int hold)
 {
 	int new_state;
 
-	if (sc->sc_base.me_dispdv != NULL) {
-		wsdisplay_kbdholdscreen(sc->sc_base.me_dispdv, hold);
+	if (sc->sc_displaydv != NULL) {
+		wsdisplay_kbdholdscreen(sc->sc_displaydv, hold);
 		new_state = sc->sc_ledstate;
 		if (hold)
 			new_state |= WSKBD_LED_SCROLL;
@@ -750,7 +744,7 @@ wskbd_enable(struct wskbd_softc *sc, int on)
 	int error;
 
 #if NWSDISPLAY > 0
-	if (sc->sc_base.me_dispdv != NULL)
+	if (sc->sc_displaydv != NULL)
 		return (0);
 
 	/* Always cancel auto repeat when fiddling with the kbd. */
@@ -819,7 +813,7 @@ wskbdopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p;
+	evar->io = p->p_p;
 
 	error = wskbd_do_open(sc, evar);
 	if (error) {
@@ -941,15 +935,15 @@ wskbd_do_ioctl_sc(struct wskbd_softc *sc, u_long cmd, caddr_t data, int flag,
 	case FIOSETOWN:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (-*(int *)data != sc->sc_base.me_evp->io->p_pgid &&
-		    *(int *)data != sc->sc_base.me_evp->io->p_pid)
+		if (-*(int *)data != sc->sc_base.me_evp->io->ps_pgid &&
+		    *(int *)data != sc->sc_base.me_evp->io->ps_pid)
 			return (EPERM);
 		return (0);
 		   
 	case TIOCSPGRP:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (*(int *)data != sc->sc_base.me_evp->io->p_pgid)
+		if (*(int *)data != sc->sc_base.me_evp->io->ps_pgid)
 			return (EPERM);
 		return (0);
 	}
@@ -1192,7 +1186,7 @@ wskbd_set_console_display(struct device *displaydv, struct wsevsrc *me)
 
 	if (sc == NULL)
 		return (NULL);
-	sc->sc_base.me_dispdv = displaydv;
+	sc->sc_displaydv = displaydv;
 #if NWSMUX > 0
 	(void)wsmux_attach_sc((struct wsmux_softc *)me, &sc->sc_base);
 #endif
@@ -1207,26 +1201,26 @@ wskbd_set_display(struct device *dv, struct device *displaydv)
 	int error;
 
 	DPRINTF(("wskbd_set_display: %s odisp=%p disp=%p cons=%d\n",
-		 dv->dv_xname, sc->sc_base.me_dispdv, displaydv, 
+		 dv->dv_xname, sc->sc_displaydv, displaydv, 
 		 sc->sc_isconsole));
 
 	if (sc->sc_isconsole)
 		return (EBUSY);
 
 	if (displaydv != NULL) {
-		if (sc->sc_base.me_dispdv != NULL)
+		if (sc->sc_displaydv != NULL)
 			return (EBUSY);
 	} else {
-		if (sc->sc_base.me_dispdv == NULL)
+		if (sc->sc_displaydv == NULL)
 			return (ENXIO);
 	}
 
-	odisplaydv = sc->sc_base.me_dispdv;
-	sc->sc_base.me_dispdv = NULL;
+	odisplaydv = sc->sc_displaydv;
+	sc->sc_displaydv = NULL;
 	error = wskbd_enable(sc, displaydv != NULL);
-	sc->sc_base.me_dispdv = displaydv;
+	sc->sc_displaydv = displaydv;
 	if (error) {
-		sc->sc_base.me_dispdv = odisplaydv;
+		sc->sc_displaydv = odisplaydv;
 		return (error);
 	}
 
@@ -1365,7 +1359,7 @@ change_displayparam(struct wskbd_softc *sc, int param, int updown,
 	struct wsdisplay_param dp;
 
 	dp.param = param;
-	res = wsdisplay_param(sc->sc_base.me_dispdv, WSDISPLAYIO_GETPARAM, &dp);
+	res = wsdisplay_param(sc->sc_displaydv, WSDISPLAYIO_GETPARAM, &dp);
 
 	if (res == EINVAL)
 		return; /* no such parameter */
@@ -1376,7 +1370,7 @@ change_displayparam(struct wskbd_softc *sc, int param, int updown,
 	else
 	if (dp.curval < dp.min)
 		dp.curval = wraparound ? dp.max : dp.min;
-	wsdisplay_param(sc->sc_base.me_dispdv, WSDISPLAYIO_SETPARAM, &dp);
+	wsdisplay_param(sc->sc_displaydv, WSDISPLAYIO_SETPARAM, &dp);
 }
 #endif
 
@@ -1441,7 +1435,7 @@ internal_command(struct wskbd_softc *sc, u_int *type, keysym_t ksym,
 #endif
 
 #if NWSDISPLAY > 0
-	if (sc->sc_base.me_dispdv == NULL)
+	if (sc->sc_displaydv == NULL)
 		return (0);
 
 	switch (ksym) {
@@ -1467,9 +1461,21 @@ internal_command(struct wskbd_softc *sc, u_int *type, keysym_t ksym,
 		return (1);
 #if defined(__i386__) || defined(__amd64__)
 	case KS_Cmd_KbdReset:
-		if (kbd_reset == 1) {
+		switch (kbd_reset) {
+#ifdef DDB
+		case 2:
+			if (sc->sc_isconsole && db_console)
+				Debugger();
+			/* discard this key (ddb discarded command modifiers) */
+			*type = WSCONS_EVENT_KEY_UP;
+			break;
+#endif
+		case 1:
 			kbd_reset = 0;
 			psignal(initproc, SIGUSR1);
+			break;
+		default:
+			break;
 		}
 		return (1);
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mptramp.S,v 1.2 2004/07/19 15:09:05 art Exp $	*/
+/*	$OpenBSD: mptramp.S,v 1.7 2010/11/13 04:16:42 guenther Exp $	*/
 /*	$NetBSD: mptramp.S,v 1.1 2003/04/26 18:39:30 fvdl Exp $	*/
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -90,7 +83,6 @@
 #include <machine/segments.h>
 #include <machine/mpbiosvar.h>
 #include <machine/i82489reg.h>
-#include <machine/gdt.h>
 
 #define _RELOC(x)       ((x) - KERNBASE)
 #define RELOC(x)        _RELOC(_C_LABEL(x))
@@ -215,9 +207,15 @@ _TRMP_LABEL(mptramp_longmode)
 
 	
 _C_LABEL(cpu_spinup_trampoline_end):	#end of code copied to MP_TRAMPOLINE
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
+	movl	_C_LABEL(local_apic)+LAPIC_ID,%eax
+	shrl	$LAPIC_ID_SHIFT,%eax
+	xorq	%rcx,%rcx
+1:
 	movq	_C_LABEL(cpu_info)(,%rcx,8),%rdi
+	incq	%rcx
+	movl	CPU_INFO_APICID(%rdi),%edx
+	cmpl	%eax,%edx
+	jne	1b
 
 	movq	CPU_INFO_IDLE_PCB(%rdi),%rsi
 
@@ -225,7 +223,7 @@ _C_LABEL(cpu_spinup_trampoline_end):	#end of code copied to MP_TRAMPOLINE
 	movq	PCB_RBP(%rsi),%rbp
 
 	movq	CPU_INFO_GDT(%rdi),%rax
-	movw	$(MAXGDTSIZ-1),-10(%rsp)
+	movw	$(GDT_SIZE-1),-10(%rsp)
 	movq	%rax,-8(%rsp)
 	lgdt	-10(%rsp)
 

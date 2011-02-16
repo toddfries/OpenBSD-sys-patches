@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dz_ibus.c,v 1.21 2006/08/01 23:36:51 miod Exp $	*/
+=======
+/*	$OpenBSD: dz_ibus.c,v 1.28 2010/09/20 06:33:48 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dz_ibus.c,v 1.15 1999/08/27 17:50:42 ragge Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
@@ -31,92 +35,49 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
-
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/ioctl.h>
-#include <sys/tty.h>
-#include <sys/file.h>
-#include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/reboot.h>
 
-#include <dev/cons.h>
-
-#include <machine/mtpr.h>
 #include <machine/sid.h>
-#include <machine/uvax.h>
 #include <machine/vsbus.h>
 #include <machine/cpu.h>
 #include <machine/scb.h>
-#include <machine/nexus.h>
-#include <machine/ka420.h>
-
-#include <vax/vax/gencons.h>
 
 #include <vax/qbus/dzreg.h>
 #include <vax/qbus/dzvar.h>
 
 #include <vax/dec/dzkbdvar.h>
 
+#include <dev/cons.h>
+
 #include "dzkbd.h"
 #include "dzms.h"
 
-static  int     dz_vsbus_match(struct device *, struct cfdata *, void *);
-static  void    dz_vsbus_attach(struct device *, struct device *, void *);
-
-static	vaddr_t dz_regs; /* Used for console */
+int     dz_vsbus_match(struct device *, struct cfdata *, void *);
+void    dz_vsbus_attach(struct device *, struct device *, void *);
 
 struct  cfattach dz_vsbus_ca = {
 	sizeof(struct dz_softc), (cfmatch_t)dz_vsbus_match, dz_vsbus_attach
 };
 
-#define REG(name)     short name; short X##name##X;
-static volatile struct ss_dz {/* base address of DZ-controller: 0x200a0000 */
-	REG(csr);	/* 00 Csr: control/status register */
-	REG(rbuf);	/* 04 Rbuf/Lpr: receive buffer/line param reg. */
-	REG(tcr);	/* 08 Tcr: transmit console register */
-	REG(tdr);	/* 0C Msr/Tdr: modem status reg/transmit data reg */
-	REG(lpr0);	/* 10 Lpr0: */
-	REG(lpr1);	/* 14 Lpr0: */
-	REG(lpr2);	/* 18 Lpr0: */
-	REG(lpr3);	/* 1C Lpr0: */
-} *dz;
-#undef REG
+#define	DZ_VSBUS_CSR	0
+#define	DZ_VSBUS_RBUF	4
+#define	DZ_VSBUS_DTR	9
+#define	DZ_VSBUS_BREAK	13
+#define	DZ_VSBUS_TBUF	12
+#define	DZ_VSBUS_TCR	8
+#define	DZ_VSBUS_DCD	13
+#define	DZ_VSBUS_RING	13
 
-cons_decl(dz);
-cdev_decl(dz);
-
-int	dz_can_have_kbd(void);
-
-extern int getmajor(void *);	/* conf.c */
-
-#if NDZKBD > 0 || NDZMS > 0
-static int
-dz_print(void *aux, const char *name)
-{
-	struct dzkm_attach_args *dz_args = aux;
-
-	if (name != NULL)
-		printf(dz_args->daa_line == 0 ? "lkkbd at %s" : "lkms at %s",
-		    name);
-	else
-		printf(" line %d", dz_args->daa_line);
-
-	return (UNCONF);
-}
-#endif
-
-static int
+int
 dz_vsbus_match(parent, cf, aux)
 	struct device *parent;
 	struct cfdata *cf;
 	void *aux;
 {
 	struct vsbus_attach_args *va = aux;
-	struct ss_dz *dzP;
+	volatile uint16_t *dzP;
 	short i;
 
 #if VAX53 || VAX49
@@ -126,21 +87,21 @@ dz_vsbus_match(parent, cf, aux)
 			return 0; /* don't probe unnecessarily */
 #endif
 
-	dzP = (struct ss_dz *)va->va_addr;
-	i = dzP->tcr;
-	dzP->csr = DZ_CSR_MSE|DZ_CSR_TXIE;
-	dzP->tcr = 0;
+	dzP = (volatile uint16_t *)va->va_addr;
+	i = dzP[DZ_VSBUS_TCR / 2];
+	dzP[DZ_VSBUS_CSR / 2] = DZ_CSR_MSE|DZ_CSR_TXIE;
+	dzP[DZ_VSBUS_TCR / 2] = 0;
 	DELAY(1000);
-	dzP->tcr = 1;
+	dzP[DZ_VSBUS_TCR / 2] = 1;
 	DELAY(100000);
-	dzP->tcr = i;
+	dzP[DZ_VSBUS_TCR / 2] = i;
 
 	/* If the device doesn't exist, no interrupt has been generated */
 	
 	return 1;
 }
 
-static void
+void
 dz_vsbus_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
@@ -150,40 +111,58 @@ dz_vsbus_attach(parent, self, aux)
 #if NDZKBD > 0 || NDZMS > 0
 	struct dzkm_attach_args daa;
 #endif
+	extern vaddr_t dz_console_regs;
+	vaddr_t dz_regs;
 
+<<<<<<< HEAD
+=======
+	printf(": ");
+
+	/*
+	 * This assumes that systems where dz@vsbus exist and can be
+	 * the console device, can only have one instance of dz@vsbus.
+	 * So far, so good.
+	 */
+	if (dz_console_regs != 0) {
+		dz_regs = dz_console_regs;
+		printf("console, ");
+	} else
+		dz_regs = vax_map_physmem(va->va_paddr, 1);
+
+>>>>>>> origin/master
 	/* 
 	 * XXX - This is evil and ugly, but...
 	 * due to the nature of how bus_space_* works on VAX, this will
 	 * be perfectly good until everything is converted.
 	 */
+<<<<<<< HEAD
 
 	if (dz_regs == 0) /* This isn't console */
 		dz_regs = vax_map_physmem(va->va_paddr, 1);
 
+=======
+>>>>>>> origin/master
 	sc->sc_ioh = dz_regs;
-	sc->sc_dr.dr_csr = 0;
-	sc->sc_dr.dr_rbuf = 4;
-	sc->sc_dr.dr_dtr = 9;
-	sc->sc_dr.dr_break = 13;
-	sc->sc_dr.dr_tbuf = 12;
-	sc->sc_dr.dr_tcr = 8;
-	sc->sc_dr.dr_dcd = 13;
-	sc->sc_dr.dr_ring = 13;
+	sc->sc_dr.dr_csr = DZ_VSBUS_CSR;
+	sc->sc_dr.dr_rbuf = DZ_VSBUS_RBUF;
+	sc->sc_dr.dr_dtr = DZ_VSBUS_DTR;
+	sc->sc_dr.dr_break = DZ_VSBUS_BREAK;
+	sc->sc_dr.dr_tbuf = DZ_VSBUS_TBUF;
+	sc->sc_dr.dr_tcr = DZ_VSBUS_TCR;
+	sc->sc_dr.dr_dcd = DZ_VSBUS_DCD;
+	sc->sc_dr.dr_ring = DZ_VSBUS_RING;
 
 	sc->sc_type = DZ_DZV;
 
-	sc->sc_dsr = 0x0f; /* XXX check if VS has modem ctrl bits */
+	/* no modem control bits except on line 2 */
+	sc->sc_dsr = (1 << 0) | (1 << 1) | (1 << 3);
 
 	sc->sc_rcvec = va->va_cvec;
-	scb_vecalloc(sc->sc_rcvec, dzxint, sc, SCB_ISTACK,
-	    &sc->sc_tintrcnt);
+	scb_vecalloc(sc->sc_rcvec, dzxint, sc, SCB_ISTACK, &sc->sc_tintrcnt);
 	sc->sc_tcvec = va->va_cvec - 4;
-	scb_vecalloc(sc->sc_tcvec, dzrint, sc, SCB_ISTACK,
-	    &sc->sc_rintrcnt);
-	evcount_attach(&sc->sc_rintrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_rcvec, &evcount_intr);
-	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_tcvec, &evcount_intr);
+	scb_vecalloc(sc->sc_tcvec, dzrint, sc, SCB_ISTACK, &sc->sc_rintrcnt);
+	evcount_attach(&sc->sc_rintrcnt, sc->sc_dev.dv_xname, &sc->sc_rcvec);
+	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname, &sc->sc_tcvec);
 
 	printf(": 4 lines");
 
@@ -193,18 +172,18 @@ dz_vsbus_attach(parent, self, aux)
 #if NDZKBD > 0
 		extern struct consdev wsdisplay_cons;
 
-		dz->rbuf = DZ_LPR_RX_ENABLE | (DZ_LPR_B4800 << 8) 
-		    | DZ_LPR_8_BIT_CHAR;
 		daa.daa_line = 0;
+		DZ_WRITE_WORD(sc, dr_rbuf, DZ_LPR_RX_ENABLE |
+		    (DZ_LPR_B4800 << 8) | DZ_LPR_8_BIT_CHAR | daa.daa_line);
 		daa.daa_flags =
 		    (cn_tab == &wsdisplay_cons ? DZKBD_CONSOLE : 0);
 		config_found(self, &daa, dz_print);
 #endif
 #if NDZMS > 0
-		dz->rbuf = DZ_LPR_RX_ENABLE | (DZ_LPR_B4800 << 8) |
-		    DZ_LPR_8_BIT_CHAR | DZ_LPR_PARENB | DZ_LPR_OPAR |
-		    1 /* line */;
 		daa.daa_line = 1;
+		DZ_WRITE_WORD(sc, dr_rbuf, DZ_LPR_RX_ENABLE |
+		    (DZ_LPR_B4800 << 8) | DZ_LPR_8_BIT_CHAR | DZ_LPR_PARENB |
+		    DZ_LPR_OPAR | daa.daa_line);
 		daa.daa_flags = 0;
 		config_found(self, &daa, dz_print);
 #endif
@@ -217,6 +196,7 @@ dz_vsbus_attach(parent, self, aux)
 	splx(s);
 #endif
 }
+<<<<<<< HEAD
 
 int
 dzcngetc(dev) 
@@ -423,3 +403,5 @@ dzputc(struct dz_linestate *ls, int ch)
 	dzcnputc(makedev(getmajor(dzopen), 0), ch);
 }
 #endif /* NDZKBD > 0 || NDZMS > 0 */
+=======
+>>>>>>> origin/master

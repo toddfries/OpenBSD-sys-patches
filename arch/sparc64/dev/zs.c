@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zs.c,v 1.17 2004/09/29 19:17:43 miod Exp $	*/
+=======
+/*	$OpenBSD: zs.c,v 1.23 2009/09/10 21:30:00 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: zs.c,v 1.29 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -483,9 +480,6 @@ zs_print(aux, name)
 	return (UNCONF);
 }
 
-/* Deprecate this? */
-static volatile int zssoftpending;
-
 static int
 zshard(arg)
 	void *arg;
@@ -501,7 +495,6 @@ zshard(arg)
 	if (((zsc->zsc_cs[0] && zsc->zsc_cs[0]->cs_softreq) ||
 	     (zsc->zsc_cs[1] && zsc->zsc_cs[1]->cs_softreq)) &&
 	    zsc->zsc_softintr) {
-		zssoftpending = PIL_TTY;
 		softintr_schedule(zsc->zsc_softintr);
 	}
 	return (rval);
@@ -538,7 +531,6 @@ zssoft(arg)
 
 	/* Make sure we call the tty layer at spltty. */
 	s = spltty();
-	zssoftpending = 0;
 	(void)zsc_intr_soft(zsc);
 #ifdef TTY_DEBUG
 	{

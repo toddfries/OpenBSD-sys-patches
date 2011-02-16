@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: asc_tcds.c,v 1.3 2003/06/05 12:27:02 deraadt Exp $ */
+=======
+/* $OpenBSD: asc_tcds.c,v 1.7 2010/06/28 18:31:02 krw Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: asc_tcds.c,v 1.5 2001/11/15 09:48:19 lukem Exp $ */
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -121,7 +118,6 @@ struct ncr53c9x_glue asc_tcds_glue = {
 };
 
 extern struct scsi_adapter asc_switch;
-extern struct scsi_device asc_dev;
 
 int
 asc_tcds_match(parent, cf, aux)
@@ -175,7 +171,8 @@ asc_tcds_attach(parent, self, aux)
 	/* gimme MHz */
 	sc->sc_freq /= 1000000;
 
-	tcds_intr_establish(parent, tcdsdev->tcdsda_chip, ncr53c9x_intr, sc);
+	tcds_intr_establish(parent, tcdsdev->tcdsda_chip, ncr53c9x_intr, sc,
+	    self->dv_xname);
 
 	/*
 	 * XXX More of this should be in ncr53c9x_attach(), but
@@ -217,7 +214,7 @@ asc_tcds_attach(parent, self, aux)
 	sc->sc_maxxfer = 64 * 1024;
 
 	/* Do the common parts of attachment. */
-	ncr53c9x_attach(sc, &asc_switch, &asc_dev);
+	ncr53c9x_attach(sc, &asc_switch);
 }
 
 void

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cissreg.h,v 1.7 2006/08/28 02:56:33 mickey Exp $	*/
+=======
+/*	$OpenBSD: cissreg.h,v 1.11 2010/06/03 01:02:13 dlg Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -29,6 +33,12 @@
 #define	CISS_OUTQ	0x44
 #define	CISS_CFG_BAR	0xb4
 #define	CISS_CFG_OFF	0xb8
+
+/* 64bit FIFO mode input/output post queues */
+#define CISS_INQ64_LO	0xc0
+#define CISS_INQ64_HI	0xc4
+#define CISS_OUTQ64_LO	0xc8
+#define CISS_OUTQ64_HI	0xcc
 
 #define	CISS_DRVMAP_SIZE	(128 / 8)
 
@@ -64,10 +74,15 @@ struct ciss_config {
 #define	CISS_SIGNATURE	(*(u_int32_t *)"CISS")
 	u_int32_t	version;
 	u_int32_t	methods;
-#define	CISS_METH_READY	0x0001
-#define	CISS_METH_SIMPL	0x0002
-#define	CISS_METH_PERF	0x0004
-#define	CISS_METH_EMQ	0x0008
+#define CISS_METH_READY		0x00000001 /* indicate to accept commands */
+#define CISS_METH_SIMPL		0x00000002 /* simple mode */
+#define CISS_METH_PERF		0x00000004 /* performant mode */
+#define CISS_METH_EMQ		0x00000008 /* MEMQ method */
+#define CISS_METH_BIT63		0x08000000 /* address bit 63 is valid */
+#define CISS_METH_FIFO64_RRO	0x10000000 /* 64bit FIFO reverse read order */
+#define CISS_METH_SHORT_TAG	0x20000000 /* short 4 byte tag support */
+#define CISS_METH_MSIX		0x40000000 /* directed MSI-X support */
+#define CISS_METH_FIFO64	0x80000000 /* 64bit FIFO support */
 	u_int32_t	amethod;
 	u_int32_t	rmethod;
 	u_int32_t	paddr_lim;
@@ -463,9 +478,9 @@ struct ciss_error {
 } __packed;
 
 struct ciss_ccb {
-	TAILQ_ENTRY(ciss_ccb)	ccb_link;
+	SLIST_ENTRY(ciss_ccb)	ccb_link;
 	struct ciss_softc	*ccb_sc;
-	paddr_t			ccb_cmdpa;
+	u_int64_t		ccb_cmdpa;
 	enum {
 		CISS_CCB_FREE	= 0x01,
 		CISS_CCB_READY	= 0x02,
@@ -485,5 +500,5 @@ struct ciss_ccb {
 	struct ciss_cmd		ccb_cmd;	/* followed by sgl */
 };
 
-typedef TAILQ_HEAD(ciss_queue_head, ciss_ccb)     ciss_queue_head;
+SLIST_HEAD(ciss_ccb_list, ciss_ccb);
 

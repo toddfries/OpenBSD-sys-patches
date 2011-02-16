@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.16 2005/05/02 18:17:52 grange Exp $ */
+/*	$OpenBSD: clock.c,v 1.34 2010/09/20 06:33:47 matthew Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -56,11 +56,8 @@ struct cfattach clock_ca = {
 	sizeof(struct clock_softc), clockmatch, clockattach
 };
 
-int	clock_started = 0;
-u_int32_t cpu_counter_last;
-u_int32_t cpu_counter_interval;
-u_int32_t pendingticks;
-u_int32_t ticktime;
+void	clock_calibrate(struct cpu_info *);
+uint32_t clock_int5(uint32_t, struct trap_frame *);
 
 u_int cp0_get_timecount(struct timecounter *);
 
@@ -83,12 +80,10 @@ struct timecounter cp0_timecounter = {
 int
 clockmatch(struct device *parent, void *cfdata, void *aux)
 {
-        struct confargs *ca = aux;
-	struct cfdata *cf = cfdata;
+	struct mainbus_attach_args *maa = aux;
 
-        /* Make sure that we're looking for a clock. */
-        if (strcmp(ca->ca_name, clock_cd.cd_name) != 0)
-                return (0);
+	if (strcmp(maa->maa_name, clock_cd.cd_name) != 0)
+		return 0;
 
 	if (cf->cf_unit >= 1)
 		return 0;
@@ -98,52 +93,26 @@ clockmatch(struct device *parent, void *cfdata, void *aux)
 void
 clockattach(struct device *parent, struct device *self, void *aux)
 {
-	struct clock_softc *sc;
+	printf(": ticker on int5 using count register\n");
 
-	md_clk_attach(parent, self, aux);
-	sc = (struct clock_softc *)self;
-
-	switch (sys_config.system_type) {
-	case ALGOR_P4032:
-	case ALGOR_P5064:
-	case MOMENTUM_CP7000:
-	case MOMENTUM_CP7000G:
-	case MOMENTUM_JAGUAR:
-	case GALILEO_EV64240:
-	case SGI_INDY:
-	case SGI_O2:
-	case SGI_O200:
-		printf(" ticker on int5 using count register");
-		set_intr(INTPRI_CLOCK, CR_INT_5, clock_int5);
-		ticktime = sys_config.cpu[0].clock / 2000;
-		break;
-
-	default:
-		panic("clockattach: it didn't get here.  really.");
-	}
-
-	printf("\n");
+	/*
+	 * We need to register the interrupt now, for idle_mask to
+	 * be computed correctly.
+	 */
+	set_intr(INTPRI_CLOCK, CR_INT_5, clock_int5);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+	/* try to avoid getting clock interrupts early */
+	cp0_set_compare(cp0_get_count() - 1);
 }
 
 /*
  *	Clock interrupt code for machines using the on cpu chip
  *	counter register. This register counts at half the pipeline
  *	frequency so the frequency must be known and the options
- *	register wired to allow it's use.
+ *	register wired to allow its use.
  *
  *	The code is enabled by setting 'cpu_counter_interval'.
  */
-void
-clock_int5_init(struct clock_softc *sc)
-{
-        int s;
-
-        s = splclock();
-        cpu_counter_interval = sys_config.cpu[0].clock / (hz * 2);
-        cpu_counter_last = cp0_get_count() + cpu_counter_interval * 4;
-        cp0_set_compare(cpu_counter_last);
-        splx(s);
-}
 
 /*
  *  Dummy count register interrupt handler used on some targets.
@@ -163,42 +132,67 @@ clock_int5_dummy(intrmask_t mask, struct trap_frame *tf)
  *  can not be run the tick is just counted and handled later when
  *  the clock is unmasked again.
  */
-intrmask_t
-clock_int5(intrmask_t mask, struct trap_frame *tf)
+uint32_t
+clock_int5(uint32_t mask, struct trap_frame *tf)
 {
 	u_int32_t clkdiff;
+	struct cpu_info *ci = curcpu();
 
 	/*
-	 * If clock is started count the tick, else just arm for a new.
+	 * If we got an interrupt before we got ready to process it,
+	 * retrigger it as far as possible. cpu_initclocks() will
+	 * take care of retriggering it correctly.
 	 */
-	if (clock_started && cpu_counter_interval != 0) {
-		clkdiff = cp0_get_count() - cpu_counter_last;
-		while (clkdiff >= cpu_counter_interval) {
-			cpu_counter_last += cpu_counter_interval;
-			clkdiff = cp0_get_count() - cpu_counter_last;
-			pendingticks++;
-		}
-		cpu_counter_last += cpu_counter_interval;
-		pendingticks++;
-	} else {
-		cpu_counter_last = cpu_counter_interval + cp0_get_count();
+	if (ci->ci_clock_started == 0) {
+		cp0_set_compare(cp0_get_count() - 1);
+
+		return CR_INT_5;
 	}
 
-	cp0_set_compare(cpu_counter_last);
-	/* Make sure that next clock tick has not passed */
-	clkdiff = cp0_get_count() - cpu_counter_last;
-	if (clkdiff > 0) {
-		cpu_counter_last += cpu_counter_interval;
-		pendingticks++;
-		cp0_set_compare(cpu_counter_last);
+	/*
+	 * Count how many ticks have passed since the last clock interrupt...
+	 */
+	clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
+	while (clkdiff >= ci->ci_cpu_counter_interval) {
+		ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
+		clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
+		ci->ci_pendingticks++;
+	}
+	ci->ci_pendingticks++;
+	ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
+
+	/*
+	 * Set up next tick, and check if it has just been hit; in this
+	 * case count it and schedule one tick ahead.
+	 */
+	cp0_set_compare(ci->ci_cpu_counter_last);
+	clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
+	if ((int)clkdiff >= 0) {
+		ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
+		ci->ci_pendingticks++;
+		cp0_set_compare(ci->ci_cpu_counter_last);
 	}
 
-	if ((tf->cpl & SPL_CLOCKMASK) == 0) {
-		while (pendingticks) {
+	/*
+	 * Process clock interrupt unless it is currently masked.
+	 */
+	if (tf->ipl < IPL_CLOCK) {
+#ifdef MULTIPROCESSOR
+		u_int32_t sr;
+		/* Enable interrupts at this (hardware) level again */
+		sr = getsr();
+		ENABLEIPI();
+		__mp_lock(&kernel_lock);
+#endif
+		while (ci->ci_pendingticks) {
 			clk_count.ec_count++;
 			hardclock(tf);
-			pendingticks--;
+			ci->ci_pendingticks--;
 		}
+#ifdef MULTIPROCESSOR
+		__mp_unlock(&kernel_lock);
+		setsr(sr);
+#endif
 	}
 
 	return CR_INT_5;	/* Clock is always on 5 */
@@ -212,27 +206,14 @@ delay(int n)
 {
 	int dly;
 	int p, c;
+	struct cpu_info *ci = curcpu();
+	uint32_t delayconst;
 
+	delayconst = ci->ci_delayconst;
+	if (delayconst == 0)
+		delayconst = bootcpu_hwinfo.clock / 2;
 	p = cp0_get_count();
-	dly = (sys_config.cpu[0].clock / 1000000) * n / 2;
-	while (dly > 0) {
-		c = cp0_get_count();
-		dly -= c - p;
-		p = c;
-	}
-}
-
-/*
- * Wait "n" nanoseconds.
- */
-void
-nanodelay(int n)
-{
-	int dly;
-	int p, c;
-
-	p = cp0_get_count();
-	dly = ((sys_config.cpu[0].clock * n) / 1000000000) / 2;
+	dly = (delayconst / 1000000) * n;
 	while (dly > 0) {
 		c = cp0_get_count();
 		dly -= c - p;
@@ -245,31 +226,82 @@ nanodelay(int n)
  */
 
 /*
+ * Calibrate cpu clock against the TOD clock if available.
+ */
+void
+clock_calibrate(struct cpu_info *ci)
+{
+	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
+
+	if (cd->tod_get == NULL)
+		return;
+
+	(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	first_sec = ct.sec;
+
+	/* Let the clock tick one second. */
+	do {
+		first_cp0 = cp0_get_count();
+		(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	} while (ct.sec == first_sec);
+	first_sec = ct.sec;
+	/* Let the clock tick one more second. */
+	do {
+		second_cp0 = cp0_get_count();
+		(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	} while (ct.sec == first_sec);
+
+	cycles_per_sec = second_cp0 - first_cp0;
+	ci->ci_hw.clock = cycles_per_sec * 2;
+	ci->ci_delayconst = cycles_per_sec;
+}
+
+/*
  * Start the real-time and statistics clocks. Leave stathz 0 since there
  * are no other timers available.
  */
 void
 cpu_initclocks()
 {
-	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
+	struct cpu_info *ci = curcpu();
 
-	hz = sc->sc_clock.clk_hz;
-	stathz = sc->sc_clock.clk_stathz;
-	profhz = sc->sc_clock.clk_profhz;
+	hz = 100;
+	profhz = 100;
+	stathz = 0;	/* XXX no stat clock yet */
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-
-	/* Start the clock.  */
-	if (sc->sc_clock.clk_init != NULL)
-		(*sc->sc_clock.clk_init)(sc);
+	clock_calibrate(ci);
 
 	tick = 1000000 / hz;	/* number of micro-seconds between interrupts */
-	tickadj = 240000 / (60 * hz);           /* can adjust 240ms in 60s */
+	tickadj = 240000 / (60 * hz);		/* can adjust 240ms in 60s */
 
-	cp0_timecounter.tc_frequency = sys_config.cpu[0].clock / 2;
+	cp0_timecounter.tc_frequency = (uint64_t)ci->ci_hw.clock / 2;
 	tc_init(&cp0_timecounter);
+	cpu_startclock(ci);
+}
 
-	clock_started++;
+void
+cpu_startclock(struct cpu_info *ci)
+{
+	int s;
+
+	if (!CPU_IS_PRIMARY(ci)) {
+		s = splhigh();
+		microuptime(&ci->ci_schedstate.spc_runtime);
+		splx(s);
+
+		/* try to avoid getting clock interrupts early */
+		cp0_set_compare(cp0_get_count() - 1);
+
+		clock_calibrate(ci);
+	}
+
+	/* Start the clock. */
+	s = splclock();
+	ci->ci_cpu_counter_interval = (ci->ci_hw.clock / 2) / hz;
+	ci->ci_cpu_counter_last = cp0_get_count() + ci->ci_cpu_counter_interval;
+	cp0_set_compare(ci->ci_cpu_counter_last);
+	ci->ci_clock_started++;
+	splx(s);
 }
 
 /*
@@ -278,8 +310,7 @@ cpu_initclocks()
  * but that would be a drag.
  */
 void
-setstatclockrate(newhz)
-	int newhz;
+setstatclockrate(int newhz)
 {
 }
 
@@ -307,7 +338,7 @@ inittodr(time_t base)
 	if (base < 15*SECYR) {
 		printf("WARNING: preposterous time in file system");
 		/* read the system clock anyway */
-		base = 17*SECYR + 186*SECDAY + SECDAY/2;
+		base = 40 * SECYR;	/* 2010 */
 	}
 
 	/*
@@ -364,8 +395,8 @@ void
 resettodr()
 {
 	struct tod_time c;
-	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
-	register int t, t2;
+	struct tod_desc *cd = &sys_tod;
+	int t, t2;
 
 	/*
 	 *  Don't reset clock if time has not been set!
@@ -379,6 +410,7 @@ resettodr()
 	c.dow = (t2 + 5) % 7 + 1;	/* 1/1/1970 was thursday */
 
 	/* compute the year */
+	t = 0;
 	t2 = time_second / SECDAY;
 	c.year = 69;
 	while (t2 >= 0) {	/* whittle off years */
@@ -413,5 +445,6 @@ resettodr()
 u_int
 cp0_get_timecount(struct timecounter *tc)
 {
+	/* XXX SMP */
 	return (cp0_get_count());
 }

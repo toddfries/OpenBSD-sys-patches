@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: RAMDISKU5,v 1.11 2006/06/21 19:28:08 jason Exp $
+=======
+#	$OpenBSD: RAMDISKU5,v 1.16 2009/06/24 11:38:40 deraadt Exp $
+>>>>>>> origin/master
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -61,9 +65,8 @@ atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
 siop*	at pci?
-#isp*	at pci?
-#option	ISP_COMPILE_FW=1
 scsibus*	at siop?
+#isp*	at pci?
 #scsibus*	at isp?
 
 # These entries find devices on all SCSI busses and assign
@@ -106,8 +109,14 @@ pckbd*	at pckbc?		#  ps2 keyboard
 wskbd*	at pckbd?		#    generic keyboard layer
 
 # Framebuffers
-creator*	at upa0
+creator*	at upa0			# Creator3D/Elite3D framebuffers
 wsdisplay*	at creator?
+gfxp*		at pci?			# PGX32 framebuffer
+wsdisplay*	at gfxp?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
+raptor*		at pci?			# Raptor framebuffer
+wsdisplay*	at raptor?
 vgafb*		at pci?
 wsdisplay*	at vgafb?
 

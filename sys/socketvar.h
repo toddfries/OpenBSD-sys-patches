@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: socketvar.h,v 1.38 2005/11/21 18:16:46 millert Exp $	*/
+=======
+/*	$OpenBSD: socketvar.h,v 1.48 2011/01/07 17:50:42 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -75,6 +79,13 @@ struct socket {
 	uid_t	so_siguid;		/* uid of process who set so_pgid */
 	uid_t	so_sigeuid;		/* euid of process who set so_pgid */
 	u_long	so_oobmark;		/* chars to oob mark */
+
+#if 1 /*def SOCKET_SPLICE*/
+	struct	socket *so_splice;	/* send data to drain socket */
+	struct	socket *so_spliceback;	/* back ref for notify and cleanup */
+	off_t	so_splicelen;		/* number of bytes spliced so far */
+	off_t	so_splicemax;		/* maximum number of bytes to splice */
+#endif /* SOCKET_SPLICE */
 /*
  * Variables for socket buffering.
  */
@@ -82,6 +93,7 @@ struct socket {
 		u_long	sb_cc;		/* actual chars in buffer */
 		u_long	sb_datacc;	/* data only chars in buffer */
 		u_long	sb_hiwat;	/* max actual char count */
+		u_long  sb_wat;		/* default watermark */
 		u_long	sb_mbcnt;	/* chars of mbufs used */
 		u_long	sb_mbmax;	/* max chars of mbufs to use */
 		long	sb_lowat;	/* low water mark */
@@ -91,7 +103,7 @@ struct socket {
 					      socket buffer */
 		struct	selinfo sb_sel;	/* process selecting read/write */
 		short	sb_flags;	/* flags, see below */
-		short	sb_timeo;	/* timeout for read/write */
+		u_short	sb_timeo;	/* timeout for read/write */
 	} so_rcv, so_snd;
 #define	SB_MAX		(256*1024)	/* default for max chars in sockbuf */
 #define	SB_LOCK		0x01		/* lock on data queue */
@@ -101,6 +113,7 @@ struct socket {
 #define	SB_ASYNC	0x10		/* ASYNC I/O, need signals */
 #define	SB_NOINTR	0x40		/* operations not interruptible */
 #define	SB_KNOTE	0x80		/* kernel note attached */
+#define	SB_SPLICE	0x0100		/* buffer is splice source or drain */
 
 	void	*so_internal;		/* Space for svr4 stream data */
 	void	(*so_upcall)(struct socket *so, caddr_t arg, int waitf);
@@ -110,8 +123,7 @@ struct socket {
 	pid_t	so_cpid;		/* pid of process that opened socket */
 };
 
-#define	SB_EMPTY_FIXUP(sb)						\
-do {									\
+#define	SB_EMPTY_FIXUP(sb) do {						\
 	if ((sb)->sb_mb == NULL) {					\
 		(sb)->sb_mbtail = NULL;					\
 		(sb)->sb_lastrecord = NULL;				\
@@ -145,7 +157,7 @@ do {									\
  * Do we need to notify the other side when I/O is possible?
  */
 #define	sb_notify(sb)	(((sb)->sb_flags & (SB_WAIT|SB_SEL|SB_ASYNC| \
-    SB_KNOTE)) != 0)
+    SB_KNOTE|SB_SPLICE)) != 0)
 
 /*
  * How much space is there in a socket buffer (so->so_snd or so->so_rcv)?
@@ -165,7 +177,7 @@ do {									\
     ((so)->so_state & SS_ISSENDING)
 
 /* can we read something from so? */
-#define	soreadable(so) \
+#define	_soreadable(so) \
     ((so)->so_rcv.sb_cc >= (so)->so_rcv.sb_lowat || \
 	((so)->so_state & SS_CANTRCVMORE) || \
 	(so)->so_qlen || (so)->so_error)
@@ -173,29 +185,29 @@ do {									\
 /* can we write something to so? */
 #define	sowriteable(so) \
     ((sbspace(&(so)->so_snd) >= (so)->so_snd.sb_lowat && \
-	(((so)->so_state&SS_ISCONNECTED) || \
-	  ((so)->so_proto->pr_flags&PR_CONNREQUIRED)==0)) || \
+	(((so)->so_state & SS_ISCONNECTED) || \
+	  ((so)->so_proto->pr_flags & PR_CONNREQUIRED)==0)) || \
     ((so)->so_state & SS_CANTSENDMORE) || (so)->so_error)
 
 /* adjust counters in sb reflecting allocation of m */
-#define	sballoc(sb, m) { \
-	(sb)->sb_cc += (m)->m_len; \
-	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME) \
-		(sb)->sb_datacc += (m)->m_len; \
-	(sb)->sb_mbcnt += MSIZE; \
-	if ((m)->m_flags & M_EXT) \
-		(sb)->sb_mbcnt += (m)->m_ext.ext_size; \
-}
+#define	sballoc(sb, m) do {						\
+	(sb)->sb_cc += (m)->m_len;					\
+	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME)	\
+		(sb)->sb_datacc += (m)->m_len;				\
+	(sb)->sb_mbcnt += MSIZE;					\
+	if ((m)->m_flags & M_EXT)					\
+		(sb)->sb_mbcnt += (m)->m_ext.ext_size;			\
+} while (/* CONSTCOND */ 0)
 
 /* adjust counters in sb reflecting freeing of m */
-#define	sbfree(sb, m) { \
-	(sb)->sb_cc -= (m)->m_len; \
-	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME) \
-		(sb)->sb_datacc -= (m)->m_len; \
-	(sb)->sb_mbcnt -= MSIZE; \
-	if ((m)->m_flags & M_EXT) \
-		(sb)->sb_mbcnt -= (m)->m_ext.ext_size; \
-}
+#define	sbfree(sb, m) do {						\
+	(sb)->sb_cc -= (m)->m_len;					\
+	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME)	\
+		(sb)->sb_datacc -= (m)->m_len;				\
+	(sb)->sb_mbcnt -= MSIZE;					\
+	if ((m)->m_flags & M_EXT)					\
+		(sb)->sb_mbcnt -= (m)->m_ext.ext_size;			\
+} while (/* CONSTCOND */ 0)
 
 /*
  * Set lock on sockbuf sb; sleep if lock is already held.
@@ -207,27 +219,35 @@ do {									\
 		((sb)->sb_flags |= SB_LOCK), 0)
 
 /* release lock on sockbuf sb */
-#define	sbunlock(sb) { \
-	(sb)->sb_flags &= ~SB_LOCK; \
-	if ((sb)->sb_flags & SB_WANT) { \
-		(sb)->sb_flags &= ~SB_WANT; \
-		wakeup((caddr_t)&(sb)->sb_flags); \
-	} \
-}
+#define	sbunlock(sb) do {						\
+	(sb)->sb_flags &= ~SB_LOCK;					\
+	if ((sb)->sb_flags & SB_WANT) {					\
+		(sb)->sb_flags &= ~SB_WANT;				\
+		wakeup((caddr_t)&(sb)->sb_flags);			\
+	}								\
+} while (/* CONSTCOND */ 0)
 
-#define	sorwakeup(so)	{ sowakeup((so), &(so)->so_rcv); \
-			  if ((so)->so_upcall) \
-			    (*((so)->so_upcall))((so), (so)->so_upcallarg, M_DONTWAIT); \
-			}
+#define	_sorwakeup(so) do {						\
+	sowakeup((so), &(so)->so_rcv);					\
+	if ((so)->so_upcall)						\
+		(*((so)->so_upcall))((so), (so)->so_upcallarg,		\
+		    M_DONTWAIT);					\
+} while (/* CONSTCOND */ 0)
 
-#define	sowwakeup(so)	sowakeup((so), &(so)->so_snd)
+#define	_sowwakeup(so)	sowakeup((so), &(so)->so_snd)
+
+#ifdef SOCKET_SPLICE
+#define	soreadable(so)	((so)->so_splice == NULL && _soreadable(so))
+void	sorwakeup(struct socket *);
+void	sowwakeup(struct socket *);
+#else /* SOCKET_SPLICE */
+#define	soreadable(so)	_soreadable(so)
+#define	sorwakeup(so)	_sorwakeup(so)
+#define	sowwakeup(so)	_sowwakeup(so)
+#endif /* SOCKET_SPLICE */
 
 #ifdef _KERNEL
 extern u_long sb_max;
-struct	socket *sonewconn(struct socket *head, int connstatus);
-
-/* strings for sleep message: */
-extern	const char netio[], netcon[], netcls[];
 
 extern struct pool	socket_pool;
 
@@ -270,6 +290,7 @@ void	sbflush(struct sockbuf *sb);
 void	sbinsertoob(struct sockbuf *sb, struct mbuf *m0);
 void	sbrelease(struct sockbuf *sb);
 int	sbcheckreserve(u_long cnt, u_long defcnt);
+int	sbchecklowmem(void);
 int	sbreserve(struct sockbuf *sb, u_long cc);
 int	sbwait(struct sockbuf *sb);
 int	sb_lock(struct sockbuf *sb);
@@ -297,7 +318,8 @@ struct socket *sonewconn(struct socket *head, int connstatus);
 void	soqinsque(struct socket *head, struct socket *so, int q);
 int	soqremque(struct socket *so, int q);
 int	soreceive(struct socket *so, struct mbuf **paddr, struct uio *uio,
-	    struct mbuf **mp0, struct mbuf **controlp, int *flagsp);
+	    struct mbuf **mp0, struct mbuf **controlp, int *flagsp,
+	    socklen_t controllen);
 int	soreserve(struct socket *so, u_long sndcc, u_long rcvcc);
 void	sorflush(struct socket *so);
 int	sosend(struct socket *so, struct mbuf *addr, struct uio *uio,

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: pmap.h,v 1.26 2005/11/06 22:21:30 miod Exp $     */
+=======
+/*      $OpenBSD: pmap.h,v 1.31 2010/12/26 15:41:00 miod Exp $     */
+>>>>>>> origin/master
 /*	$NetBSD: pmap.h,v 1.37 1999/08/01 13:48:07 ragge Exp $	   */
 
 /* 
@@ -84,10 +88,6 @@ struct pv_entry {
 	int		 pv_attr;	/* write/modified bits */
 };
 
-/* ROUND_PAGE used before vm system is initialized */
-#define ROUND_PAGE(x)	(((uint)(x) + PGOFSET) & ~PGOFSET)
-#define TRUNC_PAGE(x)	((uint)(x) & ~PGOFSET)
-
 /* Mapping macros used when allocating SPT */
 #define MAPVIRT(ptr, count)					\
 	(vaddr_t)ptr = virtual_avail;				\
@@ -118,7 +118,6 @@ extern	struct pmap kernel_pmap_store;
  */
 
 /* Routines that are best to define as macros */
-#define pmap_phys_address(phys)		((u_int)(phys) << PGSHIFT)
 #define pmap_copy(a,b,c,d,e)		/* Dont do anything */
 #define pmap_update(pm)			/* nothing */
 #define pmap_collect(pmap)		/* No need so far */

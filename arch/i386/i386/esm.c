@@ -1,4 +1,4 @@
-/*	$OpenBSD: esm.c,v 1.45 2007/01/10 15:41:27 dlg Exp $ */
+/*	$OpenBSD: esm.c,v 1.52 2010/07/02 01:35:13 tedu Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -209,8 +209,7 @@ esm_match(struct device *parent, void *match, void *aux)
 {
 	struct esm_attach_args		*eaa = aux;
 
-	if (strncmp(eaa->eaa_name, esm_cd.cd_name, sizeof(esm_cd.cd_name)) == 0 &&
-	    esm_probe(eaa))
+	if (strcmp(eaa->eaa_name, esm_cd.cd_name) == 0 && esm_probe(eaa))
 		return (1);
 
 	return (0);
@@ -230,7 +229,7 @@ esm_attach(struct device *parent, struct device *self, void *aux)
 	TAILQ_INIT(&sc->sc_sensors);
 
 	if (bus_space_map(sc->sc_iot, ESM2_BASE_PORT, 8, 0, &sc->sc_ioh) != 0) {
-		printf(": unable to map memory\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -271,7 +270,7 @@ esm_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_nextsensor = TAILQ_FIRST(&sc->sc_sensors);
 		sc->sc_retries = 0;
 		timeout_set(&sc->sc_timeout, esm_refresh, sc);
-		timeout_add(&sc->sc_timeout, hz);
+		timeout_add_sec(&sc->sc_timeout, 1);
 	}
 }
 
@@ -465,11 +464,11 @@ esm_refresh(void *arg)
 
 	if (sc->sc_nextsensor == NULL) {
 		sc->sc_nextsensor = TAILQ_FIRST(&sc->sc_sensors);
-		timeout_add(&sc->sc_timeout, hz * 10);
+		timeout_add_sec(&sc->sc_timeout, 10);
 		return;
 	}
 tick:
-	timeout_add(&sc->sc_timeout, hz / 20);
+	timeout_add_msec(&sc->sc_timeout, 50);
 }
 
 int
@@ -686,9 +685,9 @@ struct esm_sensor_map esm_sensors_powerunit[] = {
 void
 esm_devmap(struct esm_softc *sc, struct esm_devmap *devmap)
 {
-	struct esm_sensor_map	*sensor_map;
+	struct esm_sensor_map	*sensor_map = NULL;
 	const char		*name = NULL, *fname = NULL;
-	int			mapsize;
+	int			mapsize = 0;
 
 	switch (devmap->dev_major) {
 	case ESM2_DEV_ESM2:

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sili_pci.c,v 1.6 2007/04/06 01:04:52 jsg Exp $ */
+=======
+/*	$OpenBSD: sili_pci.c,v 1.12 2010/08/31 17:13:44 deraadt Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -37,6 +41,7 @@
 int	sili_pci_match(struct device *, void *, void *);
 void	sili_pci_attach(struct device *, struct device *, void *);
 int	sili_pci_detach(struct device *, int);
+int	sili_pci_activate(struct device *, int);
 
 struct sili_pci_softc {
 	struct sili_softc	psc_sili;
@@ -48,8 +53,16 @@ struct sili_pci_softc {
 };
 
 struct cfattach sili_pci_ca = {
+<<<<<<< HEAD
 	sizeof(struct sili_pci_softc), sili_pci_match, sili_pci_attach,
 	sili_pci_detach
+=======
+	sizeof(struct sili_pci_softc),
+	sili_pci_match,
+	sili_pci_attach,
+	sili_pci_detach,
+	sili_pci_activate
+>>>>>>> origin/master
 };
 
 struct sili_device {
@@ -66,6 +79,7 @@ static const struct sili_device sili_devices[] = {
 	{ PCI_VENDOR_CMDTECH,	PCI_PRODUCT_CMDTECH_3132, 2 },
 	{ PCI_VENDOR_CMDTECH,	PCI_PRODUCT_CMDTECH_3531, 1 },
 	{ PCI_VENDOR_CMDTECH,	PCI_PRODUCT_CMDTECH_AAR_1220SA, 2 },
+	{ PCI_VENDOR_CMDTECH,	PCI_PRODUCT_CMDTECH_AAR_1225SA, 2 },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3124, 4 }
 };
 
@@ -75,7 +89,7 @@ sili_lookup(struct pci_attach_args *pa)
 	int				i;
 	const struct sili_device	*sd;
 
-	for (i = 0; i < sizeofa(sili_devices); i++) {
+	for (i = 0; i < nitems(sili_devices); i++) {
 		sd = &sili_devices[i];
 		if (sd->sd_vendor == PCI_VENDOR(pa->pa_id) &&
 		    sd->sd_product == PCI_PRODUCT(pa->pa_id))
@@ -192,4 +206,25 @@ sili_pci_detach(struct device *self, int flags)
 	}
 
 	return (0);
+}
+
+int
+sili_pci_activate(struct device *self, int act)
+{
+	struct sili_softc		*sc = (struct sili_softc *)self;
+	int				 rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		sili_resume(sc);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }

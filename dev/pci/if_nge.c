@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_nge.c,v 1.55 2006/05/28 00:20:21 brad Exp $	*/
+=======
+/*	$OpenBSD: if_nge.c,v 1.70 2010/09/20 07:40:38 deraadt Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -154,7 +158,6 @@ int nge_ioctl(struct ifnet *, u_long, caddr_t);
 void nge_init(void *);
 void nge_stop(struct nge_softc *);
 void nge_watchdog(struct ifnet *);
-void nge_shutdown(void *);
 int nge_ifmedia_mii_upd(struct ifnet *);
 void nge_ifmedia_mii_sts(struct ifnet *, struct ifmediareq *);
 int nge_ifmedia_tbi_upd(struct ifnet *);
@@ -840,7 +843,8 @@ nge_attach(parent, self, aux)
 	sc->sc_dmatag = pa->pa_dmat;
 	DPRINTFN(5, ("%s: bus_dmamem_alloc\n", sc->sc_dv.dv_xname));
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct nge_list_data),
-			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT |
+			     BUS_DMA_ZERO)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
 		goto fail_2;
 	}
@@ -868,7 +872,6 @@ nge_attach(parent, self, aux)
 
 	DPRINTFN(5, ("%s: bzero\n", sc->sc_dv.dv_xname));
 	sc->nge_ldata = (struct nge_list_data *)kva;
-	bzero(sc->nge_ldata, sizeof(struct nge_list_data));
 
 	/* Try to allocate memory for jumbo buffers. */
 	DPRINTFN(5, ("%s: nge_alloc_jumbo_mem\n", sc->sc_dv.dv_xname));
@@ -893,7 +896,7 @@ nge_attach(parent, self, aux)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
-#ifdef NGE_VLAN
+#if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -956,7 +959,7 @@ nge_attach(parent, self, aux)
 	ether_ifattach(ifp);
 	DPRINTFN(5, ("%s: timeout_set\n", sc->sc_dv.dv_xname));
 	timeout_set(&sc->nge_timeout, nge_tick, sc);
-	timeout_add(&sc->nge_timeout, hz);
+	timeout_add_sec(&sc->nge_timeout, 1);
 	return;
 
 fail_5:
@@ -1278,7 +1281,7 @@ nge_rxeof(sc)
 	ifp = &sc->arpcom.ac_if;
 	i = sc->nge_cdata.nge_rx_prod;
 
-	while(NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
+	while (NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
 		struct mbuf		*m0 = NULL;
 		u_int32_t		extsts;
 
@@ -1297,9 +1300,23 @@ nge_rxeof(sc)
 		 * comes up in the ring.
 		 */
 		if (!(rxstat & NGE_CMDSTS_PKT_OK)) {
-			ifp->if_ierrors++;
-			nge_newbuf(sc, cur_rx, m);
-			continue;
+#if NVLAN > 0
+			if ((rxstat & NGE_RXSTAT_RUNT) &&
+			    total_len >= (ETHER_MIN_LEN - ETHER_CRC_LEN -
+			    ETHER_VLAN_ENCAP_LEN)) {
+				/*
+				 * Workaround a hardware bug. Accept runt
+				 * frames if its length is larger than or
+				 * equal to 56.
+				 */
+			} else {
+#endif
+				ifp->if_ierrors++;
+				nge_newbuf(sc, cur_rx, m);
+				continue;
+#if NVLAN > 0
+			}
+#endif
 		}
 
 		/*
@@ -1336,12 +1353,20 @@ nge_rxeof(sc)
 
 		ifp->if_ipackets++;
 
+#if NVLAN > 0
+		if (extsts & NGE_RXEXTSTS_VLANPKT) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs(extsts & NGE_RXEXTSTS_VTCI);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		/* Do IP checksum checking. */
@@ -1436,7 +1461,7 @@ nge_tick(xsc)
 	DPRINTFN(10, ("%s: nge_tick: link=%d\n", sc->sc_dv.dv_xname,
 		      sc->nge_link));
 
-	timeout_add(&sc->nge_timeout, hz);
+	timeout_add_sec(&sc->nge_timeout, 1);
 	if (sc->nge_link) {
 		splx(s);
 		return;
@@ -1599,13 +1624,6 @@ nge_encap(sc, m_head, txidx)
 	struct nge_desc		*f = NULL;
 	struct mbuf		*m;
 	int			frag, cur, cnt = 0;
-#if NVLAN > 0
-	struct ifvlan		*ifv = NULL;
-
-	if ((m_head->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m_head->m_pkthdr.rcvif != NULL)
-		ifv = m_head->m_pkthdr.rcvif->if_softc;
-#endif
 
 	/*
 	 * Start packing the mbufs in this chain into
@@ -1639,9 +1657,9 @@ nge_encap(sc, m_head, txidx)
 	sc->nge_ldata->nge_tx_list[*txidx].nge_extsts = 0;
 
 #if NVLAN > 0
-	if (ifv != NULL) {
+	if (m_head->m_flags & M_VLANTAG) {
 		sc->nge_ldata->nge_tx_list[cur].nge_extsts |=
-			(NGE_TXEXTSTS_VLANPKT|ifv->ifv_tag);
+		    (NGE_TXEXTSTS_VLANPKT|htons(m_head->m_pkthdr.ether_vtag));
 	}
 #endif
 
@@ -1700,7 +1718,7 @@ nge_start(ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (pkts == 0)
@@ -1811,10 +1829,18 @@ nge_init(xsc)
 	 */
 	CSR_WRITE_4(sc, NGE_VLAN_IP_RXCTL, NGE_VIPRXCTL_IPCSUM_ENB);
 
+	/*
+	 * If VLAN support is enabled, tell the chip to detect
+	 * and strip VLAN tag info from received frames. The tag
+	 * will be provided in the extsts field in the RX descriptors.
+	 */
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		NGE_SETBIT(sc, NGE_VLAN_IP_RXCTL,
+		    NGE_VIPRXCTL_TAG_DETECT_ENB | NGE_VIPRXCTL_TAG_STRIP_ENB);
+
 	/* Set TX configuration */
 	CSR_WRITE_4(sc, NGE_TX_CFG, NGE_TXCFG);
 
-#if NVLAN > 0
 	/*
 	 * If VLAN support is enabled, tell the chip to insert
 	 * VLAN tags on a per-packet basis as dictated by the
@@ -1822,7 +1848,6 @@ nge_init(xsc)
 	 */
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		NGE_SETBIT(sc, NGE_VLAN_IP_TXCTL, NGE_VIPTXCTL_TAG_PER_PKT);
-#endif
 
 	/* Set full/half duplex mode. */
 	if (sc->nge_tbi)
@@ -2045,25 +2070,14 @@ nge_ioctl(ifp, command, data)
 	caddr_t			data;
 {
 	struct nge_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
@@ -2078,6 +2092,7 @@ nge_ioctl(ifp, command, data)
 			break;
                 }
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -2105,18 +2120,7 @@ nge_ioctl(ifp, command, data)
 		sc->nge_if_flags = ifp->if_flags;
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->arpcom)
-			: ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				nge_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		if (sc->nge_tbi) {
@@ -2128,13 +2132,18 @@ nge_ioctl(ifp, command, data)
 					      command);
 		}
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			nge_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -2220,24 +2229,10 @@ nge_stop(sc)
 		sizeof(sc->nge_ldata->nge_tx_list));
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-nge_shutdown(xsc)
-	void *xsc;
-{
-	struct nge_softc *sc = (struct nge_softc *)xsc;
-
-	nge_reset(sc);
-	nge_stop(sc);
-}
-
 struct cfattach nge_ca = {
 	sizeof(struct nge_softc), nge_probe, nge_attach
 };
 
 struct cfdriver nge_cd = {
-	0, "nge", DV_IFNET
+	NULL, "nge", DV_IFNET
 };

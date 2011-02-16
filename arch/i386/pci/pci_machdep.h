@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.10 2002/03/14 01:26:33 millert Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.21 2011/01/04 21:17:49 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
 
 /*
@@ -55,7 +55,7 @@ union i386_pci_tag_u {
 	} mode2;
 };
 
-extern struct i386_bus_dma_tag pci_bus_dma_tag;
+extern struct bus_dma_tag pci_bus_dma_tag;
 
 /*
  * Types provided to machine-independent PCI code
@@ -75,7 +75,14 @@ struct {
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
  */
 extern int pci_mode;
+extern bus_addr_t pci_mcfg_addr;
+extern int pci_mcfg_min_bus, pci_mcfg_max_bus;
+
 int		pci_mode_detect(void);
+
+extern struct extent *pciio_ex;
+extern struct extent *pcimem_ex;
+void		pci_init_extents(void);
 
 /*
  * Functions provided to machine-independent PCI code.
@@ -84,19 +91,22 @@ void		pci_attach_hook(struct device *, struct device *,
 		    struct pcibus_attach_args *);
 int		pci_bus_maxdevs(pci_chipset_tag_t, int);
 pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
+int		pci_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 		    pcireg_t);
 struct pci_attach_args;
 int		pci_intr_map(struct pci_attach_args *,
 		    pci_intr_handle_t *);
-#define		pci_intr_line(ih)	((ih).line)
+#define		pci_intr_line(c, ih)	((ih).line)
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
+		    int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
+
+void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
 
 /*
  * Section 6.2.4, `Miscellaneous Functions' of the PIC Specification,
@@ -104,3 +114,10 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
  * controller on a PC.
  */
 #define	I386_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+
+/*
+ * PCI address space is shared with ISA, so avoid legacy ISA I/O
+ * registers.
+ */
+#define PCI_IO_START	0x400
+#define PCI_IO_END	0xffff

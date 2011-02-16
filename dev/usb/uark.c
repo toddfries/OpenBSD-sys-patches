@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uark.c,v 1.3 2006/06/23 06:27:12 miod Exp $	*/
+=======
+/*	$OpenBSD: uark.c,v 1.15 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -71,12 +75,20 @@ struct uark_softc {
 	u_char			sc_dying;
 };
 
+<<<<<<< HEAD
 Static void	uark_get_status(void *, int portno, u_char *lsr, u_char *msr);
 Static void	uark_set(void *, int, int, int);
 Static int	uark_param(void *, int, struct termios *);
 Static int	uark_open(void *sc, int);
 Static void	uark_break(void *, int, int);
 Static int	uark_cmd(struct uark_softc *, uint16_t, uint16_t);
+=======
+void	uark_get_status(void *, int portno, u_char *lsr, u_char *msr);
+void	uark_set(void *, int, int, int);
+int	uark_param(void *, int, struct termios *);
+void	uark_break(void *, int, int);
+int	uark_cmd(struct uark_softc *, uint16_t, uint16_t);
+>>>>>>> origin/master
 
 struct ucom_methods uark_methods = {
 	uark_get_status,
@@ -93,7 +105,26 @@ static const struct usb_devno uark_devs[] = {
 	{ USB_VENDOR_ARKMICRO,		USB_PRODUCT_ARKMICRO_ARK3116 }
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uark);
+=======
+int uark_match(struct device *, void *, void *); 
+void uark_attach(struct device *, struct device *, void *); 
+int uark_detach(struct device *, int); 
+int uark_activate(struct device *, int); 
+
+struct cfdriver uark_cd = { 
+	NULL, "uark", DV_DULL 
+}; 
+
+const struct cfattach uark_ca = { 
+	sizeof(struct uark_softc), 
+	uark_match, 
+	uark_attach, 
+	uark_detach, 
+	uark_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uark)
 {
@@ -175,9 +206,12 @@ USB_ATTACH(uark)
 	uca.methods = &uark_methods;
 	uca.arg = sc;
 	uca.info = NULL;
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
+=======
+>>>>>>> origin/master
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
 
@@ -189,20 +223,26 @@ USB_DETACH(uark)
 	USB_DETACH_START(uark, sc);
 	int rv = 0;
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 uark_activate(device_ptr_t self, enum devact act)
+=======
+uark_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uark_softc *sc = (struct uark_softc *)self;
 	int rv = 0;

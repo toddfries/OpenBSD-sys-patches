@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.c,v 1.37 2007/03/15 10:22:30 art Exp $     */
+=======
+/*	$OpenBSD: trap.c,v 1.40 2010/11/27 18:04:23 miod Exp $     */
+>>>>>>> origin/master
 /*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -96,8 +100,7 @@ int no_traps = 18;
 	do if (p->p_addr->u_pcb.iftrap) {			\
 		frame->pc = (unsigned)p->p_addr->u_pcb.iftrap;	\
 		frame->psl &= ~PSL_FPD;				\
-		frame->r0 = EFAULT;/* for copyin/out */		\
-		frame->r1 = -1; /* for fetch/store */		\
+		frame->r0 = EFAULT;				\
 		return;						\
 	} while (0)
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdsc.c,v 1.13 2006/04/22 11:37:06 miod Exp $ */
+/*	$OpenBSD: wdsc.c,v 1.17 2010/06/28 18:31:01 krw Exp $ */
 
 /*
  * Copyright (c) 1996 Steve Woodford
@@ -59,16 +59,9 @@ extern int sbicintr(struct sbic_softc *);
 
 struct scsi_adapter wdsc_scsiswitch = {
 	sbic_scsicmd,
-	sbic_minphys,
+	scsi_minphys,
 	0,          /* no lun support */
 	0,          /* no lun support */
-};
-
-struct scsi_device wdsc_scsidev = {
-	NULL,       /* use default error handler */
-	NULL,       /* do not have a start function */
-	NULL,       /* have no async handler */
-	NULL,       /* Use default done routine */
 };
 
 struct cfattach wdsc_ca = {
@@ -115,6 +108,8 @@ wdscattach(parent, self, aux)
 	struct scsibus_attach_args saa;
 	int tmp;
 
+	printf("\n");
+
 	sc->sc_enintr  = wdsc_enintr;
 	sc->sc_dmago   = wdsc_dmago;
 	sc->sc_dmanext = wdsc_dmanext;
@@ -124,10 +119,7 @@ wdscattach(parent, self, aux)
 	sc->sc_link.adapter_softc  = sc;
 	sc->sc_link.adapter_target = 7;
 	sc->sc_link.adapter        = &wdsc_scsiswitch;
-	sc->sc_link.device         = &wdsc_scsidev;
 	sc->sc_link.openings       = 2;
-
-	printf(": SCSI ID %d\n", sc->sc_link.adapter_target);
 
 	sc->sc_sbicp = (sbic_regmap_p)ca->ca_vaddr;
 

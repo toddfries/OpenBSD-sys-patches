@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.10 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.32 2011/01/14 19:04:08 jasper Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -83,7 +83,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 18 */
 	bdev_disk_init(NRAID,raid),	/* 19: RAIDframe disk driver */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 /* open, close, read, write, ioctl, tty, mmap */
 #define cdev_pc_init(c,n) { \
@@ -118,7 +118,6 @@ cdev_decl(com);
 cdev_decl(fd);
 cdev_decl(wt);
 cdev_decl(scd);
-#include "ss.h"
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
@@ -142,14 +141,15 @@ cdev_decl(cy);
 cdev_decl(mcd);
 #include "tun.h"
 #include "audio.h"
+#include "video.h"
 #include "midi.h"
 #include "sequencer.h"
 cdev_decl(music);
 #include "acpi.h"
 #include "iop.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "bktr.h"
 #include "ksyms.h"
@@ -163,6 +163,12 @@ cdev_decl(xfs_dev);
 #include "cz.h"
 cdev_decl(cztty);
 #include "radio.h"
+#include "nvram.h"
+cdev_decl(nvram);
+#include "agp.h"
+cdev_decl(agp);
+#include "drm.h"
+cdev_decl(drm);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -176,6 +182,9 @@ cdev_decl(pci);
 
 #include "pf.h"
 #include "hotplug.h"
+#include "gpio.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -183,7 +192,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
 	cdev_disk_init(NWD,wd),		/* 3: ST506/ESDI/IDE disk */
-	cdev_swap_init(1,sw),		/* 4: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 4 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 5: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 6: pseudo-tty master */
 	cdev_log_init(1,log),		/* 7: /dev/klog */
@@ -199,7 +208,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lpt_init(NLPT,lpt),	/* 16: parallel printer */
 	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
 	cdev_disk_init(NCCD,ccd),	/* 18: concatenated disk driver */
-	cdev_ss_init(NSS,ss),           /* 19: SCSI scanner */
+	cdev_notdef(),			/* 19 */
 	cdev_uk_init(NUK,uk),		/* 20: unknown SCSI */
 	cdev_notdef(), 			/* 21 */
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
@@ -232,15 +241,15 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),			/* 43 */
 #endif
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_random_init(1,random),	/* 45: random data source */
 	cdev_notdef(),			/* 46 */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 	cdev_notdef(),			/* 48 */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -283,8 +292,16 @@ struct cdevsw	cdevsw[] =
 	cdev_ptm_init(NPTY,ptm),	/* 81: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 82: devices hot plugging */
 	cdev_acpi_init(NACPI,acpi),	/* 83: ACPI */
+	cdev_bthub_init(NBTHUB,bthub),	/* 84: bthub */
+	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
+	cdev_agp_init(NAGP,agp),	/* 86: agp */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
+	cdev_gpio_init(NGPIO,gpio),	/* 88: gpio */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 89: vscsi */
+	cdev_disk_init(1,diskmap),	/* 90: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),     /* 91: pppx */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 2; 	/* major device number of memory special file */
 
@@ -385,7 +402,7 @@ int chrtoblktbl[] = {
 	/* 54 */	19,
 };
 
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 /*
  * In order to map BSD bdev numbers of disks to their BIOS equivalents
@@ -418,12 +435,6 @@ dev_rawpart(struct device *dv)
 	return (NODEV);
 }
 
-/*
- * This entire table could be autoconfig()ed but that would mean that
- * the kernel's idea of the console would be out of sync with that of
- * the standalone boot.  I think it best that they both use the same
- * known algorithm unless we see a pressing need otherwise.
- */
 #include <dev/cons.h>
 
 cons_decl(com);

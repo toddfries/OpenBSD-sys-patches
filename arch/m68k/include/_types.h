@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.2 2006/01/13 17:50:06 millert Exp $	*/
+/*	$OpenBSD: _types.h,v 1.9 2009/11/04 19:14:09 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -93,6 +93,8 @@ typedef unsigned long		__psize_t;
 /* Standard system types */
 typedef int			__clock_t;
 typedef int			__clockid_t;
+typedef long double		__double_t;
+typedef long double		__float_t;
 typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;

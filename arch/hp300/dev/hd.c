@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.44 2007/02/22 17:20:17 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.63 2010/09/22 01:18:57 matthew Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -54,9 +54,11 @@
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
+#include <sys/dkio.h>
 
 #include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
 
@@ -241,8 +243,7 @@ int	hdident(struct device *, struct hd_softc *,
 	    struct hpibbus_attach_args *);
 void	hdreset(int, int, int);
 void	hdustart(struct hd_softc *);
-void	hdgetdisklabel(dev_t, struct hd_softc *, struct disklabel *,
-	    struct cpu_disklabel *, int);
+int	hdgetdisklabel(dev_t, struct hd_softc *, struct disklabel *, int);
 void	hdrestart(void *);
 struct buf *hdfinish(struct hd_softc *, struct buf *);
 
@@ -297,9 +298,8 @@ hdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	bzero(&sc->sc_dkdev, sizeof(sc->sc_dkdev));
 	sc->sc_dkdev.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_dkdev);
+	disk_attach(&sc->sc_dev, &sc->sc_dkdev);
 
 	sc->sc_slave = ha->ha_slave;
 	sc->sc_punit = ha->ha_punit;
@@ -481,16 +481,14 @@ hdreset(ctlr, slave, punit)
 /*
  * Read or construct a disklabel
  */
-void
-hdgetdisklabel(dev, rs, lp, clp, spoofonly)
+int
+hdgetdisklabel(dev, rs, lp, spoofonly)
 	dev_t dev;
 	struct hd_softc *rs;
 	struct disklabel *lp;
 	struct cpu_disklabel *clp;
 	int spoofonly;
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 	bzero(clp, sizeof(struct cpu_disklabel));
 
@@ -513,9 +511,7 @@ hdgetdisklabel(dev, rs, lp, clp, spoofonly)
 	    sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
 
-	lp->d_secperunit = hdidentinfo[rs->sc_type].ri_nblocks;
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
+	DL_SETDSIZE(lp, hdidentinfo[rs->sc_type].ri_nblocks);
 	lp->d_flags = 0;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
@@ -534,12 +530,7 @@ hdgetdisklabel(dev, rs, lp, clp, spoofonly)
 	/*
 	 * Now try to read the disklabel
 	 */
-	errstring = readdisklabel(HDLABELDEV(dev), hdstrategy, lp, clp,
-	    spoofonly);
-	if (errstring) {
-		/* printf("%s: %s\n", rs->sc_dev.dv_xname, errstring); */
-		return;
-	}
+	return readdisklabel(DISKLABELDEV(dev), hdstrategy, lp, spoofonly);
 }
 
 int
@@ -557,6 +548,14 @@ hdopen(dev, flags, mode, p)
 	if (rs == NULL)
 		return (ENXIO);
 
+	/*
+	 * Fail open if we tried to attach but the disk did not answer.
+	 */
+	if (!ISSET(rs->sc_dkdev.dk_flags, DKF_CONSTRUCTED)) {
+		device_unref(&rs->sc_dev);
+		return (error);
+	}
+
 	if ((error = hdlock(rs)) != 0) {
 		device_unref(&rs->sc_dev);
 		return (error);
@@ -569,9 +568,10 @@ hdopen(dev, flags, mode, p)
 	 */
 	if (rs->sc_dkdev.dk_openmask == 0) {
 		rs->sc_flags |= HDF_OPENING;
-		hdgetdisklabel(dev, rs, rs->sc_dkdev.dk_label,
-		    rs->sc_dkdev.dk_cpulabel, 0);
+		error = hdgetdisklabel(dev, rs, rs->sc_dkdev.dk_label, 0);
 		rs->sc_flags &= ~HDF_OPENING;
+		if (error == EIO)
+			goto out;
 	}
 
 	part = HDPART(dev);
@@ -1057,7 +1057,7 @@ hderror(unit)
 		rs->sc_stats.hdtimeouts++;
 #endif
 		hpibfree(rs->sc_dev.dv_parent, &rs->sc_hq);
-		timeout_add(&rs->sc_timeout, hdtimo * hz);
+		timeout_add_sec(&rs->sc_timeout, hdtimo);
 		return(0);
 	}
 	/*
@@ -1097,7 +1097,7 @@ hderror(unit)
 		hdprinterr("fault", sp->c_fef, err_fault);
 		hdprinterr("access", sp->c_aef, err_access);
 		hdprinterr("info", sp->c_ief, err_info);
-		printf("    block: %d, P1-P10: ", hwbn);
+		printf("    block: %lld, P1-P10: ", hwbn);
 		printf("0x%04x", *(u_int *)&sp->c_raw[0]);
 		printf("%04x", *(u_int *)&sp->c_raw[4]);
 		printf("%02x\n", *(u_short *)&sp->c_raw[8]);
@@ -1129,7 +1129,7 @@ hdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(hdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(hdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -1139,7 +1139,7 @@ hdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(hdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(hdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -1150,7 +1150,8 @@ hdioctl(dev, cmd, data, flag, p)
 	int flag;
 	struct proc *p;
 {
-	int unit = HDUNIT(dev);
+	int unit = DISKUNIT(dev);
+	struct disklabel *lp;
 	struct hd_softc *sc;
 	int error = 0;
 
@@ -1159,6 +1160,13 @@ hdioctl(dev, cmd, data, flag, p)
 		return (ENXIO);
 
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		hdgetdisklabel(dev, sc, lp, 0);
+		*(sc->sc_dkdev.dk_label) = *lp;
+		free(lp, M_TEMP);
+		return 0;
+
 	case DIOCGPDINFO:
 	    {
 		struct cpu_disklabel osdep;

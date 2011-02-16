@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: openprom.c,v 1.10 2003/03/07 14:54:49 jason Exp $	*/
+=======
+/*	$OpenBSD: openprom.c,v 1.15 2009/04/12 22:17:52 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: openprom.c,v 1.4 2002/01/10 06:21:53 briggs Exp $ */
 
 /*
@@ -54,9 +58,18 @@
 #include <machine/openpromio.h>
 #include <machine/autoconf.h>
 #include <machine/conf.h>
+#include <machine/mdesc.h>
 
+#include <dev/clock_subr.h>
 #include <dev/ofw/openfirm.h>
 
+<<<<<<< HEAD
+=======
+extern todr_chip_handle_t todr_handle;
+
+#define OPROMMAXPARAM		32
+
+>>>>>>> origin/master
 static	int lastnode;			/* speed hack */
 extern	int optionsnode;		/* node ID of ROM's options */
 
@@ -81,6 +94,37 @@ openpromclose(dev, flags, mode, p)
 {
 
 	return (0);
+}
+
+int
+openpromread(dev_t dev, struct uio *uio, int flags)
+{
+#ifdef SUN4V
+	int error;
+	size_t len;
+	caddr_t v;
+
+	if (minor(dev) != 1)
+		return (ENXIO);
+
+	while (uio->uio_resid > 0) {
+		if (uio->uio_offset >= mdesc_len)
+			break;
+
+		v = mdesc + uio->uio_offset;
+		len = mdesc_len - uio->uio_offset;
+		if (len > uio->uio_resid)
+			len = uio->uio_resid;
+		
+		error = uiomove(v, len, uio);
+		if (error)
+			return (error);
+	}
+
+	return (0);
+#else
+	return (ENXIO);
+#endif
 }
 
 /*
@@ -191,7 +235,16 @@ openpromioctl(dev, cmd, data, flags, p)
 		if (error)
 			break;
 		s = splhigh();
+		/*
+		 * Make sure we can write to nvram, which on many
+		 * machines lives on the clock chip (and shares its
+		 * address space with the clock).
+		 */
+		if (todr_handle)
+			todr_wenable(todr_handle, 1);
 		len = OF_setprop(node, name, value, op->op_buflen + 1);
+		if (todr_handle)
+			todr_wenable(todr_handle, 0);
 		splx(s);
 		if (len != op->op_buflen)
 			error = EINVAL;

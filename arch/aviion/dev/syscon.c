@@ -1,4 +1,19 @@
-/*	$OpenBSD: syscon.c,v 1.2 2006/05/21 12:22:02 miod Exp $ */
+/*	$OpenBSD: syscon.c,v 1.6 2010/09/20 06:33:47 matthew Exp $ */
+ * Copyright (c) 2007 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice, this permission notice, and the disclaimer below
+ * appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -76,6 +91,12 @@ sysconattach(struct device *parent, struct device *self, void *args)
 	printf("\n");
 
 	/*
+	 * Set up interrupt handlers.
+	 */
+	for (i = 0; i < NINTSRC_SYSCON; i++)
+		SLIST_INIT(&sysconintr_handlers[i]);
+
+	/*
 	 * Clear SYSFAIL if lit.
 	 */
 	*(volatile u_int32_t *)AV_UCSR |= UCSR_DRVSFBIT;
@@ -139,6 +160,12 @@ syscon_print(void *args, const char *pnp)
 	return (UNCONF);
 }
 
+/*
+ * Interrupt related code
+ */
+
+intrhand_t sysconintr_handlers[NINTSRC_SYSCON];
+
 int
 sysconintr_establish(u_int vec, struct intrhand *ih, const char *name)
 {
@@ -149,7 +176,24 @@ sysconintr_establish(u_int vec, struct intrhand *ih, const char *name)
 	}
 #endif
 
-	return (intr_establish(SYSCON_VECT + vec, ih, name));
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
+	SLIST_INSERT_HEAD(list, ih, ih_link);
+
+	intsrc_enable(intsrc, ih->ih_ipl);
+
+	return (0);
+}
+
+void
+sysconintr_disestablish(u_int intsrc, struct intrhand *ih)
+{
+	intrhand_t *list;
+
+	list = &sysconintr_handlers[intsrc];
+	evcount_detach(&ih->ih_count);
+	SLIST_REMOVE(list, ih, intrhand, ih_link);
+
+	intsrc_disable(intsrc);
 }
 
 int

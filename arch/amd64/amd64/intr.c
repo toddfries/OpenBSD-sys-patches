@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.12 2006/01/22 04:52:23 brad Exp $	*/
+/*	$OpenBSD: intr.c,v 1.26 2010/12/27 20:22:23 guenther Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -356,7 +356,7 @@ found:
 
 void *
 intr_establish(int legacy_irq, struct pic *pic, int pin, int type, int level,
-    int (*handler)(void *), void *arg, char *what)
+    int (*handler)(void *), void *arg, const char *what)
 {
 	struct intrhand **p, *q, *ih;
 	struct cpu_info *ci;
@@ -447,8 +447,7 @@ intr_establish(int legacy_irq, struct pic *pic, int pin, int type, int level,
 	ih->ih_pin = pin;
 	ih->ih_cpu = ci;
 	ih->ih_slot = slot;
-	evcount_attach(&ih->ih_count, what, (void *)&ih->ih_pin,
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, what, &source->is_idtvec);
 
 	*p = ih;
 
@@ -502,7 +501,7 @@ intr_disestablish(struct intrhand *ih)
 
 	simple_lock(&ci->ci_slock);
 	pic->pic_hwmask(pic, ih->ih_pin);	
-	x86_atomic_clearbits_l(&ci->ci_ipending, (1 << ih->ih_slot));
+	x86_atomic_clearbits_u32(&ci->ci_ipending, (1 << ih->ih_slot));
 
 	/*
 	 * Remove the handler from the chain.
@@ -518,8 +517,10 @@ intr_disestablish(struct intrhand *ih)
 	*p = q->ih_next;
 
 	intr_calculatemasks(ci);
-	pic->pic_delroute(pic, ci, ih->ih_pin, idtvec, source->is_type);
-	pic->pic_hwunmask(pic, ih->ih_pin);
+	if (source->is_handlers == NULL)
+		pic->pic_delroute(pic, ci, ih->ih_pin, idtvec, source->is_type);
+	else
+		pic->pic_hwunmask(pic, ih->ih_pin);
 
 #ifdef INTRDEBUG
 	printf("cpu%u: remove slot %d (pic %s pin %d vec %d)\n",
@@ -571,8 +572,7 @@ cpu_intr_init(struct cpu_info *ci)
 	int i;
 #endif
 
-	MALLOC(isp, struct intrsource *, sizeof (struct intrsource), M_DEVBUF,
-	    M_WAITOK);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	memset(isp, 0, sizeof(struct intrsource));
@@ -582,12 +582,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_handlers = &fake_softclock_intrhand;
 	isp->is_pic = &softintr_pic;
 	ci->ci_isources[SIR_CLOCK] = isp;
-#if notyet
-	evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softclock");
-#endif
-	MALLOC(isp, struct intrsource *, sizeof (struct intrsource), M_DEVBUF,
-	    M_WAITOK);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	memset(isp, 0, sizeof(struct intrsource));
@@ -597,12 +592,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_handlers = &fake_softnet_intrhand;
 	isp->is_pic = &softintr_pic;
 	ci->ci_isources[SIR_NET] = isp;
-#if notyet
-	evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softnet");
-#endif
-	MALLOC(isp, struct intrsource *, sizeof (struct intrsource), M_DEVBUF,
-	    M_WAITOK);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	memset(isp, 0, sizeof(struct intrsource));
@@ -617,8 +607,7 @@ cpu_intr_init(struct cpu_info *ci)
 	    ci->ci_dev->dv_xname, "softserial");
 #endif
 #if NLAPIC > 0
-	MALLOC(isp, struct intrsource *, sizeof (struct intrsource), M_DEVBUF,
-	    M_WAITOK);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	memset(isp, 0, sizeof(struct intrsource));
@@ -633,8 +622,7 @@ cpu_intr_init(struct cpu_info *ci)
 	    ci->ci_dev->dv_xname, "timer");
 #endif
 #ifdef MULTIPROCESSOR
-	MALLOC(isp, struct intrsource *, sizeof (struct intrsource), M_DEVBUF,
-	    M_WAITOK);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	memset(isp, 0, sizeof(struct intrsource));

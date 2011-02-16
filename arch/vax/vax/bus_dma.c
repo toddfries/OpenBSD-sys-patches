@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bus_dma.c,v 1.15 2005/11/06 22:21:33 miod Exp $	*/
+=======
+/*	$OpenBSD: bus_dma.c,v 1.26 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bus_dma.c,v 1.5 1999/11/13 00:32:20 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,7 +60,7 @@
 #include <machine/ka43.h>
 #include <machine/sid.h>
 
-extern	vaddr_t avail_start, avail_end, virtual_avail;
+extern	vaddr_t virtual_avail;
 
 int	_bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
 	    bus_size_t, struct proc *, int, paddr_t *, int *, int);
@@ -379,9 +376,8 @@ _bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
 {
 	int error;
 
-	error =  (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, round_page(avail_start),
-	    trunc_page(avail_end)));
+	error = _bus_dmamem_alloc_range(t, size, alignment, boundary,
+	    segs, nsegs, rsegs, flags, 0, -1);
 	return(error);
 }
 
@@ -432,9 +428,10 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	caddr_t *kvap;
 	int flags;
 {
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	bus_addr_t addr;
-	int curseg;
+	int curseg, error;
 
 	/*
 	 * Special case (but common):
@@ -463,6 +460,8 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 
 	*kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
@@ -471,9 +470,18 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 				panic("_bus_dmamem_map: size botch");
 			if (vax_boardtype == VAX_BTYP_43)
 				addr |= KA43_DIAGMEM;
-			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			error = pmap_enter(pmap_kernel(), va, addr,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
 		}
 	}
 	pmap_update(pmap_kernel());
@@ -533,7 +541,7 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */
@@ -691,7 +699,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 #ifdef DEBUG_DMA
 	printf("alloc_range: t=%p size=%lx align=%lx boundary=%lx segs=%p nsegs=%x rsegs=%p flags=%x lo=%lx hi=%lx\n",
@@ -704,9 +712,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
 	TAILQ_INIT(&mlist);
 	error = uvm_pglistalloc(size, low, high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 
@@ -758,8 +770,7 @@ struct vax_bus_dma_tag vax_bus_dma_tag = {
 	0, 
 	0,
 	0,
-	0,
-	0,
+	NULL,
 	_bus_dmamap_create,
 	_bus_dmamap_destroy,
 	_bus_dmamap_load,

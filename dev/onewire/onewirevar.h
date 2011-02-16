@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: onewirevar.h,v 1.3 2006/09/30 15:52:21 grange Exp $	*/
+=======
+/*	$OpenBSD: onewirevar.h,v 1.7 2010/07/19 23:44:09 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -74,6 +78,7 @@ struct onewire_matchfam {
 
 /* Miscellaneous routines */
 int		onewire_crc(const void *, int);
+u_int16_t	onewire_crc16(const void *, int);
 const char *	onewire_famname(int);
 int		onewire_matchbyfam(struct onewire_attach_args *,
 		    const struct onewire_matchfam *, int);

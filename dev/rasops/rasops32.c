@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rasops32.c,v 1.3 2002/05/28 22:10:03 fgsch Exp $	*/
+=======
+/*	$OpenBSD: rasops32.c,v 1.7 2010/08/28 12:48:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rasops32.c,v 1.7 2000/04/12 14:22:29 pk Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,14 +42,13 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/rasops/rasops.h>
 
-void 	rasops32_putchar(void *, int, int, u_int, long);
+int 	rasops32_putchar(void *, int, int, u_int, long);
 
 /*
  * Initialize a 'rasops_info' descriptor for this depth.
  */
 void
-rasops32_init(ri)
-	struct rasops_info *ri;
+rasops32_init(struct rasops_info *ri)
 {
 
 	if (ri->ri_rnum == 0) {
@@ -70,12 +66,8 @@ rasops32_init(ri)
 /*
  * Paint a single character.
  */
-void
-rasops32_putchar(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops32_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	int width, height, cnt, fs, fb, clr[2];
 	struct rasops_info *ri;
@@ -87,10 +79,10 @@ rasops32_putchar(cookie, row, col, uc, attr)
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols)
-		return;
+		return 0;
 #endif
 
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale + col*ri->ri_xscale);
@@ -135,4 +127,6 @@ rasops32_putchar(cookie, row, col, uc, attr)
 		while (width--)
 			*rp++ = clr[1];
 	}
+
+	return 0;
 }

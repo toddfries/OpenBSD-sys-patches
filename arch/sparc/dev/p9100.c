@@ -1,7 +1,11 @@
+<<<<<<< HEAD
 /*	$OpenBSD: p9100.c,v 1.43 2007/02/18 18:40:35 miod Exp $	*/
+=======
+/*	$OpenBSD: p9100.c,v 1.49 2009/09/05 14:09:35 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
- * Copyright (c) 2003, 2005, 2006, Miodrag Vallat.
+ * Copyright (c) 2003, 2005, 2006, 2008, Miodrag Vallat.
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
  * All rights reserved.
  *
@@ -133,7 +137,7 @@ static __inline__
 void	p9100_loadcmap_deferred(struct p9100_softc *, u_int, u_int);
 void	p9100_loadcmap_immediate(struct p9100_softc *, u_int, u_int);
 paddr_t	p9100_mmap(void *, off_t, int);
-int	p9100_pick_romfont(struct p9100_softc *);
+void	p9100_pick_romfont(struct p9100_softc *);
 void	p9100_prom(void *);
 void	p9100_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 u_int	p9100_read_ramdac(struct p9100_softc *, u_int);
@@ -152,11 +156,11 @@ struct wsdisplay_accessops p9100_accessops = {
 	NULL	/* pollc */
 };
 
-void	p9100_ras_copycols(void *, int, int, int, int);
-void	p9100_ras_copyrows(void *, int, int, int);
-void	p9100_ras_do_cursor(struct rasops_info *);
-void	p9100_ras_erasecols(void *, int, int, int, long int);
-void	p9100_ras_eraserows(void *, int, int, long int);
+int	p9100_ras_copycols(void *, int, int, int, int);
+int	p9100_ras_copyrows(void *, int, int, int);
+int	p9100_ras_do_cursor(struct rasops_info *);
+int	p9100_ras_erasecols(void *, int, int, int, long int);
+int	p9100_ras_eraserows(void *, int, int, long int);
 void	p9100_ras_init(struct p9100_softc *);
 
 int	p9100match(struct device *, void *, void *);
@@ -252,6 +256,19 @@ p9100match(struct device *parent, void *vcf, void *aux)
 	if (strcmp("p9100", ra->ra_name))
 		return (0);
 
+#if NTCTRL == 0
+	/*
+	 * If this is not the console device, the frame buffer is
+	 * not completely initialized, and access to some of its
+	 * control registers will hang. We'll need to reprogram
+	 * the RAMDAC, and currently this requires assistance
+	 * from the tctrl code. Do not attach if it is not available
+	 * and console is on serial.
+	 */
+	if (ra->ra_node != fbnode)
+		return (0);
+#endif
+
 	return (1);
 }
 
@@ -265,8 +282,8 @@ p9100attach(struct device *parent, struct device *self, void *args)
 	struct rasops_info *ri = &sc->sc_sunfb.sf_ro;
 	struct confargs *ca = args;
 	struct romaux *ra = &ca->ca_ra;
-	int node, pri, scr, force_reset;
-	int isconsole, fontswitch, clear = 0;
+	int node, pri, scr;
+	int isconsole;
 
 	pri = ca->ca_ra.ra_intr[0].int_pri;
 	printf(" pri %d", pri);
@@ -299,22 +316,6 @@ p9100attach(struct device *parent, struct device *self, void *args)
 
 	P9100_SELECT_SCR(sc);
 	scr = P9100_READ_CTL(sc, P9000_SYSTEM_CONFIG);
-	switch (scr & SCR_PIXEL_MASK) {
-	default:
-#ifdef DIAGNOSTIC
-		printf(": unknown color depth code 0x%x",
-		    scr & SCR_PIXEL_MASK);
-#endif
-		/* FALLTHROUGH */
-	case SCR_PIXEL_32BPP:
-	case SCR_PIXEL_24BPP:
-	case SCR_PIXEL_16BPP:
-		force_reset = 1;
-		break;
-	case SCR_PIXEL_8BPP:
-		force_reset = 0;
-		break;
-	}
 
 	fb_setsize(&sc->sc_sunfb, 8, LCD_WIDTH, LCD_HEIGHT, node,
 	    ca->ca_bustype);
@@ -336,6 +337,15 @@ p9100attach(struct device *parent, struct device *self, void *args)
 		printf("%s", self->dv_xname);
 		clear = 1;
 	}
+#endif
+
+#if NTCTRL > 0
+	/*
+	 * ... but it didn't if we are running on serial console.
+	 * In this case, do it ourselves.
+	 */
+	if (!isconsole)
+		p9100_initialize_ramdac(sc, sc->sc_lcdwidth, 8);
 #endif
 
 #if NTCTRL > 0
@@ -371,19 +381,10 @@ p9100attach(struct device *parent, struct device *self, void *args)
 	/*
 	 * Try to get a copy of the PROM font.
 	 *
-	 * If we can, we still need to adjust the visible portion of the
-	 * display, as the PROM output is offset two chars to the left.
-	 *
-	 * If we can't, we'll switch to the 8x16 font, and we'll need to adjust
-	 * two things:
-	 * - the display row should be overrided from the current PROM metrics,
-	 *   to prevent us from overwriting the last few lines of text.
-	 * - if the 80x34 screen would make a large margin appear around it,
-	 *   choose to clear the screen rather than keeping old prom output in
-	 *   the margins.
-	 * XXX there should be a rasops "clear margins" feature
+	 * If we can't, we'll clear the display and switch to the 8x16 font.
 	 */
-	fontswitch = p9100_pick_romfont(sc);
+	if (isconsole)
+		p9100_pick_romfont(sc);
 
 	/*
 	 * Register the external video control callback with tctrl; tctrl
@@ -396,13 +397,7 @@ p9100attach(struct device *parent, struct device *self, void *args)
 	p9100_external_video(sc, 1);
 #endif
 
-	if (isconsole == 0 || fontswitch)
-		clear = 1;
-	fbwscons_init(&sc->sc_sunfb, clear ? RI_CLEAR : 0);
-	if (clear == 0) {
-		ri->ri_bits -= 2 * ri->ri_xscale;
-		ri->ri_xorigin -= 2 * ri->ri_xscale;
-	}
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 	fbwscons_setcolormap(&sc->sc_sunfb, p9100_setcolor);
 
 	/*
@@ -415,7 +410,7 @@ p9100attach(struct device *parent, struct device *self, void *args)
 	p9100_burner(sc, 1, 0);
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, clear ? 0 : -1);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 #if NTCTRL > 0
 		shutdownhook_establish(p9100_prom, sc);
 #endif
@@ -776,7 +771,7 @@ p9100_ras_init(struct p9100_softc *sc)
 	    P9000_COORDS(sc->sc_sunfb.sf_width - 1, sc->sc_sunfb.sf_height - 1));
 }
 
-void
+int
 p9100_ras_copycols(void *v, int row, int src, int dst, int n)
 {
 	struct rasops_info *ri = v;
@@ -810,9 +805,11 @@ p9100_ras_copycols(void *v, int row, int src, int dst, int n)
 	sc->sc_junk = P9100_READ_CMD(sc, P9000_PE_BLIT);
 
 	p9100_drain(sc);
+
+	return 0;
 }
 
-void
+int
 p9100_ras_copyrows(void *v, int src, int dst, int n)
 {
 	struct rasops_info *ri = v;
@@ -844,9 +841,11 @@ p9100_ras_copyrows(void *v, int src, int dst, int n)
 	sc->sc_junk = P9100_READ_CMD(sc, P9000_PE_BLIT);
 
 	p9100_drain(sc);
+
+	return 0;
 }
 
-void
+int
 p9100_ras_erasecols(void *v, int row, int col, int n, long int attr)
 {
 	struct rasops_info *ri = v;
@@ -877,9 +876,11 @@ p9100_ras_erasecols(void *v, int row, int col, int n, long int attr)
 	sc->sc_junk = P9100_READ_CMD(sc, P9000_PE_QUAD);
 
 	p9100_drain(sc);
+
+	return 0;
 }
 
-void
+int
 p9100_ras_eraserows(void *v, int row, int n, long int attr)
 {
 	struct rasops_info *ri = v;
@@ -915,9 +916,11 @@ p9100_ras_eraserows(void *v, int row, int n, long int attr)
 	sc->sc_junk = P9100_READ_CMD(sc, P9000_PE_QUAD);
 
 	p9100_drain(sc);
+
+	return 0;
 }
 
-void
+int
 p9100_ras_do_cursor(struct rasops_info *ri)
 {
 	struct p9100_softc *sc = ri->ri_hw;
@@ -944,6 +947,8 @@ p9100_ras_do_cursor(struct rasops_info *ri)
 	sc->sc_junk = P9100_READ_CMD(sc, P9000_PE_QUAD);
 
 	p9100_drain(sc);
+
+	return 0;
 }
 
 /*
@@ -963,12 +968,12 @@ struct wsdisplay_font p9100_romfont = {
 	NULL
 };
 
-int
+void
 p9100_pick_romfont(struct p9100_softc *sc)
 {
 	struct rasops_info *ri = &sc->sc_sunfb.sf_ro;
-	int *romwidth, *romheight;
-	u_int8_t **romaddr;
+	int *fontwidth, *fontheight, *fontstride;
+	u_int8_t **fontaddr;
 	char buf[200];
 
 	/*
@@ -976,31 +981,36 @@ p9100_pick_romfont(struct p9100_softc *sc)
 	 * autoconf.c romgetcursoraddr() for details.
 	 */
 	if (promvec->pv_romvec_vers < 2 || promvec->pv_printrev < 0x00020009)
-		return (1);
+		return;
 
 	/*
 	 * Get the PROM font metrics and address
 	 */
 	if (snprintf(buf, sizeof buf, "stdout @ is my-self "
-	    "addr char-height %lx ! addr char-width %lx ! addr font-base %lx !",
-	    (vaddr_t)&romheight, (vaddr_t)&romwidth, (vaddr_t)&romaddr) >=
-	    sizeof buf)
-		return (1);
-	romheight = romwidth = NULL;
+	    "addr char-height %lx ! addr char-width %lx ! "
+	    "addr font-base %lx ! addr fontbytes %lx !",
+	    (vaddr_t)&fontheight, (vaddr_t)&fontwidth,
+	    (vaddr_t)&fontaddr, (vaddr_t)&fontstride) >= sizeof buf)
+		return;
+	fontheight = fontwidth = fontstride = NULL;
+	fontaddr = NULL;
 	rominterpret(buf);
 
-	if (romheight == NULL || romwidth == NULL || romaddr == NULL ||
-	    *romheight == 0 || *romwidth == 0 || *romaddr == NULL)
-		return (1);
+	if (fontheight == NULL || fontwidth == NULL || fontstride == NULL ||
+	    fontaddr == NULL || *fontheight == 0 || *fontwidth == 0 ||
+	    *fontstride < howmany(*fontwidth, NBBY) ||
+	    *fontstride > 4 /* paranoia */)
+		return;
 
-	p9100_romfont.fontwidth = *romwidth;
-	p9100_romfont.fontheight = *romheight;
-	p9100_romfont.stride = howmany(*romwidth, NBBY);
-	p9100_romfont.data = *romaddr;
+	p9100_romfont.fontwidth = *fontwidth;
+	p9100_romfont.fontheight = *fontheight;
+	p9100_romfont.stride = *fontstride;
+	p9100_romfont.data = *fontaddr;
 	
 #ifdef DEBUG
-	printf("%s: PROM font %dx%d @%p",
-	    sc->sc_sunfb.sf_dev.dv_xname, *romwidth, *romheight, *romaddr);
+	printf("%s: PROM font %dx%d-%d @%p",
+	    sc->sc_sunfb.sf_dev.dv_xname, *fontwidth, *fontheight,
+	    *fontstride, *fontaddr);
 #endif
 
 	/*
@@ -1008,19 +1018,15 @@ p9100_pick_romfont(struct p9100_softc *sc)
 	 */
 	wsfont_init();	/* if not done before */
 	if (wsfont_add(&p9100_romfont, 0) != 0)
-		return (1);
+		return;
 
 	/*
 	 * Select this very font in our rasops structure
 	 */
 	ri->ri_wsfcookie = wsfont_find(ROMFONTNAME, 0, 0, 0);
 	if (wsfont_lock(ri->ri_wsfcookie, &ri->ri_font,
-	    WSDISPLAY_FONTORDER_L2R, WSDISPLAY_FONTORDER_L2R) <= 0) {
+	    WSDISPLAY_FONTORDER_L2R, WSDISPLAY_FONTORDER_L2R) <= 0)
 		ri->ri_wsfcookie = 0;
-		return (1);
-	}
-	
-	return (0);
 }
 
 /*
@@ -1134,7 +1140,6 @@ static const u_int32_t p9100_val_800_24[] = {
 static const u_int32_t p9100_val_800_8[] = {
 	0x07c, 0x008, 0x011, 0x075, 0x000, 0x271, 0x002, 0x016, 0x26e, 0x000
 };
-#if NTCTRL > 0
 static const u_int32_t p9100_val_640_32[] = {
 	0x18f, 0x02f, 0x043, 0x183, 0x000, 0x205, 0x003, 0x022, 0x202, 0x000
 };
@@ -1144,7 +1149,6 @@ static const u_int32_t p9100_val_640_8[] = {
 static const u_int32_t p9100_val_1024_8[] = {
 	0x0a7, 0x019, 0x022, 0x0a2, 0x000, 0x325, 0x003, 0x023, 0x323, 0x000
 };
-#endif
 
 void
 p9100_initialize_ramdac(struct p9100_softc *sc, u_int width, u_int depth)
@@ -1156,9 +1160,11 @@ p9100_initialize_ramdac(struct p9100_softc *sc, u_int width, u_int depth)
 	u_int32_t scr;
 
 	/*
-	 * XXX Switching to a low-res 8bpp mode causes kernel faults
+	 * XXX Switching to a low-res 8bpp mode does not work correctly
 	 * XXX unless coming from an high-res 8bpp mode, and I have
 	 * XXX no idea why.
+	 * XXX Of course, this mean that we can't reasonably use this
+	 * XXX routine unless NTCTRL > 0.
 	 */
 	if (depth == 8 && width != 1024)
 		p9100_initialize_ramdac(sc, 1024, 8);
@@ -1305,6 +1311,8 @@ p9100_initialize_ramdac(struct p9100_softc *sc, u_int width, u_int depth)
 	P9100_WRITE_CTL(sc, P9000_SRTC1,
 	    SRTC1_VSYNC_INTERNAL | SRTC1_HSYNC_INTERNAL | SRTC1_VIDEN | 0x03);
 	P9100_WRITE_CTL(sc, P9000_SRTC2, 0x05);
+	/* need to wait a bit before VRAM control registers are accessible */
+	delay(3000);
 	P9100_SELECT_VRAM(sc);
 	P9100_WRITE_CTL(sc, P9000_MCR, 0xc808007d);
 	delay(3000);

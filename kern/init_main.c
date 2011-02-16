@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: init_main.c,v 1.138 2007/04/03 08:05:43 art Exp $	*/
+=======
+/*	$OpenBSD: init_main.c,v 1.174 2011/01/08 19:45:09 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -39,6 +43,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/core.h>
 #include <sys/filedesc.h>
 #include <sys/file.h>
 #include <sys/errno.h>
@@ -87,6 +92,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/netisr.h>
 
 #if defined(CRYPTO)
 #include <crypto/cryptodev.h>
@@ -97,12 +103,18 @@
 extern void nfs_init(void);
 #endif
 
+#include "mpath.h"
+#include "vscsi.h"
 #include "softraid.h"
 
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
+<<<<<<< HEAD
 "Copyright (c) 1995-2007 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+=======
+"Copyright (c) 1995-2011 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+>>>>>>> origin/master
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -129,6 +141,7 @@ struct	timeval boottime;
 struct	timeval runtime;
 #endif
 int	ncpus =  1;
+int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
@@ -142,7 +155,11 @@ void	start_init(void *);
 void	start_cleaner(void *);
 void	start_update(void *);
 void	start_reaper(void *);
+<<<<<<< HEAD
 void	start_crypto(void *);
+=======
+void	crypto_init(void);
+>>>>>>> origin/master
 void	init_exec(void);
 void	kqueue_init(void);
 
@@ -167,6 +184,7 @@ struct emul emul_native = {
 	copyargs,
 	setregs,
 	NULL,
+	coredump_trad,
 	sigcode,
 	esigcode,
 	EMUL_ENABLED | EMUL_NATIVE,
@@ -184,6 +202,7 @@ int
 main(void *framep)
 {
 	struct proc *p;
+	struct process *pr;
 	struct pdevinit *pdev;
 	struct timeval rtv;
 	quad_t lim;
@@ -218,6 +237,9 @@ main(void *framep)
 	printf("%s\n", copyright);
 
 	KERNEL_LOCK_INIT();
+	SCHED_LOCK_INIT();
+
+	random_init();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -263,18 +285,22 @@ main(void *framep)
 	process0.ps_mainproc = p;
 	TAILQ_INIT(&process0.ps_threads);
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
-	p->p_p = &process0;
+	process0.ps_refcnt = 1;
+	p->p_p = pr = &process0;
+
+	/* Set the default routing table/domain. */
+	process0.ps_rtableid = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
-	p->p_pgrp = &pgrp0;
+	pr->ps_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
 	LIST_INSERT_HEAD(PGRPHASH(0), &pgrp0, pg_hash);
 	LIST_INIT(&pgrp0.pg_members);
-	LIST_INSERT_HEAD(&pgrp0.pg_members, p, p_pglist);
+	LIST_INSERT_HEAD(&pgrp0.pg_members, pr, ps_pglist);
 
 	pgrp0.pg_session = &session0;
 	session0.s_count = 1;
-	session0.s_leader = p;
+	session0.s_leader = pr;
 
 	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
 	p->p_stat = SONPROC;
@@ -287,7 +313,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
@@ -303,8 +328,8 @@ main(void *framep)
 	TAILQ_INIT(&p->p_selects);
 
 	/* Create the limits structures. */
-	p->p_p->ps_limit = &limit0;
-	for (i = 0; i < sizeof(p->p_rlimit)/sizeof(p->p_rlimit[0]); i++)
+	pr->ps_limit = &limit0;
+	for (i = 0; i < nitems(p->p_rlimit); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;
 	limit0.pl_rlimit[RLIMIT_NOFILE].rlim_cur = NOFILE;
@@ -337,6 +362,11 @@ main(void *framep)
 
 	/* Initialize run queues */
 	rqinit();
+
+	random_start();
+
+	/* Initialize the interface/address trees */
+	ifinit();
 
 	/* Configure the devices */
 	cpu_configure();
@@ -372,12 +402,12 @@ main(void *framep)
 #endif
 
 	/* Attach pseudo-devices. */
-	randomattach();
 	for (pdev = pdevinit; pdev->pdev_attach != NULL; pdev++)
 		if (pdev->pdev_count > 0)
 			(*pdev->pdev_attach)(pdev->pdev_count);
 
 #ifdef CRYPTO
+	crypto_init();
 	swcr_init();
 #endif /* CRYPTO */
 	
@@ -386,7 +416,7 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
-	ifinit();
+	netisr_init();
 	domaininit();
 	if_attachdomain();
 	splx(s);
@@ -401,9 +431,9 @@ main(void *framep)
 		volatile long newguard[8];
 		int i;
 
-		arc4random_bytes((long *)newguard, sizeof(newguard));
+		arc4random_buf((long *)newguard, sizeof(newguard));
 
-		for (i = sizeof(__guard)/sizeof(__guard[0]) - 1; i; i--)
+		for (i = nitems(__guard) - 1; i; i--)
 			__guard[i] = newguard[i];
 	}
 #endif
@@ -444,6 +474,12 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NMPATH > 0
+	config_rootfound("mpath", NULL);
+#endif
+#if NVSCSI > 0
+	config_rootfound("vscsi", NULL);
+#endif
 #if NSOFTRAID > 0
 	config_rootfound("softraid", NULL);
 #endif
@@ -461,7 +497,7 @@ main(void *framep)
 	if (VFS_ROOT(CIRCLEQ_FIRST(&mountlist), &rootvnode))
 		panic("cannot find root vnode");
 	p->p_fd->fd_cdir = rootvnode;
-	VREF(p->p_fd->fd_cdir);
+	vref(p->p_fd->fd_cdir);
 	VOP_UNLOCK(rootvnode, 0, p);
 	p->p_fd->fd_rdir = NULL;
 
@@ -471,7 +507,7 @@ main(void *framep)
 	 * share proc0's CWD info.
 	 */
 	initproc->p_fd->fd_cdir = rootvnode;
-	VREF(initproc->p_fd->fd_cdir);
+	vref(initproc->p_fd->fd_cdir);
 	initproc->p_fd->fd_rdir = NULL;
 
 	/*
@@ -517,14 +553,17 @@ main(void *framep)
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
 
+<<<<<<< HEAD
 #ifdef CRYPTO
 	/* Create the crypto kernel thread. */
 	if (kthread_create(start_crypto, NULL, NULL, "crypto"))
 		panic("crypto thread");
 #endif /* CRYPTO */
 
+=======
+>>>>>>> origin/master
 	microtime(&rtv);
-	srandom((u_long)(rtv.tv_sec ^ rtv.tv_usec));
+	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());
 
 	randompid = 1;
 
@@ -541,8 +580,11 @@ main(void *framep)
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
 
-	/* The scheduler is an infinite loop. */
-	uvm_scheduler();
+        /*
+         * proc0: nothing to do, back to sleep
+         */
+        while (1)
+                tsleep(&proc0, PVM, "scheduler", 0);
 	/* NOTREACHED */
 }
 

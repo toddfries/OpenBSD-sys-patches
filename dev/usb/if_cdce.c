@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_cdce.c,v 1.23 2007/02/23 01:19:15 drahn Exp $ */
+=======
+/*	$OpenBSD: if_cdce.c,v 1.49 2011/01/25 20:03:35 jakemsr Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -92,6 +96,7 @@ Static const struct cdce_type cdce_devs[] = {
     {{ USB_VENDOR_ACERLABS, USB_PRODUCT_ACERLABS_M5632 }, CDCE_NO_UNION },
     {{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2501 }, CDCE_NO_UNION },
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_SL5500 }, CDCE_ZAURUS },
+<<<<<<< HEAD
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_A300 }, CDCE_ZAURUS | CDCE_NO_UNION },
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_SL5600 }, CDCE_ZAURUS | CDCE_NO_UNION },
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_C700 }, CDCE_ZAURUS | CDCE_NO_UNION },
@@ -102,6 +107,37 @@ Static const struct cdce_type cdce_devs[] = {
     {{ USB_VENDOR_NETCHIP, USB_PRODUCT_NETCHIP_ETHERNETGADGET }, CDCE_NO_UNION },
     {{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQLINUX }, CDCE_NO_UNION },
     {{ USB_VENDOR_AMBIT, USB_PRODUCT_AMBIT_NTL_250 }, CDCE_NO_UNION },
+=======
+    {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_A300 }, CDCE_ZAURUS },
+    {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_SL5600 }, CDCE_ZAURUS },
+    {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_C700 }, CDCE_ZAURUS },
+    {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_C750 }, CDCE_ZAURUS },
+    {{ USB_VENDOR_MOTOROLA2, USB_PRODUCT_MOTOROLA2_USBLAN }, CDCE_ZAURUS },
+    {{ USB_VENDOR_MOTOROLA2, USB_PRODUCT_MOTOROLA2_USBLAN2 }, CDCE_ZAURUS },
+    {{ USB_VENDOR_GMATE, USB_PRODUCT_GMATE_YP3X00 }, 0 },
+    {{ USB_VENDOR_NETCHIP, USB_PRODUCT_NETCHIP_ETHERNETGADGET }, 0 },
+    {{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQLINUX }, 0 },
+    {{ USB_VENDOR_AMBIT, USB_PRODUCT_AMBIT_NTL_250 }, CDCE_SWAPUNION },
+};
+#define cdce_lookup(v, p) \
+    ((const struct cdce_type *)usb_lookup(cdce_devs, v, p))
+
+int cdce_match(struct device *, void *, void *); 
+void cdce_attach(struct device *, struct device *, void *); 
+int cdce_detach(struct device *, int); 
+int cdce_activate(struct device *, int); 
+
+struct cfdriver cdce_cd = { 
+	NULL, "cdce", DV_IFNET 
+}; 
+
+const struct cfattach cdce_ca = { 
+	sizeof(struct cdce_softc), 
+	cdce_match, 
+	cdce_attach, 
+	cdce_detach, 
+	cdce_activate, 
+>>>>>>> origin/master
 };
 #define cdce_lookup(v, p) ((const struct cdce_type *)usb_lookup(cdce_devs, v, p))
 
@@ -170,6 +206,7 @@ USB_ATTACH(cdce)
 		data_ifcno = ud->bSlaveInterface[0];
 
 		for (i = 0; i < uaa->nifaces; i++) {
+<<<<<<< HEAD
 			if (uaa->ifaces[i] != NULL) {
 				id = usbd_get_interface_descriptor(
 				    uaa->ifaces[i]);
@@ -178,6 +215,14 @@ USB_ATTACH(cdce)
 					sc->cdce_data_iface = uaa->ifaces[i];
 					uaa->ifaces[i] = NULL;
 				}
+=======
+			if (usbd_iface_claimed(sc->cdce_udev, i))
+				continue;
+			id = usbd_get_interface_descriptor(uaa->ifaces[i]);
+			if (id != NULL && id->bInterfaceNumber == data_ifcno) {
+				sc->cdce_data_iface = uaa->ifaces[i];
+				usbd_claim_iface(sc->cdce_udev, i);
+>>>>>>> origin/master
 			}
 		}
 	}
@@ -261,11 +306,14 @@ USB_ATTACH(cdce)
 
 	sc->cdce_attached = 1;
 	splx(s);
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->cdce_udev,
 	    USBDEV(sc->cdce_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(cdce)
@@ -274,19 +322,18 @@ USB_DETACH(cdce)
 	struct ifnet	*ifp = GET_IFP(sc);
 	int		 s;
 
-	s = splusb();
-
-	if (!sc->cdce_attached) {
-		splx(s);
+	if (!sc->cdce_attached)
 		return (0);
-	}
+
+	s = splusb();
 
 	if (ifp->if_flags & IFF_RUNNING)
 		cdce_stop(sc);
 
-	ether_ifdetach(ifp);
-
-	if_detach(ifp);
+	if (ifp->if_softc != NULL) {
+		ether_ifdetach(ifp);
+		if_detach(ifp);
+	}
 
 	sc->cdce_attached = 0;
 	splx(s);
@@ -420,7 +467,6 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cdce_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 s, error = 0;
 
 	if (sc->cdce_dying)
@@ -439,13 +485,6 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
@@ -457,23 +496,15 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = 0;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->cdce_arpcom) :
-		    ether_delmulti(ifr, &sc->cdce_arpcom);
-
-		if (error == ENETRESET)
-			error = 0;
-		break;
-
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->cdce_arpcom, command, data);
 		break;
 	}
 
-	splx(s);
+	if (error == ENETRESET)
+		error = 0;
 
+	splx(s);
 	return (error);
 }
 
@@ -779,7 +810,11 @@ cdce_get_desc(usbd_device_handle dev, int type, int subtype)
 }
 
 int
+<<<<<<< HEAD
 cdce_activate(device_ptr_t self, enum devact act)
+=======
+cdce_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct cdce_softc *sc = (struct cdce_softc *)self;
 

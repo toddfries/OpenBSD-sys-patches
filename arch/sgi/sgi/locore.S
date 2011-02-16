@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.5 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: locore.S,v 1.12 2010/09/11 11:29:50 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,7 +29,6 @@
 #include <sys/syscall.h>
 
 #include <machine/param.h>
-#include <machine/psl.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
@@ -47,16 +46,26 @@ idle_stack:
 	.globl	kernel_text
 kernel_text = start
 start:
-	mfc0    v0, COP_0_STATUS_REG
+	/*
+	 * On at least the O2, when netbooting the bsd.rd kernel, the
+	 * kernel image gets loaded in CKSEG1, which causes the kernel
+	 * text to be uncached.  Just to be on the safe side, jump to
+	 * our intended execution address.
+	 */
+	LA	v0, 1f
+	jr	v0
+	nop
+1:
+
+	mfc0	v0, COP_0_STATUS_REG
 	li	v1, ~SR_INT_ENAB
 	and	v0, v1
-	mtc0    v0, COP_0_STATUS_REG    # disable all interrupts
+	mtc0	v0, COP_0_STATUS_REG		# disable all interrupts
+	mtc0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
 
-	mtc0	zero, COP_0_CAUSE_REG	# Clear soft interrupts
-
-/*
- * Initialize stack and call machine startup.
- */
+	/*
+	 * Initialize stack and call machine startup.
+	 */
 	LA	sp, start - FRAMESZ(CF_SZ)
 	LA	gp, _gp
 	jal	mips_init			# mips_init(argc, argv, envp)
@@ -66,3 +75,29 @@ start:
 	jal	main				# main(regs)
 	move	a0, zero
 	PANIC("Startup failed!")
+
+#if defined(MULTIPROCESSOR)
+LEAF(hw_cpu_spinup_trampoline, 0)
+	mfc0	v0, COP_0_STATUS_REG
+	li	v1, ~SR_INT_ENAB
+	and	v0, v1
+	ori	v0, SR_KX | SR_UX
+	mtc0	v0, COP_0_STATUS_REG		# disable all interrupts
+	mtc0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
+	LA	gp, _gp
+	jal	hw_cpu_hatch
+	nop
+END(hw_cpu_spinup_trampoline)
+
+LEAF(hw_getcurcpu, 0)
+	GET_CPU_INFO(v0, v1)
+	jr	ra
+	nop
+END(hw_getcurcpu)
+
+LEAF(hw_setcurcpu, 0)
+	mtc0	a0, COP_0_LLADDR
+	j	ra
+	nop
+END(hw_setcurcpu)
+#endif /* MULTIPROCESSOR */

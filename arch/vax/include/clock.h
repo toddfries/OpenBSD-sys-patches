@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: clock.h,v 1.5 2002/03/14 01:26:48 millert Exp $ */
+=======
+/*	$OpenBSD: clock.h,v 1.8 2008/08/18 23:19:24 miod Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: clock.h,v 1.4 1999/09/06 19:52:53 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -74,5 +78,6 @@ int	generic_clkread(time_t);
 void	generic_clkwrite(void);
 int	chip_clkread(time_t);
 void	chip_clkwrite(void);
-int	missing_clkread(time_t);
-void	missing_clkwrite(void);
+
+int	yeartonum(int);
+int	numtoyear(int);

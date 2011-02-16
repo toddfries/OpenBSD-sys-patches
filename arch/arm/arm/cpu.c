@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.6 2005/12/22 20:11:16 deraadt Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.12 2010/07/01 22:39:08 drahn Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 2004/04/14 04:01:49 bsh Exp $	*/
 
 
@@ -163,9 +163,12 @@ enum cpu_class {
 	CPU_CLASS_ARM8,
 	CPU_CLASS_ARM9TDMI,
 	CPU_CLASS_ARM9ES,
+	CPU_CLASS_ARM9EJS,
 	CPU_CLASS_ARM10E,
 	CPU_CLASS_SA1,
-	CPU_CLASS_XSCALE
+	CPU_CLASS_XSCALE,
+	CPU_CLASS_ARM11J,
+	CPU_CLASS_ARMv7
 };
 
 static const char * const generic_steppings[16] = {
@@ -220,10 +223,10 @@ static const char * const i80321_steppings[16] = {
 };
 
 static const char * const i80219_steppings[16] = {
-        "step A-0",     "rev 1",        "rev 2",        "rev 3",
-        "rev 4",        "rev 5",        "rev 6",        "rev 7",
-        "rev 8",        "rev 9",        "rev 10",       "rev 11",
-        "rev 12",       "rev 13",       "rev 14",       "rev 15",
+	"step A-0",	"rev 1",	"rev 2",	"rev 3",
+	"rev 4",	"rev 5",	"rev 6",	"rev 7",
+	"rev 8",	"rev 9",	"rev 10",	"rev 11",
+	"rev 12",	"rev 13",	"rev 14",	"rev 15",
 };
 
 /* Steppings for PXA2[15]0 */
@@ -308,6 +311,8 @@ const struct cpuidtab cpuids[] = {
 	  generic_steppings },
 	{ CPU_ID_ARM922T,	CPU_CLASS_ARM9TDMI,	"ARM922T",
 	  generic_steppings },
+	{ CPU_ID_ARM926EJS,	CPU_CLASS_ARM9EJS,	"ARM926EJ-S",
+	  generic_steppings },
 	{ CPU_ID_ARM940T,	CPU_CLASS_ARM9TDMI,	"ARM940T",
 	  generic_steppings },
 	{ CPU_ID_ARM946ES,	CPU_CLASS_ARM9ES,	"ARM946E-S",
@@ -346,9 +351,9 @@ const struct cpuidtab cpuids[] = {
 	{ CPU_ID_80321_600_B0,	CPU_CLASS_XSCALE,	"i80321 600MHz",
 	  i80321_steppings },
 
-	{ CPU_ID_80219_400,     CPU_CLASS_XSCALE,       "i80219 400MHz",
+	{ CPU_ID_80219_400,	CPU_CLASS_XSCALE,	"i80219 400MHz",
 	  i80219_steppings },
-	{ CPU_ID_80219_600,     CPU_CLASS_XSCALE,       "i80219 600MHz",
+	{ CPU_ID_80219_600,	CPU_CLASS_XSCALE,	"i80219 600MHz",
 	  i80219_steppings },
 
 	{ CPU_ID_PXA250A,	CPU_CLASS_XSCALE,	"PXA250",
@@ -361,7 +366,7 @@ const struct cpuidtab cpuids[] = {
 	  pxa2x0_steppings },
 	{ CPU_ID_PXA250C, 	CPU_CLASS_XSCALE,	"PXA250",
 	  pxa2x0_steppings },
-	{ CPU_ID_PXA27X,        CPU_CLASS_XSCALE,       "PXA27x",
+	{ CPU_ID_PXA27X,	CPU_CLASS_XSCALE,	"PXA27x",
 	  pxa27x_steppings },
 	{ CPU_ID_PXA210C, 	CPU_CLASS_XSCALE,	"PXA210",
 	  pxa2x0_steppings },
@@ -372,6 +377,17 @@ const struct cpuidtab cpuids[] = {
 	  ixp425_steppings },
 	{ CPU_ID_IXP425_266,	CPU_CLASS_XSCALE,	"IXP425 266MHz",
 	  ixp425_steppings },
+
+	{ CPU_ID_ARM1136JS,	CPU_CLASS_ARM11J,	"ARM1136J-S",
+	  generic_steppings },
+	{ CPU_ID_ARM1136JSR1,	CPU_CLASS_ARM11J,	"ARM1136J-S R1",
+	  generic_steppings },
+
+	{ CPU_ID_OMAP3430,	CPU_CLASS_ARMv7,	"ARM OMAP3[45]30",
+	  generic_steppings },
+	{ CPU_ID_OMAP3530,	CPU_CLASS_ARMv7,	"ARM OMAP3530",
+	  generic_steppings },
+
 
 	{ 0, CPU_CLASS_NONE, NULL, NULL }
 };
@@ -391,10 +407,14 @@ const struct cpu_classtab cpu_classes[] = {
 	{ "ARM7TDMI",	"CPU_ARM7TDMI" },	/* CPU_CLASS_ARM7TDMI */
 	{ "ARM8",	"CPU_ARM8" },		/* CPU_CLASS_ARM8 */
 	{ "ARM9TDMI",	NULL },			/* CPU_CLASS_ARM9TDMI */
-	{ "ARM9E-S",	NULL },			/* CPU_CLASS_ARM9ES */
+	{ "ARM9E-S",	"CPU_ARM9E" },		/* CPU_CLASS_ARM9ES */
+	{ "ARM9EJ-S",	"CPU_ARM9E" },		/* CPU_CLASS_ARM9EJS */
 	{ "ARM10E",	"CPU_ARM10" },		/* CPU_CLASS_ARM10E */
 	{ "SA-1",	"CPU_SA110" },		/* CPU_CLASS_SA1 */
-	{ "XScale",	"CPU_XSCALE_..." }	/* CPU_CLASS_XSCALE */
+	{ "XScale",	"CPU_XSCALE_..." },	/* CPU_CLASS_XSCALE */
+	{ "ARM11J",	"CPU_ARM11" },		/* CPU_CLASS_ARM11J */
+	{ "ARMv7",	"CPU_ARMv7" }		/* CPU_CLASS_ARMv7 */
+
 };
 
 /*
@@ -466,9 +486,13 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 			printf(" IDC enabled");
 		break;
 	case CPU_CLASS_ARM9TDMI:
+	case CPU_CLASS_ARM9ES:
+	case CPU_CLASS_ARM9EJS:
 	case CPU_CLASS_ARM10E:
 	case CPU_CLASS_SA1:
 	case CPU_CLASS_XSCALE:
+	case CPU_CLASS_ARM11J:
+	case CPU_CLASS_ARMv7:
 		if ((ci->ci_ctrl & CPU_CONTROL_DC_ENABLE) == 0)
 			printf(" DC disabled");
 		else
@@ -540,9 +564,20 @@ identify_arm_cpu(struct device *dv, struct cpu_info *ci)
 #ifdef CPU_ARM9
 	case CPU_CLASS_ARM9TDMI:
 #endif
+#ifdef CPU_ARM9E
+	case CPU_CLASS_ARM9ES:
+	case CPU_CLASS_ARM9EJS:
+#endif
 #ifdef CPU_ARM10
 	case CPU_CLASS_ARM10E:
 #endif
+#ifdef CPU_ARM11
+	case CPU_CLASS_ARM11J:
+#endif
+#ifdef CPU_ARMv7
+	case CPU_CLASS_ARMv7:
+#endif
+
 #if defined(CPU_SA110) || defined(CPU_SA1100) || \
     defined(CPU_SA1110) || defined(CPU_IXP12X0)
 	case CPU_CLASS_SA1:
@@ -615,5 +650,28 @@ cpu_alloc_idlepcb(struct cpu_info *ci)
 	return 0;
 }
 #endif /* MULTIPROCESSOR */
+
+/*
+ * eventually it would be interesting to have these functions
+ * support the V6/V7+ atomic instructions ldrex/strex if available
+ * on the CPU.
+ */
+void
+atomic_setbits_int(__volatile unsigned int *uip, unsigned int v)
+{
+	int oldirqstate;
+	oldirqstate = disable_interrupts(I32_bit|F32_bit);
+	*uip |= v;
+	restore_interrupts(oldirqstate);
+}
+
+void
+atomic_clearbits_int(__volatile unsigned int *uip, unsigned int v)
+{
+	int oldirqstate;
+	oldirqstate = disable_interrupts(I32_bit|F32_bit);
+	*uip &= ~v;
+	restore_interrupts(oldirqstate);
+}
 
 /* End of cpu.c */

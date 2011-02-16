@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pci_machdep.h,v 1.15 2006/03/19 02:43:38 brad Exp $	*/
+=======
+/*	$OpenBSD: pci_machdep.h,v 1.25 2010/12/04 17:06:32 miod Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: pci_machdep.h,v 1.7 2001/07/20 00:07:14 eeh Exp $ */
 
 /*
@@ -67,7 +71,14 @@ struct sparc_pci_chipset {
 	bus_space_tag_t		bustag;
 	bus_space_handle_t	bushandle;
 	int			rootnode;	/* PCI controller */
+<<<<<<< HEAD
 	int			tagshift;
+=======
+	int			busnode[256];
+	int (*conf_size)(pci_chipset_tag_t, pcitag_t);
+	pcireg_t (*conf_read)(pci_chipset_tag_t, pcitag_t, int);
+	void (*conf_write)(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+>>>>>>> origin/master
 	int (*intr_map)(struct pci_attach_args *, pci_intr_handle_t *);
 };
 
@@ -77,13 +88,18 @@ int		pci_bus_maxdevs(pci_chipset_tag_t, int);
 pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t, int *, int *,
 		    int *);
+int		pci_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 				    pcireg_t);
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
+<<<<<<< HEAD
+=======
+int		pci_intr_line(pci_chipset_tag_t, pci_intr_handle_t);
+>>>>>>> origin/master
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-				 int, int (*)(void *), void *, char *);
+				 int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 
 int		sparc64_pci_enumerate_bus(struct pci_softc *,
@@ -94,5 +110,7 @@ int		sparc64_pci_enumerate_bus(struct pci_softc *,
 
 #define pciide_machdep_compat_intr_establish(a, b, c, d, e) (NULL)
 #define pciide_machdep_compat_intr_disestablish(a, b) do { } while (0)
+
+#define	pci_dev_postattach(a, b)
 
 #endif /* _MACHINE_PCI_MACHDEP_H_ */

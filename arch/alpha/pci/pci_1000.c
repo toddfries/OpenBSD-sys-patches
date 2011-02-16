@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_1000.c,v 1.4 2006/03/26 20:23:08 brad Exp $ */
+/* $OpenBSD: pci_1000.c,v 1.10 2009/09/30 20:16:30 miod Exp $ */
 /* $NetBSD: pci_1000.c,v 1.12 2001/07/27 00:25:20 thorpej Exp $ */
 
 /*
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -91,11 +84,11 @@
 static bus_space_tag_t another_mystery_icu_iot;
 static bus_space_handle_t another_mystery_icu_ioh;
 
-int	dec_1000_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
+int	dec_1000_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dec_1000_intr_string(void *, pci_intr_handle_t);
 int	dec_1000_intr_line(void *, pci_intr_handle_t);
 void	*dec_1000_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void	dec_1000_intr_disestablish(void *, void *);
 
 #define	PCI_NIRQ	16
@@ -107,7 +100,6 @@ void dec_1000_iointr(void *arg, unsigned long vec);
 void dec_1000_enable_intr(int irq);
 void dec_1000_disable_intr(int irq);
 void pci_1000_imi(void);
-static pci_chipset_tag_t pc_tag;
 
 void
 pci_1000_pickintr(core, iot, memt, pc)
@@ -122,7 +114,6 @@ pci_1000_pickintr(core, iot, memt, pc)
 
 	another_mystery_icu_iot = iot;
 
-	pc_tag = pc;
 	if (bus_space_map(iot, 0x536, 2, 0, &another_mystery_icu_ioh))
 		panic("pci_1000_pickintr");
         pc->pc_intr_v = core;
@@ -149,20 +140,20 @@ pci_1000_pickintr(core, iot, memt, pc)
 }
 
 int     
-dec_1000_intr_map(ccv, bustag, buspin, line, ihp)
-	void *ccv;
-	pcitag_t bustag;
-	int buspin, line;
+dec_1000_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
         pci_intr_handle_t *ihp;
 {
-	int	device;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	int device;
 
 	if (buspin == 0)	/* No IRQ used. */
 		return 1;
 	if (!(1 <= buspin && buspin <= 4))
 		goto bad;
 
-	pci_decompose_tag(pc_tag, bustag, NULL, &device, NULL);
+	pci_decompose_tag(pa->pa_pc, bustag, NULL, &device, NULL);
 
 	switch(device) {
 	case 6:
@@ -215,7 +206,7 @@ dec_1000_intr_establish(ccv, ih, level, func, arg, name)
         int level;
         int (*func)(void *);
 	void *arg;
-	char *name;
+	const char *name;
 {           
 	void *cookie;
 
@@ -243,8 +234,7 @@ dec_1000_intr_disestablish(ccv, cookie)
 
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(dec_1000_pci_intr, cookie,
-	    "dec_1000 irq");
+	alpha_shared_intr_disestablish(dec_1000_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(dec_1000_pci_intr, irq) == 0) {
 		dec_1000_disable_intr(irq);
 		alpha_shared_intr_set_dfltsharetype(dec_1000_pci_intr, irq,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.32 2006/03/19 01:47:23 martin Exp $	*/
+/*	$OpenBSD: param.h,v 1.39 2010/10/26 17:24:34 deraadt Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -71,15 +71,7 @@
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than the software page size, and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11
-#define	MCLBYTES	(1 << MCLSHIFT)	/* large enough for ether MTU */
-#define	MCLOFSET	(MCLBYTES - 1)
 #define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
 
 /*
@@ -99,25 +91,5 @@
 
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
-
-#ifdef _KERNEL
-#ifdef COMPAT_HPUX
-/*
- * Constants/macros for HPUX multiple mapping of user address space.
- * Pages in the first 256Mb are mapped in at every 256Mb segment.
- */
-#define HPMMMASK	0xF0000000
-#define ISHPMMADDR(v)	0		/* XXX ...jef */
-#define HPMMBASEADDR(v)	((unsigned)(v) & ~HPMMMASK)
-#endif
-
-#ifndef _LOCORE
-#define	CONADDR	conaddr
-#define	CONUNIT	conunit
-#define	COM_FREQ	7372800
-extern hppa_hpa_t conaddr;
-extern int conunit;
-#endif
-#endif
 
 #define	__SWAP_BROKEN

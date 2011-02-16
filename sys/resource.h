@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: resource.h,v 1.6 2003/12/11 22:55:22 millert Exp $	*/
+=======
+/*	$OpenBSD: resource.h,v 1.9 2010/11/02 10:51:06 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
 
 /*
@@ -35,6 +39,8 @@
 #ifndef _SYS_RESOURCE_H_
 #define	_SYS_RESOURCE_H_
 
+#include <sys/time.h>
+
 /*
  * Process priority specifications to get/setpriority.
  */
@@ -51,6 +57,7 @@
 
 #define	RUSAGE_SELF	0
 #define	RUSAGE_CHILDREN	-1
+#define	RUSAGE_THREAD	1
 
 struct	rusage {
 	struct timeval ru_utime;	/* user time used */
@@ -110,8 +117,9 @@ struct loadavg {
 
 #ifdef _KERNEL
 extern struct loadavg averunnable;
+struct process;
 int	dosetrlimit(struct proc *, u_int, struct rlimit *);
-int	donice(struct proc *, struct proc *, int);
+int	donice(struct proc *, struct process *, int);
 
 #else
 #include <sys/cdefs.h>

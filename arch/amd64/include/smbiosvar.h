@@ -1,4 +1,4 @@
-/*	$OpenBSD: smbiosvar.h,v 1.2 2006/05/10 01:39:04 krw Exp $	*/
+/*	$OpenBSD: smbiosvar.h,v 1.8 2010/08/02 16:57:53 marco Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  * Copyright (c) 2005 Jordan Hargrave
@@ -174,6 +174,66 @@ struct smbios_board {
 	u_int16_t	handle;		/* chassis handle */
 	u_int8_t	type;		/* board type */
 	u_int8_t	noc;		/* number of contained objects */
+} __packed;
+
+/*
+ * SMBIOS Structure Type 3 "System Wnclosure or Chassis"
+ * DMTF Specification DSP0134
+ */
+struct smbios_enclosure {
+	/* SMBIOS spec  2.0+ */
+	u_int8_t	vendor;		/* string */
+	u_int8_t	type;
+	u_int8_t	version;	/* string */
+	u_int8_t	serial;		/* string */
+	u_int8_t	asset_tag;	/* string */
+	/* SMBIOS spec  2.1+ */
+	u_int8_t	boot_state;
+	u_int8_t	psu_state;
+	u_int8_t	thermal_state;
+	u_int8_t	security_status;
+	/* SMBIOS spec 2.3+ */
+	u_int16_t	oem_defined;
+	u_int8_t	height;
+	u_int8_t	no_power_cords;
+	u_int8_t	no_contained_element;
+	u_int8_t	reclen_contained_element;
+	u_int8_t	contained_elements;
+	/* SMBIOS spec 2.7+ */
+	u_int8_t	sku;		/* string */
+} __packed;
+
+/*
+ * SMBIOS Structure Type 4 "processor Information"
+ * DMTF Specification DSP0134 v2.5 Section 3.3.5 p.g. 24
+ */
+struct smbios_cpu {
+	u_int8_t	cpu_socket_designation;	/* string */
+	u_int8_t	cpu_type;
+	u_int8_t	cpu_family;
+	u_int8_t	cpu_mfg;		/* string */
+	u_int32_t	cpu_id_eax;
+	u_int32_t	cpu_id_edx;
+	u_int8_t	cpu_version;		/* string */
+	u_int8_t	cpu_voltage;
+	u_int16_t	cpu_clock;
+	u_int16_t	cpu_max_speed;
+	u_int16_t	cpu_current_speed;
+	u_int8_t	cpu_status;
+#define SMBIOS_CPUST_POPULATED			(1<<6)
+#define SMBIOS_CPUST_STATUSMASK			(0x07)
+	u_int8_t	cpu_upgrade;
+	u_int16_t	cpu_l1_handle;
+	u_int16_t	cpu_l2_handle;
+	u_int16_t	cpu_l3_handle;
+	u_int8_t	cpu_serial;		/* string */
+	u_int8_t	cpu_asset_tag;		/* string */
+	u_int8_t	cpu_part_nr;		/* string */
+	/* following fields were added in smbios 2.5 */
+	u_int8_t	cpu_core_count;
+	u_int8_t	cpu_core_enabled;
+	u_int8_t	cpu_thread_count;
+	u_int16_t	cpu_characteristics;
 } __packed;
 
 /*

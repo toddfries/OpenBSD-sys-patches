@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.16 2005/12/17 07:31:26 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.21 2010/12/15 05:30:19 tedu Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.1 1996/09/30 16:34:38 ws Exp $	*/
 
 /*-
@@ -50,6 +50,10 @@
 #define	MAXDSIZ		(512*1024*1024)		/* max data size */
 #endif
 
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
+
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(1*1024*1024)		/* default stack size */
 #endif
@@ -79,6 +83,10 @@
 #define	VM_MAXUSER_ADDRESS	((vaddr_t)0xfffff000)
 #define	VM_MAX_ADDRESS		VM_MAXUSER_ADDRESS
 #define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)(PPC_KERNEL_SR << ADDR_SR_SHIFT))
+
+/* map PIE into approximately the first quarter of user va space */
+#define VM_PIE_MIN_ADDR		PAGE_SIZE
+#define VM_PIE_MAX_ADDR		0x40000000
 
 /* ppc_kvm_stolen is so that vm space can be stolen before vm is fully
  * initialized.

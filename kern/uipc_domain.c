@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uipc_domain.c,v 1.24 2006/06/15 10:46:58 henning Exp $	*/
+=======
+/*	$OpenBSD: uipc_domain.c,v 1.30 2010/07/02 15:02:38 blambert Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -47,6 +51,7 @@
 
 #include "bluetooth.h"
 #include "bpfilter.h"
+#include "pflow.h"
 
 struct	domain *domains;
 
@@ -202,6 +207,11 @@ net_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (bpf_sysctl(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
+#if NPFLOW > 0
+	if (family == PF_PFLOW)
+		return (pflow_sysctl(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen));
+#endif
 	dp = pffinddomain(family);
 	if (dp == NULL)
 		return (ENOPROTOOPT);
@@ -225,7 +235,7 @@ pfctlinput(int cmd, struct sockaddr *sa)
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_ctlinput)
-				(*pr->pr_ctlinput)(cmd, sa, NULL);
+				(*pr->pr_ctlinput)(cmd, sa, 0, NULL);
 }
 
 void
@@ -239,7 +249,7 @@ pfslowtimo(void *arg)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_slowtimo)
 				(*pr->pr_slowtimo)();
-	timeout_add(to, hz/2);
+	timeout_add_msec(to, 500);
 }
 
 void
@@ -253,5 +263,5 @@ pffasttimo(void *arg)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_fasttimo)
 				(*pr->pr_fasttimo)();
-	timeout_add(to, hz/5);
+	timeout_add_msec(to, 200);
 }

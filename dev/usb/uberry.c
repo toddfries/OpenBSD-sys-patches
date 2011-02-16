@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uberry.c,v 1.1 2006/11/27 11:38:43 deraadt Exp $	*/
+=======
+/*	$OpenBSD: uberry.c,v 1.19 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006 Theo de Raadt <deraadt@openbsd.org>
@@ -18,7 +22,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -50,7 +53,21 @@ Static struct usb_devno const uberry_devices[] = {
 	{ 0, 0 }
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uberry);
+=======
+int uberry_match(struct device *, void *, void *); 
+void uberry_attach(struct device *, struct device *, void *); 
+int uberry_detach(struct device *, int); 
+int uberry_activate(struct device *, int); 
+
+void uberry_pearlmode(struct uberry_softc *);
+void uberry_charge(struct uberry_softc *);
+
+struct cfdriver uberry_cd = { 
+	NULL, "uberry", DV_DULL 
+}; 
+>>>>>>> origin/master
 
 USB_MATCH(uberry)
 {
@@ -81,16 +98,20 @@ USB_ATTACH(uberry)
 		    USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
+<<<<<<< HEAD
 	printf("%s: Charging enabled\n", USBDEVNAME(sc->sc_dev));
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(uberry)
 {
+<<<<<<< HEAD
 	USB_DETACH_START(uberry, sc);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
@@ -101,12 +122,24 @@ USB_DETACH(uberry)
 
 Static int
 uberry_activate(device_ptr_t self, enum devact act)
+=======
+	/* struct uberry_softc *sc = (struct uberry_softc *)self; */
+
+	return 0;
+}
+
+int
+uberry_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
+	struct uberry_softc *sc = (struct uberry_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return 0;

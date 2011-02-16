@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: rf_openbsdkintf.c,v 1.33 2006/03/05 21:48:56 miod Exp $	*/
+=======
+/* $OpenBSD: rf_openbsdkintf.c,v 1.60 2010/09/23 18:49:39 oga Exp $	*/
+>>>>>>> origin/master
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -118,13 +115,14 @@
 #include <sys/device.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/fcntl.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
 #include <sys/conf.h>
 #include <sys/lock.h>
 #include <sys/buf.h>
-#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/reboot.h>
 
 #include "raid.h"
@@ -237,7 +235,7 @@ int numraid = 0;
 int  rf_probe(struct device *, void *, void *);
 void rf_attach(struct device *, struct device *, void *);
 int  rf_detach(struct device *, int);
-int  rf_activate(struct device *, enum devact);
+int  rf_activate(struct device *, int);
 
 struct cfattach raid_ca = {
 	sizeof(struct raid_softc), rf_probe, rf_attach,
@@ -274,8 +272,12 @@ struct raid_softc **raid_scPtrs;
 
 void rf_shutdown_hook(RF_ThreadArg_t);
 void raidgetdefaultlabel(RF_Raid_t *, struct raid_softc *, struct disklabel *);
+<<<<<<< HEAD
 void raidgetdisklabel(dev_t);
 void raidmakedisklabel(struct raid_softc *);
+=======
+int raidgetdisklabel(dev_t, struct raid_softc *, struct disklabel *, int);
+>>>>>>> origin/master
 
 int  raidlock(struct raid_softc *);
 void raidunlock(struct raid_softc *);
@@ -339,7 +341,7 @@ rf_detach(struct device *self, int flags)
 }
 
 int
-rf_activate(struct device *self, enum devact act)
+rf_activate(struct device *self, int act)
 {
 	return 0;
 }
@@ -794,6 +796,7 @@ raidstrategy(struct buf *bp)
 	 * error, the bounds check will flag that for us.
 	 */
 	wlabel = rs->sc_flags & (RAIDF_WLABEL | RAIDF_LABELLING);
+<<<<<<< HEAD
 	if (DISKPART(bp->b_dev) != RAW_PART)
 		if (bounds_check_with_label(bp, lp, rs->sc_dkdev.dk_cpulabel,
 		    wlabel) <= 0) {
@@ -802,6 +805,14 @@ raidstrategy(struct buf *bp)
 			biodone(bp);
 			goto raidstrategy_end;
 		}
+=======
+	if (bounds_check_with_label(bp, lp, wlabel) <= 0) {
+		db1_printf(("Bounds check failed!!:%d %d\n",
+		    (int)bp->b_blkno, (int)wlabel));
+		biodone(bp);
+		goto raidstrategy_end;
+	}
+>>>>>>> origin/master
 
 	bp->b_resid = 0;
 
@@ -833,7 +844,7 @@ raidread(dev_t dev, struct uio *uio, int flags)
 
 	db1_printf(("raidread: unit: %d partition: %d\n", unit, part));
 
-	return (physio(raidstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(raidstrategy, dev, B_READ, minphys, uio));
 }
 
 /* ARGSUSED */
@@ -850,7 +861,7 @@ raidwrite(dev_t dev, struct uio *uio, int flags)
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
 		return (ENXIO);
 	db1_printf(("raidwrite\n"));
-	return (physio(raidstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(raidstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -1646,7 +1657,7 @@ raidinit(RF_Raid_t *raidPtr)
 	 * other things, so it's critical to call this *BEFORE* we try
 	 * putzing with disklabels.
 	 */
-	disk_attach(&rs->sc_dkdev);
+	disk_attach(NULL, &rs->sc_dkdev);
 
 	/*
 	 * XXX There may be a weird interaction here between this, and
@@ -2111,14 +2122,19 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	strncpy(lp->d_typename, "raid", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_RAID;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
+<<<<<<< HEAD
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
+=======
+	lp->d_flags = 0;
+	lp->d_version = 1;
+>>>>>>> origin/master
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size = raidPtr->totalSectors;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_npartitions = MAXPARTITIONS;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -2129,6 +2145,7 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
  * Read the disklabel from the raid device.
  * If one is not present, fake one up.
  */
+<<<<<<< HEAD
 void
 raidgetdisklabel(dev_t dev)
 {
@@ -2137,8 +2154,15 @@ raidgetdisklabel(dev_t dev)
 	char *errstring;
 	struct disklabel *lp = rs->sc_dkdev.dk_label;
 	struct cpu_disklabel *clp = rs->sc_dkdev.dk_cpulabel;
+=======
+int
+raidgetdisklabel(dev_t dev, struct raid_softc *rs, struct disklabel *lp,
+    int spoofonly)
+{
+	int unit = DISKUNIT(dev);
+>>>>>>> origin/master
 	RF_Raid_t *raidPtr;
-	int i;
+	int error, i;
 	struct partition *pp;
 
 	db1_printf(("Getting the disklabel...\n"));
@@ -2152,6 +2176,7 @@ raidgetdisklabel(dev_t dev)
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
+<<<<<<< HEAD
 	errstring = readdisklabel(RAIDLABELDEV(dev), raidstrategy, lp,
 	    rs->sc_dkdev.dk_cpulabel, 0);
 	if (errstring) {
@@ -2159,6 +2184,12 @@ raidgetdisklabel(dev_t dev)
 		return;
 		/*raidmakedisklabel(rs);*/
 	}
+=======
+	error = readdisklabel(DISKLABELDEV(dev), raidstrategy, lp,
+	    spoofonly);
+	if (error)
+		return (error);
+>>>>>>> origin/master
 
 	/*
 	 * Sanity check whether the found disklabel is valid.
@@ -2182,6 +2213,7 @@ raidgetdisklabel(dev_t dev)
 			    "exceeds the size of raid (%ld)\n",
 			    rs->sc_xname, 'a' + i, (long) rs->sc_size);
 	}
+	return (0);
 }
 
 /*
@@ -2338,7 +2370,7 @@ raidread_component_label(dev_t dev, struct vnode *b_vp,
 	/* Get our ducks in a row for the read. */
 	bp->b_blkno = RF_COMPONENT_INFO_OFFSET / DEV_BSIZE;
 	bp->b_bcount = RF_COMPONENT_INFO_SIZE;
-	bp->b_flags |= B_READ;
+	bp->b_flags |= (B_READ | B_RAW);
  	bp->b_resid = RF_COMPONENT_INFO_SIZE / DEV_BSIZE;
 
 	(*bdevsw[major(bp->b_dev)].d_strategy)(bp);
@@ -2373,7 +2405,7 @@ raidwrite_component_label(dev_t dev, struct vnode *b_vp,
 	/* Get our ducks in a row for the write. */
 	bp->b_blkno = RF_COMPONENT_INFO_OFFSET / DEV_BSIZE;
 	bp->b_bcount = RF_COMPONENT_INFO_SIZE;
-	bp->b_flags |= B_WRITE;
+	bp->b_flags |= (B_WRITE | B_RAW);
  	bp->b_resid = RF_COMPONENT_INFO_SIZE / DEV_BSIZE;
 
 	memset(bp->b_data, 0, RF_COMPONENT_INFO_SIZE );
@@ -2776,7 +2808,7 @@ rf_find_raid_components(void)
 		if (bdevvp(dev, &vp))
 			panic("RAID can't alloc vnode");
 
-		error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+		error = VOP_OPEN(vp, FREAD, NOCRED, curproc);
 
 		if (error) {
 			/*
@@ -2789,7 +2821,7 @@ rf_find_raid_components(void)
 
 		/* Ok, the disk exists.  Go get the disklabel. */
 		error = VOP_IOCTL(vp, DIOCGDINFO, (caddr_t)&label,
-				  FREAD, NOCRED, 0);
+				  FREAD, NOCRED, curproc);
 		if (error) {
 			/*
 			 * XXX can't happen - open() would
@@ -2803,7 +2835,7 @@ rf_find_raid_components(void)
 		 * We don't need this any more.  We'll allocate it again
 		 * a little later if we really do...
 		 */
-		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, curproc);
 		vrele(vp);
 
 		for (i=0; i < label.d_npartitions; i++) {
@@ -2826,7 +2858,7 @@ rf_find_raid_components(void)
 			if (bdevvp(dev, &vp))
 				panic("RAID can't alloc vnode");
 
-			error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+			error = VOP_OPEN(vp, FREAD, NOCRED, curproc);
 			if (error) {
 				/* Whatever... */
 				vput(vp);
@@ -2881,7 +2913,7 @@ rf_find_raid_components(void)
 			if (!good_one) {
 				/* Cleanup. */
 				free(clabel, M_RAIDFRAME);
-				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, curproc);
 				vrele(vp);
 			}
 		}
@@ -3384,7 +3416,7 @@ rf_release_all_vps(RF_ConfigSet_t *cset)
 	while(ac!=NULL) {
 		/* Close the vp, and give it back. */
 		if (ac->vp) {
-			VOP_CLOSE(ac->vp, FREAD, NOCRED, 0);
+			VOP_CLOSE(ac->vp, FREAD, NOCRED, curproc);
 			vrele(ac->vp);
 			ac->vp = NULL;
 		}

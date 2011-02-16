@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udf_vnops.c,v 1.23 2007/03/25 18:38:20 thib Exp $	*/
+=======
+/*	$OpenBSD: udf_vnops.c,v 1.42 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -57,6 +61,7 @@
 
 int udf_bmap_internal(struct unode *, off_t, daddr64_t *, uint32_t *);
 
+<<<<<<< HEAD
 int (**udf_vnodeop_p)(void *);
 struct vnodeopv_entry_desc udf_vnodeop_entries[] = {
 	{ &vop_default_desc, vn_default_error },
@@ -78,9 +83,28 @@ struct vnodeopv_entry_desc udf_vnodeop_entries[] = {
 	{ &vop_islocked_desc, udf_islocked },		/* islocked */
 	{ &vop_print_desc, udf_print },			/* print */
 	{ NULL, NULL }
+=======
+struct vops udf_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_access	= udf_access,
+	.vop_bmap	= udf_bmap,
+	.vop_lookup	= udf_lookup,
+	.vop_getattr	= udf_getattr,
+	.vop_open	= udf_open,
+	.vop_close	= udf_close,
+	.vop_ioctl	= udf_ioctl,
+	.vop_read	= udf_read,
+	.vop_readdir	= udf_readdir,
+	.vop_readlink	= udf_readlink,
+	.vop_inactive	= udf_inactive,
+	.vop_reclaim	= udf_reclaim,
+	.vop_strategy	= udf_strategy,
+	.vop_lock	= udf_lock,
+	.vop_unlock	= udf_unlock,
+	.vop_islocked	= udf_islocked,
+	.vop_print	= udf_print
+>>>>>>> origin/master
 };
-struct vnodeopv_desc udf_vnodeop_opv_desc =
-	{ &udf_vnodeop_p, udf_vnodeop_entries };
 
 #define UDF_INVALID_BMAP	-1
 
@@ -134,7 +158,7 @@ udf_hashins(struct unode *up)
 	mtx_enter(&ump->um_hashmtx);
 	lh = &ump->um_hashtbl[up->u_ino & ump->um_hashsz];
 	if (lh == NULL)
-		LIST_INIT(lh);
+		panic("hash entry is NULL, up->u_ino = %d", up->u_ino);
 	LIST_INSERT_HEAD(lh, up, u_le);
 	mtx_leave(&ump->um_hashmtx);
 
@@ -165,7 +189,7 @@ udf_allocv(struct mount *mp, struct vnode **vpp, struct proc *p)
 	int error;
 	struct vnode *vp;
 
-	error = getnewvnode(VT_UDF, mp, udf_vnodeop_p, &vp);
+	error = getnewvnode(VT_UDF, mp, &udf_vops, &vp);
 	if (error) {
 		printf("udf_allocv: failed to allocate new vnode\n");
 		return (error);
@@ -227,8 +251,8 @@ udf_access(void *v)
 
 	mode = udf_permtomode(up);
 
-	return (vaccess(mode, up->u_fentry->uid, up->u_fentry->gid, a_mode,
-	    ap->a_cred));
+	return (vaccess(vp->v_type, mode, up->u_fentry->uid, up->u_fentry->gid,
+	    a_mode, ap->a_cred));
 }
 
 static int mon_lens[2][12] = {
@@ -320,6 +344,7 @@ udf_getattr(void *v)
 	struct vnode *vp;
 	struct unode *up;
 	struct vattr *vap;
+	struct extfile_entry *xfentry;
 	struct file_entry *fentry;
 	struct timespec ts;
 
@@ -328,7 +353,9 @@ udf_getattr(void *v)
 	vp = ap->a_vp;
 	vap = ap->a_vap;
 	up = VTOU(vp);
-	fentry = up->u_fentry;
+
+	xfentry = up->u_fentry;
+	fentry = (struct file_entry *)up->u_fentry;
 
 	vap->va_fsid = up->u_dev;
 	vap->va_fileid = up->u_ino;
@@ -340,9 +367,6 @@ udf_getattr(void *v)
 	 */
 	vap->va_uid = (letoh32(fentry->uid) == -1) ? 0 : letoh32(fentry->uid);
 	vap->va_gid = (letoh32(fentry->gid) == -1) ? 0 : letoh32(fentry->gid);
-	udf_timetotimespec(&fentry->atime, &vap->va_atime);
-	udf_timetotimespec(&fentry->mtime, &vap->va_mtime);
-	vap->va_ctime = vap->va_mtime; /* Stored as an Extended Attribute */
 	vap->va_rdev = 0;
 	if (vp->v_type & VDIR) {
 		vap->va_nlink++; /* Count a reference to ourselves */
@@ -352,15 +376,23 @@ udf_getattr(void *v)
 		 * that directories consume at least one logical block,
 		 * make it appear so.
 		 */
-		if (fentry->logblks_rec != 0) {
-			vap->va_size =
-			    letoh64(fentry->logblks_rec) * up->u_ump->um_bsize;
-		} else {
-			vap->va_size = up->u_ump->um_bsize;
-		}
-	} else {
+		vap->va_size = up->u_ump->um_bsize;
+	} else
 		vap->va_size = letoh64(fentry->inf_len);
+	if (udf_checktag(&xfentry->tag, TAGID_EXTFENTRY) == 0) {
+		udf_timetotimespec(&xfentry->atime, &vap->va_atime);
+		udf_timetotimespec(&xfentry->mtime, &vap->va_mtime);
+		if ((vp->v_type & VDIR) && xfentry->logblks_rec != 0)
+			vap->va_size =
+				    letoh64(xfentry->logblks_rec) * up->u_ump->um_bsize;
+	} else {
+		udf_timetotimespec(&fentry->atime, &vap->va_atime);
+		udf_timetotimespec(&fentry->mtime, &vap->va_mtime);
+		if ((vp->v_type & VDIR) && fentry->logblks_rec != 0)
+			vap->va_size =
+				    letoh64(fentry->logblks_rec) * up->u_ump->um_bsize;
 	}
+	vap->va_ctime = vap->va_mtime; /* Stored as an Extended Attribute */
 	vap->va_flags = 0;
 	vap->va_gen = 1;
 	vap->va_blocksize = up->u_ump->um_bsize;
@@ -452,8 +484,10 @@ udf_read(void *v)
 		error = udf_readatoffset(up, &size, offset, &bp, &data);
 		if (error == 0)
 			error = uiomove(data, size, uio);
-		if (bp != NULL)
+		if (bp != NULL) {
 			brelse(bp);
+			bp = NULL;
+		}
 		if (error)
 			break;
 	};
@@ -565,8 +599,7 @@ udf_opendir(struct unode *up, int offset, int fsize, struct umount *ump)
 {
 	struct udf_dirstream *ds;
 
-	ds = pool_get(&udf_ds_pool, PR_WAITOK);
-	bzero(ds, sizeof(struct udf_dirstream));
+	ds = pool_get(&udf_ds_pool, PR_WAITOK | PR_ZERO);
 
 	ds->node = up;
 	ds->offset = offset;
@@ -595,8 +628,10 @@ udf_getfid(struct udf_dirstream *ds)
 		    &ds->bp, &ds->data);
 		if (error) {
 			ds->error = error;
-			if (ds->bp != NULL)
+			if (ds->bp != NULL) {
 				brelse(ds->bp);
+				ds->bp = NULL;
+			}
 			return (NULL);
 		}
 	}
@@ -639,8 +674,10 @@ udf_getfid(struct udf_dirstream *ds)
 		/* Reduce all of the casting magic */
 		fid = (struct fileid_desc*)ds->buf;
 
-		if (ds->bp != NULL)
+		if (ds->bp != NULL) {
 			brelse(ds->bp);
+			ds->bp = NULL;
+		}
 
 		/* Fetch the next allocation */
 		ds->offset += ds->size;
@@ -649,6 +686,10 @@ udf_getfid(struct udf_dirstream *ds)
 		    &ds->bp, &ds->data);
 		if (error) {
 			ds->error = error;
+			if (ds->bp != NULL) {
+				brelse(ds->bp);
+				ds->bp = NULL;
+			}
 			return (NULL);
 		}
 
@@ -697,8 +738,10 @@ static void
 udf_closedir(struct udf_dirstream *ds)
 {
 
-	if (ds->bp != NULL)
+	if (ds->bp != NULL) {
 		brelse(ds->bp);
+		ds->bp = NULL;
+	}
 
 	if (ds->fid_fragment && ds->buf != NULL)
 		free(ds->buf, M_UDFFID);
@@ -758,6 +801,10 @@ udf_readdir(void *v)
 	 * Iterate through the file id descriptors.  Give the parent dir
 	 * entry special attention.
 	 */
+	if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
+		up->u_ump->um_start += up->u_ump->um_meta_start;
+		up->u_ump->um_len = up->u_ump->um_meta_len;
+	}
 	ds = udf_opendir(up, uio->uio_offset,
 	    letoh64(up->u_fentry->inf_len), up->u_ump);
 
@@ -765,7 +812,7 @@ udf_readdir(void *v)
 
 		/* Should we return an error on a bad fid? */
 		if (udf_checktag(&fid->tag, TAGID_FID)) {
-			printf("Invalid FID tag\n");
+			printf("Invalid FID tag (%d)\n", fid->tag.id);
 			error = EIO;
 			break;
 		}
@@ -827,6 +874,10 @@ udf_readdir(void *v)
 		error = ds->error;
 
 	udf_closedir(ds);
+	if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
+		up->u_ump->um_start = up->u_ump->um_realstart;
+		up->u_ump->um_len = up->u_ump->um_reallen;
+	}
 
 	if (ap->a_ncookies != NULL) {
 		if (error)
@@ -894,7 +945,7 @@ udf_strategy(void *v)
 		splx(s);
 	} else {
 		bp->b_dev = vp->v_rdev;
-		VOCALL(up->u_devvp->v_op, VOFFSET(vop_strategy), ap);
+		(up->u_devvp->v_op->vop_strategy)(ap);
 	}
 
 	return (0);
@@ -1054,7 +1105,7 @@ udf_lookup(void *v)
 	 * If dvp is what's being looked up, then return it.
 	 */
 	if (ap->a_cnp->cn_namelen == 1 && ap->a_cnp->cn_nameptr[0] == '.') {
-		VREF(dvp);
+		vref(dvp);
 		*vpp = dvp;
 		return (0);
 	}
@@ -1074,6 +1125,10 @@ udf_lookup(void *v)
 		nchstats.ncs_2passes++;
 	}
 
+	if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
+		up->u_ump->um_start += up->u_ump->um_meta_start;
+		up->u_ump->um_len = up->u_ump->um_meta_len;
+	}
 lookloop:
 	ds = udf_opendir(up, offset, fsize, ump);
 
@@ -1108,6 +1163,10 @@ lookloop:
 
 	if (error) {
 		udf_closedir(ds);
+		if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
+			up->u_ump->um_start = up->u_ump->um_realstart;
+			up->u_ump->um_len = up->u_ump->um_reallen;
+		}
 		return (error);
 	}
 
@@ -1154,6 +1213,10 @@ lookloop:
 		cache_enter(dvp, *vpp, ap->a_cnp);
 
 	udf_closedir(ds);
+	if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
+		up->u_ump->um_start = up->u_ump->um_realstart;
+		up->u_ump->um_len = up->u_ump->um_reallen;
+	}
 
 	return (error);
 }
@@ -1220,6 +1283,7 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
     struct buf **bp, uint8_t **data)
 {
 	struct umount *ump;
+	struct extfile_entry *xfentry = NULL;
 	struct file_entry *fentry = NULL;
 	struct buf *bp1;
 	uint32_t max_size;
@@ -1235,9 +1299,15 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
 		 * This error means that the file *data* is stored in the
 		 * allocation descriptor field of the file entry.
 		 */
-		fentry = up->u_fentry;
-		*data = &fentry->data[letoh32(fentry->l_ea)];
-		*size = letoh32(fentry->l_ad);
+		if (udf_checktag(&up->u_fentry->tag, TAGID_EXTFENTRY) == 0) {
+			xfentry = up->u_fentry;
+			*data = &xfentry->data[letoh32(xfentry->l_ea)];
+			*size = letoh32(xfentry->l_ad);
+		} else {
+			fentry = (struct file_entry *)up->u_fentry;
+			*data = &fentry->data[letoh32(fentry->l_ea)];
+			*size = letoh32(fentry->l_ad);
+		}
 		return (0);
 	} else if (error != 0) {
 		return (error);
@@ -1268,17 +1338,26 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
     uint32_t *max_size)
 {
 	struct umount *ump;
+	struct extfile_entry *xfentry;
 	struct file_entry *fentry;
 	void *icb;
 	struct icb_tag *tag;
 	uint32_t icblen = 0;
 	daddr_t lsector;
 	int ad_offset, ad_num = 0;
-	int i, p_offset;
+	int i, p_offset, l_ea, l_ad;
 
 	ump = up->u_ump;
-	fentry = up->u_fentry;
+	xfentry = up->u_fentry;
+	fentry = (struct file_entry *)up->u_fentry;
 	tag = &fentry->icbtag;
+	if (udf_checktag(&xfentry->tag, TAGID_EXTFENTRY) == 0) {
+		l_ea = letoh32(xfentry->l_ea);
+		l_ad = letoh32(xfentry->l_ad);
+	} else {
+		l_ea = letoh32(fentry->l_ea);
+		l_ad = letoh32(fentry->l_ad);
+	}
 
 	switch (letoh16(tag->strat_type)) {
 	case 4:
@@ -1303,18 +1382,23 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 		do {
 			offset -= icblen;
 			ad_offset = sizeof(struct short_ad) * ad_num;
-			if (ad_offset > letoh32(fentry->l_ad)) {
-				printf("File offset out of bounds\n");
+			if (ad_offset > l_ad) {
+				printf("SFile offset out of bounds (%d > %d)\n",
+				    ad_offset, l_ad);
 				return (EINVAL);
 			}
-			icb = GETICB(short_ad, fentry,
-			    letoh32(fentry->l_ea) + ad_offset);
+			
+			if (udf_checktag(&up->u_fentry->tag, TAGID_EXTFENTRY) == 0)
+				icb = GETICB(short_ad, xfentry, l_ea + ad_offset);
+			else
+				icb = GETICB(short_ad, fentry, l_ea + ad_offset);
+
 			icblen = GETICBLEN(short_ad, icb);
 			ad_num++;
 		} while(offset >= icblen);
 
 		lsector = (offset  >> ump->um_bshift) +
-		    letoh32(((struct short_ad *)(icb))->pos);
+		    letoh32(((struct short_ad *)(icb))->lb_num);
 
 		*max_size = GETICBLEN(short_ad, icb);
 
@@ -1328,12 +1412,15 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 		do {
 			offset -= icblen;
 			ad_offset = sizeof(struct long_ad) * ad_num;
-			if (ad_offset > letoh32(fentry->l_ad)) {
-				printf("File offset out of bounds\n");
+			if (ad_offset > l_ad) {
+				printf("LFile offset out of bounds (%d > %d)\n",
+				    ad_offset, l_ad);
 				return (EINVAL);
 			}
-			icb = GETICB(long_ad, fentry,
-			    letoh32(fentry->l_ea) + ad_offset);
+			if (udf_checktag(&up->u_fentry->tag, TAGID_EXTFENTRY) == 0)
+				icb = GETICB(long_ad, xfentry, l_ea + ad_offset);
+			else
+				icb = GETICB(long_ad, fentry, l_ea + ad_offset);
 			icblen = GETICBLEN(long_ad, icb);
 			ad_num++;
 		} while(offset >= icblen);

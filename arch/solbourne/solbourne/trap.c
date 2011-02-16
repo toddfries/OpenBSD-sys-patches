@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.c,v 1.8 2006/12/24 20:30:35 miod Exp $	*/
+=======
+/*	$OpenBSD: trap.c,v 1.11 2009/04/10 20:57:28 miod Exp $	*/
+>>>>>>> origin/master
 /*	OpenBSD: trap.c,v 1.42 2004/12/06 20:12:25 miod Exp 	*/
 
 /*
@@ -696,7 +700,6 @@ mem_access_fault(type, ser, v, pc, psr, tf)
 	ftype = ser & FCR_RO ? VM_PROT_WRITE : VM_PROT_READ;
 	va = trunc_page(v);
 	if (psr & PSR_PS) {
-		extern char Lfsbail[];
 		if (type == T_TEXTFAULT) {
 			/*
 			 * If we are trying to figure on which processor mask
@@ -712,12 +715,6 @@ mem_access_fault(type, ser, v, pc, psr, tf)
 			panic("kernel fault");
 			/* NOTREACHED */
 		}
-		/*
-		 * If this was an access that we shouldn't try to page in,
-		 * resume at the fault handler without any action.
-		 */
-		if (p->p_addr && p->p_addr->u_pcb.pcb_onfault == Lfsbail)
-			goto kfault;
 
 		/*
 		 * During autoconfiguration, faults are never OK unless

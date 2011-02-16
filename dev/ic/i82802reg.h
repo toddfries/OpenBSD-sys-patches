@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: i82802reg.h,v 1.2 2003/06/02 19:24:22 mickey Exp $	*/
+=======
+/*	$OpenBSD: i82802reg.h,v 1.4 2009/10/23 12:48:49 jsg Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -29,8 +33,8 @@
 /*
  * Intel 82802AB/82802AC Firmware Hub
  *
- * see:	ftp://download.intel.com/design/chipsets/datashts/29065802.pdf
- *	and http://developer.intel.com/design/chipsets/manuals/298029.pdf
+ * see:	ftp://download.intel.com/design/chipsets/datashts/29065804.pdf	 
+ *     and http://www.intel.com/Assets/PDF/manual/298029.pdf
  */
 
 /*

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: noct.c,v 1.16 2004/05/04 16:59:31 grange Exp $	*/
+=======
+/*	$OpenBSD: noct.c,v 1.22 2011/01/12 17:01:26 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -911,7 +915,7 @@ noct_ea_thread(vsc)
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback((struct mbuf *)crp->crp_buf,
 					    crd->crd_inject, len,
-					    q->q_macbuf);
+					    q->q_macbuf, M_NOWAIT);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					bcopy(q->q_macbuf, crp->crp_mac, len);
 			}
@@ -921,7 +925,7 @@ noct_ea_thread(vsc)
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback((struct mbuf *)crp->crp_buf,
 					    crd->crd_skip, crd->crd_len,
-					    q->q_buf);
+					    q->q_buf, M_NOWAIT);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					cuio_copyback((struct uio *)crp->crp_buf,
 					    crd->crd_skip, crd->crd_len,
@@ -1139,12 +1143,16 @@ noct_ea_start_des(sc, q, crp, crd)
 		if (crd->crd_flags & CRD_F_IV_EXPLICIT)
 			bcopy(crd->crd_iv, iv, 8);
 		else
+<<<<<<< HEAD
 			get_random_bytes(iv, sizeof(iv));
+=======
+			arc4random_buf(iv, sizeof(iv));
+>>>>>>> origin/master
 
 		if (!(crd->crd_flags & CRD_F_IV_PRESENT)) {
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, 8, iv);
+				    crd->crd_inject, 8, iv, M_NOWAIT);
 			else if (crp->crp_flags & CRYPTO_F_IOV)
 				cuio_copyback((struct uio *)crp->crp_buf,
 				    crd->crd_inject, 8, iv);
@@ -1729,7 +1737,7 @@ noct_kload_cb(sc, wp, err)
 	struct noct_bnc_sw *sw = &sc->sc_pkh_bnsw[wp];
 
 	extent_free(sc->sc_pkh_bn, sw->bn_off, sw->bn_siz, EX_NOWAIT);
-	bzero(&sc->sc_bncache[sw->bn_off * 16], sw->bn_siz * 16);
+	explicit_bzero(&sc->sc_bncache[sw->bn_off * 16], sw->bn_siz * 16);
 }
 
 void
@@ -1753,7 +1761,7 @@ noct_modmul_cb(sc, wp, err)
 
 out:
 	extent_free(sc->sc_pkh_bn, sw->bn_off, sw->bn_siz, EX_NOWAIT);
-	bzero(&sc->sc_bncache[sw->bn_off * 16], sw->bn_siz * 16);
+	explicit_bzero(&sc->sc_bncache[sw->bn_off * 16], sw->bn_siz * 16);
 	krp->krp_status = err;
 	crypto_kdone(krp);
 }

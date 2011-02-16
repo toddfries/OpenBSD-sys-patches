@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_bwx_bus_io_chipdep.c,v 1.4 2002/03/14 01:26:27 millert Exp $ */
+/* $OpenBSD: pci_bwx_bus_io_chipdep.c,v 1.9 2009/12/25 20:52:34 miod Exp $ */
 /* $NetBSD: pcs_bus_io_common.c,v 1.14 1996/12/02 22:19:35 cgd Exp $ */
 
 /*
@@ -68,6 +68,9 @@ int		__C(CHIP,_io_alloc)(void *, bus_addr_t, bus_addr_t,
                     bus_space_handle_t *);
 void		__C(CHIP,_io_free)(void *, bus_space_handle_t,
 		    bus_size_t);
+
+/* get kernel virtual address */
+void *		__C(CHIP,_io_vaddr)(void *, bus_space_handle_t);
 
 /* barrier */
 inline void	__C(CHIP,_io_barrier)(void *, bus_space_handle_t,
@@ -205,6 +208,9 @@ __C(CHIP,_bus_io_init)(t, v)
 	t->abs_alloc =		__C(CHIP,_io_alloc);
 	t->abs_free = 		__C(CHIP,_io_free);
 
+	/* get kernel virtual address */
+	t->abs_vaddr =		__C(CHIP,_io_vaddr);
+
 	/* barrier */
 	t->abs_barrier =	__C(CHIP,_io_barrier);
 	
@@ -280,14 +286,20 @@ __C(CHIP,_bus_io_init)(t, v)
 }
 
 int
-__C(CHIP,_io_map)(v, ioaddr, iosize, cacheable, iohp)
+__C(CHIP,_io_map)(v, ioaddr, iosize, flags, iohp)
 	void *v;
 	bus_addr_t ioaddr;
 	bus_size_t iosize;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *iohp;
 {
 	int error;
+
+	/*
+	 * Can't map i/o space linearly.
+	 */
+	if (flags & BUS_SPACE_MAP_LINEAR)
+		return (EOPNOTSUPP);
 
 #ifdef EXTENT_DEBUG
 	printf("io: allocating 0x%lx to 0x%lx\n", ioaddr, ioaddr + iosize - 1);
@@ -349,12 +361,12 @@ __C(CHIP,_io_subregion)(v, ioh, offset, size, nioh)
 }
 
 int
-__C(CHIP,_io_alloc)(v, rstart, rend, size, align, boundary, cacheable,
+__C(CHIP,_io_alloc)(v, rstart, rend, size, align, boundary, flags,
     addrp, bshp)
 	void *v;
 	bus_addr_t rstart, rend, *addrp;
 	bus_size_t size, align, boundary;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *bshp;
 {
 
@@ -373,6 +385,18 @@ __C(CHIP,_io_free)(v, bsh, size)
 	panic("%s not implemented", __S(__C(CHIP,_io_free)));
 }
 
+void *
+__C(CHIP,_io_vaddr)(v, bsh)
+	void *v;
+	bus_space_handle_t bsh;
+{
+	/*
+	 * _io_map() catches BUS_SPACE_MAP_LINEAR,
+	 * so we shouldn't get here
+	 */
+	panic("_io_vaddr");
+}
+
 inline void
 __C(CHIP,_io_barrier)(v, h, o, l, f)
 	void *v;
@@ -381,9 +405,9 @@ __C(CHIP,_io_barrier)(v, h, o, l, f)
 	int f;
 {
 
-	if ((f & BUS_BARRIER_READ) != 0)
+	if ((f & BUS_SPACE_BARRIER_READ) != 0)
 		alpha_mb();
-	else if ((f & BUS_BARRIER_WRITE) != 0)
+	else if ((f & BUS_SPACE_BARRIER_WRITE) != 0)
 		alpha_wmb();
 }
 
@@ -458,7 +482,7 @@ __C(__C(CHIP,_io_read_multi_),BYTES)(v, h, o, a, c)			\
 									\
 	while (c-- > 0) {						\
 		__C(CHIP,_io_barrier)(v, h, o, sizeof *a,		\
-		    BUS_BARRIER_READ);					\
+		    BUS_SPACE_BARRIER_READ);				\
 		*a++ = __C(__C(CHIP,_io_read_),BYTES)(v, h, o);		\
 	}								\
 }
@@ -563,7 +587,7 @@ __C(__C(CHIP,_io_write_multi_),BYTES)(v, h, o, a, c)			\
 	while (c-- > 0) {						\
 		__C(__C(CHIP,_io_write_),BYTES)(v, h, o, *a++);		\
 		__C(CHIP,_io_barrier)(v, h, o, sizeof *a,		\
-		    BUS_BARRIER_WRITE);					\
+		    BUS_SPACE_BARRIER_WRITE);				\
 	}								\
 }
 CHIP_io_write_multi_N(1,u_int8_t)
@@ -602,7 +626,7 @@ __C(__C(CHIP,_io_set_multi_),BYTES)(v, h, o, val, c)			\
 	while (c-- > 0) {						\
 		__C(__C(CHIP,_io_write_),BYTES)(v, h, o, val);		\
 		__C(CHIP,_io_barrier)(v, h, o, sizeof val,		\
-		    BUS_BARRIER_WRITE);					\
+		    BUS_SPACE_BARRIER_WRITE);				\
 	}								\
 }
 CHIP_io_set_multi_N(1,u_int8_t)
@@ -659,7 +683,8 @@ __C(__C(CHIP,_io_read_raw_multi_),BYTES)(v, h, o, a, c)			\
 	int i;								\
 									\
 	while (c > 0) {							\
-		__C(CHIP,_io_barrier)(v, h, o, BYTES, BUS_BARRIER_READ); \
+		__C(CHIP,_io_barrier)(v, h, o, BYTES,			\
+		    BUS_SPACE_BARRIER_READ);				\
 		temp = __C(__C(CHIP,_io_read_),BYTES)(v, h, o);		\
 		i = MIN(c, BYTES);					\
 		c -= i;							\
@@ -692,7 +717,8 @@ __C(__C(CHIP,_io_write_raw_multi_),BYTES)(v, h, o, a, c)		\
 				temp |= *(a + i);			\
 		}							\
 		__C(__C(CHIP,_io_write_),BYTES)(v, h, o, temp);		\
-		__C(CHIP,_io_barrier)(v, h, o, BYTES, BUS_BARRIER_WRITE); \
+		__C(CHIP,_io_barrier)(v, h, o, BYTES,			\
+		    BUS_SPACE_BARRIER_WRITE);				\
 		i = MIN(c, BYTES); 					\
 		c -= i;							\
 		a += i;							\

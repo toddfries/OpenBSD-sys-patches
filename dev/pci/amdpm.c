@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amdpm.c,v 1.19 2006/11/28 16:17:57 kettenis Exp $	*/
+=======
+/*	$OpenBSD: amdpm.c,v 1.25 2010/08/08 04:49:25 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -31,13 +35,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,8 +53,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 #include <sys/timeout.h>
 #ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
@@ -186,6 +187,7 @@ struct amdpm_softc {
 
 int	amdpm_match(struct device *, void *, void *);
 void	amdpm_attach(struct device *, struct device *, void *);
+int	amdpm_activate(struct device *, int);
 void	amdpm_rnd_callout(void *);
 
 int	amdpm_i2c_acquire_bus(void *, int);
@@ -196,7 +198,8 @@ int	amdpm_i2c_exec(void *, i2c_op_t, i2c_addr_t, const void *, size_t,
 int	amdpm_intr(void *);
 
 struct cfattach amdpm_ca = {
-	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach
+	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach, NULL,
+	amdpm_activate
 };
 
 struct cfdriver amdpm_cd = {
@@ -317,6 +320,28 @@ amdpm_attach(struct device *parent, struct device *self, void *aux)
 	iba.iba_name = "iic";
 	iba.iba_tag = &sc->sc_i2c_tag;
 	config_found(self, &iba, iicbus_print);
+}
+
+int
+amdpm_activate(struct device *self, int act)
+{
+	struct amdpm_softc *sc = (struct amdpm_softc *)self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		if (timeout_initialized(&sc->sc_rnd_ch)) {
+			pcireg_t cfg_reg;
+
+			/* Restart the AMD PBC768_PMC/8111_PMC RNG */
+			cfg_reg = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    AMDPM_CONFREG);
+			pci_conf_write(sc->sc_pc, sc->sc_tag, 
+			    AMDPM_CONFREG, cfg_reg | AMDPM_RNGEN);
+		
+		}
+		break;
+	}
+	return (0);
 }
 
 void

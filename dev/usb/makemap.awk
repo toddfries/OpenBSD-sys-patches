@@ -1,5 +1,9 @@
 #! /usr/bin/awk -f
+<<<<<<< HEAD
 #	$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $
+=======
+#	$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $
+>>>>>>> origin/master
 #
 # Copyright (c) 2005, Miodrag Vallat
 #
@@ -31,15 +35,18 @@
 #
 
 BEGIN {
+<<<<<<< HEAD
 	rcsid = "$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $"
+=======
+	rcsid = "$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $"
+>>>>>>> origin/master
 	ifdepth = 0
 	ignore = 0
 	declk = 0
 	haskeys = 0
 	kbfr = 0
 
-	# PS/2 id -> UKBD conversion table, or "sanity lossage 102"
-	# (101 is for GSC keyboards!)
+	# PS/2 id -> UKBD conversion table, or "sanity lossage 101"
 	for (i = 0; i < 256; i++)
 		conv[i] = -1
 
@@ -122,7 +129,7 @@ BEGIN {
 	conv[77] = 94
 	conv[78] = 87
 	conv[79] = 89
-	conv[80] = 90M
+	conv[80] = 90
 	conv[81] = 91
 	conv[82] = 98
 	conv[83] = 99
@@ -137,7 +144,10 @@ BEGIN {
 	conv[127] = 72
 	conv[156] = 88
 	conv[157] = 228
+	conv[160] = 127
 	conv[170] = 70
+	conv[174] = 129
+	conv[176] = 128
 	conv[181] = 84
 	conv[184] = 230
 	# 198 is #if 0 in the PS/2 map...
@@ -186,8 +196,8 @@ NR == 1 {
 	ignores[ifdepth] = ignore
 	if ($2 == "0")
 		ignore = 1
-	else
-		ignore = 0
+	#else
+	#	ignore = 0
 	ifdepth++
 	if (ignore)
 		next
@@ -309,6 +319,42 @@ $1 == "#define" || $1 == "#undef" {
 			sub("50", "49", lines[49])
 		}
 
+<<<<<<< HEAD
+=======
+		#
+		# Several USB keyboards have extra keys do not appear in
+		# the traditional PS/2 maps. We add them here, except for
+		# the Sun keyboard Compose key (101) which conflicts with
+		# the ``menu'' key.
+		#
+		if (nmaps++ == 0) {
+			# 102 Suspend
+			lines[104] = "    KC(104),\tKS_F13,"
+			lines[105] = "    KC(105),\tKS_F14,"
+			lines[106] = "    KC(106),\tKS_F15,"
+			lines[107] = "    KC(107),\tKS_F16,"
+			lines[108] = "    KC(108),\tKS_F17,"
+			lines[109] = "    KC(109),\tKS_F18,"
+			lines[110] = "    KC(110),\tKS_F19,"
+			lines[111] = "    KC(111),\tKS_F20,"
+			lines[112] = "    KC(112),\tKS_F21,"
+			lines[113] = "    KC(113),\tKS_F22,"
+			lines[114] = "    KC(114),\tKS_F23,"
+			lines[115] = "    KC(115),\tKS_F24,"
+			lines[116] = "    KC(116),\tKS_Open,"
+			lines[117] = "    KC(117),\tKS_Help,"
+			lines[118] = "    KC(118),\tKS_Props,"
+			lines[119] = "    KC(119),\tKS_Front,"
+			lines[120] = "    KC(120),\tKS_Cmd,"
+			lines[121] = "    KC(121),\tKS_Again,"
+			lines[122] = "    KC(122),\tKS_Undo,"
+			lines[123] = "    KC(123),\tKS_Cut,"
+			lines[124] = "    KC(124),\tKS_Copy,"
+			lines[125] = "    KC(125),\tKS_Paste,"
+			lines[126] = "    KC(126),\tKS_Find,"
+		}
+
+>>>>>>> origin/master
 		for (i = 0; i < 256; i++)
 			if (lines[i]) {
 				print lines[i]
@@ -376,9 +422,11 @@ $1 == "#define" || $1 == "#undef" {
 }
 /KB_FR/ {
 	print $0
-	if (kbfr++ == 0) {
+	kbfr++
+	# Add .apple variants, but not to the fr.dvorak variants
+	if (kbfr == 1) {
 		print "\tKBD_MAP(KB_FR | KB_APPLE,\tKB_FR,\tukbd_keydesc_fr_apple),"
-	} else {
+	} else if (kbfr == 3) {
 		print "\tKBD_MAP(KB_FR | KB_APPLE | KB_SWAPCTRLCAPS,\tKB_FR | KB_APPLE,"
 		print "\t\tukbd_keydesc_swapctrlcaps),"
 	}

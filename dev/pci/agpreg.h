@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: agpreg.h,v 1.5 2006/02/03 19:24:42 millert Exp $	*/
+=======
+/*	$OpenBSD: agpreg.h,v 1.12 2008/12/24 05:42:58 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: agpreg.h,v 1.1 2001/09/10 10:01:02 fvdl Exp $	*/
 
 /*-
@@ -174,11 +178,11 @@
 /*
  * Config registers for 852GM/855GM/865G device 0
  */
-#define AGP_I855_GCC1			0x52
+#define AGP_I855_GCC1			0x50
 #define AGP_I855_GCC1_DEV2		0x08
 #define AGP_I855_GCC1_DEV2_ENABLED	0x00
 #define AGP_I855_GCC1_DEV2_DISABLED	0x08
-#define AGP_I855_GCC1_GMS		0x70
+#define AGP_I855_GCC1_GMS		0xf0
 #define AGP_I855_GCC1_GMS_STOLEN_0M	0x00
 #define AGP_I855_GCC1_GMS_STOLEN_1M	0x10
 #define AGP_I855_GCC1_GMS_STOLEN_4M	0x20
@@ -203,4 +207,37 @@
 #define AGP_I915_MSAC_GMASIZE_128	0x02
 #define AGP_I915_MSAC_GMASIZE_256	0x00
 
+<<<<<<< HEAD
+=======
+/*
+ * G965 registers
+ */
+#define AGP_I965_GMADR			0x18
+#define AGP_I965_MMADR			0x10
+#define AGP_I965_MSAC			0x62
+#define AGP_I965_MSAC_GMASIZE		0x06
+#define AGP_I965_MSAC_GMASIZE_128	0x00
+#define AGP_I965_MSAC_GMASIZE_256	0x02
+#define AGP_I965_MSAC_GMASIZE_512	0x06
+#define AGP_I965_GTT			0x80000
+
+/*
+ * G33 registers
+ */
+#define AGP_G33_GCC1_GMS_STOLEN_128M	0x80
+#define AGP_G33_GCC1_GMS_STOLEN_256M	0x90
+#define AGP_G33_PGTBL_SIZE_MASK		(3U << 8)
+#define AGP_G33_PGTBL_SIZE_1M		(1U << 8)
+#define AGP_G33_PGTBL_SIZE_2M		(2U << 8)
+
+/*
+ * Intel 4-series registers and values
+ */
+#define AGP_INTEL_GMCH_GMS_STOLEN_96M	0xa0
+#define AGP_INTEL_GMCH_GMS_STOLEN_160M	0xb0
+#define AGP_INTEL_GMCH_GMS_STOLEN_224M	0xc0
+#define AGP_INTEL_GMCH_GMS_STOLEN_352M	0xd0
+#define	AGP_G4X_GTT			0x200000
+
+>>>>>>> origin/master
 #endif /* !_PCI_AGPREG_H_ */

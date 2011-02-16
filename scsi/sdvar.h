@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sdvar.h,v 1.9 2006/03/05 14:58:10 krw Exp $	*/
+=======
+/*	$OpenBSD: sdvar.h,v 1.34 2010/09/12 02:05:54 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -54,33 +51,47 @@
  * Ported to run under 386BSD by Julian Elischer (julian@dialix.oz.au) Sept 1992
  */
 
-#define	SDRETRIES	4
-
+#ifdef _KERNEL
 struct sd_softc {
-	struct device sc_dev;
-	struct disk sc_dk;
+	struct device		sc_dev;
+	struct disk		sc_dk;
+	struct bufq		sc_bufq;
 
-	int flags;
+	int			flags;
 #define	SDF_LOCKED	0x01
 #define	SDF_WANTED	0x02
 #define	SDF_WLABEL	0x04		/* label is writable */
 #define	SDF_LABELLING	0x08		/* writing label */
 #define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
+<<<<<<< HEAD
 #define	SDF_FLUSHING	0x40		/* flushing, for sddone() */
 	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
+=======
+#define	SDF_DYING	0x40		/* dying, when deactivated */
+#define	SDF_WAITING	0x80
+	struct scsi_link	*sc_link; /* contains our targ, lun, etc. */
+>>>>>>> origin/master
 	struct disk_parms {
 		u_long	heads;		/* number of heads */
 		u_long	cyls;		/* number of cylinders */
 		u_long	sectors;	/* number of sectors/track */
+<<<<<<< HEAD
 		u_long	blksize;	/* number of bytes/sector */
 		u_long	disksize;	/* total number sectors */
 		u_long	rot_rate;	/* rotational rate, in RPM */
+=======
+		u_long	secsize;	/* number of bytes/sector */
+		daddr64_t	disksize;	/* total number sectors */
+>>>>>>> origin/master
 	} params;
-	struct buf buf_queue;
 	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;
+
+	struct scsi_xshandler sc_xsh;
 };
 
 #define	SDGP_RESULT_OK		0	/* parameters obtained */
 #define	SDGP_RESULT_OFFLINE	1	/* no media, or otherwise losing */
+
+#endif /* _KERNEL */

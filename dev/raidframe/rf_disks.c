@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rf_disks.c,v 1.10 2003/11/27 20:13:27 henning Exp $	*/
+=======
+/*	$OpenBSD: rf_disks.c,v 1.15 2010/09/23 18:49:39 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rf_disks.c,v 1.31 2000/06/02 01:17:14 oster Exp $	*/
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,6 +84,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/fcntl.h>
 #ifdef	__NETBSD__
 #include <sys/vnode.h>
@@ -604,7 +602,7 @@ rf_AutoConfigureDisks(RF_Raid_t *raidPtr, RF_Config_t *cfgPtr,
 	ac = auto_config;
 	while(ac != NULL) {
 		if (ac->flag == 0) {
-			VOP_CLOSE(ac->vp, FREAD, NOCRED, 0);
+			VOP_CLOSE(ac->vp, FREAD, NOCRED, curproc);
 			vput(ac->vp);
 			ac->vp = NULL;
 #if	DEBUG

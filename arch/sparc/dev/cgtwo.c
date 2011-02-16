@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgtwo.c,v 1.35 2006/12/03 16:38:13 miod Exp $	*/
+=======
+/*	$OpenBSD: cgtwo.c,v 1.38 2010/06/07 19:43:45 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cgtwo.c,v 1.22 1997/05/24 20:16:12 pk Exp $ */
 
 /*
@@ -180,7 +184,7 @@ cgtwoattach(struct device *parent, struct device *self, void *args)
 		 * Assume this is the console if there's no eeprom info
 		 * to be found.
 		 */
-		if (eep == NULL || eep->eeConsole == EE_CONS_COLOR)
+		if (eep == NULL || eep->ee_diag.eed_console == EED_CONS_COLOR)
 			isconsole = 1;
 	}
 
@@ -216,10 +220,11 @@ cgtwoattach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_ro.ri_bits = mapiodev(&sc->sc_phys, CG2_PIXMAP_OFF,
 	    round_page(sc->sc_sunfb.sf_fbsize));
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
-	fbwscons_setcolormap(&sc->sc_sunfb, cgtwo_setcolor);
 
 	printf(": %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+
+	fbwscons_init(&sc->sc_sunfb, isconsole);
+	fbwscons_setcolormap(&sc->sc_sunfb, cgtwo_setcolor);
 
 	if (isconsole) {
 		fbwscons_console_init(&sc->sc_sunfb, -1);

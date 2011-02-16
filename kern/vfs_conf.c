@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vfs_conf.c,v 1.30 2006/09/22 14:23:04 pedro Exp $	*/
+=======
+/*	$OpenBSD: vfs_conf.c,v 1.40 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vfs_conf.c,v 1.21.4.1 1995/11/01 00:06:26 jtc Exp $	*/
 
 /*
@@ -35,6 +39,7 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/timeout.h>
 
 #ifdef FFS
 #include <ufs/ufs/quota.h>
@@ -112,8 +117,8 @@ extern 	const struct vfsops adosfs_vfsops;
 extern	const struct vfsops ext2fs_vfsops;
 #endif
 
-#ifdef XFS
-extern  const struct vfsops xfs_vfsops;
+#ifdef NNPFS
+extern  const struct vfsops nnpfs_vfsops;
 #endif
 
 #ifdef NTFS
@@ -162,9 +167,15 @@ static struct vfsconf vfsconflist[] = {
         { &nfs_vfsops, MOUNT_NFS, 2, 0, 0, nfs_mountroot, NULL },
 #endif
 
+<<<<<<< HEAD
 	/* XFS */
 #ifdef XFS
 	{ &xfs_vfsops, MOUNT_XFS, 21, 0, 0, NULL, NULL },
+=======
+	/* NNPFS */
+#ifdef NNPFS
+	{ &nnpfs_vfsops, MOUNT_NNPFS, 21, 0, 0, NULL },
+>>>>>>> origin/master
 #endif
 	
         /* /proc Filesystem */
@@ -196,6 +207,7 @@ static struct vfsconf vfsconflist[] = {
  */
 int maxvfsconf = sizeof(vfsconflist) / sizeof(struct vfsconf);
 struct vfsconf *vfsconf = vfsconflist;
+<<<<<<< HEAD
 
 
 /*
@@ -290,3 +302,5 @@ struct vnodeopv_desc *vfs_opv_descs[] = {
 
 	NULL
 };
+=======
+>>>>>>> origin/master

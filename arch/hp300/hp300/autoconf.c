@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.39 2006/11/28 16:56:50 dlg Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.49 2010/06/09 15:44:17 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.45 1999/04/10 17:31:02 kleink Exp $	*/
 
 /*
@@ -169,14 +169,7 @@ void	setbootdev(void);
 static	struct dev_data *dev_data_lookup(struct device *);
 static	void dev_data_insert(struct dev_data *, ddlist_t *);
 
-static	struct device *parsedisk(char *str, int len, int defpart,
-	    dev_t *devp);
-static	struct device *getdisk(char *str, int len, int defpart,
-	    dev_t *devp);
-static	int findblkmajor(struct device *dv);
-static	char *findblkname(int);
-static	int getstr(char *cp, int size);
-static	int device_match(const char *, const char *);
+static	int device_match(struct device *, const char *);
 
 int	mainbusmatch(struct device *, void *, void *);
 void	mainbusattach(struct device *, struct device *, void *);
@@ -235,6 +228,9 @@ mainbussearch(parent, match, aux)
 void
 cpu_configure()
 {
+	/* this couldn't be done in intr_init() because this uses malloc() */
+	softintr_init();
+
 	/*
 	 * Initialize the dev_data_lists.
 	 */
@@ -294,20 +290,9 @@ diskconf()
  **********************************************************************/
 
 static int
-device_match(const char *dvname, const char *template)
+device_match(struct device *dv, const char *template)
 {
-	size_t len = strlen(template);
-	char unit;
-
-	if (strncmp(dvname, template, len) != 0)
-		return (1);
-
-	/* Check that we are immediately followed by an unit number. */
-	unit = dvname[len];
-	if (unit < '0' || unit > '9')
-		return (1);
-
-	return (0);
+	return strcmp(dv->dv_cfdata->cf_driver->cd_name, template);
 }
 
 /*
@@ -351,16 +336,16 @@ device_register(dev, aux)
 		goto linkup;
 	}
 
-	if (device_match(dev->dv_xname, "fhpib") == 0 ||
-	    device_match(dev->dv_xname, "nhpib") == 0 ||
-	    device_match(dev->dv_xname, "spc") == 0) {
+	if (device_match(dev, "fhpib") == 0 ||
+	    device_match(dev, "nhpib") == 0 ||
+	    device_match(dev, "spc") == 0) {
 		struct dio_attach_args *da = aux;
 
 		dd->dd_scode = da->da_scode;
 		goto linkup;
 	}
 
-	if (device_match(dev->dv_xname, "hd") == 0) {
+	if (device_match(dev, "hd") == 0) {
 		struct hpibbus_attach_args *ha = aux;
 
 		dd->dd_slave = ha->ha_slave;
@@ -368,9 +353,9 @@ device_register(dev, aux)
 		goto linkup;
 	}
 
-	if (device_match(dev->dv_xname, "cd") == 0 ||
-	    device_match(dev->dv_xname, "sd") == 0 ||
-	    device_match(dev->dv_xname, "st") == 0) {
+	if (device_match(dev, "cd") == 0 ||
+	    device_match(dev, "sd") == 0 ||
+	    device_match(dev, "st") == 0) {
 		struct scsi_attach_args *sa = aux;
 
 		dd->dd_slave = sa->sa_sc_link->target;
@@ -387,13 +372,13 @@ device_register(dev, aux)
  linkup:
 	LIST_INSERT_HEAD(&dev_data_list, dd, dd_list);
 
-	if (device_match(dev->dv_xname, "fhpib") == 0 ||
-	    device_match(dev->dv_xname, "nhpib") == 0) {
+	if (device_match(dev, "fhpib") == 0 ||
+	    device_match(dev, "nhpib") == 0) {
 		dev_data_insert(dd, &dev_data_list_hpib);
 		return;
 	}
 
-	if (device_match(dev->dv_xname, "spc") == 0) {
+	if (device_match(dev, "spc") == 0) {
 		dev_data_insert(dd, &dev_data_list_scsi);
 		return;
 	}
@@ -852,9 +837,9 @@ findbootdev()
 		 * Sanity check.
 		 */
 		if ((type == 0 &&
-		     device_match(booted_device->dv_xname, "ct")) ||
+		     device_match(bootdv, "ct")) ||
 		    (type == 2 &&
-		     device_match(booted_device->dv_xname, "hd"))) {
+		     device_match(bootdv, "hd"))) {
 			printf("WARNING: boot device/type mismatch!\n");
 			printf("device = %s, type = %d\n",
 			    booted_device->dv_xname, type);
@@ -877,9 +862,9 @@ findbootdev()
 		/*
 		 * Sanity check.
 		 */
-		if (device_match(booted_device->dv_xname, "cd") != 0 &&
-		    device_match(booted_device->dv_xname, "sd") != 0 &&
-		    device_match(booted_device->dv_xname, "st") != 0) {
+		if (device_match(bootdv, "cd") != 0 &&
+		    device_match(bootdv, "sd") != 0 &&
+		    device_match(bootdv, "st") != 0) {
 			printf("WARNING: boot device/type mismatch!\n");
 			printf("device = %s, type = %d\n",
 			    booted_device->dv_xname, type);
@@ -981,11 +966,11 @@ setbootdev()
 	/*
 	 * Determine device type.
 	 */
-	if (device_match(root_device->dv_xname, "hd") == 0)
+	if (device_match(root_device, "hd") == 0)
 		type = 2;
-	else if (device_match(root_device->dv_xname, "cd") == 0 ||
-	    device_match(root_device->dv_xname, "sd") == 0 ||
-	    device_match(root_device->dv_xname, "st") == 0)
+	else if (device_match(root_device, "cd") == 0 ||
+	    device_match(root_device, "sd") == 0 ||
+	    device_match(root_device, "st") == 0)
 		/* force scsi disk regardless of the actual device */
 		type = 4;
 	else {
@@ -1097,7 +1082,7 @@ console_scan(func, arg)
 	int (*func)(int, caddr_t, void *);
 	void *arg;
 {
-	int size, scode, sctop;
+	int size, scode, sctop, sctmp;
 	caddr_t pa, va;
 
 	/*
@@ -1105,13 +1090,16 @@ console_scan(func, arg)
 	 * hardware.  If there's something there, call (*func)().
 	 */
 	sctop = DIO_SCMAX(machineid);
-	for (scode = 0; scode < sctop; ++scode) {
+	for (scode = 0; scode < sctop; scode++) {
 		/*
 		 * Skip over the select code hole and
 		 * the internal HP-IB controller.
 		 */
-		if (DIO_INHOLE(scode) ||
-		    ((scode == 7) && internalhpib))
+		if ((sctmp = dio_inhole(scode)) != 0) {
+			scode = sctmp - 1;
+			continue;
+		}
+		if (scode == 7 && internalhpib)
 			continue;
 
 		/* Map current PA. */
@@ -1152,6 +1140,7 @@ console_scan(func, arg)
 }
 
 int consolepass = -1;
+struct consdev *cn_tab;
 
 /*
  * Special version of cninit().  Actually, crippled somewhat.
@@ -1256,3 +1245,14 @@ iounmap(va, size)
 		printf("iounmap: extent_free failed\n");
 #endif
 }
+
+struct nam2blk nam2blk[] = {
+	{ "ct",		0 },
+	{ "hd",		2 },
+	{ "sd",		4 },
+	{ "st",		7 },
+	{ "rd",		8 },
+	{ "cd",		9 },
+	{ "vnd",	6 },
+	{ NULL,		-1 }
+};

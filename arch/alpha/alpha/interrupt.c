@@ -1,4 +1,4 @@
-/* $OpenBSD: interrupt.c,v 1.19 2006/02/23 20:14:13 miod Exp $ */
+/* $OpenBSD: interrupt.c,v 1.30 2010/12/21 14:56:23 claudio Exp $ */
 /* $NetBSD: interrupt.c,v 1.46 2000/06/03 20:47:36 thorpej Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,26 +88,6 @@
 #include <sys/device.h>
 #endif
 
-#include <net/netisr.h>
-#include <net/if.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-#include <netinet/ip_var.h>
-#endif
-
-#ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
-#endif
-
-#include "ppp.h"
-#include "bridge.h"
-
 #include "apecs.h"
 #include "cia.h"
 #include "lca.h"
@@ -125,8 +98,6 @@ static u_int schedclk2;
 extern struct evcount clk_count;
 
 struct scbvec scb_iovectab[SCB_VECTOIDX(SCB_SIZE - SCB_IOVECBASE)];
-
-void netintr(void);
 
 void	scb_stray(void *, u_long);
 
@@ -487,33 +458,7 @@ badaddr_read(void *addr, size_t size, void *rptr)
 
 #endif	/* NAPECS > 0 || NCIA > 0 || NLCA > 0 || NTCASIC > 0 */
 
-int netisr;
-
-void
-netintr()
-{
-	int n, s;
-
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
-
-#define	DONETISR(bit, fn)						\
-	do {								\
-		if (n & (1 << (bit)))					\
-			fn();						\
-	} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-}
-
-struct alpha_soft_intr alpha_soft_intrs[IPL_NSOFT];
-
-/* XXX For legacy software interrupts. */
-struct alpha_soft_intrhand *softnet_intrhand, *softclock_intrhand;
+struct alpha_soft_intr alpha_soft_intrs[SI_NSOFT];
 
 /*
  * softintr_init:
@@ -528,16 +473,10 @@ softintr_init()
 
 	for (i = 0; i < IPL_NSOFT; i++) {
 		asi = &alpha_soft_intrs[i];
-		LIST_INIT(&asi->softintr_q);
-		simple_lock_init(&asi->softintr_slock);
-		asi->softintr_ipl = i;
+		TAILQ_INIT(&asi->softintr_q);
+		mtx_init(&asi->softintr_mtx, IPL_HIGH);
+		asi->softintr_siq = i;
 	}
-
-	/* XXX Establish legacy software interrupt handlers. */
-	softnet_intrhand = softintr_establish(IPL_SOFTNET,
-	    (void (*)(void *))netintr, NULL);
-	softclock_intrhand = softintr_establish(IPL_SOFTCLOCK,
-	    (void (*)(void *))softclock, NULL);
 }
 
 /*
@@ -558,17 +497,22 @@ softintr_dispatch()
 				continue;
 			asi = &alpha_soft_intrs[i];
 
-			/* Already at splsoft() */
-			simple_lock(&asi->softintr_slock);
+			for (;;) {
+				mtx_enter(&asi->softintr_mtx);
 
-			for (sih = LIST_FIRST(&asi->softintr_q);
-			     sih != NULL;
-			     sih = LIST_NEXT(sih, sih_q)) {
-				if (sih->sih_pending) {
-					uvmexp.softs++;
-					sih->sih_pending = 0;
-					(*sih->sih_fn)(sih->sih_arg);
+				sih = TAILQ_FIRST(&asi->softintr_q);
+				if (sih == NULL) {
+					mtx_leave(&asi->softintr_mtx);
+					break;
 				}
+				TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+				sih->sih_pending = 0;
+
+				uvmexp.softs++;
+
+				mtx_leave(&asi->softintr_mtx);
+
+				(*sih->sih_fn)(sih->sih_arg);
 			}
 
 			simple_unlock(&asi->softintr_slock);
@@ -618,17 +562,33 @@ softintr_disestablish(void *arg)
 {
 	struct alpha_soft_intrhand *sih = arg;
 	struct alpha_soft_intr *asi = sih->sih_intrhead;
-	int s;
 
-	(void) asi;	/* XXX Unused if simple locks are noops. */
-
-	s = splsoft();
-	simple_lock(&asi->softintr_slock);
-	LIST_REMOVE(sih, sih_q);
-	simple_unlock(&asi->softintr_slock);
-	splx(s);
+	mtx_enter(&asi->softintr_mtx);
+	if (sih->sih_pending) {
+		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+		sih->sih_pending = 0;
+	}
+	mtx_leave(&asi->softintr_mtx);
 
 	free(sih, M_DEVBUF);
+}
+
+/*
+ * Schedule a software interrupt.
+*/
+void
+softintr_schedule(void *arg)
+{
+	struct alpha_soft_intrhand *sih = arg;
+	struct alpha_soft_intr *si = sih->sih_intrhead;
+
+	mtx_enter(&si->softintr_mtx);
+	if (sih->sih_pending == 0) {
+		TAILQ_INSERT_TAIL(&si->softintr_q, sih, sih_q);
+		sih->sih_pending = 1;
+		setsoft(si->softintr_siq);
+	}
+	mtx_leave(&si->softintr_mtx);
 }
 
 int
@@ -637,3 +597,27 @@ _splraise(int s)
 	int cur = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
 	return (s > cur ? alpha_pal_swpipl(s) : cur);
 }
+
+#ifdef DIAGNOSTIC
+void
+splassert_check(int wantipl, const char *func)
+{
+	int curipl = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
+
+	/*
+	 * Depending on the system, hardware interrupts may occur either
+	 * at level 3 or level 4. Avoid false positives in the former case.
+	 */
+	if (curipl == ALPHA_PSL_IPL_IO - 1)
+		curipl = ALPHA_PSL_IPL_IO;
+
+	if (curipl < wantipl) {
+		splassert_fail(wantipl, curipl, func);
+		/*
+		 * If splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		alpha_pal_swpipl(wantipl);
+	}
+}
+#endif

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: emuxkivar.h,v 1.6 2003/04/26 08:01:42 jmc Exp $	*/
+=======
+/*	$OpenBSD: emuxkivar.h,v 1.10 2008/12/09 12:30:12 brad Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: emuxkivar.h,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -227,10 +224,6 @@ struct emuxki_stream {
 struct emuxki_softc {
 	struct device   sc_dev;
 	struct audio_device sc_audv;
-	enum {
-		EMUXKI_SBLIVE = 0x00, EMUXKI_AUDIGY = 0x01, EMUXKI_AUDIGY2 = 0x02,
-		EMUXKI_LIVE_5_1 = 0x04, EMUXKI_APS = 0x08
-	} sc_type;
 
 	/* Autoconfig parameters */
 	bus_space_tag_t 	sc_iot;
@@ -261,6 +254,15 @@ struct emuxki_softc {
 	struct device		*sc_audev;
 
 	struct emuxki_voice	*pvoice, *rvoice, *lvoice;
+
+	int			sc_flags;
+#define EMUXKI_SBLIVE		0x0001
+#define EMUXKI_AUDIGY		0x0002
+#define EMUXKI_AUDIGY2		0x0004
+#define EMUXKI_SBLIVE51		0x0008
+#define EMUXKI_APS		0x0010
+#define EMUXKI_CA0108		0x0020
+#define EMUXKI_CA0151		0x0040
 };
 
 #endif				/* !_DEV_PCI_EMU10K1VAR_H_ */

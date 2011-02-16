@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bus.h,v 1.8 2007/04/10 18:02:48 miod Exp $	*/
+=======
+/*	$OpenBSD: bus.h,v 1.15 2010/04/04 12:49:30 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bus.h,v 1.14 2000/06/26 04:56:13 simonb Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -90,9 +87,9 @@ struct vax_bus_space {
 
 	/* mapping/unmapping */
 	int		(*vbs_map)(void *, bus_addr_t, bus_size_t,
-			    int, bus_space_handle_t *, int);
+			    int, bus_space_handle_t *);
 	void		(*vbs_unmap)(void *, bus_space_handle_t,
-			    bus_size_t, int);
+			    bus_size_t);
 	int		(*vbs_subregion)(void *, bus_space_handle_t,
 			    bus_size_t, bus_size_t, bus_space_handle_t *);
 
@@ -102,6 +99,9 @@ struct vax_bus_space {
 			    bus_addr_t *, bus_space_handle_t *);
 	void		(*vbs_free)(void *, bus_space_handle_t,
 			    bus_size_t);
+
+	/* get kernel virtual address */
+	void *		(*vbs_vaddr)(void *, bus_space_handle_t);
 };
 
 /*
@@ -116,9 +116,7 @@ struct vax_bus_space {
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 #define	bus_space_map(t, a, s, f, hp)					\
-	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp), 1)
-#define	vax_bus_space_map_noacct(t, a, s, f, hp)			\
-	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp), 0)
+	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp))
 
 /*
  *	int bus_space_unmap(bus_space_tag_t t,
@@ -128,9 +126,7 @@ struct vax_bus_space {
  */
 
 #define bus_space_unmap(t, h, s)					\
-	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s), 1)
-#define vax_bus_space_unmap_noacct(t, h, s)				\
-	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s), 0)
+	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s))
 
 /*
  *	int bus_space_subregion(bus_space_tag_t t,
@@ -165,6 +161,15 @@ struct vax_bus_space {
 
 #define bus_space_free(t, h, s)						\
 	(*(t)->vbs_free)((t)->vbs_cookie, (h), (s))
+
+/*
+ *	void *bus_space_vaddr(bus_space_tag_t t, bus_space_handle_t h);
+ *
+ * Get kernel virtual address.
+ */
+
+#define	bus_space_vaddr(t, h)						\
+	(*(t)->vbs_vaddr)((t)->vbs_cookie, (h))
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -637,7 +642,7 @@ vax_mem_set_region_4(t, h, o, v, c)
 #endif
 
 /*
- *	void bus_space_copy_region_N(bus_space_tag_t tag,
+ *	void bus_space_copy_N(bus_space_tag_t tag,
  *	    bus_space_handle_t bsh1, bus_size_t off1,
  *	    bus_space_handle_t bsh2, bus_size_t off2,
  *	    size_t count);
@@ -646,27 +651,27 @@ vax_mem_set_region_4(t, h, o, v, c)
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-static __inline void vax_mem_copy_region_1(bus_space_tag_t,
+static __inline void vax_mem_copy_1(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_2(bus_space_tag_t,
+static __inline void vax_mem_copy_2(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_4(bus_space_tag_t,
+static __inline void vax_mem_copy_4(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
 
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_1((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_1(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_1((t), (h1), (o1), (h2), (o2), (c))
 
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_2((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_2(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_2((t), (h1), (o1), (h2), (o2), (c))
 
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_4((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_4(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_4((t), (h1), (o1), (h2), (o2), (c))
 
 static __inline void
-vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
+vax_mem_copy_1(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -692,7 +697,7 @@ vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
 }
 
 static __inline void
-vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
+vax_mem_copy_2(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -718,7 +723,7 @@ vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
 }
 
 static __inline void
-vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
+vax_mem_copy_4(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -744,7 +749,7 @@ vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
 }
 
 #if 0	/* Cause a link error for bus_space_copy_8 */
-#define	bus_space_copy_region_8	!!! bus_space_copy_region_8 unimplemented !!!
+#define	bus_space_copy_8	!!! bus_space_copy_8 unimplemented !!!
 #endif
 
 
@@ -778,6 +783,7 @@ vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
 #define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
 #define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 #define	VAX_BUS_DMA_SPILLPAGE	BUS_DMA_BUS1	/* VS4000 kludge */
 /*
@@ -797,23 +803,6 @@ struct vax_sgmap;
 #define	BUS_DMASYNC_POSTREAD	0x02	/* post-read synchronization */
 #define	BUS_DMASYNC_PREWRITE	0x04	/* pre-write synchronization */
 #define	BUS_DMASYNC_POSTWRITE	0x08	/* post-write synchronization */
-
-/*
- *	vax_bus_t
- *
- *	Busses supported by NetBSD/vax, used by internal
- *	utility functions.  NOT TO BE USED BY MACHINE-INDEPENDENT
- *	CODE!
- */
-typedef enum {
-	VAX_BUS_MAINBUS,
-	VAX_BUS_SBI,
-	VAX_BUS_MASSBUS,
-	VAX_BUS_UNIBUS,		/* Also handles QBUS */
-	VAX_BUS_BI,
-	VAX_BUS_XMI,
-	VAX_BUS_TURBOCHANNEL
-} vax_bus_t;
 
 typedef struct vax_bus_dma_tag	*bus_dma_tag_t;
 typedef struct vax_bus_dmamap	*bus_dmamap_t;
@@ -859,12 +848,6 @@ struct vax_bus_dma_tag {
 	struct vax_sgmap *_sgmap;
 
 	/*
-	 * Internal-use only utility methods.  NOT TO BE USED BY
-	 * MACHINE-INDEPENDENT CODE!
-	 */
-	bus_dma_tag_t (*_get_tag)(bus_dma_tag_t, vax_bus_t);
-
-	/*
 	 * DMA mapping methods.
 	 */
 	int	(*_dmamap_create)(bus_dma_tag_t, bus_size_t, int,
@@ -895,9 +878,6 @@ struct vax_bus_dma_tag {
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
 };
-
-#define	vaxbus_dma_get_tag(t, b)				\
-	(*(t)->_get_tag)(t, b)
 
 #define	bus_dmamap_create(t, s, n, m, b, f, p)			\
 	(*(t)->_dmamap_create)((t), (s), (n), (m), (b), (f), (p))

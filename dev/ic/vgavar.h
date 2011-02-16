@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: vgavar.h,v 1.7 2002/03/14 03:16:05 millert Exp $ */
+=======
+/* $OpenBSD: vgavar.h,v 1.11 2010/08/28 12:48:14 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: vgavar.h,v 1.4 2000/06/17 07:11:50 soda Exp $ */
 
 /*
@@ -40,6 +44,19 @@ struct vga_handle {
 #define vh_ioh_6845 vh_ph.ph_ioh_6845
 #define vh_memh vh_ph.ph_memh
 
+struct vgascreen {
+	struct pcdisplayscreen pcs;
+	LIST_ENTRY(vgascreen) next;
+
+	/* videostate */
+	struct vga_config *cfg;
+	/* font data */
+	struct vgafont *fontset1, *fontset2;
+
+	int mindispoffset, maxdispoffset;
+	int vga_rollover;
+};
+
 struct vga_config {
 	struct vga_handle hdl;
 
@@ -52,6 +69,7 @@ struct vga_config {
 	int currentfontset1, currentfontset2;
 
 	struct vgafont *vc_fonts[8];
+	uint8_t vc_palette[256 * 3];
 
 	struct vgascreen *wantedscreen;
 	void (*switchcb)(void *, int, int);
@@ -69,77 +87,74 @@ static inline void _vga_ts_write(struct vga_handle *, int, u_int8_t);
 static inline u_int8_t _vga_gdc_read(struct vga_handle *, int);
 static inline void _vga_gdc_write(struct vga_handle *, int, u_int8_t);
 
-static inline u_int8_t _vga_attr_read(vh, reg)
-	struct vga_handle *vh;
-	int reg;
+#define	vga_raw_read(vh, reg) \
+	bus_space_read_1(vh->vh_iot, vh->vh_ioh_vga, reg)
+#define	vga_raw_write(vh, reg, value) \
+	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, reg, value)
+
+#define	vga_enable(vh) \
+	vga_raw_write(vh, 0, 0x20);
+
+static inline u_int8_t
+_vga_attr_read(struct vga_handle *vh, int reg)
 {
 	u_int8_t res;
 
 	/* reset state */
 	(void) bus_space_read_1(vh->vh_iot, vh->vh_ioh_6845, 10);
 
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_ATC_INDEX, reg);
-	res = bus_space_read_1(vh->vh_iot, vh->vh_ioh_vga, VGA_ATC_DATAR);
+	vga_raw_write(vh, VGA_ATC_INDEX, reg);
+	res = vga_raw_read(vh, VGA_ATC_DATAR);
 
 	/* reset state XXX unneeded? */
 	(void) bus_space_read_1(vh->vh_iot, vh->vh_ioh_6845, 10);
 
-	/* enable */
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, 0, 0x20);
+	vga_enable(vh);
 
 	return (res);
 }
 
-static inline void _vga_attr_write(vh, reg, val)
-	struct vga_handle *vh;
-	int reg;
-	u_int8_t val;
+static inline void
+_vga_attr_write(struct vga_handle *vh, int reg, u_int8_t val)
 {
 	/* reset state */
 	(void) bus_space_read_1(vh->vh_iot, vh->vh_ioh_6845, 10);
 
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_ATC_INDEX, reg);
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_ATC_DATAW, val);
+	vga_raw_write(vh, VGA_ATC_INDEX, reg);
+	vga_raw_write(vh, VGA_ATC_DATAW, val);
 
 	/* reset state XXX unneeded? */
 	(void) bus_space_read_1(vh->vh_iot, vh->vh_ioh_6845, 10);
 
-	/* enable */
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, 0, 0x20);
+	vga_enable(vh);
 }
 
-static inline u_int8_t _vga_ts_read(vh, reg)
-	struct vga_handle *vh;
-	int reg;
+static inline u_int8_t
+_vga_ts_read(struct vga_handle *vh, int reg)
 {
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_TS_INDEX, reg);
-	return (bus_space_read_1(vh->vh_iot, vh->vh_ioh_vga, VGA_TS_DATA));
+	vga_raw_write(vh, VGA_TS_INDEX, reg);
+	return (vga_raw_read(vh, VGA_TS_DATA));
 }
 
-static inline void _vga_ts_write(vh, reg, val)
-	struct vga_handle *vh;
-	int reg;
-	u_int8_t val;
+static inline void
+_vga_ts_write(struct vga_handle *vh, int reg, u_int8_t val)
 {
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_TS_INDEX, reg);
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_TS_DATA, val);
+	vga_raw_write(vh, VGA_TS_INDEX, reg);
+	vga_raw_write(vh, VGA_TS_DATA, val);
 }
 
-static inline u_int8_t _vga_gdc_read(vh, reg)
-	struct vga_handle *vh;
-	int reg;
+static inline u_int8_t
+_vga_gdc_read(struct vga_handle *vh, int reg)
 {
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_GDC_INDEX, reg);
-	return (bus_space_read_1(vh->vh_iot, vh->vh_ioh_vga, VGA_GDC_DATA));
+	vga_raw_write(vh, VGA_GDC_INDEX, reg);
+	return (vga_raw_read(vh, VGA_GDC_DATA));
 }
 
-static inline void _vga_gdc_write(vh, reg, val)
-	struct vga_handle *vh;
-	int reg;
-	u_int8_t val;
+static inline void
+_vga_gdc_write(struct vga_handle *vh, int reg, u_int8_t val)
 {
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_GDC_INDEX, reg);
-	bus_space_write_1(vh->vh_iot, vh->vh_ioh_vga, VGA_GDC_DATA, val);
+	vga_raw_write(vh, VGA_GDC_INDEX, reg);
+	vga_raw_write(vh, VGA_GDC_DATA, val);
 }
 
 #define vga_attr_read(vh, reg) \
@@ -161,18 +176,21 @@ static inline void _vga_gdc_write(vh, reg, val)
 	pcdisplay_6845_write(&(vh)->vh_ph, reg, val)
 
 int	vga_common_probe(bus_space_tag_t, bus_space_tag_t);
-void	vga_common_attach(struct device *, bus_space_tag_t,
-			       bus_space_tag_t, int);
-void	vga_extended_attach(struct device *, bus_space_tag_t,
-    bus_space_tag_t, int, paddr_t (*)(void *, off_t, int));
+struct vga_config *
+	vga_common_attach(struct device *, bus_space_tag_t, bus_space_tag_t,
+	    int);
+struct vga_config *
+	vga_extended_attach(struct device *, bus_space_tag_t, bus_space_tag_t,
+	    int, paddr_t (*)(void *, off_t, int));
 int	vga_is_console(bus_space_tag_t, int);
 int	vga_cnattach(bus_space_tag_t, bus_space_tag_t, int, int);
 
 struct wsscreen_descr;
-void vga_loadchars(struct vga_handle *, int, int, int, int, char *);
-void vga_setfontset(struct vga_handle *, int, int);
-void vga_setscreentype(struct vga_handle *,
-		       const struct wsscreen_descr *);
+void	vga_loadchars(struct vga_handle *, int, int, int, int, char *);
+void	vga_restore_palette(struct vga_config *);
+void	vga_save_palette(struct vga_config *);
+void	vga_setfontset(struct vga_handle *, int, int);
+void	vga_setscreentype(struct vga_handle *, const struct wsscreen_descr *);
 #if NVGA_PCI > 0
-int vga_pci_ioctl(void *, u_long, caddr_t, int, struct proc *); 
+int	vga_pci_ioctl(void *, u_long, caddr_t, int, struct proc *); 
 #endif

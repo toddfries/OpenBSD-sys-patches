@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_kue.c,v 1.43 2007/01/09 16:30:08 deraadt Exp $ */
+=======
+/*	$OpenBSD: if_kue.c,v 1.63 2011/01/25 20:03:35 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -165,8 +169,8 @@ Static const struct usb_devno kue_devs[] = {
 	{ USB_VENDOR_SILICOM, USB_PRODUCT_SILICOM_GPE },
 	{ USB_VENDOR_SMC, USB_PRODUCT_SMC_2102USB },
 };
-#define kue_lookup(v, p) (usb_lookup(kue_devs, v, p))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER_CLASS(kue, DV_IFNET);
 
 Static int kue_tx_list_init(struct kue_softc *);
@@ -186,6 +190,42 @@ Static void kue_setmulti(struct kue_softc *);
 Static void kue_reset(struct kue_softc *);
 
 Static usbd_status kue_ctl(struct kue_softc *, int, u_int8_t,
+=======
+int kue_match(struct device *, void *, void *); 
+void kue_attach(struct device *, struct device *, void *); 
+int kue_detach(struct device *, int); 
+int kue_activate(struct device *, int); 
+
+struct cfdriver kue_cd = { 
+	NULL, "kue", DV_IFNET 
+}; 
+
+const struct cfattach kue_ca = { 
+	sizeof(struct kue_softc), 
+	kue_match, 
+	kue_attach, 
+	kue_detach, 
+	kue_activate, 
+};
+
+int kue_tx_list_init(struct kue_softc *);
+int kue_rx_list_init(struct kue_softc *);
+int kue_newbuf(struct kue_softc *, struct kue_chain *,struct mbuf *);
+int kue_send(struct kue_softc *, struct mbuf *, int);
+int kue_open_pipes(struct kue_softc *);
+void kue_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void kue_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void kue_start(struct ifnet *);
+int kue_ioctl(struct ifnet *, u_long, caddr_t);
+void kue_init(void *);
+void kue_stop(struct kue_softc *);
+void kue_watchdog(struct ifnet *);
+
+void kue_setmulti(struct kue_softc *);
+void kue_reset(struct kue_softc *);
+
+usbd_status kue_ctl(struct kue_softc *, int, u_int8_t,
+>>>>>>> origin/master
 			   u_int16_t, void *, u_int32_t);
 Static usbd_status kue_setword(struct kue_softc *, u_int8_t, u_int16_t);
 Static int kue_load_fw(struct kue_softc *);
@@ -409,8 +449,8 @@ USB_MATCH(kue)
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	return (kue_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	return (usb_lookup(kue_devs, uaa->vendor, uaa->product) != NULL ?
+	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
 void
@@ -551,11 +591,14 @@ USB_ATTACH(kue)
 		mountroothook_establish(kue_attachhook, sc);
 	else
 		kue_attachhook(sc);
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->kue_udev,
 			   USBDEV(sc->kue_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(kue)
@@ -564,6 +607,10 @@ USB_DETACH(kue)
 	struct ifnet		*ifp = GET_IFP(sc);
 	int			s;
 
+	/* Detached before attached finished, so just bail out. */
+	if (!sc->kue_attached)
+		return (0);
+
 	s = splusb();		/* XXX why? */
 
 	if (sc->kue_mcfilters != NULL) {
@@ -571,18 +618,13 @@ USB_DETACH(kue)
 		sc->kue_mcfilters = NULL;
 	}
 
-	if (!sc->kue_attached) {
-		/* Detached before attached finished, so just bail out. */
-		splx(s);
-		return (0);
-	}
-
 	if (ifp->if_flags & IFF_RUNNING)
 		kue_stop(sc);
 
-	ether_ifdetach(ifp);
-
-	if_detach(ifp);
+	if (ifp->if_softc != NULL) {
+		ether_ifdetach(ifp);
+		if_detach(ifp);
+	}
 
 #ifdef DIAGNOSTIC
 	if (sc->kue_ep[KUE_ENDPT_TX] != NULL ||
@@ -599,7 +641,11 @@ USB_DETACH(kue)
 }
 
 int
+<<<<<<< HEAD
 kue_activate(device_ptr_t self, enum devact act)
+=======
+kue_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct kue_softc *sc = (struct kue_softc *)self;
 
@@ -1068,7 +1114,6 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct kue_softc	*sc = ifp->if_softc;
 	struct ifaddr 		*ifa = (struct ifaddr *)data;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	int			s, error = 0;
 
 	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->kue_dev),__func__));
@@ -1103,13 +1148,6 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1133,29 +1171,18 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		sc->kue_if_flags = ifp->if_flags;
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				kue_setmulti(sc);
-			error = 0;
-		}
-		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			kue_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 

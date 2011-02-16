@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: aic7xxx_openbsd.c,v 1.32 2006/03/04 14:20:37 krw Exp $	*/
+=======
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.48 2010/06/28 18:31:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -51,12 +55,12 @@
 #endif
 
 
-int	ahc_action(struct scsi_xfer *);
-int	ahc_execute_scb(void *, bus_dma_segment_t *, int);
+void	ahc_action(struct scsi_xfer *);
+void	ahc_execute_scb(void *, bus_dma_segment_t *, int);
 int	ahc_poll(struct ahc_softc *, int);
-int	ahc_setup_data(struct ahc_softc *, struct scsi_xfer *, struct scb *);
+void	ahc_setup_data(struct ahc_softc *, struct scsi_xfer *, struct scb *);
 
-void	ahc_minphys(struct buf *);
+void	ahc_minphys(struct buf *, struct scsi_link *);
 void	ahc_adapter_req_set_xfer_mode(struct ahc_softc *, struct scb *);
 
 
@@ -70,15 +74,6 @@ static struct scsi_adapter ahc_switch =
 	ahc_minphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for our link struct */
-static struct scsi_device ahc_dev =
-{
-	NULL, /* Use default error handler */
-	NULL, /* have a queue, served by this */
-	NULL, /* have no async handler */
-	NULL, /* Use default 'done' routine */
 };
 
 /*
@@ -102,7 +97,6 @@ ahc_attach(struct ahc_softc *ahc)
 	ahc->sc_channel.adapter_softc = ahc;
 	ahc->sc_channel.adapter = &ahc_switch;
 	ahc->sc_channel.openings = 16;
-	ahc->sc_channel.device = &ahc_dev;
 
 	if (ahc->features & AHC_TWIN) {
 		/* Configure the second scsi bus */
@@ -210,14 +204,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 	case CAM_REQ_CMP:
 		switch (xs->status) {
 		case SCSI_TASKSET_FULL:
-			/* SCSI Layer won't requeue, so we force infinite
-			 * retries until queue space is available. XS_BUSY
-			 * is dangerous because if the NOSLEEP flag is set
-			 * it can cause the I/O to return EIO. XS_BUSY code
-			 * falls through to XS_TIMEOUT anyway.
-			 */
-			xs->error = XS_TIMEOUT;
-			xs->retries++;
+			xs->error = XS_NO_CCB;
 			break;
 		case SCSI_BUSY:
 			xs->error = XS_BUSY;
@@ -246,8 +233,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 		xs->error = XS_RESET;
 		break;
 	case CAM_REQUEUE_REQ:
-		xs->error = XS_TIMEOUT;
-		xs->retries++;
+		xs->error = XS_NO_CCB;
 		break;
 	case CAM_SEL_TIMEOUT:
 		xs->error = XS_SELTIMEOUT;
@@ -279,15 +265,17 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 
         ahc_lock(ahc, &s);       
 	ahc_free_scb(ahc, scb);
+<<<<<<< HEAD
         ahc_unlock(ahc, &s);       
 
 	xs->flags |= ITSDONE;
+=======
+>>>>>>> origin/master
 	scsi_done(xs);
 }
 
 void
-ahc_minphys(bp)
-	struct buf *bp;
+ahc_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/*
 	 * Even though the card can transfer up to 16megs per command
@@ -302,7 +290,7 @@ ahc_minphys(bp)
 	minphys(bp);
 }
 
-int32_t
+void
 ahc_action(struct scsi_xfer *xs)
 {
 	struct ahc_softc *ahc;
@@ -311,13 +299,9 @@ ahc_action(struct scsi_xfer *xs)
 	u_int target_id;
 	u_int our_id;
 	int s;
-	int dontqueue = 0;
 
 	SC_DEBUG(xs->sc_link, SDEV_DB3, ("ahc_action\n"));
 	ahc = (struct ahc_softc *)xs->sc_link->adapter_softc;
-
-	/* determine safety of software queueing */
-	dontqueue = xs->flags & SCSI_POLL;
 
 	target_id = xs->sc_link->target;
 	our_id = SCSI_SCSI_ID(ahc, xs->sc_link);
@@ -325,12 +309,23 @@ ahc_action(struct scsi_xfer *xs)
 	/*
 	 * get an scb to use.
 	 */
+<<<<<<< HEAD
 	ahc_lock(ahc, &s);
 	if ((scb = ahc_get_scb(ahc)) == NULL) {
 		ahc_unlock(ahc, &s);
 		return (TRY_AGAIN_LATER);
 	}
 	ahc_unlock(ahc, &s);
+=======
+	s = splbio();
+	scb = ahc_get_scb(ahc);
+	splx(s);
+	if (scb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
+	}
+>>>>>>> origin/master
 
 	hscb = scb->hscb;
 
@@ -348,13 +343,14 @@ ahc_action(struct scsi_xfer *xs)
 		hscb->cdb_len = 0;
 		scb->flags |= SCB_DEVICE_RESET;
 		hscb->control |= MK_MESSAGE;
-		return (ahc_execute_scb(scb, NULL, 0));
+		ahc_execute_scb(scb, NULL, 0);
+		return;
 	}
 
-	return (ahc_setup_data(ahc, xs, scb));
+	ahc_setup_data(ahc, xs, scb);
 }
 
-int
+void
 ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 {
 	struct	scb *scb;
@@ -428,6 +424,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 
 	ahc_lock(ahc, &s);
 
+<<<<<<< HEAD
 	/*
 	 * Last time we need to check if this SCB needs to
 	 * be aborted.
@@ -441,6 +438,8 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 		return (COMPLETE);
 	}
 
+=======
+>>>>>>> origin/master
 	tinfo = ahc_fetch_transinfo(ahc, SCSIID_CHANNEL(ahc, scb->hscb->scsiid),
 				    SCSIID_OUR_ID(scb->hscb->scsiid),
 				    SCSIID_TARGET(ahc, scb->hscb->scsiid),
@@ -471,7 +470,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 	LIST_INSERT_HEAD(&ahc->pending_scbs, scb, pending_links);
 
 	if (!(xs->flags & SCSI_POLL))
-		timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	/*
 	 * We only allow one untagged transaction
@@ -496,8 +495,13 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 			if (xs->flags & SCSI_POLL)
 				goto poll;
 			else {		
+<<<<<<< HEAD
 				ahc_unlock(ahc, &s);
 				return (SUCCESSFULLY_QUEUED);
+=======
+				splx(s);
+				return;
+>>>>>>> origin/master
 			}
 		}
 	}
@@ -526,8 +530,13 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 
 			ahc->inited_target[xs->sc_link->target] = 1;
 		}
+<<<<<<< HEAD
 		ahc_unlock(ahc, &s);
 		return (SUCCESSFULLY_QUEUED);
+=======
+		splx(s);
+		return;
+>>>>>>> origin/master
 	}
 
 	/*
@@ -545,8 +554,12 @@ poll:
 		}
 	} while (!(xs->flags & ITSDONE));
 
+<<<<<<< HEAD
 	ahc_unlock(ahc, &s);
 	return (COMPLETE);
+=======
+	splx(s);
+>>>>>>> origin/master
 }
 
 int
@@ -567,7 +580,7 @@ ahc_poll(struct ahc_softc *ahc, int wait)
 	return (0);
 }
 
-int
+void
 ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 	       struct scb *scb)
 {
@@ -582,11 +595,18 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 	if (hscb->cdb_len > sizeof(hscb->cdb32)) {
 		ahc_lock(ahc, &s);
 		ahc_free_scb(ahc, scb);
+<<<<<<< HEAD
 		ahc_unlock(ahc, &s);
+=======
+		splx(s);
+>>>>>>> origin/master
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
+<<<<<<< HEAD
 		return (COMPLETE);
+=======
+		return;
+>>>>>>> origin/master
 	}
 
 	if (hscb->cdb_len > 12) {
@@ -613,6 +633,7 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 #endif
 			ahc_lock(ahc, &s);
 			ahc_free_scb(ahc, scb);
+<<<<<<< HEAD
 			ahc_unlock(ahc, &s);
 			return (TRY_AGAIN_LATER);	/* XXX fvdl */
 }
@@ -620,8 +641,17 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 					scb->dmamap->dm_segs,
 					scb->dmamap->dm_nsegs);
 		return error;
+=======
+			splx(s);
+			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
+			return;
+		}
+		ahc_execute_scb(scb, scb->dmamap->dm_segs,
+		    scb->dmamap->dm_nsegs);
+>>>>>>> origin/master
 	} else {
-		return ahc_execute_scb(scb, NULL, 0);
+		ahc_execute_scb(scb, NULL, 0);
 	}
 }
 

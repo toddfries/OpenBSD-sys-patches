@@ -1,4 +1,4 @@
-/*	$OpenBSD: process.S,v 1.14 2006/11/18 22:49:43 miod Exp $	*/
+/*	$OpenBSD: process.S,v 1.24 2009/05/02 14:32:29 miod Exp $	*/
 /*
  * Copyright (c) 1996 Nivas Madhur
  * All rights reserved.
@@ -104,9 +104,10 @@ ENTRY(switch_exit)
  * Find a runnable process and switch to it. On entry, the scheduler lock is
  * held; it has to be released before returning to the process.
  *
- * Note that this code ignores its proc parameter and assumes it has the
- * same value as curproc. This may change in mi_switch() in the future,
- * be careful.
+ * Switch context from oldproc to newproc. oldproc may be NULL if there is
+ * no need to save the current context.
+ *
+ * Note that this code assumes that oldproc == curproc if not NULL.
  */
 ENTRY(cpu_switch)
 	/*
@@ -128,41 +129,9 @@ ENTRY(cpu_switch)
 	bsr	_ASM_LABEL(__savectx)
 	/* note that we don't need to recover r1 at this point */
 
+	/* inline pmap_deactivate(oldproc) */
 	ldcr	r11, CPU
-	ld	r2,  r11, CI_CURPROC
-
-	/*
-	 * Note that we can still use curpcb as our stack after
-	 * pmap_deactivate() has been called, as it does not affect the u
-	 * area mappings.
-	 */
-	bsr.n	_C_LABEL(pmap_deactivate)
-	 st	r0,  r11, CI_CURPROC		/* curproc = NULL */
-
-#ifdef MULTIPROCESSOR
-	/*
-	 * We need to switch to the processor's idle stack now (in case the
-	 * process we are using the stack of gets scheduled on another
-	 * processor).
-	 */
-	ldcr	r10, CPU
-	ld	r30, r10, CI_IDLE_PCB
-	addu	r31, r30, USIZE				/* now on idle stack */
-	st	r30, r10, CI_CURPCB			/* curpcb = idle_pcb */
-#endif
-
-ASLOCAL(cpu_switch_search)
-	/*
-	 * This is the start of the idle loop. Find the highest-priority
-	 * queue that isn't empty, then take the first proc from that queue.
-	 */
-	or.u	r7, r0, hi16(_C_LABEL(whichqs))
-	ld	r7, r7, lo16(_C_LABEL(whichqs))
-	bcnd	ne0, r7, _ASM_LABEL(cpu_switch_found)
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	bsr	_C_LABEL(sched_unlock_idle)
-#endif
+	st	r0,  r11, CI_CURPMAP
 
 #ifdef MULTIPROCESSOR
 ASGLOBAL(cpu_switch_idle)
@@ -193,81 +162,13 @@ ASLOCAL(cpu_switch_idle)
 	bsr	_C_LABEL(sched_lock_idle)
 #endif
 
-ASLOCAL(cpu_switch_found)
-	/*
-	 * Disable interrupts.
-	 */
+	bsr.n	_C_LABEL(pmap_activate)		/* pmap_activate(newproc) */
+	 or	r2, r0, r3
+
 	ldcr	r2, PSR
 	set	r2, r2, 1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r2, PSR
 	FLUSH_PIPELINE
-
-	/*
-	 * An interrupt could have occured between the last whichqs check
-	 * and the call to setipl(). Check again that whichqs is nonzero.
-	 */
-	or.u	r7, r0, hi16(_C_LABEL(whichqs))	/* reload whichqs */
-	ld	r7, r7, lo16(_C_LABEL(whichqs))
-	bcnd	eq0, r7, _ASM_LABEL(cpu_switch_search)
-
-	/* XXX use ff1, like powerpc... needs *runqueue() adjustments */
-	xor	r6, r6, r6		/* set r6 to 0 */
-1:	bb1	0,  r7, 2f		/* if rightmost bit set, done */
-	extu	r7, r7, 0<1>		/* else, right shift whichqs, */
-	br.n	1b			/* increment r6, and repeat */
-	 addu	r6, r6, 1
-2:
-	or.u	r7, r0, hi16(_C_LABEL(qs))
-	or	r7, r7, lo16(_C_LABEL(qs))
-
-	/*
-	 * Need to make
-	 *	p->p_forw->p_back = p->p_back and
-	 *	p->p_back->p_forw = p->p_forw where
-	 *	p is q->p_forw.
-	 * Remember that q->p_forw == p and p->p_back == q.
-	 */
-
-	lda.d	r8,  r7[r6]	/* r8 = &qs[ff1(whichqs)] */
-	ld	r9,  r8, P_FORW	/* r8 is q, r9 is p */
-
-	ld	r12, r9, P_FORW	/* r12 = p->p_forw */
-	st	r8, r12, P_BACK	/* p->p_forw->p_back = q (p->p_back) */
-	st	r12, r8, P_FORW	/* q->p_forw = p->p_forw */
-	lda.d	r8,  r7[r6]	/* reload r8 with qs[ff1(whichqs)] */
-	ld	r12, r8, P_FORW	/* q->p_forw */
-	cmp	r12, r12, r8	/* q == q->p_forw; anyone left on queue? */
-	bb1	ne,  r12, 3f	/* yes, skip clearing bit in whichqs  */
-
-	or	r12, r0, 1
-	mak	r12, r12, r6
-	or.u	r7,  r0, hi16(_C_LABEL(whichqs))
-	ld	r8,  r7, lo16(_C_LABEL(whichqs))
-	and.c	r8,  r8, r12	/* whichqs &= ~the bit */
-	st	r8,  r7, lo16(_C_LABEL(whichqs))
-3:
-#ifdef DIAGNOSTIC
-	ld	r2, r9, P_WCHAN
-	bcnd	ne0, r2, _ASM_LABEL(Lswchanpanic)
-	ld.b	r2, r9, P_STAT
-	cmp	r2, r2, SRUN
-	bb1	ne, r2, _ASM_LABEL(Lswsrunpanic)
-#endif
-
-	ldcr	r11, CPU
-	st	r0,  r11, CI_WANT_RESCHED		/* clear want_resched */
-
-	st	r9,  r11, CI_CURPROC			/* curproc = p */
-	or	r2,  r0,  SONPROC
-	st.b	r2,  r9,  P_STAT
-
-	ld	r3,  r9,  P_ADDR
-	st	r0,  r9,  P_BACK			/* p->p_back = 0 */
-	st	r3,  r11, CI_CURPCB			/* curpcb = p->p_addr */
-
-	/* pmap_activate() the process' pmap */
-	bsr.n	_C_LABEL(pmap_activate)
-	 or	r2, r0, r9
 
 	ldcr	r10,  CPU
 	ld	r10,  r10, CI_CURPCB

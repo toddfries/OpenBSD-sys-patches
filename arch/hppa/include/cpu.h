@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.47 2007/01/17 19:30:12 mickey Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.79 2011/01/02 20:41:22 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -63,6 +63,78 @@
 #define	HPPA_FTRS_W32B		0x00000008
 
 #ifndef _LOCORE
+#ifdef _KERNEL
+#include <sys/device.h>
+#include <sys/queue.h>
+#include <sys/sched.h>
+
+#include <machine/mutex.h>
+
+/*
+ * Note that the alignment of ci_trap_save is important since we want to keep
+ * it within a single cache line. As a result, it must be kept as the first
+ * entry within the cpu_info struct.
+ */
+struct cpu_info {
+	register_t	ci_trap_save[16];
+
+	struct device	*ci_dev;
+	int		ci_cpuid;
+	hppa_hpa_t	ci_hpa;
+	volatile int	ci_flags;
+
+	struct proc	*ci_curproc;
+	paddr_t		ci_fpu_state;		/* Process FPU state. */
+	paddr_t		ci_stack;
+
+	register_t	ci_psw;			/* Processor Status Word. */
+	volatile int	ci_cpl;
+	volatile u_long	ci_mask;		/* Hardware interrupt mask. */
+	volatile u_long	ci_ipending;
+	volatile int	ci_in_intr;
+	int		ci_want_resched;
+	u_long		ci_itmr;
+
+	volatile u_long	ci_ipi;			/* IPIs pending. */
+	struct mutex	ci_ipi_mtx;
+
+	struct schedstate_percpu ci_schedstate;
+	u_int32_t	ci_randseed;
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
+} __attribute__((__aligned__(64)));
+
+#define		CPUF_RUNNING	0x0001		/* CPU is running. */
+
+#ifdef MULTIPROCESSOR
+#define		HPPA_MAXCPUS	4
+#else
+#define		HPPA_MAXCPUS	1
+#endif
+
+extern struct cpu_info cpu_info[HPPA_MAXCPUS];
+
+#define MAXCPUS		HPPA_MAXCPUS
+
+static __inline struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	asm volatile ("mfctl    %%cr29, %0" : "=r"(ci));
+
+	return ci;
+}
+
+#define cpu_number()		(curcpu()->ci_cpuid)
+
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
+#define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
+#define	CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = &cpu_info[0]; cii < ncpus; cii++, ci++)
+
 /* types */
 enum hppa_cpu_type {
 	hpcxs, hpcxt, hpcxta, hpcxl, hpcxl2, hpcxu, hpcxu2, hpcxw
@@ -101,9 +173,9 @@ extern int cpu_hvers;
  * Exported definitions unique to hp700/PA-RISC cpu support.
  */
 
-#define	HPPA_PGALIAS	0x00100000
-#define	HPPA_PGAMASK	0xfff00000
-#define	HPPA_PGAOFF	0x000fffff
+#define	HPPA_PGALIAS	0x00400000
+#define	HPPA_PGAMASK	0xffc00000
+#define	HPPA_PGAOFF	0x003fffff
 
 #define	HPPA_IOBEGIN    0xf0000000
 #define	HPPA_IOLEN      0x10000000
@@ -116,6 +188,7 @@ extern int cpu_hvers;
 #define	HPPA_FLEX_DATA	0xfff80001
 #define	HPPA_DMA_ENABLE	0x00000001
 #define	HPPA_FLEX_MASK	0xfffc0000
+#define	HPPA_FLEX_SIZE	(1 + ~HPPA_FLEX_MASK)
 #define	HPPA_FLEX(a)	(((a) & HPPA_FLEX_MASK) >> 18)
 #define	HPPA_SPA_ENABLE	0x00000020
 #define	HPPA_NMODSPBUS	64
@@ -126,9 +199,7 @@ extern int cpu_hvers;
 #define	CLKF_USERMODE(framep)	((framep)->tf_flags & T_USER)
 #define	CLKF_SYSCALL(framep)	((framep)->tf_flags & TFF_SYS)
 
-#define	signotify(p)		(setsoftast())
-#define	need_resched(ci)	(want_resched = 1, setsoftast())
-#define	need_proftick(p)	setsoftast()
+#define	need_proftick(p)	setsoftast(p)
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
 
 #ifndef _LOCORE
@@ -138,12 +209,11 @@ extern int cpu_hvers;
 #define MD_CACHE_CTL(a,s,t)	\
 	(((t)? pdcache : fdcache) (HPPA_SID_KERNEL,(vaddr_t)(a),(s)))
 
-extern int want_resched;
-
 #define DELAY(x) delay(x)
 
 extern int (*cpu_desidhash)(void);
 
+void	signotify(struct proc *);
 void	delay(u_int us);
 void	hppa_init(paddr_t start);
 void	trap(int type, struct trapframe *frame);
@@ -155,6 +225,19 @@ int	copy_on_fault(void);
 void	switch_trampoline(void);
 int	cpu_dumpsize(void);
 int	cpu_dump(void);
+
+#ifdef MULTIPROCESSOR
+void	cpu_boot_secondary_processors(void);
+void	cpu_hw_init(void);
+void	cpu_hatch(void);
+void	cpu_unidle(struct cpu_info *);
+#else
+#define	cpu_unidle(ci)
+#endif
+
+extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) 	(ci)->ci_want_resched = 0
+
 #endif
 
 /*
@@ -176,6 +259,22 @@ int	cpu_dump(void);
 	{ "console_device", CTLTYPE_STRUCT }, \
 	{ "fpu", CTLTYPE_INT }, \
 }
+
+#ifdef _KERNEL
+#include <sys/queue.h>
+
+#ifdef MULTIPROCESSOR
+#include <sys/mplock.h>
+#endif
+
+struct blink_led {
+	void (*bl_func)(void *, int);
+	void *bl_arg;
+	SLIST_ENTRY(blink_led) bl_next;
+};
+
+extern void blink_led_register(struct blink_led *);
+#endif
 #endif
 
 #endif /* _MACHINE_CPU_H_ */

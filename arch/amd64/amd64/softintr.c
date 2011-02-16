@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: softintr.c,v 1.5 2009/04/19 19:13:57 oga Exp $	*/
 /*	$NetBSD: softintr.c,v 1.1 2003/02/26 21:26:12 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +63,7 @@ softintr_init(void)
 	for (i = 0; i < X86_NSOFTINTR; i++) {
 		si = &x86_soft_intrs[i];
 		TAILQ_INIT(&si->softintr_q);
-		simple_lock_init(&si->softintr_slock);
+		mtx_init(&si->softintr_lock, IPL_HIGH);
 		si->softintr_ssir = x86_soft_intr_to_ssir[i];
 	}
 }
@@ -85,20 +78,21 @@ softintr_dispatch(int which)
 {
 	struct x86_soft_intr *si = &x86_soft_intrs[which];
 	struct x86_soft_intrhand *sih;
-	int s;
 
 	for (;;) {
-		x86_softintr_lock(si, s);
+		mtx_enter(&si->softintr_lock);
 		sih = TAILQ_FIRST(&si->softintr_q);
 		if (sih == NULL) {
-			x86_softintr_unlock(si, s);
+			mtx_leave(&si->softintr_lock);
 			break;
 		}
 		TAILQ_REMOVE(&si->softintr_q, sih, sih_q);
 		sih->sih_pending = 0;
-		x86_softintr_unlock(si, s);
 
 		uvmexp.softs++;
+
+		mtx_leave(&si->softintr_lock);
+
 		(*sih->sih_fn)(sih->sih_arg);
 	}
 }
@@ -155,14 +149,13 @@ softintr_disestablish(void *arg)
 {
 	struct x86_soft_intrhand *sih = arg;
 	struct x86_soft_intr *si = sih->sih_intrhead;
-	int s;
 
-	x86_softintr_lock(si, s);
+	mtx_enter(&si->softintr_lock);
 	if (sih->sih_pending) {
 		TAILQ_REMOVE(&si->softintr_q, sih, sih_q);
 		sih->sih_pending = 0;
 	}
-	x86_softintr_unlock(si, s);
+	mtx_leave(&si->softintr_lock);
 
 	free(sih, M_DEVBUF);
 }

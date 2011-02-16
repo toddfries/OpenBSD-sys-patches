@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pyro.c,v 1.6 2007/04/01 21:41:09 kettenis Exp $	*/
+=======
+/*	$OpenBSD: pyro.c,v 1.20 2010/12/05 15:15:14 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -38,6 +42,10 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#endif
+
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 
@@ -56,6 +64,21 @@ int pyro_debug = ~0;
 #define DPRINTF(l, s)
 #endif
 
+#define FIRE_RESET_GEN			0x7010
+
+#define FIRE_RESET_GEN_XIR		0x0000000000000002L
+
+#define FIRE_INTRMAP_INT_CNTRL_NUM_MASK	0x000003c0
+#define FIRE_INTRMAP_INT_CNTRL_NUM0	0x00000040
+#define FIRE_INTRMAP_INT_CNTRL_NUM1	0x00000080
+#define FIRE_INTRMAP_INT_CNTRL_NUM2	0x00000100
+#define FIRE_INTRMAP_INT_CNTRL_NUM3	0x00000200
+#define FIRE_INTRMAP_T_JPID_SHIFT	26
+#define FIRE_INTRMAP_T_JPID_MASK	0x7c000000
+
+#define OBERON_INTRMAP_T_DESTID_SHIFT	21
+#define OBERON_INTRMAP_T_DESTID_MASK	0x7fe00000
+
 extern struct sparc_pci_chipset _sparc_pci_chipset;
 
 int pyro_match(struct device *, void *, void *);
@@ -73,6 +96,13 @@ bus_space_tag_t _pyro_alloc_bus_tag(struct pyro_pbm *, const char *,
     int, int, int);
 bus_dma_tag_t pyro_alloc_dma_tag(struct pyro_pbm *);
 
+<<<<<<< HEAD
+=======
+int pyro_conf_size(pci_chipset_tag_t, pcitag_t);
+pcireg_t pyro_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void pyro_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+
+>>>>>>> origin/master
 int pyro_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 int _pyro_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
     bus_size_t, int, bus_space_handle_t *);
@@ -83,6 +113,10 @@ void *_pyro_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
 
 int pyro_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
+
+#ifdef DDB
+void pyro_xir(void *, int);
+#endif
 
 int
 pyro_match(struct device *parent, void *match, void *aux)
@@ -171,17 +205,17 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pbm->pp_dmat = pyro_alloc_dma_tag(pbm);
 
 	if (bus_space_map(pbm->pp_cfgt, 0, 0x10000000, 0, &pbm->pp_cfgh))
-		panic("pyro: could not map config space");
+		panic("pyro: can't map config space");
 
 	pbm->pp_pc = pyro_alloc_chipset(pbm, sc->sc_node, &_sparc_pci_chipset);
 
 	pbm->pp_pc->bustag = pbm->pp_cfgt;
 	pbm->pp_pc->bushandle = pbm->pp_cfgh;
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = busranges[0];
-	pba.pba_bridgetag = NULL;
 	pba.pba_pc = pbm->pp_pc;
 #if 0
 	pba.pba_flags = pbm->pp_flags;
@@ -189,9 +223,19 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pba.pba_dmat = pbm->pp_dmat;
 	pba.pba_memt = pbm->pp_memt;
 	pba.pba_iot = pbm->pp_iot;
+<<<<<<< HEAD
+=======
+	pba.pba_pc->conf_size = pyro_conf_size;
+	pba.pba_pc->conf_read = pyro_conf_read;
+	pba.pba_pc->conf_write = pyro_conf_write;
+>>>>>>> origin/master
 	pba.pba_pc->intr_map = pyro_intr_map;
 
 	free(busranges, M_DEVBUF);
+
+#ifdef DDB
+	db_register_xir(pyro_xir, sc);
+#endif
 
 	config_found(&sc->sc_dv, &pba, pyro_print);
 }
@@ -219,6 +263,10 @@ pyro_init_iommu(struct pyro_softc *sc, struct pyro_pbm *pbm)
 		panic("couldn't malloc iommu name");
 	snprintf(name, 32, "%s dvma", sc->sc_dv.dv_xname);
 
+	/* On Oberon, we need to flush the cache. */
+	if (sc->sc_oberon)
+		is->is_flags |= IOMMU_FLUSH_CACHE;
+
 	iommu_init(name, is, tsbsize, iobase);
 }
 
@@ -230,6 +278,29 @@ pyro_print(void *aux, const char *p)
 	return (QUIET);
 }
 
+<<<<<<< HEAD
+=======
+int
+pyro_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return PCIE_CONFIG_SPACE_SIZE;
+}
+
+pcireg_t
+pyro_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
+{
+	return (bus_space_read_4(pc->bustag, pc->bushandle,
+	    (PCITAG_OFFSET(tag) << 4) + reg));
+}
+
+void
+pyro_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
+{
+        bus_space_write_4(pc->bustag, pc->bushandle,
+	    (PCITAG_OFFSET(tag) << 4) + reg, data);
+}
+
+>>>>>>> origin/master
 /*
  * Bus-specific interrupt mapping
  */
@@ -340,8 +411,6 @@ pyro_alloc_dma_tag(struct pyro_pbm *pbm)
 	dt->_dmamap_sync	= iommu_dvmamap_sync;
 	dt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	dt->_dmamem_free	= iommu_dvmamem_free;
-	dt->_dmamem_map		= iommu_dvmamem_map;
-	dt->_dmamem_unmap	= iommu_dvmamem_unmap;
 	return (dt);
 }
 
@@ -485,7 +554,16 @@ _pyro_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 		u_int64_t intrmap;
 
 		intrmap = *intrmapptr;
-		intrmap |= (1LL << 6);
+		intrmap &= ~FIRE_INTRMAP_INT_CNTRL_NUM_MASK;
+		intrmap |= FIRE_INTRMAP_INT_CNTRL_NUM0;
+		if (sc->sc_oberon) {
+			intrmap &= ~OBERON_INTRMAP_T_DESTID_MASK;
+			intrmap |= CPU_JUPITERID <<
+			    OBERON_INTRMAP_T_DESTID_SHIFT;
+		} else {
+			intrmap &= ~FIRE_INTRMAP_T_JPID_MASK;
+			intrmap |= CPU_UPAID << FIRE_INTRMAP_T_JPID_SHIFT;
+		}
 		intrmap |= INTMAP_V;
 		*intrmapptr = intrmap;
 		intrmap = *intrmapptr;
@@ -494,6 +572,17 @@ _pyro_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 	return (ih);
 }
+
+#ifdef DDB
+void
+pyro_xir(void *arg, int cpu)
+{
+	struct pyro_softc *sc = arg;
+
+	bus_space_write_8(sc->sc_bust, sc->sc_xbch, FIRE_RESET_GEN,
+	    FIRE_RESET_GEN_XIR);
+}
+#endif
 
 const struct cfattach pyro_ca = {
 	sizeof(struct pyro_softc), pyro_match, pyro_attach

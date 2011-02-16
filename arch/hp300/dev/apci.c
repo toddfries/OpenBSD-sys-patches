@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.28 2006/01/01 11:59:37 miod Exp $	*/
+/*	$OpenBSD: apci.c,v 1.41 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -284,7 +277,7 @@ apciopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (sc->sc_tty == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	} else
 		tp = sc->sc_tty;
 	splx(s);
@@ -324,7 +317,7 @@ apciopen(dev, flag, mode, p)
 		/* Flush any pending I/O. */
 		while ((apci->ap_iir & IIR_IMASK) == IIR_RXRDY)
 			code = apci->ap_data;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	else
 		s = spltty();
@@ -376,12 +369,12 @@ apciopen(dev, flag, mode, p)
 	splx(s);
 
 	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+		error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	if (error == 0) {
 		/* clear errors, start timeout */
 		sc->sc_ferr = sc->sc_perr = sc->sc_oflow = sc->sc_toterr = 0;
-		timeout_add(&sc->sc_timeout, hz);
+		timeout_add_sec(&sc->sc_timeout, 1);
 	}
 
 	return (error);
@@ -404,7 +397,7 @@ apciclose(dev, flag, mode, p)
 	apci = sc->sc_apci;
 	tp = sc->sc_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 
@@ -494,7 +487,7 @@ apciintr(arg)
 			}
 			if (iflowdone == 0 && tp != NULL &&
 			    (tp->t_cflag & CRTS_IFLOW) &&
-			    tp->t_rawq.c_cc > (TTYHOG / 2)) {
+			    tp->t_rawq.c_cc > (TTYHOG(tp) / 2)) {
 				apci->ap_mcr &= ~MCR_RTS;
 				iflowdone = 1;
 			}
@@ -770,15 +763,9 @@ apcistart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 	if (apci->ap_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;
 		if (sc->sc_flags & APCI_HASFIFO) {
@@ -868,7 +855,7 @@ apcitimeout(arg)
 		    sc->sc_dev.dv_xname, ferr, perr, oflow, sc->sc_toterr);
 	}
 
-	timeout_add(&sc->sc_timeout, hz);
+	timeout_add_sec(&sc->sc_timeout, 1);
 }
 
 /*

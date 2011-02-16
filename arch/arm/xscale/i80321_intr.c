@@ -1,4 +1,4 @@
-/* $OpenBSD: i80321_intr.c,v 1.8 2006/07/02 02:51:13 drahn Exp $ */
+/* $OpenBSD: i80321_intr.c,v 1.14 2010/09/20 06:33:47 matthew Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
@@ -160,8 +160,8 @@ i80321intc_calc_mask(void)
 			i80321intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTCLOCK);
 		if (i < IPL_SOFTNET)
 			i80321intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTNET);
-		if (i < IPL_SOFTSERIAL)
-			i80321intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTSERIAL);
+		if (i < IPL_SOFTTTY)
+			i80321intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTTTY);
 #if 0
 		printf("mask[%d]: %x %x\n", i, i80321intc_smask[i],
 		    i80321intc_imask[i]);
@@ -199,7 +199,7 @@ i80321intc_do_pending(void)
 	}
 
 	do {
-		DO_SOFTINT(SI_SOFTSERIAL, IPL_SOFTSERIAL);
+		DO_SOFTINT(SI_SOFTTTY, IPL_SOFTTTY);
 		DO_SOFTINT(SI_SOFTNET, IPL_SOFTNET);
 		DO_SOFTINT(SI_SOFTCLOCK, IPL_SOFTCLOCK);
 		DO_SOFTINT(SI_SOFT, IPL_SOFT);
@@ -301,7 +301,7 @@ i80321intc_init(void)
 
 void *
 i80321_intr_establish(int irq, int ipl, int (*func)(void *), void *arg,
-    char *name)
+    const char *name)
 {
 	struct intrq *iq;
 	struct intrhand *ih;
@@ -323,8 +323,7 @@ i80321_intr_establish(int irq, int ipl, int (*func)(void *), void *arg,
 	iq = &i80321_handler[irq];
 
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 	/* All IOP321 interrupts are level-triggered. */
 	iq->iq_ist = IST_LEVEL;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cy.c,v 1.24 2003/10/03 16:44:51 miod Exp $	*/
+=======
+/*	$OpenBSD: cy.c,v 1.33 2010/11/18 21:15:15 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.
@@ -50,10 +54,6 @@
  *
  */
 
-/* NCY is the number of Cyclom cards in the machine */
-#include "cy.h"
-#if NCY > 0
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/ioctl.h>
@@ -62,7 +62,6 @@
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
-#include <sys/user.h>
 #include <sys/selinfo.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -300,7 +299,7 @@ cyopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (cy->cy_tty == NULL) {
-		cy->cy_tty = ttymalloc();
+		cy->cy_tty = ttymalloc(0);
 	}
 	splx(s);
 
@@ -377,7 +376,7 @@ cyopen(dev, flag, mode, p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);
 	} else {
 		s = spltty();
@@ -400,7 +399,7 @@ cyopen(dev, flag, mode, p)
 
 	splx(s);
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 /*
@@ -424,7 +423,7 @@ cyclose(dev, flag, mode, p)
 	    port, flag, mode);
 #endif
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) &&
@@ -622,17 +621,9 @@ cystart(tp)
 #endif
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-
-			if (tp->t_outq.c_cc == 0)
-				goto out;
-		}
+		ttwakeupwr(tp);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
 
 		SET(tp->t_state, TS_BUSY);
 		cy_enable_transmitter(cy);
@@ -1427,5 +1418,3 @@ cy_speed(speed_t speed, int *cor, int *bpr, int cy_clock)
 
 	return (-1);
 }
-
-#endif /* NCY > 0 */

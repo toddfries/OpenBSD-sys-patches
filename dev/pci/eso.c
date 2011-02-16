@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 /*	$OpenBSD: eso.c,v 1.21 2005/04/14 12:42:16 mickey Exp $	*/
 /*	$NetBSD: eso.c,v 1.3 1999/08/02 17:37:43 augustss Exp $	*/
+=======
+/*	$OpenBSD: eso.c,v 1.35 2010/09/21 20:11:44 jakemsr Exp $	*/
+/*	$NetBSD: eso.c,v 1.48 2006/12/18 23:13:39 kleink Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Klaus J. Klein
@@ -46,7 +51,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -67,6 +71,20 @@
 #include <machine/bus.h>
 #include <machine/intr.h>
 
+<<<<<<< HEAD
+=======
+/*
+ * XXX Work around the 24-bit implementation limit of the Audio 1 DMA
+ * XXX engine by allocating through the ISA DMA tag.
+ */
+#if defined(__amd64__) || defined(__i386__)
+#include "isa.h"
+#if NISA > 0
+#include <dev/isa/isavar.h>
+#endif
+#endif
+
+>>>>>>> origin/master
 #if defined(AUDIO_DEBUG) || defined(DEBUG)
 #define DPRINTF(x) printf x
 #else
@@ -85,13 +103,21 @@ struct eso_dma {
 #define KVADDR(dma)	((void *)(dma)->ed_addr)
 #define DMAADDR(dma)	((dma)->ed_map->dm_segs[0].ds_addr)
 
+<<<<<<< HEAD
 /* Autoconfiguration interface */
 HIDE int eso_match(struct device *, MATCH_ARG_2_T, void *);
 HIDE void eso_attach(struct device *, struct device *, void *);
 HIDE void eso_defer(struct device *);
+=======
+int eso_match(struct device *, void *, void *);
+void eso_attach(struct device *, struct device *, void *);
+int eso_activate(struct device *, int);
+void eso_defer(struct device *);
+>>>>>>> origin/master
 
 struct cfattach eso_ca = {
-	sizeof (struct eso_softc), eso_match, eso_attach
+	sizeof (struct eso_softc), eso_match, eso_attach, NULL,
+	eso_activate
 };
 
 #ifdef __OpenBSD__
@@ -125,10 +151,14 @@ HIDE int	eso_trigger_output(void *, void *, void *, int,
 		    void (*)(void *), void *, struct audio_params *);
 HIDE int	eso_trigger_input(void *, void *, void *, int,
 		    void (*)(void *), void *, struct audio_params *);
+<<<<<<< HEAD
 HIDE void       eso_setup(struct eso_softc *, int);
 
 HIDE void       eso_powerhook(int, void *);
 
+=======
+void	eso_setup(struct eso_softc *, int, int);
+>>>>>>> origin/master
 
 HIDE struct audio_hw_if eso_hw_if = {
 	eso_open,
@@ -223,12 +253,12 @@ eso_attach(parent, self, aux)
 	/* Map I/O registers. */
 	if (pci_mapreg_map(pa, ESO_PCI_BAR_IO, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, NULL, 0)) {
-		printf(", can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 	if (pci_mapreg_map(pa, ESO_PCI_BAR_SB, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_sb_iot, &sc->sc_sb_ioh, NULL, NULL, 0)) {
-		printf(", can't map SB I/O space\n");
+		printf(": can't map SB I/O space\n");
 		return;
 	}
 	if (pci_mapreg_map(pa, ESO_PCI_BAR_VC, PCI_MAPREG_TYPE_IO, 0,
@@ -239,7 +269,7 @@ eso_attach(parent, self, aux)
 
 	if (pci_mapreg_map(pa, ESO_PCI_BAR_MPU, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_mpu_iot, &sc->sc_mpu_ioh, NULL, NULL, 0)) {
-		printf(", can't map MPU I/O space\n");
+		printf(": can't map MPU I/O space\n");
 		return;
 	}
 	if (pci_mapreg_map(pa, ESO_PCI_BAR_GAME, PCI_MAPREG_TYPE_IO, 0,
@@ -254,7 +284,7 @@ eso_attach(parent, self, aux)
 
 	sc->sc_pa = *pa;
 
-	eso_setup(sc, 1);
+	eso_setup(sc, 1, 0);
 
 	/* map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
@@ -298,6 +328,7 @@ eso_attach(parent, self, aux)
 		pci_conf_write(pa->pa_pc, pa->pa_tag, ESO_PCI_DDMAC,
 			       vcbase | ESO_PCI_DDMAC_DE);
 		sc->sc_dmac_configured = 1;
+		sc->sc_dmac_addr = vcbase;
 		
 		printf("%s: mapping Audio 1 DMA using VC I/O space at 0x%lx\n",
 		       sc->sc_dev.dv_xname, (unsigned long)vcbase);
@@ -314,9 +345,12 @@ eso_attach(parent, self, aux)
 	aa.hdl = NULL;
 	(void)config_found(&sc->sc_dev, &aa, audioprint);
 
+<<<<<<< HEAD
 	sc->sc_powerhook = powerhook_establish(&eso_powerhook, sc);
 
 #if 0
+=======
+>>>>>>> origin/master
 	aa.type = AUDIODEV_TYPE_MPU;
 	aa.hwif = NULL;
 	aa.hdl = NULL;
@@ -324,6 +358,7 @@ eso_attach(parent, self, aux)
 #endif
 }
 
+<<<<<<< HEAD
 HIDE void
 eso_setup(sc, verbose)
 	struct eso_softc *sc;
@@ -331,6 +366,13 @@ eso_setup(sc, verbose)
 {
 	struct pci_attach_args *pa = &sc->sc_pa;	
 	uint8_t a2mode;
+=======
+void
+eso_setup(struct eso_softc *sc, int verbose, int resuming)
+{
+	struct pci_attach_args *pa = &sc->sc_pa;	
+	uint8_t a2mode, tmp;
+>>>>>>> origin/master
 	int idx; 
 
 	/* Reset the device; bail out upon failure. */
@@ -353,36 +395,97 @@ eso_setup(sc, verbose)
 	a2mode |= ESO_MIXREG_A2MODE_NEWA1 | ESO_MIXREG_A2MODE_ASYNC;
 	eso_write_mixreg(sc, ESO_MIXREG_A2MODE, a2mode);
 
+<<<<<<< HEAD
 	/* Set mixer regs to something reasonable, needs work. */
 	for (idx = 0; idx < ESO_NGAINDEVS; idx++) {
 		int v;
+=======
+	/* Slave Master Volume to Hardware Volume Control Counter, unmask IRQ. */
+	tmp = eso_read_mixreg(sc, ESO_MIXREG_MVCTL);
+	tmp &= ~ESO_MIXREG_MVCTL_SPLIT;
+	tmp |= ESO_MIXREG_MVCTL_HVIRQM;
+	eso_write_mixreg(sc, ESO_MIXREG_MVCTL, tmp);
+
+	if (!resuming) {
+		/* Set mixer regs to something reasonable, needs work. */
+		sc->sc_recmon = sc->sc_spatializer = sc->sc_mvmute = 0;
+		eso_set_monooutsrc(sc, ESO_MIXREG_MPM_MOMUTE);
+		eso_set_monoinbypass(sc, 0);
+		eso_set_preamp(sc, 1);
+		for (idx = 0; idx < ESO_NGAINDEVS; idx++) {
+			int v;
+>>>>>>> origin/master
 		
-		switch (idx) {
- 		case ESO_MIC_PLAY_VOL:
-		case ESO_LINE_PLAY_VOL:
-		case ESO_CD_PLAY_VOL:
-		case ESO_MONO_PLAY_VOL:
-		case ESO_AUXB_PLAY_VOL:
-		case ESO_DAC_REC_VOL:
-		case ESO_LINE_REC_VOL:
-		case ESO_SYNTH_REC_VOL:
-		case ESO_CD_REC_VOL:
-		case ESO_MONO_REC_VOL:
-		case ESO_AUXB_REC_VOL:
-		case ESO_SPATIALIZER:
-			v = 0;
-			break;
-		case ESO_MASTER_VOL:
-			v = ESO_GAIN_TO_6BIT(AUDIO_MAX_GAIN / 2);
-			break;
-		default:
-			v = ESO_GAIN_TO_4BIT(AUDIO_MAX_GAIN / 2);
-			break;
+			switch (idx) {
+ 			case ESO_MIC_PLAY_VOL:
+			case ESO_LINE_PLAY_VOL:
+			case ESO_CD_PLAY_VOL:
+			case ESO_MONO_PLAY_VOL:
+			case ESO_AUXB_PLAY_VOL:
+			case ESO_DAC_REC_VOL:
+			case ESO_LINE_REC_VOL:
+			case ESO_SYNTH_REC_VOL:
+			case ESO_CD_REC_VOL:
+			case ESO_MONO_REC_VOL:
+			case ESO_AUXB_REC_VOL:
+			case ESO_SPATIALIZER:
+				v = 0;
+				break;
+			case ESO_MASTER_VOL:
+				v = ESO_GAIN_TO_6BIT(AUDIO_MAX_GAIN / 2);
+				break;
+			default:
+				v = ESO_GAIN_TO_4BIT(AUDIO_MAX_GAIN / 2);
+				break;
+			}
+			sc->sc_gain[idx][ESO_LEFT] =
+			    sc->sc_gain[idx][ESO_RIGHT] = v;
+			eso_set_gain(sc, idx);
 		}
-		sc->sc_gain[idx][ESO_LEFT] = sc->sc_gain[idx][ESO_RIGHT] = v;
-		eso_set_gain(sc, idx);
+		eso_set_recsrc(sc, ESO_MIXREG_ERS_MIC);
+	} else {
+		eso_set_monooutsrc(sc, sc->sc_monooutsrc);
+		eso_set_monoinbypass(sc, sc->sc_monoinbypass);
+		eso_set_preamp(sc, sc->sc_preamp);
+		eso_set_recsrc(sc, sc->sc_recsrc);
+
+		/* recmon */
+		tmp = eso_read_ctlreg(sc, ESO_CTLREG_ACTL);
+		if (sc->sc_recmon)
+			tmp |= ESO_CTLREG_ACTL_RECMON;
+		else
+			tmp &= ~ESO_CTLREG_ACTL_RECMON;
+		eso_write_ctlreg(sc, ESO_CTLREG_ACTL, tmp);
+
+		/* spatializer enable */
+		tmp = eso_read_mixreg(sc, ESO_MIXREG_SPAT);
+		if (sc->sc_spatializer)
+			tmp |= ESO_MIXREG_SPAT_ENB;
+		else
+			tmp &= ~ESO_MIXREG_SPAT_ENB;
+		eso_write_mixreg(sc, ESO_MIXREG_SPAT,
+		    tmp | ESO_MIXREG_SPAT_RSTREL);
+
+		/* master volume mute */
+		if (sc->sc_mvmute) {
+			eso_write_mixreg(sc, ESO_MIXREG_LMVM,
+			    eso_read_mixreg(sc, ESO_MIXREG_LMVM) |
+			    ESO_MIXREG_LMVM_MUTE);
+			eso_write_mixreg(sc, ESO_MIXREG_RMVM,
+			    eso_read_mixreg(sc, ESO_MIXREG_RMVM) |
+			    ESO_MIXREG_RMVM_MUTE);
+		} else { 
+			eso_write_mixreg(sc, ESO_MIXREG_LMVM,
+			    eso_read_mixreg(sc, ESO_MIXREG_LMVM) &
+			    ~ESO_MIXREG_LMVM_MUTE);
+			eso_write_mixreg(sc, ESO_MIXREG_RMVM,
+			    eso_read_mixreg(sc, ESO_MIXREG_RMVM) &
+			    ~ESO_MIXREG_RMVM_MUTE);
+		}
+
+		for (idx = 0; idx < ESO_NGAINDEVS; idx++)
+			eso_set_gain(sc, idx);
 	}
-	eso_set_recsrc(sc, ESO_MIXREG_ERS_MIC);
 }
 
 HIDE void
@@ -412,6 +515,7 @@ eso_defer(self)
 		    addr | ESO_PCI_DDMAC_DE);
 		sc->sc_dmac_iot = sc->sc_iot;
 		sc->sc_dmac_configured = 1;
+		sc->sc_dmac_addr = addr;
 		printf("mapping Audio 1 DMA using I/O space at 0x%lx\n",
 		    (unsigned long)addr);
 
@@ -714,15 +818,36 @@ eso_query_encoding(hdl, fp)
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
 
 	return (0);
 }
 
+<<<<<<< HEAD
 HIDE int
 eso_set_params(hdl, setmode, usemode, play, rec)
 	void *hdl;
 	int setmode, usemode;
 	struct audio_params *play, *rec;
+=======
+void
+eso_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	params->sample_rate = 48000;
+	params->encoding = AUDIO_ENCODING_ULINEAR_LE;
+	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
+	params->channels = 2;
+	params->sw_code = NULL;
+	params->factor = 1;
+}
+
+int
+eso_set_params(void *hdl, int setmode, int usemode,
+    struct audio_params *play, struct audio_params *rec)
+>>>>>>> origin/master
 {
 	struct eso_softc *sc = hdl;
 	struct audio_params *p;
@@ -736,12 +861,24 @@ eso_set_params(hdl, setmode, usemode, play, rec)
 
 		p = (mode == AUMODE_PLAY) ? play : rec;
 
+<<<<<<< HEAD
 		if (p->sample_rate < ESO_MINRATE ||
 		    p->sample_rate > ESO_MAXRATE ||
 		    (p->precision != 8 && p->precision != 16) ||
 		    (p->channels != 1 && p->channels != 2))
 			return (EINVAL);
 		
+=======
+		if (p->sample_rate < ESO_MINRATE)
+			p->sample_rate = ESO_MINRATE;
+		if (p->sample_rate > ESO_MAXRATE)
+			p->sample_rate = ESO_MAXRATE;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
+
+>>>>>>> origin/master
 		p->factor = 1;
 		p->sw_code = NULL;
 		switch (p->encoding) {
@@ -774,6 +911,8 @@ eso_set_params(hdl, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		/*
 		 * We'll compute both possible sample rate dividers and pick
@@ -848,7 +987,11 @@ eso_halt_output(hdl)
 	    ESO_IO_A2DMAM_DMAENB);
 
 	sc->sc_pintr = NULL;
+<<<<<<< HEAD
 	error = tsleep(&sc->sc_pintr, PCATCH | PWAIT, "esoho", hz);
+=======
+	error = tsleep(&sc->sc_pintr, PWAIT, "esoho", sc->sc_pdrain);
+>>>>>>> origin/master
 	splx(s);
 	
 	/* Shut down DMA completely. */
@@ -876,7 +1019,11 @@ eso_halt_input(hdl)
 	    DMA37MD_WRITE | DMA37MD_DEMAND);
 
 	sc->sc_rintr = NULL;
+<<<<<<< HEAD
 	error = tsleep(&sc->sc_rintr, PCATCH | PWAIT, "esohi", hz);
+=======
+	error = tsleep(&sc->sc_rintr, PWAIT, "esohi", sc->sc_rdrain);
+>>>>>>> origin/master
 	splx(s);
 
 	/* Shut down DMA completely. */
@@ -1554,6 +1701,30 @@ eso_allocm(hdl, direction, size, type, flags)
 	else
 		boundary = 0;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * XXX Work around allocation problems for Audio 1, which
+	 * XXX implements the 24 low address bits only, with
+	 * XXX machine-specific DMA tag use.
+	 */
+#if defined(__alpha__)
+	/*
+	 * XXX Force allocation through the (ISA) SGMAP.
+	 */
+	if (direction == AUMODE_RECORD)
+		ed->ed_dmat = alphabus_dma_get_tag(sc->sc_dmat, ALPHA_BUS_ISA);
+	else
+#elif defined(__amd64__) || defined(__i386__)
+	/*
+	 * XXX Force allocation through the ISA DMA tag.
+	 */
+	if (direction == AUMODE_RECORD)
+		ed->ed_dmat = &isa_bus_dma_tag;
+	else
+#endif
+		ed->ed_dmat = sc->sc_dmat;
+>>>>>>> origin/master
 
 	error = eso_allocmem(sc, size, 32, boundary, flags, ed);
 	if (error) {
@@ -1664,6 +1835,13 @@ eso_trigger_output(hdl, start, end, blksize, intr, arg, param)
 	sc->sc_pintr = intr;
 	sc->sc_parg = arg;
 
+<<<<<<< HEAD
+=======
+	/* Compute drain timeout. */
+	sc->sc_pdrain = hz * (blksize * 3 / 2) / 
+	    (param->sample_rate * param->channels * param->bps * param->factor);
+
+>>>>>>> origin/master
 	/* DMA transfer count (in `words'!) reload using 2's complement. */
 	blksize = -(blksize >> 1);
 	eso_write_mixreg(sc, ESO_MIXREG_A2TCRLO, blksize & 0xff);
@@ -1745,6 +1923,13 @@ eso_trigger_input(hdl, start, end, blksize, intr, arg, param)
 	sc->sc_rintr = intr;
 	sc->sc_rarg = arg;
 
+<<<<<<< HEAD
+=======
+	/* Compute drain timeout. */
+	sc->sc_rdrain = hz * (blksize * 3 / 2) / 
+	    (param->sample_rate * param->channels * param->bps * param->factor);
+
+>>>>>>> origin/master
 	/* Set up ADC DMA converter parameters. */
 	actl = eso_read_ctlreg(sc, ESO_CTLREG_ACTL);
 	if (param->channels == 2) {
@@ -1909,6 +2094,7 @@ eso_set_gain(sc, port)
 	    sc->sc_gain[port][ESO_LEFT], sc->sc_gain[port][ESO_RIGHT]));
 }
 
+<<<<<<< HEAD
 
 HIDE void
 eso_powerhook(why, self)
@@ -1927,9 +2113,38 @@ eso_powerhook(why, self)
 		bus_space_write_1(sc->sc_sb_iot,
 				  sc->sc_sb_ioh, ESO_SB_STATUSFLAGS, 3);
 		
+=======
+int
+eso_activate(struct device *self, int act)
+{
+	struct eso_softc *sc = (struct eso_softc *)self;
+	uint8_t tmp;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		tmp = bus_space_read_1(sc->sc_iot, sc->sc_ioh, ESO_IO_IRQCTL);
+		tmp &= ~(ESO_IO_IRQCTL_MASK);
+		bus_space_write_1(sc->sc_iot, sc->sc_ioh, ESO_IO_IRQCTL, tmp);
+		break;
+	case DVACT_SUSPEND:
+		bus_space_write_1(sc->sc_iot, sc->sc_ioh, ESO_IO_A2DMAM, 0);
+		bus_space_write_1(sc->sc_dmac_iot, sc->sc_dmac_ioh,
+		    ESO_DMAC_CLEAR, 0);
+		bus_space_write_1(sc->sc_sb_iot, sc->sc_sb_ioh,
+		    ESO_SB_STATUSFLAGS, 3);
+>>>>>>> origin/master
 		/* shut down dma */
-		pci_conf_write(sc->sc_pa.pa_pc,
-			       sc->sc_pa.pa_tag, ESO_PCI_DDMAC, 0);
-	} else
-		eso_setup(sc, 0);
+		pci_conf_write(sc->sc_pa.pa_pc, sc->sc_pa.pa_tag,
+		    ESO_PCI_DDMAC, 0);
+		break;
+	case DVACT_RESUME:
+		eso_setup(sc, 1, 1);
+		pci_conf_write(sc->sc_pa.pa_pc, sc->sc_pa.pa_tag,
+		    ESO_PCI_DDMAC, sc->sc_dmac_addr | ESO_PCI_DDMAC_DE);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }

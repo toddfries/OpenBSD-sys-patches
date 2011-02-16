@@ -1,4 +1,4 @@
-/*	$OpenBSD: asc.c,v 1.24 2006/04/14 09:36:49 martin Exp $	*/
+/*	$OpenBSD: asc.c,v 1.28 2010/12/26 15:40:59 miod Exp $	*/
 /*	$NetBSD: asc.c,v 1.20 1997/02/24 05:47:33 scottr Exp $	*/
 
 /*
@@ -64,12 +64,11 @@
  * ASC driver code and console bell support
  */
 
-#include <sys/types.h>
-#include <sys/cdefs.h>
+#include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/time.h>
-#include <sys/systm.h>
-#include <sys/param.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
 #include <sys/poll.h>
@@ -157,7 +156,7 @@ ascattach(parent, self, aux)
 		addr = (bus_addr_t)MAC68K_ASC_BASE;
 	if (bus_space_map(sc->sc_tag, addr, MAC68K_ASC_LEN, 0,
 	    &sc->sc_handle)) {
-		printf(": can't map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 	sc->sc_open = 0;
@@ -288,7 +287,7 @@ ascmmap(dev, off, prot)
 	if (off >= 0 && off < MAC68K_ASC_LEN) {
 		(void)pmap_extract(pmap_kernel(),
 		    (vaddr_t)bus_space_vaddr(sc->sc_tag, sc->sc_handle), &pa);
-		return atop(pa + off);
+		return (pa + off);
 	}
 
 	return (-1);

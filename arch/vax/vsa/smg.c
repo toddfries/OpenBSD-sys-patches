@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: smg.c,v 1.18 2006/11/29 12:13:54 miod Exp $	*/
+=======
+/*	$OpenBSD: smg.c,v 1.24 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: smg.c,v 1.21 2000/03/23 06:46:44 thorpej Exp $ */
 /*
  * Copyright (c) 2006, Miodrag Vallat
@@ -195,8 +199,8 @@ const struct wsdisplay_accessops smg_accessops = {
 
 void	smg_blockmove(struct rasops_info *, u_int, u_int, u_int, u_int, u_int,
 	    int);
-void	smg_copycols(void *, int, int, int, int);
-void	smg_erasecols(void *, int, int, int, long);
+int	smg_copycols(void *, int, int, int, int);
+int	smg_erasecols(void *, int, int, int, long);
 
 int	smg_getcursor(struct smg_screen *, struct wsdisplay_cursor *);
 int	smg_setup_screen(struct smg_screen *);
@@ -436,7 +440,7 @@ smg_mmap(void *v, off_t offset, int prot)
 	if (offset >= SMSIZE || offset < 0)
 		return (-1);
 
-	return (SMADDR + offset) >> PGSHIFT;
+	return (SMADDR + offset);
 }
 
 int
@@ -776,7 +780,7 @@ smg_blockmove(struct rasops_info *ri, u_int sx, u_int y, u_int dx, u_int cx,
 	}
 }
 
-void
+int
 smg_copycols(void *cookie, int row, int src, int dst, int n)
 {
 	struct rasops_info *ri = cookie;
@@ -788,9 +792,11 @@ smg_copycols(void *cookie, int row, int src, int dst, int n)
 
 	smg_blockmove(ri, src, row, dst, n, ri->ri_font->fontheight,
 	    RR_COPY);
+
+	return 0;
 }
 
-void
+int
 smg_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -804,6 +810,8 @@ smg_erasecols(void *cookie, int row, int col, int num, long attr)
 
 	smg_blockmove(ri, col, row, col, num, ri->ri_font->fontheight,
 	    bg == 0 ? RR_CLEAR : RR_SET);
+
+	return 0;
 }
 
 /*
@@ -845,22 +853,35 @@ smgcninit()
 {
 	struct smg_screen *ss = &smg_consscr;
 	extern vaddr_t virtual_avail;
+	vaddr_t ova;
 	long defattr;
 	struct rasops_info *ri;
 
+	ova = virtual_avail;
+
 	ss->ss_addr = (caddr_t)virtual_avail;
+	ioaccess(virtual_avail, SMADDR, SMSIZE / VAX_NBPG);
 	virtual_avail += SMSIZE;
-	ioaccess((vaddr_t)ss->ss_addr, SMADDR, SMSIZE / VAX_NBPG);
 
 	ss->ss_cursor = (struct dc503reg *)virtual_avail;
+	ioaccess(virtual_avail, KA420_CUR_BASE, 1);
 	virtual_avail += VAX_NBPG;
-	ioaccess((vaddr_t)ss->ss_cursor, KA420_CUR_BASE, 1);
 
 	virtual_avail = round_page(virtual_avail);
 
+<<<<<<< HEAD
 	/* this had better not fail as we can't recover there */
 	if (smg_setup_screen(ss) != 0)
 		panic(__func__);
+=======
+	/* this had better not fail */
+	if (smg_setup_screen(ss) != 0) {
+		iounaccess((vaddr_t)ss->ss_addr, SMSIZE / VAX_NBPG);
+		iounaccess((vaddr_t)ss->ss_cursor, 1);
+		virtual_avail = ova;
+		return (1);
+	}
+>>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);

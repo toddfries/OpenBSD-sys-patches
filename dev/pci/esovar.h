@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 /*	$OpenBSD: esovar.h,v 1.2 2002/03/14 01:26:58 millert Exp $	*/
 /*	$NetBSD: esovar.h,v 1.2 1999/08/02 17:37:43 augustss Exp $	*/
+=======
+/*	$OpenBSD: esovar.h,v 1.6 2010/09/21 20:11:44 jakemsr Exp $	*/
+/*	$NetBSD: esovar.h,v 1.5 2004/05/25 21:38:11 kleink Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Klaus J. Klein
@@ -86,7 +91,6 @@ struct eso_softc {
 	struct device		sc_dev;
 	pci_intr_handle_t *	sc_ih;
 	unsigned int		sc_revision;	/* PCI Revision ID */
-	void *			sc_powerhook;
 
 	/* Optionally deferred configuration of Audio 1 DMAC I/O space */
 	struct pci_attach_args	sc_pa;
@@ -106,6 +110,7 @@ struct eso_softc {
 
 	/* Audio 1 DMAC device */
 	unsigned int		sc_dmac_configured;
+	bus_addr_t		sc_dmac_addr;
 	bus_space_tag_t		sc_dmac_iot;
 	bus_space_handle_t	sc_dmac_ioh;
 

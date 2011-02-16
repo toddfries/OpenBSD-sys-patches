@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wsmux.c,v 1.18 2006/08/05 19:08:41 miod Exp $	*/
+=======
+/*	$OpenBSD: wsmux.c,v 1.24 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*      $NetBSD: wsmux.c,v 1.37 2005/04/30 03:47:12 augustss Exp $      */
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -199,7 +196,7 @@ wsmuxopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p;
+	evar->io = p->p_p;
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	sc->sc_rawkbd = 0;
 #endif
@@ -483,8 +480,8 @@ wsmux_do_ioctl(struct device *dv, u_long cmd, caddr_t data, int flag,
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		if (-*(int *)data != evar->io->p_pgid
-		    && *(int *)data != evar->io->p_pid)
+		if (-*(int *)data != evar->io->ps_pgid
+		    && *(int *)data != evar->io->ps_pid)
 			return (EPERM);
 		return (0);
 	case TIOCSPGRP:
@@ -492,7 +489,7 @@ wsmux_do_ioctl(struct device *dv, u_long cmd, caddr_t data, int flag,
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		if (*(int *)data != evar->io->p_pgid)
+		if (*(int *)data != evar->io->ps_pgid)
 			return (EPERM);
 		return (0);
 	default:

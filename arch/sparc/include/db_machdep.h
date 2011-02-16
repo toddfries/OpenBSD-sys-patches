@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_machdep.h,v 1.12 2005/04/19 15:23:08 miod Exp $	*/
+=======
+/*	$OpenBSD: db_machdep.h,v 1.14 2010/11/27 19:57:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_machdep.h,v 1.10 1997/08/31 21:23:40 pk Exp $ */
 
 /*
@@ -78,8 +82,6 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define	inst_trap_return(ins)	((ins)&0)
 #define	inst_return(ins)	((ins)&0)
 #define	inst_call(ins)		((ins)&0)
-#define inst_load(ins)		0
-#define inst_store(ins)		0
 
 #define DB_MACHINE_COMMANDS
 

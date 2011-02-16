@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: qec.c,v 1.16 2003/06/02 15:54:22 deraadt Exp $	*/
+=======
+/*	$OpenBSD: qec.c,v 1.19 2010/09/05 18:10:10 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -35,7 +39,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 
@@ -249,9 +252,9 @@ qec_translate(sc, ca)
 
 		for (j = 0; j < sc->sc_nrange; j++) {
 			if (sc->sc_range[j].cspace == cspace) {
-				(int)ca->ca_ra.ra_reg[i].rr_paddr +=
+				ca->ca_ra.ra_reg[i].rr_paddr +=
 					sc->sc_range[j].poffset;
-				(int)ca->ca_ra.ra_reg[i].rr_iospace =
+				ca->ca_ra.ra_reg[i].rr_iospace =
 					sc->sc_range[j].pspace;
 				break;
 			}

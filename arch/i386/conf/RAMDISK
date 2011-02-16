@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.147 2007/02/17 03:16:26 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.173 2011/01/07 19:33:08 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -20,20 +20,19 @@ option		DST=0		# daylight saving time used by RTC
 #makeoptions	DEBUG="-g"	# compile full symbol table
 
 option		FFS		# UFS
-option		EXT2FS		# Linux ext2fs
+#option		EXT2FS		# Linux ext2fs
 
 #option		NFSCLIENT	# Network File System client
 
 option		CD9660		# ISO 9660 + Rock Ridge file system
 option		MSDOSFS		# MS-DOS file system
-option		FIFO		# FIFOs; RECOMMENDED
 
 option		INET		# IP + ICMP + TCP + UDP
 
 option		BOOT_CONFIG	# boot-time kernel config
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3800
+option		MINIROOTSIZE=3872
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
@@ -47,20 +46,25 @@ acpi0		at mainbus?	disable
 #acpibtn*	at acpi?
 #acpicpu*	at acpi?
 #acpiec*	at acpi?
+acpimadt0	at acpi?
 acpiprt*	at acpi?
 #acpitz*	at acpi?
 
 cpu0	at mainbus?
 bios0	at mainbus0
+ioapic*	at mainbus?
 apm0	at bios0 flags 0x0000	# flags 0x0101 to force protocol version 1.1
 #option	APMDEBUG
+mpbios0	at bios0
 pcibios0 at bios0 flags 0x0000
 
 isa0	at mainbus0
 isa0	at pcib?
-isa0	at ichpcib?
-isa0	at gscpcib?
-eisa0	at mainbus0
+#isa0	at amdpcib?
+#isa0	at ichpcib?
+#isa0	at gscpcib?
+#isa0	at glxpcib?
+#eisa0	at mainbus0
 pci*	at mainbus0
 
 option		PCIVERBOSE
@@ -71,9 +75,11 @@ ppb*	at pci?			# PCI-PCI bridges
 pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
-ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
-gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+#ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
+#gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+#amdpcib* at pci?		# AMD 8111 LPC bridge
 geodesc* at pci?		# Geode SC1100/SCx200 IAOC
+#glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
 
 # ISA PCMCIA controllers
 pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x4000
@@ -128,15 +134,15 @@ bha1	at isa? disable port 0x334 # BusLogic [57]4X SCSI controllers
 bha2	at isa? disable
 bha*	at pci?
 #bha*	at eisa?		# XXX eisa still runs in isa-compat
-scsibus* at bha?
-aha0	at isa? port 0x330	# Adaptec 154[02] SCSI controllers
-aha1	at isa? port 0x334	# Adaptec 154[02] SCSI controllers
+#scsibus* at bha?
+#aha0	at isa? port 0x330	# Adaptec 154[02] SCSI controllers
+#aha1	at isa? port 0x334	# Adaptec 154[02] SCSI controllers
 #aha*	at isapnp?
-scsibus* at aha?
-ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
-scsibus* at ahb?
+#scsibus* at aha?
+#ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
+#scsibus* at ahb?
 #ahc0	at isa?			# Adaptec 284x SCSI controllers
-ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
+#ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
@@ -208,19 +214,17 @@ ne*	at isapnp?			# NE[12]000 PnP ethernet cards
 #el0	at isa? port 0x300 irq 9	# 3C501 ethernet cards
 ep0	at isa?				# 3C509 ethernet cards
 ep*	at isa?				# 3C509 ethernet cards
-ef*	at isapnp?			# 3C515 PnP ethernet
+#ef*	at isapnp?			# 3C515 PnP ethernet
 #ie0	at isa? port 0x360 iomem 0xd0000 irq 7	# StarLAN and 3C507
 #ie1	at isa? port 0x300 irq 10	# EtherExpress
 le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 #ex0	at isa? port 0x320 irq 5	# Intel EtherExpress PRO/10
-ep0	at eisa?
-ep*	at eisa?			# 3C579 ethernet cards
+#ep*	at eisa?			# 3C579 ethernet cards
 #fea*	at eisa?			# DEC DEFEA FDDI cards
 ep*	at isapnp?			# 3C509 PnP ethernet cards
 le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards
 fxp*	at pci?				# EtherExpress 10/100B ethernet cards
-ep0	at pci?				# 3C59x ethernet cards
 ep*	at pci?				# 3C59x ethernet cards
 ne*	at pci?				# NE2000-compat ethernet cards
 ne*	at pcmcia?			# PCMCIA based NE2000 cards
@@ -230,8 +234,8 @@ ep*	at pcmcia?			# PCMCIA based 3c5xx cards
 #fpa*	at pci?				# DEC DEFPA FDDI cards
 xl*	at pci?				# 3C9xx ethernet cards
 rl*	at pci?				# RealTek 81[23]9 ethernet
-epic*	at pci?				# SMC EPIC/100 ethernet
-tl*	at pci?				# Compaq Thunderlan ethernet cards
+#epic*	at pci?				# SMC EPIC/100 ethernet
+#tl*	at pci?				# Compaq Thunderlan ethernet cards
 vr*	at pci?				# VIA Rhine ethernet
 #wb*	at pci?				# Winbond W89C840F ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet
@@ -269,7 +273,7 @@ icsphy*	at mii?				# ICS 1890 PHYs
 #lxtphy*	at mii?			# Level1 LXT970 PHYs
 nsphy*	at mii?				# NS and compatible PHYs
 nsphyter*	at mii?			# NS and compatible PHYs
-qsphy*	at mii?				# Quality Semi QS6612 PHYs
+#qsphy*	at mii?				# Quality Semi QS6612 PHYs
 #sqphy*	at mii?				# Seeq 8x220 PHYs
 rlphy* at mii?				# RealTek 8139 internal PHYs
 mtdphy*	at mii?				# Myson MTD972 PHYs
@@ -279,6 +283,7 @@ tqphy*	at mii?				# TDK 78Q212x PHYs
 bmtphy* at mii?				# Broadcom 10/100 PHYs
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
+#ipgphy*	at mii?			# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 pseudo-device	loop	1		# network loopback

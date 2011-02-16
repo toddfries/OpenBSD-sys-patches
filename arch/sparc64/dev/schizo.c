@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: schizo.c,v 1.46 2007/02/23 21:52:01 kettenis Exp $	*/
+=======
+/*	$OpenBSD: schizo.c,v 1.61 2010/12/04 17:06:32 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -40,6 +44,10 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/psl.h>
+
+#ifdef DDB
+#include <machine/db_machdep.h>
+#endif
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -85,16 +93,35 @@ bus_space_tag_t _schizo_alloc_bus_tag(struct schizo_pbm *, const char *,
     int, int, int);
 bus_dma_tag_t schizo_alloc_dma_tag(struct schizo_pbm *);
 
+<<<<<<< HEAD
 paddr_t schizo_bus_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
+=======
+int schizo_conf_size(pci_chipset_tag_t, pcitag_t);
+pcireg_t schizo_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void schizo_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+
+>>>>>>> origin/master
 int schizo_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 int _schizo_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
     bus_size_t, int, bus_space_handle_t *);
+<<<<<<< HEAD
 void *_schizo_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
+=======
+paddr_t schizo_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t,
+    int, int);
+bus_addr_t schizo_bus_addr(bus_space_tag_t, bus_space_tag_t,
+    bus_space_handle_t);
+void *schizo_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
+>>>>>>> origin/master
     int (*)(void *), void *, const char *);
 paddr_t _schizo_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 int schizo_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
+
+#ifdef DDB
+void schizo_xir(void *, int);
+#endif
 
 int
 schizo_match(struct device *parent, void *match, void *aux)
@@ -111,6 +138,8 @@ schizo_match(struct device *parent, void *match, void *aux)
 
 	str = getpropstring(ma->ma_node, "compatible");
 	if (strcmp(str, "pci108e,8001") == 0)
+		return (1);
+	if (strcmp(str, "pci108e,8002") == 0)		/* XMITS */
 		return (1);
 	if (strcmp(str, "pci108e,a801") == 0)		/* Tomatillo */
 		return (1);
@@ -205,7 +234,7 @@ schizo_init(struct schizo_softc *sc, int busa)
 	pbm->sp_dmat = schizo_alloc_dma_tag(pbm);
 
 	if (bus_space_map(pbm->sp_cfgt, 0, 0x1000000, 0, &pbm->sp_cfgh))
-		panic("schizo: could not map config space");
+		panic("schizo: can't map config space");
 
 	pbm->sp_pc = schizo_alloc_chipset(pbm, sc->sc_node,
 	    &_sparc_pci_chipset);
@@ -213,10 +242,10 @@ schizo_init(struct schizo_softc *sc, int busa)
 	pbm->sp_pc->bustag = pbm->sp_cfgt;
 	pbm->sp_pc->bushandle = pbm->sp_cfgh;
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = busranges[0];
-	pba.pba_bridgetag = NULL;
 	pba.pba_pc = pbm->sp_pc;
 #if 0
 	pba.pba_flags = pbm->sp_flags;
@@ -224,6 +253,12 @@ schizo_init(struct schizo_softc *sc, int busa)
 	pba.pba_dmat = pbm->sp_dmat;
 	pba.pba_memt = pbm->sp_memt;
 	pba.pba_iot = pbm->sp_iot;
+<<<<<<< HEAD
+=======
+	pba.pba_pc->conf_size = schizo_conf_size;
+	pba.pba_pc->conf_read = schizo_conf_read;
+	pba.pba_pc->conf_write = schizo_conf_write;
+>>>>>>> origin/master
 	pba.pba_pc->intr_map = schizo_intr_map;
 
 	free(busranges, M_DEVBUF);
@@ -261,6 +296,16 @@ schizo_init(struct schizo_softc *sc, int busa)
 	    "ce");
 	schizo_set_intr(sc, pbm, PIL_HIGH, schizo_safari_error, sc,
 	    SCZ_SERR_INO, "safari");
+
+#ifdef DDB
+	/* 
+	 * Only a master Tomatillo (the one with JPID[0:2] = 6)
+	 * can/should generate XIR.
+	 */
+	if (sc->sc_tomatillo &&
+	    ((schizo_read(sc, SCZ_CONTROL_STATUS) >> 20) & 0x7) == 6)
+		db_register_xir(schizo_xir, sc);
+#endif
 
 	config_found(&sc->sc_dv, &pba, schizo_print);
 }
@@ -430,6 +475,29 @@ schizo_print(void *aux, const char *p)
 	return (QUIET);
 }
 
+<<<<<<< HEAD
+=======
+int
+schizo_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return PCI_CONFIG_SPACE_SIZE;
+}
+
+pcireg_t
+schizo_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
+{
+	return (bus_space_read_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg));
+}
+
+void
+schizo_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
+{
+        bus_space_write_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg, data);
+}
+
+>>>>>>> origin/master
 /*
  * Bus-specific interrupt mapping
  */
@@ -542,9 +610,16 @@ _schizo_alloc_bus_tag(struct schizo_pbm *pbm, const char *name, int ss,
 	bt->default_type = ss;
 	bt->asi = asi;
 	bt->sasi = sasi;
+<<<<<<< HEAD
 	bt->sparc_bus_map = _schizo_bus_map;
 	bt->sparc_bus_mmap = _schizo_bus_mmap;
 	bt->sparc_intr_establish = _schizo_intr_establish;
+=======
+	bt->sparc_bus_map = schizo_bus_map;
+	bt->sparc_bus_mmap = schizo_bus_mmap;
+	bt->sparc_bus_addr = schizo_bus_addr;
+	bt->sparc_intr_establish = schizo_intr_establish;
+>>>>>>> origin/master
 	return (bt);
 }
 
@@ -570,8 +645,6 @@ schizo_alloc_dma_tag(struct schizo_pbm *pbm)
 	dt->_dmamap_sync	= iommu_dvmamap_sync;
 	dt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	dt->_dmamem_free	= iommu_dvmamem_free;
-	dt->_dmamem_map		= iommu_dvmamem_map;
-	dt->_dmamem_unmap	= iommu_dvmamem_unmap;
 	return (dt);
 }
 
@@ -674,6 +747,36 @@ _schizo_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 	return (-1);
 }
 
+bus_addr_t
+schizo_bus_addr(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h)
+{
+	struct schizo_pbm *pbm = t->cookie;
+	bus_addr_t addr;
+	int i, ss;
+
+	ss = t->default_type;
+
+	if (t->parent == 0 || t->parent->sparc_bus_addr == 0) {
+		printf("\nschizo_bus_addr: invalid parent");
+		return (-1);
+	}
+
+	t = t->parent;
+
+	addr = ((*t->sparc_bus_addr)(t, t0, h));
+	if (addr == -1)
+		return (-1);
+
+	for (i = 0; i < pbm->sp_nrange; i++) {
+		if (((pbm->sp_range[i].cspace >> 24) & 0x03) != ss)
+			continue;
+
+		return (BUS_ADDR_PADDR(addr) - pbm->sp_range[i].phys_lo);
+	}
+
+	return (-1);
+}
+
 void *
 _schizo_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
     int level, int flags, int (*handler)(void *), void *arg, const char *what)
@@ -725,6 +828,16 @@ _schizo_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 	return (ih);
 }
+
+#ifdef DDB
+void
+schizo_xir(void *arg, int cpu)
+{
+	struct schizo_softc *sc = arg;
+
+	schizo_write(sc, TOM_RESET_GEN, TOM_RESET_GEN_XIR);
+}
+#endif
 
 const struct cfattach schizo_ca = {
 	sizeof(struct schizo_softc), schizo_match, schizo_attach

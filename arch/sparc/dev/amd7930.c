@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amd7930.c,v 1.29 2005/07/09 22:23:13 miod Exp $	*/
+=======
+/*	$OpenBSD: amd7930.c,v 1.34 2010/09/20 06:33:47 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: amd7930.c,v 1.37 1998/03/30 14:23:40 pk Exp $	*/
 
 /*
@@ -66,7 +70,6 @@ int     amd7930debug = 0;
  */
 struct amd7930_softc {
 	struct	device sc_dev;		/* base device */
-	struct	intrhand sc_swih;	/* software interrupt vector */
 
 	int	sc_open;		/* single use device */
 	int	sc_locked;		/* true when transferring data */
@@ -86,25 +89,14 @@ struct amd7930_softc {
         /* sc_au is special in that the hardware interrupt handler uses it */
         struct  auio sc_au;		/* recv and xmit buffers, etc */
 #define	sc_hwih	sc_au.au_ih		/* hardware interrupt vector */
+#define	sc_swih	sc_au.au_swih		/* software interrupt cookie */
 };
-
-/* interrupt interfaces */
-#if defined(SUN4M)
-#define AUDIO_SET_SWINTR do {		\
-	if (CPU_ISSUN4M)		\
-		raise(0, 4);		\
-	else				\
-		ienab_bis(IE_L4);	\
-} while(0);
-#else
-#define AUDIO_SET_SWINTR ienab_bis(IE_L4)
-#endif /* defined(SUN4M) */
 
 #ifndef AUDIO_C_HANDLER
 struct auio *auiop;
 #endif /* AUDIO_C_HANDLER */
 int	amd7930hwintr(void *);
-int	amd7930swintr(void *);
+void	amd7930swintr(void *);
 
 /* forward declarations */
 void	audio_setmap(volatile struct amd7930 *, struct mapreg *);
@@ -310,7 +302,7 @@ amd7930attach(parent, self, args)
 	if (intr_fasttrap(pri, amd7930_trap, amd7930_shareintr, sc) == 0) {
 		auiop = &sc->sc_au;
 		evcount_attach(&sc->sc_hwih.ih_count, sc->sc_dev.dv_xname,
-		    &sc->sc_hwih.ih_vec, &evcount_intr);
+		    &sc->sc_hwih.ih_vec);
 	} else {
 #ifdef AUDIO_DEBUG
 		printf("%s: unable to register fast trap handler\n",
@@ -324,10 +316,7 @@ amd7930attach(parent, self, args)
 		intr_establish(pri, &sc->sc_hwih, IPL_AUHARD,
 		    sc->sc_dev.dv_xname);
 	}
-	sc->sc_swih.ih_fun = amd7930swintr;
-	sc->sc_swih.ih_arg = sc;
-	intr_establish(IPL_AUSOFT, &sc->sc_swih, IPL_AUSOFT,
-	    sc->sc_dev.dv_xname);
+	sc->sc_swih = softintr_establish(IPL_AUSOFT, amd7930swintr, sc);
 
 	audio_attach_mi(&sa_hw_if, sc, &sc->sc_dev);
 	amd7930_commit_settings(sc);
@@ -403,12 +392,13 @@ amd7930_set_params(addr, setmode, usemode, p, r)
 	int setmode, usemode;
 	struct audio_params *p, *r;
 {
-	if (p->sample_rate < 7500 || p->sample_rate > 8500 ||
-	    p->encoding != AUDIO_ENCODING_ULAW ||
-	    p->precision != 8 ||
-	    p->channels != 1) 
-		return (EINVAL);
-	p->sample_rate = 8000;	/* no other rates supported by amd chip */     
+	p->encoding = AUDIO_ENCODING_ULAW;
+	p->precision = 8;
+	p->bps = 1;
+	p->msb = 1;
+	p->channels = 1; 
+	/* no other rates supported by amd chip */
+	p->sample_rate = 8000;
 
 	return (0);
 }  
@@ -423,6 +413,8 @@ amd7930_query_encoding(addr, fp)
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
+		fp->bps = 1;
+		fp->msb = 1;
 		fp->flags = 0;
 		break;
 	default:
@@ -808,7 +800,7 @@ amd7930hwintr(au0)
 		        if (amd7930debug > 1)
                 		printf("amd7930hwintr: swintr(r) requested");
 #endif
-			AUDIO_SET_SWINTR;
+			softintr_schedule(au->au_swih);
 		}
 	}
 
@@ -823,20 +815,20 @@ amd7930hwintr(au0)
 		        if (amd7930debug > 1)
                 		printf("amd7930hwintr: swintr(p) requested");
 #endif
-			AUDIO_SET_SWINTR;
+			softintr_schedule(au->au_swih);
 		}
 	}
 
 	return (-1);
 }
 
-int
+void
 amd7930swintr(sc0)
 	void *sc0;
 {
-	register struct amd7930_softc *sc = sc0;
-	register struct auio *au;
-	register int s, ret = 0;
+	struct amd7930_softc *sc = sc0;
+	struct auio *au;
+	int s;
 
 #ifdef AUDIO_DEBUG
 	if (amd7930debug > 1)
@@ -847,17 +839,14 @@ amd7930swintr(sc0)
 	s = splaudio();
 	if (au->au_rdata > au->au_rend && sc->sc_rintr != NULL) {
 		splx(s);
-		ret = 1;
 		(*sc->sc_rintr)(sc->sc_rarg);
 		s = splaudio();
 	}
 	if (au->au_pdata > au->au_pend && sc->sc_pintr != NULL) {
 		splx(s);
-		ret = 1;
 		(*sc->sc_pintr)(sc->sc_parg);
 	} else
 		splx(s);
-	return (ret);
 }
 
 #ifndef AUDIO_C_HANDLER

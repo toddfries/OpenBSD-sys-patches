@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_intr.h,v 1.1 2006/05/29 17:13:19 drahn Exp $ */
+/*	$OpenBSD: armish_intr.h,v 1.6 2009/08/23 07:53:57 krw Exp $ */
 /*	$NetBSD: i80321_intr.h,v 1.4 2003/07/05 06:53:08 dogcow Exp $ */
 
 /*
@@ -93,9 +93,28 @@ void i80321_intr_bootstrap(vaddr_t);
 
 void i80321_irq_handler(void *);
 void *i80321_intr_establish(int irqno, int level, int (*func)(void *),
-    void *cookie, char *name);
+    void *cookie, const char *name);
 void i80321_intr_disestablish(void *cookie);
 const char *i80321_intr_string(void *cookie);
+
+#ifdef DIAGNOSTIC
+/*
+ * Although this function is implemented in MI code, it must be in this MD
+ * header because we don't want this header to include MI includes.
+ */
+void splassert_fail(int, int, const char *);
+extern int splassert_ctl;
+void i80321_splassert_check(int, const char *);
+#define splassert(__wantipl) do {				\
+	if (splassert_ctl > 0) {				\
+		i80321_splassert_check(__wantipl, __func__);	\
+	}							\
+} while (0)
+#define	splsoftassert(wantipl) splassert(wantipl)
+#else
+#define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
+#endif
 
 #endif /* ! _LOCORE */
 

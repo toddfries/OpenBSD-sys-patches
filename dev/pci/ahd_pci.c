@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ahd_pci.c,v 1.14 2006/07/11 18:50:05 kettenis Exp $	*/
+=======
+/*	$OpenBSD: ahd_pci.c,v 1.18 2009/05/31 04:47:59 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -512,7 +516,7 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
 	ahd->ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-	ahd_platform_intr, ahd, ahd->sc_dev.dv_xname);
+	    ahd_platform_intr, ahd, ahd->sc_dev.dv_xname);
 	if (ahd->ih == NULL) {
 		printf("%s: couldn't establish interrupt", ahd_name(ahd));
 		if (intrstr != NULL)

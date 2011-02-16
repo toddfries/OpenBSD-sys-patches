@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cac_pci.c,v 1.9 2003/03/06 22:31:23 mickey Exp $	*/
+=======
+/*	$OpenBSD: cac_pci.c,v 1.13 2009/04/06 15:18:45 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cac_pci.c,v 1.10 2001/01/10 16:48:04 ad Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -109,7 +106,7 @@ struct cac_pci_product {
 	u_short	cp_product;
 } cac_pci_product[] = {
 	{ PCI_VENDOR_COMPAQ,	PCI_PRODUCT_COMPAQ_SMART2P },
-	{ PCI_VENDOR_DEC,	PCI_PRODUCT_DEC_CPQ42XX },
+	{ PCI_VENDOR_DEC,	PCI_PRODUCT_DEC_21554 },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_1510 },
 };
 

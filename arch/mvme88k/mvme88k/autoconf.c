@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.34 2006/05/02 21:43:09 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.47 2010/12/23 20:05:08 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -34,15 +34,17 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/kernel.h>
 
+#include <uvm/uvm.h>
+
 #include <machine/asm_macro.h>   /* enable/disable interrupts */
 #include <machine/autoconf.h>
+#include <machine/bugio.h>
 #include <machine/cpu.h>
 #include <machine/disklabel.h>
 #include <machine/vmparam.h>
@@ -77,20 +79,12 @@ struct device *bootdv;	/* set by device drivers (if found) */
 void
 cpu_configure()
 {
+	extern void cpu_hatch_secondary_processors(void *);
+	softintr_init();
 
 	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
 
-	/*
-	 * Turn external interrupts on.
-	 *
-	 * XXX We have a race here. If we enable interrupts after setroot(),
-	 * the kernel dies.
-	 */
-	set_psr(get_psr() & ~PSR_IND);
-	spl0();
-	setroot();
-	dumpconf();
 
 	/*
 	 * Finally switch to the real console driver,
@@ -99,7 +93,35 @@ cpu_configure()
 	cn_tab = NULL;
 	cninit();
 
+#ifdef MULTIPROCESSOR
+	/*
+	 * Spin up the other processors, but do not give them work to
+	 * do yet. This is normally done when attaching mainbus, but
+	 * on MVME188 boards, the system hangs if secondary processors
+	 * try to issue BUG calls (i.e. when printing their information
+	 * on console), so this has been postponed until now.
+	 */
+	if (brdtyp == BRD_188)
+		cpu_hatch_secondary_processors(NULL);
+#endif
+
+	/* NO BUG CALLS FROM NOW ON */
+
+	/*
+	 * Switch to our final trap vectors, and unmap whatever is below
+	 * the kernel.
+	 */
+	set_vbr(kernel_vbr);
+	pmap_kremove(0, (vsize_t)kernel_vbr);
+	pmap_update(pmap_kernel());
+
 	cold = 0;
+
+	/*
+	 * Turn external interrupts on.
+	 */
+	set_psr(get_psr() & ~PSR_IND);
+	spl0();
 }
 
 struct nam2blk {
@@ -383,8 +405,8 @@ device_register(struct device *dev, void *aux)
 	/*
 	 * scsi: sd,cd
 	 */
-	if (strncmp("cd", dev->dv_xname, 2) == 0 ||
-	    strncmp("sd", dev->dv_xname, 2) == 0) {
+	if (strcmp("cd", dev->dv_cfdata->cf_driver->cd_name) == 0 ||
+	    strcmp("sd", dev->dv_cfdata->cf_driver->cd_name) == 0) {
 		struct scsi_attach_args *sa = aux;
 		int target, bus, lun;
 
@@ -405,8 +427,8 @@ device_register(struct device *dev, void *aux)
 	/*
 	 * ethernet: ie,le
 	 */
-	else if (strncmp("ie", dev->dv_xname, 2) == 0 ||
-	    strncmp("le", dev->dv_xname, 2) == 0) {
+	else if (strcmp("ie", dev->dv_cfdata->cf_driver->cd_name) == 0 ||
+	    strcmp("le", dev->dv_cfdata->cf_driver->cd_name) == 0) {
 		struct confargs *ca = aux;
 
 		if (ca->ca_paddr == bootaddr) {
@@ -451,3 +473,11 @@ get_target(int *target, int *bus, int *lun)
 		return (ENODEV);
 	}
 }
+
+struct nam2blk nam2blk[] = {
+	{ "sd",		4 },
+	{ "cd",		6 },
+	{ "rd",		7 },
+	{ "vnd",	8 },
+	{ NULL,		-1 }
+};

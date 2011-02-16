@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: procfs_vfsops.c,v 1.23 2004/03/03 05:41:37 tedu Exp $	*/
+=======
+/*	$OpenBSD: procfs_vfsops.c,v 1.26 2010/09/23 18:43:37 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: procfs_vfsops.c,v 1.25 1996/02/09 22:40:53 christos Exp $	*/
 
 /*
@@ -158,7 +162,7 @@ procfs_root(mp, vpp)
 	error = procfs_allocvp(mp, vpp, 0, Proot);
 	if (error)
 		return (error);
-	vn_lock(*vpp, LK_EXCLUSIVE, curproc);
+	vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY, curproc);
 
 	return (0);
 }

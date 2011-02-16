@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: locore.s,v 1.7 2006/03/23 02:29:35 ray Exp $	*/
+=======
+/*	$OpenBSD: locore.s,v 1.15 2010/11/27 18:04:20 miod Exp $	*/
+>>>>>>> origin/master
 /*	OpenBSD: locore.s,v 1.64 2005/04/17 18:47:50 miod Exp 	*/
 
 /*
@@ -217,6 +221,8 @@ _C_LABEL(kgdb_stack):
  */
 	.globl	_C_LABEL(cpcb)
 _C_LABEL(cpcb):	.word	_C_LABEL(u0)
+
+curproc = CPUINFO_VA + CPUINFO_CURPROC
 
 /*
  * cputyp is the current cpu type, used to distinguish between
@@ -2687,22 +2693,23 @@ dostart:
 	nop; nop; nop
 
 	/*
-	 * ... and set up the PTW as we want them
+	 * ... and unmap ROM code.
 	 */
 	set	PTW0_DEFAULT & ~PTW_V, %o1
 	sta	%o1, [%g0] ASI_PTW0
+#if 0
 	set	PTW1_DEFAULT, %o1
 	sta	%o1, [%g0] ASI_PTW1
 	set	PTW2_DEFAULT, %o1
 	sta	%o1, [%g0] ASI_PTW2
+#endif
 
 	sta	%g0, [%g0] ASI_PIID
 	sta	%g0, [%g0] ASI_GTLB_INVAL_PID
 	nop; nop; nop
 
 	/*
-	 * Call main.  This returns to us after loading /sbin/init into
-	 * user space.  (If the exec fails, main() does not return.)
+	 * Call main.
 	 */
 	call	_C_LABEL(main)
 	 clr	%o0			! our frame arg is ignored
@@ -3498,8 +3505,6 @@ Lsw_scan:
 	 */
 	mov	SONPROC, %o0			! p->p_stat = SONPROC
 	stb	%o0, [%g3 + P_STAT]
-	sethi	%hi(_C_LABEL(want_resched)), %o0
-	st	%g0, [%o0 + %lo(_C_LABEL(want_resched))]	! want_resched = 0;
 	ld	[%g3 + P_ADDR], %g5		! newpcb = p->p_addr;
 	st	%g0, [%g3 + 4]			! p->p_back = NULL;
 	ld	[%g5 + PCB_PSR], %g2		! newpsr = newpcb->pcb_psr;
@@ -3515,7 +3520,11 @@ Lsw_scan:
 	 */
 	tst	%g4
 	be,a	Lsw_load		! if no old process, go load
-	 wr	%g1, (IPL_CLOCK << 8) | PSR_ET, %psr
+#if 0
+	 wr	%g1, (IPL_SCHED << 8) | PSR_ET, %psr
+#else
+	 wr	%g1, (IPL_SCHED << 8), %psr
+#endif
 
 	INCR(_C_LABEL(nswitchdiff))		! clobbers %o0,%o1
 	/*
@@ -3529,15 +3538,39 @@ wb1:	SAVE; SAVE; SAVE; SAVE; SAVE; SAVE; SAVE	/* 7 of each: */
 	/*
 	 * Load the new process.  To load, we must change stacks and
 	 * alter cpcb and %wim, hence we must disable traps.  %psr is
-	 * currently equal to oldpsr (%g1) ^ (IPL_CLOCK << 8);
+	 * currently equal to oldpsr (%g1) ^ (IPL_SCHED << 8);
 	 * this means that PSR_ET is on.  Likewise, PSR_ET is on
 	 * in newpsr (%g2), although we do not know newpsr's ipl.
 	 *
 	 * We also must load up the `in' and `local' registers.
 	 */
-	wr	%g1, (IPL_CLOCK << 8) | PSR_ET, %psr
+#if 0
+	wr	%g1, (IPL_SCHED << 8) | PSR_ET, %psr
+#else
+	wr	%g1, (IPL_SCHED << 8), %psr
+#endif
 Lsw_load:
-!	wr	%g1, (IPL_CLOCK << 8) | PSR_ET, %psr	! done above
+#if 0
+!	wr	%g1, (IPL_SCHED << 8) | PSR_ET, %psr	! done above
+#else
+!	wr	%g1, (IPL_SCHED << 8), %psr	! done above
+#endif
+
+	/*
+	 * Access the new pcb while we still enable traps. This is
+	 * simpler (for us) than doing manual TLB insertion, and
+	 * is faster if this is a TLB hit.
+	 */
+	ld	[%g5 + PCB_SP], %o1	! access pcb
+	ld	[%g3 + P_VMSPACE], %o3	! access p
+	ld	[%o3 + VM_PMAP], %o3	! access p->p_vmspace
+	ld	[%o3 + PMAP_PSEGTAB], %o3	! access pmap
+
+	/*
+	 * Disable traps now.
+	 */
+	wr	%g1, PSR_ET, %psr
+
 	/* compute new wim */
 	ld	[%g5 + PCB_WIM], %o0
 	mov	1, %o1
@@ -3559,13 +3592,17 @@ Lsw_load:
 	 */
 
 	ld	[%g3 + P_VMSPACE], %o3	! vm = p->p_vmspace;
+#if 0
 	PTE_OF_ADDR(%o3, %o1, %o2, badstack)
 	INSERT_PTE(%o3, %o1)
+#endif
 
 	ld	[%o3 + VM_PMAP], %o3	! pm = vm->vm_map.pmap;
 	add	%o3, PMAP_PSEGTAB, %o3
+#if 0
 	PTE_OF_ADDR(%o3, %o1, %o2, badstack)
 	INSERT_PTE(%o3, %o1)
+#endif
 
 	ld	[%o3], %o3		! pmap->pm_psegtab
 	lda	[%g0] ASI_PDBR, %o4	! get old psegtab
@@ -3757,17 +3794,6 @@ Lfserr:
 	retl				! and return error indicator
 	 mov	-1, %o0
 
-	/*
-	 * This is just like Lfserr, but it's a global label that allows
-	 * mem_access_fault() to check to see that we don't want to try to
-	 * page in the fault.  It's used by xldcontrolb().
-	 */
-	 .globl	_C_LABEL(Lfsbail)
-Lfsbail:
-	st	%g0, [%o2 + PCB_ONFAULT]! error in r/w, clear pcb_onfault
-	retl				! and return error indicator
-	 mov	-1, %o0
-
 /*
  * copywords(src, dst, nbytes)
  *
@@ -3840,7 +3866,7 @@ ENTRY(memcpy)
 	mov	%o0, %o3
 	mov	%o1, %o0
 	mov	%o3, %o1
-ENTRY(bcopy)
+Lbcopy_old:
 	cmp	%o2, BCOPY_SMALL
 Lbcopy_start:
 	bge,a	Lbcopy_fancy	! if >= this many, go be fancy.
@@ -4008,6 +4034,7 @@ Lbcopy_done:
 /*
  * ovbcopy(src, dst, len): like bcopy, but regions may overlap.
  */
+ENTRY(bcopy)
 ENTRY(ovbcopy)
 	cmp	%o0, %o1	! src < dst?
 	bgeu	Lbcopy_start	! no, go copy forwards as via bcopy
@@ -4102,7 +4129,7 @@ Lback_fancy:
 	dec	2, %o0		! do {
 	ldsh	[%o0], %o4	!	src -= 2;
 	dec	2, %o1		!	dst -= 2;
-	deccc	2, %o0		!	*(short *)dst = *(short *)src;
+	deccc	2, %o2		!	*(short *)dst = *(short *)src;
 	bge	5b		! } while ((len -= 2) >= 0);
 	sth	%o4, [%o1]
 	b	Lback_mopb	! goto mop_up_byte;
@@ -4165,8 +4192,8 @@ Lback_mopb:
 	stb	%o4, [%o1 - 1]	! }
 
 /*
- * kcopy() is exactly like bcopy except that it set pcb_onfault such that
- * when a fault occurs, it is able to return -1 to indicate this to the
+ * kcopy() is exactly like old bcopy except that it set pcb_onfault such that
+ * when a fault occurs, it is able to return EFAULT to indicate this to the
  * caller.
  */
 ENTRY(kcopy)
@@ -4850,58 +4877,6 @@ Lumul_shortway:
 	 addcc	%g0, %g0, %o1	! %o1 = zero, and set Z
 
 /*
- * Here is a very good random number generator.  This implementation is
- * based on ``Two Fast Implementations of the "Minimal Standard" Random
- * Number Generator", David G. Carta, Communications of the ACM, Jan 1990,
- * Vol 33 No 1.
- */
-	.data
-	.globl	_C_LABEL(_randseed)
-_C_LABEL(_randseed):
-	.word	1
-	.text
-ENTRY(random)
-	sethi	%hi(16807), %o1
-	wr	%o1, %lo(16807), %y
-	 sethi	%hi(_C_LABEL(_randseed)), %g1
-	 ld	[%g1 + %lo(_C_LABEL(_randseed))], %o0
-	 andcc	%g0, 0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %o0, %o2
-	mulscc  %o2, %g0, %o2
-	rd	%y, %o3
-	srl	%o2, 16, %o1
-	set	0xffff, %o4
-	and	%o4, %o2, %o0
-	sll	%o0, 15, %o0
-	srl	%o3, 17, %o3
-	or	%o3, %o0, %o0
-	addcc	%o0, %o1, %o0
-	bneg	1f
-	 sethi	%hi(0x7fffffff), %o1
-	retl
-	 st	%o0, [%g1 + %lo(_C_LABEL(_randseed))]
-1:
-	or	%o1, %lo(0x7fffffff), %o1
-	add	%o0, 1, %o0
-	and	%o1, %o0, %o0
-	retl
-	 st	%o0, [%g1 + %lo(_C_LABEL(_randseed))]
-
-/*
  * delay function
  *
  * void delay(N)  -- delay N microseconds
@@ -5056,6 +5031,3 @@ _C_LABEL(proc0paddr):
 	.globl winuf_invalid
 
 	.comm	_C_LABEL(nwindows), 4
-	.comm	_C_LABEL(curproc), 4
-	.comm	_C_LABEL(qs), 32 * 8
-	.comm	_C_LABEL(whichqs), 4

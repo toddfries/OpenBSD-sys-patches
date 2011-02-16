@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: esp_pcmcia.c,v 1.5 2005/01/27 17:04:55 millert Exp $	*/
+=======
+/*	$OpenBSD: esp_pcmcia.c,v 1.9 2010/06/28 18:31:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: esp_pcmcia.c,v 1.8 2000/06/05 15:36:45 tsutsui Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,7 +84,7 @@ int	esp_pcmcia_enable(void *, int);
 
 struct scsi_adapter esp_pcmcia_adapter = {
 	ncr53c9x_scsi_cmd,	/* cmd */
-	minphys,		/* minphys */
+	scsi_minphys,		/* scsi_minphys */
 	0,			/* open */
 	0,			/* close */
 };
@@ -215,7 +212,7 @@ esp_pcmcia_attach(parent, self, aux)
 	 *  Initialize nca board itself.
 	 */
 	esc->sc_flags |= ESP_PCMCIA_ATTACHING;
-	ncr53c9x_attach(sc, &esp_pcmcia_adapter, NULL);
+	ncr53c9x_attach(sc, &esp_pcmcia_adapter);
 	esc->sc_flags &= ~ESP_PCMCIA_ATTACHING;
 	esc->sc_flags |= ESP_PCMCIA_ATTACHED;
 	return;

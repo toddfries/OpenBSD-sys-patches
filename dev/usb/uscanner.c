@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uscanner.c,v 1.21 2006/07/01 10:33:12 miod Exp $ */
+=======
+/*	$OpenBSD: uscanner.c,v 1.44 2011/01/25 20:03:36 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: uscanner.c,v 1.40 2003/01/27 00:32:44 wiz Exp $	*/
 
 /*
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -123,25 +120,8 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_4300C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_S20 }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_5200C }, 0 },
-#if 0
-  /* Handled by usscanner */
- {{ USB_VENDOR_HP, USB_PRODUCT_HP_5300C }, 0 },
-#endif
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6200C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6300C }, 0 },
-
-#if 0
-  /* XXX Should be handled by usscanner */
-  /* Microtek */
- {{ USB_VENDOR_SCANLOGIC, USB_PRODUCT_SCANLOGIC_336CX }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_X6U }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_336CX }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_336CX2 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_C6 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL2 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6UL }, 0 },
-#endif
 
   /* Mustek */
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_1200CU }, 0 },
@@ -288,7 +268,26 @@ Static void uscanner_do_close(struct uscanner_softc *);
 
 #define USCANNERUNIT(n) (minor(n))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uscanner);
+=======
+int uscanner_match(struct device *, void *, void *); 
+void uscanner_attach(struct device *, struct device *, void *); 
+int uscanner_detach(struct device *, int); 
+int uscanner_activate(struct device *, int); 
+
+struct cfdriver uscanner_cd = { 
+	NULL, "uscanner", DV_DULL 
+}; 
+
+const struct cfattach uscanner_ca = { 
+	sizeof(struct uscanner_softc), 
+	uscanner_match, 
+	uscanner_attach, 
+	uscanner_detach, 
+	uscanner_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(uscanner)
 {
@@ -366,6 +365,7 @@ USB_ATTACH(uscanner)
 
 	sc->sc_bulkin = ed_bulkin->bEndpointAddress;
 	sc->sc_bulkout = ed_bulkout->bEndpointAddress;
+<<<<<<< HEAD
 
 #ifdef __FreeBSD__
 	/* the main device, ctrl endpoint */
@@ -377,6 +377,8 @@ USB_ATTACH(uscanner)
 			   USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 int
@@ -607,7 +609,11 @@ uscannerwrite(dev_t dev, struct uio *uio, int flag)
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 int
+<<<<<<< HEAD
 uscanner_activate(device_ptr_t self, enum devact act)
+=======
+uscanner_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uscanner_softc *sc = (struct uscanner_softc *)self;
 
@@ -640,7 +646,6 @@ USB_DETACH(uscanner)
 	DPRINTF(("uscanner_detach: sc=%p\n", sc));
 #endif
 
-	sc->sc_dying = 1;
 	sc->sc_dev_flags = 0;	/* make close really close device */
 
 	/* Abort all pipes.  Causes processes waiting for transfer to wake. */
@@ -669,6 +674,7 @@ USB_DETACH(uscanner)
 	/* Nuke the vnodes for any open instances (calls close). */
 	mn = self->dv_unit * USB_MAX_ENDPOINTS;
 	vdevgone(maj, mn, mn + USB_MAX_ENDPOINTS - 1, VCHR);
+<<<<<<< HEAD
 #elif defined(__FreeBSD__)
 	/* destroy the device for the control endpoint */
 	dev = makedev(USCANNER_CDEV_MAJOR, USBDEVUNIT(sc->sc_dev));
@@ -680,6 +686,8 @@ USB_DETACH(uscanner)
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
+=======
+>>>>>>> origin/master
 
 	return (0);
 }

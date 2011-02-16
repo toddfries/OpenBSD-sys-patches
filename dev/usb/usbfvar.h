@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: usbfvar.h,v 1.7 2009/11/04 19:14:10 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -101,6 +105,7 @@ struct usbf_bus {
 	/* Filled by usbf driver */
 	struct usbf_softc	*usbfctl;
 	int			 intr_context;
+<<<<<<< HEAD
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void			*soft;		/* soft interrupt cookie */
@@ -108,6 +113,9 @@ struct usbf_bus {
 	usb_callout_t		 softi;		/* timeout handle */
 #endif
 #endif
+=======
+	void			*soft;		/* soft interrupt cookie */
+>>>>>>> origin/master
 	bus_dma_tag_t		 dmatag;	/* DMA tag */
 };
 

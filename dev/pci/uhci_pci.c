@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uhci_pci.c,v 1.24 2007/03/18 20:14:51 mglocker Exp $	*/
+=======
+/*	$OpenBSD: uhci_pci.c,v 1.31 2010/12/14 16:13:16 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uhci_pci.c,v 1.24 2002/10/02 16:51:58 thorpej Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -42,7 +39,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -61,6 +58,7 @@ int	uhci_pci_match(struct device *, void *, void *);
 void	uhci_pci_attach(struct device *, struct device *, void *);
 void	uhci_pci_attach_deferred(struct device *);
 int	uhci_pci_detach(struct device *, int);
+int	uhci_pci_activate(struct device *, int);
 
 struct uhci_pci_softc {
 	uhci_softc_t		sc;
@@ -71,7 +69,7 @@ struct uhci_pci_softc {
 
 struct cfattach uhci_pci_ca = {
 	sizeof(struct uhci_pci_softc), uhci_pci_match, uhci_pci_attach,
-	uhci_pci_detach, uhci_activate
+	uhci_pci_detach, uhci_pci_activate
 };
 
 int
@@ -85,6 +83,25 @@ uhci_pci_match(struct device *parent, void *match, void *aux)
 		return (1);
  
 	return (0);
+}
+
+int
+uhci_pci_activate(struct device *self, int act)
+{
+	struct uhci_pci_softc *sc = (struct uhci_pci_softc *)self;
+
+	/* On resume, set legacy support attribute and enable intrs */
+	switch (act) {
+	case DVACT_RESUME:
+		pci_conf_write(sc->sc_pc, sc->sc_tag,
+		    PCI_LEGSUP, PCI_LEGSUP_USBPIRQDEN);
+		bus_space_barrier(sc->sc.iot, sc->sc.ioh, 0, sc->sc.sc_size,
+		    BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE);
+		bus_space_write_2(sc->sc.iot, sc->sc.ioh, UHCI_INTR, 0);
+		break;
+	}
+
+	return uhci_activate(self, act);
 }
 
 void
@@ -176,7 +193,7 @@ uhci_pci_attach(struct device *parent, struct device *self, void *aux)
 	config_defer(self, uhci_pci_attach_deferred);
 	
 	/* Ignore interrupts for now */
-	sc->sc.sc_dying = 1;
+	sc->sc.sc_bus.dying = 1;
 
 	splx(s);
 
@@ -197,7 +214,7 @@ uhci_pci_attach_deferred(struct device *self)
 
 	s = splhardusb();
 	
-	sc->sc.sc_dying = 0;
+	sc->sc.sc_bus.dying = 0;
 	r = uhci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {
 		printf("%s: init failed, error=%d\n", devname, r);
@@ -213,6 +230,7 @@ uhci_pci_attach_deferred(struct device *self)
 
 unmap_ret:
 	bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
+	pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
 	splx(s);
 }
 

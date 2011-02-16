@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: akbd.c,v 1.5 2006/03/23 21:54:26 miod Exp $	*/
+=======
+/*	$OpenBSD: akbd.c,v 1.8 2010/05/23 15:09:38 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: akbd.c,v 1.17 2005/01/15 16:00:59 chs Exp $	*/
 
 /*
@@ -425,7 +429,7 @@ akbd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		return (0);
 #endif
 
-#ifdef mac68k	/* XXX not worth creating akbd_machdep_ioctl() */
+#if defined(__mac68k__)	/* XXX not worth creating akbd_machdep_ioctl() */
 	case WSKBDIO_BELL:
 	case WSKBDIO_COMPLEXBELL:
 #define d ((struct wskbd_bell_data *)data)
@@ -449,7 +453,7 @@ akbd_rawrepeat(void *v)
 	s = spltty();
 	wskbd_rawinput(sc->sc_wskbddev, sc->sc_rep, sc->sc_nrep);
 	splx(s);
-	timeout_add(&sc->sc_rawrepeat_ch, hz * REP_DELAYN / 1000);
+	timeout_add_msec(&sc->sc_rawrepeat_ch, REP_DELAYN);
 }
 #endif
 
@@ -576,7 +580,7 @@ akbd_input(struct akbd_softc *sc, int key)
 		timeout_del(&sc->sc_rawrepeat_ch);
 		sc->sc_nrep = npress;
 		if (npress != 0)
-			timeout_add(&sc->sc_rawrepeat_ch, hz * REP_DELAY1/1000);
+			timeout_add_msec(&sc->sc_rawrepeat_ch, REP_DELAY1);
 #endif
 	} else {
 		wskbd_input(sc->sc_wskbddev, type, val);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ether.h,v 1.37 2006/05/28 00:20:21 brad Exp $	*/
+=======
+/*	$OpenBSD: if_ether.h,v 1.47 2010/02/08 13:32:50 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -88,11 +92,6 @@ struct	ether_header {
 #define	ETHER_CRC_POLY_LE	0xedb88320
 #define	ETHER_CRC_POLY_BE	0x04c11db6
 
-/*
- * Ethernet-specific mbuf flags.
- */
-#define M_HASFCS	M_LINK0	/* FCS included at end of frame */
-
 #ifdef _KERNEL
 /*
  * Macro to map an IP multicast address to an Ethernet multicast address.
@@ -102,14 +101,14 @@ struct	ether_header {
 #define ETHER_MAP_IP_MULTICAST(ipaddr, enaddr)				\
 	/* struct in_addr *ipaddr; */					\
 	/* u_int8_t enaddr[ETHER_ADDR_LEN]; */				\
-{									\
+do {									\
 	(enaddr)[0] = 0x01;						\
 	(enaddr)[1] = 0x00;						\
 	(enaddr)[2] = 0x5e;						\
 	(enaddr)[3] = ((u_int8_t *)ipaddr)[1] & 0x7f;			\
 	(enaddr)[4] = ((u_int8_t *)ipaddr)[2];				\
 	(enaddr)[5] = ((u_int8_t *)ipaddr)[3];				\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * Macro to map an IPv6 multicast address to an Ethernet multicast address.
@@ -119,14 +118,16 @@ struct	ether_header {
 #define ETHER_MAP_IPV6_MULTICAST(ip6addr, enaddr)			\
 	/* struct in6_addr *ip6addr; */					\
 	/* u_int8_t enaddr[ETHER_ADDR_LEN]; */				\
-{									\
+do {									\
 	(enaddr)[0] = 0x33;						\
 	(enaddr)[1] = 0x33;						\
 	(enaddr)[2] = ((u_int8_t *)ip6addr)[12];			\
 	(enaddr)[3] = ((u_int8_t *)ip6addr)[13];			\
 	(enaddr)[4] = ((u_int8_t *)ip6addr)[14];			\
 	(enaddr)[5] = ((u_int8_t *)ip6addr)[15];			\
-}
+} while (/* CONSTCOND */ 0)
+
+void	ether_fakeaddr(struct ifnet *);
 #endif
 
 /*
@@ -165,10 +166,13 @@ struct	arpcom {
 struct llinfo_arp {
 	LIST_ENTRY(llinfo_arp) la_list;
 	struct	rtentry *la_rt;
-	struct	mbuf *la_hold;		/* last packet until resolved/timeout */
+	struct	mbuf *la_hold_head;	/* packet hold queue */
+	struct	mbuf *la_hold_tail;
+	int	la_hold_count;		/* number of packets queued */
 	long	la_asked;		/* last time we QUERIED for this addr */
-#define la_timer la_rt->rt_rmx.rmx_expire /* deletion time in seconds */
 };
+#define MAX_HOLD_QUEUE 10
+#define MAX_HOLD_TOTAL 100
 
 struct sockaddr_inarp {
 	u_int8_t  sin_len;
@@ -240,13 +244,13 @@ struct ether_multistep {
 	/* u_int8_t addrhi[ETHER_ADDR_LEN]; */				\
 	/* struct arpcom *ac; */					\
 	/* struct ether_multi *enm; */					\
-{									\
+do {									\
 	for ((enm) = LIST_FIRST(&(ac)->ac_multiaddrs);			\
 	    (enm) != LIST_END(&(ac)->ac_multiaddrs) &&			\
 	    (bcmp((enm)->enm_addrlo, (addrlo), ETHER_ADDR_LEN) != 0 ||	\
 	     bcmp((enm)->enm_addrhi, (addrhi), ETHER_ADDR_LEN) != 0);	\
 		(enm) = LIST_NEXT((enm), enm_list));			\
-}
+} while (/* CONSTCOND */ 0)
 
 /*
  * Macro to step through all of the ether_multi records, one at a time.
@@ -255,28 +259,27 @@ struct ether_multistep {
  * and get the first record.  Both macros return a NULL "enm" when there
  * are no remaining records.
  */
-#define ETHER_NEXT_MULTI(step, enm) \
-	/* struct ether_multistep step; */  \
-	/* struct ether_multi *enm; */  \
-{ \
-	if (((enm) = (step).e_enm) != NULL) \
-		(step).e_enm = LIST_NEXT((enm), enm_list); \
-}
+#define ETHER_NEXT_MULTI(step, enm)					\
+	/* struct ether_multistep step; */				\
+	/* struct ether_multi *enm; */					\
+do {									\
+	if (((enm) = (step).e_enm) != NULL)				\
+		(step).e_enm = LIST_NEXT((enm), enm_list);		\
+} while (/* CONSTCOND */ 0)
 
-#define ETHER_FIRST_MULTI(step, ac, enm) \
-	/* struct ether_multistep step; */ \
-	/* struct arpcom *ac; */ \
-	/* struct ether_multi *enm; */ \
-{ \
-	(step).e_enm = LIST_FIRST(&(ac)->ac_multiaddrs); \
-	ETHER_NEXT_MULTI((step), (enm)); \
-}
+#define ETHER_FIRST_MULTI(step, ac, enm)				\
+	/* struct ether_multistep step; */				\
+	/* struct arpcom *ac; */					\
+	/* struct ether_multi *enm; */					\
+do {									\
+	(step).e_enm = LIST_FIRST(&(ac)->ac_multiaddrs);		\
+	ETHER_NEXT_MULTI((step), (enm));				\
+} while (/* CONSTCOND */ 0)
 
 #ifdef _KERNEL
 
 extern struct ifnet *myip_ifp;
 
-int arpioctl(u_long, caddr_t);
 void arprequest(struct ifnet *, u_int32_t *, u_int32_t *, u_int8_t *);
 void revarpinput(struct mbuf *);
 void in_revarpinput(struct mbuf *);

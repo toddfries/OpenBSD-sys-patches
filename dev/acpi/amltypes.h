@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: amltypes.h,v 1.24 2007/01/23 04:05:58 jordan Exp $ */
+=======
+/* $OpenBSD: amltypes.h,v 1.39 2010/10/15 20:25:04 jordan Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -108,7 +112,6 @@
 #define AMLOP_NOTIFY		0x86
 #define AMLOP_SIZEOF		0x87
 #define AMLOP_INDEX		0x88
-#define AMLOP_DEREFOF		0x83
 #define AMLOP_MATCH		0x89
 #define AMLOP_CREATEDWORDFIELD	0x8A
 #define AMLOP_CREATEWORDFIELD	0x8B
@@ -157,8 +160,6 @@
 #define AML_MATCH_GE		4
 #define AML_MATCH_GT		5
 
-#define AML_STATIC		0x8000
-
 /* Defined types for ObjectType() */
 enum aml_objecttype {
 	AML_OBJTYPE_UNINITIALIZED = 0,
@@ -181,7 +182,14 @@ enum aml_objecttype {
 
 	AML_OBJTYPE_NAMEREF = 0x100,
 	AML_OBJTYPE_OBJREF,
+<<<<<<< HEAD
 	AML_OBJTYPE_STATICINT=AML_OBJTYPE_INTEGER|AML_STATIC,
+=======
+	AML_OBJTYPE_SCOPE,
+	AML_OBJTYPE_NOTARGET,
+	AML_OBJTYPE_HEXSTRING,
+	AML_OBJTYPE_DECSTRING,
+>>>>>>> origin/master
 };
 
 /* AML Opcode Arguments */
@@ -211,6 +219,19 @@ enum aml_objecttype {
 #define AML_ARG_TERMOBJLIST	'T'
 #define AML_ARG_TERMOBJ		't'
 
+<<<<<<< HEAD
+=======
+#define AML_ARG_IFELSE          'I'
+#define AML_ARG_BUFFER          'B'
+#define AML_ARG_SEARCHNAME      'n'
+#define AML_ARG_CREATENAME      'N'
+#define AML_ARG_STKARG          'A'
+#define AML_ARG_STKLOCAL        'L'
+#define AML_ARG_DEBUG           'D'
+#define AML_ARG_CONST           'c'
+#define AML_ARG_TARGET          'r'
+
+>>>>>>> origin/master
 #define AML_METHOD_ARGCOUNT(v)	 (((v) >> 0) & 0x7)
 #define AML_METHOD_SERIALIZED(v) (((v) >> 3) & 0x1)
 #define AML_METHOD_SYNCLEVEL(v)	 (((v) >> 4) & 0xF)
@@ -239,6 +260,15 @@ enum aml_objecttype {
 struct aml_scope;
 struct aml_node;
 
+<<<<<<< HEAD
+=======
+struct aml_waitq {
+	struct aml_scope          *scope;
+	SIMPLEQ_ENTRY(aml_waitq)   link;
+};
+SIMPLEQ_HEAD(aml_waitq_head, aml_waitq);
+
+>>>>>>> origin/master
 /* AML Object Value */
 struct aml_value {
 	int	type;
@@ -285,6 +315,25 @@ struct aml_value {
 			u_int16_t	pwr_order;
 		} vpowerrsrc;
 		struct acpi_mutex	*vmutex;
+<<<<<<< HEAD
+=======
+		struct {
+			u_int8_t         *name;
+			struct aml_node  *node;
+		} vnameref;
+		struct {
+			int               synclvl;
+			int               savelvl;
+			int               count;
+			char              ownername[5];
+			struct aml_scope *owner;
+			struct aml_waitq_head    waiters;
+		} Vmutex;
+		struct {
+			int               state;
+			struct aml_waitq_head    waiters;
+		} Vevent;
+>>>>>>> origin/master
 	} _;
 };
 
@@ -309,25 +358,33 @@ struct aml_value {
 #define aml_pkglen(v)		((v)->length)
 #define aml_pkgval(v,i)		(&(v)->v_package[(i)])
 
+struct acpi_pci {
+	TAILQ_ENTRY(acpi_pci)		next;
+
+	struct aml_node			*node;
+	struct device			*device;
+
+	int				sub;
+	int				seg;
+	int				bus;
+	int				dev;
+	int				fun;
+};
+
 struct aml_node {
 	struct aml_node *parent;
-	struct aml_node *child;
-	struct aml_node *sibling;
+
+	SIMPLEQ_HEAD(,aml_node)	son;
+	SIMPLEQ_ENTRY(aml_node)	sib;
 
 	char		name[5];
 	u_int16_t	opcode;
 	u_int8_t	*start;
 	u_int8_t	*end;
-  //	const char	*name;
-  //	const char	*mnem;
 
 	struct aml_value *value;
-
-	int		depth;
+	struct acpi_pci  *pci;
 };
-
-#define AML_FALSE		(0)
-#define AML_TRUE		(1)
 
 #define aml_bitmask(n)		(1L << ((n) & 0x7))
 #define aml_bitpos(n)		((n)&0x7)

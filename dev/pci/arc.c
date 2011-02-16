@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: arc.c,v 1.60 2007/03/27 11:22:59 jmc Exp $ */
+=======
+/*	$OpenBSD: arc.c,v 1.92 2010/09/07 16:21:44 deraadt Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -23,8 +27,8 @@
 #include <sys/buf.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/rwlock.h>
 
 #include <machine/bus.h>
@@ -221,6 +225,13 @@ struct arc_fw_bufhdr {
 #define ARC_FW_NOP		0x38	/* opcode only */
 
 #define ARC_FW_CMD_OK		0x41
+<<<<<<< HEAD
+=======
+#define ARC_FW_BLINK		0x43
+#define  ARC_FW_BLINK_ENABLE			0x00
+#define  ARC_FW_BLINK_DISABLE			0x01
+#define ARC_FW_CMD_PASS_REQD	0x4d
+>>>>>>> origin/master
 
 struct arc_fw_comminfo {
 	u_int8_t		baud_rate;
@@ -305,7 +316,7 @@ struct arc_fw_diskinfo {
 	u_int8_t		drive_select;
 	u_int8_t		raid_number; // 0xff unowned
 	struct arc_fw_scsiattr	scsi_attr;
-	u_int8_t		reserved[40];
+	u_int8_t		reserved[44];
 } __packed;
 
 struct arc_fw_sysinfo {
@@ -355,7 +366,7 @@ void			arc_shutdown(void *);
 int			arc_intr(void *);
 
 struct arc_ccb;
-TAILQ_HEAD(arc_ccb_list, arc_ccb);
+SLIST_HEAD(arc_ccb_list, arc_ccb);
 
 struct arc_softc {
 	struct device		sc_dev;
@@ -378,7 +389,9 @@ struct arc_softc {
 	struct arc_dmamem	*sc_requests;
 	struct arc_ccb		*sc_ccbs;
 	struct arc_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
 
+	struct scsi_iopool	sc_iopool;
 	struct scsibus_softc	*sc_scsibus;
 
 	struct rwlock		sc_lock;
@@ -387,6 +400,8 @@ struct arc_softc {
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	int			sc_nsensors;
+
+	u_int32_t		sc_ledmask;
 };
 #define DEVNAME(_s)		((_s)->sc_dev.dv_xname)
 
@@ -399,15 +414,11 @@ struct cfdriver arc_cd = {
 };
 
 /* interface for scsi midlayer to talk to */
-int			arc_scsi_cmd(struct scsi_xfer *);
-void			arc_minphys(struct buf *);
+void			arc_scsi_cmd(struct scsi_xfer *);
+void			arc_minphys(struct buf *, struct scsi_link *);
 
 struct scsi_adapter arc_switch = {
 	arc_scsi_cmd, arc_minphys, NULL, NULL, NULL
-};
-
-struct scsi_device arc_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 /* code to deal with getting bits in and out of the bus space */
@@ -453,7 +464,7 @@ struct arc_ccb {
 	struct arc_io_cmd	*ccb_cmd;
 	u_int32_t		ccb_cmd_post;
 
-	TAILQ_ENTRY(arc_ccb)	ccb_link;
+	SLIST_ENTRY(arc_ccb)	ccb_link;
 };
 
 int			arc_alloc_ccbs(struct arc_softc *);
@@ -478,7 +489,7 @@ void			arc_unlock(struct arc_softc *);
 void			arc_wait(struct arc_softc *);
 u_int8_t		arc_msg_cksum(void *, u_int16_t);
 int			arc_msgbuf(struct arc_softc *, void *, size_t,
-			    void *, size_t);
+			    void *, size_t, int);
 
 /* bioctl */
 int			arc_bioctl(struct device *, u_long, caddr_t);
@@ -488,6 +499,7 @@ int			arc_bio_disk(struct arc_softc *, struct bioc_disk *);
 int			arc_bio_alarm(struct arc_softc *, struct bioc_alarm *);
 int			arc_bio_alarm_state(struct arc_softc *,
 			    struct bioc_alarm *);
+int			arc_bio_blink(struct arc_softc *, struct bioc_blink *);
 
 int			arc_bio_getvol(struct arc_softc *, int,
 			    struct arc_fw_volinfo *);
@@ -532,14 +544,14 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_shutdownhook = shutdownhook_establish(arc_shutdown, sc);
 	if (sc->sc_shutdownhook == NULL)
-		panic("unable to establish arc powerhook");
+		panic("unable to establish arc shutdownhook");
 
-	sc->sc_link.device = &arc_dev;
 	sc->sc_link.adapter = &arc_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = ARC_MAX_TARGET;
 	sc->sc_link.adapter_buswidth = ARC_MAX_TARGET;
-	sc->sc_link.openings = sc->sc_req_count / ARC_MAX_TARGET;
+	sc->sc_link.openings = sc->sc_req_count;
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -553,7 +565,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 
 #if NBIO > 0
 	if (bio_register(self, arc_bioctl) != 0)
-		panic("%s: bioctl registration failed\n", DEVNAME(sc));
+		panic("%s: bioctl registration failed", DEVNAME(sc));
 
 	/*
 	 * you need to talk to the firmware to get volume info. our firmware
@@ -643,7 +655,7 @@ arc_intr(void *arg)
 	return (1);
 }
 
-int
+void
 arc_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link		*link = xs->sc_link;
@@ -651,7 +663,6 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 	struct arc_ccb			*ccb;
 	struct arc_msg_scsicmd		*cmd;
 	u_int32_t			reg;
-	int				rv = SUCCESSFULLY_QUEUED;
 	int				s;
 
 	if (xs->cmdlen > ARC_MSG_CDBLEN) {
@@ -660,32 +671,17 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20;
 		xs->error = XS_SENSE;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
-	s = splbio();
-	ccb = arc_get_ccb(sc);
-	splx(s);
-	if (ccb == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
-	}
-
+	ccb = xs->io;
 	ccb->ccb_xs = xs;
 
 	if (arc_load_xs(ccb) != 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		arc_put_ccb(sc, ccb);
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	cmd = &ccb->ccb_cmd->cmd;
@@ -718,15 +714,12 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 	s = splbio();
 	arc_push(sc, reg);
 	if (xs->flags & SCSI_POLL) {
-		rv = COMPLETE;
 		if (arc_complete(sc, ccb, xs->timeout) != 0) {
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
 		}
 	}
 	splx(s);
-
-	return (rv);
 }
 
 int
@@ -779,10 +772,14 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 	}
 
+<<<<<<< HEAD
 	/* timeout_del */
 	xs->flags |= ITSDONE;
 
 	if (reg & ARC_REG_REPLY_QUEUE_ERR) {
+=======
+	if (reg & ARC_RA_REPLY_QUEUE_ERR) {
+>>>>>>> origin/master
 		cmd = &ccb->ccb_cmd->cmd;
 
 		switch (cmd->status) {
@@ -815,7 +812,6 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		xs->resid = 0;
 	}
 
-	arc_put_ccb(sc, ccb);
 	scsi_done(xs);
 }
 
@@ -853,7 +849,7 @@ arc_complete(struct arc_softc *sc, struct arc_ccb *nccb, int timeout)
 }
 
 void
-arc_minphys(struct buf *bp)
+arc_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > MAXPHYS)
 		bp->b_bcount = MAXPHYS;
@@ -991,6 +987,10 @@ arc_bioctl(struct device *self, u_long cmd, caddr_t addr)
 		error = arc_bio_alarm(sc, (struct bioc_alarm *)addr);
 		break;
 
+	case BIOCBLINK:
+		error = arc_bio_blink(sc, (struct bioc_blink *)addr);
+		break;
+
 	default:
 		error = ENOTTY;
 		break;
@@ -1032,7 +1032,7 @@ arc_bio_alarm(struct arc_softc *sc, struct bioc_alarm *ba)
 	}
 
 	arc_lock(sc);
-	error = arc_msgbuf(sc, request, len, reply, sizeof(reply));
+	error = arc_msgbuf(sc, request, len, reply, sizeof(reply), 0);
 	arc_unlock(sc);
 
 	if (error != 0)
@@ -1057,7 +1057,7 @@ arc_bio_alarm_state(struct arc_softc *sc, struct bioc_alarm *ba)
 
 	arc_lock(sc);
 	error = arc_msgbuf(sc, &request, sizeof(request),
-	    sysinfo, sizeof(struct arc_fw_sysinfo));
+	    sysinfo, sizeof(struct arc_fw_sysinfo), 0);
 	arc_unlock(sc);
 
 	if (error != 0)
@@ -1087,7 +1087,7 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 
 	request[0] = ARC_FW_SYSINFO;
 	error = arc_msgbuf(sc, request, 1, sysinfo,
-	    sizeof(struct arc_fw_sysinfo));
+	    sizeof(struct arc_fw_sysinfo), 0);
 	if (error != 0)
 		goto out;
 
@@ -1097,7 +1097,7 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 	for (i = 0; i < maxvols; i++) {
 		request[1] = i;
 		error = arc_msgbuf(sc, request, sizeof(request), volinfo,
-		    sizeof(struct arc_fw_volinfo));
+		    sizeof(struct arc_fw_volinfo), 0);
 		if (error != 0)
 			goto out;
 
@@ -1121,6 +1121,37 @@ out:
 }
 
 int
+arc_bio_blink(struct arc_softc *sc, struct bioc_blink *blink)
+{
+	u_int8_t			 request[5];
+	u_int32_t			 mask;
+	int				 error = 0;
+
+	request[0] = ARC_FW_BLINK;
+	request[1] = ARC_FW_BLINK_ENABLE;
+
+	switch (blink->bb_status) {
+	case BIOC_SBUNBLINK:
+		sc->sc_ledmask &= ~(1 << blink->bb_target);
+		break;
+	case BIOC_SBBLINK:
+		sc->sc_ledmask |= (1 << blink->bb_target);
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	mask = htole32(sc->sc_ledmask);
+	bcopy(&mask, &request[2], 3);
+
+	error = arc_msgbuf(sc, request, sizeof(request), NULL, 0, 0);
+	if (error)
+		return (EIO);
+
+	return (0);
+}
+
+int
 arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 {
 	u_int8_t			request[2];
@@ -1132,7 +1163,7 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 
 	request[0] = ARC_FW_SYSINFO;
 	error = arc_msgbuf(sc, request, 1, sysinfo,
-	    sizeof(struct arc_fw_sysinfo));
+	    sizeof(struct arc_fw_sysinfo), 0);
 	if (error != 0)
 		goto out;
 
@@ -1142,7 +1173,7 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 	for (i = 0; i < maxvols; i++) {
 		request[1] = i;
 		error = arc_msgbuf(sc, request, sizeof(request), volinfo,
-		    sizeof(struct arc_fw_volinfo));
+		    sizeof(struct arc_fw_volinfo), 0);
 		if (error != 0)
 			goto out;
 
@@ -1231,8 +1262,8 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 	}
 
 	bv->bv_nodisk = volinfo->member_disks;
-	sc_link = sc->sc_scsibus->sc_link[volinfo->scsi_attr.target]
-	    [volinfo->scsi_attr.lun];
+	sc_link = scsi_get_link(sc->sc_scsibus, volinfo->scsi_attr.target,
+	    volinfo->scsi_attr.lun);
 	if (sc_link != NULL) {
 		dev = sc_link->device_softc;
 		strlcpy(bv->bv_dev, dev->dv_xname, sizeof(bv->bv_dev));
@@ -1268,7 +1299,7 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	request[0] = ARC_FW_RAIDINFO;
 	request[1] = volinfo->raid_set_number;
 	error = arc_msgbuf(sc, request, sizeof(request), raidinfo,
-	    sizeof(struct arc_fw_raidinfo));
+	    sizeof(struct arc_fw_raidinfo), 0);
 	if (error != 0)
 		goto out;
 
@@ -1293,7 +1324,7 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	request[0] = ARC_FW_DISKINFO;
 	request[1] = raidinfo->device_array[bd->bd_diskid];
 	error = arc_msgbuf(sc, request, sizeof(request), diskinfo,
-	    sizeof(struct arc_fw_diskinfo));
+	    sizeof(struct arc_fw_diskinfo), 1);
 	if (error != 0)
 		goto out;
 
@@ -1347,11 +1378,12 @@ arc_msg_cksum(void *cmd, u_int16_t len)
 
 int
 arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
-    size_t rbuflen)
+    size_t rbuflen, int sreadok)
 {
 	u_int8_t			rwbuf[ARC_REG_IOC_RWBUF_MAXLEN];
 	u_int8_t			*wbuf, *rbuf;
 	int				wlen, wdone = 0, rlen, rdone = 0;
+	u_int16_t			rlenhdr = 0;
 	struct arc_fw_bufhdr		*bufhdr;
 	u_int32_t			reg, rwlen;
 	int				error = 0;
@@ -1409,7 +1441,14 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 			wdone += rwlen;
 		}
 
+<<<<<<< HEAD
 		while ((reg = arc_read(sc, ARC_REG_OUTB_DOORBELL)) == 0)
+=======
+		if (rptr == NULL)
+			goto out;
+
+		while ((reg = arc_read(sc, ARC_RA_OUTB_DOORBELL)) == 0)
+>>>>>>> origin/master
 			arc_wait(sc);
 		arc_write(sc, ARC_REG_OUTB_DOORBELL, reg);
 
@@ -1450,6 +1489,24 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 
 			bcopy(rwbuf, &rbuf[rdone], rwlen);
 			rdone += rwlen;
+
+			/*
+			 * Allow for short reads, by reading the length
+			 * value from the response header and shrinking our
+			 * idea of size, if required.
+			 * This deals with the growth of diskinfo struct from
+			 * 128 to 132 bytes.
+			 */ 
+			if (sreadok && rdone >= sizeof(struct arc_fw_bufhdr) &&
+			    rlenhdr == 0) {
+				bufhdr = (struct arc_fw_bufhdr *)rbuf;
+				rlenhdr = letoh16(bufhdr->len);
+				if (rlenhdr < rbuflen) {
+					rbuflen = rlenhdr;
+					rlen = sizeof(struct arc_fw_bufhdr) +
+					    rbuflen + 1; /* 1 for cksum */
+				}
+			}
 		}
 	} while (rdone != rlen);
 
@@ -1722,7 +1779,7 @@ arc_dmamem_alloc(struct arc_softc *sc, size_t size)
 		goto admfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &adm->adm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &adm->adm_seg, nsegs, size,
@@ -1732,8 +1789,6 @@ arc_dmamem_alloc(struct arc_softc *sc, size_t size)
 	if (bus_dmamap_load(sc->sc_dmat, adm->adm_map, adm->adm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	bzero(adm->adm_kva, size);
 
 	return (adm);
 
@@ -1766,7 +1821,8 @@ arc_alloc_ccbs(struct arc_softc *sc)
 	u_int8_t			*cmd;
 	int				i;
 
-	TAILQ_INIT(&sc->sc_ccb_free);
+	SLIST_INIT(&sc->sc_ccb_free);
+	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct arc_ccb) * sc->sc_req_count,
 	    M_DEVBUF, M_WAITOK);
@@ -1801,6 +1857,10 @@ arc_alloc_ccbs(struct arc_softc *sc)
 		arc_put_ccb(sc, ccb);
 	}
 
+	scsi_iopool_init(&sc->sc_iopool, sc,
+	    (void *(*)(void *))arc_get_ccb,
+	    (void (*)(void *, void *))arc_put_ccb);
+
 	return (0);
 
 free_maps:
@@ -1819,9 +1879,11 @@ arc_get_ccb(struct arc_softc *sc)
 {
 	struct arc_ccb			*ccb;
 
-	ccb = TAILQ_FIRST(&sc->sc_ccb_free);
+	mtx_enter(&sc->sc_ccb_mtx);
+	ccb = SLIST_FIRST(&sc->sc_ccb_free);
 	if (ccb != NULL)
-		TAILQ_REMOVE(&sc->sc_ccb_free, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_free, ccb_link);
+	mtx_leave(&sc->sc_ccb_mtx);
 
 	return (ccb);
 }
@@ -1831,5 +1893,7 @@ arc_put_ccb(struct arc_softc *sc, struct arc_ccb *ccb)
 {
 	ccb->ccb_xs = NULL;
 	bzero(ccb->ccb_cmd, ARC_MAX_IOCMDLEN);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_free, ccb, ccb_link);
+	mtx_enter(&sc->sc_ccb_mtx);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_free, ccb, ccb_link);
+	mtx_leave(&sc->sc_ccb_mtx);
 }

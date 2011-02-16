@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_stat.c,v 1.17 2005/12/10 11:45:43 miod Exp $	 */
+=======
+/*	$OpenBSD: uvm_stat.c,v 1.22 2009/06/17 00:13:59 oga Exp $	 */
+>>>>>>> origin/master
 /*	$NetBSD: uvm_stat.c,v 1.18 2001/03/09 01:02:13 chs Exp $	 */
 
 /*
@@ -76,8 +80,7 @@ void uvmcnt_dump(void);
 #ifdef UVMHIST
 /* call this from ddb */
 void
-uvmhist_dump(l)
-	struct uvm_history *l;
+uvmhist_dump(struct uvm_history *l)
 {
 	int lcv, s;
 
@@ -95,8 +98,7 @@ uvmhist_dump(l)
  * print a merged list of uvm_history structures
  */
 static void
-uvmhist_dump_histories(hists)
-	struct uvm_history *hists[];
+uvmhist_dump_histories(struct uvm_history *hists[])
 {
 	struct timeval  tv;
 	int	cur[MAXHISTS];
@@ -168,8 +170,7 @@ restart:
  * merges the named histories.
  */
 void
-uvm_hist(bitmask)
-	u_int32_t	bitmask;	/* XXX only support 32 hists */
+uvm_hist(u_int32_t bitmask)	/* XXX only support 32 hists */
 {
 	struct uvm_history *hists[MAXHISTS + 1];
 	int i = 0;

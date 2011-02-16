@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.31 2007/01/21 23:01:45 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.41 2008/07/28 19:08:46 miod Exp $	*/
 /*	$NetBSD: locore.S,v 1.2 1996/10/16 19:33:09 ws Exp $	*/
 
 /*
@@ -209,62 +209,12 @@ _ENTRY(_C_LABEL(cpu_switch))
 	stw	%r31,12(%r1)
 	stw	%r30,8(%r1)
 
-	mr	%r30,%r3
-	GET_CPUINFO(%r3)
-	li	%r31,0
-	/* Zero to not accumulate cpu time */
-	stw	%r31,CI_CURPROC(%r3)
-	lwz	%r31,CI_CURPCB(%r3)
-
-	li	%r3,0
-	bl	_C_LABEL(lcsplx)
-	stw	%r3,PCB_SPL(%r31)	/* save spl */
-
-/* Find a new process */
-	mfmsr	%r3
-	andi.	%r3,%r3,~PSL_EE@l	/* disable interrupts while
-					   manipulating runque */
-	mtmsr	%r3
-	isync
-
-	lis	%r8,_C_LABEL(whichqs)@ha
-	lwz	%r9,_C_LABEL(whichqs)@l(%r8)
-
-	or.	%r9,%r9,%r9
-	beq-	_C_LABEL(idle)		/* all queues empty */
-_C_LABEL(sw1):
-	cntlzw	%r10,%r9
-	lis	%r4,_C_LABEL(qs)@ha
-	addi	%r4,%r4,_C_LABEL(qs)@l
-	slwi	%r3,%r10,3
-	add	%r3,%r3,%r4		/* select queue */
-
-	lwz	%r31,P_FORW(%r3)	/* unlink first proc from queue */
-	lwz	%r4,P_FORW(%r31)
-	stw	%r4,P_FORW(%r3)
-	stw	%r3,P_BACK(%r4)
-
-	cmpl	0,%r3,%r4			/* queue empty? */
-	bne	1f
-
-	lis	%r3,0x80000000@ha
-	srw	%r3,%r3,%r10
-	andc	%r9,%r9,%r3
-	stw	%r9,_C_LABEL(whichqs)@l(%r8)	/* mark it empty */
-
-1:
-	/* just did this resched thing, clear resched */
-	li	%r3,0
-	GET_CPUINFO(%r4)
-	stw	%r3,CI_WANT_RESCHED(%r4)
-
-	stw	%r3,P_BACK(%r31)		/* probably superfluous */
-
-#ifdef MULTIPROCESSOR
-	stw	%r4,P_CPU(%r31)
-#endif
-
-	stw	%r31,CI_CURPROC(%r4)		/* record new process */
+/*
+ * r3 - old proc
+ * r4 -	new proc
+ * r5 - cpuinfo
+ */
+	GET_CPUINFO(%r5)
 
 	li	%r3,SONPROC
 	stb	%r3,P_STAT(%r31)
@@ -787,8 +737,9 @@ nop32_7e:
 	stmw	%r28,CI_DDBSAVE(%r1)	/* free r28-r31 */
 	mflr	%r28			/* save LR */
 	mfcr	%r29			/* save CR */
-	lis	%r1,ddbstk+INTSTK@ha	/* get new SP */
-	addi	%r1,%r1,ddbstk+INTSTK@l
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,(SPILLSTK+DDBSTK)
 	bla	ddbtrap
 _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 #endif  /* DDB */
@@ -1001,8 +952,9 @@ s_dsitrap:
 	mtcr	%r31
 	mtsprg	1,%r1			/* save SP */
 	bc	4,1,disitrap		/* branch if table miss is false */
-	lis	%r1,spillstk+SPILLSTK@ha
-	addi	%r1,%r1,spillstk+SPILLSTK@l	/* get spill stack */
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,SPILLSTK
 	stwu	%r1,-52(%r1)
 	stw	%r0,48(%r1)		/* save non-volatile registers */
 	stw	%r3,44(%r1)
@@ -1062,8 +1014,9 @@ s_isitrap:
 	mtcr	%r31
 	mtsprg	1,%r1			/* save SP */
 	bc	4,%r1,disitrap		/* branch if table miss is false */
-	lis	%r1,spillstk+SPILLSTK@ha
-	addi	%r1,%r1,spillstk+SPILLSTK@l	/* get spill stack */
+	GET_CPUINFO(%r30)
+	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
+	addi	%r1,%r30,SPILLSTK
 	stwu	%r1,-52(%r1)
 	stw	%r0,48(%r1)		/* save non-volatile registers */
 	stw	%r3,44(%r1)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.6 2006/01/01 13:16:01 miod Exp $	*/
+/*	$OpenBSD: intr.c,v 1.14 2010/09/20 06:33:47 matthew Exp $	*/
 /*	$NetBSD: intr.c,v 1.2 1998/08/25 04:03:56 scottr Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,8 +41,6 @@
 #include <sys/evcount.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
 
 #include <machine/cpu.h>
 #include <machine/intr.h>
@@ -161,7 +152,7 @@ intr_establish(int (*func)(void *), void *arg, int ipl, const char *name)
 	ih->ih_fn = func;
 	ih->ih_arg = arg;
 	ih->ih_ipl = ipl;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 }
 
 /*
@@ -219,29 +210,23 @@ intr_dispatch(int evec)	/* format | vector offset */
 	}
 }
 
-int netisr;
-
+#ifdef DIAGNOSTIC
 void
-netintr()
+splassert_check(int wantipl, const char *func)
 {
-	int s, isr;
+	int oldipl;
 
-	for (;;) {
-		s = splhigh();
-		isr = netisr;
-		netisr = 0;
-		splx(s);
-		
-		if (isr == 0)
-			return;
+	__asm __volatile ("movew sr,%0" : "=&d" (oldipl));
 
-#define DONETISR(bit, fn) do {		\
-	if (isr & (1 << bit))		\
-		(fn)();			\
-} while (0)
+	oldipl = PSLTOIPL(oldipl);
 
-#include <net/netisr_dispatch.h>
-
-#undef  DONETISR
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		_spl(PSL_S | IPLTOPSL(wantipl));
 	}
 }
+#endif

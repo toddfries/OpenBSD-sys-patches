@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.c,v 1.20 2006/08/13 13:38:17 mk Exp $ */
+/* $OpenBSD: cpu.c,v 1.28 2010/11/28 20:57:09 miod Exp $ */
 /* $NetBSD: cpu.c,v 1.44 2000/05/23 05:12:53 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -120,8 +113,6 @@ struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL
 };
 
-extern struct cfdriver cpu_cd;
-
 static const char *ev4minor[] = {
 	"pass 2 or 2.1", "pass 3", 0
 }, *lcaminor[] = {
@@ -148,6 +139,10 @@ static const char *ev4minor[] = {
 	"pass 2.2.1", "pass 2.3 or 2.4", "pass 2.1.2", "pass 2.2.2",
 	"pass 2.2.3 or 2.2.5", "pass 2.2.4", "pass 2.5", "pass 2.4.1",
 	"pass 2.5.1", "pass 2.6", 0
+}, *ev68cbminor[] = {
+	/* what are the values for pass 2.3 and pass 2.4? */
+	"", "", "", "", "", "",
+	"pass 4.0", 0
 };
 
 
@@ -167,7 +162,7 @@ struct cputable_struct {
 	{ PCS_PROC_PCA56,	"PCA56",	pca56minor	},
 	{ PCS_PROC_PCA57,	"PCA57",	pca57minor	},
 	{ PCS_PROC_EV67,	"21264A",	ev67minor	},
-	{ PCS_PROC_EV68CB,	"21264C",	NULL		},
+	{ PCS_PROC_EV68CB,	"21264C",	ev68cbminor	},
 	{ PCS_PROC_EV68AL,	"21264B",	NULL		},
 	{ PCS_PROC_EV68CX,	"21264D",	NULL		},
 };
@@ -181,7 +176,7 @@ struct cputable_struct {
  * the primary (although the primary idles on proc0's PCB until its
  * idle PCB is created).
  *
- * Right before calling uvm_scheduler(), main() calls, on proc0's
+ * As one of the last steps in booting, main() calls, on proc0's
  * context, cpu_boot_secondary_processors().  This is our key to
  * actually spin up the additional processors we've found.  We
  * run through our cpu_info[] array looking for secondary processors
@@ -245,11 +240,11 @@ cpuattach(parent, dev, aux)
 	printf(": ID %d%s, ", ma->ma_slot,
 	    ma->ma_slot == hwrpb->rpb_primary_cpu_id ? " (primary)" : "");
 
-	for(i = 0; i < sizeof cpunametable / sizeof cpunametable[0]; ++i) {
+	for (i = 0; i < sizeof cpunametable / sizeof cpunametable[0]; ++i) {
 		if (cpunametable[i].cpu_major_code == major) {
 			printf("%s-%d", cpunametable[i].cpu_major_name, minor);
 			s = cpunametable[i].cpu_minor_names;
-			for(i = 0; s && s[i]; ++i) {
+			for (i = 0; s && s[i]; ++i) {
 				if (i == minor && strlen(s[i]) != 0) {
 					printf(" (%s)", s[i]);
 					goto recognized;
@@ -270,7 +265,7 @@ recognized:
 			cpu_amask =
 			    (~alpha_amask(ALPHA_AMASK_ALL)) & ALPHA_AMASK_ALL;
 		if (cpu_amask) {
-			printf("%s: Architecture extensions: %b\n",
+			printf("%s: architecture extensions: %b\n",
 			    dev->dv_xname, cpu_amask, ALPHA_AMASK_BITS);
 		}
 	}
@@ -341,8 +336,8 @@ recognized:
 	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
 	 */
 	TAILQ_INIT(&mlist);
-	error = uvm_pglistalloc(USPACE, avail_start, avail_end, 0, 0,
-	    &mlist, 1, 1);
+	error = uvm_pglistalloc(USPACE, avail_start, avail_end - 1, 0, 0,
+	    &mlist, 1, UVM_PLA_WAITOK);
 	if (error != 0) {
 		if (ma->ma_slot == hwrpb->rpb_primary_cpu_id) {
 			panic("cpu_attach: unable to allocate idle stack for"

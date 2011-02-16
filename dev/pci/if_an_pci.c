@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_an_pci.c,v 1.15 2006/01/30 11:41:00 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_an_pci.c,v 1.17 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -119,7 +123,7 @@ an_pci_attach(struct device *parent, struct device *self, void *aux)
 	/* Map the I/O ports. */
 	if (pci_mapreg_map(pa, AN_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 	    &iot, &ioh, NULL, NULL, 0) != 0) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 	sc->sc_iot = iot;

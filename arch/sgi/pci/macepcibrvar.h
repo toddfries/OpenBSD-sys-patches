@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibrvar.h,v 1.2 2004/08/10 19:16:18 deraadt Exp $ */
+/*	$OpenBSD: macepcibrvar.h,v 1.6 2009/07/22 20:28:21 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.se)
@@ -29,10 +29,16 @@
 #ifndef _PCIBRVAR_H_
 #define _PCIBRVAR_H_
 
-#define	MACE_PCI_IO_BASE	0x18000000
-#define	MACE_PCI_IO_SIZE	0x02000000
-#define	MACE_PCI_MEM_BASE	0x1a000000
-#define	MACE_PCI_MEM_SIZE	0x02000000
+/*
+ * Addresses of the PCI I/O and memory spaces.
+ *
+ * Note that PCI memory space addresses need to have bit 31 set to
+ * reach hardware, otherwise they reach physical memory.
+ */
+#define	MACE_PCI_IO_BASE	0x100000000UL
+#define	MACE_PCI_MEM_BASE	0x200000000UL
+#define	MACE_PCI_MEM_OFFSET	0x80000000
+#define	MACE_PCI_MEM_SIZE	0x80000000
 
 struct mace_pcibr_softc {
 	struct device	sc_dev;
@@ -56,6 +62,19 @@ void mace_pcib_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	u_int32_t);
 void mace_pcib_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	u_int64_t);
+
+void mace_pcib_read_raw_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, u_int8_t *, bus_size_t);
+void mace_pcib_write_raw_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, const u_int8_t *, bus_size_t);
+void mace_pcib_read_raw_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, u_int8_t *, bus_size_t);
+void mace_pcib_write_raw_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, const u_int8_t *, bus_size_t);
+void mace_pcib_read_raw_8(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, u_int8_t *, bus_size_t);
+void mace_pcib_write_raw_8(bus_space_tag_t, bus_space_handle_t,
+	    bus_addr_t, const u_int8_t *, bus_size_t);
 
 int mace_pcib_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
 	bus_space_handle_t *);

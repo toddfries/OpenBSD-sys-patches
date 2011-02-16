@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: qvss8x15.h,v 1.2 2003/06/02 23:28:04 millert Exp $ */
+=======
+/*	$OpenBSD: qvss8x15.h,v 1.4 2009/06/21 20:30:35 jsg Exp $ */
+>>>>>>> origin/master
 /* 	$NetBSD: qvss8x15.h,v 1.3 1999/05/18 21:51:58 ad Exp $ */
 
 /*-
@@ -69,7 +73,7 @@
  *									*
  ************************************************************************/
 
-extern u_char qvss8x15_data[];
+static u_char qvss8x15_data[];
 
 struct wsdisplay_font qvss8x15 = { 
 	"QVSS",				/* typeface name */

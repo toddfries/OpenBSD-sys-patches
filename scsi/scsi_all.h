@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: scsi_all.h,v 1.42 2007/04/03 04:55:34 dlg Exp $	*/
+=======
+/*	$OpenBSD: scsi_all.h,v 1.52 2010/12/24 02:45:33 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -83,6 +87,11 @@ struct scsi_inquiry {
 #define SI_EVPD		0x01
 	u_int8_t pagecode;
 #define SI_PG_SERIAL	0x80
+<<<<<<< HEAD
+=======
+#define SI_PG_DEVID	0x83
+#define SI_PG_ATA	0x89
+>>>>>>> origin/master
 	u_int8_t length[2];
 	u_int8_t control;
 };
@@ -260,11 +269,60 @@ struct scsi_inquiry_data {
 struct scsi_inquiry_vpd {
 	u_int8_t device;
 	u_int8_t page_code;
+<<<<<<< HEAD
 	u_int8_t reserved;
 	u_int8_t page_length;
 	char serial[32];
 };
 
+=======
+	u_int8_t page_length[2];
+};
+
+struct scsi_vpd_serial {
+	struct scsi_vpd_hdr hdr;
+	char serial[32];
+};
+
+#define VPD_PROTO_ID_FC		0x0 /* Fibre Channel */
+#define VPD_PROTO_ID_SPI	0x1 /* Parallel SCSI */
+#define VPD_PROTO_ID_SSA	0x2
+#define VPD_PROTO_ID_IEEE1394	0x3
+#define VPD_PROTO_ID_SRP	0x4 /* SCSI RDMA Protocol */
+#define VPD_PROTO_ID_ISCSI	0x5 /* Internet SCSI (iSCSI) */
+#define VPD_PROTO_ID_SAS	0x6 /* Serial Attached SCSI */
+#define VPD_PROTO_ID_ADT	0x7 /* Automation/Drive Interface Transport */
+#define VPD_PROTO_ID_ATA	0x7 /* ATA/ATAPI */
+#define VPD_PROTO_ID_NONE	0xf
+
+struct scsi_vpd_devid_hdr {
+	u_int8_t pi_code;
+#define VPD_DEVID_PI(_f)	(((_f) >> 4) & 0x0f)
+#define VPD_DEVID_CODE(_f)	(((_f) >> 0) & 0x0f)
+#define VPD_DEVID_CODE_BINARY		0x1
+#define VPD_DEVID_CODE_ASCII		0x2
+#define VPD_DEVID_CODE_UTF8		0x3
+	u_int8_t flags;
+#define VPD_DEVID_PIV		0x80
+#define VPD_DEVID_ASSOC(_f)	((_f) & 0x30)
+#define VPD_DEVID_ASSOC_LU		0x00
+#define VPD_DEVID_ASSOC_PORT		0x10
+#define VPD_DEVID_ASSOC_TARG		0x20
+#define VPD_DEVID_TYPE(_f)	((_f) & 0x0f)
+#define VPD_DEVID_TYPE_VENDOR		0x0
+#define VPD_DEVID_TYPE_T10		0x1
+#define VPD_DEVID_TYPE_EUI64		0x2
+#define VPD_DEVID_TYPE_NAA		0x3
+#define VPD_DEVID_TYPE_RELATIVE		0x4
+#define VPD_DEVID_TYPE_PORT		0x5
+#define VPD_DEVID_TYPE_LU		0x6
+#define VPD_DEVID_TYPE_MD5		0x7
+#define VPD_DEVID_TYPE_NAME		0x8
+	u_int8_t reserved;
+	u_int8_t len;
+};
+
+>>>>>>> origin/master
 struct scsi_sense_data_unextended {
 /* 1*/	u_int8_t error_code;
 /* 4*/	u_int8_t block[3];
@@ -296,7 +354,6 @@ struct scsi_sense_data {
 #define SSD_SCS_BIT_INDEX	0x07
 /*17*/	u_int8_t sense_key_spec_2;
 /*18*/	u_int8_t sense_key_spec_3;
-/*32*/	u_int8_t extra_bytes[14];
 };
 
 #define SKEY_NO_SENSE		0x00
@@ -388,6 +445,9 @@ struct scsi_mode_header_big {
 	u_int8_t blk_desc_len[2];
 };
 
+/* Both disks and tapes use dev_spec to report READONLY status. */
+#define	SMH_DSP_WRITE_PROT	0x80
+
 union scsi_mode_sense_buf {
 	struct scsi_mode_header hdr;
 	struct scsi_mode_header_big hdr_big;
@@ -406,6 +466,67 @@ struct scsi_report_luns_data {
 	} luns[256];		/* scsi_link->luns is u_int8_t. */
 };
 #define	RPL_LUNDATA_T0LUN	1	/* Type 0 LUN is in lundata[1] */
+
+/*
+ * ATA PASS-THROUGH as per SAT2
+ */
+
+#define ATA_PASSTHRU_12		0xa1
+#define ATA_PASSTHRU_16		0x85
+
+#define ATA_PASSTHRU_PROTO_MASK		0x1e
+#define ATA_PASSTHRU_PROTO_HW_RESET	0x00
+#define ATA_PASSTHRU_PROTO_SW_RESET	0x02
+#define ATA_PASSTHRU_PROTO_NON_DATA	0x06
+#define ATA_PASSTHRU_PROTO_PIO_DATAIN	0x08
+#define ATA_PASSTHRU_PROTO_PIO_DATAOUT	0x0a
+#define ATA_PASSTHRU_PROTO_DMA		0x0c
+#define ATA_PASSTHRU_PROTO_DMA_QUEUED	0x0e
+#define ATA_PASSTHRU_PROTO_EXEC_DIAG	0x10
+#define ATA_PASSTHRU_PROTO_NON_DATA_RST	0x12
+#define ATA_PASSTHRU_PROTO_UDMA_DATAIN	0x14
+#define ATA_PASSTHRU_PROTO_UDMA_DATAOUT	0x16
+#define ATA_PASSTHRU_PROTO_FPDMA	0x18
+#define ATA_PASSTHRU_PROTO_RESPONSE	0x1e
+
+#define ATA_PASSTHRU_T_DIR_MASK		0x08
+#define ATA_PASSTHRU_T_DIR_READ		0x08
+#define ATA_PASSTHRU_T_DIR_WRITE	0x00
+
+#define ATA_PASSTHRU_T_LEN_MASK		0x03
+#define ATA_PASSTHRU_T_LEN_NONE		0x00
+#define ATA_PASSTHRU_T_LEN_FEATURES	0x01
+#define ATA_PASSTHRU_T_LEN_SECTOR_COUNT	0x02
+#define ATA_PASSTHRU_T_LEN_TPSIU	0x03
+
+struct scsi_ata_passthru_12 {
+	u_int8_t opcode;
+	u_int8_t count_proto;
+	u_int8_t flags;
+	u_int8_t features;
+	u_int8_t sector_count;
+	u_int8_t lba_low;
+	u_int8_t lba_mid;
+	u_int8_t lba_high;
+	u_int8_t device;
+	u_int8_t command;
+	u_int8_t _reserved;
+	u_int8_t control;
+};
+
+struct scsi_ata_passthru_16 {
+	u_int8_t opcode;
+	u_int8_t count_proto;
+	u_int8_t flags;
+	u_int8_t features[2];
+	u_int8_t sector_count[2];
+	u_int8_t lba_low[2];
+	u_int8_t lba_mid[2];
+	u_int8_t lba_high[2];
+	u_int8_t device;
+	u_int8_t command;
+	u_int8_t control;
+};
 
 /*
  * SPI status information unit. See section 14.3.5 of SPI-3.

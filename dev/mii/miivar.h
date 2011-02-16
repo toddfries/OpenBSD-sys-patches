@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: miivar.h,v 1.26 2005/11/06 09:27:19 brad Exp $	*/
+=======
+/*	$OpenBSD: miivar.h,v 1.31 2010/04/20 20:42:16 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: miivar.h,v 1.17 2000/03/06 20:56:57 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -119,6 +116,7 @@ struct mii_softc {
 	LIST_ENTRY(mii_softc) mii_list;	/* entry on parent's PHY list */
 
 	int mii_phy;			/* our MII address */
+	int mii_oui;			/* MII_OUI(ma->mii_id1, ma->mii_id2) */
 	int mii_model;			/* MII_MODEL(ma->mii_id2) */
 	int mii_rev;			/* MII_REV(ma->mii_id2) */
 	int mii_offset;			/* first PHY, second PHY, etc. */
@@ -240,7 +238,6 @@ struct mii_media {
 
 void	mii_attach(struct device *, struct mii_data *, int, int,
 	    int, int);
-void	mii_activate(struct mii_data *, enum devact, int, int);
 void	mii_detach(struct mii_data *, int, int);
 
 int	mii_mediachg(struct mii_data *);
@@ -249,7 +246,7 @@ void	mii_pollstat(struct mii_data *);
 void	mii_down(struct mii_data *);
 int	mii_anar(int);
 
-int	mii_phy_activate(struct device *, enum devact);
+int	mii_phy_activate(struct device *, int);
 int	mii_phy_detach(struct device *, int);
 
 const struct mii_phydesc *mii_phy_match(const struct mii_attach_args *,

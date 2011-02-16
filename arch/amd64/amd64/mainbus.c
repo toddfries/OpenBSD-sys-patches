@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.10 2006/11/25 16:59:31 niklas Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.23 2010/11/03 10:15:22 dlg Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -47,10 +47,11 @@
 #include "acpi.h"
 #include "ipmi.h"
 #include "bios.h"
+#include "mpbios.h"
+#include "vmt.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
 
 #if NACPI > 0
 #include <dev/acpi/acpireg.h>
@@ -61,6 +62,10 @@
 #include <dev/ipmivar.h>
 #endif
 
+#if NVMT > 0
+#include <dev/vmtvar.h>
+#endif
+
 #if NBIOS > 0
 #include <machine/biosvar.h>
 #endif
@@ -69,7 +74,8 @@ int	mainbus_match(struct device *, void *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
 struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach
+	sizeof(struct device), mainbus_match, mainbus_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver mainbus_cd = {
@@ -112,7 +118,7 @@ struct isabus_attach_args mba_iba = {
 };
 #endif
 
-#if defined(MPBIOS) || defined(MPACPI)
+#if NMPBIOS > 0 || NACPI > 0
 struct mp_bus *mp_busses;
 int mp_nbus;
 struct mp_intr_map *mp_intrs;
@@ -147,15 +153,9 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #if NPCI > 0
 	union mainbus_attach_args	mba;
 #endif
-#ifdef MPBIOS
-	int				mpbios_present = 0;
-#endif
+	extern void			(*setperf_setup)(struct cpu_info *);
 
 	printf("\n");
-
-#if NPCI > 0
-	pci_mode = pci_mode_detect();
-#endif
 
 #if NBIOS > 0
 	{
@@ -191,14 +191,11 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#ifdef MPBIOS
-	mpbios_present = mpbios_probe(self);
-#endif
-
-#ifdef MPBIOS
-	if (mpbios_present)
-		mpbios_scan(self);
-	else
+#if NVMT > 0
+	if (vmt_probe()) {
+		mba.mba_busname = "vmt";
+		config_found(self, &mba.mba_busname, mainbus_print);
+	}
 #endif
 
 	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
@@ -214,15 +211,18 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 #if NPCI > 0
-	if (pci_mode != 0) {
+	{
+		pci_init_extents();
+
+		bzero(&mba.mba_pba, sizeof(mba.mba_pba));
 		mba.mba_pba.pba_busname = "pci";
 		mba.mba_pba.pba_iot = X86_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = X86_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
+		mba.mba_pba.pba_ioex = pciio_ex;
+		mba.mba_pba.pba_memex = pcimem_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
-		mba.mba_pba.pba_bridgetag = NULL;
-		mba.mba_pba.pba_pc = NULL;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
 #endif

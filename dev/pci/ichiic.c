@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ichiic.c,v 1.16 2006/08/19 19:13:33 brad Exp $	*/
+=======
+/*	$OpenBSD: ichiic.c,v 1.24 2010/04/08 00:23:53 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -24,8 +28,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -86,6 +94,7 @@ struct cfdriver ichiic_cd = {
 };
 
 const struct pci_matchid ichiic_ids[] = {
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6300ESB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6321ESB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801AA_SMB },
@@ -97,7 +106,14 @@ const struct pci_matchid ichiic_ids[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801EB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801FB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GB_SMB },
+<<<<<<< HEAD
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_SMB }
+=======
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_SMB },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_SMB },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JD_SMB },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SMB }
+>>>>>>> origin/master
 };
 
 int
@@ -130,7 +146,7 @@ ichiic_attach(struct device *parent, struct device *self, void *aux)
 	/* Map I/O space */
 	if (pci_mapreg_map(pa, ICH_SMB_BASE, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, &iosize, 0)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

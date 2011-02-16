@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cac_eisa.c,v 1.1 2000/12/17 21:35:03 mickey Exp $	*/
+=======
+/*	$OpenBSD: cac_eisa.c,v 1.4 2009/06/02 11:38:21 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cac_eisa.c,v 1.1 2000/09/01 12:15:20 ad Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -168,6 +165,18 @@ cac_eisa_attach(parent, self, aux)
 		return;
 	}
 
+	/*
+	 * Print board type and attach to the bus-independent code.
+	 */
+	for (i = 0; i < nitems(cac_eisa_type); i++)
+		if (strcmp(ea->ea_idstring, cac_eisa_type[i].ct_prodstr) == 0)
+			break;
+
+	if (i == nitems(cac_eisa_type)) {
+		printf(": failed to attach %s\n", ea->ea_idstring);
+		return;
+	}
+
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
 	sc->sc_dmat = ea->ea_dmat;
@@ -207,13 +216,6 @@ cac_eisa_attach(parent, self, aux)
 		printf("\n");
 		return;
 	}
-
-	/*
-	 * Print board type and attach to the bus-independent code.
-	 */
-	for (i = 0; i < sizeof(cac_eisa_type) / sizeof(cac_eisa_type[0]); i++)
-		if (strcmp(ea->ea_idstring, cac_eisa_type[i].ct_prodstr) == 0)
-			break;
 
 	printf(" %s: Compaq %s\n", intrstr, cac_eisa_type[i].ct_typestr);
 	sc->sc_cl = cac_eisa_type[i].ct_linkage;

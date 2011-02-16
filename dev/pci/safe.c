@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: safe.c,v 1.20 2006/06/29 21:34:51 deraadt Exp $	*/
+=======
+/*	$OpenBSD: safe.c,v 1.31 2011/01/12 17:16:39 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -36,7 +40,6 @@
  */
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -109,7 +112,7 @@ void safe_reset_board(struct safe_softc *);
 void safe_init_board(struct safe_softc *);
 void safe_init_pciregs(struct safe_softc *);
 void safe_cleanchip(struct safe_softc *);
-__inline u_int32_t safe_rng_read(struct safe_softc *);
+static __inline u_int32_t safe_rng_read(struct safe_softc *);
 
 int safe_free_entry(struct safe_softc *, struct safe_ringentry *);
 
@@ -302,7 +305,7 @@ safe_attach(struct device *parent, struct device *self, void *aux)
 		safe_rng_init(sc);
 
 		timeout_set(&sc->sc_rngto, safe_rng, sc);
-		timeout_add(&sc->sc_rngto, hz * safe_rnginterval);
+		timeout_add_sec(&sc->sc_rngto, safe_rnginterval);
 	}
 	return;
 
@@ -473,11 +476,13 @@ safe_process(struct cryptop *crp)
 			if (enccrd->crd_flags & CRD_F_IV_EXPLICIT)
 				bcopy(enccrd->crd_iv, iv, ivsize);
 			else
-				bcopy(ses->ses_iv, iv, ivsize);
+				arc4random_buf(iv, ivsize);
+
 			if ((enccrd->crd_flags & CRD_F_IV_PRESENT) == 0) {
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback(re->re_src_m,
-					    enccrd->crd_inject, ivsize, iv);
+					    enccrd->crd_inject, ivsize, iv,
+					    M_NOWAIT);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					cuio_copyback(re->re_src_io,
 					    enccrd->crd_inject, ivsize, iv);
@@ -485,7 +490,6 @@ safe_process(struct cryptop *crp)
 			for (i = 0; i < ivsize / sizeof(iv[0]); i++)
 				re->re_sastate.sa_saved_iv[i] = htole32(iv[i]);
 			cmd0 |= SAFE_SA_CMD0_IVLD_STATE | SAFE_SA_CMD0_SAVEIV;
-			re->re_flags |= SAFE_QFLAGS_COPYOUTIV;
 		} else {
 			cmd0 |= SAFE_SA_CMD0_INBOUND;
 
@@ -806,8 +810,13 @@ safe_process(struct cryptop *crp)
 					err = sc->sc_nqchip ? ERESTART : ENOMEM;
 					goto errout;
 				}
-				if (len == MHLEN)
-					M_DUP_PKTHDR(m, re->re_src_m);
+				if (len == MHLEN) {
+					err = m_dup_pkthdr(m, re->re_src_m);
+					if (err) {
+						m_free(m);
+						goto errout;
+					}
+				}
 				if (totlen >= MINCLSIZE) {
 					MCLGET(m, M_DONTWAIT);
 					if ((m->m_flags & M_EXT) == 0) {
@@ -1187,7 +1196,7 @@ safe_rng_init(struct safe_softc *sc)
 	} while (++i < SAFE_RNG_MAXWAIT);
 }
 
-__inline u_int32_t
+static __inline u_int32_t
 safe_rng_read(struct safe_softc *sc)
 {
 	int i;
@@ -1257,7 +1266,7 @@ retry:
 	for (i = 0; i < maxwords; i++)
 		add_true_randomness(buf[i]);
 
-	timeout_add(&sc->sc_rngto, hz * safe_rnginterval);
+	timeout_add_sec(&sc->sc_rngto, safe_rnginterval);
 }
 
 /*
@@ -1344,7 +1353,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 				return (ENOMEM);
 			bcopy(sc->sc_sessions, ses, sesn *
 			    sizeof(struct safe_session));
-			bzero(sc->sc_sessions, sesn *
+			explicit_bzero(sc->sc_sessions, sesn *
 			    sizeof(struct safe_session));
 			free(sc->sc_sessions, M_DEVBUF);
 			sc->sc_sessions = ses;
@@ -1357,9 +1366,12 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 	ses->ses_used = 1;
 
 	if (encini) {
+<<<<<<< HEAD
 		/* get an IV */
 		get_random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
 
+=======
+>>>>>>> origin/master
 		ses->ses_klen = encini->cri_klen;
 		bcopy(encini->cri_key, ses->ses_key, ses->ses_klen / 8);
 
@@ -1377,7 +1389,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hminner,
 			    sizeof(md5ctx.state));
 		} else {
@@ -1385,7 +1397,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hminner,
 			    sizeof(sha1ctx.state));
 		}
@@ -1398,7 +1410,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hmouter,
 			    sizeof(md5ctx.state));
 		} else {
@@ -1406,7 +1418,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hmouter,
 			    sizeof(sha1ctx.state));
 		}
@@ -1447,7 +1459,8 @@ safe_freesession(u_int64_t tid)
 
 	session = SAFE_SESSION(sid);
 	if (session < sc->sc_nsessions) {
-		bzero(&sc->sc_sessions[session], sizeof(sc->sc_sessions[session]));
+		explicit_bzero(&sc->sc_sessions[session],
+		    sizeof(sc->sc_sessions[session]));
 		ret = 0;
 	} else
 		ret = EINVAL;
@@ -1670,33 +1683,6 @@ safe_callback(struct safe_softc *sc, struct safe_ringentry *re)
 		crp->crp_buf = (caddr_t)re->re_dst_m;
 	}
 
-	if (re->re_flags & SAFE_QFLAGS_COPYOUTIV) {
-		/* copy out IV for future use */
-		for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
-			int ivsize;
-
-			if (crd->crd_alg == CRYPTO_DES_CBC ||
-			    crd->crd_alg == CRYPTO_3DES_CBC) {
-				ivsize = 2*sizeof(u_int32_t);
-			} else if (crd->crd_alg == CRYPTO_AES_CBC) {
-				ivsize = 4*sizeof(u_int32_t);
-			} else
-				continue;
-			if (crp->crp_flags & CRYPTO_F_IMBUF) {
-				m_copydata((struct mbuf *)crp->crp_buf,
-					crd->crd_skip + crd->crd_len - ivsize,
-					ivsize,
-					(caddr_t) sc->sc_sessions[re->re_sesn].ses_iv);
-			} else if (crp->crp_flags & CRYPTO_F_IOV) {
-				cuio_copydata((struct uio *)crp->crp_buf,
-					crd->crd_skip + crd->crd_len - ivsize,
-					ivsize,
-					(caddr_t)sc->sc_sessions[re->re_sesn].ses_iv);
-			}
-			break;
-		}
-	}
-
 	if (re->re_flags & SAFE_QFLAGS_COPYOUTICV) {
 		/* copy out ICV result */
 		for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
@@ -1715,7 +1701,8 @@ safe_callback(struct safe_softc *sc, struct safe_ringentry *re)
 			if (crp->crp_flags & CRYPTO_F_IMBUF) {
 				m_copyback((struct mbuf *)crp->crp_buf,
 					crd->crd_inject, 12,
-					(caddr_t)re->re_sastate.sa_saved_indigest);
+					(caddr_t)re->re_sastate.sa_saved_indigest,
+					M_NOWAIT);
 			} else if (crp->crp_flags & CRYPTO_F_IOV && crp->crp_mac) {
 				bcopy((caddr_t)re->re_sastate.sa_saved_indigest,
 					crp->crp_mac, 12);
@@ -2013,6 +2000,7 @@ safe_kpoll(void *vsc)
 	for (i = SAFE_PK_RAM_START; i < SAFE_PK_RAM_END; i += 4)
 		WRITE_REG(sc, i, 0);
 
+	explicit_bzero(&buf, sizeof(buf));
 	crypto_kdone(q->pkq_krp);
 	free(q, M_DEVBUF);
 	sc->sc_pkq_cur = NULL;

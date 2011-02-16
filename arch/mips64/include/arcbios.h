@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.h,v 1.5 2004/09/09 22:21:41 pefo Exp $	*/
+/*	$OpenBSD: arcbios.h,v 1.17 2010/09/12 12:27:06 kettenis Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  *
@@ -59,6 +59,10 @@ typedef enum arc_config_type
 	arc_SecondaryDcache,
 	arc_SecondaryCache,
 
+#ifdef __sgi__
+	arc_SystemMemory,
+#endif
+
 	arc_EisaAdapter,		/* Eisa adapter         */
 	arc_TcAdapter,			/* Turbochannel adapter */
 	arc_ScsiAdapter,		/* SCSI adapter         */
@@ -87,21 +91,34 @@ typedef enum arc_config_type
 	arc_PointerPeripheral,
 	arc_KeyboardPeripheral,
 	arc_TerminalPeripheral,
+#ifdef __arc__
 	arc_OtherPeripheral,		/* denotes a peripheral not otherwise defined   */
+#endif
 	arc_LinePeripheral,
 	arc_NetworkPeripheral,
-
-	arc_SystemMemory
+#ifdef __arc__
+	arc_SystemMemory,
+#endif
+#ifdef __sgi__
+	arc_OtherPeripheral,		/* denotes a peripheral not otherwise defined   */
+#endif
 } arc_config_type_t;
 
-typedef u_char arc_dev_flags_t;
+typedef u_int32_t arc_dev_flags_t;
 
-/* Wonder how this is aligned... */
+#define	ARCBIOS_DEVFLAGS_FAILED		0x01
+#define	ARCBIOS_DEVFLAGS_READONLY	0x02
+#define	ARCBIOS_DEVFLAGS_REMOVABLE	0x04
+#define	ARCBIOS_DEVFLAGS_CONSOLE_INPUT	0x08
+#define	ARCBIOS_DEVFLAGS_CONSOLE_OUTPUT	0x10
+#define	ARCBIOS_DEVFLAGS_INPUT		0x20
+#define	ARCBIOS_DEVFLAGS_OUTPUT		0x40
+
 typedef struct arc_config
 {
-	arc_config_class_t	class;		/* Likely these three all */
-	arc_config_type_t	type;		/* need to be uchar to make */
-	arc_dev_flags_t		flags;		/* the alignment right */
+	arc_config_class_t	class;
+	arc_config_type_t	type;
+	arc_dev_flags_t		flags;
 	u_int16_t		version;
 	u_int16_t		revision;
 	u_int32_t		key;
@@ -110,6 +127,20 @@ typedef struct arc_config
 	u_int32_t		id_len;
 	int32_t			id;
 } arc_config_t;
+
+typedef struct arc_config64
+{
+	arc_config_class_t	class;
+	arc_config_type_t	type;
+	arc_dev_flags_t		flags;
+	u_int16_t		version;
+	u_int16_t		revision;
+	u_int64_t		key;
+	u_int64_t		affinity_mask;
+	u_int64_t		config_data_len;
+	u_int64_t		id_len;
+	int64_t			id;
+} arc_config64_t;
 
 typedef enum arc_status
 {
@@ -142,7 +173,7 @@ typedef enum arc_status
  */
 #ifdef __arc__
 typedef enum {
-	ExeceptionBlock,	SystemParameterBlock,	FreeMemory,
+	ExceptionBlock,		SystemParameterBlock,	FreeMemory,
 	BadMemory,		LoadedProgram,		FirmwareTemporary,
 	FirmwarePermanent,	FreeContigous
 } MEMORYTYPE;
@@ -150,7 +181,7 @@ typedef enum {
 
 #ifdef __sgi__
 typedef enum {
-	ExeceptionBlock,	SystemParameterBlock,	FreeContigous,
+	ExceptionBlock,		SystemParameterBlock,	FreeContigous,
 	FreeMemory,		BadMemory,		LoadedProgram,
 	FirmwareTemporary,	FirmwarePermanent,
 } MEMORYTYPE;
@@ -181,38 +212,48 @@ typedef u_int32_t arc_open_mode_t; /* XXX */
 typedef u_int32_t arc_seek_mode_t; /* XXX */
 typedef u_int32_t arc_mount_t; /* XXX */
 
+typedef struct arc_quad {
+#ifdef __MIPSEB__
+	long	hi;
+	u_long	lo;
+#else
+	u_long	lo;
+	long	hi;
+#endif
+} arc_quad_t;
+
 typedef struct arc_calls
 {
 	arc_status_t (*load)(		/* Load 1 */
 		char *,			/* Image to load */
-		u_int32_t,		/* top address */
-		u_int32_t *,		/* Entry address */
-		u_int32_t *);		/* Low address */
+		u_long,			/* top address */
+		u_long *,		/* Entry address */
+		u_long *);		/* Low address */
 
 	arc_status_t (*invoke)(		/* Invoke 2 */
-		u_int32_t,		/* Entry Address */
-		u_int32_t,		/* Stack Address */
-		u_int32_t,		/* Argc */
+		u_long,			/* Entry Address */
+		u_long,			/* Stack Address */
+		u_long,			/* Argc */
 		char **,		/* argv */
 		char **);		/* envp */
 
 	arc_status_t (*execute)(	/* Execute 3 */
 		char *,			/* Image path */
-		u_int32_t,		/* Argc */
+		u_long,			/* Argc */
 		char **,		/* argv */
 		char **);		/* envp */
 
-	volatile void (*halt)(void);	/* Halt 4 */
+	__dead void (*halt)(void);	/* Halt 4 */
 
-	volatile void (*power_down)(void); /* PowerDown 5 */
+	__dead void (*power_down)(void); /* PowerDown 5 */
 
-	volatile void (*restart)(void);	/* Restart 6 */
+	__dead void (*restart)(void);	/* Restart 6 */
 
-	volatile void (*reboot)(void);	/* Reboot 7 */
+	__dead void (*reboot)(void);	/* Reboot 7 */
 
-	volatile void (*enter_interactive_mode)(void); /* EnterInteractiveMode 8 */
+	__dead void (*enter_interactive_mode)(void); /* EnterInteractiveMode 8 */
 
-	volatile void (*return_from_main)(void); /* ReturnFromMain 9 */
+	__dead void (*return_from_main)(void); /* ReturnFromMain 9 */
 
 	arc_config_t *(*get_peer)(	/* GetPeer 10 */
 		arc_config_t *);	/* Component */
@@ -244,7 +285,7 @@ typedef struct arc_calls
 	arc_mem_t *(*get_memory_descriptor)( /* GetMemoryDescriptor 19 */
 		arc_mem_t *);		/* MemoryDescriptor */
 
-#ifdef arc
+#ifdef __arc__
 	void (*signal)(			/* Signal 20 */
 		u_int32_t,		/* Signal number */
 /**/		caddr_t);		/* Handler */
@@ -254,40 +295,40 @@ typedef struct arc_calls
 
 	arc_time_t *(*get_time)(void);	/* GetTime 21 */
 
-	u_int32_t (*get_relative_time)(void); /* GetRelativeTime 22 */
+	u_long (*get_relative_time)(void); /* GetRelativeTime 22 */
 
 	arc_status_t (*get_dir_entry)(	/* GetDirectoryEntry 23 */
-		u_int32_t,		/* FileId */
+		u_long,			/* FileId */
 		arc_dirent_t *,		/* Directory entry */
-		u_int32_t,		/* Length */
-		u_int32_t *);		/* Count */
+		u_long,			/* Length */
+		u_long *);		/* Count */
 
 	arc_status_t (*open)(		/* Open 24 */
 		char *,			/* Path */
 		arc_open_mode_t,	/* Open mode */
-		u_int32_t *);		/* FileId */
+		u_long *);		/* FileId */
 
 	arc_status_t (*close)(		/* Close 25 */
-		u_int32_t);		/* FileId */
+		u_long);		/* FileId */
 
 	arc_status_t (*read)(		/* Read 26 */
-		u_int32_t,		/* FileId */
+		u_long,			/* FileId */
 		caddr_t,		/* Buffer */
-		u_int32_t,		/* Length */
-		u_int32_t *);		/* Count */
+		u_long,			/* Length */
+		u_long *);		/* Count */
 
 	arc_status_t (*get_read_status)( /* GetReadStatus 27 */
-		u_int32_t);		/* FileId */
+		u_long);		/* FileId */
 
 	arc_status_t (*write)(		/* Write 28 */
-		u_int32_t,		/* FileId */
+		u_long,			/* FileId */
 		caddr_t,		/* Buffer */
-		u_int32_t,		/* Length */
-		u_int32_t *);		/* Count */
+		u_long,			/* Length */
+		u_long *);		/* Count */
 
 	arc_status_t (*seek)(		/* Seek 29 */
-		u_int32_t,		/* FileId */
-		int64_t *,		/* Offset */
+		u_long,			/* FileId */
+		arc_quad_t *,		/* Offset */
 		arc_seek_mode_t);	/* Mode */
 
 	arc_status_t (*mount)(		/* Mount 30 */
@@ -307,7 +348,7 @@ typedef struct arc_calls
 
 	void (*flush_all_caches)(void);	/* FlushAllCaches 35 */
 
-#ifdef arc
+#ifdef __arc__
 	arc_status_t (*test_unicode)(	/* TestUnicodeCharacter 36 */
 		u_int32_t,		/* FileId */
 		u_int16_t);		/* UnicodeCharacter */
@@ -369,7 +410,13 @@ typedef struct arc_param_blk_64
 #endif
 #define ArcBios (ArcBiosBase->firmware_vect)
 
+#define	ARCBIOS_PAGE_SIZE	4096
+
 extern int bios_is_32bit;
+extern char bios_enaddr[20];
+extern char bios_console[30];
+extern char bios_graphics[6];
+extern char bios_keyboard[6];
 
 int  bios_getchar(void);
 void bios_putchar(char);
@@ -381,40 +428,40 @@ void bios_display_info(int *, int *, int *, int *);
 /*
  *  Direct ARC-Bios calls.
  */
-int Bios_Load(char *, u_int32_t, u_int32_t, u_int32_t *);
-int Bios_Invoke(uint32_t, uint32_t, uint32_t, char **, char **);
-int Bios_Execute(char *, u_int32_t, char **, char **);
+long Bios_Load(char *, u_long, u_long, u_long *);
+long Bios_Invoke(u_long, u_long, u_long, char **, char **);
+long Bios_Execute(char *, u_long, char **, char **);
 void Bios_Halt(void);
 void Bios_PowerDown(void);
 void Bios_Restart(void);
 void Bios_Reboot(void);
 void Bios_EnterInteractiveMode(void);
-int Bios_GetPeer(void *);
+long Bios_GetPeer(void *);
 arc_config_t *Bios_GetChild(void *);
-int Bios_GetParent(void *);
-int Bios_GetConfigurationData(void *, void *);
-int Bios_AddChild(void *, void *);
-int Bios_DeleteComponent(void *);
-int Bios_GetComponent(char *);
-int Bios_SaveConfiguration(void);
+long Bios_GetParent(void *);
+long Bios_GetConfigurationData(void *, void *);
+long Bios_AddChild(void *, void *);
+long Bios_DeleteComponent(void *);
+long Bios_GetComponent(char *);
+long Bios_SaveConfiguration(void);
 arc_sid_t *Bios_GetSystemId(void);
 arc_mem_t *Bios_GetMemoryDescriptor(void *);
-int Bios_GetTime(void);
-int Bios_GetRelativeTime(void);
-int Bios_GetDirectoryEntry(u_int32_t, void *, u_int32_t, u_int32_t *);
-int Bios_Open(char *, int, u_int *);
-int Bios_Close(u_int);
-int Bios_Read(int, char *, int, int *);
-int Bios_GetReadStatus(u_int);
-int Bios_Write(int, char *, int, int *);
-int Bios_Seek(int, int64_t *, int);
-int Bios_Mount(char *, void *);
+long Bios_GetTime(void);
+long Bios_GetRelativeTime(void);
+long Bios_GetDirectoryEntry(u_long, void *, u_long, u_long *);
+long Bios_Open(char *, int, long *);
+long Bios_Close(long);
+long Bios_Read(long, char *, long, long *);
+long Bios_GetReadStatus(u_long);
+long Bios_Write(long, char *, long, long *);
+long Bios_Seek(long, arc_quad_t *, int);
+long Bios_Mount(char *, void *);
 char *Bios_GetEnvironmentVariable(const char *);
-int Bios_SetEnvironmentVariable(char *, char *);
-int Bios_GetFileInformation(u_int32_t, u_int32_t, u_int32_t);
-int Bios_SetFileInformation(u_int32_t, u_int32_t, u_int32_t);
+long Bios_SetEnvironmentVariable(char *, char *);
+long Bios_GetFileInformation(u_long, u_long, u_long);
+long Bios_SetFileInformation(u_long, u_long, u_long);
 void Bios_FlushAllCaches(void);
-int Bios_TestUnicodeCharacter(u_int32_t, u_int16_t);
-arc_dsp_stat_t *Bios_GetDisplayStatus(u_int32_t);
+long Bios_TestUnicodeCharacter(u_long, u_int16_t);
+arc_dsp_stat_t *Bios_GetDisplayStatus(u_long);
 
 

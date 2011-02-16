@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.11 2006/01/22 18:37:58 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.14 2009/07/26 18:48:55 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -168,6 +161,7 @@ void	mac68k_bus_space_handle_swapped(bus_space_tag_t,
 
 #define	BUS_SPACE_MAP_CACHEABLE		0x01
 #define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 int	bus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t,
 	    int, bus_space_handle_t *);
@@ -203,7 +197,7 @@ int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 
 int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,
 	    bus_space_handle_t *bshp);
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.90 2007/04/03 10:14:47 art Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.117 2010/10/02 23:13:28 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -49,10 +49,6 @@
 #ifdef MULTIPROCESSOR
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
-
-/* XXX for now... */
-#define NLAPIC 1
-
 #endif
 
 /*
@@ -88,18 +84,19 @@ struct cpu_info {
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
 #endif
+	u_int32_t ci_randseed;
 
 	/*
 	 * Private members.
 	 */
 	struct proc *ci_fpcurproc;	/* current owner of the FPU */
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;		/* save in progress */
-
-	volatile u_int32_t ci_tlb_ipi_mask;
 
 	struct pcb *ci_curpcb;		/* VA of current HW PCB */
 	struct pcb *ci_idle_pcb;	/* VA of current PCB */
 	int ci_idle_tss_sel;		/* TSS selector of idle PCB */
+	struct pmap *ci_curpmap;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
 	u_int32_t	ci_ipending;
@@ -107,9 +104,12 @@ struct cpu_info {
 	int		ci_idepth;
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
 	paddr_t		ci_idle_pcb_paddr; /* PA of idle PCB */
-	u_long		ci_flags;	/* flags; see below */
+	volatile u_long	ci_flags;	/* flags; see below */
 	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
 	int		sc_apic_version;/* local APIC version */
 	u_int64_t	ci_tscbase;
@@ -117,8 +117,11 @@ struct cpu_info {
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
 	u_int32_t	ci_signature;		/* X86 cpuid type */
+	u_int32_t	ci_family;		/* extended cpuid family */
+	u_int32_t	ci_model;		/* extended cpuid model */
 	u_int32_t	ci_feature_flags;	/* X86 CPUID feature bits */
 	u_int32_t	cpu_class;		/* CPU class */
+	u_int32_t	ci_cflushsz;		/* clflush cache-line size */
 
 	struct cpu_functions *ci_func;	/* start/stop functions */
 	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
@@ -187,6 +190,8 @@ extern u_long		 cpus_running;
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
 
+void cpu_unidle(struct cpu_info *);
+
 #else /* MULTIPROCESSOR */
 
 #define I386_MAXPROCS		1
@@ -195,6 +200,8 @@ extern void cpu_init_idle_pcbs(void);
 #define	curcpu()		(&cpu_info_primary)
 
 #define CPU_IS_PRIMARY(ci)	1
+
+#define cpu_unidle(ci)
 
 #endif
 
@@ -207,6 +214,7 @@ extern void cpu_init_idle_pcbs(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #define	CLKF_USERMODE(frame)	USERMODE((frame)->if_cs, (frame)->if_eflags)
 #define	CLKF_PC(frame)		((frame)->if_eip)
@@ -330,7 +338,6 @@ void	cpuid(u_int32_t, u_int32_t *);
 /* locore.s */
 struct region_descriptor;
 void	lgdt(struct region_descriptor *);
-void	fillw(short, void *, size_t);
 
 struct pcb;
 void	savectx(struct pcb *);
@@ -338,15 +345,18 @@ void	switch_exit(struct proc *);
 void	proc_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
 void	rtcdrain(void *);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
 
-
+#if !defined(SMALL_KERNEL)
 /* est.c */
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void	est_init(const char *, int);
@@ -407,11 +417,6 @@ int	kvtop(caddr_t);
 void	vm86_gpfault(struct proc *, int);
 #endif /* VM86 */
 
-#ifdef GENERIC
-/* swapgeneric.c */
-void	setconf(void);
-#endif /* GENERIC */
-
 #endif /* _KERNEL */
 
 /* 
@@ -433,7 +438,8 @@ void	setconf(void);
 #define CPU_SSE			14	/* supports SSE */
 #define CPU_SSE2		15	/* supports SSE2 */
 #define CPU_XCRYPT		16	/* supports VIA xcrypt in userland */
-#define CPU_MAXID		17	/* number of valid machdep ids */
+#define CPU_LIDSUSPEND		17	/* lid close causes a suspend */
+#define CPU_MAXID		18	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -453,6 +459,7 @@ void	setconf(void);
 	{ "sse", CTLTYPE_INT }, \
 	{ "sse2", CTLTYPE_INT }, \
 	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lereg.h,v 1.7 2003/06/02 23:27:50 millert Exp $ */
+/*	$OpenBSD: if_lereg.h,v 1.10 2009/02/17 22:28:40 miod Exp $ */
 
 /*-
  * Copyright (c) 1982, 1992, 1993
@@ -41,6 +41,7 @@ struct lereg1 {
         volatile u_int16_t      ler1_rap;       /* register select port */
 };
 
+#define	VLEREGSIZE	0x200
 #define	VLEMEMSIZE	0x00040000 
 #define	VLEMEMBASE	0xfd6c0000
 

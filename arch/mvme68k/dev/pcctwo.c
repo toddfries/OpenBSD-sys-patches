@@ -1,5 +1,5 @@
 
-/*	$OpenBSD: pcctwo.c,v 1.14 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: pcctwo.c,v 1.18 2010/06/26 23:24:43 guenther Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -33,7 +33,6 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/systm.h>
@@ -77,9 +76,16 @@ pcctwomatch(parent, vcf, args)
 	struct confargs *ca = args;
 	struct pcctworeg *pcc2;
 
-	/* the PCC2 only exists on MVME16x's except the 162, right? */
-	if (cputyp == CPU_162 || cputyp == CPU_147 || cputyp == CPU_172)
+	switch (cputyp) {
+	case CPU_166:
+	case CPU_167:
+	case CPU_176:
+	case CPU_177:
+		break;
+	default:
 		return (0);
+	}
+
 	pcc2 = (struct pcctworeg *)(IIOV(ca->ca_paddr) + PCC2_PCC2CHIP_OFF);
 	if (badvaddr((vaddr_t)pcc2, 1) || pcc2->pcc2_chipid != PCC2_CHIPID)
 		return (0);
@@ -107,9 +113,12 @@ pcctwo_scan(parent, child, args)
 {
 	struct cfdata *cf = child;
 	struct pcctwosoftc *sc = (struct pcctwosoftc *)parent;
+	struct confargs *ca = args;
 	struct confargs oca;
 
 	bzero(&oca, sizeof oca);
+	oca.ca_iot = ca->ca_iot;
+	oca.ca_dmat = ca->ca_dmat;
 	oca.ca_offset = cf->cf_loc[0];
 	oca.ca_ipl = cf->cf_loc[1];
 	if (oca.ca_offset != -1 && ISIIOVA(sc->sc_vaddr + oca.ca_offset)) {

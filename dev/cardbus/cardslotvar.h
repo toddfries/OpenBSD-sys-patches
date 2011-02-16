@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cardslotvar.h,v 1.2 2002/03/14 01:26:53 millert Exp $	*/
+=======
+/*	$OpenBSD: cardslotvar.h,v 1.5 2010/01/13 09:10:33 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cardslotvar.h,v 1.5 2000/03/13 23:52:38 soren Exp $	*/
 
 /*
@@ -13,11 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the author.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -76,11 +75,7 @@ struct cardslot_softc {
 	struct cardbus_softc *sc_cb_softc;
 	struct pcmcia_softc *sc_16_softc;
 
-	struct proc *sc_event_thread;
-	int sc_th_enable;		/* true if the thread is enabled */
-
 	/* An event queue for the thread which processes slot state events. */
-
 	SIMPLEQ_HEAD(, cardslot_event) sc_events;
 };
 

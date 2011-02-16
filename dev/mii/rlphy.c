@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rlphy.c,v 1.26 2006/12/27 19:11:09 kettenis Exp $	*/
+=======
+/*	$OpenBSD: rlphy.c,v 1.30 2008/09/11 18:26:58 brad Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)
@@ -37,18 +41,20 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
-#include <sys/timeout.h>
 #include <sys/errno.h>
+
+#include <machine/bus.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
+
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/miidevs.h>
-#include <machine/bus.h>
+
 #include <dev/ic/rtl81x9reg.h>
 
 int	rlphymatch(struct device *, void *, void *);
@@ -193,12 +199,6 @@ rlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			return (0);
 
 		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			break;
-
-		/*
 		 * The RealTek PHY's autonegotiation doesn't need to be
 		 * kicked; it continues in the background.
 		 */
@@ -258,10 +258,10 @@ rlphy_status(struct mii_softc *sc)
 
 		if ((anlpar = PHY_READ(sc, MII_ANAR) &
 		    PHY_READ(sc, MII_ANLPAR))) {
-			if (anlpar & ANLPAR_T4)
-				mii->mii_media_active |= IFM_100_T4|IFM_HDX;
-			else if (anlpar & ANLPAR_TX_FD)
+			if (anlpar & ANLPAR_TX_FD)
 				mii->mii_media_active |= IFM_100_TX|IFM_FDX;
+			else if (anlpar & ANLPAR_T4)
+				mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 			else if (anlpar & ANLPAR_TX)
 				mii->mii_media_active |= IFM_100_TX|IFM_HDX;
 			else if (anlpar & ANLPAR_10_FD)

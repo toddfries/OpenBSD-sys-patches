@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ramdisk.c,v 1.28 2006/08/14 01:04:58 krw Exp $	*/
+=======
+/*	$OpenBSD: ramdisk.c,v 1.50 2010/09/22 01:18:57 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -86,7 +90,7 @@
 
 struct rd_softc {
 	struct device sc_dev;	/* REQUIRED first entry */
-	struct disk sc_dkdev;	/* hook for generic disk handling */
+	struct disk sc_dk;	/* hook for generic disk handling */
 	struct rd_conf sc_rd;
 #if RAMDISK_SERVER
 	struct buf *sc_buflist;
@@ -108,11 +112,27 @@ void rdgetdisklabel(struct rd_softc *sc);
  * XXX - that practice is questionable...
  */
 struct cfdriver rd_cd = {
+<<<<<<< HEAD
 	NULL, "rd", DV_DULL
+=======
+	NULL, "rd", DV_DISK
+};
+
+/*
+ * Here we define a cfattach structure for inserting any new rd device into the
+ * device tree. This is needed by some archs that look for bootable devices in
+ * there.
+ */
+int  rd_probe(struct device *, void *, void *);
+int  rd_detach(struct device *, int);
+
+struct cfattach rd_ca = {
+	sizeof(struct rd_softc), rd_probe, rd_attach,
+	rd_detach
+>>>>>>> origin/master
 };
 
 void rdstrategy(struct buf *bp);
-struct dkdriver rddkdriver = { rdstrategy };
 
 int   ramdisk_ndevs;
 void *ramdisk_devs[RD_MAX_UNITS];
@@ -121,8 +141,7 @@ void *ramdisk_devs[RD_MAX_UNITS];
  * This is called if we are configured as a pseudo-device
  */
 void
-rdattach(n)
-	int n;
+rdattach(int n)
 {
 	struct rd_softc *sc;
 	int i;
@@ -135,7 +154,7 @@ rdattach(n)
 #endif
 
 	/* XXX:  Are we supposed to provide a default? */
-	if (n <= 1)
+	if (n < 1)
 		n = 1;
 	if (n > RD_MAX_UNITS)
 		n = RD_MAX_UNITS;
@@ -162,9 +181,7 @@ rdattach(n)
 }
 
 void
-rd_attach(parent, self, aux)
-	struct device	*parent, *self;
-	void		*aux;
+rd_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct rd_softc *sc = (struct rd_softc *)self;
 
@@ -181,9 +198,8 @@ rd_attach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	sc->sc_dkdev.dk_driver = &rddkdriver;
-	sc->sc_dkdev.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_dkdev);
+	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 }
 
 /*
@@ -209,13 +225,17 @@ dev_type_size(rdsize);
 dev_type_dump(rddump);
 
 int
+<<<<<<< HEAD
 rddump(dev, blkno, va, size)
 	dev_t dev;
 	daddr_t blkno;
 	caddr_t va;
 	size_t size;
+=======
+rddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
+>>>>>>> origin/master
 {
-	return ENODEV;
+	return (ENODEV);
 }
 
 int
@@ -227,14 +247,15 @@ rdsize(dev_t dev)
 	/* Disallow control units. */
 	unit = DISKUNIT(dev);
 	if (unit >= ramdisk_ndevs)
-		return 0;
+		return (0);
 	sc = ramdisk_devs[unit];
 	if (sc == NULL)
-		return 0;
+		return (0);
 
 	if (sc->sc_type == RD_UNCONFIGURED)
-		return 0;
+		return (0);
 
+<<<<<<< HEAD
 	rdgetdisklabel(sc);
 	part = DISKPART(dev);
 	if (part >= sc->sc_dkdev.dk_label->d_npartitions)
@@ -242,30 +263,35 @@ rdsize(dev_t dev)
 	else
 		return sc->sc_dkdev.dk_label->d_partitions[part].p_size *
 		    (sc->sc_dkdev.dk_label->d_secsize / DEV_BSIZE);
+=======
+	rdgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
+	part = DISKPART(dev);
+	if (part >= sc->sc_dk.dk_label->d_npartitions)
+		return (0);
+	return (DL_GETPSIZE(&sc->sc_dk.dk_label->d_partitions[part]) *
+	    (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE));
+>>>>>>> origin/master
 }
 
 int
-rdopen(dev, flag, fmt, proc)
-	dev_t   dev;
-	int     flag, fmt;
-	struct proc *proc;
+rdopen(dev_t dev, int flag, int fmt, struct proc *proc)
 {
 	int unit;
 	struct rd_softc *sc;
 
 	unit = DISKUNIT(dev);
 	if (unit >= ramdisk_ndevs)
-		return ENXIO;
+		return (ENXIO);
 	sc = ramdisk_devs[unit];
 	if (sc == NULL)
-		return ENXIO;
+		return (ENXIO);
 
 	/*
 	 * The control device is not exclusive, and can
 	 * open uninitialized units (so you can setconf).
 	 */
 	if (RD_IS_CTRL(dev))
-		return 0;
+		return (0);
 
 #ifdef	RAMDISK_HOOKS
 	/* Call the open hook to allow loading the device. */
@@ -277,37 +303,31 @@ rdopen(dev, flag, fmt, proc)
 	 * enforce initialized, exclusive open.
 	 */
 	if (sc->sc_type == RD_UNCONFIGURED)
-		return ENXIO;
+		return (ENXIO);
 
-	return 0;
+	/*
+	 * Make sure we have read the disklabel.
+	 */
+	rdgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
+	return (0);
 }
 
 int
-rdclose(dev, flag, fmt, proc)
-	dev_t   dev;
-	int     flag, fmt;
-	struct proc *proc;
+rdclose(dev_t dev, int flag, int fmt, struct proc *proc)
 {
-
-	return 0;
+	return (0);
 }
 
 int
-rdread(dev, uio, flags)
-	dev_t		dev;
-	struct uio	*uio;
-	int		flags;
+rdread(dev_t dev, struct uio *uio, int flags)
 {
-	return (physio(rdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(rdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
-rdwrite(dev, uio, flags)
-	dev_t		dev;
-	struct uio	*uio;
-	int		flags;
+rdwrite(dev_t dev, struct uio *uio, int flags)
 {
-	return (physio(rdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(rdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 /*
@@ -315,30 +335,32 @@ rdwrite(dev, uio, flags)
  * by passing them to the server process.
  */
 void
-rdstrategy(bp)
-	struct buf *bp;
+rdstrategy(struct buf *bp)
 {
-	int unit, part;
+	int unit, s;
 	struct rd_softc *sc;
 	caddr_t addr;
 	size_t off, xfer;
-	int s;
 
 	unit = DISKUNIT(bp->b_dev);
 	sc = ramdisk_devs[unit];
 
 	/* Sort rogue requests out */
 	if (sc == NULL || bp->b_blkno < 0 ||
-	    (bp->b_bcount % sc->sc_dkdev.dk_label->d_secsize) != 0) {
+	    (bp->b_bcount % sc->sc_dk.dk_label->d_secsize) != 0) {
 		bp->b_error = EINVAL;
 		goto bad;
 	}
 
 	/* Do not write on "no trespassing" areas... */
+<<<<<<< HEAD
 	part = DISKPART(bp->b_dev);
 	if (part != RAW_PART &&
 	    bounds_check_with_label(bp, sc->sc_dkdev.dk_label,
 	      sc->sc_dkdev.dk_cpulabel, 1) <= 0)
+=======
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label, 1) <= 0)
+>>>>>>> origin/master
 		goto bad;
 
 	switch (sc->sc_type) {
@@ -386,39 +408,66 @@ bad:
 }
 
 int
-rdioctl(dev, cmd, data, flag, proc)
-	dev_t	dev;
-	u_long	cmd;
-	int		flag;
-	caddr_t	data;
-	struct proc	*proc;
+rdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *proc)
 {
+<<<<<<< HEAD
 	int unit;
+=======
+	struct disklabel *lp;
+>>>>>>> origin/master
 	struct rd_softc *sc;
 	struct rd_conf *urd;
-	int error;
+	int unit = DISKUNIT(dev), error;
 
-	unit = DISKUNIT(dev);
 	sc = ramdisk_devs[unit];
 
 	urd = (struct rd_conf *)data;
 	switch (cmd) {
-	case DIOCGDINFO:
-		if (sc->sc_type == RD_UNCONFIGURED) {
+<<<<<<< HEAD
+=======
+	case DIOCRLDINFO:
+		if (sc->sc_type == RD_UNCONFIGURED)
 			break;
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		rdgetdisklabel(dev, sc, lp, 0);
+		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		return (0);
+
+	case DIOCGPDINFO:
+		if (sc->sc_type == RD_UNCONFIGURED)
+			break;
+		rdgetdisklabel(dev, sc, (struct disklabel *)data, 1);
+		return (0);
+
+>>>>>>> origin/master
+	case DIOCGDINFO:
+		if (sc->sc_type == RD_UNCONFIGURED)
+			break;
+<<<<<<< HEAD
 		}
 		rdgetdisklabel(sc);
 		bcopy(sc->sc_dkdev.dk_label, data, sizeof(struct disklabel));
 		return 0;
+=======
+		*(struct disklabel *)data = *(sc->sc_dk.dk_label);
+		return (0);
+
+	case DIOCGPART:
+		((struct partinfo *)data)->disklab = sc->sc_dk.dk_label;
+		((struct partinfo *)data)->part =
+		    &sc->sc_dk.dk_label->d_partitions[DISKPART(dev)];
+		return (0);
+>>>>>>> origin/master
 
 	case DIOCWDINFO:
 	case DIOCSDINFO:
-		if (sc->sc_type == RD_UNCONFIGURED) {
+		if (sc->sc_type == RD_UNCONFIGURED)
 			break;
-		}
 		if ((flag & FWRITE) == 0)
-			return EBADF;
+			return (EBADF);
 
+<<<<<<< HEAD
 		error = setdisklabel(sc->sc_dkdev.dk_label,
 		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0,
 		    sc->sc_dkdev.dk_cpulabel);
@@ -427,48 +476,57 @@ rdioctl(dev, cmd, data, flag, proc)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    rdstrategy, sc->sc_dkdev.dk_label,
 				    sc->sc_dkdev.dk_cpulabel);
+=======
+		error = setdisklabel(sc->sc_dk.dk_label,
+		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    rdstrategy, sc->sc_dk.dk_label);
+>>>>>>> origin/master
 		}
-
-		return error;
+		return (error);
 
 	case DIOCWLABEL:
-		if (sc->sc_type == RD_UNCONFIGURED) {
+		if (sc->sc_type == RD_UNCONFIGURED)
 			break;
-		}
 		if ((flag & FWRITE) == 0)
-			return EBADF;
-		return 0;
+			return (EBADF);
+		return (0);
 
 	case RD_GETCONF:
 		/* If this is not the control device, punt! */
-		if (RD_IS_CTRL(dev) == 0) {
+		if (RD_IS_CTRL(dev) == 0)
 			break;
-		}
 		*urd = sc->sc_rd;
-		return 0;
+		return (0);
 
 	case RD_SETCONF:
 		/* If this is not the control device, punt! */
-		if (RD_IS_CTRL(dev) == 0) {
+		if (RD_IS_CTRL(dev) == 0)
 			break;
-		}
 		/* Can only set it once. */
-		if (sc->sc_type != RD_UNCONFIGURED) {
+		if (sc->sc_type != RD_UNCONFIGURED)
 			break;
-		}
 		switch (urd->rd_type) {
 		case RD_KMEM_ALLOCATED:
-			return rd_ioctl_kalloc(sc, urd, proc);
+			return (rd_ioctl_kalloc(sc, urd, proc));
 #if RAMDISK_SERVER
 		case RD_UMEM_SERVER:
-			return rd_ioctl_server(sc, urd, proc);
+			return (rd_ioctl_server(sc, urd, proc));
 #endif
 		default:
 			break;
 		}
 		break;
+<<<<<<< HEAD
+=======
+
+	default:
+		return (ENOTTY);
+>>>>>>> origin/master
 	}
-	return EINVAL;
+	return (EINVAL);
 }
 
 void
@@ -492,6 +550,7 @@ rdgetdisklabel(struct rd_softc *sc)
 	strncpy(lp->d_typename, "RAM disk", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_SCSI;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
+<<<<<<< HEAD
 	lp->d_secperunit = lp->d_nsectors;
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
@@ -500,6 +559,10 @@ rdgetdisklabel(struct rd_softc *sc)
 	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
+=======
+	DL_SETDSIZE(lp, lp->d_nsectors);
+	lp->d_version = 1;
+>>>>>>> origin/master
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -517,10 +580,7 @@ rdgetdisklabel(struct rd_softc *sc)
  * Just allocate some kernel memory and return.
  */
 int
-rd_ioctl_kalloc(sc, urd, proc)
-	struct rd_softc *sc;
-	struct rd_conf *urd;
-	struct proc	*proc;
+rd_ioctl_kalloc(struct rd_softc *sc, struct rd_conf *urd, struct proc *proc)
 {
 	vaddr_t addr;
 	vsize_t size;
@@ -529,14 +589,31 @@ rd_ioctl_kalloc(sc, urd, proc)
 	size = urd->rd_size;
 	addr = uvm_km_zalloc(kernel_map, size);
 	if (!addr)
-		return ENOMEM;
+		return (ENOMEM);
 
 	/* This unit is now configured. */
 	sc->sc_addr = (caddr_t)addr; 	/* kernel space */
 	sc->sc_size = (size_t)size;
 	sc->sc_type = RD_KMEM_ALLOCATED;
+<<<<<<< HEAD
 	return 0;
 }	
+=======
+	return (0);
+}
+
+int
+rd_probe(struct device *parent, void *match_, void *aux)
+{
+	return (0);
+}
+
+int
+rd_detach(struct device *self, int flags)
+{
+	return (0);
+}
+>>>>>>> origin/master
 
 #if RAMDISK_SERVER
 
@@ -545,10 +622,7 @@ rd_ioctl_kalloc(sc, urd, proc)
  * Set config, then become the I/O server for this unit.
  */
 int
-rd_ioctl_server(sc, urd, proc)
-	struct rd_softc *sc;
-	struct rd_conf *urd;
-	struct proc	*proc;
+rd_ioctl_server(struct rd_softc *sc, struct rd_conf *urd, struct proc *proc)
 {
 	vaddr_t end;
 	int error;
@@ -557,7 +631,7 @@ rd_ioctl_server(sc, urd, proc)
 	end = (vaddr_t) (urd->rd_addr + urd->rd_size);
 
 	if ((end >= VM_MAXUSER_ADDRESS) || (end < ((vaddr_t) urd->rd_addr)) )
-		return EINVAL;
+		return (EINVAL);
 
 	/* This unit is now configured. */
 	sc->sc_addr = urd->rd_addr; 	/* user space */
@@ -571,29 +645,26 @@ rd_ioctl_server(sc, urd, proc)
 	sc->sc_type = RD_UNCONFIGURED;
 	sc->sc_addr = 0;
 	sc->sc_size = 0;
-
 	return (error);
 }	
 
 int	rd_sleep_pri = PWAIT | PCATCH;
 
 int
-rd_server_loop(sc)
-	struct rd_softc *sc;
+rd_server_loop(struct rd_softc *sc)
 {
 	struct buf *bp;
 	caddr_t addr;	/* user space address */
 	size_t  off;	/* offset into "device" */
 	size_t  xfer;	/* amount to transfer */
-	int error;
-	int s;
+	int error, s;
 
 	for (;;) {
 		/* Wait for some work to arrive. */
 		while (sc->sc_buflist == NULL) {
 			error = tsleep((caddr_t)sc, rd_sleep_pri, "rd_idle", 0);
 			if (error)
-				return error;
+				return (error);
 		}
 
 		/* Unlink buf from head of list. */

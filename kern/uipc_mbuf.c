@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uipc_mbuf.c,v 1.79 2006/12/29 13:04:37 pedro Exp $	*/
+=======
+/*	$OpenBSD: uipc_mbuf.c,v 1.149 2011/01/29 13:15:39 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -76,7 +80,6 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
-#define MBTYPES
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
@@ -84,25 +87,49 @@
 #include <sys/protosw.h>
 #include <sys/pool.h>
 
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <net/if.h>
+
 #include <machine/cpu.h>
 
+#include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
 
 struct	mbstat mbstat;		/* mbuf stats */
 struct	pool mbpool;		/* mbuf pool */
-struct	pool mclpool;		/* mbuf cluster pool */
+
+/* mbuf cluster pools */
+u_int	mclsizes[] = {
+	MCLBYTES,	/* must be at slot 0 */
+	4 * 1024,
+	8 * 1024,
+	9 * 1024,
+	12 * 1024,
+	16 * 1024,
+	64 * 1024
+};
+static	char mclnames[MCLPOOLS][8];
+struct	pool mclpools[MCLPOOLS];
+
+int	m_clpool(u_int);
 
 int max_linkhdr;		/* largest link-level header */
 int max_protohdr;		/* largest protocol header */
 int max_hdr;			/* largest link+protocol header */
 int max_datalen;		/* MHLEN - max_hdr */
 
+struct timeout m_cltick_tmo;
+int	m_clticks;
+void	m_cltick(void *);
+
+void	m_extfree(struct mbuf *);
 struct mbuf *m_copym0(struct mbuf *, int, int, int, int);
 void	nmbclust_update(void);
 
 
 const char *mclpool_warnmsg =
-    "WARNING: mclpool limit reached; increase kern.maxclusters";
+    "WARNING: mclpools limit reached; increase kern.maxclusters";
 
 /*
  * Initialize the mbuf allocator.
@@ -110,30 +137,53 @@ const char *mclpool_warnmsg =
 void
 mbinit(void)
 {
+	int i;
+
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
-	pool_init(&mclpool, MCLBYTES, 0, 0, 0, "mclpl", NULL);
+	pool_set_constraints(&mbpool, &dma_constraint, 1);
+	pool_setlowat(&mbpool, mblowat);
+
+	for (i = 0; i < nitems(mclsizes); i++) {
+		snprintf(mclnames[i], sizeof(mclnames[0]), "mcl%dk",
+		    mclsizes[i] >> 10);
+		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
+		    mclnames[i], NULL);
+		pool_set_constraints(&mclpools[i], &dma_constraint, 1); 
+		pool_setlowat(&mclpools[i], mcllowat);
+	}
 
 	nmbclust_update();
 
-	/*
-	 * Set a low water mark for both mbufs and clusters.  This should
-	 * help ensure that they can be allocated in a memory starvation
-	 * situation.  This is important for e.g. diskless systems which
-	 * must allocate mbufs in order for the pagedaemon to clean pages.
-	 */
-	pool_setlowat(&mbpool, mblowat);
-	pool_setlowat(&mclpool, mcllowat);
+	timeout_set(&m_cltick_tmo, m_cltick, NULL);
+	m_cltick(NULL);
 }
 
 void
 nmbclust_update(void)
 {
+	int i;
 	/*
-	 * Set the hard limit on the mclpool to the number of
+	 * Set the hard limit on the mclpools to the number of
 	 * mbuf clusters the kernel is to support.  Log the limit
 	 * reached message max once a minute.
 	 */
+<<<<<<< HEAD
 	(void)pool_sethardlimit(&mclpool, nmbclust, mclpool_warnmsg, 60);
+=======
+	for (i = 0; i < nitems(mclsizes); i++) {
+		(void)pool_sethardlimit(&mclpools[i], nmbclust,
+		    mclpool_warnmsg, 60);
+		/*
+		 * XXX this needs to be reconsidered.
+		 * Setting the high water mark to nmbclust is too high
+		 * but we need to have enough spare buffers around so that
+		 * allocations in interrupt context don't fail or mclgeti()
+		 * drivers may end up with empty rings.
+		 */
+		pool_sethiwat(&mclpools[i], nmbclust);
+	}
+	pool_sethiwat(&mbpool, nmbclust);
+>>>>>>> origin/master
 }
 
 void
@@ -141,14 +191,14 @@ m_reclaim(void *arg, int flags)
 {
 	struct domain *dp;
 	struct protosw *pr;
-	int s = splvm();
+	int s = splnet();
 
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_drain)
 				(*pr->pr_drain)();
-	splx(s);
 	mbstat.m_drain++;
+	splx(s);
 }
 
 /*
@@ -160,15 +210,68 @@ struct mbuf *
 m_get(int nowait, int type)
 {
 	struct mbuf *m;
+<<<<<<< HEAD
 
 	MGET(m, nowait, type);
+=======
+	int s;
+
+	s = splnet();
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
+	if (m)
+		mbstat.m_mtypes[type]++;
+	splx(s);
+	if (m) {
+		m->m_type = type;
+		m->m_next = (struct mbuf *)NULL;
+		m->m_nextpkt = (struct mbuf *)NULL;
+		m->m_data = m->m_dat;
+		m->m_flags = 0;
+	}
+>>>>>>> origin/master
 	return (m);
 }
 
+/*
+ * ATTN: When changing anything here check m_inithdr() and m_defrag() those
+ * may need to change as well.
+ */
 struct mbuf *
 m_gethdr(int nowait, int type)
 {
 	struct mbuf *m;
+<<<<<<< HEAD
+=======
+	int s;
+
+	s = splnet();
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
+	if (m)
+		mbstat.m_mtypes[type]++;
+	splx(s);
+	if (m) {
+		m->m_type = type;
+
+		/* keep in sync with m_inithdr */
+		m->m_next = (struct mbuf *)NULL;
+		m->m_nextpkt = (struct mbuf *)NULL;
+		m->m_data = m->m_pktdat;
+		m->m_flags = M_PKTHDR;
+		bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
+	}
+	return (m);
+}
+
+struct mbuf *
+m_inithdr(struct mbuf *m)
+{
+	/* keep in sync with m_gethdr */
+	m->m_next = (struct mbuf *)NULL;
+	m->m_nextpkt = (struct mbuf *)NULL;
+	m->m_data = m->m_pktdat;
+	m->m_flags = M_PKTHDR;
+	bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
+>>>>>>> origin/master
 
 	MGETHDR(m, nowait, type);
 	return (m);
@@ -186,25 +289,318 @@ m_getclr(int nowait, int type)
 	return (m);
 }
 
+<<<<<<< HEAD
+=======
+int
+m_clpool(u_int pktlen)
+{
+	int pi;
+
+	for (pi = 0; pi < MCLPOOLS; pi++) {
+                if (pktlen <= mclsizes[pi])
+			return (pi);
+	}
+
+	return (-1);
+}
+
+void
+m_clinitifp(struct ifnet *ifp)
+{
+	struct mclpool *mclp = ifp->if_data.ifi_mclpool;
+	int i;
+
+	/* Initialize high water marks for use of cluster pools */
+	for (i = 0; i < MCLPOOLS; i++) {
+		mclp = &ifp->if_data.ifi_mclpool[i];
+
+		if (mclp->mcl_lwm == 0)
+			mclp->mcl_lwm = 2;
+		if (mclp->mcl_hwm == 0)
+			mclp->mcl_hwm = 32768;
+
+		mclp->mcl_cwm = MAX(4, mclp->mcl_lwm);
+	}
+}
+
+void
+m_clsetwms(struct ifnet *ifp, u_int pktlen, u_int lwm, u_int hwm)
+{
+	int pi;
+
+	pi = m_clpool(pktlen);
+	if (pi == -1)
+		return;
+
+	ifp->if_data.ifi_mclpool[pi].mcl_lwm = lwm;
+	ifp->if_data.ifi_mclpool[pi].mcl_hwm = hwm;
+}
+
+/*
+ * Record when the last timeout has been run.  If the delta is
+ * too high, m_cldrop() will notice and decrease the interface
+ * high water marks.
+ */
+void
+m_cltick(void *arg)
+{
+	extern int ticks;
+
+	m_clticks = ticks;
+	timeout_add(&m_cltick_tmo, 1);
+}
+
+int m_livelock;
+u_int mcllivelocks;
+
+int
+m_cldrop(struct ifnet *ifp, int pi)
+{
+	static int liveticks;
+	struct mclpool *mclp;
+	extern int ticks;
+	int i;
+
+	if (ticks - m_clticks > 1) {
+		struct ifnet *aifp;
+
+		/*
+		 * Timeout did not run, so we are in some kind of livelock.
+		 * Decrease the cluster allocation high water marks on all
+		 * interfaces and prevent them from growth for the very near
+		 * future.
+		 */
+		m_livelock = 1;
+		mcllivelocks++;
+		m_clticks = liveticks = ticks;
+		TAILQ_FOREACH(aifp, &ifnet, if_list) {
+			mclp = aifp->if_data.ifi_mclpool;
+			for (i = 0; i < MCLPOOLS; i++) {
+				int diff = max(mclp[i].mcl_cwm / 8, 2);
+				mclp[i].mcl_cwm = max(mclp[i].mcl_lwm,
+				    mclp[i].mcl_cwm - diff);
+			}
+		}
+	} else if (m_livelock && (ticks - liveticks) > 4)
+		m_livelock = 0;	/* Let the high water marks grow again */
+
+	mclp = &ifp->if_data.ifi_mclpool[pi];
+	if (m_livelock == 0 && ISSET(ifp->if_flags, IFF_RUNNING) &&
+	    mclp->mcl_alive <= 4 && mclp->mcl_cwm < mclp->mcl_hwm &&
+	    mclp->mcl_grown < ticks) {
+		/* About to run out, so increase the current watermark */
+		mclp->mcl_cwm++;
+		mclp->mcl_grown = ticks;
+	} else if (mclp->mcl_alive >= mclp->mcl_cwm)
+		return (1);		/* No more packets given */
+
+	return (0);
+}
+
+void
+m_clcount(struct ifnet *ifp, int pi)
+{
+	ifp->if_data.ifi_mclpool[pi].mcl_alive++;
+}
+
+void
+m_cluncount(struct mbuf *m, int all)
+{
+	struct mbuf_ext *me;
+
+	do {
+		me = &m->m_ext;
+		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
+		    (me->ext_ifp == NULL))
+			continue;
+
+		me->ext_ifp->if_data.ifi_mclpool[me->ext_backend].mcl_alive--;
+		me->ext_ifp = NULL;
+	} while (all && (m = m->m_next));
+}
+
+struct mbuf *
+m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
+{
+	struct mbuf *m0 = NULL;
+	int pi;
+	int s;
+
+	pi = m_clpool(pktlen);
+#ifdef DIAGNOSTIC
+	if (pi == -1)
+		panic("m_clget: request for %u byte cluster", pktlen);
+#endif
+
+	s = splnet();
+
+	if (ifp != NULL && m_cldrop(ifp, pi)) {
+		splx(s);
+		return (NULL);
+	}
+
+	if (m == NULL) {
+		MGETHDR(m0, M_DONTWAIT, MT_DATA);
+		if (m0 == NULL) {
+			splx(s);
+			return (NULL);
+		}
+		m = m0;
+	}			
+	m->m_ext.ext_buf = pool_get(&mclpools[pi],
+	    how == M_WAIT ? PR_WAITOK : PR_NOWAIT);
+	if (!m->m_ext.ext_buf) {
+		if (m0)
+			m_freem(m0);
+		splx(s);
+		return (NULL);
+	}
+	if (ifp != NULL)
+		m_clcount(ifp, pi);
+	splx(s);
+
+	m->m_data = m->m_ext.ext_buf;
+	m->m_flags |= M_EXT|M_CLUSTER;
+	m->m_ext.ext_size = mclpools[pi].pr_size;
+	m->m_ext.ext_free = NULL;
+	m->m_ext.ext_arg = NULL;
+	m->m_ext.ext_backend = pi;
+	m->m_ext.ext_ifp = ifp;
+	MCLINITREFERENCE(m);
+	return (m);
+}
+
+>>>>>>> origin/master
+struct mbuf *
+m_free_unlocked(struct mbuf *m)
+{
+	struct mbuf *n;
+<<<<<<< HEAD
+=======
+
+	mbstat.m_mtypes[m->m_type]--;
+	if (m->m_flags & M_PKTHDR)
+		m_tag_delete_chain(m);
+	if (m->m_flags & M_EXT)
+		m_extfree(m);
+	n = m->m_next;
+	pool_put(&mbpool, m);
+
+	return (n);
+}
+
 struct mbuf *
 m_free(struct mbuf *m)
 {
 	struct mbuf *n;
+	int s;
+
+	s = splnet();
+	n = m_free_unlocked(m);
+	splx(s);
+>>>>>>> origin/master
 
 	MFREE(m, n);
 	return (n);
 }
 
 void
+m_extfree(struct mbuf *m)
+{
+	if (MCLISREFERENCED(m)) {
+		m->m_ext.ext_nextref->m_ext.ext_prevref =
+		    m->m_ext.ext_prevref;
+		m->m_ext.ext_prevref->m_ext.ext_nextref =
+		    m->m_ext.ext_nextref;
+	} else if (m->m_flags & M_CLUSTER) {
+		m_cluncount(m, 0);
+		pool_put(&mclpools[m->m_ext.ext_backend],
+		    m->m_ext.ext_buf);
+	} else if (m->m_ext.ext_free)
+		(*(m->m_ext.ext_free))(m->m_ext.ext_buf,
+		    m->m_ext.ext_size, m->m_ext.ext_arg);
+	else
+		panic("unknown type of extension buffer");
+	m->m_ext.ext_size = 0;
+	m->m_flags &= ~(M_EXT|M_CLUSTER);
+}
+
+void
 m_freem(struct mbuf *m)
 {
 	struct mbuf *n;
+	int s;
 
 	if (m == NULL)
 		return;
+	s = splnet();
 	do {
-		MFREE(m, n);
+		n = m_free_unlocked(m);
 	} while ((m = n) != NULL);
+	splx(s);
+}
+
+/*
+ * mbuf chain defragmenter. This function uses some evil tricks to defragment
+ * an mbuf chain into a single buffer without changing the mbuf pointer.
+ * This needs to know a lot of the mbuf internals to make this work.
+ */
+int
+m_defrag(struct mbuf *m, int how)
+{
+	struct mbuf *m0;
+
+	if (m->m_next == NULL)
+		return 0;
+
+#ifdef DIAGNOSTIC
+	if (!(m->m_flags & M_PKTHDR))
+		panic("m_defrag: no packet hdr or not a chain");
+#endif
+
+	if ((m0 = m_gethdr(how, m->m_type)) == NULL)
+		return -1;
+	if (m->m_pkthdr.len > MHLEN) {
+		MCLGETI(m0, how, NULL, m->m_pkthdr.len);
+		if (!(m0->m_flags & M_EXT)) {
+			m_free(m0);
+			return -1;
+		}
+	}
+	m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
+	m0->m_pkthdr.len = m0->m_len = m->m_pkthdr.len;
+
+	/* free chain behind and possible ext buf on the first mbuf */
+	m_freem(m->m_next);
+	m->m_next = NULL;
+
+	if (m->m_flags & M_EXT) {
+		int s = splnet();
+		m_extfree(m);
+		splx(s);
+	}
+
+	/*
+	 * Bounce copy mbuf over to the original mbuf and set everything up.
+	 * This needs to reset or clear all pointers that may go into the
+	 * original mbuf chain.
+	 */
+	if (m0->m_flags & M_EXT) {
+		bcopy(&m0->m_ext, &m->m_ext, sizeof(struct mbuf_ext));
+		MCLINITREFERENCE(m);
+		m->m_flags |= M_EXT|M_CLUSTER;
+		m->m_data = m->m_ext.ext_buf;
+	} else {
+		m->m_data = m->m_pktdat;
+		bcopy(m0->m_data, m->m_data, m0->m_len);
+	}
+	m->m_pkthdr.len = m->m_len = m0->m_len;
+	m->m_pkthdr.pf.hdr = NULL;	/* altq will cope */
+
+	m0->m_flags &= ~(M_EXT|M_CLUSTER);	/* cluster is gone */
+	m_free(m0);
+
+	return 0;
 }
 
 /*
@@ -212,9 +608,7 @@ m_freem(struct mbuf *m)
  */
 
 /*
- * Lesser-used path for M_PREPEND:
- * allocate new mbuf to prepend to chain,
- * copy junk along.
+ * Ensure len bytes of contiguous space at the beginning of the mbuf chain
  */
 struct mbuf *
 m_prepend(struct mbuf *m, int len, int how)
@@ -224,17 +618,24 @@ m_prepend(struct mbuf *m, int len, int how)
 	if (len > MHLEN)
 		panic("mbuf prepend length too big");
 
-	MGET(mn, how, m->m_type);
-	if (mn == NULL) {
-		m_freem(m);
-		return (NULL);
+	if (M_LEADINGSPACE(m) >= len) {
+		m->m_data -= len;
+		m->m_len += len;
+	} else {
+		MGET(mn, how, m->m_type);
+		if (mn == NULL) {
+			m_freem(m);
+			return (NULL);
+		}
+		if (m->m_flags & M_PKTHDR)
+			M_MOVE_PKTHDR(mn, m);
+		mn->m_next = m;
+		m = mn;
+		MH_ALIGN(m, len);
+		m->m_len = len;
 	}
 	if (m->m_flags & M_PKTHDR)
-		M_MOVE_PKTHDR(mn, m);
-	mn->m_next = m;
-	m = mn;
-	MH_ALIGN(m, len);
-	m->m_len = len;
+		m->m_pkthdr.len += len;
 	return (m);
 }
 
@@ -243,8 +644,6 @@ m_prepend(struct mbuf *m, int len, int how)
  * continuing for "len" bytes.  If len is M_COPYALL, copy to end of mbuf.
  * The wait parameter is a choice of M_WAIT/M_DONTWAIT from caller.
  */
-int MCFail;
-
 struct mbuf *
 m_copym(struct mbuf *m, int off, int len, int wait)
 {
@@ -262,24 +661,18 @@ m_copym2(struct mbuf *m, int off, int len, int wait)
 }
 
 struct mbuf *
-m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
+m_copym0(struct mbuf *m0, int off, int len, int wait, int deep)
 {
-	struct mbuf *n, **np;
+	struct mbuf *m, *n, **np;
 	struct mbuf *top;
 	int copyhdr = 0;
 
 	if (off < 0 || len < 0)
 		panic("m_copym0: off %d, len %d", off, len);
-	if (off == 0 && m->m_flags & M_PKTHDR)
+	if (off == 0 && m0->m_flags & M_PKTHDR)
 		copyhdr = 1;
-	while (off > 0) {
-		if (m == NULL)
-			panic("m_copym0: null mbuf");
-		if (off < m->m_len)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
+	if ((m = m_getptr(m0, off, &off)) == NULL)
+		panic("m_copym0: short mbuf chain");
 	np = &top;
 	top = NULL;
 	while (len > 0) {
@@ -293,7 +686,8 @@ m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
 		if (n == NULL)
 			goto nospace;
 		if (copyhdr) {
-			M_DUP_PKTHDR(n, m);
+			if (m_dup_pkthdr(n, m0))
+				goto nospace;
 			if (len != M_COPYALL)
 				n->m_pkthdr.len = len;
 			copyhdr = 0;
@@ -333,12 +727,9 @@ m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
 		}
 		np = &n->m_next;
 	}
-	if (top == NULL)
-		MCFail++;
 	return (top);
 nospace:
 	m_freem(top);
-	MCFail++;
 	return (NULL);
 }
 
@@ -355,14 +746,8 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
 		panic("m_copydata: off %d < 0", off);
 	if (len < 0)
 		panic("m_copydata: len %d < 0", len);
-	while (off > 0) {
-		if (m == NULL)
-			panic("m_copydata: null mbuf in skip");
-		if (off < m->m_len)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
+	if ((m = m_getptr(m, off, &off)) == NULL)
+		panic("m_copydata: short mbuf chain");
 	while (len > 0) {
 		if (m == NULL)
 			panic("m_copydata: null mbuf");
@@ -381,49 +766,77 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
  * chain if necessary. The mbuf needs to be properly initialized
  * including the setting of m_len.
  */
-void
-m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
+int
+m_copyback(struct mbuf *m0, int off, int len, const void *_cp, int wait)
 {
-	int mlen;
+	int mlen, totlen = 0;
 	struct mbuf *m = m0, *n;
-	int totlen = 0;
 	caddr_t cp = (caddr_t)_cp;
+	int error = 0;
 
 	if (m0 == NULL)
-		return;
+		return (0);
 	while (off > (mlen = m->m_len)) {
 		off -= mlen;
 		totlen += mlen;
 		if (m->m_next == NULL) {
-			n = m_getclr(M_DONTWAIT, m->m_type);
-			if (n == NULL)
+			if ((n = m_get(wait, m->m_type)) == NULL) {
+				error = ENOBUFS;
 				goto out;
-			n->m_len = min(MLEN, len + off);
+			}
+
+			if (off + len > MLEN) {
+				MCLGETI(n, wait, NULL, off + len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					error = ENOBUFS;
+					goto out;
+				}
+			}
+			bzero(mtod(n, caddr_t), off);
+			n->m_len = len + off;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
 	while (len > 0) {
-		mlen = min (m->m_len - off, len);
-		bcopy(cp, off + mtod(m, caddr_t), (unsigned)mlen);
+		/* extend last packet to be filled fully */
+		if (m->m_next == NULL && (len > m->m_len - off))
+			m->m_len += min(len - (m->m_len - off),
+			    M_TRAILINGSPACE(m));
+		mlen = min(m->m_len - off, len);
+		bcopy(cp, mtod(m, caddr_t) + off, (size_t)mlen);
 		cp += mlen;
 		len -= mlen;
-		mlen += off;
-		off = 0;
-		totlen += mlen;
+		totlen += mlen + off;
 		if (len == 0)
 			break;
+		off = 0;
+
 		if (m->m_next == NULL) {
-			n = m_get(M_DONTWAIT, m->m_type);
-			if (n == NULL)
-				break;
-			n->m_len = min(MLEN, len);
+			if ((n = m_get(wait, m->m_type)) == NULL) {
+				error = ENOBUFS;
+				goto out;
+			}
+
+			if (len > MLEN) {
+				MCLGETI(n, wait, NULL, len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					error = ENOBUFS;
+					goto out;
+				}
+			}
+			n->m_len = len;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
-out:	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
+out:
+	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
 		m->m_pkthdr.len = totlen;
+
+	return (error);
 }
 
 /*
@@ -532,14 +945,13 @@ m_adj(struct mbuf *mp, int req_len)
  * If there is room, it will add up to max_protohdr-len extra bytes to the
  * contiguous region in an attempt to avoid being called next time.
  */
-int MPFail;
-
 struct mbuf *
 m_pullup(struct mbuf *n, int len)
 {
 	struct mbuf *m;
 	int count;
 	int space;
+	int s;
 
 	/*
 	 * If first mbuf has no cluster, and has room for len bytes
@@ -564,6 +976,7 @@ m_pullup(struct mbuf *n, int len)
 			M_MOVE_PKTHDR(m, n);
 	}
 	space = &m->m_dat[MLEN] - (m->m_data + m->m_len);
+	s = splnet();
 	do {
 		count = min(min(max(len, max_protohdr), space), n->m_len);
 		bcopy(mtod(n, caddr_t), mtod(m, caddr_t) + m->m_len,
@@ -575,17 +988,18 @@ m_pullup(struct mbuf *n, int len)
 		if (n->m_len)
 			n->m_data += count;
 		else
-			n = m_free(n);
+			n = m_free_unlocked(n);
 	} while (len > 0 && n);
 	if (len > 0) {
-		(void)m_free(m);
+		(void)m_free_unlocked(m);
+		splx(s);
 		goto bad;
 	}
+	splx(s);
 	m->m_next = n;
 	return (m);
 bad:
 	m_freem(n);
-	MPFail++;
 	return (NULL);
 }
 
@@ -593,7 +1007,7 @@ bad:
  * m_pullup2() works like m_pullup, save that len can be <= MCLBYTES.
  * m_pullup2() only works on values of len such that MHLEN < len <= MCLBYTES,
  * it calls m_pullup() for values <= MHLEN.  It also only coagulates the
- * reqested number of bytes.  (For those of us who expect unwieldly option
+ * requested number of bytes.  (For those of us who expect unwieldy option
  * headers.
  *
  * KEBE SAYS:  Remember that dtom() calls with data in clusters does not work!
@@ -620,8 +1034,10 @@ m_pullup2(struct mbuf *n, int len)
 		if (m == NULL)
 			goto bad;
 		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0)
+		if ((m->m_flags & M_EXT) == 0) {
+			m_free(m);
 			goto bad;
+		}
 		m->m_len = 0;
 		if (n->m_flags & M_PKTHDR) {
 			/* Too many adverse side effects. */
@@ -654,7 +1070,6 @@ m_pullup2(struct mbuf *n, int len)
 	return (m);
 bad:
 	m_freem(n);
-	MPFail++;
 	return (NULL);
 }
 
@@ -669,8 +1084,7 @@ m_getptr(struct mbuf *m, int loc, int *off)
 		if (m->m_len > loc) {
 	    		*off = loc;
 	    		return (m);
-		}
-		else {
+		} else {
 	    		loc -= m->m_len;
 
 	    		if (m->m_next == NULL) {
@@ -678,11 +1092,12 @@ m_getptr(struct mbuf *m, int loc, int *off)
  					/* Point at the end of valid data */
 		    			*off = m->m_len;
 		    			return (m);
-				}
-				else
+				} else {
 		  			return (NULL);
-	    		} else
+				}
+	    		} else {
 	      			m = m->m_next;
+			}
 		}
     	}
 
@@ -770,7 +1185,10 @@ m_split(struct mbuf *m0, int len0, int wait)
 		MGETHDR(n, wait, m0->m_type);
 		if (n == NULL)
 			return (NULL);
-		M_DUP_PKTHDR(n, m0);
+		if (m_dup_pkthdr(n, m0)) {
+			m_freem(n);
+			return (NULL);
+		}
 		n->m_pkthdr.len -= len0;
 		olen = m0->m_pkthdr.len;
 		m0->m_pkthdr.len = len0;
@@ -820,28 +1238,24 @@ struct mbuf *
 m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
     void (*copy)(const void *, void *, size_t))
 {
-	struct mbuf *m;
-	struct mbuf *top = NULL, **mp = &top;
-	int len;
-	char *cp;
-	char *epkt;
+	struct mbuf	*m;
+	struct mbuf	*top, **mp;
+	int		 len;
 
-	cp = buf;
-	epkt = cp + totlen;
-	if (off) {
-		/*
-		 * If 'off' is non-zero, packet is trailer-encapsulated,
-		 * so we have to skip the type and length fields.
-		 */
-		cp += off + 2 * sizeof(u_int16_t);
-		totlen -= 2 * sizeof(u_int16_t);
-	}
+	top = NULL;
+	mp = &top;
+
+	if (off < 0 || off > MHLEN)
+		return (NULL);
+
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return (NULL);
+
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
-	m->m_len = MHLEN;
+
+	len = MHLEN;
 
 	while (totlen > 0) {
 		if (top != NULL) {
@@ -850,37 +1264,38 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 				m_freem(top);
 				return (NULL);
 			}
-			m->m_len = MLEN;
+			len = MLEN;
 		}
-		len = min(totlen, epkt - cp);
-		if (len >= MINCLSIZE) {
+
+		if (totlen + off >= MINCLSIZE) {
 			MCLGET(m, M_DONTWAIT);
 			if (m->m_flags & M_EXT)
-				m->m_len = len = min(len, MCLBYTES);
-			else
-				len = m->m_len;
+				len = MCLBYTES;
 		} else {
-			/*
-			 * Place initial small packet/header at end of mbuf.
-			 */
-			if (len < m->m_len) {
-				if (top == NULL &&
-				    len + max_linkhdr <= m->m_len)
-					m->m_data += max_linkhdr;
-				m->m_len = len;
-			} else
-				len = m->m_len;
+			/* Place initial small packet/header at end of mbuf. */
+			if (top == NULL && totlen + off + max_linkhdr <= len) {
+				m->m_data += max_linkhdr;
+				len -= max_linkhdr;
+			}
 		}
+
+		if (off) {
+			m->m_data += off;
+			len -= off;
+			off = 0;
+		}
+
+		m->m_len = len = min(totlen, len);
+
 		if (copy)
-			copy(cp, mtod(m, caddr_t), (size_t)len);
+			copy(buf, mtod(m, caddr_t), (size_t)len);
 		else
-			bcopy(cp, mtod(m, caddr_t), (size_t)len);
-		cp += len;
+			bcopy(buf, mtod(m, caddr_t), (size_t)len);
+
+		buf += len;
 		*mp = m;
 		mp = &m->m_next;
 		totlen -= len;
-		if (cp == epkt)
-			cp = buf;
 	}
 	return (top);
 }
@@ -953,9 +1368,17 @@ m_apply(struct mbuf *m, int off, int len,
 struct mbuf *
 _sk_mget(int how, int type)
 {
+<<<<<<< HEAD
 	struct mbuf *m;
 	_MGET(m, how, type);
 	return m;
+=======
+	if (M_READONLY(m))
+		return 0;
+	return (m->m_flags & M_EXT ? m->m_data - m->m_ext.ext_buf :
+	    m->m_flags & M_PKTHDR ? m->m_data - m->m_pktdat :
+	    m->m_data - m->m_dat);
+>>>>>>> origin/master
 }
 
 struct mbuf *
@@ -969,6 +1392,91 @@ _sk_mgethdr(int how, int type)
 void
 _sk_mclget(struct mbuf *m, int how)
 {
+<<<<<<< HEAD
 	_MCLGET(m, how);
 }
 #endif /* SMALL_KERNEL */
+=======
+	if (M_READONLY(m))
+		return 0;
+	return (m->m_flags & M_EXT ? m->m_ext.ext_buf +
+	    m->m_ext.ext_size - (m->m_data + m->m_len) :
+	    &m->m_dat[MLEN] - (m->m_data + m->m_len));
+}
+
+
+/*
+ * Duplicate mbuf pkthdr from from to to.
+ * from must have M_PKTHDR set, and to must be empty.
+ */
+int
+m_dup_pkthdr(struct mbuf *to, struct mbuf *from)
+{
+	int error;
+
+	KASSERT(from->m_flags & M_PKTHDR);
+
+	to->m_flags = (to->m_flags & (M_EXT | M_CLUSTER));
+	to->m_flags |= (from->m_flags & M_COPYFLAGS);
+	to->m_pkthdr = from->m_pkthdr;
+
+	SLIST_INIT(&to->m_pkthdr.tags);
+
+	if ((error = m_tag_copy_chain(to, from)) != 0)
+		return (error);
+
+	if ((to->m_flags & M_EXT) == 0)
+		to->m_data = to->m_pktdat;
+
+	return (0);
+}
+
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
+
+void
+m_print(void *v, int (*pr)(const char *, ...))
+{
+	struct mbuf *m = v;
+
+	(*pr)("mbuf %p\n", m);
+	(*pr)("m_type: %hi\tm_flags: %b\n", m->m_type, m->m_flags,
+	    "\20\1M_EXT\2M_PKTHDR\3M_EOR\4M_CLUSTER\5M_PROTO1\6M_VLANTAG"
+	    "\7M_LOOP\10M_FILDROP\11M_BCAST\12M_MCAST\13M_CONF\14M_AUTH"
+	    "\15M_TUNNEL\16M_AUTH_AH\17M_LINK0");
+	(*pr)("m_next: %p\tm_nextpkt: %p\n", m->m_next, m->m_nextpkt);
+	(*pr)("m_data: %p\tm_len: %u\n", m->m_data, m->m_len);
+	(*pr)("m_dat: %p m_pktdat: %p\n", m->m_dat, m->m_pktdat);
+	if (m->m_flags & M_PKTHDR) {
+		(*pr)("m_pkthdr.len: %i\tm_ptkhdr.rcvif: %p\t"
+		    "m_ptkhdr.rdomain: %u\n", m->m_pkthdr.len, 
+		    m->m_pkthdr.rcvif, m->m_pkthdr.rdomain);
+		(*pr)("m_ptkhdr.tags: %p\tm_pkthdr.tagsset: %hx\n",
+		    SLIST_FIRST(&m->m_pkthdr.tags), m->m_pkthdr.tagsset);
+		(*pr)("m_pkthdr.csum_flags: %hx\tm_pkthdr.ether_vtag: %hu\n",
+		    m->m_pkthdr.csum_flags, m->m_pkthdr.ether_vtag);
+		(*pr)("m_pkthdr.pf.flags: %b\n",
+		    m->m_pkthdr.pf.flags, "\20\1GENERATED\2FRAGCACHE"
+		    "\3TRANSLATE_LOCALHOST\4DIVERTED\5DIVERTED_PACKET"
+		    "\6PF_TAG_REROUTE");
+		(*pr)("m_pkthdr.pf.hdr: %p\tm_pkthdr.pf.statekey: %p\n",
+		    m->m_pkthdr.pf.hdr, m->m_pkthdr.pf.statekey);
+		(*pr)("m_pkthdr.pf.qid:\t%u m_pkthdr.pf.tag: %hu\n",
+		    m->m_pkthdr.pf.qid, m->m_pkthdr.pf.tag);
+		(*pr)("m_pkthdr.pf.routed: %hhx\n", m->m_pkthdr.pf.routed);
+	}
+	if (m->m_flags & M_EXT) {
+		(*pr)("m_ext.ext_buf: %p\tm_ext.ext_size: %u\n",
+		    m->m_ext.ext_buf, m->m_ext.ext_size);
+		(*pr)("m_ext.ext_type: %x\tm_ext.ext_backend: %i\n",
+		    m->m_ext.ext_type, m->m_ext.ext_backend);
+		(*pr)("m_ext.ext_ifp: %p\n", m->m_ext.ext_ifp);
+		(*pr)("m_ext.ext_free: %p\tm_ext.ext_arg: %p\n",
+		    m->m_ext.ext_free, m->m_ext.ext_arg);
+		(*pr)("m_ext.ext_nextref: %p\tm_ext.ext_prevref: %p\n",
+		    m->m_ext.ext_nextref, m->m_ext.ext_prevref);
+	}
+}
+#endif
+>>>>>>> origin/master

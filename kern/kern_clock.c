@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_clock.c,v 1.61 2007/03/15 10:22:30 art Exp $	*/
+=======
+/*	$OpenBSD: kern_clock.c,v 1.71 2010/08/20 22:03:22 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -120,20 +124,7 @@ volatile struct	timeval time
 volatile struct	timeval mono_time;
 #endif
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 void	*softclock_si;
-void	generic_softclock(void *);
-
-void
-generic_softclock(void *ignore)
-{
-	/*
-	 * XXX - don't commit, just a dummy wrapper until we learn everyone
-	 *       deal with a changed proto for softclock().
-	 */
-	softclock();
-}
-#endif
 
 /*
  * Initialize clock frequencies and start both clocks running.
@@ -146,11 +137,9 @@ initclocks(void)
 	extern void inittimecounter(void);
 #endif
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-	softclock_si = softintr_establish(IPL_SOFTCLOCK, generic_softclock, NULL);
+	softclock_si = softintr_establish(IPL_SOFTCLOCK, softclock, NULL);
 	if (softclock_si == NULL)
 		panic("initclocks: unable to register softclock intr");
-#endif
 
 	/*
 	 * Set divisors to 1 (normal case) and let the machine-specific
@@ -166,6 +155,11 @@ initclocks(void)
 	if (profhz == 0)
 		profhz = i;
 	psratio = profhz / i;
+
+	/* For very large HZ, ensure that division by 0 does not occur later */
+	if (tickadj == 0)
+		tickadj = 1;
+
 #ifdef __HAVE_TIMECOUNTER
 	inittimecounter();
 #endif
@@ -294,7 +288,7 @@ hardclock(struct clockframe *frame)
 	 * ntp_tick_permanent accumulates the clock correction each
 	 * tick. The unit is ns per tick shifted left 32 bits. If we have
 	 * accumulated more than 1us, we bump delta in the right
-	 * direction. Use a loop to avoid long long div; typicallly
+	 * direction. Use a loop to avoid long long div; typically
 	 * the loops will be executed 0 or 1 iteration.
 	 */
 	if (ntp_tick_permanent != 0) {
@@ -322,13 +316,8 @@ hardclock(struct clockframe *frame)
 	 * Process callouts at a very low cpu priority, so we don't keep the
 	 * relatively high clock interrupt priority any longer than necessary.
 	 */
-	if (timeout_hardclock_update()) {
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	if (timeout_hardclock_update())
 		softintr_schedule(softclock_si);
-#else
-		setsoftclock();
-#endif
-	}
 }
 
 /*
@@ -336,7 +325,7 @@ hardclock(struct clockframe *frame)
  * compute the second argument to timeout_add() from an absolute time.
  */
 int
-hzto(struct timeval *tv)
+hzto(const struct timeval *tv)
 {
 	struct timeval now;
 	unsigned long ticks;
@@ -388,7 +377,7 @@ hzto(struct timeval *tv)
  * Compute number of hz in the specified amount of time.
  */
 int
-tvtohz(struct timeval *tv)
+tvtohz(const struct timeval *tv)
 {
 	unsigned long ticks;
 	long sec, usec;
@@ -596,7 +585,7 @@ statclock(struct clockframe *frame)
  * Return information about system clocks.
  */
 int
-sysctl_clockrate(char *where, size_t *sizep)
+sysctl_clockrate(char *where, size_t *sizep, void *newp)
 {
 	struct clockinfo clkinfo;
 
@@ -608,7 +597,7 @@ sysctl_clockrate(char *where, size_t *sizep)
 	clkinfo.hz = hz;
 	clkinfo.profhz = profhz;
 	clkinfo.stathz = stathz ? stathz : hz;
-	return (sysctl_rdstruct(where, sizep, NULL, &clkinfo, sizeof(clkinfo)));
+	return (sysctl_rdstruct(where, sizep, newp, &clkinfo, sizeof(clkinfo)));
 }
 
 #ifndef __HAVE_TIMECOUNTER

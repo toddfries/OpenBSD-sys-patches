@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: natm.c,v 1.6 2001/05/16 12:54:08 ho Exp $	*/
+=======
+/*	$OpenBSD: natm.c,v 1.12 2010/02/11 22:33:33 claudio Exp $	*/
+>>>>>>> origin/master
 
 /*
  *
@@ -88,7 +92,7 @@ struct proc *p;
   struct ifnet *ifp;
   int proto = so->so_proto->pr_protocol;
 
-  s = SPLSOFTNET();
+  s = splsoftnet();
 
   npcb = (struct natmpcb *) so->so_pcb;
 
@@ -222,7 +226,7 @@ struct proc *p;
       s2 = splnet();
       if (ifp->if_ioctl != NULL)
 	  ifp->if_ioctl(ifp, SIOCATMDIS, (caddr_t) &api);
-      splx(s);
+      splx(s2);
 
       npcb_free(npcb, NPCB_REMOVE);
       soisdisconnected(so);

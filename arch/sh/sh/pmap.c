@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pmap.c,v 1.5 2007/03/05 21:47:55 miod Exp $	*/
+=======
+/*	$OpenBSD: pmap.c,v 1.17 2010/12/14 20:24:25 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pmap.c,v 1.55 2006/08/07 23:19:36 tsutsui Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,6 +36,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/pool.h>
 #include <sys/msgbuf.h>
 
@@ -62,8 +60,9 @@
 
 struct pmap __pmap_kernel;
 STATIC vaddr_t __pmap_kve;	/* VA of last kernel virtual */
-paddr_t avail_start;		/* PA of first available physical page */
-paddr_t avail_end;		/* PA of last available physical page */
+
+/* For the fast tlb miss handler */
+pt_entry_t **curptd;		/* p1 va of curlwp->...->pm_ptp */
 
 /* pmap pool */
 STATIC struct pool __pmap_pmap_pool;
@@ -77,9 +76,9 @@ struct pv_entry {
 };
 #define	__pmap_pv_alloc()	pool_get(&__pmap_pv_pool, PR_NOWAIT)
 #define	__pmap_pv_free(pv)	pool_put(&__pmap_pv_pool, (pv))
-STATIC void __pmap_pv_enter(pmap_t, struct vm_page *, vaddr_t, vm_prot_t);
+STATIC int __pmap_pv_enter(pmap_t, struct vm_page *, vaddr_t, vm_prot_t);
 STATIC void __pmap_pv_remove(pmap_t, struct vm_page *, vaddr_t);
-STATIC void *__pmap_pv_page_alloc(struct pool *, int);
+STATIC void *__pmap_pv_page_alloc(struct pool *, int, int *);
 STATIC void __pmap_pv_page_free(struct pool *, void *);
 STATIC struct pool __pmap_pv_pool;
 STATIC struct pool_allocator pmap_pv_page_allocator = {
@@ -107,8 +106,6 @@ pmap_bootstrap()
 	/* Steal msgbuf area */
 	initmsgbuf((caddr_t)uvm_pageboot_alloc(MSGBUFSIZE), MSGBUFSIZE);
 
-	avail_start = ptoa(vm_physmem[0].start);
-	avail_end = ptoa(vm_physmem[vm_nphysseg - 1].end);
 	__pmap_kve = VM_MIN_KERNEL_ADDRESS;
 
 	pmap_kernel()->pm_refcnt = 1;
@@ -222,8 +219,7 @@ pmap_create()
 {
 	pmap_t pmap;
 
-	pmap = pool_get(&__pmap_pmap_pool, PR_WAITOK);
-	memset(pmap, 0, sizeof(struct pmap));
+	pmap = pool_get(&__pmap_pmap_pool, PR_WAITOK|PR_ZERO);
 	pmap->pm_asid = -1;
 	pmap->pm_refcnt = 1;
 	/* Allocate page table page holder (512 slot) */
@@ -288,7 +284,9 @@ pmap_activate(struct proc *p)
 		pmap->pm_asid = __pmap_asid_alloc();
 
 	KDASSERT(pmap->pm_asid >=0 && pmap->pm_asid < 256);
+
 	sh_tlb_set_asid(pmap->pm_asid);
+	curptd = pmap->pm_ptp;
 }
 
 int
@@ -339,8 +337,11 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 			return (0);
 
 		/* Add to physical-virtual map list of this page */
-		__pmap_pv_enter(pmap, pg, va, prot);
-
+		if (__pmap_pv_enter(pmap, pg, va, prot) != 0) {
+			if (flags & PMAP_CANFAIL)
+				return (ENOMEM);
+			panic("pmap_enter: cannot allocate pv entry");
+		}
 	} else {	/* bus-space (always uncached map) */
 		if (kva) {
 			entry |= PG_V | PG_SH |
@@ -429,11 +430,11 @@ __pmap_map_change(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot,
 }
 
 /*
- * void __pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t vaddr):
+ * int __pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t vaddr):
  *	Insert physical-virtual map to vm_page.
  *	Assume pre-existed mapping is already removed.
  */
-void
+int
 __pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t va, vm_prot_t prot)
 {
 	struct vm_page_md *pvh;
@@ -464,12 +465,18 @@ __pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t va, vm_prot_t prot)
 	/* Register pv map */
 	pvh = &pg->mdpage;
 	pv = __pmap_pv_alloc();
+	if (pv == NULL) {
+		splx(s);
+		return (ENOMEM);
+	}
+
 	pv->pv_pmap = pmap;
 	pv->pv_va = va;
 	pv->pv_prot = prot;
 
 	SLIST_INSERT_HEAD(&pvh->pvh_head, pv, pv_link);
 	splx(s);
+	return (0);
 }
 
 void
@@ -891,29 +898,27 @@ pmap_clear_modify(struct vm_page *pg)
  * Find first virtual address >= *vap that doesn't cause
  * a virtual cache alias against vaddr_t foff.
  */
-void
-pmap_prefer(vaddr_t foff, vaddr_t *vap)
+vaddr_t
+pmap_prefer(vaddr_t foff, vaddr_t va)
 {
-	vaddr_t va;
+	if (SH_HAS_VIRTUAL_ALIAS)
+		va += ((foff - va) & sh_cache_prefer_mask);
 
-	if (SH_HAS_VIRTUAL_ALIAS) {
-		va = *vap;
-
-		*vap = va + ((foff - va) & sh_cache_prefer_mask);
-	}
+	return va;
 }
 #endif /* SH4 */
 
 /*
  * pv_entry pool allocator:
- *	void *__pmap_pv_page_alloc(struct pool *pool, int flags):
+ *	void *__pmap_pv_page_alloc(struct pool *pool, int flags, int *slowdown):
  *	void __pmap_pv_page_free(struct pool *pool, void *v):
  */
 void *
-__pmap_pv_page_alloc(struct pool *pool, int flags)
+__pmap_pv_page_alloc(struct pool *pool, int flags, int *slowdown)
 {
 	struct vm_page *pg;
 
+	*slowdown = 0;
 	pg = uvm_pagealloc(NULL, 0, NULL, UVM_PGA_USERESERVE);
 	if (pg == NULL)
 		return (NULL);
@@ -928,7 +933,7 @@ __pmap_pv_page_free(struct pool *pool, void *v)
 
 	/* Invalidate cache for next use of this page */
 	if (SH_HAS_VIRTUAL_ALIAS)
-		sh_icache_sync_range_index(va, PAGE_SIZE);
+		sh_dcache_inv_range(va, PAGE_SIZE);
 	uvm_pagefree(PHYS_TO_VM_PAGE(SH3_P1SEG_TO_PHYS(va)));
 }
 
@@ -1091,4 +1096,32 @@ __pmap_asid_free(int asid)
 
 	i = asid >> 5;
 	__pmap_asid.map[i] &= ~(1 << (asid - (i << 5)));
+}
+
+/*
+ * Routines used by PMAP_MAP_DIRECT() and PMAP_UNMAP_DIRECT() to provide
+ * directly-translated pages.
+ *
+ * Because of cache virtual aliases, it is necessary to evict these pages
+ * from the cache, when `unmapping' them (as they might be reused by a
+ * different allocator). We also rely upon all users of pages to either
+ * use them with pmap_enter()/pmap_remove(), to enforce proper cache handling,
+ * or to invoke sh_dcache_inv_range() themselves, as done for page tables.
+ */
+vaddr_t
+pmap_map_direct(vm_page_t pg)
+{
+	return SH3_PHYS_TO_P1SEG(VM_PAGE_TO_PHYS(pg));
+}
+
+vm_page_t
+pmap_unmap_direct(vaddr_t va)
+{
+	paddr_t pa = SH3_P1SEG_TO_PHYS(va);
+	vm_page_t pg = PHYS_TO_VM_PAGE(pa);
+
+	if (SH_HAS_VIRTUAL_ALIAS)
+		sh_dcache_inv_range(va, PAGE_SIZE);
+
+	return pg;
 }

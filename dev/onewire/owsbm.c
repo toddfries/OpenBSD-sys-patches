@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: owsbm.c,v 1.1 2007/02/28 21:54:43 grange Exp $	*/
+=======
+/*	$OpenBSD: owsbm.c,v 1.8 2010/07/08 07:19:54 jasper Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Aaron Linville <aaron@linville.org>
@@ -75,7 +79,7 @@ struct owsbm_softc {
 int	owsbm_match(struct device *, void *, void *);
 void	owsbm_attach(struct device *, struct device *, void *);
 int	owsbm_detach(struct device *, int);
-int	owsbm_activate(struct device *, enum devact);
+int	owsbm_activate(struct device *, int);
 
 void	owsbm_update(void *);
 
@@ -98,8 +102,7 @@ static const struct onewire_matchfam owsbm_fams[] = {
 int
 owsbm_match(struct device *parent, void *match, void *aux)
 {
-	return (onewire_matchbyfam(aux, owsbm_fams,
-	    sizeof(owsbm_fams) /sizeof(owsbm_fams[0])));
+	return (onewire_matchbyfam(aux, owsbm_fams, nitems(owsbm_fams)));
 }
 
 void
@@ -115,7 +118,12 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_temp.type = SENSOR_TEMP;
+<<<<<<< HEAD
 	strlcpy(sc->sc_temp.desc, "Temp", sizeof(sc->sc_temp.desc));
+=======
+	snprintf(sc->sc_temp.desc, sizeof(sc->sc_temp.desc), "sn %012llx",
+	    ONEWIRE_ROM_SN(oa->oa_rom));
+>>>>>>> origin/master
 	sensor_attach(&sc->sc_sensordev, &sc->sc_temp);
 
 	/* Initialize voltage sensor */
@@ -133,8 +141,14 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_voltage_cr.desc, "CR", sizeof(sc->sc_voltage_cr.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_voltage_cr);
 
+<<<<<<< HEAD
 	if (sensor_task_register(sc, owsbm_update, 10)) {
 		printf(": unable to register owsbm update task\n");
+=======
+	sc->sc_sensortask = sensor_task_register(sc, owsbm_update, 10);
+	if (sc->sc_sensortask == NULL) {
+		printf(": unable to register update task\n");
+>>>>>>> origin/master
 		return;
 	}
 
@@ -158,7 +172,7 @@ owsbm_detach(struct device *self, int flags)
 }
 
 int
-owsbm_activate(struct device *self, enum devact act)
+owsbm_activate(struct device *self, int act)
 {
 	return (0);
 }

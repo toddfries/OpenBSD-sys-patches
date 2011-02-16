@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.10 2006/08/22 19:40:19 tom Exp $	*/
+/*	$OpenBSD: bios.c,v 1.20 2010/04/20 22:05:41 tedu Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -23,14 +23,24 @@
 #include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <machine/conf.h>
 #include <machine/biosvar.h>
+#include <machine/mpbiosvar.h>
 #include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
 #include <amd64/include/isa_machdep.h>
+#include <dev/pci/pcivar.h>
+
+#include <dev/acpi/acpireg.h>
+#include <dev/acpi/acpivar.h>
+
+#include "acpi.h"
+#include "mpbios.h"
+#include "pci.h"
 
 struct bios_softc {
 	struct device sc_dev;
@@ -42,7 +52,8 @@ void bios_attach(struct device *, struct device *, void *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
-	sizeof(struct bios_softc), bios_match, bios_attach
+	sizeof(struct bios_softc), bios_match, bios_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver bios_cd = {
@@ -125,6 +136,32 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	}
 	printf("\n");
+
+#if NACPI > 0
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_iot = X86_BUS_SPACE_IO;
+		ba.ba_memt = X86_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
+
+#if NMPBIOS > 0
+	if (mpbios_probe(self)) {
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "mpbios";
+		ba.ba_iot = X86_BUS_SPACE_IO;
+		ba.ba_memt = X86_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
 }
 
 /*
@@ -334,7 +371,7 @@ smbios_info(char * str)
 		 * If the uuid value is all 0xff the uuid is present but not
 		 * set, if its all 0 then the uuid isn't present at all.
 		 */
-		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
+		uuidf = SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
 		for (i = 0; i < sizeof(sys->uuid); i++) {
 			if (sys->uuid[i] != 0xff)
 				uuidf &= ~SMBIOS_UUID_NSET;

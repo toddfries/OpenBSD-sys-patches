@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.65 2007/03/15 10:22:29 art Exp $ */
+/*	$OpenBSD: trap.c,v 1.71 2010/09/20 06:33:47 matthew Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -82,20 +82,11 @@
 #include <machine/reg.h>
 #include <machine/trap.h>
 
-#ifdef COMPAT_SUNOS
-#include <compat/sunos/sunos_syscall.h>
-extern struct emul emul_sunos;
-#endif
-
 #include "systrace.h"
 #include <dev/systrace.h>
 
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_pmap.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 int	astpending;
 int	want_resched;
@@ -157,11 +148,6 @@ int mmupid = -1;
 #define MDB_WBFAILED	4
 #define MDB_ISPID(p)	(p) == mmupid
 #endif
-
-#define NSIR	8
-void (*sir_routines[NSIR])(void *);
-void *sir_args[NSIR];
-u_char next_sir;
 
 void trap(int, u_int, u_int, struct frame);
 void syscall(register_t, struct frame);
@@ -238,13 +224,7 @@ trap(type, code, v, frame)
 	register struct proc *p;
 	register int i;
 	u_int ucode;
-	int typ = 0, bit;
-#ifdef COMPAT_HPUX
-	extern struct emul emul_hpux;
-#endif
-#ifdef COMPAT_SUNOS
-	extern struct emul emul_sunos;
-#endif
+	int typ = 0;
 	register union sigval sv;
 
 	uvmexp.traps++;
@@ -345,14 +325,6 @@ copyfault:
 #endif
 
 	case T_ILLINST|T_USER:	/* illegal instruction fault */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			typ = 0;
-			ucode = HPUX_ILL_ILLINST_TRAP;
-			i = SIGILL;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was ILL_PRIVIN_FAULT */
 		typ = ILL_ILLOPC;
 		i = SIGILL;
@@ -360,11 +332,6 @@ copyfault:
 		break;
 
 	case T_PRIVINST|T_USER:	/* privileged instruction fault */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux)
-			ucode = HPUX_ILL_PRIV_TRAP;
-		else
-#endif
 		ucode	= frame.f_format;	/* XXX was ILL_PRIVIN_FAULT */
 		typ = ILL_PRVOPC;
 		i = SIGILL;
@@ -372,11 +339,6 @@ copyfault:
 		break;
 
 	case T_ZERODIV|T_USER:	/* Divide by zero */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux)
-			ucode = HPUX_FPE_INTDIV_TRAP;
-		else
-#endif
 		ucode	= frame.f_format;	/* XXX was FPE_INTDIV_TRAP */
 		typ = FPE_INTDIV;
 		i = SIGFPE;
@@ -384,14 +346,6 @@ copyfault:
 		break;
 
 	case T_CHKINST|T_USER:	/* CHK instruction trap */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			/* handled differently under hp-ux */
-			i = SIGILL;
-			ucode = HPUX_ILL_CHK_TRAP;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was FPE_SUBRNG_TRAP */
 		typ = FPE_FLTSUB;
 		i = SIGFPE;
@@ -399,14 +353,6 @@ copyfault:
 		break;
 
 	case T_TRAPVINST|T_USER:	/* TRAPV instruction trap */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			/* handled differently under hp-ux */
-			i = SIGILL;
-			ucode = HPUX_ILL_TRAPV_TRAP;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was FPE_INTOVF_TRAP */
 		typ = ILL_ILLTRP;
 		i = SIGILL;
@@ -435,19 +381,6 @@ copyfault:
 		return;
 
 	case T_TRACE|T_USER:	/* user trace trap */
-#ifdef COMPAT_SUNOS
-		/*
-		 * SunOS uses Trap #2 for a "CPU cache flush"
-		 * Just flush the on-chip caches and return.
-		 */
-		if (p->p_emul == &emul_sunos) {
-			ICIA();
-			DCIU();
-			return;
-		}
-#endif
-		/* FALLTHROUGH */
-
 	case T_TRACE:
 	case T_TRAP15|T_USER:	/* SUN user trace trap */
 		frame.f_sr &= ~PSL_T;
@@ -473,13 +406,19 @@ copyfault:
 
 	case T_SSIR:		/* software interrupt */
 	case T_SSIR|T_USER:
-		while ((bit = ffs(ssir))) {
-			--bit;
-			ssir &= ~(1 << bit);
-			uvmexp.softs++;
-			if (sir_routines[bit])
-				sir_routines[bit](sir_args[bit]);
+	    {
+		int sir, q, mask;
+
+		while ((sir = softpending) != 0) {
+			atomic_clearbits_int(&softpending, sir);
+
+			for (q = SI_NQUEUES - 1, mask = 1 << (SI_NQUEUES - 1);
+			    mask != 0; q--, mask >>= 1)
+				if (mask & sir)
+					softintr_dispatch(q);
 		}
+	    }
+
 		/*
 		 * If this was not an AST trap, we are all done.
 		 */
@@ -539,19 +478,6 @@ copyfault:
 			printf("trap: bad kernel access at %x\n", v);
 			goto dopanic;
 		}
-#ifdef COMPAT_HPUX
-		if (ISHPMMADDR(p, va)) {
-			vaddr_t bva;
-
-			rv = pmap_mapmulti(map->pmap, va);
-			if (rv) {
-				bva = HPMMBASEADDR(va);
-				rv = uvm_fault(map, bva, 0, ftype);
-				if (rv == 0)
-					(void)pmap_mapmulti(map->pmap, va);
-			}
-		} else
-#endif
 		rv = uvm_fault(map, va, 0, ftype);
 #ifdef DEBUG
 		if (rv && MDB_ISPID(p->p_pid))
@@ -955,9 +881,6 @@ syscall(code, frame)
 	int error, opc, nsys;
 	size_t argsize;
 	register_t args[8], rval[2];
-#ifdef COMPAT_SUNOS
-	extern struct emul emul_sunos;
-#endif
 	uvmexp.syscalls++;
 	
 	if (!USERMODE(frame.f_sr))
@@ -968,38 +891,6 @@ syscall(code, frame)
 
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
-
-#ifdef COMPAT_SUNOS
-	if (p->p_emul == &emul_sunos) {
-		/*
-		 * SunOS passes the syscall-number on the stack, whereas
-		 * BSD passes it in D0. So, we have to get the real "code"
-		 * from the stack, and clean up the stack, as SunOS glue
-		 * code assumes the kernel pops the syscall argument the
-		 * glue pushed on the stack. Sigh...
-		 */
-		if (copyin((caddr_t)frame.f_regs[SP], &code,
-		    sizeof(register_t)) != 0)
-			code = -1;
-
-		/*
-		 * XXX
-		 * Don't do this for sunos_sigreturn, as there's no stored pc
-		 * on the stack to skip, the argument follows the syscall
-		 * number without a gap.
-		 */
-		if (code != SUNOS_SYS_sigreturn) {
-			frame.f_regs[SP] += sizeof (int);
-			/*
-			 * remember that we adjusted the SP,
-			 * might have to undo this if the system call
-			 * returns ERESTART.
-			 */
-			p->p_md.md_flags |= MDP_STACKADJ;
-		} else
-			p->p_md.md_flags &= ~MDP_STACKADJ;
-	}
-#endif
 
 	params = (caddr_t)frame.f_regs[SP] + sizeof(int);
 
@@ -1088,34 +979,11 @@ bad:
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, error, rval);
 #endif
-#ifdef COMPAT_SUNOS
-	/* need new p-value for this */
-	if (error == ERESTART && (p->p_md.md_flags & MDP_STACKADJ))
-		frame.f_regs[SP] -= sizeof (int);
-#endif
 	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p, code, error, rval[0]);
 #endif
-}
-
-/*
- * Allocation routines for software interrupts.
- */
-u_int8_t
-allocate_sir(proc, arg)
-	void (*proc)(void *);
-	void *arg;
-{
-	int bit;
-
-	if (next_sir >= NSIR)
-		panic("allocate_sir: none left");
-	bit = next_sir++;
-	sir_routines[bit] = proc;
-	sir_args[bit] = arg;
-	return (1 << bit);
 }
 
 typedef SLIST_HEAD(,intrhand) intrhand_t;
@@ -1132,9 +1000,7 @@ init_intrs()
 		SLIST_INIT(&intrs[i]);
 
 	/* soft interrupts... */
-	sir_routines[0] = netintr;
-	sir_routines[1] = (void (*)(void *))softclock;
-	next_sir = 2;
+	softintr_init();
 }
 
 void
@@ -1235,7 +1101,7 @@ intr_establish(vec, ih, name)
 		}
 	}
 
-	evcount_attach(&ih->ih_count, name, &ih->ih_ipl, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 	SLIST_INSERT_HEAD(list, ih, ih_link);
 	return (0);
 }

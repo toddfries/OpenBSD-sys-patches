@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: viaenv.c,v 1.9 2006/12/23 17:46:39 deraadt Exp $	*/
+=======
+/*	$OpenBSD: viaenv.c,v 1.15 2011/02/15 21:46:21 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: viaenv.c,v 1.9 2002/10/02 16:51:59 thorpej Exp $	*/
 
 /*
@@ -168,7 +172,7 @@ val_to_uK(unsigned int val)
 	int     i = val / 4;
 	int     j = val % 4;
 
-	assert(i >= 0 && i <= 255);
+	KASSERT(i >= 0 && i <= 255);
 
 	if (j == 0 || i == 255)
 		return val_to_temp[i] * 10000;
@@ -194,7 +198,7 @@ val_to_uV(unsigned int val, int index)
 	static const long mult[] =
 	    {1250000, 1250000, 1670000, 2600000, 6300000};
 
-	assert(index >= 0 && index <= 4);
+	KASSERT(index >= 0 && index <= 4);
 
 	return (25LL * val + 133) * mult[index] / 2628;
 }
@@ -272,15 +276,15 @@ viaenv_attach(struct device * parent, struct device * self, void *aux)
 	pcireg_t iobase, control;
 	int i;
 
+	sc->sc_iot = pa->pa_iot;
 	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x70);
 	control = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x74);
 	if ((iobase & 0xff80) == 0 || (control & 1) == 0) {
 		printf(": HWM disabled");
 		goto nohwm;
 	}
-	sc->sc_iot = pa->pa_iot;
 	if (bus_space_map(sc->sc_iot, iobase & 0xff80, 128, 0, &sc->sc_ioh)) {
-		printf(": failed to map HWM I/O space");
+		printf(": can't map HWM i/o space");
 		goto nohwm;
 	}
 
@@ -318,7 +322,7 @@ viaenv_attach(struct device * parent, struct device * self, void *aux)
 
 	/* Refresh sensors data every 1.5 seconds */
 	timeout_set(&viaenv_timeout, viaenv_refresh, sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
+	timeout_add_msec(&viaenv_timeout, 1500);
 
 nohwm:
 #ifdef __HAVE_TIMECOUNTER
@@ -333,7 +337,7 @@ nohwm:
 	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_PMBASE);
 	if (bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(iobase),
 	    VIAENV_PMSIZE, 0, &sc->sc_pm_ioh)) {
-		printf(": failed to map PM I/O space");
+		printf(": can't map PM i/o space");
 		goto nopm;
 	}
 
@@ -387,7 +391,7 @@ viaenv_refresh(void *arg)
 	struct viaenv_softc *sc = (struct viaenv_softc *)arg;
 
 	viaenv_refresh_sensor_data(sc);
-	timeout_add(&viaenv_timeout, (15 * hz) / 10);
+	timeout_add_msec(&viaenv_timeout, 1500);
 }
 
 #ifdef __HAVE_TIMECOUNTER

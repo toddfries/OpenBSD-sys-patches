@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zaurus_audio.c,v 1.7 2005/05/26 03:52:07 pascoe Exp $	*/
+=======
+/*	$OpenBSD: zaurus_audio.c,v 1.14 2010/09/07 16:21:41 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Christopher Pascoe <pascoe@openbsd.org>
@@ -18,7 +22,6 @@
 
 /*
  * TODO:
- *	- powerhooks (currently only works until first suspend)
  *	- record support
  */
 
@@ -56,7 +59,7 @@
 int	zaudio_match(struct device *, void *, void *);
 void	zaudio_attach(struct device *, struct device *, void *);
 int	zaudio_detach(struct device *, int);
-void	zaudio_power(int, void *);
+int	zaudio_activate(struct device *, int);
 
 #define ZAUDIO_OP_SPKR	0
 #define ZAUDIO_OP_HP	1
@@ -84,7 +87,6 @@ struct zaudio_softc {
 	/* i2c device softc */
 	struct pxa2x0_i2c_softc	sc_i2c;
 
-	void			*sc_powerhook;
 	int			sc_playing;
 
 	struct zaudio_volume	sc_volume[2];
@@ -97,7 +99,7 @@ struct zaudio_softc {
 
 struct cfattach zaudio_ca = {
 	sizeof(struct zaudio_softc), zaudio_match, zaudio_attach,
-	zaudio_detach
+	zaudio_detach, zaudio_activate
 };
 
 struct cfdriver zaudio_cd = {
@@ -198,12 +200,6 @@ zaudio_attach(struct device *parent, struct device *self, void *aux)
 	struct pxaip_attach_args	*pxa = aux;
 	int err;
 
-	sc->sc_powerhook = powerhook_establish(zaudio_power, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf(": unable to establish powerhook\n");
-		return;
-	}
-
 	sc->sc_i2s.sc_iot = pxa->pxa_iot;
 	sc->sc_i2s.sc_dmat = pxa->pxa_dmat;
 	sc->sc_i2s.sc_size = PXA2X0_I2S_SIZE;
@@ -256,7 +252,7 @@ fail_probe:
 fail_i2c:
 	pxa2x0_i2s_detach_sub(&sc->sc_i2s);
 fail_i2s:
-	powerhook_disestablish(sc->sc_powerhook);
+	;
 }
 
 int
@@ -264,35 +260,29 @@ zaudio_detach(struct device *self, int flags)
 {
 	struct zaudio_softc *sc = (struct zaudio_softc *)self;
 
-	if (sc->sc_powerhook != NULL) {
-		powerhook_disestablish(sc->sc_powerhook);
-		sc->sc_powerhook = NULL;
-	}
-
 	pxa2x0_i2c_detach_sub(&sc->sc_i2c);
 	pxa2x0_i2s_detach_sub(&sc->sc_i2s);
 
 	return (0);
 }
 
-void
-zaudio_power(int why, void *arg)
+int
+zaudio_activate(struct device *self, int act)
 {
-	struct zaudio_softc *sc = arg;
+	struct zaudio_softc *sc = (struct zaudio_softc *)self;
 
-	switch (why) {
-	case PWR_STANDBY:
-	case PWR_SUSPEND:
+	switch (act) {
+	case DVACT_SUSPEND:
 		timeout_del(&sc->sc_to);
 		zaudio_standby(sc);
 		break;
-
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		pxa2x0_i2s_init(&sc->sc_i2s);
 		pxa2x0_i2c_init(&sc->sc_i2c);
 		zaudio_init(sc);
 		break;
 	}
+	return 0;
 }
 
 void
@@ -491,52 +481,55 @@ zaudio_query_encoding(void *hdl, struct audio_encoding *aep)
 		aep->encoding = AUDIO_ENCODING_ULINEAR;
 		aep->precision = 8;
 		aep->flags = 0;
-		return (0);
+		break;
 	case 1:
 		strlcpy(aep->name, AudioEmulaw, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_ULAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(aep->name, AudioEalaw, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_ALAW;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(aep->name, AudioEslinear, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_SLINEAR;
 		aep->precision = 8;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(aep->name, AudioEslinear_le, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		aep->precision = 16;
 		aep->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(aep->name, AudioEulinear_le, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(aep->name, AudioEslinear_be, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(aep->name, AudioEulinear_be, sizeof(aep->name));
 		aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		aep->precision = 16;
 		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	aep->bps = AUDIO_BPS(aep->precision);
+	aep->msb = 1;
+	return (0);
 }
 
 int
@@ -715,6 +708,9 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 			return (EINVAL);
 		}
 
+		play->bps = AUDIO_BPS(play->precision);
+		play->msb = 1;
+
 		pxa2x0_i2s_setspeed(&sc->sc_i2s, &play->sample_rate);
 	}
 
@@ -750,6 +746,9 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+
+		rec->bps = AUDIO_BPS(rec->precision);
+		rec->msb = 1;
 
 		pxa2x0_i2s_setspeed(sc, &rec->sample_rate);
 	}

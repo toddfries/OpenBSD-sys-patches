@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ncr.c,v 1.20 2006/11/28 23:59:45 dlg Exp $ */
+=======
+/* $OpenBSD: ncr.c,v 1.28 2010/09/20 06:33:48 matthew Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -58,7 +55,6 @@
 #include <sys/buf.h>
 #include <sys/disk.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -111,7 +107,7 @@ static int ncr_dmasize;
 
 static	int si_match(struct device *, void *, void *);
 static	void si_attach(struct device *, struct device *, void *);
-static	void si_minphys(struct buf *);
+static	void si_minphys(struct buf *, struct scsi_link *);
 
 static	void si_dma_alloc(struct ncr5380_softc *);
 static	void si_dma_free(struct ncr5380_softc *);
@@ -131,13 +127,6 @@ struct scsi_adapter	si_ops = {
 	si_minphys,         /* scsi_minphys()   */
 	NULL,               /* open_target_lu() */
 	NULL,               /* close_target_lu()    */
-};
-
-struct scsi_device	si_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* no start function */
-	NULL,		/* no async handler */
-	NULL		/* use default done routine */
 };
 
 struct cfattach ncr_ca = {
@@ -180,12 +169,13 @@ si_attach(parent, self, aux)
 	struct scsibus_attach_args saa;
 	int tweak, target;
 
+	printf("\n");
+
 	/* enable interrupts on vsbus too */
 	scb_vecalloc(va->va_cvec, (void (*)(void *)) ncr5380_intr, sc,
 	    SCB_ISTACK, &sc->ncr_intrcnt);
 	sc->ncr_cvec = va->va_cvec;
-	evcount_attach(&sc->ncr_intrcnt, self->dv_xname,
-	    (void *)&sc->ncr_cvec, &evcount_intr);
+	evcount_attach(&sc->ncr_intrcnt, self->dv_xname, &sc->ncr_cvec);
 
 	/*
 	 * DMA area mapin.
@@ -248,12 +238,9 @@ si_attach(parent, self, aux)
 	else
 		target = (clk_page[0xbc/2] >> tweak) & 7;
 
-	printf(": SCSI ID %d\n", target);
-
 	ncr_sc->sc_link.adapter_softc =	sc;
 	ncr_sc->sc_link.adapter_target = target;
 	ncr_sc->sc_link.adapter = &si_ops;
-	ncr_sc->sc_link.device = &si_dev;
 	ncr_sc->sc_link.openings = 4;
 
 	/*
@@ -278,11 +265,11 @@ si_attach(parent, self, aux)
  * Adjust the max transfer size. The DMA buffer is only 16k on VS2000.
  */
 static void
-si_minphys(bp)
-	struct buf *bp;
+si_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ncr_dmasize)
 		bp->b_bcount = ncr_dmasize;
+	minphys(bp);
 }
 
 void

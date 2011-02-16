@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: puc.c,v 1.10 2006/08/01 20:10:29 jolan Exp $	*/
+=======
+/*	$OpenBSD: puc.c,v 1.18 2010/08/06 21:04:14 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: puc.c,v 1.3 1999/02/06 06:29:54 cgd Exp $	*/
 
 /*
@@ -77,7 +81,12 @@ void	*puc_pci_intr_establish(struct puc_attach_args *, int,
     int (*)(void *), void *, char *);
 
 struct cfattach puc_pci_ca = {
+<<<<<<< HEAD
 	sizeof(struct puc_pci_softc), puc_pci_match, puc_pci_attach
+=======
+	sizeof(struct puc_pci_softc), puc_pci_match,
+	puc_pci_attach, puc_pci_detach, config_activate_children
+>>>>>>> origin/master
 };
 
 struct cfdriver puc_cd = {
@@ -197,7 +206,6 @@ puc_pci_attach(parent, self, aux)
 		    0, &sc->sc_bar_mappings[i].t, &sc->sc_bar_mappings[i].h,
 		    &sc->sc_bar_mappings[i].a, &sc->sc_bar_mappings[i].s, 0)
 		      == 0);
-		sc->sc_bar_mappings[i].type = type;
 		if (sc->sc_bar_mappings[i].mapped)
 			continue;
 
@@ -318,27 +326,23 @@ puc_submatch(parent, vcf, aux)
 }
 
 const struct puc_device_description *
+<<<<<<< HEAD
 puc_find_description(vend, prod, svend, sprod)
 	u_long vend, prod, svend, sprod;
+=======
+puc_find_description(u_int16_t vend, u_int16_t prod,
+    u_int16_t svend, u_int16_t sprod)
+>>>>>>> origin/master
 {
 	int i;
 
-#define checkreg(val, index) \
-    (((val) & puc_devices[i].rmask[(index)]) == puc_devices[i].rval[(index)])
-#define pucdevdone(idx) \
-    (puc_devices[idx].rval[0] == 0 && puc_devices[idx].rval[1] == 0 \
-	&& puc_devices[idx].rval[2] == 0 && puc_devices[idx].rval[3] == 0)
-
-	for (i = 0; !pucdevdone(i); i++) {
-		if (checkreg(vend, PUC_REG_VEND) &&
-		    checkreg(prod, PUC_REG_PROD) &&
-		    checkreg(svend, PUC_REG_SVEND) &&
-		    checkreg(sprod, PUC_REG_SPROD))
-			return (&puc_devices[i]);
-	}
-
-#undef devdone
-#undef checkreg
+	for (i = 0; !(puc_devs[i].rval[0] == 0 && puc_devs[i].rval[1] == 0 &&
+	    puc_devs[i].rval[2] == 0 && puc_devs[i].rval[3] == 0); i++)
+		if ((vend & puc_devs[i].rmask[0]) == puc_devs[i].rval[0] &&
+		    (prod & puc_devs[i].rmask[1]) == puc_devs[i].rval[1] &&
+		    (svend & puc_devs[i].rmask[2]) == puc_devs[i].rval[2] &&
+		    (sprod & puc_devs[i].rmask[3]) == puc_devs[i].rval[3])
+			return (&puc_devs[i]);
 
 	return (NULL);
 }

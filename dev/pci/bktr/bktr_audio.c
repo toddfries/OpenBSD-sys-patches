@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bktr_audio.c,v 1.7 2005/12/07 12:39:23 mickey Exp $	*/
+=======
+/*	$OpenBSD: bktr_audio.c,v 1.10 2008/09/25 19:09:16 chl Exp $	*/
+>>>>>>> origin/master
 /* $FreeBSD: src/sys/dev/bktr/bktr_audio.c,v 1.8 2000/10/31 13:09:56 roger Exp $ */
 /*
  * This is part of the Driver for Video Capture Cards (Frame grabbers)
@@ -137,14 +141,8 @@ set_audio( bktr_ptr_t bktr, int cmd )
 
 	switch (cmd) {
 	case AUDIO_TUNER:
-#ifdef BKTR_REVERSEMUTE
-		bktr->audio_mux_select = 3;
-#else
-		bktr->audio_mux_select = 0;
-#endif
-
 		if (bktr->reverse_mute ) 
-		      bktr->audio_mux_select = 0;
+		    bktr->audio_mux_select = 0;
 		else	
 		    bktr->audio_mux_select = 3;
 
@@ -188,17 +186,10 @@ set_audio( bktr_ptr_t bktr, int cmd )
 	 */
 
 	if ( bktr->audio_mute_state == TRUE ) {
-#ifdef BKTR_REVERSEMUTE
-		idx = 0;
-#else
-		idx = 3;
-#endif
-
 		if (bktr->reverse_mute )
 		  idx  = 3;
 		else	
 		  idx  = 0;
-
 	}
 	else
 		idx = bktr->audio_mux_select;

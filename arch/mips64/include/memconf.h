@@ -1,4 +1,4 @@
-/*	$OpenBSD: memconf.h,v 1.1 2004/08/06 20:56:02 pefo Exp $	*/
+/*	$OpenBSD: memconf.h,v 1.5 2009/11/19 06:06:49 miod Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -33,13 +33,15 @@
 #define _MIPS_MEMCONF_H_
 
 struct phys_mem_desc {
-	u_int32_t	mem_first_page;
-	u_int32_t	mem_last_page;
+	uint64_t	mem_first_page;
+	uint64_t	mem_last_page;
+	unsigned int	mem_freelist;
 };
 
 #ifdef _KERNEL
 #define	MAXMEMSEGS	16
 extern struct phys_mem_desc mem_layout[];
+int	memrange_register(uint64_t, uint64_t, uint64_t, unsigned int);
 #endif
 
 #endif /* !_MIPS_MEMCONF_H_ */

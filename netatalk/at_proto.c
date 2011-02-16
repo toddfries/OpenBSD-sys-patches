@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: at_proto.c,v 1.3 2010/09/23 09:27:49 claudio Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
  * All Rights Reserved.
@@ -83,6 +87,8 @@
 
 #include <netatalk/at.h>
 #include <netatalk/at_extern.h>
+
+struct domain		atalkdomain;
 
 struct protosw		atalksw[] = {
     {

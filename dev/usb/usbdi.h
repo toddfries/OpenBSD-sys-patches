@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbdi.h,v 1.24 2005/08/01 05:36:49 brad Exp $ */
+=======
+/*	$OpenBSD: usbdi.h,v 1.42 2011/02/09 20:24:39 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -155,6 +152,7 @@ usbd_status usbd_set_interface(usbd_interface_handle, int);
 int usbd_get_no_alts(usb_config_descriptor_t *, int);
 usbd_status  usbd_get_interface(usbd_interface_handle iface, u_int8_t *aiface);
 void usbd_fill_deviceinfo(usbd_device_handle, struct usb_device_info *, int);
+void usbd_fill_di_task(void *);
 int usbd_get_interface_altindex(usbd_interface_handle iface);
 
 usb_interface_descriptor_t *usbd_find_idesc(usb_config_descriptor_t *cd,
@@ -168,9 +166,12 @@ void usbd_set_polling(usbd_device_handle iface, int on);
 
 const char *usbd_errstr(usbd_status err);
 
+<<<<<<< HEAD
 void usbd_add_dev_event(int, usbd_device_handle);
 void usbd_add_drv_event(int, usbd_device_handle, device_ptr_t);
 
+=======
+>>>>>>> origin/master
 char *usbd_devinfo_alloc(usbd_device_handle dev, int showclass);
 void usbd_devinfo_free(char *devinfop);
 
@@ -182,6 +183,17 @@ usbd_status usbd_reload_device_desc(usbd_device_handle);
 
 int usbd_ratecheck(struct timeval *last);
 
+int usbd_get_devcnt(usbd_device_handle);
+void usbd_claim_iface(usbd_device_handle, int);
+int usbd_iface_claimed(usbd_device_handle, int);
+
+int usbd_is_dying(usbd_device_handle);
+void usbd_deactivate(usbd_device_handle);
+
+void usbd_ref_incr(usbd_device_handle);
+void usbd_ref_decr(usbd_device_handle);
+void usbd_ref_wait(usbd_device_handle);
+
 /* An iterator for descriptors. */
 typedef struct {
 	const uByte *cur;
@@ -191,21 +203,36 @@ void usb_desc_iter_init(usbd_device_handle, usbd_desc_iter_t *);
 const usb_descriptor_t *usb_desc_iter_next(usbd_desc_iter_t *);
 
 /*
- * The usb_task structs form a queue of things to run in the USB event
- * thread.  Normally this is just device discovery when a connect/disconnect
+ * The usb_task structs form a queue of things to run in the USB task
+ * threads.  Normally this is just device discovery when a connect/disconnect
  * has been detected.  But it may also be used by drivers that need to
  * perform (short) tasks that must have a process context.
  */
 struct usb_task {
 	TAILQ_ENTRY(usb_task) next;
+	usbd_device_handle dev;
 	void (*fun)(void *);
 	void *arg;
-	char onqueue;
+	char type;
+#define	USB_TASK_TYPE_GENERIC	0
+#define USB_TASK_TYPE_EXPLORE	1
+#define USB_TASK_TYPE_ABORT	2
+	u_int state;
+#define	USB_TASK_STATE_NONE	0x0
+#define	USB_TASK_STATE_ONQ	0x1
+#define	USB_TASK_STATE_RUN	0x2
+
 };
 
-void usb_add_task(usbd_device_handle dev, struct usb_task *task);
-void usb_rem_task(usbd_device_handle dev, struct usb_task *task);
-#define usb_init_task(t, f, a) ((t)->fun = (f), (t)->arg = (a), (t)->onqueue = 0)
+void usb_add_task(usbd_device_handle, struct usb_task *);
+void usb_rem_task(usbd_device_handle, struct usb_task *);
+void usb_wait_task(usbd_device_handle, struct usb_task *);
+void usb_rem_wait_task(usbd_device_handle, struct usb_task *);
+#define usb_init_task(t, f, a, y) \
+	((t)->fun = (f),	\
+	(t)->arg = (a),		\
+	(t)->type = (y),	\
+	(t)->state = USB_TASK_STATE_NONE)
 
 struct usb_devno {
 	u_int16_t ud_vendor;
@@ -282,14 +309,24 @@ int usbd_driver_load(module_t mod, int what, void *arg);
 #endif
 
 /* XXX Perhaps USB should have its own levels? */
+<<<<<<< HEAD
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+=======
+>>>>>>> origin/master
 #define splusb splsoftnet
+#if 0
+#define	SPLUSBCHECK	splsoftassert(IPL_SOFTNET)
 #else
+<<<<<<< HEAD
 #define	splusb splsoftclock
 #endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 #else
 #define splusb splbio
 #endif /* USB_USE_SOFTINTR */
+=======
+#define	SPLUSBCHECK	do { /* nothing */ } while (0)
+#endif
+>>>>>>> origin/master
 #define splhardusb splbio
 #define IPL_USB IPL_BIO

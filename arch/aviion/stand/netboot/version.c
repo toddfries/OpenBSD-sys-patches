@@ -1,3 +1,3 @@
-/*	$OpenBSD: version.c,v 1.2 1998/08/22 08:38:05 smurph Exp $ */
+/*	$OpenBSD: version.c,v 1.2 2010/04/18 15:09:02 miod Exp $ */
 
-const char version[] = "1.1";
+const char version[] = "1.2";

@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.8 2006/11/15 14:40:50 mickey Exp $ */
+/* $OpenBSD: apicvec.s,v 1.22 2010/12/21 14:56:23 claudio Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -43,9 +36,9 @@
 #include <machine/i82489reg.h>
 
 #ifdef __ELF__
-#define XINTR(vec) Xintr/**/vec
+#define XINTR(vec) Xintr##vec
 #else
-#define XINTR(vec) _Xintr/**/vec
+#define XINTR(vec) _Xintr##vec
 #endif
 
 	.globl  _C_LABEL(apic_stray)
@@ -86,6 +79,80 @@ XINTR(ipi_ast):
 	popl	%ds
 	popl	%eax
 	iret
+
+	.globl	XINTR(ipi_invlpg)
+	.p2align 4,0x90
+XINTR(ipi_invlpg):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	tlb_shoot_addr1, %eax
+	invlpg	(%eax)
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%ds
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_invlrange)
+	.p2align 4,0x90
+XINTR(ipi_invlrange):
+	pushl	%eax
+	pushl	%edx
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	tlb_shoot_addr1, %eax
+	movl	tlb_shoot_addr2, %edx
+1:	invlpg	(%eax)
+	addl	$PAGE_SIZE, %eax
+	cmpl	%edx, %eax
+	jb	1b
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%ds
+	popl	%edx
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_reloadcr3)
+	.p2align 4,0x90
+XINTR(ipi_reloadcr3):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+	pushl	%fs
+	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax
+	movw	%ax,%fs
+
+	ioapic_asm_ack()
+
+	movl	CPUVAR(CURPCB), %eax
+	movl	PCB_PMAP(%eax), %eax
+	movl	%eax, CPUVAR(CURPMAP)
+	movl	PM_PDIRPA(%eax), %eax
+	movl	%eax, %cr3
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%fs
+	popl	%ds
+	popl	%eax
+	iret
+
 #endif
 
 	/*
@@ -102,6 +169,7 @@ XINTR(ltimer):
 	movl	%eax,CPL
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -112,6 +180,7 @@ XINTR(ltimer):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty), XINTR(softast)
@@ -125,6 +194,7 @@ XINTR(softclock):
 	andl	$~(1<<SIR_CLOCK),_C_LABEL(ipending)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -132,14 +202,8 @@ XINTR(softclock):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
-
-#define DONETISR(s, c) \
-	.globl  _C_LABEL(c)	;\
-	testl	$(1 << s),%edi	;\
-	jz	1f		;\
-	call	_C_LABEL(c)	;\
-1:
 
 XINTR(softnet):
 	pushl	$0
@@ -151,15 +215,17 @@ XINTR(softnet):
 	andl	$~(1<<SIR_NET),_C_LABEL(ipending)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	xorl	%edi,%edi
-	xchgl	_C_LABEL(netisr),%edi
-#include <net/netisr_dispatch.h>
+	pushl	$I386_SOFTINTR_SOFTNET
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 #undef DONETISR
 
@@ -173,6 +239,7 @@ XINTR(softtty):
 	andl	$~(1<<SIR_TTY),_C_LABEL(ipending)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -180,6 +247,7 @@ XINTR(softtty):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 XINTR(softast):
@@ -207,7 +275,7 @@ XINTR(softast):
 	 */
 
 #define APICINTR(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-_C_LABEL(Xintr_/**/name/**/num):					\
+_C_LABEL(Xintr_##name##num):						\
 	pushl	$0							;\
 	pushl	$T_ASTFLT						;\
 	INTRENTRY							;\
@@ -224,9 +292,10 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	incl	_C_LABEL(apic_intrcount)(,%eax,4)			;\
 	movl	_C_LABEL(apic_intrhand)(,%eax,4),%ebx /* chain head */	;\
 	testl	%ebx,%ebx						;\
-	jz      _C_LABEL(Xstray_/**/name/**/num)			;\
+	jz      _C_LABEL(Xstray_##name##num)				;\
 	APIC_STRAY_INIT			/* nobody claimed it yet */	;\
 7:									 \
+	incl	CPUVAR(IDEPTH)						;\
 	LOCK_KERNEL(IF_PPL(%esp))					;\
 	movl	IH_ARG(%ebx),%eax	/* get handler arg */		;\
 	testl	%eax,%eax						;\
@@ -243,6 +312,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	adcl	$0,IH_COUNT+4(%ebx)					;\
 4:									 \
 	UNLOCK_KERNEL(IF_PPL(%esp))					;\
+	decl	CPUVAR(IDEPTH)						;\
 	movl	IH_NEXT(%ebx),%ebx	/* next handler in chain */	;\
 	testl	%ebx,%ebx						;\
 	jnz	7b							;\
@@ -251,7 +321,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	unmask(num)			/* unmask it in hardware */	;\
 	late_ack(num)							;\
 	jmp	_C_LABEL(Xdoreti)					;\
-_C_LABEL(Xstray_/**/name/**/num):					 \
+_C_LABEL(Xstray_##name##num):					 \
 	pushl	$num							;\
 	call	_C_LABEL(apic_stray)					;\
 	addl	$4,%esp							;\
@@ -264,7 +334,7 @@ _C_LABEL(Xstray_/**/name/**/num):					 \
 	orl	%eax,%esi
 #define APIC_STRAY_TEST(name,num) \
 	testl 	%esi,%esi						;\
-	jz 	_C_LABEL(Xstray_/**/name/**/num)
+	jz 	_C_LABEL(Xstray_##name##num)
 #else /* !DEBUG */
 #define APIC_STRAY_INIT
 #define APIC_STRAY_INTEGRATE

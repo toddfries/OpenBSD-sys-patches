@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.30 2004/02/10 01:31:21 millert Exp $	*/
+/*	$OpenBSD: conf.c,v 1.14 2011/01/14 19:04:08 jasper Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -51,16 +51,17 @@
 #include "pty.h"
 #include "rd.h"
 #include "sd.h"
-#include "ss.h"
 #include "st.h"
 #include "systrace.h"
 #include "tun.h"
 #include "uk.h"
 #include "vme.h"
 #include "vnd.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#include "vscsi.h"
+#include "pppx.h"
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 struct bdevsw	bdevsw[] =
@@ -85,14 +86,14 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 17 */
 	bdev_lkm_dummy(),		/* 18 */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),		/* 3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
@@ -131,7 +132,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 39: packet filter */
 	cdev_random_init(1,random),	/* 40: random data source */
 	cdev_uk_init(NUK,uk),		/* 41 */
-	cdev_ss_init(NSS,ss),		/* 42 */
+	cdev_notdef(),			/* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 44: SCSI autochanger */
 	cdev_notdef(),			/* 45 */
@@ -140,14 +141,17 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 2;	/* major device number of memory special file */
 
@@ -221,14 +225,8 @@ int chrtoblktbl[] = {
 	/* 25 */	NODEV,
 	/* 26 */	10,	/* XD disk */
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
-/*
- * This entire table could be autoconfig()ed but that would mean that
- * the kernel's idea of the console would be out of sync with that of
- * the standalone boot.  I think it best that they both use the same
- * known algorithm unless we see a pressing need otherwise.
- */
 #include <dev/cons.h>
 
 #define dartcnpollc	nullcnpollc

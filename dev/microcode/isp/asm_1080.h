@@ -1,6 +1,10 @@
+<<<<<<< HEAD
 /* $OpenBSD: asm_1080.h,v 1.1 2000/07/06 05:15:58 mjacob Exp $ */
+=======
+/* $OpenBSD: asm_1080.h,v 1.3 2008/07/11 14:46:24 sobrado Exp $ */
+>>>>>>> origin/master
 /*
- * Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000 Qlogic, Inc.
+ * Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000 QLogic, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms are permitted provided

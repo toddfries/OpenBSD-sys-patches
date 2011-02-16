@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.h,v 1.5 2006/02/12 19:55:38 miod Exp $	*/
+/*	$OpenBSD: isa_machdep.h,v 1.9 2008/12/11 17:07:14 oga Exp $	*/
 /*	$NetBSD: isa_machdep.h,v 1.2 2003/05/09 23:51:28 fvdl Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -131,13 +124,13 @@ void	isa_reinit_irq(void);
  * BY PORTABLE CODE.
  */
 
-extern struct x86_bus_dma_tag isa_bus_dma_tag;
+extern struct bus_dma_tag isa_bus_dma_tag;
 
 /*
  * Cookie used by ISA dma.  A pointer to one of these it stashed in
  * the DMA map.
  */
-struct x86_isa_dma_cookie {
+struct isa_dma_cookie {
 	int	id_flags;		/* flags; see below */
 
 	void	*id_origbuf;		/* pointer to orig buffer if

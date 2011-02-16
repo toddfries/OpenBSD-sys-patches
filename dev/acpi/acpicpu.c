@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: acpicpu.c,v 1.19 2007/01/31 23:30:51 gwk Exp $ */
+=======
+/* $OpenBSD: acpicpu.c,v 1.57 2010/07/21 19:35:15 deraadt Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -41,17 +45,43 @@ int	acpicpu_match(struct device *, void *, void *);
 void	acpicpu_attach(struct device *, struct device *, void *);
 int	acpicpu_notify(struct aml_node *, int, void *);
 void	acpicpu_setperf(int);
+void	acpicpu_setperf_ppc_change(struct acpicpu_pss *, int);
 
 #define ACPI_STATE_C0     0x00
 #define ACPI_STATE_C1     0x01
 #define ACPI_STATE_C2     0x02
 #define ACPI_STATE_C3     0x03
 
+<<<<<<< HEAD
 #define FLAGS_NO_C2       0x01
 #define FLAGS_NO_C3       0x02
 #define FLAGS_BMCHECK     0x04
 #define FLAGS_NOTHROTTLE  0x08
 #define FLAGS_NOPSS       0x10
+=======
+#define ACPI_PDC_REVID		0x1
+#define ACPI_PDC_SMP		0xa
+#define ACPI_PDC_MSR		0x1
+
+/* _PDC Intel capabilities flags from linux */
+#define ACPI_PDC_P_FFH		0x0001
+#define ACPI_PDC_C_C1_HALT	0x0002
+#define ACPI_PDC_T_FFH		0x0004
+#define ACPI_PDC_SMP_C1PT	0x0008
+#define ACPI_PDC_SMP_C2C3	0x0010
+#define ACPI_PDC_SMP_P_SWCOORD	0x0020
+#define ACPI_PDC_SMP_C_SWCOORD	0x0040
+#define ACPI_PDC_SMP_T_SWCOORD	0x0080
+#define ACPI_PDC_C_C1_FFH	0x0100
+#define ACPI_PDC_C_C2C3_FFH	0x0200
+
+#define FLAGS_NO_C2		0x01
+#define FLAGS_NO_C3		0x02
+#define FLAGS_BMCHECK		0x04
+#define FLAGS_NOTHROTTLE	0x08
+#define FLAGS_NOPSS		0x10
+#define FLAGS_NOPCT		0x20
+>>>>>>> origin/master
 
 #define CPU_THT_EN              (1L << 4)
 #define CPU_MAXSTATE(sc)  	(1L << (sc)->sc_duty_wid)
@@ -102,7 +132,16 @@ void    acpicpu_set_throttle(struct acpicpu_softc *, int);
 void    acpicpu_add_cstatepkg(struct aml_value *, void *);
 int	acpicpu_getpct(struct acpicpu_softc *);
 int	acpicpu_getpss(struct acpicpu_softc *);
+<<<<<<< HEAD
 struct acpi_cstate *acpicpu_add_cstate(struct acpicpu_softc *, int, int, int, int);
+=======
+struct acpi_cstate *acpicpu_add_cstate(struct acpicpu_softc *, int, int, int,
+    int);
+void	acpicpu_set_pdc(struct acpicpu_softc *);
+
+#if 0
+void    acpicpu_set_throttle(struct acpicpu_softc *, int);
+>>>>>>> origin/master
 struct acpi_cstate *acpicpu_find_cstate(struct acpicpu_softc *, int);
 
 struct cfattach acpicpu_ca = {
@@ -150,6 +189,55 @@ acpicpu_find_cstate(struct acpicpu_softc *sc, int type)
 			return cx;
 	return NULL;
 }
+
+
+void
+acpicpu_set_pdc(struct acpicpu_softc *sc)
+{
+	struct aml_value cmd, osc_cmd[4];
+	struct aml_value res;
+	uint32_t buf[3];
+
+	/* 4077A616-290C-47BE-9EBD-D87058713953 */
+	static uint8_t cpu_oscuuid[16] = { 0x16, 0xA6, 0x77, 0x40, 0x0C, 0x29,
+					   0xBE, 0x47, 0x9E, 0xBD, 0xD8, 0x70,
+					   0x58, 0x71, 0x39, 0x53 };
+	/* Evaluate _PDC */
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.type = AML_OBJTYPE_BUFFER;
+	cmd.v_buffer = (uint8_t *)&buf;
+	cmd.length = sizeof(buf);
+
+	buf[0] = ACPI_PDC_REVID;
+	buf[1] = 1;
+	buf[2] = ACPI_PDC_C_C1_HALT | ACPI_PDC_P_FFH | ACPI_PDC_C_C1_FFH
+	    | ACPI_PDC_C_C2C3_FFH | ACPI_PDC_SMP_P_SWCOORD | ACPI_PDC_SMP_C2C3
+	    | ACPI_PDC_SMP_C1PT;
+
+	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PDC", 1, &cmd, &res);
+
+	/* Evaluate _OSC */
+	memset(&osc_cmd, 0, sizeof(cmd) * 4);
+	osc_cmd[0].type = AML_OBJTYPE_BUFFER;
+	osc_cmd[0].v_buffer = (uint8_t *)&cpu_oscuuid;
+	osc_cmd[0].length = sizeof(cpu_oscuuid);
+
+	osc_cmd[1].type = AML_OBJTYPE_INTEGER;
+	osc_cmd[1].v_integer = 1;
+	osc_cmd[1].length = 1;
+
+	osc_cmd[2].type = AML_OBJTYPE_INTEGER;
+	osc_cmd[2].v_integer = 1;
+	osc_cmd[2].length = 1;
+
+	buf[0] = 0;
+	osc_cmd[3].type = AML_OBJTYPE_BUFFER;
+	osc_cmd[3].v_buffer = (int8_t *)&buf;
+	osc_cmd[3].length = sizeof(buf);
+
+	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_OSC", 4, osc_cmd, &res);
+}
+
 
 struct acpi_cstate *
 acpicpu_add_cstate(struct acpicpu_softc *sc, int type, 
@@ -246,16 +334,30 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 	}
 	sc->sc_duty_off = sc->sc_acpi->sc_fadt->duty_offset;
 	sc->sc_duty_wid = sc->sc_acpi->sc_fadt->duty_width;
+<<<<<<< HEAD
 	if (!valid_throttle(sc->sc_duty_off, sc->sc_duty_wid, sc->sc_pblk_addr)) 
+=======
+
+	acpicpu_set_pdc(sc);
+
+	if (!valid_throttle(sc->sc_duty_off, sc->sc_duty_wid, sc->sc_pblk_addr))
+>>>>>>> origin/master
 		sc->sc_flags |= FLAGS_NOTHROTTLE;
 
 #ifdef ACPI_DEBUG
 	printf(": %s: ", sc->sc_devnode->name);
+<<<<<<< HEAD
 	printf("\n: hdr:%x pblk:%x,%x duty:%x,%x pstate:%x (%d throttling states)\n",
 		sc->sc_acpi->sc_fadt->hdr_revision,
 		sc->sc_pblk_addr, sc->sc_pblk_len, 
 		sc->sc_duty_off, sc->sc_duty_wid,
 		sc->sc_acpi->sc_fadt->pstate_cnt,
+=======
+	printf("\n: hdr:%x pblk:%x,%x duty:%x,%x pstate:%x "
+	       "(%d throttling states)\n", sc->sc_acpi->sc_fadt->hdr_revision,
+		sc->sc_pblk_addr, sc->sc_pblk_len, sc->sc_duty_off,
+		sc->sc_duty_wid, sc->sc_acpi->sc_fadt->pstate_cnt,
+>>>>>>> origin/master
 		CPU_MAXSTATE(sc));
 #endif
 
@@ -293,6 +395,7 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 	}
 	dnprintf(20, "\n");
 #endif
+<<<<<<< HEAD
 	/* XXX this needs to be moved to probe routine */
 	if (acpicpu_getpct(sc))
 		return;
@@ -301,6 +404,42 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_acpi->sc_fadt->pstate_cnt)
 		acpi_write_pmreg(sc->sc_acpi, ACPIREG_SMICMD, 0, 
 		    sc->sc_acpi->sc_fadt->pstate_cnt);
+=======
+		if (sc->sc_pss_len == 0) {
+			/* this should never happen */
+			printf("%s: invalid _PSS length\n", DEVNAME(sc));
+			sc->sc_flags |= FLAGS_NOPSS;
+		}
+
+		acpicpu_getppc(sc);
+		if (acpicpu_getpct(sc))
+			sc->sc_flags |= FLAGS_NOPCT;
+		else if (sc->sc_pss_len > 0) {
+			/* Notify BIOS we are handing p-states */
+			if (sc->sc_acpi->sc_fadt->pstate_cnt)
+				acpi_write_pmreg(sc->sc_acpi, ACPIREG_SMICMD, 0,
+				sc->sc_acpi->sc_fadt->pstate_cnt);
+
+			aml_register_notify(sc->sc_devnode, NULL,
+			    acpicpu_notify, sc, ACPIDEV_NOPOLL);
+
+			acpi_gasio(sc->sc_acpi, ACPI_IOREAD,
+			    sc->sc_pct.pct_status.grd_gas.address_space_id,
+			    sc->sc_pct.pct_status.grd_gas.address,
+			    sc->sc_pct_stat_as, sc->sc_pct_stat_as, &status);
+			sc->sc_level = (100 / sc->sc_pss_len) *
+			    (sc->sc_pss_len - status);
+			dnprintf(20, "%s: cpu index %d, percentage %d\n",
+			    DEVNAME(sc), status, sc->sc_level);
+			if (setperf_prio < 30) {
+				cpu_setperf = acpicpu_setperf;
+				acpicpu_set_notify(acpicpu_setperf_ppc_change);
+				setperf_prio = 30;
+				acpi_hasprocfvs = 1;
+			}
+		}
+	}
+>>>>>>> origin/master
 
 	for (i = 0; i < sc->sc_pss_len; i++)
 		printf("%d%s", sc->sc_pss[i].pss_core_freq,
@@ -392,7 +531,7 @@ int
 acpicpu_getpss(struct acpicpu_softc *sc)
 {
 	struct aml_value	res;
-	int			i;
+	int			i, c, cf;
 
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PSS", 0, NULL, &res)) {
 		dnprintf(20, "%s: no _PSS\n", DEVNAME(sc));
@@ -407,23 +546,66 @@ acpicpu_getpss(struct acpicpu_softc *sc)
 
 	memset(sc->sc_pss, 0, res.length * sizeof *sc->sc_pss);
 
+	c = 0;
 	for (i = 0; i < res.length; i++) {
-		sc->sc_pss[i].pss_core_freq = aml_val2int(
-		    res.v_package[i]->v_package[0]);
-		sc->sc_pss[i].pss_power = aml_val2int(
+		cf = aml_val2int(res.v_package[i]->v_package[0]);
+
+		/* This heuristic comes from FreeBSDs
+		 * dev/acpica/acpi_perf.c to weed out invalid PSS entries.
+		 */
+		if (cf == sc->sc_pss[c].pss_core_freq) {
+			printf("%s: struck PSS entry, core frequency equals "
+			    " last\n", sc->sc_dev.dv_xname);
+			continue;
+		}
+
+		if (cf == 0xFFFF || cf == 0x9999 || cf == 99999 || cf == 0) {
+			printf("%s: struck PSS entry, inappropriate core "
+			    "frequency value\n", sc->sc_dev.dv_xname);
+			continue;
+		}
+
+		sc->sc_pss[c].pss_core_freq = cf;
+		sc->sc_pss[c].pss_power = aml_val2int(
 		    res.v_package[i]->v_package[1]);
-		sc->sc_pss[i].pss_trans_latency = aml_val2int(
+		sc->sc_pss[c].pss_trans_latency = aml_val2int(
 		    res.v_package[i]->v_package[2]);
-		sc->sc_pss[i].pss_bus_latency = aml_val2int(
+		sc->sc_pss[c].pss_bus_latency = aml_val2int(
 		    res.v_package[i]->v_package[3]);
-		sc->sc_pss[i].pss_ctrl = aml_val2int(
+		sc->sc_pss[c].pss_ctrl = aml_val2int(
 		    res.v_package[i]->v_package[4]);
-		sc->sc_pss[i].pss_status = aml_val2int(
+		sc->sc_pss[c].pss_status = aml_val2int(
 		    res.v_package[i]->v_package[5]);
+		c++;
 	}
+<<<<<<< HEAD
 	aml_freevalue(&res);
 
 	sc->sc_pss_len = res.length;
+=======
+	sc->sc_pss_len = c;
+
+	aml_freevalue(&res);
+
+	return (0);
+}
+
+int
+acpicpu_fetch_pss(struct acpicpu_pss **pss)
+{
+	struct acpicpu_softc	*sc;
+
+	/*
+	 * XXX: According to the ACPI spec in an SMP system all processors
+	 * are supposed to support the same states. For now we pray
+	 * the bios ensures this...
+	 */
+
+	sc = acpicpu_sc[0];
+	if (!sc)
+		return 0;
+	*pss = sc->sc_pss;
+>>>>>>> origin/master
 
 	return (0);
 }
@@ -440,6 +622,12 @@ acpicpu_notify(struct aml_node *node, int notify_type, void *arg)
 	case 0x80:	/* _PPC changed, retrieve new values */
 		acpicpu_getpct(sc);
 		acpicpu_getpss(sc);
+<<<<<<< HEAD
+=======
+		if (sc->sc_notify)
+			sc->sc_notify(sc->sc_pss, sc->sc_pss_len);
+
+>>>>>>> origin/master
 		break;
 	default:
 		printf("%s: unhandled cpu event %x\n", DEVNAME(sc),
@@ -451,7 +639,33 @@ acpicpu_notify(struct aml_node *node, int notify_type, void *arg)
 }
 
 void
+<<<<<<< HEAD
 acpicpu_setperf(int level) {
+=======
+acpicpu_set_notify(void (*func)(struct acpicpu_pss *, int))
+{
+	struct acpicpu_softc    *sc;
+
+	sc = acpicpu_sc[0];
+	if (sc != NULL)
+		sc->sc_notify = func;
+}
+
+void
+acpicpu_setperf_ppc_change(struct acpicpu_pss *pss, int npss)
+{
+	struct acpicpu_softc    *sc;
+
+	sc = acpicpu_sc[0];
+
+	if (sc != NULL)
+		cpu_setperf(sc->sc_level);
+}
+
+void
+acpicpu_setperf(int level)
+{
+>>>>>>> origin/master
 	struct acpicpu_softc	*sc;
 	struct acpicpu_pss	*pss = NULL;
 	int			idx;
@@ -469,12 +683,21 @@ acpicpu_setperf(int level) {
 		return;
 	}
 
+<<<<<<< HEAD
 	idx = (sc->sc_pss_len - 1) - (level / (100 / sc->sc_pss_len));
 	if (idx < 0)
 		idx = 0; /* compensate */
 	if (idx > sc->sc_pss_len) {
 		/* XXX should never happen */
 		printf("%s: acpicpu setperf index out of range\n",
+=======
+	/*
+	 * XXX this should be handled more gracefully and it needs to also do
+	 * the duty cycle method instead of pss exclusively
+	 */
+	if (sc->sc_flags & FLAGS_NOPSS || sc->sc_flags & FLAGS_NOPCT) {
+		dnprintf(10, "%s: acpicpu no _PSS or _PCT\n",
+>>>>>>> origin/master
 		    sc->sc_devnode->name);
 		return;
 	}

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: locore.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+=======
+/*	$OpenBSD: locore.h,v 1.5 2010/09/06 08:00:31 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: locore.h,v 1.11 2006/01/23 22:32:50 uwe Exp $	*/
 
 /*-
@@ -13,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -35,17 +32,17 @@
  */
 
 #if defined(SH3) && defined(SH4)
-#define	MOV(x, r)	mov.l .L_/**/x, r; mov.l @r, r
-#define	REG_SYMBOL(x)	.L_/**/x:	.long	_C_LABEL(__sh_/**/x)
-#define	FUNC_SYMBOL(x)	.L_/**/x:	.long	_C_LABEL(__sh_/**/x)
+#define	MOV(x, r)	mov.l .L_##x, r; mov.l @r, r
+#define	REG_SYMBOL(x)	.L_##x:	.long	_C_LABEL(__sh_##x)
+#define	FUNC_SYMBOL(x)	.L_##x:	.long	_C_LABEL(__sh_##x)
 #elif defined(SH3)
-#define	MOV(x, r)	mov.l .L_/**/x, r
-#define	REG_SYMBOL(x)	.L_/**/x:	.long	SH3_/**/x
-#define	FUNC_SYMBOL(x)	.L_/**/x:	.long	_C_LABEL(sh3_/**/x)
+#define	MOV(x, r)	mov.l .L_##x, r
+#define	REG_SYMBOL(x)	.L_##x:	.long	SH3_##x
+#define	FUNC_SYMBOL(x)	.L_##x:	.long	_C_LABEL(sh3_##x)
 #elif defined(SH4)
-#define	MOV(x, r)	mov.l .L_/**/x, r
-#define	REG_SYMBOL(x)	.L_/**/x:	.long	SH4_/**/x
-#define	FUNC_SYMBOL(x)	.L_/**/x:	.long	_C_LABEL(sh4_/**/x)
+#define	MOV(x, r)	mov.l .L_##x, r
+#define	REG_SYMBOL(x)	.L_##x:	.long	SH4_##x
+#define	FUNC_SYMBOL(x)	.L_##x:	.long	_C_LABEL(sh4_##x)
 #endif /* SH3 && SH4 */
 
 /*

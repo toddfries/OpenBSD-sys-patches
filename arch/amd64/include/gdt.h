@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD: gdt.h,v 1.5 2010/11/13 04:16:42 guenther Exp $	*/
 /*	$NetBSD: gdt.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -37,27 +30,5 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LOCORE
-struct proc;
-struct pmap;
-
-void gdt_init(void);
 void gdt_init_cpu(struct cpu_info *);
-void gdt_reload_cpu(struct cpu_info *);
 void gdt_alloc_cpu(struct cpu_info *);
-
-int tss_alloc(struct pcb *);
-void tss_free(int);
-
-void ldt_alloc(struct pmap *, char *, size_t);
-void ldt_free(struct pmap *);
-
-void set_mem_gdt(struct mem_segment_descriptor *, void *, size_t,
-		 int, int, int, int, int);
-void set_sys_gdt(struct sys_segment_descriptor *, void *, size_t, int, int,
-		 int);
-#endif
-
-/* MINGDTSIZ must be a multiple of PAGE_SIZE or gdt_grow breaks */
-#define MINGDTSIZ       PAGE_SIZE
-#define MAXGDTSIZ       65536

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_axe.c,v 1.62 2007/04/09 08:42:55 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_axe.c,v 1.105 2011/01/25 20:03:35 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -148,6 +152,7 @@ Static const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_ACERCM, USB_PRODUCT_ACERCM_EP1427X2}, 0 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172}, 0 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772}, AX772 },
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772A}, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88178}, AX178 },
 	{ { USB_VENDOR_ATEN, USB_PRODUCT_ATEN_UC210T}, 0 },
 	{ { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5D5055 }, AX178 },
@@ -163,6 +168,7 @@ Static const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_LINKSYS2, USB_PRODUCT_LINKSYS2_USB200M}, 0 },
 	{ { USB_VENDOR_LINKSYS4, USB_PRODUCT_LINKSYS4_USB1000 }, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX}, 0 },
+	{ { USB_VENDOR_MSI, USB_PRODUCT_MSI_AX88772A}, AX772 },
 	{ { USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120}, 0 },
 	{ { USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01PLUS }, AX772 },
 	{ { USB_VENDOR_PLANEX3, USB_PRODUCT_PLANEX3_GU1000T }, AX178 },
@@ -174,6 +180,7 @@ Static const struct axe_type axe_devs[] = {
 
 #define axe_lookup(v, p) ((struct axe_type *)usb_lookup(axe_devs, v, p))
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER_CLASS(axe, DV_IFNET);
 
 Static int axe_tx_list_init(struct axe_softc *);
@@ -204,6 +211,52 @@ Static void axe_unlock_mii(struct axe_softc *sc);
 
 Static void axe_ax88178_init(struct axe_softc *);
 Static void axe_ax88772_init(struct axe_softc *);
+=======
+int axe_match(struct device *, void *, void *); 
+void axe_attach(struct device *, struct device *, void *); 
+int axe_detach(struct device *, int); 
+int axe_activate(struct device *, int); 
+
+struct cfdriver axe_cd = { 
+	NULL, "axe", DV_IFNET 
+}; 
+
+const struct cfattach axe_ca = { 
+	sizeof(struct axe_softc), 
+	axe_match, 
+	axe_attach, 
+	axe_detach, 
+	axe_activate, 
+};
+
+int axe_tx_list_init(struct axe_softc *);
+int axe_rx_list_init(struct axe_softc *);
+struct mbuf *axe_newbuf(void);
+int axe_encap(struct axe_softc *, struct mbuf *, int);
+void axe_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void axe_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void axe_tick(void *);
+void axe_tick_task(void *);
+void axe_start(struct ifnet *);
+int axe_ioctl(struct ifnet *, u_long, caddr_t);
+void axe_init(void *);
+void axe_stop(struct axe_softc *);
+void axe_watchdog(struct ifnet *);
+int axe_miibus_readreg(struct device *, int, int);
+void axe_miibus_writereg(struct device *, int, int, int);
+void axe_miibus_statchg(struct device *);
+int axe_cmd(struct axe_softc *, int, int, int, void *);
+int axe_ifmedia_upd(struct ifnet *);
+void axe_ifmedia_sts(struct ifnet *, struct ifmediareq *);
+void axe_reset(struct axe_softc *sc);
+
+void axe_setmulti(struct axe_softc *);
+void axe_lock_mii(struct axe_softc *sc);
+void axe_unlock_mii(struct axe_softc *sc);
+
+void axe_ax88178_init(struct axe_softc *);
+void axe_ax88772_init(struct axe_softc *);
+>>>>>>> origin/master
 
 /* Get exclusive access to the MII registers */
 Static void
@@ -227,7 +280,7 @@ axe_cmd(struct axe_softc *sc, int cmd, int index, int val, void *buf)
 	usb_device_request_t	req;
 	usbd_status		err;
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return(0);
 
 	axe_lock_mii(sc);
@@ -255,8 +308,9 @@ axe_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	struct axe_softc	*sc = USBGETSOFTC(dev);
 	usbd_status		err;
 	uWord			val;
+	int			ival;
 
-	if (sc->axe_dying) {
+	if (usbd_is_dying(sc->axe_udev)) {
 		DPRINTF(("axe: dying\n"));
 		return(0);
 	}
@@ -275,7 +329,7 @@ axe_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	if (sc->axe_phyaddrs[1] != AXE_NOPHY && phy != sc->axe_phyaddrs[1])
 		return (0);
 #endif
-	if (sc->axe_phyaddrs[0] != 0xFF && sc->axe_phyaddrs[0] != phy)
+	if (sc->axe_phyno != phy)
 		return (0);
 
 	USETW(val, 0);
@@ -291,10 +345,23 @@ axe_miibus_readreg(device_ptr_t dev, int phy, int reg)
 		return(-1);
 	}
 
+<<<<<<< HEAD
 	if (UGETW(val))
 		sc->axe_phyaddrs[0] = phy;
+=======
+	ival = UGETW(val);
+	if ((sc->axe_flags & AX772) != 0 && reg == MII_BMSR) {
+		/*
+		* BMSR of AX88772 indicates that it supports extended
+		* capability but the extended status register is
+		* revered for embedded ethernet PHY. So clear the
+		* extended capability bit of BMSR.
+		*/
+		ival &= ~BMSR_EXTCAP;
+	}
+>>>>>>> origin/master
 
-	return (UGETW(val));
+	return (ival);
 }
 
 Static void
@@ -304,7 +371,9 @@ axe_miibus_writereg(device_ptr_t dev, int phy, int reg, int val)
 	usbd_status		err;
 	uWord			uval;
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
+		return;
+	if (sc->axe_phyno != phy)
 		return;
 
 	USETW(uval, val);
@@ -326,6 +395,7 @@ axe_miibus_statchg(device_ptr_t dev)
 {
 	struct axe_softc	*sc = USBGETSOFTC(dev);
 	struct mii_data		*mii = GET_MII(sc);
+	struct ifnet		*ifp;
 	int			val, err;
 
 	if ((mii->mii_media_active & IFM_GMASK) == IFM_FDX)
@@ -333,8 +403,41 @@ axe_miibus_statchg(device_ptr_t dev)
 	else
 		val = 0;
 
+	ifp = GET_IFP(sc);
+	if (mii == NULL || ifp == NULL ||
+	    (ifp->if_flags & IFF_RUNNING) == 0)
+		return;
+
+	sc->axe_link = 0;
+	if ((mii->mii_media_status & (IFM_ACTIVE | IFM_AVALID)) ==
+	    (IFM_ACTIVE | IFM_AVALID)) {
+		switch (IFM_SUBTYPE(mii->mii_media_active)) {
+		    case IFM_10_T:
+		    case IFM_100_TX:
+			sc->axe_link++;
+			break;
+		    case IFM_1000_T:
+			if ((sc->axe_flags & AX178) == 0)
+			    break;
+			sc->axe_link++;
+			break;
+		    default:
+			break;
+		}
+	}
+
+	/* Lost link, do nothing. */
+	if (sc->axe_link == 0)
+		return;
+
+	val = 0;
+	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) != 0)
+		val |= AXE_MEDIA_FULL_DUPLEX;
+
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
 		val |= (AXE_178_MEDIA_RX_EN | AXE_178_MEDIA_MAGIC);
+		if (sc->axe_flags & AX178)
+			val |= AXE_178_MEDIA_ENCK;
 
 		switch (IFM_SUBTYPE(mii->mii_media_active)) {
 		case IFM_1000_T:
@@ -366,7 +469,6 @@ axe_ifmedia_upd(struct ifnet *ifp)
 	struct axe_softc	*sc = ifp->if_softc;
 	struct mii_data		*mii = GET_MII(sc);
 
-	sc->axe_link = 0;
 	if (mii->mii_instance) {
 		struct mii_softc	*miisc;
 		LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
@@ -402,7 +504,7 @@ axe_setmulti(struct axe_softc *sc)
 	u_int16_t		rxmode;
 	u_int8_t		hashtbl[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 
 	ifp = GET_IFP(sc);
@@ -439,7 +541,7 @@ allmulti:
 Static void
 axe_reset(struct axe_softc *sc)
 {
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 	/* XXX What to reset? */
 
@@ -499,6 +601,9 @@ axe_ax88178_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_SW_RESET_REG, 0,
 	    AXE_SW_RESET_PRL | AXE_178_RESET_MAGIC, NULL);
 	usbd_delay_ms(sc->axe_udev, 150);
+	/* Enable MII/GMII/RGMII for external PHY */
+	axe_cmd(sc, AXE_CMD_SW_PHY_SELECT, 0, 0, NULL);
+	usbd_delay_ms(sc->axe_udev, 10);
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
 }
 
@@ -508,7 +613,7 @@ axe_ax88772_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x00b0, NULL);
 	usbd_delay_ms(sc->axe_udev, 40);
 
-	if (sc->axe_phyaddrs[1] == AXE_INTPHY) {
+	if (sc->axe_phyno == AXE_PHY_NO_AX772_EPHY) {
 		/* ask for the embedded PHY */
 		axe_cmd(sc, AXE_CMD_SW_PHY_SELECT, 0, 0x01, NULL);
 		usbd_delay_ms(sc->axe_udev, 10);
@@ -540,6 +645,29 @@ axe_ax88772_init(struct axe_softc *sc)
 
 	usbd_delay_ms(sc->axe_udev, 150);
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
+}
+
+static int
+axe_get_phyno(struct axe_softc *sc, int sel)
+{
+	int phyno = -1;
+
+	switch (AXE_PHY_TYPE(sc->axe_phyaddrs[sel])) {
+	case PHY_TYPE_100_HOME:
+	case PHY_TYPE_GIG:
+		phyno  = AXE_PHY_NO(sc->axe_phyaddrs[sel]);
+		break;
+	case PHY_TYPE_SPECIAL:
+		/* FALLTHROUGH */
+	case PHY_TYPE_RSVD:
+		/* FALLTHROUGH */
+	case PHY_TYPE_NON_SUP:
+		/* FALLTHROUGH */
+	default:
+		break;
+	}
+
+	return (phyno);
 }
 
 /*
@@ -578,6 +706,7 @@ USB_ATTACH(axe)
 	USB_ATTACH_SETUP;
 
 	sc->axe_unit = self->dv_unit; /*device_get_unit(self);*/
+	sc->axe_udev = dev;
 
 	err = usbd_set_config_no(dev, AXE_CONFIG_NO, 1);
 	if (err) {
@@ -589,9 +718,17 @@ USB_ATTACH(axe)
 
 	sc->axe_flags = axe_lookup(uaa->vendor, uaa->product)->axe_flags;
 
+<<<<<<< HEAD
 	usb_init_task(&sc->axe_tick_task, axe_tick_task, sc);
 	lockinit(&sc->axe_mii_lock, PZERO, "axemii", 0, LK_CANRECURSE);
 	usb_init_task(&sc->axe_stop_task, (void (*)(void *))axe_stop, sc);
+=======
+	usb_init_task(&sc->axe_tick_task, axe_tick_task, sc,
+	    USB_TASK_TYPE_GENERIC);
+	rw_init(&sc->axe_mii_lock, "axemii");
+	usb_init_task(&sc->axe_stop_task, (void (*)(void *))axe_stop, sc,
+	    USB_TASK_TYPE_GENERIC);
+>>>>>>> origin/master
 
 	err = usbd_device2interface_handle(dev, AXE_IFACE_IDX, &sc->axe_iface);
 	if (err) {
@@ -601,7 +738,6 @@ USB_ATTACH(axe)
 		USB_ATTACH_ERROR_RETURN;
 	}
 
-	sc->axe_udev = dev;
 	sc->axe_product = uaa->product;
 	sc->axe_vendor = uaa->vendor;
 
@@ -644,14 +780,30 @@ USB_ATTACH(axe)
 	DPRINTF((" phyaddrs[0]: %x phyaddrs[1]: %x\n",
 	    sc->axe_phyaddrs[0], sc->axe_phyaddrs[1]));
 
-	if (sc->axe_flags & AX178) {
+	sc->axe_phyno = axe_get_phyno(sc, AXE_PHY_SEL_PRI);
+	if (sc->axe_phyno == -1)
+		sc->axe_phyno = axe_get_phyno(sc, AXE_PHY_SEL_SEC);
+	if (sc->axe_phyno == -1) {
+		printf("%s:", sc->axe_dev.dv_xname);
+		printf(" no valid PHY address found, assuming PHY address 0\n");
+		sc->axe_phyno = 0;
+	}
+
+	DPRINTF((" get_phyno %d\n", sc->axe_phyno));
+
+	if (sc->axe_flags & AX178)
 		axe_ax88178_init(sc);
+<<<<<<< HEAD
 		printf(", AX88178");
 	} else if (sc->axe_flags & AX772) {
 		axe_ax88772_init(sc);
 		printf(", AX88772");
 	} else
 		printf(", AX88172");
+=======
+	else if (sc->axe_flags & AX772)
+		axe_ax88772_init(sc);
+>>>>>>> origin/master
 
 	/*
 	 * Get station address.
@@ -667,14 +819,15 @@ USB_ATTACH(axe)
 	axe_cmd(sc, AXE_CMD_READ_IPG012, 0, 0, (void *)&sc->axe_ipgs);
 
 	/*
-	 * Work around broken adapters that appear to lie about
-	 * their PHY addresses.
-	 */
-	sc->axe_phyaddrs[0] = sc->axe_phyaddrs[1] = 0xFF;
-
-	/*
 	 * An ASIX chip was detected. Inform the world.
 	 */
+	printf("%s:", sc->axe_dev.dv_xname);
+	if (sc->axe_flags & AX178)
+		printf(" AX88178");
+	else if (sc->axe_flags & AX772)
+		printf(" AX88772");
+	else
+		printf(" AX88172");
 	printf(", address %s\n", ether_sprintf(eaddr));
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
@@ -693,6 +846,8 @@ USB_ATTACH(axe)
 /*	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;*/
 
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/* Initialize MII/media info. */
 	mii = &sc->axe_mii;
@@ -717,13 +872,15 @@ USB_ATTACH(axe)
 
 	usb_callout_init(sc->axe_stat_ch);
 
-	sc->axe_attached = 1;
 	splx(s);
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->axe_udev,
 			   USBDEV(sc->axe_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(axe)
@@ -734,6 +891,7 @@ USB_DETACH(axe)
 
 	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->axe_dev), __func__));
 
+<<<<<<< HEAD
 	/* Detached before attached finished, so just bail out. */
 	if (!sc->axe_attached)
 		return (0);
@@ -743,6 +901,10 @@ USB_DETACH(axe)
 	sc->axe_dying = 1;
 
 	ether_ifdetach(ifp);
+=======
+	if (timeout_initialized(&sc->axe_stat_ch))
+		timeout_del(&sc->axe_stat_ch);
+>>>>>>> origin/master
 
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL)
 		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
@@ -770,8 +932,10 @@ USB_DETACH(axe)
 
 	mii_detach(&sc->axe_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 	ifmedia_delete_instance(&sc->axe_mii.mii_media, IFM_INST_ANY);
-	ether_ifdetach(ifp);
-	if_detach(ifp);
+	if (ifp->if_softc != NULL) {
+		ether_ifdetach(ifp);
+		if_detach(ifp);
+	}
 
 #ifdef DIAGNOSTIC
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL ||
@@ -781,22 +945,27 @@ USB_DETACH(axe)
 		    USBDEVNAME(sc->axe_dev));
 #endif
 
-	sc->axe_attached = 0;
-
 	if (--sc->axe_refcnt >= 0) {
 		/* Wait for processes to go away. */
 		usb_detach_wait(USBDEV(sc->axe_dev));
 	}
 	splx(s);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->axe_udev,
 			   USBDEV(sc->axe_dev));
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
 int
+<<<<<<< HEAD
 axe_activate(device_ptr_t self, enum devact act)
+=======
+axe_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct axe_softc *sc = (struct axe_softc *)self;
 
@@ -807,8 +976,12 @@ axe_activate(device_ptr_t self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
+<<<<<<< HEAD
 		if_deactivate(&sc->axe_ec.ec_if);
 		sc->axe_dying = 1;
+=======
+		usbd_deactivate(sc->axe_udev);
+>>>>>>> origin/master
 		break;
 	}
 	return (0);
@@ -939,7 +1112,7 @@ axe_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->axe_dev),__func__));
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -1052,7 +1225,7 @@ axe_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	sc = c->axe_sc;
 	ifp = &sc->arpcom.ac_if;
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 
 	s = splnet();
@@ -1096,7 +1269,7 @@ axe_tick(void *xsc)
 	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->axe_dev),
 			__func__));
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 
 	/* Perform periodic stuff in process context */
@@ -1117,7 +1290,7 @@ axe_tick_task(void *xsc)
 	if (sc == NULL)
 		return;
 
-	if (sc->axe_dying)
+	if (usbd_is_dying(sc->axe_udev))
 		return;
 
 	ifp = GET_IFP(sc);
@@ -1128,6 +1301,7 @@ axe_tick_task(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
+<<<<<<< HEAD
 	if (!sc->axe_link && mii->mii_media_status & IFM_ACTIVE &&
 	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 		DPRINTF(("%s: %s: got link\n",
@@ -1138,6 +1312,11 @@ axe_tick_task(void *xsc)
 	}
 
 	usb_callout(sc->axe_stat_ch, hz, axe_tick, sc);
+=======
+	if (sc->axe_link == 0)
+		axe_miibus_statchg(&sc->axe_dev);
+	timeout_add_sec(&sc->axe_stat_ch, 1);
+>>>>>>> origin/master
 
 	splx(s);
 }
@@ -1254,6 +1433,11 @@ axe_init(void *xsc)
 	 */
 	axe_reset(sc);
 
+	/* set MAC address */
+	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
+		axe_cmd(sc, AXE_178_CMD_WRITE_NODEID, 0, 0,
+		    &sc->arpcom.ac_enaddr);
+
 	/* Enable RX logic. */
 
 	/* Init RX ring. */
@@ -1331,12 +1515,17 @@ axe_init(void *xsc)
 		usbd_transfer(c->axe_xfer);
 	}
 
+	sc->axe_link = 0;
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
 	splx(s);
 
+<<<<<<< HEAD
 	usb_callout(sc->axe_stat_ch, hz, axe_tick, sc);
+=======
+	timeout_add_sec(&sc->axe_stat_ch, 1);
+>>>>>>> origin/master
 	return;
 }
 
@@ -1348,7 +1537,9 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	uWord			rxmode;
-	int			error = 0;
+	int			s, error = 0;
+
+	s = splnet();
 
 	switch(cmd) {
 	case SIOCSIFADDR:
@@ -1359,13 +1550,6 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1394,22 +1578,7 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->axe_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				axe_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = GET_MII(sc);
@@ -1417,10 +1586,16 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			axe_setmulti(sc);
+		error = 0;
+	}
+
+	splx(s);
 	return(error);
 }
 

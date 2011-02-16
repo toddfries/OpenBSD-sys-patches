@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_dma_3000_500.c,v 1.1 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: tc_dma_3000_500.c,v 1.5 2009/02/01 14:34:02 miod Exp $ */
 /* $NetBSD: tc_dma_3000_500.c,v 1.13 2001/07/19 06:40:03 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -61,7 +54,6 @@ struct alpha_bus_dma_tag tc_dmat_sgmap = {
 	NULL,				/* _next_window */
 	0,				/* _boundary */
 	NULL,				/* _sgmap */
-	0,				/* _pfthresh */
 	NULL,				/* _get_tag */
 	tc_bus_dmamap_create_sgmap,
 	tc_bus_dmamap_destroy_sgmap,

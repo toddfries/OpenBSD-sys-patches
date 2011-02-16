@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_intr_fixup.c,v 1.55 2006/08/06 01:13:22 brad Exp $	*/
+/*	$OpenBSD: pci_intr_fixup.c,v 1.62 2008/12/07 14:33:26 kettenis Exp $	*/
 /*	$NetBSD: pci_intr_fixup.c,v 1.10 2000/08/10 21:18:27 soda Exp $	*/
 
 /*
@@ -42,13 +42,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -659,7 +652,6 @@ pci_intr_header_fixup(pci_chipset_tag_t pc, pcitag_t tag,
 
 	irq = ihp->line & APIC_INT_LINE_MASK;
 	ihp->link = NULL;
-	ihp->tag = tag;
 	pci_decompose_tag(pc, tag, &bus, &device, &function);
 
 	if ((pir = pciintr_pir_lookup(bus, device)) == NULL ||

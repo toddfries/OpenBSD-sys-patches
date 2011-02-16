@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_faith.c,v 1.21 2006/03/04 22:40:15 brad Exp $	*/
+=======
+/*	$OpenBSD: if_faith.c,v 1.26 2010/05/06 21:38:19 claudio Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1982, 1986, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -50,7 +54,6 @@
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
-#include <net/bpf.h>
 
 #ifdef	INET
 #include <netinet/in.h>
@@ -65,6 +68,9 @@
 #endif
 
 #include "bpfilter.h"
+#if NBPFILTER > 0
+#include <net/bpf.h>
+#endif
 
 static int faithioctl(struct ifnet *, u_long, caddr_t);
 int faithoutput(struct ifnet *, struct mbuf *, struct sockaddr *,

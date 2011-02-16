@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mcd.c,v 1.40 2006/08/13 16:24:13 krw Exp $ */
+=======
+/*	$OpenBSD: mcd.c,v 1.56 2010/09/22 01:18:57 matthew Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: mcd.c,v 1.60 1998/01/14 12:14:41 drochner Exp $	*/
 
 /*
@@ -62,6 +66,7 @@
 #include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/file.h>
+#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -204,8 +209,6 @@ int	mcdlock(struct mcd_softc *);
 void	mcdunlock(struct mcd_softc *);
 void	mcd_pseudointr(void *);
 
-struct dkdriver mcddkdriver = { mcdstrategy };
-
 #define MCD_RETRIES	3
 #define MCD_RDRETRIES	3
 
@@ -249,9 +252,8 @@ mcdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	sc->sc_dk.dk_driver = &mcddkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_dk);
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 
 	printf(": model %s\n", sc->type != 0 ? sc->type : "unknown");
 
@@ -462,11 +464,11 @@ mcdstrategy(bp)
 	int s;
 	
 	/* Test validity. */
-	MCD_TRACE("strategy: buf=0x%lx blkno=%ld bcount=%ld\n", bp,
+	MCD_TRACE("strategy: buf=0x%lx blkno=%lld bcount=%ld\n", bp,
 	    bp->b_blkno, bp->b_bcount, 0);
 	if (bp->b_blkno < 0 ||
 	    (bp->b_bcount % sc->blksize) != 0) {
-		printf("%s: strategy: blkno = %d bcount = %ld\n",
+		printf("%s: strategy: blkno = %lld bcount = %ld\n",
 		    sc->sc_dev.dv_xname, bp->b_blkno, bp->b_bcount);
 		bp->b_error = EINVAL;
 		goto bad;
@@ -487,9 +489,13 @@ mcdstrategy(bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
+<<<<<<< HEAD
 	if (MCDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
 	    sc->sc_dk.dk_cpulabel,
+=======
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
+>>>>>>> origin/master
 	    (sc->flags & (MCDF_WLABEL|MCDF_LABELLING)) != 0) <= 0)
 		goto done;
 	
@@ -577,7 +583,7 @@ mcdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(mcdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(mcdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -587,7 +593,7 @@ mcdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(mcdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(mcdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -732,6 +738,7 @@ mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
 	strncpy(lp->d_typename, "Mitsumi CD-ROM", sizeof lp->d_typename);
 	lp->d_type = DTYPE_SCSI;	/* XXX */
 	strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
+<<<<<<< HEAD
 	lp->d_secperunit = sc->disksize;
 	lp->d_rpm = 300;
 	lp->d_interleave = 1;
@@ -740,6 +747,10 @@ mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
 	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
+=======
+	DL_SETDSIZE(lp, sc->disksize);
+	lp->d_version = 1;
+>>>>>>> origin/master
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -1167,7 +1178,7 @@ mcdintr(arg)
 		sc->lastmode = mbx->mode;
 
 	firstblock:
-		MCD_TRACE("doread: read blkno=%d for bp=0x%x\n", mbx->blkno,
+		MCD_TRACE("doread: read blkno=%lld for bp=0x%x\n", mbx->blkno,
 		    bp, 0, 0);
 
 		/* Build parameter block. */
@@ -1715,7 +1726,7 @@ mcd_playblocks(sc, p)
 	int error;
 
 	if (sc->debug)
-		printf("%s: playblocks: blkno %d length %d\n",
+		printf("%s: playblocks: blkno %lld length %d\n",
 		    sc->sc_dev.dv_xname, p->blk, p->len);
 
 	if (p->blk > sc->disksize || p->len > sc->disksize ||

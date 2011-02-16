@@ -1,5 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.9 2006/10/18 20:09:38 deraadt Exp $	*/
-/*	$NetBSD: disklabel.h,v 1.1 1995/02/13 23:07:34 cgd Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.16 2009/06/14 00:09:39 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994 Christopher G. Demetriou
@@ -175,15 +174,6 @@ struct hpux_label {
 #define	lifstob(s)	((s) * LIF_SECTSIZE) 
 #define	lifstodb(s)	((s) * LIF_SECTSIZE / DEV_BSIZE)
 
-struct cpu_disklabel {
-	int labelsector;
-	union {
-		struct {
-			struct lifvol lifvol;
-			struct lifdir lifdir[LIF_NUMDIR];
-			struct hpux_label hplabel;
-		} _hppa;
-	} u;
-};
+#define MAXLIFSPACE	256		/* 512 byte blocks */
 
 #endif /* _MACHINE_DISKLABEL_H_ */

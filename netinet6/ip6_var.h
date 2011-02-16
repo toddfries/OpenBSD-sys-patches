@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip6_var.h,v 1.29 2006/11/21 05:37:32 itojun Exp $	*/
+=======
+/*	$OpenBSD: ip6_var.h,v 1.38 2010/12/21 13:12:59 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -196,7 +200,6 @@ struct	ip6stat {
 	u_int64_t ip6s_m2m[32];		/* two or more mbuf */
 	u_int64_t ip6s_mext1;		/* one ext mbuf */
 	u_int64_t ip6s_mext2m;		/* two or more ext mbuf */
-	u_int64_t ip6s_exthdrtoolong;	/* ext hdr are not continuous */
 	u_int64_t ip6s_nogif;		/* no match gif found */
 	u_int64_t ip6s_toomanyhdr;	/* discarded due to too many headers */
 
@@ -241,25 +244,27 @@ extern int	ip6_forwarding;		/* act as router? */
 extern int	ip6_mforwarding;	/* act as multicast router? */
 extern int	ip6_multipath;		/* use multipath routes */
 extern int	ip6_sendredirect;	/* send ICMPv6 redirect? */
-extern int	ip6_forward_srcrt;	/* forward src-routed? */
 extern int	ip6_use_deprecated;	/* allow deprecated addr as source */
 extern int	ip6_rr_prune;		/* router renumbering prefix
 					 * walk list every 5 sec.    */
 extern int	ip6_mcast_pmtu;		/* path MTU discovery for multicast */
 extern const int	ip6_v6only;
+extern int	ip6_neighborgcthresh; /* Threshold # of NDP entries for GC */
+extern int	ip6_maxifprefixes; /* Max acceptable prefixes via RA per IF */
+extern int	ip6_maxifdefrouters; /* Max acceptable def routers via RA */
+extern int	ip6_maxdynroutes; /* Max # of routes created via redirect */
 
 extern struct socket *ip6_mrouter; 	/* multicast routing daemon */
 extern int	ip6_sendredirects;	/* send IP redirects when forwarding? */
 extern int	ip6_maxfragpackets; /* Maximum packets in reassembly queue */
 extern int	ip6_maxfrags;	/* Maximum fragments in reassembly queue */
-extern int	ip6_sourcecheck;	/* Verify source interface */
-extern int	ip6_sourcecheck_interval; /* Interval between log messages */
 extern int	ip6_accept_rtadv;	/* Acts as a host not a router */
 extern int	ip6_keepfaith;		/* Firewall Aided Internet Translator */
 extern int	ip6_log_interval;
 extern time_t	ip6_log_time;
 extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
 extern int	ip6_dad_count;		/* DupAddrDetectionTransmits */
+extern int	ip6_dad_pending;	/* number of currently running DADs */
 
 extern int ip6_auto_flowlabel;
 extern int ip6_auto_linklocal;
@@ -295,8 +300,8 @@ void	ip6_initpktopts(struct ip6_pktopts *);
 int	ip6_setpktopts(struct mbuf *, struct ip6_pktopts *,
 	    struct ip6_pktopts *, int, int);
 void	ip6_clearpktopts(struct ip6_pktopts *, int);
-struct ip6_pktopts *ip6_copypktopts(struct ip6_pktopts *, int);
-int	ip6_optlen(struct inpcb *);
+void	ip6_randomid_init(void);
+u_int32_t ip6_randomid(void);
 
 int	route6_input(struct mbuf **, int *, int);
 
@@ -323,7 +328,6 @@ int	in6_selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
 	    struct ip6_moptions *, struct route_in6 *, struct ifnet **,
 	    struct rtentry **);
 
-u_int32_t ip6_randomid(void);
 u_int32_t ip6_randomflowlabel(void);
 #endif /* _KERNEL */
 

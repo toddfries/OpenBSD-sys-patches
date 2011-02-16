@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wd.c,v 1.54 2007/03/25 18:05:49 deraadt Exp $ */
+=======
+/*	$OpenBSD: wd.c,v 1.97 2010/12/31 22:58:40 kettenis Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -12,11 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *	must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *	derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -45,13 +44,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,6 +69,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
@@ -86,6 +79,8 @@
 #include <sys/syslog.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
+#include <sys/dkio.h>
+#include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -133,7 +128,8 @@ struct wd_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-	struct buf sc_q;
+	struct bufq sc_bufq;
+
 	/* IDE disk soft states */
 	struct ata_bio sc_wdc_bio; /* current transfer */
 	struct buf *sc_bp; /* buf being transferred */
@@ -170,7 +166,7 @@ struct wd_softc {
 int	wdprobe(struct device *, void *, void *);
 void	wdattach(struct device *, struct device *, void *);
 int	wddetach(struct device *, int);
-int	wdactivate(struct device *, enum devact);
+int	wdactivate(struct device *, int);
 int	wdprint(void *, char *);
 
 struct cfattach wd_ca = {
@@ -183,18 +179,21 @@ struct cfdriver wd_cd = {
 };
 
 void  wdgetdefaultlabel(struct wd_softc *, struct disklabel *);
+<<<<<<< HEAD
 void  wdgetdisklabel(dev_t dev, struct wd_softc *,
 				 struct disklabel *,
 				 struct cpu_disklabel *, int);
+=======
+int   wdgetdisklabel(dev_t dev, struct wd_softc *, struct disklabel *, int);
+>>>>>>> origin/master
 void  wdstrategy(struct buf *);
 void  wdstart(void *);
 void  __wdstart(struct wd_softc*, struct buf *);
 void  wdrestart(void *);
 int   wd_get_params(struct wd_softc *, u_int8_t, struct ataparams *);
 void  wd_flushcache(struct wd_softc *, int);
+void  wd_standby(struct wd_softc *, int);
 void  wd_shutdown(void *);
-
-struct dkdriver wddkdriver = { wdstrategy };
 
 /* XXX: these should go elsewhere */
 cdev_decl(wd);
@@ -202,7 +201,7 @@ bdev_decl(wd);
 
 #define wdlock(wd)  disk_lock(&(wd)->sc_dk)
 #define wdunlock(wd)  disk_unlock(&(wd)->sc_dk)
-#define wdlookup(unit) (struct wd_softc *)device_lookup(&wd_cd, (unit))
+#define wdlookup(unit) (struct wd_softc *)disk_lookup(&wd_cd, (unit))
 
 
 int
@@ -349,32 +348,43 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * Initialize and attach the disk structure.
+	 * Initialize disk structures.
 	 */
-	wd->sc_dk.dk_driver = &wddkdriver;
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
-	disk_attach(&wd->sc_dk);
-	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
+	bufq_init(&wd->sc_bufq, BUFQ_DEFAULT);
 	wd->sc_sdhook = shutdownhook_establish(wd_shutdown, wd);
 	if (wd->sc_sdhook == NULL)
 		printf("%s: WARNING: unable to establish shutdown hook\n",
 		    wd->sc_dev.dv_xname);
 	timeout_set(&wd->sc_restart_timeout, wdrestart, wd);
+
+	/* Attach disk. */
+	disk_attach(&wd->sc_dev, &wd->sc_dk);
+	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
 }
 
 int
-wdactivate(struct device *self, enum devact act)
+wdactivate(struct device *self, int act)
 {
+	struct wd_softc *wd = (void *)self;
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
+	case DVACT_SUSPEND:
+		wd_flushcache(wd, AT_POLL);
+		wd_standby(wd, AT_POLL);
 		break;
-
-	case DVACT_DEACTIVATE:
+	case DVACT_RESUME:
 		/*
-		* Nothing to do; we key off the device's DVF_ACTIVATE.
-		*/
+		 * Do two resets separated by a small delay. The
+		 * first wakes the controller, the second resets
+		 * the channel
+		 */
+		wdc_disable_intr(wd->drvp->chnl_softc);
+		wdc_reset_channel(wd->drvp);
+		delay(10000);
+		wdc_reset_channel(wd->drvp);
+		wdc_enable_intr(wd->drvp->chnl_softc);
 		break;
 	}
 	return (rv);
@@ -384,13 +394,12 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *dp, *bp;
+	struct buf *bp;
 	int s, bmaj, cmaj, mn;
 
 	/* Remove unprocessed buffers from queue */
 	s = splbio();
-	for (dp = &sc->sc_q; (bp = dp->b_actf) != NULL; ) {
-		dp->b_actf = bp->b_actf;
+	while ((bp = bufq_dequeue(&sc->sc_bufq)) != NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		biodone(bp);
@@ -412,6 +421,7 @@ wddetach(struct device *self, int flags)
 		shutdownhook_disestablish(sc->sc_sdhook);
 
 	/* Detach disk. */
+	bufq_destroy(&sc->sc_bufq);
 	disk_detach(&sc->sc_dk);
 
 	return (0);
@@ -458,13 +468,17 @@ wdstrategy(struct buf *bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
+<<<<<<< HEAD
 	if (WDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, wd->sc_dk.dk_label, wd->sc_dk.dk_cpulabel,
+=======
+	if (bounds_check_with_label(bp, wd->sc_dk.dk_label,
+>>>>>>> origin/master
 	    (wd->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
+	bufq_queue(&wd->sc_bufq, bp);
 	s = splbio();
-	disksort(&wd->sc_q, bp);
 	wdstart(wd);
 	splx(s);
 	device_unref(&wd->sc_dev);
@@ -488,18 +502,15 @@ void
 wdstart(void *arg)
 {
 	struct wd_softc *wd = arg;
-	struct buf *dp, *bp = NULL;
+	struct buf *bp = NULL;
 
 	WDCDEBUG_PRINT(("wdstart %s\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
 	while (wd->openings > 0) {
 
 		/* Is there a buf for us ? */
-		dp = &wd->sc_q;
-		if ((bp = dp->b_actf) == NULL)  /* yes, an assign */
+		if ((bp = bufq_dequeue(&wd->sc_bufq)) == NULL)
 			return;
-		dp->b_actf = bp->b_actf;
-
 		/*
 		 * Make the command. First lock the device
 		 */
@@ -537,7 +548,7 @@ __wdstart(struct wd_softc *wd, struct buf *bp)
 	nblks = bp->b_bcount / wd->sc_dk.dk_label->d_secsize;
 	if ((wd->sc_flags & WDF_LBA48) &&
 	    /* use LBA48 only if really need */
-	    ((wd->sc_wdc_bio.blkno + nblks - 1 > LBA48_THRESHOLD) ||
+	    ((wd->sc_wdc_bio.blkno + nblks - 1 >= LBA48_THRESHOLD) ||
 	     (nblks > 0xff)))
 		wd->sc_wdc_bio.flags |= ATA_LBA48;
 	if (wd->sc_flags & WDF_LBA)
@@ -551,7 +562,7 @@ __wdstart(struct wd_softc *wd, struct buf *bp)
 	disk_busy(&wd->sc_dk);
 	switch (wdc_ata_bio(wd->drvp, &wd->sc_wdc_bio)) {
 	case WDC_TRY_AGAIN:
-		timeout_add(&wd->sc_restart_timeout, hz);
+		timeout_add_sec(&wd->sc_restart_timeout, 1);
 		break;
 	case WDC_QUEUED:
 		break;
@@ -648,7 +659,7 @@ wdread(dev_t dev, struct uio *uio, int flags)
 {
 
 	WDCDEBUG_PRINT(("wdread\n"), DEBUG_XFERS);
-	return (physio(wdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(wdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -656,7 +667,7 @@ wdwrite(dev_t dev, struct uio *uio, int flags)
 {
 
 	WDCDEBUG_PRINT(("wdwrite\n"), DEBUG_XFERS);
-	return (physio(wdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(wdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -697,8 +708,16 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 			wd_get_params(wd, AT_WAIT, &wd->sc_params);
 
 			/* Load the partition info if not already loaded. */
+<<<<<<< HEAD
 			wdgetdisklabel(dev, wd, wd->sc_dk.dk_label,
 			    wd->sc_dk.dk_cpulabel, 0);
+=======
+			if (wdgetdisklabel(dev, wd,
+			    wd->sc_dk.dk_label, 0) == EIO) {
+				error = EIO;
+				goto bad;
+			}
+>>>>>>> origin/master
 		}
 	}
 
@@ -808,8 +827,6 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
 	}
 	/* XXX - user viscopy() like sd.c */
 	strncpy(lp->d_packname, wd->sc_params.atap_model, sizeof lp->d_packname);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
@@ -825,11 +842,11 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
 /*
  * Fabricate a default disk label, and try to read the correct one.
  */
-void
+int
 wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
     struct cpu_disklabel *clp, int spoofonly)
 {
-	char *errstring;
+	int error;
 
 	WDCDEBUG_PRINT(("wdgetdisklabel\n"), DEBUG_FUNCS);
 
@@ -839,6 +856,7 @@ wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
 
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
+<<<<<<< HEAD
 	errstring = readdisklabel(WDLABELDEV(dev),
 	    wdstrategy, lp, clp, spoofonly);
 	if (errstring) {
@@ -860,6 +878,13 @@ wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
 
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
+=======
+	error = readdisklabel(DISKLABELDEV(dev), wdstrategy, lp,
+	    spoofonly);
+	if (wd->drvp->state > RECAL)
+		wd->drvp->drive_flags |= DRIVE_RESET;
+	return (error);
+>>>>>>> origin/master
 }
 
 int
@@ -960,8 +985,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 		auio.uio_offset =
 			fop->df_startblk * wd->sc_dk.dk_label->d_secsize;
 		auio.uio_procp = p;
-		error = physio(wdformat, NULL, dev, B_WRITE, minphys,
-		    &auio);
+		error = physio(wdformat, dev, B_WRITE, minphys, &auio);
 		fop->df_count -= auio.uio_resid;
 		fop->df_reg[0] = wdc->sc_status;
 		fop->df_reg[1] = wdc->sc_error;
@@ -1232,8 +1256,45 @@ wd_flushcache(struct wd_softc *wd, int flags)
 }
 
 void
+wd_standby(struct wd_softc *wd, int flags)
+{
+	struct wdc_command wdc_c;
+
+	bzero(&wdc_c, sizeof(struct wdc_command));
+	wdc_c.r_command = WDCC_STANDBY_IMMED;
+	wdc_c.r_st_bmask = WDCS_DRDY;
+	wdc_c.r_st_pmask = WDCS_DRDY;
+	if (flags != 0) {
+		wdc_c.flags = AT_POLL;
+	} else {
+		wdc_c.flags = AT_WAIT;
+	}
+	wdc_c.timeout = 30000; /* 30s timeout */
+	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
+		printf("%s: standby command didn't complete\n",
+		    wd->sc_dev.dv_xname);
+	}
+	if (wdc_c.flags & AT_TIMEOU) {
+		printf("%s: standby command timeout\n",
+		    wd->sc_dev.dv_xname);
+	}
+	if (wdc_c.flags & AT_DF) {
+		printf("%s: standby command: drive fault\n",
+		    wd->sc_dev.dv_xname);
+	}
+	/*
+	 * Ignore error register, it shouldn't report anything else
+	 * than COMMAND ABORTED, which means the device doesn't support
+	 * standby
+	 */
+}
+
+void
 wd_shutdown(void *arg)
 {
 	struct wd_softc *wd = arg;
+
 	wd_flushcache(wd, AT_POLL);
+	if (boothowto & RB_POWERDOWN)
+		wd_standby(wd, AT_POLL);
 }

@@ -1,3 +1,14 @@
+<<<<<<< HEAD
 CVS
 obj
 .cvsignore
+=======
+*.log
+*.orig
+*.rej
+*.sh
+.#*
+.cvsignore
+CVS
+obj
+>>>>>>> origin/master

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cninit.c,v 1.5 2002/06/12 03:57:16 miod Exp $	*/
+=======
+/*	$OpenBSD: cninit.c,v 1.10 2010/06/26 23:24:44 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cninit.c,v 1.2 1995/04/11 22:08:10 pk Exp $	*/
 
 /*
@@ -42,7 +46,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
@@ -51,6 +54,8 @@
 #include <sys/vnode.h>
 
 #include <dev/cons.h>
+
+struct consdev *cn_tab = NULL;
 
 void
 cninit()

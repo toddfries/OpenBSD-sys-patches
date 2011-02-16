@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: onewire.c,v 1.6 2006/09/30 17:45:31 grange Exp $	*/
+=======
+/*	$OpenBSD: onewire.c,v 1.11 2009/10/13 19:33:16 pirofti Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -56,7 +60,7 @@ struct onewire_softc {
 
 struct onewire_device {
 	TAILQ_ENTRY(onewire_device)	d_list;
-	struct device *			d_dev;
+	struct device *			d_dev;	/* may be NULL */
 	u_int64_t			d_rom;
 	int				d_present;
 };
@@ -64,7 +68,7 @@ struct onewire_device {
 int	onewire_match(struct device *, void *, void *);
 void	onewire_attach(struct device *, struct device *, void *);
 int	onewire_detach(struct device *, int);
-int	onewire_activate(struct device *, enum devact);
+int	onewire_activate(struct device *, int);
 int	onewire_print(void *, const char *);
 
 void	onewire_thread(void *);
@@ -121,7 +125,7 @@ onewire_detach(struct device *self, int flags)
 }
 
 int
-onewire_activate(struct device *self, enum devact act)
+onewire_activate(struct device *self, int act)
 {
 	struct onewire_softc *sc = (struct onewire_softc *)self;
 
@@ -462,6 +466,7 @@ onewire_scan(struct onewire_softc *sc)
 			}
 		}
 		if (!present) {
+<<<<<<< HEAD
 			bzero(&oa, sizeof(oa));
 			oa.oa_onewire = sc;
 			oa.oa_rom = rom;
@@ -471,8 +476,18 @@ onewire_scan(struct onewire_softc *sc)
 
 			MALLOC(nd, struct onewire_device *,
 			    sizeof(struct onewire_device), M_DEVBUF, M_NOWAIT);
+=======
+			nd = malloc(sizeof(struct onewire_device),
+			    M_DEVBUF, M_NOWAIT);
+>>>>>>> origin/master
 			if (nd == NULL)
 				continue;
+
+			bzero(&oa, sizeof(oa));
+			oa.oa_onewire = sc;
+			oa.oa_rom = rom;
+			dev = config_found(&sc->sc_dev, &oa, onewire_print);
+
 			nd->d_dev = dev;
 			nd->d_rom = rom;
 			nd->d_present = 1;
@@ -486,7 +501,8 @@ out:
 	    d != TAILQ_END(&sc->sc_dev); d = next) {
 		next = TAILQ_NEXT(d, d_list);
 		if (!d->d_present) {
-			config_detach(d->d_dev, DETACH_FORCE);
+			if (d->d_dev != NULL)
+				config_detach(d->d_dev, DETACH_FORCE);
 			TAILQ_REMOVE(&sc->sc_devs, d, d_list);
 			FREE(d, M_DEVBUF);
 		}

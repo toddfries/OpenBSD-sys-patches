@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pf_if.c,v 1.45 2006/01/30 12:39:13 henning Exp $ */
+=======
+/*	$OpenBSD: pf_if.c,v 1.61 2010/06/28 23:21:41 mcbride Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -41,6 +45,11 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/time.h>
+<<<<<<< HEAD
+=======
+#include <sys/pool.h>
+#include <sys/syslog.h>
+>>>>>>> origin/master
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -135,6 +144,9 @@ pfi_kif_ref(struct pfi_kif *kif, enum pfi_kif_refs what)
 		if (!kif->pfik_states++)
 			TAILQ_INSERT_TAIL(&pfi_statehead, kif, pfik_w_states);
 		break;
+	case PFI_KIF_REF_ROUTE:
+		kif->pfik_routes++;
+		break;
 	default:
 		panic("pfi_kif_ref with unknown type");
 	}
@@ -151,18 +163,28 @@ pfi_kif_unref(struct pfi_kif *kif, enum pfi_kif_refs what)
 		break;
 	case PFI_KIF_REF_RULE:
 		if (kif->pfik_rules <= 0) {
-			printf("pfi_kif_unref: rules refcount <= 0\n");
+			DPFPRINTF(LOG_ERR,
+			    "pfi_kif_unref: rules refcount <= 0");
 			return;
 		}
 		kif->pfik_rules--;
 		break;
 	case PFI_KIF_REF_STATE:
 		if (kif->pfik_states <= 0) {
-			printf("pfi_kif_unref: state refcount <= 0\n");
+			DPFPRINTF(LOG_ERR,
+			    "pfi_kif_unref: state refcount <= 0");
 			return;
 		}
 		if (!--kif->pfik_states)
 			TAILQ_REMOVE(&pfi_statehead, kif, pfik_w_states);
+		break;
+	case PFI_KIF_REF_ROUTE:
+		if (kif->pfik_routes <= 0) {
+			DPFPRINTF(LOG_ERR,
+			    "pfi_kif_unref: state refcount <= 0");
+			return;
+		}
+		kif->pfik_routes--;
 		break;
 	default:
 		panic("pfi_kif_unref with unknown type");
@@ -171,7 +193,7 @@ pfi_kif_unref(struct pfi_kif *kif, enum pfi_kif_refs what)
 	if (kif->pfik_ifp != NULL || kif->pfik_group != NULL || kif == pfi_all)
 		return;
 
-	if (kif->pfik_rules || kif->pfik_states)
+	if (kif->pfik_rules || kif->pfik_states || kif->pfik_routes)
 		return;
 
 	RB_REMOVE(pfi_ifhead, &pfi_ifs, kif);
@@ -336,9 +358,9 @@ pfi_dynaddr_setup(struct pf_addr_wrap *aw, sa_family_t af)
 
 	if (aw->type != PF_ADDR_DYNIFTL)
 		return (0);
-	if ((dyn = pool_get(&pfi_addr_pl, PR_NOWAIT)) == NULL)
+	if ((dyn = pool_get(&pfi_addr_pl, PR_WAITOK | PR_LIMITFAIL | PR_ZERO))
+	    == NULL)
 		return (1);
-	bzero(dyn, sizeof(*dyn));
 
 	s = splsoftnet();
 	if (!strcmp(aw->v.ifname, "self"))
@@ -371,7 +393,7 @@ pfi_dynaddr_setup(struct pf_addr_wrap *aw, sa_family_t af)
 		goto _bad;
 	}
 
-	if ((dyn->pfid_kt = pfr_attach_table(ruleset, tblname)) == NULL) {
+	if ((dyn->pfid_kt = pfr_attach_table(ruleset, tblname, 1)) == NULL) {
 		rv = 1;
 		goto _bad;
 	}
@@ -451,8 +473,9 @@ pfi_table_update(struct pfr_ktable *kt, struct pfi_kif *kif, int net, int flags)
 
 	if ((e = pfr_set_addrs(&kt->pfrkt_t, pfi_buffer, pfi_buffer_cnt, &size2,
 	    NULL, NULL, NULL, 0, PFR_TFLAG_ALLMASK)))
-		printf("pfi_table_update: cannot set %d new addresses "
-		    "into table %s: %d\n", pfi_buffer_cnt, kt->pfrkt_name, e);
+		DPFPRINTF(LOG_ERR,
+		    "pfi_table_update: cannot set %d new addresses "
+		    "into table %s: %d", pfi_buffer_cnt, kt->pfrkt_name, e);
 }
 
 void
@@ -522,18 +545,20 @@ pfi_address_add(struct sockaddr *sa, int af, int net)
 		int		 new_max = pfi_buffer_max * 2;
 
 		if (new_max > PFI_BUFFER_MAX) {
-			printf("pfi_address_add: address buffer full (%d/%d)\n",
+			DPFPRINTF(LOG_ERR,
+			    "pfi_address_add: address buffer full (%d/%d)",
 			    pfi_buffer_cnt, PFI_BUFFER_MAX);
 			return;
 		}
 		p = malloc(new_max * sizeof(*pfi_buffer), PFI_MTYPE,
 		    M_DONTWAIT);
 		if (p == NULL) {
-			printf("pfi_address_add: no memory to grow buffer "
-			    "(%d/%d)\n", pfi_buffer_cnt, PFI_BUFFER_MAX);
+			DPFPRINTF(LOG_ERR,
+			    "pfi_address_add: no memory to grow buffer "
+			    "(%d/%d)", pfi_buffer_cnt, PFI_BUFFER_MAX);
 			return;
 		}
-		memcpy(pfi_buffer, p, pfi_buffer_cnt * sizeof(*pfi_buffer));
+		memcpy(p, pfi_buffer, pfi_buffer_max * sizeof(*pfi_buffer));
 		/* no need to zero buffer */
 		free(pfi_buffer, PFI_MTYPE);
 		pfi_buffer = p;
@@ -613,8 +638,21 @@ pfi_fill_oldstatus(struct pf_status *pfs)
 	struct pfi_kif_cmp 	 key;
 	int			 i, j, k, s;
 
+<<<<<<< HEAD
 	strlcpy(key.pfik_name, pfs->ifname, sizeof(key.pfik_name));
+=======
+>>>>>>> origin/master
 	s = splsoftnet();
+	if (*name == '\0' && pfs == NULL) {
+		RB_FOREACH(p, pfi_ifhead, &pfi_ifs) {
+			bzero(p->pfik_packets, sizeof(p->pfik_packets));
+			bzero(p->pfik_bytes, sizeof(p->pfik_bytes));
+			p->pfik_tzero = time_second;
+		}
+		return;
+	}
+
+	strlcpy(key.pfik_name, name, sizeof(key.pfik_name));
 	p = RB_FIND(pfi_ifhead, &pfi_ifs, (struct pfi_kif *)&key);
 	if (p == NULL) {
 		splx(s);
@@ -710,7 +748,7 @@ pfi_set_flags(const char *name, int flags)
 	RB_FOREACH(p, pfi_ifhead, &pfi_ifs) {
 		if (pfi_skip_if(name, p))
 			continue;
-		p->pfik_flags |= flags;
+		p->pfik_flags_new = p->pfik_flags | flags;
 	}
 	splx(s);
 	return (0);
@@ -726,10 +764,22 @@ pfi_clear_flags(const char *name, int flags)
 	RB_FOREACH(p, pfi_ifhead, &pfi_ifs) {
 		if (pfi_skip_if(name, p))
 			continue;
-		p->pfik_flags &= ~flags;
+		p->pfik_flags_new = p->pfik_flags & ~flags;
 	}
 	splx(s);
 	return (0);
+}
+
+void
+pfi_xcommit(void)
+{
+	struct pfi_kif	*p;
+	int		 s;
+
+	s = splsoftnet();
+	RB_FOREACH(p, pfi_ifhead, &pfi_ifs)
+		p->pfik_flags = p->pfik_flags_new;
+	splx(s);
 }
 
 /* from pf_print_state.c */

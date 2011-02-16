@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nfsproto.h,v 1.5 2003/06/02 23:28:20 millert Exp $	*/
+=======
+/*	$OpenBSD: nfsproto.h,v 1.10 2009/07/08 14:39:31 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: nfsproto.h,v 1.1 1996/02/18 11:54:06 fvdl Exp $	*/
 
 /*
@@ -37,11 +41,6 @@
 
 #ifndef _NFS_NFSPROTO_H_
 #define _NFS_NFSPROTO_H_
-
-
-/*
- * nfs definitions as per the Version 2 and 3 specs
- */
 
 /*
  * Constants as defined in the Sun NFS Version 2 and 3 specs.
@@ -169,9 +168,8 @@
 #define	NFSPROC_FSINFO		19
 #define	NFSPROC_PATHCONF	20
 #define	NFSPROC_COMMIT		21
-
-#define NFSPROC_NOOP		25
-#define	NFS_NPROCS		26
+#define NFSPROC_NOOP		22
+#define	NFS_NPROCS		23
 
 /* Actual Version 2 procedure numbers */
 #define	NFSV2PROC_NULL		0
@@ -239,17 +237,13 @@ typedef enum { NFNON=0, NFREG=1, NFDIR=2, NFBLK=3, NFCHR=4, NFLNK=5,
 /* Structs for common parts of the rpc's */
 /*
  * File Handle (32 bytes for version 2), variable up to 64 for version 3.
- * File Handles of up to NFS_SMALLFH in size are stored directly in the
- * nfs node, whereas larger ones are malloc'd. (This never happens when
- * NFS_SMALLFH is set to 64.)
- * NFS_SMALLFH should be in the range of 32 to 64 and be divisible by 4.
  */
-#ifndef NFS_SMALLFH
-#define NFS_SMALLFH	64
+#ifndef NFS_MAXFHSIZE
+#define NFS_MAXFHSIZE	64
 #endif
 union nfsfh {
 	fhandle_t fh_generic;
-	u_char    fh_bytes[NFS_SMALLFH];
+	u_char    fh_bytes[NFS_MAXFHSIZE];
 };
 typedef union nfsfh nfsfh_t;
 

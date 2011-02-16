@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.107 2007/04/03 10:14:47 art Exp $	*/
+/*	$OpenBSD: locore.s,v 1.130 2010/07/03 04:54:32 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -117,11 +117,6 @@
 #define	SET_CURPCB(reg,treg)				\
 	GET_CPUINFO(treg)			;	\
 	movl	reg,CPU_INFO_CURPCB(treg)
-
-#define	CLEAR_RESCHED(treg)				\
-	GET_CPUINFO(treg)			;	\
-	xorl	%eax,%eax			;	\
-	movl	%eax,CPU_INFO_RESCHED(treg)
 
 #define	CHECK_ASTPENDING(treg)				\
 	GET_CPUINFO(treg)			;	\
@@ -399,7 +394,6 @@ trycyrix486:
 	jne	2f			# yes; must not be Cyrix CPU
 	movl	$CPU_486DLC,RELOC(_C_LABEL(cpu))	# set CPU type
 
-#ifndef CYRIX_CACHE_WORKS
 	/* Disable caching of the ISA hole only. */
 	invd
 	movb	$CCR0,%al		# Configuration Register index (CCR0)
@@ -412,49 +406,6 @@ trycyrix486:
 	movb	%ah,%al
 	outb	%al,$0x23
 	invd
-#else /* CYRIX_CACHE_WORKS */
-	/* Set cache parameters */
-	invd				# Start with guaranteed clean cache
-	movb	$CCR0,%al		# Configuration Register index (CCR0)
-	outb	%al,$0x22
-	inb	$0x23,%al
-	andb	$~CCR0_NC0,%al
-#ifndef CYRIX_CACHE_REALLY_WORKS
-	orb	$(CCR0_NC1|CCR0_BARB),%al
-#else
-	orb	$CCR0_NC1,%al
-#endif
-	movb	%al,%ah
-	movb	$CCR0,%al
-	outb	%al,$0x22
-	movb	%ah,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 1	*/
-	movb	$(NCR1+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 2	*/
-	movb	$(NCR2+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 3	*/
-	movb	$(NCR3+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 4	*/
-	movb	$(NCR4+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* enable caching in CR0 */
-	movl	%cr0,%eax
-	andl	$~(CR0_CD|CR0_NW),%eax
-	movl	%eax,%cr0
-	invd
-#endif /* CYRIX_CACHE_WORKS */
 
 	jmp	2f
 
@@ -721,29 +672,8 @@ NENTRY(proc_trampoline)
  * Signal trampoline; copied to top of user stack.
  */
 NENTRY(sigcode)
-	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
-	testl	%esi,%esi
-	jz	1f
-	fnsave	(%esi)
-1:	call	*SIGF_HANDLER(%esp)
-	testl	%esi,%esi
-	jz	2f
-	frstor	(%esi)
-	jmp	2f
-
-	.globl  _C_LABEL(sigcode_xmm)
-_C_LABEL(sigcode_xmm):
-	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
-	testl	%esi,%esi
-	jz	1f
-	fxsave	(%esi)
-	fninit
-1:	call	*SIGF_HANDLER(%esp)
-	testl	%esi,%esi
-	jz	2f
-	fxrstor	(%esi)
-
-2:	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
+	call	*SIGF_HANDLER(%esp)
+	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
 					# copy at SIGF_SCP(%esp))
 	pushl	%eax
 	pushl	%eax			# junk to fake return address
@@ -816,30 +746,6 @@ _C_LABEL(freebsd_esigcode):
 /*
  * The following primitives are used to fill and copy regions of memory.
  */
-
-/*
- * fillw(short pattern, caddr_t addr, size_t len);
- * Write len copies of pattern at addr.
- */
-ENTRY(fillw)
-	pushl	%edi
-	movl	8(%esp),%eax
-	movl	12(%esp),%edi
-	movw	%ax,%cx
-	rorl	$16,%eax
-	movw	%cx,%ax
-	cld
-	movl	16(%esp),%ecx
-	shrl	%ecx			# do longwords
-	rep
-	stosl
-	movl	16(%esp),%ecx
-	andl	$1,%ecx			# do remainder
-	rep
-	stosw
-	popl	%edi
-	ret
-
 
 /* Frame pointer reserve on stack. */
 #ifdef DDB
@@ -1655,52 +1561,8 @@ ENTRY(cpu_switch)
 
 	GET_CURPROC(%esi,%ecx)
 
-	/*
-	 * Clear curproc so that we don't accumulate system time while idle.
-	 * This also insures that schedcpu() will move the old process to
-	 * the correct queue if it happens to get called from the spllower()
-	 * below and changes the priority.  (See corresponding comment in
-	 * userret()).
-	 */
-	CLEAR_CURPROC(%ecx)
-
-switch_search:
-	/*
-	 * First phase: find new process.
-	 *
-	 * Registers:
-	 *   %eax - queue head, scratch, then zero
-	 *   %ebx - queue number
-	 *   %ecx - cached value of whichqs
-	 *   %edx - next process in queue
-	 *   %esi - old process
-	 *   %edi - new process
-	 */
-
-	/* Wait for new process. */
-	movl	_C_LABEL(whichqs),%ecx
-	bsfl	%ecx,%ebx		# find a full q
-	jz	_C_LABEL(idle)		# if none, idle
-	leal	_C_LABEL(qs)(,%ebx,8),%eax	# select q
-	movl	P_FORW(%eax),%edi	# unlink from front of process q
 #ifdef	DIAGNOSTIC
-	cmpl	%edi,%eax		# linked to self (i.e. nothing queued)?
-	je	_C_LABEL(switch_error)	# not possible
-#endif /* DIAGNOSTIC */
-	movl	P_FORW(%edi),%edx
-	movl	%edx,P_FORW(%eax)
-	movl	%eax,P_BACK(%edx)
-
-	cmpl	%edx,%eax		# q empty?
-	jne	3f
-
-	btrl	%ebx,%ecx		# yes, clear to indicate empty
-	movl	%ecx,_C_LABEL(whichqs)	# update q status
-
-3:	/* We just did it. */
-	CLEAR_RESCHED(%ecx)
-
-#ifdef	DIAGNOSTIC
+	xorl	%eax, %eax
 	cmpl	%eax,P_WCHAN(%edi)	# Waiting for something?
 	jne	_C_LABEL(switch_error)	# Yes; shouldn't be queued.
 	cmpb	$SRUN,P_STAT(%edi)	# In run state?
@@ -1722,42 +1584,28 @@ switch_search:
 	testl	%esi,%esi
 	jz	switch_exited
 
-	/*
-	 * Second phase: save old context.
-	 *
-	 * Registers:
-	 *   %eax, %ecx - scratch
-	 *   %esi - old process, then old pcb
-	 *   %edi - new process
-	 */
-
-	pushl	%esi
-	call	_C_LABEL(pmap_deactivate)
-	addl	$4,%esp
-
-	movl	P_ADDR(%esi),%esi
-
-	/* Save stack pointers. */
-	movl	%esp,PCB_ESP(%esi)
-	movl	%ebp,PCB_EBP(%esi)
+	/* Save old stack pointers. */
+	movl	P_ADDR(%esi),%ebx
+	movl	%esp,PCB_ESP(%ebx)
+	movl	%ebp,PCB_EBP(%ebx)
 
 switch_exited:
-	/*
-	 * Third phase: restore saved context.
-	 *
-	 * Registers:
-	 *   %eax, %ecx, %edx - scratch
-	 *   %esi - new pcb
-	 *   %edi - new process
-	 */
+	/* Restore saved context. */
 
 	/* No interrupts while loading new state. */
 	cli
-	movl	P_ADDR(%edi),%esi
+
+	/* Record new process. */
+	movl	%edi, CPUVAR(CURPROC)
+	movb	$SONPROC, P_STAT(%edi)
 
 	/* Restore stack pointers. */
-	movl	PCB_ESP(%esi),%esp
-	movl	PCB_EBP(%esi),%ebp
+	movl	P_ADDR(%edi),%ebx
+	movl	PCB_ESP(%ebx),%esp
+	movl	PCB_EBP(%ebx),%ebp
+
+	/* Record new pcb. */
+	movl	%ebx, CPUVAR(CURPCB)
 
 #if 0
 	/* Don't bother with the rest if switching to a system process. */
@@ -1766,15 +1614,15 @@ switch_exited:
 #endif
 
 	/*
-	 * Activate the address space.  We're curproc, so %cr3 will
-	 * be reloaded, but we're not yet curpcb, so the LDT won't
-	 * be reloaded, although the PCB copy of the selector will
-	 * be refreshed from the pmap.
+	 * Activate the address space.  The pcb copy of %cr3 and the
+	 * LDT will be refreshed from the pmap, and because we're
+	 * curproc they'll both be reloaded into the CPU.
 	 */
 	pushl	%edi
-	call	_C_LABEL(pmap_activate)
-	addl	$4,%esp
-	
+	pushl	%esi
+	call	_C_LABEL(pmap_switch)
+	addl	$8,%esp
+
 	/* Load TSS info. */
 #ifdef MULTIPROCESSOR
 	GET_CPUINFO(%ebx)
@@ -1788,36 +1636,20 @@ switch_exited:
 	andl	$~0x0200,4-SEL_KPL(%eax,%edx,1)
 	ltr	%dx
 
-#ifdef USER_LDT
-	/*
-	 * Switch LDT.
-	 *
-	 * XXX
-	 * Always do this, because the LDT could have been swapped into a
-	 * different selector after a process exited.  (See gdt_compact().)
-	 */
-	movl	PCB_LDT_SEL(%esi),%edx
-	lldt	%dx
-#endif /* USER_LDT */
-
-switch_restored:
 	/* Restore cr0 (including FPU state). */
-	movl	PCB_CR0(%esi),%ecx
+	movl	PCB_CR0(%ebx),%ecx
 #ifdef MULTIPROCESSOR
 	/*
 	 * If our floating point registers are on a different CPU,
 	 * clear CR0_TS so we'll trap rather than reuse bogus state.
 	 */
-	GET_CPUINFO(%ebx)
-	cmpl	PCB_FPCPU(%esi),%ebx
+	movl	CPUVAR(SELF), %esi
+	cmpl	PCB_FPCPU(%ebx), %esi
 	jz	1f
 	orl	$CR0_TS,%ecx
 1:	
 #endif	
 	movl	%ecx,%cr0
-
-	/* Record new pcb. */
-	SET_CURPCB(%esi, %ecx)
 
 	/* Interrupts are okay again. */
 	sti
@@ -1950,7 +1782,7 @@ ENTRY(savectx)
  * XXX - debugger traps are now interrupt gates so at least bdb doesn't lose
  * control.  The sti's give the standard losing behaviour for ddb and kgdb.
  */
-#define	IDTVEC(name)	ALIGN_TEXT; .globl X/**/name; X/**/name:
+#define	IDTVEC(name)	ALIGN_TEXT; .globl X##name; X##name:
 
 #define	TRAP(a)		pushl $(a) ; jmp _C_LABEL(alltraps)
 #define	ZTRAP(a)	pushl $0 ; TRAP(a)
@@ -2095,7 +1927,9 @@ calltrap:
 #ifdef DIAGNOSTIC
 	movl	CPL,%ebx
 #endif /* DIAGNOSTIC */
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 2:	/* Check for ASTs on exit to user mode. */
 	cli
 	CHECK_ASTPENDING(%ecx)
@@ -2109,7 +1943,9 @@ calltrap:
 5:	CLEAR_ASTPENDING(%ecx)
 	sti
 	movl	$T_ASTFLT,TF_TRAPNO(%esp)
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 	jmp	2b
 #ifndef DIAGNOSTIC
 1:	INTRFASTEXIT
@@ -2152,7 +1988,9 @@ IDTVEC(syscall)
 syscall1:
 	pushl	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
+	pushl	%esp
 	call	_C_LABEL(syscall)
+	addl	$4,%esp
 2:	/* Check for ASTs on exit to user mode. */
 	cli
 	CHECK_ASTPENDING(%ecx)
@@ -2161,7 +1999,9 @@ syscall1:
 	CLEAR_ASTPENDING(%ecx)
 	sti
 	/* Pushed T_ASTFLT into tf_trapno on entry. */
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 	jmp	2b
 1:	INTRFASTEXIT
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pcb.h,v 1.7 2010/11/13 04:16:42 guenther Exp $	*/
 /*	$NetBSD: pcb.h,v 1.1 2003/04/26 18:39:45 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -80,40 +73,23 @@
 
 #include <sys/signal.h>
 
-#include <machine/segments.h>
 #include <machine/tss.h>
 #include <machine/fpu.h>
-#include <machine/sysarch.h>
-
-#define	NIOPORTS	1024		/* # of ports we allow to be mapped */
 
 /*
  * Please note that the pcb_savefpu field in struct below must be
  * on a 16-byte boundary.
  */
 struct pcb {
-	/*
-	 * XXXfvdl
-	 * It's overkill to have a TSS here, as it's only needed
-	 * for compatibility processes who use an I/O permission map.
-	 * The pcb fields below are not in the TSS anymore (and there's
-	 * not enough room in the TSS to store them all)
-	 * Should just make this a pointer and allocate.
-	 */
-	struct	x86_64_tss pcb_tss;
-	u_int64_t pcb_cr3;
-	u_int64_t pcb_rsp;
-	u_int64_t pcb_rbp;
-	u_int64_t pcb_usersp;
-	u_int64_t pcb_ldt_sel;
 	struct	savefpu pcb_savefpu;	/* floating point state */
-	int	pcb_cr0;		/* saved image of CR0 */
-	int	pcb_flags;
-#define	PCB_USER_LDT	0x01		/* has user-set LDT */
+	u_int64_t	pcb_cr3;
+	u_int64_t	pcb_rsp;
+	u_int64_t	pcb_rbp;
+	u_int64_t	pcb_kstack;	/* kernel stack address */
 	caddr_t	pcb_onfault;		/* copyin/out fault recovery */
-	struct cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
-	unsigned pcb_iomap[NIOPORTS/32];	/* I/O bitmap */
-	struct pmap *pcb_pmap;		/* back pointer to our pmap */
+	struct	cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
+	struct	pmap *pcb_pmap;		/* back pointer to our pmap */
+	int	pcb_cr0;		/* saved image of CR0 */
 };
 
 /*    

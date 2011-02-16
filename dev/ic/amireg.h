@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amireg.h,v 1.26 2006/04/26 07:53:22 dlg Exp $	*/
+=======
+/*	$OpenBSD: amireg.h,v 1.30 2008/10/22 18:42:29 marco Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -514,8 +518,8 @@ struct ami_fc_einquiry {
 	u_int8_t	ain_ldstat[AMI_BIG_MAX_LDRIVES];
 
 	u_int8_t	ain_pdstat[AMI_BIG_MAX_PDRIVES];
-	u_int16_t	ain_pdfmtinp[AMI_BIG_MAX_PDRIVES];
-	u_int8_t	ain_pdrates [80];	/* pdrv xfer rates */
+	u_int16_t	ain_pdfmtinp[AMI_BIG_MAX_PDRIVES / 16];
+	u_int8_t	ain_pdrates[80];	/* pdrv xfer rates */
 	u_int8_t	ain_pad[263];		/* pad to 1k */
 } __packed;
 
@@ -661,24 +665,6 @@ struct ami_drivehistory {
 
 #define	AMI_FAILHISTORY		10
 	} __packed adh_fail[AMI_FAILHISTORY];
-} __packed;
-
-struct ami_inq_data {
-	u_int8_t	aid_peri;
-	u_int8_t	aid_scsitype;
-	u_int8_t	aid_ver;
-	u_int8_t	aid_datatrans;
-	u_int8_t	aid_addlen;
-	u_int8_t	aid_resv[2];
-	u_int8_t	aid_scsival;
-	u_int8_t	aid_vendor[8];
-	u_int8_t	aid_prod[16];
-	u_int8_t	aid_prodver[4];
-	u_int8_t	aid_mederr;
-	u_int8_t	aid_otherr;
-	u_int8_t	aid_proctype;
-
-	u_int8_t	resv2[20];
 } __packed;
 
 struct ami_progress {

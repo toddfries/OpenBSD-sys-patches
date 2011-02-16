@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: osiop.c,v 1.26 2005/12/03 16:53:16 krw Exp $	*/
+=======
+/*	$OpenBSD: osiop.c,v 1.47 2011/01/02 13:38:27 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -96,8 +100,10 @@
 #include <dev/microcode/siop/osiop.out>
 
 void osiop_attach(struct osiop_softc *);
-void osiop_minphys(struct buf *);
-int osiop_scsicmd(struct scsi_xfer *xs);
+void osiop_minphys(struct buf *, struct scsi_link *);
+void *osiop_io_get(void *);
+void osiop_io_put(void *, void *);
+void osiop_scsicmd(struct scsi_xfer *xs);
 void osiop_poll(struct osiop_softc *, struct osiop_acb *);
 void osiop_sched(struct osiop_softc *);
 void osiop_scsidone(struct osiop_acb *, int);
@@ -191,13 +197,6 @@ struct scsi_adapter osiop_adapter = {
 	NULL,
 };
 
-struct scsi_device osiop_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
-
 void
 osiop_attach(sc)
 	struct osiop_softc *sc;
@@ -212,7 +211,7 @@ osiop_attach(sc)
 	 * Allocate and map DMA-safe memory for the script.
 	 */
 	err = bus_dmamem_alloc(sc->sc_dmat, PAGE_SIZE, PAGE_SIZE, 0,
-	    &seg, 1, &nseg, BUS_DMA_NOWAIT);
+	    &seg, 1, &nseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (err) {
 		printf(": failed to allocate script memory, err=%d\n", err);
 		return;
@@ -235,7 +234,6 @@ osiop_attach(sc)
 		printf(": failed to load script map, err=%d\n", err);
 		return;
 	}
-	bzero(sc->sc_script, PAGE_SIZE);
 
 	/*
 	 * Copy and sync script
@@ -249,7 +247,7 @@ osiop_attach(sc)
 	 */
 	err = bus_dmamem_alloc(sc->sc_dmat,
 	    sizeof(struct osiop_ds) * OSIOP_NACB, PAGE_SIZE, 0,
-	    &seg, 1, &nseg, BUS_DMA_NOWAIT);
+	    &seg, 1, &nseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (err) {
 		printf(": failed to allocate ds memory, err=%d\n", err);
 		return;
@@ -275,7 +273,6 @@ osiop_attach(sc)
 		printf(": failed to load ds map, err=%d\n", err);
 		return;
 	}
-	bzero(sc->sc_ds, sizeof(struct osiop_ds) * OSIOP_NACB);
 
 	/*
 	 * Allocate (malloc) memory for acb's.
@@ -332,8 +329,16 @@ osiop_attach(sc)
 		TAILQ_INSERT_TAIL(&sc->free_list, acb, chain);
 	}
 
+<<<<<<< HEAD
 	printf(": NCR53C710 rev %d, %dMHz, SCSI ID %d\n",
 	    osiop_read_1(sc, OSIOP_CTEST8) >> 4, sc->sc_clock_freq, sc->sc_id);
+=======
+	mtx_init(&sc->free_list_mtx, IPL_BIO);
+	scsi_iopool_init(&sc->sc_iopool, sc, osiop_io_get, osiop_io_put);
+
+	printf(": NCR53C710 rev %d, %dMHz\n",
+	    osiop_read_1(sc, OSIOP_CTEST8) >> 4, sc->sc_clock_freq);
+>>>>>>> origin/master
 
 	/*
 	 * Initialize all
@@ -345,10 +350,10 @@ osiop_attach(sc)
 	 */
 	sc->sc_link.adapter = &osiop_adapter;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.device = &osiop_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = OSIOP_NTGT;
 	sc->sc_link.adapter_target = sc->sc_id;
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -363,20 +368,44 @@ osiop_attach(sc)
  * default minphys routine for osiop based controllers
  */
 void
-osiop_minphys(bp)
-	struct buf *bp;
+osiop_minphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > OSIOP_MAX_XFER)
 		bp->b_bcount = OSIOP_MAX_XFER;
 	minphys(bp);
+}
+
+void *
+osiop_io_get(void *xsc)
+{
+	struct osiop_softc *sc = xsc;
+	struct osiop_acb *acb;
+
+	mtx_enter(&sc->free_list_mtx);
+	acb = TAILQ_FIRST(&sc->free_list);
+	if (acb != NULL)
+		TAILQ_REMOVE(&sc->free_list, acb, chain);
+	mtx_leave(&sc->free_list_mtx);
+
+	return (acb);
+}
+
+void
+osiop_io_put(void *xsc, void *xio)
+{
+	struct osiop_softc *sc = xsc;
+	struct osiop_acb *acb = xio;
+
+	mtx_enter(&sc->free_list_mtx);
+	TAILQ_INSERT_TAIL(&sc->free_list, acb, chain);
+	mtx_leave(&sc->free_list_mtx);
 }
 
 /*
  * used by specific osiop controller
  *
  */
-int
+void
 osiop_scsicmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -384,10 +413,7 @@ osiop_scsicmd(xs)
 	struct osiop_acb *acb;
 	struct osiop_softc *sc = periph->adapter_softc;
 	int err, s;
-
-	/* XXXX ?? */
-	if (xs->flags & SCSI_DATA_UIO)
-		panic("osiop: scsi data uio requested");
+	int dopoll;
 
 	/* XXXX ?? */
 	if (sc->sc_nexus && (xs->flags & SCSI_POLL))
@@ -397,20 +423,7 @@ osiop_scsicmd(xs)
 		printf("osiop_scsicmd: busy\n");
 #endif
 
-	s = splbio();
-	acb = TAILQ_FIRST(&sc->free_list);
-	if (acb != NULL) {
-		TAILQ_REMOVE(&sc->free_list, acb, chain);
-	}
-	else {
-#ifdef DIAGNOSTIC
-		sc_print_addr(periph);
-		printf("unable to allocate acb\n");
-		panic("osiop_scsipi_request");
-#endif
-		splx(s);
-		return (TRY_AGAIN_LATER);
-	}
+	acb = xs->io;
 
 	acb->flags = 0;
 	acb->status = ACB_S_READY;
@@ -436,9 +449,7 @@ osiop_scsicmd(xs)
 			    sc->sc_dev.dv_xname, err);
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
-			TAILQ_INSERT_TAIL(&sc->free_list, acb, chain);
-			splx(s);
-			return (COMPLETE);
+			return;
 		}
 		bus_dmamap_sync(sc->sc_dmat, acb->datadma,
 		    0, acb->datalen, (acb->xsflags & SCSI_DATA_IN) ?
@@ -451,14 +462,24 @@ osiop_scsicmd(xs)
 	 */
 	timeout_set(&xs->stimeout, osiop_timeout, acb);
 
+	s = splbio();
 	TAILQ_INSERT_TAIL(&sc->ready_list, acb, chain);
+
+	if ((acb->xsflags & SCSI_POLL) || (sc->sc_flags & OSIOP_NODMA))
+		dopoll = 1;
+	else {
+		dopoll = 0;
+		/* start expire timer */
+		timeout_add_msec(&xs->stimeout, xs->timeout);
+	}
 
 	osiop_sched(sc);
 
 	splx(s);
 
-	if ((acb->xsflags & SCSI_POLL) || (sc->sc_flags & OSIOP_NODMA))
+	if (dopoll)
 		osiop_poll(sc, acb);
+<<<<<<< HEAD
 	else
 		/* start expire timer */
 		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
@@ -467,6 +488,8 @@ osiop_scsicmd(xs)
 		return (SUCCESSFULLY_QUEUED);
 	else
 		return (COMPLETE);
+=======
+>>>>>>> origin/master
 }
 
 void
@@ -599,7 +622,7 @@ osiop_scsidone(acb, status)
 
 #ifdef DIAGNOSTIC
 	if (acb == NULL || acb->xs == NULL) {
-		printf("osiop_scsidone: NULL acb or scsi_xfer\n");
+		printf("osiop_scsidone: NULL acb %p or scsi_xfer\n", acb);
 #if defined(OSIOP_DEBUG) && defined(DDB)
 		Debugger();
 #endif
@@ -705,11 +728,6 @@ osiop_scsidone(acb, status)
 			} else {
 				printf("%s: can't find matching acb\n",
 				    sc->sc_dev.dv_xname);
-#ifdef DDB
-#if 0
-				Debugger();
-#endif
-#endif
 			}
 		}
 		OSIOP_TRACE('d', 'n', status, 0);
@@ -719,11 +737,15 @@ osiop_scsidone(acb, status)
 		/* Put it on the free list. */
 FREE:
 		acb->status = ACB_S_FREE;
-		TAILQ_INSERT_TAIL(&sc->free_list, acb, chain);
+#ifdef DIAGNOSTIC
+		acb->xs = NULL;
+#endif
 		sc->sc_tinfo[periph->target].cmds++;
 
+#ifdef DIAGNOSTIC
+		acb->xs = NULL;
+#endif
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 	} else {
 		/* Set up REQUEST_SENSE command */
@@ -760,7 +782,7 @@ FREE:
 		TAILQ_INSERT_HEAD(&sc->ready_list, acb, chain);
 		if (((acb->xsflags & SCSI_POLL) == 0) && ((sc->sc_flags & OSIOP_NODMA) == 0))
 			/* start expire timer */
-			timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
+			timeout_add_msec(&xs->stimeout, xs->timeout);
 	}
 
 	osiop_sched(sc);
@@ -983,11 +1005,6 @@ osiop_start(sc)
 		    osiop_read_1(sc, OSIOP_LCRC),
 		    osiop_read_1(sc, OSIOP_SIEN),
 		    osiop_read_1(sc, OSIOP_DIEN));
-#ifdef DDB
-#if 0
-		Debugger();
-#endif
-#endif
 	}
 #endif
 
@@ -1069,11 +1086,6 @@ osiop_start(sc)
 		printf("ACK! osiop was busy at start: "
 		    "script %p dsa %p active %d\n",
 		    sc->sc_script, acb->ds, sc->sc_active);
-#ifdef DDB
-#if 0
-		Debugger();
-#endif
-#endif
 	}
 #endif
 	if (TAILQ_EMPTY(&sc->nexus_list)) {
@@ -1198,9 +1210,6 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 #if 0
 			printf("ACK! osiop was busy at end: "
 			    "script %p dsa %p\n", &osiop_script, ds);
-#ifdef DDB
-			Debugger();
-#endif
 #endif
 		}
 		if (ds->msgbuf[0] != MSG_CMDCOMPLETE)
@@ -1361,9 +1370,6 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 #if 0
 			osiop_write_1(sc, OSIOP_DCNTL,
 			    osiop_read_1(sc, OSIOP_DCNTL) | OSIOP_DCNTL_STD);
-#endif
-#ifdef DDB
-			Debugger();
 #endif
 			return (0);
 		}
@@ -1625,9 +1631,6 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 			    sc->sc_dev.dv_xname);
 #if 0
 			osiop_dump(sc);
-#ifdef DDB
-			Debugger();
-#endif
 #endif
 #endif
 			osiop_write_1(sc, OSIOP_DCNTL,
@@ -1698,7 +1701,7 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 	 */
 	printf("osiop_chkintr: target %x ds %p\n", target, ds);
 	printf("scripts %lx ds %lx dsp %x dcmd %x\n", scraddr,
-	    sc->sc_dsdma->dm_segs[0].ds_addr + acb->dsoffset,
+	    acb ? sc->sc_dsdma->dm_segs[0].ds_addr + acb->dsoffset : 0,
 	    osiop_read_4(sc, OSIOP_DSP),
 	    osiop_read_4(sc, OSIOP_DBC));
 	printf("osiop_chkintr: istat %x dstat %x sstat0 %x "
@@ -1706,14 +1709,19 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 	    istat, dstat, sstat0, intcode,
 	    osiop_read_4(sc, OSIOP_DSA),
 	    osiop_read_1(sc, OSIOP_SBCL),
-	    ds->stat[0], ds->msgbuf[0], ds->msgbuf[1],
+	    ds ? ds->stat[0] : 0,
+	    ds ? ds->msgbuf[0] : 0,
+	    ds ? ds->msgbuf[1] : 0,
 	    osiop_read_1(sc, OSIOP_SFBR));
 #ifdef OSIOP_DEBUG
 	if (osiop_debug & DEBUG_DMA)
 		panic("osiop_chkintr: **** temp ****");
+<<<<<<< HEAD
 #ifdef DDB
 	Debugger();
 #endif
+=======
+>>>>>>> origin/master
 #endif
 	osiop_reset(sc);	/* hard reset */
 	*status = SCSI_OSIOP_NOSTATUS;
@@ -2043,6 +2051,7 @@ osiop_dump(sc)
 #endif
 	printf("%s@%p istat %02x\n",
 	    sc->sc_dev.dv_xname, sc, osiop_read_1(sc, OSIOP_ISTAT));
+	mtx_enter(&sc->free_list_mtx);
 	if ((acb = TAILQ_FIRST(&sc->free_list)) != NULL) {
 		printf("Free list:\n");
 		while (acb) {
@@ -2050,6 +2059,7 @@ osiop_dump(sc)
 			acb = TAILQ_NEXT(acb, chain);
 		}
 	}
+	mtx_leave(&sc->free_list_mtx);
 	if ((acb = TAILQ_FIRST(&sc->ready_list)) != NULL) {
 		printf("Ready list:\n");
 		while (acb) {

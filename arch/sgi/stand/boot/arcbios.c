@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.3 2004/09/16 18:54:48 pefo Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.13 2010/09/14 14:28:49 marco Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -27,41 +27,31 @@
 
 #include <sys/param.h>
 #include <lib/libkern/libkern.h>
-#include <machine/autoconf.h>
+
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
+#include <machine/autoconf.h>
+#include <machine/cpu.h>
+#include <machine/mnode.h>
+
 #include <stand.h>
 
-#define	USE_SGI_PARTITIONS	1
+int	bios_is_32bit;
 
-void bios_configure_memory(void);
-int bios_get_system_type(void);
-const char *bios_get_path_component(const char *, char *, int *);
+u_int	kl_n_shift = 32;
+int	arcbios_init(void);
+const char *boot_get_path_component(const char *, char *, int *);
+const char *boot_getnr(const char *, int *);
 
-arc_dsp_stat_t	displayinfo;		/* Save area for display status info. */
-
-static struct systypes {
-	char *sys_vend;		/* Vendor ID if name is ambigous */
-	char *sys_name;		/* May be left NULL if name is sufficient */
-	int  sys_type;
+static const struct systypes {
+	char *sys_name;
+	int  sys_ip;
 } sys_types[] = {
-    { NULL,		"PICA-61",			ACER_PICA_61 },
-    { NULL,		"NEC-R94",			ACER_PICA_61 },
-    { NULL,		"DESKTECH-TYNE",		DESKSTATION_TYNE },
-    { NULL,		"DESKTECH-ARCStation I",	DESKSTATION_RPC44 },
-    { NULL,		"Microsoft-Jazz",		MAGNUM },
-    { NULL,		"RM200PCI",			SNI_RM200 },
-    { NULL,		"SGI-IP17",			SGI_CRIMSON },
-    { NULL,		"SGI-IP19",			SGI_ONYX },
-    { NULL,		"SGI-IP20",			SGI_INDIGO },
-    { NULL,		"SGI-IP21",			SGI_POWER },
-    { NULL,		"SGI-IP22",			SGI_INDY },
-    { NULL,		"SGI-IP25",			SGI_POWER10 },
-    { NULL,		"SGI-IP26",			SGI_POWERI },
-    { NULL,		"SGI-IP32",			SGI_O2 },
+    { "SGI-IP30", 30 },
+    { "SGI-IP32", 32 }
 };
 
-#define KNOWNSYSTEMS (sizeof(sys_types) / sizeof(struct systypes))
+#define KNOWNSYSTEMS (nitems(sys_types))
 
 /*
  *	ARC Bios trampoline code.
@@ -74,8 +64,16 @@ __asm__("\n"			\
 "	.set	noreorder\n"	\
 "	.globl	" #Name "\n"	\
 #Name":\n"			\
-"	lw	$2, 0xffffffff80001020\n"\
-"	lw	$2," #Offset "($2)\n"\
+"	lw	$2, bios_is_32bit\n"\
+"	beqz	$2, 1f\n"	\
+"	nop\n"			\
+"       lw      $2, 0xffffffff80001020\n"\
+"       lw      $2," #Offset "($2)\n"\
+"	jr	$2\n"		\
+"	nop\n"			\
+"1:\n"				\
+"       ld      $2, 0xffffffff80001040\n"\
+"	ld	$2, 2*" #Offset "($2)\n"\
 "	jr	$2\n"		\
 "	nop\n"			\
 "	.end	" #Name "\n"	);
@@ -126,7 +124,7 @@ int
 getchar()
 {
 	char buf[4];
-	int  cnt;
+	long cnt;
 
 	if (Bios_Read(0, &buf[0], 1, &cnt) != 0)
 		return(-1);
@@ -138,7 +136,7 @@ putchar(c)
 char c;
 {
 	char buf[4];
-	int  cnt;
+	long cnt;
 
 	if (c == '\n') {
 		buf[0] = '\r';
@@ -164,20 +162,32 @@ char *s;
 }
 
 /*
- * Find out system type.
+ * Identify ARCBios type.
  */
 int
-bios_get_system_type()
+arcbios_init()
 {
-	arc_config_t	*cf;
-	arc_sid_t	*sid;
-	int		i;
+	arc_config_t *cf;
+	arc_sid_t *sid;
+	char *sysid = NULL;
+	int sysid_len;
+	int i;
 
-	if ((ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC) &&
-	    (ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC_BUG)) {
-		return(-1);	/* This is not an ARC system */
+	/*
+	 * Figure out if this is an ARCBios machine and if it is, see if we're
+	 * dealing with a 32 or 64 bit version.
+	 */
+	if ((ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC) ||
+	    (ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
+		bios_is_32bit = 1;
+	} else if ((ArcBiosBase64->magic == ARC_PARAM_BLK_MAGIC) ||
+	    (ArcBiosBase64->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
+		bios_is_32bit = 0;
 	}
 
+	/*
+	 * Minimal system identification.
+	 */
 	sid = (arc_sid_t *)Bios_GetSystemId();
 	cf = (arc_config_t *)Bios_GetChild(NULL);
 	if (cf) {
@@ -189,38 +199,37 @@ bios_get_system_type()
 				continue;
 			return (sys_types[i].sys_type);	/* Found it. */
 		}
+
+		if (sysid_len > 0 && sysid != NULL) {
+			sysid_len--;
+			for (i = 0; i < KNOWNSYSTEMS; i++) {
+				if (strlen(sys_types[i].sys_name) != sysid_len)
+					continue;
+				if (strncmp(sys_types[i].sys_name, sysid,
+				    sysid_len) != 0)
+					continue;
+				return sys_types[i].sys_ip;	/* Found it. */
+			}
+		}
+	} else {
+#ifdef __LP64__
+		if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
+			/*
+			 * If we find a kldir assume IP27. Boot blocks
+			 * do not need to tell IP27 and IP35 apart.
+			 */
+			return 27;
+		}
+#endif
 	}
 
-	bios_putstring("UNIDENTIFIED SYSTEM `");
-	if (cf)
-		bios_putstring((char *)cf->id);
-	else
-		bios_putstring("????????");
-	bios_putstring("' VENDOR `");
-	sid->vendor[8] = 0;
-	bios_putstring(sid->vendor);
-	bios_putstring("'. Please contact OpenBSD (www.openbsd.org).\n");
-	bios_putstring("Reset system to restart!\n");
-	while(1);
-}
-
-/*
- * Return geometry of the display. Used by pccons.c to set up the
- * display configuration.
- */
-void
-bios_display_info(xpos, ypos, xsize, ysize)
-    int	*xpos;
-    int	*ypos;
-    int *xsize;
-    int *ysize;
-{
-#ifdef __arc__
-	*xpos = displayinfo.CursorXPosition;
-	*ypos = displayinfo.CursorYPosition;
-	*xsize = displayinfo.CursorMaxXPosition;
-	*ysize = displayinfo.CursorMaxYPosition;
-#endif
+	printf("UNRECOGNIZED SYSTEM '%s' VENDOR '%s' PRODUCT '%s'\n",
+	    cf == NULL || sysid == NULL ? "(null)" : sysid,
+	    sid->vendor, sid->prodid);
+	printf("Halting system!\n");
+	Bios_Halt();
+	printf("Halting failed, use manual reset!\n");
+	for (;;) ;
 }
 
 
@@ -243,24 +252,43 @@ devopen(struct open_file *f, const char *fname, char **file)
 	/*
 	 *  Scan the component list and find device and partition.
 	 */
-	while ((ncp = bios_get_path_component(cp, namebuf, &i)) != NULL) {
-		if ((strcmp(namebuf, "partition") == 0) ||
-		    (strcmp(namebuf, "partition") == 0)) {
-			partition = i;
-			if (USE_SGI_PARTITIONS)
-				ecp = ncp;
-		} else
+	if (strncmp(cp, "dksc(", 5) == 0) {
+		strncpy(devname, "scsi", sizeof(devname));
+		cp += 5;
+		cp = boot_getnr(cp, &i);
+		/* i = controller number */
+		if (*cp++ == ',') {
+			cp = boot_getnr(cp, &i);
+			/* i = target id */
+			if (*cp++ == ',') {
+
+				memcpy(namebuf, fname, cp - fname);
+				namebuf[cp - fname] = '\0';
+				strlcat(namebuf, "0)", sizeof namebuf);
+
+				cp = boot_getnr(cp, &i);
+				partition = i;
+				cp++;	/* skip final ) */
+			}
+		}
+	} else {
+		ncp = boot_get_path_component(cp, namebuf, &i);
+		while (ncp != NULL) {
+			if (strcmp(namebuf, "partition") == 0)
+				partition = i;
 			ecp = ncp;
 
-		/* XXX do this with a table if more devs are added */
-		if (strcmp(namebuf, "scsi") == 0)
-			strncpy(devname, namebuf, sizeof(devname)); 
+			/* XXX Do this with a table if more devs are added. */
+			if (strcmp(namebuf, "scsi") == 0)
+				strncpy(devname, namebuf, sizeof(devname)); 
 
-		cp = ncp;
+			cp = ncp;
+			ncp = boot_get_path_component(cp, namebuf, &i);
+		}
+
+		memcpy(namebuf, fname, ecp - fname);
+		namebuf[ecp - fname] = '\0';
 	}
-
-	memcpy(namebuf, fname, ecp - fname);
-	namebuf[ecp - fname] = '\0';
 
 	/*
 	 *  Dig out the driver.
@@ -268,7 +296,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	dp = devsw;
 	n = ndevs;
 	while(n--) {
-		if (strcmp (devname, dp->dv_name) == 0) {
+		if (strcmp(devname, dp->dv_name) == 0) {
 			rc = (dp->dv_open)(f, namebuf, partition, 0);
 			if (!rc) {
 				f->f_dev = dp;
@@ -283,7 +311,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 }
 
 const char *
-bios_get_path_component(const char *p, char *comp, int *no)
+boot_get_path_component(const char *p, char *comp, int *no)
 {
 	while (*p && *p != '(') {
 		*comp++ = *p++;
@@ -302,4 +330,13 @@ bios_get_path_component(const char *p, char *comp, int *no)
 			return NULL;
 	}
 	return ++p;
+}
+
+const char *
+boot_getnr(const char *p, int *no)
+{
+	*no = 0;
+	while (*p >= '0' && *p <= '9')
+		*no = *no * 10 + *p++ - '0';
+	return p;
 }

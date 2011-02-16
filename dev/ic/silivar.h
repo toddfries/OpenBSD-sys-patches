@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: silivar.h,v 1.4 2007/03/31 03:59:53 dlg Exp $ */
+=======
+/*	$OpenBSD: silivar.h,v 1.7 2010/08/05 20:21:36 kettenis Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -15,8 +19,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#define sizeofa(_a)	(sizeof(_a) / sizeof((_a)[0]))
 
 struct sili_port;
 
@@ -42,5 +44,7 @@ struct sili_softc {
 
 int	sili_attach(struct sili_softc *);
 int	sili_detach(struct sili_softc *, int);
+
+void	sili_resume(struct sili_softc *);
 
 int	sili_intr(void *);

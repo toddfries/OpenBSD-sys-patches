@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.46 2006/07/09 19:45:01 miod Exp $
+#	$OpenBSD: GENERIC,v 1.51 2010/11/19 20:52:39 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -34,10 +34,6 @@ option		USELEDS		# make the lights twinkle
 				# for SGC devices
 
 option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
-
-option		COMPAT_HPUX	# HP-UX binary compatibility
-option		COMPAT_M68K4K	# compat. with NetBSD/m68k4k binaries
-option		COMPAT_SUNOS	# SunOS/sun3 binaries
 
 # Verbose descriptions of unconfigured DIO devices
 # (Warning: this compiles in a large string table)
@@ -129,7 +125,6 @@ sd*		at scsibus?			# SCSI disks
 st*		at scsibus?			# SCSI tapes
 cd*		at scsibus?			# SCSI CD-ROMs
 ch*		at scsibus?			# SCSI changer devices
-ss*		at scsibus?			# SCSI scanners
 safte*		at scsibus?			# SCSI AF-TE
 ses*		at scsibus?			# SCSI enclosure services
 uk*		at scsibus?			# unknown SCSI devices
@@ -137,4 +132,5 @@ uk*		at scsibus?			# unknown SCSI devices
 # ISA devices
 #isa*		at isabr?
 
-pseudo-device	wsmux	2	# mouse and keyboard multiplexor
+pseudo-device	hotplug		1	# devices hot plugging
+pseudo-device	wsmux		2	# mouse and keyboard multiplexor

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: hmevar.h,v 1.11 2004/09/28 00:21:23 brad Exp $	*/
+=======
+/*	$OpenBSD: hmevar.h,v 1.14 2009/07/16 07:18:47 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -32,6 +36,7 @@ struct hme_softc {
 	int	sc_node;		/* which sbus node */
 
 	mii_data_t	sc_mii;		/* mii bus */
+	struct timeout	sc_tick;	/* tick timeout */
 
 	struct	arpcom sc_arpcom;	/* ethernet common */
 
@@ -48,8 +53,6 @@ struct hme_softc {
 	int	sc_rev;			/* Card revision */
 
 	u_int32_t	sc_flags;	/* status flags	*/
-
-	short		sc_if_flags;
 
 	/*
 	 * RX/TX ring buffers, descriptors, and counters

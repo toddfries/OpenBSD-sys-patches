@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cryptosoft.c,v 1.45 2005/05/25 05:47:53 markus Exp $	*/
+=======
+/*	$OpenBSD: cryptosoft.c,v 1.63 2011/01/11 23:00:21 markus Exp $	*/
+>>>>>>> origin/master
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -25,20 +29,30 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/sysctl.h>
 #include <sys/errno.h>
 #include <dev/rndvar.h>
 #include <crypto/md5.h>
 #include <crypto/sha1.h>
 #include <crypto/rmd160.h>
 #include <crypto/cast.h>
-#include <crypto/skipjack.h>
 #include <crypto/blf.h>
 #include <crypto/cryptodev.h>
 #include <crypto/cryptosoft.h>
 #include <crypto/xform.h>
 
+<<<<<<< HEAD
 u_int8_t hmac_ipad_buffer[64] = {
+=======
+const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN] = {
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+>>>>>>> origin/master
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
@@ -49,7 +63,19 @@ u_int8_t hmac_ipad_buffer[64] = {
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36
 };
 
+<<<<<<< HEAD
 u_int8_t hmac_opad_buffer[64] = {
+=======
+const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN] = {
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+>>>>>>> origin/master
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
@@ -66,11 +92,19 @@ u_int32_t swcr_sesnum = 0;
 int32_t swcr_id = -1;
 
 #define COPYBACK(x, a, b, c, d) \
-	(x) == CRYPTO_BUF_MBUF ? m_copyback((struct mbuf *)a,b,c,d) \
-	: cuio_copyback((struct uio *)a,b,c,d)
+	do { \
+		if ((x) == CRYPTO_BUF_MBUF) \
+			m_copyback((struct mbuf *)a,b,c,d,M_NOWAIT); \
+		else \
+			cuio_copyback((struct uio *)a,b,c,d); \
+	} while (0)
 #define COPYDATA(x, a, b, c, d) \
-	(x) == CRYPTO_BUF_MBUF ? m_copydata((struct mbuf *)a,b,c,d) \
-	: cuio_copydata((struct uio *)a,b,c,d)
+	do { \
+		if ((x) == CRYPTO_BUF_MBUF) \
+			m_copydata((struct mbuf *)a,b,c,d); \
+		else \
+			cuio_copydata((struct uio *)a,b,c,d); \
+	} while (0)
 
 /*
  * Apply a symmetric encryption/decryption algorithm.
@@ -80,7 +114,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
     int outtype)
 {
 	unsigned char iv[EALG_MAX_BLOCK_LEN], blk[EALG_MAX_BLOCK_LEN], *idat;
-	unsigned char *ivp, piv[EALG_MAX_BLOCK_LEN];
+	unsigned char *ivp, *nivp, iv2[EALG_MAX_BLOCK_LEN];
 	struct enc_xform *exf;
 	int i, k, j, blks, ind, count, ivlen;
 	struct mbuf *m = NULL;
@@ -105,12 +139,11 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 		if (crd->crd_flags & CRD_F_IV_EXPLICIT)
 			bcopy(crd->crd_iv, iv, ivlen);
 		else
-			arc4random_bytes(iv, ivlen);
+			arc4random_buf(iv, ivlen);
 
 		/* Do we need to write the IV */
-		if (!(crd->crd_flags & CRD_F_IV_PRESENT)) {
+		if (!(crd->crd_flags & CRD_F_IV_PRESENT))
 			COPYBACK(outtype, buf, crd->crd_inject, ivlen, iv);
-		}
 
 	} else {	/* Decryption */
 			/* IV explicitly provided ? */
@@ -124,6 +157,10 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 
 	ivp = iv;
 
+	/*
+	 * xforms that provide a reinit method perform all IV
+	 * handling themselves.
+	 */
 	if (exf->reinit)
 		exf->reinit(sw->sw_kschedule, iv);
 
@@ -145,7 +182,13 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 
 				/* Actual encryption/decryption */
 				if (exf->reinit) {
-					exf->encrypt(sw->sw_kschedule, blk);
+					if (crd->crd_flags & CRD_F_ENCRYPT) {
+						exf->encrypt(sw->sw_kschedule,
+						    blk);
+					} else {
+						exf->decrypt(sw->sw_kschedule,
+						    blk);
+					}
 				} else if (crd->crd_flags & CRD_F_ENCRYPT) {
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
@@ -164,25 +207,19 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, blk);
 
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
-				m_copyback(m, k, blks, blk);
+				m_copyback(m, k, blks, blk, M_NOWAIT);
 
 				/* Advance pointer */
 				m = m_getptr(m, k + blks, &k);
@@ -217,7 +254,13 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 
 			while (m->m_len >= k + blks && i > 0) {
 				if (exf->reinit) {
-					exf->encrypt(sw->sw_kschedule, idat);
+					if (crd->crd_flags & CRD_F_ENCRYPT) {
+						exf->encrypt(sw->sw_kschedule,
+						    idat);
+					} else {
+						exf->decrypt(sw->sw_kschedule,
+						    idat);
+					}
 				} else if (crd->crd_flags & CRD_F_ENCRYPT) {
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
@@ -230,21 +273,15 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, idat);
 
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
@@ -268,11 +305,17 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 			 */
 			if (uio->uio_iov[ind].iov_len < k + blks &&
 			    uio->uio_iov[ind].iov_len != k) {
-				cuio_copydata(uio, k, blks, blk);
+				cuio_copydata(uio, count, blks, blk);
 
 				/* Actual encryption/decryption */
 				if (exf->reinit) {
-					exf->encrypt(sw->sw_kschedule, blk);
+					if (crd->crd_flags & CRD_F_ENCRYPT) {
+						exf->encrypt(sw->sw_kschedule,
+						    blk);
+					} else {
+						exf->decrypt(sw->sw_kschedule,
+						    blk);
+					}
 				} else if (crd->crd_flags & CRD_F_ENCRYPT) {
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
@@ -291,25 +334,19 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, blk);
 
 					/* XOR with previous block */
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
-				cuio_copyback(uio, k, blks, blk);
+				cuio_copyback(uio, count, blks, blk);
 
 				count += blks;
 
@@ -335,7 +372,13 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 			while (uio->uio_iov[ind].iov_len >= k + blks &&
 			    i > 0) {
 				if (exf->reinit) {
-					exf->encrypt(sw->sw_kschedule, idat);
+					if (crd->crd_flags & CRD_F_ENCRYPT) {
+						exf->encrypt(sw->sw_kschedule,
+						    idat);
+					} else {
+						exf->decrypt(sw->sw_kschedule,
+						    idat);
+					}
 				} else if (crd->crd_flags & CRD_F_ENCRYPT) {
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
@@ -348,27 +391,34 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(sw->sw_kschedule, idat);
 
 					/* XOR with previous block/IV */
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
-
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
 				count += blks;
 				k += blks;
 				i -= blks;
+			}
+
+			/*
+			 * Advance to the next iov if the end of the current iov
+			 * is aligned with the end of a cipher block.
+			 * Note that the code is equivalent to calling:
+			 *	ind = cuio_getptr(uio, count, &k);
+			 */
+			if (i > 0 && k == uio->uio_iov[ind].iov_len) {
+				k = 0;
+				ind++;
+				if (ind >= uio->uio_iovcnt)
+					return (EINVAL);
 			}
 		}
 	}
@@ -446,6 +496,148 @@ swcr_authcompute(struct cryptop *crp, struct cryptodesc *crd,
 		bcopy(aalg, crp->crp_mac, axf->authsize);
 
 	return 0;
+}
+
+/*
+ * Apply a combined encryption-authentication transformation
+ */
+int
+swcr_combined(struct cryptop *crp)
+{
+	uint32_t blkbuf[howmany(EALG_MAX_BLOCK_LEN, sizeof(uint32_t))];
+	u_char *blk = (u_char *)blkbuf;
+	u_char aalg[AALG_MAX_RESULT_LEN];
+	u_char iv[EALG_MAX_BLOCK_LEN];
+	union authctx ctx;
+	struct cryptodesc *crd, *crda = NULL, *crde = NULL;
+	struct swcr_data *sw, *swa, *swe;
+	struct auth_hash *axf = NULL;
+	struct enc_xform *exf = NULL;
+	struct mbuf *m = NULL;
+	struct uio *uio = NULL;
+	caddr_t buf = (caddr_t)crp->crp_buf;
+	uint32_t *blkp;
+	int i, blksz, ivlen, outtype, len;
+
+	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
+		for (sw = swcr_sessions[crp->crp_sid & 0xffffffff];
+		     sw && sw->sw_alg != crd->crd_alg;
+		     sw = sw->sw_next)
+			;
+		if (sw == NULL)
+			return (EINVAL);
+
+		switch (sw->sw_alg) {
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
+			swe = sw;
+			crde = crd;
+			exf = swe->sw_exf;
+			ivlen = exf->ivsize;
+			break;
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			swa = sw;
+			crda = crd;
+			axf = swa->sw_axf;
+			if (swa->sw_ictx == 0)
+				return (EINVAL);
+			bcopy(swa->sw_ictx, &ctx, axf->ctxsize);
+			blksz = axf->blocksize;
+			break;
+		default:
+			return (EINVAL);
+		}
+	}
+	if (crde == NULL || crda == NULL)
+		return (EINVAL);
+
+	if (crp->crp_flags & CRYPTO_F_IMBUF) {
+		outtype = CRYPTO_BUF_MBUF;
+		m = (struct mbuf *)buf;
+	} else {
+		outtype = CRYPTO_BUF_IOV;
+		uio = (struct uio *)buf;
+	}
+
+	/* Initialize the IV */
+	if (crde->crd_flags & CRD_F_ENCRYPT) {
+		/* IV explicitly provided ? */
+		if (crde->crd_flags & CRD_F_IV_EXPLICIT)
+			bcopy(crde->crd_iv, iv, ivlen);
+		else
+			arc4random_buf(iv, ivlen);
+
+		/* Do we need to write the IV */
+		if (!(crde->crd_flags & CRD_F_IV_PRESENT))
+			COPYBACK(outtype, buf, crde->crd_inject, ivlen, iv);
+
+	} else {	/* Decryption */
+			/* IV explicitly provided ? */
+		if (crde->crd_flags & CRD_F_IV_EXPLICIT)
+			bcopy(crde->crd_iv, iv, ivlen);
+		else {
+			/* Get IV off buf */
+			COPYDATA(outtype, buf, crde->crd_inject, ivlen, iv);
+		}
+	}
+
+	/* Supply MAC with IV */
+	if (axf->Reinit)
+		axf->Reinit(&ctx, iv, ivlen);
+
+	/* Supply MAC with AAD */
+	for (i = 0; i < crda->crd_len; i += blksz) {
+		len = MIN(crda->crd_len - i, blksz);
+		COPYDATA(outtype, buf, crda->crd_skip + i, len, blk);
+		axf->Update(&ctx, blk, len);
+	}
+
+	if (exf->reinit)
+		exf->reinit(swe->sw_kschedule, iv);
+
+	/* Do encryption/decryption with MAC */
+	for (i = 0; i < crde->crd_len; i += blksz) {
+		len = MIN(crde->crd_len - i, blksz);
+		if (len < blksz)
+			bzero(blk, blksz);
+		COPYDATA(outtype, buf, crde->crd_skip + i, len, blk);
+		if (crde->crd_flags & CRD_F_ENCRYPT) {
+			exf->encrypt(swe->sw_kschedule, blk);
+			axf->Update(&ctx, blk, len);
+		} else {
+			axf->Update(&ctx, blk, len);
+			exf->decrypt(swe->sw_kschedule, blk);
+		}
+		COPYBACK(outtype, buf, crde->crd_skip + i, len, blk);
+	}
+
+	/* Do any required special finalization */
+	switch (crda->crd_alg) {
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			/* length block */
+			bzero(blk, blksz);
+			blkp = (uint32_t *)blk + 1;
+			*blkp = htobe32(crda->crd_len * 8);
+			blkp = (uint32_t *)blk + 3;
+			*blkp = htobe32(crde->crd_len * 8);
+			axf->Update(&ctx, blk, blksz);
+			break;
+	}
+
+	/* Finalize MAC */
+	axf->Final(aalg, &ctx);
+
+	/* Inject the authentication data */
+	if (outtype == CRYPTO_BUF_MBUF)
+		COPYBACK(outtype, buf, crda->crd_inject, axf->authsize, aalg);
+	else
+		bcopy(aalg, crp->crp_mac, axf->authsize);
+
+	return (0);
 }
 
 /*
@@ -601,15 +793,22 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 		case CRYPTO_CAST_CBC:
 			txf = &enc_xform_cast5;
 			goto enccommon;
-		case CRYPTO_SKIPJACK_CBC:
-			txf = &enc_xform_skipjack;
-			goto enccommon;
 		case CRYPTO_RIJNDAEL128_CBC:
 			txf = &enc_xform_rijndael128;
 			goto enccommon;
 		case CRYPTO_AES_CTR:
 			txf = &enc_xform_aes_ctr;
 			goto enccommon;
+		case CRYPTO_AES_XTS:
+			txf = &enc_xform_aes_xts;
+			goto enccommon;
+		case CRYPTO_AES_GCM_16:
+			txf = &enc_xform_aes_gcm;
+			goto enccommon;
+		case CRYPTO_AES_GMAC:
+			txf = &enc_xform_aes_gmac;
+			(*swd)->sw_exf = txf;
+			break;
 		case CRYPTO_NULL:
 			txf = &enc_xform_null;
 			goto enccommon;
@@ -632,13 +831,13 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf = &auth_hash_hmac_ripemd_160_96;
 			goto authcommon;
 		case CRYPTO_SHA2_256_HMAC:
-			axf = &auth_hash_hmac_sha2_256_96;
+			axf = &auth_hash_hmac_sha2_256_128;
 			goto authcommon;
 		case CRYPTO_SHA2_384_HMAC:
-			axf = &auth_hash_hmac_sha2_384_96;
+			axf = &auth_hash_hmac_sha2_384_192;
 			goto authcommon;
 		case CRYPTO_SHA2_512_HMAC:
-			axf = &auth_hash_hmac_sha2_512_96;
+			axf = &auth_hash_hmac_sha2_512_256;
 		authcommon:
 			(*swd)->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
 			    M_NOWAIT);
@@ -661,7 +860,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf->Update((*swd)->sw_ictx, cri->cri_key,
 			    cri->cri_klen / 8);
 			axf->Update((*swd)->sw_ictx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (cri->cri_klen / 8));
+			    axf->blocksize - (cri->cri_klen / 8));
 
 			for (k = 0; k < cri->cri_klen / 8; k++)
 				cri->cri_key[k] ^= (HMAC_IPAD_VAL ^ HMAC_OPAD_VAL);
@@ -670,7 +869,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf->Update((*swd)->sw_octx, cri->cri_key,
 			    cri->cri_klen / 8);
 			axf->Update((*swd)->sw_octx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (cri->cri_klen / 8));
+			    axf->blocksize - (cri->cri_klen / 8));
 
 			for (k = 0; k < cri->cri_klen / 8; k++)
 				cri->cri_key[k] ^= HMAC_OPAD_VAL;
@@ -726,6 +925,29 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			(*swd)->sw_axf = axf;
 			break;
 
+		case CRYPTO_AES_128_GMAC:
+			axf = &auth_hash_gmac_aes_128;
+			goto auth4common;
+
+		case CRYPTO_AES_192_GMAC:
+			axf = &auth_hash_gmac_aes_192;
+			goto auth4common;
+
+		case CRYPTO_AES_256_GMAC:
+			axf = &auth_hash_gmac_aes_256;
+		auth4common:
+			(*swd)->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
+			    M_NOWAIT);
+			if ((*swd)->sw_ictx == NULL) {
+				swcr_freesession(i);
+				return ENOBUFS;
+			}
+			axf->Init((*swd)->sw_ictx);
+			axf->Setkey((*swd)->sw_ictx, cri->cri_key,
+			    cri->cri_klen / 8);
+			(*swd)->sw_axf = axf;
+			break;
+
 		case CRYPTO_DEFLATE_COMP:
 			cxf = &comp_algo_deflate;
 			(*swd)->sw_cxf = cxf;
@@ -769,9 +991,11 @@ swcr_freesession(u_int64_t tid)
 		case CRYPTO_3DES_CBC:
 		case CRYPTO_BLF_CBC:
 		case CRYPTO_CAST_CBC:
-		case CRYPTO_SKIPJACK_CBC:
 		case CRYPTO_RIJNDAEL128_CBC:
 		case CRYPTO_AES_CTR:
+		case CRYPTO_AES_XTS:
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
 		case CRYPTO_NULL:
 			txf = swd->sw_exf;
 
@@ -788,11 +1012,11 @@ swcr_freesession(u_int64_t tid)
 			axf = swd->sw_axf;
 
 			if (swd->sw_ictx) {
-				bzero(swd->sw_ictx, axf->ctxsize);
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
 			}
 			if (swd->sw_octx) {
-				bzero(swd->sw_octx, axf->ctxsize);
+				explicit_bzero(swd->sw_octx, axf->ctxsize);
 				free(swd->sw_octx, M_CRYPTO_DATA);
 			}
 			break;
@@ -802,21 +1026,26 @@ swcr_freesession(u_int64_t tid)
 			axf = swd->sw_axf;
 
 			if (swd->sw_ictx) {
-				bzero(swd->sw_ictx, axf->ctxsize);
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
 			}
 			if (swd->sw_octx) {
-				bzero(swd->sw_octx, swd->sw_klen);
+				explicit_bzero(swd->sw_octx, swd->sw_klen);
 				free(swd->sw_octx, M_CRYPTO_DATA);
 			}
 			break;
 
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
 		case CRYPTO_MD5:
 		case CRYPTO_SHA1:
 			axf = swd->sw_axf;
 
-			if (swd->sw_ictx)
+			if (swd->sw_ictx) {
+				explicit_bzero(swd->sw_ictx, axf->ctxsize);
 				free(swd->sw_ictx, M_CRYPTO_DATA);
+			}
 			break;
 		}
 
@@ -886,9 +1115,9 @@ swcr_process(struct cryptop *crp)
 		case CRYPTO_3DES_CBC:
 		case CRYPTO_BLF_CBC:
 		case CRYPTO_CAST_CBC:
-		case CRYPTO_SKIPJACK_CBC:
 		case CRYPTO_RIJNDAEL128_CBC:
 		case CRYPTO_AES_CTR:
+		case CRYPTO_AES_XTS:
 			if ((crp->crp_etype = swcr_encdec(crd, sw,
 			    crp->crp_buf, type)) != 0)
 				goto done;
@@ -907,6 +1136,14 @@ swcr_process(struct cryptop *crp)
 			    crp->crp_buf, type)) != 0)
 				goto done;
 			break;
+
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			crp->crp_etype = swcr_combined(crp);
+			goto done;
 
 		case CRYPTO_DEFLATE_COMP:
 			if ((crp->crp_etype = swcr_compdec(crd, sw,
@@ -950,7 +1187,6 @@ swcr_init(void)
 	algs[CRYPTO_3DES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_BLF_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_CAST_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
-	algs[CRYPTO_SKIPJACK_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_MD5_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_SHA1_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_RIPEMD160_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
@@ -960,11 +1196,17 @@ swcr_init(void)
 	algs[CRYPTO_SHA1] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_RIJNDAEL128_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_AES_CTR] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_XTS] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_GCM_16] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_DEFLATE_COMP] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_NULL] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_SHA2_256_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_SHA2_384_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_SHA2_512_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_128_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_192_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_AES_256_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 
 	crypto_register(swcr_id, algs, swcr_newsession,
 	    swcr_freesession, swcr_process);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_trace.c,v 1.3 2006/11/04 00:01:24 mickey Exp $	*/
+=======
+/*	$OpenBSD: db_trace.c,v 1.5 2008/06/22 21:02:11 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_trace.c,v 1.19 2006/01/21 22:10:59 uwe Exp $	*/
 
 /*-
@@ -80,6 +84,11 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 {
 	db_addr_t callpc, frame, lastframe;
 	uint32_t vbr;
+
+	if (have_addr) {
+		(*print)("sh trace requires a trap frame... giving up\n");
+		return;
+	}
 
 	__asm volatile("stc vbr, %0" : "=r"(vbr));
 

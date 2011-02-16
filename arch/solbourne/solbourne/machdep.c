@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: machdep.c,v 1.1 2005/04/19 21:30:18 miod Exp $	*/
+=======
+/*	$OpenBSD: machdep.c,v 1.16 2010/07/02 19:57:14 tedu Exp $	*/
+>>>>>>> origin/master
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -58,14 +62,11 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <dev/rndvar.h>
 
@@ -83,8 +84,6 @@
 #include <sparc/sparc/asm.h>
 #include <sparc/sparc/cache.h>
 #include <sparc/sparc/cpuvar.h>
-
-#include <uvm/uvm.h>
 
 #include "auxreg.h"
 
@@ -131,7 +130,6 @@ int   safepri = 0;
 vaddr_t dvma_base, dvma_end;
 struct extent *dvmamap_extent;
 
-caddr_t allocsys(caddr_t);
 void	dumpsys(void);
 static int kap_maskcheck(void);
 
@@ -141,10 +139,13 @@ static int kap_maskcheck(void);
 void
 cpu_startup()
 {
+<<<<<<< HEAD
 	unsigned i;
 	caddr_t v;
 	int sz;
 	int base, residual;
+=======
+>>>>>>> origin/master
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -177,6 +178,7 @@ cpu_startup()
 	 */
 	printf(version);
 	/*identifycpu();*/
+<<<<<<< HEAD
 	printf("real mem = %d\n", ctob(physmem));
 
 	/*
@@ -237,6 +239,10 @@ cpu_startup()
 		}
 	}
 	pmap_update(pmap_kernel());
+=======
+	printf("real mem = %d (%dMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
+>>>>>>> origin/master
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -273,9 +279,14 @@ cpu_startup()
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
 #endif
+<<<<<<< HEAD
 	printf("avail mem = %ld\n", ptoa(uvmexp.free));
 	printf("using %d buffers containing %d bytes of memory\n",
 		nbuf, bufpages * PAGE_SIZE);
+=======
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
+>>>>>>> origin/master
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -287,6 +298,7 @@ cpu_startup()
 }
 
 /*
+<<<<<<< HEAD
  * Allocate space for system data structures.  We are given
  * a starting virtual address and we return a final virtual
  * address; along the way we set each data structure pointer.
@@ -338,6 +350,8 @@ allocsys(v)
 }
 
 /*
+=======
+>>>>>>> origin/master
  * Set up registers on exec.
  *
  * XXX this entire mess must be fixed
@@ -423,11 +437,7 @@ int sigpid = 0;
 struct sigframe {
 	int	sf_signo;		/* signal number */
 	siginfo_t *sf_sip;		/* points to siginfo_t */
-#ifdef COMPAT_SUNOS
-	struct	sigcontext *sf_scp;	/* points to user addr of sigcontext */
-#else
 	int	sf_xxx;			/* placeholder */
-#endif
 	caddr_t	sf_addr;		/* SunOS compat */
 	struct	sigcontext sf_sc;	/* actual sigcontext */
 	siginfo_t sf_si;
@@ -510,9 +520,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct trapframe *tf;
 	int caddr, oonstack, oldsp, newsp;
 	struct sigframe sf;
-#ifdef COMPAT_SUNOS
-	extern struct emul emul_sunos;
-#endif
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
@@ -542,13 +549,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	 */
 	sf.sf_signo = sig;
 	sf.sf_sip = NULL;
-#ifdef COMPAT_SUNOS
-	if (p->p_emul == &emul_sunos) {
-		sf.sf_sip = (void *)code;	/* SunOS has "int code" */
-		sf.sf_scp = &fp->sf_sc;
-		sf.sf_addr = val.sival_ptr;
-	}
-#endif
 
 	/*
 	 * Build the signal context to be used by sigreturn.
@@ -602,15 +602,8 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-#ifdef COMPAT_SUNOS
-	if (psp->ps_usertramp & sigmask(sig)) {
-		caddr = (int)catcher;	/* user does his own trampolining */
-	} else
-#endif
-	{
-		caddr = p->p_sigcode;
-		tf->tf_global[1] = (int)catcher;
-	}
+	caddr = p->p_sigcode;
+	tf->tf_global[1] = (int)catcher;
 	tf->tf_pc = caddr;
 	tf->tf_npc = caddr + 4;
 	tf->tf_out[6] = newsp;
@@ -810,21 +803,6 @@ mapdev(phys, virt, offset, size)
 	pmap_update(pmap_kernel());
 	return (ret);
 }
-
-#ifdef COMPAT_SUNOS
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-	extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-	if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-		return 0;
-	return error;
-}
-#endif
 
 /*
  * Soft interrupt handling

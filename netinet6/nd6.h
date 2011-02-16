@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nd6.h,v 1.24 2003/06/27 22:47:32 itojun Exp $	*/
+=======
+/*	$OpenBSD: nd6.h,v 1.27 2010/04/06 14:12:10 stsp Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -56,6 +60,7 @@ struct	llinfo_nd6 {
 	struct timeout ln_timer_ch;
 };
 
+#define ND6_LLINFO_PURGE	-3
 #define ND6_LLINFO_NOSTATE	-2
 /*
  * We don't need the WAITDELETE state any more, but we keep the definition
@@ -220,6 +225,11 @@ struct	in6_ndifreq {
 #define MAX_RTR_SOLICITATIONS		3
 
 #define ND6_INFINITE_LIFETIME		0xffffffff
+
+/* contants for RFC 4941 autoconf privacy extension */
+#define ND6_PRIV_MAX_DESYNC_FACTOR	600	/* 10 minutes */
+#define ND6_PRIV_VALID_LIFETIME		604800	/* 1 week */
+#define ND6_PRIV_PREFERRED_LIFETIME	86400	/* 1 day */
 
 #ifdef _KERNEL
 /* node constants */

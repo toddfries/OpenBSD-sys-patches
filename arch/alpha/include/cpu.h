@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.28 2007/04/12 14:38:36 martin Exp $ */
+/* $OpenBSD: cpu.h,v 1.42 2010/11/28 21:00:04 miod Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -190,6 +183,9 @@ struct cpu_info {
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
 #endif
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 	struct proc *ci_curproc;	/* current owner of the processor */
 	struct simplelock ci_slock;	/* lock on this data structure */
 	cpuid_t ci_cpuid;		/* our CPU ID */
@@ -212,6 +208,7 @@ struct cpu_info {
 	u_long ci_flags;		/* flags; see below */
 	u_long ci_ipis;			/* interprocessor interrupts pending */
 #endif
+	u_int32_t ci_randseed;
 };
 
 #define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */
@@ -223,10 +220,14 @@ struct cpu_info {
 void	fpusave_cpu(struct cpu_info *, int);
 void	fpusave_proc(struct proc *, int);
 
-#define	CPU_INFO_UNIT(ci)		((ci)->ci_dev->dv_unit)
+#define	CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 #define	CPU_INFO_ITERATOR		int
 #define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = curcpu(); \
 					    ci != NULL; ci = ci->ci_next)
+
+#define MAXCPUS	ALPHA_MAXPROCS
+
+#define cpu_unidle(ci)
 
 #if defined(MULTIPROCESSOR)
 extern	__volatile u_long cpus_running;
@@ -255,12 +256,11 @@ extern	struct cpu_info cpu_info_store;
  * definitions of cpu-dependent requirements
  * referenced in generic code
  */
-#define	cpu_wait(p)		/* nothing */
 #define	cpu_number()		alpha_pal_whami()
 
 /*
  * Arguments to hardclock and gatherstats encapsulate the previous
- * machine state in an opaque clockframe.  One the Alpha, we use
+ * machine state in an opaque clockframe.  On the Alpha, we use
  * what we push on an interrupt (a trapframe).
  */
 struct clockframe {
@@ -292,12 +292,14 @@ do {									\
 	ci->ci_want_resched = 1;					\
 	aston(curcpu());						\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 #else
 #define	need_resched(ci)						\
 do {									\
 	curcpu()->ci_want_resched = 1;					\
 	aston(curcpu());						\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) curcpu()->ci_want_resched = 0
 #endif
 
 /*
@@ -340,16 +342,16 @@ do {									\
  * CTL_MACHDEP definitions.
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_ROOT_DEVICE		2	/* string: root device name */
 #define	CPU_UNALIGNED_PRINT	3	/* int: print unaligned accesses */
 #define	CPU_UNALIGNED_FIX	4	/* int: fix unaligned accesses */
 #define	CPU_UNALIGNED_SIGBUS	5	/* int: SIGBUS unaligned accesses */
 #define	CPU_BOOTED_KERNEL	6	/* string: booted kernel name */
 #define	CPU_FP_SYNC_COMPLETE	7	/* int: always fixup sync fp traps */
 #define CPU_CHIPSET		8	/* chipset information */
-#define CPU_ALLOWAPERTURE         9
+#define CPU_ALLOWAPERTURE	9
+#define	CPU_LED_BLINK		10	/* int: blink leds on DEC 3000 */
 
-#define	CPU_MAXID		10	/* valid machdep IDs */
+#define	CPU_MAXID		11	/* valid machdep IDs */
 
 #define CPU_CHIPSET_MEM		1	/* PCI memory address */
 #define CPU_CHIPSET_BWX		2	/* PCI supports BWX */
@@ -362,7 +364,7 @@ do {									\
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
-	{ "root_device", CTLTYPE_STRING }, \
+	{ 0, 0 }, \
 	{ "unaligned_print", CTLTYPE_INT }, \
 	{ "unaligned_fix", CTLTYPE_INT }, \
 	{ "unaligned_sigbus", CTLTYPE_INT }, \
@@ -370,6 +372,7 @@ do {									\
 	{ "fp_sync_complete", CTLTYPE_INT }, \
 	{ "chipset", CTLTYPE_NODE }, \
 	{ "allowaperture", CTLTYPE_INT }, \
+	{ "led_blink", CTLTYPE_INT } \
 }
 
 #define CTL_CHIPSET_NAMES { \

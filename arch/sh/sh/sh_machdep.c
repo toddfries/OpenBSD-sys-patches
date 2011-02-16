@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sh_machdep.c,v 1.10 2007/03/03 21:37:27 miod Exp $	*/
+=======
+/*	$OpenBSD: sh_machdep.c,v 1.27 2009/11/17 17:06:44 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -33,13 +37,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -107,11 +104,13 @@
 #include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 
 #include <sh/cache.h>
 #include <sh/clock.h>
+#include <sh/fpu.h>
 #include <sh/locore.h>
 #include <sh/mmu.h>
 #include <sh/trap.h>
@@ -160,12 +159,10 @@ extern char sh3_vector_tlbmiss[], sh3_vector_tlbmiss_end[];
 extern char sh4_vector_tlbmiss[], sh4_vector_tlbmiss_end[];
 #endif
 
-caddr_t allocsys(caddr_t);
-
 /*
  * These variables are needed by /sbin/savecore
  */
-u_int32_t dumpmag = 0x8fca0101;	/* magic number */
+u_long dumpmag = 0x8fca0101;	/* magic number */
 u_int dumpsize;			/* pages */
 long dumplo;	 		/* blocks */
 cpu_kcore_hdr_t cpu_kcore_hdr;
@@ -271,10 +268,13 @@ sh_startup()
 {
 	u_int loop;
 	vaddr_t minaddr, maxaddr;
+<<<<<<< HEAD
 	caddr_t sysbase;
 	caddr_t size;
 	vsize_t bufsize;
 	int base, residual;
+=======
+>>>>>>> origin/master
 
 	printf("%s", version);
 	if (*cpu_model != '\0')
@@ -296,6 +296,7 @@ sh_startup()
 	    sh_vector_interrupt_end - sh_vector_interrupt);
 #endif /* DEBUG */
 
+<<<<<<< HEAD
 	printf("real mem = %u (%uK)\n", ctob(physmem), ctob(physmem) / 1024);
 
 	/*
@@ -353,6 +354,10 @@ sh_startup()
 		}
 	}
 	pmap_update(pmap_kernel());
+=======
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
+>>>>>>> origin/master
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -372,10 +377,15 @@ sh_startup()
 	 */
 	bufinit();
 
+<<<<<<< HEAD
 	printf("avail mem = %u (%uK)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free) / 1024);
 	printf("using %d buffers containing %u bytes (%uK) of memory\n",
 	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+=======
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
+>>>>>>> origin/master
 
 	if (boothowto & RB_CONFIG) {
 #ifdef BOOT_CONFIG
@@ -386,6 +396,7 @@ sh_startup()
 	}
 }
 
+<<<<<<< HEAD
 /*
  * Allocate space for system data structures.  We are given
  * a starting virtual address and we return a final virtual
@@ -437,6 +448,8 @@ allocsys(caddr_t v)
 	return v;
 }
 
+=======
+>>>>>>> origin/master
 void
 dumpconf()
 {
@@ -466,7 +479,7 @@ dumpconf()
 	dumpextra = cpu_dumpsize();
 
 	/* Always skip the first block, in case there is a label there. */
-	if (dumplo < btodb(1));
+	if (dumplo < btodb(1))
 		dumplo = btodb(1);
 
 	/* Put dump at the end of the partition, and make it fit. */
@@ -512,6 +525,10 @@ dumpsys()
 	blkno = dumplo;
 
 	printf("\ndumping to dev 0x%x offset %ld\n", dumpdev, dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	printf("dump ");
 
@@ -789,6 +806,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 		 * Clear floating point registers.
 		 */
 		bzero(&pcb->pcb_fp, sizeof(pcb->pcb_fp));
+		pcb->pcb_fp.fpr_fpscr = FPSCR_PR;
 		fpu_restore(&pcb->pcb_fp);
 	}
 #endif

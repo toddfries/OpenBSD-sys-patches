@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: svr4_exec.c,v 1.14 2002/03/14 01:26:51 millert Exp $	 */
+=======
+/*	$OpenBSD: svr4_exec.c,v 1.17 2009/03/05 19:52:24 kettenis Exp $	 */
+>>>>>>> origin/master
 /*	$NetBSD: svr4_exec.c,v 1.16 1995/10/14 20:24:20 christos Exp $	 */
 
 /*
@@ -35,6 +39,7 @@
 #include <sys/malloc.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
 #include <sys/exec_olf.h>
@@ -77,6 +82,7 @@ struct emul emul_svr4 = {
 	svr4_copyargs,
 	setregs,
 	exec_elf32_fixup,
+	coredump_trad,
 	svr4_sigcode,
 	svr4_esigcode,
 };
@@ -125,6 +131,9 @@ svr4_elf_probe(p, epp, itp, pos, os)
 	char *bp;
 	int error;
 	size_t len;
+
+	if (!(emul_svr4.e_flags & EMUL_ENABLED))
+		return (ENOEXEC);
 
 	if (itp) {
 		if ((error = emul_find(p, NULL, svr4_emul_path, itp, &bp, 0)))

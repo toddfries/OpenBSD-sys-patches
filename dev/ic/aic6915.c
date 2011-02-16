@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: aic6915.c,v 1.2 2006/12/07 13:30:24 martin Exp $	*/
+=======
+/*	$OpenBSD: aic6915.c,v 1.9 2009/08/10 20:29:54 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -87,8 +84,6 @@ void	sf_watchdog(struct ifnet *);
 int	sf_ioctl(struct ifnet *, u_long, caddr_t);
 int	sf_init(struct ifnet *);
 void	sf_stop(struct ifnet *, int);
-
-void	sf_shutdown(void *);
 
 void	sf_txintr(struct sf_softc *);
 void	sf_rxintr(struct sf_softc *);
@@ -313,14 +308,6 @@ sf_attach(struct sf_softc *sc)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(sf_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
 	return;
 
 	/*
@@ -349,19 +336,6 @@ sf_attach(struct sf_softc *sc)
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
  fail_0:
 	return;
-}
-
-/*
- * sf_shutdown:
- *
- *	Shutdown hook -- make sure the interface is stopped at reboot.
- */
-void
-sf_shutdown(void *arg)
-{
-	struct sf_softc *sc = arg;
-
-	sf_stop(&sc->sc_arpcom.ac_if, 1);
 }
 
 /*
@@ -550,11 +524,6 @@ sf_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -583,34 +552,19 @@ sf_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		sc->sc_flags = ifp->if_flags;
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_arpcom) :
-			ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				sf_set_filter(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			sf_set_filter(sc);
+		error = 0;
 	}
 
 	/* Try to get more packets going. */
@@ -913,7 +867,7 @@ sf_tick(void *arg)
 	sf_stats_update(sc);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }
 
 /*
@@ -1172,7 +1126,7 @@ sf_init(struct ifnet *ifp)
 	    GEC_TxDmaEn|GEC_RxDmaEn|GEC_TransmitEn|GEC_ReceiveEn);
 
 	/* Start the on second clock. */
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 
 	/*
 	 * Note that the interface is now running.

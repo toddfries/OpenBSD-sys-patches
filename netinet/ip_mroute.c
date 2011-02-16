@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_mroute.c,v 1.46 2007/02/14 00:53:48 jsg Exp $	*/
+=======
+/*	$OpenBSD: ip_mroute.c,v 1.58 2010/07/02 02:40:16 blambert Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ip_mroute.c,v 1.85 2004/04/26 01:31:57 matt Exp $	*/
 
 /*
@@ -72,6 +76,11 @@
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
 #include <sys/syslog.h>
+<<<<<<< HEAD
+=======
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+>>>>>>> origin/master
 #include <sys/timeout.h>
 
 #include <net/if.h>
@@ -130,22 +139,19 @@ u_int		mrtdebug = 0;	  /* debug level 	*/
 
 #define		VIFI_INVALID	((vifi_t) -1)
 
+<<<<<<< HEAD
 u_int       	tbfdebug = 0;     /* tbf debug level 	*/
+=======
+>>>>>>> origin/master
 #ifdef RSVP_ISI
 u_int		rsvpdebug = 0;	  /* rsvp debug level   */
 extern struct socket *ip_rsvpd;
 extern int rsvp_on;
 #endif /* RSVP_ISI */
 
-#define		EXPIRE_TIMEOUT	(hz / 4)	/* 4x / second */
+#define		EXPIRE_TIMEOUT	250		/* 4x / second */
 #define		UPCALL_EXPIRE	6		/* number of timeouts */
 struct timeout	expire_upcalls_ch;
-
-/*
- * Define the token bucket filter structures
- */
-
-#define		TBF_REPROCESS	(hz / 100)	/* 100x / second */
 
 static int get_sg_cnt(struct sioc_sg_req *);
 static int get_vif_cnt(struct sioc_vif_req *);
@@ -176,15 +182,7 @@ static int ip_mdq(struct mbuf *, struct ifnet *, struct mfc *);
 #endif
 static void phyint_send(struct ip *, struct vif *, struct mbuf *);
 static void encap_send(struct ip *, struct vif *, struct mbuf *);
-static void tbf_control(struct vif *, struct mbuf *, struct ip *,
-			     u_int32_t);
-static void tbf_queue(struct vif *, struct mbuf *);
-static void tbf_process_q(struct vif *);
-static void tbf_reprocess_q(void *);
-static int tbf_dq_sel(struct vif *, struct ip *);
-static void tbf_send_packet(struct vif *, struct mbuf *);
-static void tbf_update_tokens(struct vif *);
-static int priority(struct vif *, struct ip *);
+static void send_packet(struct vif *, struct mbuf *);
 
 /*
  * Bandwidth monitoring
@@ -252,7 +250,7 @@ struct ip multicast_encap_iphdr = {
 #define BW_METER_BUCKETS	1024
 static struct bw_meter *bw_meter_timers[BW_METER_BUCKETS];
 struct timeout bw_meter_ch;
-#define BW_METER_PERIOD (hz)		/* periodical handling of bw meters */
+#define BW_METER_PERIOD 1000	/* periodical handling of bw meters (in ms) */
 
 /*
  * Pending upcalls are stored in a vector which is flushed when
@@ -261,7 +259,7 @@ struct timeout bw_meter_ch;
 static struct bw_upcall	bw_upcalls[BW_UPCALLS_MAX];
 static u_int	bw_upcalls_n; /* # of pending upcalls */
 struct timeout	bw_upcalls_ch;
-#define BW_UPCALLS_PERIOD (hz)		/* periodical flush of bw upcalls */
+#define BW_UPCALLS_PERIOD 1000	/* periodical flush of bw upcalls (in ms) */
 
 #ifdef PIM
 struct pimstat pimstat;
@@ -581,13 +579,13 @@ ip_mrouter_init(struct socket *so, struct mbuf *m)
 	pim_assert = 0;
 
 	timeout_set(&expire_upcalls_ch, expire_upcalls, NULL);
-	timeout_add(&expire_upcalls_ch, EXPIRE_TIMEOUT);
+	timeout_add_msec(&expire_upcalls_ch, EXPIRE_TIMEOUT);
 
 	timeout_set(&bw_upcalls_ch, expire_bw_upcalls_send, NULL);
-	timeout_add(&bw_upcalls_ch, BW_UPCALLS_PERIOD);
+	timeout_add_msec(&bw_upcalls_ch, BW_UPCALLS_PERIOD);
 
 	timeout_set(&bw_meter_ch, expire_bw_meter_process, NULL);
-	timeout_add(&bw_meter_ch, BW_METER_PERIOD);
+	timeout_add_msec(&bw_meter_ch, BW_METER_PERIOD);
 
 	if (mrtdebug)
 		log(LOG_DEBUG, "ip_mrouter_init\n");
@@ -835,15 +833,13 @@ add_vif(struct mbuf *m)
 		 * local interface (e.g. it could be 127.0.0.2), we don't
 		 * check its address.
 		 */
-	    ifp = NULL;
 	} else
 #endif
 	{
 		sin.sin_addr = vifcp->vifc_lcl_addr;
-		ifa = ifa_ifwithaddr(sintosa(&sin));
+		ifa = ifa_ifwithaddr(sintosa(&sin), /* XXX */ 0);
 		if (ifa == NULL)
 			return (EADDRNOTAVAIL);
-		ifp = ifa->ifa_ifp;
 	}
 
 	if (vifcp->vifc_flags & VIFF_TUNNEL) {
@@ -883,18 +879,8 @@ add_vif(struct mbuf *m)
 
 	s = splsoftnet();
 
-	/* Define parameters for the tbf structure. */
-	vifp->tbf_q = NULL;
-	vifp->tbf_t = &vifp->tbf_q;
-	microtime(&vifp->tbf_last_pkt_t);
-	vifp->tbf_n_tok = 0;
-	vifp->tbf_q_len = 0;
-	vifp->tbf_max_q_len = MAXQSIZE;
-
 	vifp->v_flags = vifcp->vifc_flags;
 	vifp->v_threshold = vifcp->vifc_threshold;
-	/* scaling up here allows division by 1024 in critical code */
-	vifp->v_rate_limit = vifcp->vifc_rate_limit * 1024 / 1000;
 	vifp->v_lcl_addr = vifcp->vifc_lcl_addr;
 	vifp->v_rmt_addr = vifcp->vifc_rmt_addr;
 	vifp->v_ifp = ifp;
@@ -918,13 +904,17 @@ add_vif(struct mbuf *m)
 		numvifs = vifcp->vifc_vifi + 1;
 
 	if (mrtdebug)
+<<<<<<< HEAD
 		log(LOG_DEBUG, "add_vif #%d, lcladdr %x, %s %x, thresh %x, rate %d\n",
+=======
+		log(LOG_DEBUG, "add_vif #%d, lcladdr %x, %s %x, "
+		    "thresh %x\n",
+>>>>>>> origin/master
 		    vifcp->vifc_vifi,
 		    ntohl(vifcp->vifc_lcl_addr.s_addr),
 		    (vifcp->vifc_flags & VIFF_TUNNEL) ? "rmtaddr" : "mask",
 		    ntohl(vifcp->vifc_rmt_addr.s_addr),
-		    vifcp->vifc_threshold,
-		    vifcp->vifc_rate_limit);
+		    vifcp->vifc_threshold);
 
 	return (0);
 }
@@ -932,19 +922,8 @@ add_vif(struct mbuf *m)
 void
 reset_vif(struct vif *vifp)
 {
-	struct mbuf *m, *n;
 	struct ifnet *ifp;
 	struct ifreq ifr;
-
-	timeout_set(&vifp->v_repq_ch, tbf_reprocess_q, vifp);
-
-	/*
-	 * Free packets queued at the interface
-	 */
-	for (m = vifp->tbf_q; m != NULL; m = n) {
-		n = m->m_nextpkt;
-		m_freem(m);
-	}
 
 	if (vifp->v_flags & VIFF_TUNNEL) {
 		/* empty */
@@ -1379,8 +1358,15 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 
 #ifdef RSVP_ISI
 	if (imo && ((vifi = imo->imo_multicast_vif) < numvifs)) {
+<<<<<<< HEAD
 		if (ip->ip_ttl < 255)
 			ip->ip_ttl++;	/* compensate for -1 in *_send routines */
+=======
+		if (ip->ip_ttl < MAXTTL) {
+			/* compensate for -1 in *_send routines */
+			ip->ip_ttl++;
+		}
+>>>>>>> origin/master
 		if (rsvpdebug && ip->ip_p == IPPROTO_RSVP) {
 			struct vif *vifp = viftable + vifi;
 			printf("Sending IPPROTO_RSVP from %x to %x on vif %d (%s%s)\n",
@@ -1628,7 +1614,7 @@ expire_upcalls(void *v)
 	}
 
 	splx(s);
-	timeout_add(&expire_upcalls_ch, EXPIRE_TIMEOUT);
+	timeout_add_msec(&expire_upcalls_ch, EXPIRE_TIMEOUT);
 }
 
 /*
@@ -1829,11 +1815,7 @@ phyint_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
 	if (mb_copy == NULL)
 		return;
 
-	if (vifp->v_rate_limit <= 0)
-		tbf_send_packet(vifp, mb_copy);
-	else
-		tbf_control(vifp, mb_copy, mtod(mb_copy, struct ip *),
-		    ntohs(ip->ip_len));
+	send_packet(vifp, mb_copy);
 }
 
 static void
@@ -1892,155 +1874,11 @@ encap_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
 	ip->ip_sum = in_cksum(mb_copy, ip->ip_hl << 2);
 	mb_copy->m_data -= sizeof(multicast_encap_iphdr);
 
-	if (vifp->v_rate_limit <= 0)
-		tbf_send_packet(vifp, mb_copy);
-	else
-		tbf_control(vifp, mb_copy, ip, ntohs(ip_copy->ip_len));
-}
-
-/*
- * Token bucket filter module
- */
-static void
-tbf_control(struct vif *vifp, struct mbuf *m, struct ip *ip, u_int32_t len)
-{
-
-	if (len > MAX_BKT_SIZE) {
-		/* drop if packet is too large */
-		mrtstat.mrts_pkt2large++;
-		m_freem(m);
-		return;
-	}
-
-	tbf_update_tokens(vifp);
-
-	/*
-	 * If there are enough tokens, and the queue is empty, send this packet
-	 * out immediately.  Otherwise, try to insert it on this vif's queue.
-	 */
-	if (vifp->tbf_q_len == 0) {
-		if (len <= vifp->tbf_n_tok) {
-			vifp->tbf_n_tok -= len;
-			tbf_send_packet(vifp, m);
-		} else {
-			/* queue packet and timeout till later */
-			tbf_queue(vifp, m);
-			timeout_add(&vifp->v_repq_ch, TBF_REPROCESS);
-		}
-	} else {
-		if (vifp->tbf_q_len >= vifp->tbf_max_q_len &&
-		    !tbf_dq_sel(vifp, ip)) {
-			/* queue full, and couldn't make room */
-			mrtstat.mrts_q_overflow++;
-			m_freem(m);
-		} else {
-			/* queue length low enough, or made room */
-			tbf_queue(vifp, m);
-			tbf_process_q(vifp);
-		}
-	}
-}
-
-/*
- * adds a packet to the queue at the interface
- */
-static void
-tbf_queue(struct vif *vifp, struct mbuf *m)
-{
-	int s = splsoftnet();
-
-	/* insert at tail */
-	*vifp->tbf_t = m;
-	vifp->tbf_t = &m->m_nextpkt;
-	vifp->tbf_q_len++;
-
-	splx(s);
-}
-
-
-/*
- * processes the queue at the interface
- */
-static void
-tbf_process_q(struct vif *vifp)
-{
-	struct mbuf *m;
-	int len;
-	int s = splsoftnet();
-
-	/*
-	 * Loop through the queue at the interface and send as many packets
-	 * as possible.
-	 */
-	for (m = vifp->tbf_q; m != NULL; m = vifp->tbf_q) {
-		len = ntohs(mtod(m, struct ip *)->ip_len);
-
-		/* determine if the packet can be sent */
-		if (len <= vifp->tbf_n_tok) {
-			/* if so,
-			 * reduce no of tokens, dequeue the packet,
-			 * send the packet.
-			 */
-			if ((vifp->tbf_q = m->m_nextpkt) == NULL)
-				vifp->tbf_t = &vifp->tbf_q;
-			--vifp->tbf_q_len;
-
-			m->m_nextpkt = NULL;
-			vifp->tbf_n_tok -= len;
-			tbf_send_packet(vifp, m);
-		} else
-			break;
-	}
-	splx(s);
+	send_packet(vifp, mb_copy);
 }
 
 static void
-tbf_reprocess_q(void *arg)
-{
-	struct vif *vifp = arg;
-
-	if (ip_mrouter == NULL)
-		return;
-
-	tbf_update_tokens(vifp);
-	tbf_process_q(vifp);
-
-	if (vifp->tbf_q_len != 0)
-		timeout_add(&vifp->v_repq_ch, TBF_REPROCESS);
-}
-
-/* function that will selectively discard a member of the queue
- * based on the precedence value and the priority
- */
-static int
-tbf_dq_sel(struct vif *vifp, struct ip *ip)
-{
-	u_int p;
-	struct mbuf **mp, *m;
-	int s = splsoftnet();
-
-	p = priority(vifp, ip);
-
-	for (mp = &vifp->tbf_q, m = *mp;
-	    m != NULL;
-	    mp = &m->m_nextpkt, m = *mp) {
-		if (p > priority(vifp, mtod(m, struct ip *))) {
-			if ((*mp = m->m_nextpkt) == NULL)
-				vifp->tbf_t = mp;
-			--vifp->tbf_q_len;
-
-			m_freem(m);
-			mrtstat.mrts_drop_sel++;
-			splx(s);
-			return (1);
-		}
-	}
-	splx(s);
-	return (0);
-}
-
-static void
-tbf_send_packet(struct vif *vifp, struct mbuf *m)
+send_packet(struct vif *vifp, struct mbuf *m)
 {
 	int error;
 	int s = splsoftnet();
@@ -2055,7 +1893,7 @@ tbf_send_packet(struct vif *vifp, struct mbuf *m)
 		struct ip_moptions imo;
 
 		imo.imo_multicast_ifp = vifp->v_ifp;
-		imo.imo_multicast_ttl = mtod(m, struct ip *)->ip_ttl - 1;
+		imo.imo_multicast_ttl = mtod(m, struct ip *)->ip_ttl - IPTTLDEC;
 		imo.imo_multicast_loop = 1;
 #ifdef RSVP_ISI
 		imo.imo_multicast_vif = -1;
@@ -2072,6 +1910,7 @@ tbf_send_packet(struct vif *vifp, struct mbuf *m)
 	splx(s);
 }
 
+<<<<<<< HEAD
 /* determine the current time and then
  * the elapsed time (between the last time and time now)
  * in milliseconds & update the no. of tokens in the bucket
@@ -2145,6 +1984,8 @@ priority(struct vif *vifp, struct ip *ip)
 /*
  * End of token bucket filter modifications
  */
+=======
+>>>>>>> origin/master
 #ifdef RSVP_ISI
 int
 ip_rsvp_vif_init(struct socket *so, struct mbuf *m)
@@ -2700,6 +2541,7 @@ bw_meter_prepare_upcall(struct bw_meter *x, struct timeval *nowp)
 static void
 bw_upcalls_send(void)
 {
+<<<<<<< HEAD
     struct mbuf *m;
     int len = bw_upcalls_n * sizeof(bw_upcalls[0]);
     struct sockaddr_in k_igmpsrc = { sizeof k_igmpsrc, AF_INET };
@@ -2740,6 +2582,51 @@ bw_upcalls_send(void)
 	log(LOG_WARNING, "bw_upcalls_send: ip_mrouter socket queue full\n");
 	++mrtstat.mrts_upq_sockfull;
     }
+=======
+	struct mbuf *m;
+	int len = bw_upcalls_n * sizeof(bw_upcalls[0]);
+	struct sockaddr_in k_igmpsrc = { sizeof k_igmpsrc, AF_INET };
+	static struct igmpmsg igmpmsg = {
+	    0,			/* unused1 */
+	    0,			/* unused2 */
+	    IGMPMSG_BW_UPCALL,	/* im_msgtype */
+	    0,			/* im_mbz  */
+	    0,			/* im_vif  */
+	    0,			/* unused3 */
+	    { 0 },		/* im_src  */
+	    { 0 } };		/* im_dst  */
+
+	if (bw_upcalls_n == 0)
+		return;		/* No pending upcalls */
+
+	bw_upcalls_n = 0;
+
+	/*
+	 * Allocate a new mbuf, initialize it with the header and
+	 * the payload for the pending calls.
+	 */
+	MGETHDR(m, M_DONTWAIT, MT_HEADER);
+	if (m == NULL) {
+		log(LOG_WARNING, "bw_upcalls_send: cannot allocate mbuf\n");
+		return;
+	}
+
+	m->m_len = m->m_pkthdr.len = 0;
+	m_copyback(m, 0, sizeof(struct igmpmsg), (caddr_t)&igmpmsg, M_NOWAIT);
+	m_copyback(m, sizeof(struct igmpmsg), len, (caddr_t)&bw_upcalls[0],
+	    M_NOWAIT);
+
+	/*
+	 * Send the upcalls
+	 * XXX do we need to set the address in k_igmpsrc ?
+	 */
+	mrtstat.mrts_upcalls++;
+	if (socket_send(ip_mrouter, m, &k_igmpsrc) < 0) {
+		log(LOG_WARNING,
+		    "bw_upcalls_send: ip_mrouter socket queue full\n");
+		++mrtstat.mrts_upq_sockfull;
+	}
+>>>>>>> origin/master
 }
 
 /*
@@ -2930,7 +2817,11 @@ expire_bw_upcalls_send(void *unused)
     bw_upcalls_send();
     splx(s);
 
+<<<<<<< HEAD
     timeout_add(&bw_upcalls_ch, BW_UPCALLS_PERIOD);
+=======
+	timeout_add_msec(&bw_upcalls_ch, BW_UPCALLS_PERIOD);
+>>>>>>> origin/master
 }
 
 /*
@@ -2943,7 +2834,11 @@ expire_bw_meter_process(void *unused)
     if (mrt_api_config & MRT_MFC_BW_UPCALL)
 	bw_meter_process();
 
+<<<<<<< HEAD
     timeout_add(&bw_meter_ch, BW_METER_PERIOD);
+=======
+	timeout_add_msec(&bw_meter_ch, BW_METER_PERIOD);
+>>>>>>> origin/master
 }
 
 /*
@@ -3097,6 +2992,7 @@ static int
 pim_register_send_rp(struct ip *ip, struct vif *vifp,
 	struct mbuf *mb_copy, struct mfc *rt)
 {
+<<<<<<< HEAD
     struct mbuf *mb_first;
     struct ip *ip_outer;
     struct pim_encap_pimhdr *pimhdr;
@@ -3160,6 +3056,64 @@ pim_register_send_rp(struct ip *ip, struct vif *vifp,
     pimstat.pims_snd_registers_bytes += len;
 
     return 0;
+=======
+	struct mbuf *mb_first;
+	struct ip *ip_outer;
+	struct pim_encap_pimhdr *pimhdr;
+	int len = ntohs(ip->ip_len);
+	vifi_t vifi = rt->mfc_parent;
+
+	if ((vifi >= numvifs) || in_nullhost(viftable[vifi].v_lcl_addr)) {
+		m_freem(mb_copy);
+		return (EADDRNOTAVAIL);		/* The iif vif is invalid */
+	}
+
+	/* Add a new mbuf with the encapsulating header */
+	MGETHDR(mb_first, M_DONTWAIT, MT_HEADER);
+	if (mb_first == NULL) {
+		m_freem(mb_copy);
+		return (ENOBUFS);
+	}
+	mb_first->m_data += max_linkhdr;
+	mb_first->m_len = sizeof(pim_encap_iphdr) + sizeof(pim_encap_pimhdr);
+	mb_first->m_next = mb_copy;
+
+	mb_first->m_pkthdr.len = len + mb_first->m_len;
+
+	/* Fill in the encapsulating IP and PIM header */
+	ip_outer = mtod(mb_first, struct ip *);
+	*ip_outer = pim_encap_iphdr;
+	ip_outer->ip_id = htons(ip_randomid());
+	ip_outer->ip_len = htons(len + sizeof(pim_encap_iphdr) +
+	    sizeof(pim_encap_pimhdr));
+	ip_outer->ip_src = viftable[vifi].v_lcl_addr;
+	ip_outer->ip_dst = rt->mfc_rp;
+	/*
+	 * Copy the inner header TOS to the outer header, and take care of the
+	 * IP_DF bit.
+	 */
+	ip_outer->ip_tos = ip->ip_tos;
+	if (ntohs(ip->ip_off) & IP_DF)
+		ip_outer->ip_off |= htons(IP_DF);
+	pimhdr = (struct pim_encap_pimhdr *)((caddr_t)ip_outer
+	    + sizeof(pim_encap_iphdr));
+	*pimhdr = pim_encap_pimhdr;
+	/* If the iif crosses a border, set the Border-bit */
+	if (rt->mfc_flags[vifi] & MRT_MFC_FLAGS_BORDER_VIF & mrt_api_config)
+		pimhdr->flags |= htonl(PIM_BORDER_REGISTER);
+
+	mb_first->m_data += sizeof(pim_encap_iphdr);
+	pimhdr->pim.pim_cksum = in_cksum(mb_first, sizeof(pim_encap_pimhdr));
+	mb_first->m_data -= sizeof(pim_encap_iphdr);
+
+	send_packet(vifp, mb_first);
+
+	/* Keep statistics */
+	pimstat.pims_snd_registers_msgs++;
+	pimstat.pims_snd_registers_bytes += len;
+
+	return (0);
+>>>>>>> origin/master
 }
 
 /*

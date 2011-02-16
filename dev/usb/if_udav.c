@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_udav.c,v 1.19 2006/09/29 08:43:07 jsg Exp $ */
+=======
+/*	$OpenBSD: if_udav.c,v 1.51 2011/01/25 20:03:35 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -41,7 +45,6 @@
  * TODO:
  *	Interrupt Endpoint support
  *	External PHYs
- *	powerhook() support?
  */
 
 #include <sys/cdefs.h>
@@ -87,6 +90,7 @@
 
 
 /* Function declarations */
+<<<<<<< HEAD
 USB_DECLARE_DRIVER_CLASS(udav, DV_IFNET);
 
 Static int udav_openpipes(struct udav_softc *);
@@ -118,6 +122,54 @@ Static int udav_csr_read(struct udav_softc *, int, void *, int);
 Static int udav_csr_write(struct udav_softc *, int, void *, int);
 Static int udav_csr_read1(struct udav_softc *, int);
 Static int udav_csr_write1(struct udav_softc *, int, unsigned char);
+=======
+int udav_match(struct device *, void *, void *); 
+void udav_attach(struct device *, struct device *, void *); 
+int udav_detach(struct device *, int); 
+int udav_activate(struct device *, int); 
+
+struct cfdriver udav_cd = { 
+	NULL, "udav", DV_IFNET 
+}; 
+
+const struct cfattach udav_ca = { 
+	sizeof(struct udav_softc), 
+	udav_match, 
+	udav_attach, 
+	udav_detach, 
+	udav_activate, 
+};
+
+int udav_openpipes(struct udav_softc *);
+int udav_rx_list_init(struct udav_softc *);
+int udav_tx_list_init(struct udav_softc *);
+int udav_newbuf(struct udav_softc *, struct udav_chain *, struct mbuf *);
+void udav_start(struct ifnet *);
+int udav_send(struct udav_softc *, struct mbuf *, int);
+void udav_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void udav_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void udav_tick(void *);
+void udav_tick_task(void *);
+int udav_ioctl(struct ifnet *, u_long, caddr_t);
+void udav_stop_task(struct udav_softc *);
+void udav_stop(struct ifnet *, int);
+void udav_watchdog(struct ifnet *);
+int udav_ifmedia_change(struct ifnet *);
+void udav_ifmedia_status(struct ifnet *, struct ifmediareq *);
+void udav_lock_mii(struct udav_softc *);
+void udav_unlock_mii(struct udav_softc *);
+int udav_miibus_readreg(struct device *, int, int);
+void udav_miibus_writereg(struct device *, int, int, int);
+void udav_miibus_statchg(struct device *);
+int udav_init(struct ifnet *);
+void udav_setmulti(struct udav_softc *);
+void udav_reset(struct udav_softc *);
+
+int udav_csr_read(struct udav_softc *, int, void *, int);
+int udav_csr_write(struct udav_softc *, int, void *, int);
+int udav_csr_read1(struct udav_softc *, int);
+int udav_csr_write1(struct udav_softc *, int, unsigned char);
+>>>>>>> origin/master
 
 #if 0
 Static int udav_mem_read(struct udav_softc *, int, void *, int);
@@ -149,7 +201,15 @@ static const struct udav_type {
 	{{ USB_VENDOR_COREGA, USB_PRODUCT_COREGA_FETHER_USB_TXC }, 0 },
 	{{ USB_VENDOR_DAVICOM, USB_PRODUCT_DAVICOM_DM9601 }, 0 },
 	{{ USB_VENDOR_DAVICOM, USB_PRODUCT_DAVICOM_WK668 }, 0 },
+<<<<<<< HEAD
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0 }
+=======
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_DM9601 }, 0 },
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0 },
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ZT6688 }, 0 },
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ADM8515 }, 0 },
+	{{ USB_VENDOR_UNKNOWN4, USB_PRODUCT_UNKNOWN4_DM9601 }, 0 }
+>>>>>>> origin/master
 };
 #define udav_lookup(v, p) ((struct udav_type *)usb_lookup(udav_devs, v, p))
 
@@ -187,6 +247,8 @@ USB_ATTACH(udav)
 	printf("%s: %s", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
+	sc->sc_udev = dev;
+
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UDAV_CONFIG_NO, 1);
 	if (err) {
@@ -194,9 +256,17 @@ USB_ATTACH(udav)
 		goto bad;
 	}
 
+<<<<<<< HEAD
 	usb_init_task(&sc->sc_tick_task, udav_tick_task, sc);
 	lockinit(&sc->sc_mii_lock, PZERO, "udavmii", 0, 0);
 	usb_init_task(&sc->sc_stop_task, (void (*)(void *)) udav_stop_task, sc);
+=======
+	usb_init_task(&sc->sc_tick_task, udav_tick_task, sc,
+	    USB_TASK_TYPE_GENERIC);
+	rw_init(&sc->sc_mii_lock, "udavmii");
+	usb_init_task(&sc->sc_stop_task, (void (*)(void *)) udav_stop_task, sc,
+	    USB_TASK_TYPE_GENERIC);
+>>>>>>> origin/master
 
 	/* get control interface */
 	err = usbd_device2interface_handle(dev, UDAV_IFACE_INDEX, &iface);
@@ -205,7 +275,6 @@ USB_ATTACH(udav)
 		goto bad;
 	}
 
-	sc->sc_udev = dev;
 	sc->sc_ctl_iface = iface;
 	sc->sc_flags = udav_lookup(uaa->vendor, uaa->product)->udav_flags;
 
@@ -288,17 +357,27 @@ USB_ATTACH(udav)
 	if_attach(ifp);
 	Ether_ifattach(ifp, eaddr);
 
+<<<<<<< HEAD
 	usb_callout_init(sc->sc_stat_ch);
 	sc->sc_attached = 1;
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, USBDEV(sc->sc_dev));
+=======
+	timeout_set(&sc->sc_stat_ch, udav_tick, sc);
+
+	splx(s);
+>>>>>>> origin/master
 
 	USB_ATTACH_SUCCESS_RETURN;
 
  bad:
+<<<<<<< HEAD
 	sc->sc_dying = 1;
 	USB_ATTACH_ERROR_RETURN;
+=======
+	usbd_deactivate(sc->sc_udev);
+>>>>>>> origin/master
 }
 
 /* detach */
@@ -310,11 +389,13 @@ USB_DETACH(udav)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	/* Detached before attached finished */
-	if (!sc->sc_attached)
-		return (0);
 
+<<<<<<< HEAD
 	usb_uncallout(sc->sc_stat_ch, udav_tick, sc);
+=======
+	if (timeout_initialized(&sc->sc_stat_ch))
+		timeout_del(&sc->sc_stat_ch);
+>>>>>>> origin/master
 
 	/* Remove any pending tasks */
 	usb_rem_task(sc->sc_udev, &sc->sc_tick_task);
@@ -331,8 +412,10 @@ USB_DETACH(udav)
 
 	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
-	ether_ifdetach(ifp);
-	if_detach(ifp);
+	if (ifp->if_softc != NULL) {
+		ether_ifdetach(ifp);
+		if_detach(ifp);
+	}
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_pipe_tx != NULL)
@@ -345,13 +428,14 @@ USB_DETACH(udav)
 		printf("%s: detach has active intr endpoint.\n",
 		       USBDEVNAME(sc->sc_dev));
 #endif
-	sc->sc_attached = 0;
-
 	splx(s);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
@@ -369,7 +453,7 @@ udav_mem_read(struct udav_softc *sc, int offset, void *buf, int len)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xffff;
@@ -406,7 +490,7 @@ udav_mem_write(struct udav_softc *sc, int offset, void *buf, int len)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xffff;
@@ -443,7 +527,7 @@ udav_mem_write1(struct udav_softc *sc, int offset, unsigned char ch)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xffff;
@@ -480,7 +564,7 @@ udav_csr_read(struct udav_softc *sc, int offset, void *buf, int len)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xff;
@@ -517,7 +601,7 @@ udav_csr_write(struct udav_softc *sc, int offset, void *buf, int len)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xff;
@@ -552,9 +636,6 @@ udav_csr_read1(struct udav_softc *sc, int offset)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
-		return (0);
-
 	return (udav_csr_read(sc, offset, &val, 1) ? 0 : val);
 }
 
@@ -571,7 +652,7 @@ udav_csr_write1(struct udav_softc *sc, int offset, unsigned char ch)
 	DPRINTFN(0x200,
 		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	offset &= 0xff;
@@ -603,9 +684,6 @@ udav_init(struct ifnet *ifp)
 	int s;
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
-
-	if (sc->sc_dying)
-		return (EIO);
 
 	s = splnet();
 
@@ -666,7 +744,11 @@ udav_init(struct ifnet *ifp)
 
 	splx(s);
 
+<<<<<<< HEAD
 	usb_callout(sc->sc_stat_ch, hz, udav_tick, sc);
+=======
+	timeout_add_sec(&sc->sc_stat_ch, 1);
+>>>>>>> origin/master
 
 	return (0);
 }
@@ -678,7 +760,7 @@ udav_reset(struct udav_softc *sc)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	/* Select PHY */
@@ -707,7 +789,11 @@ udav_reset(struct udav_softc *sc)
 }
 
 int
+<<<<<<< HEAD
 udav_activate(device_ptr_t self, enum devact act)
+=======
+udav_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct udav_softc *sc = (struct udav_softc *)self;
 
@@ -718,8 +804,12 @@ udav_activate(device_ptr_t self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
+<<<<<<< HEAD
 		if_deactivate(&sc->sc_ec.ec_if);
 		sc->sc_dying = 1;
+=======
+		usbd_deactivate(sc->sc_udev);
+>>>>>>> origin/master
 		break;
 	}
 	return (0);
@@ -741,7 +831,7 @@ udav_setmulti(struct udav_softc *sc)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp = GET_IFP(sc);
@@ -790,7 +880,7 @@ udav_openpipes(struct udav_softc *sc)
 	int i;
 	int error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	sc->sc_refcnt++;
@@ -955,7 +1045,7 @@ udav_start(struct ifnet *ifp)
 	DPRINTF(("%s: %s: enter, link=%d\n", USBDEVNAME(sc->sc_dev),
 		 __func__, sc->sc_link));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (!sc->sc_link)
@@ -1046,7 +1136,7 @@ udav_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	struct ifnet *ifp = GET_IFP(sc);
 	int s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splnet();
@@ -1098,7 +1188,7 @@ udav_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -1196,7 +1286,7 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	s = splnet();
@@ -1207,6 +1297,7 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		mii = GET_MII(sc);
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
+
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		udav_init(ifp);
@@ -1220,12 +1311,6 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1240,29 +1325,22 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				udav_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-			udav_stop(ifp, 1);
+				udav_stop(ifp, 1);
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ac) :
-		    ether_delmulti(ifr, &sc->sc_ac);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				udav_setmulti(sc);
-			error = 0;
-		}
-		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			udav_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1391,7 +1469,7 @@ udav_ifmedia_change(struct ifnet *ifp)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (0);
 
 	sc->sc_link = 0;
@@ -1414,7 +1492,7 @@ udav_ifmedia_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0) {
@@ -1439,9 +1517,6 @@ udav_tick(void *xsc)
 	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
 			__func__));
 
-	if (sc->sc_dying)
-		return;
-
 	/* Perform periodic stuff in process context */
 	usb_add_task(sc->sc_udev, &sc->sc_tick_task);
 }
@@ -1460,7 +1535,7 @@ udav_tick_task(void *xsc)
 	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
 			__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp = GET_IFP(sc);
@@ -1481,7 +1556,11 @@ udav_tick_task(void *xsc)
 			   udav_start(ifp);
 	}
 
+<<<<<<< HEAD
 	usb_callout(sc->sc_stat_ch, hz, udav_tick, sc);
+=======
+	timeout_add_sec(&sc->sc_stat_ch, 1);
+>>>>>>> origin/master
 
 	splx(s);
 }
@@ -1523,7 +1602,7 @@ udav_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	DPRINTFN(0xff, ("%s: %s: enter, phy=%d reg=0x%04x\n",
 		 USBDEVNAME(sc->sc_dev), __func__, phy, reg));
 
-	if (sc->sc_dying) {
+	if (usbd_is_dying(sc->sc_udev)) {
 #ifdef DIAGNOSTIC
 		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
 		       __func__);
@@ -1579,7 +1658,7 @@ udav_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
 	DPRINTFN(0xff, ("%s: %s: enter, phy=%d reg=0x%04x data=0x%04x\n",
 		 USBDEVNAME(sc->sc_dev), __func__, phy, reg, data));
 
-	if (sc->sc_dying) {
+	if (usbd_is_dying(sc->sc_udev)) {
 #ifdef DIAGNOSTIC
 		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
 		       __func__);

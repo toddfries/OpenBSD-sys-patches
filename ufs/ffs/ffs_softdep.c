@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_softdep.c,v 1.84 2007/03/15 10:22:30 art Exp $	*/
+=======
+/*	$OpenBSD: ffs_softdep.c,v 1.102 2010/03/29 23:33:39 krw Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -1029,8 +1033,7 @@ top:
 		ACQUIRE_LOCK(&lk);
 		goto top;
 	}
-	pagedep = pool_get(&pagedep_pool, PR_WAITOK);
-	bzero(pagedep, sizeof(struct pagedep));
+	pagedep = pool_get(&pagedep_pool, PR_WAITOK | PR_ZERO);
 	pagedep->pd_list.wk_type = D_PAGEDEP;
 	pagedep->pd_mnt = mp;
 	pagedep->pd_ino = ip->i_number;
@@ -1454,8 +1457,7 @@ softdep_setup_allocdirect(ip, lbn, newblkno, oldblkno, newsize, oldsize, bp)
 	struct pagedep *pagedep;
 	struct newblk *newblk;
 
-	adp = pool_get(&allocdirect_pool, PR_WAITOK);
-	bzero(adp, sizeof(struct allocdirect));
+	adp = pool_get(&allocdirect_pool, PR_WAITOK | PR_ZERO);
 	adp->ad_list.wk_type = D_ALLOCDIRECT;
 	adp->ad_lbn = lbn;
 	adp->ad_newblkno = newblkno;
@@ -1702,8 +1704,7 @@ newallocindir(ip, ptrno, newblkno, oldblkno)
 {
 	struct allocindir *aip;
 
-	aip = pool_get(&allocindir_pool, PR_WAITOK);
-	bzero(aip,sizeof(struct allocindir));
+	aip = pool_get(&allocindir_pool, PR_WAITOK | PR_ZERO);
 	aip->ai_list.wk_type = D_ALLOCINDIR;
 	aip->ai_state = ATTACHED;
 	aip->ai_offset = ptrno;
@@ -1930,8 +1931,7 @@ softdep_setup_freeblocks(ip, length)
 	fs = ip->i_fs;
 	if (length != 0)
 		panic("softdep_setup_freeblocks: non-zero length");
-	freeblks = pool_get(&freeblks_pool, PR_WAITOK);
-	bzero(freeblks, sizeof(struct freeblks));
+	freeblks = pool_get(&freeblks_pool, PR_WAITOK | PR_ZERO);
 	freeblks->fb_list.wk_type = D_FREEBLKS;
 	freeblks->fb_state = ATTACHED;
 	freeblks->fb_uid = DIP(ip, uid);
@@ -2623,8 +2623,7 @@ softdep_setup_directory_add(bp, dp, diroffset, newinum, newdirbp, isnewblk)
 	fs = dp->i_fs;
 	lbn = lblkno(fs, diroffset);
 	offset = blkoff(fs, diroffset);
-	dap = pool_get(&diradd_pool, PR_WAITOK);
-	bzero(dap,sizeof(struct diradd));
+	dap = pool_get(&diradd_pool, PR_WAITOK | PR_ZERO);
 	dap->da_list.wk_type = D_DIRADD;
 	dap->da_offset = offset;
 	dap->da_newinum = newinum;
@@ -2931,8 +2930,7 @@ newdirrem(bp, dp, ip, isrmdir, prevdirremp)
 	if (num_dirrem > max_softdeps / 2)
 		(void) request_cleanup(FLUSH_REMOVE, 0);
 	num_dirrem += 1;
-	dirrem = pool_get(&dirrem_pool, PR_WAITOK);
-	bzero(dirrem,sizeof(struct dirrem));
+	dirrem = pool_get(&dirrem_pool, PR_WAITOK | PR_ZERO);
 	dirrem->dm_list.wk_type = D_DIRREM;
 	dirrem->dm_state = isrmdir ? RMDIR : 0;
 	dirrem->dm_mnt = ITOV(ip)->v_mount;
@@ -3020,14 +3018,13 @@ softdep_setup_directory_change(bp, dp, ip, newinum, isrmdir)
 	int isrmdir;		/* indicates if doing RMDIR */
 {
 	int offset;
-	struct diradd *dap = NULL;
+	struct diradd *dap;
 	struct dirrem *dirrem, *prevdirrem;
 	struct pagedep *pagedep;
 	struct inodedep *inodedep;
 
 	offset = blkoff(dp->i_fs, dp->i_offset);
-	dap = pool_get(&diradd_pool, PR_WAITOK);
-	bzero(dap,sizeof(struct diradd));
+	dap = pool_get(&diradd_pool, PR_WAITOK | PR_ZERO);
 	dap->da_list.wk_type = D_DIRADD;
 	dap->da_state = DIRCHG | ATTACHED | DEPCOMPLETE;
 	dap->da_offset = offset;
@@ -4692,9 +4689,9 @@ softdep_fsync_mountdev(vp, waitfor)
 		/* 
 		 * If it is already scheduled, skip to the next buffer.
 		 */
+		splassert(IPL_BIO);
 		if (bp->b_flags & B_BUSY)
 			continue;
-		bp->b_flags |= B_BUSY;
 
 		if ((bp->b_flags & B_DELWRI) == 0) {
 			FREE_LOCK(&lk);
@@ -4706,10 +4703,10 @@ softdep_fsync_mountdev(vp, waitfor)
 		 */
 		if ((wk = LIST_FIRST(&bp->b_dep)) == NULL ||
 		    wk->wk_type != D_BMSAFEMAP) {
-			bp->b_flags &= ~B_BUSY;
 			continue;
 		}
 		bremfree(bp);
+		buf_acquire(bp);
 		FREE_LOCK(&lk);
 		(void) bawrite(bp);
 		ACQUIRE_LOCK(&lk);
@@ -5424,7 +5421,7 @@ clear_inodedeps(p)
 	struct proc *p;
 {
 	struct inodedep_hashhead *inodedephd;
-	struct inodedep *inodedep;
+	struct inodedep *inodedep = NULL;
 	static int next = 0;
 	struct mount *mp;
 	struct vnode *vp;
@@ -5616,7 +5613,7 @@ getdirtybuf(bp, waitfor)
 	if ((bp->b_flags & B_DELWRI) == 0)
 		return (0);
 	bremfree(bp);
-	bp->b_flags |= B_BUSY;
+	buf_acquire(bp);
 	return (1);
 }
 
@@ -5731,7 +5728,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_NEWBLK:
 		newblk = WK_NEWBLK(wk);
-		(*pr)("fs %p newblk %d state %d bmsafemap %p\n",
+		(*pr)("fs %p newblk %lld state %d bmsafemap %p\n",
 		    newblk->nb_fs, newblk->nb_newblkno, newblk->nb_state,
 		    newblk->nb_bmsafemap);
 		break;
@@ -5761,7 +5758,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_FREEFRAG:
 		freefrag = WK_FREEFRAG(wk);
-		(*pr)("vnode %p mp %p blkno %d fsize %ld ino %u\n",
+		(*pr)("vnode %p mp %p blkno %lld fsize %ld ino %u\n",
 		    freefrag->ff_devvp, freefrag->ff_mnt, freefrag->ff_blkno,
 		    freefrag->ff_fragsize, freefrag->ff_inum);
 		break;

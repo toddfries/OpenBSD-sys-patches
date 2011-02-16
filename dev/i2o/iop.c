@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: iop.c,v 1.28 2006/03/07 20:46:46 brad Exp $	*/
+=======
+/*	$OpenBSD: iop.c,v 1.37 2010/01/13 00:31:04 chl Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: iop.c,v 1.12 2001/03/21 14:27:05 ad Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -405,7 +402,7 @@ iop_init(struct iop_softc *sc, const char *intrstr)
 	    sc->sc_maxob, letoh32(sc->sc_status.maxoutboundmframes));
 #endif
 
-	lockinit(&sc->sc_conflock, PRIBIO, "iopconf", 0, 0);
+	rw_init(&sc->sc_conflock, "iopconf");
 
 	startuphook_establish((void (*)(void *))iop_config_interrupts, sc);
 	return;
@@ -545,12 +542,13 @@ iop_config_interrupts(struct device *self)
 	config_found_sm(self, &ia, iop_vendor_print, iop_submatch);
 #endif
 
-	lockmgr(&sc->sc_conflock, LK_EXCLUSIVE, NULL);
-	if ((rv = iop_reconfigure(sc, 0)) == -1) {
+	rw_enter_write(&sc->sc_conflock);
+	rv = iop_reconfigure(sc, 0);
+	rw_exit_write(&sc->sc_conflock);
+	if (rv == -1) {
 		printf("%s: configure failed (%d)\n", sc->sc_dv.dv_xname, rv);
 		return;
 	}
-	lockmgr(&sc->sc_conflock, LK_RELEASE, NULL);
 	kthread_create_deferred(iop_create_reconf_thread, sc);
 }
 
@@ -599,11 +597,11 @@ iop_reconf_thread(void *cookie)
 		DPRINTF(("%s: async reconfig: notified (0x%08x, %d)\n",
 		    sc->sc_dv.dv_xname, letoh32(lct.changeindicator), rv));
 
-		if (rv == 0 &&
-		    lockmgr(&sc->sc_conflock, LK_EXCLUSIVE, NULL) == 0) {
+		if (rv == 0) {
+			rw_enter_write(&sc->sc_conflock);
 			iop_reconfigure(sc, letoh32(lct.changeindicator));
 			chgind = sc->sc_chgind + 1;
-			lockmgr(&sc->sc_conflock, LK_RELEASE, NULL);
+			rw_exit_write(&sc->sc_conflock);
 		}
 
 		tsleep(iop_reconf_thread, PWAIT, "iopzzz", hz * 5);
@@ -1149,7 +1147,7 @@ iop_lct_get(struct iop_softc *sc)
 	struct i2o_lct *lct;
 
 	esize = letoh32(sc->sc_status.expectedlctsize);
-	lct = (struct i2o_lct *)malloc(esize, M_DEVBUF, M_WAITOK);
+	lct = malloc(esize, M_DEVBUF, M_WAITOK | M_CANFAIL);
 	if (lct == NULL)
 		return (ENOMEM);
 
@@ -1161,7 +1159,7 @@ iop_lct_get(struct iop_softc *sc)
 	size = letoh16(lct->tablesize) << 2;
 	if (esize != size) {
 		free(lct, M_DEVBUF);
-		lct = (struct i2o_lct *)malloc(size, M_DEVBUF, M_WAITOK);
+		lct = malloc(size, M_DEVBUF, M_WAITOK | M_CANFAIL);
 		if (lct == NULL)
 			return (ENOMEM);
 
@@ -1199,11 +1197,13 @@ iop_param_op(struct iop_softc *sc, int tid, struct iop_initiator *ii,
 	u_int32_t mb[IOP_MAX_MSG_SIZE / sizeof(u_int32_t)];
 
 	im = iop_msg_alloc(sc, ii, (ii == NULL ? IM_WAIT : 0) | IM_NOSTATUS);
-	if ((pgop = malloc(sizeof(*pgop), M_DEVBUF, M_WAITOK)) == NULL) {
+	pgop = malloc(sizeof(*pgop), M_DEVBUF, M_WAITOK | M_CANFAIL);
+	if (pgop == NULL) {
 		iop_msg_free(sc, im);
 		return (ENOMEM);
 	}
-	if ((rf = malloc(sizeof(*rf), M_DEVBUF, M_WAITOK)) == NULL) {
+	rf = malloc(sizeof(*rf), M_DEVBUF, M_WAITOK | M_CANFAIL);
+	if (rf == NULL) {
 		iop_msg_free(sc, im);
 		free(pgop, M_DEVBUF);
 		return (ENOMEM);
@@ -1616,10 +1616,8 @@ void
 iop_intr_event(struct device *dv, struct iop_msg *im, void *reply)
 {
 	struct i2o_util_event_register_reply *rb;
-	struct iop_softc *sc;
 	u_int event;
 
-	sc = (struct iop_softc *)dv;
 	rb = reply;
 
 	if ((rb->msgflags & I2O_MSGFLAGS_FAIL) != 0)
@@ -2316,7 +2314,7 @@ iopopen(dev_t dev, int flag, int mode, struct proc *p)
 	sc->sc_flags |= IOP_OPEN;
 
 	sc->sc_ptb = malloc(IOP_MAX_XFER * IOP_MAX_MSG_XFERS, M_DEVBUF,
-	    M_WAITOK);
+	    M_WAITOK | M_CANFAIL);
 	if (sc->sc_ptb == NULL) {
 		sc->sc_flags ^= IOP_OPEN;
 		return (ENOMEM);
@@ -2375,8 +2373,7 @@ iopioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		return (ENOTTY);
 	}
 
-	if ((rv = lockmgr(&sc->sc_conflock, LK_SHARED, NULL)) != 0)
-		return (rv);
+	rw_enter_read(&sc->sc_conflock);
 
 	switch (cmd) {
 	case IOPIOCGLCT:
@@ -2404,7 +2401,7 @@ iopioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 
-	lockmgr(&sc->sc_conflock, LK_RELEASE, NULL);
+	rw_exit_read(&sc->sc_conflock);
 	return (rv);
 }
 
@@ -2435,7 +2432,7 @@ iop_passthrough(struct iop_softc *sc, struct ioppt *pt)
 			goto bad;
 		}
 
-	mf = malloc(IOP_MAX_MSG_SIZE, M_DEVBUF, M_WAITOK);
+	mf = malloc(IOP_MAX_MSG_SIZE, M_DEVBUF, M_WAITOK | M_CANFAIL);
 	if (mf == NULL)
 		return (ENOMEM);
 

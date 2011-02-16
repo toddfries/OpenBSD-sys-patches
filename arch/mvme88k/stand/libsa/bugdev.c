@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugdev.c,v 1.2 2002/03/14 01:26:40 millert Exp $ */
+/*	$OpenBSD: bugdev.c,v 1.6 2010/04/23 15:25:20 jsing Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -193,36 +193,7 @@ cputobsdlabel(lp, clp)
 	lp->d_secperunit = clp->secperunit;
 	lp->d_secpercyl = clp->secpercyl;
 	lp->d_secperunit = clp->secperunit;
-	lp->d_sparespertrack = clp->sparespertrack;
-	lp->d_sparespercyl = clp->sparespercyl;
 	lp->d_acylinders = clp->acylinders;
-	lp->d_rpm = clp->rpm;
-	lp->d_interleave = clp->cfg_ilv;
-	lp->d_trackskew = clp->cfg_sof;
-	lp->d_cylskew = clp->cylskew;
-	lp->d_headswitch = clp->headswitch;
-
-	/* this silly table is for winchester drives */
-	switch (clp->cfg_ssr) {
-	case 0:
-		lp->d_trkseek = 0;
-		break;
-	case 1:
-		lp->d_trkseek = 6;
-		break;
-	case 2:
-		lp->d_trkseek = 10;
-		break;
-	case 3:
-		lp->d_trkseek = 15;
-		break;
-	case 4:
-		lp->d_trkseek = 20;
-		break;
-	default:
-		lp->d_trkseek = 0;
-		break;
-	}
 	lp->d_flags = clp->flags;
 	for (i = 0; i < NDDATA; i++)
 		lp->d_drivedata[i] = clp->drivedata[i];

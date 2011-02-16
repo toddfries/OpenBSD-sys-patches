@@ -1,6 +1,7 @@
-/*	$OpenBSD: _types.h,v 1.1 2006/01/06 18:50:09 millert Exp $	*/
+/*	$OpenBSD: _types.h,v 1.4 2009/03/09 19:51:18 miod Exp $	*/
 
 /* public domain */
 #include <m88k/_types.h>
 
-#define	__HAVE_DEVICE_REGISTER
+/* Feature test macros */
+#define	__HAVE_TIMECOUNTER

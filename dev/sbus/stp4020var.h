@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: stp4020var.h,v 1.2 2003/06/25 17:36:49 miod Exp $	*/
+=======
+/*	$OpenBSD: stp4020var.h,v 1.5 2009/04/10 20:54:59 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: stp4020.c,v 1.23 2002/06/01 23:51:03 lukem Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -53,13 +50,15 @@ struct stp4020_socket {
 #define	STP4020_SOCKET_ENABLING	0x0004
 	int		sense;
 	int		sock;		/* Socket number (0 or 1) */
+	int		int_enable;	/* ICR0 value for interrupt enabled */
+	int		int_disable;	/* ICR0 value for interrupt disabled */
 	bus_space_tag_t	tag;		/* socket control space */
 	bus_space_handle_t	regs;	/* 			*/
 	struct device	*pcmcia;	/* Associated PCMCIA device */
 	int		(*intrhandler)	/* Card driver interrupt handler */
 			    (void *);
 	void		*intrarg;	/* Card interrupt handler argument */
-	int		ipl;		/* Interrupt level suggested by card */
+	void		*softint;	/* softintr cookie */
 	bus_space_tag_t	wintag;		/* windows access tag */
 	struct {
 		bus_space_handle_t	winaddr;/* this window's address */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.c,v 1.23 2005/09/25 20:48:21 miod Exp $	*/
+/*	$OpenBSD: gdt.c,v 1.30 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: gdt.c,v 1.28 2002/12/14 09:38:50 junyoung Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,15 +34,11 @@
  * The GDT handling has two phases.  During the early lifetime of the
  * kernel there is a static gdt which will be stored in bootstrap_gdt.
  * Later, when the virtual memory is initialized, this will be
- * replaced with a dynamically resizable GDT (although, we will only
- * ever be growing it, there is almost no gain at all to compact it,
- * and it has proven to be a complicated thing to do, considering
- * parallel access, so it's just not worth the effort.
+ * replaced with a maximum sized GDT.
  *
- * The static GDT area will hold the initial requirement of NGDT descriptors.
- * The dynamic GDT will have a statically sized virtual memory area of size
- * GDTMAXPAGES, the physical area backing this will be allocated as needed
- * starting with the size needed for holding a copy of the bootstrap gdt.
+ * The bootstrap GDT area will hold the initial requirement of NGDT
+ * descriptors.  The normal GDT will have a statically sized virtual memory
+ * area of size MAXGDTSIZ.
  *
  * Every CPU in a system has its own copy of the GDT.  The only real difference
  * between the two are currently that there is a cpu-specific segment holding
@@ -64,46 +53,29 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/lock.h>
-#include <sys/user.h>
+#include <sys/mutex.h>
 
 #include <uvm/uvm.h>
 
 #include <machine/gdt.h>
+#include <machine/pcb.h>
 
 union descriptor bootstrap_gdt[NGDT];
 union descriptor *gdt = bootstrap_gdt;
 
-int gdt_size;		/* total number of GDT entries */
-int gdt_count;		/* number of GDT entries in use */
 int gdt_next;		/* next available slot for sweeping */
 int gdt_free;		/* next free slot; terminated with GNULL_SEL */
 
-struct simplelock gdt_simplelock;
-struct lock gdt_lock_store;
+struct mutex gdt_lock_store = MUTEX_INITIALIZER(IPL_HIGH);
 
-static __inline void gdt_lock(void);
-static __inline void gdt_unlock(void);
-void gdt_grow(void);
 int gdt_get_slot(void);
 void gdt_put_slot(int);
 
 /*
- * Lock and unlock the GDT, to avoid races in case gdt_{ge,pu}t_slot() sleep
- * waiting for memory.
+ * Lock and unlock the GDT.
  */
-static __inline void
-gdt_lock()
-{
-	if (curproc != NULL)
-		lockmgr(&gdt_lock_store, LK_EXCLUSIVE, &gdt_simplelock);
-}
-
-static __inline void
-gdt_unlock()
-{
-	if (curproc != NULL)
-		lockmgr(&gdt_lock_store, LK_RELEASE, &gdt_simplelock);
-}
+#define gdt_lock()	(mtx_enter(&gdt_lock_store))
+#define gdt_unlock()	(mtx_leave(&gdt_lock_store))
 
 /* XXX needs spinlocking if we ever mean to go finegrained. */
 void
@@ -113,6 +85,8 @@ setgdt(int sel, void *base, size_t limit, int type, int dpl, int def32,
 	struct segment_descriptor *sd = &gdt[sel].sd;
 	CPU_INFO_ITERATOR cii;
 	struct cpu_info *ci;
+
+	KASSERT(sel < MAXGDTSIZ);
 
 	setsegment(sd, base, limit, type, dpl, def32, gran);
 	CPU_INFO_FOREACH(cii, ci)
@@ -126,24 +100,16 @@ setgdt(int sel, void *base, size_t limit, int type, int dpl, int def32,
 void
 gdt_init()
 {
-	size_t max_len, min_len;
 	struct vm_page *pg;
 	vaddr_t va;
 	struct cpu_info *ci = &cpu_info_primary;
 
-	simple_lock_init(&gdt_simplelock);
-	lockinit(&gdt_lock_store, PZERO, "gdtlck", 0, 0);
-
-	max_len = MAXGDTSIZ * sizeof(union descriptor);
-	min_len = MINGDTSIZ * sizeof(union descriptor);
-
-	gdt_size = MINGDTSIZ;
-	gdt_count = NGDT;
 	gdt_next = NGDT;
 	gdt_free = GNULL_SEL;
 
-	gdt = (union descriptor *)uvm_km_valloc(kernel_map, max_len);
-	for (va = (vaddr_t)gdt; va < (vaddr_t)gdt + min_len; va += PAGE_SIZE) {
+	gdt = (union descriptor *)uvm_km_valloc(kernel_map, MAXGDTSIZ);
+	for (va = (vaddr_t)gdt; va < (vaddr_t)gdt + MAXGDTSIZ;
+	    va += PAGE_SIZE) {
 		pg = uvm_pagealloc(NULL, 0, NULL, UVM_PGA_ZERO);
 		if (pg == NULL)
 			panic("gdt_init: no pages");
@@ -165,14 +131,22 @@ gdt_init()
 void
 gdt_alloc_cpu(struct cpu_info *ci)
 {
-	int max_len = MAXGDTSIZ * sizeof(union descriptor);
-	int min_len = MINGDTSIZ * sizeof(union descriptor);
+	struct vm_page *pg;
+	vaddr_t va;
 
-	ci->ci_gdt = (union descriptor *)uvm_km_valloc(kernel_map, max_len);
+	ci->ci_gdt = (union descriptor *)uvm_km_valloc(kernel_map, MAXGDTSIZ);
 	uvm_map_pageable(kernel_map, (vaddr_t)ci->ci_gdt,
-	    (vaddr_t)ci->ci_gdt + min_len, FALSE, FALSE);
-	bzero(ci->ci_gdt, min_len);
-	bcopy(gdt, ci->ci_gdt, gdt_count * sizeof(union descriptor));
+	    (vaddr_t)ci->ci_gdt + MAXGDTSIZ, FALSE, FALSE);
+	for (va = (vaddr_t)ci->ci_gdt; va < (vaddr_t)ci->ci_gdt + MAXGDTSIZ;
+	    va += PAGE_SIZE) {
+		pg = uvm_pagealloc(NULL, 0, NULL, UVM_PGA_ZERO);
+		if (pg == NULL)
+			panic("gdt_init: no pages");
+		pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg),
+		    VM_PROT_READ | VM_PROT_WRITE);
+	}
+	bzero(ci->ci_gdt, MAXGDTSIZ);
+	bcopy(gdt, ci->ci_gdt, MAXGDTSIZ);
 	setsegment(&ci->ci_gdt[GCPU_SEL].sd, ci, sizeof(struct cpu_info)-1,
 	    SDT_MEMRWA, SEL_KPL, 0, 0);
 }
@@ -188,50 +162,15 @@ gdt_init_cpu(struct cpu_info *ci)
 {
 	struct region_descriptor region;
 
-	setregion(&region, ci->ci_gdt,
-	    MAXGDTSIZ * sizeof(union descriptor) - 1);
+	setregion(&region, ci->ci_gdt, MAXGDTSIZ - 1);
 	lgdt(&region);
-}
-
-/*
- * Grow the GDT.
- */
-void
-gdt_grow()
-{
-	size_t old_len, new_len;
-	CPU_INFO_ITERATOR cii;
-	struct cpu_info *ci;
-	struct vm_page *pg;
-	vaddr_t va;
-
-	old_len = gdt_size * sizeof(union descriptor);
-	gdt_size <<= 1;
-	new_len = old_len << 1;
-
-	CPU_INFO_FOREACH(cii, ci) {
-		for (va = (vaddr_t)(ci->ci_gdt) + old_len;
-		     va < (vaddr_t)(ci->ci_gdt) + new_len;
-		     va += PAGE_SIZE) {
-			while (
-			    (pg =
-			    uvm_pagealloc(NULL, 0, NULL, UVM_PGA_ZERO)) ==
-			    NULL) {
-				uvm_wait("gdt_grow");
-			}
-			pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-		}
-	}
 }
 
 /*
  * Allocate a GDT slot as follows:
  * 1) If there are entries on the free list, use those.
- * 2) If there are fewer than gdt_size entries in use, there are free slots
+ * 2) If there are fewer than MAXGDTSIZ entries in use, there are free slots
  *    near the end that we can sweep through.
- * 3) As a last resort, we increase the size of the GDT, and sweep through
- *    the new slots.
  */
 int
 gdt_get_slot()
@@ -244,13 +183,8 @@ gdt_get_slot()
 		slot = gdt_free;
 		gdt_free = gdt[slot].gd.gd_selector;
 	} else {
-		if (gdt_next != gdt_count)
-			panic("gdt_get_slot: gdt_next != gdt_count");
-		if (gdt_next >= gdt_size) {
-			if (gdt_size >= MAXGDTSIZ)
-				panic("gdt_get_slot: out of GDT descriptors");
-			gdt_grow();
-		}
+		if (gdt_next >= MAXGDTSIZ)
+			panic("gdt_get_slot: out of GDT descriptors");
 		slot = gdt_next++;
 	}
 

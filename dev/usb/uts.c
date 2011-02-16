@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uts.c,v 1.2 2007/03/23 14:35:19 robert Exp $ */
+=======
+/*	$OpenBSD: uts.c,v 1.28 2011/01/25 20:03:36 jakemsr Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org> 
@@ -104,14 +108,31 @@ const struct wsmouse_accessops uts_accessops = {
 	uts_disable,
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uts);
+=======
+int uts_match(struct device *, void *, void *);
+void uts_attach(struct device *, struct device *, void *);
+int uts_detach(struct device *, int);
+int uts_activate(struct device *, int);
+>>>>>>> origin/master
 
 USB_MATCH(uts)
 {
+<<<<<<< HEAD
 	USB_MATCH_START(uts, uaa);
+=======
+	struct usb_attach_arg *uaa = aux;
+	usb_interface_descriptor_t *id;
+>>>>>>> origin/master
 
 	if (uaa->iface == NULL)
 		return UMATCH_NONE;
+
+	/* Some eGalax touch screens are HID devices. ignore them */
+	id = usbd_get_interface_descriptor(uaa->iface);
+	if (id != NULL && id->bInterfaceClass == UICLASS_HID)
+		return (UMATCH_NONE);
 
 	return (usb_lookup(uts_devs, uaa->vendor, uaa->product) != NULL) ?
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
@@ -124,8 +145,12 @@ USB_ATTACH(uts)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct wsmousedev_attach_args a;
+<<<<<<< HEAD
 	char *devinfop;
 	int i, found;
+=======
+	int i;
+>>>>>>> origin/master
 
 	sc->sc_udev = uaa->device;
 	sc->sc_product = uaa->product;
@@ -168,7 +193,6 @@ USB_ATTACH(uts)
 	/* Find the interrupt endpoint */
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 	sc->sc_iface_number = id->bInterfaceNumber;
-	found = 0;
 
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
@@ -193,9 +217,12 @@ USB_ATTACH(uts)
 		USB_ATTACH_ERROR_RETURN;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	a.accessops = &uts_accessops;
 	a.accesscookie = sc;
 
@@ -215,21 +242,26 @@ USB_DETACH(uts)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
-
 	if (sc->sc_wsmousedev != NULL) {
 		rv = config_detach(sc->sc_wsmousedev, flags);
 		sc->sc_wsmousedev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 uts_activate(device_ptr_t self, enum devact act)
+=======
+uts_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uts_softc *sc = (struct uts_softc *)self;
 	int rv = 0;
@@ -332,10 +364,35 @@ uts_get_pos(usbd_private_handle addr, struct uts_pos tp)
 		break;
 	case USB_PRODUCT_EGALAX_TPANEL:
 	case USB_PRODUCT_EGALAX_TPANEL2:
+<<<<<<< HEAD
 		down = (p[0] & 0x01);
 		x = ((p[3] & 0x0f) << 7) | (p[4] & 0x7f);
 		y = ((p[1] & 0x0f) << 7) | (p[2] & 0x7f);
 		sc->sc_pkts = 5;
+=======
+		/*
+		 * eGalax and Gunze USB touch panels have the same device ID,
+		 * so decide upon the vendor ID.
+		 */
+		switch (sc->sc_vendor) {
+		case USB_VENDOR_EGALAX:
+			down = (p[0] & 0x01);
+			/* Invert the X coordinate */
+			x = 0x07ff - abs(((p[3] & 0x0f) << 7) | (p[4] & 0x7f));
+			y = ((p[1] & 0x0f) << 7) | (p[2] & 0x7f);
+			z = down;
+			sc->sc_pkts = 0x5;
+			break;
+		case USB_VENDOR_GUNZE:
+			down = (~p[7] & 0x20);
+			/* Invert the X coordinate */
+			x = 0x0fff - abs(((p[0] & 0x1f) << 7) | (p[2] & 0x7f));
+			y = ((p[1] & 0x1f) << 7) | (p[3] & 0x7f);
+			z = (down != 0);
+			sc->sc_pkts = 0x4;
+			break;
+		}
+>>>>>>> origin/master
 		break;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.73 2007/02/27 15:16:30 marco Exp $	*/
+/*	$OpenBSD: apm.c,v 1.96 2011/01/13 23:19:36 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -47,13 +47,13 @@
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/buf.h>
 #include <sys/event.h>
-#include <sys/mount.h>	/* for vfs_syncwait() proto */
 
 #include <machine/conf.h>
 #include <machine/cpu.h>
@@ -65,9 +65,12 @@
 #include <i386/isa/isa_machdep.h>
 #include <i386/isa/nvram.h>
 #include <dev/isa/isavar.h>
+#include <dev/wscons/wsdisplayvar.h>
 
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+
+#include "wsdisplay.h"
 
 #if defined(APMDEBUG)
 #define DPRINTF(x)	printf x
@@ -135,6 +138,7 @@ int	cpu_apmwarn = 10;
 #define APMDEV_CTL	8
 
 int	apm_standbys;
+int	apm_lidclose;
 int	apm_userstandbys;
 int	apm_suspends;
 int	apm_resumes;
@@ -180,8 +184,7 @@ int  apm_record_event(struct apm_softc *sc, u_int type);
 const char *apm_err_translate(int code);
 
 #define	apm_get_powstat(r) apmcall(APM_POWER_STATUS, APM_DEV_ALLDEVS, r)
-void	apm_standby(void);
-void	apm_suspend(void);
+void	apm_suspend(int);
 void	apm_resume(struct apm_softc *, struct apmregs *);
 
 static int __inline
@@ -320,48 +323,53 @@ apm_power_print (struct apm_softc *sc, struct apmregs *regs)
 }
 
 void
-apm_suspend()
+apm_suspend(int state)
 {
-	dopowerhooks(PWR_SUSPEND);
+	extern int perflevel;
+	int s;
 
-	if (cold)
-		vfs_syncwait(0);
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
+	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_SUSPEND);
-}
+	s = splhigh();
+	disable_intr();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
 
-void
-apm_standby()
-{
-	dopowerhooks(PWR_STANDBY);
+	/* Send machine to sleep */
+	apm_set_powstate(APM_DEV_ALLDEVS, state);
+	/* Wake up  */
 
-	if (cold)
-		vfs_syncwait(0);
+	/* They say that some machines may require reinitializing the clocks */
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
+	inittodr(time_second);
 
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_STANDBY);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	enable_intr();
+	splx(s);
+
+	/* restore hw.setperf */
+	if (cpu_setperf != NULL)
+		cpu_setperf(perflevel);
+	bufq_restart();
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
 void
 apm_resume(struct apm_softc *sc, struct apmregs *regs)
 {
-	extern int perflevel;
 
 	apm_resumes = APM_RESUME_HOLDOFF;
 
-	/* they say that some machines may require reinitializing the clock */
-	initrtclock();
-
-	inittodr(time_second);
 	/* lower bit in cx means pccard was powered down */
-	dopowerhooks(PWR_RESUME);
-	apm_record_event(sc, regs->bx);
-	
-	/* acknowledge any rtc interrupt we may have missed */
-	rtcdrain(NULL);
 
-	/* restore hw.setperf */
-	if (cpu_setperf != NULL)
-		cpu_setperf(perflevel);
+	apm_record_event(sc, regs->bx);
 }
 
 int
@@ -470,7 +478,7 @@ apm_handle_event(struct apm_softc *sc, struct apmregs *regs)
 	case APM_CRIT_SUSPEND_REQ:
 		DPRINTF(("suspend required immediately\n"));
 		apm_record_event(sc, regs->bx);
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 		break;
 	case APM_BATTERY_LOW:
 		DPRINTF(("Battery low!\n"));
@@ -523,6 +531,9 @@ apm_periodic_check(struct apm_softc *sc)
 			break;
 		}
 
+		/* If the APM BIOS tells us to suspend, don't do it twice */
+		if (regs.bx == APM_SUSPEND_REQ)
+			apm_lidclose = 0;
 		if (apm_handle_event(sc, &regs))
 			break;
 	}
@@ -530,12 +541,18 @@ apm_periodic_check(struct apm_softc *sc)
 	if (apm_error || APM_ERR_CODE(&regs) == APM_ERR_NOTCONN)
 		ret = -1;
 
+	if (apm_lidclose) {
+		apm_lidclose = 0;
+		/* Fake a suspend request */
+		regs.bx = APM_SUSPEND_REQ;
+		apm_handle_event(sc, &regs);
+	}
 	if (apm_suspends /*|| (apm_battlow && apm_userstandbys)*/) {
 		apm_op_inprog = 0;
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 	} else if (apm_standbys || apm_userstandbys) {
 		apm_op_inprog = 0;
-		apm_standby();
+		apm_suspend(APM_SYS_STANDBY);
 	}
 	apm_suspends = apm_standbys = apm_battlow = apm_userstandbys = 0;
 	apm_error = 0;
@@ -756,11 +773,9 @@ apmprobe(struct device *parent, void *match, void *aux)
 	bios_apminfo_t *ap = ba->bios_apmp;
 	bus_space_handle_t ch, dh;
 
-	if (apm_cd.cd_ndevs || strcmp(ba->bios_dev, "apm") ||
-	    !(ba->bios_apmp->apm_detail & APM_32BIT_SUPPORTED)) {
-		DPRINTF(("%s: %x\n", ba->bios_dev, ba->bios_apmp->apm_detail));
+	if (apm_cd.cd_ndevs || strcmp(ba->ba_name, "apm") ||
+	    !(ap->apm_detail & APM_32BIT_SUPPORTED))
 		return 0;
-	}
 
 	/* addresses check
 	   since pc* console and vga* probes much later
@@ -1125,7 +1140,20 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			error = EIO;
 		}
 		break;
-
+	case APM_IOC_STANDBY_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_STANDBY_REQ))
+			error = EINVAL; /* ? */
+		break;
+	case APM_IOC_SUSPEND_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_SUSPEND_REQ))
+			error = EINVAL; /* ? */
+		break;
 	default:
 		error = ENOTTY;
 	}

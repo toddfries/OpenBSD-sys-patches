@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: vfs_getcwd.c,v 1.8 2006/05/01 21:50:48 pedro Exp $ */
+=======
+/* $OpenBSD: vfs_getcwd.c,v 1.17 2010/05/19 08:31:23 thib Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,7 +92,6 @@ vfs_getcwd_scandir(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	cn.cn_pnbuf = NULL;
 	cn.cn_nameptr = "..";
 	cn.cn_namelen = 2;
-	cn.cn_hash = 0;
 	cn.cn_consume = 0;
 
 	/* Get parent vnode using lookup of '..' */
@@ -216,6 +212,10 @@ vfs_getcwd_getcache(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	int error, vpid;
 
 	lvp = *lvpp;
+<<<<<<< HEAD
+=======
+	obp = *bpp;	/* Save original position to restore to on error */
+>>>>>>> origin/master
 
 	error = cache_revlookup(lvp, uvpp, bpp, bufp);
 	if (error) {
@@ -282,8 +282,8 @@ vfs_getcwd_common(struct vnode *lvp, struct vnode *rvp, char **bpp, char *bufp,
 			rvp = rootvnode;
 	}
 
-	VREF(rvp);
-	VREF(lvp);
+	vref(rvp);
+	vref(lvp);
 
 	error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (error) {
@@ -336,7 +336,7 @@ vfs_getcwd_common(struct vnode *lvp, struct vnode *rvp, char **bpp, char *bufp,
 				goto out;
 			}
 
-			VREF(lvp);
+			vref(lvp);
 
 			error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, p);
 			if (error) {
@@ -388,22 +388,6 @@ out:
 	vrele(rvp);
 
 	return (error);
-}
-
-/* True if p1's root directory is equal to or under p2's root directory */
-int
-proc_isunder(struct proc *p1, struct proc *p2)
-{
-	struct vnode *r1 = p1->p_fd->fd_rdir;
-	struct vnode *r2 = p2->p_fd->fd_rdir;
-
-	if (r1 == NULL)
-		return (r2 == NULL);
-
-	if (r2 == NULL)
-		return (1);
-
-	return (vn_isunder(r1, r2, p2));
 }
 
 /* Find pathname of a process's current directory */

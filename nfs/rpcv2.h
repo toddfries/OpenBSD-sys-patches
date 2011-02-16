@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rpcv2.h,v 1.5 2002/06/11 15:45:44 hin Exp $	*/
+=======
+/*	$OpenBSD: rpcv2.h,v 1.8 2008/07/04 16:49:28 blambert Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rpcv2.h,v 1.8 1996/02/18 11:54:11 fvdl Exp $	*/
 
 /*
@@ -52,7 +56,6 @@
 #define	RPCAUTH_UNIX	1
 #define	RPCAUTH_SHORT	2
 #define RPCAUTH_KERB4	4
-#define	RPCAUTH_NQNFS	300000
 #define	RPCAUTH_MAXSIZ	400
 #define	RPCVERF_MAXSIZ	12	/* For Kerb, can actually be 400 */
 #define	RPCAUTH_UNIXGIDS 16
@@ -98,45 +101,5 @@
 #define	RPCMNT_NAMELEN	255
 #define	RPCMNT_PATHLEN	1024
 #define	RPCPROG_NFS	100003
- 
-/* Structs for common parts of the rpc's */
-struct rpcv2_time {
-	u_int32_t rpc_sec;
-	u_int32_t rpc_usec;
-};
 
-/*
- * Structures used for RPCAUTH_KERB4.
- */
-struct nfsrpc_fullverf {
-	u_int32_t t1;
-	u_int32_t t2;
-	u_int32_t w2;
-};
-
-struct nfsrpc_fullblock {
-	u_int32_t t1;
-	u_int32_t t2;
-	u_int32_t w1;
-	u_int32_t w2;
-};
-
-struct nfsrpc_nickverf {
-	u_int32_t kind;
-	struct nfsrpc_fullverf	verf;
-};
-
-/*
- * and their sizes in bytes.. If sizeof (struct nfsrpc_xx) != these
- * constants, well then things will break in mount_nfs and nfsd.
- */
-#define RPCX_FULLVERF	12
-#define RPCX_FULLBLOCK	16
-#define RPCX_NICKVERF	16
-
-typedef u_char			NFSKERBKEY_T[2];
-typedef u_char			NFSKERBKEYSCHED_T[2];
-#define NFS_KERBTTL	(30 * 60)	/* Credential ttl (sec) */
-#define NFS_KERBCLOCKSKEW (5 * 60)	/* Clock skew (sec) */
-#define NFS_KERBW1(t)	(*((u_long *)(&((t).dat[((t).length + 3) & ~0x3]))))
-#endif
+#endif	/* _NFS_RPCV2_H_ */

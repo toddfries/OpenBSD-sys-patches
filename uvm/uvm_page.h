@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_page.h,v 1.23 2007/04/04 17:44:45 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_page.h,v 1.44 2010/06/29 21:25:16 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -83,16 +87,8 @@
  *
  *	A small structure is kept for each resident
  *	page, indexed by page number.  Each structure
- *	is an element of several lists:
- *
- *		A hash table bucket used to quickly
- *		perform object/offset lookups
- *
- *		A list of all pages for a given object,
- *		so they can be quickly deactivated at
- *		time of deallocation.
- *
- *		An ordered list of pages due for pageout.
+ *	contains a list used for manipulating pages, and
+ *	a tree structure for in object/offset lookups
  *
  *	In addition, the structure contains the object
  *	and offset to which this page belongs (for pageout),
@@ -109,8 +105,7 @@
 struct vm_page {
 	TAILQ_ENTRY(vm_page)	pageq;		/* queue info for FIFO
 						 * queue or free list (P) */
-	TAILQ_ENTRY(vm_page)	hashq;		/* hash table links (O)*/
-	TAILQ_ENTRY(vm_page)	listq;		/* pages in same object (O)*/
+	RB_ENTRY(vm_page)	objt;		/* object tree (O)*/
 
 	struct vm_anon		*uanon;		/* anon (O,P) */
 	struct uvm_object	*uobject;	/* object (O,P) */
@@ -125,6 +120,7 @@ struct vm_page {
 						 * to read: [O or P]
 						 * to modify: [O _and_ P] */
 	paddr_t			phys_addr;	/* physical address of page */
+	psize_t			fpgsz;		/* free page range size */
 
 #ifdef __HAVE_VM_PAGE_MD
 	struct vm_page_md	mdpage;		/* pmap-specific data */
@@ -163,6 +159,7 @@ struct vm_page {
 #define	PG_FAKE		0x00000040	/* page is not yet initialized */
 #define PG_RDONLY	0x00000080	/* page must be mapped read-only */
 #define PG_ZERO		0x00000100	/* page is pre-zero'd */
+#define PG_DEV		0x00000200	/* page is in device space, lay off */
 
 #define PG_PAGER1	0x00001000	/* pager-specific flag */
 #define PG_MASK		0x0000ffff
@@ -220,26 +217,6 @@ struct vm_physseg {
 extern boolean_t vm_page_zero_enable;
 
 /*
- *	Each pageable resident page falls into one of three lists:
- *
- *	free	
- *		Available for allocation now.
- *	inactive
- *		Not referenced in any map, but still has an
- *		object/offset-page mapping, and may be dirty.
- *		This is the list of pages that should be
- *		paged out next.
- *	active
- *		A list of pages which have been placed in
- *		at least one physical map.  This list is
- *		ordered, in LRU-like fashion.
- */
-
-extern struct pglist	vm_page_queue_free;	/* memory free queue */
-extern struct pglist	vm_page_queue_active;	/* active memory queue */
-extern struct pglist	vm_page_queue_inactive;	/* inactive memory queue */
-
-/*
  * physical memory config is stored in vm_physmem.
  */
 
@@ -247,26 +224,17 @@ extern struct vm_physseg vm_physmem[VM_PHYSSEG_MAX];
 extern int vm_nphysseg;
 
 /*
- * handle inline options
- */
-
-#ifdef UVM_PAGE_INLINE
-#define PAGE_INLINE static __inline
-#else 
-#define PAGE_INLINE /* nothing */
-#endif /* UVM_PAGE_INLINE */
-
-/*
  * prototypes: the following prototypes define the interface to pages
  */
 
-void uvm_page_init(vaddr_t *, vaddr_t *);
+void		uvm_page_init(vaddr_t *, vaddr_t *);
 #if defined(UVM_PAGE_TRKOWN)
-void uvm_page_own(struct vm_page *, char *);
+void		uvm_page_own(struct vm_page *, char *);
 #endif
 #if !defined(PMAP_STEAL_MEMORY)
-boolean_t uvm_page_physget(paddr_t *);
+boolean_t	uvm_page_physget(paddr_t *);
 #endif
+<<<<<<< HEAD
 void uvm_page_rehash(void);
 void uvm_pageidlezero(void);
 
@@ -305,20 +273,37 @@ static int vm_physseg_find(paddr_t, int *);
 
 #define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
 
-/*
- * when VM_PHYSSEG_MAX is 1, we can simplify these functions
- */
+=======
+void		uvm_pageidlezero(void);
 
+void		uvm_pageactivate(struct vm_page *);
+vaddr_t		uvm_pageboot_alloc(vsize_t);
+void		uvm_pagecopy(struct vm_page *, struct vm_page *);
+void		uvm_pagedeactivate(struct vm_page *);
+void		uvm_pagefree(struct vm_page *);
+void		uvm_page_unbusy(struct vm_page **, int);
+struct vm_page	*uvm_pagelookup(struct uvm_object *, voff_t);
+void		uvm_pageunwire(struct vm_page *);
+void		uvm_pagewait(struct vm_page *, int);
+void		uvm_pagewake(struct vm_page *);
+void		uvm_pagewire(struct vm_page *);
+void		uvm_pagezero(struct vm_page *);
+void		uvm_pagealloc_pg(struct vm_page *, struct uvm_object *,
+		    voff_t, struct vm_anon *);
+
+int		uvm_page_lookup_freelist(struct vm_page *);
+
+#if  VM_PHYSSEG_MAX == 1
+>>>>>>> origin/master
+/*
+ * Inline functions for archs like the vax where function calls are expensive.
+ */
 /*
  * vm_physseg_find: find vm_physseg structure that belongs to a PA
  */
 static __inline int
-vm_physseg_find(pframe, offp)
-	paddr_t pframe;
-	int	*offp;
+vm_physseg_find(paddr_t pframe, int *offp)
 {
-#if VM_PHYSSEG_MAX == 1
-
 	/* 'contig' case */
 	if (pframe >= vm_physmem[0].start && pframe < vm_physmem[0].end) {
 		if (offp)
@@ -326,61 +311,6 @@ vm_physseg_find(pframe, offp)
 		return(0);
 	}
 	return(-1);
-
-#elif (VM_PHYSSEG_STRAT == VM_PSTRAT_BSEARCH)
-	/* binary search for it */
-	int	start, len, try;
-
-	/*
-	 * if try is too large (thus target is less than than try) we reduce
-	 * the length to trunc(len/2) [i.e. everything smaller than "try"]
-	 *
-	 * if the try is too small (thus target is greater than try) then
-	 * we set the new start to be (try + 1).   this means we need to
-	 * reduce the length to (round(len/2) - 1).
-	 *
-	 * note "adjust" below which takes advantage of the fact that
-	 *  (round(len/2) - 1) == trunc((len - 1) / 2)
-	 * for any value of len we may have
-	 */
-
-	for (start = 0, len = vm_nphysseg ; len != 0 ; len = len / 2) {
-		try = start + (len / 2);	/* try in the middle */
-
-		/* start past our try? */
-		if (pframe >= vm_physmem[try].start) {
-			/* was try correct? */
-			if (pframe < vm_physmem[try].end) {
-				if (offp)
-					*offp = pframe - vm_physmem[try].start;
-				return(try);            /* got it */
-			}
-			start = try + 1;	/* next time, start here */
-			len--;			/* "adjust" */
-		} else {
-			/*
-			 * pframe before try, just reduce length of
-			 * region, done in "for" loop
-			 */
-		}
-	}
-	return(-1);
-
-#else
-	/* linear search for it */
-	int	lcv;
-
-	for (lcv = 0; lcv < vm_nphysseg; lcv++) {
-		if (pframe >= vm_physmem[lcv].start &&
-		    pframe < vm_physmem[lcv].end) {
-			if (offp)
-				*offp = pframe - vm_physmem[lcv].start;
-			return(lcv);		   /* got it */
-		}
-	}
-	return(-1);
-
-#endif
 }
 
 /*
@@ -388,20 +318,39 @@ vm_physseg_find(pframe, offp)
  * back from an I/O mapping (ugh!).   used in some MD code as well.
  */
 static __inline struct vm_page *
-PHYS_TO_VM_PAGE(pa)
-	paddr_t pa;
+PHYS_TO_VM_PAGE(paddr_t pa)
 {
 	paddr_t pf = atop(pa);
 	int	off;
 	int	psi;
 
 	psi = vm_physseg_find(pf, &off);
-	if (psi != -1)
-		return(&vm_physmem[psi].pgs[off]);
-	return(NULL);
+
+	return ((psi == -1) ? NULL : &vm_physmem[psi].pgs[off]);
 }
+#else
+/* if VM_PHYSSEG_MAX > 1 they're not inline, they're in uvm_page.c. */
+struct vm_page	*PHYS_TO_VM_PAGE(paddr_t);
+int		vm_physseg_find(paddr_t, int *);
+#endif
+
+/*
+ * macros
+ */
+
+#define uvm_lock_pageq()	simple_lock(&uvm.pageqlock)
+#define uvm_unlock_pageq()	simple_unlock(&uvm.pageqlock)
+#define uvm_lock_fpageq()	mtx_enter(&uvm.fpageqlock);
+#define uvm_unlock_fpageq()	mtx_leave(&uvm.fpageqlock);
+
+#define	UVM_PAGEZERO_TARGET	(uvmexp.free)
+
+#define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
 
 #define VM_PAGE_IS_FREE(entry)  ((entry)->pg_flags & PQ_FREE)
+
+#define	PADDR_IS_DMA_REACHABLE(paddr)	\
+	(dma_constraint.ucr_low <= paddr && dma_constraint.ucr_high > paddr)
 
 #endif /* _KERNEL */
 

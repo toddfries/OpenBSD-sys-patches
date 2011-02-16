@@ -1,4 +1,4 @@
-/*	$OpenBSD: icu.s,v 1.23 2005/12/13 16:14:49 aaron Exp $	*/
+/*	$OpenBSD: icu.s,v 1.31 2010/12/21 14:56:23 claudio Exp $	*/
 /*	$NetBSD: icu.s,v 1.45 1996/01/07 03:59:34 mycroft Exp $	*/
 
 /*-
@@ -30,16 +30,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <net/netisr.h>
-
 	.data
-	.globl	_C_LABEL(imen),_C_LABEL(ipending),_C_LABEL(netisr)
+	.globl	_C_LABEL(imen)
 _C_LABEL(imen):
 	.long	0xffff		# interrupt mask enable (all off)
-_C_LABEL(ipending):
-	.long	0		# interupts pending
-_C_LABEL(netisr):
-	.long	0		# scheduling bits for network
 
 	.text
 /*
@@ -111,7 +105,9 @@ IDTVEC(doreti)
 	sti
 	movl	$T_ASTFLT,TF_TRAPNO(%esp)	/* XXX undo later. */
 	/* Pushed T_ASTFLT into tf_trapno on entry. */
+	pushl	%esp
 	call	_C_LABEL(trap)
+	addl	$4,%esp
 	cli
 	jmp	2b
 3:	INTRFASTEXIT
@@ -144,13 +140,6 @@ IDTVEC(softtty)
 #endif
 	jmp	*%esi
 
-#define DONETISR(s, c) \
-	.globl  _C_LABEL(c)	;\
-	testl	$(1 << s),%edi	;\
-	jz	1f		;\
-	call	_C_LABEL(c)	;\
-1:
-
 IDTVEC(softnet)
 	movl	$IPL_SOFTNET,%eax
 	movl	%eax,CPL
@@ -158,9 +147,9 @@ IDTVEC(softnet)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	xorl	%edi,%edi
-	xchgl	_C_LABEL(netisr),%edi
-#include <net/netisr_dispatch.h>
+	pushl	$I386_SOFTINTR_SOFTNET
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR	
 	call	_C_LABEL(i386_softintunlock)
 #endif

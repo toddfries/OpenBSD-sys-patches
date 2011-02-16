@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: safevar.h,v 1.4 2003/08/14 15:26:03 jason Exp $	*/
+=======
+/*	$OpenBSD: safevar.h,v 1.8 2010/12/15 23:34:23 mikeb Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -113,8 +117,7 @@ struct safe_ringentry {
 
 	int			re_sesn;	/* crypto session ID */
 	int			re_flags;
-#define	SAFE_QFLAGS_COPYOUTIV	0x1		/* copy back on completion */
-#define	SAFE_QFLAGS_COPYOUTICV	0x2		/* copy back on completion */
+#define	SAFE_QFLAGS_COPYOUTICV	0x1		/* copy back on completion */
 };
 
 #define	re_src_m	re_src.u.m
@@ -139,7 +142,6 @@ struct safe_session {
 	u_int32_t	ses_key[8];		/* DES/3DES/AES key */
 	u_int32_t	ses_hminner[5];		/* hmac inner state */
 	u_int32_t	ses_hmouter[5];		/* hmac outer state */
-	u_int32_t	ses_iv[4];		/* DES/3DES/AES iv */
 };
 
 struct safe_pkq {
@@ -149,14 +151,12 @@ struct safe_pkq {
 
 struct safe_softc {
 	struct device		sc_dev;		/* device backpointer */
-	struct resource		*sc_irq;
 	void			*sc_ih;		/* interrupt handler cookie */
 	bus_space_handle_t	sc_sh;		/* memory handle */
 	bus_space_tag_t		sc_st;		/* memory tag */
 	struct resource		*sc_sr;		/* memory resource */
 	bus_dma_tag_t		sc_dmat;
 	u_int			sc_chiprev;	/* major/minor chip revision */
-	int			sc_suspended;
 	int			sc_needwakeup;	/* notify crypto layer */
 	int32_t			sc_cid;		/* crypto tag */
 	struct safe_dma_alloc	sc_ringalloc;	/* PE ring allocation state */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: wsemulconf.c,v 1.5 2002/01/03 21:58:59 jason Exp $ */
+=======
+/* $OpenBSD: wsemulconf.c,v 1.8 2010/08/28 12:48:14 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: wsemulconf.c,v 1.4 2000/01/05 11:19:37 drochner Exp $ */
 
 /*
@@ -56,8 +60,7 @@ static const struct wsemul_ops *wsemul_conf[] = {
 };
 
 const struct wsemul_ops *
-wsemul_pick(name)
-	const char *name;
+wsemul_pick(const char *name)
 {
 	const struct wsemul_ops **ops;
 
@@ -75,4 +78,12 @@ wsemul_pick(name)
 			break;
 
 	return (*ops);
+}
+
+const char *
+wsemul_getname(int idx)
+{
+	if (idx >= nitems(wsemul_conf) - 1)
+		return (NULL);
+	return (wsemul_conf[idx]->name);
 }

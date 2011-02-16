@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: mfi_pci.c,v 1.10 2006/08/06 03:58:36 brad Exp $ */
+=======
+/* $OpenBSD: mfi_pci.c,v 1.23 2010/04/01 23:19:39 jsg Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -14,6 +18,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#include "bio.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,6 +41,7 @@
 #include <dev/ic/mfivar.h>
 
 #define	MFI_BAR		0x10
+#define	MFI_BAR_GEN2	0x14
 #define	MFI_PCI_MEMSIZE	0x2000 /* 8k */
 
 int	mfi_pci_find_device(void *);
@@ -45,6 +52,46 @@ struct cfattach mfi_pci_ca = {
 	sizeof(struct mfi_softc), mfi_pci_match, mfi_pci_attach
 };
 
+<<<<<<< HEAD
+=======
+struct mfi_pci_subtype {
+	pcireg_t			st_id;
+	const char			*st_string;
+};
+
+static const struct mfi_pci_subtype mfi_1078_subtypes[] = {
+	{ 0x10061000,	"SAS 8888ELP" },
+	{ 0x100a1000,	"SAS 8708ELP" },
+	{ 0x100f1000,	"SAS 8708E" },
+	{ 0x10121000,	"SAS 8704ELP" },
+	{ 0x10131000,	"SAS 8708EM2" },
+	{ 0x10161000,	"SAS 8880EM2" },
+	{ 0x1f0a1028,	"Dell PERC 6/e" },
+	{ 0x1f0b1028,	"Dell PERC 6/i" },
+	{ 0x1f0d1028,	"Dell CERC 6/i" },
+	{ 0x1f0c1028,	"Dell PERC 6/i integrated" },
+	{ 0x1f111028,	"Dell CERC 6/i integrated" },
+	{ 0x0,		"" }
+};
+
+static const struct mfi_pci_subtype mfi_perc5_subtypes[] = {
+	{ 0x1f011028,	"Dell PERC 5/e" },
+	{ 0x1f021028,	"Dell PERC 5/i" },
+	{ 0x0,		"" }
+};
+
+static const struct mfi_pci_subtype mfi_gen2_subtypes[] = {
+	{ 0x1f151028,	"Dell PERC H800 Adapter" },
+	{ 0x1f161028,	"Dell PERC H700 Adapter" },
+	{ 0x1f171028,	"Dell PERC H700 Integrated" },
+	{ 0x1f181028,	"Dell PERC H700 Modular" },
+	{ 0x1f191028,	"Dell PERC H700" },
+	{ 0x1f1a1028,	"Dell PERC H800 Proto Adapter" },
+	{ 0x1f1b1028,	"Dell PERC H800" },
+	{ 0x0,		"" }
+};
+
+>>>>>>> origin/master
 static const
 struct	mfi_pci_device {
 	pcireg_t	mpd_vendor;
@@ -57,6 +104,7 @@ struct	mfi_pci_device {
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_SAS,
 	  0,			0,		"",			0 },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_VERDE_ZCR,
+<<<<<<< HEAD
 	  0,			0,		"",			0 },
 	{ PCI_VENDOR_DELL,	PCI_PRODUCT_DELL_PERC5,
 	  PCI_VENDOR_DELL,	0x1f01,		"Dell PERC 5/e",	0 },
@@ -69,6 +117,31 @@ int
 mfi_pci_find_device(void *aux) {
 	struct pci_attach_args	*pa = aux;
 	int			i;
+=======
+	  MFI_IOP_XSCALE,	NULL },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS1078,
+	  MFI_IOP_PPC,		mfi_1078_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS1078DE,
+	  MFI_IOP_PPC,		mfi_1078_subtypes },
+	{ PCI_VENDOR_DELL,	PCI_PRODUCT_DELL_PERC5,
+	  MFI_IOP_XSCALE,	mfi_perc5_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_1,
+	  MFI_IOP_GEN2,		mfi_gen2_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_2,
+	  MFI_IOP_GEN2,		mfi_gen2_subtypes },
+};
+
+const struct mfi_pci_device *mfi_pci_find_device(struct pci_attach_args *);
+
+const struct mfi_pci_device *
+mfi_pci_find_device(struct pci_attach_args *pa)
+{
+	const struct mfi_pci_device *mpd;
+	int i;
+
+	for (i = 0; i < nitems(mfi_pci_devices); i++) {
+		mpd = &mfi_pci_devices[i];
+>>>>>>> origin/master
 
 	for (i = 0; mfi_pci_devices[i].mpd_vendor; i++) {
 		if (mfi_pci_devices[i].mpd_vendor == PCI_VENDOR(pa->pa_id) &&
@@ -106,6 +179,7 @@ mfi_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char		*intrstr;
 	pci_intr_handle_t	ih;
 	bus_size_t		size;
+<<<<<<< HEAD
 	pcireg_t		csr;
 	uint32_t		subsysid, i;
 
@@ -120,6 +194,26 @@ mfi_pci_attach(struct device *parent, struct device *self, void *aux)
 	csr = pci_mapreg_type(pa->pa_pc, pa->pa_tag, MFI_BAR);
 	csr |= PCI_MAPREG_MEM_TYPE_32BIT;
 	if (pci_mapreg_map(pa, MFI_BAR, csr, 0,
+=======
+	pcireg_t		reg;
+	int			regbar;
+	const char		*subtype = NULL;
+	char			subid[32];
+
+	mpd = mfi_pci_find_device(pa);
+	if (mpd == NULL) {
+		printf(": can't find matching pci device\n");
+		return;
+	}
+
+	if (mpd->mpd_iop == MFI_IOP_GEN2)
+		regbar = MFI_BAR_GEN2;
+	else
+		regbar = MFI_BAR;
+
+	reg = pci_mapreg_type(pa->pa_pc, pa->pa_tag, regbar);
+	if (pci_mapreg_map(pa, regbar, reg, 0,
+>>>>>>> origin/master
 	    &sc->sc_iot, &sc->sc_ioh, NULL, &size, MFI_PCI_MEMSIZE)) {
 		printf(": can't map controller pci space\n");
 		return;

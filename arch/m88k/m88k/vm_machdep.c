@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.12 2006/05/08 14:36:09 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.21 2010/06/22 17:43:59 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -247,8 +247,6 @@ vmapbuf(bp, len)
 		addr += PAGE_SIZE;
 		kva += PAGE_SIZE;
 	}
-	/* make sure snooping will be possible... */
-	pmap_cache_ctrl(pmap_kernel(), ova, ova + len, CACHE_GLOBAL);
 	pmap_update(pmap_kernel());
 }
 

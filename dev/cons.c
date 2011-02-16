@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cons.c,v 1.16 2005/12/31 21:22:34 miod Exp $	*/
+=======
+/*	$OpenBSD: cons.c,v 1.20 2010/06/26 23:24:44 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cons.c,v 1.30 1996/04/08 19:57:30 jonathan Exp $	*/
 
 /*
@@ -42,7 +46,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
@@ -54,8 +57,8 @@
 #include <dev/cons.h>
 
 struct	tty *constty = NULL;	/* virtual console output device */
-struct	consdev *cn_tab;	/* physical console device info */
 struct	vnode *cn_devvp;	/* vnode for underlying device. */
+extern struct consdev *cn_tab;	/* physical console device info */
 
 int
 cnopen(dev, flag, mode, p)

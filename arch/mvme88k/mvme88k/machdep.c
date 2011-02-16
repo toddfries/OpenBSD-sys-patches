@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.184 2006/07/07 19:36:56 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.241 2011/01/05 22:20:22 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -56,9 +56,6 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
@@ -77,10 +74,14 @@
 #ifdef M88100
 #include <machine/m88100.h>
 #endif
+#ifdef MVME188
+#include <mvme88k/dev/sysconvar.h>
+#endif
+#include <mvme88k/mvme88k/clockvar.h>
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -90,15 +91,16 @@
 #include <ddb/db_var.h>
 #endif /* DDB */
 
-caddr_t	allocsys(caddr_t);
 void	consinit(void);
+void	cpu_hatch_secondary_processors(void *);
+void	dumb_delay(int);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
 u_int	getipl(void);
 void	identifycpu(void);
 void	mvme_bootstrap(void);
-void	mvme88k_vector_init(u_int32_t *, u_int32_t *);
+void	mvme88k_vector_init(uint32_t *, uint32_t *);
 void	myetheraddr(u_char *);
 void	savectx(struct pcb *);
 void	secondary_main(void);
@@ -109,22 +111,32 @@ extern void setlevel(unsigned int);
 
 extern void	m187_bootstrap(void);
 extern vaddr_t	m187_memsize(void);
-extern void	m187_startup(void);
 extern void	m188_bootstrap(void);
 extern vaddr_t	m188_memsize(void);
-extern void	m188_startup(void);
 extern void	m197_bootstrap(void);
 extern vaddr_t	m197_memsize(void);
-extern void	m197_startup(void);
 
+extern int kernelstart;
+register_t kernel_vbr;
 intrhand_t intr_handlers[NVMEINTR];
 
 /* board dependent pointers */
-void (*md_interrupt_func_ptr)(u_int, struct trapframe *);
+void (*md_interrupt_func_ptr)(struct trapframe *);
+#ifdef M88110
+int (*md_nmi_func_ptr)(struct trapframe *);
+void (*md_nmi_wrapup_func_ptr)(struct trapframe *);
+#endif
 void (*md_init_clocks)(void);
 u_int (*md_getipl)(void);
 u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
+#ifdef MULTIPROCESSOR
+void (*md_send_ipi)(int, cpuid_t);
+#endif
+void (*md_delay)(int) = dumb_delay;
+#ifdef MULTIPROCESSOR
+void (*md_smp_setup)(struct cpu_info *);
+#endif
 
 int physmem;	  /* available physical memory, in pages */
 
@@ -132,7 +144,8 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+__cpu_simple_lock_t cpu_hatch_mutex;
+__cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
 
 /*
@@ -156,14 +169,18 @@ int bufpages = 0;
 int bufcachepercent = BUFCACHEPERCENT;
 
 /*
+ * 32 or 34 bit physical address bus depending upon the CPU flavor.
+ * 32 bit DMA. "I am not aware of any system where the upper 2 bits
+ * have ever been used" - miod@
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL};
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
+/*
  * Info for CTL_HW
  */
 char  machine[] = MACHINE;	 /* cpu "architecture" */
 char  cpu_model[120];
-
-#if defined(DDB) || NKSYMS > 0
-extern char *esym;
-#endif
 
 int boothowto;					/* set in locore.S */
 int bootdev;					/* set in locore.S */
@@ -175,10 +192,27 @@ int cpuspeed = 25;				/* safe guess */
 vaddr_t first_addr;
 vaddr_t last_addr;
 
-vaddr_t avail_start, avail_end;
-vaddr_t virtual_avail, virtual_end;
-
 extern struct user *proc0paddr;
+
+struct intrhand	clock_ih;
+struct intrhand	statclock_ih;
+
+/*
+ * Statistics clock interval and variance, in usec.  Variance must be a
+ * power of two.  Since this gives us an even number, not an odd number,
+ * we discard one case and compensate.  That is, a variance of 4096 would
+ * give us offsets in [0..4095].  Instead, we take offsets in [1..4095].
+ * This is symmetric about the point 2048, or statvar/2, and thus averages
+ * to that value (assuming uniform random numbers).
+ */
+int statvar = 8192;
+int statmin;			/* statclock interval - 1/2*variance */
+
+#if defined (MVME187) || defined (MVME197)
+#define ETHERPAGES 16
+void *etherbuf = NULL;
+int etherlen;
+#endif
 
 /*
  * This is to fake out the console routines, while booting.
@@ -219,28 +253,16 @@ int
 getcpuspeed(struct mvmeprom_brdid *brdid)
 {
 	int speed = 0;
+#ifdef MVME188
 	u_int i, c;
-
-	for (i = 0; i < 4; i++) {
-		c = (u_int)brdid->speed[i];
-		if (c == ' ')
-			c = '0';
-		else if (c > '9' || c < '0') {
-			speed = 0;
-			break;
-		}
-		speed = speed * 10 + (c - '0');
-	}
-	speed = speed / 100;
+#endif
 
 	switch (brdtyp) {
 #ifdef MVME187
 	case BRD_187:
 	case BRD_8120:
-		if (speed == 25 || speed == 33)
-			return speed;
-		speed = 25;
-		break;
+		/* we already computed the speed in m187_bootstrap() */
+		return cpuspeed;
 #endif
 #ifdef MVME188
 	case BRD_188:
@@ -253,6 +275,18 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 		if ((u_int)brdid->rev < 0x50) {
 			speed = 20;
 		} else {
+			for (i = 0; i < 4; i++) {
+				c = (u_int)brdid->speed[i];
+				if (c == ' ')
+					c = '0';
+				else if (c > '9' || c < '0') {
+					speed = 0;
+					break;
+				}
+				speed = speed * 10 + (c - '0');
+			}
+			speed = speed / 100;
+
 			if (speed == 20 || speed == 25)
 				return speed;
 			speed = 25;
@@ -325,21 +359,8 @@ setstatclockrate(int newhz)
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz, i;
-	vsize_t size;
-	int base, residual;
+	int i;
 	vaddr_t minaddr, maxaddr;
-
-	/*
-	 * Initialize error message buffer (at end of core).
-	 * avail_end was pre-decremented in mvme_bootstrap() to compensate.
-	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
-		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
-		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
-	pmap_update(pmap_kernel());
-	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	/*
 	 * Good {morning,afternoon,evening,night}.
@@ -347,84 +368,6 @@ cpu_startup()
 	printf(version);
 	identifycpu();
 	printf("real mem  = %d\n", ctob(physmem));
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Grab machine dependent memory spaces
-	 */
-	switch (brdtyp) {
-#ifdef MVME187
-	case BRD_187:
-	case BRD_8120:
-		m187_startup();
-		break;
-#endif
-#ifdef MVME188
-	case BRD_188:
-		m188_startup();
-		break;
-#endif
-#ifdef MVME197
-	case BRD_197:
-		m197_startup();
-		break;
-#endif
-	}
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	      UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base + 1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				      "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -466,65 +409,12 @@ cpu_startup()
 	}
 }
 
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-
-	return v;
-}
-
 __dead void
 _doboot()
 {
+	cold = 0;
 	cmmu_shutdown();
+	set_vbr(0);		/* restore BUG VBR */
 	bugreturn();
 	/*NOTREACHED*/
 	for (;;);		/* appease gcc */
@@ -573,7 +463,9 @@ haltsys:
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	doboot();
@@ -676,6 +568,10 @@ dumpsys()
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	/* Setup the dump header */
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
@@ -704,10 +600,7 @@ dumpsys()
 		if (pg != 0 && (pg % NPGMB) == 0)
 			printf("%d ", pg / NPGMB);
 #undef NPGMB
-		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, maddr,
-		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
-
-		error = (*dump)(dumpdev, blkno, vmmap, PAGE_SIZE);
+		error = (*dump)(dumpdev, blkno, (caddr_t)maddr, PAGE_SIZE);
 		if (error == 0) {
 			maddr += PAGE_SIZE;
 			blkno += btodb(PAGE_SIZE);
@@ -762,6 +655,7 @@ secondary_pre_main()
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	ci = curcpu();
 	ci->ci_curproc = &proc0;
+	(*md_smp_setup)(ci);
 
 	splhigh();
 
@@ -773,9 +667,12 @@ secondary_pre_main()
 	/*
 	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
 	 */
-	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
-	if (ci->ci_idle_pcb == NULL) {
-		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	init_stack = uvm_km_zalloc(kernel_map, USPACE);
+	if (init_stack == (vaddr_t)NULL) {
+		printf("cpu%d: unable to allocate startup stack\n",
+		    ci->ci_cpuid);
+		__cpu_simple_unlock(&cpu_hatch_mutex);
+		for (;;) ;
 	}
 }
 
@@ -791,16 +688,28 @@ secondary_main()
 	struct cpu_info *ci = curcpu();
 
 	cpu_configuration_print(0);
-	__cpu_simple_unlock(&cpu_mutex);
+	ncpus++;
 
+	sched_init_cpu(ci);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
+	ci->ci_randseed = random();
 
-	/*
-	 * Upon return, the secondary cpu bootstrap code in locore will
-	 * enter the idle loop, waiting for some food to process on this
-	 * processor.
-	 */
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+
+	/* wait for cpu_boot_secondary_processors() */
+	__cpu_simple_lock(&cpu_boot_mutex);
+	__cpu_simple_unlock(&cpu_boot_mutex);
+
+	set_vbr(kernel_vbr);
+
+	spl0();
+	SCHED_LOCK(s);
+	set_psr(get_psr() & ~PSR_IND);
+
+	SET(ci->ci_flags, CIF_ALIVE);
+
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #endif	/* MULTIPROCESSOR */
@@ -862,9 +771,17 @@ intr_establish(int vec, struct intrhand *ihand, const char *name)
 		}
 	}
 
-	evcount_attach(&ihand->ih_count, name, (void *)&ihand->ih_ipl,
-	    &evcount_intr);
-	SLIST_INSERT_HEAD(list, ihand, ih_link);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
+	SLIST_INSERT_HEAD(list, ih, ih_link);
+
+#ifdef MVME188
+	/*
+	 * Enable VME interrupt source for this level.
+	 */
+	if (brdtyp == BRD_188)
+		syscon_intsrc_enable(INTSRC_VME + (ih->ih_ipl - 1), ih->ih_ipl);
+#endif
+
 	return (0);
 }
 
@@ -955,19 +872,29 @@ myetheraddr(cp)
 }
 
 void
-mvme88k_vector_init(u_int32_t *vbr, u_int32_t *vectors)
+mvme88k_vector_init(uint32_t *bugvbr, uint32_t *vectors)
 {
-	extern void vector_init(u_int32_t *, u_int32_t *);	/* gross */
+	extern vaddr_t vector_init(uint32_t *, uint32_t *, int); /* gross */
+	unsigned long bugvec[32];
+	uint i;
 
-	/* Save BUG vector */
-	bugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
-	bugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+	/*
+	 * Set up bootstrap vectors, overwriting the existing BUG vbr
+	 * page. This allows us to keep the BUG system call vectors.
+	 */
 
-	vector_init(vbr, vectors);
+	for (i = 0; i < 16 * 2; i++)
+		bugvec[i] = bugvbr[MVMEPROM_VECTOR * 2 + i];
+	vector_init(bugvbr, vectors, 1);
+	for (i = 0; i < 16 * 2; i++)
+		bugvbr[MVMEPROM_VECTOR * 2 + i] = bugvec[i];
 
-	/* Save new BUG vector */
-	sysbugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
-	sysbugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+	/*
+	 * Set up final vectors.
+	 */
+
+	kernel_vbr = trunc_page((vaddr_t)&kernelstart);
+	vector_init((uint32_t *)kernel_vbr, vectors, 0);
 }
 
 /*
@@ -977,9 +904,10 @@ mvme88k_vector_init(u_int32_t *vbr, u_int32_t *vectors)
 void
 mvme_bootstrap()
 {
-	extern int kernelstart;
 	extern struct consdev *cn_tab;
 	struct mvmeprom_brdid brdid;
+	vaddr_t avail_start;
+	extern vaddr_t avail_end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
@@ -1045,6 +973,10 @@ mvme_bootstrap()
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+#ifdef MULTIPROCESSOR
+	(*md_smp_setup)(curcpu());
+#endif
+	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
 
 #ifdef M88100
 	if (CPU_IS88100) {
@@ -1062,20 +994,13 @@ mvme_bootstrap()
 	curproc = &proc0;
 	curpcb = &proc0paddr->u_pcb;
 
-	avail_start = first_addr;
-	avail_end = last_addr;
-
-	/*
-	 * Steal MSGBUFSIZE at the top of physical memory for msgbuf
-	 */
-	avail_end -= round_page(MSGBUFSIZE);
+	avail_start = first_addr;	/* first page of memory after kernel image */
+	avail_end = last_addr;		/* last page of memory */
 
 #ifdef DEBUG
 	printf("MVME%x boot: memory from 0x%x to 0x%x\n",
 	    brdtyp, avail_start, avail_end);
 #endif
-	pmap_bootstrap((vaddr_t)trunc_page((unsigned)&kernelstart));
-
 	/*
 	 * Tell the VM system about available physical memory.
 	 *
@@ -1086,6 +1011,30 @@ mvme_bootstrap()
 	uvm_page_physload(atop(avail_start), atop(avail_end),
 	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
 
+	/*
+	 * Initialize message buffer.
+	 */
+	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
+	    MSGBUFSIZE);
+
+#if defined (MVME187) || defined (MVME197)
+	/*
+	 * Get ethernet buffer - need ETHERPAGES pages physically contiguous.
+	 * XXX need to fix ie(4) to support non-1:1 mapped buffers
+	 */
+	if (brdtyp == BRD_187 || brdtyp == BRD_8120 || brdtyp == BRD_197) {
+		etherlen = ETHERPAGES * PAGE_SIZE;
+		etherbuf = (void *)uvm_pageboot_alloc(etherlen);
+	}
+#endif /* defined (MVME187) || defined (MVME197) */
+
+	pmap_bootstrap(0, 0x10000);	/* BUG needs 64KB */
+
+#if defined (MVME187) || defined (MVME197)
+	if (etherlen != 0)
+		pmap_cache_ctrl((paddr_t)etherbuf, (paddr_t)etherbuf + etherlen,		    CACHE_INH);
+#endif
+
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
 #ifdef DEBUG
@@ -1095,7 +1044,7 @@ mvme_bootstrap()
 
 #ifdef MULTIPROCESSOR
 void
-cpu_boot_secondary_processors()
+cpu_hatch_secondary_processors(void *unused)
 {
 	cpuid_t cpu;
 	int rc;
@@ -1109,12 +1058,22 @@ cpu_boot_secondary_processors()
 #ifdef MVME197
 	case BRD_197:
 #endif
-		for (cpu = 0; cpu < max_cpus; cpu++) {
-			if (cpu != curcpu()->ci_cpuid) {
+		for (cpu = 0; cpu < ncpusfound; cpu++) {
+			if (cpu != ci->ci_cpuid) {
+				__cpu_simple_lock(&cpu_hatch_mutex);
 				rc = spin_cpu(cpu, (vaddr_t)secondary_start);
-				if (rc != 0 && rc != FORKMPU_NO_MPU)
+				switch (rc) {
+				case 0:
+					__cpu_simple_lock(&cpu_hatch_mutex);
+					break;
+				default:
 					printf("cpu%d: spin_cpu error %d\n",
 					    cpu, rc);
+					/* FALLTHROUGH */
+				case FORKMPU_NO_MPU:
+					break;
+				}
+				__cpu_simple_unlock(&cpu_hatch_mutex);
 			}
 		}
 		break;
@@ -1122,6 +1081,12 @@ cpu_boot_secondary_processors()
 	default:
 		break;
 	}
+}
+
+void
+cpu_boot_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_boot_mutex);
 }
 #endif
 
@@ -1207,6 +1172,16 @@ raiseipl(unsigned level)
 	 */
 	flush_pipeline();
 
-	set_psr(psr);
-	return curspl;
+#endif
+
+void
+delay(int us)
+{
+	(*md_delay)(us);
+}
+
+/* delay() routine used until a proper routine is set up */
+void
+dumb_delay(int us)
+{
 }

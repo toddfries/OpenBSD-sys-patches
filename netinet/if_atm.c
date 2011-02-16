@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: if_atm.c,v 1.12 2005/04/16 14:28:57 deraadt Exp $       */
+=======
+/*      $OpenBSD: if_atm.c,v 1.16 2010/05/07 13:33:16 claudio Exp $       */
+>>>>>>> origin/master
 
 /*
  *
@@ -236,7 +240,7 @@ atmresolve(rt, m, dst, desten)
 	}
 
 	if (rt == NULL) {
-		rt = RTALLOC1(dst, 0);
+		rt = rtalloc1(dst, 0, m->m_pkthdr.rdomain);
 		if (rt == NULL) goto bad; /* failed */
 		rt->rt_refcnt--;	/* don't keep LL references */
 		if ((rt->rt_flags & RTF_GATEWAY) != 0 ||

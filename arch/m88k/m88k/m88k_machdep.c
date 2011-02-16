@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.16 2006/05/08 14:36:09 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.51 2010/12/23 20:05:08 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -53,6 +53,7 @@
 #include <sys/exec.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
+#include <sys/malloc.h>
 #ifdef MULTIPROCESSOR
 #include <sys/mplock.h>
 #endif
@@ -68,8 +69,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <net/netisr.h>
-
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
@@ -80,25 +79,24 @@ typedef struct {
 	u_int32_t word_one, word_two;
 } m88k_exception_vector_area;
 
-void	dosoftint(void);
 void	dumpconf(void);
 void	dumpsys(void);
 void	regdump(struct trapframe *f);
-void	vector_init(m88k_exception_vector_area *, u_int32_t *);
+void	vector_init(m88k_exception_vector_area *, u_int32_t *, int);
+void	atomic_init(void);
 
 /*
  * CMMU and CPU variables
  */
 
 #ifdef MULTIPROCESSOR
+cpuid_t	master_cpu;
 __cpu_simple_lock_t cmmu_cpu_lock = __SIMPLELOCK_UNLOCKED;
 cpuid_t	master_cpu;
 struct __mp_lock sir_lock;
 #endif
 
 struct cpu_info m88k_cpus[MAX_CPUS];
-u_int	max_cpus;
-
 struct cmmu_p *cmmu;
 
 /*
@@ -154,10 +152,20 @@ setregs(p, pack, stack, retval)
 
 	/*
 	 * We want to start executing at pack->ep_entry. The way to
-	 * do this is force the processor to fetch from ep_entry. Set
-	 * NIP to something bogus and invalid so that it will be a NOOP.
-	 * And set sfip to ep_entry with valid bit on so that it will be
-	 * fetched.  mc88110 - just set exip to pack->ep_entry.
+	 * do this is force the processor to fetch from ep_entry.
+	 *
+	 * However, since we will return through m{88100,88110}_syscall(),
+	 * we need to setup registers so that the success return, when
+	 * ``incrementing'' the instruction pointers, will cause the
+	 * binary to start at the expected address.
+	 *
+	 * This relies on the fact that binaries start with
+	 *
+	 *	br.n	1f
+	 *	 or	r2, r0, r30
+	 * 1:
+	 *
+	 * So the first two instructions can be skipped.
 	 */
 #ifdef M88110
 	if (CPU_IS88110) {
@@ -166,8 +174,21 @@ setregs(p, pack, stack, retval)
 #endif
 #ifdef M88100
 	if (CPU_IS88100) {
-		tf->tf_snip = pack->ep_entry & NIP_ADDR;
-		tf->tf_sfip = (pack->ep_entry & FIP_ADDR) | FIP_V;
+		/*
+		 * m88100_syscall() will resume at sfip / sfip + 4...
+		 */
+		tf->tf_sfip = ((pack->ep_entry + 8) & FIP_ADDR) | FIP_V;
+
+		/*
+		 * ... unless we are starting init, in which case we
+		 * won't be returning through the regular path, and
+		 * need to explicitely set up nip and fip (note that
+		 * 88110 do not need such a test).
+		 */
+		if (p->p_pid == 1) {
+			tf->tf_snip = tf->tf_sfip;
+			tf->tf_sfip += 4;
+		}
 	}
 #endif
 	tf->tf_r[2] = stack;
@@ -331,86 +352,87 @@ set_cpu_number(cpuid_t number)
 	__asm__ __volatile__ ("stcr %0, cr17" :: "r" (ci));
 	flush_pipeline();
 
-#ifdef MULTIPROCESSOR
-	if (number == master_cpu)
-#endif
-	{
-		ci->ci_primary = 1;
-		ci->ci_idle_pcb = &idle_u;
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+	cpu_unidle(p->p_cpu);
+}
 
 #ifdef MULTIPROCESSOR
-		/*
-		 * Specific initialization for the master processor.
-		 */
-		__mp_lock_init(&sir_lock);
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		m88k_send_ipi(CI_IPI_NOTIFY, ci->ci_cpuid);
+}
 #endif
+
+/*
+ * Preempt the current process if in interrupt from user mode,
+ * or after the current trap/syscall if in system mode.
+ */
+void
+need_resched(struct cpu_info *ci)
+{
+	ci->ci_want_resched = 1;
+
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc != NULL) {
+		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
 	}
-
-	ci->ci_alive = 1;
 }
 
 /*
- * Soft interrupt interface
+ * Generic soft interrupt interface
  */
 
-int ssir;
-int netisr;
+void	dosoftint(int);
+int	softpending;
 
 #ifdef MULTIPROCESSOR
 
 void
-setsoftint(int sir)
+dosoftint(int sir)
 {
-	__mp_lock(&sir_lock);
-	ssir |= sir;
-	__mp_unlock(&sir_lock);
-}
+	int q, mask;
 
-int
-clrsoftint(int sir)
-{
-	int tmpsir;
-
-	__mp_lock(&sir_lock);
-	tmpsir = ssir & sir;
-	ssir ^= tmpsir;
-	__mp_unlock(&sir_lock);
-
-	return (tmpsir);
-}
+#ifdef MULTIPROCESSOR
+	__mp_lock(&kernel_lock);
 #endif
 
-void
-dosoftint()
-{
-	if (clrsoftint(SIR_NET)) {
-		uvmexp.softs++;
-#define DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << bit)) { \
-			netisr &= ~(1 << bit); \
-			fn(); \
-		} \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-	}
+	for (q = SI_NQUEUES - 1, mask = 1 << (SI_NQUEUES - 1); mask != 0;
+	    q--, mask >>= 1)
+		if (mask & sir)
+			softintr_dispatch(q);
 
-	if (clrsoftint(SIR_CLOCK)) {
-		uvmexp.softs++;
-		softclock();
-	}
+#ifdef MULTIPROCESSOR
+	__mp_unlock(&kernel_lock);
+#endif
 }
 
 int
 spl0()
 {
+	int sir;
 	int s;
 
-	s = splsoftclock();
-
-	if (ssir)
-		dosoftint();
+	/*
+	 * Try to avoid potentially expensive setipl calls if nothing
+	 * seems to be pending.
+	 */
+	if ((sir = atomic_clear_int(&softpending)) != 0) {
+		s = setipl(IPL_SOFTINT);
+		dosoftint(sir);
+		setipl(IPL_NONE);
+	} else
+		s = setipl(IPL_NONE);
 
 	setipl(0);
 	return (s);
@@ -420,7 +442,7 @@ spl0()
 #define NO_OP 		0xf4005800	/* "or r0, r0, r0" */
 
 #define BRANCH(FROM, TO) \
-	(EMPTY_BR | ((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2)
+	(EMPTY_BR | ((((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2) & 0x03ffffff))
 
 #define SET_VECTOR(NUM, VALUE) \
 	do { \
@@ -429,22 +451,23 @@ spl0()
 	} while (0)
 
 /*
- * vector_init(vector, vector_init_list)
+ * vector_init(vector, vector_init_list, bootstrap)
  *
- * This routine sets up the m88k vector table for the running processor.
+ * This routine sets up the m88k vector table for the running processor,
+ * as well as the atomic operation routines for multiprocessor kernels.
  * This is the first C code to run, before anything is initialized.
  *
- * It fills the exception vectors page. I would add an extra four bytes
- * to the page pointed to by the vbr, since the 88100 may execute the
- * first instruction of the next trap handler, as documented in its
- * Errata. Processing trap #511 would then fall into the next page,
- * unless the address computation wraps, or software traps can not trigger
- * the issue - the Errata does not provide more detail. And since the
- * MVME BUG does not add an extra NOP after their VBR page, I'll assume this
- * is safe for now -- miod
+ * I would add an extra four bytes to the exception vectors page pointed
+ * to by the vbr, since the 88100 may execute the first instruction of the
+ * next trap handler, as documented in its Errata. Processing trap #511
+ * would then fall into the next page, unless the address computation wraps,
+ * or software traps can not trigger the issue - the Errata does not provide
+ * more detail. And since the MVME BUG does not add an extra NOP after its
+ * VBR page, I'll assume this is safe for now -- miod
  */
 void
-vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
+vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list,
+    int bootstrap)
 {
 	u_int num;
 	u_int32_t vec;
@@ -462,6 +485,12 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 		extern void m88110_cache_flush_handler(void);
 		extern void m88110_stepbpt(void);
 		extern void m88110_userbpt(void);
+
+		for (num = 0; (vec = vector_init_list[num]) != 0; num++)
+			SET_VECTOR_88110(num, vec);
+
+		if (bootstrap)
+			SET_VECTOR_88110(0x03, vector_init_list[num + 1]);
 
 		for (; num < 512; num++)
 			SET_VECTOR(num, m88110_sigsys);
@@ -482,6 +511,12 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 		extern void stepbpt(void);
 		extern void userbpt(void);
 
+		for (num = 0; (vec = vector_init_list[num]) != 0; num++)
+			SET_VECTOR_88100(num, vec);
+
+		if (bootstrap)
+			SET_VECTOR_88100(0x03, vector_init_list[num + 1]);
+
 		for (; num < 512; num++)
 			SET_VECTOR(num, sigsys);
 
@@ -493,7 +528,111 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
 		break;
 #endif
 	}
+}
+
+#ifdef MULTIPROCESSOR
+/*
+ * void atomic_init(void);
+ *
+ * This routine sets up proper atomic operation code for SMP kernels
+ * with both 88100 and 88110 support compiled-in. This is crucial enough
+ * to have to be done as early as possible.
+ * This is among the first C code to run, before anything is initialized.
+ */
+void
+atomic_init()
+{
+#if defined(M88100) && defined(M88110)
+	if (cputyp == CPU_88100) {
+		extern uint32_t __atomic_lock[];
+		extern uint32_t __atomic_lock_88100[], __atomic_lock_88100_end[];
+		extern uint32_t __atomic_unlock[];
+		extern uint32_t __atomic_unlock_88100[], __atomic_unlock_88100_end[];
+
+		uint32_t *s, *e, *d;
+
+		d = __atomic_lock;
+		s = __atomic_lock_88100;
+		e = __atomic_lock_88100_end;
+		while (s != e)
+				*d++ = *s++;
+
+		d = __atomic_unlock;
+		s = __atomic_unlock_88100;
+		e = __atomic_unlock_88100_end;
+		while (s != e)
+				*d++ = *s++;
+	}
+#endif	/* M88100 && M88110 */
+}
+#endif	/* MULTIPROCESSOR */
+
+#ifdef MULTIPROCESSOR
+
+/*
+ * This function is invoked when it turns out one secondary processor is
+ * not usable.
+ * Be sure to put the process currently running on it in the run queues,
+ * so that another processor can take care of it.
+ */
+__dead void
+cpu_emergency_disable()
+{
+	struct cpu_info *ci = curcpu();
+	struct schedstate_percpu *spc = &ci->ci_schedstate;
+	struct proc *p = curproc;
+	int s;
+	extern void savectx(struct pcb *);
+
+	if (p != NULL && p != spc->spc_idleproc) {
+		savectx(curpcb);
+
+		/*
+		 * The following is an inline yield(), without the call
+		 * to mi_switch().
+		 */
+		SCHED_LOCK(s);
+		p->p_priority = p->p_usrpri;
+		p->p_stat = SRUN;
+		setrunqueue(p);
+		p->p_stats->p_ru.ru_nvcsw++;
+		SCHED_UNLOCK(s);
+	}
+
+	CLR(ci->ci_flags, CIF_ALIVE);
+	set_psr(get_psr() | PSR_IND);
+	splhigh();
 
 	/* GCC will by default produce explicit trap 503 for division by zero */
 	SET_VECTOR(503, vector_init_list[8]);
 }
+
+/*
+ * Emulate a compare-and-swap instruction for rwlocks, by using a
+ * __cpu_simple_lock as a critical section.
+ *
+ * Since we are only competing against other processors for rwlocks,
+ * it is not necessary in this case to disable interrupts to prevent
+ * reentrancy on the same processor.
+ */
+
+__cpu_simple_lock_t rw_cas_spinlock = __SIMPLELOCK_UNLOCKED;
+
+int
+rw_cas_m88k(volatile unsigned long *p, unsigned long o, unsigned long n)
+{
+	int rc = 0;
+
+	__cpu_simple_lock(&rw_cas_spinlock);
+
+	if (*p != o)
+		rc = 1;
+	else
+		*p = n;
+
+	__cpu_simple_unlock(&rw_cas_spinlock);
+
+	return (rc);
+}
+
+#endif	/* MULTIPROCESSOR */

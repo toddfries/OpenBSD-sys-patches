@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.10 2007/02/13 00:20:59 jsg Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.30 2010/09/07 16:22:48 mikeb Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -48,6 +47,11 @@
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
+
+int amd64_has_xcrypt;
+#ifdef CRYPTO
+int amd64_has_aesni;
+#endif
 
 const struct {
 	u_int32_t	bit;
@@ -92,14 +96,29 @@ const struct {
 	{ CPUID_3DNOW,	"3DNOW" }
 }, cpu_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
+	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
-	{ CPUIDECX_XTPR,	"xTPR" }
+	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" }
 };
 
 int
@@ -108,6 +127,155 @@ cpu_amd64speed(int *freq)
 	*freq = cpuspeed;
 	return (0);
 }
+
+#ifndef SMALL_KERNEL
+void	intelcore_update_sensor(void *args);
+/*
+ * Temperature read on the CPU is relative to the maximum
+ * temperature supported by the CPU, Tj(Max).
+ * Poorly documented, refer to:
+ * http://softwarecommunity.intel.com/isn/Community/
+ * en-US/forums/thread/30228638.aspx
+ * Basically, depending on a bit in one msr, the max is either 85 or 100.
+ * Then we subtract the temperature portion of thermal status from
+ * max to get current temperature.
+ */
+void
+intelcore_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+	int max = 100;
+
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
+		max = 85;
+
+	msr = rdmsr(MSR_THERM_STATUS);
+	if (msr & MSR_THERM_STATUS_VALID_BIT) {
+		ci->ci_sensor.value = max - MSR_THERM_STATUS_TEMP(msr);
+		/* micro degrees */
+		ci->ci_sensor.value *= 1000000;
+		/* kelvin */
+		ci->ci_sensor.value += 273150000;
+		ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+	} else {
+		ci->ci_sensor.value = 0;
+		ci->ci_sensor.flags |= SENSOR_FINVALID;
+	}
+}
+
+#endif
+
+void (*setperf_setup)(struct cpu_info *);
+
+void via_nano_setup(struct cpu_info *ci);
+
+void
+via_nano_setup(struct cpu_info *ci)
+{
+	u_int32_t regs[4], val;
+	u_int64_t msreg;
+	int model = (ci->ci_signature >> 4) & 15;
+
+	if (model >= 9) {
+		CPUID(0xC0000000, regs[0], regs[1], regs[2], regs[3]);
+		val = regs[0];
+		if (val >= 0xC0000001) {
+			CPUID(0xC0000001, regs[0], regs[1], regs[2], regs[3]);
+			val = regs[3];
+		} else
+			val = 0;
+
+		if (val & (C3_CPUID_HAS_RNG | C3_CPUID_HAS_ACE))
+			printf("%s:", ci->ci_dev->dv_xname);
+
+		/* Enable RNG if present and disabled */
+		if (val & C3_CPUID_HAS_RNG) {
+			extern int viac3_rnd_present;
+
+			if (!(val & C3_CPUID_DO_RNG)) {
+				msreg = rdmsr(0x110B);
+				msreg |= 0x40;
+				wrmsr(0x110B, msreg);
+			}
+			viac3_rnd_present = 1;
+			printf(" RNG");
+		}
+
+		/* Enable AES engine if present and disabled */
+		if (val & C3_CPUID_HAS_ACE) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_ACE)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_AES;
+#endif /* CRYPTO */
+			printf(" AES");
+		}
+
+		/* Enable ACE2 engine if present and disabled */
+		if (val & C3_CPUID_HAS_ACE2) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_ACE2)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_AESCTR;
+#endif /* CRYPTO */
+			printf(" AES-CTR");
+		}
+
+		/* Enable SHA engine if present and disabled */
+		if (val & C3_CPUID_HAS_PHE) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_PHE)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28/**/);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_SHA;
+#endif /* CRYPTO */
+			printf(" SHA1 SHA256");
+		}
+
+		/* Enable MM engine if present and disabled */
+		if (val & C3_CPUID_HAS_PMM) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_PMM)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28/**/);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_MM;
+#endif /* CRYPTO */
+			printf(" RSA");
+		}
+
+		printf("\n");
+	}
+}
+
+#ifndef SMALL_KERNEL
+void via_update_sensor(void *args);
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
 
 void
 identifycpu(struct cpu_info *ci)
@@ -148,6 +316,13 @@ identifycpu(struct cpu_info *ci)
 
 	if (cpu_model[0] == 0)
 		strlcpy(cpu_model, "Opteron or Athlon 64", sizeof(cpu_model));
+
+	ci->ci_family = (ci->ci_signature >> 8) & 0x0f;
+	ci->ci_model = (ci->ci_signature >> 4) & 0x0f;
+	if (ci->ci_family == 0x6 || ci->ci_family == 0xf) {
+		ci->ci_family += (ci->ci_signature >> 20) & 0xff;
+		ci->ci_model += ((ci->ci_signature >> 16) & 0x0f) << 4;
+	}
 
 	last_tsc = rdtsc();
 	delay(100000);
@@ -190,12 +365,49 @@ identifycpu(struct cpu_info *ci)
 				k8_powernow_init();
 		}
 	}
+
+	if (cpu_ecxfeature & CPUIDECX_EST) {
+		setperf_setup = est_init;
+	}
+
+	if (cpu_ecxfeature & CPUIDECX_AES)
+		amd64_has_aesni = 1;
+
+	if (!strncmp(cpu_model, "Intel", 5)) {
+		u_int32_t cflushsz;
+
+		CPUID(0x01, dummy, cflushsz, dummy, dummy);
+		/* cflush cacheline size is equal to bits 15-8 of ebx * 8 */
+		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
+		CPUID(0x06, val, dummy, dummy, dummy);
+		if (val & 0x1) {
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, intelcore_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
+	}
+
 #endif
 
 	/* AuthenticAMD:    h t u A                    i t n e */
 	if (vendor[0] == 0x68747541 && vendor[1] == 0x69746e65 &&
 	    vendor[2] == 0x444d4163)	/* DMAc */
 		amd64_errata(ci);
+
+	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0) {
+		ci->cpu_setup = via_nano_setup;
+#ifndef SMALL_KERNEL
+		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
+		    sizeof(ci->ci_sensordev.xname));
+		ci->ci_sensor.type = SENSOR_TEMP;
+		sensor_task_register(ci, via_update_sensor, 5);
+		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+		sensordev_install(&ci->ci_sensordev);
+#endif
+	}
 }
 
 void

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uio.h,v 1.12 2005/11/16 15:15:49 uwe Exp $	*/
+=======
+/*	$OpenBSD: uio.h,v 1.15 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
 
 /*
@@ -56,7 +60,7 @@ struct uio {
 	size_t	uio_resid;	/* residual i/o count */
 	enum	uio_seg uio_segflg; /* see above */
 	enum	uio_rw uio_rw;	/* see above */
-	struct	proc *uio_procp;/* associated process or NULL */
+	struct	proc *uio_procp;/* associated thread or NULL */
 };
 
 /*
@@ -82,9 +86,9 @@ __END_DECLS
 int	ureadc(int c, struct uio *);
 
 int	dofilereadv(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
+	    const struct iovec *, int, int, off_t *, register_t *);
 int	dofilewritev(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
+	    const struct iovec *, int, int, off_t *, register_t *);
 
 #endif /* !_KERNEL */
 

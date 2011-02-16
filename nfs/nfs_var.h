@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nfs_var.h,v 1.24 2007/04/11 12:18:54 thib Exp $	*/
+=======
+/*	$OpenBSD: nfs_var.h,v 1.59 2010/04/12 16:37:38 beck Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -31,49 +35,38 @@
  */
 
 /*
- * XXX needs <nfs/rpcv2.h> and <nfs/nfs.h> because of typedefs
+ * XXX needs <nfs/rpcv2.h> and <nfs/nfs.h> because of typedefs.
  */
+#ifndef _NFS_NFS_VAR_H_
+#define _NFS_NFS_VAR_H_
 
-struct vnode;
-struct uio;
-struct ucred;
-struct proc;
-struct buf;
-struct nfs_diskless;
-struct sockaddr_in;
-struct nfs_dlmount;
-struct vnode;
-struct nfsd;
-struct mbuf;
-struct file;
-struct nfssvc_sock;
-struct nfsmount;
-struct socket;
-struct nfsreq;
-struct vattr;
-struct nameidata;
+#ifdef _KERNEL
+
 struct nfsnode;
 struct sillyrename;
 struct componentname;
-struct nfsd_srvargs;
-struct nfsrv_descript;
-struct nfs_fattr;
-union nethostaddr;
+struct nfs_diskless;
+struct nfsm_info;
 
 /* nfs_bio.c */
 int nfs_bioread(struct vnode *, struct uio *, int, struct ucred *);
 int nfs_write(void *);
+<<<<<<< HEAD
 struct buf *nfs_getcacheblk(struct vnode *, daddr_t, int, struct proc *);
 int nfs_vinvalbuf(struct vnode *, int, struct ucred *, struct proc *,
 		       int);
 int nfs_asyncio(struct buf *);
+=======
+struct buf *nfs_getcacheblk(struct vnode *, daddr64_t, int, struct proc *);
+int nfs_vinvalbuf(struct vnode *, int, struct ucred *, struct proc *);
+int nfs_asyncio(struct buf *, int readahead);
+>>>>>>> origin/master
 int nfs_doio(struct buf *, struct proc *);
 
 /* nfs_boot.c */
 int nfs_boot_init(struct nfs_diskless *, struct proc *);
 
 /* nfs_node.c */
-void nfs_nhinit(void);
 int nfs_nget(struct mount *, nfsfh_t *, int, struct nfsnode **);
 int nfs_inactive(void *);
 int nfs_reclaim(void *);
@@ -127,10 +120,6 @@ int nfs_pathconf(void *);
 int nfs_advlock(void *);
 int nfs_print(void *);
 int nfs_blkatoff(void *);
-int nfs_valloc(void *);
-int nfs_vfree(void *);
-int nfs_truncate(void *);
-int nfs_update(void *);
 int nfs_bwrite(void *);
 int nfs_writebp(struct buf *, int);
 int nfsspec_access(void *);
@@ -140,6 +129,12 @@ int nfsspec_close(void *);
 int nfsfifo_read(void *);
 int nfsfifo_write(void *);
 int nfsfifo_close(void *);
+<<<<<<< HEAD
+=======
+int nfsfifo_reclaim(void *);
+
+#define	nfs_ioctl	((int (*)(void *))enoioctl)
+>>>>>>> origin/master
 
 /* nfs_serv.c */
 int nfsrv3_access(struct nfsrv_descript *, struct nfssvc_sock *,
@@ -156,9 +151,6 @@ int nfsrv_read(struct nfsrv_descript *, struct nfssvc_sock *,
 		    struct proc *, struct mbuf **);
 int nfsrv_write(struct nfsrv_descript *, struct nfssvc_sock *,
 		     struct proc *, struct mbuf **);
-int nfsrv_writegather(struct nfsrv_descript **, struct nfssvc_sock *,
-			   struct proc *, struct mbuf **);
-void nfsrvw_coalesce(struct nfsrv_descript *, struct nfsrv_descript *);
 int nfsrv_create(struct nfsrv_descript *, struct nfssvc_sock *,
 		      struct proc *, struct mbuf **);
 int nfsrv_mknod(struct nfsrv_descript *, struct nfssvc_sock *,
@@ -202,11 +194,13 @@ int nfs_send(struct socket *, struct mbuf *, struct mbuf *,
 		  struct nfsreq *);
 int nfs_receive(struct nfsreq *, struct mbuf **, struct mbuf **);
 int nfs_reply(struct nfsreq *);
-int nfs_request(struct vnode *, struct mbuf *, int, struct proc *,
-		     struct ucred *, struct mbuf **, struct mbuf **,
-		     caddr_t *);
+int nfs_request(struct vnode *, int, struct nfsm_info *);
 int nfs_rephead(int, struct nfsrv_descript *, struct nfssvc_sock *, int,
+<<<<<<< HEAD
 		u_quad_t *, struct mbuf **, struct mbuf **, caddr_t *);
+=======
+		struct mbuf **, struct mbuf **);
+>>>>>>> origin/master
 void nfs_timer(void *);
 int nfs_sigintr(struct nfsmount *, struct nfsreq *, struct proc *);
 int nfs_sndlock(int *, struct nfsreq *);
@@ -214,7 +208,7 @@ void nfs_sndunlock(int *);
 int nfs_rcvlock(struct nfsreq *);
 void nfs_rcvunlock(int *);
 int nfs_getreq(struct nfsrv_descript *, struct nfsd *, int);
-int nfs_msg(struct proc *, char *, char *);
+void nfs_msg(struct nfsreq *, char *);
 void nfsrv_rcv(struct socket *, caddr_t, int);
 int nfsrv_getstream(struct nfssvc_sock *, int);
 int nfsrv_dorec(struct nfssvc_sock *, struct nfsd *,
@@ -229,27 +223,44 @@ void nfsrv_updatecache(struct nfsrv_descript *, int, struct mbuf *);
 void nfsrv_cleancache(void);
 
 /* nfs_subs.c */
+<<<<<<< HEAD
 struct mbuf *nfsm_reqh(struct vnode *, u_long, int, caddr_t *);
 struct mbuf *nfsm_rpchead(struct ucred *, int, int, int, int, char *, int,
 			       char *, struct mbuf *, int, struct mbuf **,
 			       u_int32_t *);
 int nfsm_mbuftouio(struct mbuf **, struct uio *, int, caddr_t *);
 int nfsm_uiotombuf(struct uio *, struct mbuf **, int, caddr_t *);
+=======
+struct mbuf *nfsm_reqhead(int);
+u_int32_t nfs_get_xid(void);
+void nfsm_rpchead(struct nfsreq *, struct ucred *, int);
+void *nfsm_build(struct mbuf **, u_int);
+int nfsm_mbuftouio(struct mbuf **, struct uio *, int, caddr_t *);
+void nfsm_uiotombuf(struct mbuf **, struct uio *, size_t);
+void nfsm_strtombuf(struct mbuf **, void *, size_t);
+void nfsm_buftombuf(struct mbuf **, void *, size_t);
+>>>>>>> origin/master
 int nfsm_disct(struct mbuf **, caddr_t *, int, int, caddr_t *);
 int nfs_adv(struct mbuf **, caddr_t *, int, int);
 int nfsm_strtmbuf(struct mbuf **, char **, char *, long);
 int nfs_vfs_init(struct vfsconf *);
+int nfs_attrtimeo(struct nfsnode *);
 int nfs_loadattrcache(struct vnode **, struct mbuf **, caddr_t *,
 			   struct vattr *);
 int nfs_getattrcache(struct vnode *, struct vattr *);
 int nfs_namei(struct nameidata *, fhandle_t *, int, struct nfssvc_sock *,
 		   struct mbuf *, struct mbuf **, caddr_t *, struct vnode **,
+<<<<<<< HEAD
 		   struct proc *, int);
+=======
+		   struct proc *);
+void nfsm_v3attrbuild(struct mbuf **, struct vattr *, int);
+>>>>>>> origin/master
 void nfsm_adj(struct mbuf *, int, int);
 void nfsm_srvwcc(struct nfsrv_descript *, int, struct vattr *, int,
-		      struct vattr *, struct mbuf **, char **);
-void nfsm_srvpostopattr(struct nfsrv_descript *, int, struct vattr *,
-			     struct mbuf **, char **);
+		      struct vattr *, struct nfsm_info *);
+void nfsm_srvpostop_attr(struct nfsrv_descript *, int, struct vattr *,
+			     struct nfsm_info *);
 void nfsm_srvfattr(struct nfsrv_descript *, struct vattr *,
 			struct nfs_fattr *);
 int nfsrv_fhtovp(fhandle_t *, int, struct vnode **, struct ucred *,
@@ -264,17 +275,18 @@ void nfs_add_tobecommitted_range(struct vnode *, struct buf *);
 void nfs_del_tobecommitted_range(struct vnode *, struct buf *);
 void nfs_merge_commit_ranges(struct vnode *);
 int nfsrv_errmap(struct nfsrv_descript *, int);
-void nfsrvw_sort(gid_t *, int);
-void nfsrv_setcred(struct ucred *, struct ucred *);
+int nfsm_srvsattr(struct mbuf **, struct vattr *, struct mbuf *, caddr_t *);
+void nfsm_fhtom(struct nfsm_info *, struct vnode *, int);
+void nfsm_srvfhtom(struct mbuf **, fhandle_t *, int);
 
 /* nfs_syscalls.c */
 int sys_nfssvc(struct proc *, void *, register_t *);
 int nfssvc_addsock(struct file *, struct mbuf *);
-int nfssvc_nfsd(struct nfsd_srvargs *, caddr_t, struct proc *);
+int nfssvc_nfsd(struct nfsd *);
 void nfsrv_zapsock(struct nfssvc_sock *);
 void nfsrv_slpderef(struct nfssvc_sock *);
 void nfsrv_init(int);
-int nfssvc_iod(struct proc *);
+void nfssvc_iod(void *);
 void start_nfsio(void *);
 void nfs_getset_niothreads(int);
 int nfs_getauth(struct nfsmount *, struct nfsreq *, struct ucred *,
@@ -288,3 +300,12 @@ int nfs_savenickauth(struct nfsmount *, struct ucred *, int, NFSKERBKEY_T,
 int  nfs_kqfilter(void *);
 void nfs_kqinit(void);
 
+<<<<<<< HEAD
+=======
+/* Internal NFS utility macros */
+#define	mb_offset(m)	(mtod((m), caddr_t) + (m)->m_len)
+#define	nfsm_padlen(s)	(nfsm_rndup(s) - (s))
+
+#endif /* _KERNEL */
+#endif /* _NFS_NFS_VAR_H_ */
+>>>>>>> origin/master

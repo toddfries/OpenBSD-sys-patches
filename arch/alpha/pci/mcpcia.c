@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: mcpcia.c,v 1.5 2010/02/18 20:48:15 sobrado Exp $ */
 /* $NetBSD: mcpcia.c,v 1.20 2007/03/04 05:59:11 christos Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -192,9 +185,9 @@ mcpciaattach(parent, self, aux)
 	mcpcia_init0(ccp, 1);
 
 	ctl = REGVAL(MCPCIA_PCI_REV(ccp));
-	printf("%s: Horse Revision %d, %s Handed Saddle Revision %d,"
-	    " CAP Revision %d\n", mcp->mcpcia_dev.dv_xname, HORSE_REV(ctl),
-	    (SADDLE_TYPE(ctl) & 1)? "Right": "Left", SADDLE_REV(ctl),
+	printf("%s: Horse rev %d, %s handed Saddle rev %d, CAP rev %d\n",
+	    mcp->mcpcia_dev.dv_xname, HORSE_REV(ctl),
+	    (SADDLE_TYPE(ctl) & 1) ? "right" : "left", SADDLE_REV(ctl),
 	    CAP_REV(ctl));
 
 	mcpcia_dma_init(ccp);
@@ -208,6 +201,7 @@ mcpciaattach(parent, self, aux)
 	/*
 	 * Attach PCI bus
 	 */
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = &ccp->cc_iot;
 	pba.pba_memt = &ccp->cc_memt;
@@ -216,9 +210,8 @@ mcpciaattach(parent, self, aux)
 	pba.pba_pc = &ccp->cc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
-	pba.pba_bridgetag = NULL;
 
-	(void) config_found(self, &pba, mcpciaprint);
+	config_found(self, &pba, mcpciaprint);
 
 	/*
 	 * Clear any errors that may have occurred during the probe

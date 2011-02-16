@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: wsemul_vt100_chars.c,v 1.4 2004/04/02 04:39:51 deraadt Exp $ */
+=======
+/* $OpenBSD: wsemul_vt100_chars.c,v 1.7 2009/12/10 16:35:28 oga Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: wsemul_vt100_chars.c,v 1.4 1999/02/20 18:20:02 drochner Exp $ */
 
 /*
@@ -153,7 +157,7 @@ vt100_setnrc(edp, nrc)
 	if (edp->nrctab == NULL)
 		return (0);
 
-	if (nrc < 0 || nrc >= sizeof(nrctable) / sizeof(nrctable[0]))
+	if (nrc < 0 || nrc >= nitems(nrctable))
 		return (ERANGE);
 
 	for (i = 0; i < 128; i++)

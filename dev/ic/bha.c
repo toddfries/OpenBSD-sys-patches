@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bha.c,v 1.9 2006/11/28 23:59:45 dlg Exp $	*/
+=======
+/*	$OpenBSD: bha.c,v 1.26 2010/08/07 03:50:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bha.c,v 1.27 1998/11/19 21:53:00 thorpej Exp $	*/
 
 #undef BHADEBUG
@@ -24,13 +28,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,7 +67,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -80,10 +76,6 @@
 
 #include <dev/ic/bhareg.h>
 #include <dev/ic/bhavar.h>
-
-#ifndef DDB
-#define Debugger() panic("should call debugger here (bha.c)")
-#endif /* ! DDB */
 
 #define	BHA_MAXXFER	((BHA_NSEG - 1) << PGSHIFT)
 #define	ISWIDE(sc)	((sc)->sc_iswide)
@@ -103,69 +95,18 @@ void bha_collect_mbo(struct bha_softc *);
 void bha_start_ccbs(struct bha_softc *);
 void bha_done(struct bha_softc *, struct bha_ccb *);
 int bha_init(struct bha_softc *);
-void bhaminphys(struct buf *);
-int bha_scsi_cmd(struct scsi_xfer *);
+void bhaminphys(struct buf *, struct scsi_link *);
+void bha_scsi_cmd(struct scsi_xfer *);
 int bha_poll(struct bha_softc *, struct scsi_xfer *, int);
 void bha_timeout(void *arg);
 int bha_create_ccbs(struct bha_softc *, struct bha_ccb *, int);
-void bha_enqueue(struct bha_softc *, struct scsi_xfer *, int);
-struct scsi_xfer *bha_dequeue(struct bha_softc *);
 
 struct cfdriver bha_cd = {
 	NULL, "bha", DV_DULL
 };
 
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device bha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 #define BHA_RESET_TIMEOUT	2000	/* time to wait for reset (mSec) */
 #define	BHA_ABORT_TIMEOUT	2000	/* time to wait for abort (mSec) */
-
-/*
- * Insert a scsi_xfer into the software queue.  We overload xs->free_list
- * to avoid having to allocate additional resources (since we're used
- * only during resource shortages anyhow.
- */
-void
-bha_enqueue(sc, xs, infront)
-	struct bha_softc *sc;
-	struct scsi_xfer *xs;
-	int infront;
-{
-
-	if (infront || LIST_EMPTY(&sc->sc_queue)) {
-		if (LIST_EMPTY(&sc->sc_queue))
-			sc->sc_queuelast = xs;
-		LIST_INSERT_HEAD(&sc->sc_queue, xs, free_list);
-		return;
-	}
-
-	LIST_INSERT_AFTER(sc->sc_queuelast, xs, free_list);
-	sc->sc_queuelast = xs;
-}
-
-/*
- * Pull a scsi_xfer off the front of the software queue.
- */
-struct scsi_xfer *
-bha_dequeue(sc)
-	struct bha_softc *sc;
-{
-	struct scsi_xfer *xs;
-
-	xs = LIST_FIRST(&sc->sc_queue);
-	LIST_REMOVE(xs, free_list);
-
-	if (LIST_EMPTY(&sc->sc_queue))
-		sc->sc_queuelast = NULL;
-
-	return (xs);
-}
 
 /*
  * bha_cmd(iot, ioh, sc, icnt, ibuf, ocnt, obuf)
@@ -327,12 +268,10 @@ bha_attach(sc, bpd)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = bpd->sc_scsi_dev;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &bha_dev;
 	sc->sc_link.openings = 4;
 
 	TAILQ_INIT(&sc->sc_free_ccb);
 	TAILQ_INIT(&sc->sc_waiting_ccb);
-	LIST_INIT(&sc->sc_queue);
 
 	s = splbio();
 	bha_inquire_setup_information(sc);
@@ -591,7 +530,6 @@ bha_create_ccbs(sc, ccbstore, count)
 	struct bha_ccb *ccb;
 	int i, error;
 
-	bzero(ccbstore, sizeof(struct bha_ccb) * count);
 	for (i = 0; i < count; i++) {
 		ccb = &ccbstore[i];
 		if ((error = bha_init_ccb(sc, ccb)) != 0) {
@@ -762,7 +700,7 @@ bha_start_ccbs(sc)
 		bus_space_write_1(iot, ioh, BHA_CMD_PORT, BHA_START_SCSI);
 
 		if ((xs->flags & SCSI_POLL) == 0)
-			timeout_add(&xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->timeout);
 
 		++sc->sc_mbofull;
 		bha_nextmbx(wmbo, wmbx, mbo);
@@ -805,16 +743,14 @@ bha_done(sc, ccb)
 	 */
 #ifdef BHADIAG
 	if (ccb->flags & CCB_SENDING) {
-		printf("%s: exiting ccb still in transit!\n",
+		panic("%s: exiting ccb still in transit!",
 		    sc->sc_dev.dv_xname);
-		Debugger();
 		return;
 	}
 #endif
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n",
+		panic("%s: exiting ccb not allocated!",
 		    sc->sc_dev.dv_xname);
-		Debugger();
 		return;
 	}
 	if (xs->error == XS_NOERROR) {
@@ -850,19 +786,7 @@ bha_done(sc, ccb)
 			xs->resid = 0;
 	}
 	bha_free_ccb(sc, ccb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
-
-	/*
-	 * If there are queue entries in the software queue, try to
-	 * run the first one.  We should be more or less guaranteed
-	 * to succeed, since we just freed a CCB.
-	 *
-	 * NOTE: bha_scsi_cmd() relies on our calling it with
-	 * the first entry in the queue.
-	 */
-	if ((xs = LIST_FIRST(&sc->sc_queue)) != NULL)
-		(void) bha_scsi_cmd(xs);
 }
 
 /*
@@ -1188,7 +1112,7 @@ bha_init(sc)
 	 * Allocate the mailbox and control blocks.
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct bha_control),
-	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0) {
 		printf("%s: unable to allocate control structures, "
 		    "error = %d\n", sc->sc_dev.dv_xname, error);
 		return (error);
@@ -1327,10 +1251,8 @@ bha_inquire_setup_information(sc)
 }
 
 void
-bhaminphys(bp)
-	struct buf *bp;
+bhaminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > BHA_MAXXFER)
 		bp->b_bcount = BHA_MAXXFER;
 	minphys(bp);
@@ -1340,7 +1262,7 @@ bhaminphys(bp)
  * start a scsi operation given the command and the data address.  Also needs
  * the unit, target and lu.
  */
-int
+void
 bha_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -1349,47 +1271,11 @@ bha_scsi_cmd(xs)
 	bus_dma_tag_t dmat = sc->sc_dmat;
 	struct bha_ccb *ccb;
 	int error, seg, flags, s;
-	int fromqueue = 0, dontqueue = 0;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("bha_scsi_cmd\n"));
 
 	s = splbio();		/* protect the queue */
 
-	/*
-	 * If we're running the queue from bha_done(), we've been
-	 * called with the first queue entry as our argument.
-	 */
-	if (xs == LIST_FIRST(&sc->sc_queue)) {
-		xs = bha_dequeue(sc);
-		fromqueue = 1;
-		goto get_ccb;
-	}
-
-	/* Polled requests can't be queued for later. */
-	dontqueue = xs->flags & SCSI_POLL;
-
-	/*
-	 * If there are jobs in the queue, run them first.
-	 */
-	if (!LIST_EMPTY(&sc->sc_queue)) {
-		/*
-		 * If we can't queue, we have to abort, since
-		 * we have to preserve order.
-		 */
-		if (dontqueue) {
-			splx(s);
-			return (TRY_AGAIN_LATER);
-		}
-
-		/*
-		 * Swap with the first queue entry.
-		 */
-		bha_enqueue(sc, xs, 0);
-		xs = bha_dequeue(sc);
-		fromqueue = 1;
-	}
-
- get_ccb:
 	/*
 	 * get a ccb to use. If the transfer
 	 * is from a buf (possibly from interrupt time)
@@ -1397,21 +1283,10 @@ bha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((ccb = bha_get_ccb(sc, flags)) == NULL) {
-		/*
-		 * If we can't queue, we lose.
-		 */
-		if (dontqueue) {
-			splx(s);
-			return (TRY_AGAIN_LATER);
-		}
-
-		/*
-		 * Stuff ourselves into the queue, in front
-		 * if we came off in the first place.
-		 */
-		bha_enqueue(sc, xs, fromqueue);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (SUCCESSFULLY_QUEUED);
+		return;
 	}
 
 	splx(s);		/* done playing with the queue */
@@ -1437,20 +1312,10 @@ bha_scsi_cmd(xs)
 		/*
 		 * Map the DMA transfer.
 		 */
-#ifdef TFS
-		if (flags & SCSI_DATA_UIO) {
-			error = bus_dmamap_load_uio(dmat,
-			    ccb->dmamap_xfer, (struct uio *)xs->data,
-			    (flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT :
-			    BUS_DMA_WAITOK);
-		} else
-#endif /* TFS */
-		{
-			error = bus_dmamap_load(dmat,
-			    ccb->dmamap_xfer, xs->data, xs->datalen, NULL,
-			    (flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT :
-			    BUS_DMA_WAITOK);
-		}
+		error = bus_dmamap_load(dmat,
+		    ccb->dmamap_xfer, xs->data, xs->datalen, NULL,
+		    (flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT :
+		    BUS_DMA_WAITOK);
 
 		if (error) {
 			if (error == EFBIG) {
@@ -1520,7 +1385,7 @@ bha_scsi_cmd(xs)
 	 */
 	SC_DEBUG(sc_link, SDEV_DB3, ("cmd_sent\n"));
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/*
 	 * If we can't use interrupts, poll on completion
@@ -1530,12 +1395,12 @@ bha_scsi_cmd(xs)
 		if (bha_poll(sc, xs, ccb->timeout))
 			bha_timeout(ccb);
 	}
-	return (COMPLETE);
+	return;
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	bha_free_ccb(sc, ccb);
-	return (COMPLETE);
+	scsi_done(xs);
 }
 
 /*
@@ -1587,10 +1452,8 @@ bha_timeout(arg)
 	 * If the ccb's mbx is not free, then the board has gone Far East?
 	 */
 	bha_collect_mbo(sc);
-	if (ccb->flags & CCB_SENDING) {
-		printf("%s: not taking commands!\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (ccb->flags & CCB_SENDING)
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

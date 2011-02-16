@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gus.c,v 1.28 2005/10/19 22:52:02 fgsch Exp $	*/
+=======
+/*	$OpenBSD: gus.c,v 1.34 2010/07/15 03:43:11 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -1003,14 +1000,8 @@ gus_voice_intr(sc)
 			    sc->sc_playbuf = ++sc->sc_playbuf % sc->sc_nbufs;
 			    gus_start_playing(sc, sc->sc_playbuf);
 			} else if (sc->sc_bufcnt < 0) {
-#ifdef DDB
-			    printf("%s: negative bufcnt in stopped voice\n",
-				   sc->sc_dev.dv_xname);
-			    Debugger();
-#else
 			    panic("%s: negative bufcnt in stopped voice",
-				  sc->sc_dev.dv_xname);
-#endif
+				   sc->sc_dev.dv_xname);
 			} else {
 			    sc->sc_playbuf = -1; /* none are active */
 			    gus_stops++;
@@ -1326,7 +1317,7 @@ gusdmaout(sc, flags, gusaddr, buffaddr, length)
 	/*
 	 * XXX If we don't finish in one second, give up...
 	 */
-	timeout_add(&sc->sc_dma_tmo, hz);
+	timeout_add_sec(&sc->sc_dma_tmo, 1);
 }
 
 /*
@@ -1581,6 +1572,9 @@ gus_set_params(addr, setmode, usemode, p, r)
 		r->sw_code = p->sw_code = swap_bytes;
 		break;
 	}
+	p->bps = AUDIO_BPS(p->precision);
+	r->bps = AUDIO_BPS(r->precision);
+	p->msb = r->msb = 1;
 
 	return 0;
 }
@@ -3318,6 +3312,9 @@ gus_query_encoding(addr, fp)
 		return(EINVAL);
 		/*NOTREACHED*/
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return (0);
 }
 

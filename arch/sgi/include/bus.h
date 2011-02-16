@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.4 2005/01/02 19:33:11 kettenis Exp $	*/
+/*	$OpenBSD: bus.h,v 1.24 2010/08/23 16:56:15 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -48,10 +48,8 @@ typedef struct mips_bus_space *bus_space_tag_t;
 typedef struct mips_bus_space bus_space_t;
 
 struct mips_bus_space {
-	struct extent	*bus_extent;
 	bus_addr_t	bus_base;
-	bus_addr_t	bus_base_dma;
-	int32_t		bus_reverse;
+	void		*bus_private;
 	u_int8_t	(*_space_read_1)(bus_space_tag_t , bus_space_handle_t,
 			  bus_size_t);
 	void		(*_space_write_1)(bus_space_tag_t , bus_space_handle_t,
@@ -68,12 +66,27 @@ struct mips_bus_space {
 			  bus_size_t);
 	void		(*_space_write_8)(bus_space_tag_t , bus_space_handle_t,
 			  bus_size_t, u_int64_t);
+	void		(*_space_read_raw_2)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_2)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
+	void		(*_space_read_raw_4)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_4)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
+	void		(*_space_read_raw_8)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, u_int8_t *, bus_size_t);
+	void		(*_space_write_raw_8)(bus_space_tag_t, bus_space_handle_t,
+			  bus_addr_t, const u_int8_t *, bus_size_t);
 	int		(*_space_map)(bus_space_tag_t , bus_addr_t,
 			  bus_size_t, int, bus_space_handle_t *);
 	void		(*_space_unmap)(bus_space_tag_t, bus_space_handle_t,
 			  bus_size_t);
 	int		(*_space_subregion)(bus_space_tag_t, bus_space_handle_t,
 			  bus_size_t, bus_size_t, bus_space_handle_t *);
+	void *		(*_space_vaddr)(bus_space_tag_t, bus_space_handle_t);
+	void		(*_space_barrier)(bus_space_tag_t, bus_space_handle_t,
+			  bus_size_t, bus_size_t, int);
 };
 
 #define	bus_space_read_1(t, h, o) (*(t)->_space_read_1)((t), (h), (o))
@@ -86,14 +99,30 @@ struct mips_bus_space {
 #define	bus_space_write_4(t, h, o, v) (*(t)->_space_write_4)((t), (h), (o), (v))
 #define	bus_space_write_8(t, h, o, v) (*(t)->_space_write_8)((t), (h), (o), (v))
 
+#define	bus_space_read_raw_multi_2(t, h, a, b, l) \
+	(*(t)->_space_read_raw_2)((t), (h), (a), (b), (l))
+#define	bus_space_read_raw_multi_4(t, h, a, b, l) \
+	(*(t)->_space_read_raw_4)((t), (h), (a), (b), (l))
+#define	bus_space_read_raw_multi_8(t, h, a, b, l) \
+	(*(t)->_space_read_raw_8)((t), (h), (a), (b), (l))
+
+#define	bus_space_write_raw_multi_2(t, h, a, b, l) \
+	(*(t)->_space_write_raw_2)((t), (h), (a), (b), (l))
+#define	bus_space_write_raw_multi_4(t, h, a, b, l) \
+	(*(t)->_space_write_raw_4)((t), (h), (a), (b), (l))
+#define	bus_space_write_raw_multi_8(t, h, a, b, l) \
+	(*(t)->_space_write_raw_8)((t), (h), (a), (b), (l))
+
 #define	bus_space_map(t, o, s, c, p) (*(t)->_space_map)((t), (o), (s), (c), (p))
 #define	bus_space_unmap(t, h, s) (*(t)->_space_unmap)((t), (h), (s))
 #define	bus_space_subregion(t, h, o, s, p) \
     (*(t)->_space_subregion)((t), (h), (o), (s), (p))
 
-/* Helper function in pmap.c */
-int bus_mem_add_mapping(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
+#define	bus_space_vaddr(t, h)	(*(t)->_space_vaddr)((t), (h))
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_read_multi(n,m)					      \
@@ -126,6 +155,25 @@ bus_space_read_region(2,16)
 bus_space_read_region(4,32)
 
 #define	bus_space_read_region_8	!!! bus_space_read_region_8 not implemented !!!
+
+/*----------------------------------------------------------------------------*/
+#define bus_space_read_raw_region(n,m)					      \
+static __inline void							      \
+CAT(bus_space_read_raw_region_,n)(bus_space_tag_t bst,			      \
+     bus_space_handle_t bsh,						      \
+     bus_addr_t ba, u_int8_t *x, size_t cnt)				      \
+{									      \
+	cnt >>= ((n) >> 1);						      \
+	while (cnt--) {							      \
+		CAT(bus_space_read_raw_multi_,n)(bst, bsh, ba, x, (n));	      \
+		ba += (n);						      \
+		x += (n);						      \
+	}								      \
+}
+
+bus_space_read_raw_region(2,16)
+bus_space_read_raw_region(4,32)
+bus_space_read_raw_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_write_multi(n,m)					      \
@@ -164,6 +212,25 @@ bus_space_write_region(4,32)
     !!! bus_space_write_region_8 not implemented !!!
 
 /*----------------------------------------------------------------------------*/
+#define bus_space_write_raw_region(n,m)					      \
+static __inline void							      \
+CAT(bus_space_write_raw_region_,n)(bus_space_tag_t bst,			      \
+     bus_space_handle_t bsh,						      \
+     bus_addr_t ba, const u_int8_t *x, size_t cnt)		              \
+{									      \
+	cnt >>= ((n) >> 1);						      \
+	while (cnt--) {							      \
+		CAT(bus_space_write_raw_multi_,n)(bst, bsh, ba, x, (n));      \
+		ba += (n);						      \
+		x += (n);						      \
+	}								      \
+}
+
+bus_space_write_raw_region(2,16)
+bus_space_write_raw_region(4,32)
+bus_space_write_raw_region(8,64)
+
+/*----------------------------------------------------------------------------*/
 #define bus_space_set_region(n,m)					      \
 static __inline void							      \
 CAT(bus_space_set_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
@@ -178,38 +245,6 @@ CAT(bus_space_set_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
 bus_space_set_region(1,8)
 bus_space_set_region(2,16)
 bus_space_set_region(4,32)
-
-/*----------------------------------------------------------------------------*/
-#define	bus_space_read_raw_multi(n,m,l)					      \
-static __inline void							      \
-CAT(bus_space_read_raw_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh, \
-    bus_addr_t ba, u_int8_t *buf, bus_size_t cnt)			      \
-{									      \
-	CAT(bus_space_read_multi_,n)(bst, bsh, ba, (CAT3(u_int,m,_t) *)buf,   \
-	    cnt >> l);							      \
-}
-
-bus_space_read_raw_multi(2,16,1)
-bus_space_read_raw_multi(4,32,2)
-
-#define	bus_space_read_raw_multi_8 \
-    !!! bus_space_read_raw_multi_8 not implemented !!!
-
-/*----------------------------------------------------------------------------*/
-#define	bus_space_write_raw_multi(n,m,l)				      \
-static __inline void							      \
-CAT(bus_space_write_raw_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,\
-    bus_addr_t ba, const u_int8_t *buf, bus_size_t cnt)			      \
-{									      \
-	CAT(bus_space_write_multi_,n)(bst, bsh, ba,			      \
-	    (const CAT3(u_int,m,_t) *)buf, cnt >> l);			      \
-}
-
-bus_space_write_raw_multi(2,16,1)
-bus_space_write_raw_multi(4,32,2)
-
-#define	bus_space_write_raw_multi_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
 
 /*----------------------------------------------------------------------------*/
 static __inline void
@@ -258,8 +293,16 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_size_t o1,
  *	    bus_size_t len, int flags);
  *
  */
-#define bus_space_barrier(t, h, o, l, f)	\
-	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))
+static __inline void
+bus_space_barrier(bus_space_tag_t t, bus_space_handle_t h, bus_size_t offs,
+    bus_size_t len, int flags)
+{
+	if (t->_space_barrier != NULL)
+		(*(t)->_space_barrier)(t, h, offs, len, flags);
+	else
+		__asm__ __volatile__ ("sync" ::: "memory");
+}
+
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
 /* Compatibility defines */
@@ -301,8 +344,10 @@ typedef struct machine_bus_dmamap	*bus_dmamap_t;
  */
 struct machine_bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
-	bus_addr_t	ds_vaddr;	/* CPU address */
 	bus_size_t	ds_len;		/* length of transfer */
+
+	paddr_t		_ds_paddr;	/* CPU address */
+	vaddr_t		_ds_vaddr;	/* CPU address */
 };
 typedef struct machine_bus_dma_segment	bus_dma_segment_t;
 
@@ -330,6 +375,8 @@ struct machine_bus_dma_tag {
 		    struct uio *, int);
 	int	(*_dmamap_load_raw)(bus_dma_tag_t , bus_dmamap_t,
 		    bus_dma_segment_t *, int, bus_size_t, int);
+	int	(*_dmamap_load_buffer)(bus_dma_tag_t, bus_dmamap_t, void *,
+		    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 	void	(*_dmamap_unload)(bus_dma_tag_t , bus_dmamap_t);
 	void	(*_dmamap_sync)(bus_dma_tag_t , bus_dmamap_t,
 		    bus_addr_t, bus_size_t, int);
@@ -386,6 +433,8 @@ int	_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *, int);
 int	_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
 int	_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t,
 	    bus_dma_segment_t *, int, bus_size_t, int);
+int	_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 void	_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
 void	_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 	    bus_size_t, int);

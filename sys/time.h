@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: time.h,v 1.23 2006/06/19 15:13:35 deraadt Exp $	*/
+=======
+/*	$OpenBSD: time.h,v 1.26 2009/11/27 19:45:54 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*
@@ -306,6 +310,10 @@ void	getbinuptime(struct bintime *);
 void	getnanouptime(struct timespec *);
 void	getmicrouptime(struct timeval *);
 
+struct proc;
+int	clock_gettime(struct proc *, clockid_t, struct timespec *);
+
+int	timespecfix(struct timespec *);
 int	itimerfix(struct timeval *);
 int	itimerdecr(struct itimerval *itp, int usec);
 int	settime(struct timespec *);

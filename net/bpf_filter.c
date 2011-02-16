@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bpf_filter.c,v 1.17 2006/02/27 14:32:49 otto Exp $	*/
+=======
+/*	$OpenBSD: bpf_filter.c,v 1.24 2011/02/13 22:41:10 canacar Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bpf_filter.c,v 1.12 1996/02/13 22:00:00 christos Exp $	*/
 
 /*
@@ -42,7 +46,10 @@
 #include <sys/time.h>
 #ifndef _KERNEL
 #include <stdlib.h>
+#include <string.h>
 #include "pcap.h"
+#else
+#include <sys/systm.h>
 #endif
 
 #include <sys/endian.h>
@@ -161,6 +168,8 @@ bpf_filter(pc, p, wirelen, buflen)
 	u_int32_t A = 0, X = 0;
 	u_int32_t k;
 	int32_t mem[BPF_MEMWORDS];
+
+	bzero(mem, sizeof(mem));
 
 	if (pc == 0)
 		/*
@@ -541,7 +550,7 @@ bpf_validate(f, len)
 				/*
 				 * Check for constant division by 0.
 				 */
-				if (BPF_RVAL(p->code) == BPF_K && p->k == 0)
+				if (BPF_SRC(p->code) == BPF_K && p->k == 0)
 					return 0;
 				break;
 			default:

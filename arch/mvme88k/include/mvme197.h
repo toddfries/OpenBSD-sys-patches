@@ -1,4 +1,4 @@
-/*	$OpenBSD: mvme197.h,v 1.6 2006/04/27 20:19:31 miod Exp $ */
+/*	$OpenBSD: mvme197.h,v 1.11 2011/01/02 17:55:27 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1999 Steve Murphree, Jr.
@@ -46,6 +46,8 @@
 #ifndef __MACHINE_MVME197_H__
 #define __MACHINE_MVME197_H__
 
+#define	ECDM_BASE	0xfff01100	/* not what the doc says... */
+
 #define	FLASH_START	0xff800000	/* start of flash memory area */
 #define	FLASH_SIZE	0x00400000
 #define BUG197_START	0xfff80000	/* start of BUG PROM (in OBIO) */
@@ -57,5 +59,11 @@
 #define M197_IMASK	0xfff00065	/* interrupt mask level */
 #define M197_ISRC	0xfff0006f	/* interrupt SRC */
 #define M197_IACK	0xfff00100	/* interrupt ACK base */
+
+#ifdef _KERNEL
+void	m197_broadcast_complex_ipi(int, u_int32_t, u_int32_t);
+void	m197_send_complex_ipi(int, cpuid_t, u_int32_t, u_int32_t);
+void	m197_send_ipi(int, cpuid_t);
+#endif
 
 #endif	/* __MACHINE_MVME197_H__ */

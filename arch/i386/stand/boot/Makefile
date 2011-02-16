@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.32 2005/07/30 14:32:46 millert Exp $
+#	$OpenBSD: Makefile,v 1.35 2010/07/10 16:11:43 deraadt Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -15,7 +15,7 @@ LDFLAGS+=-nostdlib -Bstatic
 CLEANFILES+=	srt0.o
 SRCS=	crt0.c
 .else
-LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
+LDFLAGS+=-Ttext $(LINKADDR) -Z -x -noinhibit-exec
 CLEANFILES+=	crt0.o
 SRCS=	srt0.S
 .endif

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: acpitimer.c,v 1.5 2007/02/20 22:10:27 marco Exp $	*/
+=======
+/* $OpenBSD: acpitimer.c,v 1.8 2008/06/11 04:42:09 marco Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *

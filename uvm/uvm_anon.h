@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_anon.h,v 1.11 2002/03/14 01:27:18 millert Exp $	*/
+=======
+/*	$OpenBSD: uvm_anon.h,v 1.15 2010/06/14 10:05:37 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_anon.h,v 1.13 2000/12/27 09:17:04 chs Exp $	*/
 
 /*
@@ -37,10 +41,6 @@
 #define _UVM_UVM_ANON_H_
 
 /*
- * uvm_anon.h
- */
-
-/*
  * anonymous memory management
  *
  * anonymous virtual memory is short term virtual memory that goes away
@@ -50,6 +50,7 @@
 
 struct vm_anon {
 	int an_ref;			/* reference count [an_lock] */
+<<<<<<< HEAD
 	simple_lock_data_t an_lock;	/* lock for an_ref */
 	union {
 		struct vm_anon *an_nxt;	/* if on free list [afreelock] */
@@ -58,6 +59,16 @@ struct vm_anon {
 	int an_swslot;		/* drum swap slot # (if != 0) 
 				   [an_lock.  also, it is ok to read
 				   an_swslot if we hold an_page PG_BUSY] */
+=======
+
+	/*
+	 * Drum swap slot # (if != 0) [an_lock or not, if we hold an_page
+	 * PG_BUSY]
+	 */
+	int an_swslot;
+
+	simple_lock_data_t an_lock;
+>>>>>>> origin/master
 };
 
 /*
@@ -81,6 +92,9 @@ struct vm_anon {
 /*
  * processes reference anonymous virtual memory maps with an anonymous 
  * reference structure:
+ * Note that the offset field indicates which part of the amap we are
+ * referencing.
+ * Locked by vm_map lock.
  */
 
 struct vm_aref {
@@ -88,12 +102,8 @@ struct vm_aref {
 	struct vm_amap *ar_amap;	/* pointer to amap */
 };
 
-/*
- * the offset field indicates which part of the amap we are referencing.
- * locked by vm_map lock.
- */
-
 #ifdef _KERNEL
+<<<<<<< HEAD
 
 /*
  * prototypes
@@ -107,6 +117,14 @@ void uvm_anon_remove(int);
 struct vm_page *uvm_anon_lockloanpg(struct vm_anon *);
 void uvm_anon_dropswap(struct vm_anon *);
 boolean_t anon_swap_off(int, int);
+=======
+struct vm_anon	*uvm_analloc(void);
+void		 uvm_anfree(struct vm_anon *);
+void		 uvm_anon_init(void);
+struct vm_page	*uvm_anon_lockloanpg(struct vm_anon *);
+void		 uvm_anon_dropswap(struct vm_anon *);
+boolean_t	 uvm_anon_pagein(struct vm_anon *);
+>>>>>>> origin/master
 #endif /* _KERNEL */
 
 #endif /* _UVM_UVM_ANON_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.4 2007/02/01 20:39:42 art Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.15 2010/11/13 04:16:42 guenther Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -45,8 +38,11 @@
  * Interprocessor interrupt handlers.
  */
 
+#include "mtrr.h"
+
 #include <sys/param.h>
 #include <sys/device.h>
+#include <sys/memrange.h>
 #include <sys/systm.h>
 
 #include <uvm/uvm_extern.h>
@@ -58,23 +54,21 @@
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #include <machine/mtrr.h>
-#include <machine/gdt.h>
 #include <machine/fpu.h>
 
 #include <ddb/db_output.h>
 #include <machine/db_machdep.h>
 
+void x86_64_ipi_nop(struct cpu_info *);
 void x86_64_ipi_halt(struct cpu_info *);
 
 void x86_64_ipi_synch_fpu(struct cpu_info *);
 void x86_64_ipi_flush_fpu(struct cpu_info *);
 
-void x86_64_ipi_nop(struct cpu_info *);
-
-#ifdef MTRR
-void x86_64_reload_mtrr(struct cpu_info *);
+#if NMTRR > 0
+void x86_64_ipi_reload_mtrr(struct cpu_info *);
 #else
-#define x86_64_reload_mtrr NULL
+#define x86_64_ipi_reload_mtrr NULL
 #endif
 
 void (*ipifunc[X86_NIPI])(struct cpu_info *) =
@@ -83,9 +77,9 @@ void (*ipifunc[X86_NIPI])(struct cpu_info *) =
 	x86_64_ipi_nop,
 	x86_64_ipi_flush_fpu,
 	x86_64_ipi_synch_fpu,
-	pmap_do_tlb_shootdown,
-	x86_64_reload_mtrr,
-	gdt_reload_cpu,
+	NULL,
+	x86_64_ipi_reload_mtrr,
+	x86_setperf_ipi,
 #ifdef DDB
 	x86_ipi_db,
 #else
@@ -101,7 +95,11 @@ x86_64_ipi_nop(struct cpu_info *ci)
 void
 x86_64_ipi_halt(struct cpu_info *ci)
 {
+	SCHED_ASSERT_UNLOCKED();
 	disable_intr();
+	wbinvd();
+	ci->ci_flags &= ~CPUF_RUNNING;
+	wbinvd();
 
 	for(;;) {
 		__asm __volatile("hlt");
@@ -111,26 +109,22 @@ x86_64_ipi_halt(struct cpu_info *ci)
 void
 x86_64_ipi_flush_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 0);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 0);
 }
 
 void
 x86_64_ipi_synch_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 1);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 1);
 }
 
-#ifdef MTRR
-
-/*
- * mtrr_reload_cpu() is a macro in mtrr.h which picks the appropriate
- * function to use..
- */
-
+#if NMTRR > 0
 void
-x86_64_reload_mtrr(struct cpu_info *ci)
+x86_64_ipi_reload_mtrr(struct cpu_info *ci)
 {
-	if (mtrr_funcs != NULL)
-		mtrr_reload_cpu(ci);
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->reload(&mem_range_softc);
 }
 #endif

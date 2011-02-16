@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ts.c,v 1.15 2003/11/08 19:17:28 jmc Exp $ */
+=======
+/*	$OpenBSD: ts.c,v 1.20 2008/06/12 06:58:37 deraadt Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ts.c,v 1.11 1997/01/11 11:34:43 ragge Exp $ */
 
 /*-
@@ -379,7 +383,7 @@ tscommand (dev, cmd, count)
 		tsleep ((caddr_t)bp, PRIBIO, "tscommand", 0);
 		/* check MOT-flag !!! */
 	}
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 
 	splx(s);
 

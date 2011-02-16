@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amdiic.c,v 1.4 2006/01/15 10:06:06 grange Exp $	*/
+=======
+/*	$OpenBSD: amdiic.c,v 1.8 2010/04/08 00:23:53 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>
@@ -24,8 +28,12 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -146,7 +154,7 @@ amdiic_attach(struct device *parent, struct device *self, void *aux)
 	/* Map I/O space */
 	if (pci_mapreg_map(pa, AMD8111_SMB_BASE, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, &iosize, 0)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

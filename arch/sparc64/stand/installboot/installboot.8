@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 .\"	$OpenBSD: installboot.8,v 1.6 2004/12/06 20:19:38 deraadt Exp $
+=======
+.\"	$OpenBSD: installboot.8,v 1.10 2010/04/06 06:33:50 jmc Exp $
+>>>>>>> origin/master
 .\"	$NetBSD: installboot.8,v 1.1 1995/09/30 21:32:14 pk Exp $
 .\"
 .\" Copyright (c) 1995 Paul Kranenburg
@@ -29,7 +33,11 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
+<<<<<<< HEAD
 .Dd September 6, 2001
+=======
+.Dd $Mdocdate: April 6 2010 $
+>>>>>>> origin/master
 .Dt INSTALLBOOT 8 sparc64
 .Os
 .Sh NAME
@@ -97,7 +105,6 @@ as the second-level boot program:
 # /usr/mdec/installboot /usr/mdec/bootblk /dev/rsd0c
 .Ed
 .Sh SEE ALSO
-.Xr boot 8 ,
 .Xr disklabel 8 ,
 .Xr init 8
 .Sh HISTORY
@@ -105,14 +112,3 @@ The
 .Nm installboot
 first appeared in
 .Nx 1.1 .
-.Sh BUGS
-.Nm installboot
-requires simultaneous access to the mounted file system and
-the raw device, but that is not allowed with the kernel
-.Dv securelevel
-variable set to a value greater than zero
-.Pq the default ,
-so
-.Nm installboot
-only works in single-user mode
-.Pq or insecure mode - see Xr init 8 .

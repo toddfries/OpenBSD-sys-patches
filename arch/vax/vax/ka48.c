@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ka48.c,v 1.7 2002/03/14 01:26:48 millert Exp $	*/
+=======
+/*	$OpenBSD: ka48.c,v 1.10 2008/08/18 23:05:38 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -56,7 +60,7 @@
 #include <machine/vsbus.h>
 
 static	void	ka48_conf(void);
-static	void	ka48_steal_pages(void);
+static	void	ka48_init(void);
 static	void	ka48_memerr(void);
 static	int	ka48_mchk(caddr_t);
 static	void	ka48_halt(void);
@@ -69,7 +73,7 @@ struct	vs_cpu *ka48_cpu;
  * Declaration of 48-specific calls.
  */
 struct	cpu_dep ka48_calls = {
-	ka48_steal_pages,
+	ka48_init,
 	ka48_mchk,
 	ka48_memerr, 
 	ka48_conf,
@@ -79,6 +83,9 @@ struct	cpu_dep ka48_calls = {
 	2,	/* SCB pages */
 	ka48_halt,
 	ka48_reboot,
+	NULL,
+	NULL,
+	hardclock
 };
 
 
@@ -145,7 +152,7 @@ ka48_mchk(addr)
 }
 
 void
-ka48_steal_pages()
+ka48_init()
 {
 	/* Turn on caches (to speed up execution a bit) */
 	ka48_cache_enable();

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_casvar.h,v 1.2 2007/02/25 21:54:52 kettenis Exp $	*/
+=======
+/*	$OpenBSD: if_casvar.h,v 1.7 2010/09/20 07:40:38 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  *
@@ -126,8 +130,6 @@ struct cas_softc {
 	int		sc_burst;	/* DVMA burst size in effect */
 	int		sc_phys[2];	/* MII instance -> PHY map */
 
-	int		sc_if_flags;
-
 	int		sc_mif_config;	/* Selected MII reg setting */
 
 	/*
@@ -161,7 +163,6 @@ struct cas_softc {
 	/* ========== */
 	int			sc_inited;
 	int			sc_debug;
-	void			*sc_sh;		/* shutdownhook cookie */
 };
 
 #define	CAS_DMA_READ(v)		letoh64(v)

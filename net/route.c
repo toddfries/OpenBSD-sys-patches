@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: route.c,v 1.80 2006/06/17 17:20:00 pascoe Exp $	*/
+=======
+/*	$OpenBSD: route.c,v 1.128 2010/11/16 19:39:17 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -121,11 +125,19 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif
+
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
 
+<<<<<<< HEAD
 extern struct ifnet encif;
 struct ifaddr	*encap_findgwifa(struct sockaddr *);
+=======
+struct ifaddr	*encap_findgwifa(struct sockaddr *, u_int);
+>>>>>>> origin/master
 #endif
 
 #define	SA(p) ((struct sockaddr *)(p))
@@ -136,6 +148,7 @@ struct	radix_node_head	***rt_tables;
 u_int8_t		   af2rtafidx[AF_MAX+1];
 u_int8_t		   rtafidx_max;
 u_int			   rtbl_id_max = 0;
+u_int			  *rt_tab2dom;	/* rt table to domain lookup table */
 
 int			rttrash;	/* routes not in table but not freed */
 struct sockaddr		wildcard;	/* zero cookie for wildcard searches */
@@ -143,12 +156,10 @@ struct sockaddr		wildcard;	/* zero cookie for wildcard searches */
 struct pool		rtentry_pool;	/* pool for rtentry structures */
 struct pool		rttimer_pool;	/* pool for rttimer structures */
 
-int	rtable_init(struct radix_node_head ***);
-int	okaytoclone(u_int, int);
-int	rtdeletemsg(struct rtentry *, u_int);
-int	rtflushclone1(struct radix_node *, void *);
+int	rtable_init(struct radix_node_head ***, u_int);
+int	rtflushclone1(struct radix_node *, void *, u_int);
 void	rtflushclone(struct radix_node_head *, struct rtentry *);
-int	rt_if_remove_rtdelete(struct radix_node *, void *);
+int	rt_if_remove_rtdelete(struct radix_node *, void *, u_int);
 
 #define	LABELID_MAX	50000
 
@@ -163,22 +174,37 @@ TAILQ_HEAD(rt_labels, rt_label)	rt_labels = TAILQ_HEAD_INITIALIZER(rt_labels);
 
 #ifdef IPSEC
 struct ifaddr *
-encap_findgwifa(struct sockaddr *gw)
+encap_findgwifa(struct sockaddr *gw, u_int rdomain)
 {
+<<<<<<< HEAD
 	return (TAILQ_FIRST(&encif.if_addrlist));
+=======
+	struct ifnet	*encif;
+
+	if ((encif = enc_getif(rdomain, 0)) == NULL)
+		return (NULL);
+
+	return (TAILQ_FIRST(&encif->if_addrlist));
+>>>>>>> origin/master
 }
 #endif
 
 int
-rtable_init(struct radix_node_head ***table)
+rtable_init(struct radix_node_head ***table, u_int id)
 {
 	void		**p;
 	struct domain	 *dom;
+	u_int8_t	  i;
 
 	if ((p = malloc(sizeof(void *) * (rtafidx_max + 1), M_RTABLE,
+<<<<<<< HEAD
 	    M_NOWAIT)) == NULL)
 		return (-1);
 	bzero(p, sizeof(void *) * (rtafidx_max + 1));
+=======
+	    M_NOWAIT|M_ZERO)) == NULL)
+		return (ENOMEM);
+>>>>>>> origin/master
 
 	/* 2nd pass: attach */
 	for (dom = domains; dom != NULL; dom = dom->dom_next)
@@ -187,11 +213,17 @@ rtable_init(struct radix_node_head ***table)
 			    dom->dom_rtoffset);
 
 	*table = (struct radix_node_head **)p;
+
+	for (i = 0; i < rtafidx_max; i++) {
+		if ((*table)[i] != NULL)
+			(*table)[i]->rnh_rtabelid = id;
+	}
+
 	return (0);
 }
 
 void
-route_init()
+route_init(void)
 {
 	struct domain	 *dom;
 
@@ -207,36 +239,67 @@ route_init()
 		if (dom->dom_rtattach)
 			af2rtafidx[dom->dom_family] = rtafidx_max++;
 
-	if (rtable_add(0) == -1)
+	if (rtable_add(0) != 0)
 		panic("route_init rtable_add");
 }
 
 int
 rtable_add(u_int id)	/* must be called at splsoftnet */
 {
-	void	*p;
+	void	*p, *q;
 
 	if (id > RT_TABLEID_MAX)
-		return (-1);
+		return (EINVAL);
 
 	if (id == 0 || id > rtbl_id_max) {
 		size_t	newlen = sizeof(void *) * (id+1);
+		size_t	newlen2 = sizeof(u_int) * (id+1);
 
+<<<<<<< HEAD
 		if ((p = malloc(newlen, M_RTABLE, M_NOWAIT)) == NULL)
 			return (-1);
 		bzero(p, newlen);
 		if (id > 0) {
+=======
+		if ((p = malloc(newlen, M_RTABLE, M_NOWAIT|M_ZERO)) == NULL)
+			return (ENOMEM);
+		if ((q = malloc(newlen2, M_RTABLE, M_NOWAIT|M_ZERO)) == NULL) {
+			free(p, M_RTABLE);
+			return (ENOMEM);
+		}
+		if (rt_tables) {
+>>>>>>> origin/master
 			bcopy(rt_tables, p, sizeof(void *) * (rtbl_id_max+1));
+			bcopy(rt_tab2dom, q, sizeof(u_int) * (rtbl_id_max+1));
 			free(rt_tables, M_RTABLE);
+			free(rt_tab2dom, M_RTABLE);
 		}
 		rt_tables = p;
+		rt_tab2dom = q;
 		rtbl_id_max = id;
 	}
 
 	if (rt_tables[id] != NULL)	/* already exists */
-		return (-1);
+		return (EEXIST);
 
-	return (rtable_init(&rt_tables[id]));
+	rt_tab2dom[id] = 0;	/* use main table/domain by default */
+	return (rtable_init(&rt_tables[id], id));
+}
+
+u_int
+rtable_l2(u_int id)
+{
+	if (id > rtbl_id_max)
+		return (0);
+	return (rt_tab2dom[id]);
+}
+
+void
+rtable_l2set(u_int id, u_int parent)
+{
+	if (!rtable_exists(id) || !rtable_exists(parent))
+		return;
+	rt_tab2dom[id] = parent;
 }
 
 int
@@ -248,40 +311,7 @@ rtable_exists(u_int id)	/* verify table with that ID exists */
 	if (id > rtbl_id_max)
 		return (0);
 
-	if (rt_tables[id] == NULL)	/* should not happen */
-		return (0);
-
-	return (1);
-}
-
-void
-rtalloc_noclone(struct route *ro, int howstrict)
-{
-	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
-		return;		/* XXX */
-	ro->ro_rt = rtalloc2(&ro->ro_dst, 1, howstrict);
-}
-
-int
-okaytoclone(u_int flags, int howstrict)
-{
-	if (howstrict == ALL_CLONING)
-		return (1);
-	if (howstrict == ONNET_CLONING && !(flags & RTF_GATEWAY))
-		return (1);
-	return (0);
-}
-
-struct rtentry *
-rtalloc2(struct sockaddr *dst, int report, int howstrict)
-{
-	struct radix_node_head	*rnh;
-	struct rtentry		*rt;
-	struct radix_node	*rn;
-	struct rtentry		*newrt = 0;
-	struct rt_addrinfo	 info;
-	int			 s = splnet(), err = 0, msgtype = RTM_MISS;
-
+<<<<<<< HEAD
 	rnh = rt_gettable(dst->sa_family, 0);
 	if (rnh && (rn = rnh->rnh_matchaddr((caddr_t)dst, rnh)) &&
 	    ((rn->rn_flags & RNF_ROOT) == 0)) {
@@ -312,21 +342,36 @@ miss:
 	}
 	splx(s);
 	return (newrt);
+=======
+	if (rt_tables[id] == NULL)
+		return (0);
+
+	return (1);
+>>>>>>> origin/master
 }
 
 /*
  * Packet routing routines.
  */
 void
+rtalloc_noclone(struct route *ro)
+{
+	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
+		return;				 /* XXX */
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT | RT_NOCLONING,
+	    ro->ro_tableid);
+}
+
+void
 rtalloc(struct route *ro)
 {
 	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
 		return;				 /* XXX */
-	ro->ro_rt = rtalloc1(&ro->ro_dst, 1, 0);
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT, ro->ro_tableid);
 }
 
 struct rtentry *
-rtalloc1(struct sockaddr *dst, int report, u_int tableid)
+rtalloc1(struct sockaddr *dst, int flags, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 	struct rtentry		*rt;
@@ -339,9 +384,16 @@ rtalloc1(struct sockaddr *dst, int report, u_int tableid)
 	if (rnh && (rn = rnh->rnh_matchaddr((caddr_t)dst, rnh)) &&
 	    ((rn->rn_flags & RNF_ROOT) == 0)) {
 		newrt = rt = (struct rtentry *)rn;
+<<<<<<< HEAD
 		if (report && (rt->rt_flags & RTF_CLONING)) {
 			err = rtrequest(RTM_RESOLVE, dst, SA(NULL),
 			    SA(NULL), 0, &newrt, tableid);
+=======
+		if ((rt->rt_flags & RTF_CLONING) &&
+		    ISSET(flags,  RT_REPORT | RT_NOCLONING) == RT_REPORT) {
+			err = rtrequest1(RTM_RESOLVE, &info, RTP_DEFAULT,
+			    &newrt, tableid);
+>>>>>>> origin/master
 			if (err) {
 				newrt = rt;
 				rt->rt_refcnt++;
@@ -374,7 +426,7 @@ rtalloc1(struct sockaddr *dst, int report, u_int tableid)
 	 * sent upward breaking user-level routing queries.
 	 */
 miss:
-		if (report && dst->sa_family != PF_KEY) {
+		if (ISSET(flags, RT_REPORT) && dst->sa_family != PF_KEY) {
 			bzero((caddr_t)&info, sizeof(info));
 			info.rti_info[RTAX_DST] = dst;
 			rt_missmsg(msgtype, &info, 0, NULL, err, tableid);
@@ -395,6 +447,8 @@ rtfree(struct rtentry *rt)
 	rt->rt_refcnt--;
 
 	if (rt->rt_refcnt <= 0 && (rt->rt_flags & RTF_UP) == 0) {
+		if (rt->rt_refcnt == 0 && (rt->rt_nodes->rn_flags & RNF_ACTIVE))
+			return; /* route still active but currently down */
 		if (rt->rt_nodes->rn_flags & (RNF_ACTIVE | RNF_ROOT))
 			panic("rtfree 2");
 		rttrash--;
@@ -407,6 +461,10 @@ rtfree(struct rtentry *rt)
 		if (ifa)
 			IFAFREE(ifa);
 		rtlabel_unref(rt->rt_labelid);
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS)
+			free(rt->rt_llinfo, M_TEMP);
+#endif
 		Free(rt_key(rt));
 		pool_put(&rtentry_pool, rt);
 	}
@@ -434,7 +492,7 @@ ifafree(struct ifaddr *ifa)
 void
 rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
     struct sockaddr *netmask, int flags, struct sockaddr *src,
-    struct rtentry **rtp)
+    struct rtentry **rtp, u_int rdomain)
 {
 	struct rtentry		*rt;
 	int			 error = 0;
@@ -443,15 +501,15 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	struct ifaddr		*ifa;
 	struct ifnet		*ifp = NULL;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	/* verify the gateway is directly reachable */
-	if ((ifa = ifa_ifwithnet(gateway)) == NULL) {
+	if ((ifa = ifa_ifwithnet(gateway, rdomain)) == NULL) {
 		error = ENETUNREACH;
 		goto out;
 	}
 	ifp = ifa->ifa_ifp;
-	rt = rtalloc1(dst, 0, 0);
+	rt = rtalloc1(dst, 0, rdomain);
 	/*
 	 * If the redirect isn't from our current router for this dst,
 	 * it's either old or wrong.  If it redirects us to ourselves,
@@ -464,7 +522,7 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	if (!(flags & RTF_DONE) && rt &&
 	     (!equal(src, rt->rt_gateway) || rt->rt_ifa != ifa))
 		error = EINVAL;
-	else if (ifa_ifwithaddr(gateway) != NULL)
+	else if (ifa_ifwithaddr(gateway, rdomain) != NULL)
 		error = EHOSTUNREACH;
 	if (error)
 		goto done;
@@ -497,7 +555,12 @@ create:
 			info.rti_ifa = ifa;
 			info.rti_flags = flags;
 			rt = NULL;
+<<<<<<< HEAD
 			error = rtrequest1(RTM_ADD, &info, &rt, 0);
+=======
+			error = rtrequest1(RTM_ADD, &info, RTP_DEFAULT, &rt,
+			    rdomain);
+>>>>>>> origin/master
 			if (rt != NULL)
 				flags = rt->rt_flags;
 			stat = &rtstat.rts_dynamic;
@@ -509,7 +572,7 @@ create:
 			rt->rt_flags |= RTF_MODIFIED;
 			flags |= RTF_MODIFIED;
 			stat = &rtstat.rts_newgateway;
-			rt_setgate(rt, rt_key(rt), gateway, 0);
+			rt_setgate(rt, rt_key(rt), gateway, rdomain);
 		}
 	} else
 		error = EHOSTUNREACH;
@@ -530,7 +593,7 @@ out:
 	info.rti_info[RTAX_GATEWAY] = gateway;
 	info.rti_info[RTAX_NETMASK] = netmask;
 	info.rti_info[RTAX_AUTHOR] = src;
-	rt_missmsg(RTM_REDIRECT, &info, flags, ifp, error, 0);
+	rt_missmsg(RTM_REDIRECT, &info, flags, ifp, error, rdomain);
 }
 
 /*
@@ -567,14 +630,14 @@ rtdeletemsg(struct rtentry *rt, u_int tableid)
 }
 
 int
-rtflushclone1(struct radix_node *rn, void *arg)
+rtflushclone1(struct radix_node *rn, void *arg, u_int id)
 {
 	struct rtentry	*rt, *parent;
 
 	rt = (struct rtentry *)rn;
 	parent = (struct rtentry *)arg;
 	if ((rt->rt_flags & RTF_CLONED) != 0 && rt->rt_parent == parent)
-		rtdeletemsg(rt, 0);
+		rtdeletemsg(rt, id);
 	return 0;
 }
 
@@ -598,7 +661,8 @@ rtioctl(u_long req, caddr_t data, struct proc *p)
 }
 
 struct ifaddr *
-ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
+ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway,
+    u_int rtableid)
 {
 	struct ifaddr	*ifa;
 
@@ -610,7 +674,7 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
 	 * enc0.
 	 */
 	if (dst && (dst->sa_family == PF_KEY))
-		return (encap_findgwifa(gateway));
+		return (encap_findgwifa(gateway, rtableid));
 #endif
 
 	if ((flags & RTF_GATEWAY) == 0) {
@@ -623,21 +687,21 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
 		 */
 		ifa = NULL;
 		if (flags & RTF_HOST)
-			ifa = ifa_ifwithdstaddr(dst);
+			ifa = ifa_ifwithdstaddr(dst, rtableid);
 		if (ifa == NULL)
-			ifa = ifa_ifwithaddr(gateway);
+			ifa = ifa_ifwithaddr(gateway, rtableid);
 	} else {
 		/*
 		 * If we are adding a route to a remote net
 		 * or host, the gateway may still be on the
 		 * other end of a pt to pt link.
 		 */
-		ifa = ifa_ifwithdstaddr(gateway);
+		ifa = ifa_ifwithdstaddr(gateway, rtableid);
 	}
 	if (ifa == NULL)
-		ifa = ifa_ifwithnet(gateway);
+		ifa = ifa_ifwithnet(gateway, rtableid);
 	if (ifa == NULL) {
-		struct rtentry	*rt = rtalloc1(gateway, 0, 0);
+		struct rtentry	*rt = rtalloc1(gateway, 0, rtable_l2(rtableid));
 		if (rt == NULL)
 			return (NULL);
 		rt->rt_refcnt--;
@@ -660,6 +724,7 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway)
 #define ROUNDUP(a) (a>0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
 int
+<<<<<<< HEAD
 rtrequest(int req, struct sockaddr *dst, struct sockaddr *gateway,
     struct sockaddr *netmask, int flags, struct rtentry **ret_nrt,
     u_int tableid)
@@ -676,6 +741,9 @@ rtrequest(int req, struct sockaddr *dst, struct sockaddr *gateway,
 
 int
 rt_getifa(struct rt_addrinfo *info)
+=======
+rt_getifa(struct rt_addrinfo *info, u_int rtid)
+>>>>>>> origin/master
 {
 	struct ifaddr	*ifa;
 	int		 error = 0;
@@ -686,12 +754,12 @@ rt_getifa(struct rt_addrinfo *info)
 	 */
 	if (info->rti_ifp == NULL && info->rti_info[RTAX_IFP] != NULL
 	    && info->rti_info[RTAX_IFP]->sa_family == AF_LINK &&
-	    (ifa = ifa_ifwithnet((struct sockaddr *)info->rti_info[RTAX_IFP]))
-	    != NULL)
+	    (ifa = ifa_ifwithnet((struct sockaddr *)info->rti_info[RTAX_IFP],
+	    rtid)) != NULL)
 		info->rti_ifp = ifa->ifa_ifp;
 
 	if (info->rti_ifa == NULL && info->rti_info[RTAX_IFA] != NULL)
-		info->rti_ifa = ifa_ifwithaddr(info->rti_info[RTAX_IFA]);
+		info->rti_ifa = ifa_ifwithaddr(info->rti_info[RTAX_IFA], rtid);
 
 	if (info->rti_ifa == NULL) {
 		struct sockaddr	*sa;
@@ -706,10 +774,11 @@ rt_getifa(struct rt_addrinfo *info)
 		    info->rti_info[RTAX_GATEWAY] != NULL)
 			info->rti_ifa = ifa_ifwithroute(info->rti_flags,
 			    info->rti_info[RTAX_DST],
-			    info->rti_info[RTAX_GATEWAY]);
+			    info->rti_info[RTAX_GATEWAY],
+			    rtid);
 		else if (sa != NULL)
 			info->rti_ifa = ifa_ifwithroute(info->rti_flags,
-			    sa, sa);
+			    sa, sa, rtid);
 	}
 	if ((ifa = info->rti_ifa) != NULL) {
 		if (info->rti_ifp == NULL)
@@ -729,7 +798,10 @@ rtrequest1(int req, struct rt_addrinfo *info, struct rtentry **ret_nrt,
 	struct radix_node_head	*rnh;
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
-	struct sockaddr_rtlabel	*sa_rl;
+	struct sockaddr_rtlabel	*sa_rl, sa_rl2;
+#ifdef MPLS
+	struct sockaddr_mpls	*sa_mpls;
+#endif
 #define senderr(x) { error = x ; goto bad; }
 
 	if ((rnh = rt_gettable(info->rti_info[RTAX_DST]->sa_family, tableid)) ==
@@ -782,7 +854,7 @@ rtrequest1(int req, struct rt_addrinfo *info, struct rtentry **ret_nrt,
 		if (rn_mpath_capable(rnh)) {
 			if ((rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
 			    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
-			    rn_mpath_next(rn) == NULL)
+			    rn_mpath_next(rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 		}
 #endif
@@ -805,24 +877,47 @@ rtrequest1(int req, struct rt_addrinfo *info, struct rtentry **ret_nrt,
 			senderr(EINVAL);
 		if ((rt->rt_flags & RTF_CLONING) == 0)
 			senderr(EINVAL);
-		ifa = rt->rt_ifa;
+		if (rt->rt_ifa->ifa_ifp) {
+			info->rti_ifa = rt->rt_ifa;
+		} else {
+			/*
+			 * The interface address at the cloning route
+			 * is not longer referenced by an interface.
+			 * Try to find a similar active address and use
+			 * it for the cloned route.  The cloning route
+			 * will get the new address and interface later.
+			 */
+			info->rti_ifa = NULL;
+			info->rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
+		}
+		info->rti_ifp = rt->rt_ifp;
 		info->rti_flags = rt->rt_flags & ~(RTF_CLONING | RTF_STATIC);
 		info->rti_flags |= RTF_CLONED;
 		info->rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		if ((info->rti_info[RTAX_NETMASK] = rt->rt_genmask) == NULL)
 			info->rti_flags |= RTF_HOST;
-		goto makeroute;
+		info->rti_info[RTAX_LABEL] =
+		    rtlabel_id2sa(rt->rt_labelid, &sa_rl2);
+		/* FALLTHROUGH */
 
 	case RTM_ADD:
-		if (info->rti_ifa == 0 && (error = rt_getifa(info)))
+		if (info->rti_ifa == NULL && (error = rt_getifa(info, tableid)))
 			senderr(error);
 		ifa = info->rti_ifa;
-makeroute:
-		rt = pool_get(&rtentry_pool, PR_NOWAIT);
+		rt = pool_get(&rtentry_pool, PR_NOWAIT | PR_ZERO);
 		if (rt == NULL)
 			senderr(ENOBUFS);
+<<<<<<< HEAD
 		Bzero(rt, sizeof(*rt));
 		rt->rt_flags = RTF_UP | info->rti_flags;
+=======
+
+		rt->rt_flags = info->rti_flags;
+
+		if (prio == 0)
+			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
+		rt->rt_priority = prio;	/* init routing priority */
+>>>>>>> origin/master
 		LIST_INIT(&rt->rt_timer);
 		if (rt_setgate(rt, info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_GATEWAY], tableid)) {
@@ -837,15 +932,26 @@ makeroute:
 			Bcopy(info->rti_info[RTAX_DST], ndst,
 			    info->rti_info[RTAX_DST]->sa_len);
 #ifndef SMALL_KERNEL
-		/* do not permit exactly the same dst/mask/gw pair */
-		if (rn_mpath_capable(rnh) &&
-		    rt_mpath_conflict(rnh, rt, info->rti_info[RTAX_NETMASK],
-		    info->rti_flags & RTF_MPATH)) {
-			if (rt->rt_gwroute)
-				rtfree(rt->rt_gwroute);
-			Free(rt_key(rt));
-			pool_put(&rtentry_pool, rt);
-			senderr(EEXIST);
+		if (rn_mpath_capable(rnh)) {
+			/* do not permit exactly the same dst/mask/gw pair */
+			if (rt_mpath_conflict(rnh, rt,
+			    info->rti_info[RTAX_NETMASK],
+			    info->rti_flags & RTF_MPATH)) {
+				if (rt->rt_gwroute)
+					rtfree(rt->rt_gwroute);
+				Free(rt_key(rt));
+				pool_put(&rtentry_pool, rt);
+				senderr(EEXIST);
+			}
+			/* check the link state since the table supports it */
+			if ((LINK_STATE_IS_UP(ifa->ifa_ifp->if_link_state) ||
+			    ifa->ifa_ifp->if_link_state == LINK_STATE_UNKNOWN)
+			    && ifa->ifa_ifp->if_flags & IFF_UP)
+				rt->rt_flags |= RTF_UP;
+			else {
+				rt->rt_flags &= ~RTF_UP;
+				rt->rt_priority |= RTP_DOWN;
+			}
 		}
 #endif
 
@@ -855,10 +961,65 @@ makeroute:
 			rt->rt_labelid = rtlabel_name2id(sa_rl->sr_label);
 		}
 
+#ifdef MPLS
+		/* We have to allocate additional space for MPLS infos */ 
+		if (info->rti_flags & RTF_MPLS &&
+		    (info->rti_info[RTAX_SRC] != NULL ||
+		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS)) {
+			struct rt_mpls *rt_mpls;
+
+			sa_mpls = (struct sockaddr_mpls *)
+			    info->rti_info[RTAX_SRC];
+
+			rt->rt_llinfo = (caddr_t)malloc(sizeof(struct rt_mpls),
+			    M_TEMP, M_NOWAIT|M_ZERO);
+
+			if (rt->rt_llinfo == NULL) {
+				if (rt->rt_gwroute)
+					rtfree(rt->rt_gwroute);
+				Free(rt_key(rt));
+				pool_put(&rtentry_pool, rt);
+				senderr(ENOMEM);
+			}
+
+			rt_mpls = (struct rt_mpls *)rt->rt_llinfo;
+
+			if (sa_mpls != NULL)
+				rt_mpls->mpls_label = sa_mpls->smpls_label;
+
+			rt_mpls->mpls_operation = info->rti_mpls;
+
+			/* XXX: set experimental bits */
+
+			rt->rt_flags |= RTF_MPLS;
+		} else
+			rt->rt_flags &= ~RTF_MPLS;
+#endif
+
 		ifa->ifa_refcnt++;
 		rt->rt_ifa = ifa;
 		rt->rt_ifp = ifa->ifa_ifp;
 		if (req == RTM_RESOLVE) {
+			/*
+			 * If the ifa of the cloning route was stale, a
+			 * successful lookup for an ifa with the same address
+			 * has been made.  Use this ifa also for the cloning
+			 * route.
+			 */
+			if ((*ret_nrt)->rt_ifa->ifa_ifp == NULL) {
+				printf("rtrequest1 RTM_RESOLVE: wrong ifa (%p) "
+				    "was (%p)\n", ifa, (*ret_nrt)->rt_ifa);
+				if ((*ret_nrt)->rt_ifa->ifa_rtrequest)
+					(*ret_nrt)->rt_ifa->ifa_rtrequest(
+					    RTM_DELETE, *ret_nrt, NULL);
+				IFAFREE((*ret_nrt)->rt_ifa);
+				(*ret_nrt)->rt_ifa = ifa;
+				(*ret_nrt)->rt_ifp = ifa->ifa_ifp;
+				ifa->ifa_refcnt++;
+				if (ifa->ifa_rtrequest)
+					ifa->ifa_rtrequest(RTM_ADD, *ret_nrt,
+					    NULL);
+			}
 			/*
 			 * Copy both metrics and a back pointer to the cloned
 			 * route's parent.
@@ -893,8 +1054,9 @@ makeroute:
 #ifndef SMALL_KERNEL
 		if (rn_mpath_capable(rnh) &&
 		    (rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
-		    info->rti_info[RTAX_NETMASK], rnh)) != NULL) {
-			if (rn_mpath_next(rn) == NULL)
+		    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
+		    (rn = rn_mpath_prio(rn, prio)) != NULL) {
+			if (rn_mpath_next(rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 			else
 				((struct rtentry *)rn)->rt_flags |= RTF_MPATH;
@@ -951,7 +1113,8 @@ rt_setgate(struct rtentry *rt0, struct sockaddr *dst, struct sockaddr *gate,
 		rt->rt_gwroute = NULL;
 	}
 	if (rt->rt_flags & RTF_GATEWAY) {
-		rt->rt_gwroute = rtalloc1(gate, 1, tableid);
+		/* XXX is this actually valid to cross tables here? */
+		rt->rt_gwroute = rtalloc1(gate, RT_REPORT, rtable_l2(tableid));
 		/*
 		 * If we switched gateways, grab the MTU from the new
 		 * gateway route if the current MTU is 0 or greater
@@ -1001,6 +1164,11 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	struct rtentry		*nrt = NULL;
 	int			 error;
 	struct rt_addrinfo	 info;
+<<<<<<< HEAD
+=======
+	struct sockaddr_rtlabel	 sa_rl;
+	u_short			 rtableid = ifa->ifa_ifp->if_rdomain;
+>>>>>>> origin/master
 
 	dst = flags & RTF_HOST ? ifa->ifa_dstaddr : ifa->ifa_addr;
 	if (cmd == RTM_DELETE) {
@@ -1012,9 +1180,13 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 			rt_maskedcopy(dst, deldst, ifa->ifa_netmask);
 			dst = deldst;
 		}
-		if ((rt = rtalloc1(dst, 0, 0)) != NULL) {
+		if ((rt = rtalloc1(dst, 0, rtableid)) != NULL) {
 			rt->rt_refcnt--;
-			if (rt->rt_ifa != ifa) {
+			/* try to find the right route */
+			while (rt && rt->rt_ifa != ifa)
+				rt = (struct rtentry *)
+				    ((struct radix_node *)rt)->rn_dupedkey;
+			if (!rt) {
 				if (m != NULL)
 					(void) m_free(m);
 				return (flags & RTF_HOST ? EHOSTUNREACH
@@ -1026,7 +1198,15 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	info.rti_ifa = ifa;
 	info.rti_flags = flags | ifa->ifa_flags;
 	info.rti_info[RTAX_DST] = dst;
+<<<<<<< HEAD
 	info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+=======
+	if (cmd == RTM_ADD)
+		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+	info.rti_info[RTAX_LABEL] =
+	    rtlabel_id2sa(ifa->ifa_ifp->if_rtlabelid, &sa_rl);
+
+>>>>>>> origin/master
 	/*
 	 * XXX here, it seems that we are assuming that ifa_netmask is NULL
 	 * for RTF_HOST.  bsdi4 passes NULL explicitly (via intermediate
@@ -1034,13 +1214,26 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	 * change it to meet bsdi4 behavior.
 	 */
 	info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
+<<<<<<< HEAD
 	error = rtrequest1(cmd, &info, &nrt, 0);
 	if (cmd == RTM_DELETE && error == 0 && (rt = nrt) != NULL) {
 		rt_newaddrmsg(cmd, ifa, error, nrt);
 		if (rt->rt_refcnt <= 0) {
 			rt->rt_refcnt++;
 			rtfree(rt);
+=======
+	error = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, rtableid);
+	if (cmd == RTM_DELETE) {
+		if (error == 0 && (rt = nrt) != NULL) {
+			rt_newaddrmsg(cmd, ifa, error, nrt);
+			if (rt->rt_refcnt <= 0) {
+				rt->rt_refcnt++;
+				rtfree(rt);
+			}
+>>>>>>> origin/master
 		}
+		if (m != NULL)
+			(void) m_free(m);
 	}
 	if (cmd == RTM_ADD && error == 0 && (rt = nrt) != NULL) {
 		rt->rt_refcnt--;
@@ -1077,9 +1270,17 @@ static int			rt_init_done = 0;
 	if (r->rtt_func != NULL) {				\
 		(*r->rtt_func)(r->rtt_rt, r);			\
 	} else {						\
+<<<<<<< HEAD
 		rtrequest((int) RTM_DELETE,			\
 		    (struct sockaddr *)rt_key(r->rtt_rt),	\
 		    0, 0, 0, 0, 0);				\
+=======
+		struct rt_addrinfo info;			\
+		bzero(&info, sizeof(info));			\
+		info.rti_info[RTAX_DST] = rt_key(r->rtt_rt);	\
+		rtrequest1(RTM_DELETE, &info,			\
+		    r->rtt_rt->rt_priority, NULL, r->rtt_tableid);	\
+>>>>>>> origin/master
 	}							\
 }
 
@@ -1103,7 +1304,7 @@ rt_timer_init()
 
 	LIST_INIT(&rttimer_queue_head);
 	timeout_set(&rt_timer_timeout, rt_timer_timer, &rt_timer_timeout);
-	timeout_add(&rt_timer_timeout, hz);	/* every second */
+	timeout_add_sec(&rt_timer_timeout, 1);
 	rt_init_done = 1;
 }
 
@@ -1115,10 +1316,8 @@ rt_timer_queue_create(u_int timeout)
 	if (rt_init_done == 0)
 		rt_timer_init();
 
-	R_Malloc(rtq, struct rttimer_queue *, sizeof *rtq);
-	if (rtq == NULL)
+	if ((rtq = malloc(sizeof(*rtq), M_RTABLE, M_NOWAIT|M_ZERO)) == NULL)
 		return (NULL);
-	Bzero(rtq, sizeof *rtq);
 
 	rtq->rtq_timeout = timeout;
 	rtq->rtq_count = 0;
@@ -1152,10 +1351,7 @@ rt_timer_queue_destroy(struct rttimer_queue *rtq, int destroy)
 	}
 
 	LIST_REMOVE(rtq, rtq_link);
-
-	/*
-	 * Caller is responsible for freeing the rttimer_queue structure.
-	 */
+	free(rtq, M_RTABLE);
 }
 
 unsigned long
@@ -1182,7 +1378,7 @@ rt_timer_remove_all(struct rtentry *rt)
 
 int
 rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
-    struct rttimer *), struct rttimer_queue *queue)
+    struct rttimer *), struct rttimer_queue *queue, u_int rtableid)
 {
 	struct rttimer	*r;
 	long		 current_time;
@@ -1208,15 +1404,15 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 		}
 	}
 
-	r = pool_get(&rttimer_pool, PR_NOWAIT);
+	r = pool_get(&rttimer_pool, PR_NOWAIT | PR_ZERO);
 	if (r == NULL)
 		return (ENOBUFS);
-	Bzero(r, sizeof(*r));
 
 	r->rtt_rt = rt;
 	r->rtt_time = current_time;
 	r->rtt_func = func;
 	r->rtt_queue = queue;
+	r->rtt_tableid = rtableid;
 	LIST_INSERT_HEAD(&rt->rt_timer, r, rtt_link);
 	TAILQ_INSERT_TAIL(&queue->rtq_head, r, rtt_next);
 	r->rtt_queue->rtq_count++;
@@ -1227,11 +1423,17 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 struct radix_node_head *
 rt_gettable(sa_family_t af, u_int id)
 {
+<<<<<<< HEAD
 	return (rt_tables[id][af2rtafidx[af]]);
+=======
+	if (id > rtbl_id_max)
+		return (NULL);
+	return (rt_tables[id] ? rt_tables[id][af2rtafidx[af]] : NULL);
+>>>>>>> origin/master
 }
 
 struct radix_node *
-rt_lookup(struct sockaddr *dst, struct sockaddr *mask, int tableid)
+rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 
@@ -1270,7 +1472,7 @@ rt_timer_timer(void *arg)
 	}
 	splx(s);
 
-	timeout_add(to, hz);		/* every second */
+	timeout_add_sec(to, 1);
 }
 
 u_int16_t
@@ -1331,6 +1533,22 @@ rtlabel_id2name(u_int16_t id)
 	return (NULL);
 }
 
+struct sockaddr *
+rtlabel_id2sa(u_int16_t labelid, struct sockaddr_rtlabel *sa_rl)
+{
+	const char	*label;
+
+	if (labelid == 0 || (label = rtlabel_id2name(labelid)) == NULL)
+		return (NULL);
+
+	bzero(sa_rl, sizeof(*sa_rl));
+	sa_rl->sr_len = sizeof(*sa_rl);
+	sa_rl->sr_family = AF_UNSPEC;
+	strlcpy(sa_rl->sr_label, label, sizeof(sa_rl->sr_label));
+
+	return ((struct sockaddr *)sa_rl);
+}
+
 void
 rtlabel_unref(u_int16_t id)
 {
@@ -1355,13 +1573,17 @@ void
 rt_if_remove(struct ifnet *ifp)
 {
 	int			 i;
+	u_int			 tid;
 	struct radix_node_head	*rnh;
 
-	for (i = 1; i <= AF_MAX; i++)
-		if ((rnh = rt_gettable(i, 0)) != NULL)
-			while ((*rnh->rnh_walktree)(rnh,
-			    rt_if_remove_rtdelete, ifp) == EAGAIN)
-				;	/* nothing */
+	for (tid = 0; tid <= rtbl_id_max; tid++) {
+		for (i = 1; i <= AF_MAX; i++) {
+			if ((rnh = rt_gettable(i, tid)) != NULL)
+				while ((*rnh->rnh_walktree)(rnh,
+				    rt_if_remove_rtdelete, ifp) == EAGAIN)
+					;	/* nothing */
+		}
+	}
 }
 
 /*
@@ -1371,7 +1593,7 @@ rt_if_remove(struct ifnet *ifp)
  * as long as EAGAIN is returned.
  */
 int
-rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
+rt_if_remove_rtdelete(struct radix_node *rn, void *vifp, u_int id)
 {
 	struct ifnet	*ifp = vifp;
 	struct rtentry	*rt = (struct rtentry *)rn;
@@ -1379,8 +1601,12 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 	if (rt->rt_ifp == ifp) {
 		int	cloning = (rt->rt_flags & RTF_CLONING);
 
+<<<<<<< HEAD
 		if (rtrequest(RTM_DELETE, rt_key(rt), rt->rt_gateway,
 		    rt_mask(rt), 0, NULL, 0) == 0 && cloning)
+=======
+		if (rtdeletemsg(rt, id) == 0 && cloning)
+>>>>>>> origin/master
 			return (EAGAIN);
 	}
 
@@ -1391,3 +1617,56 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 
 	return (0);
 }
+
+#ifndef SMALL_KERNEL
+void
+rt_if_track(struct ifnet *ifp)
+{
+	struct radix_node_head *rnh;
+	int i;
+	u_int tid;
+
+	if (rt_tables == NULL)
+		return;
+
+	for (tid = 0; tid <= rtbl_id_max; tid++) {
+		for (i = 1; i <= AF_MAX; i++) {
+			if ((rnh = rt_gettable(i, tid)) != NULL) {
+				if (!rn_mpath_capable(rnh))
+					continue;
+				while ((*rnh->rnh_walktree)(rnh,
+				    rt_if_linkstate_change, ifp) == EAGAIN)
+					;	/* nothing */
+			}
+		}
+	}
+}
+
+int
+rt_if_linkstate_change(struct radix_node *rn, void *arg, u_int id)
+{
+	struct ifnet *ifp = arg;
+	struct rtentry *rt = (struct rtentry *)rn;
+
+	if (rt->rt_ifp == ifp) {
+		if ((LINK_STATE_IS_UP(ifp->if_link_state) ||
+		    ifp->if_link_state == LINK_STATE_UNKNOWN) &&
+		    ifp->if_flags & IFF_UP) {
+			if (!(rt->rt_flags & RTF_UP)) {
+				/* bring route up */
+				rt->rt_flags |= RTF_UP;
+				rn_mpath_reprio(rn, rt->rt_priority & RTP_MASK);
+			}
+		} else {
+			if (rt->rt_flags & RTF_UP) {
+				/* take route done */
+				rt->rt_flags &= ~RTF_UP;
+				rn_mpath_reprio(rn, rt->rt_priority | RTP_DOWN);
+			}
+		}
+		if_group_routechange(rt_key(rt), rt_mask(rt));
+	}
+
+	return (0);
+}
+#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.37 2005/01/14 22:39:27 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.51 2011/01/14 19:04:08 jasper Exp $	*/
 /*	$NetBSD: conf.c,v 1.39 1997/05/12 08:17:53 thorpej Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@ bdev_decl(mt);
 bdev_decl(hd);
 #include "rd.h"
 #include "sd.h"
-#include "ss.h"
 #include "st.h"
 #include "uk.h"
 #include "vnd.h"
@@ -75,7 +74,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 14 */
 	bdev_lkm_dummy(),		/* 15 */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 /* open, close, read, write, ioctl -- XXX should be a generic device */
 #define	cdev_ppi_init(c,n) { \
@@ -102,9 +101,9 @@ cdev_decl(fd);
 #include "bpfilter.h"
 #include "tun.h"
 #include "ksyms.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -112,13 +111,16 @@ cdev_decl(xfs_dev);
 #include "wsmux.h"
 #include "pf.h"
 #include "systrace.h"
+#include "vscsi.h"
+#include "pppx.h"
+#include "hotplug.h"
 
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),		/* 3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
@@ -153,7 +155,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NAPCI,apci),	/* 35: Apollo APCI UARTs */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 36: Kernel symbols device */
 	cdev_uk_init(NUK,uk),		/* 37 */
-	cdev_ss_init(NSS,ss),		/* 38 */
+	cdev_notdef(),			/* 38 */
 	cdev_ch_init(NCH,ch),		/* 39 */
 	cdev_wsdisplay_init(NWSDISPLAY,wsdisplay), /* 40: frame buffers */
 	cdev_mouse_init(NWSKBD,wskbd),	/* 41: keyboards */
@@ -166,15 +168,18 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
-
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
+	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 56: devices hot plugging */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 2; 	/* major device number of memory special file */
 
@@ -256,7 +261,7 @@ int chrtoblktbl[] = {
 	/* 33 */	NODEV,
 	/* 34 */	8,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 /*
  * This entire table could be autoconfig()ed but that would mean that

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mfs_extern.h,v 1.11 2003/06/02 23:28:23 millert Exp $	*/
+=======
+/*	$OpenBSD: mfs_extern.h,v 1.18 2010/12/21 20:14:44 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mfs_extern.h,v 1.4 1996/02/09 22:31:27 christos Exp $	*/
 
 /*-
@@ -42,7 +46,8 @@ struct vnode;
 struct vfsconf;
 struct mbuf;
 
-__BEGIN_DECLS
+extern struct vops mfs_vops;
+
 /* mfs_vfsops.c */
 int mfs_mountroot(void);
 int mfs_initminiroot(caddr_t);
@@ -66,4 +71,3 @@ int mfs_print(void *);
 #define	mfs_revoke vop_generic_revoke
 int mfs_badop(void *);
 
-__END_DECLS

@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.13 2006/11/29 14:26:40 deraadt Exp $ 
+# $OpenBSD: GENERIC,v 1.38 2011/01/08 11:56:30 damien Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -17,7 +17,6 @@ options		ARM32
 
 makeoptions	KERNEL_BASE_PHYS="0x00200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
-makeoptions	BOARDTYPE="armish"
 
 options	CPU_XSCALE_80321	# Support the XScale core
 options	XSCALE_CACHE_READ_WRITE_ALLOCATE
@@ -26,6 +25,7 @@ options	CACHE_CLEAN_BLOCK_INTR
 #options	PERFCTRS	# performance counters
 
 option		PCIVERBOSE
+option		USER_PCICONF		# user-space PCI configuration
 
 config	bsd	swap generic
 
@@ -59,6 +59,7 @@ scsibus*	at siop?
 em*		at pci?
 re*		at pci?
 ral*		at pci?
+bwi*		at pci?
 # IDE controllers
 pciide* 	at pci? flags 0x0000
 wd*		at pciide? flags 0x0000
@@ -68,7 +69,6 @@ sd*		at scsibus?	# SCSI disk drives
 #st*		at scsibus?	# SCSI tape drives
 cd*		at scsibus?	# SCSI CD-ROM drives
 #ch*		at scsibus?	# SCSI autochangers
-#ss*		at scsibus?	# SCSI scanners
 #uk*		at scsibus?	# unknown SCSI
 
 # USB Controllers
@@ -119,6 +119,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
+udl*	 at uhub?		# USB DisplayLink video
+wsdisplay* at udl?
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
@@ -128,14 +130,13 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
+uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -143,9 +144,27 @@ radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
+urtwn*	at uhub?		# Realtek RTL8188CU/RTL8192CU
+athn*	at uhub?		# Atheros AR9002U
 #udcf*	at uhub?		# Gude Expert mouseCLOCK
+uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+
+# Bluetooth controllers
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
+
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 amphy*		at mii?		# AMD 79C873 PHYs
 dcphy*		at mii?		# Digital Clone PHYs
@@ -178,9 +197,10 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?		# Counter device
 
 # mouse & keyboard multiplexor pseudo-devices
-#pseudo-device	wsmux		2
+pseudo-device	wsmux		2
 pseudo-device	crypto		1
 pseudo-device	bio		1	# ioctl multiplexing device
 pseudo-device	hotplug		1	# devices hot plugging

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ehci_cardbus.c,v 1.7 2006/07/12 06:26:34 jolan Exp $ */
+=======
+/*	$OpenBSD: ehci_cardbus.c,v 1.15 2010/03/27 21:40:13 jsg Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,7 +79,6 @@ struct cfattach ehci_cardbus_ca = {
 	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
 };
 
-#define CARDBUS_INTERFACE_EHCI PCI_INTERFACE_EHCI
 #define CARDBUS_CBMEM PCI_CBMEM
 #define cardbus_findvendor pci_findvendor
 #define cardbus_devinfo pci_devinfo
@@ -92,9 +88,9 @@ ehci_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	struct cardbus_attach_args *ca = (struct cardbus_attach_args *)aux;
 
-	if (CARDBUS_CLASS(ca->ca_class) == CARDBUS_CLASS_SERIALBUS &&
-	    CARDBUS_SUBCLASS(ca->ca_class) == CARDBUS_SUBCLASS_SERIALBUS_USB &&
-	    CARDBUS_INTERFACE(ca->ca_class) == CARDBUS_INTERFACE_EHCI)
+	if (PCI_CLASS(ca->ca_class) == PCI_CLASS_SERIALBUS &&
+	    PCI_SUBCLASS(ca->ca_class) == PCI_SUBCLASS_SERIALBUS_USB &&
+	    PCI_INTERFACE(ca->ca_class) == PCI_INTERFACE_EHCI)
 		return (1);
  
 	return (0);
@@ -107,9 +103,14 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
+<<<<<<< HEAD
 	cardbusreg_t csr;
 	char devinfo[256];
+=======
+	pcireg_t csr;
+>>>>>>> origin/master
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
@@ -118,9 +119,13 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	printf(" %s", devinfo);
 
 	/* Map I/O registers */
-	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, CARDBUS_MAPREG_TYPE_MEM, 0,
+	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
+<<<<<<< HEAD
 		printf("%s: can't map mem space\n", devname);
+=======
+		printf(": can't map mem space\n");
+>>>>>>> origin/master
 		return;
 	}
 
@@ -133,11 +138,11 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the device. */
-	csr = cardbus_conf_read(cc, cf, ca->ca_tag,
-				CARDBUS_COMMAND_STATUS_REG);
-	cardbus_conf_write(cc, cf, ca->ca_tag, CARDBUS_COMMAND_STATUS_REG,
-		       csr | CARDBUS_COMMAND_MASTER_ENABLE
-			   | CARDBUS_COMMAND_MEM_ENABLE);
+	csr = pci_conf_read(pc, ca->ca_tag,
+				PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, ca->ca_tag, PCI_COMMAND_STATUS_REG,
+		       csr | PCI_COMMAND_MASTER_ENABLE
+			   | PCI_COMMAND_MEM_ENABLE);
 
 	/* Disable interrupts, so we don't get any spurious ones. */
 	sc->sc.sc_offs = EREAD1(&sc->sc, EHCI_CAPLENGTH);
@@ -154,12 +159,12 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Figure out vendor for root hub descriptor. */
 	vendor = cardbus_findvendor(ca->ca_id);
-	sc->sc.sc_id_vendor = CARDBUS_VENDOR(ca->ca_id);
+	sc->sc.sc_id_vendor = PCI_VENDOR(ca->ca_id);
 	if (vendor)
 		strlcpy(sc->sc.sc_vendor, vendor, sizeof(sc->sc.sc_vendor));
 	else
 		snprintf(sc->sc.sc_vendor, sizeof(sc->sc.sc_vendor),
-		    "vendor 0x%04x", CARDBUS_VENDOR(ca->ca_id));
+		    "vendor 0x%04x", PCI_VENDOR(ca->ca_id));
 	
 	r = ehci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {

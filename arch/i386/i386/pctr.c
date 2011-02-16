@@ -1,4 +1,4 @@
-/*	$OpenBSD: pctr.c,v 1.21 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: pctr.c,v 1.26 2008/11/21 03:22:29 mikeb Exp $	*/
 
 /*
  * Pentium performance counter driver for OpenBSD.
@@ -186,8 +186,10 @@ pctrioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 	}
 	case PCIOCS0:
 	case PCIOCS1:
-		if (usep6ctr)
-			return p6ctrsel(fflag, cmd, *(u_int *) data);
+	case PCIOCS2:
+	case PCIOCS3:
+		if (usepctr)
+			return (pctrsel(fflag, cmd, *(u_int *)data));
 		if (usep5ctr)
 			return p5ctrsel(fflag, cmd, *(u_int *) data);
 		return ENODEV;

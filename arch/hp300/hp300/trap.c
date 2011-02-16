@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.50 2007/03/15 10:22:29 art Exp $	*/
+/*	$OpenBSD: trap.c,v 1.56 2010/07/02 19:57:14 tedu Exp $	*/
 /*	$NetBSD: trap.c,v 1.57 1998/02/16 20:58:31 thorpej Exp $	*/
 
 /*
@@ -92,16 +92,6 @@
 #include <uvm/uvm_pmap.h>
 
 #include <dev/cons.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-extern struct emul emul_hpux;
-#endif
-
-#ifdef COMPAT_SUNOS
-#include <compat/sunos/sunos_syscall.h>
-extern struct emul emul_sunos;
-#endif
 
 int	writeback(struct frame *);
 void	trap(int type, u_int code, u_int v, struct frame frame);
@@ -307,7 +297,8 @@ dopanic:
 			printf("trap during panic!\n");
 #ifdef DEBUG
 			/* XXX should be a machine-dependent hook */
-			printf("(press a key)\n"); (void)cngetc();
+			printf("(press a key)\n");
+			cnpollc(1); (void)cngetc(); cnpollc(0);
 #endif
 		}
 		regdump(&(frame.F_t), 128);
@@ -404,14 +395,6 @@ dopanic:
 #endif
 
 	case T_ILLINST|T_USER:	/* illegal instruction fault */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			typ = 0;
-			ucode = HPUX_ILL_ILLINST_TRAP;
-			i = SIGILL;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was ILL_PRIVIN_FAULT */
 		typ = ILL_ILLOPC;
 		i = SIGILL;
@@ -419,11 +402,6 @@ dopanic:
 		break;
 
 	case T_PRIVINST|T_USER:	/* privileged instruction fault */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux)
-			ucode = HPUX_ILL_PRIV_TRAP;
-		else
-#endif
 		ucode = frame.f_format;	/* XXX was ILL_PRIVIN_FAULT */
 		typ = ILL_PRVOPC;
 		i = SIGILL;
@@ -431,11 +409,6 @@ dopanic:
 		break;
 
 	case T_ZERODIV|T_USER:	/* Divide by zero */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux)
-			ucode = HPUX_FPE_INTDIV_TRAP;
-		else
-#endif
 		ucode = frame.f_format;	/* XXX was FPE_INTDIV_TRAP */
 		typ = FPE_INTDIV;
 		i = SIGFPE;
@@ -443,14 +416,6 @@ dopanic:
 		break;
 
 	case T_CHKINST|T_USER:	/* CHK instruction trap */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			/* handled differently under hp-ux */
-			i = SIGILL;
-			ucode = HPUX_ILL_CHK_TRAP;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was FPE_SUBRNG_TRAP */
 		typ = FPE_FLTSUB;
 		i = SIGFPE;
@@ -458,14 +423,6 @@ dopanic:
 		break;
 
 	case T_TRAPVINST|T_USER:	/* TRAPV instruction trap */
-#ifdef COMPAT_HPUX
-		if (p->p_emul == &emul_hpux) {
-			/* handled differently under hp-ux */
-			i = SIGILL;
-			ucode = HPUX_ILL_TRAPV_TRAP;
-			break;
-		}
-#endif
 		ucode = frame.f_format;	/* XXX was FPE_INTOVF_TRAP */
 		typ = ILL_ILLTRP;
 		i = SIGILL;
@@ -497,18 +454,6 @@ dopanic:
 		return;
 
 	case T_TRACE|T_USER:	/* user trace trap */
-#ifdef COMPAT_SUNOS
-		/*
-		 * SunOS uses Trap #2 for a "CPU cache flush".
-		 * Just flush the on-chip caches and return.
-		 */
-		if (p->p_emul == &emul_sunos) {
-			ICIA();
-			DCIU();
-			return;
-		}
-#endif
-		/* FALLTHROUGH */
 	case T_TRACE:		/* tracing a trap instruction */
 	case T_TRAP15|T_USER:	/* SUN user trace trap */
 		frame.f_sr &= ~PSL_T;
@@ -534,17 +479,19 @@ dopanic:
 
 	case T_SSIR:		/* software interrupt */
 	case T_SSIR|T_USER:
-		if (ssir & SIR_NET) {
-			void netintr(void);
-			siroff(SIR_NET);
-			uvmexp.softs++;
-			netintr();
+	    {
+		int sir, q, mask;
+
+		while ((sir = softpending) != 0) {
+			atomic_clearbits_int(&softpending, sir);
+
+			for (q = SI_NQUEUES - 1, mask = 1 << (SI_NQUEUES - 1);
+			    mask != 0; q--, mask >>= 1)
+				if (mask & sir)
+					softintr_dispatch(q);
 		}
-		if (ssir & SIR_CLOCK) {
-			siroff(SIR_CLOCK);
-			uvmexp.softs++;
-			softclock();
-		}
+	    }
+
 		/*
 		 * If this was not an AST trap, we are all done.
 		 */
@@ -605,20 +552,6 @@ dopanic:
 			goto dopanic;
 		}
 
-#ifdef COMPAT_HPUX
-		if (ISHPMMADDR(p, va)) {
-			int pmap_mapmulti(pmap_t, vaddr_t);
-			vaddr_t bva;
-
-			rv = pmap_mapmulti(map->pmap, va);
-			if (rv) {
-				bva = HPMMBASEADDR(va);
-				rv = uvm_fault(map, bva, 0, ftype);
-				if (rv == 0)
-					(void)pmap_mapmulti(map->pmap, va);
-			}
-		} else
-#endif
 		rv = uvm_fault(map, va, 0, ftype);
 #ifdef DEBUG
 		if (rv && MDB_ISPID(p->p_pid))
@@ -1033,38 +966,6 @@ syscall(code, frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-#ifdef COMPAT_SUNOS
-	if (p->p_emul == &emul_sunos) {
-		/*
-		 * SunOS passes the syscall-number on the stack, whereas
-		 * BSD passes it in D0. So, we have to get the real "code"
-		 * from the stack, and clean up the stack, as SunOS glue
-		 * code assumes the kernel pops the syscall argument the
-		 * glue pushed on the stack. Sigh...
-		 */
-		if (copyin((caddr_t)frame.f_regs[SP], &code,
-		   sizeof(register_t)) != 0)
-			code = -1;
-
-		/*
-		 * XXX
-		 * Don't do this for sunos_sigreturn, as there's no stored pc
-		 * on the stack to skip, the argument follows the syscall
-		 * number without a gap.
-		 */
-		if (code != SUNOS_SYS_sigreturn) {
-			frame.f_regs[SP] += sizeof (int);
-			/*
-			 * remember that we adjusted the SP,
-			 * might have to undo this if the system call
-			 * returns ERESTART.
-			 */
-			p->p_md.md_flags |= MDP_STACKADJ;
-		} else
-			p->p_md.md_flags &= ~MDP_STACKADJ;
-	}
-#endif
-
 	params = (caddr_t)frame.f_regs[SP] + sizeof(int);
 
 	switch (code) {
@@ -1151,11 +1052,6 @@ bad:
 
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, error, rval);
-#endif
-#ifdef COMPAT_SUNOS
-	/* need new p-value for this */
-	if (error == ERESTART && (p->p_md.md_flags & MDP_STACKADJ))
-		frame.f_regs[SP] -= sizeof (int);
 #endif
 	userret(p);
 #ifdef KTRACE

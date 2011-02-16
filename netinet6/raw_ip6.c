@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: raw_ip6.c,v 1.31 2006/12/09 01:12:28 itojun Exp $	*/
+=======
+/*	$OpenBSD: raw_ip6.c,v 1.40 2010/04/20 22:05:44 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -69,6 +73,11 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/systm.h>
+<<<<<<< HEAD
+=======
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+>>>>>>> origin/master
 
 #include <net/if.h>
 #include <net/route.h>
@@ -141,9 +150,7 @@ rip6_init()
  * mbuf chain.
  */
 int
-rip6_input(mp, offp, proto)
-	struct	mbuf **mp;
-	int	*offp, proto;
+rip6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
@@ -251,14 +258,9 @@ rip6_input(mp, offp, proto)
 }
 
 void
-rip6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 {
 	struct ip6_hdr *ip6;
-	struct mbuf *m;
-	int off;
 	struct ip6ctlparam *ip6cp = NULL;
 	const struct sockaddr_in6 *sa6_src = NULL;
 	void *cmdarg;
@@ -283,14 +285,11 @@ rip6_ctlinput(cmd, sa, d)
 	/* if the parameter is from icmp6, decode it. */
 	if (d != NULL) {
 		ip6cp = (struct ip6ctlparam *)d;
-		m = ip6cp->ip6c_m;
 		ip6 = ip6cp->ip6c_ip6;
-		off = ip6cp->ip6c_off;
 		cmdarg = ip6cp->ip6c_cmdarg;
 		sa6_src = ip6cp->ip6c_src;
 		nxt = ip6cp->ip6c_nxt;
 	} else {
-		m = NULL;
 		ip6 = NULL;
 		cmdarg = NULL;
 		sa6_src = &sa6_any;
@@ -446,10 +445,9 @@ rip6_output(struct mbuf *m, ...)
 			goto bad;
 		}
 		ip6->ip6_src = *in6a;
-		if (in6p->in6p_route.ro_rt) {
-			/* what if oifp contradicts ? */
-			oifp = ifindex2ifnet[in6p->in6p_route.ro_rt->rt_ifp->if_index];
-		}
+		if (in6p->in6p_route.ro_rt &&
+		    in6p->in6p_route.ro_rt->rt_flags & RTF_UP)
+			oifp = in6p->in6p_route.ro_rt->rt_ifp;
 	}
 
 	ip6->ip6_flow = in6p->in6p_flowinfo & IPV6_FLOWINFO_MASK;
@@ -521,11 +519,8 @@ rip6_output(struct mbuf *m, ...)
  * Raw IPv6 socket option processing.
  */
 int
-rip6_ctloutput(op, so, level, optname, mp)
-	int op;
-	struct socket *so;
-	int level, optname;
-	struct mbuf **mp;
+rip6_ctloutput(int op, struct socket *so, int level, int optname, 
+	struct mbuf **mp)
 {
 #ifdef MROUTING
 	int error = 0;
@@ -576,11 +571,8 @@ extern	u_long rip6_sendspace;
 extern	u_long rip6_recvspace;
 
 int
-rip6_usrreq(so, req, m, nam, control, p)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *nam, *control;
-	struct proc *p;
+rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam, 
+	struct mbuf *control, struct proc *p)
 {
 	struct in6pcb *in6p = sotoin6pcb(so);
 	int s;
@@ -689,7 +681,8 @@ rip6_usrreq(so, req, m, nam, control, p)
 		 * this in a more natural way.
 		 */
 		if (!IN6_IS_ADDR_UNSPECIFIED(&addr->sin6_addr) &&
-		    (ia = ifa_ifwithaddr((struct sockaddr *)addr)) == 0) {
+		    (ia = ifa_ifwithaddr((struct sockaddr *)addr,
+		    /* XXX */ 0)) == 0) {
 			error = EADDRNOTAVAIL;
 			break;
 		}

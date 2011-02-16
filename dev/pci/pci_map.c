@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: pci_map.c,v 1.19 2006/12/12 18:28:54 deraadt Exp $     */
+=======
+/*      $OpenBSD: pci_map.c,v 1.29 2010/09/06 12:30:35 kettenis Exp $     */
+>>>>>>> origin/master
 /*	$NetBSD: pci_map.c,v 1.7 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,6 +44,22 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+
+#ifndef PCI_IO_START
+#define PCI_IO_START	0
+#endif
+
+#ifndef PCI_IO_END
+#define PCI_IO_END	0xffffffff
+#endif
+
+#ifndef PCI_MEM_START
+#define PCI_MEM_START	0
+#endif
+
+#ifndef PCI_MEM_END
+#define PCI_MEM_END	0xffffffff
+#endif
 
 
 int obsd_pci_io_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
@@ -159,7 +172,7 @@ obsd_pci_mem_find(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
 		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
 		    csr & ~PCI_COMMAND_MEM_ENABLE);
 	address = pci_conf_read(pc, tag, reg);
-	pci_conf_write(pc, tag, reg, 0xffffffff);
+	pci_conf_write(pc, tag, reg, PCI_MAPREG_MEM_ADDR_MASK);
 	mask = pci_conf_read(pc, tag, reg);
 	pci_conf_write(pc, tag, reg, address);
 	if (is64bit) {
@@ -311,7 +324,7 @@ pci_mapreg_info(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
 }
 
 int
-pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
+pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int flags,
     bus_space_tag_t *tagp, bus_space_handle_t *handlep, bus_addr_t *basep,
     bus_size_t *sizep, bus_size_t maxsize)
 {
@@ -320,14 +333,45 @@ pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
 	bus_addr_t base;
 	bus_size_t size;
 	pcireg_t csr;
-	int flags;
 	int rv;
 
 	if ((rv = pci_mapreg_info(pa->pa_pc, pa->pa_tag, reg, type,
-	    &base, &size, &flags)) != 0)
+	    &base, &size, NULL)) != 0)
 		return (rv);
+<<<<<<< HEAD
 	if (base == 0)
 		return (EINVAL);	/* disabled because of invalid BAR */
+=======
+#if !defined(__sparc64__)
+	if (base == 0) {
+		struct extent *ex;
+		bus_addr_t start, end;
+
+		if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO) {
+			ex = pa->pa_ioex;
+			if (ex != NULL) {
+				start = max(PCI_IO_START, ex->ex_start);
+				end = min(PCI_IO_END, ex->ex_end);
+			}
+		} else {
+			ex = pa->pa_memex;
+			if (ex != NULL) {
+				start = max(PCI_MEM_START, ex->ex_start);
+				end = min(PCI_MEM_END, ex->ex_end);
+			}
+		}
+
+		if (ex == NULL || extent_alloc_subregion(ex, start, end,
+		    size, size, 0, 0, 0, &base))
+			return (EINVAL); /* disabled because of invalid BAR */
+
+		pci_conf_write(pa->pa_pc, pa->pa_tag, reg, base);
+		if (PCI_MAPREG_MEM_TYPE(type) == PCI_MAPREG_MEM_TYPE_64BIT)
+			pci_conf_write(pa->pa_pc, pa->pa_tag, reg + 4,
+			    (u_int64_t)base >> 32);
+	}
+#endif
+>>>>>>> origin/master
 
 	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO)
@@ -357,7 +401,7 @@ pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
 		size = maxsize;
 	}
 
-	if (bus_space_map(tag, base, size, busflags | flags, &handle))
+	if (bus_space_map(tag, base, size, flags, &handle))
 		return (1);
 
 	if (tagp != NULL)

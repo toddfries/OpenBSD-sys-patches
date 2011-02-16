@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.12 2004/06/13 21:49:16 niklas Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.17 2010/08/19 19:31:53 kettenis Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.8 1994/10/27 04:15:59 cgd Exp $	*/
 
 /*
@@ -63,6 +63,8 @@ static __inline void enable_intr(void);
 static __inline u_int read_eflags(void);
 static __inline void write_eflags(u_int);
 static __inline void wbinvd(void);
+static __inline void clflush(u_int32_t addr);
+static __inline void mfence(void);
 static __inline void wrmsr(u_int, u_int64_t);
 static __inline u_int64_t rdmsr(u_int);
 static __inline void breakpoint(void);
@@ -76,7 +78,7 @@ invlpg(u_int addr)
 static __inline void
 lidt(void *p)
 {
-	__asm __volatile("lidt (%0)" : : "r" (p));
+	__asm __volatile("lidt (%0)" : : "r" (p) : "memory");
 }
 
 static __inline void
@@ -222,6 +224,17 @@ wbinvd(void)
         __asm __volatile("wbinvd");
 }
 
+static __inline void
+clflush(u_int32_t addr)
+{
+	__asm __volatile("clflush %0" : "+m" (addr));
+}
+
+static __inline void
+mfence(void)
+{
+	__asm __volatile("mfence" : : : "memory");
+}
 
 static __inline void
 wrmsr(u_int msr, u_int64_t newval)
@@ -271,7 +284,9 @@ breakpoint(void)
 	__asm __volatile("int $3");
 }
 
-#ifdef I686_CPU
+#define read_psl()	read_eflags()
+#define write_psl(x)	write_eflags(x)
+
 void amd64_errata(struct cpu_info *);
 #endif
 

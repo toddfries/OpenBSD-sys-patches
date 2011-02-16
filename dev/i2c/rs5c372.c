@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+=======
+/*	$OpenBSD: rs5c372.c,v 1.5 2009/10/05 18:59:36 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rs5c372.c,v 1.5 2006/03/29 06:41:24 thorpej Exp $	*/
 
 /*
@@ -135,6 +139,7 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 		return (0);
 	}
 	if ((data & ~RICOHRTC_SECONDS_MASK) != 0) {
+		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc second %d\n",data);
 		return (0);
 	}
@@ -148,6 +153,7 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 	}
 
 	if ((data & ~RICOHRTC_MINUTES_MASK) != 0) {
+		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc minute %d\n",data);
 		return (0);
 	}
@@ -160,12 +166,13 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 		return (0);
 	}
 	if ((data & ~RICOHRTC_HOURS_24MASK) != 0) {
+		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc hour %d\n",data);
 		return (0);
 	}
-#endif
-
 	iic_release_bus(ia->ia_tag, I2C_F_POLL);
+
+#endif
 	return (1);
 }
 

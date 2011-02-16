@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.20 2006/06/10 17:50:30 gwk Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.42 2010/11/27 13:03:04 kettenis Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -112,6 +104,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+void	patinit(struct cpu_info *ci);
 
 #ifdef MULTIPROCESSOR
 int mp_cpu_start(struct cpu_info *);
@@ -151,13 +144,6 @@ void	cpu_copy_trampoline(void);
 void
 cpu_init_first()
 {
-	int cpunum = cpu_number();
-
-	if (cpunum != 0) {
-		cpu_info[0] = NULL;
-		cpu_info[cpunum] = &cpu_info_primary;
-	}
-
 	cpu_copy_trampoline();
 }
 #endif
@@ -171,14 +157,18 @@ struct cfdriver cpu_cd = {
 };
 
 int
-cpu_match(struct device *parent, void *matchv, void *aux)
+cpu_match(struct device *parent, void *match, void *aux)
 {
-  	struct cfdata *match = (struct cfdata *)matchv;
-	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
+  	struct cfdata *cf = match;
+	struct cpu_attach_args *caa = aux;
 
-	if (strcmp(caa->caa_name, match->cf_driver->cd_name) == 0)
-		return (1);
-	return (0);
+	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) != 0)
+		return 0;
+
+	if (cf->cf_unit >= MAXCPUS)
+		return 0;
+
+	return 1;
 }
 
 void
@@ -188,35 +178,33 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
 
 #ifdef MULTIPROCESSOR
-	int cpunum = caa->cpu_number;
+	int cpunum = ci->ci_dev.dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
+#endif
 
-	if (caa->cpu_role != CPU_ROLE_AP) {
-		if (cpunum != cpu_number()) {
+	if (caa->cpu_role == CPU_ROLE_AP) {
+#ifdef MULTIPROCESSOR
+		if (cpu_info[cpunum] != NULL)
+			panic("cpu at apic id %d already attached?", cpunum);
+		cpu_info[cpunum] = ci;
+#endif
+	} else {
+		ci = &cpu_info_primary;
+#ifdef MULTIPROCESSOR
+		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    self->dv_xname, cpu_number(), cpunum);
+			    self->dv_xname, lapic_cpu_number(), caa->cpu_number);
 		}
-
-		ci = &cpu_info_primary;
-		bcopy(self, &ci->ci_dev, sizeof *self);
-
-		/* special-case boot CPU */			    /* XXX */
-		if (cpu_info[cpunum] == &cpu_info_primary) {	    /* XXX */
-			cpu_info[cpunum] = NULL; 		    /* XXX */
-		}				 		    /* XXX */
-	}
-	if (cpu_info[cpunum] != NULL)
-		panic("cpu at apic id %d already attached?", cpunum);
-
-	cpu_info[cpunum] = ci;
 #endif
+		bcopy(self, &ci->ci_dev, sizeof *self);
+	}
 
 	ci->ci_self = ci;
 	ci->ci_apicid = caa->cpu_number;
 #ifdef MULTIPROCESSOR
-	ci->ci_cpuid = ci->ci_apicid;
+	ci->ci_cpuid = cpunum;
 #else
 	ci->ci_cpuid = 0;	/* False for APs, so what, they're not used */
 #endif
@@ -253,11 +241,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
 #endif
+	ci->ci_curpmap = pmap_kernel();
 
 	/* further PCB init done later. */
 
-/* XXXSMP: must be shared with UP */
-#ifdef MULTIPROCESSOR
 	printf(": ");
 
 	switch (caa->cpu_role) {
@@ -291,6 +278,8 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		 * report on an AP
 		 */
 		printf("apid %d (application processor)\n", caa->cpu_number);
+
+#ifdef MULTIPROCESSOR
 		gdt_alloc_cpu(ci);
 		cpu_alloc_ldt(ci);
 		ci->ci_flags |= CPUF_PRESENT | CPUF_AP;
@@ -298,25 +287,21 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ncpus++;
+#endif
 		break;
 
 	default:
 		panic("unknown processor type??");
 	}
 
-	/* Mark this ID as taken if it's in the I/O APIC ID area */
-	if (ci->ci_apicid < IOAPIC_ID_MAX)
-		ioapic_id_map &= ~(1 << ci->ci_apicid);
-
+#ifdef MULTIPROCESSOR
 	if (mp_verbose) {
 		printf("%s: kstack at 0x%lx for %d bytes\n",
 		    ci->ci_dev.dv_xname, kstack, USPACE);
 		printf("%s: idle pcb at %p, idle sp at 0x%x\n",
 		    ci->ci_dev.dv_xname, pcb, pcb->pcb_esp);
 	}
-#else	/* MULTIPROCESSOR */
-	printf("\n");
-#endif	/* !MULTIPROCESSOR */
+#endif
 }
 
 /*
@@ -332,7 +317,14 @@ cpu_init(struct cpu_info *ci)
 
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
-	 * On a 486 or above, enable ring 0 write protection.
+	 * We do this here after identifycpu() because errata may affect
+	 * what we do.
+	 */
+	patinit(ci);
+ 
+	/*
+	 * Enable ring 0 write protection (486 or above, but 386
+	 * no longer supported).
 	 */
 	if (ci->cpu_class >= CPUCLASS_486)
 		lcr0(rcr0() | CR0_WP);
@@ -340,8 +332,11 @@ cpu_init(struct cpu_info *ci)
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
+#ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
-#if defined(I686_CPU)
+	tlbflushg();
+#endif
+
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */
@@ -361,6 +356,41 @@ cpu_init(struct cpu_info *ci)
 #ifdef MULTIPROCESSOR
 
 void
+patinit(struct cpu_info *ci)
+{
+	extern int	pmap_pg_wc;
+	u_int64_t	reg;
+
+	if ((ci->ci_feature_flags & CPUID_PAT) == 0)
+		return;
+
+#define PATENTRY(n, type)	((u_int64_t)type << ((n) * 8))
+#define	PAT_UC		0x0UL
+#define	PAT_WC		0x1UL
+#define	PAT_WT		0x4UL
+#define	PAT_WP		0x5UL
+#define	PAT_WB		0x6UL
+#define	PAT_UCMINUS	0x7UL
+	/* 
+	 * Set up PAT bits.
+	 * The default pat table is the following:
+	 * WB, WT, UC- UC, WB, WT, UC-, UC
+	 * We change it to:
+	 * WB, WC, UC-, UC, WB, WC, UC-, UC.
+	 * i.e change the WT bit to be WC.
+	 */
+	reg = PATENTRY(0, PAT_WB) | PATENTRY(1, PAT_WC) |
+	    PATENTRY(2, PAT_UCMINUS) | PATENTRY(3, PAT_UC) |
+	    PATENTRY(4, PAT_WB) | PATENTRY(5, PAT_WC) |
+	    PATENTRY(6, PAT_UCMINUS) | PATENTRY(7, PAT_UC);
+
+	wrmsr(MSR_CR_PAT, reg);
+	pmap_pg_wc = PG_WC;
+}
+
+
+#ifdef MULTIPROCESSOR
+void
 cpu_boot_secondary_processors()
 {
 	struct cpu_info *ci;
@@ -370,6 +400,7 @@ cpu_boot_secondary_processors()
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
+		ci->ci_randseed = random();
 		if (ci->ci_idle_pcb == NULL)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)
@@ -448,7 +479,7 @@ cpu_hatch(void *v)
 
 	cpu_init_idt();
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 	lapic_set_lvt();
 	gdt_init_cpu(ci);
 	cpu_init_ldt(ci);
@@ -477,9 +508,6 @@ cpu_copy_trampoline()
 	extern u_char cpu_spinup_trampoline[];
 	extern u_char cpu_spinup_trampoline_end[];
 
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,		/* physical */
-	    VM_PROT_ALL);			/* protection */
 	bcopy(cpu_spinup_trampoline, (caddr_t)MP_TRAMPOLINE,
 	    cpu_spinup_trampoline_end - cpu_spinup_trampoline);
 }
@@ -572,6 +600,8 @@ mp_cpu_start(struct cpu_info *ci)
 
 	dwordptr[0] = 0;
 	dwordptr[1] = MP_TRAMPOLINE >> 4;
+
+	pmap_activate(curproc);
 
 	pmap_kenter_pa(0, 0, VM_PROT_READ|VM_PROT_WRITE);
 	memcpy((u_int8_t *)0x467, dwordptr, 4);

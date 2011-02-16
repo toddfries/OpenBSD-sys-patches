@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: i82596.c,v 1.25 2005/01/15 05:24:11 brad Exp $	*/
+=======
+/*	$OpenBSD: i82596.c,v 1.33 2009/10/31 14:31:11 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: i82586.c,v 1.18 1998/08/15 04:42:42 mycroft Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -782,6 +779,7 @@ i82596_tint(sc, scbstatus)
 		 * Check SQE and DEFERRED?
 		 * What if more than one bit is set?
 		 */
+#ifdef I82596_DEBUG
 		if (status & IE_STAT_ABORT)
 			printf("%s: send aborted\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_NOCARRIER)
@@ -790,9 +788,13 @@ i82596_tint(sc, scbstatus)
 			printf("%s: lost CTS\n", sc->sc_dev.dv_xname);
 		else if (status & IE_XS_UNDERRUN)
 			printf("%s: DMA underrun\n", sc->sc_dev.dv_xname);
-		else if (status & IE_XS_EXCMAX) {
+		else
+#endif /* I82596_DEBUG */
+		if (status & IE_XS_EXCMAX) {
+#ifdef I82596_DEBUG
 			printf("%s: too many collisions\n",
 				sc->sc_dev.dv_xname);
+#endif /* I82596_DEBUG */
 			sc->sc_arpcom.ac_if.if_collisions += 16;
 		}
 	}
@@ -1452,9 +1454,11 @@ ie_run_tdr(sc, cmd)
 	clocks = result & IE_TDR_TIME;
 	if (result & 0x10000)
 		printf("%s: TDR command failed\n", sc->sc_dev.dv_xname);
-	else if (result & IE_TDR_XCVR)
+	else if (result & IE_TDR_XCVR) {
+#ifdef I82596_DEBUG
 		printf("%s: transceiver problem\n", sc->sc_dev.dv_xname);
-	else if (result & IE_TDR_OPEN)
+#endif
+	} else if (result & IE_TDR_OPEN)
 		printf("%s: TDR detected an open %d clock%s away\n",
 		    sc->sc_dev.dv_xname, clocks, clocks == 1? "":"s");
 	else if (result & IE_TDR_SHORT)
@@ -1878,13 +1882,7 @@ i82596_ioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -1934,31 +1932,21 @@ i82596_ioctl(ifp, cmd, data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ie_mc_reset(sc);
-			error = 0;
-		}
+	case SIOCGIFMEDIA:
+	case SIOCSIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 
-        case SIOCGIFMEDIA:
-        case SIOCSIFMEDIA:
-                error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
-                break;
-
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ie_mc_reset(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }

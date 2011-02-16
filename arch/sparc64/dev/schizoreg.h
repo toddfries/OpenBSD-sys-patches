@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: schizoreg.h,v 1.17 2007/01/14 16:18:56 kettenis Exp $	*/
+=======
+/*	$OpenBSD: schizoreg.h,v 1.21 2008/12/16 22:27:34 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -27,9 +31,8 @@
  */
 struct schizo_pbm_regs {
 	volatile u_int64_t	_unused1[64];		/* 0x0000 - 0x01ff */
-	struct iommureg		iommu;			/* 0x0200 - 0x0217 */
-	volatile u_int64_t	iommu_ctxflush;		/* 0x0218 - 0x021f */
-	volatile u_int64_t	_unused2[444];
+	struct iommureg		iommu;			/* 0x0200 - 0x03ff */
+	volatile u_int64_t	_unused2[384];
 	volatile u_int64_t	imap[64];
 	volatile u_int64_t	_unused3[64];
 	volatile u_int64_t	iclr[64];
@@ -94,6 +97,7 @@ struct schizo_regs {
 #define	SCZ_UE_AFAR			0x10038
 #define	SCZ_CE_AFSR			0x10040
 #define	SCZ_CE_AFAR			0x10048
+#define	TOM_RESET_GEN			0x17010
 
 /* These are relative to the PBM */
 #define	SCZ_PCI_IOMMU_CTRL		0x00200
@@ -181,6 +185,8 @@ struct schizo_regs {
 #define	SZC_CEAFAR_PIO_PCIBI		0x0000000000000000UL	/*  pcib: interface */
 #define	SCZ_CEAFAR_PIO_PCIAC		0x0000038000000000UL	/*  pcib: config / i/o */
 #define	SCZ_CEAFAR_MEMADDR		0x000007fffffffff0UL	/* memory address */
+
+#define	TOM_RESET_GEN_XIR		0x00000000000000002L
 
 #define	SCZ_PCICTRL_BUS_UNUS		(1UL << 63UL)		/* bus unusable */
 #define	TOM_PCICTRL_DTO_ERR		(1UL << 62UL)		/* pci discard timeout */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sdmmc_io.c,v 1.5 2006/06/19 21:14:30 miod Exp $	*/
+=======
+/*	$OpenBSD: sdmmc_io.c,v 1.19 2010/08/24 14:52:23 blambert Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -19,6 +23,13 @@
 /* Routines for SD I/O cards. */
 
 #include <sys/param.h>
+<<<<<<< HEAD
+=======
+#include <sys/device.h>
+#include <sys/kernel.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+>>>>>>> origin/master
 #include <sys/systm.h>
 
 #include <dev/sdmmc/sdmmc_ioreg.h>
@@ -26,6 +37,17 @@
 #include <dev/sdmmc/sdmmcreg.h>
 #include <dev/sdmmc/sdmmcvar.h>
 
+<<<<<<< HEAD
+=======
+struct sdmmc_intr_handler {
+	struct sdmmc_softc *ih_softc;
+	const char *ih_name;
+	int (*ih_fun)(void *);
+	void *ih_arg;
+	TAILQ_ENTRY(sdmmc_intr_handler) entry;
+};
+
+>>>>>>> origin/master
 int	sdmmc_submatch(struct device *, void *, void *);
 int	sdmmc_print(void *, const char *);
 int	sdmmc_io_rw_direct(struct sdmmc_softc *, struct sdmmc_function *,
@@ -62,6 +84,8 @@ sdmmc_io_enable(struct sdmmc_softc *sc)
 	u_int32_t host_ocr;
 	u_int32_t card_ocr;
 
+	rw_assert_wrlock(&sc->sc_lock);
+
 	/* Set host mode to SD "combo" card. */
 	SET(sc->sc_flags, SMF_SD_MODE|SMF_IO_MODE|SMF_MEM_MODE);
 
@@ -83,13 +107,13 @@ sdmmc_io_enable(struct sdmmc_softc *sc)
 	/* Parse the additional bits in the I/O OCR value. */
 	if (!ISSET(card_ocr, SD_IO_OCR_MEM_PRESENT)) {
 		/* SDIO card without memory (not a "combo card"). */
-		DPRINTF(("%s: no memory present\n", SDMMCDEVNAME(sc)));
+		DPRINTF(("%s: no memory present\n", DEVNAME(sc)));
 		CLR(sc->sc_flags, SMF_MEM_MODE);
 	}
 	sc->sc_function_count = SD_IO_OCR_NUM_FUNCTIONS(card_ocr);
 	if (sc->sc_function_count == 0) {
 		/* Useless SDIO card without any I/O functions. */
-		DPRINTF(("%s: no I/O functions\n", SDMMCDEVNAME(sc)));
+		DPRINTF(("%s: no I/O functions\n", DEVNAME(sc)));
 		CLR(sc->sc_flags, SMF_IO_MODE);
 		return 0;
 	}
@@ -99,7 +123,7 @@ sdmmc_io_enable(struct sdmmc_softc *sc)
 	host_ocr = sdmmc_chip_host_ocr(sc->sct, sc->sch);
 	if (sdmmc_set_bus_power(sc, host_ocr, card_ocr) != 0) {
 		printf("%s: can't supply voltage requested by card\n",
-		    SDMMCDEVNAME(sc));
+		    DEVNAME(sc));
 		return 1;
 	}
 
@@ -108,7 +132,7 @@ sdmmc_io_enable(struct sdmmc_softc *sc)
 
 	/* Send the new OCR value until all cards are ready. */
 	if (sdmmc_io_send_op_cond(sc, host_ocr, NULL) != 0) {
-		printf("%s: can't send I/O OCR\n", SDMMCDEVNAME(sc));
+		printf("%s: can't send I/O OCR\n", DEVNAME(sc));
 		return 1;
 	}
 	return 0;
@@ -124,10 +148,12 @@ sdmmc_io_scan(struct sdmmc_softc *sc)
 	struct sdmmc_function *sf0, *sf;
 	int i;
 
+	rw_assert_wrlock(&sc->sc_lock);
+
 	sf0 = sdmmc_function_alloc(sc);
 	sf0->number = 0;
 	if (sdmmc_set_relative_addr(sc, sf0) != 0) {
-		printf("%s: can't set I/O RCA\n", SDMMCDEVNAME(sc));
+		printf("%s: can't set I/O RCA\n", DEVNAME(sc));
 		SET(sf0->flags, SFF_ERROR);
 		return;
 	}
@@ -136,7 +162,7 @@ sdmmc_io_scan(struct sdmmc_softc *sc)
 
 	/* Verify that the RCA has been set by selecting the card. */
 	if (sdmmc_select_card(sc, sf0) != 0) {
-		printf("%s: can't select I/O RCA %d\n", SDMMCDEVNAME(sc),
+		printf("%s: can't select I/O RCA %d\n", DEVNAME(sc),
 		    sf0->rca);
 		SET(sf0->flags, SFF_ERROR);
 		return;
@@ -157,12 +183,14 @@ sdmmc_io_scan(struct sdmmc_softc *sc)
 int
 sdmmc_io_init(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 {
+	rw_assert_wrlock(&sc->sc_lock);
+
 	if (sf->number == 0) {
 		(void)sdmmc_io_write(sc, sf, SD_IO_CCCR_BUS_WIDTH,
 		    CCCR_BUS_WIDTH_1);
 
 		if (sdmmc_read_cis(sf, &sf->cis) != 0) {
-			printf("%s: can't read CIS\n", SDMMCDEVNAME(sc));
+			printf("%s: can't read CIS\n", DEVNAME(sc));
 			SET(sf->flags, SFF_ERROR);
 			return 1;
 		}
@@ -175,18 +203,54 @@ sdmmc_io_init(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 	return 0;
 }
 
+<<<<<<< HEAD
 void
+=======
+/*
+ * Indicate whether the function is ready to operate.
+ */
+int
+sdmmc_io_function_ready(struct sdmmc_function *sf)
+{
+	struct sdmmc_softc *sc = sf->sc;
+	struct sdmmc_function *sf0 = sc->sc_fn0;
+	u_int8_t rv;
+
+	rw_assert_wrlock(&sc->sc_lock);
+
+	if (sf->number == 0)
+		return 1;	/* FN0 is always ready */
+
+	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_READY);
+
+	return (rv & (1 << sf->number)) != 0;
+}
+
+/*
+ * Enable the I/O function.  Return zero if the function was
+ * enabled successfully.
+ */
+int
+>>>>>>> origin/master
 sdmmc_io_function_enable(struct sdmmc_function *sf)
 {
 	struct sdmmc_softc *sc = sf->sc;
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
-	SDMMC_LOCK(sc);
+	rw_enter_write(&sc->sc_lock);
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_ENABLE);
 	rv |= (1<<sf->number);
 	sdmmc_io_write_1(sf0, SD_IO_CCCR_FN_ENABLE, rv);
+<<<<<<< HEAD
 	SDMMC_UNLOCK(sc);
+=======
+	rw_exit(&sc->sc_lock);
+
+	while (!sdmmc_io_function_ready(sf) && retry-- > 0)
+		tsleep(&lbolt, PPAUSE, "pause", 0);
+	return (retry >= 0) ? 0 : ETIMEDOUT;
+>>>>>>> origin/master
 }
 
 void
@@ -196,11 +260,18 @@ sdmmc_io_function_disable(struct sdmmc_function *sf)
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
+<<<<<<< HEAD
 	SDMMC_LOCK(sc);
+=======
+	rw_assert_wrlock(&sc->sc_lock);
+
+	if (sf->number == 0)
+		return;		/* FN0 is always enabled */
+
+>>>>>>> origin/master
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_ENABLE);
 	rv &= ~(1<<sf->number);
 	sdmmc_io_write_1(sf0, SD_IO_CCCR_FN_ENABLE, rv);
-	SDMMC_UNLOCK(sc);
 }
 
 void
@@ -208,6 +279,8 @@ sdmmc_io_attach(struct sdmmc_softc *sc)
 {
 	struct sdmmc_function *sf;
 	struct sdmmc_attach_args saa;
+
+	rw_assert_wrlock(&sc->sc_lock);
 
 	SIMPLEQ_FOREACH(sf, &sc->sf_head, sf_list) {
 		if (sf->number < 1)
@@ -280,6 +353,8 @@ sdmmc_io_detach(struct sdmmc_softc *sc)
 {
 	struct sdmmc_function *sf;
 
+	rw_assert_wrlock(&sc->sc_lock);
+
 	SIMPLEQ_FOREACH(sf, &sc->sf_head, sf_list) {
 		if (sf->child != NULL) {
 			config_detach(sf->child, DETACH_FORCE);
@@ -295,11 +370,11 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Make sure the card is selected. */
 	if ((error = sdmmc_select_card(sc, sf)) != 0) {
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 		return error;
 	}
 
@@ -318,7 +393,6 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	error = sdmmc_mmc_command(sc, &cmd);
 	*datap = SD_R5_DATA(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -329,11 +403,11 @@ sdmmc_io_rw_extended(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/* Make sure the card is selected. */
 	if ((error = sdmmc_select_card(sc, sf)) != 0) {
-		SDMMC_UNLOCK(sc);
+		rw_exit(&sc->sc_lock);
 		return error;
 	}
 
@@ -356,7 +430,7 @@ sdmmc_io_rw_extended(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 		cmd.c_flags |= SCF_CMD_READ;
 
 	error = sdmmc_mmc_command(sc, &cmd);
-	SDMMC_UNLOCK(sc);
+	rw_exit(&sc->sc_lock);
 	return error;
 }
 
@@ -364,6 +438,8 @@ u_int8_t
 sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 {
 	u_int8_t data = 0;
+
+	rw_assert_wrlock(&sf->sc->sc_lock);
 	
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_READ);
@@ -373,6 +449,8 @@ sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_1(struct sdmmc_function *sf, int reg, u_int8_t data)
 {
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_WRITE);
 }
@@ -382,6 +460,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 {
 	u_int16_t data = 0;
 	
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_READ);
 	return data;
@@ -390,6 +470,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_2(struct sdmmc_function *sf, int reg, u_int16_t data)
 {
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_WRITE);
 }
@@ -399,6 +481,8 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 {
 	u_int32_t data = 0;
 	
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
 	    SD_ARG_CMD53_READ);
 	return data;
@@ -407,15 +491,59 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_4(struct sdmmc_function *sf, int reg, u_int32_t data)
 {
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
+<<<<<<< HEAD
 	    SD_ARG_CMD53_WRITE);
+=======
+	    SD_ARG_CMD53_WRITE | SD_ARG_CMD53_INCREMENT);
+}
+
+int
+sdmmc_io_read_multi_1(struct sdmmc_function *sf, int reg, u_char *data,
+    int datalen)
+{
+	int error;
+
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
+	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
+		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
+		    SD_ARG_CMD53_LENGTH_MAX, SD_ARG_CMD53_READ);
+		if (error)
+			return error;
+		data += SD_ARG_CMD53_LENGTH_MAX;
+		datalen -= SD_ARG_CMD53_LENGTH_MAX;
+	}
+
+	return sdmmc_io_rw_extended(sf->sc, sf, reg, data, datalen,
+	    SD_ARG_CMD53_READ);
+>>>>>>> origin/master
 }
 
 int
 sdmmc_io_write(struct sdmmc_softc *sc, struct sdmmc_function *sf,
     int reg, u_char data)
 {
+<<<<<<< HEAD
 	return sdmmc_io_rw_direct(sc, sf, reg, &data,
+=======
+	int error;
+
+	rw_assert_wrlock(&sf->sc->sc_lock);
+
+	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
+		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
+		    SD_ARG_CMD53_LENGTH_MAX, SD_ARG_CMD53_WRITE);
+		if (error)
+			return error;
+		data += SD_ARG_CMD53_LENGTH_MAX;
+		datalen -= SD_ARG_CMD53_LENGTH_MAX;
+	}
+
+	return sdmmc_io_rw_extended(sf->sc, sf, reg, data, datalen,
+>>>>>>> origin/master
 	    SD_ARG_CMD53_WRITE);
 }
 
@@ -423,6 +551,9 @@ int
 sdmmc_io_xchg(struct sdmmc_softc *sc, struct sdmmc_function *sf,
     int reg, u_char *datap)
 {
+
+	rw_assert_wrlock(&sc->sc_lock);
+
 	return sdmmc_io_rw_direct(sc, sf, reg, datap,
 	    SD_ARG_CMD52_WRITE|SD_ARG_CMD52_EXCHANGE);
 }
@@ -449,7 +580,7 @@ sdmmc_io_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr, u_int32_t *ocrp)
 	int error;
 	int i;
 
-	SDMMC_LOCK(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	/*
 	 * If we change the OCR value, retry the command until the OCR
@@ -474,6 +605,136 @@ sdmmc_io_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr, u_int32_t *ocrp)
 	if (error == 0 && ocrp != NULL)
 		*ocrp = MMC_R4(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
+<<<<<<< HEAD
+=======
+
+/*
+ * Card interrupt handling
+ */
+
+void
+sdmmc_intr_enable(struct sdmmc_function *sf)
+{
+	struct sdmmc_softc *sc = sf->sc;
+	struct sdmmc_function *sf0 = sc->sc_fn0;
+	u_int8_t imask;
+
+	rw_enter_write(&sc->sc_lock);
+	imask = sdmmc_io_read_1(sf0, SD_IO_CCCR_INT_ENABLE);
+	imask |= 1 << sf->number;
+	sdmmc_io_write_1(sf0, SD_IO_CCCR_INT_ENABLE, imask);
+	rw_exit(&sc->sc_lock);
+}
+
+void
+sdmmc_intr_disable(struct sdmmc_function *sf)
+{
+	struct sdmmc_softc *sc = sf->sc;
+	struct sdmmc_function *sf0 = sc->sc_fn0;
+	u_int8_t imask;
+
+	rw_enter_write(&sc->sc_lock);
+	imask = sdmmc_io_read_1(sf0, SD_IO_CCCR_INT_ENABLE);
+	imask &= ~(1 << sf->number);
+	sdmmc_io_write_1(sf0, SD_IO_CCCR_INT_ENABLE, imask);
+	rw_exit(&sc->sc_lock);
+}
+
+/*
+ * Establish a handler for the SDIO card interrupt.  Because the
+ * interrupt may be shared with different SDIO functions, multiple
+ * handlers can be established.
+ */
+void *
+sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
+    void *arg, const char *name)
+{
+	struct sdmmc_softc *sc = (struct sdmmc_softc *)sdmmc;
+	struct sdmmc_intr_handler *ih;
+	int s;
+
+	if (sc->sct->card_intr_mask == NULL)
+		return NULL;
+
+	ih = malloc(sizeof *ih, M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
+	if (ih == NULL)
+		return NULL;
+
+	ih->ih_name = name;
+	ih->ih_softc = sc;
+	ih->ih_fun = fun;
+	ih->ih_arg = arg;
+
+	s = splhigh();
+	if (TAILQ_EMPTY(&sc->sc_intrq)) {
+		sdmmc_intr_enable(sc->sc_fn0);
+		sdmmc_chip_card_intr_mask(sc->sct, sc->sch, 1);
+	}
+	TAILQ_INSERT_TAIL(&sc->sc_intrq, ih, entry);
+	splx(s);
+	return ih;
+}
+
+/*
+ * Disestablish the given handler.
+ */
+void
+sdmmc_intr_disestablish(void *cookie)
+{
+	struct sdmmc_intr_handler *ih = cookie;
+	struct sdmmc_softc *sc = ih->ih_softc;
+	int s;
+
+	if (sc->sct->card_intr_mask == NULL)
+		return;
+
+	s = splhigh();
+	TAILQ_REMOVE(&sc->sc_intrq, ih, entry);
+	if (TAILQ_EMPTY(&sc->sc_intrq)) {
+		sdmmc_chip_card_intr_mask(sc->sct, sc->sch, 0);
+		sdmmc_intr_disable(sc->sc_fn0);
+	}
+	splx(s);
+
+	free(ih, M_DEVBUF);
+}
+
+/*
+ * Call established SDIO card interrupt handlers.  The host controller
+ * must call this function from its own interrupt handler to handle an
+ * SDIO interrupt from the card.
+ */
+void
+sdmmc_card_intr(struct device *sdmmc)
+{
+	struct sdmmc_softc *sc = (struct sdmmc_softc *)sdmmc;
+
+	if (sc->sct->card_intr_mask == NULL)
+		return;
+
+	if (!sdmmc_task_pending(&sc->sc_intr_task))
+		sdmmc_add_task(sc, &sc->sc_intr_task);
+}
+
+void
+sdmmc_intr_task(void *arg)
+{
+	struct sdmmc_softc *sc = arg;
+	struct sdmmc_intr_handler *ih;
+	int s;
+
+	s = splhigh();
+	TAILQ_FOREACH(ih, &sc->sc_intrq, entry) {
+		splx(s);
+
+		/* XXX examine return value and do evcount stuff*/
+		(void)ih->ih_fun(ih->ih_arg);
+
+		s = splhigh();
+	}
+	sdmmc_chip_card_intr_ack(sc->sct, sc->sch);
+	splx(s);
+}
+>>>>>>> origin/master

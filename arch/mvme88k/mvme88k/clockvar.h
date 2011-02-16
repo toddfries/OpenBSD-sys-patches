@@ -1,4 +1,4 @@
-/*	$OpenBSD: clockvar.h,v 1.1 2006/04/19 22:09:40 miod Exp $ */
+/*	$OpenBSD: clockvar.h,v 1.3 2009/02/13 23:26:51 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1995 Theo de Raadt
@@ -72,4 +72,6 @@ extern struct intrhand	statclock_ih;
 extern int statvar;
 extern int statmin;
 
+void	m188_delay(int);
+void	m1x7_delay(int);
 void	m1x7_init_clocks(void);

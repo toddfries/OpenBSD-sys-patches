@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: qe.c,v 1.29 2006/03/25 22:41:41 djm Exp $	*/
+=======
+/*	$OpenBSD: qe.c,v 1.33 2010/11/11 17:46:58 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.
@@ -634,34 +638,21 @@ qeioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				qeinit(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, cmd);
 		break;
+
 	default:
-		if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-			splx(s);
-			return (error);
-		}
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			qeinit(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }
@@ -684,13 +675,11 @@ qeinit(sc)
 	 */
 	if (sc->sc_desc == NULL)
 		sc->sc_desc_dva = (struct qe_desc *) dvma_malloc(
-			sizeof(struct qe_desc), &sc->sc_desc, M_NOWAIT);
-	bzero(sc->sc_desc, sizeof(struct qe_desc));
+		    sizeof(struct qe_desc), &sc->sc_desc, M_NOWAIT | M_ZERO);
 
 	if (sc->sc_bufs == NULL)
 		sc->sc_bufs_dva = (struct qe_bufs *) dvma_malloc(
-			sizeof(struct qe_bufs), &sc->sc_bufs, M_NOWAIT);
-	bzero(sc->sc_bufs, sizeof(struct qe_bufs));
+		    sizeof(struct qe_bufs), &sc->sc_bufs, M_NOWAIT | M_ZERO);
 
 	for (i = 0; i < QE_TX_RING_MAXSIZE; i++)
 		sc->sc_desc->qe_txd[i].tx_addr =

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: acpiac.c,v 1.16 2007/01/03 05:52:28 marco Exp $ */
+=======
+/* $OpenBSD: acpiac.c,v 1.28 2010/08/07 16:55:38 canacar Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -16,11 +20,13 @@
  */
 
 #include <sys/param.h>
+#include <sys/event.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 
 #include <machine/bus.h>
+#include <machine/apmvar.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -45,6 +51,8 @@ struct cfdriver acpiac_cd = {
 	NULL, "acpiac", DV_DULL
 };
 
+const char *acpiac_hids[] = { ACPI_DEV_AC, 0 };
+
 int
 acpiac_match(struct device *parent, void *match, void *aux)
 {
@@ -52,11 +60,7 @@ acpiac_match(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 
 	/* sanity */
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
-		return (0);
-	return (1);
+	return (acpi_matchhids(aa, acpiac_hids, cf->cf_driver->cd_name));
 }
 
 void
@@ -68,9 +72,12 @@ acpiac_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node->child;
 
+<<<<<<< HEAD
 	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev,
 	    acpiac_notify, sc, ACPIDEV_NOPOLL);
 
+=======
+>>>>>>> origin/master
 	acpiac_getsta(sc);
 	printf(": AC unit ");
 	if (sc->sc_ac_stat == PSR_ONLINE)
@@ -88,6 +95,9 @@ acpiac_attach(struct device *parent, struct device *self, void *aux)
 	sensor_attach(&sc->sc_sensdev, &sc->sc_sens[0]);
 	sensordev_install(&sc->sc_sensdev);
 	sc->sc_sens[0].value = sc->sc_ac_stat;
+
+	aml_register_notify(sc->sc_devnode, aa->aaa_dev,
+	    acpiac_notify, sc, ACPIDEV_NOPOLL);
 }
 
 void
@@ -97,25 +107,25 @@ acpiac_refresh(void *arg)
 
 	acpiac_getsta(sc);
 	sc->sc_sens[0].value = sc->sc_ac_stat;
+	acpi_record_event(sc->sc_acpi, APM_POWER_CHANGE);
 }
 
 int
 acpiac_getsta(struct acpiac_softc *sc)
 {
-	struct aml_value res;
+	int64_t sta;
 
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, NULL)) {
 		dnprintf(10, "%s: no _STA\n",
 		    DEVNAME(sc));
 	}
 
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PSR", 0, NULL, &res)) {
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_PSR", 0, NULL, &sta)) {
 		dnprintf(10, "%s: no _PSR\n",
 		    DEVNAME(sc));
 		return (1);
 	}
-	sc->sc_ac_stat = aml_val2int(&res);
-	aml_freevalue(&res);
+	sc->sc_ac_stat = sta;
 	return (0);
 }
 

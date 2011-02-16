@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.2 2005/04/13 04:03:46 mickey Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.5 2010/12/15 05:30:19 tedu Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -49,6 +49,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(512*1024)		/* initial stack size limit */
 #endif
@@ -89,7 +92,11 @@
 #define	VM_FREELIST_ARCH	1
 
 #if defined(_KERNEL) && !defined(_LOCORE)
+
+#include <sys/lock.h>
+
 #define __HAVE_VM_PAGE_MD
+
 struct pv_entry;
 struct vm_page_md {
 	struct simplelock pvh_lock;	/* locks every pv on this list */

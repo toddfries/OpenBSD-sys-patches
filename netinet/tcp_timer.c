@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tcp_timer.c,v 1.37 2005/06/30 08:51:31 markus Exp $	*/
+=======
+/*	$OpenBSD: tcp_timer.c,v 1.45 2010/07/03 04:44:51 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tcp_timer.c,v 1.14 1996/02/13 23:44:09 christos Exp $	*/
 
 /*
@@ -216,14 +220,14 @@ tcp_timer_rexmt(void *arg)
 		icmp.icmp_ip.ip_len = tp->t_pmtud_ip_len;
 		icmp.icmp_ip.ip_hl = tp->t_pmtud_ip_hl;
 		icmpsrc.sin_addr = tp->t_inpcb->inp_faddr;
-		icmp_mtudisc(&icmp);
+		icmp_mtudisc(&icmp, tp->t_inpcb->inp_rtableid);
 
 		/*
 		 * Notify all connections to the same peer about
 		 * new mss and trigger retransmit.
 		 */
-		in_pcbnotifyall(&tcbtable, sintosa(&icmpsrc), EMSGSIZE,
-		    tcp_mtudisc);
+		in_pcbnotifyall(&tcbtable, sintosa(&icmpsrc),
+		    tp->t_inpcb->inp_rtableid, EMSGSIZE, tcp_mtudisc);
 		splx(s);
 		return;
 	}
@@ -288,7 +292,8 @@ tcp_timer_rexmt(void *arg)
 			sin.sin_family = AF_INET;
 			sin.sin_len = sizeof(struct sockaddr_in);
 			sin.sin_addr = inp->inp_faddr;
-			rt = icmp_mtudisc_clone(sintosa(&sin));
+			rt = icmp_mtudisc_clone(sintosa(&sin), 
+			    inp->inp_rtableid);
 			break;
 		}
 		if (rt != NULL) {
@@ -461,11 +466,15 @@ tcp_timer_keep(void *arg)
 		 * to get a 4.2 host to respond.
 		 */
 		tcp_respond(tp, mtod(tp->t_template, caddr_t),
+<<<<<<< HEAD
 		    (struct mbuf *)NULL, tp->rcv_nxt - 1, tp->snd_una - 1, 0);
 #else
 		tcp_respond(tp, mtod(tp->t_template, caddr_t),
 		    (struct mbuf *)NULL, tp->rcv_nxt, tp->snd_una - 1, 0);
 #endif
+=======
+		    NULL, tp->rcv_nxt, tp->snd_una - 1, 0, 0);
+>>>>>>> origin/master
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcp_keepintvl);
 	} else
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcp_keepidle);

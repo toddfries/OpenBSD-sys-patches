@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: specdev.h,v 1.18 2006/06/02 20:25:09 pedro Exp $	*/
+=======
+/*	$OpenBSD: specdev.h,v 1.29 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: specdev.h,v 1.12 1996/02/13 13:13:01 mycroft Exp $	*/
 
 /*
@@ -78,10 +82,11 @@ struct cloneinfo {
 
 extern struct vnode *speclisth[SPECHSZ];
 
+#ifdef	_KERNEL
 /*
  * Prototypes for special file operations on vnodes.
  */
-extern	int (**spec_vnodeop_p)(void *);
+extern struct vops spec_vops;
 struct	nameidata;
 struct	componentname;
 struct	ucred;
@@ -129,8 +134,7 @@ int	spec_advlock(void *);
 #define	spec_bwrite	vop_generic_bwrite
 #define spec_revoke     vop_generic_revoke
 
-int	spec_vnoperate(void *);
-
 /* spec_subr.c */
 int	spec_open_clone(struct vop_open_args *);
 int	spec_close_clone(struct vop_close_args *);
+#endif	/* _KERNEL */

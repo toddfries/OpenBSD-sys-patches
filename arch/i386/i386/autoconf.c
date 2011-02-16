@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.69 2006/11/29 22:40:13 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.86 2010/11/18 21:13:19 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -45,9 +45,9 @@
  */
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
 #include <sys/reboot.h>
@@ -112,8 +112,6 @@ cpu_configure(void)
 	 * Note, on i386, configure is not running under splhigh unlike other
 	 * architectures.  This fact is used by the pcmcia irq line probing.
 	 */
-
-	startrtclock();
 
 	gdt_init();		/* XXX - pcibios uses gdt stuff */
 
@@ -329,62 +327,16 @@ setroot(void)
 #endif
 }
 
-#include "wd.h"
-#if NWD > 0
-extern	struct cfdriver wd_cd;
-#endif
-#include "sd.h"
-#if NSD > 0
-extern	struct cfdriver sd_cd;
-#endif
-#include "cd.h"
-#if NCD > 0
-extern	struct cfdriver cd_cd;
-#endif
-#include "mcd.h"
-#if NMCD > 0
-extern	struct cfdriver mcd_cd;
-#endif
-#include "fd.h"
-#if NFD > 0
-extern	struct cfdriver fd_cd;
-#endif
-#include "rd.h"
-#if NRD > 0
-extern	struct cfdriver rd_cd;
-#endif
-#include "raid.h"
-#if NRAID > 0
-extern	struct cfdriver raid_cd;
-#endif
-
-struct	genericconf {
-	struct cfdriver *gc_driver;
-	char *gc_name;
-	dev_t gc_major;
-} genericconf[] = {
-#if NWD > 0
-	{ &wd_cd,  "wd",  0 },
-#endif
-#if NFD > 0
-	{ &fd_cd,  "fd",  2 },
-#endif
-#if NSD > 0
-	{ &sd_cd,  "sd",  4 },
-#endif
-#if NCD > 0
-	{ &cd_cd,  "cd",  6 },
-#endif
-#if NMCD > 0
-	{ &mcd_cd, "mcd", 7 },
-#endif
-#if NRD > 0
-	{ &rd_cd,  "rd",  17 },
-#endif
-#if NRAID > 0
-	{ &raid_cd,  "raid",  19 },
-#endif
-	{ 0 }
+struct nam2blk nam2blk[] = {
+	{ "wd",		0 },
+	{ "fd",		2 },
+	{ "sd",		4 },
+	{ "cd",		6 },
+	{ "mcd",	7 },
+	{ "rd",		17 },
+	{ "raid",	19 },
+	{ "vnd",	14 },
+	{ NULL,		-1 }
 };
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dino.c,v 1.19 2006/12/18 18:49:46 miod Exp $	*/
+/*	$OpenBSD: dino.c,v 1.30 2011/01/01 15:20:19 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003-2005 Michael Shalayeff
@@ -160,12 +160,13 @@ void	dino_attach_hook(struct device *, struct device *,
 int	dino_maxdevs(void *, int);
 pcitag_t dino_make_tag(void *, int, int, int);
 void	dino_decompose_tag(void *, pcitag_t, int *, int *, int *);
+int	dino_conf_size(void *, pcitag_t);
 pcireg_t dino_conf_read(void *, pcitag_t, int);
 void	dino_conf_write(void *, pcitag_t, int, pcireg_t);
 int	dino_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dino_intr_string(void *, pci_intr_handle_t);
 void *	dino_intr_establish(void *, pci_intr_handle_t, int, int (*)(void *),
-	    void *, char *);
+	    void *, const char *);
 void	dino_intr_disestablish(void *, void *);
 int	dino_iomap(void *, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
 int	dino_memmap(void *, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
@@ -311,9 +312,18 @@ dino_make_tag(void *v, int bus, int dev, int func)
 void
 dino_decompose_tag(void *v, pcitag_t tag, int *bus, int *dev, int *func)
 {
-	*bus = (tag >> 16) & 0xff;
-	*dev = (tag >> 11) & 0x1f;
-	*func= (tag >>  8) & 0x07;
+	if (bus)
+		*bus = (tag >> 16) & 0xff;
+	if (dev)
+		*dev = (tag >> 11) & 0x1f;
+	if (func)
+		*func= (tag >>  8) & 0x07;
+}
+
+int
+dino_conf_size(void *v, pcitag_t tag)
+{
+	return PCI_CONFIG_SPACE_SIZE;
 }
 
 pcireg_t
@@ -370,8 +380,12 @@ dino_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	pcireg_t reg;
 
 	reg = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+
+	if (PCI_INTERRUPT_LINE(reg) == 0xff)
+		return (1);
+    
 	*ihp = PCI_INTERRUPT_LINE(reg) + 1;
-	return (*ihp == 0);
+	return (0);
 }
 
 const char *
@@ -386,7 +400,7 @@ dino_intr_string(void *v, pci_intr_handle_t ih)
 
 void *
 dino_intr_establish(void *v, pci_intr_handle_t ih,
-    int pri, int (*handler)(void *), void *arg, char *name)
+    int pri, int (*handler)(void *), void *arg, const char *name)
 {
 	struct dino_softc *sc = v;
 	volatile struct dino_regs *r = sc->sc_regs;
@@ -451,10 +465,12 @@ dino_memmap(void *v, bus_addr_t bpa, bus_size_t size,
 		sbpa = bpa & 0xff800000;
 		reg = sc->io_shadow;
 		reg |= 1 << ((bpa >> 23) & 0x1f);
+		if (reg & 0x80000001) {
 #ifdef DEBUG
-		if (reg & 0x80000001)
 			panic("mapping outside the mem extent range");
 #endif
+			return (EINVAL);
+		}
 		/* map into the upper bus space, if not yet mapped this 8M */
 		if (reg != sc->io_shadow) {
 
@@ -540,10 +556,12 @@ dino_memalloc(void *v, bus_addr_t rstart, bus_addr_t rend, bus_size_t size,
 
 	reg = sc->io_shadow;
 	reg |= 1 << ((*addrp >> 23) & 0x1f);
+	if (reg & 0x80000001) {
 #ifdef DEBUG
-	if (reg & 0x80000001)
 		panic("mapping outside the mem extent range");
 #endif
+		return (EINVAL);
+	}
 	r->io_addr_en |= reg;
 	sc->io_shadow = reg;
 
@@ -630,7 +648,7 @@ dino_alloc_parent(struct device *self, struct pci_attach_args *pa, int io)
 		return (NULL);
 
 	extent_free(ex, start, size, EX_NOWAIT);
-	return rbus_new_root_share(tag, ex, start, size, 0);
+	return rbus_new_root_share(tag, ex, start, size);
 }
 #endif
 
@@ -1642,7 +1660,7 @@ const struct hppa_bus_dma_tag dino_dmat = {
 const struct hppa_pci_chipset_tag dino_pc = {
 	NULL,
 	dino_attach_hook, dino_maxdevs, dino_make_tag, dino_decompose_tag,
-	dino_conf_read, dino_conf_write,
+	dino_conf_size, dino_conf_read, dino_conf_write,
 	dino_intr_map, dino_intr_string,
 	dino_intr_establish, dino_intr_disestablish,
 #if NCARDBUS > 0
@@ -1784,8 +1802,9 @@ dinoattach(parent, self, aux)
 
 	/* scan for ps2 kbd/ms, serial, and flying toasters */
 	ca->ca_hpamask = -1;
-	pdc_scanbus(self, ca, MAXMODBUS, 0);
+	pdc_scanbus(self, ca, MAXMODBUS, 0, 0);
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = &sc->sc_iot;
 	pba.pba_memt = &sc->sc_memt;
@@ -1793,7 +1812,6 @@ dinoattach(parent, self, aux)
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
-	pba.pba_bridgetag = NULL;
 	config_found(self, &pba, dinoprint);
 
 	/* postpone cleanup if necessary */

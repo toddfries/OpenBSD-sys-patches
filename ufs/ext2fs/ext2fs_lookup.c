@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ext2fs_lookup.c,v 1.20 2005/12/16 15:37:24 pedro Exp $	*/
+=======
+/*	$OpenBSD: ext2fs_lookup.c,v 1.27 2010/11/18 21:18:10 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ext2fs_lookup.c,v 1.16 2000/08/03 20:29:26 thorpej Exp $	*/
 
 /* 
@@ -173,7 +177,7 @@ ext2fs_readdir(v)
 	MALLOC(dirbuf, caddr_t, e2fs_count, M_TEMP, M_WAITOK);
 	if (ap->a_ncookies) {
 		nc = ncookies = e2fs_count / 16;
-		cookies = malloc(sizeof (off_t) * ncookies, M_TEMP, M_WAITOK);
+		cookies = malloc(sizeof(*cookies) * ncookies, M_TEMP, M_WAITOK);
 		*ap->a_cookies = cookies;
 	}
 	memset(dirbuf, 0, e2fs_count);
@@ -589,7 +593,7 @@ found:
 		else
 			dp->i_count = dp->i_offset - prevoff;
 		if (dp->i_number == dp->i_ino) {
-			VREF(vdp);
+			vref(vdp);
 			*vpp = vdp;
 			return (0);
 		}
@@ -680,7 +684,7 @@ found:
 		}
 		*vpp = tdp;
 	} else if (dp->i_number == dp->i_ino) {
-		VREF(vdp);	/* we want ourself, ie "." */
+		vref(vdp);	/* we want ourself, ie "." */
 		*vpp = vdp;
 	} else {
 		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) != 0)
@@ -995,7 +999,7 @@ ext2fs_dirempty(ip, parentino, cred)
 
 	for (off = 0; off < ext2fs_size(ip); off += fs2h16(dp->e2d_reclen)) {
 		error = vn_rdwr(UIO_READ, ITOV(ip), (caddr_t)dp, MINDIRSIZ, off,
-		   UIO_SYSSPACE, IO_NODELOCKED, cred, &count, (struct proc *)0);
+		   UIO_SYSSPACE, IO_NODELOCKED, cred, &count, curproc);
 		/*
 		 * Since we read MINDIRSIZ, residual must
 		 * be 0 unless we're at end of file.
@@ -1060,8 +1064,8 @@ ext2fs_checkpath(source, target, cred)
 		}
 		error = vn_rdwr(UIO_READ, vp, (caddr_t)&dirbuf,
 			sizeof (struct ext2fs_dirtemplate), (off_t)0,
-			UIO_SYSSPACE, IO_NODELOCKED, cred, (size_t *)0,
-			(struct proc *)0);
+			UIO_SYSSPACE, IO_NODELOCKED, cred, NULL,
+			curproc);
 		if (error != 0)
 			break;
 		namlen = dirbuf.dotdot_namlen;

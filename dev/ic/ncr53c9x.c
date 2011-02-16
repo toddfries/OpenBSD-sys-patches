@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ncr53c9x.c,v 1.32 2006/06/26 22:16:23 miod Exp $	*/
+=======
+/*	$OpenBSD: ncr53c9x.c,v 1.50 2010/11/11 17:47:00 miod Exp $	*/
+>>>>>>> origin/master
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -75,7 +79,6 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/pool.h>
 
@@ -186,10 +189,9 @@ ncr53c9x_lunsearch(ti, lun)
  * Attach this instance, and then all the sub-devices
  */
 void
-ncr53c9x_attach(sc, adapter, dev)
+ncr53c9x_attach(sc, adapter)
 	struct ncr53c9x_softc *sc;
 	struct scsi_adapter *adapter;
-	struct scsi_device *dev;
 {
 	struct scsibus_attach_args saa;
 
@@ -266,7 +268,6 @@ ncr53c9x_attach(sc, adapter, dev)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
 	sc->sc_link.adapter = adapter;
-	sc->sc_link.device = dev;
 	sc->sc_link.openings = 2;
 	sc->sc_link.adapter_buswidth = sc->sc_ntarg;
 
@@ -764,7 +765,7 @@ ncr53c9x_get_ecb(sc, flags)
 	int flags;
 {
 	struct ncr53c9x_ecb *ecb;
-	int s, wait = 0;
+	int s, wait = PR_NOWAIT;
 
 	if ((curproc != NULL) && ((flags & SCSI_NOSLEEP) == 0))
 		wait = PR_WAITOK;
@@ -789,7 +790,7 @@ ncr53c9x_get_ecb(sc, flags)
  * This function is called by the higher level SCSI-driver to queue/run
  * SCSI-commands.
  */
-int
+void
 ncr53c9x_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -810,10 +811,12 @@ ncr53c9x_scsi_cmd(xs)
 	li = TINFO_LUN(ti, lun);
 	if (li == NULL) {
 		/* Initialize LUN info and add to list. */
-		if ((li = malloc(sizeof(*li), M_DEVBUF, M_NOWAIT)) == NULL) {
-			return (TRY_AGAIN_LATER);
+		if ((li = malloc(sizeof(*li), M_DEVBUF,
+		    M_NOWAIT | M_ZERO)) == NULL) {
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
+			return;
 		}
-		bzero(li, sizeof(*li));
 		li->last_used = time_second;
 		li->lun = lun;
 		s = splbio();
@@ -823,8 +826,11 @@ ncr53c9x_scsi_cmd(xs)
 		splx(s);
 	}
 
-	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL)
-		return (TRY_AGAIN_LATER);
+	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
+	}
 
 	/* Initialize ecb */
 	ecb->xs = xs;
@@ -852,7 +858,7 @@ ncr53c9x_scsi_cmd(xs)
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/* Not allowed to use interrupts, use polling instead */
 	if (ncr53c9x_poll(sc, xs, ecb->timeout)) {
@@ -860,7 +866,6 @@ ncr53c9x_scsi_cmd(xs)
 		if (ncr53c9x_poll(sc, xs, ecb->timeout))
 			ncr53c9x_timeout(ecb);
 	}
-	return (COMPLETE);
 }
 
 /*
@@ -936,8 +941,6 @@ ncr53c9x_sched(sc)
 			tag = 0;
 		else if ((ecb->flags & ECB_SENSE) != 0)
 			tag = 0;
-		else if (ecb->xs->flags & SCSI_URGENT)
-			tag = MSG_HEAD_OF_Q_TAG;
 		else
 			tag = MSG_SIMPLE_Q_TAG;
 #if 0
@@ -949,11 +952,11 @@ ncr53c9x_sched(sc)
 		li = TINFO_LUN(ti, lun);
 		if (!li) {
 			/* Initialize LUN info and add to list. */
-			if ((li = malloc(sizeof(*li), M_DEVBUF, M_NOWAIT)) == NULL) {
+			if ((li = malloc(sizeof(*li), M_DEVBUF,
+			    M_NOWAIT | M_ZERO)) == NULL) {
 				splx(s);
 				continue;
 			}
-			bzero(li, sizeof(*li));
 			li->lun = lun;
 
 			LIST_INSERT_HEAD(&ti->luns, li, link);
@@ -1125,8 +1128,6 @@ ncr53c9x_done(sc, ecb)
 			xs->resid = ecb->dleft;
 		}
 	}
-
-	xs->flags |= ITSDONE;
 
 #ifdef NCR53C9X_DEBUG
 	if (ncr53c9x_debug & NCR_SHOWMISC) {
@@ -1404,10 +1405,6 @@ abort:
 	ncr53c9x_sched_msgout(SEND_ABORT);
 	return (1);
 }
-
-#define IS1BYTEMSG(m) (((m) != 1 && (m) < 0x20) || (m) & 0x80)
-#define IS2BYTEMSG(m) (((m) & 0xf0) == 0x20)
-#define ISEXTMSG(m) ((m) == 1)
 
 static inline int
 __verify_msg_format(u_char *p, int len)
@@ -2772,10 +2769,9 @@ ncr53c9x_timeout(arg)
 	int s;
 
 	sc_print_addr(sc_link);
-	printf("%s: timed out [ecb %p (flags 0x%x, dleft %x, stat %x)], "
+	printf("timed out [ecb %p (flags 0x%x, dleft %x, stat %x)], "
 	       "<state %d, nexus %p, phase(l %x, c %x, p %x), resid %lx, "
 	       "msg(q %x,o %x) %s>",
-		sc->sc_dev.dv_xname,
 		ecb, ecb->flags, ecb->dleft, ecb->stat,
 		sc->sc_state, sc->sc_nexus,
 		NCR_READ_REG(sc, NCR_STAT),
@@ -2840,5 +2836,5 @@ ncr53c9x_watch(arg)
 		}
 	}
 	splx(s);
-	timeout_add(&sc->sc_watchdog, 60*hz);
+	timeout_add_sec(&sc->sc_watchdog, 60);
 }

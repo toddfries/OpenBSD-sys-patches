@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zx.c,v 1.18 2006/12/03 17:10:40 miod Exp $	*/
+=======
+/*	$OpenBSD: zx.c,v 1.23 2009/09/05 14:09:35 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: zx.c,v 1.5 2002/10/02 16:52:46 thorpej Exp $	*/
 
 /*
@@ -43,13 +47,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. All advertising materials mentioning features or use of this software
- *     must display the following acknowledgement:
- *         This product includes software developed by the NetBSD
- *         Foundation, Inc. and its contributors.
- *  4. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -167,12 +164,12 @@ void	zx_fillrect(struct rasops_info *, int, int, int, int, long, int);
 int	zx_intr(void *);
 int	zx_putcmap(struct zx_softc *);
 
-void	zx_copycols(void *, int, int, int, int);
-void	zx_copyrows(void *, int, int, int);
-void	zx_do_cursor(struct rasops_info *);
-void	zx_erasecols(void *, int, int, int, long);
-void	zx_eraserows(void *, int, int, long);
-void	zx_putchar(void *, int, int, u_int, long);
+int	zx_copycols(void *, int, int, int, int);
+int	zx_copyrows(void *, int, int, int);
+int	zx_do_cursor(struct rasops_info *);
+int	zx_erasecols(void *, int, int, int, long);
+int	zx_eraserows(void *, int, int, long);
+int	zx_putchar(void *, int, int, u_int, long);
 
 struct cfattach zx_ca = {
 	sizeof(struct zx_softc), zx_match, zx_attach
@@ -254,7 +251,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	    ZX_OFF_SS0, round_page(sc->sc_sunfb.sf_fbsize));
 	ri->ri_hw = sc;
 
-	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 
 	/*
 	 * Watch out! rasops_init() invoked via fbwscons_init() did not
@@ -311,7 +308,7 @@ zx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 	 */
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_SUN24;
+		*(u_int *)data = WSDISPLAY_TYPE_SUNLEO;
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;
@@ -621,16 +618,18 @@ zx_copyrect(struct rasops_info *ri, int sx, int sy, int dx, int dy, int w,
 	SETREG(zc->zc_copy, ZX_COORDS(dx, dy));
 }
 
-void
+int
 zx_do_cursor(struct rasops_info *ri)
 {
 
 	zx_fillrect(ri, ri->ri_ccol, ri->ri_crow, 1, 1, WSCOL_BLACK << 16,
 	    ZX_ROP_NEW_XOR_OLD | ZX_ATTR_WE_ENABLE | ZX_ATTR_OE_ENABLE |
 	    ZX_ATTR_FORCE_WID);
+
+	return 0;
 }
 
-void
+int
 zx_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri;
@@ -638,9 +637,11 @@ zx_erasecols(void *cookie, int row, int col, int num, long attr)
 	ri = (struct rasops_info *)cookie;
 
 	zx_fillrect(ri, col, row, num, 1, attr, ZX_STD_ROP);
+
+	return 0;
 }
 
-void
+int
 zx_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri;
@@ -668,9 +669,11 @@ zx_eraserows(void *cookie, int row, int num, long attr)
 		SETREG(zc->zc_fill, ZX_COORDS(0, 0) | ZX_EXTENT_DIR_BACKWARDS);
 	} else
 		zx_fillrect(ri, 0, row, ri->ri_cols, num, attr, ZX_STD_ROP);
+
+	return 0;
 }
 
-void
+int
 zx_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri;
@@ -678,9 +681,11 @@ zx_copyrows(void *cookie, int src, int dst, int num)
 	ri = (struct rasops_info *)cookie;
 
 	zx_copyrect(ri, 0, src, 0, dst, ri->ri_cols, num);
+
+	return 0;
 }
 
-void
+int
 zx_copycols(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_info *ri;
@@ -688,9 +693,11 @@ zx_copycols(void *cookie, int row, int src, int dst, int num)
 	ri = (struct rasops_info *)cookie;
 
 	zx_copyrect(ri, src, row, dst, row, num, 1);
+
+	return 0;
 }
 
-void
+int
 zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri;
@@ -714,7 +721,7 @@ zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	if (uc == ' ') {
 		zx_fillrect(ri, col, row, 1, 1, attr, ZX_STD_ROP);
 		if (ul == 0)
-			return;
+			return 0;
 
 		dp += font->fontheight << ZX_WWIDTH;
 
@@ -762,6 +769,8 @@ zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 		dp -= 2 << ZX_WWIDTH;
 		*dp = 0xffffffff;
 	}
+
+	return 0;
 }
 
 void

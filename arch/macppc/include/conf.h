@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.10 2005/12/21 18:50:52 miod Exp $	*/
+/*	$OpenBSD: conf.h,v 1.13 2010/07/21 15:40:04 deraadt Exp $	*/
 /*	$NetBSD: conf.h,v 1.2 1996/05/05 19:28:34 christos Exp $	*/
 
 /*
@@ -40,8 +40,17 @@ cdev_decl(mm);
 #define cdev_apm_init(c,n) { \
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
+	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
 
 cdev_decl(apm);
 cdev_decl(zs);
+
+/* open, close, ioctl */
+#define cdev_openprom_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
+	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) nullop, 0, selfalse, \
+	(dev_type_mmap((*))) enodev }
+
+cdev_decl(openprom);

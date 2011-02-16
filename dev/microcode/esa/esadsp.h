@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: esadsp.h,v 1.1 2002/04/08 01:47:33 frantzen Exp $ */
+=======
+/* $OpenBSD: esadsp.h,v 1.3 2009/06/02 18:06:34 deraadt Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: esadsp.h,v 1.4 2002/01/07 07:33:09 jmcneill Exp $ */
 
 /*
@@ -94,7 +98,7 @@ static const struct rec_vals {
 	{ ESA_SRC3_DIRECTION_OFFSET + 22, 0xff}
 };
 
-static const u_int32_t esa_assp_kernel_image[] = {
+static const u_int16_t esa_assp_kernel_image[] = {
  0x7980, 0x0030, 0x7980, 0x03b4, 0x7980, 0x03b4, 0x7980, 0x00fb,
  0x7980, 0x00dd, 0x7980, 0x03b4, 0x7980, 0x0332, 0x7980, 0x0287,
  0x7980, 0x03b4, 0x7980, 0x03b4, 0x7980, 0x03b4, 0x7980, 0x03b4,
@@ -216,7 +220,7 @@ static const u_int32_t esa_assp_kernel_image[] = {
  0x0267, 0x0368, 0x0469, 0x056a, 0xbe3a,
 };
 
-static const u_int32_t esa_assp_minisrc_image[] = {
+static const u_int16_t esa_assp_minisrc_image[] = {
                                          0xbf80, 0x101e, 0x906e,
  0x006e, 0x8b88, 0x6980, 0xef88, 0x906f, 0x0d6f, 0x6900, 0xeb08,
  0x0412, 0xbc20, 0x696e, 0xb801, 0x906e, 0x7980, 0x0403, 0xb90e,

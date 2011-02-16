@@ -31,7 +31,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
+<<<<<<< HEAD
 /* $OpenBSD: if_ixgb.c,v 1.35 2006/11/28 04:45:08 brad Exp $ */
+=======
+/* $OpenBSD: if_ixgb.c,v 1.57 2010/09/20 07:50:19 deraadt Exp $ */
+>>>>>>> origin/master
 
 #include <dev/pci/if_ixgb.h>
 
@@ -44,7 +48,7 @@ int             ixgb_display_debug_stats = 0;
  *  Driver version
  *********************************************************************/
 
-char ixgb_driver_version[] = "6.1.0";
+#define IXGB_DRIVER_VERSION	"6.1.0"
 
 /*********************************************************************
  *  PCI Device ID Table
@@ -62,9 +66,7 @@ const struct pci_matchid ixgb_devices[] = {
  *********************************************************************/
 int  ixgb_probe(struct device *, void *, void *);
 void ixgb_attach(struct device *, struct device *, void *);
-void ixgb_shutdown(void *);
 int  ixgb_intr(void *);
-void ixgb_power(int, void *);
 void ixgb_start(struct ifnet *);
 int  ixgb_ioctl(struct ifnet *, u_long, caddr_t);
 void ixgb_watchdog(struct ifnet *);
@@ -106,6 +108,7 @@ void ixgb_update_link_status(struct ixgb_softc *);
 int
 ixgb_get_buf(struct ixgb_softc *, int i,
 	     struct mbuf *);
+void ixgb_enable_hw_vlans(struct ixgb_softc *);
 int  ixgb_encap(struct ixgb_softc *, struct mbuf *);
 int
 ixgb_dma_malloc(struct ixgb_softc *, bus_size_t,
@@ -121,7 +124,7 @@ struct cfattach ixgb_ca = {
 };
 
 struct cfdriver ixgb_cd = {
-	0, "ixgb", DV_IFNET
+	NULL, "ixgb", DV_IFNET
 };
 
 /* some defines for controlling descriptor fetches in h/w */
@@ -196,11 +199,8 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 	/* Set the max frame size assuming standard ethernet sized frames */
 	sc->hw.max_frame_size = IXGB_MAX_JUMBO_FRAME_SIZE;
 
-	if (ixgb_allocate_pci_resources(sc)) {
-		printf("%s: Allocation of PCI resources failed\n",
-		       sc->sc_dv.dv_xname);
+	if (ixgb_allocate_pci_resources(sc))
 		goto err_pci;
-	}
 
 	tsize = IXGB_ROUNDUP(sc->num_tx_desc * sizeof(struct ixgb_tx_desc),
 	    IXGB_MAX_TXD * sizeof(struct ixgb_tx_desc));
@@ -244,8 +244,6 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 	printf(", address %s\n", ether_sprintf(sc->interface_data.ac_enaddr));
 
 	INIT_DEBUGOUT("ixgb_attach: end");
-	sc->sc_powerhook = powerhook_establish(ixgb_power, sc);
-	sc->sc_shutdownhook = shutdownhook_establish(ixgb_shutdown, sc);
 	return;
 
 err_hw_init:
@@ -255,33 +253,6 @@ err_rx_desc:
 err_tx_desc:
 err_pci:
 	ixgb_free_pci_resources(sc);
-}
-
-void
-ixgb_power(int why, void *arg)
-{
-	struct ixgb_softc *sc = (struct ixgb_softc *)arg;
-	struct ifnet *ifp;
-
-	if (why == PWR_RESUME) {
-		ifp = &sc->interface_data.ac_if;
-		if (ifp->if_flags & IFF_UP)
-			ixgb_init(sc);
-	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/ 
-
-void
-ixgb_shutdown(void *arg)
-{
-	struct ixgb_softc *sc = arg;
-
-	ixgb_stop(sc);
 }
 
 /*********************************************************************
@@ -299,6 +270,7 @@ ixgb_start(struct ifnet *ifp)
 {
 	struct mbuf    *m_head;
 	struct ixgb_softc *sc = ifp->if_softc;
+	int		post = 0;
 
 	if ((ifp->if_flags & (IFF_OACTIVE | IFF_RUNNING)) != IFF_RUNNING)
 		return;
@@ -306,9 +278,12 @@ ixgb_start(struct ifnet *ifp)
 	if (!sc->link_active)
 		return;
 
+	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+
 	for (;;) {
 		IFQ_POLL(&ifp->if_snd, m_head);
-
 		if (m_head == NULL)
 			break;
 
@@ -322,12 +297,25 @@ ixgb_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Send a copy of the frame to the BPF listener */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
 		ifp->if_timer = IXGB_TX_TIMEOUT;
+
+		post = 1;
 	}
+
+	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	/*
+	 * Advance the Transmit Descriptor Tail (Tdt),
+	 * this tells the E1000 that this frame
+	 * is available to transmit.
+	 */
+	if (post)
+		IXGB_WRITE_REG(&sc->hw, TDT, sc->next_avail_tx_desc);
 }
 
 /*********************************************************************
@@ -342,17 +330,12 @@ ixgb_start(struct ifnet *ifp)
 int
 ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
-        int		s, error = 0;
-	struct ifreq   *ifr = (struct ifreq *) data;
-	struct ifaddr  *ifa = (struct ifaddr *)data;
 	struct ixgb_softc *sc = ifp->if_softc;
+	struct ifaddr	*ifa = (struct ifaddr *) data;
+	struct ifreq	*ifr = (struct ifreq *) data;
+	int		s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->interface_data, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (command) {
 	case SIOCSIFADDR:
@@ -366,13 +349,7 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->interface_data, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFMTU (Set Interface MTU)");
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
@@ -395,30 +372,24 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOC(ADD|DEL)MULTI");
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->interface_data)
-			: ether_delmulti(ifr, &sc->interface_data);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING) {
-				ixgb_disable_intr(sc);
-				ixgb_set_multi(sc);
-				ixgb_enable_intr(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCxIFMEDIA (Get/Set Interface Media)");
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
+
 	default:
-		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%X)\n", (int)command);
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->interface_data, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			ixgb_disable_intr(sc);
+			ixgb_set_multi(sc);
+			ixgb_enable_intr(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
@@ -489,6 +460,9 @@ ixgb_init(void *arg)
 		return;
 	}
 
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		ixgb_enable_hw_vlans(sc);
+
 	/* Prepare transmit descriptors and buffers */
 	if (ixgb_setup_transmit_structures(sc)) {
 		printf("%s: Could not setup transmit structures\n",
@@ -525,7 +499,7 @@ ixgb_init(void *arg)
 	temp_reg |= IXGB_CTRL0_JFE;
 	IXGB_WRITE_REG(&sc->hw, CTRL0, temp_reg);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	ixgb_clear_hw_cntrs(&sc->hw);
 	ixgb_enable_intr(sc);
 
@@ -569,7 +543,7 @@ ixgb_intr(void *arg)
 			timeout_del(&sc->timer_handle);
 			ixgb_check_for_link(&sc->hw);
 			ixgb_update_link_status(sc);
-			timeout_add(&sc->timer_handle, hz);
+			timeout_add_sec(&sc->timer_handle, 1);
 		}
 
 		if (rxdmt0 && sc->raidc) {
@@ -713,6 +687,15 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	sc->num_tx_desc_avail -= map->dm_nsegs;
 	sc->next_avail_tx_desc = i;
 
+	/* Find out if we are in VLAN mode */
+	if (m_head->m_flags & M_VLANTAG) {
+		/* Set the VLAN id */
+		current_tx_desc->vlan = htole16(m_head->m_pkthdr.ether_vtag);
+
+		/* Tell hardware to add tag */
+		current_tx_desc->cmd_type_len |= htole32(IXGB_TX_DESC_CMD_VLE);
+	}
+
 	tx_buffer->m_head = m_head;
 	bus_dmamap_sync(sc->txtag, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
@@ -721,15 +704,6 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	 * Last Descriptor of Packet needs End Of Packet (EOP)
 	 */
 	current_tx_desc->cmd_type_len |= htole32(IXGB_TX_DESC_CMD_EOP);
-
-	/*
-	 * Advance the Transmit Descriptor Tail (Tdt), this tells the E1000
-	 * that this frame is available to transmit.
-	 */
-	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_map->dm_mapsize,
-	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-	IXGB_WRITE_REG(&sc->hw, TDT, i);
 
 	return (0);
 
@@ -826,7 +800,7 @@ ixgb_local_timer(void *arg)
 	if (ixgb_display_debug_stats && ifp->if_flags & IFF_RUNNING)
 		ixgb_print_hw_stats(sc);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 
 	splx(s);
 }
@@ -1040,6 +1014,10 @@ ixgb_setup_interface(struct ixgb_softc *sc)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
+
 #ifdef IXGB_CSUM_OFFLOAD
 	ifp->if_capabilities |= IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
 #endif
@@ -1102,9 +1080,7 @@ ixgb_dma_malloc(struct ixgb_softc *sc, bus_size_t size,
 	}
 
 	r = bus_dmamap_load(sc->osdep.ixgb_pa.pa_dmat, dma->dma_map,
-			    dma->dma_vaddr,
-			    size,
-			    NULL,
+			    dma->dma_vaddr, size, NULL,
 			    mapflags | BUS_DMA_NOWAIT);
 	if (r != 0) {
 		printf("%s: ixgb_dma_malloc: bus_dmamap_load failed; "
@@ -1440,15 +1416,16 @@ ixgb_txeof(struct ixgb_softc *sc)
 	 * clear the timeout. Otherwise, if some descriptors have been freed,
 	 * restart the timeout.
 	 */
-	if (num_avail > IXGB_TX_CLEANUP_THRESHOLD) {
+	if (num_avail > IXGB_TX_CLEANUP_THRESHOLD)
 		ifp->if_flags &= ~IFF_OACTIVE;
-		/* All clean, turn off the timer */
-		if (num_avail == sc->num_tx_desc)
-			ifp->if_timer = 0;
-		/* Some cleaned, reset the timer */
-		else if (num_avail != sc->num_tx_desc_avail)
-			ifp->if_timer = IXGB_TX_TIMEOUT;
-	}
+
+	/* All clean, turn off the timer */
+	if (num_avail == sc->num_tx_desc)
+		ifp->if_timer = 0;
+	/* Some cleaned, reset the timer */
+	else if (num_avail != sc->num_tx_desc_avail)
+		ifp->if_timer = IXGB_TX_TIMEOUT;
+
 	sc->num_tx_desc_avail = num_avail;
 }
 
@@ -1464,10 +1441,7 @@ ixgb_get_buf(struct ixgb_softc *sc, int i,
 {
 	struct mbuf *mp = nmp;
 	struct ixgb_buffer *rx_buffer;
-	struct ifnet   *ifp;
 	int             error;
-
-	ifp = &sc->interface_data.ac_if;
 
 	if (mp == NULL) {
 		MGETHDR(mp, M_DONTWAIT, MT_DATA);
@@ -1504,6 +1478,7 @@ ixgb_get_buf(struct ixgb_softc *sc, int i,
 		return (error);
 	}
 	rx_buffer->m_head = mp;
+	bzero(&sc->rx_desc_base[i], sizeof(sc->rx_desc_base[i]));
 	sc->rx_desc_base[i].buff_addr = htole64(rx_buffer->map->dm_segs[0].ds_addr);
 	bus_dmamap_sync(sc->rxtag, rx_buffer->map, 0,
 	    rx_buffer->map->dm_mapsize, BUS_DMASYNC_PREREAD);
@@ -1599,10 +1574,7 @@ ixgb_initialize_receive_unit(struct ixgb_softc *sc)
 	u_int32_t       reg_rctl;
 	u_int32_t       reg_rxcsum;
 	u_int32_t       reg_rxdctl;
-	struct ifnet   *ifp;
 	u_int64_t       bus_addr;
-
-	ifp = &sc->interface_data.ac_if;
 
 	/*
 	 * Make sure receives are disabled while setting up the descriptor
@@ -1778,7 +1750,7 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 		} else {
 			eop = 0;
 		}
-		len = current_desc->length;
+		len = letoh16(current_desc->length);
 
 		if (current_desc->errors & (IXGB_RX_DESC_ERRORS_CE |
 			    IXGB_RX_DESC_ERRORS_SE | IXGB_RX_DESC_ERRORS_P |
@@ -1805,6 +1777,15 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 				eop_desc = i;
 				sc->fmp->m_pkthdr.rcvif = ifp;
 				ifp->if_ipackets++;
+				ixgb_receive_checksum(sc, current_desc, sc->fmp);
+
+#if NVLAN > 0
+				if (current_desc->status & IXGB_RX_DESC_STATUS_VP) {
+					sc->fmp->m_pkthdr.ether_vtag =
+					    letoh16(current_desc->special);
+					sc->fmp->m_flags |= M_VLANTAG;
+				}
+#endif
 
 #if NBPFILTER > 0
 				/*
@@ -1812,12 +1793,10 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 				 * user see the packet.
 				 */
 				if (ifp->if_bpf)
-					bpf_mtap(ifp->if_bpf, sc->fmp,
+					bpf_mtap_ether(ifp->if_bpf, sc->fmp,
 					    BPF_DIRECTION_IN);
 #endif
 
-				ixgb_receive_checksum(sc, current_desc,
-						      sc->fmp);
 				ether_input_mbuf(ifp, sc->fmp);
 				sc->fmp = NULL;
 				sc->lmp = NULL;
@@ -1923,6 +1902,20 @@ ixgb_receive_checksum(struct ixgb_softc *sc,
 				M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 		}
 	}
+}
+
+/*
+ * This turns on the hardware offload of the VLAN
+ * tag insertion and strip
+ */
+void
+ixgb_enable_hw_vlans(struct ixgb_softc *sc)
+{
+	uint32_t ctrl;
+
+	ctrl = IXGB_READ_REG(&sc->hw, CTRL0);
+	ctrl |= IXGB_CTRL0_VME;
+	IXGB_WRITE_REG(&sc->hw, CTRL0, ctrl);
 }
 
 void

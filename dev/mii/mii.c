@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mii.c,v 1.17 2005/07/22 11:50:53 brad Exp $	*/
+=======
+/*	$OpenBSD: mii.c,v 1.21 2010/04/20 20:42:16 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mii.c,v 1.19 2000/02/02 17:09:44 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -151,40 +148,6 @@ mii_attach(struct device *parent, struct mii_data *mii, int capmask,
 			mii->mii_instance++;
 		}
 		offset++;
-	}
-}
-
-void
-mii_activate(struct mii_data *mii, enum devact act, int phyloc, int offloc)
-{
-	struct mii_softc *child;
-
-	if (phyloc != MII_PHY_ANY && offloc != MII_OFFSET_ANY)
-		panic("mii_activate: phyloc and offloc specified");
-
-	if ((mii->mii_flags & MIIF_INITDONE) == 0)
-		return;
-
-	for (child = LIST_FIRST(&mii->mii_phys);
-	     child != NULL; child = LIST_NEXT(child, mii_list)) {
-		if (phyloc != MII_PHY_ANY || offloc != MII_OFFSET_ANY) {
-			if (phyloc != MII_PHY_ANY &&
-			    phyloc != child->mii_phy)
-				continue;
-			if (offloc != MII_OFFSET_ANY &&
-			    offloc != child->mii_offset)
-				continue;
-		}
-		switch (act) {
-		case DVACT_ACTIVATE:
-			panic("mii_activate: DVACT_ACTIVATE");
-			break;
-
-		case DVACT_DEACTIVATE:
-			if (config_deactivate(&child->mii_dev) != 0)
-				panic("%s: config_activate(%d) failed",
-				    child->mii_dev.dv_xname, act);
-		}
 	}
 }
 

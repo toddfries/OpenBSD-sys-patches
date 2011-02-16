@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: subr_prof.c,v 1.16 2006/12/24 20:28:43 miod Exp $	*/
+=======
+/*	$OpenBSD: subr_prof.c,v 1.19 2010/07/09 20:30:48 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: subr_prof.c,v 1.12 1996/04/22 01:38:50 christos Exp $	*/
 
 /*-
@@ -36,8 +40,9 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <sys/resourcevar.h>
 #include <sys/mount.h>
+#include <sys/sysctl.h>
 #include <sys/syscallargs.h>
 
 #include <machine/cpu.h>

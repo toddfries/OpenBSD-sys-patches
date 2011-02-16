@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_command.c,v 1.44 2006/08/24 21:10:14 miod Exp $	*/
+=======
+/*	$OpenBSD: db_command.c,v 1.62 2010/11/05 15:17:50 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -290,7 +294,7 @@ db_buf_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	if (modif[0] == 'f')
 		full = TRUE;
 				   
-	vfs_buf_print((struct buf *) addr, full, db_printf);
+	vfs_buf_print((void *) addr, full, db_printf);
 }
 
 /*ARGSUSED*/
@@ -323,6 +327,13 @@ db_malloc_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 
 /*ARGSUSED*/
 void
+db_mbuf_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	m_print((void *)addr, db_printf);
+}
+
+/*ARGSUSED*/
+void
 db_mount_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
 	boolean_t full = FALSE;
@@ -333,6 +344,46 @@ db_mount_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	vfs_mount_print((struct mount *) addr, full, db_printf);
 }
 
+<<<<<<< HEAD
+=======
+void
+db_show_all_mounts(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	boolean_t full = FALSE;
+	struct mount *mp;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list)
+		vfs_mount_print(mp, full, db_printf);
+}
+
+extern struct pool vnode_pool;
+void
+db_show_all_vnodes(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	pool_walk(&vnode_pool, full, db_printf, vfs_vnode_print);
+}
+
+extern struct pool bufpool;
+void
+db_show_all_bufs(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	pool_walk(&bufpool, full, db_printf, vfs_buf_print);
+}
+
+>>>>>>> origin/master
 /*ARGSUSED*/
 void
 db_object_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
@@ -366,8 +417,37 @@ db_vnode_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	if (modif[0] == 'f')
 		full = TRUE;
 
-	vfs_vnode_print((struct vnode *) addr, full, db_printf);
+	vfs_vnode_print((void *)addr, full, db_printf);
 }
+
+#ifdef NFSCLIENT
+/*ARGSUSED*/
+void     
+db_nfsreq_print_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+    char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	nfs_request_print((void *)addr, full, db_printf);
+}
+
+/*ARGSUSED*/
+void     
+db_nfsnode_print_cmd(db_expr_t addr, int have_addr, db_expr_t count,
+    char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	nfs_node_print((void *)addr, full, db_printf);
+}
+#endif
+
 
 /*ARGSUSED*/
 void
@@ -410,6 +490,15 @@ db_uvmexp_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	uvmexp_print(db_printf);
 }
 
+void	bcstats_print(int (*)(const char *, ...));
+
+/*ARGSUSED*/
+void
+db_bcstats_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	bcstats_print(db_printf);
+}
+
 /*
  * 'show' commands
  */
@@ -418,23 +507,45 @@ struct db_command db_show_all_cmds[] = {
 	{ "procs",	db_show_all_procs,	0, NULL },
 	{ "callout",	db_show_callout,	0, NULL },
 	{ "pools",	db_show_all_pools,	0, NULL },
+<<<<<<< HEAD
+=======
+	{ "mounts",	db_show_all_mounts,	0, NULL },
+	{ "vnodes",	db_show_all_vnodes,	0, NULL },
+	{ "bufs",	db_show_all_bufs,	0, NULL },
+#ifdef NFSCLIENT
+	{ "nfsreqs",	db_show_all_nfsreqs,	0, NULL },
+	{ "nfsnodes",	db_show_all_nfsnodes,	0, NULL },
+#endif
+>>>>>>> origin/master
 	{ NULL, 	NULL, 			0, NULL }
 };
 
 struct db_command db_show_cmds[] = {
 	{ "all",	NULL,			0,	db_show_all_cmds },
+	{ "bcstats",	db_bcstats_print_cmd,	0,	NULL },
 	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
 	{ "buf",	db_buf_print_cmd,	0,	NULL },
 	{ "extents",	db_extent_print_cmd,	0,	NULL },
 	{ "malloc",	db_malloc_print_cmd,	0,	NULL },
 	{ "map",	db_map_print_cmd,	0,	NULL },
+	{ "mbuf",	db_mbuf_print_cmd,	0,	NULL },
 	{ "mount",	db_mount_print_cmd,	0,	NULL },
+#ifdef NFSCLIENT
+	{ "nfsreq",	db_nfsreq_print_cmd,	0,	NULL },
+	{ "nfsnode",	db_nfsnode_print_cmd,	0,	NULL },
+#endif
 	{ "object",	db_object_print_cmd,	0,	NULL },
+#ifdef DDB_STRUCT
+	{ "offset",	db_struct_offset_cmd,	CS_OWN,	NULL },
+#endif
 	{ "page",	db_page_print_cmd,	0,	NULL },
 	{ "panic",	db_show_panic_cmd,	0,	NULL },
 	{ "pool",	db_pool_print_cmd,	0,	NULL },
 	{ "proc",	db_proc_print_cmd,	0,	NULL },
 	{ "registers",	db_show_regs,		0,	NULL },
+#ifdef DDB_STRUCT
+	{ "struct",	db_struct_layout_cmd,	CS_OWN,	NULL },
+#endif
 	{ "uvmexp",	db_uvmexp_print_cmd,	0,	NULL },
 	{ "vnode",	db_vnode_print_cmd,	0,	NULL },
 	{ "watches",	db_listwatch_cmd, 	0,	NULL },
@@ -551,7 +662,8 @@ db_error(char *s)
 	if (s)
 		db_printf("%s", s);
 	db_flush_lex();
-	longjmp(db_recover);
+	if (db_recover != NULL)
+		longjmp(db_recover);
 }
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.51 2007/04/04 17:44:45 art Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.59 2010/12/06 20:57:16 miod Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -15,13 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -156,12 +149,10 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
-#include <sys/user.h>
 #include <sys/pool.h>
 
 #include <machine/pte.h>
 
-/* #define UVM_PAGE_INLINE */
 #include <uvm/uvm.h>
 
 #include <machine/cpu.h>
@@ -266,10 +257,11 @@ pt_entry_t	*Sysmap, *Sysptmap;
 st_entry_t	*Segtabzero, *Segtabzeropa;
 vsize_t		Sysptsize = VM_KERNEL_PT_PAGES;
 
+#ifndef __HAVE_PMAP_DIRECT
 extern caddr_t	CADDR1, CADDR2;
-
 pt_entry_t	*caddr1_pte;	/* PTE for CADDR1 */
 pt_entry_t	*caddr2_pte;	/* PTE for CADDR2 */
+#endif
 
 struct pmap	kernel_pmap_store;
 struct vm_map	*st_map, *pt_map;
@@ -298,9 +290,6 @@ struct pool	pmap_pmap_pool;	/* memory pool for pmap structures */
  */
 struct pv_entry	*pmap_alloc_pv(void);
 void		 pmap_free_pv(struct pv_entry *);
-#ifdef COMPAT_HPUX
-int		 pmap_mapmulti(pmap_t, vaddr_t);
-#endif
 void		 pmap_remove_flags(pmap_t, vaddr_t, vaddr_t, int);
 void		 pmap_remove_mapping(pmap_t, vaddr_t, pt_entry_t *, int);
 boolean_t	 pmap_testbit(struct vm_page *, int);
@@ -410,12 +399,14 @@ pmap_init()
 
 	PMAP_DPRINTF(PDB_FOLLOW, ("pmap_init()\n"));
 
+#ifndef __HAVE_PMAP_DIRECT
 	/*
 	 * Before we do anything else, initialize the PTE pointers
 	 * used by pmap_zero_page() and pmap_copy_page().
 	 */
 	caddr1_pte = pmap_pte(pmap_kernel(), CADDR1);
 	caddr2_pte = pmap_pte(pmap_kernel(), CADDR2);
+#endif
 
 	/*
 	 * Now that kernel map has been allocated, we can mark as
@@ -644,8 +635,7 @@ pmap_create()
 	PMAP_DPRINTF(PDB_FOLLOW|PDB_CREATE,
 	    ("pmap_create\n"));
 
-	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
-	bzero(pmap, sizeof(*pmap));
+	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK | PR_ZERO);
 
 	/*
 	 * No need to allocate page table space yet but we do need a
@@ -1064,13 +1054,15 @@ pmap_enter_cache(pmap, va, pa, prot, flags, template)
 	    ("pmap_enter_cache(%p, %lx, %lx, %x, %x, %x)\n",
 	    pmap, va, pa, prot, wired, template));
 
-#ifdef DIAGNOSTIC
+#ifdef DEBUG
+#ifndef __HAVE_PMAP_DIRECT
 	/*
 	 * pmap_enter() should never be used for CADDR1 and CADDR2.
 	 */
 	if (pmap == pmap_kernel() &&
 	    (va == (vaddr_t)CADDR1 || va == (vaddr_t)CADDR2))
 		panic("pmap_enter: used for CADDR1 or CADDR2");
+#endif
 #endif
 
 	/*
@@ -1819,6 +1811,10 @@ ok:
 void
 pmap_zero_page(struct vm_page *pg)
 {
+#ifdef __HAVE_PMAP_DIRECT
+	vaddr_t va = pmap_map_direct(pg);
+	zeropage((void *)va);
+#else
 	paddr_t phys = VM_PAGE_TO_PHYS(pg);
 	int npte;
 
@@ -1855,6 +1851,7 @@ pmap_zero_page(struct vm_page *pg)
 	*caddr1_pte = PG_NV;
 	TBIS((vaddr_t)CADDR1);
 #endif
+#endif	/* __HAVE_PMAP_DIRECT */
 }
 
 /*
@@ -1869,6 +1866,11 @@ pmap_zero_page(struct vm_page *pg)
 void
 pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 {
+#ifdef __HAVE_PMAP_DIRECT
+	vaddr_t srcva = pmap_map_direct(srcpg);
+	vaddr_t dstva = pmap_map_direct(dstpg);
+	copypage((void *)srcva, (void *)dstva);
+#else
 	paddr_t src = VM_PAGE_TO_PHYS(srcpg);
 	paddr_t dst = VM_PAGE_TO_PHYS(dstpg);
 
@@ -1916,6 +1918,7 @@ pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 	*caddr2_pte = PG_NV;
 	TBIS((vaddr_t)CADDR2);
 #endif
+#endif	/* __HAVE_PMAP_DIRECT */
 }
 
 /*
@@ -2001,62 +2004,23 @@ pmap_is_modified(pg)
  *	Find the first virtual address >= *vap that does not
  *	cause a virtually-tagged cache alias problem.
  */
-void
-pmap_prefer(foff, vap)
-	vaddr_t foff, *vap;
+vaddr_t
+pmap_prefer(vaddr_t foff, vaddr_t va)
 {
-	vaddr_t va;
 	vsize_t d;
 
 #ifdef M68K_MMU_MOTOROLA
 	if (pmap_aliasmask)
 #endif
 	{
-		va = *vap;
 		d = foff - va;
 		d &= pmap_aliasmask;
-		*vap = va + d;
+		va += d;
 	}
+
+	return va;
 }
 #endif /* M68K_MMU_HP */
-
-#ifdef COMPAT_HPUX
-/*
- * pmap_mapmulti:
- *
- *	'PUX hack for dealing with the so called multi-mapped address space.
- *	The first 256mb is mapped in at every 256mb region from 0x10000000
- *	up to 0xF0000000.  This allows for 15 bits of tag information.
- *
- *	We implement this at the segment table level, the machine independent
- *	VM knows nothing about it.
- */
-int
-pmap_mapmulti(pmap, va)
-	pmap_t pmap;
-	vaddr_t va;
-{
-	st_entry_t *ste, *bste;
-
-#ifdef PMAP_DEBUG
-	if (pmapdebug & PDB_MULTIMAP) {
-		ste = pmap_ste(pmap, HPMMBASEADDR(va));
-		printf("pmap_mapmulti(%p, %lx): bste %p(%x)",
-		       pmap, va, ste, *ste);
-		ste = pmap_ste(pmap, va);
-		printf(" ste %p(%x)\n", ste, *ste);
-	}
-#endif
-	bste = pmap_ste(pmap, HPMMBASEADDR(va));
-	ste = pmap_ste(pmap, va);
-	if (!(*ste & SG_V) && (*bste & SG_V)) {
-		*ste = *bste;
-		TBIAU();
-		return (0);
-	}
-	return (EFAULT);
-}
-#endif /* COMPAT_HPUX */
 
 /*
  * Miscellaneous support routines follow

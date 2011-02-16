@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nsgphy.c,v 1.17 2006/07/22 04:45:13 brad Exp $	*/
+=======
+/*	$OpenBSD: nsgphy.c,v 1.22 2009/07/22 10:39:51 sthen Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001
@@ -34,9 +38,10 @@
  */
 
 /*
- * Driver for the National Semiconductor DP83891 and DP83861
+ * Driver for the National Semiconductor DP83861, DP83865 and DP83891
  * 10/100/1000 PHYs.
  * Datasheet available at: http://www.national.com/ds/DP/DP83861.pdf
+ * and at: http://www.national.com/ds/DP/DP83865.pdf
  *
  * The DP83891 is the older NatSemi gigE PHY which isn't being sold
  * anymore. The DP83861 is its replacement, which is an 'enhanced'
@@ -264,7 +269,7 @@ nsgphy_status(struct mii_softc *sc)
 		}
 
 		if (physup & PHY_SUP_DUPLEX)
-			mii->mii_media_active |= IFM_FDX;
+			mii->mii_media_active |= mii_phy_flowstatus(sc) | IFM_FDX;
 		else
 			mii->mii_media_active |= IFM_HDX;
 	} else

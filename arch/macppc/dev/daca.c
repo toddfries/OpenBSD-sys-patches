@@ -1,5 +1,4 @@
-/*	$OpenBSD: daca.c,v 1.2 2005/11/05 04:26:22 brad Exp $	*/
-/*	$Id: daca.c,v 1.3 2005/11/20 19:54:05 brad Exp $	*/
+/*	$OpenBSD: daca.c,v 1.8 2010/02/26 21:53:43 jasper Exp $	*/
 
 /*-
  * Copyright (c) 2002,2003 Tsubai Masanari.  All rights reserved.
@@ -64,6 +63,7 @@ void daca_attach(struct device *, struct device *, void *);
 void daca_defer(struct device *);
 void daca_init(struct daca_softc *);
 void daca_set_volume(struct daca_softc *, int, int);
+void daca_get_default_params(void *, int, struct audio_params *);
 
 struct cfattach daca_ca = {
 	sizeof(struct daca_softc), daca_match, daca_attach
@@ -100,6 +100,7 @@ struct audio_hw_if daca_hw_if = {
 	i2s_get_props,
 	i2s_trigger_output,
 	i2s_trigger_input,
+	daca_get_default_params
 };
 
 struct audio_device daca_device = {
@@ -156,8 +157,8 @@ daca_defer(struct device *dev)
 	struct device *dv;
 
 	TAILQ_FOREACH(dv, &alldevs, dv_list)
-		if (strncmp(dv->dv_xname, "ki2c", 4) == 0 &&
-		    strncmp(dv->dv_parent->dv_xname, "macobio", 7) == 0)
+		if (strcmp(dv->dv_cfdata->cf_driver->cd_name, "kiic") == 0 &&
+		    strcmp(dv->dv_parent->dv_cfdata->cf_driver->cd_name, "macobio") == 0)
 			sc->sc_i2c = dv;
 	if (sc->sc_i2c == NULL) {
 		printf("%s: unable to find i2c\n", sc->sc_dev.dv_xname);
@@ -197,4 +198,10 @@ daca_set_volume(struct daca_softc *sc, int left, int right)
 	right >>= 2;
 	data = left << 8 | right;
 	ki2c_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2);
+}
+
+void
+daca_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	i2s_get_default_params(params);
 }

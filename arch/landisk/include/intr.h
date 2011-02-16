@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.4 2006/11/21 21:01:51 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.9 2009/03/15 19:40:40 miod Exp $	*/
 /*	$NetBSD: intr.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -13,13 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,8 +75,10 @@ do {									\
 		splassert_check(__wantipl, __func__);			\
 	}								\
 } while (0)
+#define splsoftassert(__wantipl) splassert(__wantipl)
 #else
 #define	splassert(wantipl)	do { /* nothing yet */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing yet */ } while (0)
 #endif
 
 void intr_init(void);

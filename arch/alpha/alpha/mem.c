@@ -1,4 +1,4 @@
-/* $OpenBSD: mem.c,v 1.20 2005/10/28 19:10:26 martin Exp $ */
+/* $OpenBSD: mem.c,v 1.25 2010/12/26 15:40:58 miod Exp $ */
 /* $NetBSD: mem.c,v 1.26 2000/03/29 03:48:20 simonb Exp $ */
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/param.h>
 #include <sys/buf.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/msgbuf.h>
@@ -109,7 +110,7 @@ mmclose(dev, flag, mode, p)
 
 #ifdef APERTURE
 	if (minor(dev) == 4) {
-		ap_open_count--;
+		ap_open_count = 0;
 		ap_open_pid = -1;
 	}
 #endif
@@ -235,7 +236,7 @@ mmmmap(dev, off, prot)
 	 */
 		if ((prot & alpha_pa_access(atop(off))) != prot)
 			return (-1);
-		return (atop(off));
+		return off;
 		
 #ifdef APERTURE
 	case 4:
@@ -244,7 +245,7 @@ mmmmap(dev, off, prot)
 		case 1:
 			if ((prot & alpha_pa_access(atop(off))) != prot)
 				return (-1);
-			return atop(off);
+			return off;
 		default:
 			return -1;
 		}

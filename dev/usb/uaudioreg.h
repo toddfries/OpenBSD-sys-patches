@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uaudioreg.h,v 1.10 2002/07/25 04:07:32 nate Exp $ */
+=======
+/*	$OpenBSD: uaudioreg.h,v 1.14 2010/07/23 19:59:09 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: uaudioreg.h,v 1.11 2002/10/23 02:32:37 christos Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -71,7 +68,12 @@ typedef struct {
 	 */
 	uByte		bRefresh;
 	uByte		bSynchAddress;
+<<<<<<< HEAD
 } UPACKED usb_endpoint_descriptor_audio_t;
+=======
+} __packed usb_endpoint_descriptor_audio_t;
+#define USB_ENDPOINT_DESCRIPTOR_AUDIO_SIZE 9
+>>>>>>> origin/master
 
 struct usb_audio_control_descriptor {
 	uByte		bLength;

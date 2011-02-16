@@ -1,4 +1,4 @@
-/*      $OpenBSD: param.h,v 1.14 2006/03/19 01:47:24 martin Exp $ */
+/*      $OpenBSD: param.h,v 1.27 2010/11/28 20:35:15 miod Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -41,11 +41,7 @@
 #define _MIPS_PARAM_H_
 
 #ifdef _KERNEL
-#ifdef _LOCORE
-#include <machine/psl.h>
-#else
 #include <machine/cpu.h>
-#endif
 #endif
 
 /*
@@ -57,39 +53,29 @@
 #define	ALIGN(p)	(((u_long)(p) + ALIGNBYTES) &~ ALIGNBYTES)
 #define ALIGNED_POINTER(p, t)  ((((u_long)(p)) & (sizeof (t) - 1)) == 0)
 
-#define	NBPG		4096		/* bytes/page */
-#define	PGOFSET		(NBPG-1)	/* byte offset into page */
-#define	PGSHIFT		12		/* LOG2(NBPG) */
-
-#define PAGE_SHIFT	12
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
-#define	NPTEPG		(NBPG/4)
+#define	NBPG		PAGE_SIZE
+#define	PGOFSET		PAGE_MASK
+#define	PGSHIFT		PAGE_SHIFT
 
-#define NBSEG		0x400000	/* bytes/segment */
-#define	SEGOFSET	(NBSEG-1)	/* byte offset into segment */
-#define	SEGSHIFT	22		/* LOG2(NBSEG) */
-
-#ifdef __LP64__
 #define	KERNBASE	0xffffffff80000000L	/* start of kernel virtual */
-#else
-#define	KERNBASE	0x80000000	/* start of kernel virtual */
-#endif
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
 #define BLKDEV_IOSIZE	2048
 #define	MAXPHYS		(32 * 1024)	/* max raw I/O transfer size */
 
-#ifdef __LP64__
-#define	UPAGES		4		/* pages of u-area */
+#define USPACE		(16384)
+#ifdef _KERNEL
+#define	UPAGES		(USPACE >> PAGE_SHIFT)
+#if PAGE_SHIFT > 12
+#define	USPACE_ALIGN	0
 #else
-#define	UPAGES		2		/* pages of u-area */
+#define	USPACE_ALIGN	(2 * PAGE_SIZE)	/* align to an even TLB boundary */
 #endif
-
-#define USPACE		(UPAGES*NBPG)	/* size of u-area in bytes */
-#define	USPACE_ALIGN	(2*NBPG)	/* u-area alignment 0-none */
+#endif	/* _KERNEL */
 
 /*
  * Constants related to network buffer management.
@@ -106,13 +92,19 @@
 #define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
 #endif
 
+#ifdef _KERNEL
+#if PAGE_SHIFT > 12
+#define	MSGBUFSIZE	PAGE_SIZE
+#else
 #define	MSGBUFSIZE	8192
+#endif
 
 /* Default malloc arena size */
 #define	NKMEMPAGES_MIN_DEFAULT  ((8 * 1024 * 1024) >> PAGE_SHIFT)
 #define	NKMEMPAGES_MAX_DEFAULT  ((128 * 1024 * 1024) >> PAGE_SHIFT)
+#endif /* _KERNEL */
 
-/* pages ("clicks") (4096 bytes) to disk blocks */
+/* pages ("clicks") to disk blocks */
 #define	ctod(x)	((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)	((x) >> (PGSHIFT - DEV_BSHIFT))
 
@@ -126,11 +118,9 @@
 
 #ifdef _KERNEL
 #ifndef _LOCORE
-
 #define	DELAY(n)	delay(n)
 void delay(int);
-void nanodelay(int);
 #endif
-#endif /* !_KERNEL */
+#endif /* _KERNEL */
 
 #endif /* !_MIPS_PARAM_H_ */

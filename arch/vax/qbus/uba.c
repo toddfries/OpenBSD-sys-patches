@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uba.c,v 1.10 2004/07/07 23:10:46 deraadt Exp $	*/
+=======
+/*	$OpenBSD: uba.c,v 1.13 2010/11/18 21:13:19 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uba.c,v 1.57 2001/04/26 19:16:07 ragge Exp $	*/
 /*
  * Copyright (c) 1996 Jonathan Stone.
@@ -40,9 +44,7 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
-#include <sys/dkstat.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>

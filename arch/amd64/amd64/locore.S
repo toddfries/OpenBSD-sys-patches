@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.20 2005/07/26 08:38:29 art Exp $	*/
+/*	$OpenBSD: locore.S,v 1.44 2010/12/04 05:20:18 guenther Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -56,13 +56,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -215,7 +208,7 @@ _C_LABEL(biosextmem):	.long	REALEXTMEM
 	.globl	gdt64
 
 gdt64:
-	.word	gdt64_end-gdt64_start
+	.word	gdt64_end-gdt64_start-1
 	.quad	_RELOC(gdt64_start)
 .align 64
 
@@ -228,7 +221,7 @@ gdt64_end:
 farjmp64:
 	.long	longmode-KERNBASE
 	.word	GSEL(GCODE_SEL, SEL_KPL)
-	
+
 	.space 512
 tmpstk:
 
@@ -614,6 +607,12 @@ longmode_hi:
 
 /*
  * Signal trampoline; copied to top of user stack.
+ *
+ * Note, the "system call" to sigreturn() needs to be an 'int $0x80' one
+ * so that the kernel returns using 'iretq' method.  This way if a process
+ * was interrupted (by tick) as opposed to in the kernel when a signal was
+ * being delivered, the process will be completely restored, including the
+ * userland %rcx register, which the 'sysret' instruction can not restore.
  */
 NENTRY(sigcode)
 	call	*%rax
@@ -686,44 +685,8 @@ ENTRY(longjmp)
 /*****************************************************************************/
 
 /*
- * The following primitives manipulate the run queues.
- * _whichqs tells which of the 32 queues _qs
- * have processes in them.  Setrq puts processes into queues, Remrq
- * removes them from queues.  The running process is on no queue,
- * other processes are on a queue related to p->p_pri, divided by 4
- * actually to shrink the 0-127 range of priorities into the 32 available
- * queues.
- */
-	.globl	_C_LABEL(whichqs),_C_LABEL(qs)
-	.globl	_C_LABEL(uvmexp),_C_LABEL(panic)
-
-#if NAPM > 0
-	.globl _C_LABEL(apm_cpu_idle),_C_LABEL(apm_cpu_busy)
-#endif
-
-#ifdef DIAGNOSTIC
-NENTRY(switch_error1)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 1"
-NENTRY(switch_error2)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 2"
-NENTRY(switch_error3)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 3"
-#endif /* DIAGNOSTIC */
-
-/*
- * int cpu_switch(struct proc *)
- * Find a runnable process and switch to it.  Wait if necessary.  If the new
- * proc is the same as the old one, we short-circuit the context save and
- * restore.
+ * int cpu_switchto(struct proc *old, struct proc *new)
+ * Switch from "old" proc to "new".
  */
 ENTRY(cpu_switch)
 	pushq	%rbx
@@ -800,95 +763,8 @@ ENTRY(cpu_switch)
 	movq	PCB_RSP(%r12),%rsp
 	movq	PCB_RBP(%r12),%rbp
 
-	/* Switch address space. */
-	movq	PCB_CR3(%r12),%rcx
-	movq	%rcx,%cr3
-
-#ifdef MULTIPROCESSOR
-	movq	CPUVAR(GDT),%rax
-#else
-	movq	_C_LABEL(gdtstore)(%rip),%rax
-#endif
-
-	/* Switch TSS. Reset "task busy" flag before */
-	andl	$~0x0200,4(%rax,%rdx, 1)
-	ltr	%dx
-
-	/* Restore cr0 (including FPU state). */
-	movl	PCB_CR0(%r12),%ecx
-	movq	%rcx,%cr0
-
-	SET_CURPCB(%r12)
-
-	xorq	%r13,%r13
-	sti
-idle_unlock:
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)       
-	call	_C_LABEL(sched_unlock_idle)
-#endif
-	/* Interrupts are okay again. */
-	movl	$IPL_NONE,%edi
-	call	_C_LABEL(Xspllower)
-	jmp	idle_start
-idle_zero:
-	sti
-	call	_C_LABEL(uvm_pageidlezero)
-	cli
-	cmpl	$0,_C_LABEL(whichqs)(%rip)
-	jnz	idle_exit
-idle_loop:
-	/* Try to zero some pages. */
-	movl	_C_LABEL(uvm)+UVM_PAGE_IDLE_ZERO(%rip),%ecx
-	testl	%ecx,%ecx
-	jnz	idle_zero
-	sti
-	hlt
-NENTRY(mpidle)
-idle_start:
-	cli
-	cmpl	$0,_C_LABEL(whichqs)(%rip)
-	jz	idle_loop
-idle_exit:
-	movl	$IPL_HIGH,CPUVAR(ILEVEL)
-	sti
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)       
-	call	_C_LABEL(sched_lock_idle)
-#endif
-switch_search:
-	movl	_C_LABEL(whichqs)(%rip),%ecx
-	bsfl	%ecx,%r8d
-	jz	idle_unlock
-
-switch_dequeue:
-
-	sti
-	movq	%r8,%r9
-
-	shlq	$4, %r9
-	leaq	_C_LABEL(qs)(%rip),%rax
-	addq	%r9,%rax
-	/* movq	(%rax),%rax */
-
-	movq	P_FORW(%rax),%r12	# unlink from front of process q
-#ifdef	DIAGNOSTIC
-	cmpq	%r12,%rax		# linked to self (i.e. nothing queued)?
-	je	_C_LABEL(switch_error1)	# not possible
-#endif /* DIAGNOSTIC */
-	movq	P_FORW(%r12),%rdx
-	movq	%rdx,P_FORW(%rax)
-	movq	%rax,P_BACK(%rdx)
-
-	cmpq	%rdx,%rax		# q empty?
-	jne	3f
-
-	btrl	%r8d,%ecx		# yes, clear to indicate empty
-	movl	%ecx,_C_LABEL(whichqs)(%rip) # update q status
-
-3:	/* We just did it. */
-	xorq	%rax,%rax
-	movl	%eax,CPUVAR(RESCHED)
-switch_resume:
 #ifdef DIAGNOSTIC
+	xorq	%rax,%rax
 	cmpq	%rax,P_WCHAN(%r12)
 	jne	_C_LABEL(switch_error2)
 	cmpb	$SRUN,P_STAT(%r12)
@@ -902,10 +778,7 @@ switch_resume:
 	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
 	SET_CURPROC(%r12,%rcx)
 
-	/* Skip context switch if same proc. */
-	xorl	%ebx,%ebx
-	cmpq	%r12,%r13
-	je	switch_return
+	movl	CPUVAR(CPUID),%edi
 
 	/* If old proc exited, don't bother. */
 	testq	%r13,%r13
@@ -918,12 +791,15 @@ switch_resume:
 	 *   %rax, %rcx - scratch
 	 *   %r13 - old proc, then old pcb
 	 *   %r12 - new proc
+	 *   %edi - cpuid
 	 */
 
-	movq	%r13,%rdi
-	call	pmap_deactivate
-
 	movq	P_ADDR(%r13),%r13
+
+	/* clear the old pmap's bit for the cpu */
+	movq	PCB_PMAP(%r13),%rcx
+	lock
+	btrq	%rdi,PM_CPUS(%rcx)
 
 	/* Save stack pointers. */
 	movq	%rsp,PCB_RSP(%r13)
@@ -947,30 +823,27 @@ switch_exited:
 	movq	PCB_RSP(%r13),%rsp
 	movq	PCB_RBP(%r13),%rbp
 
-#if 0
+	movq	CPUVAR(TSS),%rcx
+	movq	PCB_KSTACK(%r13),%rdx
+	movq	%rdx,TSS_RSP0(%rcx)
+
+	movq	PCB_CR3(%r13),%rax
+	movq	%rax,%cr3
+
 	/* Don't bother with the rest if switching to a system process. */
 	testl	$P_SYSTEM,P_FLAG(%r12)
 	jnz	switch_restored
+
+	/* set the new pmap's bit for the cpu */
+	movl	CPUVAR(CPUID),%edi
+	movq	PCB_PMAP(%r13),%rcx
+	lock
+	btsq	%rdi,PM_CPUS(%rcx)
+#ifdef DIAGNOSTIC
+	jc	_C_LABEL(switch_pmcpu_set)
 #endif
 
-	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	movq    CPUVAR(GDT),%rax
-#else   
-	movq	_C_LABEL(gdtstore)(%rip),%rax
-#endif
-	movl	P_MD_TSS_SEL(%r12),%edx
-
-	/* Switch TSS. Reset "task busy" flag before */
-	andl	$~0x0200,4(%rax,%rdx, 1)
-	ltr	%dx
-
-	movq	%r12,%rdi
-	call	_C_LABEL(pmap_activate)
-
-#if 0
 switch_restored:
-#endif
 	/* Restore cr0 (including FPU state). */
 	movl	PCB_CR0(%r13),%ecx
 #ifdef MULTIPROCESSOR
@@ -992,12 +865,6 @@ switch_return:
 	call	_C_LABEL(sched_unlock_idle)
 #endif
 
-	movl	$IPL_NONE,%edi
-	call	_C_LABEL(Xspllower)
-	movl	$IPL_HIGH,CPUVAR(ILEVEL)
-
-	movl	%ebx,%eax
-
 	popq	%r15
 	popq	%r14
 	popq	%r13
@@ -1006,22 +873,57 @@ switch_return:
 	popq	%rbx
 	ret
 
-ENTRY(cpu_switchto)
-	pushq	%rbx
-	pushq	%rbp
-	pushq	%r12
-	pushq	%r13
-	pushq	%r14
-	pushq	%r15
+ENTRY(cpu_idle_enter)
+	movq	_C_LABEL(cpu_idle_enter_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	jmpq	*%rax
+1:
+	ret
 
-	movq	%rdi,%r13
-	movq	%rsi,%r12
+ENTRY(cpu_idle_cycle)
+	movq	_C_LABEL(cpu_idle_cycle_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	call	*%rax
+	ret
+1:
+	sti
+	hlt
+	ret
 
-	movq	$0,CPUVAR(CURPROC)
+ENTRY(cpu_idle_leave)
+	movq	_C_LABEL(cpu_idle_leave_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	jmpq	*%rax
+1:
+	ret
 
-	xorq	%rax,%rax
-	jmp	switch_resume
+	.globl	_C_LABEL(panic)
 
+#ifdef DIAGNOSTIC
+NENTRY(switch_error1)
+	movabsq	$1f,%rdi
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"cpu_switch 1"
+NENTRY(switch_error2)
+	movabsq	$1f,%rdi
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"cpu_switch 2"
+NENTRY(switch_error3)
+	movabsq	$1f,%rdi
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"cpu_switch 3"
+NENTRY(switch_pmcpu_set)
+	movabsq	$1f,%rdi
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"activate already active pmap"
+#endif /* DIAGNOSTIC */
 
 /*
  * void switch_exit(struct proc *l, void (*exit)(struct proc *));
@@ -1110,7 +1012,7 @@ IDTVEC(syscall)
 	swapgs
 	movq	%r15,CPUVAR(SCRATCH)
 	movq	CPUVAR(CURPCB),%r15
-	movq	PCB_RSP0(%r15),%r15
+	movq	PCB_KSTACK(%r15),%r15
 	xchgq	%r15,%rsp
 	sti
 
@@ -1121,7 +1023,7 @@ IDTVEC(syscall)
 	 * ss:rsp, etc, so that all GP registers can be
 	 * saved. Then, fill in the rest.
 	 */
-	pushq	$(LSEL(LUDATA_SEL, SEL_UPL))
+	pushq	$(GSEL(GUDATA_SEL, SEL_UPL))
 	pushq	%r15
 	subq	$(TF_RSP-TF_TRAPNO),%rsp
 	movq	CPUVAR(SCRATCH),%r15
@@ -1130,9 +1032,9 @@ IDTVEC(syscall)
 	movw	%fs,TF_FS(%rsp)
 	movw	%gs,TF_GS(%rsp)
 	movw	%es,TF_ES(%rsp)
-	movw	$(LSEL(LUDATA_SEL, SEL_UPL)),TF_DS(%rsp)
+	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),TF_DS(%rsp)
 	movq	%r11, TF_RFLAGS(%rsp)	/* old rflags from syscall insn */
-	movq	$(LSEL(LUCODE_SEL, SEL_UPL)), TF_CS(%rsp)
+	movq	$(GSEL(GUCODE_SEL, SEL_UPL)), TF_CS(%rsp)
 	movq	%rcx,TF_RIP(%rsp)
 	movq	$2,TF_ERR(%rsp)
 	movq	$T_ASTFLT, TF_TRAPNO(%rsp)
@@ -1171,7 +1073,7 @@ syscall_return:
 	movw	TF_FS(%rsp),%fs
 	movw	TF_GS(%rsp),%gs
 	INTR_RESTORE_GPRS
-	movw	$(LSEL(LUDATA_SEL, SEL_UPL)),%r11
+	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),%r11
 	movw	%r11,%ds
 	addq	$48,%rsp
 	popq	%rcx	/* return rip */
@@ -1218,26 +1120,12 @@ NENTRY(child_trampoline)
 
 	.globl  _C_LABEL(osyscall_return)
 
-/* XXX - can we zap the following two? */
-
-/*
- * Old call gate entry for syscall. only needed if we're
- * going to support running old NetBSD or ibcs2 binaries, etc,
- * on NetBSD/amd64.
- */
-IDTVEC(oosyscall)
-	/* Set rflags in trap frame. */
-	pushfq
-	popq	8(%rsp)
-	pushq	$7		# size of instruction for restart
-	jmp	osyscall1
 
 /*
  * Trap gate entry for int $80 syscall, also used by sigreturn.
  */
 IDTVEC(osyscall)
 	pushq	$2		# size of instruction for restart
-osyscall1:
 	pushq	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
 	sti
@@ -1259,12 +1147,28 @@ _C_LABEL(osyscall_return):
 	jmp	2b
 
 iret_return:
-#ifndef DIAGNOSTIC
-1:	INTRFASTEXIT
-#else /* DIAGNOSTIC */
-1:	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
+1:
+#ifdef DIAGNOSTIC
+	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
 	jne	3f
-	INTRFASTEXIT
+#endif /* DIAGNOSTIC */
+	.globl	intr_fast_exit
+intr_fast_exit:
+	INTR_RESTORE_GPRS
+	testq	$SEL_UPL,56(%rsp)
+	je	5f
+	cli
+	swapgs
+	movw	0(%rsp),%gs
+	movw	8(%rsp),%fs
+	movw	16(%rsp),%es
+	movw	24(%rsp),%ds
+5:	addq	$48,%rsp
+	.globl	_C_LABEL(doreti_iret)
+_C_LABEL(doreti_iret):
+	iretq
+
+#ifdef DIAGNOSTIC
 3:	sti
 	movabsq	$4f, %rdi
 	xorq	%rax,%rax
@@ -1291,3 +1195,32 @@ ENTRY(pagezero)
 	jne     1b
 	sfence
 	ret
+
+#if NACPI > 0
+ENTRY(acpi_acquire_global_lock)
+	movq	%rdi, %rcx
+1:	movl	(%rcx), %eax
+	movl	%eax, %edx
+	andl	$~1, %edx
+	btsl	$1, %edx
+	adcl	$0, %edx
+	lock
+	cmpxchgl       %edx, (%rcx)
+	jnz	1b
+	andl	$3, %edx
+	cmpl	$3, %edx
+	sbb	%eax, %eax
+	ret
+
+ENTRY(acpi_release_global_lock)
+	movq	%rdi, %rcx
+1:	movl	(%rcx), %eax
+	movl	%eax, %edx
+	andl	$~3, %edx
+	lock
+	cmpxchgl	%edx, (%rcx)
+	jnz	1b
+	andl	$1, %eax
+	ret
+#endif
+

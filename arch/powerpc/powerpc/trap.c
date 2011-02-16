@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.76 2007/03/23 21:06:06 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.83 2008/06/14 10:55:20 mk Exp $	*/
 /*	$NetBSD: trap.c,v 1.3 1996/10/13 03:31:37 christos Exp $	*/
 
 /*
@@ -180,10 +180,8 @@ enable_vec(struct proc *p)
 	/* If this is the very first altivec instruction executed
 	 * by this process, create a context.
 	 */
-	if (pcb->pcb_vr == NULL) {
-		pcb->pcb_vr = pool_get(&ppc_vecpl, PR_WAITOK);
-		bzero(pcb->pcb_vr, sizeof *(pcb->pcb_vr));
-	}
+	if (pcb->pcb_vr == NULL)
+		pcb->pcb_vr = pool_get(&ppc_vecpl, PR_WAITOK | PR_ZERO);
 
 	/* first we enable vector so that we dont throw an exception
 	 * in kernel mode

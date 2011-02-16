@@ -1,5 +1,4 @@
-/*	$OpenBSD: i2svar.h,v 1.2 2005/10/31 00:26:07 joris Exp $	*/
-/*	$Id: i2svar.h,v 1.3 2005/11/19 01:07:00 kettenis Exp $	*/
+/*	$OpenBSD: i2svar.h,v 1.6 2010/02/26 21:53:43 jasper Exp $	*/
 
 /*-
  * Copyright (c) 2001,2003 Tsubai Masanari.  All rights reserved.
@@ -61,6 +60,7 @@ struct i2s_softc {
 	void (*sc_setvolume)(struct i2s_softc *, int, int);
 	void (*sc_setbass)(struct i2s_softc *, int);
 	void (*sc_settreble)(struct i2s_softc *, int);
+	void (*sc_setinput)(struct i2s_softc *, int);
 
 	u_char *sc_reg;
 	void *sc_i2c;
@@ -87,6 +87,7 @@ int i2s_open(void *, int);
 void i2s_close(void *);
 int i2s_query_encoding(void *, struct audio_encoding *);
 int i2s_set_params(void *, int, int, struct audio_params *, struct audio_params *);
+void i2s_get_default_params(struct audio_params *);
 int i2s_round_blocksize(void *, int);
 int i2s_halt_output(void *);
 int i2s_halt_input(void *);

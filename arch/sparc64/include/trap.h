@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.h,v 1.2 2001/08/20 20:23:52 jason Exp $	*/
+=======
+/*	$OpenBSD: trap.h,v 1.4 2008/07/04 22:04:37 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: trap.h,v 1.4 1999/06/07 05:28:04 eeh Exp $ */
 
 /*
@@ -137,6 +141,7 @@
 #define	T_OS_VENDOR_SYSCALL	0x166
 #define	T_HW_OEM_SYSCALL	0x167
 #define T_RTF_DEF_TRAP		0x168
+#define T_MON_BREAKPOINT	0x17f
 
 #ifdef _KERNEL			/* pseudo traps for locore.s */
 #define	T_RWRET		-1	/* need first user window for trap return */

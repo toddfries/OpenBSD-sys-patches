@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.25 2006/01/18 23:21:17 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.33 2010/07/01 03:20:37 matthew Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.38 1996/12/18 05:46:09 scottr Exp $	*/
 
 /*
@@ -485,6 +485,34 @@ findbootdev()
 	}
 }
 
+void
+cpu_configure()
+{
+	/* this couldn't be done in intr_init() because this uses malloc() */
+	softintr_init();
+
+	startrtclock();
+
+	if (config_rootfound("mainbus", "mainbus") == NULL)
+		panic("No mainbus found!");
+	spl0();
+
+	findbootdev();
+	cold = 0;
+}
+
+void
+device_register(struct device *dev, void *aux)
+{
+}
+
+void
+diskconf(void)
+{
+	setroot(booted_device, booted_partition, RB_USERREQ);
+	dumpconf();
+}
+
 /*
  * Map a SCSI bus, target, lun to a device number.
  * This could be tape, disk, CD.  The calling routine, though,
@@ -510,8 +538,8 @@ extern	struct cfdriver		scsibus_cd;
 			if (scsibus_cd.cd_devs[bus]) {
 				scsi = (struct scsibus_softc *)
 						scsibus_cd.cd_devs[bus];
-				if (scsi->sc_link[target][lun]) {
-					sc_link = scsi->sc_link[target][lun];
+				sc_link = scsi_get_link(scsi, target, lun);
+				if (sc_link != NULL) {
 					sc_dev = (struct device *)
 							sc_link->device_softc;
 					return sc_dev->dv_unit;
@@ -526,11 +554,19 @@ extern	struct cfdriver		scsibus_cd;
 	}
 	if (scsibus_cd.cd_devs[bus]) {
 		scsi = (struct scsibus_softc *) scsibus_cd.cd_devs[bus];
-		if (scsi->sc_link[target][lun]) {
-			sc_link = scsi->sc_link[target][lun];
+		sc_link = scsi_get_link(scsi, target, lun);
+		if (sc_link != NULL) {
 			sc_dev = (struct device *) sc_link->device_softc;
 			return sc_dev->dv_unit;
 		}
 	}
 	return -1;
 }
+
+struct nam2blk nam2blk[] = {
+	{ "sd",         4 },
+	{ "cd",         6 },
+	{ "rd",		13 },
+	{ "vnd",	8 },
+	{ NULL,		-1 }
+};

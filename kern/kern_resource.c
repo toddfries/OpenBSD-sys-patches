@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_resource.c,v 1.31 2005/11/28 00:14:29 jsg Exp $	*/
+=======
+/*	$OpenBSD: kern_resource.c,v 1.36 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_resource.c,v 1.38 1996/10/23 07:19:38 matthias Exp $	*/
 
 /*-
@@ -68,6 +72,7 @@ sys_getpriority(struct proc *curp, void *v, register_t *retval)
 		syscallarg(int) which;
 		syscallarg(id_t) who;
 	} */ *uap = v;
+	struct process *pr;
 	struct proc *p;
 	int low = NZERO + PRIO_MAX + 1;
 
@@ -75,25 +80,29 @@ sys_getpriority(struct proc *curp, void *v, register_t *retval)
 
 	case PRIO_PROCESS:
 		if (SCARG(uap, who) == 0)
-			p = curp;
+			pr = curp->p_p;
 		else
-			p = pfind(SCARG(uap, who));
-		if (p == 0)
+			pr = prfind(SCARG(uap, who));
+		if (pr == NULL)
 			break;
-		low = p->p_nice;
+		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
+			if (p->p_nice < low)
+				low = p->p_nice;
+		}
 		break;
 
 	case PRIO_PGRP: {
 		struct pgrp *pg;
 
 		if (SCARG(uap, who) == 0)
-			pg = curp->p_pgrp;
+			pg = curp->p_p->ps_pgrp;
 		else if ((pg = pgfind(SCARG(uap, who))) == NULL)
 			break;
-		LIST_FOREACH(p, &pg->pg_members, p_pglist) {
-			if (p->p_nice < low)
-				low = p->p_nice;
-		}
+		LIST_FOREACH(pr, &pg->pg_members, ps_pglist)
+			TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
+				if (p->p_nice < low)
+					low = p->p_nice;
+			}
 		break;
 	}
 
@@ -124,19 +133,19 @@ sys_setpriority(struct proc *curp, void *v, register_t *retval)
 		syscallarg(id_t) who;
 		syscallarg(int) prio;
 	} */ *uap = v;
-	struct proc *p;
+	struct process *pr;
 	int found = 0, error = 0;
 
 	switch (SCARG(uap, which)) {
 
 	case PRIO_PROCESS:
 		if (SCARG(uap, who) == 0)
-			p = curp;
+			pr = curp->p_p;
 		else
-			p = pfind(SCARG(uap, who));
-		if (p == 0)
+			pr = prfind(SCARG(uap, who));
+		if (pr == NULL)
 			break;
-		error = donice(curp, p, SCARG(uap, prio));
+		error = donice(curp, pr, SCARG(uap, prio));
 		found++;
 		break;
 
@@ -144,25 +153,34 @@ sys_setpriority(struct proc *curp, void *v, register_t *retval)
 		struct pgrp *pg;
 		 
 		if (SCARG(uap, who) == 0)
-			pg = curp->p_pgrp;
+			pg = curp->p_p->ps_pgrp;
 		else if ((pg = pgfind(SCARG(uap, who))) == NULL)
 			break;
-		LIST_FOREACH(p, &pg->pg_members, p_pglist) {
-			error = donice(curp, p, SCARG(uap, prio));
+		LIST_FOREACH(pr, &pg->pg_members, ps_pglist) {
+			error = donice(curp, pr, SCARG(uap, prio));
 			found++;
 		}
 		break;
 	}
 
-	case PRIO_USER:
+	case PRIO_USER: {
+		struct proc *p;
 		if (SCARG(uap, who) == 0)
 			SCARG(uap, who) = curp->p_ucred->cr_uid;
+<<<<<<< HEAD
 		for (p = LIST_FIRST(&allproc); p; p = LIST_NEXT(p, p_list))
 			if (p->p_ucred->cr_uid == SCARG(uap, who)) {
 				error = donice(curp, p, SCARG(uap, prio));
+=======
+		LIST_FOREACH(p, &allproc, p_list)
+			if ((p->p_flag & P_THREAD) == 0 &&
+			    p->p_ucred->cr_uid == SCARG(uap, who)) {
+				error = donice(curp, p->p_p, SCARG(uap, prio));
+>>>>>>> origin/master
 				found++;
 			}
 		break;
+	}
 
 	default:
 		return (EINVAL);
@@ -173,25 +191,28 @@ sys_setpriority(struct proc *curp, void *v, register_t *retval)
 }
 
 int
-donice(struct proc *curp, struct proc *chgp, int n)
+donice(struct proc *curp, struct process *chgpr, int n)
 {
 	struct pcred *pcred = curp->p_cred;
+	struct proc *p;
 	int s;
 
 	if (pcred->pc_ucred->cr_uid && pcred->p_ruid &&
-	    pcred->pc_ucred->cr_uid != chgp->p_ucred->cr_uid &&
-	    pcred->p_ruid != chgp->p_ucred->cr_uid)
+	    pcred->pc_ucred->cr_uid != chgpr->ps_cred->pc_ucred->cr_uid &&
+	    pcred->p_ruid != chgpr->ps_cred->pc_ucred->cr_uid)
 		return (EPERM);
 	if (n > PRIO_MAX)
 		n = PRIO_MAX;
 	if (n < PRIO_MIN)
 		n = PRIO_MIN;
 	n += NZERO;
-	if (n < chgp->p_nice && suser(curp, 0))
+	/* XXX wrong: p_nice should be in process */
+	if (n < chgpr->ps_mainproc->p_nice && suser(curp, 0))
 		return (EACCES);
-	chgp->p_nice = n;
+	chgpr->ps_mainproc->p_nice = n;
 	SCHED_LOCK(s);
-	(void)resetpriority(chgp);
+	TAILQ_FOREACH(p, &chgpr->ps_threads, p_thr_link)
+		(void)resetpriority(p);
 	SCHED_UNLOCK(s);
 	return (0);
 }
@@ -229,10 +250,12 @@ dosetrlimit(struct proc *p, u_int which, struct rlimit *limp)
 	    limp->rlim_max > alimp->rlim_max)
 		if ((error = suser(p, 0)) != 0)
 			return (error);
-	if (p->p_p->ps_limit->p_refcnt > 1 &&
-	    (p->p_p->ps_limit->p_lflags & PL_SHAREMOD) == 0) {
-		p->p_p->ps_limit->p_refcnt--;
-		p->p_p->ps_limit = limcopy(p->p_p->ps_limit);
+	if (p->p_p->ps_limit->p_refcnt > 1) {
+		struct plimit *l = p->p_p->ps_limit;
+
+		/* limcopy() can sleep, so copy before decrementing refcnt */
+		p->p_p->ps_limit = limcopy(l);
+		l->p_refcnt--;
 		alimp = &p->p_rlimit[which];
 	}
 
@@ -362,13 +385,40 @@ sys_getrusage(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) who;
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
+	struct process *pr = p->p_p;
+	struct rusage ru;
 	struct rusage *rup;
 
 	switch (SCARG(uap, who)) {
 
 	case RUSAGE_SELF:
+		calcru(p, &p->p_stats->p_ru.ru_utime,
+		    &p->p_stats->p_ru.ru_stime, NULL);
+		ru = p->p_stats->p_ru;
+		rup = &ru;
+
+		/* XXX add on already dead threads */
+
+		/* add on other living threads */
+		{
+			struct proc *q;
+
+			TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+				if (q == p || P_ZOMBIE(q))
+					continue;
+				/*
+				 * XXX this is approximate: no call
+				 * to calcru in other running threads
+				 */
+				ruadd(rup, &q->p_stats->p_ru);
+			}
+		}
+		break;
+
+	case RUSAGE_THREAD:
 		rup = &p->p_stats->p_ru;
 		calcru(p, &rup->ru_utime, &rup->ru_stime, NULL);
+		ru = *rup;
 		break;
 
 	case RUSAGE_CHILDREN:
@@ -419,7 +469,6 @@ limcopy(struct plimit *lim)
 	newlim = pool_get(&plimit_pool, PR_WAITOK);
 	bcopy(lim->pl_rlimit, newlim->pl_rlimit,
 	    sizeof(struct rlimit) * RLIM_NLIMITS);
-	newlim->p_lflags = 0;
 	newlim->p_refcnt = 1;
 	return (newlim);
 }

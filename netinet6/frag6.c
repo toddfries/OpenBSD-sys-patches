@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: frag6.c,v 1.22 2005/11/20 19:25:16 brad Exp $	*/
+=======
+/*	$OpenBSD: frag6.c,v 1.31 2011/01/13 23:36:53 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: frag6.c,v 1.40 2002/05/27 21:40:31 itojun Exp $	*/
 
 /*
@@ -62,11 +66,11 @@
  */
 #define IN6_IFSTAT_STRICT
 
-static void frag6_enq(struct ip6asfrag *, struct ip6asfrag *);
-static void frag6_deq(struct ip6asfrag *);
-static void frag6_insque(struct ip6q *, struct ip6q *);
-static void frag6_remque(struct ip6q *);
-static void frag6_freef(struct ip6q *);
+void frag6_enq(struct ip6asfrag *, struct ip6asfrag *);
+void frag6_deq(struct ip6asfrag *);
+void frag6_insque(struct ip6q *, struct ip6q *);
+void frag6_remque(struct ip6q *);
+void frag6_freef(struct ip6q *);
 
 static int ip6q_locked;
 u_int frag6_nfragpackets;
@@ -132,7 +136,7 @@ do {									\
  * Initialise reassembly queue and fragment identifier.
  */
 void
-frag6_init()
+frag6_init(void)
 {
 
 	ip6q.ip6q_next = ip6q.ip6q_prev = &ip6q;
@@ -171,9 +175,7 @@ frag6_init()
  * Fragment input
  */
 int
-frag6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;
+frag6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp, *t;
 	struct ip6_hdr *ip6;
@@ -185,7 +187,7 @@ frag6_input(mp, offp, proto)
 	int fragoff, frgpartlen;	/* must be larger than u_int16_t */
 	struct ifnet *dstifp;
 #ifdef IN6_IFSTAT_STRICT
-	static struct route_in6 ro;
+	struct route_in6 ro;
 	struct sockaddr_in6 *dst;
 #endif
 	u_int8_t ecn, ecn0;
@@ -198,24 +200,18 @@ frag6_input(mp, offp, proto)
 	dstifp = NULL;
 #ifdef IN6_IFSTAT_STRICT
 	/* find the destination interface of the packet. */
+	bzero(&ro, sizeof(ro));
 	dst = (struct sockaddr_in6 *)&ro.ro_dst;
-	if (ro.ro_rt
-	 && ((ro.ro_rt->rt_flags & RTF_UP) == 0
-	  || !IN6_ARE_ADDR_EQUAL(&dst->sin6_addr, &ip6->ip6_dst))) {
-		RTFREE(ro.ro_rt);
-		ro.ro_rt = (struct rtentry *)0;
-	}
-	if (ro.ro_rt == NULL) {
-		bzero(dst, sizeof(*dst));
-		dst->sin6_family = AF_INET6;
-		dst->sin6_len = sizeof(struct sockaddr_in6);
-		dst->sin6_addr = ip6->ip6_dst;
-	}
+	dst->sin6_family = AF_INET6;
+	dst->sin6_len = sizeof(struct sockaddr_in6);
+	dst->sin6_addr = ip6->ip6_dst;
 
-	rtalloc_mpath((struct route *)&ro, &ip6->ip6_src.s6_addr32[0], 0);
+	rtalloc_mpath((struct route *)&ro, &ip6->ip6_src.s6_addr32[0]);
 
 	if (ro.ro_rt != NULL && ro.ro_rt->rt_ifa != NULL)
 		dstifp = ((struct in6_ifaddr *)ro.ro_rt->rt_ifa)->ia_ifp;
+	RTFREE(ro.ro_rt);
+	ro.ro_rt = NULL;
 #else
 	/* we are violating the spec, this is not the destination interface */
 	if ((m->m_flags & M_PKTHDR) != 0)
@@ -557,12 +553,11 @@ insert:
 	*q6->ip6q_nxtp = (u_char)(nxt & 0xff);
 #endif
 
-	/*
-	 * Delete frag6 header with as a few cost as possible.
-	 */
-	if (offset < m->m_len) {
+	/* Delete frag6 header */
+	if (m->m_len >= offset + sizeof(struct ip6_frag)) {
+		/* This is the only possible case with !PULLDOWN_TEST */
 		ovbcopy((caddr_t)ip6, (caddr_t)ip6 + sizeof(struct ip6_frag),
-			offset);
+		    offset);
 		m->m_data += sizeof(struct ip6_frag);
 		m->m_len -= sizeof(struct ip6_frag);
 	} else {
@@ -624,8 +619,7 @@ insert:
  * associated datagrams.
  */
 void
-frag6_freef(q6)
-	struct ip6q *q6;
+frag6_freef(struct ip6q *q6)
 {
 	struct ip6asfrag *af6, *down6;
 
@@ -648,7 +642,7 @@ frag6_freef(q6)
 			/* adjust pointer */
 			ip6 = mtod(m, struct ip6_hdr *);
 
-			/* restoure source and destination addresses */
+			/* restore source and destination addresses */
 			ip6->ip6_src = q6->ip6q_src;
 			ip6->ip6_dst = q6->ip6q_dst;
 
@@ -669,8 +663,7 @@ frag6_freef(q6)
  * Like insque, but pointers in middle of structure.
  */
 void
-frag6_enq(af6, up6)
-	struct ip6asfrag *af6, *up6;
+frag6_enq(struct ip6asfrag *af6, struct ip6asfrag *up6)
 {
 
 	IP6Q_LOCK_CHECK();
@@ -685,8 +678,7 @@ frag6_enq(af6, up6)
  * To frag6_enq as remque is to insque.
  */
 void
-frag6_deq(af6)
-	struct ip6asfrag *af6;
+frag6_deq(struct ip6asfrag *af6)
 {
 
 	IP6Q_LOCK_CHECK();
@@ -696,8 +688,7 @@ frag6_deq(af6)
 }
 
 void
-frag6_insque(new, old)
-	struct ip6q *new, *old;
+frag6_insque(struct ip6q *new, struct ip6q *old)
 {
 
 	IP6Q_LOCK_CHECK();
@@ -709,8 +700,7 @@ frag6_insque(new, old)
 }
 
 void
-frag6_remque(p6)
-	struct ip6q *p6;
+frag6_remque(struct ip6q *p6)
 {
 
 	IP6Q_LOCK_CHECK();
@@ -725,7 +715,7 @@ frag6_remque(p6)
  * queue, discard it.
  */
 void
-frag6_slowtimo()
+frag6_slowtimo(void)
 {
 	struct ip6q *q6;
 	int s = splsoftnet();
@@ -778,7 +768,7 @@ frag6_slowtimo()
  * Drain off all datagram fragments.
  */
 void
-frag6_drain()
+frag6_drain(void)
 {
 
 	if (ip6q_lock_try() == 0)

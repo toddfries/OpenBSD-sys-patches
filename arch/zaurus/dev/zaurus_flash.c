@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: zaurus_flash.c,v 1.9 2009/05/21 23:45:48 krw Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -376,8 +380,12 @@ zflash_default_disklabel(void *arg, dev_t dev, struct disklabel *lp,
 	lp->d_partitions[10].p_offset = lp->d_partitions[9].p_offset +
 	    lp->d_partitions[9].p_size;
 	lp->d_partitions[10].p_fstype = FS_OTHER;
+<<<<<<< HEAD
 
 	lp->d_npartitions = 11;
+=======
+	lp->d_npartitions = MAXPARTITIONS;
+>>>>>>> origin/master
 
 	/* Re-calculate the checksum. */
 	lp->d_checksum = dkcksum(lp);

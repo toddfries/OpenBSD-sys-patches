@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ega.c,v 1.11 2006/12/02 19:11:11 miod Exp $ */
+=======
+/* $OpenBSD: ega.c,v 1.15 2009/09/05 14:09:35 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: ega.c,v 1.4.4.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*
@@ -113,7 +117,7 @@ static void ega_init(struct ega_config *,
 static void ega_setfont(struct ega_config *, struct egascreen *);
 static int ega_alloc_attr(void *, int, int, int, long *);
 static void ega_unpack_attr(void *, long, int *, int *, int *);
-void ega_copyrows(void *, int, int, int);
+int ega_copyrows(void *, int, int, int);
 
 struct cfattach ega_ca = {
 	sizeof(struct ega_softc), ega_match, ega_attach,
@@ -432,14 +436,14 @@ ega_init(vc, iot, memt, mono)
 	vh->vh_mono = mono;
 
         if (bus_space_map(vh->vh_iot, 0x3c0, 0x10, 0, &vh->vh_ioh_vga))
-                panic("ega_common_setup: couldn't map ega io");
+                panic("ega_common_setup: can't map ega i/o");
 
 	if (bus_space_map(vh->vh_iot, (vh->vh_mono ? 0x3b0 : 0x3d0), 0x10, 0,
 			  &vh->vh_ioh_6845))
-                panic("ega_common_setup: couldn't map 6845 io");
+                panic("ega_common_setup: can't map 6845 i/o");
 
         if (bus_space_map(vh->vh_memt, 0xa0000, 0x20000, 0, &vh->vh_allmemh))
-                panic("ega_common_setup: couldn't map memory");
+                panic("ega_common_setup: can't map mem space");
 
         if (bus_space_subregion(vh->vh_memt, vh->vh_allmemh,
 				(vh->vh_mono ? 0x10000 : 0x18000), 0x8000,
@@ -622,8 +626,10 @@ ega_alloc_screen(v, type, cookiep, curxp, curyp, defattrp)
 		 * for the first one too.
 		 * XXX We could be more clever and use video RAM.
 		 */
-		LIST_FIRST(&vc->screens)->pcs.mem =
-		  malloc(type->ncols * type->nrows * 2, M_DEVBUF, M_WAITOK);
+		scr = LIST_FIRST(&vs->screens);
+		scr->pcs.mem =
+		  malloc(scr->pcs.type->ncols * scr->pcs.type->nrows * 2,
+		    M_DEVBUF, M_WAITOK);
 	}
 
 	scr = malloc(sizeof(struct egascreen), M_DEVBUF, M_WAITOK);
@@ -923,7 +929,7 @@ ega_unpack_attr(id, attr, fg, bg, ul)
 		*fg += 8;
 }
 
-void
+int
 ega_copyrows(id, srcrow, dstrow, nrows)
 	void *id;
 	int srcrow, dstrow, nrows;
@@ -975,4 +981,6 @@ ega_copyrows(id, srcrow, dstrow, nrows)
 	} else
 		bcopy(&scr->pcs.mem[srcoff], &scr->pcs.mem[dstoff],
 		      nrows * ncols * 2);
+
+	return 0;
 }

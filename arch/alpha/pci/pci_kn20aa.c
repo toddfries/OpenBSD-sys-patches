@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_kn20aa.c,v 1.21 2006/01/29 10:47:35 martin Exp $	*/
+/*	$OpenBSD: pci_kn20aa.c,v 1.26 2009/09/30 20:18:06 miod Exp $	*/
 /*	$NetBSD: pci_kn20aa.c,v 1.21 1996/11/17 02:05:27 cgd Exp $	*/
 
 /*
@@ -54,12 +54,11 @@
 #include <alpha/pci/siovar.h>
 #endif
 
-int	dec_kn20aa_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
+int	dec_kn20aa_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dec_kn20aa_intr_string(void *, pci_intr_handle_t);
 int	dec_kn20aa_intr_line(void *, pci_intr_handle_t);
 void	*dec_kn20aa_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void	dec_kn20aa_intr_disestablish(void *, void *);
 
 #define	KN20AA_PCEB_IRQ	31
@@ -104,14 +103,13 @@ pci_kn20aa_pickintr(ccp)
 }
 
 int     
-dec_kn20aa_intr_map(ccv, bustag, buspin, line, ihp)
-        void *ccv;
-        pcitag_t bustag; 
-        int buspin, line;
+dec_kn20aa_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
         pci_intr_handle_t *ihp;
 {
-	struct cia_config *ccp = ccv;
-	pci_chipset_tag_t pc = &ccp->cc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int device;
 	int kn20aa_irq;
 
@@ -161,7 +159,7 @@ dec_kn20aa_intr_map(ccv, bustag, buspin, line, ihp)
 	}
 
 	kn20aa_irq += buspin - 1;
-	if (kn20aa_irq > KN20AA_MAX_IRQ)
+	if (kn20aa_irq >= KN20AA_MAX_IRQ)
 		panic("pci_kn20aa_map_int: kn20aa_irq too large (%d)",
 		    kn20aa_irq);
 
@@ -197,7 +195,7 @@ dec_kn20aa_intr_establish(ccv, ih, level, func, arg, name)
         pci_intr_handle_t ih;
         int level;
         int (*func)(void *);
-	char *name;
+	const char *name;
 {           
 	void *cookie;
 
@@ -226,8 +224,7 @@ dec_kn20aa_intr_disestablish(ccv, cookie)
 
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(kn20aa_pci_intr, cookie,
-	    "kn20aa irq");
+	alpha_shared_intr_disestablish(kn20aa_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(kn20aa_pci_intr, irq) == 0) {
 		kn20aa_disable_intr(irq);
 		alpha_shared_intr_set_dfltsharetype(kn20aa_pci_intr, irq,

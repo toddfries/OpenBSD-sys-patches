@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: xform.h,v 1.15 2004/12/20 20:31:18 hshoexer Exp $	*/
+=======
+/*	$OpenBSD: xform.h,v 1.22 2010/10/06 22:19:20 mikeb Exp $	*/
+>>>>>>> origin/master
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -28,6 +32,7 @@
 #include <crypto/sha1.h>
 #include <crypto/rmd160.h>
 #include <crypto/sha2.h>
+#include <crypto/gmac.h>
 
 /* Declarations */
 struct auth_hash {
@@ -37,8 +42,15 @@ struct auth_hash {
 	u_int16_t hashsize;
 	u_int16_t authsize;
 	u_int16_t ctxsize;
+	u_int16_t blocksize;
 	void (*Init) (void *);
+<<<<<<< HEAD
 	int  (*Update) (void *, u_int8_t *, u_int16_t);
+=======
+	void (*Setkey) (void *, const u_int8_t *, u_int16_t);
+	void (*Reinit) (void *, const u_int8_t *, u_int16_t);
+	int  (*Update) (void *, const u_int8_t *, u_int16_t);
+>>>>>>> origin/master
 	void (*Final) (u_int8_t *, void *);
 };
 
@@ -66,18 +78,19 @@ union authctx {
 	MD5_CTX md5ctx;
 	SHA1_CTX sha1ctx;
 	RMD160_CTX rmd160ctx;
-	SHA256_CTX sha2_256ctx;
-	SHA384_CTX sha2_384ctx;
-	SHA512_CTX sha2_512ctx;
+	SHA2_CTX sha2_ctx;
+	AES_GMAC_CTX aes_gmac_ctx;
 };
 
 extern struct enc_xform enc_xform_des;
 extern struct enc_xform enc_xform_3des;
 extern struct enc_xform enc_xform_blf;
 extern struct enc_xform enc_xform_cast5;
-extern struct enc_xform enc_xform_skipjack;
 extern struct enc_xform enc_xform_rijndael128;
 extern struct enc_xform enc_xform_aes_ctr;
+extern struct enc_xform enc_xform_aes_gcm;
+extern struct enc_xform enc_xform_aes_gmac;
+extern struct enc_xform enc_xform_aes_xts;
 extern struct enc_xform enc_xform_arc4;
 extern struct enc_xform enc_xform_null;
 
@@ -88,9 +101,12 @@ extern struct auth_hash auth_hash_key_sha1;
 extern struct auth_hash auth_hash_hmac_md5_96;
 extern struct auth_hash auth_hash_hmac_sha1_96;
 extern struct auth_hash auth_hash_hmac_ripemd_160_96;
-extern struct auth_hash auth_hash_hmac_sha2_256_96;
-extern struct auth_hash auth_hash_hmac_sha2_384_96;
-extern struct auth_hash auth_hash_hmac_sha2_512_96;
+extern struct auth_hash auth_hash_hmac_sha2_256_128;
+extern struct auth_hash auth_hash_hmac_sha2_384_192;
+extern struct auth_hash auth_hash_hmac_sha2_512_256;
+extern struct auth_hash auth_hash_gmac_aes_128;
+extern struct auth_hash auth_hash_gmac_aes_192;
+extern struct auth_hash auth_hash_gmac_aes_256;
 
 extern struct comp_algo comp_algo_deflate;
 extern struct comp_algo comp_algo_lzs;

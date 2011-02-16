@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: wsemul_vt100_keys.c,v 1.1 2000/05/16 23:49:11 mickey Exp $ */
+=======
+/* $OpenBSD: wsemul_vt100_keys.c,v 1.5 2009/09/05 14:49:20 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: wsemul_vt100_keys.c,v 1.3 1999/04/22 20:06:02 mycroft Exp $ */
 
 /*
@@ -30,9 +34,11 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 
+#include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wsksymvar.h>
 #include <dev/wscons/wsksymdef.h>
+#include <dev/wscons/wsemulvar.h>
 #include <dev/wscons/wsemul_vt100var.h>
 
 static char *vt100_fkeys[] = {

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pci_machdep.h,v 1.7 2010/12/04 17:06:31 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -37,6 +37,7 @@ struct hppa64_pci_chipset_tag {
 	pcitag_t	(*pc_make_tag)(void *, int, int, int);
 	void		(*pc_decompose_tag)(void *, pcitag_t, int *,
 			    int *, int *);
+	int		(*pc_conf_size)(void *, pcitag_t);
 	pcireg_t	(*pc_conf_read)(void *, pcitag_t, int);
 	void		(*pc_conf_write)(void *, pcitag_t, int, pcireg_t);
 
@@ -44,7 +45,7 @@ struct hppa64_pci_chipset_tag {
 			    pci_intr_handle_t *);
 	const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
 	void		*(*pc_intr_establish)(void *, pci_intr_handle_t,
-			    int, int (*)(void *), void *, char *);
+			    int, int (*)(void *), void *, const char *);
 	void		(*pc_intr_disestablish)(void *, void *);
 
 	void		*(*pc_alloc_parent)(struct device *,
@@ -62,13 +63,15 @@ struct hppa64_pci_chipset_tag {
     (*(c)->pc_make_tag)((c)->_cookie, (b), (d), (f))
 #define	pci_decompose_tag(c, t, bp, dp, fp)				\
     (*(c)->pc_decompose_tag)((c)->_cookie, (t), (bp), (dp), (fp))
+#define	pci_conf_size(c, t)						\
+    (*(c)->pc_conf_size)((c)->_cookie, (t))
 #define	pci_conf_read(c, t, r)						\
     (*(c)->pc_conf_read)((c)->_cookie, (t), (r))
 #define	pci_conf_write(c, t, r, v)					\
     (*(c)->pc_conf_write)((c)->_cookie, (t), (r), (v))
 #define	pci_intr_map(p, ihp)						\
     (*(p)->pa_pc->pc_intr_map)((p), (ihp))
-#define	pci_intr_line(ih)	(ih)
+#define	pci_intr_line(c, ih)	(ih)
 #define	pci_intr_string(c, ih)						\
     (*(c)->pc_intr_string)((c)->_cookie, (ih))
 #define	pci_intr_establish(c, ih, l, h, a, nm)				\
@@ -78,5 +81,7 @@ struct hppa64_pci_chipset_tag {
 
 #define	pciide_machdep_compat_intr_establish(a, b, c, d, e)	(NULL)
 #define	pciide_machdep_compat_intr_disestablish(a, b)	((void)(a), (void)(b))
+
+#define	pci_dev_postattach(a, b)
 
 #endif /* _MACHINE_PCI_MACHDEP_H_ */

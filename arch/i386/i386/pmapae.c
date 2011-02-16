@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmapae.c,v 1.10 2007/04/04 17:44:45 art Exp $	*/
+/*	$OpenBSD: pmapae.c,v 1.21 2010/04/22 19:02:44 oga Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff
@@ -364,7 +364,7 @@
  * is a void function.
  *
  * [B] new page tables pages (PTP)
- * 	call pae_pagealloc()
+ * 	call uvm_pagealloc()
  * 		=> success: zero page, add to pm_pdir
  * 		=> failure: we are out of free vm_pages, let pmap_enter()
  *		   tell UVM about it.
@@ -551,13 +551,6 @@ extern caddr_t pmap_csrcp, pmap_cdstp, pmap_zerop, pmap_ptpp;
 
 extern int pmap_pg_g;
 extern struct pmap_head pmaps;
-
-/*
- * a towards larger memory prioritised version opf uvm_pagealloc()
- */
-#define	pae_pagealloc(obj, off, anon, flags) \
-    uvm_pagealloc_strat((obj), (off), (anon), (flags), \
-	UVM_PGA_STRAT_FALLBACK, VM_FREELIST_ABOVE4G)
 
 /*
  * local prototypes
@@ -801,7 +794,7 @@ pmap_bootstrap_pae()
 	for (va = KERNBASE, eva = va + (nkpde << 22);
 	    va < eva; va += PAGE_SIZE) {
 		if (!pmap_valid_entry(PDE(kpm, pdei(va)))) {
-			ptp = pae_pagealloc(&kpm->pm_obj, va, NULL,
+			ptp = uvm_pagealloc(&kpm->pm_obj, va, NULL,
 			    UVM_PGA_ZERO);
 			ptaddr = VM_PAGE_TO_PHYS(ptp);
 			PDE(kpm, pdei(va)) = ptaddr | PG_KW | PG_V;
@@ -977,7 +970,7 @@ pmap_alloc_ptp_pae(struct pmap *pmap, int pde_index, boolean_t just_try)
 {
 	struct vm_page *ptp;
 
-	ptp = pae_pagealloc(&pmap->pm_obj, ptp_i2o(pde_index), NULL,
+	ptp = uvm_pagealloc(&pmap->pm_obj, ptp_i2o(pde_index), NULL,
 			    UVM_PGA_USERESERVE|UVM_PGA_ZERO);
 	if (ptp == NULL)
 		return(NULL);
@@ -1447,14 +1440,20 @@ pmap_remove_pae(struct pmap *pmap, vaddr_t sva, vaddr_t eva)
 				pmap->pm_stats.resident_count--;
 				if (pmap->pm_ptphint == ptp)
 					pmap->pm_ptphint =
-					    TAILQ_FIRST(&pmap->pm_obj.memq);
+					    RB_ROOT(&pmap->pm_obj.memt);
 				ptp->wire_count = 0;
-				uvm_pagefree(ptp);
+				/* Postpone free to after shootdown. */
+				uvm_pagerealloc(ptp, NULL, 0);
+				TAILQ_INSERT_TAIL(&empty_ptps, ptp, pageq);
 			}
 		}
 		pmap_tlb_shootnow(cpumask);
 		pmap_unmap_ptes_pae(pmap);		/* unlock pmap */
 		PMAP_MAP_TO_HEAD_UNLOCK();
+		while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+			TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+			uvm_pagefree(ptp);
+		}
 		return;
 	}
 
@@ -1534,15 +1533,21 @@ pmap_remove_pae(struct pmap *pmap, vaddr_t sva, vaddr_t eva)
 			pmap->pm_stats.resident_count--;
 			if (pmap->pm_ptphint == ptp)	/* update hint? */
 				pmap->pm_ptphint =
-				    TAILQ_FIRST(&pmap->pm_obj.memq);
+				    RB_ROOT(&pmap->pm_obj.memt);
 			ptp->wire_count = 0;
-			uvm_pagefree(ptp);
+			/* Postpone free to after shootdown. */
+			uvm_pagerealloc(ptp, NULL, 0);
+			TAILQ_INSERT_TAIL(&empty_ptps, ptp, pageq);
 		}
 	}
 
 	pmap_tlb_shootnow(cpumask);
 	pmap_unmap_ptes_pae(pmap);
 	PMAP_MAP_TO_HEAD_UNLOCK();
+	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+		uvm_pagefree(ptp);
+	}
 }
 
 /*
@@ -1583,8 +1588,6 @@ pmap_page_remove_pae(struct vm_page *pg)
 		ptes = pmap_map_ptes_pae(pve->pv_pmap);	/* locks pmap */
 
 #ifdef DIAGNOSTIC
-		if (pve->pv_va >= uvm.pager_sva && pve->pv_va < uvm.pager_eva)
-			printf("pmap_page_remove: found pager VA on pv_list\n");
 		if (pve->pv_ptp && (PDE(pve->pv_pmap,
 		    pdei(pve->pv_va)) & PG_FRAME) !=
 		    VM_PAGE_TO_PHYS(pve->pv_ptp)) {
@@ -1644,9 +1647,12 @@ pmap_page_remove_pae(struct vm_page *pg)
 				/* update hint? */
 				if (pve->pv_pmap->pm_ptphint == pve->pv_ptp)
 					pve->pv_pmap->pm_ptphint =
-					    TAILQ_FIRST(&pve->pv_pmap->pm_obj.memq);
+					    RB_ROOT(&pve->pv_pmap->pm_obj.memt);
 				pve->pv_ptp->wire_count = 0;
-				uvm_pagefree(pve->pv_ptp);
+				/* Postpone free to after shootdown. */
+				uvm_pagerealloc(pve->pv_ptp, NULL, 0);
+				TAILQ_INSERT_TAIL(&empty_ptps, pve->pv_ptp,
+				    pageq);
 			}
 		}
 		pmap_unmap_ptes_pae(pve->pv_pmap);	/* unlocks pmap */
@@ -1656,6 +1662,10 @@ pmap_page_remove_pae(struct vm_page *pg)
 	simple_unlock(&pvh->pvh_lock);
 	PMAP_HEAD_TO_MAP_UNLOCK();
 	pmap_tlb_shootnow(cpumask);
+	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
+		uvm_pagefree(ptp);
+	}
 }
 
 /*

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ext2fs_subr.c,v 1.13 2005/12/11 20:46:28 pedro Exp $	*/
+=======
+/*	$OpenBSD: ext2fs_subr.c,v 1.23 2010/12/21 20:14:44 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ext2fs_subr.c,v 1.1 1997/06/11 09:34:03 bouyer Exp $	*/
 
 /*
@@ -107,9 +111,14 @@ ext2fs_checkoverlap(bp, ip)
 	struct buf *bp;
 	struct inode *ip;
 {
+<<<<<<< HEAD
 	struct buf *ebp, *ep;
 	ufs1_daddr_t start, last;
+=======
+	struct buf *ep;
+>>>>>>> origin/master
 	struct vnode *vp;
+	daddr64_t start, last;
 
 	ebp = &buf[nbuf];
 	start = bp->b_blkno;
@@ -127,7 +136,7 @@ ext2fs_checkoverlap(bp, ip)
 			ep->b_blkno + btodb(ep->b_bcount) <= start)
 			continue;
 		vprint("Disk overlap", vp);
-		printf("\tstart %d, end %d overlap start %d, end %ld\n",
+		printf("\tstart %lld, end %lld overlap start %lld, end %lld\n",
 			start, last, ep->b_blkno,
 			ep->b_blkno + btodb(ep->b_bcount) - 1);
 		panic("Disk buffer overlap");
@@ -139,8 +148,8 @@ ext2fs_checkoverlap(bp, ip)
  * Initialize the vnode associated with a new inode, handle aliased vnodes.
  */
 int
-ext2fs_vinit(struct mount *mp, int (**specops)(void *),
-    int (**fifoops)(void *), struct vnode **vpp)
+ext2fs_vinit(struct mount *mp, struct vops *specops,
+    struct vops *fifoops, struct vnode **vpp)
 {
 	struct inode *ip;
 	struct vnode *vp, *nvp;
@@ -164,7 +173,7 @@ ext2fs_vinit(struct mount *mp, int (**specops)(void *),
 			 */
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
-			vp->v_op = spec_vnodeop_p;
+			vp->v_op = &spec_vops;
 #ifdef VFSDEBUG
 			vp->v_flag &= ~VLOCKSWORK;
 #endif

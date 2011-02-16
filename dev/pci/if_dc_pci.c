@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_dc_pci.c,v 1.56 2007/02/13 10:38:00 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_dc_pci.c,v 1.67 2010/08/27 19:54:03 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -109,21 +113,36 @@ struct dc_type dc_devs[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_21145 },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CSHO100BTX },
 	{ PCI_VENDOR_MICROSOFT, PCI_PRODUCT_MICROSOFT_MN130 },
+	{ PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_X3201_3_21143 },
+	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_AN985 },
+	{ PCI_VENDOR_ABOCOM, PCI_PRODUCT_ABOCOM_FE2500 },
+	{ PCI_VENDOR_ABOCOM, PCI_PRODUCT_ABOCOM_FE2500MX },
+	{ PCI_VENDOR_ABOCOM, PCI_PRODUCT_ABOCOM_PCM200 },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DRP32TXD },
+	{ PCI_VENDOR_LINKSYS, PCI_PRODUCT_LINKSYS_PCMPC200 },
+	{ PCI_VENDOR_LINKSYS, PCI_PRODUCT_LINKSYS_PCM200 },
+	{ PCI_VENDOR_HAWKING, PCI_PRODUCT_HAWKING_PN672TX },
+	{ PCI_VENDOR_MICROSOFT, PCI_PRODUCT_MICROSOFT_MN120 },
 	{ 0, 0 }
 };
 
 int dc_pci_match(struct device *, void *, void *);
 void dc_pci_attach(struct device *, struct device *, void *);
+int dc_pci_detach(struct device *, int);
 void dc_pci_acpi(struct device *, void *);
+
+struct dc_pci_softc {
+	struct dc_softc		psc_softc;
+	pci_chipset_tag_t	psc_pc;
+	bus_size_t		psc_mapsize;
+};
 
 /*
  * Probe for a 21143 or clone chip. Check the PCI vendor and device
  * IDs against our list and return a device name if we find a match.
  */
 int
-dc_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+dc_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 	struct dc_type *t;
@@ -164,11 +183,11 @@ dc_pci_match(parent, match, aux)
 	return (0);
 }
 
-void dc_pci_acpi(self, aux)
-	struct device *self;
-	void *aux;
+void
+dc_pci_acpi(struct device *self, void *aux)
 {
-	struct dc_softc		*sc = (struct dc_softc *)self;
+	struct dc_pci_softc	*psc = (struct dc_pci_softc *)self;
+	struct dc_softc		*sc = &psc->psc_softc;
 	struct pci_attach_args	*pa = (struct pci_attach_args *)aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	u_int32_t		r, cptr;
@@ -208,20 +227,19 @@ void dc_pci_acpi(self, aux)
  * Attach the interface. Allocate softc structures, do ifmedia
  * setup and ethernet/BPF attach.
  */
-void dc_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+void
+dc_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	const char		*intrstr = NULL;
 	pcireg_t		command;
-	struct dc_softc		*sc = (struct dc_softc *)self;
+	struct dc_pci_softc	*psc = (struct dc_pci_softc *)self;
+	struct dc_softc		*sc = &psc->psc_softc;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
-	bus_size_t		size;
-	u_int32_t		revision;
 	int			found = 0;
 
+	psc->psc_pc = pa->pa_pc;
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
@@ -237,14 +255,14 @@ void dc_pci_attach(parent, self, aux)
 #ifdef DC_USEIOSPACE
 	if (pci_mapreg_map(pa, DC_PCI_CFBIO,
 	    PCI_MAPREG_TYPE_IO, 0,
-	    &sc->dc_btag, &sc->dc_bhandle, NULL, &size, 0)) {
+	    &sc->dc_btag, &sc->dc_bhandle, NULL, &psc->psc_mapsize, 0)) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 #else
 	if (pci_mapreg_map(pa, DC_PCI_CFBMA,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &sc->dc_btag, &sc->dc_bhandle, NULL, &size, 0)) {
+	    &sc->dc_btag, &sc->dc_bhandle, NULL, &psc->psc_mapsize, 0)) {
 		printf(": can't map mem space\n");
 		return;
 	}
@@ -268,11 +286,16 @@ void dc_pci_attach(parent, self, aux)
 	printf(": %s,", intrstr);
 
 	/* Need this info to decide on a chip type. */
-	sc->dc_revision = revision = PCI_REVISION(pa->pa_class);
+	sc->dc_revision = PCI_REVISION(pa->pa_class);
 
-	/* Get the eeprom width, but PNIC has no eeprom */
-	if (!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LITEON &&
+	/* Get the eeprom width, if possible */
+	if ((PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LITEON &&
 	      PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_LITEON_PNIC))
+		;	/* PNIC has non-standard eeprom */
+	else if ((PCI_VENDOR(pa->pa_id) == PCI_VENDOR_XIRCOM &&
+	      PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_XIRCOM_X3201_3_21143))
+		;	/* XIRCOM has non-standard eeprom */
+	else
 		dc_eeprom_width(sc);
 
 	switch (PCI_VENDOR(pa->pa_id)) {
@@ -351,10 +374,9 @@ void dc_pci_attach(parent, self, aux)
 		}
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MACRONIX_MX98713) {
 			found = 1;
-			if (revision < DC_REVISION_98713A) {
+			if (sc->dc_revision < DC_REVISION_98713A)
 				sc->dc_type = DC_TYPE_98713;
-			}
-			if (revision >= DC_REVISION_98713A) {
+			if (sc->dc_revision >= DC_REVISION_98713A) {
 				sc->dc_type = DC_TYPE_98713A;
 				sc->dc_flags |= DC_21143_NWAY;
 			}
@@ -364,8 +386,8 @@ void dc_pci_attach(parent, self, aux)
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MACRONIX_MX98715 ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ACCTON_EN1217) {
 			found = 1;
-			if (revision >= DC_REVISION_98715AEC_C &&
-			    revision < DC_REVISION_98725)
+			if (sc->dc_revision >= DC_REVISION_98715AEC_C &&
+			    sc->dc_revision < DC_REVISION_98725)
 				sc->dc_flags |= DC_128BIT_HASH;
 			sc->dc_type = DC_TYPE_987x5;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
@@ -381,11 +403,11 @@ void dc_pci_attach(parent, self, aux)
 	case PCI_VENDOR_COMPEX:
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPEX_98713) {
 			found = 1;
-			if (revision < DC_REVISION_98713A) {
+			if (sc->dc_revision < DC_REVISION_98713A) {
 				sc->dc_type = DC_TYPE_98713;
 				sc->dc_flags |= DC_REDUCED_MII_POLL;
 			}
-			if (revision >= DC_REVISION_98713A)
+			if (sc->dc_revision >= DC_REVISION_98713A)
 				sc->dc_type = DC_TYPE_98713A;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
 		}
@@ -407,7 +429,7 @@ void dc_pci_attach(parent, self, aux)
 			    M_NOWAIT);
 			if (sc->dc_pnic_rx_buf == NULL)
 				panic("dc_pci_attach");
-			if (revision < DC_REVISION_82C169)
+			if (sc->dc_revision < DC_REVISION_82C169)
 				sc->dc_pmode = DC_PMODE_SYM;
 		}
 		break;
@@ -430,6 +452,16 @@ void dc_pci_attach(parent, self, aux)
 			dc_read_srom(sc, sc->dc_romwidth);
 		}
 		break;
+	case PCI_VENDOR_XIRCOM:
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_XIRCOM_X3201_3_21143) {
+			found = 1;
+			sc->dc_type = DC_TYPE_XIRCOM;
+			sc->dc_flags |= DC_TX_INTR_ALWAYS;
+			sc->dc_flags |= DC_TX_COALESCE;
+			sc->dc_flags |= DC_TX_ALIGN;
+			sc->dc_pmode = DC_PMODE_MII;
+		}
+		break;
 	}
 	if (found == 0) {
 		/* This shouldn't happen if probe has done its job... */
@@ -449,7 +481,7 @@ void dc_pci_attach(parent, self, aux)
 	dc_reset(sc);
 
 	/* Take 21143 out of snooze mode */
-	if (DC_IS_INTEL(sc)) {
+	if (DC_IS_INTEL(sc) || DC_IS_XIRCOM(sc)) {
 		command = pci_conf_read(pc, pa->pa_tag, DC_PCI_CFDD);
 		command &= ~(DC_CFDD_SNOOZE_MODE|DC_CFDD_SLEEP_MODE);
 		pci_conf_write(pc, pa->pa_tag, DC_PCI_CFDD, command);
@@ -537,9 +569,24 @@ fail_2:
 	pci_intr_disestablish(pc, sc->sc_ih);
 
 fail_1:
-	bus_space_unmap(sc->dc_btag, sc->dc_bhandle, size);
+	bus_space_unmap(sc->dc_btag, sc->dc_bhandle, psc->psc_mapsize);
+}
+
+int
+dc_pci_detach(struct device *self, int flags)
+{
+	struct dc_pci_softc *psc = (void *)self;
+	struct dc_softc *sc = &psc->psc_softc;
+
+	if (sc->sc_ih != NULL)
+		pci_intr_disestablish(psc->psc_pc, sc->sc_ih);	
+	dc_detach(sc);
+	bus_space_unmap(sc->dc_btag, sc->dc_bhandle, psc->psc_mapsize);
+
+	return (0);
 }
 
 struct cfattach dc_pci_ca = {
-	sizeof(struct dc_softc), dc_pci_match, dc_pci_attach
+	sizeof(struct dc_softc), dc_pci_match, dc_pci_attach, dc_pci_detach,
+	dc_activate
 };

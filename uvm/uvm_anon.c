@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_anon.c,v 1.26 2007/04/04 17:44:45 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_anon.c,v 1.34 2009/06/16 23:54:57 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_anon.c,v 1.10 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -68,7 +72,7 @@ static boolean_t anon_pagein(struct vm_anon *);
  * allocate anons
  */
 void
-uvm_anon_init()
+uvm_anon_init(void)
 {
 	int nanon = uvmexp.free - (uvmexp.free / 16); /* XXXCDC ??? */
 
@@ -87,9 +91,14 @@ uvm_anon_init()
  *
  * => swap_syscall_lock should be held (protects anonblock_list).
  */
+<<<<<<< HEAD
 int
 uvm_anon_add(count)
 	int	count;
+=======
+struct vm_anon *
+uvm_analloc(void)
+>>>>>>> origin/master
 {
 	struct uvm_anonblock *anonblock;
 	struct vm_anon *anon;
@@ -179,8 +188,7 @@ uvm_analloc()
  * => we may lock the pageq's.
  */
 void
-uvm_anfree(anon)
-	struct vm_anon *anon;
+uvm_anfree(struct vm_anon *anon)
 {
 	struct vm_page *pg;
 	UVMHIST_FUNC("uvm_anfree"); UVMHIST_CALLED(maphist);
@@ -271,8 +279,7 @@ uvm_anfree(anon)
  * => anon must be locked or have a reference count of 0.
  */
 void
-uvm_anon_dropswap(anon)
-	struct vm_anon *anon;
+uvm_anon_dropswap(struct vm_anon *anon)
 {
 	UVMHIST_FUNC("uvm_anon_dropswap"); UVMHIST_CALLED(maphist);
 
@@ -310,8 +317,7 @@ uvm_anon_dropswap(anon)
  *	count.
  */
 struct vm_page *
-uvm_anon_lockloanpg(anon)
-	struct vm_anon *anon;
+uvm_anon_lockloanpg(struct vm_anon *anon)
 {
 	struct vm_page *pg;
 	boolean_t locked = FALSE;
@@ -461,9 +467,14 @@ anon_swap_off(startslot, endslot)
  * => returns TRUE if pagein was aborted due to lack of memory.
  */
 
+<<<<<<< HEAD
 static boolean_t
 anon_pagein(anon)
 	struct vm_anon *anon;
+=======
+boolean_t
+uvm_anon_pagein(struct vm_anon *anon)
+>>>>>>> origin/master
 {
 	struct vm_page *pg;
 	struct uvm_object *uobj;

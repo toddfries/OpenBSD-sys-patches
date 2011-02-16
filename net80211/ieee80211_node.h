@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ieee80211_node.h,v 1.9 2006/06/18 18:39:41 damien Exp $	*/
+=======
+/*	$OpenBSD: ieee80211_node.h,v 1.41 2009/03/26 20:38:29 damien Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -69,6 +73,84 @@ enum ieee80211_node_state {
 		(__ni)->ni_state = (__state);	\
 	} while (0)
 
+<<<<<<< HEAD
+=======
+enum ieee80211_node_psstate {
+	IEEE80211_PS_AWAKE,
+	IEEE80211_PS_DOZE
+};
+
+#define	IEEE80211_PS_MAX_QUEUE	50	/* maximum saved packets */
+
+/* Authenticator state machine: 4-Way Handshake (see 8.5.6.1.1) */
+enum {
+	RSNA_INITIALIZE,
+	RSNA_AUTHENTICATION,
+	RSNA_AUTHENTICATION_2,
+	RSNA_INITPMK,
+	RSNA_INITPSK,
+	RSNA_PTKSTART,
+	RSNA_PTKCALCNEGOTIATING,
+	RSNA_PTKCALCNEGOTIATING_2,
+	RSNA_PTKINITNEGOTIATING,
+	RSNA_PTKINITDONE,
+	RSNA_DISCONNECT,
+	RSNA_DISCONNECTED
+};
+
+/* Authenticator state machine: Group Key Handshake (see 8.5.6.1.2) */
+enum {
+	RSNA_IDLE,
+	RSNA_REKEYNEGOTIATING,
+	RSNA_REKEYESTABLISHED,
+	RSNA_KEYERROR
+};
+
+struct ieee80211_rxinfo {
+	u_int32_t		rxi_flags;
+	u_int32_t		rxi_tstamp;
+	int			rxi_rssi;
+};
+#define IEEE80211_RXI_HWDEC		0x00000001
+#define IEEE80211_RXI_AMPDU_DONE	0x00000002
+
+/* Block Acknowledgement Record */
+struct ieee80211_tx_ba {
+	struct ieee80211_node	*ba_ni;	/* backpointer for callbacks */
+	struct timeout		ba_to;
+	int			ba_timeout_val;
+#define IEEE80211_BA_MIN_TIMEOUT	(10 * 1000)		/* 10msec */
+#define IEEE80211_BA_MAX_TIMEOUT	(10 * 1000 * 1000)	/* 10sec */
+
+	int			ba_state;
+#define IEEE80211_BA_INIT	0
+#define IEEE80211_BA_REQUESTED	1
+#define IEEE80211_BA_AGREED	2
+
+	u_int16_t		ba_winstart;
+	u_int16_t		ba_winend;
+	u_int16_t		ba_winsize;
+#define IEEE80211_BA_MAX_WINSZ	128	/* maximum we will accept */
+
+	u_int8_t		ba_token;
+};
+
+struct ieee80211_rx_ba {
+	struct ieee80211_node	*ba_ni;	/* backpointer for callbacks */
+	struct {
+		struct mbuf		*m;
+		struct ieee80211_rxinfo	rxi;
+	}			*ba_buf;
+	struct timeout		ba_to;
+	int			ba_timeout_val;
+	int			ba_state;
+	u_int16_t		ba_winstart;
+	u_int16_t		ba_winend;
+	u_int16_t		ba_winsize;
+	u_int16_t		ba_head;
+};
+
+>>>>>>> origin/master
 /*
  * Node specific information.  Note that drivers are expected
  * to derive from this structure to add device-specific per-node
@@ -98,8 +180,6 @@ struct ieee80211_node {
 	struct ieee80211_rateset ni_rates;	/* negotiated rate set */
 	u_int8_t		*ni_country;	/* country information XXX */
 	struct ieee80211_channel *ni_chan;
-	u_int16_t		ni_fhdwell;	/* FH only */
-	u_int8_t		ni_fhindex;	/* FH only */
 	u_int8_t		ni_erp;		/* 11g only */
 
 #ifdef notyet
@@ -117,6 +197,43 @@ struct ieee80211_node {
 	u_int8_t		ni_pwrsave;
 	struct ifqueue		ni_savedq;	/* packets queued for pspoll */
 
+<<<<<<< HEAD
+=======
+	/* RSN */
+	struct timeout		ni_eapol_to;
+	u_int			ni_rsn_state;
+	u_int			ni_rsn_gstate;
+	u_int			ni_rsn_retries;
+	u_int			ni_rsnprotos;
+	u_int			ni_rsnakms;
+	u_int			ni_rsnciphers;
+	enum ieee80211_cipher	ni_rsngroupcipher;
+	enum ieee80211_cipher	ni_rsngroupmgmtcipher;
+	u_int16_t		ni_rsncaps;
+	enum ieee80211_cipher	ni_rsncipher;
+	u_int8_t		ni_nonce[EAPOL_KEY_NONCE_LEN];
+	u_int8_t		ni_pmk[IEEE80211_PMK_LEN];
+	u_int8_t		ni_pmkid[IEEE80211_PMKID_LEN];
+	u_int64_t		ni_replaycnt;
+	u_int8_t		ni_replaycnt_ok;
+	u_int64_t		ni_reqreplaycnt;
+	u_int8_t		ni_reqreplaycnt_ok;
+	u_int8_t		*ni_rsnie;
+	struct ieee80211_key	ni_pairwise_key;
+	struct ieee80211_ptk	ni_ptk;
+	u_int8_t		ni_key_count;
+	int			ni_port_valid;
+
+	/* SA Query */
+	u_int16_t		ni_sa_query_trid;
+	struct timeout		ni_sa_query_to;
+	int			ni_sa_query_count;
+
+	/* Block Ack records */
+	struct ieee80211_tx_ba	ni_tx_ba[IEEE80211_NUM_TID];
+	struct ieee80211_rx_ba	ni_rx_ba[IEEE80211_NUM_TID];
+
+>>>>>>> origin/master
 	/* others */
 	u_int16_t		ni_associd;	/* assoc response */
 	u_int16_t		ni_txseq;	/* seq to be transmitted */
@@ -125,9 +242,29 @@ struct ieee80211_node {
 	int			ni_inact;	/* inactivity mark count */
 	int			ni_txrate;	/* index to ni_rates[] */
 	int			ni_state;
+<<<<<<< HEAD
 	u_int32_t		*ni_challenge;	/* shared-key challenge */
 	u_int8_t		ni_flags;	/* special-purpose state */
 #define IEEE80211_NODE_ERP	0x01
+=======
+
+	u_int16_t		ni_flags;	/* special-purpose state */
+#define IEEE80211_NODE_ERP		0x0001
+#define IEEE80211_NODE_QOS		0x0002
+#define IEEE80211_NODE_REKEY		0x0004	/* GTK rekeying in progress */
+#define IEEE80211_NODE_RXPROT		0x0008	/* RX protection ON */
+#define IEEE80211_NODE_TXPROT		0x0010	/* TX protection ON */
+#define IEEE80211_NODE_TXRXPROT	\
+	(IEEE80211_NODE_TXPROT | IEEE80211_NODE_RXPROT)
+#define IEEE80211_NODE_RXMGMTPROT	0x0020	/* RX MMPDU protection ON */
+#define IEEE80211_NODE_TXMGMTPROT	0x0040	/* TX MMPDU protection ON */
+#define IEEE80211_NODE_MFP		0x0080	/* MFP negotiated */
+#define IEEE80211_NODE_PMK		0x0100	/* ni_pmk set */
+#define IEEE80211_NODE_PMKID		0x0200	/* ni_pmkid set */
+#define IEEE80211_NODE_HT		0x0400	/* HT negotiated */
+#define IEEE80211_NODE_SA_QUERY		0x0800	/* SA Query in progress */
+#define IEEE80211_NODE_SA_QUERY_FAILED	0x1000	/* last SA Query failed */
+>>>>>>> origin/master
 };
 
 RB_HEAD(ieee80211_tree, ieee80211_node);
@@ -218,6 +355,7 @@ extern	int ieee80211_match_bss(struct ieee80211com *,
 		struct ieee80211_node *);
 extern	void ieee80211_create_ibss(struct ieee80211com* ,
 		struct ieee80211_channel *);
+extern	void ieee80211_notify_dtim(struct ieee80211com *);
 
 extern	int ieee80211_node_cmp(struct ieee80211_node *, struct ieee80211_node *);
 RB_PROTOTYPE(ieee80211_tree, ieee80211_node, ni_node, ieee80211_node_cmp);

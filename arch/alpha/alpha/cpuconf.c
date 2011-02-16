@@ -1,4 +1,4 @@
-/* $OpenBSD: cpuconf.c,v 1.10 2005/04/28 17:19:14 deraadt Exp $ */
+/* $OpenBSD: cpuconf.c,v 1.13 2009/10/02 18:01:47 miod Exp $ */
 /* $NetBSD: cpuconf.c,v 1.27 2000/06/26 02:42:04 enami Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -182,6 +175,7 @@ static const struct cpuinit cpuinit[] = {
 	cpu_notsupp(ST_DEC_EV56_PBP, "EV56 Passive Backplane Board"),
 	cpu_notsupp(ST_DEC_ALPHAVME_320, "AlphaVME 320"),
 	cpu_init(ST_DEC_6600, dec_6600_init, "DEC_6600"),
+	cpu_init(ST_DEC_TITAN, dec_6600_init, "DEC_6600"),
 	cpu_init(ST_API_NAUTILUS, api_up1000_init, "API_UP1000"),
 };
 static const int ncpuinit = (sizeof(cpuinit) / sizeof(cpuinit[0]));

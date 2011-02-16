@@ -1,7 +1,11 @@
+<<<<<<< HEAD
 /*	$OpenBSD: owtemp.c,v 1.6 2006/12/23 17:46:39 deraadt Exp $	*/
+=======
+/*	$OpenBSD: owtemp.c,v 1.15 2010/07/08 07:19:54 jasper Exp $	*/
+>>>>>>> origin/master
 
 /*
- * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
+ * Copyright (c) 2006, 2009 Alexander Yurchenko <grange@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,6 +45,7 @@
 #define DS1920_SP_TEMP_MSB		1
 #define DS1920_SP_TH			2
 #define DS1920_SP_TL			3
+#define DS18B20_SP_CONFIG		4
 #define DS1920_SP_COUNT_REMAIN		6
 #define DS1920_SP_COUNT_PERC		7
 #define DS1920_SP_CRC			8
@@ -59,7 +64,7 @@ struct owtemp_softc {
 int	owtemp_match(struct device *, void *, void *);
 void	owtemp_attach(struct device *, struct device *, void *);
 int	owtemp_detach(struct device *, int);
-int	owtemp_activate(struct device *, enum devact);
+int	owtemp_activate(struct device *, int);
 
 void	owtemp_update(void *);
 
@@ -76,14 +81,15 @@ struct cfdriver owtemp_cd = {
 };
 
 static const struct onewire_matchfam owtemp_fams[] = {
-	{ ONEWIRE_FAMILY_DS1920 }
+	{ ONEWIRE_FAMILY_DS1920 },
+	{ ONEWIRE_FAMILY_DS18B20 },
+	{ ONEWIRE_FAMILY_DS1822 }
 };
 
 int
 owtemp_match(struct device *parent, void *match, void *aux)
 {
-	return (onewire_matchbyfam(aux, owtemp_fams,
-	    sizeof(owtemp_fams) /sizeof(owtemp_fams[0])));
+	return (onewire_matchbyfam(aux, owtemp_fams, nitems(owtemp_fams)));
 }
 
 void
@@ -99,6 +105,8 @@ owtemp_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_sensor.type = SENSOR_TEMP;
+	snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc), "sn %012llx",
+	    ONEWIRE_ROM_SN(oa->oa_rom));
 
 	if (sensor_task_register(sc, owtemp_update, 5)) {
 		printf(": unable to register update task\n");
@@ -125,7 +133,7 @@ owtemp_detach(struct device *self, int flags)
 }
 
 int
-owtemp_activate(struct device *self, enum devact act)
+owtemp_activate(struct device *self, int act)
 {
 	return (0);
 }
@@ -167,17 +175,27 @@ owtemp_update(void *arg)
 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
 		    data[DS1920_SP_TEMP_LSB];
-		count_perc = data[DS1920_SP_COUNT_PERC];
-		count_remain = data[DS1920_SP_COUNT_REMAIN];
-
-		if (count_perc != 0) {
-			/* High resolution algorithm */
-			temp &= ~0x0001;
-			val = temp * 500000 - 250000 +
-			    ((count_perc - count_remain) * 1000000) /
-			    count_perc;
+		if (ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS18B20 ||
+		    ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS1822) {
+			/*
+			 * DS18B20 decoding
+			 * default 12 bit 0.0625 C resolution
+			 */
+			val = temp * (1000000 / 16);
 		} else {
-			val = temp * 500000;
+			/* DS1920 decoding */
+			count_perc = data[DS1920_SP_COUNT_PERC];
+			count_remain = data[DS1920_SP_COUNT_REMAIN];
+
+			if (count_perc != 0) {
+				/* High resolution algorithm */
+				temp &= ~0x0001;
+				val = temp * 500000 - 250000 +
+				    ((count_perc - count_remain) * 1000000) /
+				    count_perc;
+			} else {
+				val = temp * 500000;
+			}
 		}
 		sc->sc_sensor.value = 273150000 + val;
 	}

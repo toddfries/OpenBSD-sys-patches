@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpuswitch.S,v 1.5 2004/12/30 23:43:42 drahn Exp $	*/
+/*	$OpenBSD: cpuswitch.S,v 1.11 2010/11/28 20:45:46 miod Exp $	*/
 /*	$NetBSD: cpuswitch.S,v 1.41 2003/11/15 08:44:18 scw Exp $	*/
 
 /*
@@ -86,24 +86,6 @@
 
 /* LINTSTUB: include <sys/param.h> */
 	
-#undef IRQdisable
-#undef IRQenable
-
-/*
- * New experimental definitions of IRQdisable and IRQenable
- * These keep FIQ's enabled since FIQ's are special.
- */
-
-#define IRQdisable \
-	mrs	r14, cpsr ; \
-	orr	r14, r14, #(I32_bit) ; \
-	msr	cpsr_c, r14 ; \
-
-#define IRQenable \
-	mrs	r14, cpsr ; \
-	bic	r14, r14, #(I32_bit) ; \
-	msr	cpsr_c, r14 ; \
-
 /*
  * These are used for switching the translation table/DACR.
  * Since the vector page can be invalid for a short time, we must
@@ -270,9 +252,6 @@ ENTRY(remrunqueue)
 	.word	_C_LABEL(curpcb)
 #endif
 
-.Lwant_resched:
-	.word	_C_LABEL(want_resched)
-
 .Lcpufuncs:	
 	.word	_C_LABEL(cpufuncs)
 	
@@ -378,149 +357,6 @@ ENTRY(cpu_switch)
  * r7 = scratch
  */
 	stmfd	sp!, {r4-r7, lr}
-
-	/*
-	 * Indicate that there is no longer a valid process (curlwp = 0).
-	 * Zero the current PCB pointer while we're at it.
-	 */
-	ldr	r7, .Lcurproc
-	ldr	r6, .Lcurpcb
-	mov	r2, #0x00000000
-	str	r2, [r7]		/* curproc = NULL */
-	str	r2, [r6]		/* curpcb = NULL */
-
-	/* stash the old proc while we call functions */
-	mov	r5, r0
-
-	/* First phase : find a new proc */
-	ldr	r7, .Lwhichqs
-
-	/* rem: r5 = old proc */
-	/* rem: r7 = &whichqs */
-
-.Lswitch_search:
-	IRQdisable
-
-	/* Do we have any active queues  */
-	ldr	r3, [r7]
-
-	/* If not we must idle until we do. */
-	teq	r3, #0x00000000
-	beq	_ASM_LABEL(idle)
-
-	/* put old proc back in r1 */
-	mov	r1, r5
-
-	/* rem: r1 = old proc */
-	/* rem: r3 = whichqs */
-	/* rem: interrupts are disabled */
-
-	/* used further down, saves SA stall */
-	ldr	r6, .Lqs
-
-	/*
-	 * We have found an active queue. Currently we do not know which queue
-	 * is active just that one of them is.
-	 */
-	/* Non-Xscale version of the ffs algorithm devised by d.seal and
-	 * posted to comp.sys.arm on 16 Feb 1994.
-	 */
- 	rsb	r5, r3, #0
- 	ands	r0, r3, r5
-
-#ifndef __XSCALE__
-	adr	r5, .Lcpu_switch_ffs_table
-
-				    /* X = R0 */
-	orr	r4, r0, r0, lsl #4  /* r4 = X * 0x11 */ 
-	orr	r4, r4, r4, lsl #6  /* r4 = X * 0x451 */
-	rsb	r4, r4, r4, lsl #16 /* r4 = X * 0x0450fbaf */
-	
-	/* now lookup in table indexed on top 6 bits of a4 */
-	ldrb	r4, [ r5, r4, lsr #26 ]
-
-#else	/* __XSCALE__ */
-	clz	r4, r0
-	rsb	r4, r4, #31
-#endif	/* __XSCALE__ */
-
-	/* rem: r0 = bit mask of chosen queue (1 << r4) */
-	/* rem: r1 = old proc */
-	/* rem: r3 = whichqs */
-	/* rem: r4 = queue number */
-	/* rem: interrupts are disabled */
-
-	/* Get the address of the queue (&qs[queue]) */
-	add	r5, r6, r4, lsl #3
-
-	/*
-	 * Get the proc from the queue and place the next process in
-	 * the queue at the head. This basically unlinks the lwp at
-	 * the head of the queue.
-	 */
-	ldr	r6, [r5, #(P_FORW)]
-
-#ifdef DIAGNOSTIC
-	cmp	r6, r5
-	beq	.Lswitch_bogons
-#endif
-
-	/* rem: r6 = new proc */
-	ldr	r7, [r6, #(P_FORW)]
-	str	r7, [r5, #(P_FORW)]	
-
-	/*
-	 * Test to see if the queue is now empty. If the head of the queue
-	 * points to the queue itself then there are no more procs in
-	 * the queue. We can therefore clear the queue not empty flag held
-	 * in r3.
-	 */
-
-	teq	r5, r7
-	biceq	r3, r3, r0
-
-	/* rem: r0 = bit mask of chosen queue (1 << r4) - NOT NEEDED AN MORE */
-
-	/* Fix the back pointer for the lwp now at the head of the queue. */
-	ldr	r0, [r6, #(P_BACK)]
-	str	r0, [r7, #(P_BACK)]
-
-	/* Update the RAM copy of the queue not empty flags word. */
-	ldreq	r7, .Lwhichqs
-	streq	r3, [r7]
-
-	/* rem: r1 = old proc */
-	/* rem: r3 = whichqs - NOT NEEDED ANY MORE */
-	/* rem: r4 = queue number - NOT NEEDED ANY MORE */
-	/* rem: r6 = new proc */
-	/* rem: interrupts are disabled */
-
-	/* Clear the want_resched flag */
-	ldr	r7, .Lwant_resched
-	mov	r0, #0x00000000
-	str	r0, [r7]
-
-	/*
-	 * Clear the back pointer of the proc we have removed from
-	 * the head of the queue. The new proc is isolated now.
-	 */
-	str	r0, [r6, #(P_BACK)]
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	/*
-	 * unlock the sched_lock, but leave interrupts off, for now.
-	 */
-	mov	r7, r1
-	bl	_C_LABEL(sched_unlock_idle)
-	mov	r1, r7
-#endif
-
-
-.Lswitch_resume:
-	/* rem: r1 = old proc */
-	/* rem: r4 = return value [not used if came from cpu_switchto()] */
-	/* rem: r6 = new process */
-	/* rem: interrupts are disabled */
 
 #ifdef MULTIPROCESSOR
 	/* XXX use curcpu() */

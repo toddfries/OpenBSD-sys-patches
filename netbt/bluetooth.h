@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bluetooth.h,v 1.2 2005/01/17 18:12:49 mickey Exp $	*/
+=======
+/*	$OpenBSD: bluetooth.h,v 1.6 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$NetBSD: bluetooth.h,v 1.8 2008/09/08 23:36:55 gmcgarry Exp $	*/
+>>>>>>> origin/master
 
 /*
  * bluetooth.h
@@ -67,8 +72,14 @@
 /*
  * Version of the stack
  */
+<<<<<<< HEAD
 
 #define NG_BLUETOOTH_VERSION	1
+=======
+typedef struct {
+	uint8_t	b[BLUETOOTH_BDADDR_SIZE];
+} __packed bdaddr_t;
+>>>>>>> origin/master
 
 /*
  * Declare the base of the Bluetooth sysctl hierarchy, 
@@ -254,6 +265,7 @@ typedef struct ng_bt_itemq *	ng_bt_itemq_p;
  * Get Bluetooth stack sysctl globals
  */
 
+<<<<<<< HEAD
 u_int32_t	bluetooth_hci_command_timeout	(void);
 u_int32_t	bluetooth_hci_connect_timeout	(void);
 u_int32_t	bluetooth_hci_max_neighbor_age	(void);
@@ -261,3 +273,48 @@ u_int32_t	bluetooth_l2cap_rtx_timeout	(void);
 u_int32_t	bluetooth_l2cap_ertx_timeout	(void);
 
 #endif /* _NETGRAPH_BLUETOOTH_H_ */
+=======
+#define BLUETOOTH_DEBUG
+#ifdef BLUETOOTH_DEBUG
+extern int bluetooth_debug;
+# define DPRINTF(fmt, args...)	do {			\
+	if (bluetooth_debug)				\
+		printf("%s: "fmt, __func__ , ##args);	\
+} while (/* CONSTCOND */0)
+
+# define DPRINTFN(n, fmt, args...)	do {		\
+	if (bluetooth_debug > (n))			\
+		printf("%s: "fmt, __func__ , ##args);	\
+} while (/* CONSTCOND */0)
+
+# define UNKNOWN(value)			\
+		printf("%s: %s = %d unknown!\n", __func__, #value, (value));
+#else
+# define DPRINTF(...) ((void)0)
+# define DPRINTFN(...) ((void)0)
+# define UNKNOWN(x) ((void)0)
+#endif	/* BLUETOOTH_DEBUG */
+
+extern struct mutex bt_lock;
+
+/* XXX NetBSD compatibility goo, abused for debugging */
+#ifdef BLUETOOTH_DEBUG
+#define mutex_enter(mtx) do {						\
+	DPRINTFN(1, "mtx_enter(" __STRING(mtx) ") in %d\n",		\
+	    curproc ? curproc->p_pid : 0);				\
+	mtx_enter((mtx));						\
+} while (/*CONSTCOND*/0)
+#define mutex_exit(mtx) do {						\
+	DPRINTFN(1, "mtx_leave(" __STRING(mtx) ") in %d\n",		\
+	    curproc ? curproc->p_pid : 0);				\
+	mtx_leave((mtx));						\
+} while (/*CONSTCOND*/0)
+#else
+#define mutex_enter		mtx_enter
+#define mutex_exit		mtx_leave
+#endif
+
+#endif	/* _KERNEL */
+
+#endif	/* _NETBT_BLUETOOTH_H_ */
+>>>>>>> origin/master

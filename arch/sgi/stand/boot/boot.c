@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.6 2005/04/27 04:37:33 deraadt Exp $ */
+/*	$OpenBSD: boot.c,v 1.17 2010/09/14 16:57:15 miod Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB, www.opsycon.se.
@@ -28,23 +28,18 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
-#include <sys/exec.h>
-#include <sys/exec_elf.h>
+#include <lib/libkern/libkern.h>
 #include <stand.h>
 
 #include <mips64/arcbios.h>
 
-void gets(char *);
-ssize_t read(int, void *, size_t);
-int close(int);
+#include <sys/exec_elf.h>
+#include "loadfile.h"
 
-int main(int, char **);
-void dobootopts(int, char **);
-Elf32_Addr loadfile(char *);
-Elf32_Addr loadfile32(int, Elf32_Ehdr *);
-Elf32_Addr loadfile64(int, Elf64_Ehdr *);
-int loadsymtab32(int, Elf32_Ehdr *, int);
-int loadsymtab64(int, Elf64_Ehdr *, int);
+char *strstr(char *, const char *);	/* strstr.c */
+
+int	main(int, char **);
+void	dobootopts(int, char **);
 
 enum {
 	AUTO_NONE,
@@ -55,6 +50,7 @@ enum {
 } bootauto = AUTO_NONE;
 char *OSLoadPartition = NULL;
 char *OSLoadFilename = NULL;
+int	IP;
 
 unsigned long tablebase;
 
@@ -86,30 +82,60 @@ gettable(int size, char *name, int flags, size_t align)
 int
 main(int argc, char *argv[])
 {
-	char  line[1024];
-	int   i;
-	Elf32_Addr entry;
+	u_long marks[MARK_MAX];
+	u_int64_t *esym;
+	char line[1024];
+	u_long entry;
+	int fd;
+	extern int arcbios_init(void);
+
+	IP = arcbios_init();
+
+	printf("\nOpenBSD/sgi-IP%d ARCBios boot\n", IP);
 
 	dobootopts(argc, argv);
 	if (OSLoadPartition != NULL) {
 		strlcpy(line, OSLoadPartition, sizeof(line));
-		i = strlen(line);
 		if (OSLoadFilename != NULL)
-			strlcpy(&line[i], OSLoadFilename, sizeof(line) - i -1);
+			strlcat(line, OSLoadFilename, sizeof(line));
 	} else
-		strlcpy("invalid argument setup", line, sizeof(line));
+		strlcpy(line, "invalid argument setup", sizeof(line));
 
 	for (entry = 0; entry < argc; entry++)
 		printf("arg %d: %s\n", entry, argv[entry]);
-	printf("\nOpenBSD/sgi Arcbios boot\n");
 
 	printf("Boot: %s\n", line);
 
-	entry = loadfile(line);
-	if (entry != NULL)
-		((void (*)())entry)(argc, argv);
-	printf("Boot FAILED!\n                ");
-	Bios_Restart();
+	/*
+	 * Load the kernel and symbol table.
+	 */
+
+	marks[MARK_START] = 0;
+	if ((fd = loadfile(line, marks, LOAD_KERNEL | COUNT_KERNEL)) != -1) {
+		(void)close(fd);
+
+		entry = marks[MARK_ENTRY];
+#ifdef __LP64__
+		esym = (u_int64_t *)marks[MARK_END];
+#else
+#undef  CKSEG0_BASE
+#define CKSEG0_BASE	0xffffffff80000000ULL
+		esym = (u_int64_t *)PHYS_TO_CKSEG0(marks[MARK_END]);
+#endif
+
+		if (entry != NULL)
+			((void (*)())entry)(argc, argv, esym);
+	}
+
+	/* We failed to load the kernel. */
+	panic("Boot FAILED!");
+}
+
+__dead void
+_rtt()
+{
+	Bios_EnterInteractiveMode();
+	for (;;) ;
 }
 
 /*
@@ -118,6 +144,7 @@ main(int argc, char *argv[])
 void
 dobootopts(int argc, char **argv)
 {
+	static char filenamebuf[1 + 32];
 	char *SystemPartition = NULL;
 	char *cp;
 	int i;
@@ -151,378 +178,59 @@ dobootopts(int argc, char **argv)
 		char *p;
 
 		strlcpy(loadpart, argv[0], sizeof loadpart);
-		p = strstr(loadpart, "partition(8)");
-		if (p) {
+		if ((p = strstr(loadpart, "partition(8)")) != NULL) {
 			p += strlen("partition(");
-			p[0] = '0'; p[2] = 0;
+		} else if (strncmp(loadpart, "dksc(", 5) == 0) {
+			p = strstr(loadpart, ",8)");
+			if (p != NULL)
+				p++;
+		} else
+			p = NULL;
+
+		if (p != NULL) {
+			p[0] = '0';
+			p[2] = '\0';
+			snprintf(filenamebuf, sizeof filenamebuf,
+			    "/bsd.rd.IP%d", IP);
 			OSLoadPartition = loadpart;
-			OSLoadFilename = "/bsd.rd";
+			OSLoadFilename = filenamebuf;
 		}
 	}
 }
 
 /*
- * Open 'filename', read in program and return the entry point or -1 if error.
+ * Prevent loading a wrong kernel.
  */
-Elf32_Addr
-loadfile(fname)
-	register char *fname;
-{
-	union {
-		Elf32_Ehdr eh32;
-		Elf64_Ehdr eh64;
-	} eh;
-	int fd;
-	Elf32_Addr entry;
-
-	if ((fd = open(fname, 0)) < 0) {
-		printf("can't open file %s\n", fname);
-		return NULL;
-	}
-
-	/* read the ELF header and check that it IS an ELF header */
-	if (read(fd, (char *)&eh, sizeof(eh)) != sizeof(eh)) {
-		printf("error: ELF header read error\n");
-		return NULL;
-	}
-	if (!IS_ELF(eh.eh32)) {
-		printf("not an elf file\n");
-		return NULL;
-	}
-
-	/* Determine CLASS */
-	if (eh.eh32.e_ident[EI_CLASS] == ELFCLASS32)
-		entry = loadfile32(fd, (void *)&eh);
-	else if (eh.eh32.e_ident[EI_CLASS] == ELFCLASS64)
-		entry = loadfile64(fd, (void *)&eh);
-	else {
-		printf("unknown ELF class\n");
-		return NULL;
-	}
-	return entry;
-}
-
-Elf32_Addr
-loadfile32(int fd, Elf32_Ehdr *eh)
-{
-	char buf[4096];
-	Elf32_Phdr *ph;
-	int i;
-
-	ph = (Elf32_Phdr *) buf;
-	lseek(fd, eh->e_phoff, 0);
-	if (read(fd, (char *)ph, 4096) != 4096) {
-		printf("unexpected EOF\n");
-		return NULL;
-	}
-
-	tablebase = 0;
-	printf("Loading ELF32 file\n");
-
-	for (i = 0; i < eh->e_phnum; i++, ph++) {
-		if (ph->p_type == PT_LOAD) {
-			lseek(fd, ph->p_offset, 0);
-			printf("0x%x:0x%x, ",(long)ph->p_paddr, (long)ph->p_filesz);
-			if (read(fd, (char *)ph->p_paddr,
-			    ph->p_filesz) != ph->p_filesz) {
-				printf("unexpected EOF\n");
-				return NULL;
-			}
-			if(ph->p_memsz > ph->p_filesz) {
-				printf("Zero 0x%x:0x%x, ",
-				    (long)(ph->p_paddr + ph->p_filesz),
-				    (long)(ph->p_memsz - ph->p_filesz));
-				bzero((void *)(ph->p_paddr + ph->p_filesz),
-				    ph->p_memsz - ph->p_filesz);
-			}
-			if((ph->p_paddr + ph->p_memsz) > tablebase)
-				tablebase = ph->p_paddr + ph->p_memsz;
-		}
-	}
-	memset((void *)tablebase, 0, 4096);
-	loadsymtab32(fd, eh, 0);
-	printf("Start at 0x%x\n", eh->e_entry);
-	return(eh->e_entry);
-}
-
-Elf32_Addr
-loadfile64(int fd, Elf64_Ehdr *eh)
-{
-	char buf[4096];
-	Elf64_Phdr *ph;
-	int i;
-
-	ph = (Elf64_Phdr *) buf;
-	lseek(fd, eh->e_phoff, 0);
-	if (read(fd, (char *)ph, 4096) != 4096) {
-		printf("unexpected EOF\n");
-		return NULL;
-	}
-
-	tablebase = 0;
-	printf("Loading ELF64 file\n");
-
-	for (i = 0; i < eh->e_phnum; i++, ph++) {
-		if (ph->p_type == PT_LOAD) {
-			lseek(fd, ph->p_offset, 0);
-			printf("0x%llx:0x%llx, ",ph->p_paddr, ph->p_filesz);
-			if (read(fd, (char *)(long)ph->p_paddr,
-			    ph->p_filesz) != ph->p_filesz) {
-				printf("unexpected EOF\n");
-				return NULL;
-			}
-			if(ph->p_memsz > ph->p_filesz) {
-				printf("Zero 0x%llx:0x%llx, ",
-				    ph->p_paddr + ph->p_filesz,
-				    ph->p_memsz - ph->p_filesz);
-				bzero((void *)(long)(ph->p_paddr + ph->p_filesz),
-				    ph->p_memsz - ph->p_filesz);
-			}
-			if((ph->p_paddr + ph->p_memsz) > tablebase)
-				tablebase = ph->p_paddr + ph->p_memsz;
-		}
-	}
-	memset((void *)tablebase, 0, 4096);
-	loadsymtab64(fd, eh, 0);
-	printf("Start at 0x%llx\n", eh->e_entry);
-	return(eh->e_entry);
-}
-
 int
-loadsymtab32(int fd, Elf32_Ehdr *eh, int flags)
+check_phdr(void *v)
 {
-	Elf32_Ehdr *keh;
-	Elf32_Shdr *shtab;
-	Elf32_Shdr *sh, *ksh, *shstrh, *strh;
-	Elf32_Sym *symtab;
-	int *symptr;
-	char *shstrtab, *strtab, *symend;
-	int i, nsym, offs, size;
+	Elf64_Phdr *phdr = (Elf64_Phdr *)v;
+	uint64_t addr;
 
-	printf("Loading symbol table\n");
-	size =  eh->e_shnum * sizeof(Elf32_Shdr);
-	shtab = (Elf32_Shdr *) alloc(size);
-	if (lseek (fd, eh->e_shoff, SEEK_SET) != eh->e_shoff ||
-	    read (fd, shtab, size) != size) {
-		printf("Seek to section headers failed.\n");
-		return -1;
-        }
-
-	tablebase = roundup(tablebase, sizeof(long));
-	symptr = (int *)tablebase;
-	tablebase = roundup(tablebase, 4096);
-	keh = (Elf32_Ehdr *)tablebase;
-	tablebase += sizeof(Elf32_Ehdr);
-	tablebase = roundup(tablebase, sizeof(long));
-	ksh = (Elf32_Shdr *)tablebase;
-	tablebase += roundup((sizeof(Elf32_Shdr) * eh->e_shnum), sizeof(long));
-	memcpy(ksh, shtab, roundup((sizeof(Elf32_Shdr) * eh->e_shnum), sizeof(long)));
-	sh = ksh;
-
-	shstrh = &sh[eh->e_shstrndx];
-
-	for (i = 0; i < eh->e_shnum; sh++, i++) {
-		if (sh->sh_type == SHT_SYMTAB)
-			break;
-	}
-	if (i >= eh->e_shnum) {
-		printf("No symbol table found!\n");
-		return -1;
+	switch (IP) {
+	case 27:
+		addr = 0xa800000000000000ULL >> 28;
+		break;
+	case 30:
+		addr = 0xa800000020000000ULL >> 28;
+		break;
+	case 32:
+		addr = 0xffffffff80000000ULL >> 28;
+		break;
+	default:
+		/*
+		 * If the system could not be identified, accept any
+		 * address and hope the user knows what's he's doing.
+		 */
+		return 0;
 	}
 
-	strh = &ksh[sh->sh_link];
-	nsym = sh->sh_size / sh->sh_entsize;
-	offs = sh->sh_offset;
-	size = sh->sh_size;
-
-	/*
-	 *  Allocate tables in correct order so the kernel grooks it.
-	 *  Then we read them in the order they are in the ELF file.
-	 */
-	shstrtab = gettable(shstrh->sh_size, "shstrtab", flags, sizeof(long));
-	strtab = gettable(strh->sh_size, "strtab", flags, sizeof(long));
-	symtab = gettable(size, "symtab", flags, sizeof(long));
-	symend = (char *)symtab + size;
-
-        do {
-		if(shstrh->sh_offset < offs && shstrh->sh_offset < strh->sh_offset) {
-#if 0
-			/*
-			 * We would like to read the shstrtab from the file
-			 * but since this table is located in front of the shtab
-			 * it is already gone. We can't position backwards
-			 * outside the current segment when using tftp.
-			 * Instead we create the names we need in the string
-			 * table because it can be reconstructed from the info
-			 * we now have access to.
-			 */
-			if (!readtable (shstrh->sh_offset, (void *)shstrtab,
-			    shstrh->sh_size, "shstring", flags))
-				return(0);
-#else
-			memset(shstrtab, 0, shstrh->sh_size);
-			strncpy(shstrtab + shstrh->sh_name, ".shstrtab", 10);
-			strncpy(shstrtab + strh->sh_name, ".strtab", 10);
-			strncpy(shstrtab + sh->sh_name, ".symtab", 10);
-#endif
-			shstrh->sh_offset = 0x7fffffff;
-		}
-
-		if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
-			if (!(readtable(fd, offs, (void *)symtab, size,
-			    "sym", flags)))
-				return (0);
-			offs = 0x7fffffff;
-		}
-
-		if (strh->sh_offset < offs && strh->sh_offset < shstrh->sh_offset) {
-			if (!(readtable (fd, strh->sh_offset, (void *)strtab,
-			    strh->sh_size, "string", flags)))
-				return (0);
-			strh->sh_offset = 0x7fffffff;
-		}
-		if (offs == 0x7fffffff && strh->sh_offset == 0x7fffffff &&
-		    shstrh->sh_offset == 0x7fffffff)
-			break;
-	} while(1);
-
-	/*
-	 *  Update the kernel headers with the current info.
-	 */
-	shstrh->sh_offset = (Elf32_Off)shstrtab - (Elf32_Off)keh;
-	strh->sh_offset = (Elf32_Off)strtab - (Elf32_Off)keh;
-	sh->sh_offset = (Elf32_Off)symtab - (Elf32_Off)keh;
-	memcpy(keh, eh, sizeof(Elf32_Ehdr));
-	keh->e_phoff = 0;
-	keh->e_shoff = sizeof(Elf32_Ehdr);
-	keh->e_phentsize = 0;
-	keh->e_phnum = 0;
-
-	symptr[0] = (int)keh;
-	symptr[1] = roundup((int)symend, sizeof(int));
-
-	return(0);
-
-}
-
-int
-loadsymtab64(int fd, Elf64_Ehdr *eh, int flags)
-{
-	Elf64_Ehdr *keh;
-	Elf64_Shdr *shtab;
-	Elf64_Shdr *sh, *ksh, *shstrh, *strh;
-	Elf64_Sym *symtab;
-	u_int64_t *symptr;
-	char *shstrtab, *strtab, *symend;
-	int i, nsym;
-	Elf64_Xword size;
-	Elf64_Off offs;
-
-	printf("Loading symbol table\n");
-	size =  eh->e_shnum * sizeof(Elf64_Shdr);
-	shtab = (Elf64_Shdr *) alloc(size);
-	if (lseek (fd, (int)eh->e_shoff, SEEK_SET) != (int)eh->e_shoff ||
-	    read (fd, shtab, size) != size) {
-		printf("Seek to section headers failed.\n");
-		return -1;
-        }
-
-	tablebase = roundup(tablebase, sizeof(u_int64_t));
-	symptr = (u_int64_t *)tablebase;
-	tablebase = roundup(tablebase, 4096);
-	keh = (Elf64_Ehdr *)tablebase;
-	tablebase += sizeof(Elf64_Ehdr);
-	tablebase = roundup(tablebase, sizeof(u_int64_t));
-	ksh = (Elf64_Shdr *)tablebase;
-	tablebase += roundup((sizeof(Elf64_Shdr) * eh->e_shnum), sizeof(u_int64_t));
-	memcpy(ksh, shtab, roundup((sizeof(Elf64_Shdr) * eh->e_shnum),
-	    sizeof(u_int64_t)));
-	sh = ksh;
-
-	shstrh = &sh[eh->e_shstrndx];
-
-	for (i = 0; i < eh->e_shnum; sh++, i++) {
-		if (sh->sh_type == SHT_SYMTAB) {
-			break;
-		}
-	}
-	if (i >= eh->e_shnum) {
-		printf("No symbol table found!\n");
-		return -1;
+	if ((phdr->p_vaddr >> 28) != addr) {
+		/* I'm sorry Dave, I can't let you do that. */
+		printf("This kernel does not seem to be compiled for this"
+		    " machine type.\nYou need to boot an IP%d kernel.\n", IP);
+		return 1;
 	}
 
-	strh = &ksh[sh->sh_link];
-	nsym = sh->sh_size / sh->sh_entsize;
-	offs = sh->sh_offset;
-	size = sh->sh_size;
-
-	/*
-	 *  Allocate tables in correct order so the kernel grooks it.
-	 *  Then we read them in the order they are in the ELF file.
-	 */
-	shstrtab = gettable(shstrh->sh_size, "shstrtab", flags, sizeof(u_int64_t));
-	strtab = gettable(strh->sh_size, "strtab", flags, sizeof(u_int64_t));
-	symtab = gettable(size, "symtab", flags, sizeof(u_int64_t));
-	symend = (char *)symtab + size;
-
-        do {
-		if(shstrh->sh_offset < offs && shstrh->sh_offset < strh->sh_offset) {
-#if 0
-			/*
-			 * We would like to read the shstrtab from the file
-			 * but since this table is located in front of the shtab
-			 * it is already gone. We can't position backwards
-			 * outside the current segment when using tftp.
-			 * Instead we create the names we need in the string
-			 * table because it can be reconstructed from the
-			 * info we now have access to.
-			 */
-			if (!readtable (shstrh->sh_offset, (void *)shstrtab,
-			    shstrh->sh_size, "shstring", flags))
-				return(0);
-#else
-			memset(shstrtab, 0, shstrh->sh_size);
-			strncpy(shstrtab + shstrh->sh_name, ".shstrtab", 10);
-			strncpy(shstrtab + strh->sh_name, ".strtab", 10);
-			strncpy(shstrtab + sh->sh_name, ".symtab", 10);
-#endif
-			shstrh->sh_offset = 0x7fffffff;
-		}
-
-		if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
-			if (!(readtable(fd, offs, (void *)symtab,
-			    size, "sym", flags)))
-				return (0);
-			offs = 0x7fffffff;
-		}
-
-		if (strh->sh_offset < offs && strh->sh_offset < shstrh->sh_offset) {
-			if (!(readtable (fd, strh->sh_offset, (void *)strtab,
-			    strh->sh_size, "string", flags))) {
-				return (0);
-			}
-			strh->sh_offset = 0x7fffffff;
-		}
-		if (offs == 0x7fffffff && strh->sh_offset == 0x7fffffff &&
-		    shstrh->sh_offset == 0x7fffffff)
-			break;
-	} while(1);
-
-	/*
-	 *  Update the kernel headers with the current info.
-	 */
-	shstrh->sh_offset = (Elf64_Off)(long)shstrtab - (Elf64_Off)(long)keh;
-	strh->sh_offset = (Elf64_Off)(long)strtab - (Elf64_Off)(long)keh;
-	sh->sh_offset = (Elf64_Off)(long)symtab - (Elf64_Off)(long)keh;
-	memcpy(keh, eh, sizeof(Elf64_Ehdr));
-	keh->e_phoff = 0;
-	keh->e_shoff = sizeof(Elf64_Ehdr);
-	keh->e_phentsize = 0;
-	keh->e_phnum = 0;
-
-	symptr[0] = (Elf64_Off)keh;
-	symptr[1] = (Elf64_Off)roundup((Elf64_Off)symend, sizeof(u_int64_t));
-
-	return(0);
-
+	return 0;
 }

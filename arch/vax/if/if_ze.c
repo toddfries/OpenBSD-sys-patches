@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ze.c,v 1.6 2006/08/27 16:50:44 miod Exp $	*/
+=======
+/*	$OpenBSD: if_ze.c,v 1.9 2010/09/20 06:33:47 matthew Exp $	*/
+>>>>>>> origin/master
 /*      $NetBSD: if_ze.c,v 1.3 2000/01/24 02:54:03 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -38,6 +42,8 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_media.h>
+
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
@@ -125,8 +131,7 @@ zeattach(parent, self, aux)
 
 	scb_vecalloc(SGECVEC, (void (*)(void *)) sgec_intr, sc,
 	    SCB_ISTACK, &sc->sc_intrcnt);
-	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_intvec, &evcount_intr);
+	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname, &sc->sc_intvec);
 
 	sgec_attach(sc);
 }

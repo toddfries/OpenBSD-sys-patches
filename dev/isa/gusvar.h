@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gusvar.h,v 1.4 2002/03/14 01:26:56 millert Exp $	*/
+=======
+/*	$OpenBSD: gusvar.h,v 1.7 2008/11/21 16:06:36 robert Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -392,9 +389,6 @@ extern const int gus_irq_map[];
 extern const int gus_drq_map[];
 extern const int gus_base_addrs[];
 extern const int gus_addrs;
-extern const int gus_max_frequency[];
-
-extern const ushort gus_log_volumes[];
 
 #define SELECT_GUS_REG(iot,ioh1,x) bus_space_write_1(iot,ioh1,GUS_REG_SELECT,x)
 #define ADDR_HIGH(x) (unsigned int) ((x >> 7L) & 0x1fffL)
@@ -416,7 +410,6 @@ extern const ushort gus_log_volumes[];
 #define splgus splaudio
 
 extern struct audio_hw_if gus_hw_if;
-extern struct audio_hw_if gusmax_hw_if;
 extern struct audio_device gus_device;
 
 #define FLIP_REV	5		/* This rev has flipped mixer chans */

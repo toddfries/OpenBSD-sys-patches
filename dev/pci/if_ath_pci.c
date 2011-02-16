@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: if_ath_pci.c,v 1.13 2006/08/03 02:29:33 brad Exp $   */
+=======
+/*      $OpenBSD: if_ath_pci.c,v 1.22 2010/08/27 19:44:44 deraadt Exp $   */
+>>>>>>> origin/master
 /*	$NetBSD: if_ath_pci.c,v 1.7 2004/06/30 05:58:17 mycroft Exp $	*/
 
 /*-
@@ -86,7 +90,7 @@ struct ath_pci_softc {
 	pci_chipset_tag_t	sc_pc;
 	pcitag_t		sc_pcitag;
 
-	void			*sc_ih;		/* interrupt handler */
+	void			*sc_ih;		/* Interrupt handler. */
 };
 
 /* Base Address Register */
@@ -94,14 +98,14 @@ struct ath_pci_softc {
 
 int	 ath_pci_match(struct device *, void *, void *);
 void	 ath_pci_attach(struct device *, struct device *, void *);
-void	 ath_pci_shutdown(void *);
 int	 ath_pci_detach(struct device *, int);
 
 struct cfattach ath_pci_ca = {
 	sizeof(struct ath_pci_softc),
 	ath_pci_match,
 	ath_pci_attach,
-	ath_pci_detach
+	ath_pci_detach,
+	ath_activate
 };
 
 int
@@ -129,11 +133,8 @@ ath_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t pt = pa->pa_tag;
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
 	pci_intr_handle_t ih;
 	pcireg_t mem_type;
-	void *hook;
 	const char *intrstr = NULL;
 
 	psc->sc_pc = pc;
@@ -146,17 +147,20 @@ ath_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (mem_type != PCI_MAPREG_TYPE_MEM &&
 	    mem_type != PCI_MAPREG_MEM_TYPE_64BIT) {
 		printf(": bad PCI register type %d\n", (int)mem_type);
-		goto bad;
+		goto fail;
 	}
-	if (mem_type == PCI_MAPREG_MEM_TYPE_64BIT)
-		sc->sc_64bit = 1;
-	if (pci_mapreg_map(pa, ATH_BAR0, mem_type, 0, &iot, &ioh,
-	    NULL, NULL, 0)) {
-		printf(": cannot map register space\n");
-		goto bad;
+	if (pci_mapreg_map(pa, ATH_BAR0, mem_type, 0, &sc->sc_st, &sc->sc_sh,
+	    NULL, &sc->sc_ss, 0)) {
+		printf(": can't map register space\n");
+		goto fail;
 	}
-	sc->sc_st = iot;
-	sc->sc_sh = ioh;
+
+	/*
+	 * PCI Express check.
+	 */
+	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
+	    NULL, NULL) != 0)
+		sc->sc_pcie = 1;
 
 	sc->sc_invalid = 1;
 
@@ -164,37 +168,29 @@ ath_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * Arrange interrupt line.
 	 */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
-		goto bad1;
+		printf(": can't map interrupt\n");
+		goto unmap;
 	}
 
 	intrstr = pci_intr_string(pc, ih);
 	psc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, ath_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (psc->sc_ih == NULL) {
-		printf(": couldn't map interrupt\n");
-		goto bad2;
+		printf(": can't map interrupt\n");
+		goto unmap;
 	}
 
 	printf(": %s\n", intrstr);
 
 	sc->sc_dmat = pa->pa_dmat;
 
-	hook = shutdownhook_establish(ath_pci_shutdown, psc);
-	if (hook == NULL) {
-		printf(": couldn't make shutdown hook\n");
-		goto bad3;
-	}
-
 	if (ath_attach(PCI_PRODUCT(pa->pa_id), sc) == 0)
 		return;
 
-	shutdownhook_disestablish(hook);
-
-bad3:	pci_intr_disestablish(pc, psc->sc_ih);
-bad2:	/* XXX */
-bad1:	/* XXX */
-bad:
+	pci_intr_disestablish(pc, psc->sc_ih);
+unmap:
+	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_ss);
+fail:
 	return;
 }
 
@@ -202,17 +198,19 @@ int
 ath_pci_detach(struct device *self, int flags)
 {
 	struct ath_pci_softc *psc = (struct ath_pci_softc *)self;
+	struct ath_softc *sc = &psc->sc_sc;
 
 	ath_detach(&psc->sc_sc, flags);
-	pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
+
+	if (psc->sc_ih != NULL) {
+		pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
+		psc->sc_ih = NULL;
+	}
+
+	if (sc->sc_ss != 0) {
+		bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_ss);
+		sc->sc_ss = 0;
+	}
 
 	return (0);
-}
-
-void
-ath_pci_shutdown(void *self)
-{
-	struct ath_pci_softc *psc = (struct ath_pci_softc *)self;
-
-	ath_shutdown(&psc->sc_sc);
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: acx111.c,v 1.14 2006/12/08 00:04:10 mglocker Exp $ */
+=======
+/*	$OpenBSD: acx111.c,v 1.18 2010/04/20 22:05:41 tedu Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -53,7 +57,7 @@
 #include <sys/param.h>
 #include <sys/endian.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
+#include <sys/systm.h>
 #include <sys/device.h>
 
 #include <machine/bus.h>

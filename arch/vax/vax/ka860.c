@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ka860.c,v 1.8 2003/06/02 23:27:59 millert Exp $	*/
+=======
+/*	$OpenBSD: ka860.c,v 1.10 2008/08/18 23:05:39 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ka860.c,v 1.15 1999/08/07 10:36:49 ragge Exp $	*/
 /*
  * Copyright (c) 1986, 1988 Regents of the University of California.
@@ -69,6 +73,8 @@ struct	cpu_dep	ka860_calls = {
 	0,	/* Halt call, nothing special */
 	ka86_reboot,
 	ka86_clrf,
+	NULL,
+	hardclock
 };
 
 /*

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: agp_ali.c,v 1.1 2002/07/12 20:17:03 mickey Exp $	*/
+=======
+/*	$OpenBSD: agp_ali.c,v 1.12 2010/08/07 18:15:38 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: agp_ali.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 
@@ -30,13 +34,10 @@
  *	$FreeBSD: src/sys/pci/agp_ali.c,v 1.3 2001/07/05 21:28:46 jhb Exp $
  */
 
-
-
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/lock.h>
@@ -44,6 +45,7 @@
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
+#include <dev/pci/pcidevs.h>
 #include <dev/pci/vga_pcivar.h>
 #include <dev/pci/agpvar.h>
 #include <dev/pci/agpreg.h>
@@ -51,37 +53,64 @@
 #include <machine/bus.h>
 
 struct agp_ali_softc {
-	u_int32_t	initial_aperture; /* aperture size at startup */
-	struct agp_gatt *gatt;
+	struct device		 dev;
+	struct agp_softc	*agpdev;
+	struct agp_gatt		*gatt;
+	pci_chipset_tag_t	 asc_pc;
+	pcitag_t		 asc_tag;
+	bus_addr_t		 asc_apaddr;
+	bus_size_t		 asc_apsize;
+	pcireg_t		 asc_attbase;
+	pcireg_t		 asc_tlbctrl;
 };
 
+<<<<<<< HEAD
 u_int32_t agp_ali_get_aperture(struct vga_pci_softc *);
 int	agp_ali_set_aperture(struct vga_pci_softc *sc, u_int32_t);
 int	agp_ali_bind_page(struct vga_pci_softc *, off_t, bus_addr_t);
 int	agp_ali_unbind_page(struct vga_pci_softc *, off_t);
 void	agp_ali_flush_tlb(struct vga_pci_softc *);
+=======
+void	agp_ali_attach(struct device *, struct device *, void *);
+int	agp_ali_activate(struct device *, int);
+void	agp_ali_save(struct agp_ali_softc *);
+void	agp_ali_restore(struct agp_ali_softc *);
+int	agp_ali_probe(struct device *, void *, void *);
+bus_size_t agp_ali_get_aperture(void *);
+int	agp_ali_set_aperture(void *sc, bus_size_t);
+void	agp_ali_bind_page(void *, bus_addr_t, paddr_t, int);
+void	agp_ali_unbind_page(void *, bus_addr_t);
+void	agp_ali_flush_tlb(void *);
 
-struct agp_methods agp_ali_methods = {
-	agp_ali_get_aperture,
-	agp_ali_set_aperture,
+struct cfattach aliagp_ca = {
+	sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach,
+	NULL, agp_ali_activate
+};
+>>>>>>> origin/master
+
+struct cfdriver aliagp_cd = {
+	NULL, "aliagp", DV_DULL
+};
+
+const struct agp_methods agp_ali_methods = {
 	agp_ali_bind_page,
 	agp_ali_unbind_page,
 	agp_ali_flush_tlb,
-	agp_generic_enable,
-	agp_generic_alloc_memory,
-	agp_generic_free_memory,
-	agp_generic_bind_memory,
-	agp_generic_unbind_memory,
 };
 
+<<<<<<< HEAD
 int 
 agp_ali_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa,
 	       struct pci_attach_args *pchb_pa)
+=======
+int
+agp_ali_probe(struct device *parent, void *match, void *aux)
+>>>>>>> origin/master
 {
-	struct agp_ali_softc *asc;
-	struct agp_gatt *gatt;
-	pcireg_t reg;
+	struct agp_attach_args	*aa = aux;
+	struct pci_attach_args	*pa = aa->aa_pa;
 
+<<<<<<< HEAD
 	asc = malloc(sizeof *asc, M_DEVBUF, M_NOWAIT);
 	if (asc == NULL) {
 		printf(": failed to allocate softc\n");
@@ -94,38 +123,70 @@ agp_ali_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa,
 		printf(": failed to map aperture\n");
 		free(asc, M_DEVBUF);
 		return (ENXIO);
+=======
+	/* Must be a pchb, don't attach to iommu-style agp devs */
+	if (agpbus_probe(aa) == 1 && PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ALI &&
+	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_ALI_M1689)
+		return (1);
+	return (0);
+}
+
+void 
+agp_ali_attach(struct device *parent, struct device *self, void *aux)
+{
+	struct agp_ali_softc	*asc = (struct agp_ali_softc *)self;
+	struct agp_gatt		*gatt;
+	struct agp_attach_args	*aa = aux;
+	struct pci_attach_args	*pa = aa->aa_pa;
+	pcireg_t		 reg;
+
+	asc->asc_tag = pa->pa_tag;
+	asc->asc_pc = pa->pa_pc;
+	asc->asc_apsize = agp_ali_get_aperture(asc);
+
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &asc->asc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+>>>>>>> origin/master
 	}
 
-	asc->initial_aperture = agp_ali_get_aperture(sc);
-
 	for (;;) {
-		gatt = agp_alloc_gatt(sc);
+		gatt = agp_alloc_gatt(pa->pa_dmat, asc->asc_apsize);
 		if (gatt != NULL)
 			break;
-
 		/*
-		 * Probably contigmalloc failure. Try reducing the
-		 * aperture so that the gatt size reduces.
+		 * almost certainly error allocating contigious dma memory
+		 * so reduce aperture so that the gatt size reduces.
 		 */
+<<<<<<< HEAD
 		if (AGP_SET_APERTURE(sc, AGP_GET_APERTURE(sc) / 2)) {
 			agp_generic_detach(sc);
 			printf(": failed to set aperture\n");
 			return (ENOMEM);
+=======
+		asc->asc_apsize /= 2;
+		if (agp_ali_set_aperture(asc, asc->asc_apsize)) {
+			printf("failed to set aperture\n");
+			return;
+>>>>>>> origin/master
 		}
 	}
 	asc->gatt = gatt;
 
 	/* Install the gatt. */
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE);
 	reg = (reg & 0xff) | gatt->ag_physical;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE, reg);
 	
 	/* Enable the TLB. */
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL);
 	reg = (reg & ~0xff) | 0x10;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
 
-	return (0);
+	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_ali_methods,
+	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
+	return;
 }
 
 #if 0
@@ -157,6 +218,45 @@ agp_ali_detach(struct vga_pci_softc *sc)
 }
 #endif
 
+int
+agp_ali_activate(struct device *arg, int act)
+{
+	struct agp_ali_softc *asc = (struct agp_ali_softc *)arg;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		agp_ali_save(asc);
+		break;
+	case DVACT_RESUME:
+		agp_ali_restore(asc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_ali_save(struct agp_ali_softc *asc)
+{
+	asc->asc_attbase = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_ATTBASE);
+	asc->asc_tlbctrl = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_TLBCTRL);
+}
+
+void
+agp_ali_restore(struct agp_ali_softc *asc)
+{
+
+	/* Install the gatt and aperture size. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE,
+	    asc->asc_attbase);
+	
+	/* Enable the TLB. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL,
+	    asc->asc_tlbctrl);
+}
+
 #define M 1024*1024
 
 static const u_int32_t agp_ali_table[] = {
@@ -174,16 +274,22 @@ static const u_int32_t agp_ali_table[] = {
 };
 #define agp_ali_table_size (sizeof(agp_ali_table) / sizeof(agp_ali_table[0]))
 
+<<<<<<< HEAD
 u_int32_t
 agp_ali_get_aperture(struct vga_pci_softc *sc)
+=======
+bus_size_t
+agp_ali_get_aperture(void *sc)
+>>>>>>> origin/master
 {
-	int i;
+	struct agp_ali_softc	*asc = sc;
+	int			 i;
 
 	/*
 	 * The aperture size is derived from the low bits of attbase.
 	 * I'm not sure this is correct..
 	 */
-	i = (int)pci_conf_read(sc->sc_pc, sc->sc_pcitag,
+	i = (int)pci_conf_read(asc->asc_pc, asc->asc_tag,
 	    AGP_ALI_ATTBASE) & 0xff;
 	if (i >= agp_ali_table_size)
 		return (0);
@@ -191,10 +297,15 @@ agp_ali_get_aperture(struct vga_pci_softc *sc)
 }
 
 int
+<<<<<<< HEAD
 agp_ali_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
+=======
+agp_ali_set_aperture(void *sc, bus_size_t aperture)
+>>>>>>> origin/master
 {
-	int i;
-	pcireg_t reg;
+	struct agp_ali_softc	*asc = sc;
+	int			 i;
+	pcireg_t		 reg;
 
 	for (i = 0; i < agp_ali_table_size; i++)
 		if (agp_ali_table[i] == aperture)
@@ -202,48 +313,56 @@ agp_ali_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
 	if (i == agp_ali_table_size)
 		return EINVAL;
 
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE);
 	reg &= ~0xff;
 	reg |= i;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_ATTBASE, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE, reg);
 	return (0);
 }
 
+<<<<<<< HEAD
 int
 agp_ali_bind_page(struct vga_pci_softc *sc, off_t offset, bus_addr_t physical)
+=======
+void
+agp_ali_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
+>>>>>>> origin/master
 {
-	struct agp_ali_softc *asc = sc->sc_chipc;
+	struct agp_ali_softc *asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical;
 }
 
+<<<<<<< HEAD
 int
 agp_ali_unbind_page(struct vga_pci_softc *sc, off_t offset)
+=======
+void
+agp_ali_unbind_page(void *sc, bus_size_t offset)
+>>>>>>> origin/master
 {
-	struct agp_ali_softc *asc = sc->sc_chipc;
+	struct agp_ali_softc *asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void
+<<<<<<< HEAD
 agp_ali_flush_tlb(struct vga_pci_softc *sc)
+=======
+agp_ali_flush_tlb(void *sc)
+>>>>>>> origin/master
 {
-	pcireg_t reg;
+	struct agp_ali_softc	*asc = sc;
+	pcireg_t		reg;
 
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL);
 	reg &= ~0xff;
 	reg |= 0x90;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
 	reg &= ~0xff;
 	reg |= 0x10;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_ALI_TLBCTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
 }
 

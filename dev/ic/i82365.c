@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: i82365.c,v 1.24 2005/09/10 20:32:40 grange Exp $	*/
+=======
+/*	$OpenBSD: i82365.c,v 1.29 2010/09/06 19:20:21 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: i82365.c,v 1.10 1998/06/09 07:36:55 thorpej Exp $	*/
 
 /*
@@ -684,7 +688,7 @@ pcic_poll_intr(arg)
 		if (sc->handle[i].flags & PCIC_FLAG_SOCKETP)
 			pcic_intr_socket(&sc->handle[i]);
 
-	timeout_add(&sc->poll_timeout, hz / 2);
+	timeout_add_msec(&sc->poll_timeout, 500);
 
 	splx(s);
 }
@@ -837,9 +841,14 @@ pcic_power(why, arg)
 	struct pcic_softc *sc = (struct pcic_softc *)h->ph_parent;
 	struct pcic_event *pe;
 
+<<<<<<< HEAD
 	if (why != PWR_RESUME) {
 		if (timeout_pending(&sc->poll_timeout))
 			timeout_del(&sc->poll_timeout);
+=======
+	if (why != DVACT_RESUME) {
+		timeout_del(&sc->poll_timeout);
+>>>>>>> origin/master
 	}
 	else {
 		pcic_intr_socket(h);
@@ -847,7 +856,7 @@ pcic_power(why, arg)
 		while ((pe = SIMPLEQ_FIRST(&h->events)))
 			pcic_event_process(h, pe);
 
-		timeout_add(&sc->poll_timeout, hz / 2);
+		timeout_add_msec(&sc->poll_timeout, 500);
 	}
 }
 

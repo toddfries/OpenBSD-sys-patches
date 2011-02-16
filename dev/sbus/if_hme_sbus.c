@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_hme_sbus.c,v 1.10 2006/06/02 20:00:56 miod Exp $	*/
+=======
+/*	$OpenBSD: if_hme_sbus.c,v 1.13 2009/07/12 21:27:09 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_hme_sbus.c,v 1.6 2001/02/28 14:52:48 mrg Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -100,19 +97,20 @@ hmeattach_sbus(struct device *parent, struct device *self, void *aux)
 	struct hmesbus_softc *hsc = (void *)self;
 	struct hme_softc *sc = &hsc->hsc_hme;
 	u_int32_t burst, sbusburst;
-	int node;
-	/* XXX the following declarations should be elsewhere */
+	/* XXX the following declaration should be elsewhere */
 	extern void myetheraddr(u_char *);
-
-	node = sa->sa_node;
 
 	/* Pass on the bus tags */
 	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_dmatag = sa->sa_dmatag;
 
+	if (sa->sa_nintr < 1) {
+		printf(": no interrupt\n");
+		return;
+	}
+
 	if (sa->sa_nreg < 5) {
-		printf("%s: only %d register sets\n",
-			self->dv_xname, sa->sa_nreg);
+		printf(": only %d register sets\n", sa->sa_nreg);
 		return;
 	}
 
@@ -129,31 +127,31 @@ hmeattach_sbus(struct device *parent, struct device *self, void *aux)
 	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
 	    (bus_addr_t)sa->sa_reg[0].sbr_offset,
 	    (bus_size_t)sa->sa_reg[0].sbr_size, 0, 0, &sc->sc_seb) != 0) {
-		printf("%s @ sbus: cannot map registers\n", self->dv_xname);
+		printf(": can't map registers\n");
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[1].sbr_slot,
 	    (bus_addr_t)sa->sa_reg[1].sbr_offset,
 	    (bus_size_t)sa->sa_reg[1].sbr_size, 0, 0, &sc->sc_etx) != 0) {
-		printf("%s @ sbus: cannot map registers\n", self->dv_xname);
+		printf(": can't map registers\n");
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[2].sbr_slot,
 	    (bus_addr_t)sa->sa_reg[2].sbr_offset,
 	    (bus_size_t)sa->sa_reg[2].sbr_size, 0, 0, &sc->sc_erx) != 0) {
-		printf("%s @ sbus: cannot map registers\n", self->dv_xname);
+		printf(": can't map registers\n");
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[3].sbr_slot,
 	    (bus_addr_t)sa->sa_reg[3].sbr_offset,
 	    (bus_size_t)sa->sa_reg[3].sbr_size, 0, 0, &sc->sc_mac) != 0) {
-		printf("%s @ sbus: cannot map registers\n", self->dv_xname);
+		printf(": can't map registers\n");
 		return;
 	}
 	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[4].sbr_slot,
 	    (bus_addr_t)sa->sa_reg[4].sbr_offset,
 	    (bus_size_t)sa->sa_reg[4].sbr_size, 0, 0, &sc->sc_mif) != 0) {
-		printf("%s @ sbus: cannot map registers\n", self->dv_xname);
+		printf(": can't map registers\n");
 		return;
 	}
 
@@ -169,7 +167,7 @@ hmeattach_sbus(struct device *parent, struct device *self, void *aux)
 	if (sbusburst == 0)
 		sbusburst = SBUS_BURST_32 - 1; /* 1->16 */
 
-	burst = getpropint(node, "burst-sizes", -1);
+	burst = getpropint(sa->sa_node, "burst-sizes", -1);
 	if (burst == -1)
 		/* take SBus burst sizes */
 		burst = sbusburst;
@@ -190,9 +188,8 @@ hmeattach_sbus(struct device *parent, struct device *self, void *aux)
 	sc->sc_pci = 0; /* XXXXX should all be done in bus_dma. */
 
 	/* Establish interrupt handler */
-	if (sa->sa_nintr != 0)
-		(void)bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET, 0,
-					 hme_intr, sc, self->dv_xname);
+	bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET, 0, hme_intr,
+	    sc, self->dv_xname);
 
 	hme_config(sc);
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: owid.c,v 1.3 2006/12/23 17:46:39 deraadt Exp $	*/
+=======
+/*	$OpenBSD: owid.c,v 1.8 2010/07/08 07:19:54 jasper Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -46,7 +50,7 @@ struct owid_softc {
 int	owid_match(struct device *, void *, void *);
 void	owid_attach(struct device *, struct device *, void *);
 int	owid_detach(struct device *, int);
-int	owid_activate(struct device *, enum devact);
+int	owid_activate(struct device *, int);
 
 struct cfattach owid_ca = {
 	sizeof(struct owid_softc),
@@ -67,8 +71,7 @@ static const struct onewire_matchfam owid_fams[] = {
 int
 owid_match(struct device *parent, void *match, void *aux)
 {
-	return (onewire_matchbyfam(aux, owid_fams,
-	    sizeof(owid_fams) /sizeof(owid_fams[0])));
+	return (onewire_matchbyfam(aux, owid_fams, nitems(owid_fams)));
 }
 
 void
@@ -86,6 +89,8 @@ owid_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sensor.type = SENSOR_INTEGER;
 	strlcpy(sc->sc_sensor.desc, "ID", sizeof(sc->sc_sensor.desc));
 	sc->sc_sensor.value = ONEWIRE_ROM_SN(sc->sc_rom);
+	snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc), "sn %012llx",
+	    ONEWIRE_ROM_SN(oa->oa_rom));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
 	sensordev_install(&sc->sc_sensordev);
 
@@ -103,7 +108,7 @@ owid_detach(struct device *self, int flags)
 }
 
 int
-owid_activate(struct device *self, enum devact act)
+owid_activate(struct device *self, int act)
 {
 	struct owid_softc *sc = (struct owid_softc *)self;
 

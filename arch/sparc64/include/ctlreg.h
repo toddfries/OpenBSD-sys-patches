@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ctlreg.h,v 1.10 2006/10/27 19:59:14 kettenis Exp $	*/
+=======
+/*	$OpenBSD: ctlreg.h,v 1.23 2009/11/30 22:59:29 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -242,10 +246,17 @@
  * The following are 4u control registers
  */
 
+/* Get the CPU's UPA port ID */
+#define	UPA_CR_MID(x)		(((x) >> 17) & 0x1f)
+#define	CPU_UPAID		UPA_CR_MID(ldxa(0, ASI_MID_REG))
 
-/* Get the CPU's UPAID */
-#define	UPA_CR_MID(x)	(((x)>>17)&0x1f)	
-#define	CPU_UPAID	UPA_CR_MID(ldxa(0, ASI_MID_REG))
+/* Get the CPU's Fireplane agent ID */
+#define FIREPLANE_CR_AID(x)	(((x) >> 17) & 0x3ff)
+#define CPU_FIREPLANEID		FIREPLANE_CR_AID(ldxa(0, ASI_MID_REG))
+
+/* Get the CPU's Jupiter Bus interrupt target ID */
+#define JUPITER_CR_ITID(x)	((x) & 0x3ff)
+#define CPU_JUPITERID		JUPITER_CR_ITID(ldxa(0, ASI_MID_REG))
 
 /*
  * [4u] MMU and Cache Control Register (MCCR)
@@ -589,11 +600,20 @@ sparc_rdpr_ ## name()							\
 }
 
 GEN_RD(asi);
+GEN_RD(fprs);
 GEN_RD(asr22);
-GEN_RDPR(cwp);
+GEN_RD(sys_tick);
+GEN_RD(sys_tick_cmpr);
 GEN_RDPR(tick);
+GEN_RDPR(tba);
 GEN_RDPR(pstate);
 GEN_RDPR(pil);
+GEN_RDPR(cwp);
+GEN_RDPR(cansave);
+GEN_RDPR(canrestore);
+GEN_RDPR(cleanwin);
+GEN_RDPR(otherwin);
+GEN_RDPR(wstate);
 GEN_RDPR(ver);
 /*
  * Before adding GEN_RDPRs for other registers, see Errata 50 (E.g,. in
@@ -728,10 +748,18 @@ void flush(void *p)
 	    : "memory");
 }
 
-/* read 64-bit %tick register */
+/* Read 64-bit %tick and %sys_tick registers. */
 #define tick() (sparc_rdpr(tick) & TICK_TICKS)
+#define sys_tick() (sparc_rd(sys_tick) & TICK_TICKS)
+extern u_int64_t stick(void);
 
+<<<<<<< HEAD
 extern void next_tick(long);
+=======
+extern void tickcmpr_set(u_int64_t);
+extern void sys_tickcmpr_set(u_int64_t);
+extern void stickcmpr_set(u_int64_t);
+>>>>>>> origin/master
 
 #endif /* _LOCORE */
 #endif /* _SPARC64_CTLREG_ */

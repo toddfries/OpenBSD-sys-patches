@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.6 2004/09/27 20:39:27 pefo Exp $ */
+/*	$OpenBSD: asm.h,v 1.13 2010/10/01 05:02:19 guenther Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -185,17 +185,17 @@
  */
 #if defined(XGPROF) || defined(XPROF)
 #define	MCOUNT			\
-	PTR_SUBU sp, sp, 32;	\
+	PTR_SUBU sp, sp, 64;	\
 	SAVE_GP(16);		\
-	sw	ra, 28(sp);	\
-	sw	gp, 24(sp);	\
+	sd	ra, 56(sp);	\
+	sd	gp, 48(sp);	\
 	.set	noat;		\
 	.set	noreorder;	\
 	move	AT, ra;		\
 	jal	_mcount;	\
-	PTR_SUBU sp, sp, 8;	\
-	lw	ra, 28(sp);	\
-	PTR_ADDU sp, sp, 32;	\
+	PTR_SUBU sp, sp, 16;	\
+	ld	ra, 56(sp);	\
+	PTR_ADDU sp, sp, 64;	\
 	.set reorder;		\
 	.set	at;
 #else
@@ -270,6 +270,13 @@ x: ;				\
 	.end x
 
 /*
+ * WEAK ALIAS: create a weak alias
+ */
+#define WEAK_ALIAS(alias,sym) \
+	.weak alias; alias = sym
+
+
+/*
  * Macros to panic and printf from assembly language.
  */
 #define PANIC(msg) \
@@ -279,7 +286,7 @@ x: ;				\
 	MSG(msg)
 
 #define	PRINTF(msg) \
-	la	a0, 9f; \
+	LA	a0, 9f; \
 	jal	printf; \
 	nop	;	\
 	MSG(msg)
@@ -292,5 +299,16 @@ x: ;				\
 #define ASMSTR(str) \
 	.asciiz str; \
 	.align	3
+
+#define	LOAD_XKPHYS(reg, cca) \
+	li	reg, cca | 0x10; \
+	dsll	reg, reg, 59
+
+#ifdef MULTIPROCESSOR
+#define GET_CPU_INFO(ci, tmp)	HW_GET_CPU_INFO(ci, tmp)
+#else  /* MULTIPROCESSOR */
+#define GET_CPU_INFO(ci, tmp)		\
+	LA	ci, cpu_info_primary
+#endif /* MULTIPROCESSOR */
 
 #endif /* !_MIPS_ASM_H */

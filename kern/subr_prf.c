@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: subr_prf.c,v 1.68 2006/11/17 09:21:52 jmc Exp $	*/
+=======
+/*	$OpenBSD: subr_prf.c,v 1.75 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -69,9 +73,6 @@
 #ifdef DDB
 #include <ddb/db_output.h>	/* db_printf, db_putchar prototypes */
 #include <ddb/db_var.h>		/* db_log, db_radix */
-#endif
-#if defined(UVM_SWAP_ENCRYPT)
-extern int uvm_doswapencrypt;
 #endif
 
 
@@ -186,10 +187,6 @@ panic(const char *fmt, ...)
 	va_list ap;
 
 	bootopt = RB_AUTOBOOT | RB_DUMP;
-#if defined(UVM_SWAP_ENCRYPT)
-	if (uvm_doswapencrypt)
-		bootopt &= ~RB_DUMP;
-#endif
 	va_start(ap, fmt);
 	if (panicstr)
 		bootopt |= RB_NOSYNC;
@@ -365,12 +362,12 @@ kputchar(int c, int flags, struct tty *tp)
 void
 uprintf(const char *fmt, ...)
 {
-	struct proc *p = curproc;
+	struct process *pr = curproc->p_p;
 	va_list ap;
 
-	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
+	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
 		va_start(ap, fmt);
-		kprintf(fmt, TOTTY, p->p_session->s_ttyp, NULL, ap);
+		kprintf(fmt, TOTTY, pr->ps_session->s_ttyp, NULL, ap);
 		va_end(ap);
 	}
 }
@@ -388,6 +385,7 @@ uprintf(const char *fmt, ...)
 
 /*
  * tprintf_open: get a tprintf handle on a process "p"
+ * XXX change s/proc/process
  *
  * => returns NULL if process can't be printed to
  */
@@ -395,10 +393,11 @@ uprintf(const char *fmt, ...)
 tpr_t
 tprintf_open(struct proc *p)
 {
+	struct process *pr = p->p_p;
 
-	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
-		SESSHOLD(p->p_session);
-		return ((tpr_t) p->p_session);
+	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
+		SESSHOLD(pr->ps_session);
+		return ((tpr_t)pr->ps_session);
 	}
 	return ((tpr_t) NULL);
 }

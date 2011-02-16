@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: netisr.h,v 1.22 2005/06/07 02:45:11 henning Exp $	*/
+=======
+/*	$OpenBSD: netisr.h,v 1.35 2010/12/21 14:56:24 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -41,9 +45,6 @@
  * The software interrupt level for the network is higher than the software
  * level for the clock (so you can enter the network in routines called
  * at timeout time).
- *
- * The routine to request a network software interrupt, setsoftnet(),
- * is defined in the machine-specific include files.
  */
 
 /*
@@ -53,7 +54,13 @@
  * on the lowest level routine of each protocol.
  */
 #define	NETISR_IP	2		/* same as AF_INET */
+<<<<<<< HEAD
 #define	NETISR_IMP	3		/* same as AF_IMPLINK */
+=======
+#define	NETISR_TX	3		/* for if_snd processing */
+#define	NETISR_MPLS	4		/* AF_MPLS would overflow */
+#define	NETISR_PFSYNC	5		/* for pfsync "immediate" tx */
+>>>>>>> origin/master
 #define	NETISR_ATALK	16		/* same as AF_APPLETALK */
 #define	NETISR_ARP	18		/* same as AF_LINK */
 #define	NETISR_IPX	23		/* same as AF_IPX */
@@ -80,10 +87,27 @@ void	pppintr(void);
 void	bridgeintr(void);
 void	pppoeintr(void);
 void	btintr(void);
+<<<<<<< HEAD
 
 #include <dev/rndvar.h>
 #define	schednetisr(anisr)	\
 	{ netisr |= 1<<(anisr); add_net_randomness(anisr); setsoftnet(); }
+=======
+void	mplsintr(void);
+void	pfsyncintr(void);
+
+#include <machine/atomic.h>
+
+extern void *netisr_intr;
+#define	schednetisr(anisr)						\
+do {									\
+	atomic_setbits_int(&netisr, (1 << (anisr)));			\
+	softintr_schedule(netisr_intr);							\
+} while (/* CONSTCOND */0)
+
+void	netisr_init(void);
+
+>>>>>>> origin/master
 #endif
 #endif
 

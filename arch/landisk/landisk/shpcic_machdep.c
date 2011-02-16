@@ -1,4 +1,4 @@
-/*	$OpenBSD: shpcic_machdep.c,v 1.3 2006/10/19 03:37:54 drahn Exp $	*/
+/*	$OpenBSD: shpcic_machdep.c,v 1.5 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: shpcic_machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*
@@ -188,6 +188,8 @@ struct _bus_space landisk_pci_bus_io =
 	.bs_alloc = shpcic_iomem_alloc,
 	.bs_free = shpcic_iomem_free,
 
+	.bs_vaddr = shpcic_iomem_vaddr,
+
 	.bs_r_1 = shpcic_io_read_1,
 	.bs_r_2 = shpcic_io_read_2,
 	.bs_r_4 = shpcic_io_read_4,
@@ -232,9 +234,9 @@ struct _bus_space landisk_pci_bus_io =
 	.bs_sr_2 = shpcic_io_set_region_2,
 	.bs_sr_4 = shpcic_io_set_region_4,
 
-	.bs_c_1 = shpcic_io_copy_region_1,
-	.bs_c_2 = shpcic_io_copy_region_2,
-	.bs_c_4 = shpcic_io_copy_region_4,
+	.bs_c_1 = shpcic_io_copy_1,
+	.bs_c_2 = shpcic_io_copy_2,
+	.bs_c_4 = shpcic_io_copy_4,
 };
 
 struct _bus_space landisk_pci_bus_mem =
@@ -247,6 +249,8 @@ struct _bus_space landisk_pci_bus_mem =
 
 	.bs_alloc = shpcic_iomem_alloc,
 	.bs_free = shpcic_iomem_free,
+
+	.bs_vaddr = shpcic_iomem_vaddr,
 
 	.bs_r_1 = shpcic_mem_read_1,
 	.bs_r_2 = shpcic_mem_read_2,
@@ -292,7 +296,7 @@ struct _bus_space landisk_pci_bus_mem =
 	.bs_sr_2 = shpcic_mem_set_region_2,
 	.bs_sr_4 = shpcic_mem_set_region_4,
 
-	.bs_c_1 = shpcic_mem_copy_region_1,
-	.bs_c_2 = shpcic_mem_copy_region_2,
-	.bs_c_4 = shpcic_mem_copy_region_4,
+	.bs_c_1 = shpcic_mem_copy_1,
+	.bs_c_2 = shpcic_mem_copy_2,
+	.bs_c_4 = shpcic_mem_copy_4,
 };

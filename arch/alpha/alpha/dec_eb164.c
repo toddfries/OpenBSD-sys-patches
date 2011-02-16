@@ -1,4 +1,4 @@
-/* $OpenBSD: dec_eb164.c,v 1.13 2006/07/16 21:52:05 miod Exp $ */
+/* $OpenBSD: dec_eb164.c,v 1.18 2010/11/23 04:07:55 shadchin Exp $ */
 /* $NetBSD: dec_eb164.c,v 1.33 2000/05/22 20:13:32 thorpej Exp $ */
 
 /*
@@ -125,8 +125,7 @@ dec_eb164_cons_init()
 #if NPCKBD > 0
 		/* display console ... */
 		/* XXX */
-		(void) pckbc_cnattach(&ccp->cc_iot, IO_KBD, KBCMDP,
-		    PCKBC_KBD_SLOT);
+		(void) pckbc_cnattach(&ccp->cc_iot, IO_KBD, KBCMDP, 0);
 
 		/*
 		 * On at least LX164, SRM reports an isa video board
@@ -250,8 +249,9 @@ dec_eb164_device_register(dev, aux)
 	 */
 	if (!strcmp(cd->cd_name, "wd")) {
 		struct ata_atapi_attach *aa_link = aux;
+		int variation = hwrpb->rpb_variation & SV_ST_MASK;
 
-		if ((strncmp("pciide", parent->dv_xname, 6) != 0))
+		if ((strcmp("pciide", parent->dv_cfdata->cf_driver->cd_name) != 0))
 			return;
 		if (parent != ctrlrdev)
 			return;
@@ -260,9 +260,25 @@ dec_eb164_device_register(dev, aux)
 		    aa_link->aa_drv_data->drive, aa_link->aa_channel));
 		DR_VERBOSE(printf("Bootdev info: unit: %d, channel: %d\n",
 		    b->unit, b->channel));
-		if (b->unit != aa_link->aa_drv_data->drive ||
-		    b->channel != aa_link->aa_channel)
+		if (b->unit != aa_link->aa_drv_data->drive)
 			return;
+
+		/*
+		 * On 164SX, the built-in IDE controller appears as
+		 * two distinct pciide devices, both with a single
+		 * channel.  However SRM will nevertheless pretend
+		 * the second channel is channel #1 of the second
+		 * device, while it is really channel #0, so just
+		 * ignore the channel number in this case.
+		 */
+		if (variation >= SV_ST_ALPHAPC164SX_400 &&
+		   variation <= SV_ST_ALPHAPC164SX_600 &&
+		    b->slot == 0 * 1000 + 2 * 100 + 8) {
+			/* nothing */
+		} else {
+			if (b->channel != aa_link->aa_channel)
+				return;
+		}
 
 		/* we've found it! */
 		booted_device = dev;

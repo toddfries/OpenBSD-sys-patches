@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: psycho.c,v 1.50 2007/01/26 16:53:28 tsi Exp $	*/
+=======
+/*	$OpenBSD: psycho.c,v 1.67 2010/12/04 17:06:32 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: psycho.c,v 1.39 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*
@@ -42,6 +46,7 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/time.h>
+#include <sys/timetc.h>
 #include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
@@ -113,8 +118,21 @@ int psycho_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 void psycho_identify_pbm(struct psycho_softc *sc, struct psycho_pbm *pp,
     struct pcibus_attach_args *pa);
 
+<<<<<<< HEAD
+=======
+int psycho_conf_size(pci_chipset_tag_t, pcitag_t);
+pcireg_t psycho_conf_read(pci_chipset_tag_t, pcitag_t, int);
+void psycho_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
+
+>>>>>>> origin/master
 /* base pci_chipset */
 extern struct sparc_pci_chipset _sparc_pci_chipset;
+
+u_int stick_get_timecount(struct timecounter *);
+
+struct timecounter stick_timecounter = {
+	stick_get_timecount, NULL, ~0u, 0, "stick", 1000, NULL
+};
 
 /*
  * autoconfiguration
@@ -228,6 +246,11 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	u_int64_t csr;
 	int psycho_br[2], n;
 	struct psycho_type *ptype;
+<<<<<<< HEAD
+=======
+	char buf[32];
+	u_int stick_rate;
+>>>>>>> origin/master
 
 	sc->sc_node = ma->ma_node;
 	sc->sc_bustag = ma->ma_bustag;
@@ -355,9 +378,9 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	/* get the bus-range for the psycho */
 	psycho_get_bus_range(sc->sc_node, psycho_br);
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = psycho_br[0];
-	pba.pba_bridgetag = NULL;
 
 	printf("%s: bus range %u-%u, PCI bus %d\n", sc->sc_dev.dv_xname,
 	    psycho_br[0], psycho_br[1], psycho_br[0]);
@@ -397,12 +420,16 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		psycho_set_intr(sc, 15, psycho_ue,
 		    psycho_psychoreg_vaddr(sc, ue_int_map),
 		    psycho_psychoreg_vaddr(sc, ue_clr_int), "ue");
-		psycho_set_intr(sc, 1, psycho_ce,
-		    psycho_psychoreg_vaddr(sc, ce_int_map),
-		    psycho_psychoreg_vaddr(sc, ce_clr_int), "ce");
-		psycho_set_intr(sc, 15, psycho_bus_a,
-		    psycho_psychoreg_vaddr(sc, pciaerr_int_map),
-		    psycho_psychoreg_vaddr(sc, pciaerr_clr_int), "bus_a");
+		if (sc->sc_mode == PSYCHO_MODE_PSYCHO ||
+		    sc->sc_mode == PSYCHO_MODE_SABRE) {
+			psycho_set_intr(sc, 1, psycho_ce,
+			    psycho_psychoreg_vaddr(sc, ce_int_map),
+			    psycho_psychoreg_vaddr(sc, ce_clr_int), "ce");
+			psycho_set_intr(sc, 15, psycho_bus_a,
+			    psycho_psychoreg_vaddr(sc, pciaerr_int_map),
+			    psycho_psychoreg_vaddr(sc, pciaerr_clr_int),
+			    "bus_a");
+		}
 #if 0
 		psycho_set_intr(sc, 15, psycho_powerfail,
 		    psycho_psychoreg_vaddr(sc, power_int_map),
@@ -413,6 +440,8 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 			    psycho_psychoreg_vaddr(sc, pciberr_int_map),
 			    psycho_psychoreg_vaddr(sc, pciberr_clr_int),
 			    "bus_b");
+		}
+		if (sc->sc_mode == PSYCHO_MODE_PSYCHO) {
 			psycho_set_intr(sc, 1, psycho_wakeup,
 			    psycho_psychoreg_vaddr(sc, pwrmgt_int_map),
 			    psycho_psychoreg_vaddr(sc, pwrmgt_clr_int),
@@ -483,7 +512,7 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_configtag = psycho_alloc_config_tag(sc->sc_psycho_this);
 		if (bus_space_map(sc->sc_configtag,
 		    sc->sc_basepaddr, 0x01000000, 0, &sc->sc_configaddr))
-			panic("could not map psycho PCI configuration space");
+			panic("can't map psycho PCI configuration space");
 	} else {
 		/* Just copy IOMMU state, config tag and address */
 		sc->sc_is = osc->sc_is;
@@ -519,14 +548,28 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_is->is_sb[1] = &pp->pp_sb;
 
 		printf("%s: ", sc->sc_dev.dv_xname);
-		printf("dvma map %x-%x, ", sc->sc_is->is_dvmabase,
+		printf("dvma map %x-%x", sc->sc_is->is_dvmabase,
 		    sc->sc_is->is_dvmaend);
-		printf("iotdb %llx-%llx",
+#ifdef DEBUG
+		printf(", iotdb %llx-%llx",
 		    (unsigned long long)sc->sc_is->is_ptsb,
 		    (unsigned long long)(sc->sc_is->is_ptsb +
 		    (PAGE_SIZE << sc->sc_is->is_tsbsize)));
+#endif
 		iommu_reset(sc->sc_is);
 		printf("\n");
+	}
+
+	/*
+	 * The UltraSPARC IIe has new STICK logic that provides a
+	 * timebase counter that doesn't scale with processor
+	 * frequency.  Use it to provide a timecounter.
+	 */
+	stick_rate = getpropint(findroot(), "stick-frequency", 0);
+	if (stick_rate > 0 && sc->sc_mode == PSYCHO_MODE_SABRE) {
+		stick_timecounter.tc_frequency = stick_rate;
+		stick_timecounter.tc_priv = sc;
+		tc_init(&stick_timecounter);
 	}
 
 	/*
@@ -541,6 +584,12 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_memt = sc->sc_psycho_this->pp_memt;
 	pba.pba_pc->bustag = sc->sc_configtag;
 	pba.pba_pc->bushandle = sc->sc_configaddr;
+<<<<<<< HEAD
+=======
+	pba.pba_pc->conf_size = psycho_conf_size;
+	pba.pba_pc->conf_read = psycho_conf_read;
+	pba.pba_pc->conf_write = psycho_conf_write;
+>>>>>>> origin/master
 	pba.pba_pc->intr_map = psycho_intr_map;
 
 	if (sc->sc_mode == PSYCHO_MODE_PSYCHO)
@@ -718,15 +767,23 @@ int
 psycho_ce(void *arg)
 {
 	struct psycho_softc *sc = arg;
+	u_int64_t afar, afsr;
 
 	/*
 	 * It's correctable.  Dump the regs and continue.
 	 */
 
+	afar = psycho_psychoreg_read(sc, psy_ce_afar);
+	afsr = psycho_psychoreg_read(sc, psy_ce_afsr);
+
 	printf("%s: correctable DMA error AFAR %llx AFSR %llx\n",
-	    sc->sc_dev.dv_xname, 
-	    (long long)psycho_psychoreg_read(sc, psy_ce_afar),
-	    (long long)psycho_psychoreg_read(sc, psy_ce_afsr));
+	    sc->sc_dev.dv_xname, afar, afsr);
+
+	/* Clear error. */
+	psycho_psychoreg_write(sc, psy_ce_afsr,
+	    afsr & (PSY_CEAFSR_PDRD | PSY_CEAFSR_PDWR |
+	    PSY_CEAFSR_SDRD | PSY_CEAFSR_SDWR));
+			       
 	return (1);
 }
 
@@ -928,8 +985,6 @@ psycho_alloc_dma_tag(struct psycho_pbm *pp)
 		dt->_dmamap_sync = psycho_sabre_dvmamap_sync;
 	dt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	dt->_dmamem_free	= iommu_dvmamem_free;
-	dt->_dmamem_map		= iommu_dvmamem_map;
-	dt->_dmamem_unmap	= iommu_dvmamem_unmap;
 
 	return (dt);
 }
@@ -1022,6 +1077,59 @@ psycho_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 	return (-1);
 }
 
+<<<<<<< HEAD
+=======
+bus_addr_t
+psycho_bus_addr(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h)
+{
+	struct psycho_pbm *pp = t->cookie;
+	bus_addr_t addr;
+	int i, ss;
+
+	ss = t->default_type;
+
+	if (t->parent == 0 || t->parent->sparc_bus_addr == 0) {
+		printf("\npsycho_bus_addr: invalid parent");
+		return (-1);
+	}
+
+	t = t->parent;
+
+	addr = ((*t->sparc_bus_addr)(t, t0, h));
+	if (addr == -1)
+		return (-1);
+
+	for (i = 0; i < pp->pp_nrange; i++) {
+		if (((pp->pp_range[i].cspace >> 24) & 0x03) != ss)
+			continue;
+
+		return (BUS_ADDR_PADDR(addr) - pp->pp_range[i].phys_lo);
+	}
+
+	return (-1);
+}
+
+int
+psycho_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return PCI_CONFIG_SPACE_SIZE;
+}
+
+pcireg_t
+psycho_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
+{
+	return (bus_space_read_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg));
+}
+
+void
+psycho_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
+{
+        bus_space_write_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg, data);
+}
+
+>>>>>>> origin/master
 /*
  * Bus-specific interrupt mapping
  */ 
@@ -1215,3 +1323,13 @@ psycho_sabre_dvmamap_sync(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 		membar(MemIssue);
 }
 
+<<<<<<< HEAD
+=======
+u_int
+stick_get_timecount(struct timecounter *tc)
+{
+	struct psycho_softc *sc = tc->tc_priv;
+
+	return psycho_psychoreg_read(sc, stick_reg_low);
+}
+>>>>>>> origin/master

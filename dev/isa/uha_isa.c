@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uha_isa.c,v 1.7 2005/11/23 11:30:14 mickey Exp $	*/
+=======
+/*	$OpenBSD: uha_isa.c,v 1.11 2010/06/26 23:24:44 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uha_isa.c,v 1.5 1996/10/21 22:41:21 thorpej Exp $	*/
 
 /*
@@ -36,7 +40,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -51,10 +55,6 @@
 #include <dev/ic/uhavar.h>
 
 #define	UHA_ISA_IOSIZE	16
-
-#ifndef DDB
-#define	Debugger() panic("should call debugger here (uha_isa.c)")
-#endif
 
 int	uha_isa_probe(struct device *, void *, void *);
 void	uha_isa_attach(struct device *, struct device *, void *);
@@ -256,11 +256,9 @@ u14_start_mbox(sc, mscp)
 			break;
 		delay(100);
 	}
-	if (!spincount) {
-		printf("%s: uha_start_mbox, board not responding\n",
+	if (!spincount)
+		panic("%s: uha_start_mbox, board not responding",
 		    sc->sc_dev.dv_xname);
-		Debugger();
-	}
 
 	bus_space_write_4(iot, ioh, U14_OGMPTR, KVTOPHYS(mscp));
 	if (mscp->flags & MSCP_ABORT)
@@ -269,7 +267,7 @@ u14_start_mbox(sc, mscp)
 		bus_space_write_1(iot, ioh, U14_LINT, U14_OGMFULL);
 
 	if ((mscp->xs->flags & SCSI_POLL) == 0)
-		timeout_add(&mscp->xs->stimeout, (mscp->timeout * hz) / 1000);
+		timeout_add_msec(&mscp->xs->stimeout, mscp->timeout);
 }
 
 /*

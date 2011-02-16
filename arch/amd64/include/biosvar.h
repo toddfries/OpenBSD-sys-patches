@@ -1,5 +1,5 @@
 /* XXX - DSR */
-/*	$OpenBSD: biosvar.h,v 1.6 2006/05/08 22:51:18 gwk Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.11 2010/11/22 21:07:18 miod Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -31,7 +31,6 @@
 
 #ifndef _I386_BIOSVAR_H_
 #define _I386_BIOSVAR_H_
-#pragma pack(1)
 
 	/* some boxes put apm data seg in the 2nd page */
 #define	BOOTARG_OFF	(NBPG*2)
@@ -75,7 +74,7 @@ struct bios_romheader {
 	u_int32_t	entry;		/* initialization entry point */
 	u_int8_t	reserved[19];
 	u_int16_t	pnpheader;	/* offset to PnP expansion header */
-} *bios_romheader_t;
+} __packed *bios_romheader_t;
 
 /*
  * BIOS32
@@ -88,20 +87,20 @@ struct bios32_header {
 	u_int8_t	length;		/* 09: header length */
 	u_int8_t	cksum;		/* 0a: modulo 256 checksum */
 	u_int8_t	reserved[5];
-} *bios32_header_t;
+} __packed *bios32_header_t;
 
 typedef
 struct bios32_entry_info {
 	paddr_t	bei_base;
 	psize_t	bei_size;
 	paddr_t	bei_entry;
-} *bios32_entry_info_t;
+} __packed *bios32_entry_info_t;
 
 typedef
 struct bios32_entry {
 	u_int32_t offset;
 	u_int16_t segment;
-} *bios32_entry_t;
+} __packed *bios32_entry_t;
 
 #define	BIOS32_START	0xe0000
 #define	BIOS32_SIZE	0x20000
@@ -133,7 +132,7 @@ typedef struct _bios_memmap {
 	u_int64_t addr;		/* Beginning of block */
 	u_int64_t size;		/* Size of block */
 	u_int32_t type;		/* Type of block */
-} bios_memmap_t;
+} __packed bios_memmap_t;
 
 /* Info about disk from the bios, plus the mapping from
  * BIOS numbers to BSD major (driver?) number.
@@ -166,7 +165,7 @@ typedef struct _bios_diskinfo {
 #define BDI_EL_TORITO	0x00000008	/* 2,048-byte sectors */
 #define BDI_PICKED	0x80000000	/* kernel-only: cksum matched */
 
-} bios_diskinfo_t;
+} __packed bios_diskinfo_t;
 
 #define	BOOTARG_APMINFO 2
 typedef struct _bios_apminfo {
@@ -179,7 +178,7 @@ typedef struct _bios_apminfo {
 	u_int	apm_data_len;
 	u_int	apm_entry;
 	u_int	apm_code16_len;
-} bios_apminfo_t;
+} __packed bios_apminfo_t;
 
 #define	BOOTARG_CKSUMLEN 3		/* u_int32_t */
 
@@ -190,18 +189,23 @@ typedef struct _bios_pciinfo {
 	u_int32_t	pci_rev;	/* BCD Revision (%ebx) */
 	u_int32_t	pci_entry32;	/* PM entry point for PCI BIOS */
 	u_int32_t	pci_lastbus;	/* Number of last PCI bus */
-} bios_pciinfo_t;
+} __packed bios_pciinfo_t;
 
 #define	BOOTARG_CONSDEV	5
 typedef struct _bios_consdev {
 	dev_t	consdev;
 	int	conspeed;
-} bios_consdev_t;
+} __packed bios_consdev_t;
 
 #define BOOTARG_BOOTMAC	7
 typedef struct _bios_bootmac {
 	char	mac[6];
-} bios_bootmac_t;
+} __packed bios_bootmac_t;
+
+#define BOOTARG_DDB 8
+typedef struct _bios_ddb {
+	int	db_console;
+} __packed bios_ddb_t;
 
 #if defined(_KERNEL) || defined (_STANDALONE)
 
@@ -220,7 +224,7 @@ extern volatile struct BIOS_regs {
 	u_int32_t	biosr_di;
 	u_int32_t	biosr_ds;
 	u_int32_t	biosr_es;
-}	BIOS_regs;
+} __packed BIOS_regs;
 
 #ifdef _KERNEL
 #include <machine/bus.h>
@@ -243,11 +247,6 @@ struct proc;
 
 int bios_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
 
-void bioscnprobe(struct consdev *);
-void bioscninit(struct consdev *);
-void bioscnputc(dev_t, int);
-int bioscngetc(dev_t);
-void bioscnpollc(dev_t, int);
 void bios_getopt(void);
 bios_diskinfo_t *bios_getdiskinfo(dev_t);
 
@@ -261,5 +260,4 @@ extern bios_memmap_t *bios_memmap;
 #endif /* _LOCORE */
 #endif /* _KERNEL || _STANDALONE */
 
-#pragma pack()
 #endif /* _I386_BIOSVAR_H_ */

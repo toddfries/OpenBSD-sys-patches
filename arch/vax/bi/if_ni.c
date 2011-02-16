@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ni.c,v 1.7 2006/01/17 20:26:14 miod Exp $ */
+=======
+/*	$OpenBSD: if_ni.c,v 1.15 2010/09/20 07:40:41 deraadt Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -141,7 +145,6 @@ static	int	niioctl(struct ifnet *, u_long, caddr_t);
 static	int	ni_add_rxbuf(struct ni_softc *, struct ni_dg *, int);
 static	void	ni_setup(struct ni_softc *);
 static	void	nitimeout(struct ifnet *);
-static	void	ni_shutdown(void *);
 static	void ni_getpgs(struct ni_softc *sc, int size, caddr_t *v, paddr_t *p);
 static	int failtest(struct ni_softc *, int, int, int, char *);
 
@@ -192,11 +195,11 @@ ni_getpgs(struct ni_softc *sc, int size, caddr_t *v, paddr_t *p)
 
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, size, NBPG, 0, &seg, 1,
 	    &nsegs, BUS_DMA_NOWAIT)) != 0)
-		panic(" unable to allocate memory: error %d", error);
+		panic(" can't allocate memory: error %d", error);
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, nsegs, size, v,
 	    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0)
-		panic(" unable to map memory: error %d", error);
+		panic(" can't map mem space: error %d", error);
 
 	if (p)
 		*p = seg.ds_addr;
@@ -471,9 +474,6 @@ retry:	WAITREG(NI_PCR, PCR_OWN);
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp, sc->sc_enaddr);
-	if (shutdownhook_establish(ni_shutdown, sc) == 0)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
 }
 
 /*
@@ -699,12 +699,12 @@ niioctl(ifp, cmd, data)
 	caddr_t data;
 {
 	struct ni_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -742,30 +742,16 @@ niioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ec):
-			ether_delmulti(ifr, &sc->sc_ec);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ni_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ni_setup(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }
@@ -884,20 +870,3 @@ nitimeout(ifp)
 	niinit(sc);
 #endif
 }
-
-/*
- * Shutdown hook.  Make sure the interface is stopped at reboot.
- */
-void
-ni_shutdown(arg)
-	void *arg;
-{
-	struct ni_softc *sc = arg;
-
-        WAITREG(NI_PCR, PCR_OWN);
-        NI_WREG(NI_PCR, PCR_OWN|PCR_SHUTDOWN);
-        WAITREG(NI_PCR, PCR_OWN);
-        WAITREG(NI_PSR, PSR_OWN);
-
-}
-

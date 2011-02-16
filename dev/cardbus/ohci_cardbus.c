@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ohci_cardbus.c,v 1.7 2006/07/12 06:26:34 jolan Exp $ */
+=======
+/*	$OpenBSD: ohci_cardbus.c,v 1.17 2010/09/07 16:21:41 deraadt Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ohci_cardbus.c,v 1.19 2004/08/02 19:14:28 mycroft Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,7 +79,6 @@ struct cfattach ohci_cardbus_ca = {
 	    ohci_cardbus_attach, ohci_cardbus_detach, ohci_activate
 };
 
-#define CARDBUS_INTERFACE_OHCI PCI_INTERFACE_OHCI
 #define CARDBUS_CBMEM PCI_CBMEM
 #define cardbus_findvendor pci_findvendor
 #define cardbus_devinfo pci_devinfo
@@ -92,9 +88,9 @@ ohci_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	struct cardbus_attach_args *ca = (struct cardbus_attach_args *)aux;
 
-	if (CARDBUS_CLASS(ca->ca_class) == CARDBUS_CLASS_SERIALBUS &&
-	    CARDBUS_SUBCLASS(ca->ca_class) == CARDBUS_SUBCLASS_SERIALBUS_USB &&
-	    CARDBUS_INTERFACE(ca->ca_class) == CARDBUS_INTERFACE_OHCI)
+	if (PCI_CLASS(ca->ca_class) == PCI_CLASS_SERIALBUS &&
+	    PCI_SUBCLASS(ca->ca_class) == PCI_SUBCLASS_SERIALBUS_USB &&
+	    PCI_INTERFACE(ca->ca_class) == PCI_INTERFACE_OHCI)
 		return (1);
  
 	return (0);
@@ -107,9 +103,14 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
+<<<<<<< HEAD
 	cardbusreg_t csr;
 	char devinfo[256];
+=======
+	pcireg_t csr;
+>>>>>>> origin/master
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
@@ -118,9 +119,13 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	printf(" %s", devinfo);
 
 	/* Map I/O registers */
-	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, CARDBUS_MAPREG_TYPE_MEM, 0,
+	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
+<<<<<<< HEAD
 		printf("%s: can't map mem space\n", devname);
+=======
+		printf(": can't map mem space\n");
+>>>>>>> origin/master
 		return;
 	}
 
@@ -137,28 +142,32 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the device. */
-	csr = cardbus_conf_read(cc, cf, ca->ca_tag,
-				CARDBUS_COMMAND_STATUS_REG);
-	cardbus_conf_write(cc, cf, ca->ca_tag, CARDBUS_COMMAND_STATUS_REG,
-		       csr | CARDBUS_COMMAND_MASTER_ENABLE
-			   | CARDBUS_COMMAND_MEM_ENABLE);
+	csr = pci_conf_read(pc, ca->ca_tag,
+				PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, ca->ca_tag, PCI_COMMAND_STATUS_REG,
+		       csr | PCI_COMMAND_MASTER_ENABLE
+			   | PCI_COMMAND_MEM_ENABLE);
 
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
 					   IPL_USB, ohci_intr, sc, devname);
 	if (sc->sc_ih == NULL) {
+<<<<<<< HEAD
 		printf("%s: couldn't establish interrupt\n", devname);
+=======
+		printf(": couldn't establish interrupt\n");
+>>>>>>> origin/master
 		return;
 	}
 	printf(": irq %d", ca->ca_intrline);
 
 	/* Figure out vendor for root hub descriptor. */
 	vendor = cardbus_findvendor(ca->ca_id);
-	sc->sc.sc_id_vendor = CARDBUS_VENDOR(ca->ca_id);
+	sc->sc.sc_id_vendor = PCI_VENDOR(ca->ca_id);
 	if (vendor)
 		strlcpy(sc->sc.sc_vendor, vendor, sizeof(sc->sc.sc_vendor));
 	else
 		snprintf(sc->sc.sc_vendor, sizeof(sc->sc.sc_vendor),
-		    "vendor 0x%04x", CARDBUS_VENDOR(ca->ca_id));
+		    "vendor 0x%04x", PCI_VENDOR(ca->ca_id));
 
 	/* Display revision and perform legacy emulation handover. */
 	if (ohci_checkrev(&sc->sc) != USBD_NORMAL_COMPLETION ||
@@ -179,8 +188,6 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc.sc_powerhook = powerhook_establish(ohci_power, &sc->sc);
-
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
 				       usbctlprint);
@@ -196,9 +203,6 @@ ohci_cardbus_detach(struct device *self, int flags)
 	rv = ohci_detach(&sc->sc, flags);
 	if (rv)
 		return (rv);
-
-	if (sc->sc.sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc.sc_powerhook);
 
 	if (sc->sc_ih != NULL) {
 		cardbus_intr_disestablish(sc->sc_cc, sc->sc_cf, sc->sc_ih);

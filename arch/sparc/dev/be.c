@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: be.c,v 1.39 2006/03/25 22:41:41 djm Exp $	*/
+=======
+/*	$OpenBSD: be.c,v 1.43 2008/11/28 02:44:17 brad Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -557,7 +561,7 @@ betick(vsc)
 	br->lt_ctr = 0;
 	bestart(ifp);
 	splx(s);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -615,34 +619,21 @@ beioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				be_mcreset(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, cmd);
 		break;
+
 	default:
-		if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-			splx(s);
-			return error;
-		}
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			be_mcreset(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return error;
 }
@@ -753,7 +744,7 @@ beinit(sc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 	splx(s);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 	bestart(ifp);
 }
 

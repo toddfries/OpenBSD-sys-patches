@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: fifo_vnops.c,v 1.21 2004/05/18 12:37:51 pedro Exp $	*/
+=======
+/*	$OpenBSD: fifo_vnops.c,v 1.34 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*
@@ -61,6 +65,7 @@ struct fifoinfo {
 	long		fi_writers;
 };
 
+<<<<<<< HEAD
 int (**fifo_vnodeop_p)(void *);
 struct vnodeopv_entry_desc fifo_vnodeop_entries[] = {
 	{ &vop_default_desc, vn_default_error },
@@ -100,18 +105,46 @@ struct vnodeopv_entry_desc fifo_vnodeop_entries[] = {
 	{ &vop_advlock_desc, fifo_advlock },		/* advlock */
 	{ &vop_bwrite_desc, fifo_bwrite },		/* bwrite */
 	{ NULL, NULL }
+=======
+struct vops fifo_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_lookup	= vop_generic_lookup,
+	.vop_create	= fifo_badop,
+	.vop_mknod	= fifo_badop,
+	.vop_open	= fifo_open,
+	.vop_close	= fifo_close,
+	.vop_access	= fifo_ebadf,
+	.vop_getattr	= fifo_ebadf,
+	.vop_setattr	= fifo_ebadf,
+	.vop_read	= fifo_read,
+	.vop_write	= fifo_write,
+	.vop_ioctl	= fifo_ioctl,
+	.vop_poll	= fifo_poll,
+	.vop_kqfilter	= fifo_kqfilter,
+	.vop_revoke	= vop_generic_revoke,
+	.vop_fsync	= nullop,
+	.vop_remove	= fifo_badop,
+	.vop_link	= fifo_badop,
+	.vop_rename	= fifo_badop,
+	.vop_mkdir	= fifo_badop,
+	.vop_rmdir	= fifo_badop,
+	.vop_symlink	= fifo_badop,
+	.vop_readdir	= fifo_badop,
+	.vop_readlink	= fifo_badop,
+	.vop_abortop	= fifo_badop,
+	.vop_inactive	= fifo_inactive,
+	.vop_reclaim	= fifo_reclaim,
+	.vop_lock	= vop_generic_lock,
+	.vop_unlock	= vop_generic_unlock,
+	.vop_bmap	= vop_generic_bmap,
+	.vop_strategy	= fifo_badop,
+	.vop_print	= fifo_print,
+	.vop_islocked	= vop_generic_islocked,
+	.vop_pathconf	= fifo_pathconf,
+	.vop_advlock	= fifo_advlock,
+	.vop_bwrite	= nullop
+>>>>>>> origin/master
 };
-
-struct vnodeopv_desc fifo_vnodeop_opv_desc =
-	{ &fifo_vnodeop_p, fifo_vnodeop_entries };
-
-int
-fifo_vnoperate(void *v)
-{
-	struct vop_generic_args *ap = v;
-
-	return (VOCALL(fifo_vnodeop_p, ap->a_desc->vdesc_offset, ap));
-}
 
 void	filt_fifordetach(struct knote *kn);
 int	filt_fiforead(struct knote *kn, long hint);
@@ -261,7 +294,7 @@ fifo_read(v)
 	if (ap->a_ioflag & IO_NDELAY)
 		rso->so_state |= SS_NBIO;
 	VOP_UNLOCK(ap->a_vp, 0, p);
-	error = soreceive(rso, NULL, uio, NULL, NULL, NULL);
+	error = soreceive(rso, NULL, uio, NULL, NULL, NULL, 0);
 	vn_lock(ap->a_vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (ap->a_ioflag & IO_NDELAY) {
 		rso->so_state &= ~SS_NBIO;

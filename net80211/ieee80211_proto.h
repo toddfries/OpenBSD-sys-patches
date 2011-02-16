@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ieee80211_proto.h,v 1.10 2006/11/03 19:02:08 damien Exp $	*/
+=======
+/*	$OpenBSD: ieee80211_proto.h,v 1.39 2009/11/21 18:09:31 damien Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ieee80211_proto.h,v 1.3 2003/10/13 04:23:56 dyoung Exp $	*/
 
 /*-
@@ -51,7 +55,11 @@ enum ieee80211_state {
 #define	IEEE80211_S_MAX		(IEEE80211_S_RUN+1)
 
 #define	IEEE80211_SEND_MGMT(_ic,_ni,_type,_arg) \
-	((*(_ic)->ic_send_mgmt)(_ic, _ni, _type, _arg))
+	((*(_ic)->ic_send_mgmt)(_ic, _ni, _type, _arg, 0))
+/* shortcut */
+#define IEEE80211_SEND_ACTION(_ic,_ni,_categ,_action,_arg) \
+	((*(_ic)->ic_send_mgmt)(_ic, _ni, IEEE80211_FC0_SUBTYPE_ACTION, \
+	    (_categ) << 16 | (_action), _arg))
 
 extern	const char *ieee80211_mgt_subtype_name[];
 extern	const char *ieee80211_phymode_name[];
@@ -60,14 +68,27 @@ extern	void ieee80211_proto_attach(struct ifnet *);
 extern	void ieee80211_proto_detach(struct ifnet *);
 
 struct ieee80211_node;
+<<<<<<< HEAD
+=======
+struct ieee80211_rxinfo;
+struct ieee80211_rsnparams;
+extern	void ieee80211_set_link_state(struct ieee80211com *, int);
+extern	u_int ieee80211_get_hdrlen(const struct ieee80211_frame *);
+>>>>>>> origin/master
 extern	void ieee80211_input(struct ifnet *, struct mbuf *,
-		struct ieee80211_node *, int, u_int32_t);
+		struct ieee80211_node *, struct ieee80211_rxinfo *);
 extern	int ieee80211_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		struct rtentry *);
 extern	void ieee80211_recv_mgmt(struct ieee80211com *, struct mbuf *,
-		struct ieee80211_node *, int, int, u_int32_t);
+		struct ieee80211_node *, struct ieee80211_rxinfo *, int);
 extern	int ieee80211_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
+<<<<<<< HEAD
 		int, int);
+=======
+		int, int, int);
+extern	void ieee80211_eapol_key_input(struct ieee80211com *, struct mbuf *,
+		struct ieee80211_node *);
+>>>>>>> origin/master
 extern	struct mbuf *ieee80211_encap(struct ifnet *, struct mbuf *,
 		struct ieee80211_node **);
 extern	struct mbuf *ieee80211_get_rts(struct ieee80211com *,
@@ -76,6 +97,7 @@ extern	struct mbuf *ieee80211_get_cts_to_self(struct ieee80211com *,
 		u_int16_t);
 extern	struct mbuf *ieee80211_beacon_alloc(struct ieee80211com *,
 		struct ieee80211_node *);
+<<<<<<< HEAD
 extern	void ieee80211_pwrsave(struct ieee80211com *, struct ieee80211_node *,
 		struct mbuf *);
 extern	struct mbuf *ieee80211_decap(struct ifnet *, struct mbuf *);
@@ -84,11 +106,62 @@ extern	u_int8_t *ieee80211_add_rates(u_int8_t *frm,
 #define	ieee80211_new_state(_ic, _nstate, _arg) \
 	(((_ic)->ic_newstate)((_ic), (_nstate), (_arg)))
 extern	u_int8_t *ieee80211_add_xrates(u_int8_t *frm,
+=======
+extern int ieee80211_save_ie(const u_int8_t *, u_int8_t **);
+extern	void ieee80211_eapol_timeout(void *);
+extern	int ieee80211_send_4way_msg1(struct ieee80211com *,
+		struct ieee80211_node *);
+extern	int ieee80211_send_4way_msg2(struct ieee80211com *,
+		struct ieee80211_node *, const u_int8_t *,
+		const struct ieee80211_ptk *);
+extern	int ieee80211_send_4way_msg3(struct ieee80211com *,
+		struct ieee80211_node *);
+extern	int ieee80211_send_4way_msg4(struct ieee80211com *,
+		struct ieee80211_node *);
+extern	int ieee80211_send_group_msg1(struct ieee80211com *,
+		struct ieee80211_node *);
+extern	int ieee80211_send_group_msg2(struct ieee80211com *,
+		struct ieee80211_node *, const struct ieee80211_key *);
+extern	int ieee80211_send_eapol_key_req(struct ieee80211com *,
+		struct ieee80211_node *, u_int16_t, u_int64_t);
+extern	int ieee80211_pwrsave(struct ieee80211com *, struct mbuf *,
+		struct ieee80211_node *);
+#define	ieee80211_new_state(_ic, _nstate, _arg) \
+	(((_ic)->ic_newstate)((_ic), (_nstate), (_arg)))
+extern	enum ieee80211_edca_ac ieee80211_up_to_ac(struct ieee80211com *, int);
+extern	u_int8_t *ieee80211_add_capinfo(u_int8_t *, struct ieee80211com *,
+		const struct ieee80211_node *);
+extern	u_int8_t *ieee80211_add_ssid(u_int8_t *, const u_int8_t *, u_int);
+extern	u_int8_t *ieee80211_add_rates(u_int8_t *,
+>>>>>>> origin/master
 		const struct ieee80211_rateset *);
 extern	u_int8_t *ieee80211_add_ssid(u_int8_t *, const u_int8_t *, u_int);
 extern	u_int8_t *ieee80211_add_erp(u_int8_t *, struct ieee80211com *);
+<<<<<<< HEAD
 extern	void ieee80211_print_essid(u_int8_t *, int);
 extern	void ieee80211_dump_pkt(u_int8_t *, int, int, int);
+=======
+extern	u_int8_t *ieee80211_add_qos_capability(u_int8_t *,
+		struct ieee80211com *);
+extern	u_int8_t *ieee80211_add_rsn(u_int8_t *, struct ieee80211com *,
+		const struct ieee80211_node *);
+extern	u_int8_t *ieee80211_add_wpa(u_int8_t *, struct ieee80211com *,
+		const struct ieee80211_node *);
+extern	u_int8_t *ieee80211_add_xrates(u_int8_t *,
+		const struct ieee80211_rateset *);
+extern	u_int8_t *ieee80211_add_htcaps(u_int8_t *, struct ieee80211com *);
+extern	u_int8_t *ieee80211_add_htop(u_int8_t *, struct ieee80211com *);
+extern	u_int8_t *ieee80211_add_tie(u_int8_t *, u_int8_t, u_int32_t);
+
+extern	int ieee80211_parse_rsn(struct ieee80211com *, const u_int8_t *,
+		struct ieee80211_rsnparams *);
+extern	int ieee80211_parse_wpa(struct ieee80211com *, const u_int8_t *,
+		struct ieee80211_rsnparams *);
+extern	void ieee80211_print_essid(const u_int8_t *, int);
+#ifdef IEEE80211_DEBUG
+extern	void ieee80211_dump_pkt(const u_int8_t *, int, int, int);
+#endif
+>>>>>>> origin/master
 extern	int ieee80211_ibss_merge(struct ieee80211com *,
 		struct ieee80211_node *, u_int64_t);
 extern	int ieee80211_compute_duration(struct ieee80211_frame *, int,
@@ -96,6 +169,27 @@ extern	int ieee80211_compute_duration(struct ieee80211_frame *, int,
 		struct ieee80211_duration *, int *, int);
 extern	void ieee80211_reset_erp(struct ieee80211com *);
 extern	void ieee80211_set_shortslottime(struct ieee80211com *, int);
+<<<<<<< HEAD
+=======
+extern	void ieee80211_auth_open(struct ieee80211com *,
+	    const struct ieee80211_frame *, struct ieee80211_node *,
+	    struct ieee80211_rxinfo *rs, u_int16_t, u_int16_t);
+extern	void ieee80211_gtk_rekey_timeout(void *);
+extern	int ieee80211_keyrun(struct ieee80211com *, u_int8_t *);
+extern	void ieee80211_setkeys(struct ieee80211com *);
+extern	void ieee80211_setkeysdone(struct ieee80211com *);
+extern	void ieee80211_sa_query_timeout(void *);
+extern	void ieee80211_sa_query_request(struct ieee80211com *,
+	    struct ieee80211_node *);
+#ifndef IEEE80211_NO_HT
+extern	void ieee80211_tx_ba_timeout(void *);
+extern	void ieee80211_rx_ba_timeout(void *);
+extern	int ieee80211_addba_request(struct ieee80211com *,
+	    struct ieee80211_node *,  u_int16_t, u_int8_t);
+extern	void ieee80211_delba_request(struct ieee80211com *,
+	    struct ieee80211_node *, u_int16_t, u_int8_t, u_int8_t);
+#endif
+>>>>>>> origin/master
 
 extern	const char *ieee80211_state_name[IEEE80211_S_MAX];
 #endif /* _NET80211_IEEE80211_PROTO_H_ */

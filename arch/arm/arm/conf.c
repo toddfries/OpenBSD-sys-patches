@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.12 2006/05/29 17:01:42 drahn Exp $	*/
+/*	$OpenBSD: conf.c,v 1.29 2011/01/14 19:04:08 jasper Exp $	*/
 /*	$NetBSD: conf.c,v 1.10 2002/04/19 01:04:38 wiz Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  * Character and Block Device configuration
  * Console configuration
  *
- * Defines the structures cdevsw and constab
+ * Defines the structures [bc]devsw
  *
  * Created      : 17/09/94
  */
@@ -97,7 +97,6 @@
  */
 #include "wd.h"
 bdev_decl(wd);
-bdev_decl(sw);
 
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -112,12 +111,13 @@ cdev_decl(pci);
 #include "cd.h"
 #include "ch.h"
 #include "uk.h"
-#include "ss.h"
+#include "bio.h"
 
 /*
  * Audio devices
  */
 #include "audio.h"
+#include "video.h"
 #include "midi.h"
 #include "sequencer.h"
 
@@ -133,6 +133,11 @@ cdev_decl(pci);
 #include "uscanner.h"
 
 /*
+ * Bluetooth devices
+ */
+#include "bthub.h"
+
+/*
  * WSCONS devices
  */
 #include "wsdisplay.h"
@@ -146,11 +151,6 @@ cdev_decl(wskbd);
 cdev_decl(wsmouse);
 
 #include "lpt.h"
-#ifdef CONF_HAVE_FCOM
-#include "fcom.h"
-#else
-#define NFCOM	0
-#endif
 
 #include "radio.h"
 cdev_decl(radio);
@@ -265,13 +265,15 @@ struct bdevsw bdevsw[] = {
 #define ptctty          ptytty
 #define ptcioctl        ptyioctl
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "systrace.h"
 
 #include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 #ifdef CONF_HAVE_GPIO
 #include "gpio.h"
@@ -289,7 +291,7 @@ struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),			/*  0: virtual console */
 	cdev_ctty_init(1,ctty),			/*  1: controlling terminal */
 	cdev_mm_init(1,mm),			/*  2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),			/*  3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),				/*  3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),		/*  4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),		/*  5: pseudo-tty master */
 	cdev_log_init(1,log),			/*  6: /dev/klog */
@@ -300,7 +302,7 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 11: */
 	cdev_tty_init(NCOM,com),		/* 12: serial port */
 	cdev_gpio_init(NGPIO,gpio),     	/* 13: GPIO interface */
-	cdev_lkm_dummy(),			/* 14: */
+	cdev_notdef(),				/* 14 was alternate serial port */
 	cdev_lkm_dummy(),			/* 15: */
 	cdev_disk_init(NWD,wd),			/* 16: ST506/ESDI/IDE disk */
 	cdev_lkm_dummy(),			/* 17: */
@@ -315,7 +317,7 @@ struct cdevsw cdevsw[] = {
 	cdev_disk_init(NCD,cd),			/* 26: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),	 		/* 27: SCSI autochanger */
 	cdev_uk_init(NUK,uk),	 		/* 28: SCSI unknown */
-	cdev_scanner_init(NSS,ss),		/* 29: SCSI scanner */
+	cdev_notdef(),				/* 29: */
 	cdev_lkm_dummy(),			/* 30: */
 	cdev_lkm_dummy(),			/* 31: */
 	cdev_lkm_dummy(),			/* 32: */
@@ -324,7 +326,7 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_init(NLKM,lkm),		/* 35: loadable module driver */
 	cdev_audio_init(NAUDIO,audio),		/* 36: generic audio I/O */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 37: devices hot plugging*/
-	cdev_notdef(),				/* 38: removed cpu device */
+	cdev_video_init(NVIDEO,video),		/* 38: generic video I/O */
 	cdev_lkm_dummy(),			/* 39: reserved */
 	cdev_random_init(1,random),		/* 40: random generator */
 	cdev_lkm_dummy(),			/* 41: reserved */
@@ -337,14 +339,14 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 48: reserved */
 	cdev_lkm_dummy(),			/* 49: reserved */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),		/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),				/* 51: reserved */
 #endif
 	cdev_notdef(),				/* 52: reserved */
 	cdev_notdef(),				/* 53: reserved */
-	cdev_tty_init(NFCOM,fcom),		/* 54: FOOTBRIDGE console */
+	cdev_notdef(),				/* 54 was FOOTBRIDGE console */
 	cdev_lkm_dummy(),			/* 55: Reserved for bypass device */	
 	cdev_notdef(),				/* 56: reserved */
 	cdev_midi_init(NMIDI,midi),		/* 57: MIDI I/O */
@@ -394,10 +396,14 @@ struct cdevsw cdevsw[] = {
 	cdev_radio_init(NRADIO,radio),		/* 97: generic radio I/O */
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
 	cdev_spkr_init(NSPKR,spkr),		/* 99: PC speaker */
+	cdev_vscsi_init(NVSCSI,vscsi),		/* 100: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),		/* 101: bthub */
+	cdev_disk_init(1,diskmap),		/* 102: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),		/* 103: pppx */
 };
 
-int nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
-int nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int nblkdev = nitems(bdevsw);
+int nchrdev = nitems(cdevsw);
 
 int mem_no = 2; 	/* major device number of memory special file */
 
@@ -535,7 +541,7 @@ int chrtoblktbl[] = {
     /* 96 */	    NODEV,
     /* 97 */	    NODEV,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 
 dev_t

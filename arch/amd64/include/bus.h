@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.4 2005/11/05 18:29:24 marco Exp $	*/
+/*	$OpenBSD: bus.h,v 1.24 2010/09/06 19:05:48 kettenis Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -72,6 +65,9 @@
 
 #ifndef _X86_BUS_H_
 #define _X86_BUS_H_
+
+#include <sys/mutex.h>
+#include <sys/tree.h>
 
 #include <machine/pio.h>
 
@@ -128,7 +124,7 @@ void	_x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 
 /* like bus_space_map(), but without extent map checking/allocation */
 int	_bus_space_map(bus_space_tag_t t, bus_addr_t addr,
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
 /*
  *      int bus_space_subregion(bus_space_tag_t t,
@@ -148,18 +144,14 @@ int	x86_memio_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
  * Read a 1, 2, 4, or 8 byte quantity from bus space
  * described by tag/handle/offset.
  */
+u_int8_t	bus_space_read_1(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
-#define	bus_space_read_1(t, h, o)					\
-	((t) == X86_BUS_SPACE_IO ? (inb((h) + (o))) :			\
-	    (*(volatile u_int8_t *)((h) + (o))))
+u_int16_t	bus_space_read_2(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
-#define	bus_space_read_2(t, h, o)					\
-	((t) == X86_BUS_SPACE_IO ? (inw((h) + (o))) :			\
-	    (*(volatile u_int16_t *)((h) + (o))))
-
-#define	bus_space_read_4(t, h, o)					\
-	((t) == X86_BUS_SPACE_IO ? (inl((h) + (o))) :			\
-	    (*(volatile u_int32_t *)((h) + (o))))
+u_int32_t	bus_space_read_4(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_read_8 */
 #define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
@@ -174,65 +166,14 @@ int	x86_memio_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
  * described by tag/handle/offset and copy into buffer provided.
  */
 
-#define	bus_space_read_multi_1(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		insb((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movb (%2),%%al				;	\
-			stosb					;	\
-			loop 1b"				: 	\
-		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o))       :	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_read_multi_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int8_t *, bus_size_t);
 
-#define	bus_space_read_multi_2(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		insw((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movw (%2),%%ax				;	\
-			stosw					;	\
-			loop 1b"				:	\
-		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o))       :	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_read_multi_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int16_t *, bus_size_t);
 
-#define	bus_space_read_multi_4(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		insl((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movl (%2),%%eax				;	\
-			stosl					;	\
-			loop 1b"				:	\
-		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o))       :       \
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_read_multi_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_read_multi_8 */
 #define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
@@ -269,98 +210,12 @@ do {									\
  * buffer provided.
  */
 
-#define	bus_space_read_region_1(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inb %w1,%%al				;	\
-			stosb					;	\
-			incl %1					;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsb"					:	\
-		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define	bus_space_read_region_2(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inw %w1,%%ax				;	\
-			stosw					;	\
-			addl $2,%1				;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsw"					:	\
-		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define	bus_space_read_region_4(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inl %w1,%%eax				;	\
-			stosl					;	\
-			addl $4,%1				;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsl"					:	\
-		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_read_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t *, bus_size_t);
+void	bus_space_read_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t *, bus_size_t);
+void	bus_space_read_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t *, bus_size_t);
 
 #define bus_space_read_region_stream_1 bus_space_read_region_1
 #if 0	/* Cause a link error for bus_space_read_region_8 */
@@ -398,26 +253,12 @@ do {									\
  * described by tag/handle/offset.
  */
 
-#define	bus_space_write_1(t, h, o, v)	do {				\
-	if ((t) == X86_BUS_SPACE_IO)					\
-		outb((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int8_t *)((h) + (o)) = (v)));	\
-} while (0)
-
-#define	bus_space_write_2(t, h, o, v)	do {				\
-	if ((t) == X86_BUS_SPACE_IO)					\
-		outw((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int16_t *)((h) + (o)) = (v)));	\
-} while (0)
-
-#define	bus_space_write_4(t, h, o, v)	do {				\
-	if ((t) == X86_BUS_SPACE_IO)					\
-		outl((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int32_t *)((h) + (o)) = (v)));	\
-} while (0)
+void	bus_space_write_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t);
+void	bus_space_write_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t);
+void	bus_space_write_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t);
 
 #if 0	/* Cause a link error for bus_space_write_8 */
 #define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
@@ -432,62 +273,12 @@ do {									\
  * provided to bus space described by tag/handle/offset.
  */
 
-#define	bus_space_write_multi_1(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		outsb((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsb					;	\
-			movb %%al,(%2)				;	\
-			loop 1b"				: 	\
-		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o)));		\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define bus_space_write_multi_2(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		outsw((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsw					;	\
-			movw %%ax,(%2)				;	\
-			loop 1b"				: 	\
-		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o)));		\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define bus_space_write_multi_4(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		outsl((h) + (o), (ptr), (cnt));				\
-	} else {							\
-		void *dummy1;						\
-		int dummy2;						\
-		void *dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsl					;	\
-			movl %%eax,(%2)				;	\
-			loop 1b"				: 	\
-		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) : \
-		    "0" ((ptr)), "1" ((cnt)), "2" ((h) + (o)));		\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_write_multi_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int8_t *, bus_size_t);
+void	bus_space_write_multi_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int16_t *, bus_size_t);
+void	bus_space_write_multi_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_write_multi_8 */
 #define	bus_space_write_multi_8(t, h, o, a, c)				\
@@ -524,98 +315,12 @@ do {									\
  * to bus space described by tag/handle starting at `offset'.
  */
 
-#define	bus_space_write_region_1(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsb					;	\
-			outb %%al,%w1				;	\
-			incl %1					;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsb"					:	\
-		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define	bus_space_write_region_2(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsw					;	\
-			outw %%ax,%w1				;	\
-			addl $2,%1				;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsw"					:	\
-		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
-
-#define	bus_space_write_region_4(t, h, o, ptr, cnt)			\
-do {									\
-	if ((t) == X86_BUS_SPACE_IO) {					\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		int __x;						\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsl					;	\
-			outl %%eax,%w1				;	\
-			addl $4,%1				;	\
-			loop 1b"				: 	\
-		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),		\
-		    "=c" (dummy3)				:	\
-		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:	\
-		    "memory");						\
-	} else {							\
-		int dummy1;						\
-		void *dummy2;						\
-		int dummy3;						\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			movsl"					:	\
-		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:	\
-		    "0" ((h) + (o)), "1" ((ptr)), "2" ((cnt))	:	\
-		    "memory");						\
-	}								\
-} while (/* CONSTCOND */ 0)
+void	bus_space_write_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int8_t *, bus_size_t);
+void	bus_space_write_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int16_t *, bus_size_t);
+void	bus_space_write_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_write_region_8 */
 #define	bus_space_write_region_8					\
@@ -653,63 +358,12 @@ do {									\
  * by tag/handle/offset `count' times.
  */
 
-static __inline void x86_memio_set_multi_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-static __inline void x86_memio_set_multi_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-static __inline void x86_memio_set_multi_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t, size_t);
-
-#define	bus_space_set_multi_1(t, h, o, v, c)				\
-	x86_memio_set_multi_1((t), (h), (o), (v), (c))
-
-#define	bus_space_set_multi_2(t, h, o, v, c)				\
-	x86_memio_set_multi_2((t), (h), (o), (v), (c))
-
-#define	bus_space_set_multi_4(t, h, o, v, c)				\
-	x86_memio_set_multi_4((t), (h), (o), (v), (c))
-
-static __inline void
-x86_memio_set_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int8_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		while (c--)
-			outb(addr, v);
-	else
-		while (c--)
-			*(volatile u_int8_t *)(addr) = v;
-}
-
-static __inline void
-x86_memio_set_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int16_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		while (c--)
-			outw(addr, v);
-	else
-		while (c--)
-			*(volatile u_int16_t *)(addr) = v;
-}
-
-static __inline void
-x86_memio_set_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int32_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		while (c--)
-			outl(addr, v);
-	else
-		while (c--)
-			*(volatile u_int32_t *)(addr) = v;
-}
+void	bus_space_set_multi_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t, size_t);
+void	bus_space_set_multi_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t, size_t);
+void	bus_space_set_multi_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t, size_t);
 
 #if 0	/* Cause a link error for bus_space_set_multi_8 */
 #define	bus_space_set_multi_8					\
@@ -725,63 +379,12 @@ x86_memio_set_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
  * by tag/handle starting at `offset'.
  */
 
-static __inline void x86_memio_set_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int8_t, size_t);
-static __inline void x86_memio_set_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int16_t, size_t);
-static __inline void x86_memio_set_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, u_int32_t, size_t);
-
-#define	bus_space_set_region_1(t, h, o, v, c)				\
-	x86_memio_set_region_1((t), (h), (o), (v), (c))
-
-#define	bus_space_set_region_2(t, h, o, v, c)				\
-	x86_memio_set_region_2((t), (h), (o), (v), (c))
-
-#define	bus_space_set_region_4(t, h, o, v, c)				\
-	x86_memio_set_region_4((t), (h), (o), (v), (c))
-
-static __inline void
-x86_memio_set_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int8_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		for (; c != 0; c--, addr++)
-			outb(addr, v);
-	else
-		for (; c != 0; c--, addr++)
-			*(volatile u_int8_t *)(addr) = v;
-}
-
-static __inline void
-x86_memio_set_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int16_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		for (; c != 0; c--, addr += 2)
-			outw(addr, v);
-	else
-		for (; c != 0; c--, addr += 2)
-			*(volatile u_int16_t *)(addr) = v;
-}
-
-static __inline void
-x86_memio_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int32_t v, size_t c)
-{
-	bus_addr_t addr = h + o;
-
-	if (t == X86_BUS_SPACE_IO)
-		for (; c != 0; c--, addr += 4)
-			outl(addr, v);
-	else
-		for (; c != 0; c--, addr += 4)
-			*(volatile u_int32_t *)(addr) = v;
-}
+void	bus_space_set_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t, size_t);
+void	bus_space_set_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t, size_t);
+void	bus_space_set_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t, size_t);
 
 #if 0	/* Cause a link error for bus_space_set_region_8 */
 #define	bus_space_set_region_8					\
@@ -798,134 +401,12 @@ x86_memio_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-#define bus_space_copy_1 bus_space_copy_region_1
-#define bus_space_copy_2 bus_space_copy_region_2
-#define bus_space_copy_4 bus_space_copy_region_4
-#define bus_space_copy_8 bus_space_copy_region_8
-
-static __inline void x86_memio_copy_region_1(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
-static __inline void x86_memio_copy_region_2(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
-static __inline void x86_memio_copy_region_4(bus_space_tag_t,
-	bus_space_handle_t, bus_size_t, bus_space_handle_t,
-	bus_size_t, size_t);
-
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)			\
-	x86_memio_copy_region_1((t), (h1), (o1), (h2), (o2), (c))
-
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)			\
-	x86_memio_copy_region_2((t), (h1), (o1), (h2), (o2), (c))
-
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)			\
-	x86_memio_copy_region_4((t), (h1), (o1), (h2), (o2), (c))
-
-static __inline void
-x86_memio_copy_region_1(bus_space_tag_t t,
-    bus_space_handle_t h1, bus_size_t o1,
-    bus_space_handle_t h2, bus_size_t o2, size_t c)
-{
-	bus_addr_t addr1 = h1 + o1;
-	bus_addr_t addr2 = h2 + o2;
-
-	if (t == X86_BUS_SPACE_IO) {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1++, addr2++)
-				outb(addr2, inb(addr1));
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += (c - 1), addr2 += (c - 1);
-			    c != 0; c--, addr1--, addr2--)
-				outb(addr2, inb(addr1));
-		}
-	} else {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1++, addr2++)
-				*(volatile u_int8_t *)(addr2) =
-				    *(volatile u_int8_t *)(addr1);
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += (c - 1), addr2 += (c - 1);
-			    c != 0; c--, addr1--, addr2--)
-				*(volatile u_int8_t *)(addr2) =
-				    *(volatile u_int8_t *)(addr1);
-		}
-	}
-}
-
-static __inline void
-x86_memio_copy_region_2(bus_space_tag_t t,
-    bus_space_handle_t h1, bus_size_t o1,
-    bus_space_handle_t h2, bus_size_t o2, size_t c)
-{
-	bus_addr_t addr1 = h1 + o1;
-	bus_addr_t addr2 = h2 + o2;
-
-	if (t == X86_BUS_SPACE_IO) {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1 += 2, addr2 += 2)
-				outw(addr2, inw(addr1));
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += 2 * (c - 1), addr2 += 2 * (c - 1);
-			    c != 0; c--, addr1 -= 2, addr2 -= 2)
-				outw(addr2, inw(addr1));
-		}
-	} else {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1 += 2, addr2 += 2)
-				*(volatile u_int16_t *)(addr2) =
-				    *(volatile u_int16_t *)(addr1);
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += 2 * (c - 1), addr2 += 2 * (c - 1);
-			    c != 0; c--, addr1 -= 2, addr2 -= 2)
-				*(volatile u_int16_t *)(addr2) =
-				    *(volatile u_int16_t *)(addr1);
-		}
-	}
-}
-
-static __inline void
-x86_memio_copy_region_4(bus_space_tag_t t,
-    bus_space_handle_t h1, bus_size_t o1,
-    bus_space_handle_t h2, bus_size_t o2, size_t c)
-{
-	bus_addr_t addr1 = h1 + o1;
-	bus_addr_t addr2 = h2 + o2;
-
-	if (t == X86_BUS_SPACE_IO) {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1 += 4, addr2 += 4)
-				outl(addr2, inl(addr1));
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += 4 * (c - 1), addr2 += 4 * (c - 1);
-			    c != 0; c--, addr1 -= 4, addr2 -= 4)
-				outl(addr2, inl(addr1));
-		}
-	} else {
-		if (addr1 >= addr2) {
-			/* src after dest: copy forward */
-			for (; c != 0; c--, addr1 += 4, addr2 += 4)
-				*(volatile u_int32_t *)(addr2) =
-				    *(volatile u_int32_t *)(addr1);
-		} else {
-			/* dest after src: copy backwards */
-			for (addr1 += 4 * (c - 1), addr2 += 4 * (c - 1);
-			    c != 0; c--, addr1 -= 4, addr2 -= 4)
-				*(volatile u_int32_t *)(addr2) =
-				    *(volatile u_int32_t *)(addr1);
-		}
-	}
-}
+void	bus_space_copy_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
+void	bus_space_copy_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
+void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, bus_space_handle_t, bus_size_t, size_t);
 
 #if 0	/* Cause a link error for bus_space_copy_8 */
 #define	bus_space_copy_8					\
@@ -937,36 +418,34 @@ x86_memio_copy_region_4(bus_space_tag_t t,
  */
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
-/* Compatibility defines */
-#define	BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define	BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
 
-static __inline void
-bus_space_barrier(bus_space_tag_t tag, bus_space_handle_t bsh,
-    bus_size_t offset, bus_size_t len, int flags)
-{
-	if (flags == (BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE))
-		__asm __volatile("mfence");
-	else if (flags == BUS_SPACE_BARRIER_WRITE)
-		__asm __volatile("sfence");
-	else
-		__asm __volatile("lfence");
-}
+void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, bus_size_t, int);
 
 /*
  * Flags used in various bus DMA methods.
  */
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x020
-#define	BUS_DMA_BUS3		0x040
-#define	BUS_DMA_24BIT		0x080	/* isadma map */
-#define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0020
+#define	BUS_DMA_32BIT		0x0040
+#define	BUS_DMA_24BIT		0x0080	/* isadma map */
+#define	BUS_DMA_STREAMING	0x0100	/* hint: sequential, unidirectional */
+#define	BUS_DMA_READ		0x0200	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0400	/* mapping is memory -> device only */
+#define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
+#define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
+#define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
+
+/* types for _dm_buftype */
+#define	BUS_BUFTYPE_INVALID	0
+#define	BUS_BUFTYPE_LINEAR	1
+#define	BUS_BUFTYPE_MBUF	2
+#define	BUS_BUFTYPE_UIO		3
+#define	BUS_BUFTYPE_RAW		4
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -981,8 +460,8 @@ struct uio;
 #define BUS_DMASYNC_PREWRITE	0x04
 #define BUS_DMASYNC_POSTWRITE	0x08
 
-typedef struct x86_bus_dma_tag		*bus_dma_tag_t;
-typedef struct x86_bus_dmamap		*bus_dmamap_t;
+typedef struct bus_dma_tag		*bus_dma_tag_t;
+typedef struct bus_dmamap		*bus_dmamap_t;
 
 /*
  *	bus_dma_segment_t
@@ -990,11 +469,18 @@ typedef struct x86_bus_dmamap		*bus_dmamap_t;
  *	Describes a single contiguous DMA transaction.  Values
  *	are suitable for programming into DMA registers.
  */
-struct x86_bus_dma_segment {
+struct bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
 	bus_size_t	ds_len;		/* length of transfer */
+	/*
+	 * Ugh. need this so can pass alignment down from bus_dmamem_alloc
+	 * to scatter gather maps. only the first one is used so the rest is
+	 * wasted space. bus_dma could do with fixing the api for this.
+	 */
+	 bus_size_t	_ds_boundary;	/* don't cross */
+	 bus_size_t	_ds_align;	/* align to me */
 };
-typedef struct x86_bus_dma_segment	bus_dma_segment_t;
+typedef struct bus_dma_segment	bus_dma_segment_t;
 
 /*
  *	bus_dma_tag_t
@@ -1003,7 +489,7 @@ typedef struct x86_bus_dma_segment	bus_dma_segment_t;
  *	DMA for a given bus.
  */
 
-struct x86_bus_dma_tag {
+struct bus_dma_tag {
 	void	*_cookie;		/* cookie used in the guts */
 
 	/*
@@ -1053,8 +539,7 @@ struct x86_bus_dma_tag {
 #define	bus_dmamap_unload(t, p)					\
 	(*(t)->_dmamap_unload)((t), (p))
 #define	bus_dmamap_sync(t, p, o, l, ops)			\
-	(void)((t)->_dmamap_sync ?				\
-	    (*(t)->_dmamap_sync)((t), (p), (o), (l), (ops)) : (void)0)
+	(*(t)->_dmamap_sync)((t), (p), (o), (l), (ops))
 
 #define	bus_dmamem_alloc(t, s, a, b, sg, n, r, f)		\
 	(*(t)->_dmamem_alloc)((t), (s), (a), (b), (sg), (n), (r), (f))
@@ -1072,7 +557,7 @@ struct x86_bus_dma_tag {
  *
  *	Describes a DMA mapping.
  */
-struct x86_bus_dmamap {
+struct bus_dmamap {
 	/*
 	 * PRIVATE MEMBERS: not for use by machine-independent code.
 	 */
@@ -1092,7 +577,6 @@ struct x86_bus_dmamap {
 	bus_dma_segment_t dm_segs[1];	/* segments; variable length */
 };
 
-#ifdef _X86_BUS_DMA_PRIVATE
 int	_bus_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
 	    bus_size_t, int, bus_dmamap_t *);
 void	_bus_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
@@ -1125,6 +609,66 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
 	    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags,
 	    paddr_t low, paddr_t high);
 
+struct extent;
+
+/* Scatter gather bus_dma functions. */
+struct sg_cookie {
+	struct mutex	 sg_mtx;
+	struct extent	*sg_ex;
+	void		*sg_hdl;
+
+	void		(*bind_page)(void *, bus_addr_t, paddr_t, int);
+	void		(*unbind_page)(void *, bus_addr_t);
+	void		(*flush_tlb)(void *);
+};
+
+/* 
+ * per-map DVMA page table
+ */
+struct sg_page_entry {
+	SPLAY_ENTRY(sg_page_entry)	spe_node;
+	paddr_t				spe_pa;
+	bus_addr_t			spe_va;
+};
+
+/* for sg_dma this will be in the map's dm_cookie. */
+struct sg_page_map {
+	SPLAY_HEAD(sg_page_tree, sg_page_entry) spm_tree;
+
+	void			*spm_origbuf;	/* pointer to original data */
+	int			 spm_buftype;	/* type of data */
+	struct proc		*spm_proc;	/* proc that owns the mapping */
+
+	int			 spm_maxpage;	/* Size of allocated page map */
+	int			 spm_pagecnt;	/* Number of entries in use */
+	bus_addr_t		 spm_start;	/* dva when bound */
+	bus_size_t		 spm_size;	/* size of bound map */
+	struct sg_page_entry	 spm_map[1];
+};
+
+struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,
+			    void (*)(void *, vaddr_t, paddr_t, int),
+			    void (*)(void *, vaddr_t), void (*)(void *));
+void	sg_dmatag_destroy(struct sg_cookie *);
+int	sg_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
+	    bus_size_t, int, bus_dmamap_t *);
+void	sg_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
+void	sg_dmamap_set_alignment(bus_dma_tag_t, bus_dmamap_t, u_long);
+int	sg_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int);
+int	sg_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int);
+int	sg_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
+int	sg_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+	    int, bus_size_t, int);
+void	sg_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
+int	sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int, int *, int);
+int	sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
+	    int, int, int *, int);
+int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
+	    bus_dma_segment_t *, int, int *, int);
+
 /*      
  *      paddr_t bus_space_mmap(bus_space_tag_t t, bus_addr_t base,
  *          off_t offset, int prot, int flags);
@@ -1132,9 +676,6 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
  * Mmap an area of bus space.
  */
  
-paddr_t x86_memio_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
-            
-
-#endif /* _X86_BUS_DMA_PRIVATE */
+paddr_t bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 #endif /* _X86_BUS_H_ */

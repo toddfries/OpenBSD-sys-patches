@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: autoconf.c,v 1.23 2006/07/23 19:23:09 miod Exp $	*/
+=======
+/*	$OpenBSD: autoconf.c,v 1.32 2009/03/20 18:39:30 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
 
 /*
@@ -48,9 +52,11 @@
 #include <machine/ioa.h>
 #include <machine/ka820.h>
 #include <machine/ka750.h>
-#include <machine/ka650.h>
 #include <machine/clock.h>
 #include <machine/rpb.h>
+#ifdef VAX60
+#include <vax/mbus/mbusreg.h>
+#endif
 
 #include "led.h"
 
@@ -58,18 +64,30 @@
 
 #include <vax/bi/bireg.h>
 
+<<<<<<< HEAD
 void	cpu_dumpconf(void);	/* machdep.c */
 void	gencnslask(void);
 void	setroot(void);		/* rootfil.c */
+=======
+void	dumpconf(void);	/* machdep.c */
+>>>>>>> origin/master
 
 struct cpu_dep *dep_call;
 extern struct device *bootdv;
 
 int	mastercpu;	/* chief of the system */
 
+<<<<<<< HEAD
+=======
+struct device *bootdv;
+int booted_partition;	/* defaults to 0 (aka 'a' partition) */
+
+>>>>>>> origin/master
 void
 cpu_configure()
 {
+	softintr_init();
+
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("mainbus not configured");
 
@@ -328,14 +346,9 @@ booted_sd(struct device *dev, void *aux)
 
 	/* Is this a SCSI device? */
 	if (jmfr("sd", dev, BDEV_SD) && jmfr("cd", dev, BDEV_SD) &&
-	    jmfr("sd", dev, BDEV_SDN) && jmfr("cd", dev, BDEV_SDN))
+	    jmfr("sd", dev, BDEV_SDN) && jmfr("cd", dev, BDEV_SDN) &&
+	    jmfr("sd", dev, BDEV_SDS) && jmfr("cd", dev, BDEV_SDS))
 		return 0;
-
-#ifdef __NetBSD__
-	if (sa->sa_periph->periph_channel->chan_bustype->bustype_type !=
-	    SCSIPI_BUSTYPE_SCSI)
-		return 0; /* ``Cannot happen'' */
-#endif
 
 	if (sa->sa_sc_link->target != rpb.unit)
 		return 0; /* Wrong unit */
@@ -343,11 +356,18 @@ booted_sd(struct device *dev, void *aux)
 	ppdev = dev->dv_parent->dv_parent;
 
 	/* VS3100 NCR 53C80 (si) & VS4000 NCR 53C94 (asc) */
-	if (((jmfr("ncr",  ppdev, BDEV_SD) == 0) ||	/* old name */
+	if (((jmfr("ncr", ppdev, BDEV_SD) == 0) ||	/* old name */
 	    (jmfr("asc", ppdev, BDEV_SD) == 0) ||
 	    (jmfr("asc", ppdev, BDEV_SDN) == 0)) &&
 	    (ppdev->dv_cfdata->cf_loc[0] == rpb.csrphy))
 			return 1;
+
+#ifdef VAX60
+	/* VS35x0 (sii) */
+	if (jmfr("sii", ppdev, BDEV_SDS) == 0 && rpb.csrphy ==
+	    MBUS_SLOT_BASE(ppdev->dv_parent->dv_cfdata->cf_loc[0]))
+		return 1;
+#endif
 
 	return 0; /* Where did we come from??? */
 }
@@ -438,3 +458,26 @@ booted_hd(struct device *dev, void *aux)
 	return 1;
 }
 #endif
+<<<<<<< HEAD
+=======
+
+struct  ngcconf {
+        struct  cfdriver *ng_cf;
+        dev_t   ng_root;
+};
+
+struct nam2blk nam2blk[] = {
+	{ "ra",          9 },
+	{ "rx",         12 },
+#ifdef notyet
+	{ "rl",         14 },
+#endif
+	{ "hd",		19 },
+	{ "sd",         20 },
+	{ "cd",         22 },
+	{ "rd",         23 },
+	{ "raid",       25 },
+	{ "vnd",	18 },
+	{ NULL,		-1 }
+};
+>>>>>>> origin/master

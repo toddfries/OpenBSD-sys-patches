@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: autoconf.c,v 1.6 2006/05/25 22:40:18 miod Exp $	*/
+=======
+/*	$OpenBSD: autoconf.c,v 1.14 2010/11/28 20:44:20 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.2 2001/09/05 16:17:36 matt Exp $	*/
 
 /*
@@ -55,10 +59,13 @@
 
 #include <dev/cons.h>
 
+<<<<<<< HEAD
 
 struct device *booted_device;
 int booted_partition;
 
+=======
+>>>>>>> origin/master
 struct device *bootdv = NULL;
 
 int findblkmajor(struct device *dv);
@@ -232,6 +239,7 @@ cpu_configure(void)
 
 }
 
+<<<<<<< HEAD
 /*
  * Attempt to find the device from which we were booted.
  * If we can do so, and not instructed not to do so,
@@ -445,3 +453,14 @@ gotswap:
 		dumpdev = swdevt[0].sw_dev;
 }
 /* End of autoconf.c */
+=======
+struct nam2blk nam2blk[] = {
+	{ "wd",		16 },
+	{ "sd",		24 },
+	{ "cd",		26 },
+	{ "rd",		18 },
+	{ "raid",	71 },
+	{ "vnd",	19 },
+	{ NULL,		-1 }
+};
+>>>>>>> origin/master

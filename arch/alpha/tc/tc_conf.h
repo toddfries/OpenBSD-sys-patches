@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_conf.h,v 1.7 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: tc_conf.h,v 1.11 2010/09/22 12:36:32 miod Exp $ */
 /* $NetBSD: tc_conf.h,v 1.10 2000/06/04 19:14:29 cgd Exp $ */
 
 /*
@@ -39,8 +39,9 @@ extern void	tc_3000_500_intr_setup(void);
 extern void	tc_3000_500_iointr(void *, unsigned long);
 
 extern void	tc_3000_500_intr_establish(struct device *, void *,
-		    tc_intrlevel_t, int (*)(void *), void *);
-extern void	tc_3000_500_intr_disestablish(struct device *, void *);
+		    int, int (*)(void *), void *, const char *);
+extern void	tc_3000_500_intr_disestablish(struct device *, void *,
+		    const char *);
 
 extern int	tc_3000_500_nslots;
 extern struct tc_slotdesc tc_3000_500_slots[];
@@ -57,8 +58,9 @@ extern void	tc_3000_300_intr_setup(void);
 extern void	tc_3000_300_iointr(void *, unsigned long);
 
 extern void	tc_3000_300_intr_establish(struct device *, void *,
-		    tc_intrlevel_t, int (*)(void *), void *);
-extern void	tc_3000_300_intr_disestablish(struct device *, void *);
+		    int, int (*)(void *), void *, const char *);
+extern void	tc_3000_300_intr_disestablish(struct device *, void *,
+		    const char *);
 
 extern int	tc_3000_300_nslots;
 extern struct tc_slotdesc tc_3000_300_slots[];

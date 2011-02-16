@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_pmap.h,v 1.17 2004/01/29 20:50:33 drahn Exp $	*/
+=======
+/*	$OpenBSD: uvm_pmap.h,v 1.22 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_pmap.h,v 1.1 2000/06/27 09:00:14 mrg Exp $	*/
 
 /* 
@@ -92,6 +96,10 @@ typedef struct pmap_statistics	*pmap_statistics_t;
  */
 #define	PMAP_WIRED	0x00000010	/* wired mapping */
 #define	PMAP_CANFAIL	0x00000020	/* can fail if resource shortage */
+#define	PMAP_MD0	0x00000040	/* Machine dependant */
+#define	PMAP_MD1	0x00000080	/* Machine dependant */
+#define	PMAP_MD2	0x00000100	/* Machine dependant */
+#define	PMAP_MD3	0x00000200	/* Machine dependant */
 
 #ifndef PMAP_EXCLUDE_DECLS	/* Used in Sparc port to virtualize pmap mod */
 #ifdef _KERNEL
@@ -144,11 +152,15 @@ boolean_t	 pmap_is_referenced(struct vm_page *);
 
 void		 pmap_page_protect(struct vm_page *, vm_prot_t);
 
+<<<<<<< HEAD
 #if !defined(pmap_phys_address)
 paddr_t	 pmap_phys_address(int);
+=======
+#if !defined(pmap_proc_iflush)
+void		pmap_proc_iflush(struct proc *, vaddr_t, vsize_t);
+>>>>>>> origin/master
 #endif
-void		 pmap_protect(pmap_t,
-		    vaddr_t, vaddr_t, vm_prot_t);
+void		 pmap_protect(pmap_t, vaddr_t, vaddr_t, vm_prot_t);
 #if !defined(pmap_reference)
 void		 pmap_reference(pmap_t);
 #endif

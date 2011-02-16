@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgsix.c,v 1.37 2006/12/03 16:38:13 miod Exp $	*/
+=======
+/*	$OpenBSD: cgsix.c,v 1.43 2010/07/10 19:32:24 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cgsix.c,v 1.33 1997/08/07 19:12:30 pk Exp $ */
 
 /*
@@ -77,12 +81,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
-#include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/malloc.h>
-#include <sys/mman.h>
-#include <sys/tty.h>
 #include <sys/conf.h>
 
 #include <uvm/uvm_extern.h>
@@ -103,7 +101,8 @@
 #include <sparc/dev/btreg.h>
 #include <sparc/dev/btvar.h>
 #include <sparc/dev/cgsixreg.h>
-#include <sparc/dev/sbusvar.h>
+#include <dev/ic/bt458reg.h>
+
 #if defined(SUN4)
 #include <sparc/dev/pfourreg.h>
 #endif
@@ -130,11 +129,11 @@ paddr_t	cgsix_mmap(void *, off_t, int);
 void	cgsix_reset(struct cgsix_softc *, u_int);
 void	cgsix_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 
-void	cgsix_ras_copyrows(void *, int, int, int);
-void	cgsix_ras_copycols(void *, int, int, int, int);
-void	cgsix_ras_do_cursor(struct rasops_info *);
-void	cgsix_ras_erasecols(void *, int, int, int, long);
-void	cgsix_ras_eraserows(void *, int, int, long);
+int	cgsix_ras_copyrows(void *, int, int, int);
+int	cgsix_ras_copycols(void *, int, int, int, int);
+int	cgsix_ras_do_cursor(struct rasops_info *);
+int	cgsix_ras_erasecols(void *, int, int, int, long);
+int	cgsix_ras_eraserows(void *, int, int, long);
 void	cgsix_ras_init(struct cgsix_softc *);
 
 struct wsdisplay_accessops cgsix_accessops = {
@@ -248,17 +247,17 @@ cgsixattach(struct device *parent, struct device *self, void *args)
 	if (CPU_ISSUN4) {
 		struct eeprom *eep = (struct eeprom *)eeprom_va;
 		int constype = ISSET(sc->sc_sunfb.sf_flags, FB_PFOUR) ?
-		    EE_CONS_P4OPT : EE_CONS_COLOR;
+		    EED_CONS_P4 : EED_CONS_COLOR;
 		/*
 		 * Assume this is the console if there's no eeprom info
 		 * to be found.
 		 */
-		if (eep == NULL || eep->eeConsole == constype)
+		if (eep == NULL || eep->ee_diag.eed_console == constype)
 			isconsole = 1;
 	}
 #endif
 
-	if (CPU_ISSUN4COR4M)
+	if (!CPU_ISSUN4)
 		isconsole = node == fbnode;
 
 	fhcrev = (*sc->sc_fhc >> FHC_REV_SHIFT) &
@@ -279,19 +278,10 @@ cgsixattach(struct device *parent, struct device *self, void *args)
 	    CGSIX_VID_OFFSET, round_page(sc->sc_sunfb.sf_fbsize));
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 
-	/*
-	 * If the framebuffer width is under 1024x768, we will switch from the
-	 * PROM font to the more adequate 8x16 font here.
-	 * However, we need to adjust two things in this case:
-	 * - the display row should be overrided from the current PROM metrics,
-	 *   to prevent us from overwriting the last few lines of text.
-	 * - if the 80x34 screen would make a large margin appear around it,
-	 *   choose to clear the screen rather than keeping old prom output in
-	 *   the margins.
-	 * XXX there should be a rasops "clear margins" feature
-	 */
-	fbwscons_init(&sc->sc_sunfb, isconsole &&
-	    (sc->sc_sunfb.sf_width >= 1024) ? 0 : RI_CLEAR);
+	printf("%dx%d, rev %d\n", sc->sc_sunfb.sf_width,
+	    sc->sc_sunfb.sf_height, fhcrev);
+
+	fbwscons_init(&sc->sc_sunfb, isconsole);
 	fbwscons_setcolormap(&sc->sc_sunfb, cgsix_setcolor);
 
 	/*
@@ -309,13 +299,8 @@ cgsixattach(struct device *parent, struct device *self, void *args)
 		cgsix_ras_init(sc);
 	}
 
-	printf("%dx%d, rev %d\n", sc->sc_sunfb.sf_width,
-	    sc->sc_sunfb.sf_height, fhcrev);
-
-	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb,
-		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0);
-	}
+	if (isconsole)
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 
 	fbwscons_attach(&sc->sc_sunfb, &cgsix_accessops, isconsole);
 }
@@ -409,8 +394,8 @@ cgsix_reset(struct cgsix_softc *sc, u_int fhcrev)
 
 	/* Enable cursor in Brooktree DAC. */
 	bt = sc->sc_bt;
-	bt->bt_addr = 0x06 << 24;
-	bt->bt_ctrl |= 0x03 << 24;
+	bt->bt_addr = BT_CR << 24;
+	bt->bt_ctrl |= (BTCR_DISPENA_OV1 | BTCR_DISPENA_OV0) << 24;
 }
 
 paddr_t
@@ -515,7 +500,7 @@ cgsix_ras_init(struct cgsix_softc *sc)
 	sc->sc_fbc->fbc_mode = m;
 }
 
-void
+int
 cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 {
 	struct rasops_info *ri = cookie;
@@ -523,7 +508,7 @@ cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 	volatile struct cgsix_fbc *fbc = sc->sc_fbc;
 
 	if (dst == src)
-		return;
+		return 0;
 	if (src < 0) {
 		n += src;
 		src = 0;
@@ -537,7 +522,7 @@ cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 	if (dst + n > ri->ri_rows)
 		n = ri->ri_rows - dst;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontheight;
 	src *= ri->ri_font->fontheight;
 	dst *= ri->ri_font->fontheight;
@@ -561,9 +546,11 @@ cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 	fbc->fbc_y3 = ri->ri_yorigin + dst + n - 1;
 	CG6_BLIT_WAIT(fbc);
 	CG6_DRAIN(fbc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 {
 	struct rasops_info *ri = cookie;
@@ -571,9 +558,9 @@ cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 	volatile struct cgsix_fbc *fbc = sc->sc_fbc;
 
 	if (dst == src)
-		return;
+		return 0;
 	if ((row < 0) || (row >= ri->ri_rows))
-		return;
+		return 0;
 	if (src < 0) {
 		n += src;
 		src = 0;
@@ -587,7 +574,7 @@ cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 	if (dst + n > ri->ri_cols)
 		n = ri->ri_cols - dst;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontwidth;
 	src *= ri->ri_font->fontwidth;
 	dst *= ri->ri_font->fontwidth;
@@ -612,9 +599,11 @@ cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 	fbc->fbc_y3 = ri->ri_yorigin + row + ri->ri_font->fontheight - 1;
 	CG6_BLIT_WAIT(fbc);
 	CG6_DRAIN(fbc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_erasecols(void *cookie, int row, int col, int n, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -623,7 +612,7 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long attr)
 	int fg, bg;
 
 	if ((row < 0) || (row >= ri->ri_rows))
-		return;
+		return 0;
 	if (col < 0) {
 		n += col;
 		col = 0;
@@ -631,7 +620,7 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long attr)
 	if (col + n > ri->ri_cols)
 		n = ri->ri_cols - col;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontwidth;
 	col *= ri->ri_font->fontwidth;
 	row *= ri->ri_font->fontheight;
@@ -654,9 +643,11 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long attr)
 	fbc->fbc_arectx = ri->ri_xorigin + col + n - 1;
 	CG6_DRAW_WAIT(fbc);
 	CG6_DRAIN(fbc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_eraserows(void *cookie, int row, int n, long attr)
 {
 	struct rasops_info *ri = cookie;
@@ -671,7 +662,7 @@ cgsix_ras_eraserows(void *cookie, int row, int n, long attr)
 	if (row + n > ri->ri_rows)
 		n = ri->ri_rows - row;
 	if (n <= 0)
-		return;
+		return 0;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
@@ -701,9 +692,11 @@ cgsix_ras_eraserows(void *cookie, int row, int n, long attr)
 	}
 	CG6_DRAW_WAIT(fbc);
 	CG6_DRAIN(fbc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_do_cursor(struct rasops_info *ri)
 {
 	struct cgsix_softc *sc = ri->ri_hw;
@@ -727,4 +720,6 @@ cgsix_ras_do_cursor(struct rasops_info *ri)
 	fbc->fbc_arectx = ri->ri_xorigin + col + ri->ri_font->fontwidth - 1;
 	CG6_DRAW_WAIT(fbc);
 	CG6_DRAIN(fbc);
+
+	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_intr.h,v 1.8 2005/08/08 16:30:47 uwe Exp $ */
+/*	$OpenBSD: pxa2x0_intr.h,v 1.13 2009/08/26 20:31:43 deraadt Exp $ */
 /*	$NetBSD: pxa2x0_intr.h,v 1.4 2003/07/05 06:53:08 dogcow Exp $ */
 
 /* Derived from i80321_intr.h */
@@ -100,9 +100,28 @@ void pxa2x0_intr_bootstrap(vaddr_t);
 
 void pxa2x0_irq_handler(void *);
 void *pxa2x0_intr_establish(int irqno, int level, int (*func)(void *),
-    void *cookie, char *name);
+    void *cookie, const char *name);
 void pxa2x0_intr_disestablish(void *cookie);
 const char *pxa2x0_intr_string(void *cookie);
+
+#ifdef DIAGNOSTIC
+/*
+ * Although this function is implemented in MI code, it must be in this MD
+ * header because we don't want this header to include MI includes.
+ */
+void splassert_fail(int, int, const char *);
+extern int splassert_ctl;
+void pxa2x0_splassert_check(int, const char *);
+#define splassert(__wantipl) do {				\
+	if (splassert_ctl > 0) {				\
+		pxa2x0_splassert_check(__wantipl, __func__);	\
+	}							\
+} while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
+#else
+#define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
+#endif
 
 #endif /* ! _LOCORE */
 

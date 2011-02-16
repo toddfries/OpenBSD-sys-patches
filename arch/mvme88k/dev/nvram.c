@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.c,v 1.28 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: nvram.c,v 1.33 2010/12/26 15:40:59 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -33,6 +33,7 @@
 #include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
+#include <sys/timetc.h>
 
 #include <machine/autoconf.h>
 #include <machine/bugio.h>
@@ -122,45 +123,13 @@ nvramattach(parent, self, args)
 
 	if (bus_space_map(sc->sc_iot, sc->sc_base, round_page(maplen),
 	    BUS_SPACE_MAP_LINEAR, &ioh) != 0) {
-		printf(": can't map memory!\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
 	sc->sc_ioh = ioh;
 
 	printf(": MK48T0%d\n", sc->sc_len / 1024);
-}
-
-/*
- * Return the best possible estimate of the time in the timeval
- * to which tvp points.  We do this by returning the current time
- * plus the amount of time since the last clock interrupt (clock.c:clkread).
- *
- * Check that this time is no less than any previously-reported time,
- * which could happen around the time of a clock adjustment.  Just for fun,
- * we guarantee that the time will be greater than the value obtained by a
- * previous call.
- */
-void
-microtime(tvp)
-	struct timeval *tvp;
-{
-	int s = splhigh();
-	static struct timeval lasttime;
-
-	*tvp = time;
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	if (tvp->tv_sec == lasttime.tv_sec &&
-	    tvp->tv_usec <= lasttime.tv_usec &&
-	    (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
 }
 
 /*
@@ -232,7 +201,7 @@ void
 timetochip(c)
 	struct chiptime *c;
 {
-	int t, t2, t3, now = time.tv_sec;
+	time_t t, t2, t3, now = time_second;
 
 	/* January 1 1970 was a Thursday (4 in unix wdays) */
 	/* compute the days since the epoch */
@@ -282,12 +251,14 @@ timetochip(c)
  */
 
 void
-inittodr(base)
-	time_t base;
+inittodr(time_t base)
 {
 	struct nvramsoftc *sc = (struct nvramsoftc *) nvram_cd.cd_devs[0];
 	int sec, min, hour, day, mon, year;
 	int badbase = 0, waszero = base == 0;
+	struct timespec ts;
+
+	ts.tv_sec = ts.tv_nsec = 0;
 
 	if (base < 35 * SECYR) {
 		/*
@@ -297,7 +268,7 @@ inittodr(base)
 		if (base != 0)
 			printf("WARNING: preposterous time in file system\n");
 		/* not going to use it anyway, if the chip is readable */
-		base = 36 * SECYR + 109 * SECDAY + 22 * 3600;
+		base = 39 * SECYR;
 		badbase = 1;
 	}
 
@@ -345,7 +316,7 @@ inittodr(base)
 		      sc->sc_regs + CLK_CSR) & ~CLK_READ);
 	}
 
-	if ((time.tv_sec = chiptotime(sec, min, hour, day, mon, year)) == 0) {
+	if ((ts.tv_sec = chiptotime(sec, min, hour, day, mon, year)) == 0) {
 		printf("WARNING: bad date in nvram");
 #ifdef DEBUG
 		printf("\nday = %d, mon = %d, year = %d, hour = %d, min = %d, sec = %d",
@@ -356,20 +327,22 @@ inittodr(base)
 		 * Believe the time in the file system for lack of
 		 * anything better, resetting the clock.
 		 */
-		time.tv_sec = base;
+		ts.tv_sec = base;
 		if (!badbase)
 			resettodr();
 	} else {
-		int deltat = time.tv_sec - base;
+		int deltat = ts.tv_sec - base;
 
 		if (deltat < 0)
 			deltat = -deltat;
 		if (waszero || deltat < 2 * SECDAY)
-			return;
+			goto done;
 		printf("WARNING: clock %s %d days",
-		       time.tv_sec < base ? "lost" : "gained", deltat / SECDAY);
+		       ts.tv_sec < base ? "lost" : "gained", deltat / SECDAY);
 	}
 	printf(" -- CHECK AND RESET THE DATE!\n");
+done:
+	tc_setclock(&ts);
 }
 
 /*
@@ -384,7 +357,7 @@ resettodr()
 	struct nvramsoftc *sc = (struct nvramsoftc *) nvram_cd.cd_devs[0];
 	struct chiptime c;
 
-	if (!time.tv_sec || sc == NULL)
+	if (time_second == 0 || sc == NULL)
 		return;
 	timetochip(&c);
 
@@ -541,7 +514,7 @@ nvrammmap(dev, off, prot)
 	/* allow access only in RAM */
 	if (off < 0 || off > sc->sc_len)
 		return (-1);
-	return (atop(sc->sc_base + off));
+	return (sc->sc_base + off);
 }
 
 #ifdef MVME188

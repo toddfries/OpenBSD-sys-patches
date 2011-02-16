@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: lcg.c,v 1.9 2006/08/22 21:05:03 miod Exp $	*/
+=======
+/*	$OpenBSD: lcg.c,v 1.15 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -484,7 +488,7 @@ lcg_mmap(void *v, off_t offset, int prot)
 	if (offset >= ss->ss_fbsize || offset < 0)
 		return (-1);
 
-	return (LCG_FB_ADDR + offset) >> PGSHIFT;
+	return (LCG_FB_ADDR + offset);
 }
 
 int
@@ -708,6 +712,11 @@ lcgcnprobe()
 	u_int32_t cfg;
 	vaddr_t tmp;
 	volatile u_int8_t *ch;
+<<<<<<< HEAD
+=======
+	int rc;
+#endif
+>>>>>>> origin/master
 
 	switch (vax_boardtype) {
 	case VAX_BTYP_46:
@@ -719,6 +728,7 @@ lcgcnprobe()
 		ioaccess(tmp, vax_trunc_page(LCG_CONFIG_ADDR), 1);
 		cfg = *(volatile u_int32_t *)
 		    (tmp + (LCG_CONFIG_ADDR & VAX_PGOFSET));
+		iounaccess(tmp, 1);
 
 		if (lcg_probe_screen(cfg, NULL, NULL) <= 0)
 			break;	/* unsupported configuration */
@@ -727,13 +737,17 @@ lcgcnprobe()
 		 * Check for video memory.
 		 * We can not use badaddr() on these models.
 		 */
+		rc = 0;
 		ioaccess(tmp, LCG_FB_ADDR, 1);
 		ch = (volatile u_int8_t *)tmp;
 		*ch = 0x01;
-		if ((*ch & 0x01) == 0)
-			break;
-		*ch = 0x00;
-		if ((*ch & 0x01) != 0)
+		if ((*ch & 0x01) != 0) {
+			*ch = 0x00;
+			if ((*ch & 0x01) == 0)
+				rc = 1;
+		}
+		iounaccess(tmp, 1);
+		if (rc == 0)
 			break;
 
 		return (1);
@@ -755,14 +769,15 @@ lcgcninit()
 {
 	struct lcg_screen *ss = &lcg_consscr;
 	extern vaddr_t virtual_avail;
-	vaddr_t tmp;
+	vaddr_t ova;
 	long defattr;
 	struct rasops_info *ri;
 
-	tmp = virtual_avail;
-	ioaccess(tmp, vax_trunc_page(LCG_CONFIG_ADDR), 1);
+	ova = virtual_avail;
+	ioaccess(virtual_avail, vax_trunc_page(LCG_CONFIG_ADDR), 1);
 	ss->ss_cfg = *(volatile u_int32_t *)
-	    (tmp + (LCG_CONFIG_ADDR & VAX_PGOFSET));
+	    (virtual_avail + (LCG_CONFIG_ADDR & VAX_PGOFSET));
+	iounaccess(virtual_avail, 1);
 
 	ss->ss_depth = lcg_probe_screen(ss->ss_cfg,
 	    &ss->ss_width, &ss->ss_height);
@@ -770,23 +785,34 @@ lcgcninit()
 	ss->ss_fbsize = roundup(ss->ss_width * ss->ss_height, PAGE_SIZE);
 
 	ss->ss_addr = (caddr_t)virtual_avail;
+	ioaccess(virtual_avail, LCG_FB_ADDR, ss->ss_fbsize / VAX_NBPG);
 	virtual_avail += ss->ss_fbsize;
-	ioaccess((vaddr_t)ss->ss_addr, LCG_FB_ADDR, ss->ss_fbsize / VAX_NBPG);
 
 	ss->ss_reg = virtual_avail;
+	ioaccess(virtual_avail, LCG_REG_ADDR, LCG_REG_SIZE / VAX_NBPG);
 	virtual_avail += LCG_REG_SIZE;
-	ioaccess(ss->ss_reg, LCG_REG_ADDR, LCG_REG_SIZE / VAX_NBPG);
 
 	ss->ss_lut = (volatile u_int8_t *)virtual_avail;
-	virtual_avail += LCG_LUT_SIZE;
-	ioaccess((vaddr_t)ss->ss_lut, LCG_LUT_ADDR + LCG_LUT_OFFSET,
+	ioaccess(virtual_avail, LCG_LUT_ADDR + LCG_LUT_OFFSET,
 	    LCG_LUT_SIZE / VAX_NBPG);
+	virtual_avail += LCG_LUT_SIZE;
 
 	virtual_avail = round_page(virtual_avail);
 
+<<<<<<< HEAD
 	/* this had better not fail as we can't recover there */
 	if (lcg_setup_screen(ss) != 0)
 		panic(__func__);
+=======
+	/* this had better not fail */
+	if (lcg_setup_screen(ss) != 0) {
+		iounaccess((vaddr_t)ss->ss_lut, LCG_LUT_SIZE / VAX_NBPG);
+		iounaccess((vaddr_t)ss->ss_reg, LCG_REG_SIZE / VAX_NBPG);
+		iounaccess((vaddr_t)ss->ss_addr, ss->ss_fbsize / VAX_NBPG);
+		virtual_avail = ova;
+		return (1);
+	}
+>>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);

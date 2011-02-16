@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.3 2007/04/10 18:02:48 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.7 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -414,13 +407,13 @@ struct _bus_space {
 /*
  * Copy region operations.
  */
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)			\
+#define	bus_space_copy_1(t, h1, o1, h2, o2, c)				\
 	__bs_copy(1, uint8_t, (t), (h1), (o1), (h2), (o2), (c))
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)			\
+#define	bus_space_copy_2(t, h1, o1, h2, o2, c)				\
 	__bs_copy(2, uint16_t, (t), (h1), (o1), (h2), (o2), (c))
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)			\
+#define	bus_space_copy_4(t, h1, o1, h2, o2, c)				\
 	__bs_copy(4, uint32_t, (t), (h1), (o1), (h2), (o2), (c))
-#define	bus_space_copy_region_8(t, h1, o1, h2, o2, c)			\
+#define	bus_space_copy_8(t, h1, o1, h2, o2, c)				\
 	__bs_copy(8, uint64_t, (t), (h1), (o1), (h2), (o2), (c))
 
 #endif /* _KERNEL */
@@ -440,6 +433,7 @@ struct _bus_space {
 #define	BUS_DMA_READ		0x100	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
 #define	BUS_DMA_NOCACHE		0x400	/* hint: map non-cached memory */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;

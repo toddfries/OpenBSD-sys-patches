@@ -1,4 +1,4 @@
-/* $OpenBSD: dec_axppci_33.c,v 1.18 2005/05/09 21:55:12 martin Exp $ */
+/* $OpenBSD: dec_axppci_33.c,v 1.22 2010/11/23 04:07:55 shadchin Exp $ */
 /* $NetBSD: dec_axppci_33.c,v 1.44 2000/05/22 20:13:32 thorpej Exp $ */
 
 /*
@@ -125,15 +125,15 @@ dec_axppci_33_init()
 		return;
 
 	bus_space_write_1(iot, nsio, NSIO_INDEX, NSIO_CFG0);
-	A33_NSIOBARRIER(BUS_BARRIER_READ | BUS_BARRIER_WRITE);
+	A33_NSIOBARRIER(BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	cfg0val = bus_space_read_1(iot, nsio, NSIO_DATA);
 
 	cfg0val |= NSIO_IDE_ENABLE;
 
 	bus_space_write_1(iot, nsio, NSIO_INDEX, NSIO_CFG0);
-	A33_NSIOBARRIER(BUS_BARRIER_WRITE);
+	A33_NSIOBARRIER(BUS_SPACE_BARRIER_WRITE);
 	bus_space_write_1(iot, nsio, NSIO_DATA, cfg0val);
-	A33_NSIOBARRIER(BUS_BARRIER_WRITE);
+	A33_NSIOBARRIER(BUS_SPACE_BARRIER_WRITE);
 	bus_space_write_1(iot, nsio, NSIO_DATA, cfg0val);
 
 	/* Leave nsio mapped to catch any accidental port space collisions  */
@@ -173,8 +173,7 @@ dec_axppci_33_cons_init()
 #if NPCKBD > 0
 		/* display console ... */
 		/* XXX */
-		(void) pckbc_cnattach(&lcp->lc_iot, IO_KBD, KBCMDP,
-		    PCKBC_KBD_SLOT);
+		(void) pckbc_cnattach(&lcp->lc_iot, IO_KBD, KBCMDP, 0);
 
 		if (CTB_TURBOSLOT_TYPE(ctb->ctb_turboslot) ==
 		    CTB_TURBOSLOT_TYPE_ISA)

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cd.h,v 1.13 2006/07/19 01:21:28 krw Exp $	*/
+=======
+/*	$OpenBSD: cd.h,v 1.25 2009/12/16 10:51:28 dlg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: scsi_cd.h,v 1.6 1996/03/19 03:06:39 mycroft Exp $	*/
 
 /*
@@ -7,7 +11,7 @@
  *
  * TRW Financial Systems, in accordance with their agreement with Carnegie
  * Mellon University, makes this software available to CMU to distribute
- * or use in any manner that they see fit as long as this message is kept with 
+ * or use in any manner that they see fit as long as this message is kept with
  * the software. For this reason TFS also grants any other persons or
  * organisations permission to use or modify this software.
  *
@@ -158,14 +162,6 @@ struct scsi_read_track_info {
 	u_int8_t control;
 };
 
-struct scsi_read_cd_capacity {
-	u_int8_t opcode;
-	u_int8_t byte2;
-	u_int8_t addr[4];
-	u_int8_t unused[3];
-	u_int8_t control;
-};
-
 struct scsi_load_unload {
 	u_int8_t opcode;
 	u_int8_t reserved;
@@ -184,11 +180,10 @@ struct scsi_load_unload {
  * Opcodes
  */
 
-#define READ_CD_CAPACITY	0x25	/* slightly different from disk */
 #define READ_SUBCHANNEL		0x42	/* cdrom read Subchannel */
 #define READ_TOC		0x43	/* cdrom read TOC */
 #define READ_HEADER		0x44	/* cdrom read header */
-#define PLAY			0x45	/* cdrom play  'play audio' mode */
+#define PLAY			0x45	/* cdrom play 'play audio' mode */
 #define PLAY_MSF		0x47	/* cdrom play Min,Sec,Frames mode */
 #define PLAY_TRACK		0x48	/* cdrom play track/index mode */
 #define PLAY_TRACK_REL		0x49	/* cdrom play track/index mode */
@@ -197,7 +192,7 @@ struct scsi_load_unload {
 #define CLOSE_TRACK		0x5b	/* close track/rzone/session/border */
 #define BLANK			0xa1	/* cdrom blank */
 #define PLAY_BIG		0xa5	/* cdrom pause in 'play audio' mode */
-#define	LOAD_UNLOAD		0xa6	/* cdrom load/unload media */
+#define LOAD_UNLOAD		0xa6	/* cdrom load/unload media */
 #define PLAY_TRACK_REL_BIG	0xa9	/* cdrom play track/index mode */
 
 /*
@@ -207,11 +202,6 @@ struct scsi_load_unload {
 #define ERR_RECOVERY_PAGE	0x01
 #define WRITE_PARAM_PAGE	0x05
 #define CDVD_CAPABILITIES_PAGE	0x2a
-
-struct scsi_read_cd_cap_data {
-	u_int8_t addr[4];
-	u_int8_t length[4];
-};
 
 struct cd_audio_page {
 	u_int8_t page_code;
@@ -255,8 +245,6 @@ struct cd_audio_page {
 #define CD_NORMAL_DENSITY_CODE	0x00	/* from Toshiba CD-ROM specs */
 #define CD_DA_DENSITY_CODE	0x82	/* from Toshiba CD-ROM specs */
 
-#define	CDRETRIES	4
-
 struct scsi_read_dvd_structure {
 	u_int8_t	opcode;		/* GPCMD_READ_DVD_STRUCTURE */
 	u_int8_t	reserved;
@@ -274,33 +262,4 @@ struct scsi_read_dvd_structure_data {
 	u_int8_t	data[2048];
 };
 
-#ifdef _KERNEL
-
-struct cd_softc {
-	struct device sc_dev;
-	struct disk sc_dk;
-
-	int flags;
-#define	CDF_LOCKED	0x01
-#define	CDF_WANTED	0x02
-#define	CDF_WLABEL	0x04		/* label is writable */
-#define	CDF_LABELLING	0x08		/* writing label */
-#define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
-#ifdef CDDA
-#define CDF_CDDA	0x20
-#endif
-	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
-	struct cd_parms {
-		int blksize;
-		u_long disksize;	/* total number sectors */
-	} params;
-#ifdef CDDA
-	struct cd_parms orig_params;    /* filled in when CD-DA mode starts */
-#endif
-	struct buf buf_queue;
-	struct timeout sc_timeout;
-	void *sc_cdpwrhook;		/* our power hook */
-};
-
-#endif /* _KERNEL */
 #endif

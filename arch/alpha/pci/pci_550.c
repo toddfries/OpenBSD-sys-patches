@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_550.c,v 1.15 2006/03/26 20:23:08 brad Exp $ */
+/* $OpenBSD: pci_550.c,v 1.22 2010/08/07 03:50:01 krw Exp $ */
 /* $NetBSD: pci_550.c,v 1.18 2000/06/29 08:58:48 mrg Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -94,12 +87,11 @@
 #include <alpha/pci/siovar.h>
 #endif
 
-int	dec_550_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
+int	dec_550_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dec_550_intr_string(void *, pci_intr_handle_t);
 int	dec_550_intr_line(void *, pci_intr_handle_t);
 void	*dec_550_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void	dec_550_intr_disestablish(void *, void *);
 
 void	*dec_550_pciide_compat_intr_establish(void *, struct device *,
@@ -174,14 +166,13 @@ pci_550_pickintr(ccp)
 }
 
 int     
-dec_550_intr_map(ccv, bustag, buspin, line, ihp)
-        void *ccv;
-        pcitag_t bustag; 
-        int buspin, line;
+dec_550_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
         pci_intr_handle_t *ihp;
 {
-	struct cia_config *ccp = ccv;
-	pci_chipset_tag_t pc = &ccp->cc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin, line = pa->pa_intrline;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int bus, device, function;
 
 	if (buspin == 0) {
@@ -297,7 +288,7 @@ dec_550_intr_establish(ccv, ih, level, func, arg, name)
 	pci_intr_handle_t ih;
 	int level;
 	int (*func)(void *);
-	char *name;
+	const char *name;
 {
 #if 0
 	struct cia_config *ccp = ccv;
@@ -349,8 +340,7 @@ dec_550_intr_disestablish(ccv, cookie)
  
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(dec_550_pci_intr, cookie,
-	    "dec 550 irq");
+	alpha_shared_intr_disestablish(dec_550_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(dec_550_pci_intr, irq) == 0) {
 		dec_550_intr_disable(irq);
 		alpha_shared_intr_set_dfltsharetype(dec_550_pci_intr, irq,
@@ -408,7 +398,7 @@ dec_550_iointr(arg, vec)
 	irq = SCB_VECTOIDX(vec - 0x900);
 
 	if (irq >= DEC_550_MAX_IRQ)
-		panic("550_iointr: vec 0x%lx out of range\n", vec);
+		panic("550_iointr: vec 0x%lx out of range", vec);
 
 	if (!alpha_shared_intr_dispatch(dec_550_pci_intr, irq)) {
 		alpha_shared_intr_stray(dec_550_pci_intr, irq,

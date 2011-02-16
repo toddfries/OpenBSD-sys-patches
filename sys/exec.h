@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: exec.h,v 1.22 2004/04/15 00:22:42 tedu Exp $	*/
+=======
+/*	$OpenBSD: exec.h,v 1.25 2009/07/09 22:29:56 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: exec.h,v 1.59 1996/02/09 18:25:09 christos Exp $	*/
 
 /*-
@@ -204,7 +208,7 @@ void	new_vmcmd(struct exec_vmcmd_set *evsp,
 	vcp->ev_len = (len); \
 	vcp->ev_addr = (addr); \
 	if ((vcp->ev_vp = (vp)) != NULLVP) \
-		VREF(vp); \
+		vref(vp); \
 	vcp->ev_offset = (offset); \
 	vcp->ev_prot = (prot); \
 	vcp->ev_flags = (flags); \

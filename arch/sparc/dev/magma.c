@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 /*	$OpenBSD: magma.c,v 1.18 2004/09/29 07:35:11 miod Exp $	*/
 /*
  * magma.c
  *
+=======
+/*	$OpenBSD: magma.c,v 1.27 2010/07/02 17:27:01 nicm Exp $	*/
+
+/*-
+>>>>>>> origin/master
  * Copyright (c) 1998 Iain Hibbert
  * All rights reserved.
  *
@@ -13,11 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Iain Hibbert
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +30,6 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
 /*
@@ -65,19 +65,6 @@
 
 #include <sparc/bppioctl.h>
 #include <sparc/dev/magmareg.h>
-
-/*
- * Select tty soft interrupt bit based on TTY ipl. (stolen from zs.c)
- */
-#if IPL_TTY == 1
-# define IE_MSOFT IE_L1
-#elif IPL_TTY == 4
-# define IE_MSOFT IE_L4
-#elif IPL_TTY == 6
-# define IE_MSOFT IE_L6
-#else
-# error "no suitable software interrupt bit"
-#endif
 
 #ifdef MAGMA_DEBUG
 #define dprintf(x) printf x
@@ -487,9 +474,7 @@ magma_attach(parent, dev, args)
 	intr_establish(ra->ra_intr[0].int_pri, &sc->ms_hardint, -1,
 	    dev->dv_xname);
 
-	sc->ms_softint.ih_fun = magma_soft;
-	sc->ms_softint.ih_arg = sc;
-	intr_establish(IPL_TTY, &sc->ms_softint, IPL_TTY, dev->dv_xname);
+	sc->ms_softint = softintr_establish(IPL_SOFTTTY, magma_soft, sc);
 }
 
 /*
@@ -722,14 +707,8 @@ magma_hard(arg)
 	}
 	*/
 
-	if (needsoftint) {	/* trigger the soft interrupt */
-#if defined(SUN4M)
-		if (CPU_ISSUN4M)
-			raise(0, IPL_TTY);
-		else
-#endif
-			ienab_bis(IE_MSOFT);
-	}
+	if (needsoftint)	/* trigger the soft interrupt */
+		softintr_schedule(sc->ms_softint);
 
 	return (serviced);
 }
@@ -737,11 +716,9 @@ magma_hard(arg)
 /*
  * magma soft interrupt handler
  *
- *  returns 1 if it handled it, 0 otherwise
- *
  *  runs at spltty()
  */
-int
+void
 magma_soft(arg)
 	void *arg;
 {
@@ -749,7 +726,6 @@ magma_soft(arg)
 	struct mtty_softc *mtty = sc->ms_mtty;
 	struct mbpp_softc *mbpp = sc->ms_mbpp;
 	int port;
-	int serviced = 0;
 	int s, flags;
 
 	/*
@@ -787,7 +763,6 @@ magma_soft(arg)
 					    mtty->ms_dev.dv_xname, port);
 
 				(*linesw[tp->t_line].l_rint)(data, tp);
-				serviced = 1;
 			}
 
 			s = splhigh();	/* block out hard interrupt routine */
@@ -802,14 +777,12 @@ magma_soft(arg)
 				    mp->mp_carrier ? "on" : "off"));
 				(*linesw[tp->t_line].l_modem)(tp,
 				    mp->mp_carrier);
-				serviced = 1;
 			}
 
 			if (ISSET(flags, MTTYF_RING_OVERFLOW)) {
 				log(LOG_WARNING,
 				    "%s%x: ring buffer overflow\n",
 				    mtty->ms_dev.dv_xname, port);
-				serviced = 1;
 			}
 
 			if (ISSET(flags, MTTYF_DONE)) {
@@ -818,7 +791,6 @@ magma_soft(arg)
 				CLR(tp->t_state, TS_BUSY);
 				/* might be some more */
 				(*linesw[tp->t_line].l_start)(tp);
-				serviced = 1;
 			}
 		} /* for (each mtty...) */
 	}
@@ -840,12 +812,9 @@ magma_soft(arg)
 
 			if (ISSET(flags, MBPPF_WAKEUP)) {
 				wakeup(mp);
-				serviced = 1;
 			}
 		} /* for (each mbpp...) */
 	}
-
-	return (serviced);
 }
 
 /************************************************************************
@@ -899,7 +868,7 @@ mtty_attach(parent, dev, args)
 			chan = 1; /* skip channel 0 if parmode */
 		mp->mp_channel = chan;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_oproc = mtty_start;
 		tp->t_param = mtty_param;
 
@@ -991,7 +960,7 @@ mttyopen(dev, flags, mode, p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);	/* superuser can break exclusive access */
 	} else {
 		s = spltty();
@@ -1016,7 +985,7 @@ mttyopen(dev, flags, mode, p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*
@@ -1034,7 +1003,7 @@ mttyclose(dev, flag, mode, p)
 	struct tty *tp = mp->mp_tty;
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	/*
@@ -1239,14 +1208,7 @@ mtty_start(tp)
 		 * If we are sleeping and output has drained below
 		 * low water mark, awaken.
 		 */
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 
 		/*
 		 * If there is something to send, start transmitting.

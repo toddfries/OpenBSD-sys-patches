@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.5 2010/08/30 21:35:57 deraadt Exp $	*/
 /* $NetBSD: mainbus.c,v 1.3 2001/06/13 17:52:43 nathanw Exp $ */
 
 /*
@@ -49,14 +49,8 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 
-#if defined(arm32)		/* XXX */
-#include <machine/io.h>
-#endif
 #include <machine/bus.h>
 #include <arm/mainbus/mainbus.h>
-/*
-#include "locators.h"
-*/
 
 /*
  * mainbus is a root device so we a bus space tag to pass to children
@@ -76,7 +70,8 @@ int mainbussearch (struct device *,  void *, void *);
 /* attach and device structures for the device */
 
 struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbusmatch, mainbusattach
+	sizeof(struct device), mainbusmatch, mainbusattach, NULL,
+	config_activate_children
 };
 
 struct cfdriver mainbus_cd = {

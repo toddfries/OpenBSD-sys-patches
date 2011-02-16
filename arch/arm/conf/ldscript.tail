@@ -1,4 +1,4 @@
-/*     $OpenBSD:$         */
+/*     $OpenBSD: ldscript.tail,v 1.4 2009/06/27 14:44:39 drahn Exp $         */
   } =0
   PROVIDE (__etext = .);
   PROVIDE (_etext = .);

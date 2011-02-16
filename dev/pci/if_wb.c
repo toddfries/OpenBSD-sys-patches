@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wb.c,v 1.35 2006/05/28 00:04:24 jason Exp $	*/
+=======
+/*	$OpenBSD: if_wb.c,v 1.46 2010/05/19 15:27:35 oga Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998
@@ -135,10 +139,8 @@ int wb_probe(struct device *, void *, void *);
 void wb_attach(struct device *, struct device *, void *);
 
 void wb_bfree(caddr_t, u_int, void *);
-int wb_newbuf(struct wb_softc *, struct wb_chain_onefrag *,
-    struct mbuf *);
-int wb_encap(struct wb_softc *, struct wb_chain *,
-    struct mbuf *);
+void wb_newbuf(struct wb_softc *, struct wb_chain_onefrag *);
+int wb_encap(struct wb_softc *, struct wb_chain *, struct mbuf *);
 
 void wb_rxeof(struct wb_softc *);
 void wb_rxeoc(struct wb_softc *);
@@ -151,7 +153,6 @@ int wb_ioctl(struct ifnet *, u_long, caddr_t);
 void wb_init(void *);
 void wb_stop(struct wb_softc *);
 void wb_watchdog(struct ifnet *);
-void wb_shutdown(void *);
 int wb_ifmedia_upd(struct ifnet *);
 void wb_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -800,7 +801,7 @@ wb_attach(parent, self, aux)
 	printf(", address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
 
 	if (bus_dmamem_alloc(pa->pa_dmat, sizeof(struct wb_list_data),
-	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": can't alloc list data\n");
 		goto fail_2;
 	}
@@ -821,7 +822,6 @@ wb_attach(parent, self, aux)
 		goto fail_5;
 	}
 	sc->wb_ldata = (struct wb_list_data *)kva;
-	bzero(sc->wb_ldata, sizeof(struct wb_list_data));
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
@@ -857,8 +857,6 @@ wb_attach(parent, self, aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(wb_shutdown, sc);
 	return;
 
 fail_5:
@@ -928,8 +926,7 @@ int wb_list_rx_init(sc)
 		cd->wb_rx_chain[i].wb_ptr =
 			(struct wb_desc *)&ld->wb_rx_list[i];
 		cd->wb_rx_chain[i].wb_buf = (void *)&ld->wb_rxbufs[i];
-		if (wb_newbuf(sc, &cd->wb_rx_chain[i], NULL) == ENOBUFS)
-			return(ENOBUFS);
+		wb_newbuf(sc, &cd->wb_rx_chain[i]);
 		if (i == (WB_RX_LIST_CNT - 1)) {
 			cd->wb_rx_chain[i].wb_nextdesc = &cd->wb_rx_chain[0];
 			ld->wb_rx_list[i].wb_next = 
@@ -947,50 +944,17 @@ int wb_list_rx_init(sc)
 	return(0);
 }
 
-void
-wb_bfree(buf, size, arg)
-	caddr_t			buf;
-	u_int			size;
-	void *arg;
-{
-}
-
 /*
  * Initialize an RX descriptor and attach an MBUF cluster.
  */
-int
-wb_newbuf(sc, c, m)
+void
+wb_newbuf(sc, c)
 	struct wb_softc *sc;
 	struct wb_chain_onefrag *c;
-	struct mbuf *m;
 {
-	struct mbuf		*m_new = NULL;
-
-	if (m == NULL) {
-		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL)
-			return(ENOBUFS);
-		m_new->m_data = m_new->m_ext.ext_buf = c->wb_buf;
-		m_new->m_flags |= M_EXT;
-		m_new->m_ext.ext_size = m_new->m_pkthdr.len =
-		    m_new->m_len = WB_BUFBYTES;
-		m_new->m_ext.ext_free = wb_bfree;
-		m_new->m_ext.ext_arg = NULL;
-		MCLINITREFERENCE(m_new);
-	} else {
-		m_new = m;
-		m_new->m_len = m_new->m_pkthdr.len = WB_BUFBYTES;
-		m_new->m_data = m_new->m_ext.ext_buf;
-	}
-
-	m_adj(m_new, sizeof(u_int64_t));
-
-	c->wb_mbuf = m_new;
-	c->wb_ptr->wb_data = VTOPHYS(mtod(m_new, caddr_t));
+	c->wb_ptr->wb_data = VTOPHYS(c->wb_buf + sizeof(u_int64_t));
 	c->wb_ptr->wb_ctl = WB_RXCTL_RLINK | ETHER_MAX_DIX_LEN;
 	c->wb_ptr->wb_status = WB_RXSTAT;
-
-	return(0);
 }
 
 /*
@@ -1000,7 +964,6 @@ wb_newbuf(sc, c, m)
 void wb_rxeof(sc)
 	struct wb_softc		*sc;
 {
-        struct mbuf		*m = NULL;
         struct ifnet		*ifp;
 	struct wb_chain_onefrag	*cur_rx;
 	int			total_len = 0;
@@ -1010,12 +973,10 @@ void wb_rxeof(sc)
 
 	while(!((rxstat = sc->wb_cdata.wb_rx_head->wb_ptr->wb_status) &
 							WB_RXSTAT_OWN)) {
-		struct mbuf *m0 = NULL;
+		struct mbuf *m;
 
 		cur_rx = sc->wb_cdata.wb_rx_head;
 		sc->wb_cdata.wb_rx_head = cur_rx->wb_nextdesc;
-
-		m = cur_rx->wb_mbuf;
 
 		if ((rxstat & WB_RXSTAT_MIIERR) ||
 		    (WB_RXBYTES(cur_rx->wb_ptr->wb_status) < WB_MIN_FRAMELEN) ||
@@ -1023,7 +984,7 @@ void wb_rxeof(sc)
 		    !(rxstat & WB_RXSTAT_LASTFRAG) ||
 		    !(rxstat & WB_RXSTAT_RXCMP)) {
 			ifp->if_ierrors++;
-			wb_newbuf(sc, cur_rx, m);
+			wb_newbuf(sc, cur_rx);
 			printf("%s: receiver babbling: possible chip "
 				"bug, forcing reset\n", sc->sc_dev.dv_xname);
 			wb_fixmedia(sc);
@@ -1034,7 +995,7 @@ void wb_rxeof(sc)
 
 		if (rxstat & WB_RXSTAT_RXERR) {
 			ifp->if_ierrors++;
-			wb_newbuf(sc, cur_rx, m);
+			wb_newbuf(sc, cur_rx);
 			break;
 		}
 
@@ -1050,15 +1011,13 @@ void wb_rxeof(sc)
 		 */
 		total_len -= ETHER_CRC_LEN;
 
-		m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-		    total_len + ETHER_ALIGN, 0, ifp, NULL);
-		wb_newbuf(sc, cur_rx, m);
-		if (m0 == NULL) {
+		m = m_devget(cur_rx->wb_buf + sizeof(u_int64_t), total_len,
+		    ETHER_ALIGN, ifp, NULL);
+		wb_newbuf(sc, cur_rx);
+		if (m == NULL) {
 			ifp->if_ierrors++;
 			break;
 		}
-		m_adj(m0, ETHER_ALIGN);
-		m = m0;
 
 		ifp->if_ipackets++;
 
@@ -1268,7 +1227,7 @@ wb_tick(xsc)
 	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
-	timeout_add(&sc->wb_tick_tmo, hz);
+	timeout_add_sec(&sc->wb_tick_tmo, 1);
 }
 
 /*
@@ -1571,7 +1530,7 @@ void wb_init(xsc)
 	splx(s);
 
 	timeout_set(&sc->wb_tick_tmo, wb_tick, sc);
-	timeout_add(&sc->wb_tick_tmo, hz);
+	timeout_add_sec(&sc->wb_tick_tmo, 1);
 
 	return;
 }
@@ -1613,16 +1572,11 @@ int wb_ioctl(ifp, command, data)
 	caddr_t			data;
 {
 	struct wb_softc		*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1638,6 +1592,7 @@ int wb_ioctl(ifp, command, data)
 			wb_init(sc);
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			wb_init(sc);
@@ -1647,33 +1602,23 @@ int wb_ioctl(ifp, command, data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				wb_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			wb_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1727,12 +1672,6 @@ void wb_stop(sc)
 	/*
 	 * Free data in the RX lists.
 	 */
-	for (i = 0; i < WB_RX_LIST_CNT; i++) {
-		if (sc->wb_cdata.wb_rx_chain[i].wb_mbuf != NULL) {
-			m_freem(sc->wb_cdata.wb_rx_chain[i].wb_mbuf);
-			sc->wb_cdata.wb_rx_chain[i].wb_mbuf = NULL;
-		}
-	}
 	bzero((char *)&sc->wb_ldata->wb_rx_list,
 		sizeof(sc->wb_ldata->wb_rx_list));
 
@@ -1750,24 +1689,10 @@ void wb_stop(sc)
 		sizeof(sc->wb_ldata->wb_tx_list));
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void wb_shutdown(arg)
-	void			*arg;
-{
-	struct wb_softc		*sc = (struct wb_softc *)arg;
-
-	wb_stop(sc);
-
-	return;
-}
-
 struct cfattach wb_ca = {
 	sizeof(struct wb_softc), wb_probe, wb_attach
 };
 
 struct cfdriver wb_cd = {
-	0, "wb", DV_IFNET
+	NULL, "wb", DV_IFNET
 };

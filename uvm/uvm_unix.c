@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_unix.c,v 1.27 2005/07/26 07:11:55 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_unix.c,v 1.40 2009/11/24 10:35:56 otto Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -67,24 +71,21 @@
  */
 
 int
-sys_obreak(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_obreak(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_obreak_args /* {
 		syscallarg(char *) nsize;
 	} */ *uap = v;
 	struct vmspace *vm = p->p_vmspace;
-	vaddr_t new, old;
+	vaddr_t new, old, base;
 	int error;
 
-	old = (vaddr_t)vm->vm_daddr;
+	base = (vaddr_t)vm->vm_daddr;
 	new = round_page((vaddr_t)SCARG(uap, nsize));
-	if ((new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur)
+	if (new < base || (new - base) > p->p_rlimit[RLIMIT_DATA].rlim_cur)
 		return (ENOMEM);
 
-	old = round_page(old + ptoa(vm->vm_dsize));
+	old = round_page(base + ptoa(vm->vm_dsize));
 
 	if (new == old)
 		return (0);
@@ -117,9 +118,7 @@ sys_obreak(p, v, retval)
  */
 
 void
-uvm_grow(p, sp)
-	struct proc *p;
-	vaddr_t sp;
+uvm_grow(struct proc *p, vaddr_t sp)
 {
 	struct vmspace *vm = p->p_vmspace;
 	int si;
@@ -152,6 +151,8 @@ uvm_grow(p, sp)
 		vm->vm_ssize += si;
 }
 
+#ifndef SMALL_KERNEL
+
 /*
  * sys_oadvise: old advice system call
  */
@@ -177,11 +178,8 @@ sys_ovadvise(p, v, retval)
  */
 
 int
-uvm_coredump(p, vp, cred, chdr)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *chdr;
+uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *chdr)
 {
 	struct vmspace *vm = p->p_vmspace;
 	vm_map_t map = &vm->vm_map;
@@ -270,3 +268,78 @@ uvm_coredump(p, vp, cred, chdr)
 	return (error);
 }
 
+int
+uvm_coredump_walkmap(struct proc *p, void *iocookie,
+    int (*func)(struct proc *, void *, struct uvm_coredump_state *),
+    void *cookie)
+{
+	struct uvm_coredump_state state;
+	struct vmspace *vm = p->p_vmspace;
+	struct vm_map *map = &vm->vm_map;
+	struct vm_map_entry *entry;
+	vaddr_t top;
+	int error;
+
+	for (entry = map->header.next; entry != &map->header;
+	    entry = entry->next) {
+
+		state.cookie = cookie;
+		state.prot = entry->protection;
+		state.flags = 0;
+
+		/* should never happen for a user process */
+		if (UVM_ET_ISSUBMAP(entry)) {
+			panic("uvm_coredump: user process with submap?");
+		}
+
+		if (!(entry->protection & VM_PROT_WRITE) &&
+		    entry->start != p->p_sigcode)
+			continue;
+
+		/*
+		 * Don't dump mmaped devices.
+		 */
+		if (entry->object.uvm_obj != NULL &&
+		    UVM_OBJ_IS_DEVICE(entry->object.uvm_obj))
+			continue;
+
+		state.start = entry->start;
+		state.realend = entry->end;
+		state.end = entry->end;
+
+		if (state.start >= VM_MAXUSER_ADDRESS)
+			continue;
+
+		if (state.end > VM_MAXUSER_ADDRESS)
+			state.end = VM_MAXUSER_ADDRESS;
+
+#ifdef MACHINE_STACK_GROWS_UP
+		if (USRSTACK <= state.start &&
+		    state.start < (USRSTACK + MAXSSIZ)) {
+			top = round_page(USRSTACK + ptoa(vm->vm_ssize));
+			if (state.end > top)
+				state.end = top;
+
+			if (state.start >= state.end)
+				continue;
+#else
+		if (state.start >= (vaddr_t)vm->vm_maxsaddr) {
+			top = trunc_page(USRSTACK - ptoa(vm->vm_ssize));
+			if (state.start < top)
+				state.start = top;
+
+			if (state.start >= state.end)
+				continue;
+#endif
+			state.flags |= UVM_COREDUMP_STACK;
+		}
+
+		error = (*func)(p, iocookie, &state);
+		if (error)
+			return (error);
+	}
+
+	return (0);
+}
+
+#endif	/* !SMALL_KERNEL */

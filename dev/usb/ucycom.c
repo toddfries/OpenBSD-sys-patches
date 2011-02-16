@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ucycom.c,v 1.3 2006/08/18 23:08:45 jason Exp $	*/
+=======
+/*	$OpenBSD: ucycom.c,v 1.19 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ucycom.c,v 1.3 2005/08/05 07:27:47 skrll Exp $	*/
 
 /*
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -51,7 +48,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/sysctl.h>
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/vnode.h>
@@ -163,16 +159,34 @@ Static const struct usb_devno ucycom_devs[] = {
 	{ USB_VENDOR_DELORME, USB_PRODUCT_DELORME_EMUSB },
 	{ USB_VENDOR_DELORME, USB_PRODUCT_DELORME_EMLT20 },
 };
-#define ucycom_lookup(v, p) usb_lookup(ucycom_devs, v, p)
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(ucycom);
+=======
+int ucycom_match(struct device *, void *, void *); 
+void ucycom_attach(struct device *, struct device *, void *); 
+int ucycom_detach(struct device *, int); 
+int ucycom_activate(struct device *, int); 
+
+struct cfdriver ucycom_cd = { 
+	NULL, "ucycom", DV_DULL 
+}; 
+
+const struct cfattach ucycom_ca = { 
+	sizeof(struct ucycom_softc), 
+	ucycom_match, 
+	ucycom_attach, 
+	ucycom_detach, 
+	ucycom_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(ucycom)
 {
 	struct uhidev_attach_arg *uha = aux;
 
 	DPRINTF(("ucycom match\n"));
-	return (ucycom_lookup(uha->uaa->vendor, uha->uaa->product) != NULL ?
+	return (usb_lookup(ucycom_devs, uha->uaa->vendor, uha->uaa->product) != NULL ?
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
@@ -228,9 +242,12 @@ USB_ATTACH(ucycom)
 	uca.arg = sc;
 	uca.info = NULL;
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_hdev.sc_dev));
 
+=======
+>>>>>>> origin/master
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
 	DPRINTF(("ucycom_attach: complete %p\n", sc->sc_subdev));
 
@@ -577,7 +594,6 @@ ucycom_detach(struct device *self, int flags)
 	struct ucycom_softc *sc = (struct ucycom_softc *)self;
 
 	DPRINTF(("ucycom_detach: sc=%p flags=%d\n", sc, flags));
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -586,7 +602,11 @@ ucycom_detach(struct device *self, int flags)
 }
 
 int
+<<<<<<< HEAD
 ucycom_activate(device_ptr_t self, enum devact act)
+=======
+ucycom_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct ucycom_softc *sc = (struct ucycom_softc *)self;
 	int rv = 0;

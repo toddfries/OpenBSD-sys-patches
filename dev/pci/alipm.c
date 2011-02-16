@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: alipm.c,v 1.10 2006/05/09 18:49:56 kettenis Exp $	*/
+=======
+/*	$OpenBSD: alipm.c,v 1.15 2010/04/08 00:23:53 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -19,8 +23,12 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/lock.h>
 #include <sys/proc.h>
+=======
+#include <sys/rwlock.h>
+>>>>>>> origin/master
 #include <sys/systm.h>
 
 #include <dev/i2c/i2cvar.h>
@@ -154,7 +162,7 @@ alipm_attach(struct device *parent, struct device *self, void *aux)
 		if (iobase == 0 ||
 		    bus_space_map(sc->sc_iot, iobase >> 16,
 		    iosize, 0, &sc->sc_ioh)) {
-			printf(": can't map I/O space\n");
+			printf(": can't map i/o space\n");
 			return;
 		}
 
@@ -173,7 +181,7 @@ alipm_attach(struct device *parent, struct device *self, void *aux)
 		/* Map I/O space */
 		if (pci_mapreg_map(pa, ALIPM_SMB_BASE, PCI_MAPREG_TYPE_IO, 0,
 		    &sc->sc_iot, &sc->sc_ioh, NULL, &iosize, ALIPM_SMB_SIZE)) {
-			printf(": can't map I/O space\n");
+			printf(": can't map i/o space\n");
 			return;
 		}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mptramp.s,v 1.5 2006/03/14 14:44:37 mickey Exp $	*/
+/*	$OpenBSD: mptramp.s,v 1.13 2010/04/01 19:48:50 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -111,8 +104,8 @@
 #define HALT(x)	1: movl (%edi),%ebx;cmpl $ x,%ebx ; jle 1b ; movl $x,4(%edi)
 #define HALTT(x,y)	movl y,8(%edi); HALT(x)
 #else
-#define HALT(x)	/**/
-#define HALTT(x,y) /**/
+#define HALT(x)
+#define HALTT(x,y)
 #endif
 
 	.globl	_C_LABEL(cpu),_C_LABEL(cpu_id),_C_LABEL(cpu_vendor)
@@ -178,16 +171,22 @@ _TRMP_LABEL(mp_startup)
 # ok, we're now running with paging enabled and sharing page tables with cpu0.
 # figure out which processor we really are, what stack we should be on, etc.
 
-	movl	_C_LABEL(local_apic)+LAPIC_ID,%ecx
-	shrl	$LAPIC_ID_SHIFT,%ecx
-	leal	0(,%ecx,4),%ecx
+	movl	_C_LABEL(local_apic)+LAPIC_ID,%eax
+	shrl	$LAPIC_ID_SHIFT,%eax
+	xorl	%ebx,%ebx
+1:
+	leal	0(,%ebx,4),%ecx
+	incl	%ebx
 	movl	_C_LABEL(cpu_info)(%ecx),%ecx
+	movl	CPU_INFO_APICID(%ecx),%edx
+	cmpl	%eax,%edx
+	jne 1b
 
 	HALTT(0x7, %ecx)
 
 # %ecx points at our cpu_info structure..
 
-	movw	$((MAXGDTSIZ*8) - 1), 6(%esp)	# prepare segment descriptor
+	movw	$(MAXGDTSIZ-1), 6(%esp)		# prepare segment descriptor
 	movl	CPU_INFO_GDT(%ecx), %eax	# for real gdt
 	movl	%eax, 8(%esp)
 	HALTT(0x8, %eax)

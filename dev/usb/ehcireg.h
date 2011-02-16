@@ -1,8 +1,12 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ehcireg.h,v 1.12 2004/12/29 01:52:27 dlg Exp $ */
+=======
+/*	$OpenBSD: ehcireg.h,v 1.16 2008/11/29 08:52:03 mglocker Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: ehcireg.h,v 1.17 2004/06/23 06:45:56 mycroft Exp $	*/
 
 /*
- * Copyright (c) 2001 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001, 2004 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -193,42 +190,45 @@ typedef u_int32_t ehci_link_t;
 #define EHCI_LINK_ADDR(x)	((x) &~ 0x1f)
 
 typedef u_int32_t ehci_physaddr_t;
+typedef u_int32_t ehci_isoc_trans_t;
+typedef u_int32_t ehci_isoc_bufr_ptr_t;
 #define	EHCI_BUFPTR_MASK	0xfffff000
 
 /* Isochronous Transfer Descriptor */
 #define EHCI_ITD_NTRANS		8
 #define EHCI_ITD_NBUFFERS	7
 typedef struct {
-	ehci_link_t	itd_next;
-	u_int32_t	itd_trans[EHCI_ITD_NTRANS];
-#define EHCI_ITD_GET_OFFSET(x)	(((x) >>  0) & 0xfff) /* offset from buf ptr */
-#define EHCI_ITD_SET_OFFSET(x)	(x)
-#define EHCI_ITD_GET_PG(x)	(((x) >> 12) & 0x7) /* buffer page */
-#define EHCI_ITD_SET_PG(x)	((x) << 12)
-#define EHCI_ITD_GET_IOC(x)	(((x) >> 15) &  0x1) /* interrupt on complete */
-#define EHCI_ITD_IOC		0x00008000
-#define EHCI_ITD_GET_XLEN(x)	(((x) >> 16) & 0xfff) /* transaction length */
-#define EHCI_ITD_SET_XLEN(x)	((x) << 12)
-#define EHCI_ITD_GET_STATUS(x)	(((x) >> 28) & 0xf) /* duh */
-#define EHCI_ITD_SET_STATUS(x)	((x) << 28)
-#define  EHCI_ITD_ACTIVE	0x8
-#define  EHCI_ITD_BUFERR	0x4
-#define  EHCI_ITD_BABBLE	0x2
-#define  EHCI_ITD_XACTERR	0x1
-	ehci_physaddr_t	itd_buffer[EHCI_ITD_NBUFFERS];
-/* page (buffer) 0 */
-#define EHCI_ITD_GET_ADDR(x)	(((x) >>  0) & 0x7f) /* endpoint addr */
-#define EHCI_ITD_SET_ADDR(x)	(x)
-#define EHCI_ITD_GET_ENDPT(x)	(((x) >>  8) & 0xf) /* endpoint no */
-#define EHCI_ITD_SET_ENDPT(x)	((x) <<  8)
-/* page (buffer) 2 */
-#define EHCI_ITD_GET_MPS(x)	(((x) >>  0) & 0x7ff) /* max packet size */
-#define EHCI_ITD_SET_MPS(x)	(x)
-#define EHCI_ITD_DIRECTION	0x00000800
-/* page (buffer) 3 */
-#define EHCI_ITD_GET_MULTI(x)	(((x) >>  0) & 0x3) /* trans per microframe */
-#define EHCI_ITD_SET_MULTI(x)	(x)
-	ehci_physaddr_t	itd_buffer_hi[EHCI_ITD_NBUFFERS]; /* 64bit */
+	volatile ehci_link_t            itd_next;
+	volatile ehci_isoc_trans_t      itd_ctl[8];
+#define EHCI_ITD_GET_STATUS(x)	(((x) >> 28) & 0xf)
+#define EHCI_ITD_SET_STATUS(x)	(((x) & 0xf) << 28)
+#define EHCI_ITD_ACTIVE		0x80000000
+#define EHCI_ITD_BUF_ERR	0x40000000
+#define EHCI_ITD_BABBLE		0x20000000
+#define EHCI_ITD_ERROR		0x10000000
+#define EHCI_ITD_GET_LEN(x)	(((x) >> 16) & 0xfff)
+#define EHCI_ITD_SET_LEN(x)	(((x) & 0xfff) << 16)
+#define EHCI_ITD_IOC		0x8000
+#define EHCI_ITD_GET_IOC(x)	(((x) >> 15) & 1)
+#define EHCI_ITD_SET_IOC(x)	(((x) << 15) & EHCI_ITD_IOC)
+#define EHCI_ITD_GET_PG(x)	(((x) >> 12) & 0x7)
+#define EHCI_ITD_SET_PG(x)	(((x) & 0x7) << 12)
+#define EHCI_ITD_GET_OFFS(x)	(((x) >> 0) & 0xfff)
+#define EHCI_ITD_SET_OFFS(x)	(((x) & 0xfff) << 0)
+	volatile ehci_isoc_bufr_ptr_t   itd_bufr[7];
+#define EHCI_ITD_GET_BPTR(x)	((x) & 0xfffff000)
+#define EHCI_ITD_SET_BPTR(x)	((x) & 0xfffff000)
+#define EHCI_ITD_GET_EP(x)	(((x) >> 8) & 0xf)
+#define EHCI_ITD_SET_EP(x)	(((x) & 0xf) << 8)
+#define EHCI_ITD_GET_DADDR(x)	((x) & 0x7f)
+#define EHCI_ITD_SET_DADDR(x)	((x) & 0x7f)
+#define EHCI_ITD_GET_DIR(x)	(((x) >> 11) & 1)
+#define EHCI_ITD_SET_DIR(x)	(((x) & 1) << 11)
+#define EHCI_ITD_GET_MAXPKT(x)	((x) & 0x7ff)
+#define EHCI_ITD_SET_MAXPKT(x)	((x) & 0x7ff)
+#define EHCI_ITD_GET_MULTI(x)	((x) & 0x3)
+#define EHCI_ITD_SET_MULTI(x)	((x) & 0x3)
+	volatile ehci_isoc_bufr_ptr_t	itd_bufr_hi[7];
 } ehci_itd_t;
 #define EHCI_ITD_ALIGN		32
 

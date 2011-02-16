@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amivar.h,v 1.51 2007/01/27 05:09:51 dlg Exp $	*/
+=======
+/*	$OpenBSD: amivar.h,v 1.58 2010/06/23 04:53:53 dlg Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -26,8 +30,6 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/sensors.h>
 
 struct ami_mem {
 	bus_dmamap_t		am_map;
@@ -108,12 +110,18 @@ struct ami_softc {
 	bus_space_handle_t	sc_ioh;
 	bus_dma_tag_t		sc_dmat;
 
+	struct ami_ccb		*sc_ccbs;
+	struct ami_ccb_list	sc_ccb_freeq;
+	struct mutex		sc_ccb_freeq_mtx;
+
 	struct ami_mem		*sc_mbox_am;
 	volatile struct ami_iocmd *sc_mbox;
 	paddr_t			sc_mbox_pa;
 
-	struct ami_ccb		*sc_ccbs;
-	struct ami_ccb_list	sc_ccb_freeq, sc_ccb_preq, sc_ccb_runq;
+	struct ami_ccb_list	sc_ccb_preq, sc_ccb_runq;
+	struct mutex		sc_cmd_mtx;
+
+	struct scsi_iopool	sc_iopool;
 
 	struct ami_mem		*sc_ccbmem_am;
 
@@ -144,6 +152,14 @@ struct ami_softc {
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
+
+	/* bio stuff */
+	struct bioc_inq		sc_bi;
+	char			sc_plist[AMI_BIG_MAX_PDRIVES];
+
+	struct ami_ccb		*sc_mgmtccb;
+	int			sc_drainio;
+	u_int8_t		sc_drvinscnt;
 };
 
 int  ami_attach(struct ami_softc *sc);

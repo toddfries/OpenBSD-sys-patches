@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: si.c,v 1.24 2006/12/10 16:15:03 miod Exp $	*/
+=======
+/*	$OpenBSD: si.c,v 1.35 2010/06/28 18:31:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: si.c,v 1.38 1997/08/27 11:24:20 bouyer Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -101,11 +98,12 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_debug.h>
 #include <scsi/scsiconf.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
@@ -198,7 +196,7 @@ static int	si_match(struct device *, void *, void *);
 static void	si_attach(struct device *, struct device *, void *);
 static int	si_intr(void *);
 static void	si_reset_adapter(struct ncr5380_softc *);
-static void	si_minphys(struct buf *);
+static void	si_minphys(struct buf *, struct scsi_link *);
 
 void si_dma_alloc(struct ncr5380_softc *);
 void si_dma_free(struct ncr5380_softc *);
@@ -224,16 +222,6 @@ static struct scsi_adapter	si_ops = {
 	NULL,				/* open_target_lu()	*/
 	NULL,				/* close_target_lu()	*/
 };
-
-/* This is copied from julian's bt driver */
-/* "so we have a default dev struct for our link struct." */
-static struct scsi_device si_dev = {
-	NULL,		/* Use default error handler.		*/
-	NULL,		/* Use default start handler.		*/
-	NULL,		/* Use default async handler.		*/
-	NULL,		/* Use default "done" routine.		*/
-};
-
 
 /* The Sun SCSI-3 VME controller. */
 struct cfattach si_ca = {
@@ -346,7 +334,6 @@ si_attach(parent, self, args)
 	ncr_sc->sc_link.adapter_softc = sc;
 	ncr_sc->sc_link.adapter_target = 7;
 	ncr_sc->sc_link.adapter = &si_ops;
-	ncr_sc->sc_link.device = &si_dev;
 	ncr_sc->sc_link.openings = 4;
 
 	/*
@@ -499,7 +486,7 @@ si_attach(parent, self, args)
 }
 
 static void
-si_minphys(struct buf *bp)
+si_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > MAX_DMA_LEN) {
 #ifdef DEBUG
@@ -510,7 +497,7 @@ si_minphys(struct buf *bp)
 #endif
 		bp->b_bcount = MAX_DMA_LEN;
 	}
-	return (minphys(bp));
+	minphys(bp);
 }
 
 #define CSR_WANT (SI_CSR_SBC_IP | SI_CSR_DMA_IP | \
@@ -1010,11 +997,15 @@ si_vme_dma_stop(ncr_sc)
 		    resid, ntrans);
 	}
 #endif
+
 	if (ntrans < MIN_DMA_LEN) {
+#ifdef DEBUG
 		printf("si: fifo count: 0x%x\n", resid);
+#endif
 		ncr_sc->sc_state |= NCR_ABORTING;
 		goto out;
 	}
+
 	if (ntrans > ncr_sc->sc_datalen)
 		panic("si_dma_stop: excess transfer");
 

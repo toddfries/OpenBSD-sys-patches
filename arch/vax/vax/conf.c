@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: conf.c,v 1.48 2006/07/30 12:32:43 miod Exp $ */
+=======
+/*	$OpenBSD: conf.c,v 1.62 2011/01/14 19:04:08 jasper Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -135,7 +139,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NRY,ry),		/* 24: VS3100 floppy */
 	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 /*
  * Console routines for VAX console.
@@ -163,7 +167,7 @@ struct	consdev constab[]={
 #else
 #define NGEN	0
 #endif
-#if VAX410 || VAX43 || VAX46 || VAX48 || VAX49 || VAX53
+#if VAX410 || VAX43 || VAX46 || VAX48 || VAX49 || VAX53 || VAX60
 #if NDZ > 0
 	cons_init(dz),	/* DZ11-like serial console on VAXstations */
 #endif
@@ -338,12 +342,11 @@ cdev_decl(ii);
 
 #include "tun.h" 
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "wsdisplay.h"
@@ -354,6 +357,9 @@ cdev_decl(xfs_dev);
 
 #include "systrace.h"
 
+#include "vscsi.h"
+#include "pppx.h"
+
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -363,7 +369,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NHP,hp),		/* 4: Massbuss disk */
 	cdev_notdef(),			/* 5 */
 	cdev_plotter_init(NVP,vp),	/* 6: Versatec plotter */
-	cdev_swap_init(1,sw),		/* 7 */
+	cdev_notdef(),			/* 7 was /dev/drum */
 	cdev_cnstore_init(NCFL,cfl),	/* 8: 11/780 console floppy */
 	cdev_disk_init(NRA,ra),		/* 9: MSCP disk interface */
 	cdev_plotter_init(NVA,va),	/* 10: Benson-Varian plotter */
@@ -420,7 +426,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NCD,cd),		/* 61: SCSI CD-ROM */
 	cdev_disk_init(NRD,rd),		/* 62: memory disk driver */
 	cdev_ch_init(NCH,ch),		/* 63: SCSI autochanger */
-	cdev_scanner_init(NSS,ss),	/* 64: SCSI scanner */
+	cdev_notdef(),			/* 64 */
 	cdev_uk_init(NUK,uk),		/* 65: SCSI unknown */
 	cdev_tty_init(NDL,dl),		/* 66: DL11 */
 	cdev_random_init(1,random),	/* 67: random data source */
@@ -430,14 +436,17 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NRY,ry),		/* 71: VS floppy */
 	cdev_notdef(),			/* 72: was: SCSI bus */
 	cdev_disk_init(NRAID,raid),	/* 73: RAIDframe disk driver */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 74: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 74: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 74 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 75: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
+	cdev_disk_init(1,diskmap),	/* 79: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 80: pppx */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 3;	/* major device number of memory special file */
 
@@ -529,7 +538,7 @@ int	chrtoblktbl[] = {
 	25,	/* 73 */
 	NODEV,	/* 74 */
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 /*
  * Returns true if dev is /dev/mem or /dev/kmem.

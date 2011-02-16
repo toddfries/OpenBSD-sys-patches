@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbf_subr.c,v 1.2 2007/02/07 16:26:49 drahn Exp $	*/
+=======
+/*	$OpenBSD: usbf_subr.c,v 1.15 2009/11/04 19:14:10 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -22,6 +26,7 @@
 
 #include <sys/param.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 #include <sys/systm.h>
 
 #include <machine/bus.h>
@@ -86,6 +91,11 @@ usbf_realloc(void **pp, size_t *sizep, size_t newsize)
 	oldsize = MIN(*sizep, newsize);
 	if (oldsize > 0)
 		bcopy(*pp, p, oldsize);
+#if 0
+	/* XXX must leak for now; something unknown has a pointer */
+	if (*pp != NULL)
+		free(*pp, M_USB);
+#endif
 	*pp = p;
 	*sizep = newsize;
 	return p;
@@ -1047,7 +1057,8 @@ usbf_transfer_complete(usbf_xfer_handle xfer)
 
 	pipe->methods->done(xfer);
 
-	/* XXX wake up any processes waiting for the transfer to complete */
+	if (xfer->flags & USBD_SYNCHRONOUS)
+		wakeup(xfer);
 
 	if (!repeat) {
 		if (xfer->status != USBF_NORMAL_COMPLETION &&
@@ -1065,24 +1076,33 @@ usbf_transfer_complete(usbf_xfer_handle xfer)
 usbf_status
 usbf_softintr_establish(struct usbf_bus *bus)
 {
+<<<<<<< HEAD
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+=======
+>>>>>>> origin/master
 	KASSERT(bus->soft == NULL);
+
 	/* XXX we should have our own level */
 	bus->soft = softintr_establish(IPL_SOFTNET,
 	    bus->methods->soft_intr, bus);
 	if (bus->soft == NULL)
 		return USBF_INVAL;
+<<<<<<< HEAD
 #else
 	usb_callout_init(bus->softi);
 #endif
 #endif
+=======
+
+>>>>>>> origin/master
 	return USBF_NORMAL_COMPLETION;
 }
 
 void
 usbf_schedsoftintr(struct usbf_bus *bus)
 {
+<<<<<<< HEAD
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(bus->soft);
@@ -1094,4 +1114,7 @@ usbf_schedsoftintr(struct usbf_bus *bus)
 #else
 	bus->methods->soft_intr(bus);
 #endif /* USB_USE_SOFTINTR */
+=======
+	softintr_schedule(bus->soft);
+>>>>>>> origin/master
 }

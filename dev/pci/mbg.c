@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mbg.c,v 1.12 2007/01/03 13:27:12 mbalmer Exp $ */
+=======
+/*	$OpenBSD: mbg.c,v 1.29 2010/04/08 00:23:53 tedu Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Marc Balmer <mbalmer@openbsd.org>
@@ -20,7 +24,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/systm.h>
 #include <sys/sensors.h>
 #include <sys/syslog.h>
@@ -40,8 +44,14 @@ struct mbg_softc {
 	struct ksensor		sc_timedelta;
 	struct ksensor		sc_signal;
 	struct ksensordev	sc_sensordev;
+<<<<<<< HEAD
 	u_int8_t		sc_status;
 
+=======
+	struct timeout		sc_timeout;	/* invalidate sensor */
+	int			sc_trust;	/* trust time in seconds */
+	
+>>>>>>> origin/master
 	int			(*sc_read)(struct mbg_softc *, int cmd,
 				    char *buf, size_t len,
 				    struct timespec *tstamp);
@@ -128,7 +138,7 @@ int
 mbg_probe(struct device *parent, void *match, void *aux)
 {
 	return pci_matchbyid((struct pci_attach_args *)aux, mbg_devices,
-	    sizeof(mbg_devices) / sizeof(mbg_devices[0]));
+	    nitems(mbg_devices));
 }
 
 void
@@ -154,6 +164,23 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 		desc = "Radio clock";
 	strlcpy(sc->sc_timedelta.desc, desc, sizeof(sc->sc_timedelta.desc));
 
+<<<<<<< HEAD
+=======
+	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
+	    sizeof(sc->sc_sensordev.xname));
+
+	sc->sc_timedelta.type = SENSOR_TIMEDELTA;
+	sc->sc_timedelta.status = SENSOR_S_UNKNOWN;
+	sensor_attach(&sc->sc_sensordev, &sc->sc_timedelta);
+
+	sc->sc_signal.type = SENSOR_PERCENT;
+	sc->sc_signal.status = SENSOR_S_UNKNOWN;
+	strlcpy(sc->sc_signal.desc, "Signal", sizeof(sc->sc_signal.desc));
+	sensor_attach(&sc->sc_sensordev, &sc->sc_signal);
+
+	t_trust = 12 * 60 * 60;		/* twelve hours */
+
+>>>>>>> origin/master
 	switch (PCI_PRODUCT(pa->pa_id)) {
 	case PCI_PRODUCT_MEINBERG_PCI32:
 		sc->sc_read = mbg_read_amcc_s5933;
@@ -167,7 +194,39 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 		/* this can not normally happen, but then there is murphy */
 		panic(": unsupported product 0x%04x", PCI_PRODUCT(pa->pa_id));
 		break;
+<<<<<<< HEAD
 	}	
+=======
+	}
+
+	sc->sc_trust = t_trust;
+
+	if (sc->sc_read(sc, MBG_GET_TIME, (char *)&tframe,
+	    sizeof(struct mbg_time), NULL)) {
+		printf(": unknown status");
+		sc->sc_signal.status = SENSOR_S_CRIT;
+	} else {
+		sc->sc_signal.status = SENSOR_S_OK;
+		signal = tframe.signal - MBG_SIG_BIAS;
+		if (signal < 0)
+			signal = 0;
+		else if (signal > MBG_SIG_MAX)
+			signal = MBG_SIG_MAX;
+		sc->sc_signal.value = signal;
+
+		if (tframe.status & MBG_SYNC)
+			printf(": synchronized");
+		else
+			printf(": not synchronized");
+		if (tframe.status & MBG_FREERUN) {
+			sc->sc_signal.status = SENSOR_S_WARN;
+			printf(", free running");
+		}
+		if (tframe.status & MBG_IFTM)
+			printf(", time set from host");
+	}
+#ifdef MBG_DEBUG
+>>>>>>> origin/master
 	if (sc->sc_read(sc, MBG_GET_FW_ID_1, fw_id, MBG_FIFO_LEN, NULL) ||
 	    sc->sc_read(sc, MBG_GET_FW_ID_2, &fw_id[MBG_FIFO_LEN], MBG_FIFO_LEN,
 	    NULL))
@@ -210,6 +269,10 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 
 	sensor_task_register(sc, mbg_task, 10);
 	sensordev_install(&sc->sc_sensordev);
+<<<<<<< HEAD
+=======
+	timeout_add_sec(&sc->sc_timeout, sc->sc_trust);
+>>>>>>> origin/master
 }
 
 void
@@ -256,6 +319,31 @@ mbg_task(void *arg)
 	sc->sc_signal.status = SENSOR_S_OK;
 	sc->sc_signal.tv.tv_sec = sc->sc_timedelta.tv.tv_sec;
 	sc->sc_signal.tv.tv_usec = sc->sc_timedelta.tv.tv_usec;
+<<<<<<< HEAD
+=======
+	if (!(status & MBG_FREERUN)) {
+		sc->sc_timedelta.status = SENSOR_S_OK;
+		timeout_add_sec(&sc->sc_timeout, sc->sc_trust);
+	}
+}
+
+/*
+ * send a command and read back results to an AMCC S5920 based card
+ * (e.g. the PCI509 DCF77 radio clock)
+ */
+int
+mbg_read_amcc_s5920(struct mbg_softc *sc, int cmd, char *buf, size_t len,
+    struct timespec *tstamp)
+{
+	long timer, tmax;
+	size_t quot, rem;
+	u_int32_t ul;
+	int n;
+	u_int8_t status;
+
+	quot = len / 4;
+	rem = len % 4;
+>>>>>>> origin/master
 
 	if (tframe.status != sc->sc_status) {
 		if (tframe.status & MBG_SYNC)
@@ -376,3 +464,26 @@ mbg_read_asic(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 	}
 	return 0;
 }
+<<<<<<< HEAD
+=======
+
+/*
+ * degrade the sensor state if we are feerunning for more than
+ * sc->sc_trust seconds.
+ */
+void
+mbg_timeout(void *xsc)
+{
+	struct mbg_softc *sc = xsc;
+
+	if (sc->sc_timedelta.status == SENSOR_S_OK) {
+		sc->sc_timedelta.status = SENSOR_S_WARN;
+		/*
+		 * further degrade in sc->sc_trust seconds if no new valid
+		 * time data can be read from the device.
+		 */
+		timeout_add_sec(&sc->sc_timeout, sc->sc_trust);
+	} else
+		sc->sc_timedelta.status = SENSOR_S_CRIT;
+}
+>>>>>>> origin/master

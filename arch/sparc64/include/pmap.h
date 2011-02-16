@@ -120,6 +120,8 @@ struct pmap {
 	paddr_t pm_physaddr;	/* physical address of pm_segs */
 	int64_t *pm_segs;
 	struct simplelock pm_lock;
+
+	struct pmap_statistics pm_stats;
 };
 
 /*
@@ -156,17 +158,15 @@ typedef	struct pmap *pmap_t;
 extern struct pmap kernel_pmap_;
 #define	pmap_kernel()	(&kernel_pmap_)
 
-int pmap_count_res(pmap_t pmap);
 /* int pmap_change_wiring(pmap_t pm, vaddr_t va, boolean_t wired); */
-#define	pmap_resident_count(pm)		pmap_count_res((pm))
-#define	pmap_phys_address(x)		(x)
+#define	pmap_resident_count(pm)		((pm)->pm_stats.resident_count)
 #define	pmap_update(pm)			/* nothing (yet) */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
 
 void pmap_bootstrap(u_long kernelstart, u_long kernelend, u_int numctx);
 /* make sure all page mappings are modulo 16K to prevent d$ aliasing */
-#define PMAP_PREFER(pa, va)	(*(va) += (((*(va)) ^ (pa)) & VA_ALIAS_MASK))
+#define PMAP_PREFER(pa, va)	((va) + (((va) ^ (pa)) & VA_ALIAS_MASK))
 
 #define PMAP_GROWKERNEL         /* turn on pmap_growkernel interface */
 

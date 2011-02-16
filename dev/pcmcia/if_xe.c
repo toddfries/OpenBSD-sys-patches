@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_xe.c,v 1.31 2005/11/23 11:39:37 mickey Exp $	*/
+=======
+/*	$OpenBSD: if_xe.c,v 1.39 2010/08/30 20:33:18 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas
@@ -120,7 +124,7 @@ int xedebug = XEDEBUG_DEF;
 int	xe_pcmcia_match(struct device *, void *, void *);
 void	xe_pcmcia_attach(struct device *, struct device *, void *);
 int	xe_pcmcia_detach(struct device *, int);
-int	xe_pcmcia_activate(struct device *, enum devact);
+int	xe_pcmcia_activate(struct device *, int);
 
 /*
  * In case this chipset ever turns up out of pcmcia attachments (very
@@ -170,7 +174,6 @@ struct cfattach xe_pcmcia_ca = {
 };
 
 void	xe_cycle_power(struct xe_softc *);
-int	xe_ether_ioctl(struct ifnet *, u_long cmd, caddr_t);
 void	xe_full_reset(struct xe_softc *);
 void	xe_init(struct xe_softc *);
 int	xe_intr(void *);
@@ -228,7 +231,7 @@ xe_pcmcia_attach(parent, self, aux)
 	struct xe_softc *sc = &psc->sc_xe;
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_function *pf = pa->pf;
-	struct pcmcia_config_entry *cfe;
+	struct pcmcia_config_entry *cfe = NULL;
 	struct ifnet *ifp;
 	u_int8_t myla[ETHER_ADDR_LEN], *enaddr = NULL;
 	int state = 0;
@@ -427,11 +430,6 @@ xe_pcmcia_attach(parent, self, aux)
 		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_NONE);
 		xe_stop(sc);
 	}
-
-#ifdef notyet
-	pcmcia_function_disable(pa->pf);
-#endif	/* notyet */
-
 	return;
 
 bad:
@@ -469,30 +467,46 @@ xe_pcmcia_detach(dev, flags)
 int
 xe_pcmcia_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct xe_pcmcia_softc *sc = (struct xe_pcmcia_softc *)dev;
 	struct ifnet *ifp = &sc->sc_xe.sc_arpcom.ac_if;
-	int s;
 
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
+		if (sc->sc_xe.sc_ih == NULL) {
+			pcmcia_function_enable(sc->sc_pf);
+			sc->sc_xe.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
+			    xe_intr, sc, sc->sc_xe.sc_dev.dv_xname);
+		}
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			xe_stop(&sc->sc_xe);
+		ifp->if_flags &= ~IFF_RUNNING;
+		if (sc->sc_xe.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		sc->sc_xe.sc_ih = NULL;
+		pcmcia_function_disable(sc->sc_pf);
+		break;
+	case DVACT_RESUME:
 		pcmcia_function_enable(sc->sc_pf);
 		sc->sc_xe.sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
 		    xe_intr, sc, sc->sc_xe.sc_dev.dv_xname);
-		xe_init(&sc->sc_xe);
+		/* XXX this is a ridiculous */
+		xe_reset(&sc->sc_xe);
+		if ((ifp->if_flags & IFF_UP) == 0)
+			xe_stop(&sc->sc_xe);
 		break;
-
 	case DVACT_DEACTIVATE:
 		ifp->if_timer = 0;
-		if (ifp->if_flags & IFF_RUNNING)
-			xe_stop(&sc->sc_xe);
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		ifp->if_flags &= ~IFF_RUNNING;
+		if (sc->sc_xe.sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_xe.sc_ih);
+		sc->sc_xe.sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 
@@ -1170,46 +1184,13 @@ xe_start(ifp)
 }
 
 int
-xe_ether_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
-{
-	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct xe_softc *sc = ifp->if_softc;
-
-	switch (cmd) {
-	case SIOCSIFADDR:
-		ifp->if_flags |= IFF_UP;
-
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
-		case AF_INET:
-			xe_init(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
-#endif	/* INET */
-
-		default:
-			xe_init(sc);
-			break;
-		}
-		break;
-
-	default:
-		return (EINVAL);
-	}
-
-	return (0);
-}
-
-int
 xe_ioctl(ifp, command, data)
 	struct ifnet *ifp;
 	u_long command;
 	caddr_t data;
 {
 	struct xe_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
@@ -1217,7 +1198,12 @@ xe_ioctl(ifp, command, data)
 
 	switch (command) {
 	case SIOCSIFADDR:
-		error = xe_ether_ioctl(ifp, command, data);
+		ifp->if_flags |= IFF_UP;
+		xe_init(sc);
+#ifdef INET
+		if (ifa->ifa_addr->sa_family == AF_INET)
+			arp_ifinit(&sc->sc_arpcom, ifa);
+#endif  /* INET */
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1280,8 +1266,9 @@ xe_ioctl(ifp, command, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
+
 	splx(s);
 	return (error);
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: libkern.h,v 1.21 2004/06/21 22:55:04 itojun Exp $	*/
+=======
+/*	$OpenBSD: libkern.h,v 1.28 2011/01/10 23:23:56 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: libkern.h,v 1.7 1996/03/14 18:52:08 christos Exp $	*/
 
 /*-
@@ -55,57 +59,48 @@ LIBKERN_INLINE int abs(int);
 
 #ifdef LIBKERN_BODY
 LIBKERN_INLINE int
-imax(a, b)
-	int a, b;
+imax(int a, int b)
 {
 	return (a > b ? a : b);
 }
 LIBKERN_INLINE int
-imin(a, b)
-	int a, b;
+imin(int a, int b)
 {
 	return (a < b ? a : b);
 }
 LIBKERN_INLINE long
-lmax(a, b)
-	long a, b;
+lmax(long a, long b)
 {
 	return (a > b ? a : b);
 }
 LIBKERN_INLINE long
-lmin(a, b)
-	long a, b;
+lmin(long a, long b)
 {
 	return (a < b ? a : b);
 }
 LIBKERN_INLINE u_int
-max(a, b)
-	u_int a, b;
+max(u_int a, u_int b)
 {
 	return (a > b ? a : b);
 }
 LIBKERN_INLINE u_int
-min(a, b)
-	u_int a, b;
+min(u_int a, u_int b)
 {
 	return (a < b ? a : b);
 }
 LIBKERN_INLINE u_long
-ulmax(a, b)
-	u_long a, b;
+ulmax(u_long a, u_long b)
 {
 	return (a > b ? a : b);
 }
 LIBKERN_INLINE u_long
-ulmin(a, b)
-	u_long a, b;
+ulmin(u_long a, u_long b)
 {
 	return (a < b ? a : b);
 }
 
 LIBKERN_INLINE int
-abs(j)
-	int j;
+abs(int j)
 {
 	return(j < 0 ? -j : j);
 }
@@ -152,12 +147,13 @@ void	 __assert(const char *, const char *, int, const char *)
 	    __attribute__ ((__noreturn__));
 int	 bcmp(const void *, const void *, size_t);
 void	 bzero(void *, size_t);
+void	 explicit_bzero(void *, size_t);
 int	 ffs(int);
 int	 locc(int, char *, u_int);
 void	*memchr(const void *, int, size_t);
 int	 memcmp(const void *, const void *, size_t);
-u_long	 random(void);
-void	 srandom(u_long);
+u_int32_t random(void);
+void	 srandom(u_int32_t);
 int	 scanc(u_int, const u_char *, const u_char [], int);
 int	 skpc(int, size_t, u_char *);
 size_t	 strlen(const char *);
@@ -173,6 +169,7 @@ int	 strncasecmp(const char *, const char *, size_t);
 int	 getsn(char *, int);
 char	*strchr(const char *, int);
 char	*strrchr(const char *, int);
+int	 timingsafe_bcmp(const void *, const void *, size_t);
 
 extern u_int8_t const __bcd2bin[], __bin2bcd[];
 #define	bcd2bin(b)	(__bcd2bin[(b)&0xff])

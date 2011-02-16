@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcibios.c,v 1.36 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: pcibios.c,v 1.40 2010/11/20 20:11:19 miod Exp $	*/
 /*	$NetBSD: pcibios.c,v 1.5 2000/08/01 05:23:59 uch Exp $	*/
 
 /*
@@ -42,13 +42,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -394,7 +387,7 @@ pcibios_get_intr_routing(struct pcibios_softc *sc,
 		u_int16_t size;
 		u_int32_t offset;
 		u_int16_t segment;
-	} __attribute__((__packed__)) args;
+	} __packed args;
 
 	args.size = *nentries * sizeof(*table);
 	args.offset = (u_int32_t)table;

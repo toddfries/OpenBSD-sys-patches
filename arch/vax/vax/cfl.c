@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cfl.c,v 1.5 2003/06/02 23:27:58 millert Exp $	*/
+=======
+/*	$OpenBSD: cfl.c,v 1.7 2010/06/26 23:24:44 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cfl.c,v 1.2 1998/04/13 12:10:26 ragge Exp $	*/
 /*-
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -42,7 +46,6 @@
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/buf.h>
 
 #include <machine/cpu.h>

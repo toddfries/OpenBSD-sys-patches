@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: files.usb,v 1.68 2006/11/28 15:42:30 uwe Exp $
+=======
+#	$OpenBSD: files.usb,v 1.97 2011/01/06 19:32:09 damien Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -34,6 +38,18 @@ device	uaudio: audio, auconv, mulaw
 attach	uaudio at uhub
 file	dev/usb/uaudio.c		uaudio
 
+<<<<<<< HEAD
+=======
+# Video devices
+device	uvideo: video, firmload
+attach	uvideo at uhub
+file	dev/usb/uvideo.c		uvideo
+
+device	udl: wsemuldisplaydev, rasops16, edid
+attach	udl at uhub
+file	dev/usb/udl.c			udl
+
+>>>>>>> origin/master
 # MIDI devices
 device	umidi: midibus
 attach	umidi at uhub
@@ -71,13 +87,17 @@ attach	uhid at uhidbus
 file	dev/usb/uhid.c			uhid			needs-flag
 
 # Keyboards
-device	ukbd: hid, wskbddev
+define	hidkbd
+file	dev/usb/hidkbd.c		hidkbd			needs-flag
+file	dev/usb/ukbdmap.c		hidkbd
+device	ukbd: hid, hidkbd, wskbddev
 attach	ukbd at uhidbus
 file	dev/usb/ukbd.c			ukbd			needs-flag
-file	dev/usb/ukbdmap.c		ukbd
 
 # Mice
-device	ums: hid, wsmousedev
+define	hidms
+file	dev/usb/hidms.c			hidms
+device	ums: hid, hidms, wsmousedev
 attach	ums at uhidbus
 file	dev/usb/ums.c			ums
 
@@ -85,6 +105,10 @@ file	dev/usb/ums.c			ums
 device	uts: wsmousedev
 attach	uts at uhub
 file	dev/usb/uts.c			uts
+
+device	uhts: wsmousedev
+attach	uhts at uhidbus
+file	dev/usb/uhts.c			uhts
 
 # Cypress microcontroller based serial adpaters
 device	ucycom: hid, ucombus
@@ -131,6 +155,20 @@ device	udsbr: radiobus
 attach	udsbr at uhub
 file	dev/usb/udsbr.c			udsbr
 
+# TEMPerHUM HID
+device	uthum: hid
+attach	uthum at uhidbus
+file	dev/usb/uthum.c			uthum
+
+# Strawberry Linux USBRH
+device	utrh: hid
+attach	utrh at uhidbus
+file	dev/usb/utrh.c			utrh
+
+# Maywa-denki/Kayac YUREX
+device	utwitch: hid
+attach	utwitch at uhidbus
+file	dev/usb/utwitch.c		utwitch
 
 # Ethernet adapters
 # ADMtek AN986 Pegasus
@@ -158,6 +196,16 @@ file	dev/usb/if_kue.c		kue
 device	cdce: ether, ifnet, ifmedia
 attach	cdce at uhub
 file	dev/usb/if_cdce.c		cdce
+
+# RNDIS
+device urndis: ether, ifnet, ifmedia
+attach urndis at uhub
+file	dev/usb/if_urndis.c		urndis
+
+# Moschip MCS7x30 Ethernet
+device	mos: ether, ifnet, mii, ifmedia
+attach	mos at uhub
+file	dev/usb/if_mos.c		mos
 
 # Davicom DM9601
 device	udav: ether, ifnet, mii, ifmedia
@@ -238,11 +286,6 @@ device	uscanner
 attach	uscanner at uhub
 file	dev/usb/uscanner.c		uscanner		needs-flag
 
-# Avision SCSI over USB, HP5300
-device	usscanner: scsi
-attach	usscanner at uhub
-file	dev/usb/usscanner.c		usscanner
-
 # Prism3 WI @ USB
 attach	wi at uhub with wi_usb
 file	dev/usb/if_wi_usb.c		wi_usb
@@ -267,11 +310,44 @@ device	rum: ether, ifnet, ifmedia, wlan, firmload
 attach	rum at uhub
 file	dev/usb/if_rum.c		rum
 
+# Ralink Technology RT2700U/RT2800U/RT3000U
+device	run: ether, ifnet, ifmedia, wlan, firmload
+attach	run at uhub
+file	dev/usb/if_run.c		run
+
 # Zydas ZD1211
 device	zyd: ether, ifnet, ifmedia, wlan, firmload
 attach	zyd at uhub
 file	dev/usb/if_zyd.c		zyd
 
+<<<<<<< HEAD
+=======
+# PrismGT
+device	upgt: ether, ifnet, ifmedia, wlan, firmload
+attach	upgt at uhub
+file	dev/usb/if_upgt.c		upgt
+
+# RealTek 8187
+device	urtw: ether, ifnet, ifmedia, wlan
+attach	urtw at uhub
+file	dev/usb/if_urtw.c		urtw
+
+# Realtek RTL8188CU/RTL8192CU
+device	urtwn: ether, ifnet, ifmedia, wlan, firmload
+attach	urtwn at uhub
+file	dev/usb/if_urtwn.c		urtwn
+
+# Realtek RTL8188SU/RTL8191SU/RTL8192SU
+device	rsu: ether, ifnet, ifmedia, wlan, firmload
+attach	rsu at uhub
+file	dev/usb/if_rsu.c		rsu
+
+# Atheros AR9170
+device	otus: ether, ifnet, ifmedia, wlan, firmload
+attach	otus at uhub
+file	dev/usb/if_otus.c		otus
+
+>>>>>>> origin/master
 # Analog Devices Eagle driver
 device	ueagle: atm, ifnet, ezload, firmload
 attach	ueagle at uhub
@@ -289,11 +365,14 @@ device	cdcef {}
 attach	cdcef at usbf
 file	dev/usb/if_cdcef.c		cdcef
 
-
 # Atheros AR5005UG/AR5005UX
 device	uath: ether, ifnet, ifmedia, wlan, firmload
 attach	uath at uhub
 file	dev/usb/if_uath.c		uath
+
+# Atheros AR9002U
+attach	athn at uhub with athn_usb: firmload
+file	dev/usb/if_athn_usb.c		athn_usb		needs-flag
 
 # Maxim/Dallas DS2490 1-Wire adapter
 device	uow: onewirebus
@@ -304,3 +383,8 @@ file	dev/usb/uow.c			uow
 device	uberry {}
 attach	uberry at uhub
 file	dev/usb/uberry.c		uberry
+
+# DFU driver
+device	udfu {}
+attach	udfu at uhub
+file	dev/usb/udfu.c			udfu

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ubsa.c,v 1.19 2007/02/21 05:41:57 fkr Exp $ 	*/
+=======
+/*	$OpenBSD: ubsa.c,v 1.52 2011/01/25 20:03:36 jakemsr Exp $ 	*/
+>>>>>>> origin/master
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -40,13 +44,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -81,7 +78,6 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
-#include <sys/sysctl.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbcdc.h>
@@ -218,9 +214,15 @@ struct	ucom_methods ubsa_methods = {
 	NULL
 };
 
+<<<<<<< HEAD
 Static const struct usb_devno ubsa_devs[] = {
 	/* AnyDATA ADU-E100H */
 	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100H },
+=======
+const struct usb_devno ubsa_devs[] = {
+	/* Axesstel MV100H */
+	{ USB_VENDOR_AXESSTEL, USB_PRODUCT_AXESSTEL_DATAMODEM },
+>>>>>>> origin/master
 	/* BELKIN F5U103 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U103 },
 	/* BELKIN F5U120 */
@@ -229,24 +231,37 @@ Static const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_ETEK, USB_PRODUCT_ETEK_1COM },
 	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
-	/* HUAWEI Mobile */
-	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_E618 },
-	/* Novatel Wireless U740 */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
-	/* Option Vodafone Mobile Connect 3G */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
-	/* Option GlobeTrotter 3G FUSION */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION },
-	/* Option GlobeTrotter 3G QUAD */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
-	/* Option GlobeTrotter 3G QUAD PLUS */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
+<<<<<<< HEAD
+=======
+	/* ZTE Inc. CMDMA MSM modem */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_CDMA_MSM },
+	/* ZTE Inc. AC8700 */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_AC8700 },
+>>>>>>> origin/master
 };
-#define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(ubsa);
+=======
+int ubsa_match(struct device *, void *, void *); 
+void ubsa_attach(struct device *, struct device *, void *); 
+int ubsa_detach(struct device *, int); 
+int ubsa_activate(struct device *, int); 
+
+struct cfdriver ubsa_cd = { 
+	NULL, "ubsa", DV_DULL 
+}; 
+
+const struct cfattach ubsa_ca = { 
+	sizeof(struct ubsa_softc), 
+	ubsa_match, 
+	ubsa_attach, 
+	ubsa_detach, 
+	ubsa_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(ubsa)
 {
@@ -255,8 +270,8 @@ USB_MATCH(ubsa)
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	return (ubsa_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	return (usb_lookup(ubsa_devs, uaa->vendor, uaa->product) != NULL ?
+	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
 USB_ATTACH(ubsa)
@@ -379,9 +394,12 @@ USB_ATTACH(ubsa)
 	uca.arg = sc;
 	uca.info = NULL;
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	DPRINTF(("ubsa: in = 0x%x, out = 0x%x, intr = 0x%x\n",
 	    uca.bulkin, uca.bulkout, sc->sc_intr_number));
 
@@ -408,20 +426,26 @@ USB_DETACH(ubsa)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
 	}
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 ubsa_activate(device_ptr_t self, enum devact act)
+=======
+ubsa_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct ubsa_softc *sc = (struct ubsa_softc *)self;
 	int rv = 0;
@@ -699,8 +723,10 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct ubsa_softc *sc = priv;
 	u_char *buf;
+	usb_cdc_notification_t *cdcbuf;
 
 	buf = sc->sc_intr_buf;
+	cdcbuf = (usb_cdc_notification_t *)sc->sc_intr_buf;
 	if (sc->sc_dying)
 		return;
 
@@ -713,6 +739,24 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		usbd_clear_endpoint_stall_async(sc->sc_intr_pipe);
 		return;
 	}
+
+#if 1 /* test */
+	if (cdcbuf->bmRequestType == UCDC_NOTIFICATION) {
+		printf("%s: this device is using CDC notify message in" 
+		    " intr pipe.\n"
+		    "Please send your dmesg to <bugs@openbsd.org>, thanks.\n",
+		    sc->sc_dev.dv_xname);
+		printf("%s: intr buffer 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n", 
+		    sc->sc_dev.dv_xname,
+		    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
+
+		/* check the buffer data */
+		if (cdcbuf->bNotification == UCDC_N_SERIAL_STATE)
+			printf("%s:notify serial state, len=%d, data=0x%02x\n",
+			    sc->sc_dev.dv_xname,
+			    UGETW(cdcbuf->wLength), cdcbuf->data[0]);
+	}
+#endif
 
 	/* incidentally, Belkin adapter status bits match UART 16550 bits */
 	sc->sc_lsr = buf[2];

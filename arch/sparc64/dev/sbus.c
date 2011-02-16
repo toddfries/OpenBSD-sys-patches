@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sbus.c,v 1.25 2006/06/27 20:20:48 jason Exp $	*/
+=======
+/*	$OpenBSD: sbus.c,v 1.39 2010/12/26 15:37:20 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -284,7 +281,7 @@ sbus_xbox_attach(struct device *parent, struct device *self, void *aux)
 	 * IS THIS THE CORRECT DEFAULT??
 	 */
 	sc->sc_clockfreq = getpropint(node, "clock-frequency", 25*1000*1000);
-	printf(": clock = %s MHz\n", clockfreq(sc->sc_clockfreq));
+	printf(": %s MHz\n", clockfreq(sc->sc_clockfreq));
 
 	sbus_attach_common(sc, node, 1);
 }
@@ -776,9 +773,13 @@ sbus_alloc_bustag(struct sbus_softc *sc, int indirect)
 	if (sbt == NULL)
 		return (NULL);
 
+<<<<<<< HEAD
 	bzero(sbt, sizeof *sbt);
 	snprintf(sbt->name, sizeof(sbt->name), "%s",
 		sc->sc_dev.dv_xname);
+=======
+	strlcpy(sbt->name, sc->sc_dev.dv_xname, sizeof(sbt->name));
+>>>>>>> origin/master
 	sbt->cookie = sc;
 	if (indirect)
 		sbt->parent = sc->sc_bustag->parent;
@@ -799,8 +800,8 @@ sbus_alloc_dmatag(struct sbus_softc *sc, bus_dma_tag_t psdt)
 {
 	bus_dma_tag_t sdt;
 
-	sdt = (bus_dma_tag_t)
-		malloc(sizeof(struct sparc_bus_dma_tag), M_DEVBUF, M_NOWAIT);
+	sdt = (bus_dma_tag_t)malloc(sizeof(struct sparc_bus_dma_tag),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sdt == NULL)
 		/* Panic? */
 		return (psdt);
@@ -815,8 +816,6 @@ sbus_alloc_dmatag(struct sbus_softc *sc, bus_dma_tag_t psdt)
 	sdt->_dmamap_sync	= iommu_dvmamap_sync;
 	sdt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	sdt->_dmamem_free	= iommu_dvmamem_free;
-	sdt->_dmamem_map	= iommu_dvmamem_map;
-	sdt->_dmamem_unmap	= iommu_dvmamem_unmap;
 	return (sdt);
 }
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: psl.h,v 1.20 2005/04/19 15:29:48 mickey Exp $	*/
+=======
+/*	$OpenBSD: psl.h,v 1.25 2009/04/10 20:53:54 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: psl.h,v 1.12 1997/03/10 21:49:11 pk Exp $ */
 
 /*
@@ -77,12 +81,13 @@
  */
 #define IPL_NONE	0
 #define IPL_SOFTINT	1
-#define IPL_SOFTCLOCK	IPL_SOFTINT	/* softclock() interrupts */
-#define IPL_SOFTNET	IPL_SOFTINT	/* soft network interrupts */
+#define IPL_SOFTCLOCK	1		/* softclock() interrupts */
+#define IPL_SOFTNET	1		/* soft network interrupts */
 #define IPL_AUSOFT	4		/* audio soft interrupts */
 #define IPL_FDSOFT	4		/* floppy soft interrupts */
 #define IPL_BIO		5		/* block devices are at 5 and below */
-#define IPL_TTY		6		/* tty soft interrupts */
+#define IPL_TTY		6		/* MD tty soft interrupts */
+#define	IPL_SOFTTTY	IPL_TTY
 #define IPL_NET		7		/* network hardware at 7 or below */
 #define IPL_VM		7		/* max(BIO, NET, TTY) */
 #define	IPL_FB		9		/* framebuffer interrupts */
@@ -172,8 +177,10 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
 #else
-#define splassert(wantipl) do { /* nada */ } while (0)
+#define splassert(wantipl)	do { /* nada */ } while (0)
+#define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
 
 /*

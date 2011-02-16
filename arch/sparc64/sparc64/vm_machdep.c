@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vm_machdep.c,v 1.12 2005/08/08 19:48:37 kettenis Exp $	*/
+=======
+/*	$OpenBSD: vm_machdep.c,v 1.27 2011/01/13 21:19:42 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vm_machdep.c,v 1.38 2001/06/30 00:02:20 eeh Exp $ */
 
 /*
@@ -121,15 +125,8 @@ vmapbuf(bp, len)
 	uva = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - uva;
 	len = round_page(off + len);
-	kva = uvm_km_valloc_wait(kernel_map, len);
+	kva = uvm_km_valloc_prefer_wait(kernel_map, len, uva);
 	bp->b_data = (caddr_t)(kva + off);
-
-	/*
-	 * We have to flush any write-back cache on the
-	 * user-space mappings so our new mappings will
-	 * have the correct contents.
-	 */
-	cache_flush(uva, len);
 
 	upmap = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 	kpmap = vm_map_pmap(kernel_map);
@@ -345,12 +342,45 @@ cpu_exit(p)
 {
 	register struct fpstate64 *fs;
 
+<<<<<<< HEAD
 	if ((fs = p->p_md.md_fpstate) != NULL) {
 		if (p == fpproc) {
 			savefpstate(fs);
 			fpproc = NULL;
 		}
 		free((void *)fs, M_SUBPROC);
+=======
+	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
+		if (ci == curcpu())
+			continue;
+		if (ci->ci_fpproc != p)
+			continue;
+		sparc64_send_ipi(ci->ci_itid,
+		    save ? ipi_save_fpstate : ipi_drop_fpstate, (vaddr_t)p, 0);
+		while(ci->ci_fpproc == p)
+			sparc_membar(Sync);
+		break;
+	}
+#else
+	if (p == ci->ci_fpproc)
+		fpusave_cpu(ci, save);
+#endif
+}
+
+/*
+ * cpu_exit is called as the last action during exit.
+ *
+ * We clean up a little and then call sched_exit() with the old proc
+ * as an argument.  sched_exit() schedules the old vmspace and stack
+ * to be freed, then selects a new process to run.
+ */
+void
+cpu_exit(struct proc *p)
+{
+	if (p->p_md.md_fpstate != NULL) {
+		fpusave_proc(p, 0);
+		free(p->p_md.md_fpstate, M_SUBPROC);
+>>>>>>> origin/master
 	}
 	switchexit(p);
 	/* NOTREACHED */

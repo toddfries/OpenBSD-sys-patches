@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD$ */
+=======
+/* $OpenBSD: esavar.h,v 1.2 2010/09/07 16:21:44 deraadt Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: esavar.h,v 1.4 2002/03/16 14:34:01 jmcneill Exp $ */
 
 /*
@@ -133,6 +137,5 @@ struct esa_softc
 	int			type;		/* Allegro-1 or Maestro 3? */
 	int			delay1, delay2;
 
-	void			*powerhook;
 	u_int16_t		*savemem;
 };

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pte.h,v 1.6 2006/06/02 18:53:57 miod Exp $	*/
+=======
+/*	$OpenBSD: pte.h,v 1.14 2008/11/26 14:10:23 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pte.h,v 1.7 2001/07/31 06:55:46 eeh Exp $ */
 
 /*
@@ -37,7 +41,7 @@
  *		u_int64	tag_g:1,	(global flag)
  *			tag_ctxt:15,	(context for mapping)
  *			tag_unassigned:6,
- *			tag_va:42;	(virtual address bits<64:22>)
+ *			tag_va:42;	(virtual address bits<63:22>)
  *		u_int64	data_v:1,	(valid bit)
  *			data_size:2,	(page size [8K*8**<SIZE>])
  *			data_nfo:1,	(no-fault only)
@@ -146,6 +150,7 @@ extern void tlb_flush_ctx(int ctx);
 #define	TLB_SZ(s)		(((uint64_t)(s))<<PGSZ_SHIFT)
 
 /* TLB data masks */
+<<<<<<< HEAD
 #define TLB_V			0x8000000000000000LL
 #define TLB_8K			TLB_SZ(PGSZ_8K)
 #define TLB_64K			TLB_SZ(PGSZ_64K)
@@ -158,6 +163,20 @@ extern void tlb_flush_ctx(int ctx);
 #define TLB_RESERVED_MASK	0x0003f80000000000LL
 #define TLB_PA_MASK		0x000007ffffffe000LL
 #define TLB_SOFT_MASK		0x0000000000001f80LL
+=======
+#define SUN4U_TLB_V		0x8000000000000000LL
+#define SUN4U_TLB_8K		SUN4U_TLB_SZ(PGSZ_8K)
+#define SUN4U_TLB_64K		SUN4U_TLB_SZ(PGSZ_64K)
+#define SUN4U_TLB_512K		SUN4U_TLB_SZ(PGSZ_512K)
+#define SUN4U_TLB_4M		SUN4U_TLB_SZ(PGSZ_4M)
+#define SUN4U_TLB_SZ_MASK	0x6000000000000000LL
+#define SUN4U_TLB_NFO		0x1000000000000000LL
+#define SUN4U_TLB_IE		0x0800000000000000LL
+#define SUN4U_TLB_SOFT2_MASK	0x07fc000000000000LL
+#define SUN4U_TLB_RESERVED_MASK	0x0003800000000000LL
+#define SUN4U_TLB_PA_MASK	0x00007fffffffe000LL
+#define SUN4U_TLB_SOFT_MASK	0x0000000000001f80LL
+>>>>>>> origin/master
 /* S/W bits */
 /* Access & TSB locked bits are swapped so I can set access w/one insn */
 /* #define TLB_ACCESS		0x0000000000001000LL */

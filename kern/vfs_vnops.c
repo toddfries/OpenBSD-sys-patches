@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vfs_vnops.c,v 1.54 2007/01/16 17:52:18 thib Exp $	*/
+=======
+/*	$OpenBSD: vfs_vnops.c,v 1.65 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -52,6 +56,7 @@
 #include <sys/tty.h>
 #include <sys/cdio.h>
 #include <sys/poll.h>
+#include <sys/filedesc.h>
 
 #include <uvm/uvm_extern.h>
 #include <miscfs/specfs/specdev.h>
@@ -96,6 +101,8 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 			VATTR_NULL(&va);
 			va.va_type = VREG;
 			va.va_mode = cmode;
+			if (fmode & O_EXCL)
+				va.va_vaflags |= VA_EXCLUSIVE;
 			error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
 					   &ndp->ni_cnd, &va);
 			if (error)
@@ -129,7 +136,7 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 		goto bad;
 	}
 	if (vp->v_type == VLNK) {
-		error = EMLINK;
+		error = ELOOP;
 		goto bad;
 	}
 	if ((fmode & O_CREAT) == 0) {
@@ -389,9 +396,9 @@ vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
 	sb->st_gid = va.va_gid;
 	sb->st_rdev = va.va_rdev;
 	sb->st_size = va.va_size;
-	sb->st_atimespec = va.va_atime;
-	sb->st_mtimespec = va.va_mtime;
-	sb->st_ctimespec = va.va_ctime;
+	sb->st_atim = va.va_atime;
+	sb->st_mtim = va.va_mtime;
+	sb->st_ctim = va.va_ctime;
 	sb->st_blksize = va.va_blocksize;
 	sb->st_flags = va.va_flags;
 	sb->st_gen = va.va_gen;
@@ -434,10 +441,11 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 	case VBLK:
 		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
 		if (error == 0 && com == TIOCSCTTY) {
-			if (p->p_session->s_ttyvp)
-				vrele(p->p_session->s_ttyvp);
-			p->p_session->s_ttyvp = vp;
-			VREF(vp);
+			struct session *s = p->p_p->ps_session;
+			if (s->s_ttyvp)
+				vrele(s->s_ttyvp);
+			s->s_ttyvp = vp;
+			vref(vp);
 		}
 		return (error);
 	}
@@ -484,8 +492,18 @@ vn_lock(struct vnode *vp, int flags, struct proc *p)
 int
 vn_closefile(struct file *fp, struct proc *p)
 {
-	return (vn_close(((struct vnode *)fp->f_data), fp->f_flag,
-		fp->f_cred, p));
+	struct vnode *vp = fp->f_data;
+	struct flock lf;
+	
+	if ((fp->f_flag & FHASLOCK)) {
+		lf.l_whence = SEEK_SET;
+		lf.l_start = 0;
+		lf.l_len = 0;
+		lf.l_type = F_UNLCK;
+		(void) VOP_ADVLOCK(vp, (caddr_t)fp, F_UNLCK, &lf, F_FLOCK);
+	}
+
+	return (vn_close(vp, fp->f_flag, fp->f_cred, p));
 }
 
 int

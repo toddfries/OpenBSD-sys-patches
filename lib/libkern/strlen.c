@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: strlen.c,v 1.6 2003/06/11 21:08:16 deraadt Exp $	*/
+=======
+/*	$OpenBSD: strlen.c,v 1.9 2009/10/27 23:59:35 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 1990, 1993
@@ -29,10 +33,13 @@
  * SUCH DAMAGE.
  */
 
+<<<<<<< HEAD
 #if defined(LIBC_SCCS) && !defined(lint)
 static char *rcsid = "$OpenBSD: strlen.c,v 1.6 2003/06/11 21:08:16 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+=======
+>>>>>>> origin/master
 #if !defined(_KERNEL) && !defined(_STANDALONE)
 #include <string.h>
 #else

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tcp_usrreq.c,v 1.88 2005/02/22 17:28:49 mcbride Exp $	*/
+=======
+/*	$OpenBSD: tcp_usrreq.c,v 1.105 2010/10/10 22:02:50 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -75,6 +79,7 @@
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/stat.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
@@ -117,6 +122,7 @@ u_int	tcp_sendspace = TCP_SENDSPACE;
 #define	TCP_RECVSPACE	1024*16
 #endif
 u_int	tcp_recvspace = TCP_RECVSPACE;
+u_int	tcp_autorcvbuf_inc = 16 * 1024;
 
 int *tcpctl_vars[TCPCTL_MAXID] = TCPCTL_VARS;
 
@@ -278,10 +284,7 @@ tcp_usrreq(so, req, m, nam, control)
 
 			if (IN6_IS_ADDR_UNSPECIFIED(in6_addr) ||
 			    IN6_IS_ADDR_MULTICAST(in6_addr) ||
-			    (IN6_IS_ADDR_V4MAPPED(in6_addr) &&
-			    ((in6_addr->s6_addr32[3] == INADDR_ANY) ||
-			    IN_MULTICAST(in6_addr->s6_addr32[3]) ||
-			    in_broadcast(sin->sin_addr, NULL)))) {
+			    IN6_IS_ADDR_V4MAPPED(in6_addr)) {
 				error = EINVAL;
 				break;
 			}
@@ -327,7 +330,7 @@ tcp_usrreq(so, req, m, nam, control)
 			tp->ts_modulate = arc4random();
 
 		/* Compute window scaling to request.  */
-		tcp_rscale(tp, so->so_rcv.sb_hiwat);
+		tcp_rscale(tp, sb_max);
 
 		soisconnecting(so);
 		tcpstat.tcps_connattempt++;
@@ -671,10 +674,19 @@ tcp_attach(so)
 	int error;
 
 	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
-		error = soreserve(so, tcp_sendspace, tcp_recvspace);
+		/* if low on memory only allow smaller then default buffers */
+		if (so->so_snd.sb_wat == 0 ||
+		    sbcheckreserve(so->so_snd.sb_wat, tcp_sendspace))
+			so->so_snd.sb_wat = tcp_sendspace;
+		if (so->so_rcv.sb_wat == 0 ||
+		    sbcheckreserve(so->so_rcv.sb_wat, tcp_recvspace))
+			so->so_rcv.sb_wat = tcp_recvspace;
+
+		error = soreserve(so, so->so_snd.sb_wat, so->so_rcv.sb_wat);
 		if (error)
 			return (error);
 	}
+
 	error = in_pcballoc(so, &tcbtable);
 	if (error)
 		return (error);
@@ -781,12 +793,7 @@ tcp_usrclosed(tp)
  * Look up a socket for ident or tcpdrop, ...
  */
 int
-tcp_ident(oldp, oldlenp, newp, newlen, dodrop)
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	int dodrop;
+tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 {
 	int error = 0, s;
 	struct tcp_ident_mapping tir;
@@ -847,7 +854,7 @@ tcp_ident(oldp, oldlenp, newp, newlen, dodrop)
 #endif
 	case AF_INET:
 		inp = in_pcbhashlookup(&tcbtable,  fin->sin_addr,
-		    fin->sin_port, lin->sin_addr, lin->sin_port);
+		    fin->sin_port, lin->sin_addr, lin->sin_port , tir.rdomain);
 		break;
 	}
 
@@ -872,7 +879,11 @@ tcp_ident(oldp, oldlenp, newp, newlen, dodrop)
 #endif
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable, 
+<<<<<<< HEAD
 			    lin->sin_addr, lin->sin_port, 0);
+=======
+			    lin->sin_addr, lin->sin_port, 0, NULL, tir.rdomain);
+>>>>>>> origin/master
 			break;
 		}
 	}
@@ -966,4 +977,69 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 		return (ENOPROTOOPT);
 	}
 	/* NOTREACHED */
+}
+
+/*
+ * Scale the send buffer so that inflight data is not accounted against
+ * the limit. The buffer will scale with the congestion window, if the
+ * the receiver stops acking data the window will shrink and therefor
+ * the buffer size will shrink as well.
+ * In low memory situation try to shrink the buffer to the initial size
+ * disabling the send buffer scaling as long as the situation persists.
+ */
+void
+tcp_update_sndspace(struct tcpcb *tp)
+{
+	struct socket *so = tp->t_inpcb->inp_socket;
+	u_long nmax;
+
+	if (sbchecklowmem())
+		/* low on memory try to get rid of some */
+		nmax = tcp_sendspace;
+	else if (so->so_snd.sb_wat != tcp_sendspace)
+		/* user requested buffer size, auto-scaling disabled */
+		nmax = so->so_snd.sb_wat;
+	else
+		/* automatic buffer scaling */
+		nmax = MIN(sb_max, so->so_snd.sb_wat + tp->snd_max -
+		    tp->snd_una);
+
+	/* round to MSS boundary */
+	nmax = roundup(nmax, tp->t_maxseg);
+
+	if (nmax != so->so_snd.sb_hiwat)
+		sbreserve(&so->so_snd, nmax);
+}
+
+/*
+ * Scale the recv buffer by looking at how much data was transfered in
+ * on approximated RTT. If more then a big part of the recv buffer was
+ * transfered during that time we increase the buffer by a constant.
+ * In low memory situation try to shrink the buffer to the initial size.
+ */
+void
+tcp_update_rcvspace(struct tcpcb *tp)
+{
+	struct socket *so = tp->t_inpcb->inp_socket;
+	u_long nmax = so->so_rcv.sb_hiwat;
+
+	if (sbchecklowmem())
+		/* low on memory try to get rid of some */
+		nmax = tcp_recvspace;
+	else if (so->so_rcv.sb_wat != tcp_recvspace)
+		/* user requested buffer size, auto-scaling disabled */
+		nmax = so->so_rcv.sb_wat;
+	else {
+		/* automatic buffer scaling */
+		if (tp->rfbuf_cnt > so->so_rcv.sb_hiwat / 8 * 7)
+			nmax = MIN(sb_max, so->so_rcv.sb_hiwat +
+			    tcp_autorcvbuf_inc);
+	}
+
+	if (nmax == so->so_rcv.sb_hiwat)
+		return;
+
+	/* round to MSS boundary */
+	nmax = roundup(nmax, tp->t_maxseg);
+	sbreserve(&so->so_rcv, nmax);
 }

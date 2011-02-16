@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ntfs_subr.c,v 1.9 2006/03/05 21:48:57 miod Exp $	*/
+=======
+/*	$OpenBSD: ntfs_subr.c,v 1.23 2010/09/09 11:31:40 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $	*/
 
 /*-
@@ -44,23 +48,11 @@ __KERNEL_RCSID(0, "$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $
 #include <sys/buf.h>
 #include <sys/file.h>
 #include <sys/malloc.h>
-#include <sys/lock.h>
-#if defined(__FreeBSD__)
-#include <machine/clock.h>
-#endif
+#include <sys/rwlock.h>
 
 #include <miscfs/specfs/specdev.h>
 
 /* #define NTFS_DEBUG 1 */
-#if defined(__FreeBSD__) || defined(__NetBSD__)
-#include <fs/ntfs/ntfs.h>
-#include <fs/ntfs/ntfsmount.h>
-#include <fs/ntfs/ntfs_inode.h>
-#include <fs/ntfs/ntfs_vfsops.h>
-#include <fs/ntfs/ntfs_subr.h>
-#include <fs/ntfs/ntfs_compr.h>
-#include <fs/ntfs/ntfs_ihash.h>
-#else
 #include <ntfs/ntfs.h>
 #include <ntfs/ntfsmount.h>
 #include <ntfs/ntfs_inode.h>
@@ -68,7 +60,6 @@ __KERNEL_RCSID(0, "$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $
 #include <ntfs/ntfs_subr.h>
 #include <ntfs/ntfs_compr.h>
 #include <ntfs/ntfs_ihash.h>
-#endif
 
 #if defined(NTFS_DEBUG)
 int ntfs_debug = NTFS_DEBUG;
@@ -99,7 +90,7 @@ static int ntfs_uastrcmp(struct ntfsmount *, const wchar *, size_t, const char *
 static wchar *ntfs_toupper_tab;
 #define NTFS_U28(ch)		((((ch) & 0xE0) == 0) ? '_' : (ch) & 0xFF)
 #define NTFS_TOUPPER(ch)	(ntfs_toupper_tab[(unsigned char)(ch)])
-static struct lock ntfs_toupper_lock;
+struct rwlock ntfs_toupper_lock = RWLOCK_INITIALIZER("ntfs_toupper");
 static signed int ntfs_toupper_usecount;
 
 /* support macro for ntfs_ntvattrget() */
@@ -173,7 +164,7 @@ ntfs_findvattr(ntmp, ip, lvapp, vapp, type, name, namelen, vcn)
 /*
  * Search attribute specified in ntnode (load ntnode if necessary).
  * If not found but ATTR_A_ATTRLIST present, read it in and search through.
- * VOP_VGET node needed, and lookup through its ntnode (load if nessesary).
+ * VOP_VGET node needed, and lookup through its ntnode (load if necessary).
  *
  * ntnode should be locked
  */
@@ -222,7 +213,7 @@ ntfs_ntvattrget(
 	}
 	/* Scan $ATTRIBUTE_LIST for requested attribute */
 	len = lvap->va_datalen;
-	alpool = (caddr_t) malloc(len, M_TEMP, M_WAITOK);
+	alpool = malloc(len, M_TEMP, M_WAITOK);
 	error = ntfs_readntvattr_plain(ntmp, ip, lvap, 0, len, alpool, &len,
 			NULL);
 	if (error)
@@ -300,8 +291,7 @@ ntfs_loadntnode(
 
 	dprintf(("ntfs_loadntnode: loading ino: %d\n",ip->i_number));
 
-	mfrp = (struct filerec *) malloc(ntfs_bntob(ntmp->ntm_bpmftrec),
-	       M_TEMP, M_WAITOK);
+	mfrp = malloc(ntfs_bntob(ntmp->ntm_bpmftrec), M_TEMP, M_WAITOK);
 
 	if (ip->i_number < NTFS_SYSNODESNUM) {
 		struct buf     *bp;
@@ -320,7 +310,7 @@ ntfs_loadntnode(
 			goto out;
 		}
 		memcpy(mfrp, bp->b_data, ntfs_bntob(ntmp->ntm_bpmftrec));
-		bqrelse(bp);
+		brelse(bp);
 	} else {
 		struct vnode   *vp;
 
@@ -384,9 +374,7 @@ out:
 int
 ntfs_ntget(
 	struct ntnode *ip,
-#ifdef __OpenBSD__
 	struct proc *p
-#endif
 	)
 {
 	dprintf(("ntfs_ntget: get ntnode %d: %p, usecount: %d\n",
@@ -394,7 +382,7 @@ ntfs_ntget(
 
 	ip->i_usecount++;
 
-	lockmgr(&ip->i_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&ip->i_lock);
 
 	return 0;
 }
@@ -410,12 +398,8 @@ int
 ntfs_ntlookup(
 	   struct ntfsmount * ntmp,
 	   ino_t ino,
-#ifndef __OpenBSD__
-	   struct ntnode ** ipp)
-#else
 	   struct ntnode ** ipp,
 	   struct proc * p)
-#endif
 {
 	struct ntnode  *ip;
 
@@ -423,17 +407,13 @@ ntfs_ntlookup(
 
 	do {
 		if ((ip = ntfs_nthashlookup(ntmp->ntm_dev, ino)) != NULL) {
-#ifndef __OpenBSD__
-			ntfs_ntget(ip);
-#else
 			ntfs_ntget(ip, p);
-#endif
 			dprintf(("ntfs_ntlookup: ntnode %d: %p, usecount: %d\n",
 				ino, ip, ip->i_usecount));
 			*ipp = ip;
 			return (0);
 		}
-	} while (lockmgr(&ntfs_hashlock, LK_EXCLUSIVE | LK_SLEEPFAIL, NULL));
+	} while (rw_enter(&ntfs_hashlock, RW_WRITE | RW_SLEEPFAIL));
 
 	MALLOC(ip, struct ntnode *, sizeof(struct ntnode),
 	       M_NTFSNTNODE, M_WAITOK);
@@ -447,19 +427,15 @@ ntfs_ntlookup(
 	ip->i_mp = ntmp;
 
 	LIST_INIT(&ip->i_fnlist);
-	VREF(ip->i_devvp);
+	vref(ip->i_devvp);
 
 	/* init lock and lock the newborn ntnode */
-	lockinit(&ip->i_lock, PINOD, "ntnode", 0, LK_EXCLUSIVE);
-#ifndef __OpenBSD__
-	ntfs_ntget(ip);
-#else
+	rw_init(&ip->i_lock, "ntnode");
 	ntfs_ntget(ip, p);
-#endif
 
 	ntfs_nthashins(ip);
 
-	lockmgr(&ntfs_hashlock, LK_RELEASE, NULL);
+	rw_exit(&ntfs_hashlock);
 
 	*ipp = ip;
 
@@ -478,9 +454,7 @@ ntfs_ntlookup(
 void
 ntfs_ntput(
 	struct ntnode *ip,
-#ifdef __OpenBSD__
 	struct proc *p
-#endif
 	)
 {
 	struct ntvattr *vap;
@@ -498,7 +472,7 @@ ntfs_ntput(
 #endif
 
 	if (ip->i_usecount > 0) {
-		lockmgr(&ip->i_lock, LK_RELEASE, NULL);
+		rw_exit_write(&ip->i_lock);
 		return;
 	}
 
@@ -622,8 +596,7 @@ ntfs_attrtontvattr(
 		vap->va_allocated = rap->a_r.a_datalen;
 		vap->va_vcnstart = 0;
 		vap->va_vcnend = ntfs_btocn(vap->va_allocated);
-		vap->va_datap = (caddr_t) malloc(vap->va_datalen,
-		       M_NTFSRDATA, M_WAITOK);
+		vap->va_datap = malloc(vap->va_datalen, M_NTFSRDATA, M_WAITOK);
 		memcpy(vap->va_datap, (caddr_t) rap + rap->a_r.a_dataoff,
 		       rap->a_r.a_datalen);
 	}
@@ -664,8 +637,8 @@ ntfs_runtovrun(
 		off += (run[off] & 0xF) + ((run[off] >> 4) & 0xF) + 1;
 		cnt++;
 	}
-	cn = (cn_t *) malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
-	cl = (cn_t *) malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cn = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cl = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
 
 	off = 0;
 	cnt = 0;
@@ -870,7 +843,7 @@ ntfs_ntlookupattr(
 		adp = ntmp->ntm_ad;
 		for (i = 0; i < ntmp->ntm_adnum; i++, adp++){
 			if (syslen != adp->ad_namelen || 
-			   strncmp(sys, adp->ad_name, syslen) != 0)
+			    strncmp(sys, adp->ad_name, syslen) != 0)
 				continue;
 
 			*attrtype = adp->ad_type;
@@ -881,8 +854,8 @@ ntfs_ntlookupattr(
 
     out:
 	if (namelen) {
-		*attrname = (char *) malloc(namelen, M_TEMP, M_WAITOK);
-		memcpy((*attrname), name, namelen);
+		*attrname = malloc(namelen + 1, M_TEMP, M_WAITOK);
+		memcpy(*attrname, name, namelen);
 		(*attrname)[namelen] = '\0';
 		*attrtype = NTFS_A_DATA;
 	}
@@ -899,12 +872,8 @@ ntfs_ntlookupfile(
 	      struct ntfsmount * ntmp,
 	      struct vnode * vp,
 	      struct componentname * cnp,
-#ifndef __OpenBSD__
-	      struct vnode ** vpp)
-#else
 	      struct vnode ** vpp,
 	      struct proc *p)
-#endif
 {
 	struct fnode   *fp = VTOF(vp);
 	struct ntnode  *ip = FTONT(fp);
@@ -925,11 +894,8 @@ ntfs_ntlookupfile(
 	int fullscan = 0;
 	struct ntfs_lookup_ctx *lookup_ctx = NULL, *tctx;
 
-#ifndef __OpenBSD__
-	error = ntfs_ntget(ip);
-#else
 	error = ntfs_ntget(ip, p);
-#endif
+
 	if (error)
 		return (error);
 
@@ -956,7 +922,7 @@ ntfs_ntlookupfile(
 	blsize = vap->va_a_iroot->ir_size;
 	dprintf(("ntfs_ntlookupfile: blksz: %d\n", blsize));
 
-	rdbuf = (caddr_t) malloc(blsize, M_TEMP, M_WAITOK);
+	rdbuf = malloc(blsize, M_TEMP, M_WAITOK);
 
     loop:
 	rdsize = vap->va_datalen;
@@ -1030,7 +996,7 @@ ntfs_ntlookupfile(
 			     (attrname && fp->f_attrname &&
 			      !strcmp(attrname, fp->f_attrname))))
 			{
-				VREF(vp);
+				vref(vp);
 				*vpp = vp;
 				error = 0;
 				goto fail;
@@ -1162,11 +1128,7 @@ fail:
 		}
 	}
 	ntfs_ntvattrrele(vap);
-#ifndef __OpenBSD__
-	ntfs_ntput(ip);
-#else
 	ntfs_ntput(ip, p);
-#endif
 	free(rdbuf, M_TEMP);
 	return (error);
 }
@@ -1210,12 +1172,8 @@ ntfs_ntreaddir(
 	       struct ntfsmount * ntmp,
 	       struct fnode * fp,
 	       u_int32_t num,
-#ifndef __OpenBSD__
-	       struct attr_indexentry ** riepp)
-#else
 	       struct attr_indexentry ** riepp,
 	       struct proc *p)
-#endif
 {
 	struct ntnode  *ip = FTONT(fp);
 	struct ntvattr *vap = NULL;	/* IndexRoot attribute */
@@ -1233,11 +1191,7 @@ ntfs_ntreaddir(
 	u_int32_t       aoff, cnum;
 
 	dprintf(("ntfs_ntreaddir: read ino: %d, num: %d\n", ip->i_number, num));
-#ifndef __OpenBSD__
-	error = ntfs_ntget(ip);
-#else
 	error = ntfs_ntget(ip, p);
-#endif
 	if (error)
 		return (error);
 
@@ -1247,8 +1201,8 @@ ntfs_ntreaddir(
 
 	if (fp->f_dirblbuf == NULL) {
 		fp->f_dirblsz = vap->va_a_iroot->ir_size;
-		fp->f_dirblbuf = (caddr_t) malloc(
-		       MAX(vap->va_datalen,fp->f_dirblsz), M_NTFSDIR, M_WAITOK);
+		fp->f_dirblbuf = malloc(MAX(vap->va_datalen,fp->f_dirblsz),
+		    M_NTFSDIR, M_WAITOK);
 	}
 
 	blsize = fp->f_dirblsz;
@@ -1263,7 +1217,7 @@ ntfs_ntreaddir(
 			error = ENOTDIR;
 			goto fail;
 		}
-		bmp = (u_int8_t *) malloc(bmvap->va_datalen, M_TEMP, M_WAITOK);
+		bmp = malloc(bmvap->va_datalen, M_TEMP, M_WAITOK);
 		error = ntfs_readattr(ntmp, ip, NTFS_A_INDXBITMAP, "$I30", 0,
 				       bmvap->va_datalen, bmp, NULL);
 		if (error)
@@ -1369,12 +1323,16 @@ fail:
 	if (iavap)
 		ntfs_ntvattrrele(iavap);
 	if (bmp)
+<<<<<<< HEAD
 		FREE(bmp, M_TEMP);
 #ifndef __OpenBSD__
 	ntfs_ntput(ip);
 #else
+=======
+		free(bmp, M_TEMP);
+>>>>>>> origin/master
 	ntfs_ntput(ip, p);
-#endif
+
 	return (error);
 }
 
@@ -1395,38 +1353,6 @@ ntfs_nttimetounix(
 		89LL * 1LL * 24LL * 60LL * 60LL;
 	return (t);
 }
-
-#ifndef __OpenBSD__
-/*
- * Get file times from NTFS_A_NAME attribute.
- */
-int
-ntfs_times(
-	   struct ntfsmount * ntmp,
-	   struct ntnode * ip,
-	   ntfs_times_t * tm)
-{
-	struct ntvattr *vap;
-	int             error;
-
-	dprintf(("ntfs_times: ino: %d...\n", ip->i_number));
-
-	error = ntfs_ntget(ip);
-	if (error)
-		return (error);
-
-	error = ntfs_ntvattrget(ntmp, ip, NTFS_A_NAME, NULL, 0, &vap);
-	if (error) {
-		ntfs_ntput(ip);
-		return (error);
-	}
-	*tm = vap->va_a_name->n_times;
-	ntfs_ntvattrrele(vap);
-	ntfs_ntput(ip);
-
-	return (0);
-}
-#endif
 
 /*
  * Get file sizes from corresponding attribute. 
@@ -1611,9 +1537,11 @@ ntfs_writentvattr_plain(
 					return (error);
 				}
 			}
-			if (uio)
-				uiomove(bp->b_data + off, tocopy, uio);
-			else
+			if (uio) {
+				error = uiomove(bp->b_data + off, tocopy, uio);
+				if (error != 0)
+					break;
+			} else
 				memcpy(bp->b_data + off, data, tocopy);
 			bawrite(bp);
 			data = data + tocopy;
@@ -1625,7 +1553,7 @@ ntfs_writentvattr_plain(
 		}
 	}
 
-	if (left) {
+	if (left && error == 0) {
 		printf("ntfs_writentvattr_plain: POSSIBLE RUN ERROR\n");
 		error = EINVAL;
 	}
@@ -1718,8 +1646,10 @@ ntfs_readntvattr_plain(
 						return (error);
 					}
 					if (uio) {
-						uiomove(bp->b_data + off,
+						error = uiomove(bp->b_data + off,
 							tocopy, uio);
+						if (error != 0)
+							break;
 					} else {
 						memcpy(data, bp->b_data + off,
 							tocopy);
@@ -1744,22 +1674,27 @@ ntfs_readntvattr_plain(
 				off = 0;
 				if (uio) {
 					size_t remains = tocopy;
-					for(; remains; remains--)
-						uiomove("", 1, uio);
+					for(; remains; remains--) {
+						error = uiomove("", 1, uio);
+						if (error != 0)
+							break;
+					}
 				} else 
 					bzero(data, tocopy);
 				data = data + tocopy;
 			}
 			cnt++;
+			if (error != 0)
+				break;
 		}
-		if (left) {
+		if (left && error == 0) {
 			printf("ntfs_readntvattr_plain: POSSIBLE RUN ERROR\n");
 			error = E2BIG;
 		}
 	} else {
 		ddprintf(("ntfs_readnvattr_plain: data is in mft record\n"));
 		if (uio) 
-			uiomove(vap->va_datap + roff, rsize, uio);
+			error = uiomove(vap->va_datap + roff, rsize, uio);
 		else
 			memcpy(rdata, vap->va_datap + roff, rsize);
 		*initp += rsize;
@@ -1886,14 +1821,17 @@ ntfs_readattr(
 
 			if (init == ntfs_cntob(NTFS_COMPUNIT_CL)) {
 				if (uio)
-					uiomove(cup + off, tocopy, uio);
+					error = uiomove(cup + off, tocopy, uio);
 				else
 					memcpy(data, cup + off, tocopy);
 			} else if (init == 0) {
 				if (uio) {
 					size_t remains = tocopy;
-					for(; remains; remains--)
-						uiomove("", 1, uio);
+					for(; remains; remains--) {
+						error = uiomove("", 1, uio);
+						if (error != 0)
+							break;
+					}
 				}
 				else
 					bzero(data, tocopy);
@@ -1902,10 +1840,12 @@ ntfs_readattr(
 				if (error)
 					break;
 				if (uio)
-					uiomove(uup + off, tocopy, uio);
+					error = uiomove(uup + off, tocopy, uio);
 				else
 					memcpy(data, uup + off, tocopy);
 			}
+			if (error)
+				break;
 
 			left -= tocopy;
 			data = data + tocopy;
@@ -2065,7 +2005,6 @@ void
 ntfs_toupper_init()
 {
 	ntfs_toupper_tab = (wchar *) NULL;
-	lockinit(&ntfs_toupper_lock, PVFS, "ntfs_toupper", 0, 0);
 	ntfs_toupper_usecount = 0;
 }
 
@@ -2074,22 +2013,16 @@ ntfs_toupper_init()
  * otherwise read the data from the filesystem we are currently mounting
  */
 int
-#ifndef __OpenBSD__
-ntfs_toupper_use(mp, ntmp)
-	struct mount *mp;
-	struct ntfsmount *ntmp;
-#else
 ntfs_toupper_use(mp, ntmp, p)
 	struct mount *mp;
 	struct ntfsmount *ntmp;
 	struct proc *p;
-#endif
 {
 	int error = 0;
 	struct vnode *vp;
 
 	/* get exclusive access */
-	lockmgr(&ntfs_toupper_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&ntfs_toupper_lock);
 
 	/* only read the translation data from a file if it hasn't been
 	 * read already */
@@ -2113,7 +2046,7 @@ ntfs_toupper_use(mp, ntmp, p)
 
     out:
 	ntfs_toupper_usecount++;
-	lockmgr(&ntfs_toupper_lock, LK_RELEASE, NULL);
+	rw_exit_write(&ntfs_toupper_lock);
 	return (error);
 }
 
@@ -2122,15 +2055,11 @@ ntfs_toupper_use(mp, ntmp, p)
  * tied by toupper table
  */
 void
-#ifndef __OpenBSD__
-ntfs_toupper_unuse()
-#else
 ntfs_toupper_unuse(p)
 	struct proc *p;
-#endif
 {
 	/* get exclusive access */
-	lockmgr(&ntfs_toupper_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&ntfs_toupper_lock);
 
 	ntfs_toupper_usecount--;
 	if (ntfs_toupper_usecount == 0) {
@@ -2145,5 +2074,5 @@ ntfs_toupper_unuse(p)
 #endif
 	
 	/* release the lock */
-	lockmgr(&ntfs_toupper_lock, LK_RELEASE, NULL);
+	rw_exit_write(&ntfs_toupper_lock);
 }

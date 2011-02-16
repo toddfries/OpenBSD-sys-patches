@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uhcivar.h,v 1.14 2002/07/25 02:18:10 nate Exp $ */
+=======
+/*	$OpenBSD: uhcivar.h,v 1.24 2010/12/14 16:13:16 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: uhcivar.h,v 1.36 2002/12/31 00:39:11 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.14 1999/11/17 22:33:42 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -162,13 +159,16 @@ typedef struct uhci_softc {
 	u_int8_t sc_saved_sof;
 	u_int16_t sc_saved_frnum;
 
+<<<<<<< HEAD
 #ifdef USB_USE_SOFTINTR
 	char sc_softwake;
 #endif /* USB_USE_SOFTINTR */
+=======
+	char sc_softwake;
+>>>>>>> origin/master
 
 	char sc_isreset;
 	char sc_suspend;
-	char sc_dying;
 
 	LIST_HEAD(, uhci_intr_info) sc_intrhead;
 
@@ -180,7 +180,6 @@ typedef struct uhci_softc {
 	char sc_vendor[32];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
-	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
 	device_ptr_t sc_child;		/* /dev/usb# device */
@@ -191,6 +190,10 @@ usbd_status	uhci_run(uhci_softc_t *, int run);
 int		uhci_intr(void *);
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 int		uhci_detach(uhci_softc_t *, int);
+<<<<<<< HEAD
 int		uhci_activate(device_ptr_t, enum devact);
 #endif
 
+=======
+int		uhci_activate(struct device *, int);
+>>>>>>> origin/master

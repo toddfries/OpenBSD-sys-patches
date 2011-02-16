@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: hotplug.c,v 1.7 2006/05/28 01:33:50 mk Exp $	*/
+=======
+/*	$OpenBSD: hotplug.c,v 1.11 2010/12/15 03:34:33 tedu Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -29,7 +33,7 @@
 #include <sys/poll.h>
 #include <sys/vnode.h>
 
-#define HOTPLUG_MAXEVENTS	16
+#define HOTPLUG_MAXEVENTS	64
 
 static int opened;
 static struct hotplug_event evqueue[HOTPLUG_MAXEVENTS];
@@ -97,7 +101,6 @@ hotplug_put_event(struct hotplug_event *he)
 		evqueue_count++;
 	wakeup(&evqueue);
 	selwakeup(&hotplug_sel);
-	KNOTE(&hotplug_sel.si_note, 0);
 	return (0);
 }
 
@@ -156,7 +159,7 @@ again:
 	if (flags & IO_NDELAY)
 		return (EAGAIN);
 
-	error = tsleep(evqueue, PRIBIO | PCATCH, "htplev", 0);
+	error = tsleep(&evqueue, PRIBIO | PCATCH, "htplev", 0);
 	if (error)
 		return (error);
 	goto again;

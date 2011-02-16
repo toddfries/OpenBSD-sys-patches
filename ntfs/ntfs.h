@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ntfs.h,v 1.3 2003/05/20 03:36:42 tedu Exp $	*/
+=======
+/*	$OpenBSD: ntfs.h,v 1.12 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ntfs.h,v 1.5 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -33,7 +37,6 @@
 typedef u_int64_t cn_t;
 typedef u_int16_t wchar;
 
-#pragma pack(1)
 #define BBSIZE			1024
 #define	BBOFF			((off_t)(0))
 #define	BBLOCK			((daddr_t)(0))
@@ -51,7 +54,7 @@ struct fixuphdr {
 	u_int32_t       fh_magic;
 	u_int16_t       fh_foff;
 	u_int16_t       fh_fnum;
-};
+} __packed;
 
 #define NTFS_AF_INRUN	0x00000001
 struct attrhdr {
@@ -64,7 +67,7 @@ struct attrhdr {
 	u_int8_t        a_compression;
 	u_int8_t        reserved2;
 	u_int16_t       a_index;
-};
+} __packed;
 #define NTFS_A_STD	0x10
 #define NTFS_A_ATTRLIST	0x20
 #define NTFS_A_NAME	0x30
@@ -83,7 +86,7 @@ struct attr {
 			u_int16_t       reserved1;
 			u_int16_t       a_dataoff;
 			u_int16_t       a_indexed;
-		}               a_S_r;
+		} __packed	a_S_r;
 		struct {
 			cn_t            a_vcnstart;
 			cn_t            a_vcnend;
@@ -93,9 +96,9 @@ struct attr {
 			u_int64_t       a_allocated;
 			u_int64_t       a_datalen;
 			u_int64_t       a_initialized;
-		}               a_S_nr;
+		} __packed	a_S_nr;
 	}               a_S;
-};
+} __packed;
 #define a_r	a_S.a_S_r
 #define a_nr	a_S.a_S_nr
 
@@ -104,7 +107,7 @@ typedef struct {
 	u_int64_t       t_write;
 	u_int64_t       t_mftwrite;
 	u_int64_t       t_access;
-}               ntfs_times_t;
+} __packed ntfs_times_t;
 
 #define NTFS_FFLAG_RDONLY	0x01LL
 #define NTFS_FFLAG_HIDDEN	0x02LL
@@ -123,7 +126,7 @@ struct attr_name {
 	u_int8_t        n_namelen;
 	u_int8_t        n_nametype;
 	u_int16_t       n_name[1];
-};
+} __packed;
 
 #define NTFS_IRFLAG_INDXALLOC	0x00000001
 struct attr_indexroot {
@@ -132,11 +135,11 @@ struct attr_indexroot {
 	u_int32_t       ir_size;/* ??? */
 	u_int32_t       ir_unkn3;	/* number of cluster */
 	u_int32_t       ir_unkn4;	/* always 0x10 */
-	u_int32_t       ir_datalen;	/* sizeof simething */
+	u_int32_t       ir_datalen;	/* sizeof something */
 	u_int32_t       ir_allocated;	/* same as above */
 	u_int16_t       ir_flag;/* ?? always 1 */
 	u_int16_t       ir_unkn7;
-};
+} __packed;
 
 struct attr_attrlist {
 	u_int32_t       al_type;	/* Attribute type */
@@ -148,7 +151,7 @@ struct attr_attrlist {
 	u_int32_t       reserved;
 	u_int16_t       al_index;	/* Attribute index in MFT record */
 	u_int16_t       al_name[1];	/* Name */
-};
+} __packed;
 
 #define	NTFS_INDXMAGIC	(u_int32_t)(0x58444E49)
 struct attr_indexalloc {
@@ -159,7 +162,7 @@ struct attr_indexalloc {
 	u_int16_t       unknown2;
 	u_int32_t       ia_inuse;
 	u_int32_t       ia_allocated;
-};
+} __packed;
 
 #define	NTFS_IEFLAG_SUBNODE	0x00000001
 #define	NTFS_IEFLAG_LAST	0x00000002
@@ -180,7 +183,7 @@ struct attr_indexentry {
 	u_int8_t        ie_fnametype;
 	wchar           ie_fname[NTFS_MAXFILENAME];
 	/* cn_t		ie_bufcn;	 buffer with subnodes */
-};
+} __packed;
 
 #define	NTFS_FILEMAGIC	(u_int32_t)(0x454C4946)
 #define	NTFS_FRFLAG_DIR	0x0002
@@ -195,7 +198,7 @@ struct filerec {
 	u_int32_t       fr_allocated;	/* allocated length of record */
 	u_int64_t       fr_mainrec;	/* main record */
 	u_int16_t       fr_attrnum;	/* maximum attr number + 1 ??? */
-};
+} __packed;
 
 #define	NTFS_ATTRNAME_MAXLEN	0x40
 #define	NTFS_ADFLAG_NONRES	0x0080	/* Attrib can be non resident */
@@ -207,13 +210,13 @@ struct attrdef {
 	u_int32_t	ad_flag;
 	u_int64_t	ad_minlen;
 	u_int64_t	ad_maxlen;	/* -1 for nonlimited */
-};
+} __packed;
 
 struct ntvattrdef {
 	char		ad_name[0x40];
 	int		ad_namelen;
 	u_int32_t	ad_type;
-};
+} __packed;
 
 #define	NTFS_BBID	"NTFS    "
 #define	NTFS_BBIDLEN	8
@@ -235,9 +238,7 @@ struct bootfile {
 					/* 0xF6 inducates 1/4 */
 	u_int32_t       bf_ibsz;	/* index buffer size */
 	u_int32_t       bf_volsn;	/* volume ser. num. */
-};
-
-#pragma pack()
+} __packed;
 
 typedef wchar (ntfs_wget_func_t)(const char **);
 typedef int (ntfs_wput_func_t)(char *, size_t, wchar);
@@ -287,45 +288,6 @@ struct ntfsmount {
 
 #define	ntfs_bpbl	(daddr_t)((ntmp)->ntm_bps)
 
-#if __FreeBSD_version >= 300000 || defined(__NetBSD__)
-MALLOC_DECLARE(M_NTFSMNT);
-MALLOC_DECLARE(M_NTFSNTNODE);
-MALLOC_DECLARE(M_NTFSFNODE);
-MALLOC_DECLARE(M_NTFSDIR);
-MALLOC_DECLARE(M_NTFSNTHASH);
-MALLOC_DECLARE(M_NTFSNTVATTR);
-MALLOC_DECLARE(M_NTFSRDATA);
-MALLOC_DECLARE(M_NTFSDECOMP);
-MALLOC_DECLARE(M_NTFSRUN);
-#endif
-
-#ifdef __NetBSD__
-typedef int (vop_t)(void *);
-#define HASHINIT(a, b, c, d)	hashinit((a), HASH_LIST, (b), (c), (d))
-#define bqrelse(bp)		brelse(bp)
-#define VOP__UNLOCK(a, b, c)	VOP_UNLOCK((a), (b))
-#define VGET(a, b, c)		vget((a), (b))
-#define VN_LOCK(a, b, c)	vn_lock((a), (b))
-
-#elif defined(__OpenBSD__)
-typedef int (vop_t)(void *);
-#define HASHINIT(a, b, c, d)	hashinit((a), (b), (c), (d))
-#define bqrelse(bp)		brelse(bp)
-#define VOP__UNLOCK(a, b, c)	VOP_UNLOCK((a), (b), (c))
-#define VGET(a, b, c)		vget((a), (b), (c))
-#define VN_LOCK(a, b, c)	vn_lock((a), (b), (c))
-
-#else /* !NetBSD && !OpenBSD */
-#define HASHINIT(a, b, c, d)	hashinit((a), (b), (d))
-#define VOP__UNLOCK(a, b, c)	VOP_UNLOCK((a), (b), (c))
-#define VGET(a, b, c)		vget((a), (b), (c))
-#define VN_LOCK(a, b, c)	vn_lock((a), (b), (c))
-
-/* PDIRUNLOCK is used by NetBSD to mark if vfs_lookup() unlocked parent dir;
- * on FreeBSD, it's not defined and nothing similar exists */
-#define PDIRUNLOCK		0
-#endif /* NetBSD */
-
 #if defined(NTFS_DEBUG)
 extern int ntfs_debug;
 #define DPRINTF(X, Y) do { if(ntfs_debug >= (X)) printf Y; } while(0)
@@ -337,4 +299,4 @@ extern int ntfs_debug;
 #define ddprintf(a)
 #endif
 
-extern vop_t  **ntfs_vnodeop_p;
+extern struct vops ntfs_vops;

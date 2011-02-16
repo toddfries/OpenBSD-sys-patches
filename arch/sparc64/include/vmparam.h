@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vmparam.h,v 1.14 2005/04/11 15:13:01 deraadt Exp $	*/
+=======
+/*	$OpenBSD: vmparam.h,v 1.22 2010/12/15 05:30:19 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vmparam.h,v 1.18 2001/05/01 02:19:19 thorpej Exp $ */
 
 /*
@@ -58,11 +62,7 @@
 /*
  * Virtual memory related constants, all in bytes
  */
-/* #ifdef __arch64__ */
-#if 0
 /*
- * 64-bit limits:
- *
  * Since the compiler generates `call' instructions we can't
  * have more than 4GB in a single text segment.
  *
@@ -70,45 +70,22 @@
  * of that for data and the other half for stack.
  */
 #ifndef MAXTSIZ
-#define	MAXTSIZ		(4L*1024*1024*1024)	/* max text size */
+#define	MAXTSIZ		(1L*1024*1024*1024)	/* max text size */
 #endif
 #ifndef DFLDSIZ
 #define	DFLDSIZ		(128L*1024*1024)	/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(512L*1024*1024*1024)	/* max data size */
+#define	MAXDSIZ		(8L*1024*1024*1024)	/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
 #endif
 #ifndef	DFLSSIZ
-#define	DFLSSIZ		(1024*1024)		/* initial stack size limit */
+#define	DFLSSIZ		(2L*1024*1024)		/* initial stack size limit */
 #endif
 #ifndef	MAXSSIZ
-#define	MAXSSIZ		MAXDSIZ			/* max stack size */
-#endif
-#else
-/*
- * 32-bit limits:
- *
- * We only have 4GB to play with.  Limit stack, data, and text
- * each to half of that.
- *
- * This is silly.  Apparently if we go above these numbers
- * integer overflows in other parts of the kernel cause hangs.
- */
-#ifndef MAXTSIZ
-#define	MAXTSIZ		(1*1024*1024*1024)	/* max text size */
-#endif
-#ifndef DFLDSIZ
-#define	DFLDSIZ		(128*1024*1024)		/* initial data size limit */
-#endif
-#ifndef MAXDSIZ
-#define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
-#endif
-#ifndef	DFLSSIZ
-#define	DFLSSIZ		(1024*1024)		/* initial stack size limit */
-#endif
-#ifndef	MAXSSIZ
-#define	MAXSSIZ		(8*1024*1024)			/* max stack size */
-#endif
+#define	MAXSSIZ		(32L*1024*1024)		/* max stack size */
 #endif
 
 #define STACKGAP_RANDOM	256*1024
@@ -130,6 +107,10 @@
 #define VM_MIN_ADDRESS		((vaddr_t)0)
 #define VM_MAX_ADDRESS		((vaddr_t)-1)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)-1)
+
+/* map PIE into the first quarter of the address space before hole */
+#define VM_PIE_MIN_ADDR		PAGE_SIZE
+#define VM_PIE_MAX_ADDR		0x10000000000
 
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)
 #define VM_MAX_KERNEL_ADDRESS	((vaddr_t)0x000007ffffffffffL)

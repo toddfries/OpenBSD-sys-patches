@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dp8390.c,v 1.37 2006/10/20 16:54:01 brad Exp $	*/
+=======
+/*	$OpenBSD: dp8390.c,v 1.43 2010/08/29 18:01:21 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dp8390.c,v 1.13 1998/07/05 06:49:11 jonathan Exp $	*/
 
 /*
@@ -62,9 +66,13 @@ static __inline__ int	dp8390_write_mbuf(struct dp8390_softc *,
 
 static int		dp8390_test_mem(struct dp8390_softc *);
 
+<<<<<<< HEAD
 int	dp8390_enable(struct dp8390_softc *);
 void	dp8390_disable(struct dp8390_softc *);
 
+=======
+#ifdef DEBUG
+>>>>>>> origin/master
 int	dp8390_debug = 0;
 
 /*
@@ -104,7 +112,8 @@ dp8390_config(struct dp8390_softc *sc)
 	sc->tx_page_start = sc->mem_start >> ED_PAGE_SHIFT;
 	sc->rec_page_start = sc->tx_page_start + sc->txb_cnt * ED_TXBUF_SIZE;
 	sc->rec_page_stop = sc->tx_page_start + (sc->mem_size >> ED_PAGE_SHIFT);
-	sc->mem_ring = sc->mem_start + (sc->rec_page_start << ED_PAGE_SHIFT);
+	sc->mem_ring = sc->mem_start +
+	    ((sc->txb_cnt * ED_TXBUF_SIZE) << ED_PAGE_SHIFT);
 	sc->mem_end = sc->mem_start + sc->mem_size;
 
 	/* Now zero memory and verify that it is clear. */
@@ -819,7 +828,6 @@ dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		if ((error = dp8390_enable(sc)) != 0)
 			break;
@@ -835,14 +843,6 @@ dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		default:
 			dp8390_init(sc);
 			break;
-		}
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
 		}
 		break;
 
@@ -875,39 +875,21 @@ dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		if (sc->sc_enabled == 0) {
-			error = EIO;
-			break;
-		}
-
-		/* Update our multicast list. */
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING) {
-				dp8390_stop(sc);	/* XXX for ds_setmcaf? */
-				dp8390_init(sc);
-			}
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			dp8390_stop(sc);	/* XXX for ds_setmcaf? */
+			dp8390_init(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);

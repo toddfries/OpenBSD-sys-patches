@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zs_kgdb.c,v 1.1 2002/08/12 10:44:04 miod Exp $	*/
+=======
+/*	$OpenBSD: zs_kgdb.c,v 1.4 2010/07/10 19:32:24 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: zs_kgdb.c,v 1.1 1997/10/18 00:00:51 gwr Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -66,7 +63,7 @@
 #define PCLK	(9600 * 512)	/* PCLK pin input clock rate */
 #define ZSHARD_PRI	6	/* Wired on the CPU board... */
 
-#define	ZS_DELAY()		(CPU_ISSUN4C ? (0) : delay(2))
+#define	ZS_DELAY()		((CPU_ISSUN4C || CPU_ISSUN4E) ? (0) : delay(2))
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {

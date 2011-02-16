@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: msdosfs_denode.c,v 1.29 2007/03/21 17:29:32 thib Exp $	*/
+=======
+/*	$OpenBSD: msdosfs_denode.c,v 1.42 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -78,24 +82,20 @@ static void msdosfs_hashrem(struct denode *);
 
 /*ARGSUSED*/
 int
-msdosfs_init(vfsp)
-	struct vfsconf *vfsp;
+msdosfs_init(struct vfsconf *vfsp)
 {
 	dehashtbl = hashinit(desiredvnodes/2, M_MSDOSFSMNT, M_WAITOK, &dehash);
 	return (0);
 }
 
 static struct denode *
-msdosfs_hashget(dev, dirclust, diroff)
-	dev_t dev;
-	uint32_t dirclust;
-	uint32_t diroff;
+msdosfs_hashget(dev_t dev, uint32_t dirclust, uint32_t diroff)
 {
 	struct denode *dep;
 	struct proc *p = curproc; /* XXX */
        
 	for (;;)
-		for (dep = dehashtbl[DEHASH(dev, dirclust, diroff)];;
+		for (dep = dehashtbl[DEHASH(dev, dirclust, diroff)]; ;
 		     dep = dep->de_next) {
 			if (dep == NULL)
 				return (NULL);
@@ -114,8 +114,7 @@ msdosfs_hashget(dev, dirclust, diroff)
 }
 
 static int
-msdosfs_hashins(dep)
-	struct denode *dep;
+msdosfs_hashins(struct denode *dep)
 {
 	struct denode **depp, *deq;
 
@@ -140,8 +139,7 @@ msdosfs_hashins(dep)
 }
 
 static void
-msdosfs_hashrem(dep)
-	struct denode *dep;
+msdosfs_hashrem(struct denode *dep)
 {
 	struct denode *deq;
 
@@ -170,14 +168,11 @@ msdosfs_hashrem(dep)
  * depp	     - returns the address of the gotten denode.
  */
 int
-deget(pmp, dirclust, diroffset, depp)
-	struct msdosfsmount *pmp;	/* so we know the maj/min number */
-	uint32_t dirclust;		/* cluster this dir entry came from */
-	uint32_t diroffset;		/* index of entry within the cluster */
-	struct denode **depp;		/* returns the addr of the gotten denode */
+deget(struct msdosfsmount *pmp, uint32_t dirclust, uint32_t diroffset,
+    struct denode **depp)
 {
 	int error;
-	extern int (**msdosfs_vnodeop_p)(void *);
+	extern struct vops msdosfs_vops;
 	struct direntry *direntptr;
 	struct denode *ldep;
 	struct vnode *nvp;
@@ -219,9 +214,8 @@ retry:
 	 * Directory entry was not in cache, have to create a vnode and
 	 * copy it from the passed disk buffer.
 	 */
-	/* getnewvnode() does a VREF() on the vnode */
-	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp,
-			    msdosfs_vnodeop_p, &nvp);
+	/* getnewvnode() does a vref() on the vnode */
+	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp, &msdosfs_vops, &nvp);
 	if (error) {
 		*depp = 0;
 		return (error);
@@ -329,15 +323,13 @@ retry:
 		}
 	} else
 		nvp->v_type = VREG;
-	VREF(ldep->de_devvp);
+	vref(ldep->de_devvp);
 	*depp = ldep;
 	return (0);
 }
 
 int
-deupdat(dep, waitfor)
-	struct denode *dep;
-	int waitfor;
+deupdat(struct denode *dep, int waitfor)
 {
 	struct buf *bp;
 	struct direntry *dirp;
@@ -371,19 +363,20 @@ deupdat(dep, waitfor)
  * Truncate the file described by dep to the length specified by length.
  */
 int
-detrunc(dep, length, flags, cred, p)
-	struct denode *dep;
-	uint32_t length;
-	int flags;
-	struct ucred *cred;
-	struct proc *p;
+detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
+    struct proc *p)
 {
 	int error;
 	int allerror;
 	int vflags;
 	uint32_t eofentry;
+<<<<<<< HEAD
 	uint32_t chaintofree;
 	daddr_t bn;
+=======
+	uint32_t chaintofree = 0;
+	daddr64_t bn;
+>>>>>>> origin/master
 	int boff;
 	int isadir = dep->de_Attributes & ATTR_DIRECTORY;
 	struct buf *bp;
@@ -517,10 +510,7 @@ detrunc(dep, length, flags, cred, p)
  * Extend the file described by dep to length specified by length.
  */
 int
-deextend(dep, length, cred)
-	struct denode *dep;
-	uint32_t length;
-	struct ucred *cred;
+deextend(struct denode *dep, uint32_t length, struct ucred *cred)
 {
 	struct msdosfsmount *pmp = dep->de_pmp;
 	uint32_t count;
@@ -566,8 +556,7 @@ deextend(dep, length, cred)
  * been moved to a new directory.
  */
 void
-reinsert(dep)
-	struct denode *dep;
+reinsert(struct denode *dep)
 {
 	/*
 	 * Fix up the denode cache.  If the denode is for a directory,
@@ -584,8 +573,7 @@ reinsert(dep)
 }
 
 int
-msdosfs_reclaim(v)
-	void *v;
+msdosfs_reclaim(void *v)
 {
 	struct vop_reclaim_args /* {
 		struct vnode *a_vp;
@@ -625,8 +613,7 @@ msdosfs_reclaim(v)
 }
 
 int
-msdosfs_inactive(v)
-	void *v;
+msdosfs_inactive(void *v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: bt_proto.c,v 1.6 2008/11/24 20:19:51 uwe Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -29,6 +33,8 @@
 #include <netbt/l2cap_var.h>
 
 struct domain btdomain;
+
+void bt_init(void);
 
 struct protosw btsw[] = {
 	{ SOCK_RAW, &btdomain, BLUETOOTH_PROTO_HCI,
@@ -70,3 +76,17 @@ struct domain btdomain = {
 	NULL/*rtattach*/, 32, sizeof(struct sockaddr_hci),
 	NULL/*ifattach*/, NULL/*ifdetach*/
 };
+
+struct mutex bt_lock;
+
+void
+bt_init(void)
+{
+	/*
+	 * In accordance with mutex(9), since hci_intr() uses the
+	 * lock, we associate the subsystem lock with IPL_SOFTNET.
+	 * For unknown reasons, in NetBSD the interrupt level is
+	 * IPL_NONE.
+	 */
+	mtx_init(&bt_lock, IPL_BIO);
+}

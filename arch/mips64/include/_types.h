@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.1 2006/01/06 18:50:09 millert Exp $	*/
+/*	$OpenBSD: _types.h,v 1.8 2010/11/24 21:16:26 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -101,6 +101,8 @@ typedef unsigned long		__psize_t;
 /* Standard system types */
 typedef int			__clock_t;
 typedef int			__clockid_t;
+typedef double			__double_t;
+typedef float			__float_t;
 typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;
@@ -133,5 +135,6 @@ typedef struct label_t {
 
 /* Feature test macros */
 #define __HAVE_TIMECOUNTER
+#define	__HAVE_EXEC_MD_MAP
 
 #endif	/* _MIPS64__TYPES_H_ */

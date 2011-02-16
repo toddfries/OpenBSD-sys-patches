@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rasops4.c,v 1.6 2006/01/08 17:40:30 miod Exp $	*/
+=======
+/*	$OpenBSD: rasops4.c,v 1.10 2010/08/28 12:48:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rasops4.c,v 1.4 2001/11/15 09:48:15 lukem Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -47,14 +44,14 @@
 #include <dev/rasops/rasops.h>
 #include <dev/rasops/rasops_masks.h>
 
-void	rasops4_copycols(void *, int, int, int, int);
-void	rasops4_erasecols(void *, int, int, int, long);
-void	rasops4_do_cursor(struct rasops_info *);
-void	rasops4_putchar(void *, int, int col, u_int, long);
+int	rasops4_copycols(void *, int, int, int, int);
+int	rasops4_erasecols(void *, int, int, int, long);
+int	rasops4_do_cursor(struct rasops_info *);
+int	rasops4_putchar(void *, int, int col, u_int, long);
 #ifndef RASOPS_SMALL
-void	rasops4_putchar8(void *, int, int col, u_int, long);
-void	rasops4_putchar12(void *, int, int col, u_int, long);
-void	rasops4_putchar16(void *, int, int col, u_int, long);
+int	rasops4_putchar8(void *, int, int col, u_int, long);
+int	rasops4_putchar12(void *, int, int col, u_int, long);
+int	rasops4_putchar16(void *, int, int col, u_int, long);
 void	rasops4_makestamp(struct rasops_info *, long);
 
 /*
@@ -69,8 +66,7 @@ static int	stamp_mutex;	/* XXX see note in README */
  * Initialize rasops_info struct for this colordepth.
  */
 void
-rasops4_init(ri)
-	struct rasops_info *ri;
+rasops4_init(struct rasops_info *ri)
 {
 	rasops_masks_init();
 
@@ -103,12 +99,8 @@ rasops4_init(ri)
 /*
  * Paint a single character. This is the generic version, this is ugly.
  */
-void
-rasops4_putchar(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops4_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 	int height, width, fs, rs, fb, bg, fg, lmask, rmask;
 	struct rasops_info *ri;
@@ -120,10 +112,10 @@ rasops4_putchar(cookie, row, col, uc, attr)
 #ifdef RASOPS_CLIPPING
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows)
-		return;
+		return 0;
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols)
-		return;
+		return 0;
 #endif
 
 	width = ri->ri_font->fontwidth << 1;
@@ -212,21 +204,20 @@ rasops4_putchar(cookie, row, col, uc, attr)
 			rp[1] = (rp[1] & rmask) | (fg & ~rmask);
 		}
 	}
+
+	return 0;
 }
 #endif
 
 /*
  * Put a single character. This is the generic version.
  */
-void
-rasops4_putchar(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops4_putchar(void *cookie, int row, int col, u_int uc, long attr)
 {
 
 	/* XXX punt */
+	return (EAGAIN);
 }
 
 #ifndef RASOPS_SMALL
@@ -234,9 +225,7 @@ rasops4_putchar(cookie, row, col, uc, attr)
  * Recompute the blitting stamp.
  */
 void
-rasops4_makestamp(ri, attr)
-	struct rasops_info *ri;
-	long attr;
+rasops4_makestamp(struct rasops_info *ri, long attr)
 {
 	int i, fg, bg;
 
@@ -262,12 +251,8 @@ rasops4_makestamp(ri, attr)
 /*
  * Put a single character. This is for 8-pixel wide fonts.
  */
-void
-rasops4_putchar8(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops4_putchar8(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri;
 	int height, fs, rs;
@@ -277,8 +262,7 @@ rasops4_putchar8(cookie, row, col, uc, attr)
 	/* Can't risk remaking the stamp if it's already in use */
 	if (stamp_mutex++) {
 		stamp_mutex--;
-		rasops4_putchar(cookie, row, col, uc, attr);
-		return;
+		return rasops4_putchar(cookie, row, col, uc, attr);
 	}
 
 	ri = (struct rasops_info *)cookie;
@@ -287,12 +271,12 @@ rasops4_putchar8(cookie, row, col, uc, attr)
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 #endif
 
@@ -332,17 +316,15 @@ rasops4_putchar8(cookie, row, col, uc, attr)
 	}
 
 	stamp_mutex--;
+
+	return 0;
 }
 
 /*
  * Put a single character. This is for 12-pixel wide fonts.
  */
-void
-rasops4_putchar12(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops4_putchar12(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri;
 	int height, fs, rs;
@@ -352,8 +334,7 @@ rasops4_putchar12(cookie, row, col, uc, attr)
 	/* Can't risk remaking the stamp if it's already in use */
 	if (stamp_mutex++) {
 		stamp_mutex--;
-		rasops4_putchar(cookie, row, col, uc, attr);
-		return;
+		return rasops4_putchar(cookie, row, col, uc, attr);
 	}
 
 	ri = (struct rasops_info *)cookie;
@@ -362,12 +343,12 @@ rasops4_putchar12(cookie, row, col, uc, attr)
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 #endif
 
@@ -410,17 +391,15 @@ rasops4_putchar12(cookie, row, col, uc, attr)
 	}
 
 	stamp_mutex--;
+
+	return 0;
 }
 
 /*
  * Put a single character. This is for 16-pixel wide fonts.
  */
-void
-rasops4_putchar16(cookie, row, col, uc, attr)
-	void *cookie;
-	int row, col;
-	u_int uc;
-	long attr;
+int
+rasops4_putchar16(void *cookie, int row, int col, u_int uc, long attr)
 {
 	struct rasops_info *ri;
 	int height, fs, rs;
@@ -430,8 +409,7 @@ rasops4_putchar16(cookie, row, col, uc, attr)
 	/* Can't risk remaking the stamp if it's already in use */
 	if (stamp_mutex++) {
 		stamp_mutex--;
-		rasops4_putchar(cookie, row, col, uc, attr);
-		return;
+		return rasops4_putchar(cookie, row, col, uc, attr);
 	}
 
 	ri = (struct rasops_info *)cookie;
@@ -440,12 +418,12 @@ rasops4_putchar16(cookie, row, col, uc, attr)
 	/* Catches 'row < 0' case too */
 	if ((unsigned)row >= (unsigned)ri->ri_rows) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 
 	if ((unsigned)col >= (unsigned)ri->ri_cols) {
 		stamp_mutex--;
-		return;
+		return 0;
 	}
 #endif
 
@@ -491,6 +469,8 @@ rasops4_putchar16(cookie, row, col, uc, attr)
 	}
 
 	stamp_mutex--;
+
+	return 0;
 }
 #endif	/* !RASOPS_SMALL */
 

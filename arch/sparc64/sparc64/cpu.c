@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cpu.c,v 1.18 2007/01/07 18:13:41 kettenis Exp $	*/
+=======
+/*	$OpenBSD: cpu.c,v 1.56 2011/01/13 22:55:33 matthieu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -53,8 +57,10 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#include <sys/systm.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -71,8 +77,12 @@ struct cacheinfo cacheinfo = {
 	us_dcache_flush_page
 };
 
+<<<<<<< HEAD
 /* Our exported CPU info; we have only one for now. */  
 struct cpu_info cpu_info_store;
+=======
+void (*cpu_start_clock)(void);
+>>>>>>> origin/master
 
 /* Linked list of all CPUs in system. */
 struct cpu_info *cpus = NULL;
@@ -98,9 +108,99 @@ extern struct cfdriver cpu_cd;
 
 static char *fsrtoname(int, int, int, char *, size_t);
 
+int sparc64_cpuspeed(int *);
+
+int hummingbird_div(uint64_t);
+uint64_t hummingbird_estar_mode(int);
+void hummingbird_enable_self_refresh(void);
+void hummingbird_disable_self_refresh(void);
+void hummingbird_set_refresh_count(int, int);
+void hummingbird_setperf(int);
+void hummingbird_init(struct cpu_info *ci);
+
 #define	IU_IMPL(v)	((((u_int64_t)(v))&VER_IMPL) >> VER_IMPL_SHIFT)
 #define	IU_VERS(v)	((((u_int64_t)(v))&VER_MASK) >> VER_MASK_SHIFT)
 
+<<<<<<< HEAD
+=======
+struct cpu_info *
+alloc_cpuinfo(struct mainbus_attach_args *ma)
+{
+	paddr_t pa0, pa;
+	vaddr_t va, va0;
+	vsize_t sz = 8 * PAGE_SIZE;
+	int portid;
+	struct cpu_info *cpi, *ci;
+	extern paddr_t cpu0paddr;
+
+	portid = getpropint(ma->ma_node, "upa-portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "cpuid", -1);
+	if (portid == -1 && ma->ma_nreg > 0)
+		portid = (ma->ma_reg[0].ur_paddr >> 32) & 0x0fffffff;
+	if (portid == -1)
+		panic("alloc_cpuinfo: portid");
+
+	for (cpi = cpus; cpi != NULL; cpi = cpi->ci_next)
+		if (cpi->ci_upaid == portid)
+			return cpi;
+
+	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE, 0);
+	if (va == 0)
+		panic("alloc_cpuinfo: no virtual space");
+	va0 = va;
+
+	pa0 = cpu0paddr;
+	cpu0paddr += sz;
+
+	for (pa = pa0; pa < cpu0paddr; pa += PAGE_SIZE, va += PAGE_SIZE)
+		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
+
+	pmap_update(pmap_kernel());
+
+	cpi = (struct cpu_info *)(va0 + CPUINFO_VA - INTSTACK);
+
+	memset((void *)va0, 0, sz);
+
+	/*
+	 * Initialize cpuinfo structure.
+	 *
+	 * Arrange pcb, idle stack and interrupt stack in the same
+	 * way as is done for the boot CPU in pmap.c.
+	 */
+	cpi->ci_next = NULL;
+	cpi->ci_curproc = NULL;
+	cpi->ci_number = ncpus++;
+	cpi->ci_upaid = portid;
+	cpi->ci_fpproc = NULL;
+#ifdef MULTIPROCESSOR
+	cpi->ci_spinup = cpu_hatch;				/* XXX */
+#else
+	cpi->ci_spinup = NULL;
+#endif
+
+	cpi->ci_initstack = cpi;
+	cpi->ci_paddr = pa0;
+#ifdef SUN4V
+	cpi->ci_mmfsa = pa0;
+#endif
+	cpi->ci_self = cpi;
+	cpi->ci_node = ma->ma_node;
+
+	sched_init_cpu(cpi);
+
+	/*
+	 * Finally, add itself to the list of active cpus.
+	 */
+	for (ci = cpus; ci->ci_next != NULL; ci = ci->ci_next)
+		;
+	ci->ci_next = cpi;
+	return (cpi);
+}
+
+>>>>>>> origin/master
 int
 cpu_match(parent, vcf, aux)
 	struct device *parent;
@@ -110,7 +210,36 @@ cpu_match(parent, vcf, aux)
 	struct mainbus_attach_args *ma = aux;
 	struct cfdata *cf = (struct cfdata *)vcf;
 
+<<<<<<< HEAD
 	return (strcmp(cf->cf_driver->cd_name, ma->ma_name) == 0);
+=======
+#ifndef MULTIPROCESSOR
+	/*
+	 * On singleprocessor kernels, only match the CPU we're
+	 * running on.
+	 */
+	portid = getpropint(ma->ma_node, "upa-portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "portid", -1);
+	if (portid == -1)
+		portid = getpropint(ma->ma_node, "cpuid", -1);
+	if (portid == -1 && ma->ma_nreg > 0)
+		portid = (ma->ma_reg[0].ur_paddr >> 32) & 0xff;
+	if (portid == -1)
+		return (0);
+
+	if (portid != cpus->ci_upaid)
+		return (0);
+#else
+	/* XXX Only attach the first thread of a core for now. */
+	if (OF_getprop(OF_parent(ma->ma_node), "device_type",
+	    buf, sizeof(buf)) >= 0 && strcmp(buf, "core") == 0 &&
+	    (getpropint(ma->ma_node, "cpuid", -1) % 2) == 1)
+		return (0);
+#endif
+
+	return (1);
+>>>>>>> origin/master
 }
 
 /*
@@ -125,10 +254,15 @@ cpu_attach(parent, dev, aux)
 	void *aux;
 {
 	int node;
+<<<<<<< HEAD
 	long clk;
 	int impl, vers, fver;
 	char *cpuname;
 	char *fpuname;
+=======
+	u_int clk;
+	int impl, vers;
+>>>>>>> origin/master
 	struct mainbus_attach_args *ma = aux;
 	struct fpstate64 *fpstate;
 	struct fpstate64 fps[2];
@@ -162,8 +296,20 @@ cpu_attach(parent, dev, aux)
 		fpuname = "no";
 
 	/* tell them what we have */
-	node = ma->ma_node;
+	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "core") == 0)
+		node = OF_parent(ma->ma_node);
+	else
+		node = ma->ma_node;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * Allocate cpu_info structure if needed.
+	 */
+	ci = alloc_cpuinfo(ma);
+	ci->ci_node = ma->ma_node;
+
+>>>>>>> origin/master
 	clk = getpropint(node, "clock-frequency", 0);
 	if (clk == 0) {
 		/*
@@ -183,6 +329,14 @@ cpu_attach(parent, dev, aux)
 		vers >> 4, vers & 0xf, clockfreq(clk), fpuname);
 	printf(": %s\n", cpu_model);
 
+<<<<<<< HEAD
+=======
+	cpu_cpuspeed = sparc64_cpuspeed;
+
+	if (ci->ci_upaid == cpu_myid())
+		cpu_init(ci);
+
+>>>>>>> origin/master
 	cacheinfo.c_physical = 1; /* Dunno... */
 	cacheinfo.c_split = 1;
 	l = getpropint(node, "icache-line-size", 0);
@@ -272,8 +426,24 @@ cpu_attach(parent, dev, aux)
 		       (long)cacheinfo.ec_totalsize/1024,
 		       (long)cacheinfo.ec_linesize);
 	}
+
+#ifndef SMALL_KERNEL
+	if (impl == IMPL_HUMMINGBIRD)
+		hummingbird_init(ci);
+#endif
+
 	printf("\n");
 	cache_enable();
+<<<<<<< HEAD
+=======
+}
+
+int
+cpu_myid(void)
+{
+	char buf[32];
+	int impl;
+>>>>>>> origin/master
 
 	if (impl >= IMPL_CHEETAH) {
 		extern vaddr_t ktext, dlflush_start;
@@ -293,6 +463,64 @@ cpu_attach(parent, dev, aux)
 
 		cacheinfo.c_dcache_flush_page = us3_dcache_flush_page;
 	}
+<<<<<<< HEAD
+=======
+#endif
+
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
+		return lduwa(0x1fff40000d0UL, ASI_PHYS_NON_CACHED);
+
+	impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
+	switch (impl) {
+	case IMPL_OLYMPUS_C:
+	case IMPL_JUPITER:
+		return CPU_JUPITERID;
+	case IMPL_CHEETAH:
+	case IMPL_CHEETAH_PLUS:
+	case IMPL_JAGUAR:
+	case IMPL_PANTHER:
+		return CPU_FIREPLANEID;
+	default:
+		return CPU_UPAID;
+	}
+}
+
+void
+cpu_init(struct cpu_info *ci)
+{
+#ifdef SUN4V
+	paddr_t pa = ci->ci_paddr;
+	int err;
+
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		return;
+
+#define MONDO_QUEUE_SIZE	32
+#define QUEUE_ENTRY_SIZE	64
+
+	pa += CPUINFO_VA - INTSTACK;
+	pa += PAGE_SIZE;
+
+	ci->ci_cpumq = pa;
+	err = hv_cpu_qconf(CPU_MONDO_QUEUE, ci->ci_cpumq, MONDO_QUEUE_SIZE);
+	if (err != H_EOK)
+		panic("Unable to set cpu mondo queue: %d", err);
+	pa += MONDO_QUEUE_SIZE * QUEUE_ENTRY_SIZE;
+
+	ci->ci_devmq = pa;
+	err = hv_cpu_qconf(DEVICE_MONDO_QUEUE, ci->ci_devmq, MONDO_QUEUE_SIZE);
+	if (err != H_EOK)
+		panic("Unable to set device mondo queue: %d", err);
+	pa += MONDO_QUEUE_SIZE * QUEUE_ENTRY_SIZE;
+
+	ci->ci_mondo = pa;
+	pa += 64;
+
+	ci->ci_cpuset = pa;
+	pa += 64;
+#endif
+>>>>>>> origin/master
 }
 
 /*
@@ -312,8 +540,262 @@ struct info {
 	char	*name;
 };
 
+<<<<<<< HEAD
 #define	ANY	0xff	/* match any FPU version (or, later, IU version) */
 
+=======
+int
+sparc64_cpuspeed(int *freq)
+{
+	extern u_int64_t cpu_clockrate[];
+
+	*freq = cpu_clockrate[1];
+	return (0);
+}
+
+#ifndef SMALL_KERNEL
+
+/*
+ * Hummingbird (UltraSPARC-IIe) has a clock control unit that enables
+ * Energy Star mode.  This only works in combination with unbuffered
+ * DIMMs so it is not supported on all machines with UltraSPARC-IIe
+ * CPUs.
+ */
+
+/* Memory_Control_0 (MC0) register. */
+#define HB_MC0			0x1fe0000f010ULL
+#define  HB_MC0_SELF_REFRESH		0x00010000
+#define  HB_MC0_REFRESH_COUNT_MASK	0x00007f00
+#define  HB_MC0_REFRESH_COUNT_SHIFT	8
+#define  HB_MC0_REFRESH_COUNT(reg) \
+  (((reg) & HB_MC0_REFRESH_COUNT_MASK) >> HB_MC0_REFRESH_COUNT_SHIFT)
+#define  HB_MC0_REFRESH_CLOCKS_PER_COUNT	64ULL
+#define  HB_MC0_REFRESH_INTERVAL	7800ULL
+
+/* Energy Star register. */
+#define HB_ESTAR		0x1fe0000f080ULL
+#define  HB_ESTAR_MODE_MASK		0x00000007
+#define  HB_ESTAR_MODE_DIV_1		0x00000000
+#define  HB_ESTAR_MODE_DIV_2		0x00000001
+#define  HB_ESTAR_MODE_DIV_4		0x00000003
+#define  HB_ESTAR_MODE_DIV_6		0x00000002
+#define  HB_ESTAR_MODE_DIV_8		0x00000004
+#define  HB_ESTAR_NUM_MODES		5
+
+int hummingbird_divisors[HB_ESTAR_NUM_MODES];
+
+int
+hummingbird_div(uint64_t estar_mode)
+{
+	switch(estar_mode) {
+	case HB_ESTAR_MODE_DIV_1:
+		return 1;
+	case HB_ESTAR_MODE_DIV_2:
+		return 2;
+	case HB_ESTAR_MODE_DIV_4:
+		return 4;
+	case HB_ESTAR_MODE_DIV_6:
+		return 6;
+	case HB_ESTAR_MODE_DIV_8:
+		return 8;
+	default:
+		panic("bad E-Star mode");
+	}
+}
+
+uint64_t
+hummingbird_estar_mode(int div)
+{
+	switch(div) {
+	case 1:
+		return HB_ESTAR_MODE_DIV_1;
+	case 2:
+		return HB_ESTAR_MODE_DIV_2;
+	case 4:
+		return HB_ESTAR_MODE_DIV_4;
+	case 6:
+		return HB_ESTAR_MODE_DIV_6;
+	case 8:
+		return HB_ESTAR_MODE_DIV_8;
+	default:
+		panic("bad clock divisor");
+	}
+}
+
+void
+hummingbird_enable_self_refresh(void)
+{
+	uint64_t reg;
+
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+	reg |= HB_MC0_SELF_REFRESH;
+	stxa(HB_MC0, ASI_PHYS_NON_CACHED, reg);
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+}
+
+void
+hummingbird_disable_self_refresh(void)
+{
+	uint64_t reg;
+
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+	reg &= ~HB_MC0_SELF_REFRESH;
+	stxa(HB_MC0, ASI_PHYS_NON_CACHED, reg);
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+}
+
+void
+hummingbird_set_refresh_count(int div, int new_div)
+{
+	extern u_int64_t cpu_clockrate[];
+	uint64_t count, new_count;
+	uint64_t delta;
+	uint64_t reg;
+
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+	count = HB_MC0_REFRESH_COUNT(reg);
+	new_count = (HB_MC0_REFRESH_INTERVAL * cpu_clockrate[0]) /
+		(HB_MC0_REFRESH_CLOCKS_PER_COUNT * new_div * 1000000000);
+	reg &= ~HB_MC0_REFRESH_COUNT_MASK;
+	reg |= (new_count << HB_MC0_REFRESH_COUNT_SHIFT);
+	stxa(HB_MC0, ASI_PHYS_NON_CACHED, reg);
+	reg = ldxa(HB_MC0, ASI_PHYS_NON_CACHED);
+
+	if (new_div > div && (reg & HB_MC0_SELF_REFRESH) == 0) {
+		delta = HB_MC0_REFRESH_CLOCKS_PER_COUNT * 
+		    ((count + new_count) * 1000000UL * div) / cpu_clockrate[0];
+		delay(delta + 1);
+	}
+}
+
+void
+hummingbird_setperf(int level)
+{
+	extern u_int64_t cpu_clockrate[];
+	uint64_t estar_mode, new_estar_mode;
+	uint64_t reg, s;
+	int div, new_div, i;
+
+	new_estar_mode = HB_ESTAR_MODE_DIV_1;
+	for (i = 0; i < HB_ESTAR_NUM_MODES && hummingbird_divisors[i]; i++) {
+		if (level <= 100 / hummingbird_divisors[i])
+			new_estar_mode =
+			    hummingbird_estar_mode(hummingbird_divisors[i]);
+	}
+
+	reg = ldxa(HB_ESTAR, ASI_PHYS_NON_CACHED);
+	estar_mode = reg & HB_ESTAR_MODE_MASK;
+	if (estar_mode == new_estar_mode)
+		return;
+
+	reg &= ~HB_ESTAR_MODE_MASK;
+	div = hummingbird_div(estar_mode);
+	new_div = hummingbird_div(new_estar_mode);
+
+	s = intr_disable();
+	if (estar_mode == HB_ESTAR_MODE_DIV_1 &&
+	    new_estar_mode == HB_ESTAR_MODE_DIV_2) {
+		hummingbird_set_refresh_count(1, 2);
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | HB_ESTAR_MODE_DIV_2);
+		delay(1);
+		hummingbird_enable_self_refresh();
+	} else if (estar_mode == HB_ESTAR_MODE_DIV_2 &&
+	    new_estar_mode == HB_ESTAR_MODE_DIV_1) {
+		hummingbird_disable_self_refresh();
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | HB_ESTAR_MODE_DIV_1);
+		delay(1);
+		hummingbird_set_refresh_count(2, 1);
+	} else if (estar_mode == HB_ESTAR_MODE_DIV_1) {
+		/* 
+		 * Transition to 1/2 speed first, then to
+		 * lower speed.
+		 */
+		hummingbird_set_refresh_count(1, 2);
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | HB_ESTAR_MODE_DIV_2);
+		delay(1);
+		hummingbird_enable_self_refresh();
+
+		hummingbird_set_refresh_count(2, new_div);
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | new_estar_mode);
+		delay(1);
+	} else if (new_estar_mode == HB_ESTAR_MODE_DIV_1) {
+		/* 
+		 * Transition to 1/2 speed first, then to
+		 * full speed.
+		 */
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | HB_ESTAR_MODE_DIV_2);
+		delay(1);
+		hummingbird_set_refresh_count(div, 2);
+
+		hummingbird_disable_self_refresh();
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | HB_ESTAR_MODE_DIV_1);
+		delay(1);
+		hummingbird_set_refresh_count(2, 1);
+	} else if (div < new_div) {
+		hummingbird_set_refresh_count(div, new_div);
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | new_estar_mode);
+		delay(1);
+	} else if (div > new_div) {
+		stxa(HB_ESTAR, ASI_PHYS_NON_CACHED, reg | new_estar_mode);
+		delay(1);
+		hummingbird_set_refresh_count(div, new_div);
+	}
+	cpu_clockrate[1] = cpu_clockrate[0] / (new_div * 1000000);
+	intr_restore(s);
+}
+
+void
+hummingbird_init(struct cpu_info *ci)
+{
+	/*
+	 * The "clock-divisors" property seems to indicate which
+	 * frequency scalings are supported on a particular model.
+	 */
+	if (OF_getprop(ci->ci_node, "clock-divisors",
+	    &hummingbird_divisors, sizeof(hummingbird_divisors)) <= 0)
+		return;
+
+	cpu_setperf = hummingbird_setperf;
+}
+#endif
+
+#ifdef MULTIPROCESSOR
+void cpu_mp_startup(void);
+
+void
+cpu_boot_secondary_processors(void)
+{
+	struct cpu_info *ci;
+	int cpuid, i;
+	char buf[32];
+
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0) {
+		for (ci = cpus; ci != NULL; ci = ci->ci_next)
+			ci->ci_itid = STARFIRE_UPAID2HWMID(ci->ci_upaid);
+	} else {
+		for (ci = cpus; ci != NULL; ci = ci->ci_next)
+			ci->ci_itid = ci->ci_upaid;
+	}
+
+	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
+		if (ci->ci_upaid == cpu_myid())
+			continue;
+		ci->ci_randseed = random();
+
+		if (CPU_ISSUN4V)
+			cpuid = ci->ci_upaid;
+		else
+			cpuid = getpropint(ci->ci_node, "cpuid", -1);
+
+		if (OF_test("SUNW,start-cpu-by-cpuid") == 0) {
+			prom_start_cpu_by_cpuid(cpuid,
+			    (void *)cpu_mp_startup, ci->ci_paddr);
+		} else {
+			prom_start_cpu(ci->ci_node,
+			    (void *)cpu_mp_startup, ci->ci_paddr);
+		}
+>>>>>>> origin/master
 
 /* NB: table order matters here; specific numbers must appear before ANY. */
 static struct info fpu_types[] = {
@@ -352,10 +834,14 @@ static struct info fpu_types[] = {
 	 */
 	{ 1, 0x5, ANY, 0, "on-chip" },
 
+<<<<<<< HEAD
 	/*
 	 * Vendor 9, Weitek.
 	 */
 	{ 1, 0x9, ANY, 3, "on-chip" },
+=======
+	cpu_start_clock();
+>>>>>>> origin/master
 
 	{ 0 }
 };
@@ -366,6 +852,7 @@ fsrtoname(impl, vers, fver, buf, buflen)
 	char *buf;
 	size_t buflen;
 {
+<<<<<<< HEAD
 	register struct info *p;
 
 	for (p = fpu_types; p->valid; p++)
@@ -375,6 +862,53 @@ fsrtoname(impl, vers, fver, buf, buflen)
 			return (p->name);
 	snprintf(buf, buflen, "version %x", fver);
 	return (buf);
+=======
+	ci->ci_want_resched = 1;
+
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
+		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
+	}
+}
+
+/*
+ * Idle loop.
+ *
+ * We disable and reenable the interrupts in every cycle of the idle loop.
+ * Since hv_cpu_yield doesn't actually reenable interrupts, it just wakes
+ * up if an interrupt would have happened, but it's our responsibility to
+ * unblock interrupts.
+ */
+
+void
+cpu_idle_enter(void)
+{
+	if (CPU_ISSUN4V) {
+		sparc_wrpr(pstate, sparc_rdpr(pstate) & ~PSTATE_IE, 0);
+	}
+}
+
+void
+cpu_idle_cycle(void)
+{
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		hv_cpu_yield();
+		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);
+		sparc_wrpr(pstate, sparc_rdpr(pstate) & ~PSTATE_IE, 0);
+	}
+#endif
+}
+
+void
+cpu_idle_leave()
+{
+	if (CPU_ISSUN4V) {
+		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);
+	}
+>>>>>>> origin/master
 }
 
 struct cfdriver cpu_cd = {

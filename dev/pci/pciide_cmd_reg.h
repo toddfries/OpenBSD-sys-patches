@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pciide_cmd_reg.h,v 1.8 2003/09/28 21:01:43 grange Exp $	*/
+=======
+/*	$OpenBSD: pciide_cmd_reg.h,v 1.11 2010/07/23 07:47:13 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pciide_cmd_reg.h,v 1.9 2000/08/02 20:23:46 bouyer Exp $	*/
 
 /*
@@ -12,12 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -37,7 +35,6 @@
 
 /*
  * Registers definitions for CMD Technologies's PCI 064x IDE controllers.
- * Available from http://www.cmd.com/
  */
 
 /* Interesting revision of the 0646 */

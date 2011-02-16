@@ -1,4 +1,19 @@
-/* $OpenBSD: machdep.c,v 1.4 2006/05/20 22:40:43 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.42 2011/01/05 22:20:19 miod Exp $	*/
+ * Copyright (c) 2007 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice, this permission notice, and the disclaimer below
+ * appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -56,9 +71,6 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
@@ -79,7 +91,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -89,15 +101,14 @@
 #include <ddb/db_var.h>
 #endif /* DDB */
 
-caddr_t	allocsys(caddr_t);
 void	aviion_bootstrap(void);
-int	aviion_identify(void);
+void	aviion_identify(void);
 void	consinit(void);
+void	cpu_hatch_secondary_processors(void);
+void	cpu_setup_secondary_processors(void);
 __dead void doboot(void);
 void	dumpconf(void);
 void	dumpsys(void);
-u_int	getipl(void);
-void	identifycpu(void);
 void	savectx(struct pcb *);
 void	secondary_main(void);
 void	secondary_pre_main(void);
@@ -110,7 +121,9 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+u_int	hatch_pending_count = 0;
+__cpu_simple_lock_t cpu_hatch_mutex = __SIMPLELOCK_LOCKED;
+__cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
 
 /*
@@ -133,6 +146,9 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * Info for CTL_HW
  */
@@ -146,6 +162,8 @@ extern vaddr_t esym;
 const char *prom_bootargs;			/* set in locore.S */
 char bootargs[256];				/* local copy */
 u_int bootdev, bootunit, bootpart;		/* set in locore.S */
+
+int32_t cpuid;
 
 int cputyp;					/* set in locore.S */
 int cpuspeed = 20;				/* safe guess */
@@ -198,17 +216,6 @@ consinit()
 #endif
 }
 
-void
-identifycpu()
-{
-#if 0
-	/* XXX FILL ME */
-	cpuspeed = getcpuspeed(&brdid);
-#endif
-
-	strlcpy(cpu_model, platform->descr, sizeof cpu_model);
-}
-
 /*
  * Set up real-time clocks.
  * These function pointers are set in dev/clock.c.
@@ -229,89 +236,19 @@ setstatclockrate(int newhz)
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz, i;
-	vsize_t size;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-
-	/*
-	 * Initialize error message buffer (at end of core).
-	 * avail_end was pre-decremented in aviion_bootstrap() to compensate.
-	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
-		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
-		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
-	pmap_update(pmap_kernel());
-	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	/*
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	identifycpu();
-	printf("real mem  = %d\n", ctob(physmem));
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Grab machine dependent memory spaces
 	 */
 	platform->startup();
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	      UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base + 1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				      "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -351,61 +288,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-
-	return v;
 }
 
 __dead void
@@ -565,6 +447,10 @@ dumpsys()
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	/* Setup the dump header */
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
@@ -593,10 +479,7 @@ dumpsys()
 		if (pg != 0 && (pg % NPGMB) == 0)
 			printf("%d ", pg / NPGMB);
 #undef NPGMB
-		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, maddr,
-		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
-
-		error = (*dump)(dumpdev, blkno, vmmap, PAGE_SIZE);
+		error = (*dump)(dumpdev, blkno, (caddr_t)maddr, PAGE_SIZE);
 		if (error == 0) {
 			maddr += PAGE_SIZE;
 			blkno += btodb(PAGE_SIZE);
@@ -647,10 +530,12 @@ void
 secondary_pre_main()
 {
 	struct cpu_info *ci;
+	vaddr_t init_stack;
 
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	ci = curcpu();
 	ci->ci_curproc = &proc0;
+	platform->smp_setup(ci);
 
 	splhigh();
 
@@ -662,9 +547,16 @@ secondary_pre_main()
 	/*
 	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
 	 */
-	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
-	if (ci->ci_idle_pcb == NULL) {
-		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	init_stack = uvm_km_zalloc(kernel_map, USPACE);
+	if (init_stack == (vaddr_t)NULL) {
+		printf("cpu%d: unable to allocate startup stack\n",
+		    ci->ci_cpuid);
+		/*
+		 * Release cpu_hatch_mutex to let other secondary processors
+		 * have a chance to run.
+		 */
+		__cpu_simple_unlock(&cpu_hatch_mutex);
+		for (;;) ;
 	}
 }
 
@@ -680,16 +572,29 @@ secondary_main()
 	struct cpu_info *ci = curcpu();
 
 	cpu_configuration_print(0);
-	__cpu_simple_unlock(&cpu_mutex);
+	ncpus++;
 
+	sched_init_cpu(ci);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
+	ci->ci_randseed = random();
+	SET(ci->ci_flags, CIF_ALIVE);
 
 	/*
-	 * Upon return, the secondary cpu bootstrap code in locore will
-	 * enter the idle loop, waiting for some food to process on this
-	 * processor.
+	 * Release cpu_hatch_mutex to let other secondary processors
+	 * have a chance to run.
 	 */
+	hatch_pending_count--;
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+
+	/* wait for cpu_boot_secondary_processors() */
+	__cpu_simple_lock(&cpu_boot_mutex);
+	__cpu_simple_unlock(&cpu_boot_mutex);
+
+	spl0();
+	SCHED_LOCK(s);
+	set_psr(get_psr() & ~PSR_IND);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #endif	/* MULTIPROCESSOR */
@@ -813,7 +718,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 aviion_bootstrap()
 {
-	extern int kernelstart;
 	extern char *end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
@@ -822,41 +726,11 @@ aviion_bootstrap()
 	/* Save a copy of our commandline before it gets overwritten. */
 	strlcpy(bootargs, prom_bootargs, sizeof bootargs);
 
-	avtyp = aviion_identify();
-
-	/* Set up interrupt and fp exception handlers based on the machine. */
-	switch (avtyp) {
-#ifdef AV400
-	case AV_400:
-		platform = &board_av400;
-		break;
-#endif
-#ifdef AV530
-	case AV_530:
-		platform = &board_av530;
-		break;
-#endif
-#ifdef AV5000
-	case AV_5000:
-		platform = &board_av5000;
-		break;
-#endif
-#ifdef AV6280
-	case AV_6280:
-		platform = &board_av6280;
-		break;
-#endif
-	default:
-		scm_printf("Sorry, OpenBSD/" MACHINE
-		    " does not support this model.\n");
-		scm_halt();
-		break;
-	};
+	aviion_identify();
 
 	cn_tab = &bootcons;
-	/* we can use printf() from here. */
-
 	platform->bootstrap();
+	/* we can use printf() from here. */
 
 	/* Parse the commandline */
 	cmdline_parse();
@@ -878,6 +752,24 @@ aviion_bootstrap()
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+#ifdef MULTIPROCESSOR
+	platform->smp_setup(curcpu());
+#endif
+	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
+
+#ifdef M88100
+	if (CPU_IS88100) {
+		m88100_apply_patches();
+	}
+#endif
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * We need to start secondary processors while it is still
+	 * possible to invoke SCM functions.
+	 */
+	cpu_hatch_secondary_processors();
+#endif
 
 	/*
 	 * Now that set_cpu_number() set us with a valid cpu_info pointer,
@@ -892,10 +784,6 @@ aviion_bootstrap()
 	avail_start = round_page(first_addr);
 	avail_end = last_addr;
 
-	/* Steal MSGBUFSIZE at the top of physical memory for msgbuf. */
-	avail_end -= round_page(MSGBUFSIZE);
-	pmap_bootstrap((vaddr_t)trunc_page((unsigned)&kernelstart));
-
 	/*
 	 * Tell the VM system about available physical memory.
 	 * The aviion systems only have one contiguous area.
@@ -906,25 +794,76 @@ aviion_bootstrap()
 	uvm_page_physload(atop(avail_start), atop(avail_end),
 	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
 
+	/*
+	 * Initialize message buffer.
+	 */
+	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
+	    MSGBUFSIZE);
+
+	pmap_bootstrap(0, 0);	/* ROM image is on top of physical memory */
+
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
 }
 
 #ifdef MULTIPROCESSOR
+/*
+ * Spin processors while we can use the PROM, and have them wait for
+ * cpu_hatch_mutex.
+ */
 void
-cpu_boot_secondary_processors()
+cpu_hatch_secondary_processors()
 {
+	struct cpu_info *ci = curcpu();
 	cpuid_t cpu;
 	int rc;
 	extern void secondary_start(void);
 
-	for (cpu = 0; cpu < max_cpus; cpu++) {
-		if (cpu != curcpu()->ci_cpuid) {
-			rc = scm_spincpu(cpu, (vaddr_t)secondary_start);
-			if (rc != 0)
-				printf("cpu%d: spin_cpu error %d\n", cpu, rc);
+	/* we might not have a working SMP implementation on this system. */
+	if (platform->send_ipi == NULL)
+		return;
+
+	for (cpu = 0; cpu < ncpusfound; cpu++) {
+		if (cpu != ci->ci_cpuid) {
+			rc = scm_jpstart(cpu, (vaddr_t)secondary_start);
+			switch (rc) {
+			case JPSTART_OK:
+				hatch_pending_count++;
+				break;
+			case JPSTART_NO_JP:
+				break;
+			case JPSTART_SINGLE_JP:
+				/* this should never happen, but just in case */
+				ncpusfound = 1;
+				return;
+			default:
+				printf("CPU%d failed to start, error %d\n",
+				    cpu, rc);
+				break;
+			}
 		}
 	}
+}
+
+/*
+ * Release cpu_hatch_mutex to let secondary processors initialize.
+ */
+void
+cpu_setup_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+	while (hatch_pending_count != 0)
+		delay(100000);
+}
+
+/*
+ * Release cpu_boot_mutex to let secondary processors start running
+ * processes.
+ */
+void
+cpu_boot_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_boot_mutex);
 }
 #endif
 
@@ -976,8 +915,36 @@ getipl(void)
 	return curspl;
 }
 
-u_int
-setipl(u_int level)
+#ifdef MULTIPROCESSOR
+void
+m88k_send_ipi(int ipi, cpuid_t cpu)
+{
+	struct cpu_info *ci;
+
+	ci = &m88k_cpus[cpu];
+	if (ISSET(ci->ci_flags, CIF_ALIVE))
+		platform->send_ipi(ipi, cpu);
+}
+
+void
+m88k_broadcast_ipi(int ipi)
+{
+	struct cpu_info *us = curcpu();
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == us)
+			continue;
+
+		if (ISSET(ci->ci_flags, CIF_ALIVE))
+			platform->send_ipi(ipi, ci->ci_cpuid);
+	}
+}
+#endif
+
+void
+intsrc_enable(u_int intsrc, int ipl)
 {
 	u_int curspl, psr;
 
@@ -1030,39 +997,127 @@ myetheraddr(u_char *cp)
  * These heuristics are probably not the best; feel free to come with better
  * ones...
  */
-int
+
+struct aviion_system {
+	int32_t			 cpuid;
+	const char		*model;
+	const struct board	*platform;
+	const char		*kernel_option;
+};
+static const struct aviion_system aviion_systems[] = {
+#define	BOARD_UNSUPPORTED	NULL, NULL
+#ifdef AV400
+#define	BOARD_AV400		&board_av400, NULL
+#else
+#define	BOARD_AV400		NULL, "AV400"
+#endif
+#ifdef AV530
+#define	BOARD_AV530		&board_av530, NULL
+#else
+#define	BOARD_AV530		NULL, "AV530"
+#endif
+#ifdef AV5000
+#define	BOARD_AV5000		&board_av5000, NULL
+#else
+#define	BOARD_AV5000		BOARD_UNSUPPORTED /* NULL, "AV5000" */
+#endif
+#ifdef AV6280
+#define	BOARD_AV6280		&board_av6280, NULL
+#else
+#define	BOARD_AV6280		BOARD_UNSUPPORTED /* NULL, "AV6280" */
+#endif
+	{ AVIION_300_310,		"300/310",	BOARD_AV400 },
+	{ AVIION_5100_6100,		"5100/6100",	BOARD_UNSUPPORTED },
+	{ AVIION_400_4000,		"400/4000",	BOARD_AV400 },
+	{ AVIION_410_4100,		"410/4100",	BOARD_AV400 },
+	{ AVIION_300C_310C,		"300C/310C",	BOARD_AV400 },
+	{ AVIION_5200_6200,		"5200/6200",	BOARD_AV5000 },
+	{ AVIION_5240_6240,		"5240/6240",	BOARD_AV5000 },
+	{ AVIION_300CD_310CD,		"300CD/310CD",	BOARD_AV400 },
+	{ AVIION_300D_310D,		"300D/310D",	BOARD_AV400 },
+	{ AVIION_4600_530,		"4600/530",	BOARD_AV530 },
+	{ AVIION_4300_25,		"4300-25",	BOARD_AV400 },
+	{ AVIION_4300_20,		"4300-20",	BOARD_AV400 },
+	{ AVIION_4300_16,		"4300-16",	BOARD_AV400 },
+	{ AVIION_5255_6255,		"5255/6255",	BOARD_AV5000 },
+	{ AVIION_350,			"350",		BOARD_UNSUPPORTED },
+	{ AVIION_6280,			"6280",		BOARD_AV6280 },
+	{ AVIION_8500_9500,		"8500/9500",	BOARD_UNSUPPORTED },
+	{ AVIION_9500_HA,		"9500HA",	BOARD_UNSUPPORTED },
+	{ AVIION_500,			"500",		BOARD_UNSUPPORTED },
+	{ AVIION_5500,			"5500",		BOARD_UNSUPPORTED },
+	{ AVIION_450,			"450",		BOARD_UNSUPPORTED },
+	{ AVIION_8500_9500_45_1MB,	"8500/9500-45",	BOARD_UNSUPPORTED },
+	{ AVIION_10000,			"10000",	BOARD_UNSUPPORTED },
+	{ AVIION_10000_QT,		"10000QT",	BOARD_UNSUPPORTED },
+	{ AVIION_5500PLUS,		"5500+",	BOARD_UNSUPPORTED },
+	{ AVIION_450PLUS,		"450+",		BOARD_UNSUPPORTED },
+	{ AVIION_8500_9500_50_1MB,	"8500/9500-50",	BOARD_UNSUPPORTED },
+	{ AVIION_8500_9500_50_2MB,	"8500/9500-50d", BOARD_UNSUPPORTED },
+
+	{ AVIION_UNKNOWN1,		"\"Montezuma\"", BOARD_UNSUPPORTED },
+	{ AVIION_UNKNOWN2,		"\"Montezuma\"", BOARD_UNSUPPORTED },
+	{ AVIION_UNKNOWN3,		"\"Flintstone\"", BOARD_UNSUPPORTED },
+	{ AVIION_UNKNOWN1_DIS,		"\"Montezuma-\"", BOARD_UNSUPPORTED },
+	{ AVIION_UNKNOWN2_DIS,		"\"Montezuma-\"", BOARD_UNSUPPORTED },
+
+	{ 0 }
+#undef	BOARD_AV6280
+#undef	BOARD_AV5000
+#undef	BOARD_AV530
+#undef	BOARD_AV400
+};
+
+void
 aviion_identify()
 {
-	/*
-	 * We don't know anything about 88110-based models.
-	 * Note that we can't use CPU_IS81x0 here since these are optimized
-	 * if the kernel you're running is compiled for only one processor
-	 * type, and we want to check against the real hardware.
-	 */
-	if (cputyp == CPU_88110)
-		return (0);
+	const struct aviion_system *system;
+	char excuse[512];
+	extern char *hw_vendor, *hw_prod;
 
-	/*
-	 * Series 100/200/300/400/3000/4000/4300 do not have the VIRQLV
-	 * register at 0xfff85000.
-	 */
-	if (badaddr(0xfff85000, 4) != 0)
-		return (AV_400);
+	cpuid = scm_cpuid();
+	hostid = scm_sysid();
 
-	/*
-	 * Series 5000 and 6000 do not have an RTC counter at 0xfff8f084.
-	 */
-	if (badaddr(0xfff8f084, 4) != 0)
-		return (AV_5000);
+	for (system = aviion_systems; ; system++) {
+		if (system->cpuid != 0 && system->cpuid != cpuid)
+			continue;
 
-	/*
-	 * Series 4600/530 have IOFUSEs at 0xfffb0040 and 0xfffb00c0.
-	 */
-	if (badaddr(0xfffb0040, 1) == 0 && badaddr(0xfffb00c0, 1) == 0)
-		return (AV_530);
+		hw_vendor = "Data General";
+		hw_prod = "AViiON";
+		strlcpy(cpu_model, system->model, sizeof cpu_model);
 
-	/*
-	 * Series 6280/8000-8 fall here.
-	 */
-	return (AV_6280);
+		if (system->platform != NULL) {
+			platform = system->platform;
+			return;
+		}
+
+		if (system->kernel_option != NULL) {
+			/* unconfigured system */
+			snprintf(excuse, sizeof excuse, "\n"
+			    "Sorry, support for the %s system is not present\n"
+			    "in this OpenBSD/" MACHINE " kernel.\n"
+			    "Please recompile your kernel with\n"
+			    "\toption\t%s\n"
+			    "in the kernel configuration file.\n",
+			    system->model, system->kernel_option);
+		} else if (system->cpuid != 0) {
+			/* unsupported system */
+			snprintf(excuse, sizeof excuse, "\n"
+			    "Sorry, OpenBSD/" MACHINE
+			    " does not support the %s system"
+			    " (cpuid %04x) yet.\n\n"
+			    "Please contact <m88k@openbsd.org>\n",
+			    system->model, cpuid);
+		} else {
+			/* unrecgonized system */
+			snprintf(excuse, sizeof excuse, "\n"
+			    "Sorry, OpenBSD/" MACHINE
+			    " does not recognize this system (cpuid %04x).\n\n"
+			    "Please contact <m88k@openbsd.org>\n",
+			    cpuid);
+		}
+	}
+
+	scm_printf(excuse);
+	scm_halt();
 }

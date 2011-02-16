@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: build.c,v 1.3 2009/05/15 15:53:55 damien Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006
@@ -51,6 +55,8 @@ int
 main(void)
 {
 	output("rum-rt2573", rt2573, sizeof rt2573);
+	output("run-rt2870", rt2870, sizeof rt2870);
+	output("run-rt3071", rt3071, sizeof rt3071);
 
 	return 0;
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_machdep.h,v 1.10 2005/01/04 21:14:35 espie Exp $	*/
+=======
+/*	$OpenBSD: db_machdep.h,v 1.13 2010/11/27 19:57:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_machdep.h,v 1.6 1998/08/10 14:33:33 ragge Exp $	*/
 
 /* 
@@ -69,9 +73,6 @@ db_regs_t	ddb_regs;	/* register state */
 #define	inst_trap_return(ins)	(((ins)&0xff) == I_IRET)
 #define	inst_return(ins)	(((ins)&0xff) == I_RET)
 #define	inst_call(ins)		(((ins)&0xff) == I_CALL)
-
-#define inst_load(ins)		0
-#define inst_store(ins)		0
 
 /* Prototypes */
 void	kdb_trap(struct trapframe *);

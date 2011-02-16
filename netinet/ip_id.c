@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ip_id.c,v 1.12 2004/03/22 04:37:20 deraadt Exp $ */
+=======
+/*	$OpenBSD: ip_id.c,v 1.22 2008/06/09 07:07:17 djm Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright 1998 Niels Provos <provos@citi.umich.edu>
@@ -184,5 +188,19 @@ ip_randomid(void)
 
 	ru_counter += i;
 
+<<<<<<< HEAD
 	return (ru_seed ^ pmod(ru_g,ru_seed2 + ru_x, RU_N)) | ru_msb;
+=======
+	do {
+		arc4random_buf(&si, sizeof(si));
+		i = isindex & 0xFFFF;
+		i2 = (isindex - (si & 0x7FFF)) & 0xFFFF;
+		r = ip_shuffle[i];
+		ip_shuffle[i] = ip_shuffle[i2];
+		ip_shuffle[i2] = r;
+		isindex++;
+	} while (r == 0);
+
+	return (r);
+>>>>>>> origin/master
 }

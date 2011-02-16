@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uha_eisa.c,v 1.5 2005/11/23 11:30:14 mickey Exp $	*/
+=======
+/*	$OpenBSD: uha_eisa.c,v 1.12 2010/08/07 03:50:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uha_eisa.c,v 1.5 1996/10/21 22:31:07 thorpej Exp $	*/
 
 /*
@@ -36,7 +40,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -52,10 +56,6 @@
 
 #define	UHA_EISA_SLOT_OFFSET	0xc80
 #define	UHA_EISA_IOSIZE		0x020
-
-#ifndef DDB
-#define	Debugger() panic("should call debugger here (uha_eisa.c)")
-#endif
 
 int	uha_eisa_match(struct device *, void *, void *);
 void	uha_eisa_attach(struct device *, struct device *, void *);
@@ -126,7 +126,7 @@ uha_eisa_attach(parent, self, aux)
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
 	    UHA_EISA_SLOT_OFFSET, UHA_EISA_IOSIZE, 0, &ioh))
-		panic("uha_attach: could not map I/O addresses");
+		panic("uha_attach: can't map I/O addresses");
 
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
@@ -233,11 +233,9 @@ u24_start_mbox(sc, mscp)
 			break;
 		delay(100);
 	}
-	if (!spincount) {
-		printf("%s: uha_start_mbox, board not responding\n",
+	if (!spincount)
+		panic("%s: uha_start_mbox, board not responding",
 		    sc->sc_dev.dv_xname);
-		Debugger();
-	}
 
 	bus_space_write_4(iot, ioh, U24_OGMPTR, KVTOPHYS(mscp));
 	if (mscp->flags & MSCP_ABORT)
@@ -247,7 +245,7 @@ u24_start_mbox(sc, mscp)
 	bus_space_write_1(iot, ioh, U24_LINT, U24_OGMFULL);
 
 	if ((mscp->xs->flags & SCSI_POLL) == 0)
-		timeout_add(&mscp->xs->stimeout, (mscp->timeout * hz) / 1000);
+		timeout_add_msec(&mscp->xs->stimeout, mscp->timeout);
 }
 
 int

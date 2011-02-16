@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.10 2005/08/07 07:29:44 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.22 2010/12/15 05:30:19 tedu Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.5 1994/10/26 21:10:10 cgd Exp $	*/
 
 /*
@@ -44,12 +44,8 @@
 /*
  * Machine dependent constants mips processors.
  */
-/*
- * USRTEXT is the start of the user text/data space, while USRSTACK
- * is the top (end) of the user stack.
- */
-#define	USRTEXT		0x0000000000400000L
-#define	USRSTACK	0x0000000080000000L	/* Start of user stack */
+
+#define	USRSTACK	VM_MAXUSER_ADDRESS	/* Start of user stack */
 
 /*
  * Virtual memory related constants, all in bytes
@@ -63,6 +59,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
 #endif
@@ -73,7 +72,7 @@
 #define STACKGAP_RANDOM	256*1024
 
 /*
- * PTEs for mapping user space into the kernel for phyio operations.
+ * PTEs for mapping user space into the kernel for physio operations.
  * 16 pte's are enough to cover 8 disks * MAXBSIZE.
  */
 #ifndef USRIOSIZE
@@ -89,23 +88,23 @@
 #endif
 
 #define	VM_PHYSSEG_MAX	8	/* Max number of physical memory segments */
+#endif
+#ifndef	VM_PHYSSEG_STRAT
 #define VM_PHYSSEG_STRAT VM_PSTRAT_BSEARCH
+#endif
 #define VM_PHYSSEG_NOADD
 
 
 /* user/kernel map constants */
-#ifdef __LP64__
-#define VM_MIN_ADDRESS		((vaddr_t)0x0000000000000000L)
+#define VM_MIN_ADDRESS		((vaddr_t)0x0000000000004000L)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)0x0000000080000000L)
-#define VM_MAX_ADDRESS		((vaddr_t)0x0000000080000000L)
-#define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xffffffffc0000000L)
-#else
-#define VM_MIN_ADDRESS		((vaddr_t)0x00000000)
-#define VM_MAXUSER_ADDRESS	((vaddr_t)0x80000000)
-#define VM_MAX_ADDRESS		((vaddr_t)0x80000000)
-#define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xc0000000)
-#endif
-#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)-PAGE_SIZE)
+#define VM_MAX_ADDRESS		VM_MAXUSER_ADDRESS
+#define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xc000000000000000L)
+#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)0xc000000040000000L)
+
+/* map PIE below 256MB (non-pie link address) to avoid mmap pressure */
+#define VM_PIE_MIN_ADDR		PAGE_SIZE
+#define VM_PIE_MAX_ADDR		(0x10000000UL)
 
 #define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0

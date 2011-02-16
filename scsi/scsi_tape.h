@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: scsi_tape.h,v 1.6 1997/04/14 04:09:13 downsj Exp $	*/
+=======
+/*	$OpenBSD: scsi_tape.h,v 1.8 2010/12/24 02:45:33 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: scsi_tape.h,v 1.9 1996/05/24 02:04:47 thorpej Exp $	*/
 
 /*
@@ -173,7 +177,6 @@ struct scsi_tape_dev_conf_page {
 #define	SMH_DSP_BUFF_MODE_OFF	0x00
 #define	SMH_DSP_BUFF_MODE_ON	0x10
 #define	SMH_DSP_BUFF_MODE_MLTI	0x20
-#define	SMH_DSP_WRITE_PROT	0x80
 
 /* A special for the CIPHER ST150S(old drive) */
 struct block_desc_cipher {

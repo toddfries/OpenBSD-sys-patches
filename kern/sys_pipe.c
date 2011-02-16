@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sys_pipe.c,v 1.50 2005/12/13 10:33:14 jsg Exp $	*/
+=======
+/*	$OpenBSD: sys_pipe.c,v 1.58 2010/01/14 23:12:11 schwarze Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -90,9 +94,9 @@ struct pool pipe_pool;
 void	pipeclose(struct pipe *);
 void	pipe_free_kmem(struct pipe *);
 int	pipe_create(struct pipe *);
-static __inline int pipelock(struct pipe *);
-static __inline void pipeunlock(struct pipe *);
-static __inline void pipeselwakeup(struct pipe *);
+int	pipelock(struct pipe *);
+void	pipeunlock(struct pipe *);
+void	pipeselwakeup(struct pipe *);
 int	pipespace(struct pipe *, u_int);
 
 /*
@@ -223,7 +227,7 @@ pipe_create(struct pipe *cpipe)
 /*
  * lock a pipe for I/O, blocking other access
  */
-static __inline int
+int
 pipelock(struct pipe *cpipe)
 {
 	int error;
@@ -239,7 +243,7 @@ pipelock(struct pipe *cpipe)
 /*
  * unlock a pipe I/O lock
  */
-static __inline void
+void
 pipeunlock(struct pipe *cpipe)
 {
 	cpipe->pipe_state &= ~PIPE_LOCK;
@@ -249,16 +253,16 @@ pipeunlock(struct pipe *cpipe)
 	}
 }
 
-static __inline void
+void
 pipeselwakeup(struct pipe *cpipe)
 {
 	if (cpipe->pipe_state & PIPE_SEL) {
 		cpipe->pipe_state &= ~PIPE_SEL;
 		selwakeup(&cpipe->pipe_sel);
-	}
+	} else
+		KNOTE(&cpipe->pipe_sel.si_note, 0);
 	if ((cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_pgid != NO_PID)
 		gsignal(cpipe->pipe_pgid, SIGIO);
-	KNOTE(&cpipe->pipe_sel.si_note, 0);
 }
 
 /* ARGSUSED */
@@ -415,7 +419,7 @@ pipe_write(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 	}
 
 	/*
-	 * If an early error occured unbusy and return, waking up any pending
+	 * If an early error occurred unbusy and return, waking up any pending
 	 * readers.
 	 */
 	if (error) {
@@ -683,9 +687,9 @@ pipe_stat(struct file *fp, struct stat *ub, struct proc *p)
 	ub->st_blksize = pipe->pipe_buffer.size;
 	ub->st_size = pipe->pipe_buffer.cnt;
 	ub->st_blocks = (ub->st_size + ub->st_blksize - 1) / ub->st_blksize;
-	ub->st_atimespec = pipe->pipe_atime;
-	ub->st_mtimespec = pipe->pipe_mtime;
-	ub->st_ctimespec = pipe->pipe_ctime;
+	ub->st_atim = pipe->pipe_atime;
+	ub->st_mtim = pipe->pipe_mtime;
+	ub->st_ctim = pipe->pipe_ctime;
 	ub->st_uid = fp->f_cred->cr_uid;
 	ub->st_gid = fp->f_cred->cr_gid;
 	/*
@@ -749,7 +753,6 @@ pipeclose(struct pipe *cpipe)
 
 			ppipe->pipe_state |= PIPE_EOF;
 			wakeup(ppipe);
-			KNOTE(&ppipe->pipe_sel.si_note, 0);
 			ppipe->pipe_peer = NULL;
 		}
 

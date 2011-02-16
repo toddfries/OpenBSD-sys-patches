@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_event.c,v 1.28 2006/12/01 07:17:25 camield Exp $	*/
+=======
+/*	$OpenBSD: kern_event.c,v 1.38 2010/08/02 19:54:07 guenther Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -90,6 +94,14 @@ int	filt_procattach(struct knote *kn);
 void	filt_procdetach(struct knote *kn);
 int	filt_proc(struct knote *kn, long hint);
 int	filt_fileattach(struct knote *kn);
+<<<<<<< HEAD
+=======
+void	filt_timerexpire(void *knx);
+int	filt_timerattach(struct knote *kn);
+void	filt_timerdetach(struct knote *kn);
+int	filt_timer(struct knote *kn, long hint);
+void	filt_seltruedetach(struct knote *kn);
+>>>>>>> origin/master
 
 struct filterops kqread_filtops =
 	{ 1, NULL, filt_kqdetach, filt_kqueue };
@@ -187,11 +199,16 @@ filt_procattach(struct knote *kn)
 	if (p == NULL)
 		return (ESRCH);
 
+	/* threads and exiting processes can't be specified */
+	if (p->p_flag & (P_THREAD|P_WEXIT))
+		return (ESRCH);
+
 	/*
 	 * Fail if it's not owned by you, or the last exec gave us
 	 * setuid/setgid privs (unless you're root).
 	 */
-	if ((p->p_cred->p_ruid != curproc->p_cred->p_ruid ||
+	if (p->p_p != curproc->p_p &&
+	    (p->p_cred->p_ruid != curproc->p_cred->p_ruid ||
 	    (p->p_flag & P_SUGID)) && suser(curproc, 0) != 0)
 		return (EACCES);
 
@@ -208,7 +225,7 @@ filt_procattach(struct knote *kn)
 	}
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -230,7 +247,7 @@ filt_procdetach(struct knote *kn)
 		return;
 
 	/* XXX locking?  this might modify another process. */
-	SLIST_REMOVE(&p->p_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
 }
 
 int
@@ -250,11 +267,15 @@ filt_proc(struct knote *kn, long hint)
 		kn->kn_fflags |= event;
 
 	/*
-	 * process is gone, so flag the event as finished.
+	 * process is gone, so flag the event as finished and remove it
+	 * from the process's klist
 	 */
 	if (event == NOTE_EXIT) {
+		struct process *pr = kn->kn_ptr.p_proc->p_p;
+
 		kn->kn_status |= KN_DETACHED;
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 		return (1);
 	}
 
@@ -300,6 +321,35 @@ filt_seltrue(struct knote *kn, long hint)
 	 */
 	kn->kn_data = 0;
 	return (1);
+}
+
+/*
+ * This provides full kqfilter entry for device switch tables, which
+ * has same effect as filter using filt_seltrue() as filter method.
+ */
+void
+filt_seltruedetach(struct knote *kn)
+{
+	/* Nothing to do */
+}
+
+const struct filterops seltrue_filtops =
+	{ 1, NULL, filt_seltruedetach, filt_seltrue };
+
+int
+seltrue_kqfilter(dev_t dev, struct knote *kn)
+{
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+	case EVFILT_WRITE:
+		kn->kn_fop = &seltrue_filtops;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	/* Nothing more to do */
+	return (0);
 }
 
 int
@@ -791,8 +841,8 @@ kqueue_wakeup(struct kqueue *kq)
 	if (kq->kq_state & KQ_SEL) {
 		kq->kq_state &= ~KQ_SEL;
 		selwakeup(&kq->kq_sel);
-	}
-	KNOTE(&kq->kq_sel.si_note, 0);
+	} else
+		KNOTE(&kq->kq_sel.si_note, 0);
 }
 
 /*
@@ -832,6 +882,19 @@ knote_fdclose(struct proc *p, int fd)
 	struct klist *list = &fdp->fd_knlist[fd];
 
 	knote_remove(p, list);
+}
+
+/*
+ * handle a process exiting, including the triggering of NOTE_EXIT notes
+ * XXX this could be more efficient, doing a single pass down the klist
+ */
+void
+knote_processexit(struct process *pr)
+{
+	KNOTE(&pr->ps_klist, NOTE_EXIT);
+
+	/* remove other knotes hanging off the process */
+	knote_remove(pr->ps_mainproc, &pr->ps_klist);
 }
 
 void

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_usrreq.c,v 1.11 2006/03/15 21:02:38 deraadt Exp $	*/
+=======
+/*	$OpenBSD: db_usrreq.c,v 1.14 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.
@@ -28,8 +32,10 @@
 #include <sys/types.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/tty.h>
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
+#include <dev/cons.h>
 
 #include <ddb/db_var.h>
 
@@ -87,6 +93,19 @@ ddb_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		break;
 	case DBCTL_LOG:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &db_log));
+	case DBCTL_TRIGGER:
+		if (newp && db_console) {
+			struct process *pr = curproc->p_p;
+
+			if (securelevel < 1 ||
+			    (pr->ps_flags & PS_CONTROLT && cn_tab &&
+			    cn_tab->cn_dev == pr->ps_session->s_ttyp->t_dev)) {
+				Debugger();
+				newp = NULL;
+			} else
+				return (EOPNOTSUPP);
+		}
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 	default:
 		return (EOPNOTSUPP);
 	}

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: beep.c,v 1.2 2006/05/29 00:17:25 jason Exp $	*/
+=======
+/*	$OpenBSD: beep.c,v 1.5 2010/07/31 16:04:50 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jason L. Wright (jason@thought.net)
@@ -45,6 +49,14 @@
 #include <sparc64/dev/ebusreg.h>
 #include <sparc64/dev/ebusvar.h>
 
+<<<<<<< HEAD
+=======
+#include "hidkbd.h"
+#if NHIDKBD > 0
+#include <dev/usb/hidkbdvar.h>
+#endif
+
+>>>>>>> origin/master
 #define	BEEP_CTRL		0
 #define	BEEP_CNT_0		2
 #define	BEEP_CNT_1		3
@@ -79,6 +91,14 @@ struct cfdriver beep_cd = {
 	NULL, "beep", DV_DULL
 };
 
+<<<<<<< HEAD
+=======
+#if NHIDKBD > 0
+void beep_stop(void *);
+void beep_bell(void *, u_int, u_int, u_int, int);
+#endif
+
+>>>>>>> origin/master
 int
 beep_match(struct device *parent, void *match, void *aux)
 {
@@ -138,6 +158,14 @@ beep_attach(parent, self, aux)
 	    BEEP_CTRL_OFF);
 
 	printf(": clock %sMHz\n", clockfreq(sc->sc_clk));
+<<<<<<< HEAD
+=======
+
+#if NHIDKBD > 0
+	timeout_set(&sc->sc_to, beep_stop, sc);
+	hidkbd_hookup_bell(beep_bell, sc);
+#endif
+>>>>>>> origin/master
 }
 
 void
@@ -179,3 +207,52 @@ beep_setfreq(struct beep_softc *sc, int freq)
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, BEEP_CNT_3,
 	    (sc->sc_freqs[i].reg >>  0) & 0xff);
 }
+<<<<<<< HEAD
+=======
+
+#if NHIDKBD > 0
+void
+beep_stop(void *vsc)
+{
+	struct beep_softc *sc = vsc;
+	int s;
+
+	s = spltty();
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, BEEP_CTRL,
+	    BEEP_CTRL_OFF);
+	sc->sc_bellactive = 0;
+	sc->sc_belltimeout = 0;
+	splx(s);
+}
+
+void
+beep_bell(void *vsc, u_int pitch, u_int period, u_int volume, int poll)
+{
+	struct beep_softc *sc = vsc;
+	int s, ticks;
+
+	ticks = (period * hz) / 1000;
+	if (ticks <= 0)
+		ticks = 1;
+
+	s = spltty();
+	if (sc->sc_bellactive) {
+		if (sc->sc_belltimeout == 0)
+			timeout_del(&sc->sc_to);
+	}
+	if (pitch == 0 || period == 0 || volume == 0) {
+		beep_stop(sc);
+		splx(s);
+		return;
+	}
+	if (!sc->sc_bellactive) {
+		sc->sc_bellactive = 1;
+		sc->sc_belltimeout = 1;
+		bus_space_write_1(sc->sc_iot, sc->sc_ioh, BEEP_CTRL,
+	    	    BEEP_CTRL_ON);
+		timeout_add(&sc->sc_to, ticks);
+	}
+	splx(s);
+}
+#endif /* NHIDKBD > 0 */
+>>>>>>> origin/master

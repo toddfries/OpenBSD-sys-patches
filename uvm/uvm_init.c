@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_init.c,v 1.13 2006/07/13 22:51:26 deraadt Exp $	*/
+=======
+/*	$OpenBSD: uvm_init.c,v 1.28 2010/08/07 03:50:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -48,6 +52,7 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/pool.h>
 
 #include <uvm/uvm.h>
 
@@ -68,7 +73,7 @@ struct uvmexp uvmexp;	/* decl */
  */
 
 void
-uvm_init()
+uvm_init(void)
 {
 	vaddr_t kvm_start, kvm_end;
 
@@ -81,10 +86,8 @@ uvm_init()
 	}
 
 	/*
-	 * step 1: zero the uvm structure
+	 * step 1: set up stats.
 	 */
-
-	memset(&uvm, 0, sizeof(uvm));
 	averunnable.fscale = FSCALE;
 
 	/*
@@ -128,6 +131,11 @@ uvm_init()
 	kmeminit();
 
 	/*
+	 * step 6.5: init the dma allocator, which is backed by pools.
+	 */
+	dma_alloc_init();
+
+	/*
 	 * step 7: init all pagers and the pager_map.
 	 */
 
@@ -141,16 +149,17 @@ uvm_init()
 	uvm_anon_init();	/* allocate initial anons */
 
 	/*
-	 * the VM system is now up!  now that malloc is up we can resize the
-	 * <obj,off> => <page> hash table for general use and enable paging
-	 * of kernel objects.
+	 * step 9: init uvm_km_page allocator memory.
+	 */
+	uvm_km_page_init();
+
+	/*
+	 * the VM system is now up!  now that malloc is up we can
+	 * enable paging of kernel objects.
 	 */
 
-	uvm_page_rehash();
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
 	    UAO_FLAG_KERNSWAP);
-
-	uvm_km_page_init();
 
 	/*
 	 * reserve some unmapped space for malloc/pool use after free usage
@@ -160,14 +169,14 @@ uvm_init()
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
 	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
-		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF0);
+		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF0);
 #endif
 #ifdef DEADBEEF1
 	kvm_start = DEADBEEF1 - PAGE_SIZE;
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
 	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
-		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF1);
+		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF1);
 #endif
 	/*
 	 * done!

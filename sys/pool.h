@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pool.h,v 1.20 2006/12/23 15:00:15 miod Exp $	*/
+=======
+/*	$OpenBSD: pool.h,v 1.36 2010/09/26 21:03:57 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -82,7 +79,7 @@ struct pool_cache {
 };
 
 struct pool_allocator {
-	void *(*pa_alloc)(struct pool *, int);
+	void *(*pa_alloc)(struct pool *, int, int *);
 	void (*pa_free)(struct pool *, void *);
 	int pa_pagesz;
 
@@ -129,6 +126,7 @@ struct pool {
 	const char	*pr_wchan;	/* tsleep(9) identifier */
 	unsigned int	pr_flags;	/* r/w flags */
 	unsigned int	pr_roflags;	/* r/o flags */
+<<<<<<< HEAD
 #define PR_MALLOCOK	0x01
 #define	PR_NOWAIT	0x00		/* for symmetry */
 #define PR_WAITOK	0x02
@@ -137,6 +135,16 @@ struct pool {
 #define PR_LOGGING	0x10
 #define PR_LIMITFAIL	0x20	/* even if waiting, fail if we hit limit */
 #define PR_DEBUG	0x40
+=======
+#define PR_WAITOK	0x0001 /* M_WAITOK */
+#define PR_NOWAIT	0x0002 /* M_NOWAIT */
+#define PR_LIMITFAIL	0x0004 /* M_CANFAIL */
+#define PR_ZERO		0x0008 /* M_ZERO */
+#define PR_WANTED	0x0100
+#define PR_PHINPAGE	0x0200
+#define PR_LOGGING	0x0400
+#define PR_DEBUG	0x0800
+>>>>>>> origin/master
 
 	/*
 	 * `pr_slock' protects the pool's data structures when removing
@@ -149,7 +157,7 @@ struct pool {
 	 */
 	struct simplelock	pr_slock;
 
-	SPLAY_HEAD(phtree, pool_item_header) pr_phtree;
+	RB_HEAD(phtree, pool_item_header) pr_phtree;
 
 	int		pr_maxcolor;	/* Cache colouring */
 	int		pr_curcolor;
@@ -174,6 +182,7 @@ struct pool {
 	unsigned int	pr_hiwat;	/* max # of pages in pool */
 	unsigned long	pr_nidle;	/* # of idle pages */
 
+<<<<<<< HEAD
 	/*
 	 * Diagnostic aides.
 	 */
@@ -189,6 +198,14 @@ struct pool {
 /* old nointr allocator, still needed for large allocations */
 extern struct pool_allocator pool_allocator_oldnointr;
 /* interrupt safe (name preserved for compat) new default allocator */
+=======
+	/* Physical memory configuration. */
+	struct uvm_constraint_range *pr_crange;
+	int		pr_pa_nsegs;
+};
+
+#ifdef _KERNEL
+>>>>>>> origin/master
 extern struct pool_allocator pool_allocator_nointr;
 /* previous interrupt safe allocator, allocates from kmem */
 extern struct pool_allocator pool_allocator_kmem;
@@ -196,6 +213,18 @@ extern struct pool_allocator pool_allocator_kmem;
 void		pool_init(struct pool *, size_t, u_int, u_int, int,
 		    const char *, struct pool_allocator *);
 void		pool_destroy(struct pool *);
+<<<<<<< HEAD
+=======
+void		pool_setipl(struct pool *, int);
+void		pool_setlowat(struct pool *, int);
+void		pool_sethiwat(struct pool *, int);
+int		pool_sethardlimit(struct pool *, u_int, const char *, int);
+struct uvm_constraint_range; /* XXX */
+void		pool_set_constraints(struct pool *,
+		    struct uvm_constraint_range *, int);
+void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
+		    void(*)(void *, void *), void *);
+>>>>>>> origin/master
 
 void		*pool_get(struct pool *, int) __malloc;
 void		pool_put(struct pool *, void *);
@@ -225,8 +254,11 @@ int		pool_sethardlimit(struct pool *, unsigned, const char *, int);
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
 int		pool_chk(struct pool *, const char *);
+void		pool_walk(struct pool *, int, int (*)(const char *, ...),
+		    void (*)(void *, int, int (*)(const char *, ...)));
 #endif
 
+<<<<<<< HEAD
 /*
  * Pool cache routines.
  */
@@ -239,6 +271,12 @@ void		*pool_cache_get(struct pool_cache *, int);
 void		pool_cache_put(struct pool_cache *, void *);
 void		pool_cache_destruct_object(struct pool_cache *, void *);
 void		pool_cache_invalidate(struct pool_cache *);
+=======
+/* the allocator for dma-able memory is a thin layer on top of pool  */
+void			 dma_alloc_init(void);
+void			*dma_alloc(size_t size, int flags);
+void			 dma_free(void *m, size_t size);
+>>>>>>> origin/master
 #endif /* _KERNEL */
 
 #endif /* _SYS_POOL_H_ */

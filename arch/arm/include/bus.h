@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.7 2007/04/10 18:02:46 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.13 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.12 2003/10/23 15:03:24 scw Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -499,26 +492,14 @@ struct bus_space {
 /*
  * Copy operations.
  */
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_1(t, h1, o1, h2, o2, c)				\
 	__bs_copy(1, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_2(t, h1, o1, h2, o2, c)				\
 	__bs_copy(2, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_4(t, h1, o1, h2, o2, c)				\
 	__bs_copy(4, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_8(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_8(t, h1, o1, h2, o2, c)				\
 	__bs_copy(8, t, h1, o1, h2, o2, c)
-
-void
-bus_space_copy_1(bus_space_tag_t bst, bus_space_handle_t h1,
-    bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-void
-bus_space_copy_2(bus_space_tag_t bst, bus_space_handle_t h1,
-     bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-void
-bus_space_copy_4(bus_space_tag_t bst, bus_space_handle_t h1,
-     bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-#define	bus_space_copy_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
 
 /*
  * Macros to provide prototypes for all the functions used in the
@@ -527,7 +508,7 @@ bus_space_copy_4(bus_space_tag_t bst, bus_space_handle_t h1,
 
 #define bs_map_proto(f)							\
 int	__bs_c(f,_bs_map) (void *t, bus_addr_t addr,		\
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
 #define bs_unmap_proto(f)						\
 void	__bs_c(f,_bs_unmap) (void *t, bus_space_handle_t bsh,	\
@@ -541,7 +522,7 @@ int	__bs_c(f,_bs_subregion) (void *t, bus_space_handle_t bsh,	\
 #define bs_alloc_proto(f)						\
 int	__bs_c(f,_bs_alloc) (void *t, bus_addr_t rstart,		\
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,		\
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,	\
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,	\
 	    bus_space_handle_t *bshp);
 
 #define bs_free_proto(f)						\
@@ -769,6 +750,7 @@ bs_c_8_proto(f);
 #define	BUS_DMA_READ		0x100	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
 #define	BUS_DMA_NOCACHE		0x400	/* hint: map non-cached memory */
+#define	BUS_DMA_ZERO		0x800	/* dmamem_alloc returns zeroed mem */
 
 /*
  * Private flags stored in the DMA map.

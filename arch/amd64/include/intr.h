@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.6 2005/04/19 15:29:47 mickey Exp $	*/
+/*	$OpenBSD: intr.h,v 1.21 2010/12/27 19:51:27 guenther Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -144,10 +137,6 @@ void softintr(int);
 #define	splserial()	splraise(IPL_SERIAL)
 #define splipi()	splraise(IPL_IPI)
 
-#define spllpt()	spltty()
-
-#define	spllpt()	spltty()
-
 /*
  * Software interrupt masks
  */
@@ -179,14 +168,11 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(wantipl) splassert(wantipl)
 #else
-#define splassert(wantipl) do { /* nada */ } while (0)
+#define splassert(wantipl)	do { /* nada */ } while (0)
+#define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
-
-/*
- * XXX
- */
-#define	setsoftnet()	softintr(SIR_NET)
 
 #define IPLSHIFT 4			/* The upper nibble of vectors is the IPL.      */
 #define IPL(level) ((level) >> IPLSHIFT)	/* Extract the IPL.    */
@@ -216,7 +202,7 @@ int intr_allocate_slot_cpu(struct cpu_info *, struct pic *, int, int *);
 int intr_allocate_slot(struct pic *, int, int, int, struct cpu_info **, int *,
 	    int *);
 void *intr_establish(int, struct pic *, int, int, int, int (*)(void *),
-	    void *, char *);
+	    void *, const char *);
 void intr_disestablish(struct intrhand *);
 void cpu_intr_init(struct cpu_info *);
 int intr_find_mpmapping(int bus, int pin, int *handle);
@@ -225,7 +211,6 @@ void intr_printconfig(void);
 #ifdef MULTIPROCESSOR
 int x86_send_ipi(struct cpu_info *, int);
 void x86_broadcast_ipi(int);
-void x86_multicast_ipi(int, int);
 void x86_ipi_handler(void);
 void x86_intlock(struct intrframe);
 void x86_intunlock(struct intrframe);
@@ -260,22 +245,10 @@ struct x86_soft_intrhand {
 
 struct x86_soft_intr {
 	TAILQ_HEAD(, x86_soft_intrhand)
-		softintr_q;
-	int softintr_ssir;
-	struct simplelock softintr_slock;
+			softintr_q;
+	int		softintr_ssir;
+	struct mutex	softintr_lock;
 };
-
-#define	x86_softintr_lock(si, s)					\
-do {									\
-	(s) = splhigh();						\
-	simple_lock(&si->softintr_slock);				\
-} while (/*CONSTCOND*/ 0)
-
-#define	x86_softintr_unlock(si, s)					\
-do {									\
-	simple_unlock(&si->softintr_slock);				\
-	splx((s));							\
-} while (/*CONSTCOND*/ 0)
 
 void	*softintr_establish(int, void (*)(void *), void *);
 void	softintr_disestablish(void *);
@@ -286,15 +259,14 @@ void	softintr_dispatch(int);
 do {									\
 	struct x86_soft_intrhand *__sih = (arg);			\
 	struct x86_soft_intr *__si = __sih->sih_intrhead;		\
-	int __s;							\
 									\
-	x86_softintr_lock(__si, __s);					\
+	mtx_enter(&__si->softintr_lock);				\
 	if (__sih->sih_pending == 0) {					\
 		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
 		__sih->sih_pending = 1;					\
 		softintr(__si->softintr_ssir);				\
 	}								\
-	x86_softintr_unlock(__si, __s);					\
+	mtx_leave(&__si->softintr_lock);				\
 } while (/*CONSTCOND*/ 0)
 #endif /* _LOCORE */
 

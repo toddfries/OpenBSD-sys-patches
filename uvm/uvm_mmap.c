@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_mmap.c,v 1.66 2007/03/26 08:43:34 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_mmap.c,v 1.82 2010/12/24 21:49:04 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -101,10 +105,7 @@
 
 /* ARGSUSED */
 int
-sys_sbrk(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_sbrk(struct proc *p, void *v, register_t *retval)
 {
 #if 0
 	struct sys_sbrk_args /* {
@@ -121,10 +122,7 @@ sys_sbrk(p, v, retval)
 
 /* ARGSUSED */
 int
-sys_sstk(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_sstk(struct proc *p, void *v, register_t *retval)
 {
 #if 0
 	struct sys_sstk_args /* {
@@ -147,10 +145,7 @@ sys_sstk(p, v, retval)
  */
 
 int
-sys_mquery(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mquery(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mquery_args /* {
 		syscallarg(void *) addr;
@@ -198,15 +193,16 @@ sys_mquery(p, v, retval)
 
 	/* prevent a user requested address from falling in heap space */
 	if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr) &&
-	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
+	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
 		if (flags & UVM_FLAG_FIXED) {
 			error = EINVAL;
 			goto done;
 		}
-		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
+		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ);
 	}
-again:
+	vm_map_lock(&p->p_vmspace->vm_map);
 
+again:
 	if (uvm_map_findspace(&p->p_vmspace->vm_map, vaddr, size,
 	    &vaddr, uobj, uoff, 0, flags) == NULL) {
 		if (flags & UVM_FLAG_FIXED)
@@ -216,14 +212,15 @@ again:
 	} else {
 		/* prevent a returned address from falling in heap space */
 		if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr)
-		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
+		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
 			vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
-			    MAXDSIZ);
+			    BRKSIZ);
 			goto again;
 		}
 		error = 0;
 		*retval = (register_t)(vaddr);
 	}
+	vm_map_unlock(&p->p_vmspace->vm_map);
 done:
 	if (fp != NULL)
 		FRELE(fp);
@@ -236,10 +233,7 @@ done:
 
 /* ARGSUSED */
 int
-sys_mincore(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mincore(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mincore_args /* {
 		syscallarg(void *) addr;
@@ -247,7 +241,7 @@ sys_mincore(p, v, retval)
 		syscallarg(char *) vec;
 	} */ *uap = v;
 	vm_page_t m;
-	char *vec, pgi;
+	char *vec, *pgi, *pgs;
 	struct uvm_object *uobj;
 	struct vm_amap *amap;
 	struct vm_anon *anon;
@@ -255,7 +249,7 @@ sys_mincore(p, v, retval)
 	vaddr_t start, end, lim;
 	vm_map_t map;
 	vsize_t len, npgs;
-	int error = 0;
+	int error = 0; 
 
 	map = &p->p_vmspace->vm_map;
 
@@ -273,11 +267,24 @@ sys_mincore(p, v, retval)
 	npgs = len >> PAGE_SHIFT;
 
 	/*
+ 	 * < art> Anyone trying to mincore more than 4GB of address space is
+	 *	clearly insane.
+	 */
+	if (npgs >= (0xffffffff >> PAGE_SHIFT))
+		return (E2BIG);
+	pgs = malloc(sizeof(*pgs) * npgs, M_TEMP, M_WAITOK | M_CANFAIL);
+	if (pgs == NULL)
+		return (ENOMEM);
+	pgi = pgs;
+
+	/*
 	 * Lock down vec, so our returned status isn't outdated by
 	 * storing the status byte for a page.
 	 */
-	if ((error = uvm_vslock(p, vec, npgs, VM_PROT_WRITE)) != 0)
+	if ((error = uvm_vslock(p, vec, npgs, VM_PROT_WRITE)) != 0) {
+		free(pgs, M_TEMP);
 		return (error);
+	}
 
 	vm_map_lock_read(map);
 
@@ -308,12 +315,10 @@ sys_mincore(p, v, retval)
 		 */
 		if (UVM_ET_ISOBJ(entry)) {
 			KASSERT(!UVM_OBJ_IS_KERN_OBJECT(entry->object.uvm_obj));
-			if (entry->object.uvm_obj->pgops->pgo_releasepg
-			    == NULL) {
-				pgi = 1;
+			if (entry->object.uvm_obj->pgops->pgo_fault != NULL) {
 				for (/* nothing */; start < lim;
-				     start += PAGE_SIZE, vec++)
-					copyout(&pgi, vec, sizeof(char));
+				     start += PAGE_SIZE, pgi++)
+					*pgi = 1;
 				continue;
 			}
 		}
@@ -326,8 +331,8 @@ sys_mincore(p, v, retval)
 		if (uobj != NULL)
 			simple_lock(&uobj->vmobjlock);
 
-		for (/* nothing */; start < lim; start += PAGE_SIZE, vec++) {
-			pgi = 0;
+		for (/* nothing */; start < lim; start += PAGE_SIZE, pgi++) {
+			*pgi = 0;
 			if (amap != NULL) {
 				/* Check the top layer first. */
 				anon = amap_lookup(&entry->aref,
@@ -338,11 +343,11 @@ sys_mincore(p, v, retval)
 					 * Anon has the page for this entry
 					 * offset.
 					 */
-					pgi = 1;
+					*pgi = 1;
 				}
 			}
 
-			if (uobj != NULL && pgi == 0) {
+			if (uobj != NULL && *pgi == 0) {
 				/* Check the bottom layer. */
 				m = uvm_pagelookup(uobj,
 				    entry->offset + (start - entry->start));
@@ -351,11 +356,9 @@ sys_mincore(p, v, retval)
 					 * Object has the page for this entry
 					 * offset.
 					 */
-					pgi = 1;
+					*pgi = 1;
 				}
 			}
-
-			copyout(&pgi, vec, sizeof(char));
 		}
 
 		if (uobj != NULL)
@@ -367,6 +370,10 @@ sys_mincore(p, v, retval)
  out:
 	vm_map_unlock_read(map);
 	uvm_vsunlock(p, SCARG(uap, vec), npgs);
+	/* now the map is unlocked we can copyout without fear. */
+	if (error == 0)
+		copyout(pgs, vec, npgs * sizeof(char));
+	free(pgs, M_TEMP);
 	return (error);
 }
 
@@ -380,10 +387,7 @@ sys_mincore(p, v, retval)
  */
 
 int
-sys_mmap(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mmap(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mmap_args /* {
 		syscallarg(void *) addr;
@@ -608,6 +612,13 @@ sys_mmap(p, v, retval)
 
 	error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot, maxprot,
 	    flags, handle, pos, p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
+	if (error == ENOMEM && !(flags & (MAP_FIXED | MAP_TRYFIXED))) {
+		/* once more, with feeling */
+		addr = uvm_map_hint1(p, prot, 0);
+		error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot,
+		    maxprot, flags, handle, pos,
+		    p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
+	}
 
 	if (error == 0)
 		/* remember to add offset */
@@ -624,10 +635,7 @@ out:
  */
 
 int
-sys_msync(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_msync(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_msync_args /* {
 		syscallarg(void *) addr;
@@ -711,10 +719,7 @@ sys_msync(p, v, retval)
  */
 
 int
-sys_munmap(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_munmap(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_munmap_args /* {
 		syscallarg(void *) addr;
@@ -766,7 +771,7 @@ sys_munmap(p, v, retval)
 	/*
 	 * doit!
 	 */
-	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p);
+	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p, FALSE);
 
 	vm_map_unlock(map);	/* and unlock */
 
@@ -781,10 +786,7 @@ sys_munmap(p, v, retval)
  */
 
 int
-sys_mprotect(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mprotect(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mprotect_args /* {
 		syscallarg(void *) addr;
@@ -822,10 +824,7 @@ sys_mprotect(p, v, retval)
  */
 
 int
-sys_minherit(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_minherit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_minherit_args /* {
 		syscallarg(void *) addr;
@@ -857,10 +856,7 @@ sys_minherit(p, v, retval)
 
 /* ARGSUSED */
 int
-sys_madvise(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_madvise(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_madvise_args /* {
 		syscallarg(void *) addr;
@@ -947,10 +943,7 @@ sys_madvise(p, v, retval)
  */
 
 int
-sys_mlock(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mlock(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mlock_args /* {
 		syscallarg(const void *) addr;
@@ -995,10 +988,7 @@ sys_mlock(p, v, retval)
  */
 
 int
-sys_munlock(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_munlock(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_munlock_args /* {
 		syscallarg(const void *) addr;
@@ -1037,10 +1027,7 @@ sys_munlock(p, v, retval)
  */
 
 int
-sys_mlockall(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_mlockall(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_mlockall_args /* {
 		syscallarg(int) flags;
@@ -1070,10 +1057,7 @@ sys_mlockall(p, v, retval)
  */
 
 int
-sys_munlockall(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_munlockall(struct proc *p, void *v, register_t *retval)
 {
 
 	(void) uvm_map_pageable_all(&p->p_vmspace->vm_map, 0, 0);
@@ -1090,16 +1074,9 @@ sys_munlockall(p, v, retval)
  */
 
 int
-uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit, p)
-	vm_map_t map;
-	vaddr_t *addr;
-	vsize_t size;
-	vm_prot_t prot, maxprot;
-	int flags;
-	caddr_t handle;		/* XXX: VNODE? */
-	voff_t foff;
-	vsize_t locklimit;
-	struct proc *p;
+uvm_mmap(vm_map_t map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
+    vm_prot_t maxprot, int flags, caddr_t handle, voff_t foff,
+    vsize_t locklimit, struct proc *p)
 {
 	struct uvm_object *uobj;
 	struct vnode *vp;
@@ -1189,7 +1166,7 @@ uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit, p)
 			}
 #else
 			/* XXX for now, attach doesn't gain a ref */
-			VREF(vp);
+			vref(vp);
 #endif
 		} else {
 			uobj = udv_attach((void *) &vp->v_rdev,

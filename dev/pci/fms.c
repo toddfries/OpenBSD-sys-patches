@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: fms.c,v 1.16 2005/04/14 12:42:16 mickey Exp $ */
+=======
+/*	$OpenBSD: fms.c,v 1.22 2010/07/15 03:43:11 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: fms.c,v 1.5.4.1 2000/06/30 16:27:50 simonb Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -468,52 +465,56 @@ fms_query_encoding(addr, fp)
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0; 
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return 0;
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEulinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return 0;
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0;
+		break;
 	case 4:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0;
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0;
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0;
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return 0;
+		break;
 	default:
 		return EINVAL;
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
+	return 0;
 }
 
 /*
@@ -581,6 +582,9 @@ fms_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return EINVAL;
 		}
+		play->bps = AUDIO_BPS(play->precision);
+		play->msb = 1;
+
 		for (i = 0; i < 10 && play->sample_rate > fms_rates[i].limit;
 		     i++)
 			;
@@ -610,18 +614,21 @@ fms_set_params(addr, setmode, usemode, play, rec)
 			rec->sw_code = ulinear8_to_alaw;
 			break;
 		case AUDIO_ENCODING_SLINEAR_BE:
-			if (play->precision == 16)
-				play->sw_code = swap_bytes;
+			if (rec->precision == 16)
+				rec->sw_code = swap_bytes;
 			else
-				play->sw_code = change_sign8;
+				rec->sw_code = change_sign8;
 			break;
 		case AUDIO_ENCODING_ULINEAR_BE:
-			if (play->precision == 16)
-				play->sw_code = swap_bytes_change_sign16_le;
+			if (rec->precision == 16)
+				rec->sw_code = swap_bytes_change_sign16_le;
 			break;
 		default:
 			return EINVAL;
 		}
+		rec->bps = AUDIO_BPS(rec->precision);
+		rec->msb = 1;
+
 		for (i = 0; i < 10 && rec->sample_rate > fms_rates[i].limit; 
 		     i++)
 			;

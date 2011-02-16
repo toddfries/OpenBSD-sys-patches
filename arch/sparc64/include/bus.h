@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bus.h,v 1.20 2006/12/30 21:19:24 claudio Exp $	*/
+=======
+/*	$OpenBSD: bus.h,v 1.25 2009/04/20 00:42:06 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: bus.h,v 1.31 2001/09/21 15:30:41 wiz Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -365,6 +362,7 @@ bus_space_barrier(t, h, o, s, f)
 #define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
 #define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 #define	BUS_DMA_NOCACHE		BUS_DMA_BUS1
 #define	BUS_DMA_DVMA		BUS_DMA_BUS2	/* Don't bother with alignment */

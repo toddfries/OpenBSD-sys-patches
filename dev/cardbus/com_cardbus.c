@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: com_cardbus.c,v 1.25 2006/06/02 20:11:48 fkr Exp $ */
+=======
+/* $OpenBSD: com_cardbus.c,v 1.40 2010/11/15 23:19:34 mikeb Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*
@@ -77,14 +81,15 @@ struct com_cardbus_softc {
 	void			*cc_ih;
 	cardbus_devfunc_t	cc_ct;
 	bus_addr_t		cc_addr;
-	cardbusreg_t		cc_base;
+	pcireg_t		cc_base;
 	bus_size_t		cc_size;
-	cardbusreg_t		cc_csr;
+	pcireg_t		cc_csr;
 	int			cc_cben;
-	cardbustag_t		cc_tag;
-	cardbusreg_t		cc_reg;
+	pcitag_t		cc_tag;
+	pcireg_t		cc_reg;
 	int			cc_type;
 	u_char			cc_bug;
+	pci_chipset_tag_t	cc_pc;
 };
 
 #define DEVNAME(CSC) ((CSC)->cc_com.sc_dev.dv_xname)
@@ -114,31 +119,32 @@ struct cfattach pccom_cardbus_ca = {
 
 #define BUG_BROADCOM	0x01
 
+/* XXX Keep this list syncronized with the corresponding one in pucdata.c */
 static struct csdev {
 	u_short		vendor;
 	u_short		product;
-	cardbusreg_t	reg;
+	pcireg_t	reg;
 	u_char		type;
 	u_char		bug;
 } csdevs[] = {
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_GLOBALMODEM56,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_MODEM56,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4322,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO, BUG_BROADCOM },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO, BUG_BROADCOM },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO, BUG_BROADCOM },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL_2,
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO, BUG_BROADCOM },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL_GC,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_MODEM56,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXCB950,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_CBEM56G,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_MODEM56,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO }
+	  CARDBUS_BASE0_REG, PCI_MAPREG_TYPE_IO }
 };
 
 static const int ncsdevs = sizeof(csdevs) / sizeof(csdevs[0]);
@@ -149,8 +155,8 @@ com_cardbus_find_csdev(struct cardbus_attach_args *ca)
 	struct csdev *cp;
 
 	for (cp = csdevs; cp < csdevs + ncsdevs; cp++)
-		if (cp->vendor == CARDBUS_VENDOR(ca->ca_id) &&
-		    cp->product == CARDBUS_PRODUCT(ca->ca_id))
+		if (cp->vendor == PCI_VENDOR(ca->ca_id) &&
+		    cp->product == PCI_PRODUCT(ca->ca_id))
 			return (cp);
 	return (NULL);
 }
@@ -180,7 +186,7 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
     struct com_cardbus_softc *csc)
 {
 	int i, index = -1;
-	cardbusreg_t cis_ptr;
+	pcireg_t cis_ptr;
 	struct csdev *cp;
 
 	/* If this device is listed above, use the known values, */
@@ -192,7 +198,7 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
 		return (0);
 	}
 
-	cis_ptr = Cardbus_conf_read(csc->cc_ct, csc->cc_tag, CARDBUS_CIS_REG);
+	cis_ptr = pci_conf_read(ca->ca_pc, csc->cc_tag, CARDBUS_CIS_REG);
 
 	/* otherwise try to deduce which BAR and type to use from CIS.  If
 	   there is only one BAR, it must be the one we should use, if
@@ -215,9 +221,9 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
 	}
 	csc->cc_reg = CARDBUS_CIS_ASI_BAR(ca->ca_cis.bar[index].flags);
 	if ((ca->ca_cis.bar[index].flags & 0x10) == 0)
-		csc->cc_type = CARDBUS_MAPREG_TYPE_MEM;
+		csc->cc_type = PCI_MAPREG_TYPE_MEM;
 	else
-		csc->cc_type = CARDBUS_MAPREG_TYPE_IO;
+		csc->cc_type = PCI_MAPREG_TYPE_IO;
 	return (0);
 
   multi_bar:
@@ -227,7 +233,7 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
 	    "please report the following information\n",
 	    DEVNAME(csc));
 	printf("%s: vendor 0x%x product 0x%x\n", DEVNAME(csc),
-	    CARDBUS_VENDOR(ca->ca_id), CARDBUS_PRODUCT(ca->ca_id));
+	    PCI_VENDOR(ca->ca_id), PCI_PRODUCT(ca->ca_id));
 	for (i = 0; i < 7; i++) {
 		/* ignore zero sized BARs */
 		if (ca->ca_cis.bar[i].size == 0)
@@ -250,27 +256,33 @@ com_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct com_softc *sc = (struct com_softc*)self;
 	struct com_cardbus_softc *csc = (struct com_cardbus_softc*)self;
 	struct cardbus_attach_args *ca = aux;
+	cardbus_devfunc_t ct;
 
-	csc->cc_ct = ca->ca_ct;
-	csc->cc_tag = Cardbus_make_tag(csc->cc_ct);
+	csc->cc_ct = ct = ca->ca_ct;
+	csc->cc_tag = pci_make_tag(ca->ca_pc, ct->ct_bus, ct->ct_dev, ct->ct_func);
+	csc->cc_pc = ca->ca_pc;
 
 	if (com_cardbus_gofigure(ca, csc) != 0)
 		return;
 
 	if (Cardbus_mapreg_map(ca->ca_ct, csc->cc_reg, csc->cc_type, 0,
 	    &sc->sc_iot, &sc->sc_ioh, &csc->cc_addr, &csc->cc_size) != 0) {
+<<<<<<< HEAD
 		printf("failed to map memory");
+=======
+		printf(": can't map memory\n");
+>>>>>>> origin/master
 		return;
 	}
 
 	csc->cc_base = csc->cc_addr;
-	csc->cc_csr = CARDBUS_COMMAND_MASTER_ENABLE;
-	if (csc->cc_type == CARDBUS_MAPREG_TYPE_IO) {
-		csc->cc_base |= CARDBUS_MAPREG_TYPE_IO;
-		csc->cc_csr |= CARDBUS_COMMAND_IO_ENABLE;
+	csc->cc_csr = PCI_COMMAND_MASTER_ENABLE;
+	if (csc->cc_type == PCI_MAPREG_TYPE_IO) {
+		csc->cc_base |= PCI_MAPREG_TYPE_IO;
+		csc->cc_csr |= PCI_COMMAND_IO_ENABLE;
 		csc->cc_cben = CARDBUS_IO_ENABLE;
 	} else {
-		csc->cc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
+		csc->cc_csr |= PCI_COMMAND_MEM_ENABLE;
 		csc->cc_cben = CARDBUS_MEM_ENABLE;
 	}
 
@@ -305,30 +317,31 @@ com_cardbus_setup(struct com_cardbus_softc *csc)
 {
 	cardbus_devfunc_t ct = csc->cc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = csc->cc_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t reg;
+	pcireg_t reg;
 
-	cardbus_conf_write(cc, cf, csc->cc_tag, csc->cc_reg, csc->cc_base);
+	pci_conf_write(pc, csc->cc_tag, csc->cc_reg, csc->cc_base);
 
 	/* enable accesses on cardbus bridge */
 	cf->cardbus_ctrl(cc, csc->cc_cben);
 	cf->cardbus_ctrl(cc, CARDBUS_BM_ENABLE);
 
 	/* and the card itself */
-	reg = cardbus_conf_read(cc, cf, csc->cc_tag, CARDBUS_COMMAND_STATUS_REG);
-	reg &= ~(CARDBUS_COMMAND_IO_ENABLE | CARDBUS_COMMAND_MEM_ENABLE);
+	reg = pci_conf_read(pc, csc->cc_tag, PCI_COMMAND_STATUS_REG);
+	reg &= ~(PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE);
 	reg |= csc->cc_csr;
-	cardbus_conf_write(cc, cf, csc->cc_tag, CARDBUS_COMMAND_STATUS_REG, reg);
+	pci_conf_write(pc, csc->cc_tag, PCI_COMMAND_STATUS_REG, reg);
 
 	/*
 	 * Make sure the latency timer is set to some reasonable
 	 * value.
 	 */
-	reg = cardbus_conf_read(cc, cf, csc->cc_tag, CARDBUS_BHLC_REG);
-	if (CARDBUS_LATTIMER(reg) < 0x20) {
-			reg &= ~(CARDBUS_LATTIMER_MASK << CARDBUS_LATTIMER_SHIFT);
-			reg |= (0x20 << CARDBUS_LATTIMER_SHIFT);
-			cardbus_conf_write(cc, cf, csc->cc_tag, CARDBUS_BHLC_REG, reg);
+	reg = pci_conf_read(pc, csc->cc_tag, PCI_BHLC_REG);
+	if (PCI_LATTIMER(reg) < 0x20) {
+			reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+			reg |= (0x20 << PCI_LATTIMER_SHIFT);
+			pci_conf_write(pc, csc->cc_tag, PCI_BHLC_REG, reg);
 	}
 }
 
@@ -349,7 +362,11 @@ com_cardbus_enable(struct com_softc *sc)
 	csc->cc_ih = cardbus_intr_establish(cc, cf, psc->sc_intrline,
 	    IPL_TTY, comintr, sc, DEVNAME(csc));
 	if (csc->cc_ih == NULL) {
+<<<<<<< HEAD
 		printf("%s: couldn't establish interrupt\n", DEVNAME(csc));
+=======
+		printf(": couldn't establish interrupt\n");
+>>>>>>> origin/master
 		return (1);
 	}
 

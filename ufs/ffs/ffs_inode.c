@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_inode.c,v 1.45 2006/09/20 13:43:47 pedro Exp $	*/
+=======
+/*	$OpenBSD: ffs_inode.c,v 1.56 2009/01/15 07:58:36 grange Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -451,8 +455,16 @@ done:
 
 #ifdef FFS2
 #define BAP(ip, i) (((ip)->i_ump->um_fstype == UM_UFS2) ? bap2[i] : bap1[i])
+#define BAP_ASSIGN(ip, i, value)					\
+	do {								\
+		if ((ip)->i_ump->um_fstype == UM_UFS2)			\
+			bap2[i] = (value);				\
+		else							\
+			bap1[i] = (value);				\
+	} while (0)
 #else
 #define BAP(ip, i) bap1[i]
+#define BAP_ASSIGN(ip, i, value) do { bap1[i] = (value); } while (0)
 #endif /* FFS2 */
 
 /*
@@ -506,6 +518,8 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 	bp = getblk(vp, lbn, (int)fs->fs_bsize, 0, 0);
 	if (!(bp->b_flags & (B_DONE | B_DELWRI))) {
 		curproc->p_stats->p_ru.ru_inblock++;	/* pay for read */
+		bcstats.pendingreads++;
+		bcstats.numreads++;
 		bp->b_flags |= B_READ;
 		if (bp->b_bcount > bp->b_bufsize)
 			panic("ffs_indirtrunc: bad buffer size");
@@ -531,7 +545,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 		bcopy(bp->b_data, copy, (u_int) fs->fs_bsize);
 
 		for (i = last + 1; i < NINDIR(fs); i++)
-			BAP(ip, i) = 0;
+			BAP_ASSIGN(ip, i, 0);
 
 		if (!DOINGASYNC(vp)) {
 			error = bwrite(bp);

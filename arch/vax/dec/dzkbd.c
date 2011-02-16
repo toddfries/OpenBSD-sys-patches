@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dzkbd.c,v 1.11 2006/08/05 22:05:55 miod Exp $	*/
+=======
+/*	$OpenBSD: dzkbd.c,v 1.14 2008/08/20 16:31:41 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dzkbd.c,v 1.1 2000/12/02 17:03:55 ragge Exp $	*/
 
 /*
@@ -189,13 +193,19 @@ dzkbd_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-dzkbd_cnattach(struct dz_linestate *ls)
+dzkbd_cnattach()
 {
+	/*
+	 * Early operation (especially keyboard initialization)
+	 * requires the help of the serial console routines, which
+	 * need to be initialized to work with the keyboard line.
+	 */
+	dzcninit_internal(0, 1);
 
 	dzkbd_console_internal.dzi_ks.attmt.sendchar = dzkbd_sendchar;
-	dzkbd_console_internal.dzi_ks.attmt.cookie = ls;
+	dzkbd_console_internal.dzi_ks.attmt.cookie = NULL;
 	lk201_init(&dzkbd_console_internal.dzi_ks);
-	dzkbd_console_internal.dzi_ls = ls;
+	dzkbd_console_internal.dzi_ls = NULL;
 
 	wskbd_cnattach(&dzkbd_consops, &dzkbd_console_internal,
 	    &dzkbd_keymapdata);
@@ -216,10 +226,17 @@ void
 dzkbd_cngetc(void *v, u_int *type, int *data)
 {
 	struct dzkbd_internal *dzi = v;
-	int c;
+#if 0
+	int line = dzi->dzi_ls != NULL ? dzi->dzi_ls->dz_line : 0;
+#else
+	int line = 0;	/* keyboard */
+#endif
+	int c, s;
 
 	do {
-		c = dzgetc(dzi->dzi_ls);
+		s = spltty();
+		c = dzcngetc_internal(line);
+		splx(s);
 	} while (lk201_decode(&dzi->dzi_ks, 1, 0, c, type, data) == LKD_NODATA);
 }
 

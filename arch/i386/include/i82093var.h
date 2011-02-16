@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82093var.h,v 1.4 2005/11/23 09:24:52 mickey Exp $	*/
+/*	$OpenBSD: i82093var.h,v 1.9 2009/08/22 02:54:50 mk Exp $	*/
 /* $NetBSD: i82093var.h,v 1.1 2003/02/26 21:26:10 fvdl Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -56,7 +49,7 @@ struct ioapic_pin
 };
 
 struct ioapic_softc {
-	struct 			device sc_dev;	/* generic device glue */
+	struct pic		sc_pic;
 	struct ioapic_softc	*sc_next;
 	int			sc_apicid;
 	int			sc_apic_vers;
@@ -87,16 +80,8 @@ struct ioapic_softc {
 #define APIC_IRQ_APIC(x) ((x & APIC_INT_APIC_MASK) >> APIC_INT_APIC_SHIFT)
 #define APIC_IRQ_PIN(x) ((x & APIC_INT_PIN_MASK) >> APIC_INT_PIN_SHIFT)
 
-/* I/O APIC ID remapping helper macros. */
-#define IOAPIC_REMAP_MASK	(IOAPIC_ID_MASK >> IOAPIC_ID_SHIFT)
-#define IOAPIC_REMAP_FLAG	((IOAPIC_REMAP_MASK + 1) << 1)
-#define IOAPIC_REMAP(old_id, new_id) \
-    (ioapic_id_remap[(old_id)] = IOAPIC_REMAP_FLAG | (new_id))
-#define IOAPIC_REMAPPED(id)	(ioapic_id_remap[(id)] & IOAPIC_REMAP_FLAG)
-#define IOAPIC_REMAPPED_ID(id)	\
-    (IOAPIC_REMAPPED(id) ? ioapic_id_remap[(id)] & IOAPIC_REMAP_MASK : (id))
-
-void   *apic_intr_establish(int, int, int, int (*)(void *), void *, char *); 
+void   *apic_intr_establish(int, int, int, int (*)(void *), void *,
+    const char *); 
 void	apic_intr_disestablish(void *);
 
 void	ioapic_print_redir(struct ioapic_softc *, char *, int);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tty_subr.c,v 1.17 2003/06/02 04:00:16 deraadt Exp $	*/
+=======
+/*	$OpenBSD: tty_subr.c,v 1.23 2010/11/11 17:35:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: tty_subr.c,v 1.13 1996/02/09 19:00:43 christos Exp $	*/
 
 /*
@@ -45,39 +49,36 @@
  */
 #define QMEM(n)		((((n)-1)/NBBY)+1)
 
-void	cinit(void);
 void	clrbits(u_char *, int, int);
-
-/*
- * Initialize clists.
- */
-void
-cinit(void)
-{
-}
 
 /*
  * Initialize a particular clist. Ok, they are really ring buffers,
  * of the specified length, with/without quoting support.
  */
-int
+void
 clalloc(struct clist *clp, int size, int quot)
 {
 
 	clp->c_cs = malloc(size, M_TTYS, M_WAITOK);
 	bzero(clp->c_cs, size);
 
+<<<<<<< HEAD
 	if (quot) {
 		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK);
 		bzero(clp->c_cq, QMEM(size));
 	} else
 		clp->c_cq = (u_char *)0;
+=======
+	if (quot)
+		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK|M_ZERO);
+	else
+		clp->c_cq = NULL;
+>>>>>>> origin/master
 
-	clp->c_cf = clp->c_cl = (u_char *)0;
+	clp->c_cf = clp->c_cl = NULL;
 	clp->c_ce = clp->c_cs + size;
 	clp->c_cn = size;
 	clp->c_cc = 0;
-	return (0);
 }
 
 void
@@ -91,7 +92,7 @@ clfree(struct clist *clp)
 		bzero(clp->c_cq, QMEM(clp->c_cn));
 		free(clp->c_cq, M_TTYS);
 	}
-	clp->c_cs = clp->c_cq = (u_char *)0;
+	clp->c_cs = clp->c_cq = NULL;
 }
 
 
@@ -242,19 +243,17 @@ putc(int c, struct clist *clp)
 	int s;
 
 	s = spltty();
-	if (clp->c_cc == clp->c_cn)
-		goto out;
+	if (clp->c_cc == clp->c_cn) {
+		splx(s);
+		return -1;
+	}
 
 	if (clp->c_cc == 0) {
 		if (!clp->c_cs) {
-#if defined(DIAGNOSTIC) || 1
+#if defined(DIAGNOSTIC)
 			printf("putc: required clalloc\n");
 #endif
-			if (clalloc(clp, 1024, 1)) {
-out:
-				splx(s);
-				return -1;
-			}
+			clalloc(clp, 1024, 1);
 		}
 		clp->c_cf = clp->c_cl = clp->c_cs;
 	}
@@ -304,11 +303,13 @@ clrbits(u_char *cp, int off, int len)
 		mask = (1<<sbi) - 1;
 		cp[sby++] &= mask;
 
-		mask = (1<<ebi) - 1;
-		cp[eby] &= ~mask;
-
 		for (i = sby; i < eby; i++)
 			cp[i] = 0x00;
+
+		mask = (1<<ebi) - 1;
+		if (mask)	/* if no mask, eby may be 1 too far */
+			cp[eby] &= ~mask;
+
 	}
 }
 
@@ -332,11 +333,10 @@ b_to_q(u_char *cp, int count, struct clist *clp)
 
 	if (clp->c_cc == 0) {
 		if (!clp->c_cs) {
-#if defined(DIAGNOSTIC) || 1
+#if defined(DIAGNOSTIC)
 			printf("b_to_q: required clalloc\n");
 #endif
-			if (clalloc(clp, 1024, 1))
-				goto out;
+			clalloc(clp, 1024, 1);
 		}
 		clp->c_cf = clp->c_cl = clp->c_cs;
 	}

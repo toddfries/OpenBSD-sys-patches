@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vfs_syscalls_35.c,v 1.2 2004/07/14 18:00:48 millert Exp $	*/
+=======
+/*	$OpenBSD: vfs_syscalls_35.c,v 1.5 2010/07/01 23:10:40 tedu Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1989, 1993
@@ -68,9 +72,9 @@ cvtstat(struct stat *st, struct stat35 *ost)
 	ost->st_uid = st->st_uid;
 	ost->st_gid = st->st_gid;
 	ost->st_rdev = st->st_rdev;
-	ost->st_atimespec = st->st_atimespec;
-	ost->st_mtimespec = st->st_mtimespec;
-	ost->st_ctimespec = st->st_ctimespec;
+	ost->st_atim = st->st_atim;
+	ost->st_mtim = st->st_mtim;
+	ost->st_ctim = st->st_ctim;
 	ost->st_size = st->st_size;
 	ost->st_blocks = st->st_blocks;
 	ost->st_blksize = st->st_blksize;
@@ -173,42 +177,5 @@ compat_35_sys_fstat(struct proc *p, void *v, register_t *retval)
 		cvtstat(&ub, &oub);
 		error = copyout(&oub, SCARG(uap, sb), sizeof(oub));
 	}
-	return (error);
-}
-
-/* ARGSUSED */
-int
-compat_35_sys_fhstat(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_fhstat_args /* {
-		syscallarg(const fhandle_t *) fhp;
-		syscallarg(struct stat35 *) sb;
-	} */ *uap = v;
-	struct stat ub;
-	struct stat35 oub;
-	int error;
-	fhandle_t fh;
-	struct mount *mp;
-	struct vnode *vp;
-
-	/*
-	 * Must be super user
-	 */
-	if ((error = suser(p, 0)))
-		return (error);
-
-	if ((error = copyin(SCARG(uap, fhp), &fh, sizeof(fhandle_t))) != 0)
-		return (error);
-
-	if ((mp = vfs_getvfs(&fh.fh_fsid)) == NULL)
-		return (ESTALE);
-	if ((error = VFS_FHTOVP(mp, &fh.fh_fid, &vp)))
-		return (error);
-	error = vn_stat(vp, &ub, p);
-	vput(vp);
-	if (error)
-		return (error);
-	cvtstat(&ub, &oub);
-	error = copyout(&oub, SCARG(uap, sb), sizeof(oub));
 	return (error);
 }

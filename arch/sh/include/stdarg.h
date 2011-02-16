@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: stdarg.h,v 1.2 2008/10/23 21:25:07 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: stdarg.h,v 1.9 2006/05/21 22:39:04 uwe Exp $	*/
 
 /*
@@ -52,9 +56,5 @@ typedef __va_list	va_list;
 #define	va_arg			__builtin_va_arg
 #define	va_end			__builtin_va_end
 #define	__va_copy(dest, src)	__builtin_va_copy((dest), (src))
-
-#if __ISO_C_VISIBLE >= 1999
-#define	va_copy(dest, src)	__va_copy((dest), (src))
-#endif
 
 #endif /* !_SH_STDARG_H_ */

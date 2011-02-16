@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.42 2006/11/29 12:26:13 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.49 2010/07/24 12:18:58 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.45 1997/02/10 22:13:40 scottr Exp $	*/
 
 /*
@@ -77,14 +77,8 @@
 #include <machine/intr.h>
 
 /*
- * definitions of cpu-dependent requirements
- * referenced in generic code
- */
-#define	cpu_wait(p)			/* nothing */
-
-/*
  * Arguments to hardclock and gatherstats encapsulate the previous
- * machine state in an opaque clockframe.  One the hp300, we use
+ * machine state in an opaque clockframe.  On the m68k, we use
  * what the hardware pushes on an interrupt (frame format 0).
  */
 struct clockframe {
@@ -103,6 +97,7 @@ struct clockframe {
  */
 extern int want_resched;	/* resched() was called */
 #define	need_resched(ci)	{ want_resched = 1; aston(); }
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Give a profiling tick to the current process from the softclock

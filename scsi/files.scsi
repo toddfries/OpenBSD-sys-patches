@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: files.scsi,v 1.19 2005/08/01 23:14:31 dlg Exp $
+=======
+#	$OpenBSD: files.scsi,v 1.22 2010/07/03 03:59:17 krw Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.scsi,v 1.4 1996/05/16 04:01:08 mycroft Exp $
 #
 # Config.new file and device description for machine-independent SCSI code.
@@ -27,12 +31,6 @@ file	scsi/sd.c			sd needs-flag
 device	st: tape
 attach	st at scsibus
 file	scsi/st.c			st needs-flag
-
-device	ss: tape
-attach	ss at scsibus
-file	scsi/ss.c			ss needs-flag
-file	scsi/ss_mustek.c		ss
-file	scsi/ss_scanjet.c		ss
 
 device	uk: disk
 attach	uk at scsibus

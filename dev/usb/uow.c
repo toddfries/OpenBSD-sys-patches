@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uow.c,v 1.13 2006/09/30 15:53:49 grange Exp $	*/
+=======
+/*	$OpenBSD: uow.c,v 1.29 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -36,12 +40,6 @@
 
 #include <dev/usb/uowreg.h>
 
-#ifdef UOW_DEBUG
-#define DPRINTF(x) printf x
-#else
-#define DPRINTF(x)
-#endif
-
 #define UOW_TIMEOUT	1000	/* ms */
 
 struct uow_softc {
@@ -60,7 +58,26 @@ struct uow_softc {
 	u_int8_t		sc_fifo[DS2490_DATAFIFOSIZE];
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(uow);
+=======
+int uow_match(struct device *, void *, void *); 
+void uow_attach(struct device *, struct device *, void *); 
+int uow_detach(struct device *, int); 
+int uow_activate(struct device *, int); 
+
+struct cfdriver uow_cd = { 
+	NULL, "uow", DV_DULL 
+}; 
+
+const struct cfattach uow_ca = { 
+	sizeof(struct uow_softc), 
+	uow_match, 
+	uow_attach, 
+	uow_detach, 
+	uow_activate, 
+};
+>>>>>>> origin/master
 
 /* List of supported devices */
 static const struct usb_devno uow_devs[] = {
@@ -254,14 +271,21 @@ USB_DETACH(uow)
 
 	splx(s);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (rv);
 }
 
 int
+<<<<<<< HEAD
 uow_activate(device_ptr_t self, enum devact act)
+=======
+uow_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct uow_softc *sc = (struct uow_softc *)self;
 	int rv = 0;
@@ -272,6 +296,7 @@ uow_activate(device_ptr_t self, enum devact act)
 	case DVACT_DEACTIVATE:
 		if (sc->sc_ow_dev != NULL)
 			rv = config_deactivate(sc->sc_ow_dev);
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 

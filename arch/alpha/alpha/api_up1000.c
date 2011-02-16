@@ -1,4 +1,4 @@
-/*	$OpenBSD: api_up1000.c,v 1.7 2004/07/18 02:29:11 deraadt Exp $	*/
+/*	$OpenBSD: api_up1000.c,v 1.11 2010/11/23 04:07:55 shadchin Exp $	*/
 /* $NetBSD: api_up1000.c,v 1.4 2000/06/20 03:48:53 matt Exp $ */
 
 /*
@@ -130,8 +130,7 @@ api_up1000_cons_init()
 #if NPCKBD > 0
 		/* display console ... */
 		/* XXX */
-		(void) pckbc_cnattach(&icp->ic_iot, IO_KBD, KBCMDP,
-		    PCKBC_KBD_SLOT);
+		(void) pckbc_cnattach(&icp->ic_iot, IO_KBD, KBCMDP, 0);
 
 		if (CTB_TURBOSLOT_TYPE(ctb->ctb_turboslot) ==
 		    CTB_TURBOSLOT_TYPE_ISA)
@@ -255,7 +254,7 @@ api_up1000_device_register(dev, aux)
 	 */
 	if ((ideboot || scsiboot) && !strcmp(cd->cd_name, "wd")) {
 		struct ata_atapi_attach *aa_link = aux;
-		if ((strncmp("pciide", parent->dv_xname, 6) != 0)) {
+		if ((strcmp("pciide", parent->dv_cfdata->cf_driver->cd_name) != 0)) {
 			return;
 		} else {
 			if (parent != scsidev)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.h,v 1.3 2002/07/23 17:53:24 drahn Exp $ */
+/*	$OpenBSD: rbus_machdep.h,v 1.8 2010/01/13 09:10:33 jsg Exp $	*/
 /*	$NetBSD: rbus_machdep.h,v 1.2 1999/10/15 06:43:05 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,22 +26,25 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
-#if !defined _ARCH_I386_I386_RBUS_MACHDEP_H_
-#define _ARCH_I386_I386_RBUS_MACHDEP_H_
+#ifndef _I386_RBUS_MACHDEP_H_
+#define _I386_RBUS_MACHDEP_H_
 
 struct pci_attach_args;		/* XXX */
 
-#define md_space_map(bt, physaddr, size, flags, bshp) \
-	_bus_space_map((bt), (physaddr), (size), (flags), (bshp))
+#define md_space_map(rbt, physaddr, size, flags, bshp) \
+	_bus_space_map((rbt)->rb_bt, (physaddr), (size), (flags), (bshp))
 
-#define md_space_unmap(bt, bsh, size, adrp) \
-	_bus_space_unmap((bt), (bsh), (size), (adrp))
+#define md_space_unmap(rbt, bsh, size, adrp) \
+	_bus_space_unmap((rbt)->rb_bt, (bsh), (size), (adrp))
 
+rbus_tag_t	rbus_pccbb_parent_io(struct device *,
+		    struct pci_attach_args *);
+rbus_tag_t	rbus_pccbb_parent_mem(struct device *,
+		    struct pci_attach_args *);
 
-rbus_tag_t rbus_pccbb_parent_io(struct device *self,
-    struct pci_attach_args *pa);
-rbus_tag_t rbus_pccbb_parent_mem(struct device *self,
-    struct pci_attach_args *pa);
+bus_addr_t	rbus_min_start_hint(void);
 
-#endif /* _ARCH_I386_I386_RBUS_MACHDEP_H_ */
+void		pccbb_attach_hook(struct device *, struct device *,
+		    struct pci_attach_args *);
+
+#endif /* _I386_RBUS_MACHDEP_H_ */

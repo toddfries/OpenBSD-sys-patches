@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: intr.c,v 1.23 2005/04/26 18:54:39 miod Exp $	*/
+=======
+/*	$OpenBSD: intr.c,v 1.39 2010/12/21 14:56:24 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -48,8 +52,12 @@
 
 #include <dev/cons.h>
 
+<<<<<<< HEAD
 #include <net/netisr.h>
 
+=======
+#include <machine/atomic.h>
+>>>>>>> origin/master
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
@@ -68,7 +76,6 @@ struct intrhand *intrlev[MAXINTNUM];
 
 void	strayintr(const struct trapframe64 *, int);
 int	softintr(void *);
-int	softnet(void *);
 int	intr_list_handler(void *);
 
 /*
@@ -125,6 +132,7 @@ strayintr(fp, vectored)
  *	Soft clock interrupt
  */
 
+<<<<<<< HEAD
 int netisr;
 
 int
@@ -156,31 +164,31 @@ setsoftnet() {
 
 int fastvec = 0;
 
+=======
+>>>>>>> origin/master
 /*
  * PCI devices can share interrupts so we need to have
  * a handler to hand out interrupts.
  */
 int
-intr_list_handler(arg)
-	void * arg;
+intr_list_handler(void *arg)
 {
+	struct cpu_info *ci = curcpu();
+	struct intrhand *ih = arg;
 	int claimed = 0;
-	struct intrhand *ih = (struct intrhand *)arg;
 
-	if (!arg) panic("intr_list_handler: no handlers!");
-	while (ih && !claimed) {
-		claimed = (*ih->ih_fun)(ih->ih_arg);
-#ifdef DEBUG
-		{
-			extern int intrdebug;
-			if (intrdebug & 1)
-				printf("intr %p %x arg %p %s\n",
-					ih, ih->ih_number, ih->ih_arg,
-					claimed ? "claimed" : "");
+	while (ih) {
+		sparc_wrpr(pil, ih->ih_pil, 0);
+		ci->ci_handled_intr_level = ih->ih_pil;
+
+		if (ih->ih_fun(ih->ih_arg)) {
+			ih->ih_count.ec_count++;
+			claimed = 1;
 		}
-#endif
+
 		ih = ih->ih_next;
 	}
+
 	return (claimed);
 }
 
@@ -190,15 +198,14 @@ intr_list_handler(arg)
  * This is not possible if it has been taken away as a fast vector.
  */
 void
-intr_establish(level, ih)
-	int level;
-	struct intrhand *ih;
+intr_establish(int level, struct intrhand *ih)
 {
 	struct intrhand *q;
 	u_int64_t m, id;
 	int s;
 
 	s = splhigh();
+
 	/*
 	 * This is O(N^2) for long chains, but chains are never long
 	 * and we do want to preserve order.
@@ -223,9 +230,9 @@ intr_establish(level, ih)
 		panic("intr_establish: bad intr number %x", ih->ih_number);
 
 	if (strlen(ih->ih_name) == 0)
-		evcount_attach(&ih->ih_count, "unknown", NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, "unknown", NULL);
 	else
-		evcount_attach(&ih->ih_count, ih->ih_name, NULL, &evcount_intr);
+		evcount_attach(&ih->ih_count, ih->ih_name, NULL);
 
 	q = intrlev[ih->ih_number];
 	if (q == NULL) {
@@ -241,29 +248,35 @@ intr_establish(level, ih)
 #ifdef DEBUG
 		printf("intr_establish: intr reused %x\n", ih->ih_number);
 #endif
-
 		if (q->ih_fun != intr_list_handler) {
-			nih = (struct intrhand *)malloc(sizeof(struct intrhand),
-			    M_DEVBUF, M_NOWAIT);
+			nih = malloc(sizeof(struct intrhand),
+			    M_DEVBUF, M_NOWAIT | M_ZERO);
 			if (nih == NULL)
 				panic("intr_establish");
-			/* Point the old IH at the new handler */
-			*nih = *q;
-			q->ih_fun = intr_list_handler;
-			q->ih_arg = (void *)nih;
-			nih->ih_next = NULL;
+
+			nih->ih_fun = intr_list_handler;
+			nih->ih_arg = q;
+			nih->ih_number = q->ih_number;
+			nih->ih_pil = min(q->ih_pil, ih->ih_pil);
+			nih->ih_map = q->ih_map;
+			nih->ih_clr = q->ih_clr;
+			nih->ih_ack = q->ih_ack;
+
+			intrlev[ih->ih_number] = q = nih;
+		} else {
+			if (ih->ih_pil < q->ih_pil)
+				q->ih_pil = ih->ih_pil;
 		}
-		nih = (struct intrhand *)malloc(sizeof(struct intrhand),
-		    M_DEVBUF, M_NOWAIT);
-		if (nih == NULL)
-			panic("intr_establish");
-		*nih = *ih;
+
 		/* Add the ih to the head of the list */
-		nih->ih_next = (struct intrhand *)q->ih_arg;
-		q->ih_arg = (void *)nih;
+		ih->ih_next = q->ih_arg;
+		q->ih_arg = ih;
 	}
 
-	if(ih->ih_map) {
+	if (ih->ih_clr != NULL)			/* Set interrupt to idle */
+		*ih->ih_clr = INTCLR_IDLE;
+
+	if (ih->ih_map) {
 		id = CPU_UPAID;
 		m = *ih->ih_map;
 		if (INTTID(m) != id) {
@@ -277,16 +290,7 @@ intr_establish(level, ih)
 		}
 		m |= INTMAP_V;
 		*ih->ih_map = m;
-	} else {
-#ifdef DEBUG
-		printf(	"\n**********************\n"
-			"********************** intr_establish: no map register\n"
-			"**********************\n");
-#endif
 	}
-
-	if (ih->ih_clr != NULL)			/* Set interrupt to idle */
-		*ih->ih_clr = INTCLR_IDLE;
 
 #ifdef DEBUG
 	printf("\nintr_establish: vector %x pil %x mapintr %p "
@@ -307,8 +311,15 @@ softintr_establish(level, fun, arg)
 {
 	struct intrhand *ih;
 
+<<<<<<< HEAD
 	ih = malloc(sizeof(*ih), M_DEVBUF, 0);
 	bzero(ih, sizeof(*ih));
+=======
+	if (level == IPL_TTY)
+		level = IPL_SOFTTTY;
+
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_WAITOK | M_ZERO);
+>>>>>>> origin/master
 	ih->ih_fun = (int (*)(void *))fun;	/* XXX */
 	ih->ih_arg = arg;
 	ih->ih_pil = level;
@@ -355,3 +366,27 @@ splassert_check(int wantipl, const char *func)
 	}
 }
 #endif
+<<<<<<< HEAD
+=======
+
+#ifdef MULTIPROCESSOR
+
+void sparc64_intlock(struct trapframe64 *);
+void sparc64_intunlock(struct trapframe64 *);
+
+void
+sparc64_intlock(struct trapframe64 *tf)
+{
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
+		__mp_lock(&kernel_lock);
+}
+
+void
+sparc64_intunlock(struct trapframe64 *tf)
+{
+	if (tf->tf_pil < PIL_SCHED && tf->tf_pil != PIL_CLOCK)
+		__mp_unlock(&kernel_lock);
+}
+
+#endif
+>>>>>>> origin/master

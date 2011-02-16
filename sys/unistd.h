@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: unistd.h,v 1.12 2004/05/07 18:39:19 millert Exp $	*/
+=======
+/*	$OpenBSD: unistd.h,v 1.18 2010/10/28 02:05:59 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: unistd.h,v 1.10 1994/06/29 06:46:06 cgd Exp $	*/
 
 /*
@@ -38,9 +42,10 @@
 #include <sys/cdefs.h>
 
 /* compile-time symbolic constants */
-#define	_POSIX_JOB_CONTROL	/* implementation supports job control */
-
-#define	_POSIX_SAVED_IDS	/* saved set-user-ID and set-group-ID */
+				/* implementation supports job control */
+#define	_POSIX_JOB_CONTROL	1
+				/* saved set-user-ID and set-group-ID */
+#define	_POSIX_SAVED_IDS	1
 
 #define	_POSIX_VERSION		199009L
 #define	_POSIX2_VERSION		199212L
@@ -118,12 +123,14 @@
 #define	_SC_XOPEN_SHM		30
 #define	_SC_SEM_NSEMS_MAX	31
 #define	_SC_SEM_VALUE_MAX	32
+#define	_SC_HOST_NAME_MAX	33
 
-#ifdef notyet
 /* P1003.1c */
-#define _SC_GETGR_R_SIZE_MAX
-#define _SC_GETPW_R_SIZE_MAX
-#define _SC_LOGIN_NAME_MAX
+#define _SC_GETGR_R_SIZE_MAX	100
+#define _SC_GETPW_R_SIZE_MAX	101
+#define _SC_LOGIN_NAME_MAX	102
+#define _SC_THREAD_SAFE_FUNCTIONS 103
+#ifdef notyet
 #define _SC_THREAD_DESTRUCTOR_ITERATIONS
 #define _SC_THREAD_KEYS_MAX
 #define _SC_THREAD_STACK_MIN
@@ -136,9 +143,16 @@
 #define _SC_THREAD_PRIO_INHERIT
 #define _SC_THREAD_PRIO_PROTECT
 #define _SC_THREAD_PROCESS_SHARED
-#define _SC_THREAD_SAFE_FUNCTIONS
 #endif
 
+<<<<<<< HEAD
+=======
+#define	_SC_PHYS_PAGES		500
+#define	_SC_AVPHYS_PAGES	501
+#define	_SC_NPROCESSORS_CONF	502
+#define	_SC_NPROCESSORS_ONLN	503
+
+>>>>>>> origin/master
 /* configurable system strings */
 #define	_CS_PATH		 1
 

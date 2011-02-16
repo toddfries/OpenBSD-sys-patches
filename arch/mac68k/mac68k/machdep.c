@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.135 2007/03/03 21:21:25 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.156 2010/11/20 20:29:09 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -94,9 +94,6 @@
 #include <sys/mount.h>
 #include <sys/extent.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
@@ -113,6 +110,7 @@
 #include <machine/pmap.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #include <sys/sysctl.h>
 
@@ -137,9 +135,10 @@ u_long  IOBase;
 vaddr_t SCSIBase;
 
 /* These are used to map kernel space: */
+#define	NBMEMRANGES	8
 extern int numranges;
-extern u_long low[8];
-extern u_long high[8];
+extern u_long low[NBMEMRANGES];
+extern u_long high[NBMEMRANGES];
 
 /* These are used to map NuBus space: */
 #define	NBMAXRANGES	16
@@ -192,6 +191,9 @@ int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -217,7 +219,6 @@ int	astpending = 0;
 void	identifycpu(void);
 u_long	get_physical(u_int, u_long *);
 
-caddr_t	allocsys(caddr_t);
 void	initcpu(void);
 int	cpu_dumpsize(void);
 int	cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
@@ -246,8 +247,6 @@ mac68k_init()
 
 	/*
 	 * Tell the VM system about available physical memory.
-	 * Notice that we don't need to worry about avail_end here
-	 * since it's equal to high[numranges-1].
 	 */
 	for (i = 0; i < numranges; i++) {
 		if (low[i] <= avail_start && avail_start < high[i])
@@ -361,12 +360,10 @@ consinit(void)
 void
 cpu_startup(void)
 {
-	caddr_t v;
 	unsigned i;
 	int vers;
 	int base, residual;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size = 0;	/* To avoid compiler warning */
 	int delay;
 
 	/*
@@ -406,55 +403,6 @@ cpu_startup(void)
 		for (delay = 0; delay < 1000000; delay++);
 	}
 	printf("real mem = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addressses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if ((allocsys(v) - v) != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL) 
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-		pmap_update(pmap_kernel());
-	}
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -497,58 +445,6 @@ cpu_startup(void)
 
 	/* Safe for extent allocation to use malloc now. */
 	iomem_malloc_safe = 1;
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)((name)+(num))
-#define	valloclim(name, type, num, lim) \
-	    (name) = (type *)v; v = (caddr_t)((lim) = ((name)+(num)))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate (enough to
-	 * hold 5% of total physical memory, but at least 16).
-	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-	return (v);
 }
 
 void
@@ -654,7 +550,9 @@ haltsys:
 		}
 		printf("\nThe operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);
 		(void)cngetc();
+		cnpollc(0);
 	}
 
 	/* Map the last physical page VA = PA for doboot() */
@@ -820,6 +718,10 @@ dumpsys()
 
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	printf("dump ");
 
@@ -1000,24 +902,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-#ifdef COMPAT_SUNOS
-	{
-		extern int sunos_exec_aout_makecmds(struct proc *,
-			        struct exec_package *);
-		if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-			return 0;
-	}
-#endif
-	return error;
 }
 
 static char *envbuf = NULL;
@@ -1661,7 +1545,7 @@ mac68k_set_io_offsets(base)
 	case MACH_CLASSQ:
 		Via1Base = (volatile u_char *)base;
 
-		/* The following two may be overriden. */
+		/* The following two may be overridden. */
 		sccA = (volatile u_char *)base + 0xc000;
 		SCSIBase = base + 0xf000;
 
@@ -1884,7 +1768,7 @@ get_mapping(void)
 	int i, last, same;
 
 	numranges = 0;
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < NBMEMRANGES; i++) {
 		low[i] = 0;
 		high[i] = 0;
 	}
@@ -1917,7 +1801,7 @@ get_mapping(void)
 		if (numranges > 0 && phys == high[last]) {
 			/* Common case: extend existing segment on high end */
 			high[last] += PAGE_SIZE;
-		} else {
+		} else if (numranges < NBMEMRANGES - 1) {
 			/* This is a new physical segment. */
 			for (last = 0; last < numranges; last++)
 				if (phys < low[last])
@@ -1934,6 +1818,9 @@ get_mapping(void)
 			numranges++;
 			low[last] = phys;
 			high[last] = phys + PAGE_SIZE;
+		} else {
+			/* Not enough ranges. Display a warning message? */
+			continue;
 		}
 
 		/* Coalesce adjoining segments as appropriate */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_txpreg.h,v 1.36 2004/05/31 19:25:00 mcbride Exp $ */
+=======
+/*	$OpenBSD: if_txpreg.h,v 1.38 2009/03/24 11:12:10 kettenis Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Aaron Campbell <aaron@monkey.org>.
@@ -596,6 +600,7 @@ struct txp_fw_file_header {
 	u_int32_t	version;
 	u_int32_t	nsections;
 	u_int32_t	addr;
+	u_int32_t	hmac[5];
 };
 
 struct txp_fw_section_header {

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_var.h,v 1.8 2003/06/28 01:52:18 tedu Exp $	*/
+=======
+/*	$OpenBSD: db_var.h,v 1.10 2008/11/08 01:14:51 mpf Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.
@@ -42,7 +46,8 @@
 #define DBCTL_PANIC	5
 #define DBCTL_CONSOLE	6
 #define DBCTL_LOG	7
-#define DBCTL_MAXID	8
+#define DBCTL_TRIGGER	8
+#define DBCTL_MAXID	9
 
 #define	CTL_DDB_NAMES { \
 	{ NULL, 0 }, \
@@ -53,6 +58,7 @@
 	{ "panic", CTLTYPE_INT }, \
 	{ "console", CTLTYPE_INT }, \
 	{ "log", CTLTYPE_INT }, \
+	{ "trigger", CTLTYPE_INT }, \
 }
 
 #ifdef	_KERNEL

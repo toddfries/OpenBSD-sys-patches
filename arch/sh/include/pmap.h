@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pmap.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+=======
+/*	$OpenBSD: pmap.h,v 1.9 2010/12/26 15:41:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pmap.h,v 1.28 2006/04/10 23:12:11 uwe Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,7 +59,6 @@ typedef struct pmap {
 extern struct pmap __pmap_kernel;
 
 void pmap_bootstrap(void);
-void pmap_proc_iflush(struct proc *, vaddr_t, size_t);
 #define	pmap_unuse_final(p)		do { /* nothing */ } while (0)
 #define	pmap_kernel()			(&__pmap_kernel)
 #define	pmap_deactivate(pmap)		do { /* nothing */ } while (0)
@@ -71,7 +67,6 @@ void pmap_proc_iflush(struct proc *, vaddr_t, size_t);
 #define	pmap_collect(pmap)		do { /* nothing */ } while (0)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
-#define	pmap_phys_address(frame)	((paddr_t)(ptoa(frame)))
 
 /* ARGSUSED */
 static __inline void
@@ -86,12 +81,12 @@ pmap_remove_all(struct pmap *pmap)
  */
 #ifdef SH4
 #define	PMAP_PREFER(pa, va)		pmap_prefer((pa), (va))
-void pmap_prefer(vaddr_t, vaddr_t *);
+vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
 #endif /* SH4 */
 
 #define	__HAVE_PMAP_DIRECT
-#define	pmap_map_direct(pg)		SH3_PHYS_TO_P1SEG(VM_PAGE_TO_PHYS(pg))
-#define	pmap_unmap_direct(va)		PHYS_TO_VM_PAGE(SH3_P1SEG_TO_PHYS((va)))
+vaddr_t	pmap_map_direct(vm_page_t);
+vm_page_t pmap_unmap_direct(vaddr_t);
 
 /* MD pmap utils. */
 pt_entry_t *__pmap_pte_lookup(pmap_t, vaddr_t);

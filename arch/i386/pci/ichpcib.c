@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichpcib.c,v 1.16 2006/12/12 23:14:27 dim Exp $	*/
+/*	$OpenBSD: ichpcib.c,v 1.25 2010/07/08 20:17:54 deraadt Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -25,6 +25,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
@@ -73,7 +74,9 @@ struct timecounter ichpcib_timecounter = {
 struct cfattach ichpcib_ca = {
 	sizeof(struct ichpcib_softc),
 	ichpcib_match,
-	ichpcib_attach
+	ichpcib_attach,
+	NULL,
+	config_activate_children
 };
 
 struct cfdriver ichpcib_cd = {

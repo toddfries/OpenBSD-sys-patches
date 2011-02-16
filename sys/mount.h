@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mount.h,v 1.77 2006/12/15 03:04:24 krw Exp $	*/
+=======
+/*	$OpenBSD: mount.h,v 1.100 2010/06/29 04:09:32 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -354,7 +358,8 @@ struct ostatfs {
 #define	MOUNT_ADOSFS	"adosfs"	/* AmigaDOS Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
-#define	MOUNT_XFS	"xfs"		/* xfs */
+#define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
+#define	MOUNT_NNPFS	"nnpfs"		/* nnpfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
 
@@ -448,10 +453,13 @@ struct mount {
 #define VFS_MAXTYPENUM	1	/* int: highest defined filesystem type */
 #define VFS_CONF	2	/* struct: vfsconf for filesystem given
 				   as next argument */
+#define VFS_BCACHESTAT	3	/* struct: buffer cache statistics given 
+				   as next argument */
 #define	CTL_VFSGENCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "maxtypenum", CTLTYPE_INT }, \
-	{ "conf", CTLTYPE_NODE } \
+	{ "conf", CTLTYPE_NODE }, \
+	{ "bcachestat", CTLTYPE_STRUCT } \
 }
 
 /*
@@ -468,6 +476,33 @@ struct vfsconf {
 	int	(*vfc_mountroot)(void);	/* if != NULL, routine to mount root */
 	struct	vfsconf *vfc_next;	/* next in list */
 };
+
+/* buffer cache statistics */
+struct bcachestats {
+	int64_t numbufs;		/* number of buffers allocated */
+	int64_t freebufs;		/* number of free buffers */
+	int64_t numbufpages;		/* number of pages in buffer cache */
+	int64_t numfreepages; 		/* number of free pages */
+	int64_t numdirtypages; 		/* number of dirty free pages */
+	int64_t numcleanpages; 		/* number of clean free pages */
+	int64_t pendingwrites;		/* number of pending writes */
+	int64_t pendingreads;		/* number of pending reads */
+	int64_t numwrites;		/* total writes started */
+	int64_t numreads;		/* total reads started */
+	int64_t cachehits;		/* total reads found in cache */
+	int64_t busymapped;		/* number of busy and mapped buffers */
+};
+#ifdef _KERNEL
+extern struct bcachestats bcstats;
+extern long buflowpages, bufhighpages, bufbackpages;
+#define BUFPAGES_DEFICIT (((buflowpages - bcstats.numbufpages) < 0) ? 0 \
+    : buflowpages - bcstats.numbufpages)
+#define BUFPAGES_INACT (((bcstats.numcleanpages - buflowpages) < 0) ? 0 \
+    : bcstats.numcleanpages - buflowpages)
+extern int bufcachepercent;
+extern void bufadjust(int);
+extern int bufbackoff(void);
+#endif
 
 /*
  * Operations supported on mounted file system.
@@ -597,12 +632,14 @@ int	speedup_syncer(void);
 
 int	vfs_syncwait(int);	/* sync and wait for complete */
 void	vfs_shutdown(void);	/* unmount and sync file systems */
-long	makefstype(char *);
 int	dounmount(struct mount *, int, struct proc *, struct vnode *);
 void	vfsinit(void);
+<<<<<<< HEAD
 #ifdef DEBUG
 void	vfs_bufstats(void);
 #endif
+=======
+>>>>>>> origin/master
 int	vfs_register(struct vfsconf *);
 int	vfs_unregister(struct vfsconf *);
 #else /* _KERNEL */

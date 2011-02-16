@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kgdb_machdep.c,v 1.7 2003/06/02 23:27:55 millert Exp $ */
+=======
+/*	$OpenBSD: kgdb_machdep.c,v 1.10 2010/07/10 19:32:25 miod Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: kgdb_machdep.c,v 1.1 1997/08/31 21:22:45 pk Exp $ */
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -15,13 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -105,7 +102,7 @@
 	lda(((vaddr_t)va & 0xFFFFF000) | ASI_SRMMUFP_L3, ASI_SRMMUFP)
 #endif
 
-#if defined(SUN4) || defined(SUN4C)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 #define	getpte4(va)		lda(va, ASI_PTE)
 #define	setpte4(va, pte)	sta(va, ASI_PTE, pte)
 #endif
@@ -281,8 +278,8 @@ kgdb_acc(vaddr_t va, size_t len)
 				return (0);
 		}
 #endif
-#if defined(SUN4) || defined(SUN4C)
-		if (CPU_ISSUN4C || CPU_ISSUN4) {
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
+		if (CPU_ISSUN4OR4COR4E) {
 			pte = getpte4(va);
 			if ((pte & PG_V) == 0)
 				return (0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.3 2005/10/26 18:35:45 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.30 2011/01/04 17:59:14 jasper Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -39,15 +39,14 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
+#include <sys/timetc.h>
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
+#include <uvm/uvm_swap.h>
 
 #include <dev/cons.h>
 #include <dev/clock_subr.h>
@@ -58,10 +57,6 @@
 #include <machine/reg.h>
 #include <machine/autoconf.h>
 #include <machine/kcore.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -129,13 +124,9 @@ int	cpu_hvers;
 enum hppa_cpu_type cpu_type;
 const char *cpu_typename;
 u_int	fpu_version;
-#ifdef COMPAT_HPUX
-int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
-#endif
 
 dev_t	bootdev;
 int	physmem, resvmem, resvphysmem, esym;
-paddr_t	avail_end;
 
 /*
  * Things for MI glue to stick on.
@@ -143,6 +134,7 @@ paddr_t	avail_end;
 struct user *proc0paddr;
 long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(32) / sizeof(long)];
 struct extent *hppa_ex;
+struct consdev *cn_tab;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -154,6 +146,12 @@ static __inline void fall(int, int, int, int, int);
 void dumpsys(void);
 void hpmc_dump(void);
 void cpuid(void);
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 /*
  * wide used hardware params
@@ -170,6 +168,11 @@ pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
+int	hppa_cpuspeed(int *mhz);
+
 int
 hppa_cpuspeed(int *mhz)
 {
@@ -179,11 +182,11 @@ hppa_cpuspeed(int *mhz)
 }
 
 void
-hppa_init(start)
-	paddr_t start;
+hppa_init(paddr_t start)
 {
 	extern int kernel_text;
 	int error;
+	paddr_t	avail_end;
 
 	mtctl((long)&cpu0_info, 24);
 
@@ -223,7 +226,7 @@ TODO hpmc/toc/pfr
 	/* setup hpmc handler */
 	{
 		extern u_int hpmc_v[];	/* from locore.s */
-		register u_int *p = hpmc_v;
+		u_int *p = hpmc_v;
 
 		if (pdc_call((iodcio_t)pdc, 0, PDC_INSTR, PDC_INSTR_DFLT, p))
 			*p = 0x08000240;
@@ -235,7 +238,7 @@ TODO hpmc/toc/pfr
 
 	{
 		extern u_int hppa_toc[], hppa_toc_end[];
-		register u_int cksum, *p;
+		u_int cksum, *p;
 
 		for (cksum = 0, p = hppa_toc; p < hppa_toc_end; p++)
 			cksum += *p;
@@ -247,7 +250,7 @@ TODO hpmc/toc/pfr
 
 	{
 		extern u_int hppa_pfr[], hppa_pfr_end[];
-		register u_int cksum, *p;
+		u_int cksum, *p;
 
 		for (cksum = 0, p = hppa_pfr; p < hppa_pfr_end; p++)
 			cksum += *p;
@@ -271,24 +274,8 @@ TODO hpmc/toc/pfr
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-#ifdef SYSVMSG
-{
-	vaddr_t v;
-
-	v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)start, (v - start));
-	start = v;
-}
-#endif
 	/* sets resvphysmem */
-	pmap_bootstrap(start);
+	pmap_bootstrap(round_page(start));
 
 	/* buffer cache parameters */
 	if (bufpages == 0)
@@ -425,44 +412,9 @@ cpu_startup(void)
 	 * join me in this one love dream
 	 */
 	printf("%s%s\n", version, cpu_model);
-	printf("real mem = %u (%u reserved for PROM, %u used by OpenBSD)\n",
-	    ctob(physmem), ctob(resvmem), ctob(resvphysmem - resvmem));
-
-printf("here2\n");
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, &minaddr, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	buffers = (caddr_t)minaddr;
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vaddr_t curbuf;
-		int cbpgs, pd;
-
-{ extern int pmapdebug; pd = pmapdebug; pmapdebug = 0; }
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-
-		for (cbpgs = base + (i < residual? 1 : 0); cbpgs--; ) {
-			struct vm_page *pg;
-
-			if ((pg = uvm_pagealloc(NULL, 0, NULL, 0)) == NULL)
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    UVM_PROT_RW);
-			curbuf += PAGE_SIZE;
-		}
-{ extern int pmapdebug; pmapdebug = pd; }
-	}
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem) / 1024 / 1024);
+	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
 printf("here3\n");
 	/*
@@ -480,9 +432,8 @@ printf("here4\n");
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 printf("here5\n");
-	printf("avail mem = %lu\n", ptoa(uvmexp.free));
-	printf("using %u buffers containing %u bytes of memory\n",
-	    nbuf, (unsigned)bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -502,56 +453,6 @@ printf("here6\n");
 #endif
 	}
 printf("here7\n");
-}
-
-/*
- * initialize the system time from the time of day clock
- */
-void
-inittodr(t)
-	time_t t;
-{
-	struct pdc_tod tod PDC_ALIGNMENT;
-	int 	error, tbad = 0;
-
-	if (t < 12*SECYR) {
-		printf ("WARNING: preposterous time in file system");
-		t = 6*SECYR + 186*SECDAY + SECDAY/2;
-		tbad = 1;
-	}
-
-	if ((error = pdc_call((iodcio_t)pdc,
-	    1, PDC_TOD, PDC_TOD_READ, &tod, 0, 0, 0, 0, 0)))
-		printf("clock: failed to fetch (%d)\n", error);
-
-	time.tv_sec = tod.sec;
-	time.tv_usec = tod.usec;
-
-	if (!tbad) {
-		u_long	dt;
-
-		dt = (time.tv_sec < t)?  t - time.tv_sec : time.tv_sec - t;
-
-		if (dt < 2 * SECDAY)
-			return;
-		printf("WARNING: clock %s %ld days",
-		    time.tv_sec < t? "lost" : "gained", dt / SECDAY);
-	}
-
-	printf (" -- CHECK AND RESET THE DATE!\n");
-}
-
-/*
- * reset the time of day clock to the value in time
- */
-void
-resettodr()
-{
-	int error;
-
-	if ((error = pdc_call((iodcio_t)pdc, 1, PDC_TOD, PDC_TOD_WRITE,
-	    time.tv_sec, time.tv_usec)))
-		printf("clock: failed to save (%d)\n", error);
 }
 
 /*
@@ -582,8 +483,7 @@ printf("nom=%lu denom=%lu\n", cpu_ticksnum, cpu_ticksdenom);
 }
 
 void
-delay(us)
-	u_int us;
+delay(u_int us)
 {
 	u_long start, end, n;
 
@@ -607,8 +507,7 @@ delay(us)
 }
 
 static __inline void
-fall(c_base, c_count, c_loop, c_stride, data)
-	int c_base, c_count, c_loop, c_stride, data;
+fall(int c_base, int c_count, int c_loop, int c_stride, int data)
 {
 	int loop;
 
@@ -644,13 +543,13 @@ fdcacheall(void)
 void
 ptlball(void)
 {
-	register pa_space_t sp;
-	register int i, j, k;
+	pa_space_t sp;
+	int i, j, k;
 
 	/* instruction TLB */
 	sp = pdc_cache.it_sp_base;
 	for (i = 0; i < pdc_cache.it_sp_count; i++) {
-		register vaddr_t off = pdc_cache.it_off_base;
+		vaddr_t off = pdc_cache.it_off_base;
 		for (j = 0; j < pdc_cache.it_off_count; j++) {
 			for (k = 0; k < pdc_cache.it_loop; k++)
 				pitlb(sp, off);
@@ -662,7 +561,7 @@ ptlball(void)
 	/* data TLB */
 	sp = pdc_cache.dt_sp_base;
 	for (i = 0; i < pdc_cache.dt_sp_count; i++) {
-		register vaddr_t off = pdc_cache.dt_off_base;
+		vaddr_t off = pdc_cache.dt_off_base;
 		for (j = 0; j < pdc_cache.dt_off_count; j++) {
 			for (k = 0; k < pdc_cache.dt_loop; k++)
 				pdtlb(sp, off);
@@ -673,8 +572,7 @@ ptlball(void)
 }
 
 void
-boot(howto)
-	int howto;
+boot(int howto)
 {
 	/* If system is cold, just halt. */
 	if (cold) {
@@ -818,6 +716,10 @@ dumpsys(void)
 	}
 	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	psize = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
 	if (psize == -1) {
@@ -862,30 +764,19 @@ dumpsys(void)
 
 /* bcopy(), error on fault */
 int
-kcopy(from, to, size)
-	const void *from;
-	void *to;
-	size_t size;
+kcopy(const void *from, void *to, size_t size)
 {
 	return spcopy(HPPA_SID_KERNEL, from, HPPA_SID_KERNEL, to, size);
 }
 
 int
-copystr(src, dst, size, lenp)
-	const void *src;
-	void *dst;
-	size_t size;
-	size_t *lenp;
+copystr(const void *src, void *dst, size_t size, size_t *lenp)
 {
 	return spstrcpy(HPPA_SID_KERNEL, src, HPPA_SID_KERNEL, dst, size, lenp);
 }
 
 int
-copyinstr(src, dst, size, lenp)
-	const void *src;
-	void *dst;
-	size_t size;
-	size_t *lenp;
+copyinstr(const void *src, void *dst, size_t size, size_t *lenp)
 {
 	return spstrcpy(curproc->p_addr->u_pcb.pcb_space, src,
 	    HPPA_SID_KERNEL, dst, size, lenp);
@@ -893,11 +784,7 @@ copyinstr(src, dst, size, lenp)
 
 
 int
-copyoutstr(src, dst, size, lenp)
-	const void *src;
-	void *dst;
-	size_t size;
-	size_t *lenp;
+copyoutstr(const void *src, void *dst, size_t size, size_t *lenp)
 {
 	return spstrcpy(HPPA_SID_KERNEL, src,
 	    curproc->p_addr->u_pcb.pcb_space, dst, size, lenp);
@@ -905,20 +792,14 @@ copyoutstr(src, dst, size, lenp)
 
 
 int
-copyin(src, dst, size)
-	const void *src;
-	void *dst;
-	size_t size;
+copyin(const void *src, void *dst, size_t size)
 {
 	return spcopy(curproc->p_addr->u_pcb.pcb_space, src,
 	    HPPA_SID_KERNEL, dst, size);
 }
 
 int
-copyout(src, dst, size)
-	const void *src;
-	void *dst;
-	size_t size;
+copyout(const void *src, void *dst, size_t size)
 {
 	return spcopy(HPPA_SID_KERNEL, src,
 	    curproc->p_addr->u_pcb.pcb_space, dst, size);
@@ -928,11 +809,8 @@ copyout(src, dst, size)
  * Set registers on exec.
  */
 void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
+setregs(struct proc *p, struct exec_package *pack, u_long stack,
+    register_t *retval)
 {
 	extern paddr_t fpu_curpcb;	/* from locore.S */
 	struct trapframe *tf = p->p_md.md_regs;
@@ -973,12 +851,8 @@ setregs(p, pack, stack, retval)
  * Send an interrupt to process.
  */
 void
-sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
+    union sigval val)
 {
 	extern paddr_t fpu_curpcb;	/* from locore.S */
 	extern u_int fpu_enable;
@@ -1080,10 +954,7 @@ sendsig(catcher, sig, mask, code, type, val)
 }
 
 int
-sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_sigreturn(struct proc *p, void *v, register_t *retval)
 {
 	extern paddr_t fpu_curpcb;	/* from locore.S */
 	struct sys_sigreturn_args /* {
@@ -1144,14 +1015,8 @@ sys_sigreturn(p, v, retval)
  * machine dependent system variables.
  */
 int
-cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	dev_t consdev;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rmclass_debug.h,v 1.2 2002/11/26 01:03:34 henning Exp $	*/
+/*	$OpenBSD: altq_rmclass_debug.h,v 1.4 2008/08/27 01:37:16 deraadt Exp $	*/
 /*	$KAME: altq_rmclass_debug.h,v 1.2 2000/02/22 14:00:35 itojun Exp $	*/
 
 /*
@@ -33,8 +33,6 @@
 
 #ifndef _ALTQ_ALTQ_RMCLASS_DEBUG_H_
 #define	_ALTQ_ALTQ_RMCLASS_DEBUG_H_
-
-/* #pragma ident	"@(#)rm_class_debug.h	1.7	98/05/04 SMI" */
 
 /*
  * Cbq debugging macros

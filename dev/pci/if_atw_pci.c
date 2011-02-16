@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_atw_pci.c,v 1.6 2005/08/09 04:10:11 mickey Exp $	*/
+=======
+/*	$OpenBSD: if_atw_pci.c,v 1.13 2010/08/29 16:47:00 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_atw_pci.c,v 1.7 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -97,13 +94,16 @@ struct atw_pci_softc {
 
 int	atw_pci_match(struct device *, void *, void *);
 void	atw_pci_attach(struct device *, struct device *, void *);
+int	atw_pci_detach(struct device *, int);
 
 struct cfattach atw_pci_ca = {
-    sizeof (struct atw_softc), atw_pci_match, atw_pci_attach
+    sizeof (struct atw_softc), atw_pci_match, atw_pci_attach, atw_pci_detach,
+    atw_activate
 };
 
 const struct pci_matchid atw_pci_devices[] = {
 	{ PCI_VENDOR_ADMTEK,		PCI_PRODUCT_ADMTEK_ADM8211 },
+	{ PCI_VENDOR_3COM,		PCI_PRODUCT_3COM_3CRSHPW796 }
 };
 
 int
@@ -150,6 +150,7 @@ atw_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr = NULL;
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
+	bus_size_t iosize, memsize;
 	int ioh_valid, memh_valid;
 	pcireg_t reg;
 	int pmreg;
@@ -208,17 +209,19 @@ atw_pci_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	ioh_valid = (pci_mapreg_map(pa, ATW_PCI_IOBA,
 	    PCI_MAPREG_TYPE_IO, 0,
-	    &iot, &ioh, NULL, NULL, 0) == 0);
+	    &iot, &ioh, NULL, &iosize, 0) == 0);
 	memh_valid = (pci_mapreg_map(pa, ATW_PCI_MMBA,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &memt, &memh, NULL, NULL, 0) == 0);
+	    &memt, &memh, NULL, &memsize, 0) == 0);
 
 	if (memh_valid) {
 		sc->sc_st = memt;
 		sc->sc_sh = memh;
+		sc->sc_mapsize = memsize;
 	} else if (ioh_valid) {
 		sc->sc_st = iot;
 		sc->sc_sh = ioh;
+		sc->sc_mapsize = iosize;
 	} else {
 		printf(": unable to map device registers\n");
 		return;
@@ -269,4 +272,23 @@ atw_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * Finish off the attach.
 	 */
 	atw_attach(sc);
+}
+
+int
+atw_pci_detach(struct device *self, int flags)
+{
+	struct atw_pci_softc *psc = (void *)self;
+	struct atw_softc *sc = &psc->psc_atw;
+	int rv;
+
+	rv = atw_detach(sc);
+	if (rv)
+		return (rv);
+
+	if (psc->psc_intrcookie != NULL)
+		pci_intr_disestablish(psc->psc_pc, psc->psc_intrcookie);
+
+	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_mapsize);
+
+	return (0);
 }

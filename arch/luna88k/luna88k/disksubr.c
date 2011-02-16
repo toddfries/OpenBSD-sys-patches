@@ -1,4 +1,4 @@
-/* $OpenBSD: disksubr.c,v 1.9 2006/08/17 10:34:14 krw Exp $ */
+/* $OpenBSD: disksubr.c,v 1.46 2010/09/29 13:39:03 miod Exp $ */
 /* $NetBSD: disksubr.c,v 1.12 2002/02/19 17:09:44 wiz Exp $ */
 
 /*
@@ -96,8 +96,8 @@
 #error	"Default value of LABELSECTOR no longer zero?"
 #endif
 
-char *disklabel_om_to_bsd(char *, struct disklabel *);
-int disklabel_bsd_to_om(struct disklabel *, char *);
+int disklabel_om_to_bsd(struct sun_disklabel *, struct disklabel *);
+int disklabel_bsd_to_om(struct disklabel *, struct sun_disklabel *);
 
 /*
  * Attempt to read a disk label from a device
@@ -111,38 +111,16 @@ int disklabel_bsd_to_om(struct disklabel *, char *);
  *
  * Returns null on success and an error string on failure.
  */
-char *
-readdisklabel(dev, strat, lp, clp, spoofonly)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *clp;
-	int spoofonly;
+int
+readdisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, int spoofonly)
 {
-	struct buf *bp;
-	struct disklabel *dlp;
-	struct sun_disklabel *slp;
-	int error, i;
+	struct buf *bp = NULL;
+	int error;
 
-	/* minimal requirements for archetypal disk label */
-	if (lp->d_secsize < DEV_BSIZE)
-		lp->d_secsize = DEV_BSIZE;
-	if (lp->d_secperunit == 0)
-		lp->d_secperunit = 0x1fffffff;
-	if (lp->d_secpercyl == 0)
-		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
-	for (i = 0; i < RAW_PART; i++) {
-		lp->d_partitions[i].p_size = 0;
-		lp->d_partitions[i].p_offset = 0;
-	}
-	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = lp->d_secperunit;
-	lp->d_partitions[i].p_offset = 0;
-
-        /* don't read the on-disk label if we are in spoofed-only mode */
-	if (spoofonly)
-		return (NULL);
+	if ((error = initdisklabel(lp)))
+		goto done;
+	lp->d_flags |= D_VENDOR;
 
 	/* obtain buffer to probe drive with */
 	bp = geteblk((int)lp->d_secsize);
@@ -152,27 +130,31 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
-
-	/* if successful, locate disk label within block and validate */
-	error = biowait(bp);
-	if (!error) {
-		/* Save the whole block in case it has info we need. */
-		bcopy(bp->b_data, clp->cd_block, sizeof(clp->cd_block));
+	if (biowait(bp)) {
+		error = bp->b_error;
+		goto done;
 	}
-	bp->b_flags = B_INVAL | B_AGE | B_READ;
-	brelse(bp);
-	if (error)
-		return ("disk label read error");
+
+	error = disklabel_om_to_bsd((struct sun_disklabel *)bp->b_data, lp);
+	if (error == 0)
+		goto done;
+
+	error = checkdisklabel(bp->b_data + LABELOFFSET, lp, 0,
+	    DL_GETDSIZE(lp));
+	if (error == 0)
+		goto done;
 
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0)
-		return (NULL);
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0)
-		return (NULL);
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 
 	/* Check for a BSD disk label first. */
@@ -190,55 +172,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	if (slp->sl_magic == SUN_DKMAGIC) {
 		return (disklabel_om_to_bsd(clp->cd_block, lp));
 	}
-
-	memset(clp->cd_block, 0, sizeof(clp->cd_block));
-	return ("no disk label");
-}
-
-/*
- * Check new disk label for sensibility
- * before setting it.
- */
-int
-setdisklabel(olp, nlp, openmask, clp)
-	struct disklabel *olp, *nlp;
-	u_long openmask;
-	struct cpu_disklabel *clp;
-{
-	struct partition *opp, *npp;
-	int i;
-
-	/* sanity clause */
-	if ((nlp->d_secpercyl == 0) || (nlp->d_secsize == 0) ||
-	    (nlp->d_secsize % DEV_BSIZE) != 0)
-		return (EINVAL);
-
-	/* special case to allow disklabel to be invalidated */
-	if (nlp->d_magic == 0xffffffff) {
-		*olp = *nlp;
-		return (0);
-	}
-
-	if (nlp->d_magic != DISKMAGIC ||
-	    nlp->d_magic2 != DISKMAGIC ||
-	    dkcksum(nlp) != 0)
-		return (EINVAL);
-
-	while (openmask != 0) {
-		i = ffs(openmask) - 1;
-		openmask &= ~(1 << i);
-		if (nlp->d_npartitions <= i)
-			return (EBUSY);
-		opp = &olp->d_partitions[i];
-		npp = &nlp->d_partitions[i];
-		if (npp->p_offset != opp->p_offset ||
-		    npp->p_size < opp->p_size)
-			return (EBUSY);
-	}
-
-	/* We did not modify the new label, so the checksum is OK. */
-	*olp = *nlp;
-	return (0);
+	return (error);
 }
 
 
@@ -274,7 +208,8 @@ writedisklabel(dev, strat, lp, clp)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags |= B_WRITE;
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
+
 	(*strat)(bp);
 	error = biowait(bp);
 	brelse(bp);
@@ -282,27 +217,9 @@ writedisklabel(dev, strat, lp, clp)
 	return (error);
 }
 
-/*
- * Determine the size of the transfer, and make sure it is
- * within the boundaries of the partition. Adjust transfer
- * if needed, and signal errors or early completion.
- */
-int
-bounds_check_with_label(bp, lp, osdep, wlabel)
-	struct buf *bp;
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int wlabel;
-{
-#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
-	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
-	int sz = howmany(bp->b_bcount, DEV_BSIZE);
-
-	/* avoid division by zero */
-	if (lp->d_secpercyl == 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	(*strat)(bp);
+	error = biowait(bp);
 
 	/* overwriting disk label ? */
 	/* XXX this assumes everything <=LABELSECTOR is label! */
@@ -365,10 +282,8 @@ sun_fstypes[8] = {
  *
  * The BSD label is cleared out before this is called.
  */
-char *
-disklabel_om_to_bsd(cp, lp)
-	char *cp;
-	struct disklabel *lp;
+int
+disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 {
 	struct sun_disklabel *sl;
 	struct partition *npp;
@@ -378,6 +293,9 @@ disklabel_om_to_bsd(cp, lp)
 
 	sl = (struct sun_disklabel *)cp;
 
+	if (sl->sl_magic != SUN_DKMAGIC)
+		return (EINVAL);
+
 	/* Verify the XOR check. */
 	sp1 = (u_short *)sl;
 	sp2 = (u_short *)(sl + 1);
@@ -385,7 +303,7 @@ disklabel_om_to_bsd(cp, lp)
 	while (sp1 < sp2)
 		cksum ^= *sp1++;
 	if (cksum != 0)
-		return ("UniOS disk label, bad checksum");
+		return (EINVAL);	/* UniOS disk label, bad checksum */
 
 	memset((caddr_t)lp, 0, sizeof(struct disklabel));
 	/* Format conversion. */
@@ -393,27 +311,25 @@ disklabel_om_to_bsd(cp, lp)
 	lp->d_magic2 = DISKMAGIC;
 	memcpy(lp->d_packname, sl->sl_text, sizeof(lp->d_packname));
 
-	lp->d_type	 = DTYPE_SCSI;
-	lp->d_secsize	 = 512;
-	lp->d_nsectors   = sl->sl_nsectors;
-	lp->d_ntracks    = sl->sl_ntracks;
+	lp->d_secsize = DEV_BSIZE;
+	lp->d_nsectors = sl->sl_nsectors;
+	lp->d_ntracks = sl->sl_ntracks;
 	lp->d_ncylinders = sl->sl_ncylinders;
 
 	secpercyl = sl->sl_nsectors * sl->sl_ntracks;
 	lp->d_secpercyl  = secpercyl;
 	lp->d_secperunit = secpercyl * sl->sl_ncylinders;
 
-	lp->d_sparespercyl = 0;				/* no way to know */
-	lp->d_acylinders   = sl->sl_acylinders;
-	lp->d_rpm          = sl->sl_rpm;		/* UniOS - (empty) */
-	lp->d_interleave   = sl->sl_interleave;		/* UniOS - ndisk */
+	memcpy(&lp->d_uid, &sl->sl_uid, sizeof(sl->sl_uid));
+
+	lp->d_acylinders = sl->sl_acylinders;
 
 	if (sl->sl_rpm == 0) {
 		/* UniOS label has blkoffset, not cyloffset */
 		secpercyl = 1;
 	}
 
-	lp->d_npartitions = 8;
+	lp->d_npartitions = MAXPARTITIONS;
 	/* These are as defined in <ufs/ffs/fs.h> */
 	lp->d_bbsize = 8192;				/* XXX */
 	lp->d_sbsize = 8192;				/* XXX */
@@ -454,8 +370,7 @@ disklabel_om_to_bsd(cp, lp)
 	}
 
 	lp->d_checksum = dkcksum(lp);
-
-	return (NULL);
+	return (checkdisklabel(lp, lp, 0, DL_GETDSIZE(lp)));
 }
 
 /*
@@ -475,23 +390,25 @@ disklabel_bsd_to_om(lp, cp)
 	int i;
 	u_short cksum, *sp1, *sp2;
 
-	if (lp->d_secsize != 512)
+	if (lp->d_secsize != DEV_BSIZE)
 		return (EINVAL);
 
 	sl = (struct sun_disklabel *)cp;
 
 	/* Format conversion. */
+	bzero(lp, sizeof(*lp));
 	memcpy(sl->sl_text, lp->d_packname, sizeof(lp->d_packname));
 	sl->sl_rpm = 0;					/* UniOS */
 #if 0 /* leave as was */
 	sl->sl_pcyl = lp->d_ncylinders + lp->d_acylinders;	/* XXX */
-	sl->sl_sparespercyl = lp->d_sparespercyl;
 #endif
-	sl->sl_interleave   = lp->d_interleave;
-	sl->sl_ncylinders   = lp->d_ncylinders;
-	sl->sl_acylinders   = lp->d_acylinders;
-	sl->sl_ntracks      = lp->d_ntracks;
-	sl->sl_nsectors     = lp->d_nsectors;
+	sl->sl_interleave = 1;
+	sl->sl_ncylinders = lp->d_ncylinders;
+	sl->sl_acylinders = lp->d_acylinders;
+	sl->sl_ntracks = lp->d_ntracks;
+	sl->sl_nsectors = lp->d_nsectors;
+
+	memcpy(&sl->sl_uid, &lp->d_uid, sizeof(lp->d_uid));
 
 	for (i = 0; i < 8; i++) {
 		spp = &sl->sl_part[i];

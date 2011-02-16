@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ntfs_compr.c,v 1.1 2003/05/20 03:03:27 tedu Exp $	*/
+=======
+/*	$OpenBSD: ntfs_compr.c,v 1.5 2010/08/12 04:26:56 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ntfs_compr.c,v 1.1 2002/12/23 17:38:31 jdolecek Exp $	*/
 
 /*-
@@ -36,40 +40,21 @@ __KERNEL_RCSID(0, "$NetBSD: ntfs_compr.c,v 1.1 2002/12/23 17:38:31 jdolecek Exp 
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/namei.h>
-#include <sys/proc.h>
-#include <sys/kernel.h>
-#include <sys/vnode.h>
 #include <sys/mount.h>
-#include <sys/buf.h>
-#include <sys/file.h>
-#include <sys/malloc.h>
-#ifdef __FreeBSD__
-#include <machine/clock.h>
-#endif
 
-#include <miscfs/specfs/specdev.h>
-
-#if defined(__FreeBSD__) || defined(__NetBSD__)
-#include <fs/ntfs/ntfs.h>
-#include <fs/ntfs/ntfs_compr.h>
-#else
 #include <ntfs/ntfs.h>
 #include <ntfs/ntfs_compr.h>
-#endif
 
 #define GET_UINT16(addr)	(*((u_int16_t *)(addr)))
 
 int
-ntfs_uncompblock(
-	u_int8_t * buf,
-	u_int8_t * cbuf)
+ntfs_uncompblock(u_int8_t * buf, u_int8_t * cbuf)
 {
-	u_int32_t       ctag;
-	int             len, dshift, lmask;
-	int             blen, boff;
-	int             i, j;
-	int             pos, cpos;
+	u_int32_t ctag;
+	int len, dshift, lmask;
+	int blen, boff;
+	int i, j;
+	int pos, cpos;
 
 	len = GET_UINT16(cbuf) & 0xFFF;
 	dprintf(("ntfs_uncompblock: block length: %d + 3, 0x%x,0x%04x\n",
@@ -82,7 +67,7 @@ ntfs_uncompblock(
 		}
 		memcpy(buf, cbuf + 2, len + 1);
 		bzero(buf + len + 1, NTFS_COMPBLOCK_SIZE - 1 - len);
-		return len + 3;
+		return (len + 3);
 	}
 	cpos = 2;
 	pos = 0;
@@ -97,7 +82,8 @@ ntfs_uncompblock(
 				}
 				boff = -1 - (GET_UINT16(cbuf + cpos) >> dshift);
 				blen = 3 + (GET_UINT16(cbuf + cpos) & lmask);
-				for (j = 0; (j < blen) && (pos < NTFS_COMPBLOCK_SIZE); j++) {
+				for (j = 0; (j < blen) &&
+				    (pos < NTFS_COMPBLOCK_SIZE); j++) {
 					buf[pos] = buf[pos + boff];
 					pos++;
 				}
@@ -108,21 +94,20 @@ ntfs_uncompblock(
 			ctag >>= 1;
 		}
 	}
-	return len + 3;
+	return (len + 3);
 }
 
 int
-ntfs_uncompunit(
-	struct ntfsmount * ntmp,
-	u_int8_t * uup,
-	u_int8_t * cup)
+ntfs_uncompunit(struct ntfsmount * ntmp, u_int8_t * uup, u_int8_t * cup)
 {
-	int             i;
-	int             off = 0;
-	int             new;
+	int i;
+	int off = 0;
+	int new;
 
-	for (i = 0; i * NTFS_COMPBLOCK_SIZE < ntfs_cntob(NTFS_COMPUNIT_CL); i++) {
-		new = ntfs_uncompblock(uup + i * NTFS_COMPBLOCK_SIZE, cup + off);
+	for (i = 0; i * NTFS_COMPBLOCK_SIZE < ntfs_cntob(NTFS_COMPUNIT_CL);
+	    i++) {
+		new = ntfs_uncompblock(uup + i * NTFS_COMPBLOCK_SIZE,
+		    cup + off);
 		if (new == 0)
 			return (EINVAL);
 		off += new;

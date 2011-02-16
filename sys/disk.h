@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: disk.h,v 1.13 2006/03/15 20:20:42 miod Exp $	*/
+=======
+/*	$OpenBSD: disk.h,v 1.28 2010/11/17 15:01:05 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*
@@ -48,6 +52,7 @@
  * Disk device structures.
  */
 
+#include <sys/device.h>
 #include <sys/time.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
@@ -67,7 +72,7 @@ struct diskstats {
 	u_int64_t	ds_rbytes;	/* total bytes read */
 	u_int64_t	ds_wbytes;	/* total bytes written */
 	struct timeval	ds_attachtime;	/* time disk was attached */
-	struct timeval	ds_timestamp;	/* timestamp of last unbusy */
+	struct timeval	ds_timestamp;	/* time of first busy or any unbusy */
 	struct timeval	ds_time;	/* total time spent busy */
 };
 
@@ -75,8 +80,12 @@ struct disk {
 	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
 	struct rwlock	dk_lock;	/* disk lock */
 	char		*dk_name;	/* disk name */
+	struct device	*dk_device;	/* disk device structure. */
+	dev_t		dk_devno;	/* disk device number. */
 	int		dk_flags;	/* disk flags */
-#define DKF_CONSTRUCTED  0x0001
+#define DKF_CONSTRUCTED	0x0001
+#define DKF_OPENED	0x0002
+#define DKF_NOLABELREAD	0x0004
 
 	/*
 	 * Metrics data; note that some metrics may have no meaning
@@ -89,7 +98,7 @@ struct disk {
 	u_int64_t	dk_rbytes;	/* total bytes read */
 	u_int64_t	dk_wbytes;	/* total bytes written */
 	struct timeval	dk_attachtime;	/* time disk was attached */
-	struct timeval	dk_timestamp;	/* timestamp of last unbusy */
+	struct timeval	dk_timestamp;	/* time of first busy or any unbusy */
 	struct timeval	dk_time;	/* total time spent busy */
 
 	int		dk_bopenmask;	/* block devices open */
@@ -99,13 +108,12 @@ struct disk {
 	int		dk_blkshift;	/* shift to convert DEV_BSIZE to blks*/
 	int		dk_byteshift;	/* shift to convert bytes to blks */
 
-	struct	dkdriver *dk_driver;	/* pointer to driver */
-
 	/*
 	 * Disk label information.  Storage for the in-core disk label
 	 * must be dynamically allocated, otherwise the size of this
 	 * structure becomes machine-dependent.
 	 */
+<<<<<<< HEAD
 	daddr_t		dk_labelsector;		/* sector containing label */
 	struct disklabel *dk_label;	/* label */
 	struct cpu_disklabel *dk_cpulabel;
@@ -122,6 +130,9 @@ struct dkdriver {
 	void	(*d_start)(struct buf *, daddr_t);
 	int	(*d_mklabel)(struct disk *);
 #endif
+=======
+	struct disklabel *dk_label;
+>>>>>>> origin/master
 };
 
 /* states */
@@ -131,6 +142,10 @@ struct dkdriver {
 #define	DK_RDLABEL	3		/* label being read */
 #define	DK_OPEN		4		/* label read, drive open */
 #define	DK_OPENRAW	5		/* open without label */
+
+/* Disk map flags. */
+#define	DM_OPENPART	0x1		/* Open raw partition. */
+#define	DM_OPENBLCK	0x2		/* Open block device. */
 
 #ifdef DISKSORT_STATS
 /*
@@ -153,12 +168,13 @@ struct disksort_stats {
 TAILQ_HEAD(disklist_head, disk);	/* the disklist is a TAILQ */
 
 #ifdef _KERNEL
+extern	struct disklist_head disklist;	/* list of disks attached to system */
 extern	int disk_count;			/* number of disks in global disklist */
 extern	int disk_change;		/* disk attached/detached */
 
 void	disk_init(void);
 int	disk_construct(struct disk *, char *);
-void	disk_attach(struct disk *);
+void	disk_attach(struct device *, struct disk *);
 void	disk_detach(struct disk *);
 void	disk_busy(struct disk *);
 void	disk_unbusy(struct disk *, long, int);
@@ -167,4 +183,7 @@ struct	disk *disk_find(char *);
 
 int	disk_lock(struct disk *);
 void    disk_unlock(struct disk *);
+struct device *disk_lookup(struct cfdriver *, int);
+
+int	disk_map(char *, char *, int, int);
 #endif

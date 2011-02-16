@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.4 2005/12/27 18:31:09 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.13 2010/07/01 04:33:23 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2005 Michael Shalayeff
@@ -343,6 +343,8 @@ gotdisk:
 	*cp = c;
 	return (dv);
 }
+
+void	print_devpath(const char *label, struct pz_device *pz);
 
 void
 print_devpath(const char *label, struct pz_device *pz)
@@ -718,6 +720,8 @@ pdc_scan(struct device *self, struct confargs *ca)
 	}
 }
 
+struct pdc_pat_pci_rt *pdc_getirt(int *);
+
 struct pdc_pat_pci_rt *
 pdc_getirt(int *pn)
 {
@@ -907,3 +911,16 @@ device_register(struct device *dev, void *aux)
 	}
 #endif
 }
+
+struct nam2blk nam2blk[] = {
+	{ "rd",		3 },
+	{ "sd",		4 },
+	{ "st",		5 },
+	{ "cd",		6 },
+#if 0
+	{ "wd",		? },
+	{ "fd",		7 },
+#endif
+	{ "vnd",	2 },
+	{ NULL,		-1 }
+};

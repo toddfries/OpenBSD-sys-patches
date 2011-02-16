@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: files.isa,v 1.93 2006/01/28 11:25:17 kettenis Exp $
+=======
+#	$OpenBSD: files.isa,v 1.107 2010/07/31 08:33:20 ratchov Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.isa,v 1.21 1996/05/16 03:45:55 mycroft Exp $
 #
 # Config file and device description for machine-independent ISA code.
@@ -272,9 +276,6 @@ file	dev/isa/sb.c			sb needs-flag
 attach	sb at isa with sb_isa
 file	dev/isa/sb_isa.c		sb & (sb_isa | sb_isapnp) needs-flag
 
-attach	opl at sbdsp with opl_sb
-file	dev/isa/opl_sb.c		opl_sb
-
 # Soundcards based on Sierra's Aria chipset.
 # Such as the Prometheus Aria 16 or the Diamond
 # sonic sound.
@@ -316,9 +317,6 @@ file	dev/isa/wss_isa.c		wss & (wss_isa | wss_isapnp) needs-flag
 device	ess {} : audio, isa_dma, mulaw, auconv, midibus
 file	dev/isa/ess.c			ess needs-flag
 
-attach	opl at ess with opl_ess
-file	dev/isa/opl_ess.c		opl_ess
-
 # Gravis UltraSound & UltraSound MAX.
 # Use the "flags" keyword in a config file to specify an extra DMA
 # channel for full-duplex operation.
@@ -328,10 +326,6 @@ file	dev/isa/gus.c			gus needs-flag
 
 attach	gus at isa with gus_isa
 file	dev/isa/gus_isa.c		gus & (gus_isa | gus_isapnp) needs-flag
-
-# Yamaha OPL2/OPL3 FM synth
-attach	opl at isa with opl_isa
-file	dev/isa/opl_isa.c		opl_isa
 
 # Sound Forte RadioLink SF16-FMR FM Radio Card
 device sfr: radiobus, tc921x, pt2254a
@@ -367,13 +361,24 @@ file	dev/isa/pcppi.c	pcppi	needs-flag
 device	spkr
 attach	spkr at pcppi
 file	dev/isa/spkr.c			spkr	needs-flag
-attach	midi at pcppi with midi_pcppi: midisyn
-file	dev/isa/midi_pcppi.c		midi_pcppi
 
 # 8255A-based PC parallel ports
 attach	lpt at isa with lpt_isa
 file	dev/isa/lpt_isa.c		lpt_isa needs-flag
 
+<<<<<<< HEAD
+=======
+# Winbond LPC Super I/O
+device	wbsio {}
+attach	wbsio at isa
+file	dev/isa/wbsio.c			wbsio
+
+# SMSC SCH311x Super I/O
+device	schsio {}
+attach	schsio at isa
+file	dev/isa/sch311x.c		schsio
+
+>>>>>>> origin/master
 # National Semiconductor LM78/79/81 and compatible hardware monitors
 attach	lm at isa with lm_isa
 file	dev/isa/lm78_isa.c		lm_isa
@@ -397,6 +402,11 @@ file	dev/isa/it.c			it
 device	viasio
 attach	viasio at isa
 file	dev/isa/viasio.c		viasio
+
+# ABIT uGuru
+device	uguru
+attach	uguru at isa
+file	dev/isa/uguru.c			uguru
 
 # ThinkPad Active Protection System accelerometer
 device	aps

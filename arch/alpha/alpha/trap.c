@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.53 2007/03/15 10:22:29 art Exp $ */
+/* $OpenBSD: trap.c,v 1.57 2010/10/27 20:20:38 miod Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -121,10 +114,6 @@
 #include <machine/db_machdep.h>
 #endif
 #include <alpha/alpha/db_instruction.h>
-
-#ifdef COMPAT_OSF1
-#include <compat/osf1/osf1_syscall.h>
-#endif
 
 void		userret(struct proc *);
 
@@ -279,6 +268,7 @@ trap(a0, a1, a2, entry, framep)
 	uvmexp.traps++;
 	p = curproc;
 	ucode = 0;
+	v = 0;
 	user = (framep->tf_regs[FRAME_PS] & ALPHA_PSL_USERMODE) != 0;
 	if (user)  {
 		p->p_md.md_tf = framep;
@@ -305,7 +295,8 @@ trap(a0, a1, a2, entry, framep)
 				goto out;
 #endif
 
-			ucode = a0;		/* VA */
+			ucode = ILL_ILLADR;
+			v = (caddr_t)a0;
 			break;
 		}
 
@@ -334,8 +325,9 @@ trap(a0, a1, a2, entry, framep)
 				goto out;
 #else
 			i = SIGFPE;
-			ucode = a0;
+			ucode = FPE_FLTINV;
 #endif
+			v = (caddr_t)framep->tf_regs[FRAME_PC];
 			break;
 		}
 
@@ -399,6 +391,7 @@ trap(a0, a1, a2, entry, framep)
 			printf("trap: unknown IF type 0x%lx\n", a0);
 			goto dopanic;
 		}
+		v = (caddr_t)framep->tf_regs[FRAME_PC];
 		break;
 
 	case ALPHA_KENTRY_MM:
@@ -568,9 +561,6 @@ syscall(code, framep)
 	u_long rval[2];
 	u_long args[10];					/* XXX */
 	u_int hidden, nargs;
-#ifdef COMPAT_OSF1
-	extern struct emul emul_osf1;
-#endif
 
 	uvmexp.syscalls++;
 	p = curproc;
@@ -580,19 +570,6 @@ syscall(code, framep)
 	callp = p->p_emul->e_sysent;
 	numsys = p->p_emul->e_nsysent;
 
-#ifdef COMPAT_OSF1
-	if (p->p_emul == &emul_osf1) 
-		switch (code) {
-		case OSF1_SYS_syscall:
-			/* OSF/1 syscall() */
-			code = framep->tf_regs[FRAME_A0];
-			hidden = 1;
-			break;
-		default:
-			hidden = 0;
-		}
-	else
-#endif
 	switch(code) {
 	case SYS_syscall:
 	case SYS___syscall:

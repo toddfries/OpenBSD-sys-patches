@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: in6_var.h,v 1.27 2006/03/05 21:48:57 miod Exp $	*/
+=======
+/*	$OpenBSD: in6_var.h,v 1.32 2010/07/08 19:42:46 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: in6_var.h,v 1.55 2001/02/16 12:49:45 itojun Exp $	*/
 
 /*
@@ -91,6 +95,8 @@ struct in6_ifextra {
 	struct in6_ifstat *in6_ifstat;
 	struct icmp6_ifstat *icmp6_ifstat;
 	struct nd_ifinfo *nd_ifinfo;
+	int nprefixes;
+	int ndefrouters;
 };
 
 struct	in6_ifaddr {
@@ -436,6 +442,7 @@ struct	in6_rrenumreq {
 					 * (used only at first SIOC* call)
 					 */
 #define IN6_IFF_AUTOCONF	0x40	/* autoconfigurable address. */
+#define IN6_IFF_PRIVACY		0x80	/* RFC 4941 temporary address */
 
 /* do not input/output */
 #define IN6_IFF_NOTREADY (IN6_IFF_TENTATIVE|IN6_IFF_DUPLICATED)
@@ -576,7 +583,6 @@ int	in6_update_ifa(struct ifnet *, struct in6_aliasreq *,
 	struct in6_ifaddr *);
 void	in6_purgeaddr(struct ifaddr *);
 int	in6if_do_dad(struct ifnet *);
-void	in6_purgeif(struct ifnet *);
 void	in6_savemkludge(struct in6_ifaddr *);
 void	in6_setmaxmtu(void);
 void	*in6_domifattach(struct ifnet *);
@@ -586,6 +592,8 @@ void	in6_createmkludge(struct ifnet *);
 void	in6_purgemkludge(struct ifnet *);
 struct in6_ifaddr *in6ifa_ifpforlinklocal(struct ifnet *, int);
 struct in6_ifaddr *in6ifa_ifpwithaddr(struct ifnet *, struct in6_addr *);
+struct in6_ifaddr *in6ifa_ifplocaladdr(const struct ifnet *,
+	    const struct in6_addr *);
 char	*ip6_sprintf(struct in6_addr *);
 int	in6_addr2scopeid(struct ifnet *, struct in6_addr *);
 int	in6_matchlen(struct in6_addr *, struct in6_addr *);
@@ -595,7 +603,6 @@ void	in6_purgeprefix(struct ifnet *);
 void	in6_ifaddloop(struct ifaddr *);
 void	in6_ifremloop(struct ifaddr *);
 
-int	in6_is_addr_deprecated(struct sockaddr_in6 *);
 struct inpcb;
 int in6_embedscope(struct in6_addr *, const struct sockaddr_in6 *,
 	struct inpcb *, struct ifnet **);

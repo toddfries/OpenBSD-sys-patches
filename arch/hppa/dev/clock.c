@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.20 2003/12/12 19:42:47 deraadt Exp $	*/
+/*	$OpenBSD: clock.c,v 1.28 2011/01/09 19:37:51 jasper Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -41,32 +41,98 @@
 #include <machine/cpufunc.h>
 #include <machine/autoconf.h>
 
-#if defined(DDB)
-#include <uvm/uvm_extern.h>
-#include <machine/db_machdep.h>
-#include <ddb/db_sym.h>
-#include <ddb/db_extern.h>
-#endif
+u_long	cpu_hzticks;
+int	timeset;
+
+int	cpu_hardclock(void *);
+u_int	itmr_get_timecount(struct timecounter *);
+
+struct timecounter itmr_timecounter = {
+	itmr_get_timecount, NULL, 0xffffffff, 0, "itmr", 0, NULL
+};
 
 void
-cpu_initclocks()
+cpu_initclocks(void)
 {
-	extern volatile u_long cpu_itmr;
-	extern u_long cpu_hzticks;
+	struct cpu_info *ci = curcpu();
 	u_long __itmr;
 
+	cpu_hzticks = (PAGE0->mem_10msec * 100) / hz;
+
+	itmr_timecounter.tc_frequency = PAGE0->mem_10msec * 100;
+	tc_init(&itmr_timecounter);
+
 	mfctl(CR_ITMR, __itmr);
-	cpu_itmr = __itmr;
+	ci->ci_itmr = __itmr;
 	__itmr += cpu_hzticks;
 	mtctl(__itmr, CR_ITMR);
+}
+
+int
+cpu_hardclock(void *v)
+{
+	struct cpu_info *ci = curcpu();
+	u_long __itmr, delta, eta;
+	int wrap;
+	register_t eiem;
+
+	/*
+	 * Invoke hardclock as many times as there has been cpu_hzticks
+	 * ticks since the last interrupt.
+	 */
+	for (;;) {
+		mfctl(CR_ITMR, __itmr);
+		delta = __itmr - ci->ci_itmr;
+		if (delta >= cpu_hzticks) {
+			hardclock(v);
+			ci->ci_itmr += cpu_hzticks;
+		} else
+			break;
+	}
+
+	/*
+	 * Program the next clock interrupt, making sure it will
+	 * indeed happen in the future. This is done with interrupts
+	 * disabled to avoid a possible race.
+	 */
+	eta = ci->ci_itmr + cpu_hzticks;
+	wrap = eta < ci->ci_itmr;	/* watch out for a wraparound */
+	__asm __volatile("mfctl	%%cr15, %0": "=r" (eiem));
+	__asm __volatile("mtctl	%r0, %cr15");
+	mtctl(eta, CR_ITMR);
+	mfctl(CR_ITMR, __itmr);
+	/*
+	 * If we were close enough to the next tick interrupt
+	 * value, by the time we have programmed itmr, it might
+	 * have passed the value, which would cause a complete
+	 * cycle until the next interrupt occurs. On slow
+	 * models, this would be a disaster (a complete cycle
+	 * taking over two minutes on a 715/33).
+	 *
+	 * We expect that it will only be necessary to postpone
+	 * the interrupt once. Thus, there are two cases:
+	 * - We are expecting a wraparound: eta < cpu_itmr.
+	 *   itmr is in tracks if either >= cpu_itmr or < eta.
+	 * - We are not wrapping: eta > cpu_itmr.
+	 *   itmr is in tracks if >= cpu_itmr and < eta (we need
+	 *   to keep the >= cpu_itmr test because itmr might wrap
+	 *   before eta does).
+	 */
+	if ((wrap && !(eta > __itmr || __itmr >= ci->ci_itmr)) ||
+	    (!wrap && !(eta > __itmr && __itmr >= ci->ci_itmr))) {
+		eta += cpu_hzticks;
+		mtctl(eta, CR_ITMR);
+	}
+	__asm __volatile("mtctl	%0, %%cr15":: "r" (eiem));
+
+	return (1);
 }
 
 /*
  * initialize the system time from the time of day clock
  */
 void
-inittodr(t)
-	time_t t;
+inittodr(time_t t)
 {
 	struct pdc_tod tod PDC_ALIGNMENT;
 	int 	error, tbad = 0;
@@ -81,8 +147,10 @@ inittodr(t)
 	    1, PDC_TOD, PDC_TOD_READ, &tod, 0, 0, 0, 0, 0)))
 		printf("clock: failed to fetch (%d)\n", error);
 
-	time.tv_sec = tod.sec;
-	time.tv_usec = tod.usec;
+	ts.tv_sec = tod.sec;
+	ts.tv_nsec = tod.usec * 1000;
+	tc_setclock(&ts);
+	timeset = 1;
 
 	if (!tbad) {
 		u_long	dt;
@@ -106,14 +174,22 @@ resettodr()
 {
 	int error;
 
+	/*
+	 * We might have been called by boot() due to a crash early
+	 * on.  Don't reset the clock chip in this case.
+	 */
+	if (!timeset)
+		return;
+
+	microtime(&tv);
+
 	if ((error = pdc_call((iodcio_t)pdc, 1, PDC_TOD, PDC_TOD_WRITE,
 	    time.tv_sec, time.tv_usec)))
 		printf("clock: failed to save (%d)\n", error);
 }
 
 void
-setstatclockrate(newhz)
-	int newhz;
+setstatclockrate(int newhz)
 {
 	/* nothing we can do */
 }

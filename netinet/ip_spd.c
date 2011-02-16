@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ip_spd.c,v 1.52 2006/06/16 16:49:40 henning Exp $ */
+=======
+/* $OpenBSD: ip_spd.c,v 1.63 2010/09/28 01:44:57 deraadt Exp $ */
+>>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -85,6 +89,7 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 	struct sockaddr_encap *ddst;
 	struct ipsec_policy *ipo;
 	int signore = 0, dignore = 0;
+	u_int rdomain = rtable_l2(m->m_pkthdr.rdomain);
 
 	/*
 	 * If there are no flows in place, there's no point
@@ -188,7 +193,7 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 		    (caddr_t) &(ddst->sen_ip6_proto));
 
 		sdst.sin6.sin6_family = ssrc.sin6.sin6_family = AF_INET6;
-		sdst.sin6.sin6_len = ssrc.sin6.sin6_family =
+		sdst.sin6.sin6_len = ssrc.sin6.sin6_len =
 		    sizeof(struct sockaddr_in6);
 		in6_recoverscope(&ssrc.sin6, &ddst->sen_ip6_src, NULL);
 		in6_recoverscope(&sdst.sin6, &ddst->sen_ip6_dst, NULL);
@@ -229,6 +234,9 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 		*error = EAFNOSUPPORT;
 		return NULL;
 	}
+
+	/* Set the rdomain that was obtained from the mbuf */
+	re->re_tableid = rdomain;
 
 	/* Actual SPD lookup. */
 	rtalloc((struct route *) re);
@@ -390,7 +398,8 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 
 			/* Find an appropriate SA from the existing ones. */
 			ipo->ipo_tdb =
-			    gettdbbyaddr(dignore ? &sdst : &ipo->ipo_dst,
+			    gettdbbyaddr(rdomain,
+				dignore ? &sdst : &ipo->ipo_dst,
 				ipo->ipo_sproto, ipo->ipo_srcid,
 				ipo->ipo_dstid, ipo->ipo_local_cred, m, af,
 				&ipo->ipo_addr, &ipo->ipo_mask);
@@ -503,7 +512,8 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 				ipo->ipo_last_searched = time_second;
 
 			ipo->ipo_tdb =
-			    gettdbbysrc(dignore ? &ssrc : &ipo->ipo_dst,
+			    gettdbbysrc(rdomain,
+				dignore ? &ssrc : &ipo->ipo_dst,
 				ipo->ipo_sproto, ipo->ipo_srcid,
 				ipo->ipo_dstid, m, af, &ipo->ipo_addr,
 				&ipo->ipo_mask);
@@ -577,6 +587,13 @@ ipsec_delete_policy(struct ipsec_policy *ipo)
 		    (struct sockaddr *) &ipo->ipo_mask,
 		    0, (struct rtentry **) 0, 0);	/* XXX other tables? */
 
+<<<<<<< HEAD
+=======
+		/* XXX other tables? */
+		err = rtrequest1(RTM_DELETE, &info, RTP_DEFAULT, NULL,
+		    ipo->ipo_rdomain);
+	}
+>>>>>>> origin/master
 	if (ipo->ipo_tdb != NULL)
 		TAILQ_REMOVE(&ipo->ipo_tdb->tdb_policy_head, ipo,
 		    ipo_tdb_next);
@@ -595,10 +612,10 @@ ipsec_delete_policy(struct ipsec_policy *ipo)
 	if (ipo->ipo_local_auth)
 		ipsp_reffree(ipo->ipo_local_auth);
 
-	pool_put(&ipsec_policy_pool, ipo);
-
 	if (!(ipo->ipo_flags & IPSP_POLICY_SOCKET))
 		ipsec_in_use--;
+
+	pool_put(&ipsec_policy_pool, ipo);
 
 	return err;
 }
@@ -617,11 +634,9 @@ ipsec_add_policy(struct inpcb *inp, int af, int direction)
 		    0, 0, 0, "ipsec policy", NULL);
 	}
 
-	ipon = pool_get(&ipsec_policy_pool, 0);
+	ipon = pool_get(&ipsec_policy_pool, PR_NOWAIT|PR_ZERO);
 	if (ipon == NULL)
 		return NULL;
-
-	bzero(ipon, sizeof(struct ipsec_policy));
 
 	ipon->ipo_ref_count = 1;
 	ipon->ipo_flags |= IPSP_POLICY_SOCKET;
@@ -633,6 +648,7 @@ ipsec_add_policy(struct inpcb *inp, int af, int direction)
 	 * policies (for tunnel/transport and ESP/AH), as needed.
 	 */
 	ipon->ipo_sproto = IPPROTO_ESP;
+	ipon->ipo_rdomain = rtable_l2(inp->inp_rtableid);
 
 	TAILQ_INIT(&ipon->ipo_acquires);
 	TAILQ_INSERT_HEAD(&ipsec_policy_head, ipon, ipo_list);
@@ -771,11 +787,10 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		    0, 0, 0, "ipsec acquire", NULL);
 	}
 
-	ipa = pool_get(&ipsec_acquire_pool, 0);
+	ipa = pool_get(&ipsec_acquire_pool, PR_NOWAIT|PR_ZERO);
 	if (ipa == NULL)
 		return ENOMEM;
 
-	bzero(ipa, sizeof(struct ipsec_acquire));
 	bcopy(gw, &ipa->ipa_addr, sizeof(union sockaddr_union));
 
 	timeout_set(&ipa->ipa_timeout, ipsp_delete_acquire, ipa);
@@ -791,9 +806,7 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		ipa->ipa_info.sen_direction = ipo->ipo_addr.sen_direction;
 		ipa->ipa_mask.sen_direction = ipo->ipo_mask.sen_direction;
 
-		if (ipo->ipo_mask.sen_ip_src.s_addr == INADDR_ANY ||
-		    ipo->ipo_addr.sen_ip_src.s_addr == INADDR_ANY ||
-		    ipsp_is_unspecified(ipo->ipo_dst)) {
+		if (ipsp_is_unspecified(ipo->ipo_dst)) {
 			ipa->ipa_info.sen_ip_src = ddst->sen_ip_src;
 			ipa->ipa_mask.sen_ip_src.s_addr = INADDR_BROADCAST;
 		} else {
@@ -801,9 +814,7 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 			ipa->ipa_mask.sen_ip_src = ipo->ipo_mask.sen_ip_src;
 		}
 
-		if (ipo->ipo_mask.sen_ip_dst.s_addr == INADDR_ANY ||
-		    ipo->ipo_addr.sen_ip_dst.s_addr == INADDR_ANY ||
-		    ipsp_is_unspecified(ipo->ipo_dst)) {
+		if (ipsp_is_unspecified(ipo->ipo_dst)) {
 			ipa->ipa_info.sen_ip_dst = ddst->sen_ip_dst;
 			ipa->ipa_mask.sen_ip_dst.s_addr = INADDR_BROADCAST;
 		} else {
@@ -832,9 +843,7 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		ipa->ipa_mask.sen_ip6_direction =
 		    ipo->ipo_mask.sen_ip6_direction;
 
-		if (IN6_IS_ADDR_UNSPECIFIED(&ipo->ipo_mask.sen_ip6_src) ||
-		    IN6_IS_ADDR_UNSPECIFIED(&ipo->ipo_addr.sen_ip6_src) ||
-		    ipsp_is_unspecified(ipo->ipo_dst)) {
+		if (ipsp_is_unspecified(ipo->ipo_dst)) {
 			ipa->ipa_info.sen_ip6_src = ddst->sen_ip6_src;
 			ipa->ipa_mask.sen_ip6_src = in6mask128;
 		} else {
@@ -842,9 +851,7 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 			ipa->ipa_mask.sen_ip6_src = ipo->ipo_mask.sen_ip6_src;
 		}
 
-		if (IN6_IS_ADDR_UNSPECIFIED(&ipo->ipo_mask.sen_ip6_dst) ||
-		    IN6_IS_ADDR_UNSPECIFIED(&ipo->ipo_addr.sen_ip6_dst) ||
-		    ipsp_is_unspecified(ipo->ipo_dst)) {
+		if (ipsp_is_unspecified(ipo->ipo_dst)) {
 			ipa->ipa_info.sen_ip6_dst = ddst->sen_ip6_dst;
 			ipa->ipa_mask.sen_ip6_dst = in6mask128;
 		} else {
@@ -873,7 +880,7 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		return 0;
 	}
 
-	timeout_add(&ipa->ipa_timeout, ipsec_expire_acquire * hz);
+	timeout_add_sec(&ipa->ipa_timeout, ipsec_expire_acquire);
 
 	TAILQ_INSERT_TAIL(&ipsec_acquire_head, ipa, ipa_next);
 	TAILQ_INSERT_TAIL(&ipo->ipo_acquires, ipa, ipa_ipo_next);
@@ -1008,7 +1015,8 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 				inp->inp_ipo->ipo_last_searched = time_second;
 
 				/* Do we have an SA already established ? */
-				if (gettdbbysrc(&inp->inp_ipo->ipo_dst,
+				if (gettdbbysrc(rtable_l2(inp->inp_rtableid),
+				    &inp->inp_ipo->ipo_dst,
 				    inp->inp_ipo->ipo_sproto,
 				    inp->inp_ipo->ipo_srcid,
 				    inp->inp_ipo->ipo_dstid, m, af,
@@ -1064,7 +1072,8 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 				ipsec_update_policy(inp, inp->inp_ipo, af,
 				    IPSP_DIRECTION_OUT);
 
-				tdb = gettdbbyaddr(&inp->inp_ipo->ipo_dst,
+				tdb = gettdbbyaddr(rtable_l2(inp->inp_rtableid),
+				    &inp->inp_ipo->ipo_dst,
 				    inp->inp_ipo->ipo_sproto,
 				    inp->inp_ipo->ipo_srcid,
 				    inp->inp_ipo->ipo_dstid,
@@ -1080,7 +1089,8 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 			ipsec_update_policy(inp, &sipon, af,
 			    IPSP_DIRECTION_OUT);
 
-			tdb = gettdbbyaddr(&sipon.ipo_dst, IPPROTO_ESP, NULL,
+			tdb = gettdbbyaddr(rtable_l2(inp->inp_rtableid),
+			    &sipon.ipo_dst, IPPROTO_ESP, NULL,
 			    NULL, NULL, m, af, &sipon.ipo_addr,
 			    &sipon.ipo_mask);
 		}
@@ -1150,6 +1160,7 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 	tdbi = (struct tdb_ident *)(mtag + 1);
 	tdbi->spi = ipo->ipo_tdb->tdb_spi;
 	tdbi->proto = ipo->ipo_tdb->tdb_sproto;
+	tdbi->rdomain = rtable_l2(inp->inp_rtableid);
 	bcopy(&ipo->ipo_tdb->tdb_dst, &tdbi->dst,
 	    ipo->ipo_tdb->tdb_dst.sa.sa_len);
 	m_tag_prepend(m, mtag);

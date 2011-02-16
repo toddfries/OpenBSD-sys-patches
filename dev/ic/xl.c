@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: xl.c,v 1.75 2006/08/10 18:40:54 brad Exp $	*/
+=======
+/*	$OpenBSD: xl.c,v 1.99 2010/09/22 08:49:14 claudio Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -153,7 +157,6 @@ void xl_stats_update(void *);
 int xl_encap(struct xl_softc *, struct xl_chain *,
     struct mbuf * );
 void xl_rxeof(struct xl_softc *);
-int xl_rx_resync(struct xl_softc *);
 void xl_txeof(struct xl_softc *);
 void xl_txeof_90xB(struct xl_softc *);
 void xl_txeoc(struct xl_softc *);
@@ -161,11 +164,8 @@ int xl_intr(void *);
 void xl_start(struct ifnet *);
 void xl_start_90xB(struct ifnet *);
 int xl_ioctl(struct ifnet *, u_long, caddr_t);
-void xl_init(void *);
-void xl_stop(struct xl_softc *);
 void xl_freetxrx(struct xl_softc *);
 void xl_watchdog(struct ifnet *);
-void xl_shutdown(void *);
 int xl_ifmedia_upd(struct ifnet *);
 void xl_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -178,11 +178,11 @@ int xl_mii_writereg(struct xl_softc *, struct xl_mii_frame *);
 
 void xl_setcfg(struct xl_softc *);
 void xl_setmode(struct xl_softc *, int);
-void xl_setmulti(struct xl_softc *);
-void xl_setmulti_hash(struct xl_softc *);
-void xl_setpromisc(struct xl_softc *);
-void xl_reset(struct xl_softc *);
+void xl_iff(struct xl_softc *);
+void xl_iff_90x(struct xl_softc *);
+void xl_iff_905b(struct xl_softc *);
 int xl_list_rx_init(struct xl_softc *);
+void xl_fill_rx_ring(struct xl_softc *);
 int xl_list_tx_init(struct xl_softc *);
 int xl_list_tx_init_90xB(struct xl_softc *);
 void xl_wait(struct xl_softc *);
@@ -196,26 +196,32 @@ int xl_miibus_readreg(struct device *, int, int);
 void xl_miibus_writereg(struct device *, int, int, int);
 void xl_miibus_statchg(struct device *);
 
-void xl_power(int, void *);
-
-void
-xl_power(int why, void *arg)
+int
+xl_activate(struct device *self, int act)
 {
-	struct xl_softc *sc = arg;
-	struct ifnet *ifp;
-	int s;
+	struct xl_softc *sc = (struct xl_softc *)self;
+	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
+	int rv = 0;
 
-	s = splnet();
-	if (why != PWR_RESUME)
-		xl_stop(sc);
-	else {
-		ifp = &sc->sc_arpcom.ac_if;
-		if (ifp->if_flags & IFF_UP) {
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING) {
 			xl_reset(sc);
-			xl_init(sc);
+			xl_stop(sc);
 		}
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		xl_reset(sc);
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			xl_init(sc);
+		break;
 	}
-	splx(s);
+	return (rv);
 }
 
 /*
@@ -556,109 +562,109 @@ xl_read_eeprom(struct xl_softc *sc, caddr_t dest, int off, int cnt, int swap)
 	return (err ? 1 : 0);
 }
 
+void
+xl_iff(struct xl_softc *sc)
+{
+	if (sc->xl_type == XL_TYPE_905B)
+		xl_iff_905b(sc);
+	else
+		xl_iff_90x(sc);
+}
+
 /*
  * NICs older than the 3c905B have only one multicast option, which
  * is to enable reception of all multicast frames.
  */
 void
-xl_setmulti(struct xl_softc *sc)
+xl_iff_90x(struct xl_softc *sc)
 {
-	struct ifnet	*ifp;
+	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
 	struct arpcom	*ac = &sc->sc_arpcom;
 	u_int8_t	rxfilt;
 
-	ifp = &sc->sc_arpcom.ac_if;
-
 	XL_SEL_WIN(5);
-	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
 
-	if (ifp->if_flags & IFF_ALLMULTI) {
-		rxfilt |= XL_RXFILTER_ALLMULTI;
-		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
-		return;
+	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
+	rxfilt &= ~(XL_RXFILTER_ALLFRAMES | XL_RXFILTER_ALLMULTI |
+	    XL_RXFILTER_BROADCAST | XL_RXFILTER_INDIVIDUAL);
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	/*
+	 * Always accept broadcast frames.
+	 * Always accept frames destined to our station address.
+	 */
+	rxfilt |= XL_RXFILTER_BROADCAST | XL_RXFILTER_INDIVIDUAL;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
+	    ac->ac_multicnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= XL_RXFILTER_ALLFRAMES;
+		else
+			rxfilt |= XL_RXFILTER_ALLMULTI;
 	}
 
-	if (ac->ac_multicnt > 0)
-		rxfilt |= XL_RXFILTER_ALLMULTI;
-	else
-		rxfilt &= ~XL_RXFILTER_ALLMULTI;
+	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT | rxfilt);
 
-	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
+	XL_SEL_WIN(7);
 }
 
 /*
  * 3c905B adapters have a hash filter that we can program.
  */
 void
-xl_setmulti_hash(struct xl_softc *sc)
+xl_iff_905b(struct xl_softc *sc)
 {
-	struct ifnet	*ifp;
-	int		h = 0, i;
+	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
 	struct arpcom	*ac = &sc->sc_arpcom;
+	int		h = 0, i;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	u_int8_t	rxfilt;
-	int		mcnt = 0;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	XL_SEL_WIN(5);
+
 	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
+	rxfilt &= ~(XL_RXFILTER_ALLFRAMES | XL_RXFILTER_ALLMULTI |
+	    XL_RXFILTER_BROADCAST | XL_RXFILTER_INDIVIDUAL |
+	    XL_RXFILTER_MULTIHASH);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI) {
-allmulti:
-		rxfilt |= XL_RXFILTER_ALLMULTI;
-		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
-		return;
-	} else
-		rxfilt &= ~XL_RXFILTER_ALLMULTI;
+	/*
+	 * Always accept broadcast frames.
+	 * Always accept frames destined to our station address.
+	 */
+	rxfilt |= XL_RXFILTER_BROADCAST | XL_RXFILTER_INDIVIDUAL;
 
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= XL_RXFILTER_ALLFRAMES;
+		else
+			rxfilt |= XL_RXFILTER_ALLMULTI;
+	} else {
+		rxfilt |= XL_RXFILTER_MULTIHASH;
 
-	/* first, zot all the existing hash bits */
-	for (i = 0; i < XL_HASHFILT_SIZE; i++)
-		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_HASH|i);
+		/* first, zot all the existing hash bits */
+		for (i = 0; i < XL_HASHFILT_SIZE; i++)
+			CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_HASH|i);
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) &
+			    0x000000FF;
+			CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_HASH |
+			    XL_HASH_SET | h);
+
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) &
-		    0x000000FF;
-		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_HASH|XL_HASH_SET|h);
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
 	}
 
-	if (mcnt)
-		rxfilt |= XL_RXFILTER_MULTIHASH;
-	else
-		rxfilt &= ~XL_RXFILTER_MULTIHASH;
+	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT | rxfilt);
 
-	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
+	XL_SEL_WIN(7);
 }
-
-void
-xl_setpromisc(struct xl_softc *sc)
-{
-	struct ifnet *ifp;
-	u_int8_t rxfilt;
-
-	ifp = &sc->sc_arpcom.ac_if;
-
-	XL_SEL_WIN(5);
-	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
-
-	if (ifp->if_flags & IFF_PROMISC)
-		rxfilt |= XL_RXFILTER_ALLFRAMES;
-	else
-		rxfilt &= ~XL_RXFILTER_ALLFRAMES;
-
-	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
-}
-
 
 #ifdef notdef
 void
@@ -1075,8 +1081,6 @@ xl_list_rx_init(struct xl_softc *sc)
 	for (i = 0; i < XL_RX_LIST_CNT; i++) {
 		cd->xl_rx_chain[i].xl_ptr =
 			(struct xl_list_onefrag *)&ld->xl_rx_list[i];
-		if (xl_newbuf(sc, &cd->xl_rx_chain[i]) == ENOBUFS)
-			return(ENOBUFS);
 		if (i == (XL_RX_LIST_CNT - 1))
 			n = 0;
 		else
@@ -1087,10 +1091,29 @@ xl_list_rx_init(struct xl_softc *sc)
 		ld->xl_rx_list[i].xl_next = htole32(next);
 	}
 
-	cd->xl_rx_head = &cd->xl_rx_chain[0];
-
+	cd->xl_rx_prod = cd->xl_rx_cons = &cd->xl_rx_chain[0];
+	cd->xl_rx_cnt = 0;
+	xl_fill_rx_ring(sc);
 	return (0);
 }
+
+void
+xl_fill_rx_ring(struct xl_softc *sc)
+{  
+	struct xl_chain_data    *cd;
+	struct xl_list_data     *ld;
+
+	cd = &sc->xl_cdata;
+	ld = sc->xl_ldata;
+
+	while (cd->xl_rx_cnt < XL_RX_LIST_CNT) {
+		if (xl_newbuf(sc, cd->xl_rx_prod) == ENOBUFS)
+			break;
+		cd->xl_rx_prod = cd->xl_rx_prod->xl_next;
+		cd->xl_rx_cnt++;
+	}
+}
+
 
 /*
  * Initialize an RX descriptor and attach an MBUF cluster.
@@ -1101,15 +1124,10 @@ xl_newbuf(struct xl_softc *sc, struct xl_chain_onefrag *c)
 	struct mbuf	*m_new = NULL;
 	bus_dmamap_t	map;
 
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
+	m_new = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	
+	if (!m_new)
 		return (ENOBUFS);
-
-	MCLGET(m_new, M_DONTWAIT);
-	if (!(m_new->m_flags & M_EXT)) {
-		m_freem(m_new);
-		return (ENOBUFS);
-	}
 
 	m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 	if (bus_dmamap_load(sc->sc_dmat, sc->sc_rx_sparemap,
@@ -1149,32 +1167,6 @@ xl_newbuf(struct xl_softc *sc, struct xl_chain_onefrag *c)
 	return (0);
 }
 
-int
-xl_rx_resync(struct xl_softc *sc)
-{
-	struct xl_chain_onefrag *pos;
-	int i;
-
-	pos = sc->xl_cdata.xl_rx_head;
-
-	for (i = 0; i < XL_RX_LIST_CNT; i++) {
-		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
-		    ((caddr_t)pos->xl_ptr - sc->sc_listkva),
-		    sizeof(struct xl_list),
-		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
-
-		if (pos->xl_ptr->xl_status)
-			break;
-		pos = pos->xl_next;
-	}
-
-	if (i == XL_RX_LIST_CNT)
-		return (0);
-
-	sc->xl_cdata.xl_rx_head = pos;
-
-	return (EAGAIN);
-}
 
 /*
  * A frame has been uploaded: pass the resulting mbuf chain up to
@@ -1186,23 +1178,27 @@ xl_rxeof(struct xl_softc *sc)
         struct mbuf		*m;
         struct ifnet		*ifp;
 	struct xl_chain_onefrag	*cur_rx;
-	int			total_len = 0, sumflags = 0;
+	int			total_len = 0;
 	u_int32_t		rxstat;
+	u_int16_t		sumflags = 0;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
 again:
 
-	while ((rxstat = letoh32(sc->xl_cdata.xl_rx_head->xl_ptr->xl_status))
-	    != 0) {
-		cur_rx = sc->xl_cdata.xl_rx_head;
-		sc->xl_cdata.xl_rx_head = cur_rx->xl_next;
-		total_len = rxstat & XL_RXSTAT_LENMASK;
-
-		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
+	while (sc->xl_cdata.xl_rx_cnt > 0) {
+		cur_rx = sc->xl_cdata.xl_rx_cons;
+		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,                    
 		    ((caddr_t)cur_rx->xl_ptr - sc->sc_listkva),
 		    sizeof(struct xl_list),
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+		if ((rxstat = letoh32(sc->xl_cdata.xl_rx_cons->xl_ptr->xl_status)) == 0)
+			break;
+		m = cur_rx->xl_mbuf;  
+		cur_rx->xl_mbuf = NULL;
+		sc->xl_cdata.xl_rx_cons = cur_rx->xl_next;
+		sc->xl_cdata.xl_rx_cnt--;
+		total_len = rxstat & XL_RXSTAT_LENMASK;
 
 		/*
 		 * Since we have told the chip to allow large frames,
@@ -1222,6 +1218,7 @@ again:
 		if (rxstat & XL_RXSTAT_UP_ERROR) {
 			ifp->if_ierrors++;
 			cur_rx->xl_ptr->xl_status = htole32(0);
+			m_freem(m);
 			continue;
 		}
 
@@ -1235,22 +1232,7 @@ again:
 			    "packet dropped\n", sc->sc_dev.dv_xname);
 			ifp->if_ierrors++;
 			cur_rx->xl_ptr->xl_status = htole32(0);
-			continue;
-		}
-
-		/* No errors; receive the packet. */	
-		m = cur_rx->xl_mbuf;
-
-		/*
-		 * Try to conjure up a new mbuf cluster. If that
-		 * fails, it means we have an out of memory condition and
-		 * should leave the buffer in place and continue. This will
-		 * result in a lost packet, but there's little else we
-		 * can do in this situation.
-		 */
-		if (xl_newbuf(sc, cur_rx) == ENOBUFS) {
-			ifp->if_ierrors++;
-			cur_rx->xl_ptr->xl_status = htole32(0);
+			m_freem(m);
 			continue;
 		}
 
@@ -1284,7 +1266,7 @@ again:
 
 		ether_input_mbuf(ifp, m);
 	}
-
+	xl_fill_rx_ring(sc);
 	/*
 	 * Handle the 'end of channel' condition. When the upload
 	 * engine hits the end of the RX ring, it will stall. This
@@ -1301,13 +1283,11 @@ again:
 		CSR_READ_4(sc, XL_UPLIST_STATUS) & XL_PKTSTAT_UP_STALLED) {
 		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_UP_STALL);
 		xl_wait(sc);
-		CSR_WRITE_4(sc, XL_UPLIST_PTR,
-		    sc->sc_listmap->dm_segs[0].ds_addr +
-		    offsetof(struct xl_list_data, xl_rx_list[0]));
-		sc->xl_cdata.xl_rx_head = &sc->xl_cdata.xl_rx_chain[0];
 		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_UP_UNSTALL);
+		xl_fill_rx_ring(sc);
 		goto again;
 	}
+
 }
 
 /*
@@ -1321,9 +1301,6 @@ xl_txeof(struct xl_softc *sc)
 	struct ifnet		*ifp;
 
 	ifp = &sc->sc_arpcom.ac_if;
-
-	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
 
 	/*
 	 * Go through our tx list and free mbufs for those
@@ -1364,6 +1341,8 @@ xl_txeof(struct xl_softc *sc)
 
 	if (sc->xl_cdata.xl_tx_head == NULL) {
 		ifp->if_flags &= ~IFF_OACTIVE;
+		/* Clear the timeout timer. */
+		ifp->if_timer = 0;
 		sc->xl_cdata.xl_tx_tail = NULL;
 	} else {
 		if (CSR_READ_4(sc, XL_DMACTL) & XL_DMACTL_DOWN_STALLED ||
@@ -1410,13 +1389,14 @@ xl_txeof_90xB(struct xl_softc *sc)
 
 		sc->xl_cdata.xl_tx_cnt--;
 		XL_INC(idx, XL_TX_LIST_CNT);
-		ifp->if_timer = 0;
 	}
 
 	sc->xl_cdata.xl_tx_cons = idx;
 
 	if (cur_tx != NULL)
 		ifp->if_flags &= ~IFF_OACTIVE;
+	if (sc->xl_cdata.xl_tx_cnt == 0)
+		ifp->if_timer = 0;
 }
 
 /*
@@ -1512,16 +1492,9 @@ xl_intr(void *arg)
 		if (sc->intr_ack)
 			(*sc->intr_ack)(sc);
 
-		if (status & XL_STAT_UP_COMPLETE) {
-			int curpkts;
-
-			curpkts = ifp->if_ipackets;
+		if (status & XL_STAT_UP_COMPLETE)
 			xl_rxeof(sc);
-			if (curpkts == ifp->if_ipackets) {
-				while (xl_rx_resync(sc))
-					xl_rxeof(sc);
-			}
-		}
+
 
 		if (status & XL_STAT_DOWN_COMPLETE) {
 			if (sc->xl_type == XL_TYPE_905B)
@@ -1599,7 +1572,7 @@ xl_stats_update(void *xsc)
 	XL_SEL_WIN(7);
 
 	if (!sc->xl_stats_no_timeout)
-		timeout_add(&sc->xl_stsup_tmo, hz);
+		timeout_add_sec(&sc->xl_stsup_tmo, 1);
 }
 
 /*
@@ -1937,7 +1910,6 @@ xl_init(void *xsc)
 	struct xl_softc		*sc = xsc;
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			s, i;
-	u_int16_t		rxfilt = 0;
 	struct mii_data		*mii = NULL;
 
 	s = splnet();
@@ -1999,7 +1971,6 @@ xl_init(void *xsc)
 	CSR_WRITE_1(sc, XL_TX_FREETHRESH, XL_PACKET_SIZE >> 8);
 
 	/* Set the TX start threshold for best performance. */
-	sc->xl_tx_thresh = XL_MIN_FRAMELEN;
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_SET_START|sc->xl_tx_thresh);
 
 	/*
@@ -2016,37 +1987,8 @@ xl_init(void *xsc)
 		    XL_CMD_SET_TX_RECLAIM|(XL_PACKET_SIZE >> 4));
 	}
 
-	/* Set RX filter bits. */
-	XL_SEL_WIN(5);
-	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
-
-	/* Set the individual bit to receive frames for this host only. */
-	rxfilt |= XL_RXFILTER_INDIVIDUAL;
-
-	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
-
-	/* Set promiscuous mode. */
-	xl_setpromisc(sc);
-
-	rxfilt = CSR_READ_1(sc, XL_W5_RX_FILTER);
-
-	/*
-	 * Set capture broadcast bit to capture broadcast frames.
-	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxfilt |= XL_RXFILTER_BROADCAST;
-	else
-		rxfilt &= ~XL_RXFILTER_BROADCAST;
-
-	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_FILT|rxfilt);
-
-	/*
-	 * Program the multicast filter, if necessary.
-	 */
-	if (sc->xl_type == XL_TYPE_905B)
-		xl_setmulti_hash(sc);
-	else
-		xl_setmulti(sc);
+	/* Program promiscuous mode and multicast filters. */
+	xl_iff(sc);
 
 	/*
 	 * Load the address of the RX list. We have to
@@ -2145,7 +2087,7 @@ xl_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->xl_stsup_tmo, hz);
+	timeout_add_sec(&sc->xl_stsup_tmo, 1);
 }
 
 /*
@@ -2272,11 +2214,6 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2285,54 +2222,21 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif /* INET */
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
-		XL_SEL_WIN(5);
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->xl_if_flags) &
-			     IFF_PROMISC) {
-				xl_setpromisc(sc);
-				XL_SEL_WIN(7);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					xl_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				xl_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				xl_stop(sc);
 		}
-		sc->xl_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING) {
-				if (sc->xl_type == XL_TYPE_905B)
-					xl_setmulti_hash(sc);
-				else
-					xl_setmulti(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		if (sc->xl_hasmii != 0)
@@ -2344,13 +2248,18 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			error = ifmedia_ioctl(ifp, ifr,
 			    &mii->mii_media, command);
 		break;
+
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			xl_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -2433,6 +2342,9 @@ xl_stop(struct xl_softc *sc)
 {
 	struct ifnet *ifp;
 
+	/* Stop the stats updater. */
+	timeout_del(&sc->xl_stsup_tmo);
+
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_timer = 0;
 
@@ -2458,9 +2370,6 @@ xl_stop(struct xl_softc *sc)
 
 	if (sc->intr_ack)
 		(*sc->intr_ack)(sc);
-
-	/* Stop the stats updater. */
-	timeout_del(&sc->xl_stsup_tmo);
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
@@ -2492,7 +2401,7 @@ xl_attach(struct xl_softc *sc)
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct xl_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		return;
 	}
@@ -2514,7 +2423,6 @@ xl_attach(struct xl_softc *sc)
 		return;
 	}
 	sc->xl_ldata = (struct xl_list_data *)sc->sc_listkva;
-	bzero(sc->xl_ldata, sizeof(struct xl_list_data));
 
 	for (i = 0; i < XL_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
@@ -2577,6 +2485,9 @@ xl_attach(struct xl_softc *sc)
 		sc->xl_type = XL_TYPE_905B;
 	else
 		sc->xl_type = XL_TYPE_90X;
+
+	/* Set the TX start threshold for best performance. */
+	sc->xl_tx_thresh = XL_MIN_FRAMELEN;
 
 	timeout_set(&sc->xl_stsup_tmo, xl_stats_update, sc);
 
@@ -2737,13 +2648,12 @@ xl_attach(struct xl_softc *sc)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	sc->sc_sdhook = shutdownhook_establish(xl_shutdown, sc);
-	sc->sc_pwrhook = powerhook_establish(xl_power, sc);
+	m_clsetwms(ifp, MCLBYTES, 2, XL_RX_LIST_CNT - 1);
 }
 
 int
 xl_detach(struct xl_softc *sc)
+<<<<<<< HEAD
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
@@ -2772,11 +2682,28 @@ xl_detach(struct xl_softc *sc)
 
 void
 xl_shutdown(void *v)
+=======
+>>>>>>> origin/master
 {
-	struct xl_softc	*sc = (struct xl_softc *)v;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	extern void xl_freetxrx(struct xl_softc *);
 
-	xl_reset(sc);
-	xl_stop(sc);
+	/* Unhook our tick handler. */
+	timeout_del(&sc->xl_stsup_tmo);
+
+	xl_freetxrx(sc);
+
+	/* Detach all PHYs */
+	if (sc->xl_hasmii)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete all remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	return (0);
 }
 
 struct cfdriver xl_cd = {

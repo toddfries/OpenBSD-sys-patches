@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: proc.h,v 1.4 2009/12/29 13:11:40 jsing Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -35,7 +35,8 @@
  * Machine-dependent part of the proc structure for hppa.
  */
 struct mdproc {
-	struct	trapframe *md_regs;	/* registers on current frame */
+	struct trapframe *md_regs;	/* registers on current frame */
+	volatile int md_astpending;	/* AST pending for this process */
 	int	md_flags;		/* machine-dependent flags */
 
 	vaddr_t md_bpva;

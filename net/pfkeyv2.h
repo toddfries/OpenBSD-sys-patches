@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: pfkeyv2.h,v 1.55 2005/05/27 15:29:55 hshoexer Exp $ */
+=======
+/* $OpenBSD: pfkeyv2.h,v 1.60 2010/10/06 22:19:20 mikeb Exp $ */
+>>>>>>> origin/master
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) January 1998
  * 
@@ -219,6 +223,12 @@ struct sadb_x_tag {
 	u_int32_t sadb_x_tag_taglen;
 };
 
+struct sadb_x_tap {
+	uint16_t  sadb_x_tap_len;
+	uint16_t  sadb_x_tap_exttype;
+	u_int32_t sadb_x_tap_unit;
+};
+
 #ifdef _KERNEL
 #define SADB_X_GETSPROTO(x) \
 	( (x) == SADB_SATYPE_AH ? IPPROTO_AH :\
@@ -261,7 +271,8 @@ struct sadb_x_tag {
 #define SADB_X_EXT_UDPENCAP           31
 #define SADB_X_EXT_LIFETIME_LASTUSE   32
 #define SADB_X_EXT_TAG                33
-#define SADB_EXT_MAX                  33
+#define SADB_X_EXT_TAP                34
+#define SADB_EXT_MAX                  34
 
 /* Fix pfkeyv2.c struct pfkeyv2_socket if SATYPE_MAX > 31 */
 #define SADB_SATYPE_UNSPEC		 0
@@ -290,6 +301,9 @@ struct sadb_x_tag {
 #define SADB_X_AALG_SHA2_384         6
 #define SADB_X_AALG_SHA2_512         7
 #define SADB_X_AALG_RIPEMD160HMAC    8
+#define SADB_X_AALG_AES128GMAC       9
+#define SADB_X_AALG_AES192GMAC       10
+#define SADB_X_AALG_AES256GMAC       11
 #define SADB_X_AALG_MD5              249
 #define SADB_X_AALG_SHA1             250
 #define SADB_AALG_MAX                250
@@ -308,8 +322,11 @@ struct sadb_x_tag {
 #define SADB_EALG_NULL        11
 #define SADB_X_EALG_AES       12
 #define SADB_X_EALG_AESCTR    13
-#define SADB_X_EALG_SKIPJACK  249
-#define SADB_EALG_MAX         249
+#define SADB_X_EALG_AESGCM8   18
+#define SADB_X_EALG_AESGCM12  19
+#define SADB_X_EALG_AESGCM16  20
+#define SADB_X_EALG_AESGMAC   21
+#define SADB_EALG_MAX         21
 
 #define SADB_X_CALG_NONE	0
 #define SADB_X_CALG_OUI		1
@@ -405,6 +422,7 @@ struct pfkeyv2_socket
 	int flags;
 	uint32_t pid;
 	uint32_t registration;    /* Increase size if SATYPE_MAX > 31 */
+	uint rdomain;
 };
 
 struct dump_state
@@ -429,14 +447,14 @@ int pfkeyv2_get(struct tdb *, void **, void **, int *);
 int pfkeyv2_policy(struct ipsec_acquire *, void **, void **);
 int pfkeyv2_release(struct socket *);
 int pfkeyv2_send(struct socket *, void *, int);
-int pfkeyv2_sendmessage(void **, int, struct socket *, u_int8_t, int);
+int pfkeyv2_sendmessage(void **, int, struct socket *, u_int8_t, int, u_int);
 int pfkeyv2_dump_policy(struct ipsec_policy *, void **, void **, int *);
 int pfkeyv2_dump_walker(struct tdb *, void *, int);
 int pfkeyv2_flush_walker(struct tdb *, void *, int);
 int pfkeyv2_get_proto_alg(u_int8_t, u_int8_t *, int *);
 int pfkeyv2_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int pfkeyv2_sysctl_walker(struct tdb *, void *, int);
-int pfkeyv2_ipo_walk(int (*)(struct ipsec_policy *, void *), void *);
+int pfkeyv2_ipo_walk(u_int, int (*)(struct ipsec_policy *, void *), void *);
 int pfkeyv2_sysctl_dump(void *);
 int pfkeyv2_sysctl_policydumper(struct ipsec_policy *, void *);
 
@@ -453,6 +471,7 @@ void export_key(void **, struct tdb *, int);
 void export_auth(void **, struct tdb *, int);
 void export_udpencap(void **, struct tdb *);
 void export_tag(void **, struct tdb *);
+void export_tap(void **, struct tdb *);
 
 void import_auth(struct tdb *, struct sadb_x_cred *, int);
 void import_address(struct sockaddr *, struct sadb_address *);
@@ -466,5 +485,6 @@ void import_flow(struct sockaddr_encap *, struct sockaddr_encap *,
     struct sadb_address *, struct sadb_protocol *, struct sadb_protocol *);
 void import_udpencap(struct tdb *, struct sadb_x_udpencap *);
 void import_tag(struct tdb *, struct sadb_x_tag *);
+void import_tap(struct tdb *, struct sadb_x_tap *);
 #endif /* _KERNEL */
 #endif /* _NET_PFKEY_V2_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.14 2003/07/15 18:15:41 mickey Exp $	*/
+/*	$OpenBSD: asm.h,v 1.16 2010/10/01 05:02:19 guenther Exp $	*/
 
 /* 
  * Copyright (c) 1990,1991,1994 The University of Utah and
@@ -250,5 +250,7 @@ tf4	.reg	%fr8
 #define EXIT(x) ! .exit ! .procend ! .size   x, .-x
 
 #define	BSS(n,s)	! .data ! .label n ! .comm s
+
+#define WEAK_ALIAS(alias,sym) ! .weak alias ! .set alias, sym
 
 #endif /* _MACHINE_ASM_H_ */

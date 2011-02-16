@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: smc91cxx.c,v 1.25 2006/06/17 17:56:10 brad Exp $	*/
+=======
+/*	$OpenBSD: smc91cxx.c,v 1.32 2009/10/13 19:33:16 pirofti Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -290,13 +287,14 @@ smc91cxx_attach(sc, myea)
 		 * even if the PHY does.
 		 */
 		miicapabilities &= ~(BMSR_100TXFDX | BMSR_10TFDX);
+		/* FALLTHROUGH */
 	case CHIP_91100FD:
 		if (tmp & CR_MII_SELECT) {
 #ifdef SMC_DEBUG
 			printf("%s: default media MII\n",
 			    sc->sc_dev.dv_xname);
 #endif
-			mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff,
+			mii_attach(&sc->sc_dev, &sc->sc_mii, miicapabilities,
 			    MII_PHY_ANY, MII_OFFSET_ANY, 0);
 			if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
 				ifmedia_add(&sc->sc_mii.mii_media,
@@ -310,7 +308,7 @@ smc91cxx_attach(sc, myea)
 			sc->sc_flags |= SMC_FLAGS_HAS_MII;
 			break;
 		}
-		/*FALLTHROUGH*/
+		/* FALLTHROUGH */
 	default:
 		aui = tmp & CR_AUI_SELECT;
 #ifdef SMC_DEBUG
@@ -525,7 +523,7 @@ smc91cxx_init(sc)
 	if (sc->sc_flags & SMC_FLAGS_HAS_MII) {
 		/* Start the one second clock. */
 		timeout_set(&sc->sc_mii_timeout, smc91cxx_tick, sc);
-		timeout_add(&sc->sc_mii_timeout, hz);
+		timeout_add_sec(&sc->sc_mii_timeout, 1);
 	}
 
 	/*
@@ -1096,35 +1094,19 @@ smc91cxx_ioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		if ((sc->sc_flags & SMC_FLAGS_ENABLED) == 0) {
-			error = EIO;
-			break;
-		}
-
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				smc91cxx_reset(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			smc91cxx_reset(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1225,7 +1207,7 @@ smc91cxx_disable(sc)
 int
 smc91cxx_activate(self, act)
 	struct device *self;
-	enum devact act;
+	int act;
 {
 #if 0
 	struct smc91cxx_softc *sc = (struct smc91cxx_softc *)self;
@@ -1369,5 +1351,5 @@ smc91cxx_tick(arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }

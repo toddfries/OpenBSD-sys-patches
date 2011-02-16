@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cpu.h,v 1.6 2007/03/03 21:37:27 miod Exp $	*/
+=======
+/*	$OpenBSD: cpu.h,v 1.21 2010/09/28 20:27:55 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -51,6 +55,38 @@
 #ifdef _KERNEL
 
 /*
+<<<<<<< HEAD
+=======
+ * Per-CPU information.
+ */
+
+#include <machine/intr.h>
+#include <sys/sched.h>
+
+struct cpu_info {
+	struct proc *ci_curproc;
+
+	struct schedstate_percpu ci_schedstate; /* scheduler state */
+	u_int32_t ci_randseed;
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
+};
+
+extern struct cpu_info cpu_info_store;
+#define	curcpu()	(&cpu_info_store)
+#define cpu_number()	0
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS	1
+#define cpu_unidle(ci)
+
+
+/*
+>>>>>>> origin/master
  * Arguments to hardclock and gatherstats encapsulate the previous
  * machine state in an opaque clockframe.
  */
@@ -82,6 +118,7 @@ do {									\
 	if (curproc != NULL)						\
 		aston(curproc);					\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling
@@ -100,7 +137,6 @@ do {									\
 
 extern int want_resched;		/* need_resched() was called */
 
-#define	cpu_wait(p)	((void)(p))
 /*
  * We need a machine-independent name for this.
  */

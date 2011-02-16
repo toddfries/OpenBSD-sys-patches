@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.h,v 1.20 2005/11/23 09:32:46 mickey Exp $	*/
+/*	$OpenBSD: isa_machdep.h,v 1.25 2009/08/22 02:54:50 mk Exp $	*/
 /*	$NetBSD: isa_machdep.h,v 1.7 1997/06/06 23:28:42 thorpej Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -111,7 +104,8 @@ void	isa_attach_hook(struct device *, struct device *,
 int	isa_intr_alloc(isa_chipset_tag_t, int, int, int *);
 int	isa_intr_check(isa_chipset_tag_t, int, int);
 void	*isa_intr_establish(isa_chipset_tag_t ic, int irq, int type,
-	    int level, int (*ih_fun)(void *), void *ih_arg, char *ih_what);
+	    int level, int (*ih_fun)(void *), void *ih_arg,
+	    const char *ih_what);
 void	isa_intr_disestablish(isa_chipset_tag_t ic, void *handler);
 
 /*
@@ -119,13 +113,13 @@ void	isa_intr_disestablish(isa_chipset_tag_t ic, void *handler);
  * BY PORTABLE CODE.
  */
 
-extern struct i386_bus_dma_tag isa_bus_dma_tag;
+extern struct bus_dma_tag isa_bus_dma_tag;
 
 /*
  * Cookie used by ISA dma.  A pointer to one of these it stashed in
  * the DMA map.
  */
-struct i386_isa_dma_cookie {
+struct isa_dma_cookie {
 	int	id_flags;		/* flags; see below */
 
 	void	*id_origbuf;		/* pointer to orig buffer if

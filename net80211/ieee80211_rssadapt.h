@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ieee80211_rssadapt.h,v 1.2 2005/09/08 13:24:53 reyk Exp $ */
+=======
+/* $OpenBSD: ieee80211_rssadapt.h,v 1.5 2010/07/17 16:25:09 damien Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: ieee80211_rssadapt.h,v 1.3 2004/05/06 03:03:20 dyoung Exp $ */
 
 /*-
@@ -13,9 +17,6 @@
  *    copyright notice, this list of conditions and the following
  *    disclaimer in the documentation and/or other materials provided
  *    with the distribution.
- * 3. The name of David Young may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY David Young ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: acx100.c,v 1.17 2006/12/17 21:45:49 claudio Exp $ */
+=======
+/*	$OpenBSD: acx100.c,v 1.21 2010/04/20 22:05:41 tedu Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -55,7 +59,6 @@
 #include <sys/mbuf.h>
 #include <sys/endian.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
 #include <sys/device.h>
 
 #include <machine/bus.h>

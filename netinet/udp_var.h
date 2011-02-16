@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udp_var.h,v 1.15 2003/06/02 23:28:15 millert Exp $	*/
+=======
+/*	$OpenBSD: udp_var.h,v 1.21 2010/10/21 11:38:27 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: udp_var.h,v 1.12 1996/02/13 23:44:41 christos Exp $	*/
 
 /*
@@ -99,13 +103,18 @@ struct	udpstat {
 extern struct	inpcbtable udbtable;
 extern struct	udpstat udpstat;
 
-#if defined(INET6) && !defined(TCP6)
+#ifdef INET6
 void	udp6_ctlinput(int, struct sockaddr *, void *);
 int	udp6_input(struct mbuf **, int *, int);
+<<<<<<< HEAD
 int	udp6_usrreq(struct socket *,
 	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 #endif /* INET6 && !TCP6 */
 void	 *udp_ctlinput(int, struct sockaddr *, void *);
+=======
+#endif /* INET6 */
+void	 *udp_ctlinput(int, struct sockaddr *, u_int, void *);
+>>>>>>> origin/master
 void	 udp_init(void);
 void	 udp_input(struct mbuf *, ...);
 #ifdef INET6

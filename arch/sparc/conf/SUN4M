@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: SUN4M,v 1.71 2006/06/26 22:16:23 miod Exp $
+=======
+#	$OpenBSD: SUN4M,v 1.78 2010/07/03 03:59:17 krw Exp $
+>>>>>>> origin/master
 #	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
@@ -16,12 +20,12 @@ option		SUN4M		# sun4m - SS10, SS20, Classic, etc.
 #option		KGDBRATE=38400	# baud rate
 
 # Options for SPARCstation hardware
-option		COMPAT_SUNOS	# compatibility with SunOS binaries
 option		COMPAT_SVR4	# compatibility with SVR4 binaries
 option		PROCFS		# /proc
 
 option		WSEMUL_SUN	# provide sun terminal emulation; required
 option		WSEMUL_NO_VT100	# do not provide vt100 terminal emulation
+option		WSDISPLAY_COMPAT_RAWKBD # provide raw scancodes; needed for X11
 
 maxusers	32		# estimated number of users
 
@@ -69,6 +73,8 @@ zs1	at obio0					# sun4m
 zstty* at zs?
 zskbd* at zs?
 wskbd* at zskbd?
+zsms*  at zs?
+wsmouse* at zsms?
 
 # Magma serial/parallel port devices
 magma*	at sbus?					# magma serial cards
@@ -112,7 +118,6 @@ esp*	at dma? flags 0x00ff000f			# depending on model
 
 #sun4c, sun4m
 isp*	at sbus?
-options ISP_COMPILE_1000_FW=1
 
 # sun4m Ethernet - an AMD 7990 LANCE behind
 # specialized DMA glue
@@ -138,6 +143,9 @@ hme*	at sbus?
 qec*	at sbus?
 qe*	at qec?
 be*	at qec?
+
+# Gigabit ethernet
+gem*	at sbus?
 
 # Sun "bwtwo" black and white framebuffer, found on sun4, sun4c, and sun4m
 # systems.
@@ -218,6 +226,7 @@ ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 
 # Media Independent Interface (mii) drivers (required by hme, ne, ep)
 bmtphy*	at mii?			# Broadcom 10/100 PHYs
+gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 lxtphy*	at mii?			# Level1 LXT970 PHYs
 nsphy*	at mii?			# NS and compatible PHYs
 nsphyter* at mii?
@@ -237,9 +246,10 @@ sd*	at scsibus?		# SCSI disks
 st*	at scsibus?		# SCSI tapes
 cd*	at scsibus?		# SCSI CD-ROMs
 ch*	at scsibus?		# SCSI changer devices
-ss*	at scsibus?		# SCSI scanners
 uk*	at scsibus?		# unknown SCSI devices
 
 # Floppy controller and drive found on SPARCstations.
 fdc0	at obio0		# sun4m controller
 fd*	at fdc0			# the drive itself
+
+pseudo-device	wsmux	2	# mouse & keyboard multiplexor

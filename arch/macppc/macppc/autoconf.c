@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.22 2005/12/27 18:31:09 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.39 2010/11/11 17:58:21 miod Exp $	*/
 /*
  * Copyright (c) 1996, 1997 Per Fogelstrom
  * Copyright (c) 1995 Theo de Raadt
@@ -37,7 +37,7 @@
  * from: Utah Hdr: autoconf.c 1.31 91/01/21
  *
  *	from: @(#)autoconf.c	8.1 (Berkeley) 6/10/93
- *      $Id: autoconf.c,v 1.24 2007/03/28 06:17:37 dlg Exp $
+ *      $Id: autoconf.c,v 1.39 2010/11/11 17:58:21 miod Exp $
  */
 
 /*
@@ -69,11 +69,7 @@
 struct  device *parsedisk(char *, int, int, dev_t *);
 void    setroot(void);
 void	dumpconf(void);
-int	findblkmajor(struct device *);
-char	*findblkname(int);
-static	struct device * getdisk(char *, int, int, dev_t *);
-struct	device * getdevunit(char *, int);
-static	struct devmap * findtype(char **);
+static	struct devmap *findtype(char **);
 void	makebootdev(char *cp);
 int	getpno(char **);
 void	diskconf(void);
@@ -100,7 +96,9 @@ cpu_configure()
 	(void)splhigh();	/* To be really sure.. */
 	calc_delayconst();
 
-	if(config_rootfound("mainbus", "mainbus") == 0)
+	softintr_init();
+
+	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
 	(void)spl0();
 
@@ -556,7 +554,7 @@ makebootdev(char *bp)
 	} while((dp->type & T_IFACE) == 0);
 
 	if (dp->att && dp->type == T_IFACE) {
-		snprintf(bootdev, sizeof bootdev, "%s", dp->dev);
+		strlcpy(bootdev, dp->dev, sizeof bootdev);
 		return;
 	}
 	dev = dp->dev;
@@ -608,3 +606,37 @@ getpno(char **cp)
 	*cp = cx;
 	return (val);
 }
+
+void
+device_register(struct device *dev, void *aux)
+{
+}
+
+/*
+ * Now that we are fully operational, we can checksum the
+ * disks, and using some heuristics, hopefully are able to
+ * always determine the correct root disk.
+ */
+void
+diskconf(void)
+{
+	dev_t temp;
+	int part = 0;
+
+	printf("bootpath: %s\n", bootpath);
+	makebootdev(bootpath);
+
+	/* Lookup boot device from boot if not set by configuration */
+	bootdv = parsedisk(bootdev, strlen(bootdev), 0, &temp);
+	setroot(bootdv, part, RB_USERREQ);
+	dumpconf();
+}
+
+struct nam2blk nam2blk[] = {
+	{ "wd",		0 },
+	{ "sd",		2 },
+	{ "rd",		17 },
+	{ "raid",	19 },
+	{ "vnd",	14 },
+	{ NULL,		-1 }
+};

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usb.h,v 1.24 2006/06/23 19:25:07 miod Exp $ */
+=======
+/*	$OpenBSD: usb.h,v 1.36 2011/01/15 23:58:43 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -260,6 +257,8 @@ typedef struct {
 #define  UE_ISO_SYNC	0x0c
 #define UE_GET_ISO_TYPE(a)	((a) & UE_ISO_TYPE)
 	uWord		wMaxPacketSize;
+#define UE_GET_TRANS(a)	(((a) >> 11) & 0x3)
+#define UE_GET_SIZE(a)	((a) & 0x7ff)
 	uByte		bInterval;
 } UPACKED usb_endpoint_descriptor_t;
 #define USB_ENDPOINT_DESCRIPTOR_SIZE 7
@@ -296,6 +295,7 @@ typedef struct {
 #define UHF_C_PORT_RESET	20
 #define UHF_PORT_TEST		21
 #define UHF_PORT_INDICATOR	22
+#define UHF_PORT_DISOWN_TO_1_1	30
 
 typedef struct {
 	uByte		bDescLength;
@@ -480,6 +480,7 @@ typedef struct {
 #define UICLASS_WIRELESS	0xe0
 #define  UISUBCLASS_RF			0x01
 #define   UIPROTO_BLUETOOTH		0x01
+#define   UIPROTO_RNDIS			0x03
 
 #define UICLASS_APPL_SPEC	0xfe
 #define  UISUBCLASS_FIRMWARE_DOWNLOAD	1
@@ -618,6 +619,29 @@ struct usb_device_info {
 #define USB_PORT_SUSPENDED 0xfe
 #define USB_PORT_POWERED 0xfd
 #define USB_PORT_DISABLED 0xfc
+	char		udi_serial[USB_MAX_STRING_LEN];
+};
+
+/* OpenBSD <= 4.8 version, to be removed eventually */
+struct usb_device_info_48 {
+	u_int8_t	udi_bus;
+	u_int8_t	udi_addr;	/* device address */
+	usb_event_cookie_t udi_cookie;
+	char		udi_product[USB_MAX_STRING_LEN];
+	char		udi_vendor[USB_MAX_STRING_LEN];
+	char		udi_release[8];
+	u_int16_t	udi_productNo;
+	u_int16_t	udi_vendorNo;
+	u_int16_t	udi_releaseNo;
+	u_int8_t	udi_class;
+	u_int8_t	udi_subclass;
+	u_int8_t	udi_protocol;
+	u_int8_t	udi_config;
+	u_int8_t	udi_speed;
+	int		udi_power;	/* power consumption in mA, 0 if selfpowered */
+	int		udi_nports;
+	char		udi_devnames[USB_MAX_DEVNAMES][USB_MAX_DEVNAMELEN];
+	u_int8_t	udi_ports[16];/* hub only: addresses of devices on ports */
 };
 
 struct usb_ctl_report {
@@ -655,9 +679,10 @@ struct usb_event {
 
 /* USB controller */
 #define USB_REQUEST		_IOWR('U', 1, struct usb_ctl_request)
-#define USB_SETDEBUG		_IOW ('U', 2, int)
+#define USB_SETDEBUG		_IOW ('U', 2, unsigned int)
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
+#define USB_DEVICEINFO_48	_IOWR('U', 4, struct usb_device_info_48)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)
 
 /* Generic HID device */

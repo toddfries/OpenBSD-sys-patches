@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.49 2006/06/30 16:14:31 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.64 2010/12/21 14:56:24 claudio Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -44,15 +44,10 @@
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/syslog.h>
 #include <sys/extent.h>
 #include <sys/systm.h>
 #include <sys/user.h>
-
-#include <net/netisr.h>
 
 #include <machine/bat.h>
 #include <machine/bugio.h>
@@ -143,8 +138,6 @@ int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
 
 struct firmware *fw = NULL;
 extern struct firmware ppc1_firmware;
-
-caddr_t allocsys(caddr_t);
 
 /*
  * Extent maps to manage I/O. Allocate storage for 8 regions in each,
@@ -393,8 +386,6 @@ install_extint(handler)
 void
 cpu_startup()
 {
-	int sz, i;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
 	int base, residual;
 
@@ -403,56 +394,6 @@ cpu_startup()
 	printf("%s", version);
 	
 	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem)/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	sz = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(sz),
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	      UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	/*
-	addr = (vaddr_t)buffers;
-	*/
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE) {
-		/* Don't want to alloc more physical mem than ever needed */
-		base = MAXBSIZE;
-		residual = 0;
-	}
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-		
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for"
-					" buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-					VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -485,48 +426,6 @@ cpu_startup()
 	devio_malloc_safe = 1;
 	nvram_map();
 	prep_bus_space_init();	
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Decide on buffer space to use.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 35% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-	
-	return v;
 }
 
 /*
@@ -701,22 +600,6 @@ dumpsys()
 
 volatile int cpl, ipending, astpending;
 int imask[IPL_NUM];
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(isr)
-	int isr;
-{
-#define	DONETISR(flag, func) \
-	if (isr & (1 << (flag))) \
-		(func)();
-
-#include <net/netisr_dispatch.h>
-#undef	DONETISR
-}
 
 int
 lcsplx(ipl)
@@ -811,7 +694,7 @@ int ppc_configed_intr_cnt = 0;
 struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 
 void *ppc_intr_establish(void *, pci_intr_handle_t, int, int, int (*)(void *),
-    void *, char *);
+    void *, const char *);
 void ppc_intr_setup(intr_establish_t *, intr_disestablish_t *);
 void ppc_intr_enable(int);
 int ppc_intr_disable(void);
@@ -824,7 +707,7 @@ ppc_intr_establish(lcv, ih, type, level, func, arg, name)
 	int level;
 	int (*func)(void *);
 	void *arg;
-	char *name;
+	const char *name;
 {
 	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
 		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;

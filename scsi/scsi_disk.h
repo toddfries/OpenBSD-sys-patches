@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: scsi_disk.h,v 1.20 2005/09/15 05:33:39 krw Exp $	*/
+=======
+/*	$OpenBSD: scsi_disk.h,v 1.29 2010/09/23 11:23:58 dlg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: scsi_disk.h,v 1.10 1996/07/05 16:19:05 christos Exp $	*/
 
 /*
@@ -192,6 +196,52 @@ struct scsi_rw_16 {
 	u_int8_t control;
 };
 
+struct scsi_write_same_10 {
+	u_int8_t opcode;
+	u_int8_t flags;
+#define WRITE_SAME_F_LBDATA	(1 << 1)
+#define WRITE_SAME_F_PBDATA	(1 << 2)
+	u_int8_t lba[4];
+	u_int8_t group_number;
+	u_int8_t length[2];
+	u_int8_t control;
+};
+
+struct scsi_write_same_16 {
+	u_int8_t opcode;
+	u_int8_t flags;
+/* includes WRITE SAME 10 flags */
+#define WRITE_SAME_F_UNMAP	(1 << 3)
+#define WRITE_SAME_F_ANCHOR	(1 << 4)
+	u_int8_t lba[8];
+	u_int8_t length[4];
+	u_int8_t group_number;
+	u_int8_t control;
+};
+
+struct scsi_unmap {
+	u_int8_t opcode;
+	u_int8_t anchor;
+	u_int8_t _reserved[4];
+	u_int8_t group_number;
+	u_int8_t list_len[2];
+	u_int8_t control;
+};
+
+struct scsi_unmap_data {
+	u_int8_t data_length[2];
+	u_int8_t desc_length[2];
+	u_int8_t _reserved[4];
+
+	/* followed by struct scsi_unmap_desc */
+};
+
+struct scsi_unmap_desc {
+	u_int8_t logical_addr[8];
+	u_int8_t logical_blocks[4];
+	u_int8_t _reserved[4];
+};
+
 struct scsi_read_capacity {
 	u_int8_t opcode;
 	u_int8_t byte2;
@@ -224,7 +274,6 @@ struct scsi_start_stop {
 /*
  * XXX Does ATAPI have an equivalent?
  */
-#define	SYNCHRONIZE_CACHE		0x35
 struct scsi_synchronize_cache {
 	u_int8_t opcode;
 	u_int8_t flags;
@@ -253,6 +302,9 @@ struct scsi_synchronize_cache {
 #define READ_16			0x88
 #define WRITE_16		0x8a
 #define SYNCHRONIZE_CACHE	0x35
+#define WRITE_SAME_10		0x41
+#define WRITE_SAME_16		0x93
+#define UNMAP			0x42
 
 
 struct scsi_read_cap_data {
@@ -266,6 +318,8 @@ struct scsi_read_cap_data_16 {
 	u_int8_t p_type_prot;
 	u_int8_t logical_per_phys;
 	u_int8_t lowest_aligned[2];
+#define READ_CAP_16_TPE		0x8000
+#define READ_CAP_16_TPRZ	0x4000
 	u_int8_t reserved[16];
 };
 
@@ -283,6 +337,7 @@ struct scsi_reassign_blocks_data {
 #define PAGE_RIGID_GEOMETRY	4
 #define PAGE_FLEX_GEOMETRY	5
 #define PAGE_REDUCED_GEOMETRY	6
+#define PAGE_CACHING_MODE	8
 
 struct page_disk_format {
 	u_int8_t pg_code;	/* page code (should be 3) */
@@ -372,4 +427,72 @@ struct page_reduced_geometry {
 #define	READ_DISABLED	0x8
 	u_int8_t reserved;
 };
+
+struct page_caching_mode {
+	u_int8_t pg_code;	/* page code (should be 8) */
+	u_int8_t pg_length;	/* page length (should be 0x12) */
+	u_int8_t flags;
+#define PG_CACHE_FL_RCD		(1<<0)
+#define PG_CACHE_FL_MF		(1<<1)
+#define PG_CACHE_FL_WCE		(1<<2)
+#define PG_CACHE_FL_SIZE	(1<<3)
+#define PG_CACHE_FL_DISC	(1<<4)
+#define PG_CACHE_FL_CAP		(1<<5)
+#define PG_CACHE_FL_ABPF	(1<<6)
+#define PG_CACHE_FL_IC		(1<<7)
+	u_int8_t priority;
+#define PG_CACHE_PRI_DEMAND(_f)		((_f) & 0x0f)
+#define PG_CACHE_PRI_WRITE(_f)		(((_f) >> 4) & 0x0f)
+	u_int8_t dis_prefetch_tl[2];
+	u_int8_t min_prefetch[2];
+	u_int8_t max_prefetch[2];
+	u_int8_t max_prefetch_ceil[2];
+};
+
+#define SI_PG_DISK_LIMITS	0xb0 /* block limits */
+#define SI_PG_DISK_INFO		0xb1 /* device charateristics */
+
+struct scsi_vpd_disk_limits {
+        struct scsi_vpd_hdr hdr;
+#define SI_PG_DISK_LIMITS_LEN		0x10
+#define SI_PG_DISK_LIMITS_LEN_THIN	0x3c
+
+	u_int8_t		_reserved1[1];
+	u_int8_t		max_comp_wr_len;
+	u_int8_t		optimal_xfer_granularity[2];
+
+	u_int8_t		max_xfer_len[4];
+
+	u_int8_t		optimal_xfer[4];
+
+	u_int8_t		max_xd_prefetch_len[4];
+
+	u_int8_t		max_unmap_lba_count[4];
+
+	u_int8_t		max_unmap_desc_count[4];
+
+	u_int8_t		optimal_unmap_granularity[4];
+
+	u_int8_t		unmap_granularity_align[4];
+
+	u_int8_t		_reserved2[28];
+}; 
+
+struct scsi_vpd_disk_info {
+        struct scsi_vpd_hdr	hdr;
+	u_int8_t		rpm[2];
+#define VPD_DISK_INFO_RPM_UNDEF		0x0000
+#define VPD_DISK_INFO_RPM_NONE		0x0001
+	u_int8_t		_reserved1[1];
+	u_int8_t		form_factor;
+#define VPD_DISK_INFO_FORM_MASK		0xf
+#define VPD_DISK_INFO_FORM_UNDEF	0x0
+#define VPD_DISK_INFO_FORM_5_25		0x1
+#define VPD_DISK_INFO_FORM_3_5		0x2
+#define VPD_DISK_INFO_FORM_2_5		0x3
+#define VPD_DISK_INFO_FORM_1_8		0x4
+#define VPD_DISK_INFO_FORM_LT_1_8	0x5
+	u_int8_t		_reserved2[56];
+}; 
+
 #endif /* _SCSI_SCSI_DISK_H */

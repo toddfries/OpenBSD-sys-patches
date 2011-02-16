@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: ip_ipcomp.c,v 1.19 2005/12/20 13:36:28 markus Exp $ */
+=======
+/* $OpenBSD: ip_ipcomp.c,v 1.27 2010/07/09 16:58:06 reyk Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)
@@ -197,6 +201,7 @@ ipcomp_input(m, tdb, skip, protoff)
 	tc->tc_protoff = protoff;
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = IPPROTO_IPCOMP;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	return crypto_dispatch(crp);
@@ -212,8 +217,6 @@ ipcomp_input_cb(op)
 	int error, s, skip, protoff, roff, hlen = IPCOMP_HLENGTH, clen;
 	u_int8_t nproto;
 	struct mbuf *m, *m1, *mo;
-	struct cryptodesc *crd;
-	struct comp_algo *ipcompx;
 	struct tdb_crypto *tc;
 	struct cryptop *crp;
 	struct tdb *tdb;
@@ -221,7 +224,6 @@ ipcomp_input_cb(op)
 	caddr_t addr;
 
 	crp = (struct cryptop *) op;
-	crd = crp->crp_desc;
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
@@ -239,7 +241,7 @@ ipcomp_input_cb(op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		FREE(tc, M_XDATA);
 		ipcompstat.ipcomps_notdb++;
@@ -247,7 +249,6 @@ ipcomp_input_cb(op)
 		error = EPERM;
 		goto baddone;
 	}
-	ipcompx = (struct comp_algo *) tdb->tdb_compalgxform;
 
 	/* update the counters */
 	tdb->tdb_cur_bytes += m->m_pkthdr.len - (skip + hlen);
@@ -352,7 +353,7 @@ ipcomp_input_cb(op)
 	crypto_freereq(crp);
 
 	/* Restore the Next Protocol field */
-	m_copyback(m, protoff, sizeof(u_int8_t), &nproto);
+	m_copyback(m, protoff, sizeof(u_int8_t), &nproto, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
 	error = ipsec_common_input_cb(m, tdb, skip, protoff, NULL);
@@ -388,18 +389,23 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 	struct tdb_crypto *tc;
 	struct mbuf    *mi, *mo;
 #if NBPFILTER > 0
-	struct ifnet   *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	if (ifn->if_bpf) {
-		struct enchdr   hdr;
+	if ((encif = enc_getif(0, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-		bzero(&hdr, sizeof(hdr));
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
+			bzero (&hdr, sizeof(hdr));
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 	hlen = IPCOMP_HLENGTH;
@@ -529,6 +535,7 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
 	tc->tc_skip = skip;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	/* Crypto operation descriptor */
@@ -580,7 +587,7 @@ ipcomp_output_cb(cp)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		FREE(tc, M_XDATA);
 		ipcompstat.ipcomps_notdb++;

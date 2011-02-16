@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_exec.c,v 1.101 2007/03/01 11:18:40 art Exp $	*/
+=======
+/*	$OpenBSD: kern_exec.c,v 1.114 2010/11/24 21:05:20 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -104,7 +108,7 @@ int stackgap_random = STACKGAP_RANDOM;
  * EXEC SWITCH EXIT:
  *	ok:	return 0, filled exec package, one locked vnode.
  *	error:	destructive:
- *			everything deallocated execept exec header.
+ *			everything deallocated except exec header.
  *		non-destructive:
  *			error code, locked vnode, exec header unmodified
  */
@@ -329,7 +333,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 			cp = *tmpfap;
 			while (*cp)
 				*dp++ = *cp++;
-			dp++;
+			*dp++ = '\0';
 
 			free(*tmpfap, M_EXEC);
 			tmpfap++; argc++;
@@ -461,13 +465,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/* record proc's vnode, for use by procfs and others */
 	if (p->p_textvp)
 		vrele(p->p_textvp);
-	VREF(pack.ep_vp);
+	vref(pack.ep_vp);
 	p->p_textvp = pack.ep_vp;
 
 	atomic_setbits_int(&p->p_flag, P_EXEC);
-	if (p->p_flag & P_PPWAIT) {
-		atomic_clearbits_int(&p->p_flag, P_PPWAIT);
-		wakeup((caddr_t)p->p_pptr);
+	if (p->p_p->ps_mainproc->p_flag & P_PPWAIT) {
+		atomic_clearbits_int(&p->p_p->ps_mainproc->p_flag, P_PPWAIT);
+		wakeup(p->p_p->ps_pptr);
 	}
 
 	/*
@@ -596,7 +600,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/*
 	 * notify others that we exec'd
 	 */
-	KNOTE(&p->p_klist, NOTE_EXEC);
+	KNOTE(&p->p_p->ps_klist, NOTE_EXEC);
 
 	/* setup new registers and do misc. setup. */
 	if (pack.ep_emul->e_fixup != NULL) {
@@ -612,6 +616,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/* map the process's signal trampoline code */
 	if (exec_sigcode_map(p, pack.ep_emul))
 		goto free_pack_abort;
+
+#ifdef __HAVE_EXEC_MD_MAP
+	/* perform md specific mappings that process might need */
+	if (exec_md_map(p, &pack))
+		goto free_pack_abort;
+#endif
 
 	if (p->p_flag & P_TRACED)
 		psignal(p, SIGTRAP);

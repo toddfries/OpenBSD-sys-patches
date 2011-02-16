@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: isp_sbus.c,v 1.23 2002/10/12 01:09:43 krw Exp $	*/
+=======
+/*	$OpenBSD: isp_sbus.c,v 1.30 2010/11/11 17:46:58 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
  *
@@ -43,8 +47,23 @@
 #include <sparc/sparc/cpuvar.h>
 
 #include <dev/ic/isp_openbsd.h>
-#if	defined(ISP_COMPILE_FW) || defined(ISP_COMPILE_1000_FW)
+
+#ifndef ISP_NOFIRMWARE
+#define ISP_FIRMWARE_1000
+#define ISP_FIRMWARE_2200
+#endif
+
+#if	defined(ISP_FIRMWARE_1000)
 #include <dev/microcode/isp/asm_sbus.h>
+#else
+#define	ISP_1000_RISC_CODE	NULL
+#endif
+
+#if	defined(ISP_FIRMWARE_2200)
+#define	ISP_2200_RISC_CODE	(u_int16_t *) isp_2200_risc_code
+#include <dev/microcode/isp/asm_2200.h>
+#else
+#define	ISP_2200_RISC_CODE	NULL
 #endif
 
 #define ISP_SBUSIFY_ISPHDR(isp, hdrp)					\
@@ -57,19 +76,19 @@
 
 
 static int
-isp_sbus_rd_isr(struct ispsoftc *, u_int16_t *, u_int16_t *, u_int16_t *);
-static u_int16_t isp_sbus_rd_reg(struct ispsoftc *, int);
-static void isp_sbus_wr_reg(struct ispsoftc *, int, u_int16_t);
+isp_sbus_rd_isr(struct ispsoftc *, u_int32_t *, u_int16_t *, u_int16_t *);
+static int
+isp_sbus_rd_isr_2200(struct ispsoftc *, u_int32_t *, u_int16_t *, u_int16_t *);
+static u_int32_t isp_sbus_rd_reg(struct ispsoftc *, int);
+static void isp_sbus_wr_reg(struct ispsoftc *, int, u_int32_t);
+static u_int32_t isp_sbus_rd_reg_2200(struct ispsoftc *, int);
+static void isp_sbus_wr_reg_2200(struct ispsoftc *, int, u_int32_t);
 static int isp_sbus_mbxdma(struct ispsoftc *);
 static int isp_sbus_dmasetup(struct ispsoftc *, struct scsi_xfer *,
-	ispreq_t *, u_int16_t *, u_int16_t);
+	ispreq_t *, u_int32_t *, u_int32_t);
 static void
-isp_sbus_dmateardown(struct ispsoftc *, struct scsi_xfer *, u_int16_t);
+isp_sbus_dmateardown(struct ispsoftc *, struct scsi_xfer *, u_int32_t);
 static int isp_sbus_intr(void *);
-
-#ifndef	ISP_1000_RISC_CODE
-#define	ISP_1000_RISC_CODE	NULL
-#endif
 
 static struct ispmdvec mdvec = {
 	isp_sbus_rd_isr,
@@ -81,8 +100,21 @@ static struct ispmdvec mdvec = {
 	NULL,
 	NULL,
 	NULL,
-	(u_int16_t *) ISP_1000_RISC_CODE,
+	ISP_1000_RISC_CODE,
 	BIU_BURST_ENABLE|BIU_SBUS_CONF1_FIFO_32
+};
+
+static struct ispmdvec mdvec_2200 = {
+	isp_sbus_rd_isr_2200,
+	isp_sbus_rd_reg_2200,
+	isp_sbus_wr_reg_2200,
+	isp_sbus_mbxdma,
+	isp_sbus_dmasetup,
+	isp_sbus_dmateardown,
+	NULL,
+	NULL,
+	NULL,
+	ISP_2200_RISC_CODE
 };
 
 struct isp_sbussoftc {
@@ -119,7 +151,9 @@ isp_match(struct device *parent, void *cfarg, void *aux)
 		strcmp("PTI,ptisp", ra->ra_name) == 0 ||
 		strcmp("ptisp", ra->ra_name) == 0 ||
 		strcmp("SUNW,isp", ra->ra_name) == 0 ||
-		strcmp("QLGC,isp", ra->ra_name) == 0);
+		strcmp("SUNW,qlc", ra->ra_name) == 0 ||
+		strcmp("QLGC,isp", ra->ra_name) == 0 ||
+		strcmp("QLGC,qla", ra->ra_name) == 0);
 	if (rv == 0)
 		return (rv);
 #ifdef DEBUG
@@ -145,6 +179,7 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 	struct bootpath *bp;
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) self;
 	struct ispsoftc *isp = &sbc->sbus_isp;
+	volatile u_int16_t *fpga_reg;
 
 	if (ca->ca_ra.ra_nintr != 1) {
 		printf(": expected 1 interrupt, got %d\n", ca->ca_ra.ra_nintr);
@@ -215,6 +250,35 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 	sbc->sbus_poff[RISC_BLOCK >> _BLK_REG_SHFT] = SBUS_RISC_REGS_OFF;
 	sbc->sbus_poff[DMA_BLOCK >> _BLK_REG_SHFT] = DMA_REGS_OFF;
 
+	if (strcmp("SUNW,qlc", ca->ca_ra.ra_name) == 0 ||
+	    strcmp("QLGC,qla", ca->ca_ra.ra_name) == 0) {
+		isp->isp_mdvec = &mdvec_2200;
+		isp->isp_bustype = ISP_BT_PCI;
+		isp->isp_type = ISP_HA_FC_2200;
+		isp->isp_param = malloc(sizeof(fcparam), M_DEVBUF,
+		    M_NOWAIT | M_ZERO);
+		if (isp->isp_param == NULL) {
+			printf("%s: no mem for sdparam table\n",
+			    self->dv_xname);
+			return;
+		}
+		sbc->sbus_poff[BIU_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + BIU_REGS_OFF;
+		sbc->sbus_poff[MBOX_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_MBOX_REGS2100_OFF;
+		sbc->sbus_poff[SXP_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_SXP_REGS_OFF;
+		sbc->sbus_poff[RISC_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + PCI_RISC_REGS_OFF;
+		sbc->sbus_poff[DMA_BLOCK >> _BLK_REG_SHFT] =
+		    0x100 + DMA_REGS_OFF;
+
+		fpga_reg = mapiodev(&ca->ca_ra.ra_reg[1], 0,
+		    ca->ca_ra.ra_reg[1].rr_len);
+		fpga_reg[0x80] &= ~htole16(0x700);
+		fpga_reg[0x80] |= htole16(0x300);
+	}
+
 	/* Establish interrupt channel */
 	sbc->sbus_ih.ih_fun = (void *) isp_sbus_intr;
 	sbc->sbus_ih.ih_arg = sbc;
@@ -244,7 +308,7 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 		ISP_UNLOCK(isp);
 		return;
 	}
-	ENABLE_INTS(isp);
+	ISP_ENABLE_INTS(isp);
 	isp_init(isp);
 	if (isp->isp_state != ISP_INITSTATE) {
 		isp_uninit(isp);
@@ -285,7 +349,7 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 #define	BXR2(pcs, off)		(sbc->sbus_reg[off >> 1])
 
 static int
-isp_sbus_rd_isr(struct ispsoftc *isp, u_int16_t *isrp,
+isp_sbus_rd_isr(struct ispsoftc *isp, u_int32_t *isrp,
     u_int16_t *semap, u_int16_t *mbp)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
@@ -306,7 +370,29 @@ isp_sbus_rd_isr(struct ispsoftc *isp, u_int16_t *isrp,
 	return (1);
 }
 
-static u_int16_t
+static int
+isp_sbus_rd_isr_2200(struct ispsoftc *isp, u_int32_t *isrp,
+    u_int16_t *semap, u_int16_t *mbp)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	volatile u_int16_t isr, sema;
+
+	isr = letoh16(BXR2(pcs, IspVirt2Off(isp, BIU_ISR)));
+	sema = letoh16(BXR2(pcs, IspVirt2Off(isp, BIU_SEMA)));
+	isp_prt(isp, ISP_LOGDEBUG3, "ISR 0x%x SEMA 0x%x", isr, sema);
+	isr &= INT_PENDING_MASK(isp);
+	sema &= BIU_SEMA_LOCK;
+	if (isr == 0 && sema == 0) {
+		return (0);
+	}
+	*isrp = isr;
+	if ((*semap = sema) != 0) {
+		*mbp = letoh16(BXR2(pcs, IspVirt2Off(isp, OUTMAILBOX0)));
+	}
+	return (1);
+}
+
+static u_int32_t
 isp_sbus_rd_reg(struct ispsoftc *isp, int regoff)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
@@ -316,7 +402,7 @@ isp_sbus_rd_reg(struct ispsoftc *isp, int regoff)
 }
 
 static void
-isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int16_t val)
+isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int32_t val)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
 	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
@@ -324,6 +410,23 @@ isp_sbus_wr_reg(struct ispsoftc *isp, int regoff, u_int16_t val)
 	sbc->sbus_reg[offset >> 1] = val;
 }
 
+static u_int32_t
+isp_sbus_rd_reg_2200(struct ispsoftc *isp, int regoff)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
+	offset += (regoff & 0xff);
+	return ((u_int16_t) letoh16(sbc->sbus_reg[offset >> 1]));
+}
+
+static void
+isp_sbus_wr_reg_2200(struct ispsoftc *isp, int regoff, u_int32_t val)
+{
+	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
+	int offset = sbc->sbus_poff[(regoff & _BLK_REG_MASK) >> _BLK_REG_SHFT];
+	offset += (regoff & 0xff);
+	sbc->sbus_reg[offset >> 1] = htole16(val);
+}
 
 static int
 isp_sbus_mbxdma(struct ispsoftc *isp)
@@ -341,11 +444,10 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 	 */
 
 	len = isp->isp_maxcmds * sizeof (XS_T);
-	isp->isp_xflist = (XS_T **) malloc(len, M_DEVBUF, M_WAITOK);
-	bzero(isp->isp_xflist, len);
+	isp->isp_xflist = (XS_T **) malloc(len, M_DEVBUF, M_WAITOK | M_ZERO);
 	len = isp->isp_maxcmds * sizeof (vaddr_t);
-	sbc->sbus_kdma_allocs = (vaddr_t *) malloc(len, M_DEVBUF, M_WAITOK);
-	bzero(sbc->sbus_kdma_allocs, len);
+	sbc->sbus_kdma_allocs = (vaddr_t *) malloc(len, M_DEVBUF,
+	    M_WAITOK | M_ZERO);
 
 	/*
 	 * Allocate and map the request queue.
@@ -359,7 +461,7 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 	isp->isp_rquest_dma = (u_int32_t)
 	    kdvma_mapin((caddr_t)isp->isp_rquest, len, 0);
 	if (isp->isp_rquest_dma == 0) {
-		printf("%s: could not mapin request queue\n", isp->isp_name);
+		printf("%s: can't mapin request queue\n", isp->isp_name);
 		return (1);
 	}
 
@@ -375,9 +477,30 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 	isp->isp_result_dma = (u_int32_t)
 	    kdvma_mapin((caddr_t)isp->isp_result, len, 0);
 	if (isp->isp_result_dma == 0) {
-		printf("%s: could not mapin result queue\n", isp->isp_name);
+		printf("%s: can't mapin result queue\n", isp->isp_name);
 		return (1);
 	}
+
+	if (IS_FC(isp)) {
+		/*
+		 * Allocate and map the FC scratch area.
+		 */
+		len = ISP2100_SCRLEN;
+		FCPARAM(isp)->isp_scratch = malloc(len, M_DEVBUF, M_NOWAIT);
+		if (FCPARAM(isp)->isp_scratch == 0) {
+			printf("%s: cannot allocate FC scratch area\n",
+			    isp->isp_name);
+			return (1);
+		}
+		FCPARAM(isp)->isp_scdma = (u_int32_t)
+		    kdvma_mapin((caddr_t)FCPARAM(isp)->isp_scratch, len, 0);
+		if (FCPARAM(isp)->isp_scdma == 0) {
+			printf("%s: can't mapin FC scratch area\n",
+			    isp->isp_name);
+			return (1);
+		}
+	}
+
 	return (0);
 }
 
@@ -387,7 +510,7 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 
 static int
 isp_sbus_dmasetup(struct ispsoftc *isp, struct scsi_xfer *xs, ispreq_t *rq,
-    u_int16_t *iptrp, u_int16_t optr)
+    u_int32_t *iptrp, u_int32_t optr)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
 	ispreq_t *qe;
@@ -459,7 +582,7 @@ mbxsync:
 }
 
 static void
-isp_sbus_dmateardown(struct ispsoftc *isp, XS_T *xs, u_int16_t handle)
+isp_sbus_dmateardown(struct ispsoftc *isp, XS_T *xs, u_int32_t handle)
 {
 	struct isp_sbussoftc *sbc = (struct isp_sbussoftc *) isp;
 	vaddr_t kdvma;
@@ -481,7 +604,8 @@ isp_sbus_dmateardown(struct ispsoftc *isp, XS_T *xs, u_int16_t handle)
 static int
 isp_sbus_intr(void *arg)
 {
-	u_int16_t isr, sema, mbox;
+	u_int32_t isr;
+	u_int16_t sema, mbox;
 	struct ispsoftc *isp = (struct ispsoftc *)arg;
 
 	isp->isp_intcnt++;

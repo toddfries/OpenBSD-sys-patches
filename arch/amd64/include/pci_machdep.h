@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.3 2005/09/04 19:19:40 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.17 2011/01/04 21:17:49 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -36,44 +36,37 @@
  */
 
 /*
- * i386-specific PCI structure and type definitions.
+ * amd64-specific PCI structure and type definitions.
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
- *
- * Configuration tag; created from a {bus,device,function} triplet by
- * pci_make_tag(), and passed to pci_conf_read() and pci_conf_write().
- * We could instead always pass the {bus,device,function} triplet to
- * the read and write routines, but this would cause extra overhead.
- *
- * Mode 2 is historical and deprecated by the Revision 2.0 specification.
  */
-union x86_pci_tag_u {
-	u_int32_t mode1;
-	struct {
-		u_int16_t port;
-		u_int8_t enable;
-		u_int8_t forward;
-	} mode2;
-};
 
-extern struct x86_bus_dma_tag pci_bus_dma_tag;
+extern struct bus_dma_tag pci_bus_dma_tag;
 
 /*
  * Types provided to machine-independent PCI code
  */
 typedef void *pci_chipset_tag_t;
-typedef union x86_pci_tag_u pcitag_t;
-typedef int pci_intr_handle_t;
+typedef u_int32_t pcitag_t;
 
-#define	pci_intr_line(ih)	((ih) & 0xff)
+typedef struct {
+	pcitag_t tag;
+	int line, pin;
+} pci_intr_handle_t;
+
+#define	pci_intr_line(pc,ih)	((ih.line) & 0xff)
 
 /*
- * i386-specific PCI variables and functions.
+ * amd64-specific PCI variables and functions.
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
  */
-extern int pci_mode;
-int		pci_mode_detect(void);
-int		pci_bus_flags(void);
+extern bus_addr_t pci_mcfg_addr;
+extern int pci_mcfg_min_bus, pci_mcfg_max_bus;
+
 struct		pci_attach_args;
+
+extern struct extent *pciio_ex;
+extern struct extent *pcimem_ex;
+void		pci_init_extents(void);
 
 /*
  * Functions provided to machine-independent PCI code.
@@ -84,16 +77,19 @@ int		pci_bus_maxdevs(pci_chipset_tag_t, int);
 pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
+int		pci_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 		    pcireg_t);
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
+		    int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
+
+void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
 
 /*
  * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED
@@ -106,3 +102,10 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
  * controller on a PC.
  */
 #define	X86_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+
+/*
+ * PCI address space is shared with ISA, so avoid legacy ISA I/O
+ * registers.
+ */
+#define PCI_IO_START	0x400
+#define PCI_IO_END	0xffff

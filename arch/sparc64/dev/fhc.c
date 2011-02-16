@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: fhc.c,v 1.11 2004/09/28 18:37:43 jason Exp $	*/
+=======
+/*	$OpenBSD: fhc.c,v 1.17 2010/11/11 17:58:23 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)
@@ -173,8 +177,12 @@ fhc_alloc_bus_tag(struct fhc_softc *sc)
 	if (bt == NULL)
 		panic("fhc: couldn't alloc bus tag");
 
+<<<<<<< HEAD
 	bzero(bt, sizeof(*bt));
 	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dv.dv_xname);
+=======
+	strlcpy(bt->name, sc->sc_dv.dv_xname, sizeof(bt->name));
+>>>>>>> origin/master
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;
 	bt->asi = bt->parent->asi;

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wss.c,v 1.21 2002/03/14 01:26:56 millert Exp $	*/
+=======
+/*	$OpenBSD: wss.c,v 1.24 2010/06/30 11:21:35 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: wss.c,v 1.42 1998/01/19 22:18:23 augustss Exp $	*/
 
 /*
@@ -92,12 +96,12 @@ struct audio_hw_if wss_hw_if = {
 	ad1848_set_params,
 	ad1848_round_blocksize,
 	ad1848_commit_settings,
-	ad1848_dma_init_output,
-	ad1848_dma_init_input,
-	ad1848_dma_output,
-	ad1848_dma_input,
-	ad1848_halt_out_dma,
-	ad1848_halt_in_dma,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	ad1848_halt_output,
+	ad1848_halt_input,
 	NULL,
 	wss_getdev,
 	NULL,
@@ -109,7 +113,12 @@ struct audio_hw_if wss_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	ad1848_get_props,
+<<<<<<< HEAD
 	NULL,
+=======
+	ad1848_trigger_output,
+	ad1848_trigger_input,
+>>>>>>> origin/master
 	NULL
 };
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: brgphyreg.h,v 1.8 2003/10/22 09:39:29 jmc Exp $	*/
+=======
+/*	$OpenBSD: brgphyreg.h,v 1.15 2010/07/10 07:59:33 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000
@@ -178,25 +182,25 @@
 #define BRGPHY_DSP_PLL_BANDWIDTH		0x0A
 #define BRGPHY_DSP_PLL_PHASE_OFFSET		0x0B
 
-#define BRGPHYDSP_FILTER_DCOFFSET		0x0C00
-#define BRGPHY_DSP_FILTER_FEXT3			0x0B00
-#define BRGPHY_DSP_FILTER_FEXT2			0x0A00
-#define BRGPHY_DSP_FILTER_FEXT1			0x0900
-#define BRGPHY_DSP_FILTER_FEXT0			0x0800
-#define BRGPHY_DSP_FILTER_NEXT3			0x0700
-#define BRGPHY_DSP_FILTER_NEXT2			0x0600
-#define BRGPHY_DSP_FILTER_NEXT1			0x0500
-#define BRGPHY_DSP_FILTER_NEXT0			0x0400
-#define BRGPHY_DSP_FILTER_ECHO			0x0300
-#define BRGPHY_DSP_FILTER_DFE			0x0200
-#define BRGPHY_DSP_FILTER_FFE			0x0100
+#define BRGPHYDSP_FILTER_DCOFFSET	0x0C00
+#define BRGPHY_DSP_FILTER_FEXT3		0x0B00
+#define BRGPHY_DSP_FILTER_FEXT2		0x0A00
+#define BRGPHY_DSP_FILTER_FEXT1		0x0900
+#define BRGPHY_DSP_FILTER_FEXT0		0x0800
+#define BRGPHY_DSP_FILTER_NEXT3		0x0700
+#define BRGPHY_DSP_FILTER_NEXT2		0x0600
+#define BRGPHY_DSP_FILTER_NEXT1		0x0500
+#define BRGPHY_DSP_FILTER_NEXT0		0x0400
+#define BRGPHY_DSP_FILTER_ECHO		0x0300
+#define BRGPHY_DSP_FILTER_DFE		0x0200
+#define BRGPHY_DSP_FILTER_FFE		0x0100
 
-#define BRGPHY_DSP_CONTROL_ALL_FILTERS		0x1000
+#define BRGPHY_DSP_CONTROL_ALL_FILTERS	0x1000
 
-#define BRGPHY_DSP_SEL_CH_0			0x0000
-#define BRGPHY_DSP_SEL_CH_1			0x2000
-#define BRGPHY_DSP_SEL_CH_2			0x4000
-#define BRGPHY_DSP_SEL_CH_3			0x6000
+#define BRGPHY_DSP_SEL_CH_0		0x0000
+#define BRGPHY_DSP_SEL_CH_1		0x2000
+#define BRGPHY_DSP_SEL_CH_2		0x4000
+#define BRGPHY_DSP_SEL_CH_3		0x6000
 
 #define BRGPHY_MII_AUXCTL	0x18	/* AUX control */
 #define BRGPHY_AUXCTL_LOW_SQ	0x8000	/* Low squelch */
@@ -228,6 +232,9 @@
 #define BRGPHY_RES_100HD	0x0300	/* 100baseT half duplex */
 #define BRGPHY_RES_10FD		0x0200	/* 10baseT full duplex */
 #define BRGPHY_RES_10HD		0x0100	/* 10baseT half duplex */
+/* 5906 */
+#define BRGPHY_RES_100		0x0008	/* 100baseT */
+#define BRGPHY_RES_FULL		0x0001	/* full duplex */
 
 #define BRGPHY_MII_ISR		0x1A	/* interrupt status */
 #define BRGPHY_ISR_PSERR	0x4000	/* Pair swap error */
@@ -265,6 +272,121 @@
 
 #define BRGPHY_TEST1		0x1E
 #define BRGPHY_TEST1_TRIM_EN	0x0010
+<<<<<<< HEAD
+=======
+#define BRGPHY_TEST1_CRC_EN	0x8000
+
+#define BRGPHY_MII_TEST2	0x1F
+
+/*******************************************************/
+/* End: PHY register values for the 5706 PHY           */
+/*******************************************************/
+
+/*******************************************************/
+/* Begin: PHY register values for the 5708S SerDes PHY */
+/*******************************************************/
+
+#define BRGPHY_5708S_BMCR_2500			0x20
+
+/* Autoneg Next Page Transmit 1 Regiser */
+#define BRGPHY_5708S_ANEG_NXT_PG_XMIT1		0x0B
+#define BRGPHY_5708S_ANEG_NXT_PG_XMIT1_25G	0x0001
+
+/* Use the BLOCK_ADDR register to select the page for registers 0x10 to 0x1E */
+#define BRGPHY_5708S_BLOCK_ADDR			0x1f
+#define BRGPHY_5708S_DIG_PG0 			0x0000
+#define BRGPHY_5708S_DIG3_PG2			0x0002
+#define BRGPHY_5708S_TX_MISC_PG5		0x0005
+
+/* 5708S SerDes "Digital" Registers (page 0) */
+#define BRGPHY_5708S_PG0_1000X_CTL1		0x10
+#define BRGPHY_5708S_PG0_1000X_CTL1_FIBER_MODE	0x0001
+#define BRGPHY_5708S_PG0_1000X_CTL1_AUTODET_EN	0x0010
+
+#define BRGPHY_5708S_PG0_1000X_STAT1		0x14
+#define BRGPHY_5708S_PG0_1000X_STAT1_SGMII	0x0001
+#define BRGPHY_5708S_PG0_1000X_STAT1_LINK	0x0002
+#define BRGPHY_5708S_PG0_1000X_STAT1_FDX	0x0004
+#define BRGPHY_5708S_PG0_1000X_STAT1_SPEED_MASK	0x0018
+#define BRGPHY_5708S_PG0_1000X_STAT1_SPEED_10	(0x0 << 3)
+#define BRGPHY_5708S_PG0_1000X_STAT1_SPEED_100	(0x1 << 3)
+#define BRGPHY_5708S_PG0_1000X_STAT1_SPEED_1G	(0x2 << 3)
+#define BRGPHY_5708S_PG0_1000X_STAT1_SPEED_25G	(0x3 << 3)
+
+#define BRGPHY_5708S_PG0_1000X_CTL2		0x11
+#define BRGPHY_5708S_PG0_1000X_CTL2_PAR_DET_EN	0x0001
+
+/* 5708S SerDes "Digital 3" Registers (page 2) */
+#define BRGPHY_5708S_PG2_DIGCTL_3_0		0x10
+#define BRGPHY_5708S_PG2_DIGCTL_3_0_USE_IEEE	0x0001
+
+/* 5708S SerDes "TX Misc" Registers (page 5) */
+#define BRGPHY_5708S_PG5_2500STATUS1		0x10
+
+#define BRGPHY_5708S_PG5_TXACTL1		0x15
+#define BRGPHY_5708S_PG5_TXACTL1_VCM		0x30
+
+#define BRGPHY_5708S_PG5_TXACTL3		0x17
+
+/*******************************************************/
+/* End: PHY register values for the 5708S SerDes PHY   */
+/*******************************************************/
+>>>>>>> origin/master
+
+/*******************************************************/
+/* Begin: PHY register values for the 5709S SerDes PHY */
+/*******************************************************/
+
+/* 5709S SerDes "General Purpose Status" Registers */
+#define BRGPHY_BLOCK_ADDR_GP_STATUS		0x8120
+#define BRGPHY_GP_STATUS_TOP_ANEG_STATUS	0x1B
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_MASK	0x3F00
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_10	0x0000
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_100	0x0100
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_1G	0x0200
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_25G	0x0300
+#define BRGPHY_GP_STATUS_TOP_ANEG_SPEED_1GKX	0x0D00
+#define BRGPHY_GP_STATUS_TOP_ANEG_FDX		0x0008
+#define BRGPHY_GP_STATUS_TOP_ANEG_LINK_UP	0x0004
+#define BRGPHY_GP_STATUS_TOP_ANEG_CL73_COMP	0x0001
+
+/* 5709S SerDes "SerDes Digital" Registers */
+#define BRGPHY_BLOCK_ADDR_SERDES_DIG		0x8300
+#define BRGPHY_SERDES_DIG_1000X_CTL1		0x0010
+#define BRGPHY_SD_DIG_1000X_CTL1_AUTODET	0x0010
+#define BRGPHY_SD_DIG_1000X_CTL1_FIBER		0x0001
+
+/* 5709S SerDes "Over 1G" Registers */
+#define BRGPHY_BLOCK_ADDR_OVER_1G		0x8320
+#define BRGPHY_OVER_1G_UNFORMAT_PG1		0x19
+
+/* 5709S SerDes "Multi-Rate Backplane Ethernet" Registers */
+#define BRGPHY_BLOCK_ADDR_MRBE			0x8350
+#define BRGPHY_MRBE_MSG_PG5_NP			0x10
+#define BRGPHY_MRBE_MSG_PG5_NP_MBRE		0x0001
+#define BRGPHY_MRBE_MSG_PG5_NP_T2		0x0001
+
+/* 5709S SerDes "IEEE Clause 73 User B0" Registers */
+#define BRGPHY_BLOCK_ADDR_CL73_USER_B0		0x8370
+#define BRGPHY_CL73_USER_B0_MBRE_CTL1		0x12
+#define BRGPHY_CL73_USER_B0_MBRE_CTL1_NP_AFT_BP	0x2000
+#define BRGPHY_CL73_USER_B0_MBRE_CTL1_STA_MGR	0x4000
+#define BRGPHY_CL73_USER_B0_MBRE_CTL1_ANEG	0x8000
+
+/* 5709S SerDes "IEEE Clause 73 User B0" Registers */
+#define BRGPHY_BLOCK_ADDR_ADDR_EXT		0xFFD0
+
+/* 5709S SerDes "Combo IEEE 0" Registers */
+#define BRGPHY_BLOCK_ADDR_COMBO_IEEE0		0xFFE0
+
+#define BRGPHY_ADDR_EXT				0x1E
+#define BRGPHY_BLOCK_ADDR			0x1F
+
+#define BRGPHY_ADDR_EXT_AN_MMD			0x3800
+
+/*******************************************************/
+/* End: PHY register values for the 5709S SerDes PHY   */
+/*******************************************************/
 
 #define BRGPHY_INTRS	\
 	~(BRGPHY_IMR_LNK_CHG|BRGPHY_IMR_LSP_CHG|BRGPHY_IMR_DUP_CHG)

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: lkm.h,v 1.10 2002/01/07 19:23:32 ericj Exp $	*/
+=======
+/*	$OpenBSD: lkm.h,v 1.13 2008/11/07 02:23:04 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: lkm.h,v 1.12 1996/02/09 18:25:13 christos Exp $	*/
 
 /*
@@ -253,7 +257,7 @@ extern int lkmdispatch(struct lkm_table *, int);
  * be specified.  "cmd" is passed to each function so that a single
  * function can be used if desired.
  */
-#define	DISPATCH(lkmtp,cmd,ver,load,unload,stat)			\
+#define	DISPATCH(lkmtp,cmd,ver,load,unload,stat) do {			\
 	if (ver != LKM_VERSION)						\
 		return EINVAL;	/* version mismatch */			\
 	switch (cmd) {							\
@@ -272,7 +276,8 @@ extern int lkmdispatch(struct lkm_table *, int);
 			return error;					\
 		break;							\
 	}								\
-	return lkmdispatch(lkmtp, cmd);
+	return lkmdispatch(lkmtp, cmd);					\
+} while (/* CONSTCOND */ 0)
 
 #endif /* _KERNEL */
 

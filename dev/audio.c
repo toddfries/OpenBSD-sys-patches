@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: audio.c,v 1.53 2006/11/29 13:34:31 miod Exp $	*/
+=======
+/*	$OpenBSD: audio.c,v 1.111 2010/11/18 21:15:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -61,9 +65,6 @@
  *   and silence fill.
  */
 
-#include "audio.h"
-#if NAUDIO > 0
-
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
@@ -79,6 +80,7 @@
 #include <sys/conf.h>
 #include <sys/audioio.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <dev/audio_if.h>
 #include <dev/audiovar.h>
@@ -142,6 +144,11 @@ int	audio_drain(struct audio_softc *);
 void	audio_clear(struct audio_softc *);
 static __inline void audio_pint_silence(struct audio_softc *, struct audio_ringbuffer *, u_char *, int);
 
+int	audio_quiesce(struct audio_softc *);
+void	audio_resume(struct audio_softc *);
+void	audio_resume_to(void *);
+void	audio_resume_task(void *, void *);
+
 int	audio_alloc_ring(struct audio_softc *, struct audio_ringbuffer *, int, int);
 void	audio_free_ring(struct audio_softc *, struct audio_ringbuffer *);
 
@@ -150,7 +157,7 @@ int	audioprint(void *, const char *);
 int	audioprobe(struct device *, void *, void *);
 void	audioattach(struct device *, struct device *, void *);
 int	audiodetach(struct device *, int);
-int	audioactivate(struct device *, enum devact);
+int	audioactivate(struct device *, int);
 
 struct portname {
 	char	*name;
@@ -187,7 +194,7 @@ int	au_portof(struct audio_softc *, char *);
 
 /* The default audio mode: 8 kHz mono ulaw */
 struct audio_params audio_default =
-	{ 8000, AUDIO_ENCODING_ULAW, 8, 1, 0, 1 };
+	{ 8000, AUDIO_ENCODING_ULAW, 8, 1, 1, 1, 0, 1 };
 
 struct cfattach audio_ca = {
 	sizeof(struct audio_softc), audioprobe, audioattach,
@@ -286,8 +293,19 @@ audioattach(parent, self, aux)
 	/*
 	 * Set default softc params
 	 */
+<<<<<<< HEAD
 	sc->sc_pparams = audio_default;
 	sc->sc_rparams = audio_default;
+=======
+
+	if (hwp->get_default_params) {
+		hwp->get_default_params(hdlp, AUMODE_PLAY, &sc->sc_pparams);
+		hwp->get_default_params(hdlp, AUMODE_RECORD, &sc->sc_rparams);
+	} else {
+		sc->sc_pparams = audio_default;
+		sc->sc_rparams = audio_default;
+	}
+>>>>>>> origin/master
 
 	/* Set up some default values */
 	sc->sc_blkset = 0;
@@ -332,19 +350,32 @@ audioattach(parent, self, aux)
 	}
 	DPRINTF(("audio_attach: inputs ports=0x%x, output ports=0x%x\n",
 		 sc->sc_inports.allports, sc->sc_outports.allports));
+
+	timeout_set(&sc->sc_resume_to, audio_resume_to, sc);
 }
 
 int
+<<<<<<< HEAD
 audioactivate(self, act)
 	struct device *self;
 	enum devact act;
+=======
+audioactivate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct audio_softc *sc = (struct audio_softc *)self;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
+	case DVACT_QUIESCE:
+		audio_quiesce(sc);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		audio_resume(sc);
+		break;
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;
@@ -365,6 +396,8 @@ audiodetach(self, flags)
 
 	sc->sc_dying = 1;
 
+	timeout_del(&sc->sc_resume_to);
+	wakeup(&sc->sc_quiesce);
 	wakeup(&sc->sc_wchan);
 	wakeup(&sc->sc_rchan);
 	s = splaudio();
@@ -486,7 +519,6 @@ audio_attach_mi(ahwp, hdlp, dev)
 	return config_found(dev, &arg, audioprint);
 }
 
-#if NAUDIO > 0
 int
 audioprint(aux, pnp)
 	void *aux;
@@ -514,8 +546,6 @@ audioprint(aux, pnp)
 	return (UNCONF);
 }
 
-#endif /* NAUDIO > 0 */
-
 #ifdef AUDIO_DEBUG
 void	audio_printsc(struct audio_softc *);
 void	audio_print_params(char *, struct audio_params *);
@@ -538,8 +568,8 @@ audio_print_params(s, p)
 	char *s;
 	struct audio_params *p;
 {
-	printf("audio: %s sr=%ld, enc=%d, chan=%d, prec=%d\n", s,
-	    p->sample_rate, p->encoding, p->channels, p->precision);
+	printf("audio: %s sr=%ld, enc=%d, chan=%d, prec=%d bps=%d\n", s,
+	    p->sample_rate, p->encoding, p->channels, p->precision, p->bps);
 }
 #endif
 
@@ -859,9 +889,12 @@ audio_init_ringbuffer(rp)
 	rp->stamp_last = 0;
 	rp->drops = 0;
 	rp->pdrops = 0;
+<<<<<<< HEAD
 	rp->pause = 0;
 	rp->copying = 0;
 	rp->needfill = 0;
+=======
+>>>>>>> origin/master
 	rp->mmapped = 0;
 }
 
@@ -894,7 +927,7 @@ audio_initbufs(sc)
 	sc->sc_pnintr = 0;
 	sc->sc_pblktime = (u_long)(
 	    (u_long)sc->sc_pr.blksize * 100000 /
-	    (u_long)(sc->sc_pparams.precision / NBBY *
+	    (u_long)(sc->sc_pparams.bps *
 		sc->sc_pparams.channels *
 		sc->sc_pparams.sample_rate)) * 10;
 	DPRINTF(("audio: play blktime = %lu for %d\n",
@@ -902,7 +935,7 @@ audio_initbufs(sc)
 	sc->sc_rnintr = 0;
 	sc->sc_rblktime = (u_long)(
 	    (u_long)sc->sc_rr.blksize * 100000 /
-	    (u_long)(sc->sc_rparams.precision / NBBY *
+	    (u_long)(sc->sc_rparams.bps *
 		sc->sc_rparams.channels *
 		sc->sc_rparams.sample_rate)) * 10;
 	DPRINTF(("audio: record blktime = %lu for %d\n",
@@ -1023,8 +1056,20 @@ audio_open(dev, sc, flags, ifmt, p)
 	 */
 	if (ISDEVAUDIO(dev)) {
 		/* /dev/audio */
+<<<<<<< HEAD
 		sc->sc_rparams = audio_default;
 		sc->sc_pparams = audio_default;
+=======
+		if (sc->hw_if->get_default_params) {
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_PLAY,
+			    &sc->sc_pparams);
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_RECORD,
+			    &sc->sc_rparams);
+		} else {
+			sc->sc_rparams = audio_default;
+			sc->sc_pparams = audio_default;
+		}
+>>>>>>> origin/master
 	}
 #ifdef DIAGNOSTIC
 	/*
@@ -1044,10 +1089,22 @@ audio_open(dev, sc, flags, ifmt, p)
 	ai.record.encoding    = sc->sc_rparams.encoding;
 	ai.record.channels    = sc->sc_rparams.channels;
 	ai.record.precision   = sc->sc_rparams.precision;
+<<<<<<< HEAD
+=======
+	ai.record.bps         = sc->sc_rparams.bps;
+	ai.record.msb         = sc->sc_rparams.msb;
+	ai.record.pause	      = 0;
+>>>>>>> origin/master
 	ai.play.sample_rate   = sc->sc_pparams.sample_rate;
-	ai.play.encoding       = sc->sc_pparams.encoding;
+	ai.play.encoding      = sc->sc_pparams.encoding;
 	ai.play.channels      = sc->sc_pparams.channels;
 	ai.play.precision     = sc->sc_pparams.precision;
+<<<<<<< HEAD
+=======
+	ai.play.bps           = sc->sc_pparams.bps;
+	ai.play.msb           = sc->sc_pparams.msb;
+	ai.play.pause	      = 0;
+>>>>>>> origin/master
 	ai.mode		      = mode;
 	sc->sc_pr.blksize = sc->sc_rr.blksize = 0; /* force recalculation */
 	error = audiosetinfo(sc, &ai);
@@ -1134,12 +1191,6 @@ audio_drain(sc)
 	 * XXX This should be done some other way to avoid
 	 * playing silence.
 	 */
-#ifdef DIAGNOSTIC
-	if (cb->copying) {
-		printf("audio_drain: copying in progress!?!\n");
-		cb->copying = 0;
-	}
-#endif
 	drops = cb->drops;
 	error = 0;
 	s = splaudio();
@@ -1155,6 +1206,87 @@ audio_drain(sc)
 	}
 	splx(s);
 	return error;
+}
+
+int
+audio_quiesce(struct audio_softc *sc)
+{
+	sc->sc_quiesce = AUDIO_QUIESCE_START;
+
+	while (sc->sc_pbus && !sc->sc_pqui)
+		audio_sleep(&sc->sc_wchan, "audpqui");
+	while (sc->sc_rbus && !sc->sc_rqui)
+		audio_sleep(&sc->sc_rchan, "audrqui");
+
+	sc->sc_quiesce = AUDIO_QUIESCE_SILENT;
+
+	au_get_mute(sc, &sc->sc_outports, &sc->sc_mute);
+	au_set_mute(sc, &sc->sc_outports, 1);
+
+	if (sc->sc_pbus)
+		sc->hw_if->halt_output(sc->hw_hdl);
+	if (sc->sc_rbus)
+		sc->hw_if->halt_input(sc->hw_hdl);
+
+	return 0;
+}
+
+void
+audio_resume(struct audio_softc *sc)
+{
+	timeout_add_msec(&sc->sc_resume_to, 1500);
+}
+
+void
+audio_resume_to(void *v)
+{
+	struct audio_softc *sc = v;
+	workq_queue_task(NULL, &sc->sc_resume_task, 0,
+	    audio_resume_task, sc, 0);
+}
+
+void
+audio_resume_task(void *arg1, void *arg2)
+{
+	struct audio_softc *sc = arg1;
+	int setmode = 0;
+
+	sc->sc_pqui = sc->sc_rqui = 0;
+
+	au_set_mute(sc, &sc->sc_outports, sc->sc_mute);
+
+	if (sc->sc_pbus)
+		setmode |= AUMODE_PLAY;
+	if (sc->sc_rbus)
+		setmode |= AUMODE_RECORD;
+
+	if (setmode) {
+		sc->hw_if->set_params(sc->hw_hdl, setmode,
+		    sc->sc_mode & (AUMODE_PLAY | AUMODE_RECORD),
+		    &sc->sc_pparams, &sc->sc_rparams);
+	}
+
+	if (sc->sc_pbus) {
+		if (sc->hw_if->trigger_output)
+			sc->hw_if->trigger_output(sc->hw_hdl, sc->sc_pr.start,
+			    sc->sc_pr.end, sc->sc_pr.blksize,
+			    audio_pint, (void *)sc, &sc->sc_pparams);
+		else
+			sc->hw_if->start_output(sc->hw_hdl, sc->sc_pr.outp,
+			    sc->sc_pr.blksize, audio_pint, (void *)sc);
+	}
+	if (sc->sc_rbus) {
+		if (sc->hw_if->trigger_input)
+			sc->hw_if->trigger_input(sc->hw_hdl, sc->sc_rr.start,
+			    sc->sc_rr.end, sc->sc_rr.blksize,
+			    audio_rint, (void *)sc, &sc->sc_rparams);
+		else
+			sc->hw_if->start_input(sc->hw_hdl, sc->sc_rr.inp,
+			    sc->sc_rr.blksize, audio_rint, (void *)sc);
+	}
+
+	sc->sc_quiesce = 0;
+	wakeup(&sc->sc_quiesce);
 }
 
 /*
@@ -1235,13 +1367,21 @@ audio_read(dev, uio, ioflag)
 	struct audio_softc *sc = audio_cd.cd_devs[unit];
 	struct audio_ringbuffer *cb = &sc->sc_rr;
 	u_char *outp;
-	int error, s, used, cc, n;
+	int error, s, cc, n, resid;
 
 	if (cb->mmapped)
 		return EINVAL;
 
 	DPRINTFN(1,("audio_read: cc=%d mode=%d\n",
 	    uio->uio_resid, sc->sc_mode));
+
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qrd", 0);
 
 	error = 0;
 	/*
@@ -1280,7 +1420,7 @@ audio_read(dev, uio, ioflag)
 		}
 		return (error);
 	}
-	while (uio->uio_resid > 0 && !error) {
+	while (uio->uio_resid > 0) {
 		s = splaudio();
 		while (cb->used <= 0) {
 			if (!sc->sc_rbus) {
@@ -1303,12 +1443,11 @@ audio_read(dev, uio, ioflag)
 				return error;
 			}
 		}
-		used = cb->used;
+		resid = uio->uio_resid * sc->sc_rparams.factor;
 		outp = cb->outp;
-		cb->copying = 1;
-		splx(s);
-		cc = used - cb->usedlow; /* maximum to read */
+		cc = cb->used - cb->usedlow; /* maximum to read */
 		n = cb->end - outp;
+<<<<<<< HEAD
 		if (n < cc)
 			cc = n;	/* don't read beyond end of buffer */
 
@@ -1328,8 +1467,26 @@ audio_read(dev, uio, ioflag)
 		cb->used = used;
 		cb->copying = 0;
 		splx(s);
+=======
+		if (cc > n)
+			cc = n;		/* don't read beyond end of buffer */
+		
+		if (cc > resid)
+			cc = resid;	/* and no more than we want */
+		cb->used -= cc;
+		cb->outp += cc;
+		if (cb->outp >= cb->end)
+			cb->outp = cb->start;
+		splx(s);
+		DPRINTFN(1,("audio_read: outp=%p, cc=%d\n", outp, cc));
+		if (sc->sc_rparams.sw_code)
+			sc->sc_rparams.sw_code(sc->hw_hdl, outp, cc);
+		error = uiomove(outp, cc / sc->sc_rparams.factor, uio);
+		if (error)
+			return error;
+>>>>>>> origin/master
 	}
-	return (error);
+	return 0;
 }
 
 void
@@ -1372,9 +1529,18 @@ audio_calc_blksize(sc, mode)
 		rb = &sc->sc_rr;
 	}
 
+<<<<<<< HEAD
 	bs = parm->sample_rate * audio_blk_ms / 1000 *
 	     parm->channels * parm->precision / NBBY *
 	     parm->factor;
+=======
+	fs = parm->channels * parm->bps;
+	bs = fpb * fs;
+	maxbs = rb->bufsize / 2;
+	if (bs > maxbs)
+		bs = (maxbs / fs) * fs;
+
+>>>>>>> origin/master
 	ROUNDSIZE(bs);
 	if (hw->round_blocksize)
 		bs = hw->round_blocksize(sc->hw_hdl, bs);
@@ -1390,15 +1556,47 @@ audio_fill_silence(params, p, n)
 	u_char *p;
 	int n;
 {
+<<<<<<< HEAD
 	u_char auzero0, auzero1 = 0; /* initialize to please gcc */
 	int nfill = 1;
+=======
+	size_t rounderr;
+	int i, nsamples;
+	u_char auzero[4] = {0, 0, 0, 0};
+
+	/*
+	 * p may point the middle of a sample; round it to the
+	 * beginning of the sample, so we overwrite partially written
+	 * ones.
+	 */
+	rounderr = (p - start) % params->bps;
+	p -= rounderr;
+	n += rounderr;
+	nsamples = n / params->bps;
+>>>>>>> origin/master
 
 	switch (params->encoding) {
 	case AUDIO_ENCODING_ULAW:
 		auzero0 = 0x7f;
 		break;
 	case AUDIO_ENCODING_ALAW:
+<<<<<<< HEAD
 		auzero0 = 0x55;
+=======
+		auzero[0] = 0x55;
+		break;
+	case AUDIO_ENCODING_ULINEAR_LE:
+		if (params->msb == 1)
+			auzero[params->bps - 1] = 0x80;
+		else
+			auzero[params->bps - 1] = 1 << ((params->precision + 7) % NBBY);
+		break;
+	case AUDIO_ENCODING_ULINEAR_BE:
+		if (params->msb == 1)
+			auzero[0] = 0x80;
+		else
+			auzero[0] = 1 << ((params->precision + 7) % NBBY);
+>>>>>>> origin/master
 		break;
 	case AUDIO_ENCODING_MPEG_L1_STREAM:
 	case AUDIO_ENCODING_MPEG_L1_PACKETS:
@@ -1430,6 +1628,7 @@ audio_fill_silence(params, p, n)
 		auzero0 = 0;
 		break;
 	}
+<<<<<<< HEAD
 	if (nfill == 1) {
 		while (--n >= 0)
 			*p++ = auzero0; /* XXX memset */
@@ -1439,6 +1638,11 @@ audio_fill_silence(params, p, n)
 			*p++ = auzero1;
 			n -= 2;
 		}
+=======
+	while (--nsamples >= 0) {
+		for (i = 0; i < params->bps; i++) 
+			*p++ = auzero[i];
+>>>>>>> origin/master
 	}
 }
 
@@ -1472,14 +1676,22 @@ audio_write(dev, uio, ioflag)
 	int unit = AUDIOUNIT(dev);
 	struct audio_softc *sc = audio_cd.cd_devs[unit];
 	struct audio_ringbuffer *cb = &sc->sc_pr;
-	u_char *inp, *einp;
-	int saveerror, error, s, n, cc, used;
+	u_char *inp;
+	int error, s, n, cc, resid, avail;
 
 	DPRINTFN(2, ("audio_write: sc=%p(unit=%d) count=%d used=%d(hi=%d)\n", sc, unit,
 		 uio->uio_resid, sc->sc_pr.used, sc->sc_pr.usedhigh));
 
 	if (cb->mmapped)
 		return EINVAL;
+
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qwr", 0);
 
 	if (uio->uio_resid == 0) {
 		sc->sc_eof++;
@@ -1512,8 +1724,7 @@ audio_write(dev, uio, ioflag)
 	    sc->sc_pparams.precision, sc->sc_pparams.channels,
 	    sc->sc_pparams.sw_code, sc->sc_pparams.factor));
 
-	error = 0;
-	while (uio->uio_resid > 0 && !error) {
+	while (uio->uio_resid > 0) {
 		s = splaudio();
 		while (cb->used >= cb->usedhigh) {
 			DPRINTFN(2, ("audio_write: sleep used=%d lowat=%d hiwat=%d\n",
@@ -1530,55 +1741,42 @@ audio_write(dev, uio, ioflag)
 				return error;
 			}
 		}
-		used = cb->used;
+		resid = uio->uio_resid * sc->sc_pparams.factor;
+		avail = cb->end - cb->inp;
 		inp = cb->inp;
-		cb->copying = 1;
-		splx(s);
-		cc = cb->usedhigh - used;	/* maximum to write */
-		n = cb->end - inp;
-		if (sc->sc_pparams.factor != 1) {
-			/* Compensate for software coding expansion factor. */
-			n /= sc->sc_pparams.factor;
-			cc /= sc->sc_pparams.factor;
-		}
-		if (n < cc)
-			cc = n;			/* don't write beyond end of buffer */
-		if (uio->uio_resid < cc)
-			cc = uio->uio_resid;	/* and no more than we have */
-
-#ifdef DIAGNOSTIC
+		cc = cb->usedhigh - cb->used;
+		if (cc > resid)
+			cc = resid;
+		if (cc > avail)
+			cc = avail;
+		cb->inp += cc;
+		if (cb->inp >= cb->end)
+			cb->inp = cb->start;
+		cb->used += cc;
 		/*
-		 * This should never happen since the block size and and
-		 * block pointers are always nicely aligned.
+		 * This is a very suboptimal way of keeping track of
+		 * silence in the buffer, but it is simple.
 		 */
-		if (cc == 0) {
-			printf("audio_write: cc == 0, swcode=%p, factor=%d\n",
-			    sc->sc_pparams.sw_code, sc->sc_pparams.factor);
-			cb->copying = 0;
-			return EINVAL;
+		sc->sc_sil_count = 0;
+		if (!sc->sc_pbus && !cb->pause && cb->used >= cb->blksize) {
+			error = audiostartp(sc);
+			if (error) {
+				splx(s);
+				return error;
+			}
 		}
-#endif
+		splx(s);
+		cc /= sc->sc_pparams.factor;
 		DPRINTFN(1, ("audio_write: uiomove cc=%d inp=%p, left=%d\n",
 		    cc, inp, uio->uio_resid));
-		n = uio->uio_resid;
 		error = uiomove(inp, cc, uio);
-		cc = n - uio->uio_resid; /* number of bytes actually moved */
-#ifdef AUDIO_DEBUG
 		if (error)
-			printf("audio_write:(1) uiomove failed %d; cc=%d inp=%p\n",
-			    error, cc, inp);
-#endif
-		/*
-		 * Continue even if uiomove() failed because we may have
-		 * gotten a partial block.
-		 */
-
+			return 0;
 		if (sc->sc_pparams.sw_code) {
 			sc->sc_pparams.sw_code(sc->hw_hdl, inp, cc);
-			/* Adjust count after the expansion. */
-			cc *= sc->sc_pparams.factor;
 			DPRINTFN(1, ("audio_write: expanded cc=%d\n", cc));
 		}
+<<<<<<< HEAD
 
 		einp = cb->inp + cc;
 		if (einp >= cb->end)
@@ -1620,8 +1818,10 @@ audio_write(dev, uio, ioflag)
 			DPRINTFN(1, ("audio_write: fill %d\n", cc));
 			audio_fill_silence(&sc->sc_pparams, einp, cc);
 		}
+=======
+>>>>>>> origin/master
 	}
-	return (error);
+	return 0;
 }
 
 int
@@ -1638,6 +1838,15 @@ audio_ioctl(dev, cmd, addr, flag, p)
 	struct audio_offset *ao;
 	int error = 0, s, offs, fd;
 	int rbus, pbus;
+
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.  An ioctl may be used to determine how
+	 * much to read or write.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qio", 0);
 
 	DPRINTF(("audio_ioctl(%d,'%c',%d)\n",
 	    IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff));
@@ -1678,6 +1887,7 @@ audio_ioctl(dev, cmd, addr, flag, p)
 	/*
 	 * Number of read (write) samples dropped.  We don't know where or
 	 * when they were dropped.
+<<<<<<< HEAD
 	 */
 	case AUDIO_RERROR:
 		*(int *)addr = sc->sc_rr.drops;
@@ -1685,6 +1895,30 @@ audio_ioctl(dev, cmd, addr, flag, p)
 
 	case AUDIO_PERROR:
 		*(int *)addr = sc->sc_pr.drops;
+=======
+	 * 
+	 * The audio_ringbuffer->drops count is the number of buffer
+	 * sample size bytes.  Convert it to userland sample size bytes,
+	 * then convert to samples.  There is no easy way to get the
+	 * buffer sample size, but the userland sample size can be
+	 * calculated with userland channels and userland precision.
+	 *
+	 * original formula:
+	 *  sc->sc_rr.drops /
+	 *  sc->sc_rparams.factor /
+	 *  (sc->sc_rparams.channels * sc->sc_rparams.bps)
+	 */
+	case AUDIO_RERROR:
+		*(int *)addr = sc->sc_rr.drops /
+		    (sc->sc_rparams.factor * sc->sc_rparams.channels *
+		    sc->sc_rparams.bps);
+		break;
+
+	case AUDIO_PERROR:
+		*(int *)addr = sc->sc_pr.drops /
+		    (sc->sc_pparams.factor * sc->sc_pparams.channels *
+		    sc->sc_pparams.bps);
+>>>>>>> origin/master
 		break;
 
 	/*
@@ -1694,10 +1928,10 @@ audio_ioctl(dev, cmd, addr, flag, p)
 		s = splaudio();
 		/* figure out where next DMA will start */
 		ao = (struct audio_offset *)addr;
-		ao->samples = sc->sc_rr.stamp;
+		ao->samples = sc->sc_rr.stamp / sc->sc_rparams.factor;
 		ao->deltablks = (sc->sc_rr.stamp - sc->sc_rr.stamp_last) / sc->sc_rr.blksize;
 		sc->sc_rr.stamp_last = sc->sc_rr.stamp;
-		ao->offset = sc->sc_rr.inp - sc->sc_rr.start;
+		ao->offset = (sc->sc_rr.inp - sc->sc_rr.start) / sc->sc_rparams.factor;
 		splx(s);
 		break;
 
@@ -1708,10 +1942,10 @@ audio_ioctl(dev, cmd, addr, flag, p)
 		offs = sc->sc_pr.outp - sc->sc_pr.start + sc->sc_pr.blksize;
 		if (sc->sc_pr.start + offs >= sc->sc_pr.end)
 			offs = 0;
-		ao->samples = sc->sc_pr.stamp;
+		ao->samples = sc->sc_pr.stamp / sc->sc_pparams.factor;
 		ao->deltablks = (sc->sc_pr.stamp - sc->sc_pr.stamp_last) / sc->sc_pr.blksize;
 		sc->sc_pr.stamp_last = sc->sc_pr.stamp;
-		ao->offset = offs;
+		ao->offset = offs / sc->sc_pparams.factor;
 		splx(s);
 		break;
 
@@ -1801,7 +2035,6 @@ audio_selwakeup(struct audio_softc *sc, int play)
 	selwakeup(si);
 	if (sc->sc_async_audio)
 		psignal(sc->sc_async_audio, SIGIO);
-	KNOTE(&si->si_note, 0);
 }
 
 #define	AUDIO_FILTREAD(sc) ((sc->sc_mode & AUMODE_PLAY) ? \
@@ -2025,6 +2258,9 @@ audio_pint(v)
 	if (!sc->sc_open)
 		return;		/* ignore interrupt if not open */
 
+	if (sc->sc_pqui)
+		return;
+
 	blksize = cb->blksize;
 
 	add_audio_randomness((long)cb);
@@ -2071,6 +2307,7 @@ audio_pint(v)
 	cb->used -= blksize;
 	if (cb->used < blksize) {
 		/* we don't have a full block to use */
+<<<<<<< HEAD
 		if (cb->copying) {
 			/* writer is in progress, don't disturb */
 			cb->needfill = 1;
@@ -2095,7 +2332,26 @@ audio_pint(v)
 			/* Clear next block so we keep ahead of the DMA. */
 			if (cb->used + cc < cb->usedhigh)
 				audio_pint_silence(sc, cb, inp, blksize);
+=======
+		inp = cb->inp;
+		cc = blksize - (inp - cb->start) % blksize;
+		if (cb->pause)
+			cb->pdrops += cc;
+		else {
+			cb->drops += cc;
+			sc->sc_playdrop += cc;
+>>>>>>> origin/master
 		}
+		audio_pint_silence(sc, cb, inp, cc);
+		inp += cc;
+		if (inp >= cb->end)
+			inp = cb->start;
+		cb->inp = inp;
+		cb->used += cc;
+
+		/* Clear next block so we keep ahead of the DMA. */
+		if (cb->used + cc < cb->usedhigh)
+			audio_pint_silence(sc, cb, inp, blksize);
 	}
 
 	DPRINTFN(5, ("audio_pint: outp=%p cc=%d\n", cb->outp, blksize));
@@ -2118,6 +2374,17 @@ audio_pint(v)
 	/* Possible to return one or more "phantom blocks" now. */
 	if (!sc->sc_full_duplex && sc->sc_rchan)
 		audio_selwakeup(sc, 0);
+
+	/*
+	 * If quiesce requested, halt output when the ring buffer position
+	 * is at the beginning, because when the hardware is resumed, it's
+	 * buffer position is reset to the beginning.  This will put
+	 * hardware and software positions in sync across a suspend cycle.
+	 */
+	if (sc->sc_quiesce == AUDIO_QUIESCE_START && cb->outp == cb->start) {
+		sc->sc_pqui = 1;
+		audio_wakeup(&sc->sc_wchan);
+	}
 }
 
 /*
@@ -2137,6 +2404,9 @@ audio_rint(v)
 
 	if (!sc->sc_open)
 		return;		/* ignore interrupt if not open */
+
+	if (sc->sc_rqui)
+		return;
 
 	add_audio_randomness((long)cb);
 
@@ -2187,11 +2457,19 @@ audio_rint(v)
 		DPRINTFN(1, ("audio_rint: pdrops %lu\n", cb->pdrops));
 		cb->pdrops += blksize;
 		cb->outp += blksize;
+		if (cb->outp >= cb->end)
+			cb->outp = cb->start;
 		cb->used -= blksize;
+<<<<<<< HEAD
 	} else if (cb->used + blksize >= cb->usedhigh && !cb->copying) {
+=======
+	} else if (cb->used >= cb->usedhigh) {
+>>>>>>> origin/master
 		DPRINTFN(1, ("audio_rint: drops %lu\n", cb->drops));
 		cb->drops += blksize;
 		cb->outp += blksize;
+		if (cb->outp >= cb->end)
+			cb->outp = cb->start;
 		cb->used -= blksize;
 	}
 
@@ -2208,12 +2486,29 @@ audio_rint(v)
 	}
 
 	audio_selwakeup(sc, 0);
+
+	/*
+	 * If quiesce requested, halt input when the ring buffer position
+	 * is at the beginning, because when the hardware is resumed, it's
+	 * buffer position is reset to the beginning.  This will put
+	 * hardware and software positions in sync across a suspend cycle.
+	 */
+	if (sc->sc_quiesce == AUDIO_QUIESCE_START && cb->inp == cb->start) {
+		sc->sc_rqui = 1;
+		audio_wakeup(&sc->sc_rchan);
+	}
 }
 
 int
 audio_check_params(p)
 	struct audio_params *p;
 {
+	if (p->channels < 1 || p->channels > 12)
+		return (EINVAL);
+
+	if (p->precision < 8 || p->precision > 32)
+		return (EINVAL);
+
 	if (p->encoding == AUDIO_ENCODING_PCM16) {
 		if (p->precision == 8)
 			p->encoding = AUDIO_ENCODING_ULINEAR;
@@ -2244,15 +2539,18 @@ audio_check_params(p)
 	case AUDIO_ENCODING_ALAW:
 	case AUDIO_ENCODING_ADPCM:
 		if (p->precision != 8)
-			return (EINVAL);
+			p->precision = 8;
 		break;
 	case AUDIO_ENCODING_SLINEAR_LE:
 	case AUDIO_ENCODING_SLINEAR_BE:
 	case AUDIO_ENCODING_ULINEAR_LE:
 	case AUDIO_ENCODING_ULINEAR_BE:
+<<<<<<< HEAD
 		if (p->precision != 8 && p->precision != 16)
 			return (EINVAL);
 		break;
+=======
+>>>>>>> origin/master
 	case AUDIO_ENCODING_MPEG_L1_STREAM:
 	case AUDIO_ENCODING_MPEG_L1_PACKETS:
 	case AUDIO_ENCODING_MPEG_L1_SYSTEM:
@@ -2264,9 +2562,12 @@ audio_check_params(p)
 		return (EINVAL);
 	}
 
+<<<<<<< HEAD
 	if (p->channels < 1 || p->channels > 8)	/* sanity check # of channels */
 		return (EINVAL);
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
@@ -2581,6 +2882,22 @@ audiosetinfo(sc, ai)
 		rp.precision = r->precision;
 		nr++;
 	}
+	if (p->bps != ~0) {
+		pp.bps = p->bps;
+		np++;
+	}
+	if (r->bps != ~0) {
+		rp.bps = r->bps;
+		nr++;
+	}
+	if (p->msb != ~0) {
+		pp.msb = p->msb;
+		np++;
+	}
+	if (r->msb != ~0) {
+		rp.msb = r->msb;
+		nr++;
+	}
 	if (p->channels != ~0) {
 		pp.channels = p->channels;
 		np++;
@@ -2634,7 +2951,7 @@ audiosetinfo(sc, ai)
 		if (!indep) {
 			if (setmode == AUMODE_RECORD)
 				pp = rp;
-			else if (setmode == AUMODE_PLAY)
+			else
 				rp = pp;
 		}
 		error = hw->set_params(sc->hw_hdl, setmode,
@@ -2647,11 +2964,15 @@ audiosetinfo(sc, ai)
 				pp.encoding    = rp.encoding;
 				pp.channels    = rp.channels;
 				pp.precision   = rp.precision;
+				pp.bps         = rp.bps;
+				pp.msb         = rp.msb;
 			} else if (setmode == AUMODE_PLAY) {
 				rp.sample_rate = pp.sample_rate;
 				rp.encoding    = pp.encoding;
 				rp.channels    = pp.channels;
 				rp.precision   = pp.precision;
+				rp.bps         = pp.bps;
+				rp.msb         = pp.msb;
 			}
 		}
 		sc->sc_rparams = rp;
@@ -2665,6 +2986,48 @@ audiosetinfo(sc, ai)
 		audio_calc_blksize(sc, AUMODE_RECORD);
 		audio_calc_blksize(sc, AUMODE_PLAY);
 	}
+<<<<<<< HEAD
+=======
+	if (r->block_size != ~0) {
+		sc->sc_rr.blkset = 0;
+		if (!cleared)
+			audio_clear(sc);
+		cleared = 1;
+		nr++;
+	}
+	if (p->block_size != ~0) {
+		sc->sc_pr.blkset = 0;
+		if (!cleared)
+			audio_clear(sc);
+		cleared = 1;
+		np++;
+	}
+	if (nr) {
+		if (r->block_size == ~0 || r->block_size == 0) {
+			fpb = rp.sample_rate * audio_blk_ms / 1000;
+		} else {
+			fs = rp.channels * rp.bps; 
+			fpb = (r->block_size * rp.factor) / fs;
+		}
+		if (sc->sc_rr.blkset == 0)
+			audio_set_blksize(sc, AUMODE_RECORD, fpb);
+	}
+	if (np) {
+		if (p->block_size == ~0 || p->block_size == 0) {
+			fpb = pp.sample_rate * audio_blk_ms / 1000;
+		} else {
+			fs = pp.channels * pp.bps;
+			fpb = (p->block_size * pp.factor) / fs;
+		}
+		if (sc->sc_pr.blkset == 0)
+			audio_set_blksize(sc, AUMODE_PLAY, fpb);
+	}
+	if (r->block_size != ~0 && r->block_size != 0)
+		sc->sc_rr.blkset = 1;
+	if (p->block_size != ~0 && p->block_size != 0)
+		sc->sc_pr.blkset = 1;
+
+>>>>>>> origin/master
 #ifdef AUDIO_DEBUG
 	if (audiodebug > 1 && nr)
 	    audio_print_params("After setting record params", &sc->sc_rparams);
@@ -2842,6 +3205,10 @@ audiogetinfo(sc, ai)
 	r->channels = sc->sc_rparams.channels;
 	p->precision = sc->sc_pparams.precision;
 	r->precision = sc->sc_rparams.precision;
+	p->bps = sc->sc_pparams.bps;
+	r->bps = sc->sc_rparams.bps;
+	p->msb = sc->sc_pparams.msb;
+	r->msb = sc->sc_rparams.msb;
 	p->encoding = sc->sc_pparams.encoding;
 	r->encoding = sc->sc_rparams.encoding;
 
@@ -2941,7 +3308,7 @@ mixer_remove(sc, p)
 }
 
 /*
- * Signal all processes waitinf for the mixer.
+ * Signal all processes waiting for the mixer.
  */
 static void
 mixer_signal(sc)
@@ -2988,6 +3355,10 @@ mixer_ioctl(dev, cmd, addr, flag, p)
 
 	DPRINTF(("mixer_ioctl(%d,'%c',%d)\n",
 		 IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff));
+
+	/* Block when fully quiesced.  No need to block earlier. */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qmi", 0);
 
 	switch (cmd) {
 	case FIOASYNC:
@@ -3038,7 +3409,6 @@ mixer_ioctl(dev, cmd, addr, flag, p)
 		 IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff, error));
 	return (error);
 }
-#endif
 
 int
 audiokqfilter(dev, kn)
@@ -3107,7 +3477,11 @@ filt_audiowrite(struct knote *kn, long hint)
 	return AUDIO_FILTWRITE(sc);
 }
 
+<<<<<<< HEAD
 #if NAUDIO > 0 && NWSKBD_HOTKEY > 0
+=======
+#if NWSKBD > 0
+>>>>>>> origin/master
 int
 wskbd_get_mixerdev(struct audio_softc *sc, int dir, int *index)
 {
@@ -3264,4 +3638,8 @@ wskbd_set_mixervolume(int dir)
 
 	return (0);
 }
+<<<<<<< HEAD
 #endif /* NAUDIO > 0 && NWSKBD_HOTKEY > 0 */
+=======
+#endif /* NWSKBD > 0 */
+>>>>>>> origin/master

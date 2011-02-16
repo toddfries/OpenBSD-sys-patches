@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: pcdisplayvar.h,v 1.8 2006/11/29 19:11:15 miod Exp $ */
+=======
+/* $OpenBSD: pcdisplayvar.h,v 1.11 2010/08/28 12:48:14 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: pcdisplayvar.h,v 1.8 2000/01/25 02:44:03 ad Exp $ */
 
 /*
@@ -50,23 +54,19 @@ struct pcdisplay_handle {
 	bus_space_handle_t ph_ioh_6845, ph_memh;
 };
 
-static inline u_int8_t _pcdisplay_6845_read(struct pcdisplay_handle *,
-						 int);
+static inline u_int8_t _pcdisplay_6845_read(struct pcdisplay_handle *, int);
 static inline void _pcdisplay_6845_write(struct pcdisplay_handle *,
 					      int, u_int8_t);
 
-static inline u_int8_t _pcdisplay_6845_read(ph, reg)
-	struct pcdisplay_handle *ph;
-	int reg;
+static inline u_int8_t
+_pcdisplay_6845_read(struct pcdisplay_handle *ph, int reg)
 {
 	bus_space_write_1(ph->ph_iot, ph->ph_ioh_6845, MC6845_INDEX, reg);
 	return (bus_space_read_1(ph->ph_iot, ph->ph_ioh_6845, MC6845_DATA));
 }
 
-static inline void _pcdisplay_6845_write(ph, reg, val)
-	struct pcdisplay_handle *ph;
-	int reg;
-	u_int8_t val;
+static inline void
+_pcdisplay_6845_write(struct pcdisplay_handle *ph, int reg, u_int8_t val)
 {
 	bus_space_write_1(ph->ph_iot, ph->ph_ioh_6845, MC6845_INDEX, reg);
 	bus_space_write_1(ph->ph_iot, ph->ph_ioh_6845, MC6845_DATA, val);
@@ -79,15 +79,15 @@ static inline void _pcdisplay_6845_write(ph, reg, val)
 
 void	pcdisplay_cursor_init(struct pcdisplayscreen *, int);
 void	pcdisplay_cursor_reset(struct pcdisplayscreen *);
-void	pcdisplay_cursor(void *, int, int, int);
+int	pcdisplay_cursor(void *, int, int, int);
 #if 0
 unsigned int pcdisplay_mapchar_simple(void *, int);
 #endif
-int pcdisplay_mapchar(void *, int, unsigned int *);
-void	pcdisplay_putchar(void *, int, int, u_int, long);
+int	pcdisplay_mapchar(void *, int, unsigned int *);
+int	pcdisplay_putchar(void *, int, int, u_int, long);
 struct wsdisplay_charcell;
 int	pcdisplay_getchar(void *, int, int, struct wsdisplay_charcell *);
-void	pcdisplay_copycols(void *, int, int, int,int);
-void	pcdisplay_erasecols(void *, int, int, int, long);
-void	pcdisplay_copyrows(void *, int, int, int);
-void	pcdisplay_eraserows(void *, int, int, long);
+int	pcdisplay_copycols(void *, int, int, int,int);
+int	pcdisplay_erasecols(void *, int, int, int, long);
+int	pcdisplay_copyrows(void *, int, int, int);
+int	pcdisplay_eraserows(void *, int, int, long);

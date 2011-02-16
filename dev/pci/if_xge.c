@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_xge.c,v 1.36 2007/02/27 22:18:53 kettenis Exp $	*/
+=======
+/*	$OpenBSD: if_xge.c,v 1.52 2010/04/08 00:23:53 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -91,7 +95,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $");
 #include <dev/pci/pcidevs.h>
 
 #include <sys/lock.h>
-#include <sys/proc.h>
 
 #include <dev/pci/if_xgereg.h>
 
@@ -179,6 +182,7 @@ static uint64_t herc_dtx_cfg[] = {
 };
 
 struct xge_softc {
+<<<<<<< HEAD
 	struct device sc_dev;
 	struct arpcom sc_arpcom;
 #define sc_if sc_arpcom.ac_if
@@ -194,6 +198,24 @@ struct xge_softc {
 
 	struct ifmedia xena_media;
 	pcireg_t sc_pciregs[16];
+=======
+	struct device		sc_dev;
+	struct arpcom		sc_arpcom;
+	struct ifmedia		xena_media;
+
+	void			*sc_ih;
+
+	bus_dma_tag_t		sc_dmat;
+	bus_space_tag_t		sc_st;
+	bus_space_handle_t	sc_sh;
+	bus_space_tag_t		sc_txt;
+	bus_space_handle_t	sc_txh;
+
+	pcireg_t		sc_pciregs[16];
+
+	int			xge_type; /* chip type */
+	int			xge_if_flags;
+>>>>>>> origin/master
 
 	/* Transmit structures */
 	struct txd *sc_txd[NTXDESCS];	/* transmit frags array */
@@ -226,7 +248,6 @@ int xge_alloc_txmem(struct xge_softc *);
 int xge_alloc_rxmem(struct xge_softc *);
 void xge_start(struct ifnet *);
 void xge_stop(struct ifnet *, int);
-void xge_shutdown(void *);
 int xge_add_rxbuf(struct xge_softc *, int);
 void xge_setmulti(struct xge_softc *);
 void xge_setpromisc(struct xge_softc *);
@@ -307,7 +328,7 @@ struct cfattach xge_ca = {
 };
 
 struct cfdriver xge_cd = {
-	0, "xge", DV_IFNET
+	NULL, "xge", DV_IFNET
 };
 
 #define XNAME sc->sc_dev.dv_xname
@@ -658,8 +679,6 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_shutdownhook = shutdownhook_establish(xge_shutdown, sc);
-
 	/*
 	 * Setup interrupt vector before initializing.
 	 */
@@ -752,10 +771,12 @@ xge_init(struct ifnet *ifp)
 		return (1);
 	}
 
-	/* disable VLAN tag stripping */
-	val = PIF_RCSR(RX_PA_CFG);
-	val &= ~STRIP_VLAN_TAG;
-	PIF_WCSR(RX_PA_CFG, val);
+	if (!(ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)) {
+		/* disable VLAN tag stripping */
+		val = PIF_RCSR(RX_PA_CFG);
+		val &= ~STRIP_VLAN_TAG;
+		PIF_WCSR(RX_PA_CFG, val);
+	}
 
 	/* set MRU */
 #ifdef XGE_JUMBO
@@ -810,15 +831,6 @@ xge_stop(struct ifnet *ifp, int disable)
 
 	while ((PIF_RCSR(ADAPTER_STATUS) & QUIESCENT) != QUIESCENT)
 		;
-}
-
-void
-xge_shutdown(void *pv)
-{
-	struct xge_softc *sc = (struct xge_softc *)pv;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	xge_stop(ifp, 1);
 }
 
 int
@@ -943,9 +955,17 @@ xge_intr(void *pv)
 		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_UDP)
 			m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 
+#if NVLAN > 0
+		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_VLAN) {
+			m->m_pkthdr.ether_vtag =
+			    RXD_CTL2_VLANTAG(rxd->rxd_control2);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 
 		ether_input_mbuf(ifp, m);
@@ -961,16 +981,11 @@ int
 xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct xge_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq *ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -982,12 +997,7 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1004,28 +1014,23 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->xge_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->sc_arpcom)
-			: ether_delmulti(ifr, &sc->sc_arpcom);
 
-                if (error == ENETRESET) {
-                        if (ifp->if_flags & IFF_RUNNING)
-				xge_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->xena_media, cmd);
 		break;
+
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			xge_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1108,9 +1113,6 @@ xge_start(struct ifnet *ifp)
 	struct	mbuf *m;
 	uint64_t par, lcr;
 	int nexttx = 0, ntxd, error, i;
-#if NVLAN > 0
-	struct ifvlan *ifv = NULL;
-#endif
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1154,12 +1156,10 @@ xge_start(struct ifnet *ifp)
 		txd->txd_control2 = TXD_CTL2_UTIL;
 
 #if NVLAN > 0
-		if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-		    m->m_pkthdr.rcvif != NULL) {
-			ifv = m->m_pkthdr.rcvif->if_softc;
-
+		if (m->m_flags & M_VLANTAG) {
 			txd->txd_control2 |= TXD_CTL2_VLANE;
-			txd->txd_control2 |= TXD_CTL2_VLANT(ifv->ifv_tag);
+			txd->txd_control2 |=
+			    TXD_CTL2_VLANT(m->m_pkthdr.ether_vtag);
 		}
 #endif
 
@@ -1182,7 +1182,7 @@ xge_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 
 		sc->sc_nexttx = NEXTTX(nexttx);
@@ -1224,7 +1224,7 @@ xge_alloc_txmem(struct xge_softc *sc)
 	/* setup transmit array pointers */
 	txp = (struct txd *)kva;
 	txdp = seg.ds_addr;
-	for (txp = (struct txd *)kva, i = 0; i < NTXDESCS; i++) {
+	for (i = 0; i < NTXDESCS; i++) {
 		sc->sc_txd[i] = txp;
 		sc->sc_txdp[i] = txdp;
 		txp += NTXFRAGS;

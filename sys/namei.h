@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: namei.h,v 1.15 2005/06/18 18:09:43 millert Exp $	*/
+=======
+/*	$OpenBSD: namei.h,v 1.25 2010/09/09 10:37:04 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: namei.h,v 1.11 1996/02/09 18:25:20 christos Exp $	*/
 
 /*
@@ -36,6 +40,12 @@
 #define	_SYS_NAMEI_H_
 
 #include <sys/queue.h>
+#include <sys/tree.h>
+#include <sys/uio.h>
+
+struct namecache;
+struct namecache_rb_cache;
+RB_PROTOTYPE(namecache_rb_cache, namecache, n_rbcache, namecache_compare);
 
 /*
  * Encapsulation of namei parameters.
@@ -85,7 +95,10 @@ struct nameidata {
 		char	*cn_pnbuf;	/* pathname buffer */
 		char	*cn_nameptr;	/* pointer to looked up name */
 		long	cn_namelen;	/* length of looked up component */
+<<<<<<< HEAD
 		u_long	cn_hash;	/* hash value of looked up name */
+=======
+>>>>>>> origin/master
 		long	cn_consume;	/* chars to consume in lookup() */
 	} ni_cnd;
 };
@@ -150,17 +163,16 @@ struct nameidata {
 
 /*
  * This structure describes the elements in the cache of recent
- * names looked up by namei. NCHNAMLEN is sized to make structure
- * size a power of two to optimize malloc's. Minimum reasonable
- * size is 15.
+ * names looked up by namei.
  */
 
 #define	NCHNAMLEN	31	/* maximum name segment length we bother with */
 
 struct	namecache {
-	LIST_ENTRY(namecache) nc_hash;	/* hash chain */
-	LIST_ENTRY(namecache) nc_vhash;	/* (reverse) directory hash chain */
-	TAILQ_ENTRY(namecache) nc_lru;	/* LRU chain */
+	TAILQ_ENTRY(namecache) nc_lru;	/* Regular Entry LRU chain */
+	TAILQ_ENTRY(namecache) nc_neg;	/* Negative Entry LRU chain */
+	RB_ENTRY(namecache) n_rbcache;  /* Namecache rb tree from vnode */
+	TAILQ_ENTRY(namecache) nc_me;	/* ncp's referring to me */
 	struct	vnode *nc_dvp;		/* vnode of parent of name */
 	u_long	nc_dvpid;		/* capability number of nc_dvp */
 	struct	vnode *nc_vp;		/* vnode the name refers to */
@@ -172,8 +184,8 @@ struct	namecache {
 #ifdef _KERNEL
 extern u_long nextvnodeid;
 int	namei(struct nameidata *ndp);
-int	lookup(struct nameidata *ndp);
-int	relookup(struct vnode *dvp, struct vnode **vpp,
+int	vfs_lookup(struct nameidata *ndp);
+int	vfs_relookup(struct vnode *dvp, struct vnode **vpp,
 		      struct componentname *cnp);
 void cache_purge(struct vnode *);
 int cache_lookup(struct vnode *, struct vnode **, struct componentname *);
@@ -191,16 +203,18 @@ extern struct pool namei_pool;
  * Stats on usefulness of namei caches.
  */
 struct	nchstats {
-	long	ncs_goodhits;		/* hits that we can really use */
-	long	ncs_neghits;		/* negative hits that we can use */
-	long	ncs_badhits;		/* hits we must drop */
-	long	ncs_falsehits;		/* hits with id mismatch */
-	long	ncs_miss;		/* misses */
-	long	ncs_long;		/* long names that ignore cache */
-	long	ncs_pass2;		/* names found with passes == 2 */
-	long	ncs_2passes;		/* number of times we attempt it */
-	long    ncs_revhits;		/* reverse-cache hits */
-	long    ncs_revmiss;		/* reverse-cache misses */
+	u_int64_t	ncs_goodhits;	/* hits that we can really use */
+	u_int64_t	ncs_neghits;	/* negative hits that we can use */
+	u_int64_t	ncs_badhits;	/* hits we must drop */
+	u_int64_t	ncs_falsehits;	/* hits with id mismatch */
+	u_int64_t	ncs_miss;	/* misses */
+	u_int64_t	ncs_long;	/* long names that ignore cache */
+	u_int64_t	ncs_pass2;	/* names found with passes == 2 */
+	u_int64_t	ncs_2passes;	/* number of times we attempt it */
+	u_int64_t	ncs_revhits;	/* reverse-cache hits */
+	u_int64_t	ncs_revmiss;	/* reverse-cache misses */
+	u_int64_t	ncs_dothits;	/* hits on '.' lookups */
+	u_int64_t	ncs_dotdothits;	/* hits on '..' lookups */
 };
 
 /* These sysctl names are only really used by sysctl(8) */
@@ -214,19 +228,23 @@ struct	nchstats {
 #define KERN_NCHSTATS_2PASSES		8
 #define KERN_NCHSTATS_REVHITS           9
 #define KERN_NCHSTATS_REVMISS           10
-#define KERN_NCHSTATS_MAXID		11
+#define KERN_NCHSTATS_DOTHITS		11
+#define KERN_NCHSTATS_DOTDOTHITS	12
+#define KERN_NCHSTATS_MAXID		13
 
 #define CTL_KERN_NCHSTATS_NAMES {		\
 	{ 0, 0 },				\
-	{ "good_hits", CTLTYPE_INT },		\
-	{ "negative_hits", CTLTYPE_INT },	\
-	{ "bad_hits", CTLTYPE_INT },		\
-	{ "false_hits", CTLTYPE_INT },		\
-	{ "misses", CTLTYPE_INT },		\
-	{ "long_names", CTLTYPE_INT },		\
-	{ "pass2", CTLTYPE_INT },		\
-	{ "2passes", CTLTYPE_INT },		\
-	{ "ncs_revhits", CTLTYPE_INT },		\
-	{ "ncs_revmiss", CTLTYPE_INT },		\
+	{ "good_hits", CTLTYPE_QUAD },		\
+	{ "negative_hits", CTLTYPE_QUAD },	\
+	{ "bad_hits", CTLTYPE_QUAD },		\
+	{ "false_hits", CTLTYPE_QUAD },		\
+	{ "misses", CTLTYPE_QUAD },		\
+	{ "long_names", CTLTYPE_QUAD },		\
+	{ "pass2", CTLTYPE_QUAD },		\
+	{ "2passes", CTLTYPE_QUAD },		\
+	{ "ncs_revhits", CTLTYPE_QUAD },	\
+	{ "ncs_revmiss", CTLTYPE_QUAD },	\
+	{ "ncs_dothits", CTLTYPE_QUAD },	\
+	{ "nch_dotdothits", CTLTYPE_QUAD },	\
 }
 #endif /* !_SYS_NAMEI_H_ */

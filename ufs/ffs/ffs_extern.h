@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ffs_extern.h,v 1.28 2006/03/31 12:19:42 pedro Exp $	*/
+=======
+/*	$OpenBSD: ffs_extern.h,v 1.37 2010/12/21 20:14:44 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ffs_extern.h,v 1.4 1996/02/09 22:22:22 christos Exp $	*/
 
 /*
@@ -94,7 +98,9 @@ struct mbuf;
 struct cg;
 struct vop_vfree_args;
 
-__BEGIN_DECLS
+extern struct vops	ffs_vops;
+extern struct vops	ffs_specvops;
+extern struct vops	ffs_fifovops;
 
 /* ffs_alloc.c */
 int ffs_alloc(struct inode *, daddr_t, daddr_t , int, struct ucred *,
@@ -122,15 +128,22 @@ int ffs_update(struct inode *, struct timespec *, struct timespec *, int);
 int ffs_truncate(struct inode *, off_t, int, struct ucred *);
 
 /* ffs_subr.c */
-int ffs_bufatoff(struct inode *, off_t, char **, struct buf **);
+int  ffs_bufatoff(struct inode *, off_t, char **, struct buf **);
 void ffs_fragacct(struct fs *, int, int32_t[], int);
 #ifdef DIAGNOSTIC
 void	ffs_checkoverlap(struct buf *, struct inode *);
 #endif
+<<<<<<< HEAD
 int   ffs_isfreeblock(struct fs *, unsigned char *, daddr_t);
 int ffs_isblock(struct fs *, unsigned char *, daddr_t);
 void ffs_clrblock(struct fs *, u_char *, daddr_t);
 void ffs_setblock(struct fs *, unsigned char *, daddr_t);
+=======
+int  ffs_isfreeblock(struct fs *, u_char *, daddr64_t);
+int  ffs_isblock(struct fs *, u_char *, daddr64_t);
+void ffs_clrblock(struct fs *, u_char *, daddr64_t);
+void ffs_setblock(struct fs *, u_char *, daddr64_t);
+>>>>>>> origin/master
 
 /* ffs_vfsops.c */
 int ffs_mountroot(void);
@@ -186,13 +199,9 @@ void  softdep_setup_allocindir_page(struct inode *, ufs_lbn_t,
 void  softdep_fsync_mountdev(struct vnode *, int);
 int   softdep_sync_metadata(struct vop_fsync_args *);
 int   softdep_fsync(struct vnode *);
-__END_DECLS
 
-extern int (**ffs_vnodeop_p)(void *);
-extern int (**ffs_specop_p)(void *);
 #ifdef FIFO
-extern int (**ffs_fifoop_p)(void *);
-#define FFS_FIFOOPS ffs_fifoop_p
+#define FFS_FIFOOPS &ffs_fifovops
 #else
 #define FFS_FIFOOPS NULL
 #endif

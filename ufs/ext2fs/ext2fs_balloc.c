@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ext2fs_balloc.c,v 1.12 2003/05/26 18:33:16 tedu Exp $	*/
+=======
+/*	$OpenBSD: ext2fs_balloc.c,v 1.17 2009/09/05 17:23:43 jasper Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ext2fs_balloc.c,v 1.10 2001/07/04 21:16:01 chs Exp $	*/
 
 /*
@@ -60,15 +64,23 @@ ext2fs_buf_alloc(struct inode *ip, daddr_t bn, int size, struct ucred *cred,
     struct buf **bpp, int flags)
 {
 	struct m_ext2fs *fs;
+<<<<<<< HEAD
 	ufs1_daddr_t nb;
 	struct buf *bp, *nbp;
 	struct vnode *vp = ITOV(ip);
 	struct indir indirs[NIADDR + 2];
 	ufs1_daddr_t newb, lbn, *bap, pref;
+=======
+	struct buf *bp, *nbp;
+	struct vnode *vp = ITOV(ip);
+	struct indir indirs[NIADDR + 2];
+	int32_t nb, newb, *bap;
+>>>>>>> origin/master
 	int num, i, error;
 	u_int deallocated;
 	ufs1_daddr_t *allocib, *blkp, *allocblk, allociblk[NIADDR + 1];
 	int unwindidx = -1;
+	daddr64_t lbn, pref;
 
 	*bpp = NULL;
 	if (bn < 0)
@@ -265,7 +277,6 @@ fail:
 			    (int)fs->e2fs_bsize, NOCRED, &bp);
 			if (r) {
 				panic("Could not unwind indirect block, error %d", r);
-				brelse(bp);
 			} else {
 				bap = (ufs1_daddr_t *)bp->b_data;
 				bap[indirs[unwindidx].in_off] = 0;

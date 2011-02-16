@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot1.c,v 1.2 2006/10/11 17:18:10 drahn Exp $	*/
+/*	$OpenBSD: boot1.c,v 1.5 2010/12/06 22:51:46 jasper Exp $	*/
 /*	$NetBSD: boot1.c,v 1.1 2006/09/01 21:26:19 uwe Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -62,12 +55,12 @@ struct fs_ops file_system[] = {
 	{ ufs_open, ufs_close, ufs_read, ufs_write, ufs_seek,
 	  ufs_stat, ufs_readdir },
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw devsw[] = {
 	{ "dk", blkdevstrategy, blkdevopen, blkdevclose, noioctl },
 };
-int     ndevs = NENTS(devsw);
+int     ndevs = nitems(devsw);
 
 const char *
 boot1(uint32_t *sector)

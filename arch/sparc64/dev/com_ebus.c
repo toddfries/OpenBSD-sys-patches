@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: com_ebus.c,v 1.11 2005/06/06 01:08:47 miod Exp $	*/
+=======
+/*	$OpenBSD: com_ebus.c,v 1.20 2009/01/12 22:17:36 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: com_ebus.c,v 1.6 2001/07/24 19:27:10 eeh Exp $	*/
 
 /*
@@ -106,6 +110,8 @@ com_ebus_attach(parent, self, aux)
 	struct com_softc *sc = (void *)self;
 	struct ebus_attach_args *ea = aux;
 	int i, com_is_input, com_is_output;
+	int node, port;
+	char buf[32];
 
 	sc->sc_iobase = EBUS_PADDR_FROM_REG(&ea->ea_regs[0]);
 	/*
@@ -146,9 +152,35 @@ com_ebus_attach(parent, self, aux)
 		bus_intr_establish(sc->sc_iot, ea->ea_intrs[i],
 		    IPL_TTY, 0, comintr, sc, self->dv_xname);
 
-	/* Figure out if we're the console. */
-	com_is_input = (ea->ea_node == OF_instance_to_package(OF_stdin()));
-	com_is_output = (ea->ea_node == OF_instance_to_package(OF_stdout()));
+	/*
+	 * Figure out if we're the console.
+	 *
+	 * The Fujitsu SPARC Enterprise M4000/M5000/M8000/M9000 has a
+	 * serial port on each I/O board and a pseudo console that is
+	 * redirected to one of these serial ports.  The board number
+	 * of the serial port in question is encoded in the "tty-port#"
+	 * property of the pseudo console, so we figure out what our
+	 * board number is by walking up the device tree, and check
+	 * for a match.
+	 */
+
+	node = OF_instance_to_package(OF_stdin());
+	com_is_input = (ea->ea_node == node);
+	if (OF_getprop(node, "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "pseudo-console") == 0) {
+		port = getpropint(node, "tty-port#", -1);
+		node = OF_parent(OF_parent(ea->ea_node));
+		com_is_input = (getpropint(node, "board#", -2) == port);
+	}
+
+	node = OF_instance_to_package(OF_stdout());
+	com_is_output = (ea->ea_node == node);
+	if (OF_getprop(node, "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "pseudo-console") == 0) {
+		port = getpropint(node, "tty-port#", -1);
+		node = OF_parent(OF_parent(ea->ea_node));
+		com_is_output = (getpropint(node, "board#", -2) == port);
+	}
 
 	if (com_is_input || com_is_output) {
 		struct consdev *cn_orig;
@@ -172,6 +204,17 @@ com_ebus_attach(parent, self, aux)
 		if (com_is_output)
 			cn_tab->cn_putc = comcnputc;
 	}
+
+	/*
+	 * Apparently shoving too much data down the TX FIFO on the
+	 * Fujitsu SPARC Enterprise M4000/M5000 causes a hardware
+	 * fault.  Avoid this issue by setting the FIFO depth to 1.
+	 * This will effectively disable the TX FIFO, but will still
+	 * enable the RX FIFO, which is what we really care about.
+	 */
+	if (OF_getprop(ea->ea_node, "compatible", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "FJSV,su") == 0)
+		sc->sc_fifolen = 1;
 
         if (OF_getproplen(ea->ea_node, "keyboard") == 0)
 		printf(": keyboard");

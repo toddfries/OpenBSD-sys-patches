@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.10 2005/05/01 07:54:42 david Exp $
+#	$OpenBSD: RAMDISK,v 1.13 2010/09/26 20:39:08 miod Exp $
 #
 # MVMEPPC GENERIC config file
 #
@@ -49,7 +49,6 @@ isa*	at	pcib?
 #pckbc0		at isa?			# PC keyboard controller
 #pckbd*		at pckbc?		# PC keyboard
 #pms*		at pckbc?		# PS/2 mouse for wsmouse
-#pmsi*		at pckbc?		# PS/2 "Intelli"mouse for wsmouse
 #vga0		at isa?
 #vga*		at pci?
 #com*	at	isa? port 0x3f8 irq 4	# standard serial ports
@@ -81,7 +80,6 @@ sd0		at scsibus? target 0 lun 0
 #st*		at scsibus?
 #cd*		at scsibus?
 #ch*		at scsibus?
-#ss*		at scsibus?
 #uk*		at scsibus?
 
 pseudo-device	rd		1	# ram disk

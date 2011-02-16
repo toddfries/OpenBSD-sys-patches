@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_rtw_pci.c,v 1.6 2005/08/09 04:10:12 mickey Exp $	*/
+=======
+/*	$OpenBSD: if_rtw_pci.c,v 1.14 2010/08/29 16:47:00 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_rtw_pci.c,v 1.1 2004/09/26 02:33:36 dyoung Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -83,6 +80,7 @@
 
 int rtw_pci_enable(struct rtw_softc *);
 void rtw_pci_disable(struct rtw_softc *);
+int rtw_pci_detach(struct device *, int);
 
 /*
  * PCI configuration space registers used by the RTL8180L.
@@ -98,19 +96,27 @@ struct rtw_pci_softc {
 
 	pci_chipset_tag_t	psc_pc;		/* our PCI chipset */
 	pcitag_t		psc_pcitag;	/* our PCI tag */
+	bus_size_t		psc_mapsize;
 };
 
 int	rtw_pci_match(struct device *, void *, void *);
 void	rtw_pci_attach(struct device *, struct device *, void *);
 
 struct cfattach rtw_pci_ca = {
-	sizeof (struct rtw_pci_softc), rtw_pci_match, rtw_pci_attach
+	sizeof (struct rtw_pci_softc), rtw_pci_match, rtw_pci_attach,
+	    rtw_pci_detach, rtw_activate
 };
 
 const struct pci_matchid rtw_pci_products[] = {
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
+<<<<<<< HEAD
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
+=======
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D7010 },
+#endif
+>>>>>>> origin/master
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6001 },
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6020V3 },
 	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
 };
 
@@ -159,6 +165,7 @@ rtw_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr = NULL;
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
+	bus_size_t iosize, memsize;
 	int ioh_valid, memh_valid;
 	pcireg_t reg;
 	int pmreg;
@@ -217,17 +224,19 @@ rtw_pci_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	ioh_valid = (pci_mapreg_map(pa, RTW_PCI_IOBA,
 	    PCI_MAPREG_TYPE_IO, 0,
-	    &iot, &ioh, NULL, NULL, 0) == 0);
+	    &iot, &ioh, NULL, &iosize, 0) == 0);
 	memh_valid = (pci_mapreg_map(pa, RTW_PCI_MMBA,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &memt, &memh, NULL, NULL, 0) == 0);
+	    &memt, &memh, NULL, &memsize, 0) == 0);
 
 	if (memh_valid) {
 		regs->r_bt = memt;
 		regs->r_bh = memh;
+		psc->psc_mapsize = memsize;
 	} else if (ioh_valid) {
 		regs->r_bt = iot;
 		regs->r_bh = ioh;
+		psc->psc_mapsize = iosize;
 	} else {
 		printf(": unable to map device registers\n");
 		return;
@@ -262,4 +271,22 @@ rtw_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * Finish off the attach.
 	 */
 	rtw_attach(sc);
+}
+
+int
+rtw_pci_detach(struct device *self, int flags)
+{
+	struct rtw_pci_softc *psc = (void *)self;
+	struct rtw_softc *sc = &psc->psc_rtw;
+	struct rtw_regs *regs = &sc->sc_regs;
+	int rv;
+
+	rv = rtw_detach(sc);
+	if (rv)
+		return (rv);
+	if (psc->psc_intrcookie != NULL)
+		pci_intr_disestablish(psc->psc_pc, psc->psc_intrcookie);
+	bus_space_unmap(regs->r_bt, regs->r_bh, psc->psc_mapsize);
+
+	return (0);
 }

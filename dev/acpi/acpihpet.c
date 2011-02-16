@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: acpihpet.c,v 1.3 2007/02/20 22:25:45 marco Exp $	*/
+=======
+/* $OpenBSD: acpihpet.c,v 1.13 2011/01/10 13:36:57 mikeb Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -29,8 +33,11 @@
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 
+int acpihpet_attached;
+
 int acpihpet_match(struct device *, void *, void *);
 void acpihpet_attach(struct device *, struct device *, void *);
+int acpihpet_activate(struct device *, int);
 
 #ifdef __HAVE_TIMECOUNTER
 u_int acpihpet_gettime(struct timecounter *tc);
@@ -53,12 +60,31 @@ struct acpihpet_softc {
 };
 
 struct cfattach acpihpet_ca = {
-	sizeof(struct acpihpet_softc), acpihpet_match, acpihpet_attach
+	sizeof(struct acpihpet_softc),
+	acpihpet_match,
+	acpihpet_attach,
+	NULL,
+	acpihpet_activate
 };
 
 struct cfdriver acpihpet_cd = {
 	NULL, "acpihpet", DV_DULL
 };
+
+int
+acpihpet_activate(struct device *self, int act)
+{
+	struct acpihpet_softc *sc = (struct acpihpet_softc *) self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+		    HPET_CONFIGURATION, 1);
+		break;
+	}
+
+	return 0;
+}
 
 int
 acpihpet_match(struct device *parent, void *match, void *aux)
@@ -67,9 +93,9 @@ acpihpet_match(struct device *parent, void *match, void *aux)
 	struct acpi_table_header *hdr;
 
 	/*
-	 * If we do not have a table, it is not us
+	 * If we do not have a table, it is not us; attach only once
 	 */
-	if (aaa->aaa_table == NULL)
+	if (acpihpet_attached || aaa->aaa_table == NULL)
 		return (0);
 
 	/*
@@ -90,6 +116,11 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_attach_args *aaa = aux;
 	struct acpi_hpet *hpet = (struct acpi_hpet *)aaa->aaa_table;
 	u_int64_t period, freq;	/* timer period in femtoseconds (10^-15) */
+<<<<<<< HEAD
+=======
+	u_int32_t v1, v2;
+	int timeout;
+>>>>>>> origin/master
 
 	if (acpi_map_address(psc, &hpet->base_address, 0, HPET_REG_SIZE,
 	    &sc->sc_ioh, &sc->sc_iot))	{
@@ -97,6 +128,43 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+<<<<<<< HEAD
+=======
+	/*
+	 * Revisions 0x30 through 0x3a of the AMD SB700, with spread
+	 * spectrum enabled, have an SMM based HPET emulation that's
+	 * subtly broken.  The hardware is initialized upon first
+	 * access of the configuration register.  Initialization takes
+	 * some time during which the configuration register returns
+	 * 0xffffffff.
+	 */
+	timeout = 1000;
+	do {
+		if (bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		    HPET_CONFIGURATION) != 0xffffffff)
+			break;
+	} while(--timeout > 0);
+
+	if (timeout == 0) {
+		printf(": disabled\n");
+		return;
+	}
+
+	/* enable hpet */
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, HPET_CONFIGURATION, 1);
+
+	/* make sure hpet is working */
+	v1 = bus_space_read_4(sc->sc_iot, sc->sc_ioh, HPET_MAIN_COUNTER);
+	delay(1);
+	v2 = bus_space_read_4(sc->sc_iot, sc->sc_ioh, HPET_MAIN_COUNTER);
+	if (v1 == v2) {
+		printf(": counter not incrementing\n");
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+		    HPET_CONFIGURATION, 0);
+		return;
+	}
+
+>>>>>>> origin/master
 	period = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 	    HPET_CAPABILITIES + sizeof(u_int32_t));
 	freq =  1000000000000000ull / period;
@@ -109,6 +177,7 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, HPET_CONFIGURATION, 1);
 	tc_init(&hpet_timecounter);
 #endif
+	acpihpet_attached++;
 }
 
 #ifdef __HAVE_TIMECOUNTER

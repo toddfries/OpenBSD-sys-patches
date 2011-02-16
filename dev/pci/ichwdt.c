@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ichwdt.c,v 1.1 2005/05/02 17:26:00 grange Exp $	*/
+=======
+/*	$OpenBSD: ichwdt.c,v 1.3 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2005 Alexander Yurchenko <grange@openbsd.org>
@@ -102,7 +106,7 @@ ichwdt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = pa->pa_iot;
 	if (pci_mapreg_map(pa, ICH_WDT_BASE, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, NULL, 0)) {
-		printf(": failed to map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 

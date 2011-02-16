@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+=======
+/*	$OpenBSD: cmpcivar.h,v 1.7 2010/10/08 14:01:07 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cmpcivar.h,v 1.9 2005/12/11 12:22:48 christos Exp $	*/
 
 /*
@@ -172,6 +176,21 @@ typedef struct cmpci_dmanode *cmpci_dmapool_t;
 /*
  * softc
  */
+<<<<<<< HEAD
+=======
+
+	/* each channel */
+struct cmpci_channel {
+	void		(*intr)(void *);
+	void		*intr_arg;
+	int		md_divide;
+	int		bps;
+	int		blksize;
+	int		nblocks;
+	int		swpos;
+};
+
+>>>>>>> origin/master
 struct cmpci_softc {
 	struct device		sc_dev;
 

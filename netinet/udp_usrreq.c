@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udp_usrreq.c,v 1.111 2006/11/27 11:00:12 claudio Exp $	*/
+=======
+/*	$OpenBSD: udp_usrreq.c,v 1.138 2010/09/24 14:50:30 hsuenaga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -74,6 +78,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -102,6 +107,21 @@
 
 extern int ip6_defhlim;
 #endif /* INET6 */
+
+#include "faith.h"
+#if NFAITH > 0
+#include <net/if_types.h>
+#endif
+
+#include "pf.h"
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
+
+#ifdef PIPEX 
+#include <netinet/if_ether.h>
+#include <net/pipex.h>
+#endif
 
 /*
  * UDP protocol implementation.
@@ -137,13 +157,11 @@ udp_init()
 
 #ifdef INET6
 int
-udp6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;
+udp6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
 
-#if defined(NFAITH) && 0 < NFAITH
+#if NFAITH > 0
 	if (m->m_pkthdr.rcvif) {
 		if (m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
 			/* XXX send icmp6 host/port unreach? */
@@ -163,7 +181,7 @@ udp_input(struct mbuf *m, ...)
 {
 	struct ip *ip;
 	struct udphdr *uh;
-	struct inpcb *inp;
+	struct inpcb *inp = NULL;
 	struct mbuf *opts = NULL;
 	struct ip save_ip;
 	int iphlen, len;
@@ -281,9 +299,21 @@ udp_input(struct mbuf *m, ...)
 			udpstat.udps_nosum++;
 			goto bad;
 		}
-		if ((uh->uh_sum = in6_cksum(m, IPPROTO_UDP, iphlen, len))) {
-			udpstat.udps_badsum++;
-			goto bad;
+		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_OK) == 0) {
+			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_BAD) {
+				udpstat.udps_badsum++;
+				udpstat.udps_inhwcsum++;
+				goto bad;
+			}
+
+			if ((uh->uh_sum = in6_cksum(m, IPPROTO_UDP,
+			    iphlen, len))) {
+				udpstat.udps_badsum++;
+				goto bad;
+			}
+		} else {
+			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_IN_OK;
+			udpstat.udps_inhwcsum++;
 		}
 	} else
 #endif /* INET6 */
@@ -423,6 +453,9 @@ udp_input(struct mbuf *m, ...)
 			if (!ip6 && (inp->inp_flags & INP_IPV6))
 				continue;
 #endif
+			if (rtable_l2(inp->inp_rtableid) !=
+			    rtable_l2(m->m_pkthdr.rdomain))
+				continue;
 			if (inp->inp_lport != uh->uh_dport)
 				continue;
 #ifdef INET6
@@ -486,7 +519,7 @@ udp_input(struct mbuf *m, ...)
 			 * not have either the SO_REUSEPORT or SO_REUSEADDR
 			 * socket options set.  This heuristic avoids searching
 			 * through all pcbs in the common case of a non-shared
-			 * port.  It * assumes that an application will never
+			 * port.  It assumes that an application will never
 			 * clear these options after setting them.
 			 */
 			if ((last->inp_socket->so_options & (SO_REUSEPORT |
@@ -523,14 +556,27 @@ udp_input(struct mbuf *m, ...)
 	/*
 	 * Locate pcb for datagram.
 	 */
+#if 0
+	if (m->m_pkthdr.pf.statekey)
+		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
+#endif
+	if (inp == NULL) {
 #ifdef INET6
-	if (ip6)
-		inp = in6_pcbhashlookup(&udbtable, &ip6->ip6_src, uh->uh_sport,
-		    &ip6->ip6_dst, uh->uh_dport);
-	else
+		if (ip6)
+			inp = in6_pcbhashlookup(&udbtable, &ip6->ip6_src,
+			    uh->uh_sport, &ip6->ip6_dst, uh->uh_dport);
+		else
 #endif /* INET6 */
-	inp = in_pcbhashlookup(&udbtable, ip->ip_src, uh->uh_sport,
-	    ip->ip_dst, uh->uh_dport);
+		inp = in_pcbhashlookup(&udbtable, ip->ip_src, uh->uh_sport,
+		    ip->ip_dst, uh->uh_dport, m->m_pkthdr.rdomain);
+#if NPF > 0
+		if (m->m_pkthdr.pf.statekey && inp) {
+			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
+			    inp;
+			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
+		}
+#endif
+	}
 	if (inp == 0) {
 		int	inpl_reverse = 0;
 #if NPF > 0
@@ -548,7 +594,12 @@ udp_input(struct mbuf *m, ...)
 		} else
 #endif /* INET6 */
 		inp = in_pcblookup_listen(&udbtable,
+<<<<<<< HEAD
 		    ip->ip_dst, uh->uh_dport, inpl_reverse);
+=======
+		    ip->ip_dst, uh->uh_dport, inpl_reverse, m,
+		    m->m_pkthdr.rdomain);
+>>>>>>> origin/master
 		if (inp == 0) {
 			udpstat.udps_noport++;
 			if (m->m_flags & (M_BCAST | M_MCAST)) {
@@ -577,7 +628,8 @@ udp_input(struct mbuf *m, ...)
 	s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi,
+		    &tdbi->dst, tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, srcsa.sa.sa_family, iphlen, &error,
@@ -633,6 +685,27 @@ udp_input(struct mbuf *m, ...)
 #endif /* INET6 */
 	if (ip && (inp->inp_flags & INP_CONTROLOPTS))
 		ip_savecontrol(inp, &opts, ip, m);
+<<<<<<< HEAD
+=======
+	if (ip && (inp->inp_flags & INP_RECVDSTPORT)) {
+		struct mbuf **mp = &opts;
+
+		while (*mp)
+			mp = &(*mp)->m_next;
+		*mp = sbcreatecontrol((caddr_t)&uh->uh_dport, sizeof(u_int16_t),
+		    IP_RECVDSTPORT, IPPROTO_IP);
+	}
+#ifdef PIPEX
+	if (inp->inp_pipex) {
+		struct pipex_session *session;
+		int off = iphlen + sizeof(struct udphdr);
+		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
+			if ((m = pipex_l2tp_input(m, off, session)) == NULL)
+				return; /* the packet is handled by PIPEX */
+		}
+	}
+#endif
+>>>>>>> origin/master
 
 	iphlen += sizeof(struct udphdr);
 	m_adj(m, iphlen);
@@ -652,10 +725,15 @@ bad:
  * Notify a udp user of an asynchronous error;
  * just wake up so that he can collect error status.
  */
+<<<<<<< HEAD
 static void
 udp_notify(inp, errno)
 	struct inpcb *inp;
 	int errno;
+=======
+void
+udp_notify(struct inpcb *inp, int errno)
+>>>>>>> origin/master
 {
 	inp->inp_socket->so_error = errno;
 	sorwakeup(inp->inp_socket);
@@ -664,10 +742,7 @@ udp_notify(inp, errno)
 
 #ifdef INET6
 void
-udp6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 {
 	struct udphdr uh;
 	struct sockaddr_in6 sa6;
@@ -825,10 +900,7 @@ udp6_ctlinput(cmd, sa, d)
 #endif
 
 void *
-udp_ctlinput(cmd, sa, v)
-	int cmd;
-	struct sockaddr *sa;
-	void *v;
+udp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	struct ip *ip = v;
 	struct udphdr *uhp;
@@ -863,16 +935,17 @@ udp_ctlinput(cmd, sa, v)
 		/* PMTU discovery for udpencap */
 		if (cmd == PRC_MSGSIZE && ip_mtudisc && udpencap_enable &&
 		    udpencap_port && uhp->uh_sport == htons(udpencap_port)) {
-			udpencap_ctlinput(cmd, sa, v);
+			udpencap_ctlinput(cmd, sa, rdomain, v);
 			return (NULL);
 		}
 #endif
 		inp = in_pcbhashlookup(&udbtable,
-		    ip->ip_dst, uhp->uh_dport, ip->ip_src, uhp->uh_sport);
+		    ip->ip_dst, uhp->uh_dport, ip->ip_src, uhp->uh_sport,
+		    rdomain);
 		if (inp && inp->inp_socket != NULL)
 			notify(inp, errno);
 	} else
-		in_pcbnotifyall(&udbtable, sa, errno, notify);
+		in_pcbnotifyall(&udbtable, sa, rdomain, errno, notify);
 	return (NULL);
 }
 
@@ -933,7 +1006,7 @@ udp_output(struct mbuf *m, ...)
 	 * for UDP and IP headers.
 	 */
 	M_PREPEND(m, sizeof(struct udpiphdr), M_DONTWAIT);
-	if (m == 0) {
+	if (m == NULL) {
 		error = ENOBUFS;
 		goto bail;
 	}
@@ -968,10 +1041,16 @@ udp_output(struct mbuf *m, ...)
 	((struct ip *)ui)->ip_tos = inp->inp_ip.ip_tos;
 
 	udpstat.udps_opackets++;
+
+	/* force routing domain */
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
+
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    inp->inp_socket->so_options &
 	    (SO_DONTROUTE | SO_BROADCAST | SO_JUMBO),
 	    inp->inp_moptions, inp);
+	if (error == EACCES)	/* translate pf(4) error for userland */
+		error = EHOSTUNREACH;
 
 bail:
 	if (addr) {
@@ -993,11 +1072,16 @@ release:
 #ifdef INET6
 /*ARGSUSED*/
 int
+<<<<<<< HEAD
 udp6_usrreq(so, req, m, addr, control, p)
 	struct socket *so;
 	int req;
 	struct mbuf *m, *addr, *control;
 	struct proc *p;
+=======
+udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
+    struct mbuf *control, struct proc *p)
+>>>>>>> origin/master
 {
 
 	return udp_usrreq(so, req, m, addr, control);
@@ -1144,6 +1228,28 @@ udp_usrreq(so, req, m, addr, control)
 		break;
 
 	case PRU_SEND:
+#ifdef PIPEX
+		if (inp->inp_pipex) {
+			struct pipex_session *session;
+#ifdef INET6
+			if (inp->inp_flags & INP_IPV6)
+				session =
+				    pipex_l2tp_userland_lookup_session_ipv6(
+					m, inp->inp_faddr6);
+			else
+#endif
+				session =
+				    pipex_l2tp_userland_lookup_session_ipv4(
+					m, inp->inp_faddr);
+			if (session != NULL)
+				if ((m = pipex_l2tp_userland_output(
+				    m, session)) == NULL) {
+					error = ENOMEM;
+					goto release;
+				}
+		}
+#endif
+
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			return (udp6_output(inp, m, addr, control));
@@ -1211,9 +1317,14 @@ release:
 	return (error);
 }
 
+<<<<<<< HEAD
 static void
 udp_detach(inp)
 	struct inpcb *inp;
+=======
+void
+udp_detach(struct inpcb *inp)
+>>>>>>> origin/master
 {
 	int s = splsoftnet();
 
@@ -1225,13 +1336,8 @@ udp_detach(inp)
  * Sysctl for udp variables.
  */
 int
-udp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
+udp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen)
 {
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)

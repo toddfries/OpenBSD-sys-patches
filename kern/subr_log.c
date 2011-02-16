@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: subr_log.c,v 1.13 2005/04/20 00:08:50 deraadt Exp $	*/
+=======
+/*	$OpenBSD: subr_log.c,v 1.16 2009/11/09 17:53:39 nicm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: subr_log.c,v 1.11 1996/03/30 22:24:44 christos Exp $	*/
 
 /*
@@ -263,7 +267,6 @@ logwakeup(void)
 		wakeup(msgbufp);
 		logsoftc.sc_state &= ~LOG_RDWAIT;
 	}
-	KNOTE(&logsoftc.sc_selp.si_note, 0);
 }
 
 /*ARGSUSED*/

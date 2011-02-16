@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.c,v 1.3 2006/10/12 12:14:17 krw Exp $	*/
+/*	$OpenBSD: biosdev.c,v 1.9 2010/08/11 13:11:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -42,8 +42,10 @@
 static const char *biosdisk_err(u_int);
 static int biosdisk_errno(u_int);
 
-static int CHS_rw (int, int, int, int, int, int, void *);
+int CHS_rw (int, int, int, int, int, int, void *);
 static int EDD_rw (int, int, u_int64_t, u_int32_t, void *);
+
+static daddr_t findopenbsd(bios_diskinfo_t *, daddr_t, const char **, int *);
 
 extern int debug;
 int bios_bootdev;
@@ -121,14 +123,6 @@ bios_getdiskinfo(int dev, bios_diskinfo_t *pdi)
 	pdi->bios_cylinders &= 0x3ff;
 	pdi->bios_cylinders++;
 
-	/* Sanity check */
-	if (!pdi->bios_cylinders || !pdi->bios_heads || !pdi->bios_sectors)
-		return(1);
-
-	/* CD-ROMs sometimes return heads == 1 */
-	if (pdi->bios_heads < 2)
-		return(1);
-
 	/* NOTE:
 	 * This currently hangs/reboots some machines
 	 * The IBM ThinkPad 750ED for one.
@@ -170,13 +164,25 @@ bios_getdiskinfo(int dev, bios_diskinfo_t *pdi)
 	} else
 		pdi->bios_edd = -1;
 
+	/* Skip sanity check for CHS options in EDD mode. */
+	if (pdi->bios_edd != -1)
+		return 0;
+
+	/* Sanity check */
+	if (!pdi->bios_cylinders || !pdi->bios_heads || !pdi->bios_sectors)
+		return(1);
+
+	/* CD-ROMs sometimes return heads == 1 */
+	if (pdi->bios_heads < 2)
+		return(1);
+
 	return(0);
 }
 
 /*
  * Read/Write a block from given place using the BIOS.
  */
-static __inline int
+int
 CHS_rw(int rw, int dev, int cyl, int head, int sect, int nsect, void *buf)
 {
 	int rv;
@@ -335,37 +341,83 @@ biosd_io(int rw, bios_diskinfo_t *bd, daddr_t off, int nsect, void *buf)
 /*
  * Try to read the bsd label on the given BIOS device
  */
+static daddr_t
+findopenbsd(bios_diskinfo_t *bd, daddr_t mbroff, const char **err, int *n)
+{
+	int error, i;
+	struct dos_mbr mbr;
+	struct dos_partition *dp;
+	daddr_t off;
+
+	/* Limit the number of recursions */
+	if (!(*n)--) {
+		*err = "too many extended partitions";
+		return (-1);
+	}
+
+	/* Read MBR */
+	error = biosd_io(F_READ, bd, mbroff, 1, &mbr);
+	if (error) {
+		*err = biosdisk_err(error);
+		return (-1);
+	}
+
+	/* check mbr signature */
+	if (mbr.dmbr_sign != DOSMBR_SIGNATURE) {
+		*err = "bad MBR signature\n";
+		return (-1);
+	}
+
+	/* Search for OpenBSD partition */
+	for (i = 0; i < NDOSPART; i++) {
+		dp = &mbr.dmbr_parts[i];
+		if (!dp->dp_size)
+			continue;
+#ifdef BIOS_DEBUG
+		if (debug)
+			printf("found partition %u: "
+			    "type %u (0x%x) offset %u (0x%x)\n",
+			    (int)(dp - mbr.dmbr_parts),
+			    dp->dp_typ, dp->dp_typ,
+			    dp->dp_start, dp->dp_start);
+#endif
+		if (dp->dp_typ == DOSPTYP_OPENBSD) {
+			return (dp->dp_start + mbroff);
+		} else if (dp->dp_typ == DOSPTYP_EXTEND ||
+		    dp->dp_typ == DOSPTYP_EXTENDL) {
+			off = findopenbsd(bd, dp->dp_start + mbroff, err, n);
+			if (off != -1)
+				return (off);
+		}
+	}
+
+	return (-1);
+}
+
 const char *
 bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 {
-	daddr_t off = LABELSECTOR;
+	daddr_t off = 0;
 	char *buf;
-	struct dos_mbr mbr;
-	int error, i;
+	const char *err = NULL;
+	int error;
+	int n = 8;
 
 	/* Sanity check */
-	if(bd->bios_heads == 0 || bd->bios_sectors == 0)
+	if (bd->bios_edd == -1 &&
+	    (bd->bios_heads == 0 || bd->bios_sectors == 0))
 		return("failed to read disklabel");
 
 	/* MBR is a harddisk thing */
 	if (bd->bios_number & 0x80) {
-		/* Read MBR */
-		error = biosd_io(F_READ, bd, DOSBBSECTOR, 1, &mbr);
-		if (error)
-			return(biosdisk_err(error));
-
-		/* check mbr signature */
-		if (mbr.dmbr_sign != DOSMBR_SIGNATURE)
-			return("bad MBR signature\n");
-
-		/* Search for OpenBSD partition */
-		for (off = 0, i = 0; off == 0 && i < NDOSPART; i++)
-			if (mbr.dmbr_parts[i].dp_typ == DOSPTYP_OPENBSD)
-				off = mbr.dmbr_parts[i].dp_start + LABELSECTOR;
-		if (off == 0)
-			return("no OpenBSD partition\n");
-	} else
-		off = LABELSECTOR;
+		off = findopenbsd(bd, DOSBBSECTOR, &err, &n);
+		if (off == -1) {
+			if (err != NULL)
+				return (err);
+ 			return "no OpenBSD partition\n";
+		}
+	}
+	off = LABELSECTOR + off;
 
 	/* Load BSD disklabel */
 	buf = alloca(DEV_BSIZE);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_devar.h,v 1.26 2006/05/31 02:45:42 brad Exp $	*/
+=======
+/*	$OpenBSD: if_devar.h,v 1.31 2010/05/02 22:19:27 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-
@@ -111,7 +115,7 @@ typedef struct {
  *
  * The receive space MUST ALWAYS be a multiple of the page size.
  * And the number of receive descriptors multiplied by the size
- * of the receive buffers must equal the recevive space.  This
+ * of the receive buffers must equal the receive space.  This
  * is so that we can manipulate the page tables so that even if a
  * packet wraps around the end of the receive space, we can
  * treat it as virtually contiguous.
@@ -121,7 +125,7 @@ typedef struct {
  * architecture which can't handle unaligned accesses) because with
  * 100Mb/s cards the copying is just too much of a hit.
  */
-#if !defined(__i386__)
+#ifdef __STRICT_ALIGNMENT
 #define	TULIP_COPY_RXDATA	1
 #endif
 
@@ -435,13 +439,13 @@ struct _tulip_softc_t {
     bus_dma_tag_t tulip_dmatag;		/* bus DMA tag */
     bus_dmamap_t tulip_setupmap;
     bus_dmamap_t tulip_txdescmap;
-    bus_dmamap_t tulip_txmaps[TULIP_TXDESCS];
-    unsigned tulip_txmaps_free;
+    bus_dmamap_t tulip_free_txmaps[TULIP_TXDESCS];
+    unsigned tulip_num_free_txmaps;
     bus_dmamap_t tulip_rxdescmap;
-    bus_dmamap_t tulip_rxmaps[TULIP_RXDESCS];
-    unsigned tulip_rxmaps_free;
+    bus_dmamap_t tulip_free_rxmaps[TULIP_RXDESCS];
+    unsigned tulip_num_free_rxmaps;
     struct arpcom tulip_ac;
-    struct timeout tulip_ftmo, tulip_stmo;
+    struct timeout tulip_stmo;
     tulip_regfile_t tulip_csrs;
     u_int32_t tulip_flags;
 #define	TULIP_WANTSETUP		0x00000001

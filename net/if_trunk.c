@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_trunk.c,v 1.29 2006/05/28 01:14:15 reyk Exp $	*/
+=======
+/*	$OpenBSD: if_trunk.c,v 1.77 2011/01/28 14:20:37 reyk Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>
@@ -26,7 +30,6 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/hash.h>
@@ -56,6 +59,8 @@
 
 #include <net/if_vlan_var.h>
 #include <net/if_trunk.h>
+#include <net/trunklacp.h>
+
 
 SLIST_HEAD(__trhead, trunk_softc) trunk_list;	/* list of trunks */
 
@@ -88,6 +93,7 @@ int	 trunk_media_change(struct ifnet *);
 void	 trunk_media_status(struct ifnet *, struct ifmediareq *);
 struct trunk_port *trunk_link_active(struct trunk_softc *,
 	    struct trunk_port *);
+const void *trunk_gethdr(struct mbuf *, u_int, u_int, void *);
 
 struct if_clone trunk_cloner =
     IF_CLONE_INITIALIZER("trunk", trunk_clone_create, trunk_clone_destroy);
@@ -116,8 +122,24 @@ int	 trunk_lb_start(struct trunk_softc *, struct mbuf *);
 int	 trunk_lb_input(struct trunk_softc *, struct trunk_port *,
 	    struct ether_header *, struct mbuf *);
 int	 trunk_lb_porttable(struct trunk_softc *, struct trunk_port *);
-const void *trunk_lb_gethdr(struct mbuf *, u_int, u_int, void *);
 
+<<<<<<< HEAD
+=======
+/* Broadcast mode */
+int	 trunk_bcast_attach(struct trunk_softc *);
+int	 trunk_bcast_detach(struct trunk_softc *);
+int	 trunk_bcast_start(struct trunk_softc *, struct mbuf *);
+int	 trunk_bcast_input(struct trunk_softc *, struct trunk_port *,
+	    struct ether_header *, struct mbuf *);
+
+/* 802.3ad LACP */
+int	 trunk_lacp_attach(struct trunk_softc *);
+int	 trunk_lacp_detach(struct trunk_softc *);
+int	 trunk_lacp_start(struct trunk_softc *, struct mbuf *);
+int	 trunk_lacp_input(struct trunk_softc *, struct trunk_port *,
+	    struct ether_header *, struct mbuf *);
+
+>>>>>>> origin/master
 /* Trunk protocol table */
 static const struct {
 	enum trunk_proto	ti_proto;
@@ -126,6 +148,11 @@ static const struct {
 	{ TRUNK_PROTO_ROUNDROBIN,	trunk_rr_attach },
 	{ TRUNK_PROTO_FAILOVER,		trunk_fail_attach },
 	{ TRUNK_PROTO_LOADBALANCE,	trunk_lb_attach },
+<<<<<<< HEAD
+=======
+	{ TRUNK_PROTO_BROADCAST,	trunk_bcast_attach },
+	{ TRUNK_PROTO_LACP,		trunk_lacp_attach },
+>>>>>>> origin/master
 	{ TRUNK_PROTO_NONE,		NULL }
 };
 
@@ -170,24 +197,21 @@ trunk_clone_create(struct if_clone *ifc, int unit)
 	ifmedia_set(&tr->tr_media, IFM_ETHER | IFM_AUTO);
 
 	ifp = &tr->tr_ac.ac_if;
-	ifp->if_carp = NULL;
-	ifp->if_type = IFT_ETHER;
 	ifp->if_softc = tr;
 	ifp->if_start = trunk_start;
 	ifp->if_watchdog = trunk_watchdog;
 	ifp->if_ioctl = trunk_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 	ifp->if_capabilities = trunk_capabilities(tr);
 
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	snprintf(ifp->if_xname, sizeof(ifp->if_xname), "%s%d",
 	    ifc->ifc_name, unit);
 
 	/*
-	 * Attach as an ordinary ethernet device, childs will be attached
+	 * Attach as an ordinary ethernet device, children will be attached
 	 * as special device IFT_IEEE8023ADLAG.
 	 */
 	if_attach(ifp);
@@ -271,26 +295,12 @@ void
 trunk_port_lladdr(struct trunk_port *tp, u_int8_t *lladdr)
 {
 	struct ifnet *ifp = tp->tp_if;
-	struct ifaddr *ifa;
-	struct ifreq ifr;
 
 	/* Set the link layer address */
 	trunk_lladdr((struct arpcom *)ifp, lladdr);
 
 	/* Reset the port to update the lladdr */
-	if (ifp->if_flags & IFF_UP) {
-		int s = splnet();
-		ifp->if_flags &= ~IFF_UP;
-		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
-		ifp->if_flags |= IFF_UP;
-		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
-		splx(s);
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr != NULL &&
-			    ifa->ifa_addr->sa_family == AF_INET)
-				arp_ifinit((struct arpcom *)ifp, ifa);
-		}
-	}
+	ifnewlladdr(ifp);
 }
 
 int
@@ -359,7 +369,8 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 	}
 
 	/* Update link layer address for this port */
-	trunk_port_lladdr(tp, tr->tr_primary->tp_lladdr);
+	trunk_port_lladdr(tp,
+	    ((struct arpcom *)(tr->tr_primary->tp_if))->ac_enaddr);
 
 	/* Insert into the list of ports */
 	SLIST_INSERT_HEAD(&tr->tr_ports, tp, tp_entries);
@@ -464,14 +475,13 @@ trunk_port_destroy(struct trunk_port *tp)
 void
 trunk_port_watchdog(struct ifnet *ifp)
 {
-	struct trunk_softc *tr;
 	struct trunk_port *tp;
 
 	/* Should be checked by the caller */
 	if (ifp->if_type != IFT_IEEE8023ADLAG)
 		return;
 	if ((tp = (struct trunk_port *)ifp->if_tp) == NULL ||
-	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL)
+	    tp->tp_trunk == NULL)
 		return;
 
 	if (tp->tp_watchdog != NULL)
@@ -484,7 +494,7 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct trunk_reqport *rp = (struct trunk_reqport *)data;
 	struct trunk_softc *tr;
-	struct trunk_port *tp;
+	struct trunk_port *tp = NULL;
 	int s, error = 0;
 
 	s = splnet();
@@ -568,12 +578,36 @@ void
 trunk_port2req(struct trunk_port *tp, struct trunk_reqport *rp)
 {
 	struct trunk_softc *tr = (struct trunk_softc *)tp->tp_trunk;
+
 	strlcpy(rp->rp_ifname, tr->tr_ifname, sizeof(rp->rp_ifname));
 	strlcpy(rp->rp_portname, tp->tp_if->if_xname, sizeof(rp->rp_portname));
 	rp->rp_prio = tp->tp_prio;
-	rp->rp_flags = tp->tp_flags;
-	if (TRUNK_PORTACTIVE(tp))
-		rp->rp_flags |= TRUNK_PORT_ACTIVE;
+	if (tr->tr_portreq != NULL)
+		(*tr->tr_portreq)(tp, (caddr_t)&rp->rp_psc);
+
+	/* Add protocol specific flags */
+	switch (tr->tr_proto) {
+	case TRUNK_PROTO_FAILOVER:
+		rp->rp_flags = tp->tp_flags;
+		if (tp == trunk_link_active(tr, tr->tr_primary))
+			rp->rp_flags |= TRUNK_PORT_ACTIVE;
+		break;
+
+	case TRUNK_PROTO_ROUNDROBIN:
+	case TRUNK_PROTO_LOADBALANCE:
+	case TRUNK_PROTO_BROADCAST:
+		rp->rp_flags = tp->tp_flags;
+		if (TRUNK_PORTACTIVE(tp))
+			rp->rp_flags |= TRUNK_PORT_ACTIVE;
+		break;
+
+	case TRUNK_PROTO_LACP:
+		/* LACP has a different definition of active */
+		rp->rp_flags = lacp_port_status(tp);
+		break;
+	default:
+		break;
+	}
 }
 
 int
@@ -590,14 +624,13 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &tr->tr_ac, cmd, data)) > 0)
-		goto out;
-
 	bzero(&rpbuf, sizeof(rpbuf));
 
 	switch (cmd) {
 	case SIOCGTRUNK:
 		ra->ra_proto = tr->tr_proto;
+		if (tr->tr_req != NULL)
+			(*tr->tr_req)(tr, (caddr_t)&ra->ra_psc);
 		ra->ra_ports = i = 0;
 		tp = SLIST_FIRST(&tr->tr_ports);
 		while (tp && ra->ra_size >=
@@ -690,20 +723,12 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&tr->tr_ac, ifa);
 #endif /* INET */
 
 		error = ENETRESET;
-		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU) {
-			error = EINVAL;
-			break;
-		}
-		ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCSIFFLAGS:
 		error = ENETRESET;
@@ -724,8 +749,7 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			trunk_port_lladdr(tp, ifr->ifr_addr.sa_data);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &tr->tr_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -893,32 +917,155 @@ trunk_start(struct ifnet *ifp)
 {
 	struct trunk_softc *tr = (struct trunk_softc *)ifp->if_softc;
 	struct mbuf *m;
-	int error = 0;
+	int error;
 
-	for (;; error = 0) {
+	for (;;) {
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
-		if (tr->tr_proto != TRUNK_PROTO_NONE)
+		if (tr->tr_proto != TRUNK_PROTO_NONE && tr->tr_count) {
 			error = (*tr->tr_start)(tr, m);
-		else
-			m_free(m);
-
-		if (error == 0)
-			ifp->if_opackets++;
-		else
-			ifp->if_oerrors++;
+			if (error == 0)
+				ifp->if_opackets++;
+			else
+				ifp->if_oerrors++;
+		} else {
+			m_freem(m);
+			if (tr->tr_proto != TRUNK_PROTO_NONE)
+				ifp->if_oerrors++;
+		}
 	}
-
-	return;
 }
 
+<<<<<<< HEAD
+=======
+int
+trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
+{
+	int len, error = 0;
+	u_short mflags;
+
+	splassert(IPL_NET);
+
+	/* Send mbuf */
+	mflags = m->m_flags;
+	len = m->m_pkthdr.len;
+	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+	if (error)
+		return (error);
+	if_start(ifp);
+
+	ifp->if_obytes += len;
+	if (mflags & M_MCAST)
+		ifp->if_omcasts++;
+
+	return (error);
+}
+
+u_int32_t
+trunk_hashmbuf(struct mbuf *m, u_int32_t key)
+{
+	u_int16_t etype, ether_vtag;
+	u_int32_t p = 0;
+	u_int16_t *vlan, vlanbuf[2];
+	int off;
+	struct ether_header *eh;
+#ifdef INET
+	struct ip *ip, ipbuf;
+#endif
+#ifdef INET6
+	u_int32_t flow;
+	struct ip6_hdr *ip6, ip6buf;
+#endif
+
+	off = sizeof(*eh);
+	if (m->m_len < off)
+		return (p);
+	eh = mtod(m, struct ether_header *);
+	etype = ntohs(eh->ether_type);
+	p = hash32_buf(&eh->ether_shost, ETHER_ADDR_LEN, key);
+	p = hash32_buf(&eh->ether_dhost, ETHER_ADDR_LEN, p);
+
+	/* Special handling for encapsulating VLAN frames */
+	if (m->m_flags & M_VLANTAG) {
+		ether_vtag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
+	} else if (etype == ETHERTYPE_VLAN) {
+		if ((vlan = (u_int16_t *)
+		    trunk_gethdr(m, off, EVL_ENCAPLEN, &vlanbuf)) == NULL)
+			return (p);
+		ether_vtag = EVL_VLANOFTAG(*vlan);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
+		etype = ntohs(vlan[1]);
+		off += EVL_ENCAPLEN;
+	}
+
+	switch (etype) {
+#ifdef INET
+	case ETHERTYPE_IP:
+		if ((ip = (struct ip *)
+		    trunk_gethdr(m, off, sizeof(*ip), &ipbuf)) == NULL)
+			return (p);
+		p = hash32_buf(&ip->ip_src, sizeof(struct in_addr), p);
+		p = hash32_buf(&ip->ip_dst, sizeof(struct in_addr), p);
+		break;
+#endif
+#ifdef INET6
+	case ETHERTYPE_IPV6:
+		if ((ip6 = (struct ip6_hdr *)
+		    trunk_gethdr(m, off, sizeof(*ip6), &ip6buf)) == NULL)
+			return (p);
+		p = hash32_buf(&ip6->ip6_src, sizeof(struct in6_addr), p);
+		p = hash32_buf(&ip6->ip6_dst, sizeof(struct in6_addr), p);
+		flow = ip6->ip6_flow & IPV6_FLOWLABEL_MASK;
+		p = hash32_buf(&flow, sizeof(flow), p); /* IPv6 flow label */
+		break;
+#endif
+	}
+
+	return (p);
+}
+
+void
+trunk_init(struct ifnet *ifp)
+{
+	struct trunk_softc *tr = (struct trunk_softc *)ifp->if_softc;
+	int s;
+
+	s = splnet();
+
+	ifp->if_flags |= IFF_RUNNING;
+	ifp->if_flags &= ~IFF_OACTIVE;
+
+	if (tr->tr_init != NULL)
+		(*tr->tr_init)(tr);
+
+	splx(s);
+}
+
+void
+trunk_stop(struct ifnet *ifp)
+{
+	struct trunk_softc *tr = (struct trunk_softc *)ifp->if_softc;
+	int s;
+
+	s = splnet();
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
+	if (tr->tr_stop != NULL)
+		(*tr->tr_stop)(tr);
+
+	splx(s);
+}
+
+>>>>>>> origin/master
 void
 trunk_watchdog(struct ifnet *ifp)
 {
@@ -949,27 +1096,29 @@ trunk_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		error = ENOENT;
 		goto bad;
 	}
-	if (tr->tr_proto == TRUNK_PROTO_NONE)
-		goto bad;
 	trifp = &tr->tr_ac.ac_if;
-
-	error = (*tr->tr_input)(tr, tp, eh, m);
-	if (error != 0)
+	if (tr->tr_proto == TRUNK_PROTO_NONE) {
+		error = ENOENT;
 		goto bad;
+	}
 
 #if NBPFILTER > 0
-	if (trifp->if_bpf)
+	if (trifp->if_bpf && tr->tr_proto != TRUNK_PROTO_FAILOVER)
 		bpf_mtap_hdr(trifp->if_bpf, (char *)eh, ETHER_HDR_LEN, m,
 		    BPF_DIRECTION_IN);
 #endif
 
-	trifp->if_ipackets++;
+	error = (*tr->tr_input)(tr, tp, eh, m);
+	if (error != 0)
+		return (error);
 
+	trifp->if_ipackets++;
 	return (0);
 
  bad:
 	if (error && trifp != NULL)
 		trifp->if_ierrors++;
+	m_freem(m);
 	return (error);
 }
 
@@ -994,9 +1143,10 @@ trunk_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	imr->ifm_status = IFM_AVALID;
 	imr->ifm_active = IFM_ETHER | IFM_AUTO;
 
-	tp = tr->tr_primary;
-	if (tp != NULL && tp->tp_if->if_flags & IFF_UP)
-		imr->ifm_status |= IFM_ACTIVE;
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
+		if (TRUNK_PORTACTIVE(tp))
+			imr->ifm_status |= IFM_ACTIVE;
+	}
 }
 
 void
@@ -1067,6 +1217,18 @@ trunk_link_active(struct trunk_softc *tr, struct trunk_port *tp)
 	return (rval);
 }
 
+const void *
+trunk_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
+{
+	if (m->m_pkthdr.len < (off + len))
+		return (NULL);
+	else if (m->m_len < (off + len)) {
+		m_copydata(m, off, len, buf);
+		return (buf);
+	}
+	return (mtod(m, caddr_t) + off);
+}
+
 /*
  * Simple round robin trunking
  */
@@ -1082,6 +1244,8 @@ trunk_rr_attach(struct trunk_softc *tr)
 	tr->tr_port_create = NULL;
 	tr->tr_port_destroy = trunk_rr_port_destroy;
 	tr->tr_capabilities = IFCAP_TRUNK_FULLDUPLEX;
+	tr->tr_req = NULL;
+	tr->tr_portreq = NULL;
 
 	tp = SLIST_FIRST(&tr->tr_ports);
 	tr->tr_psc = (caddr_t)tp;
@@ -1158,6 +1322,12 @@ trunk_fail_attach(struct trunk_softc *tr)
 	tr->tr_input = trunk_fail_input;
 	tr->tr_port_create = NULL;
 	tr->tr_port_destroy = NULL;
+<<<<<<< HEAD
+=======
+	tr->tr_linkstate = NULL;
+	tr->tr_req = NULL;
+	tr->tr_portreq = NULL;
+>>>>>>> origin/master
 
 	return (0);
 }
@@ -1200,25 +1370,31 @@ trunk_fail_input(struct trunk_softc *tr, struct trunk_port *tp,
 {
 	struct ifnet *ifp = &tr->tr_ac.ac_if;
 	struct trunk_port *tmp_tp;
+	int accept = 0;
 
 	if (tp == tr->tr_primary) {
-		m->m_pkthdr.rcvif = ifp;
-		return (0);
-	}
-
-	if (tr->tr_primary->tp_link_state == LINK_STATE_DOWN) {
+		accept = 1;
+	} else if (tr->tr_primary->tp_link_state == LINK_STATE_DOWN) {
 		tmp_tp = trunk_link_active(tr, NULL);
 		/*
 		 * If tmp_tp is null, we've recieved a packet when all
 		 * our links are down. Weird, but process it anyways.
 		 */
-		if ((tmp_tp == NULL || tmp_tp == tp)) {
-			m->m_pkthdr.rcvif = ifp;
-			return (0);
-		}
+		if ((tmp_tp == NULL || tmp_tp == tp))
+			accept = 1;
 	}
+	if (!accept) {
+		m_freem(m);
+		return (-1);
+	}
+#if NBPFILTER > 0
+	if (ifp->if_bpf)
+		bpf_mtap_hdr(ifp->if_bpf, (char *)eh, ETHER_HDR_LEN, m,
+		    BPF_DIRECTION_IN);
+#endif
 
-	return (-1);
+	m->m_pkthdr.rcvif = ifp;
+	return (0);
 }
 
 /*
@@ -1241,6 +1417,8 @@ trunk_lb_attach(struct trunk_softc *tr)
 	tr->tr_port_create = trunk_lb_port_create;
 	tr->tr_port_destroy = trunk_lb_port_destroy;
 	tr->tr_capabilities = IFCAP_TRUNK_FULLDUPLEX;
+	tr->tr_req = NULL;
+	tr->tr_portreq = NULL;
 
 	lb->lb_key = arc4random();
 	tr->tr_psc = (caddr_t)lb;
@@ -1293,18 +1471,6 @@ trunk_lb_port_destroy(struct trunk_port *tp)
 	trunk_lb_porttable(tr, tp);
 }
 
-const void *
-trunk_lb_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
-{
-	if (m->m_pkthdr.len < (off + len)) {
-		return (NULL);
-	} else if (m->m_len < (off + len)) {
-		m_copydata(m, off, len, buf);
-		return (buf);
-	}
-	return (mtod(m, const void *) + off);
-}
-
 int
 trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 {
@@ -1313,6 +1479,7 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 	u_int16_t etype;
 	struct ifnet *ifp;
 	u_int32_t p = 0;
+<<<<<<< HEAD
 	u_int16_t *vlan, vlanbuf[2];
 	int error = 0, idx, off;
 	struct ether_header *eh;
@@ -1376,6 +1543,12 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS)
 		return (EINVAL);
 	tp = lb->lb_ports[idx];
+=======
+
+	p = trunk_hashmbuf(m, lb->lb_key);
+	p %= tr->tr_count;
+	tp = lb->lb_ports[p];
+>>>>>>> origin/master
 
  send:
 	/*
@@ -1386,22 +1559,15 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 		return (ENOENT);
 
 	/* Send mbuf */
+<<<<<<< HEAD
 	ifp = tp->tp_if;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 	if (error)
 		return (error);
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
-
-	ifp->if_obytes += m->m_pkthdr.len;
-	if (m->m_flags & M_MCAST)
-		ifp->if_omcasts++;
-
-	return (error);
-
- merr:
-	m = NULL;
-	return (ENOBUFS);
+=======
+	return (trunk_enqueue(tp->tp_if, m));
 }
 
 int
@@ -1413,5 +1579,150 @@ trunk_lb_input(struct trunk_softc *tr, struct trunk_port *tp,
 	/* Just pass in the packet to our trunk device */
 	m->m_pkthdr.rcvif = ifp;
 
+	return (0);
+}
+
+/*
+ * Broadcast mode
+ */
+
+int
+trunk_bcast_attach(struct trunk_softc *tr)
+{
+	tr->tr_detach = trunk_bcast_detach;
+	tr->tr_start = trunk_bcast_start;
+	tr->tr_input = trunk_bcast_input;
+	tr->tr_init = NULL;
+	tr->tr_stop = NULL;
+	tr->tr_port_create = NULL;
+	tr->tr_port_destroy = NULL;
+	tr->tr_linkstate = NULL;
+	tr->tr_req = NULL;
+	tr->tr_portreq = NULL;
+
+	return (0);
+}
+>>>>>>> origin/master
+
+	ifp->if_obytes += m->m_pkthdr.len;
+	if (m->m_flags & M_MCAST)
+		ifp->if_omcasts++;
+
+	return (error);
+
+<<<<<<< HEAD
+ merr:
+	m = NULL;
+	return (ENOBUFS);
+=======
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
+		if (TRUNK_PORTACTIVE(tp)) {
+			if (active_ports) {
+				n = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+				if (n == NULL) {
+					m_freem(m);
+					return (ENOBUFS);
+				}
+			} else
+				n = m;
+			active_ports++;
+			if ((ret = trunk_enqueue(tp->tp_if, n)))
+				errors++;
+		}
+	}
+	if (active_ports == 0) {
+		m_freem(m);
+		return (ENOENT);
+	}
+	if (errors == active_ports)
+		return (ret);
+	return (0);
+>>>>>>> origin/master
+}
+
+int
+trunk_lb_input(struct trunk_softc *tr, struct trunk_port *tp,
+    struct ether_header *eh, struct mbuf *m)
+{
+	struct ifnet *ifp = &tr->tr_ac.ac_if;
+
+	/* Just pass in the packet to our trunk device */
+	m->m_pkthdr.rcvif = ifp;
+
+	return (0);
+}
+
+/*
+ * 802.3ad LACP
+ */
+
+int
+trunk_lacp_attach(struct trunk_softc *tr)
+{
+	struct trunk_port *tp;
+	int error;
+
+	tr->tr_detach = trunk_lacp_detach;
+	tr->tr_port_create = lacp_port_create;
+	tr->tr_port_destroy = lacp_port_destroy;
+	tr->tr_linkstate = lacp_linkstate;
+	tr->tr_start = trunk_lacp_start;
+	tr->tr_input = trunk_lacp_input;
+	tr->tr_init = lacp_init;
+	tr->tr_stop = lacp_stop;
+	tr->tr_req = lacp_req;
+	tr->tr_portreq = lacp_portreq;
+
+	error = lacp_attach(tr);
+	if (error)
+		return (error);
+
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries)
+		lacp_port_create(tp);
+
+	return (error);
+}
+
+int
+trunk_lacp_detach(struct trunk_softc *tr)
+{
+	struct trunk_port *tp;
+	int error;
+
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries)
+		lacp_port_destroy(tp);
+
+	/* unlocking is safe here */
+	error = lacp_detach(tr);
+
+	return (error);
+}
+
+int
+trunk_lacp_start(struct trunk_softc *tr, struct mbuf *m)
+{
+	struct trunk_port *tp;
+
+	tp = lacp_select_tx_port(tr, m);
+	if (tp == NULL) {
+		m_freem(m);
+		return (EBUSY);
+	}
+
+	/* Send mbuf */
+	return (trunk_enqueue(tp->tp_if, m));
+}
+
+int
+trunk_lacp_input(struct trunk_softc *tr, struct trunk_port *tp,
+    struct ether_header *eh, struct mbuf *m)
+{
+	struct ifnet *ifp = &tr->tr_ac.ac_if;
+
+	m = lacp_input(tp, eh, m);
+	if (m == NULL)
+		return (-1);
+
+	m->m_pkthdr.rcvif = ifp;
 	return (0);
 }

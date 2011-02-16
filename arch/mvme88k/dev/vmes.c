@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmes.c,v 1.18 2004/04/24 19:51:48 miod Exp $ */
+/*	$OpenBSD: vmes.c,v 1.22 2010/12/26 15:40:59 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -27,7 +27,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
@@ -36,6 +35,8 @@
 #include <machine/autoconf.h>
 #include <machine/conf.h>
 #include <machine/cpu.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <mvme88k/dev/vme.h>
 
@@ -170,5 +171,5 @@ vmesmmap(dev, off, prot)
 #endif
 	if (pa == NULL)
 		return (-1);
-	return (atop(pa));
+	return (pa);
 }

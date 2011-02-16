@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: softfloat.h,v 1.4 2008/10/07 22:06:29 martynas Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: softfloat.h,v 1.1 2001/04/26 03:10:48 ross Exp $	*/
 
 /* This is a derivative work. */
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -241,6 +238,9 @@ int float64_to_int32( float64 );
 int float64_to_int32_round_to_zero( float64 );
 #ifndef SOFTFLOAT_FOR_GCC /* __fix?fdi provided by libgcc2.c */
 int64_t float64_to_int64( float64 );
+#ifdef __alpha__
+int64_t float64_to_int64_no_overflow( float64 );
+#endif /* __alpha__ */
 int64_t float64_to_int64_round_to_zero( float64 );
 #endif
 float32 float64_to_float32( float64 );

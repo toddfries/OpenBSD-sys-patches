@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: pcdisplay_chars.c,v 1.3 2003/11/20 17:47:02 millert Exp $ */
+=======
+/* $OpenBSD: pcdisplay_chars.c,v 1.5 2010/08/28 12:48:14 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: pcdisplay_chars.c,v 1.5 2000/06/08 07:01:19 cgd Exp $ */
 
 /*
@@ -40,7 +44,7 @@
 #define CONTROL 1 /* XXX smiley */
 #define NOTPRINTABLE 4 /* diamond XXX watch out - not in ISO part! */
 
-static u_char isomappings[128] = {
+static const u_char isomappings[128] = {
 	CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL,
 	CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL,
 	CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL, CONTROL,
@@ -143,7 +147,7 @@ static u_char isomappings[128] = {
 	0x98, /* 0x00ff LATIN SMALL LETTER Y WITH DIAERESIS */
 };
 
-static struct {
+static const struct {
 	u_int16_t uni;
 	u_char ibm;
 } unimappings[] = {
@@ -257,7 +261,7 @@ static struct {
 	{0x266b, 0x0e}, /* BEAMED EIGHTH NOTES */
 };
 
-static struct {
+static const struct {
 	u_int16_t uni;
 	u_char ibm;
 	int quality;
@@ -326,10 +330,7 @@ static struct {
 };
 
 int
-pcdisplay_mapchar(id, uni, index)
-	void *id;
-	int uni;
-	unsigned int *index;
+pcdisplay_mapchar(void *id, int uni, unsigned int *index)
 {
 	u_int i;
 

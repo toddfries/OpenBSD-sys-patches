@@ -1,4 +1,4 @@
-/*	$OpenBSD: tumbler.c,v 1.2 2005/10/31 01:20:46 brad Exp $	*/
+/*	$OpenBSD: tumbler.c,v 1.7 2009/10/26 20:17:27 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001,2003 Tsubai Masanari.  All rights reserved.
@@ -65,6 +65,7 @@ void tumbler_defer(struct device *);
 void tumbler_set_volume(struct tumbler_softc *, int, int);
 void tumbler_set_bass(struct tumbler_softc *, int);
 void tumbler_set_treble(struct tumbler_softc *, int);
+void tumbler_get_default_params(void *, int, struct audio_params *);
 
 int tas3001_write(struct tumbler_softc *, u_int, const void *);
 int tas3001_init(struct tumbler_softc *);
@@ -103,6 +104,7 @@ struct audio_hw_if tumbler_hw_if = {
 	i2s_get_props,
 	i2s_trigger_output,
 	i2s_trigger_input,
+	tumbler_get_default_params
 };
 
 struct audio_device tumbler_device = {
@@ -300,8 +302,8 @@ tumbler_defer(struct device *dev)
 	struct device *dv;
 
 	TAILQ_FOREACH(dv, &alldevs, dv_list)
-		if (strncmp(dv->dv_xname, "ki2c", 4) == 0 &&
-		    strncmp(dv->dv_parent->dv_xname, "macobio", 7) == 0)
+		if (strcmp(dv->dv_cfdata->cf_driver->cd_name, "kiic") == 0 &&
+		    strcmp(dv->dv_parent->dv_cfdata->cf_driver->cd_name, "macobio") == 0)
 			sc->sc_i2c = dv;
 	if (sc->sc_i2c == NULL) {
 		printf("%s: unable to find i2c\n", sc->sc_dev.dv_xname);
@@ -491,4 +493,10 @@ tumbler_getdev(void *h, struct audio_device *retp)
 {
 	*retp = tumbler_device;
 	return (0);
+}
+
+void
+tumbler_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	i2s_get_default_params(params);
 }

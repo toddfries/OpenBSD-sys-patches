@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: atw.c,v 1.51 2007/02/14 04:46:44 jsg Exp $	*/
+=======
+/*	$OpenBSD: atw.c,v 1.75 2010/11/11 17:47:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -212,8 +209,10 @@ void	atw_linkintr(struct atw_softc *, u_int32_t);
 /* 802.11 state machine */
 int	atw_newstate(struct ieee80211com *, enum ieee80211_state, int);
 int	atw_tune(struct atw_softc *);
+#ifndef IEEE80211_STA_ONLY
 void	atw_recv_mgmt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, int, int, u_int32_t);
+	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
+#endif
 void	atw_next_scan(void *);
 
 /* Device initialization */
@@ -271,8 +270,20 @@ void	atw_si4126_tune(struct atw_softc *, u_int);
 void	atw_si4126_write(struct atw_softc *, u_int, u_int);
 void	atw_si4126_init(struct atw_softc *);
 
-const struct atw_txthresh_tab atw_txthresh_tab_lo[] = ATW_TXTHRESH_TAB_LO_RATE;
-const struct atw_txthresh_tab atw_txthresh_tab_hi[] = ATW_TXTHRESH_TAB_HI_RATE;
+const struct atw_txthresh_tab atw_txthresh_tab_lo[] = {
+	{ ATW_NAR_TR_L64,	"64 bytes" },
+	{ ATW_NAR_TR_L160,	"160 bytes" },
+	{ ATW_NAR_TR_L192,	"192 bytes" },
+	{ ATW_NAR_SF,		"store and forward" },
+	{ 0,			NULL }
+};
+const struct atw_txthresh_tab atw_txthresh_tab_hi[] = {
+	{ ATW_NAR_TR_H96,	"96 bytes" },
+	{ ATW_NAR_TR_H288,	"288 bytes" },
+	{ ATW_NAR_TR_H544,	"544 bytes" },
+	{ ATW_NAR_SF,		"store and forward" },
+	{ 0,			NULL }
+};
 
 struct cfdriver atw_cd = {
     NULL, "atw", DV_IFNET
@@ -313,27 +324,6 @@ const char *atw_rx_state[] = {
 	"RUNNING - fifo drain"
 };
 
-#endif
-
-#ifndef __OpenBSD__
-int
-atw_activate(struct device *self, enum devact act)
-{
-	struct atw_softc *sc = (struct atw_softc *)self;
-	int rv = 0, s;
-
-	s = splnet();
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if_deactivate(&sc->sc_ic.ic_if);
-		break;
-	}
-	splx(s);
-	return rv;
-}
 #endif
 
 /*
@@ -413,15 +403,15 @@ atw_read_srom(struct atw_softc *sc)
 		return -1;
 	}
 
-	sc->sc_srom = malloc(sc->sc_sromsz, M_DEVBUF, M_NOWAIT);
+	sc->sc_srom = malloc(sc->sc_sromsz, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_srom == NULL) {
 		printf("%s: unable to allocate SROM buffer\n",
 		    sc->sc_dev.dv_xname);
 		return -1;
 	}
 
-	(void)memset(sc->sc_srom, 0, sc->sc_sromsz);
-	/* ADM8211 has a single 32-bit register for controlling the
+	/*
+	 * ADM8211 has a single 32-bit register for controlling the
 	 * 93cx6 SROM.  Bit SRS enables the serial port. There is no
 	 * "ready" bit. The ADM8211 input/output sense is the reverse
 	 * of read_seeprom's.
@@ -813,17 +803,14 @@ atw_attach(struct atw_softc *sc)
 	ifp->if_ioctl = atw_ioctl;
 	ifp->if_start = atw_start;
 	ifp->if_watchdog = atw_watchdog;
-#if !defined(__OpenBSD__)
-	ifp->if_init = atw_init;
-	ifp->if_stop = atw_stop;
-#endif
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ic->ic_phytype = IEEE80211_T_DS;
 	ic->ic_opmode = IEEE80211_M_STA;
-	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
-	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
-
+	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
+#ifndef IEEE80211_STA_ONLY
+	ic->ic_caps |= IEEE80211_C_IBSS;
+#endif
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;	
 
 	/*
@@ -836,8 +823,10 @@ atw_attach(struct atw_softc *sc)
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = atw_newstate;
 
+#ifndef IEEE80211_STA_ONLY
 	sc->sc_recv_mgmt = ic->ic_recv_mgmt;
 	ic->ic_recv_mgmt = atw_recv_mgmt;
+#endif
 
 	sc->sc_node_free = ic->ic_node_free;
 	ic->ic_node_free = atw_node_free;
@@ -858,23 +847,6 @@ atw_attach(struct atw_softc *sc)
 	bpfattach(&sc->sc_radiobpf, ifp, DLT_IEEE802_11_RADIO,
 	    sizeof(struct ieee80211_frame) + 64);
 #endif
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(atw_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-
-	/*
-	 * Add a suspend hook to make sure we come back up after a
-	 * resume.
-	 */
-	sc->sc_powerhook = powerhook_establish(atw_power, sc);
-	if (sc->sc_powerhook == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
 
 	memset(&sc->sc_rxtapu, 0, sizeof(sc->sc_rxtapu));
 	sc->sc_rxtap.ar_ihdr.it_len = sizeof(sc->sc_rxtapu);
@@ -1428,19 +1400,19 @@ atw_init(struct ifnet *ifp)
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_STA:
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_AHDEMO: /* XXX */
 	case IEEE80211_M_IBSS:
 		ic->ic_flags |= IEEE80211_F_IBSSON;
 		/*FALLTHROUGH*/
-	case IEEE80211_M_HOSTAP: /* XXX */
-		break;
-	case IEEE80211_M_MONITOR: /* XXX */
+#endif
+	default: /* XXX */
 		break;
 	}
 
+#ifndef IEEE80211_STA_ONLY
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_AHDEMO:
-	case IEEE80211_M_HOSTAP:
 		ic->ic_bss->ni_intval = ic->ic_lintval;
 		ic->ic_bss->ni_rssi = 0;
 		ic->ic_bss->ni_rstamp = 0;
@@ -1448,7 +1420,7 @@ atw_init(struct ifnet *ifp)
 	default:					/* XXX */
 		break;
 	}
-
+#endif
 	sc->sc_wepctl = 0;
 
 	atw_write_ssid(sc);
@@ -1985,7 +1957,7 @@ atw_si4126_write(struct atw_softc *sc, u_int addr, u_int val)
 	ATW_WRITE(sc, ATW_SYNRF, reg | ATW_SYNRF_LEIF);
 	ATW_WRITE(sc, ATW_SYNRF, reg);
 
-	for (mask = BIT(nbits - 1); mask != 0; mask >>= 1) {
+	for (mask = (1 << (nbits - 1)); mask != 0; mask >>= 1) {
 		if ((bits & mask) != 0)
 			reg |= ATW_SYNRF_SYNDATA;
 		else
@@ -2051,7 +2023,7 @@ atw_si4126_read(struct atw_softc *sc, u_int addr, u_int *val)
 
 /* XXX is the endianness correct? test. */
 #define	atw_calchash(addr) \
-	(ether_crc32_le((addr), IEEE80211_ADDR_LEN) & BITS(5, 0))
+	(ether_crc32_le((addr), IEEE80211_ADDR_LEN) & 0x3f)
 
 /*
  * atw_filter_setup:
@@ -2062,11 +2034,7 @@ void
 atw_filter_setup(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-#if defined(__OpenBSD__)
 	struct arpcom *ec = &ic->ic_ac;
-#else
-	struct ethercom *ec = &ic->ic_ec;
-#endif
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int hash;
 	u_int32_t hashes[2];
@@ -2269,9 +2237,10 @@ atw_change_ibss(struct atw_softc *sc)
 	atw_start_beacon(sc, 1);
 }
 
+#ifndef IEEE80211_STA_ONLY
 void
 atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
-    struct ieee80211_node *ni, int subtype, int rssi, u_int32_t rstamp)
+    struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int subtype)
 {
 	struct atw_softc *sc = (struct atw_softc*)ic->ic_softc;
 
@@ -2280,7 +2249,7 @@ atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 	    sc->sc_rev < ATW_REVISION_BA)
 		return;
 
-	(*sc->sc_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
+	(*sc->sc_recv_mgmt)(ic, m, ni, rxi, subtype);
 
 	switch (subtype) {
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
@@ -2296,6 +2265,7 @@ atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 	}
 	return;
 }
+#endif
 
 /* Write the SSID in the ieee80211com to the SRAM on the ADM8211.
  * In ad hoc mode, the SSID is written to the beacons sent by the
@@ -2328,15 +2298,20 @@ void
 atw_write_sup_rates(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	/* 14 bytes are probably (XXX) reserved in the ADM8211 SRAM for
-	 * supported rates
+	/*
+	 * There is not enough space in the ADM8211 SRAM for the
+	 * full IEEE80211_RATE_MAXSIZE
 	 */
-	u_int8_t buf[roundup(1 /* length */ + IEEE80211_RATE_SIZE, 2)];
+	u_int8_t buf[12];
+	u_int8_t nrates;
 
 	memset(buf, 0, sizeof(buf));
-	buf[0] = ic->ic_bss->ni_rates.rs_nrates;
-	memcpy(&buf[1], ic->ic_bss->ni_rates.rs_rates,
-	    ic->ic_bss->ni_rates.rs_nrates);
+	if (ic->ic_bss->ni_rates.rs_nrates > sizeof(buf) - 1)
+		nrates = sizeof(buf) - 1;
+	else
+		nrates = ic->ic_bss->ni_rates.rs_nrates;
+	buf[0] = nrates;
+	memcpy(&buf[1], ic->ic_bss->ni_rates.rs_rates, nrates);
 
 	/* XXX deal with rev BA bug linux driver talks of? */
 
@@ -2348,8 +2323,11 @@ void
 atw_start_beacon(struct atw_softc *sc, int start)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+#ifndef IEEE80211_STA_ONLY
 	uint16_t chan;
-	uint32_t bcnt, bpli, cap0, cap1, capinfo;
+	uint32_t bpli;
+#endif
+	uint32_t bcnt, cap0, cap1, capinfo;
 	size_t len;
 
 	if (ATW_IS_ENABLED(sc) == 0)
@@ -2382,15 +2360,11 @@ atw_start_beacon(struct atw_softc *sc, int start)
 	if (ic->ic_flags & IEEE80211_F_WEPON)
 		capinfo |= IEEE80211_CAPINFO_PRIVACY;
 
+#ifndef IEEE80211_STA_ONLY
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_IBSS:
 		len += 4; /* IBSS parameters */
 		capinfo |= IEEE80211_CAPINFO_IBSS;
-		break;
-	case IEEE80211_M_HOSTAP:
-		/* XXX 6-byte minimum TIM */
-		len += atw_beacon_len_adjust;
-		capinfo |= IEEE80211_CAPINFO_ESS;
 		break;
 	default:
 		return;
@@ -2417,6 +2391,7 @@ atw_start_beacon(struct atw_softc *sc, int start)
 	    sc->sc_dev.dv_xname, bcnt));
 	DPRINTF(sc, ("%s: atw_start_beacon reg[ATW_CAP1] = %08x\n",
 	    sc->sc_dev.dv_xname, cap1));
+#endif
 }
 
 /* Return the 32 lsb of the last TSFT divisible by ival. */
@@ -2472,14 +2447,16 @@ atw_predict_beacon(struct atw_softc *sc)
 		uint8_t		tstamp[8];
 	} u;
 
-	if ((ic->ic_opmode == IEEE80211_M_HOSTAP) ||
-	    ((ic->ic_opmode == IEEE80211_M_IBSS) &&
-	     (ic->ic_flags & IEEE80211_F_SIBSS))) {
+#ifndef IEEE80211_STA_ONLY
+	if ((ic->ic_opmode == IEEE80211_M_IBSS) &&
+	    (ic->ic_flags & IEEE80211_F_SIBSS)) {
 		tsft = atw_get_tsft(sc);
 		u.word = htole64(tsft);
 		(void)memcpy(&ic->ic_bss->ni_tstamp[0], &u.tstamp[0],
 		    sizeof(ic->ic_bss->ni_tstamp));
-	} else {
+	} else
+#endif
+	{
 		(void)memcpy(&u, &ic->ic_bss->ni_tstamp[0], sizeof(u));
 		tsft = letoh64(u.word);
 	}
@@ -2548,7 +2525,7 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		panic("%s: unexpected state IEEE80211_S_INIT", __func__);
 		break;
 	case IEEE80211_S_SCAN:
-		timeout_add(&sc->sc_scan_to, atw_dwelltime * hz / 1000);
+		timeout_add_msec(&sc->sc_scan_to, atw_dwelltime);
 		break;
 	case IEEE80211_S_RUN:
 		if (ic->ic_opmode == IEEE80211_M_STA)
@@ -2559,7 +2536,10 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		atw_write_ssid(sc);
 		atw_write_sup_rates(sc);
 
-		if (ic->ic_opmode == IEEE80211_M_AHDEMO ||
+		if (
+#ifndef IEEE80211_STA_ONLY
+		    ic->ic_opmode == IEEE80211_M_AHDEMO ||
+#endif
 		    ic->ic_opmode == IEEE80211_M_MONITOR)
 			break;
 
@@ -2581,11 +2561,12 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	if (nstate != IEEE80211_S_SCAN)
 		timeout_del(&sc->sc_scan_to);
 
+#ifndef IEEE80211_STA_ONLY
 	if (nstate == IEEE80211_S_RUN &&
-	    (ic->ic_opmode == IEEE80211_M_HOSTAP ||
-	     ic->ic_opmode == IEEE80211_M_IBSS))
+	    ic->ic_opmode == IEEE80211_M_IBSS)
 		atw_start_beacon(sc, 1);
 	else
+#endif
 		atw_start_beacon(sc, 0);
 
 	error = (*sc->sc_newstate)(ic, nstate, arg);
@@ -2770,24 +2751,10 @@ atw_detach(struct atw_softc *sc)
 	    sizeof(struct atw_control_data));
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_cdseg, sc->sc_cdnseg);
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
 	if (sc->sc_srom)
 		free(sc->sc_srom, M_DEVBUF);
 
 	return (0);
-}
-
-/* atw_shutdown: make sure the interface is stopped at reboot time. */
-void
-atw_shutdown(void *arg)
-{
-	struct atw_softc *sc = arg;
-
-	atw_stop(&sc->sc_ic.ic_if, 1);
 }
 
 int
@@ -3075,6 +3042,7 @@ atw_rxintr(struct atw_softc *sc)
 {
 	static int rate_tbl[] = {2, 4, 11, 22, 44};
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
 	struct ifnet *ifp = &ic->ic_if;
@@ -3124,11 +3092,7 @@ atw_rxintr(struct atw_softc *sc)
 		 */
 
 		if ((rxstat & ATW_RXSTAT_ES) != 0 &&
-#if defined(__OpenBSD__)
 		    ((sc->sc_ic.ic_if.if_capabilities & IFCAP_VLAN_MTU) == 0 ||
-#else
-		    ((sc->sc_ic.ic_ec.ec_capenable & ETHERCAP_VLAN_MTU) == 0 ||
-#endif
 		     (rxstat & (ATW_RXSTAT_DE | ATW_RXSTAT_SFDE |
 		                ATW_RXSTAT_SIGE | ATW_RXSTAT_CRC16E |
 				ATW_RXSTAT_RXTOE | ATW_RXSTAT_CRC32E |
@@ -3223,11 +3187,16 @@ atw_rxintr(struct atw_softc *sc)
 
 		wh = mtod(m, struct ieee80211_frame *);
 		ni = ieee80211_find_rxnode(ic, wh);
+		rxi.rxi_flags = 0;
 #if 0
-		if (atw_hw_decrypted(sc, wh))
+		if (atw_hw_decrypted(sc, wh)) {
 			wh->i_fc[1] &= ~IEEE80211_FC1_WEP;
+			rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
+		}
 #endif
-		ieee80211_input(ifp, m, ni, (int)rssi, 0);
+		rxi.rxi_rssi = (int)rssi;
+		rxi.rxi_tstamp = 0;
+		ieee80211_input(ifp, m, ni, &rxi);
 		/*
 		 * The frame may have caused the node to be marked for
 		 * reclamation (e.g. in response to a DEAUTH message)
@@ -3311,18 +3280,9 @@ atw_txintr(struct atw_softc *sc)
 
 		if ((ifp->if_flags & IFF_DEBUG) != 0 &&
 		    (txstat & TXSTAT_ERRMASK) != 0) {
-#if defined(__OpenBSD__)
 			printf("%s: txstat %b %d\n", sc->sc_dev.dv_xname,
 			    txstat & TXSTAT_ERRMASK, TXSTAT_FMT,
 			    MASK_AND_RSHIFT(txstat, ATW_TXSTAT_ARC_MASK));
-#else
-			static char txstat_buf[sizeof("ffffffff<>" TXSTAT_FMT)];
-			bitmask_snprintf(txstat & TXSTAT_ERRMASK, TXSTAT_FMT,
-			    txstat_buf, sizeof(txstat_buf));
-			printf("%s: txstat %s %d\n", sc->sc_dev.dv_xname,
-			    txstat_buf,
-			    MASK_AND_RSHIFT(txstat, ATW_TXSTAT_ARC_MASK));
-#endif
 		}
 
 		/*
@@ -3849,45 +3809,37 @@ atw_start(struct ifnet *ifp)
 	}
 }
 
-/*
- * atw_power:
- *
- *	Power management (suspend/resume) hook.
- */
-void
-atw_power(int why, void *arg)
+int
+atw_activate(struct device *self, int act)
 {
-	struct atw_softc *sc = arg;
+	struct atw_softc *sc = (struct atw_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
 
-	DPRINTF(sc, ("%s: atw_power(%d,)\n", sc->sc_dev.dv_xname, why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_STANDBY:
-		/* XXX do nothing. */
-		break;
-	case PWR_SUSPEND:
-		atw_stop(ifp, 1);
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			atw_stop(ifp, 1);
 		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
+			(*sc->sc_power)(sc, act);
 		break;
-	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-			atw_init(ifp);
-		}
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    atw_resume, sc, NULL);
 		break;
-#if !defined(__OpenBSD__)
-	case PWR_SOFTSUSPEND:
-	case PWR_SOFTSTANDBY:
-	case PWR_SOFTRESUME:
-		break;
-#endif
 	}
-	splx(s);
+	return 0;
+}
+
+void
+atw_resume(void *arg1, void *arg2)
+{
+	struct atw_softc *sc = (struct atw_softc *)arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (sc->sc_power != NULL)
+		(*sc->sc_power)(sc, DVACT_RESUME);
+	if (ifp->if_flags & IFF_UP)
+		atw_init(ifp);
 }
 
 /*
@@ -3911,13 +3863,6 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-        case SIOCSIFMTU:
-                if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-                        error = EINVAL;
-                } else if (ifp->if_mtu != ifr->ifr_mtu) {
-                        ifp->if_mtu = ifr->ifr_mtu;
-                }
-                break;
         case SIOCSIFADDR:
                 ifp->if_flags |= IFF_UP;
 #ifdef INET
@@ -3926,6 +3871,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
                 }
 #endif  /* INET */
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ATW_IS_ENABLED(sc)) {
@@ -3940,16 +3886,12 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		} else if (ATW_IS_ENABLED(sc))
 			atw_stop(ifp, 1);
 		break;
+
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (cmd == SIOCADDMULTI) ?
-#if defined(__OpenBSD__)
 		    ether_addmulti(ifr, &sc->sc_ic.ic_ac) :
 		    ether_delmulti(ifr, &sc->sc_ic.ic_ac);
-#else
-		    ether_addmulti(ifr, &sc->sc_ic.ic_ec) :
-		    ether_delmulti(ifr, &sc->sc_ic.ic_ec);
-#endif
 
 		if (error == ENETRESET) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -3957,6 +3899,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = 0;
 		}
 		break;
+
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
 		if (error == ENETRESET) {

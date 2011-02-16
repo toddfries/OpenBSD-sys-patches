@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: agp_amd.c,v 1.1 2002/07/12 20:17:03 mickey Exp $	*/
+=======
+/*	$OpenBSD: agp_amd.c,v 1.16 2010/08/07 19:32:44 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: agp_amd.c,v 1.6 2001/10/06 02:48:50 thorpej Exp $	*/
 
 
@@ -30,14 +34,11 @@
  *	$FreeBSD: src/sys/pci/agp_amd.c,v 1.6 2001/07/05 21:28:46 jhb Exp $
  */
 
-
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/agpio.h>
@@ -68,38 +69,65 @@ struct agp_amd_gatt {
 };
 
 struct agp_amd_softc {
-	u_int32_t	initial_aperture; /* aperture size at startup */
-	struct agp_amd_gatt *gatt;
-	bus_space_handle_t ioh;
-	bus_space_tag_t iot;
+	struct device		 dev;
+	struct agp_softc	*agpdev;
+	struct agp_amd_gatt	*gatt;
+	pci_chipset_tag_t	 asc_pc;
+	pcitag_t		 asc_tag;
+	bus_space_handle_t	 ioh;
+	bus_space_tag_t		 iot;
+	bus_addr_t		 asc_apaddr;
+	bus_size_t		 asc_apsize;
+	pcireg_t		 asc_apctrl;
+	pcireg_t		 asc_modectrl;
+	u_int16_t		 asc_status;
 };
 
+<<<<<<< HEAD
 static u_int32_t agp_amd_get_aperture(struct vga_pci_softc *);
 static int agp_amd_set_aperture(struct vga_pci_softc *, u_int32_t);
 static int agp_amd_bind_page(struct vga_pci_softc *, off_t, bus_addr_t);
 static int agp_amd_unbind_page(struct vga_pci_softc *, off_t);
 static void agp_amd_flush_tlb(struct vga_pci_softc *);
+=======
+void	agp_amd_attach(struct device *, struct device *, void *);
+int	agp_amd_activate(struct device *, int);
+void	agp_amd_save(struct agp_amd_softc *);
+void	agp_amd_restore(struct agp_amd_softc *);
+int	agp_amd_probe(struct device *, void *, void *);
+bus_size_t agp_amd_get_aperture(void *);
+struct agp_amd_gatt *agp_amd_alloc_gatt(bus_dma_tag_t, bus_size_t);
+int	agp_amd_set_aperture(void *, bus_size_t);
+void	agp_amd_bind_page(void *, bus_size_t, paddr_t, int);
+void	agp_amd_unbind_page(void *, bus_size_t);
+void	agp_amd_flush_tlb(void *);
 
+struct cfattach amdagp_ca = {
+	sizeof(struct agp_amd_softc), agp_amd_probe, agp_amd_attach, NULL,
+	agp_amd_activate
+};
+>>>>>>> origin/master
 
-struct agp_methods agp_amd_methods = {
-	agp_amd_get_aperture,
-	agp_amd_set_aperture,
+struct cfdriver amdagp_cd = {
+	NULL, "amdagp", DV_DULL
+};
+
+const struct agp_methods agp_amd_methods = {
 	agp_amd_bind_page,
 	agp_amd_unbind_page,
 	agp_amd_flush_tlb,
-	agp_generic_enable,
-	agp_generic_alloc_memory,
-	agp_generic_free_memory,
-	agp_generic_bind_memory,
-	agp_generic_unbind_memory,
 };
 
 
+<<<<<<< HEAD
 static struct agp_amd_gatt *
 agp_amd_alloc_gatt(struct vga_pci_softc *sc)
+=======
+struct agp_amd_gatt *
+agp_amd_alloc_gatt(bus_dma_tag_t dmat, bus_size_t apsize)
+>>>>>>> origin/master
 {
-	u_int32_t apsize = AGP_GET_APERTURE(sc);
-	u_int32_t entries = apsize >> AGP_PAGE_SHIFT;
+	bus_size_t entries = apsize >> AGP_PAGE_SHIFT;
 	struct agp_amd_gatt *gatt;
 	int i, npages;
 	caddr_t vdir;
@@ -107,13 +135,21 @@ agp_amd_alloc_gatt(struct vga_pci_softc *sc)
 	gatt = malloc(sizeof(struct agp_amd_gatt), M_DEVBUF, M_NOWAIT);
 	if (!gatt)
 		return (0);
+	gatt->ag_size = AGP_PAGE_SIZE + entries * sizeof(u_int32_t);
 
-	if (agp_alloc_dmamem(sc->sc_dmat,
-	    AGP_PAGE_SIZE + entries * sizeof(u_int32_t), 0,
-	    &gatt->ag_dmamap, &vdir, &gatt->ag_pdir,
-	    &gatt->ag_dmaseg, 1, &gatt->ag_nseg) != 0) {
+	if (agp_alloc_dmamem(dmat, gatt->ag_size, &gatt->ag_dmamap,
+	    &gatt->ag_pdir, &gatt->ag_dmaseg) != 0) {
 		printf("failed to allocate GATT\n");
 		free(gatt, M_DEVBUF);
+		return (NULL);
+	}
+
+	if (bus_dmamem_map(dmat, &gatt->ag_dmaseg, 1, gatt->ag_size,
+	    &vdir, BUS_DMA_NOWAIT) != 0) {
+		printf("failed to map GATT\n");
+		agp_free_dmamem(dmat, gatt->ag_size, gatt->ag_dmamap,
+		    &gatt->ag_dmaseg);
+		free(gatt, M_AGP);
 		return (NULL);
 	}
 
@@ -121,16 +157,16 @@ agp_amd_alloc_gatt(struct vga_pci_softc *sc)
 	gatt->ag_entries = entries;
 	gatt->ag_virtual = (u_int32_t *)(vdir + AGP_PAGE_SIZE);
 	gatt->ag_physical = gatt->ag_pdir + AGP_PAGE_SIZE;
-	gatt->ag_size = AGP_PAGE_SIZE + entries * sizeof(u_int32_t);
-
-	memset(gatt->ag_vdir, 0, AGP_PAGE_SIZE);
-	memset(gatt->ag_virtual, 0, entries * sizeof(u_int32_t));
 
 	/*
 	 * Map the pages of the GATT into the page directory.
 	 */
+<<<<<<< HEAD
 	npages = ((entries * sizeof(u_int32_t) + AGP_PAGE_SIZE - 1)
 		  >> AGP_PAGE_SHIFT);
+=======
+	npages = ((gatt->ag_size - 1) >> AGP_PAGE_SHIFT);
+>>>>>>> origin/master
 
 	for (i = 0; i < npages; i++)
 		gatt->ag_vdir[i] = (gatt->ag_physical + i * AGP_PAGE_SIZE) | 1;
@@ -144,10 +180,16 @@ agp_amd_alloc_gatt(struct vga_pci_softc *sc)
 }
 
 #if 0
+<<<<<<< HEAD
 static void
 agp_amd_free_gatt(struct vga_pci_softc *sc, struct agp_amd_gatt *gatt)
+=======
+void
+agp_amd_free_gatt(bus_dma_tag_t dmat, struct agp_amd_gatt *gatt)
+>>>>>>> origin/master
 {
-	agp_free_dmamem(sc->sc_dmat, gatt->ag_size,
+	bus_dmamem_unmap(dmat, gatt->ag_virtual, gatt->ag_size);
+	agp_free_dmamem(dmat, gatt->ag_size,
 	    gatt->ag_dmamap, (caddr_t)gatt->ag_virtual, &gatt->ag_dmaseg,
 	    gatt->ag_nseg);
 	free(gatt, M_DEVBUF);
@@ -155,6 +197,7 @@ agp_amd_free_gatt(struct vga_pci_softc *sc, struct agp_amd_gatt *gatt)
 #endif
 
 int
+<<<<<<< HEAD
 agp_amd_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa, struct pci_attach_args *pchb_pa)
 {
 	struct agp_amd_softc *asc;
@@ -167,12 +210,46 @@ agp_amd_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa, struct pci_
 		printf(": can't allocate softc\n");
 		/* agp_generic_detach(sc) */
 		return (ENOMEM);
+=======
+agp_amd_probe(struct device *parent, void *match, void *aux)
+{
+	struct agp_attach_args	*aa = aux;
+	struct pci_attach_args	*pa = aa->aa_pa;
+
+	/* Must be a pchb */
+	if (agpbus_probe(aa) == 1 && PCI_VENDOR(pa->pa_id) == PCI_VENDOR_AMD &&
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_SC751_SC ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_761_PCHB ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_762_PCHB))
+			return (1);
+	return (0);
+}
+
+void
+agp_amd_attach(struct device *parent, struct device *self, void *aux)
+{
+	struct agp_amd_softc	*asc = (struct agp_amd_softc *)self;
+	struct agp_attach_args	*aa = aux;
+	struct pci_attach_args	*pa = aa->aa_pa;
+	struct agp_amd_gatt	*gatt;
+	pcireg_t		 reg;
+	int			 error;
+
+	asc->asc_pc = pa->pa_pc;
+	asc->asc_tag = pa->pa_tag;
+
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &asc->asc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+>>>>>>> origin/master
 	}
 	memset(asc, 0, sizeof *asc);
 
 	error = pci_mapreg_map(pchb_pa, AGP_AMD751_REGISTERS,
 	     PCI_MAPREG_TYPE_MEM,0, &asc->iot, &asc->ioh, NULL, NULL, 0);
 	if (error != 0) {
+<<<<<<< HEAD
 		printf(": can't map AGP registers\n");
 		agp_generic_detach(sc);
 		return (error);
@@ -187,19 +264,27 @@ agp_amd_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa, struct pci_
 	sc->sc_methods = &agp_amd_methods;
 	sc->sc_chipc = asc;
 	asc->initial_aperture = AGP_GET_APERTURE(sc);
+=======
+		printf("can't map AGP registers\n");
+		return;
+	}
+
+	asc->asc_apsize = agp_amd_get_aperture(asc);
+>>>>>>> origin/master
 
 	for (;;) {
-		gatt = agp_amd_alloc_gatt(sc);
-		if (gatt)
+		gatt = agp_amd_alloc_gatt(pa->pa_dmat, asc->asc_apsize);
+		if (gatt != NULL)
 			break;
 
 		/*
-		 * Probably contigmalloc failure. Try reducing the
-		 * aperture so that the gatt size reduces.
+		 * almost certainly error allocating contigious dma memory
+		 * so reduce aperture so that the gatt size reduces.
 		 */
-		if (AGP_SET_APERTURE(sc, AGP_GET_APERTURE(sc) / 2)) {
-			printf(": can't set aperture\n");
-			return (ENOMEM);
+		asc->asc_apsize /= 2;
+		if (agp_amd_set_aperture(asc, asc->asc_apsize)) {
+			printf(": failed to set aperture\n");
+			return;
 		}
 	}
 	asc->gatt = gatt;
@@ -208,41 +293,48 @@ agp_amd_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa, struct pci_
 	WRITE4(AGP_AMD751_ATTBASE, gatt->ag_physical);
 
 	/* Enable synchronisation between host and agp. */
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_MODECTRL);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL);
 	reg &= ~0x00ff00ff;
 	reg |= (AGP_AMD751_MODECTRL_SYNEN) | (AGP_AMD751_MODECTRL2_GPDCE << 16);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_MODECTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL, reg);
 	/* Enable the TLB and flush */
 	WRITE2(AGP_AMD751_STATUS,
 	    READ2(AGP_AMD751_STATUS) | AGP_AMD751_STATUS_GCE);
-	AGP_FLUSH_TLB(sc);
+	agp_amd_flush_tlb(asc);
 
-	return (0);
+	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_amd_methods,
+	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
+	return;
 }
 
 #if 0
+<<<<<<< HEAD
 static int
 agp_amd_detach(struct vga_pci_softc *sc)
+=======
+int
+agp_amd_detach(void *sc)
+>>>>>>> origin/master
 {
-	pcireg_t reg;
-	struct agp_amd_softc *asc = sc->sc_chipc;
+	struct agp_amd_softc	*asc = sc;
+	pcireg_t		 reg;
 
 	/* Disable the TLB.. */
 	WRITE2(AGP_AMD751_STATUS,
 	    READ2(AGP_AMD751_STATUS) & ~AGP_AMD751_STATUS_GCE);
 
 	/* Disable host-agp sync */
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_MODECTRL);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL);
 	reg &= 0xffffff00;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_MODECTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_pcitag, AGP_AMD751_MODECTRL, reg);
 
 	/* Clear the GATT base */
 	WRITE4(AGP_AMD751_ATTBASE, 0);
 
 	/* Put the aperture back the way it started. */
-	AGP_SET_APERTURE(sc, asc->initial_aperture);
+	agp_amd_set_aperture(asc, asc->initial_aperture);
 
-	agp_amd_free_gatt(sc, asc->gatt);
+	agp_amd_free_gatt(asc, asc->gatt);
 
 	/* XXXfvdl no pci_mapreg_unmap */
 
@@ -250,12 +342,64 @@ agp_amd_detach(struct vga_pci_softc *sc)
 }
 #endif
 
+<<<<<<< HEAD
 static u_int32_t
 agp_amd_get_aperture(struct vga_pci_softc *sc)
+=======
+int
+agp_amd_activate(struct device *arg, int act)
 {
-	int vas;
+	struct agp_amd_softc *asc = (struct agp_amd_softc *)arg;
 
-	vas = (pci_conf_read(sc->sc_pc, sc->sc_pcitag,
+	switch (act) {
+	case DVACT_SUSPEND:
+		agp_amd_save(asc);
+		break;
+	case DVACT_RESUME:
+		agp_amd_restore(asc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_amd_save(struct agp_amd_softc *asc)
+{
+	asc->asc_apctrl = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_AMD751_APCTRL);
+	asc->asc_modectrl = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_AMD751_MODECTRL);
+	asc->asc_status = READ2(AGP_AMD751_STATUS);
+}
+
+void
+agp_amd_restore(struct agp_amd_softc *asc)
+>>>>>>> origin/master
+{
+
+	/* restore aperture size */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_APCTRL,
+	    asc->asc_apctrl);
+
+	/* Install the gatt. */
+	WRITE4(AGP_AMD751_ATTBASE, asc->gatt->ag_physical);
+
+	/* Reenable synchronisation between host and agp. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL,
+	    asc->asc_modectrl);
+	/* Enable the TLB and flush */
+	WRITE2(AGP_AMD751_STATUS, asc->asc_status);
+	agp_amd_flush_tlb(asc);
+}
+
+bus_size_t
+agp_amd_get_aperture(void *sc)
+{
+	struct agp_amd_softc	*asc = sc;
+	int			 vas;
+
+	vas = (pci_conf_read(asc->asc_pc, asc->asc_tag,
 	    AGP_AMD751_APCTRL) & 0x06);
 	vas >>= 1;
 	/*
@@ -264,11 +408,17 @@ agp_amd_get_aperture(struct vga_pci_softc *sc)
 	return ((32 * 1024 * 1024) << vas);
 }
 
+<<<<<<< HEAD
 static int
 agp_amd_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
+=======
+int
+agp_amd_set_aperture(void *sc, bus_size_t aperture)
+>>>>>>> origin/master
 {
-	int vas;
-	pcireg_t reg;
+	struct agp_amd_softc	*asc = sc;
+	int			 vas;
+	pcireg_t		 reg;
 
 	/*
 	 * Check for a power of two and make sure its within the
@@ -281,41 +431,49 @@ agp_amd_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
 
 	vas = ffs(aperture / 32*1024*1024) - 1;
 
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_APCTRL);
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_AMD751_APCTRL);
 	reg = (reg & ~0x06) | (vas << 1);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_AMD751_APCTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_APCTRL, reg);
 
 	return (0);
 }
 
+<<<<<<< HEAD
 static int
 agp_amd_bind_page(struct vga_pci_softc *sc, off_t offset, bus_addr_t physical)
+=======
+void
+agp_amd_bind_page(void *sc, bus_size_t offset, paddr_t physical, int flags)
+>>>>>>> origin/master
 {
-	struct agp_amd_softc *asc = sc->sc_chipc;
+	struct agp_amd_softc	*asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical | 1;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical | 1;
 }
 
+<<<<<<< HEAD
 static int
 agp_amd_unbind_page(struct vga_pci_softc *sc, off_t offset)
+=======
+void
+agp_amd_unbind_page(void *sc, bus_size_t offset)
+>>>>>>> origin/master
 {
-	struct agp_amd_softc *asc = sc->sc_chipc;
+	struct agp_amd_softc	*asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
+<<<<<<< HEAD
 static void
 agp_amd_flush_tlb(struct vga_pci_softc *sc)
+=======
+void
+agp_amd_flush_tlb(void *sc)
+>>>>>>> origin/master
 {
-	struct agp_amd_softc *asc = sc->sc_chipc;
+	struct agp_amd_softc	*asc = sc;
 
 	/* Set the cache invalidate bit and wait for the chipset to clear */
 	WRITE4(AGP_AMD751_TLBCTRL, 1);

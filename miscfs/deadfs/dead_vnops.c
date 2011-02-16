@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dead_vnops.c,v 1.16 2007/03/21 17:29:32 thib Exp $	*/
+=======
+/*	$OpenBSD: dead_vnops.c,v 1.25 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: dead_vnops.c,v 1.16 1996/02/13 13:12:48 mycroft Exp $	*/
 
 /*
@@ -84,6 +88,7 @@ int	dead_print(void *);
 
 int	chkvnlock(struct vnode *);
 
+<<<<<<< HEAD
 int (**dead_vnodeop_p)(void *);
 
 struct vnodeopv_entry_desc dead_vnodeop_entries[] = {
@@ -122,9 +127,44 @@ struct vnodeopv_entry_desc dead_vnodeop_entries[] = {
 	{ &vop_advlock_desc, dead_advlock },	/* advlock */
 	{ &vop_bwrite_desc, dead_bwrite },	/* bwrite */
 	{ (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
+=======
+struct vops dead_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_lookup	= vop_generic_lookup,
+	.vop_create	= dead_badop,
+	.vop_mknod	= dead_badop,
+	.vop_open	= dead_open,
+	.vop_close	= nullop,
+	.vop_access	= dead_ebadf,
+	.vop_getattr	= dead_ebadf,
+	.vop_setattr	= dead_ebadf,
+	.vop_read	= dead_read,
+	.vop_write	= dead_write,
+	.vop_ioctl	= dead_ioctl,
+	.vop_poll	= dead_poll,
+	.vop_fsync	= nullop,
+	.vop_remove	= dead_badop,
+	.vop_link	= dead_badop,
+	.vop_rename	= dead_badop,
+	.vop_mkdir	= dead_badop,
+	.vop_rmdir	= dead_badop,
+	.vop_symlink	= dead_badop,
+	.vop_readdir	= dead_ebadf,
+	.vop_readlink	= dead_ebadf,
+	.vop_abortop	= dead_badop,
+	.vop_inactive	= nullop,
+	.vop_reclaim	= nullop,
+	.vop_lock	= dead_lock,
+	.vop_unlock	= vop_generic_unlock,
+	.vop_bmap	= dead_bmap,
+	.vop_strategy	= dead_strategy,
+	.vop_print	= dead_print,
+	.vop_islocked	= vop_generic_islocked,
+	.vop_pathconf	= dead_ebadf,
+	.vop_advlock	= dead_ebadf,
+	.vop_bwrite	= nullop,
+>>>>>>> origin/master
 };
-struct vnodeopv_desc dead_vnodeop_opv_desc =
-	{ &dead_vnodeop_p, dead_vnodeop_entries };
 
 /*
  * Trivial lookup routine that always fails.
@@ -214,7 +254,7 @@ dead_ioctl(void *v)
 
 	if (!chkvnlock(ap->a_vp))
 		return (EBADF);
-	return (VCALL(ap->a_vp, VOFFSET(vop_ioctl), ap));
+	return ((ap->a_vp->v_op->vop_ioctl)(ap));
 }
 
 /* ARGSUSED */
@@ -272,7 +312,7 @@ dead_lock(void *v)
 	if (ap->a_flags & LK_DRAIN || !chkvnlock(vp))
 		return (0);
 
-	return (VCALL(vp, VOFFSET(vop_lock), ap));
+	return ((vp->v_op->vop_lock)(ap));
 }
 
 /*

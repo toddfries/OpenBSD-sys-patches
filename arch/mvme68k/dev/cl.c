@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.42 2006/01/01 11:59:39 miod Exp $ */
+/*	$OpenBSD: cl.c,v 1.52 2010/06/28 14:13:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -61,7 +61,7 @@
 
 /* min timeout 0xa, what is a good value */
 #define CL_TIMEOUT	0x10
-#define CL_FIFO_MAX	0x10
+#define CL_FIFO_MAX	0x20
 #define CL_FIFO_CNT	0xc
 #define	CL_RX_TIMEOUT	0x10
 
@@ -128,7 +128,7 @@ struct clsoftc {
 	char			sc_rxintrname[16 + 3];
 	char			sc_txintrname[16 + 3];
 	int			sc_flags;
-	u_int8_t		ssir;
+	void			*sc_softih;
 };
 
 const struct {
@@ -233,11 +233,18 @@ clprobe(parent, self, aux)
 	struct clreg *cl_reg;
 	struct confargs *ca = aux;
 	int ret;
-	if (cputyp != CPU_167 && cputyp != CPU_166 && cputyp != CPU_177)
-	{
+
+	switch (cputyp) {
+	case CPU_166:
+	case CPU_167:
+	case CPU_176:
+	case CPU_177:
+		break;
+	default:
 		return 0;
 	}
-   cl_reg = (struct clreg *)ca->ca_vaddr;
+
+	cl_reg = (struct clreg *)ca->ca_vaddr;
 
 #if 0
 	ret = !badvaddr(&cl_reg->cl_gfrcr,1);
@@ -308,7 +315,7 @@ clattach(parent, self, aux)
 		sc->sc_cl[i].psupply = sc->sc_cl[i].buffer;
 		sc->sc_cl[i].nchar = 0;
 	}
-	sc->ssir = allocate_sir(cl_softint, (void *)sc);
+	sc->sc_softih = softintr_establish(IPL_SOFTTTY, cl_softint, sc);
 #endif
 	for (i = 0; i < CLCD_PORTS_PER_CHIP; i++) {
 #if 0
@@ -547,7 +554,7 @@ clopen(dev, flag, mode, p)
 	if (cl->tty) {
 		tp = cl->tty;
 	} else {
-		tp = cl->tty = ttymalloc();
+		tp = cl->tty = ttymalloc(0);
 	}
 	tp->t_oproc = clstart;
 	tp->t_param = clparam;
@@ -643,7 +650,7 @@ if (channel == 2) { /* test one channel now */
 #endif /* CL_DMA_WORKS */
 			sc->cl_reg->cl_car = save;
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return(EBUSY);
 	}
@@ -664,7 +671,7 @@ if (channel == 2) { /* test one channel now */
 #ifdef DEBUG
 	cl_dumpport(channel);
 #endif
-	return((*linesw[tp->t_line].l_open)(dev, tp));
+	return((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 int clparam(tp, t)
 	struct tty *tp;
@@ -752,7 +759,7 @@ clclose(dev, flag, mode, p)
 	channel = CL_CHANNEL(dev);
 	cl = &sc->sc_cl[channel];
 	tp = cl->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = splcl();
 	
@@ -927,7 +934,9 @@ clcnprobe(cp)
 	int maj;
 
 	switch (cputyp) {
+	case CPU_166:
 	case CPU_167:
+	case CPU_176:
 	case CPU_177:
 		break;
 	default:
@@ -1964,7 +1973,7 @@ cl_appendbuf(sc, channel, c)
 		sc->sc_cl[channel].psupply = sc->sc_cl[channel].buffer;
 	}
 	sc->sc_cl[channel].nchar ++;
-	setsoftint(sc->ssir);
+	softintr_schedule(sc->sc_softih);
 	/* splx (s); */
 	
 }
@@ -1995,7 +2004,7 @@ cl_appendbufn(sc, channel, buf, cnt)
 		}
 		sc->sc_cl[channel].nchar ++;
 	}
-	setsoftint(sc->ssir);
+	softintr_schedule(sc->sc_softih);
 	/* splx (s); */
 }
 

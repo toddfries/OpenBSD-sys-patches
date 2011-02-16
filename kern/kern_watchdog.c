@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: kern_watchdog.c,v 1.6 2006/09/19 21:43:13 mk Exp $        */
+=======
+/*      $OpenBSD: kern_watchdog.c,v 1.8 2010/04/20 22:05:43 tedu Exp $        */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -26,6 +30,7 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 

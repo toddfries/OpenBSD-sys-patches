@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.16 2004/11/25 18:32:10 miod Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.24 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.14 1996/12/17 20:42:43 gwr Exp $	*/
 
 /*
@@ -163,20 +163,20 @@ struct zsops zsops_tty;
 /* Routines called from other code. */
 cdev_decl(zs);	/* open, close, read, write, ioctl, stop, ... */
 
-static void	zsstart(struct tty *);
-static int	zsparam(struct tty *, struct termios *);
-static void	zs_modem(struct zstty_softc *zst, int onoff);
-static int	zshwiflow(struct tty *, int);
-static void	zs_hwiflow(struct zstty_softc *, int);
-static void	zstty_rxint(register struct zs_chanstate *);
-static void	zstty_txint(register struct zs_chanstate *);
-static void	zstty_stint(register struct zs_chanstate *);
-static void	zstty_softint(struct zs_chanstate *);
-static void	zsoverrun(struct zstty_softc *, long *, char *);
+void	zsstart(struct tty *);
+int	zsparam(struct tty *, struct termios *);
+void	zs_modem(struct zstty_softc *zst, int onoff);
+int	zshwiflow(struct tty *, int);
+void	zs_hwiflow(struct zstty_softc *, int);
+void	zstty_rxint(register struct zs_chanstate *);
+void	zstty_txint(register struct zs_chanstate *);
+void	zstty_stint(register struct zs_chanstate *);
+void	zstty_softint(struct zs_chanstate *);
+void	zsoverrun(struct zstty_softc *, long *, char *);
 /*
  * zstty_match: how is this zs channel configured?
  */
-int
+static int
 zstty_match(parent, match, aux)
 	struct device *parent;
 	void   *match, *aux;
@@ -195,7 +195,7 @@ zstty_match(parent, match, aux)
 	return 0;
 }
 
-void
+static void
 zstty_attach(parent, self, aux)
 	struct device *parent, *self;
 	void   *aux;
@@ -245,7 +245,7 @@ zstty_attach(parent, self, aux)
 	}
 	printf("\n");
 
-	tp = ttymalloc();
+	tp = ttymalloc(0);
 	tp->t_dev = dev;
 	tp->t_oproc = zsstart;
 	tp->t_param = zsparam;
@@ -346,7 +346,7 @@ zsopen(dev, flags, mode, p)
 	/* It's simpler to do this up here. */
 	if (((tp->t_state & (TS_ISOPEN | TS_XCLUDE))
 	     ==             (TS_ISOPEN | TS_XCLUDE))
-	    && (p->p_ucred->cr_uid != 0) )
+	    && (suser(p, 0) != 0) )
 	{
 		return (EBUSY);
 	}
@@ -443,7 +443,7 @@ zsopen(dev, flags, mode, p)
 
 	splx(s);
 	if (error == 0)
-		error = linesw[tp->t_line].l_open(dev, tp);
+		error = linesw[tp->t_line].l_open(dev, tp, p);
 	return (error);
 }
 
@@ -470,7 +470,7 @@ zsclose(dev, flags, mode, p)
 	if ((tp->t_state & TS_ISOPEN) == 0)
 		return 0;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 
 	/* Disable interrupts. */
 	s = splzs();
@@ -609,7 +609,7 @@ zsioctl(dev, cmd, data, flag, p)
 /*
  * Start or restart transmission.
  */
-static void
+void
 zsstart(tp)
 	register struct tty *tp;
 {
@@ -639,13 +639,7 @@ zsstart(tp)
 	 * If there are sleepers, and output has drained below low
 	 * water mark, awaken.
 	 */
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 
 	nch = ndqb(&tp->t_outq, 0);	/* XXX */
 	(void) splzs();
@@ -711,7 +705,7 @@ zsstop(tp, flag)
  * XXX - Should just copy the whole termios after
  * making sure all the changes could be done.
  */
-static int
+int
 zsparam(tp, t)
 	register struct tty *tp;
 	register struct termios *t;
@@ -857,7 +851,7 @@ zsparam(tp, t)
  * Raise or lower modem control (DTR/RTS) signals.  If a character is
  * in transmission, the change is deferred.
  */
-static void
+void
 zs_modem(zst, onoff)
 	struct zstty_softc *zst;
 	int onoff;
@@ -941,7 +935,7 @@ zshwiflow(tp, stop)
  * Internal version of zshwiflow
  * called at splzs
  */
-static void
+void
 zs_hwiflow(zst, stop)
 	register struct zstty_softc *zst;
 	int stop;
@@ -983,15 +977,15 @@ zs_hwiflow(zst, stop)
  * Interface to the lower layer (zscc)
  ****************************************************************/
 
-static void zstty_rxint (struct zs_chanstate *);
-static void zstty_txint (struct zs_chanstate *);
-static void zstty_stint (struct zs_chanstate *);
+void zstty_rxint(struct zs_chanstate *);
+void zstty_txint(struct zs_chanstate *);
+void zstty_stint(struct zs_chanstate *);
 
 /*
  * receiver ready interrupt.
  * called at splzs
  */
-static void
+void
 zstty_rxint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -1058,7 +1052,7 @@ nextchar:
 /*
  * transmitter ready interrupt.  (splzs)
  */
-static void
+void
 zstty_txint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -1110,7 +1104,7 @@ zstty_txint(cs)
 /*
  * status change interrupt.  (splzs)
  */
-static void
+void
 zstty_stint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -1167,7 +1161,7 @@ zstty_stint(cs)
 /*
  * Print out a ring or fifo overrun error message.
  */
-static void
+void
 zsoverrun(zst, ptime, what)
 	struct zstty_softc *zst;
 	long *ptime;
@@ -1193,7 +1187,7 @@ zsoverrun(zst, ptime, what)
  * Note: an "input blockage" condition is assumed to exist if
  * EITHER the TS_TBLOCK flag or zst_rx_blocked flag is set.
  */
-static void
+void
 zstty_softint(cs)
 	struct zs_chanstate *cs;
 {

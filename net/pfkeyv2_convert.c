@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pfkeyv2_convert.c,v 1.28 2006/06/01 07:06:09 todd Exp $	*/
+=======
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.34 2010/10/06 22:19:20 mikeb Exp $	*/
+>>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -211,6 +215,18 @@ export_sa(void **p, struct tdb *tdb)
 			sadb_sa->sadb_sa_auth = SADB_X_AALG_SHA2_512;
 			break;
 
+		case CRYPTO_AES_128_GMAC:
+			sadb_sa->sadb_sa_auth = SADB_X_AALG_AES128GMAC;
+			break;
+
+		case CRYPTO_AES_192_GMAC:
+			sadb_sa->sadb_sa_auth = SADB_X_AALG_AES192GMAC;
+			break;
+
+		case CRYPTO_AES_256_GMAC:
+			sadb_sa->sadb_sa_auth = SADB_X_AALG_AES256GMAC;
+			break;
+
 		case CRYPTO_MD5_KPDK:
 			sadb_sa->sadb_sa_auth = SADB_X_AALG_MD5;
 			break;
@@ -243,16 +259,20 @@ export_sa(void **p, struct tdb *tdb)
 			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_AESCTR;
 			break;
 
+		case CRYPTO_AES_GCM_16:
+			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_AESGCM16;
+			break;
+
+		case CRYPTO_AES_GMAC:
+			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_AESGMAC;
+			break;
+
 		case CRYPTO_CAST_CBC:
 			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_CAST;
 			break;
 
 		case CRYPTO_BLF_CBC:
 			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_BLF;
-			break;
-
-		case CRYPTO_SKIPJACK_CBC:
-			sadb_sa->sadb_sa_encrypt = SADB_X_EALG_SKIPJACK;
 			break;
 		}
 	}
@@ -680,7 +700,7 @@ import_address(struct sockaddr *sa, struct sadb_address *sadb_address)
 			break;
 #endif /* INET */
 
-#if INET6
+#ifdef INET6
 		case AF_INET6:
 			salen = sizeof(struct sockaddr_in6);
 			break;
@@ -1006,5 +1026,24 @@ export_tag(void **p, struct tdb *tdb)
 	stag->sadb_x_tag_len = (sizeof(struct sadb_x_tag) +
 	    PADUP(stag->sadb_x_tag_taglen)) / sizeof(uint64_t);
 	*p += PADUP(stag->sadb_x_tag_taglen) + sizeof(struct sadb_x_tag);
+}
+
+/* Import enc(4) tap device information for SA */
+void
+import_tap(struct tdb *tdb, struct sadb_x_tap *stap)
+{
+	if (stap)
+		tdb->tdb_tap = stap->sadb_x_tap_unit;
+}
+
+/* Export enc(4) tap device information for SA */
+void
+export_tap(void **p, struct tdb *tdb)
+{
+	struct sadb_x_tap *stag = (struct sadb_x_tap *)*p;
+
+	stag->sadb_x_tap_unit = tdb->tdb_tap;
+	stag->sadb_x_tap_len = sizeof(struct sadb_x_tap) / sizeof(uint64_t);
+	*p += sizeof(struct sadb_x_tap);
 }
 #endif

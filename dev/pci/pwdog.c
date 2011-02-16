@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pwdog.c,v 1.5 2006/12/11 08:25:54 mbalmer Exp $ */
+=======
+/*	$OpenBSD: pwdog.c,v 1.7 2010/04/08 00:23:53 tedu Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Marc Balmer <mbalmer@openbsd.org>
@@ -20,7 +24,6 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 
 #include <machine/bus.h>

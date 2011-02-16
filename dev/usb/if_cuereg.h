@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_cuereg.h,v 1.6 2004/05/19 11:37:00 brad Exp $ */
+=======
+/*	$OpenBSD: if_cuereg.h,v 1.11 2010/12/06 04:41:39 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_cuereg.h,v 1.14 2001/01/21 22:09:24 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -188,8 +192,6 @@ struct cue_softc {
 	u_int16_t		cue_rxfilt;
 	struct cue_cdata	cue_cdata;
 
-	char			cue_dying;
-	char			cue_attached;
 	u_int			cue_rx_errs;
 	struct timeval		cue_rx_notice;
 

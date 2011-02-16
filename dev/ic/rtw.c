@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rtw.c,v 1.59 2007/04/02 08:41:04 claudio Exp $	*/
+=======
+/*	$OpenBSD: rtw.c,v 1.81 2010/09/07 16:21:43 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -99,15 +103,19 @@ void	 rtw_rxdesc_init(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int, int);
 void	 rtw_rxring_fixup(struct rtw_softc *);
 void	 rtw_io_enable(struct rtw_regs *, u_int8_t, int);
 void	 rtw_intr_rx(struct rtw_softc *, u_int16_t);
+#ifndef IEEE80211_STA_ONLY
 void	 rtw_intr_beacon(struct rtw_softc *, u_int16_t);
 void	 rtw_intr_atim(struct rtw_softc *);
+#endif
 void	 rtw_transmit_config(struct rtw_softc *);
 void	 rtw_pktfilt_load(struct rtw_softc *);
 void	 rtw_start(struct ifnet *);
 void	 rtw_watchdog(struct ifnet *);
 void	 rtw_next_scan(void *);
+#ifndef IEEE80211_STA_ONLY
 void	 rtw_recv_mgmt(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, int, int, u_int32_t);
+	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
+#endif
 struct ieee80211_node *rtw_node_alloc(struct ieee80211com *);
 void	 rtw_node_free(struct ieee80211com *, struct ieee80211_node *);
 void	 rtw_media_status(struct ifnet *, struct ifmediareq *);
@@ -180,8 +188,6 @@ void	 rtw_enable_interrupts(struct rtw_softc *);
 int	 rtw_dequeue(struct ifnet *, struct rtw_txsoft_blk **,
 	    struct rtw_txdesc_blk **, struct mbuf **,
 	    struct ieee80211_node **);
-void	 rtw_establish_hooks(struct rtw_hooks *, const char *, void *);
-void	 rtw_disestablish_hooks(struct rtw_hooks *, const char *, void *);
 int	 rtw_txsoft_blk_setup(struct rtw_txsoft_blk *, u_int);
 void	 rtw_rxdesc_init_all(struct rtw_rxdesc_blk *, struct rtw_rxsoft *,
 	    int);
@@ -192,8 +198,10 @@ struct mbuf *rtw_80211_dequeue(struct rtw_softc *, struct ifqueue *, int,
 	    struct rtw_txsoft_blk **, struct rtw_txdesc_blk **,
 	    struct ieee80211_node **, short *);
 uint64_t rtw_tsf_extend(struct rtw_regs *, u_int32_t);
+#ifndef IEEE80211_STA_ONLY
 void	 rtw_ibss_merge(struct rtw_softc *, struct ieee80211_node *,
 	    u_int32_t);
+#endif
 void	 rtw_idle(struct rtw_regs *);
 void	 rtw_led_attach(struct rtw_led_state *, void *);
 void	 rtw_led_init(struct rtw_regs *);
@@ -831,13 +839,13 @@ rtw_identify_sta(struct rtw_regs *regs, u_int8_t (*addr)[IEEE80211_ADDR_LEN],
 	u_int32_t idr0 = RTW_READ(regs, RTW_IDR0),
 	    idr1 = RTW_READ(regs, RTW_IDR1);
 
-	(*addr)[0] = MASK_AND_RSHIFT(idr0, BITS(0,  7));
-	(*addr)[1] = MASK_AND_RSHIFT(idr0, BITS(8,  15));
-	(*addr)[2] = MASK_AND_RSHIFT(idr0, BITS(16, 23));
-	(*addr)[3] = MASK_AND_RSHIFT(idr0, BITS(24 ,31));
+	(*addr)[0] = MASK_AND_RSHIFT(idr0, 0xff);
+	(*addr)[1] = MASK_AND_RSHIFT(idr0, 0xff00);
+	(*addr)[2] = MASK_AND_RSHIFT(idr0, 0xff0000);
+	(*addr)[3] = MASK_AND_RSHIFT(idr0, 0xff000000);
 
-	(*addr)[4] = MASK_AND_RSHIFT(idr1, BITS(0,  7));
-	(*addr)[5] = MASK_AND_RSHIFT(idr1, BITS(8, 15));
+	(*addr)[4] = MASK_AND_RSHIFT(idr1, 0xff);
+	(*addr)[5] = MASK_AND_RSHIFT(idr1, 0xff00);
 
 	if (IEEE80211_ADDR_EQ(addr, empty_macaddr)) {
 		printf("\n%s: could not get mac address, attach failed\n",
@@ -1135,7 +1143,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 	struct rtw_rxsoft *rs;
 	struct rtw_rxdesc_blk *rdb;
 	struct mbuf *m;
-
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
 
@@ -1312,10 +1320,10 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			rr->rr_tsft =
 			    htole64(((uint64_t)htsfth << 32) | htsftl);
 
-			if ((hstat & RTW_RXSTAT_SPLCP) != 0)
-				rr->rr_flags = IEEE80211_RADIOTAP_F_SHORTPRE;
-
 			rr->rr_flags = 0;
+			if ((hstat & RTW_RXSTAT_SPLCP) != 0)
+				rr->rr_flags |= IEEE80211_RADIOTAP_F_SHORTPRE;
+
 			rr->rr_rate = rate;
 			rr->rr_chan_freq =
 			    htole16(ic->ic_bss->ni_chan->ic_freq);
@@ -1334,7 +1342,10 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 		}
 #endif /* NPBFILTER > 0 */
 
-		ieee80211_input(&sc->sc_if, m, ni, rssi, htsftl);
+		rxi.rxi_flags = 0;
+		rxi.rxi_rssi = rssi;
+		rxi.rxi_tstamp = htsftl;
+		ieee80211_input(&sc->sc_if, m, ni, &rxi);
 		ieee80211_release_node(&sc->sc_ic, ni);
 next:
 		rtw_rxdesc_init(rdb, rs, next, 0);
@@ -1342,14 +1353,6 @@ next:
 	rdb->rdb_next = next;
 
 	KASSERT(rdb->rdb_next < rdb->rdb_ndesc);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&sc->sc_if.if_snd) &&
-	    !(sc->sc_if.if_flags & IFF_OACTIVE))
-		(*sc->sc_if.if_start)(&sc->sc_if);
 
 	return;
 #undef IS_BEACON
@@ -1505,6 +1508,7 @@ rtw_intr_tx(struct rtw_softc *sc, u_int16_t isr)
 		rtw_start(&sc->sc_if);
 }
 
+#ifndef IEEE80211_STA_ONLY
 void
 rtw_intr_beacon(struct rtw_softc *sc, u_int16_t isr)
 {
@@ -1562,6 +1566,7 @@ rtw_intr_atim(struct rtw_softc *sc)
 	/* TBD */
 	return;
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 #ifdef RTW_DEBUG
 void
@@ -1895,10 +1900,12 @@ rtw_intr(void *arg)
 			rtw_intr_rx(sc, isr & RTW_INTR_RX);
 		if ((isr & RTW_INTR_TX) != 0)
 			rtw_intr_tx(sc, isr & RTW_INTR_TX);
+#ifndef IEEE80211_STA_ONLY
 		if ((isr & RTW_INTR_BEACON) != 0)
 			rtw_intr_beacon(sc, isr & RTW_INTR_BEACON);
 		if ((isr & RTW_INTR_ATIMINT) != 0)
 			rtw_intr_atim(sc);
+#endif
 		if ((isr & RTW_INTR_IOERROR) != 0)
 			rtw_intr_ioerror(sc, isr & RTW_INTR_IOERROR);
 		if ((isr & RTW_INTR_TIMEOUT) != 0)
@@ -2292,6 +2299,7 @@ rtw_set_nettype(struct rtw_softc *sc, enum ieee80211_opmode opmode)
 	msr = RTW_READ8(&sc->sc_regs, RTW_MSR) & ~RTW_MSR_NETYPE_MASK;
 
 	switch (opmode) {
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_AHDEMO:
 	case IEEE80211_M_IBSS:
 		msr |= RTW_MSR_NETYPE_ADHOC_OK;
@@ -2299,12 +2307,15 @@ rtw_set_nettype(struct rtw_softc *sc, enum ieee80211_opmode opmode)
 	case IEEE80211_M_HOSTAP:
 		msr |= RTW_MSR_NETYPE_AP_OK;
 		break;
+#endif
 	case IEEE80211_M_MONITOR:
 		/* XXX */
 		msr |= RTW_MSR_NETYPE_NOLINK;
 		break;
 	case IEEE80211_M_STA:
 		msr |= RTW_MSR_NETYPE_INFRA_OK;
+		break;
+	default:
 		break;
 	}
 	RTW_WRITE8(&sc->sc_regs, RTW_MSR, msr);
@@ -2339,11 +2350,13 @@ rtw_pktfilt_load(struct rtw_softc *sc)
 	case IEEE80211_M_MONITOR:
 		sc->sc_rcr |= RTW_RCR_MONITOR;
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_AHDEMO:
 	case IEEE80211_M_IBSS:
 		/* receive broadcasts in our BSS */
 		sc->sc_rcr |= RTW_RCR_ADD3;
 		break;
+#endif
 	default:
 		break;
 	}
@@ -2532,8 +2545,8 @@ rtw_led_newstate(struct rtw_softc *sc, enum ieee80211_state nstate)
 		ls->ls_default = 0;
 		break;
 	case IEEE80211_S_SCAN:
-		timeout_add(&ls->ls_slow_ch, RTW_LED_SLOW_TICKS);
-		timeout_add(&ls->ls_fast_ch, RTW_LED_FAST_TICKS);
+		timeout_add_msec(&ls->ls_slow_ch, RTW_LED_SLOW_MSEC);
+		timeout_add_msec(&ls->ls_fast_ch, RTW_LED_FAST_MSEC);
 		/*FALLTHROUGH*/
 	case IEEE80211_S_AUTH:
 	case IEEE80211_S_ASSOC:
@@ -2621,7 +2634,7 @@ rtw_led_fastblink(void *arg)
 		rtw_led_set(ls, &sc->sc_regs, sc->sc_hwverid);
 	splx(s);
 
-	timeout_add(&ls->ls_fast_ch, RTW_LED_FAST_TICKS);
+	timeout_add_msec(&ls->ls_fast_ch, RTW_LED_FAST_MSEC);
 }
 
 void
@@ -2635,7 +2648,7 @@ rtw_led_slowblink(void *arg)
 	ls->ls_state ^= RTW_LED_S_SLOW;
 	rtw_led_set(ls, &sc->sc_regs, sc->sc_hwverid);
 	splx(s);
-	timeout_add(&ls->ls_slow_ch, RTW_LED_SLOW_TICKS);
+	timeout_add_msec(&ls->ls_slow_ch, RTW_LED_SLOW_MSEC);
 }
 
 void
@@ -2648,21 +2661,15 @@ rtw_led_attach(struct rtw_led_state *ls, void *arg)
 int
 rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	int rc = 0, s;
 	struct rtw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int rc = 0, s;
 
 	s = splnet();
+
 	switch (cmd) {
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			rc = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 #ifdef INET
@@ -2681,6 +2688,7 @@ rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		} else if ((sc->sc_flags & RTW_F_ENABLED) != 0)
 			rtw_stop(ifp, 1);
 		break;
+
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		if (cmd == SIOCADDMULTI)
@@ -2693,6 +2701,7 @@ rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			rtw_pktfilt_load(sc);
 		rc = 0;
 		break;
+
 	default:
 		if ((rc = ieee80211_ioctl(ifp, cmd, data)) == ENETRESET) {
 			if ((sc->sc_flags & RTW_F_ENABLED) != 0)
@@ -2702,6 +2711,7 @@ rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 	}
+
 	splx(s);
 	return rc;
 }
@@ -3319,21 +3329,23 @@ rtw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			rtw_set_nettype(sc, IEEE80211_M_MONITOR);
 		}
 
-		timeout_add(&sc->sc_scan_to, rtw_dwelltime * hz / 1000);
+		timeout_add_msec(&sc->sc_scan_to, rtw_dwelltime);
 
 		break;
 	case IEEE80211_S_RUN:
 		switch (ic->ic_opmode) {
+#ifndef IEEE80211_STA_ONLY
 		case IEEE80211_M_HOSTAP:
 		case IEEE80211_M_IBSS:
 			rtw_set_nettype(sc, IEEE80211_M_MONITOR);
 			/*FALLTHROUGH*/
 		case IEEE80211_M_AHDEMO:
+#endif
 		case IEEE80211_M_STA:
 			rtw_join_bss(sc, ic->ic_bss->ni_bssid,
 			    ic->ic_bss->ni_intval);
 			break;
-		case IEEE80211_M_MONITOR:
+		default:
 			break;
 		}
 		rtw_set_nettype(sc, ic->ic_opmode);
@@ -3362,6 +3374,7 @@ rtw_tsf_extend(struct rtw_regs *regs, u_int32_t rstamp)
 	return ((u_int64_t)tsfth << 32) | rstamp;
 }
 
+#ifndef IEEE80211_STA_ONLY
 void
 rtw_ibss_merge(struct rtw_softc *sc, struct ieee80211_node *ni,
     u_int32_t rstamp)
@@ -3384,11 +3397,11 @@ rtw_ibss_merge(struct rtw_softc *sc, struct ieee80211_node *ni,
 
 void
 rtw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
-    struct ieee80211_node *ni, int subtype, int rssi, u_int32_t rstamp)
+    struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int subtype)
 {
 	struct rtw_softc *sc = (struct rtw_softc*)ic->ic_softc;
 
-	(*sc->sc_mtbl.mt_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
+	(*sc->sc_mtbl.mt_recv_mgmt)(ic, m, ni, rxi, subtype);
 
 	switch (subtype) {
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
@@ -3396,13 +3409,14 @@ rtw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 		if (ic->ic_opmode != IEEE80211_M_IBSS ||
 		    ic->ic_state != IEEE80211_S_RUN)
 			return;
-		rtw_ibss_merge(sc, ni, rstamp);
+		rtw_ibss_merge(sc, ni, rxi->rxi_tstamp);
 		break;
 	default:
 		break;
 	}
 	return;
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 struct ieee80211_node *
 rtw_node_alloc(struct ieee80211com *ic)
@@ -3454,77 +3468,29 @@ rtw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	ieee80211_media_status(ifp, imr);
 }
 
-void
-rtw_power(int why, void *arg)
+int
+rtw_activate(struct device *self, int act)
 {
-	struct rtw_softc *sc = arg;
+	struct rtw_softc *sc = (struct rtw_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
 
-	DPRINTF(sc, RTW_DEBUG_PWR,
-	    ("%s: rtw_power(%d,)\n", sc->sc_dev.dv_xname, why));
-
-	s = splnet();
-	switch (why) {
-	case PWR_STANDBY:
-		/* XXX do nothing. */
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING) {
+			rtw_stop(ifp, 1);
+			if (sc->sc_power != NULL)
+				(*sc->sc_power)(sc, act);
+		}
 		break;
-	case PWR_SUSPEND:
-		rtw_stop(ifp, 1);
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		break;
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		if (ifp->if_flags & IFF_UP) {
 			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
+				(*sc->sc_power)(sc, act);
 			rtw_init(ifp);
 		}
 		break;
 	}
-	splx(s);
-}
-
-/* rtw_shutdown: make sure the interface is stopped at reboot time. */
-void
-rtw_shutdown(void *arg)
-{
-	struct rtw_softc *sc = arg;
-
-	rtw_stop(&sc->sc_ic.ic_if, 1);
-}
-
-void
-rtw_establish_hooks(struct rtw_hooks *hooks, const char *dvname,
-    void *arg)
-{
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	hooks->rh_shutdown = shutdownhook_establish(rtw_shutdown, arg);
-	if (hooks->rh_shutdown == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    dvname);
-
-	/*
-	 * Add a suspend hook to make sure we come back up after a
-	 * resume.
-	 */
-	hooks->rh_power = powerhook_establish(rtw_power, arg);
-	if (hooks->rh_power == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    dvname);
-}
-
-void
-rtw_disestablish_hooks(struct rtw_hooks *hooks, const char *dvname,
-    void *arg)
-{
-	if (hooks->rh_shutdown != NULL)
-		shutdownhook_disestablish(hooks->rh_shutdown);
-
-	if (hooks->rh_power != NULL)
-		powerhook_disestablish(hooks->rh_power);
+	return 0;
 }
 
 int
@@ -3817,7 +3783,7 @@ rtw_attach(struct rtw_softc *sc)
 	    (caddr_t*)&sc->sc_descs, BUS_DMA_COHERENT);
 
 	if (rc != 0) {
-		printf("\n%s: could not map hw descriptors, error %d\n",
+		printf("\n%s: can't map hw descriptors, error %d\n",
 		    sc->sc_dev.dv_xname, rc);
 		goto fail1;
 	}
@@ -3933,9 +3899,10 @@ rtw_attach(struct rtw_softc *sc)
 
 	ic->ic_phytype = IEEE80211_T_DS;
 	ic->ic_opmode = IEEE80211_M_STA;
-	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
-	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
-
+	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
+#ifndef IEEE80211_STA_ONLY
+	ic->ic_caps |= IEEE80211_C_HOSTAP | IEEE80211_C_IBSS;
+#endif
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
 
 	rtw_led_attach(&sc->sc_led_state, (void *)sc);
@@ -3950,8 +3917,10 @@ rtw_attach(struct rtw_softc *sc)
 	mtbl->mt_newstate = ic->ic_newstate;
 	ic->ic_newstate = rtw_newstate;
 
+#ifndef IEEE80211_STA_ONLY
 	mtbl->mt_recv_mgmt = ic->ic_recv_mgmt;
 	ic->ic_recv_mgmt = rtw_recv_mgmt;
+#endif
 
 	mtbl->mt_node_free = ic->ic_node_free;
 	ic->ic_node_free = rtw_node_free;
@@ -3980,9 +3949,6 @@ rtw_attach(struct rtw_softc *sc)
 	bpfattach(&sc->sc_radiobpf, &sc->sc_ic.ic_if, DLT_IEEE802_11_RADIO,
 	    sizeof(struct ieee80211_frame) + 64);
 #endif
-
-	rtw_establish_hooks(&sc->sc_hooks, sc->sc_dev.dv_xname, (void*)sc);
-
 	return;
 
 fail8:
@@ -4026,11 +3992,10 @@ rtw_detach(struct rtw_softc *sc)
 {
 	sc->sc_flags |= RTW_F_INVALID;
 
+	timeout_del(&sc->sc_scan_to);
+
 	rtw_stop(&sc->sc_if, 1);
 
-	rtw_disestablish_hooks(&sc->sc_hooks, sc->sc_dev.dv_xname,
-	    (void*)sc);
-	timeout_del(&sc->sc_scan_to);
 	ieee80211_ifdetach(&sc->sc_if);
 	if_detach(&sc->sc_if);
 
@@ -4496,12 +4461,12 @@ rtw_grf5101_pwrstate(struct rtw_softc *sc, enum rtw_pwrstate power)
 {
 	switch (power) {
 	case RTW_OFF:
+		/* FALLTHROUGH */
 	case RTW_SLEEP:
 		rtw_rf_macwrite(sc, 0x07, 0x0000);
 		rtw_rf_macwrite(sc, 0x1f, 0x0045);
 		rtw_rf_macwrite(sc, 0x1f, 0x0005);
 		rtw_rf_macwrite(sc, 0x00, 0x08e4);
-	default:
 		break;
 	case RTW_ON:
 		rtw_rf_macwrite(sc, 0x1f, 0x0001);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.8 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.19 2010/01/31 19:39:04 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,7 +29,6 @@
 #include <sys/syscall.h>
 
 #include <machine/param.h>
-#include <machine/psl.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
@@ -115,16 +114,6 @@ sigcode:
 	.globl	esigcode
 esigcode:
 
-/* Mips o32 ABI sigcode. 32 bit pointers. */
-	.globl	sigcode_o32
-sigcode_o32:
-	addu	a0, sp, 16		# address of sigcontext
-	li	v0, SYS_sigreturn	# sigreturn(scp)
-	syscall
-	break	0			# just in case sigreturn fails
-	.globl	esigcode_o32
-esigcode_o32:
-
 /*
  * Copy a null terminated string within the kernel address space.
  * Maxlength may be null if count not wanted.
@@ -136,74 +125,25 @@ esigcode_o32:
  */
 LEAF(copystr, 0)
 	move	t2, a2			# Save the number of bytes
+	move	v0, zero
 1:
 	lbu	t0, 0(a0)
 	PTR_SUBU a2, a2, 1
-	beq	t0, zero, 2f
 	sb	t0, 0(a1)
 	PTR_ADDU a0, a0, 1
-	bne	a2, zero, 1b
+	beq	t0, zero, 2f
 	PTR_ADDU a1, a1, 1
+	bne	a2, zero, 1b
+	nop
+	LI	v0, ENAMETOOLONG	# String is longer than maxlength
 2:
 	beq	a3, zero, 3f
-	PTR_SUBU a2, t2, a2		# compute length copied
+	PTR_SUBU a2, t2, a2		# Compute length copied
 	REG_S	a2, 0(a3)
 3:
 	j	ra
-	move	v0, zero
-END(copystr)
-
-#ifndef __LP64__
-/*
- *  Read 64 bits from bus in non LP64 mode.
- *  XXX ints should be disabled!
- */
-LEAF(lp32_read8, 0)
-#if defined(__MIPSEB__)
-	ld	v1, 0(a0)
-	jr	ra
-	dsrl	v0, v1, 32
-#else
-	ld	v0, 0(a0)
-	jr	ra
-	dsrl	v1, v0, 32
-#endif
-END(lp32_read8)
-
-/*
- *  Write 64 bits to bus in non LP64 mode.
- *  XXX ints should be disabled!
- */
-LEAF(lp32_write8, 0)
-#if defined(__MIPSEB__)
-	dsll	a2, 32
-	dsll	a3, 32
-	dsrl	a3, 32
-	or	a2, a3
-#else
-	dsll	a3, 32
-	dsll	a2, 32
-	dsrl	a2, 32
-	or	a3, a2
-#endif
-	jr	ra
-	sd	a2, 0(a0)
-END(lp32_write8)
-#endif
-
-/*
- * fillw(pat, addr, count)
- */
-LEAF(fillw, 0)
-1:
-	PTR_ADDU a2, a2, -1
-	sh	a0, 0(a1)
-	bne	a2,zero, 1b
-	PTR_ADDU a1, a1, 2
-
-	jr	ra
 	nop
-END(fillw)
+END(copystr)
 
 /*
  * Optimized memory zero code.
@@ -348,17 +288,19 @@ NON_LEAF(copyinstr, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
-	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	LI	v0, KT_COPYERR
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	move	v0, zero
+	nop
 END(copyinstr)
 
 /*
@@ -376,17 +318,19 @@ NON_LEAF(copyoutstr, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
-	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	LI	v0, KT_COPYERR
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	move	v0, zero
+	nop
 END(copyoutstr)
 
 /*
@@ -402,12 +346,14 @@ NON_LEAF(copyin, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
 	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -427,12 +373,14 @@ NON_LEAF(copyout, FRAMESZ(CF_SZ), ra)
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
 	li	v0, KT_COPYERR
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -441,7 +389,8 @@ END(copyout)
 
 _copyerr:
 	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
@@ -450,19 +399,74 @@ _copyerr:
 /*
  *  kcopy is a wrapper around bcopy that catches bad memory references.
  */
-NON_LEAF(kcopy, FRAMESZ(CF_SZ), ra)
-	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
-	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
-	PTR_S	ra, CF_RA_OFFS(sp)
+NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
+	PTR_SUBU sp, sp, FRAMESZ(CF_SZ + REGSZ)
+	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ + REGSZ))
+	PTR_S	ra, CF_RA_OFFS + REGSZ(sp)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+	lw	v1, PCB_ONFAULT(t3)
 	li	v0, KT_KCOPYERR
 	PTR_L	t3, curprocpaddr
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 
-	PTR_L	ra, CF_RA_OFFS(sp)
-	PTR_L	t3, curprocpaddr
-	sw	zero, PCB_ONFAULT(t3)
-	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
+	PTR_L	v0, CF_ARGSZ(sp)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
+	sw	v0, PCB_ONFAULT(t3)
+	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
 	j	ra
 	move	v0, zero
 END(kcopy)
+
+_kcopyerr:
+	PTR_L	v0, CF_ARGSZ(sp)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+	PTR_L	ra, CF_RA_OFFS + REGSZ(sp)
+	sw	v0, PCB_ONFAULT(t3)
+	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
+	j	ra
+	li	v0, EFAULT		# return error
+
+/*
+ * Guarded ``memory'' access routines
+ * int guarded_read_4(paddr_t address, uint32_t *dest);
+ * int guarded_write_4(paddr_t address, uint32_t src);
+ */
+
+LEAF(guarded_read_4, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+	lw	v0, 0(a0)
+	sw	v0, 0(a1)
+	
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	move	v0, zero
+END(guarded_read_4)
+
+LEAF(guarded_write_4, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+	sw	a1, 0(a0)
+	
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	move	v0, zero
+END(guarded_write_4)
+
+_guarderr:
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	li	v0, EFAULT		# return error

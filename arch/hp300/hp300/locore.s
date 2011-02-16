@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.58 2006/07/09 19:41:21 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.65 2010/06/29 20:30:31 guenther Exp $	*/
 /*	$NetBSD: locore.s,v 1.91 1998/11/11 06:41:25 thorpej Exp $	*/
 
 /*
@@ -1003,10 +1003,10 @@ ENTRY_NOPROFILE(trap0)
 	addql	#4,sp			| pop syscall arg
 	tstl	_C_LABEL(astpending)
 	jne	Lrei2
-	tstb	_C_LABEL(ssir)
+	tstl	_C_LABEL(softpending)
 	jeq	Ltrap1
 	movw	#SPL1,sr
-	tstb	_C_LABEL(ssir)
+	tstl	_C_LABEL(softpending)
 	jne	Lsir1
 Ltrap1:
 	movl	sp@(FR_SP),a0		| grab and restore
@@ -1028,7 +1028,7 @@ ENTRY_NOPROFILE(trap2)
 	jra	_C_LABEL(trace)
 
 /*
- * Trap 12 is the entry point for the cachectl "syscall" (both HPUX & BSD)
+ * Trap 12 is the entry point for the cachectl "syscall"
  *	cachectl(command, addr, length)
  * command in d0, addr in a1, length in d1
  */
@@ -1262,7 +1262,7 @@ ENTRY_NOPROFILE(lev7intr)	/* level 7: parity errors, reset key */
  * necessitating a stack cleanup.
  */
 
-BSS(ssir,1)
+BSS(softpending,4)
 
 ASENTRY_NOPROFILE(rei)
 	tstl	_C_LABEL(astpending)	| AST pending?
@@ -1300,7 +1300,7 @@ Laststkadj:
 	movl	sp@,sp			| and our SP
 	rte				| and do real RTE
 Lchksir:
-	tstb	_C_LABEL(ssir)		| SIR pending?
+	tstl	_C_LABEL(softpending)	| SIR pending?
 	jeq	Ldorte			| no, all done
 	movl	d0,sp@-			| need a scratch register
 	movw	sp@(4),d0		| get SR
@@ -1309,7 +1309,7 @@ Lchksir:
 	movl	sp@+,d0			| restore scratch register
 Lgotsir:
 	movw	#SPL1,sr		| prevent others from servicing int
-	tstb	_C_LABEL(ssir)		| too late?
+	tstl	_C_LABEL(softpending)	| too late?
 	jeq	Ldorte			| yes, oh well...
 	clrl	sp@-			| stack adjust
 	moveml	#0xFFFF,sp@-		| save all registers
@@ -1642,39 +1642,6 @@ Lhpmmu5:
 #endif
 	rts
 
-#if defined(COMPAT_HPUX)
-/*
- * Invalidate user side of TLB
- */
-ENTRY(TBIAU)
-#if defined(M68040)
-	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
-	jne	Lmotommu6		| no, skip
-	.word	0xf518			| yes, pflusha (for now) XXX
-	rts
-Lmotommu6:
-#endif
-#if defined(M68K_MMU_MOTOROLA)
-	tstl	_C_LABEL(mmutype)	| HP MMU?
-	jeq	Lhpmmu8			| yes, skip
-	jpl	Lmc68851d		| 68851?
-	pflush	#0,#4			| flush user TLB entries
-	movl	#DC_CLEAR,d0
-	movc	d0,cacr			| invalidate on-chip d-cache
-	rts
-Lmc68851d:
-	pflushs	#0,#4			| flush user TLB entries
-	rts
-Lhpmmu8:
-#endif
-#if defined(M68K_MMU_HP)
-	MMUADDR(a0)
-	moveq	#0,d0			| more
-	movl	d0,a0@(MMUTBINVAL)	|   HP magic
-#endif
-	rts
-#endif	/* COMPAT_HPUX */
-
 /*
  * Invalidate instruction cache
  */
@@ -1883,7 +1850,7 @@ ENTRY(spl0)
 	moveq	#0,d0
 	movw	sr,d0			| get old SR for return
 	movw	#PSL_LOWIPL,sr		| restore new SR
-	tstb	_C_LABEL(ssir)		| software interrupt pending?
+	tstl	_C_LABEL(softpending)	| software interrupt pending?
 	jeq	Lspldone		| no, all done
 	subql	#4,sp			| make room for RTE frame
 	movl	sp@(4),sp@(2)		| position return address

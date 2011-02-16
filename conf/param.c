@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: param.c,v 1.24 2007/02/14 16:47:04 mickey Exp $	*/
+=======
+/*	$OpenBSD: param.c,v 1.31 2009/12/08 22:12:06 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: param.c,v 1.16 1996/03/12 03:08:40 mrg Exp $	*/
 
 /*
@@ -100,8 +104,6 @@ int	mcllowat = MCLLOWAT;
 
 int	fscale = FSCALE;	/* kernel uses `FSCALE', user uses `fscale' */
 
-int	shmseg = 8;
-int	shmmaxpgs = SHMMAXPGS;
 /*
  * Values in support of System V compatible shared memory.	XXX
  */
@@ -139,6 +141,7 @@ struct	seminfo seminfo = {
 #endif
 
 /*
+<<<<<<< HEAD
  * Values in support of System V compatible messages.
  */
 #ifdef SYSVMSG
@@ -155,6 +158,9 @@ struct	msginfo msginfo = {
 
 /*
  * These have to be allocated somewhere; allocating
+=======
+ * This has to be allocated somewhere; allocating
+>>>>>>> origin/master
  * them here forces loader errors if this file is omitted
  * (if they've been externed everywhere else; hah!).
  */

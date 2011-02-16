@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.30 2007/03/20 20:59:53 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.46 2010/09/28 20:27:55 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -65,6 +65,25 @@ struct cpu_info {
 	register_t ci_ddbsave[CPUSAVE_LEN];
 #define DISISAVE_LEN	4
 	register_t ci_disisave[DISISAVE_LEN];
+
+	volatile u_int64_t ci_nexttimerevent;
+	volatile u_int64_t ci_prevtb;
+	volatile u_int64_t ci_lasttb;
+	volatile u_int64_t ci_nextstatevent;
+	int ci_statspending;
+
+	volatile int    ci_ddb_paused;
+#define	CI_DDB_RUNNING	0
+#define	CI_DDB_SHOULDSTOP	1
+#define	CI_DDB_STOPPED		2
+#define	CI_DDB_ENTERDDB		3
+#define	CI_DDB_INDDB		4
+
+	u_int32_t ci_randseed;
+
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 };
 
 static __inline struct cpu_info *
@@ -79,7 +98,7 @@ curcpu(void)
 #define	curpcb			(curcpu()->ci_curpcb)
 #define	curpm			(curcpu()->ci_curpm)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 #ifdef MULTIPROCESSOR
 
@@ -99,7 +118,9 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
 #define CPU_INFO_ITERATOR		int
 #define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = &cpu_info[0]; cii < PPC_MAXPROCS; cii++, ci++)
+	for (cii = 0, ci = &cpu_info[0]; cii < ncpus; cii++, ci++)
+
+void cpu_unidle(struct cpu_info *);
 
 #else
 
@@ -112,7 +133,11 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_INFO_FOREACH(cii, ci)					\
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
 
+#define cpu_unidle(ci)
+
 #endif
+
+#define MAXCPUS	PPC_MAXPROCS
 
 extern struct cpu_info cpu_info[PPC_MAXPROCS];
 
@@ -125,14 +150,26 @@ extern struct cpu_info cpu_info[PPC_MAXPROCS];
  */
 #define	PROC_PC(p)		(trapframe(p)->srr0)
 
-#define	cpu_wait(p)		do { /* nothing */ } while (0)
-
 void	delay(unsigned);
 #define	DELAY(n)		delay(n)
 
-#define	need_resched(ci)	(ci->ci_want_resched = 1, ci->ci_astpending = 1)
-#define	need_proftick(p)	do { curcpu()->ci_astpending = 1; } while (0)
-#define	signotify(p)		(curcpu()->ci_astpending = 1)
+#define	aston(p)		((p)->p_md.md_astpending = 1)
+
+/*
+ * Preempt the current process if in interrupt from user mode,
+ * or after the current trap/syscall if in system mode.
+ */
+#define	need_resched(ci) \
+do {									\
+	ci->ci_want_resched = 1;					\
+	if (ci->ci_curproc != NULL)					\
+		aston(ci->ci_curproc);					\
+} while (0)
+#define clear_resched(ci) (ci)->ci_want_resched = 0
+
+#define	need_proftick(p)	aston(p)
+
+void	signotify(struct proc *);
 
 extern char *bootpath;
 
@@ -219,6 +256,14 @@ FUNC_SPR(532, ibat2u)
 FUNC_SPR(533, ibat2l)
 FUNC_SPR(534, ibat3u)
 FUNC_SPR(535, ibat3l)
+FUNC_SPR(560, ibat4u)
+FUNC_SPR(561, ibat4l)
+FUNC_SPR(562, ibat5u)
+FUNC_SPR(563, ibat5l)
+FUNC_SPR(564, ibat6u)
+FUNC_SPR(565, ibat6l)
+FUNC_SPR(566, ibat7u)
+FUNC_SPR(567, ibat7l)
 FUNC_SPR(536, dbat0u)
 FUNC_SPR(537, dbat0l)
 FUNC_SPR(538, dbat1u)
@@ -227,6 +272,14 @@ FUNC_SPR(540, dbat2u)
 FUNC_SPR(541, dbat2l)
 FUNC_SPR(542, dbat3u)
 FUNC_SPR(543, dbat3l)
+FUNC_SPR(568, dbat4u)
+FUNC_SPR(569, dbat4l)
+FUNC_SPR(570, dbat5u)
+FUNC_SPR(571, dbat5l)
+FUNC_SPR(572, dbat6u)
+FUNC_SPR(573, dbat6l)
+FUNC_SPR(574, dbat7u)
+FUNC_SPR(575, dbat7l)
 FUNC_SPR(1008, hid0)
 FUNC_SPR(1009, hid1)
 FUNC_SPR(1010, iabr)

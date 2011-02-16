@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.2 2004/02/26 01:46:49 deraadt Exp $	*/
+/*	$OpenBSD: sysarch.h,v 1.5 2010/10/26 05:49:10 guenther Exp $	*/
 /*	$NetBSD: sysarch.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 
 #ifndef _AMD64_SYSARCH_H_
@@ -7,8 +7,6 @@
 /*
  * Architecture specific syscalls (amd64)
  */
-#define AMD64_GET_LDT	0
-#define AMD64_SET_LDT	1
 #define	AMD64_IOPL	2
 #define	AMD64_GET_IOPERM	3
 #define	AMD64_SET_IOPERM	4
@@ -18,21 +16,6 @@
 #define	AMD64_PMC_READ	10
 #define AMD64_GET_MTRR   11
 #define AMD64_SET_MTRR   12
-
-/*
- * XXX todo.
- */
-struct amd64_get_ldt_args {
-	int start;
-	union descriptor *desc;
-	int num;
-};
-
-struct amd64_set_ldt_args {
-	int start;
-	union descriptor *desc;
-	int num;
-};
 
 struct amd64_iopl_args {
 	int iopl;
@@ -95,8 +78,6 @@ int amd64_iopl(struct proc *, void *, register_t *);
 int amd64_get_mtrr(struct proc *, void *, register_t *);
 int amd64_set_mtrr(struct proc *, void *, register_t *);
 #else
-int amd64_get_ldt(int, union descriptor *, int);
-int amd64_set_ldt(int, union descriptor *, int);
 int amd64_iopl(int);
 int amd64_get_ioperm(u_long *);
 int amd64_set_ioperm(u_long *);

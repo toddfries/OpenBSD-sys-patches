@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: udf_extern.h,v 1.6 2006/07/09 04:14:25 pedro Exp $	*/
+=======
+/*	$OpenBSD: udf_extern.h,v 1.11 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Written by Pedro Martelletto <pedro@openbsd.org> in February 2005.
@@ -61,7 +65,5 @@ extern struct pool udf_trans_pool;
 extern struct pool unode_pool;
 extern struct pool udf_ds_pool;
 
-/*
- * Set of UDF vnode operations.
- */
-extern int (**udf_vnodeop_p)(void *);
+/* Set of UDF vnode operations.*/
+extern struct vops udf_vops;

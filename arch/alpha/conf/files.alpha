@@ -1,4 +1,4 @@
-#	$OpenBSD: files.alpha,v 1.78 2007/03/16 21:22:27 robert Exp $
+#	$OpenBSD: files.alpha,v 1.91 2010/12/06 20:10:17 jasper Exp $
 #	$NetBSD: files.alpha,v 1.32 1996/11/25 04:03:21 cgd Exp $
 #
 # alpha-specific configuration info
@@ -35,7 +35,7 @@ major	{vnd = 9}
 #
 # Media Independent Interface (mii)
 #
-include	"../../../dev/mii/files.mii"
+include	"dev/mii/files.mii"
 
 #
 # Machine-independent SCSI drivers
@@ -97,7 +97,7 @@ file	arch/alpha/tc/tc_3000_300.c		tcasic & dec_3000_300
 
 # the TURBOchannel IOCTL ASIC
 # IOASIC device and attachment defined in sys/dev/tc/files.tc
-file	arch/alpha/tc/ioasic.c			ioasic
+file	arch/alpha/tc/ioasic.c			ioasic needs-flag
 
 # PMAG-B CX
 device	cfb: wsemuldisplaydev
@@ -164,12 +164,16 @@ major	{fd = 4}
 
 include	"dev/eisa/files.eisa"
 
+file	arch/alpha/eisa/eisa_machdep.c		eisa
+
 
 #
 # PCI Bus support
 #
 
 # include "dev/pci/files.pci" XXX SEE ABOVE
+
+include "dev/pci/files.agp"
 
 file	arch/alpha/pci/pciide_machdep.c		pciide
 
@@ -265,7 +269,7 @@ file	dev/pci/if_hme_pci.c		hme_pci
 # ISA PnP
 #
 
-include	"../../../dev/isa/files.isapnp"
+include	"dev/isa/files.isapnp"
 file	arch/alpha/isa/isapnp_machdep.c		isapnp
 
 attach	com at isapnp with com_isapnp
@@ -330,14 +334,6 @@ file	arch/alpha/alpha/dec_550.c		dec_550		needs-flag
 file	arch/alpha/alpha/dec_1000a.c		dec_1000 | dec_1000a	needs-flag
 file	arch/alpha/alpha/dec_6600.c		dec_6600	needs-flag
 file	arch/alpha/alpha/api_up1000.c		api_up1000	needs-flag
-
-# OSF/1 Binary Compatibility (COMPAT_OSF1)
-include	"compat/osf1/files.osf1"
-file	arch/alpha/alpha/osf1_locore.s		compat_osf1
-
-# NetBSD binary compatibility (COMPAT_NETBSD)
-include	"../../../compat/netbsd/files.netbsd"
-file	arch/alpha/alpha/netbsd_machdep.c	compat_netbsd
 
 #
 # Machine-independent I2C drivers

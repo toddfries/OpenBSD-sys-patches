@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: wsemul_vt100var.h,v 1.5 2004/12/23 21:47:47 miod Exp $ */
+=======
+/* $OpenBSD: wsemul_vt100var.h,v 1.9 2009/09/05 14:49:20 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: wsemul_vt100var.h,v 1.5 2000/04/28 21:56:17 mycroft Exp $ */
 
 /*
@@ -31,6 +35,7 @@
 
 struct wsemul_vt100_emuldata {
 	const struct wsdisplay_emulops *emulops;
+	struct wsemul_abortstate abortstate;
 	void *emulcookie;
 	int scrcapabilities;
 	u_int nrows, ncols, crow, ccol;
@@ -106,10 +111,10 @@ struct wsemul_vt100_emuldata {
 } while (0)
 #define NCOLS		(edp->ncols >> edp->dw)
 #define	COLS_LEFT	(NCOLS - edp->ccol - 1)
-#define COPYCOLS(f, t, n) (*edp->emulops->copycols)(edp->emulcookie, \
-	edp->crow, (f) << edp->dw, (t) << edp->dw, (n) << edp->dw)
-#define ERASECOLS(f, n, a) (*edp->emulops->erasecols)(edp->emulcookie, \
-	edp->crow, (f) << edp->dw, (n) << edp->dw, a)
+#define COPYCOLS(f, t, n)	(edp->emulcookie, edp->crow, (f) << edp->dw, \
+				 (t) << edp->dw, (n) << edp->dw)
+#define ERASECOLS(f, n, a)	(edp->emulcookie, edp->crow, (f) << edp->dw, \
+				 (n) << edp->dw, a)
 
 /*
  * response to primary DA request
@@ -127,6 +132,7 @@ struct wsemul_vt100_emuldata {
  */
 #define WSEMUL_VT_ID2 "\033[>24;20;0c"
 
+<<<<<<< HEAD
 void wsemul_vt100_reset(struct wsemul_vt100_emuldata *);
 void wsemul_vt100_scrollup(struct wsemul_vt100_emuldata *, int);
 void wsemul_vt100_scrolldown(struct wsemul_vt100_emuldata *, int);
@@ -134,6 +140,15 @@ void wsemul_vt100_ed(struct wsemul_vt100_emuldata *, int);
 void wsemul_vt100_el(struct wsemul_vt100_emuldata *, int);
 void wsemul_vt100_handle_csi(struct wsemul_vt100_emuldata *, u_char);
 void wsemul_vt100_handle_dcs(struct wsemul_vt100_emuldata *);
+=======
+void	wsemul_vt100_reset(struct wsemul_vt100_emuldata *);
+int	wsemul_vt100_scrollup(struct wsemul_vt100_emuldata *, int);
+int	wsemul_vt100_scrolldown(struct wsemul_vt100_emuldata *, int);
+int	wsemul_vt100_ed(struct wsemul_vt100_emuldata *, int);
+int	wsemul_vt100_el(struct wsemul_vt100_emuldata *, int);
+int	wsemul_vt100_handle_csi(struct wsemul_vt100_emuldata *, u_char);
+void	wsemul_vt100_handle_dcs(struct wsemul_vt100_emuldata *);
+>>>>>>> origin/master
 
 int wsemul_vt100_translate(void *cookie, keysym_t, char **);
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: urio.c,v 1.20 2005/11/21 18:16:44 millert Exp $	*/
+=======
+/*	$OpenBSD: urio.c,v 1.38 2011/01/25 20:03:36 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: urio.c,v 1.15 2002/10/23 09:14:02 jdolecek Exp $	*/
 
 /*
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -141,9 +138,27 @@ static const struct usb_devno urio_devs[] = {
 	{ USB_VENDOR_DIAMOND2, USB_PRODUCT_DIAMOND2_RIO800USB},
 	{ USB_VENDOR_DIAMOND2, USB_PRODUCT_DIAMOND2_PSAPLAY120},
 };
-#define urio_lookup(v, p) usb_lookup(urio_devs, v, p)
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER(urio);
+=======
+int urio_match(struct device *, void *, void *); 
+void urio_attach(struct device *, struct device *, void *); 
+int urio_detach(struct device *, int); 
+int urio_activate(struct device *, int); 
+
+struct cfdriver urio_cd = { 
+	NULL, "urio", DV_DULL 
+}; 
+
+const struct cfattach urio_ca = { 
+	sizeof(struct urio_softc), 
+	urio_match, 
+	urio_attach, 
+	urio_detach, 
+	urio_activate, 
+};
+>>>>>>> origin/master
 
 USB_MATCH(urio)
 {
@@ -154,8 +169,8 @@ USB_MATCH(urio)
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	return (urio_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+	return (usb_lookup(urio_devs, uaa->vendor, uaa->product) != NULL ?
+	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
 USB_ATTACH(urio)
@@ -226,11 +241,14 @@ USB_ATTACH(urio)
 #endif /* defined(__FreeBSD__) */
 
 	DPRINTFN(10, ("urio_attach: %p\n", sc->sc_udev));
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(urio)
@@ -245,7 +263,6 @@ USB_DETACH(urio)
 	DPRINTF(("urio_detach: sc=%p\n", sc));
 #endif
 
-	sc->sc_dying = 1;
 	/* Abort all pipes.  Causes processes waiting for transfer to wake. */
 	if (sc->sc_in_pipe != NULL) {
 		usbd_abort_pipe(sc->sc_in_pipe);
@@ -282,15 +299,22 @@ USB_DETACH(urio)
 	/* XXX not implemented yet */
 #endif
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 			   USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 int
+<<<<<<< HEAD
 urio_activate(device_ptr_t self, enum devact act)
+=======
+urio_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct urio_softc *sc = (struct urio_softc *)self;
 

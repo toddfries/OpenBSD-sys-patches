@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: smc83c170.c,v 1.7 2005/12/15 23:40:19 krw Exp $	*/
+=======
+/*	$OpenBSD: smc83c170.c,v 1.14 2009/08/10 20:29:54 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: smc83c170.c,v 1.59 2005/02/27 00:27:02 perry Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -92,8 +89,6 @@ void	epic_watchdog(struct ifnet *);
 int	epic_ioctl(struct ifnet *, u_long, caddr_t);
 int	epic_init(struct ifnet *);
 void	epic_stop(struct ifnet *, int);
-
-void	epic_shutdown(void *);
 
 void	epic_reset(struct epic_softc *);
 void	epic_rxdrain(struct epic_softc *);
@@ -308,14 +303,6 @@ epic_attach(struct epic_softc *sc, const char *intrstr)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(epic_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
 	return;
 
 	/*
@@ -346,17 +333,6 @@ epic_attach(struct epic_softc *sc, const char *intrstr)
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
  fail_0:
 	return;
-}
-
-/*
- * Shutdown hook.  Make sure the interface is stopped at reboot.
- */
-void
-epic_shutdown(void *arg)
-{
-	struct epic_softc *sc = arg;
-
-	epic_stop(&sc->sc_arpcom.ac_if, 1);
 }
 
 /*
@@ -561,16 +537,11 @@ int
 epic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct epic_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -589,13 +560,6 @@ epic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-        case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		/*
 		 * If interface is marked up and not running, then start it.
@@ -609,33 +573,23 @@ epic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			epic_stop(ifp, 1);
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING) {
-				mii_pollstat(&sc->sc_mii);
-				epic_set_mchash(sc);
-			}
-			error = 0;
-		}
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			mii_pollstat(&sc->sc_mii);
+			epic_set_mchash(sc);
+		}
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }
@@ -912,7 +866,7 @@ epic_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }
 
 /*
@@ -1100,7 +1054,7 @@ epic_init(struct ifnet *ifp)
 	/*
 	 * Start the one second clock.
 	 */
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 
 	/*
 	 * Attempt to start output on the interface.

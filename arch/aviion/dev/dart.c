@@ -1,4 +1,4 @@
-/*	$OpenBSD: dart.c,v 1.47 2006/04/17 13:30:02 miod Exp $	*/
+/*	$OpenBSD: dart.c,v 1.11 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Mach Operating System
@@ -267,15 +267,9 @@ dartstart(struct tty *tp)
 	if (tp->t_state & (TS_TIMEOUT | TS_BUSY | TS_TTSTOP))
 		goto bail;
 
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto bail;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto bail;
 
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0) {
@@ -610,7 +604,7 @@ dartopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (dart->tty != NULL)
 		tp = dart->tty;
 	else
-		tp = dart->tty = ttymalloc();
+		tp = dart->tty = ttymalloc(0);
 
 	tp->t_oproc = dartstart;
 	tp->t_param = dartparam;
@@ -644,7 +638,7 @@ dartopen(dev_t dev, int flag, int mode, struct proc *p)
 
 		(void)dartmctl(sc, port, TIOCM_DTR | TIOCM_RTS, DMSET);
 		tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}
@@ -655,7 +649,7 @@ dartopen(dev_t dev, int flag, int mode, struct proc *p)
 	 */
 	tp->t_dev = dev;
 	splx(s);
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -672,7 +666,7 @@ dartclose(dev_t dev, int flag, int mode, struct proc *p)
 	dart = &sc->sc_dart[port];
 
 	tp = dart->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 
 	return (0);
@@ -817,7 +811,7 @@ dartintr(void *arg)
 		 * ready change on a disabled port). This should not happen,
 		 * but we have to claim the interrupt anyway.
 		 */
-#ifdef DIAGNOSTIC
+#if defined(DIAGNOSTIC) && !defined(MULTIPROCESSOR)
 		printf("%s: spurious interrupt, isr %x imr %x\n",
 		    sc->sc_dev.dv_xname, isr, imr);
 #endif

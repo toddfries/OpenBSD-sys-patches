@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.114 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.136 2011/01/14 19:04:08 jasper Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -84,7 +84,7 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 18 */
 	bdev_disk_init(NRAID,raid),	/* 19: RAIDframe disk driver */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 /* open, close, read, write, ioctl, tty, mmap */
 #define cdev_pc_init(c,n) { \
@@ -125,8 +125,6 @@ cdev_decl(wd);
 #include "pccom.h"
 cdev_decl(com);
 cdev_decl(fd);
-cdev_decl(wt);
-#include "ss.h"
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
@@ -150,6 +148,7 @@ cdev_decl(cy);
 cdev_decl(mcd);
 #include "tun.h"
 #include "audio.h"
+#include "video.h"
 #include "midi.h"
 #include "sequencer.h"
 cdev_decl(music);
@@ -159,9 +158,9 @@ cdev_decl(music);
 #include "pctr.h"
 #include "bios.h"
 #include "iop.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "bktr.h"
 #include "ksyms.h"
@@ -178,11 +177,10 @@ cdev_decl(cztty);
 #include "gpr.h"
 #include "nvram.h"
 cdev_decl(nvram);
-
-/* XXX -- this needs to be supported by config(8)! */
-#if (NCOM > 0) && (NPCCOM > 0)
-#error com and pccom are mutually exclusive.  Sorry.
-#endif
+#include "agp.h"
+cdev_decl(agp);
+#include "drm.h"
+cdev_decl(drm);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -197,6 +195,9 @@ cdev_decl(pci);
 #include "pf.h"
 #include "hotplug.h"
 #include "gpio.h"
+#include "amdmsr.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -204,15 +205,11 @@ struct cdevsw	cdevsw[] =
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
 	cdev_disk_init(NWD,wd),		/* 3: ST506/ESDI/IDE disk */
-	cdev_swap_init(1,sw),		/* 4: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 4 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 5: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 6: pseudo-tty master */
 	cdev_log_init(1,log),		/* 7: /dev/klog */
-#if NPCCOM > 0
-	cdev_tty_init(NPCCOM,com),	/* 8: serial port */
-#else
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
-#endif
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
 	cdev_tape_init(NWT,wt),		/* 10: QIC-02/QIC-36 tape */
 	cdev_notdef(),			/* 11 */
@@ -224,7 +221,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lpt_init(NLPT,lpt),	/* 16: parallel printer */
 	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
 	cdev_disk_init(NCCD,ccd),	/* 18: concatenated disk driver */
-	cdev_ss_init(NSS,ss),           /* 19: SCSI scanner */
+	cdev_notdef(),			/* 19 */
 	cdev_uk_init(NUK,uk),		/* 20: unknown SCSI */
 	cdev_apm_init(NAPM,apm),	/* 21: Advancded Power Management */
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
@@ -257,15 +254,15 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),			/* 43 */
 #endif
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_random_init(1,random),	/* 45: random data source */
 	cdev_ocis_init(NPCTR,pctr),	/* 46: pentium performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -309,9 +306,16 @@ struct cdevsw	cdevsw[] =
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 82: devices hot plugging */
 	cdev_gpio_init(NGPIO,gpio),	/* 83: GPIO interface */
 	cdev_nvram_init(NNVRAM,nvram),	/* 84: NVRAM interface */
-	cdev_acpi_init(NACPI,acpi),	/* 85: ACPI */
+	cdev_notdef(),			/* 85: ACPI (deprecated) */
+	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
+	cdev_agp_init(NAGP,agp),	/* 87: agp */
+	cdev_drm_init(NDRM,drm),	/* 88: drm */
+	cdev_amdmsr_init(NAMDMSR,amdmsr),	/* 89: amdmsr */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 90: vscsi */
+	cdev_disk_init(1,diskmap),	/* 91: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),     /* 92: pppx */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 2; 	/* major device number of memory special file */
 
@@ -409,7 +413,7 @@ int chrtoblktbl[] = {
 	/* 53 */	NODEV,
 	/* 54 */	19,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
 /*
  * In order to map BSD bdev numbers of disks to their BIOS equivalents
@@ -457,7 +461,7 @@ struct	consdev constab[] = {
 #if NWSDISPLAY > 0
 	cons_init(ws),
 #endif
-#if NCOM + NPCCOM > 0
+#if NCOM
 	cons_init(com),
 #endif
 	{ 0 },

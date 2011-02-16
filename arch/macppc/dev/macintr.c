@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.31 2007/03/01 15:00:57 mickey Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.41 2011/01/08 18:10:22 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -220,7 +220,7 @@ fakeintr(void *arg)
  */
 void *
 macintr_establish(void * lcv, int irq, int type, int level,
-    int (*ih_fun)(void *), void *ih_arg, char *name)
+    int (*ih_fun)(void *), void *ih_arg, const char *name)
 {
 	struct intrhand **p, *q, *ih;
 	static struct intrhand fakehand;
@@ -287,8 +287,7 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&m_hwirq[irq],
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &m_hwirq[irq]);
 	*p = ih;
 
 	return (ih);
@@ -373,7 +372,7 @@ intr_calculatemasks()
 		for (irq = 0; irq < ICU_LEN; irq++)
 			if (m_intrlevel[irq] & (1 << level))
 				irqs |= 1 << irq;
-		imask[level] = irqs | SINT_MASK;
+		cpu_imask[level] = irqs | SINT_ALLMASK;
 	}
 
 	/*
@@ -383,23 +382,23 @@ intr_calculatemasks()
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-	imask[IPL_NET] |= imask[IPL_BIO];
-	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCK;
+	cpu_imask[IPL_NET] |= cpu_imask[IPL_BIO];
+	cpu_imask[IPL_TTY] |= cpu_imask[IPL_NET];
+	cpu_imask[IPL_VM] |= cpu_imask[IPL_TTY];
+	cpu_imask[IPL_CLOCK] |= cpu_imask[IPL_VM] | SPL_CLOCKMASK;
 
 	/*
 	 * These are pseudo-levels.
 	 */
-	imask[IPL_NONE] = 0x00000000;
-	imask[IPL_HIGH] = 0xffffffff;
+	cpu_imask[IPL_NONE] = 0x00000000;
+	cpu_imask[IPL_HIGH] = 0xffffffff;
 
 	/* And eventually calculate the complete masks. */
 	for (irq = 0; irq < ICU_LEN; irq++) {
 		register int irqs = 1 << irq;
 		for (q = m_intrhand[irq]; q; q = q->ih_next)
-			irqs |= imask[q->ih_level];
-		m_intrmask[irq] = irqs | SINT_MASK;
+			irqs |= cpu_imask[q->ih_level];
+		m_intrmask[irq] = irqs | SINT_ALLMASK;
 	}
 
 	/* Lastly, determine which IRQs are actually in use. */
@@ -578,20 +577,17 @@ mac_intr_do_pending_int()
 	do {
 		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_CLOCK;
-			softclock();
+			softintr_dispatch(SI_SOFTCLOCK);
 		}
 		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr = netisr;
-			netisr = 0;
 			ci->ci_ipending &= ~SINT_NET;
-			softnet(pisr);
+			softintr_dispatch(SI_SOFTNET);
 		}
 		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_TTY;
-			softtty();
+			softintr_dispatch(SI_SOFTTTY);
 		}
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_ipending &= pcpl;
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
 	ppc_intr_enable(s);

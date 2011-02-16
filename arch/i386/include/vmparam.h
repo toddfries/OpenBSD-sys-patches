@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.36 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.46 2011/01/07 03:15:39 tedu Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.15 1994/10/27 04:16:34 cgd Exp $	*/
 
 /*-
@@ -63,7 +63,10 @@
 #define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(1024*1024*1024)	/* max data size */
+#define	MAXDSIZ		(2UL*1024*1024*1024)	/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		(1024*1024*1024)	/* heap gap size */
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(4*1024*1024)		/* initial stack size limit */
@@ -76,6 +79,10 @@
 
 /* I386 has a line where all code is executable: 0 - I386_MAX_EXE_ADDR */
 #define I386_MAX_EXE_ADDR 0x20000000		/* exec line */
+
+/* map PIE into 320MB - 448MB address range */
+#define VM_PIE_MIN_ADDR 0x14000000
+#define VM_PIE_MAX_ADDR 0x1C000000
 
 /*
  * Size of shared memory map
@@ -90,7 +97,7 @@
 #define	USRIOSIZE 	300
 
 /* user/kernel map constants */
-#define VM_MIN_ADDRESS		((vaddr_t)0)
+#define VM_MIN_ADDRESS		((vaddr_t)PAGE_SIZE)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)((PDSLOT_PTE<<PDSHIFT) - USPACE))
 #define VM_MAX_ADDRESS		((vaddr_t)((PDSLOT_PTE<<PDSHIFT) + \
 				    (PDSLOT_PTE<<PGSHIFT)))

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sdmmc_scsi.c,v 1.6 2006/10/17 01:26:26 dlg Exp $	*/
+=======
+/*	$OpenBSD: sdmmc_scsi.c,v 1.26 2010/10/25 10:36:49 krw Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -20,6 +24,7 @@
 
 #include <sys/param.h>
 #include <sys/buf.h>
+#include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
@@ -46,7 +51,6 @@ struct sdmmc_ccb {
 	struct scsi_xfer *ccb_xs;
 	int ccb_flags;
 #define SDMMC_CCB_F_ERR		0x0001
-	void (*ccb_done)(struct sdmmc_ccb *);
 	u_int32_t ccb_blockno;
 	u_int32_t ccb_blockcnt;
 	volatile enum {
@@ -70,21 +74,21 @@ struct sdmmc_scsi_softc {
 	struct sdmmc_ccb *sc_ccbs;		/* allocated ccbs */
 	struct sdmmc_ccb_list sc_ccb_freeq;	/* free ccbs */
 	struct sdmmc_ccb_list sc_ccb_runq;	/* queued ccbs */
+	struct mutex sc_ccb_mtx;
+	struct scsi_iopool sc_iopool;
 };
 
 int	sdmmc_alloc_ccbs(struct sdmmc_scsi_softc *, int);
 void	sdmmc_free_ccbs(struct sdmmc_scsi_softc *);
-struct sdmmc_ccb *sdmmc_get_ccb(struct sdmmc_scsi_softc *, int);
-void	sdmmc_put_ccb(struct sdmmc_ccb *);
+void	*sdmmc_ccb_alloc(void *);
+void	sdmmc_ccb_free(void *, void *);
 
-int	sdmmc_scsi_cmd(struct scsi_xfer *);
-int	sdmmc_start_xs(struct sdmmc_softc *, struct sdmmc_ccb *);
+void	sdmmc_scsi_cmd(struct scsi_xfer *);
+void	sdmmc_start_xs(struct sdmmc_softc *, struct sdmmc_ccb *);
 void	sdmmc_complete_xs(void *);
 void	sdmmc_done_xs(struct sdmmc_ccb *);
 void	sdmmc_stimeout(void *);
-void	sdmmc_scsi_minphys(struct buf *);
-
-#define DEVNAME(sc)	SDMMCDEVNAME(sc)
+void	sdmmc_scsi_minphys(struct buf *, struct scsi_link *);
 
 #ifdef SDMMC_DEBUG
 #define DPRINTF(s)	printf s
@@ -95,10 +99,11 @@ void	sdmmc_scsi_minphys(struct buf *);
 void
 sdmmc_scsi_attach(struct sdmmc_softc *sc)
 {
-	struct scsibus_attach_args saa;
+	struct sdmmc_attach_args saa;
 	struct sdmmc_scsi_softc *scbus;
 	struct sdmmc_function *sf;
 
+<<<<<<< HEAD
 	MALLOC(scbus, struct sdmmc_scsi_softc *,
 	    sizeof *scbus, M_DEVBUF, M_WAITOK);
 	bzero(scbus, sizeof *scbus);
@@ -107,6 +112,14 @@ sdmmc_scsi_attach(struct sdmmc_softc *sc)
 	    sizeof(*scbus->sc_tgt) * (SDMMC_SCSIID_MAX+1),
 	    M_DEVBUF, M_WAITOK);
 	bzero(scbus->sc_tgt, sizeof(*scbus->sc_tgt) * (SDMMC_SCSIID_MAX+1));
+=======
+	rw_assert_wrlock(&sc->sc_lock);
+
+	scbus = malloc(sizeof *scbus, M_DEVBUF, M_WAITOK | M_ZERO);
+
+	scbus->sc_tgt = malloc(sizeof(*scbus->sc_tgt) *
+	    (SDMMC_SCSIID_MAX+1), M_DEVBUF, M_WAITOK | M_ZERO);
+>>>>>>> origin/master
 
 	/*
 	 * Each card that sent us a CID in the identification stage
@@ -137,9 +150,10 @@ sdmmc_scsi_attach(struct sdmmc_softc *sc)
 	scbus->sc_link.luns = 1;
 	scbus->sc_link.openings = 1;
 	scbus->sc_link.adapter = &scbus->sc_adapter;
+	scbus->sc_link.pool = &scbus->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &scbus->sc_link;
+	saa.scsi_link = &scbus->sc_link;
 
 	scbus->sc_child = config_found(&sc->sc_dev, &saa, scsiprint);
 	if (scbus->sc_child == NULL) {
@@ -162,6 +176,8 @@ sdmmc_scsi_detach(struct sdmmc_softc *sc)
 	struct sdmmc_scsi_softc *scbus;
 	struct sdmmc_ccb *ccb;
 	int s;
+
+	rw_assert_wrlock(&sc->sc_lock);
 
 	scbus = sc->sc_scsibus;
 	if (scbus == NULL)
@@ -202,6 +218,9 @@ sdmmc_alloc_ccbs(struct sdmmc_scsi_softc *scbus, int nccbs)
 
 	TAILQ_INIT(&scbus->sc_ccb_freeq);
 	TAILQ_INIT(&scbus->sc_ccb_runq);
+	mtx_init(&scbus->sc_ccb_mtx, IPL_BIO);
+	scsi_iopool_init(&scbus->sc_iopool, scbus, sdmmc_ccb_alloc,
+	    sdmmc_ccb_free);
 
 	for (i = 0; i < nccbs; i++) {
 		ccb = &scbus->sc_ccbs[i];
@@ -209,7 +228,6 @@ sdmmc_alloc_ccbs(struct sdmmc_scsi_softc *scbus, int nccbs)
 		ccb->ccb_state = SDMMC_CCB_FREE;
 		ccb->ccb_flags = 0;
 		ccb->ccb_xs = NULL;
-		ccb->ccb_done = NULL;
 
 		TAILQ_INSERT_TAIL(&scbus->sc_ccb_freeq, ccb, ccb_link);
 	}
@@ -225,41 +243,42 @@ sdmmc_free_ccbs(struct sdmmc_scsi_softc *scbus)
 	}
 }
 
-struct sdmmc_ccb *
-sdmmc_get_ccb(struct sdmmc_scsi_softc *scbus, int flags)
+void *
+sdmmc_ccb_alloc(void *xscbus)
 {
+	struct sdmmc_scsi_softc *scbus = xscbus;
 	struct sdmmc_ccb *ccb;
-	int s;
 
-	s = splbio();
-	while ((ccb = TAILQ_FIRST(&scbus->sc_ccb_freeq)) == NULL &&
-	    !ISSET(flags, SCSI_NOSLEEP))
-		tsleep(&scbus->sc_ccb_freeq, PRIBIO, "getccb", 0);
+	mtx_enter(&scbus->sc_ccb_mtx);
+	ccb = TAILQ_FIRST(&scbus->sc_ccb_freeq);
 	if (ccb != NULL) {
 		TAILQ_REMOVE(&scbus->sc_ccb_freeq, ccb, ccb_link);
 		ccb->ccb_state = SDMMC_CCB_READY;
 	}
-	splx(s);
+	mtx_leave(&scbus->sc_ccb_mtx);
+
 	return ccb;
 }
 
 void
-sdmmc_put_ccb(struct sdmmc_ccb *ccb)
+sdmmc_ccb_free(void *xscbus, void *xccb)
 {
-	struct sdmmc_scsi_softc *scbus = ccb->ccb_scbus;
+	struct sdmmc_scsi_softc *scbus = xscbus;
+	struct sdmmc_ccb *ccb = xccb;
 	int s;
 
 	s = splbio();
 	if (ccb->ccb_state == SDMMC_CCB_QUEUED)
 		TAILQ_REMOVE(&scbus->sc_ccb_runq, ccb, ccb_link);
+	splx(s);
+
 	ccb->ccb_state = SDMMC_CCB_FREE;
 	ccb->ccb_flags = 0;
 	ccb->ccb_xs = NULL;
-	ccb->ccb_done = NULL;
+
+	mtx_enter(&scbus->sc_ccb_mtx);
 	TAILQ_INSERT_TAIL(&scbus->sc_ccb_freeq, ccb, ccb_link);
-	if (TAILQ_NEXT(ccb, ccb_link) == NULL)
-		wakeup(&scbus->sc_ccb_freeq);
-	splx(s);
+	mtx_leave(&scbus->sc_ccb_mtx);
 }
 
 /*
@@ -285,7 +304,7 @@ sdmmc_scsi_decode_rw(struct scsi_xfer *xs, u_int32_t *blocknop,
 	}
 }
 
-int
+void
 sdmmc_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
@@ -297,7 +316,6 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 	u_int32_t blockno;
 	u_int32_t blockcnt;
 	struct sdmmc_ccb *ccb;
-	int s;
 
 	if (link->target >= scbus->sc_ntargets || tgt->card == NULL ||
 	    link->lun != 0) {
@@ -305,11 +323,8 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 		    DEVNAME(sc), link->target));
 		/* XXX should be XS_SENSE and sense filled out */
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 	}
 
 	DPRINTF(("%s: scsi cmd target=%d opcode=%#x proc=\"%s\" (poll=%#x)\n",
@@ -337,34 +352,29 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 		    "Drive #%02d", link->target);
 		strlcpy(inq.revision, "   ", sizeof(inq.revision));
 		bcopy(&inq, xs->data, MIN(xs->datalen, sizeof inq));
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 
 	case TEST_UNIT_READY:
 	case START_STOP:
 	case SYNCHRONIZE_CACHE:
-		return COMPLETE;
+		scsi_done(xs);
+		return;
 
 	case READ_CAPACITY:
 		bzero(&rcd, sizeof rcd);
 		_lto4b(tgt->card->csd.capacity - 1, rcd.addr);
 		_lto4b(tgt->card->csd.sector_size, rcd.length);
 		bcopy(&rcd, xs->data, MIN(xs->datalen, sizeof rcd));
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 
 	default:
 		DPRINTF(("%s: unsupported scsi command %#x\n",
 		    DEVNAME(sc), xs->cmd->opcode));
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 	}
 
 	/* A read or write operation. */
@@ -375,32 +385,20 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 		DPRINTF(("%s: out of bounds %u-%u >= %u\n", DEVNAME(sc),
 		    blockno, blockcnt, tgt->card->csd.capacity));
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 	}
 
-	ccb = sdmmc_get_ccb(sc->sc_scsibus, xs->flags);
-	if (ccb == NULL) {
-		printf("%s: out of ccbs\n", DEVNAME(sc));
-		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
-	}
+	ccb = xs->io;
 
 	ccb->ccb_xs = xs;
-	ccb->ccb_done = sdmmc_done_xs;
-
 	ccb->ccb_blockcnt = blockcnt;
 	ccb->ccb_blockno = blockno;
 
-	return sdmmc_start_xs(sc, ccb);
+	sdmmc_start_xs(sc, ccb);
 }
 
-int
+void
 sdmmc_start_xs(struct sdmmc_softc *sc, struct sdmmc_ccb *ccb)
 {
 	struct sdmmc_scsi_softc *scbus = sc->sc_scsibus;
@@ -417,12 +415,11 @@ sdmmc_start_xs(struct sdmmc_softc *sc, struct sdmmc_ccb *ccb)
 
 	if (ISSET(xs->flags, SCSI_POLL)) {
 		sdmmc_complete_xs(ccb);
-		return COMPLETE;
+		return;
 	}
 
-	timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+	timeout_add_msec(&xs->stimeout, xs->timeout);
 	sdmmc_add_task(sc, &ccb->ccb_task);
-	return SUCCESSFULLY_QUEUED;
 }
 
 void
@@ -453,7 +450,7 @@ sdmmc_complete_xs(void *arg)
 	if (error != 0)
 		xs->error = XS_DRIVER_STUFFUP;
 
-	ccb->ccb_done(ccb);
+	sdmmc_done_xs(ccb);
 	splx(s);
 }
 
@@ -473,12 +470,10 @@ sdmmc_done_xs(struct sdmmc_ccb *ccb)
 	    curproc ? curproc->p_comm : "", xs->error));
 
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 
 	if (ISSET(ccb->ccb_flags, SDMMC_CCB_F_ERR))
 		xs->error = XS_DRIVER_STUFFUP;
 
-	sdmmc_put_ccb(ccb);
 	scsi_done(xs);
 }
 
@@ -492,16 +487,23 @@ sdmmc_stimeout(void *arg)
 	ccb->ccb_flags |= SDMMC_CCB_F_ERR;
 	if (sdmmc_task_pending(&ccb->ccb_task)) {
 		sdmmc_del_task(&ccb->ccb_task);
-		ccb->ccb_done(ccb);
+		sdmmc_done_xs(ccb);
 	}
 	splx(s);
 }
 
 void
-sdmmc_scsi_minphys(struct buf *bp)
+sdmmc_scsi_minphys(struct buf *bp, struct scsi_link *sl)
 {
-	/* XXX limit to max. transfer size supported by card/host? */
-	if (bp->b_bcount > DEV_BSIZE)
-		bp->b_bcount = DEV_BSIZE;
+	struct sdmmc_softc *sc = sl->adapter_softc;
+	struct sdmmc_scsi_softc *scbus = sc->sc_scsibus;
+	struct sdmmc_scsi_target *tgt = &scbus->sc_tgt[sl->target];
+	struct sdmmc_function *sf = tgt->card;
+
+	/* limit to max. transfer size supported by card/host */
+	if (sc->sc_max_xfer != 0 &&
+	    bp->b_bcount > sf->csd.sector_size * sc->sc_max_xfer)
+		bp->b_bcount = sf->csd.sector_size * sc->sc_max_xfer;
+
 	minphys(bp);
 }

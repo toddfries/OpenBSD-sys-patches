@@ -1,4 +1,4 @@
-/* $OpenBSD: tsp_dma.c,v 1.4 2006/03/20 01:00:58 martin Exp $ */
+/* $OpenBSD: tsp_dma.c,v 1.8 2009/10/02 18:01:47 miod Exp $ */
 /* $NetBSD: tsp_dma.c,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-
@@ -48,13 +48,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -94,32 +87,19 @@
 #define	EDIFF(a, b) (((a) | WSBA_ENA | WSBA_SG)	!= ((b) | WSBA_ENA | WSBA_SG))
 
 bus_dma_tag_t tsp_dma_get_tag(bus_dma_tag_t, alpha_bus_t);
-
 int	tsp_bus_dmamap_load_sgmap(bus_dma_tag_t, bus_dmamap_t, void *,
 	    bus_size_t, struct proc *, int);
-
 int	tsp_bus_dmamap_load_mbuf_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    struct mbuf *, int);
-
 int	tsp_bus_dmamap_load_uio_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    struct uio *, int);
-
 int	tsp_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
 	    bus_dma_segment_t *, int, bus_size_t, int);
-
 void	tsp_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
-
 void	tsp_tlb_invalidate(struct tsp_config *);
 
-/*
- * XXX Need to figure out what this is, if any.  Initialize it to
- * XXX something that should be safe.
- */
-#define	TSP_SGMAP_PFTHRESH	256
-
 void
-tsp_dma_init(pcp)
-	struct tsp_config *pcp;
+tsp_dma_init(struct device *tsp, struct tsp_config *pcp)
 {
 	int i;
 	bus_dma_tag_t t;
@@ -128,19 +108,19 @@ tsp_dma_init(pcp)
 	static struct map_expected {
 		u_int32_t base, mask, enables;
 	} premap[4] = {
-		{ 0x800000, 		   0x700000, WSBA_ENA | WSBA_SG },
-		{ 0x80000000 | WSBA_ENA, 0x3ff00000, WSBA_ENA           },
-		{ 0, 0 },
-		{ 0, 0 }
+		{ 0x00800000, 0x00700000, WSBA_ENA | WSBA_SG },
+		{ 0x80000000, 0x3ff00000, WSBA_ENA           },
+		{ 0, 0, 0 },
+		{ 0, 0, 0 }
 	};
 
 	alpha_mb();
 	for(i = 0; i < 4; ++i) {
 		if (EDIFF(pccsr->tsp_wsba[i].tsg_r, premap[i].base) ||
 		    EDIFF(pccsr->tsp_wsm[i].tsg_r, premap[i].mask))
-			printf("tsp%d: window %d: %lx/base %lx/mask %lx"
+			printf("%s: window %d: %lx/base %lx/mask %lx"
 			    " reinitialized\n",
-			    pcp->pc_pslot, i,
+			    tsp->dv_xname, i,
 			    pccsr->tsp_wsba[i].tsg_r,
 			    pccsr->tsp_wsm[i].tsg_r,
 			    pccsr->tsp_tba[i].tsg_r);
@@ -185,7 +165,6 @@ tsp_dma_init(pcp)
 	t->_next_window = NULL;
 	t->_boundary = 0;
 	t->_sgmap = &pcp->pc_sgmap;
-	t->_pfthresh = TSP_SGMAP_PFTHRESH;
 	t->_get_tag = tsp_dma_get_tag;
 	t->_dmamap_create = alpha_sgmap_dmamap_create;
 	t->_dmamap_destroy = alpha_sgmap_dmamap_destroy;
@@ -217,12 +196,21 @@ tsp_dma_init(pcp)
 	alpha_mb();
 
 	/*
+	 * Enable window 1 in direct mode.
+	 */
+	alpha_mb();
+	pccsr->tsp_wsba[1].tsg_r =
+	    (pccsr->tsp_wsba[1].tsg_r & ~WSBA_SG) | WSBA_ENA;
+	alpha_mb();
+
+	/*
 	 * Check windows for sanity, especially if we later decide to
 	 * use the firmware's initialization in some cases.
 	 */
 	if ((sgwbase <= dwbase && dwbase < sgwbase + sgwlen) ||
 	    (dwbase <= sgwbase && sgwbase < dwbase + dwlen))
-		panic("tsp_dma_init: overlap");
+		panic("tsp_dma_init: overlap sg %p len %p d %p len %p",
+		    sgwbase, sgwlen, dwbase, dwlen);
 
 	tbase = pcp->pc_sgmap.aps_ptpa;
 	if (tbase & ~0x7fffffc00UL)
@@ -389,6 +377,6 @@ tsp_tlb_invalidate(pcp)
 {
 
 	alpha_mb();
-	pcp->pc_csr->tsp_tlbia.tsg_r = 0;
+	*pcp->pc_tlbia = 0;
 	alpha_mb();
 }

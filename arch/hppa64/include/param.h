@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.7 2006/03/19 01:47:23 martin Exp $	*/
+/*	$OpenBSD: param.h,v 1.12 2010/07/01 04:20:38 jsing Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -24,6 +24,7 @@
  */
 
 #include <machine/cpu.h>
+#include <machine/intr.h>
 
 /*
  * Machine dependent constants for PA-RISC.

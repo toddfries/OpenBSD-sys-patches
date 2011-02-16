@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.41 2005/12/17 07:31:26 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.47 2010/12/26 15:41:00 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
 
 /*-
@@ -111,7 +111,6 @@ boolean_t pteclrbits(paddr_t pa, u_int mask, u_int clear);
 	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF_32, FALSE))
 
 #define	pmap_unwire(pm, va)
-#define	pmap_phys_address(x)		(x)
 #define pmap_update(pmap)	/* nothing (yet) */
 
 #define pmap_resident_count(pmap)       ((pmap)->pm_stats.resident_count) 
@@ -137,7 +136,6 @@ int pte_spill_v(struct pmap *pm, u_int32_t va, u_int32_t dsisr, int exec_fault);
 #define pmap_copy(dst_pmap, src_pmap, dst_addr, len, src_addr) ;
 int reserve_dumppages(caddr_t p);
 
-void pmap_proc_iflush(struct proc *proc, vaddr_t va, vsize_t len);
 #define pmap_unuse_final(p)		/* nothing */
 
 #endif	/* _KERNEL */

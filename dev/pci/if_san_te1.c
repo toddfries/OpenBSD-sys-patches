@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_san_te1.c,v 1.8 2005/04/01 21:42:36 canacar Exp $	*/
+=======
+/*	$OpenBSD: if_san_te1.c,v 1.11 2009/01/21 21:54:00 grange Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -3658,7 +3662,7 @@ sdla_te_enable_timer(sdla_t *card, unsigned long delay)
 	}
 	bit_set((u_int8_t*)&card->fe_te.te_critical, TE_TIMER_RUNNING);
 
-	timeout_add(&card->fe_te.te_timer, delay * hz / 1000);
+	timeout_add_msec(&card->fe_te.te_timer, delay);
 	return;
 }
 

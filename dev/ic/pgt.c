@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pgt.c,v 1.40 2006/12/30 22:43:01 claudio Exp $  */
+=======
+/*	$OpenBSD: pgt.c,v 1.66 2010/09/20 07:40:41 deraadt Exp $  */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -55,11 +59,11 @@
 #include <sys/mbuf.h>
 #include <sys/endian.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/kthread.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -131,7 +135,7 @@ int	 pgt_load_tx_desc_frag(struct pgt_softc *, enum pgt_queue,
 void	 pgt_unload_tx_desc_frag(struct pgt_softc *, struct pgt_desc *);
 int	 pgt_load_firmware(struct pgt_softc *);
 void	 pgt_cleanup_queue(struct pgt_softc *, enum pgt_queue,
-	     struct pgt_frag []);
+	     struct pgt_frag *);
 int	 pgt_reset(struct pgt_softc *);
 void	 pgt_stop(struct pgt_softc *, unsigned int);
 void	 pgt_reboot(struct pgt_softc *);
@@ -171,7 +175,7 @@ void	 pgt_ieee80211_node_copy(struct ieee80211com *,
 	     struct ieee80211_node *,
 	     const struct ieee80211_node *);
 int	 pgt_ieee80211_send_mgmt(struct ieee80211com *,
-	     struct ieee80211_node *, int, int);
+	     struct ieee80211_node *, int, int, int);
 int	 pgt_net_attach(struct pgt_softc *);
 void	 pgt_start(struct ifnet *);
 int	 pgt_ioctl(struct ifnet *, u_long, caddr_t);
@@ -192,8 +196,7 @@ int	 pgt_dma_alloc(struct pgt_softc *);
 int	 pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq);
 void	 pgt_dma_free(struct pgt_softc *);
 void	 pgt_dma_free_queue(struct pgt_softc *sc, enum pgt_queue pq);
-void	 pgt_shutdown(void *);
-void	 pgt_power(int, void *);
+void	 pgt_resume(void *, void *);
 
 void
 pgt_write_memory_barrier(struct pgt_softc *sc)
@@ -377,7 +380,7 @@ pgt_load_firmware(struct pgt_softc *sc)
 
 void
 pgt_cleanup_queue(struct pgt_softc *sc, enum pgt_queue pq,
-    struct pgt_frag pqfrags[])
+    struct pgt_frag *pqfrags)
 {
 	struct pgt_desc *pd;
 	unsigned int i;
@@ -604,6 +607,7 @@ pgt_attach(void *xsc)
 	tsleep(&sc->sc_flags, 0, "pgtres", hz);
 	if (sc->sc_flags & SC_UNINITIALIZED) {
 		printf("%s: not responding\n", sc->sc_dev.dv_xname);
+		sc->sc_flags |= SC_NEEDS_FIRMWARE;
 		return;
 	} else {
 		/* await all interrupts */
@@ -632,14 +636,6 @@ pgt_detach(struct pgt_softc *sc)
 	/* stop card */
 	pgt_stop(sc, SC_DYING);
 	pgt_reboot(sc);
-
-	/*
-	 * Disable shutdown and power hooks
-	 */
-        if (sc->sc_shutdown_hook != NULL)
-                shutdownhook_disestablish(sc->sc_shutdown_hook);
-        if (sc->sc_power_hook != NULL)
-                powerhook_disestablish(sc->sc_power_hook);
 
 	ieee80211_ifdetach(&sc->sc_ic.ic_if);
 	if_detach(&sc->sc_ic.ic_if);
@@ -716,11 +712,10 @@ pgt_update_intr(struct pgt_softc *sc, int hack)
 	 * Check completion of rx into their dirty queues.
 	 */
 	for (i = 0; i < PGT_QUEUE_COUNT; i++) {
-		size_t qdirty, qfree, qtotal;
+		size_t qdirty, qfree;
 
 		qdirty = sc->sc_dirtyq_count[pqs[i]];
 		qfree = sc->sc_freeq_count[pqs[i]];
-		qtotal = qdirty + qfree;
 		/*
 		 * We want the wrap-around here.
 		 */
@@ -734,8 +729,8 @@ pgt_update_intr(struct pgt_softc *sc, int hack)
 #endif
 			npend = pgt_queue_frags_pending(sc, pqs[i]);
 			/*
-			 * Receive queues clean up below, so qfree must
-			 * always be qtotal (qdirty is 0).
+			 * Receive queues clean up below, so qdirty must
+			 * always be 0.
 			 */
 			if (npend > qfree) {
 				if (sc->sc_debug & SC_DEBUG_UNEXPECTED)
@@ -846,7 +841,9 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 	if (ni != NULL) {
 		if (ic->ic_opmode == IEEE80211_M_STA) {
 			*ni = ieee80211_ref_node(ic->ic_bss);
-		} else {
+		}
+#ifndef IEEE80211_STA_ONLY
+		else {
 			*ni = ieee80211_find_node(ic, eh->ether_shost);
 			/*
 			 * Make up associations for ad-hoc mode.  To support
@@ -866,6 +863,7 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 				return (NULL);
 			}
 		}
+#endif
 		(*ni)->ni_inact = 0;
 	}
 	snap->llc_dsap = snap->llc_ssap = LLC_SNAP_LSAP;
@@ -887,6 +885,7 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 		IEEE80211_ADDR_COPY(frame->i_addr2, ic->ic_bss->ni_bssid);
 		IEEE80211_ADDR_COPY(frame->i_addr3, eh->ether_shost);
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 	case IEEE80211_M_AHDEMO:
 		frame->i_fc[1] = IEEE80211_FC1_DIR_NODS;
@@ -901,6 +900,7 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 		IEEE80211_ADDR_COPY(frame->i_addr2, eh->ether_shost);
 		IEEE80211_ADDR_COPY(frame->i_addr3, eh->ether_dhost);
 		break;
+#endif
 	default:
 		break;
 	}
@@ -913,6 +913,7 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 	struct ether_header eh;
 	struct ifnet *ifp;
 	struct ieee80211_channel *chan;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct ieee80211com *ic;
 	struct pgt_rx_annex *pra;
@@ -920,7 +921,7 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 	struct mbuf *next;
 	unsigned int n;
 	uint32_t rstamp;
-	uint8_t rate, rssi;
+	uint8_t rssi;
 
 	ic = &sc->sc_ic;
 	ifp = &ic->ic_if;
@@ -997,7 +998,6 @@ input:
 		 */
 		rssi = pha->pra_rssi;
 		rstamp = letoh32(pha->pra_clock);
-		rate = pha->pra_rate;
 		n = ieee80211_mhz2ieee(letoh32(pha->pra_frequency), 0);
 		if (n <= IEEE80211_CHAN_MAX)
 			chan = &ic->ic_channels[n];
@@ -1031,9 +1031,10 @@ input:
 				bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 			}
 #endif
-			ni->ni_rssi = rssi;
-			ni->ni_rstamp = rstamp;
-			ieee80211_input(ifp, m, ni, rssi, rstamp);
+			rxi.rxi_flags = 0;
+			ni->ni_rssi = rxi.rxi_rssi = rssi;
+			ni->ni_rstamp = rxi.rxi_tstamp = rstamp;
+			ieee80211_input(ifp, m, ni, &rxi);
 			/*
 			 * The frame may have caused the node to be marked for
 			 * reclamation (e.g. in response to a DEAUTH message)
@@ -1326,7 +1327,7 @@ pgt_trap_received(struct pgt_softc *sc, uint32_t oid, void *trapdata,
 		return;
 
 	total = sizeof(oid) + size + sizeof(struct pgt_async_trap);
-	if (total >= MINCLSIZE) {
+	if (total > MLEN) {
 		MGETHDR(m, M_DONTWAIT, MT_DATA);
 		if (m == NULL)
 			return;
@@ -1515,7 +1516,7 @@ pgt_datarx_completion(struct pgt_softc *sc, enum pgt_queue pq)
 
 		if (m == NULL)
 			goto fail;
-		if (datalen >= MINCLSIZE) {
+		if (datalen > MHLEN) {
 			MCLGET(m, M_DONTWAIT);
 			if (!(m->m_flags & M_EXT)) {
 				m_free(m);
@@ -1850,7 +1851,7 @@ pgt_ieee80211_node_copy(struct ieee80211com *ic, struct ieee80211_node *dst,
 
 int
 pgt_ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
-    int type, int arg)
+    int type, int arg1, int arg2)
 {
 	return (EOPNOTSUPP);
 }
@@ -1885,7 +1886,6 @@ pgt_net_attach(struct pgt_softc *sc)
 		return (error);
 
 	ifp->if_softc = sc;
-	ifp->if_init = pgt_init;
 	ifp->if_ioctl = pgt_ioctl;
 	ifp->if_start = pgt_start;
 	ifp->if_watchdog = pgt_watchdog;
@@ -1985,10 +1985,11 @@ pgt_net_attach(struct pgt_softc *sc)
 		}
 	}
 
-	ic->ic_caps = IEEE80211_C_WEP | IEEE80211_C_IBSS | IEEE80211_C_PMGT |
-	    IEEE80211_C_HOSTAP | IEEE80211_C_TXPMGT | IEEE80211_C_SHSLOT |
-	    IEEE80211_C_SHPREAMBLE | IEEE80211_C_MONITOR;
-
+	ic->ic_caps = IEEE80211_C_WEP | IEEE80211_C_PMGT | IEEE80211_C_TXPMGT |
+	    IEEE80211_C_SHSLOT | IEEE80211_C_SHPREAMBLE | IEEE80211_C_MONITOR;
+#ifndef IEEE80211_STA_ONLY
+	ic->ic_caps |= IEEE80211_C_IBSS | IEEE80211_C_HOSTAP;
+#endif
 	ic->ic_opmode = IEEE80211_M_STA;
 	ic->ic_state = IEEE80211_S_INIT;
 
@@ -2020,19 +2021,6 @@ pgt_net_attach(struct pgt_softc *sc)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(PGT_TX_RADIOTAP_PRESENT);
 #endif
-
-	/*
-         * Enable shutdown and power hooks
-         */
-        sc->sc_shutdown_hook = shutdownhook_establish(pgt_shutdown, sc);
-        if (sc->sc_shutdown_hook == NULL)
-                printf("%s: WARNING: unable to establish shutdown hook\n",
-                    sc->sc_dev.dv_xname);
-        sc->sc_power_hook = powerhook_establish(pgt_power, sc);
-        if (sc->sc_power_hook == NULL)
-                printf("%s: WARNING: unable to establish power hook\n",
-                    sc->sc_dev.dv_xname);
-
 	return (0);
 }
 
@@ -2092,6 +2080,7 @@ pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_STA:
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		imr->ifm_active |= IFM_IEEE80211_ADHOC;
 		break;
@@ -2101,6 +2090,7 @@ pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	case IEEE80211_M_HOSTAP:
 		imr->ifm_active |= IFM_IEEE80211_HOSTAP;
 		break;
+#endif
 	case IEEE80211_M_MONITOR:
 		imr->ifm_active |= IFM_IEEE80211_MONITOR;
 		break;
@@ -2367,6 +2357,7 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 		if (nr)
 			free(nr, M_DEVBUF);
 		free(pob, M_DEVBUF);
+		free(wreq, M_DEVBUF);
 		break;
 	}
 	case SIOCSIFADDR:
@@ -2509,6 +2500,7 @@ pgt_watchdog(struct ifnet *ifp)
 	    sc->sc_ic.ic_opmode != IEEE80211_M_MONITOR)
 		pgt_async_update(sc);
 
+#ifndef IEEE80211_STA_ONLY
 	/*
 	 * As a firmware-based HostAP, we should not time out
 	 * nodes inside the driver additionally to the timeout
@@ -2528,6 +2520,7 @@ pgt_watchdog(struct ifnet *ifp)
 	default:
 		break;
 	}
+#endif
 	ieee80211_watchdog(ifp);
 	ifp->if_timer = 1;
 }
@@ -2595,6 +2588,7 @@ pgt_update_hw_from_sw(struct pgt_softc *sc, int keepassoc, int keepnodes)
 			bsstype = PGT_BSS_TYPE_STA;
 			dot1x = PGT_DOT1X_AUTH_ENABLED;
 			break;
+#ifndef IEEE80211_STA_ONLY
 		case IEEE80211_M_IBSS:
 			if (ifp->if_flags & IFF_PROMISC)
 				mode = PGT_MODE_CLIENT;	/* what to do? */
@@ -2624,6 +2618,7 @@ pgt_update_hw_from_sw(struct pgt_softc *sc, int keepassoc, int keepnodes)
 			if (sc->sc_wds)
 				config |= PGT_CONFIG_WDS;
 			break;
+#endif
 		case IEEE80211_M_MONITOR:
 			mode = PGT_MODE_PROMISCUOUS;
 			bsstype = PGT_BSS_TYPE_ANY;
@@ -2655,8 +2650,6 @@ badopmode:
 		preamble = PGT_OID_PREAMBLE_MODE_SHORT;
 		DPRINTF(("IEEE80211_MODE_11G\n"));
 		break;
-	case IEEE80211_MODE_FH:
-		/* FALLTHROUGH */
 	case IEEE80211_MODE_TURBO: /* not handled */
 		/* FALLTHROUGH */
 	case IEEE80211_MODE_AUTO:
@@ -2665,7 +2658,7 @@ badopmode:
 		DPRINTF(("IEEE80211_MODE_AUTO\n"));
 		break;
 	default:
-		panic("unknown mode %d\n", ic->ic_curmode);
+		panic("unknown mode %d", ic->ic_curmode);
 	}
 
 	switch (sc->sc_80211_ioc_auth) {
@@ -2909,8 +2902,10 @@ pgt_update_sw_from_hw(struct pgt_softc *sc, struct pgt_async_trap *pa,
 				    letoh16(mlme->pom_id),
 				    letoh16(mlme->pom_state),
 				    letoh16(mlme->pom_code)));
+#ifndef IEEE80211_STA_ONLY
 			if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 				pgt_hostap_handle_mlme(sc, oid, mlme);
+#endif
 			break;
 		}
 		return;
@@ -2992,9 +2987,11 @@ pgt_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		else
 			ieee80211_free_allnodes(ic);
 
+#ifndef IEEE80211_STA_ONLY
 		/* Just use any old channel; we override it anyway. */
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 			ieee80211_create_ibss(ic, ic->ic_ibss_chan);
+#endif
 		break;
 	case IEEE80211_S_RUN:
 		ic->ic_if.if_timer = 1;
@@ -3064,7 +3061,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE,
-	    0, &sc->sc_cbdmas, 1, &nsegs, BUS_DMA_NOWAIT);
+	    0, &sc->sc_cbdmas, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: can not allocate DMA memory for control block\n",
 		    sc->sc_dev);
@@ -3078,7 +3075,6 @@ pgt_dma_alloc(struct pgt_softc *sc)
 		    sc->sc_dev);
 		goto out;
 	}
-	bzero(sc->sc_cb, size);
 
 	error = bus_dmamap_load(sc->sc_dmat, sc->sc_cbdmam,
 	    sc->sc_cb, size, NULL, BUS_DMA_NOWAIT);
@@ -3102,7 +3098,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE,
-	   0, &sc->sc_psmdmas, 1, &nsegs, BUS_DMA_NOWAIT);
+	   0, &sc->sc_psmdmas, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: can not allocate DMA memory for powersave\n",
 		    sc->sc_dev);
@@ -3116,7 +3112,6 @@ pgt_dma_alloc(struct pgt_softc *sc)
 		    sc->sc_dev);
 		goto out;
 	}
-	bzero(sc->sc_psmbuf, size);
 
 	error = bus_dmamap_load(sc->sc_dmat, sc->sc_psmdmam,
 	    sc->sc_psmbuf, size, NULL, BUS_DMA_WAITOK);
@@ -3166,35 +3161,30 @@ int
 pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 {
 	struct pgt_desc *pd;
-	struct pgt_frag *pcbqueue;
 	size_t i, qsize;
 	int error, nsegs;
 
 	switch (pq) {
 		case PGT_QUEUE_DATA_LOW_RX:
-			pcbqueue = sc->sc_cb->pcb_data_low_rx;
 			qsize = PGT_QUEUE_DATA_RX_SIZE;
 			break;
 		case PGT_QUEUE_DATA_LOW_TX:
-			pcbqueue = sc->sc_cb->pcb_data_low_tx;
 			qsize = PGT_QUEUE_DATA_TX_SIZE;
 			break;
 		case PGT_QUEUE_DATA_HIGH_RX:
-			pcbqueue = sc->sc_cb->pcb_data_high_rx;
 			qsize = PGT_QUEUE_DATA_RX_SIZE;
 			break;
 		case PGT_QUEUE_DATA_HIGH_TX:
-			pcbqueue = sc->sc_cb->pcb_data_high_tx;
 			qsize = PGT_QUEUE_DATA_TX_SIZE;
 			break;
 		case PGT_QUEUE_MGMT_RX:
-			pcbqueue = sc->sc_cb->pcb_mgmt_rx;
 			qsize = PGT_QUEUE_MGMT_SIZE;
 			break;
 		case PGT_QUEUE_MGMT_TX:
-			pcbqueue = sc->sc_cb->pcb_mgmt_tx;
 			qsize = PGT_QUEUE_MGMT_SIZE;
 			break;
+		default:
+			return (EINVAL);
 	}
 
 	for (i = 0; i < qsize; i++) {
@@ -3299,50 +3289,45 @@ pgt_dma_free_queue(struct pgt_softc *sc, enum pgt_queue pq)
 	}
 }
 
-void
-pgt_shutdown(void *arg)
+int
+pgt_activate(struct device *self, int act)
 {
-	struct pgt_softc *sc = arg;
-
-	DPRINTF(("%s: %s\n", sc->sc_dev.dv_xname, __func__));
-
-	pgt_stop(sc, SC_DYING);
-}
-
-void
-pgt_power(int why, void *arg)
-{
-	struct pgt_softc *sc = arg;
+	struct pgt_softc *sc = (struct pgt_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
 
 	DPRINTF(("%s: %s(%d)\n", sc->sc_dev.dv_xname, __func__, why));
 
-	s = splnet();
-
-	switch (why) {
-	case PWR_STANDBY:
-	case PWR_SUSPEND:
-		pgt_stop(sc, SC_NEEDS_RESET);
-		pgt_update_hw_from_sw(sc, 0, 0);
-
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		break;
-	case PWR_RESUME:
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-
-		pgt_stop(sc, SC_NEEDS_RESET);
-		pgt_update_hw_from_sw(sc, 0, 0);
-
-		if ((ifp->if_flags & IFF_UP) &&
-		    !(ifp->if_flags & IFF_RUNNING)) {
-			pgt_init(ifp);
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING) {
+			pgt_stop(sc, SC_NEEDS_RESET);
 			pgt_update_hw_from_sw(sc, 0, 0);
 		}
+		if (sc->sc_power != NULL)
+			(*sc->sc_power)(sc, act);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    pgt_resume, sc, NULL);
 		break;
 	}
+	return 0;
+}
 
-	splx(s);
+void
+pgt_resume(void *arg1, void *arg2)
+{
+	struct pgt_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (sc->sc_power != NULL)
+		(*sc->sc_power)(sc, DVACT_RESUME);
+
+	pgt_stop(sc, SC_NEEDS_RESET);
+	pgt_update_hw_from_sw(sc, 0, 0);
+
+	if (ifp->if_flags & IFF_UP) {
+		pgt_init(ifp);
+		pgt_update_hw_from_sw(sc, 0, 0);
+	}
 }

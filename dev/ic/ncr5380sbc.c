@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ncr5380sbc.c,v 1.18 2005/11/12 20:29:45 brad Exp $	*/
+=======
+/*	$OpenBSD: ncr5380sbc.c,v 1.26 2010/06/26 23:24:44 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ncr5380sbc.c,v 1.13 1996/10/13 01:37:25 christos Exp $	*/
 
 /*
@@ -75,7 +79,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_debug.h>
@@ -593,22 +596,19 @@ out:
  * WARNING:  This can be called recursively!
  * (see comment in ncr5380_done)
  */
-int
+void
 ncr5380_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
 	struct	ncr5380_softc *sc;
 	struct sci_req	*sr;
-	int s, rv, i, flags;
+	int s, i, flags;
 
 	sc = xs->sc_link->adapter_softc;
 	flags = xs->flags;
 
 	if (sc->sc_flags & NCR5380_FORCE_POLLING)
 		flags |= SCSI_POLL;
-
-	if (flags & SCSI_DATA_UIO)
-		panic("ncr5380: scsi data uio requested");
 
 	s = splbio();
 
@@ -634,8 +634,9 @@ ncr5380_scsi_cmd(xs)
 		if (sc->sc_ring[i].sr_xs == NULL)
 			goto new;
 
-	rv = TRY_AGAIN_LATER;
-	NCR_TRACE("scsi_cmd: no openings, rv=%d\n", rv);
+	xs->error = XS_NO_CCB;
+	scsi_done(xs);
+	NCR_TRACE("scsi_cmd: no openings\n", 0);
 	goto out;
 
 new:
@@ -650,7 +651,6 @@ new:
 	sr->sr_flags = (flags & SCSI_POLL) ? SR_IMMED : 0;
 	sr->sr_status = -1;	/* no value */
 	sc->sc_ncmds++;
-	rv = SUCCESSFULLY_QUEUED;
 
 	NCR_TRACE("scsi_cmd: new sr=0x%x\n", (long)sr);
 
@@ -676,12 +676,10 @@ new:
 		if (sc->sc_state != NCR_IDLE)
 			panic("ncr5380_scsi_cmd: poll didn't finish");
 #endif
-		rv = COMPLETE;
 	}
 
 out:
 	splx(s);
-	return (rv);
 }
 
 
@@ -806,7 +804,6 @@ finish:
 	sc->sc_ncmds--;
 
 	/* Tell common SCSI code it is done. */
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 
 	sc->sc_state = NCR_IDLE;
@@ -1532,10 +1529,6 @@ success:
  * SYNCHRONOUS DATA TRANSFER REQUEST	if appropriate
  * NOOP				if nothing else fits the bill ...
  */
-
-#define IS1BYTEMSG(m) (((m) != 0x01 && (m) < 0x20) || (m) >= 0x80)
-#define IS2BYTEMSG(m) (((m) & 0xf0) == 0x20)
-#define ISEXTMSG(m) ((m) == 0x01)
 
 /*
  * Precondition:

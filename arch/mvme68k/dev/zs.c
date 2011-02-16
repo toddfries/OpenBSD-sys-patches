@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.24 2006/03/15 20:04:36 miod Exp $ */
+/*	$OpenBSD: zs.c,v 1.34 2010/07/02 17:27:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2000 Steve Murphree, Jr.
@@ -32,7 +32,6 @@
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/systm.h>
@@ -109,10 +108,11 @@ struct zs {
 #define ZH_RXOVF	8	/* receiver buffer overflow */
 
 struct zssoftc {
-	struct device  sc_dev;
-	struct zs   sc_zs[2];
-	struct intrhand   sc_ih;
-	int      sc_flags;
+	struct device	 sc_dev;
+	struct zs	 sc_zs[2];
+	struct intrhand	 sc_ih;
+	void		*sc_softih;
+	int      	 sc_flags;
 };
 #define ZSSF_85230	1
 
@@ -129,7 +129,6 @@ int   zsirq(void *);
 int   zsregs(vaddr_t, int, volatile u_char **, volatile u_char **);
 int   zspclk(void);
 
-u_int8_t sir_zs;
 void  zs_softint(void *);
 
 #define zsunit(dev)	(minor(dev) >> 1)
@@ -159,9 +158,9 @@ void	zscc_mset(struct sccregs *, int);
 void	zscc_mclr(struct sccregs *, int);
 void	zs_drain(struct zs *);
 void	zs_unblock(struct tty *);
-void	zs_txint(struct zs *);
-void	zs_rxint(struct zs *);
-void	zs_extint(struct zs *);
+void	zs_txint(struct zssoftc *, struct zs *);
+void	zs_rxint(struct zssoftc *, struct zs *);
+void	zs_extint(struct zssoftc *, struct zs *);
 cons_decl(zs);
 
 int
@@ -263,8 +262,7 @@ zsattach(parent, self, args)
 	zp->scc.s_dr = scc_dr;
 	zp->flags |= ZS_RESET;
 
-	if (sir_zs == 0)
-		sir_zs = allocate_sir(zs_softint, 0);
+	sc->sc_softih = softintr_establish(IPL_SOFTTTY, zs_softint, sc);
 
 	printf("\n");
 
@@ -353,7 +351,7 @@ zsopen(dev, flag, mode, p)
 
 	zp = &sc->sc_zs[zsside(dev)];
 	if (zp->tty == NULL) {
-		zp->tty = ttymalloc();
+		zp->tty = ttymalloc(0);
 		zs_ttydef(zp);
 		if (minor(dev) < NZSLINE)
 			zs_tty[minor(dev)] = zp->tty;
@@ -366,10 +364,10 @@ zsopen(dev, flag, mode, p)
 		zs_init(zp);
 		if ((zp->modem_state & SCC_DCD) != 0)
 			tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 
-	error = ((*linesw[tp->t_line].l_open) (dev, tp));
+	error = ((*linesw[tp->t_line].l_open) (dev, tp, p));
 
 	if (error == 0)
 		++zp->nzs_open;
@@ -393,7 +391,7 @@ zsclose(dev, flag, mode, p)
 	zp = &sc->sc_zs[zsside(dev)];
 	tp = zp->tty;
 
-	(*linesw[tp->t_line].l_close) (tp, flag);
+	(*linesw[tp->t_line].l_close) (tp, flag, p);
 	s = splzs();
 	if ((zp->flags & ZS_CONSOLE) == 0 && (tp->t_cflag & HUPCL) != 0)
 		ZBIC(&zp->scc, 5, 0x82);		  /* drop DTR, RTS */
@@ -535,7 +533,7 @@ zsstart(tp)
 			zp->send_ptr = tp->t_outq.c_cf;
 			zp->send_count = n;
 			zp->sent_count = 0;
-			zs_txint(zp);
+			zs_txint(sc, zp);
 			spltty();
 		}
 	}
@@ -559,13 +557,7 @@ zsstop(tp, flag)
 		tp->t_state &= ~TS_BUSY;
 		spltty();
 		ndflush(&tp->t_outq, n);
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (tp->t_state & TS_ASLEEP) {
-				tp->t_state &= ~TS_ASLEEP;
-				wakeup((caddr_t) & tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 	}
 	splx(s);
 	return (0);
@@ -759,26 +751,25 @@ zsirq(arg)
 	if (ipend == 0)
 		return (0);
 	if ((ipend & 0x20) != 0)
-		zs_rxint(zp);
+		zs_rxint(sc, zp);
 	if ((ipend & 0x10) != 0)
-		zs_txint(zp);
+		zs_txint(sc, zp);
 	if ((ipend & 0x8) != 0)
-		zs_extint(zp);
+		zs_extint(sc, zp);
 	++zp;				/* now look for B side ints */
 	if ((ipend & 0x4) != 0)
-		zs_rxint(zp);
+		zs_rxint(sc, zp);
 	if ((ipend & 0x2) != 0)
-		zs_txint(zp);
+		zs_txint(sc, zp);
 	if ((ipend & 0x1) != 0)
-		zs_extint(zp);
+		zs_extint(sc, zp);
 	ZWRITE0(&zp->scc, 0x38);	/* reset highest IUS */
 
 	return (1);
 }
 
 void
-zs_txint(zp)
-	register struct zs *zp;
+zs_txint(struct zssoftc *sc, struct zs *zp)
 {
 	struct sccregs *scc;
 	int     c;
@@ -798,14 +789,13 @@ zs_txint(zp)
 		if (zp->send_count == 0 && (zp->hflags & ZH_TXING) != 0) {
 			zp->hflags &= ~ZH_TXING;
 			zp->hflags |= ZH_SIRQ;
-			setsoftint(sir_zs);
+			softintr_schedule(sc->sc_softih);
 		}
 	}
 }
 
 void
-zs_rxint(zp)
-	register struct zs *zp;
+zs_rxint(struct zssoftc *sc, struct zs *zp)
 {
 	register int stat, c, n, extra;
 	u_char *put;
@@ -846,14 +836,13 @@ zs_rxint(zp)
 		zp->rcv_put = put;
 		zp->rcv_count = n;
 		zp->hflags |= ZH_SIRQ;
-		setsoftint(sir_zs);
+		softintr_schedule(sc->sc_softih);
 	}
 }
 
 /* Ext/status interrupt */
 void
-zs_extint(zp)
-	register struct zs *zp;
+zs_extint(struct zssoftc *sc, struct zs *zp)
 {
 	int     rr0;
 	struct tty *tp = zp->tty;
@@ -875,13 +864,13 @@ zs_extint(zp)
 		else {
 			zp->hflags &= ~ZH_OBLOCK;
 			if ((rr0 & SCC_TXRDY) != 0)
-				zs_txint(zp);
+				zs_txint(sc, zp);
 		}
 	}
 	zp->modem_change |= rr0 ^ zp->modem_state;
 	zp->modem_state = rr0;
 	zp->hflags |= ZH_SIRQ;
-	setsoftint(sir_zs);
+	softintr_schedule(sc->sc_softih);
 }
 
 /* ARGSUSED */
@@ -889,97 +878,87 @@ void
 zs_softint(arg)
 	void *arg;
 {
+	struct zssoftc *sc = (struct zssoftc *)arg;
 	int     s, c, stat, rr0;
 	struct zs *zp;
 	struct tty *tp;
 	u_char *get;
-	int     unit, side;
+	int     side;
 
 	s = splzs();
-	for (unit = 0; unit < zs_cd.cd_ndevs; ++unit) {
-		if (zs_cd.cd_devs[unit] == NULL)
+	zp = &sc->sc_zs[0];
+	for (side = 0; side < 2; ++side, ++zp) {
+		if ((zp->hflags & ZH_SIRQ) == 0)
 			continue;
-		zp = &((struct zssoftc *) zs_cd.cd_devs[unit])->sc_zs[0];
-		for (side = 0; side < 2; ++side, ++zp) {
-			if ((zp->hflags & ZH_SIRQ) == 0)
-				continue;
-			zp->hflags &= ~ZH_SIRQ;
-			tp = zp->tty;
+		zp->hflags &= ~ZH_SIRQ;
+		tp = zp->tty;
 
-			/* check for tx done */
-			spltty();
-			if (tp != NULL && zp->send_count == 0
-				 && (tp->t_state & TS_BUSY) != 0) {
-				tp->t_state &= ~(TS_BUSY | TS_FLUSH);
-				ndflush(&tp->t_outq, zp->sent_count);
-				if (tp->t_outq.c_cc <= tp->t_lowat) {
-					if (tp->t_state & TS_ASLEEP) {
-						tp->t_state &= ~TS_ASLEEP;
-						wakeup((caddr_t) & tp->t_outq);
-					}
-					selwakeup(&tp->t_wsel);
-				}
-				if (tp->t_line != 0)
-					(*linesw[tp->t_line].l_start) (tp);
-				else
-					zsstart(tp);
-			}
-			splzs();
+		/* check for tx done */
+		spltty();
+		if (tp != NULL && zp->send_count == 0
+			 && (tp->t_state & TS_BUSY) != 0) {
+			tp->t_state &= ~(TS_BUSY | TS_FLUSH);
+			ndflush(&tp->t_outq, zp->sent_count);
+			ttwakeupwr(tp);
+			if (tp->t_line != 0)
+				(*linesw[tp->t_line].l_start) (tp);
+			else
+				zsstart(tp);
+		}
+		splzs();
 
-			/* check for received characters */
-			get = zp->rcv_get;
-			while (zp->rcv_count > 0) {
+		/* check for received characters */
+		get = zp->rcv_get;
+		while (zp->rcv_count > 0) {
+			c = *get++;
+			if (get >= zp->rcv_end)
+				get = zp->rcv_buf;
+			if (c == ERROR_DET) {
+				stat = *get++;
+				if (get >= zp->rcv_end)
+					get = zp->rcv_buf;
 				c = *get++;
 				if (get >= zp->rcv_end)
 					get = zp->rcv_buf;
-				if (c == ERROR_DET) {
-					stat = *get++;
-					if (get >= zp->rcv_end)
-						get = zp->rcv_buf;
-					c = *get++;
-					if (get >= zp->rcv_end)
-						get = zp->rcv_buf;
-					zp->rcv_count -= 3;
-				} else {
-					stat = 0;
-					--zp->rcv_count;
+				zp->rcv_count -= 3;
+			} else {
+				stat = 0;
+				--zp->rcv_count;
+			}
+			spltty();
+			if (tp == NULL || (tp->t_state & TS_ISOPEN) == 0)
+				continue;
+			if (zp->nzs_open == 0) {
+			} else {
+				if ((stat & 0x10) != 0)
+					c |= TTY_PE;
+				if ((stat & 0x20) != 0) {
+					log(LOG_WARNING, "zs: fifo overflow\n");
+					c |= TTY_FE;	/* need some error for
+							 * slip stuff */
 				}
+				if ((stat & 0x40) != 0)
+					c |= TTY_FE;
+				(*linesw[tp->t_line].l_rint) (c, tp);
+			}
+			splzs();
+		}
+		zp->rcv_get = get;
+
+		/* check for modem lines changing */
+		while (zp->modem_change != 0 || zp->modem_state != zp->rr0) {
+			rr0 = zp->rr0 ^ zp->modem_change;
+			zp->modem_change = rr0 ^ zp->modem_state;
+
+			/* Check if DCD (carrier detect) has changed */
+			if (tp != NULL && (rr0 & 8) != (zp->rr0 & 8)) {
 				spltty();
-				if (tp == NULL || (tp->t_state & TS_ISOPEN) == 0)
-					continue;
-				if (zp->nzs_open == 0) {
-					
-				} else {
-					if ((stat & 0x10) != 0)
-						c |= TTY_PE;
-					if ((stat & 0x20) != 0) {
-						log(LOG_WARNING, "zs: fifo overflow\n");
-						c |= TTY_FE;	/* need some error for
-								 * slip stuff */
-					}
-					if ((stat & 0x40) != 0)
-						c |= TTY_FE;
-					(*linesw[tp->t_line].l_rint) (c, tp);
-				}
+				ttymodem(tp, rr0 & 8);
+				/* XXX possibly should disable line if
+				 * return value is 0 */
 				splzs();
 			}
-			zp->rcv_get = get;
-
-			/* check for modem lines changing */
-			while (zp->modem_change != 0 || zp->modem_state != zp->rr0) {
-				rr0 = zp->rr0 ^ zp->modem_change;
-				zp->modem_change = rr0 ^ zp->modem_state;
-
-				/* Check if DCD (carrier detect) has changed */
-				if (tp != NULL && (rr0 & 8) != (zp->rr0 & 8)) {
-					spltty();
-					ttymodem(tp, rr0 & 8);
-					/* XXX possibly should disable line if
-					 * return value is 0 */
-					splzs();
-				}
-				zp->rr0 = rr0;
-			}
+			zp->rr0 = rr0;
 		}
 	}
 	splx(s);

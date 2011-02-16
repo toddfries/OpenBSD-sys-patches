@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: amd7930intr.s,v 1.8 2003/06/02 23:27:55 millert Exp $	*/
+=======
+/*	$OpenBSD: amd7930intr.s,v 1.11 2010/08/17 20:05:08 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: amd7930intr.s,v 1.10 1997/03/11 01:03:07 pk Exp $	*/
 /*
  * Copyright (c) 1995 Rolf Grossmann.
@@ -47,6 +51,13 @@
 #include <sparc/sparc/intreg.h>
 #include <machine/psl.h>
 #include <machine/asm.h>
+
+/*
+ * Note the following code hardcodes soft interrupt level 4, instead of
+ * picking the actual bits from the softintr cookie. We don't have enough
+ * free registers to be able to pick it easily, anyway; it's just not
+ * worth doing.
+ */
 
 #define AUDIO_SET_SWINTR_4C				\
 	sethi	%hi(INTRREG_VA), %l5;			\
@@ -129,6 +140,9 @@ _C_LABEL(amd7930_trap):
 	bne	1f				! if (d == e)
 	 st	R_data, [%l7 + AU_RDATA]
 
+	ld	[%l7 + AU_SWIH], %l5
+	mov	1, %l6
+	st	%l6, [%l5 + SIH_PENDING]
 	AUDIO_SET_SWINTR
 
 1:
@@ -150,6 +164,9 @@ _C_LABEL(amd7930_trap):
 	bne	2f				! if (d == e)
 	 st	R_data, [%l7 + AU_PDATA]
 
+	ld	[%l7 + AU_SWIH], %l5
+	mov	1, %l6
+	st	%l6, [%l5 + SIH_PENDING]
 	AUDIO_SET_SWINTR
 
 2:

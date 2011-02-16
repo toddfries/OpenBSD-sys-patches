@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.11 2005/09/25 20:48:18 miod Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.40 2010/11/27 13:03:04 kettenis Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -76,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -112,6 +104,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+void	patinit(struct cpu_info *ci);
 
 struct cpu_softc {
 	struct device sc_dev;		/* device tree glue */
@@ -142,8 +135,6 @@ struct cpu_info cpu_info_primary = { 0, &cpu_info_primary };
 
 struct cpu_info *cpu_info_list = &cpu_info_primary;
 
-u_int32_t cpus_attached = 0;
-
 #ifdef MULTIPROCESSOR
 /*
  * Array of CPU info structures.  Must be statically-allocated because
@@ -154,9 +145,9 @@ struct cpu_info *cpu_info[X86_MAXPROCS] = { &cpu_info_primary };
 u_int32_t cpus_running = 0;
 
 void    	cpu_hatch(void *);
-static void    	cpu_boot_secondary(struct cpu_info *ci);
-static void    	cpu_start_secondary(struct cpu_info *ci);
-static void	cpu_copy_trampoline(void);
+void    	cpu_boot_secondary(struct cpu_info *ci);
+void    	cpu_start_secondary(struct cpu_info *ci);
+void		cpu_copy_trampoline(void);
 
 /*
  * Runs once per boot once multiprocessor goo has been detected and
@@ -167,13 +158,6 @@ static void	cpu_copy_trampoline(void);
 void
 cpu_init_first(void)
 {
-	int cpunum = lapic_cpu_number();
-
-	if (cpunum != 0) {
-		cpu_info[0] = NULL;
-		cpu_info[cpunum] = &cpu_info_primary;
-	}
-
 	cpu_copy_trampoline();
 }
 #endif
@@ -184,9 +168,13 @@ cpu_match(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 	struct cpu_attach_args *caa = aux;
 
-	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) == 0)
-		return 1;
-	return 0;
+	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) != 0)
+		return 0;
+
+	if (cf->cf_unit >= MAXCPUS)
+		return 0;
+
+	return 1;
 }
 
 static void
@@ -234,7 +222,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct cpu_attach_args *caa = aux;
 	struct cpu_info *ci;
 #if defined(MULTIPROCESSOR)
-	int cpunum = caa->cpu_number;
+	int cpunum = sc->sc_dev.dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
 #endif
@@ -258,10 +246,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		ci = &cpu_info_primary;
 #if defined(MULTIPROCESSOR)
-		if (cpunum != lapic_cpu_number()) {
+		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    sc->sc_dev.dv_xname, lapic_cpu_number(), cpunum);
+			    sc->sc_dev.dv_xname, lapic_cpu_number(), caa->cpu_number);
 		}
 #endif
 	}
@@ -272,7 +260,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci->ci_dev = self;
 	ci->ci_apicid = caa->cpu_number;
 #ifdef MULTIPROCESSOR
-	ci->ci_cpuid = ci->ci_apicid;
+	ci->ci_cpuid = cpunum;
 #else
 	ci->ci_cpuid = 0;	/* False for APs, but they're not used anyway */
 #endif
@@ -297,9 +285,8 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	pcb = ci->ci_idle_pcb = (struct pcb *) kstack;
 	memset(pcb, 0, USPACE);
 
-	pcb->pcb_tss.tss_rsp0 = kstack + USPACE - 16;
+	pcb->pcb_kstack = kstack + USPACE - 16;
 	pcb->pcb_rbp = pcb->pcb_rsp = kstack + USPACE - 16;
-	pcb->pcb_tss.tss_ist[0] = kstack + PAGE_SIZE - 16;
 	pcb->pcb_pmap = pmap_kernel();
 	pcb->pcb_cr0 = rcr0();
 	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
@@ -363,8 +350,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	}
 	cpu_vm_init(ci);
 
-	cpus_attached |= (1 << ci->ci_cpuid);
-
 #if defined(MULTIPROCESSOR)
 	if (mp_verbose) {
 		printf("%s: kstack at 0x%lx for %d bytes\n",
@@ -385,19 +370,18 @@ cpu_init(struct cpu_info *ci)
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
 		(*ci->cpu_setup)(ci);
+	/*
+	 * We do this here after identifycpu() because errata may affect
+	 * what we do.
+	 */
+	patinit(ci);
 
 	lcr0(rcr0() | CR0_WP);
 	lcr4(rcr4() | CR4_DEFAULT);
 
-#ifdef MTRR
-	if ((ci->ci_flags & CPUF_AP) == 0)
-		i686_mtrr_init_first();
-	mtrr_init_cpu(ci);
-#endif
-
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
-	cpus_running |= 1 << ci->ci_cpuid;
+	tlbflushg();
 #endif
 }
 
@@ -413,6 +397,7 @@ cpu_boot_secondary_processors(void)
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
+		ci->ci_randseed = random();
 		if (ci->ci_idle_pcb == NULL)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)
@@ -444,10 +429,7 @@ cpu_init_idle_pcbs(void)
 void
 cpu_start_secondary(struct cpu_info *ci)
 {
-	struct pcb *pcb;
 	int i;
-
-	pcb = ci->ci_idle_pcb;
 
 	ci->ci_flags |= CPUF_AP;
 
@@ -516,7 +498,7 @@ cpu_hatch(void *v)
 	ci->ci_flags |= CPUF_PRESENT;
 
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);
@@ -531,7 +513,7 @@ cpu_hatch(void *v)
 	gdt_init_cpu(ci);
 	fpuinit(ci);
 
-	lldt(GSYSSEL(GLDT_SEL, SEL_KPL));
+	lldt(0);
 
 	cpu_init(ci);
 
@@ -570,7 +552,7 @@ cpu_debug_dump(void)
 }
 #endif
 
-static void
+void
 cpu_copy_trampoline(void)
 {
 	/*
@@ -579,29 +561,18 @@ cpu_copy_trampoline(void)
 	extern u_char cpu_spinup_trampoline[];
 	extern u_char cpu_spinup_trampoline_end[];
 
-	struct pmap *kmp = pmap_kernel();
 	extern u_int32_t mp_pdirpa;
-	extern vaddr_t lo32_vaddr;
-	extern paddr_t lo32_paddr;
+	extern paddr_t tramp_pdirpa;
 
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,	/* physical */
-	    VM_PROT_ALL);		/* protection */
 	memcpy((caddr_t)MP_TRAMPOLINE,
 	    cpu_spinup_trampoline,
 	    cpu_spinup_trampoline_end-cpu_spinup_trampoline);
 
 	/*
-	 * The initial PML4 pointer must be below 4G, so if the
-	 * current one isn't, use a "bounce buffer"
 	 * We need to patch this after we copy the trampoline,
 	 * the symbol points into the copied trampoline.
 	 */
-	if (kmp->pm_pdirpa > 0xffffffff) {
-		memcpy((void *)lo32_vaddr, kmp->pm_pdir, PAGE_SIZE);
-		mp_pdirpa = lo32_paddr;
-	} else
-		mp_pdirpa = kmp->pm_pdirpa;
+	mp_pdirpa = tramp_pdirpa;
 }
 
 
@@ -681,7 +652,7 @@ cpu_init_msrs(struct cpu_info *ci)
 {
 	wrmsr(MSR_STAR,
 	    ((uint64_t)GSEL(GCODE_SEL, SEL_KPL) << 32) |
-	    ((uint64_t)LSEL(LSYSRETBASE_SEL, SEL_UPL) << 48));
+	    ((uint64_t)GSEL(GUCODE32_SEL, SEL_UPL) << 48));
 	wrmsr(MSR_LSTAR, (uint64_t)Xsyscall);
 	wrmsr(MSR_CSTAR, (uint64_t)Xsyscall32);
 	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C);
@@ -692,4 +663,36 @@ cpu_init_msrs(struct cpu_info *ci)
 
 	if (cpu_feature & CPUID_NXE)
 		wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_NXE);
+}
+
+void
+patinit(struct cpu_info *ci)
+{
+	extern int	pmap_pg_wc;
+	u_int64_t	reg;
+
+	if ((ci->ci_feature_flags & CPUID_PAT) == 0)
+		return;
+#define	PATENTRY(n, type)	(type << ((n) * 8))
+#define	PAT_UC		0x0UL
+#define	PAT_WC		0x1UL
+#define	PAT_WT		0x4UL
+#define	PAT_WP		0x5UL
+#define	PAT_WB		0x6UL
+#define	PAT_UCMINUS	0x7UL
+	/* 
+	 * Set up PAT bits.
+	 * The default pat table is the following:
+	 * WB, WT, UC- UC, WB, WT, UC-, UC
+	 * We change it to:
+	 * WB, WC, UC-, UC, WB, WC, UC-, UC.
+	 * i.e change the WT bit to be WC.
+	 */
+	reg = PATENTRY(0, PAT_WB) | PATENTRY(1, PAT_WC) |
+	    PATENTRY(2, PAT_UCMINUS) | PATENTRY(3, PAT_UC) |
+	    PATENTRY(4, PAT_WB) | PATENTRY(5, PAT_WC) |
+	    PATENTRY(6, PAT_UCMINUS) | PATENTRY(7, PAT_UC);
+
+	wrmsr(MSR_CR_PAT, reg);
+	pmap_pg_wc = PG_WC;
 }

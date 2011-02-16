@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: _types.h,v 1.2 2007/02/03 20:08:50 miod Exp $	*/
+=======
+/*	$OpenBSD: _types.h,v 1.10 2010/05/10 21:41:08 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 1990, 1993
@@ -48,16 +52,10 @@ typedef	short			__int16_t;
 typedef	unsigned short		__uint16_t;
 typedef	int			__int32_t;
 typedef	unsigned int		__uint32_t;
-/* XXX - we don't use __COMPILER_INT64__ */
-#ifdef __COMPILER_INT64__
-typedef	__COMPILER_INT64__	__int64_t;
-typedef	__COMPILER_UINT64__	__uint64_t;
-#else
 /* LONGLONG */
 typedef	long long		__int64_t;
 /* LONGLONG */
 typedef	unsigned long long	__uint64_t;
-#endif
 
 /* 7.18.1.2 Minimum-width integer types */
 typedef	__int8_t		__int_least8_t;
@@ -99,6 +97,8 @@ typedef unsigned long		__psize_t;
 /* Standard system types */
 typedef int			__clock_t;
 typedef int			__clockid_t;
+typedef	double			__double_t;
+typedef	float			__float_t;
 typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;
@@ -121,9 +121,12 @@ typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
 
 /* Feature test macros */
+<<<<<<< HEAD
 #define __HAVE_DEVICE_REGISTER
 #define __HAVE_GENERIC_SOFT_INTERRUPTS
 #define	__HAVE_MUTEX
+=======
+>>>>>>> origin/master
 #define __HAVE_TIMECOUNTER
 
 #endif	/* _SPARC64__TYPES_H_ */

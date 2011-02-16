@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: hil.c,v 1.21 2005/12/22 07:09:52 miod Exp $	*/
+=======
+/*	$OpenBSD: hil.c,v 1.24 2010/11/20 16:45:46 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  * All rights reserved.
@@ -456,6 +460,7 @@ hil_thread(void *arg)
 			hilempty(sc);
 			break;
 		}
+		splx(s);
 	}
 }
 

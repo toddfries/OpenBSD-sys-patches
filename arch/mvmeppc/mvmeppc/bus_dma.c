@@ -1,4 +1,4 @@
-/*      $OpenBSD: bus_dma.c,v 1.17 2004/12/25 23:02:25 miod Exp $        */
+/*      $OpenBSD: bus_dma.c,v 1.28 2010/12/26 15:40:59 miod Exp $        */
 /*      $NetBSD: bus_dma.c,v 1.2 2001/06/10 02:31:25 briggs Exp $        */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,7 +33,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/extent.h>
 #include <sys/buf.h>
 #include <sys/device.h>
@@ -445,18 +437,8 @@ _bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
         int *rsegs;
         int flags;
 {
-        paddr_t avail_start = 0xffffffff, avail_end = 0;
-        int bank;
-
-        for (bank = 0; bank < vm_nphysseg; bank++) {
-                if (avail_start > vm_physmem[bank].avail_start << PGSHIFT)
-                        avail_start = vm_physmem[bank].avail_start << PGSHIFT;
-                if (avail_end < vm_physmem[bank].avail_end << PGSHIFT)
-                        avail_end = vm_physmem[bank].avail_end << PGSHIFT;
-        }
-
         return _bus_dmamem_alloc_range(t, size, alignment, boundary, segs,
-            nsegs, rsegs, flags, avail_start, avail_end - PAGE_SIZE);
+            nsegs, rsegs, flags, 0, -1);
 }
 
 /*
@@ -504,9 +486,10 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
         caddr_t *kvap;
         int flags;
 {
-        vaddr_t va;
+        vaddr_t va, sva;
+        size_t ssize;
         bus_addr_t addr;
-        int curseg;
+        int curseg, error;
 
         size = round_page(size);
 
@@ -517,6 +500,8 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 
         *kvap = (caddr_t)va;
 
+        sva = va;
+        ssize = size;
         for (curseg = 0; curseg < nsegs; curseg++) {
                 for (addr = PCI_MEM_TO_PHYS(segs[curseg].ds_addr);
                     addr < (PCI_MEM_TO_PHYS(segs[curseg].ds_addr)
@@ -524,9 +509,18 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
                     addr += NBPG, va += NBPG, size -= NBPG) {
                         if (size == 0)
                                 panic("_bus_dmamem_map: size botch");
-                        pmap_enter(pmap_kernel(), va, addr,
-                            VM_PROT_READ | VM_PROT_WRITE,
-                            VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+                        error = pmap_enter(pmap_kernel(), va, addr,
+                             VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+                             VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+                        if (error) {
+                                /*
+                                 * Clean up after ourselves.
+                                 * XXX uvm_wait on WAITOK
+                                 */
+                                pmap_update(pmap_kernel());
+                                uvm_km_free(kernel_map, va, ssize);
+                                return (error);
+                        }
                 }
         }
 	pmap_update(pmap_kernel());
@@ -584,7 +578,7 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
                         continue;
                 }
 
-                return (atop(PCI_MEM_TO_PHYS(segs[i].ds_addr) + off));
+                return (PCI_MEM_TO_PHYS(segs[i].ds_addr) + off);
         }
 
         /* Page not found. */
@@ -610,7 +604,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
         paddr_t curaddr, lastaddr;
         struct vm_page *m;
         struct pglist mlist;
-        int curseg, error;
+        int curseg, error, plaflag;
 
         /* Always round the size. */
         size = round_page(size);
@@ -618,9 +612,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
         /*
          * Allocate pages from the VM system.
          */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
         TAILQ_INIT(&mlist);
         error = uvm_pglistalloc(size, low, high, alignment, boundary,
-            &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+            &mlist, nsegs, plaflag);
         if (error)
                 return (error);
 

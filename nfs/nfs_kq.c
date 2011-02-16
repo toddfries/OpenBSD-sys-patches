@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: nfs_kq.c,v 1.2 2005/11/19 02:18:01 pedro Exp $ */
+=======
+/*	$OpenBSD: nfs_kq.c,v 1.15 2009/01/19 23:40:36 thib Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: nfs_kq.c,v 1.7 2003/10/30 01:43:10 simonb Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,6 +49,11 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_kq.c,v 1.7 2003/10/30 01:43:10 simonb Exp $");
 #include <sys/unistd.h>
 #include <sys/file.h>
 #include <sys/kthread.h>
+<<<<<<< HEAD
+=======
+#include <sys/rwlock.h>
+#include <sys/queue.h>
+>>>>>>> origin/master
 
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm.h>
@@ -134,7 +136,7 @@ nfs_kqpoll(void *arg)
 
 			error = VOP_GETATTR(ke->vp, &attr, p->p_ucred, p);
 			if (error == ESTALE) {
-				np->n_attrstamp = 0;
+				NFS_INVALIDATE_ATTRCACHE(np);
 				VN_KNOTE(ke->vp, NOTE_DELETE);
 				goto next;
 			}
@@ -142,9 +144,14 @@ nfs_kqpoll(void *arg)
 			/* following is a bit fragile, but about best
 			 * we can get */
 			if (attr.va_size != osize) {
-				int extended = (attr.va_size > osize);
-				VN_KNOTE(ke->vp, NOTE_WRITE
-				    | (extended ? NOTE_EXTEND : 0));
+				int flags = NOTE_WRITE;
+
+				if (attr.va_size > osize)
+					flags |= NOTE_EXTEND;
+				else
+					flags |= NOTE_TRUNCATE;
+
+				VN_KNOTE(ke->vp, flags);
 				ke->omtime = attr.va_mtime;
 			} else if (attr.va_mtime.tv_sec != ke->omtime.tv_sec
 			    || attr.va_mtime.tv_nsec != ke->omtime.tv_nsec) {
@@ -299,7 +306,7 @@ nfs_kqfilter(void *v)
 		kn->kn_fop = &nfsvnode_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = vp;

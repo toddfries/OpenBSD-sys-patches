@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #	$OpenBSD: files.cardbus,v 1.24 2006/11/22 15:12:50 mglocker Exp $
+=======
+#	$OpenBSD: files.cardbus,v 1.28 2009/11/14 16:55:11 damien Exp $
+>>>>>>> origin/master
 #	$NetBSD: files.cardbus,v 1.8 2000/01/26 06:37:24 thorpej Exp $
 #
 # files.cardbus
@@ -58,6 +62,12 @@ file	dev/cardbus/if_re_cardbus.c		re_cardbus
 #
 attach	ath at cardbus with ath_cardbus
 file	dev/cardbus/if_ath_cardbus.c		ath_cardbus
+
+#
+# Atheros AR9k
+#
+attach	athn at cardbus with athn_cardbus
+file	dev/cardbus/if_athn_cardbus.c		athn_cardbus
 
 #
 # ADMtek ADM8211

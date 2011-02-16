@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: signal.h,v 1.18 2005/12/13 00:35:23 millert Exp $	*/
+=======
+/*	$OpenBSD: signal.h,v 1.21 2010/07/02 19:57:15 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: signal.h,v 1.21 1996/02/09 18:25:32 christos Exp $	*/
 
 /*
@@ -43,7 +47,7 @@
 #include <sys/cdefs.h>
 #include <machine/signal.h>	/* sigcontext; codes for SIGILL, SIGFPE */
 
-#define _NSIG	32		/* counting 0; could be 33 (mask is 1-32) */
+#define _NSIG	33		/* counting 0 (mask is 1-32) */
 
 #if __BSD_VISIBLE
 #define NSIG _NSIG
@@ -87,6 +91,9 @@
 #endif
 #define SIGUSR1 30	/* user defined signal 1 */
 #define SIGUSR2 31	/* user defined signal 2 */
+#if __BSD_VISIBLE
+#define SIGTHR  32	/* thread library AST */
+#endif
 
 /*
  * Language spec says we must list exactly one parameter, even though we
@@ -123,9 +130,6 @@ struct	sigaction {
 #define SA_RESETHAND	0x0004	/* reset to SIG_DFL when taking signal */
 #define SA_NODEFER	0x0010	/* don't mask the signal we're delivering */
 #define SA_NOCLDWAIT	0x0020	/* don't create zombies (assign to pid 1) */
-#ifdef COMPAT_SUNOS
-#define	SA_USERTRAMP	0x0100	/* do not bounce off kernel's sigtramp */
-#endif
 #endif /* __XPG_VISIBLE >= 500 */
 #define SA_NOCLDSTOP	0x0008	/* do not generate SIGCHLD on child stop */
 #if __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 500

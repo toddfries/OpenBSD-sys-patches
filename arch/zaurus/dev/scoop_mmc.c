@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: scoop_mmc.c,v 1.2 2009/09/03 21:40:29 marex Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -23,6 +27,8 @@
 #include <sys/systm.h>
 
 #include <dev/sdmmc/sdmmcreg.h>
+
+#include <machine/machine_reg.h>
 
 #include <arch/arm/xscale/pxammcvar.h>
 #include <arch/zaurus/dev/zaurus_scoopvar.h>
@@ -52,6 +58,8 @@ scoop_mmc_attach(struct device *parent, struct device *self, void *aux)
 	sc->tag.cookie = (void *)sc;
 	sc->tag.get_ocr = scoop_mmc_get_ocr;
 	sc->tag.set_power = scoop_mmc_set_power;
+
+	sc->sc_gpio_detect = GPIO_MMC_DETECT;
 
 	pxammc_attach(sc, aux);
 }

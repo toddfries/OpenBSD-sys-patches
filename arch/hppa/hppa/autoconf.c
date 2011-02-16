@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.44 2005/12/27 18:31:08 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.56 2010/05/24 15:04:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -338,6 +338,8 @@ gotdisk:
 	return (dv);
 }
 
+void	print_devpath(const char *label, struct pz_device *pz);
+
 void
 print_devpath(const char *label, struct pz_device *pz)
 {
@@ -605,15 +607,23 @@ struct pdc_sysmap_addrs pdc_addr PDC_ALIGNMENT;
 struct pdc_iodc_read pdc_iodc_read PDC_ALIGNMENT;
 
 void
-pdc_scanbus(self, ca, maxmod, hpa)
-	struct device *self;
-	struct confargs *ca;
-	int maxmod;
-	hppa_hpa_t hpa;
+pdc_scanbus(struct device *self, struct confargs *ca, int maxmod,
+    hppa_hpa_t hpa, int cpu_scan)
 {
-	int i;
+	int start, end, incr, i;
 
-	for (i = maxmod; i--; ) {
+	/* Scan forwards for CPUs, backwards for everything else. */
+	if (cpu_scan) {
+		start = 0;
+		incr = 1;
+		end = maxmod;
+	} else {
+		start = maxmod - 1;
+		incr = -1;
+		end = -1;
+	}
+
+	for (i = start; i != end; i += incr) {
 		struct confargs nca;
 		int error;
 
@@ -710,6 +720,24 @@ pdc_scanbus(self, ca, maxmod, hpa)
 			    nca.ca_dp.dp_mod, nca.ca_hpa,
 			    nca.ca_type.iodc_type, nca.ca_type.iodc_sv_model);
 		}
+
+		if (cpu_scan && nca.ca_type.iodc_type == HPPA_TYPE_NPROC &&
+		    nca.ca_type.iodc_sv_model == HPPA_NPROC_HPPA)
+			ncpusfound++;
+
+		if (cpu_scan &&
+		    ((nca.ca_type.iodc_type != HPPA_TYPE_NPROC ||
+	            nca.ca_type.iodc_sv_model != HPPA_NPROC_HPPA) &&
+		    (nca.ca_type.iodc_type != HPPA_TYPE_MEMORY ||
+		    nca.ca_type.iodc_sv_model != HPPA_MEMORY_PDEP)))
+			continue;
+
+		if (!cpu_scan &&
+		    ((nca.ca_type.iodc_type == HPPA_TYPE_NPROC &&
+		    nca.ca_type.iodc_sv_model == HPPA_NPROC_HPPA) ||
+		    (nca.ca_type.iodc_type == HPPA_TYPE_MEMORY &&
+		    nca.ca_type.iodc_sv_model == HPPA_MEMORY_PDEP)))
+			continue;
 
 		config_found_sm(self, &nca, mbprint, mbsubmatch);
 	}
@@ -848,3 +876,46 @@ device_register(struct device *dev, void *aux)
 	}
 #endif
 }
+
+/*
+ * cpu_configure:
+ * called at boot time, configure all devices on system
+ */
+void
+cpu_configure(void)
+{
+	splhigh();
+	if (config_rootfound("mainbus", "mainbus") == NULL)
+		panic("no mainbus found");
+
+	cpu_intr_init();
+	spl0();
+
+	if (cold_hook)
+		(*cold_hook)(HPPA_COLD_HOT);
+
+#ifdef USELEDS
+	timeout_set(&heartbeat_tmo, heartbeat, NULL);
+	heartbeat(NULL);
+#endif
+	cold = 0;
+}
+
+void
+diskconf(void)
+{
+	print_devpath("bootpath", &PAGE0->mem_boot);
+	setroot(bootdv, 0, RB_USERREQ);
+	dumpconf();
+}
+
+struct nam2blk nam2blk[] = {
+	{ "rd",		3 },
+	{ "sd",		4 },
+	{ "st",		5 },
+	{ "cd",		6 },
+	{ "fd",		7 },
+	{ "wd",		8 },
+	{ "vnd",	2 },
+	{ NULL,		-1 }
+};

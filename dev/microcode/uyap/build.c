@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: build.c,v 1.2 2005/04/14 19:01:08 damien Exp $	*/
+=======
+/*	$OpenBSD: build.c,v 1.5 2009/08/07 00:10:17 martynas Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
@@ -19,6 +23,8 @@
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <sys/param.h>
+#include <stdio.h>
+#include <err.h>
 
 #include <dev/usb/ezload.h>
 #include "uyap_firmware.h"

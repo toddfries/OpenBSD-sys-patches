@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: domain.h,v 1.7 2003/05/12 00:48:52 jason Exp $	*/
+=======
+/*	$OpenBSD: domain.h,v 1.9 2009/02/22 07:47:22 otto Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: domain.h,v 1.10 1996/02/09 18:25:07 christos Exp $	*/
 
 /*
@@ -47,7 +51,7 @@ struct	domain {
 	char	*dom_name;
 	void	(*dom_init)(void);	/* initialize domain data structures */
 					/* externalize access rights */
-	int	(*dom_externalize)(struct mbuf *);
+	int	(*dom_externalize)(struct mbuf *, socklen_t);
 					/* dispose of internalized rights */
 	void	(*dom_dispose)(struct mbuf *);
 	struct	protosw *dom_protosw, *dom_protoswNPROTOSW;

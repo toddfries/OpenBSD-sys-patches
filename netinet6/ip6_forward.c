@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip6_forward.c,v 1.36 2006/11/17 01:11:23 itojun Exp $	*/
+=======
+/*	$OpenBSD: ip6_forward.c,v 1.50 2011/01/09 20:25:46 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -45,6 +49,7 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
+#include <net/if_enc.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -69,7 +74,6 @@
 #endif
 
 struct	route_in6 ip6_forward_rt;
-int	ip6_forward_rtableid;
 
 /*
  * Forward a packet.  If some error occurs return the sender
@@ -85,9 +89,7 @@ int	ip6_forward_rtableid;
  */
 
 void
-ip6_forward(m, srcrt)
-	struct mbuf *m;
-	int srcrt;
+ip6_forward(struct mbuf *m, int srcrt)
 {
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct sockaddr_in6 *dst;
@@ -103,11 +105,18 @@ ip6_forward(m, srcrt)
 	u_int32_t sspi;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
+<<<<<<< HEAD
 #if NPF > 0
 	struct pf_mtag *pft;
 #endif
 	int rtableid = 0;
+=======
+	u_int rtableid = 0;
+>>>>>>> origin/master
 
 	/*
 	 * Do not forward packets to multicast destination (should be handled
@@ -142,6 +151,10 @@ ip6_forward(m, srcrt)
 	}
 	ip6->ip6_hlim -= IPV6_HLIMDEC;
 
+#if NPF > 0
+reroute:
+#endif
+
 #ifdef IPSEC
 	s = splnet();
 
@@ -159,7 +172,8 @@ ip6_forward(m, srcrt)
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 		if (tdb == NULL)
 			error = -EINVAL;
 		m_tag_delete(m, mtag);
@@ -200,6 +214,7 @@ ip6_forward(m, srcrt)
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
+			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
 				splx(s);
@@ -220,8 +235,12 @@ ip6_forward(m, srcrt)
 #endif /* IPSEC */
 
 #if NPF > 0
+<<<<<<< HEAD
 	if ((pft = pf_find_mtag(m)) != NULL)
 		rtableid = pft->rtableid;
+=======
+	rtableid = m->m_pkthdr.rdomain;
+>>>>>>> origin/master
 #endif
 
 	/*
@@ -242,15 +261,15 @@ ip6_forward(m, srcrt)
 		 */
 		if (ip6_forward_rt.ro_rt == 0 ||
 		    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) == 0 ||
-		    ip6_forward_rtableid != rtableid) {
+		    ip6_forward_rt.ro_tableid != rtableid) {
 			if (ip6_forward_rt.ro_rt) {
 				RTFREE(ip6_forward_rt.ro_rt);
 				ip6_forward_rt.ro_rt = 0;
 			}
 			/* this probably fails but give it a try again */
+			ip6_forward_rt.ro_tableid = rtableid;
 			rtalloc_mpath((struct route *)&ip6_forward_rt,
-			    &ip6->ip6_src.s6_addr32[0], rtableid);
-			ip6_forward_rtableid = rtableid;
+			    &ip6->ip6_src.s6_addr32[0]);
 		}
 
 		if (ip6_forward_rt.ro_rt == 0) {
@@ -263,8 +282,10 @@ ip6_forward(m, srcrt)
 			m_freem(m);
 			return;
 		}
-	} else if ((rt = ip6_forward_rt.ro_rt) == 0 ||
-		 !IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst, &dst->sin6_addr)) {
+	} else if (ip6_forward_rt.ro_rt == 0 ||
+	   (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) == 0 ||
+	   !IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst, &dst->sin6_addr) ||
+	   ip6_forward_rt.ro_tableid != rtableid) {
 		if (ip6_forward_rt.ro_rt) {
 			RTFREE(ip6_forward_rt.ro_rt);
 			ip6_forward_rt.ro_rt = 0;
@@ -273,9 +294,10 @@ ip6_forward(m, srcrt)
 		dst->sin6_len = sizeof(struct sockaddr_in6);
 		dst->sin6_family = AF_INET6;
 		dst->sin6_addr = ip6->ip6_dst;
+		ip6_forward_rt.ro_tableid = rtableid;
 
 		rtalloc_mpath((struct route *)&ip6_forward_rt,
-		    &ip6->ip6_src.s6_addr32[0], 0);
+		    &ip6->ip6_src.s6_addr32[0]);
 
 		if (ip6_forward_rt.ro_rt == 0) {
 			ip6stat.ip6s_noroute++;
@@ -330,13 +352,37 @@ ip6_forward(m, srcrt)
 	if (sproto != 0) {
 		s = splnet();
 
-		tdb = gettdb(sspi, &sdst, sproto);
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto senderr;	/*XXX*/
 		}
+
+#if NPF > 0
+		if ((encif = enc_getif(tdb->tdb_rdomain,
+		    tdb->tdb_tap)) == NULL ||
+		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
+			splx(s);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto senderr;
+		}
+		if (m == NULL) {
+			splx(s);
+			goto senderr;
+		}
+		ip6 = mtod(m, struct ip6_hdr *);
+		/*
+		 * PF_TAG_REROUTE handling or not...
+		 * Packet is entering IPsec so the routing is
+		 * already overruled by the IPsec policy.
+		 * Until now the change was not reconsidered.
+		 * What's the behaviour?
+		 */
+#endif
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -392,7 +438,8 @@ ip6_forward(m, srcrt)
 			 * type/code is based on suggestion by Rich Draves.
 			 * not sure if it is the best pick.
 			 */
-			icmp6_error(mcopy, ICMP6_DST_UNREACH,
+			if (mcopy)
+				icmp6_error(mcopy, ICMP6_DST_UNREACH,
 				    ICMP6_DST_UNREACH_ADDR, 0);
 			m_freem(m);
 			goto freert;
@@ -451,6 +498,16 @@ ip6_forward(m, srcrt)
 		goto senderr;
 
 	ip6 = mtod(m, struct ip6_hdr *);
+	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
+	    (PF_TAG_REROUTE | PF_TAG_GENERATED)) {
+		/* already rerun the route lookup, go on */
+		m->m_pkthdr.pf.flags &= ~(PF_TAG_GENERATED | PF_TAG_REROUTE);
+	} else if (m->m_pkthdr.pf.flags & PF_TAG_REROUTE) {
+		/* tag as generated to skip over pf_test on rerun */
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+		srcrt = 1;
+		goto reroute;
+	}
 #endif 
 
 	error = nd6_output(rt->rt_ifp, origifp, m, dst, rt);

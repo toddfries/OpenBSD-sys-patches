@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_axppci_33.c,v 1.17 2002/03/14 03:15:50 millert Exp $	*/
+/*	$OpenBSD: pci_axppci_33.c,v 1.20 2009/08/22 02:54:50 mk Exp $	*/
 /*	$NetBSD: pci_axppci_33.c,v 1.10 1996/11/13 21:13:29 cgd Exp $	*/
 
 /*
@@ -52,12 +52,11 @@
 
 #include "sio.h"
 
-int     dec_axppci_33_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
+int     dec_axppci_33_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char *dec_axppci_33_intr_string(void *, pci_intr_handle_t);
 int	dec_axppci_33_intr_line(void *, pci_intr_handle_t);
 void    *dec_axppci_33_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
+	    int, int (*func)(void *), void *, const char *);
 void    dec_axppci_33_intr_disestablish(void *, void *);
 
 #define	LCA_SIO_DEVICE	7	/* XXX */
@@ -98,14 +97,13 @@ pci_axppci_33_pickintr(lcp)
 }
 
 int
-dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
-	void *lcv;
-	pcitag_t bustag;
-	int buspin, line;
+dec_axppci_33_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
 	pci_intr_handle_t *ihp;
 {
-	struct lca_config *lcp = lcv;
-	pci_chipset_tag_t pc = &lcp->lc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int device, pirq;
 	pcireg_t pirqreg;
 	u_int8_t pirqline;
@@ -234,7 +232,7 @@ dec_axppci_33_intr_establish(lcv, ih, level, func, arg, name)
 	pci_intr_handle_t ih;
 	int level;
 	int (*func)(void *);
-	char *name;
+	const char *name;
 {
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
 	    arg, name);

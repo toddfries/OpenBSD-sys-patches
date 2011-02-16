@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cmpci.c,v 1.13 2005/04/14 12:42:16 mickey Exp $	*/
+=======
+/*	$OpenBSD: cmpci.c,v 1.30 2010/10/09 09:11:13 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*
@@ -60,7 +64,6 @@ int cmpcidebug = 0;
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -112,18 +115,22 @@ void cmpci_set_mixer_gain(struct cmpci_softc *, int);
 void cmpci_set_out_ports(struct cmpci_softc *);
 int cmpci_set_in_ports(struct cmpci_softc *);
 
+int cmpci_resume(struct cmpci_softc *);
+
 /*
  * autoconf interface
  */
 int cmpci_match(struct device *, void *, void *);
 void cmpci_attach(struct device *, struct device *, void *);
+int cmpci_activate(struct device *, int);
 
 struct cfdriver cmpci_cd = {
 	NULL, "cmpci", DV_DULL
 };
 
 struct cfattach cmpci_ca = {
-	sizeof (struct cmpci_softc), cmpci_match, cmpci_attach
+	sizeof (struct cmpci_softc), cmpci_match, cmpci_attach, NULL,
+	cmpci_activate
 };
 
 /* interrupt */
@@ -392,20 +399,20 @@ cmpci_attach(struct device *parent, struct device *self, void *aux)
 	/* map I/O space */
 	if (pci_mapreg_map(pa, CMPCI_PCI_IOBASEREG, PCI_MAPREG_TYPE_IO, 0,
 			   &sc->sc_iot, &sc->sc_ioh, NULL, NULL, 0)) {
-		printf(": failed to map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 
 	/* interrupt */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": failed to map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
 	sc->sc_ih=pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, cmpci_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": failed to establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -501,10 +508,48 @@ cmpci_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
+cmpci_activate(struct device *self, int act)
+{
+	struct cmpci_softc *sc = (struct cmpci_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		cmpci_resume(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_DEACTIVATE:
+		break;
+	}
+	return (rv);
+}
+
+int
+cmpci_resume(struct cmpci_softc *sc)
+{
+	int i;
+
+	cmpci_mixerreg_write(sc, CMPCI_SB16_MIXER_RESET, 0);
+	for (i = 0; i < CMPCI_NDEVS; i++)
+		cmpci_set_mixer_gain(sc, i);
+
+	return 0;
+}
+
+int
 cmpci_intr(void *handle)
 {
 	struct cmpci_softc *sc = handle;
+	struct cmpci_channel *chan;
 	uint32_t intrstat;
+	uint16_t hwpos;
 
 	intrstat = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 	    CMPCI_REG_INTR_STATUS);
@@ -523,12 +568,51 @@ cmpci_intr(void *handle)
 		    CMPCI_REG_CH1_INTR_ENABLE);
 
 	if (intrstat & CMPCI_REG_CH0_INTR) {
+<<<<<<< HEAD
 		if (sc->sc_play.intr != NULL)
 			(*sc->sc_play.intr)(sc->sc_play.intr_arg);
 	}
 	if (intrstat & CMPCI_REG_CH1_INTR) {
 		if (sc->sc_rec.intr != NULL)
 			(*sc->sc_rec.intr)(sc->sc_rec.intr_arg);
+=======
+		chan = &sc->sc_ch0;
+		if (chan->intr != NULL) {
+			hwpos = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
+			    CMPCI_REG_DMA0_BYTES);
+			hwpos = hwpos * chan->bps / chan->blksize;
+			hwpos = chan->nblocks - hwpos - 1;
+			while (chan->swpos != hwpos) {
+				(*chan->intr)(chan->intr_arg);
+				chan->swpos++;
+				if (chan->swpos >= chan->nblocks)
+					chan->swpos = 0;
+				if (chan->swpos != hwpos) {
+					DPRINTF(("%s: DMA0 hwpos=%d swpos=%d\n",
+					    __func__, hwpos, chan->swpos));
+				}
+			}
+		}
+	}
+	if (intrstat & CMPCI_REG_CH1_INTR) {
+		chan = &sc->sc_ch1;
+		if (chan->intr != NULL) {
+			hwpos = bus_space_read_2(sc->sc_iot, sc->sc_ioh,
+			    CMPCI_REG_DMA1_BYTES);
+			hwpos = hwpos * chan->bps / chan->blksize;
+			hwpos = chan->nblocks - hwpos - 1;
+			while (chan->swpos != hwpos) {
+				(*chan->intr)(chan->intr_arg);
+				chan->swpos++;
+				if (chan->swpos >= chan->nblocks)
+					chan->swpos = 0;
+				if (chan->swpos != hwpos) {
+					DPRINTF(("%s: DMA1 hwpos=%d swpos=%d\n",
+					    __func__, hwpos, chan->swpos));
+				}
+			}
+		}
+>>>>>>> origin/master
 	}
 
 	/* enable intr */
@@ -614,9 +698,28 @@ cmpci_query_encoding(void *handle, struct audio_encoding *fp)
 	default:
 		return EINVAL;
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return 0;
 }
 
+<<<<<<< HEAD
+=======
+void
+cmpci_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	params->sample_rate = 48000;
+	params->encoding = AUDIO_ENCODING_SLINEAR_LE;
+	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
+	params->channels = 2;
+	params->sw_code = NULL;
+	params->factor = 1;
+}
+
+>>>>>>> origin/master
 int
 cmpci_set_params(void *handle, int setmode, int usemode,
     struct audio_params *play, struct audio_params *rec)
@@ -647,7 +750,40 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 		if (!(setmode & mode))
 			continue;
 
+<<<<<<< HEAD
+=======
+		if (setmode & AUMODE_RECORD) {
+			if (p->channels > 2)
+				p->channels = 2;
+			sc->sc_play_channel = 0;
+			cmpci_reg_clear_reg_misc(sc, CMPCI_REG_ENDBDAC);
+			cmpci_reg_clear_reg_misc(sc, CMPCI_REG_XCHGDAC);
+		} else {
+			sc->sc_play_channel = 1;
+			cmpci_reg_set_reg_misc(sc, CMPCI_REG_ENDBDAC);
+			cmpci_reg_set_reg_misc(sc, CMPCI_REG_XCHGDAC);
+		}
+
+		cmpci_reg_clear_4(sc, CMPCI_REG_LEGACY_CTRL,
+		    CMPCI_REG_NXCHG);
+		if (sc->sc_capable & CMPCI_CAP_4CH)
+			cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT,
+			    CMPCI_REG_CHB3D);
+		if (sc->sc_capable & CMPCI_CAP_6CH) {
+			cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT,
+			    CMPCI_REG_CHB3D5C);
+			cmpci_reg_clear_4(sc, CMPCI_REG_LEGACY_CTRL,
+		    	    CMPCI_REG_CHB3D6C);
+			cmpci_reg_clear_reg_misc(sc, CMPCI_REG_ENCENTER);
+		}
+		if (sc->sc_capable & CMPCI_CAP_8CH)
+			cmpci_reg_clear_4(sc, CMPCI_REG_8768_MISC,
+			    CMPCI_REG_CHB3D8C);
+
+>>>>>>> origin/master
 		/* format */
+		if (p->precision > 16)
+			p->precision = 16;
 		p->sw_code = NULL;
 		switch (p->channels) {
 		case 1:
@@ -656,13 +792,75 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 		case 2:
 			md_format = CMPCI_REG_FORMAT_STEREO;
 			break;
+<<<<<<< HEAD
+=======
+		case 4:
+			if (mode & AUMODE_PLAY) {
+				if (sc->sc_capable & CMPCI_CAP_4CH) {
+					cmpci_reg_clear_reg_misc(sc,
+					    CMPCI_REG_N4SPK3D);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_CHANNEL_FORMAT,
+					    CMPCI_REG_CHB3D);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_LEGACY_CTRL,
+					    CMPCI_REG_NXCHG);
+				} else
+					p->channels = 2;
+			}
+			md_format = CMPCI_REG_FORMAT_STEREO;
+			break;
+		case 6:
+			if (mode & AUMODE_PLAY) {
+				if (sc->sc_capable & CMPCI_CAP_6CH) {
+					cmpci_reg_clear_reg_misc(sc,
+					    CMPCI_REG_N4SPK3D);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_CHANNEL_FORMAT,
+					    CMPCI_REG_CHB3D5C);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_LEGACY_CTRL,
+					    CMPCI_REG_CHB3D6C);
+					cmpci_reg_set_reg_misc(sc,
+					    CMPCI_REG_ENCENTER);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_LEGACY_CTRL,
+					    CMPCI_REG_NXCHG);
+				} else
+					p->channels = 2;
+			}
+			md_format = CMPCI_REG_FORMAT_STEREO;
+			break;
+		case 8:
+			if (mode & AUMODE_PLAY) {
+				if (sc->sc_capable & CMPCI_CAP_8CH) {
+					cmpci_reg_clear_reg_misc(sc,
+					    CMPCI_REG_N4SPK3D);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_CHANNEL_FORMAT,
+					    CMPCI_REG_CHB3D5C);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_LEGACY_CTRL,
+					    CMPCI_REG_CHB3D6C);
+					cmpci_reg_set_reg_misc(sc,
+					    CMPCI_REG_ENCENTER);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_8768_MISC,
+					    CMPCI_REG_CHB3D8C);
+					cmpci_reg_set_4(sc,
+					    CMPCI_REG_LEGACY_CTRL,
+					    CMPCI_REG_NXCHG);
+				} else
+					p->channels = 2;
+			}
+			md_format = CMPCI_REG_FORMAT_STEREO;
+			break;
+>>>>>>> origin/master
 		default:
 			return (EINVAL);
 		}
 		switch (p->encoding) {
 		case AUDIO_ENCODING_ULAW:
-			if (p->precision != 8)
-				return (EINVAL);
 			if (mode & AUMODE_PLAY) {
 				p->factor = 2;
 				p->sw_code = mulaw_to_slinear16_le;
@@ -673,8 +871,6 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 			}
 			break;
 		case AUDIO_ENCODING_ALAW:
-			if (p->precision != 8)
-				return (EINVAL);
 			if (mode & AUMODE_PLAY) {
 				p->factor = 2;
 				p->sw_code = alaw_to_slinear16_le;
@@ -745,12 +941,30 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+<<<<<<< HEAD
 		if (mode & AUMODE_PLAY)
 			cmpci_reg_partial_write_4(sc,
 			   CMPCI_REG_CHANNEL_FORMAT,
 			   CMPCI_REG_CH0_FORMAT_SHIFT,
 			   CMPCI_REG_CH0_FORMAT_MASK, md_format);
 		else
+=======
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
+		if (mode & AUMODE_PLAY) {
+			if (sc->sc_play_channel == 1) {
+				cmpci_reg_partial_write_4(sc,
+				   CMPCI_REG_CHANNEL_FORMAT,
+				   CMPCI_REG_CH1_FORMAT_SHIFT,
+				   CMPCI_REG_CH1_FORMAT_MASK, md_format);
+			} else {
+				cmpci_reg_partial_write_4(sc,
+				   CMPCI_REG_CHANNEL_FORMAT,
+				   CMPCI_REG_CH0_FORMAT_SHIFT,
+				   CMPCI_REG_CH0_FORMAT_MASK, md_format);
+			}
+		} else {
+>>>>>>> origin/master
 			cmpci_reg_partial_write_4(sc,
 			   CMPCI_REG_CHANNEL_FORMAT,
 			   CMPCI_REG_CH1_FORMAT_SHIFT,
@@ -772,9 +986,8 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 			    CMPCI_REG_ADC_FS_MASK, md_divide);
 			sc->sc_rec.md_divide = md_divide;
 		}
-		cmpci_set_out_ports(sc);
-		cmpci_set_in_ports(sc);
 	}
+
 	return 0;
 }
 
@@ -1421,26 +1634,60 @@ cmpci_set_out_ports(struct cmpci_softc *sc)
 	else
 		cmpci_reg_clear_reg_misc(sc, CMPCI_REG_SPDFLOOPI);
 
+<<<<<<< HEAD
+=======
+	if (sc->sc_play_channel == 1)
+		chan = &sc->sc_ch1;
+	else
+		chan = &sc->sc_ch0;
+
+	/* disable ac3 and 24 and 32 bit s/pdif modes */
+	cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT, CMPCI_REG_AC3EN1);
+	cmpci_reg_clear_reg_misc(sc, CMPCI_REG_AC3EN2);
+	cmpci_reg_clear_reg_misc(sc, CMPCI_REG_SPD32SEL);
+	cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT, CMPCI_REG_SPDIF_24);
+
+>>>>>>> origin/master
 	/* playback to ... */
 	if (CMPCI_ISCAP(sc, SPDOUT) &&
 	    sc->sc_gain[CMPCI_PLAYBACK_MODE][CMPCI_LR]
 		== CMPCI_PLAYBACK_MODE_SPDIF &&
 	    (sc->sc_play.md_divide == CMPCI_REG_RATE_44100 ||
 		(CMPCI_ISCAP(sc, SPDOUT_48K) &&
+<<<<<<< HEAD
 		    sc->sc_play.md_divide==CMPCI_REG_RATE_48000))) {
+=======
+		    chan->md_divide == CMPCI_REG_RATE_48000))) {
+>>>>>>> origin/master
 		/* playback to SPDIF */
-		cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1, CMPCI_REG_SPDIF0_ENABLE);
+		if (sc->sc_play_channel == 0)
+			cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF0_ENABLE);
+		else
+			cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF1_ENABLE);
 		enspdout = 1;
+<<<<<<< HEAD
 		if (sc->sc_play.md_divide==CMPCI_REG_RATE_48000)
+=======
+		if (chan->md_divide == CMPCI_REG_RATE_48000)
+>>>>>>> origin/master
 			cmpci_reg_set_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
 		else
 			cmpci_reg_clear_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
+		/* XXX assume sample rate <= 48kHz */
+		cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT,
+		    CMPCI_REG_DBL_SPD_RATE);
 	} else {
 		/* playback to DAC */
-		cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
-				  CMPCI_REG_SPDIF0_ENABLE);
+		if (sc->sc_play_channel == 0)
+			cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF0_ENABLE);
+		else
+			cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF1_ENABLE);
 		if (CMPCI_ISCAP(sc, SPDOUT_48K))
 			cmpci_reg_clear_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
@@ -1756,6 +2003,7 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 {
 	struct cmpci_softc *sc = handle;
 	struct cmpci_dmanode *p;
+<<<<<<< HEAD
 	int bps;
 
 	sc->sc_play.intr = intr;
@@ -1763,6 +2011,43 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	bps = param->channels * param->precision * param->factor / 8;
 	if (!bps)
 		return EINVAL;
+=======
+	struct cmpci_channel *chan;
+	uint32_t reg_dma_base, reg_dma_bytes, reg_dma_samples, reg_dir,
+	    reg_intr_enable, reg_enable;
+	uint32_t length;
+	size_t buffer_size = (caddr_t)end - (caddr_t)start;
+
+	cmpci_set_out_ports(sc);
+
+	if (sc->sc_play_channel == 1) {
+		chan = &sc->sc_ch1;
+		reg_dma_base = CMPCI_REG_DMA1_BASE;
+		reg_dma_bytes = CMPCI_REG_DMA1_BYTES;
+		reg_dma_samples = CMPCI_REG_DMA1_SAMPLES;
+		reg_dir = CMPCI_REG_CH1_DIR;
+		reg_intr_enable = CMPCI_REG_CH1_INTR_ENABLE;
+		reg_enable = CMPCI_REG_CH1_ENABLE;
+	} else {
+		chan = &sc->sc_ch0;
+		reg_dma_base = CMPCI_REG_DMA0_BASE;
+		reg_dma_bytes = CMPCI_REG_DMA0_BYTES;
+		reg_dma_samples = CMPCI_REG_DMA0_SAMPLES;
+		reg_dir = CMPCI_REG_CH0_DIR;
+		reg_intr_enable = CMPCI_REG_CH0_INTR_ENABLE;
+		reg_enable = CMPCI_REG_CH0_ENABLE;
+	}
+
+	chan->bps = (param->channels > 1 ? 2 : 1) * param->bps * param->factor;
+	if (!chan->bps)
+		return EINVAL;
+
+	chan->intr = intr;
+	chan->intr_arg = arg;
+	chan->blksize = blksize;
+	chan->nblocks = buffer_size / chan->blksize;
+	chan->swpos = 0;
+>>>>>>> origin/master
 
 	/* set DMA frame */
 	if (!(p = cmpci_find_dmamem(sc, start)))
@@ -1770,6 +2055,7 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA0_BASE,
 	    DMAADDR(p));
 	delay(10);
+<<<<<<< HEAD
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA0_BYTES,
 	    ((caddr_t)end - (caddr_t)start + 1) / bps - 1);
 	delay(10);
@@ -1777,6 +2063,15 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	/* set interrupt count */
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA0_SAMPLES,
 			  (blksize + bps - 1) / bps - 1);
+=======
+	length = (buffer_size + 1) / chan->bps - 1;
+	bus_space_write_2(sc->sc_iot, sc->sc_ioh, reg_dma_bytes, length);
+	delay(10);
+
+	/* set interrupt count */
+	length = (chan->blksize + chan->bps - 1) / chan->bps - 1;
+	bus_space_write_2(sc->sc_iot, sc->sc_ioh, reg_dma_samples, length);
+>>>>>>> origin/master
 	delay(10);
 
 	/* start DMA */
@@ -1793,13 +2088,27 @@ cmpci_trigger_input(void *handle, void *start, void *end, int blksize,
 {
 	struct cmpci_softc *sc = handle;
 	struct cmpci_dmanode *p;
-	int bps;
+	struct cmpci_channel *chan = &sc->sc_ch1;
+	size_t buffer_size = (caddr_t)end - (caddr_t)start;
 
+	cmpci_set_in_ports(sc);
+
+<<<<<<< HEAD
 	sc->sc_rec.intr = intr;
 	sc->sc_rec.intr_arg = arg;
 	bps = param->channels*param->precision*param->factor/8;
 	if (!bps)
+=======
+	chan->bps = param->channels * param->bps * param->factor;
+	if (!chan->bps)
+>>>>>>> origin/master
 		return EINVAL;
+
+	chan->intr = intr;
+	chan->intr_arg = arg;
+	chan->blksize = blksize;
+	chan->nblocks = buffer_size / chan->blksize;
+	chan->swpos = 0;
 
 	/* set DMA frame */
 	if (!(p = cmpci_find_dmamem(sc, start)))
@@ -1808,12 +2117,12 @@ cmpci_trigger_input(void *handle, void *start, void *end, int blksize,
 	    DMAADDR(p));
 	delay(10);
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA1_BYTES,
-	    ((caddr_t)end - (caddr_t)start + 1) / bps - 1);
+	    (buffer_size + 1) / chan->bps - 1);
 	delay(10);
 
 	/* set interrupt count */
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, CMPCI_REG_DMA1_SAMPLES,
-	    (blksize + bps - 1) / bps - 1);
+	    (chan->blksize + chan->bps - 1) / chan->bps - 1);
 	delay(10);
 
 	/* start DMA */

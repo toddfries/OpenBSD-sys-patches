@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 /*	$OpenBSD: l2cap.h,v 1.1 2005/01/14 12:04:02 grange Exp $	*/
+=======
+/*	$OpenBSD: l2cap.h,v 1.8 2009/11/21 13:05:32 guenther Exp $	*/
+/*	$NetBSD: l2cap.h,v 1.8 2008/09/08 23:36:55 gmcgarry Exp $	*/
+>>>>>>> origin/master
 
 /*
  * ng_l2cap.h
@@ -27,7 +32,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+<<<<<<< HEAD
  * $FreeBSD: src/sys/netgraph/bluetooth/include/ng_l2cap.h,v 1.2 2003/05/10 21:44:41 julian Exp $
+=======
+ * $Id: l2cap.h,v 1.8 2009/11/21 13:05:32 guenther Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/include/l2cap.h,v 1.4 2005/08/31 18:13:23 emax Exp $
+>>>>>>> origin/master
  */
 
 /*
@@ -142,6 +152,7 @@
 #define NG_L2CAP_NOT_SUPPORTED		0x0001
 /* 0x0002 - 0xffff - reserved for future use */
 
+<<<<<<< HEAD
 /* L2CAP flow control */
 typedef struct {
 	u_int8_t	flags;             /* reserved for future use */
@@ -153,6 +164,40 @@ typedef struct {
 	u_int32_t	delay_variation;   /* microseconds */
 } __attribute__ ((packed)) ng_l2cap_flow_t;
 typedef ng_l2cap_flow_t *	ng_l2cap_flow_p;
+=======
+/* L2CAP Quality of Service option */
+typedef struct {
+	uint8_t  flags;			/* reserved for future use */
+	uint8_t  service_type;		/* service type */
+	uint32_t token_rate;		/* bytes per second */
+	uint32_t token_bucket_size;	/* bytes */
+	uint32_t peak_bandwidth;	/* bytes per second */
+	uint32_t latency;		/* microseconds */
+	uint32_t delay_variation;	/* microseconds */
+} __packed l2cap_qos_t;
+
+/* L2CAP QoS type */
+#define L2CAP_QOS_NO_TRAFFIC	0x00
+#define L2CAP_QOS_BEST_EFFORT	0x01       /* (default) */
+#define L2CAP_QOS_GUARANTEED	0x02
+/* 0x03 - 0xff - reserved for future use */
+
+/* L2CAP Retransmission & Flow Control option */
+typedef struct {
+	uint8_t	mode;		   /* RFC mode */
+	uint8_t	window_size;	   /* bytes */
+	uint8_t	max_transmit;	   /* max retransmissions */
+	uint16_t	retransmit_timo;   /* milliseconds */
+	uint16_t	monitor_timo;	   /* milliseconds */
+	uint16_t	max_pdu_size;	   /* bytes */
+} __packed l2cap_rfc_t;
+
+/* L2CAP RFC mode */
+#define L2CAP_RFC_BASIC		0x00	   /* (default) */
+#define L2CAP_RFC_RETRANSMIT	0x01
+#define L2CAP_RFC_FLOW		0x02
+/* 0x03 - 0xff - reserved for future use */
+>>>>>>> origin/master
 
 /**************************************************************************
  **************************************************************************
@@ -162,28 +207,47 @@ typedef ng_l2cap_flow_t *	ng_l2cap_flow_p;
 
 /* L2CAP header */
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	length;	/* payload size */
 	u_int16_t	dcid;	/* destination channel ID */
 } __attribute__ ((packed)) ng_l2cap_hdr_t;
+=======
+	uint16_t	length;	/* payload size */
+	uint16_t	dcid;	/* destination channel ID */
+} __packed l2cap_hdr_t;
+>>>>>>> origin/master
 
 /* L2CAP ConnectionLess Traffic (CLT) (if destination cid == 0x2) */
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	psm; /* Protocol/Service Multiplexor */
 } __attribute__ ((packed)) ng_l2cap_clt_hdr_t;
+=======
+	uint16_t	psm; /* Protocol/Service Multiplexor */
+} __packed l2cap_clt_hdr_t;
+>>>>>>> origin/master
 
 #define NG_L2CAP_CLT_MTU_MAXIMUM \
 	(NG_L2CAP_MTU_MAXIMUM - sizeof(ng_l2cap_clt_hdr_t))
 
 /* L2CAP command header */
 typedef struct {
+<<<<<<< HEAD
 	u_int8_t	code;   /* command OpCode */
 	u_int8_t	ident;  /* identifier to match request and response */
 	u_int16_t	length; /* command parameters length */
 } __attribute__ ((packed)) ng_l2cap_cmd_hdr_t;
+=======
+	uint8_t	code;   /* command OpCode */
+	uint8_t	ident;  /* identifier to match request and response */
+	uint16_t	length; /* command parameters length */
+} __packed l2cap_cmd_hdr_t;
+>>>>>>> origin/master
 
 /* L2CAP Command Reject */
 #define NG_L2CAP_CMD_REJ	0x01
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	reason; /* reason to reject command */
 /*	u_int8_t	data[]; -- optional data (depends on reason) */
 } __attribute__ ((packed)) ng_l2cap_cmd_rej_cp;
@@ -201,34 +265,61 @@ typedef union {
 	} __attribute__ ((packed)) cid;
 } ng_l2cap_cmd_rej_data_t;
 typedef ng_l2cap_cmd_rej_data_t * ng_l2cap_cmd_rej_data_p;
+=======
+	uint16_t	reason; /* reason to reject command */
+	uint16_t	data[2];/* optional data */
+} __packed l2cap_cmd_rej_cp;
+>>>>>>> origin/master
 
 /* L2CAP Connection Request */
 #define NG_L2CAP_CON_REQ	0x02
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	psm;  /* Protocol/Service Multiplexor (PSM) */
 	u_int16_t	scid; /* source channel ID */
 } __attribute__ ((packed)) ng_l2cap_con_req_cp;
+=======
+	uint16_t	psm;  /* Protocol/Service Multiplexor (PSM) */
+	uint16_t	scid; /* source channel ID */
+} __packed l2cap_con_req_cp;
+>>>>>>> origin/master
 
 /* L2CAP Connection Response */
 #define NG_L2CAP_CON_RSP	0x03
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	dcid;   /* destination channel ID */
 	u_int16_t	scid;   /* source channel ID */
 	u_int16_t	result; /* 0x00 - success */
 	u_int16_t	status; /* more info if result != 0x00 */
 } __attribute__ ((packed)) ng_l2cap_con_rsp_cp;
+=======
+	uint16_t	dcid;   /* destination channel ID */
+	uint16_t	scid;   /* source channel ID */
+	uint16_t	result; /* 0x00 - success */
+	uint16_t	status; /* more info if result != 0x00 */
+} __packed l2cap_con_rsp_cp;
+>>>>>>> origin/master
 
 /* L2CAP Configuration Request */
 #define NG_L2CAP_CFG_REQ	0x04
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	dcid;  /* destination channel ID */
 	u_int16_t	flags; /* flags */
 /*	u_int8_t	options[] --  options */
 } __attribute__ ((packed)) ng_l2cap_cfg_req_cp;
+=======
+	uint16_t	dcid;  /* destination channel ID */
+	uint16_t	flags; /* flags */
+/*	uint8_t	options[] --  options */
+} __packed l2cap_cfg_req_cp;
+>>>>>>> origin/master
 
 /* L2CAP Configuration Response */
 #define NG_L2CAP_CFG_RSP	0x05
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	scid;   /* source channel ID */
 	u_int16_t	flags;  /* flags */
 	u_int16_t	result; /* 0x00 - success */
@@ -242,6 +333,20 @@ typedef struct {
 /*	u_int8_t	value[] -- option value (depends on type) */
 } __attribute__ ((packed)) ng_l2cap_cfg_opt_t;
 typedef ng_l2cap_cfg_opt_t * ng_l2cap_cfg_opt_p;
+=======
+	uint16_t	scid;   /* source channel ID */
+	uint16_t	flags;  /* flags */
+	uint16_t	result; /* 0x00 - success */
+/*	uint8_t	options[] -- options */
+} __packed l2cap_cfg_rsp_cp;
+
+/* L2CAP configuration option */
+typedef struct {
+	uint8_t	type;
+	uint8_t	length;
+/*	uint8_t	value[] -- option value (depends on type) */
+} __packed l2cap_cfg_opt_t;
+>>>>>>> origin/master
 
 /* L2CAP configuration option value */
 typedef union {
@@ -254,9 +359,15 @@ typedef ng_l2cap_cfg_opt_val_t * ng_l2cap_cfg_opt_val_p;
 /* L2CAP Disconnect Request */
 #define NG_L2CAP_DISCON_REQ	0x06
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	dcid; /* destination channel ID */
 	u_int16_t	scid; /* source channel ID */
 } __attribute__ ((packed)) ng_l2cap_discon_req_cp;
+=======
+	uint16_t	dcid; /* destination channel ID */
+	uint16_t	scid; /* source channel ID */
+} __packed l2cap_discon_req_cp;
+>>>>>>> origin/master
 
 /* L2CAP Disconnect Response */
 #define NG_L2CAP_DISCON_RSP	0x07
@@ -275,8 +386,13 @@ typedef ng_l2cap_discon_req_cp	ng_l2cap_discon_rsp_cp;
 /* L2CAP Information Request */
 #define NG_L2CAP_INFO_REQ	0x0a
 typedef struct {
+<<<<<<< HEAD
 	u_int16_t	type; /* requested information type */
 } __attribute__ ((packed)) ng_l2cap_info_req_cp;
+=======
+	uint16_t	type; /* requested information type */
+} __packed l2cap_info_req_cp;
+>>>>>>> origin/master
 
 /* L2CAP Information Response */
 #define NG_L2CAP_INFO_RSP	0x0b
@@ -287,15 +403,25 @@ typedef struct {
  *
  * NG_L2CAP_CONNLESS_MTU - 2 bytes connectionless MTU
  */
+<<<<<<< HEAD
 } __attribute__ ((packed)) ng_l2cap_info_rsp_cp;
+=======
+} __packed l2cap_info_rsp_cp;
+>>>>>>> origin/master
 
 typedef union {
  	/* NG_L2CAP_CONNLESS_MTU */
 	struct {
+<<<<<<< HEAD
 		u_int16_t	mtu;
 	} __attribute__ ((packed)) mtu;
 } ng_l2cap_info_rsp_data_t;
 typedef ng_l2cap_info_rsp_data_t *	ng_l2cap_info_rsp_data_p;
+=======
+		uint16_t	mtu;
+	} __packed mtu;
+} l2cap_info_rsp_data_t;
+>>>>>>> origin/master
 
 /**************************************************************************
  **************************************************************************
@@ -659,4 +785,54 @@ typedef struct {
 #define NGM_L2CAP_NODE_SET_AUTO_DISCON_TIMO 0x40d /* User -> L2CAP */
 typedef u_int16_t	ng_l2cap_node_auto_discon_ep;
 
+<<<<<<< HEAD
 #endif /* ndef _NETGRAPH_L2CAP_H_ */
+=======
+struct socket;
+struct mbuf;
+
+/* l2cap_lower.c */
+void l2cap_close(struct l2cap_channel *, int);
+void l2cap_recv_frame(struct mbuf *, struct hci_link *);
+int l2cap_start(struct l2cap_channel *);
+
+/* l2cap_misc.c */
+void l2cap_init(void);
+int l2cap_setmode(struct l2cap_channel *);
+int l2cap_cid_alloc(struct l2cap_channel *);
+struct l2cap_channel *l2cap_cid_lookup(uint16_t);
+int l2cap_request_alloc(struct l2cap_channel *, uint8_t);
+struct l2cap_req *l2cap_request_lookup(struct hci_link *, uint8_t);
+void l2cap_request_free(struct l2cap_req *);
+void l2cap_rtx(void *);
+
+/* l2cap_signal.c */
+void l2cap_recv_signal(struct mbuf *, struct hci_link *);
+int l2cap_send_connect_req(struct l2cap_channel *);
+int l2cap_send_config_req(struct l2cap_channel *);
+int l2cap_send_disconnect_req(struct l2cap_channel *);
+int l2cap_send_connect_rsp(struct hci_link *, uint8_t, uint16_t, uint16_t, uint16_t);
+
+/* l2cap_socket.c */
+int l2cap_usrreq(struct socket *, int, struct mbuf *, struct mbuf *,
+    struct mbuf *, struct proc *);
+int l2cap_ctloutput(int, struct socket *, int, int, struct mbuf **);
+
+/* l2cap_upper.c */
+int l2cap_attach(struct l2cap_channel **, const struct btproto *, void *);
+int l2cap_bind(struct l2cap_channel *, struct sockaddr_bt *);
+int l2cap_sockaddr(struct l2cap_channel *, struct sockaddr_bt *);
+int l2cap_connect(struct l2cap_channel *, struct sockaddr_bt *);
+int l2cap_peeraddr(struct l2cap_channel *, struct sockaddr_bt *);
+int l2cap_disconnect(struct l2cap_channel *, int);
+int l2cap_detach(struct l2cap_channel **);
+int l2cap_listen(struct l2cap_channel *);
+int l2cap_send(struct l2cap_channel *, struct mbuf *);
+int l2cap_setlinkmode(struct l2cap_channel *, int);
+int l2cap_setopt(struct l2cap_channel *, int, struct mbuf *);
+int l2cap_getopt(struct l2cap_channel *, int, void *);
+
+#endif	/* _KERNEL */
+
+#endif	/* _NETBT_L2CAP_H_ */
+>>>>>>> origin/master

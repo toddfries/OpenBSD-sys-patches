@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.11 2006/04/19 15:51:22 mickey Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.21 2010/09/29 15:11:31 joshe Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -59,6 +59,7 @@
 #include <machine/trap.h>
 #include <machine/specialreg.h>
 #include <machine/fpu.h>
+#include <machine/lock.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -166,7 +167,7 @@ x86fpflags_to_siginfo(u_int32_t flags)
                 FPE_FLTINV, /* bit 6 - stack fault      */
         };
 
-        for (i=0;i < sizeof(x86fp_siginfo_table)/sizeof(int); i++) {
+        for (i = 0; i < nitems(x86fp_siginfo_table); i++) {
                 if (flags & (1 << i))
                         return (x86fp_siginfo_table[i]);
         }
@@ -184,6 +185,7 @@ x86fpflags_to_siginfo(u_int32_t flags)
 void
 fpudna(struct cpu_info *ci)
 {
+	struct savefpu *sfp;
 	struct proc *p;
 	int s;
 
@@ -205,7 +207,7 @@ fpudna(struct cpu_info *ci)
 	 * was using the FPU, save their state.
 	 */
 	if (ci->ci_fpcurproc != NULL && ci->ci_fpcurproc != p) {
-		fpusave_cpu(ci, 1);
+		fpusave_cpu(ci, ci->ci_fpcurproc != &proc0);
 		uvmexp.fpswtch++;
 	} else {
 		clts();
@@ -236,9 +238,14 @@ fpudna(struct cpu_info *ci)
 	p->p_addr->u_pcb.pcb_fpcpu = ci;
 	splx(s);
 
+	sfp = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave.fx_fcw);
-		ldmxcsr(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave.fx_mxcsr);
+		fninit();
+		bzero(&sfp->fp_fxsave, sizeof(sfp->fp_fxsave));
+		sfp->fp_fxsave.fx_fcw = __INITIAL_NPXCW__;
+		sfp->fp_fxsave.fx_mxcsr = __INITIAL_MXCSR__;
+		fxrstor(&sfp->fp_fxsave);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		static double	zero = 0.0;
@@ -249,7 +256,7 @@ fpudna(struct cpu_info *ci)
 		 */
 		fnclex();
 		__asm __volatile("ffree %%st(7)\n\tfld %0" : : "m" (zero));
-		fxrstor(&p->p_addr->u_pcb.pcb_savefpu);
+		fxrstor(sfp);
 	}
 }
 
@@ -312,31 +319,60 @@ fpusave_proc(struct proc *p, int save)
 		fpusave_cpu(ci, save);
 		splx(s);
 	} else {
-#ifdef DIAGNOSTIC
-		int spincount;
-#endif
-
+		oci->ci_fpsaveproc = p;
 		x86_send_ipi(oci,
-		    save ? X86_IPI_SYNCH_FPU : X86_IPI_FLUSH_FPU);
-
-#ifdef DIAGNOSTIC
-		spincount = 0;
-#endif
+	    	    save ? X86_IPI_SYNCH_FPU : X86_IPI_FLUSH_FPU);
 		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
-#ifdef DIAGNOSTIC
-		{
-			spincount++;
-			if (spincount > 10000000) {
-				panic("fp_save ipi didn't");
-			}
-		}
-#else
-		__splbarrier();		/* XXX replace by generic barrier */
-		;
-#endif
+			SPINLOCK_SPIN_HOOK;
 	}
 #else
 	KASSERT(ci->ci_fpcurproc == p);
 	fpusave_cpu(ci, save);
 #endif
+}
+
+void
+fpu_kernel_enter(void)
+{
+	struct cpu_info	*ci = curcpu();
+	uint32_t	 cw;
+	int		 s;
+
+	/*
+	 * Fast path.  If the kernel was using the FPU before, there
+	 * is no work to do besides clearing TS.
+	 */
+	if (ci->ci_fpcurproc == &proc0) {
+		clts();
+		return;
+	}
+
+	s = splipi();
+
+	if (ci->ci_fpcurproc != NULL) {
+		fpusave_cpu(ci, 1);
+		uvmexp.fpswtch++;
+	}
+
+	/* Claim the FPU */
+	ci->ci_fpcurproc = &proc0;
+
+	splx(s);
+
+	/* Disable DNA exceptions */
+	clts();
+
+	/* Initialize the FPU */
+	fninit();
+	cw = __INITIAL_NPXCW__;
+	fldcw(&cw);
+	cw = __INITIAL_MXCSR__;
+	ldmxcsr(&cw);
+}
+
+void
+fpu_kernel_exit(void)
+{
+	/* Enable DNA exceptions */
+	stts();
 }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: vxt.c,v 1.5 2009/06/20 20:58:07 miod Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -32,8 +36,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*** needs to be completed MK-990306 ***/
-
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/device.h>
@@ -48,21 +50,21 @@
 #include <machine/clock.h>
 
 static	void	vxt_conf(void);
-static	void	vxt_steal_pages(void);
+static	void	vxt_init(void);
 static	void	vxt_memerr(void);
 static	int	vxt_mchk(caddr_t);
 static	void	vxt_halt(void);
 static	void	vxt_reboot(int);
 static	void	vxt_cache_enable(void);
-
-struct	vs_cpu *vxt_cpu;
+static	int	missing_clkread(time_t);
+static	void	missing_clkwrite(void);
 
 /* 
  * Declaration of vxt-specific calls.
  */
 
 struct	cpu_dep vxt_calls = {
-	vxt_steal_pages,
+	vxt_init,
 	vxt_mchk,
 	vxt_memerr, 
 	vxt_conf,
@@ -72,6 +74,9 @@ struct	cpu_dep vxt_calls = {
 	2,	/* SCB pages */
 	vxt_halt,
 	vxt_reboot,
+	NULL,
+	NULL,
+	hardclock
 };
 
 void
@@ -117,7 +122,7 @@ vxt_mchk(addr)
 }
 
 void
-vxt_steal_pages()
+vxt_init()
 {
 	/* Turn on caches (to speed up execution a bit) */
 	vxt_cache_enable();
@@ -134,4 +139,17 @@ vxt_reboot(arg)
 	int arg;
 {
 	asm("halt");
+}
+
+int
+missing_clkread(base)
+	time_t base;
+{
+	printf("WARNING: no TOY clock");
+	return CLKREAD_BAD;
+}
+
+void
+missing_clkwrite()
+{
 }

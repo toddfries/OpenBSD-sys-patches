@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: strlcpy.c,v 1.4 2003/06/17 21:56:25 millert Exp $	*/
+=======
+/*	$OpenBSD: strlcpy.c,v 1.6 2009/10/27 23:59:35 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -16,10 +20,13 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+<<<<<<< HEAD
 #if defined(LIBC_SCCS) && !defined(lint)
 static char *rcsid = "$OpenBSD: strlcpy.c,v 1.4 2003/06/17 21:56:25 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+=======
+>>>>>>> origin/master
 #if !defined(_KERNEL) && !defined(_STANDALONE)
 #include <sys/types.h>
 #include <string.h>

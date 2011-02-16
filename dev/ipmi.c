@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ipmi.c,v 1.54 2007/04/08 05:48:18 marco Exp $ */
+=======
+/*	$OpenBSD: ipmi.c,v 1.65 2010/05/24 14:25:20 deraadt Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Jordan Hargrave
@@ -1090,7 +1094,7 @@ int
 get_sdr_partial(struct ipmi_softc *sc, u_int16_t recordId, u_int16_t reserveId,
     u_int8_t offset, u_int8_t length, void *buffer, u_int16_t *nxtRecordId)
 {
-	u_int8_t	cmd[8 + length];
+	u_int8_t	cmd[8 + 255];	/* 8 + max of length */
 	int		len;
 
 	((u_int16_t *) cmd)[0] = reserveId;
@@ -1156,8 +1160,15 @@ get_sdr(struct ipmi_softc *sc, u_int16_t recid, u_int16_t *nxtrec)
 
 		if (get_sdr_partial(sc, recid, resid, offset, len,
 		    psdr + offset, NULL)) {
+<<<<<<< HEAD
 			printf(": get chunk: %d,%d fails\n", offset, len);
 			return (-1);
+=======
+			printf("%s: get chunk: %d,%d fails\n", DEVNAME(sc),
+			    offset, len);
+			free(psdr, M_DEVBUF);
+			return (1);
+>>>>>>> origin/master
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vx.c,v 1.37 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: vx.c,v 1.42 2010/06/28 14:13:29 deraadt Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -415,7 +415,7 @@ vxopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (vxt->tty) {
 		tp = vxt->tty;
 	} else {
-		tp = vxt->tty = ttymalloc();
+		tp = vxt->tty = ttymalloc(0);
 	}
 
 	/* set line status */
@@ -463,7 +463,7 @@ vxopen(dev_t dev, int flag, int mode, struct proc *p)
 		(void)vx_mctl(dev, TIOCM_DTR | TIOCM_RTS, DMSET);
 
 		tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}
@@ -475,7 +475,7 @@ vxopen(dev_t dev, int flag, int mode, struct proc *p)
 	tp->t_dev = dev;
 	vxt->open = 1;
 	splx(s);
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 int
@@ -522,7 +522,7 @@ vxclose(dev_t dev, int flag, int mode, struct proc *p)
 #endif
 
 	tp = vxt->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = splvx();
 
@@ -957,6 +957,7 @@ ccode(struct vxsoftc *sc, int port, char c)
 	struct vx_info *vxt;
 	struct tty *tp;
 
+	vxt = &sc->sc_info[port];
 	tp = vxt->tty;
 	(*linesw[tp->t_line].l_rint)(c, tp);
 }

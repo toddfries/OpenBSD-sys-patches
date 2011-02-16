@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.3 2006/07/30 21:38:12 drahn Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 2010/11/28 20:44:20 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.2 2001/09/05 16:17:36 matt Exp $	*/
 
 /*
@@ -53,10 +53,6 @@
 #include <machine/intr.h>
 
 #include <dev/cons.h>
-
-
-struct device *booted_device;
-int booted_partition;
 
 struct device *bootdv = NULL;
 
@@ -317,169 +313,12 @@ rootconf()
 	} else
 		printf("boot device: %s.\n", bootdv->dv_xname);
 
-	if (boothowto & RB_ASKNAME) {
-		for (;;) {
-			printf("root device ");
-			if (bootdv != NULL)
-				 printf("(default %s%c)",
-					bootdv->dv_xname,
-					bootdv->dv_class == DV_DISK
-						? 'a' : ' ');
-			printf(": ");
-			s = splhigh();
-			cnpollc(1);
-			len = getsn(buf, sizeof(buf));
-
-			cnpollc(0);
-			splx(s);
-			if (len == 0 && bootdv != NULL) {
-				strlcpy(buf, bootdv->dv_xname, sizeof buf);
-				len = strlen(buf);
-			}
-			if (len > 0 && buf[len - 1] == '*') {
-				buf[--len] = '\0';
-				dv = getdisk(buf, len, 1, &nrootdev);
-				if (dv != NULL) {
-					bootdv = dv;
-					nswapdev = nrootdev;
-					goto gotswap;
-				}
-			}
-
-			if ((len == 6) && strncmp(buf, "reboot", 6) == 0)
-				boot(RB_USERREQ);
-
-			dv = getdisk(buf, len, 0, &nrootdev);
-			if (dv != NULL) {
-				bootdv = dv;
-				break;
-			}
-		}
-		/*
-		 * because swap must be on same device as root, for
-		 * network devices this is easy.
-		 */
-		if (bootdv->dv_class == DV_IFNET)
-			goto gotswap;
-
-		for (;;) {
-			printf("swap device ");
-			if (bootdv != NULL)
-				printf("(default %s%c)",
-					bootdv->dv_xname,
-					bootdv->dv_class == DV_DISK?'b':' ');
-			printf(": ");
-			s = splhigh();
-			cnpollc(1);
-			len = getsn(buf, sizeof(buf));
-			cnpollc(0);
-			splx(s);
-			if (len == 0 && bootdv != NULL) {
-				switch (bootdv->dv_class) {
-				case DV_IFNET:
-					nswapdev = NODEV;
-					break;
-				case DV_DISK:
-					nswapdev = MAKEDISKDEV(major(nrootdev),
-					    DISKUNIT(nrootdev), 1);
-					break;
-				case DV_TAPE:
-				case DV_TTY:
-				case DV_DULL:
-				case DV_CPU:
-					break;
-				}
-				break;
-			}
-			dv = getdisk(buf, len, 1, &nswapdev);
-			if (dv) {
-				if (dv->dv_class == DV_IFNET)
-					nswapdev = NODEV;
-				break;
-			}
-		}
-
-gotswap:
-		rootdev = nrootdev;
-		dumpdev = nswapdev;
-		swdevt[0].sw_dev = nswapdev;
-		swdevt[1].sw_dev = NODEV;
-	} else if (mountroot == NULL) {
-		/*
-		 * `swap generic': Use the device the ROM told us to use.
-		 */
-		if (bootdv == NULL)
-			panic("boot device not known");
-
-		majdev = findblkmajor(bootdv);
-
-		if (majdev >= 0) {
-			/*
-			 * Root and Swap are on disk.
-			 * Boot is always from partition 0.
-			 */
-			rootdev = MAKEDISKDEV(majdev, bootdv->dv_unit, 0);
-			nswapdev = MAKEDISKDEV(majdev, bootdv->dv_unit, 1);
-			dumpdev = nswapdev;
-		} else {
-			/*
-			 *  Root and Swap are on net.
-			 */
-			nswapdev = dumpdev = NODEV;
-		}
-		swdevt[0].sw_dev = nswapdev;
-		swdevt[1].sw_dev = NODEV;
-
-	} else {
-
-		/*
-		 * `root DEV swap DEV': honour rootdev/swdevt.
-		 * rootdev/swdevt/mountroot already properly set.
-		 */
-		return;
-	}
-
-	switch (bootdv->dv_class) {
-#if defined(NFSCLIENT)
-	case DV_IFNET:
-		mountroot = nfs_mountroot;
-		nfsbootdevname = bootdv->dv_xname;
-		return;
-#endif
-	case DV_DISK:
-		mountroot = dk_mountroot;
-		majdev = major(rootdev);
-		mindev = minor(rootdev);
-		unit = DISKUNIT(rootdev);
-		part = DISKPART(rootdev);
-		printf("root on %s%c\n", bootdv->dv_xname, part + 'a');
-		break;
-	default:
-		printf("can't figure root, hope your kernel is right\n");
-		return;
-	}
-
-	/*
-	 * XXX: What is this doing?
-	 */
-	temp = NODEV;
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		if (majdev == major(swp->sw_dev) &&
-		    unit == DISKUNIT(swp->sw_dev)) {
-			temp = swdevt[0].sw_dev;
-			swdevt[0].sw_dev = swp->sw_dev;
-			swp->sw_dev = temp;
-			break;
-		}
-	}
-	if (swp->sw_dev == NODEV)
-		return;
-
-	/*
-	 * If dumpdev was the same as the old primary swap device, move
-	 * it to the new primary swap device.
-	 */
-	if (temp == dumpdev)
-		dumpdev = swdevt[0].sw_dev;
-}
-/* End of autoconf.c */
+struct nam2blk nam2blk[] = {
+	{ "wd",		16 },
+	{ "sd",		24 },
+	{ "cd",		26 },
+	{ "rd",		18 },
+	{ "raid",	71 },
+	{ "vnd",	19 },
+	{ NULL,		-1 }
+};

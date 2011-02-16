@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.8 2006/11/17 07:47:56 tom Exp $	*/
+/*	$OpenBSD: via.c,v 1.27 2011/01/12 17:15:20 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -24,7 +24,6 @@
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/buf.h>
 #include <sys/reboot.h>
@@ -63,9 +62,8 @@ void	viac3_rnd(void *);
 #ifdef CRYPTO
 
 struct viac3_session {
-	u_int32_t	ses_ekey[4 * (MAXNR + 1) + 4];	/* 128 bit aligned */
-	u_int32_t	ses_dkey[4 * (MAXNR + 1) + 4];	/* 128 bit aligned */
-	u_int8_t	ses_iv[16];			/* 128 bit aligned */
+	u_int32_t	ses_ekey[4 * (AES_MAXROUNDS + 1) + 4];	/* 128 bit aligned */
+	u_int32_t	ses_dkey[4 * (AES_MAXROUNDS + 1) + 4];	/* 128 bit aligned */
 	u_int32_t	ses_cw0;
 	struct swcr_data *swd;
 	int		ses_klen;
@@ -89,8 +87,8 @@ struct viac3_softc {
 static struct viac3_softc *vc3_sc;
 extern int i386_has_xcrypt;
 
-extern u_int8_t hmac_ipad_buffer[64];
-extern u_int8_t hmac_opad_buffer[64];
+extern const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN];
+extern const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN];
 
 void viac3_crypto_setup(void);
 int viac3_crypto_newsession(u_int32_t *, struct cryptoini *);
@@ -107,9 +105,9 @@ viac3_crypto_setup(void)
 {
 	int algs[CRYPTO_ALGORITHM_MAX + 1];
 
-	if ((vc3_sc = malloc(sizeof(*vc3_sc), M_DEVBUF, M_NOWAIT)) == NULL)
-		return;		/* YYY bitch? */
-	bzero(vc3_sc, sizeof(*vc3_sc));
+	vc3_sc = malloc(sizeof(*vc3_sc), M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (vc3_sc == NULL)
+		return;	/* YYY bitch? */
 
 	bzero(algs, sizeof(algs));
 	algs[CRYPTO_AES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
@@ -121,8 +119,10 @@ viac3_crypto_setup(void)
 	algs[CRYPTO_SHA2_512_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 
 	vc3_sc->sc_cid = crypto_get_driverid(0);
-	if (vc3_sc->sc_cid < 0)
+	if (vc3_sc->sc_cid < 0) {
+		free(vc3_sc, M_DEVBUF);
 		return;		/* YYY bitch? */
+	}
 
 	crypto_register(vc3_sc->sc_cid, algs, viac3_crypto_newsession,
 	    viac3_crypto_freesession, viac3_crypto_process);
@@ -163,7 +163,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			if (ses == NULL)
 				return (ENOMEM);
 			bcopy(sc->sc_sessions, ses, sesn * sizeof(*ses));
-			bzero(sc->sc_sessions, sesn * sizeof(*ses));
+			explicit_bzero(sc->sc_sessions, sesn * sizeof(*ses));
 			free(sc->sc_sessions, M_DEVBUF);
 			sc->sc_sessions = ses;
 			ses = &sc->sc_sessions[sesn];
@@ -193,7 +193,6 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			cw0 |= C3_CRYPT_CWLO_ALG_AES | C3_CRYPT_CWLO_KEYGEN_SW |
 			    C3_CRYPT_CWLO_NORMAL;
 
-			get_random_bytes(ses->ses_iv, sizeof(ses->ses_iv));
 			ses->ses_klen = c->cri_klen;
 			ses->ses_cw0 = cw0;
 
@@ -219,13 +218,13 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			axf = &auth_hash_hmac_ripemd_160_96;
 			goto authcommon;
 		case CRYPTO_SHA2_256_HMAC:
-			axf = &auth_hash_hmac_sha2_256_96;
+			axf = &auth_hash_hmac_sha2_256_128;
 			goto authcommon;
 		case CRYPTO_SHA2_384_HMAC:
-			axf = &auth_hash_hmac_sha2_384_96;
+			axf = &auth_hash_hmac_sha2_384_192;
 			goto authcommon;
 		case CRYPTO_SHA2_512_HMAC:
-			axf = &auth_hash_hmac_sha2_512_96;
+			axf = &auth_hash_hmac_sha2_512_256;
 		authcommon:
 			MALLOC(swd, struct swcr_data *,
 			    sizeof(struct swcr_data), M_CRYPTO_DATA,
@@ -257,7 +256,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			axf->Init(swd->sw_ictx);
 			axf->Update(swd->sw_ictx, c->cri_key, c->cri_klen / 8);
 			axf->Update(swd->sw_ictx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (c->cri_klen / 8));
+			    axf->blocksize - (c->cri_klen / 8));
 
 			for (i = 0; i < c->cri_klen / 8; i++)
 				c->cri_key[i] ^= (HMAC_IPAD_VAL ^
@@ -266,7 +265,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			axf->Init(swd->sw_octx);
 			axf->Update(swd->sw_octx, c->cri_key, c->cri_klen / 8);
 			axf->Update(swd->sw_octx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (c->cri_klen / 8));
+			    axf->blocksize - (c->cri_klen / 8));
 
 			for (i = 0; i < c->cri_klen / 8; i++)
 				c->cri_key[i] ^= HMAC_OPAD_VAL;
@@ -304,17 +303,17 @@ viac3_crypto_freesession(u_int64_t tid)
 		axf = swd->sw_axf;
 
 		if (swd->sw_ictx) {
-			bzero(swd->sw_ictx, axf->ctxsize);
+			explicit_bzero(swd->sw_ictx, axf->ctxsize);
 			free(swd->sw_ictx, M_CRYPTO_DATA);
 		}
 		if (swd->sw_octx) {
-			bzero(swd->sw_octx, axf->ctxsize);
+			explicit_bzero(swd->sw_octx, axf->ctxsize);
 			free(swd->sw_octx, M_CRYPTO_DATA);
 		}
 		FREE(swd, M_CRYPTO_DATA);
 	}
 
-	bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
+	explicit_bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
 	return (0);
 }
 
@@ -374,12 +373,12 @@ viac3_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 		if (crd->crd_flags & CRD_F_IV_EXPLICIT)
 			bcopy(crd->crd_iv, sc->op_iv, 16);
 		else
-			bcopy(ses->ses_iv, sc->op_iv, 16);
+			arc4random_buf(sc->op_iv, 16);
 
 		if ((crd->crd_flags & CRD_F_IV_PRESENT) == 0) {
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, 16, sc->op_iv);
+				    crd->crd_inject, 16, sc->op_iv, M_NOWAIT);
 			else if (crp->crp_flags & CRYPTO_F_IOV)
 				cuio_copyback((struct uio *)crp->crp_buf,
 				    crd->crd_inject, 16, sc->op_iv);
@@ -420,7 +419,7 @@ viac3_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 
 	if (crp->crp_flags & CRYPTO_F_IMBUF)
 		m_copyback((struct mbuf *)crp->crp_buf,
-		    crd->crd_skip, crd->crd_len, sc->op_buf);
+		    crd->crd_skip, crd->crd_len, sc->op_buf, M_NOWAIT);
 	else if (crp->crp_flags & CRYPTO_F_IOV)
 		cuio_copyback((struct uio *)crp->crp_buf,
 		    crd->crd_skip, crd->crd_len, sc->op_buf);
@@ -428,23 +427,8 @@ viac3_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 		bcopy(sc->op_buf, crp->crp_buf + crd->crd_skip,
 		    crd->crd_len);
 
-	/* copy out last block for use as next session IV */
-	if (crd->crd_flags & CRD_F_ENCRYPT) {
-		if (crp->crp_flags & CRYPTO_F_IMBUF)
-			m_copydata((struct mbuf *)crp->crp_buf,
-			    crd->crd_skip + crd->crd_len - 16, 16,
-			    ses->ses_iv);
-		else if (crp->crp_flags & CRYPTO_F_IOV)
-			cuio_copydata((struct uio *)crp->crp_buf,
-			    crd->crd_skip + crd->crd_len - 16, 16,
-			    ses->ses_iv);
-		else
-			bcopy(crp->crp_buf + crd->crd_skip +
-			    crd->crd_len - 16, ses->ses_iv, 16);
-	}
-
 	if (sc->op_buf != NULL) {
-		bzero(sc->op_buf, crd->crd_len);
+		explicit_bzero(sc->op_buf, crd->crd_len);
 		free(sc->op_buf, M_DEVBUF);
 		sc->op_buf = NULL;
 	}
@@ -554,7 +538,7 @@ viac3_rnd(void *v)
 	for (i = 0, p = buffer; i < VIAC3_RNG_BUFSIZ; i++, p++)
 		add_true_randomness(*p);
 
-	timeout_add(tmo, (hz > 100) ? (hz / 100) : 1);
+	timeout_add_msec(tmo, 10);
 }
 
 #endif /* defined(I686_CPU) */

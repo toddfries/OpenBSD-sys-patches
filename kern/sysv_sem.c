@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sysv_sem.c,v 1.32 2004/07/15 11:24:46 millert Exp $	*/
+=======
+/*	$OpenBSD: sysv_sem.c,v 1.41 2011/02/02 09:33:11 fgsch Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sysv_sem.c,v 1.26 1996/02/09 19:00:25 christos Exp $	*/
 
 /*
@@ -59,7 +63,7 @@ struct	pool sema_pool;		/* pool for struct semid_ds */
 struct	pool semu_pool;		/* pool for struct sem_undo (SEMUSZ) */
 unsigned short *semseqs;	/* array of sem sequence numbers */
 
-struct sem_undo *semu_alloc(struct proc *);
+struct sem_undo *semu_alloc(struct process *);
 int semundo_adjust(struct proc *, struct sem_undo **, int, int, int);
 void semundo_clear(int, int);
 
@@ -85,7 +89,7 @@ seminit(void)
  * (returns ptr to structure or NULL if no more room)
  */
 struct sem_undo *
-semu_alloc(struct proc *p)
+semu_alloc(struct process *pr)
 {
 	struct sem_undo *suptr, *sutmp;
 
@@ -95,13 +99,13 @@ semu_alloc(struct proc *p)
 	/*
 	 * Allocate a semu w/o waiting if possible.
 	 * If we do have to wait, we must check to verify that a semu
-	 * with un_proc == p has not been allocated in the meantime.
+	 * with un_proc == pr has not been allocated in the meantime.
 	 */
 	semutot++;
-	if ((suptr = pool_get(&semu_pool, 0)) == NULL) {
+	if ((suptr = pool_get(&semu_pool, PR_NOWAIT)) == NULL) {
 		sutmp = pool_get(&semu_pool, PR_WAITOK);
 		SLIST_FOREACH(suptr, &semu_list, un_next) {
-			if (suptr->un_proc == p) {
+			if (suptr->un_proc == pr) {
 				pool_put(&semu_pool, sutmp);
 				semutot--;
 				return (suptr);
@@ -110,7 +114,7 @@ semu_alloc(struct proc *p)
 		suptr = sutmp;
 	}
 	suptr->un_cnt = 0;
-	suptr->un_proc = p;
+	suptr->un_proc = pr;
 	SLIST_INSERT_HEAD(&semu_list, suptr, un_next);
 	return (suptr);
 }
@@ -122,6 +126,7 @@ int
 semundo_adjust(struct proc *p, struct sem_undo **supptr, int semid, int semnum,
 	int adjval)
 {
+	struct process *pr = p->p_p;
 	struct sem_undo *suptr;
 	struct undo *sunptr;
 	int i;
@@ -132,7 +137,7 @@ semundo_adjust(struct proc *p, struct sem_undo **supptr, int semid, int semnum,
 	suptr = *supptr;
 	if (suptr == NULL) {
 		SLIST_FOREACH(suptr, &semu_list, un_next) {
-			if (suptr->un_proc == p) {
+			if (suptr->un_proc == pr) {
 				*supptr = suptr;
 				break;
 			}
@@ -140,7 +145,7 @@ semundo_adjust(struct proc *p, struct sem_undo **supptr, int semid, int semnum,
 		if (suptr == NULL) {
 			if (adjval == 0)
 				return (0);
-			suptr = semu_alloc(p);
+			suptr = semu_alloc(p->p_p);
 			if (suptr == NULL)
 				return (ENOSPC);
 			*supptr = suptr;
@@ -264,6 +269,7 @@ semctl1(struct proc *p, int semid, int semnum, int cmd, union semun *arg,
 	int i, ix, error = 0;
 	struct semid_ds sbuf;
 	struct semid_ds *semaptr;
+	unsigned short *semval = NULL;
 
 	DPRINTF(("call to semctl(%d, %d, %d, %p)\n", semid, semnum, cmd, arg));
 
@@ -355,6 +361,8 @@ semctl1(struct proc *p, int semid, int semnum, int cmd, union semun *arg,
 			return (error);
 		if (semnum < 0 || semnum >= semaptr->sem_nsems)
 			return (EINVAL);
+		if (arg->val > seminfo.semvmx)
+			return (ERANGE);
 		semaptr->sem_base[semnum].semval = arg->val;
 		semundo_clear(ix, semnum);
 		wakeup(&sema[ix]);
@@ -363,13 +371,20 @@ semctl1(struct proc *p, int semid, int semnum, int cmd, union semun *arg,
 	case SETALL:
 		if ((error = ipcperm(cred, &semaptr->sem_perm, IPC_W)))
 			return (error);
+		semval = malloc(semaptr->sem_nsems * sizeof(arg->array[0]),
+		    M_TEMP, M_WAITOK);
 		for (i = 0; i < semaptr->sem_nsems; i++) {
-			error = ds_copyin(&arg->array[i],
-			    &semaptr->sem_base[i].semval,
+			error = ds_copyin(&arg->array[i], &semval[i],
 			    sizeof(arg->array[0]));
 			if (error != 0)
-				break;
+				goto error;
+			if (semval[i] > seminfo.semvmx) {
+				error = ERANGE;
+				goto error;
+			}
 		}
+		for (i = 0; i < semaptr->sem_nsems; i++)
+			semaptr->sem_base[i].semval = semval[i];
 		semundo_clear(ix, -1);
 		wakeup(&sema[ix]);
 		break;
@@ -377,6 +392,10 @@ semctl1(struct proc *p, int semid, int semnum, int cmd, union semun *arg,
 	default:
 		return (EINVAL);
 	}
+
+error:
+	if (semval)
+		free(semval, M_TEMP);
 
 	return (error);
 }
@@ -437,6 +456,10 @@ sys_semget(struct proc *p, void *v, register_t *retval)
 					DPRINTF(("not exclusive\n"));
 					error = EEXIST;
 					goto error;
+				}
+				if (semaptr_new != NULL) {
+					free(semaptr_new->sem_base, M_SEM);
+					pool_put(&sema_pool, semaptr_new);
 				}
 				goto found;
 			}
@@ -720,7 +743,7 @@ done:
 	for (i = 0; i < nsops; i++) {
 		sopptr = &sops[i];
 		semptr = &semaptr->sem_base[sopptr->sem_num];
-		semptr->sempid = p->p_pid;
+		semptr->sempid = p->p_p->ps_mainproc->p_pid;
 	}
 
 	/* Do a wakeup if any semaphore was up'd. */
@@ -742,7 +765,7 @@ done2:
  * semaphores.
  */
 void
-semexit(struct proc *p)
+semexit(struct process *pr)
 {
 	struct sem_undo *suptr;
 	struct sem_undo **supptr;
@@ -752,7 +775,7 @@ semexit(struct proc *p)
 	 * this process.
 	 */
 	SLIST_FOREACH_PREVPTR(suptr, supptr, &semu_list, un_next) {
-		if (suptr->un_proc == p)
+		if (suptr->un_proc == pr)
 			break;
 	}
 
@@ -765,7 +788,7 @@ semexit(struct proc *p)
 	/*
 	 * We now have an undo vector for this process.
 	 */
-	DPRINTF(("proc @%p has undo structure with %d entries\n", p,
+	DPRINTF(("process @%p has undo structure with %d entries\n", pr,
 	    suptr->un_cnt));
 
 	/*

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: spec_vnops.c,v 1.38 2007/01/16 17:52:18 thib Exp $	*/
+=======
+/*	$OpenBSD: spec_vnops.c,v 1.61 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -48,6 +52,7 @@
 #include <sys/disklabel.h>
 #include <sys/lockf.h>
 #include <sys/poll.h>
+#include <sys/dkio.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -55,6 +60,7 @@
 
 struct vnode *speclisth[SPECHSZ];
 
+<<<<<<< HEAD
 int (**spec_vnodeop_p)(void *);
 struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
 	{ &vop_default_desc, vn_default_error },
@@ -94,17 +100,46 @@ struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
 	{ &vop_advlock_desc, spec_advlock },		/* advlock */
 	{ &vop_bwrite_desc, spec_bwrite },		/* bwrite */
 	{ NULL, NULL }
+=======
+struct vops spec_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_lookup	= vop_generic_lookup,
+	.vop_create	= spec_badop,
+	.vop_mknod	= spec_badop,
+	.vop_open	= spec_open,
+	.vop_close	= spec_close,
+	.vop_access	= spec_access,
+	.vop_getattr	= spec_getattr,
+	.vop_setattr	= spec_setattr,
+	.vop_read	= spec_read,
+	.vop_write	= spec_write,
+	.vop_ioctl	= spec_ioctl,
+	.vop_poll	= spec_poll,
+	.vop_kqfilter	= spec_kqfilter,
+	.vop_revoke	= vop_generic_revoke,
+	.vop_fsync	= spec_fsync,
+	.vop_remove	= spec_badop,
+	.vop_link	= spec_badop,
+	.vop_rename	= spec_badop,
+	.vop_mkdir	= spec_badop,
+	.vop_rmdir	= spec_badop,
+	.vop_symlink	= spec_badop,
+	.vop_readdir	= spec_badop,
+	.vop_readlink	= spec_badop,
+	.vop_abortop	= spec_badop,
+	.vop_inactive	= spec_inactive,
+	.vop_reclaim	= nullop,
+	.vop_lock	= vop_generic_lock,
+	.vop_unlock	= vop_generic_unlock,
+	.vop_islocked	= vop_generic_islocked,
+	.vop_bmap	= vop_generic_bmap,
+	.vop_strategy	= spec_strategy,
+	.vop_print	= spec_print,
+	.vop_pathconf	= spec_pathconf,
+	.vop_advlock	= spec_advlock,
+	.vop_bwrite	= vop_generic_bwrite,
+>>>>>>> origin/master
 };
-struct vnodeopv_desc spec_vnodeop_opv_desc =
-	{ &spec_vnodeop_p, spec_vnodeop_entries };
-
-int
-spec_vnoperate(void *v)
-{
-	struct vop_generic_args *ap = v;
-
-	return (VOCALL(spec_vnodeop_p, ap->a_desc->vdesc_offset, ap));
-}
 
 /*
  * Trivial lookup routine that always fails.
@@ -126,7 +161,6 @@ spec_lookup(v)
 /*
  * Open a special file.
  */
-/* ARGSUSED */
 int
 spec_open(v)
 	void *v;
@@ -220,7 +254,6 @@ spec_open(v)
 /*
  * Vnode op for read
  */
-/* ARGSUSED */
 int
 spec_read(v)
 	void *v;
@@ -316,7 +349,6 @@ spec_inactive(v)
 /*
  * Vnode op for write
  */
-/* ARGSUSED */
 int
 spec_write(v)
 	void *v;
@@ -396,7 +428,6 @@ spec_write(v)
 /*
  * Device ioctl operation.
  */
-/* ARGSUSED */
 int
 spec_ioctl(v)
 	void *v;
@@ -428,7 +459,6 @@ spec_ioctl(v)
 	}
 }
 
-/* ARGSUSED */
 int
 spec_poll(v)
 	void *v;
@@ -451,7 +481,6 @@ spec_poll(v)
 		return (*cdevsw[major(dev)].d_poll)(dev, ap->a_events, ap->a_p);
 	}
 }
-/* ARGSUSED */
 int
 spec_kqfilter(v)
 	void *v;
@@ -472,7 +501,6 @@ spec_kqfilter(v)
 /*
  * Synch buffers associated with a block device
  */
-/* ARGSUSED */
 int
 spec_fsync(v)
 	void *v;
@@ -503,7 +531,7 @@ loop:
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("spec_fsync: not dirty");
 		bremfree(bp);
-		bp->b_flags |= B_BUSY;
+		buf_acquire(bp);
 		splx(s);
 		bawrite(bp);
 		goto loop;
@@ -568,7 +596,6 @@ spec_bmap(v)
 /*
  * Device close routine
  */
-/* ARGSUSED */
 int
 spec_close(v)
 	void *v;
@@ -597,9 +624,9 @@ spec_close(v)
 		 * plus the session), release the reference from the session.
 		 */
 		if (vcount(vp) == 2 && ap->a_p &&
-		    vp == ap->a_p->p_session->s_ttyvp) {
+		    vp == ap->a_p->p_p->ps_session->s_ttyvp) {
 			vrele(vp);
-			ap->a_p->p_session->s_ttyvp = NULL;
+			ap->a_p->p_p->ps_session->s_ttyvp = NULL;
 		}
 		/*
 		 * If the vnode is locked, then we are in the midst
@@ -708,7 +735,6 @@ spec_pathconf(v)
 /*
  * Special device advisory byte-level locks.
  */
-/* ARGSUSED */
 int
 spec_advlock(v)
 	void *v;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.h,v 1.2 2004/02/28 22:26:05 deraadt Exp $	*/
+/*	$OpenBSD: fpu.h,v 1.7 2010/11/20 20:11:17 miod Exp $	*/
 /*	$NetBSD: fpu.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef	_AMD64_FPU_H_
@@ -26,7 +26,7 @@ struct fxsave64 {
 	u_int64_t  fx_st[8][2];   /* 8 normal FP regs */
 	u_int64_t  fx_xmm[16][2]; /* 16 SSE2 registers */
 	u_int8_t   fx_unused3[96];
-} __attribute__((packed));
+} __packed;
 
 struct savefpu {
 	struct fxsave64 fp_fxsave;	/* see above */
@@ -51,11 +51,12 @@ struct cpu_info;
 
 void fpuinit(struct cpu_info *);
 void fpudrop(void);
-void fpusave(struct proc *);
 void fpudiscard(struct proc *);
 void fputrap(struct trapframe *);
 void fpusave_proc(struct proc *, int);
 void fpusave_cpu(struct cpu_info *, int);
+void fpu_kernel_enter(void);
+void fpu_kernel_exit(void);
 
 #endif
 

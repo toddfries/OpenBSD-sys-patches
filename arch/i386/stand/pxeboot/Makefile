@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2004/03/19 13:48:19 tom Exp $
+#	$OpenBSD: Makefile,v 1.5 2010/07/10 17:04:22 deraadt Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -12,7 +12,7 @@ LDFLAGS+=-nostdlib -Bstatic
 INSTALL_STRIP=
 
 LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
-CLEANFILES+=	crt0.o
+CLEANFILES+=	crt0.o ${PROG}.whole
 SRCS=	srt0.S
 
 SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c devopen.c net.c open.c
@@ -27,6 +27,7 @@ DPADD=	${LIBSA} ${LIBZ} ${LIBKERN}
 ${PROG}: $(OBJS) $(DPADD)
 	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS) $(LDADD)
 	@$(SIZE) ${PROG}
+	cp ${PROG} ${PROG}.whole
 	@if [ -x ${.OBJDIR}/${PROG} ]; then \
 		objcopy -O binary ${PROG} ${.OBJDIR}/.tmp;\
 		mv -f ${.OBJDIR}/.tmp ${.OBJDIR}/${PROG}; \

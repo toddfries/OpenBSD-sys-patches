@@ -1,4 +1,4 @@
-/*	$OpenBSD: apic.c,v 1.1 2005/04/01 10:40:47 mickey Exp $	*/
+/*	$OpenBSD: apic.c,v 1.5 2010/07/01 04:33:23 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -30,6 +30,8 @@
 #include <hppa64/dev/elroyreg.h>
 #include <hppa64/dev/elroyvar.h>
 
+void		apic_write(volatile struct elroy_regs *, u_int32_t, u_int32_t);
+u_int32_t	apic_read(volatile struct elroy_regs *, u_int32_t);
 
 void
 apic_write(volatile struct elroy_regs *r, u_int32_t reg, u_int32_t val)
@@ -44,6 +46,10 @@ apic_read(volatile struct elroy_regs *r, u_int32_t reg)
 	elroy_write32(&r->apic_addr, htole32(reg));
 	return letoh32(elroy_read32(&r->apic_data));
 }
+
+void		apic_write(volatile struct elroy_regs *r, u_int32_t reg,
+		    u_int32_t val);
+u_int32_t	apic_read(volatile struct elroy_regs *r, u_int32_t reg);
 
 void
 apic_attach(struct elroy_softc *sc)
@@ -88,7 +94,7 @@ apic_intr_string(void *v, pci_intr_handle_t ih)
 
 void *
 apic_intr_establish(void *v, pci_intr_handle_t ih,
-    int pri, int (*handler)(void *), void *arg, char *name)
+    int pri, int (*handler)(void *), void *arg, const char *name)
 {
 	/* struct elroy_softc *sc = v; */
 	/* volatile struct elroy_regs *r = sc->sc_regs; */

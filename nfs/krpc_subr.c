@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: krpc_subr.c,v 1.13 2004/11/18 15:09:07 markus Exp $	*/
+=======
+/*	$OpenBSD: krpc_subr.c,v 1.20 2009/10/19 22:24:18 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
 
 /*
@@ -61,6 +65,7 @@
 #include <nfs/krpc.h>
 #include <nfs/xdr_subs.h>
 #include <dev/rndvar.h>
+#include <crypto/idgen.h>
 
 /*
  * Kernel support for Sun RPC
@@ -115,6 +120,24 @@ struct rpc_reply {
 
 #define MIN_REPLY_HDR 16	/* xid, dir, astat, errno */
 
+u_int32_t krpc_get_xid(void);
+
+/*
+ * Return an unpredictable XID.
+ */
+u_int32_t
+krpc_get_xid(void)
+{
+	static struct idgen32_ctx krpc_xid_ctx;
+	static int called = 0;
+
+	if (!called) {
+		called = 1;
+		idgen32_init(&krpc_xid_ctx);
+	}
+	return idgen32(&krpc_xid_ctx);
+}
+
 /*
  * What is the longest we will wait before re-sending a request?
  * Note this is also the frequency of "RPC timeout" messages.
@@ -128,10 +151,7 @@ struct rpc_reply {
  * Returns non-zero error on failure.
  */
 int
-krpc_portmap(sin,  prog, vers, portp)
-	struct sockaddr_in *sin;		/* server address */
-	u_int prog, vers;	/* host order */
-	u_int16_t *portp;	/* network order */
+krpc_portmap(struct sockaddr_in *sin, u_int prog, u_int vers, u_int16_t *portp)
 {
 	struct sdata {
 		u_int32_t prog;		/* call program */
@@ -184,14 +204,12 @@ krpc_portmap(sin,  prog, vers, portp)
  * Do a remote procedure call (RPC) and wait for its reply.
  * If from_p is non-null, then we are doing broadcast, and
  * the address from whence the response came is saved there.
+ * data:	input/output
+ * from_p:	output
  */
 int
-krpc_call(sa, prog, vers, func, data, from_p, retries)
-	struct sockaddr_in *sa;
-	u_int prog, vers, func;
-	struct mbuf **data;	/* input/output */
-	struct mbuf **from_p;	/* output */
-	int retries;
+krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
+    struct mbuf **data, struct mbuf **from_p, int retries)
 {
 	struct socket *so;
 	struct sockaddr_in *sin;
@@ -201,7 +219,6 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	struct uio auio;
 	int error, rcvflg, timo, secs, len;
 	static u_int32_t xid = 0;
-	u_int32_t newxid;
 	int *ip;
 	struct timeval *tv;
 
@@ -248,12 +265,6 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	 * because some NFS servers refuse requests from
 	 * non-reserved (non-privileged) ports.
 	 */
-	m = m_getclr(M_WAIT, MT_SONAME);
-	sin = mtod(m, struct sockaddr_in *);
-	sin->sin_len = m->m_len = sizeof(*sin);
-	sin->sin_family = AF_INET;
-	sin->sin_addr.s_addr = INADDR_ANY;
-
 	MGET(mopt, M_WAIT, MT_SOOPTS);
 	mopt->m_len = sizeof(int);
 	ip = mtod(mopt, int *);
@@ -299,8 +310,7 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	mhead->m_len = sizeof(*call);
 	bzero((caddr_t)call, sizeof(*call));
 	/* rpc_call part */
-	while ((newxid = arc4random()) == xid);
-	xid = newxid;
+	xid = krpc_get_xid();
 	call->rp_xid = txdr_unsigned(xid);
 	/* call->rp_direction = 0; */
 	call->rp_rpcvers = txdr_unsigned(2);
@@ -370,7 +380,8 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 			auio.uio_resid = len = 1<<16;
 			auio.uio_procp = NULL;
 			rcvflg = 0;
-			error = soreceive(so, &from, &auio, &m, NULL, &rcvflg);
+			error = soreceive(so, &from, &auio, &m, NULL, &rcvflg,
+			    0);
 			if (error == EWOULDBLOCK) {
 				secs--;
 				continue;
@@ -438,7 +449,7 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 
 	/* result */
 	*data = m;
-	if (from_p) {
+	if (from_p && error == 0) {
 		*from_p = from;
 		from = NULL;
 	}
@@ -466,9 +477,7 @@ struct xdr_string {
 };
 
 struct mbuf *
-xdr_string_encode(str, len)
-	char *str;
-	int len;
+xdr_string_encode(char *str, int len)
 {
 	struct mbuf *m;
 	struct xdr_string *xs;
@@ -497,10 +506,7 @@ xdr_string_encode(str, len)
 }
 
 struct mbuf *
-xdr_string_decode(m, str, len_p)
-	struct mbuf *m;
-	char *str;
-	int *len_p;		/* bufsize - 1 */
+xdr_string_decode(struct mbuf *m, char *str, int *len_p)
 {
 	struct xdr_string *xs;
 	int mlen;	/* message length */
@@ -541,8 +547,7 @@ struct xdr_inaddr {
 };
 
 struct mbuf *
-xdr_inaddr_encode(ia)
-	struct in_addr *ia;		/* already in network order */
+xdr_inaddr_encode(struct in_addr *ia)
 {
 	struct mbuf *m;
 	struct xdr_inaddr *xi;
@@ -564,9 +569,7 @@ xdr_inaddr_encode(ia)
 }
 
 struct mbuf *
-xdr_inaddr_decode(m, ia)
-	struct mbuf *m;
-	struct in_addr *ia;		/* already in network order */
+xdr_inaddr_decode(struct mbuf *m, struct in_addr *ia)
 {
 	struct xdr_inaddr *xi;
 	u_int8_t *cp;

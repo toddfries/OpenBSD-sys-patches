@@ -1,4 +1,4 @@
-/*   $OpenBSD: eh_common.S,v 1.21 2006/11/19 19:36:40 miod Exp $	*/
+/*   $OpenBSD: eh_common.S,v 1.55 2010/12/23 20:05:08 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -248,14 +248,14 @@
  *
  * Also, if any are 'r2' or 'r3', be careful using with CALL above!
  */
-#define	FLAGS		r2
-#define	TMP		r3
-#define	TMP2		r10
-#define	TMP3		r11
-#define	SAVE_TMP2	st	r10, r31, GENREG_OFF(10)
-#define	SAVE_TMP3	st	r11, r31, GENREG_OFF(11)
-#define	RESTORE_TMP2	ld	r10, r31, GENREG_OFF(10)
-#define	RESTORE_TMP3	ld	r11, r31, GENREG_OFF(11)
+#define	FLAGS			r2
+#define	TMP			r3
+#define	TMP2			r10
+#define	TMP3			r11
+#define	SAVE_TMP2(ef)		st	r10, ef, GENREG_OFF(10)
+#define	SAVE_TMP3(ef)		st	r11, ef, GENREG_OFF(11)
+#define	RESTORE_TMP2(ef)	ld	r10, ef, GENREG_OFF(10)
+#define	RESTORE_TMP3(ef)	ld	r11, ef, GENREG_OFF(11)
 
 /*
  * EF_SR3
@@ -396,16 +396,16 @@
 	stcr	r1, SR2	/* r1 now free */		; \
 	/* set or clear the FLAG_FROM_KERNEL bit */	; \
 	ldcr	r1, EPSR 				; \
-	bb0.n	PSR_SUPERVISOR_MODE_BIT, r1, 1f 	; \
-	 clr	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL> 	; \
+	clr	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL> 	; \
+	bb0	PSR_SUPERVISOR_MODE_BIT, r1, 1f 	; \
 	set	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL>	; \
-	/* get a stack (exception frame) */		; \
+	/* get a stack and an exception frame */	; \
 1:	bsr	_ASM_LABEL(m88110_setup_phase_one)	; \
 	/* TMP2 now free -- use to set EF_VECTOR */	; \
 	or	TMP2, r0, NUM				; \
-	st	TMP2, r31, REG_OFF(EF_VECTOR)		; \
-	/* call setup_phase_two to restart the FPU  */	; \
-	/* and to save all general registers.       */	; \
+	/* call setup_phase_two to save all general */	; \
+	/* registers.                               */	; \
+	st	TMP2, r30, EF_VECTOR			; \
 	bsr	_ASM_LABEL(m88110_setup_phase_two)
 #endif
 
@@ -434,9 +434,8 @@ GLOBAL(unknown_handler)
 /* interrupt exception handler */
 GLOBAL(interrupt_handler)
 	PREP88100("interrupt", 1,,)
-	or	r2, r0, T_INT
-	or	r3, r0, r30
-	XCALL(_C_LABEL(m88100_trap), _ASM_LABEL(m88100_return_code))
+	or	r2, r0, r30
+	XCALL(_C_LABEL(interrupt), _ASM_LABEL(check_ast))
 
 /* instruction access exception handler */
 GLOBAL(instruction_access_handler)
@@ -449,10 +448,14 @@ GLOBAL(instruction_access_handler)
  * data access exception handler --
  *  See badaddr() below for info about Data_Precheck.
  */
-GLOBAL(data_exception_handler)
+GLOBAL(data_exception_handler_bootstrap)
 	PREP88100("data", 3,, M88100_Data_Precheck)
 	/* No need to call m88100_trap(T_DATAFLT) as PREP will do this for us */
-	br	_ASM_LABEL(m88100_return_code)
+	br	_ASM_LABEL(check_ast)
+GLOBAL(data_exception_handler)
+	PREP88100("data", 3,,)
+	/* No need to call m88100_trap(T_DATAFLT) as PREP will do this for us */
+	br	_ASM_LABEL(check_ast)
 
 /* misaligned access exception handler */
 GLOBAL(misaligned_handler)
@@ -786,7 +789,7 @@ ASLOCAL(m88110_ignore_data_exception)
 #endif /* M88110 */
 
 /*
- * extern boolean_t badaddr(unsigned addr, unsigned len)
+ * extern int badaddr(vaddr_t addr, int len)
  *
  * Returns true (non-zero) if the given LEN bytes starting at ADDR are
  * not all currently accessible by the kernel.
@@ -827,7 +830,6 @@ GLOBAL(badaddr)
 	sub	r6,  r3, 4
 	bcnd.n	ne0, r6, _ASM_LABEL(badaddr__maybe_halfword)
 	 stcr	r5,  SR1
-	FLUSH_PIPELINE
 
 	/*
 	 * It's a bad address if it's misaligned.
@@ -843,6 +845,7 @@ GLOBAL(badaddr)
 	 *
 	 * If there is no fault, execution just continues as normal.
 	 */
+	FLUSH_PIPELINE
 	ld	r5, r2, 0
 	FLUSH_PIPELINE
 	br.n	_ASM_LABEL(badaddr__return)
@@ -1059,8 +1062,8 @@ ASLOCAL(m88100_have_pcb)
 	 *   the exception frame.
 	 */
 	stcr	TMP, SR3	/* free up TMP, TMP2, TMP3 */
-	SAVE_TMP2
-	SAVE_TMP3
+	SAVE_TMP2(r31)
+	SAVE_TMP3(r31)
 
 	/* save some exception-time registers to the exception frame */
 	ldcr	TMP,  EPSR
@@ -1170,7 +1173,7 @@ ASLOCAL(pfsr_done)
 	 * Valid in the exception frame:
 	 *   Exception-time r1, r31, FLAGS.
 	 *   Exception-time TMP2, TMP3.
-	 *   Exception-time espr, sfip, snip, sxip.
+	 *   Exception-time epsr, sfip, snip, sxip.
 	 *   Dmt0.
 	 *   Other data pipeline control registers, if appropriate.
 	 *   Exception SR3, if appropriate.
@@ -1370,7 +1373,7 @@ ASLOCAL(m88100_setup_phase_two)
 	 *    Valid in the exception frame:
 	 *   Exception-time r1, r31, FLAGS.
 	 *   Exception-time TMP2, TMP3.
-	 *   Exception-time espr, sfip, snip, sxip.
+	 *   Exception-time epsr, sfip, snip, sxip.
 	 *   Exception number (EF_VECTOR).
 	 *   Dmt0
 	 *   Other data pipeline control registers, if appropriate.
@@ -1383,8 +1386,8 @@ ASLOCAL(m88100_setup_phase_two)
 	 */
 
 	stcr	TMP,  SSBR	/* done with SSBR, TMP now free */
-	RESTORE_TMP2	/* done with extra temp regs */
-	RESTORE_TMP3	/* done with extra temp regs */
+	RESTORE_TMP2(r31)	/* done with extra temp regs */
+	RESTORE_TMP3(r31)	/* done with extra temp regs */
 
 	/* Get the current PSR and modify for the rte to enable the FPU */
 	ldcr	TMP,  PSR
@@ -1415,7 +1418,7 @@ ASLOCAL(m88100_setup_phase_two)
 	 *
 	 * Valid in the exception frame:
 	 *   Exception-time FLAGS.
-	 *   Exception-time espr, sfip, snip, sxip.
+	 *   Exception-time epsr, sfip, snip, sxip.
 	 *   Exception number (EF_VECTOR).
 	 *   Dmt0
 	 *   Other data pipeline control registers, if appropriate.
@@ -1494,7 +1497,7 @@ ASLOCAL(m88100_fpu_enable)
 	 * Valid in the exception frame:
 	 *   Exception-time r0 through r31.
 	 *   Exception-time FLAGS.
-	 *   Exception-time espr, sfip, snip, sxip.
+	 *   Exception-time epsr, sfip, snip, sxip.
 	 *   Exception number (EF_VECTOR).
 	 *   Dmt0
 	 *   Other data pipeline control registers, if appropriate.
@@ -1533,7 +1536,8 @@ ASLOCAL(m88100_fpu_enable)
 	st	r30,  r31,  4	/* store it for the debugger to recognize */
 #endif
 
-	ld	r2,   r30,  REG_OFF(EF_VECTOR)
+	ld	r6,   r30,  EF_EPSR
+	ld	r2,   r30,  EF_VECTOR
 	bcnd.n	eq0,  r2,   8f			/* error exception */
 	 ld	r14,  r30,  REG_OFF(EF_RET)
 
@@ -1548,17 +1552,20 @@ ASLOCAL(m88100_fpu_enable)
 	 cmp	r3,   r2,   130	/* DDB break exception */
 	bb1.n	eq,   r3,   8f
 	 cmp	r3,   r2,   132	/* DDB entry exception */
-	bb1.n	eq,   r3,   8f
+	bb1	eq,   r3,   8f
 #endif
 
-	/* turn interrupts back on */
-	 ldcr	r2,   PSR
+	/* turn interrupts back on unless they were not enabled when the
+	   trap occured */
+	bb1.n	PSR_INTERRUPT_DISABLE_BIT, r6, 7f
+	 ld	r3,   r30,  EF_DMT0
+
+	ldcr	r2,   PSR
 	clr	r2,   r2,   1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r2,   PSR
 	FLUSH_PIPELINE
 
 	/* service any outstanding data pipeline stuff */
-	ld	r3,   r30,  REG_OFF(EF_DMT0)
 	bb0	DMT_VALID_BIT, r3, 8f
 
 	/*
@@ -1588,9 +1595,8 @@ GLOBAL(m88110_unknown_handler)
 /* interrupt exception handler */
 GLOBAL(m88110_interrupt_handler)
 	PREP88110("interrupt", 1,)
-	or	r2, r0, T_INT
-	or	r3, r0, r30
-	XCALL(_C_LABEL(m88110_trap), _ASM_LABEL(m88110_return_code))
+	or	r2, r0, r30
+	XCALL(_C_LABEL(interrupt), _ASM_LABEL(check_ast))
 
 /* instruction access exception handler */
 GLOBAL(m88110_instruction_access_handler)
@@ -1602,11 +1608,16 @@ GLOBAL(m88110_instruction_access_handler)
  * data access exception handler --
  *  See badaddr() below for info about Data_Precheck.
  */
-GLOBAL(m88110_data_exception_handler)
+GLOBAL(m88110_data_exception_handler_bootstrap)
 	PREP88110("data", 3, M88110_Data_Precheck)
 	or	r2, r0, T_DATAFLT
 	or	r3, r0, r30
-	XCALL(_C_LABEL(m88110_trap), _ASM_LABEL(m88110_return_code))
+	XCALL(_C_LABEL(m88110_trap), _ASM_LABEL(check_ast))
+GLOBAL(m88110_data_exception_handler)
+	PREP88110("data", 3,)
+	or	r2, r0, T_DATAFLT
+	or	r3, r0, r30
+	XCALL(_C_LABEL(m88110_trap), _ASM_LABEL(check_ast))
 
 /* misaligned access exception handler */
 GLOBAL(m88110_misaligned_handler)
@@ -1656,12 +1667,11 @@ GLOBAL(m88110_fp_precise_handler)
 	or	r3, r0, r30
 	XCALL(_ASM_LABEL(m88110_Xfp_precise), _ASM_LABEL(m88110_return_code))
 
-/* MVME197 non-maskable interrupt handler (ABORT button) */
+/* non-maskable interrupt handler (IPIs, ABORT button) */
 GLOBAL(m88110_nonmaskable)
 	PREP88110("NMI", 11,)
-	or	r2, r0, T_NON_MASK
-	or	r3, r0, r30
-	XCALL(_C_LABEL(m88110_trap), _ASM_LABEL(m88110_return_code))
+	or	r2, r0, r30
+	XCALL(_C_LABEL(nmi), _ASM_LABEL(nmi_return))
 
 /* software walk data MMU read miss handler */
 GLOBAL(m88110_data_read_miss)
@@ -1755,8 +1765,8 @@ GLOBAL(m88110_entry)
  * since they aren't generally used.
  */
 GLOBAL(m88110_error_handler)
-	br.n	1f
-	 or	r29, r0, 10
+	or	r29, r0, 10
+	br	1f
 GLOBAL(m88110_reset_handler)
 	or	r29, r0, 0
 1:
@@ -1771,8 +1781,8 @@ GLOBAL(m88110_reset_handler)
 1:	cmp	r28, r27, r31
 	bb1	ge,  r28, 2f	/* branch if at the end of the stack */
 	st	r0,  r0,  r27
-	br.n	1b
-	 addu	r27, r27, 4	/* bump up */
+	addu	r27, r27, 4	/* bump up */
+	br	1b
 2:	/* stack has been cleared */
 #endif
 
@@ -1890,8 +1900,8 @@ GLOBAL(m88110_reset_handler)
 	st	r20, r31, 0x00
 #endif
 
-	bsr.n	_C_LABEL(error_fatal)
-	 or	r2, r0, r30
+	or	r2, r0, r30
+	bsr	_C_LABEL(error_fatal)
 
 	/* turn interrupts back on */
 	ldcr	r1, PSR
@@ -1903,216 +1913,156 @@ GLOBAL(m88110_reset_handler)
 	br	1b
 	/* NOTREACHED */
 
+/*
+ * 88110 exception handling setup
+ *
+ * This is much simpler than for 88100, because all exception are
+ * precise. Therefore, when reenabling shadowing, we do not risk
+ * getting new exceptions caught by the execution pipeline and not
+ * reported yet.
+ *
+ * However, as soon as shadow freezing is over, we can receive a
+ * non-maskable interrupt at any time. The code below will cope with
+ * this, as long as the stack pointer (r31) is valid in the kernel
+ * all the time shadowing is enabled.
+ *
+ * Thus, unlike the 88100 code, we setup both the exception frame
+ * (in r30) and the exception stack (in r31) as early as possible.
+ */
+
 ASLOCAL(m88110_setup_phase_one)
 	/*
 	 * SR1: saved copy of exception-time register now holding FLAGS
 	 * SR2: saved copy of exception-time r1
-	 * SR3: must be preserved .. may be the exception-time stack
+	 * SR3: free
 	 * r1: return address to calling exception handler
 	 * FLAGS: CPU status flags
 	 *
 	 * immediate goal:
-	 *   Decide where we're going to put the exception frame.
-	 *   Might be at the end of R31, SR3, or the process pcb.
+	 *   Find out where to put the exception frame, and which
+	 *   stack to use.
 	 */
 
 	/* Check if we are coming in from a FPU restart exception.
 	   If so, the pcb will be in SR3 */
 	NOP
-	xcr	r1,   r1,   SR2
+	xcr	r1,   r1,   SR2		/* recover exception-time r1 */
 	NOP
 	NOP
 	NOP
 
-	bb1	FLAG_ENABLING_FPU, FLAGS, _ASM_LABEL(m88110_use_SR3_pcb)
-	/* are we coming in from user mode? If so, pick up process pcb */
-	bb0	FLAG_FROM_KERNEL, FLAGS, _ASM_LABEL(m88110_pickup_stack)
-
-	/* Interrupt in kernel mode, not FPU restart */
 	/*
-	 * SR1: saved copy of exception-time register now holding FLAGS
-	 * SR2: return address to the calling exception handler
-	 * SR3: must be preserved; may be important for other exceptions
-	 * FLAGS: CPU status flags
+	 * If we were in the kernel when the exception occured, we have
+	 * a valid stack. Keep using it, and build the frame on it.
 	 *
-	 * immediate goal:
-	 *   We're already on the kernel stack, but not having
-	 *   needed to use SR3. We can just make room on the
-	 *   stack (r31) for our exception frame.
+	 * Note that if this exception is an NMI, we might be currently
+	 * switching processes, and curpcb and curproc won't match. It
+	 * is nevertheless safe to use curpcb, since nmi are processed
+	 * with interrupts disabled, and we won't check for AST or soft
+	 * interrupts before returning to the cpu_switchto kernel code.
 	 */
-	subu	r31,  r31,  SIZEOF_EF		/* r31 now our E.F. */
-	st	FLAGS,r31,  REG_OFF(EF_FLAGS)	/* save flags */
-	st	r1,   r31,  GENREG_OFF(1)	/* save prev. r1 (now free) */
+	bb1	FLAG_FROM_KERNEL, FLAGS, _ASM_LABEL(m88110_kernel_stack)
 
-	ldcr	r1,   SR3			/* save previous SR3 */
-	st	r1,   r31,  REG_OFF(EF_SR3)
-
-	addu	r1,   r31,  SIZEOF_EF		/* save previous r31 */
-	br.n	_ASM_LABEL(m88110_have_pcb)
-	 st	r1,   r31,  GENREG_OFF(31)
-
-ASLOCAL(m88110_use_SR3_pcb)
 	/*
-	 * SR1: saved copy of exception-time register now holding FLAGS
-	 * SR2: return address to the calling exception handler
-	 * SR3: must be preserved; exception-time stack pointer
-	 * FLAGS: CPU status flags
-	 *
-	 * immediate goal:
-	 *   An exception occurred while enabling the FPU. Since r31 is the
-	 *   user's r31 while enabling the FPU, we had put our pcb pointer
-	 *   into SR3, so make room from there for our stack pointer.
-	 *   We need to check if SR3 is the old stack pointer or the pointer
-	 *   off to the user pcb. If it pointing to the user pcb, we need to
-	 *   pick up the kernel stack. Otherwise we need to allocate a frame
-	 *   upon it.
-	 *   We look at the EPSR to see if it was from user mode
-	 *   Unfortunately, we have no registers free at the moment, but we
-	 *   know register 0 in the pcb frame will always be zero, so we can
-	 *   use it as scratch storage.
+	 * Otherwise, this is an exception in user mode, we'll use the PCB
+	 * for the exception frame and the top of the PCB as the stack.
 	 */
-#if 1
-	ldcr	TMP,  PSR
-	clr	TMP,  TMP,  1<PSR_FPU_DISABLE_BIT>	/* enable the FPU */
-	clr	TMP,  TMP,  1<PSR_SHADOW_FREEZE_BIT>	/* and shadowing */
-	stcr	TMP,  EPSR
 
-	or.u	TMP,  r0,   hi16(_C_LABEL(m88110_error_handler))
-	or	TMP,  TMP,  lo16(_C_LABEL(m88110_error_handler))
-	stcr	TMP,  EXIP
+	/* compute frame address: in PCB */
+	stcr	r30,  SR3			/* save r30, now free */
+	ldcr	r30,  CPU
+	ld	r30,  r30,  CI_CURPCB
+	addu	r30,  r30,  PCB_USER_STATE	/* point to user save area */
 
-	RTE
-#else
-	/* Testing!!! */
-	xcr	r30,  r30,  SR3			/* r30 = old exception frame */
-	st	r1,   r30,  GENREG_OFF(0)	/* free up r1 */
-	ld	r1,   r30,  REG_OFF(EF_EPSR)	/* get back the epsr */
-	bb0.n	PSR_SUPERVISOR_MODE_BIT, r1, 1f	/* if user mode */
-	 ld	r1,   r30,  GENREG_OFF(0)	/* restore r1 */
-	/* we were in kernel mode - dump frame upon the stack */
-	st	r0,   r30,  GENREG_OFF(0)	/* repair old frame */
-	subu	r30,  r30,  SIZEOF_EF		/* r30 now our E.F. */
-	st	FLAGS,r30,  REG_OFF(EF_FLAGS)	/* save flags */
-	st	r1,   r30,  GENREG_OFF(1)	/* save prev. r1 (now free) */
+	/* save a few registers before we lose them*/
+	st	r1,   r30,  GENREG_OFF(1)	/* save prev. r1 (now free)*/
+	ldcr	r1,   SR3			/* save previous r30 */
+	st	r31,  r30,  GENREG_OFF(31)
+	st	r1,   r30,  GENREG_OFF(30)
 
-	st	r31,  r30,  GENREG_OFF(31)	/* save previous r31 */
-	or	r31,  r0,   r30			/* make r31 our pointer. */
-	addu	r30,  r30,  SIZEOF_EF		/* r30 now has previous SR3 */
-	st	r30,  r31,  REG_OFF(EF_SR3)	/* save previous SR3 */
-	br.n	_ASM_LABEL(m88110_have_pcb)
-	 xcr	r30,  r30,  SR3			/* restore r30 */
-1:
-	/*
-	 * We took an exception while restarting the FPU from user space.
-	 * Consequently, we never picked up a stack. Do so now.
-	 * R1 is currently free (saved in the exception frame pointed at by
-	 * r30)
-	 */
+	/* compute stack address: top of U area */
 	ldcr	r1,   CPU
-	ld	r1,   r1,   CI_CURPCB
-	addu	r1,   r1,   USIZE - SIZEOF_EF
-	st	FLAGS,r1,   REG_OFF(EF_FLAGS)	/* store flags */
-	st	r31,  r1,   GENREG_OFF(31)	/* store r31 - now free */
-	st	r30,  r1,   REG_OFF(EF_SR3)	/* store old SR3 (pcb) */
-	or	r31,  r1,   r0			/* make r31 our exception fp */
-	ld	r1,   r30,  GENREG_OFF(0)	/* restore old r1 */
-	st	r0,   r30,  GENREG_OFF(0)	/* repair that frame */
-	st	r1,   r31,  GENREG_OFF(1)	/* store r1 */
-	br.n	_ASM_LABEL(m88110_have_pcb)
-	 xcr	r30,  r30,  SR3			/* restore r30 */
-#endif
+	ld	r31,  r1,   CI_CURPCB
+	addu	r31,  r31,  USPACE
 
-ASLOCAL(m88110_pickup_stack)
-	/*
-	 * SR1: saved copy of exception-time register now holding FLAGS
-	 * SR2: return address to the calling exception handler
-	 * SR3: free
-	 * FLAGS: CPU status flags
-	 *
-	 * immediate goal:
-	 *   Since we're servicing an exception from user mode, we
-	 *   know that SR3 is free.  We use it to free up a temporary
-	 *   register to be used in getting the process pcb.
-	 */
-	stcr	r31,  SR3	/* save previous r31 */
+	br	_ASM_LABEL(m88110_have_stack)
 
-	/* switch to the process kernel stack. */
-	ldcr	r31,  CPU
-	ld	r31,  r31,  CI_CURPCB
-	addu	r31,  r31,  PCB_USER_STATE	/* point to user save area */
+ASLOCAL(m88110_kernel_stack)		/* Exception in kernel mode */
 
-	/*
-	 * WARNING! Using pcb->user_state as the exception frame
-	 * AND stack pointer, means we can not afford using the stack
-	 * until we have saved enough and can go back to the top of the u area,
-	 * after the FPU is enabled.
-	 */
+	/* compute stack and frame address: allocate them on current stack */
+	subu	r31,  r31,  TRAPFRAME_SIZEOF	/* r31 now our E.F. */
 
-	st	FLAGS,r31,  REG_OFF(EF_FLAGS)	/* save flags */
-	st	r1,   r31,  GENREG_OFF(1)	/* save prev. r1 (now free)*/
-	ldcr	r1,   SR3			/* save previous r31 */
+	/* save a few registers before we lose them */
+	st	r1,   r31,  GENREG_OFF(1)	/* save prev. r1 (now free) */
+	addu	r1,   r31,  TRAPFRAME_SIZEOF	/* save previous r31 */
+	st	r30,  r31,  GENREG_OFF(30)
 	st	r1,   r31,  GENREG_OFF(31)
+
+	/* frame = stack */
+	or	r30,  r31,  r0
+
 	/* FALLTHROUGH */
 
-ASLOCAL(m88110_have_pcb)
+ASLOCAL(m88110_have_stack)
 	/*
 	 * SR1: saved copy of exception-time register now holding FLAGS
 	 * SR2: return address to the calling exception handler
 	 * SR3: free
 	 * r1:  free
 	 * FLAGS: CPU status flags
-	 * r31: our exception frame
+	 * r30: incomplete exception frame
+	 * r31: exception stack
 	 * Valid in the exception frame:
-	 *   Exception-time r1, r31, FLAGS.
-	 *   Exception SR3, if appropriate.
-	 *
-	 * immediate goal:
-	 *   Save the shadow registers that need to be saved to
-	 *   the exception frame.
+	 *   Exception-time r1, r30, r31, FLAGS.
 	 */
+
 	stcr	TMP, SR3	/* free up TMP, TMP2, TMP3 */
-	SAVE_TMP2
-	SAVE_TMP3
+	SAVE_TMP2(r30)
+	SAVE_TMP3(r30)
 
 	/* save some exception-time registers to the exception frame */
+	st	FLAGS,r30,  EF_FLAGS		/* save flags */
+
 	ldcr	TMP,  EPSR
-	st	TMP,  r31,  REG_OFF(EF_EPSR)
+	st	TMP,  r30,  EF_EPSR
 	ldcr	TMP2, EXIP
 	ldcr	TMP3, ENIP
-	st	TMP2, r31,  REG_OFF(EF_EXIP)
-	st	TMP3, r31,  REG_OFF(EF_ENIP)
+	st	TMP2, r30,  EF_EXIP
+	st	TMP3, r30,  EF_ENIP
 
 	/* get and store the cpu_info pointer */
 	ldcr	TMP,  CPU
-	st	TMP,  r31,  REG_OFF(EF_CPU)
+	st	TMP,  r30,  EF_CPU
 
 	/*
 	 * Save fault status registers from CMMU.
 	 */
 	ldcr	TMP,  ISR
+	st	TMP,  r30,  EF_ISR
+	bcnd	eq0,  TMP,  1f
 	ldcr	TMP2, ILAR
 	ldcr	TMP3, IPAR
-	st	TMP,  r31,  REG_OFF(EF_ISR)
-	st	TMP2, r31,  REG_OFF(EF_ILAR)
-	st	TMP3, r31,  REG_OFF(EF_IPAR)
+	st	TMP2, r30,  EF_ILAR
+	st	TMP3, r30,  EF_IPAR
 	ldcr	TMP,  ISAP
 	ldcr	TMP2, IUAP
-	st	TMP,  r31,  REG_OFF(EF_ISAP)
-	st	TMP2, r31,  REG_OFF(EF_IUAP)
+	st	TMP,  r30,  EF_ISAP
+	st	TMP2, r30,  EF_IUAP
+	stcr	r0,   ISR
+1:
 	ldcr	TMP,  DSR
+	st	TMP,  r30,  EF_DSR
+	bcnd	eq0,  TMP,  1f
 	ldcr	TMP2, DLAR
 	ldcr	TMP3, DPAR
-	st	TMP,  r31,  REG_OFF(EF_DSR)
-	st	TMP2, r31,  REG_OFF(EF_DLAR)
-	st	TMP3, r31,  REG_OFF(EF_DPAR)
+	st	TMP2, r30,  EF_DLAR
+	st	TMP3, r30,  EF_DPAR
 	ldcr	TMP,  DSAP
 	ldcr	TMP2, DUAP
-	st	TMP,  r31,  REG_OFF(EF_DSAP)
-	st	TMP2, r31,  REG_OFF(EF_DUAP)
-
-	stcr	r0, ISR
-	stcr	r0, DSR
-
+	st	TMP,  r30,  EF_DSAP
+	st	TMP2, r30,  EF_DUAP
+	stcr	r0,   DSR
+1:
 	ldcr	r1,   SR2
 	jmp	r1
 
@@ -2125,28 +2075,23 @@ ASLOCAL(m88110_setup_phase_two)
 	 * TMP2: free
 	 * TMP3: free
 	 * FLAGS: CPU status flags
-	 * r31: our exception frame
+	 * r30: incomplete exception frame
+	 * r31: exception stack
 	 * Valid in the exception frame:
-	 *   Exception-time r1, r31, FLAGS.
+	 *   Exception-time r1, r30, r31, FLAGS.
 	 *   Exception-time TMP2, TMP3.
-	 *   Exception-time espr, enip, exip.
+	 *   Exception-time epsr, enip, exip.
 	 *   Exception number (EF_VECTOR).
-	 *   Dmt0
-	 *   Other data pipeline control registers, if appropriate.
-	 *   FPU control registers, if appropriate.
-	 *   Exception SR3, if appropriate.
 	 *
 	 * immediate goal:
-	 *   restore the system to the exception-time state (except SR3 will
-	 *   be OUR stack pointer) so that we may resart the FPU.
+	 *   restore the system to the exception-time state.
 	 */
 
-	RESTORE_TMP2	/* done with extra temp regs */
-	RESTORE_TMP3	/* done with extra temp regs */
+	RESTORE_TMP2(r30)	/* done with extra temp regs */
+	RESTORE_TMP3(r30)	/* done with extra temp regs */
 
 	ldcr	TMP,  PSR
-	clr	TMP,  TMP,  1<PSR_FPU_DISABLE_BIT>	/* enable the FPU */
-	clr	TMP,  TMP,  1<PSR_SHADOW_FREEZE_BIT>	/* and shadowing */
+	clr	TMP,  TMP,  1<PSR_SHADOW_FREEZE_BIT>	/* enable shadowing */
 	stcr	TMP,  EPSR
 
 	or.u	TMP,  r0,   hi16(_ASM_LABEL(m88110_fpu_enable))
@@ -2155,156 +2100,120 @@ ASLOCAL(m88110_setup_phase_two)
 
 	set	FLAGS, FLAGS, 1<FLAG_ENABLING_FPU>
 	xcr	FLAGS, FLAGS, SR1
-	st	r1,   r31,  REG_OFF(EF_RET)	/* save the return address */
-	ld	r1,   r31,  GENREG_OFF(1)	/* get original r1 */
+	st	r1,   r30,  EF_RET		/* save the return address */
 
 	xcr	TMP,  r31, SR3	/* TMP now restored. R31 now saved in SR3 */
-	ld	r31,  r31,  GENREG_OFF(31)	/* get original r31 */
 
 	/*
 	 * SR1: CPU flags
 	 * SR2: free
 	 * SR3: pointer to our exception frame (our stack pointer)
-	 * r1 through r31: original exception-time values
+	 * r2 through r29: original exception-time values
+	 * r30: exception frame
+	 * r31: exception stack
 	 *
 	 * Valid in the exception frame:
-	 *   Exception-time FLAGS.
-	 *   Exception-time espr, sfip, enip, exip.
+	 *   Exception-time r1, r30, r31, FLAGS.
+	 *   Exception-time epsr, sfip, enip, exip.
 	 *   Exception number (EF_VECTOR).
-	 *   Dmt0
-	 *   Other data pipeline control registers, if appropriate.
-	 *   FPU control registers, if appropriate.
-	 *   Exception SR3, if appropriate.
+	 *   DSR/ISR, fault registers, if appropriate.
 	 * Held temporarily in the exception frame:
 	 *   Return address to the calling exception handler.
 	 *
 	 * immediate goal:
-	 *   Do an RTE to restart the fpu and jump to "fpu_enable"
-	 *   Another exception (or exceptions) may be raised in
-	 *   this, which is why FLAG_ENABLING_FPU is set in SR1.
+	 *   Do an RTE to unfreeze the shadow registers.
+	 *   Another exception (NMI) may be raised in this.
 	 */
 	RTE	/* jumps to "m88110_fpu_enable" to enable the FPU. */
 
-ASLOCAL(m88110_fpu_enable)
-	FLUSH_PIPELINE
+ASLOCAL(m88110_shadow_enable)
+	FLUSH_PIPELINE				/* XXX necessary? */
 
-	xcr	TMP,  TMP,  SR3			/* get E.F. pointer */
-	st	r30,  TMP,  GENREG_OFF(30)	/* save previous r30, r31 */
-	st	r31,  TMP,  GENREG_OFF(31)	/* save previous r30, r31 */
-	or	r31,  TMP,  r0			/* transfer E.F. pointer */
-	ld	TMP,  r31,  REG_OFF(EF_SR3)	/* get previous SR3 */
-
-	/* make sure that the FLAG_ENABLING_FPU bit is off */
-	xcr	FLAGS,FLAGS,SR1
-	clr	FLAGS,FLAGS,1<FLAG_ENABLING_FPU>
-	xcr	FLAGS,FLAGS,SR1
-
-	xcr	TMP,  TMP,  SR3	/* replace TMP, SR3 */
-
-	/* now save all regs to the exception frame. */
-	st	r0 ,  r31,  GENREG_OFF(0)
-	st	r1 ,  r31,  GENREG_OFF(1)
-	st	r2 ,  r31,  GENREG_OFF(2)
-	st	r3 ,  r31,  GENREG_OFF(3)
-	st	r4 ,  r31,  GENREG_OFF(4)
-	st	r5 ,  r31,  GENREG_OFF(5)
-	st	r6 ,  r31,  GENREG_OFF(6)
-	st	r7 ,  r31,  GENREG_OFF(7)
-	st	r8 ,  r31,  GENREG_OFF(8)
-	st	r9 ,  r31,  GENREG_OFF(9)
-	st	r10,  r31,  GENREG_OFF(10)
-	st	r11,  r31,  GENREG_OFF(11)
-	st	r12,  r31,  GENREG_OFF(12)
-	st	r13,  r31,  GENREG_OFF(13)
-	st	r14,  r31,  GENREG_OFF(14)
-	st	r15,  r31,  GENREG_OFF(15)
-	st	r16,  r31,  GENREG_OFF(16)
-	st	r17,  r31,  GENREG_OFF(17)
-	st	r18,  r31,  GENREG_OFF(18)
-	st	r19,  r31,  GENREG_OFF(19)
-	st	r20,  r31,  GENREG_OFF(20)
-	st	r21,  r31,  GENREG_OFF(21)
-	st	r22,  r31,  GENREG_OFF(22)
-	st	r23,  r31,  GENREG_OFF(23)
-	st	r24,  r31,  GENREG_OFF(24)
-	st	r25,  r31,  GENREG_OFF(25)
-	st	r26,  r31,  GENREG_OFF(26)
-	st	r27,  r31,  GENREG_OFF(27)
-	st	r28,  r31,  GENREG_OFF(28)
-
-	/* get and save IPL */
-	bsr.n	_C_LABEL(getipl)
-	 st	r29,  r31,  GENREG_OFF(29)
-	st	r2, r31, REG_OFF(EF_MASK)
+	/* now save all missing regs to the exception frame. */
+	st	r0 ,  r30,  GENREG_OFF(0)
+	st	r2 ,  r30,  GENREG_OFF(2)
+	st	r3 ,  r30,  GENREG_OFF(3)
+	st	r4 ,  r30,  GENREG_OFF(4)
+	st	r5 ,  r30,  GENREG_OFF(5)
+	st	r6 ,  r30,  GENREG_OFF(6)
+	st	r7 ,  r30,  GENREG_OFF(7)
+	st	r8 ,  r30,  GENREG_OFF(8)
+	st	r9 ,  r30,  GENREG_OFF(9)
+	st	r10,  r30,  GENREG_OFF(10)
+	st	r11,  r30,  GENREG_OFF(11)
+	st	r12,  r30,  GENREG_OFF(12)
+	st	r13,  r30,  GENREG_OFF(13)
+	st	r14,  r30,  GENREG_OFF(14)
+	st	r15,  r30,  GENREG_OFF(15)
+	st	r16,  r30,  GENREG_OFF(16)
+	st	r17,  r30,  GENREG_OFF(17)
+	st	r18,  r30,  GENREG_OFF(18)
+	st	r19,  r30,  GENREG_OFF(19)
+	st	r20,  r30,  GENREG_OFF(20)
+	st	r21,  r30,  GENREG_OFF(21)
+	st	r22,  r30,  GENREG_OFF(22)
+	st	r23,  r30,  GENREG_OFF(23)
+	st	r24,  r30,  GENREG_OFF(24)
+	st	r25,  r30,  GENREG_OFF(25)
+	st	r26,  r30,  GENREG_OFF(26)
+	st	r27,  r30,  GENREG_OFF(27)
+	st	r28,  r30,  GENREG_OFF(28)
+	st	r29,  r30,  GENREG_OFF(29)
 
 	/*
 	 * SR1: free
 	 * SR2: free
-	 * SR3: previous exception-time SR3
-	 * r1: return address to the calling exception handler
-	 * r2 through r30: free
-	 * r31: our exception frame
+	 * SR3: free
+	 * r1 through r29: free
+	 * r30: exception frame
+	 * r31: exception stack
 	 *
 	 * Valid in the exception frame:
 	 *   Exception-time r0 through r31.
 	 *   Exception-time FLAGS.
-	 *   Exception-time espr, enip, exip.
+	 *   Exception-time epsr, enip, exip.
 	 *   Exception number (EF_VECTOR).
-	 *   DSR
-	 *   Other data pipeline control registers, if appropriate.
-	 *   FPU control registers, if appropriate.
-	 *   Exception SR3, if appropriate.
+	 *   Return value (EF_RET).
+	 *   DSR/ISR, fault registers, if appropriate.
 	 *
 	 * immediate goal:
-	 *   Pick up a stack if we came in from user mode.
-	 *   Put a copy of the exception frame pointer into r30
 	 *   Bump the stack a doubleword and write the exception frame pointer.
-	 *   If not an interrupt exception, turn on interrupts and service any
-	 *     outstanding data access exceptions.
+	 *   If not an interrupt exception or an NMI, turn on interrupts.
 	 *   Return to calling exception handler to service the exception.
 	 */
 
-	/*
-	 * If it's not the interrupt exception, enable interrupts and
-	 * take care of any data access exceptions......
-	 */
-	or	r30,  r0,   r31		/* get a copy of the e.f. pointer */
-	ld	r2,   r31,  REG_OFF(EF_EPSR)
-	bb1	PSR_SUPERVISOR_MODE_BIT, r2, 1f	/* if in kernel mode */
+	/* get and save IPL */
+	bsr	_C_LABEL(getipl)
+	st	r2,   r30,  EF_MASK
 
-	ldcr	r31,  CPU
-	ld	r31,  r31,  CI_CURPCB
-	addu	r31,  r31,  USIZE		/* point at proper end */
-1:
-
-	/*
-	 * here - r30 holds a pointer to the exception frame.
-	 * r31 is a pointer to the kernel stack/interrupt stack.
-	 */
 	subu	r31,  r31,  8	/* make some breathing space */
 	st	r30,  r31,  0	/* store frame pointer on the stack */
 #ifdef DDB
 	st	r30,  r31,  4	/* store it again for the debugger */
 #endif
 
-	ld	r2,   r30,  REG_OFF(EF_VECTOR)
-	bcnd.n	eq0,  r2,   8f
-	 ld	r14,  r30,  REG_OFF(EF_RET)	/* load return value XXX!!! */
-	cmp	r3,   r2,   1	/* is an interrupt? */
-	bb1.n	eq,   r3,   8f
-	 cmp	r3,   r2,   11	/* or NMI? */
-	bb1.n	eq,   r3,   8f
+	ld	r6,   r30,  EF_EPSR
+	ld	r14,  r30,  EF_RET
+
+	/* don't turn interrupts back on unless they were enabled when the
+	   trap occured */
+	bb1	PSR_INTERRUPT_DISABLE_BIT, r6, 8f
+
+	ld	r2,   r30,  EF_VECTOR
+	bcnd	eq0,  r2,   8f
+	cmp	r3,   r2,   1	/* is this an interrupt? */
+	bb1	eq,   r3,   8f
+	cmp	r3,   r2,   11	/* or NMI? */
+	bb1	eq,   r3,   8f
 
 #ifdef DDB
-	 cmp	r3,   r2,   130	/* DDB break exception */
-	bb1.n	eq,   r3,   8f
-
-	 cmp	r3,   r2,   132	/* DDB entry exception */
-	bb1.n	eq,   r3,   8f
+	cmp	r3,   r2,   130	/* DDB break exception */
+	bb1	eq,   r3,   8f
+	cmp	r3,   r2,   132	/* DDB entry exception */
+	bb1	eq,   r3,   8f
 #endif
 
-	/* turn interrupts back on */
-	 ldcr	r2,   PSR
+	ldcr	r2,   PSR
 	clr	r2,   r2,   1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r2,   PSR
 	FLUSH_PIPELINE
@@ -2385,8 +2294,8 @@ ASLOCAL(m88100_return_code)
 	bb0	DMT_VALID_BIT, r3, _ASM_LABEL(check_ast)
 
 	/*
-	 * If it's the interrupt exception, and interrupts were
-	 * initially disabled, enable interrupts again...
+	 * If the saved ipl is 0, then call spl0() to process soft
+	 * interrupts. And if returning to userland, look for ASTs.
 	 */
 	ld	r2, FPTR, REG_OFF(EF_VECTOR)
 	cmp	r2, r2, 1	/* is an interrupt? */
@@ -2402,20 +2311,15 @@ ASLOCAL(m88100_return_code)
 	FLUSH_PIPELINE
 1:
 
-	CALL(m88100_trap, T_DATAFLT, r30)
-#ifdef M88110
-	br	_ASM_LABEL(check_ast)
-#else
-	/* FALLTHROUGH */
-#endif
-#endif /* M88100 */
-
-#ifdef M88110
-ASLOCAL(m88110_return_code)
-#define	FPTR	r14
-	ld	FPTR, r31, 0	/* grab exception frame pointer */
-	/* FALLTHROUGH */
-#endif /* M88110 */
+#ifdef MULTIPROCESSOR
+	/*
+	 * Check for IPI soft interrupt
+	 */
+	ldcr	r3,   CPU
+	or	r15,  r0,   r0
+	addu	r3,   r3,   CI_SOFTIPI_CB
+	xmem	r15,  r3,   r0
+	bcnd	eq0,  r15,   _ASM_LABEL(do_softint)
 
 /*
  *   If the saved ipl is 0, then call dosoftint() to process soft
@@ -2432,41 +2336,44 @@ ASLOCAL(check_ast)
 
 	/* do an inline spl0() */
 	bsr.n	_C_LABEL(setipl)
-	 or	r2, r0, IPL_SOFTCLOCK
-	bsr	_C_LABEL(dosoftint)
-	bsr.n	_C_LABEL(setipl)
-	 or	r2, r0, IPL_NONE
+	 or	r2,   r0,   IPL_NONE
 
-ASLOCAL(no_softint)
+	jsr	r15
+ASLOCAL(do_softint)
+#endif
+
+	/*
+	 * Process soft interrupts, if any.
+	 */
+	bsr	_C_LABEL(spl0)
+
 	/* do not service AST if not returning to user mode */
-	ld	r2, FPTR, REG_OFF(EF_EPSR)
-	bb1	PSR_SUPERVISOR_MODE_BIT, r2, _ASM_LABEL(no_ast)
-
+	ld	r2, FPTR, EF_EPSR
+	bb1	PSR_SUPERVISOR_MODE_BIT, r2, _ASM_LABEL(ast_done)
+1:
 	ldcr	r2,  CPU
 	ld	r3,  r2, CI_CURPROC
 	bcnd	eq0, r3, _ASM_LABEL(no_ast)	/* no AST if no process! */
 	ld	r2,  r3, P_ASTPENDING
-	bcnd.n	eq0, r2, _ASM_LABEL(no_ast)	/* .n safe since the first
-						   instruction of CALL() is
-						   safe in a delay slot. */
-	/*
-	 * trap(AST,...) will service ast's.
-	 */
-#if defined(M88110) && defined(M88100)
-	 or.u	r2, r0, hi16(_C_LABEL(cputyp))
-	ld	r3, r2, lo16(_C_LABEL(cputyp))
-	cmp	r2, r3, CPU_88110
-	bb0	eq, r2, 2f
-#endif
-#if defined(M88110)
-	CALL(m88110_trap, T_ASTFLT, FPTR)
-#endif
-#if defined(M88110) && defined(M88100)
-	br	_ASM_LABEL(no_ast)
-2:
-#endif
-#ifdef M88100
-	CALL(m88100_trap, T_ASTFLT, FPTR)
+	bcnd	eq0, r2, _ASM_LABEL(ast_done)
+
+	bsr.n	_C_LABEL(ast)
+	 or	r2, r0, FPTR
+
+	br	1b
+
+/*
+ * void proc_trampoline(void (*func)(void *), void *proc)
+ *
+ * When a process setup by cpu_fork() resumes, it will find itself in
+ * proc_trampoline, with r31 pointing to a ksigframe. proc_trampoline will
+ * load func and proc values from ksigframe, call the function, and on return
+ * pop off the ksigframe. Then, it will return to userland.
+ */
+
+ENTRY(proc_trampoline)
+#ifdef MULTIPROCESSOR
+	bsr	_C_LABEL(proc_trampoline_mp)
 #endif
 
 ASLOCAL(no_ast)
@@ -2480,6 +2387,15 @@ ASLOCAL(no_ast)
 	bsr.n	_C_LABEL(setipl)
 	 ld	r2, FPTR, REG_OFF(EF_MASK)	/* get pre-exception ipl */
 
+#if defined(M88100) && defined(M88110)
+	ldcr	r2, PID
+	extu	r3,  r2, 8<8>
+	bcnd	ne0, r3, _ASM_LABEL(m88110_user_rte)
+	/* FALLTHROUGH */
+#endif
+
+#ifdef M88100
+ASGLOBAL(m88100_user_rte)
 	/*
 	 * Transfer the frame pointer to r31, since we no longer need a stack.
 	 * No page faults here, and interrupts are disabled.
@@ -2523,23 +2439,6 @@ ASLOCAL(no_ast)
 	FLUSH_PIPELINE
 
 	/* reload the control regs*/
-#ifdef M88110
-#ifdef M88100
-	or.u	r1, r0, hi16(_C_LABEL(cputyp))
-	ld	r30, r1, lo16(_C_LABEL(cputyp))
-	cmp	r1, r30, CPU_88110
-	bb1	ne, r1, 1f
-#endif
-	ld	r30, r31, REG_OFF(EF_ENIP)
-	ld	r1,  r31, REG_OFF(EF_EXIP)
-	stcr	r30, ENIP
-	stcr	r1,  EXIP
-#ifdef M88100
-	br	2f
-1:
-#endif
-#endif
-#ifdef M88100
 	/*
 	 * RTE will cause execution to continue first with the
 	 * instruction pointed to by the NIP and then the FIP;
@@ -2552,7 +2451,64 @@ ASLOCAL(no_ast)
 	stcr	r1,  SFIP
 2:
 #endif
-	ld	r30, r31, REG_OFF(EF_EPSR)
+
+#ifdef M88110
+ASGLOBAL(m88110_user_rte)
+	/*
+	 * Disable shadowing. This used to be done after all the registers
+	 * from the E.F. have been restored, but on 88110 we may receive
+	 * an NMI anytime, unless shadowing is frozen, and we rely on r31
+	 * being valid.
+	 */
+	ldcr	r1, PSR
+	set	r1, r1, 1<PSR_SHADOW_FREEZE_BIT>
+	stcr	r1, PSR
+	FLUSH_PIPELINE
+
+ASLOCAL(m88110_restore)
+	/*
+	 * Transfer the frame pointer to r31, since we no longer need a stack.
+	 * No page faults here, and interrupts are disabled.
+	 */
+	or	r31, r0,  FPTR
+	/* restore r1 later */
+	ld	r2 , r31, GENREG_OFF(2)
+	ld	r3 , r31, GENREG_OFF(3)
+	ld	r4 , r31, GENREG_OFF(4)
+	ld	r5 , r31, GENREG_OFF(5)
+	ld	r6 , r31, GENREG_OFF(6)
+	ld	r7 , r31, GENREG_OFF(7)
+	ld	r8 , r31, GENREG_OFF(8)
+	ld	r9 , r31, GENREG_OFF(9)
+	ld	r10, r31, GENREG_OFF(10)
+	ld	r11, r31, GENREG_OFF(11)
+	ld	r12, r31, GENREG_OFF(12)
+	ld	r13, r31, GENREG_OFF(13)
+	ld	r14, r31, GENREG_OFF(14)
+	ld	r15, r31, GENREG_OFF(15)
+	ld	r16, r31, GENREG_OFF(16)
+	ld	r17, r31, GENREG_OFF(17)
+	ld	r18, r31, GENREG_OFF(18)
+	ld	r19, r31, GENREG_OFF(19)
+	ld	r20, r31, GENREG_OFF(20)
+	ld	r21, r31, GENREG_OFF(21)
+	ld	r22, r31, GENREG_OFF(22)
+	ld	r23, r31, GENREG_OFF(23)
+	ld	r24, r31, GENREG_OFF(24)
+	ld	r25, r31, GENREG_OFF(25)
+	ld	r26, r31, GENREG_OFF(26)
+	ld	r27, r31, GENREG_OFF(27)
+	ld	r28, r31, GENREG_OFF(28)
+	ld	r29, r31, GENREG_OFF(29)
+	/* restore r1, r30, r31 later */
+
+	/* reload the control regs*/
+	ld	r30, r31, EF_ENIP
+	ld	r1,  r31, EF_EXIP
+	stcr	r30, ENIP
+	stcr	r1,  EXIP
+
+	ld	r30, r31, EF_EPSR
 	stcr	r30, EPSR
 
 	/* Now restore r1, r30, and r31 */
@@ -2561,3 +2517,40 @@ ASLOCAL(no_ast)
 	ld	r31, r31, GENREG_OFF(31)
 
 	RTE
+
+	/*
+	 * NMI return here after processing.
+	 * We then decide whether to check for AST and soft interrupts,
+	 * or not.
+	 */
+ASLOCAL(nmi_return)
+	bcnd	ne0, r2, _ASM_LABEL(check_ast)
+
+	ld	FPTR, r31, 0	/* grab exception frame pointer */
+
+	/*
+	 * Disable interrupts and shadowing. The latter used to be done
+	 * after all the registers from the E.F. have been restored, but
+	 * on 88110 we may receive an NMI anytime, unless shadowing is frozen,
+	 * and we rely on r31 being valid.
+	 */
+	ldcr	r1, PSR
+	set	r1, r1, 1<PSR_INTERRUPT_DISABLE_BIT>
+	set	r1, r1, 1<PSR_SHADOW_FREEZE_BIT>
+	stcr	r1, PSR
+	FLUSH_PIPELINE
+
+	/* now ready to return....*/
+	bsr.n	_C_LABEL(setipl)
+	 ld	r2, FPTR, EF_MASK		/* get pre-exception ipl */
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * Reenable NMIs if necessary.
+	 */
+	or	r2,   FPTR,  r0
+	bsr	_C_LABEL(nmi_wrapup)
+#endif
+
+	br	_ASM_LABEL(m88110_restore)
+#endif

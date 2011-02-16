@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: yds.c,v 1.27 2005/08/09 04:10:13 mickey Exp $	*/
+=======
+/*	$OpenBSD: yds.c,v 1.38 2010/09/17 07:55:52 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: yds.c,v 1.5 2001/05/21 23:55:04 minoura Exp $	*/
 
 /*
@@ -45,7 +49,6 @@
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/fcntl.h>
 
@@ -89,6 +92,7 @@ static	int ac97_id2;
 
 int	yds_match(struct device *, void *, void *);
 void	yds_attach(struct device *, struct device *, void *);
+int	yds_activate(struct device *, int);
 int	yds_intr(void *);
 
 static void nswaph(u_int32_t *p, int wcount);
@@ -146,7 +150,8 @@ void YWRITE4(struct yds_softc *sc,bus_size_t r,u_int32_t x)
 	bus_space_write_region_4((sc)->memt, (sc)->memh, (r), (x), (c) / 4)
 
 struct cfattach yds_ca = {
-	sizeof(struct yds_softc), yds_match, yds_attach
+	sizeof(struct yds_softc), yds_match, yds_attach, NULL,
+	yds_activate
 };
 
 struct cfdriver yds_cd = {
@@ -184,7 +189,7 @@ int     yds_get_portnum_by_name(struct yds_softc *, char *, char *,
 
 static u_int yds_get_dstype(int);
 static int yds_download_mcode(struct yds_softc *);
-static int yds_allocate_slots(struct yds_softc *);
+static int yds_allocate_slots(struct yds_softc *, int);
 static void yds_configure_legacy(struct yds_softc *arg);
 static void yds_enable_dsp(struct yds_softc *);
 static int yds_disable_dsp(struct yds_softc *);
@@ -194,8 +199,7 @@ static u_int32_t yds_get_lpfq(u_int);
 static u_int32_t yds_get_lpfk(u_int);
 static struct yds_dma *yds_find_dma(struct yds_softc *, void *);
 
-void yds_powerhook(int, void *);
-int	yds_init(void *sc);
+int	yds_init(struct yds_softc *, int);
 void	yds_attachhook(void *);
 
 #ifdef AUDIO_DEBUG
@@ -416,8 +420,7 @@ yds_download_mcode(sc)
 }
 
 static int
-yds_allocate_slots(sc)
-	struct yds_softc *sc;
+yds_allocate_slots(struct yds_softc *sc, int resuming)
 {
 	size_t pcs, rcs, ecs, ws, memsize;
 	void *mp;
@@ -456,12 +459,14 @@ yds_allocate_slots(sc)
 	memsize += (N_PLAY_SLOTS+1)*sizeof(u_int32_t);
 
 	p = &sc->sc_ctrldata;
-	i = yds_allocmem(sc, memsize, 16, p);
-	if (i) {
-		printf("%s: couldn't alloc/map DSP DMA buffer, reason %d\n",
-		       sc->sc_dev.dv_xname, i);
-		free(p, M_DEVBUF);
-		return 1;
+	if (!resuming) {
+		i = yds_allocmem(sc, memsize, 16, p);
+		if (i) {
+			printf("%s: couldn't alloc/map DSP DMA buffer, reason %d\n",
+			       sc->sc_dev.dv_xname, i);
+			free(p, M_DEVBUF);
+			return 1;
+		}
 	}
 	mp = KERNADDR(p);
 	da = DMAADDR(p);
@@ -687,7 +692,7 @@ yds_attach(parent, self, aux)
 	/* Map register to memory */
 	if (pci_mapreg_map(pa, YDS_PCI_MBA, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->memt, &sc->memh, NULL, &size, 0)) {
-		printf("%s: can't map memory space\n", sc->sc_dev.dv_xname);
+		printf("%s: can't map mem space\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -747,7 +752,7 @@ yds_attachhook(void *xsc)
 	int r, i;
 	
 	/* Initialize the device */
-	if (yds_init(sc) == -1)
+	if (yds_init(sc, 0) == -1)
 		return;
 
 	/*
@@ -819,9 +824,7 @@ yds_attachhook(void *xsc)
 	audio_attach_mi(&yds_hw_if, sc, &sc->sc_dev);
 
 	/* Watch for power changes */
-	sc->suspend = PWR_RESUME;
-	sc->powerhook = powerhook_establish(yds_powerhook, sc);
-
+	sc->suspend = DVACT_RESUME;
 	yds_configure_legacy(sc);
 }
 
@@ -1139,52 +1142,56 @@ yds_query_encoding(addr, fp)
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
+	return (0);
 }
 
 int
@@ -1203,10 +1210,14 @@ yds_set_params(addr, setmode, usemode, play, rec)
 
 		p = mode == AUMODE_PLAY ? play : rec;
 
-		if (p->sample_rate < 4000 || p->sample_rate > 48000 ||
-		    (p->precision != 8 && p->precision != 16) ||
-		    (p->channels != 1 && p->channels != 2))
-			return (EINVAL);
+		if (p->sample_rate < 4000)
+			p->sample_rate = 4000;
+		if (p->sample_rate > 48000)
+			p->sample_rate = 48000;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
 
 		p->factor = 1;
 		p->sw_code = 0;
@@ -1252,6 +1263,8 @@ yds_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 	}
 
 	return 0;
@@ -1785,38 +1798,39 @@ yds_get_props(addr)
 		AUDIO_PROP_FULLDUPLEX);
 }
 
-void
-yds_powerhook(why, self)
-	int why;
-	void *self;
+int
+yds_activate(struct device *self, int act)
 {
 	struct yds_softc *sc = (struct yds_softc *)self;
+	int rv = 0;
 
-	if (why != PWR_RESUME) {
-		/* Power down */
-		DPRINTF(("yds: power down\n"));
-		sc->suspend = why;
-
-	} else {
-		/* Wake up */
-		DPRINTF(("yds: power resume\n"));
-		if (sc->suspend == PWR_RESUME) {
-			printf("%s: resume without suspend?\n",
-				sc->sc_dev.dv_xname);
-			sc->suspend = why;
-			return;
-		}
-		sc->suspend = why;
-		yds_init(sc);
-		(sc->sc_codec[0].codec_if->vtbl->restore_ports)(sc->sc_codec[0].codec_if);
+	switch (act) {
+	case DVACT_QUIESCE:
+		if (sc->sc_play.intr || sc->sc_rec.intr)
+			sc->sc_resume_active = 1;
+		else
+			sc->sc_resume_active = 0;
+		rv = config_activate_children(self, act);
+		if (sc->sc_resume_active)
+			yds_close(sc);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		yds_halt(sc);
+		yds_init(sc, 1);
+		ac97_resume(&sc->sc_codec[0].host_if, sc->sc_codec[0].codec_if);
+		if (sc->sc_resume_active)
+			yds_open(sc, 0);
+		rv = config_activate_children(self, act);
+		break;
 	}
+	return (rv);
 }
 
 int
-yds_init(sc_)
-	void *sc_;
+yds_init(struct yds_softc *sc, int resuming)
 {
-	struct yds_softc *sc = sc_;
 	u_int32_t reg;
 
 	pci_chipset_tag_t pc = sc->sc_pc;
@@ -1826,12 +1840,14 @@ yds_init(sc_)
 	DPRINTF(("in yds_init()\n"));
 
 	/* Download microcode */
-	if (yds_download_mcode(sc)) {
-		printf("%s: download microcode failed\n", sc->sc_dev.dv_xname);
-		return -1;
+	if (!resuming) {
+		if (yds_download_mcode(sc)) {
+			printf("%s: download microcode failed\n", sc->sc_dev.dv_xname);
+			return -1;
+		}
 	}
 	/* Allocate DMA buffers */
-	if (yds_allocate_slots(sc)) {
+	if (yds_allocate_slots(sc, resuming)) {
 		printf("%s: could not allocate slots\n", sc->sc_dev.dv_xname);
 		return -1;
 	}

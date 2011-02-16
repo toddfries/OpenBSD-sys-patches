@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.15 2006/07/09 22:10:05 mk Exp $ */
+/*	$OpenBSD: intr.h,v 1.42 2010/12/21 14:56:24 claudio Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -30,37 +30,34 @@
 #define _MACHINE_INTR_H_
 
 /*
- *  The interrupt mask cpl is a mask which can be used with the
- *  CPU interrupt mask register or an external HW mask register.
- *  If interrupts are masked by the CPU interrupt mask all external
- *  masks should be enabled and any routing set up so that the
- *  interrupt source is routed to the CPU interrupt corresponding
- *  to the interrupts "priority level". In this case the generic
- *  interrupt handler can be used.
+ * The interrupt level ipl is a logical level; per-platform interrupt
+ * code will turn it into the appropriate hardware interrupt masks
+ * values.
  *
- *  The IMASK_EXTERNAL define is used to select whether the CPU
- *  interrupt mask should be controlled by the cpl mask value
- *  or not. If the mask is external, the CPU mask is never changed
- *  from the value it gets when interrupt dispatchers are registred.
- *  When an external masking register is used dedicated interrupt
- *  handlers must be written as well as ipending handlers.
+ * Interrupt sources on the CPU are kept enabled regardless of the
+ * current ipl value; individual hardware sources interrupting while
+ * logically masked are masked on the fly, remembered as pending, and
+ * unmasked at the first splx() opportunity.
+ *
+ * An exception to this rule is the clock interrupt. Clock interrupts
+ * are always allowed to happen, but will (of course!) not be serviced
+ * if logically masked.  The reason for this is that clocks usually sit on
+ * INT5 and cannot be easily masked if external hardware masking is used.
  */
-#define	IMASK_EXTERNAL		/* XXX move this to config */
-
-/* This define controls whether splraise is inlined or not */
-/* #define INLINE_SPLRAISE */
-
 
 /* Interrupt priority `levels'; not mutually exclusive. */
-#define	IPL_BIO		0	/* block I/O */
+#define	IPL_NONE	0	/* nothing */
+#define	IPL_SOFTINT	1	/* soft interrupts */
+#define	IPL_BIO		2	/* block I/O */
 #define IPL_AUDIO	IPL_BIO
-#define	IPL_NET		1	/* network */
-#define	IPL_TTY		2	/* terminal */
-#define	IPL_VM		3	/* memory allocation */
-#define	IPL_CLOCK	4	/* clock */
-#define	IPL_NONE	5	/* nothing */
-#define	IPL_HIGH	6	/* everything */
-#define	NIPLS		7	/* Number of levels */
+#define	IPL_NET		3	/* network */
+#define	IPL_TTY		4	/* terminal */
+#define	IPL_VM		5	/* memory allocation */
+#define	IPL_CLOCK	6	/* clock */
+#define	IPL_SCHED	IPL_CLOCK
+#define	IPL_HIGH	7	/* everything */
+#define	IPL_IPI         8       /* interprocessor interrupt */
+#define	NIPLS		9	/* Number of levels */
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -68,124 +65,85 @@
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
+#define	SINTBIT(q)	(q)
+#define	SINTMASK(q)	(1 << SINTBIT(q))
+
 /* Soft interrupt masks. */
-#define	SINT_CLOCK	31
-#define	SINT_CLOCKMASK	(1 << SINT_CLOCK)
-#define	SINT_NET	30
-#define	SINT_NETMASK	((1 << SINT_NET) | SINT_CLOCKMASK)
-#define	SINT_TTY	29
-#define	SINT_TTYMASK	((1 << SINT_TTY) | SINT_CLOCKMASK)
-#define	SINT_ALLMASK	(SINT_CLOCKMASK | SINT_NETMASK | SINT_TTYMASK)
-#define	SPL_CLOCK	28
-#define	SPL_CLOCKMASK	(1 << SPL_CLOCK)
+
+#define	IPL_SOFT	0
+#define	IPL_SOFTCLOCK	1
+#define	IPL_SOFTNET	2
+#define	IPL_SOFTTTY	3
+
+#define	SI_SOFT		0	/* for IPL_SOFT */
+#define	SI_SOFTCLOCK	1	/* for IPL_SOFTCLOCK */
+#define	SI_SOFTNET	2	/* for IPL_SOFTNET */
+#define	SI_SOFTTTY	3	/* for IPL_SOFTTTY */
+
+#define	SI_NQUEUES	4
 
 #ifndef _LOCORE
 
-#define splbio()		splraise(imask[IPL_BIO])
-#define splnet()		splraise(imask[IPL_NET])
-#define spltty()		splraise(imask[IPL_TTY])
-#define splaudio()		splraise(imask[IPL_AUDIO])
-#define splclock()		splraise(SPL_CLOCKMASK|SINT_ALLMASK)
-#define splvm()			splraise(imask[IPL_VM])
-#define splsoftclock()		splraise(SINT_CLOCKMASK)
-#define splsoftnet()		splraise(SINT_NETMASK|SINT_CLOCKMASK)
-#define splsofttty()		splraise(SINT_TTYMASK)
-#define splstatclock()		splhigh()
-#define splhigh()		splraise(-1)
-#define spl0()			spllower(0)
+#include <machine/mutex.h>
+#include <sys/queue.h>
 
-#include <machine/atomic.h>
+struct soft_intrhand {
+	TAILQ_ENTRY(soft_intrhand) sih_list;
+	void	(*sih_func)(void *);
+	void	*sih_arg;
+	struct soft_intrq *sih_siq;
+	int	sih_pending;
+};
 
-#define setsoftclock()  	atomic_setbits_int(&ipending, SINT_CLOCKMASK)
-#define setsoftnet()    	atomic_setbits_int(&ipending, SINT_NETMASK)
-#define setsofttty()    	atomic_setbits_int(&ipending, SINT_TTYMASK)
+struct soft_intrq {
+	TAILQ_HEAD(, soft_intrhand) siq_list;
+	int siq_si;
+	struct mutex siq_mtx;
+};
+
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(int);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
+
+#define	splsoft()	splraise(IPL_SOFTINT)
+#define splbio()	splraise(IPL_BIO)
+#define splnet()	splraise(IPL_NET)
+#define spltty()	splraise(IPL_TTY)
+#define splaudio()	splraise(IPL_AUDIO)
+#define splvm()		splraise(IPL_VM)
+#define splclock()	splraise(IPL_CLOCK)
+#define splsched()	splraise(IPL_SCHED)
+#define splhigh()	splraise(IPL_HIGH)
+
+#define splsoftclock()	splsoft()
+#define splsoftnet()	splsoft()
+#define splstatclock()	splhigh()
+
+#define spllock()	splhigh()
+#define spl0()		spllower(0)
 
 void	splinit(void);
 
 #define	splassert(X)
-
-/*
- *  Schedule prioritys for base interrupts (cpu)
- */
-#define	INTPRI_CLOCK	1
-#define	INTPRI_MACEIO	2	/* O2 I/O interrupt */
-#define	INTPRI_XBOWMUX	2	/* Origin 200/2000 I/O interrupt */
-#define	INTPRI_MACEAUX	3
-
-/*
- *   Define a type for interrupt masks. We may need 64 bits here.
- */
-typedef u_int32_t intrmask_t;		/* Type of var holding interrupt mask */
-
-#define	INTMASKSIZE	(sizeof(intrmask_t) * 8)
-
-extern volatile intrmask_t cpl;
-extern volatile intrmask_t ipending;
-extern volatile intrmask_t astpending;
-
-extern intrmask_t imask[NIPLS];
-
-/*
- *  A note on clock interrupts. Clock interrupts are always
- *  allowed to happen but will not be serviced if masked.
- *  The reason for this is that clocks usually sits on INT5
- *  and can not be easily masked if external HW masking is used.
- */
+#define	splsoftassert(X)
 
 /* Inlines */
-static __inline void register_pending_int_handler(void (*)(int));
-static __inline void splx(int newcpl);
-static __inline int spllower(int newcpl);
+static __inline void register_splx_handler(void (*)(int));
 
-typedef void  (int_f) (int);
-extern int_f *pending_hand;
+typedef void (int_f)(int);
+extern int_f *splx_hand;
 
 static __inline void
-register_pending_int_handler(void(*pending)(int))
+register_splx_handler(void(*handler)(int))
 {
-	pending_hand = pending;
+	splx_hand = handler;
 }
 
-/*
- */
-#ifdef INLINE_SPLRAISE
-static __inline int splraise(int newcpl);
-static __inline int
-splraise(int newcpl)
-{
-	int oldcpl;
-
-	__asm__ (" .set noreorder\n");
-	oldcpl = cpl;
-	cpl = oldcpl | newcpl;
-	__asm__ (" sync\n .set reorder\n");
-	return (oldcpl);
-}
-#else
-int splraise(int newcpl);
-#endif
-
-static __inline void
-splx(int newcpl)
-{
-	if (ipending & ~newcpl)
-		(*pending_hand)(newcpl);
-	else
-		cpl = newcpl;
-}
-
-static __inline int
-spllower(int newcpl)
-{
-	int oldcpl;
-
-	oldcpl = cpl;
-	if (ipending & ~newcpl)
-		(*pending_hand)(newcpl);
-	else
-		cpl = newcpl;
-	return (oldcpl);
-}
+int	splraise(int);
+void	splx(int);
+int	spllower(int);
 
 /*
  * Interrupt control struct used by interrupt dispatchers
@@ -195,47 +153,42 @@ spllower(int newcpl)
 #include <sys/evcount.h>
 
 struct intrhand {
-	struct	intrhand *ih_next;
-	int	(*ih_fun)(void *);
-	void	*ih_arg;
-	int	ih_level;
-	int	ih_irq;
-	char	*ih_what;
-	void	*frame;
-	struct evcount  ih_count;
+	struct	intrhand	*ih_next;
+	int			(*ih_fun)(void *);
+	void			*ih_arg;
+	int			 ih_level;
+	int			 ih_irq;
+	struct evcount		 ih_count;
+	int			 ih_flags;
+#define	IH_ALLOCATED		0x01
 };
-
-extern struct intrhand *intrhand[INTMASKSIZE];
 
 /*
  * Low level interrupt dispatcher registration data.
  */
+
+/* Schedule priorities for base interrupts (CPU) */
+#define	INTPRI_IPI	0
+#define	INTPRI_CLOCK	1
+/* other values are system-specific */
+
 #define NLOWINT	16		/* Number of low level registrations possible */
 
+extern uint32_t idle_mask;
+
 struct trap_frame;
+void	set_intr(int, uint32_t, uint32_t(*)(uint32_t, struct trap_frame *));
 
-extern intrmask_t idle_mask;
-extern int last_low_int;
+uint32_t updateimask(uint32_t);
+void	dosoftint(void);
 
-void set_intr(int, intrmask_t, intrmask_t(*)(intrmask_t, struct trap_frame *));
-
-#ifdef IMASK_EXTERNAL
-void hw_setintrmask(intrmask_t);
-extern void *hwmask_addr;
+#ifdef MULTIPROCESSOR
+#if defined (TGT_OCTANE)
+#define ENABLEIPI() updateimask(~CR_INT_2) /* enable IPI interrupt level */
+#else
+#error MULTIPROCESSOR kernel not supported on this configuration
 #endif
-
-/*
- *  Generic interrupt handling code that can be used for simple
- *  interrupt hardware models. Functions can also be used by
- *  more complex code especially the mask calculation code.
- */
-
-void *generic_intr_establish(void *, u_long, int, int,
-	    int (*)(void *), void *, char *);
-void generic_intr_disestablish(void *, void *);
-void generic_intr_makemasks(void);
-void generic_do_pending_int(int);
-intrmask_t generic_iointr(intrmask_t, struct trap_frame *);
+#endif
 
 #endif /* _LOCORE */
 

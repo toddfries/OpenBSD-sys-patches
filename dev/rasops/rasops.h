@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rasops.h,v 1.7 2005/09/15 20:23:10 miod Exp $ */
+=======
+/*	$OpenBSD: rasops.h,v 1.10 2009/09/05 14:09:35 miod Exp $ */
+>>>>>>> origin/master
 /* 	$NetBSD: rasops.h,v 1.13 2000/06/13 13:36:54 ad Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -112,7 +109,7 @@ struct rasops_info {
 	int	ri_caps;
 
 	/* Callbacks so we can share some code */
-	void	(*ri_do_cursor)(struct rasops_info *);
+	int	(*ri_do_cursor)(struct rasops_info *);
 	void	(*ri_updatecursor)(struct rasops_info *);
 
 #if NRASOPS_ROTATION > 0
@@ -152,8 +149,8 @@ void	rasops32_init(struct rasops_info *);
 /* rasops.c */
 int	rasops_init(struct rasops_info *, int, int);
 int	rasops_reconfig(struct rasops_info *, int, int);
-void	rasops_eraserows(void *, int, int, long);
-void	rasops_erasecols(void *, int, int, int, long);
+int	rasops_eraserows(void *, int, int, long);
+int	rasops_erasecols(void *, int, int, int, long);
 
 extern const u_char	rasops_isgray[16];
 extern const u_char	rasops_cmap[256*3];

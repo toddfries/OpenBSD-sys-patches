@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: boot.c,v 1.15 2006/08/24 20:29:38 miod Exp $ */
+=======
+/*	$OpenBSD: boot.c,v 1.19 2008/08/26 18:36:21 miod Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: boot.c,v 1.18 2002/05/31 15:58:26 ragge Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
@@ -80,6 +84,7 @@ const struct vals {
 
 int jbuf[10];
 int sluttid, senast, skip, askname;
+int mcheck_silent;
 struct rpb bootrpb;
 
 void
@@ -111,7 +116,11 @@ Xmain(void)
 		transition = ' ';
 
 	askname = bootrpb.rpb_bootr5 & RB_ASKNAME;
+<<<<<<< HEAD
 	printf("\n\r>> OpenBSD/vax boot [%s] [%s] <<\n", "1.12", __DATE__);
+=======
+	printf("\n\r>> OpenBSD/vax boot [%s] <<\n", "1.15");
+>>>>>>> origin/master
 	printf(">> Press enter to autoboot now, or any other key to abort:  ");
 	sluttid = getsecs() + 5;
 	senast = 0;

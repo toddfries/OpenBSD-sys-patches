@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vmparam.h,v 1.30 2005/04/11 15:13:01 deraadt Exp $	*/
+=======
+/*	$OpenBSD: vmparam.h,v 1.36 2010/12/15 05:30:19 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vmparam.h,v 1.13 1997/07/12 16:20:03 perry Exp $	*/
 
 /*
@@ -67,6 +71,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(128*1024*1024)		/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(512*1024)		/* initial stack size limit */
 #endif
@@ -89,7 +96,7 @@
  * IO space virtual base, which must be the same as VM_MAX_KERNEL_ADDRESS:
  * tread with care.
  */
-#define VM_MIN_ADDRESS		((vaddr_t)0)
+#define VM_MIN_ADDRESS		((vaddr_t)0x2000)
 #define VM_MAX_ADDRESS		((vaddr_t)VM_MIN_KERNEL_ADDRESS)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)VM_MIN_KERNEL_ADDRESS)
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)

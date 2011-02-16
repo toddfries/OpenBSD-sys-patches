@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*       $OpenBSD: vfs_sync.c,v 1.41 2006/06/25 15:01:54 sturm Exp $  */
+=======
+/*       $OpenBSD: vfs_sync.c,v 1.49 2010/12/21 20:14:43 thib Exp $  */
+>>>>>>> origin/master
 
 /*
  *  Portions of this code are:
@@ -62,13 +66,13 @@ int   softdep_process_worklist(struct mount *);
 #define SYNCER_MAXDELAY	32		/* maximum sync delay time */
 #define SYNCER_DEFAULT 30		/* default sync delay time */
 int syncer_maxdelay = SYNCER_MAXDELAY;	/* maximum delay time */
-time_t syncdelay = SYNCER_DEFAULT;	/* time to delay syncing vnodes */
+int syncdelay = SYNCER_DEFAULT;		/* time to delay syncing vnodes */
 
 int rushjob = 0;			/* number of slots to run ASAP */
 int stat_rush_requests = 0;		/* number of rush requests */
 
-static int syncer_delayno = 0;
-static long syncer_mask;
+int syncer_delayno = 0;
+long syncer_mask;
 LIST_HEAD(synclist, vnode);
 static struct synclist *syncer_workitem_pending;
 
@@ -254,16 +258,11 @@ speedup_syncer(void)
 	return 0;
 }
 
-/*
- * Routine to create and manage a filesystem syncer vnode.
- */
-#define sync_close nullop
+/* Routine to create and manage a filesystem syncer vnode. */
 int   sync_fsync(void *);
 int   sync_inactive(void *);
-#define sync_reclaim nullop
-#define sync_lock vop_generic_lock
-#define sync_unlock vop_generic_unlock
 int   sync_print(void *);
+<<<<<<< HEAD
 #define sync_islocked vop_generic_islocked
 
 int (**sync_vnodeop_p)(void *);
@@ -281,6 +280,19 @@ struct vnodeopv_entry_desc sync_vnodeop_entries[] = {
 };
 struct vnodeopv_desc sync_vnodeop_opv_desc = {
 	&sync_vnodeop_p, sync_vnodeop_entries
+=======
+
+struct vops sync_vops = {
+	.vop_default	= eopnotsupp,
+	.vop_close	= nullop,
+	.vop_fsync	= sync_fsync,
+	.vop_inactive	= sync_inactive,
+	.vop_reclaim	= nullop,
+	.vop_lock	= vop_generic_lock,
+	.vop_unlock	= vop_generic_unlock,
+	.vop_islocked	= vop_generic_islocked,
+	.vop_print	= sync_print
+>>>>>>> origin/master
 };
 
 /*
@@ -294,7 +306,7 @@ vfs_allocate_syncvnode(struct mount *mp)
 	int error;
 
 	/* Allocate a new vnode */
-	if ((error = getnewvnode(VT_VFS, mp, sync_vnodeop_p, &vp)) != 0) {
+	if ((error = getnewvnode(VT_VFS, mp, &sync_vops, &vp)) != 0) {
 		mp->mnt_syncer = NULL;
 		return (error);
 	}

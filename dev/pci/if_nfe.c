@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_nfe.c,v 1.68 2007/01/08 18:39:27 damien Exp $	*/
+=======
+/*	$OpenBSD: if_nfe.c,v 1.97 2011/01/10 16:18:03 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -70,7 +74,7 @@
 
 int	nfe_match(struct device *, void *, void *);
 void	nfe_attach(struct device *, struct device *, void *);
-void	nfe_power(int, void *);
+int	nfe_activate(struct device *, int);
 void	nfe_miibus_statchg(struct device *);
 int	nfe_miibus_readreg(struct device *, int, int);
 void	nfe_miibus_writereg(struct device *, int, int, int);
@@ -107,7 +111,8 @@ void	nfe_set_macaddr(struct nfe_softc *, const uint8_t *);
 void	nfe_tick(void *);
 
 struct cfattach nfe_ca = {
-	sizeof (struct nfe_softc), nfe_match, nfe_attach
+	sizeof (struct nfe_softc), nfe_match, nfe_attach, NULL,
+	nfe_activate
 };
 
 struct cfdriver nfe_cd = {
@@ -150,7 +155,24 @@ const struct pci_matchid nfe_devices[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN1 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN2 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN3 },
+<<<<<<< HEAD
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN4 }
+=======
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP73_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_LAN }
+>>>>>>> origin/master
 };
 
 int
@@ -159,6 +181,32 @@ nfe_match(struct device *dev, void *match, void *aux)
 	return pci_matchbyid((struct pci_attach_args *)aux, nfe_devices,
 	    sizeof (nfe_devices) / sizeof (nfe_devices[0]));
 }
+
+int
+nfe_activate(struct device *self, int act)
+{
+	struct nfe_softc *sc = (struct nfe_softc *)self;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			nfe_stop(ifp, 0);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			nfe_init(ifp);
+		break;
+	}
+	return (rv);
+}
+
 
 void
 nfe_attach(struct device *parent, struct device *self, void *aux)
@@ -173,6 +221,7 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	pcireg_t memtype;
 
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, NFE_PCI_BA);
+<<<<<<< HEAD
 	switch (memtype) {
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
@@ -182,11 +231,16 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 		/* FALLTHROUGH */
 	default:
 		printf(": could not map mem space\n");
+=======
+	if (pci_mapreg_map(pa, NFE_PCI_BA, memtype, 0, &sc->sc_memt,
+	    &sc->sc_memh, NULL, &memsize, 0)) {
+		printf(": can't map mem space\n");
+>>>>>>> origin/master
 		return;
 	}
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 
@@ -226,7 +280,31 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP67_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP67_LAN3:
 	case PCI_PRODUCT_NVIDIA_MCP67_LAN4:
+<<<<<<< HEAD
 		sc->sc_flags |= NFE_40BIT_ADDR;
+=======
+	case PCI_PRODUCT_NVIDIA_MCP73_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP73_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP73_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP73_LAN4:
+		sc->sc_flags |= NFE_40BIT_ADDR | NFE_CORRECT_MACADDR |
+		    NFE_PWR_MGMT;
+		break;
+	case PCI_PRODUCT_NVIDIA_MCP77_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP77_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP77_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP77_LAN4:
+		sc->sc_flags |= NFE_40BIT_ADDR | NFE_HW_CSUM |
+		    NFE_CORRECT_MACADDR | NFE_PWR_MGMT;
+		break;
+	case PCI_PRODUCT_NVIDIA_MCP79_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP79_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP79_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP79_LAN4:
+	case PCI_PRODUCT_NVIDIA_MCP89_LAN:
+		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR | NFE_HW_CSUM |
+		    NFE_CORRECT_MACADDR | NFE_PWR_MGMT;
+>>>>>>> origin/master
 		break;
 	case PCI_PRODUCT_NVIDIA_CK804_LAN1:
 	case PCI_PRODUCT_NVIDIA_CK804_LAN2:
@@ -273,7 +351,6 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = nfe_ioctl;
 	ifp->if_start = nfe_start;
 	ifp->if_watchdog = nfe_watchdog;
-	ifp->if_init = nfe_init;
 	ifp->if_baudrate = IF_Gbps(1);
 	IFQ_SET_MAXLEN(&ifp->if_snd, NFE_IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
@@ -288,6 +365,7 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_flags & NFE_HW_VLAN)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
+
 	if (sc->sc_flags & NFE_HW_CSUM) {
 		ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
 		    IFCAP_CSUM_UDPv4;
@@ -300,8 +378,7 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&sc->sc_mii.mii_media, 0, nfe_ifmedia_upd,
 	    nfe_ifmedia_sts);
-	mii_attach(self, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0);
+	mii_attach(self, &sc->sc_mii, 0xffffffff, MII_PHY_ANY, 0, 0);
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->sc_dev.dv_xname);
 		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER | IFM_MANUAL,
@@ -314,24 +391,6 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 
 	timeout_set(&sc->sc_tick_ch, nfe_tick, sc);
-
-	sc->sc_powerhook = powerhook_establish(nfe_power, sc);
-}
-
-void
-nfe_power(int why, void *arg)
-{
-	struct nfe_softc *sc = arg;
-	struct ifnet *ifp;
-
-	if (why == PWR_RESUME) {
-		ifp = &sc->sc_arpcom.ac_if;
-		if (ifp->if_flags & IFF_UP) {
-			nfe_init(ifp);
-			if (ifp->if_flags & IFF_RUNNING)
-				nfe_start(ifp);
-		}
-	}
 }
 
 void
@@ -482,16 +541,11 @@ int
 nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct nfe_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -503,12 +557,7 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			/*
@@ -530,28 +579,23 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->sc_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				nfe_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
+
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			nfe_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return error;
 }
 
@@ -639,6 +683,9 @@ nfe_rxeof(struct nfe_softc *sc)
 	struct nfe_jbuf *jbuf;
 	struct mbuf *m, *mnew;
 	bus_addr_t physaddr;
+#if NVLAN > 0
+	uint32_t vtag;
+#endif
 	uint16_t flags;
 	int error, len;
 
@@ -651,6 +698,9 @@ nfe_rxeof(struct nfe_softc *sc)
 
 			flags = letoh16(desc64->flags);
 			len = letoh16(desc64->length) & 0x3fff;
+#if NVLAN > 0
+			vtag = letoh32(desc64->physaddr[1]);
+#endif
 		} else {
 			desc32 = &sc->rxq.desc32[sc->rxq.cur];
 			nfe_rxdesc32_sync(sc, desc32, BUS_DMASYNC_POSTREAD);
@@ -764,9 +814,16 @@ nfe_rxeof(struct nfe_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
 		}
 
+#if NVLAN > 0
+		if ((vtag & NFE_RX_VTAG) && (sc->sc_flags & NFE_HW_VLAN)) {
+			m->m_pkthdr.ether_vtag = vtag & 0xffff;
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ifp->if_ipackets++;
 		ether_input_mbuf(ifp, m);
@@ -879,16 +936,14 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 	struct nfe_tx_data *data;
 	bus_dmamap_t map;
 	uint16_t flags = 0;
-#if NVLAN > 0
 	uint32_t vtag = 0;
-#endif
 	int error, i, first = sc->txq.cur;
 
 	map = sc->txq.data[first].map;
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m0, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		return error;
 	}
@@ -900,11 +955,8 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 
 #if NVLAN > 0
 	/* setup h/w VLAN tagging */
-	if ((m0->m_flags & (M_PROTO1 | M_PKTHDR)) == (M_PROTO1 | M_PKTHDR) &&
-	    m0->m_pkthdr.rcvif != NULL) {
-		struct ifvlan *ifv = m0->m_pkthdr.rcvif->if_softc;
-		vtag = NFE_TX_VTAG | htons(ifv->ifv_tag);
-	}
+	if (m0->m_flags & M_VLANTAG)
+		vtag = NFE_TX_VTAG | m0->m_pkthdr.ether_vtag;
 #endif
 	if (m0->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 		flags |= NFE_TX_IP_CSUM;
@@ -924,9 +976,7 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 			    htole32(map->dm_segs[i].ds_addr & 0xffffffff);
 			desc64->length = htole16(map->dm_segs[i].ds_len - 1);
 			desc64->flags = htole16(flags);
-#if NVLAN > 0
 			desc64->vtag = htole32(vtag);
-#endif
 		} else {
 			desc32 = &sc->txq.desc32[sc->txq.cur];
 
@@ -941,9 +991,8 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 			 * only.
 			 */
 			flags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_UDP_CSUM);
-#if NVLAN > 0
 			vtag = 0;
-#endif
+
 			/*
 			 * Setting of the valid bit in the first descriptor is
 			 * deferred until the whole chain is fully setup.
@@ -1006,7 +1055,7 @@ nfe_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (sc->txq.cur == old)	/* nothing sent */
@@ -1054,25 +1103,20 @@ nfe_init(struct ifnet *ifp)
 		sc->rxtxctl |= NFE_RXTX_V3MAGIC;
 	else if (sc->sc_flags & NFE_JUMBO_SUP)
 		sc->rxtxctl |= NFE_RXTX_V2MAGIC;
+
 	if (sc->sc_flags & NFE_HW_CSUM)
 		sc->rxtxctl |= NFE_RXTX_RXCSUM;
-#if NVLAN > 0
-	/*
-	 * Although the adapter is capable of stripping VLAN tags from received
-	 * frames (NFE_RXTX_VTAG_STRIP), we do not enable this functionality on
-	 * purpose.  This will be done in software by our network stack.
-	 */
-	if (sc->sc_flags & NFE_HW_VLAN)
-		sc->rxtxctl |= NFE_RXTX_VTAG_INSERT;
-#endif
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		sc->rxtxctl |= NFE_RXTX_VTAG_INSERT | NFE_RXTX_VTAG_STRIP;
+
 	NFE_WRITE(sc, NFE_RXTX_CTL, NFE_RXTX_RESET | sc->rxtxctl);
 	DELAY(10);
 	NFE_WRITE(sc, NFE_RXTX_CTL, sc->rxtxctl);
 
-#if NVLAN
-	if (sc->sc_flags & NFE_HW_VLAN)
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		NFE_WRITE(sc, NFE_VTAG_CTL, NFE_VTAG_ENABLE);
-#endif
+	else
+		NFE_WRITE(sc, NFE_VTAG_CTL, 0);
 
 	NFE_WRITE(sc, NFE_SETUP_R6, 0);
 
@@ -1141,7 +1185,7 @@ nfe_init(struct ifnet *ifp)
 	/* enable interrupts */
 	NFE_WRITE(sc, NFE_IRQ_MASK, NFE_IRQ_WANTED);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1206,7 +1250,7 @@ nfe_alloc_rx_ring(struct nfe_softc *sc, struct nfe_rx_ring *ring)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, NFE_RX_RING_COUNT * descsize,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1216,7 +1260,7 @@ nfe_alloc_rx_ring(struct nfe_softc *sc, struct nfe_rx_ring *ring)
 	error = bus_dmamem_map(sc->sc_dmat, &ring->seg, nsegs,
 	    NFE_RX_RING_COUNT * descsize, (caddr_t *)desc, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1228,8 +1272,6 @@ nfe_alloc_rx_ring(struct nfe_softc *sc, struct nfe_rx_ring *ring)
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
-
-	bzero(*desc, NFE_RX_RING_COUNT * descsize);
 	ring->physaddr = ring->map->dm_segs[0].ds_addr;
 
 	if (sc->sc_flags & NFE_USE_JUMBO) {
@@ -1444,7 +1486,7 @@ nfe_jpool_alloc(struct nfe_softc *sc)
 	error = bus_dmamem_map(sc->sc_dmat, &ring->jseg, nsegs, NFE_JPOOL_SIZE,
 	    &ring->jpool, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map jumbo DMA memory\n",
+		printf("%s: can't map jumbo DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1525,7 +1567,7 @@ nfe_alloc_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, NFE_TX_RING_COUNT * descsize,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1535,7 +1577,7 @@ nfe_alloc_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 	error = bus_dmamem_map(sc->sc_dmat, &ring->seg, nsegs,
 	    NFE_TX_RING_COUNT * descsize, (caddr_t *)desc, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1547,8 +1589,6 @@ nfe_alloc_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
-
-	bzero(*desc, NFE_TX_RING_COUNT * descsize);
 	ring->physaddr = ring->map->dm_segs[0].ds_addr;
 
 	for (i = 0; i < NFE_TX_RING_COUNT; i++) {
@@ -1755,5 +1795,5 @@ nfe_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }

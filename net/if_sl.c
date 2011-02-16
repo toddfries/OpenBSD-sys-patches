@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_sl.c,v 1.31 2006/03/11 22:44:47 brad Exp $	*/
+=======
+/*	$OpenBSD: if_sl.c,v 1.43 2011/01/06 11:52:41 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -83,7 +87,7 @@
 #include <net/netisr.h>
 #include <net/route.h>
 
-#if INET
+#ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -326,11 +330,7 @@ slopen(dev, tp)
 				sc->sc_oldbufquot = tp->t_outq.c_cq != 0;
 
 				clfree(&tp->t_outq);
-				error = clalloc(&tp->t_outq, 3*SLMTU, 0);
-				if (error) {
-					splx(s);
-					return (error);
-				}
+				clalloc(&tp->t_outq, 3*SLMTU, 0);
 			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
 			splx(s);
@@ -429,6 +429,15 @@ sloutput(ifp, m, dst, rtp)
 		sc->sc_if.if_noproto++;
 		return (EAFNOSUPPORT);
 	}
+
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    dst->sa_family);
+	}
+#endif
 
 	if (sc->sc_ttyp == NULL) {
 		m_freem(m);
@@ -847,6 +856,9 @@ slinput(c, tp)
 		m = sl_btom(sc, len);
 		if (m == NULL)
 			goto error;
+
+		/* mark incoming routing domain */
+		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
 
 #if NBPFILTER > 0
 		if (sc->sc_bpf) {

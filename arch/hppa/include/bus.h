@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.23 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: bus.h,v 1.29 2010/06/19 14:06:56 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -166,7 +166,6 @@ extern const struct hppa_bus_space_tag hppa_bustag;
 #define	BUS_SPACE_MAP_LINEAR		0x0002
 #define	BUS_SPACE_MAP_READONLY		0x0004
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x0008
-#define	BUS_SPACE_MAP_NOEXTENT		0x8000	/* no extent ops */
 
 /* bus access routines */
 
@@ -282,26 +281,26 @@ extern const struct hppa_bus_space_tag hppa_bustag;
 #define	bus_space_copy_8(t, h1, o1, h2, o2, c) \
 	(((t)->hbt_cp_8)((t)->hbt_cookie, (h1), (o1), (h2), (o2), (c)))
 
-#define	BUS_SPACE_BARRIER_READ	0
-#define	BUS_SPACE_BARRIER_WRITE	1
+#define	BUS_SPACE_BARRIER_READ	0x01
+#define	BUS_SPACE_BARRIER_WRITE	0x02
 
 #define	bus_space_barrier(t,h,o,l,op) \
 	((t)->hbt_barrier((t)->hbt_cookie, (h), (o), (l), (op)))
 #define	bus_space_vaddr(t,h,o,l,op) \
 	((t)->hbt_vaddr((t)->hbt_cookie, (h), (o), (l), (op)))
 
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMAMEM_NOSYNC	0x010
-#define	BUS_DMA_BUS1		0x020	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x040
-#define	BUS_DMA_BUS3		0x080
-#define	BUS_DMA_BUS4		0x100
-#define	BUS_DMA_STREAMING	0x200	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x400	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x800	/* mapping is memory -> device only */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0020	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0040
+#define	BUS_DMA_BUS3		0x0080
+#define	BUS_DMA_BUS4		0x0100
+#define	BUS_DMA_STREAMING	0x0200	/* hint: sequential, unidirectional */
+#define	BUS_DMA_READ		0x0400	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0800	/* mapping is memory -> device only */
+#define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;

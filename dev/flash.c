@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: flash.c,v 1.1 2006/11/25 14:32:00 uwe Exp $	*/
+=======
+/*	$OpenBSD: flash.c,v 1.20 2010/09/24 18:27:43 jasper Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -67,8 +71,12 @@ void	flashdone(void *);
 int	flashsafestrategy(struct flash_softc *, struct buf *);
 void	flashgetdefaultlabel(dev_t, struct flash_softc *,
     struct disklabel *);
+<<<<<<< HEAD
 void	flashgetdisklabel(dev_t, struct flash_softc *, struct disklabel *,
     struct cpu_disklabel *, int);
+=======
+int	flashgetdisklabel(dev_t, struct flash_softc *, struct disklabel *, int);
+>>>>>>> origin/master
 
 /*
  * Driver attachment glue
@@ -95,8 +103,6 @@ static const struct flashdev flashdevs[] = {
 struct cfdriver flash_cd = {
 	NULL, "flash", DV_DISK
 };
-
-struct dkdriver flashdkdriver = { flashstrategy };
 
 void
 flashattach(struct flash_softc *sc, struct flash_ctl_tag *tag,
@@ -159,9 +165,8 @@ flashattach(struct flash_softc *sc, struct flash_ctl_tag *tag,
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	sc->sc_dk.dk_driver = &flashdkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_dk);
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 
 	/* XXX establish shutdown hook to finish any commands. */
 }
@@ -179,7 +184,7 @@ flashdetach(struct device *self, int flags)
 }
 
 int
-flashactivate(struct device *self, enum devact act)
+flashactivate(struct device *self, int act)
 {
 	/* XXX anything to be done here? */
 	return 0;
@@ -700,8 +705,17 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 			sc->sc_flags |= FDK_LOADED;
 			if (flashsafe(dev))
 				sc->sc_flags |= FDK_SAFE;
+<<<<<<< HEAD
 			flashgetdisklabel(dev, sc, sc->sc_dk.dk_label,
 			    sc->sc_dk.dk_cpulabel, 0);
+=======
+			if ((error = flashgetdisklabel(dev, sc, 
+			    sc->sc_dk.dk_label, 0)) != 0) {
+				flashunlock(sc);
+				device_unref(&sc->sc_dev);
+				return error;
+			}
+>>>>>>> origin/master
 		}
 	} else if (((sc->sc_flags & FDK_SAFE) == 0) !=
 	    (flashsafe(dev) == 0)) {
@@ -811,9 +825,13 @@ flashstrategy(struct buf *bp)
 		goto done;
 
 	/* Do bounds checking on partitions. */
+<<<<<<< HEAD
 	if (flashpart(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
 	    sc->sc_dk.dk_cpulabel, 0) <= 0)
+=======
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label, 0) <= 0)
+>>>>>>> origin/master
 		goto done;
 
 	/* Queue the transfer. */
@@ -852,9 +870,14 @@ flashioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 	}
 
 	switch (cmd) {
+	case DIOCGPDINFO:
+		flashgetdisklabel(dev, sc, (struct disklabel *)data, 1);
+		break;
+
 	case DIOCGDINFO:
 		*(struct disklabel *)data = *sc->sc_dk.dk_label;
 		break;
+
 	default:
 		error = ENOTTY;
 		break;
@@ -993,9 +1016,13 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 	lp->d_secperunit = lp->d_ncylinders * lp->d_secpercyl;
 
+<<<<<<< HEAD
 	/* Fake hardware characteristics. */
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
+=======
+	lp->d_version = 1;
+>>>>>>> origin/master
 
 	/* XXX these values assume ffs. */
 	lp->d_bbsize = BBSIZE;
@@ -1013,11 +1040,10 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 	lp->d_checksum = dkcksum(lp);
 }
 
-void
+int
 flashgetdisklabel(dev_t dev, struct flash_softc *sc,
     struct disklabel *lp, struct cpu_disklabel *clp, int spoofonly)
 {
-	char *errstring;
 	dev_t labeldev;
 
 	flashgetdefaultlabel(dev, sc, lp);
@@ -1028,11 +1054,15 @@ flashgetdisklabel(dev_t dev, struct flash_softc *sc,
 
 	/* Call the generic disklabel extraction routine. */
 	labeldev = flashlabeldev(dev);
+<<<<<<< HEAD
 	errstring = readdisklabel(labeldev, flashstrategy, lp, clp,
 	    spoofonly);
 	if (errstring != NULL) {
 		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
 	}
+=======
+	return readdisklabel(labeldev, flashstrategy, lp, spoofonly);
+>>>>>>> origin/master
 }
 
 /*
@@ -1053,13 +1083,13 @@ flashminphys(struct buf *bp)
 int
 flashread(dev_t dev, struct uio *uio, int ioflag)
 {
-	return physio(flashstrategy, NULL, dev, B_READ, flashminphys, uio);
+	return physio(flashstrategy, dev, B_READ, flashminphys, uio);
 }
 
 int
 flashwrite(dev_t dev, struct uio *uio, int ioflag)
 {
-	return physio(flashstrategy, NULL, dev, B_WRITE, flashminphys, uio);
+	return physio(flashstrategy, dev, B_WRITE, flashminphys, uio);
 }
 
 /*

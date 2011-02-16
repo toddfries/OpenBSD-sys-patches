@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: viasio.c,v 1.8 2006/12/23 17:46:39 deraadt Exp $	*/
+=======
+/*	$OpenBSD: viasio.c,v 1.12 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -176,7 +180,7 @@ viasio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = ia->ia_iot;
 	if (bus_space_map(sc->sc_iot, ia->ipa_io[0].base,
 	    VT1211_IOSIZE, 0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 
@@ -242,7 +246,11 @@ viasio_hm_init(struct viasio_softc *sc)
 	/* Map HM I/O space */
 	if (bus_space_map(sc->sc_iot, iobase, VT1211_HM_IOSIZE, 0,
 	    &sc->sc_hm_ioh)) {
+<<<<<<< HEAD
 		printf(": can't map I/O space");
+=======
+		printf(" can't map i/o space");
+>>>>>>> origin/master
 		return;
 	}
 
@@ -312,7 +320,7 @@ viasio_hm_init(struct viasio_softc *sc)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_hm_sensors[i]);
 	sensordev_install(&sc->sc_sensordev);
 	timeout_set(&sc->sc_hm_timo, viasio_hm_refresh, sc);
-	timeout_add(&sc->sc_hm_timo, hz);
+	timeout_add_sec(&sc->sc_hm_timo, 1);
 }
 
 void
@@ -425,7 +433,7 @@ viasio_hm_refresh(void *arg)
 		sc->sc_hm_sensors[VT1211_HMS_FAN2].flags |= SENSOR_FINVALID;
 	}
 
-	timeout_add(&sc->sc_hm_timo, hz);
+	timeout_add_sec(&sc->sc_hm_timo, 1);
 }
 
 void
@@ -473,7 +481,11 @@ viasio_wdg_init(struct viasio_softc *sc)
 	/* Map WDG I/O space */
 	if (bus_space_map(sc->sc_iot, iobase, VT1211_WDG_IOSIZE, 0,
 	    &sc->sc_wdg_ioh)) {
+<<<<<<< HEAD
 		printf(": can't map I/O space");
+=======
+		printf(" can't map i/o space");
+>>>>>>> origin/master
 		return;
 	}
 

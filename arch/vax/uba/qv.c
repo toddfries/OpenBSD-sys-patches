@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: qv.c,v 1.11 2004/02/19 18:46:18 miod Exp $	*/
+=======
+/*	$OpenBSD: qv.c,v 1.16 2010/11/18 21:15:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: qv.c,v 1.2 1996/09/02 06:44:28 mycroft Exp $	*/
 
 /*-
@@ -124,14 +128,10 @@
  */
 
 
-#include "qv.h"
-#if NQV > 0
-
 #include <machine/pte.h>
 
 #include <sys/param.h>
 #include <sys/conf.h>
-#include <sys/user.h>
 #include <vax/uba/qvioctl.h>
 #include <sys/tty.h>
 #include <sys/map.h>
@@ -153,7 +153,6 @@ struct	uba_device *qvinfo[NQV];
 
 struct	tty qv_tty[NQV*4];
 
-#define	nNQV  NQV
 int	nqv = NQV*4;
 
 /*
@@ -406,7 +405,7 @@ qvopen(dev, flag)
 	 * mouse channel. For the mouse we init the ring ptr's.
 	 */
 	if( QVCHAN(unit) != QVMOUSECHAN )
-		return ((*linesw[tp->t_line].l_open)(dev, tp));
+		return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 	else {
 		mouseon = 1;
 		/* set up event queue for later */
@@ -447,7 +446,7 @@ qvclose(dev, flag, mode, p)
 	 * otherwise clear the state flag, and put the keyboard into down/up.
 	 */
 	if (QVCHAN(unit) != QVMOUSECHAN) {
-		(*linesw[tp->t_line].l_close)(tp, flag);
+		(*linesw[tp->t_line].l_close)(tp, flag, p);
 		error = ttyclose(tp);
 	} else {
 		mouseon = 0;
@@ -1313,4 +1312,3 @@ int probed;
         qvaddr->qv_csr |= QV_VIDEO_ENA ;
 	return 1;
 }
-#endif

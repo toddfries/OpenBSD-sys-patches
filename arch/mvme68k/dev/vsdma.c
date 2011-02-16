@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsdma.c,v 1.11 2006/03/15 20:20:40 miod Exp $ */
+/*	$OpenBSD: vsdma.c,v 1.14 2010/06/28 18:31:01 krw Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -62,16 +62,9 @@ int	vs_eintr(void *);
 
 struct scsi_adapter vs_scsiswitch = {
 	vs_scsicmd,
-	vs_minphys,
+	scsi_minphys,
 	0,			/* no lun support */
 	0,			/* no lun support */
-};
-
-struct scsi_device vs_scsidev = {
-	NULL,		/* use default error handler */
-	NULL,		/* do not have a start function */
-	NULL,		/* have no async handler */
-	NULL,		/* Use default done routine */
 };
 
 struct cfattach vs_ca = {
@@ -110,7 +103,6 @@ vsattach(parent, self, auxp)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = 7;
 	sc->sc_link.adapter = &vs_scsiswitch;
-	sc->sc_link.device = &vs_scsidev;
 	sc->sc_link.luns = 1;
 	sc->sc_link.openings = 1;
 

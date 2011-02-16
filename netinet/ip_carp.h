@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_carp.h,v 1.21 2006/06/02 19:53:12 mpf Exp $	*/
+=======
+/*	$OpenBSD: ip_carp.h,v 1.28 2010/04/25 17:38:53 mpf Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -132,6 +136,7 @@ struct carpreq {
 	int		carpr_advskew;
 	int		carpr_advbase;
 	unsigned char	carpr_key[CARP_KEY_LEN];
+	struct in_addr	carpr_peer;
 };
 
 /*
@@ -155,12 +160,19 @@ struct carpreq {
 void		 carp_ifdetach (struct ifnet *);
 void		 carp_proto_input (struct mbuf *, ...);
 void		 carp_carpdev_state(void *);
-void		 carp_group_demote_adj(struct ifnet *, int);
+void		 carp_group_demote_adj(struct ifnet *, int, char *);
 int		 carp6_proto_input(struct mbuf **, int *, int);
+<<<<<<< HEAD
 int		 carp_iamatch(struct in_ifaddr *, u_char *,
 		     u_int32_t *, u_int32_t);
 int		 carp_iamatch6(struct ifnet *, struct ifaddr *);
 struct ifnet	*carp_ourether(void *, struct ether_header *, u_char, int);
+=======
+int		 carp_iamatch(struct in_ifaddr *, u_char *, u_int8_t **,
+		     u_int8_t **);
+int		 carp_iamatch6(struct ifnet *, u_char *, struct sockaddr_dl **);
+struct ifnet	*carp_ourether(void *, struct ether_header *, int);
+>>>>>>> origin/master
 int		 carp_input(struct mbuf *, u_int8_t *, u_int8_t *, u_int16_t);
 int		 carp_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);

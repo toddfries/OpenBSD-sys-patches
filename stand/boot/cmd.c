@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cmd.c,v 1.57 2004/06/26 17:50:47 tom Exp $	*/
+=======
+/*	$OpenBSD: cmd.c,v 1.60 2009/02/16 23:58:05 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -101,6 +105,17 @@ read_conf(void)
 #endif
 	int fd, rc = 0;
 
+<<<<<<< HEAD
+=======
+#ifdef CHECK_SKIP_CONF
+	if (CHECK_SKIP_CONF()) {
+		printf("boot.conf processing skipped at operator request\n");
+		cmd.timeout = 0;
+		return -1;		/* Pretend file wasn't found */
+	}
+#endif
+
+>>>>>>> origin/master
 	if ((fd = open(qualify(cmd.conf), 0)) < 0) {
 		if (errno != ENOENT && errno != ENXIO) {
 			printf("open(%s): %s\n", cmd.path, strerror(errno));

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ac97.h,v 1.18 2005/06/06 21:12:44 mjc Exp $	*/
+=======
+/*	$OpenBSD: ac97.h,v 1.25 2010/12/22 09:54:27 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Constantine Sapuntzakis
@@ -36,7 +40,12 @@ enum ac97_host_flags {
 	AC97_HOST_DONT_READ = 0x1,
 	AC97_HOST_DONT_READANY = 0x2,
 	AC97_HOST_SWAPPED_CHANNELS = 0x4,
+<<<<<<< HEAD
 	AC97_HOST_DONT_ENABLE_SPDIF = 0x8
+=======
+	AC97_HOST_ALC650_PIN47_IS_EAPD = 0x8,
+	AC97_HOST_VT1616_DYNEX = 0x10
+>>>>>>> origin/master
 };
 
 struct ac97_host_if {
@@ -48,6 +57,7 @@ struct ac97_host_if {
 	void (*reset)(void *arg);
 
 	enum ac97_host_flags (*flags)(void *arg);
+	void (*spdif_event)(void *arg, int);
 };
 
 /*
@@ -67,14 +77,33 @@ struct ac97_codec_if_vtbl {
 	 * after resume from a laptop suspend to disk.
 	 */
 	void (*restore_ports)(struct ac97_codec_if *addr);
+<<<<<<< HEAD
+=======
+
+	u_int16_t (*get_caps)(struct ac97_codec_if *codec_if);
+	int (*set_rate)(struct ac97_codec_if *codec_if, int target,
+	    u_long *rate);
+	void (*set_clock)(struct ac97_codec_if *codec_if,
+	    unsigned int clock);
+	void (*lock)(struct ac97_codec_if *codec_if);
+	void (*unlock)(struct ac97_codec_if *codec_if);
+>>>>>>> origin/master
 };
 
 struct ac97_codec_if {
+	struct ac97_softc *as;
+	void (*initfunc)(struct ac97_softc *, int);
 	struct ac97_codec_if_vtbl *vtbl;
 };
 
 int ac97_attach(struct ac97_host_if *);
+<<<<<<< HEAD
 int ac97_set_rate(struct ac97_codec_if *, struct audio_params *, int);
+=======
+int ac97_resume(struct ac97_host_if *, struct ac97_codec_if *);
+int ac97_set_rate(struct ac97_codec_if *, int, u_long *);
+void ac97_get_default_params(struct audio_params *);
+>>>>>>> origin/master
 
 #define	AC97_REG_RESET			0x00
 #define	AC97_CAPS_MICIN			0x0001
@@ -127,12 +156,21 @@ int ac97_set_rate(struct ac97_codec_if *, struct audio_params *, int);
 #define	AC97_EXT_AUDIO_DRA		0x0002
 #define	AC97_EXT_AUDIO_SPDIF		0x0004
 #define	AC97_EXT_AUDIO_VRM		0x0008
-#define	AC97_EXT_AUDIO_DSA0		0x0010
-#define	AC97_EXT_AUDIO_DSA1		0x0020
+#define	AC97_EXT_AUDIO_DSA_MASK		0x0030
+#define	AC97_EXT_AUDIO_DSA00		0x0000
+#define	AC97_EXT_AUDIO_DSA01		0x0010
+#define	AC97_EXT_AUDIO_DSA10		0x0020
+#define	AC97_EXT_AUDIO_DSA11		0x0030
+#define	AC97_EXT_AUDIO_SPSA_MASK	0x0030
+#define	AC97_EXT_AUDIO_SPSA34		0x0000
+#define	AC97_EXT_AUDIO_SPSA78		0x0010
+#define	AC97_EXT_AUDIO_SPSA69		0x0020
+#define	AC97_EXT_AUDIO_SPSAAB		0x0030
 #define	AC97_EXT_AUDIO_CDAC		0x0040
 #define	AC97_EXT_AUDIO_SDAC		0x0080
 #define	AC97_EXT_AUDIO_LDAC		0x0100
 #define	AC97_EXT_AUDIO_AMAP		0x0200
+#define AC97_EXT_AUDIO_SPCV		0x0400
 #define	AC97_EXT_AUDIO_REV_11		0x0000
 #define	AC97_EXT_AUDIO_REV_22		0x0400
 #define	AC97_EXT_AUDIO_REV_23		0x0800
@@ -149,6 +187,18 @@ int ac97_set_rate(struct ac97_codec_if *, struct audio_params *, int);
 #define	AC97_REG_SURROUND_VOLUME	0x38
 #define	AC97_REG_SPDIF_CTRL		0x3a
 #define	AC97_REG_SPDIF_CTRL_BITS	"\02\01pro\02/audio\03copy\04pre\014l\017drs\020valid"
+#define	AC97_SPDIF_V			0x8000
+#define	AC97_SPDIF_DRS			0x4000
+#define	AC97_SPDIF_SPSR_MASK		0x3000
+#define	AC97_SPDIF_SPSR_44K		0x0000
+#define	AC97_SPDIF_SPSR_48K		0x2000
+#define	AC97_SPDIF_SPSR_32K		0x1000
+#define	AC97_SPDIF_L			0x0800
+#define	AC97_SPDIF_CC_MASK		0x07f0
+#define	AC97_SPDIF_PRE			0x0008
+#define	AC97_SPDIF_COPY			0x0004
+#define	AC97_SPDIF_NOAUDIO		0x0002
+#define	AC97_SPDIF_PRO			0x0001
 
 #define	AC97_REG_VENDOR_ID1		0x7c
 #define	AC97_REG_VENDOR_ID2		0x7e
@@ -187,3 +237,20 @@ int ac97_set_rate(struct ac97_codec_if *, struct audio_params *, int);
 #define AC97_CX_MASK		0x03
 #define AC97_CX_COPYRIGHT	0x04
 #define AC97_CX_SPDIFEN		0x08
+<<<<<<< HEAD
+=======
+
+
+/* VIA codec specific data */
+#define AC97_VT_REG_TEST	0x5a
+#define AC97_VT_LVL		0x8000	/* hp controls rear */
+#define AC97_VT_LCTF		0x1000	/* lfe/center to front downmix */
+#define AC97_VT_STF		0x0800	/* surround to front downmix */
+#define AC97_VT_BPDC		0x0400	/* enable DC-offset cancellation */
+#define AC97_VT_DC		0x0200	/* DC offset cancellation capable */
+
+#define AC97_IS_FIXED_RATE(codec)	!((codec)->vtbl->get_caps(codec) & \
+    AC97_EXT_AUDIO_VRA)
+#define AC97_BITS_6CH	(AC97_EXT_AUDIO_SDAC | AC97_EXT_AUDIO_CDAC | \
+    AC97_EXT_AUDIO_LDAC)
+>>>>>>> origin/master

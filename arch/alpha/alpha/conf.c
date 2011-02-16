@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.50 2004/06/18 20:35:50 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.66 2011/01/14 19:04:08 jasper Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@ bdev_decl(fd);
 #include "st.h"
 #include "cd.h"
 #include "sd.h"
-#include "ss.h"
 #include "uk.h"
 #include "vnd.h"
 #include "raid.h"
@@ -78,7 +77,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 15 */
 	bdev_disk_init(NRAID,raid),	/* 16 */
 };
-int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 #define	mmread  mmrw
 #define	mmwrite mmrw
@@ -91,6 +90,7 @@ cdev_decl(mm);
 #include "scc.h"
 cdev_decl(scc);
 #include "audio.h"
+#include "video.h"
 #include "com.h"
 cdev_decl(com);
 #include "wsdisplay.h"
@@ -111,9 +111,9 @@ cdev_decl(wd);
 cdev_decl(fd);
 #include "cy.h"
 cdev_decl(cy);
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -122,22 +122,27 @@ cdev_decl(xfs_dev);
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
+#include "urio.h"
 #include "ucom.h"
+#include "uscanner.h"
 #include "pf.h"
 #ifdef USER_PCICONF
 #include "pci.h"
 cdev_decl(pci);
 #endif
+#include "bthub.h"
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),		/* 3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
@@ -166,7 +171,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD,wskbd),	/* 29: /dev/kbd XXX */
 	cdev_mouse_init(NWSMOUSE,wsmouse),	/* 30: /dev/mouse XXX */
 	cdev_lpt_init(NLPT,lpt),	/* 31: parallel printer */
-	cdev_scanner_init(NSS,ss),	/* 32: SCSI scanner */
+	cdev_notdef(),			/* 32: */
 	cdev_uk_init(NUK,uk),		/* 33: SCSI unknown */
 	cdev_random_init(1,random),	/* 34: random data source */
 	cdev_pf_init(NPF, pf),		/* 35: packet filter */
@@ -178,15 +183,15 @@ struct cdevsw	cdevsw[] =
 	cdev_midi_init(NMIDI,midi),     /* 41: MIDI I/O */
         cdev_midi_init(NSEQUENCER,sequencer),   /* 42: sequencer I/O */
 	cdev_disk_init(NRAID,raid),	/* 43: RAIDframe disk driver */
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_usb_init(NUSB,usb),	/* 45: USB controller */
 	cdev_usbdev_init(NUHID,uhid),	/* 46: USB generic HID */
 	cdev_ulpt_init(NULPT,ulpt),	/* 47: USB printer */
 	cdev_usbdev_init(NUGEN,ugen),	/* 48: USB generic driver */
 	cdev_tty_init(NUCOM, ucom),	/* 49: USB tty */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -202,8 +207,15 @@ struct cdevsw	cdevsw[] =
 	cdev_crypto_init(NCRYPTO,crypto), /* 57: /dev/crypto */
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
+	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
+	cdev_vscsi_init(NVSCSI, vscsi),	/* 61: vscsi */
+	cdev_bthub_init(NBTHUB, bthub), /* 62: bthub */
+	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
+	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
+	cdev_usbdev_init(NUSCANNER,uscanner),	/* 66: USB scanners */
 };
-int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 2; 	/* major device number of memory special file */
 
@@ -302,4 +314,4 @@ int chrtoblktbl[] = {
 	/* 50 */	NODEV,
 	/* 51 */	NODEV,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);

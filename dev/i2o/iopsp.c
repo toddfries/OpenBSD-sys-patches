@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: iopsp.c,v 1.8 2005/11/19 02:18:00 pedro Exp $	*/
+=======
+/*	$OpenBSD: iopsp.c,v 1.18 2010/06/28 18:31:01 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -52,7 +49,7 @@
 #include <sys/endian.h>
 #include <sys/malloc.h>
 #include <sys/scsiio.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 
 #include <machine/bus.h>
 
@@ -78,15 +75,11 @@ struct cfattach iopsp_ca = {
 	sizeof(struct iopsp_softc), iopsp_match, iopsp_attach
 };
 
-int	iopsp_scsi_cmd(struct scsi_xfer *);
-void	iopspminphys(struct buf *bp);
+void	iopsp_scsi_cmd(struct scsi_xfer *);
+void	iopspminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter iopsp_switch = {
 	iopsp_scsi_cmd, iopspminphys, 0, 0,
-};
-
-struct scsi_device iopsp_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void	iopsp_adjqparam(struct device *, int);
@@ -196,7 +189,6 @@ iopsp_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &iopsp_switch;
 	sc->sc_link.adapter_target = letoh32(param.p.sci.initiatorid);
-	sc->sc_link.device = &iopsp_dev;
 	sc->sc_link.openings = 1;
 	sc->sc_link.adapter_buswidth = fcal?
 	    IOPSP_MAX_FCAL_TARGET : param.p.sci.maxdatawidth;
@@ -380,13 +372,7 @@ iopsp_rescan(struct iopsp_softc *sc)
 
 	iop = (struct iop_softc *)sc->sc_dv.dv_parent;
 
-	rv = lockmgr(&iop->sc_conflock, LK_EXCLUSIVE, NULL);
-	if (rv != 0) {
-#ifdef I2ODEBUG
-		printf("iopsp_rescan: unable to acquire lock\n");
-#endif
-		return (rv);
-	}
+	rw_enter_write(&iop->sc_conflock);
 
 	im = iop_msg_alloc(iop, &sc->sc_ii, IM_WAIT);
 
@@ -404,13 +390,12 @@ iopsp_rescan(struct iopsp_softc *sc)
 	if ((rv = iop_lct_get(iop)) == 0)
 		rv = iopsp_reconfig(&sc->sc_dv);
 
-	lockmgr(&iop->sc_conflock, LK_RELEASE, NULL);
+	rw_exit_write(&iop->sc_conflock);
 	return (rv);
 }
 
 void
-iopspminphys(bp)
-	struct buf *bp;
+iopspminphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > IOP_MAX_XFER)
 		bp->b_bcount = IOP_MAX_XFER;
@@ -420,7 +405,7 @@ iopspminphys(bp)
 /*
  * Start a SCSI command.
  */
-int
+void
 iopsp_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -436,7 +421,11 @@ iopsp_scsi_cmd(xs)
 	if (tid == IOPSP_TID_ABSENT || tid == IOPSP_TID_INUSE) {
 		xs->error = XS_SELTIMEOUT;
 		scsi_done(xs);
+<<<<<<< HEAD
 		return (COMPLETE);
+=======
+		return;
+>>>>>>> origin/master
 	}
 
 	SC_DEBUG(xs->sc_link, SDEV_DB2, ("iopsp_scsi_cmd: run_xfer\n"));
@@ -454,7 +443,11 @@ iopsp_scsi_cmd(xs)
 			xs->error = XS_NOERROR;
 
 		scsi_done(xs);
+<<<<<<< HEAD
 		return (COMPLETE);
+=======
+		return;
+>>>>>>> origin/master
 	}
 
 #if defined(I2ODEBUG) || defined(SCSIDEBUG)
@@ -499,7 +492,11 @@ iopsp_scsi_cmd(xs)
 			xs->error = XS_DRIVER_STUFFUP;
 			iop_msg_free(iop, im);
 			scsi_done(xs);
+<<<<<<< HEAD
 			return (COMPLETE);
+=======
+			return;
+>>>>>>> origin/master
 		}
 		if ((xs->flags & SCSI_DATA_IN) == 0)
 			mf->flags |= I2O_SCB_FLAG_XFER_TO_DEVICE;
@@ -520,10 +517,11 @@ iopsp_scsi_cmd(xs)
 		iop_msg_free(iop, im);
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
+<<<<<<< HEAD
 		return (COMPLETE);
+=======
+>>>>>>> origin/master
 	}
-
-	return (xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED);
 }
 
 #ifdef notyet

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: sys_process.c,v 1.38 2007/03/15 10:22:30 art Exp $	*/
+=======
+/*	$OpenBSD: sys_process.c,v 1.47 2010/07/26 01:56:27 guenther Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -51,13 +55,13 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/exec.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
-#include <sys/user.h>
 #include <sys/sched.h>
 
 #include <sys/mount.h>
@@ -66,6 +70,8 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/reg.h>
+
+int	process_auxv_offset(struct proc *, struct proc *, struct uio *);
 
 #ifdef PTRACE
 /*
@@ -164,6 +170,14 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 */
 		if ((t->p_pid == 1) && (securelevel > -1))
 			return (EPERM);
+
+		/*
+		 *	(6) it's an ancestor of the current process and
+		 *	    not init (because that would create a loop in
+		 *	    the process graph).
+		 */
+		if (t->p_pid != 1 && inferior(p->p_p, t->p_p))
+			return (EINVAL);
 		break;
 
 	case  PT_READ_I:
@@ -207,7 +221,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		/*
 		 *	(2) it's not being traced by _you_, or
 		 */
-		if (t->p_pptr != p)
+		if (t->p_p->ps_pptr != p->p_p)
 			return (EBUSY);
 
 		/*
@@ -232,7 +246,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 	case  PT_TRACE_ME:
 		/* Just set the trace flag. */
 		atomic_setbits_int(&t->p_flag, P_TRACED);
-		t->p_oppid = t->p_pptr->p_pid;
+		t->p_oppid = t->p_p->ps_pptr->ps_pid;
 		if (t->p_ptstat == NULL)
 			t->p_ptstat = malloc(sizeof(*t->p_ptstat),
 			    M_SUBPROC, M_WAITOK);
@@ -250,7 +264,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		iov.iov_len = sizeof(int);
 		uio.uio_iov = &iov;
 		uio.uio_iovcnt = 1;
-		uio.uio_offset = (off_t)(long)SCARG(uap, addr);
+		uio.uio_offset = (off_t)(vaddr_t)SCARG(uap, addr);
 		uio.uio_resid = sizeof(int);
 		uio.uio_segflg = UIO_SYSSPACE;
 		uio.uio_rw = write ? UIO_WRITE : UIO_READ;
@@ -268,7 +282,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		iov.iov_len = piod.piod_len;
 		uio.uio_iov = &iov;
 		uio.uio_iovcnt = 1;
-		uio.uio_offset = (off_t)(long)piod.piod_offs;
+		uio.uio_offset = (off_t)(vaddr_t)piod.piod_offs;
 		uio.uio_resid = piod.piod_len;
 		uio.uio_segflg = UIO_USERSPACE;
 		uio.uio_procp = p;
@@ -288,6 +302,19 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		case PIOD_WRITE_D:
 			req = PT_WRITE_D;
 			uio.uio_rw = UIO_WRITE;
+			break;
+		case PIOD_READ_AUXV:
+			req = PT_READ_D;
+			uio.uio_rw = UIO_READ;
+			temp = t->p_emul->e_arglen * sizeof(char *);
+			if (uio.uio_offset > temp)
+				return (EIO);
+			if (uio.uio_resid > temp - uio.uio_offset)
+				uio.uio_resid = temp - uio.uio_offset;
+			piod.piod_len = iov.iov_len = uio.uio_resid;
+			error = process_auxv_offset(p, t, &uio);
+			if (error)
+				return (error);
 			break;
 		default:
 			return (EINVAL);
@@ -364,11 +391,11 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 #endif
 
 		/* give process back to original parent or init */
-		if (t->p_oppid != t->p_pptr->p_pid) {
-			struct proc *pp;
+		if (t->p_oppid != t->p_p->ps_pptr->ps_pid) {
+			struct process *ppr;
 
-			pp = pfind(t->p_oppid);
-			proc_reparent(t, pp ? pp : initproc);
+			ppr = prfind(t->p_oppid);
+			proc_reparent(t->p_p, ppr ? ppr : initproc->p_p);
 		}
 
 		/* not being traced any more */
@@ -409,9 +436,9 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 * Stop the target.
 		 */
 		atomic_setbits_int(&t->p_flag, P_TRACED);
-		t->p_oppid = t->p_pptr->p_pid;
-		if (t->p_pptr != p)
-			proc_reparent(t, p);
+		t->p_oppid = t->p_p->ps_pptr->ps_pid;
+		if (t->p_p->ps_pptr != p->p_p)
+			proc_reparent(t->p_p, p->p_p);
 		if (t->p_ptstat == NULL)
 			t->p_ptstat = malloc(sizeof(*t->p_ptstat),
 			    M_SUBPROC, M_WAITOK);
@@ -573,6 +600,7 @@ process_checkioperm(struct proc *p, struct proc *t)
 int
 process_domem(struct proc *curp, struct proc *p, struct uio *uio, int req)
 {
+	struct vmspace *vm;
 	int error;
 	vaddr_t addr;
 	vsize_t len;
@@ -588,13 +616,57 @@ process_domem(struct proc *curp, struct proc *p, struct uio *uio, int req)
 	if ((p->p_flag & P_WEXIT) || (p->p_vmspace->vm_refcnt < 1)) 
 		return(EFAULT);
 	addr = uio->uio_offset;
-	p->p_vmspace->vm_refcnt++;  /* XXX */
-	error = uvm_io(&p->p_vmspace->vm_map, uio,
+
+	vm = p->p_vmspace;
+	vm->vm_refcnt++;
+
+	error = uvm_io(&vm->vm_map, uio,
 	    (req == PT_WRITE_I) ? UVM_IO_FIXPROT : 0);
-	uvmspace_free(p->p_vmspace);
+
+	uvmspace_free(vm);
 
 	if (error == 0 && req == PT_WRITE_I)
 		pmap_proc_iflush(p, addr, len);
 
 	return (error);
 }
+
+#ifdef PTRACE
+int
+process_auxv_offset(struct proc *curp, struct proc *p, struct uio *uiop)
+{
+	struct ps_strings pss;
+	struct iovec iov;
+	struct uio uio;
+	int error;
+
+	iov.iov_base = &pss;
+	iov.iov_len = sizeof(pss);
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;	
+	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
+	uio.uio_resid = sizeof(pss);
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_READ;
+	uio.uio_procp = curp;
+
+	if ((error = uvm_io(&p->p_vmspace->vm_map, &uio, 0)) != 0)
+		return (error);
+
+	if (pss.ps_envstr == NULL)
+		return (EIO);
+
+	uiop->uio_offset += (off_t)(vaddr_t)(pss.ps_envstr + pss.ps_nenvstr + 1);
+#ifdef MACHINE_STACK_GROWS_UP
+	if (uiop->uio_offset < (off_t)(vaddr_t)PS_STRINGS)
+		return (EIO);
+#else
+	if (uiop->uio_offset > (off_t)(vaddr_t)PS_STRINGS)
+		return (EIO);
+	if ((uiop->uio_offset + uiop->uio_resid) > (off_t)(vaddr_t)PS_STRINGS)
+		uiop->uio_resid = (off_t)(vaddr_t)PS_STRINGS - uiop->uio_offset;
+#endif
+
+	return (0);
+}
+#endif

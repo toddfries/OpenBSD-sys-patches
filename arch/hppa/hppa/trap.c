@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.97 2007/03/05 17:13:59 mickey Exp $	*/
+/*	$OpenBSD: trap.c,v 1.113 2011/01/23 15:09:12 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -36,8 +36,6 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 
-#include <net/netisr.h>
-
 #include "systrace.h"
 #include <dev/systrace.h>
 
@@ -45,15 +43,24 @@
 
 #include <machine/autoconf.h>
 
-#include <machine/db_machdep.h>	/* XXX always needed for inst_store() */
 #ifdef DDB
 #ifdef TRAPDEBUG
 #include <ddb/db_output.h>
+#else
+#include <machine/db_machdep.h>
 #endif
 #endif
 
+static __inline int inst_store(u_int ins) {
+	return (ins & 0xf0000000) == 0x60000000 ||	/* st */
+	       (ins & 0xf4000200) == 0x24000200 ||	/* fst/cst */
+	       (ins & 0xfc000200) == 0x0c000200 ||	/* stby */
+	       (ins & 0xfc0003c0) == 0x0c0001c0;	/* ldcw */
+}
+
+int	pcxs_unaligned(u_int opcode, vaddr_t va);
 #ifdef PTRACE
-void ss_clear_breakpoints(struct proc *p);
+void	ss_clear_breakpoints(struct proc *p);
 #endif
 
 /* single-step breakpoint */
@@ -92,8 +99,6 @@ const char *trap_type[] = {
 };
 int trap_types = sizeof(trap_type)/sizeof(trap_type[0]);
 
-int want_resched, astpending;
-
 #define	frame_regmap(tf,r)	(((u_int *)(tf))[hppa_regmap[(r)]])
 u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_pad[0]) / 4,	/* r0 XXX */
@@ -130,18 +135,22 @@ u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 4,
 };
 
+void	userret(struct proc *p);
+
 void
 userret(struct proc *p)
 {
 	int sig;
 
-	if (astpending) {
-		astpending = 0;
+	if (p->p_md.md_astpending) {
+		p->p_md.md_astpending = 0;
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
+			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
+			KERNEL_PROC_UNLOCK(p);
 		}
-		if (want_resched)
+		if (curcpu()->ci_want_resched)
 			preempt(NULL);
 	}
 
@@ -152,9 +161,7 @@ userret(struct proc *p)
 }
 
 void
-trap(type, frame)
-	int type;
-	struct trapframe *frame;
+trap(int type, struct trapframe *frame)
 {
 	struct proc *p = curproc;
 	vaddr_t va;
@@ -168,7 +175,7 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	trapnum = type & ~T_USER;
@@ -259,7 +266,7 @@ trap(type, frame)
 			return;
 		}
 #else
-		if (type == T_DATALIGN)
+		if (type == T_DATALIGN || type == T_DPROT)
 			panic ("trap: %s at 0x%x", tts, va);
 		else
 			panic ("trap: no debugger for \"%s\" (%d)", tts, type);
@@ -275,7 +282,9 @@ trap(type, frame)
 			code = TRAP_TRACE;
 #endif
 		/* pass to user debugger */
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGTRAP, type &~ T_USER, code, sv);
+		KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 
@@ -284,14 +293,20 @@ trap(type, frame)
 		ss_clear_breakpoints(p);
 
 		/* pass to user debugger */
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_TRACE, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 #endif
 
 	case T_EXCEPTION | T_USER: {
-		u_int64_t *fpp = (u_int64_t *)frame->tf_cr30;
+		struct hppa_fpstate *hfp;
+		u_int64_t *fpp;
 		u_int32_t *pex;
 		int i, flt;
+
+		hfp = (struct hppa_fpstate *)frame->tf_cr30;
+		fpp = (u_int64_t *)&hfp->hfp_regs;
 
 		pex = (u_int32_t *)&fpp[0];
 		for (i = 0, pex++; i < 7 && !*pex; i++, pex++);
@@ -318,11 +333,11 @@ trap(type, frame)
 		}
 		/* reset the trap flag, as if there was none */
 		fpp[0] &= ~(((u_int64_t)HPPA_FPU_T) << 32);
-		/* flush out, since load is done from phys, only 4 regs */
-		fdcache(HPPA_SID_KERNEL, (vaddr_t)fpp, 8 * 4);
 
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, flt, sv);
+		KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 
@@ -332,40 +347,67 @@ trap(type, frame)
 
 	case T_EMULATION | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_COPROC, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_OVERFLOW | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTOVF, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_CONDITION | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTDIV, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_PRIV_OP | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVOPC, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_PRIV_REG | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVREG, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 		/* these should never got here */
 	case T_HIGHERPL | T_USER:
 	case T_LOWERPL | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
-	case T_IPROT | T_USER:
+	/*
+	 * On PCXS processors, traps T_DATACC, T_DATAPID and T_DATALIGN
+	 * are shared.  We need to sort out the unaligned access situation
+	 * first, before handling this trap as T_DATACC.
+	 */
 	case T_DPROT | T_USER:
+		if (cpu_type == hpcxs) {
+			if (pcxs_unaligned(opcode, va))
+				goto datalign_user;
+			else
+				goto datacc;
+		}
+		/* FALLTHROUGH */
+
+	case T_IPROT | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_ITLBMISSNA:
@@ -393,6 +435,11 @@ trap(type, frame)
 				pl = frame_regmap(frame,
 				    (opcode >> 16) & 0x1f) & 3;
 
+			if (type & T_USER)
+				KERNEL_PROC_LOCK(p);
+			else
+				KERNEL_LOCK();
+
 			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
 			    (frame->tf_iioq_head & 3) != pl ||
 			    (type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
@@ -401,9 +448,16 @@ trap(type, frame)
 				frame_regmap(frame, opcode & 0x1f) = 0;
 				frame->tf_ipsw |= PSL_N;
 			}
+
+			if (type & T_USER)
+				KERNEL_PROC_UNLOCK(p);
+			else
+				KERNEL_UNLOCK();
 		} else if (type & T_USER) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLTRP, sv);
+			KERNEL_PROC_UNLOCK(p);
 		} else
 			panic("trap: %s @ 0x%x:0x%x for 0x%x:0x%x irr 0x%08x",
 			    tts, frame->tf_iisq_head, frame->tf_iioq_head,
@@ -414,6 +468,7 @@ trap(type, frame)
 	case T_TLB_DIRTY | T_USER:
 	case T_DATACC:
 	case T_DATACC | T_USER:
+datacc:
 		fault = VM_FAULT_PROTECT;
 	case T_ITLBMISS:
 	case T_ITLBMISS | T_USER:
@@ -440,9 +495,16 @@ trap(type, frame)
 		if ((type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
 		   (type & T_USER && map->pmap->pm_space != space)) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
+			KERNEL_PROC_UNLOCK(p);
 			break;
 		}
+
+		if (type & T_USER)
+			KERNEL_PROC_LOCK(p);
+		else
+			KERNEL_LOCK();
 
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
@@ -461,12 +523,19 @@ trap(type, frame)
 				ret = EFAULT;
 		}
 
+		if (type & T_USER)
+			KERNEL_PROC_UNLOCK(p);
+		else
+			KERNEL_UNLOCK();
+
 		if (ret != 0) {
 			if (type & T_USER) {
 				sv.sival_int = va;
+				KERNEL_PROC_LOCK(p);
 				trapsignal(p, SIGSEGV, vftype,
 				    ret == EACCES? SEGV_ACCERR : SEGV_MAPERR,
 				    sv);
+				KERNEL_PROC_UNLOCK(p);
 			} else {
 				if (p && p->p_addr->u_pcb.pcb_onfault) {
 					frame->tf_iioq_tail = 4 +
@@ -485,8 +554,11 @@ trap(type, frame)
 		break;
 
 	case T_DATALIGN | T_USER:
+datalign_user:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGBUS, vftype, BUS_ADRALN, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_INTERRUPT:
@@ -508,13 +580,28 @@ trap(type, frame)
 		}
 		if (type & T_USER) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGILL, type &~ T_USER, ILL_ILLOPC, sv);
+			KERNEL_PROC_UNLOCK(p);
 			break;
 		}
 		/* FALLTHROUGH */
 
-	case T_LOWERPL:
+	/*
+	 * On PCXS processors, traps T_DATACC, T_DATAPID and T_DATALIGN
+	 * are shared.  We need to sort out the unaligned access situation
+	 * first, before handling this trap as T_DATACC.
+	 */
 	case T_DPROT:
+		if (cpu_type == hpcxs) {
+			if (pcxs_unaligned(opcode, va))
+				goto dead_end;
+			else
+				goto datacc;
+		}
+		/* FALLTHROUGH to unimplemented */
+
+	case T_LOWERPL:
 	case T_IPROT:
 	case T_OVERFLOW:
 	case T_HIGHERPL:
@@ -524,9 +611,6 @@ trap(type, frame)
 	case T_PAGEREF:
 	case T_DATAPID:
 	case T_DATAPID | T_USER:
-		if (0 /* T-chip */) {
-			break;
-		}
 		/* FALLTHROUGH to unimplemented */
 	default:
 #if 0
@@ -537,13 +621,13 @@ if (kdb_trap (type, va, frame))
 	}
 
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl)
+	if (curcpu()->ci_cpl != oldcpl)
 		printf("WARNING: SPL (%d) NOT LOWERED ON "
-		    "TRAP (%d) EXIT\n", cpl, trapnum);
+		    "TRAP (%d) EXIT\n", curcpu()->ci_cpl, trapnum);
 #endif
 
 	if (trapnum != T_INTERRUPT)
-		splx(cpl);	/* process softints */
+		splx(curcpu()->ci_cpl);	/* process softints */
 
 	/*
 	 * in case we were interrupted from the syscall gate page
@@ -557,8 +641,7 @@ if (kdb_trap (type, va, frame))
 }
 
 void
-child_return(arg)
-	void *arg;
+child_return(void *arg)
 {
 	struct proc *p = (struct proc *)arg;
 	struct trapframe *tf = p->p_md.md_regs;
@@ -570,17 +653,25 @@ child_return(arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_t1 = 0;		/* errno */
 
+	KERNEL_PROC_UNLOCK(p);
+
 	userret(p);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p,
 		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 }
 
 #ifdef PTRACE
 
 #include <sys/ptrace.h>
+
+int	ss_get_value(struct proc *p, vaddr_t addr, u_int *value);
+int	ss_put_value(struct proc *p, vaddr_t addr, u_int value);
 
 int
 ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
@@ -636,14 +727,19 @@ process_sstep(struct proc *p, int sstep)
 
 	ss_clear_breakpoints(p);
 
-	/* Don't touch the syscall gateway page. */
-	if (sstep == 0 ||
-	    (p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE) {
+	if (sstep == 0) {
 		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
 		return (0);
 	}
 
-	p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
+	/*
+	 * Don't touch the syscall gateway page.  Instead, insert a
+	 * breakpoint where we're supposed to return.
+	 */
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE)
+		p->p_md.md_bpva = p->p_md.md_regs->tf_r31 & ~HPPA_PC_PRIV_MASK;
+	else
+		p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
 
 	/*
 	 * Insert two breakpoint instructions; the first one might be
@@ -665,11 +761,17 @@ process_sstep(struct proc *p, int sstep)
 	if (error)
 		return (error);
 
-	p->p_md.md_regs->tf_ipsw |= PSL_T;
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) != SYSCALLGATE)
+		p->p_md.md_regs->tf_ipsw |= PSL_T;
+	else
+		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
+
 	return (0);
 }
 
 #endif	/* PTRACE */
+
+void	syscall(struct trapframe *frame);
 
 /*
  * call actual syscall routine
@@ -682,7 +784,7 @@ syscall(struct trapframe *frame)
 	int retq, nsys, code, argsize, argoff, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	uvmexp.syscalls++;
@@ -777,11 +879,16 @@ syscall(struct trapframe *frame)
 	}
 
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, args);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
+	if (KTRPOINT(p, KTR_SYSCALL)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsyscall(p, code, callp->sy_argsize, args);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 	if (error)
 		goto bad;
@@ -789,11 +896,21 @@ syscall(struct trapframe *frame)
 	rval[0] = 0;
 	rval[1] = frame->tf_ret1;
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
+		KERNEL_PROC_LOCK(p);
 		oerror = error = systrace_redirect(code, p, args, rval);
-	else
+		KERNEL_PROC_UNLOCK(p);
+	} else
 #endif
+	{
+		int nolock = (callp->sy_flags & SY_NOLOCK);
+		if (!nolock)
+			KERNEL_PROC_LOCK(p);
 		oerror = error = (*callp->sy_call)(p, args, rval);
+		if (!nolock)
+			KERNEL_PROC_UNLOCK(p);
+
+	}
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];
@@ -815,20 +932,102 @@ syscall(struct trapframe *frame)
 		break;
 	}
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_ret(p, code, oerror, rval);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 	userret(p);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p, code, oerror, rval[0]);
-#endif
-#ifdef DIAGNOSTIC
-	if (cpl != oldcpl) {
-		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
-		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
-		    cpl, code, args[0], args[1], args[2], p->p_pid);
-		cpl = oldcpl;
+		KERNEL_PROC_UNLOCK(p);
 	}
 #endif
-	splx(cpl);	/* process softints */
+#ifdef DIAGNOSTIC
+	if (curcpu()->ci_cpl != oldcpl) {
+		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
+		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
+		    curcpu()->ci_cpl, code, args[0], args[1], args[2],
+		    p->p_pid);
+		curcpu()->ci_cpl = oldcpl;
+	}
+#endif
+	splx(curcpu()->ci_cpl);	/* process softints */
+}
+
+/*
+ * Decide if opcode `opcode' accessing virtual address `va' caused an
+ * unaligned trap. Returns zero if the access is correctly aligned.
+ * Used on PCXS processors to sort out exception causes.
+ */
+int
+pcxs_unaligned(u_int opcode, vaddr_t va)
+{
+	u_int mbz_bits;
+
+	/*
+	 * Exit early if the va is obviously aligned enough.
+	 */
+	if ((va & 0x0f) == 0)
+		return 0;
+
+	mbz_bits = 0;
+
+	/*
+	 * Only load and store instructions can cause unaligned access.
+	 * There are three opcode patterns to look for:
+	 * - canonical load/store
+	 * - load/store short or indexed
+	 * - coprocessor load/store
+	 */
+
+	if ((opcode & 0xd0000000) == 0x40000000) {
+		switch ((opcode >> 26) & 0x03) {
+		case 0x00:	/* ldb, stb */
+			mbz_bits = 0x00;
+			break;
+		case 0x01:	/* ldh, sth */
+			mbz_bits = 0x01;
+			break;
+		case 0x02:	/* ldw, stw */
+		case 0x03:	/* ldwm, stwm */
+			mbz_bits = 0x03;
+			break;
+		}
+	} else
+
+	if ((opcode & 0xfc000000) == 0x0c000000) {
+		switch ((opcode >> 6) & 0x0f) {
+		case 0x01:	/* ldhx, ldhs */
+			mbz_bits = 0x01;
+			break;
+		case 0x02:	/* ldwx, ldws */
+			mbz_bits = 0x03;
+			break;
+		case 0x07:	/* ldcwx, ldcws */
+			mbz_bits = 0x0f;
+			break;
+		case 0x09:
+			if ((opcode & (1 << 12)) != 0)	/* sths */
+				mbz_bits = 0x01;
+			break;
+		case 0x0a:
+			if ((opcode & (1 << 12)) != 0)	/* stws */
+				mbz_bits = 0x03;
+			break;
+		}
+	} else
+
+	if ((opcode & 0xf4000000) == 0x24000000) {
+		if ((opcode & (1 << 27)) != 0) {
+			/* cldwx, cstwx, cldws, cstws */
+			mbz_bits = 0x03;
+		} else {
+			/* clddx, cstdx, cldds, cstds */
+			mbz_bits = 0x07;
+		}
+	}
+
+	return (va & mbz_bits);
 }

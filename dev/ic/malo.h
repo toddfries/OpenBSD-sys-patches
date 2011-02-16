@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: malo.h,v 1.8 2006/11/07 21:39:32 mglocker Exp $ */
+=======
+/*	$OpenBSD: malo.h,v 1.10 2010/08/08 16:36:33 deraadt Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -124,8 +128,11 @@ struct malo_softc {
 #define sc_txtap	sc_txtapu.th
 	int		sc_txtap_len;
 #endif
+	struct workq_task	sc_resume_wqt;
 };
 
 int malo_intr(void *arg);
 int malo_attach(struct malo_softc *sc);
 int malo_detach(void *arg);
+int malo_init(struct ifnet *);
+void malo_stop(struct malo_softc *);

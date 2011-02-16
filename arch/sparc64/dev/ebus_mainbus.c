@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ebus_mainbus.c,v 1.2 2007/04/05 19:14:00 kettenis Exp $	*/
+=======
+/*	$OpenBSD: ebus_mainbus.c,v 1.7 2010/11/11 17:58:23 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -173,8 +177,12 @@ ebus_alloc_bus_tag(struct ebus_softc *sc, bus_space_tag_t parent)
 	if (bt == NULL)
 		panic("could not allocate ebus bus tag");
 
+<<<<<<< HEAD
 	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dev.dv_xname);
+=======
+	strlcpy(bt->name, sc->sc_dev.dv_xname, sizeof(bt->name));
+>>>>>>> origin/master
 	bt->cookie = sc;
 	bt->parent = parent;
 	bt->asi = parent->asi;

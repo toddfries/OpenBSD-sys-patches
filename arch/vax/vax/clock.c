@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: clock.c,v 1.18 2004/07/07 23:10:46 deraadt Exp $	 */
+=======
+/*	$OpenBSD: clock.c,v 1.22 2010/09/20 06:33:48 matthew Exp $	 */
+>>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.35 2000/06/04 06:16:58 matt Exp $	 */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.
@@ -43,9 +47,6 @@
 #include <machine/clock.h>
 #include <machine/cpu.h>
 #include <machine/uvax.h>
-
-int	yeartonum(int);
-int	numtoyear(int);
 
 struct evcount clock_intrcnt;
 
@@ -180,7 +181,7 @@ cpu_initclocks()
 	if (vax_boardtype != VAX_BTYP_VXT)
 		mtpr(-10000, PR_NICR); /* Load in count register */
 	mtpr(0x800000d1, PR_ICCS); /* Start clock and enable interrupt */
-	evcount_attach(&clock_intrcnt, "clock", NULL, &evcount_intr);
+	evcount_attach(&clock_intrcnt, "clock", NULL);
 }
 
 /*
@@ -329,19 +330,4 @@ chip_clkwrite()
 
 	REGPOKE(CSRB_OFF, CSRB_DM|CSRB_24);
 };
-#endif
-
-#if VXT
-int
-missing_clkread(base)
-	time_t base;
-{
-	printf("WARNING: no TOY clock");
-	return CLKREAD_BAD;
-}
-
-void
-missing_clkwrite()
-{
-}
 #endif

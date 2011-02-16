@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: usbdivar.h,v 1.23 2005/03/13 02:54:04 pascoe Exp $ */
+=======
+/*	$OpenBSD: usbdivar.h,v 1.42 2011/01/16 22:35:29 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -18,13 +22,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -95,7 +92,7 @@ struct usbd_hub {
 	usbd_status	      (*explore)(usbd_device_handle hub);
 	void		       *hubsoftc;
 	usb_hub_descriptor_t	hubdesc;
-	struct usbd_port        ports[1];
+	struct usbd_port        *ports;
 };
 
 struct usb_softc;
@@ -110,8 +107,10 @@ struct usbd_bus {
 	/* Filled by usb driver */
 	struct usbd_device     *root_hub;
 	usbd_device_handle	devices[USB_MAX_DEVICES];
-	char			needs_explore;/* a hub a signalled a change */
 	char			use_polling;
+	char			dying;
+	int			flags;
+#define USB_BUS_CONFIG_PENDING	0x01
 	struct usb_softc       *usbctl;
 	struct usb_device_stats	stats;
 	int 			intr_context;
@@ -123,6 +122,7 @@ struct usbd_bus {
 #define USBREV_1_1	3
 #define USBREV_2_0	4
 #define USBREV_STR { "unknown", "pre 1.0", "1.0", "1.1", "2.0" }
+<<<<<<< HEAD
 
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
@@ -133,6 +133,9 @@ struct usbd_bus {
 #endif
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
+=======
+	void		       *soft; /* soft interrupt cookie */
+>>>>>>> origin/master
 	bus_dma_tag_t		dmatag;	/* DMA tag */
 #endif
 };
@@ -140,7 +143,13 @@ struct usbd_bus {
 struct usbd_device {
 	struct usbd_bus	       *bus;           /* our controller */
 	struct usbd_pipe       *default_pipe;  /* pipe 0 */
+<<<<<<< HEAD
 	u_int8_t		address;       /* device addess */
+=======
+	u_int8_t		dying;	       /* hardware removed */
+	u_int8_t		ref_cnt;       /* # of procs using device */
+	u_int8_t		address;       /* device address */
+>>>>>>> origin/master
 	u_int8_t		config;	       /* current configuration # */
 	u_int8_t		depth;         /* distance from root hub */
 	u_int8_t		speed;         /* low/full/high speed */
@@ -159,7 +168,12 @@ struct usbd_device {
 	usb_config_descriptor_t *cdesc;	       /* full config descr */
 	const struct usbd_quirks     *quirks;  /* device quirks, always set */
 	struct usbd_hub	       *hub;           /* only if this is a hub */
+<<<<<<< HEAD
 	device_ptr_t	       *subdevs;       /* sub-devices, 0 terminated */
+=======
+	struct device         **subdevs;       /* sub-devices, 0 terminated */
+	int			ndevs;	       /* # of subdevs */
+>>>>>>> origin/master
 };
 
 struct usbd_interface {
@@ -170,6 +184,7 @@ struct usbd_interface {
 	struct usbd_endpoint   *endpoints;
 	void		       *priv;
 	LIST_HEAD(, usbd_pipe)	pipes;
+	u_int8_t		claimed;
 };
 
 struct usbd_pipe {
@@ -233,6 +248,8 @@ struct usbd_xfer {
 
 void usbd_init(void);
 void usbd_finish(void);
+void usb_begin_tasks(void);
+void usb_end_tasks(void);
 
 #ifdef USB_DEBUG
 void usbd_dump_iface(struct usbd_interface *iface);
@@ -245,6 +262,8 @@ void usbd_dump_pipe(usbd_pipe_handle pipe);
 /* Routines from usb_subr.c */
 int		usbctlprint(void *, const char *);
 void		usb_delay_ms(usbd_bus_handle, u_int);
+usbd_status	usbd_port_disown_to_1_1(usbd_device_handle dev, 
+		    int port, usb_port_status_t *ps);
 usbd_status	usbd_reset_port(usbd_device_handle dev,
 				int port, usb_port_status_t *ps);
 usbd_status	usbd_setup_pipe(usbd_device_handle dev,
@@ -265,23 +284,9 @@ void		usb_transfer_complete(usbd_xfer_handle xfer);
 void		usb_disconnect_port(struct usbd_port *up, device_ptr_t);
 
 /* Routines from usb.c */
-void		usb_needs_explore(usbd_device_handle);
+void		usb_needs_explore(usbd_device_handle, int);
 void		usb_needs_reattach(usbd_device_handle);
 void		usb_schedsoftintr(struct usbd_bus *);
-
-/*
- * XXX This check is extremely bogus. Bad Bad Bad.
- */
-#if defined(DIAGNOSTIC) && 0
-#define SPLUSBCHECK \
-	do { int _s = splusb(), _su = splusb(); \
-             if (!cold && _s != _su) printf("SPLUSBCHECK failed 0x%x!=0x%x, %s:%d\n", \
-				   _s, _su, __FILE__, __LINE__); \
-	     splx(_s); \
-        } while (0)
-#else
-#define SPLUSBCHECK
-#endif
 
 /* Locator stuff. */
 

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cd9660_node.c,v 1.17 2007/03/21 17:29:31 thib Exp $	*/
+=======
+/*	$OpenBSD: cd9660_node.c,v 1.21 2010/04/23 19:40:28 oga Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cd9660_node.c,v 1.17 1997/05/05 07:13:57 mycroft Exp $	*/
 
 /*-
@@ -60,7 +64,6 @@
 struct iso_node **isohashtbl;
 u_long isohash;
 #define	INOHASH(device, inum)	(((device) + ((inum)>>12)) & isohash)
-struct simplelock cd9660_ihash_slock;
 
 #ifdef ISODEVMAP
 struct iso_node **idvhashtbl;
@@ -81,7 +84,6 @@ cd9660_init(vfsp)
 {
 
 	isohashtbl = hashinit(desiredvnodes, M_ISOFSMNT, M_WAITOK, &isohash);
-	simple_lock_init(&cd9660_ihash_slock);
 #ifdef ISODEVMAP
 	idvhashtbl = hashinit(desiredvnodes / 8, M_ISOFSMNT, M_WAITOK, &idvhash);
 #endif
@@ -159,17 +161,17 @@ cd9660_ihashget(dev, inum)
 	struct vnode *vp;
 
 loop:
-       simple_lock(&cd9660_ihash_slock);
+	/* XXX locking lock hash list? */
        for (ip = isohashtbl[INOHASH(dev, inum)]; ip; ip = ip->i_next) {
                if (inum == ip->i_number && dev == ip->i_dev) {
                        vp = ITOV(ip);
-                       simple_unlock(&cd9660_ihash_slock);
+			/* XXX locking unlock hash list? */
                        if (vget(vp, LK_EXCLUSIVE, p))
                                goto loop;
                        return (vp);
 	       }
        }
-       simple_unlock(&cd9660_ihash_slock);
+	/* XXX locking unlock hash list? */
        return (NULL);
 }
 
@@ -182,7 +184,7 @@ cd9660_ihashins(ip)
 {
 	struct iso_node **ipp, *iq;
 
-	simple_lock(&cd9660_ihash_slock);
+	/* XXX locking lock hash list? */
 	ipp = &isohashtbl[INOHASH(ip->i_dev, ip->i_number)];
 
 	for (iq = *ipp; iq; iq = iq->i_next) {
@@ -196,7 +198,7 @@ cd9660_ihashins(ip)
 	ip->i_next = iq;
 	ip->i_prev = ipp;
 	*ipp = ip;
-	simple_unlock(&cd9660_ihash_slock);
+	/* XXX locking unlock hash list? */
 
 	lockmgr(&ip->i_lock, LK_EXCLUSIVE, NULL);
 
@@ -215,7 +217,7 @@ cd9660_ihashrem(ip)
 	if (ip->i_prev == NULL)
 		return;
 	
-	simple_lock(&cd9660_ihash_slock);
+	/* XXX locking lock hash list? */
 	if ((iq = ip->i_next) != NULL)
 		iq->i_prev = ip->i_prev;
 	*ip->i_prev = iq;
@@ -223,7 +225,7 @@ cd9660_ihashrem(ip)
 	ip->i_next = NULL;
 	ip->i_prev = NULL;
 #endif
-	simple_unlock(&cd9660_ihash_slock);
+	/* XXX locking unlock hash list? */
 }
 
 /*

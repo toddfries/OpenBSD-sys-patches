@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_ah.c,v 1.88 2007/02/08 15:25:30 itojun Exp $ */
+=======
+/*	$OpenBSD: ip_ah.c,v 1.99 2011/01/11 15:42:05 deraadt Exp $ */
+>>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -116,15 +120,15 @@ ah_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 		break;
 
 	case SADB_X_AALG_SHA2_256:
-		thash = &auth_hash_hmac_sha2_256_96;
+		thash = &auth_hash_hmac_sha2_256_128;
 		break;
 
 	case SADB_X_AALG_SHA2_384:
-		thash = &auth_hash_hmac_sha2_384_96;
+		thash = &auth_hash_hmac_sha2_384_192;
 		break;
 
 	case SADB_X_AALG_SHA2_512:
-		thash = &auth_hash_hmac_sha2_512_96;
+		thash = &auth_hash_hmac_sha2_512_256;
 		break;
 
 	case SADB_X_AALG_MD5:
@@ -179,8 +183,13 @@ ah_zeroize(struct tdb *tdbp)
 	int err;
 
 	if (tdbp->tdb_amxkey) {
+<<<<<<< HEAD
 		bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 		FREE(tdbp->tdb_amxkey, M_XDATA);
+=======
+		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
+		free(tdbp->tdb_amxkey, M_XDATA);
+>>>>>>> origin/master
 		tdbp->tdb_amxkey = NULL;
 	}
 
@@ -370,7 +379,7 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 			ip6.ip6_dst.s6_addr16[1] = 0;
 
 		/* Done with IPv6 header. */
-		m_copyback(m, 0, sizeof(struct ip6_hdr), &ip6);
+		m_copyback(m, 0, sizeof(struct ip6_hdr), &ip6, M_NOWAIT);
 
 		/* Let's deal with the remaining headers (if any). */
 		if (skip - sizeof(struct ip6_hdr) > 0) {
@@ -498,7 +507,8 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 					    (caddr_t)&ip6);
 					addr[0] = ip6.ip6_dst;
 					ip6.ip6_dst = finaldst;
-					m_copyback(m, 0, sizeof(ip6), &ip6);
+					m_copyback(m, 0, sizeof(ip6), &ip6,
+					    M_NOWAIT);
 
 					rh0->ip6r0_segleft = 0;
 				}
@@ -523,8 +533,13 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 		/* Copyback and free, if we allocated. */
 		if (alloc) {
 			m_copyback(m, sizeof(struct ip6_hdr),
+<<<<<<< HEAD
 			    skip - sizeof(struct ip6_hdr), ptr);
 			FREE(ptr, M_XDATA);
+=======
+			    skip - sizeof(struct ip6_hdr), ptr, M_NOWAIT);
+			free(ptr, M_XDATA);
+>>>>>>> origin/master
 		}
 
 		break;
@@ -663,6 +678,7 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		tdbi = (struct tdb_ident *) (mtag + 1);
 		if (tdbi->proto == tdb->tdb_sproto &&
 		    tdbi->spi == tdb->tdb_spi &&
+		    tdbi->rdomain == tdb->tdb_rdomain &&
 		    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			sizeof(union sockaddr_union)))
 			break;
@@ -699,7 +715,8 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		    (caddr_t) (tc + 1));
 
 		/* Zeroize the authenticator on the packet. */
-		m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes);
+		m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes,
+		    M_NOWAIT);
 
 		/* "Massage" the packet headers for crypto processing. */
 		if ((btsx = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
@@ -725,6 +742,7 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
 	tc->tc_ptr = (caddr_t) mtag; /* Save the mtag we've identified. */
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	if (mtag == NULL)
@@ -742,7 +760,6 @@ ah_input_cb(void *op)
 	int s, roff, rplen, error, skip, protoff;
 	unsigned char calc[AH_ALEN_MAX];
 	struct mbuf *m1, *m0, *m;
-	struct cryptodesc *crd;
 	struct auth_hash *ahx;
 	struct tdb_crypto *tc;
 	struct cryptop *crp;
@@ -753,7 +770,6 @@ ah_input_cb(void *op)
 	caddr_t ptr;
 
 	crp = (struct cryptop *) op;
-	crd = crp->crp_desc;
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
@@ -773,7 +789,7 @@ ah_input_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		FREE(tc, M_XDATA);
 		ahstat.ahs_notdb++;
@@ -819,8 +835,13 @@ ah_input_cb(void *op)
 		ptr = (caddr_t) (tc + 1);
 
 		/* Verify authenticator. */
+<<<<<<< HEAD
 		if (bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
 			FREE(tc, M_XDATA);
+=======
+		if (timingsafe_bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
+			free(tc, M_XDATA);
+>>>>>>> origin/master
 
 			DPRINTF(("ah_input(): authentication failed for "
 			    "packet in SA %s/%08x\n",
@@ -835,11 +856,11 @@ ah_input_cb(void *op)
 		((u_int8_t *) ptr)[protoff] = ((u_int8_t *) ptr)[skip];
 
 		/* Copyback the saved (uncooked) network headers. */
-		m_copyback(m, 0, skip, ptr);
+		m_copyback(m, 0, skip, ptr, M_NOWAIT);
 	} else {
 		/* Fix the Next Protocol field. */
 		m_copydata(m, skip, sizeof(u_int8_t), &prot);
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 	}
 
 	FREE(tc, M_XDATA);
@@ -992,22 +1013,24 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	u_int8_t prot;
 	struct ah *ah;
 #if NBPFILTER > 0
-	struct ifnet *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	ifn->if_opackets++;
-	ifn->if_obytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(tdb->tdb_rdomain, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-	if (ifn->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		bzero (&hdr, sizeof(hdr));
+			bzero (&hdr, sizeof(hdr));
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
-		hdr.flags |= M_AUTH | M_AUTH_AH;
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+			hdr.flags |= M_AUTH | M_AUTH_AH;
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 
@@ -1143,7 +1166,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	ah->ah_spi = tdb->tdb_spi;
 
 	/* Zeroize authenticator. */
-	m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes);
+	m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes, M_NOWAIT);
 
 	if (!(tdb->tdb_flags & TDBF_NOREPLAY)) {
 		ah->ah_rpl = htonl(tdb->tdb_rpl++);
@@ -1207,7 +1230,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			    (caddr_t) &iplen, sizeof(u_int16_t));
 			iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
 			m_copyback(m, offsetof(struct ip, ip_len),
-			    sizeof(u_int16_t), &iplen);
+			    sizeof(u_int16_t), &iplen, M_NOWAIT);
 			break;
 #endif /* INET */
 
@@ -1218,7 +1241,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			    (caddr_t) &iplen, sizeof(u_int16_t));
 			iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
 			m_copyback(m, offsetof(struct ip6_hdr, ip6_plen),
-			    sizeof(u_int16_t), &iplen);
+			    sizeof(u_int16_t), &iplen, M_NOWAIT);
 			break;
 #endif /* INET6 */
 		}
@@ -1228,7 +1251,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 		/* Update the Next Protocol field in the IP header. */
 		prot = IPPROTO_AH;
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 
 		/* "Massage" the packet headers for crypto processing. */
 		if ((len = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
@@ -1241,7 +1264,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	} else {
 		/* Update the Next Protocol field in the IP header. */
 		prot = IPPROTO_AH;
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 	}
 
 	/* Crypto operation descriptor. */
@@ -1257,6 +1280,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	tc->tc_protoff = protoff;
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
@@ -1271,7 +1295,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 int
 ah_output_cb(void *op)
 {
-	int skip, protoff, error;
+	int skip, error;
 	struct tdb_crypto *tc;
 	struct cryptop *crp;
 	struct tdb *tdb;
@@ -1282,7 +1306,6 @@ ah_output_cb(void *op)
 	crp = (struct cryptop *) op;
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
-	protoff = tc->tc_protoff;
 	ptr = (caddr_t) (tc + 1);
 
 	m = (struct mbuf *) crp->crp_buf;
@@ -1298,7 +1321,7 @@ ah_output_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		FREE(tc, M_XDATA);
 		ahstat.ahs_notdb++;
@@ -1328,7 +1351,7 @@ ah_output_cb(void *op)
 	 * in place.
 	 */
 	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
-		m_copyback(m, 0, skip, ptr);
+		m_copyback(m, 0, skip, ptr, M_NOWAIT);
 
 	FREE(tc, M_XDATA);
 

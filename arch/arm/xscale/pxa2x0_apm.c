@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.27 2006/12/12 23:14:27 dim Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.36 2010/09/08 21:18:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -39,9 +39,9 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
-#include <sys/lock.h>
-#include <sys/mount.h>		/* for vfs_syncwait() */
+#include <sys/rwlock.h>
 #include <sys/proc.h>
+#include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
@@ -55,6 +55,9 @@
 #include <arm/xscale/pxa2x0var.h>
 #include <arm/xscale/pxa2x0_apm.h>
 #include <arm/xscale/pxa2x0_gpio.h>
+#include <dev/wscons/wsdisplayvar.h>
+
+#include "wsdisplay.h"
 
 #if defined(APMDEBUG)
 #define DPRINTF(x)	printf x
@@ -62,8 +65,8 @@
 #define	DPRINTF(x)	/**/
 #endif
 
-#define APM_LOCK(sc)    lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL)
-#define APM_UNLOCK(sc)  lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL)
+#define APM_LOCK(sc)    rw_enter_write(&(sc)->sc_lock);
+#define APM_UNLOCK(sc)  rw_exit_write(&(sc)->sc_lock);
 
 struct cfdriver apm_cd = {
 	NULL, "apm", DV_DULL
@@ -302,18 +305,22 @@ apm_power_info(struct pxa2x0_apm_softc *sc,
 void
 apm_suspend(struct pxa2x0_apm_softc *sc)
 {
+	int s;
+
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
 
 	resettodr();
-
-	dopowerhooks(PWR_SUSPEND);
-
-	if (cold)
-		vfs_syncwait(0);
 
 	if (sc->sc_suspend == NULL)
 		pxa2x0_wakeup_config(PXA2X0_WAKEUP_ALL, 1);
 	else
 		sc->sc_suspend(sc);
+
+	s = splhigh();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	splx(s);
 
 	pxa2x0_apm_sleep(sc);
 }
@@ -321,17 +328,25 @@ apm_suspend(struct pxa2x0_apm_softc *sc)
 void
 apm_resume(struct pxa2x0_apm_softc *sc)
 {
+	int s;
 
-	dopowerhooks(PWR_RESUME);
+	s = splhigh();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	splx(s);
 
 	inittodr(0);
 
 	/*
 	 * Clear the OTG Peripheral hold after running the pxaudc and pxaohci
-	 * powerhooks to re-enable their operation. See 3.8.1.2
+	 * ca_activate to re-enable their operation. See 3.8.1.2
 	 */
 	/* XXX ifdef NPXAUDC > 0 */
 	bus_space_write_4(sc->sc_iot, sc->sc_pm_ioh, POWMAN_PSSR, PSSR_OTGPH);
+
+	bufq_restart();
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
 int
@@ -562,7 +577,17 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	        power = (struct apm_power_info *)data;
 		apm_power_info(sc, power);
 		break;
-
+	case APM_IOC_STANDBY_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		else if (apm_record_event(sc, APM_USER_STANDBY_REQ))
+			error = EINVAL; /* ? */
+		break;
+	case APM_IOC_SUSPEND_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		else if (apm_record_event(sc, APM_USER_SUSPEND_REQ))
+			error = EINVAL; /* ? */
 	default:
 		error = ENOTTY;
 	}
@@ -640,7 +665,7 @@ pxa2x0_apm_attach_sub(struct pxa2x0_apm_softc *sc)
 		return;
 	}
 
-	lockinit(&sc->sc_lock, PWAIT, "apmlk", 0, 0);
+	rw_init(&sc->sc_lock, "apmlk");
 
 	kthread_create_deferred(apm_thread_create, sc);
 

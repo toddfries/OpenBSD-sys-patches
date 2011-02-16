@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: malloc.h,v 1.82 2005/12/14 22:03:01 pedro Exp $	*/
+=======
+/*	$OpenBSD: malloc.h,v 1.99 2010/12/25 00:13:21 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -52,15 +56,22 @@
 /*
  * flags to malloc
  */
+<<<<<<< HEAD
 #define	M_WAITOK	0x0000
 #define	M_NOWAIT	0x0001
 #define M_CANFAIL	0x0002
+=======
+#define	M_WAITOK	0x0001
+#define	M_NOWAIT	0x0002
+#define	M_CANFAIL	0x0004
+#define	M_ZERO		0x0008
+>>>>>>> origin/master
 
 /*
  * Types of memory to be allocated
  */
 #define	M_FREE		0	/* should be on free list */
-#define	M_MBUF		1	/* mbuf */
+/* 1 - free */
 #define	M_DEVBUF	2	/* device driver memory */
 #define M_DEBUG		3	/* debug chunk */
 #define	M_PCB		4	/* protocol control block */
@@ -80,7 +91,7 @@
 /* 21 - free */
 #define	M_NFSREQ	22	/* NFS request header */
 #define	M_NFSMNT	23	/* NFS mount structure */
-#define	M_NFSNODE	24	/* NFS vnode private part */
+/* 24 - free */
 #define	M_VNODE		25	/* Dynamically allocated vnodes */
 #define	M_CACHE		26	/* Dynamically allocated cache entries */
 #define	M_DQUOT		27	/* UFS quota entries */
@@ -89,7 +100,7 @@
 #define	M_VMMAP		30	/* VM map structures */
 #define	M_SEM		31	/* SVID compatible semaphores */
 #define	M_DIRHASH	32	/* UFS dirhash */
-/* 33 - free */
+#define M_ACPI		33	/* ACPI */
 #define	M_VMPMAP	34	/* VM pmap */
 /* 35-37 - free */
 #define	M_FILE		38	/* Open file structure */
@@ -103,7 +114,7 @@
 /* 47-48 - free */
 #define	M_NETADDR	49	/* Export host address structure */
 #define	M_NFSSVC	50	/* Nfs server structure */
-#define	M_NFSUID	51	/* Nfs uid mapping structure */
+/* 51 - free */
 #define	M_NFSD		52	/* Nfs server daemon structure */
 #define	M_IPMOPTS	53	/* internet multicast options */
 #define	M_IPMADDR	54	/* internet multicast address */
@@ -150,16 +161,14 @@
 /* 109 - free */
 #define M_CREDENTIALS	110	/* IPsec-related credentials and ID info */
 #define M_PACKET_TAGS	111	/* Packet-attached information */
-#define M_1394CTL	112	/* IEEE 1394 control structures */
-#define M_1394DATA	113	/* IEEE 1394 data buffers */
+/* 112-113 - free */
 #define	M_EMULDATA	114	/* Per-process emulation data */
 /* 115-122 - free */
 
 /* KAME IPv6 */
 #define	M_IP6OPT	123	/* IPv6 options */
 #define	M_IP6NDP	124	/* IPv6 Neighbour Discovery */
-#define	M_IP6RR		125	/* IPv6 Router Renumbering Prefix */
-#define	M_RR_ADDR	126	/* IPv6 Router Renumbering Ifid */
+/* 125-126 - free */
 #define	M_TEMP		127	/* misc temporary data buffers */
 
 #define	M_NTFSMNT	128	/* NTFS mount structure */
@@ -186,7 +195,7 @@
 
 #define	INITKMEMNAMES { \
 	"free",		/* 0 M_FREE */ \
-	"mbuf",		/* 1 M_MBUF */ \
+	NULL, \
 	"devbuf",	/* 2 M_DEVBUF */ \
 	"debug", 	/* 3 M_DEBUG */ \
 	"pcb",		/* 4 M_PCB */ \
@@ -209,7 +218,7 @@
 	NULL, \
 	"NFS req",	/* 22 M_NFSREQ */ \
 	"NFS mount",	/* 23 M_NFSMNT */ \
-	"NFS node",	/* 24 M_NFSNODE */ \
+	NULL, \
 	"vnodes",	/* 25 M_VNODE */ \
 	"namecache",	/* 26 M_CACHE */ \
 	"UFS quota",	/* 27 M_DQUOT */ \
@@ -218,7 +227,7 @@
 	"VM map",	/* 30 M_VMMAP */ \
 	"sem",		/* 31 M_SEM */ \
 	"dirhash",	/* 32 M_DIRHASH */ \
-	NULL, \
+	"ACPI", 	/* 33 M_ACPI */ \
 	"VM pmap",	/* 34 M_VMPMAP */ \
 	NULL,	/* 35 */ \
 	NULL,	/* 36 */ \
@@ -236,7 +245,7 @@
 	NULL, \
 	"Export Host",	/* 49 M_NETADDR */ \
 	"NFS srvsock",	/* 50 M_NFSSVC */ \
-	"NFS uid",	/* 51 M_NFSUID */ \
+	NULL, \
 	"NFS daemon",	/* 52 M_NFSD */ \
 	"ip_moptions",	/* 53 M_IPMOPTS */ \
 	"in_multi",	/* 54 M_IPMADDR */ \
@@ -288,23 +297,23 @@
 	NULL, \
 	"IPsec creds",	/* 110 M_CREDENTIALS */ \
 	"packet tags",	/* 111 M_PACKET_TAGS */ \
-	"1394ctl",	/* 112 M_1394CTL */ \
-	"1394data",	/* 113 M_1394DATA */ \
+	NULL, \
+	NULL, \
 	"emuldata",	/* 114 M_EMULDATA */ \
 	NULL, NULL, NULL, NULL, \
 	NULL, NULL, NULL, NULL, \
 	"ip6_options",	/* 123 M_IP6OPT */ \
 	"NDP",		/* 124 M_IP6NDP */ \
-	"ip6rr",	/* 125 M_IP6RR */ \
-	"rp_addr",	/* 126 M_RR_ADDR */ \
+	NULL, \
+	NULL, \
 	"temp",		/* 127 M_TEMP */ \
 	"NTFS mount",	/* 128 M_NTFSMNT */ \
 	"NTFS node",	/* 129 M_NTFSNTNODE */ \
 	"NTFS fnode",	/* 130 M_NTFSFNODE */ \
 	"NTFS dir",	/* 131 M_NTFSDIR */ \
-	"NTFS hash tables",	/* 132 M_NTFSNTHASH */ \
-	"NTFS file attr",	/* 133 M_NTFSNTVATTR */ \
-	"NTFS resident data ",	/* 134 M_NTFSRDATA */ \
+	"NTFS hash",	/* 132 M_NTFSNTHASH */ \
+	"NTFS attr",	/* 133 M_NTFSNTVATTR */ \
+	"NTFS data",	/* 134 M_NTFSRDATA */ \
 	"NTFS decomp",	/* 135 M_NTFSDECOMP */ \
 	"NTFS vrun",	/* 136 M_NTFSRUN */ \
 	"kqueue",	/* 137 M_KEVENT */ \
@@ -313,6 +322,12 @@
 	"UDF mount",	/* 140 M_UDFMOUNT */ \
 	"UDF file entry",	/* 141 M_UDFFENTRY */ \
 	"UDF file id",	/* 142 M_UDFFID */ \
+<<<<<<< HEAD
+=======
+	"Bluetooth HID",	/* 143 M_BTHIDEV */ \
+	"AGP Memory",	/* 144 M_AGP */ \
+	"DRM",	/* 145 M_DRM */ \
+>>>>>>> origin/master
 }
 
 struct kmemstats {
@@ -355,39 +370,8 @@ struct kmembuckets {
 };
 
 #ifdef _KERNEL
+
 #define	MINALLOCSIZE	(1 << MINBUCKET)
-#define	BUCKETINDX(size) \
-	((size) <= (MINALLOCSIZE * 128) \
-		? (size) <= (MINALLOCSIZE * 8) \
-			? (size) <= (MINALLOCSIZE * 2) \
-				? (size) <= (MINALLOCSIZE * 1) \
-					? (MINBUCKET + 0) \
-					: (MINBUCKET + 1) \
-				: (size) <= (MINALLOCSIZE * 4) \
-					? (MINBUCKET + 2) \
-					: (MINBUCKET + 3) \
-			: (size) <= (MINALLOCSIZE* 32) \
-				? (size) <= (MINALLOCSIZE * 16) \
-					? (MINBUCKET + 4) \
-					: (MINBUCKET + 5) \
-				: (size) <= (MINALLOCSIZE * 64) \
-					? (MINBUCKET + 6) \
-					: (MINBUCKET + 7) \
-		: (size) <= (MINALLOCSIZE * 2048) \
-			? (size) <= (MINALLOCSIZE * 512) \
-				? (size) <= (MINALLOCSIZE * 256) \
-					? (MINBUCKET + 8) \
-					: (MINBUCKET + 9) \
-				: (size) <= (MINALLOCSIZE * 1024) \
-					? (MINBUCKET + 10) \
-					: (MINBUCKET + 11) \
-			: (size) <= (MINALLOCSIZE * 8192) \
-				? (size) <= (MINALLOCSIZE * 4096) \
-					? (MINBUCKET + 12) \
-					: (MINBUCKET + 13) \
-				: (size) <= (MINALLOCSIZE * 16384) \
-					? (MINBUCKET + 14) \
-					: (MINBUCKET + 15))
 
 /*
  * Turn virtual addresses into kmem map indices
@@ -396,6 +380,7 @@ struct kmembuckets {
 #define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / NBPG)
 #define	btokup(addr)	(&kmemusage[((caddr_t)(addr) - kmembase) >> PAGE_SHIFT])
 
+<<<<<<< HEAD
 /*
  * Macro versions for the usual cases of malloc/free
  */
@@ -437,6 +422,8 @@ struct kmembuckets {
 } while(0)
 #endif /* do not collect statistics */
 
+=======
+>>>>>>> origin/master
 extern struct kmemstats kmemstats[];
 extern struct kmemusage *kmemusage;
 extern char *kmembase;

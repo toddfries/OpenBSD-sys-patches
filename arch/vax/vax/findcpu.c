@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: findcpu.c,v 1.11 2006/07/20 19:07:14 miod Exp $	*/
+=======
+/*	$OpenBSD: findcpu.c,v 1.14 2008/08/20 19:00:01 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: findcpu.c,v 1.5 1999/08/23 19:10:43 ragge Exp $	*/
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
@@ -38,6 +42,7 @@
 #include <machine/nexus.h>
 #include <machine/mtpr.h>
 #include <machine/cpu.h>
+#include <machine/cvax.h>
 
 /* 
  * We set up some information about the machine we're
@@ -46,12 +51,12 @@
  * outside of this routine, they should be read only!
  */
 int vax_cputype;	/* highest byte of SID register */
-int vax_bustype;	/* holds/defines all busses on this machine */
-int vax_boardtype;	/* machine dependend, combination of SID and SIE */
+int vax_bustype;	/* holds/defines the main bus type on this machine */
+int vax_boardtype;	/* machine dependent, combination of SID and SIE */
  
 int vax_cpudata = 0;	/* contents of the SID register */
 int vax_siedata = 0;	/* contents of the SIE register */
-int vax_confdata;	/* machine dependend, configuration/setup data */
+int vax_confdata;	/* machine dependent, configuration/setup data */
 
 void	findcpu(void);
 
@@ -112,6 +117,11 @@ findcpu(void)
 			break;
 
 		case VAX_BTYP_60:
+			vax_confdata =
+			    ((struct cvax_ssc *)CVAX_SSC)->ssc_terminfo;
+			vax_bustype = VAX_MBUS;
+			break;
+
 		case VAX_BTYP_630:
 		case VAX_BTYP_650:
 		case VAX_BTYP_660:
@@ -121,7 +131,6 @@ findcpu(void)
 		case VAX_BTYP_1305:
 			vax_bustype = VAX_IBUS;
 			break;
-
 		}
 		break;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.7 2006/01/26 07:11:08 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.17 2010/11/18 21:13:19 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -34,7 +34,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/device.h>
@@ -77,6 +76,7 @@ struct device *bootdv;	/* set by device drivers (if found) */
 void
 cpu_configure()
 {
+	softintr_init();
 
 	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
@@ -424,14 +424,14 @@ device_register(struct device *dev, void *aux)
         /*
          * scsi: sd,cd  XXX: Can LUNA88K boot from CD-ROM?
          */
-        if (strncmp("sd", dev->dv_xname, 2) == 0 ||
-            strncmp("cd", dev->dv_xname, 2) == 0) {
+        if (strcmp("sd", dev->dv_cfdata->cf_driver->cd_name) == 0 ||
+            strcmp("cd", dev->dv_cfdata->cf_driver->cd_name) == 0) {
 		struct scsi_attach_args *sa = aux;
 		struct device *spcsc;
 
 		spcsc = dev->dv_parent->dv_parent;
 
-                if (strncmp(autoboot.cont, spcsc->dv_xname, 4) == 0 &&
+                if (strcmp(autoboot.cont, spcsc->dv_cfdata->cf_driver->cd_name) == 0 &&
 		    sa->sa_sc_link->target == autoboot.targ &&
 		    sa->sa_sc_link->lun == 0) {
                         bootdv = dev;
@@ -440,3 +440,11 @@ device_register(struct device *dev, void *aux)
                 }
         }
 }
+
+struct nam2blk nam2blk[] = {
+	{ "sd",		4 },
+	{ "st",		5 },
+	{ "rd",		7 },
+	{ "vnd",	8 },
+	{ NULL,		-1 }
+};

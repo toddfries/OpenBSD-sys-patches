@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gencons.c,v 1.16 2006/01/01 11:59:40 miod Exp $	*/
+=======
+/*	$OpenBSD: gencons.c,v 1.23 2010/06/28 14:13:31 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: gencons.c,v 1.22 2000/01/24 02:40:33 matt Exp $	*/
 
 /*
@@ -86,7 +90,7 @@ gencnopen(dev, flag, mode, p)
 		return ENXIO;
 
 	if (gencn_tty[unit] == NULL)
-		gencn_tty[unit] = ttymalloc();
+		gencn_tty[unit] = ttymalloc(0);
 
 	tp = gencn_tty[unit];
 
@@ -102,7 +106,7 @@ gencnopen(dev, flag, mode, p)
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 		gencnparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return EBUSY;
 	tp->t_state |= TS_CARR_ON;
 	if (unit == 0)
@@ -110,7 +114,7 @@ gencnopen(dev, flag, mode, p)
 	mtpr(GC_RIE, pr_rxcs[unit]); /* Turn on interrupts */
 	mtpr(GC_TIE, pr_txcs[unit]);
 
-        return ((*linesw[tp->t_line].l_open)(dev, tp));
+        return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -123,7 +127,7 @@ gencnclose(dev, flag, mode, p)
 
 	if (minor(dev) == 0)
 		consopened = 0;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return (0);
 }

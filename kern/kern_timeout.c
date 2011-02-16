@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: kern_timeout.c,v 1.24 2006/04/21 01:35:27 dlg Exp $	*/
+=======
+/*	$OpenBSD: kern_timeout.c,v 1.32 2009/11/04 19:14:10 kettenis Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -30,7 +34,12 @@
 #include <sys/lock.h>
 #include <sys/timeout.h>
 #include <sys/mutex.h>
+<<<<<<< HEAD
 #include <sys/queue.h>
+=======
+#include <sys/kernel.h>
+#include <sys/queue.h>			/* _Q_INVALIDATE */
+>>>>>>> origin/master
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -137,7 +146,7 @@ timeout_startup(void)
 	int b;
 
 	CIRCQ_INIT(&timeout_todo);
-	for (b = 0; b < BUCKETS; b++)
+	for (b = 0; b < nitems(timeout_wheel); b++)
 		CIRCQ_INIT(&timeout_wheel[b]);
 }
 
@@ -186,6 +195,83 @@ timeout_add(struct timeout *new, int to_ticks)
 }
 
 void
+timeout_add_tv(struct timeout *to, const struct timeval *tv)
+{
+	long long to_ticks;
+
+	to_ticks = (long long)hz * tv->tv_sec + tv->tv_usec / tick;
+	if (to_ticks > INT_MAX)
+		to_ticks = INT_MAX;
+
+	timeout_add(to, (int)to_ticks);
+}
+
+void
+timeout_add_ts(struct timeout *to, const struct timespec *ts)
+{
+	long long to_ticks;
+
+	to_ticks = (long long)hz * ts->tv_sec + ts->tv_nsec / (tick * 1000);
+	if (to_ticks > INT_MAX)
+		to_ticks = INT_MAX;
+
+	timeout_add(to, (int)to_ticks);
+}
+
+void
+timeout_add_bt(struct timeout *to, const struct bintime *bt)
+{
+	long long to_ticks;
+
+	to_ticks = (long long)hz * bt->sec + (long)(((uint64_t)1000000 *
+	    (uint32_t)(bt->frac >> 32)) >> 32) / tick;
+	if (to_ticks > INT_MAX)
+		to_ticks = INT_MAX;
+
+	timeout_add(to, (int)to_ticks);
+}
+
+void
+timeout_add_sec(struct timeout *to, int secs)
+{
+	long long to_ticks;
+
+	to_ticks = (long long)hz * secs;
+	if (to_ticks > INT_MAX)
+		to_ticks = INT_MAX;
+
+	timeout_add(to, (int)to_ticks);
+}
+
+void
+timeout_add_msec(struct timeout *to, int msecs)
+{
+	long long to_ticks;
+
+	to_ticks = (long long)msecs * 1000 / tick;
+	if (to_ticks > INT_MAX)
+		to_ticks = INT_MAX;
+
+	timeout_add(to, (int)to_ticks);
+}
+
+void
+timeout_add_usec(struct timeout *to, int usecs)
+{
+	int to_ticks = usecs / tick;
+
+	timeout_add(to, to_ticks);
+}
+
+void
+timeout_add_nsec(struct timeout *to, int nsecs)
+{
+	int to_ticks = nsecs / (tick * 1000);
+
+	timeout_add(to, to_ticks);
+}
+
+void
 timeout_del(struct timeout *to)
 {
 	mtx_enter(&timeout_mutex);
@@ -226,11 +312,10 @@ timeout_hardclock_update(void)
 }
 
 void
-softclock(void)
+softclock(void *arg)
 {
 	struct timeout *to;
 	void (*fn)(void *);
-	void *arg;
 
 	mtx_enter(&timeout_mutex);
 	while (!CIRCQ_EMPTY(&timeout_todo)) {
@@ -291,10 +376,8 @@ db_show_callout(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 	db_printf("ticks now: %d\n", ticks);
 	db_printf("    ticks  wheel       arg  func\n");
 
-	mtx_enter(&timeout_mutex);
 	db_show_callout_bucket(&timeout_todo);
-	for (b = 0; b < BUCKETS; b++)
+	for (b = 0; b < nitems(timeout_wheel); b++)
 		db_show_callout_bucket(&timeout_wheel[b]);
-	mtx_leave(&timeout_mutex);
 }
 #endif

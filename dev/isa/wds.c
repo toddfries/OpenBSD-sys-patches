@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wds.c,v 1.22 2005/12/03 17:13:22 krw Exp $	*/
+=======
+/*	$OpenBSD: wds.c,v 1.37 2010/07/02 02:29:45 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -67,7 +71,7 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -78,10 +82,6 @@
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
 #include <dev/isa/wdsreg.h>
-
-#ifndef DDB
-#define Debugger() panic("should call debugger here (wds.c)")
-#endif /* ! DDB */
 
 #define WDS_MBX_SIZE	16
 
@@ -163,8 +163,8 @@ void    wds_done(struct wds_softc *, struct wds_scb *, u_char);
 int	wds_find(struct isa_attach_args *, struct wds_softc *);
 void	wds_init(struct wds_softc *);
 void	wds_inquire_setup_information(struct wds_softc *);
-void    wdsminphys(struct buf *);
-int     wds_scsi_cmd(struct scsi_xfer *);
+void    wdsminphys(struct buf *, struct scsi_link *);
+void    wds_scsi_cmd(struct scsi_xfer *);
 void	wds_sense(struct wds_softc *, struct wds_scb *);
 int	wds_poll(struct wds_softc *, struct scsi_xfer *, int);
 int	wds_ipoll(struct wds_softc *, struct wds_scb *, int);
@@ -176,14 +176,6 @@ struct scsi_adapter wds_switch = {
 	wdsminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device wds_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 int	wdsprobe(struct device *, void *, void *);
@@ -316,7 +308,6 @@ wdsattach(parent, self, aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &wds_switch;
-	sc->sc_link.device = &wds_dev;
 	/* XXX */
 	/* I don't think the -ASE can handle openings > 1. */
 	/* It gives Vendor Error 26 whenever I try it.     */
@@ -720,6 +711,7 @@ wds_start_scbs(sc)
 #ifdef WDSDIAG
 		scb->flags |= SCB_SENDING;
 #endif
+		timeout_set(&scb->xs->stimeout, wds_timeout, scb);
 
 		/* Link scb to mbo. */
 #ifdef notyet
@@ -739,10 +731,8 @@ wds_start_scbs(sc)
 		c = WDSC_MSTART(wmbo - wmbx->mbo);
 		wds_cmd(sc, &c, sizeof c);
 
-		if ((scb->flags & SCB_POLLED) == 0) {
-			timeout_set(&scb->xs->stimeout, wds_timeout, scb);
-			timeout_add(&scb->xs->stimeout, (scb->timeout * hz) / 1000);
-		}
+		if ((scb->flags & SCB_POLLED) == 0)
+			timeout_add_msec(&scb->xs->stimeout, scb->timeout);
 
 		++sc->sc_mbofull;
 		wds_nextmbx(wmbo, wmbx, mbo);
@@ -849,7 +839,6 @@ wds_done(sc, scb, stat)
 	}
 #endif
 	wds_free_scb(sc, scb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
@@ -859,7 +848,7 @@ wds_find(ia, sc)
 	struct wds_softc *sc;
 {
 	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
+	bus_space_handle_t ioh = ia->ia_ioh;
 	u_char c;
 	int i;
 
@@ -1032,8 +1021,7 @@ out:
 }
 
 void
-wdsminphys(bp)
-	struct buf *bp;
+wdsminphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((WDS_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((WDS_NSEG - 1) << PGSHIFT);
@@ -1043,7 +1031,7 @@ wdsminphys(bp)
 /*
  * Send a SCSI command.
  */
-int
+void
 wds_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -1056,9 +1044,6 @@ wds_scsi_cmd(xs)
 	int seg;
 	u_long thiskv, thisphys, nextphys;
 	int bytes_this_seg, bytes_this_page, datalen, flags;
-#ifdef TFS
-	struct iovec *iovp;
-#endif
 	int s;
 #ifdef notyet
 	int mflags;
@@ -1068,7 +1053,8 @@ wds_scsi_cmd(xs)
 		/* XXX Fix me! */
 		printf("%s: reset!\n", sc->sc_dev.dv_xname);
 		wds_init(sc);
-		return COMPLETE;
+		scsi_done(xs);
+		return;
 	}
 
 	flags = xs->flags;
@@ -1079,18 +1065,12 @@ wds_scsi_cmd(xs)
 		mflags = ISADMA_MAP_BOUNCE | ISADMA_MAP_WAITOK;
 #endif
 	if ((scb = wds_get_scb(sc, flags, NEEDBUFFER(sc))) == NULL) {
-		return TRY_AGAIN_LATER;
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 	scb->xs = xs;
 	scb->timeout = xs->timeout;
-
-	if (xs->flags & SCSI_DATA_UIO) {
-		/* XXX Fix me! */
-		/* Let's not worry about UIO. There isn't any code for the *
-		 * non-SG boards anyway! */
-		printf("%s: UIO is untested and disabled!\n", sc->sc_dev.dv_xname);
-		goto bad;
-	}
 
 	/* Zero out the command structure. */
 	bzero(&scb->cmd, sizeof scb->cmd);
@@ -1107,94 +1087,75 @@ wds_scsi_cmd(xs)
 	if (!NEEDBUFFER(sc) && xs->datalen) {
 		sg = scb->scat_gath;
 		seg = 0;
-#ifdef TFS
-		if (flags & SCSI_DATA_UIO) {
-			iovp = ((struct uio *)xs->data)->uio_iov;
-			datalen = ((struct uio *)xs->data)->uio_iovcnt;
-			xs->datalen = 0;
-			while (datalen && seg < WDS_NSEG) {
-				ltophys(iovp->iov_base, sg->seg_addr);
-				ltophys(iovp->iov_len, sg->seg_len);
-				xs->datalen += iovp->iov_len;
-				SC_DEBUGN(sc_link, SDEV_DB4, ("UIO(0x%x@0x%x)",
-				    iovp->iov_len, iovp->iov_base));
-				sg++;
-				iovp++;
-				seg++;
-				datalen--;
-			}
-		} else
-#endif /* TFS */
-		{
-			/*
-			 * Set up the scatter-gather block.
-			 */
-			SC_DEBUG(sc_link, SDEV_DB4,
-			    ("%d @0x%x:- ", xs->datalen, xs->data));
+
+		/*
+		 * Set up the scatter-gather block.
+		 */
+		SC_DEBUG(sc_link, SDEV_DB4,
+		    ("%d @0x%x:- ", xs->datalen, xs->data));
 
 #ifdef notyet
-			scb->data_nseg = isadma_map(xs->data, xs->datalen,
-						    scb->data_phys, mflags);
-			for (seg = 0; seg < scb->data_nseg; seg++) {
-				ltophys(scb->data_phys[seg].addr,
-				       sg[seg].seg_addr);
-				ltophys(scb->data_phys[seg].length,
-				       sg[seg].seg_len);
-			}
-#else
-			datalen = xs->datalen;
-			thiskv = (int)xs->data;
-			thisphys = KVTOPHYS(xs->data);
-
-			while (datalen && seg < WDS_NSEG) {
-				bytes_this_seg = 0;
-
-				/* put in the base address */
-				ltophys(thisphys, sg->seg_addr);
-
-				SC_DEBUGN(sc_link, SDEV_DB4, ("0x%x", thisphys));
-
-				/* do it at least once */
-				nextphys = thisphys;
-				while (datalen && thisphys == nextphys) {
-					/*
-					 * This page is contiguous (physically)
-					 * with the last, just extend the
-					 * length
-					 */
-					/* check it fits on the ISA bus */
-					if (thisphys > 0xFFFFFF) {
-						printf("%s: DMA beyond"
-							" end of ISA\n",
-							sc->sc_dev.dv_xname);
-						goto bad;
-					}
-					/* how far to the end of the page */
-					nextphys = (thisphys & ~PGOFSET) + NBPG;
-					bytes_this_page = nextphys - thisphys;
-					/**** or the data ****/
-					bytes_this_page = min(bytes_this_page,
-							      datalen);
-					bytes_this_seg += bytes_this_page;
-					datalen -= bytes_this_page;
-
-					/* get more ready for the next page */
-					thiskv = (thiskv & ~PGOFSET) + NBPG;
-					if (datalen)
-						thisphys = KVTOPHYS(thiskv);
-				}
-				/*
-				 * next page isn't contiguous, finish the seg
-				 */
-				SC_DEBUGN(sc_link, SDEV_DB4,
-				    ("(0x%x)", bytes_this_seg));
-				ltophys(bytes_this_seg, sg->seg_len);
-				sg++;
-				seg++;
-#endif
-			}
+		scb->data_nseg = isadma_map(xs->data, xs->datalen,
+					    scb->data_phys, mflags);
+		for (seg = 0; seg < scb->data_nseg; seg++) {
+			ltophys(scb->data_phys[seg].addr,
+			       sg[seg].seg_addr);
+			ltophys(scb->data_phys[seg].length,
+			       sg[seg].seg_len);
 		}
-		/* end of iov/kv decision */
+#else
+		datalen = xs->datalen;
+		thiskv = (int)xs->data;
+		thisphys = KVTOPHYS(xs->data);
+
+		while (datalen && seg < WDS_NSEG) {
+			bytes_this_seg = 0;
+
+			/* put in the base address */
+			ltophys(thisphys, sg->seg_addr);
+
+			SC_DEBUGN(sc_link, SDEV_DB4, ("0x%x", thisphys));
+
+			/* do it at least once */
+			nextphys = thisphys;
+			while (datalen && thisphys == nextphys) {
+				/*
+				 * This page is contiguous (physically)
+				 * with the last, just extend the
+				 * length
+				 */
+				/* check it fits on the ISA bus */
+				if (thisphys > 0xFFFFFF) {
+					printf("%s: DMA beyond"
+						" end of ISA\n",
+						sc->sc_dev.dv_xname);
+					goto bad;
+				}
+				/* how far to the end of the page */
+				nextphys = (thisphys & ~PGOFSET) + NBPG;
+				bytes_this_page = nextphys - thisphys;
+				/**** or the data ****/
+				bytes_this_page = min(bytes_this_page,
+						      datalen);
+				bytes_this_seg += bytes_this_page;
+				datalen -= bytes_this_page;
+
+				/* get more ready for the next page */
+				thiskv = (thiskv & ~PGOFSET) + NBPG;
+				if (datalen)
+					thisphys = KVTOPHYS(thiskv);
+			}
+			/*
+			 * next page isn't contiguous, finish the seg
+			 */
+			SC_DEBUGN(sc_link, SDEV_DB4,
+			    ("(0x%x)", bytes_this_seg));
+			ltophys(bytes_this_seg, sg->seg_len);
+			sg++;
+			seg++;
+#endif
+		}
+
 		SC_DEBUGN(sc_link, SDEV_DB4, ("\n"));
 		if (datalen) {
 			/*
@@ -1273,25 +1234,24 @@ wds_scsi_cmd(xs)
 		wds_free_scb(sc, scb);
 		scsi_done(xs);
 		splx(s);
-		return COMPLETE;
+		return;
 	}
 #endif
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return SUCCESSFULLY_QUEUED;
+		return;
 
 	if (wds_poll(sc, xs, scb->timeout)) {
 		wds_timeout(scb);
 		if (wds_poll(sc, xs, scb->timeout))
 			wds_timeout(scb);
 	}
-	return COMPLETE;
+	return;
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	wds_free_scb(sc, scb);
-	return COMPLETE;
 }
 
 /*
@@ -1426,10 +1386,8 @@ wds_timeout(arg)
 	 * If The scb's mbx is not free, then the board has gone south?
 	 */
 	wds_collect_mbo(sc);
-	if (scb->flags & SCB_SENDING) {
-		printf("%s: not taking commands!\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (scb->flags & SCB_SENDING)
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

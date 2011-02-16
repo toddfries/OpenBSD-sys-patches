@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wsfont.c,v 1.19 2006/08/06 13:04:33 miod Exp $ */
+=======
+/*	$OpenBSD: wsfont.c,v 1.25 2010/05/23 15:04:19 deraadt Exp $ */
+>>>>>>> origin/master
 /* 	$NetBSD: wsfont.c,v 1.17 2001/02/07 13:59:24 ad Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -109,7 +106,7 @@
 #define HAVE_FONT 1
 
 #define	FONT_BOLD8x16_ISO1
-#if defined(__sparc__) || defined(__sparc64__) || defined(luna88k) || !defined(SMALL_KERNEL)
+#if defined(__sparc__) || defined(__sparc64__) || defined(__luna88k__) || !defined(SMALL_KERNEL)
 #define	FONT_GALLANT12x22
 #endif
 
@@ -304,8 +301,6 @@ wsfont_rotate_internal(struct wsdisplay_font *font)
 
 	/* Duplicate the existing font... */
 	newfont = malloc(sizeof *font, M_DEVBUF, M_WAITOK);
-	if (newfont == NULL)
-		return (NULL);
 
 	bcopy(font, newfont, sizeof *font);
 	newfont->cookie = NULL;
@@ -313,11 +308,15 @@ wsfont_rotate_internal(struct wsdisplay_font *font)
 	/* Allocate a buffer big enough for the rotated font. */
 	newstride = (font->fontheight + 7) / 8;
 	newbits = malloc(newstride * font->fontwidth * font->numchars,
+<<<<<<< HEAD
 	    M_DEVBUF, M_WAITOK);
 	if (newbits == NULL) {
 		free(newfont, M_DEVBUF);
 		return (NULL);
 	}
+=======
+	    M_DEVBUF, M_WAITOK | M_ZERO);
+>>>>>>> origin/master
 
 	bzero(newbits, newstride * font->fontwidth * font->numchars);
 

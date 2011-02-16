@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_examine.c,v 1.12 2006/03/13 06:23:20 jsg Exp $	*/
+=======
+/*	$OpenBSD: db_examine.c,v 1.17 2009/11/21 20:40:04 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_examine.c,v 1.11 1996/03/30 22:30:07 christos Exp $	*/
 
 /*
@@ -198,19 +202,19 @@ db_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 		db_printf("%*r", sizeof(db_expr_t) * 2 * 6 / 5, addr);
 		break;
 	case 'x':
-		db_printf("%*x", sizeof(db_expr_t) * 2, addr);
+		db_printf("%*lx", sizeof(db_expr_t) * 2, addr);
 		break;
 	case 'z':
 		db_printf("%*z", sizeof(db_expr_t) * 2, addr);
 		break;
 	case 'd':
-		db_printf("%*d", sizeof(db_expr_t) * 2 * 6 / 5, addr);
+		db_printf("%*ld", sizeof(db_expr_t) * 2 * 6 / 5, addr);
 		break;
 	case 'u':
-		db_printf("%*u", sizeof(db_expr_t) * 2 * 6 / 5, addr);
+		db_printf("%*lu", sizeof(db_expr_t) * 2 * 6 / 5, addr);
 		break;
 	case 'o':
-		db_printf("%*o", sizeof(db_expr_t) * 2 * 4 / 3, addr);
+		db_printf("%*lo", sizeof(db_expr_t) * 2 * 4 / 3, addr);
 		break;
 	case 'c':
 		value = addr & 0xFF;

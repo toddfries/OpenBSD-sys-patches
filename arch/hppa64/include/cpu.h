@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.9 2006/03/12 03:14:37 brad Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.19 2010/12/21 14:56:23 claudio Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -110,9 +110,6 @@
 #define	splx(c)		spllower(c)
 
 #define	setsoftast()		(astpending = 1)
-#define	setsoftclock()		/* TODO */
-#define	setsoftnet()		/* TODO */
-#define	setsofttty()		/* TODO */
 
 #ifndef _LOCORE
 #include <sys/time.h>
@@ -126,6 +123,7 @@ struct cpu_info {
 	struct proc	*ci_fpproc;
 	int		ci_number;
 	struct schedstate_percpu ci_schedstate;	/* scheduler state */
+	u_int32_t	ci_randseed;
 
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long		ci_spin_locks;  /* # of spin locks held */
@@ -134,6 +132,11 @@ struct cpu_info {
 	/* Spinning up the CPU */
 	void		(*ci_spinup)(void); /* spinup routine */
 	void		*ci_initstack;
+
+	u_long		ci_itmr;
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 };
 
 struct cpu_info *curcpu(void);
@@ -143,6 +146,8 @@ struct cpu_info *curcpu(void);
 #define	CPU_INFO_FOREACH(cii,ci) \
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = ci->ci_next)
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_number)
+#define MAXCPUS	1
+#define cpu_unidle(ci)
 
 #ifdef DIAGNOSTIC   
 void splassert_fail(int, int, const char *);
@@ -153,8 +158,10 @@ void splassert_check(int, const char *);
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
+#define splsoftassert(__wantipl) splassert(__wantipl)
 #else
-#define splassert(__wantipl)	do { /* nada */ } while (0)
+#define splassert(__wantipl)		do { /* nada */ } while (0)
+#define splsoftassert(__wantipl)	do { /* nada */ } while (0)
 #endif /* DIAGNOSTIC */
 
 /* types */
@@ -196,6 +203,7 @@ extern int cpu_hvers;
 
 #define	signotify(p)		(setsoftast())
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
+#define clear_resched(ci) 	want_resched = 0
 #define	need_proftick(p)	setsoftast()
 
 #ifndef _LOCORE

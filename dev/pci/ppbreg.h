@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ppbreg.h,v 1.1 1996/04/18 23:48:09 niklas Exp $	*/
+=======
+/*	$OpenBSD: ppbreg.h,v 1.4 2009/11/19 20:43:32 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ppbreg.h,v 1.3 2001/07/06 18:07:16 mcr Exp $	*/
 
 /*
@@ -78,6 +82,7 @@
 #define PPB_IOBASE_SHIFT   0
 #define PPB_IOLIMIT_SHIFT  8
 #define PPB_IO_MASK   0xf000
+#define PPB_IO_SHIFT  8
 #define PPB_IO_MIN    4096
 
 /*
@@ -92,7 +97,7 @@
 /* 
  * bridge control register (see table 3.9 of ppb rev. 1.1)
  *
- * Note these are in the *upper* 16 bits if the Bridge Control
+ * Note these are in the *upper* 16 bits of the Bridge Control
  * Register (the bottom 16 are Interrupt Line and Interrupt Pin).
  */
 #define	PPB_BC_BITBASE			   16

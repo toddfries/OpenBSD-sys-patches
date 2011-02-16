@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wi_hostap.c,v 1.36 2006/07/01 20:22:22 reyk Exp $	*/
+=======
+/*	$OpenBSD: if_wi_hostap.c,v 1.41 2008/10/15 19:12:19 blambert Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2002
@@ -376,7 +380,7 @@ wihap_timeout(void *v)
 			 * until inactivity_time seconds have passed.
 			 */
 			wihap_sta_movetail(whi, sta);
-			timeout_add(&sta->tmo, hz * whi->inactivity_time);
+			timeout_add_sec(&sta->tmo, whi->inactivity_time);
 		} else if (sta->flags & WI_SIFLAGS_AUTHEN) {
 			if (sc->sc_ic.ic_if.if_flags & IFF_DEBUG)
 				printf("wihap_timeout: deauth due to inactivity: %s\n",
@@ -483,7 +487,7 @@ wihap_sta_alloc(struct wi_softc *sc, u_int8_t *addr)
 	whi->n_stations++;
 	bcopy(addr, &sta->addr, ETHER_ADDR_LEN);
 	timeout_set(&sta->tmo, wihap_sta_timeout, sta);
-	timeout_add(&sta->tmo, hz * whi->inactivity_time);
+	timeout_add_sec(&sta->tmo, whi->inactivity_time);
 
 	return (sta);
 }
@@ -619,7 +623,7 @@ wihap_auth_req(struct wi_softc *sc, struct wi_frame *rxfrm,
 			goto fail;
 		}
 	}
-	timeout_add(&sta->tmo, hz * whi->inactivity_time);
+	timeout_add_sec(&sta->tmo, whi->inactivity_time);
 
 	/* Note: it's okay to leave the station info structure around
 	 * if the authen fails.  It'll be timed out eventually.
@@ -833,7 +837,7 @@ wihap_assoc_req(struct wi_softc *sc, struct wi_frame *rxfrm,
 	}
 
 	sta->flags |= WI_SIFLAGS_ASSOC;
-	timeout_add(&sta->tmo, hz * whi->inactivity_time);
+	timeout_add_sec(&sta->tmo, whi->inactivity_time);
 	status = IEEE80211_STATUS_SUCCESS;
 
 fail:
@@ -1056,7 +1060,7 @@ wihap_sta_is_assoc(struct wihap_info *whi, u_int8_t addr[])
 	sta = wihap_sta_find(whi, addr);
 	if (sta != NULL && (sta->flags & WI_SIFLAGS_ASSOC)) {
 		/* Keep it active. */
-		timeout_add(&sta->tmo, hz * whi->inactivity_time);
+		timeout_add_sec(&sta->tmo, whi->inactivity_time);
 		return (1);
 	}
 
@@ -1084,7 +1088,7 @@ wihap_check_tx(struct wihap_info *whi, u_int8_t addr[], u_int8_t *txrate)
 	sta = wihap_sta_find(whi, addr);
 	if (sta != NULL && (sta->flags & WI_SIFLAGS_ASSOC)) {
 		/* Keep it active. */
-		timeout_add(&sta->tmo, hz * whi->inactivity_time);
+		timeout_add_sec(&sta->tmo, whi->inactivity_time);
 		*txrate = txratetable[sta->tx_curr_rate];
 		splx(s);
 		return (1);
@@ -1154,7 +1158,7 @@ wihap_data_input(struct wi_softc *sc, struct wi_frame *rxfrm, struct mbuf *m)
 		return (1);
 	}
 
-	timeout_add(&sta->tmo, hz * whi->inactivity_time);
+	timeout_add_sec(&sta->tmo, whi->inactivity_time);
 	sta->sig_info = letoh16(rxfrm->wi_q_info);
 
 	splx(s);
@@ -1278,7 +1282,7 @@ wihap_ioctl(struct wi_softc *sc, u_long command, caddr_t data)
 		}
 		sta = wihap_sta_alloc(sc, reqsta.addr);
 		sta->flags = reqsta.flags;
-		timeout_add(&sta->tmo, hz * whi->inactivity_time);
+		timeout_add_sec(&sta->tmo, whi->inactivity_time);
 		splx(s);
 		break;
 

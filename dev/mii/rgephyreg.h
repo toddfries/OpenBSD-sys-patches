@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rgephyreg.h,v 1.1 2004/06/05 05:49:29 pvalchev Exp $	*/
+=======
+/*	$OpenBSD: rgephyreg.h,v 1.4 2008/08/26 07:43:03 brad Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -138,6 +142,19 @@
 #define RGEPHY_EXTSTS_T_FD_CAP	0x2000	/* 1000base-T FD capable */
 #define RGEPHY_EXTSTS_T_HD_CAP	0x1000	/* 1000base-T HD capable */
 
+<<<<<<< HEAD
 
+=======
+/* RTL8211B(L)/RTL8211C(L) */
+#define RGEPHY_SR		0x11	/* PHY Specific Status */
+#define RGEPHY_SR_CROSSOVER		(1 <<  6)
+#define RGEPHY_SR_LINK			(1 << 10)
+#define RGEPHY_SR_FDX			(1 << 13)
+#define RGEPHY_SR_SPEED_MASK		(3 << 14)
+#define RGEPHY_SR_SPEED_1000MBPS	(2 << 14)
+#define RGEPHY_SR_SPEED_100MBPS		(1 << 14)
+#define RGEPHY_SR_SPEED_10MBPS		(0 << 14)
+#define RGEPHY_SR_SPEED(X)		((X) & RGEPHY_SR_SPEED_MASK)
+>>>>>>> origin/master
 
 #endif /* _DEV_RGEPHY_MIIREG_H_ */

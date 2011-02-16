@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.6 2007/02/13 00:20:59 jsg Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.19 2010/04/29 17:00:48 oga Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 /*	$NetBSD: x86/specialreg.h,v 1.2 2003/04/25 21:54:30 fvdl Exp $	*/
 
@@ -123,14 +123,29 @@
 #define	CPUID_SBF	0x80000000	/* signal break on FERR */
 
 #define	CPUIDECX_SSE3	0x00000001	/* streaming SIMD extensions #3 */
+#define CPUIDECX_PCLMUL	0x00000002	/* Carryless Multiplication */
 #define CPUIDECX_MWAIT	0x00000008	/* Monitor/Mwait */
 #define CPUIDECX_DSCPL	0x00000010	/* CPL Qualified Debug Store */
 #define CPUIDECX_VMX	0x00000020	/* Virtual Machine Extensions */
+#define CPUIDECX_SMX	0x00000040	/* Safer Mode Extensions */
 #define CPUIDECX_EST	0x00000080	/* enhanced SpeedStep */
 #define CPUIDECX_TM2	0x00000100	/* thermal monitor 2 */
+#define CPUIDECX_SSSE3	0x00000200	/* Supplemental Streaming SIMD Ext. 3 */
 #define CPUIDECX_CNXTID	0x00000400	/* Context ID */
+#define CPUIDECX_FMA3	0x00001000	/* Fused Multiply Add */
 #define CPUIDECX_CX16	0x00002000	/* has CMPXCHG16B instruction */
 #define CPUIDECX_XTPR	0x00004000	/* xTPR Update Control */
+#define CPUIDECX_PDCM	0x00008000	/* Perfmon and Debug Capability */
+#define CPUIDECX_DCA	0x00040000	/* Direct Cache Access */
+#define CPUIDECX_SSE41	0x00080000	/* Streaming SIMD Extensions 4.1 */
+#define CPUIDECX_SSE42	0x00100000	/* Streaming SIMD Extensions 4.2 */
+#define CPUIDECX_X2APIC	0x00200000	/* Extended xAPIC Support */
+#define CPUIDECX_MOVBE	0x00400000	/* MOVBE Instruction */
+#define CPUIDECX_POPCNT	0x00800000	/* POPCNT Instruction */
+#define CPUIDECX_AES	0x02000000	/* AES Instruction */
+#define CPUIDECX_XSAVE	0x04000000	/* XSAVE/XSTOR States */
+#define CPUIDECX_OSXSAVE	0x08000000	/* OSXSAVE */
+#define CPUIDECX_AVX	0x10000000	/* Advanced Vector Extensions */
 
 /*
  * AMD/VIA processor specific flags.
@@ -221,6 +236,7 @@
 #define	MSR_MTRRfix4K_E8000	0x26d
 #define	MSR_MTRRfix4K_F0000	0x26e
 #define	MSR_MTRRfix4K_F8000	0x26f
+#define MSR_CR_PAT		0x277
 #define MSR_MTRRdefType		0x2ff
 #define MSR_MC0_CTL		0x400
 #define MSR_MC0_STATUS		0x401
@@ -242,6 +258,9 @@
 #define MSR_MC3_STATUS		0x411
 #define MSR_MC3_ADDR		0x412
 #define MSR_MC3_MISC		0x413
+
+/* VIA MSR */
+#define MSR_CENT_TMTEMPERATURE	0x1423	/* Thermal monitor temperature */
 
 /*
  * AMD K6/K7 MSRs.
@@ -275,6 +294,10 @@
 #define MSR_FSBASE	0xc0000100		/* 64bit offset for fs: */
 #define MSR_GSBASE	0xc0000101		/* 64bit offset for gs: */
 #define MSR_KERNELGSBASE 0xc0000102		/* storage for swapgs ins */
+#define MSR_INT_PEN_MSG	0xc0010055		/* Interrupt pending message */
+
+#define IPM_C1E_CMP_HLT	0x10000000
+#define IPM_SMI_CMP_HLT	0x08000000
 
 /*
  * These require a 'passcode' for access.  See cpufunc.h.
@@ -621,23 +644,35 @@
 #define	K7_BP2_MATCH			0xde
 #define	K7_BP3_MATCH			0xdf
 
-/*
- * Extended Feature Enable Register of the x86-64
- */
+/* VIA C3 crypto featureset: for i386_has_xcrypt */
+#define C3_HAS_AES			1	/* cpu has AES */
+#define C3_HAS_SHA			2	/* cpu has SHA1 & SHA256 */
+#define C3_HAS_MM			4	/* cpu has RSA instructions */
+#define C3_HAS_AESCTR			8	/* cpu has AES-CTR instructions */
 
-#define MSR_EFER	0xc0000080
+/* Centaur Extended Feature flags */
+#define C3_CPUID_HAS_RNG		0x000004
+#define C3_CPUID_DO_RNG			0x000008
+#define C3_CPUID_HAS_ACE		0x000040
+#define C3_CPUID_DO_ACE			0x000080
+#define C3_CPUID_HAS_ACE2		0x000100
+#define C3_CPUID_DO_ACE2		0x000200
+#define C3_CPUID_HAS_PHE		0x000400
+#define C3_CPUID_DO_PHE			0x000800
+#define C3_CPUID_HAS_PMM		0x001000
+#define C3_CPUID_DO_PMM			0x002000
 
-#define EFER_SCE	0x00000001	/* SYSCALL extension */
-#define EFER_LME	0x00000100	/* Long Mode Enabled */
-#define EFER_LMA	0x00000400	/* Long Mode Active */
-#define EFER_NXE	0x00000800	/* No-Execute Enable */
-#define EFER_FFXSR	0x00004000	/* Fast FXSAVE/FXRSTOR */
-
-#define MSR_STAR	0xc0000081		/* 32 bit syscall gate addr */
-#define MSR_LSTAR	0xc0000082		/* 64 bit syscall gate addr */
-#define MSR_CSTAR	0xc0000083		/* compat syscall gate addr */
-#define MSR_SFMASK	0xc0000084		/* flags to clear on syscall */
-
-#define MSR_FSBASE		0xc0000100	/* 64bit offset for fs: */
-#define MSR_GSBASE		0xc0000101	/* 64bit offset for gs: */
-#define MSR_KERNELGSBASE	0xc0000102	/* storage for swapgs ins */
+/* VIA C3 xcrypt-* instruction context control options */
+#define	C3_CRYPT_CWLO_ROUND_M		0x0000000f
+#define	C3_CRYPT_CWLO_ALG_M		0x00000070
+#define	C3_CRYPT_CWLO_ALG_AES		0x00000000
+#define	C3_CRYPT_CWLO_KEYGEN_M		0x00000080
+#define	C3_CRYPT_CWLO_KEYGEN_HW		0x00000000
+#define	C3_CRYPT_CWLO_KEYGEN_SW		0x00000080
+#define	C3_CRYPT_CWLO_NORMAL		0x00000000
+#define	C3_CRYPT_CWLO_INTERMEDIATE	0x00000100
+#define	C3_CRYPT_CWLO_ENCRYPT		0x00000000
+#define	C3_CRYPT_CWLO_DECRYPT		0x00000200
+#define	C3_CRYPT_CWLO_KEY128		0x0000000a	/* 128bit, 10 rds */
+#define	C3_CRYPT_CWLO_KEY192		0x0000040c	/* 192bit, 12 rds */
+#define	C3_CRYPT_CWLO_KEY256		0x0000080e	/* 256bit, 15 rds */

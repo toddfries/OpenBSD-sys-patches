@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vm_machdep.c,v 1.7 2006/11/17 08:35:43 deraadt Exp $	*/
+=======
+/*	$OpenBSD: vm_machdep.c,v 1.10 2008/07/14 14:00:00 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vm_machdep.c,v 1.53 2006/08/31 16:49:21 matt Exp $	*/
 
 /*
@@ -356,7 +360,7 @@ vmapbuf(struct buf *bp, vsize_t len)
 	faddr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - faddr;
 	len = round_page(off + len);
-	taddr = uvm_km_valloc_wait(phys_map, len);
+	taddr = uvm_km_valloc_prefer_wait(phys_map, len, faddr);
 	bp->b_data = (caddr_t)(taddr + off);
 	/*
 	 * The region is locked, so we expect that pmap_pte() will return

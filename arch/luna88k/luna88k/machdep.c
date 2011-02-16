@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.36 2007/01/12 21:41:53 aoyama Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.75 2011/01/05 22:20:22 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -69,9 +69,6 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
@@ -93,7 +90,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -103,7 +100,6 @@
 #include <ddb/db_output.h>		/* db_printf()		*/
 #endif /* DDB */
 
-caddr_t	allocsys(caddr_t);
 void	consinit(void);
 void	dumpconf(void);
 void	dumpsys(void);
@@ -188,8 +184,6 @@ struct nvram_t {
 	char value[NVVALLEN];
 } nvram[NNVSYM];
 
-vaddr_t obiova;
-
 int physmem;	  /* available physical memory, in pages */
 
 struct vm_map *exec_map = NULL;
@@ -214,6 +208,9 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * Info for CTL_HW
@@ -267,6 +264,8 @@ struct consdev romttycons = {
 	makedev(14, 0),
 	CN_NORMAL,
 };
+
+struct consdev *cn_tab = &romttycons;
 
 /*
  * Early console initialization: called early on from main, before vm init.
@@ -370,21 +369,7 @@ identifycpu()
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz, i;
-	vsize_t size;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-
-	/*
-	 * Initialize error message buffer (at end of core).
-	 * avail_end was pre-decremented in luna88k_bootstrap() to compensate.
-	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
-		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
-		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
-	pmap_update(pmap_kernel());
-	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	/* Determine the machine type from FUSE ROM data.  */
 	get_fuse_rom_data();
@@ -401,7 +386,8 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem  = %d\n", ctob(physmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
 
 	/*
 	 * Check front DIP switch setting
@@ -457,73 +443,6 @@ cpu_startup()
 #endif
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Grab the OBIO space that we hardwired in pmap_bootstrap
-	 */
-	obiova = OBIO_START;
-	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (obiova != OBIO_START)
-		panic("obiova %lx: OBIO not free", obiova);
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	      UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				      "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
-
-	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
@@ -536,9 +455,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
-	printf("using %d buffers containing %d bytes of memory\n", nbuf,
-	    bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -560,61 +478,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-
-	return v;
 }
 
 __dead void
@@ -676,7 +539,7 @@ haltsys:
 	/*NOTREACHED*/
 }
 
-unsigned dumpmag = 0x8fca0101;	 /* magic number for savecore */
+u_long dumpmag = 0x8fca0101;	 /* magic number for savecore */
 int   dumpsize = 0;	/* also for savecore */
 long  dumplo = 0;
 cpu_kcore_hdr_t cpu_kcore_hdr;
@@ -770,6 +633,10 @@ dumpsys()
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	/* Setup the dump header */
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
@@ -798,10 +665,7 @@ dumpsys()
 		if (pg != 0 && (pg % NPGMB) == 0)
 			printf("%d ", pg / NPGMB);
 #undef NPGMB
-		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, maddr,
-		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
-
-		error = (*dump)(dumpdev, blkno, vmmap, PAGE_SIZE);
+		error = (*dump)(dumpdev, blkno, (caddr_t)maddr, PAGE_SIZE);
 		if (error == 0) {
 			maddr += PAGE_SIZE;
 			blkno += btodb(PAGE_SIZE);
@@ -899,7 +763,7 @@ secondary_main()
  */
 
 void 
-luna88k_ext_int(u_int v, struct trapframe *eframe)
+luna88k_ext_int(struct trapframe *eframe)
 {
 	int cpu = cpu_number();
 	unsigned int cur_mask, cur_int;
@@ -1058,14 +922,11 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 luna88k_bootstrap()
 {
-	extern int kernelstart;
-	extern struct consdev *cn_tab;
 	extern struct cmmu_p cmmu8820x;
 	extern char *end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
-	cpuid_t cpu;
 	extern void m8820x_initialize_cpu(cpuid_t);
 	extern void m8820x_set_sapr(cpuid_t, apr_t);
 	extern void cpu_boot_secondary_processors(void);
@@ -1077,9 +938,6 @@ luna88k_bootstrap()
 	*int_mask_reg[1] = 0;
 	*int_mask_reg[2] = 0;
 	*int_mask_reg[3] = 0;
-
-	/* startup fake console driver.  It will be replaced by consinit() */
-	cn_tab = &romttycons;
 
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
@@ -1107,16 +965,10 @@ luna88k_bootstrap()
 	avail_start = first_addr;
 	avail_end = last_addr;
 
-	/*
-	 * Steal MSGBUFSIZE at the top of physical memory for msgbuf
-	 */
-	avail_end -= round_page(MSGBUFSIZE);
-
 #ifdef DEBUG
 	printf("LUNA88K boot: memory from 0x%x to 0x%x\n",
 	    avail_start, avail_end);
 #endif
-	pmap_bootstrap((vaddr_t)trunc_page((unsigned)&kernelstart));
 
 	/*
 	 * Tell the VM system about available physical memory.
@@ -1125,23 +977,17 @@ luna88k_bootstrap()
 	uvm_page_physload(atop(avail_start), atop(avail_end),
 	    atop(avail_start), atop(avail_end),VM_FREELIST_DEFAULT);
 
+	/*
+	 * Initialize message buffer.
+	 */
+	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
+	    MSGBUFSIZE);
+
+	pmap_bootstrap(0, 0x20000);	/* ROM needs 128KB */
+
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
 
-	/*
-	 * On the luna88k, secondary processors are not disabled while the
-	 * kernel is initializing. We just initialized the CMMUs tied to the
-	 * currently-running CPU; initialize the others with similar settings
-	 * as well, after calling pmap_bootstrap() above.
-	 */
-	for (cpu = 0; cpu < max_cpus; cpu++) {
-		if (cpu == master_cpu)
-			continue;
-		if (m88k_cpus[cpu].ci_alive == 0)
-			continue;
-		m8820x_initialize_cpu(cpu);
-		cmmu_set_sapr(cpu, kernel_pmap->pm_apr);
-	}
 	/* Release the cpu_mutex */
 	cpu_boot_secondary_processors();
 

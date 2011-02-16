@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: cpu.h,v 1.23 2007/03/15 10:22:30 art Exp $      */
+=======
+/*      $OpenBSD: cpu.h,v 1.36 2010/09/28 20:27:56 miod Exp $      */
+>>>>>>> origin/master
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -47,15 +51,44 @@
 #include <machine/trap.h>
 #include <machine/intr.h>
 
+<<<<<<< HEAD
 #define	cpu_wait(p)
 #define	cpu_number()			0
+=======
+#include <sys/sched.h>
+struct cpu_info {
+	struct proc *ci_curproc;
+
+	struct schedstate_percpu ci_schedstate; /* scheduler state */
+	u_int32_t 		ci_randseed;
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
+};
+
+extern struct cpu_info cpu_info_store;
+#define	curcpu()	(&cpu_info_store)
+#define cpu_number()	0
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS	1
+#define cpu_unidle(ci)
+
+struct clockframe {
+        int     pc;
+        int     ps;
+};
+>>>>>>> origin/master
 
 /*
  * All cpu-dependent info is kept in this struct. Pointer to the
  * struct for the current cpu is set up in locore.c.
  */
 struct	cpu_dep {
-	void	(*cpu_steal_pages)(void); /* pmap init before mm is on */
+	void	(*cpu_init)(void); /* pmap init before mm is on */
 	int	(*cpu_mchk)(caddr_t);   /* Machine check handling */
 	void	(*cpu_memerr)(void); /* Memory subsystem errors */
 	    /* Autoconfiguration */
@@ -68,22 +101,15 @@ struct	cpu_dep {
 	void	(*cpu_reboot)(int); /* Cpu dependent reboot call */
 	void	(*cpu_clrf)(void); /* Clear cold/warm start flags */
 	void	(*cpu_subconf)(struct device *);/*config cpu dep. devs */
+	void	(*cpu_hardclock)(struct clockframe *);	/* hardclock handler */
 };
 
 extern struct cpu_dep *dep_call; /* Holds pointer to current CPU struct. */
-
-struct clockframe {
-        int     pc;
-        int     ps;
-};
 
 extern struct device *booted_from;
 extern int mastercpu;
 extern int bootdev;
 
-#define	setsoftnet()	mtpr(IPL_SOFTNET,PR_SIRR)
-#define setsoftclock()	mtpr(IPL_SOFTCLOCK,PR_SIRR)
-#define	todr()		mfpr(PR_TODR)
 /*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
@@ -93,6 +119,7 @@ extern int bootdev;
 	want_resched++; \
 	mtpr(AST_OK,PR_ASTLVL); \
 	}
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Notify the current process (p) that it has a signal pending,

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bktr_core.c,v 1.21 2007/02/11 20:29:22 miod Exp $	*/
+=======
+/*	$OpenBSD: bktr_core.c,v 1.29 2010/08/06 00:00:16 miod Exp $	*/
+>>>>>>> origin/master
 /* $FreeBSD: src/sys/dev/bktr/bktr_core.c,v 1.114 2000/10/31 13:09:56 roger Exp $ */
 
 /*
@@ -810,7 +814,17 @@ common_bktr_intr( void *arg )
 		}
 
 		/* If someone has a select() on /dev/vbi, inform them */
+<<<<<<< HEAD
 		selwakeup(&bktr->vbi_select);
+=======
+#ifndef __OpenBSD__
+		if (bktr->vbi_select.si_pid) {
+			selwakeup(&bktr->vbi_select);
+		}
+#else
+		selwakeup(&bktr->vbi_select);
+#endif
+>>>>>>> origin/master
 	}
 
 
@@ -1230,7 +1244,8 @@ vbi_read(bktr_ptr_t bktr, struct uio *uio, int ioflag)
 
 		readsize2 = VBI_BUFFER_SIZE - bktr->vbistart;
 		status = uiomove((caddr_t)bktr->vbibuffer + bktr->vbistart, readsize2, uio);
-		status += uiomove((caddr_t)bktr->vbibuffer, (readsize - readsize2), uio);
+		if (status == 0)
+			status = uiomove((caddr_t)bktr->vbibuffer, (readsize - readsize2), uio);
 	} else {
 		/* We do not need to wrap around */
 		status = uiomove((caddr_t)bktr->vbibuffer + bktr->vbistart, readsize, uio);

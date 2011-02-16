@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_eg.c,v 1.29 2006/04/16 16:30:56 miod Exp $	*/
+=======
+/*	$OpenBSD: if_eg.c,v 1.32 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_eg.c,v 1.26 1996/05/12 23:52:27 mycroft Exp $	*/
 
 /*
@@ -326,7 +330,7 @@ egprobe(parent, match, aux)
 	}
 	
 	if (bus_space_map(bst, ia->ia_iobase, EG_IO_PORTS, 0, &bsh)) {
-		DPRINTF(("%s: can't map I/O space\n", sc->sc_dev.dv_xname));
+		DPRINTF(("%s: can't map i/o space\n", sc->sc_dev.dv_xname));
 		return (0);
 	}
 	sc->sc_bsh = bsh;
@@ -786,13 +790,7 @@ egioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -839,8 +837,7 @@ egioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);

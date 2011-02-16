@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cgsix.c,v 1.55 2006/12/02 11:21:37 miod Exp $	*/
+=======
+/*	$OpenBSD: cgsix.c,v 1.58 2009/09/05 14:09:35 miod Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -53,11 +57,6 @@
 #include <dev/ic/bt458reg.h>
 
 int cgsix_ioctl(void *, u_long, caddr_t, int, struct proc *);
-int cgsix_alloc_screen(void *, const struct wsscreen_descr *, void **,
-    int *, int *, long *);
-void cgsix_free_screen(void *, void *);
-int cgsix_show_screen(void *, void *, int, void (*cb)(void *, int, int),
-    void *);
 paddr_t cgsix_mmap(void *, off_t, int);
 int cgsix_is_console(int);
 int cg6_bt_getcmap(union bt_cmap *, struct wsdisplay_cmap *);
@@ -70,20 +69,20 @@ void cgsix_hardreset(struct cgsix_softc *);
 void cgsix_burner(void *, u_int, u_int);
 int cgsix_intr(void *);
 void cgsix_ras_init(struct cgsix_softc *);
-void cgsix_ras_copyrows(void *, int, int, int);
-void cgsix_ras_copycols(void *, int, int, int, int);
-void cgsix_ras_erasecols(void *, int, int, int, long int);
-void cgsix_ras_eraserows(void *, int, int, long int);
-void cgsix_ras_do_cursor(struct rasops_info *);
+int cgsix_ras_copyrows(void *, int, int, int);
+int cgsix_ras_copycols(void *, int, int, int, int);
+int cgsix_ras_erasecols(void *, int, int, int, long int);
+int cgsix_ras_eraserows(void *, int, int, long int);
+int cgsix_ras_do_cursor(struct rasops_info *);
 int cgsix_setcursor(struct cgsix_softc *, struct wsdisplay_cursor *);
 int cgsix_updatecursor(struct cgsix_softc *, u_int);
 
 struct wsdisplay_accessops cgsix_accessops = {
 	cgsix_ioctl,
 	cgsix_mmap,
-	cgsix_alloc_screen,
-	cgsix_free_screen,
-	cgsix_show_screen,
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
 	NULL,	/* load_font */
 	NULL,	/* scrollback */
 	NULL,	/* getchar */
@@ -202,7 +201,12 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sunfb.sf_ro.ri_bits = (void *)bus_space_vaddr(sc->sc_bustag,
 	    sc->sc_vid_regs);
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
-	fbwscons_init(&sc->sc_sunfb, console ? 0 : RI_CLEAR);
+
+	printf(", %dx%d, rev %d\n", sc->sc_sunfb.sf_width,
+	    sc->sc_sunfb.sf_height, rev);
+
+	fbwscons_init(&sc->sc_sunfb, 0, console);
+	fbwscons_setcolormap(&sc->sc_sunfb, cgsix_setcolor);
 
 	/*
 	 * Old rev. cg6 cards do not like the current acceleration code.
@@ -223,14 +227,8 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 		cgsix_ras_init(sc);
 	}
 
-	printf(", %dx%d, rev %d\n", sc->sc_sunfb.sf_width,
-	    sc->sc_sunfb.sf_height, rev);
-
-	fbwscons_setcolormap(&sc->sc_sunfb, cgsix_setcolor);
-
-	if (console) {
+	if (console)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
-	}
 
 	fbwscons_attach(&sc->sc_sunfb, &cgsix_accessops, console);
 
@@ -497,39 +495,6 @@ cgsix_updatecursor(struct cgsix_softc *sc, u_int which)
 		}
 	}
 
-	return (0);
-}
-
-int
-cgsix_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
-    int *curxp, int *curyp, long *attrp)
-{
-	struct cgsix_softc *sc = v;
-
-	if (sc->sc_nscreens > 0)
-		return (ENOMEM);
-
-	*cookiep = &sc->sc_sunfb.sf_ro;
-	*curyp = 0;
-	*curxp = 0;
-	sc->sc_sunfb.sf_ro.ri_ops.alloc_attr(&sc->sc_sunfb.sf_ro,
-	    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
-	sc->sc_nscreens++;
-	return (0);
-}
-
-void
-cgsix_free_screen(void *v, void *cookie)
-{
-	struct cgsix_softc *sc = v;
-
-	sc->sc_nscreens--;
-}
-
-int
-cgsix_show_screen(void *v, void *cookie, int waitok,
-    void (*cb)(void *, int, int), void *cbarg)
-{
 	return (0);
 }
 
@@ -833,14 +798,14 @@ cgsix_ras_init(struct cgsix_softc *sc)
 	FBC_WRITE(sc, CG6_FBC_MODE, m);
 }
 
-void
+int
 cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 {
 	struct rasops_info *ri = cookie;
 	struct cgsix_softc *sc = ri->ri_hw;
 
 	if (dst == src)
-		return;
+		return 0;
 	if (src < 0) {
 		n += src;
 		src = 0;
@@ -854,7 +819,7 @@ cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 	if (dst + n > ri->ri_rows)
 		n = ri->ri_rows - dst;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontheight;
 	src *= ri->ri_font->fontheight;
 	dst *= ri->ri_font->fontheight;
@@ -878,18 +843,20 @@ cgsix_ras_copyrows(void *cookie, int src, int dst, int n)
 	FBC_WRITE(sc, CG6_FBC_Y3, ri->ri_yorigin + dst + n - 1);
 	CG6_BLIT_WAIT(sc);
 	CG6_DRAIN(sc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 {
 	struct rasops_info *ri = cookie;
 	struct cgsix_softc *sc = ri->ri_hw;
 
 	if (dst == src)
-		return;
+		return 0;
 	if ((row < 0) || (row >= ri->ri_rows))
-		return;
+		return 0;
 	if (src < 0) {
 		n += src;
 		src = 0;
@@ -903,7 +870,7 @@ cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 	if (dst + n > ri->ri_cols)
 		n = ri->ri_cols - dst;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontwidth;
 	src *= ri->ri_font->fontwidth;
 	dst *= ri->ri_font->fontwidth;
@@ -930,9 +897,11 @@ cgsix_ras_copycols(void *cookie, int row, int src, int dst, int n)
 	    ri->ri_yorigin + row + ri->ri_font->fontheight - 1);
 	CG6_BLIT_WAIT(sc);
 	CG6_DRAIN(sc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_erasecols(void *cookie, int row, int col, int n, long int attr)
 {
 	struct rasops_info *ri = cookie;
@@ -940,7 +909,7 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long int attr)
 	int fg, bg;
 
 	if ((row < 0) || (row >= ri->ri_rows))
-		return;
+		return 0;
 	if (col < 0) {
 		n += col;
 		col = 0;
@@ -948,7 +917,7 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long int attr)
 	if (col + n > ri->ri_cols)
 		n = ri->ri_cols - col;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontwidth;
 	col *= ri->ri_font->fontwidth;
 	row *= ri->ri_font->fontheight;
@@ -972,9 +941,11 @@ cgsix_ras_erasecols(void *cookie, int row, int col, int n, long int attr)
 	FBC_WRITE(sc, CG6_FBC_ARECTX, ri->ri_xorigin + col + n - 1);
 	CG6_DRAW_WAIT(sc);
 	CG6_DRAIN(sc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_eraserows(void *cookie, int row, int n, long int attr)
 {
 	struct rasops_info *ri = cookie;
@@ -988,7 +959,7 @@ cgsix_ras_eraserows(void *cookie, int row, int n, long int attr)
 	if (row + n > ri->ri_rows)
 		n = ri->ri_rows - row;
 	if (n <= 0)
-		return;
+		return 0;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
@@ -1018,9 +989,11 @@ cgsix_ras_eraserows(void *cookie, int row, int n, long int attr)
 	}
 	CG6_DRAW_WAIT(sc);
 	CG6_DRAIN(sc);
+
+	return 0;
 }
 
-void
+int
 cgsix_ras_do_cursor(struct rasops_info *ri)
 {
 	struct cgsix_softc *sc = ri->ri_hw;
@@ -1045,4 +1018,6 @@ cgsix_ras_do_cursor(struct rasops_info *ri)
 	    ri->ri_xorigin + col + ri->ri_font->fontwidth - 1);
 	CG6_DRAW_WAIT(sc);
 	CG6_DRAIN(sc);
+
+	return 0;
 }

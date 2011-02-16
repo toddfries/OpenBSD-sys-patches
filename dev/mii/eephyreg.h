@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: eephyreg.h,v 1.4 2003/08/01 04:46:13 nate Exp $	*/
+=======
+/*	$OpenBSD: eephyreg.h,v 1.7 2009/06/04 05:19:38 kettenis Exp $	*/
+>>>>>>> origin/master
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -220,7 +224,6 @@
 #define E1000_SCR_AUTO_X_MODE		0x0060
 #define E1000_SCR_10BT_EXT_ENABLE	0x0080
 #define E1000_SCR_MII_5BIT_ENABLE	0x0100
-#define E1000_SCR_SCRAMBLER_DISABLE	0x0200
 #define E1000_SCR_FORCE_LINK_GOOD	0x0400
 #define E1000_SCR_ASSERT_CRS_ON_TX	0x0800
 #define E1000_SCR_RX_FIFO_DEPTH_6	0x0000
@@ -233,6 +236,10 @@
 #define E1000_SCR_TX_FIFO_DEPTH_12	0xC000
 
 #define E1000_SCR_EN_DETECT_MASK	0x0300
+
+#define E3000_SCR_SCRAMBLER_DISABLE	0x0200
+#define E3000_SCR_REG8_NEXT_PAGE	0x1000
+#define E3000_SCR_EN_DETECT_MASK	0x4000
 
 /* 88E1112 page 2 */
 #define E1000_SCR_MODE_MASK		0x0380

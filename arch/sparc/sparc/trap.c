@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.c,v 1.50 2006/12/24 20:30:35 miod Exp $	*/
+=======
+/*	$OpenBSD: trap.c,v 1.55 2010/11/27 19:41:48 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: trap.c,v 1.58 1997/09/12 08:55:01 pk Exp $ */
 
 /*
@@ -461,11 +465,6 @@ badtrap:
 		break;
 
 	case T_ALIGN:
-		if ((p->p_md.md_flags & MDP_FIXALIGN) != 0 && 
-		    fixalign(p, tf) == 0) {
-			ADVANCE;
-			break;
-		}
 		trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);
 		break;
 
@@ -530,12 +529,9 @@ badtrap:
 		break;
 
 	case T_FIXALIGN:
-#ifdef DEBUG_ALIGN
 		uprintf("T_FIXALIGN\n");
-#endif
-		/* User wants us to fix alignment faults */
-		p->p_md.md_flags |= MDP_FIXALIGN;
 		ADVANCE;
+		trapsignal(p, SIGILL, 0, ILL_ILLOPN, sv);
 		break;
 
 	case T_INTOF:
@@ -628,7 +624,7 @@ mem_access_fault(type, ser, v, pc, psr, tf)
 	int pc, psr;
 	struct trapframe *tf;
 {
-#if defined(SUN4) || defined(SUN4C)
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 	struct proc *p;
 	struct vmspace *vm;
 	vaddr_t va;
@@ -756,7 +752,7 @@ out:
 		userret(p);
 		share_fpu(p, tf);
 	}
-#endif /* Sun4/Sun4C */
+#endif /* SUN4 || SUN4C || SUN4E */
 }
 
 #if defined(SUN4M)	/* 4m version of mem_access_fault() follows */

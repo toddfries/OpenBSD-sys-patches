@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: zaurus_var.h,v 1.3 2005/01/14 18:44:08 drahn Exp $	*/
+=======
+/*	$OpenBSD: zaurus_var.h,v 1.5 2008/11/25 14:55:44 drahn Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: lubbock_var.h,v 1.1 2003/06/18 10:51:15 bsh Exp $ */
 
 /*
@@ -37,7 +41,7 @@
 #include <sys/device.h>
 
 #include <machine/bus.h>
-#include <machine/zaurus_reg.h>
+#include <machine/machine_reg.h>
 
 #ifdef _KERNEL
 

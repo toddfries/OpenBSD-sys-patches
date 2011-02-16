@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ssvar.h,v 1.10 2003/05/18 16:06:35 mickey Exp $	*/
+=======
+/*	$OpenBSD: ssvar.h,v 1.18 2010/06/30 00:02:00 dlg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ssvar.h,v 1.2 1996/03/30 21:47:11 christos Exp $	*/
 
 /*
@@ -31,6 +35,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef _KERNEL
+
 /*
  * SCSI scanner interface description
  */
@@ -49,7 +55,7 @@ struct ss_special {
 	int	(*get_params)(struct ss_softc *);
 	/* some scanners only send line-multiples */
 	void	(*minphys)(struct ss_softc *, struct buf *);
-	int	(*read)(struct ss_softc *, struct buf *);
+	int	(*read)(struct ss_softc *, struct scsi_xfer *, struct buf *);
 	int	(*rewind_scanner)(struct ss_softc *);
 	int	(*load_adf)(struct ss_softc *);
 	int	(*unload_adf)(struct ss_softc *);
@@ -65,11 +71,14 @@ struct ss_softc {
 	int flags;
 #define SSF_TRIGGERED	0x01	/* read operation has been primed */
 #define	SSF_LOADED	0x02	/* parameters loaded */
+#define SSF_WAITING	0x04
 	struct scsi_link *sc_link;	/* contains our targ, lun, etc.	*/
 	struct scan_io sio;
-	struct buf buf_queue;		/* the queue of pending IO operations */
+	struct bufq *sc_bufq;
 	const struct quirkdata *quirkdata; /* if we have a rogue entry */
 	struct ss_special special;	/* special handlers for spec. devices */
+	struct timeout timeout;
+	struct scsi_xshandler xsh;
 };
 
 /*
@@ -77,3 +86,5 @@ struct ss_softc {
  */
 void mustek_attach(struct ss_softc *, struct scsi_attach_args *);
 void scanjet_attach(struct ss_softc *, struct scsi_attach_args *);
+
+#endif /* _KERNEL */

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: vga_pcivar.h,v 1.6 2006/03/16 21:32:34 matthieu Exp $ */
+=======
+/* $OpenBSD: vga_pcivar.h,v 1.14 2010/08/08 17:21:07 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: vga_pcivar.h,v 1.1 1998/03/22 15:16:19 drochner Exp $ */
 
 /*
@@ -37,10 +41,26 @@
 	     (PCI_CLASS(class) == PCI_CLASS_PREHISTORIC &&		\
 	      PCI_SUBCLASS(class) == PCI_SUBCLASS_PREHISTORIC_VGA)) ? 1 : 0)
 
+<<<<<<< HEAD
 enum agp_acquire_state {
 	AGP_ACQUIRE_FREE,
 	AGP_ACQUIRE_USER,
 	AGP_ACQUIRE_KERNEL
+=======
+#define VGA_PCI_MAX_BARS 6
+
+struct vga_pci_bar {
+	int		addr;
+	u_int		mapped;
+	pcireg_t	maptype;
+	bus_addr_t	base;
+	bus_size_t	size;
+	bus_size_t	maxsize;
+	bus_space_tag_t	bst;
+	bus_space_handle_t bsh;
+	int		flags;
+	void		*vaddr;
+>>>>>>> origin/master
 };
 
 /*
@@ -63,9 +83,23 @@ struct agp_memory {
 
 struct vga_pci_softc {
 	struct device sc_dev;
+	struct vga_config *sc_vc;
 
+<<<<<<< HEAD
 #if 0
 	struct vga_config *sc_vc;	/* VGA configuration */
+=======
+	struct pci_attach_args pa;
+	struct vga_pci_bar *bars[VGA_PCI_MAX_BARS];
+#if NACPI > 0
+	struct reg_vgats sc_save_ts;
+	struct reg_mc6845 sc_save_crtc;
+	struct reg_vgaattr sc_save_atc;
+	struct reg_vgagdc sc_save_gdc;
+#endif
+#ifdef X86EMU
+	struct vga_post *sc_posth;
+>>>>>>> origin/master
 #endif
 #ifdef VESAFB
 	int sc_width;
@@ -127,10 +161,10 @@ int vga_pci_cnattach(bus_space_tag_t, bus_space_tag_t,
 			  pci_chipset_tag_t, int, int, int);
 
 #ifdef VESAFB
-int vesafb_find_mode(struct vga_pci_softc *, int, int, int);
-void vesafb_set_mode(struct vga_pci_softc *, int);
-int vesafb_get_mode(struct vga_pci_softc *);
-int vesafb_get_supported_depth(struct vga_pci_softc *);
+int	vesafb_find_mode(struct vga_pci_softc *, int, int, int);
+void	vesafb_set_mode(struct vga_pci_softc *, int);
+int	vesafb_get_mode(struct vga_pci_softc *);
+int	vesafb_get_supported_depth(struct vga_pci_softc *);
 #endif
 
 #endif /* _PCI_VGA_PCIVAR_H_ */

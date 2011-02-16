@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip6_id.c,v 1.3 2003/12/12 06:57:12 itojun Exp $	*/
+=======
+/*	$OpenBSD: ip6_id.c,v 1.8 2010/02/08 12:16:02 jsing Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ip6_id.c,v 1.7 2003/09/13 21:32:59 itojun Exp $	*/
 /*	$KAME: ip6_id.c,v 1.8 2003/09/06 13:41:06 itojun Exp $	*/
 
@@ -113,17 +117,6 @@ struct randomtab {
 	long ru_reseed;
 };
 
-static struct randomtab randomtab_32 = {
-	32,			/* resulting bits */
-	180,			/* Time after wich will be reseeded */
-	1000000000,		/* Uniq cycle, avoid blackjack prediction */
-	2,			/* Starting generator */
-	2147483629,		/* RU_N-1 = 2^2*3^2*59652323 */
-	7,			/* determine ru_a as RU_AGEN^(2*rand) */
-	1836660096,		/* RU_M = 2^7*3^15 - don't change */
-	{ 2, 3, 59652323, 0 },	/* factors of ru_n */
-};
-
 static struct randomtab randomtab_20 = {
 	20,			/* resulting bits */
 	180,			/* Time after wich will be reseeded */
@@ -135,16 +128,16 @@ static struct randomtab randomtab_20 = {
 	{ 2, 3, 14563, 0 },	/* factors of ru_n */
 };
 
-static u_int32_t pmod(u_int32_t, u_int32_t, u_int32_t);
-static void initid(struct randomtab *);
-static u_int32_t randomid(struct randomtab *);
+u_int32_t pmod(u_int32_t, u_int32_t, u_int32_t);
+void initid(struct randomtab *);
+u_int32_t randomid(struct randomtab *);
 
 /*
  * Do a fast modular exponation, returned value will be in the range
  * of 0 - (mod-1)
  */
 
-static u_int32_t
+u_int32_t
 pmod(u_int32_t gen, u_int32_t expo, u_int32_t mod)
 {
 	u_int64_t s, t, u;
@@ -170,7 +163,7 @@ pmod(u_int32_t gen, u_int32_t expo, u_int32_t mod)
  * This function is called from id_randomid() when needed, an
  * application does not have to worry about it.
  */
-static void
+void
 initid(struct randomtab *p)
 {
 	u_int32_t j, i;
@@ -214,7 +207,7 @@ initid(struct randomtab *p)
 	p->ru_msb = p->ru_msb ? 0 : (1U << (p->ru_bits - 1));
 }
 
-static u_int32_t
+u_int32_t
 randomid(struct randomtab *p)
 {
 	int i, n;
@@ -239,15 +232,8 @@ randomid(struct randomtab *p)
 }
 
 u_int32_t
-ip6_randomid(void)
-{
-
-	return randomid(&randomtab_32);
-}
-
-u_int32_t
 ip6_randomflowlabel(void)
 {
-
 	return randomid(&randomtab_20) & 0xfffff;
 }
+

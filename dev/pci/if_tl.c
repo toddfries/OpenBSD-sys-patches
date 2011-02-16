@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_tl.c,v 1.41 2006/05/28 00:04:24 jason Exp $	*/
+=======
+/*	$OpenBSD: if_tl.c,v 1.50 2010/05/19 15:27:35 oga Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998
@@ -264,7 +268,6 @@ int tl_ioctl(struct ifnet *, u_long, caddr_t);
 void tl_init(void *);
 void tl_stop(struct tl_softc *);
 void tl_watchdog(struct ifnet *);
-void tl_shutdown(void *);
 int tl_ifmedia_upd(struct ifnet *);
 void tl_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -1443,7 +1446,7 @@ void tl_stats_update(xsc)
 		}
 	}
 
-	timeout_add(&sc->tl_stats_tmo, hz);
+	timeout_add_sec(&sc->tl_stats_tmo, 1);
 
 	if (!sc->tl_bitrate)
 		mii_tick(&sc->sc_mii);
@@ -1715,9 +1718,9 @@ void tl_init(xsc)
 
 	/* Start the stats update counter */
 	timeout_set(&sc->tl_stats_tmo, tl_stats_update, sc);
-	timeout_add(&sc->tl_stats_tmo, hz);
+	timeout_add_sec(&sc->tl_stats_tmo, 1);
 	timeout_set(&sc->tl_wait_tmo, tl_wait_up, sc);
-	timeout_add(&sc->tl_wait_tmo, 2 * hz);
+	timeout_add_sec(&sc->tl_wait_tmo, 2);
 
 	return;
 }
@@ -1778,16 +1781,11 @@ int tl_ioctl(ifp, command, data)
 	caddr_t			data;
 {
 	struct tl_softc		*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1804,6 +1802,7 @@ int tl_ioctl(ifp, command, data)
 			break;
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1826,21 +1825,7 @@ int tl_ioctl(ifp, command, data)
 		sc->tl_if_flags = ifp->if_flags;
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			tl_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		if (sc->tl_bitrate)
@@ -1849,13 +1834,18 @@ int tl_ioctl(ifp, command, data)
 			error = ifmedia_ioctl(ifp, ifr,
 			    &sc->sc_mii.mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			tl_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -2012,7 +2002,7 @@ tl_attach(parent, self, aux)
 	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)) {
 		if (pci_mapreg_map(pa, TL_PCI_LOMEM, PCI_MAPREG_TYPE_IO, 0,
 		    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)) {
-			printf(": failed to map i/o space\n");
+			printf(": can't map i/o space\n");
 			return;
 		}
 	}
@@ -2021,7 +2011,7 @@ tl_attach(parent, self, aux)
 	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)){
 		if (pci_mapreg_map(pa, TL_PCI_LOIO, PCI_MAPREG_TYPE_MEM, 0,
 		    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)){
-			printf(": failed to map memory space\n");
+			printf(": can't map mem space\n");
 			return;
 		}
 	}
@@ -2057,7 +2047,7 @@ tl_attach(parent, self, aux)
 
 	sc->sc_dmat = pa->pa_dmat;
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct tl_list_data),
-	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc list\n", sc->sc_dev.dv_xname);
 		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
@@ -2087,7 +2077,6 @@ tl_attach(parent, self, aux)
 		return;
 	}
 	sc->tl_ldata = (struct tl_list_data *)kva;
-	bzero(sc->tl_ldata, sizeof(struct tl_list_data));
 
 	for (sc->tl_product = tl_prods; sc->tl_product->tp_vend;
 	     sc->tl_product++) {
@@ -2185,8 +2174,6 @@ tl_attach(parent, self, aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(tl_shutdown, sc);
 }
 
 void
@@ -2200,19 +2187,10 @@ tl_wait_up(xsc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 }
 
-void
-tl_shutdown(xsc)
-	void *xsc;
-{
-	struct tl_softc *sc = xsc;
-
-	tl_stop(sc);
-}
-
 struct cfattach tl_ca = {
 	sizeof(struct tl_softc), tl_probe, tl_attach
 };
 
 struct cfdriver tl_cd = {
-	0, "tl", DV_IFNET
+	NULL, "tl", DV_IFNET
 };

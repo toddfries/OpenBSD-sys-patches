@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.25 2007/02/17 17:35:43 tom Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.62 2010/11/29 00:04:09 dlg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -43,7 +43,6 @@
  */
 #include <machine/frame.h>
 #include <machine/segments.h>
-#include <machine/tss.h>
 #include <machine/intrdefs.h>
 #include <machine/cacheinfo.h>
 
@@ -56,6 +55,7 @@
 #include <sys/lock.h>
 #include <sys/sched.h>
 
+struct x86_64_tss;
 struct cpu_info {
 	struct device *ci_dev;
 	struct cpu_info *ci_self;
@@ -66,19 +66,16 @@ struct cpu_info {
 	struct simplelock ci_slock;
 	u_int ci_cpuid;
 	u_int ci_apicid;
-	u_long ci_spin_locks;
-	u_long ci_simple_locks;
+	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
-
-	volatile u_int32_t ci_tlb_ipi_mask;
 
 	struct pcb *ci_curpcb;
 	struct pcb *ci_idle_pcb;
-	int ci_idle_tss_sel;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
 	u_int32_t	ci_ipending;
@@ -86,14 +83,19 @@ struct cpu_info {
 	int		ci_idepth;
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
-	paddr_t 	ci_idle_pcb_paddr;
-	u_int		ci_flags;
+	volatile u_int	ci_flags;
 	u_int32_t	ci_ipis;
 
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
 	u_int32_t	ci_signature;
+	u_int32_t	ci_family;
+	u_int32_t	ci_model;
+	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
 	struct cpu_functions *ci_func;
@@ -105,11 +107,7 @@ struct cpu_info {
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
 
-	struct timeval 	ci_cc_time;
-	int64_t		ci_cc_cc;
-	int64_t		ci_cc_ms_delta;
-	int64_t		ci_cc_denom;
-
+	struct	x86_64_tss *ci_tss;
 	char		*ci_gdt;
 
 	volatile int	ci_ddb_paused;
@@ -119,11 +117,14 @@ struct cpu_info {
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
 
-	struct x86_64_tss	ci_doubleflt_tss;
+	volatile int ci_setperf_state;
+#define CI_SETPERF_READY	0
+#define CI_SETPERF_SHOULDSTOP	1
+#define CI_SETPERF_INTRANSIT	2
+#define CI_SETPERF_DONE		3
 
-	char *ci_doubleflt_stack;
-
-	struct evcnt ci_ipi_events[X86_NIPI];
+	struct ksensordev	ci_sensordev;
+	struct ksensor		ci_sensor;
 };
 
 #define CPUF_BSP	0x0001		/* CPU is the original BSP */
@@ -145,17 +146,18 @@ extern struct cpu_info *cpu_info_list;
 #define CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
 					    ci != NULL; ci = ci->ci_next)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 /*      
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #if defined(MULTIPROCESSOR)
 
-#define X86_MAXPROCS		32	/* bitmask; can be bumped to 64 */
+#define MAXCPUS		64	/* bitmask; can be bumped to 64 */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
@@ -173,6 +175,8 @@ extern struct cpu_info *cpu_info[X86_MAXPROCS];
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
 
+void cpu_unidle(struct cpu_info *);
+
 #else /* !MULTIPROCESSOR */
 
 #define X86_MAXPROCS		1
@@ -181,6 +185,8 @@ void cpu_init_idle_pcbs(void);
 extern struct cpu_info cpu_info_primary;
 
 #define curcpu()		(&cpu_info_primary)
+
+#define cpu_unidle(ci)
 
 #endif
 
@@ -200,8 +206,6 @@ extern struct cpu_info cpu_info_primary;
 #endif
 
 #define aston(p)	((p)->p_md.md_astpending = 1)
-
-extern u_int32_t cpus_attached;
 
 #define curpcb		curcpu()->ci_curpcb
 #define curproc		curcpu()->ci_curproc
@@ -259,16 +263,18 @@ void cpu_probe_features(struct cpu_info *);
 
 /* machdep.c */
 void	dumpconf(void);
-int	cpu_maxproc(void);
 void	cpu_reset(void);
 void	x86_64_proc0_tss_ldt_init(void);
 void	x86_64_bufinit(void);
 void	x86_64_init_pcb_tss_ldt(struct cpu_info *);
 void	cpu_proc_fork(struct proc *, struct proc *);
+int	amd64_pa_used(paddr_t);
+extern void (*cpu_idle_enter_fcn)(void);
+extern void (*cpu_idle_cycle_fcn)(void);
+extern void (*cpu_idle_leave_fcn)(void);
 
 struct region_descriptor;
 void	lgdt(struct region_descriptor *);
-void	fillw(short, void *, size_t);
 
 struct pcb;
 void	savectx(struct pcb *);
@@ -277,12 +283,18 @@ void	proc_trampoline(void);
 void	child_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
+
+/* i8259.c */
+void	i8259_default_setup(void);
 
 
 void cpu_init_msrs(struct cpu_info *);
@@ -293,9 +305,6 @@ void	child_return(void *);
 
 /* dkcsum.c */
 void	dkcsumattach(void);
-
-/* consinit.c */
-void kgdb_port_init(void);
 
 /* bus_machdep.c */
 void x86_bus_space_init(void);
@@ -321,8 +330,9 @@ void k8_powernow_setperf(int);
 #define CPU_APMWARN		9	/* APM battery warning percentage */
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
-#define CPU_USERLDT		12
-#define CPU_MAXID		13	/* number of valid machdep ids */
+#define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
+#define CPU_LIDSUSPEND		13	/* lid close causes a suspend */
+#define CPU_MAXID		14	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -337,7 +347,8 @@ void k8_powernow_setperf(int);
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
-	{ "userldt", CTLTYPE_INT }, \
+	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*

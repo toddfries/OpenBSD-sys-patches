@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ydsreg.h,v 1.4 2004/02/19 11:08:11 markus Exp $	*/
+=======
+/*	$OpenBSD: ydsreg.h,v 1.7 2010/09/17 07:55:52 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*
@@ -398,8 +402,8 @@ struct yds_softc {
 	/*
 	 * Suspend/resume support
 	 */
-	void			*powerhook;
 	int			suspend;
+	int			sc_resume_active;
 };
 #define sc_opl_iot	sc_legacy_iot
 #define sc_mpu_iot	sc_legacy_iot

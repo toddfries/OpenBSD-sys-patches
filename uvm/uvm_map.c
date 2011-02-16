@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_map.c,v 1.89 2007/04/13 18:57:49 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_map.c,v 1.131 2010/12/24 21:49:04 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -85,7 +89,6 @@
 #include <sys/shm.h>
 #endif
 
-#define UVM_MAP
 #include <uvm/uvm.h>
 #undef RB_AUGMENT
 #define RB_AUGMENT(x) uvm_rb_augment(x)
@@ -98,6 +101,7 @@ static struct timeval uvm_kmapent_last_warn_time;
 static struct timeval uvm_kmapent_warn_rate = { 10, 0 };
 
 struct uvm_cnt uvm_map_call, map_backmerge, map_forwmerge;
+struct uvm_cnt map_nousermerge;
 struct uvm_cnt uvm_mlk_call, uvm_mlk_hint;
 const char vmmapbsy[] = "vmmapbsy";
 
@@ -201,8 +205,15 @@ static void		uvm_map_unreference_amap(struct vm_map_entry *, int);
 int			uvm_map_spacefits(struct vm_map *, vaddr_t *, vsize_t,
     struct vm_map_entry *, voff_t, vsize_t);
 
-struct vm_map_entry	*uvm_mapent_alloc(struct vm_map *);
+struct vm_map_entry	*uvm_mapent_alloc(struct vm_map *, int);
 void			uvm_mapent_free(struct vm_map_entry *);
+
+#ifdef KVA_GUARDPAGES
+/*
+ * Number of kva guardpages in use.
+ */
+int kva_guardpages;
+#endif
 
 
 /*
@@ -386,18 +397,23 @@ _uvm_tree_sanity(struct vm_map *map, const char *name)
  */
 
 struct vm_map_entry *
-uvm_mapent_alloc(struct vm_map *map)
+uvm_mapent_alloc(struct vm_map *map, int flags)
 {
 	struct vm_map_entry *me, *ne;
 	int s, i;
+	int slowdown, pool_flags;
 	UVMHIST_FUNC("uvm_mapent_alloc"); UVMHIST_CALLED(maphist);
+
+	pool_flags = PR_WAITOK;
+	if (flags & UVM_FLAG_TRYLOCK)
+		pool_flags = PR_NOWAIT;
 
 	if (map->flags & VM_MAP_INTRSAFE || cold) {
 		s = splvm();
 		simple_lock(&uvm.kentry_lock);
 		me = uvm.kentry_free;
 		if (me == NULL) {
-			ne = uvm_km_getpage(0);
+			ne = uvm_km_getpage(0, &slowdown);
 			if (ne == NULL)
 				panic("uvm_mapent_alloc: cannot allocate map "
 				    "entry");
@@ -419,14 +435,19 @@ uvm_mapent_alloc(struct vm_map *map)
 		me->flags = UVM_MAP_STATIC;
 	} else if (map == kernel_map) {
 		splassert(IPL_NONE);
-		me = pool_get(&uvm_map_entry_kmem_pool, PR_WAITOK);
+		me = pool_get(&uvm_map_entry_kmem_pool, pool_flags);
+		if (me == NULL)
+			goto out;
 		me->flags = UVM_MAP_KMEM;
 	} else {
 		splassert(IPL_NONE);
-		me = pool_get(&uvm_map_entry_pool, PR_WAITOK);
+		me = pool_get(&uvm_map_entry_pool, pool_flags);
+		if (me == NULL)
+			goto out;
 		me->flags = 0;
 	}
 
+out:
 	UVMHIST_LOG(maphist, "<- new entry=%p [kentry=%ld]", me,
 	    ((map->flags & VM_MAP_INTRSAFE) != 0 || map == kernel_map), 0, 0);
 	return(me);
@@ -540,6 +561,7 @@ uvm_map_init(void)
 	UVMCNT_INIT(map_backmerge, UVMCNT_CNT, 0, "# uvm_map() back merges", 0);
 	UVMCNT_INIT(map_forwmerge, UVMCNT_CNT, 0, "# uvm_map() missed forward",
 	    0);
+	UVMCNT_INIT(map_nousermerge, UVMCNT_CNT, 0, "# back merges skipped", 0);
 	UVMCNT_INIT(uvm_mlk_call,  UVMCNT_CNT, 0, "# map lookup calls", 0);
 	UVMCNT_INIT(uvm_mlk_hint,  UVMCNT_CNT, 0, "# map lookup hint hits", 0);
 
@@ -595,7 +617,7 @@ uvm_map_clip_start(struct vm_map *map, struct vm_map_entry *entry,
 	 * starting address.
 	 */
 
-	new_entry = uvm_mapent_alloc(map);
+	new_entry = uvm_mapent_alloc(map, 0);
 	uvm_mapent_copy(entry, new_entry); /* entry -> new_entry */
 
 	new_entry->end = start; 
@@ -647,7 +669,7 @@ uvm_map_clip_end(struct vm_map *map, struct vm_map_entry *entry, vaddr_t end)
 	 *	AFTER the specified entry
 	 */
 
-	new_entry = uvm_mapent_alloc(map);
+	new_entry = uvm_mapent_alloc(map, 0);
 	uvm_mapent_copy(entry, new_entry); /* entry -> new_entry */
 
 	new_entry->start = entry->end = end;
@@ -711,6 +733,9 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
     struct proc *p)
 {
 	struct vm_map_entry *prev_entry, *new_entry;
+#ifdef KVA_GUARDPAGES
+	struct vm_map_entry *guard_entry;
+#endif
 	vm_prot_t prot = UVM_PROTECTION(flags), maxprot =
 	    UVM_MAXPROTECTION(flags);
 	vm_inherit_t inherit = UVM_INHERIT(flags);
@@ -723,8 +748,48 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
 	    map, *startp, size, flags);
 	UVMHIST_LOG(maphist, "  uobj/offset %p/%ld", uobj, (u_long)uoffset,0,0);
 
+#ifdef KVA_GUARDPAGES
+	if (map == kernel_map && !(flags & UVM_FLAG_FIXED)) {
+		/*
+		 * kva_guardstart is initialized to the start of the kernelmap
+		 * and cycles through the kva space.
+		 * This way we should have a long time between re-use of kva.
+		 */
+		static vaddr_t kva_guardstart = 0;
+		if (kva_guardstart == 0) {
+			kva_guardstart = vm_map_min(map);
+			printf("uvm_map: kva guard pages enabled: %p\n",
+			    kva_guardstart);
+		}
+		size += PAGE_SIZE;	/* Add guard page at the end. */
+		/*
+		 * Try to fully exhaust kva prior to wrap-around.
+		 * (This may eat your ram!)
+		 */
+		if (VM_MAX_KERNEL_ADDRESS - kva_guardstart < size) {
+			static int wrap_counter = 0;
+			printf("uvm_map: kva guard page wrap-around %d\n",
+			    ++wrap_counter);
+			kva_guardstart = vm_map_min(map);
+		}
+		*startp = kva_guardstart;
+		/*
+		 * Prepare for next round.
+		 */
+		kva_guardstart += size;
+	}
+#endif
+
 	uvm_tree_sanity(map, "map entry");
 
+<<<<<<< HEAD
+=======
+	if ((map->flags & VM_MAP_INTRSAFE) == 0)
+		splassert(IPL_NONE);
+	else
+		splassert(IPL_VM);
+
+>>>>>>> origin/master
 	/*
 	 * step 0: sanity check of protection code
 	 */
@@ -757,7 +822,8 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
 		 * If the kernel pmap can't map the requested space,
 		 * then allocate more resources for it.
 		 */
-		if (map == kernel_map && uvm_maxkaddr < (*startp + size))
+		if (map == kernel_map && !(flags & UVM_FLAG_FIXED) &&
+		    uvm_maxkaddr < (*startp + size))
 			uvm_maxkaddr = pmap_growkernel(*startp + size);
 	}
 #endif
@@ -830,12 +896,19 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
 			goto step3;
 		}
 
+		/*
+		 * Only merge kernel mappings, but keep track
+		 * of how much we skipped.
+		 */
+		if (map != kernel_map && map != kmem_map) {
+			UVMCNT_INCR(map_nousermerge);
+			goto step3;
+		}
+
 		if (prev_entry->aref.ar_amap) {
 			error = amap_extend(prev_entry, size);
-			if (error) {
-				vm_map_unlock(map);
-				return (error);
-			}
+			if (error)
+				goto step3;
 		}
 
 		UVMCNT_INCR(map_backmerge);
@@ -879,7 +952,16 @@ step3:
 	 * step 3: allocate new entry and link it in
 	 */
 
-	new_entry = uvm_mapent_alloc(map);
+#ifdef KVA_GUARDPAGES
+	if (map == kernel_map && !(flags & UVM_FLAG_FIXED))
+		size -= PAGE_SIZE;
+#endif
+
+	new_entry = uvm_mapent_alloc(map, flags);
+	if (new_entry == NULL) {
+		vm_map_unlock(map);
+		return (ENOMEM);
+	}
 	new_entry->start = *startp;
 	new_entry->end = new_entry->start + size;
 	new_entry->object.uvm_obj = uobj;
@@ -895,6 +977,8 @@ step3:
 		if ((flags & UVM_FLAG_OVERLAY) == 0)
 			new_entry->etype |= UVM_ET_NEEDSCOPY;
 	}
+	if (flags & UVM_FLAG_HOLE)
+		new_entry->etype |= UVM_ET_HOLE;
 
 	new_entry->protection = prot;
 	new_entry->max_protection = maxprot;
@@ -930,6 +1014,32 @@ step3:
 	if ((map->first_free == prev_entry) &&
 	    (prev_entry->end >= new_entry->start))
 		map->first_free = new_entry;
+
+#ifdef KVA_GUARDPAGES
+	/*
+	 * Create the guard entry.
+	 */
+	if (map == kernel_map && !(flags & UVM_FLAG_FIXED)) {
+		guard_entry = uvm_mapent_alloc(map, flags);
+		if (guard_entry != NULL {
+			guard_entry->start = new_entry->end;
+			guard_entry->end = guard_entry->start + PAGE_SIZE;
+			guard_entry->object.uvm_obj = uobj;
+			guard_entry->offset = uoffset;
+			guard_entry->etype = MAP_ET_KVAGUARD;
+			guard_entry->protection = prot;
+			guard_entry->max_protection = maxprot;
+			guard_entry->inheritance = inherit;
+			guard_entry->wired_count = 0;
+			guard_entry->advice = advice;
+			guard_entry->aref.ar_pageoff = 0;
+			guard_entry->aref.ar_amap = NULL;
+			uvm_map_entry_link(map, new_entry, guard_entry);
+			map->size += PAGE_SIZE;
+			kva_guardpages++;
+		}
+	}
+#endif
 
 	uvm_tree_sanity(map, "map leave");
 
@@ -1061,8 +1171,8 @@ uvm_map_lookup_entry(struct vm_map *map, vaddr_t address,
 }
 
 /*
- * Checks if address pointed to be phint fits into the empty
- * space before the vm_map_entry after.  Takes aligment and
+ * Checks if address pointed to by phint fits into the empty
+ * space before the vm_map_entry after.  Takes alignment and
  * offset into consideration.
  */
 
@@ -1079,7 +1189,7 @@ uvm_map_spacefits(struct vm_map *map, vaddr_t *phint, vsize_t length,
 	 * we only do this if a valid offset is specified.
 	 */
 	if (uoffset != UVM_UNKNOWN_OFFSET)
-		PMAP_PREFER(uoffset, &hint);
+		hint = PMAP_PREFER(uoffset, hint);
 #endif
 	if (align != 0)
 		if ((hint & (align - 1)) != 0)
@@ -1096,11 +1206,50 @@ uvm_map_spacefits(struct vm_map *map, vaddr_t *phint, vsize_t length,
 }
 
 /*
+ * uvm_map_pie: return a random load address for a PIE executable
+ * properly aligned.
+ */
+
+#ifndef VM_PIE_MAX_ADDR
+#define VM_PIE_MAX_ADDR (VM_MAXUSER_ADDRESS / 4)
+#endif
+
+#ifndef VM_PIE_MIN_ADDR
+#define VM_PIE_MIN_ADDR VM_MIN_ADDRESS
+#endif
+
+#ifndef VM_PIE_MIN_ALIGN
+#define VM_PIE_MIN_ALIGN PAGE_SIZE
+#endif
+
+vaddr_t
+uvm_map_pie(vaddr_t align)
+{
+	vaddr_t addr, space, min;
+
+	align = MAX(align, VM_PIE_MIN_ALIGN);
+
+	/* round up to next alignment */
+	min = (VM_PIE_MIN_ADDR + align - 1) & ~(align - 1);
+
+	if (align >= VM_PIE_MAX_ADDR || min >= VM_PIE_MAX_ADDR)
+		return (align);
+
+	space = (VM_PIE_MAX_ADDR - min) / align;
+	space = MIN(space, (u_int32_t)-1);
+
+	addr = (vaddr_t)arc4random_uniform((u_int32_t)space) * align;
+	addr += min;
+
+	return (addr);
+}
+
+/*
  * uvm_map_hint: return the beginning of the best area suitable for
  * creating a new mapping with "prot" protection.
  */
 vaddr_t
-uvm_map_hint(struct proc *p, vm_prot_t prot)
+uvm_map_hint1(struct proc *p, vm_prot_t prot, int skipheap)
 {
 	vaddr_t addr;
 
@@ -1116,12 +1265,12 @@ uvm_map_hint(struct proc *p, vm_prot_t prot)
 		return (round_page(addr));
 	}
 #endif
-	addr = (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ;
-#if !defined(__vax__)
-	addr += arc4random() & (MIN((256 * 1024 * 1024), MAXDSIZ) - 1);
-#else
 	/* start malloc/mmap after the brk */
-	addr = (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ;
+	addr = (vaddr_t)p->p_vmspace->vm_daddr;
+	if (skipheap)
+		addr += BRKSIZ;
+#if !defined(__vax__)
+	addr += arc4random() & (MIN((256 * 1024 * 1024), BRKSIZ) - 1);
 #endif
 	return (round_page(addr));
 }
@@ -1317,7 +1466,7 @@ uvm_map_findspace(struct vm_map *map, vaddr_t hint, vsize_t length,
 		 * we only do this if a valid offset is specified.
 		 */
 		if (uoffset != UVM_UNKNOWN_OFFSET)
-			PMAP_PREFER(uoffset, &hint);
+			hint = PMAP_PREFER(uoffset, hint);
 #endif
 		if (align != 0) {
 			if ((hint & (align - 1)) != 0)
@@ -1348,6 +1497,40 @@ uvm_map_findspace(struct vm_map *map, vaddr_t hint, vsize_t length,
 }
 
 /*
+ *   U N M A P   -   m a i n   e n t r y   p o i n t
+ */
+
+/*
+ * uvm_unmap: remove mappings from a vm_map (from "start" up to "stop")
+ *
+ * => caller must check alignment and size 
+ * => map must be unlocked (we will lock it)
+ */
+void
+uvm_unmap_p(vm_map_t map, vaddr_t start, vaddr_t end, struct proc *p)
+{
+	vm_map_entry_t dead_entries;
+	UVMHIST_FUNC("uvm_unmap"); UVMHIST_CALLED(maphist);
+
+	UVMHIST_LOG(maphist, "  (map=%p, start=0x%lx, end=0x%lx)",
+	    map, start, end, 0);
+
+	/*
+	 * work now done by helper functions.   wipe the pmap's and then
+	 * detach from the dead entries...
+	 */
+	vm_map_lock(map);
+	uvm_unmap_remove(map, start, end, &dead_entries, p, FALSE);
+	vm_map_unlock(map);
+
+	if (dead_entries != NULL)
+		uvm_unmap_detach(dead_entries, 0);
+
+	UVMHIST_LOG(maphist, "<- done", 0,0,0,0);
+}
+
+
+/*
  *   U N M A P   -   m a i n   h e l p e r   f u n c t i o n s
  */
 
@@ -1362,7 +1545,7 @@ uvm_map_findspace(struct vm_map *map, vaddr_t hint, vsize_t length,
 
 void
 uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
-    struct vm_map_entry **entry_list, struct proc *p)
+    struct vm_map_entry **entry_list, struct proc *p, boolean_t remove_holes)
 {
 	struct vm_map_entry *entry, *first_entry, *next;
 	vaddr_t len;
@@ -1376,6 +1559,14 @@ uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
 
 	uvm_tree_sanity(map, "unmap_remove entry");
 
+<<<<<<< HEAD
+=======
+	if ((map->flags & VM_MAP_INTRSAFE) == 0)
+		splassert(IPL_NONE);
+	else
+		splassert(IPL_VM);
+
+>>>>>>> origin/master
 	/*
 	 * find first entry
 	 */
@@ -1441,7 +1632,18 @@ uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
 		 * special case: handle mappings to anonymous kernel objects.
 		 * we want to free these pages right away...
 		 */
-		if (map->flags & VM_MAP_INTRSAFE) {
+#ifdef KVA_GUARDPAGES
+		if (map == kernel_map && entry->etype & MAP_ET_KVAGUARD) {
+			entry->etype &= ~MAP_ET_KVAGUARD;
+			kva_guardpages--;
+		} else		/* (code continues across line-break) */
+#endif
+		if (UVM_ET_ISHOLE(entry)) {
+			if (!remove_holes) {
+				entry = next;
+				continue;
+			}
+		} else if (map->flags & VM_MAP_INTRSAFE) {
 			uvm_km_pgremove_intrsafe(entry->start, entry->end);
 			pmap_kremove(entry->start, len);
 		} else if (UVM_ET_ISOBJ(entry) &&
@@ -1517,6 +1719,26 @@ uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
 		first_entry = entry;
 		entry = next;		/* next entry, please */
 	}
+#ifdef KVA_GUARDPAGES
+	/*
+	 * entry points at the map-entry after the last-removed map-entry.
+	 */
+	if (map == kernel_map && entry != &map->header &&
+	    entry->etype & MAP_ET_KVAGUARD && entry->start == end) {
+		/*
+		 * Removed range is followed by guard page;
+		 * remove that guard page now (or it will stay forever).
+		 */
+		entry->etype &= ~MAP_ET_KVAGUARD;
+		kva_guardpages--;
+
+		uvm_map_entry_unlink(map, entry);
+		map->size -= len;
+		entry->next = first_entry;
+		first_entry = entry;
+		entry = next;		/* next entry, please */
+	}
+#endif
 	/* if ((map->flags & VM_MAP_DYING) == 0) { */
 		pmap_update(vm_map_pmap(map));
 	/* } */
@@ -1892,7 +2114,7 @@ uvm_map_extract(struct vm_map *srcmap, vaddr_t start, vsize_t len,
 		oldoffset = (entry->start + fudge) - start;
 
 		/* allocate a new map entry */
-		newentry = uvm_mapent_alloc(dstmap);
+		newentry = uvm_mapent_alloc(dstmap, flags);
 		if (newentry == NULL) {
 			error = ENOMEM;
 			goto bad;
@@ -2272,7 +2494,7 @@ int
 uvm_map_inherit(struct vm_map *map, vaddr_t start, vaddr_t end,
     vm_inherit_t new_inheritance)
 {
-	struct vm_map_entry *entry, *temp_entry;
+	struct vm_map_entry *entry;
 	UVMHIST_FUNC("uvm_map_inherit"); UVMHIST_CALLED(maphist);
 	UVMHIST_LOG(maphist,"(map=%p,start=0x%lx,end=0x%lx,new_inh=0x%lx)",
 	    map, start, end, new_inheritance);
@@ -2291,11 +2513,10 @@ uvm_map_inherit(struct vm_map *map, vaddr_t start, vaddr_t end,
 	
 	VM_MAP_RANGE_CHECK(map, start, end);
 	
-	if (uvm_map_lookup_entry(map, start, &temp_entry)) {
-		entry = temp_entry;
+	if (uvm_map_lookup_entry(map, start, &entry)) {
 		UVM_MAP_CLIP_START(map, entry, start);
 	} else {
-		entry = temp_entry->next;
+		entry = entry->next;
 	}
 
 	while ((entry != &map->header) && (entry->start < end)) {
@@ -2318,18 +2539,28 @@ uvm_map_inherit(struct vm_map *map, vaddr_t start, vaddr_t end,
 int
 uvm_map_advice(struct vm_map *map, vaddr_t start, vaddr_t end, int new_advice)
 {
-	struct vm_map_entry *entry, *temp_entry;
+	struct vm_map_entry *entry;
 	UVMHIST_FUNC("uvm_map_advice"); UVMHIST_CALLED(maphist);
 	UVMHIST_LOG(maphist,"(map=%p,start=0x%lx,end=0x%lx,new_adv=0x%lx)",
 	    map, start, end, new_advice);
 
+	switch (new_advice) {
+	case MADV_NORMAL:
+	case MADV_RANDOM:
+	case MADV_SEQUENTIAL:
+		/* nothing special here */
+		break;
+
+	default:
+		UVMHIST_LOG(maphist,"<- done (INVALID ARG)",0,0,0,0);
+		return (EINVAL);
+	}
 	vm_map_lock(map);
 	VM_MAP_RANGE_CHECK(map, start, end);
-	if (uvm_map_lookup_entry(map, start, &temp_entry)) {
-		entry = temp_entry;
+	if (uvm_map_lookup_entry(map, start, &entry)) {
 		UVM_MAP_CLIP_START(map, entry, start);
 	} else {
-		entry = temp_entry->next;
+		entry = entry->next;
 	}
 
 	/*
@@ -2339,18 +2570,6 @@ uvm_map_advice(struct vm_map *map, vaddr_t start, vaddr_t end, int new_advice)
 	while ((entry != &map->header) && (entry->start < end)) {
 		UVM_MAP_CLIP_END(map, entry, end);
 
-		switch (new_advice) {
-		case MADV_NORMAL:
-		case MADV_RANDOM:
-		case MADV_SEQUENTIAL:
-			/* nothing special here */
-			break;
-
-		default:
-			vm_map_unlock(map);
-			UVMHIST_LOG(maphist,"<- done (INVALID ARG)",0,0,0,0);
-			return (EINVAL);
-		}
 		entry->advice = new_advice;
 		entry = entry->next;
 	}
@@ -3093,8 +3312,13 @@ uvmspace_alloc(vaddr_t min, vaddr_t max, int pageable)
 	struct vmspace *vm;
 	UVMHIST_FUNC("uvmspace_alloc"); UVMHIST_CALLED(maphist);
 
+<<<<<<< HEAD
 	vm = pool_get(&uvm_vmspace_pool, PR_WAITOK);
 	uvmspace_init(vm, NULL, min, max, pageable);
+=======
+	vm = pool_get(&uvm_vmspace_pool, PR_WAITOK | PR_ZERO);
+	uvmspace_init(vm, NULL, min, max, pageable, remove_holes);
+>>>>>>> origin/master
 	UVMHIST_LOG(maphist,"<- done (vm=%p)", vm,0,0,0);
 	return (vm);
 }
@@ -3113,8 +3337,6 @@ uvmspace_init(vm, pmap, min, max, pageable)
 	boolean_t pageable;
 {
 	UVMHIST_FUNC("uvmspace_init"); UVMHIST_CALLED(maphist);
-
-	memset(vm, 0, sizeof(*vm));
 
 	uvm_map_setup(&vm->vm_map, min, max, pageable ? VM_MAP_PAGEABLE : 0);
 
@@ -3141,32 +3363,6 @@ uvmspace_share(p1, p2)
 {
 	p2->p_vmspace = p1->p_vmspace;
 	p1->p_vmspace->vm_refcnt++;
-}
-
-/*
- * uvmspace_unshare: ensure that process "p" has its own, unshared, vmspace
- *
- * - XXX: no locking on vmspace
- */
-
-void
-uvmspace_unshare(p)
-	struct proc *p; 
-{
-	struct vmspace *nvm, *ovm = p->p_vmspace;
-
-	if (ovm->vm_refcnt == 1)
-		/* nothing to do: vmspace isn't shared in the first place */
-		return;
-
-	/* make a new vmspace, still holding old one */
-	nvm = uvmspace_fork(ovm);
-
-	pmap_deactivate(p);		/* unbind old vmspace */
-	p->p_vmspace = nvm; 
-	pmap_activate(p);		/* switch to new vmspace */
-
-	uvmspace_free(ovm);		/* drop reference to old vmspace */
 }
 
 /*
@@ -3278,7 +3474,7 @@ uvmspace_free(struct vmspace *vm)
 		if (vm->vm_map.nentries) {
 			uvm_unmap_remove(&vm->vm_map,
 			    vm->vm_map.min_offset, vm->vm_map.max_offset,
-			    &dead_entries, NULL);
+			    &dead_entries, NULL, TRUE);
 			if (dead_entries != NULL)
 				uvm_unmap_detach(dead_entries, 0);
 		}
@@ -3287,6 +3483,87 @@ uvmspace_free(struct vmspace *vm)
 		pool_put(&uvm_vmspace_pool, vm);
 	}
 	UVMHIST_LOG(maphist,"<- done", 0,0,0,0);
+}
+
+/*
+ * uvm_map_create: create map
+ */
+vm_map_t
+uvm_map_create(pmap_t pmap, vaddr_t min, vaddr_t max, int flags)
+{
+	vm_map_t result;
+
+	result = malloc(sizeof(struct vm_map), M_VMMAP, M_WAITOK);
+	uvm_map_setup(result, min, max, flags);
+	result->pmap = pmap;
+	return(result);
+}
+
+/*
+ * uvm_map_setup: init map
+ *
+ * => map must not be in service yet.
+ */
+void
+uvm_map_setup(vm_map_t map, vaddr_t min, vaddr_t max, int flags)
+{
+
+	RB_INIT(&map->rbhead);
+	map->header.next = map->header.prev = &map->header;
+	map->nentries = 0;
+	map->size = 0;
+	map->ref_count = 1;
+	map->min_offset = min;
+	map->max_offset = max;
+	map->flags = flags;
+	map->first_free = &map->header;
+	map->hint = &map->header;
+	map->timestamp = 0;
+	rw_init(&map->lock, "vmmaplk");
+	simple_lock_init(&map->ref_lock);
+	simple_lock_init(&map->hint_lock);
+}
+
+
+
+/*
+ * uvm_map_reference: add reference to a map
+ *
+ * => map need not be locked (we use ref_lock).
+ */
+void
+uvm_map_reference(vm_map_t map)
+{
+	simple_lock(&map->ref_lock);
+	map->ref_count++; 
+	simple_unlock(&map->ref_lock);
+}
+
+/*
+ * uvm_map_deallocate: drop reference to a map
+ *
+ * => caller must not lock map
+ * => we will zap map if ref count goes to zero
+ */
+void
+uvm_map_deallocate(vm_map_t map)
+{
+	int c;
+
+	simple_lock(&map->ref_lock);
+	c = --map->ref_count;
+	simple_unlock(&map->ref_lock);
+	if (c > 0) {
+		return;
+	}
+
+	/*
+	 * all references gone.   unmap and free.
+	 */
+
+	uvm_unmap(map, map->min_offset, map->max_offset);
+	pmap_destroy(map->pmap);
+	free(map, M_VMMAP);
 }
 
 /*
@@ -3366,7 +3643,7 @@ uvmspace_fork(struct vmspace *vm1)
 				/* XXXCDC: WAITOK??? */
 			}
 
-			new_entry = uvm_mapent_alloc(new_map);
+			new_entry = uvm_mapent_alloc(new_map, 0);
 			/* old_entry -> new_entry */
 			uvm_mapent_copy(old_entry, new_entry);
 
@@ -3413,7 +3690,7 @@ uvmspace_fork(struct vmspace *vm1)
 			 * (note that new references are read-only).
 			 */
 
-			new_entry = uvm_mapent_alloc(new_map);
+			new_entry = uvm_mapent_alloc(new_map, 0);
 			/* old_entry -> new_entry */
 			uvm_mapent_copy(old_entry, new_entry);
 
@@ -3652,8 +3929,8 @@ uvm_object_printit(uobj, full, pr)
 	struct vm_page *pg;
 	int cnt = 0;
 
-	(*pr)("OBJECT %p: locked=%d, pgops=%p, npages=%d, ",
-	    uobj, uobj->vmobjlock.lock_data, uobj->pgops, uobj->uo_npages);
+	(*pr)("OBJECT %p: pgops=%p, npages=%d, ",
+	    uobj, uobj->pgops, uobj->uo_npages);
 	if (UVM_OBJ_IS_KERN_OBJECT(uobj))
 		(*pr)("refs=<SYSTEM>\n");
 	else
@@ -3663,13 +3940,12 @@ uvm_object_printit(uobj, full, pr)
 		return;
 	}
 	(*pr)("  PAGES <pg,offset>:\n  ");
-	for (pg = TAILQ_FIRST(&uobj->memq);
-	     pg != NULL;
-	     pg = TAILQ_NEXT(pg, listq), cnt++) {
+	RB_FOREACH(pg, uvm_objtree, &uobj->memt) {
 		(*pr)("<%p,0x%llx> ", pg, (long long)pg->offset);
 		if ((cnt % 3) == 2) {
 			(*pr)("\n  ");
 		}
+		cnt++;
 	}
 	if ((cnt % 3) != 2) {
 		(*pr)("\n");
@@ -3682,9 +3958,8 @@ uvm_object_printit(uobj, full, pr)
 
 static const char page_flagbits[] =
 	"\20\1BUSY\2WANTED\3TABLED\4CLEAN\5CLEANCHK\6RELEASED\7FAKE\10RDONLY"
-	"\11ZERO\15PAGER1";
-static const char page_pqflagbits[] =
-	"\20\1FREE\2INACTIVE\3ACTIVE\4LAUNDRY\5ANON\6AOBJ";
+	"\11ZERO\15PAGER1\20FREE\21INACTIVE\22ACTIVE\24ENCRYPT\30PMAP0"
+	"\31PMAP1\32PMAP2\33PMAP3";
 
 void
 uvm_page_printit(pg, full, pr)
@@ -3695,14 +3970,10 @@ uvm_page_printit(pg, full, pr)
 	struct vm_page *tpg;
 	struct uvm_object *uobj;
 	struct pglist *pgl;
-	char pgbuf[128];
-	char pqbuf[128];
 
 	(*pr)("PAGE %p:\n", pg);
-	snprintf(pgbuf, sizeof(pgbuf), "%b", pg->pg_flags, page_flagbits);
-	snprintf(pqbuf, sizeof(pqbuf), "%b", pg->pg_flags, page_pqflagbits);
-	(*pr)("  flags=%s, pg_flags=%s, vers=%d, wire_count=%d, pa=0x%llx\n",
-	    pgbuf, pqbuf, pg->pg_version, pg->wire_count,
+	(*pr)("  flags=%b, vers=%d, wire_count=%d, pa=0x%llx\n",
+	    pg->pg_flags, page_flagbits, pg->pg_version, pg->wire_count,
 	    (long long)pg->phys_addr);
 	(*pr)("  uobject=%p, uanon=%p, offset=0x%llx loan_count=%d\n",
 	    pg->uobject, pg->uanon, (long long)pg->offset, pg->loan_count);
@@ -3731,7 +4002,7 @@ uvm_page_printit(pg, full, pr)
 			uobj = pg->uobject;
 			if (uobj) {
 				(*pr)("  checking object list\n");
-				TAILQ_FOREACH(tpg, &uobj->memq, listq) {
+				RB_FOREACH(tpg, uvm_objtree, &uobj->memt) {
 					if (tpg == pg) {
 						break;
 					}
@@ -3746,9 +4017,11 @@ uvm_page_printit(pg, full, pr)
 
 	/* cross-verify page queue */
 	if (pg->pg_flags & PQ_FREE) {
-		int fl = uvm_page_lookup_freelist(pg);
-		pgl = &uvm.page_free[fl].pgfl_queues[((pg)->pg_flags & PG_ZERO) ?
-		    PGFL_ZEROS : PGFL_UNKNOWN];
+		if (uvm_pmr_isfree(pg))
+			printf("  page found in uvm_pmemrange\n");
+		else
+			printf("  >>> page not found in uvm_pmemrange <<<\n");
+		pgl = NULL;
 	} else if (pg->pg_flags & PQ_INACTIVE) {
 		pgl = (pg->pg_flags & PQ_SWAPBACKED) ?
 		    &uvm.page_inactive_swp : &uvm.page_inactive_obj;

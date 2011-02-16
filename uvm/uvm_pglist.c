@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: uvm_pglist.c,v 1.19 2007/04/04 17:44:45 art Exp $	*/
+=======
+/*	$OpenBSD: uvm_pglist.c,v 1.38 2010/06/27 03:03:49 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: uvm_pglist.c,v 1.13 2001/02/18 21:19:08 chs Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright 
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the NetBSD
- *      Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *      
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -63,6 +60,7 @@ u_long	uvm_pglistalloc_npages;
 #define	STAT_DECR(v)
 #endif
 
+<<<<<<< HEAD
 int	uvm_pglistalloc_simple(psize_t, paddr_t, paddr_t, struct pglist *);
 
 int
@@ -152,6 +150,8 @@ out:
 	return (error);
 }
 
+=======
+>>>>>>> origin/master
 /*
  * uvm_pglistalloc: allocate a list of pages
  *
@@ -169,15 +169,17 @@ out:
  *	alignment	memory must be aligned to this power-of-two boundary.
  *	boundary	no segment in the allocation may cross this 
  *			power-of-two boundary (relative to zero).
+ * => flags:
+ *	UVM_PLA_NOWAIT	fail if allocation fails
+ *	UVM_PLA_WAITOK	wait for memory to become avail
+ *	UVM_PLA_ZERO	return zeroed memory
  */
 
 int
-uvm_pglistalloc(size, low, high, alignment, boundary, rlist, nsegs, waitok)
-	psize_t size;
-	paddr_t low, high, alignment, boundary;
-	struct pglist *rlist;
-	int nsegs, waitok;
+uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
+    paddr_t boundary, struct pglist *rlist, int nsegs, int flags)
 {
+<<<<<<< HEAD
 	paddr_t try, idxpa, lastidxpa;
 	int psi;
 	struct vm_page *pgs;
@@ -187,21 +189,18 @@ uvm_pglistalloc(size, low, high, alignment, boundary, rlist, nsegs, waitok)
 #ifdef DEBUG
 	vm_page_t tp;
 #endif
+=======
+>>>>>>> origin/master
 	UVMHIST_FUNC("uvm_pglistalloc"); UVMHIST_CALLED(pghist);
 
 	KASSERT((alignment & (alignment - 1)) == 0);
 	KASSERT((boundary & (boundary - 1)) == 0);
-	
-	/*
-	 * Our allocations are always page granularity, so our alignment
-	 * must be, too.
-	 */
-	if (alignment < PAGE_SIZE)
-		alignment = PAGE_SIZE;
+	KASSERT(!(flags & UVM_PLA_WAITOK) ^ !(flags & UVM_PLA_NOWAIT));
 
 	if (size == 0)
 		return (EINVAL);
 
+<<<<<<< HEAD
 	size = round_page(size);
 	try = roundup(low, alignment);
 
@@ -282,51 +281,28 @@ uvm_pglistalloc(size, low, high, alignment, boundary, rlist, nsegs, waitok)
 		if (idx == end) {
 			break;
 		}
+=======
+	if ((high & PAGE_MASK) != PAGE_MASK) {
+		printf("uvm_pglistalloc: Upper boundary 0x%lx "
+		    "not on pagemask.\n", (unsigned long)high);
+>>>>>>> origin/master
 	}
 
-#if PGFL_NQUEUES != 2
-#error uvm_pglistalloc needs to be updated
-#endif
-
 	/*
-	 * we have a chunk of memory that conforms to the requested constraints.
+	 * Our allocations are always page granularity, so our alignment
+	 * must be, too.
 	 */
-	idx = tryidx;
-	while (idx < end) {
-		m = &pgs[idx];
-		free_list = uvm_page_lookup_freelist(m);
-		pgflidx = (m->pg_flags & PG_ZERO) ? PGFL_ZEROS : PGFL_UNKNOWN;
-#ifdef DEBUG
-		for (tp = TAILQ_FIRST(&uvm.page_free[
-			free_list].pgfl_queues[pgflidx]);
-		     tp != NULL;
-		     tp = TAILQ_NEXT(tp, pageq)) {
-			if (tp == m)
-				break;
-		}
-		if (tp == NULL)
-			panic("uvm_pglistalloc: page not on freelist");
-#endif
-		TAILQ_REMOVE(&uvm.page_free[free_list].pgfl_queues[pgflidx],
-		    m, pageq);
-		uvmexp.free--;
-		if (m->pg_flags & PG_ZERO)
-			uvmexp.zeropages--;
-		m->pg_flags = PG_CLEAN;
-		m->uobject = NULL;
-		m->uanon = NULL;
-		m->pg_version++;
-		TAILQ_INSERT_TAIL(rlist, m, pageq);
-		idx++;
-		STAT_INCR(uvm_pglistalloc_npages);
-	}
-	error = 0;
+	if (alignment < PAGE_SIZE)
+		alignment = PAGE_SIZE;
 
-out:
+	low = atop(roundup(low, alignment));
 	/*
-	 * check to see if we need to generate some free pages waking
-	 * the pagedaemon.
+	 * high + 1 may result in overflow, in which case high becomes 0x0,
+	 * which is the 'don't care' value.
+	 * The only requirement in that case is that low is also 0x0, or the
+	 * low<high assert will fail.
 	 */
+<<<<<<< HEAD
 	 
 	if (uvmexp.free + uvmexp.paging < uvmexp.freemin ||
 	    (uvmexp.free + uvmexp.paging < uvmexp.freetarg &&
@@ -337,6 +313,17 @@ out:
 	uvm_unlock_fpageq(s);
 
 	return (error);
+=======
+	high = atop(high + 1);
+	size = atop(round_page(size));
+	alignment = atop(alignment);
+	if (boundary < PAGE_SIZE && boundary != 0)
+		boundary = PAGE_SIZE;
+	boundary = atop(boundary);
+
+	return uvm_pmr_getpages(size, low, high, alignment, boundary, nsegs,
+	    flags, rlist);
+>>>>>>> origin/master
 }
 
 /*
@@ -348,6 +335,7 @@ out:
 void
 uvm_pglistfree(struct pglist *list)
 {
+<<<<<<< HEAD
 	struct vm_page *m;
 	int s;
 	UVMHIST_FUNC("uvm_pglistfree"); UVMHIST_CALLED(pghist);
@@ -382,4 +370,8 @@ uvm_pglistfree(struct pglist *list)
 	}
 
 	uvm_unlock_fpageq(s);
+=======
+	UVMHIST_FUNC("uvm_pglistfree"); UVMHIST_CALLED(pghist);
+	uvm_pmr_freepageq(list);
+>>>>>>> origin/master
 }

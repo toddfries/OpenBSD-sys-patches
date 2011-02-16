@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.99 2006/06/11 20:50:51 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.123 2010/07/02 19:57:14 tedu Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -85,9 +85,6 @@
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/evcount.h>
 
 #include <machine/autoconf.h>
@@ -98,13 +95,17 @@
 #include <machine/pte.h>
 #include <machine/reg.h>
 
+#ifdef MVME141
+#include <mvme68k/dev/ofobioreg.h>
+#endif
 #ifdef MVME147
 #include <mvme68k/dev/pccreg.h>
 #endif
+#ifdef MVME165
+#include <mvme68k/dev/lrcreg.h>
+#endif
  
 #include <dev/cons.h>
-
-#include <net/netisr.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -113,7 +114,7 @@
 #include <ddb/db_var.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;		/* cpu "architecture" */
@@ -144,15 +145,15 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int   physmem;			/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
  */
 int   safepri = PSL_LOWIPL;
-
-#ifdef COMPAT_SUNOS
-extern struct emul emul_sunos;
-#endif
 
 void dumpsys(void);
 void initvectors(void);
@@ -167,7 +168,6 @@ int fpu_gettype(void);
 int memsize162(void);
 int memsize1x7(void);	/* in locore */
 int memsize(void);
-caddr_t allocsys(caddr_t);
 
 void
 mvme68k_init()
@@ -220,11 +220,7 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
-	int base, residual;
-	
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -248,62 +244,6 @@ cpu_startup()
 	printf("%s", version);
 	identifycpu();
 	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem) / 1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t) uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				      "buffer cache");
-
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -345,54 +285,6 @@ cpu_startup()
 }
 
 /*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * You call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)((name) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate (enough to
-	 * hold 5% of total physical memory, but at least 16).
-	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
-	return (v);
-}
-
-/*
  * Info for CTL_HW
  */
 char  cpu_model[120];
@@ -427,6 +319,17 @@ identifycpu()
 	}
 
 	switch (cputyp) {
+#ifdef MVME141
+	case CPU_141:
+		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
+#if 0
+		cpuspeed = ofobiospeed((struct ofobioreg *)IIOV(0xfffb0000));
+#else
+		cpuspeed = 50;
+#endif
+		snprintf(speed, sizeof speed, "%02d", cpuspeed);
+		break;
+#endif
 #ifdef MVME147
 	case CPU_147:
 		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
@@ -436,8 +339,10 @@ identifycpu()
 #endif
 #if defined(MVME162) || defined(MVME167) || defined(MVME172) || defined(MVME177)
 	case CPU_162:
+	case CPU_166:
 	case CPU_167:
 	case CPU_172:
+	case CPU_176:
 	case CPU_177:
 		bzero(speed, sizeof speed);
 		speed[0] = brdid.speed[0];
@@ -456,6 +361,13 @@ identifycpu()
 			else
 				break;
 		}
+		break;
+#endif
+#ifdef MVME165
+	case CPU_165:
+		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
+		cpuspeed = lrcspeed((struct lrcreg *)IIOV(0xfff90000));
+		snprintf(speed, sizeof speed, "%02d", cpuspeed);
 		break;
 #endif
 	}
@@ -601,7 +513,9 @@ haltsys:
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
+		cnpollc(1);
 		cngetc();
+		cnpollc(0);
 	}
 
 	doboot();
@@ -706,6 +620,10 @@ dumpsys()
 	printf("\ndumping to dev %u,%u offset %ld\n", maj,
 	    minor(dumpdev), dumplo);
 
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
+
 	kseg_p = (kcore_seg_t *)dump_hdr;
 	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
 	bzero(dump_hdr, sizeof(dump_hdr));
@@ -791,9 +709,9 @@ int m68060_pcr_init = 0x20 | PCR_SUPERSCALAR;	/* make this patchable */
 void
 initvectors()
 {
+#if defined(M68060)
 	typedef void trapfun(void);
 	extern trapfun *vectab[256];
-#if defined(M68060)
 #if defined(M060SP)
 	extern trapfun intemu60, fpiemu60, fpdemu60, fpeaemu60;
 	extern u_int8_t FP_CALL_TOP[];
@@ -906,23 +824,6 @@ badvaddr(addr, size)
 	return (0);
 }
 
-int netisr;
-
-void
-netintr(arg)
-	void *arg;
-{
-#define DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << (bit))) { \
-			netisr &= ~(1 << (bit)); \
-			(fn)(); \
-		} \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-}
-
 /*
  * Level 7 interrupts are normally caused by the ABORT switch,
  * drop into ddb.
@@ -931,37 +832,11 @@ void
 nmihand(frame)
 	void *frame;
 {
+	printf("Abort switch pressed\n");
 #ifdef DDB
-	printf("NMI ... going to debugger\n");
-	Debugger();
-#else
-	/* panic?? */
-	printf("unexpected level 7 interrupt ignored\n");
+	if (db_console)
+		Debugger();
 #endif
-}
-
-/*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- * 
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-#ifdef COMPAT_SUNOS
-	{
-		extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-		if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-			return (0);
-	}
-#endif
-	return (error);
 }
 
 u_char   myea[6] = { 0x08, 0x00, 0x3e, 0xff, 0xff, 0xff};

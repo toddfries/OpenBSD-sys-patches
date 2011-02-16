@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: vfs_init.c,v 1.17 2004/05/14 04:00:33 tedu Exp $	*/
+=======
+/*	$OpenBSD: vfs_init.c,v 1.28 2010/12/21 20:14:43 thib Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: vfs_init.c,v 1.6 1996/02/09 19:00:58 christos Exp $	*/
 
 /*
@@ -50,6 +54,7 @@
 #include <sys/pool.h>
 #include <sys/systm.h>
 
+<<<<<<< HEAD
 /*
  * Sigh, such primitive tools are these...
  */
@@ -232,6 +237,11 @@ struct pool namei_pool;
 /*
  * Initialize the vnode structures and initialize each file system type.
  */
+=======
+struct pool namei_pool;
+
+/* Initialize the vnode structures and initialize each file system type. */
+>>>>>>> origin/master
 void
 vfsinit(void)
 {
@@ -242,14 +252,12 @@ vfsinit(void)
 	pool_init(&namei_pool, MAXPATHLEN, 0, 0, 0, "namei",
 	    &pool_allocator_nointr);
 
-	/*
-	 * Initialize the vnode table
-	 */
+	/* Initialize the vnode table. */
 	vntblinit();
-	/*
-	 * Initialize the vnode name cache
-	 */
+
+	/* Initialize the vnode name cache. */
 	nchinit();
+<<<<<<< HEAD
 	/*
 	 * Build vnode operation vectors.
 	 */
@@ -259,6 +267,8 @@ vfsinit(void)
 	 * Initialize each file system type.
 	 */
 	vattr_null(&va_null);
+=======
+>>>>>>> origin/master
 
 	/*
 	 * Stop using vfsconf and maxvfsconf as a temporary storage,

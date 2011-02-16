@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma.c,v 1.16 2004/12/25 23:02:23 miod Exp $	*/
+/*	$OpenBSD: dma.c,v 1.20 2008/10/15 19:12:19 blambert Exp $	*/
 /*	$NetBSD: dma.c,v 1.19 1997/05/05 21:02:39 thorpej Exp $	*/
 
 /*
@@ -178,7 +178,7 @@ dmainit()
 #ifdef DEBUG
 	/* make sure timeout is really not needed */
 	timeout_set(&sc->sc_timeout, dmatimeout, sc);
-	timeout_add(&sc->sc_timeout, 30 * hz);
+	timeout_add_sec(&sc->sc_timeout, 30);
 #endif
 
 	printf("98620%c, 2 channels, %d bit DMA\n",
@@ -221,11 +221,7 @@ dmareq(struct dmaqueue *dq)
 	struct dma_softc *sc = &dma_softc;
 	int i, chan, s;
 
-#if 1
-	s = splhigh();	/* XXXthorpej */
-#else
-	s = splbio();
-#endif
+	s = splvm();
 
 	chan = dq->dq_chan;
 	for (i = NDMACHAN - 1; i >= 0; i--) {
@@ -294,11 +290,7 @@ dmafree(struct dmaqueue *dq)
 	struct dmaqueue *dn;
 	int chan, s;
 
-#if 1
-	s = splhigh();	/* XXXthorpej */
-#else
-	s = splbio();
-#endif
+	s = splvm();
 
 #ifdef DEBUG
 	dmatimo[unit] = 0;
@@ -566,7 +558,7 @@ dmatimeout(void *arg)
 	struct dma_softc *sc = arg;
 
 	for (i = 0; i < NDMACHAN; i++) {
-		s = splbio();
+		s = splvm();
 		if (dmatimo[i]) {
 			if (dmatimo[i] > 1)
 				printf("dma channel %d timeout #%d\n",
@@ -575,6 +567,6 @@ dmatimeout(void *arg)
 		}
 		splx(s);
 	}
-	timeout_add(&sc->sc_timeout, 30 * hz);
+	timeout_add_sec(&sc->sc_timeout, 30);
 }
 #endif

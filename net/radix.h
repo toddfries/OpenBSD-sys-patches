@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: radix.h,v 1.12 2004/04/25 02:48:03 itojun Exp $	*/
+=======
+/*	$OpenBSD: radix.h,v 1.16 2010/06/28 18:50:37 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: radix.h,v 1.8 1996/02/13 22:00:37 christos Exp $	*/
 
 /*
@@ -93,14 +97,18 @@ extern struct radix_mask {
 #define rm_mask rm_rmu.rmu_mask
 #define rm_leaf rm_rmu.rmu_leaf		/* extra field would make 32 bytes */
 
-#define MKGet(m) {\
-	if (rn_mkfreelist) {\
-		m = rn_mkfreelist; \
-		rn_mkfreelist = (m)->rm_mklist; \
-	} else \
-		R_Malloc(m, struct radix_mask *, sizeof (*(m))); }\
+#define MKGet(m) do {							\
+	if (rn_mkfreelist) {						\
+		m = rn_mkfreelist;					\
+		rn_mkfreelist = (m)->rm_mklist;				\
+	} else								\
+		R_Malloc(m, struct radix_mask *, sizeof (*(m)));	\
+} while (0)
 
-#define MKFree(m) { (m)->rm_mklist = rn_mkfreelist; rn_mkfreelist = (m);}
+#define MKFree(m) do {							\
+	(m)->rm_mklist = rn_mkfreelist;					\
+	rn_mkfreelist = (m);						\
+} while (0)
 
 struct radix_node_head {
 	struct	radix_node *rnh_treetop;
@@ -120,9 +128,10 @@ struct radix_node_head {
 		    struct radix_node_head *head);
 					/* traverse tree */
 	int	(*rnh_walktree)(struct radix_node_head *,
-		     int (*)(struct radix_node *, void *), void *);
+		     int (*)(struct radix_node *, void *, u_int), void *);
 	struct	radix_node rnh_nodes[3];/* empty tree for common case */
 	int	rnh_multipath;		/* multipath? */
+	u_int	rnh_rtabelid;
 };
 
 #ifdef _KERNEL
@@ -137,7 +146,7 @@ int	rn_inithead(void **, int);
 int	rn_inithead0(struct radix_node_head *, int);
 int	rn_refines(void *, void *);
 int	rn_walktree(struct radix_node_head *,
-	    int (*)(struct radix_node *, void *), void *);
+	    int (*)(struct radix_node *, void *, u_int), void *);
 
 struct radix_node	*rn_addmask(void *, int, int);
 struct radix_node	*rn_addroute(void *, void *, struct radix_node_head *,

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.c,v 1.11 2007/03/13 19:29:33 miod Exp $	*/
+=======
+/*	$OpenBSD: trap.c,v 1.16 2010/06/27 12:41:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
@@ -84,9 +88,9 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/pool.h>
-#include <sys/user.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
+#include <sys/resourcevar.h>
 #include <sys/syscall.h>
 
 #ifdef KTRACE
@@ -103,6 +107,7 @@
 #include <sh/cache.h>
 #include <sh/cpu.h>
 #include <sh/mmu.h>
+#include <sh/pcb.h>
 #include <sh/trap.h>
 #include <sh/userret.h>
 #ifdef SH4
@@ -510,7 +515,7 @@ cachectl(struct proc *p, struct trapframe *tf)
 		va = (vaddr_t)tf->tf_r4;
 		len = (vsize_t)tf->tf_r5;
 
-		if (/* va < VM_MIN_ADDRESS || */ va >= VM_MAXUSER_ADDRESS ||
+		if (va < VM_MIN_ADDRESS || va >= VM_MAXUSER_ADDRESS ||
 		    va + len <= va || va + len >= VM_MAXUSER_ADDRESS)
 			len = 0;
 
@@ -571,7 +576,7 @@ syscall(struct proc *p, struct trapframe *tf)
 #ifdef DIAGNOSTIC
 	if (argsize > sizeof args) {
 		callp += p->p_emul->e_nosys - code;
-		goto bad;
+		argsize = callp->sy_argsize;
 	}
 #endif
 
@@ -620,9 +625,6 @@ syscall(struct proc *p, struct trapframe *tf)
 		break;
 	}
 
-	if (error)
-		goto bad;
-
 #ifdef SYSCALL_DEBUG
 	scdebug_call(p, code, args);
 #endif
@@ -630,6 +632,9 @@ syscall(struct proc *p, struct trapframe *tf)
 	if (KTRPOINT(p, KTR_SYSCALL))
 		ktrsyscall(p, code, callp->sy_argsize, args);
 #endif
+
+	if (error != 0)
+		goto bad;
 
 	rval[0] = 0;
 	rval[1] = tf->tf_r1;
@@ -640,6 +645,7 @@ syscall(struct proc *p, struct trapframe *tf)
 #endif
 		error = (*callp->sy_call)(p, args, rval);
 
+bad:
 	switch (oerror = error) {
 	case 0:
 		tf->tf_r0 = rval[0];
@@ -654,7 +660,6 @@ syscall(struct proc *p, struct trapframe *tf)
 		/* nothing to do */
 		break;
 	default:
-bad:
 		if (p->p_emul->e_errno)
 			error = p->p_emul->e_errno[error];
 		tf->tf_r0 = error;

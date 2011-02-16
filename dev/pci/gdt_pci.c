@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: gdt_pci.c,v 1.19 2003/08/06 21:08:06 millert Exp $	*/
+=======
+/*	$OpenBSD: gdt_pci.c,v 1.22 2009/03/29 21:53:52 sthen Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -281,14 +285,14 @@ gdt_pci_attach(parent, self, aux)
 	if (GDT_CLASS(gdt) == GDT_PCINEW) {
 		if (pci_mapreg_map(pa, GDT_PCINEW_IOMEM, PCI_MAPREG_TYPE_MEM,
 		    0, &iomemt, &iomemh, &iomembase, &iomemsize, 0)) {
-			printf("cannot map memory mapped I/O ports\n");
+			printf("can't map memory mapped i/o ports\n");
 			goto bail_out;
 		}
 		status |= IOMEM_MAPPED;
 
 		if (pci_mapreg_map(pa, GDT_PCINEW_IO, PCI_MAPREG_TYPE_IO, 0,
 		    &iot, &ioh, &iobase, &iosize, 0)) {
-			printf("cannot map I/O ports\n");
+			printf("can't map i/o space\n");
 			goto bail_out;
 		}
 		status |= IO_MAPPED;
@@ -302,7 +306,7 @@ gdt_pci_attach(parent, self, aux)
 		bus_space_set_region_4(dpmemt, dpmemh, 0, 0,
 		    GDT_DPR_IF_SZ >> 2);
 		if (bus_space_read_1(dpmemt, dpmemh, 0) != 0) {
-			printf("cannot write to DPMEM\n");
+			printf("can't write to DPMEM\n");
 			goto bail_out;
 		}
 

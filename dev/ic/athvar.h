@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*      $OpenBSD: athvar.h,v 1.18 2006/06/23 21:53:01 reyk Exp $  */
+=======
+/*      $OpenBSD: athvar.h,v 1.31 2010/09/07 16:21:42 deraadt Exp $  */
+>>>>>>> origin/master
 /*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
 
 /*-
@@ -45,8 +49,12 @@
 #ifndef _DEV_ATH_ATHVAR_H
 #define _DEV_ATH_ATHVAR_H
 
+#ifdef _KERNEL
+
 #include <net80211/ieee80211_radiotap.h>
 #include <dev/ic/ar5xxx.h>
+
+#include "bpfilter.h"
 
 #ifdef notyet
 #include "gpio.h"
@@ -120,8 +128,6 @@ struct ath_stats {
 	u_int32_t	ast_rate_raise;	/* rate control raised xmit rate */
 	u_int32_t	ast_rate_drop;	/* rate control dropped xmit rate */
 };
-
-#define	SIOCGATHSTATS	_IOWR('i', 137, struct ifreq)
 
 /*
  * Radio capture format.
@@ -216,12 +222,13 @@ struct ath_softc {
 					const struct ieee80211_node *);
 	void			(*sc_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
+				    struct ieee80211_rxinfo *, int);
 #ifdef __FreeBSD__
 	device_t		sc_dev;
 #endif
 	bus_space_tag_t		sc_st;		/* bus space tag */
 	bus_space_handle_t	sc_sh;		/* bus space handle */
+	bus_size_t		sc_ss;		/* bus space size */
 	bus_dma_tag_t		sc_dmat;	/* bus DMA tag */
 #ifdef __FreeBSD__
 	struct mtx		sc_mtx;		/* master lock (recursive) */
@@ -232,7 +239,7 @@ struct ath_softc {
 				sc_veol : 1,	/* tx VEOL support */
 				sc_softled : 1,	/* GPIO software LED */
 				sc_probing : 1,	/* probing AP on beacon miss */
-				sc_64bit : 1;	/* indicates PCI Express */
+				sc_pcie : 1;	/* indicates PCI Express */
 	u_int			sc_nchan;	/* number of valid channels */
 	const HAL_RATE_TABLE	*sc_rates[IEEE80211_MODE_MAX];
 	const HAL_RATE_TABLE	*sc_currates;	/* current rate table */
@@ -308,8 +315,6 @@ struct ath_softc {
 	HAL_MIB_STATS		sc_mib_stats;	/* MIB counter statistics */
 
 #ifndef __FreeBSD__
-	void			*sc_sdhook;	/* shutdown hook */
-	void			*sc_powerhook;	/* power management hook */
 	u_int			sc_flags;	/* misc flags */
 #endif
 
@@ -409,13 +414,7 @@ typedef unsigned long u_intptr_t;
 int	ath_attach(u_int16_t, struct ath_softc *);
 int	ath_detach(struct ath_softc *, int);
 int	ath_enable(struct ath_softc *);
-void	ath_resume(struct ath_softc *, int);
-void	ath_suspend(struct ath_softc *, int);
-#ifdef __NetBSD__
-int	ath_activate(struct device *, enum devact);
-void	ath_power(int, void *);
-#endif
-void	ath_shutdown(void *);
+int	ath_activate(struct device *, int);
 int	ath_intr(void *);
 int	ath_enable(struct ath_softc *);
 
@@ -450,6 +449,8 @@ int	ath_enable(struct ath_softc *);
 	(((*(_ah)->ah_is_key_valid)((_ah), (_ix))))
 #define	ath_hal_set_key_lladdr(_ah, _ix, _mac) \
 	((*(_ah)->ah_set_key_lladdr)((_ah), (_ix), (_mac)))
+#define	ath_hal_softcrypto(_ah, _val ) \
+	((*(_ah)->ah_softcrypto)((_ah), (_val)))
 #define	ath_hal_get_rx_filter(_ah) \
 	((*(_ah)->ah_get_rx_filter)((_ah)))
 #define	ath_hal_set_rx_filter(_ah, _filter) \
@@ -555,5 +556,9 @@ int	ath_enable(struct ath_softc *);
 	((*(_ah)->ah_fill_tx_desc)((_ah), (_ds), (_l), (_first), (_last)))
 #define	ath_hal_proc_tx_desc(_ah, _ds) \
 	((*(_ah)->ah_proc_tx_desc)((_ah), (_ds)))
+
+#endif /* _KERNEL */
+
+#define	SIOCGATHSTATS	_IOWR('i', 137, struct ifreq)
 
 #endif /* _DEV_ATH_ATHVAR_H */

@@ -1,4 +1,4 @@
-/* $OpenBSD: pci_6600.c,v 1.14 2006/03/26 20:23:08 brad Exp $ */
+/* $OpenBSD: pci_6600.c,v 1.19 2009/09/30 20:16:30 miod Exp $ */
 /* $NetBSD: pci_6600.c,v 1.5 2000/06/06 00:50:15 thorpej Exp $ */
 
 /*-
@@ -73,15 +73,14 @@
 #define	DEC_6600_LINE_IS_ISA(line)	((line) >= 0xe0 && (line) <= 0xef)
 #define	DEC_6600_LINE_ISA_IRQ(line)	((line) & 0x0f)
 
-static char *irqtype = "6600 irq";
 static struct tsp_config *sioprimary;
 
 void dec_6600_intr_disestablish(void *, void *);
 void *dec_6600_intr_establish(void *, pci_intr_handle_t, int,
-    int (*func)(void *), void *, char *);
+    int (*func)(void *), void *, const char *);
 const char *dec_6600_intr_string(void *, pci_intr_handle_t);
 int dec_6600_intr_line(void *, pci_intr_handle_t);
-int dec_6600_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
+int dec_6600_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 void *dec_6600_pciide_compat_intr_establish(void *, struct device *,
     struct pci_attach_args *, int, int (*)(void *), void *);
 void  dec_6600_pciide_compat_intr_disestablish(void *, void *);
@@ -133,14 +132,13 @@ pci_6600_pickintr(pcp)
 }
 
 int     
-dec_6600_intr_map(acv, bustag, buspin, line, ihp)
-        void *acv;
-        pcitag_t bustag; 
-        int buspin, line;
+dec_6600_intr_map(pa, ihp)
+	struct pci_attach_args *pa;
         pci_intr_handle_t *ihp;
 {
-	struct tsp_config *pcp = acv;
-	pci_chipset_tag_t pc = &pcp->pc_pc;
+	pcitag_t bustag = pa->pa_intrtag;
+	int buspin = pa->pa_intrpin, line = pa->pa_intrline;
+	pci_chipset_tag_t pc = pa->pa_pc;
 	int bus, device, function;
 
 	if (buspin == 0) {
@@ -220,7 +218,7 @@ dec_6600_intr_establish(acv, ih, level, func, arg, name)
         pci_intr_handle_t ih;
         int level;
         int (*func)(void *);
-	char *name;
+	const char *name;
 {
 	void *cookie;
 
@@ -269,7 +267,7 @@ dec_6600_intr_disestablish(acv, cookie)
  
 	s = splhigh();
 
-	alpha_shared_intr_disestablish(dec_6600_pci_intr, cookie, irqtype);
+	alpha_shared_intr_disestablish(dec_6600_pci_intr, cookie);
 	if (alpha_shared_intr_isactive(dec_6600_pci_intr, irq) == 0) {
 		dec_6600_intr_disable(irq);
 		alpha_shared_intr_set_dfltsharetype(dec_6600_pci_intr, irq,
@@ -293,8 +291,7 @@ dec_6600_iointr(arg, vec)
 		panic("iointr: irq %d is too high", irq);
 
 	if (!alpha_shared_intr_dispatch(dec_6600_pci_intr, irq)) {
-		alpha_shared_intr_stray(dec_6600_pci_intr, irq,
-		    irqtype);
+		alpha_shared_intr_stray(dec_6600_pci_intr, irq, "6600 irq");
 		if (ALPHA_SHARED_INTR_DISABLE(dec_6600_pci_intr, irq))
 			dec_6600_intr_disable(irq);
 	} else

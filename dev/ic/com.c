@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: com.c,v 1.111 2006/04/27 19:31:44 deraadt Exp $	*/
+=======
+/*	$OpenBSD: com.c,v 1.145 2010/08/28 12:48:14 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -68,7 +72,6 @@
 #include <sys/selinfo.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/uio.h>
@@ -105,7 +108,6 @@
 #include <arch/zaurus/dev/zaurus_scoopvar.h>
 #endif
 
-/* XXX: These belong elsewhere */
 cdev_decl(com);
 
 static u_char tiocm_xxx2mcr(int);
@@ -129,6 +131,7 @@ bus_addr_t comconsaddr;
 int	comconsattached;
 bus_space_tag_t comconsiot;
 bus_space_handle_t comconsioh;
+int	comconsunit;
 tcflag_t comconscflag = TTYDEF_CFLAG;
 #endif
 
@@ -229,19 +232,19 @@ com_detach(self, flags)
 
 	timeout_del(&sc->sc_dtr_tmo);
 	timeout_del(&sc->sc_diag_tmo);
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_disestablish(sc->sc_si);
-#else
-	timeout_del(&sc->sc_comsoft_tmo);
-#endif
 
 	return (0);
 }
 
 int
+<<<<<<< HEAD
 com_activate(self, act)
 	struct device *self;
 	enum devact act;
+=======
+com_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct com_softc *sc = (struct com_softc *)self;
 	int s, rv = 0;
@@ -301,7 +304,7 @@ comopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (!sc->sc_tty) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(1000000);
 	} else
 		tp = sc->sc_tty;
 	splx(s);
@@ -334,10 +337,6 @@ comopen(dev, flag, mode, p)
 		sc->sc_initialize = 1;
 		comparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-		timeout_add(&sc->sc_comsoft_tmo, 1);
-#endif
 
 		sc->sc_ibufp = sc->sc_ibuf = sc->sc_ibufs[0];
 		sc->sc_ibufhigh = sc->sc_ibuf + COM_IHIGHWATER;
@@ -372,6 +371,8 @@ comopen(dev, flag, mode, p)
 
 			if (tp->t_ispeed <= 1200)
 				fifo |= FIFO_TRIGGER_1;
+			else if (tp->t_ispeed <= 38400)
+				fifo |= FIFO_TRIGGER_4;
 			else
 				fifo |= FIFO_TRIGGER_8;
 			if (sc->sc_uarttype == COM_UART_TI16750) {
@@ -437,7 +438,7 @@ comopen(dev, flag, mode, p)
 #endif
 		}
 #endif
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0)
 		return EBUSY;
 	else
 		s = spltty();
@@ -480,7 +481,7 @@ comopen(dev, flag, mode, p)
 	}
 	splx(s);
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 int
@@ -505,21 +506,18 @@ comclose(dev, flag, mode, p)
 	if(sc->sc_swflags & COM_SW_DEAD)
 		return 0;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 	if (ISSET(tp->t_state, TS_WOPEN)) {
 		/* tty device is waiting for carrier; drop dtr then re-raise */
 		CLR(sc->sc_mcr, MCR_DTR | MCR_RTS);
 		bus_space_write_1(iot, ioh, com_mcr, sc->sc_mcr);
-		timeout_add(&sc->sc_dtr_tmo, hz * 2);
+		timeout_add_sec(&sc->sc_dtr_tmo, 2);
 	} else {
 		/* no one else waiting; turn off the uart */
 		compwroff(sc);
 	}
 	CLR(tp->t_state, TS_BUSY | TS_FLUSH);
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-	timeout_del(&sc->sc_comsoft_tmo);
-#endif
 	sc->sc_cua = 0;
 	splx(s);
 	ttyclose(tp);
@@ -587,8 +585,121 @@ compwroff(sc)
 }
 
 void
+<<<<<<< HEAD
 com_raisedtr(arg)
 	void *arg;
+=======
+com_resume(struct com_softc *sc)
+{
+	struct tty *tp = sc->sc_tty;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	int ospeed;
+
+	if (!tp || !ISSET(tp->t_state, TS_ISOPEN)) {
+#ifdef COM_CONSOLE
+		if (ISSET(sc->sc_hwflags, COM_HW_CONSOLE))
+			cominit(iot, ioh, comconsrate, comconsfreq);
+#endif
+		return;
+	}
+
+	/*
+	 * Wake up the sleepy heads.
+	 */
+	switch (sc->sc_uarttype) {
+	case COM_UART_ST16650:
+	case COM_UART_ST16650V2:
+		bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
+		bus_space_write_1(iot, ioh, com_efr, EFR_ECB);
+		bus_space_write_1(iot, ioh, com_ier, 0);
+		bus_space_write_1(iot, ioh, com_efr, 0);
+		bus_space_write_1(iot, ioh, com_lcr, 0);
+		break;
+	case COM_UART_TI16750:
+		bus_space_write_1(iot, ioh, com_ier, 0);
+		break;
+	case COM_UART_PXA2X0:
+		bus_space_write_1(iot, ioh, com_ier, IER_EUART);
+		break;
+	}
+
+	ospeed = comspeed(sc->sc_frequency, tp->t_ospeed);
+
+	if (ospeed != 0) {
+		bus_space_write_1(iot, ioh, com_lcr, sc->sc_lcr | LCR_DLAB);
+		bus_space_write_1(iot, ioh, com_dlbl, ospeed);
+		bus_space_write_1(iot, ioh, com_dlbh, ospeed >> 8);
+		bus_space_write_1(iot, ioh, com_lcr, sc->sc_lcr);
+	} else {
+		bus_space_write_1(iot, ioh, com_lcr, sc->sc_lcr);
+	}
+
+	if (ISSET(sc->sc_hwflags, COM_HW_FIFO)) {
+		u_int8_t fifo = FIFO_ENABLE|FIFO_RCV_RST|FIFO_XMT_RST;
+		u_int8_t lcr;
+
+		if (tp->t_ispeed <= 1200)
+			fifo |= FIFO_TRIGGER_1;
+		else if (tp->t_ispeed <= 38400)
+			fifo |= FIFO_TRIGGER_4;
+		else
+			fifo |= FIFO_TRIGGER_8;
+		if (sc->sc_uarttype == COM_UART_TI16750) {
+			fifo |= FIFO_ENABLE_64BYTE;
+			lcr = bus_space_read_1(iot, ioh, com_lcr);
+			bus_space_write_1(iot, ioh, com_lcr,
+			    lcr | LCR_DLAB);
+		}
+
+		/*
+		 * (Re)enable and drain FIFOs.
+		 *
+		 * Certain SMC chips cause problems if the FIFOs are
+		 * enabled while input is ready. Turn off the FIFO
+		 * if necessary to clear the input. Test the input
+		 * ready bit after enabling the FIFOs to handle races
+		 * between enabling and fresh input.
+		 *
+		 * Set the FIFO threshold based on the receive speed.
+		 */
+		for (;;) {
+			bus_space_write_1(iot, ioh, com_fifo, 0);
+			delay(100);
+			(void) bus_space_read_1(iot, ioh, com_data);
+			bus_space_write_1(iot, ioh, com_fifo, fifo |
+			    FIFO_RCV_RST | FIFO_XMT_RST);
+			delay(100);
+			if(!ISSET(bus_space_read_1(iot, ioh,
+			    com_lsr), LSR_RXRDY))
+				break;
+		}
+		if (sc->sc_uarttype == COM_UART_TI16750)
+			bus_space_write_1(iot, ioh, com_lcr, lcr);
+	}
+
+	/* Flush any pending I/O. */
+	while (ISSET(bus_space_read_1(iot, ioh, com_lsr), LSR_RXRDY))
+		(void) bus_space_read_1(iot, ioh, com_data);
+
+	/* You turn me on, baby! */
+	bus_space_write_1(iot, ioh, com_mcr, sc->sc_mcr);
+	bus_space_write_1(iot, ioh, com_ier, sc->sc_ier);
+
+#ifdef COM_PXA2X0
+	if (sc->sc_uarttype == COM_UART_PXA2X0 &&
+	    ISSET(sc->sc_hwflags, COM_HW_SIR)) {
+		bus_space_write_1(iot, ioh, com_isr, ISR_RECV);
+#ifdef __zaurus__
+		scoop_set_irled(1);
+#endif
+	}
+#endif
+}
+
+void
+com_raisedtr(void *arg)
+>>>>>>> origin/master
 {
 	struct com_softc *sc = arg;
 
@@ -921,15 +1032,9 @@ comstart(tp)
 		goto stopped;
 	if (ISSET(tp->t_cflag, CRTSCTS) && !ISSET(sc->sc_msr, MSR_CTS))
 		goto stopped;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		if (tp->t_outq.c_cc == 0)
-			goto stopped;
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto stopped;
 	SET(tp->t_state, TS_BUSY);
 
 #ifdef COM_PXA2X0
@@ -1039,7 +1144,7 @@ comsoft(arg)
 	};
 
 	if (sc == NULL || sc->sc_ibufp == sc->sc_ibuf)
-		goto out;
+		return;
 
 	tp = sc->sc_tty;
 
@@ -1050,7 +1155,7 @@ comsoft(arg)
 
 	if (ibufp == ibufend) {
 		splx(s);
-		goto out;
+		return;
 	}
 
 	sc->sc_ibufp = sc->sc_ibuf = (ibufp == sc->sc_ibufs[0]) ?
@@ -1060,7 +1165,7 @@ comsoft(arg)
 
 	if (tp == NULL || !ISSET(tp->t_state, TS_ISOPEN)) {
 		splx(s);
-		goto out;
+		return;
 	}
 
 	if (ISSET(tp->t_cflag, CRTSCTS) &&
@@ -1078,19 +1183,12 @@ comsoft(arg)
 		if (ISSET(*ibufp, LSR_OE)) {
 			sc->sc_overflows++;
 			if (sc->sc_errors++ == 0)
-				timeout_add(&sc->sc_diag_tmo, 60 * hz);
+				timeout_add_sec(&sc->sc_diag_tmo, 60);
 		}
 		/* This is ugly, but fast. */
 		c |= lsrmap[(*ibufp++ & (LSR_BI|LSR_FE|LSR_PE)) >> 2];
 		(*linesw[tp->t_line].l_rint)(c, tp);
 	}
-
-out:
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-	timeout_add(&sc->sc_comsoft_tmo, 1);
-#else
-	;
-#endif
 }
 
 #ifdef KGDB
@@ -1173,9 +1271,7 @@ comintr(arg)
 		if (ISSET(lsr, LSR_RXRDY)) {
 			register u_char *p = sc->sc_ibufp;
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 			softintr_schedule(sc->sc_si);
-#endif
 			do {
 				data = bus_space_read_1(iot, ioh, com_data);
 				if (ISSET(lsr, LSR_BI)) {
@@ -1192,7 +1288,7 @@ comintr(arg)
 				if (p >= sc->sc_ibufend) {
 					sc->sc_floods++;
 					if (sc->sc_errors++ == 0)
-						timeout_add(&sc->sc_diag_tmo, 60 * hz);
+						timeout_add_sec(&sc->sc_diag_tmo, 60);
 				} else {
 					*p++ = data;
 					*p++ = lsr;
@@ -1400,10 +1496,17 @@ comcnprobe(cp)
 		if (cdevsw[commajor].d_open == comopen)
 			break;
 
+<<<<<<< HEAD
 	/* initialize required fields */
 	cp->cn_dev = makedev(commajor, CONUNIT);
 #if defined(COMCONSOLE) || defined(PCCOMCONSOLE) || !defined(__amd64__)
 	cp->cn_pri = CN_REMOTE;
+=======
+	/* Initialize required fields. */
+	cp->cn_dev = makedev(commajor, comconsunit);
+#if defined(COMCONSOLE) || !defined(__amd64__)
+	cp->cn_pri = CN_HIGHPRI;
+>>>>>>> origin/master
 #else
 	cp->cn_pri = CN_NORMAL;
 #endif
@@ -1545,4 +1648,345 @@ com_is_console(bus_space_tag_t iot, bus_addr_t iobase)
 #endif
 	return (0);
 }
+#endif /* COM_PXA2X0 */
+
+void	com_enable_debugport(struct com_softc *);
+void	com_fifo_probe(struct com_softc *);
+
+#if defined(COM_CONSOLE) || defined(KGDB)
+void
+com_enable_debugport(struct com_softc *sc)
+{
+	int s;
+
+	/* Turn on line break interrupt, set carrier. */
+	s = splhigh();
+#ifdef KGDB
+	SET(sc->sc_ier, IER_ERXRDY);
+#ifdef COM_PXA2X0
+	if (sc->sc_uarttype == COM_UART_PXA2X0)
+		sc->sc_ier |= IER_EUART | IER_ERXTOUT;
 #endif
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, com_ier, sc->sc_ier);
+#endif
+	SET(sc->sc_mcr, MCR_DTR | MCR_RTS | MCR_IENABLE);
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, com_mcr, sc->sc_mcr);
+
+	splx(s);
+}
+#endif	/* COM_CONSOLE || KGDB */
+
+void
+com_attach_subr(struct com_softc *sc)
+{
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	u_int8_t lcr;
+
+	sc->sc_ier = 0;
+#ifdef COM_PXA2X0
+	if (sc->sc_uarttype == COM_UART_PXA2X0)
+		sc->sc_ier |= IER_EUART;
+#endif
+	/* disable interrupts */
+	bus_space_write_1(iot, ioh, com_ier, sc->sc_ier);
+
+#ifdef COM_CONSOLE
+	if (sc->sc_iot == comconsiot && sc->sc_iobase == comconsaddr) {
+		comconsattached = 1;
+		delay(10000);			/* wait for output to finish */
+		SET(sc->sc_hwflags, COM_HW_CONSOLE);
+		SET(sc->sc_swflags, COM_SW_SOFTCAR);
+	}
+#endif
+
+	/*
+	 * Probe for all known forms of UART.
+	 */
+	lcr = bus_space_read_1(iot, ioh, com_lcr);
+	bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
+	bus_space_write_1(iot, ioh, com_efr, 0);
+	bus_space_write_1(iot, ioh, com_lcr, 0);
+
+	bus_space_write_1(iot, ioh, com_fifo, FIFO_ENABLE);
+	delay(100);
+
+	/*
+	 * Skip specific probes if attachment code knows it already.
+	 */
+	if (sc->sc_uarttype == COM_UART_UNKNOWN)
+		switch (bus_space_read_1(iot, ioh, com_iir) >> 6) {
+		case 0:
+			sc->sc_uarttype = COM_UART_16450;
+			break;
+		case 2:
+			sc->sc_uarttype = COM_UART_16550;
+			break;
+		case 3:
+			sc->sc_uarttype = COM_UART_16550A;
+			break;
+		default:
+			sc->sc_uarttype = COM_UART_UNKNOWN;
+			break;
+		}
+
+	if (sc->sc_uarttype == COM_UART_16550A) { /* Probe for ST16650s */
+		bus_space_write_1(iot, ioh, com_lcr, lcr | LCR_DLAB);
+		if (bus_space_read_1(iot, ioh, com_efr) == 0) {
+			sc->sc_uarttype = COM_UART_ST16650;
+		} else {
+			bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
+			if (bus_space_read_1(iot, ioh, com_efr) == 0)
+				sc->sc_uarttype = COM_UART_ST16650V2;
+		}
+	}
+
+#if 0	/* until com works with large FIFOs */
+	if (sc->sc_uarttype == COM_UART_ST16650V2) { /* Probe for XR16850s */
+		u_int8_t dlbl, dlbh;
+
+		/* Enable latch access and get the current values. */
+		bus_space_write_1(iot, ioh, com_lcr, lcr | LCR_DLAB);
+		dlbl = bus_space_read_1(iot, ioh, com_dlbl);
+		dlbh = bus_space_read_1(iot, ioh, com_dlbh);
+
+		/* Zero out the latch divisors */
+		bus_space_write_1(iot, ioh, com_dlbl, 0);
+		bus_space_write_1(iot, ioh, com_dlbh, 0);
+
+		if (bus_space_read_1(iot, ioh, com_dlbh) == 0x10) {
+			sc->sc_uarttype = COM_UART_XR16850;
+			sc->sc_uartrev = bus_space_read_1(iot, ioh, com_dlbl);
+		}
+
+		/* Reset to original. */
+		bus_space_write_1(iot, ioh, com_dlbl, dlbl);
+		bus_space_write_1(iot, ioh, com_dlbh, dlbh);
+	}
+#endif
+
+	if (sc->sc_uarttype == COM_UART_16550A) { /* Probe for TI16750s */
+		bus_space_write_1(iot, ioh, com_lcr, lcr | LCR_DLAB);
+		bus_space_write_1(iot, ioh, com_fifo,
+		    FIFO_ENABLE | FIFO_ENABLE_64BYTE);
+		if ((bus_space_read_1(iot, ioh, com_iir) >> 5) == 7) {
+#if 0
+			bus_space_write_1(iot, ioh, com_lcr, 0);
+			if ((bus_space_read_1(iot, ioh, com_iir) >> 5) == 6)
+#endif
+				sc->sc_uarttype = COM_UART_TI16750;
+		}
+		bus_space_write_1(iot, ioh, com_fifo, FIFO_ENABLE);
+	}
+
+	/* Reset the LCR (latch access is probably enabled). */
+	bus_space_write_1(iot, ioh, com_lcr, lcr);
+	if (sc->sc_uarttype == COM_UART_16450) { /* Probe for 8250 */
+		u_int8_t scr0, scr1, scr2;
+
+		scr0 = bus_space_read_1(iot, ioh, com_scratch);
+		bus_space_write_1(iot, ioh, com_scratch, 0xa5);
+		scr1 = bus_space_read_1(iot, ioh, com_scratch);
+		bus_space_write_1(iot, ioh, com_scratch, 0x5a);
+		scr2 = bus_space_read_1(iot, ioh, com_scratch);
+		bus_space_write_1(iot, ioh, com_scratch, scr0);
+
+		if ((scr1 != 0xa5) || (scr2 != 0x5a))
+			sc->sc_uarttype = COM_UART_8250;
+	}
+
+	/*
+	 * Print UART type and initialize ourself.
+	 */
+	switch (sc->sc_uarttype) {
+	case COM_UART_UNKNOWN:
+		printf(": unknown uart\n");
+		break;
+	case COM_UART_8250:
+		printf(": ns8250, no fifo\n");
+		break;
+	case COM_UART_16450:
+		printf(": ns16450, no fifo\n");
+		break;
+	case COM_UART_16550:
+		printf(": ns16550, no working fifo\n");
+		break;
+	case COM_UART_16550A:
+		if (sc->sc_fifolen == 0)
+			sc->sc_fifolen = 16;
+		printf(": ns16550a, %d byte fifo\n", sc->sc_fifolen);
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		break;
+#ifdef COM_PXA2X0
+	case COM_UART_PXA2X0:
+		printf(": pxa2x0, 32 byte fifo");
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 32;
+		if (sc->sc_iobase == comsiraddr) {
+			SET(sc->sc_hwflags, COM_HW_SIR);
+			printf(" (SIR)");
+		}
+		printf("\n");
+		break;
+#endif
+	case COM_UART_ST16650:
+		printf(": st16650, no working fifo\n");
+		break;
+	case COM_UART_ST16650V2:
+		if (sc->sc_fifolen == 0)
+			sc->sc_fifolen = 32;
+		printf(": st16650, %d byte fifo\n", sc->sc_fifolen);
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		break;
+	case COM_UART_ST16C654:
+		printf(": st16c654, 64 byte fifo\n");
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 64;
+		break;
+	case COM_UART_TI16750:
+		printf(": ti16750, 64 byte fifo\n");
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 64;
+		break;
+#if 0
+	case COM_UART_XR16850:
+		printf(": xr16850 (rev %d), 128 byte fifo\n", sc->sc_uartrev);
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 128;
+		break;
+#ifdef COM_UART_OX16C950
+	case COM_UART_OX16C950:
+		printf(": ox16c950 (rev %d), 128 byte fifo\n", sc->sc_uartrev);
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 128;
+		break;
+#endif
+#endif
+	default:
+		panic("comattach: bad fifo type");
+	}
+
+#ifdef KGDB
+	/*
+	 * Allow kgdb to "take over" this port.  If this is
+	 * the kgdb device, it has exclusive use.
+	 */
+
+	if (iot == com_kgdb_iot && sc->sc_iobase == com_kgdb_addr &&
+	    !ISSET(sc->sc_hwflags, COM_HW_CONSOLE)) {
+		printf("%s: kgdb\n", sc->sc_dev.dv_xname);
+		SET(sc->sc_hwflags, COM_HW_KGDB);
+	}
+#endif /* KGDB */
+
+#if defined(COM_CONSOLE) || defined(KGDB)
+	if (!ISSET(sc->sc_hwflags, COM_HW_CONSOLE|COM_HW_KGDB))
+#endif
+		com_fifo_probe(sc);
+
+	if (sc->sc_fifolen == 0) {
+		CLR(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 1;
+	}
+
+	/* clear and disable fifo */
+	bus_space_write_1(iot, ioh, com_fifo, FIFO_RCV_RST | FIFO_XMT_RST);
+	(void)bus_space_read_1(iot, ioh, com_data);
+	bus_space_write_1(iot, ioh, com_fifo, 0);
+
+	sc->sc_mcr = 0;
+	bus_space_write_1(iot, ioh, com_mcr, sc->sc_mcr);
+
+#ifdef COM_CONSOLE
+	if (ISSET(sc->sc_hwflags, COM_HW_CONSOLE)) {
+		int maj;
+
+		/* locate the major number */
+		for (maj = 0; maj < nchrdev; maj++)
+			if (cdevsw[maj].d_open == comopen)
+				break;
+
+		if (maj < nchrdev && cn_tab->cn_dev == NODEV)
+			cn_tab->cn_dev = makedev(maj, sc->sc_dev.dv_unit);
+
+		printf("%s: console\n", sc->sc_dev.dv_xname);
+	}
+#endif
+
+	timeout_set(&sc->sc_diag_tmo, comdiag, sc);
+	timeout_set(&sc->sc_dtr_tmo, com_raisedtr, sc);
+	sc->sc_si = softintr_establish(IPL_TTY, comsoft, sc);
+	if (sc->sc_si == NULL)
+		panic("%s: can't establish soft interrupt",
+		    sc->sc_dev.dv_xname);
+
+	/*
+	 * If there are no enable/disable functions, assume the device
+	 * is always enabled.
+	 */
+	if (!sc->enable)
+		sc->enabled = 1;
+
+#if defined(COM_CONSOLE) || defined(KGDB)
+	if (ISSET(sc->sc_hwflags, COM_HW_CONSOLE|COM_HW_KGDB))
+		com_enable_debugport(sc);
+#endif
+}
+
+void
+com_fifo_probe(struct com_softc *sc)
+{
+	bus_space_handle_t ioh = sc->sc_ioh;
+	bus_space_tag_t iot = sc->sc_iot;
+	u_int8_t fifo, ier;
+	int timo, len;
+
+	if (!ISSET(sc->sc_hwflags, COM_HW_FIFO))
+		return;
+
+	ier = 0;
+#ifdef COM_PXA2X0
+	if (sc->sc_uarttype == COM_UART_PXA2X0)
+		ier |= IER_EUART;
+#endif
+	bus_space_write_1(iot, ioh, com_ier, ier);
+	bus_space_write_1(iot, ioh, com_lcr, LCR_DLAB);
+	bus_space_write_1(iot, ioh, com_dlbl, 3);
+	bus_space_write_1(iot, ioh, com_dlbh, 0);
+	bus_space_write_1(iot, ioh, com_lcr, LCR_PNONE | LCR_8BITS);
+	bus_space_write_1(iot, ioh, com_mcr, MCR_LOOPBACK);
+
+	fifo = FIFO_ENABLE | FIFO_RCV_RST | FIFO_XMT_RST;
+	if (sc->sc_uarttype == COM_UART_TI16750)
+		fifo |= FIFO_ENABLE_64BYTE;
+
+	bus_space_write_1(iot, ioh, com_fifo, fifo);
+
+	for (len = 0; len < 256; len++) {
+		bus_space_write_1(iot, ioh, com_data, (len + 1));
+		timo = 2000;
+		while (!ISSET(bus_space_read_1(iot, ioh, com_lsr),
+		    LSR_TXRDY) && --timo)
+			delay(1);
+		if (!timo)
+			break;
+	}
+
+	delay(100);
+
+	for (len = 0; len < 256; len++) {
+		timo = 2000;
+		while (!ISSET(bus_space_read_1(iot, ioh, com_lsr),
+		    LSR_RXRDY) && --timo)
+			delay(1);
+		if (!timo || bus_space_read_1(iot, ioh, com_data) != (len + 1))
+			break;
+	}
+
+	/* For safety, always use the smaller value. */
+	if (sc->sc_fifolen > len) {
+		printf("%s: probed fifo depth: %d bytes\n",
+		    sc->sc_dev.dv_xname, len);
+		sc->sc_fifolen = len;
+	}
+}

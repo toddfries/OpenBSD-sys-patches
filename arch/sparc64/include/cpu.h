@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cpu.h,v 1.37 2006/12/24 20:30:35 miod Exp $	*/
+=======
+/*	$OpenBSD: cpu.h,v 1.75 2010/12/21 14:56:24 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -103,8 +107,24 @@ struct cpu_info {
 	struct proc		*ci_fpproc;
 	int			ci_number;
 	int			ci_upaid;
+<<<<<<< HEAD
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
+=======
+#ifdef MULTIPROCESSOR
+	int			ci_itid;
+#endif
+	int			ci_node;
+	u_int32_t 		ci_randseed;
+	struct schedstate_percpu ci_schedstate; /* scheduler state */
+
+	int			ci_want_resched;
+	int			ci_handled_intr_level;
+	void			*ci_intrpending[16][8];
+	u_int64_t		ci_tick;
+	struct intrhand		ci_tickintr;
+
+>>>>>>> origin/master
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long			ci_spin_locks;	/* # of spin locks held */
 	u_long			ci_simple_locks;/* # of simple locks held */
@@ -113,15 +133,69 @@ struct cpu_info {
 	void			(*ci_spinup)(void); /* spinup routine */
 	void			*ci_initstack;
 	paddr_t			ci_paddr;	/* Phys addr of this structure. */
+<<<<<<< HEAD
+=======
+
+#ifdef SUN4V
+	struct rwindow64	ci_rw;
+	u_int64_t		ci_rwsp;
+
+	paddr_t			ci_mmfsa;
+	paddr_t			ci_cpumq;
+	paddr_t			ci_devmq;
+
+	paddr_t			ci_cpuset;
+	paddr_t			ci_mondo;
+#endif
+
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
+>>>>>>> origin/master
 };
 
 extern struct cpu_info *cpus;
 extern struct cpu_info cpu_info_store;
 
+<<<<<<< HEAD
 #if 1
 #define	curcpu()	(&cpu_info_store)
+=======
+#define curpcb		curcpu()->ci_cpcb
+#define fpproc		curcpu()->ci_fpproc
+
+#ifdef MULTIPROCESSOR
+
+#define	cpu_number()	(curcpu()->ci_number)
+
+extern __inline struct cpu_info *curcpu(void);
+extern __inline struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	__asm __volatile("mov %%g7, %0" : "=r"(ci));
+	return (ci->ci_self);
+}
+
+#define CPU_IS_PRIMARY(ci)	((ci)->ci_number == 0)
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	for (cii = 0, ci = cpus; ci != NULL; ci = ci->ci_next)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_number)
+#define MAXCPUS	256
+
+void	cpu_boot_secondary_processors(void);
+
+void	sparc64_send_ipi(int, void (*)(void), u_int64_t, u_int64_t);
+void	sparc64_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
+
+void	cpu_unidle(struct cpu_info *);
+
+>>>>>>> origin/master
 #else
 #define	curcpu()	((struct cpu_info *)CPUINFO_VA)
+<<<<<<< HEAD
 #endif
 
 /*
@@ -133,6 +207,18 @@ extern struct cpu_info cpu_info_store;
 #define cpu_number()	0
 #else
 #define	cpu_number()	(curcpu()->ci_number)
+=======
+
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS 1
+
+#define cpu_unidle(ci)
+
+>>>>>>> origin/master
 #endif
 
 /*
@@ -153,7 +239,7 @@ struct clockframe {
 				(((framep)->t.tf_kstack < (vaddr_t)EINTSTACK)&&\
 				((framep)->t.tf_kstack > (vaddr_t)INTSTACK)))
 
-void setsoftnet(void);
+extern void (*cpu_start_clock)(void);
 
 extern	int want_ast;
 
@@ -161,8 +247,13 @@ extern	int want_ast;
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
+<<<<<<< HEAD
 extern	int want_resched;	/* resched() was called */
 #define	need_resched(ci)	(want_resched = 1, want_ast = 1)
+=======
+extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
+>>>>>>> origin/master
 
 /*
  * This is used during profiling to integrate system time.
@@ -196,7 +287,6 @@ void	dumpconf(void);
 caddr_t	reserve_dumppages(caddr_t);
 /* clock.c */
 struct timeval;
-int	tickintr(void *); /* level 10 (tick) interrupt code */
 int	clockintr(void *);/* level 10 (clock) interrupt code */
 int	statintr(void *);	/* level 14 (statclock) interrupt code */
 /* locore.s */
@@ -205,7 +295,7 @@ void	savefpstate(struct fpstate64 *);
 void	loadfpstate(struct fpstate64 *);
 u_int64_t	probeget(paddr_t, int, int);
 #define	 write_all_windows() __asm __volatile("flushw" : : )
-#define	 write_user_windows() __asm __volatile("flushw" : : )
+void	write_user_windows(void);
 void 	proc_trampoline(void);
 struct pcb;
 void	snapshot(struct pcb *);
@@ -238,7 +328,6 @@ void kgdb_connect(int);
 void kgdb_panic(void);
 #endif
 /* emul.c */
-int	fixalign(struct proc *, struct trapframe64 *);
 int	emulinstr(vaddr_t, struct trapframe64 *);
 int	emul_qf(int32_t, struct proc *, union sigval, struct trapframe64 *);
 int	emul_popc(int32_t, struct proc *, union sigval, struct trapframe64 *);
@@ -260,7 +349,7 @@ int	emul_popc(int32_t, struct proc *, union sigval, struct trapframe64 *);
 struct trapvec {
 	int	tv_instr[8];		/* the eight instructions */
 };
-extern struct trapvec *trapbase;	/* the 256 vectors */
+extern struct trapvec trapbase[];	/* the 256 vectors */
 
 extern void wzero(void *, u_int);
 extern void wcopy(const void *, void *, u_int);

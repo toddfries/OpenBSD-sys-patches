@@ -1,4 +1,4 @@
-#	$OpenBSD: m88110_mmu.S,v 1.1 2004/04/29 14:33:27 miod Exp $
+#	$OpenBSD: m88110_mmu.S,v 1.5 2008/07/28 17:49:38 miod Exp $
 /*
  * Copyright (c) 2000 Steve Murphree, Jr.
  * All rights reserved.
@@ -38,8 +38,8 @@
 
 ENTRY(set_icmd)
 	FLUSH_PIPELINE
-	jmp.n	r1
-	 stcr	r2, ICMD
+	stcr	r2, ICMD
+	jmp	r1
 
 ENTRY(set_ictl)
 	FLUSH_PIPELINE
@@ -49,8 +49,8 @@ ENTRY(set_ictl)
 	jmp	r1
 
 ENTRY(set_isar)
-	jmp.n	r1
-	 stcr	r2, ISAR
+	stcr	r2, ISAR
+	jmp	r1
 
 ENTRY(set_isap)
 	FLUSH_PIPELINE
@@ -65,29 +65,29 @@ ENTRY(set_iuap)
 	jmp	r1
 
 ENTRY(set_iir)
-	jmp.n	r1
-	 stcr	r2, IIR 
+	stcr	r2, IIR 
+	jmp	r1
 
 ENTRY(set_ibp)
-	jmp.n	r1
-	 stcr	r2, IBP 
+	stcr	r2, IBP 
+	jmp	r1
 
 ENTRY(set_ippu)
-	jmp.n	r1
-	 stcr	r2, IPPU
+	stcr	r2, IPPU
+	jmp	r1
 
 ENTRY(set_ippl)
-	jmp.n	r1
-	 stcr	r2, IPPL
+	stcr	r2, IPPL
+	jmp	r1
 
 ENTRY(set_isr)
-	jmp.n	r1
-	 stcr	r2, ISR 
+	stcr	r2, ISR 
+	jmp	r1
 
 ENTRY(set_dcmd)
 	FLUSH_PIPELINE
-	jmp.n	r1
-	 stcr	r2, DCMD
+	stcr	r2, DCMD
+	jmp	r1
 
 ENTRY(set_dctl)
 	FLUSH_PIPELINE
@@ -118,24 +118,24 @@ ENTRY(set_duap)
 	jmp	r1
 
 ENTRY(set_dir)
-	jmp.n	r1
-	 stcr	r2, DIR 
+	stcr	r2, DIR 
+	jmp	r1
 
 ENTRY(set_dbp)
-	jmp.n	r1
-	 stcr	r2, DBP 
+	stcr	r2, DBP 
+	jmp	r1
 
 ENTRY(set_dppu)
-	jmp.n	r1
-	 stcr	r2, DPPU
+	stcr	r2, DPPU
+	jmp	r1
 
 ENTRY(set_dppl)
-	jmp.n	r1
-	 stcr	r2, DPPL
+	stcr	r2, DPPL
+	jmp	r1
 
 ENTRY(set_dsr)
-	jmp.n	r1
-	 stcr	r2, DSR 
+	stcr	r2, DSR 
+	jmp	r1
 
 /* get routines */
 ENTRY(get_icmd)
@@ -143,8 +143,8 @@ ENTRY(get_icmd)
 	 ldcr	r2, ICMD
 
 ENTRY(get_ictl)
-	jmp.n	r1
-	 ldcr	r2, ICTL
+	ldcr	r2, ICTL
+	jmp	r1
 
 ENTRY(get_isar)
 	jmp.n	r1
@@ -183,37 +183,5 @@ ENTRY(get_dcmd)
 	 ldcr	r2, DCMD
 
 ENTRY(get_dctl)
-	jmp.n	r1
-	 ldcr	r2, DCTL
-
-ENTRY(get_dsar)
-	jmp.n	r1
-	 ldcr	r2, DSAR
-
-ENTRY(get_dsap)
-	jmp.n	r1
-	 ldcr	r2, DSAP
-
-ENTRY(get_duap)
-	jmp.n	r1
-	 ldcr	r2, DUAP
-
-ENTRY(get_dir)
-	jmp.n	r1
-	 ldcr	r2, DIR 
-
-ENTRY(get_dbp)
-	jmp.n	r1
-	 ldcr	r2, DBP 
-
-ENTRY(get_dppu)
-	jmp.n	r1
-	 ldcr	r2, DPPU
-
-ENTRY(get_dppl)
-	jmp.n	r1
-	 ldcr	r2, DPPL
-
-ENTRY(get_dsr)
-	jmp.n	r1
-	 ldcr	r2, DSR 
+	ldcr	r2, DCTL
+	jmp	r1

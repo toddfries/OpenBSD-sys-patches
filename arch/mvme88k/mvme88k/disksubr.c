@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.32 2006/03/15 20:20:40 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.64 2010/04/23 15:25:20 jsing Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -34,17 +34,8 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-#ifdef DEBUG
-int disksubr_debug;
-#endif
-
-void bsdtocpulabel(struct disklabel *, struct cpu_disklabel *);
-void cputobsdlabel(struct disklabel *, struct cpu_disklabel *);
-
-#ifdef DEBUG
-void printlp(struct disklabel *, char *);
-void printclp(struct cpu_disklabel *, char *);
-#endif
+void	bsdtocpulabel(struct disklabel *, struct mvmedisklabel *);
+int	cputobsdlabel(struct disklabel *, struct mvmedisklabel *);
 
 /*
  * Attempt to read a disk label from a device
@@ -55,32 +46,19 @@ void printclp(struct cpu_disklabel *, char *);
  * Returns NULL on success and an error string on failure.
  */
 
-char *
-readdisklabel(dev, strat, lp, clp, spoofonly)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *clp;
-	int spoofonly;
+int
+readdisklabel(dev_t dev, void (*strat)(struct buf *),
+    struct disklabel *lp, int spoofonly)
 {
-	struct buf *bp;
-	int error, i;
+	struct buf *bp = NULL;
+	int error;
 
-	/* minimal requirements for archetypal disk label */
-	if (lp->d_secsize < DEV_BSIZE)
-		lp->d_secsize = DEV_BSIZE;
-	if (lp->d_secperunit == 0)
-		lp->d_secperunit = 0x1fffffff;
-	if (lp->d_secpercyl == 0)
-		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
-	for (i = 0; i < RAW_PART; i++) {
-		lp->d_partitions[i].p_size = 0;
-		lp->d_partitions[i].p_offset = 0;
-	}
-	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = lp->d_secperunit;
-	lp->d_partitions[i].p_offset = 0;
+	if ((error = initdisklabel(lp)))
+		goto done;
+
+	/* get a buffer and initialize it */
+	bp = geteblk((int)lp->d_secsize);
+	bp->b_dev = dev;
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
@@ -93,40 +71,26 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylinder = 0; /* contained in block 0 */
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
+	if (biowait(bp)) {
+		error = bp->b_error;
+		goto done;
+	}
 
-	error = biowait(bp);
+	error = cputobsdlabel(lp, (struct mvmedisklabel *)bp->b_data);
 	if (error == 0)
-		bcopy(bp->b_data, clp, sizeof (struct cpu_disklabel));
-	bp->b_flags = B_INVAL | B_AGE | B_READ;
-	brelse(bp);
-
-	if (error)
-		return ("disk label read error");
+		goto done;
 
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0)
-		return (NULL);
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0)
-		return (NULL);
-#endif
-	if (clp->magic1 != DISKMAGIC || clp->magic2 != DISKMAGIC)
-		return ("no disk label");
-
-	cputobsdlabel(lp, clp);
-
-	if (dkcksum(lp) != 0)
-		return ("disk label corrupted");
-
-#ifdef DEBUG
-	if (disksubr_debug != 0) {
-		printlp(lp, "readdisklabel:bsd label");
-		printclp(clp, "readdisklabel:cpu label");
-	}
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
+		goto done;
 #endif
 	return (NULL);
 }
@@ -196,8 +160,7 @@ setdisklabel(olp, nlp, openmask, clp)
 	if (disksubr_debug != 0) {
 		printlp(olp, "setdisklabel:old->new disklabel");
 	}
-#endif
-	return (0);
+	return (error);
 }
 
 /*
@@ -226,8 +189,7 @@ writedisklabel(dev, strat, lp, clp)
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylinder = 0; /* contained in block 0 */
+	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 
 	if ((error = biowait(bp)) != 0) {
@@ -236,12 +198,9 @@ writedisklabel(dev, strat, lp, clp)
 		bcopy(bp->b_data, clp, sizeof(struct cpu_disklabel));
 	}
 
-	bp->b_flags = B_INVAL | B_AGE | B_READ;
-	brelse(bp);
-
-	if (error) {
-		return (error);
-	}
+	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	(*strat)(bp);
+	error = biowait(bp);
 
 	bsdtocpulabel(lp, clp);
 
@@ -341,6 +300,20 @@ bsdtocpulabel(lp, clp)
 	char *id = "M88K";
 	char *mot;
 	int i;
+	u_short osa_u, osa_l, osl;
+	u_int oss;
+
+	/* preserve existing VID boot code information */
+	osa_u = clp->vid_osa_u;
+	osa_l = clp->vid_osa_l;
+	osl = clp->vid_osl;
+	oss = clp->vid_oss;
+	bzero(clp, sizeof(*clp));
+	clp->vid_osa_u = osa_u;
+	clp->vid_osa_l = osa_l;
+	clp->vid_osl = osl;
+	clp->vid_oss = oss;
+	clp->vid_cas = clp->vid_cal = 1;
 
 	clp->magic1 = lp->d_magic;
 	clp->type = lp->d_type;
@@ -353,30 +326,14 @@ bsdtocpulabel(lp, clp)
 	clp->cfg_hds = lp->d_ntracks;
 
 	clp->secpercyl = lp->d_secpercyl;
-	clp->secperunit = lp->d_secperunit;
-	clp->sparespertrack = lp->d_sparespertrack;
-	clp->sparespercyl = lp->d_sparespercyl;
+	clp->secperunit = DL_GETDSIZE(lp);
 	clp->acylinders = lp->d_acylinders;
-	clp->rpm = lp->d_rpm;
 
-	clp->cfg_ilv = lp->d_interleave;
-	clp->cfg_sof = lp->d_trackskew;
-	clp->cylskew = lp->d_cylskew;
-	clp->headswitch = lp->d_headswitch;
-
-	/* this silly table is for winchester drives */
-	if (lp->d_trkseek < 6) {
-		clp->cfg_ssr = 0;
-	} else if (lp->d_trkseek < 10) {
-		clp->cfg_ssr = 1;
-	} else if (lp->d_trkseek < 15) {
-		clp->cfg_ssr = 2;
-	} else if (lp->d_trkseek < 20) {
-		clp->cfg_ssr = 3;
-	} else {
-		clp->cfg_ssr = 4;
-	}
-
+	clp->cfg_ilv = 1;
+	clp->cfg_sof = 1;
+	clp->cylskew = 1;
+	clp->headswitch = 0;
+	clp->cfg_ssr = 0;
 	clp->flags = lp->d_flags;
 	for (i = 0; i < NDDATA; i++)
 		clp->drivedata[i] = lp->d_drivedata[i];
@@ -405,156 +362,33 @@ bsdtocpulabel(lp, clp)
 	}
 }
 
-void
-cputobsdlabel(lp, clp)
-	struct disklabel *lp;
-	struct cpu_disklabel *clp;
+int
+cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 {
 	int i;
 
-	if (clp->version == 0) {
-#ifdef DEBUG
-		if (disksubr_debug != 0) {
-			printf("Reading old disklabel\n");
-		}
-#endif
-		lp->d_magic = clp->magic1;
-		lp->d_type = clp->type;
-		lp->d_subtype = clp->subtype;
-		strncpy(lp->d_typename, clp->vid_vd, sizeof lp->d_typename);
-		strncpy(lp->d_packname, clp->packname, sizeof lp->d_packname);
-		lp->d_secsize = clp->cfg_psm;
-		lp->d_nsectors = clp->cfg_spt;
-		lp->d_ncylinders = clp->cfg_trk; /* trk is really num of cyl! */
-		lp->d_ntracks = clp->cfg_hds;
+	if (clp->magic1 != DISKMAGIC || clp->magic2 != DISKMAGIC)
+		return (EINVAL);	/* no disk label */
 
-		lp->d_secpercyl = clp->secpercyl;
-		lp->d_secperunit = clp->secperunit;
-		lp->d_secpercyl = clp->secpercyl;
-		lp->d_secperunit = clp->secperunit;
-		lp->d_sparespertrack = clp->sparespertrack;
-		lp->d_sparespercyl = clp->sparespercyl;
-		lp->d_acylinders = clp->acylinders;
-		lp->d_rpm = clp->rpm;
-		lp->d_interleave = clp->cfg_ilv;
-		lp->d_trackskew = clp->cfg_sof;
-		lp->d_cylskew = clp->cylskew;
-		lp->d_headswitch = clp->headswitch;
+	lp->d_magic = clp->magic1;
+	lp->d_type = clp->type;
+	lp->d_subtype = clp->subtype;
+	strncpy(lp->d_typename, clp->vid_vd, sizeof lp->d_typename);
+	strncpy(lp->d_packname, clp->packname, sizeof lp->d_packname);
+	lp->d_secsize = clp->cfg_psm;
+	lp->d_nsectors = clp->cfg_spt;
+	lp->d_ncylinders = clp->cfg_trk; /* trk is really num of cyl! */
+	lp->d_ntracks = clp->cfg_hds;
 
-		/* this silly table is for winchester drives */
-		switch (clp->cfg_ssr) {
-		case 0:
-			lp->d_trkseek = 0;
-			break;
-		case 1:
-			lp->d_trkseek = 6;
-			break;
-		case 2:
-			lp->d_trkseek = 10;
-			break;
-		case 3:
-			lp->d_trkseek = 15;
-			break;
-		case 4:
-			lp->d_trkseek = 20;
-			break;
-		default:
-			lp->d_trkseek = 0;
-		}
-		lp->d_flags = clp->flags;
-		for (i = 0; i < NDDATA; i++)
-			lp->d_drivedata[i] = clp->drivedata[i];
-		for (i = 0; i < NSPARE; i++)
-			lp->d_spare[i] = clp->spare[i];
-
-		lp->d_magic2 = clp->magic2;
-		lp->d_checksum = clp->checksum;
-		lp->d_npartitions = clp->partitions;
-		lp->d_bbsize = clp->bbsize;
-		lp->d_sbsize = clp->sbsize;
-		bcopy(clp->vid_4, &lp->d_partitions[0], sizeof(struct partition) * 4);
-		bcopy(clp->cfg_4, &lp->d_partitions[4], sizeof(struct partition) * 12);
-		lp->d_checksum = 0;
-		lp->d_checksum = dkcksum(lp);
-	} else {
-#ifdef DEBUG
-		if (disksubr_debug != 0) {
-			printf("Reading new disklabel\n");
-		}
-#endif
-		lp->d_magic = clp->magic1;
-		lp->d_type = clp->type;
-		lp->d_subtype = clp->subtype;
-		strncpy(lp->d_typename, clp->vid_vd, sizeof lp->d_typename);
-		strncpy(lp->d_packname, clp->packname, sizeof lp->d_packname);
-		lp->d_secsize = clp->cfg_psm;
-		lp->d_nsectors = clp->cfg_spt;
-		lp->d_ncylinders = clp->cfg_trk; /* trk is really num of cyl! */
-		lp->d_ntracks = clp->cfg_hds;
-
-		lp->d_secpercyl = clp->secpercyl;
-		lp->d_secperunit = clp->secperunit;
-		lp->d_secpercyl = clp->secpercyl;
-		lp->d_secperunit = clp->secperunit;
-		lp->d_sparespertrack = clp->sparespertrack;
-		lp->d_sparespercyl = clp->sparespercyl;
-		lp->d_acylinders = clp->acylinders;
-		lp->d_rpm = clp->rpm;
-		lp->d_interleave = clp->cfg_ilv;
-		lp->d_trackskew = clp->cfg_sof;
-		lp->d_cylskew = clp->cylskew;
-		lp->d_headswitch = clp->headswitch;
-
-		/* this silly table is for winchester drives */
-		switch (clp->cfg_ssr) {
-		case 0:
-			lp->d_trkseek = 0;
-			break;
-		case 1:
-			lp->d_trkseek = 6;
-			break;
-		case 2:
-			lp->d_trkseek = 10;
-			break;
-		case 3:
-			lp->d_trkseek = 15;
-			break;
-		case 4:
-			lp->d_trkseek = 20;
-			break;
-		default:
-			lp->d_trkseek = 0;
-		}
-		lp->d_flags = clp->flags;
-		for (i = 0; i < NDDATA; i++)
-			lp->d_drivedata[i] = clp->drivedata[i];
-		for (i = 0; i < NSPARE; i++)
-			lp->d_spare[i] = clp->spare[i];
-
-		lp->d_magic2 = clp->magic2;
-		lp->d_checksum = clp->checksum;
-		lp->d_npartitions = clp->partitions;
-		lp->d_bbsize = clp->bbsize;
-		lp->d_sbsize = clp->sbsize;
-		bcopy(clp->vid_4, &lp->d_partitions[0], sizeof(struct partition) * 4);
-		bcopy(clp->cfg_4, &lp->d_partitions[4], sizeof(struct partition) * 12);
-		lp->d_checksum = 0;
-		lp->d_checksum = dkcksum(lp);
-	}
-#if defined(DEBUG)
-	if (disksubr_debug != 0) {
-		printlp(lp, "translated label read from disk\n");
-	}
-#endif
-}
-
-#ifdef DEBUG
-void
-printlp(lp, str)
-	struct disklabel *lp;
-	char *str;
-{
-	int i;
+	lp->d_secpercyl = clp->secpercyl;
+	if (DL_GETDSIZE(lp) == 0)
+		DL_SETDSIZE(lp, clp->secperunit);
+	lp->d_acylinders = clp->acylinders;
+	lp->d_flags = clp->flags;
+	for (i = 0; i < NDDATA; i++)
+		lp->d_drivedata[i] = clp->drivedata[i];
+	for (i = 0; i < NSPARE; i++)
+		lp->d_spare[i] = clp->spare[i];
 
 	printf("%s\n", str);
 	printf("magic1 %x\n", lp->d_magic);
@@ -606,5 +440,10 @@ printclp(clp, str)
 		    'a' + i, part->p_size, part->p_offset, fstyp,
 		    part->p_frag, part->p_cpg);
 	}
+
+	lp->d_version = 1;
+	lp->d_checksum = 0;
+	lp->d_checksum = dkcksum(lp);
+	return (0);
 }
 #endif

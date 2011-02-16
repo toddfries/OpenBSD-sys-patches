@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibr.c,v 1.17 2005/11/07 02:19:46 brad Exp $ */
+/*	$OpenBSD: mpcpcibr.c,v 1.21 2010/12/04 17:06:31 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.
@@ -65,6 +65,7 @@ void   mpc_attach_hook(struct device *, struct device *,
 int    mpc_bus_maxdevs(void *, int);
 pcitag_t mpc_make_tag(void *, int, int, int);
 void   mpc_decompose_tag(void *, pcitag_t, int *, int *, int *);
+int	mpc_conf_size(void *, pcitag_t);
 pcireg_t mpc_conf_read(void *, pcitag_t, int);
 void   mpc_conf_write(void *, pcitag_t, int, pcireg_t);
 
@@ -72,7 +73,7 @@ int      mpc_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
 const char *mpc_intr_string(void *, pci_intr_handle_t);
 int	 mpc_intr_line(void *, pci_intr_handle_t);
 void     *mpc_intr_establish(void *, pci_intr_handle_t,
-    int, int (*)(void *), void *, char *);
+    int, int (*)(void *), void *, const char *);
 void     mpc_intr_disestablish(void *, void *);
 int      mpc_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 
@@ -210,6 +211,7 @@ mpcpcibrattach(parent, self, aux)
 	lcp->lc_pc.pc_bus_maxdevs = mpc_bus_maxdevs;
 	lcp->lc_pc.pc_make_tag = mpc_make_tag;
 	lcp->lc_pc.pc_decompose_tag = mpc_decompose_tag;
+	lcp->lc_pc.pc_conf_size = mpc_conf_size;
 	lcp->lc_pc.pc_conf_read = mpc_conf_read;
 	lcp->lc_pc.pc_conf_write = mpc_conf_write;
 	lcp->lc_pc.pc_ether_hw_addr = mpc_ether_hw_addr;
@@ -232,6 +234,8 @@ mpcpcibrattach(parent, self, aux)
 
 	printf(": revision 0x%x\n", 
 	    mpc_cfg_read_1(lcp, RAVEN_PCI_REVID));
+
+	bzero(&pba, sizeof(pba));
 	pba.pba_dmat = &pci_bus_dma_tag;
 
 	pba.pba_busname = "pci";
@@ -379,6 +383,12 @@ mpc_gen_config_reg(cpv, tag, offset)
 	return reg;
 }
 
+int
+mpc_conf_size(void *cpv, pcitag_t tag)
+{
+	return PCI_CONFIG_SPACE_SIZE;
+}
+
 /*#define DEBUG_CONFIG */
 pcireg_t
 mpc_conf_read(cpv, tag, offset)
@@ -394,7 +404,8 @@ mpc_conf_read(cpv, tag, offset)
 	faultbuf env;
 	void *oldh;
 
-	if (offset & 3 || offset < 0 || offset >= 0x100) {
+	if (offset & 3 ||
+	    offset < 0 || offset >= PCI_CONFIG_SPACE_SIZE) {
 #ifdef DEBUG_CONFIG
 		printf ("pci_conf_read: bad reg %x\n", offset);
 #endif
@@ -541,7 +552,7 @@ mpc_intr_establish(lcv, ih, level, func, arg, name)
 	int level;
 	int (*func)(void *);
 	void *arg;
-	char *name;
+	const char *name;
 {
 	return (*intr_establish_func)(lcv, ih, IST_LEVEL, level, func, arg,
 		name);

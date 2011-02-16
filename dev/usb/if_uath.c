@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_uath.c,v 1.16 2007/01/02 14:43:50 claudio Exp $	*/
+=======
+/*	$OpenBSD: if_uath.c,v 1.49 2011/01/25 20:03:35 jakemsr Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006
@@ -19,8 +23,6 @@
 
 /*-
  * Driver for Atheros AR5005UG/AR5005UX chipsets.
- * http://www.atheros.com/pt/bulletins/AR5005UGBulletin.pdf
- * http://www.atheros.com/pt/bulletins/AR5005UXBulletin.pdf
  *
  * IMPORTANT NOTICE:
  * This driver was written without any documentation or support from Atheros
@@ -32,7 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -118,10 +119,12 @@ static const struct uath_type {
 	UATH_DEV_UG(GIGASET,		SMCWUSBTG),
 	UATH_DEV_UG(GLOBALSUN,		AR5523_1),
 	UATH_DEV_UX(GLOBALSUN,		AR5523_2),
+	UATH_DEV_UG(IODATA,		USBWNG54US),
+	UATH_DEV_UG(MELCO,		WLIU2KAMG54),
 	UATH_DEV_UX(NETGEAR,		WG111U),
 	UATH_DEV_UG(NETGEAR3,		WG111T),
 	UATH_DEV_UG(NETGEAR3,		WPN111),
-	UATH_DEV_UG(UMEDIA,		AR5523_1),
+	UATH_DEV_UG(PHILIPS,		SNU6500),
 	UATH_DEV_UX(UMEDIA,		AR5523_2),
 	UATH_DEV_UG(UMEDIA,		TEW444UBEU),
 	UATH_DEV_UG(WISTRONNEWEB,	AR5523_1),
@@ -152,6 +155,7 @@ Static int	uath_newstate(struct ieee80211com *, enum ieee80211_state,
 #ifdef UATH_DEBUG
 Static void	uath_dump_cmd(const uint8_t *, int, char);
 #endif
+<<<<<<< HEAD
 Static int	uath_cmd(struct uath_softc *, uint32_t, const void *, int,
 		    void *, int);
 Static int	uath_cmd_write(struct uath_softc *, uint32_t, const void *,
@@ -197,6 +201,61 @@ Static int	uath_activate(device_ptr_t, enum devact);
 USB_DECLARE_DRIVER(uath);
 
 USB_MATCH(uath)
+=======
+int	uath_cmd(struct uath_softc *, uint32_t, const void *, int, void *,
+	    int);
+int	uath_cmd_write(struct uath_softc *, uint32_t, const void *, int, int);
+int	uath_cmd_read(struct uath_softc *, uint32_t, const void *, int, void *,
+	    int);
+int	uath_write_reg(struct uath_softc *, uint32_t, uint32_t);
+int	uath_write_multi(struct uath_softc *, uint32_t, const void *, int);
+int	uath_read_reg(struct uath_softc *, uint32_t, uint32_t *);
+int	uath_read_eeprom(struct uath_softc *, uint32_t, void *);
+void	uath_cmd_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uath_data_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uath_data_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+int	uath_tx_null(struct uath_softc *);
+int	uath_tx_data(struct uath_softc *, struct mbuf *,
+	    struct ieee80211_node *);
+void	uath_start(struct ifnet *);
+void	uath_watchdog(struct ifnet *);
+int	uath_ioctl(struct ifnet *, u_long, caddr_t);
+int	uath_query_eeprom(struct uath_softc *);
+int	uath_reset(struct uath_softc *);
+int	uath_reset_tx_queues(struct uath_softc *);
+int	uath_wme_init(struct uath_softc *);
+int	uath_set_chan(struct uath_softc *, struct ieee80211_channel *);
+int	uath_set_key(struct uath_softc *, const struct ieee80211_key *, int);
+int	uath_set_keys(struct uath_softc *);
+int	uath_set_rates(struct uath_softc *, const struct ieee80211_rateset *);
+int	uath_set_rxfilter(struct uath_softc *, uint32_t, uint32_t);
+int	uath_set_led(struct uath_softc *, int, int);
+int	uath_switch_channel(struct uath_softc *, struct ieee80211_channel *);
+int	uath_init(struct ifnet *);
+void	uath_stop(struct ifnet *, int);
+int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
+int	uath_activate(struct device *, int);
+
+int uath_match(struct device *, void *, void *); 
+void uath_attach(struct device *, struct device *, void *); 
+int uath_detach(struct device *, int); 
+int uath_activate(struct device *, int); 
+
+struct cfdriver uath_cd = { 
+	NULL, "uath", DV_IFNET
+}; 
+
+const struct cfattach uath_ca = { 
+	sizeof(struct uath_softc), 
+	uath_match, 
+	uath_attach, 
+	uath_detach, 
+	uath_activate, 
+};
+
+int
+uath_match(struct device *parent, void *match, void *aux)
+>>>>>>> origin/master
 {
 	USB_MATCH_START(uath, uaa);
 
@@ -295,7 +354,7 @@ USB_ATTACH(uath)
 	/*
 	 * Only post-firmware devices here.
 	 */
-	usb_init_task(&sc->sc_task, uath_task, sc);
+	usb_init_task(&sc->sc_task, uath_task, sc, USB_TASK_TYPE_GENERIC);
 	timeout_set(&sc->scan_to, uath_next_scan, sc);
 	timeout_set(&sc->stat_to, uath_stat, sc);
 
@@ -387,7 +446,6 @@ USB_ATTACH(uath)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = uath_init;
 	ifp->if_ioctl = uath_ioctl;
 	ifp->if_start = uath_start;
 	ifp->if_watchdog = uath_watchdog;
@@ -415,17 +473,25 @@ USB_ATTACH(uath)
 	sc->sc_txtap.wt_ihdr.it_present = htole32(UATH_TX_RADIOTAP_PRESENT);
 #endif
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+	return;
+>>>>>>> origin/master
 
 fail4:	uath_free_tx_data_list(sc);
 fail3:	uath_free_rx_cmd_list(sc);
 fail2:	uath_free_tx_cmd_list(sc);
 fail1:	uath_close_pipes(sc);
+<<<<<<< HEAD
 
 	USB_ATTACH_ERROR_RETURN;
+=======
+	usbd_deactivate(sc->sc_udev);
+>>>>>>> origin/master
 }
 
 USB_DETACH(uath)
@@ -445,8 +511,10 @@ USB_DETACH(uath)
 	/* post-firmware device */
 
 	usb_rem_task(sc->sc_udev, &sc->sc_task);
-	timeout_del(&sc->scan_to);
-	timeout_del(&sc->stat_to);
+	if (timeout_initialized(&sc->scan_to))
+		timeout_del(&sc->scan_to);
+	if (timeout_initialized(&sc->stat_to))
+		timeout_del(&sc->stat_to);
 
 	ieee80211_ifdetach(ifp);	/* free all nodes */
 	if_detach(ifp);
@@ -466,11 +534,21 @@ USB_DETACH(uath)
 	/* close Tx/Rx pipes */
 	uath_close_pipes(sc);
 
+<<<<<<< HEAD
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
+=======
+	if (ifp->if_softc != NULL) {
+		ieee80211_ifdetach(ifp);	/* free all nodes */
+		if_detach(ifp);
+	}
+
+	splx(s);
+
+>>>>>>> origin/master
 	return 0;
 }
 
@@ -808,7 +886,7 @@ uath_task(void *arg)
 			    USBDEVNAME(sc->sc_dev));
 			break;
 		}
-		timeout_add(&sc->scan_to, hz / 4);
+		timeout_add_msec(&sc->scan_to, 250);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -906,7 +984,7 @@ uath_task(void *arg)
 		    0);
 
 		/* start statistics timer */
-		timeout_add(&sc->stat_to, hz);
+		timeout_add_sec(&sc->stat_to, 1);
 		break;
 	}
 	}
@@ -1158,7 +1236,7 @@ uath_cmd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	case UATH_NOTIF_STATS:
 		DPRINTFN(2, ("received device statistics\n"));
-		timeout_add(&sc->stat_to, hz);
+		timeout_add_sec(&sc->stat_to, 1);
 		break;
 	}
 
@@ -1178,6 +1256,7 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct uath_rx_data *ndata;
 	struct uath_rx_desc *desc;
@@ -1245,6 +1324,7 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	data = ndata;
 
 	wh = mtod(m, struct ieee80211_frame *);
+	rxi.rxi_flags = 0;
 	if ((wh->i_fc[1] & IEEE80211_FC1_WEP) &&
 	    ic->ic_opmode != IEEE80211_M_MONITOR) {
 		/*
@@ -1258,6 +1338,8 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		m_adj(m, IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN);
 		m_adj(m, -IEEE80211_WEP_CRCLEN);
 		wh = mtod(m, struct ieee80211_frame *);
+
+		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 	}
 
 #if NBPFILTER > 0
@@ -1284,7 +1366,9 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	s = splnet();
 	sc->sc_refcnt++;
 	ni = ieee80211_find_rxnode(ic, wh);
-	ieee80211_input(ifp, m, ni, (int)betoh32(desc->rssi), 0);
+	rxi.rxi_rssi = (int)betoh32(desc->rssi);
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
@@ -2121,15 +2205,26 @@ fail2:	usbd_free_xfer(ctlxfer);
 fail1:	return error;
 }
 
+<<<<<<< HEAD
 Static int
 uath_activate(device_ptr_t self, enum devact act)
+=======
+int
+uath_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
+	struct uath_softc *sc = (struct uath_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
+<<<<<<< HEAD
 		/*if_deactivate(&sc->sc_ic.ic_if);*/
+=======
+		usbd_deactivate(sc->sc_udev);
+>>>>>>> origin/master
 		break;
 	}
 	return 0;

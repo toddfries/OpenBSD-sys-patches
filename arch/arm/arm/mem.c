@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.5 2006/03/07 20:20:28 miod Exp $	*/
+/*	$OpenBSD: mem.c,v 1.10 2010/12/26 15:40:59 miod Exp $	*/
 /*	$NetBSD: mem.c,v 1.11 2003/10/16 12:02:58 jdolecek Exp $	*/
 
 /*
@@ -137,7 +137,7 @@ mmclose(dev, flag, mode, p)
 {
 #ifdef APERTURE
 	if (minor(dev) == 4)
-		ap_open_count--;
+		ap_open_count = 0;
 #endif
 	return (0);
 }
@@ -261,7 +261,7 @@ mmmmap(dev, off, prot)
 	if ((paddr_t)off >= ctob((paddr_t)physmem) &&
 	    suser(p, 0) != 0)
 		return -1;
-	return atop(off);
+	return off;
 }
 /*ARGSUSED*/
 int

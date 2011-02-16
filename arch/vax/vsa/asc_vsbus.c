@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: asc_vsbus.c,v 1.6 2003/02/11 19:20:26 mickey Exp $	*/
+=======
+/*	$OpenBSD: asc_vsbus.c,v 1.13 2010/09/20 06:33:48 matthew Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: asc_vsbus.c,v 1.22 2001/02/04 20:36:32 ragge Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	  This product includes software developed by the NetBSD
- *	  Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +45,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/reboot.h>
 #include <sys/queue.h>
 
@@ -114,18 +110,10 @@ struct cfdriver asc_cd = {
 
 struct scsi_adapter	asc_vsbus_ops = {
 	ncr53c9x_scsi_cmd,	
-	minphys,
+	scsi_minphys,
 	NULL,
 	NULL
 };
-
-static struct scsi_device asc_vsbus_dev = {
-	NULL,			/* Use the default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* use the default done handler */
-};
-
 
 /*
  * Functions and the switch for the MI code
@@ -287,8 +275,7 @@ asc_vsbus_attach(struct device *parent, struct device *self, void *aux)
 	scb_vecalloc(va->va_cvec, (void (*)(void *)) ncr53c9x_intr,
 	    &asc->sc_ncr53c9x, SCB_ISTACK, &asc->sc_intrcnt);
 	asc->sc_cvec = va->va_cvec;
-	evcount_attach(&asc->sc_intrcnt, self->dv_xname,
-	    (void *)&asc->sc_cvec, &evcount_intr);
+	evcount_attach(&asc->sc_intrcnt, self->dv_xname, &asc->sc_cvec);
 
 	/*
 	 * XXX More of this should be in ncr53c9x_attach(), but
@@ -323,7 +310,7 @@ asc_vsbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxxfer = 64 * 1024;
 
 	/* Do the common parts of attachment. */
-	ncr53c9x_attach(sc, &asc_vsbus_ops, &asc_vsbus_dev);
+	ncr53c9x_attach(sc, &asc_vsbus_ops);
 }
 
 /*

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: pckbcvar.h,v 1.4 2004/11/02 21:21:00 miod Exp $ */
+=======
+/* $OpenBSD: pckbcvar.h,v 1.10 2010/11/23 04:07:55 shadchin Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: pckbcvar.h,v 1.4 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -51,7 +55,11 @@ struct pckbc_internal {
 	bus_addr_t t_addr;
 	u_char t_cmdbyte; /* shadow */
 
+	int t_flags;
+#define	PCKBC_CANT_TRANSLATE	0x0001	/* can't translate to XT scancodes */
+#define	PCKBC_NEED_AUXWRITE	0x0002	/* need auxwrite command to find aux */
 	int t_haveaux; /* controller has an aux port */
+
 	struct pckbc_slotdata *t_slotdata[PCKBC_NSLOTS];
 
 	struct pckbc_softc *t_sc; /* back pointer */
@@ -101,10 +109,16 @@ void pckbc_set_poll(pckbc_tag_t, pckbc_slot_t, int);
 int pckbc_xt_translation(pckbc_tag_t, pckbc_slot_t, int);
 void pckbc_slot_enable(pckbc_tag_t, pckbc_slot_t, int);
 
-void pckbc_attach(struct pckbc_softc *);
-int pckbc_cnattach(bus_space_tag_t, bus_addr_t, bus_size_t,
-			pckbc_slot_t);
+void pckbc_attach(struct pckbc_softc *, int);
+int pckbc_cnattach(bus_space_tag_t, bus_addr_t, bus_size_t, int);
 int pckbc_is_console(bus_space_tag_t, bus_addr_t);
+void pckbc_reset(struct pckbc_softc *);
 int pckbcintr(void *);
+
+/*
+ * Device configuration flags (cf_flags).
+ */
+
+#define	PCKBCF_FORCE_KEYBOARD_PRESENT	0x0001
 
 #endif /* _DEV_IC_PCKBCVAR_H_ */

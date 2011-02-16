@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: autoconf.c,v 1.8 2002/06/11 09:36:23 hugh Exp $ */
+=======
+/*	$OpenBSD: autoconf.c,v 1.13 2008/08/18 23:20:43 miod Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.19 2002/06/01 15:33:22 ragge Exp $ */
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
@@ -38,20 +42,28 @@
 
 #include <lib/libsa/stand.h>
 
-#include "../../include/mtpr.h"
-#include "../../include/sid.h"
-#include "../../include/intr.h"
-#include "../../include/rpb.h"
-#include "../../include/scb.h"
+#include <machine/mtpr.h>
+#include <machine/sid.h>
+#include <machine/intr.h>
+#include <machine/rpb.h>
+#include <machine/scb.h>
+#include <arch/vax/mbus/mbusreg.h>
+#include <arch/vax/mbus/fwioreg.h>
 #include "vaxstand.h"
 
 void autoconf(void);
 void findcpu(void);
 void consinit(void);
 void scbinit(void);
+void clkstart(void);
 int getsecs(void);
 void scb_stray(void *);
+<<<<<<< HEAD
 void longjmp(int *, int);
+=======
+void scb_silent(void *);
+void longjmp(int *);
+>>>>>>> origin/master
 void rtimer(void *);
 
 long *bootregs;
@@ -68,8 +80,9 @@ autoconf(void)
 	int fromnet = (bootregs[12] != -1);
 
 	findcpu(); /* Configures CPU variables */
+	scbinit(); /* Setup interrupts */
 	consinit(); /* Allow us to print out things */
-	scbinit(); /* Fix interval clock etc */
+	clkstart(); /* Fix interval clock etc */
 
 #ifdef DEV_DEBUG
 	printf("Register contents:\n");
@@ -136,15 +149,24 @@ struct ivec_dsp **scb;
 struct ivec_dsp *scb_vec;
 extern struct ivec_dsp idsptch;
 extern int jbuf[10];
+extern int mcheck_silent;
 
 static void
 mcheck(void *arg)
 {
 	int off, *mfp = (int *)&arg;
 
+<<<<<<< HEAD
 	off = (mfp[7]/4 + 8);
 	printf("Machine check, pc=%x, psl=%x\n", mfp[off], mfp[off+1]);
 	longjmp(jbuf, 1);
+=======
+	if (!mcheck_silent) {
+		off = (mfp[7]/4 + 8);
+		printf("Machine check, pc=%x, psl=%x\n", mfp[off], mfp[off+1]);
+	}
+	longjmp(jbuf);
+>>>>>>> origin/master
 }
 
 /*
@@ -175,12 +197,26 @@ scbinit(void)
 		scb_vec[i].pushlarg = (void *) (i * 4);
 		scb_vec[i].ev = NULL;
 	}
-	scb_vec[0xc0/4].hoppaddr = rtimer;
 	scb_vec[4/4].hoppaddr = mcheck;
+	if (vax_boardtype == VAX_BTYP_60)
+		scb_vec[0x60/4].hoppaddr = scb_silent;
+}
 
+void
+clkstart(void)
+{
+	scb_vec[0xc0/4].hoppaddr = rtimer;
 	if (vax_boardtype != VAX_BTYP_VXT)
 		mtpr(-10000, PR_NICR);		/* Load in count register */
 	mtpr(0x800000d1, PR_ICCS);	/* Start clock and enable interrupt */
+
+	if (vax_boardtype == VAX_BTYP_60) {
+		extern int ka60_ioslot;
+
+		/* enable M-Bus clock in IOCSR */
+		*(unsigned int *)(MBUS_SLOT_BASE(ka60_ioslot) +
+		    FWIO_IOCSR_OFFSET) |= FWIO_IOCSR_CLKIEN;
+	}
 
 	mtpr(20, PR_IPL);
 }
@@ -249,4 +285,10 @@ scb_stray(void *arg)
 	ipl = mfpr(PR_IPL);
 	vector = (int) arg;
 	printf("stray interrupt: vector 0x%x, ipl %d\n", vector, ipl);
+}
+
+void
+scb_silent(void *arg)
+{
+	/* nothing */
 }

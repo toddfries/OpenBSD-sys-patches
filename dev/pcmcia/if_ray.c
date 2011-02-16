@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_ray.c,v 1.33 2006/08/18 07:50:50 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_ray.c,v 1.45 2010/09/07 16:21:46 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*
@@ -172,8 +176,6 @@ struct ray_softc {
 	struct pcmcia_mem_handle	sc_mem;
 	int				sc_window;
 	void				*sc_ih;
-	void				*sc_sdhook;
-	void				*sc_pwrhook;
 	int				sc_flags;
 #define	RAY_FLAGS_RESUMEINIT	0x01
 #define	RAY_FLAGS_ATTACHED	0x02
@@ -307,7 +309,7 @@ int ray_cmd_is_running(struct ray_softc *, int);
 int ray_cmd_is_scheduled(struct ray_softc *, int);
 void ray_cmd_done(struct ray_softc *, int);
 int ray_detach(struct device *, int);
-int ray_activate(struct device *, enum devact);
+int ray_activate(struct device *, int);
 void ray_disable(struct ray_softc *);
 void ray_download_params(struct ray_softc *);
 int ray_enable(struct ray_softc *);
@@ -332,7 +334,6 @@ void ray_reset(struct ray_softc *);
 void ray_reset_resetloop(void *);
 int ray_send_auth(struct ray_softc *, u_int8_t *, u_int8_t);
 void ray_set_pending(struct ray_softc *, u_int);
-void ray_shutdown(void *);
 int ray_simple_cmd(struct ray_softc *, u_int, u_int);
 void ray_start_assoc(struct ray_softc *);
 void ray_start_join_net(struct ray_softc *);
@@ -353,9 +354,11 @@ int ray_user_update_params(struct ray_softc *,
     struct ray_param_req *);
 
 #define	ray_read_region(sc,off,p,c) \
-	bus_space_read_region_1((sc)->sc_memt, (sc)->sc_memh, (off), (p), (c))
+	bus_space_read_region_1((sc)->sc_memt, (sc)->sc_memh, (off),	\
+	    (u_int8_t *)(p), (c))
 #define	ray_write_region(sc,off,p,c) \
-	bus_space_write_region_1((sc)->sc_memt, (sc)->sc_memh, (off), (p), (c))
+	bus_space_write_region_1((sc)->sc_memt, (sc)->sc_memh, (off),	\
+	    (u_int8_t *)(p), (c))
 
 #ifdef RAY_DO_SIGLEV
 void ray_update_siglev(struct ray_softc *, u_int8_t *, u_int8_t);
@@ -633,9 +636,6 @@ ray_attach(struct device *parent, struct device *self, void *aux)
 	/* disable the card */
 	pcmcia_function_disable(sc->sc_pf);
 
-	sc->sc_sdhook = shutdownhook_establish(ray_shutdown, sc);
-	sc->sc_pwrhook = powerhook_establish(ray_power, sc);
-
 	/* The attach is successful. */
 	sc->sc_flags |= RAY_FLAGS_ATTACHED;
 	return;
@@ -651,15 +651,11 @@ fail:
 }
 
 int
-ray_activate(struct device *dev, enum devact act)
+ray_activate(struct device *dev, int act)
 {
 	struct ray_softc *sc = (struct ray_softc *)dev;
 	struct ifnet *ifp = &sc->sc_if;
-	int s;
 
-	RAY_DPRINTF(("%s: activate\n", sc->sc_xname));
-
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
 		pcmcia_function_enable(sc->sc_pf);
@@ -667,18 +663,15 @@ ray_activate(struct device *dev, enum devact act)
 		ray_enable(sc);
 		printf("\n");
 		break;
-
 	case DVACT_DEACTIVATE:
 		if (ifp->if_flags & IFF_RUNNING)
 			ray_disable(sc);
-		if (sc->sc_ih) {
+		if (sc->sc_ih)
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
-			sc->sc_ih = NULL;
-		}
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 
@@ -709,11 +702,6 @@ ray_detach(struct device *self, int flags)
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-
 	return (0);
 }
 
@@ -909,30 +897,20 @@ ray_power(int why, void *arg)
 	/* can't do this until power hooks are called from thread */
 	sc = arg;
 	switch (why) {
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		if ((sc->sc_flags & RAY_FLAGS_RESUMEINIT))
 			ray_init(sc);
 		break;
-	case PWR_SUSPEND:
+	case DVACT_SUSPEND:
 		if ((sc->sc_if.if_flags & IFF_RUNNING)) {
 			ray_stop(sc);
 			sc->sc_flags |= RAY_FLAGS_RESUMEINIT;
 		}
 		break;
-	case PWR_STANDBY:
 	default:
 		break;
 	}
 #endif
-}
-
-void
-ray_shutdown(void *arg)
-{
-	struct ray_softc *sc;
-
-	sc = arg;
-	ray_disable(sc);
 }
 
 int
@@ -943,10 +921,9 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ray_softc *sc;
 	struct ifreq *ifr;
 	struct ifaddr *ifa;
-	int error, error2, s, i;
+	int error = 0, error2, s, i;
 
 	sc = ifp->if_softc;
-	error = 0;
 
 	ifr = (struct ifreq *)data;
 
@@ -954,11 +931,6 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	RAY_DPRINTF(("%s: ioctl: cmd 0x%lx data 0x%lx\n", ifp->if_xname,
 	    cmd, (long)data));
-
-	if ((error = ether_ioctl(ifp, &sc->sc_ec, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -988,22 +960,6 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				ray_update_promisc(sc);
 		} else if (ifp->if_flags & IFF_RUNNING)
 			ray_disable(sc);
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		if (cmd == SIOCADDMULTI) {
-			RAY_DPRINTF(("%s: ioctl: cmd SIOCADDMULTI\n",
-			    ifp->if_xname));
-			error = ether_addmulti(ifr, &sc->sc_ec);
-		} else {
-			RAY_DPRINTF(("%s: ioctl: cmd SIOCDELMULTI\n",
-			    ifp->if_xname));
-			error = ether_delmulti(ifr, &sc->sc_ec);
-		}
-		if (error == ENETRESET) {
-			error = 0;
-			ray_update_mcast(sc);
-		}
 		break;
 	case SIOCSIFMEDIA:
 		RAY_DPRINTF(("%s: ioctl: cmd SIOCSIFMEDIA\n", ifp->if_xname));
@@ -1076,15 +1032,18 @@ ray_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 #endif
 	default:
-		RAY_DPRINTF(("%s: ioctl: unknown\n", ifp->if_xname));
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ray_update_mcast(sc);
+		error = 0;
 	}
 
 	RAY_DPRINTF(("%s: ioctl: returns %d\n", ifp->if_xname, error));
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1242,6 +1201,8 @@ ray_intr_start(struct ray_softc *sc)
 		} else if (et > ETHERMTU) {
 			/* adjust for LLC/SNAP header */
 			tmplen= sizeof(struct ieee80211_frame) - ETHER_ADDR_LEN;
+		} else {
+			tmplen = 0;
 		}
 		/* now get our space for the 802.11 frame */
 		M_PREPEND(m0, tmplen, M_DONTWAIT);
@@ -2793,7 +2754,7 @@ ray_start_join_net_done(struct ray_softc *sc, u_int cmd, bus_size_t ccs, u_int s
 				break;
 		}
 		sc->sc_cnwid.i_len = i;
-		memcpy(sc->sc_cnwid.i_nwid, np.p_ssid, sizeof(sc->sc_cnwid));
+		memcpy(sc->sc_cnwid.i_nwid, np.p_ssid, i);
 		sc->sc_omode = sc->sc_mode;
 		if (np.p_net_type != sc->sc_mode)
 			return (ray_start_join_net);

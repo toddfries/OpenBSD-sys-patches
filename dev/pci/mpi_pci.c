@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mpi_pci.c,v 1.13 2006/10/08 04:54:36 brad Exp $ */
+=======
+/*	$OpenBSD: mpi_pci.c,v 1.23 2008/11/23 12:45:11 dlg Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -17,11 +21,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include "bio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
+#include <sys/sensors.h>
+#include <sys/rwlock.h>
 
 #include <machine/bus.h>
 
@@ -82,8 +90,7 @@ static const struct pci_matchid mpi_devices[] = {
 int
 mpi_pci_match(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, mpi_devices,
-	    sizeof(mpi_devices) / sizeof(mpi_devices[0])));
+	return (pci_matchbyid(aux, mpi_devices, nitems(mpi_devices)));
 }
 
 void

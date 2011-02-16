@@ -1,4 +1,4 @@
-/*	$OpenBSD: va-m88k.h,v 1.8 2006/01/06 18:53:05 millert Exp $	*/
+/*	$OpenBSD: va-m88k.h,v 1.11 2010/12/31 20:37:36 miod Exp $	*/
 
 /* Define __gnuc_va_list.  */
 
@@ -87,6 +87,9 @@ __extension__(*({							\
 
 #define va_end(AP)	((void)0)
 
+#ifdef lint
+#define	__va_copy(dest, src)	((dest) = (src))
+#else
 /* Copy __gnuc_va_list into another variable of this type.  */
 #define __va_copy(dest, src) \
 __extension__ ({ \
@@ -94,9 +97,6 @@ __extension__ ({ \
 	   (struct __va_list_tag *)__builtin_alloca(sizeof(__gnuc_va_list)); \
 	*(dest) = *(src);\
   })
-
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) __va_copy(dest, src)
-#endif
+#endif /* lint */
 
 #endif /* defined (_STDARG_H) || defined (_VARARGS_H) */

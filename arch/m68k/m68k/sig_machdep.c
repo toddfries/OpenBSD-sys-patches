@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.17 2006/06/07 21:53:43 miod Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.22 2010/06/27 22:04:01 miod Exp $	*/
 /*	$NetBSD: sig_machdep.c,v 1.3 1997/04/30 23:28:03 gwr Exp $	*/
 
 /*
@@ -65,7 +65,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
@@ -79,6 +78,7 @@
 #include <sys/syscallargs.h>
 
 #include <machine/cpu.h>
+#include <machine/frame.h>
 #include <machine/reg.h>
 
 extern short exframesize[];
@@ -362,7 +362,7 @@ sys_sigreturn(p, v, retval)
 	 */
 	if (flags & SS_USERREGS)
 		bcopy((caddr_t)tstate.ss_frame.f_regs,
-		      (caddr_t)frame->f_regs, sizeof(frame->f_regs)-2*NBPW);
+		      (caddr_t)frame->f_regs, sizeof(frame->f_regs)-2*sizeof(int));
 	/*
 	 * Restore long stack frames.  Note that we do not copy
 	 * back the saved SR or PC, they were picked up above from

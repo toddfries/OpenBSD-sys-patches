@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: db_trap.c,v 1.10 2001/11/06 19:53:18 miod Exp $	*/
+=======
+/*	$OpenBSD: db_trap.c,v 1.15 2010/11/27 19:57:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: db_trap.c,v 1.9 1996/02/05 01:57:18 christos Exp $	*/
 
 /* 
@@ -59,9 +63,7 @@ db_trap(int type, int code)
 
 	if (db_stop_at_pc(DDB_REGS, &bkpt)) {
 		if (db_inst_count) {
-			db_printf("After %d instructions ", db_inst_count);
-			db_printf("(%d loads, %d stores),\n", db_load_count,
-			    db_store_count);
+			db_printf("After %d instructions\n", db_inst_count);
 		}
 		if (bkpt)
 			db_printf("Breakpoint at\t");
@@ -77,6 +79,10 @@ db_trap(int type, int code)
 				db_printf("\n");
 			db_printf("RUN AT LEAST 'trace' AND 'ps' AND INCLUDE "
 			    "OUTPUT WHEN REPORTING THIS PANIC!\n");
+#ifdef MULTIPROCESSOR
+			db_printf("IF RUNNING SMP, USE 'mach ddbcpu <#>' AND "
+			    "'trace' ON OTHER PROCESSORS, TOO.\n");
+#endif
 			db_printf("DO NOT EVEN BOTHER REPORTING THIS WITHOUT "
 			    "INCLUDING THAT INFORMATION!\n");
 		}

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cs4280.c,v 1.24 2005/11/29 05:42:17 tedu Exp $	*/
+=======
+/*	$OpenBSD: cs4280.c,v 1.38 2010/09/12 03:17:34 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cs4280.c,v 1.5 2000/06/26 04:56:23 simonb Exp $	*/
 
 /*
@@ -157,8 +161,6 @@ struct cs4280_softc {
 	struct ac97_codec_if *codec_if;
 	struct ac97_host_if host_if;	
 
-	char	sc_suspend;
-	void   *sc_powerhook;		/* Power Hook */
 	u_int16_t  ac97_reg[CS4280_SAVE_REG_MAX + 1];	/* Save ac97 registers */
 };
 
@@ -169,6 +171,7 @@ struct cs4280_softc {
 
 int	cs4280_match(struct device *, void *, void *);
 void	cs4280_attach(struct device *, struct device *, void *);
+int	cs4280_activate(struct device *, int);
 void	cs4280_attachhook(void *xsc);
 int	cs4280_intr(void *);
 void	cs4280_reset(void *);
@@ -190,7 +193,8 @@ struct	cfdriver clcs_cd = {
 };
 
 struct cfattach clcs_ca = {
-	sizeof(struct cs4280_softc), cs4280_match, cs4280_attach
+	sizeof(struct cs4280_softc), cs4280_match, cs4280_attach, NULL,
+	cs4280_activate
 };
 
 int	cs4280_init(struct cs4280_softc *, int);
@@ -230,8 +234,6 @@ int	cs4280_attach_codec(void *sc, struct ac97_codec_if *);
 int	cs4280_read_codec(void *sc, u_int8_t a, u_int16_t *d);
 int	cs4280_write_codec(void *sc, u_int8_t a, u_int16_t d);
 void	cs4280_reset_codec(void *sc);
-
-void	cs4280_power(int, void *);
 
 void	cs4280_clear_fifos(struct cs4280_softc *);
 
@@ -588,8 +590,6 @@ cs4280_attachhook(void *xsc)
 #if NMIDI > 0
 	midi_attach_mi(&cs4280_midi_hw_if, sc, &sc->sc_dev);
 #endif
-	sc->sc_suspend = PWR_RESUME;
-	sc->sc_powerhook = powerhook_establish(cs4280_power, sc);
 }
 
 void
@@ -750,23 +750,30 @@ cs4280_intr(p)
 			break;
 		case CF_16BIT_MONO:
 			for (i = 0; i < 512; i++) {
-				rdata  = *((int16_t *)empty_dma)++>>1;
-				rdata += *((int16_t *)empty_dma)++>>1;
-				*((int16_t *)sc->sc_rn)++ = rdata;
+				rdata  = *((int16_t *)empty_dma)>>1;
+				empty_dma += 2;
+				rdata += *((int16_t *)empty_dma)>>1;
+				empty_dma += 2;
+				*((int16_t *)sc->sc_rn) = rdata;
+				sc->sc_rn += 2;
 			}
 			break;
 		case CF_8BIT_STEREO:
 			for (i = 0; i < 512; i++) {
-				rdata = *((int16_t*)empty_dma)++;
+				rdata = *((int16_t*)empty_dma);
+				empty_dma += 2;
 				*sc->sc_rn++ = rdata >> 8;
-				rdata = *((int16_t*)empty_dma)++;
+				rdata = *((int16_t*)empty_dma);
+				empty_dma += 2;
 				*sc->sc_rn++ = rdata >> 8;
 			}
 			break;
 		case CF_8BIT_MONO:
 			for (i = 0; i < 512; i++) {
-				rdata =	 *((int16_t*)empty_dma)++ >>1;
-				rdata += *((int16_t*)empty_dma)++ >>1;
+				rdata =	 *((int16_t*)empty_dma) >>1;
+				empty_dma += 2;
+				rdata += *((int16_t*)empty_dma) >>1;
+				empty_dma += 2;
 				*sc->sc_rn++ = rdata >>8;
 			}
 			break;
@@ -1094,6 +1101,9 @@ cs4280_query_encoding(addr, fp)
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return (0);
 }
 
@@ -1112,37 +1122,33 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		if ((setmode & mode) == 0)
 			continue;
 		
-		p = mode == AUMODE_PLAY ? play : rec;
-		
+		p = mode == AUMODE_PLAY ? play : rec;		
 		if (p == play) {
 			DPRINTFN(5,("play: sample=%ld precision=%d channels=%d\n",
 				p->sample_rate, p->precision, p->channels));
-			/* play back data format may be 8- or 16-bit and
-			 * either stereo or mono.
-			 * playback rate may range from 8000Hz to 48000Hz 
-			 */
-			if (p->sample_rate < 8000 || p->sample_rate > 48000 ||
-			    (p->precision != 8 && p->precision != 16) ||
-			    (p->channels != 1  && p->channels != 2) ) {
-				return (EINVAL);
-			}
 		} else {
 			DPRINTFN(5,("rec: sample=%ld precision=%d channels=%d\n",
 				p->sample_rate, p->precision, p->channels));
-			/* capture data format must be 16bit stereo
-			 * and sample rate range from 11025Hz to 48000Hz.
-			 *
-			 * XXX: it looks like to work with 8000Hz,
-			 *	although data sheets say lower limit is
-			 *	11025 Hz.
-			 */
-
-			if (p->sample_rate < 8000 || p->sample_rate > 48000 ||
-			    (p->precision != 8 && p->precision != 16) ||
-			    (p->channels  != 1 && p->channels  != 2) ) {
-				return (EINVAL);
-			}
 		}
+		/* play back data format may be 8- or 16-bit and
+		 * either stereo or mono.
+		 * playback rate may range from 8000Hz to 48000Hz 
+		 *
+	         * capture data format must be 16bit stereo
+		 * and sample rate range from 11025Hz to 48000Hz.
+		 *
+		 * XXX: it looks like to work with 8000Hz,
+		 *	although data sheets say lower limit is
+		 *	11025 Hz.
+		 */
+		if (p->sample_rate < 8000)
+			p->sample_rate = 8000;
+		if (p->sample_rate > 48000)
+			p->sample_rate = 48000;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
 		p->factor  = 1;
 		p->sw_code = 0;
 
@@ -1191,6 +1197,8 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 	}
 
 	/* set sample rate */
@@ -1810,47 +1818,33 @@ cs4280_init2(sc, init)
 	return(0);
 }
 
-void
-cs4280_power(why, v)
-	int why;
-	void *v;
+int
+cs4280_activate(struct device *self, int act)
 {
-	struct cs4280_softc *sc = (struct cs4280_softc *)v;
-	int i;
+	struct cs4280_softc *sc = (struct cs4280_softc *)self;
+	int rv = 0;
 
-	DPRINTF(("%s: cs4280_power why=%d\n",
-	       sc->sc_dev.dv_xname, why));
-	if (why != PWR_RESUME) {
-		sc->sc_suspend = why;
-
-		cs4280_halt_output(sc);
-		cs4280_halt_input(sc);
-		/* Save AC97 registers */
-		for(i = 1; i <= CS4280_SAVE_REG_MAX; i++) {
-			if(i == 0x04) /* AC97_REG_MASTER_TONE */
-				continue;
-			cs4280_read_codec(sc, 2*i, &sc->ac97_reg[i]);
-		}
+	switch (act) {
+ 	case DVACT_ACTIVATE:
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
 		/* should I powerdown here ? */
 		cs4280_write_codec(sc, AC97_REG_POWER, CS4280_POWER_DOWN_ALL);
-	} else {
-		if (sc->sc_suspend == PWR_RESUME) {
-			printf("cs4280_power: odd, resume without suspend.\n");
-			sc->sc_suspend = why;
-			return;
-		}
-		sc->sc_suspend = why;
+		break;
+	case DVACT_RESUME:
+		cs4280_close(sc);
 		cs4280_init(sc, 0);
 		cs4280_init2(sc, 0);
-		cs4280_reset_codec(sc);
-
-		/* restore ac97 registers */
-		for(i = 1; i <= CS4280_SAVE_REG_MAX; i++) {
-			if(i == 0x04) /* AC97_REG_MASTER_TONE */
-				continue;
-			cs4280_write_codec(sc, 2*i, sc->ac97_reg[i]);
-		}
+		ac97_resume(&sc->host_if, sc->codec_if);
+		rv = config_activate_children(self, act);
+		break;
+ 	case DVACT_DEACTIVATE:
+		break;
 	}
+	return (rv);
 }
 
 void

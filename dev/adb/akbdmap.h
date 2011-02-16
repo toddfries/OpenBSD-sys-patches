@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: akbdmap.h,v 1.3 2008/06/26 05:42:14 ray Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: akbdmap.h,v 1.7 2005/05/05 22:29:41 abs Exp $	*/
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -502,7 +499,7 @@ static const keysym_t akbd_keydesc_sg_nodead[] = {
 #define KBD_MAP(name, base, map) \
 			{ name, base, sizeof(map)/sizeof(keysym_t), map }
 
-static const struct wscons_keydesc akbd_keydesctab[] = {
+const struct wscons_keydesc akbd_keydesctab[] = {
 	KBD_MAP(KB_US,			0,	akbd_keydesc_us),
 	KBD_MAP(KB_US | KB_DVORAK,	KB_US,	akbd_keydesc_us_dvorak),
 	KBD_MAP(KB_DE,			KB_US,  akbd_keydesc_de),

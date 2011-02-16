@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rtl8225reg.h,v 1.2 2005/10/20 02:53:00 reyk Exp $	*/
+=======
+/*	$OpenBSD: rtl8225reg.h,v 1.4 2009/08/16 18:21:57 jsg Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
@@ -23,8 +27,8 @@
  * Serial bus format for the Realtek RTL8225 Single-chip Transceiver.
  */
 
-#define RTL8225_TWI_DATA_MASK	BITS(31, 4)
-#define RTL8225_TWI_ADDR_MASK	BITS(4, 0)
+#define RTL8225_TWI_DATA_MASK	0xfffffff0
+#define RTL8225_TWI_ADDR_MASK	0x1f
 
 #define RTL8225_ANAPARM_0_ON	0xa0000b59
 #define RTL8225_ANAPARM_0_OFF	0xa000eb59

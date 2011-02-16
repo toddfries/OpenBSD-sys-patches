@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: socket.h,v 1.52 2005/05/27 04:55:28 mcbride Exp $	*/
+=======
+/*	$OpenBSD: socket.h,v 1.71 2011/01/07 17:50:42 bluhm Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -44,6 +48,9 @@
  * Definitions related to sockets: types, address families, options.
  */
 
+/* Maximum number of alternate routing tables */
+#define	RT_TABLEID_MAX	255
+
 /*
  * Types
  */
@@ -67,6 +74,11 @@
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
 #define SO_JUMBO	0x0400		/* try to use jumbograms */
+<<<<<<< HEAD
+=======
+#define SO_TIMESTAMP	0x0800		/* timestamp received dgram traffic */
+#define SO_BINDANY	0x1000		/* allow bind to any address */
+>>>>>>> origin/master
 
 /*
  * Additional options, not kept in so_options.
@@ -80,6 +92,9 @@
 #define	SO_ERROR	0x1007		/* get error status and clear */
 #define	SO_TYPE		0x1008		/* get socket type */
 #define	SO_NETPROC	0x1020		/* multiplex; network processing */
+#define	SO_RTABLE	0x1021		/* routing table to be used */
+#define	SO_PEERCRED	0x1022		/* get connect-time credentials */
+#define	SO_SPLICE	0x1023		/* splice data to other socket */
 
 /*
  * Structure used for manipulating linger option.
@@ -87,6 +102,14 @@
 struct	linger {
 	int	l_onoff;		/* option on/off */
 	int	l_linger;		/* linger time */
+};
+
+/*
+ * Structure used for manipulating splice option.
+ */
+struct	splice {
+	int	sp_fd;			/* drain socket file descriptor */
+	off_t	sp_max;			/* if set, maximum bytes to splice */
 };
 
 /*
@@ -134,8 +157,14 @@ struct	linger {
 #define pseudo_AF_HDRCMPLT 31		/* Used by BPF to not rewrite headers
 					   in interface output routine */
 #define	AF_BLUETOOTH	32		/* Bluetooth */
+<<<<<<< HEAD
 
 #define	AF_MAX		33
+=======
+#define AF_MPLS         33              /* MPLS */
+#define pseudo_AF_PFLOW 34		/* pflow */
+#define AF_MAX          35
+>>>>>>> origin/master
 
 /*
  * Structure used by kernel to store most
@@ -214,6 +243,11 @@ struct sockproto {
 #define PF_KEY		AF_KEY
 #define PF_BPF		pseudo_AF_HDRCMPLT
 #define	PF_BLUETOOTH	AF_BLUETOOTH
+<<<<<<< HEAD
+=======
+#define PF_MPLS		AF_MPLS
+#define PF_PFLOW	pseudo_AF_PFLOW
+>>>>>>> origin/master
 #define	PF_MAX		AF_MAX
 
 /*
@@ -234,6 +268,15 @@ struct sockcred {
 	int	sc_ngroups;		/* number of supplemental groups */
 	gid_t	sc_groups[1];		/* variable length */
 };
+
+#if __BSD_VISIBLE
+/* Read using getsockopt() with SOL_SOCKET, SO_PEERCRED */
+struct sockpeercred {
+	uid_t		uid;		/* effective user id */
+	gid_t		gid;		/* effective group id */
+	pid_t		pid;
+};
+#endif /* __BSD_VISIBLE */
 
 /*
  * Compute size of a sockcred structure with groups.
@@ -284,6 +327,12 @@ struct sockcred {
 	{ "sip", CTLTYPE_NODE }, \
 	{ "key", CTLTYPE_NODE }, \
 	{ "bpf", CTLTYPE_NODE }, \
+<<<<<<< HEAD
+=======
+	{ "bluetooth", CTLTYPE_NODE }, \
+	{ "mpls", CTLTYPE_NODE }, \
+	{ "pflow", CTLTYPE_NODE }, \
+>>>>>>> origin/master
 }
 
 /*
@@ -293,12 +342,18 @@ struct sockcred {
  *	Fourth: address family, 0 is wildcard
  *	Fifth: type of info, defined below
  *	Sixth: flag(s) to mask with for NET_RT_FLAGS
+<<<<<<< HEAD
+=======
+ *	Seventh: routing table to use (facultative, defaults to 0)
+ *		 NET_RT_TABLE has the table id as sixth element.
+>>>>>>> origin/master
  */
 #define NET_RT_DUMP	1		/* dump; may limit to a.f. */
 #define NET_RT_FLAGS	2		/* by flags, e.g. RESOLVING */
 #define NET_RT_IFLIST	3		/* survey interface list */
 #define	NET_RT_STATS	4		/* routing table statistics */
-#define	NET_RT_MAXID	5
+#define	NET_RT_TABLE	5
+#define	NET_RT_MAXID	6
 
 #define CTL_NET_RT_NAMES { \
 	{ 0, 0 }, \
@@ -306,6 +361,7 @@ struct sockcred {
 	{ "flags", CTLTYPE_STRUCT }, \
 	{ "iflist", CTLTYPE_STRUCT }, \
 	{ "stats", CTLTYPE_STRUCT }, \
+	{ "table", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -332,6 +388,17 @@ struct sockcred {
 	{ 0, 0 }, \
 	{ "bufsize", CTLTYPE_INT }, \
 	{ "maxbufsize", CTLTYPE_INT }, \
+}
+
+/*
+ * PF_PFLOW not really a family, but connected under CTL_NET
+ */
+#define NET_PFLOW_STATS		1		/* statistics */
+#define NET_PFLOW_MAXID		2
+
+#define CTL_NET_PFLOW_NAMES { \
+	{ 0, 0 }, \
+	{ "stats", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -460,11 +527,12 @@ int	setsockopt(int, int, int, const void *, socklen_t);
 int	shutdown(int, int);
 int	socket(int, int, int);
 int	socketpair(int, int, int, int *);
+int	getrtable(void);
+int	setrtable(int);
 __END_DECLS
 #else
-# if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_LINUX) || \
-     defined(COMPAT_HPUX) || defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS) \
-     || defined(COMPAT_OSF1)
+# if defined(COMPAT_43) || defined(COMPAT_LINUX) || \
+     defined(COMPAT_FREEBSD)
 #  define COMPAT_OLDSOCK
 #  define MSG_COMPAT	0x8000
 # endif

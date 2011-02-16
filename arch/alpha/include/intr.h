@@ -1,4 +1,4 @@
-/* $OpenBSD: intr.h,v 1.24 2007/04/12 14:38:36 martin Exp $ */
+/* $OpenBSD: intr.h,v 1.37 2010/12/21 14:56:23 claudio Exp $ */
 /* $NetBSD: intr.h,v 1.26 2000/06/03 20:47:41 thorpej Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -70,6 +63,7 @@
 
 #include <sys/evcount.h>
 #include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/queue.h>
 #include <machine/atomic.h>
 
@@ -114,20 +108,22 @@ struct scbvec {
  * whittle it down to 3.
  */
 
-#define	IPL_NONE	1	/* disable only this interrupt */
-#define	IPL_BIO		1	/* disable block I/O interrupts */
-#define	IPL_NET		1	/* disable network interrupts */
-#define	IPL_TTY		1	/* disable terminal interrupts */
-#define	IPL_CLOCK	2	/* disable clock interrupts */
-#define	IPL_HIGH	3	/* disable all interrupts */
-#define	IPL_SERIAL	1	/* disable serial interrupts */
-#define	IPL_AUDIO	1	/* disable audio interrupts */
+#define	IPL_NONE	ALPHA_PSL_IPL_0
+#define	IPL_SOFTINT	ALPHA_PSL_IPL_SOFT
+#define	IPL_BIO		ALPHA_PSL_IPL_IO
+#define	IPL_NET		ALPHA_PSL_IPL_IO
+#define	IPL_TTY		ALPHA_PSL_IPL_IO
+#define	IPL_SERIAL	ALPHA_PSL_IPL_IO
+#define	IPL_AUDIO	ALPHA_PSL_IPL_IO
+#define	IPL_VM		ALPHA_PSL_IPL_IO
+#define	IPL_CLOCK	ALPHA_PSL_IPL_CLOCK
+#define	IPL_SCHED	ALPHA_PSL_IPL_HIGH
+#define	IPL_HIGH	ALPHA_PSL_IPL_HIGH
 
 #define	IPL_SOFTSERIAL	0	/* serial software interrupts */
-#define	IPL_SOFTNET	1	/* network software interrupts */
-#define	IPL_SOFTCLOCK	2	/* clock software interrupts */
+#define	IPL_SOFTCLOCK	1	/* clock software interrupts */
+#define	IPL_SOFTNET	2	/* network software interrupts */
 #define	IPL_SOFT	3	/* other software interrupts */
-#define	IPL_NSOFT	4
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -135,10 +131,34 @@ struct scbvec {
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
+#define SI_SOFT		0
+#define SI_SOFTCLOCK	1
+#define SI_SOFTNET	2
+#define SI_SOFTSERIAL	3
+#define	SI_NSOFT	4
+
 #ifdef	_KERNEL
 
 /* SPL asserts */
-#define	splassert(wantipl)	/* nothing */
+#ifdef DIAGNOSTIC
+/*
+ * Although this function is implemented in MI code, it must be in this MD
+ * header because we don't want this header to include MI includes.
+ */
+void splassert_fail(int, int, const char *);
+extern int splassert_ctl;
+void splassert_check(int, const char *);
+#define	splassert(__wantipl)						\
+	do {								\
+		if (splassert_ctl > 0) {				\
+			splassert_check(__wantipl, __func__);		\
+		}							\
+	} while (0)
+#define	splsoftassert(wantipl)	splassert(IPL_SOFTINT)
+#else
+#define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
+#endif
 
 /* IPL-lowering/restoring macros */
 #define splx(s)								\
@@ -161,7 +181,6 @@ int _splraise(int);
 #define splstatclock()          _splraise(ALPHA_PSL_IPL_CLOCK)
 #define splhigh()               _splraise(ALPHA_PSL_IPL_HIGH)
 
-#define spllpt()		spltty()
 #define spllock()		splhigh()
 #define splsched()		splhigh()
 
@@ -236,36 +255,22 @@ struct alpha_soft_intrhand {
 struct alpha_soft_intr {
 	LIST_HEAD(, alpha_soft_intrhand)
 		softintr_q;
-	struct simplelock softintr_slock;
-	unsigned long softintr_ipl;
+	struct mutex softintr_mtx;
+	unsigned long softintr_siq;
 };
 
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(void);
 void	*softintr_establish(int, void (*)(void *), void *);
-void	softintr_disestablish(void *);
-void	softintr_init(void);
-void	softintr_dispatch(void);
-
-#define	softintr_schedule(arg)						\
-do {									\
-	struct alpha_soft_intrhand *__sih = (arg);			\
-	__sih->sih_pending = 1;						\
-	setsoft(__sih->sih_intrhead->softintr_ipl);			\
-} while (0)
-
-/* XXX For legacy software interrupts. */
-extern struct alpha_soft_intrhand *softnet_intrhand;
-extern struct alpha_soft_intrhand *softclock_intrhand;
-
-#define	setsoftnet()	softintr_schedule(softnet_intrhand)
-#define	setsoftclock()	softintr_schedule(softclock_intrhand)
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
 
 struct alpha_shared_intr *alpha_shared_intr_alloc(unsigned int);
 int	alpha_shared_intr_dispatch(struct alpha_shared_intr *,
 	    unsigned int);
 void	*alpha_shared_intr_establish(struct alpha_shared_intr *,
 	    unsigned int, int, int, int (*)(void *), void *, const char *);
-void	alpha_shared_intr_disestablish(struct alpha_shared_intr *,
-	    void *, const char *);
+void	alpha_shared_intr_disestablish(struct alpha_shared_intr *, void *);
 int	alpha_shared_intr_get_sharetype(struct alpha_shared_intr *,
 	    unsigned int);
 int	alpha_shared_intr_isactive(struct alpha_shared_intr *,

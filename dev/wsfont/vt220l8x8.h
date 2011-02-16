@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD$ */
+=======
+/*	$OpenBSD: vt220l8x8.h,v 1.2 2009/06/21 20:30:35 jsg Exp $ */
+>>>>>>> origin/master
 /* 	$NetBSD: vt220l8x8.h,v 1.3 2000/01/05 18:44:25 ad Exp $	*/
 
 /*
@@ -37,7 +41,7 @@
  * Translated into a wsfont form by Shin Takemura in Nov 2, 1999.
  */
 
-extern u_char vt220l8x8_data[];
+static u_char vt220l8x8_data[];
 
 struct wsdisplay_font vt220l8x8 = {
 	"vt220l",			/* typeface name */

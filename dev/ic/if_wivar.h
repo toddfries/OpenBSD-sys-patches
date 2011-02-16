@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_wivar.h,v 1.27 2005/10/31 05:37:13 jsg Exp $	*/
+=======
+/*	$OpenBSD: if_wivar.h,v 1.30 2010/08/30 20:42:27 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -112,7 +116,6 @@ struct wi_softc	{
 		u_int16_t		wi_confbits;
 		u_int16_t		wi_confbits_param0;
 	} wi_debug;
-	void				*sc_sdhook;
 	struct wi_usb_softc		*wi_usb_cdata;
 
 	struct wi_funcs			*sc_funcs;
@@ -140,6 +143,7 @@ struct wi_softc	{
 #define WI_FLAGS_BUS_USB		0x0400
 #define WI_FLAGS_HAS_ENH_SECURITY	0x0800
 #define WI_FLAGS_TXPOWER		0x1000
+#define WI_FLAGS_BUSY			0x2000
 
 #define WI_PRT_FMT "%s"
 #define WI_PRT_ARG(sc)	(sc)->sc_dev.dv_xname

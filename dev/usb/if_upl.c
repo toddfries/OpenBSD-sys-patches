@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_upl.c,v 1.25 2006/06/23 06:27:11 miod Exp $ */
+=======
+/*	$OpenBSD: if_upl.c,v 1.47 2011/01/25 20:03:35 jakemsr Exp $ */
+>>>>>>> origin/master
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -120,11 +117,6 @@
 #define UPL_ENDPT_INTR		0x2
 #define UPL_ENDPT_MAX		0x3
 
-struct upl_type {
-	u_int16_t		upl_vid;
-	u_int16_t		upl_did;
-};
-
 struct upl_softc;
 
 struct upl_chain {
@@ -179,12 +171,16 @@ int	upldebug = 0;
 /*
  * Various supported device vendors/products.
  */
+<<<<<<< HEAD
 Static struct upl_type sc_devs[] = {
+=======
+struct usb_devno upl_devs[] = {
+>>>>>>> origin/master
 	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2301 },
-	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2302 },
-	{ 0, 0 }
+	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2302 }
 };
 
+<<<<<<< HEAD
 USB_DECLARE_DRIVER_CLASS(upl, DV_IFNET);
 
 Static int upl_openpipes(struct upl_softc *);
@@ -202,6 +198,40 @@ Static void upl_stop(struct upl_softc *);
 Static void upl_watchdog(struct ifnet *);
 
 Static int upl_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+=======
+int upl_match(struct device *, void *, void *); 
+void upl_attach(struct device *, struct device *, void *); 
+int upl_detach(struct device *, int); 
+int upl_activate(struct device *, int); 
+
+struct cfdriver upl_cd = { 
+	NULL, "upl", DV_IFNET 
+}; 
+
+const struct cfattach upl_ca = { 
+	sizeof(struct upl_softc), 
+	upl_match, 
+	upl_attach, 
+	upl_detach, 
+	upl_activate, 
+};
+
+int upl_openpipes(struct upl_softc *);
+int upl_tx_list_init(struct upl_softc *);
+int upl_rx_list_init(struct upl_softc *);
+int upl_newbuf(struct upl_softc *, struct upl_chain *, struct mbuf *);
+int upl_send(struct upl_softc *, struct mbuf *, int);
+void upl_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void upl_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void upl_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void upl_start(struct ifnet *);
+int upl_ioctl(struct ifnet *, u_long, caddr_t);
+void upl_init(void *);
+void upl_stop(struct upl_softc *);
+void upl_watchdog(struct ifnet *);
+
+int upl_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+>>>>>>> origin/master
 		      struct rtentry *);
 Static void upl_input(struct ifnet *, struct mbuf *);
 
@@ -210,17 +240,18 @@ Static void upl_input(struct ifnet *, struct mbuf *);
  */
 USB_MATCH(upl)
 {
+<<<<<<< HEAD
 	USB_MATCH_START(upl, uaa);
 	struct upl_type			*t;
+=======
+	struct usb_attach_arg		*uaa = aux;
+>>>>>>> origin/master
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
 
-	for (t = sc_devs; t->upl_vid != 0; t++)
-		if (uaa->vendor == t->upl_vid && uaa->product == t->upl_did)
-			return (UMATCH_VENDOR_PRODUCT);
-
-	return (UMATCH_NONE);
+	return (usb_lookup(upl_devs, uaa->vendor, uaa->product) != NULL ?
+	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
 USB_ATTACH(upl)
@@ -322,11 +353,14 @@ USB_ATTACH(upl)
 #endif
 	sc->sc_attached = 1;
 	splx(s);
+<<<<<<< HEAD
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
 	USB_ATTACH_SUCCESS_RETURN;
+=======
+>>>>>>> origin/master
 }
 
 USB_DETACH(upl)
@@ -337,18 +371,17 @@ USB_DETACH(upl)
 
 	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
-	s = splusb();
-
-	if (!sc->sc_attached) {
-		/* Detached before attached finished, so just bail out. */
-		splx(s);
+	/* Detached before attached finished, so just bail out. */
+	if (!sc->sc_attached)
 		return (0);
-	}
+
+	s = splusb();
 
 	if (ifp->if_flags & IFF_RUNNING)
 		upl_stop(sc);
 
-	if_detach(ifp);
+	if (ifp->if_softc != NULL)
+		if_detach(ifp);
 
 #ifdef DIAGNOSTIC
 	if (sc->sc_ep[UPL_ENDPT_TX] != NULL ||
@@ -361,14 +394,21 @@ USB_DETACH(upl)
 	sc->sc_attached = 0;
 	splx(s);
 
+<<<<<<< HEAD
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
 	    USBDEV(sc->sc_dev));
 
+=======
+>>>>>>> origin/master
 	return (0);
 }
 
 int
+<<<<<<< HEAD
 upl_activate(device_ptr_t self, enum devact act)
+=======
+upl_activate(struct device *self, int act)
+>>>>>>> origin/master
 {
 	struct upl_softc *sc = (struct upl_softc *)self;
 
@@ -887,12 +927,11 @@ upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = 0;
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
 	splx(s);
-
 	return (error);
 }
 

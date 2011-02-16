@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: asc_tc.c,v 1.6 2002/05/02 22:56:06 miod Exp $ */
+=======
+/* $OpenBSD: asc_tc.c,v 1.11 2010/11/11 17:54:54 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: asc_tc.c,v 1.19 2001/11/15 09:48:19 lukem Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -69,7 +66,6 @@ struct cfattach asc_tc_ca = {
 };
 
 extern struct scsi_adapter asc_switch;
-extern struct scsi_device asc_dev;
 
 int	asc_dma_isintr(struct ncr53c9x_softc *);
 void	asc_tc_reset(struct ncr53c9x_softc *);
@@ -144,13 +140,11 @@ asc_tc_attach(parent, self, aux)
 	}
 	asc->sc_base = (caddr_t)ta->ta_addr;	/* XXX XXX XXX */
 
-	tc_intr_establish(parent, ta->ta_cookie, IPL_BIO, ncr53c9x_intr, sc);
+	tc_intr_establish(parent, ta->ta_cookie, IPL_BIO, ncr53c9x_intr, sc,
+	    self->dv_xname);
 	
 	sc->sc_id = 7;
-	sc->sc_freq = (ta->ta_busspeed) ? 25000000 : 12500000;
-
-	/* gimme MHz */
-	sc->sc_freq /= 1000000;
+	sc->sc_freq = TC_SPEED_TO_KHZ(ta->ta_busspeed);	/* in kHz so far */
 
 	/*
 	 * XXX More of this should be in ncr53c9x_attach(), but
@@ -178,15 +172,18 @@ asc_tc_attach(parent, self, aux)
 	 * in "clocks per byte", and has a minimum value of 4.
 	 * The SCSI period used in negotiation is one-fourth
 	 * of the time (in nanoseconds) needed to transfer one byte.
-	 * Since the chip's clock is given in MHz, we have the following
-	 * formula: 4 * period = (1000 / freq) * 4
+	 * Since the chip's clock is given in kHz, we have the following
+	 * formula: 4 * period = (1000000 / freq) * 4
 	 */
-	sc->sc_minsync = (1000 / sc->sc_freq) * 5 / 4;
+	sc->sc_minsync = (1000000 / sc->sc_freq) * 5 / 4;
 
 	sc->sc_maxxfer = 64 * 1024;
 
+	/* convert sc_freq to MHz */
+	sc->sc_freq /= 1000;
+
 	/* Do the common parts of attachment. */
-	ncr53c9x_attach(sc, &asc_switch, &asc_dev);
+	ncr53c9x_attach(sc, &asc_switch);
 }
 
 void

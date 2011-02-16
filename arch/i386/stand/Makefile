@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.13 2005/07/30 17:25:19 millert Exp $
+#	$OpenBSD: Makefile,v 1.16 2010/03/04 22:13:57 deraadt Exp $
 
 .if ${MACHINE} == "i386"
 SUBDIR=	etc libsa libkern libz mbr cdbr
@@ -15,7 +15,7 @@ zero-fd0:
 	sudo dd if=/dev/zero of=/dev/rfd0a count=144 bs=10240
 
 prep-fd0:
-	sudo disklabel -rw fd0 floppy
+	sudo disklabel -w fd0 floppy
 	sudo newfs -O 0 -m 0 -o space -i 3000 -c 80 /dev/rfd0a
 
 .include <bsd.subdir.mk>

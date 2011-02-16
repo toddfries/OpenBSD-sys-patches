@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: fbvar.h,v 1.16 2006/03/12 22:53:01 miod Exp $	*/
+=======
+/*	$OpenBSD: fbvar.h,v 1.18 2010/05/15 15:27:16 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: fbvar.h,v 1.9 1997/07/07 23:31:30 pk Exp $ */
 
 /*
@@ -82,6 +86,6 @@ void	fbwscons_setcolormap(struct sunfb *,
 void	fbwscons_attach(struct sunfb *, struct wsdisplay_accessops *, int);
 
 #if defined(SUN4)
-int	fb_pfour_id(void *);
+int	fb_pfour_id(volatile void *);
 void	fb_pfour_burner(void *, u_int, u_int);
 #endif

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: vga_pci.c,v 1.25 2006/11/27 18:04:28 gwk Exp $ */
+=======
+/* $OpenBSD: vga_pci.c,v 1.65 2010/12/26 15:41:00 miod Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -63,6 +67,9 @@
  */
 
 #include "vga.h"
+#if defined(__i386__) || defined(__amd64__)
+#include "acpi.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -89,23 +96,120 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 
+#ifdef X86EMU
+#include <machine/vga_post.h>
+#endif
+
 #ifdef VESAFB
 #include <dev/vesa/vesabiosvar.h>
 #endif
 
+<<<<<<< HEAD
+=======
+#include "intagp.h"
+#include "drm.h"
+
+>>>>>>> origin/master
 int	vga_pci_match(struct device *, void *, void *);
 void	vga_pci_attach(struct device *, struct device *, void *);
+int	vga_pci_activate(struct device *, int);
 paddr_t	vga_pci_mmap(void* v, off_t off, int prot);
+<<<<<<< HEAD
+=======
+void	vga_pci_bar_init(struct vga_pci_softc *, struct pci_attach_args *);
+
+#if NINTAGP > 0
+int	intagpsubmatch(struct device *, void *, void *);
+int	intagp_print(void *, const char *);
+#endif 
+#if NDRM > 0
+int	drmsubmatch(struct device *, void *, void *);
+int	vga_drm_print(void *, const char *);
+#endif
+>>>>>>> origin/master
 
 #ifdef VESAFB
-int vesafb_putcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
-int vesafb_getcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
+int	vesafb_putcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
+int	vesafb_getcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
 #endif
+
+#if !defined(SMALL_KERNEL) && NACPI > 0
+void	vga_save_state(struct vga_pci_softc *);
+void	vga_restore_state(struct vga_pci_softc *);
+#endif
+
+
+/*
+ * Function pointers for wsconsctl parameter handling.
+ * XXX These should be per-softc, but right now we only attach
+ * XXX a single vga@pci instance, so this will do.
+ */
+int	(*ws_get_param)(struct wsdisplay_param *);
+int	(*ws_set_param)(struct wsdisplay_param *);
+    
 
 struct cfattach vga_pci_ca = {
 	sizeof(struct vga_pci_softc), vga_pci_match, vga_pci_attach,
+	NULL, vga_pci_activate
 };
 
+<<<<<<< HEAD
+=======
+#if !defined(SMALL_KERNEL) && NACPI > 0
+int vga_pci_do_post;
+extern int do_real_mode_post;
+
+struct vga_device_description {
+	u_int16_t	rval[4];
+	u_int16_t	rmask[4];
+	char	vga_pci_post;
+	char	real_mode_post;
+};
+
+static const struct vga_device_description vga_devs[] = {
+	/*
+	 * Header description:
+	 *
+	 * First entry is a list of the pci video information in the following
+	 * order: VENDOR, PRODUCT, SUBVENDOR, SUBPRODUCT
+	 *
+	 * The next entry is a list of corresponding masks.
+	 *
+	 * Finally the last two values set what resume should do, repost with
+	 * vga_pci (i.e. the x86emulator) or with a locore call to the video
+	 * bios.
+	 */
+	{	/* All machines with Intel US15W (until more evidence) */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_US15W_IGD,
+	    	0x0000, 0x0000 },
+	    {	0xffff, 0xffff, 0x0000, 0x0000 }, 1, 0
+	},
+	{	/* All machines with Intel US15L (until more evidence) */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_US15L_IGD,
+	    	0x0000, 0x0000 },
+	    {	0xffff, 0xffff, 0x0000, 0x0000 }, 1, 0
+	},
+
+	{	/* Thinkpad T510 (and similar models) */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,	
+	    	0x17aa, 0x215a },
+	    {	0xffff, 0xffff, 0xffff, 0xffff }, 1, 0
+	},
+	{	/* HP G62 (and similar models) */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,	
+	    	0x103c, 0x1425 },
+	    {	0xffff, 0xffff, 0xffff, 0xffff }, 1, 0
+	},
+
+	{	/* All ATI video until further notice */
+	    {	PCI_VENDOR_ATI, 0x0000,
+		0x0000, 0x0000 },
+	    {	0xffff, 0x0000, 0x0000, 0x0000}, 1, 0
+	},
+};
+#endif
+
+>>>>>>> origin/master
 int
 vga_pci_match(struct device *parent, void *match, void *aux)
 {
@@ -156,6 +260,10 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
 #endif
 
+#if !defined(SMALL_KERNEL) && NACPI > 0
+	int prod, vend, subid, subprod, subvend, i;
+#endif
+
 	/*
 	 * Enable bus master; X might need this for accelerated graphics.
 	 */
@@ -170,16 +278,152 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (vesabios_softc != NULL && vesabios_softc->sc_nmodes > 0) {
 		sc->sc_textmode = vesafb_get_mode(sc);
 		printf(", vesafb\n");
-		vga_extended_attach(self, pa->pa_iot, pa->pa_memt,
+		sc->sc_vc = vga_extended_attach(self, pa->pa_iot, pa->pa_memt,
 		    WSDISPLAY_TYPE_PCIVGA, vga_pci_mmap);
 		return;
 	}
 #endif
 	printf("\n");
-	vga_common_attach(self, pa->pa_iot, pa->pa_memt,
+	sc->sc_vc = vga_common_attach(self, pa->pa_iot, pa->pa_memt,
 	    WSDISPLAY_TYPE_PCIVGA);
+<<<<<<< HEAD
 }
 
+=======
+
+	vga_pci_bar_init(sc, pa);
+
+#if !defined(SMALL_KERNEL) && NACPI > 0
+
+#ifdef X86EMU
+	if ((sc->sc_posth = vga_post_init(pa->pa_bus, pa->pa_device,
+	    pa->pa_function)) == NULL)
+		printf("couldn't set up vga POST handler\n");
+#endif
+
+	vend = PCI_VENDOR(pa->pa_id);
+	prod = PCI_PRODUCT(pa->pa_id);
+	subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+	subvend = PCI_VENDOR(subid);
+	subprod = PCI_PRODUCT(subid);
+
+	for (i = 0; i < nitems(vga_devs); i++)
+		if ((vend & vga_devs[i].rmask[0]) == vga_devs[i].rval[0] &&
+		    (prod & vga_devs[i].rmask[1]) == vga_devs[i].rval[1] &&
+		    (subvend & vga_devs[i].rmask[2]) == vga_devs[i].rval[2] &&
+		    (subprod & vga_devs[i].rmask[3]) == vga_devs[i].rval[3]) {
+			vga_pci_do_post = vga_devs[i].vga_pci_post;
+			if (sc->sc_dev.dv_unit == 0)	/* main screen only */
+				do_real_mode_post = vga_devs[i].real_mode_post;
+			break;
+		}
+#endif
+
+#if NINTAGP > 0
+	/*
+	 * attach intagp here instead of pchb so it can share mappings
+	 * with the DRM.
+	 */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL) {
+		config_found_sm(self, aux, intagp_print, intagpsubmatch);
+
+	}
+#endif
+
+#if NDRM > 0
+	config_found_sm(self, aux, NULL, drmsubmatch);
+#endif
+}
+
+int
+vga_pci_activate(struct device *self, int act)
+{
+	int rv = 0;
+
+#if !defined(SMALL_KERNEL) && NACPI > 0
+	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
+#endif
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+#if !defined(SMALL_KERNEL) && NACPI > 0
+		/*
+		 * Save the common vga state. This should theoretically only
+		 * be necessary if we intend to POST, but it is preferrable
+		 * to do it unconditionnaly, as many systems do not restore
+		 * this state correctly upon resume.
+		 */
+		vga_save_state(sc);
+#endif
+		break;
+	case DVACT_RESUME:
+#if !defined(SMALL_KERNEL) && NACPI > 0
+#if defined (X86EMU)
+		if (vga_pci_do_post) {
+#ifdef obnoxious
+			printf("%s: reposting video using BIOS.  Is this necessary?\n",
+			    sc->sc_dev.dv_xname);
+#endif
+			vga_post_call(sc->sc_posth);
+		}
+#endif
+		vga_restore_state(sc);
+#endif
+		rv = config_activate_children(self, act);
+		break;
+	}
+
+	return (rv);
+}
+
+#if NINTAGP > 0
+int
+intagpsubmatch(struct device *parent, void *match, void *aux)
+{
+	extern struct cfdriver intagp_cd;
+	struct cfdata *cf = match;
+
+	/* only allow intagp to attach */
+	if (cf->cf_driver == &intagp_cd)
+		return ((*cf->cf_attach->ca_match)(parent, match, aux));
+	return (0);
+}
+
+int
+intagp_print(void *vaa, const char *pnp)
+{
+	if (pnp)
+		printf("intagp at %s", pnp);
+	return (UNCONF);
+}
+#endif
+
+#if NDRM > 0
+int
+drmsubmatch(struct device *parent, void *match, void *aux)
+{
+	struct cfdata *cf = match;
+	struct cfdriver *cd;
+	size_t len = 0;
+	char *sm;
+
+	cd = cf->cf_driver;
+
+	/* is this a *drm device? */
+	len = strlen(cd->cd_name);
+	sm = cd->cd_name + len - 3;
+	if (strncmp(sm, "drm", 3) == 0)
+		return ((*cf->cf_attach->ca_match)(parent, match, aux));
+
+	return (0);
+}
+#endif
+
+>>>>>>> origin/master
 paddr_t
 vga_pci_mmap(void *v, off_t off, int prot)
 {
@@ -190,7 +434,7 @@ vga_pci_mmap(void *v, off_t off, int prot)
 	if (sc->sc_mode == WSDISPLAYIO_MODE_DUMBFB) {
 		if (off < 0 || off > vesabios_softc->sc_size)
 			return (-1);
-		return atop(sc->sc_base + off);
+		return (sc->sc_base + off);
 	}
 #endif
 #ifdef PCIAGP
@@ -283,6 +527,7 @@ vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 		break;
 
 #endif
+<<<<<<< HEAD
 #ifdef PCIAGP
 	case AGPIOC_INFO:
 	case AGPIOC_ACQUIRE:
@@ -295,6 +540,20 @@ vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 		error = agp_ioctl(v, cmd, addr, flag, pb);
 		break;
 #endif
+=======
+	case WSDISPLAYIO_GETPARAM:
+		if (ws_get_param != NULL)
+			return (*ws_get_param)((struct wsdisplay_param *)addr);
+		else
+			error = ENOTTY;
+		break;
+	case WSDISPLAYIO_SETPARAM:
+		if (ws_set_param != NULL)
+			return (*ws_set_param)((struct wsdisplay_param *)addr);
+		else
+			error = ENOTTY;
+		break;
+>>>>>>> origin/master
 	default:
 		error = ENOTTY;
 	}
@@ -309,5 +568,245 @@ vga_pci_close(void *v)
 #ifdef PCIAGP
 	agp_close(v);
 #endif
+<<<<<<< HEAD
 }
+=======
+
+/*
+ * Prepare dev->bars to be used for information. we do this at startup
+ * so we can do the whole array at once, dealing with 64-bit BARs correctly.
+ */
+void
+vga_pci_bar_init(struct vga_pci_softc *dev, struct pci_attach_args *pa)
+{
+	pcireg_t type;
+	int addr = PCI_MAPREG_START, i = 0;
+	memcpy(&dev->pa, pa, sizeof(dev->pa));
+
+	while (i < VGA_PCI_MAX_BARS) {
+		dev->bars[i] = malloc(sizeof((*dev->bars[i])), M_DEVBUF,
+		    M_NOWAIT | M_ZERO);
+		if (dev->bars[i] == NULL) {
+			return;
+		}
+
+		dev->bars[i]->addr = addr;
+
+		type = dev->bars[i]->maptype = pci_mapreg_type(pa->pa_pc,
+		    pa->pa_tag, addr);
+		if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, addr,
+		    dev->bars[i]->maptype, &dev->bars[i]->base,
+		    &dev->bars[i]->maxsize, &dev->bars[i]->flags) != 0) {
+			free(dev->bars[i], M_DEVBUF);
+			dev->bars[i] = NULL;
+		}
+
+		if (type == PCI_MAPREG_MEM_TYPE_64BIT) {
+			addr += 8;
+			i += 2;
+		} else {
+			addr+=4;
+			++i;
+		}
+	}
+}
+
+/*
+ * Get the vga_pci_bar struct for the address in question. returns NULL if
+ * invalid BAR is passed.
+ */
+struct vga_pci_bar*
+vga_pci_bar_info(struct vga_pci_softc *dev, int no)
+{
+	if (dev == NULL || no >= VGA_PCI_MAX_BARS)
+		return (NULL);
+	return (dev->bars[no]);
+}
+
+/*
+ * map the BAR in question, returning the vga_pci_bar struct in case any more
+ * processing needs to be done. Returns NULL on failure. Can be called multiple
+ * times.
+ */
+struct vga_pci_bar*
+vga_pci_bar_map(struct vga_pci_softc *dev, int addr, bus_size_t size,
+    int busflags)
+{
+	struct vga_pci_bar *bar = NULL;
+	int i;
+
+	if (dev == NULL) 
+		return (NULL);
+
+	for (i = 0; i < VGA_PCI_MAX_BARS; i++) {
+		if (dev->bars[i] && dev->bars[i]->addr == addr) {
+			bar = dev->bars[i];
+			break;
+		}
+	}
+	if (bar == NULL) {
+		printf("vga_pci_bar_map: given invalid address 0x%x\n", addr);
+		return (NULL);
+	}
+
+	if (bar->mapped == 0) {
+		if (pci_mapreg_map(&dev->pa, bar->addr, bar->maptype,
+		    bar->flags | busflags, &bar->bst, &bar->bsh, NULL,
+		    &bar->size, size)) {
+			printf("vga_pci_bar_map: can't map bar 0x%x\n", addr);
+			return (NULL);
+		}
+	}
+
+	bar->mapped++;
+	return (bar);
+}
+
+/*
+ * "unmap" the BAR referred to by argument. If more than one place has mapped it
+ * we just decrement the reference counter so nothing untoward happens.
+ */
+void
+vga_pci_bar_unmap(struct vga_pci_bar *bar)
+{
+	if (bar != NULL && bar->mapped != 0) {
+		if (--bar->mapped == 0)
+			bus_space_unmap(bar->bst, bar->bsh, bar->size);
+	}
+}
+
+#if !defined(SMALL_KERNEL) && NACPI > 0
+void
+vga_save_state(struct vga_pci_softc *sc)
+{
+	struct vga_config *vc = sc->sc_vc;
+	struct vga_handle *vh;
+	struct vgascreen *scr;
+	size_t i;
+	char *buf;
+
+	if (vc == NULL)
+		return;
+
+	vh = &vc->hdl;
+
+	/*
+	 * Save sequencer registers
+	 */
+	vga_ts_write(vh, syncreset, 1);	/* stop sequencer */
+	buf = (char *)&sc->sc_save_ts;
+	*buf++ = 0;
+	for (i = 1; i < sizeof(sc->sc_save_ts); i++)
+		*buf++ = _vga_ts_read(vh, i);
+	vga_ts_write(vh, syncreset, 3);	/* start sequencer */
+	/* pretend screen is not blanked */
+	sc->sc_save_ts.mode &= ~0x20;
+	sc->sc_save_ts.mode |= 0x80;
+
+	/*
+	 * Save CRTC registers
+	 */
+	buf = (char *)&sc->sc_save_crtc;
+	for (i = 0; i < sizeof(sc->sc_save_crtc); i++)
+		*buf++ = _pcdisplay_6845_read(&vh->vh_ph, i);
+
+	/*
+	 * Save ATC registers
+	 */
+	buf = (char *)&sc->sc_save_atc;
+	for (i = 0; i < sizeof(sc->sc_save_atc); i++)
+		*buf++ = _vga_attr_read(vh, i);
+
+	/*
+	 * Save GDC registers
+	 */
+	buf = (char *)&sc->sc_save_gdc;
+	for (i = 0; i < sizeof(sc->sc_save_gdc); i++)
+		*buf++ = _vga_gdc_read(vh, i);
+
+	vga_save_palette(vc);
+
+	/* XXX should also save font data */
+
+	/*
+	 * Save current screen contents if we have backing store for it,
+	 * and intend to POST on resume.
+	 * XXX Since we don't allocate backing store unless the second VT is
+	 * XXX created, we could theoretically have no backing store available
+	 * XXX at this point.
+	 */
+	if (vga_pci_do_post) {
+		scr = vc->active;
+		if (scr != NULL && scr->pcs.active && scr->pcs.mem != NULL)
+			bus_space_read_region_2(vh->vh_memt, vh->vh_memh,
+			    scr->pcs.dispoffset, scr->pcs.mem,
+			    scr->pcs.type->ncols * scr->pcs.type->nrows);
+	}
+}
+
+void
+vga_restore_state(struct vga_pci_softc *sc)
+{
+	struct vga_config *vc = sc->sc_vc;
+	struct vga_handle *vh;
+	struct vgascreen *scr;
+	size_t i;
+	char *buf;
+
+	if (vc == NULL)
+		return;
+
+	vh = &vc->hdl;
+
+	/*
+	 * Restore sequencer registers
+	 */
+	vga_ts_write(vh, syncreset, 1);	/* stop sequencer */
+	buf = (char *)&sc->sc_save_ts + 1;
+	for (i = 1; i < sizeof(sc->sc_save_ts); i++)
+		_vga_ts_write(vh, i, *buf++);
+	vga_ts_write(vh, syncreset, 3);	/* start sequencer */
+
+	/*
+	 * Restore CRTC registers
+	 */
+	/* unprotect registers 00-07 */
+	vga_6845_write(vh, vsynce,
+	    vga_6845_read(vh, vsynce) & ~0x80);
+	buf = (char *)&sc->sc_save_crtc;
+	for (i = 0; i < sizeof(sc->sc_save_crtc); i++)
+		_pcdisplay_6845_write(&vh->vh_ph, i, *buf++);
+
+	/*
+	 * Restore ATC registers
+	 */
+	buf = (char *)&sc->sc_save_atc;
+	for (i = 0; i < sizeof(sc->sc_save_atc); i++)
+		_vga_attr_write(vh, i, *buf++);
+
+	/*
+	 * Restore GDC registers
+	 */
+	buf = (char *)&sc->sc_save_gdc;
+	for (i = 0; i < sizeof(sc->sc_save_gdc); i++)
+		_vga_gdc_write(vh, i, *buf++);
+
+	vga_restore_palette(vc);
+
+	/*
+	 * Restore current screen contents if we have backing store for it,
+	 * and have POSTed on resume.
+	 * XXX Since we don't allocate backing store unless the second VT is
+	 * XXX created, we could theoretically have no backing store available
+	 * XXX at this point.
+	 */
+	if (vga_pci_do_post) {
+		scr = vc->active;
+		if (scr != NULL && scr->pcs.active && scr->pcs.mem != NULL)
+			bus_space_write_region_2(vh->vh_memt, vh->vh_memh,
+			    scr->pcs.dispoffset, scr->pcs.mem,
+			    scr->pcs.type->ncols * scr->pcs.type->nrows);
+	}
+}
+>>>>>>> origin/master
 #endif

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rtl81x9reg.h,v 1.35 2006/12/01 01:13:01 todd Exp $	*/
+=======
+/*	$OpenBSD: rtl81x9reg.h,v 1.72 2010/11/28 22:08:59 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998
@@ -78,7 +82,11 @@
 #define RL_EECMD	0x0050		/* EEPROM command register */
 #define RL_CFG0		0x0051		/* config register #0 */
 #define RL_CFG1		0x0052		/* config register #1 */
-					/* 0053-0057 reserved */
+#define RL_CFG2		0x0053		/* config register #2 */
+#define RL_CFG3		0x0054		/* config register #3 */
+#define RL_CFG4		0x0055		/* config register #4 */
+#define RL_CFG5		0x0056		/* config register #5 */
+					/* 0057 reserved */
 #define RL_MEDIASTAT	0x0058		/* media status register (8139) */
 					/* 0059-005A reserved */
 #define RL_MII		0x005A		/* 8129 chip only */
@@ -112,7 +120,6 @@
 #define RL_TXLIST_ADDR_HI	0x0024	/* 64 bits, 256 byte alignment */
 #define RL_TXLIST_ADDR_HPRIO_LO	0x0028	/* 64 bits, 256 byte aligned */
 #define RL_TXLIST_ADDR_HPRIO_HI	0x002C	/* 64 bits, 256 byte aligned */
-#define RL_CFG2		0x0053
 #define RL_TIMERINT		0x0054	/* interrupt on timer expire */
 #define RL_TXSTART		0x00D9	/* 8 bits */
 #define RL_CPLUS_CMD		0x00E0	/* 16 bits */
@@ -129,6 +136,13 @@
 #define RL_TBI_ANAR		0x0068
 #define RL_TBI_LPAR		0x006A
 #define RL_GMEDIASTAT		0x006C	/* 8 bits */
+<<<<<<< HEAD
+=======
+#define RL_MACDBG		0x006D	/* 8 bits */
+#define RL_GPIO			0x006E	/* 8 bits */
+#define RL_PMCH			0x006F	/* 8 bits */
+#define RL_LDPS			0x0082	/* Link Down Power Saving */
+>>>>>>> origin/master
 #define RL_MAXRXPKTLEN		0x00DA	/* 16 bits, chip multiplies by 8 */
 #define RL_GTXSTART		0x0038	/* 16 bits */
 /*
@@ -149,15 +163,31 @@
 /* Known revision codes. */
 
 #define RL_HWREV_8169		0x00000000
-#define RL_HWREV_8110S		0x00800000
-#define RL_HWREV_8169S		0x04000000
+#define RL_HWREV_8169S		0x00800000
+#define RL_HWREV_8110S		0x04000000
 #define RL_HWREV_8169_8110SB	0x10000000
+<<<<<<< HEAD
 #define RL_HWREV_8169_8110SC	0x18000000
+=======
+#define RL_HWREV_8169_8110SCd	0x18000000
+#define RL_HWREV_8102EL		0x24800000
+#define RL_HWREV_8103E		0x24C00000
+#define RL_HWREV_8168D		0x28000000
+#define RL_HWREV_8168DP		0x28800000
+#define RL_HWREV_8168E		0x2C000000
+>>>>>>> origin/master
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
+#define RL_HWREV_8102E		0x34800000
 #define RL_HWREV_8168_SPIN2	0x38000000
 #define RL_HWREV_8100E_SPIN2	0x38800000
+<<<<<<< HEAD
+=======
+#define RL_HWREV_8168C		0x3c000000
+#define RL_HWREV_8168C_SPIN2	0x3c400000
+#define RL_HWREV_8168CP		0x3c800000
+>>>>>>> origin/master
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
 #define RL_HWREV_8139AG		0x70800000
@@ -168,6 +198,11 @@
 #define RL_HWREV_8139CPLUS	0x74800000
 #define RL_HWREV_8101		0x74c00000
 #define RL_HWREV_8100		0x78800000
+<<<<<<< HEAD
+=======
+#define RL_HWREV_8169_8110SBL	0x7cc00000
+#define RL_HWREV_8169_8110SCe	0x98000000
+>>>>>>> origin/master
 
 #define RL_TXDMA_16BYTES	0x00000000
 #define RL_TXDMA_32BYTES	0x00000100
@@ -202,7 +237,7 @@
 #define RL_ISR_RX_OVERRUN	0x0010
 #define RL_ISR_PKT_UNDERRUN	0x0020
 #define RL_ISR_LINKCHG		0x0020	/* 8169 only */
-#define RL_ISR_FIFO_OFLOW	0x0040	/* 8139 only */
+#define RL_ISR_FIFO_OFLOW	0x0040
 #define RL_ISR_TX_DESC_UNAVAIL	0x0080	/* C+ only */
 #define RL_ISR_SWI		0x0100	/* C+ only */
 #define RL_ISR_CABLE_LEN_CHGD	0x2000
@@ -217,9 +252,13 @@
 
 #define RL_INTRS_CPLUS	\
 	(RL_ISR_RX_OK|RL_ISR_RX_ERR|RL_ISR_TX_ERR|			\
-	RL_ISR_RX_OVERRUN|RL_ISR_PKT_UNDERRUN|RL_ISR_FIFO_OFLOW|	\
-	RL_ISR_PCS_TIMEOUT|RL_ISR_SYSTEM_ERR|RL_ISR_TIMEOUT_EXPIRED)
+	RL_ISR_RX_OVERRUN|RL_ISR_FIFO_OFLOW|RL_ISR_LINKCHG|		\
+	RL_ISR_SYSTEM_ERR|RL_ISR_TX_OK)
 
+#define RL_INTRS_TIMER							\
+	(RL_ISR_RX_ERR|RL_ISR_TX_ERR|					\
+	RL_ISR_LINKCHG|RL_ISR_SYSTEM_ERR|				\
+	RL_ISR_TIMEOUT_EXPIRED)
 
 /*
  * Media status register. (8139 only)
@@ -292,6 +331,7 @@
 #define RL_CMD_TX_ENB		0x0004
 #define RL_CMD_RX_ENB		0x0008
 #define RL_CMD_RESET		0x0010
+#define RL_CMD_STOPREQ		0x0080
 
 /*
  * EEPROM control register
@@ -358,14 +398,49 @@
  * Config 1 register
  */
 #define RL_CFG1_PWRDWN		0x01
+#define RL_CFG1_PME		0x01
 #define RL_CFG1_SLEEP		0x02
+#define RL_CFG1_VPDEN		0x02
 #define RL_CFG1_IOMAP		0x04
 #define RL_CFG1_MEMMAP		0x08
 #define RL_CFG1_RSVD		0x10
+#define RL_CFG1_LWACT		0x10
 #define RL_CFG1_DRVLOAD		0x20
 #define RL_CFG1_LED0		0x40
 #define RL_CFG1_FULLDUPLEX	0x40	/* 8129 only */
 #define RL_CFG1_LED1		0x80
+
+/*
+ * Config 2 register
+ */
+#define RL_CFG2_PCI_MASK	0x07
+#define RL_CFG2_PCI_33MHZ	0x00
+#define RL_CFG2_PCI_66MHZ	0x01
+#define RL_CFG2_PCI_64BIT	0x08
+#define RL_CFG2_AUXPWR		0x10
+
+/*
+ * Config 3 register
+ */
+#define RL_CFG3_GRANTSEL	0x80
+#define RL_CFG3_WOL_MAGIC	0x20
+#define RL_CFG3_WOL_LINK	0x10
+#define RL_CFG3_FAST_B2B	0x01
+
+/*
+ * Config 4 register
+ */
+#define RL_CFG4_LWPTN		0x04
+#define RL_CFG4_LWPME		0x10
+
+/*
+ * Config 5 register
+ */
+#define RL_CFG5_WOL_BCAST	0x40
+#define RL_CFG5_WOL_MCAST	0x20
+#define RL_CFG5_WOL_UCAST	0x10
+#define RL_CFG5_WOL_LANWAKE	0x02
+#define RL_CFG5_PME_STS		0x01
 
 /*
  * 8139C+ register definitions
@@ -402,6 +477,15 @@
 #define RL_CPLUSCMD_PCI_DAC	0x0010	/* PCI dual-address cycle only */
 #define RL_CPLUSCMD_RXCSUM_ENB	0x0020	/* enable RX checksum offload */
 #define RL_CPLUSCMD_VLANSTRIP	0x0040	/* enable VLAN tag stripping */
+#define	RL_CPLUSCMD_MACSTAT_DIS	0x0080	/* 8168B/C/CP */
+#define	RL_CPLUSCMD_ASF		0x0100	/* 8168C/CP */
+#define	RL_CPLUSCMD_DBG_SEL	0x0200	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_TXFC	0x0400	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_RXFC	0x0800	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_HDPX	0x1000	/* 8168C/CP */
+#define	RL_CPLUSCMD_NORMAL_MODE	0x2000	/* 8168C/CP */
+#define	RL_CPLUSCMD_DBG_ENB	0x4000	/* 8168C/CP */
+#define	RL_CPLUSCMD_BIST_ENB	0x8000	/* 8168C/CP */
 
 /* C+ early transmit threshold */
 
@@ -455,6 +539,10 @@
 #define RL_RXCFG_CONFIG		(RL_RX_FIFOTHRESH|RL_RX_MAXDMA|RL_RX_BUF_SZ)
 #define RL_TXCFG_CONFIG		(RL_TXCFG_IFG|RL_TX_MAXDMA)
 
+#define RL_IM_MAGIC		0x5050
+#define RL_IM_RXTIME(t)		((t) & 0xf)
+#define RL_IM_TXTIME(t)		(((t) & 0xf) << 8)
+
 struct rl_chain_data {
 	u_int16_t		cur_rx;
 	caddr_t			rl_rx_buf;
@@ -502,6 +590,10 @@ struct rl_desc {
 
 #define RL_TDESC_VLANCTL_TAG	0x00020000	/* Insert VLAN tag */
 #define RL_TDESC_VLANCTL_DATA	0x0000FFFF	/* TAG data */
+/* RTL8168C/RTL8168CP/RTL8111C/RTL8111CP */
+#define	RL_TDESC_CMD_IPCSUMV2	0x20000000
+#define	RL_TDESC_CMD_TCPCSUMV2	0x40000000
+#define	RL_TDESC_CMD_UDPCSUMV2	0x80000000
 
 /*
  * Error bits are valid only on the last descriptor of a frame
@@ -539,6 +631,8 @@ struct rl_desc {
 #define RL_RDESC_STAT_RUNT	0x00080000	/* runt packet received */
 #define RL_RDESC_STAT_CRCERR	0x00040000	/* CRC error */
 #define RL_RDESC_STAT_PROTOID	0x00030000	/* Protocol type */
+#define	RL_RDESC_STAT_UDP	0x00020000	/* UDP, 8168C/CP, 8111C/CP */
+#define	RL_RDESC_STAT_TCP	0x00010000	/* TCP, 8168C/CP, 8111C/CP */
 #define RL_RDESC_STAT_IPSUMBAD	0x00008000	/* IP header checksum bad */
 #define RL_RDESC_STAT_UDPSUMBAD	0x00004000	/* UDP checksum bad */
 #define RL_RDESC_STAT_TCPSUMBAD	0x00002000	/* TCP checksum bad */
@@ -550,6 +644,9 @@ struct rl_desc {
 #define RL_RDESC_VLANCTL_TAG	0x00010000	/* VLAN tag available
 						   (rl_vlandata valid)*/
 #define RL_RDESC_VLANCTL_DATA	0x0000FFFF	/* TAG data */
+/* RTL8168C/RTL8168CP/RTL8111C/RTL8111CP */
+#define	RL_RDESC_IPV6		0x80000000
+#define	RL_RDESC_IPV4		0x40000000
 
 #define RL_PROTOID_NONIP	0x00000000
 #define RL_PROTOID_TCPIP	0x00010000
@@ -584,7 +681,7 @@ struct rl_stats {
 
 #define RL_RX_DESC_CNT		64
 #define RL_TX_DESC_CNT_8139	64
-#define RL_TX_DESC_CNT_8169	1024
+#define RL_TX_DESC_CNT_8169	512
 
 #define RL_TX_QLEN		64
 
@@ -703,7 +800,9 @@ struct rl_list_data {
 	struct rl_rxsoft	rl_rxsoft[RL_RX_DESC_CNT];
 	bus_dmamap_t		rl_rx_list_map;
 	struct rl_desc		*rl_rx_list;
+	int			rl_rx_considx;
 	int			rl_rx_prodidx;
+	int			rl_rx_cnt;
 	bus_dma_segment_t	rl_rx_listseg;
 	int			rl_rx_listnseg;
 };
@@ -721,13 +820,11 @@ struct rl_softc {
 	u_int8_t		rl_type;
 	int			rl_eecmd_read;
 	int			rl_eewidth;
-	void			*sc_sdhook;	/* shutdownhook */
-	void			*sc_pwrhook;
+	int			rl_bus_speed;
 	int			rl_txthresh;
 	int			sc_flags;	/* misc flags */
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
-	int			if_flags;
 
 	struct rl_list_data	rl_ldata;
 	struct mbuf		*rl_head;
@@ -737,7 +834,35 @@ struct rl_softc {
 	struct timeout		timer_handle;
 
 	int			rl_txstart;
-	int			rl_link;
+	u_int32_t		rl_flags;
+#define	RL_FLAG_MSI		0x00000001
+#define	RL_FLAG_PCI64		0x00000002
+#define	RL_FLAG_PCIE		0x00000004
+#define	RL_FLAG_INVMAR		0x00000008
+#define	RL_FLAG_PHYWAKE		0x00000010
+#define	RL_FLAG_NOJUMBO		0x00000020
+#define	RL_FLAG_PAR		0x00000040
+#define	RL_FLAG_DESCV2		0x00000080
+#define	RL_FLAG_MACSTAT		0x00000100
+#define	RL_FLAG_HWIM		0x00000200
+#define	RL_FLAG_TIMERINTR	0x00000400
+#define	RL_FLAG_MACLDPS		0x00000800
+#define	RL_FLAG_CMDSTOP		0x00001000
+#define	RL_FLAG_MACSLEEP	0x00002000
+#define	RL_FLAG_AUTOPAD		0x00004000
+#define	RL_FLAG_LINK		0x00008000
+#define	RL_FLAG_PHYWAKE_PM	0x00010000
+
+	u_int16_t		rl_intrs;
+	u_int16_t		rl_tx_ack;
+	u_int16_t		rl_rx_ack;
+	int			rl_tx_time;
+	int			rl_rx_time;
+	int			rl_sim_time;
+	int			rl_imtype;
+#define	RL_IMTYPE_NONE		0
+#define	RL_IMTYPE_SIM		1	/* simulated */
+#define	RL_IMTYPE_HW		2	/* hardware based */
 };
 
 /*
@@ -799,6 +924,7 @@ struct rl_softc {
 	CSR_WRITE_4(sc, offset, CSR_READ_4(sc, offset) & ~(val))
 
 #define RL_TIMEOUT		1000
+#define RL_PHY_TIMEOUT		20
 
 /*
  * General constants that are fun to know.
@@ -899,3 +1025,5 @@ extern int rl_attach(struct rl_softc *);
 extern int rl_detach(struct rl_softc *);
 extern int rl_intr(void *);
 extern void rl_setmulti(struct rl_softc *);
+int rl_detach(struct rl_softc *);
+int rl_activate(struct device *, int);

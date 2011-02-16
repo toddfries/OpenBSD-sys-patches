@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: radix_mpath.c,v 1.6 2006/06/18 11:47:45 pascoe Exp $	*/
+=======
+/*	$OpenBSD: radix_mpath.c,v 1.18 2010/05/07 13:33:16 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$KAME: radix_mpath.c,v 1.13 2002/10/28 21:05:59 itojun Exp $	*/
 
 /*
@@ -57,6 +61,9 @@ u_int32_t rn_mpath_hash(struct route *, u_int32_t *);
  * give some jitter to hash, to avoid synchronization between routers
  */
 static u_int32_t hashjitter;
+#ifdef RN_DEBUG
+extern struct radix_node	*rn_clist;
+#endif
 
 int
 rn_mpath_capable(struct radix_node_head *rnh)
@@ -65,26 +72,181 @@ rn_mpath_capable(struct radix_node_head *rnh)
 }
 
 struct radix_node *
-rn_mpath_next(struct radix_node *rn)
+rn_mpath_next(struct radix_node *rn, int all)
 {
 	struct radix_node *next;
 
 	if (!rn->rn_dupedkey)
 		return NULL;
 	next = rn->rn_dupedkey;
+<<<<<<< HEAD
 	if (rn->rn_mask == next->rn_mask)
+=======
+	if (rn->rn_mask == next->rn_mask && (all ||
+	    rt->rt_priority == ((struct rtentry *)next)->rt_priority))
+>>>>>>> origin/master
 		return next;
 	else
 		return NULL;
 }
 
+<<<<<<< HEAD
+=======
+struct radix_node *
+rn_mpath_prio(struct radix_node *rn, u_int8_t prio)
+{
+	struct radix_node	*prev = rn;
+	struct rtentry		*rt;
+
+	if (prio == RTP_ANY)
+		return (rn);
+
+	while (rn) {
+		/* different netmask -> different route */
+		if (rn->rn_mask != prev->rn_mask)
+			return (prev);
+
+		rt = (struct rtentry *)rn;
+		if (rt->rt_priority == prio)
+			return (rn);
+		if (rt->rt_priority > prio)
+			/* list is sorted return last more prefered entry */
+			return (prev);
+		prev = rn;
+		rn = rn->rn_dupedkey;
+	}
+	return (prev);
+}
+
+void
+rn_mpath_reprio(struct radix_node *rn, int newprio)
+{
+	struct radix_node	*prev = rn->rn_p;
+	struct radix_node	*next = rn->rn_dupedkey;
+	struct radix_node	*t, *tt, *saved_tt, *head;
+	struct rtentry		*rt = (struct rtentry *)rn;
+	int			 mid, oldprio, prioinv = 0;
+
+	oldprio = rt->rt_priority;
+	rt->rt_priority = newprio;
+
+	/* same prio, no change needed */
+	if (oldprio == newprio)
+		return;
+	if (rn_mpath_next(rn, 1) == NULL) {
+		/* no need to move node, route is alone */
+		if (prev->rn_mask != rn->rn_mask)
+			return;
+		/* ... or route is last and prio gets bigger */
+		if (oldprio < newprio)
+			return;
+	}
+
+	/* remove node from dupedkey list and reinsert at correct place */
+	if (prev->rn_dupedkey == rn) {
+		prev->rn_dupedkey = next;
+		if (next)
+			next->rn_p = prev;
+		else
+			next = prev;
+	} else {
+		if (next == NULL)
+			panic("next == NULL");
+		next->rn_p = prev;
+		if (prev->rn_l == rn)
+			prev->rn_l = next;
+		else
+			prev->rn_r = next;
+	}
+
+	/* re-insert rn at the right spot, so first rewind to the head */
+	for (tt = next; tt->rn_p->rn_dupedkey == tt; tt = tt->rn_p)
+		;
+	saved_tt = tt;
+
+	/*
+	 * Stolen from radix.c rn_addroute().
+	 * This is nasty code with a certain amount of magic and dragons.
+	 * t is the element where the re-priorized rn is inserted -- before
+	 * or after depending on prioinv. saved_tt points to the head of the
+	 * dupedkey chain and tt is a bit of a helper
+	 *
+	 * First we skip with tt to the start of the mpath group then we
+	 * search the right spot to enter our node.
+	 */
+	for (; tt; tt = tt->rn_dupedkey)
+		if (rn->rn_mask == tt->rn_mask)
+			break;
+	head = tt; /* store current head entry for rn_mklist check */
+
+	tt = rn_mpath_prio(tt, newprio);
+	if (((struct rtentry *)tt)->rt_priority != newprio) {
+		if (((struct rtentry *)tt)->rt_priority > newprio)
+			prioinv = 1;
+		t = tt;
+	} else {
+		mid = rn_mpath_count(tt) / 2;
+		do {
+			t = tt;
+			tt = rn_mpath_next(tt, 0);
+		} while (tt && --mid > 0);
+	}
+
+	/* insert rn before or after t depending on prioinv, tt and saved_tt */
+	if (tt == saved_tt && prioinv) {
+		/* link in at head of list */
+		rn->rn_dupedkey = tt;
+		rn->rn_p = tt->rn_p;
+		tt->rn_p = rn;
+		if (rn->rn_p->rn_l == tt)
+			rn->rn_p->rn_l = rn;
+		else
+			rn->rn_p->rn_r = rn;
+	} else if (prioinv == 1) {
+		rn->rn_dupedkey = t;
+		t->rn_p->rn_dupedkey = rn;
+		rn->rn_p = t->rn_p;
+		t->rn_p = rn;
+	} else {
+		rn->rn_dupedkey = t->rn_dupedkey;
+		t->rn_dupedkey = rn;
+		rn->rn_p = t;
+		if (rn->rn_dupedkey)
+			rn->rn_dupedkey->rn_p = rn;
+	}
+
+#ifdef RN_DEBUG
+	/* readd at head of creation list */
+	for (t = rn_clist; t && t->rn_ybro != rn; t = t->rn_ybro)
+		;
+	if (t)
+		t->rn_ybro = rn->rn_ybro;
+	rn->rn_ybro = rn_clist;
+	rn_clist = rn;
+#endif
+
+	if (rn->rn_mklist && rn->rn_flags & RNF_NORMAL) {
+		/* the rn_mklist needs to be fixed if the best route changed */
+		if (rn->rn_mklist->rm_leaf != rn) {
+			if (rn->rn_mklist->rm_leaf->rn_p == rn)
+				/* changed route is now best */
+				rn->rn_mklist->rm_leaf = rn;
+		} else {
+			if (rn->rn_dupedkey != head)
+				/* rn moved behind head, so head is new head */
+				rn->rn_mklist->rm_leaf = head;
+		}
+	}
+}
+
+>>>>>>> origin/master
 int
 rn_mpath_count(struct radix_node *rn)
 {
 	int i;
 
 	i = 1;
-	while ((rn = rn_mpath_next(rn)) != NULL)
+	while ((rn = rn_mpath_next(rn, 0)) != NULL)
 		i++;
 	return i;
 }
@@ -92,6 +254,7 @@ rn_mpath_count(struct radix_node *rn)
 struct rtentry *
 rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate)
 {
+<<<<<<< HEAD
 	struct radix_node *rn;
 
 	if (!rn_mpath_next((struct radix_node *)rt))
@@ -101,14 +264,37 @@ rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate)
 		return NULL;
 	/* beyond here, we use rn as the master copy */
 	rn = (struct radix_node *)rt;
+=======
+	struct radix_node *rn = (struct radix_node *)rt;
+
+>>>>>>> origin/master
 	do {
 		rt = (struct rtentry *)rn;
+
+		/* first find routes with correct priority */
+		if (prio != RTP_ANY &&
+		    (rt->rt_priority & RTP_MASK) != (prio & RTP_MASK))
+			continue;
+		/*
+		 * if gate is set it must be compared, if not set the route
+		 * must be a non-multipath one.
+		 */
+		if (!gate && !rn_mpath_next(rn, 0))
+			return rt;
+		if (!gate)
+			return NULL;
+		if (!rt->rt_gateway)
+			continue;
 		if (rt->rt_gateway->sa_len == gate->sa_len &&
 		    !memcmp(rt->rt_gateway, gate, gate->sa_len))
 			break;
+<<<<<<< HEAD
 	} while ((rn = rn_mpath_next(rn)) != NULL);
 	if (!rn)
 		return NULL;
+=======
+	} while ((rn = rn_mpath_next(rn, 1)) != NULL);
+>>>>>>> origin/master
 
 	return (struct rtentry *)rn;
 }
@@ -208,7 +394,7 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
 
 		/* all key/mask/gateway are the same.  conflicting entry. */
 		return EEXIST;
-	} while ((rn1 = rn_mpath_next(rn1)) != NULL);
+	} while ((rn1 = rn_mpath_next(rn1, 0)) != NULL);
 
  different:
 	return 0;
@@ -218,7 +404,7 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
  * allocate a route, potentially using multipath to select the peer.
  */
 void
-rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp, u_int tableid)
+rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp)
 {
 #if defined(INET) || defined(INET6)
 	struct radix_node *rn;
@@ -231,7 +417,7 @@ rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp, u_int tableid)
 	 */
 	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
 		return;
-	ro->ro_rt = rtalloc1(&ro->ro_dst, 1, tableid);
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT, ro->ro_tableid);
 
 	/* if the route does not exist or it is not multipath, don't care */
 	if (!ro->ro_rt || !(ro->ro_rt->rt_flags & RTF_MPATH))
@@ -256,7 +442,7 @@ rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp, u_int tableid)
 	threshold = 1 + (0xffff / npaths);
 	while (hash > threshold && rn) {
 		/* stay within the multipath routes */
-		if (rn->rn_dupedkey && rn->rn_mask != rn->rn_dupedkey->rn_mask)
+		if (rn_mpath_next(rn, 0) == NULL)
 			break;
 		rn = rn->rn_dupedkey;
 		hash -= threshold;

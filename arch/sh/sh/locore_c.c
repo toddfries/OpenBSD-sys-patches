@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: locore_c.c,v 1.2 2006/11/28 18:52:23 kettenis Exp $	*/
+=======
+/*	$OpenBSD: locore_c.c,v 1.10 2010/06/27 12:41:23 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: locore_c.c,v 1.13 2006/03/04 01:13:35 uwe Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -113,7 +110,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/sched.h>
 #include <sys/proc.h>
 
@@ -121,6 +118,7 @@
 
 #include <sh/locore.h>
 #include <sh/cpu.h>
+#include <sh/pcb.h>
 #include <sh/pmap.h>
 #include <sh/mmu_sh3.h>
 #include <sh/mmu_sh4.h>

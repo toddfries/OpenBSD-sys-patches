@@ -1,4 +1,5 @@
-#	$OpenBSD: Makefile,v 1.3 2006/07/29 00:48:52 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.7 2008/06/09 15:01:56 deraadt Exp $
+.include "${.CURDIR}/../Makefile.inc"
 
 NOMAN=
 

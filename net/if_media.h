@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_media.h,v 1.22 2006/12/27 12:00:17 kettenis Exp $	*/
+=======
+/*	$OpenBSD: if_media.h,v 1.31 2010/02/09 13:18:04 claudio Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: if_media.h,v 1.22 2000/02/17 21:53:16 sommerfeld Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -183,6 +180,12 @@ int	ifmedia_baudrate(int);
 #define	IFM_10G_LR	18		/* 10GBase-LR - single-mode fiber */
 #define	IFM_10G_SR	19		/* 10GBase-SR - multi-mode fiber */
 #define	IFM_10G_CX4	20		/* 10GBase-CX4 - copper */
+<<<<<<< HEAD
+=======
+#define	IFM_2500_SX	21		/* 2500baseSX - multi-mode fiber */
+#define	IFM_10G_T	22		/* 10GbaseT cat 6 */
+#define	IFM_10G_SFP_CU	23		/* 10G SFP+ direct attached cable */
+>>>>>>> origin/master
 
 #define	IFM_ETH_MASTER	0x00000100	/* master mode (1000baseT) */
 #define	IFM_ETH_RXPAUSE	0x00000200	/* receive PAUSE frames */
@@ -238,10 +241,10 @@ int	ifmedia_baudrate(int);
 #define	IFM_IEEE80211_TURBO	0x2000	/* Operate in Turbo mode */
 
 /* operating mode for multi-mode devices */
-#define IFM_IEEE80211_11A	0x00010000	/* 5Ghz, OFDM mode */
+#define IFM_IEEE80211_11A	0x00010000	/* 5GHz, OFDM mode */
 #define IFM_IEEE80211_11B	0x00020000	/* Direct Sequence mode */
-#define IFM_IEEE80211_11G	0x00030000	/* 2Ghz, CCK mode */
-#define IFM_IEEE80211_FH	0x00040000	/* 2Ghz, GFSK mode */
+#define IFM_IEEE80211_11G	0x00030000	/* 2GHz, CCK mode */
+#define IFM_IEEE80211_FH	0x00040000	/* 2GHz, GFSK mode */
 
 /*
  * Digitally multiplexed "Carrier" Serial Interfaces
@@ -436,6 +439,7 @@ struct ifmedia_description {
 	{ IFM_ETHER|IFM_10G_CX4,	"10GbaseCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GBASE-CX4" },		\
+<<<<<<< HEAD
 									\
 	{ IFM_TOKEN|IFM_TOK_STP4,	"DB9/4Mbit" },			\
 	{ IFM_TOKEN|IFM_TOK_STP4,	"4STP" },			\
@@ -445,6 +449,15 @@ struct ifmedia_description {
 	{ IFM_TOKEN|IFM_TOK_UTP4,	"4UTP" },			\
 	{ IFM_TOKEN|IFM_TOK_UTP16,	"UTP/16Mbit" },			\
 	{ IFM_TOKEN|IFM_TOK_UTP16,	"16UTP" },			\
+=======
+	{ IFM_ETHER|IFM_2500_SX,	"2500baseSX" },			\
+	{ IFM_ETHER|IFM_2500_SX,	"2500SX" },			\
+	{ IFM_ETHER|IFM_10G_T,		"10GbaseT" },			\
+	{ IFM_ETHER|IFM_10G_T,		"10GT" },			\
+	{ IFM_ETHER|IFM_10G_T,		"10GBASE-T" },			\
+	{ IFM_ETHER|IFM_10G_SFP_CU,	"10GSFP+Cu" },			\
+	{ IFM_ETHER|IFM_10G_SFP_CU,	"10GCu" },			\
+>>>>>>> origin/master
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"Single-mode" },		\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"SMF" },			\
@@ -563,6 +576,7 @@ struct ifmedia_baudrate {
 	{ IFM_ETHER|IFM_1000_CX,	IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_1000_T,		IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_HPNA_1,		IF_Mbps(1) },			\
+<<<<<<< HEAD
 	{ IFM_ETHER|IFM_10G_LR,		IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_10G_SR,		IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_10G_CX4,	IF_Mbps(1000) },		\
@@ -571,6 +585,14 @@ struct ifmedia_baudrate {
 	{ IFM_TOKEN|IFM_TOK_STP16,	IF_Mbps(16) },			\
 	{ IFM_TOKEN|IFM_TOK_UTP4,	IF_Mbps(4) },			\
 	{ IFM_TOKEN|IFM_TOK_UTP16,	IF_Mbps(16) },			\
+=======
+	{ IFM_ETHER|IFM_10G_LR,		IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_10G_SR,		IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_10G_CX4,	IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_2500_SX,	IF_Mbps(2500) },		\
+	{ IFM_ETHER|IFM_10G_T,		IF_Gbps(10) },			\
+	{ IFM_ETHER|IFM_10G_SFP_CU,	IF_Gbps(10) },			\
+>>>>>>> origin/master
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	IF_Mbps(100) },			\
 	{ IFM_FDDI|IFM_FDDI_MMF,	IF_Mbps(100) },			\

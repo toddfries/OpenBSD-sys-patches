@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: pcppi.c,v 1.6 2006/01/02 05:21:40 brad Exp $ */
+=======
+/* $OpenBSD: pcppi.c,v 1.10 2010/08/20 02:34:15 deraadt Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: pcppi.c,v 1.1 1998/04/15 20:26:18 drochner Exp $ */
 
 /*
@@ -45,11 +49,12 @@
 #include <dev/ic/i8253reg.h>
 
 #include "pckbd.h"
-#if NPCKBD > 0
+#include "hidkbd.h"
+#if NPCKBD > 0 || NHIDKBD > 0
 #include <dev/ic/pckbcvar.h>
 #include <dev/pckbc/pckbdvar.h>
-
-void	pcppi_pckbd_bell(void *, u_int, u_int, u_int, int);
+#include <dev/usb/hidkbdvar.h>
+void	pcppi_kbd_bell(void *, u_int, u_int, u_int, int);
 #endif
 
 struct pcppi_softc {
@@ -169,13 +174,17 @@ pcppi_attach(parent, self, aux)
 
 	sc->sc_bellactive = sc->sc_bellpitch = sc->sc_slp = 0;
 
+	/* Provide a beeper for the keyboard, if there isn't one already. */
 #if NPCKBD > 0
-	/* Provide a beeper for the PC Keyboard, if there isn't one already. */
-	pckbd_hookup_bell(pcppi_pckbd_bell, sc);
+	pckbd_hookup_bell(pcppi_kbd_bell, sc);
+#endif
+#if NHIDKBD > 0
+	hidkbd_hookup_bell(pcppi_kbd_bell, sc);
 #endif
 
 	pa.pa_cookie = sc;
-	while (config_found(self, &pa, 0));
+	while (config_found(self, &pa, 0))
+		;
 }
 
 void
@@ -255,9 +264,9 @@ pcppi_bell_stop(arg)
 	splx(s);
 }
 
-#if NPCKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 void
-pcppi_pckbd_bell(arg, pitch, period, volume, poll)
+pcppi_kbd_bell(arg, pitch, period, volume, poll)
 	void *arg;
 	u_int pitch, period, volume;
 	int poll;
@@ -268,4 +277,4 @@ pcppi_pckbd_bell(arg, pitch, period, volume, poll)
 	pcppi_bell(arg, volume ? pitch : 0, (period * hz) / 1000,
 	    poll ? PCPPI_BELL_POLL : 0);
 }
-#endif /* NPCKBD > 0 */
+#endif /* NPCKBD > 0 || NHIDKBD > 0 */

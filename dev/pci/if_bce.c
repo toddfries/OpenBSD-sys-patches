@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /* $OpenBSD: if_bce.c,v 1.16 2007/04/07 22:11:05 krw Exp $ */
+=======
+/* $OpenBSD: if_bce.c,v 1.31 2010/08/27 17:08:00 jsg Exp $ */
+>>>>>>> origin/master
 /* $NetBSD: if_bce.c,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
 
 /*
@@ -164,6 +168,7 @@ do {									\
 	    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);			\
 } while (/* CONSTCOND */ 0)
 
+<<<<<<< HEAD
 static	int	bce_probe(struct device *, void *, void *);
 static	void	bce_attach(struct device *, struct device *, void *);
 static	int	bce_ioctl(struct ifnet *, u_long, caddr_t);
@@ -187,6 +192,31 @@ static	void	bce_mediastatus(struct ifnet *, struct ifmediareq *);
 static	void	bce_tick(void *);
 
 #define BCE_DEBUG
+=======
+int	bce_probe(struct device *, void *, void *);
+void	bce_attach(struct device *, struct device *, void *);
+int	bce_activate(struct device *, int);
+int	bce_ioctl(struct ifnet *, u_long, caddr_t);
+void	bce_start(struct ifnet *);
+void	bce_watchdog(struct ifnet *);
+int	bce_intr(void *);
+void	bce_rxintr(struct bce_softc *);
+void	bce_txintr(struct bce_softc *);
+int	bce_init(struct ifnet *);
+void	bce_add_mac(struct bce_softc *, u_int8_t *, unsigned long);
+int	bce_add_rxbuf(struct bce_softc *, int);
+void	bce_rxdrain(struct bce_softc *);
+void	bce_stop(struct ifnet *, int);
+void	bce_reset(struct bce_softc *);
+void	bce_set_filter(struct ifnet *);
+int	bce_mii_read(struct device *, int, int);
+void	bce_mii_write(struct device *, int, int, int);
+void	bce_statchg(struct device *);
+int	bce_mediachange(struct ifnet *);
+void	bce_mediastatus(struct ifnet *, struct ifmediareq *);
+void	bce_tick(void *);
+
+>>>>>>> origin/master
 #ifdef BCE_DEBUG
 #define DPRINTF(x)	do {		\
 	if (bcedebug)			\
@@ -203,10 +233,10 @@ int             bcedebug = 0;
 #endif
 
 struct cfattach bce_ca = {
-	sizeof(struct bce_softc), bce_probe, bce_attach
+	sizeof(struct bce_softc), bce_probe, bce_attach, NULL, bce_activate
 };
 struct cfdriver bce_cd = {
-	0, "bce", DV_IFNET
+	NULL, "bce", DV_IFNET
 };
 
 const struct pci_matchid bce_devices[] = {
@@ -374,7 +404,6 @@ bce_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = bce_ioctl;
 	ifp->if_start = bce_start;
 	ifp->if_watchdog = bce_watchdog;
-	ifp->if_init = bce_init;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
@@ -430,21 +459,38 @@ bce_attach(struct device *parent, struct device *self, void *aux)
 	timeout_set(&sc->bce_timeout, bce_tick, sc);
 }
 
+int
+bce_activate(struct device *self, int act)
+{
+	struct bce_softc *sc = (struct bce_softc *)self;
+	struct ifnet *ifp = &sc->bce_ac.ac_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			bce_stop(ifp, 1);
+		break;
+	case DVACT_RESUME:
+		if (ifp->if_flags & IFF_UP) {
+			bce_init(ifp);
+			bce_start(ifp);
+		}
+		break;
+	}
+
+	return (0);
+}
+
 /* handle media, and ethernet requests */
 static int
 bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct bce_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq   *ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	int             s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->bce_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -462,12 +508,7 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if(ifp->if_flags & IFF_UP)
 			if(ifp->if_flags & IFF_RUNNING)
@@ -478,29 +519,20 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			bce_stop(ifp, 0);
 
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->bce_ac) :
-		    ether_delmulti(ifr, &sc->bce_ac);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				bce_set_filter(ifp);
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->bce_mii.mii_media, cmd);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->bce_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			bce_set_filter(ifp);
+		error = 0;
 	}
 
 	if (error == 0) {
@@ -1010,7 +1042,7 @@ bce_init(struct ifnet *ifp)
 	    BCE_ENET_CTL) | EC_EE);
 
 	/* start timer */
-	timeout_add(&sc->bce_timeout, hz);
+	timeout_add_sec(&sc->bce_timeout, 1);
 
 	/* mark as running, and no outputs active */
 	ifp->if_flags |= IFF_RUNNING;
@@ -1494,5 +1526,5 @@ bce_tick(void *v)
 	/* Tick the MII. */
 	mii_tick(&sc->bce_mii);
 
-	timeout_add(&sc->bce_timeout, hz);
+	timeout_add_sec(&sc->bce_timeout, 1);
 }

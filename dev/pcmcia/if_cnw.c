@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_cnw.c,v 1.15 2005/01/27 17:04:55 millert Exp $	*/
+=======
+/*	$OpenBSD: if_cnw.c,v 1.21 2010/08/30 20:33:18 deraadt Exp $	*/
+>>>>>>> origin/master
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -14,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -107,7 +104,7 @@ int cnw_skey = CNW_SCRAMBLEKEY;		/* Scramble key */
 int	cnw_match(struct device *, void *, void *);
 void	cnw_attach(struct device *, struct device *, void *);
 int	cnw_detach(struct device *, int);
-int	cnw_activate(struct device *, enum devact);
+int	cnw_activate(struct device *, int);
 
 struct cnw_softc {
 	struct device sc_dev;		    /* Device glue (must be first) */
@@ -408,7 +405,7 @@ cnw_attach(parent, self, aux)
 	if (pcmcia_mem_map(sc->sc_pf, PCMCIA_MEM_COMMON, CNW_MEM_ADDR,
 			   CNW_MEM_SIZE, &sc->sc_pcmemh, &sc->sc_memoff,
 			   &sc->sc_memwin) != 0) {
-		printf(": can't map memory\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 	sc->sc_memt = sc->sc_pcmemh.memt;
@@ -784,7 +781,6 @@ cnw_ioctl(ifp, cmd, data)
 	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		if (!(ifp->if_flags & IFF_RUNNING) &&
 		    (error = cnw_enable(sc)) != 0)
@@ -816,7 +812,7 @@ cnw_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -864,13 +860,11 @@ cnw_detach(dev, flags)
 int
 cnw_activate(dev, act)
 	struct device *dev;
-	enum devact act;
+	int act;
 {
 	struct cnw_softc *sc = (struct cnw_softc *)dev;
         struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	int s;
 
-	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
 		pcmcia_function_enable(sc->sc_pf);
@@ -878,14 +872,14 @@ cnw_activate(dev, act)
 		    cnw_intr, sc, sc->sc_dev.dv_xname);
 		cnw_init(sc);
 		break;
-
 	case DVACT_DEACTIVATE:
 		ifp->if_timer = 0;
 		ifp->if_flags &= ~IFF_RUNNING; /* XXX no cnw_stop() ? */
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		if (sc->sc_ih)
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }

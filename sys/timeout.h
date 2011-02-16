@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: timeout.h,v 1.15 2002/06/25 19:41:41 mickey Exp $	*/
+=======
+/*	$OpenBSD: timeout.h,v 1.20 2010/05/26 17:50:00 deraadt Exp $	*/
+>>>>>>> origin/master
 /*
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -69,7 +73,9 @@ struct timeout {
  */
 #define TIMEOUT_ONQUEUE		2	/* timeout is on the todo queue */
 #define TIMEOUT_INITIALIZED	4	/* timeout is initialized */
-#define TIMEOUT_TRIGGERED       8       /* timeout is running or ran */
+#define TIMEOUT_TRIGGERED	8	/* timeout is running or ran */
+
+#ifdef _KERNEL
 /*
  * special macros
  *
@@ -80,9 +86,15 @@ struct timeout {
 #define timeout_initialized(to) ((to)->to_flags & TIMEOUT_INITIALIZED)
 #define timeout_triggered(to) ((to)->to_flags & TIMEOUT_TRIGGERED)
 
-#ifdef _KERNEL
 void timeout_set(struct timeout *, void (*)(void *), void *);
 void timeout_add(struct timeout *, int);
+void timeout_add_tv(struct timeout *, const struct timeval *);
+void timeout_add_ts(struct timeout *, const struct timespec *);
+void timeout_add_bt(struct timeout *, const struct bintime *);
+void timeout_add_sec(struct timeout *, int);
+void timeout_add_msec(struct timeout *, int);
+void timeout_add_usec(struct timeout *, int);
+void timeout_add_nsec(struct timeout *, int);
 void timeout_del(struct timeout *);
 
 void timeout_startup(void);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: dcreg.h,v 1.41 2005/01/02 13:39:21 brad Exp $ */
+=======
+/*	$OpenBSD: dcreg.h,v 1.48 2010/09/07 16:21:42 deraadt Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -194,6 +198,10 @@
 #define DC_RXSTATE_CLOSE	0x000A0000	/* 101 - close tx desc */
 #define DC_RXSTATE_FLUSH	0x000C0000	/* 110 - flush from FIFO */
 #define DC_RXSTATE_DEQUEUE	0x000E0000	/* 111 - dequeue from FIFO */
+
+#define DC_HAS_BROKEN_RXSTATE(x)					\
+	(DC_IS_CENTAUR(x) || DC_IS_CONEXANT(x) || (DC_IS_DAVICOM(x) &&	\
+	sc->dc_revision >= DC_REVISION_DM9102A))
 
 #define DC_TXSTATE_RESET	0x00000000	/* 000 - reset */
 #define DC_TXSTATE_FETCH	0x00100000	/* 001 - fetching descriptor */
@@ -719,10 +727,6 @@ struct dc_softc {
 	bus_space_handle_t	dc_bhandle;	/* bus space handle */
 	bus_space_tag_t		dc_btag;	/* bus space tag */
 	void			*dc_intrhand;
-	void			*sc_dhook;
-	void			*sc_pwrhook;
-	struct resource		*dc_irq;
-	struct resource		*dc_res;
 	u_int8_t		dc_type;
 	u_int8_t		dc_pmode;
 	u_int8_t		dc_link;
@@ -1047,7 +1051,12 @@ struct dc_eblock_reset {
 
 extern void dc_attach(struct dc_softc *);
 extern int dc_detach(struct dc_softc *);
+extern int dc_activate(struct device *, int);
 extern int dc_intr(void *);
+
+void dc_init(void *);
+void dc_stop(struct dc_softc *, int);
+
 extern void dc_reset(struct dc_softc *);
 extern void dc_eeprom_width(struct dc_softc *);
 extern void dc_read_srom(struct dc_softc *, int);

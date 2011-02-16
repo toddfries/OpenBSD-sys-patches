@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 /*	$OpenBSD: magma.c,v 1.14 2005/03/08 21:56:23 martin Exp $	*/
 /*
  * magma.c
  *
+=======
+/*	$OpenBSD: magma.c,v 1.23 2010/07/02 17:27:01 nicm Exp $	*/
+
+/*-
+>>>>>>> origin/master
  * Copyright (c) 1998 Iain Hibbert
  * All rights reserved.
  *
@@ -13,11 +19,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Iain Hibbert
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,9 +30,9 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
-#define MAGMA_DEBUG
  */
+
+/* #define MAGMA_DEBUG */
 
 /*
  * Driver for Magma SBus Serial/Parallel cards using the Cirrus Logic
@@ -811,7 +812,7 @@ mtty_attach(struct device *parent, struct device *dev, void *args)
 		}
 		mp->mp_channel = chan;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_oproc = mtty_start;
 		tp->t_param = mtty_param;
 
@@ -898,7 +899,7 @@ mttyopen(dev_t dev, int flags, int mode, struct proc *p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);	/* superuser can break exclusive access */
 	} else {
 		s = spltty();
@@ -921,7 +922,7 @@ mttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*
@@ -935,7 +936,7 @@ mttyclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp = mp->mp_tty;
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	/* if HUPCL is set, and the tty is no longer open
@@ -1122,14 +1123,7 @@ mtty_start(struct tty *tp)
 		/* if we are sleeping and output has drained below
 		 * low water mark, awaken
 		 */
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 
 		/* if something to send, start transmitting
 		 */

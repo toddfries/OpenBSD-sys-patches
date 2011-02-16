@@ -1,4 +1,4 @@
-/* $OpenBSD: omrasops.c,v 1.3 2006/08/06 13:04:33 miod Exp $ */
+/* $OpenBSD: omrasops.c,v 1.6 2009/09/05 14:09:35 miod Exp $ */
 /* $NetBSD: omrasops.c,v 1.1 2000/01/05 08:48:56 nisimura Exp $ */
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,12 +48,12 @@
 #include <dev/rasops/rasops.h>
 
 /* wscons emulator operations */
-void	om_cursor(void *, int, int, int);
-void	om_putchar(void *, int, int, u_int, long);
-void	om_copycols(void *, int, int, int, int);
-void	om_copyrows(void *, int, int, int num);
-void	om_erasecols(void *, int, int, int, long);
-void	om_eraserows(void *, int, int, long);
+int	om_cursor(void *, int, int, int);
+int	om_putchar(void *, int, int, u_int, long);
+int	om_copycols(void *, int, int, int, int);
+int	om_copyrows(void *, int, int, int num);
+int	om_erasecols(void *, int, int, int, long);
+int	om_eraserows(void *, int, int, long);
 
 #define	ALL1BITS	(~0U)
 #define	ALL0BITS	(0U)
@@ -74,7 +67,7 @@ void	om_eraserows(void *, int, int, long);
 /*
  * Blit a character at the specified co-ordinates.
  */
-void
+int
 om_putchar(cookie, row, startcol, uc, attr)
 	void *cookie;
 	int row, startcol;
@@ -134,9 +127,11 @@ om_putchar(cookie, row, startcol, uc, attr)
 			height--;
 		}
 	}
+
+	return 0;
 }
 
-void
+int
 om_erasecols(cookie, row, startcol, ncols, attr)
 	void *cookie;
 	int row, startcol, ncols;
@@ -186,9 +181,11 @@ om_erasecols(cookie, row, startcol, ncols, attr)
 			height--;
 		}
 	}
+
+	return 0;
 }
 
-void
+int
 om_eraserows(cookie, startrow, nrows, attr)
 	void *cookie;
 	int startrow, nrows;
@@ -223,9 +220,11 @@ om_eraserows(cookie, startrow, nrows, attr)
 		width = w;
 		height--;
 	}
+
+	return 0;
 }
 
-void
+int
 om_copyrows(cookie, srcrow, dstrow, nrows)
 	void *cookie;
 	int srcrow, dstrow, nrows;
@@ -264,9 +263,11 @@ om_copyrows(cookie, srcrow, dstrow, nrows)
 		width = w;
 		height--;
 	}
+
+	return 0;
 }
 
-void
+int
 om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	void *cookie;
 	int startrow, srccol, dstcol, ncols;
@@ -355,16 +356,18 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 			height--;
 		}
 	}
-	return;
+	return 0;
 
     hardluckalignment:
 	/* alignments painfully disagree */
+
+	return 0;
 }
 
 /*
  * Position|{enable|disable} the cursor at the specified location.
  */
-void
+int
 om_cursor(cookie, on, row, col)
 	void *cookie;
 	int on, row, col;
@@ -377,7 +380,7 @@ om_cursor(cookie, on, row, col)
 	if (!on) {
 		/* make sure it's on */
 		if ((ri->ri_flg & RI_CURSOR) == 0)
-			return;
+			return 0;
 
 		row = ri->ri_crow;
 		col = ri->ri_ccol;
@@ -421,4 +424,6 @@ om_cursor(cookie, on, row, col)
 		}
 	}
 	ri->ri_flg ^= RI_CURSOR;
+
+	return 0;
 }

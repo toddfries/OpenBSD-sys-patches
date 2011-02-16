@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: eephy.c,v 1.39 2007/01/05 21:40:45 kettenis Exp $	*/
+=======
+/*	$OpenBSD: eephy.c,v 1.50 2010/11/23 06:59:27 kevlo Exp $	*/
+>>>>>>> origin/master
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -56,21 +60,26 @@
 
 #include <dev/mii/eephyreg.h>
 
-int	eephy_service(struct mii_softc *, struct mii_data *, int);
-void	eephy_status(struct mii_softc *);
-int	eephymatch(struct device *, void *, void *);
-void	eephyattach(struct device *, struct device *, void *);
+int	eephy_match(struct device *, void *, void *);
+void	eephy_attach(struct device *, struct device *, void *);
+int	eephy_activate(struct device *, int);
 
 struct cfattach eephy_ca = {
-	sizeof (struct mii_softc), eephymatch, eephyattach,
-	mii_phy_detach, mii_phy_activate
+	sizeof (struct mii_softc), eephy_match, eephy_attach,
+	mii_phy_detach, eephy_activate
 };
 
 struct cfdriver eephy_cd = {
 	NULL, "eephy", DV_DULL
 };
 
+<<<<<<< HEAD
 int	eephy_mii_phy_auto(struct mii_softc *);
+=======
+void	eephy_init(struct mii_softc *);
+int	eephy_service(struct mii_softc *, struct mii_data *, int);
+void	eephy_status(struct mii_softc *);
+>>>>>>> origin/master
 void	eephy_reset(struct mii_softc *);
 
 const struct mii_phy_funcs eephy_funcs = {
@@ -96,12 +105,18 @@ static const struct mii_phydesc eephys[] = {
 	  MII_STR_MARVELL_E1112 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116,
 	  MII_STR_MARVELL_E1116 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116R,
+	  MII_STR_MARVELL_E1116R },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1118,
 	  MII_STR_MARVELL_E1118 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1149,
 	  MII_STR_MARVELL_E1149 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E3016,
+	  MII_STR_MARVELL_E3016},
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E3082,
 	  MII_STR_MARVELL_E3082 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_PHYG65G,
+	  MII_STR_MARVELL_PHYG65G },
 	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_5,
 	  MII_STR_xxMARVELL_E1000_5 },
 	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_6,
@@ -116,7 +131,7 @@ static const struct mii_phydesc eephys[] = {
 };
 
 int
-eephymatch(struct device *parent, void *match, void *aux)
+eephy_match(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -127,7 +142,7 @@ eephymatch(struct device *parent, void *match, void *aux)
 }
 
 void
-eephyattach(struct device *parent, struct device *self, void *aux)
+eephy_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
@@ -148,6 +163,32 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	/* XXX No loopback support yet, although the hardware can do it. */
 	sc->mii_flags |= MIIF_NOLOOP;
 
+<<<<<<< HEAD
+=======
+	/* Make sure page 0 is selected. */
+        PHY_WRITE(sc, E1000_EADR, 0);
+
+	/* Switch to copper-only mode if necessary. */
+	if (sc->mii_model == MII_MODEL_MARVELL_E1111 &&
+	    (sc->mii_flags & MIIF_HAVEFIBER) == 0) {
+		/*
+		 * The onboard 88E1111 PHYs on the Sun X4100 M2 come
+		 * up with fiber/copper auto-selection enabled, even
+		 * though the machine only has copper ports.  This
+		 * makes the chip autoselect to 1000baseX, and makes
+		 * it impossible to select any other media.  So
+		 * disable fiber/copper autoselection.
+		 */
+		reg = PHY_READ(sc, E1000_ESSR);
+		if ((reg & E1000_ESSR_HWCFG_MODE) == E1000_ESSR_RGMII_COPPER) {
+			reg |= E1000_ESSR_DIS_FC;
+			PHY_WRITE(sc, E1000_ESSR, reg);
+
+			PHY_RESET(sc);
+		}
+	}
+
+>>>>>>> origin/master
 	/* Switch to fiber-only mode if necessary. */
 	if (sc->mii_model == MII_MODEL_MARVELL_E1112 &&
 	    sc->mii_flags & MIIF_HAVEFIBER) {
@@ -168,6 +209,30 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	mii_phy_add_media(sc);
 
+	eephy_init(sc);
+}
+
+int
+eephy_activate(struct device *self, int act)
+{
+	struct mii_softc *sc = (void *)self;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		eephy_init(sc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+eephy_init(struct mii_softc *sc)
+{
+	int reg;
+
 	/*
 	 * Initialize PHY Specific Control Register.
 	 */
@@ -179,6 +244,7 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	/* Enable auto crossover. */
 	switch (sc->mii_model) {
+	case MII_MODEL_MARVELL_E3016:
 	case MII_MODEL_MARVELL_E3082:
 		/* Bits are in a different position.  */
 		reg |= (E1000_SCR_AUTO_X_MODE >> 1);
@@ -193,13 +259,27 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable energy detect; only available on some models. */
 	switch(sc->mii_model) {
+	case MII_MODEL_MARVELL_E3016:
+		reg &= ~E3000_SCR_EN_DETECT_MASK;
+		break;
 	case MII_MODEL_MARVELL_E1011:
 	case MII_MODEL_MARVELL_E1111:
 	case MII_MODEL_MARVELL_E1112:
-		/* Disable energy detect. */
+	case MII_MODEL_MARVELL_PHYG65G:
 		reg &= ~E1000_SCR_EN_DETECT_MASK;
 		break;
 	}
+
+	/* Enable scrambler if necessary. */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016)
+		reg &= ~E3000_SCR_SCRAMBLER_DISABLE;
+
+	/*
+	 * Store next page in the Link Partner Next Page register for
+	 * compatibility with 802.3ab.
+	 */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016)
+		reg |= E3000_SCR_REG8_NEXT_PAGE;
 
 	PHY_WRITE(sc, E1000_SCR, reg);
 
@@ -207,6 +287,13 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	reg = PHY_READ(sc, E1000_ESCR);
 	reg |= E1000_ESCR_TX_CLK_25;
 	PHY_WRITE(sc, E1000_ESCR, reg);
+
+	/* Configure LEDs if they were left unconfigured. */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016 &&
+	    PHY_READ(sc, 0x16) == 0) {
+		reg = (0x0b << 8) | (0x05 << 4) | 0x04;	/* XXX */
+		PHY_WRITE(sc, 0x16, reg);
+	}
 
 	/*
 	 * Do a software reset for these settings to take effect.

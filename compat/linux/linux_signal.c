@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: linux_signal.c,v 1.11 2001/08/09 14:15:22 niklas Exp $	*/
+=======
+/*	$OpenBSD: linux_signal.c,v 1.14 2009/12/09 16:29:56 jsg Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: linux_signal.c,v 1.10 1996/04/04 23:51:36 christos Exp $	*/
 
 /*
@@ -98,6 +102,7 @@ int bsd_to_linux_sig[NSIG] = {
 	0,			/* SIGINFO */
 	LINUX_SIGUSR1,
 	LINUX_SIGUSR2,
+	0,			/* SIGTHR */
 };
 
 int linux_to_bsd_sig[LINUX__NSIG] = {

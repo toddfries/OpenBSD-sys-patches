@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ukphy_subr.c,v 1.6 2006/12/23 12:34:50 kettenis Exp $	*/
+=======
+/*	$OpenBSD: ukphy_subr.c,v 1.10 2008/10/24 16:50:01 brad Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: ukphy_subr.c,v 1.2 1998/11/05 04:08:02 thorpej Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -108,10 +105,10 @@ ukphy_status(struct mii_softc *phy)
 		else if ((gtcr & GTCR_ADV_1000THDX) &&
 			 (gtsr & GTSR_LP_1000THDX))
 			mii->mii_media_active |= IFM_1000_T|IFM_HDX;
-		else if (anlpar & ANLPAR_T4)
-			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX_FD)
 			mii->mii_media_active |= IFM_100_TX|IFM_FDX;
+		else if (anlpar & ANLPAR_T4)
+			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX)
 			mii->mii_media_active |= IFM_100_TX|IFM_HDX;
 		else if (anlpar & ANLPAR_10_FD)
@@ -120,6 +117,9 @@ ukphy_status(struct mii_softc *phy)
 			mii->mii_media_active |= IFM_10_T|IFM_HDX;
 		else
 			mii->mii_media_active |= IFM_NONE;
+
+		if (mii->mii_media_active & IFM_FDX)
+			mii->mii_media_active |= mii_phy_flowstatus(phy);
 
 		if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
 		    (gtsr & GTSR_MS_RES))

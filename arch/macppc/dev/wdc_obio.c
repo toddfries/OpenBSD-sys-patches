@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc_obio.c,v 1.25 2006/02/10 21:45:41 kettenis Exp $	*/
+/*	$OpenBSD: wdc_obio.c,v 1.28 2010/08/29 23:06:53 deraadt Exp $	*/
 /*	$NetBSD: wdc_obio.c,v 1.15 2001/07/25 20:26:33 bouyer Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -99,7 +92,7 @@ int	wdc_obio_detach(struct device *, int);
 
 struct cfattach wdc_obio_ca = {
 	sizeof(struct wdc_obio_softc), wdc_obio_probe, wdc_obio_attach,
-	    wdc_obio_detach, wdcactivate
+	    wdc_obio_detach, config_activate_children
 };
 
 int	wdc_obio_dma_init(void *, int, int, void *, size_t, int);

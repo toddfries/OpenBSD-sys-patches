@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: stdarg.h,v 1.5 2006/01/06 18:53:05 millert Exp $	*/
+=======
+/*	$OpenBSD: stdarg.h,v 1.8 2010/12/30 05:01:36 tedu Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: stdarg.h,v 1.11 2000/07/23 21:36:56 mycroft Exp $ */
 
 /*
@@ -57,15 +61,11 @@ typedef __va_list	va_list;
 
 #ifdef lint
 #define	va_start(ap,lastarg)	((ap) = (ap))
+#define	__va_copy(dst, src)	((dst) = (src))
 #else
 #define	va_start(ap, last) \
 	(__builtin_next_arg(last), (ap) = (va_list)__builtin_saveregs())
 #endif /* lint */
-
-#if __BSD_VISIBLE
-#define	va_copy(dest, src) \
-	((dest) = (src))
-#endif
 
 #define va_end(ap)	
 

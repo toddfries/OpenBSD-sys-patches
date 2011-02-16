@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: param.h,v 1.68 2006/07/26 20:34:11 deraadt Exp $	*/
+=======
+/*	$OpenBSD: param.h,v 1.89 2011/01/14 00:04:16 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +45,13 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
+<<<<<<< HEAD
 #define OpenBSD	200705		/* OpenBSD version (year & month). */
 #define OpenBSD4_1 1		/* OpenBSD 4.1 */
+=======
+#define OpenBSD	201105		/* OpenBSD version (year & month). */
+#define OpenBSD4_9 1		/* OpenBSD 4.9 */
+>>>>>>> origin/master
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -54,7 +63,6 @@
 
 #ifndef _LOCORE
 #include <sys/types.h>
-#include <sys/simplelock.h>
 #endif
 
 /*
@@ -67,7 +75,7 @@
 #include <sys/syslimits.h>
 
 #define	MAXCOMLEN	16		/* max command name remembered */
-#define	MAXINTERP	64		/* max interpreter file name length */
+#define	MAXINTERP	128		/* max interpreter file name length */
 #define	MAXLOGNAME	LOGIN_NAME_MAX	/* max login name length w/ NUL */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
@@ -116,8 +124,6 @@
 #define PNORELOCK	0x200	/* OR'd with pri for ltsleep to not relock
 				   the interlock */
 
-#define	NBPW	sizeof(int)	/* number of bytes per word (integer) */
-
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
 #define NETDEV	(dev_t)(-2)	/* network device (for nfs swap) */
@@ -129,6 +135,22 @@
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
+<<<<<<< HEAD
+=======
+ * Constants related to network buffer management.
+ * MCLBYTES must be no larger than NBPG (the software page size), and,
+ * on machines that exchange pages of input or output buffers with mbuf
+ * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
+ * of the hardware page size.
+ */
+#define	MSIZE		256		/* size of an mbuf */
+#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
+					/* 2K cluster can hold Ether frame */
+#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
+#define	MCLOFSET	(MCLBYTES - 1)
+
+/*
+>>>>>>> origin/master
  * File system parameters and macros.
  *
  * The file system is made out of blocks of at most MAXBSIZE units, with
@@ -182,6 +204,8 @@
 #if !defined(offsetof) && defined(_KERNEL)
 #define offsetof(s, e) ((size_t)&((s *)0)->e)
 #endif
+
+#define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0]))
 
 /*
  * Constants for setting the parameters of the kernel memory allocator.

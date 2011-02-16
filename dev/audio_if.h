@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: audio_if.h,v 1.24 2004/02/24 20:42:40 deraadt Exp $	*/
+=======
+/*	$OpenBSD: audio_if.h,v 1.27 2010/07/15 03:43:11 jakemsr Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: audio_if.h,v 1.24 1998/01/10 14:07:25 tv Exp $	*/
 
 /*
@@ -38,6 +42,8 @@
 #ifndef _SYS_DEV_AUDIO_IF_H_
 #define _SYS_DEV_AUDIO_IF_H_
 
+#define AUDIO_BPS(bits)		(bits) <= 8 ? 1 : ((bits) <= 16 ? 2 : 4)
+
 /*
  * Generic interface to hardware driver.
  */
@@ -52,6 +58,8 @@ struct audio_params {
 	u_long	sample_rate;			/* sample rate */
 	u_int	encoding;			/* mu-law, linear, etc */
 	u_int	precision;			/* bits/sample */
+	u_int	bps;				/* bytes/sample */
+	u_int	msb;				/* data alignment */
 	u_int	channels;			/* mono(1), stereo(2) */
 	/* Software en/decode functions, set if SW coding required by HW */
 	void	(*sw_code)(void *, u_char *, int);

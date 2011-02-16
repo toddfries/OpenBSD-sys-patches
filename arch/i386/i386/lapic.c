@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.14 2007/03/19 09:29:33 art Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.31 2010/09/20 06:33:47 matthew Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -18,13 +18,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/timetc.h>
@@ -66,7 +58,9 @@
 #include <i386/isa/timerreg.h>	/* XXX for TIMER_FREQ */
 
 struct evcount clk_count;
+#ifdef MULTIPROCESSOR
 struct evcount ipi_count;
+#endif
 
 void	lapic_delay(int);
 void	lapic_microtime(struct timeval *);
@@ -100,7 +94,7 @@ lapic_map(lapic_base)
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
-	cpu_init_first();	/* catch up to changed cpu_number() */
+	cpu_init_first();
 #endif
 
 	lapic_tpr = s;
@@ -140,6 +134,31 @@ lapic_set_lvt()
 		    i82489_readreg(LAPIC_LVINT1));
 	}
 #endif
+
+	if (strcmp(cpu_vendor, "AuthenticAMD") == 0) {
+		/*
+		 * Detect the presence of C1E capability mostly on latest
+		 * dual-cores (or future) k8 family. This mis-feature renders
+		 * the local APIC timer dead, so we disable it by reading
+		 * the Interrupt Pending Message register and clearing both
+		 * C1eOnCmpHalt (bit 28) and SmiOnCmpHalt (bit 27).
+		 * 
+		 * Reference:
+		 *   "BIOS and Kernel Developer's Guide for AMD NPT
+		 *    Family 0Fh Processors"
+		 *   #32559 revision 3.00
+		 */
+		if ((cpu_id & 0x00000f00) == 0x00000f00 &&
+		    (cpu_id & 0x0fff0000) >= 0x00040000) {
+			uint64_t msr;
+
+			msr = rdmsr(MSR_INT_PEN_MSG);
+			if (msr & (IPM_C1E_CMP_HLT|IPM_SMI_CMP_HLT)) {
+				msr &= ~(IPM_C1E_CMP_HLT|IPM_SMI_CMP_HLT);
+				wrmsr(MSR_INT_PEN_MSG, msr);
+			}
+		}
+	}
 
 	for (i = 0; i < mp_nintrs; i++) {
 		mpi = &mp_intrs[i];
@@ -181,19 +200,26 @@ lapic_boot_init(paddr_t lapic_base)
 {
 	extern void Xintripi_ast(void);
 	static int clk_irq = 0;
+#ifdef MULTIPROCESSOR
 	static int ipi_irq = 0;
+#endif
 
 	lapic_map(lapic_base);
 
 #ifdef MULTIPROCESSOR
 	idt_vec_set(LAPIC_IPI_VECTOR, Xintripi);
-	idt_vec_set(LAPIC_IPI_AST, Xintripi_ast);
+	idt_vec_set(LAPIC_IPI_INVLTLB, Xintripi_invltlb);
+	idt_vec_set(LAPIC_IPI_INVLPG, Xintripi_invlpg);
+	idt_vec_set(LAPIC_IPI_INVLRANGE, Xintripi_invlrange);
+	idt_vec_set(LAPIC_IPI_RELOADCR3, Xintripi_reloadcr3);
 #endif
 	idt_vec_set(LAPIC_SPURIOUS_VECTOR, Xintrspurious);
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintrltimer);
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-	evcount_attach(&ipi_count, "ipi", (void *)&ipi_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+#ifdef MULTIPROCESSOR
+	evcount_attach(&ipi_count, "ipi", &ipi_irq);
+#endif
 }
 
 static __inline u_int32_t
@@ -232,7 +258,7 @@ lapic_clockintr(arg)
 }
 
 void
-lapic_initclocks()
+lapic_startclock(void)
 {
 	/*
 	 * Start local apic countdown timer running, in repeated mode.
@@ -247,8 +273,15 @@ lapic_initclocks()
 	i82489_writereg(LAPIC_LVTT, LAPIC_LVTT_TM|LAPIC_TIMER_VECTOR);
 }
 
+void
+lapic_initclocks(void)
+{
+	lapic_startclock();
+
+	i8254_inittimecounter_simple();
+}
+
 extern int gettick(void);	/* XXX put in header file */
-extern void (*initclock_func)(void); /* XXX put in header file */
 
 /*
  * Calibrate the local apic count-down timer (which is running at
@@ -464,6 +497,7 @@ lapic_microtime(tv)
  * XXX the following belong mostly or partly elsewhere..
  */
 
+#ifdef MULTIPROCESSOR
 int
 i386_ipi_init(target)
 	int target;
@@ -500,7 +534,11 @@ int
 i386_ipi(vec,target,dl)
 	int vec,target,dl;
 {
-	unsigned j;
+	int result, s;
+
+	s = splhigh();
+
+	i82489_icr_wait();
 
 	if ((target & LAPIC_DEST_MASK) == 0)
 		i82489_writereg(LAPIC_ICRHI, target << LAPIC_ID_SHIFT);
@@ -515,3 +553,4 @@ i386_ipi(vec,target,dl)
 
 	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
 }
+#endif /* MULTIPROCESSOR */

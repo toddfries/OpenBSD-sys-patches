@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.5 2006/05/26 17:11:41 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.16 2011/01/04 21:11:41 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.76 2003/09/06 09:10:46 rearnsha Exp $	*/
 
 /*
@@ -177,7 +177,6 @@ struct pmap {
 	simple_lock_data_t	pm_lock;
 	struct l2_dtable	*pm_l2[L2_SIZE];
 	struct pmap_statistics	pm_stats;
-	LIST_ENTRY(pmap)	pm_list;
 };
 
 typedef struct pmap *pmap_t;
@@ -243,10 +242,9 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 
 #define	pmap_copy(dp, sp, da, l, sa)	/* nothing */
 
-#define pmap_phys_address(ppn)		(ptoa(ppn))
-
-#define pmap_proc_iflush(p, va, len)	/* nothing */
-#define pmap_unuse_final(p)		/* nothing */
+#define pmap_proc_iflush(p, va, len)	do { /* nothing */ } while (0)
+#define pmap_unuse_final(p)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 /*
  * Functions that we need to export
@@ -254,6 +252,7 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 void	pmap_procwr(struct proc *, vaddr_t, int);
 void	pmap_remove_all(pmap_t);
 boolean_t pmap_extract(pmap_t, vaddr_t, paddr_t *);
+void	pmap_uncache_page(paddr_t, vaddr_t);
 
 #define	PMAP_NEED_PROCWR
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
@@ -270,6 +269,9 @@ void	pmap_debug(int);
 void	pmap_postinit(void);
 
 void	vector_page_setprot(int);
+
+/* XXX */
+void pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cacheable);
 
 const struct pmap_devmap *pmap_devmap_find_pa(paddr_t, psize_t);
 const struct pmap_devmap *pmap_devmap_find_va(vaddr_t, vsize_t);
@@ -412,11 +414,24 @@ void	pmap_pte_init_arm9(void);
 #if defined(CPU_ARM10)
 void	pmap_pte_init_arm10(void);
 #endif /* CPU_ARM10 */
+#if defined(CPU_ARM11)
+void	pmap_pte_init_arm11(void);
+#endif /* CPU_ARM11 */
+#if defined(CPU_ARMv7)
+void	pmap_pte_init_armv7(void);
+#endif /* CPU_ARMv7 */
 #endif /* (ARM_MMU_GENERIC + ARM_MMU_SA1) != 0 */
 
 #if ARM_MMU_SA1 == 1
 void	pmap_pte_init_sa1(void);
 #endif /* ARM_MMU_SA1 == 1 */
+
+#if ARM_MMU_V7 == 1
+void	pmap_copy_page_v7(struct vm_page *, struct vm_page *);
+void	pmap_zero_page_v7(struct vm_page *);
+
+void	pmap_pte_init_v7(void);
+#endif /* ARM_MMU_V7 == 1 */
 
 #if ARM_MMU_XSCALE == 1
 void	pmap_copy_page_xscale(struct vm_page *, struct vm_page *);
@@ -481,6 +496,7 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 
 #define	L1_S_CACHE_MASK_generic	(L1_S_B|L1_S_C)
 #define	L1_S_CACHE_MASK_xscale	(L1_S_B|L1_S_C|L1_S_XSCALE_TEX(TEX_XSCALE_X))
+#define	L1_S_CACHE_MASK_v7	(L1_S_B|L1_S_C|L1_S_V7_TEX(TEX_V7_X))
 
 #define	L2_L_PROT_U		(L2_AP(AP_U))
 #define	L2_L_PROT_W		(L2_AP(AP_W))
@@ -488,6 +504,7 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 
 #define	L2_L_CACHE_MASK_generic	(L2_B|L2_C)
 #define	L2_L_CACHE_MASK_xscale	(L2_B|L2_C|L2_XSCALE_L_TEX(TEX_XSCALE_X))
+#define	L2_L_CACHE_MASK_v7	(L2_B|L2_C|L2_V7_L_TEX(TEX_V7_X))
 
 #define	L2_S_PROT_U_generic	(L2_AP(AP_U))
 #define	L2_S_PROT_W_generic	(L2_AP(AP_W))
@@ -497,19 +514,27 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #define	L2_S_PROT_W_xscale	(L2_AP0(AP_W))
 #define	L2_S_PROT_MASK_xscale	(L2_S_PROT_U|L2_S_PROT_W)
 
+#define	L2_S_PROT_U_v7		(L2_AP0(AP_U))
+#define	L2_S_PROT_W_v7		(L2_AP0(AP_W))
+#define	L2_S_PROT_MASK_v7	(L2_S_PROT_U|L2_S_PROT_W)
+
 #define	L2_S_CACHE_MASK_generic	(L2_B|L2_C)
 #define	L2_S_CACHE_MASK_xscale	(L2_B|L2_C|L2_XSCALE_T_TEX(TEX_XSCALE_X))
+#define	L2_S_CACHE_MASK_v7	(L2_B|L2_C)
 
 #define	L1_S_PROTO_generic	(L1_TYPE_S | L1_S_IMP)
 #define	L1_S_PROTO_xscale	(L1_TYPE_S)
+#define	L1_S_PROTO_v7		(L1_TYPE_S)
 
 #define	L1_C_PROTO_generic	(L1_TYPE_C | L1_C_IMP2)
 #define	L1_C_PROTO_xscale	(L1_TYPE_C)
+#define	L1_C_PROTO_v7		(L1_TYPE_C)
 
 #define	L2_L_PROTO		(L2_TYPE_L)
 
 #define	L2_S_PROTO_generic	(L2_TYPE_S)
 #define	L2_S_PROTO_xscale	(L2_TYPE_XSCALE_XS)
+#define	L2_S_PROTO_v7		(L2_TYPE_S)
 
 /*
  * User-visible names for the ones that vary with MMU class.
@@ -561,6 +586,21 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 
 #define	pmap_copy_page(s, d)	pmap_copy_page_xscale((s), (d))
 #define	pmap_zero_page(d)	pmap_zero_page_xscale((d))
+#elif ARM_MMU_V7 == 1
+#define	L2_S_PROT_U		L2_S_PROT_U_v7
+#define	L2_S_PROT_W		L2_S_PROT_W_v7
+#define	L2_S_PROT_MASK		L2_S_PROT_MASK_v7
+
+#define	L1_S_CACHE_MASK		L1_S_CACHE_MASK_v7
+#define	L2_L_CACHE_MASK		L2_L_CACHE_MASK_v7
+#define	L2_S_CACHE_MASK		L2_S_CACHE_MASK_v7
+
+#define	L1_S_PROTO		L1_S_PROTO_v7
+#define	L1_C_PROTO		L1_C_PROTO_v7
+#define	L2_S_PROTO		L2_S_PROTO_v7
+
+#define	pmap_copy_page(s, d)	pmap_copy_page_v7((s), (d))
+#define	pmap_zero_page(d)	pmap_zero_page_v7((d))
 #endif /* ARM_NMMUS > 1 */
 
 /*
@@ -586,10 +626,14 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #define	L2_L_MAPPABLE_P(va, pa, size)					\
 	((((va) | (pa)) & L2_L_OFFSET) == 0 && (size) >= L2_L_SIZE)
 
-/*
- * Hooks for the pool allocator.
- */
-#define	POOL_VTOPHYS(va)	vtophys((vaddr_t) (va))
+#ifndef _LOCORE
+/* pmap_prefer bits for VIPT ARMv7 */
+#define PMAP_PREFER(fo, ap)	pmap_prefer((fo), (ap))
+vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
+
+extern uint32_t pmap_alias_dist;
+extern uint32_t pmap_alias_bits;
+#endif /* _LOCORE */
 
 #endif /* _KERNEL */
 

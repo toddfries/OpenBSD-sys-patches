@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bm.c,v 1.20 2005/10/09 19:22:23 brad Exp $	*/
+/*	$OpenBSD: if_bm.c,v 1.27 2009/08/25 20:39:36 miod Exp $	*/
 /*	$NetBSD: if_bm.c,v 1.1 1999/01/01 01:27:52 tsubai Exp $	*/
 
 /*-
@@ -431,11 +431,11 @@ bmac_init(struct bmac_softc *sc)
 	bzero(data, sizeof(*eh) + ETHERMIN);
 	bcopy(sc->arpcom.ac_enaddr, eh->ether_dhost, ETHER_ADDR_LEN);
 	bcopy(sc->arpcom.ac_enaddr, eh->ether_shost, ETHER_ADDR_LEN);
-	bmac_transmit_packet(sc, sc->sc_txbuf_pa, sizeof(eh) + ETHERMIN);
+	bmac_transmit_packet(sc, sc->sc_txbuf_pa, sizeof(*eh) + ETHERMIN);
 
 	bmac_start(ifp);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
 
 void
@@ -753,7 +753,6 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -802,32 +801,21 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING) {
-				bmac_init(sc);
-				bmac_setladrf(sc);
-			}
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			bmac_init(sc);
+			bmac_setladrf(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
@@ -983,5 +971,5 @@ bmac_mii_tick(void *v)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }

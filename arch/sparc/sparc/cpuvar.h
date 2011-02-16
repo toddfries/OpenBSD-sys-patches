@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: cpuvar.h,v 1.8 2002/03/14 01:26:44 millert Exp $	*/
+=======
+/*	$OpenBSD: cpuvar.h,v 1.19 2010/09/28 20:27:55 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: cpuvar.h,v 1.4 1997/07/06 21:14:25 pk Exp $ */
 
 /*
@@ -16,13 +20,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. All advertising materials mentioning features or use of this software
- *     must display the following acknowledgement:
- *         This product includes software developed by the NetBSD
- *         Foundation, Inc. and its contributors.
- *  4. Neither the name of The NetBSD Foundation nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
  *
  *  THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  *  ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -77,6 +74,34 @@ struct module_info {
 };
 
 
+<<<<<<< HEAD
+=======
+struct cpu_softc;
+struct cpu_info {
+	struct cpu_softc *ci_softc;
+
+	struct proc *ci_curproc;
+	struct cpu_info *ci_next;
+
+	struct schedstate_percpu ci_schedstate;
+	u_int32_t 		ci_randseed;
+
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
+};
+
+#define curcpu() (&cpuinfo.ci)
+#define cpu_number() (cpuinfo.mid)
+#define CPU_IS_PRIMARY(ci)	((ci)->ci_softc->master)
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = ci->ci_next)
+#define CPU_INFO_UNIT(ci) ((ci)->ci_softc ? (ci)->ci_softc->dv.dv_unit : 0)
+#define MAXCPUS	1
+#define cpu_unidle(ci)
+
+>>>>>>> origin/master
 /*
  * The cpu_softc structure. This structure maintains information about one
  * currently installed CPU (there may be several of these if the machine
@@ -205,50 +230,19 @@ struct cpu_softc {
 };
 
 /*
- * CPU architectures
- */
-#define CPUARCH_UNKNOWN		0
-#define CPUARCH_SUN4		1
-#define CPUARCH_SUN4C		2
-#define CPUARCH_SUN4M		3
-#define	CPUARCH_SUN4D		4
-#define CPUARCH_SUN4U		5
-
-/*
- * CPU classes
- */
-#define CPUCLS_UNKNOWN		0
-
-#if defined(SUN4)
-#define CPUCLS_SUN4		1
-#endif
-
-#if defined(SUN4C)
-#define CPUCLS_SUN4C		5
-#endif
-
-#if defined(SUN4M)
-#define CPUCLS_MICROSPARC	10	/* MicroSPARC-II */
-#define CPUCLS_SUPERSPARC	11	/* Generic SuperSPARC */
-#define CPUCLS_HYPERSPARC	12	/* Ross HyperSPARC RT620 */
-#endif
-
-/*
- * CPU types. Each of these should uniquely identify one platform/type of
- * system, i.e. "MBus-based 75 MHz SuperSPARC-II with ECache" is
- * CPUTYP_SS2_MBUS_MXCC. The general form is
+ * CPU types. When nonzero, these enable system-specific behaviour.
+ * The general form is
  * 	CPUTYP_proctype_bustype_cachetype_etc_etc
- *
- * XXX: This is far from complete/comprehensive
- * XXX: ADD SUN4, SUN4C TYPES
  */
 #define CPUTYP_UNKNOWN		0
 
+/* sun4 models */
 #define CPUTYP_4_100		1 	/* Sun4/100 */
 #define CPUTYP_4_200		2	/* Sun4/200 */
 #define CPUTYP_4_300		3	/* Sun4/300 */
 #define CPUTYP_4_400		4	/* Sun4/400 */
 
+<<<<<<< HEAD
 #define CPUTYP_SLC		10	/* SPARCstation SLC */
 #define CPUTYP_ELC		11	/* SPARCstation ELC */
 #define CPUTYP_IPX		12	/* SPARCstation IPX */
@@ -261,6 +255,10 @@ struct cpu_softc {
 #define	CPUTYP_SS2_MBUS_MXCC	20 	/* SuperSPARC-II, Mbus, MXCC (SS20) */
 #define CPUTYP_SS1_MBUS_MXCC	21	/* SuperSPARC-I, Mbus, MXCC (SS10) */
 #define CPUTYP_SS2_MBUS_NOMXCC	22	/* SuperSPARC-II, on MBus w/o MXCC */
+=======
+/* rough sun4m families; not really used */
+#define CPUTYP_SS1_MBUS_MXCC	21	/* SuperSPARC-I, MBus, MXCC (SS10) */
+>>>>>>> origin/master
 #define CPUTYP_SS1_MBUS_NOMXCC	23	/* SuperSPARC-I, on MBus w/o MXCC */
 #define CPUTYP_MS2		24	/* MicroSPARC-2 */
 #define CPUTYP_MS1		25 	/* MicroSPARC-1 */

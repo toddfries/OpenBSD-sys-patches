@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.h,v 1.1 2002/07/23 17:53:24 drahn Exp $ */
+/*	$OpenBSD: rbus_machdep.h,v 1.5 2010/01/13 09:10:33 jsg Exp $ */
 /*	$NetBSD: rbus_machdep.h,v 1.2 1999/10/15 06:43:05 haya Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -40,18 +35,18 @@ struct pci_attach_args;		/* XXX */
 void _bus_space_unmap(bus_space_tag_t, bus_space_handle_t,
 			     bus_size_t, bus_addr_t *);
 
-#define md_space_map(bt, physaddr, size, flags, bshp) \
-	bus_space_map((bt), (physaddr), (size), (flags), (bshp))
+#define md_space_map(rbt, physaddr, size, flags, bshp) \
+	bus_space_map((rbt)->rb_bt, (physaddr), (size), (flags), (bshp))
 
 /* XXX */
 bus_addr_t bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh,
                           bus_size_t size);
 
 
-#define md_space_unmap(bt, bsh, size, adrp) \
+#define md_space_unmap(rbt, bsh, size, adrp) \
 	do { \
-		*adrp = bus_space_unmap_p((bt), (bsh), (size)); \
-		if (bt->bus_io) { \
+		*adrp = bus_space_unmap_p((rbt)->rb_bt, (bsh), (size)); \
+		if ((rbt)->rb_bt->bus_io) { \
 			*adrp = *adrp & 0xffff; \
 		} \
 	} while (0)

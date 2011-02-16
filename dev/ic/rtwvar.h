@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: rtwvar.h,v 1.21 2006/01/05 05:36:06 jsg Exp $	*/
+=======
+/*	$OpenBSD: rtwvar.h,v 1.30 2010/09/07 16:21:43 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-
@@ -173,9 +177,6 @@ struct rtw_txsoft {
 
 #define RTW_MAXPKTSEGS		64	/* max 64 segments per Tx packet */
 
-#define CASSERT(cond, complaint)					\
-	complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
-
 /* Note well: the descriptor rings must begin on RTW_DESC_ALIGNMENT
  * boundaries.  I allocate them consecutively from one buffer, so
  * just round up.
@@ -283,17 +284,12 @@ struct rtw_tx_radiotap_header {
 	u_int16_t				rt_chan_flags;
 } __packed;
 
-struct rtw_hooks {
-	void			*rh_shutdown;	/* shutdown hook */
-	void			*rh_power;	/* power management hook */
-};
-
 struct rtw_mtbl {
 	int			(*mt_newstate)(struct ieee80211com *,
 					enum ieee80211_state, int);
 	void			(*mt_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
-				    int, int, u_int32_t);
+				    struct ieee80211_rxinfo *, int);
 	struct ieee80211_node	*(*mt_node_alloc)(struct ieee80211com *);
 	void			(*mt_node_free)(struct ieee80211com *,
 					struct ieee80211_node *);
@@ -331,8 +327,8 @@ union rtw_keys {
 	u_int32_t	rk_words[16];
 };
 
-#define	RTW_LED_SLOW_TICKS	MAX(1, hz/2)
-#define	RTW_LED_FAST_TICKS	MAX(1, hz/10)
+#define	RTW_LED_SLOW_MSEC	500
+#define	RTW_LED_FAST_MSEC	100
 
 struct rtw_led_state {
 #define	RTW_LED0	0x1
@@ -396,7 +392,6 @@ struct rtw_softc {
 	void			(*sc_disable)(struct rtw_softc *);
 	void			(*sc_power)(struct rtw_softc *, int);
 	struct rtw_mtbl		sc_mtbl;
-	struct rtw_hooks	sc_hooks;
 
 	caddr_t			sc_radiobpf;
 
@@ -449,8 +444,7 @@ int rtw_intr(void *);
 void rtw_disable(struct rtw_softc *);
 int rtw_enable(struct rtw_softc *);
 
-int rtw_activate(struct device *, enum devact);
-void rtw_power(int, void *);
+int rtw_activate(struct device *, int);
 void rtw_shutdown(void *);
 
 const char *rtw_pwrstate_string(enum rtw_pwrstate);

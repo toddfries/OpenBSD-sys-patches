@@ -1,7 +1,13 @@
+<<<<<<< HEAD
 /*	$OpenBSD: atascsi.h,v 1.24 2007/04/10 07:57:21 jsg Exp $ */
+=======
+/*	$OpenBSD: atascsi.h,v 1.45 2011/01/26 21:41:00 drahn Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
+ * Copyright (c) 2010 Conformal Systems LLC <info@conformal.com>
+ * Copyright (c) 2010 Jonathan Matthew <jonathan@d14n.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,6 +23,7 @@
  */
 
 struct atascsi;
+struct scsi_link;
 
 /*
  * ATA commands
@@ -28,12 +35,17 @@ struct atascsi;
 #define ATA_C_READ_FPDMA	0x60
 #define ATA_C_WRITE_FPDMA	0x61
 #define ATA_C_PACKET		0xa0
+#define ATA_C_IDENTIFY_PACKET	0xa1
 #define ATA_C_READDMA		0xc8
 #define ATA_C_WRITEDMA		0xca
+#define ATA_C_STANDBY_IMMED	0xe0
+#define ATA_C_READ_PM		0xe4
+#define ATA_C_WRITE_PM		0xe8
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
 #define ATA_C_SEC_FREEZE_LOCK	0xf5
+#define ATA_C_DSM		0x06
 
 struct ata_identify {
 	u_int16_t	config;		/*   0 */
@@ -70,11 +82,18 @@ struct ata_identify {
 	u_int16_t	recmwdma;	/*  66 */
 	u_int16_t	minpio;		/*  67 */
 	u_int16_t	minpioflow;	/*  68 */
-	u_int16_t	reserved4[2];	/*  69 */
+	u_int16_t	add_support;	/*  69 */
+#define ATA_ID_ADD_SUPPORT_DRT	0x4000
+	u_int16_t	reserved4;	/*  70 */
 	u_int16_t	typtime[2];	/*  71 */
 	u_int16_t	reserved5[2];	/*  73 */
 	u_int16_t	qdepth;		/*  75 */
+#define ATA_QDEPTH(_q)		(((_q) & 0x1f) + 1)
 	u_int16_t	satacap;	/*  76 */
+#define ATA_SATACAP_GEN1	0x0002
+#define ATA_SATACAP_GEN2	0x0004
+#define ATA_SATACAP_NCQ		0x0100
+#define ATA_SATACAP_PWRMGMT	0x0200
 	u_int16_t	reserved6;	/*  77 */
 	u_int16_t	satafsup;	/*  78 */
 	u_int16_t	satafen;	/*  79 */
@@ -100,7 +119,12 @@ struct ata_identify {
 	u_int16_t	addrsecxt[4];	/* 100 */
 	u_int16_t	stream_xfer_p;	/* 104 */
 	u_int16_t	padding1;	/* 105 */
-	u_int16_t	phys_sect_sz;	/* 106 */
+	u_int16_t	p2l_sect;	/* 106 */
+#define ATA_ID_P2L_SECT_MASK	0xc000
+#define ATA_ID_P2L_SECT_VALID	0x4000
+#define ATA_ID_P2L_SECT_SET	0x2000
+#define ATA_ID_P2L_SECT_SIZESET	0x1000
+#define ATA_ID_P2L_SECT_SIZE	0x000f
 	u_int16_t	seek_delay;	/* 107 */
 	u_int16_t	naa_ieee_oui;	/* 108 */
 	u_int16_t	ieee_oui_uid;	/* 109 */
@@ -115,14 +139,39 @@ struct ata_identify {
 	u_int16_t	rmsn;		/* 127 */
 	u_int16_t	securestatus;	/* 128 */
 	u_int16_t	vendor[31];	/* 129 */
-	u_int16_t	padding3[16];	/* 160 */
+	u_int16_t	padding3[8];	/* 160 */
+	u_int16_t	form;		/* 168 */
+#define ATA_ID_FORM_MASK	0x000f
+	u_int16_t	data_set_mgmt;	/* 169 */
+#define ATA_ID_DATA_SET_MGMT_TRIM 0x0001
+	u_int16_t	padding4[6];	/* 170 */
 	u_int16_t	curmedser[30];	/* 176 */
 	u_int16_t	sctsupport;	/* 206 */
-	u_int16_t	padding4[48];	/* 207 */
+	u_int16_t	rpm;		/* 207 */
+	u_int16_t	padding5[1];	/* 208 */
+	u_int16_t	logical_align;	/* 209 */
+#define ATA_ID_LALIGN_MASK	0xc000
+#define ATA_ID_LALIGN_VALID	0x4000
+#define ATA_ID_LALIGN		0x3fff
+	u_int16_t	padding6[45];	/* 210 */
 	u_int16_t	integrity;	/* 255 */
 } __packed;
 
 /*
+<<<<<<< HEAD
+=======
+ * IDENTIFY DEVICE data
+ */
+#define ATA_IDENTIFY_WRITECACHE		(1 << 5)
+#define ATA_IDENTIFY_LOOKAHEAD		(1 << 6)
+
+/*
+ * ATA DSM (Data Set Management) subcommands
+ */
+#define ATA_DSM_TRIM		0x01
+
+/*
+>>>>>>> origin/master
  * Frame Information Structures
  */
 
@@ -155,6 +204,8 @@ struct ata_fis_h2d {
 	u_int8_t		sector_count_exp;
 	u_int8_t		reserved0;
 	u_int8_t		control;
+#define ATA_FIS_CONTROL_SRST		0x04
+#define ATA_FIS_CONTROL_4BIT		0x08
 
 	u_int8_t		reserved1;
 	u_int8_t		reserved2;
@@ -233,6 +284,7 @@ struct ata_log_page_10h {
  * ATA interface
  */
 
+<<<<<<< HEAD
 struct ata_port {
 	struct atascsi		*ap_as;
 	int			ap_port;
@@ -245,6 +297,8 @@ struct ata_port {
 	int			ap_ncqdepth;
 };
 
+=======
+>>>>>>> origin/master
 struct ata_xfer {
 	struct ata_fis_h2d	*fis;
 	struct ata_fis_d2h	rfis;
@@ -267,6 +321,16 @@ struct ata_xfer {
 #define ATA_F_PIO			(1<<4)
 #define ATA_F_PACKET			(1<<5)
 #define ATA_F_NCQ			(1<<6)
+<<<<<<< HEAD
+=======
+#define ATA_F_DONE			(1<<7)
+#define ATA_F_GET_RFIS			(1<<8)
+#define ATA_FMT_FLAGS			"\020" "\011GET_RFIS" "\010DONE" \
+					"\007NCQ" "\006PACKET" "\005PIO" \
+					"\004POLL" "\003NOWAIT" "\002WRITE" \
+					"\001READ"
+
+>>>>>>> origin/master
 	volatile int		state;
 #define ATA_S_SETUP			0
 #define ATA_S_PENDING			1
@@ -275,40 +339,60 @@ struct ata_xfer {
 #define ATA_S_TIMEOUT			4
 #define ATA_S_ONCHIP			5
 #define ATA_S_PUT			6
+#define ATA_S_DONE			7
 
 	void			*atascsi_private;
 
+	int			pmp_port;
+
 	void			(*ata_put_xfer)(struct ata_xfer *);
 };
-
-#define ATA_QUEUED		0
-#define ATA_COMPLETE		1
-#define ATA_ERROR		2
 
 /*
  * atascsi
  */
 
 struct atascsi_methods {
+<<<<<<< HEAD
 	int			(*probe)(void *, int);
 	struct ata_xfer *	(*ata_get_xfer)(void *, int );
 	int			(*ata_cmd)(struct ata_xfer *);
+=======
+	int			(*probe)(void *, int, int);
+	void			(*free)(void *, int, int);
+	struct ata_xfer *	(*ata_get_xfer)(void *, int);
+	void			(*ata_cmd)(struct ata_xfer *);
+>>>>>>> origin/master
 };
 
 struct atascsi_attach_args {
 	void			*aaa_cookie;
 
 	struct atascsi_methods	*aaa_methods;
-	void			(*aaa_minphys)(struct buf *);
+	void			(*aaa_minphys)(struct buf *,
+				    struct scsi_link *);
 	int			aaa_nports;
 	int			aaa_ncmds;
 	int			aaa_capability;
 #define ASAA_CAP_NCQ		(1 << 0)
 #define ASAA_CAP_NEEDS_RESERVED	(1 << 1)
+#define ASAA_CAP_PMP_NCQ	(1 << 2)
 };
+
+#define ATA_PORT_T_NONE		0
+#define ATA_PORT_T_DISK		1
+#define ATA_PORT_T_ATAPI	2
+#define ATA_PORT_T_PM		3
 
 struct atascsi	*atascsi_attach(struct device *, struct atascsi_attach_args *);
 int		atascsi_detach(struct atascsi *);
 
+<<<<<<< HEAD
 int		atascsi_probe_dev(struct atascsi *, int);
 int		atascsi_detach_dev(struct atascsi *, int);
+=======
+int		atascsi_probe_dev(struct atascsi *, int, int);
+int		atascsi_detach_dev(struct atascsi *, int, int, int);
+
+void		ata_complete(struct ata_xfer *);
+>>>>>>> origin/master

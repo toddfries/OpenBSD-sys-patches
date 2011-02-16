@@ -1,10 +1,18 @@
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
+=======
+/*	$OpenBSD: pcmciadevs.h,v 1.136 2009/05/26 19:37:35 fgsch Exp $	*/
+>>>>>>> origin/master
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
+<<<<<<< HEAD
  *		OpenBSD: pcmciadevs,v 1.130 2006/07/28 17:13:43 brad Exp 
+=======
+ *		OpenBSD: pcmciadevs,v 1.133 2009/05/26 19:37:22 fgsch Exp 
+>>>>>>> origin/master
  */
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
@@ -472,6 +480,8 @@
 /* Quatech */
 #define	PCMCIA_CIS_QUATECH_DSP_225	{ NULL, NULL, NULL, NULL }
 #define	PCMCIA_PRODUCT_QUATECH_DSP_225	0x0008
+#define	PCMCIA_CIS_QUATECH_SSP_100	{ NULL, NULL, NULL, NULL }
+#define	PCMCIA_PRODUCT_QUATECH_SSP_100	0x004b
 
 /* Raylink/WebGear */
 #define	PCMCIA_CIS_RAYTHEON_WLAN	{ NULL, NULL, NULL, NULL }
@@ -627,6 +637,8 @@
 #define	PCMCIA_PRODUCT_PLANEX_GWNS11H	PCMCIA_PRODUCT_INVALID
 #define	PCMCIA_CIS_DLINK_DE650	{ "D-Link", "DE-650", NULL, NULL }
 #define	PCMCIA_PRODUCT_DLINK_DE650	PCMCIA_PRODUCT_INVALID
+#define	PCMCIA_CIS_IODATA_PCETTXR	{ "I-O DATA", "PCET/TX-R", NULL, NULL }
+#define	PCMCIA_PRODUCT_IODATA_PCETTXR	PCMCIA_PRODUCT_INVALID
 #define	PCMCIA_CIS_GREYCELL_DWL650H	{ "D-Link Corporation", "D-Link DWL-650H 11Mbps WLAN Adapter", NULL, NULL }
 #define	PCMCIA_PRODUCT_GREYCELL_DWL650H	PCMCIA_PRODUCT_INVALID
 #define	PCMCIA_CIS_DLINK_DE660	{ "D-Link", "DE-660", NULL, NULL }

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: bridgestp.c,v 1.25 2007/02/14 00:53:48 jsg Exp $	*/
+=======
+/*	$OpenBSD: bridgestp.c,v 1.39 2010/11/20 14:23:09 fgsch Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -63,10 +67,6 @@ __FBSDID("$FreeBSD: /repoman/r/ncvs/src/sys/net/bridgestp.c,v 1.25 2006/11/03 03
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
 #endif
 
 #include <net/if_bridge.h>
@@ -231,7 +231,6 @@ struct bstp_tbpdu {
 
 const u_int8_t bstp_etheraddr[] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
 
-LIST_HEAD(, bstp_state) bstp_list;
 
 void	bstp_transmit(struct bstp_state *, struct bstp_port *);
 void	bstp_transmit_bpdu(struct bstp_state *, struct bstp_port *);
@@ -291,11 +290,6 @@ void	bstp_edge_delay_expiry(struct bstp_state *,
 int	bstp_addr_cmp(const u_int8_t *, const u_int8_t *);
 int	bstp_same_bridgeid(u_int64_t, u_int64_t);
 
-void
-bstp_attach(int n)
-{
-	LIST_INIT(&bstp_list);
-}
 
 void
 bstp_transmit(struct bstp_state *bs, struct bstp_port *bp)
@@ -375,7 +369,7 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	struct ifnet *ifp = bp->bp_ifp;
 	struct ether_header *eh;
 	struct mbuf *m;
-	int s,error;
+	int s, len, error;
 
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
 		return;
@@ -401,9 +395,18 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 
 	s = splnet();
 	bp->bp_txcount++;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+<<<<<<< HEAD
 	if (error == 0 && (ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
+=======
+	if (error == 0) {
+		ifp->if_obytes += len;
+		ifp->if_omcasts++;
+		if_start(ifp);
+	}
+>>>>>>> origin/master
 	splx(s);
 }
 
@@ -486,7 +489,7 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	struct ifnet *ifp = bp->bp_ifp;
 	struct mbuf *m;
 	struct ether_header *eh;
-	int s, error;
+	int s, len, error;
 
 	s = splnet();
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
@@ -534,9 +537,18 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	m->m_len = m->m_pkthdr.len;
 
 	bp->bp_txcount++;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+<<<<<<< HEAD
 	if (error == 0 && (ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
+=======
+	if (error == 0) {
+		ifp->if_obytes += len;
+		ifp->if_omcasts++;
+		if_start(ifp);
+	}
+>>>>>>> origin/master
  done:
 	splx(s);
 }
@@ -592,7 +604,7 @@ bstp_pdu_flags(struct bstp_port *bp)
 	return (flags);
 }
 
-struct mbuf *
+void
 bstp_input(struct bstp_state *bs, struct bstp_port *bp,
     struct ether_header *eh, struct mbuf *m)
 {
@@ -652,7 +664,6 @@ bstp_input(struct bstp_state *bs, struct bstp_port *bp,
  out:
 	if (m)
 		m_freem(m);
-	return (NULL);
 }
 
 void
@@ -1758,7 +1769,7 @@ bstp_tick(void *arg)
 	}
 
 	if (bs->bs_ifp->if_flags & IFF_RUNNING)
-		timeout_add(&bs->bs_bstptimeout, hz);
+		timeout_add_sec(&bs->bs_bstptimeout, 1);
 
 	splx(s);
 }
@@ -1871,7 +1882,7 @@ void
 bstp_initialization(struct bstp_state *bs)
 {
 	struct bstp_port *bp;
-	struct ifnet *ifp, *mif;
+	struct ifnet *mif = NULL;
 	u_char *e_addr;
 
 	if (LIST_EMPTY(&bs->bs_bplist)) {
@@ -1879,25 +1890,23 @@ bstp_initialization(struct bstp_state *bs)
 		return;
 	}
 
-	mif = NULL;
 	/*
 	 * Search through the Ethernet interfaces and find the one
-	 * with the lowest value. The adapter which we take the MAC
-	 * address from does not need to be part of the bridge, it just
-	 * needs to be a unique value. It is not possible for mif to be
+	 * with the lowest value.
+	 * Make sure we take the address from an interface that is
+	 * part of the bridge to make sure two bridges on the system
+	 * will not use the same one. It is not possible for mif to be
 	 * null, at this point we have at least one STP port and hence
 	 * at least one NIC.
 	 */
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		if (ifp->if_type != IFT_ETHER)
-			continue;
+	LIST_FOREACH(bp, &bs->bs_bplist, bp_next) {
 		if (mif == NULL) {
-			mif = ifp;
+			mif = bp->bp_ifp;
 			continue;
 		}
-		if (bstp_addr_cmp(LLADDR(ifp->if_sadl),
+		if (bstp_addr_cmp(LLADDR(bp->bp_ifp->if_sadl),
 		    LLADDR(mif->if_sadl)) < 0) {
-			mif = ifp;
+			mif = bp->bp_ifp;
 			continue;
 		}
 	}
@@ -1921,7 +1930,7 @@ bstp_initialization(struct bstp_state *bs)
 		timeout_set(&bs->bs_bstptimeout, bstp_tick, bs);
 	if (bs->bs_ifflags & IFF_RUNNING &&
 	    !timeout_pending(&bs->bs_bstptimeout))
-		timeout_add(&bs->bs_bstptimeout, hz);
+		timeout_add_sec(&bs->bs_bstptimeout, 1);
 
 	LIST_FOREACH(bp, &bs->bs_bplist, bp_next) {
 		bp->bp_port_id = (bp->bp_priority << 8) |
@@ -1956,7 +1965,6 @@ bstp_create(struct ifnet *ifp)
 
 	getmicrotime(&bs->bs_last_tc_time);
 
-	LIST_INSERT_HEAD(&bstp_list, bs, bs_list);
 	splx(s);
 
 	return (bs);
@@ -1965,18 +1973,13 @@ bstp_create(struct ifnet *ifp)
 void
 bstp_destroy(struct bstp_state *bs)
 {
-	int s;
-
 	if (bs == NULL)
 		return;
 
 	if (!LIST_EMPTY(&bs->bs_bplist))
 		panic("bstp still active");
 
-	s = splnet();
-	LIST_REMOVE(bs, bs_list);
 	free(bs, M_DEVBUF);
-	splx(s);
 }
 
 void

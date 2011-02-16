@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mec.c,v 1.9 2005/11/09 06:11:42 brad Exp $ */
+/*	$OpenBSD: if_mec.c,v 1.23 2010/03/15 18:59:09 miod Exp $ */
 /*	$NetBSD: if_mec_mace.c,v 1.5 2004/08/01 06:36:36 tsutsui Exp $ */
 
 /*
@@ -105,6 +105,8 @@
 #include <mips64/archtype.h>
 #include <mips64/arcbios.h>
 #include <sgi/dev/if_mecreg.h>
+
+#include <sgi/localbus/macebusvar.h>
 
 #ifdef MEC_DEBUG
 #define MEC_DEBUG_RESET		0x01
@@ -266,10 +268,9 @@ struct mec_softc {
 	struct device sc_dev;		/* generic device structures */
 	struct arpcom sc_ac;		/* Ethernet common part */
 
-	bus_space_tag_t sc_st;		/* bus_space tag */
-	bus_space_handle_t sc_sh;	/* bus_space handle */
-	bus_dma_tag_t sc_dmat;		/* bus_dma tag */
-	void *sc_sdhook;		/* shoutdown hook */
+	bus_space_tag_t sc_st;		/* bus_space tag. */
+	bus_space_handle_t sc_sh;	/* bus_space handle. */
+	bus_dma_tag_t sc_dmat;		/* bus_dma tag. */
 
 	struct mii_data sc_mii;		/* MII/media information */
 	int sc_phyaddr;			/* MII address */
@@ -338,12 +339,11 @@ void	mec_watchdog(struct ifnet *);
 void	mec_tick(void *);
 int	mec_ioctl(struct ifnet *, u_long, caddr_t);
 void	mec_reset(struct mec_softc *);
-void	mec_setfilter(struct mec_softc *);
+void	mec_iff(struct mec_softc *);
 int	mec_intr(void *arg);
 void	mec_stop(struct ifnet *, int);
 void	mec_rxintr(struct mec_softc *, uint32_t);
 void	mec_txintr(struct mec_softc *, uint32_t);
-void	mec_shutdown(void *);
 
 int
 mec_match(struct device *parent, void *match, void *aux)
@@ -360,7 +360,7 @@ void
 mec_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mec_softc *sc = (void *)self;
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	uint32_t command;
 	char *macaddr;
@@ -368,15 +368,15 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	bus_dma_segment_t seg;
 	int i, err, rseg;
 
-	sc->sc_st = ca->ca_iot;
-	if (bus_space_map(sc->sc_st, ca->ca_baseaddr, MEC_NREGS, 0,
+	sc->sc_st = maa->maa_iot;
+	if (bus_space_map(sc->sc_st, maa->maa_baseaddr, MEC_NREGS, 0,
 	    &sc->sc_sh) != 0) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 
-	/* set up DMA structures */
-	sc->sc_dmat = ca->ca_dmat;
+	/* Set up DMA structures. */
+	sc->sc_dmat = maa->maa_dmat;
 
 	/*
 	 * Allocate the control data structures, and create and load the
@@ -485,12 +485,9 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_MAXLEN(&ifp->if_snd, MEC_NTXDESC - 1);
 	ether_ifattach(ifp);
 
-	/* establish interrupt */
-	BUS_INTR_ESTABLISH(ca, NULL, ca->ca_intr, IST_EDGE, IPL_NET,
-	    mec_intr, sc, sc->sc_dev.dv_xname);
-
-	/* set shutdown hook to reset interface on powerdown */
-	sc->sc_sdhook = shutdownhook_establish(mec_shutdown, sc);
+	/* Establish interrupt handler. */
+	macebus_intr_establish(maa->maa_intr, maa->maa_mace_intr,
+	    IST_EDGE, IPL_NET, mec_intr, sc, sc->sc_dev.dv_xname);
 
 	return;
 
@@ -653,8 +650,8 @@ mec_init(struct ifnet *ifp)
 	/* reset device */
 	mec_reset(sc);
 
-	/* setup filter for multicast or promisc mode */
-	mec_setfilter(sc);
+	/* Setup filter for multicast or promisc mode. */
+	mec_iff(sc);
 
 	/* set the TX ring pointer to the base address */
 	bus_space_write_8(st, sh, MEC_TX_RING_BASE, MEC_CDTXADDR(sc, 0));
@@ -687,7 +684,7 @@ mec_init(struct ifnet *ifp)
 	    MEC_DMA_TX_DMA_ENABLE | /* MEC_DMA_TX_INT_ENABLE | */
 	    MEC_DMA_RX_DMA_ENABLE | MEC_DMA_RX_INT_ENABLE);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -703,7 +700,7 @@ mec_reset(struct mec_softc *sc)
 {
 	bus_space_tag_t st = sc->sc_st;
 	bus_space_handle_t sh = sc->sc_sh;
-	uint64_t address, control;
+	uint64_t address;
 	int i;
 
 	/* reset chip */
@@ -720,11 +717,10 @@ mec_reset(struct mec_softc *sc)
 	}
 	bus_space_write_8(st, sh, MEC_STATION, address);
 
-	/* Default to 100/half and let autonegotiation work its magic */
-	control = MEC_MAC_SPEED_SELECT | MEC_MAC_FILTER_MATCHMULTI |
-	    MEC_MAC_IPG_DEFAULT;
+	/* Default to 100/half and let auto-negotiation work its magic. */
+	bus_space_write_8(st, sh, MEC_MAC_CONTROL,
+	    MEC_MAC_SPEED_SELECT | MEC_MAC_IPG_DEFAULT);
 
-	bus_space_write_8(st, sh, MEC_MAC_CONTROL, control);
 	bus_space_write_8(st, sh, MEC_DMA_CONTROL, 0);
 
 	DPRINTF(MEC_DEBUG_RESET, ("mec: control now %llx\n",
@@ -1045,65 +1041,30 @@ mec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mec_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			mec_init(ifp);
 #ifdef INET
-		case AF_INET:
-			mec_init(ifp);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-			break;
 #endif
-		default:
-			mec_init(ifp);
-			break;
-		}
-		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
-		/*
-		 * If interface is marked up and not running, then start it.
-		 * If it is marked down and running, stop it.
-		 * XXX If it's up then re-initialize it. This is so flags
-		 * such as IFF_PROMISC are handled.
-		 */
-		if (ifp->if_flags & IFF_UP)
-			mec_init(ifp);
-		else if (ifp->if_flags & IFF_RUNNING)
-			mec_stop(ifp, 1);
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ac) :
-		    ether_delmulti(ifr, &sc->sc_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
+		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				mec_init(ifp);
-			error = 0;
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				mec_stop(ifp);
 		}
 		break;
 
@@ -1113,8 +1074,13 @@ mec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENXIO;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mec_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1142,57 +1108,46 @@ mec_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
 
 void
-mec_setfilter(struct mec_softc *sc)
+mec_iff(struct mec_softc *sc)
 {
-	struct arpcom *ec = &sc->sc_ac;
+	struct arpcom *ac = &sc->sc_ac;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	bus_space_tag_t st = sc->sc_st;
 	bus_space_handle_t sh = sc->sc_sh;
-	uint64_t mchash;
+	uint64_t mchash = 0;
 	uint32_t control, hash;
-	int mcnt;
+	int mcnt = 0;
 
 	control = bus_space_read_8(st, sh, MEC_MAC_CONTROL);
 	control &= ~MEC_MAC_FILTER_MASK;
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		control |= MEC_MAC_FILTER_PROMISC;
-		bus_space_write_8(st, sh, MEC_MULTICAST, 0xffffffffffffffffULL);
-		bus_space_write_8(st, sh, MEC_MAC_CONTROL, control);
-		return;
-	}
-
-	mcnt = 0;
-	mchash = 0;
-	ETHER_FIRST_MULTI(step, ec, enm);
-	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			/* set allmulti for a range of multicast addresses */
-			control |= MEC_MAC_FILTER_ALLMULTI;
-			bus_space_write_8(st, sh, MEC_MULTICAST,
-			    0xffffffffffffffffULL);
-			bus_space_write_8(st, sh, MEC_MAC_CONTROL, control);
-			return;
-		}
-
-#define mec_calchash(addr)	(ether_crc32_be((addr), ETHER_ADDR_LEN) >> 26)
-
-		hash = mec_calchash(enm->enm_addrlo);
-		mchash |= 1 << hash;
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
-	}
-
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (mcnt > 0)
-		control |= MEC_MAC_FILTER_MATCHMULTI;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			control |= MEC_MAC_FILTER_PROMISC;
+		else
+			control |= MEC_MAC_FILTER_ALLMULTI;
+		mchash = 0xffffffffffffffffULL;
+	} else {
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			hash = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26;
+			mchash |= 1 << hash;
+			mcnt++;
+			ETHER_NEXT_MULTI(step, enm);
+		}
+
+		if (mcnt > 0)
+			control |= MEC_MAC_FILTER_MATCHMULTI;
+	}
 
 	bus_space_write_8(st, sh, MEC_MULTICAST, mchash);
 	bus_space_write_8(st, sh, MEC_MAC_CONTROL, control);
@@ -1428,13 +1383,6 @@ mec_txintr(struct mec_softc *sc, uint32_t stat)
 			break;
 		}
 
-		if ((txstat & MEC_TXSTAT_SUCCESS) == 0) {
-			printf("%s: TX error: txstat = 0x%llx\n",
-			    sc->sc_dev.dv_xname, txstat);
-			ifp->if_oerrors++;
-			continue;
-		}
-
 		txs = &sc->sc_txsoft[i];
 		if ((txs->txs_flags & MEC_TXS_TXDPTR1) != 0) {
 			dmamap = txs->txs_dmamap;
@@ -1445,9 +1393,16 @@ mec_txintr(struct mec_softc *sc, uint32_t stat)
 			txs->txs_mbuf = NULL;
 		}
 
-		col = (txstat & MEC_TXSTAT_COLCNT) >> MEC_TXSTAT_COLCNT_SHIFT;
-		ifp->if_collisions += col;
-		ifp->if_opackets++;
+		if ((txstat & MEC_TXSTAT_SUCCESS) == 0) {
+			printf("%s: TX error: txstat = 0x%llx\n",
+			    sc->sc_dev.dv_xname, txstat);
+			ifp->if_oerrors++;
+		} else {
+			col = (txstat & MEC_TXSTAT_COLCNT) >>
+			    MEC_TXSTAT_COLCNT_SHIFT;
+			ifp->if_collisions += col;
+			ifp->if_opackets++;
+		}
 	}
 
 	/* update the dirty TX buffer pointer */
@@ -1462,12 +1417,4 @@ mec_txintr(struct mec_softc *sc, uint32_t stat)
 	else if (!(stat & MEC_INT_TX_EMPTY))
 		bus_space_write_8(sc->sc_st, sc->sc_sh, MEC_TX_ALIAS,
 		    MEC_TX_ALIAS_INT_ENABLE);
-}
-
-void
-mec_shutdown(void *arg)
-{
-	struct mec_softc *sc = arg;
-
-	mec_stop(&sc->sc_ac.ac_if, 1);
 }

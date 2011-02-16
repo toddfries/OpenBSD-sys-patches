@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pcireg.h,v 1.31 2006/06/01 11:17:31 brad Exp $	*/
+=======
+/*	$OpenBSD: pcireg.h,v 1.39 2010/12/05 15:15:14 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*
@@ -40,6 +44,9 @@
  * XXX This is not complete.
  */
 
+#define	PCI_CONFIG_SPACE_SIZE		0x100
+#define	PCIE_CONFIG_SPACE_SIZE		0x1000
+
 /*
  * Device identification register; contains a vendor ID and a device ID.
  */
@@ -77,6 +84,7 @@ typedef u_int16_t pci_product_id_t;
 #define	PCI_COMMAND_STEPPING_ENABLE		0x00000080
 #define	PCI_COMMAND_SERR_ENABLE			0x00000100
 #define	PCI_COMMAND_BACKTOBACK_ENABLE		0x00000200
+#define PCI_COMMAND_INTERRUPT_DISABLE		0x00000400
 
 #define	PCI_STATUS_CAPLIST_SUPPORT		0x00100000
 #define	PCI_STATUS_66MHZ_SUPPORT		0x00200000
@@ -496,6 +504,47 @@ typedef u_int8_t pci_revision_t;
 #define PCI_PMCSR_STATE_D3	0x03
 
 /*
+<<<<<<< HEAD
+=======
+ * PCI Express; access via capability pointer.
+ */
+#define PCI_PCIE_XCAP		0x00
+#define PCI_PCIE_XCAP_SI	0x01000000
+#define PCI_PCIE_DCAP		0x04
+#define PCI_PCIE_DCSR		0x08
+#define PCI_PCIE_DCSR_ENA_NO_SNOOP	0x00000800
+#define PCI_PCIE_LCAP		0x0c
+#define PCI_PCIE_LCSR		0x10
+#define PCI_PCIE_LCSR_ASPM_L0S	0x00000001
+#define PCI_PCIE_LCSR_ASPM_L1	0x00000002
+#define PCI_PCIE_LCSR_ES	0x00000080
+#define PCI_PCIE_SLCAP		0x14
+#define PCI_PCIE_SLCAP_ABP	0x00000001
+#define PCI_PCIE_SLCAP_PCP	0x00000002
+#define PCI_PCIE_SLCAP_MSP	0x00000004
+#define PCI_PCIE_SLCAP_AIP	0x00000008
+#define PCI_PCIE_SLCAP_PIP	0x00000010
+#define PCI_PCIE_SLCAP_HPS	0x00000020
+#define PCI_PCIE_SLCAP_HPC	0x00000040
+#define PCI_PCIE_SLCSR		0x18
+#define PCI_PCIE_SLCSR_ABE	0x00000001
+#define PCI_PCIE_SLCSR_PFE	0x00000002
+#define PCI_PCIE_SLCSR_MSE	0x00000004
+#define PCI_PCIE_SLCSR_PDE	0x00000008
+#define PCI_PCIE_SLCSR_CCE	0x00000010
+#define PCI_PCIE_SLCSR_HPE	0x00000020
+#define PCI_PCIE_SLCSR_ABP	0x00010000
+#define PCI_PCIE_SLCSR_PFD	0x00020000
+#define PCI_PCIE_SLCSR_MSC	0x00040000
+#define PCI_PCIE_SLCSR_PDC	0x00080000
+#define PCI_PCIE_SLCSR_CC	0x00100000
+#define PCI_PCIE_SLCSR_MS	0x00200000
+#define PCI_PCIE_SLCSR_PDS	0x00400000
+#define PCI_PCIE_SLCSR_LACS	0x01000000
+#define PCI_PCIE_RCSR		0x1c
+
+/*
+>>>>>>> origin/master
  * Interrupt Configuration Register; contains interrupt pin and line.
  */
 #define	PCI_INTERRUPT_REG		0x3c

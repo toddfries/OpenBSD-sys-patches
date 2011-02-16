@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: pcscp.c,v 1.13 2006/04/20 16:06:32 martin Exp $	*/
+=======
+/*	$OpenBSD: pcscp.c,v 1.17 2010/06/28 18:31:02 krw Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: pcscp.c,v 1.26 2003/10/19 10:25:42 tsutsui Exp $	*/
 
 /*-
@@ -17,13 +21,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -128,7 +125,7 @@ int	pcscp_dma_isactive(struct ncr53c9x_softc *);
 
 struct scsi_adapter pcscp_adapter = {
 	ncr53c9x_scsi_cmd,	/* cmd */
-	minphys,		/* minphys */
+	scsi_minphys,		/* scsi_minphys */
 	0,			/* open */
 	0,			/* close */
 };
@@ -305,7 +302,7 @@ pcscp_attach(struct device *parent, struct device *self, void *aux)
 	/* Do the common parts of attachment. */
 	printf("%s", sc->sc_dev.dv_xname);
 
-	ncr53c9x_attach(sc, &pcscp_adapter, NULL);
+	ncr53c9x_attach(sc, &pcscp_adapter);
 
 	/* Turn on target selection using the `dma' method */
 	sc->sc_features |= NCR_F_DMASELECT;

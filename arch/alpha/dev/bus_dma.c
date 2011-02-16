@@ -1,4 +1,4 @@
-/* $OpenBSD: bus_dma.c,v 1.20 2006/05/21 02:00:08 brad Exp $ */
+/* $OpenBSD: bus_dma.c,v 1.30 2010/12/26 15:40:58 miod Exp $ */
 /* $NetBSD: bus_dma.c,v 1.40 2000/07/17 04:47:56 thorpej Exp $ */
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -55,8 +48,6 @@
 int	_bus_dmamap_load_buffer_direct(bus_dma_tag_t,
 	    bus_dmamap_t, void *, bus_size_t, struct proc *, int,
 	    paddr_t *, int *, int);
-
-extern paddr_t avail_start, avail_end;	/* from pmap.c */
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -145,9 +136,15 @@ _bus_dmamap_load_buffer_direct(t, map, buf, buflen, p, flags,
 	int first;
 {
 	bus_size_t sgsize;
+	pmap_t pmap;
 	bus_addr_t curaddr, lastaddr, baddr, bmask;
 	vaddr_t vaddr = (vaddr_t)buf;
 	int seg;
+
+	if (p != NULL)
+		pmap = p->p_vmspace->vm_map.pmap;
+	else
+		pmap = pmap_kernel();
 
 	lastaddr = *lastaddrp;
 	bmask = ~(map->_dm_boundary - 1);
@@ -156,11 +153,7 @@ _bus_dmamap_load_buffer_direct(t, map, buf, buflen, p, flags,
 		/*
 		 * Get the physical address for this segment.
 		 */
-		if (p != NULL)
-			pmap_extract(p->p_vmspace->vm_map.pmap, vaddr,
-				&curaddr);
-		else
-			curaddr = vtophys(vaddr);
+		pmap_extract(pmap, vaddr, &curaddr);
 
 		/*
 		 * If we're beyond the current DMA window, indicate
@@ -469,7 +462,7 @@ _bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
 {
 
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, 0, trunc_page(avail_end)));
+	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
 }
 
 /*
@@ -491,7 +484,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;    
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 	/* Always round the size. */
 	size = round_page(size);
@@ -499,9 +492,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
 	TAILQ_INIT(&mlist);
 	error = uvm_pglistalloc(size, low, high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 
@@ -518,7 +515,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
-		if (curaddr < avail_start || curaddr >= high) {
+		if (curaddr < low || curaddr >= high) {
 			printf("uvm_pglistalloc returned non-sensical"
 			    " address 0x%lx\n", curaddr);
 			panic("_bus_dmamem_alloc");
@@ -583,9 +580,10 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	caddr_t *kvap;  
 	int flags;
 {
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	bus_addr_t addr;
-	int curseg;
+	int curseg, error;
 
 	/*
 	 * If we're only mapping 1 segment, use K0SEG, to avoid
@@ -605,15 +603,26 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 
 	*kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
 		    addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
-			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			error = pmap_enter(pmap_kernel(), va, addr,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
 		}
 	}
 	pmap_update(pmap_kernel());
@@ -677,7 +686,7 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */

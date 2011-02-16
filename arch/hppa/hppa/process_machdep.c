@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.12 2005/05/10 11:32:51 mickey Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.20 2011/01/23 09:46:25 jsing Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff
@@ -26,7 +26,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -34,11 +33,11 @@
 #include <sys/user.h>
 
 #include <machine/cpufunc.h>
+#include <machine/fpu.h>
+#include <machine/frame.h>
 
 int
-process_read_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
+process_read_regs(struct proc *p, struct reg *regs)
 {
 	struct trapframe *tf = p->p_md.md_regs;
 
@@ -81,20 +80,11 @@ process_read_regs(p, regs)
 }
 
 int
-process_read_fpregs(p, fpregs)
-	struct proc *p;
-	struct fpreg *fpregs;
+process_read_fpregs(struct proc *p, struct fpreg *fpregs)
 {
-	extern paddr_t fpu_curpcb;
-	extern u_int fpu_enable;
+	fpu_proc_save(p);
 
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		mtctl(fpu_enable, CR_CCR);
-		fpu_save((vaddr_t)p->p_addr->u_pcb.pcb_fpregs);
-		mtctl(0, CR_CCR);
-	}
-	bcopy(p->p_addr->u_pcb.pcb_fpregs, fpregs, 32 * 8);
-	pdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
+	bcopy(&p->p_addr->u_pcb.pcb_fpstate->hfp_regs, fpregs, 32 * 8);
 
 	return (0);
 }
@@ -102,9 +92,7 @@ process_read_fpregs(p, fpregs)
 #ifdef PTRACE
 
 int
-process_write_regs(p, regs)
-	struct proc *p;
-	struct reg *regs;
+process_write_regs(struct proc *p, struct reg *regs)
 {
 	struct trapframe *tf = p->p_md.md_regs;
 
@@ -147,19 +135,11 @@ process_write_regs(p, regs)
 }
 
 int
-process_write_fpregs(p, fpregs)
-	struct proc *p;
-	struct fpreg *fpregs;
+process_write_fpregs(struct proc *p, struct fpreg *fpregs)
 {
-	extern paddr_t fpu_curpcb;
+	fpu_proc_flush(p);
 
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		fpu_exit();
-		fpu_curpcb = 0;
-	}
-
-	bcopy(fpregs, p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
+	bcopy(fpregs, &p->p_addr->u_pcb.pcb_fpstate->hfp_regs, 32 * 8);
 
 	return (0);
 }
@@ -167,9 +147,7 @@ process_write_fpregs(p, fpregs)
 /* process_sstep() is in trap.c */
 
 int
-process_set_pc(p, addr)
-	struct proc *p;
-	caddr_t addr;
+process_set_pc(struct proc *p, caddr_t addr)
 {
 	p->p_md.md_regs->tf_iioq_tail = 4 +
 	    (p->p_md.md_regs->tf_iioq_head = (register_t)addr | 3);

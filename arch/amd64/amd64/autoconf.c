@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.16 2006/10/29 18:28:07 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.37 2010/11/18 21:13:16 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -47,7 +47,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/dkstat.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
 #include <sys/device.h>
@@ -58,6 +57,7 @@
 #include <sys/reboot.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -100,8 +100,17 @@ struct device *booted_device;
 int booted_partition;
 extern dev_t bootdev;
 
-#ifdef RAMDISK_HOOKS
-static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
+/* Support for VIA C3 RNG */
+extern struct timeout viac3_rnd_tmo;
+extern int	viac3_rnd_present;
+void		viac3_rnd(void *);
+
+#ifdef CRYPTO
+void		viac3_crypto_setup(void);
+extern int	amd64_has_xcrypt;
+
+void		aesni_setup(void);
+extern int	amd64_has_aesni;
 #endif
 
 /*
@@ -115,8 +124,6 @@ cpu_configure(void)
 #endif
 
 	x86_64_proc0_tss_ldt_init();
-
-	startrtclock();
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
@@ -136,7 +143,24 @@ cpu_configure(void)
 	spl0();
 	cold = 0;
 
-	md_diskconf = diskconf;
+	/*
+	 * At this point the RNG is running, and if FSXR is set we can
+	 * use it.  Here we setup a periodic timeout to collect the data.
+	 */
+	if (viac3_rnd_present) {
+		timeout_set(&viac3_rnd_tmo, viac3_rnd, &viac3_rnd_tmo);
+		viac3_rnd(&viac3_rnd_tmo);
+	}
+#ifdef CRYPTO
+	/*
+	 * Also, if the chip has crypto available, enable it.
+	 */
+	if (amd64_has_xcrypt)
+		viac3_crypto_setup();
+
+	if (amd64_has_aesni)
+		aesni_setup();
+#endif
 }
 
 void
@@ -327,62 +351,15 @@ setroot(void)
 #endif
 }
 
-#include "wd.h"
-#if NWD > 0
-extern	struct cfdriver wd_cd;
-#endif
-#include "sd.h"
-#if NSD > 0
-extern	struct cfdriver sd_cd;
-#endif
-#include "cd.h"
-#if NCD > 0
-extern	struct cfdriver cd_cd;
-#endif
-#include "mcd.h"
-#if NMCD > 0
-extern	struct cfdriver mcd_cd;
-#endif
-#include "fd.h"
-#if NFD > 0
-extern	struct cfdriver fd_cd;
-#endif
-#include "rd.h"
-#if NRD > 0
-extern	struct cfdriver rd_cd;
-#endif
-#include "raid.h"
-#if NRAID > 0
-extern	struct cfdriver raid_cd;
-#endif
-
-struct	genericconf {
-	struct cfdriver *gc_driver;
-	char *gc_name;
-	dev_t gc_major;
-} genericconf[] = {
-#if NWD > 0
-	{ &wd_cd,  "wd",  0 },
-#endif
-#if NFD > 0
-	{ &fd_cd,  "fd",  2 },
-#endif
-#if NSD > 0
-	{ &sd_cd,  "sd",  4 },
-#endif
-#if NCD > 0
-	{ &cd_cd,  "cd",  6 },
-#endif
-#if NMCD > 0
-	{ &mcd_cd, "mcd", 7 },
-#endif
-#if NRD > 0
-	{ &rd_cd,  "rd",  17 },
-#endif
-#if NRAID > 0
-	{ &raid_cd,  "raid",  19 },
-#endif
-	{ 0 }
+struct nam2blk nam2blk[] = {
+	{ "wd",		0 },
+	{ "fd",		2 },
+	{ "sd",		4 },
+	{ "cd",		6 },
+	{ "vnd",	14 },
+	{ "rd",		17 },
+	{ "raid",	19 },
+	{ NULL,		-1 }
 };
 
 void

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: mscp_subr.c,v 1.8 2005/11/15 07:02:37 miod Exp $	*/
+=======
+/*	$OpenBSD: mscp_subr.c,v 1.10 2009/06/02 20:58:39 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: mscp_subr.c,v 1.18 2001/11/13 07:38:28 lukem Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -56,8 +60,6 @@
 
 #include "ra.h"
 #include "mt.h"
-
-#define b_forw	b_hash.le_next
 
 int	mscp_match(struct device *, struct cfdata *, void *);
 void	mscp_attach(struct device *, struct device *, void *);

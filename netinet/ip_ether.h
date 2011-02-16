@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: ip_ether.h,v 1.12 2002/03/14 01:27:11 millert Exp $ */
+=======
+/*	$OpenBSD: ip_ether.h,v 1.15 2010/05/11 09:36:07 claudio Exp $ */
+>>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@adk.gr)
  *
@@ -62,6 +66,11 @@ struct etherip_header {
 }
 
 #ifdef _KERNEL
+int	etherip_output(struct mbuf *, struct tdb *, struct mbuf **, int);
+void	etherip_input(struct mbuf *, ...);
+#ifdef INET6
+int	etherip_input6(struct mbuf **, int *, int);
+#endif
 int	etherip_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 extern int etherip_allow;

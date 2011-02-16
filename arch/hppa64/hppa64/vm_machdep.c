@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.3 2006/11/29 12:26:13 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.10 2009/03/26 17:24:33 oga Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -208,12 +208,6 @@ cpu_exit(p)
 	cpu_switch(p);
 }
 
-void
-cpu_wait(p)
-	struct proc *p;
-{
-}
-
 /*
  * Map an IO request into kernel virtual address space.
  */
@@ -235,13 +229,7 @@ vmapbuf(bp, len)
 	off = (vaddr_t)bp->b_data - uva;
 	size = round_page(off + len);
 
-	/*
-	 * We do it on our own here to be able to specify an offset to uvm_map
-	 * so that we can get all benefits of PMAP_PREFER.
-	 * - art@
-	 */
-	kva = uvm_km_valloc_prefer_wait(kernel_map, size, uva);
-	fdcache(pm->pm_space, uva, size);
+	kva = uvm_km_valloc_prefer_wait(phys_map, size, uva);
 	bp->b_data = (caddr_t)(kva + off);
 	while (size > 0) {
 		paddr_t pa;

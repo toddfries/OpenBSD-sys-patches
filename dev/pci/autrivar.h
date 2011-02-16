@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: autrivar.h,v 1.2 2001/11/26 18:10:52 mickey Exp $	*/
+=======
+/*	$OpenBSD: autrivar.h,v 1.4 2010/08/27 18:50:56 deraadt Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -86,8 +90,6 @@ struct autri_softc {
 
 	u_int32_t		sc_class;
 	int			sc_revision;
-
-	int			sc_old_power;
 
 	/*
 	 * Play/record status

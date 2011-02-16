@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcib.c,v 1.1 2005/09/19 01:28:04 deraadt Exp $	*/
+/*	$OpenBSD: pcib.c,v 1.5 2010/07/08 20:17:54 deraadt Exp $	*/
 /*	$NetBSD: pcib.c,v 1.6 1997/06/06 23:29:16 thorpej Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -57,7 +50,8 @@ void	pcib_callback(struct device *);
 int	pcib_print(void *, const char *);
 
 struct cfattach pcib_ca = {
-	sizeof(struct device), pcibmatch, pcibattach
+	sizeof(struct device), pcibmatch, pcibattach,
+	NULL, config_activate_children
 };
 
 struct cfdriver pcib_cd = {
@@ -79,18 +73,21 @@ pcibmatch(struct device *parent, void *match, void *aux)
 			/* The above bridges mis-identify themselves */
 			return (1);
 		}
+		break;
 	case PCI_VENDOR_SIS:
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_SIS_85C503:
 			/* mis-identifies itself as a miscellaneous prehistoric */
 			return (1);
 		}
+		break;
 	case PCI_VENDOR_VIATECH:
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_VIATECH_VT82C686A_SMB:
 			/* mis-identifies itself as a ISA bridge */
 			return (0);
 		}
+		break;
 	}
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_BRIDGE &&

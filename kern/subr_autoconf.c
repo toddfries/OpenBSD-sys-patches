@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: subr_autoconf.c,v 1.48 2006/05/28 07:12:11 deraadt Exp $	*/
+=======
+/*	$OpenBSD: subr_autoconf.c,v 1.63 2010/09/08 15:50:11 deraadt Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -49,7 +53,6 @@
 #include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
-/* Extra stuff from Matthias Drochner <drochner@zelux6.zel.kfa-juelich.de> */
 #include <sys/queue.h>
 #include <sys/proc.h>
 
@@ -281,11 +284,14 @@ config_rootsearch(cfmatch_t fn, char *rootname, void *aux)
 	m.pri = 0;
 	/*
 	 * Look at root entries for matching name.  We do not bother
-	 * with found-state here since only one root should ever be
-	 * searched (and it must be done first).
+	 * with found-state here since only one instance of each possible
+	 * root child should ever be searched.
 	 */
 	for (p = cfroots; *p >= 0; p++) {
 		cf = &cfdata[*p];
+		if (cf->cf_fstate == FSTATE_DNOTFOUND ||
+		    cf->cf_fstate == FSTATE_DSTAR)
+			continue;
 		if (strcmp(cf->cf_driver->cd_name, rootname) == 0)
 			mapply(&m, cf);
 	}
@@ -752,43 +758,75 @@ config_detach_children(struct device *parent, int flags)
 }
 
 int
-config_activate_children(struct device *parent, enum devact act)
+config_suspend(struct device *dev, int act)
 {
-	struct device *dev, *next_dev;
-	int  rv = 0;
+	struct cfattach *ca = dev->dv_cfdata->cf_attach;
 
-	/* The config_deactivate routine may sleep, meaning devices
-	   may be added to the queue. However, all devices will
-	   be added to the tail of the queue, the queue won't
-	   be re-organized, and the subtree of parent here should be locked
-	   for purposes of adding/removing children.
-	*/
-	for (dev = TAILQ_FIRST(&alldevs);
-	     dev != NULL; dev = next_dev) {
-		next_dev = TAILQ_NEXT(dev, dv_list);
-		if (dev->dv_parent == parent) {
-			switch (act) {
-			case DVACT_ACTIVATE:
-				rv = config_activate(dev);
-				break;
-			case DVACT_DEACTIVATE:
-				rv = config_deactivate(dev);
-				break;
-			default:
-#ifdef DIAGNOSTIC
-				printf ("config_activate_children: shouldn't get here");
+	if (ca->ca_activate) {
+#if 0
+		printf("activate: %s %d\n", dev->dv_xname, act);
 #endif
-				rv = EOPNOTSUPP;
-				break;
-
-			}
-						
-			if (rv)
-				break;
-		}
+		return (*ca->ca_activate)(dev, act);
 	}
+	return (0);
+}
 
-	return  (rv);
+/*
+ * Call the ca_activate for each of our children, letting each
+ * decide whether they wish to do the same for their children
+ * and more.
+ */
+int
+config_activate_children(struct device *parent, int act)
+{
+	struct device *d;
+	int rv = 0;
+
+	for (d = TAILQ_NEXT(parent, dv_list); d != NULL;
+	    d = TAILQ_NEXT(d, dv_list)) {
+		if (d->dv_parent != parent)
+			continue;
+		switch (act) {
+		case DVACT_ACTIVATE:
+			rv = config_activate(d);
+			break;
+		case DVACT_SUSPEND:
+		case DVACT_RESUME:
+		case DVACT_QUIESCE:
+			rv = config_suspend(d, act);
+			break;
+		case DVACT_DEACTIVATE:
+			rv = config_deactivate(d);
+			break;
+		}
+		if (rv == 0)
+			continue;
+
+		/*
+		 * Found a device that refuses the action.
+		 * If we were being asked to suspend, we can
+		 * try to resume all previous devices.
+		 */
+#ifdef DIAGNOSTIC
+		printf("config_activate_children: device %s failed %d\n",
+		    d->dv_xname, act);
+#endif
+		if (act == DVACT_RESUME)
+			printf("failing resume cannot be handled\n");
+		if (act != DVACT_SUSPEND)
+			return (rv);
+
+		d = TAILQ_PREV(d, devicelist, dv_list);
+		for (; d != NULL && d != parent;
+		    d = TAILQ_PREV(d, devicelist, dv_list)) {
+			if (d->dv_parent != parent)
+				continue;
+			printf("resume %s\n", d->dv_xname);
+			config_suspend(d, DVACT_RESUME);
+		}
+		return (rv);
+	}
+	return (rv);
 }
 
 /* 

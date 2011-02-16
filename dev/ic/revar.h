@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: revar.h,v 1.4 2006/09/19 07:23:02 mickey Exp $	*/
+=======
+/*	$OpenBSD: revar.h,v 1.7 2010/07/27 20:53:39 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -18,5 +22,6 @@
 
 int	re_intr(void *);
 int	re_attach(struct rl_softc *, const char *);
+void	re_reset(struct rl_softc *);
 int	re_init(struct ifnet *);
-void	re_stop(struct ifnet *, int);
+void	re_stop(struct ifnet *);

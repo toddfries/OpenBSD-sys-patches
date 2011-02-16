@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.32 2004/07/13 14:51:29 tedu Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.40 2010/12/26 15:40:59 miod Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -84,20 +84,22 @@ extern struct pdc_hwtlb pdc_hwtlb;
  * pool quickmaps
  */
 #define	pmap_map_direct(pg)	((vaddr_t)VM_PAGE_TO_PHYS(pg))
-#define	pmap_unmap_direct(va) PHYS_TO_VM_PAGE((paddr_t)(va))
+struct vm_page *pmap_unmap_direct(vaddr_t);
 #define	__HAVE_PMAP_DIRECT
 
 /*
  * according to the parisc manual aliased va's should be
  * different by high 12 bits only.
  */
-#define	PMAP_PREFER(o,h)	do {					\
-	vaddr_t pmap_prefer_hint;					\
-	pmap_prefer_hint = (*(h) & HPPA_PGAMASK) | ((o) & HPPA_PGAOFF);	\
-	if (pmap_prefer_hint < *(h))					\
-		pmap_prefer_hint += HPPA_PGALIAS;			\
-	*(h) = pmap_prefer_hint;					\
-} while(0)
+#define	PMAP_PREFER(o,h)	pmap_prefer(o, h)
+static __inline__ vaddr_t
+pmap_prefer(vaddr_t offs, vaddr_t hint)
+{
+	vaddr_t pmap_prefer_hint = (hint & HPPA_PGAMASK) | (offs & HPPA_PGAOFF);
+	if (pmap_prefer_hint < hint)
+		pmap_prefer_hint += HPPA_PGALIAS;
+	return pmap_prefer_hint;
+}
 
 #define	pmap_sid2pid(s)			(((s) + 1) << 1)
 #define pmap_kernel()			(&kernel_pmap_store)
@@ -109,9 +111,7 @@ extern struct pdc_hwtlb pdc_hwtlb;
 #define pmap_clear_reference(pg) pmap_changebit(pg, PTE_PROT(TLB_REFTRAP), 0)
 #define pmap_is_modified(pg)	pmap_testbit(pg, PTE_PROT(TLB_DIRTY))
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_PROT(TLB_REFTRAP))
-#define pmap_phys_address(ppn)	((ppn) << PAGE_SHIFT)
 
-#define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
 
 void pmap_bootstrap(vaddr_t);

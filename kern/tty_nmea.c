@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: tty_nmea.c,v 1.20 2007/03/20 20:14:29 deraadt Exp $ */
+=======
+/*	$OpenBSD: tty_nmea.c,v 1.39 2010/05/27 17:18:23 sthen Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 2006, 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -20,7 +24,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/queue.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/sensors.h>
@@ -36,19 +39,29 @@ int nmeadebug = 0;
 #endif
 #define DPRINTF(x)	DPRINTFN(0, x)
 
-int	nmeaopen(dev_t, struct tty *);
-int	nmeaclose(struct tty *, int);
+int	nmeaopen(dev_t, struct tty *, struct proc *);
+int	nmeaclose(struct tty *, int, struct proc *);
 int	nmeainput(int, struct tty *);
 void	nmeaattach(int);
 
 #define NMEAMAX	82
 #define MAXFLDS	32
 
+<<<<<<< HEAD
 int nmea_count;	/* this is wrong, it should really be a SLIST */
+=======
+int nmea_count, nmea_nxid;
+>>>>>>> origin/master
 
 struct nmea {
 	char			cbuf[NMEAMAX];	/* receive buffer */
 	struct ksensor		time;		/* the timedelta sensor */
+<<<<<<< HEAD
+=======
+	struct ksensor		signal;		/* signal status */
+	struct ksensor		latitude;
+	struct ksensor		longitude;
+>>>>>>> origin/master
 	struct ksensordev	timedev;
 	struct timespec		ts;		/* current timestamp */
 	struct timespec		lts;		/* timestamp of last '$' seen */
@@ -71,15 +84,23 @@ void	nmea_gprmc(struct nmea *, struct tty *, char *fld[], int fldcnt);
 int	nmea_date_to_nano(char *s, int64_t *nano);
 int	nmea_time_to_nano(char *s, int64_t *nano);
 
+<<<<<<< HEAD
+=======
+/* longitude and latitude conversion */
+int	nmea_degrees(int64_t *dst, char *src, int neg);
+
+/* degrade the timedelta sensor */
+void	nmea_timeout(void *);
+
+>>>>>>> origin/master
 void
 nmeaattach(int dummy)
 {
 }
 
 int
-nmeaopen(dev_t dev, struct tty *tp)
+nmeaopen(dev_t dev, struct tty *tp, struct proc *p)
 {
-	struct proc *p = curproc;
 	struct nmea *np;
 	int error;
 
@@ -90,25 +111,55 @@ nmeaopen(dev_t dev, struct tty *tp)
 	np = malloc(sizeof(struct nmea), M_DEVBUF, M_WAITOK);
 	bzero(np, sizeof(*np));
 	snprintf(np->timedev.xname, sizeof(np->timedev.xname), "nmea%d",
-	    nmea_count++);
+	    nmea_nxid++);
+	nmea_count++;
 	np->time.status = SENSOR_S_UNKNOWN;
 	np->time.type = SENSOR_TIMEDELTA;
 	np->time.flags = SENSOR_FINVALID;
 	sensor_attach(&np->timedev, &np->time);
+<<<<<<< HEAD
+=======
+
+	np->signal.type = SENSOR_INDICATOR;
+	np->signal.status = SENSOR_S_UNKNOWN;
+	np->signal.value = 0;
+	strlcpy(np->signal.desc, "Signal", sizeof(np->signal.desc));
+	sensor_attach(&np->timedev, &np->signal);
+
+	np->latitude.type = SENSOR_ANGLE;
+	np->latitude.status = SENSOR_S_UNKNOWN;
+	np->latitude.flags = SENSOR_FINVALID;
+	np->latitude.value = 0;
+	strlcpy(np->latitude.desc, "Latitude", sizeof(np->latitude.desc));
+	sensor_attach(&np->timedev, &np->latitude);
+
+	np->longitude.type = SENSOR_ANGLE;
+	np->longitude.status = SENSOR_S_UNKNOWN;
+	np->longitude.flags = SENSOR_FINVALID;
+	np->longitude.value = 0;
+	strlcpy(np->longitude.desc, "Longitude", sizeof(np->longitude.desc));
+	sensor_attach(&np->timedev, &np->longitude);
+
+>>>>>>> origin/master
 	np->sync = 1;
 	tp->t_sc = (caddr_t)np;
 
-	error = linesw[TTYDISC].l_open(dev, tp);
+	error = linesw[TTYDISC].l_open(dev, tp, p);
 	if (error) {
 		free(np, M_DEVBUF);
 		tp->t_sc = NULL;
 	} else
 		sensordev_install(&np->timedev);
+<<<<<<< HEAD
+=======
+		timeout_set(&np->nmea_tout, nmea_timeout, np);
+	}
+>>>>>>> origin/master
 	return error;
 }
 
 int
-nmeaclose(struct tty *tp, int flags)
+nmeaclose(struct tty *tp, int flags, struct proc *p)
 {
 	struct nmea *np = (struct nmea *)tp->t_sc;
 
@@ -117,7 +168,9 @@ nmeaclose(struct tty *tp, int flags)
 	free(np, M_DEVBUF);
 	tp->t_sc = NULL;
 	nmea_count--;
-	return linesw[TTYDISC].l_close(tp, flags);
+	if (nmea_count == 0)
+		nmea_nxid = 0;
+	return linesw[TTYDISC].l_close(tp, flags, p);
 }
 
 /* collect NMEA sentence from tty */
@@ -153,7 +206,7 @@ nmeainput(int c, struct tty *tp)
 		}
 #endif
 		np->gap = gap;
-	
+
 		/*
 		 * If a tty timestamp is available, make sure its value is
 		 * reasonable by comparing against the timestamp just taken.
@@ -258,6 +311,7 @@ void
 nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 {
 	int64_t date_nano, time_nano, nmea_now;
+	int jumped = 0;
 
 	if (fldcnt != 12 && fldcnt != 13) {
 		DPRINTF(("gprmc: field count mismatch, %d\n", fldcnt));
@@ -274,11 +328,18 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 	nmea_now = date_nano + time_nano;
 	if (nmea_now <= np->last) {
 		DPRINTF(("gprmc: time not monotonically increasing\n"));
-		return;
+		jumped = 1;
 	}
 	np->last = nmea_now;
 	np->gap = 0LL;
 #ifdef NMEA_DEBUG
+<<<<<<< HEAD
+=======
+	if (np->time.status == SENSOR_S_UNKNOWN) {
+		np->time.status = SENSOR_S_OK;
+		timeout_add_sec(&np->nmea_tout, TRUSTTIME);
+	}
+>>>>>>> origin/master
 	np->gapno = 0;
 	if (nmeadebug > 0) {
 		linesw[TTYDISC].l_rint('[', tp);
@@ -317,7 +378,7 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 			    sizeof(np->time.desc));
 			break;
 		case 'N':
-			strlcpy(np->time.desc, "GPS not valid",
+			strlcpy(np->time.desc, "GPS invalid",
 			    sizeof(np->time.desc));
 			break;
 		default:
@@ -327,22 +388,96 @@ nmea_gprmc(struct nmea *np, struct tty *tp, char *fld[], int fldcnt)
 		}
 	}
 	switch (*fld[2]) {
+<<<<<<< HEAD
 	case 'A':
 		np->time.status = SENSOR_S_OK;
 		break;
 	case 'V':
 		np->time.status = SENSOR_S_WARN;
+=======
+	case 'A':	/* The GPS has a fix, (re)arm the timeout. */
+			/* XXX is 'D' also a valid state? */
+		np->time.status = SENSOR_S_OK;
+		np->signal.value = 1;
+		np->signal.status = SENSOR_S_OK;
+		np->latitude.status = SENSOR_S_OK;
+		np->longitude.status = SENSOR_S_OK;
+		np->time.flags &= ~SENSOR_FINVALID;
+		np->latitude.flags &= ~SENSOR_FINVALID;
+		np->longitude.flags &= ~SENSOR_FINVALID;
+		break;
+	case 'V':	/*
+			 * The GPS indicates a warning status, do not add to
+			 * the timeout, if the condition persist, the sensor
+			 * will be degraded.  Signal the condition through
+			 * the signal sensor.
+			 */
+		np->signal.value = 0;
+		np->signal.status = SENSOR_S_CRIT;
+		np->latitude.status = SENSOR_S_WARN;
+		np->longitude.status = SENSOR_S_WARN;
+>>>>>>> origin/master
 		break;
 	default:
 		DPRINTF(("gprmc: unknown warning indication\n"));
 	}
+	if (nmea_degrees(&np->latitude.value, fld[3], *fld[4] == 'S' ? 1 : 0))
+		np->latitude.status = SENSOR_S_WARN;
+	if (nmea_degrees(&np->longitude.value,fld[5], *fld[6] == 'W' ? 1 : 0))
+		np->longitude.status = SENSOR_S_WARN;
 
+	if (jumped)
+		np->time.status = SENSOR_S_WARN;
+	if (np->time.status == SENSOR_S_OK)
+		timeout_add_sec(&np->nmea_tout, TRUSTTIME);
 	/*
-	 * If tty timestamping is requested, but not PPS signal is present, set
+	 * If tty timestamping is requested, but no PPS signal is present, set
 	 * the sensor state to CRITICAL.
 	 */
 	if (np->no_pps)
 		np->time.status = SENSOR_S_CRIT;
+}
+
+/*
+ * Convert a nmea position in the form DDDMM.MMMM to an
+ * angle sensor value (degrees*1000000)
+ */
+int
+nmea_degrees(int64_t *dst, char *src, int neg)
+{
+	size_t ppos;
+	int i, n;
+	int64_t deg = 0, min = 0;
+	char *p;
+
+	while (*src == '0')
+		++src;	/* skip leading zeroes */
+
+	for (p = src, ppos = 0; *p; ppos++)
+		if (*p++ == '.')
+			break;
+
+	if (*p == '\0')
+		return -1;	/* no decimal point */
+
+	for (n = 0; *src && n + 2 < ppos; n++)
+		deg = deg * 10 + (*src++ - '0');
+
+	for (; *src && n < ppos; n++)
+		min = min * 10 + (*src++ - '0');
+
+	src++;		/* skip decimal point */
+
+	for (; *src && n < (ppos + 4); n++)
+		min = min * 10 + (*src++ - '0');
+
+	for (i=0; i < 6 + ppos - n; i++)
+		min *= 10;
+
+	deg = deg * 1000000 + (min/60);
+
+	*dst = neg ? -deg : deg;
+	return 0;
 }
 
 /*
@@ -426,3 +561,32 @@ nmea_time_to_nano(char *s, int64_t *nano)
 	*nano = secs * 1000000000LL + (int64_t)frac * (1000000000 / div);
 	return 0;
 }
+<<<<<<< HEAD
+=======
+
+/*
+ * Degrade the sensor state if we received no NMEA sentences for more than
+ * TRUSTTIME seconds.
+ */
+void
+nmea_timeout(void *xnp)
+{
+	struct nmea *np = xnp;
+
+	np->signal.value = 0;
+	np->signal.status = SENSOR_S_CRIT;
+	if (np->time.status == SENSOR_S_OK) {
+		np->time.status = SENSOR_S_WARN;
+		np->latitude.status = SENSOR_S_WARN;
+		np->longitude.status = SENSOR_S_WARN;
+		/*
+		 * further degrade in TRUSTTIME seconds if no new valid NMEA
+		 * sentences are received.
+		 */
+		timeout_add_sec(&np->nmea_tout, TRUSTTIME);
+	} else
+		np->time.status = SENSOR_S_CRIT;
+		np->latitude.status = SENSOR_S_CRIT;
+		np->longitude.status = SENSOR_S_CRIT;
+}
+>>>>>>> origin/master

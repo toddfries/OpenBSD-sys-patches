@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.14 2006/03/13 19:39:52 brad Exp $	*/
+/*	$OpenBSD: intr.h,v 1.21 2010/04/23 03:50:22 miod Exp $	*/
 /*	$NetBSD: intr.h,v 1.9 1998/08/12 06:58:42 scottr Exp $	*/
 
 /*
@@ -56,14 +56,17 @@ extern u_short	mac68k_statclockipl;
  *	- compute CPU PSL values for the spl*() calls.
  */
 #define	IPL_NONE	0
-#define	IPL_SOFTNET	1
-#define	IPL_SOFTCLOCK	1
-#define	IPL_BIO		PSLTOIPL(mac68k_bioipl)
+#define	IPL_SOFTINT	1
+#define	IPL_BIO		2
+#define	IPL_AUDIO	PSLTOIPL(mac68k_audioipl)
 #define	IPL_NET		PSLTOIPL(mac68k_netipl)
 #define	IPL_TTY		PSLTOIPL(mac68k_ttyipl)
 #define	IPL_CLOCK	PSLTOIPL(mac68k_clockipl)
 #define	IPL_STATCLOCK	PSLTOIPL(mac68k_statclockipl)
+#define	IPL_SCHED	7
 #define	IPL_HIGH	7
+
+#define	MD_IPLTOPSL(ipl)	IPLTOPSL(ipl)
 
 /*
  * These should be used for:
@@ -88,31 +91,12 @@ extern u_short	mac68k_statclockipl;
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
 
 /* These spl calls are _not_ to be used by machine-independent code. */
-#define	spladb()		splhigh()
 #define	splzs()			splserial()
 
 /* watch out for side effects */
 #define splx(s)         	((s) & PSL_IPL ? _spl(s) : spl0())
 
-/*
- * simulated software interrupt register
- */
-extern volatile u_int8_t ssir;
-
-#define	SIR_NET		0x01
-#define	SIR_CLOCK	0x02
-#define	SIR_SERIAL	0x04
-#define SIR_ADB		0x08
-
-#define	siron(mask)	\
-	__asm __volatile ( "orb %1,%0" : "=m" (ssir) : "i" (mask))
-#define	siroff(mask)	\
-	__asm __volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)))
-
-#define	setsoftnet()	siron(SIR_NET)
-#define	setsoftclock()	siron(SIR_CLOCK)
-#define	setsoftserial()	siron(SIR_SERIAL)
-#define	setsoftadb()	siron(SIR_ADB)
+#include <m68k/intr.h>		/* soft interrupt support */
 
 /* intr.c */
 void	intr_init(void);

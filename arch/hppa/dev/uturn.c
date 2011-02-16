@@ -1,4 +1,4 @@
-/*	$OpenBSD: uturn.c,v 1.2 2004/09/26 21:54:00 mickey Exp $	*/
+/*	$OpenBSD: uturn.c,v 1.7 2010/04/29 13:48:29 jsing Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff
@@ -108,5 +108,21 @@ uturnattach(parent, self, aux)
 
 	nca = *ca;	/* clone from us */
 	nca.ca_hpamask = HPPA_IOBEGIN;
-	pdc_scanbus(self, &nca, MAXMODBUS, 0);
+	pdc_scanbus(self, &nca, MAXMODBUS - 1, 0, 0);
+
+	/* XXX On some machines, PDC doesn't tell us about all devices. */
+	switch (cpu_hvers) {
+	case HPPA_BOARD_HP809:
+	case HPPA_BOARD_HP819:
+	case HPPA_BOARD_HP829:
+	case HPPA_BOARD_HP839:
+	case HPPA_BOARD_HP849:
+	case HPPA_BOARD_HP859:
+	case HPPA_BOARD_HP869:
+		hpa = ((struct iomod *)ioh)->io_io_low << 16;
+		pdc_scanbus(self, &nca, MAXMODBUS - 1, hpa, 0);
+		break;
+	default:
+		break;
+	}
 }

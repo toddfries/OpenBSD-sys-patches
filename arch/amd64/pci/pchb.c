@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.4 2006/03/13 20:10:49 brad Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.37 2010/08/31 17:13:46 deraadt Exp $	*/
 /*	$NetBSD: pchb.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -49,7 +42,8 @@
 
 #include <dev/pci/pcidevs.h>
 
-#include <arch/amd64/pci/pchbvar.h>
+#include <dev/pci/agpvar.h>
+#include <dev/pci/ppbreg.h>
 
 #define PCISET_BRIDGETYPE_MASK	0x3
 #define PCISET_TYPE_COMPAT	0x1
@@ -78,8 +72,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -87,14 +83,29 @@
 
 #define AMD64HT_LDT_SEC_BUS_NUM(reg)	(((reg) >> 8) & 0xff)
 
+struct pchb_softc {
+	struct device sc_dev;
+
+	bus_space_tag_t sc_bt;
+	bus_space_handle_t sc_bh;
+
+	/* rng stuff */
+	int sc_rng_active;
+	int sc_rng_ax;
+	int sc_rng_i;
+	struct timeout sc_rng_to;
+};
+
 int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
+int	pchbactivate(struct device *, int);
 
 int	pchb_print(void *, const char *);
 void	pchb_amd64ht_attach (struct device *, struct pci_attach_args *, int);
 
 struct cfattach pchb_ca = {
-	sizeof(struct pchb_softc), pchbmatch, pchbattach,
+	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
+	pchbactivate
 };
 
 struct cfdriver pchb_cd = {
@@ -118,19 +129,153 @@ void
 pchbattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	int i;
-
-	printf("\n");
+	struct pcibus_attach_args pba;
+	pcireg_t bcreg, bir;
+	u_char pbnum;
+	pcitag_t tag;
+	int i, r;
+	int doattach = 0;
 
 	switch (PCI_VENDOR(pa->pa_id)) {
 	case PCI_VENDOR_AMD:
 		switch (PCI_PRODUCT(pa->pa_id)) {
-		case PCI_PRODUCT_AMD_AMD64_HT:
+		case PCI_PRODUCT_AMD_AMD64_0F_HT:
+		case PCI_PRODUCT_AMD_AMD64_10_HT:
 			for (i = 0; i < AMD64HT_NUM_LDT; i++)
 				pchb_amd64ht_attach(self, pa, i);
 			break;
 		}
+		break;
+	case PCI_VENDOR_INTEL:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_INTEL_82915G_HB:
+		case PCI_PRODUCT_INTEL_82945G_HB:
+		case PCI_PRODUCT_INTEL_82925X_HB:
+		case PCI_PRODUCT_INTEL_82955X_HB:
+			sc->sc_bt = pa->pa_memt;
+			if (bus_space_map(sc->sc_bt, I82802_IOBASE,
+			    I82802_IOSIZE, 0, &sc->sc_bh))
+				break;
+
+			/* probe and init rng */
+			if (!(bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) & I82802_RNG_HWST_PRESENT))
+				break;
+
+			/* enable RNG */
+			bus_space_write_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST,
+			    bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) | I82802_RNG_HWST_ENABLE);
+
+			/* see if we can read anything */
+			for (i = 1000; i-- &&
+			    !(bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_RNGST) & I82802_RNG_RNGST_DATAV); )
+				DELAY(10);
+
+			if (!(bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_RNGST) & I82802_RNG_RNGST_DATAV))
+				break;
+
+			r = bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_DATA);
+
+			timeout_set(&sc->sc_rng_to, pchb_rnd, sc);
+			sc->sc_rng_i = 4;
+			pchb_rnd(sc);
+			sc->sc_rng_active = 1;
+			break;
+		}
+		printf("\n");
+		break;
+	case PCI_VENDOR_VIATECH:
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_VIATECH_VT8251_PCIE_0:
+			/*
+			 * Bump the host bridge into PCI-PCI bridge
+			 * mode by clearing magic bit on the VLINK
+			 * device.  This allows us to read the bus
+			 * number for the PCI bus attached to this
+			 * host bridge.
+			 */
+			tag = pci_make_tag(pa->pa_pc, 0, 17, 7);
+			bcreg = pci_conf_read(pa->pa_pc, tag, 0xfc);
+			bcreg &= ~0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
+
+			bir = pci_conf_read(pa->pa_pc,
+			    pa->pa_tag, PPB_REG_BUSINFO);
+			pbnum = PPB_BUSINFO_PRIMARY(bir);
+			if (pbnum > 0)
+				doattach = 1;
+
+			/* Switch back to host bridge mode. */
+			bcreg |= 0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
+			break;
+		}
+		printf("\n");
+		break;
+	default:
+		printf("\n");
+		break;
 	}
+
+#if NAGP > 0
+	/*
+	 * Intel IGD have an odd interface and attach at vga, however,
+	 * in that mode they don't have the AGP cap bit, so this
+	 * test should be sufficient
+	 */
+	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL) != 0) {
+		struct agp_attach_args	aa;
+		aa.aa_busname = "agp";
+		aa.aa_pa = pa;
+
+		config_found(self, &aa, agpdev_print);
+	}
+#endif /* NAGP > 0 */
+
+	if (doattach == 0)
+		return;
+
+	bzero(&pba, sizeof(pba));
+	pba.pba_busname = "pci";
+	pba.pba_iot = pa->pa_iot;
+	pba.pba_memt = pa->pa_memt;
+	pba.pba_dmat = pa->pa_dmat;
+	pba.pba_domain = pa->pa_domain;
+	pba.pba_bus = pbnum;
+	pba.pba_pc = pa->pa_pc;
+	config_found(self, &pba, pchb_print);
+}
+
+int
+pchbactivate(struct device *self, int act)
+{
+	struct pchb_softc *sc = (struct pchb_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		/* re-enable RNG, if we have it */
+		if (sc->sc_rng_active)
+			bus_space_write_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST,
+			    bus_space_read_1(sc->sc_bt, sc->sc_bh,
+			    I82802_RNG_HWST) | I82802_RNG_HWST_ENABLE);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }
 
 int
@@ -160,12 +305,12 @@ pchb_amd64ht_attach (struct device *self, struct pci_attach_args *pa, int i)
 	reg = AMD64HT_LDT0_BUS + i * 0x20;
 	bus = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 	if (AMD64HT_LDT_SEC_BUS_NUM(bus) > 0) {
+		bzero(&pba, sizeof(pba));
 		pba.pba_busname = "pci";
 		pba.pba_iot = pa->pa_iot;
 		pba.pba_memt = pa->pa_memt;
 		pba.pba_dmat = pa->pa_dmat;
 		pba.pba_bus = AMD64HT_LDT_SEC_BUS_NUM(bus);
-		pba.pba_bridgetag = NULL;
 		pba.pba_pc = pa->pa_pc;
 		config_found(self, &pba, pchb_print);
 	}

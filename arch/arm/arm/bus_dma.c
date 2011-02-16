@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.8 2006/07/16 00:18:33 drahn Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.20 2011/01/04 21:12:55 miod Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.38 2003/10/30 08:44:13 scw Exp $	*/
 
 /*-
@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -613,9 +606,6 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
  * by bus-specific DMA memory allocation functions.
  */
 
-extern paddr_t physical_start;
-extern paddr_t physical_end;
-
 int
 _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
@@ -638,14 +628,13 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 			error = _bus_dmamem_alloc_range(t, size, alignment,
 			    boundary, segs, nsegs, rsegs, flags,
 			    trunc_page(dr->dr_sysbase),
-			    trunc_page(dr->dr_sysbase + dr->dr_len));
+			    trunc_page(dr->dr_sysbase + dr->dr_len) - 1);
 			if (error == 0)
 				break;
 		}
 	} else {
 		error = _bus_dmamem_alloc_range(t, size, alignment, boundary,
-		    segs, nsegs, rsegs, flags, trunc_page(physical_start),
-		    trunc_page(physical_end));
+		    segs, nsegs, rsegs, flags, 0, -1);
 	}
 
 #ifdef DEBUG_DMA
@@ -694,10 +683,13 @@ int
 _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
     size_t size, caddr_t *kvap, int flags)
 {
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	bus_addr_t addr;
-	int curseg;
-	pt_entry_t *ptep/*, pte*/;
+	int curseg, error;
+#ifdef DEBUG_DMA
+	pt_entry_t *ptep;
+#endif
 
 #ifdef DEBUG_DMA
 	printf("dmamem_map: t=%p segs=%p nsegs=%x size=%lx flags=%x\n", t,
@@ -712,6 +704,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 
 	*kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
@@ -721,9 +715,18 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 #endif	/* DEBUG_DMA */
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
-			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			error = pmap_enter(pmap_kernel(), va, addr,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
 			/*
 			 * If the memory must remain coherent with the
 			 * cache then we must make the memory uncacheable
@@ -735,9 +738,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			if (flags & BUS_DMA_COHERENT) {
 				cpu_dcache_wbinv_range(va, PAGE_SIZE);
 				cpu_drain_writebuf();
-				ptep = vtopte(va);
-				*ptep &= ~L2_S_CACHE_MASK;
-				PTE_SYNC(ptep);
+				pmap_uncache_page(va, addr);
 				tlb_flush();
 			}
 #ifdef DEBUG_DMA
@@ -799,7 +800,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */
@@ -970,7 +971,7 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 #ifdef DEBUG_DMA
 	printf("alloc_range: t=%p size=%lx align=%lx boundary=%lx segs=%p nsegs=%x rsegs=%p flags=%x lo=%lx hi=%lx\n",
@@ -980,12 +981,16 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	/* Always round the size. */
 	size = round_page(size);
 
-	TAILQ_INIT(&mlist);
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
+	TAILQ_INIT(&mlist);
 	error = uvm_pglistalloc(size, low, high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 

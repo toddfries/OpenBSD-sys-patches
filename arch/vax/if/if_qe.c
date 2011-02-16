@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: if_qe.c,v 1.19 2006/03/25 22:41:42 djm Exp $	*/
+=======
+/*	$OpenBSD: if_qe.c,v 1.25 2010/09/20 06:33:47 matthew Exp $	*/
+>>>>>>> origin/master
 /*      $NetBSD: if_qe.c,v 1.51 2002/06/08 12:28:37 ragge Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -315,8 +319,7 @@ qeattach(struct device *parent, struct device *self, void *aux)
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec, qeintr,
 		sc, &sc->sc_intrcnt);
 	sc->sc_cvec = ua->ua_cvec;
-	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_cvec, &evcount_intr);
+	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname, &sc->sc_cvec);
 
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, sizeof ifp->if_xname);
 	ifp->if_softc = sc;
@@ -632,12 +635,12 @@ int
 qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct qe_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -676,29 +679,16 @@ qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ac):
-			ether_delmulti(ifr, &sc->sc_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			qe_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			qe_setup(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }

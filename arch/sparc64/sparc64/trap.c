@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: trap.c,v 1.46 2007/02/27 22:46:32 deraadt Exp $	*/
+=======
+/*	$OpenBSD: trap.c,v 1.66 2010/11/27 19:41:48 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -464,10 +468,16 @@ trap(tf, type, pc, tstate)
 dopanic:
 			trap_trace_dis = 1;
 
+<<<<<<< HEAD
 			printf("trap type 0x%x: pc=%lx", type, pc); 
 			printf(" npc=%lx pstate=%b\n",
 			    (long)tf->tf_npc, pstate, PSTATE_BITS);
 			panic(type < N_TRAP_TYPES ? trap_type[type] : T);
+=======
+			panic("trap type 0x%x (%s): pc=%lx npc=%lx pstate=%b",
+			    type, type < N_TRAP_TYPES ? trap_type[type] : T,
+			    pc, (long)tf->tf_npc, pstate, PSTATE_BITS);
+>>>>>>> origin/master
 			/* NOTREACHED */
 		}
 #if defined(COMPAT_SVR4) || defined(COMPAT_SVR4_32)
@@ -504,6 +514,26 @@ badtrap:
 			preempt(NULL);
 		break;
 
+<<<<<<< HEAD
+=======
+	case T_RWRET:
+		/*
+		 * XXX Flushing the user windows here should not be
+		 * necessary, but not doing so here causes corruption
+		 * of user windows on sun4v.  Flushing them shouldn't
+		 * be much of a prefermance penalty since we're
+		 * probably going to spill any remaining user windows
+		 * anyhow.
+		 */
+		write_user_windows();
+		if (rwindow_save(p) == -1) {
+			KERNEL_PROC_LOCK(p);
+			trapsignal(p, SIGILL, 0, ILL_BADSTK, sv);
+			KERNEL_PROC_UNLOCK(p);
+		}
+		break;
+
+>>>>>>> origin/master
 	case T_ILLINST:
 	{
 		union instr ins;
@@ -637,11 +667,6 @@ badtrap:
 		}
 	}
 		
-		if ((p->p_md.md_flags & MDP_FIXALIGN) != 0 && 
-		    fixalign(p, tf) == 0) {
-			ADVANCE;
-			break;
-		}
 		/* XXX sv.sival_ptr should be the fault address! */
 		trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);	/* XXX code?? */
 		break;
@@ -705,12 +730,11 @@ badtrap:
 		break;
 
 	case T_FIXALIGN:
-#ifdef DEBUG_ALIGN
 		uprintf("T_FIXALIGN\n");
-#endif
-		/* User wants us to fix alignment faults */
-		p->p_md.md_flags |= MDP_FIXALIGN;
 		ADVANCE;
+		KERNEL_PROC_LOCK(p);
+		trapsignal(p, SIGILL, 0, ILL_ILLOPN, sv);	/* XXX code? */
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_INTOF:
@@ -901,7 +925,11 @@ kfault:
 				extern int trap_trace_dis;
 				trap_trace_dis = 1; /* Disable traptrace for printf */
 				(void) splhigh();
+<<<<<<< HEAD
 				printf("data fault: pc=%lx addr=%lx\n",
+=======
+				panic("kernel data fault: pc=%lx addr=%lx",
+>>>>>>> origin/master
 				    pc, addr);
 				panic("kernel fault");
 				/* NOTREACHED */
@@ -961,7 +989,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 	printf("data error type %x sfsr=%lx sfva=%lx afsr=%lx afva=%lx tf=%p\n",
 		type, sfsr, sfva, afsr, afva, tf);
 
-	if (afsr == 0) {
+	if (afsr == 0 && sfsr == 0) {
 		printf("data_access_error: no fault\n");
 		goto out;	/* No fault. Why were we called? */
 	}
@@ -973,7 +1001,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			panic("data fault: pc=%lx addr=%lx sfsr=%b\n",
+			panic("data fault: pc=%lx addr=%lx sfsr=%b",
 				(u_long)pc, (long)sfva, sfsr, SFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -1036,8 +1064,12 @@ text_access_fault(tf, type, pc, sfsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
+<<<<<<< HEAD
 		printf("text_access_fault: pc=%lx va=%lx\n", pc, va);
 		panic("kernel fault");
+=======
+		panic("kernel text_access_fault: pc=%lx va=%lx", pc, va);
+>>>>>>> origin/master
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1068,8 +1100,12 @@ text_access_fault(tf, type, pc, sfsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
+<<<<<<< HEAD
 			printf("text fault: pc=%llx\n", (unsigned long long)pc);
 			panic("kernel fault");
+=======
+			panic("kernel text fault: pc=%llx", (unsigned long long)pc);
+>>>>>>> origin/master
 			/* NOTREACHED */
 		}
 		trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
@@ -1139,8 +1175,12 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
+<<<<<<< HEAD
 		printf("text error: pc=%lx sfsr=%b\n", pc, sfsr, SFSR_BITS);
 		panic("kernel fault");
+=======
+		panic("kernel text error: pc=%lx sfsr=%b", pc, sfsr, SFSR_BITS);
+>>>>>>> origin/master
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1172,7 +1212,11 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
+<<<<<<< HEAD
 			printf("text error: pc=%lx sfsr=%b\n", pc,
+=======
+			panic("kernel text error: pc=%lx sfsr=%b", pc,
+>>>>>>> origin/master
 			    sfsr, SFSR_BITS);
 			panic("kernel fault");
 			/* NOTREACHED */

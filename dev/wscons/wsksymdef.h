@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: wsksymdef.h,v 1.30 2006/05/29 20:23:13 miod Exp $	*/
+=======
+/*	$OpenBSD: wsksymdef.h,v 1.33 2010/07/31 16:12:37 miod Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
 
 /*-
@@ -16,13 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -581,6 +578,10 @@
 #define KS_f18			0xf311
 #define KS_f19			0xf312
 #define KS_f20			0xf313
+#define KS_f21			0xf314
+#define KS_f22			0xf315
+#define KS_f23			0xf316
+#define KS_f24			0xf317
 
 #define KS_F1			0xf340
 #define KS_F2			0xf341
@@ -602,6 +603,10 @@
 #define KS_F18			0xf351
 #define KS_F19			0xf352
 #define KS_F20			0xf353
+#define KS_F21			0xf354
+#define KS_F22			0xf355
+#define KS_F23			0xf356
+#define KS_F24			0xf357
 
 #define KS_Home			0xf381
 #define KS_Prior		0xf382

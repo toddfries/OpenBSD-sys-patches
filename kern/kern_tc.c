@@ -6,17 +6,23 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
+<<<<<<< HEAD
  * $OpenBSD: kern_tc.c,v 1.7 2006/11/15 17:25:40 jmc Exp $
+=======
+ * $OpenBSD: kern_tc.c,v 1.16 2010/09/24 07:29:30 deraadt Exp $
+>>>>>>> origin/master
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <sys/timetc.h>
 #include <sys/malloc.h>
+#include <dev/rndvar.h>
 
 #ifdef __HAVE_TIMECOUNTER
 /*
@@ -65,7 +71,7 @@ struct timehands {
 	struct timehands	*th_next;
 };
 
-extern struct timehands th0;
+static struct timehands th0;
 static struct timehands th9 = { NULL, 0, 0, 0, {0, 0}, {0, 0}, {0, 0}, 0, &th0};
 static struct timehands th8 = { NULL, 0, 0, 0, {0, 0}, {0, 0}, {0, 0}, 0, &th9};
 static struct timehands th7 = { NULL, 0, 0, 0, {0, 0}, {0, 0}, {0, 0}, 0, &th8};
@@ -293,7 +299,8 @@ tc_init(struct timecounter *tc)
 	    tc->tc_frequency < timecounter->tc_frequency)
 		return;
 	(void)tc->tc_get_timecount(tc);
-	(void)tc->tc_get_timecount(tc);
+	add_timer_randomness(tc->tc_get_timecount(tc));
+
 	timecounter = tc;
 }
 
@@ -322,6 +329,7 @@ tc_setclock(struct timespec *ts)
 	bintime_add(&bt2, &boottimebin);
 	boottimebin = bt;
 	bintime2timeval(&bt, &boottime);
+	add_timer_randomness(ts->tv_sec);
 
 	/* XXX fiddle all the little crinkly bits around the fiords... */
 	tc_windup();
@@ -495,7 +503,6 @@ sysctl_tc_choice(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 	int error, maxlen;
 
 	spc = "";
-	error = 0;
 	maxlen = 0;
 	for (tc = timecounters; tc != NULL; tc = tc->tc_next)
 		maxlen += sizeof(buf);
@@ -534,13 +541,15 @@ tc_ticktock(void)
 void
 inittimecounter(void)
 {
+#ifdef DEBUG
 	u_int p;
+#endif
 
 	/*
 	 * Set the initial timeout to
 	 * max(1, <approx. number of hardclock ticks in a millisecond>).
 	 * People should probably not use the sysctl to set the timeout
-	 * to smaller than its inital value, since that value is the
+	 * to smaller than its initial value, since that value is the
 	 * smallest reasonable one.  If they want better timestamps they
 	 * should use the non-"get"* functions.
 	 */
@@ -548,8 +557,8 @@ inittimecounter(void)
 		tc_tick = (hz + 500) / 1000;
 	else
 		tc_tick = 1;
-	p = (tc_tick * 1000000) / hz;
 #ifdef DEBUG
+	p = (tc_tick * 1000000) / hz;
 	printf("Timecounters tick every %d.%03u msec\n", p / 1000, p % 1000);
 #endif
 

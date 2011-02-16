@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: evcount.h,v 1.1 2004/06/28 01:34:46 aaron Exp $ */
+=======
+/*	$OpenBSD: evcount.h,v 1.3 2010/09/20 06:33:46 matthew Exp $ */
+>>>>>>> origin/master
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>
@@ -36,20 +40,14 @@ struct evcount {
 	u_int64_t		ec_count;	/* main counter */
 	int			ec_id;		/* counter ID */
 	const char		*ec_name;	/* counter name */
-	struct evcount		*ec_parent;	/* parent */
 	void			*ec_data;	/* user data */
 
 	TAILQ_ENTRY(evcount)	next;
 };
 
-void evcount_attach(struct evcount *, const char *, void *, struct evcount *);
+void evcount_attach(struct evcount *, const char *, void *);
 void evcount_detach(struct evcount *);
 int evcount_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-
-/*
- * Standard evcount parents.
- */
-extern struct evcount evcount_intr;
 
 #endif /* _KERNEL */
 

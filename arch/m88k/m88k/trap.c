@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.38 2007/02/11 12:49:37 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.73 2010/12/31 20:54:21 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -80,6 +80,7 @@
 #define USERMODE(PSR)   (((PSR) & PSR_MODE) == 0)
 #define SYSTEMMODE(PSR) (((PSR) & PSR_MODE) != 0)
 
+void printtrap(int, struct trapframe *);
 __dead void panictrap(int, struct trapframe *);
 __dead void error_fatal(struct trapframe *);
 int double_reg_fixup(struct trapframe *);
@@ -129,48 +130,106 @@ userret(struct proc *p)
 	curcpu()->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
+void
+printtrap(int type, struct trapframe *frame)
+{
+#ifdef M88100
+	if (CPU_IS88100) {
+		if (type == 2) {
+			/* instruction exception */
+			printf("\nInstr access fault (%s) v = %x, frame %p\n",
+			    pbus_exception_type[
+			      CMMU_PFSR_FAULT(frame->tf_ipfsr)],
+			    frame->tf_sxip & XIP_ADDR, frame);
+		} else if (type == 3) {
+			/* data access exception */
+			printf("\nData access fault (%s) v = %x, frame %p\n",
+			    pbus_exception_type[
+			      CMMU_PFSR_FAULT(frame->tf_dpfsr)],
+			    frame->tf_sxip & XIP_ADDR, frame);
+		} else
+			printf("\nTrap type %d, v = %x, frame %p\n",
+			    type, frame->tf_sxip & XIP_ADDR, frame);
+	}
+#endif
+#ifdef M88110
+	if (CPU_IS88110) {
+		printf("\nTrap type %d, v = %x, frame %p\n",
+		    type, frame->tf_exip, frame);
+	}
+#endif
+#ifdef DDB
+	regdump(frame);
+#endif
+}
+
 __dead void
 panictrap(int type, struct trapframe *frame)
 {
 	static int panicing = 0;
 
-	if (panicing++ == 0) {
-#ifdef M88100
-		if (CPU_IS88100) {
-			if (type == 2) {
-				/* instruction exception */
-				printf("\nInstr access fault (%s) v = %x, "
-				    "frame %p\n",
-				    pbus_exception_type[
-				      CMMU_PFSR_FAULT(frame->tf_ipfsr)],
-				    frame->tf_sxip & XIP_ADDR, frame);
-			} else if (type == 3) {
-				/* data access exception */
-				printf("\nData access fault (%s) v = %x, "
-				    "frame %p\n",
-				    pbus_exception_type[
-				      CMMU_PFSR_FAULT(frame->tf_dpfsr)],
-				    frame->tf_sxip & XIP_ADDR, frame);
-			} else
-				printf("\nTrap type %d, v = %x, frame %p\n",
-				    type, frame->tf_sxip & XIP_ADDR, frame);
-		}
-#endif
-#ifdef M88110
-		if (CPU_IS88110) {
-			printf("\nTrap type %d, v = %x, frame %p\n",
-			    type, frame->tf_exip, frame);
-		}
-#endif
-#ifdef DDB
-		regdump(frame);
-#endif
-	}
+	if (panicing++ == 0)
+		printtrap(type, frame);
 	if ((u_int)type < trap_types)
 		panic(trap_type[type]);
 	else
 		panic("trap %d", type);
 	/*NOTREACHED*/
+}
+
+/*
+ * Handle external interrupts.
+ */
+void
+interrupt(struct trapframe *frame)
+{
+	struct cpu_info *ci = curcpu();
+
+	ci->ci_intrdepth++;
+	md_interrupt_func(frame);
+	ci->ci_intrdepth--;
+}
+
+#ifdef M88110
+/*
+ * Handle non-maskable interrupts.
+ */
+int
+nmi(struct trapframe *frame)
+{
+	return md_nmi_func(frame);
+}
+
+/*
+ * Reenable non-maskable interrupts.
+ */
+void
+nmi_wrapup(struct trapframe *frame)
+{
+	md_nmi_wrapup_func(frame);
+}
+#endif
+
+/*
+ * Handle asynchronous software traps.
+ */
+void
+ast(struct trapframe *frame)
+{
+	struct cpu_info *ci = curcpu();
+	struct proc *p = ci->ci_curproc;
+
+	uvmexp.softs++;
+	p->p_md.md_astpending = 0;
+	if (p->p_flag & P_OWEUPC) {
+		KERNEL_PROC_LOCK(p);
+		ADDUPROF(p);
+		KERNEL_PROC_UNLOCK(p);
+	}
+	if (ci->ci_want_resched)
+		preempt(NULL);
+
+	userret(p);
 }
 
 #ifdef M88100
@@ -209,6 +268,8 @@ m88100_trap(unsigned type, struct trapframe *frame)
 
 	switch (type) {
 	default:
+	case T_ILLFLT:
+lose:
 		panictrap(frame->tf_vector, frame);
 		break;
 		/*NOTREACHED*/
@@ -229,23 +290,10 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		splx(s);
 		return;
 #endif /* DDB */
-	case T_ILLFLT:
-		printf("Unimplemented opcode!\n");
-		panictrap(frame->tf_vector, frame);
-		break;
-	case T_INT:
-	case T_INT+T_USER:
-		curcpu()->ci_intrdepth++;
-		md_interrupt_func(T_INT, frame);
-		curcpu()->ci_intrdepth--;
-		return;
-
 	case T_MISALGNFLT:
-		printf("kernel misaligned access exception @ 0x%08x\n",
+		printf("kernel misaligned access exception @%p\n",
 		    frame->tf_sxip);
-		panictrap(frame->tf_vector, frame);
-		break;
-
+		goto lose;
 	case T_INSTFLT:
 		/* kernel mode instruction access fault.
 		 * Should never, never happen for a non-paged kernel.
@@ -256,9 +304,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		    pbus_type, pbus_exception_type[pbus_type],
 		    fault_addr, frame, frame->tf_cpu);
 #endif
-		panictrap(frame->tf_vector, frame);
-		break;
-
+		goto lose;
 	case T_DATAFLT:
 		/* kernel mode data fault */
 
@@ -278,9 +324,6 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		}
 
 		va = trunc_page((vaddr_t)fault_addr);
-		if (va == 0) {
-			panic("trap: bad kernel access at %x", fault_addr);
-		}
 
 		KERNEL_LOCK(LK_CANRECURSE | LK_EXCLUSIVE);
 		vm = p->p_vmspace;
@@ -311,6 +354,22 @@ m88100_trap(unsigned type, struct trapframe *frame)
 				p->p_addr->u_pcb.pcb_onfault = 0;
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
+			/*
+			 * This could be a fault caused in copyout*()
+			 * while accessing kernel space.
+			 */
+			if (result != 0 && pcb_onfault != 0) {
+				frame->tf_snip = pcb_onfault | NIP_V;
+				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
+				frame->tf_sxip = 0;
+				/*
+				 * Continue as if the fault had been resolved,
+				 * but do not try to complete the faulting
+				 * access.
+				 */
+				frame->tf_dmt0 |= DMT_SKIP;
+				result = 0;
+			}
 			if (result == 0) {
 				/*
 				 * We could resolve the fault. Call
@@ -331,7 +390,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		    pbus_exception_type[pbus_type], va);
 #endif
 		KERNEL_UNLOCK();
-		panictrap(frame->tf_vector, frame);
+		goto lose;
 		/* NOTREACHED */
 	case T_INSTFLT+T_USER:
 		/* User mode instruction access fault */
@@ -598,6 +657,58 @@ m88110_trap(unsigned type, struct trapframe *frame)
 	if ((p = curproc) == NULL)
 		p = &proc0;
 
+	fault_type = SI_NOINFO;
+	fault_code = 0;
+	fault_addr = frame->tf_exip & XIP_ADDR;
+
+	/*
+	 * 88110 errata #16 (4.2) or #3 (5.1.1):
+	 * ``bsr, br, bcnd, jsr and jmp instructions with the .n extension
+	 *   can cause the enip value to be incremented by 4 incorrectly
+	 *   if the instruction in the delay slot is the first word of a
+	 *   page which misses in the mmu and results in a hardware
+	 *   tablewalk which encounters an exception or an invalid
+	 *   descriptor.  The exip value in this case will point to the
+	 *   first word of the page, and the D bit will be set.
+	 *
+	 *   Note: if the instruction is a jsr.n r1, r1 will be overwritten
+	 *   with erroneous data.  Therefore, no recovery is possible. Do
+	 *   not allow this instruction to occupy the last word of a page.
+	 *
+	 *   Suggested fix: recover in general by backing up the exip by 4
+	 *   and clearing the delay bit before an rte when the lower 3 hex
+	 *   digits of the exip are 001.''
+	 */
+	if ((frame->tf_exip & PAGE_MASK) == 0x00000001 && type == T_INSTFLT) {
+		u_int instr;
+
+		/*
+		 * Note that we have initialized fault_addr above, so that
+		 * signals provide the correct address if necessary.
+		 */
+		frame->tf_exip = (frame->tf_exip & ~1) - 4;
+
+		/*
+		 * Check the instruction at the (backed up) exip.
+		 * If it is a jsr.n, abort.
+		 */
+		if (!USERMODE(frame->tf_epsr)) {
+			instr = *(u_int *)fault_addr;
+			if (instr == 0xf400cc01)
+				panic("mc88110 errata #16, exip %p enip %p",
+				    (frame->tf_exip + 4) | 1, frame->tf_enip);
+		} else {
+			/* copyin here should not fail */
+			if (copyin((const void *)frame->tf_exip, &instr,
+			    sizeof instr) == 0 &&
+			    instr == 0xf400cc01) {
+				uprintf("mc88110 errata #16, exip %p enip %p",
+				    (frame->tf_exip + 4) | 1, frame->tf_enip);
+				sig = SIGILL;
+			}
+		}
+	}
+
 	if (USERMODE(frame->tf_epsr)) {
 		type += T_USER;
 		p->p_md.md_tf = frame;	/* for ptrace/signals */
@@ -676,28 +787,60 @@ m88110_trap(unsigned type, struct trapframe *frame)
 #endif /* 0 */
 #endif /* DDB */
 	case T_ILLFLT:
-		printf("Unimplemented opcode!\n");
-		panictrap(frame->tf_vector, frame);
-		break;
-	case T_NON_MASK:
-	case T_NON_MASK+T_USER:
-		curcpu()->ci_intrdepth++;
-		md_interrupt_func(T_NON_MASK, frame);
-		curcpu()->ci_intrdepth--;
-		return;
-	case T_INT:
-	case T_INT+T_USER:
-		curcpu()->ci_intrdepth++;
-		md_interrupt_func(T_INT, frame);
-		curcpu()->ci_intrdepth--;
-		return;
-	case T_MISALGNFLT:
-		printf("kernel mode misaligned access exception @ 0x%08x\n",
-		    frame->tf_exip);
-		panictrap(frame->tf_vector, frame);
-		break;
-		/*NOTREACHED*/
+		/*
+		 * The 88110 seems to trigger an instruction fault in
+		 * supervisor mode when running the following sequence:
+		 *
+		 *	bcnd.n cond, reg, 1f
+		 *	arithmetic insn
+		 *	...
+		 *  	the same exact arithmetic insn
+		 *  1:	another arithmetic insn stalled by the previous one
+		 *	...
+		 *
+		 * The exception is reported with exip pointing to the
+		 * branch address. I don't know, at this point, if there
+		 * is any better workaround than the aggressive one
+		 * implemented below; I don't see how this could relate to
+		 * any of the 88110 errata (although it might be related to
+		 * branch prediction).
+		 *
+		 * For the record, the exact sequence triggering the
+		 * spurious exception is:
+		 *
+		 *	bcnd.n	eq0, r2,  1f
+		 *	 or	r25, r0,  r22
+		 *	bsr	somewhere
+		 *	or	r25, r0,  r22
+		 *  1:	cmp	r13, r25, r20
+		 *
+		 * within the same cache line.
+		 *
+		 * Simply ignoring the exception and returning does not
+		 * cause the exception to disappear. Clearing the
+		 * instruction cache works, but on 88110+88410 systems,
+		 * the 88410 needs to be invalidated as well. (note that
+		 * the size passed to the flush routines does not matter
+		 * since there is no way to flush a subset of the 88110
+		 * I$ anyway)
+		 */
+	    {
+		extern void *kernel_text, *etext;
 
+		if (fault_addr >= (vaddr_t)&kernel_text &&
+		    fault_addr < (vaddr_t)&etext) {
+			cmmu_icache_inv(curcpu()->ci_cpuid,
+			    trunc_page(fault_addr), PAGE_SIZE);
+			cmmu_cache_wbinv(curcpu()->ci_cpuid,
+			    trunc_page(fault_addr), PAGE_SIZE);
+			return;
+		}
+	    }
+		goto lose;
+	case T_MISALGNFLT:
+		printf("kernel misaligned access exception @%p\n",
+		    frame->tf_exip);
+		goto lose;
 	case T_INSTFLT:
 		/* kernel mode instruction access fault.
 		 * Should never, never happen for a non-paged kernel.
@@ -734,9 +877,6 @@ m88110_trap(unsigned type, struct trapframe *frame)
 		}
 
 		va = trunc_page((vaddr_t)fault_addr);
-		if (va == 0) {
-			panic("trap: bad kernel access at %x", fault_addr);
-		}
 
 		KERNEL_LOCK(LK_CANRECURSE | LK_EXCLUSIVE);
 		vm = p->p_vmspace;
@@ -752,54 +892,20 @@ m88110_trap(unsigned type, struct trapframe *frame)
 				p->p_addr->u_pcb.pcb_onfault = 0;
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
+			/*
+			 * This could be a fault caused in copyout*()
+			 * while accessing kernel space.
+			 */
+			if (result != 0 && pcb_onfault != 0) {
+				frame->tf_exip = pcb_onfault;
+				/*
+				 * Continue as if the fault had been resolved.
+				 */
+				result = 0;
+			}
 			if (result == 0) {
 				KERNEL_UNLOCK();
 				return;
-			}
-		}
-		if (frame->tf_dsr & CMMU_DSR_WE) {	/* write fault  */
-			/*
-			 * This could be a write protection fault or an
-			 * exception to set the used and modified bits
-			 * in the pte. Basically, if we got a write error,
-			 * then we already have a pte entry that faulted
-			 * in from a previous seg fault or page fault.
-			 * Get the pte and check the status of the
-			 * modified and valid bits to determine if this
-			 * indeed a real write fault.  XXX smurph
-			 */
-			pte = pmap_pte(map->pmap, va);
-#ifdef DEBUG
-			if (pte == NULL) {
-				KERNEL_UNLOCK();
-				panic("NULL pte on write fault??");
-			}
-#endif
-			if (!(*pte & PG_M) && !(*pte & PG_RO)) {
-				/* Set modified bit and try the write again. */
-#ifdef TRAPDEBUG
-				printf("Corrected kernel write fault, map %x pte %x\n",
-				    map->pmap, *pte);
-#endif
-				*pte |= PG_M;
-				KERNEL_UNLOCK();
-				return;
-#if 1	/* shouldn't happen */
-			} else {
-				/* must be a real wp fault */
-#ifdef TRAPDEBUG
-				printf("Uncorrected kernel write fault, map %x pte %x\n",
-				    map->pmap, *pte);
-#endif
-				if ((pcb_onfault = p->p_addr->u_pcb.pcb_onfault) != 0)
-					p->p_addr->u_pcb.pcb_onfault = 0;
-				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
-				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-				if (result == 0) {
-					KERNEL_UNLOCK();
-					return;
-				}
-#endif
 			}
 		}
 		KERNEL_UNLOCK();
@@ -844,7 +950,28 @@ m88110_user_fault:
 		 * Call uvm_fault() to resolve non-bus error faults
 		 * whenever possible.
 		 */
-		if (type == T_DATAFLT+T_USER) {
+		if (type == T_INSTFLT+T_USER) {
+			/* instruction faults */
+			if (frame->tf_isr &
+			    (CMMU_ISR_BE | CMMU_ISR_SP | CMMU_ISR_TBE)) {
+				/* bus error, supervisor protection */
+				result = EACCES;
+			} else
+			if (frame->tf_isr & (CMMU_ISR_SI | CMMU_ISR_PI)) {
+				/* segment or page fault */
+				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
+			} else {
+#ifdef TRAPDEBUG
+				printf("Unexpected Instruction fault isr %x\n",
+				    frame->tf_isr);
+#endif
+				if (type == T_DATAFLT)
+					KERNEL_UNLOCK();
+				else
+					KERNEL_PROC_UNLOCK(p);
+				goto lose;
+			}
+		} else {
 			/* data faults */
 			if (frame->tf_dsr & CMMU_DSR_BE) {
 				/* bus error */
@@ -853,7 +980,6 @@ m88110_user_fault:
 			if (frame->tf_dsr & (CMMU_DSR_SI | CMMU_DSR_PI)) {
 				/* segment or page fault */
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
-				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 			} else
 			if (frame->tf_dsr & (CMMU_DSR_CP | CMMU_DSR_WA)) {
 				/* copyback or write allocate error */
@@ -902,36 +1028,20 @@ m88110_user_fault:
 					    map->pmap, *pte);
 #endif
 					result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
-					p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 				}
 			} else {
 #ifdef TRAPDEBUG
 				printf("Unexpected Data access fault dsr %x\n",
 				    frame->tf_dsr);
 #endif
-				KERNEL_PROC_UNLOCK(p);
-				panictrap(frame->tf_vector, frame);
-			}
-		} else {
-			/* instruction faults */
-			if (frame->tf_isr &
-			    (CMMU_ISR_BE | CMMU_ISR_SP | CMMU_ISR_TBE)) {
-				/* bus error, supervisor protection */
-				result = EACCES;
-			} else
-			if (frame->tf_isr & (CMMU_ISR_SI | CMMU_ISR_PI)) {
-				/* segment or page fault */
-				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
-				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-			} else {
-#ifdef TRAPDEBUG
-				printf("Unexpected Instruction fault isr %x\n",
-				    frame->tf_isr);
-#endif
-				KERNEL_PROC_UNLOCK(p);
-				panictrap(frame->tf_vector, frame);
+				if (type == T_DATAFLT)
+					KERNEL_UNLOCK();
+				else
+					KERNEL_PROC_UNLOCK(p);
+				goto lose;
 			}
 		}
+		p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 
 		if ((caddr_t)va >= vm->vm_maxsaddr) {
 			if (result == 0)
@@ -1424,7 +1534,7 @@ child_return(arg)
 	/* skip br instruction as in syscall() */
 #ifdef M88100
 	if (CPU_IS88100) {
-		tf->tf_snip = tf->tf_sfip & XIP_ADDR;
+		tf->tf_snip = (tf->tf_sfip & XIP_ADDR) | XIP_V;
 		tf->tf_sfip = tf->tf_snip + 4;
 	}
 #endif
@@ -1785,7 +1895,7 @@ cache_flush(struct trapframe *tf)
 	while (len != 0) {
 		count = min(len, PAGE_SIZE - (va & PAGE_MASK));
 		if (pmap_extract(pmap, va, &pa) != FALSE)	
-			dma_cachectl_pa(pa, count, DMA_CACHE_SYNC);
+			dma_cachectl(pa, count, DMA_CACHE_SYNC);
 		va += count;
 		len -= count;
 	}
