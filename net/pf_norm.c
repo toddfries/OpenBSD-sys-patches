@@ -919,10 +919,15 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 
 	if (!pf_pull_hdr(m, off, &frag, sizeof(frag), NULL, NULL, AF_INET6))
 		goto shortpkt;
-	fragoff = ntohs(frag.ip6f_offlg & IP6F_OFF_MASK);
-	if (fragoff + (sizeof(struct ip6_hdr) + plen - off - sizeof(frag)) >
-	    IPV6_MAXPACKET)
-		goto badfrag;
+	/* offset now points to data portion */
+	off += sizeof(frag);
+
+	/* Returns PF_DROP or *m0 is NULL or completely reassembled mbuf */
+	if (pf_reassemble6(m0, h, &frag, off, extoff, dir, reason) != PF_PASS)
+		return (PF_DROP);
+	m = *m0;
+	if (m == NULL)
+		return (PF_PASS);
 
 	pd->flags |= PFDESC_IP_REAS;
 	return (PF_PASS);
