@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nd6_rtr.c,v 1.40 2006/06/16 16:49:40 henning Exp $	*/
-=======
 /*	$OpenBSD: nd6_rtr.c,v 1.54 2010/09/24 14:10:52 jsing Exp $	*/
->>>>>>> origin/master
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -45,11 +41,8 @@
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/syslog.h>
-<<<<<<< HEAD
-=======
 #include <sys/queue.h>
 #include <sys/workq.h>
->>>>>>> origin/master
 #include <dev/rndvar.h>
 
 #include <net/if.h>
@@ -443,6 +436,7 @@ nd6_rtmsg(int cmd, struct rtentry *rt)
 void
 defrouter_addreq(struct nd_defrouter *new)
 {
+	struct rt_addrinfo info;
 	struct sockaddr_in6 def, mask, gate;
 	struct rtentry *newrt = NULL;
 	int s;
@@ -451,6 +445,7 @@ defrouter_addreq(struct nd_defrouter *new)
 	Bzero(&def, sizeof(def));
 	Bzero(&mask, sizeof(mask));
 	Bzero(&gate, sizeof(gate)); /* for safety */
+	Bzero(&info, sizeof(info));
 
 	def.sin6_len = mask.sin6_len = gate.sin6_len =
 	    sizeof(struct sockaddr_in6);
@@ -458,10 +453,13 @@ defrouter_addreq(struct nd_defrouter *new)
 	gate.sin6_addr = new->rtaddr;
 	gate.sin6_scope_id = 0;	/* XXX */
 
+	info.rti_flags = RTF_GATEWAY;
+	info.rti_info[RTAX_DST] = (struct sockaddr *)&def;
+	info.rti_info[RTAX_GATEWAY] = (struct sockaddr *)&gate;
+	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
+
 	s = splsoftnet();
-	error = rtrequest(RTM_ADD, (struct sockaddr *)&def,
-	    (struct sockaddr *)&gate, (struct sockaddr *)&mask,
-	    RTF_GATEWAY, &newrt, 0);
+	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &newrt, 0);
 	if (newrt) {
 		nd6_rtmsg(RTM_ADD, newrt); /* tell user process */
 		newrt->rt_refcnt--;
@@ -510,7 +508,7 @@ defrtrlist_del(struct nd_defrouter *dr)
 	/*
 	 * Also delete all the pointers to the router in each prefix lists.
 	 */
-	for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 		struct nd_pfxrouter *pfxrtr;
 		if ((pfxrtr = pfxrtr_lookup(pr, dr)) != NULL)
 			pfxrtr_del(pfxrtr);
@@ -542,6 +540,7 @@ defrtrlist_del(struct nd_defrouter *dr)
 void
 defrouter_delreq(struct nd_defrouter *dr)
 {
+	struct rt_addrinfo info;
 	struct sockaddr_in6 def, mask, gw;
 	struct rtentry *oldrt = NULL;
 
@@ -550,6 +549,7 @@ defrouter_delreq(struct nd_defrouter *dr)
 		panic("dr == NULL in defrouter_delreq");
 #endif
 
+	Bzero(&info, sizeof(info));
 	Bzero(&def, sizeof(def));
 	Bzero(&mask, sizeof(mask));
 	Bzero(&gw, sizeof(gw));	/* for safety */
@@ -560,15 +560,18 @@ defrouter_delreq(struct nd_defrouter *dr)
 	gw.sin6_addr = dr->rtaddr;
 	gw.sin6_scope_id = 0;	/* XXX */
 
-	rtrequest(RTM_DELETE, (struct sockaddr *)&def,
-	    (struct sockaddr *)&gw,
-	    (struct sockaddr *)&mask, RTF_GATEWAY, &oldrt, 0);
+	info.rti_flags = RTF_GATEWAY;
+	info.rti_info[RTAX_DST] = (struct sockaddr *)&def;
+	info.rti_info[RTAX_GATEWAY] = (struct sockaddr *)&gw;
+	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
+
+	rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &oldrt, 0);
 	if (oldrt) {
 		nd6_rtmsg(RTM_DELETE, oldrt);
 		if (oldrt->rt_refcnt <= 0) {
 			/*
 			 * XXX: borrowed from the RTM_DELETE case of
-			 * rtrequest().
+			 * rtrequest1().
 			 */
 			oldrt->rt_refcnt++;
 			rtfree(oldrt);
@@ -792,9 +795,6 @@ defrtrlist_update(struct nd_defrouter *new)
 		return (NULL);
 	}
 
-<<<<<<< HEAD
-	n = (struct nd_defrouter *)malloc(sizeof(*n), M_IP6NDP, M_NOWAIT);
-=======
 	if (ip6_maxifdefrouters >= 0 &&
 	    ext->ndefrouters >= ip6_maxifdefrouters) {
 		splx(s);
@@ -802,12 +802,10 @@ defrtrlist_update(struct nd_defrouter *new)
 	}
 
 	n = malloc(sizeof(*n), M_IP6NDP, M_NOWAIT | M_ZERO);
->>>>>>> origin/master
 	if (n == NULL) {
 		splx(s);
 		return (NULL);
 	}
-	bzero(n, sizeof(*n));
 	*n = *new;
 
 insert:
@@ -843,7 +841,7 @@ pfxrtr_lookup(struct nd_prefix *pr, struct nd_defrouter *dr)
 {
 	struct nd_pfxrouter *search;
 
-	for (search = pr->ndpr_advrtrs.lh_first; search; search = search->pfr_next) {
+	LIST_FOREACH(search, &pr->ndpr_advrtrs, pfr_entry) {
 		if (search->router == dr)
 			break;
 	}
@@ -856,10 +854,9 @@ pfxrtr_add(struct nd_prefix *pr, struct nd_defrouter *dr)
 {
 	struct nd_pfxrouter *new;
 
-	new = (struct nd_pfxrouter *)malloc(sizeof(*new), M_IP6NDP, M_NOWAIT);
+	new = malloc(sizeof(*new), M_IP6NDP, M_NOWAIT | M_ZERO);
 	if (new == NULL)
 		return;
-	bzero(new, sizeof(*new));
 	new->router = dr;
 
 	LIST_INSERT_HEAD(&pr->ndpr_advrtrs, new, pfr_entry);
@@ -879,7 +876,7 @@ nd6_prefix_lookup(struct nd_prefix *pr)
 {
 	struct nd_prefix *search;
 
-	for (search = nd_prefix.lh_first; search; search = search->ndpr_next) {
+	LIST_FOREACH(search, &nd_prefix, ndpr_entry) {
 		if (pr->ndpr_ifp == search->ndpr_ifp &&
 		    pr->ndpr_plen == search->ndpr_plen &&
 		    in6_are_prefix_equal(&pr->ndpr_prefix.sin6_addr,
@@ -944,10 +941,9 @@ nd6_prelist_add(struct nd_prefix *pr, struct nd_defrouter *dr,
 			return(ENOMEM);
 	}
 
-	new = (struct nd_prefix *)malloc(sizeof(*new), M_IP6NDP, M_NOWAIT);
+	new = malloc(sizeof(*new), M_IP6NDP, M_NOWAIT | M_ZERO);
 	if (new == NULL)
 		return ENOMEM;
-	bzero(new, sizeof(*new));
 	*new = *pr;
 	if (newp != NULL)
 		*newp = new;
@@ -1022,8 +1018,8 @@ prelist_remove(struct nd_prefix *pr)
 	LIST_REMOVE(pr, ndpr_entry);
 
 	/* free list of routers that adversed the prefix */
-	for (pfr = pr->ndpr_advrtrs.lh_first; pfr; pfr = next) {
-		next = pfr->pfr_next;
+	for (pfr = LIST_FIRST(&pr->ndpr_advrtrs); pfr != NULL; pfr = next) {
+		next = LIST_NEXT(pfr, pfr_entry);
 
 		free(pfr, M_IP6NDP);
 	}
@@ -1362,7 +1358,7 @@ pfxlist_onlink_check(void)
 	 * Check if there is a prefix that has a reachable advertising
 	 * router.
 	 */
-	for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 		if (pr->ndpr_raf_onlink && find_pfxlist_reachable_router(pr))
 			break;
 	}
@@ -1376,7 +1372,7 @@ pfxlist_onlink_check(void)
 		 * Detach prefixes which have no reachable advertising
 		 * router, and attach other prefixes.
 		 */
-		for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+		LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 			/* XXX: a link-local prefix should never be detached */
 			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
 				continue;
@@ -1397,7 +1393,7 @@ pfxlist_onlink_check(void)
 		}
 	} else {
 		/* there is no prefix that has a reachable router */
-		for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+		LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
 				continue;
 
@@ -1417,7 +1413,7 @@ pfxlist_onlink_check(void)
 	 * interfaces.  Such cases will be handled in nd6_prefix_onlink,
 	 * so we don't have to care about them.
 	 */
-	for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {	
 		int e;
 
 		if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
@@ -1500,6 +1496,7 @@ pfxlist_onlink_check(void)
 int
 nd6_prefix_onlink(struct nd_prefix *pr)
 {
+	struct rt_addrinfo info;
 	struct ifaddr *ifa;
 	struct ifnet *ifp = pr->ndpr_ifp;
 	struct sockaddr_in6 mask6;
@@ -1523,7 +1520,7 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	 * Although such a configuration is expected to be rare, we explicitly
 	 * allow it.
 	 */
-	for (opr = nd_prefix.lh_first; opr; opr = opr->ndpr_next) {
+	LIST_FOREACH(opr, &nd_prefix, ndpr_entry) {
 		if (opr == pr)
 			continue;
 
@@ -1572,7 +1569,7 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	bzero(&mask6, sizeof(mask6));
 	mask6.sin6_len = sizeof(mask6);
 	mask6.sin6_addr = pr->ndpr_mask;
-	/* rtrequest() will probably set RTF_UP, but we're not sure. */
+	/* rtrequest1() will probably set RTF_UP, but we're not sure. */
 	rtflags = ifa->ifa_flags | RTF_UP;
 	if (nd6_need_cache(ifp)) {
 		/* explicitly set in case ifa_flags does not set the flag. */
@@ -1583,8 +1580,14 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 		 */
 		rtflags &= ~RTF_CLONING;
 	}
-	error = rtrequest(RTM_ADD, (struct sockaddr *)&pr->ndpr_prefix,
-	    ifa->ifa_addr, (struct sockaddr *)&mask6, rtflags, &rt, 0);
+
+	bzero(&info, sizeof(info));
+	info.rti_flags = rtflags;
+	info.rti_info[RTAX_DST] = (struct sockaddr *)&pr->ndpr_prefix;
+	info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask6;
+
+	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &rt, 0);
 	if (error == 0) {
 		if (rt != NULL) /* this should be non NULL, though */
 			nd6_rtmsg(RTM_ADD, rt);
@@ -1608,6 +1611,7 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 int
 nd6_prefix_offlink(struct nd_prefix *pr)
 {
+	struct rt_addrinfo info;
 	int error = 0;
 	struct ifnet *ifp = pr->ndpr_ifp;
 	struct nd_prefix *opr;
@@ -1631,8 +1635,10 @@ nd6_prefix_offlink(struct nd_prefix *pr)
 	mask6.sin6_family = AF_INET6;
 	mask6.sin6_len = sizeof(sa6);
 	bcopy(&pr->ndpr_mask, &mask6.sin6_addr, sizeof(struct in6_addr));
-	error = rtrequest(RTM_DELETE, (struct sockaddr *)&sa6, NULL,
-	    (struct sockaddr *)&mask6, 0, &rt, 0);
+	bzero(&info, sizeof(info));
+	info.rti_info[RTAX_DST] = (struct sockaddr *)&sa6;
+	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask6;
+	error = rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &rt, 0);
 	if (error == 0) {
 		pr->ndpr_stateflags &= ~NDPRF_ONLINK;
 
@@ -1647,7 +1653,7 @@ nd6_prefix_offlink(struct nd_prefix *pr)
 		 * If there's one, try to make the prefix on-link on the
 		 * interface.
 		 */
-		for (opr = nd_prefix.lh_first; opr; opr = opr->ndpr_next) {
+		LIST_FOREACH(opr, &nd_prefix, ndpr_entry) {
 			if (opr == pr)
 				continue;
 
@@ -1912,6 +1918,7 @@ int
 rt6_deleteroute(struct radix_node *rn, void *arg, u_int id)
 {
 #define SIN6(s)	((struct sockaddr_in6 *)s)
+	struct rt_addrinfo info;
 	struct rtentry *rt = (struct rtentry *)rn;
 	struct in6_addr *gate = (struct in6_addr *)arg;
 
@@ -1936,17 +1943,12 @@ rt6_deleteroute(struct radix_node *rn, void *arg, u_int id)
 	if ((rt->rt_flags & RTF_HOST) == 0)
 		return (0);
 
-<<<<<<< HEAD
-	return (rtrequest(RTM_DELETE, rt_key(rt), rt->rt_gateway,
-	    rt_mask(rt), rt->rt_flags, 0, 0));
-=======
 	bzero(&info, sizeof(info));
 	info.rti_flags =  rt->rt_flags;
 	info.rti_info[RTAX_DST] = rt_key(rt);
 	info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	return (rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, NULL, id));
->>>>>>> origin/master
 #undef SIN6
 }
 

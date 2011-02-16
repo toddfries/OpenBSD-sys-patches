@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_stat.c,v 1.17 2005/12/10 11:45:43 miod Exp $	 */
-=======
 /*	$OpenBSD: uvm_stat.c,v 1.22 2009/06/17 00:13:59 oga Exp $	 */
->>>>>>> origin/master
 /*	$NetBSD: uvm_stat.c,v 1.18 2001/03/09 01:02:13 chs Exp $	 */
 
 /*
@@ -222,8 +218,9 @@ uvmexp_print(int (*pr)(const char *, ...))
 	(*pr)("  freemin=%d, free-target=%d, inactive-target=%d, "
 	    "wired-max=%d\n", uvmexp.freemin, uvmexp.freetarg, uvmexp.inactarg,
 	    uvmexp.wiredmax);
-	(*pr)("  faults=%d, traps=%d, intrs=%d, ctxswitch=%d\n",
-	    uvmexp.faults, uvmexp.traps, uvmexp.intrs, uvmexp.swtch);
+	(*pr)("  faults=%d, traps=%d, intrs=%d, ctxswitch=%d fpuswitch=%d\n",
+	    uvmexp.faults, uvmexp.traps, uvmexp.intrs, uvmexp.swtch,
+	    uvmexp.fpswtch);
 	(*pr)("  softint=%d, syscalls=%d, swapins=%d, swapouts=%d, "
 	    "kmapent=%d\n", uvmexp.softs, uvmexp.syscalls, uvmexp.swapins,
 	    uvmexp.swapouts, uvmexp.kmapent);

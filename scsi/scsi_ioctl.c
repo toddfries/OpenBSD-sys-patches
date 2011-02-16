@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsi_ioctl.c,v 1.27 2006/12/21 02:05:46 krw Exp $	*/
-=======
 /*	$OpenBSD: scsi_ioctl.c,v 1.46 2010/07/22 05:32:10 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_ioctl.c,v 1.23 1996/10/12 23:23:17 christos Exp $	*/
 
 /*
@@ -101,38 +97,8 @@ const unsigned char scsi_readsafe_cmd[256] = {
 	[0xbe] = 1	/* READ CD */
 };
 
-<<<<<<< HEAD
-struct scsi_ioctl *
-si_get(void)
-{
-	struct scsi_ioctl			*si;
-	int					s;
-
-	si = malloc(sizeof(struct scsi_ioctl), M_TEMP, M_WAITOK);
-	bzero(si, sizeof(struct scsi_ioctl));
-	s = splbio();
-	LIST_INSERT_HEAD(&si_head, si, si_list);
-	splx(s);
-	return (si);
-}
-
-void
-si_free(struct scsi_ioctl *si)
-{
-	int					s;
-
-	s = splbio();
-	LIST_REMOVE(si, si_list);
-	splx(s);
-	free(si, M_TEMP);
-}
-
-struct scsi_ioctl *
-si_find(struct buf *bp)
-=======
 int
 scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
->>>>>>> origin/master
 {
 	struct scsi_xfer *xs;
 	int err = 0;

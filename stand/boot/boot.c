@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.31 2004/06/24 17:10:17 tom Exp $	*/
+/*	$OpenBSD: boot.c,v 1.36 2007/06/26 10:34:41 tom Exp $	*/
 
 /*
  * Copyright (c) 2003 Dale Rahn
@@ -37,12 +37,9 @@
 
 #include "cmd.h"
 
-static const char *const kernels[] = {
-	"/bsd",
-	"/obsd",
-	"/bsd.old",
-	NULL
-};
+#ifndef KERNEL
+#define KERNEL "/bsd"
+#endif
 
 char prog_ident[40];
 char *progname = "BOOT";
@@ -52,12 +49,13 @@ struct cmd_state cmd;
 
 /* bootprompt can be set by MD code to avoid prompt first time round */
 int bootprompt = 1;
+char *kernelfile = KERNEL;		/* can be changed by MD code */
 
 void
 boot(dev_t bootdev)
 {
-	const char *bootfile = kernels[0];
-	int i = 0, try = 0, st;
+	int fd;
+	int try = 0, st;
 	u_long marks[MARK_MAX];
 
 	machdep();
@@ -67,7 +65,7 @@ boot(dev_t bootdev)
 	printf("%s\n", prog_ident);
 
 	devboot(bootdev, cmd.bootdev);
-	strlcpy(cmd.image, bootfile, sizeof(cmd.image));
+	strlcpy(cmd.image, kernelfile, sizeof(cmd.image));
 	cmd.boothowto = 0;
 	cmd.conf = "/etc/boot.conf";
 	cmd.addr = (void *)DEFAULT_KERNEL_ADDRESS;
@@ -89,16 +87,15 @@ boot(dev_t bootdev)
 
 		printf("booting %s: ", cmd.path);
 		marks[MARK_START] = (u_long)cmd.addr;
-		if (loadfile(cmd.path, marks, LOAD_ALL) >= 0)
+		if ((fd = loadfile(cmd.path, marks, LOAD_ALL)) != -1) {
+			close(fd);
 			break;
+		}
 
-		if (kernels[++i] == NULL) {
-			try += 1;
-			bootfile = kernels[i=0];
-		} else
-			bootfile = kernels[i];
-		strlcpy(cmd.image, bootfile, sizeof(cmd.image));
-		printf(" failed(%d). will try %s\n", errno, bootfile);
+		kernelfile = KERNEL;
+		try++;
+		strlcpy(cmd.image, kernelfile, sizeof(cmd.image));
+		printf(" failed(%d). will try %s\n", errno, kernelfile);
 
 		if (try < 2) {
 			if (cmd.timeout > 0)

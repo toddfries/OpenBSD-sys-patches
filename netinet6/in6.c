@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6.c,v 1.71 2006/11/15 03:07:44 itojun Exp $	*/
-=======
 /*	$OpenBSD: in6.c,v 1.89 2010/10/07 22:07:06 mpf Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -144,6 +140,7 @@ struct multi6_kludge {
 void
 in6_ifloop_request(int cmd, struct ifaddr *ifa)
 {
+	struct rt_addrinfo info;
 	struct sockaddr_in6 lo_sa;
 	struct sockaddr_in6 all1_sa;
 	struct rtentry *nrt = NULL;
@@ -165,10 +162,6 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	 * which changes the outgoing interface to the loopback interface.
 	 * XXX only table 0 for now
 	 */
-<<<<<<< HEAD
-	e = rtrequest(cmd, ifa->ifa_addr, ifa->ifa_addr,
-	    (struct sockaddr *)&all1_sa, RTF_UP|RTF_HOST|RTF_LLINFO, &nrt, 0);
-=======
 	bzero(&info, sizeof(info));
 	info.rti_flags = RTF_UP | RTF_HOST | RTF_LLINFO;
 	info.rti_info[RTAX_DST] = ifa->ifa_addr;
@@ -176,7 +169,6 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&all1_sa;
 	e = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, 0);
->>>>>>> origin/master
 	if (e != 0) {
 		log(LOG_ERR, "in6_ifloop_request: "
 		    "%s operation failed for %s (errno=%d)\n",
@@ -923,11 +915,9 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		 * RA, it is called under an interrupt context.  So, we should
 		 * call malloc with M_NOWAIT.
 		 */
-		ia = (struct in6_ifaddr *) malloc(sizeof(*ia), M_IFADDR,
-		    M_NOWAIT);
+		ia = malloc(sizeof(*ia), M_IFADDR, M_NOWAIT | M_ZERO);
 		if (ia == NULL)
 			return (ENOBUFS);
-		bzero((caddr_t)ia, sizeof(*ia));
 		LIST_INIT(&ia->ia6_memberships);
 		/* Initialize the address and masks, and put time stamp */
 		ia->ia_ifa.ifa_addr = (struct sockaddr *)&ia->ia_addr;
@@ -1123,7 +1113,8 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			    (struct sockaddr *)&ia->ia_addr;
 			/* XXX: we need RTF_CLONING to fake nd6_rtrequest */
 			info.rti_flags = RTF_UP | RTF_CLONING;
-			error = rtrequest1(RTM_ADD, &info, NULL, 0);
+			error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, NULL,
+			    0);
 			if (error)
 				goto cleanup;
 		} else {
@@ -1191,7 +1182,8 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			info.rti_info[RTAX_IFA] =
 			    (struct sockaddr *)&ia->ia_addr;
 			info.rti_flags = RTF_UP | RTF_CLONING;
-			error = rtrequest1(RTM_ADD, &info, NULL, 0);
+			error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
+			    NULL, 0);
 			if (error)
 				goto cleanup;
 		} else {
@@ -1724,9 +1716,8 @@ in6_createmkludge(struct ifnet *ifp)
 			return;
 	}
 
-	mk = malloc(sizeof(*mk), M_IPMADDR, M_WAITOK);
+	mk = malloc(sizeof(*mk), M_IPMADDR, M_WAITOK | M_ZERO);
 
-	bzero(mk, sizeof(*mk));
 	LIST_INIT(&mk->mk_head);
 	mk->mk_ifp = ifp;
 	LIST_INSERT_HEAD(&in6_mk, mk, mk_entry);
@@ -2521,17 +2512,13 @@ in6_domifattach(struct ifnet *ifp)
 {
 	struct in6_ifextra *ext;
 
-	ext = (struct in6_ifextra *)malloc(sizeof(*ext), M_IFADDR, M_WAITOK);
-	bzero(ext, sizeof(*ext));
+	ext = malloc(sizeof(*ext), M_IFADDR, M_WAITOK | M_ZERO);
 
-	ext->in6_ifstat = (struct in6_ifstat *)malloc(sizeof(struct in6_ifstat),
-	    M_IFADDR, M_WAITOK);
-	bzero(ext->in6_ifstat, sizeof(*ext->in6_ifstat));
+	ext->in6_ifstat = malloc(sizeof(*ext->in6_ifstat), M_IFADDR,
+	    M_WAITOK | M_ZERO);
 
-	ext->icmp6_ifstat =
-	    (struct icmp6_ifstat *)malloc(sizeof(struct icmp6_ifstat),
-	    M_IFADDR, M_WAITOK);
-	bzero(ext->icmp6_ifstat, sizeof(*ext->icmp6_ifstat));
+	ext->icmp6_ifstat = malloc(sizeof(*ext->icmp6_ifstat), M_IFADDR,
+	    M_WAITOK | M_ZERO);
 
 	ext->nd_ifinfo = nd6_ifattach(ifp);
 	ext->nprefixes = 0;

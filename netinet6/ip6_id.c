@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip6_id.c,v 1.3 2003/12/12 06:57:12 itojun Exp $	*/
-=======
 /*	$OpenBSD: ip6_id.c,v 1.8 2010/02/08 12:16:02 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip6_id.c,v 1.7 2003/09/13 21:32:59 itojun Exp $	*/
 /*	$KAME: ip6_id.c,v 1.8 2003/09/06 13:41:06 itojun Exp $	*/
 
@@ -156,7 +152,7 @@ pmod(u_int32_t gen, u_int32_t expo, u_int32_t mod)
 }
 
 /*
- * Initalizes the seed and chooses a suitable generator. Also toggles
+ * Initializes the seed and chooses a suitable generator. Also toggles
  * the msb flag. The msb flag is used to generate two distinct
  * cycles of random numbers and thus avoiding reuse of ids.
  *
@@ -169,7 +165,7 @@ initid(struct randomtab *p)
 	u_int32_t j, i;
 	int noprime = 1;
 
-	p->ru_x = arc4random() % p->ru_m;
+	p->ru_x = arc4random_uniform(p->ru_m);
 
 	/* (bits - 1) bits of random seed */
 	p->ru_seed = arc4random() & (~0U >> (32 - p->ru_bits + 1));
@@ -182,7 +178,7 @@ initid(struct randomtab *p)
 	while (p->ru_b % 3 == 0)
 		p->ru_b += 2;
 
-	j = arc4random() % p->ru_n;
+	j = arc4random_uniform(p->ru_n);
 
 	/*
 	 * Do a fast gcd(j, RU_N - 1), so we can find a j with

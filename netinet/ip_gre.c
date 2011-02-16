@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: ip_gre.c,v 1.29 2006/03/25 22:41:48 djm Exp $ */
-=======
 /*      $OpenBSD: ip_gre.c,v 1.40 2010/09/28 14:14:54 yasuoka Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -95,7 +91,7 @@
 #include <net/if_gre.h>
 
 struct gre_softc *gre_lookup(struct mbuf *, u_int8_t);
-static int gre_input2(struct mbuf *, int, u_char);
+int gre_input2(struct mbuf *, int, u_char);
 
 /*
  * Decapsulate.
@@ -106,7 +102,7 @@ static int gre_input2(struct mbuf *, int, u_char);
  * routine.
  */
 
-static int
+int
 gre_input2(m , hlen, proto)
         struct mbuf *m;
 	int hlen;

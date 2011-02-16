@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-/*	$NetBSD: ieee80211_crypto.h,v 1.2 2003/09/14 01:14:55 dyoung Exp $	*/
-=======
 /*	$OpenBSD: ieee80211_crypto.h,v 1.22 2009/01/26 19:09:41 damien Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2007,2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -12,24 +7,6 @@
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
-<<<<<<< HEAD
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/net80211/ieee80211_crypto.h,v 1.2 2003/06/27 05:13:52 sam Exp $
-=======
  * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
  * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
@@ -37,7 +14,6 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
->>>>>>> origin/master
  */
 
 #ifndef _NET80211_IEEE80211_CRYPTO_H_
@@ -46,18 +22,6 @@
 /*
  * 802.11 protocol crypto-related definitions.
  */
-<<<<<<< HEAD
-#define	IEEE80211_KEYBUF_SIZE	16
-
-struct ieee80211_wepkey {
-	int			wk_len;
-	u_int8_t		wk_key[IEEE80211_KEYBUF_SIZE];
-};
-
-extern	void ieee80211_crypto_attach(struct ifnet *);
-extern	void ieee80211_crypto_detach(struct ifnet *);
-extern	struct mbuf *ieee80211_wep_crypt(struct ifnet *, struct mbuf *, int);
-=======
 
 /*
  * 802.11 ciphers.
@@ -214,5 +178,4 @@ struct	mbuf *ieee80211_bip_encap(struct ieee80211com *, struct mbuf *,
 struct	mbuf *ieee80211_bip_decap(struct ieee80211com *, struct mbuf *,
 	    struct ieee80211_key *);
 
->>>>>>> origin/master
 #endif /* _NET80211_IEEE80211_CRYPTO_H_ */

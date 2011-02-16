@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in_gif.c,v 1.32 2007/02/10 15:34:22 claudio Exp $	*/
-=======
 /*	$OpenBSD: in_gif.c,v 1.38 2010/05/11 09:36:07 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*

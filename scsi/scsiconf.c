@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsiconf.c,v 1.123 2006/11/28 23:59:45 dlg Exp $	*/
-=======
 /*	$OpenBSD: scsiconf.c,v 1.167 2010/10/12 00:53:32 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -99,10 +95,12 @@ struct cfdriver scsibus_cd = {
 	NULL, "scsibus", DV_DULL
 };
 
+#ifdef SCSIDEBUG
 int scsidebug_buses = SCSIDEBUG_BUSES;
 int scsidebug_targets = SCSIDEBUG_TARGETS;
 int scsidebug_luns = SCSIDEBUG_LUNS;
 int scsidebug_level = SCSIDEBUG_LEVEL;
+#endif
 
 int scsi_autoconf = SCSI_AUTOCONF;
 
@@ -154,6 +152,7 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	if (!cold)
 		scsi_autoconf = 0;
 
+	sc_link_proto->bus = sb;
 	sc_link_proto->scsibus = sb->sc_dev.dv_unit;
 	sb->adapter_link = sc_link_proto;
 	if (sb->adapter_link->adapter_buswidth == 0)
@@ -162,9 +161,6 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	if (sb->adapter_link->luns == 0)
 		sb->adapter_link->luns = 8;
 
-<<<<<<< HEAD
-	printf(": %d targets\n", sb->sc_buswidth);
-=======
 	printf(": %d targets", sb->sc_buswidth);
 	if (sb->adapter_link->adapter_target < sb->sc_buswidth)
 		printf(", initiator %d", sb->adapter_link->adapter_target);
@@ -174,26 +170,11 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 		    sb->adapter_link->port_wwn, sb->adapter_link->node_wwn);
 	}
 	printf("\n");
->>>>>>> origin/master
 
 	/* Initialize shared data. */
 	scsi_init();
 
-<<<<<<< HEAD
-	nbytes = sb->sc_buswidth * sizeof(struct scsi_link **);
-	sb->sc_link = malloc(nbytes, M_DEVBUF, M_NOWAIT);
-	if (sb->sc_link == NULL)
-		panic("scsibusattach: can't allocate target links");
-	nbytes = sb->adapter_link->luns * sizeof(struct scsi_link *);
-	for (i = 0; i < sb->sc_buswidth; i++) {
-		sb->sc_link[i] = malloc(nbytes, M_DEVBUF, M_NOWAIT);
-		if (sb->sc_link[i] == NULL)
-			panic("scsibusattach: can't allocate lun links");
-		bzero(sb->sc_link[i], nbytes);
-	}
-=======
 	SLIST_INIT(&sb->sc_link);
->>>>>>> origin/master
 
 #if NBIO > 0
 	if (bio_register(&sb->sc_dev, scsibus_bioctl) != 0)
@@ -514,9 +495,6 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	if (((flags & DETACH_FORCE) == 0) && (link->flags & SDEV_OPEN))
 		return (EBUSY);
 
-<<<<<<< HEAD
-	/* detaching a device from scsibus is a two step process... */
-=======
 	/* detaching a device from scsibus is a five step process... */
 
 	/* 1. wake up processes sleeping for an xs */
@@ -529,14 +507,10 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	else
 #endif /* NMPATH */
 		rv = config_detach(link->device_softc, flags);
->>>>>>> origin/master
 
 	if (rv != 0)
 		return (rv);
 
-<<<<<<< HEAD
-	/* 2. free up its state in the midlayer */
-=======
 	/* 3. if its using the openings io allocator, clean it up */
 	if (ISSET(link->flags, SDEV_OWN_IOPL)) {
 		scsi_iopool_destroy(link->pool);
@@ -551,7 +525,6 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	if (link->id != NULL)
 		devid_free(link->id);
 	scsi_remove_link(sc, link);
->>>>>>> origin/master
 	free(link, M_DEVBUF);
 
 	return (0);
@@ -799,12 +772,6 @@ scsibus_printlink(struct scsi_link *link)
 	scsi_strvis(product, inqbuf->product, 16);
 	scsi_strvis(revision, inqbuf->revision, 4);
 
-<<<<<<< HEAD
-	printf(" targ %d lun %d: <%s, %s, %s> SCSI%d %d/%s %s%s",
-	    target, lun, vendor, product, revision,
-	    SCSISPC(inqbuf->version), type, dtype,
-	    removable ? "removable" : "fixed", qtype);
-=======
 	printf(" targ %d lun %d: <%s, %s, %s> ", link->target, link->lun,
 	    vendor, product, revision);
 	if (link->flags & SDEV_ATAPI)
@@ -813,7 +780,6 @@ scsibus_printlink(struct scsi_link *link)
 		printf("SCSI%d", SCSISPC(inqbuf->version));
 	printf(" %d/%s %s%s", type, dtype, removable ? "removable" : "fixed",
 	    qtype);
->>>>>>> origin/master
 
 #if NMPATH > 0
 	if (link->id != NULL && link->id->d_type != DEVID_NONE) {
@@ -907,6 +873,14 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	inqbuf = &sc_link->inqdata;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_link created.\n"));
+
+	/* ask the adapter if this will be a valid device */
+	if (scsi->adapter_link->adapter->dev_probe != NULL &&
+	    scsi->adapter_link->adapter->dev_probe(sc_link) != 0) {
+		if (lun == 0)
+			rslt = EINVAL;
+		goto free;
+	}
 
 	/*
 	 * If we havent been given an io pool by now then fall back to
@@ -1023,7 +997,10 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 			sc_link->quirks &= ~SDEV_NOSYNC;
 		if ((inqbuf->flags & SID_WBus16) != 0)
 			sc_link->quirks &= ~SDEV_NOWIDE;
-	}
+	} else
+		/* Older devices do not have SYNCHRONIZE CACHE capability. */
+		sc_link->quirks |= SDEV_NOSYNCCACHE;
+
 	/*
 	 * Now apply any quirks from the table.
 	 */
@@ -1090,15 +1067,12 @@ free_devid:
 	if (sc_link->id)
 		devid_free(sc_link->id);
 bad:
-<<<<<<< HEAD
-=======
 	if (ISSET(sc_link->flags, SDEV_OWN_IOPL))
 		free(sc_link->pool, M_DEVBUF);
 
 	if (scsi->adapter_link->adapter->dev_free != NULL)
 		scsi->adapter_link->adapter->dev_free(sc_link);
 free:
->>>>>>> origin/master
 	free(sc_link, M_DEVBUF);
 	return (rslt);
 }

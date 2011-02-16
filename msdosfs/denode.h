@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: denode.h,v 1.19 2007/01/16 17:52:18 thib Exp $	*/
-=======
 /*	$OpenBSD: denode.h,v 1.23 2010/07/17 19:27:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: denode.h,v 1.24 1997/10/17 11:23:39 ws Exp $	*/
 
 /*-
@@ -145,7 +141,7 @@ struct denode {
 	struct vnode *de_devvp;	/* vnode of blk dev we live on */
 	uint32_t de_flag;		/* flag bits */
 	dev_t de_dev;		/* device where direntry lives */
-	daddr_t de_lastr;
+	daddr64_t de_lastr;
 	uint32_t de_dirclust;	/* cluster of the directory file containing this entry */
 	uint32_t de_diroffset;	/* offset of this entry in the directory cluster */
 	uint32_t de_fndoffset;	/* offset of found dir entry */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_extern.h,v 1.64 2007/04/11 12:10:42 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_extern.h,v 1.89 2010/07/02 01:25:06 art Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -391,6 +387,7 @@ extern struct uvmexp uvmexp;
 #include <sys/tree.h>
 #include <uvm/uvm_param.h>
 #include <sys/lock.h>
+#include <sys/mutex.h>
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_pmap.h>
 #include <uvm/uvm_map.h>
@@ -477,7 +474,6 @@ struct core;
 /* vm_machdep.c */
 void		vmapbuf(struct buf *, vsize_t);
 void		vunmapbuf(struct buf *, vsize_t);
-void		pagemove(caddr_t, caddr_t, size_t);
 void		cpu_fork(struct proc *, struct proc *, void *, size_t,
 		    void (*)(void *), void *);
 
@@ -562,9 +558,9 @@ boolean_t		uvm_map_checkprot(vm_map_t, vaddr_t,
 int			uvm_map_protect(vm_map_t, vaddr_t, 
 				vaddr_t, vm_prot_t, boolean_t);
 struct vmspace		*uvmspace_alloc(vaddr_t, vaddr_t,
-				boolean_t);
+				boolean_t, boolean_t);
 void			uvmspace_init(struct vmspace *, struct pmap *,
-				vaddr_t, vaddr_t, boolean_t);
+				vaddr_t, vaddr_t, boolean_t, boolean_t);
 void			uvmspace_exec(struct proc *, vaddr_t, vaddr_t);
 struct vmspace		*uvmspace_fork(struct vmspace *);
 void			uvmspace_free(struct vmspace *);
@@ -595,6 +591,7 @@ void			uvm_page_physload_flags(paddr_t, paddr_t, paddr_t,
 #define uvm_page_physload(s, e, as, ae, fl)	\
 	uvm_page_physload_flags(s, e, as, ae, fl, 0)
 void			uvm_setpagesize(void);
+void			uvm_shutdown(void);
 
 /* uvm_pager.c */
 void			uvm_aio_biodone1(struct buf *);

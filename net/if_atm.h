@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: if_atm.h,v 1.11 2002/03/14 01:27:09 millert Exp $       */
-=======
 /*      $OpenBSD: if_atm.h,v 1.14 2010/05/07 13:33:16 claudio Exp $       */
->>>>>>> origin/master
 
 /*
  *

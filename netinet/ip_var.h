@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_var.h,v 1.35 2005/08/11 12:55:31 mpf Exp $	*/
-=======
 /*	$OpenBSD: ip_var.h,v 1.39 2009/06/05 00:05:22 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip_var.h,v 1.16 1996/02/13 23:43:20 christos Exp $	*/
 
 /*
@@ -100,7 +96,8 @@ struct ip_moptions {
 	u_int8_t  imo_multicast_ttl;	/* TTL for outgoing multicasts */
 	u_int8_t  imo_multicast_loop;	/* 1 => hear sends if a member */
 	u_int16_t imo_num_memberships;	/* no. memberships this socket */
-	struct	  in_multi *imo_membership[IP_MAX_MEMBERSHIPS];
+	u_int16_t imo_max_memberships;	/* max memberships this socket */
+	struct	  in_multi **imo_membership; /* group memberships */
 };
 
 struct	ipstat {
@@ -195,6 +192,6 @@ void	 rip_init(void);
 void	 rip_input(struct mbuf *, ...);
 int	 rip_output(struct mbuf *, ...);
 int	 rip_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *);
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 #endif /* _KERNEL */
 #endif /* _NETINET_IP_VAR_H_ */

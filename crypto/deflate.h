@@ -1,4 +1,4 @@
-/* $OpenBSD: deflate.h,v 1.2 2001/07/16 15:25:40 jjbg Exp $ */
+/* $OpenBSD: deflate.h,v 1.3 2002/03/14 01:26:51 millert Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)

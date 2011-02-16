@@ -93,11 +93,8 @@
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
 #include <sys/syslog.h>
-<<<<<<< HEAD
-=======
 #include <sys/proc.h>
 #include <sys/sysctl.h>
->>>>>>> origin/master
 
 #include <net/if.h>
 #include <net/route.h>
@@ -325,7 +322,7 @@ mrt6_ioctl(int cmd, caddr_t data)
 	case SIOCGETMIFCNT_IN6:
 		return (get_mif6_cnt((struct sioc_mif_req6 *)data));
 	default:
-		return (EINVAL);
+		return (ENOTTY);
 	}
 }
 
@@ -1508,8 +1505,8 @@ phyint_send(struct ip6_hdr *ip6, struct mif6 *mifp, struct mbuf *m)
 		/* XXX: ip6_output will override ip6->ip6_hlim */
 		im6o.im6o_multicast_hlim = ip6->ip6_hlim;
 		im6o.im6o_multicast_loop = 1;
-		error = ip6_output(mb_copy, NULL, &ro,
-				   IPV6_FORWARDING, &im6o, NULL);
+		error = ip6_output(mb_copy, NULL, &ro, IPV6_FORWARDING, &im6o,
+		    NULL, NULL);
 
 #ifdef MRT6DEBUG
 		if (mrt6debug & DEBUG_XMIT)
@@ -1860,4 +1857,28 @@ pim6_input(struct mbuf **mp, int *offp, int proto)
   pim6_input_to_daemon:
 	rip6_input(&m, offp, proto);
 	return (IPPROTO_DONE);
+}
+
+/*
+ * Sysctl for pim6 variables.
+ */
+int
+pim6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case PIM6CTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &pim6stat, sizeof(pim6stat)));
+
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOTREACHED */
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpfdesc.h,v 1.16 2005/11/21 18:16:45 millert Exp $	*/
+/*	$OpenBSD: bpfdesc.h,v 1.17 2006/03/25 22:41:47 djm Exp $	*/
 /*	$NetBSD: bpfdesc.h,v 1.11 1995/09/27 18:30:42 thorpej Exp $	*/
 
 /*

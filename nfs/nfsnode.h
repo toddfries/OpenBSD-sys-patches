@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfsnode.h,v 1.24 2007/03/18 15:05:33 mickey Exp $	*/
-=======
 /*	$OpenBSD: nfsnode.h,v 1.39 2009/12/15 15:53:48 beck Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -61,22 +57,6 @@ struct sillyrename {
 };
 
 /*
- * This structure is used to save the logical directory offset to
- * NFS cookie mappings.
- * The mappings are stored in a list headed
- * by n_cookies, as required.
- * There is one mapping for each NFS_DIRBLKSIZ bytes of directory information
- * stored in increasing logical offset byte order.
- */
-#define NFSNUMCOOKIES		31
-
-struct nfsdmap {
-	LIST_ENTRY(nfsdmap)	ndm_list;
-	int			ndm_eocookie;
-	nfsuint64		ndm_cookies[NFSNUMCOOKIES];
-};
-
-/*
  * The nfsnode is the nfs equivalent to ufs's inode. Any similarity
  * is purely coincidental.
  * There is a unique nfsnode allocated for each active file,
@@ -84,7 +64,7 @@ struct nfsdmap {
  * An nfsnode is 'named' by its file handle. (nget/nfs_node.c)
  * If this structure exceeds 256 bytes (it is currently 256 using 4.4BSD-Lite
  * type definitions), file handles of > 32 bytes should probably be split out
- * into a separate MALLOC()'d data structure. (Reduce the size of nfsfh_t by
+ * into a separate malloc()'d data structure. (Reduce the size of nfsfh_t by
  * changing the definition in sys/mount.h of NFS_SMALLFH.)
  * NB: Hopefully the current order of the fields is such that everything will
  *     be well aligned and, therefore, tightly packed.
@@ -92,13 +72,10 @@ struct nfsdmap {
 struct nfsnode {
 	RB_ENTRY(nfsnode)	n_entry;	/* filehandle/node tree. */
 	u_quad_t		n_size;		/* Current size of file */
-	u_quad_t		n_brev;		/* Modify rev when cached */
-	u_quad_t		n_lrev;		/* Modify rev for lease */
 	struct vattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
 	struct timespec 	n_mtime;	/* Prev modify time. */
 	time_t			n_ctime;	/* Prev create time. */
-	time_t			n_expiry;	/* Lease expiry time */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vnode		*n_vnode;	/* associated vnode */
 	struct lockf		*n_lockf;	/* Locking record of file */
@@ -111,10 +88,7 @@ struct nfsnode {
 		struct timespec	nf_mtim;
 		off_t		nd_direof;	/* Dir. EOF offset cache */
 	} n_un2;
-	union {
-		struct sillyrename *nf_silly;	/* Ptr to silly rename struct */
-		LIST_HEAD(, nfsdmap) nd_cook;	/* cookies */
-	} n_un3;
+	struct sillyrename	*n_sillyrename;	/* Ptr to silly rename struct */
 	short			n_fhsize;	/* size in bytes, of fh */
 	short			n_flag;		/* Flag for locking.. */
 	nfsfh_t			n_fh;		/* Small File Handle */
@@ -125,12 +99,12 @@ struct nfsnode {
 	struct ucred		*n_rcred;
 	struct ucred		*n_wcred;
 
-	off_t                    n_pushedlo;    /* 1st blk in commited range */
-	off_t                    n_pushedhi;    /* Last block in range */
-	off_t                    n_pushlo;      /* 1st block in commit range */
-	off_t                    n_pushhi;      /* Last block in range */
-	struct rwlock            n_commitlock;  /* Serialize commits */
-	int                      n_commitflags;
+	off_t			n_pushedlo;	/* 1st blk in commited range */
+	off_t			n_pushedhi;	/* Last block in range */
+	off_t			n_pushlo;	/* 1st block in commit range */
+	off_t			n_pushhi;	/* Last block in range */
+	struct rwlock		n_commitlock;	/* Serialize commits */
+	int			n_commitflags;
 };
 
 /*
@@ -141,10 +115,8 @@ struct nfsnode {
 
 #define n_atim		n_un1.nf_atim
 #define n_mtim		n_un2.nf_mtim
-#define n_sillyrename	n_un3.nf_silly
 #define n_cookieverf	n_un1.nd_cookieverf
 #define n_direofoffset	n_un2.nd_direof
-#define n_cookies	n_un3.nd_cook
 
 /*
  * Flags for n_flag
@@ -171,61 +143,4 @@ struct nfsnode {
 extern TAILQ_HEAD(nfs_bufqhead, buf) nfs_bufq;
 extern uint32_t nfs_bufqlen, nfs_bufqmax;
 
-#ifdef _KERNEL
-/*
- * Prototypes for NFS vnode operations
- */
-int	nfs_lookup(void *);
-int	nfs_create(void *);
-int	nfs_mknod(void *);
-int	nfs_open(void *);
-int	nfs_close(void *);
-int	nfsspec_close(void *);
-int	nfsfifo_close(void *);
-int	nfs_access(void *);
-int	nfsspec_access(void *);
-int	nfs_getattr(void *);
-int	nfs_setattr(void *);
-int	nfs_read(void *);
-int	nfs_write(void *);
-int	nfsspec_read(void *);
-int	nfsspec_write(void *);
-int	nfsfifo_read(void *);
-int	nfsfifo_write(void *);
-#define nfs_ioctl ((int (*)(void *))enoioctl)
-int	nfs_poll(void *);
-#define nfs_revoke vop_generic_revoke
-int	nfs_fsync(void *);
-int	nfs_remove(void *);
-int	nfs_link(void *);
-int	nfs_rename(void *);
-int	nfs_mkdir(void *);
-int	nfs_rmdir(void *);
-int	nfs_symlink(void *);
-int	nfs_readdir(void *);
-int	nfs_readlink(void *);
-int	nfs_inactive(void *);
-int	nfs_reclaim(void *);
-int	nfsfifo_reclaim(void *);
-#define nfs_lock ((int (*)(void *))vop_generic_lock)
-#define nfs_unlock ((int (*)(void *))vop_generic_unlock)
-#define nfs_islocked ((int (*)(void *))vop_generic_islocked)
-int	nfs_bmap(void *);
-int	nfs_strategy(void *);
-int	nfs_print(void *);
-int	nfs_pathconf(void *);
-int	nfs_advlock(void *);
-int	nfs_bwrite(void *);
-int	nfs_vget(struct mount *, ino_t, struct vnode **);
-
-/* other stuff */
-int	nfs_removeit(struct sillyrename *);
-int	nfs_nget(struct mount *,nfsfh_t *,int,struct nfsnode **);
-int	nfs_lookitup(struct vnode *,char *,int,struct ucred *,struct proc *,struct nfsnode **);
-int	nfs_sillyrename(struct vnode *,struct vnode *,struct componentname *);
-
-extern int (**nfsv2_vnodeop_p)(void *);
-
-#endif /* _KERNEL */
-
-#endif
+#endif		/* _NFS_NFSNODE_H_ */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: svr4_exec.c,v 1.14 2002/03/14 01:26:51 millert Exp $	 */
-=======
 /*	$OpenBSD: svr4_exec.c,v 1.17 2009/03/05 19:52:24 kettenis Exp $	 */
->>>>>>> origin/master
 /*	$NetBSD: svr4_exec.c,v 1.16 1995/10/14 20:24:20 christos Exp $	 */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ether.h,v 1.37 2006/05/28 00:20:21 brad Exp $	*/
-=======
 /*	$OpenBSD: if_ether.h,v 1.47 2010/02/08 13:32:50 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -159,8 +155,10 @@ struct	arpcom {
 	struct	 ifnet ac_if;			/* network-visible interface */
 	u_int8_t ac_enaddr[ETHER_ADDR_LEN];	/* ethernet hardware address */
 	char	 ac__pad[2];			/* pad for some machines */
-	LIST_HEAD(, ether_multi) ac_multiaddrs;	/* list of ether multicast addrs */
-	int	 ac_multicnt;			/* length of ac_multiaddrs list */
+	LIST_HEAD(, ether_multi) ac_multiaddrs;	/* list of multicast addrs */
+	int	 ac_multicnt;			/* length of ac_multiaddrs */
+	int	 ac_multirangecnt;		/* number of mcast ranges */
+
 };
 
 struct llinfo_arp {
@@ -288,6 +286,8 @@ int revarpwhoarewe(struct ifnet *, struct in_addr *, struct in_addr *);
 int revarpwhoami(struct in_addr *, struct ifnet *);
 int db_show_arptab(void);
 
+u_int32_t ether_crc32_le_update(u_int32_t crc, const u_int8_t *, size_t);
+u_int32_t ether_crc32_be_update(u_int32_t crc, const u_int8_t *, size_t);
 u_int32_t ether_crc32_le(const u_int8_t *, size_t);
 u_int32_t ether_crc32_be(const u_int8_t *, size_t);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_readwrite.c,v 1.17 2005/04/30 13:58:55 niallo Exp $	*/
+/*	$OpenBSD: ext2fs_readwrite.c,v 1.22 2007/06/17 20:15:25 jasper Exp $	*/
 /*	$NetBSD: ext2fs_readwrite.c,v 1.16 2001/02/27 04:37:47 chs Exp $	*/
 
 /*-
@@ -62,15 +62,9 @@
  */
 /* ARGSUSED */
 int
-ext2fs_read(v)
-	void *v;
+ext2fs_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 	struct vnode *vp;
 	struct inode *ip;
 	struct uio *uio;
@@ -119,9 +113,6 @@ ext2fs_read(v)
 
 		if (lblktosize(fs, nextlbn) >= ext2fs_size(ip))
 			error = bread(vp, lbn, size, NOCRED, &bp);
-		else if (doclusterread)
-			error = cluster_read(vp, &ip->i_ci,
-				ext2fs_size(ip), lbn, size, NOCRED, &bp);
 		else if (lbn - 1 == ip->i_ci.ci_lastr) {
 			int nextsize = fs->e2fs_bsize;
 			error = breadn(vp, lbn,
@@ -163,22 +154,16 @@ ext2fs_read(v)
  * Vnode op for writing.
  */
 int
-ext2fs_write(v)
-	void *v;
+ext2fs_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 	struct vnode *vp;
 	struct uio *uio;
 	struct inode *ip;
 	struct m_ext2fs *fs;
 	struct buf *bp;
 	struct proc *p;
-	ufs1_daddr_t lbn;
+	int32_t lbn;
 	off_t osize;
 	int blkoffset, error, flags, ioflag, resid, size, xfersize;
 

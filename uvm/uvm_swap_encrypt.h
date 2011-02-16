@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_swap_encrypt.h,v 1.6 2002/03/14 01:27:19 millert Exp $	*/
-=======
 /*	$OpenBSD: uvm_swap_encrypt.h,v 1.9 2009/03/23 22:10:04 oga Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright 1999 Niels Provos <provos@citi.umich.edu>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: ip_gre.h,v 1.6 2002/06/09 16:26:10 itojun Exp $ */
-=======
 /*      $OpenBSD: ip_gre.h,v 1.9 2010/01/12 23:33:24 yasuoka Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ip_gre.h,v 1.3 1998/10/07 23:33:02 thorpej Exp $ */
 
 /*

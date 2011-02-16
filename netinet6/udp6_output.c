@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udp6_output.c,v 1.12 2004/06/12 04:58:48 itojun Exp $	*/
-=======
 /*	$OpenBSD: udp6_output.c,v 1.16 2008/11/23 13:30:59 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
 
 /*
@@ -273,7 +269,7 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct mbuf *addr6,
 
 		udp6stat.udp6s_opackets++;
 		error = ip6_output(m, optp, &in6p->in6p_route,
-			    flags, in6p->in6p_moptions, NULL);
+			    flags, in6p->in6p_moptions, NULL, in6p);
 		break;
 	case AF_INET:
 		error = EAFNOSUPPORT;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsi_tape.h,v 1.6 1997/04/14 04:09:13 downsj Exp $	*/
-=======
 /*	$OpenBSD: scsi_tape.h,v 1.8 2010/12/24 02:45:33 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_tape.h,v 1.9 1996/05/24 02:04:47 thorpej Exp $	*/
 
 /*

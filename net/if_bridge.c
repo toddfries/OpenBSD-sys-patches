@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_bridge.c,v 1.157 2007/01/08 13:52:38 michele Exp $	*/
-=======
 /*	$OpenBSD: if_bridge.c,v 1.188 2010/11/04 23:07:15 weerd Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -56,6 +52,9 @@
 #include <net/if_llc.h>
 #include <net/route.h>
 #include <net/netisr.h>
+
+/* for arc4random() */
+#include <dev/rndvar.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -116,8 +115,6 @@
 #ifndef	BRIDGE_RTABLE_TIMEOUT
 #define	BRIDGE_RTABLE_TIMEOUT	240
 #endif
-
-extern int ifqmaxlen;
 
 void	bridgeattach(int);
 int	bridge_ioctl(struct ifnet *, u_long, caddr_t);
@@ -198,10 +195,9 @@ bridge_clone_create(struct if_clone *ifc, int unit)
 	struct ifnet *ifp;
 	int i, s;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!sc)
 		return (ENOMEM);
-	bzero(sc, sizeof(*sc));
 
 	sc->sc_stp = bstp_create(&sc->sc_if);
 	if (!sc->sc_stp) {
@@ -383,15 +379,13 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 
-		p = (struct bridge_iflist *)malloc(
-		    sizeof(struct bridge_iflist), M_DEVBUF, M_NOWAIT);
+		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (p == NULL) {
 			if (ifs->if_type == IFT_ETHER)
 				ifpromisc(ifs, 0);
 			error = ENOMEM;
 			break;
 		}
-		bzero(p, sizeof(struct bridge_iflist));
 
 		p->ifp = ifs;
 		p->bif_flags = IFBIF_LEARNING | IFBIF_DISCOVER;
@@ -443,13 +437,11 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = EBUSY;
 			break;
 		}
-		p = (struct bridge_iflist *)malloc(
-		    sizeof(struct bridge_iflist), M_DEVBUF, M_NOWAIT);
+		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (p == NULL) {
 			error = ENOMEM;
 			break;
 		}
-		bzero(p, sizeof(struct bridge_iflist));
 		p->ifp = ifs;
 		p->bif_flags = IFBIF_SPAN;
 		SIMPLEQ_INIT(&p->bif_brlin);
@@ -613,15 +605,10 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 		sc->sc_brttimeout = bparam->ifbrp_ctime;
-		timeout_del(&sc->sc_brtimeout);
 		if (bparam->ifbrp_ctime != 0)
-<<<<<<< HEAD
-			timeout_add(&sc->sc_brtimeout, sc->sc_brttimeout * hz);
-=======
 			timeout_add_sec(&sc->sc_brtimeout, sc->sc_brttimeout);
 		else
 			timeout_del(&sc->sc_brtimeout);
->>>>>>> origin/master
 		break;
 	case SIOCBRDGGTO:
 		bparam->ifbrp_ctime = sc->sc_brttimeout;
@@ -732,7 +719,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = suser(curproc, 0);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1024,13 +1011,13 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	sc = (struct bridge_softc *)ifp->if_bridge;
 	if (sc == NULL) {
 		m_freem(m);
-		return (0);
+		return (EINVAL);
 	}
 
 	if (m->m_len < sizeof(*eh)) {
 		m = m_pullup(m, sizeof(*eh));
 		if (m == NULL)
-			return (0);
+			return (ENOBUFS);
 	}
 	eh = mtod(m, struct ether_header *);
 	dst = (struct ether_addr *)&eh->ether_dhost[0];
@@ -1165,7 +1152,7 @@ sendunicast:
 	if ((dst_if->if_flags & IFF_RUNNING) == 0) {
 		m_freem(m);
 		splx(s);
-		return (0);
+		return (ENETDOWN);
 	}
 	bridge_ifenqueue(sc, dst_if, m);
 	splx(s);
@@ -1191,7 +1178,7 @@ bridgeintr(void)
 	int s;
 
 	LIST_FOREACH(sc, &bridge_list, sc_list) {
-		while (sc->sc_if.if_snd.ifq_head) {
+		for (;;) {
 			s = splnet();
 			IF_DEQUEUE(&sc->sc_if.if_snd, m);
 			splx(s);
@@ -1796,8 +1783,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 	if (p == LIST_END(&sc->sc_rts[h])) {
 		if (sc->sc_brtcnt >= sc->sc_brtmax)
 			goto done;
-		p = (struct bridge_rtnode *)malloc(
-		    sizeof(struct bridge_rtnode), M_DEVBUF, M_NOWAIT);
+		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
 		if (p == NULL)
 			goto done;
 
@@ -1824,7 +1810,8 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			if (setflags) {
 				q->brt_if = ifp;
 				q->brt_flags = flags;
-			}
+			} else if (!(q->brt_flags & IFBAF_STATIC))
+				q->brt_if = ifp;
 
 			if (q->brt_if == ifp)
 				q->brt_age = 1;
@@ -1835,8 +1822,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 		if (dir > 0) {
 			if (sc->sc_brtcnt >= sc->sc_brtmax)
 				goto done;
-			p = (struct bridge_rtnode *)malloc(
-			    sizeof(struct bridge_rtnode), M_DEVBUF, M_NOWAIT);
+			p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
 			if (p == NULL)
 				goto done;
 
@@ -1857,8 +1843,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 		if (p == LIST_END(&sc->sc_rts[h])) {
 			if (sc->sc_brtcnt >= sc->sc_brtmax)
 				goto done;
-			p = (struct bridge_rtnode *)malloc(
-			    sizeof(struct bridge_rtnode), M_DEVBUF, M_NOWAIT);
+			p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
 			if (p == NULL)
 				goto done;
 
@@ -2261,7 +2246,7 @@ bridge_filterrule(struct brl_head *h, struct ether_header *eh, struct mbuf *m)
 
 return_action:
 #if NPF > 0
-	pf_tag_packet(m, NULL, n->brl_tag, -1);
+	pf_tag_packet(m, n->brl_tag, -1);
 #endif
 	return (n->brl_action);
 }
@@ -2271,7 +2256,7 @@ bridge_addrule(struct bridge_iflist *bif, struct ifbrlreq *req, int out)
 {
 	struct brl_node *n;
 
-	n = (struct brl_node *)malloc(sizeof(struct brl_node), M_DEVBUF, M_NOWAIT);
+	n = malloc(sizeof(*n), M_DEVBUF, M_NOWAIT);
 	if (n == NULL)
 		return (ENOMEM);
 	bcopy(&req->ifbr_src, &n->brl_src, sizeof(struct ether_addr));
@@ -2836,8 +2821,6 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 	int error, len;
 	short mflags;
 
-<<<<<<< HEAD
-=======
 #if NGIF > 0
 	/* Packet needs etherip encapsulation. */
 	if (ifp->if_type == IFT_GIF) {
@@ -2871,7 +2854,6 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 		m->m_flags &= ~M_VLANTAG;
 	}
 #endif
->>>>>>> origin/master
 	len = m->m_pkthdr.len;
 	mflags = m->m_flags;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
@@ -2884,8 +2866,7 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 	ifp->if_obytes += len;
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 
 	return (0);
 }

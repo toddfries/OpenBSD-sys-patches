@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp_input.c,v 1.3 2002/03/14 01:27:10 millert Exp $	*/
+/*	$OpenBSD: ddp_input.c,v 1.4 2006/03/04 22:40:16 brad Exp $	*/
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.

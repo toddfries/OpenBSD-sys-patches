@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bridgestp.c,v 1.25 2007/02/14 00:53:48 jsg Exp $	*/
-=======
 /*	$OpenBSD: bridgestp.c,v 1.39 2010/11/20 14:23:09 fgsch Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -154,7 +150,7 @@ __FBSDID("$FreeBSD: /repoman/r/ncvs/src/sys/net/bridgestp.c,v 1.25 2006/11/03 03
 #define	BSTP_MSGTYPE_RSTP	0x02		/* Rapid STP */
 #define	BSTP_MSGTYPE_TCN	0x80		/* Topology chg notification */
 
-#define	BSTP_INFO_RECIEVED	1
+#define	BSTP_INFO_RECEIVED	1
 #define	BSTP_INFO_MINE		2
 #define	BSTP_INFO_AGED		3
 #define	BSTP_INFO_DISABLED	4
@@ -397,16 +393,11 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	bp->bp_txcount++;
 	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-<<<<<<< HEAD
-	if (error == 0 && (ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
-=======
 	if (error == 0) {
 		ifp->if_obytes += len;
 		ifp->if_omcasts++;
 		if_start(ifp);
 	}
->>>>>>> origin/master
 	splx(s);
 }
 
@@ -539,16 +530,11 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	bp->bp_txcount++;
 	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-<<<<<<< HEAD
-	if (error == 0 && (ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
-=======
 	if (error == 0) {
 		ifp->if_obytes += len;
 		ifp->if_omcasts++;
 		if_start(ifp);
 	}
->>>>>>> origin/master
  done:
 	splx(s);
 }
@@ -747,7 +733,7 @@ bstp_received_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 			bp->bp_rcvdtca = 1;
 
 		if (bp->bp_agree &&
-		    !bstp_pdu_bettersame(bp, BSTP_INFO_RECIEVED))
+		    !bstp_pdu_bettersame(bp, BSTP_INFO_RECEIVED))
 			bp->bp_agree = 0;
 
 		/* copy the received priority and timers to the port */
@@ -762,7 +748,7 @@ bstp_received_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 		/* set expiry for the new info */
 		bstp_set_timer_msgage(bp);
 
-		bp->bp_infois = BSTP_INFO_RECIEVED;
+		bp->bp_infois = BSTP_INFO_RECEIVED;
 		bstp_assign_roles(bs);
 		break;
 
@@ -858,8 +844,8 @@ bstp_pdu_rcvtype(struct bstp_port *bp, struct bstp_config_unit *cu)
 int
 bstp_pdu_bettersame(struct bstp_port *bp, int newinfo)
 {
-	if (newinfo == BSTP_INFO_RECIEVED &&
-	    bp->bp_infois == BSTP_INFO_RECIEVED &&
+	if (newinfo == BSTP_INFO_RECEIVED &&
+	    bp->bp_infois == BSTP_INFO_RECEIVED &&
 	    bstp_info_cmp(&bp->bp_port_pv, &bp->bp_msg_cu.cu_pv) >= INFO_SAME)
 		return (1);
 
@@ -929,9 +915,9 @@ bstp_assign_roles(struct bstp_state *bs)
 	bs->bs_root_htime = bs->bs_bridge_htime;
 	bs->bs_root_port = NULL;
 
-	/* check if any recieved info supersedes us */
+	/* check if any received info supersedes us */
 	LIST_FOREACH(bp, &bs->bs_bplist, bp_next) {
-		if (bp->bp_infois != BSTP_INFO_RECIEVED)
+		if (bp->bp_infois != BSTP_INFO_RECEIVED)
 			continue;
 
 		pv = bp->bp_port_pv;
@@ -994,7 +980,7 @@ bstp_assign_roles(struct bstp_state *bs)
 				bstp_update_info(bp);
 			break;
 
-		case BSTP_INFO_RECIEVED:
+		case BSTP_INFO_RECEIVED:
 			if (bp == rbp) {
 				/*
 				 * root priority is derived from this
@@ -1040,12 +1026,12 @@ bstp_update_state(struct bstp_state *bs, struct bstp_port *bp)
 	struct bstp_port *bp2;
 	int synced;
 
-	/* check if all the ports have syncronised again */
+	/* check if all the ports have synchronized again */
 	if (!bs->bs_allsynced) {
 		synced = 1;
 		LIST_FOREACH(bp2, &bs->bs_bplist, bp_next) {
-			if (!(bp->bp_synced ||
-			     bp->bp_role == BSTP_ROLE_ROOT)) {
+			if (!(bp2->bp_synced ||
+			     bp2->bp_role == BSTP_ROLE_ROOT)) {
 				synced = 0;
 				break;
 			}
@@ -1826,7 +1812,7 @@ bstp_hello_timer_expiry(struct bstp_state *bs, struct bstp_port *bp)
 void
 bstp_message_age_expiry(struct bstp_state *bs, struct bstp_port *bp)
 {
-	if (bp->bp_infois == BSTP_INFO_RECIEVED) {
+	if (bp->bp_infois == BSTP_INFO_RECEIVED) {
 		bp->bp_infois = BSTP_INFO_AGED;
 		bstp_assign_roles(bs);
 		DPRINTF("aged info on %s\n", bp->bp_ifp->if_xname);
@@ -1949,8 +1935,7 @@ bstp_create(struct ifnet *ifp)
 	int s;
 
 	s = splnet();
-	bs = (struct bstp_state *)malloc(sizeof(*bs), M_DEVBUF, M_WAITOK);
-	bzero(bs, sizeof(*bs));
+	bs = malloc(sizeof(*bs), M_DEVBUF, M_WAITOK|M_ZERO);
 	LIST_INIT(&bs->bs_bplist);
 
 	bs->bs_ifp = ifp;
@@ -1990,8 +1975,7 @@ bstp_stop(struct bstp_state *bs)
 	LIST_FOREACH(bp, &bs->bs_bplist, bp_next)
 		bstp_set_port_state(bp, BSTP_IFSTATE_DISCARDING);
 
-	if (timeout_initialized(&bs->bs_bstptimeout) &&
-	    timeout_pending(&bs->bs_bstptimeout))
+	if (timeout_initialized(&bs->bs_bstptimeout))
 		timeout_del(&bs->bs_bstptimeout);
 }
 
@@ -2008,10 +1992,9 @@ bstp_add(struct bstp_state *bs, struct ifnet *ifp)
 		return (NULL);
 	}
 
-	bp = (struct bstp_port *)malloc(sizeof(*bp), M_DEVBUF, M_NOWAIT);
+	bp = malloc(sizeof(*bp), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (bp == NULL)
 		return (NULL);
-	bzero(bp, sizeof(*bp));
 
 	bp->bp_ifp = ifp;
 	bp->bp_bs = bs;

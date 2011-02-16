@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_hdio.c,v 1.4 2002/02/13 19:08:06 art Exp $	*/
-=======
 /*	$OpenBSD: linux_hdio.c,v 1.7 2010/05/18 04:41:14 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_hdio.c,v 1.1 2000/12/10 14:12:17 fvdl Exp $	*/
 
 /*
@@ -135,7 +131,7 @@ linux_ioctl_hdio(struct proc *p, struct linux_sys_ioctl_args *uap,
 			break;
 		}
 		labp = error != 0 ? &label : partp.disklab;
-		hdg.start = error1 != 0 ? partp.part->p_offset : 0;
+		hdg.start = error1 != 0 ? DL_GETPOFFSET(partp.part) & 0x7fffffff: 0;
 		hdg.heads = labp->d_ntracks;
 		hdg.cylinders = labp->d_ncylinders;
 		hdg.sectors = labp->d_nsectors;
@@ -153,7 +149,7 @@ linux_ioctl_hdio(struct proc *p, struct linux_sys_ioctl_args *uap,
 			break;
 		}
 		labp = error != 0 ? &label : partp.disklab;
-		hdg_big.start = error1 != 0 ? partp.part->p_offset : 0;
+		hdg_big.start = error1 != 0 ? DL_GETPOFFSET(partp.part) & 0x7fffffff : 0;
 		hdg_big.heads = labp->d_ntracks;
 		hdg_big.cylinders = labp->d_ncylinders;
 		hdg_big.sectors = labp->d_nsectors;

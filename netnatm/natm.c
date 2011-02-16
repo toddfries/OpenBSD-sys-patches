@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: natm.c,v 1.6 2001/05/16 12:54:08 ho Exp $	*/
-=======
 /*	$OpenBSD: natm.c,v 1.12 2010/02/11 22:33:33 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  *
@@ -71,17 +67,8 @@ u_long natm0_recvspace = 16*1024;
  * user requests
  */
 
-#if defined(__NetBSD__)
-int natm_usrreq(so, req, m, nam, control)
-#elif defined(__OpenBSD__) || defined(__FreeBSD__)
-int natm_usrreq(so, req, m, nam, control)
-#endif
-struct socket *so;
-int req;
-struct mbuf *m, *nam, *control;
-#if defined(__NetBSD__)
-struct proc *p;
-#endif
+int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct proc *p)
 {
   int error = 0, s, s2;
   struct natmpcb *npcb;
@@ -309,7 +296,7 @@ struct proc *p;
     case PRU_LISTEN:			/* listen for connection */
     case PRU_ACCEPT:			/* accept connection from peer */
     case PRU_CONNECT2:			/* connect two sockets */
-    case PRU_ABORT:			/* abort (fast DISCONNECT, DETATCH) */
+    case PRU_ABORT:			/* abort (fast DISCONNECT, DETACH) */
 					/* (only happens if LISTEN socket) */
     case PRU_RCVD:			/* have taken data; more room now */
     case PRU_FASTTIMO:			/* 200ms timeout */
@@ -372,7 +359,7 @@ next:
   if (npcb->npcb_flags & NPCB_DRAIN) {
     m_freem(m);
     if (npcb->npcb_inq == 0)
-      FREE(npcb, M_PCB);			/* done! */
+      free(npcb, M_PCB);			/* done! */
     goto next;
   }
 

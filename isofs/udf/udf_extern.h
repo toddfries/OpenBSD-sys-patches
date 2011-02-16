@@ -1,11 +1,7 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udf_extern.h,v 1.6 2006/07/09 04:14:25 pedro Exp $	*/
-=======
 /*	$OpenBSD: udf_extern.h,v 1.11 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 
 /*
- * Written by Pedro Martelletto <pedro@openbsd.org> in February 2005.
+ * Written by Pedro Martelletto <pedro@ambientworks.net> in February 2005.
  * Public domain.
  */
 

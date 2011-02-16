@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_quota.c,v 1.26 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: ufs_quota.c,v 1.30 2008/01/05 19:49:26 otto Exp $	*/
 /*	$NetBSD: ufs_quota.c,v 1.8 1996/02/09 22:36:09 christos Exp $	*/
 
 /*
@@ -62,9 +62,8 @@ struct dquot {
 	LIST_ENTRY(dquot) dq_hash;	/* hash list */
 	TAILQ_ENTRY(dquot) dq_freelist;	/* free list */
 	u_int16_t dq_flags;		/* flags, see below */
-	u_int16_t dq_cnt;		/* count of active references */
-	u_int16_t dq_spare;		/* unused spare padding */
 	u_int16_t dq_type;		/* quota type of this dquot */
+	u_int32_t dq_cnt;		/* count of active references */
 	u_int32_t dq_id;		/* identifier this applies to */
 	struct  vnode *dq_vp;           /* file backing this quota */
 	struct  ucred  *dq_cred;        /* credentials for writing file */
@@ -178,7 +177,7 @@ getinoquota(struct inode *ip)
  * Update disk usage, and take corrective action.
  */
 int 
-ufs_quota_alloc_blocks2(struct inode *ip, int32_t change, 
+ufs_quota_alloc_blocks2(struct inode *ip, daddr64_t change,
     struct ucred *cred, enum ufs_quota_flags flags)
 {
 	struct dquot *dq;
@@ -219,7 +218,7 @@ ufs_quota_alloc_blocks2(struct inode *ip, int32_t change,
 }
 
 int
-ufs_quota_free_blocks2(struct inode *ip, int32_t change, 
+ufs_quota_free_blocks2(struct inode *ip, daddr64_t change,
     struct ucred *cred, enum ufs_quota_flags flags)
 {
 	struct dquot *dq;
@@ -835,8 +834,7 @@ dqget(struct vnode *vp, u_long id, struct ufsmount *ump, int type,
 	    numdquot < MAXQUOTAS * desiredvnodes)
 		desireddquot += DQUOTINC;
 	if (numdquot < desireddquot) {
-		dq = (struct dquot *)malloc(sizeof *dq, M_DQUOT, M_WAITOK);
-		bzero((char *)dq, sizeof *dq);
+		dq = malloc(sizeof *dq, M_DQUOT, M_WAITOK | M_ZERO);
 		numdquot++;
 	} else {
 		if ((dq = TAILQ_FIRST(&dqfreelist)) == NULL) {

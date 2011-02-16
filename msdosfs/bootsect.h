@@ -1,4 +1,4 @@
-/*	$OpenBSD: bootsect.h,v 1.4 2000/11/10 15:33:10 provos Exp $	*/
+/*	$OpenBSD: bootsect.h,v 1.5 2006/12/15 03:04:24 krw Exp $	*/
 /*	$NetBSD: bootsect.h,v 1.8 1997/10/17 11:23:29 ws Exp $	*/
 
 /*

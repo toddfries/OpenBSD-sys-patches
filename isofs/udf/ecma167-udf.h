@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ecma167-udf.h,v 1.5 2006/06/22 00:48:31 pedro Exp $	*/
-=======
 /*	$OpenBSD: ecma167-udf.h,v 1.8 2009/12/23 02:24:39 krw Exp $	*/
 /* $NetBSD: ecma167-udf.h,v 1.10 2008/06/24 15:30:33 reinoud Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003, 2004, 2005, 2006, 2008 Reinoud Zandijk

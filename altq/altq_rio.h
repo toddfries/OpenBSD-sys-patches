@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rio.h,v 1.5 2002/12/16 17:27:20 henning Exp $	*/
+/*	$OpenBSD: altq_rio.h,v 1.6 2003/03/13 16:33:46 kjc Exp $	*/
 /*	$KAME: altq_rio.h,v 1.5 2000/12/14 08:12:46 thorpej Exp $	*/
 
 /*

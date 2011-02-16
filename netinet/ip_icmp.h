@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_icmp.h,v 1.20 2003/06/02 23:28:14 millert Exp $	*/
-=======
 /*	$OpenBSD: ip_icmp.h,v 1.24 2010/09/13 09:59:32 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip_icmp.h,v 1.10 1996/02/13 23:42:28 christos Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_examine.c,v 1.12 2006/03/13 06:23:20 jsg Exp $	*/
-=======
 /*	$OpenBSD: db_examine.c,v 1.17 2009/11/21 20:40:04 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_examine.c,v 1.11 1996/03/30 22:30:07 christos Exp $	*/
 
 /*
@@ -80,6 +76,7 @@ db_examine(db_addr_t addr, char *fmt, int count)
 	int		size;
 	int		width;
 	char *		fp;
+	char		tmpfmt[28];
 
 	while (--count >= 0) {
 		fp = fmt;
@@ -117,7 +114,9 @@ db_examine(db_addr_t addr, char *fmt, int count)
 			case 'r':	/* signed, current radix */
 				value = db_get_value(addr, size, TRUE);
 				addr += size;
-				db_printf("%-*lr", width, (long)value);
+				db_format(tmpfmt, sizeof tmpfmt,
+				    (long)value, DB_FORMAT_R, 0, width);
+				db_printf("%-*s", width, tmpfmt);
 				break;
 			case 'x':	/* unsigned hex */
 				value = db_get_value(addr, size, FALSE);
@@ -127,7 +126,9 @@ db_examine(db_addr_t addr, char *fmt, int count)
 			case 'z':	/* signed hex */
 				value = db_get_value(addr, size, TRUE);
 				addr += size;
-				db_printf("%-*lz", width, (long)value);
+				db_format(tmpfmt, sizeof tmpfmt,
+				    (long)value, DB_FORMAT_Z, 0, width);
+				db_printf("%-*s", width, tmpfmt);
 				break;
 			case 'd':	/* signed decimal */
 				value = db_get_value(addr, size, TRUE);
@@ -190,6 +191,7 @@ void
 db_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
 	db_expr_t	value;
+	char		tmpfmt[28];
 
 	if (modif[0] != '\0')
 		db_print_format = modif[0];
@@ -199,13 +201,15 @@ db_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 		db_printsym((db_addr_t)addr, DB_STGY_ANY, db_printf);
 		break;
 	case 'r':
-		db_printf("%*r", sizeof(db_expr_t) * 2 * 6 / 5, addr);
+		db_printf("%s", db_format(tmpfmt, sizeof tmpfmt, addr,
+		    DB_FORMAT_R, 0, sizeof(db_expr_t) * 2 * 6 / 5));
 		break;
 	case 'x':
 		db_printf("%*lx", sizeof(db_expr_t) * 2, addr);
 		break;
 	case 'z':
-		db_printf("%*z", sizeof(db_expr_t) * 2, addr);
+		db_printf("%s", db_format(tmpfmt, sizeof tmpfmt, addr,
+		    DB_FORMAT_Z, 0, sizeof(db_expr_t) * 2));
 		break;
 	case 'd':
 		db_printf("%*ld", sizeof(db_expr_t) * 2 * 6 / 5, addr);

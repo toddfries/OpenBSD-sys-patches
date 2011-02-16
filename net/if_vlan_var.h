@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_vlan_var.h,v 1.17 2006/01/05 14:57:24 norby Exp $	*/
-=======
 /*	$OpenBSD: if_vlan_var.h,v 1.20 2010/06/03 16:15:00 naddy Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology

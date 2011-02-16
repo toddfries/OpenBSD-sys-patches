@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd9660_node.c,v 1.17 2007/03/21 17:29:31 thib Exp $	*/
-=======
 /*	$OpenBSD: cd9660_node.c,v 1.21 2010/04/23 19:40:28 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cd9660_node.c,v 1.17 1997/05/05 07:13:57 mycroft Exp $	*/
 
 /*-
@@ -113,8 +109,7 @@ iso_dmap(device, inum, create)
 	if (!create)
 		return (NULL);
 
-	MALLOC(dp, struct iso_dnode *, sizeof(struct iso_dnode), M_CACHE,
-	       M_WAITOK);
+	dp = malloc(sizeof(struct iso_dnode), M_CACHE, M_WAITOK);
 	dp->i_dev = dev;
 	dp->i_number = ino;
 
@@ -140,7 +135,7 @@ iso_dunmap(device)
 				if (dq)
 					dq->d_prev = dp->d_prev;
 				*dp->d_prev = dq;
-				FREE(dp, M_CACHE);
+				free(dp, M_CACHE);
 			}
 		}
 	}
@@ -236,10 +231,7 @@ int
 cd9660_inactive(v)
 	void *v;
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct proc *p = ap->a_p;
 	register struct iso_node *ip = VTOI(vp);
@@ -269,9 +261,7 @@ int
 cd9660_reclaim(v)
 	void *v;
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	register struct vnode *vp = ap->a_vp;
 	register struct iso_node *ip = VTOI(vp);
 
@@ -292,7 +282,7 @@ cd9660_reclaim(v)
 		vrele(ip->i_devvp);
 		ip->i_devvp = 0;
 	}
-	FREE(vp->v_data, M_ISOFSNODE);
+	free(vp->v_data, M_ISOFSNODE);
 	vp->v_data = NULL;
 	return (0);
 }

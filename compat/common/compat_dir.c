@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* 	$OpenBSD: compat_dir.c,v 1.3 2002/03/14 01:26:49 millert Exp $	*/
-=======
 /* 	$OpenBSD: compat_dir.c,v 1.5 2008/08/19 09:49:50 pedro Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Constantine Sapuntzakis

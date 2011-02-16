@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ffs_vnops.c,v 1.42 2007/02/26 11:25:23 pedro Exp $	*/
-=======
 /*	$OpenBSD: ffs_vnops.c,v 1.60 2010/12/29 21:28:45 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -66,49 +62,6 @@
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
-<<<<<<< HEAD
-/* Global vfs data structures for ufs. */
-int (**ffs_vnodeop_p)(void *);
-struct vnodeopv_entry_desc ffs_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
-	{ &vop_lookup_desc, ufs_lookup },		/* lookup */
-	{ &vop_create_desc, ufs_create },		/* create */
-	{ &vop_mknod_desc, ufs_mknod },			/* mknod */
-	{ &vop_open_desc, ufs_open },			/* open */
-	{ &vop_close_desc, ufs_close },			/* close */
-	{ &vop_access_desc, ufs_access },		/* access */
-	{ &vop_getattr_desc, ufs_getattr },		/* getattr */
-	{ &vop_setattr_desc, ufs_setattr },		/* setattr */
-	{ &vop_read_desc, ffs_read },			/* read */
-	{ &vop_write_desc, ffs_write },			/* write */
-	{ &vop_ioctl_desc, ufs_ioctl },			/* ioctl */
-	{ &vop_poll_desc, ufs_poll },			/* poll */
-	{ &vop_kqfilter_desc, ufs_kqfilter },		/* kqfilter */
-	{ &vop_revoke_desc, ufs_revoke },		/* revoke */
-	{ &vop_fsync_desc, ffs_fsync },			/* fsync */
-	{ &vop_remove_desc, ufs_remove },		/* remove */
-	{ &vop_link_desc, ufs_link },			/* link */
-	{ &vop_rename_desc, ufs_rename },		/* rename */
-	{ &vop_mkdir_desc, ufs_mkdir },			/* mkdir */
-	{ &vop_rmdir_desc, ufs_rmdir },			/* rmdir */
-	{ &vop_symlink_desc, ufs_symlink },		/* symlink */
-	{ &vop_readdir_desc, ufs_readdir },		/* readdir */
-	{ &vop_readlink_desc, ufs_readlink },		/* readlink */
-	{ &vop_abortop_desc, vop_generic_abortop },	/* abortop */
-	{ &vop_inactive_desc, ufs_inactive },		/* inactive */
-	{ &vop_reclaim_desc, ffs_reclaim },		/* reclaim */
-	{ &vop_lock_desc, ufs_lock },			/* lock */
-	{ &vop_unlock_desc, ufs_unlock },		/* unlock */
-	{ &vop_bmap_desc, ufs_bmap },			/* bmap */
-	{ &vop_strategy_desc, ufs_strategy },		/* strategy */
-	{ &vop_print_desc, ufs_print },			/* print */
-	{ &vop_islocked_desc, ufs_islocked },		/* islocked */
-	{ &vop_pathconf_desc, ufs_pathconf },		/* pathconf */
-	{ &vop_advlock_desc, ufs_advlock },		/* advlock */
-	{ &vop_reallocblks_desc, ffs_reallocblks },	/* reallocblks */
-	{ &vop_bwrite_desc, vop_generic_bwrite },
-	{ NULL, NULL }
-=======
 struct vops ffs_vops = {
 	.vop_default	= eopnotsupp,
 	.vop_lookup	= ufs_lookup,
@@ -147,7 +100,6 @@ struct vops ffs_vops = {
 	.vop_advlock	= ufs_advlock,
 	.vop_reallocblks = ffs_reallocblks,
 	.vop_bwrite	= vop_generic_bwrite
->>>>>>> origin/master
 };
 
 struct vops ffs_specvops = {
@@ -246,12 +198,7 @@ int doclusterwrite = 1;
 int
 ffs_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 	struct vnode *vp;
 	struct inode *ip;
 	struct uio *uio;
@@ -292,7 +239,7 @@ ffs_read(void *v)
 			break;
 		lbn = lblkno(fs, uio->uio_offset);
 		nextlbn = lbn + 1;
-		size = blksize(fs, ip, lbn);
+		size = fs->fs_bsize;	/* WAS blksize(fs, ip, lbn); */
 		blkoffset = blkoff(fs, uio->uio_offset);
 		xfersize = fs->fs_bsize - blkoffset;
 		if (uio->uio_resid < xfersize)
@@ -302,13 +249,8 @@ ffs_read(void *v)
 
 		if (lblktosize(fs, nextlbn) >= DIP(ip, size))
 			error = bread(vp, lbn, size, NOCRED, &bp);
-		else if (doclusterread)
-			error = cluster_read(vp, &ip->i_ci,
-			    DIP(ip, size), lbn, size, NOCRED, &bp);
 		else if (lbn - 1 == ip->i_ci.ci_lastr) {
-			int nextsize = blksize(fs, ip, nextlbn);
-			error = breadn(vp, lbn,
-			    size, &nextlbn, &nextsize, 1, NOCRED, &bp);
+			error = bread_cluster(vp, lbn, size, &bp);
 		} else
 			error = bread(vp, lbn, size, NOCRED, &bp);
 
@@ -337,7 +279,10 @@ ffs_read(void *v)
 	}
 	if (bp != NULL)
 		brelse(bp);
-	ip->i_flag |= IN_ACCESS;
+	if (!(vp->v_mount->mnt_flag & MNT_NOATIME) ||
+	    (ip->i_flag & (IN_CHANGE | IN_UPDATE))) {
+		ip->i_flag |= IN_ACCESS;
+	}
 	return (error);
 }
 
@@ -347,19 +292,14 @@ ffs_read(void *v)
 int
 ffs_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 	struct vnode *vp;
 	struct uio *uio;
 	struct inode *ip;
 	struct fs *fs;
 	struct buf *bp;
 	struct proc *p;
-	daddr_t lbn;
+	daddr64_t lbn;
 	off_t osize;
 	int blkoffset, error, extended, flags, ioflag, resid, size, xfersize;
 
@@ -491,12 +431,7 @@ ffs_write(void *v)
 int
 ffs_fsync(void *v)
 {
-	struct vop_fsync_args /* {
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int a_waitfor;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_fsync_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct buf *bp, *nbp;
 	int s, error, passes, skipmeta;
@@ -606,10 +541,7 @@ loop:
 int
 ffs_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 	int error;

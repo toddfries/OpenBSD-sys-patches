@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ether.c,v 1.67 2007/03/18 23:23:17 mpf Exp $	*/
-=======
 /*	$OpenBSD: if_ether.c,v 1.88 2010/07/22 00:41:55 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -518,12 +514,16 @@ arpintr()
 	struct arphdr *ar;
 	int s, len;
 
-	while (arpintrq.ifq_head) {
+	for (;;) {
 		s = splnet();
 		IF_DEQUEUE(&arpintrq, m);
 		splx(s);
-		if (m == 0 || (m->m_flags & M_PKTHDR) == 0)
+		if (m == NULL)
+			break;
+#ifdef DIAGNOSTIC
+		if ((m->m_flags & M_PKTHDR) == 0)
 			panic("arpintr");
+#endif
 
 		len = sizeof(struct arphdr);
 		if (m->m_len < len && (m = m_pullup(m, len)) == NULL)
@@ -573,20 +573,14 @@ in_arpinput(m)
 	struct llinfo_arp *la = 0;
 	struct rtentry *rt;
 	struct in_ifaddr *ia;
-<<<<<<< HEAD
-#if NBRIDGE > 0
-	struct in_ifaddr *bridge_ia = NULL;
-#endif
-#if NCARP > 0
-	u_int32_t count = 0, index = 0;
-#endif
-=======
->>>>>>> origin/master
 	struct sockaddr_dl *sdl;
 	struct sockaddr sa;
 	struct in_addr isaddr, itaddr, myaddr;
 	struct mbuf *mh, *mt;
 	u_int8_t *enaddr = NULL;
+#if NCARP > 0
+	u_int8_t *ether_shost = NULL;
+#endif
 	int op;
 
 	ea = mtod(m, struct ether_arp *);
@@ -613,13 +607,6 @@ in_arpinput(m)
 		if (ia->ia_ifp->if_type == IFT_CARP &&
 		    ((ia->ia_ifp->if_flags & (IFF_UP|IFF_RUNNING)) ==
 		    (IFF_UP|IFF_RUNNING))) {
-<<<<<<< HEAD
-			index++;
-			if (ia->ia_ifp == m->m_pkthdr.rcvif &&
-			    carp_iamatch(ia, ea->arp_sha,
-			    &count, index))
-				break;
-=======
 			if (ia->ia_ifp == m->m_pkthdr.rcvif) {
 				if (op == ARPOP_REPLY)
 					break;
@@ -629,36 +616,10 @@ in_arpinput(m)
 				else
 					goto out;
 			}
->>>>>>> origin/master
 		} else
 #endif
 			if (ia->ia_ifp == m->m_pkthdr.rcvif)
 				break;
-<<<<<<< HEAD
-#if NBRIDGE > 0
-		/*
-		 * If the interface we received the packet on
-		 * is part of a bridge, check to see if we need
-		 * to "bridge" the packet to ourselves at this
-		 * layer.  Note we still prefer a perfect match,
-		 * but allow this weaker match if necessary.
-		 */
-		if (m->m_pkthdr.rcvif->if_bridge != NULL) {
-			if (m->m_pkthdr.rcvif->if_bridge ==
-			    ia->ia_ifp->if_bridge)
-				bridge_ia = ia;
-#if NCARP > 0
-			else if (ia->ia_ifp->if_carpdev != NULL &&
-			    m->m_pkthdr.rcvif->if_bridge ==
-			    ia->ia_ifp->if_carpdev->if_bridge &&
-			    carp_iamatch(ia, ea->arp_sha,
-			    &count, index))
-				bridge_ia = ia;
-#endif
-		}
-#endif
-=======
->>>>>>> origin/master
 	}
 
 	/* Second try: check source against our addresses */
@@ -758,12 +719,6 @@ in_arpinput(m)
 			rt->rt_expire = time_second + arpt_keep;
 		rt->rt_flags &= ~RTF_REJECT;
 		la->la_asked = 0;
-<<<<<<< HEAD
-		if (la->la_hold) {
-			(*ac->ac_if.if_output)(&ac->ac_if, la->la_hold,
-				rt_key(rt), rt);
-			la->la_hold = 0;
-=======
 		while ((mh = la->la_hold_head) != NULL) {
 			if ((la->la_hold_head = mh->m_nextpkt) == NULL)
 				la->la_hold_tail = NULL;
@@ -784,7 +739,6 @@ in_arpinput(m)
 				la_hold_total--;
 				m_freem(mh);
 			}
->>>>>>> origin/master
 		}
 	}
 reply:
@@ -818,12 +772,10 @@ out:
 	eh = (struct ether_header *)sa.sa_data;
 	bcopy(ea->arp_tha, eh->ether_dhost, sizeof(eh->ether_dhost));
 #if NCARP > 0
-	if (ac->ac_if.if_type == IFT_CARP && ac->ac_if.if_flags & IFF_LINK1)
-		bcopy(((struct arpcom *)ac->ac_if.if_carpdev)->ac_enaddr,
-		    eh->ether_shost, sizeof(eh->ether_shost));
-	else
+	if (ether_shost)
+		enaddr = ether_shost;
 #endif
-		bcopy(enaddr, eh->ether_shost, sizeof(eh->ether_shost));
+	bcopy(enaddr, eh->ether_shost, sizeof(eh->ether_shost));
 
 	eh->ether_type = htons(ETHERTYPE_ARP);
 	sa.sa_family = pseudo_AF_HDRCMPLT;
@@ -841,11 +793,8 @@ arptfree(la)
 {
 	struct rtentry *rt = la->la_rt;
 	struct sockaddr_dl *sdl;
-<<<<<<< HEAD
-=======
 	struct rt_addrinfo info;
 	u_int tid = 0;
->>>>>>> origin/master
 
 	if (rt == 0)
 		panic("arptfree");
@@ -856,10 +805,6 @@ arptfree(la)
 		rt->rt_flags &= ~RTF_REJECT;
 		return;
 	}
-<<<<<<< HEAD
-	rtrequest(RTM_DELETE, rt_key(rt), (struct sockaddr *)0, rt_mask(rt),
-	    0, (struct rtentry **)0, 0);
-=======
 	bzero(&info, sizeof(info));
 	info.rti_info[RTAX_DST] = rt_key(rt);
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
@@ -868,7 +813,6 @@ arptfree(la)
 		tid = rt->rt_ifp->if_rdomain;
 
 	rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, tid);
->>>>>>> origin/master
 }
 
 /*
@@ -896,12 +840,6 @@ arplookup(addr, create, proxy, tableid)
 		if (create) {
 			if (rt->rt_refcnt <= 0 &&
 			    (rt->rt_flags & RTF_CLONED) != 0) {
-<<<<<<< HEAD
-				rtrequest(RTM_DELETE,
-				    (struct sockaddr *)rt_key(rt),
-				    rt->rt_gateway, rt_mask(rt), rt->rt_flags,
-				    0, 0);
-=======
 				struct rt_addrinfo info;
 
 				bzero(&info, sizeof(info));
@@ -911,7 +849,6 @@ arplookup(addr, create, proxy, tableid)
 
 				rtrequest1(RTM_DELETE, &info, rt->rt_priority,
 				    NULL, tableid);
->>>>>>> origin/master
 			}
 		}
 		return (0);

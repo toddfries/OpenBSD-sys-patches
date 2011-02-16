@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udp_var.h,v 1.15 2003/06/02 23:28:15 millert Exp $	*/
-=======
 /*	$OpenBSD: udp_var.h,v 1.21 2010/10/21 11:38:27 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: udp_var.h,v 1.12 1996/02/13 23:44:41 christos Exp $	*/
 
 /*
@@ -81,7 +77,8 @@ struct	udpstat {
 #define	UDPCTL_BADDYNAMIC	2 /* return bad dynamic port bitmap */
 #define UDPCTL_RECVSPACE	3 /* receive buffer space */
 #define UDPCTL_SENDSPACE	4 /* send buffer space */
-#define UDPCTL_MAXID		5
+#define UDPCTL_STATS		5 /* UDP statistics */
+#define UDPCTL_MAXID		6
 
 #define UDPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -89,6 +86,7 @@ struct	udpstat {
 	{ "baddynamic", CTLTYPE_STRUCT }, \
 	{ "recvspace",  CTLTYPE_INT }, \
 	{ "sendspace",  CTLTYPE_INT }, \
+	{ "stats",	CTLTYPE_STRUCT } \
 }
 
 #define UDPCTL_VARS { \
@@ -97,6 +95,7 @@ struct	udpstat {
 	NULL, \
 	&udp_recvspace, \
 	&udp_sendspace, \
+	NULL \
 }
 
 #ifdef _KERNEL
@@ -106,15 +105,8 @@ extern struct	udpstat udpstat;
 #ifdef INET6
 void	udp6_ctlinput(int, struct sockaddr *, void *);
 int	udp6_input(struct mbuf **, int *, int);
-<<<<<<< HEAD
-int	udp6_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
-#endif /* INET6 && !TCP6 */
-void	 *udp_ctlinput(int, struct sockaddr *, void *);
-=======
 #endif /* INET6 */
 void	 *udp_ctlinput(int, struct sockaddr *, u_int, void *);
->>>>>>> origin/master
 void	 udp_init(void);
 void	 udp_input(struct mbuf *, ...);
 #ifdef INET6
@@ -124,6 +116,6 @@ int	 udp6_output(struct inpcb *, struct mbuf *, struct mbuf *,
 int	 udp_output(struct mbuf *, ...);
 int	 udp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int	 udp_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *);
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 #endif /* _KERNEL */
 #endif /* _NETINET_UDP_VAR_H_ */

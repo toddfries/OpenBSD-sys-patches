@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mld6.c,v 1.22 2006/11/17 01:11:23 itojun Exp $	*/
-=======
 /*	$OpenBSD: mld6.c,v 1.26 2010/03/22 12:23:32 jsg Exp $	*/
->>>>>>> origin/master
 /*	$KAME: mld6.c,v 1.26 2001/02/16 14:50:35 itojun Exp $	*/
 
 /*
@@ -448,5 +444,6 @@ mld6_sendpkt(struct in6_multi *in6m, int type, const struct in6_addr *dst)
 		break;
 	}
 
-	ip6_output(mh, &ip6_opts, NULL, ia ? 0 : IPV6_UNSPECSRC, &im6o, NULL);
+	ip6_output(mh, &ip6_opts, NULL, ia ? 0 : IPV6_UNSPECSRC, &im6o, NULL,
+	    NULL);
 }

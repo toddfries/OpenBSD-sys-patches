@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in_pcb.h,v 1.58 2006/12/09 01:12:28 itojun Exp $	*/
-=======
 /*	$OpenBSD: in_pcb.h,v 1.70 2010/09/23 04:45:15 yasuoka Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -177,9 +173,10 @@ struct inpcbtable {
 #define	INP_LOWPORT	0x020	/* user wants "low" port binding */
 #define	INP_RECVIF	0x080	/* receive incoming interface */
 #define	INP_RECVTTL	0x040	/* receive incoming IP TTL */
+#define	INP_RECVDSTPORT	0x200	/* receive IP dst addr before rdr */
 
 #define	INP_CONTROLOPTS	(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR| \
-	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL)
+	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL|INP_RECVDSTPORT)
 
 /*
  * These flags' values should be determined by either the transport
@@ -249,7 +246,7 @@ struct baddynamicports {
 
 void	 in_losing(struct inpcb *);
 int	 in_pcballoc(struct socket *, void *);
-int	 in_pcbbind(void *, struct mbuf *);
+int	 in_pcbbind(void *, struct mbuf *, struct proc *);
 int	 in_pcbconnect(void *, struct mbuf *);
 void	 in_pcbdetach(void *);
 void	 in_pcbdisconnect(void *);
@@ -257,20 +254,16 @@ struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
 			       u_int, struct in_addr, u_int, u_int);
 struct inpcb *
-<<<<<<< HEAD
-	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int);
-=======
 	 in_pcblookup_listen(struct inpcbtable *, struct in_addr, u_int, int,
 	    struct mbuf *, u_int);
->>>>>>> origin/master
 #ifdef INET6
 struct inpcb *
 	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
 			       u_int, struct in6_addr *, u_int);
 struct inpcb *
 	 in6_pcblookup_listen(struct inpcbtable *,
-			       struct in6_addr *, u_int, int);
-int	 in6_pcbbind(struct inpcb *, struct mbuf *);
+			       struct in6_addr *, u_int, int, struct mbuf *);
+int	 in6_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
 int	 in6_pcbconnect(struct inpcb *, struct mbuf *);
 int	 in6_setsockaddr(struct inpcb *, struct mbuf *);
 int	 in6_setpeeraddr(struct inpcb *, struct mbuf *);

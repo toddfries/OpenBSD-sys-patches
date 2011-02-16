@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udp_usrreq.c,v 1.111 2006/11/27 11:00:12 claudio Exp $	*/
-=======
 /*	$OpenBSD: udp_usrreq.c,v 1.138 2010/09/24 14:50:30 hsuenaga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -138,8 +134,8 @@ int *udpctl_vars[UDPCTL_MAXID] = UDPCTL_VARS;
 struct	inpcbtable udbtable;
 struct	udpstat udpstat;
 
-static	void udp_detach(struct inpcb *);
-static	void udp_notify(struct inpcb *, int);
+void udp_detach(struct inpcb *);
+void udp_notify(struct inpcb *, int);
 
 #ifndef UDBHASHSIZE
 #define	UDBHASHSIZE	128
@@ -492,11 +488,15 @@ udp_input(struct mbuf *m, ...)
 				if ((n = m_copy(m, 0, M_COPYALL)) != NULL) {
 #ifdef INET6
 					if (ip6 && (last->inp_flags &
-					    IN6P_CONTROLOPTS))
+					    IN6P_CONTROLOPTS ||
+					    last->inp_socket->so_options &
+					    SO_TIMESTAMP))
 						ip6_savecontrol(last, n, &opts);
 #endif /* INET6 */
 					if (ip && (last->inp_flags &
-					    INP_CONTROLOPTS))
+					    INP_CONTROLOPTS ||
+					    last->inp_socket->so_options &
+					    SO_TIMESTAMP))
 						ip_savecontrol(last, &opts,
 						    ip, n);
 
@@ -538,10 +538,12 @@ udp_input(struct mbuf *m, ...)
 		}
 
 #ifdef INET6
-		if (ip6 && (last->inp_flags & IN6P_CONTROLOPTS))
+		if (ip6 && (last->inp_flags & IN6P_CONTROLOPTS ||
+		    last->inp_socket->so_options & SO_TIMESTAMP))
 			ip6_savecontrol(last, m, &opts);
 #endif /* INET6 */
-		if (ip && (last->inp_flags & INP_CONTROLOPTS))
+		if (ip && (last->inp_flags & INP_CONTROLOPTS ||
+		    last->inp_socket->so_options & SO_TIMESTAMP))
 			ip_savecontrol(last, &opts, ip, m);
 
 		m_adj(m, iphlen);
@@ -579,27 +581,18 @@ udp_input(struct mbuf *m, ...)
 	}
 	if (inp == 0) {
 		int	inpl_reverse = 0;
-#if NPF > 0
-		struct pf_mtag *t;
-
-		if ((t = pf_find_mtag(m)) != NULL &&
-		    t->flags & PF_TAG_TRANSLATE_LOCALHOST)
+		if (m->m_pkthdr.pf.flags & PF_TAG_TRANSLATE_LOCALHOST)
 			inpl_reverse = 1;
-#endif
 		++udpstat.udps_pcbhashmiss;
 #ifdef INET6
 		if (ip6) {
 			inp = in6_pcblookup_listen(&udbtable,
-			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse);
+			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse, m);
 		} else
 #endif /* INET6 */
 		inp = in_pcblookup_listen(&udbtable,
-<<<<<<< HEAD
-		    ip->ip_dst, uh->uh_dport, inpl_reverse);
-=======
 		    ip->ip_dst, uh->uh_dport, inpl_reverse, m,
 		    m->m_pkthdr.rdomain);
->>>>>>> origin/master
 		if (inp == 0) {
 			udpstat.udps_noport++;
 			if (m->m_flags & (M_BCAST | M_MCAST)) {
@@ -680,13 +673,13 @@ udp_input(struct mbuf *m, ...)
 
 	opts = NULL;
 #ifdef INET6
-	if (ip6 && (inp->inp_flags & IN6P_CONTROLOPTS))
+	if (ip6 && (inp->inp_flags & IN6P_CONTROLOPTS ||
+	    inp->inp_socket->so_options & SO_TIMESTAMP))
 		ip6_savecontrol(inp, m, &opts);
 #endif /* INET6 */
-	if (ip && (inp->inp_flags & INP_CONTROLOPTS))
+	if (ip && (inp->inp_flags & INP_CONTROLOPTS ||
+	    inp->inp_socket->so_options & SO_TIMESTAMP))
 		ip_savecontrol(inp, &opts, ip, m);
-<<<<<<< HEAD
-=======
 	if (ip && (inp->inp_flags & INP_RECVDSTPORT)) {
 		struct mbuf **mp = &opts;
 
@@ -705,7 +698,6 @@ udp_input(struct mbuf *m, ...)
 		}
 	}
 #endif
->>>>>>> origin/master
 
 	iphlen += sizeof(struct udphdr);
 	m_adj(m, iphlen);
@@ -725,15 +717,8 @@ bad:
  * Notify a udp user of an asynchronous error;
  * just wake up so that he can collect error status.
  */
-<<<<<<< HEAD
-static void
-udp_notify(inp, errno)
-	struct inpcb *inp;
-	int errno;
-=======
 void
 udp_notify(struct inpcb *inp, int errno)
->>>>>>> origin/master
 {
 	inp->inp_socket->so_error = errno;
 	sorwakeup(inp->inp_socket);
@@ -1069,31 +1054,10 @@ release:
 	return (error);
 }
 
-#ifdef INET6
 /*ARGSUSED*/
 int
-<<<<<<< HEAD
-udp6_usrreq(so, req, m, addr, control, p)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *addr, *control;
-	struct proc *p;
-=======
 udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
     struct mbuf *control, struct proc *p)
->>>>>>> origin/master
-{
-
-	return udp_usrreq(so, req, m, addr, control);
-}
-#endif
-
-/*ARGSUSED*/
-int
-udp_usrreq(so, req, m, addr, control)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *addr, *control;
 {
 	struct inpcb *inp = sotoinpcb(so);
 	int error = 0;
@@ -1149,10 +1113,10 @@ udp_usrreq(so, req, m, addr, control)
 		s = splsoftnet();
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
-			error = in6_pcbbind(inp, addr);
+			error = in6_pcbbind(inp, addr, p);
 		else
 #endif
-			error = in_pcbbind(inp, addr);
+			error = in_pcbbind(inp, addr, p);
 		splx(s);
 		break;
 
@@ -1317,14 +1281,8 @@ release:
 	return (error);
 }
 
-<<<<<<< HEAD
-static void
-udp_detach(inp)
-	struct inpcb *inp;
-=======
 void
 udp_detach(struct inpcb *inp)
->>>>>>> origin/master
 {
 	int s = splsoftnet();
 
@@ -1347,6 +1305,13 @@ udp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case UDPCTL_BADDYNAMIC:
 		return (sysctl_struct(oldp, oldlenp, newp, newlen,
 		    baddynamicports.udp, sizeof(baddynamicports.udp)));
+
+	case UDPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &udpstat, sizeof(udpstat)));
+
 	default:
 		if (name[0] < UDPCTL_MAXID)
 			return (sysctl_int_arr(udpctl_vars, name, namelen,

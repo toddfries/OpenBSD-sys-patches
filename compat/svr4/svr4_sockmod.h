@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_sockmod.h,v 1.3 1996/08/02 20:35:41 niklas Exp $	 */
+/*	$OpenBSD: svr4_sockmod.h,v 1.4 1997/08/29 19:56:38 kstailey Exp $	 */
 /*	$NetBSD: svr4_sockmod.h,v 1.5 1997/07/21 23:02:38 christos Exp $	 */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp-comp.h,v 1.7 2002/07/01 19:31:35 deraadt Exp $	*/
+/*	$OpenBSD: ppp-comp.h,v 1.8 2002/09/13 00:12:07 deraadt Exp $	*/
 
 /*
  * ppp-comp.h - Definitions for doing PPP packet compression.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_ipsp.h,v 1.134 2006/06/30 21:41:12 deraadt Exp $	*/
-=======
 /*	$OpenBSD: ip_ipsp.h,v 1.146 2010/10/06 22:19:20 mikeb Exp $	*/
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),

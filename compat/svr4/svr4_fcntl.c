@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: svr4_fcntl.c,v 1.21 2002/02/13 19:08:06 art Exp $	 */
-=======
 /*	$OpenBSD: svr4_fcntl.c,v 1.23 2010/07/26 01:56:27 guenther Exp $	 */
->>>>>>> origin/master
 /*	$NetBSD: svr4_fcntl.c,v 1.14 1995/10/14 20:24:24 christos Exp $	 */
 
 /*

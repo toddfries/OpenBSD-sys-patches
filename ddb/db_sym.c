@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_sym.c,v 1.31 2005/09/29 05:57:14 deraadt Exp $	*/
+/*	$OpenBSD: db_sym.c,v 1.32 2006/03/13 06:23:20 jsg Exp $	*/
 /*	$NetBSD: db_sym.c,v 1.24 2000/08/11 22:50:47 tv Exp $	*/
 
 /* 
@@ -148,11 +148,9 @@ ddb_init(void)
 		return;
 	}
 
-	printf("%s: xssym %p xesym %p\n", __func__, xssym, xesym);
 	if (xesym != NULL && xesym != xssym)
 		for (symf = db_symformats; *symf != NULL; symf++) {
 			db_symformat = *symf;
-			printf("%s: calling X_db_sym_init\n", __func__);
 			if (X_db_sym_init((vaddr_t)xesym - (vaddr_t)xssym,
 			    xssym, xesym, name) == TRUE)
 			return;

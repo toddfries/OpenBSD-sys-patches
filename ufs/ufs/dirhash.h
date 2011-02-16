@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: dirhash.h,v 1.3 2004/02/02 19:34:39 tedu Exp $	*/
-=======
 /* $OpenBSD: dirhash.h,v 1.5 2010/04/25 14:43:07 tedu Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2001 Ian Dowse.  All rights reserved.
  *

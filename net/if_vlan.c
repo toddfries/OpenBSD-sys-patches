@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_vlan.c,v 1.67 2006/05/09 19:43:02 mpf Exp $	*/
-=======
 /*	$OpenBSD: if_vlan.c,v 1.86 2011/01/03 11:18:13 reyk Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -81,12 +77,7 @@
 #include <net/if_vlan_var.h>
 
 extern struct	ifaddr	**ifnet_addrs;
-<<<<<<< HEAD
-extern int ifqmaxlen;
-u_long vlan_tagmask;
-=======
 u_long vlan_tagmask, svlan_tagmask;
->>>>>>> origin/master
 
 #define TAG_HASH_SIZE		32
 #define TAG_HASH(tag)		(tag & vlan_tagmask)
@@ -136,10 +127,9 @@ vlan_clone_create(struct if_clone *ifc, int unit)
 	struct ifvlan *ifv;
 	struct ifnet *ifp;
 
-	ifv = malloc(sizeof(*ifv), M_DEVBUF, M_NOWAIT);
+	ifv = malloc(sizeof(*ifv), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!ifv)
 		return (ENOMEM);
-	bzero(ifv, sizeof(*ifv));
 
 	LIST_INIT(&ifv->vlan_mc_listhead);
 	ifp = &ifv->ifv_if;
@@ -271,8 +261,7 @@ vlan_start(struct ifnet *ifp)
 		}
 
 		ifp->if_opackets++;
-		if ((p->if_flags & (IFF_RUNNING|IFF_OACTIVE)) == IFF_RUNNING)
-			p->if_start(p);
+		if_start(p);
 	}
 	ifp->if_flags &= ~IFF_OACTIVE;
 
@@ -374,16 +363,11 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 
 	if (p->if_type != IFT_ETHER)
 		return EPROTONOSUPPORT;
-<<<<<<< HEAD
-	if (ifv->ifv_p)
-		return EBUSY;
-=======
 	if (ifv->ifv_p == p && ifv->ifv_tag == tag) /* noop */
 		return (0);
 
 	/* Reset the interface */
 	vlan_unconfig(&ifv->ifv_if);
->>>>>>> origin/master
 
 	ifv->ifv_p = p;
 
@@ -702,7 +686,7 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    vlan_ether_delmulti(ifv, ifr) : EINVAL;
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 	return error;
 }
@@ -730,8 +714,7 @@ vlan_ether_addmulti(struct ifvlan *ifv, struct ifreq *ifr)
 	 * about it.  Also, remember this multicast address so that
 	 * we can delete them on unconfigure.
 	 */
-	MALLOC(mc, struct vlan_mc_entry *, sizeof(struct vlan_mc_entry),
-	    M_DEVBUF, M_NOWAIT);
+	mc = malloc(sizeof(*mc), M_DEVBUF, M_NOWAIT);
 	if (mc == NULL) {
 		error = ENOMEM;
 		goto alloc_failed;
@@ -754,7 +737,7 @@ vlan_ether_addmulti(struct ifvlan *ifv, struct ifreq *ifr)
 
  ioctl_failed:
 	LIST_REMOVE(mc, mc_entries);
-	FREE(mc, M_DEVBUF);
+	free(mc, M_DEVBUF);
  alloc_failed:
 	(void)ether_delmulti(ifr, (struct arpcom *)&ifv->ifv_ac);
 
@@ -797,7 +780,7 @@ vlan_ether_delmulti(struct ifvlan *ifv, struct ifreq *ifr)
 	if (error == 0) {
 		/* And forget about this address. */
 		LIST_REMOVE(mc, mc_entries);
-		FREE(mc, M_DEVBUF);
+		free(mc, M_DEVBUF);
 	} else
 		(void)ether_addmulti(ifr, (struct arpcom *)&ifv->ifv_ac);
 	return (error);
@@ -826,6 +809,6 @@ vlan_ether_purgemulti(struct ifvlan *ifv)
 		memcpy(&ifr->ifr_addr, &mc->mc_addr, mc->mc_addr.ss_len);
 		(void)(*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)ifr);
 		LIST_REMOVE(mc, mc_entries);
-		FREE(mc, M_DEVBUF);
+		free(mc, M_DEVBUF);
 	}
 }

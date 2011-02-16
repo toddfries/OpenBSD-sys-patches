@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rio.c,v 1.8 2002/12/16 17:27:20 henning Exp $	*/
+/*	$OpenBSD: altq_rio.c,v 1.12 2008/05/08 15:22:02 chl Exp $	*/
 /*	$KAME: altq_rio.c,v 1.8 2000/12/14 08:12:46 thorpej Exp $	*/
 
 /*
@@ -136,7 +136,7 @@
 #define	RIO_STATS		/* collect statistics */
 
 #define	TV_DELTA(a, b, delta) {					\
-	register int	xxs;					\
+	int	xxs;					\
 								\
 	delta = (a)->tv_usec - (b)->tv_usec;			\
 	if ((xxs = (a)->tv_sec - (b)->tv_sec) != 0) {		\
@@ -172,10 +172,7 @@ rio_alloc(int weight, struct redparams *params, int flags, int pkttime)
 	int	 w, i;
 	int	 npkts_per_sec;
 
-	MALLOC(rp, rio_t *, sizeof(rio_t), M_DEVBUF, M_WAITOK);
-	if (rp == NULL)
-		return (NULL);
-	bzero(rp, sizeof(rio_t));
+	rp = malloc(sizeof(rio_t), M_DEVBUF, M_WAITOK|M_ZERO);
 
 	rp->rio_flags = flags;
 	if (pkttime == 0)
@@ -259,7 +256,7 @@ void
 rio_destroy(rio_t *rp)
 {
 	wtab_destroy(rp->rio_wtab);
-	FREE(rp, M_DEVBUF);
+	free(rp, M_DEVBUF);
 }
 
 void

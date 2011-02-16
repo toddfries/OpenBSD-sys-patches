@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_glue.c,v 1.44 2006/05/25 22:42:22 miod Exp $	*/
-=======
 /*	$OpenBSD: uvm_glue.c,v 1.55 2010/07/02 22:38:32 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_glue.c,v 1.44 2001/02/06 19:54:44 eeh Exp $	*/
 
 /* 
@@ -109,18 +105,6 @@ uvm_kernacc(caddr_t addr, size_t len, int rw)
 	rv = uvm_map_checkprot(kernel_map, saddr, eaddr, prot);
 	vm_map_unlock_read(kernel_map);
 
-	/*
-	 * XXX there are still some things (e.g. the buffer cache) that
-	 * are managed behind the VM system's back so even though an
-	 * address is accessible in the mind of the VM system, there may
-	 * not be physical pages where the VM thinks there is.  This can
-	 * lead to bogus allocation of pages in the kernel address space
-	 * or worse, inconsistencies at the pmap level.  We only worry
-	 * about the buffer cache for now.
-	 */
-	if (!readbuffers && rv && (eaddr > (vaddr_t)buffers &&
-			     saddr < (vaddr_t)buffers + MAXBSIZE * nbuf))
-		rv = FALSE;
 	return(rv);
 }
 
@@ -402,26 +386,6 @@ int	swapdebug = 0;
 #endif
 
 /*
-<<<<<<< HEAD
- * uvm_scheduler: process zero main loop
- *
- * - if not enough memory, wake the pagedaemon and let it clear space.
- */
-
-void
-uvm_scheduler(void)
-{
-	/*
-	 * Nothing to do, back to sleep
-	 */
-loop:
-	tsleep(&proc0, PVM, "scheduler", 0);
-	goto loop;
-}
-
-/*
-=======
->>>>>>> origin/master
  * swappable: is process "p" swappable?
  */
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rpcv2.h,v 1.5 2002/06/11 15:45:44 hin Exp $	*/
-=======
 /*	$OpenBSD: rpcv2.h,v 1.8 2008/07/04 16:49:28 blambert Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rpcv2.h,v 1.8 1996/02/18 11:54:11 fvdl Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vars.c,v 1.12 2004/06/24 22:41:39 tom Exp $	*/
-=======
 /*	$OpenBSD: vars.c,v 1.14 2009/04/30 01:12:44 dlg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998-2000 Michael Shalayeff

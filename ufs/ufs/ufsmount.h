@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufsmount.h,v 1.11 2005/07/03 20:14:03 drahn Exp $	*/
+/*	$OpenBSD: ufsmount.h,v 1.12 2006/10/29 00:53:37 thib Exp $	*/
 /*	$NetBSD: ufsmount.h,v 1.4 1994/12/21 20:00:23 mycroft Exp $	*/
 
 /*

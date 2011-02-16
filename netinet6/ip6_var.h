@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip6_var.h,v 1.29 2006/11/21 05:37:32 itojun Exp $	*/
-=======
 /*	$OpenBSD: ip6_var.h,v 1.38 2010/12/21 13:12:59 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -293,7 +289,7 @@ void	ip6_forward(struct mbuf *, int);
 
 void	ip6_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in6 *);
 int	ip6_output(struct mbuf *, struct ip6_pktopts *, struct route_in6 *, int,
-	    struct ip6_moptions *, struct ifnet **);
+	    struct ip6_moptions *, struct ifnet **, struct inpcb *);
 int	ip6_ctloutput(int, struct socket *, int, int, struct mbuf **);
 int	ip6_raw_ctloutput(int, struct socket *, int, int, struct mbuf **);
 void	ip6_initpktopts(struct ip6_pktopts *);
@@ -317,6 +313,7 @@ int	rip6_ctloutput(int, struct socket *, int, int, struct mbuf **);
 int	rip6_output(struct mbuf *, ...);
 int	rip6_usrreq(struct socket *,
 	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
+int	rip6_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 int	dest6_input(struct mbuf **, int *, int);
 int	none_input(struct mbuf **, int *, int);

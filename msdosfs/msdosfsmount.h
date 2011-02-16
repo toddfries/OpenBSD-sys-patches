@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: msdosfsmount.h,v 1.17 2006/12/15 03:04:24 krw Exp $	*/
-=======
 /*	$OpenBSD: msdosfsmount.h,v 1.19 2009/01/05 01:14:40 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: msdosfsmount.h,v 1.16 1997/10/17 11:24:24 ws Exp $	*/
 
 /*-

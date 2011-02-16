@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_input.c,v 1.1 2005/01/14 12:04:02 grange Exp $	*/
+/*	$OpenBSD: bt_input.c,v 1.5 2007/06/24 20:55:27 uwe Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -16,43 +16,19 @@
  */
 
 #include <sys/param.h>
-#include <sys/mbuf.h>
-#include <sys/systm.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 
-#include <net/if.h>
-#include <net/if_types.h>
 #include <net/netisr.h>
 
-#include <netbt/bluetooth.h>
 #include <netbt/hci.h>
-#include <netbt/l2cap.h>
-#include <netbt/bt.h>
-#include <netbt/bt_var.h>
-#include <netbt/hci_var.h>
-
-struct ifqueue btintrq;
-
-void
-bt_init(void)
-{
-	btintrq.ifq_maxlen = IFQ_MAXLEN;
-}
 
 void
 btintr(void)
 {
-	struct mbuf *m;
-	int s;
+	struct hci_unit *unit;
 
-	for (;;) {
-		s = splnet();
-		IF_DEQUEUE(&btintrq, m);
-		splx(s);
-
-		if (m == NULL)
-			break;
-
-		ng_btsocket_hci_raw_data_input(m);
+	TAILQ_FOREACH(unit, &hci_unit_list, hci_next) {
+		hci_intr(unit);
 	}
 }

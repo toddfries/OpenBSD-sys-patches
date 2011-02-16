@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cryptosoft.c,v 1.45 2005/05/25 05:47:53 markus Exp $	*/
-=======
 /*	$OpenBSD: cryptosoft.c,v 1.63 2011/01/11 23:00:21 markus Exp $	*/
->>>>>>> origin/master
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -40,9 +36,6 @@
 #include <crypto/cryptosoft.h>
 #include <crypto/xform.h>
 
-<<<<<<< HEAD
-u_int8_t hmac_ipad_buffer[64] = {
-=======
 const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN] = {
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
@@ -52,7 +45,6 @@ const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN] = {
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
->>>>>>> origin/master
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
@@ -63,9 +55,6 @@ const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN] = {
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36
 };
 
-<<<<<<< HEAD
-u_int8_t hmac_opad_buffer[64] = {
-=======
 const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN] = {
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
@@ -75,7 +64,6 @@ const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN] = {
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
->>>>>>> origin/master
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
@@ -659,7 +647,7 @@ swcr_compdec(struct cryptodesc *crd, struct swcr_data *sw,
 	 * copy in a buffer.
 	 */
 
-	MALLOC(data, u_int8_t *, crd->crd_len, M_CRYPTO_DATA,  M_NOWAIT);
+	data = malloc(crd->crd_len, M_CRYPTO_DATA, M_NOWAIT);
 	if (data == NULL)
 		return (EINVAL);
 	COPYDATA(outtype, buf, crd->crd_skip, crd->crd_len, data);
@@ -669,7 +657,7 @@ swcr_compdec(struct cryptodesc *crd, struct swcr_data *sw,
 	else
 		result = cxf->decompress(data, crd->crd_len, &out);
 
-	FREE(data, M_CRYPTO_DATA);
+	free(data, M_CRYPTO_DATA);
 	if (result == 0)
 		return EINVAL;
 
@@ -681,7 +669,7 @@ swcr_compdec(struct cryptodesc *crd, struct swcr_data *sw,
 	if (crd->crd_flags & CRD_F_COMP) {
 		if (result > crd->crd_len) {
 			/* Compression was useless, we lost time */
-			FREE(out, M_CRYPTO_DATA);
+			free(out, M_CRYPTO_DATA);
 			return 0;
 		}
 	}
@@ -712,7 +700,7 @@ swcr_compdec(struct cryptodesc *crd, struct swcr_data *sw,
 			}
 		}
 	}
-	FREE(out, M_CRYPTO_DATA);
+	free(out, M_CRYPTO_DATA);
 	return 0;
 }
 
@@ -746,7 +734,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			swcr_sesnum *= 2;
 
 		swd = malloc(swcr_sesnum * sizeof(struct swcr_data *),
-		    M_CRYPTO_DATA, M_NOWAIT);
+		    M_CRYPTO_DATA, M_NOWAIT | M_ZERO);
 		if (swd == NULL) {
 			/* Reset session number */
 			if (swcr_sesnum == CRYPTO_SW_SESSIONS)
@@ -755,8 +743,6 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 				swcr_sesnum /= 2;
 			return ENOBUFS;
 		}
-
-		bzero(swd, swcr_sesnum * sizeof(struct swcr_data *));
 
 		/* Copy existing sessions */
 		if (swcr_sessions) {
@@ -772,13 +758,12 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 	*sid = i;
 
 	while (cri) {
-		MALLOC(*swd, struct swcr_data *, sizeof(struct swcr_data),
-		    M_CRYPTO_DATA, M_NOWAIT);
+		*swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+		    M_NOWAIT | M_ZERO);
 		if (*swd == NULL) {
 			swcr_freesession(i);
 			return ENOBUFS;
 		}
-		bzero(*swd, sizeof(struct swcr_data));
 
 		switch (cri->cri_alg) {
 		case CRYPTO_DES_CBC:
@@ -1049,7 +1034,7 @@ swcr_freesession(u_int64_t tid)
 			break;
 		}
 
-		FREE(swd, M_CRYPTO_DATA);
+		free(swd, M_CRYPTO_DATA);
 	}
 	return 0;
 }

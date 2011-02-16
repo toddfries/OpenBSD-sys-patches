@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_meter.c,v 1.21 2006/11/29 12:24:18 miod Exp $	*/
-=======
 /*	$OpenBSD: uvm_meter.c,v 1.29 2010/07/22 17:31:39 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -117,8 +113,10 @@ uvm_loadav(struct loadavg *avg)
 				continue;
 		/* FALLTHROUGH */
 		case SRUN:
-		case SIDL:
 		case SONPROC:
+			if (p == p->p_cpu->ci_schedstate.spc_idleproc)
+				continue;
+		case SIDL:
 			nrun++;
 			if (p->p_cpu)
 				nrun_cpu[CPU_INFO_UNIT(p->p_cpu)]++;

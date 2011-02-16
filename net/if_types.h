@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_types.h,v 1.17 2004/11/18 16:49:57 mpf Exp $	*/
-=======
 /*	$OpenBSD: if_types.h,v 1.19 2008/09/09 13:56:39 henning Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_types.h,v 1.17 2000/10/26 06:51:31 onoe Exp $	*/
 
 /*

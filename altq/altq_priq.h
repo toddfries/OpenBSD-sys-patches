@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_priq.h,v 1.5 2003/04/03 14:31:02 henning Exp $	*/
+/*	$OpenBSD: altq_priq.h,v 1.6 2004/01/14 08:42:23 kjc Exp $	*/
 /*	$KAME: altq_priq.h,v 1.1 2000/10/18 09:15:23 kjc Exp $	*/
 /*
  * Copyright (C) 2000-2002

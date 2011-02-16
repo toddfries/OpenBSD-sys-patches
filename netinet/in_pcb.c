@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in_pcb.c,v 1.88 2006/06/18 11:47:45 pascoe Exp $	*/
-=======
 /*	$OpenBSD: in_pcb.c,v 1.113 2010/07/03 04:44:51 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -72,6 +68,8 @@
  * Research Laboratory (NRL).
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -80,9 +78,11 @@
 #include <sys/socketvar.h>
 #include <sys/proc.h>
 #include <sys/domain.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -119,7 +119,7 @@ int ipport_hifirstauto = IPPORT_HIFIRSTAUTO;
 int ipport_hilastauto = IPPORT_HILASTAUTO;
 
 struct pool inpcb_pool;
-int inpcb_pool_initalized = 0;
+int inpcb_pool_initialized = 0;
 
 #define	INPCBHASH(table, faddr, fport, laddr, lport, rdom) \
 	&(table)->inpt_hashtbl[(ntohl((faddr)->s_addr) + \
@@ -183,10 +183,10 @@ in_pcballoc(so, v)
 	struct inpcb *inp;
 	int s;
 
-	if (inpcb_pool_initalized == 0) {
+	if (inpcb_pool_initialized == 0) {
 		pool_init(&inpcb_pool, sizeof(struct inpcb), 0, 0, 0,
 		    "inpcbpl", NULL);
-		inpcb_pool_initalized = 1;
+		inpcb_pool_initialized = 1;
 	}
 	inp = pool_get(&inpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (inp == NULL)
@@ -223,23 +223,23 @@ in_pcballoc(so, v)
 }
 
 int
-in_pcbbind(v, nam)
+in_pcbbind(v, nam, p)
 	void *v;
 	struct mbuf *nam;
+	struct proc *p;
 {
 	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
 	struct inpcbtable *table = inp->inp_table;
 	u_int16_t *lastport = &inp->inp_table->inpt_lastport;
 	struct sockaddr_in *sin;
-	struct proc *p = curproc;		/* XXX */
 	u_int16_t lport = 0;
 	int wild = 0, reuseport = (so->so_options & SO_REUSEPORT);
 	int error;
 
 #ifdef INET6
 	if (sotopf(so) == PF_INET6)
-		return in6_pcbbind(inp, nam);
+		return in6_pcbbind(inp, nam, p);
 #endif /* INET6 */
 
 	if (TAILQ_EMPTY(&in_ifaddr))
@@ -275,13 +275,9 @@ in_pcbbind(v, nam)
 				reuseport = SO_REUSEADDR|SO_REUSEPORT;
 		} else if (sin->sin_addr.s_addr != INADDR_ANY) {
 			sin->sin_port = 0;		/* yech... */
-<<<<<<< HEAD
-			if (in_iawithaddr(sin->sin_addr, NULL) == 0)
-=======
 			if (!(so->so_options & SO_BINDANY) &&
 			    in_iawithaddr(sin->sin_addr, NULL,
 			    inp->inp_rtableid) == 0)
->>>>>>> origin/master
 				return (EADDRNOTAVAIL);
 		}
 		if (lport) {
@@ -336,7 +332,7 @@ in_pcbbind(v, nam)
 			 */
 			count = first - last;
 			if (count)
-				*lastport = first - (arc4random() % count);
+				*lastport = first - arc4random_uniform(count);
 
 			do {
 				if (count-- < 0)	/* completely used? */
@@ -354,7 +350,7 @@ in_pcbbind(v, nam)
 			 */
 			count = last - first;
 			if (count)
-				*lastport = first + (arc4random() % count);
+				*lastport = first + arc4random_uniform(count);
 
 			do {
 				if (count-- < 0)	/* completely used? */
@@ -432,7 +428,7 @@ in_pcbconnect(v, nam)
 		return (EADDRINUSE);
 	if (inp->inp_laddr.s_addr == INADDR_ANY) {
 		if (inp->inp_lport == 0 &&
-		    in_pcbbind(inp, (struct mbuf *)0) == EADDRNOTAVAIL)
+		    in_pcbbind(inp, NULL, curproc) == EADDRNOTAVAIL)
 			return (EADDRNOTAVAIL);
 		inp->inp_laddr = ifaddr->sin_addr;
 	}
@@ -634,20 +630,15 @@ in_losing(inp)
 	if ((rt = inp->inp_route.ro_rt)) {
 		inp->inp_route.ro_rt = 0;
 		bzero((caddr_t)&info, sizeof(info));
+		info.rti_flags = rt->rt_flags;
 		info.rti_info[RTAX_DST] = &inp->inp_route.ro_dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		rt_missmsg(RTM_LOSING, &info, rt->rt_flags, rt->rt_ifp, 0,
 		    inp->inp_rtableid);
 		if (rt->rt_flags & RTF_DYNAMIC)
-<<<<<<< HEAD
-			(void) rtrequest(RTM_DELETE, rt_key(rt),
-				rt->rt_gateway, rt_mask(rt), rt->rt_flags,
-				(struct rtentry **)0, 0);
-=======
 			(void)rtrequest1(RTM_DELETE, &info, rt->rt_priority,
 				(struct rtentry **)0, inp->inp_rtableid);
->>>>>>> origin/master
 		/*
 		 * A new route can be allocated
 		 * the next time output is attempted.
@@ -1018,24 +1009,14 @@ in6_pcbhashlookup(struct inpcbtable *table, struct in6_addr *faddr,
  *		*.*     <->     *.lport
  */
 struct inpcb *
-<<<<<<< HEAD
-in_pcblookup_listen(table, laddr, lport_arg, reverse)
-	struct inpcbtable *table;
-	struct in_addr laddr;
-	u_int lport_arg;
-	int reverse;
-=======
 in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
     u_int lport_arg, int reverse, struct mbuf *m, u_int rdomain)
->>>>>>> origin/master
 {
 	struct inpcbhead *head;
 	struct in_addr *key1, *key2;
 	struct inpcb *inp;
 	u_int16_t lport = lport_arg;
 
-<<<<<<< HEAD
-=======
 	rdomain = rtable_l2(rdomain);	/* convert passed rtableid to rdomain */
 #if NPF > 0
 	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
@@ -1047,7 +1028,6 @@ in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
 		lport = divert->port;
 	} else
 #endif
->>>>>>> origin/master
 	if (reverse) {
 		key1 = &zeroin_addr;
 		key2 = &laddr;
@@ -1102,19 +1082,14 @@ in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
 
 #ifdef INET6
 struct inpcb *
-in6_pcblookup_listen(table, laddr, lport_arg, reverse)
-	struct inpcbtable *table;
-	struct in6_addr *laddr;
-	u_int lport_arg;
-	int reverse;
+in6_pcblookup_listen(struct inpcbtable *table, struct in6_addr *laddr,
+    u_int lport_arg, int reverse, struct mbuf *m)
 {
 	struct inpcbhead *head;
 	struct in6_addr *key1, *key2;
 	struct inpcb *inp;
 	u_int16_t lport = lport_arg;
 
-<<<<<<< HEAD
-=======
 #if NPF > 0
 	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		struct pf_divert *divert;
@@ -1125,7 +1100,6 @@ in6_pcblookup_listen(table, laddr, lport_arg, reverse)
 		lport = divert->port;
 	} else
 #endif
->>>>>>> origin/master
 	if (reverse) {
 		key1 = &zeroin6_addr;
 		key2 = laddr;

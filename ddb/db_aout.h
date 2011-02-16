@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_aout.h,v 1.1 1996/04/19 16:08:29 niklas Exp $	*/
+/*	$OpenBSD: db_aout.h,v 1.2 2003/06/02 23:28:01 millert Exp $	*/
 /*	$NetBSD: db_aout.h,v 1.1 1996/02/27 20:54:44 gwr Exp $	*/
 
 /*-

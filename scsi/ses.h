@@ -1,4 +1,4 @@
-/* $OpenBSD: ses.h,v 1.9 2005/08/23 23:44:28 dlg Exp $ */
+/* $OpenBSD: ses.h,v 1.10 2006/05/11 00:45:59 krw Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom
  * All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: ip_spd.c,v 1.52 2006/06/16 16:49:40 henning Exp $ */
-=======
 /* $OpenBSD: ip_spd.c,v 1.63 2010/09/28 01:44:57 deraadt Exp $ */
->>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -31,6 +27,7 @@
 #include <sys/kernel.h>
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -574,6 +571,7 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 int
 ipsec_delete_policy(struct ipsec_policy *ipo)
 {
+	struct rt_addrinfo info;
 	struct ipsec_acquire *ipa;
 	int err = 0;
 
@@ -581,19 +579,15 @@ ipsec_delete_policy(struct ipsec_policy *ipo)
 		return 0;
 
 	/* Delete from SPD. */
-	if (!(ipo->ipo_flags & IPSP_POLICY_SOCKET))
-		err = rtrequest(RTM_DELETE, (struct sockaddr *) &ipo->ipo_addr,
-		    (struct sockaddr *) 0,
-		    (struct sockaddr *) &ipo->ipo_mask,
-		    0, (struct rtentry **) 0, 0);	/* XXX other tables? */
+	if (!(ipo->ipo_flags & IPSP_POLICY_SOCKET)) {
+		bzero(&info, sizeof(info));
+		info.rti_info[RTAX_DST] = (struct sockaddr *)&ipo->ipo_addr;
+		info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&ipo->ipo_mask;
 
-<<<<<<< HEAD
-=======
 		/* XXX other tables? */
 		err = rtrequest1(RTM_DELETE, &info, RTP_DEFAULT, NULL,
 		    ipo->ipo_rdomain);
 	}
->>>>>>> origin/master
 	if (ipo->ipo_tdb != NULL)
 		TAILQ_REMOVE(&ipo->ipo_tdb->tdb_policy_head, ipo,
 		    ipo_tdb_next);

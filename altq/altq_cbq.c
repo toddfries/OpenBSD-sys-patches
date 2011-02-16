@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_cbq.c,v 1.20 2006/03/04 22:40:15 brad Exp $	*/
+/*	$OpenBSD: altq_cbq.c,v 1.25 2008/05/09 14:10:05 dlg Exp $	*/
 /*	$KAME: altq_cbq.c,v 1.9 2000/12/14 08:12:45 thorpej Exp $	*/
 
 /*
@@ -214,10 +214,7 @@ cbq_add_altq(struct pf_altq *a)
 		return (ENODEV);
 
 	/* allocate and initialize cbq_state_t */
-	MALLOC(cbqp, cbq_state_t *, sizeof(cbq_state_t), M_DEVBUF, M_WAITOK);
-	if (cbqp == NULL)
-		return (ENOMEM);
-	bzero(cbqp, sizeof(cbq_state_t));
+	cbqp = malloc(sizeof(cbq_state_t), M_DEVBUF, M_WAITOK|M_ZERO);
 	CALLOUT_INIT(&cbqp->cbq_callout);
 	cbqp->cbq_qlen = 0;
 	cbqp->ifnp.ifq_ = &ifp->if_snd;	    /* keep the ifq */
@@ -245,7 +242,7 @@ cbq_remove_altq(struct pf_altq *a)
 		cbq_class_destroy(cbqp, cbqp->ifnp.root_);
 
 	/* deallocate cbq_state_t */
-	FREE(cbqp, M_DEVBUF);
+	free(cbqp, M_DEVBUF);
 
 	return (0);
 }
@@ -441,7 +438,6 @@ cbq_enqueue(struct ifaltq *ifq, struct mbuf *m, struct altq_pktattr *pktattr)
 {
 	cbq_state_t	*cbqp = (cbq_state_t *)ifq->altq_disc;
 	struct rm_class	*cl;
-	struct pf_mtag	*t;
 	int		 len;
 
 	/* grab class set by classifier */
@@ -452,9 +448,7 @@ cbq_enqueue(struct ifaltq *ifq, struct mbuf *m, struct altq_pktattr *pktattr)
 		m_freem(m);
 		return (ENOBUFS);
 	}
-	t = pf_find_mtag(m);
-	if (t == NULL ||
-	    (cl = clh_to_clp(cbqp, t->qid)) == NULL) {
+	if ((cl = clh_to_clp(cbqp, m->m_pkthdr.pf.qid)) == NULL) {
 		cl = cbqp->ifnp.default_;
 		if (cl == NULL) {
 			m_freem(m);
@@ -517,9 +511,8 @@ cbqrestart(struct ifaltq *ifq)
 		return;
 
 	ifp = ifq->altq_ifp;
-	if (ifp->if_start &&
-	    cbqp->cbq_qlen > 0 && (ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if (ifp->if_start && cbqp->cbq_qlen > 0)
+		if_start(ifp);
 }
 
 static void cbq_purge(cbq_state_t *cbqp)

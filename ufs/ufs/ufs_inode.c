@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ufs_inode.c,v 1.35 2006/12/28 20:33:24 thib Exp $	*/
-=======
 /*	$OpenBSD: ufs_inode.c,v 1.38 2009/08/14 20:55:05 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ufs_inode.c,v 1.7 1996/05/11 18:27:52 mycroft Exp $	*/
 
 /*
@@ -65,10 +61,7 @@
 int
 ufs_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 	struct proc *p = ap->a_p;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pager.c,v 1.41 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_pager.c,v 1.57 2010/07/24 15:40:39 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -483,7 +479,7 @@ uvm_mk_pcluster(struct uvm_object *uobj, struct vm_page **pps, int *npages,
  *	PGO_PDFREECLUST: pagedaemon: drop cluster on successful I/O
  *	PGO_FREE: tell the aio daemon to free pages in the async case.
  * => start/stop: if (uobj && !PGO_ALLPAGES) limit targets to this range
- *		  if (!uobj) start is the (daddr_t) of the starting swapblk
+ *		  if (!uobj) start is the (daddr64_t) of the starting swapblk
  * => return state:
  *	1. we return the VM_PAGER status code of the pageout
  *	2. we return with the page queues unlocked
@@ -508,7 +504,7 @@ uvm_pager_put(struct uvm_object *uobj, struct vm_page *pg,
     voff_t start, voff_t stop)
 {
 	int result;
-	daddr_t swblk;
+	daddr64_t swblk;
 	struct vm_page **ppsp = *ppsp_ptr;
 	UVMHIST_FUNC("uvm_pager_put"); UVMHIST_CALLED(pdhist);
 
@@ -546,7 +542,7 @@ uvm_pager_put(struct uvm_object *uobj, struct vm_page *pg,
 		 * interested in (in which case the whole cluster gets dropped
 		 * in the event of an error or a sync "done").
 		 */
-		swblk = (daddr_t) start;
+		swblk = (daddr64_t) start;
 		/* ppsp and npages should be ok */
 	}
 
@@ -566,6 +562,7 @@ ReTry:
 		/* object is now unlocked */
 	} else {
 		/* nothing locked */
+		/* XXX daddr64_t -> int */
 		result = uvm_swap_put(swblk, ppsp, *npages, flags);
 		/* nothing locked */
 	}
@@ -621,6 +618,7 @@ ReTry:
 		 */
 
 		if (uobj == NULL && pg != NULL) {
+			/* XXX daddr64_t -> int */
 			int nswblk = (result == VM_PAGER_AGAIN) ? swblk : 0;
 			if (pg->pg_flags & PQ_ANON) {
 				simple_lock(&pg->uanon->an_lock);
@@ -643,8 +641,10 @@ ReTry:
 
 			if (uobj == NULL) {
 				if (pg) {
+					/* XXX daddr64_t -> int */
 					uvm_swap_free(swblk + 1, *npages - 1);
 				} else {
+					/* XXX daddr64_t -> int */
 					uvm_swap_free(swblk, *npages);
 				}
 			}
@@ -661,6 +661,7 @@ ReTry:
 			 * free swslots that we mark bad.
 			 */
 
+			/* XXX daddr64_t -> int */
 			uvm_swap_markbad(swblk, *npages);
 		}
 	}
@@ -814,13 +815,14 @@ void
 uvm_aio_aiodone(struct buf *bp)
 {
 	int npages = bp->b_bufsize >> PAGE_SHIFT;
-	struct vm_page *pg, *pgs[npages];
+	struct vm_page *pg, *pgs[MAXPHYS >> PAGE_SHIFT];
 	struct uvm_object *uobj;
 	int i, error;
 	boolean_t write, swap;
 	UVMHIST_FUNC("uvm_aio_aiodone"); UVMHIST_CALLED(pdhist);
 	UVMHIST_LOG(pdhist, "bp %p", bp, 0,0,0);
 
+	KASSERT(npages <= MAXPHYS >> PAGE_SHIFT);
 	splassert(IPL_BIO);
 
 	error = (bp->b_flags & B_ERROR) ? (bp->b_error ? bp->b_error : EIO) : 0;

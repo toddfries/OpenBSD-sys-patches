@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_trap.c,v 1.10 2001/11/06 19:53:18 miod Exp $	*/
-=======
 /*	$OpenBSD: db_trap.c,v 1.15 2010/11/27 19:57:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_trap.c,v 1.9 1996/02/05 01:57:18 christos Exp $	*/
 
 /* 
@@ -51,6 +47,7 @@
 #include <ddb/db_output.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+#include <ddb/db_interface.h>
 
 void
 db_trap(int type, int code)
@@ -73,6 +70,15 @@ db_trap(int type, int code)
 			db_printf("Stopped at\t");
 		db_dot = PC_REGS(DDB_REGS);
 		db_print_loc_and_inst(db_dot);
+
+		/*
+		 * Just in case we do not have any usable console driver,
+		 * give the user a traceback.
+		 */
+		if (cold) {
+			db_stack_trace_print(db_dot, 0, 10 /* arbitrary */, "",
+			    db_printf);
+		}
 
 		if (panicstr != NULL) {
 			if (db_print_position() != 0)

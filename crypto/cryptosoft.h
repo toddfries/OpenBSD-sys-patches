@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cryptosoft.h,v 1.9 2002/03/19 23:24:53 angelos Exp $	*/
-=======
 /*	$OpenBSD: cryptosoft.h,v 1.13 2010/09/22 11:54:23 mikeb Exp $	*/
->>>>>>> origin/master
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -61,13 +57,8 @@ struct swcr_data {
 };
 
 #ifdef _KERNEL
-<<<<<<< HEAD
-extern u_int8_t hmac_ipad_buffer[64];
-extern u_int8_t hmac_opad_buffer[64];
-=======
 extern const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN];
 extern const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN];
->>>>>>> origin/master
 
 int	swcr_encdec(struct cryptodesc *, struct swcr_data *, caddr_t, int);
 int	swcr_authcompute(struct cryptop *, struct cryptodesc *, struct swcr_data *,

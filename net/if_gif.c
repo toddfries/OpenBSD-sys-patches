@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_gif.c,v 1.40 2007/02/10 15:34:22 claudio Exp $	*/
-=======
 /*	$OpenBSD: if_gif.c,v 1.55 2010/07/03 04:44:51 guenther Exp $	*/
->>>>>>> origin/master
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -70,8 +66,6 @@
 #include "bpfilter.h"
 #include "bridge.h"
 
-extern int ifqmaxlen;
-
 void	gifattach(int);
 int	gif_clone_create(struct if_clone *, int);
 int	gif_clone_destroy(struct ifnet *);
@@ -98,10 +92,9 @@ gif_clone_create(struct if_clone *ifc, int unit)
 	struct gif_softc *sc;
 	int s;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!sc)
 		return (ENOMEM);
-	bzero(sc, sizeof(*sc));
 
 	snprintf(sc->gif_if.if_xname, sizeof sc->gif_if.if_xname,
 	     "%s%d", ifc->ifc_name, unit);
@@ -119,7 +112,7 @@ gif_clone_create(struct if_clone *ifc, int unit)
 
 #if NBPFILTER > 0
 	bpfattach(&sc->gif_if.if_bpf, &sc->gif_if, DLT_NULL,
-		  sizeof(u_int));
+	    sizeof(u_int));
 #endif
 	s = splnet();
 	LIST_INSERT_HEAD(&gif_softc_list, sc, gif_list);
@@ -151,56 +144,25 @@ gif_clone_destroy(struct ifnet *ifp)
 }
 
 void
-<<<<<<< HEAD
-gif_start(ifp)
-        struct ifnet *ifp;
-{
-	struct gif_softc *sc = (struct gif_softc*)ifp;
-        struct mbuf *m;
-	struct m_tag *mtag;
-	int family;
-=======
 gif_start(struct ifnet *ifp)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	struct mbuf *m;
->>>>>>> origin/master
 	int s;
 	sa_family_t family;
 
 	while (1) {
-	        s = splnet();
+		s = splnet();
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
 
 		if (m == NULL)
 			break;
 
-<<<<<<< HEAD
-		/*
-		 * gif may cause infinite recursion calls when misconfigured.
-		 * We'll prevent this by detecting loops.
-		 */
-		for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
-		    mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
-			if (!bcmp((caddr_t)(mtag + 1), &ifp,
-			    sizeof(struct ifnet *))) {
-				IF_DROP(&ifp->if_snd);
-				log(LOG_NOTICE, "gif_output: "
-				    "recursively called too many times\n");
-				m_freem(m);
-				continue;
-			}
-		}
-
-		mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
-		if (mtag == NULL) {
-=======
 		/* is interface up and usable? */
 		if ((ifp->if_flags & (IFF_OACTIVE | IFF_UP)) != IFF_UP ||
 		    sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
 		    sc->gif_psrc->sa_family != sc->gif_pdst->sa_family) {
->>>>>>> origin/master
 			m_freem(m);
 			continue;
 		}
@@ -209,16 +171,6 @@ gif_start(struct ifnet *ifp)
 		family = sc->gif_psrc->sa_family;
 
 		/*
-<<<<<<< HEAD
-		 * remove multicast and broadcast flags or encapsulated paket
-		 * ends up as multicast or broadcast packet.
-		 */
-		m->m_flags &= ~(M_BCAST|M_MCAST);
-
-		/* extract address family */
-		tp = *mtod(m, u_int8_t *);
-		tp = (tp >> 4) & 0xff;  /* Get the IP version number. */
-=======
 		 * Check if the packet is comming via bridge and needs
 		 * etherip encapsulation or not. bridge(4) directly calls
 		 * the start function and bypasses the if_output function
@@ -232,7 +184,6 @@ gif_start(struct ifnet *ifp)
 			 */
 			m->m_flags &= ~(M_BCAST|M_MCAST);
 			switch (sc->gif_psrc->sa_family) {
->>>>>>> origin/master
 #ifdef INET
 			case AF_INET:
 				error = in_gif_output(ifp, AF_LINK, &m);
@@ -243,25 +194,6 @@ gif_start(struct ifnet *ifp)
 				error = in6_gif_output(ifp, AF_LINK, &m);
 				break;
 #endif
-<<<<<<< HEAD
-
-#if NBRIDGE > 0
-		/*
-		 * Check if the packet is comming via bridge and needs
-		 * etherip encapsulation or not.
-		 */
-		if (ifp->if_bridge)
-			for (mtag = m_tag_find(m, PACKET_TAG_BRIDGE, NULL);
-			    mtag;
-			    mtag = m_tag_find(m, PACKET_TAG_BRIDGE, mtag)) {
-				if (!bcmp(&ifp->if_bridge, mtag + 1,
-				    sizeof(caddr_t))) {
-					family = AF_LINK;
-					break;
-				}
-			}
-#endif
-=======
 			default:
 				error = EAFNOSUPPORT;
 				m_freem(m);
@@ -272,7 +204,6 @@ gif_start(struct ifnet *ifp)
 			if (gif_checkloop(ifp, m))
 				continue;
 		}
->>>>>>> origin/master
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf) {
@@ -393,15 +324,9 @@ gif_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		break;
 #endif
 	default:
-<<<<<<< HEAD
-		m_freem(m);		
-		error = ENETDOWN;
-		goto end;
-=======
 		m_freem(m);
 		error = EAFNOSUPPORT;
 		break;
->>>>>>> origin/master
 	}
 
 	if (error)
@@ -420,16 +345,11 @@ gif_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		splx(s);
 		goto end;
 	}
-<<<<<<< HEAD
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
-=======
 	ifp->if_obytes += m->m_pkthdr.len;
 	if_start(ifp);
->>>>>>> origin/master
 	splx(s);
 
-  end:
+end:
 	if (error)
 		ifp->if_oerrors++;
 	return (error);
@@ -445,11 +365,11 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct sockaddr *sa;
 	int s;
 	struct gif_softc *sc2;
-		
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 		break;
-		
+
 	case SIOCSIFDSTADDR:
 		break;
 
@@ -597,13 +517,13 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (sc->gif_psrc)
 			free((caddr_t)sc->gif_psrc, M_IFADDR);
-		sa = (struct sockaddr *)malloc(src->sa_len, M_IFADDR, M_WAITOK);
+		sa = malloc(src->sa_len, M_IFADDR, M_WAITOK);
 		bcopy((caddr_t)src, (caddr_t)sa, src->sa_len);
 		sc->gif_psrc = sa;
 
 		if (sc->gif_pdst)
 			free((caddr_t)sc->gif_pdst, M_IFADDR);
-		sa = (struct sockaddr *)malloc(dst->sa_len, M_IFADDR, M_WAITOK);
+		sa = malloc(dst->sa_len, M_IFADDR, M_WAITOK);
 		bcopy((caddr_t)dst, (caddr_t)sa, dst->sa_len);
 		sc->gif_pdst = sa;
 
@@ -628,7 +548,7 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		/* change the IFF_{UP, RUNNING} flag as well? */
 		break;
 #endif
-			
+
 	case SIOCGIFPSRCADDR:
 #ifdef INET6
 	case SIOCGIFPSRCADDR_IN6:
@@ -660,7 +580,7 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
-			
+
 	case SIOCGIFPDSTADDR:
 #ifdef INET6
 	case SIOCGIFPDSTADDR_IN6:
@@ -742,7 +662,7 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifr->ifr_rdomainid = sc->gif_rtableid;
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
  bad:

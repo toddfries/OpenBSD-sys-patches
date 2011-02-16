@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tcp_timer.c,v 1.37 2005/06/30 08:51:31 markus Exp $	*/
-=======
 /*	$OpenBSD: tcp_timer.c,v 1.45 2010/07/03 04:44:51 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tcp_timer.c,v 1.14 1996/02/13 23:44:09 christos Exp $	*/
 
 /*
@@ -43,6 +39,7 @@
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 
 #include <net/route.h>
 
@@ -138,11 +135,7 @@ tcp_slowtimo()
 
 	s = splsoftnet();
 	tcp_maxidle = TCPTV_KEEPCNT * tcp_keepintvl;
-#ifdef TCP_COMPAT_42
-	tcp_iss += TCP_ISSINCR/PR_SLOWHZ;		/* increment iss */
-	if ((int)tcp_iss < 0)
-		tcp_iss = 0;				/* XXX */
-#endif /* TCP_COMPAT_42 */
+	tcp_iss += TCP_ISSINCR2/PR_SLOWHZ;		/* increment iss */
 	tcp_now++;					/* for timestamps */
 	splx(s);
 }
@@ -460,21 +453,8 @@ tcp_timer_keep(void *arg)
 		 * correspondent TCP to respond.
 		 */
 		tcpstat.tcps_keepprobe++;
-#ifdef TCP_COMPAT_42
-		/*
-		 * The keepalive packet must have nonzero length
-		 * to get a 4.2 host to respond.
-		 */
 		tcp_respond(tp, mtod(tp->t_template, caddr_t),
-<<<<<<< HEAD
-		    (struct mbuf *)NULL, tp->rcv_nxt - 1, tp->snd_una - 1, 0);
-#else
-		tcp_respond(tp, mtod(tp->t_template, caddr_t),
-		    (struct mbuf *)NULL, tp->rcv_nxt, tp->snd_una - 1, 0);
-#endif
-=======
 		    NULL, tp->rcv_nxt, tp->snd_una - 1, 0, 0);
->>>>>>> origin/master
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcp_keepintvl);
 	} else
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcp_keepidle);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_loan.h,v 1.6 2001/03/09 05:34:38 smart Exp $	*/
+/*	$OpenBSD: uvm_loan.h,v 1.7 2002/03/14 01:27:18 millert Exp $	*/
 /*	$NetBSD: uvm_loan.h,v 1.7 1999/06/21 17:25:11 thorpej Exp $	*/
 
 /*

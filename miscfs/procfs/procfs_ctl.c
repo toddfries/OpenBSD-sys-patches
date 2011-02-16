@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: procfs_ctl.c,v 1.19 2006/11/29 12:24:18 miod Exp $	*/
-=======
 /*	$OpenBSD: procfs_ctl.c,v 1.22 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: procfs_ctl.c,v 1.14 1996/02/09 22:40:48 christos Exp $	*/
 
 /*
@@ -109,10 +105,8 @@ static const vfs_namemap_t signames[] = {
 static int procfs_control(struct proc *, struct proc *, int);
 
 static int
-procfs_control(curp, p, op)
-	struct proc *curp;		/* tracer */
-	struct proc *p;			/* traced */
-	int op;
+procfs_control(struct proc *curp, struct proc *p, int op)
+/* *curp being the tracer, and *p the traced */
 {
 	int error;
 	int s;
@@ -265,11 +259,7 @@ procfs_control(curp, p, op)
 #endif
 
 int
-procfs_doctl(curp, p, pfs, uio)
-	struct proc *curp;
-	struct pfsnode *pfs;
-	struct uio *uio;
-	struct proc *p;
+procfs_doctl(struct proc *curp, struct proc *p, struct pfsnode *pfs, struct uio *uio)
 {
 	int xlen;
 	int error;

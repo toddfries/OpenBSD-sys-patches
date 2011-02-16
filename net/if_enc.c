@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_enc.c,v 1.44 2006/06/28 12:02:26 claudio Exp $	*/
-=======
 /*	$OpenBSD: if_enc.c,v 1.52 2010/07/03 04:44:51 guenther Exp $	*/
 
->>>>>>> origin/master
 /*
  * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
  *
@@ -59,8 +55,6 @@ void	 enc_unsetif(struct ifnet *);
 
 struct if_clone enc_cloner =
     IF_CLONE_INITIALIZER("enc", enc_clone_create, enc_clone_destroy);
-
-extern int ifqmaxlen;
 
 void
 encattach(int count)
@@ -195,7 +189,7 @@ enc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			return (error);
 		/* FALLTHROUGH */
 	default:
-		return (EINVAL);
+		return (ENOTTY);
 	}
 
 	return (0);

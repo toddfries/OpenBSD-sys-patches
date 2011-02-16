@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: if_atmsubr.c,v 1.25 2005/09/30 02:39:24 brad Exp $       */
-=======
 /*      $OpenBSD: if_atmsubr.c,v 1.32 2010/08/24 14:43:56 blambert Exp $       */
->>>>>>> origin/master
 
 /*
  *
@@ -257,8 +253,7 @@ atm_output(ifp, m0, dst, rt0)
 		return (error);
 	}
 	ifp->if_obytes += len;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 	splx(s);
 	return (error);
 

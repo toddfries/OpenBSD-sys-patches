@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: netisr.h,v 1.22 2005/06/07 02:45:11 henning Exp $	*/
-=======
 /*	$OpenBSD: netisr.h,v 1.35 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -53,17 +49,13 @@
  * interrupt used for scheduling the network code to calls
  * on the lowest level routine of each protocol.
  */
+#define	NETISR_RND_DONE	1
 #define	NETISR_IP	2		/* same as AF_INET */
-<<<<<<< HEAD
-#define	NETISR_IMP	3		/* same as AF_IMPLINK */
-=======
 #define	NETISR_TX	3		/* for if_snd processing */
 #define	NETISR_MPLS	4		/* AF_MPLS would overflow */
 #define	NETISR_PFSYNC	5		/* for pfsync "immediate" tx */
->>>>>>> origin/master
 #define	NETISR_ATALK	16		/* same as AF_APPLETALK */
 #define	NETISR_ARP	18		/* same as AF_LINK */
-#define	NETISR_IPX	23		/* same as AF_IPX */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
 #define	NETISR_ISDN	26		/* same as AF_E164 */
 #define	NETISR_NATM	27		/* same as AF_ATM */
@@ -76,23 +68,17 @@
 #ifdef _KERNEL
 extern int	netisr;			/* scheduling bits for network */
 
+void	nettxintr(void);
 void	arpintr(void);
 void	ipintr(void);
 void	ip6intr(void);
 void	atintr(void);
-void	ipxintr(void);
 void	clnlintr(void);
 void	natmintr(void);
 void	pppintr(void);
 void	bridgeintr(void);
 void	pppoeintr(void);
 void	btintr(void);
-<<<<<<< HEAD
-
-#include <dev/rndvar.h>
-#define	schednetisr(anisr)	\
-	{ netisr |= 1<<(anisr); add_net_randomness(anisr); setsoftnet(); }
-=======
 void	mplsintr(void);
 void	pfsyncintr(void);
 
@@ -107,7 +93,6 @@ do {									\
 
 void	netisr_init(void);
 
->>>>>>> origin/master
 #endif
 #endif
 

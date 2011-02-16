@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_signal.c,v 1.11 2001/08/09 14:15:22 niklas Exp $	*/
-=======
 /*	$OpenBSD: linux_signal.c,v 1.14 2009/12/09 16:29:56 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_signal.c,v 1.10 1996/04/04 23:51:36 christos Exp $	*/
 
 /*
@@ -588,6 +584,7 @@ linux_sys_sigprocmask(p, v, retval)
 	linux_old_sigset_t ss;
 	sigset_t bs;
 	int error = 0;
+	int s;
 
 	*retval = 0;
 
@@ -607,7 +604,7 @@ linux_sys_sigprocmask(p, v, retval)
 
 	linux_old_to_bsd_sigset(&ss, &bs);
 
-	(void) splhigh();
+	s = splhigh();
 
 	switch (SCARG(uap, how)) {
 	case LINUX_SIG_BLOCK:
@@ -627,7 +624,7 @@ linux_sys_sigprocmask(p, v, retval)
 		break;
 	}
 
-	(void) spl0();
+	splx(s);
 
 	return (error);
 }
@@ -647,6 +644,7 @@ linux_sys_rt_sigprocmask(p, v, retval)
 	linux_sigset_t ls;
 	sigset_t bs;
 	int error = 0;
+	int s;
 
 	if (SCARG(uap, sigsetsize) != sizeof(linux_sigset_t))
 		return (EINVAL);
@@ -669,7 +667,7 @@ linux_sys_rt_sigprocmask(p, v, retval)
 
 	linux_to_bsd_sigset(&ls, &bs);
 
-	(void) splhigh();
+	s = splhigh();
 
 	switch (SCARG(uap, how)) {
 	case LINUX_SIG_BLOCK:
@@ -689,7 +687,7 @@ linux_sys_rt_sigprocmask(p, v, retval)
 		break;
 	}
 
-	(void) spl0();
+	splx(s);
 
 	return (error);
 }
@@ -729,15 +727,16 @@ linux_sys_sigsetmask(p, v, retval)
 	} */ *uap = v;
 	linux_old_sigset_t mask;
 	sigset_t bsdsig;
+	int s;
 
 	bsd_to_linux_old_sigset(&p->p_sigmask, (linux_old_sigset_t *)retval);
 
 	mask = SCARG(uap, mask);
 	bsd_to_linux_old_sigset(&bsdsig, &mask);
 
-	splhigh();
+	s = splhigh();
 	p->p_sigmask = bsdsig & ~sigcantmask;
-	spl0();
+	splx(s);
 
 	return (0);
 }

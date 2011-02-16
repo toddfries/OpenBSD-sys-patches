@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: ieee80211_radiotap.h,v 1.7 2005/07/30 17:13:17 reyk Exp $ */
-=======
 /* $OpenBSD: ieee80211_radiotap.h,v 1.11 2010/07/17 16:25:09 damien Exp $ */
->>>>>>> origin/master
 /* $FreeBSD: src/sys/net80211/ieee80211_radiotap.h,v 1.3 2004/04/05 22:13:21 sam Exp $ */
 /* $NetBSD: ieee80211_radiotap.h,v 1.9 2004/06/06 04:13:28 dyoung Exp $ */
 

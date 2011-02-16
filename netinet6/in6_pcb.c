@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_pcb.c,v 1.42 2004/02/06 21:05:57 itojun Exp $	*/
-=======
 /*	$OpenBSD: in6_pcb.c,v 1.49 2009/06/05 00:05:22 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -166,19 +162,12 @@ u_char inet6ctlerrmap[PRC_NCMDS] = {
  * Bind an address (or at least a port) to an PF_INET6 socket.
  */
 int
-<<<<<<< HEAD
-in6_pcbbind(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
-=======
 in6_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
->>>>>>> origin/master
 {
 	struct socket *so = inp->inp_socket;
 
 	struct inpcbtable *head = inp->inp_table;
 	struct sockaddr_in6 *sin6;
-	struct proc *p = curproc;		/* XXX */
 	u_short lport = 0;
 	int wild = INPLOOKUP_IPV6, reuseport = (so->so_options & SO_REUSEPORT);
 	int error;
@@ -245,14 +234,9 @@ in6_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 					       * well.  (What about flow?)
 					       */
 			sin6->sin6_flowinfo = 0;
-<<<<<<< HEAD
-			if ((ia = ifa_ifwithaddr((struct sockaddr *)sin6))
-			    == NULL)
-=======
 			if (!(so->so_options & SO_BINDANY) &&
 			    (ia = ifa_ifwithaddr((struct sockaddr *)sin6,
 			    /* XXX */ 0)) == NULL)
->>>>>>> origin/master
 				return EADDRNOTAVAIL;
 
 			/*
@@ -358,7 +342,7 @@ in6_pcbsetport(struct in6_addr *laddr, struct inpcb *inp, struct proc *p)
 		 */
 		count = first - last;
 		if (count)
-			*lastport = first - (arc4random() % count);
+			*lastport = first - arc4random_uniform(count);
 
 		do {
 			if (count-- < 0)	/* completely used? */
@@ -376,7 +360,7 @@ in6_pcbsetport(struct in6_addr *laddr, struct inpcb *inp, struct proc *p)
 		 */
 		count = last - first;
 		if (count)
-			*lastport = first + (arc4random() % count);
+			*lastport = first + arc4random_uniform(count);
 
 		do {
 			if (count-- < 0)	/* completely used? */
@@ -473,7 +457,7 @@ in6_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6)) {
 		if (inp->inp_lport == 0)
-			(void)in6_pcbbind(inp, (struct mbuf *)0);
+			(void)in6_pcbbind(inp, NULL, curproc);
 		inp->inp_laddr6 = *in6a;
 	}
 	inp->inp_faddr6 = sin6->sin6_addr;

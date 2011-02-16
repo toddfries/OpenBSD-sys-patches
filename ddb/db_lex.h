@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_lex.h,v 1.6 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: db_lex.h,v 1.7 2002/07/01 21:56:55 miod Exp $	*/
 /*	$NetBSD: db_lex.h,v 1.7 1996/02/05 01:57:07 christos Exp $	*/
 
 /* 

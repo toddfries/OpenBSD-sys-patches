@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: route.h,v 1.45 2006/06/16 16:52:08 henning Exp $	*/
-=======
 /*	$OpenBSD: route.h,v 1.75 2010/10/28 17:18:35 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -64,30 +60,30 @@ struct route {
  * retransmission behavior and are included in the routing structure.
  */
 struct rt_kmetrics {
-	u_long	rmx_locks;	/* Kernel must leave these values alone */
-	u_long	rmx_mtu;	/* MTU for this path */
-	u_long	rmx_expire;	/* lifetime for route, e.g. redirect */
-	u_long	rmx_pksent;	/* packets sent using this route */
+	u_int64_t	rmx_pksent;	/* packets sent using this route */
+	u_int		rmx_locks;	/* Kernel must leave these values */
+	u_int		rmx_mtu;	/* MTU for this path */
+	u_int		rmx_expire;	/* lifetime for route, e.g. redirect */
+	u_int		rmx_pad;
 };
 
 /*
  * Huge version for userland compatibility.
  */
 struct rt_metrics {
-	u_long	rmx_locks;	/* Kernel must leave these values alone */
-	u_long	rmx_mtu;	/* MTU for this path */
-	u_long	rmx_hopcount;	/* max hops expected */
-	u_long	rmx_expire;	/* lifetime for route, e.g. redirect */
-	u_long	rmx_recvpipe;	/* inbound delay-bandwidth product */
-	u_long	rmx_sendpipe;	/* outbound delay-bandwidth product */
-	u_long	rmx_ssthresh;	/* outbound gateway buffer limit (deprecated) */
-	u_long	rmx_rtt;	/* estimated round trip time (deprecated) */
-	u_long	rmx_rttvar;	/* estimated rtt variance (deprecated) */
-	u_long	rmx_pksent;	/* packets sent using this route */
+	u_int64_t	rmx_pksent;	/* packets sent using this route */
+	u_int		rmx_locks;	/* Kernel must leave these values */
+	u_int		rmx_mtu;	/* MTU for this path */
+	u_int		rmx_expire;	/* lifetime for route, e.g. redirect */
+	u_int		rmx_refcnt;	/* # references hold */
+	/* some apps may still need these no longer used metrics */
+	u_int		rmx_hopcount;	/* max hops expected */
+	u_int		rmx_recvpipe;	/* inbound delay-bandwidth product */
+	u_int		rmx_sendpipe;	/* outbound delay-bandwidth product */
+	u_int		rmx_ssthresh;	/* outbound gateway buffer limit */
+	u_int		rmx_rtt;	/* estimated round trip time */
+	u_int		rmx_rttvar;	/* estimated rtt variance */
 };
-/* XXX overloading some values that are no longer used. */
-#define rmx_refcnt rmx_rttvar	/* # held references only used by sysctl */
-#define	rmx_rt_tableid rmx_rtt	/* routing table ID */
 
 /*
  * rmx_rtt and rmx_rttvar are stored as microseconds;
@@ -117,7 +113,7 @@ struct rtentry {
 	u_int	rt_flags;		/* up/down?, host/net */
 	int	rt_refcnt;		/* # held references */
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
-	struct	ifaddr *rt_ifa;		/* the answer: interface to use */
+	struct	ifaddr *rt_ifa;		/* the answer: interface addr to use */
 	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
 	caddr_t	rt_llinfo;		/* pointer to link level info cache or
 					   to an MPLS structure */ 
@@ -126,6 +122,7 @@ struct rtentry {
 	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
 	LIST_HEAD(, rttimer) rt_timer;  /* queue of timeouts for misc funcs */
 	u_int16_t rt_labelid;		/* route label ID */
+	u_int8_t rt_priority;		/* routing priority to use */
 };
 #define	rt_use	rt_rmx.rmx_pksent
 
@@ -146,7 +143,6 @@ struct rtentry {
 #define RTF_PROTO2	0x4000		/* protocol specific routing flag */
 #define RTF_PROTO1	0x8000		/* protocol specific routing flag */
 #define RTF_CLONED	0x10000		/* this is a cloned route */
-#define RTF_SOURCE	0x20000		/* this route has a source selector */
 #define RTF_MPATH	0x40000		/* multipath route or operation */
 #define RTF_JUMBO	0x80000		/* try to use jumbo frames */
 #define RTF_MPLS	0x100000	/* MPLS additional infos */
@@ -158,11 +154,10 @@ struct rtentry {
 
 #ifndef _KERNEL
 /* obsoleted */
-#define	RTF_TUNNEL	0x100000	/* Tunnelling bit. */
+#define RTF_SOURCE	0x20000		/* this route has a source selector */
+#define RTF_TUNNEL	0x100000	/* Tunnelling bit. */
 #endif
 
-<<<<<<< HEAD
-=======
 /* Routing priorities used by the different routing protocols */
 #define RTP_NONE	0	/* unset priority use sane default */
 #define RTP_CONNECTED	4	/* directly connected routes */
@@ -177,7 +172,6 @@ struct rtentry {
 #define RTP_MASK	0x7f
 #define RTP_DOWN	0x80	/* route/link is down */
 
->>>>>>> origin/master
 /*
  * Routing statistics.
  */
@@ -204,23 +198,6 @@ struct rt_msghdr {
 	u_short	rtm_msglen;	/* to skip over non-understood messages */
 	u_char	rtm_version;	/* future binary compatibility */
 	u_char	rtm_type;	/* message type */
-<<<<<<< HEAD
-	u_short	rtm_index;	/* index for associated ifp */
-	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
-	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
-	pid_t	rtm_pid;	/* identify sender */
-	int	rtm_seq;	/* for sender to identify action */
-	int	rtm_errno;	/* why failed */
-	int	rtm_use;	/* deprecated use rtm_rmx->rmx_pksent */
-#define rtm_fmask	rtm_use	/* bitmask used in RTM_CHANGE message */
-	u_long	rtm_inits;	/* which metrics we are initializing */
-	struct	rt_metrics rtm_rmx; /* metrics themselves */
-};
-/* overload no longer used field */
-#define rtm_tableid	rtm_rmx.rmx_rt_tableid
-
-#define RTM_VERSION	3	/* Up the ante and ignore older versions */
-=======
 	u_short	rtm_hdrlen;	/* sizeof(rt_msghdr) to skip over the header */
 	u_short	rtm_index;	/* index for associated ifp */
 	u_short rtm_tableid;	/* routing table id */
@@ -239,7 +216,6 @@ struct rt_msghdr {
 #define rtm_use	rtm_rmx.rmx_pksent
 
 #define RTM_VERSION	4	/* Up the ante and ignore older versions */
->>>>>>> origin/master
 
 #define RTM_MAXSIZE	2048	/* Maximum size of an accepted route msg */
 
@@ -322,6 +298,7 @@ struct rt_addrinfo {
 struct route_cb {
 	int	ip_count;
 	int	ip6_count;
+	int     mpls_count;
 	int	any_count;
 };
 
@@ -388,7 +365,7 @@ void	 rtable_l2set(u_int, u_int);
 int	 rtable_exists(u_int);
 int	 route_output(struct mbuf *, ...);
 int	 route_usrreq(struct socket *, int, struct mbuf *,
-			   struct mbuf *, struct mbuf *);
+			   struct mbuf *, struct mbuf *, struct proc *);
 void	 rt_ifmsg(struct ifnet *);
 void	 rt_ifannouncemsg(struct ifnet *, int);
 void	 rt_maskedcopy(struct sockaddr *,
@@ -424,17 +401,9 @@ int	 rtinit(struct ifaddr *, int, int);
 int	 rtioctl(u_long, caddr_t, struct proc *);
 void	 rtredirect(struct sockaddr *, struct sockaddr *,
 			 struct sockaddr *, int, struct sockaddr *,
-<<<<<<< HEAD
-			 struct rtentry **);
-int	 rtrequest(int, struct sockaddr *,
-			struct sockaddr *, struct sockaddr *, int,
-			struct rtentry **, u_int);
-int	 rtrequest1(int, struct rt_addrinfo *, struct rtentry **, u_int);
-=======
 			 struct rtentry **, u_int);
 int	 rtrequest1(int, struct rt_addrinfo *, u_int8_t, struct rtentry **,
 	     u_int);
->>>>>>> origin/master
 void	 rt_if_remove(struct ifnet *);
 #ifndef SMALL_KERNEL
 void	 rt_if_track(struct ifnet *);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_watch.c,v 1.8 2002/02/27 17:37:05 pefo Exp $ */
-=======
 /*	$OpenBSD: db_watch.c,v 1.10 2010/11/27 19:59:11 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: db_watch.c,v 1.9 1996/03/30 22:30:12 christos Exp $	*/
 
 /* 

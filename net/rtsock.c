@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtsock.c,v 1.62 2006/06/16 17:45:37 henning Exp $	*/
-=======
 /*	$OpenBSD: rtsock.c,v 1.114 2011/02/14 12:53:27 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -81,13 +77,10 @@
 #include <net/route.h>
 #include <net/raw_cb.h>
 
-<<<<<<< HEAD
-=======
 #ifdef MPLS
 #include <netmpls/mpls.h>
 #endif
 
->>>>>>> origin/master
 #include <sys/stdarg.h>
 #include <sys/kernel.h>
 #include <sys/timeout.h>
@@ -101,12 +94,6 @@ struct walkarg {
 	caddr_t	w_where, w_tmem;
 };
 
-<<<<<<< HEAD
-static struct mbuf
-		*rt_msg1(int, struct rt_addrinfo *);
-static int	 rt_msg2(int, struct rt_addrinfo *, caddr_t, struct walkarg *);
-static void	 rt_xaddrs(caddr_t, caddr_t, struct rt_addrinfo *);
-=======
 int	route_ctloutput(int, struct socket *, int, int, struct mbuf **);
 void	route_input(struct mbuf *m0, ...);
 
@@ -114,7 +101,6 @@ struct mbuf	*rt_msg1(int, struct rt_addrinfo *);
 int		 rt_msg2(int, int, struct rt_addrinfo *, caddr_t,
 		     struct walkarg *);
 void		 rt_xaddrs(caddr_t, caddr_t, struct rt_addrinfo *);
->>>>>>> origin/master
 
 /* Sleazy use of local variables throughout file, warning!!!! */
 #define dst	info.rti_info[RTAX_DST]
@@ -149,29 +135,13 @@ void	rt_senddesync(void *);
 
 int
 route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control)
+    struct mbuf *control, struct proc *p)
 {
 	struct rawcb	*rp;
 	struct routecb	*rop;
 	int		 s, af;
 	int		 error = 0;
 
-<<<<<<< HEAD
-	if (req == PRU_ATTACH) {
-		MALLOC(rp, struct rawcb *, sizeof(*rp), M_PCB, M_WAITOK);
-		so->so_pcb = rp;
-		bzero(so->so_pcb, sizeof(*rp));
-	}
-	if (req == PRU_DETACH && rp) {
-		int af = rp->rcb_proto.sp_protocol;
-		if (af == AF_INET)
-			route_cb.ip_count--;
-		else if (af == AF_INET6)
-			route_cb.ip6_count--;
-		route_cb.any_count--;
-	}
-=======
->>>>>>> origin/master
 	s = splsoftnet();
 	rp = sotorawcb(so);
 
@@ -196,15 +166,6 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EACCES;
 		else
 			error = raw_attach(so, (int)(long)nam);
-<<<<<<< HEAD
-	} else
-		error = raw_usrreq(so, req, m, nam, control);
-
-	rp = sotorawcb(so);
-	if (req == PRU_ATTACH && rp) {
-		int af = rp->rcb_proto.sp_protocol;
-=======
->>>>>>> origin/master
 		if (error) {
 			free(rp, M_PCB);
 			splx(s);
@@ -216,13 +177,10 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			route_cb.ip_count++;
 		else if (af == AF_INET6)
 			route_cb.ip6_count++;
-<<<<<<< HEAD
-=======
 #ifdef MPLS
 		else if (af == AF_MPLS)
 			route_cb.mpls_count++;
 #endif
->>>>>>> origin/master
 		rp->rcb_faddr = &route_src;
 		route_cb.any_count++;
 		soisconnected(so);
@@ -501,6 +459,7 @@ route_output(struct mbuf *m, ...)
 	const char		*label;
 	va_list			 ap;
 	u_int			 tableid;
+	u_int8_t		 prio;
 
 	va_start(ap, m);
 	so = va_arg(ap, struct socket *);
@@ -513,24 +472,11 @@ route_output(struct mbuf *m, ...)
 	if ((m->m_flags & M_PKTHDR) == 0)
 		panic("route_output");
 	len = m->m_pkthdr.len;
-	if (len < sizeof(*rtm) ||
+	if (len < offsetof(struct rt_msghdr, rtm_type) + 1 ||
 	    len != mtod(m, struct rt_msghdr *)->rtm_msglen) {
 		error = EINVAL;
 		goto fail;
 	}
-<<<<<<< HEAD
-	R_Malloc(rtm, struct rt_msghdr *, len);
-	if (rtm == 0) {
-		dst = 0;
-		error = ENOBUFS;
-		goto flush;
-	}
-	m_copydata(m, 0, len, (caddr_t)rtm);
-	if (rtm->rtm_version != RTM_VERSION) {
-		dst = 0;
-		error = EPROTONOSUPPORT;
-		goto flush;
-=======
 	switch (mtod(m, struct rt_msghdr *)->rtm_version) {
 	case RTM_VERSION:
 		if (len < sizeof(struct rt_msghdr)) {
@@ -580,19 +526,12 @@ route_output(struct mbuf *m, ...)
 	if (rtm->rtm_type != RTM_GET && suser(curproc, 0) != 0) {
 		error = EACCES;
 		goto fail;
->>>>>>> origin/master
 	}
-	rtm->rtm_pid = curproc->p_pid;
 
 	tableid = rtm->rtm_tableid;
 	if (!rtable_exists(tableid)) {
 		if (rtm->rtm_type == RTM_ADD) {
-<<<<<<< HEAD
-			if (rtable_add(tableid)) {
-				error = EINVAL;
-=======
 			if ((error = rtable_add(tableid)) != NULL)
->>>>>>> origin/master
 				goto flush;
 		} else {
 			error = EINVAL;
@@ -600,8 +539,6 @@ route_output(struct mbuf *m, ...)
 		}
 	}
 
-<<<<<<< HEAD
-=======
 	/* make sure that kernel-only bits are not set */
 	rtm->rtm_priority &= RTP_MASK;
 
@@ -618,10 +555,9 @@ route_output(struct mbuf *m, ...)
 	else
 		prio = RTP_DEFAULT;
 
->>>>>>> origin/master
 	bzero(&info, sizeof(info));
 	info.rti_addrs = rtm->rtm_addrs;
-	rt_xaddrs((caddr_t)(rtm + 1), len + (caddr_t)rtm, &info);
+	rt_xaddrs(rtm->rtm_hdrlen + (caddr_t)rtm, len + (caddr_t)rtm, &info);
 	info.rti_flags = rtm->rtm_flags;
 	if (dst == 0 || dst->sa_family >= AF_MAX ||
 	    (gate != 0 && gate->sa_family >= AF_MAX)) {
@@ -651,7 +587,8 @@ route_output(struct mbuf *m, ...)
 			error = EINVAL;
 			goto flush;
 		}
-		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt, tableid);
+		error = rtrequest1(rtm->rtm_type, &info, prio, &saved_nrt,
+		    tableid);
 		if (error == 0 && saved_nrt) {
 			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
 			    &saved_nrt->rt_rmx);
@@ -664,7 +601,8 @@ route_output(struct mbuf *m, ...)
 		}
 		break;
 	case RTM_DELETE:
-		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt, tableid);
+		error = rtrequest1(rtm->rtm_type, &info, prio, &saved_nrt,
+		    tableid);
 		if (error == 0) {
 			(rt = saved_nrt)->rt_refcnt++;
 			goto report;
@@ -692,12 +630,6 @@ route_output(struct mbuf *m, ...)
 		 * if gate == NULL the first match is returned.
 		 * (no need to call rt_mpath_matchgate if gate == NULL)
 		 */
-<<<<<<< HEAD
-		if (rn_mpath_capable(rnh) &&
-		    (rtm->rtm_type != RTM_GET || gate)) {
-			rt = rt_mpath_matchgate(rt, gate);
-			rn = (struct radix_node *)rt;
-=======
 		if (rn_mpath_capable(rnh)) {
 			/* first find correct priority bucket */
 			rn = rn_mpath_prio(rn, prio);
@@ -728,7 +660,6 @@ route_output(struct mbuf *m, ...)
 				 */
 				rt = rt_mpath_matchgate(rt, gate, prio);
 
->>>>>>> origin/master
 			if (!rt) {
 				error = ESRCH;
 				goto flush;
@@ -797,7 +728,8 @@ report:
 					brdaddr = 0;
 				rtm->rtm_index = ifp->if_index;
 			}
-			len = rt_msg2(rtm->rtm_type, &info, NULL, NULL);
+			len = rt_msg2(rtm->rtm_type, RTM_VERSION, &info, NULL,
+			    NULL);
 			if (len > rtm->rtm_msglen) {
 				struct rt_msghdr	*new_rtm;
 				R_Malloc(new_rtm, struct rt_msghdr *, len);
@@ -808,13 +740,11 @@ report:
 				Bcopy(rtm, new_rtm, rtm->rtm_msglen);
 				Free(rtm); rtm = new_rtm;
 			}
-			rt_msg2(rtm->rtm_type, &info, (caddr_t)rtm, NULL);
+			rt_msg2(rtm->rtm_type, RTM_VERSION, &info, (caddr_t)rtm,
+			    NULL);
 			rtm->rtm_flags = rt->rt_flags;
 			rtm->rtm_use = 0;
-<<<<<<< HEAD
-=======
 			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
->>>>>>> origin/master
 			rt_getmetrics(&rt->rt_rmx, &rtm->rtm_rmx);
 			rtm->rtm_addrs = info.rti_addrs;
 			break;
@@ -991,6 +921,7 @@ rt_setmetrics(u_long which, struct rt_metrics *in, struct rt_kmetrics *out)
 		out->rmx_mtu = in->rmx_mtu;
 	if (which & RTV_EXPIRE)
 		out->rmx_expire = in->rmx_expire;
+	/* RTV_PRIORITY handled befor */
 }
 
 void
@@ -1007,7 +938,7 @@ rt_getmetrics(struct rt_kmetrics *in, struct rt_metrics *out)
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 #define ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
 
-static void
+void
 rt_xaddrs(caddr_t cp, caddr_t cplim, struct rt_addrinfo *rtinfo)
 {
 	struct sockaddr	*sa;
@@ -1022,14 +953,14 @@ rt_xaddrs(caddr_t cp, caddr_t cplim, struct rt_addrinfo *rtinfo)
 	}
 }
 
-static struct mbuf *
+struct mbuf *
 rt_msg1(int type, struct rt_addrinfo *rtinfo)
 {
 	struct rt_msghdr	*rtm;
 	struct mbuf		*m;
 	int			 i;
 	struct sockaddr		*sa;
-	int			 len, dlen;
+	int			 len, dlen, hlen;
 
 	switch (type) {
 	case RTM_DELADDR:
@@ -1058,7 +989,7 @@ rt_msg1(int type, struct rt_addrinfo *rtinfo)
 	}
 	if (m == 0)
 		return (m);
-	m->m_pkthdr.len = m->m_len = len;
+	m->m_pkthdr.len = m->m_len = hlen = len;
 	m->m_pkthdr.rcvif = NULL;
 	rtm = mtod(m, struct rt_msghdr *);
 	bzero(rtm, len);
@@ -1075,16 +1006,18 @@ rt_msg1(int type, struct rt_addrinfo *rtinfo)
 		return (NULL);
 	}
 	rtm->rtm_msglen = len;
+	rtm->rtm_hdrlen = hlen;
 	rtm->rtm_version = RTM_VERSION;
 	rtm->rtm_type = type;
 	return (m);
 }
 
-static int
-rt_msg2(int type, struct rt_addrinfo *rtinfo, caddr_t cp, struct walkarg *w)
+int
+rt_msg2(int type, int vers, struct rt_addrinfo *rtinfo, caddr_t cp,
+    struct walkarg *w)
 {
 	int		i;
-	int		len, dlen, second_time = 0;
+	int		len, dlen, hlen, second_time = 0;
 	caddr_t		cp0;
 
 	rtinfo->rti_addrs = 0;
@@ -1101,6 +1034,7 @@ again:
 		len = sizeof(struct rt_msghdr);
 		break;
 	}
+	hlen = len;
 	if ((cp0 = cp) != NULL)
 		cp += len;
 	for (i = 0; i < RTAX_MAX; i++) {
@@ -1138,22 +1072,16 @@ again:
 				rw->w_where = 0;
 		}
 	}
-<<<<<<< HEAD
-=======
 	if (cp && w)		/* clear the message header */
 		bzero(cp0, hlen);
 
->>>>>>> origin/master
 	if (cp) {
 		struct rt_msghdr *rtm = (struct rt_msghdr *)cp0;
 
 		rtm->rtm_version = RTM_VERSION;
 		rtm->rtm_type = type;
 		rtm->rtm_msglen = len;
-<<<<<<< HEAD
-=======
 		rtm->rtm_hdrlen = hlen;
->>>>>>> origin/master
 	}
 	return (len);
 }
@@ -1364,20 +1292,15 @@ sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
 	}
 #endif
 
-	size = rt_msg2(RTM_GET, &info, NULL, w);
+	size = rt_msg2(RTM_GET, RTM_VERSION, &info, NULL, w);
 	if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 		struct rt_msghdr *rtm = (struct rt_msghdr *)w->w_tmem;
 
 		rtm->rtm_flags = rt->rt_flags;
-<<<<<<< HEAD
-		rtm->rtm_use = 0;
-=======
 		rtm->rtm_priority = rt->rt_priority & RTP_MASK;
->>>>>>> origin/master
 		rt_getmetrics(&rt->rt_rmx, &rtm->rtm_rmx);
-		rtm->rtm_rmx.rmx_refcnt = (u_long)rt->rt_refcnt;
+		rtm->rtm_rmx.rmx_refcnt = rt->rt_refcnt;
 		rtm->rtm_index = rt->rt_ifp->if_index;
-		rtm->rtm_errno = rtm->rtm_pid = rtm->rtm_seq = 0;
 		rtm->rtm_addrs = info.rti_addrs;
 		rtm->rtm_tableid = id;
 #ifdef MPLS
@@ -1407,8 +1330,7 @@ sysctl_iflist(int af, struct walkarg *w)
 		if (!ifa)
 			continue;
 		ifpaddr = ifa->ifa_addr;
-		len = rt_msg2(RTM_IFINFO, &info, 0, w);
-		ifpaddr = 0;
+		len = rt_msg2(RTM_IFINFO, RTM_VERSION, &info, 0, w);
 		if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 			struct if_msghdr *ifm;
 
@@ -1423,10 +1345,7 @@ sysctl_iflist(int af, struct walkarg *w)
 				return (error);
 			w->w_where += len;
 		}
-<<<<<<< HEAD
-=======
 		ifpaddr = 0;
->>>>>>> origin/master
 		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) !=
 		    TAILQ_END(&ifp->if_addrlist)) {
 			if (af && af != ifa->ifa_addr->sa_family)
@@ -1434,7 +1353,7 @@ sysctl_iflist(int af, struct walkarg *w)
 			ifaaddr = ifa->ifa_addr;
 			netmask = ifa->ifa_netmask;
 			brdaddr = ifa->ifa_dstaddr;
-			len = rt_msg2(RTM_NEWADDR, &info, 0, w);
+			len = rt_msg2(RTM_NEWADDR, RTM_VERSION, &info, 0, w);
 			if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 				struct ifa_msghdr *ifam;
 

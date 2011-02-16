@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: radix_mpath.c,v 1.6 2006/06/18 11:47:45 pascoe Exp $	*/
-=======
 /*	$OpenBSD: radix_mpath.c,v 1.18 2010/05/07 13:33:16 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: radix_mpath.c,v 1.13 2002/10/28 21:05:59 itojun Exp $	*/
 
 /*
@@ -74,24 +70,19 @@ rn_mpath_capable(struct radix_node_head *rnh)
 struct radix_node *
 rn_mpath_next(struct radix_node *rn, int all)
 {
-	struct radix_node *next;
+	struct radix_node	*next;
+	struct rtentry		*rt = (struct rtentry *)rn;
 
 	if (!rn->rn_dupedkey)
 		return NULL;
 	next = rn->rn_dupedkey;
-<<<<<<< HEAD
-	if (rn->rn_mask == next->rn_mask)
-=======
 	if (rn->rn_mask == next->rn_mask && (all ||
 	    rt->rt_priority == ((struct rtentry *)next)->rt_priority))
->>>>>>> origin/master
 		return next;
 	else
 		return NULL;
 }
 
-<<<<<<< HEAD
-=======
 struct radix_node *
 rn_mpath_prio(struct radix_node *rn, u_int8_t prio)
 {
@@ -239,7 +230,6 @@ rn_mpath_reprio(struct radix_node *rn, int newprio)
 	}
 }
 
->>>>>>> origin/master
 int
 rn_mpath_count(struct radix_node *rn)
 {
@@ -252,22 +242,10 @@ rn_mpath_count(struct radix_node *rn)
 }
 
 struct rtentry *
-rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate)
+rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate, u_int8_t prio)
 {
-<<<<<<< HEAD
-	struct radix_node *rn;
-
-	if (!rn_mpath_next((struct radix_node *)rt))
-		return rt;
-
-	if (!gate)
-		return NULL;
-	/* beyond here, we use rn as the master copy */
-	rn = (struct radix_node *)rt;
-=======
 	struct radix_node *rn = (struct radix_node *)rt;
 
->>>>>>> origin/master
 	do {
 		rt = (struct rtentry *)rn;
 
@@ -288,13 +266,7 @@ rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate)
 		if (rt->rt_gateway->sa_len == gate->sa_len &&
 		    !memcmp(rt->rt_gateway, gate, gate->sa_len))
 			break;
-<<<<<<< HEAD
-	} while ((rn = rn_mpath_next(rn)) != NULL);
-	if (!rn)
-		return NULL;
-=======
 	} while ((rn = rn_mpath_next(rn, 1)) != NULL);
->>>>>>> origin/master
 
 	return (struct rtentry *)rn;
 }
@@ -376,9 +348,10 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
 	}
 
  maskmatched:
-	if (!mpathok)
+	if (!mpathok && rt1->rt_priority == rt->rt_priority)
 		return EEXIST;
 
+	rn1 = rn_mpath_prio((struct radix_node *)rt1, rt->rt_priority);
 	/* key/mask were the same.  compare gateway for all multipaths */
 	do {
 		rt1 = (struct rtentry *)rn1;
@@ -390,6 +363,10 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
 		if (rt1->rt_gateway->sa_len != rt->rt_gateway->sa_len ||
 		    bcmp(rt1->rt_gateway, rt->rt_gateway,
 		    rt1->rt_gateway->sa_len))
+			continue;
+
+		/* check the route priority */
+		if (rt1->rt_priority != rt->rt_priority)
 			continue;
 
 		/* all key/mask/gateway are the same.  conflicting entry. */

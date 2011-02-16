@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: icmp6.c,v 1.92 2007/01/16 11:05:25 itojun Exp $	*/
-=======
 /*	$OpenBSD: icmp6.c,v 1.113 2010/07/09 15:44:20 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -482,7 +478,6 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 	    icmp6->icmp6_type == ICMP6_ECHO_REQUEST &&
 	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
 	    ip6->ip6_dst.s6_addr32))
@@ -1560,7 +1555,7 @@ ni6_nametodns(const char *name, int namelen, int old)
 			if (i <= 0 || i >= 64)
 				goto fail;
 			*cp++ = i;
-			if (!isalpha(p[0]) || !isalnum(p[i - 1]))
+			if (!isalnum(p[0]) || !isalnum(p[i - 1]))
 				goto fail;
 			while (i > 0) {
 				if (!isalnum(*p) && *p != '-')
@@ -2132,15 +2127,11 @@ icmp6_reflect(struct mbuf *m, size_t off)
 	 * Note that only echo and node information replies are affected,
 	 * since the length of ICMP6 errors is limited to the minimum MTU.
 	 */
-<<<<<<< HEAD
-	if (ip6_output(m, NULL, NULL, IPV6_MINMTU, NULL, &outif) != 0 && outif)
-=======
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 	if (ip6_output(m, NULL, NULL, IPV6_MINMTU, NULL, &outif, NULL) != 0 &&
 	    outif)
->>>>>>> origin/master
 		icmp6_ifstat_inc(outif, ifs6_out_error);
 
 	if (outif)
@@ -2627,7 +2618,7 @@ noredhdropt:
 		= in6_cksum(m, IPPROTO_ICMPV6, sizeof(*ip6), ntohs(ip6->ip6_plen));
 
 	/* send the packet to outside... */
-	if (ip6_output(m, NULL, NULL, 0, NULL, NULL) != 0)
+	if (ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL) != 0)
 		icmp6_ifstat_inc(ifp, ifs6_out_error);
 
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);
@@ -2770,12 +2761,14 @@ icmp6_mtudisc_clone(struct sockaddr *dst)
 
 	/* If we didn't get a host route, allocate one */
 	if ((rt->rt_flags & RTF_HOST) == 0) {
+		struct rt_addrinfo info;
 		struct rtentry *nrt;
 
-		error = rtrequest((int) RTM_ADD, dst,
-		    (struct sockaddr *) rt->rt_gateway,
-		    (struct sockaddr *) 0,
-		    RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC, &nrt, 0);
+		bzero(&info, sizeof(info));
+		info.rti_flags = RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC;
+		info.rti_info[RTAX_DST] = dst;
+		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+		error = rtrequest1(RTM_ADD, &info, rt->rt_priority, &nrt, 0);
 		if (error) {
 			rtfree(rt);
 			return NULL;
@@ -2801,10 +2794,6 @@ icmp6_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		panic("icmp6_mtudisc_timeout: bad route to timeout");
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
-<<<<<<< HEAD
-		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
-=======
 		struct rt_addrinfo info;
 
 		bzero(&info, sizeof(info));
@@ -2814,7 +2803,6 @@ icmp6_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
 		    r->rtt_tableid);
->>>>>>> origin/master
 	} else {
 		if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
 			rt->rt_rmx.rmx_mtu = 0;
@@ -2828,10 +2816,6 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 		panic("icmp6_redirect_timeout: bad route to timeout");
 	if ((rt->rt_flags & (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) {
-<<<<<<< HEAD
-		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
-=======
 		struct rt_addrinfo info;
 
 		bzero(&info, sizeof(info));
@@ -2841,7 +2825,6 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
 		    r->rtt_tableid);
->>>>>>> origin/master
 	}
 }
 

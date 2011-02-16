@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pf_norm.c,v 1.106 2006/03/25 20:55:24 dhartmei Exp $ */
-=======
 /*	$OpenBSD: pf_norm.c,v 1.128 2011/02/01 16:10:31 bluhm Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -101,24 +97,8 @@ void			 pf_remove_fragment(struct pf_fragment *);
 void			 pf_flush_fragments(void);
 void			 pf_free_fragment(struct pf_fragment *);
 struct pf_fragment	*pf_find_fragment(struct ip *, struct pf_frag_tree *);
-<<<<<<< HEAD
-struct mbuf		*pf_reassemble(struct mbuf **, struct pf_fragment **,
-			    struct pf_frent *, int);
-struct mbuf		*pf_fragcache(struct mbuf **, struct ip*,
-			    struct pf_fragment **, int, int, int *);
-int			 pf_normalize_tcpopt(struct pf_rule *, struct mbuf *,
-			    struct tcphdr *, int);
-
-#define	DPFPRINTF(x) do {				\
-	if (pf_status.debug >= PF_DEBUG_MISC) {		\
-		printf("%s: ", __func__);		\
-		printf x ;				\
-	}						\
-} while(0)
-=======
 int			 pf_reassemble(struct mbuf **, struct pf_fragment **,
 			    struct pf_frent *, int, u_short *);
->>>>>>> origin/master
 
 /* Globals */
 struct pool		 pf_frent_pl, pf_frag_pl;
@@ -479,39 +459,6 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 	u_int16_t		 max;
 	int			 ip_len;
 	int			 ip_off;
-<<<<<<< HEAD
-
-	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
-	while (r != NULL) {
-		r->evaluations++;
-		if (pfi_kif_match(r->kif, kif) == r->ifnot)
-			r = r->skip[PF_SKIP_IFP].ptr;
-		else if (r->direction && r->direction != dir)
-			r = r->skip[PF_SKIP_DIR].ptr;
-		else if (r->af && r->af != AF_INET)
-			r = r->skip[PF_SKIP_AF].ptr;
-		else if (r->proto && r->proto != h->ip_p)
-			r = r->skip[PF_SKIP_PROTO].ptr;
-		else if (PF_MISMATCHAW(&r->src.addr,
-		    (struct pf_addr *)&h->ip_src.s_addr, AF_INET,
-		    r->src.neg, kif))
-			r = r->skip[PF_SKIP_SRC_ADDR].ptr;
-		else if (PF_MISMATCHAW(&r->dst.addr,
-		    (struct pf_addr *)&h->ip_dst.s_addr, AF_INET,
-		    r->dst.neg, NULL))
-			r = r->skip[PF_SKIP_DST_ADDR].ptr;
-		else
-			break;
-	}
-
-	if (r == NULL || r->action == PF_NOSCRUB)
-		return (PF_PASS);
-	else {
-		r->packets[dir == PF_OUT]++;
-		r->bytes[dir == PF_OUT] += pd->tot_len;
-	}
-=======
->>>>>>> origin/master
 
 	/* Check for illegal packets */
 	if (hlen < (int)sizeof(struct ip))
@@ -557,68 +504,8 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 	}
 	max = fragoff + ip_len;
 
-<<<<<<< HEAD
-	if ((r->rule_flag & (PFRULE_FRAGCROP|PFRULE_FRAGDROP)) == 0) {
-		/* Fully buffer all of the fragments */
-
-		frag = pf_find_fragment(h, &pf_frag_tree);
-
-		/* Check if we saw the last fragment already */
-		if (frag != NULL && (frag->fr_flags & PFFRAG_SEENLAST) &&
-		    max > frag->fr_max)
-			goto bad;
-
-		/* Get an entry for the fragment queue */
-		frent = pool_get(&pf_frent_pl, PR_NOWAIT);
-		if (frent == NULL) {
-			REASON_SET(reason, PFRES_MEMORY);
-			return (PF_DROP);
-		}
-		pf_nfrents++;
-		frent->fr_ip = h;
-		frent->fr_m = m;
-
-		/* Might return a completely reassembled mbuf, or NULL */
-		DPFPRINTF(("reass frag %d @ %d-%d\n", h->ip_id, fragoff, max));
-		*m0 = m = pf_reassemble(m0, &frag, frent, mff);
-
-		if (m == NULL)
-			return (PF_DROP);
-
-		/* use mtag from concatenated mbuf chain */
-		pd->pf_mtag = pf_find_mtag(m);
-#ifdef DIAGNOSTIC
-		if (pd->pf_mtag == NULL) {
-			printf("%s: pf_find_mtag returned NULL(1)\n", __func__);
-			if ((pd->pf_mtag = pf_get_mtag(m)) == NULL) {
-				m_freem(m);
-				*m0 = NULL;
-				goto no_mem;
-			}
-		}
-#endif
-		if (frag != NULL && (frag->fr_flags & PFFRAG_DROP))
-			goto drop;
-
-		h = mtod(m, struct ip *);
-	} else {
-		/* non-buffering fragment cache (drops or masks overlaps) */
-		int	nomem = 0;
-
-		if (dir == PF_OUT && pd->pf_mtag->flags & PF_TAG_FRAGCACHE) {
-			/*
-			 * Already passed the fragment cache in the
-			 * input direction.  If we continued, it would
-			 * appear to be a dup and would be dropped.
-			 */
-			goto fragment_pass;
-		}
-
-		frag = pf_find_fragment(h, &pf_cache_tree);
-=======
 	/* Fully buffer all of the fragments */
 	frag = pf_find_fragment(h, &pf_frag_tree);
->>>>>>> origin/master
 
 	/* Check if we saw the last fragment already */
 	if (frag != NULL && (frag->fr_flags & PFFRAG_SEENLAST) &&
@@ -635,22 +522,6 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 	frent->fr_ip = h;
 	frent->fr_m = m;
 
-<<<<<<< HEAD
-		/* use mtag from copied and trimmed mbuf chain */
-		pd->pf_mtag = pf_find_mtag(m);
-#ifdef DIAGNOSTIC
-		if (pd->pf_mtag == NULL) {
-			printf("%s: pf_find_mtag returned NULL(2)\n", __func__);
-			if ((pd->pf_mtag = pf_get_mtag(m)) == NULL) {
-				m_freem(m);
-				*m0 = NULL;
-				goto no_mem;
-			}
-		}
-#endif
-		if (dir == PF_IN)
-			pd->pf_mtag->flags |= PF_TAG_FRAGCACHE;
-=======
 	/* Returns PF_DROP or *m0 is NULL or completely reassembled mbuf */
 	DPFPRINTF(LOG_NOTICE,
 	    "reass frag %d @ %d-%d", h->ip_id, fragoff, max);
@@ -659,7 +530,6 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 	m = *m0;
 	if (m == NULL)
 		return (PF_PASS);  /* packet has been reassembled, no error */
->>>>>>> origin/master
 
 	h = mtod(m, struct ip *);
 
@@ -672,49 +542,9 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_off, h->ip_off, 0);
 	}
 
-<<<<<<< HEAD
-	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (r->min_ttl && h->ip_ttl < r->min_ttl) {
-		u_int16_t ip_ttl = h->ip_ttl;
-
-		h->ip_ttl = r->min_ttl;
-		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_ttl, h->ip_ttl, 0);
-	}
-
-	if (r->rule_flag & PFRULE_RANDOMID) {
-		u_int16_t ip_id = h->ip_id;
-
-		h->ip_id = ip_randomid();
-		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_id, h->ip_id, 0);
-	}
-	if ((r->rule_flag & (PFRULE_FRAGCROP|PFRULE_FRAGDROP)) == 0)
-		pd->flags |= PFDESC_IP_REAS;
-
-	return (PF_PASS);
-
- fragment_pass:
-	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (r->min_ttl && h->ip_ttl < r->min_ttl) {
-		u_int16_t ip_ttl = h->ip_ttl;
-
-		h->ip_ttl = r->min_ttl;
-		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_ttl, h->ip_ttl, 0);
-	}
-	if ((r->rule_flag & (PFRULE_FRAGCROP|PFRULE_FRAGDROP)) == 0)
-		pd->flags |= PFDESC_IP_REAS;
-	return (PF_PASS);
-
- no_mem:
-	REASON_SET(reason, PFRES_MEMORY);
-	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL, pd);
-	return (PF_DROP);
-
-=======
 	pd->flags |= PFDESC_IP_REAS;
 	return (PF_PASS);
 
->>>>>>> origin/master
  drop:
 	REASON_SET(reason, PFRES_NORM);
 	return (PF_DROP);
@@ -921,13 +751,6 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
 		rewrite = 1;
 	}
 
-<<<<<<< HEAD
-	/* Process options */
-	if (r->max_mss && pf_normalize_tcpopt(r, m, th, off))
-		rewrite = 1;
-
-=======
->>>>>>> origin/master
 	/* copy back packet headers if we sanitized */
 	if (rewrite)
 		m_copyback(m, off, sizeof(*th), th, M_NOWAIT);
@@ -1243,7 +1066,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 		 *    network conditions that re-order packets and
 		 *    cause our view of them to decrease.  For now the
 		 *    only lowerbound we can safely determine is that
-		 *    the TS echo will never be less than the orginal
+		 *    the TS echo will never be less than the original
 		 *    TS.  XXX There is probably a better lowerbound.
 		 *    Remove TS_MAX_CONN with better lowerbound check.
 		 *        tescr >= other original TS
@@ -1433,25 +1256,12 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 }
 
 int
-<<<<<<< HEAD
-pf_normalize_tcpopt(struct pf_rule *r, struct mbuf *m, struct tcphdr *th,
-    int off)
-=======
 pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
->>>>>>> origin/master
 {
 	struct tcphdr	*th = pd->hdr.tcp;
 	u_int16_t	 mss;
 	int		 thoff;
 	int		 opt, cnt, optlen = 0;
-<<<<<<< HEAD
-	int		 rewrite = 0;
-	u_char		*optp;
-
-	thoff = th->th_off << 2;
-	cnt = thoff - sizeof(struct tcphdr);
-	optp = mtod(m, caddr_t) + off + sizeof(struct tcphdr);
-=======
 	u_char		 opts[MAX_TCPOPTLEN];
 	u_char		*optp = opts;
 
@@ -1461,7 +1271,6 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 	if (cnt > 0 && !pf_pull_hdr(m, off + sizeof(*th), opts, cnt,
 	    NULL, NULL, pd->af))
 		return (0);
->>>>>>> origin/master
 
 	for (; cnt > 0; cnt -= optlen, optp += optlen) {
 		opt = optp[0];
@@ -1494,9 +1303,6 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 		}
 	}
 
-<<<<<<< HEAD
-	return (rewrite);
-=======
 
 
 	return (0);
@@ -1542,7 +1348,6 @@ pf_scrub_ip(struct mbuf **m0, u_int16_t flags, u_int8_t min_ttl, u_int8_t tos)
 		h->ip_id = htons(ip_randomid());
 		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_id, h->ip_id, 0);
 	}
->>>>>>> origin/master
 }
 
 #ifdef INET6

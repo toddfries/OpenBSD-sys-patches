@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: md5.c,v 1.4 2004/04/29 18:38:23 millert Exp $	*/
-=======
 /*	$OpenBSD: md5.c,v 1.2 2011/01/11 15:42:05 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * This code implements the MD5 message-digest algorithm.

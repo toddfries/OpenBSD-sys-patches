@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ssvar.h,v 1.10 2003/05/18 16:06:35 mickey Exp $	*/
-=======
 /*	$OpenBSD: ssvar.h,v 1.18 2010/06/30 00:02:00 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ssvar.h,v 1.2 1996/03/30 21:47:11 christos Exp $	*/
 
 /*

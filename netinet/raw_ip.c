@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: raw_ip.c,v 1.39 2006/05/29 20:42:27 claudio Exp $	*/
-=======
 /*	$OpenBSD: raw_ip.c,v 1.50 2010/09/08 08:34:42 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -81,6 +77,7 @@
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -141,8 +138,6 @@ rip_input(struct mbuf *m, ...)
 
 		if (inp->inp_ip.ip_p && inp->inp_ip.ip_p != ip->ip_p)
 			continue;
-<<<<<<< HEAD
-=======
 #if NPF > 0
 		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 			struct pf_divert *divert;
@@ -154,7 +149,6 @@ rip_input(struct mbuf *m, ...)
 				continue;
 		} else
 #endif
->>>>>>> origin/master
 		if (inp->inp_laddr.s_addr &&
 		    inp->inp_laddr.s_addr != ip->ip_dst.s_addr)
 			continue;
@@ -165,7 +159,8 @@ rip_input(struct mbuf *m, ...)
 			struct mbuf *n;
 
 			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
-				if (last->inp_flags & INP_CONTROLOPTS)
+				if (last->inp_flags & INP_CONTROLOPTS ||
+				    last->inp_socket->so_options & SO_TIMESTAMP)
 					ip_savecontrol(last, &opts, ip, n);
 				if (sbappendaddr(&last->inp_socket->so_rcv,
 				    sintosa(&ripsrc), n, opts) == 0) {
@@ -181,7 +176,8 @@ rip_input(struct mbuf *m, ...)
 		last = inp;
 	}
 	if (last) {
-		if (last->inp_flags & INP_CONTROLOPTS)
+		if (last->inp_flags & INP_CONTROLOPTS ||
+		    last->inp_socket->so_options & SO_TIMESTAMP)
 			ip_savecontrol(last, &opts, ip, m);
 		if (sbappendaddr(&last->inp_socket->so_rcv, sintosa(&ripsrc), m,
 		    opts) == 0) {
@@ -362,7 +358,7 @@ u_long	rip_recvspace = RIPRCVQ;
 /*ARGSUSED*/
 int
 rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control)
+    struct mbuf *control, struct proc *p)
 {
 	int error = 0;
 	struct inpcb *inp = sotoinpcb(so);
@@ -425,13 +421,9 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		    ((addr->sin_family != AF_INET) &&
 		     (addr->sin_family != AF_IMPLINK)) ||
 		    (addr->sin_addr.s_addr &&
-<<<<<<< HEAD
-		     ifa_ifwithaddr(sintosa(addr)) == 0)) {
-=======
 		     (!(so->so_options & SO_BINDANY) &&
 		     in_iawithaddr(addr->sin_addr, NULL, inp->inp_rtableid) ==
 		     0))) {
->>>>>>> origin/master
 			error = EADDRNOTAVAIL;
 			break;
 		}

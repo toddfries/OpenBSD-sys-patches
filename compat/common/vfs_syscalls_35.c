@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_syscalls_35.c,v 1.2 2004/07/14 18:00:48 millert Exp $	*/
-=======
 /*	$OpenBSD: vfs_syscalls_35.c,v 1.5 2010/07/01 23:10:40 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1989, 1993

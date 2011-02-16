@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: msdosfs_lookup.c,v 1.16 2006/10/03 19:49:06 pedro Exp $	*/
-=======
 /*	$OpenBSD: msdosfs_lookup.c,v 1.23 2010/01/17 20:23:58 chl Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: msdosfs_lookup.c,v 1.34 1997/10/18 22:12:27 ws Exp $	*/
 
 /*-
@@ -84,11 +80,7 @@
 int
 msdosfs_lookup(void *v)
 {
-	struct vop_lookup_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 	struct vnode *vdp = ap->a_dvp;
 	struct vnode **vpp = ap->a_vpp;
 	struct componentname *cnp = ap->a_cnp;
@@ -802,7 +794,7 @@ dosdirempty(struct denode *dep)
 int
 doscheckpath(struct denode *source, struct denode *target)
 {
-	daddr_t scn;
+	uint32_t scn;
 	struct msdosfsmount *pmp;
 	struct direntry *ep;
 	struct denode *dep;
@@ -891,7 +883,7 @@ readep(struct msdosfsmount *pmp, uint32_t dirclust, uint32_t diroffset,
     struct buf **bpp, struct direntry **epp)
 {
 	int error;
-	daddr_t bn;
+	daddr64_t bn;
 	int blsize;
 
 	blsize = pmp->pm_bpcluster;
@@ -975,7 +967,7 @@ removede(struct denode *pdep, struct denode *dep)
 		offset += sizeof(struct direntry);
 		while (1) {
 			/*
-			 * We are a bit agressive here in that we delete any Win95
+			 * We are a bit aggressive here in that we delete any Win95
 			 * entries preceding this entry, not just the ones we "own".
 			 * Since these presumably aren't valid anyway,
 			 * there should be no harm.

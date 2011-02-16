@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_command.c,v 1.44 2006/08/24 21:10:14 miod Exp $	*/
-=======
 /*	$OpenBSD: db_command.c,v 1.62 2010/11/05 15:17:50 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -42,6 +38,7 @@
 #include <sys/pool.h>
 #include <sys/msgbuf.h>
 #include <sys/malloc.h>
+#include <sys/mount.h>
 
 #include <uvm/uvm_extern.h>
 #include <machine/db_machdep.h>		/* type definitions */
@@ -62,7 +59,7 @@
 /*
  * Exported global variables
  */
-boolean_t	db_cmd_loop_done;
+int		db_cmd_loop_done;
 label_t		*db_recover;
 
 /*
@@ -344,8 +341,6 @@ db_mount_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	vfs_mount_print((struct mount *) addr, full, db_printf);
 }
 
-<<<<<<< HEAD
-=======
 void
 db_show_all_mounts(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
@@ -383,7 +378,6 @@ db_show_all_bufs(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	pool_walk(&bufpool, full, db_printf, vfs_buf_print);
 }
 
->>>>>>> origin/master
 /*ARGSUSED*/
 void
 db_object_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
@@ -507,8 +501,6 @@ struct db_command db_show_all_cmds[] = {
 	{ "procs",	db_show_all_procs,	0, NULL },
 	{ "callout",	db_show_callout,	0, NULL },
 	{ "pools",	db_show_all_pools,	0, NULL },
-<<<<<<< HEAD
-=======
 	{ "mounts",	db_show_all_mounts,	0, NULL },
 	{ "vnodes",	db_show_all_vnodes,	0, NULL },
 	{ "bufs",	db_show_all_bufs,	0, NULL },
@@ -516,7 +508,6 @@ struct db_command db_show_all_cmds[] = {
 	{ "nfsreqs",	db_show_all_nfsreqs,	0, NULL },
 	{ "nfsnodes",	db_show_all_nfsnodes,	0, NULL },
 #endif
->>>>>>> origin/master
 	{ NULL, 	NULL, 			0, NULL }
 };
 
@@ -682,6 +673,7 @@ db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	db_expr_t	retval;
 	db_expr_t	(*func)(db_expr_t, ...);
 	int		t;
+	char		tmpfmt[28];
 
 	if (!db_expression(&fn_addr)) {
 	    db_printf("Bad function\n");
@@ -723,7 +715,8 @@ db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 
 	retval = (*func)(args[0], args[1], args[2], args[3], args[4],
 			 args[5], args[6], args[7], args[8], args[9]);
-	db_printf("%#n\n", retval);
+	db_printf("%s\n", db_format(tmpfmt, sizeof tmpfmt, retval,
+	    DB_FORMAT_N, 1, 0));
 }
 
 void

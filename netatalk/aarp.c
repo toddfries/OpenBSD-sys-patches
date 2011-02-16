@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aarp.c,v 1.6 2006/03/04 22:40:16 brad Exp $	*/
-=======
 /*	$OpenBSD: aarp.c,v 1.10 2010/07/02 05:45:25 blambert Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

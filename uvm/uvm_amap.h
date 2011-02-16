@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_amap.h,v 1.13 2004/12/30 08:28:39 niklas Exp $	*/
-=======
 /*	$OpenBSD: uvm_amap.h,v 1.18 2009/03/25 20:00:18 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_amap.h,v 1.14 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -91,13 +87,7 @@ int		amap_flags(struct vm_amap *);
 void		amap_free(struct vm_amap *);
 					/* init amap module (at boot time) */
 void		amap_init(void);
-<<<<<<< HEAD
-					/* lock amap */
-void		amap_lock(struct vm_amap *);
-AMAP_INLINE				/* lookup an anon @ offset in amap */
-=======
 					/* lookup an anon @ offset in amap */
->>>>>>> origin/master
 struct vm_anon	*amap_lookup(struct vm_aref *, vaddr_t);
 					/* lookup multiple anons */
 void		amap_lookups(struct vm_aref *, vaddr_t, struct vm_anon **, int);
@@ -111,16 +101,11 @@ void		amap_share_protect(vm_map_entry_t, vm_prot_t);
 void		amap_splitref(struct vm_aref *, struct vm_aref *, vaddr_t);
 					/* remove an anon from an amap */
 void		amap_unadd(struct vm_aref *, vaddr_t);
-<<<<<<< HEAD
-					/* unlock amap */
-void		amap_unlock(struct vm_amap *);
-AMAP_INLINE				/* drop reference to an amap */
-=======
 					/* drop reference to an amap */
->>>>>>> origin/master
 void		amap_unref(struct vm_amap *, vaddr_t, vsize_t, int);
 					/* remove all anons from amap */
 void		amap_wipeout(struct vm_amap *);
+boolean_t	amap_swap_off(int, int);
 
 /*
  * amap flag values
@@ -128,6 +113,7 @@ void		amap_wipeout(struct vm_amap *);
 
 #define AMAP_SHARED	0x1	/* amap is shared */
 #define AMAP_REFALL	0x2	/* amap_ref: reference entire amap */
+#define AMAP_SWAPOFF	0x4	/* amap_swap_off() is in progress */
 
 #endif /* _KERNEL */
 
@@ -151,7 +137,6 @@ void		amap_wipeout(struct vm_amap *);
  */
 
 struct vm_amap {
-	simple_lock_data_t am_l; /* simple lock [locks all vm_amap fields] */
 	int am_ref;		/* reference count */
 	int am_flags;		/* flags */
 	int am_maxslot;		/* max # of slots allocated */
@@ -163,6 +148,7 @@ struct vm_amap {
 #ifdef UVM_AMAP_PPREF
 	int *am_ppref;		/* per page reference count (if !NULL) */
 #endif
+	LIST_ENTRY(vm_amap) am_list;
 };
 
 /*
@@ -250,9 +236,7 @@ struct vm_amap {
  */
 
 #define amap_flags(AMAP)	((AMAP)->am_flags)
-#define amap_lock(AMAP)		simple_lock(&(AMAP)->am_l)
 #define amap_refs(AMAP)		((AMAP)->am_ref)
-#define amap_unlock(AMAP)	simple_unlock(&(AMAP)->am_l)
 
 /*
  * if we enable PPREF, then we have a couple of extra functions that

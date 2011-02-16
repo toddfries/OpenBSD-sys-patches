@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pglist.c,v 1.19 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_pglist.c,v 1.38 2010/06/27 03:03:49 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_pglist.c,v 1.13 2001/02/18 21:19:08 chs Exp $	*/
 
 /*-
@@ -60,98 +56,6 @@ u_long	uvm_pglistalloc_npages;
 #define	STAT_DECR(v)
 #endif
 
-<<<<<<< HEAD
-int	uvm_pglistalloc_simple(psize_t, paddr_t, paddr_t, struct pglist *);
-
-int
-uvm_pglistalloc_simple(psize_t size, paddr_t low, paddr_t high,
-    struct pglist *rlist)
-{
-	psize_t try;
-	int psi;
-	struct vm_page *pg;
-	int s, todo, idx, pgflidx, error, free_list;
-	UVMHIST_FUNC("uvm_pglistalloc_simple"); UVMHIST_CALLED(pghist);
-#ifdef DEBUG
-	vm_page_t tp;
-#endif
-
-	/* Default to "lose". */
-	error = ENOMEM;
-
-	todo = size / PAGE_SIZE;
-
-	/*
-	 * Block all memory allocation and lock the free list.
-	 */
-	s = uvm_lock_fpageq();
-
-	/* Are there even any free pages? */
-	if (uvmexp.free <= (uvmexp.reserve_pagedaemon + uvmexp.reserve_kernel))
-		goto out;
-
-	for (try = low; try < high; try += PAGE_SIZE) {
-
-		/*
-		 * Make sure this is a managed physical page.
-		 */
-
-		if ((psi = vm_physseg_find(atop(try), &idx)) == -1)
-			continue; /* managed? */
-		pg = &vm_physmem[psi].pgs[idx];
-		if (VM_PAGE_IS_FREE(pg) == 0)
-			continue;
-
-		free_list = uvm_page_lookup_freelist(pg);
-		pgflidx = (pg->pg_flags & PG_ZERO) ? PGFL_ZEROS : PGFL_UNKNOWN;
-#ifdef DEBUG
-		for (tp = TAILQ_FIRST(&uvm.page_free[free_list].pgfl_queues[pgflidx]);
-		     tp != NULL;
-		     tp = TAILQ_NEXT(tp, pageq)) {
-			if (tp == pg)
-				break;
-		}
-		if (tp == NULL)
-			panic("uvm_pglistalloc_simple: page not on freelist");
-#endif
-		TAILQ_REMOVE(&uvm.page_free[free_list].pgfl_queues[pgflidx], pg, pageq);
-		uvmexp.free--;
-		if (pg->pg_flags & PG_ZERO)
-			uvmexp.zeropages--;
-		pg->pg_flags = PG_CLEAN;
-		pg->uobject = NULL;
-		pg->uanon = NULL;
-		pg->pg_version++;
-		TAILQ_INSERT_TAIL(rlist, pg, pageq);
-		STAT_INCR(uvm_pglistalloc_npages);
-		if (--todo == 0) {
-			error = 0;
-			goto out;
-		}
-	}
-
-out:
-	/*
-	 * check to see if we need to generate some free pages waking
-	 * the pagedaemon.
-	 */
-
-	if (!error && (uvmexp.free + uvmexp.paging < uvmexp.freemin ||
-	    (uvmexp.free + uvmexp.paging < uvmexp.freetarg &&
-	    uvmexp.inactive < uvmexp.inactarg))) {
-		wakeup(&uvm.pagedaemon);
-	}
-
-	uvm_unlock_fpageq(s);
-
-	if (error)
-		uvm_pglistfree(rlist);
-
-	return (error);
-}
-
-=======
->>>>>>> origin/master
 /*
  * uvm_pglistalloc: allocate a list of pages
  *
@@ -179,18 +83,6 @@ int
 uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
     paddr_t boundary, struct pglist *rlist, int nsegs, int flags)
 {
-<<<<<<< HEAD
-	paddr_t try, idxpa, lastidxpa;
-	int psi;
-	struct vm_page *pgs;
-	int s, tryidx, idx, pgflidx, end, error, free_list;
-	vm_page_t m;
-	u_long pagemask;
-#ifdef DEBUG
-	vm_page_t tp;
-#endif
-=======
->>>>>>> origin/master
 	UVMHIST_FUNC("uvm_pglistalloc"); UVMHIST_CALLED(pghist);
 
 	KASSERT((alignment & (alignment - 1)) == 0);
@@ -200,92 +92,9 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	if (size == 0)
 		return (EINVAL);
 
-<<<<<<< HEAD
-	size = round_page(size);
-	try = roundup(low, alignment);
-
-	if ((nsegs >= size / PAGE_SIZE) && (alignment == PAGE_SIZE) &&
-	    (boundary == 0))
-		return (uvm_pglistalloc_simple(size, try, high, rlist));
-
-	if (boundary != 0 && boundary < size)
-		return (EINVAL);
-
-	pagemask = ~(boundary - 1);
-
-	/* Default to "lose". */
-	error = ENOMEM;
-
-	/*
-	 * Block all memory allocation and lock the free list.
-	 */
-	s = uvm_lock_fpageq();
-
-	/* Are there even any free pages? */
-	if (uvmexp.free <= (uvmexp.reserve_pagedaemon + uvmexp.reserve_kernel))
-		goto out;
-
-	for (;; try += alignment) {
-		if (try + size > high) {
-
-			/*
-			 * We've run past the allowable range.
-			 */
-
-			goto out;
-		}
-
-		/*
-		 * Make sure this is a managed physical page.
-		 */
-
-		if ((psi = vm_physseg_find(atop(try), &idx)) == -1)
-			continue; /* managed? */
-		if (vm_physseg_find(atop(try + size), NULL) != psi)
-			continue; /* end must be in this segment */
-
-		tryidx = idx;
-		end = idx + (size / PAGE_SIZE);
-		pgs = vm_physmem[psi].pgs;
-
-		/*
-		 * Found a suitable starting page.  See of the range is free.
-		 */
-
-		for (; idx < end; idx++) {
-			if (VM_PAGE_IS_FREE(&pgs[idx]) == 0) {
-				break;
-			}
-			idxpa = VM_PAGE_TO_PHYS(&pgs[idx]);
-			if (idx > tryidx) {
-				lastidxpa = VM_PAGE_TO_PHYS(&pgs[idx - 1]);
-				if ((lastidxpa + PAGE_SIZE) != idxpa) {
-
-					/*
-					 * Region not contiguous.
-					 */
-
-					break;
-				}
-				if (boundary != 0 &&
-				    ((lastidxpa ^ idxpa) & pagemask) != 0) {
-
-					/*
-					 * Region crosses boundary.
-					 */
-
-					break;
-				}
-			}
-		}
-		if (idx == end) {
-			break;
-		}
-=======
 	if ((high & PAGE_MASK) != PAGE_MASK) {
 		printf("uvm_pglistalloc: Upper boundary 0x%lx "
 		    "not on pagemask.\n", (unsigned long)high);
->>>>>>> origin/master
 	}
 
 	/*
@@ -302,18 +111,6 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	 * The only requirement in that case is that low is also 0x0, or the
 	 * low<high assert will fail.
 	 */
-<<<<<<< HEAD
-	 
-	if (uvmexp.free + uvmexp.paging < uvmexp.freemin ||
-	    (uvmexp.free + uvmexp.paging < uvmexp.freetarg &&
-	     uvmexp.inactive < uvmexp.inactarg)) {
-		wakeup(&uvm.pagedaemon);
-	}
-
-	uvm_unlock_fpageq(s);
-
-	return (error);
-=======
 	high = atop(high + 1);
 	size = atop(round_page(size));
 	alignment = atop(alignment);
@@ -323,7 +120,6 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 
 	return uvm_pmr_getpages(size, low, high, alignment, boundary, nsegs,
 	    flags, rlist);
->>>>>>> origin/master
 }
 
 /*
@@ -335,43 +131,6 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 void
 uvm_pglistfree(struct pglist *list)
 {
-<<<<<<< HEAD
-	struct vm_page *m;
-	int s;
-	UVMHIST_FUNC("uvm_pglistfree"); UVMHIST_CALLED(pghist);
-
-	/*
-	 * Block all memory allocation and lock the free list.
-	 */
-	s = uvm_lock_fpageq();
-
-	while ((m = TAILQ_FIRST(list)) != NULL) {
-		KASSERT((m->pg_flags & (PQ_ACTIVE|PQ_INACTIVE)) == 0);
-		TAILQ_REMOVE(list, m, pageq);
-#ifdef DEBUG
-		if (m->uobject == (void *)0xdeadbeef &&
-		    m->uanon == (void *)0xdeadbeef) {
-			panic("uvm_pagefree: freeing free page %p", m);
-		}
-
-		m->uobject = (void *)0xdeadbeef;
-		m->offset = 0xdeadbeef;
-		m->uanon = (void *)0xdeadbeef;
-#endif
-		atomic_clearbits_int(&m->pg_flags, PQ_MASK);
-		atomic_setbits_int(&m->pg_flags, PQ_FREE);
-		TAILQ_INSERT_TAIL(&uvm.page_free[
-		    uvm_page_lookup_freelist(m)].pgfl_queues[PGFL_UNKNOWN],
-		    m, pageq);
-		uvmexp.free++;
-		if (uvmexp.zeropages < UVM_PAGEZERO_TARGET)
-			uvm.page_idle_zero = vm_page_zero_enable;
-		STAT_DECR(uvm_pglistalloc_npages);
-	}
-
-	uvm_unlock_fpageq(s);
-=======
 	UVMHIST_FUNC("uvm_pglistfree"); UVMHIST_CALLED(pghist);
 	uvm_pmr_freepageq(list);
->>>>>>> origin/master
 }

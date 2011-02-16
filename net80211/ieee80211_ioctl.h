@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ieee80211_ioctl.h,v 1.6 2006/06/23 21:34:15 reyk Exp $	*/
-=======
 /*	$OpenBSD: ieee80211_ioctl.h,v 1.17 2009/02/15 08:34:36 damien Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ieee80211_ioctl.h,v 1.7 2004/04/30 22:51:04 dyoung Exp $	*/
 
 /*-
@@ -20,10 +16,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -55,6 +47,7 @@ struct ieee80211_stats {
 	u_int32_t	is_rx_mcastecho;	/* rx discard 'cuz mcast echo */
 	u_int32_t	is_rx_notassoc;		/* rx discard 'cuz sta !assoc */
 	u_int32_t	is_rx_nowep;		/* rx w/ wep but wep !config */
+	u_int32_t	is_rx_unencrypted;	/* rx w/o wep but wep config */
 	u_int32_t	is_rx_wepfail;		/* rx wep processing failed */
 	u_int32_t	is_rx_decap;		/* rx decapsulation failed */
 	u_int32_t	is_rx_mgtdiscard;	/* rx discard mgt frames */
@@ -88,8 +81,6 @@ struct ieee80211_stats {
 	u_int32_t	is_scan_passive;	/* passive scans started */
 	u_int32_t	is_node_timeout;	/* nodes timed out inactivity */
 	u_int32_t	is_crypto_nomem;	/* no memory for crypto ctx */
-<<<<<<< HEAD
-=======
 	u_int32_t	is_rx_assoc_badrsnie;	/* rx assoc w/ bad RSN IE */
 	u_int32_t	is_rx_unauth;		/* rx port not valid */
 	u_int32_t	is_tx_noauth;		/* tx port not valid */
@@ -105,7 +96,6 @@ struct ieee80211_stats {
 	u_int32_t	is_cmac_replays;
 	u_int32_t	is_cmac_icv_errs;
 	u_int32_t	is_pbac_errs;
->>>>>>> origin/master
 };
 
 #define	SIOCG80211STATS		_IOWR('i', 242, struct ifreq)
@@ -223,8 +213,6 @@ struct ieee80211_txpower {
 #define IEEE80211_TXPOWER_MODE_FIXED	0	/* fixed tx power value */
 #define IEEE80211_TXPOWER_MODE_AUTO	1	/* auto level control */
 
-<<<<<<< HEAD
-=======
 struct ieee80211_wpapsk {
 	char		i_name[IFNAMSIZ];	/* if_name, e.g. "wi0" */
 	int		i_enabled;
@@ -285,7 +273,6 @@ struct ieee80211_keyrun {
 #define SIOCS80211KEYAVAIL	 _IOW('i', 251, struct ieee80211_keyavail)
 #define SIOCS80211KEYRUN	 _IOW('i', 252, struct ieee80211_keyrun)
 
->>>>>>> origin/master
 /* scan request (will block) */
 #define IEEE80211_SCAN_TIMEOUT	30	/* timeout in seconds */
 
@@ -324,6 +311,8 @@ struct ieee80211_nodereq {
 	u_int32_t	nr_inact;	/* inactivity mark count */
 	u_int8_t	nr_txrate;	/* index to nr_rates[] */
 	u_int16_t	nr_state;	/* node state in the cache */
+
+	/* XXX RSN */
 
 	/* Node flags */
 	u_int8_t	nr_flags;

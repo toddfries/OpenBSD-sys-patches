@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in_proto.c,v 1.44 2005/07/14 02:09:46 uwe Exp $	*/
-=======
 /*	$OpenBSD: in_proto.c,v 1.55 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
@@ -147,11 +143,6 @@
 #include <netinet/in_gif.h>
 #endif
 
-#ifdef IPXIP
-#include <netipx/ipx.h>
-#include <netipx/ipx_ip.h>
-#endif /* IPXIP */
-
 #ifdef INET6
 #include <netinet6/ip6_var.h>
 #endif /* INET6 */
@@ -201,7 +192,7 @@ struct protosw inetsw[] = {
 { SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp_input,	0,		tcp_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
-  tcp_init,	0,		tcp_slowtimo,	tcp_drain,	tcp_sysctl
+  tcp_init,	0,		tcp_slowtimo,	0,		tcp_sysctl
 },
 { SOCK_RAW,	&inetdomain,	IPPROTO_RAW,	PR_ATOMIC|PR_ADDR,
   rip_input,	rip_output,	0,		rip_ctloutput,
@@ -255,22 +246,15 @@ struct protosw inetsw[] = {
 { SOCK_RAW,	&inetdomain,	IPPROTO_IGMP,	PR_ATOMIC|PR_ADDR,
   igmp_input,	rip_output,	0,		rip_ctloutput,
   rip_usrreq,
-  igmp_init,	igmp_fasttimo,	igmp_slowtimo,	0,
+  igmp_init,	igmp_fasttimo,	igmp_slowtimo,	0,		igmp_sysctl
 },
 #ifdef PIM
 { SOCK_RAW,	&inetdomain,	IPPROTO_PIM,	PR_ATOMIC|PR_ADDR,
   pim_input,	rip_output,	0,		rip_ctloutput,
   rip_usrreq,
-  0,		0,		0,		0,
+  0,		0,		0,		0,		pim_sysctl
 },
 #endif /* PIM */
-#ifdef IPXIP
-{ SOCK_RAW,	&inetdomain,	IPPROTO_IDP,	PR_ATOMIC|PR_ADDR,
-  ipxip_input,	rip_output,	ipxip_ctlinput,	0,
-  rip_usrreq,
-  ipxipprotoinit,0,		0,		0,
-},
-#endif /* IPXIP */
 #ifdef IPSEC
 { SOCK_RAW,   &inetdomain,    IPPROTO_AH,     PR_ATOMIC|PR_ADDR,
   ah4_input,   rip_output,    ah4_ctlinput,   rip_ctloutput,
@@ -311,7 +295,7 @@ struct protosw inetsw[] = {
 { SOCK_RAW,	&inetdomain,	IPPROTO_PFSYNC,	PR_ATOMIC|PR_ADDR,
   pfsync_input,	rip_output,	0,		rip_ctloutput,
   rip_usrreq,
-  0,		0,		0,		0,
+  0,		0,		0,		0,		pfsync_sysctl
 },
 #endif /* NPFSYNC > 0 */
 #if NPF > 0

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm.h,v 1.18 2006/01/16 13:11:05 mickey Exp $	*/
-=======
 /*	$OpenBSD: uvm.h,v 1.41 2010/06/29 20:39:27 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -109,11 +105,7 @@ struct uvm {
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
 	/* Lock order: object lock,  pageqlock, then fpageqlock. */
 	simple_lock_data_t pageqlock;	/* lock for active/inactive page q */
-<<<<<<< HEAD
-	simple_lock_data_t fpageqlock;	/* lock for free page q */
-=======
 	struct mutex fpageqlock;	/* lock for free page q  + pdaemon */
->>>>>>> origin/master
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
 					   pages in the idle loop */
@@ -133,10 +125,6 @@ struct uvm {
 	int page_nhash;			/* number of buckets */
 	int page_hashmask;		/* hash mask */
 	struct mutex hashlock;		/* lock on page_hash array */
-
-	/* anon stuff */
-	struct vm_anon *afree;		/* anon free list */
-	simple_lock_data_t afreelock; 	/* lock on anon free list */
 
 	/* static kernel map entry pool */
 	vm_map_entry_t kentry_free;	/* free page pool */
@@ -191,8 +179,7 @@ extern UVMHIST_DECL(pghist);
 
 #define	UVM_UNLOCK_AND_WAIT(event, slock, intr, msg, timo)		\
 do {									\
-	(void) ltsleep(event, PVM | PNORELOCK | (intr ? PCATCH : 0),	\
-	    msg, timo, slock);						\
+	tsleep(event, PVM|PNORELOCK|(intr ? PCATCH : 0), msg, timo);	\
 } while (0)
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: msdosfs_denode.c,v 1.29 2007/03/21 17:29:32 thib Exp $	*/
-=======
 /*	$OpenBSD: msdosfs_denode.c,v 1.42 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -220,9 +216,7 @@ retry:
 		*depp = 0;
 		return (error);
 	}
-	MALLOC(ldep, struct denode *, sizeof(struct denode), M_MSDOSFSNODE,
-	    M_WAITOK);
-	bzero((caddr_t)ldep, sizeof *ldep);
+	ldep = malloc(sizeof(*ldep), M_MSDOSFSNODE, M_WAITOK | M_ZERO);
 	lockinit(&ldep->de_lock, PINOD, "denode", 0, 0);
 	nvp->v_data = ldep;
 	ldep->de_vnode = nvp;
@@ -318,8 +312,10 @@ retry:
 			if (error == E2BIG) {
 				ldep->de_FileSize = de_cn2off(pmp, size);
 				error = 0;
-			} else
+			} else {
 				printf("deget(): pcbmap returned %d\n", error);
+				return (error);
+			}
 		}
 	} else
 		nvp->v_type = VREG;
@@ -370,13 +366,8 @@ detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
 	int allerror;
 	int vflags;
 	uint32_t eofentry;
-<<<<<<< HEAD
-	uint32_t chaintofree;
-	daddr_t bn;
-=======
 	uint32_t chaintofree = 0;
 	daddr64_t bn;
->>>>>>> origin/master
 	int boff;
 	int isadir = dep->de_Attributes & ATTR_DIRECTORY;
 	struct buf *bp;
@@ -575,9 +566,7 @@ reinsert(struct denode *dep)
 int
 msdosfs_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
 #ifdef DIAGNOSTIC
@@ -607,7 +596,7 @@ msdosfs_reclaim(void *v)
 #if 0 /* XXX */
 	dep->de_flag = 0;
 #endif
-	FREE(dep, M_MSDOSFSNODE);
+	free(dep, M_MSDOSFSNODE);
 	vp->v_data = NULL;
 	return (0);
 }
@@ -615,10 +604,7 @@ msdosfs_reclaim(void *v)
 int
 msdosfs_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
 	struct proc *p = ap->a_p;

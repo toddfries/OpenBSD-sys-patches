@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ieee80211_ioctl.c,v 1.15 2006/06/27 20:55:51 reyk Exp $	*/
-=======
 /*	$OpenBSD: ieee80211_ioctl.c,v 1.34 2010/09/29 20:00:51 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ieee80211_ioctl.c,v 1.15 2004/05/06 02:58:16 dyoung Exp $	*/
 
 /*-
@@ -20,10 +16,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -63,13 +55,13 @@
 #include <net80211/ieee80211_crypto.h>
 #include <net80211/ieee80211_ioctl.h>
 
-void	 ieee80211_node2req(struct ieee80211com *, struct ieee80211_node *,
-	    struct ieee80211_nodereq *);
-void	 ieee80211_req2node(struct ieee80211com *, struct ieee80211_nodereq *,
-	    struct ieee80211_node *);
+void	 ieee80211_node2req(struct ieee80211com *,
+	    const struct ieee80211_node *, struct ieee80211_nodereq *);
+void	 ieee80211_req2node(struct ieee80211com *,
+	    const struct ieee80211_nodereq *, struct ieee80211_node *);
 
 void
-ieee80211_node2req(struct ieee80211com *ic, struct ieee80211_node *ni,
+ieee80211_node2req(struct ieee80211com *ic, const struct ieee80211_node *ni,
     struct ieee80211_nodereq *nr)
 {
 	/* Node address and name information */
@@ -99,6 +91,7 @@ ieee80211_node2req(struct ieee80211com *ic, struct ieee80211_node *ni,
 	nr->nr_inact = ni->ni_inact;
 	nr->nr_txrate = ni->ni_txrate;
 	nr->nr_state = ni->ni_state;
+	/* XXX RSN */
 
 	/* Node flags */
 	nr->nr_flags = 0;
@@ -109,7 +102,7 @@ ieee80211_node2req(struct ieee80211com *ic, struct ieee80211_node *ni,
 }
 
 void
-ieee80211_req2node(struct ieee80211com *ic, struct ieee80211_nodereq *nr,
+ieee80211_req2node(struct ieee80211com *ic, const struct ieee80211_nodereq *nr,
     struct ieee80211_node *ni)
 {
 	/* Node address and name information */
@@ -136,8 +129,6 @@ ieee80211_req2node(struct ieee80211com *ic, struct ieee80211_nodereq *nr,
 	ni->ni_state = nr->nr_state;
 }
 
-<<<<<<< HEAD
-=======
 static int
 ieee80211_ioctl_setnwkeys(struct ieee80211com *ic,
     const struct ieee80211_nwkey *nwkey)
@@ -331,7 +322,6 @@ ieee80211_ioctl_getwpaparms(struct ieee80211com *ic,
 	return 0;
 }
 
->>>>>>> origin/master
 int
 ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
@@ -339,20 +329,15 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr = (struct ifreq *)data;
 	int i, error = 0;
 	struct ieee80211_nwid nwid;
-<<<<<<< HEAD
-	struct ieee80211_nwkey *nwkey;
-=======
 	struct ieee80211_wpapsk *psk;
 	struct ieee80211_wmmparams *wmm;
 	struct ieee80211_keyavail *ka;
 	struct ieee80211_keyrun *kr;
->>>>>>> origin/master
 	struct ieee80211_power *power;
 	struct ieee80211_bssid *bssid;
 	struct ieee80211chanreq *chanreq;
 	struct ieee80211_channel *chan;
 	struct ieee80211_txpower *txpower;
-	struct ieee80211_wepkey keys[IEEE80211_WEP_NKID];
 	static const u_int8_t empty_macaddr[IEEE80211_ADDR_LEN] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
@@ -398,75 +383,63 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCS80211NWKEY:
 		if ((error = suser(curproc, 0)) != 0)
 			break;
-		nwkey = (struct ieee80211_nwkey *)data;
-		if ((ic->ic_caps & IEEE80211_C_WEP) == 0 &&
-		    nwkey->i_wepon != IEEE80211_NWKEY_OPEN) {
-			error = EINVAL;
+		error = ieee80211_ioctl_setnwkeys(ic, (void *)data);
+		break;
+	case SIOCG80211NWKEY:
+		error = ieee80211_ioctl_getnwkeys(ic, (void *)data);
+		break;
+	case SIOCS80211WMMPARMS:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
+		if (!(ic->ic_flags & IEEE80211_C_QOS)) {
+			error = ENODEV;
 			break;
 		}
-		/* check and copy keys */
-		memset(keys, 0, sizeof(keys));
-		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-			keys[i].wk_len = nwkey->i_key[i].i_keylen;
-			/*
-			 * Limit the maximal allowed key size to 
-			 * IEEE80211_KEYBUF_SIZE bytes.
-			 */
-			if (keys[i].wk_len > sizeof(keys[i].wk_key)) {
-				error = EINVAL;
-				break;
-			}
-			if (keys[i].wk_len <= 0)
-				continue;
-			if ((error = copyin(nwkey->i_key[i].i_keydat,
-			    keys[i].wk_key, keys[i].wk_len)) != 0)
-				break;
-		}
-		if (error)
-			break;
-		i = nwkey->i_defkid - 1;
-		if (i < 0 || i >= IEEE80211_WEP_NKID ||
-		    keys[i].wk_len == 0 ||
-		    (keys[i].wk_len == -1 && ic->ic_nw_keys[i].wk_len == 0)) {
-			if (nwkey->i_wepon != IEEE80211_NWKEY_OPEN) {
-				error = EINVAL;
-				break;
-			}
-		} else
-			ic->ic_wep_txkey = i;
-		/* save the key */
-		if (nwkey->i_wepon == IEEE80211_NWKEY_OPEN)
-			ic->ic_flags &= ~IEEE80211_F_WEPON;
+		wmm = (struct ieee80211_wmmparams *)data;
+		if (wmm->i_enabled)
+			ic->ic_flags |= IEEE80211_F_QOS;
 		else
-			ic->ic_flags |= IEEE80211_F_WEPON;
-		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-			if (keys[i].wk_len < 0)
-				continue;
-			ic->ic_nw_keys[i].wk_len = keys[i].wk_len;
-			memcpy(ic->ic_nw_keys[i].wk_key, keys[i].wk_key,
-			    sizeof(keys[i].wk_key));
+			ic->ic_flags &= ~IEEE80211_F_QOS;
+		error = ENETRESET;
+		break;
+	case SIOCG80211WMMPARMS:
+		wmm = (struct ieee80211_wmmparams *)data;
+		wmm->i_enabled = (ic->ic_flags & IEEE80211_F_QOS) ? 1 : 0;
+		break;
+	case SIOCS80211WPAPARMS:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
+		error = ieee80211_ioctl_setwpaparms(ic, (void *)data);
+		break;
+	case SIOCG80211WPAPARMS:
+		error = ieee80211_ioctl_getwpaparms(ic, (void *)data);
+		break;
+	case SIOCS80211WPAPSK:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
+		psk = (struct ieee80211_wpapsk *)data;
+		if (psk->i_enabled) {
+			ic->ic_flags |= IEEE80211_F_PSK;
+			memcpy(ic->ic_psk, psk->i_psk, sizeof(ic->ic_psk));
+		} else {
+			ic->ic_flags &= ~IEEE80211_F_PSK;
+			memset(ic->ic_psk, 0, sizeof(ic->ic_psk));
 		}
 		error = ENETRESET;
 		break;
-	case SIOCG80211NWKEY:
-		nwkey = (struct ieee80211_nwkey *)data;
-		if (ic->ic_flags & IEEE80211_F_WEPON)
-			nwkey->i_wepon = IEEE80211_NWKEY_WEP;
-		else
-			nwkey->i_wepon = IEEE80211_NWKEY_OPEN;
-		nwkey->i_defkid = ic->ic_wep_txkey + 1;
-		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-			if (nwkey->i_key[i].i_keydat == NULL)
-				continue;
+	case SIOCG80211WPAPSK:
+		psk = (struct ieee80211_wpapsk *)data;
+		if (ic->ic_flags & IEEE80211_F_PSK) {
+			psk->i_enabled = 1;
 			/* do not show any keys to non-root user */
-			if ((error = suser(curproc, 0)) != 0)
-				break;
-			nwkey->i_key[i].i_keylen = ic->ic_nw_keys[i].wk_len;
-			if ((error = copyout(ic->ic_nw_keys[i].wk_key,
-			    nwkey->i_key[i].i_keydat,
-			    ic->ic_nw_keys[i].wk_len)) != 0)
-				break;
-		}
+			if (suser(curproc, 0) != 0) {
+				psk->i_enabled = 2;
+				memset(psk->i_psk, 0, sizeof(psk->i_psk));
+				break;	/* return ok but w/o key */
+			}
+			memcpy(psk->i_psk, ic->ic_psk, sizeof(psk->i_psk));
+		} else
+			psk->i_enabled = 0;
 		break;
 	case SIOCS80211KEYAVAIL:
 		if ((error = suser(curproc, 0)) != 0)
@@ -773,12 +746,7 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-<<<<<<< HEAD
-		error = EINVAL;
-		break;
-=======
 		error = ether_ioctl(ifp, &ic->ic_ac, cmd, data);
->>>>>>> origin/master
 	}
 
 	return error;

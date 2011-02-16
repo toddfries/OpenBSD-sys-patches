@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_page.h,v 1.23 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_page.h,v 1.44 2010/06/29 21:25:16 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -173,7 +169,12 @@ struct vm_page {
 					   uvm_object */
 #define PQ_SWAPBACKED	(PQ_ANON|PQ_AOBJ)
 #define	PQ_ENCRYPT	0x00400000	/* page needs {en,de}cryption */
-#define PQ_MASK		0xffff0000
+#define PQ_MASK		0x00ff0000
+
+#define PG_PMAP0	0x01000000	/* Used by some pmaps. */
+#define PG_PMAP1	0x02000000	/* Used by some pmaps. */
+#define PG_PMAP2	0x04000000	/* Used by some pmaps. */
+#define PG_PMAP3	0x08000000	/* Used by some pmaps. */
 
 /*
  * physical memory layout structure
@@ -234,46 +235,6 @@ void		uvm_page_own(struct vm_page *, char *);
 #if !defined(PMAP_STEAL_MEMORY)
 boolean_t	uvm_page_physget(paddr_t *);
 #endif
-<<<<<<< HEAD
-void uvm_page_rehash(void);
-void uvm_pageidlezero(void);
-
-PAGE_INLINE int uvm_lock_fpageq(void);
-PAGE_INLINE void uvm_unlock_fpageq(int);
-
-PAGE_INLINE void uvm_pageactivate(struct vm_page *);
-vaddr_t uvm_pageboot_alloc(vsize_t);
-PAGE_INLINE void uvm_pagecopy(struct vm_page *, struct vm_page *);
-PAGE_INLINE void uvm_pagedeactivate(struct vm_page *);
-void uvm_pagefree(struct vm_page *);
-void uvm_page_unbusy(struct vm_page **, int);
-PAGE_INLINE struct vm_page *uvm_pagelookup(struct uvm_object *, voff_t);
-PAGE_INLINE void uvm_pageunwire(struct vm_page *);
-PAGE_INLINE void uvm_pagewait(struct vm_page *, int);
-PAGE_INLINE void uvm_pagewake(struct vm_page *);
-PAGE_INLINE void uvm_pagewire(struct vm_page *);
-PAGE_INLINE void uvm_pagezero(struct vm_page *);
-
-PAGE_INLINE int uvm_page_lookup_freelist(struct vm_page *);
-
-static struct vm_page *PHYS_TO_VM_PAGE(paddr_t);
-static int vm_physseg_find(paddr_t, int *);
-
-/*
- * macros
- */
-
-#define uvm_lock_pageq()	simple_lock(&uvm.pageqlock)
-#define uvm_unlock_pageq()	simple_unlock(&uvm.pageqlock)
-
-#define uvm_pagehash(obj,off) \
-	(((unsigned long)obj+(unsigned long)atop(off)) & uvm.page_hashmask)
-
-#define	UVM_PAGEZERO_TARGET	(uvmexp.free)
-
-#define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
-
-=======
 void		uvm_pageidlezero(void);
 
 void		uvm_pageactivate(struct vm_page *);
@@ -294,7 +255,6 @@ void		uvm_pagealloc_pg(struct vm_page *, struct uvm_object *,
 int		uvm_page_lookup_freelist(struct vm_page *);
 
 #if  VM_PHYSSEG_MAX == 1
->>>>>>> origin/master
 /*
  * Inline functions for archs like the vax where function calls are expensive.
  */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_ether.h,v 1.12 2002/03/14 01:27:11 millert Exp $ */
-=======
 /*	$OpenBSD: ip_ether.h,v 1.15 2010/05/11 09:36:07 claudio Exp $ */
->>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@adk.gr)
  *
@@ -58,11 +54,13 @@ struct etherip_header {
  * Names for Ether-IP sysctl objects
  */
 #define	ETHERIPCTL_ALLOW	1	/* accept incoming EtherIP packets */
-#define ETHERIPCTL_MAXID	2
+#define	ETHERIPCTL_STATS	2	/* etherip stats */
+#define	ETHERIPCTL_MAXID	3
 
 #define ETHERIPCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "allow", CTLTYPE_INT }, \
+	{ "stats", CTLTYPE_STRUCT }, \
 }
 
 #ifdef _KERNEL

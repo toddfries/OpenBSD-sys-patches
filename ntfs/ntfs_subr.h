@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ntfs_subr.h,v 1.2 2003/05/20 03:23:12 mickey Exp $	*/
-=======
 /*	$OpenBSD: ntfs_subr.h,v 1.6 2010/09/04 21:35:58 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ntfs_subr.h,v 1.1 2002/12/23 17:38:33 jdolecek Exp $	*/
 
 /*-

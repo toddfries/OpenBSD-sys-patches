@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tcp_var.h,v 1.80 2005/12/11 17:21:53 deraadt Exp $	*/
-=======
 /*	$OpenBSD: tcp_var.h,v 1.98 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -96,7 +92,6 @@ struct tcpcb {
 #define TF_SEND_CWR	0x00020000	/* send CWR in next seg */
 #define TF_DISABLE_ECN	0x00040000	/* disable ECN for this connection */
 #endif
-#define TF_REASSLOCK	0x00080000	/* reassembling or draining */
 #define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
 #define TF_DEAD		0x00200000	/* dead and to-be-released */
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
@@ -314,35 +309,6 @@ struct syn_cache_head {
 	u_short sch_length;			/* # entries in bucket */
 };
 
-static __inline int tcp_reass_lock_try(struct tcpcb *);
-static __inline void tcp_reass_unlock(struct tcpcb *);
-#define tcp_reass_lock(tp) tcp_reass_lock_try(tp)
-
-static __inline int
-tcp_reass_lock_try(struct tcpcb *tp)
-{
-	int s;
-
-	/* Use splvm() due to mbuf allocation. */
-	s = splvm();
-	if (tp->t_flags & TF_REASSLOCK) {
-		splx(s);
-		return (0);
-	}
-	tp->t_flags |= TF_REASSLOCK;
-	splx(s);
-	return (1);
-}
-
-static __inline void
-tcp_reass_unlock(struct tcpcb *tp)
-{
-	int s;
-
-	s = splvm();
-	tp->t_flags &= ~TF_REASSLOCK;
-	splx(s);
-}
 #endif /* _KERNEL */
 
 /*
@@ -506,7 +472,8 @@ struct	tcpstat {
 #define	TCPCTL_REASS_LIMIT     18 /* max entries for tcp reass queues */
 #define	TCPCTL_DROP	       19 /* drop tcp connection */
 #define	TCPCTL_SACKHOLE_LIMIT  20 /* max entries for tcp sack queues */
-#define	TCPCTL_MAXID	       21
+#define	TCPCTL_STATS	       21 /* TCP statistics */
+#define	TCPCTL_MAXID	       22
 
 #define	TCPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -530,6 +497,7 @@ struct	tcpstat {
 	{ "reasslimit", 	CTLTYPE_INT }, \
 	{ "drop", 	CTLTYPE_STRUCT }, \
 	{ "sackholelimit", 	CTLTYPE_INT }, \
+	{ "stats",	CTLTYPE_STRUCT } \
 }
 
 #define	TCPCTL_VARS { \
@@ -551,6 +519,7 @@ struct	tcpstat {
 	&tcp_syn_cache_limit, \
 	&tcp_syn_bucket_limit, \
 	&tcp_do_rfc3390, \
+	NULL, \
 	NULL, \
 	NULL, \
 	NULL \
@@ -603,12 +572,7 @@ struct tcpcb *
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
-<<<<<<< HEAD
-		struct mbuf *, int, struct tcp_opt_info *);
-void	 tcp_drain(void);
-=======
 		struct mbuf *, int, struct tcp_opt_info *, u_int);
->>>>>>> origin/master
 void	 tcp_init(void);
 #ifdef INET6
 int	 tcp6_input(struct mbuf **, int *, int);
@@ -630,13 +594,8 @@ int	 tcp_output(struct tcpcb *);
 void	 tcp_pulloutofband(struct socket *, u_int, struct mbuf *, int);
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, struct mbuf *, int *);
 void	 tcp_rscale(struct tcpcb *, u_long);
-<<<<<<< HEAD
-void	 tcp_respond(struct tcpcb *, caddr_t, struct mbuf *, tcp_seq,
-		tcp_seq, int);
-=======
 void	 tcp_respond(struct tcpcb *, caddr_t, struct tcphdr *, tcp_seq,
 		tcp_seq, int, u_int);
->>>>>>> origin/master
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_update_sndspace(struct tcpcb *);
 void	 tcp_update_rcvspace(struct tcpcb *);
@@ -647,12 +606,8 @@ void	 tcp_trace(short, short, struct tcpcb *, caddr_t, int, int);
 struct tcpcb *
 	 tcp_usrclosed(struct tcpcb *);
 int	 tcp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-#if defined(INET6) && !defined(TCP6)
-int	 tcp6_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
-#endif
 int	 tcp_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *);
+	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
 void	 tcp_xmit_timer(struct tcpcb *, int);
 void	 tcpdropoldhalfopen(struct tcpcb *, u_int16_t);
 #ifdef TCP_SACK
@@ -677,14 +632,11 @@ int	tcp_signature_apply(caddr_t, caddr_t, unsigned int);
 int	tcp_signature(struct tdb *, int, struct mbuf *, struct tcphdr *,
 	    int, int, char *);
 #endif /* TCP_SIGNATURE */
-void	tcp_rndiss_init(void);
-tcp_seq	tcp_rndiss_next(void);
-u_int16_t
-	tcp_rndiss_encrypt(u_int16_t);
+void     tcp_set_iss_tsm(struct tcpcb *);
 
 int	 syn_cache_add(struct sockaddr *, struct sockaddr *,
 		struct tcphdr *, unsigned int, struct socket *,
-		struct mbuf *, u_char *, int, struct tcp_opt_info *);
+		struct mbuf *, u_char *, int, struct tcp_opt_info *, tcp_seq *);
 void	 syn_cache_unreach(struct sockaddr *, struct sockaddr *,
 	   struct tcphdr *, u_int);
 struct socket *syn_cache_get(struct sockaddr *, struct sockaddr *,

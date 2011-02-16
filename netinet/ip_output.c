@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_output.c,v 1.183 2006/12/01 12:33:28 henning Exp $	*/
-=======
 /*	$OpenBSD: ip_output.c,v 1.214 2010/09/30 09:18:18 phessler Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -88,8 +84,8 @@ extern int ipforwarding;
 extern int ipmforwarding;
 #endif
 
-static struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
-static void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
+struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
+void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
 
 /*
  * IP output.  The packet in mbuf chain m contains a skeletal IP
@@ -258,6 +254,9 @@ reroute:
 #endif
 
 #ifdef IPSEC
+	if (!ipsec_in_use && inp == NULL)
+		goto done_spd;
+
 	/*
 	 * splnet is chosen over spltdb because we are not allowed to
 	 * lower the level, and udp_output calls us in splnet().
@@ -687,8 +686,9 @@ sendit:
 	 * If deferred crypto processing is needed, check that the
 	 * interface supports it.
 	 */
-	if ((mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL))
-	    != NULL && (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
+	if (ipsec_in_use && (mtag = m_tag_find(m,
+	    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL)) != NULL &&
+	    (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
 		/* Notify IPsec to do its own crypto. */
 		ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 		m_freem(m);
@@ -739,7 +739,7 @@ sendit:
 #endif
 
 #ifdef IPSEC
-	if ((flags & IP_FORWARDING) && (ipforwarding == 2) &&
+	if (ipsec_in_use && (flags & IP_FORWARDING) && (ipforwarding == 2) &&
 	    (m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL) == NULL)) {
 		error = EHOSTUNREACH;
 		m_freem(m);
@@ -954,7 +954,7 @@ sendorfree:
  * Adjust IP destination as required for IP source routing,
  * as indicated by a non-zero in_addr at the start of the options.
  */
-static struct mbuf *
+struct mbuf *
 ip_insertoptions(m, opt, phlen)
 	struct mbuf *m;
 	struct mbuf *opt;
@@ -1086,6 +1086,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVDSTADDR:
 		case IP_RECVIF:
 		case IP_RECVTTL:
+		case IP_RECVDSTPORT:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1131,6 +1132,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVTTL:
 					OPTSET(INP_RECVTTL);
+					break;
+				case IP_RECVDSTPORT:
+					OPTSET(INP_RECVDSTPORT);
 					break;
 				}
 			}
@@ -1327,8 +1331,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				}
 			}
 
-			MALLOC(ipr, struct ipsec_ref *,
-			       sizeof(struct ipsec_ref) + m->m_len - 2,
+			ipr = malloc(sizeof(struct ipsec_ref) + m->m_len - 2,
 			       M_CREDENTIALS, M_NOWAIT);
 			if (ipr == NULL) {
 				error = ENOBUFS;
@@ -1347,7 +1350,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
 				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
 				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_srcid != NULL)
@@ -1360,7 +1363,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
 				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
 				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_dstid != NULL)
@@ -1371,7 +1374,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_CRED:
 				if (ipr->ref_type < IPSP_CRED_KEYNOTE ||
 				    ipr->ref_type > IPSP_CRED_X509) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_local_cred != NULL)
@@ -1382,7 +1385,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_AUTH:
 				if (ipr->ref_type < IPSP_AUTH_PASSPHRASE ||
 				    ipr->ref_type > IPSP_AUTH_RSA) {
-					FREE(ipr, M_CREDENTIALS);
+					free(ipr, M_CREDENTIALS);
 					error = EINVAL;
 				} else {
 					if (inp->inp_ipo->ipo_local_auth != NULL)
@@ -1463,6 +1466,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVDSTADDR:
 		case IP_RECVIF:
 		case IP_RECVTTL:
+		case IP_RECVDSTPORT:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1497,6 +1501,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVTTL:
 				optval = OPTBIT(INP_RECVTTL);
+				break;
+			case IP_RECVDSTPORT:
+				optval = OPTBIT(INP_RECVDSTPORT);
 				break;
 			}
 			*mtod(m, int *) = optval;
@@ -1764,6 +1771,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 	struct ip_mreq *mreq;
 	struct ifnet *ifp;
 	struct ip_moptions *imo = *imop;
+	struct in_multi **immp;
 	struct route ro;
 	struct sockaddr_in *dst;
 
@@ -1773,13 +1781,17 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * allocate one and initialize to default values.
 		 */
 		imo = (struct ip_moptions *)malloc(sizeof(*imo), M_IPMOPTS,
-		    M_WAITOK);
-
+		    M_WAITOK|M_ZERO);
+		immp = (struct in_multi **)malloc(
+		    (sizeof(*immp) * IP_MIN_MEMBERSHIPS), M_IPMOPTS,
+		    M_WAITOK|M_ZERO);
 		*imop = imo;
 		imo->imo_multicast_ifp = NULL;
 		imo->imo_multicast_ttl = IP_DEFAULT_MULTICAST_TTL;
 		imo->imo_multicast_loop = IP_DEFAULT_MULTICAST_LOOP;
 		imo->imo_num_memberships = 0;
+		imo->imo_max_memberships = IP_MIN_MEMBERSHIPS;
+		imo->imo_membership = immp;
 	}
 
 	switch (optname) {
@@ -1889,7 +1901,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * membership slots are full.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ifp == ifp &&
+			if (imo->imo_membership[i]->inm_ia->ia_ifp == ifp &&
 			    imo->imo_membership[i]->inm_addr.s_addr
 						== mreq->imr_multiaddr.s_addr)
 				break;
@@ -1898,9 +1910,34 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 			error = EADDRINUSE;
 			break;
 		}
-		if (i == IP_MAX_MEMBERSHIPS) {
-			error = ETOOMANYREFS;
-			break;
+		if (imo->imo_num_memberships == imo->imo_max_memberships) {
+			struct in_multi **nmships, **omships;
+			size_t newmax;
+			/*
+			 * Resize the vector to next power-of-two minus 1. If the
+			 * size would exceed the maximum then we know we've really
+			 * run out of entries. Otherwise, we reallocate the vector.
+			 */
+			nmships = NULL;
+			omships = imo->imo_membership;
+			newmax = ((imo->imo_max_memberships + 1) * 2) - 1;
+			if (newmax <= IP_MAX_MEMBERSHIPS) {
+				nmships = (struct in_multi **)malloc(
+				    sizeof(*nmships) * newmax, M_IPMOPTS,
+				    M_NOWAIT|M_ZERO);
+				if (nmships != NULL) {
+					bcopy(omships, nmships,
+					    sizeof(*omships) *
+					    imo->imo_max_memberships);
+					free(omships, M_IPMOPTS);
+					imo->imo_membership = nmships;
+					imo->imo_max_memberships = newmax;
+				}
+			}
+			if (nmships == NULL) {
+				error = ETOOMANYREFS;
+				break;
+			}
 		}
 		/*
 		 * Everything looks good; add a new record to the multicast
@@ -1946,7 +1983,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
 			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ifp == ifp) &&
+			     imo->imo_membership[i]->inm_ia->ia_ifp == ifp) &&
 			     imo->imo_membership[i]->inm_addr.s_addr ==
 			     mreq->imr_multiaddr.s_addr)
 				break;
@@ -1974,12 +2011,13 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 	}
 
 	/*
-	 * If all options have default values, no need to keep the mbuf.
+	 * If all options have default values, no need to keep the data.
 	 */
 	if (imo->imo_multicast_ifp == NULL &&
 	    imo->imo_multicast_ttl == IP_DEFAULT_MULTICAST_TTL &&
 	    imo->imo_multicast_loop == IP_DEFAULT_MULTICAST_LOOP &&
 	    imo->imo_num_memberships == 0) {
+		free(imo->imo_membership , M_IPMOPTS);
 		free(*imop, M_IPMOPTS);
 		*imop = NULL;
 	}
@@ -2048,6 +2086,7 @@ ip_freemoptions(imo)
 	if (imo != NULL) {
 		for (i = 0; i < imo->imo_num_memberships; ++i)
 			in_delmulti(imo->imo_membership[i]);
+		free(imo->imo_membership, M_IPMOPTS);
 		free(imo, M_IPMOPTS);
 	}
 }
@@ -2058,7 +2097,7 @@ ip_freemoptions(imo)
  * calls the output routine of the loopback "driver", but with an interface
  * pointer that might NOT be &loif -- easier than replicating that code here.
  */
-static void
+void
 ip_mloopback(ifp, m, dst)
 	struct ifnet *ifp;
 	struct mbuf *m;

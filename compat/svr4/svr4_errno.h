@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_errno.h,v 1.2 1996/08/02 20:35:36 niklas Exp $	*/
+/*	$OpenBSD: svr4_errno.h,v 1.3 2000/08/23 16:36:06 brad Exp $	*/
 /*	$NetBSD: svr4_errno.h,v 1.5 1998/10/24 19:35:36 mrg Exp $	*/
 
 /*

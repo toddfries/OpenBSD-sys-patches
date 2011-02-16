@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rmd160.c,v 1.3 2001/09/26 21:40:13 markus Exp $	*/
-=======
 /*	$OpenBSD: rmd160.c,v 1.5 2011/01/11 15:42:05 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
  *

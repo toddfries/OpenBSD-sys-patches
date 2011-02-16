@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pf_table.c,v 1.68 2006/05/02 10:08:45 dhartmei Exp $	*/
-=======
 /*	$OpenBSD: pf_table.c,v 1.88 2010/11/20 23:58:13 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Cedric Berger
@@ -39,11 +35,8 @@
 #include <sys/socket.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-<<<<<<< HEAD
-=======
 #include <sys/pool.h>
 #include <sys/syslog.h>
->>>>>>> origin/master
 
 #include <net/if.h>
 #include <net/route.h>
@@ -289,11 +282,7 @@ pfr_add_addrs(struct pfr_table *tbl, struct pfr_addr *addr, int size,
 				ad.pfra_fback = PFR_FB_NONE;
 		}
 		if (p == NULL && q == NULL) {
-<<<<<<< HEAD
-			p = pfr_create_kentry(&ad, 0);
-=======
 			p = pfr_create_kentry(&ad);
->>>>>>> origin/master
 			if (p == NULL)
 				senderr(ENOMEM);
 			if (pfr_route_kentry(tmpkt, p)) {
@@ -469,11 +458,7 @@ pfr_set_addrs(struct pfr_table *tbl, struct pfr_addr *addr, int size,
 				ad.pfra_fback = PFR_FB_DUPLICATE;
 				goto _skip;
 			}
-<<<<<<< HEAD
-			p = pfr_create_kentry(&ad, 0);
-=======
 			p = pfr_create_kentry(&ad);
->>>>>>> origin/master
 			if (p == NULL)
 				senderr(ENOMEM);
 			if (pfr_route_kentry(tmpkt, p)) {
@@ -1012,9 +997,9 @@ pfr_route_kentry(struct pfr_ktable *kt, struct pfr_kentry *ke)
 	s = splsoftnet();
 	if (KENTRY_NETWORK(ke)) {
 		pfr_prepare_network(&mask, ke->pfrke_af, ke->pfrke_net);
-		rn = rn_addroute(&ke->pfrke_sa, &mask, head, ke->pfrke_node);
+		rn = rn_addroute(&ke->pfrke_sa, &mask, head, ke->pfrke_node, 0);
 	} else
-		rn = rn_addroute(&ke->pfrke_sa, NULL, head, ke->pfrke_node);
+		rn = rn_addroute(&ke->pfrke_sa, NULL, head, ke->pfrke_node, 0);
 	splx(s);
 
 	return (rn == NULL ? -1 : 0);
@@ -2149,10 +2134,6 @@ pfr_pool_get(struct pfr_ktable *kt, int *pidx, struct pf_addr *counter,
 
 _next_block:
 	ke = pfr_kentry_byidx(kt, idx, af);
-<<<<<<< HEAD
-	if (ke == NULL)
-		return (1);
-=======
 	if (ke == NULL) {
 		/* we don't have this idx, try looping */
 		idx = 0;
@@ -2162,7 +2143,6 @@ _next_block:
 			return (1);
 		}
 	}
->>>>>>> origin/master
 	pfr_prepare_network(&pfr_mask, af, ke->pfrke_net);
 	*raddr = SUNION2PF(&ke->pfrke_sa, af);
 	*rmask = SUNION2PF(&pfr_mask, af);
@@ -2185,12 +2165,9 @@ _next_block:
 		/* this is a single IP address - no possible nested block */
 		PF_ACPY(counter, addr, af);
 		*pidx = idx;
-<<<<<<< HEAD
-=======
 		kt->pfrkt_match++;
 		if (ke->pfrke_type == PFRKE_ROUTE)
 			*kif = ((struct pfr_kentry_route *)ke)->kif;
->>>>>>> origin/master
 		return (0);
 	}
 	for (;;) {
@@ -2206,12 +2183,9 @@ _next_block:
 			/* lookup return the same block - perfect */
 			PF_ACPY(counter, addr, af);
 			*pidx = idx;
-<<<<<<< HEAD
-=======
 			kt->pfrkt_match++;
 			if (ke->pfrke_type == PFRKE_ROUTE)
 				*kif = ((struct pfr_kentry_route *)ke)->kif;
->>>>>>> origin/master
 			return (0);
 		}
 

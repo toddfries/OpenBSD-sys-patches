@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_proto.c,v 1.50 2006/06/18 11:47:46 pascoe Exp $	*/
-=======
 /*	$OpenBSD: in6_proto.c,v 1.60 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -137,24 +133,24 @@ struct ip6protosw inet6sw[] = {
 },
 { SOCK_DGRAM,	&inet6domain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR,
   udp6_input,	0,		udp6_ctlinput,	ip6_ctloutput,
-  udp6_usrreq,	0,
+  udp_usrreq,	0,
   0,		0,		0,
   udp_sysctl,
 },
 { SOCK_STREAM,	&inet6domain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp6_input,	0,		tcp6_ctlinput,	tcp_ctloutput,
-  tcp6_usrreq,
+  tcp_usrreq,
 #ifdef INET	/* don't call initialization and timeout routines twice */
-  0,		0,		0,		tcp_drain,
+  0,		0,		0,		0,
 #else
-  tcp_init,	tcp_fasttimo,	tcp_slowtimo,	tcp_drain,
+  tcp_init,	tcp_fasttimo,	tcp_slowtimo,	0,
 #endif
   tcp_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_RAW,	PR_ATOMIC|PR_ADDR,
   rip6_input,	rip6_output,	rip6_ctlinput,	rip6_ctloutput,
   rip6_usrreq,
-  0,		0,		0,		0,
+  0,		0,		0,		0,		rip6_sysctl
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_ICMPV6,	PR_ATOMIC|PR_ADDR,
   icmp6_input,	rip6_output,	rip6_ctlinput,	rip6_ctloutput,
@@ -228,7 +224,7 @@ struct ip6protosw inet6sw[] = {
 { SOCK_RAW,	&inet6domain,	IPPROTO_PIM,	PR_ATOMIC|PR_ADDR,
   pim6_input,	rip6_output,	0,		rip6_ctloutput,
   rip6_usrreq,
-  0,		0,		0,		0,
+  0,		0,		0,		0,		pim6_sysctl
 },
 #endif
 #if NCARP > 0
@@ -279,7 +275,7 @@ int	ip6_accept_rtadv = 0;	/* enabling forwarding and rtadv concurrently is dange
 int	ip6_maxfragpackets = 200;
 int	ip6_maxfrags = 200;
 int	ip6_log_interval = 5;
-int	ip6_hdrnestlimit = 50;	/* appropriate? */
+int	ip6_hdrnestlimit = 10;	/* appropriate? */
 int	ip6_dad_count = 1;	/* DupAddrDetectionTransmits */
 int	ip6_dad_pending;	/* number of currently running DADs */
 int	ip6_auto_flowlabel = 1;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_km.h,v 1.8 2004/04/19 22:52:33 tedu Exp $	*/
-=======
 /*	$OpenBSD: uvm_km.h,v 1.11 2010/07/15 00:14:17 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_km.h,v 1.9 1999/06/21 17:25:11 thorpej Exp $	*/
 
 /*

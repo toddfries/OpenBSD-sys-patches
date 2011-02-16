@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfs_node.c,v 1.31 2006/01/09 12:43:16 pedro Exp $	*/
-=======
 /*	$OpenBSD: nfs_node.c,v 1.55 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*
@@ -49,12 +45,8 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
-<<<<<<< HEAD
-#include <sys/hash.h>
-=======
 #include <sys/rwlock.h>
 #include <sys/queue.h>
->>>>>>> origin/master
 
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
@@ -63,13 +55,6 @@
 #include <nfs/nfsmount.h>
 #include <nfs/nfs_var.h>
 
-<<<<<<< HEAD
-LIST_HEAD(nfsnodehashhead, nfsnode) *nfsnodehashtbl;
-u_long nfsnodehash;
-struct lock nfs_hashlock;
-
-=======
->>>>>>> origin/master
 struct pool nfs_node_pool;
 extern int prtactive;
 
@@ -82,17 +67,9 @@ extern struct vops nfs_vops;
 static __inline int
 nfsnode_cmp(const struct nfsnode *a, const struct nfsnode *b)
 {
-<<<<<<< HEAD
-	nfsnodehashtbl = hashinit(desiredvnodes, M_NFSNODE, M_WAITOK, &nfsnodehash);
-	lockinit(&nfs_hashlock, PINOD, "nfs_hashlock", 0, 0);
-
-	pool_init(&nfs_node_pool, sizeof(struct nfsnode), 0, 0, 0, "nfsnodepl",
-	    &pool_allocator_nointr);
-=======
 	if (a->n_fhsize != b->n_fhsize)
 		return (a->n_fhsize - b->n_fhsize);
 	return (memcmp(a->n_fhp, b->n_fhp, a->n_fhsize));
->>>>>>> origin/master
 }
 
 RB_PROTOTYPE(nfs_nodetree, nfsnode, n_entry, nfsnode_cmp);
@@ -129,14 +106,6 @@ loop:
 		*npp = np;
 		return (0);
 	}
-<<<<<<< HEAD
-	if (lockmgr(&nfs_hashlock, LK_EXCLUSIVE|LK_SLEEPFAIL, NULL))
-		goto loop;
-	error = getnewvnode(VT_NFS, mntp, nfsv2_vnodeop_p, &nvp);
-	if (error) {
-		*npp = 0;
-		lockmgr(&nfs_hashlock, LK_RELEASE, NULL);
-=======
 
 	/*
 	 * getnewvnode() could recycle a vnode, potentially formerly
@@ -153,7 +122,6 @@ loop:
 	if (error) {
 		*npp = NULL;
 		rw_exit_write(&nfs_hashlock);
->>>>>>> origin/master
 		return (error);
 	}
 	nvp->v_flag |= VLARVAL;
@@ -186,14 +154,10 @@ loop:
 	np->n_fhp = &np->n_fh;
 	bcopy(fh, np->n_fhp, fhsize);
 	np->n_fhsize = fhsize;
-<<<<<<< HEAD
-	lockmgr(&nfs_hashlock, LK_RELEASE, NULL);
-=======
 	np2 = RB_INSERT(nfs_nodetree, &nmp->nm_ntree, np);
 	KASSERT(np2 == NULL);
 	np->n_accstamp = -1;
 	rw_exit(&nfs_hashlock);
->>>>>>> origin/master
 	*npp = np;
 
 	return (0);
@@ -202,21 +166,9 @@ loop:
 int
 nfs_inactive(void *v)
 {
-<<<<<<< HEAD
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
-	struct nfsnode *np;
-	struct sillyrename *sp;
-	struct proc *p = curproc;	/* XXX */
-
-	np = VTONFS(ap->a_vp);
-=======
 	struct vop_inactive_args	*ap = v;
 	struct nfsnode			*np;
 	struct sillyrename		*sp;
->>>>>>> origin/master
 
 #ifdef DIAGNOSTIC
 	if (prtactive && ap->a_vp->v_usecount != 0)
@@ -247,7 +199,7 @@ nfs_inactive(void *v)
 		nfs_removeit(sp);
 		crfree(sp->s_cred);
 		vrele(sp->s_dvp);
-		FREE((caddr_t)sp, M_NFSREQ);
+		free(sp, M_NFSREQ);
 	}
 	np->n_flag &= (NMODIFIED | NFLUSHINPROG | NFLUSHWANT);
 
@@ -261,46 +213,15 @@ nfs_inactive(void *v)
 int
 nfs_reclaim(void *v)
 {
-<<<<<<< HEAD
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
-	struct vnode *vp = ap->a_vp;
-	struct nfsnode *np = VTONFS(vp);
-	struct nfsdmap *dp, *dp2;
-=======
 	struct vop_reclaim_args	*ap = v;
 	struct vnode		*vp = ap->a_vp;
 	struct nfsmount		*nmp;
 	struct nfsnode		*np = VTONFS(vp);
->>>>>>> origin/master
 
 #ifdef DIAGNOSTIC
 	if (prtactive && vp->v_usecount != 0)
 		vprint("nfs_reclaim: pushing active", vp);
 #endif
-<<<<<<< HEAD
-
-	if (np->n_hash.le_prev != NULL)
-		LIST_REMOVE(np, n_hash);
-
-	/*
-	 * Free up any directory cookie structures and
-	 * large file handle structures that might be associated with
-	 * this nfs node.
-	 */
-	if (vp->v_type == VDIR) {
-		dp = LIST_FIRST(&np->n_cookies);
-		while (dp) {
-			dp2 = dp;
-			dp = LIST_NEXT(dp, ndm_list);
-			FREE((caddr_t)dp2, M_NFSDIROFF);
-		}
-	}
-	if (np->n_fhsize > NFS_SMALLFH) {
-		free(np->n_fhp, M_NFSBIGFH);
-	}
-=======
 	if (ap->a_vp->v_flag & VLARVAL)
 		/*
 		 * vnode was incompletely set up, just return
@@ -316,17 +237,12 @@ nfs_reclaim(void *v)
 	rw_enter_write(&nfs_hashlock);
 	RB_REMOVE(nfs_nodetree, &nmp->nm_ntree, np);
 	rw_exit_write(&nfs_hashlock);
->>>>>>> origin/master
 
 	if (np->n_rcred)
 		crfree(np->n_rcred);
 	if (np->n_wcred)
-<<<<<<< HEAD
-		crfree(np->n_wcred);	
-=======
 		crfree(np->n_wcred);
 
->>>>>>> origin/master
 	cache_purge(vp);
 	pool_put(&nfs_node_pool, vp->v_data);
 	vp->v_data = NULL;

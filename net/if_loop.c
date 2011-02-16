@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.39 2006/03/04 22:40:15 brad Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.44 2008/05/07 12:58:54 norby Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -138,15 +138,14 @@
 #include <netinet/ip6.h>
 #endif
 
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-#endif
-
 #ifdef NETATALK
 #include <netinet/if_ether.h>
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
+#endif
+
+#ifdef MPLS
+#include <netmpls/mpls.h>
 #endif
 
 #if NBPFILTER > 0
@@ -185,10 +184,9 @@ loop_clone_create(ifc, unit)
 {
 	struct ifnet *ifp;
 
-	MALLOC(ifp, struct ifnet *, sizeof(*ifp), M_DEVBUF, M_NOWAIT);
+	ifp = malloc(sizeof(*ifp), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (ifp == NULL)
 		return (ENOMEM);
-	bzero(ifp, sizeof(struct ifnet));
 
 	snprintf(ifp->if_xname, sizeof ifp->if_xname, "lo%d", unit);
 	ifp->if_softc = NULL;
@@ -299,18 +297,18 @@ looutput(ifp, m, dst, rt)
 		isr = NETISR_IPV6;
 		break;
 #endif /* INET6 */
-#ifdef IPX
-	case AF_IPX:
-		ifq = &ipxintrq;
-		isr = NETISR_IPX;
-		break;
-#endif
 #ifdef NETATALK
 	case AF_APPLETALK:
 		ifq = &atintrq2;
 		isr = NETISR_ATALK;
 		break;
 #endif /* NETATALK */
+#ifdef MPLS
+	case AF_MPLS:
+		ifq = &mplsintrq;
+		isr = NETISR_MPLS;
+		break;
+#endif /* MPLS */
 	default:
 		printf("%s: can't handle af%d\n", ifp->if_xname,
 			dst->sa_family);
@@ -367,10 +365,10 @@ lo_altqstart(ifp)
 			isr = NETISR_IPV6;
 			break;
 #endif
-#ifdef IPX
-		case AF_IPX:
-			ifq = &ipxintrq;
-			isr = NETISR_IPX;
+#ifdef MPLS
+		case AF_MPLS:
+			ifq = &mplsintrq;
+			isr = NETISR_MPLS;
 			break;
 #endif
 #ifdef NETATALK
@@ -469,7 +467,7 @@ loioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 	return (error);
 }

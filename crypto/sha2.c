@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sha2.c,v 1.3 2004/04/28 22:06:02 millert Exp $	*/
-=======
 /*	$OpenBSD: sha2.c,v 1.8 2011/01/11 15:42:05 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * FILE:	sha2.c

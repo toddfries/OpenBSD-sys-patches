@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_icmp.c,v 1.72 2007/01/03 18:39:56 claudio Exp $	*/
-=======
 /*	$OpenBSD: ip_icmp.c,v 1.92 2010/09/13 09:59:32 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -127,7 +123,7 @@ int *icmpctl_vars[ICMPCTL_MAXID] = ICMPCTL_VARS;
 
 void icmp_mtudisc_timeout(struct rtentry *, struct rttimer *);
 int icmp_ratelimit(const struct in_addr *, const int, const int);
-static void icmp_redirect_timeout(struct rtentry *, struct rttimer *);
+void icmp_redirect_timeout(struct rtentry *, struct rttimer *);
 
 extern	struct protosw inetsw[];
 
@@ -152,9 +148,6 @@ icmp_do_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 	struct icmp *icp;
 	struct mbuf *m;
 	unsigned icmplen, mblen;
-#if NPF > 0
-	struct pf_mtag	*mtag;
-#endif
 
 #ifdef ICMPPRINTFS
 	if (icmpprintfs)
@@ -272,14 +265,11 @@ icmp_do_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 	nip->ip_p = IPPROTO_ICMP;
 	nip->ip_src = oip->ip_src;
 	nip->ip_dst = oip->ip_dst;
-#if NPF > 0
-	/* move PF_GENERATED to new packet, if existant XXX preserve more? */
-	if ((mtag = pf_find_mtag(n)) != NULL &&
-	    mtag->flags & PF_TAG_GENERATED) {
-		mtag = pf_get_tag(m);
-		mtag->flags |= PF_TAG_GENERATED;
-	}
-#endif
+
+	/* move PF_GENERATED to new packet, if existent XXX preserve more? */
+	if (n->m_pkthdr.pf.flags & PF_TAG_GENERATED)
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+
 	m_freem(n);
 	return (m);
 
@@ -308,7 +298,6 @@ icmp_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 struct sockaddr_in icmpsrc = { sizeof (struct sockaddr_in), AF_INET };
 static struct sockaddr_in icmpdst = { sizeof (struct sockaddr_in), AF_INET };
 static struct sockaddr_in icmpgw = { sizeof (struct sockaddr_in), AF_INET };
-struct sockaddr_in icmpmask = { 8, 0 };
 
 /*
  * Process a received ICMP message.
@@ -473,7 +462,6 @@ icmp_input(struct mbuf *m, ...)
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
 #if NCARP > 0
 		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
 		    &ip->ip_dst.s_addr))
 			goto freeit;
@@ -552,7 +540,6 @@ icmp_input(struct mbuf *m, ...)
 reflect:
 #if NCARP > 0
 		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 		    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
 		    &ip->ip_dst.s_addr))
 			goto freeit;
@@ -602,7 +589,6 @@ reflect:
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
 #if NCARP > 0
 		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
 		    &ip->ip_dst.s_addr))
 			goto freeit;
@@ -876,6 +862,11 @@ icmp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 		break;
 	}
+	case ICMPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &icmpstat, sizeof(icmpstat)));
 	default:
 		if (name[0] < ICMPCTL_MAXID)
 			return (sysctl_int_arr(icmpctl_vars, name, namelen,
@@ -905,20 +896,14 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 
 	if ((rt->rt_flags & RTF_HOST) == 0) {
 		struct rtentry *nrt;
+		struct rt_addrinfo info;
 
-<<<<<<< HEAD
-		error = rtrequest((int) RTM_ADD, dst,
-		    (struct sockaddr *) rt->rt_gateway,
-		    (struct sockaddr *) 0,
-		    RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC, &nrt, 0);
-=======
 		bzero(&info, sizeof(info));
 		info.rti_info[RTAX_DST] = dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_flags = RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC;
 
 		error = rtrequest1(RTM_ADD, &info, RTP_DEFAULT, &nrt, rtableid);
->>>>>>> origin/master
 		if (error) {
 			rtfree(rt);
 			return (NULL);
@@ -1010,15 +995,17 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 		extern u_char ip_protox[];
 		struct sockaddr_in sa;
+		struct rt_addrinfo info;
+
+		bzero(&info, sizeof(info));
+		info.rti_info[RTAX_DST] = rt_key(rt);
+		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+		info.rti_flags = rt->rt_flags;   
 
 		sa = *(struct sockaddr_in *)rt_key(rt);
-<<<<<<< HEAD
-		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
-=======
 		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
 		    r->rtt_tableid);
->>>>>>> origin/master
 
 		/* Notify TCP layer of increased Path MTU estimate */
 		ctlfunc = inetsw[ip_protox[IPPROTO_TCP]].pr_ctlinput;
@@ -1051,22 +1038,13 @@ icmp_ratelimit(const struct in_addr *dst, const int type, const int code)
 	return 0;
 }
 
-<<<<<<< HEAD
-/* XXX only handles table 0 right now */
-static void
-=======
 void
->>>>>>> origin/master
 icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)
 		panic("icmp_redirect_timeout:  bad route to timeout");
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
-<<<<<<< HEAD
-		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
-=======
 		struct rt_addrinfo info;
 
 		bzero(&info, sizeof(info));
@@ -1123,7 +1101,6 @@ icmp_do_exthdr(struct mbuf *m, u_int16_t class, u_int8_t ctype, void *buf,
 	    m_copyback(m, hlen + off + sizeof(hdr), len, buf, M_NOWAIT)) {
 		m_freem(m);
 		return (ENOBUFS);
->>>>>>> origin/master
 	}
 
 	/* calculate checksum */

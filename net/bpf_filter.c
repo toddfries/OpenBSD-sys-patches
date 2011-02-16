@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bpf_filter.c,v 1.17 2006/02/27 14:32:49 otto Exp $	*/
-=======
 /*	$OpenBSD: bpf_filter.c,v 1.24 2011/02/13 22:41:10 canacar Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bpf_filter.c,v 1.12 1996/02/13 22:00:00 christos Exp $	*/
 
 /*
@@ -482,9 +478,8 @@ bpf_filter(pc, p, wirelen, buflen)
 /*
  * Return true if the 'fcode' is a valid filter program.
  * The constraints are that each jump be forward and to a valid
- * code.  The code must terminate with either an accept or reject. 
- * 'valid' is an array for use by the routine (it must be at least
- * 'len' bytes long).  
+ * code and memory operations use valid addresses.  The code
+ * must terminate with either an accept or reject. 
  *
  * The kernel needs to be able to verify an application's filter code.
  * Otherwise, a bogus program could easily crash the system.
@@ -540,6 +535,7 @@ bpf_validate(f, len)
 			switch (BPF_OP(p->code)) {
 			case BPF_ADD:
 			case BPF_SUB:
+			case BPF_MUL:
 			case BPF_OR:
 			case BPF_AND:
 			case BPF_LSH:
@@ -559,7 +555,7 @@ bpf_validate(f, len)
 			break;
 		case BPF_JMP:
 			/*
-			 * Check that that jumps are forward, and within 
+			 * Check that jumps are forward, and within 
 			 * the code block.
 			 */
 			from = i + 1;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tcp_usrreq.c,v 1.88 2005/02/22 17:28:49 mcbride Exp $	*/
-=======
 /*	$OpenBSD: tcp_usrreq.c,v 1.105 2010/10/10 22:02:50 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -83,6 +79,7 @@
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
+#include <sys/pool.h>
 
 #include <dev/rndvar.h>
 
@@ -130,19 +127,6 @@ struct	inpcbtable tcbtable;
 
 int tcp_ident(void *, size_t *, void *, size_t, int);
 
-#ifdef INET6
-int
-tcp6_usrreq(so, req, m, nam, control, p)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *nam, *control;
-	struct proc *p;
-{
-
-	return tcp_usrreq(so, req, m, nam, control);
-}
-#endif
-
 /*
  * Process a TCP user request for TCP tb.  If this is a send request
  * then m is the mbuf chain of send data.  If this is a timer expiration
@@ -150,10 +134,11 @@ tcp6_usrreq(so, req, m, nam, control, p)
  */
 /*ARGSUSED*/
 int
-tcp_usrreq(so, req, m, nam, control)
+tcp_usrreq(so, req, m, nam, control, p)
 	struct socket *so;
 	int req;
 	struct mbuf *m, *nam, *control;
+	struct proc *p;
 {
 	struct sockaddr_in *sin;
 	struct inpcb *inp;
@@ -187,6 +172,9 @@ tcp_usrreq(so, req, m, nam, control)
 	 * structure will point at a subsidiary (struct tcpcb).
 	 */
 	if (inp == 0 && req != PRU_ATTACH) {
+		error = so->so_error;
+		if (error == 0)
+			error = EINVAL;
 		splx(s);
 		/*
 		 * The following corrects an mbuf leak under rare
@@ -194,7 +182,7 @@ tcp_usrreq(so, req, m, nam, control)
 		 */
 		if (m && (req == PRU_SEND || req == PRU_SENDOOB))
 			m_freem(m);
-		return (EINVAL);		/* XXX */
+		return (error);
 	}
 	if (inp) {
 		tp = intotcpcb(inp);
@@ -241,10 +229,10 @@ tcp_usrreq(so, req, m, nam, control)
 	case PRU_BIND:
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
-			error = in6_pcbbind(inp, nam);
+			error = in6_pcbbind(inp, nam, p);
 		else
 #endif
-			error = in_pcbbind(inp, nam);
+			error = in_pcbbind(inp, nam, p);
 		if (error)
 			break;
 		break;
@@ -256,10 +244,10 @@ tcp_usrreq(so, req, m, nam, control)
 		if (inp->inp_lport == 0) {
 #ifdef INET6
 			if (inp->inp_flags & INP_IPV6)
-				error = in6_pcbbind(inp, NULL);
+				error = in6_pcbbind(inp, NULL, p);
 			else
 #endif
-				error = in_pcbbind(inp, NULL);
+				error = in_pcbbind(inp, NULL, p);
 		}
 		/* If the in_pcbbind() above is called, the tp->pf
 		   should still be whatever it was before. */
@@ -290,7 +278,7 @@ tcp_usrreq(so, req, m, nam, control)
 			}
 
 			if (inp->inp_lport == 0) {
-				error = in6_pcbbind(inp, NULL);
+				error = in6_pcbbind(inp, NULL, p);
 				if (error)
 					break;
 			}
@@ -306,7 +294,7 @@ tcp_usrreq(so, req, m, nam, control)
 			}
 
 			if (inp->inp_lport == 0) {
-				error = in_pcbbind(inp, NULL);
+				error = in_pcbbind(inp, NULL, p);
 				if (error)
 					break;
 			}
@@ -325,10 +313,6 @@ tcp_usrreq(so, req, m, nam, control)
 
 		so->so_state |= SS_CONNECTOUT;
 		
-		/* initialise the timestamp modulator */
-		if (tp->t_flags & TF_REQ_TSTMP)
-			tp->ts_modulate = arc4random();
-
 		/* Compute window scaling to request.  */
 		tcp_rscale(tp, sb_max);
 
@@ -336,12 +320,7 @@ tcp_usrreq(so, req, m, nam, control)
 		tcpstat.tcps_connattempt++;
 		tp->t_state = TCPS_SYN_SENT;
 		TCP_TIMER_ARM(tp, TCPT_KEEP, tcptv_keep_init);
-#ifdef TCP_COMPAT_42
-		tp->iss = tcp_iss;
-		tcp_iss += TCP_ISSINCR/2;
-#else  /* TCP_COMPAT_42 */
-		tp->iss = tcp_rndiss_next();
-#endif /* !TCP_COMPAT_42 */
+		tcp_set_iss_tsm(tp);
 		tcp_sendseqinit(tp);
 #if defined(TCP_SACK)
 		tp->snd_last = tp->snd_una;
@@ -874,16 +853,12 @@ tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &l6, lin6->sin6_port, 0);
+			    &l6, lin6->sin6_port, 0, NULL);
 			break;
 #endif
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable, 
-<<<<<<< HEAD
-			    lin->sin_addr, lin->sin_port, 0);
-=======
 			    lin->sin_addr, lin->sin_port, 0, NULL, tir.rdomain);
->>>>>>> origin/master
 			break;
 		}
 	}
@@ -970,6 +945,13 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 		}
 		return (0);
 #endif
+
+	case TCPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &tcpstat, sizeof(tcpstat)));
+
 	default:
 		if (name[0] < TCPCTL_MAXID)
 			return (sysctl_int_arr(tcpctl_vars, name, namelen,

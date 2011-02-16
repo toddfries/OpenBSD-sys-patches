@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in.c,v 1.45 2007/01/02 11:41:28 markus Exp $	*/
-=======
 /*	$OpenBSD: in.c,v 1.64 2010/11/28 20:24:33 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -91,13 +87,13 @@
 
 #ifdef INET
 
-static int in_mask2len(struct in_addr *);
-static void in_len2mask(struct in_addr *, int);
-static int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
+int in_mask2len(struct in_addr *);
+void in_len2mask(struct in_addr *, int);
+int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
 	struct ifnet *);
 
-static int in_addprefix(struct in_ifaddr *, int);
-static int in_scrubprefix(struct in_ifaddr *);
+int in_addprefix(struct in_ifaddr *, int);
+int in_scrubprefix(struct in_ifaddr *);
 
 /* Return 1 if an internet address is for a directly connected host */
 int
@@ -154,7 +150,7 @@ in_socktrim(ap)
 		}
 }
 
-static int
+int
 in_mask2len(mask)
 	struct in_addr *mask;
 {
@@ -176,7 +172,7 @@ in_mask2len(mask)
 	return x * 8 + y;
 }
 
-static void
+void
 in_len2mask(mask, len)
 	struct in_addr *mask;
 	int len;
@@ -258,9 +254,7 @@ in_control(so, cmd, data, ifp)
 		if (ifp == 0)
 			panic("in_control");
 		if (ia == (struct in_ifaddr *)0) {
-			ia = (struct in_ifaddr *)
-				malloc(sizeof *ia, M_IFADDR, M_WAITOK);
-			bzero((caddr_t)ia, sizeof *ia);
+			ia = malloc(sizeof *ia, M_IFADDR, M_WAITOK | M_ZERO);
 			s = splsoftnet();
 			TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
 			ia->ia_addr.sin_family = AF_INET;
@@ -444,6 +438,8 @@ cleanup:
 			in_delmulti(ia->ia_allhosts);
 			ia->ia_allhosts = NULL;
 		}
+		/* remove backpointer, since ifp may die before ia */
+		ia->ia_ifp = NULL;
 		IFAFREE((&ia->ia_ifa));
 		if (!error)
 			dohooks(ifp->if_addrhooks, 0);
@@ -481,7 +477,7 @@ cleanup:
  *	EADDRNOTAVAIL on prefix match failed/specified address not found
  *	other values may be returned from in_ioctl()
  */
-static int
+int
 in_lifaddr_ioctl(so, cmd, data, ifp)
 	struct socket *so;
 	u_long cmd;
@@ -764,7 +760,7 @@ in_ifinit(ifp, ia, sin, scrub, newaddr)
  * add a route to prefix ("connected route" in cisco terminology).
  * does nothing if there's some interface address with the same prefix already.
  */
-static int
+int
 in_addprefix(target, flags)
 	struct in_ifaddr *target;
 	int flags;
@@ -809,7 +805,7 @@ in_addprefix(target, flags)
 #endif
 		/*
 		 * if we got a matching prefix route inserted by other
-		 * interface adderss, we don't need to bother
+		 * interface address, we don't need to bother
 		 */
 		return 0;
 	}
@@ -828,7 +824,7 @@ in_addprefix(target, flags)
  * re-installs the route by using another interface address, if there's one
  * with the same prefix (otherwise we lose the route mistakenly).
  */
-static int
+int
 in_scrubprefix(target)
 	struct in_ifaddr *target;
 {
@@ -962,7 +958,6 @@ in_addmulti(ap, ifp)
 			return (NULL);
 		}
 		inm->inm_addr = *ap;
-		inm->inm_ifp = ifp;
 		inm->inm_refcount = 1;
 		IFP_TO_IA(ifp, ia);
 		if (ia == NULL) {
@@ -1005,6 +1000,7 @@ in_delmulti(inm)
 	struct in_multi *inm;
 {
 	struct ifreq ifr;
+	struct ifnet *ifp;
 	int s = splsoftnet();
 
 	if (--inm->inm_refcount == 0) {
@@ -1017,15 +1013,18 @@ in_delmulti(inm)
 		 * Unlink from list.
 		 */
 		LIST_REMOVE(inm, inm_list);
+		ifp = inm->inm_ia->ia_ifp;
 		IFAFREE(&inm->inm_ia->ia_ifa);
-		/*
-		 * Notify the network driver to update its multicast reception
-		 * filter.
-		 */
-		satosin(&ifr.ifr_addr)->sin_family = AF_INET;
-		satosin(&ifr.ifr_addr)->sin_addr = inm->inm_addr;
-		(*inm->inm_ifp->if_ioctl)(inm->inm_ifp, SIOCDELMULTI,
-							     (caddr_t)&ifr);
+
+		if (ifp) {
+			/*
+			 * Notify the network driver to update its multicast
+			 * reception filter.
+			 */
+			satosin(&ifr.ifr_addr)->sin_family = AF_INET;
+			satosin(&ifr.ifr_addr)->sin_addr = inm->inm_addr;
+			(*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)&ifr);
+		}
 		free(inm, M_IPMADDR);
 	}
 	splx(s);

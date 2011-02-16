@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_ipip.c,v 1.38 2006/12/13 09:01:59 itojun Exp $ */
-=======
 /*	$OpenBSD: ip_ipip.c,v 1.47 2010/05/11 09:36:07 claudio Exp $ */
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -666,6 +662,11 @@ ipip_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	switch (name[0]) {
 	case IPIPCTL_ALLOW:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &ipip_allow));
+	case IPIPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ipipstat, sizeof(ipipstat)));
 	default:
 		return (ENOPROTOOPT);
 	}

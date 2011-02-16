@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pfkeyv2.h,v 1.55 2005/05/27 15:29:55 hshoexer Exp $ */
-=======
 /* $OpenBSD: pfkeyv2.h,v 1.60 2010/10/06 22:19:20 mikeb Exp $ */
->>>>>>> origin/master
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) January 1998
  * 

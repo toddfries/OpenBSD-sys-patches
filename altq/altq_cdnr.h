@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_cdnr.h,v 1.3 2002/12/16 09:18:05 kjc Exp $	*/
+/*	$OpenBSD: altq_cdnr.h,v 1.4 2002/12/16 17:27:20 henning Exp $	*/
 /*	$KAME: altq_cdnr.h,v 1.6 2000/12/14 08:12:45 thorpej Exp $	*/
 
 /*

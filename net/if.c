@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if.c,v 1.156 2007/03/18 23:23:17 mpf Exp $	*/
-=======
 /*	$OpenBSD: if.c,v 1.233 2011/01/25 05:44:05 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -90,6 +86,7 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/route.h>
+#include <net/netisr.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -196,12 +193,8 @@ static int if_index = 0;
 int if_indexlim = 0;
 struct ifaddr **ifnet_addrs = NULL;
 struct ifnet **ifindex2ifnet = NULL;
-<<<<<<< HEAD
-struct ifnet_head ifnet;
-=======
 struct ifnet_head ifnet = TAILQ_HEAD_INITIALIZER(ifnet);
 struct ifnet_head iftxlist = TAILQ_HEAD_INITIALIZER(iftxlist);
->>>>>>> origin/master
 struct ifnet *lo0ifp;
 
 /*
@@ -259,16 +252,9 @@ if_attachsetup(struct ifnet *ifp)
 			if_indexlim <<= 1;
 
 		/* grow ifnet_addrs */
-<<<<<<< HEAD
-		m = oldlim * sizeof(ifa);
-		n = if_indexlim * sizeof(ifa);
-		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK);
-		bzero(q, n);
-=======
 		m = oldlim * sizeof(struct ifaddr *);
 		n = if_indexlim * sizeof(struct ifaddr *);
 		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK|M_ZERO);
->>>>>>> origin/master
 		if (ifnet_addrs) {
 			bcopy((caddr_t)ifnet_addrs, q, m);
 			free((caddr_t)ifnet_addrs, M_IFADDR);
@@ -278,8 +264,7 @@ if_attachsetup(struct ifnet *ifp)
 		/* grow ifindex2ifnet */
 		m = oldlim * sizeof(struct ifnet *);
 		n = if_indexlim * sizeof(struct ifnet *);
-		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK);
-		bzero(q, n);
+		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK|M_ZERO);
 		if (ifindex2ifnet) {
 			bcopy((caddr_t)ifindex2ifnet, q, m);
 			free((caddr_t)ifindex2ifnet, M_IFADDR);
@@ -343,8 +328,7 @@ if_alloc_sadl(struct ifnet *ifp)
 		socksize = sizeof(*sdl);
 	socksize = ROUNDUP(socksize);
 	ifasize = sizeof(*ifa) + 2 * socksize;
-	ifa = (struct ifaddr *)malloc(ifasize, M_IFADDR, M_WAITOK);
-	bzero((caddr_t)ifa, ifasize);
+	ifa = malloc(ifasize, M_IFADDR, M_WAITOK|M_ZERO);
 	sdl = (struct sockaddr_dl *)(ifa + 1);
 	sdl->sdl_len = socksize;
 	sdl->sdl_family = AF_LINK;
@@ -458,8 +442,6 @@ if_attach(struct ifnet *ifp)
 	if_attachsetup(ifp);
 }
 
-<<<<<<< HEAD
-=======
 void
 if_attach_common(struct ifnet *ifp)
 {
@@ -520,7 +502,6 @@ nettxintr(void)
 	splx(s);
 }
 
->>>>>>> origin/master
 /*
  * Detach an interface from everything in the kernel.  Also deallocate
  * private resources.
@@ -604,18 +585,12 @@ do { \
 #ifdef INET6
 	IF_DETACH_QUEUES(ip6intrq);
 #endif
-#ifdef IPX
-	IF_DETACH_QUEUES(ipxintrq);
-#endif
 #ifdef NETATALK
 	IF_DETACH_QUEUES(atintrq1);
 	IF_DETACH_QUEUES(atintrq2);
 #endif
 #ifdef NATM
 	IF_DETACH_QUEUES(natmintrq);
-#endif
-#if NBLUETOOTH > 0
-	IF_DETACH_QUEUES(btintrq);
 #endif
 #undef IF_DETACH_QUEUES
 
@@ -626,6 +601,8 @@ do { \
 
 	/* Remove the interface from the list of all interfaces.  */
 	TAILQ_REMOVE(&ifnet, ifp, if_list);
+	if (ISSET(ifp->if_xflags, IFXF_TXREADY))
+		TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
 
 	/*
 	 * Deallocate private resources.
@@ -641,6 +618,7 @@ do { \
 		if (ifa == ifnet_addrs[ifp->if_index])
 			continue;
 
+		ifa->ifa_ifp = NULL;
 		IFAFREE(ifa);
 	}
 
@@ -650,6 +628,7 @@ do { \
 
 	if_free_sadl(ifp);
 
+	ifnet_addrs[ifp->if_index]->ifa_ifp = NULL;
 	IFAFREE(ifnet_addrs[ifp->if_index]);
 	ifnet_addrs[ifp->if_index] = NULL;
 
@@ -852,7 +831,7 @@ if_clone_list(struct if_clonereq *ifcr)
 	    if_cloners_count : ifcr->ifcr_count;
 
 	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
-	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+	    ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
 		bzero(outbuf, sizeof outbuf);
 		strlcpy(outbuf, ifc->ifc_name, IFNAMSIZ);
 		error = copyout(outbuf, dst, IFNAMSIZ);
@@ -1256,9 +1235,11 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	struct sockaddr_dl *sdl;
 	struct ifgroupreq *ifgr;
 	char ifdescrbuf[IFDESCRSIZE];
+	char ifrtlabelbuf[RTLABEL_LEN];
 	int error = 0;
 	size_t bytesdone;
 	short oif_flags;
+	const char *label;
 
 	switch (cmd) {
 
@@ -1450,8 +1431,6 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		break;
 
-<<<<<<< HEAD
-=======
 	case SIOCGIFRTLABEL:
 		if (ifp->if_rtlabelid &&
 		    (label = rtlabel_id2name(ifp->if_rtlabelid)) != NULL) {
@@ -1553,7 +1532,6 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		ifp->if_rdomain = ifr->ifr_rdomainid;
 		break;
 
->>>>>>> origin/master
 	case SIOCAIFGROUP:
 		if ((error = suser(p, 0)))
 			return (error);
@@ -1578,34 +1556,25 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		break;
 
 	case SIOCSIFLLADDR:
-	        if ((error = suser(p, 0)))
-	                return (error);
-	        ifa = ifnet_addrs[ifp->if_index];
-	        if (ifa == NULL)
-	                return (EINVAL);
-	        sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-	        if (sdl == NULL)
-	                return (EINVAL);
-	        if (ifr->ifr_addr.sa_len != ETHER_ADDR_LEN)
-	                return (EINVAL);
+		if ((error = suser(p, 0)))
+			return (error);
+		ifa = ifnet_addrs[ifp->if_index];
+		if (ifa == NULL)
+			return (EINVAL);
+		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+		if (sdl == NULL)
+			return (EINVAL);
+		if (ifr->ifr_addr.sa_len != ETHER_ADDR_LEN)
+			return (EINVAL);
 		if (ETHER_IS_MULTICAST(ifr->ifr_addr.sa_data))
 			return (EINVAL);
-	        switch (ifp->if_type) {
+		switch (ifp->if_type) {
 		case IFT_ETHER:
 		case IFT_CARP:
 		case IFT_FDDI:
 		case IFT_XETHER:
 		case IFT_ISO88025:
 		case IFT_L2VLAN:
-<<<<<<< HEAD
-	                bcopy((caddr_t)ifr->ifr_addr.sa_data,
-			      (caddr_t)((struct arpcom *)ifp)->ac_enaddr,
-			      ETHER_ADDR_LEN);
-			/* FALLTHROUGH */
-		case IFT_ARCNET:
-                        bcopy((caddr_t)ifr->ifr_addr.sa_data,
-			      LLADDR(sdl), ETHER_ADDR_LEN);
-=======
 			bcopy((caddr_t)ifr->ifr_addr.sa_data,
 			    (caddr_t)((struct arpcom *)ifp)->ac_enaddr,
 			    ETHER_ADDR_LEN);
@@ -1614,32 +1583,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			error = (*ifp->if_ioctl)(ifp, cmd, data);
 			if (error == ENOTTY)
 				error = 0;
->>>>>>> origin/master
 			break;
 		default:
-	                return (ENODEV);
+			return (ENODEV);
 		}
-<<<<<<< HEAD
-		if (ifp->if_flags & IFF_UP) {
-			struct ifreq ifrq;
-		        int s = splnet();
-			ifp->if_flags &= ~IFF_UP;
-			ifrq.ifr_flags = ifp->if_flags;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
-			ifp->if_flags |= IFF_UP;
-			ifrq.ifr_flags = ifp->if_flags;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
-			splx(s);
-			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			        if (ifa->ifa_addr != NULL &&
-				    ifa->ifa_addr->sa_family == AF_INET)
-				        arp_ifinit((struct arpcom *)ifp, ifa);
-			}
-		}
-=======
 
 		ifnewlladdr(ifp);
->>>>>>> origin/master
 		break;
 
 	default:
@@ -1648,7 +1597,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #if !defined(COMPAT_43) && !defined(COMPAT_LINUX) && !defined(COMPAT_SVR4)
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 			(struct mbuf *) cmd, (struct mbuf *) data,
-			(struct mbuf *) ifp));
+			(struct mbuf *) ifp, p));
 #else
 	    {
 		u_long ocmd = cmd;
@@ -1688,7 +1637,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 		    (struct mbuf *) cmd, (struct mbuf *) data,
-		    (struct mbuf *) ifp));
+		    (struct mbuf *) ifp, p));
 		switch (ocmd) {
 
 		case OSIOCGIFADDR:
@@ -1849,10 +1798,9 @@ if_detached_watchdog(struct ifnet *ifp)
 struct ifg_group *
 if_creategroup(const char *groupname)
 {
-	struct ifg_group	*ifg = NULL;
+	struct ifg_group	*ifg;
 
-	if ((ifg = (struct ifg_group *)malloc(sizeof(struct ifg_group),
-	    M_TEMP, M_NOWAIT)) == NULL)
+	if ((ifg = malloc(sizeof(*ifg), M_TEMP, M_NOWAIT)) == NULL)
 		return (NULL);
 
 	strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
@@ -1885,12 +1833,10 @@ if_addgroup(struct ifnet *ifp, const char *groupname)
 		if (!strcmp(ifgl->ifgl_group->ifg_group, groupname))
 			return (EEXIST);
 
-	if ((ifgl = (struct ifg_list *)malloc(sizeof(struct ifg_list), M_TEMP,
-	    M_NOWAIT)) == NULL)
+	if ((ifgl = malloc(sizeof(*ifgl), M_TEMP, M_NOWAIT)) == NULL)
 		return (ENOMEM);
 
-	if ((ifgm = (struct ifg_member *)malloc(sizeof(struct ifg_member),
-	    M_TEMP, M_NOWAIT)) == NULL) {
+	if ((ifgm = malloc(sizeof(*ifgm), M_TEMP, M_NOWAIT)) == NULL) {
 		free(ifgl, M_TEMP);
 		return (ENOMEM);
 	}
@@ -2209,7 +2155,7 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return (ENOTDIR);
- 
+
 	switch (name[0]) {
 	case IFQCTL_LEN:
 		return (sysctl_rdint(oldp, oldlenp, newp, ifq->ifq_len));

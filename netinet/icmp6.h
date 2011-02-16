@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: icmp6.h,v 1.31 2006/04/27 02:19:32 tedu Exp $	*/
-=======
 /*	$OpenBSD: icmp6.h,v 1.33 2010/03/22 12:23:32 jsg Exp $	*/
->>>>>>> origin/master
 /*	$KAME: icmp6.h,v 1.84 2003/04/23 10:26:51 itojun Exp $	*/
 
 /*

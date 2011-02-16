@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_tun.c,v 1.84 2007/02/16 13:41:21 claudio Exp $	*/
-=======
 /*	$OpenBSD: if_tun.c,v 1.109 2010/09/23 04:47:02 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -75,14 +71,8 @@
 #include <netinet/if_ether.h>
 #endif
 
-<<<<<<< HEAD
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-=======
 #ifdef PIPEX
 #include <net/pipex.h>
->>>>>>> origin/master
 #endif
 
 #ifdef NETATALK
@@ -122,8 +112,6 @@ int	tundebug = TUN_DEBUG;
 
 /* Only these IFF flags are changeable by TUNSIFINFO */
 #define TUN_IFF_FLAGS (IFF_UP|IFF_POINTOPOINT|IFF_MULTICAST|IFF_BROADCAST)
-
-extern int ifqmaxlen;
 
 void	tunattach(int);
 int	tunopen(dev_t, int, int, struct proc *);
@@ -185,10 +173,9 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	struct ifnet		*ifp;
 	int			 s;
 
-	tp = malloc(sizeof(*tp), M_DEVBUF, M_NOWAIT);
+	tp = malloc(sizeof(*tp), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!tp)
 		return (ENOMEM);
-	bzero(tp, sizeof(*tp));
 
 	tp->tun_unit = unit;
 	tp->tun_flags = TUN_INITED|TUN_STAYUP;
@@ -561,17 +548,13 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		error = tun_switch(tp,
-		    ifr->ifr_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
+		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
-<<<<<<< HEAD
-		error = EINVAL;
-=======
 		if (tp->tun_flags & TUN_LAYER2)
 			error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
 		else
 			error = ENOTTY;
->>>>>>> origin/master
 	}
 
 	splx(s);
@@ -608,6 +591,8 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		return (ether_output(ifp, m0, dst, rt));
 
 	M_PREPEND(m0, sizeof(*af), M_DONTWAIT);
+	if (m0 == NULL)
+		return (ENOBUFS);
 	af = mtod(m0, u_int32_t *);
 	*af = htonl(dst->sa_family);
 
@@ -884,7 +869,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	if (tp->tun_flags & TUN_LAYER2) {
 		/*
 		 * Pad so that IP header is correctly aligned
-		 * this is neccessary for all strict aligned architectures.
+		 * this is necessary for all strict aligned architectures.
 		 */
 		mlen -= ETHER_ALIGN;
 		m->m_data += ETHER_ALIGN;
@@ -931,13 +916,10 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 #endif
 
 	if (tp->tun_flags & TUN_LAYER2) {
-<<<<<<< HEAD
-=======
 		/* quirk to not add randomness from a virtual device */
 		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
 
 		s = splnet();
->>>>>>> origin/master
 		ether_input_mbuf(ifp, top);
 		splx(s);
 
@@ -964,12 +946,6 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	case AF_INET6:
 		ifq = &ip6intrq;
 		isr = NETISR_IPV6;
-		break;
-#endif
-#ifdef IPX
-	case AF_IPX:
-		ifq = &ipxintrq;
-		isr = NETISR_IPX;
 		break;
 #endif
 #ifdef NETATALK

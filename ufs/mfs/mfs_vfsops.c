@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mfs_vfsops.c,v 1.33 2006/06/14 20:01:50 sturm Exp $	*/
-=======
 /*	$OpenBSD: mfs_vfsops.c,v 1.42 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mfs_vfsops.c,v 1.10 1996/02/09 22:31:28 christos Exp $	*/
 
 /*
@@ -59,9 +55,6 @@
 #include <ufs/mfs/mfsnode.h>
 #include <ufs/mfs/mfs_extern.h>
 
-caddr_t	mfs_rootbase;	/* address of mini-root in kernel virtual memory */
-u_long	mfs_rootsize;	/* size of mini-root in bytes */
-
 static	int mfs_minor;	/* used for building internal dev_t */
 
 /*
@@ -82,77 +75,6 @@ const struct vfsops mfs_vfsops = {
 	ffs_sysctl,
 	mfs_checkexp
 };
-
-/*
- * Called by main() when mfs is going to be mounted as root.
- */
-
-int
-mfs_mountroot(void)
-{
-	struct fs *fs;
-	struct mount *mp;
-	struct proc *p = curproc;
-	struct ufsmount *ump;
-	struct mfsnode *mfsp;
-	int error;
-
-	if ((error = bdevvp(swapdev, &swapdev_vp)) ||
-	    (error = bdevvp(rootdev, &rootvp))) {
-		printf("mfs_mountroot: can't setup bdevvp's");
-		return (error);
-	}
-	if ((error = vfs_rootmountalloc("mfs", "mfs_root", &mp)) != 0)
-		return (error);
-	mfsp = malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK);
-	rootvp->v_data = mfsp;
-	rootvp->v_op = mfs_vnodeop_p;
-	rootvp->v_tag = VT_MFS;
-	mfsp->mfs_baseoff = mfs_rootbase;
-	mfsp->mfs_size = mfs_rootsize;
-	mfsp->mfs_vnode = rootvp;
-	mfsp->mfs_pid = p->p_pid;
-	mfsp->mfs_buflist = (struct buf *)0;
-	if ((error = ffs_mountfs(rootvp, mp, p)) != 0) {
-		mp->mnt_vfc->vfc_refcount--;
-		vfs_unbusy(mp);
-		free(mp, M_MOUNT);
-		free(mfsp, M_MFSNODE);
-		return (error);
-	}
-
-	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
-	ump = VFSTOUFS(mp);
-	fs = ump->um_fs;
-	(void) copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1, 0);
-	(void)ffs_statfs(mp, &mp->mnt_stat, p);
-	vfs_unbusy(mp);
-	inittodr((time_t)0);
-
-	return (0);
-}
-
-/*
- * This is called early in boot to set the base address and size
- * of the mini-root.
- */
-int
-mfs_initminiroot(caddr_t base)
-{
-	struct fs *fs = (struct fs *)(base + SBOFF);
-	extern int (*mountroot)(void);
-
-	/* check for valid super block */
-	if (fs->fs_magic != FS_MAGIC || fs->fs_bsize > MAXBSIZE ||
-	    fs->fs_bsize < sizeof(struct fs))
-		return (0);
-	mountroot = mfs_mountroot;
-	mfs_rootbase = base;
-	mfs_rootsize = fs->fs_fsize * fs->fs_size;
-	rootdev = makedev(255, mfs_minor);
-	mfs_minor++;
-	return (mfs_rootsize);
-}
 
 /*
  * VFS Operations.
@@ -248,16 +170,23 @@ mfs_start(struct mount *mp, int flags, struct proc *p)
 	struct vnode *vp = VFSTOUFS(mp)->um_devvp;
 	struct mfsnode *mfsp = VTOMFS(vp);
 	struct buf *bp;
-	caddr_t base;
-	int sleepreturn = 0;
+	int sleepreturn = 0, s;
 
-	base = mfsp->mfs_baseoff;
-	while (mfsp->mfs_buflist != (struct buf *)-1) {
-		while ((bp = mfsp->mfs_buflist) != NULL) {
+	while (1) {
+		while (1) {
+			s = splbio();
+			bp = mfsp->mfs_buflist;
+			if (bp == NULL || bp == (struct buf *)-1) {
+				splx(s);
+				break;
+			}
 			mfsp->mfs_buflist = bp->b_actf;
-			mfs_doio(bp, base);
+			splx(s);
+			mfs_doio(mfsp, bp);
 			wakeup((caddr_t)bp);
 		}
+		if (bp == (struct buf *)-1)
+			break;
 		/*
 		 * If a non-ignored signal is received, try to unmount.
 		 * If that fails, clear the signal (it has been "processed"),
@@ -266,7 +195,8 @@ mfs_start(struct mount *mp, int flags, struct proc *p)
 		 */
 		if (sleepreturn != 0) {
 			if (vfs_busy(mp, VB_WRITE|VB_NOWAIT) ||
-			    dounmount(mp, 0, p, NULL))
+			    dounmount(mp,
+			    (CURSIG(p) == SIGKILL) ? MNT_FORCE : 0, p, NULL))
 				CLRSIG(p, CURSIG(p));
 			sleepreturn = 0;
 			continue;

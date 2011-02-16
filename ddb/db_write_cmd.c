@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_write_cmd.c,v 1.7 2002/05/16 13:01:41 art Exp $	*/
-=======
 /*	$OpenBSD: db_write_cmd.c,v 1.11 2009/05/30 20:58:49 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_write_cmd.c,v 1.6 1996/02/05 01:57:25 christos Exp $	*/
 
 /* 
@@ -61,6 +57,7 @@ db_write_cmd(db_expr_t	address, boolean_t have_addr, db_expr_t count,
 	db_expr_t	new_value;
 	int		size;
 	boolean_t	wrote_one = FALSE;
+	char		tmpfmt[28];
 
 	addr = (db_addr_t) address;
 
@@ -87,13 +84,6 @@ db_write_cmd(db_expr_t	address, boolean_t have_addr, db_expr_t count,
 	}
 
 	while (db_expression(&new_value)) {
-<<<<<<< HEAD
-	    old_value = db_get_value(addr, size, FALSE);
-	    db_printsym(addr, DB_STGY_ANY, db_printf);
-	    db_printf("\t\t%#8n\t=\t%#8n\n", old_value, new_value);
-	    db_put_value(addr, size, new_value);
-	    addr += size;
-=======
 		old_value = db_get_value(addr, size, FALSE);
 		db_printsym(addr, DB_STGY_ANY, db_printf);
 		db_printf("\t\t%s\t", db_format(tmpfmt, sizeof tmpfmt,
@@ -102,7 +92,6 @@ db_write_cmd(db_expr_t	address, boolean_t have_addr, db_expr_t count,
 		    new_value, DB_FORMAT_N, 0, 8));
 		db_put_value(addr, size, new_value);
 		addr += size;
->>>>>>> origin/master
 
 		wrote_one = TRUE;
 	}

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: $ */
-=======
 /*	$OpenBSD: if_pppoe.h,v 1.5 2008/08/28 13:10:54 brad Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_pppoe.h,v 1.5 2003/11/28 08:56:48 keihan Exp $ */
 
 /*

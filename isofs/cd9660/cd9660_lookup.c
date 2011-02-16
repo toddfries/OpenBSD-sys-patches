@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd9660_lookup.c,v 1.11 2003/06/02 23:28:05 millert Exp $	*/
-=======
 /*	$OpenBSD: cd9660_lookup.c,v 1.17 2010/01/17 20:25:58 chl Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cd9660_lookup.c,v 1.18 1997/05/08 16:19:59 mycroft Exp $	*/
 
 /*-
@@ -99,11 +95,7 @@ int
 cd9660_lookup(v)
 	void *v;
 {
-	struct vop_lookup_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 	register struct vnode *vdp;	/* vnode for directory being searched */
 	register struct iso_node *dp;	/* inode for directory being searched */
 	register struct iso_mnt *imp;	/* file system that directory is in */
@@ -291,14 +283,14 @@ searchloop:
 			else
 				ino = dbtob(bp->b_blkno) + entryoffsetinblock;
 			dp->i_ino = ino;
-			MALLOC(altname, char *, NAME_MAX, M_TEMP, M_WAITOK);
+			altname = malloc(NAME_MAX, M_TEMP, M_WAITOK);
 			cd9660_rrip_getname(ep,altname,&namelen,&dp->i_ino,imp);
 			if (namelen == cnp->cn_namelen
 			    && !bcmp(name,altname,namelen)) {
-				FREE(altname, M_TEMP);
+				free(altname, M_TEMP);
 				goto found;
 			}
-			FREE(altname, M_TEMP);
+			free(altname, M_TEMP);
 			ino = 0;
 			break;
 		}
@@ -438,7 +430,7 @@ cd9660_bufatoff(struct iso_node *ip, off_t offset, char **res,
 {
 	struct iso_mnt *imp;
 	struct buf *bp;
-	daddr_t lbn;
+	daddr64_t lbn;
 	int bsize, error;
 	struct vnode *vp = ITOV(ip);
 

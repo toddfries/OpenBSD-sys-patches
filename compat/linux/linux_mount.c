@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_mount.c,v 1.3 1996/08/03 18:06:43 deraadt Exp $	*/
+/*	$OpenBSD: linux_mount.c,v 1.4 1996/10/16 12:25:26 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Erik Theisen

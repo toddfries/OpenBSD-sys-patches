@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ntfs_conv.c,v 1.2 2003/05/20 03:23:11 mickey Exp $	*/
-=======
 /*	$OpenBSD: ntfs_conv.c,v 1.8 2010/08/12 04:26:56 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ntfs_conv.c,v 1.1 2002/12/23 17:38:32 jdolecek Exp $	*/
 
 /*-
@@ -36,11 +32,6 @@
  *
  * The utf-8 routines were derived from src/lib/libc/locale/utf2.c.
  */
-
-#include <sys/cdefs.h>
-#ifdef __KERNEL_RCSID
-__KERNEL_RCSID(0, "$NetBSD: ntfs_conv.c,v 1.1 2002/12/23 17:38:32 jdolecek Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>

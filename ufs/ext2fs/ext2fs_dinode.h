@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_dinode.h,v 1.9 2005/10/06 17:43:14 pedro Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_dinode.h,v 1.12 2010/02/16 08:24:13 otto Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_dinode.h,v 1.6 2000/01/26 16:21:33 bouyer Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rijndael.c,v 1.17 2004/12/20 20:31:18 hshoexer Exp $ */
-=======
 /*	$OpenBSD: rijndael.c,v 1.19 2008/06/09 07:49:45 djm Exp $ */
->>>>>>> origin/master
 
 /**
  * rijndael-alg-fst.c

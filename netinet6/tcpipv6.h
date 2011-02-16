@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpipv6.h,v 1.7 2001/06/05 02:31:38 deraadt Exp $	*/
+/*	$OpenBSD: tcpipv6.h,v 1.8 2003/05/26 05:31:22 itojun Exp $	*/
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995

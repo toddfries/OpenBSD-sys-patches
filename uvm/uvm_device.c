@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_device.c,v 1.26 2006/07/26 23:15:55 mickey Exp $	*/
-=======
 /*	$OpenBSD: uvm_device.c,v 1.39 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_device.c,v 1.30 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -205,14 +201,8 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 
 		mtx_leave(&udv_lock);
 		/* NOTE: we could sleep in the following malloc() */
-<<<<<<< HEAD
-		MALLOC(udv, struct uvm_device *, sizeof(*udv), M_TEMP,
-		       M_WAITOK);
-		simple_lock(&udv_lock);
-=======
 		udv = malloc(sizeof(*udv), M_TEMP, M_WAITOK);
 		mtx_enter(&udv_lock);
->>>>>>> origin/master
 
 		/*
 		 * now we have to double check to make sure no one added it
@@ -230,13 +220,8 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 		 */
 
 		if (lcv) {
-<<<<<<< HEAD
-			simple_unlock(&udv_lock);
-			FREE(udv, M_TEMP);
-=======
 			mtx_leave(&udv_lock);
 			free(udv, M_TEMP);
->>>>>>> origin/master
 			continue;
 		}
 
@@ -330,7 +315,7 @@ again:
 		wakeup(udv);
 	mtx_leave(&udv_lock);
 	simple_unlock(&uobj->vmobjlock);
-	FREE(udv, M_TEMP);
+	free(udv, M_TEMP);
 	UVMHIST_LOG(maphist," <- done, freed uobj=%p", uobj,0,0,0);
 }
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: at_proto.c,v 1.3 2010/09/23 09:27:49 claudio Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
  * All Rights Reserved.
@@ -86,6 +82,7 @@
 #include <netinet/if_ether.h>
 
 #include <netatalk/at.h>
+#include <netatalk/ddp_var.h>
 #include <netatalk/at_extern.h>
 
 struct domain		atalkdomain;
@@ -106,7 +103,7 @@ struct protosw		atalksw[] = {
 	/* socket-protocol interface. */
 	ddp_usrreq,
 	/* utility routines. */
-	ddp_init,	0,		0,		0,
+	ddp_init,	0,		0,		0,	ddp_sysctl
     },
 };
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_ddb.h,v 1.11 2002/03/14 01:27:18 millert Exp $	*/
+/*	$OpenBSD: uvm_ddb.h,v 1.12 2002/03/14 03:16:13 millert Exp $	*/
 /*	$NetBSD: uvm_ddb.h,v 1.5 2000/11/25 06:27:59 chs Exp $	*/
 
 /*

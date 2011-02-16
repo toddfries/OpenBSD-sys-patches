@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_ipc_35.c,v 1.2 2004/07/14 23:45:11 millert Exp $	*/
-=======
 /*	$OpenBSD: kern_ipc_35.c,v 1.4 2011/01/03 23:08:07 guenther Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Todd C. Miller <Todd.Miller@courtesan.com>

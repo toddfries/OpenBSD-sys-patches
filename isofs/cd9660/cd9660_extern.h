@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd9660_extern.h,v 1.7 2002/03/14 01:27:03 millert Exp $	*/
-=======
 /*	$OpenBSD: cd9660_extern.h,v 1.11 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cd9660_extern.h,v 1.1 1997/01/24 00:24:53 cgd Exp $	*/
 
 /*-

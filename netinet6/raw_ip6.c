@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: raw_ip6.c,v 1.31 2006/12/09 01:12:28 itojun Exp $	*/
-=======
 /*	$OpenBSD: raw_ip6.c,v 1.40 2010/04/20 22:05:44 tedu Exp $	*/
->>>>>>> origin/master
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -73,11 +69,8 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/systm.h>
-<<<<<<< HEAD
-=======
 #include <sys/proc.h>
 #include <sys/sysctl.h>
->>>>>>> origin/master
 
 #include <net/if.h>
 #include <net/route.h>
@@ -493,7 +486,7 @@ rip6_output(struct mbuf *m, ...)
 		flags |= IPV6_MINMTU;
 
 	error = ip6_output(m, optp, &in6p->in6p_route, flags,
-	    in6p->in6p_moptions, &oifp);
+	    in6p->in6p_moptions, &oifp, in6p);
 	if (so->so_proto->pr_protocol == IPPROTO_ICMPV6) {
 		if (oifp)
 			icmp6_ifoutstat_inc(oifp, type, code);
@@ -610,8 +603,8 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		in6p->in6p_ip6.ip6_nxt = (long)nam;
 		in6p->in6p_cksum = -1;
 
-		MALLOC(in6p->in6p_icmp6filt, struct icmp6_filter *,
-		    sizeof(struct icmp6_filter), M_PCB, M_NOWAIT);
+		in6p->in6p_icmp6filt = malloc(sizeof(struct icmp6_filter),
+		    M_PCB, M_NOWAIT);
 		if (in6p->in6p_icmp6filt == NULL) {
 			in6_pcbdetach(in6p);
 			error = ENOMEM;
@@ -641,7 +634,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 #endif
 		/* xxx: RSVP */
 		if (in6p->in6p_icmp6filt) {
-			FREE(in6p->in6p_icmp6filt, M_PCB);
+			free(in6p->in6p_icmp6filt, M_PCB);
 			in6p->in6p_icmp6filt = NULL;
 		}
 		in6_pcbdetach(in6p);
@@ -833,4 +826,24 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	if (m != NULL)
 		m_freem(m);
 	return (error);
+}
+
+int
+rip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return ENOTDIR;
+
+	switch (name[0]) {
+	case RIPV6CTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &rip6stat, sizeof(rip6stat)));
+	default:
+		return (EOPNOTSUPP);
+	}
+	/* NOTREACHED */
 }

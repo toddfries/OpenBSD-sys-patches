@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_socket.c,v 1.34 2005/11/21 18:16:37 millert Exp $	*/
-=======
 /*	$OpenBSD: linux_socket.c,v 1.39 2009/09/05 10:28:43 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_socket.c,v 1.14 1996/04/05 00:01:50 christos Exp $	*/
 
 /*
@@ -122,7 +118,7 @@ static const int linux_to_bsd_domain_[LINUX_AF_MAX] = {
 	AF_UNIX,
 	AF_INET,
 	-1,		/* LINUX_AF_AX25 */
-	AF_IPX,
+	-1,		/* IPX */
 	AF_APPLETALK,
 	-1,		/* LINUX_AF_NETROM */
 	-1,		/* LINUX_AF_BRIDGE */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfs_vfsops.c,v 1.62 2006/05/29 16:49:42 avsm Exp $	*/
-=======
 /*	$OpenBSD: nfs_vfsops.c,v 1.92 2009/10/19 22:24:18 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -50,6 +46,7 @@
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/mbuf.h>
+#include <sys/dirent.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/systm.h>
@@ -72,10 +69,11 @@
 
 extern struct nfsstats nfsstats;
 extern int nfs_ticks;
+extern u_int32_t nfs_procids[NFS_NPROCS];
 
-int nfs_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
-int nfs_checkexp(struct mount *mp, struct mbuf *nam,
-	 int *extflagsp, struct ucred **credanonp);
+int		nfs_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
+int		nfs_checkexp(struct mount *, struct mbuf *, int *, struct ucred **);
+struct mount	*nfs_mount_diskless(struct nfs_dlmount *, char *, int);
 
 /*
  * nfs vfs operations.
@@ -96,17 +94,6 @@ const struct vfsops nfs_vfsops = {
 	nfs_checkexp
 };
 
-<<<<<<< HEAD
-extern u_int32_t nfs_procids[NFS_NPROCS];
-extern u_int32_t nfs_prog, nfs_vers;
-
-struct mount *nfs_mount_diskless(struct nfs_dlmount *, char *, int);
-
-#define TRUE	1
-#define	FALSE	0
-
-=======
->>>>>>> origin/master
 /*
  * nfs statfs call
  */
@@ -117,18 +104,10 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	struct nfs_statfs *sfp = NULL;
 	struct nfsm_info	info;
 	u_int32_t *tl;
-<<<<<<< HEAD
-	int32_t t1, t2;
-	caddr_t bpos, dpos, cp2;
-	struct nfsmount *nmp = VFSTONFS(mp);
-	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
-	struct mbuf *mreq, *mrep = NULL, *md, *mb, *mb2;
-=======
 	int32_t t1;
 	caddr_t cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
 	int error = 0, retattr;
->>>>>>> origin/master
 	struct ucred *cred;
 	struct nfsnode *np;
 	u_quad_t tquad;
@@ -153,12 +132,7 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	if (info.nmi_v3)
 		nfsm_postop_attr(vp, retattr);
 	if (error) {
-<<<<<<< HEAD
-		if (mrep != NULL)
-			m_free(mrep);
-=======
 		m_freem(info.nmi_mrep);
->>>>>>> origin/master
 		goto nfsmout;
 	}
 
@@ -167,15 +141,18 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	if (info.nmi_v3) {
 		sbp->f_bsize = NFS_FABLKSIZE;
 		tquad = fxdr_hyper(&sfp->sf_tbytes);
-		sbp->f_blocks = (u_int32_t)(tquad / (u_quad_t)NFS_FABLKSIZE);
+		sbp->f_blocks = tquad / (u_quad_t)NFS_FABLKSIZE;
 		tquad = fxdr_hyper(&sfp->sf_fbytes);
-		sbp->f_bfree = (u_int32_t)(tquad / (u_quad_t)NFS_FABLKSIZE);
+		sbp->f_bfree = tquad / (u_quad_t)NFS_FABLKSIZE;
 		tquad = fxdr_hyper(&sfp->sf_abytes);
-		sbp->f_bavail = (int32_t)((quad_t)tquad / (quad_t)NFS_FABLKSIZE);
-		sbp->f_files = (fxdr_unsigned(int32_t,
-		    sfp->sf_tfiles.nfsuquad[1]) & 0x7fffffff);
-		sbp->f_ffree = (fxdr_unsigned(int32_t,
-		    sfp->sf_ffiles.nfsuquad[1]) & 0x7fffffff);
+		sbp->f_bavail = (quad_t)tquad / (quad_t)NFS_FABLKSIZE;
+
+		tquad = fxdr_hyper(&sfp->sf_tfiles);
+		sbp->f_files = tquad;
+		tquad = fxdr_hyper(&sfp->sf_ffiles);
+		sbp->f_ffree = tquad;
+		sbp->f_favail = tquad;
+		sbp->f_namemax = MAXNAMLEN;
 	} else {
 		sbp->f_bsize = fxdr_unsigned(int32_t, sfp->sf_bsize);
 		sbp->f_blocks = fxdr_unsigned(int32_t, sfp->sf_blocks);
@@ -184,20 +161,9 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 		sbp->f_files = 0;
 		sbp->f_ffree = 0;
 	}
-<<<<<<< HEAD
-	if (sbp != &mp->mnt_stat) {
-		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
-		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
-		bcopy(&mp->mnt_stat.mount_info.nfs_args,
-		    &sbp->mount_info.nfs_args, sizeof(struct nfs_args));
-	}
-	strncpy(&sbp->f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
-	nfsm_reqdone;
-=======
 	copy_statfs_info(sbp, mp);
 	m_freem(info.nmi_mrep);
 nfsmout: 
->>>>>>> origin/master
 	vrele(vp);
 	crfree(cred);
 	return (error);
@@ -211,20 +177,11 @@ nfs_fsinfo(struct nfsmount *nmp, struct vnode *vp, struct ucred *cred,
     struct proc *p)
 {
 	struct nfsv3_fsinfo *fsp;
-<<<<<<< HEAD
-	caddr_t cp;
-	int32_t t1, t2;
-=======
 	struct nfsm_info	info;
 	int32_t t1;
->>>>>>> origin/master
 	u_int32_t *tl, pref, max;
 	caddr_t cp2;
 	int error = 0, retattr;
-<<<<<<< HEAD
-	struct mbuf *mreq, *mrep, *md, *mb, *mb2;
-=======
->>>>>>> origin/master
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
 	info.nmi_mb = info.nmi_mreq = nfsm_reqhead(NFSX_FH(1));
@@ -251,9 +208,6 @@ nfs_fsinfo(struct nfsmount *nmp, struct vnode *vp, struct ucred *cred,
 		if (nmp->nm_wsize == 0)
 			nmp->nm_wsize = max;
 	}
-<<<<<<< HEAD
-	nfsm_reqdone;
-=======
 	pref = fxdr_unsigned(u_int32_t, fsp->fs_rtpref);
 	if (pref < nmp->nm_rsize)
 		nmp->nm_rsize = (pref + NFS_FABLKSIZE - 1) &
@@ -277,7 +231,6 @@ nfs_fsinfo(struct nfsmount *nmp, struct vnode *vp, struct ucred *cred,
 
 	m_freem(info.nmi_mrep);
 nfsmout: 
->>>>>>> origin/master
 	return (error);
 }
 
@@ -640,6 +593,9 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	if (error)
 		return (error);
 
+	if ((args.flags & (NFSMNT_NFSV3|NFSMNT_RDIRPLUS)) == NFSMNT_RDIRPLUS)
+		return (EINVAL);
+
 	if (nfs_niothreads < 0) {
 		nfs_niothreads = 4;
 		nfs_getset_niothreads(1);
@@ -697,9 +653,8 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam, char *pth,
 		m_freem(nam);
 		return (0);
 	} else {
-		MALLOC(nmp, struct nfsmount *, sizeof (struct nfsmount),
-		    M_NFSMNT, M_WAITOK);
-		bzero((caddr_t)nmp, sizeof (struct nfsmount));
+		nmp = malloc(sizeof(struct nfsmount), M_NFSMNT,
+		    M_WAITOK|M_ZERO);
 		mp->mnt_data = (qaddr_t)nmp;
 	}
 
@@ -712,11 +667,6 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam, char *pth,
 	nmp->nm_readdirsize = NFS_READDIRSIZE;
 	nmp->nm_numgrps = NFS_MAXGRPS;
 	nmp->nm_readahead = NFS_DEFRAHEAD;
-<<<<<<< HEAD
-	nmp->nm_deadthresh = NQ_DEADTHRESH;
-	nmp->nm_inprog = NULLVP;
-=======
->>>>>>> origin/master
 	nmp->nm_fhsize = argp->fhsize;
 	nmp->nm_acregmin = NFS_MINATTRTIMO;
 	nmp->nm_acregmax = NFS_MAXATTRTIMO;
@@ -762,58 +712,27 @@ bad:
 	return (error);
 }
 
-/*
- * unmount system call
- */
+/* unmount system call */
 int
-nfs_unmount(mp, mntflags, p)
-	struct mount *mp;
-	int mntflags;
-	struct proc *p;
+nfs_unmount(struct mount *mp, int mntflags, struct proc *p)
 {
 	struct nfsmount *nmp;
-	int error, flags = 0;
+	int error, flags;
+
+	nmp = VFSTONFS(mp);
+	flags = 0;
 
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
-	nmp = VFSTONFS(mp);
-	/*
-	 * Goes something like this..
-	 * - Call vflush() to clear out vnodes for this file system,
-	 *   except for the root vnode.
-	 * - Close the socket
-	 * - Free up the data structures
-	 */
 
-	/*
-	 * Must handshake with nqnfs_clientd() if it is active.
-	 */
-	nmp->nm_flag |= NFSMNT_DISMINPROG;
-	while (nmp->nm_inprog != NULLVP)
-		(void) tsleep((caddr_t)&lbolt, PSOCK, "nfsdism", 0);
 	error = vflush(mp, NULL, flags);
-	if (error) {
-		nmp->nm_flag &= ~NFSMNT_DISMINPROG;
+	if (error)
 		return (error);
-	}
-
-	/*
-	 * We are now committed to the unmount.
-	 * For NQNFS, let the server daemon free the nfsmount structure.
-	 */
-	if (nmp->nm_flag & NFSMNT_KERB)
-		nmp->nm_flag |= NFSMNT_DISMNT;
 
 	nfs_disconnect(nmp);
 	m_freem(nmp->nm_nam);
-<<<<<<< HEAD
-
-	if ((nmp->nm_flag & NFSMNT_KERB) == 0)
-		free((caddr_t)nmp, M_NFSMNT);
-=======
 	timeout_del(&nmp->nm_rtimeout);
 	free(nmp, M_NFSMNT);
->>>>>>> origin/master
 	return (0);
 }
 
@@ -834,8 +753,6 @@ nfs_root(struct mount *mp, struct vnode **vpp)
 	*vpp = NFSTOV(np);
 	return (0);
 }
-
-extern int syncprt;
 
 /*
  * Flush out the buffer cache

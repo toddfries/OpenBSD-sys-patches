@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_ipsp.c,v 1.167 2007/01/18 20:00:19 henning Exp $	*/
-=======
 /*	$OpenBSD: ip_ipsp.c,v 1.181 2010/07/09 16:58:06 reyk Exp $	*/
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -244,7 +240,7 @@ reserve_spi(u_int rdomain, u_int32_t sspi, u_int32_t tspi,
 		if (sspi == tspi)  /* Specific SPI asked. */
 			spi = tspi;
 		else    /* Range specified */
-			spi = sspi + (arc4random() % (tspi - sspi));
+			spi = sspi + arc4random_uniform(tspi - sspi);
 
 		/* Don't allocate reserved SPIs.  */
 		if (spi >= SPI_RESERVED_MIN && spi <= SPI_RESERVED_MAX)
@@ -611,16 +607,12 @@ tdb_rehash(void)
 
 	tdb_hashmask = (tdb_hashmask << 1) | 1;
 
-	MALLOC(new_tdbh, struct tdb **,
-	    sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB, M_WAITOK);
-	MALLOC(new_tdbaddr, struct tdb **,
-	    sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB, M_WAITOK);
-	MALLOC(new_srcaddr, struct tdb **,
-	    sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB, M_WAITOK);
-
-	bzero(new_tdbh, sizeof(struct tdb *) * (tdb_hashmask + 1));
-	bzero(new_tdbaddr, sizeof(struct tdb *) * (tdb_hashmask + 1));
-	bzero(new_srcaddr, sizeof(struct tdb *) * (tdb_hashmask + 1));
+	new_tdbh = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	    M_WAITOK | M_ZERO);
+	new_tdbaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	    M_WAITOK | M_ZERO);
+	new_srcaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	    M_WAITOK | M_ZERO);
 
 	for (i = 0; i <= old_hashmask; i++) {
 		for (tdbp = tdbh[i]; tdbp != NULL; tdbp = tdbnp) {
@@ -651,13 +643,13 @@ tdb_rehash(void)
 		}
 	}
 
-	FREE(tdbh, M_TDB);
+	free(tdbh, M_TDB);
 	tdbh = new_tdbh;
 
-	FREE(tdbaddr, M_TDB);
+	free(tdbaddr, M_TDB);
 	tdbaddr = new_tdbaddr;
 
-	FREE(tdbsrc, M_TDB);
+	free(tdbsrc, M_TDB);
 	tdbsrc = new_srcaddr;
 }
 
@@ -671,19 +663,12 @@ puttdb(struct tdb *tdbp)
 	int s = spltdb();
 
 	if (tdbh == NULL) {
-		MALLOC(tdbh, struct tdb **,
-		    sizeof(struct tdb *) * (tdb_hashmask + 1),
-		    M_TDB, M_WAITOK);
-		MALLOC(tdbaddr, struct tdb **,
-		    sizeof(struct tdb *) * (tdb_hashmask + 1),
-		    M_TDB, M_WAITOK);
-		MALLOC(tdbsrc, struct tdb **,
-		    sizeof(struct tdb *) * (tdb_hashmask + 1),
-		    M_TDB, M_WAITOK);
-
-		bzero(tdbh, sizeof(struct tdb *) * (tdb_hashmask + 1));
-		bzero(tdbaddr, sizeof(struct tdb *) * (tdb_hashmask + 1));
-		bzero(tdbsrc, sizeof(struct tdb *) * (tdb_hashmask + 1));
+		tdbh = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+		    M_WAITOK | M_ZERO);
+		tdbaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1),
+		    M_TDB, M_WAITOK | M_ZERO);
+		tdbsrc = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1),
+		    M_TDB, M_WAITOK | M_ZERO);
 	}
 
 	hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
@@ -801,8 +786,7 @@ tdb_alloc(u_int rdomain)
 {
 	struct tdb *tdbp;
 
-	MALLOC(tdbp, struct tdb *, sizeof(struct tdb), M_TDB, M_WAITOK);
-	bzero((caddr_t) tdbp, sizeof(struct tdb));
+	tdbp = malloc(sizeof(*tdbp), M_TDB, M_WAITOK | M_ZERO);
 
 	/* Init Incoming SA-Binding Queues. */
 	TAILQ_INIT(&tdbp->tdb_inp_out);
@@ -913,7 +897,7 @@ tdb_free(struct tdb *tdbp)
 	if ((tdbp->tdb_inext) && (tdbp->tdb_inext->tdb_onext == tdbp))
 		tdbp->tdb_inext->tdb_onext = NULL;
 
-	FREE(tdbp, M_TDB);
+	free(tdbp, M_TDB);
 }
 
 /*
@@ -1070,7 +1054,7 @@ ipsp_reffree(struct ipsec_ref *ipr)
 		    ipr->ref_count, ipr, ipr->ref_len, ipr->ref_malloctype);
 #endif
 	if (--ipr->ref_count <= 0)
-		FREE(ipr, ipr->ref_malloctype);
+		free(ipr, ipr->ref_malloctype);
 }
 
 /* Mark a TDB as TDBF_SKIPCRYPTO. */

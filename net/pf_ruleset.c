@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: pf_ruleset.c,v 1.6 2010/01/18 23:52:46 mcbride Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier

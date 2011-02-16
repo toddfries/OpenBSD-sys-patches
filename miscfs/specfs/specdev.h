@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: specdev.h,v 1.18 2006/06/02 20:25:09 pedro Exp $	*/
-=======
 /*	$OpenBSD: specdev.h,v 1.29 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: specdev.h,v 1.12 1996/02/13 13:13:01 mycroft Exp $	*/
 
 /*
@@ -47,7 +43,7 @@ struct specinfo {
 	struct  mount *si_mountpoint;
 	dev_t	si_rdev;
 	struct	lockf *si_lockf;
-	daddr_t si_lastr;
+	daddr64_t si_lastr;
 	union {
 		struct vnode *ci_parent; /* pointer back to parent device */
 		u_int8_t ci_bitmap[8]; /* bitmap of devices cloned off us */
@@ -95,44 +91,22 @@ struct	buf;
 struct	uio;
 
 int	spec_badop(void *);
-int	spec_ebadf(void *);
-
-int	spec_lookup(void *);
-#define	spec_create	spec_badop
-#define	spec_mknod	spec_badop
+int	spec_getattr(void *);
+int	spec_setattr(void *);
+int	spec_access(void *);
 int	spec_open(void *);
 int	spec_close(void *);
-#define	spec_access	spec_ebadf
-#define	spec_getattr	spec_ebadf
-#define	spec_setattr	spec_ebadf
 int	spec_read(void *);
 int	spec_write(void *);
 int	spec_ioctl(void *);
 int	spec_poll(void *);
 int	spec_kqfilter(void *);
 int	spec_fsync(void *);
-#define	spec_remove	spec_badop
-#define	spec_link	spec_badop
-#define	spec_rename	spec_badop
-#define	spec_mkdir	spec_badop
-#define	spec_rmdir	spec_badop
-#define	spec_symlink	spec_badop
-#define	spec_readdir	spec_badop
-#define	spec_readlink	spec_badop
-#define	spec_abortop	spec_badop
-int spec_inactive(void *);
-#define	spec_reclaim	nullop
-#define spec_lock       vop_generic_lock
-#define spec_unlock     vop_generic_unlock
-#define spec_islocked   vop_generic_islocked
-int	spec_bmap(void *);
+int	spec_inactive(void *);
 int	spec_strategy(void *);
 int	spec_print(void *);
 int	spec_pathconf(void *);
 int	spec_advlock(void *);
-#define	spec_reallocblks spec_badop
-#define	spec_bwrite	vop_generic_bwrite
-#define spec_revoke     vop_generic_revoke
 
 /* spec_subr.c */
 int	spec_open_clone(struct vop_open_args *);

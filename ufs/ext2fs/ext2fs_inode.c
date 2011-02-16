@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_inode.c,v 1.33 2006/06/18 14:18:25 pedro Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_inode.c,v 1.43 2008/11/23 23:52:35 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_inode.c,v 1.24 2001/06/19 12:59:18 wiz Exp $	*/
 
 /*
@@ -59,8 +55,8 @@
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 
-static int ext2fs_indirtrunc(struct inode *, ufs1_daddr_t, ufs1_daddr_t,
-				ufs1_daddr_t, int, long *);
+static int ext2fs_indirtrunc(struct inode *, int32_t, int32_t,
+				int32_t, int, long *);
 
 /*
  * Get the size of an inode.
@@ -109,13 +105,9 @@ ext2fs_setsize(struct inode *ip, u_int64_t size)
  * Last reference to an inode.  If necessary, write or delete it.
  */
 int
-ext2fs_inactive(v)
-	void *v;
+ext2fs_inactive(void *v)
 {   
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 	struct proc *p = ap->a_p;
@@ -227,9 +219,9 @@ int
 ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 {
 	struct vnode *ovp = ITOV(oip);
-	ufs1_daddr_t lastblock;
-	ufs1_daddr_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
-	ufs1_daddr_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
+	int32_t lastblock;
+	int32_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
+	int32_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
 	struct m_ext2fs *fs;
 	struct buf *bp;
 	int offset, size, level;
@@ -319,8 +311,8 @@ ext2fs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		size = fs->e2fs_bsize;
 		uvm_vnp_setsize(ovp, length);
 		uvm_vnp_uncache(ovp);
-		bzero((char *)bp->b_data + offset, (u_int)(size - offset));
-		allocbuf(bp, size);
+		bzero(bp->b_data + offset, (u_int)(size - offset));
+		bp->b_bcount = size;
 		if (aflags & B_SYNC)
 			bwrite(bp);
 		else
@@ -438,19 +430,14 @@ done:
  * NB: triple indirect blocks are untested.
  */
 static int
-ext2fs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
-	struct inode *ip;
-	ufs1_daddr_t lbn, lastbn;
-	ufs1_daddr_t dbn;
-	int level;
-	long *countp;
+ext2fs_indirtrunc(struct inode *ip, int32_t lbn, int32_t dbn, int32_t lastbn, int level, long *countp)
 {
 	int i;
 	struct buf *bp;
 	struct m_ext2fs *fs = ip->i_e2fs;
-	ufs1_daddr_t *bap;
+	int32_t *bap;
 	struct vnode *vp;
-	ufs1_daddr_t *copy = NULL, nb, nlbn, last;
+	int32_t *copy = NULL, nb, nlbn, last;
 	long blkcount, factor;
 	int nblocks, blocksreleased = 0;
 	int error = 0, allerror = 0;
@@ -494,9 +481,9 @@ ext2fs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 		return (error);
 	}
 
-	bap = (ufs1_daddr_t *)bp->b_data;
+	bap = (int32_t *)bp->b_data;
 	if (lastbn >= 0) {
-		MALLOC(copy, ufs1_daddr_t *, fs->e2fs_bsize, M_TEMP, M_WAITOK);
+		copy = malloc(fs->e2fs_bsize, M_TEMP, M_WAITOK);
 		memcpy((caddr_t)copy, (caddr_t)bap, (u_int)fs->e2fs_bsize);
 		memset((caddr_t)&bap[last + 1], 0,
 			(u_int)(NINDIR(fs) - (last + 1)) * sizeof (u_int32_t));
@@ -517,7 +504,7 @@ ext2fs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 			continue;
 		if (level > SINGLE) {
 			error = ext2fs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
-						   (ufs1_daddr_t)-1, level - 1,
+						   (int32_t)-1, level - 1,
 						   &blkcount);
 			if (error)
 				allerror = error;
@@ -543,7 +530,7 @@ ext2fs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 	}
 
 	if (copy != NULL) {
-		FREE(copy, M_TEMP);
+		free(copy, M_TEMP);
 	} else {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);

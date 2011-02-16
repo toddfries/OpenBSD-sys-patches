@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pglist.h,v 1.2 2001/11/07 02:55:50 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_pglist.h,v 1.6 2008/06/26 05:42:20 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_pglist.h,v 1.3 2001/05/02 01:22:20 thorpej Exp $	*/
 
 /*-

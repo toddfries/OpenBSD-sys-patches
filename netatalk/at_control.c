@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: at_control.c,v 1.9 2006/06/17 14:14:12 henning Exp $	*/
-=======
 /*	$OpenBSD: at_control.c,v 1.17 2010/09/27 20:16:17 guenther Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -171,8 +167,7 @@ at_control( cmd, data, ifp, p )
 	    panic( "at_control" );
 
 	if ( aa == (struct at_ifaddr *) 0 ) {
-	    aa0 = malloc(sizeof(struct at_ifaddr), M_IFADDR, M_WAITOK);
-	    bzero(aa0, sizeof(struct at_ifaddr));
+	    aa0 = malloc(sizeof(*aa0), M_IFADDR, M_WAITOK | M_ZERO);
 
 	    if (( aa = at_ifaddr ) != NULL ) {
 		/*
@@ -366,7 +361,7 @@ at_ifinit( ifp, aa, sat )
 	    if ( sat->sat_addr.s_net == ATADDR_ANYNET ) {
 		if ( nnets != 1 ) {
 		    net = ntohs( nr.nr_firstnet ) +
-		    	arc4random() % ( nnets - 1 );
+		    	arc4random_uniform( nnets - 1 );
 		} else {
 		    net = ntohs( nr.nr_firstnet );
 		}

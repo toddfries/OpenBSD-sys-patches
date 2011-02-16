@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ffs_extern.h,v 1.28 2006/03/31 12:19:42 pedro Exp $	*/
-=======
 /*	$OpenBSD: ffs_extern.h,v 1.37 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ffs_extern.h,v 1.4 1996/02/09 22:22:22 christos Exp $	*/
 
 /*
@@ -103,21 +99,21 @@ extern struct vops	ffs_specvops;
 extern struct vops	ffs_fifovops;
 
 /* ffs_alloc.c */
-int ffs_alloc(struct inode *, daddr_t, daddr_t , int, struct ucred *,
-		   daddr_t *);
-int ffs_realloccg(struct inode *, daddr_t, daddr_t, int, int ,
-		       struct ucred *, struct buf **, daddr_t *);
+int ffs_alloc(struct inode *, daddr64_t, daddr64_t , int, struct ucred *,
+		   daddr64_t *);
+int ffs_realloccg(struct inode *, daddr64_t, daddr64_t, int, int ,
+		       struct ucred *, struct buf **, daddr64_t *);
 int ffs_reallocblks(void *);
 int ffs_inode_alloc(struct inode *, mode_t, struct ucred *, struct vnode **);
 int ffs_inode_free(struct inode *, ino_t, mode_t);
 int ffs_freefile(struct inode *, ino_t, mode_t);
 
-ufs1_daddr_t ffs1_blkpref(struct inode *, daddr_t, int, ufs1_daddr_t *);
+int32_t ffs1_blkpref(struct inode *, daddr64_t, int, int32_t *);
 #ifdef FFS2
-ufs2_daddr_t ffs2_blkpref(struct inode *, daddr_t, int, ufs2_daddr_t *);
+int64_t ffs2_blkpref(struct inode *, daddr64_t, int, int64_t *);
 #endif
-void ffs_blkfree(struct inode *, daddr_t, long);
-void ffs_clusteracct(struct fs *, struct cg *, daddr_t, int);
+void ffs_blkfree(struct inode *, daddr64_t, long);
+void ffs_clusteracct(struct fs *, struct cg *, daddr64_t, int);
 
 /* ffs_balloc.c */
 int ffs_balloc(struct inode *, off_t, int, struct ucred *, int, struct buf **);
@@ -133,17 +129,10 @@ void ffs_fragacct(struct fs *, int, int32_t[], int);
 #ifdef DIAGNOSTIC
 void	ffs_checkoverlap(struct buf *, struct inode *);
 #endif
-<<<<<<< HEAD
-int   ffs_isfreeblock(struct fs *, unsigned char *, daddr_t);
-int ffs_isblock(struct fs *, unsigned char *, daddr_t);
-void ffs_clrblock(struct fs *, u_char *, daddr_t);
-void ffs_setblock(struct fs *, unsigned char *, daddr_t);
-=======
 int  ffs_isfreeblock(struct fs *, u_char *, daddr64_t);
 int  ffs_isblock(struct fs *, u_char *, daddr64_t);
 void ffs_clrblock(struct fs *, u_char *, daddr64_t);
 void ffs_setblock(struct fs *, u_char *, daddr64_t);
->>>>>>> origin/master
 
 /* ffs_vfsops.c */
 int ffs_mountroot(void);
@@ -189,13 +178,13 @@ void  softdep_load_inodeblock(struct inode *);
 void  softdep_freefile(struct vnode *, ino_t, mode_t);
 void  softdep_setup_freeblocks(struct inode *, off_t);
 void  softdep_setup_inomapdep(struct buf *, struct inode *, ino_t);
-void  softdep_setup_blkmapdep(struct buf *, struct fs *, daddr_t);
-void  softdep_setup_allocdirect(struct inode *, ufs_lbn_t, daddr_t,
-            daddr_t, long, long, struct buf *);
+void  softdep_setup_blkmapdep(struct buf *, struct fs *, daddr64_t);
+void  softdep_setup_allocdirect(struct inode *, daddr64_t, daddr64_t,
+            daddr64_t, long, long, struct buf *);
 void  softdep_setup_allocindir_meta(struct buf *, struct inode *,
-            struct buf *, int, daddr_t);
-void  softdep_setup_allocindir_page(struct inode *, ufs_lbn_t,
-            struct buf *, int, daddr_t, daddr_t, struct buf *);
+            struct buf *, int, daddr64_t);
+void  softdep_setup_allocindir_page(struct inode *, daddr64_t,
+            struct buf *, int, daddr64_t, daddr64_t, struct buf *);
 void  softdep_fsync_mountdev(struct vnode *, int);
 int   softdep_sync_metadata(struct vop_fsync_args *);
 int   softdep_fsync(struct vnode *);

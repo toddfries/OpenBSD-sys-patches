@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tcp.h,v 1.16 2005/12/10 01:30:14 deraadt Exp $	*/
-=======
 /*	$OpenBSD: tcp.h,v 1.18 2010/10/23 22:50:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tcp.h,v 1.8 1995/04/17 05:32:58 cgd Exp $	*/
 
 /*

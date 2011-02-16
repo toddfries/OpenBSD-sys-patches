@@ -1,4 +1,4 @@
-/*	$OpenBSD: fat.h,v 1.8 2006/10/03 19:49:06 pedro Exp $	*/
+/*	$OpenBSD: fat.h,v 1.9 2006/12/15 03:04:24 krw Exp $	*/
 /*	$NetBSD: fat.h,v 1.11 1997/10/17 11:23:49 ws Exp $	*/
 
 /*-

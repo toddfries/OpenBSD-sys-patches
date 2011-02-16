@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_loan.c,v 1.25 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_loan.c,v 1.34 2009/07/22 21:05:37 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_loan.c,v 1.22 2000/06/27 17:29:25 mrg Exp $	*/
 
 /*
@@ -143,8 +139,6 @@ uvm_loanentry(struct uvm_faultinfo *ufi, void ***output, int flags)
 	/*
 	 * lock us the rest of the way down
 	 */
-	if (aref->ar_amap)
-		amap_lock(aref->ar_amap);
 	if (uobj)
 		simple_lock(&uobj->vmobjlock);
 
@@ -328,7 +322,7 @@ uvm_loananon(struct uvm_faultinfo *ufi, void ***output, int flags,
 	 */
 	if (flags & UVM_LOAN_TOANON) {
 		simple_lock(&anon->an_lock);
-		pg = anon->u.an_page;
+		pg = anon->an_page;
 		if (pg && (pg->pg_flags & PQ_ANON) != 0 && anon->an_ref == 1)
 			/* read protect it */
 			pmap_page_protect(pg, VM_PROT_READ);
@@ -373,7 +367,7 @@ uvm_loananon(struct uvm_faultinfo *ufi, void ***output, int flags,
 	 * we have the page and its owner locked: do the loan now.
 	 */
 
-	pg = anon->u.an_page;
+	pg = anon->an_page;
 	uvm_lock_pageq();
 	if (pg->loan_count == 0)
 		pmap_page_protect(pg, VM_PROT_READ);
@@ -465,8 +459,6 @@ uvm_loanuobj(struct uvm_faultinfo *ufi, void ***output, int flags, vaddr_t va)
 		 */
 
 		locked = uvmfault_relock(ufi);
-		if (locked && amap)
-			amap_lock(amap);
 		simple_lock(&uobj->vmobjlock);
 
 		/*
@@ -560,7 +552,7 @@ uvm_loanuobj(struct uvm_faultinfo *ufi, void ***output, int flags, vaddr_t va)
 		uvmfault_unlockall(ufi, amap, uobj, NULL);
 		return(-1);
 	}
-	anon->u.an_page = pg;
+	anon->an_page = pg;
 	pg->uanon = anon;
 	uvm_lock_pageq();
 	if (pg->loan_count == 0)
@@ -602,8 +594,6 @@ uvm_loanzero(struct uvm_faultinfo *ufi, void ***output, int flags)
 			uvm_wait("loanzero1");
 			if (!uvmfault_relock(ufi))
 				return(0);
-			if (ufi->entry->aref.ar_amap)
-				amap_lock(ufi->entry->aref.ar_amap);
 			if (ufi->entry->object.uvm_obj)
 				simple_lock(
 				    &ufi->entry->object.uvm_obj->vmobjlock);
@@ -643,8 +633,6 @@ uvm_loanzero(struct uvm_faultinfo *ufi, void ***output, int flags)
 			return (0);
 
 		/* relock everything else */
-		if (ufi->entry->aref.ar_amap)
-			amap_lock(ufi->entry->aref.ar_amap);
 		if (ufi->entry->object.uvm_obj)
 			simple_lock(&ufi->entry->object.uvm_obj->vmobjlock);
 		/* ... and try again */

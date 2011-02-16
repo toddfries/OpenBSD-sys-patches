@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uk.c,v 1.11 2006/07/11 21:18:12 dlg Exp $	*/
-=======
 /*	$OpenBSD: uk.c,v 1.15 2010/07/01 05:11:18 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uk.c,v 1.15 1996/03/17 00:59:57 thorpej Exp $	*/
 
 /*
@@ -131,7 +127,7 @@ ukopen(dev_t dev, int flag, int fmt, struct proc *p)
 
 /*
  * close the device.. only called if we are the LAST
- * occurence of an open device
+ * occurrence of an open device
  */
 int
 ukclose(dev_t dev, int flag, int fmt, struct proc *p)

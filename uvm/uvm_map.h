@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_map.h,v 1.37 2007/04/04 18:02:59 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_map.h,v 1.44 2010/12/24 21:49:04 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_map.h,v 1.24 2001/02/18 21:19:08 chs Exp $	*/
 
 /* 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_misc.c,v 1.59 2006/10/08 19:49:57 sturm Exp $	*/
-=======
 /*	$OpenBSD: linux_misc.c,v 1.66 2011/02/11 21:40:04 pirofti Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -1464,7 +1460,7 @@ linux_sys_sysinfo(p, v, retval)
 	si.loads[0] = la->ldavg[0] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
 	si.loads[1] = la->ldavg[1] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
 	si.loads[2] = la->ldavg[2] * LINUX_SYSINFO_LOADS_SCALE / la->fscale;
-	si.totalram = ctob(physmem);
+	si.totalram = ptoa(physmem);
 	si.freeram = uvmexp.free * uvmexp.pagesize;
 	si.sharedram = 0;/* XXX */
 	si.bufferram = bufpages * PAGE_SIZE;

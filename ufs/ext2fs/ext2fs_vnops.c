@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_vnops.c,v 1.45 2007/01/16 17:52:18 thib Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_vnops.c,v 1.58 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_vnops.c,v 1.1 1997/06/11 09:34:09 bouyer Exp $	*/
 
 /*
@@ -81,15 +77,9 @@ static int ext2fs_chown(struct vnode *, uid_t, gid_t, struct ucred *, struct pro
  * Create a regular file
  */
 int
-ext2fs_create(v)
-	void *v;
+ext2fs_create(void *v)
 {
-	struct vop_create_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-	} */ *ap = v;
+	struct vop_create_args *ap = v;
 	return ext2fs_makeinode(MAKEIMODE(ap->a_vap->va_type, 
 					  ap->a_vap->va_mode),
 			  	ap->a_dvp, ap->a_vpp, ap->a_cnp);
@@ -100,18 +90,12 @@ ext2fs_create(v)
  */
 /* ARGSUSED */
 int
-ext2fs_mknod(v)
-	void *v;
+ext2fs_mknod(void *v)
 {
-	struct vop_mknod_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-	} */ *ap = v;
-	register struct vattr *vap = ap->a_vap;
-	register struct vnode **vpp = ap->a_vpp;
-	register struct inode *ip;
+	struct vop_mknod_args *ap = v;
+	struct vattr *vap = ap->a_vap;
+	struct vnode **vpp = ap->a_vpp;
+	struct inode *ip;
 	int error;
 
 	if ((error =
@@ -146,15 +130,9 @@ ext2fs_mknod(v)
  */
 /* ARGSUSED */
 int
-ext2fs_open(v)
-	void *v;
+ext2fs_open(void *v)
 {
-	struct vop_open_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_open_args *ap = v;
 
 	/*
 	 * Files marked append-only must be opened for appending.
@@ -166,17 +144,11 @@ ext2fs_open(v)
 }
 
 int
-ext2fs_access(v)
-	void *v;
+ext2fs_access(void *v)
 {
-	struct vop_access_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct inode *ip = VTOI(vp);
+	struct vop_access_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct inode *ip = VTOI(vp);
 	mode_t mode = ap->a_mode;
 
 	/* If immutable bit set, nobody gets to write it. */
@@ -189,18 +161,12 @@ ext2fs_access(v)
 
 /* ARGSUSED */
 int
-ext2fs_getattr(v)
-	void *v;
+ext2fs_getattr(void *v)
 {
-	struct vop_getattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct inode *ip = VTOI(vp);
-	register struct vattr *vap = ap->a_vap;
+	struct vop_getattr_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct inode *ip = VTOI(vp);
+	struct vattr *vap = ap->a_vap;
 	struct timeval tv;
 
 	getmicrotime(&tv);
@@ -247,20 +213,14 @@ ext2fs_getattr(v)
  * Set attribute vnode op. called from several syscalls
  */
 int
-ext2fs_setattr(v)
-	void *v;
+ext2fs_setattr(void *v)
 {
-	struct vop_setattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vattr *vap = ap->a_vap;
-	register struct vnode *vp = ap->a_vp;
-	register struct inode *ip = VTOI(vp);
-	register struct ucred *cred = ap->a_cred;
-	register struct proc *p = ap->a_p;
+	struct vop_setattr_args *ap = v;
+	struct vattr *vap = ap->a_vap;
+	struct vnode *vp = ap->a_vp;
+	struct inode *ip = VTOI(vp);
+	struct ucred *cred = ap->a_cred;
+	struct proc *p = ap->a_p;
 	int error;
 
 	/*
@@ -340,11 +300,13 @@ ext2fs_setattr(v)
 			((vap->va_vaflags & VA_UTIMES_NULL) == 0 || 
 			(error = VOP_ACCESS(vp, VWRITE, cred, p))))
 			return (error);
-		if (vap->va_atime.tv_sec != VNOVAL)
-			if (!(vp->v_mount->mnt_flag & MNT_NOATIME))
-				ip->i_flag |= IN_ACCESS;
 		if (vap->va_mtime.tv_sec != VNOVAL)
 			ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		if (vap->va_atime.tv_sec != VNOVAL) {
+			if (!(vp->v_mount->mnt_flag & MNT_NOATIME) ||
+			    (ip->i_flag & (IN_CHANGE | IN_UPDATE)))
+				ip->i_flag |= IN_ACCESS;
+		}
 		error = ext2fs_update(ip, &vap->va_atime, &vap->va_mtime, 1);
 		if (error)
 			return (error);
@@ -363,13 +325,9 @@ ext2fs_setattr(v)
  * Inode must be locked before calling.
  */
 static int
-ext2fs_chmod(vp, mode, cred, p)
-	register struct vnode *vp;
-	register mode_t mode;
-	register struct ucred *cred;
-	struct proc *p;
+ext2fs_chmod(struct vnode *vp, mode_t mode, struct ucred *cred, struct proc *p)
 {
-	register struct inode *ip = VTOI(vp);
+	struct inode *ip = VTOI(vp);
 	int error;
 
 	if (cred->cr_uid != ip->i_e2fs_uid && (error = suser_ucred(cred)))
@@ -393,14 +351,9 @@ ext2fs_chmod(vp, mode, cred, p)
  * inode must be locked prior to call.
  */
 static int
-ext2fs_chown(vp, uid, gid, cred, p)
-	register struct vnode *vp;
-	uid_t uid;
-	gid_t gid;
-	struct ucred *cred;
-	struct proc *p;
+ext2fs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred, struct proc *p)
 {
-	register struct inode *ip = VTOI(vp);
+	struct inode *ip = VTOI(vp);
 	uid_t ouid;
 	gid_t ogid;
 	int error = 0;
@@ -433,17 +386,12 @@ ext2fs_chown(vp, uid, gid, cred, p)
 }
 
 int
-ext2fs_remove(v)
-	void *v;
+ext2fs_remove(void *v)
 {
-	struct vop_remove_args /* {
-		struct vnode *a_dvp;
-		struct vnode *a_vp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
-	register struct inode *ip;
-	register struct vnode *vp = ap->a_vp;
-	register struct vnode *dvp = ap->a_dvp;
+	struct vop_remove_args *ap = v;
+	struct inode *ip;
+	struct vnode *vp = ap->a_vp;
+	struct vnode *dvp = ap->a_dvp;
 	int error;
 
 	ip = VTOI(vp);
@@ -471,19 +419,14 @@ out:
  * link vnode call
  */
 int
-ext2fs_link(v)
-	void *v;
+ext2fs_link(void *v)
 {
-	struct vop_link_args /* {
-		struct vnode *a_dvp;
-		struct vnode *a_vp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
-	register struct vnode *dvp = ap->a_dvp;
-	register struct vnode *vp = ap->a_vp;
-	register struct componentname *cnp = ap->a_cnp;
+	struct vop_link_args *ap = v;
+	struct vnode *dvp = ap->a_dvp;
+	struct vnode *vp = ap->a_vp;
+	struct componentname *cnp = ap->a_cnp;
 	struct proc *p = cnp->cn_proc;
-	register struct inode *ip;
+	struct inode *ip;
 	int error;
 
 #ifdef DIAGNOSTIC
@@ -558,27 +501,19 @@ out2:
  *    directory.
  */
 int
-ext2fs_rename(v)
-	void *v;
+ext2fs_rename(void *v)
 {
-	struct vop_rename_args  /* {
-		struct vnode *a_fdvp;
-		struct vnode *a_fvp;
-		struct componentname *a_fcnp;
-		struct vnode *a_tdvp;
-		struct vnode *a_tvp;
-		struct componentname *a_tcnp;
-	} */ *ap = v;
+	struct vop_rename_args  *ap = v;
 	struct vnode *tvp = ap->a_tvp;
-	register struct vnode *tdvp = ap->a_tdvp;
+	struct vnode *tdvp = ap->a_tdvp;
 	struct vnode *fvp = ap->a_fvp;
-	register struct vnode *fdvp = ap->a_fdvp;
-	register struct componentname *tcnp = ap->a_tcnp;
-	register struct componentname *fcnp = ap->a_fcnp;
-	register struct inode *ip, *xp, *dp;
+	struct vnode *fdvp = ap->a_fdvp;
+	struct componentname *tcnp = ap->a_tcnp;
+	struct componentname *fcnp = ap->a_fcnp;
+	struct inode *ip, *xp, *dp;
 	struct proc *p = fcnp->cn_proc;
 	struct ext2fs_dirtemplate dirbuf;
-	//struct timespec ts;
+	/* struct timespec ts; */
 	int doingdirectory = 0, oldparent = 0, newparent = 0;
 	int error = 0;
 	u_char namlen;
@@ -945,19 +880,13 @@ out:
  * Mkdir system call
  */
 int
-ext2fs_mkdir(v)
-	void *v;
+ext2fs_mkdir(void *v)
 {
-	struct vop_mkdir_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-	} */ *ap = v;
-	register struct vnode *dvp = ap->a_dvp;
-	register struct vattr *vap = ap->a_vap;
-	register struct componentname *cnp = ap->a_cnp;
-	register struct inode *ip, *dp;
+	struct vop_mkdir_args *ap = v;
+	struct vnode *dvp = ap->a_dvp;
+	struct vattr *vap = ap->a_vap;
+	struct componentname *cnp = ap->a_cnp;
+	struct inode *ip, *dp;
 	struct vnode *tvp;
 	struct ext2fs_dirtemplate dirtemplate;
 	mode_t dmode;
@@ -1067,18 +996,13 @@ out:
  * Rmdir system call.
  */
 int
-ext2fs_rmdir(v)
-	void *v;
+ext2fs_rmdir(void *v)
 {
-	struct vop_rmdir_args /* {
-		struct vnode *a_dvp;
-		struct vnode *a_vp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct vnode *dvp = ap->a_dvp;
-	register struct componentname *cnp = ap->a_cnp;
-	register struct inode *ip, *dp;
+	struct vop_rmdir_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct vnode *dvp = ap->a_dvp;
+	struct componentname *cnp = ap->a_cnp;
+	struct inode *ip, *dp;
 	int error;
 
 	ip = VTOI(vp);
@@ -1147,18 +1071,11 @@ out:
  * symlink -- make a symbolic link
  */
 int
-ext2fs_symlink(v)
-	void *v;
+ext2fs_symlink(void *v)
 {
-	struct vop_symlink_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-		char *a_target;
-	} */ *ap = v;
-	register struct vnode *vp, **vpp = ap->a_vpp;
-	register struct inode *ip;
+	struct vop_symlink_args *ap = v;
+	struct vnode *vp, **vpp = ap->a_vpp;
+	struct inode *ip;
 	int len, error;
 
 	error = ext2fs_makeinode(IFLNK | ap->a_vap->va_mode, ap->a_dvp,
@@ -1187,16 +1104,11 @@ bad:
  * Return target name of a symbolic link
  */
 int
-ext2fs_readlink(v)
-	void *v;
+ext2fs_readlink(void *v)
 {
-	struct vop_readlink_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct inode *ip = VTOI(vp);
+	struct vop_readlink_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct inode *ip = VTOI(vp);
 	int isize;
 
 	isize = ext2fs_size(ip);
@@ -1212,17 +1124,10 @@ ext2fs_readlink(v)
  * Advisory record locking support
  */
 int
-ext2fs_advlock(v)
-	void *v;
+ext2fs_advlock(void *v)
 {
-	struct vop_advlock_args /* {
-		struct vnode *a_vp;
-		caddr_t  a_id;
-		int  a_op;
-		struct flock *a_fl;
-		int  a_flags;
-	} */ *ap = v;
-	register struct inode *ip = VTOI(ap->a_vp);
+	struct vop_advlock_args *ap = v;
+	struct inode *ip = VTOI(ap->a_vp);
 
 	return (lf_advlock(&ip->i_lockf, ext2fs_size(ip), ap->a_id, ap->a_op,
 	    ap->a_fl, ap->a_flags));
@@ -1232,13 +1137,10 @@ ext2fs_advlock(v)
  * Allocate a new inode.
  */
 int
-ext2fs_makeinode(mode, dvp, vpp, cnp)
-	int mode;
-	struct vnode *dvp;
-	struct vnode **vpp;
-	struct componentname *cnp;
+ext2fs_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
+    struct componentname *cnp)
 {
-	register struct inode *ip, *pdir;
+	struct inode *ip, *pdir;
 	struct vnode *tvp;
 	int error;
 
@@ -1302,16 +1204,10 @@ bad:
  */
 /* ARGSUSED */
 int
-ext2fs_fsync(v)
-	void *v;
+ext2fs_fsync(void *v)
 {
-	struct vop_fsync_args /* {
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int a_waitfor;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
+	struct vop_fsync_args *ap = v;
+	struct vnode *vp = ap->a_vp;
 
 	vflushbuf(vp, ap->a_waitfor == MNT_WAIT);
 	return (ext2fs_update(VTOI(ap->a_vp), NULL, NULL, 
@@ -1322,13 +1218,10 @@ ext2fs_fsync(v)
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-ext2fs_reclaim(v)
-	void *v;
+ext2fs_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
+	struct vop_reclaim_args *ap = v;
+	struct vnode *vp = ap->a_vp;
 	struct inode *ip;
 #ifdef DIAGNOSTIC
 	extern int prtactive;
@@ -1361,46 +1254,6 @@ ext2fs_reclaim(v)
 }
 
 /* Global vfs data structures for ext2fs. */
-<<<<<<< HEAD
-int (**ext2fs_vnodeop_p)(void *);
-struct vnodeopv_entry_desc ext2fs_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
-	{ &vop_lookup_desc, ext2fs_lookup },	/* lookup */
-	{ &vop_create_desc, ext2fs_create },	/* create */
-	{ &vop_mknod_desc, ext2fs_mknod },		/* mknod */
-	{ &vop_open_desc, ext2fs_open },		/* open */
-	{ &vop_close_desc, ufs_close },			/* close */
-	{ &vop_access_desc, ext2fs_access },	/* access */
-	{ &vop_getattr_desc, ext2fs_getattr },	/* getattr */
-	{ &vop_setattr_desc, ext2fs_setattr },	/* setattr */
-	{ &vop_read_desc, ext2fs_read },		/* read */
-	{ &vop_write_desc, ext2fs_write },		/* write */
-	{ &vop_ioctl_desc, ufs_ioctl },			/* ioctl */
-	{ &vop_poll_desc, ufs_poll },		/* poll */
-	{ &vop_kqfilter_desc, vop_generic_kqfilter },	/* kqfilter */
-	{ &vop_fsync_desc, ext2fs_fsync },		/* fsync */
-	{ &vop_remove_desc, ext2fs_remove },	/* remove */
-	{ &vop_link_desc, ext2fs_link },		/* link */
-	{ &vop_rename_desc, ext2fs_rename },	/* rename */
-	{ &vop_mkdir_desc, ext2fs_mkdir },		/* mkdir */
-	{ &vop_rmdir_desc, ext2fs_rmdir },		/* rmdir */
-	{ &vop_symlink_desc, ext2fs_symlink },	/* symlink */
-	{ &vop_readdir_desc, ext2fs_readdir },	/* readdir */
-	{ &vop_readlink_desc, ext2fs_readlink },/* readlink */
-	{ &vop_abortop_desc, vop_generic_abortop },		/* abortop */
-	{ &vop_inactive_desc, ext2fs_inactive },/* inactive */
-	{ &vop_reclaim_desc, ext2fs_reclaim },	/* reclaim */
-	{ &vop_lock_desc, ufs_lock },			/* lock */
-	{ &vop_unlock_desc, ufs_unlock },		/* unlock */
-	{ &vop_bmap_desc, ext2fs_bmap },		/* bmap */
-	{ &vop_strategy_desc, ufs_strategy },	/* strategy */
-	{ &vop_print_desc, ufs_print },			/* print */
-	{ &vop_islocked_desc, ufs_islocked },	/* islocked */
-	{ &vop_pathconf_desc, ufs_pathconf },	/* pathconf */
-	{ &vop_advlock_desc, ext2fs_advlock },	/* advlock */
-	{ &vop_bwrite_desc, vop_generic_bwrite },		/* bwrite */
-	{ NULL, NULL }
-=======
 struct vops ext2fs_vops = {
         .vop_default    = eopnotsupp,
         .vop_lookup     = ext2fs_lookup,
@@ -1437,7 +1290,6 @@ struct vops ext2fs_vops = {
         .vop_pathconf   = ufs_pathconf,
         .vop_advlock    = ext2fs_advlock,
         .vop_bwrite     = vop_generic_bwrite
->>>>>>> origin/master
 };
 
 struct vops ext2fs_specvops = {

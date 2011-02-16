@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_extern.h,v 1.12 2004/04/25 03:21:50 itojun Exp $	*/
+/*	$OpenBSD: db_extern.h,v 1.13 2006/07/06 18:14:14 miod Exp $	*/
 /*	$NetBSD: db_extern.h,v 1.1 1996/02/05 01:57:00 christos Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ntfs_vfsops.c,v 1.10 2005/10/10 15:55:07 pedro Exp $	*/
-=======
 /*	$OpenBSD: ntfs_vfsops.c,v 1.24 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -32,11 +28,6 @@
  *
  *	Id: ntfs_vfsops.c,v 1.7 1999/05/31 11:28:30 phk Exp
  */
-
-#include <sys/cdefs.h>
-#ifdef __KERNEL_RCSID
-__KERNEL_RCSID(0, "$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -360,8 +351,7 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	error = bread(devvp, BBLOCK, BBSIZE, NOCRED, &bp);
 	if (error)
 		goto out;
-	ntmp = malloc(sizeof *ntmp, M_NTFSMNT, M_WAITOK);
-	bzero(ntmp, sizeof *ntmp);
+	ntmp = malloc(sizeof *ntmp, M_NTFSMNT, M_WAITOK | M_ZERO);
 	bcopy(bp->b_data, &ntmp->ntm_bootfile, sizeof(struct bootfile));
 	brelse(bp);
 	bp = NULL;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ethersubr.c,v 1.105 2006/12/07 18:15:29 reyk Exp $	*/
-=======
 /*	$OpenBSD: if_ethersubr.c,v 1.148 2011/01/28 13:19:44 reyk Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -108,6 +104,8 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 
+#include <dev/rndvar.h>
+
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
@@ -149,14 +147,8 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet6/nd6.h>
 #endif
 
-<<<<<<< HEAD
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-=======
 #ifdef PIPEX
 #include <net/pipex.h>
->>>>>>> origin/master
 #endif
 
 #ifdef NETATALK
@@ -167,6 +159,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 extern u_char	at_org_code[ 3 ];
 extern u_char	aarp_org_code[ 3 ];
 #endif /* NETATALK */
+
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif /* MPLS */
 
 u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
@@ -183,20 +179,6 @@ ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef IPX
-		case AF_IPX:
-		    {
-			struct ipx_addr *ina = &IA_SIPX(ifa)->sipx_addr;
-
-			if (ipx_nullhost(*ina))
-				ina->ipx_host =
-				    *(union ipx_host *)(arp->ac_enaddr);
-			else
-				bcopy(ina->ipx_host.c_host,
-				    arp->ac_enaddr, sizeof(arp->ac_enaddr));
-			break;
-		    }
-#endif /* IPX */
 #ifdef NETATALK
 		case AF_APPLETALK:
 			/* Nothing to do. */
@@ -321,14 +303,9 @@ ether_output(ifp0, m0, dst, rt0)
 		if (!arpresolve(ac, rt, m, dst, edst))
 			return (0);	/* if not yet resolved */
 		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX)) {
-#if NPF > 0
-			struct pf_mtag	*t;
-
-			if ((t = pf_find_mtag(m)) == NULL || !t->routed)
-#endif
-				mcopy = m_copy(m, 0, (int)M_COPYALL);
-		}
+		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
+		    !m->m_pkthdr.pf.routed)
+			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		etype = htons(ETHERTYPE_IP);
 		break;
 #endif
@@ -337,16 +314,6 @@ ether_output(ifp0, m0, dst, rt0)
 		if (!nd6_storelladdr(ifp, rt, m, dst, (u_char *)edst))
 			return (0); /* it must be impossible, but... */
 		etype = htons(ETHERTYPE_IPV6);
-		break;
-#endif
-#ifdef IPX
-	case AF_IPX:
-		etype = htons(ETHERTYPE_IPX);
-		bcopy((caddr_t)&satosipx(dst)->sipx_addr.ipx_host,
-		    (caddr_t)edst, sizeof(edst));
-		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
-			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		break;
 #endif
 #ifdef NETATALK
@@ -399,8 +366,6 @@ ether_output(ifp0, m0, dst, rt0)
 		}
 		} break;
 #endif /* NETATALK */
-<<<<<<< HEAD
-=======
 #ifdef MPLS
        case AF_MPLS:
 		if (rt)
@@ -433,7 +398,6 @@ ether_output(ifp0, m0, dst, rt0)
 			etype = htons(ETHERTYPE_MPLS);
 		break;
 #endif /* MPLS */
->>>>>>> origin/master
 	case pseudo_AF_HDRCMPLT:
 		hdrcmplt = 1;
 		eh = (struct ether_header *)dst->sa_data;
@@ -476,11 +440,8 @@ ether_output(ifp0, m0, dst, rt0)
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
-	if (ifp0 != ifp && ifp0->if_type == IFT_CARP &&
-	    !(ifp0->if_flags & IFF_LINK1)) {
-		bcopy((caddr_t)((struct arpcom *)ifp0)->ac_enaddr,
-		    (caddr_t)eh->ether_shost, sizeof(eh->ether_shost));
-	}
+	if (ifp0 != ifp && ifp0->if_type == IFT_CARP)
+	    carp_rewrite_lladdr(ifp0, eh->ether_shost);
 #endif
 
 #if NBRIDGE > 0
@@ -518,7 +479,7 @@ ether_output(ifp0, m0, dst, rt0)
 			}
 			bcopy(&ifp->if_bridge, mtag + 1, sizeof(caddr_t));
 			m_tag_prepend(m, mtag);
-			bridge_output(ifp, m, NULL, NULL);
+			error = bridge_output(ifp, m, NULL, NULL);
 			return (error);
 		}
 	}
@@ -543,8 +504,7 @@ ether_output(ifp0, m0, dst, rt0)
 #endif /* NCARP > 0 */
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
+	if_start(ifp);
 	splx(s);
 	return (error);
 
@@ -560,8 +520,8 @@ bad:
  * the ether header, which is provided separately.
  */
 void
-ether_input(ifp, eh, m)
-	struct ifnet *ifp;
+ether_input(ifp0, eh, m)
+	struct ifnet *ifp0;
 	struct ether_header *eh;
 	struct mbuf *m;
 {
@@ -570,6 +530,7 @@ ether_input(ifp, eh, m)
 	int s, llcfound = 0;
 	struct llc *l;
 	struct arpcom *ac;
+	struct ifnet *ifp = ifp0;
 #if NTRUNK > 0
 	int i = 0;
 #endif
@@ -634,11 +595,24 @@ ether_input(ifp, eh, m)
 		else
 			m->m_flags |= M_MCAST;
 		ifp->if_imcasts++;
+#if NTRUNK > 0
+		if (ifp != ifp0)
+			ifp0->if_imcasts++;
+#endif
 	}
 
 	ifp->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
+#if NTRUNK > 0
+	if (ifp != ifp0)
+		ifp0->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
+#endif
 
 	etype = ntohs(eh->ether_type);
+
+	if (!(netisr & (1 << NETISR_RND_DONE))) {
+		add_net_randomness(etype);
+		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
+	}
 
 #if NVLAN > 0
 	if (((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN ||
@@ -682,12 +656,10 @@ ether_input(ifp, eh, m)
 		    (carp_input(m, (u_int8_t *)&eh->ether_shost,
 		    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
 			return;
-		/* Always clear multicast flags if received on a carp address */
+		/* clear mcast if received on a carp IP balanced address */
 		else if (ifp->if_type == IFT_CARP &&
-		    ifp->if_flags & IFF_LINK2 &&
 		    m->m_flags & (M_BCAST|M_MCAST) &&
-		    !bcmp(((struct arpcom *)ifp)->ac_enaddr,
-		    (caddr_t)eh->ether_dhost, ETHER_ADDR_LEN))
+		    carp_our_mcastaddr(ifp, (u_int8_t *)&eh->ether_dhost))
 			m->m_flags &= ~(M_BCAST|M_MCAST);
 	}
 #endif /* NCARP > 0 */
@@ -715,6 +687,10 @@ ether_input(ifp, eh, m)
 		}
 	}
 
+	/*
+	 * Schedule softnet interrupt and enqueue packet within the same spl.
+	 */
+	s = splnet();
 decapsulate:
 
 	switch (etype) {
@@ -735,7 +711,7 @@ decapsulate:
 		if (ifp->if_flags & IFF_NOARP)
 			goto dropanyway;
 		revarpinput(m);	/* XXX queue? */
-		return;
+		goto done;
 
 #endif
 #ifdef INET6
@@ -747,12 +723,6 @@ decapsulate:
 		inq = &ip6intrq;
 		break;
 #endif /* INET6 */
-#ifdef IPX
-	case ETHERTYPE_IPX:
-		schednetisr(NETISR_IPX);
-		inq = &ipxintrq;
-		break;
-#endif
 #ifdef NETATALK
 	case ETHERTYPE_AT:
 		schednetisr(NETISR_ATALK);
@@ -762,30 +732,20 @@ decapsulate:
 		/* probably this should be done with a NETISR as well */
 		/* XXX queue this */
 		aarpinput((struct arpcom *)ifp, m);
-		return;
+		goto done;
 #endif
 #if NPPPOE > 0 || defined(PIPEX)
 	case ETHERTYPE_PPPOEDISC:
 	case ETHERTYPE_PPPOE:
-<<<<<<< HEAD
-		/* XXX we dont have this flag */
-		/*
-		if (m->m_flags & M_PROMISC) {
-			m_freem(m);
-			return;
-		}
-		*/
-=======
->>>>>>> origin/master
 #ifndef PPPOE_SERVER
 		if (m->m_flags & (M_MCAST | M_BCAST)) {
 			m_freem(m);
-			return;
+			goto done;
 		}
 #endif
 		M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 		if (m == NULL)
-			return;
+			goto done;
 
 		eh_tmp = mtod(m, struct ether_header *);
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
@@ -806,9 +766,6 @@ decapsulate:
 
 		schednetisr(NETISR_PPPOE);
 		break;
-<<<<<<< HEAD
-#endif /* NPPPOE > 0 */
-=======
 #endif
 #ifdef AOE
 	case ETHERTYPE_AOE:
@@ -822,7 +779,6 @@ decapsulate:
 		schednetisr(NETISR_MPLS);
 		break;
 #endif
->>>>>>> origin/master
 	default:
 		if (llcfound || etype > ETHERMTU)
 			goto dropanyway;
@@ -857,7 +813,7 @@ decapsulate:
 				m_adj(m, AT_LLC_SIZE);
 				/* XXX Really this should use netisr too */
 				aarpinput((struct arpcom *)ifp, m);
-				return;
+				goto done;
 			}
 #endif /* NETATALK */
 			if (l->llc_control == LLC_UI &&
@@ -871,7 +827,7 @@ decapsulate:
 				m->m_pkthdr.len -= 6;	/* XXX */
 				M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 				if (m == 0)
-					return;
+					goto done;
 				*mtod(m, struct ether_header *) = *eh;
 				goto decapsulate;
 			}
@@ -879,12 +835,12 @@ decapsulate:
 		dropanyway:
 		default:
 			m_freem(m);
-			return;
+			goto done;
 		}
 	}
 
-	s = splnet();
 	IF_INPUT_ENQUEUE(inq, m);
+done:
 	splx(s);
 }
 
@@ -985,13 +941,11 @@ ether_ifdetach(ifp)
  * This is for reference.  We have table-driven versions of the
  * crc32 generators, which are faster than the double-loop.
  */
-u_int32_t
-ether_crc32_le(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_le_update(u_int_32_t crc, const u_int8_t *buf, size_t len)
 {
-	u_int32_t c, crc, carry;
+	u_int32_t c, carry;
 	size_t i, j;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		c = buf[i];
@@ -1007,13 +961,11 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 
-u_int32_t
-ether_crc32_be(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_be_update(u_int_32_t crc, const u_int8_t *buf, size_t len)
 {
-	u_int32_t c, crc, carry;
+	u_int32_t c, carry;
 	size_t i, j;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		c = buf[i];
@@ -1029,8 +981,8 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 #else
-u_int32_t
-ether_crc32_le(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_le_update(u_int32_t crc, const u_int8_t *buf, size_t len)
 {
 	static const u_int32_t crctab[] = {
 		0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
@@ -1039,9 +991,6 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 		0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c
 	};
 	size_t i;
-	u_int32_t crc;
-
-	crc = 0xffffffffU;	/* initial value */
 
 	for (i = 0; i < len; i++) {
 		crc ^= buf[i];
@@ -1052,8 +1001,8 @@ ether_crc32_le(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 
-u_int32_t
-ether_crc32_be(const u_int8_t *buf, size_t len)
+u_int32_t __pure
+ether_crc32_be_update(u_int32_t crc, const u_int8_t *buf, size_t len)
 {
 	static const u_int8_t rev[] = {
 		0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
@@ -1066,10 +1015,8 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 		0x350c9b64, 0x31cd86d3, 0x3c8ea00a, 0x384fbdbd
 	};
 	size_t i;
-	u_int32_t crc;
 	u_int8_t data;
 
-	crc = 0xffffffffU;	/* initial value */
 	for (i = 0; i < len; i++) {
 		data = buf[i];
 		crc = (crc << 4) ^ crctab[(crc >> 28) ^ rev[data & 0xf]];
@@ -1079,6 +1026,18 @@ ether_crc32_be(const u_int8_t *buf, size_t len)
 	return (crc);
 }
 #endif
+
+u_int32_t
+ether_crc32_le(const u_int8_t *buf, size_t len)
+{
+	return ether_crc32_le_update(0xffffffff, buf, len);
+}
+
+u_int32_t
+ether_crc32_be(const u_int8_t *buf, size_t len)
+{
+	return ether_crc32_be_update(0xffffffff, buf, len);
+}
 
 #ifdef INET
 u_char	ether_ipmulticast_min[ETHER_ADDR_LEN] =
@@ -1208,7 +1167,7 @@ ether_addmulti(ifr, ac)
 	 * New address or range; malloc a new multicast record
 	 * and link it into the interface's multicast list.
 	 */
-	enm = (struct ether_multi *)malloc(sizeof(*enm), M_IFMADDR, M_NOWAIT);
+	enm = malloc(sizeof(*enm), M_IFMADDR, M_NOWAIT);
 	if (enm == NULL) {
 		splx(s);
 		return (ENOBUFS);
@@ -1219,6 +1178,8 @@ ether_addmulti(ifr, ac)
 	enm->enm_refcount = 1;
 	LIST_INSERT_HEAD(&ac->ac_multiaddrs, enm, enm_list);
 	ac->ac_multicnt++;
+	if (bcmp(addrlo, addrhi, ETHER_ADDR_LEN) != 0)
+		ac->ac_multirangecnt++;
 	splx(s);
 	/*
 	 * Return ENETRESET to inform the driver that the list has changed
@@ -1267,6 +1228,8 @@ ether_delmulti(ifr, ac)
 	LIST_REMOVE(enm, enm_list);
 	free(enm, M_IFMADDR);
 	ac->ac_multicnt--;
+	if (bcmp(addrlo, addrhi, ETHER_ADDR_LEN) != 0)
+		ac->ac_multirangecnt--;
 	splx(s);
 	/*
 	 * Return ENETRESET to inform the driver that the list has changed

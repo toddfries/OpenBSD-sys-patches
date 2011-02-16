@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_termios.c,v 1.11 2000/08/29 02:22:13 brad Exp $	 */
+/*	$OpenBSD: svr4_termios.c,v 1.12 2002/03/14 01:26:51 millert Exp $	 */
 /*	$NetBSD: svr4_termios.c,v 1.9 1996/04/11 12:53:48 christos Exp $	 */
 
 /*

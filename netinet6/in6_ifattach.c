@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_ifattach.c,v 1.43 2006/08/31 12:37:31 mcbride Exp $	*/
-=======
 /*	$OpenBSD: in6_ifattach.c,v 1.51 2010/04/06 14:12:10 stsp Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -224,22 +220,6 @@ found:
 			in6->s6_addr[14] = addr[4];
 			in6->s6_addr[15] = addr[5];
 		}
-		break;
-
-	case IFT_ARCNET:
-		if (addrlen != 1)
-			return -1;
-		if (!addr[0])
-			return -1;
-
-		bzero(&in6->s6_addr[8], 8);
-		in6->s6_addr[15] = addr[0];
-
-		/*
-		 * due to insufficient bitwidth, we mark it local.
-		 */
-		in6->s6_addr[8] &= ~EUI64_GBIT;	/* g bit to "individual" */
-		in6->s6_addr[8] |= EUI64_UBIT;	/* u bit to "local" */
 		break;
 
 	case IFT_GIF:
@@ -676,7 +656,6 @@ in6_ifdetach(struct ifnet *ifp)
 	struct in6_ifaddr *ia, *oia;
 	struct ifaddr *ifa, *next;
 	struct rtentry *rt;
-	short rtflags;
 	struct sockaddr_in6 sin6;
 	struct in6_multi_mship *imm;
 
@@ -721,12 +700,20 @@ in6_ifdetach(struct ifnet *ifp)
 		/* remove from the routing table */
 		if ((ia->ia_flags & IFA_ROUTE) &&
 		    (rt = rtalloc1((struct sockaddr *)&ia->ia_addr, 0, 0))) {
-			rtflags = rt->rt_flags;
+			struct rt_addrinfo info;
+			u_int8_t prio;
+
+			bzero(&info, sizeof(info));
+			info.rti_flags = rt->rt_flags;
+			prio = rt->rt_priority;
+			info.rti_info[RTAX_DST] =
+			    (struct sockaddr *)&ia->ia_addr;
+			info.rti_info[RTAX_GATEWAY] =
+			    (struct sockaddr *)&ia->ia_addr;
+			info.rti_info[RTAX_NETMASK] =
+			    (struct sockaddr *)&ia->ia_prefixmask;
 			rtfree(rt);
-			rtrequest(RTM_DELETE, (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&ia->ia_prefixmask,
-			    rtflags, (struct rtentry **)0, 0);
+			rtrequest1(RTM_DELETE, &info, prio, NULL, 0);
 		}
 
 		/* remove from the linked list */
@@ -773,8 +760,14 @@ in6_ifdetach(struct ifnet *ifp)
 	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
 	rt = rtalloc1((struct sockaddr *)&sin6, 0, 0);
 	if (rt && rt->rt_ifp == ifp) {
-		rtrequest(RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
+		struct rt_addrinfo info;
+
+		bzero(&info, sizeof(info));
+		info.rti_flags = rt->rt_flags;
+		info.rti_info[RTAX_DST] = rt_key(rt);
+		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
 		rtfree(rt);
 	}
 }

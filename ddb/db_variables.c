@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_variables.c,v 1.11 2006/07/06 18:14:48 miod Exp $	*/
+/*	$OpenBSD: db_variables.c,v 1.12 2006/07/06 19:05:58 miod Exp $	*/
 /*	$NetBSD: db_variables.c,v 1.8 1996/02/05 01:57:19 christos Exp $	*/
 
 /* 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: safte.c,v 1.34 2007/03/22 16:55:31 deraadt Exp $ */
-=======
 /*	$OpenBSD: safte.c,v 1.46 2010/09/27 19:49:43 thib Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -76,6 +72,7 @@ struct safte_softc {
 	int			sc_nsensors;
 	struct safte_sensor	*sc_sensors;
 	struct ksensordev	sc_sensordev;
+	struct sensor_task	*sc_sensortask;
 
 	int			sc_celsius;
 	int			sc_ntemps;
@@ -195,16 +192,20 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (sc->sc_nsensors > 0 &&
-	    sensor_task_register(sc, safte_read_encstat, 10) != 0) {
-		printf("%s: unable to register update task\n", DEVNAME(sc));
-		sc->sc_nsensors = sc->sc_ntemps = 0;
-		free(sc->sc_sensors, M_DEVBUF);
-	} else {
-		for (i = 0; i < sc->sc_nsensors; i++)
-			sensor_attach(&sc->sc_sensordev, 
-			    &sc->sc_sensors[i].se_sensor);
-		sensordev_install(&sc->sc_sensordev);
+	if (sc->sc_nsensors > 0) {
+		sc->sc_sensortask = sensor_task_register(sc,
+		    safte_read_encstat, 10);
+		if (sc->sc_sensortask == NULL) {
+			printf("%s: unable to register update task\n",
+			    DEVNAME(sc));
+			sc->sc_nsensors = sc->sc_ntemps = 0;
+			free(sc->sc_sensors, M_DEVBUF);
+		} else {
+			for (i = 0; i < sc->sc_nsensors; i++)
+				sensor_attach(&sc->sc_sensordev, 
+				    &sc->sc_sensors[i].se_sensor);
+			sensordev_install(&sc->sc_sensordev);
+		}
 	}
 
 #if NBIO > 0
@@ -239,7 +240,7 @@ safte_detach(struct device *self, int flags)
 
 	if (sc->sc_nsensors > 0) {
 		sensordev_deinstall(&sc->sc_sensordev);
-		sensor_task_unregister(sc);
+		sensor_task_unregister(sc->sc_sensortask);
 
 		for (i = 0; i < sc->sc_nsensors; i++)
 			sensor_detach(&sc->sc_sensordev, 
@@ -309,7 +310,7 @@ safte_read_config(struct safte_softc *sc)
 		(config.doorlock ? 1 : 0) + (config.alarm ? 1 : 0);
 
 	sc->sc_sensors = malloc(sc->sc_nsensors * sizeof(struct safte_sensor),
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL) {
 		free(sc->sc_encbuf, M_DEVBUF);
 		sc->sc_encbuf = NULL;
@@ -320,8 +321,6 @@ safte_read_config(struct safte_softc *sc)
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
 
-	memset(sc->sc_sensors, 0,
-	    sc->sc_nsensors * sizeof(struct safte_sensor));
 	s = sc->sc_sensors;
 
 	for (i = 0; i < config.nfans; i++) {
@@ -384,8 +383,6 @@ safte_read_config(struct safte_softc *sc)
 		s->se_type = SAFTE_T_TEMP;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_TEMP;
-		snprintf(s->se_sensor.desc, sizeof(s->se_sensor.desc),
-		    "Temp%d", i);
 
 		s++;
 	}
@@ -586,13 +583,8 @@ safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 	if (slot >= sc->sc_nslots)
 		return (ENODEV);
 
-<<<<<<< HEAD
-	op = malloc(sizeof(struct safte_slotop), M_TEMP, 0);
-=======
 	op = malloc(sizeof(*op), M_TEMP, M_WAITOK|M_ZERO);
->>>>>>> origin/master
 
-	memset(op, 0, sizeof(struct safte_slotop));
 	op->opcode = SAFTE_WRITE_SLOTOP;
 	op->slot = slot;
 	op->flags |= wantblink ? SAFTE_SLOTOP_IDENTIFY : 0;

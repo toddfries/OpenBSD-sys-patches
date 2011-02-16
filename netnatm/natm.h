@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: natm.h,v 1.5 1997/10/11 01:32:08 angelos Exp $	*/
-=======
 /*	$OpenBSD: natm.h,v 1.9 2009/05/31 19:17:20 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  *
@@ -128,13 +124,8 @@ void	npcb_free(struct natmpcb *, int);
 struct	natmpcb *npcb_add(struct natmpcb *, struct ifnet *, int, int);
 
 /* natm.c */
-#if defined(__NetBSD__)
 int	natm_usrreq(struct socket *, int, struct mbuf *,
-                             struct mbuf *, struct mbuf *, struct proc *);
-#elif defined(__OpenBSD__) || defined(FreeBSD)
-int	natm_usrreq(struct socket *, int, struct mbuf *,
-                             struct mbuf *, struct mbuf *);
-#endif
+	    struct mbuf *, struct mbuf *, struct proc *);
 int	natm0_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int	natm5_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 void	natmintr(void);

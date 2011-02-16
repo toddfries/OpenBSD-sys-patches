@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_media.c,v 1.15 2005/07/09 21:23:45 brad Exp $	*/
-=======
 /*	$OpenBSD: if_media.c,v 1.20 2008/06/26 05:42:20 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_media.c,v 1.10 2000/03/13 23:52:39 soren Exp $	*/
 
 /*-
@@ -199,9 +195,8 @@ ifmedia_set(struct ifmedia *ifm, int target)
 		if (match == NULL) {
 			ifmedia_add(ifm, target, 0, NULL);
 			match = ifmedia_match(ifm, target, ifm->ifm_mask);
-			if (match == NULL) {
+			if (match == NULL)
 				panic("ifmedia_set failed");
-			}
 		}
 	}
 	ifm->ifm_cur = match;
@@ -245,8 +240,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 		if (match == NULL) {
 #ifdef IFMEDIA_DEBUG
 			if (ifmedia_debug) {
-				printf(
-				    "ifmedia_ioctl: no media found for 0x%x\n", 
+				printf("ifmedia_ioctl: no media found for 0x%x\n",
 				    newmedia);
 			}
 #endif
@@ -262,7 +256,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 		if ((IFM_SUBTYPE(newmedia) != IFM_AUTO) &&
 		    (newmedia == ifm->ifm_media) &&
 		    (match == ifm->ifm_cur))
-			return 0;
+			return (0);
 
 		/*
 		 * We found a match, now make the driver switch to it.
@@ -316,8 +310,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 		if (ifmr->ifm_count != 0) {
 			size_t count;
 			size_t minwords = nwords > (size_t)ifmr->ifm_count 
-			    ? (size_t)ifmr->ifm_count
-			    : nwords;
+			    ? (size_t)ifmr->ifm_count : nwords;
 			int *kptr = (int *)malloc(minwords * sizeof(int),
  			    M_TEMP, M_WAITOK);
 			/*
@@ -339,7 +332,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 	}
 
 	default:
-		return (EINVAL);
+		return (ENOTTY);
 	}
 
 	return (error);
@@ -371,7 +364,7 @@ ifmedia_match(struct ifmedia *ifm, u_int target, u_int mask)
 		}
 	}
 
-	return match;
+	return (match);
 }
 
 /*
@@ -400,7 +393,7 @@ ifmedia_delete_instance(struct ifmedia *ifm, u_int inst)
 struct ifmedia_baudrate ifmedia_baudrate_descriptions[] =
     IFM_BAUDRATE_DESCRIPTIONS;
 
-int
+u_int64_t
 ifmedia_baudrate(int mword)
 {
 	int i;

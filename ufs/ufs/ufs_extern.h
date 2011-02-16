@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ufs_extern.h,v 1.26 2006/10/03 19:49:06 pedro Exp $	*/
-=======
 /*	$OpenBSD: ufs_extern.h,v 1.32 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-
@@ -80,7 +76,6 @@ int	 ufs_readlink(void *);
 int	 ufs_remove(void *);
 int	 ufs_rename(void *);
 int	 ufs_rmdir(void *);
-int	 ufs_seek(void *);
 int	 ufs_poll(void *);
 int	 ufs_kqfilter(void *);
 int	 ufs_setattr(void *);
@@ -98,9 +93,9 @@ int	ufsfifo_close(void *);
 #endif
 
 /* ufs_bmap.c */
-int ufs_bmaparray(struct vnode *, daddr_t, daddr64_t *, struct indir *,
+int ufs_bmaparray(struct vnode *, daddr64_t, daddr64_t *, struct indir *,
 		       int *, int *);
-int ufs_getlbns(struct vnode *, daddr_t, struct indir *, int *);
+int ufs_getlbns(struct vnode *, daddr64_t, struct indir *, int *);
 
 /* ufs_ihash.c */
 void ufs_ihashinit(void);

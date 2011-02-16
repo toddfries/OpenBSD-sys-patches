@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfs_boot.c,v 1.17 2006/05/26 01:10:01 deraadt Exp $ */
-=======
 /*	$OpenBSD: nfs_boot.c,v 1.26 2010/04/03 20:03:38 krw Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: nfs_boot.c,v 1.26 1996/05/07 02:51:25 thorpej Exp $	*/
 
 /*
@@ -172,7 +168,7 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 * Do RARP for the interface address.
 	 */
 	if ((error = revarpwhoami(&my_ip, ifp)) != 0)
-		panic("revarp failed, error=%d", error);
+		panic("reverse arp not answered by rarpd(8) or dhcpd(8)");
 	printf("nfs_boot: client_addr=%s\n", inet_ntoa(my_ip));
 
 	/*
@@ -227,6 +223,7 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 */
 	if (gw_ip.s_addr) {
 		struct sockaddr dst, gw, mask;
+		struct rt_addrinfo info;
 		/* Destination: (default) */
 		bzero((caddr_t)&dst, sizeof(dst));
 		dst.sa_len = sizeof(dst);
@@ -239,11 +236,15 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 		sin->sin_addr.s_addr = gw_ip.s_addr;
 		/* Mask: (zero length) */
 		bzero(&mask, sizeof(mask));
+		bzero(&info, sizeof(info));
+		info.rti_info[RTAX_DST] = &dst;
+		info.rti_info[RTAX_GATEWAY] = &gw;
+		info.rti_info[RTAX_NETMASK] = &mask;
+		info.rti_flags = (RTF_UP | RTF_GATEWAY | RTF_STATIC);
 
 		printf("nfs_boot: gateway=%s\n", inet_ntoa(gw_ip));
 		/* add, dest, gw, mask, flags, 0 */
-		error = rtrequest(RTM_ADD, &dst, (struct sockaddr *)&gw,
-		    &mask, (RTF_UP | RTF_GATEWAY | RTF_STATIC), NULL, 0);
+		error = rtrequest1(RTM_ADD, &info, RTP_STATIC, NULL, 0);
 		if (error)
 			printf("nfs_boot: add route, error=%d\n", error);
 	}

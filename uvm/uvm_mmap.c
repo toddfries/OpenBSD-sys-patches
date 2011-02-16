@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_mmap.c,v 1.66 2007/03/26 08:43:34 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_mmap.c,v 1.82 2010/12/24 21:49:04 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -326,8 +322,6 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		amap = entry->aref.ar_amap;	/* top layer */
 		uobj = entry->object.uvm_obj;	/* bottom layer */
 
-		if (amap != NULL)
-			amap_lock(amap);
 		if (uobj != NULL)
 			simple_lock(&uobj->vmobjlock);
 
@@ -338,7 +332,7 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 				anon = amap_lookup(&entry->aref,
 				    start - entry->start);
 				/* Don't need to lock anon here. */
-				if (anon != NULL && anon->u.an_page != NULL) {
+				if (anon != NULL && anon->an_page != NULL) {
 					/*
 					 * Anon has the page for this entry
 					 * offset.
@@ -363,8 +357,6 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 
 		if (uobj != NULL)
 			simple_unlock(&uobj->vmobjlock);
-		if (amap != NULL)
-			amap_unlock(amap);
 	}
 
  out:
@@ -600,7 +592,7 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 	if ((flags & MAP_ANON) != 0 ||
 	    ((flags & MAP_PRIVATE) != 0 && (prot & PROT_WRITE) != 0)) {
 		if (size >
-		    (p->p_rlimit[RLIMIT_DATA].rlim_cur - ctob(p->p_vmspace->vm_dused))) {
+		    (p->p_rlimit[RLIMIT_DATA].rlim_cur - ptoa(p->p_vmspace->vm_dused))) {
 			error = ENOMEM;
 			goto out;
 		}

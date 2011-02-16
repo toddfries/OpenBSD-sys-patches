@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_gif.h,v 1.8 2002/03/14 01:27:09 millert Exp $	*/
-=======
 /*	$OpenBSD: if_gif.h,v 1.10 2009/11/21 14:08:14 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
 /*

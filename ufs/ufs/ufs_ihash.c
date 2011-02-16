@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ufs_ihash.c,v 1.12 2005/11/19 02:18:02 pedro Exp $	*/
-=======
 /*	$OpenBSD: ufs_ihash.c,v 1.16 2010/07/19 21:13:43 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ufs_ihash.c,v 1.3 1996/02/09 22:36:04 christos Exp $	*/
 
 /*

@@ -1,17 +1,10 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ieee80211_proto.c,v 1.13 2006/12/25 19:24:27 reyk Exp $	*/
-=======
 /*	$OpenBSD: ieee80211_proto.c,v 1.44 2010/08/07 03:50:02 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ieee80211_proto.c,v 1.8 2004/04/30 23:58:20 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
-<<<<<<< HEAD
-=======
  * Copyright (c) 2008, 2009 Damien Bergamini
->>>>>>> origin/master
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,10 +17,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -76,22 +65,22 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
 
-#define	IEEE80211_RATE2MBS(r)	(((r) & IEEE80211_RATE_VAL) / 2)
+#include <dev/rndvar.h>
 
-const char *ieee80211_mgt_subtype_name[] = {
+const char * const ieee80211_mgt_subtype_name[] = {
 	"assoc_req",	"assoc_resp",	"reassoc_req",	"reassoc_resp",
 	"probe_req",	"probe_resp",	"reserved#6",	"reserved#7",
 	"beacon",	"atim",		"disassoc",	"auth",
-	"deauth",	"reserved#13",	"reserved#14",	"reserved#15"
+	"deauth",	"action",	"action_noack",	"reserved#15"
 };
-const char *ieee80211_state_name[IEEE80211_S_MAX] = {
+const char * const ieee80211_state_name[IEEE80211_S_MAX] = {
 	"INIT",		/* IEEE80211_S_INIT */
 	"SCAN",		/* IEEE80211_S_SCAN */
 	"AUTH",		/* IEEE80211_S_AUTH */
 	"ASSOC",	/* IEEE80211_S_ASSOC */
 	"RUN"		/* IEEE80211_S_RUN */
 };
-const char *ieee80211_phymode_name[] = {
+const char * const ieee80211_phymode_name[] = {
 	"auto",		/* IEEE80211_MODE_AUTO */
 	"11a",		/* IEEE80211_MODE_11A */
 	"11b",		/* IEEE80211_MODE_11B */
@@ -99,11 +88,7 @@ const char *ieee80211_phymode_name[] = {
 	"turbo",	/* IEEE80211_MODE_TURBO */
 };
 
-<<<<<<< HEAD
-static int ieee80211_newstate(struct ieee80211com *, enum ieee80211_state, int);
-=======
 int ieee80211_newstate(struct ieee80211com *, enum ieee80211_state, int);
->>>>>>> origin/master
 
 void
 ieee80211_proto_attach(struct ifnet *ifp)
@@ -139,10 +124,10 @@ ieee80211_proto_detach(struct ifnet *ifp)
 }
 
 void
-ieee80211_print_essid(u_int8_t *essid, int len)
+ieee80211_print_essid(const u_int8_t *essid, int len)
 {
 	int i;
-	u_int8_t *p;
+	const u_int8_t *p;
 
 	if (len > IEEE80211_NWID_LEN)
 		len = IEEE80211_NWID_LEN;
@@ -165,7 +150,7 @@ ieee80211_print_essid(u_int8_t *essid, int len)
 
 #ifdef IEEE80211_DEBUG
 void
-ieee80211_dump_pkt(u_int8_t *buf, int len, int rate, int rssi)
+ieee80211_dump_pkt(const u_int8_t *buf, int len, int rate, int rssi)
 {
 	struct ieee80211_frame *wh;
 	int i;
@@ -210,7 +195,7 @@ ieee80211_dump_pkt(u_int8_t *buf, int len, int rate, int rssi)
 	if (wh->i_fc[1] & IEEE80211_FC1_WEP)
 		printf(" WEP");
 	if (rate >= 0)
-		printf(" %dM", rate / 2);
+		printf(" %d%sM", rate / 2, (rate & 1) ? ".5" : "");
 	if (rssi >= 0)
 		printf(" +%d", rssi);
 	printf("\n");
@@ -232,7 +217,8 @@ ieee80211_fix_rate(struct ieee80211com *ic, struct ieee80211_node *ni,
 #define	RV(v)	((v) & IEEE80211_RATE_VAL)
 	int i, j, ignore, error;
 	int okrate, badrate, fixedrate;
-	struct ieee80211_rateset *srs, *nrs;
+	const struct ieee80211_rateset *srs;
+	struct ieee80211_rateset *nrs;
 	u_int8_t r;
 
 	/*
@@ -377,9 +363,6 @@ ieee80211_set_shortslottime(struct ieee80211com *ic, int on)
 		ic->ic_updateslot(ic);
 }
 
-<<<<<<< HEAD
-static int
-=======
 /*
  * This function is called by the 802.1X PACP machine (via an ioctl) when
  * the transmit key machine (4-Way Handshake for 802.11) should run.
@@ -778,19 +761,14 @@ ieee80211_auth_open(struct ieee80211com *ic, const struct ieee80211_frame *wh,
 }
 
 int
->>>>>>> origin/master
 ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
     int mgt)
 {
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_node *ni;
 	enum ieee80211_state ostate;
-<<<<<<< HEAD
-	u_int mbps;
-=======
 	u_int rate;
 #ifndef IEEE80211_STA_ONLY
->>>>>>> origin/master
 	int s;
 #endif
 
@@ -799,6 +777,8 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	    ieee80211_state_name[nstate]));
 	ic->ic_state = nstate;			/* state transition */
 	ni = ic->ic_bss;			/* NB: no reference held */
+	if (ostate == IEEE80211_S_RUN)
+		ieee80211_set_link_state(ic, LINK_STATE_DOWN);
 	switch (nstate) {
 	case IEEE80211_S_INIT:
 		/*
@@ -860,21 +840,14 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 			/* FALLTHROUGH */
 		case IEEE80211_S_AUTH:
 		case IEEE80211_S_SCAN:
-<<<<<<< HEAD
-=======
 justcleanup:
 #ifndef IEEE80211_STA_ONLY
 			if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 				timeout_del(&ic->ic_rsn_timeout);
 #endif
->>>>>>> origin/master
 			ic->ic_mgt_timer = 0;
 			IF_PURGE(&ic->ic_mgtq);
 			IF_PURGE(&ic->ic_pwrsaveq);
-			if (ic->ic_wep_ctx != NULL) {
-				free(ic->ic_wep_ctx, M_DEVBUF);
-				ic->ic_wep_ctx = NULL;
-			}
 			ieee80211_free_allnodes(ic);
 			break;
 		}
@@ -1004,10 +977,11 @@ justcleanup:
 				    ether_sprintf(ni->ni_bssid));
 				ieee80211_print_essid(ic->ic_bss->ni_essid,
 				    ni->ni_esslen);
-				mbps = IEEE80211_RATE2MBS(
-				    ni->ni_rates.rs_rates[ni->ni_txrate]);
-				printf(" channel %d start %uMb",
-				    ieee80211_chan2ieee(ic, ni->ni_chan), mbps);
+				rate = ni->ni_rates.rs_rates[ni->ni_txrate] &
+				    IEEE80211_RATE_VAL;
+				printf(" channel %d start %u%sMb",
+				    ieee80211_chan2ieee(ic, ni->ni_chan),
+				    rate / 2, (rate & 1) ? ".5" : "");
 				printf(" %s preamble %s slot time%s\n",
 				    (ic->ic_flags & IEEE80211_F_SHPREAMBLE) ?
 					"short" : "long",
@@ -1031,8 +1005,6 @@ justcleanup:
 	}
 	return 0;
 }
-<<<<<<< HEAD
-=======
 
 void
 ieee80211_set_link_state(struct ieee80211com *ic, int nstate)
@@ -1057,4 +1029,3 @@ ieee80211_set_link_state(struct ieee80211com *ic, int nstate)
 		if_link_state_change(ifp);
 	}
 }
->>>>>>> origin/master

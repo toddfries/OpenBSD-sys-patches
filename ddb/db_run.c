@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_run.c,v 1.18 2005/09/06 19:49:21 miod Exp $	*/
-=======
 /*	$OpenBSD: db_run.c,v 1.22 2010/11/27 19:59:11 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_run.c,v 1.8 1996/02/05 01:57:12 christos Exp $	*/
 
 /* 
@@ -231,8 +227,6 @@ db_single_step(db_regs_t *regs)
 	    db_set_single_step(regs);
 	}
 }
-
-extern int	db_cmd_loop_done;
 
 /* single-step */
 /*ARGSUSED*/

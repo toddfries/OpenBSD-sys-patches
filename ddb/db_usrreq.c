@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_usrreq.c,v 1.11 2006/03/15 21:02:38 deraadt Exp $	*/
-=======
 /*	$OpenBSD: db_usrreq.c,v 1.14 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nd6.c,v 1.71 2006/06/16 15:41:19 pascoe Exp $	*/
-=======
 /*	$OpenBSD: nd6.c,v 1.85 2010/06/28 16:48:15 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -154,8 +150,7 @@ nd6_ifattach(struct ifnet *ifp)
 {
 	struct nd_ifinfo *nd;
 
-	nd = (struct nd_ifinfo *)malloc(sizeof(*nd), M_IP6NDP, M_WAITOK);
-	bzero(nd, sizeof(*nd));
+	nd = malloc(sizeof(*nd), M_IP6NDP, M_WAITOK | M_ZERO);
 
 	nd->initialized = 1;
 
@@ -196,17 +191,10 @@ nd6_setmtu0(struct ifnet *ifp, struct nd_ifinfo *ndi)
 
 	omaxmtu = ndi->maxmtu;
 
-	switch (ifp->if_type) {
-	case IFT_ARCNET:
-		ndi->maxmtu = MIN(60480, ifp->if_mtu); /* RFC2497 */
-		break;
-	case IFT_FDDI:
+	if (ifp->if_type == IFT_FDDI)
 		ndi->maxmtu = MIN(FDDIMTU, ifp->if_mtu);
-		break;
-	default:
+	else
 		ndi->maxmtu = ifp->if_mtu;
-		break;
-	}
 
 	/*
 	 * Decreasing the interface MTU under IPV6 minimum MTU may cause
@@ -457,6 +445,11 @@ nd6_llinfo_timer(void *arg)
 
 				icmp6_error(m, ICMP6_DST_UNREACH,
 				    ICMP6_DST_UNREACH_ADDR, 0);
+				if (ln->ln_hold == m) {
+					/* m is back in ln_hold. Discard. */
+					m_freem(ln->ln_hold);
+					ln->ln_hold = NULL;
+				}
 			}
 			(void)nd6_free(rt, 0);
 			ln = NULL;
@@ -558,8 +551,8 @@ nd6_timer(void *ignored_arg)
 	}
 
 	/* expire prefix list */
-	pr = nd_prefix.lh_first;
-	while (pr) {
+	pr = LIST_FIRST(&nd_prefix);
+	while (pr != NULL) {
 		/*
 		 * check prefix lifetime.
 		 * since pltime is just for autoconf, pltime processing for
@@ -568,7 +561,7 @@ nd6_timer(void *ignored_arg)
 		if (pr->ndpr_vltime != ND6_INFINITE_LIFETIME &&
 		    time_second - pr->ndpr_lastupdate > pr->ndpr_vltime) {
 			struct nd_prefix *t;
-			t = pr->ndpr_next;
+			t = LIST_NEXT(pr, ndpr_entry);
 
 			/*
 			 * address expiration and prefix expiration are
@@ -578,7 +571,7 @@ nd6_timer(void *ignored_arg)
 			prelist_remove(pr);
 			pr = t;
 		} else
-			pr = pr->ndpr_next;
+			pr = LIST_NEXT(pr, ndpr_entry);
 	}
 	splx(s);
 }
@@ -618,8 +611,8 @@ nd6_purge(struct ifnet *ifp)
 	}
 
 	/* Nuke prefix list entries toward ifp */
-	for (pr = nd_prefix.lh_first; pr; pr = npr) {
-		npr = pr->ndpr_next;
+	for (pr = LIST_FIRST(&nd_prefix); pr != NULL; pr = npr) {
+		npr = LIST_NEXT(pr, ndpr_entry);
 		if (pr->ndpr_ifp == ifp) {
 			/*
 			 * Because if_detach() does *not* release prefixes
@@ -698,6 +691,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 	}
 	if (!rt) {
 		if (create && ifp) {
+			struct rt_addrinfo info;
 			int e;
 
 			/*
@@ -716,12 +710,17 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 			 * Create a new route.  RTF_LLINFO is necessary
 			 * to create a Neighbor Cache entry for the
 			 * destination in nd6_rtrequest which will be
-			 * called in rtrequest via ifa->ifa_rtrequest.
+			 * called in rtrequest1 via ifa->ifa_rtrequest.
 			 */
-			if ((e = rtrequest(RTM_ADD, (struct sockaddr *)&sin6,
-			    ifa->ifa_addr, (struct sockaddr *)&all1_sa,
-			    (ifa->ifa_flags | RTF_HOST | RTF_LLINFO) &
-			    ~RTF_CLONING, &rt, 0)) != 0) {
+			bzero(&info, sizeof(info));
+			info.rti_flags = (ifa->ifa_flags | RTF_HOST |
+			    RTF_LLINFO) & ~RTF_CLONING;
+			info.rti_info[RTAX_DST] = (struct sockaddr *)&sin6;
+			info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+			info.rti_info[RTAX_NETMASK] =
+			    (struct sockaddr *)&all1_sa;
+			if ((e = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
+			    &rt, 0)) != 0) {
 #if 0
 				log(LOG_ERR,
 				    "nd6_lookup: failed to add route for a "
@@ -791,7 +790,7 @@ nd6_is_addr_neighbor(struct sockaddr_in6 *addr, struct ifnet *ifp)
 	 * If the address matches one of our on-link prefixes, it should be a
 	 * neighbor.
 	 */
-	for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 		if (pr->ndpr_ifp != ifp)
 			continue;
 
@@ -833,6 +832,7 @@ nd6_is_addr_neighbor(struct sockaddr_in6 *addr, struct ifnet *ifp)
 struct llinfo_nd6 *
 nd6_free(struct rtentry *rt, int gc)
 {
+	struct rt_addrinfo info;
 	struct llinfo_nd6 *ln = (struct llinfo_nd6 *)rt->rt_llinfo, *next;
 	struct in6_addr in6 = ((struct sockaddr_in6 *)rt_key(rt))->sin6_addr;
 	struct nd_defrouter *dr;
@@ -925,8 +925,10 @@ nd6_free(struct rtentry *rt, int gc)
 	 * caches, and disable the route entry not to be used in already
 	 * cached routes.
 	 */
-	rtrequest(RTM_DELETE, rt_key(rt), (struct sockaddr *)0,
-	    rt_mask(rt), 0, (struct rtentry **)0, 0);
+	bzero(&info, sizeof(info));
+	info.rti_info[RTAX_DST] = rt_key(rt);
+	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+	rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
 
 	return (next);
 }
@@ -1325,7 +1327,7 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		 */
 		bzero(oprl, sizeof(*oprl));
 		s = splsoftnet();
-		pr = nd_prefix.lh_first;
+		pr = LIST_FIRST(&nd_prefix);
 		while (pr && i < PRLSTSIZ) {
 			struct nd_pfxrouter *pfr;
 			int j;
@@ -1338,7 +1340,7 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 			oprl->prefix[i].if_index = pr->ndpr_ifp->if_index;
 			oprl->prefix[i].expire = pr->ndpr_expire;
 
-			pfr = pr->ndpr_advrtrs.lh_first;
+			pfr = LIST_FIRST(&pr->ndpr_advrtrs);
 			j = 0;
 			while(pfr) {
 				if (j < DRLSTSIZ) {
@@ -1356,13 +1358,13 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 #undef RTRADDR
 				}
 				j++;
-				pfr = pfr->pfr_next;
+				pfr = LIST_NEXT(pfr, pfr_entry);
 			}
 			oprl->prefix[i].advrtrs = j;
 			oprl->prefix[i].origin = PR_ORIG_RA;
 
 			i++;
-			pr = pr->ndpr_next;
+			pr = LIST_NEXT(pr, ndpr_entry);
 		}
 		splx(s);
 
@@ -1396,10 +1398,10 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		struct nd_prefix *pr, *next;
 
 		s = splsoftnet();
-		for (pr = nd_prefix.lh_first; pr; pr = next) {
+		for (pr = LIST_FIRST(&nd_prefix); pr; pr = next) {
 			struct in6_ifaddr *ia, *ia_next;
 
-			next = pr->ndpr_next;
+			next = LIST_NEXT(pr, ndpr_entry);
 
 			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
 				continue; /* XXX */
@@ -1609,13 +1611,19 @@ fail:
 			nd6_llinfo_settimer(ln, (long)nd6_gctimer * hz);
 
 			if (ln->ln_hold) {
+				struct mbuf *n = ln->ln_hold;
+				ln->ln_hold = NULL;
 				/*
 				 * we assume ifp is not a p2p here, so just
 				 * set the 2nd argument as the 1st one.
 				 */
-				nd6_output(ifp, ifp, ln->ln_hold,
+				nd6_output(ifp, ifp, n,
 				    (struct sockaddr_in6 *)rt_key(rt), rt);
-				ln->ln_hold = NULL;
+				if (ln->ln_hold == n) {
+					/* n is back in ln_hold. Discard. */
+					m_freem(ln->ln_hold);
+					ln->ln_hold = NULL;
+				}
 			}
 		} else if (ln->ln_state == ND6_LLINFO_INCOMPLETE) {
 			/* probe right away */
@@ -1944,13 +1952,12 @@ nd6_need_cache(struct ifnet *ifp)
 {
 	/*
 	 * XXX: we currently do not make neighbor cache on any interface
-	 * other than ARCnet, Ethernet, FDDI and GIF.
+	 * other than Ethernet, FDDI and GIF.
 	 *
 	 * RFC2893 says:
 	 * - unidirectional tunnels needs no ND
 	 */
 	switch (ifp->if_type) {
-	case IFT_ARCNET:
 	case IFT_ETHER:
 	case IFT_FDDI:
 	case IFT_IEEE1394:
@@ -1979,9 +1986,6 @@ nd6_storelladdr(struct ifnet *ifp, struct rtentry *rt, struct mbuf *m,
 						 desten);
 			return (1);
 			break;
-		case IFT_ARCNET:
-			*desten = 0;
-			return (1);
 		default:
 			m_freem(m);
 			return (0);
@@ -2126,7 +2130,7 @@ fill_prlist(void *oldp, size_t *oldlenp, size_t ol)
 	}
 	l = 0;
 
-	for (pr = nd_prefix.lh_first; pr; pr = pr->ndpr_next) {
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 		u_short advrtrs;
 		size_t advance;
 		struct sockaddr_in6 *sin6;
@@ -2168,8 +2172,7 @@ fill_prlist(void *oldp, size_t *oldlenp, size_t ol)
 			p->flags = pr->ndpr_stateflags;
 			p->origin = PR_ORIG_RA;
 			advrtrs = 0;
-			for (pfr = pr->ndpr_advrtrs.lh_first; pfr;
-			     pfr = pfr->pfr_next) {
+			LIST_FOREACH(pfr, &pr->ndpr_advrtrs, pfr_entry) {
 				if ((void *)&sin6[advrtrs + 1] > (void *)pe) {
 					advrtrs++;
 					continue;
@@ -2186,8 +2189,7 @@ fill_prlist(void *oldp, size_t *oldlenp, size_t ol)
 		}
 		else {
 			advrtrs = 0;
-			for (pfr = pr->ndpr_advrtrs.lh_first; pfr;
-			     pfr = pfr->pfr_next)
+			LIST_FOREACH(pfr, &pr->ndpr_advrtrs, pfr_entry)
 				advrtrs++;
 		}
 

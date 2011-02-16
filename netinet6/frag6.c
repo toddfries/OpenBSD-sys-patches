@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: frag6.c,v 1.22 2005/11/20 19:25:16 brad Exp $	*/
-=======
 /*	$OpenBSD: frag6.c,v 1.31 2011/01/13 23:36:53 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$KAME: frag6.c,v 1.40 2002/05/27 21:40:31 itojun Exp $	*/
 
 /*
@@ -281,11 +277,9 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 		else if (frag6_nfragpackets >= (u_int)ip6_maxfragpackets)
 			goto dropfrag;
 		frag6_nfragpackets++;
-		q6 = (struct ip6q *)malloc(sizeof(struct ip6q), M_FTABLE,
-		    M_DONTWAIT);
+		q6 = malloc(sizeof(*q6), M_FTABLE, M_DONTWAIT | M_ZERO);
 		if (q6 == NULL)
 			goto dropfrag;
-		bzero(q6, sizeof(*q6));
 
 		frag6_insque(q6, &ip6q);
 
@@ -374,11 +368,9 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 		}
 	}
 
-	ip6af = (struct ip6asfrag *)malloc(sizeof(struct ip6asfrag), M_FTABLE,
-	    M_DONTWAIT);
+	ip6af = malloc(sizeof(*ip6af), M_FTABLE, M_DONTWAIT | M_ZERO);
 	if (ip6af == NULL)
 		goto dropfrag;
-	bzero(ip6af, sizeof(*ip6af));
 	ip6af->ip6af_head = ip6->ip6_flow;
 	ip6af->ip6af_len = ip6->ip6_plen;
 	ip6af->ip6af_nxt = ip6->ip6_nxt;
@@ -459,7 +451,7 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 	}
 #else
 	/*
-	 * If the incoming framgent overlaps some existing fragments in
+	 * If the incoming fragment overlaps some existing fragments in
 	 * the reassembly queue, drop it, since it is dangerous to override
 	 * existing fragments from a security point of view.
 	 * We don't know which fragment is the bad guy - here we trust

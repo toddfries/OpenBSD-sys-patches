@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_cdrom.h,v 1.1 1997/12/07 22:59:14 provos Exp $	*/
+/*	$OpenBSD: linux_cdrom.h,v 1.2 1997/12/10 00:01:40 provos Exp $	*/
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pdaemon.c,v 1.31 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_pdaemon.c,v 1.56 2010/09/26 12:53:27 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -314,22 +310,10 @@ uvm_aiodone_daemon(void *arg)
 			splx(s);
 			bp = nbp;
 		}
-<<<<<<< HEAD
-		if (free <= uvmexp.reserve_kernel) {
-			s = uvm_lock_fpageq();
-			wakeup(&uvm.pagedaemon);
-			uvm_unlock_fpageq(s);
-		} else {
-			simple_lock(&uvm.pagedaemon_lock);
-			wakeup(&uvmexp.free);
-			simple_unlock(&uvm.pagedaemon_lock);
-		}
-=======
 		uvm_lock_fpageq();
 		wakeup(free <= uvmexp.reserve_kernel ? &uvm.pagedaemon :
 		    &uvmexp.free);
 		uvm_unlock_fpageq();
->>>>>>> origin/master
 	}
 }
 
@@ -349,7 +333,7 @@ boolean_t
 uvmpd_scan_inactive(struct pglist *pglst)
 {
 	boolean_t retval = FALSE;	/* assume we haven't hit target */
-	int s, free, result;
+	int free, result;
 	struct vm_page *p, *nextpg;
 	struct uvm_object *uobj;
 	struct vm_page *pps[MAXBSIZE >> PAGE_SHIFT], **ppsp;
@@ -398,14 +382,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			 * update our copy of "free" and see if we've met
 			 * our target
 			 */
-<<<<<<< HEAD
-
-			s = uvm_lock_fpageq();
-			free = uvmexp.free;
-			uvm_unlock_fpageq(s);
-=======
 			free = uvmexp.free - BUFPAGES_DEFICIT;
->>>>>>> origin/master
 
 			if (free + uvmexp.paging >= uvmexp.freetarg << 2 ||
 			    dirtyreacts == UVMPD_NUMDIRTYREACTS) {
@@ -533,7 +510,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 					KASSERT(anon->an_swslot != 0);
 
 					/* remove from object */
-					anon->u.an_page = NULL;
+					anon->an_page = NULL;
 					simple_unlock(&anon->an_lock);
 				} else {
 					/* pagefree has already removed the
@@ -846,39 +823,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 
 			/* released during I/O? Can only happen for anons */
 			if (p->pg_flags & PG_RELEASED) {
-<<<<<<< HEAD
-				if (anon) {
-					/* remove page so we can get nextpg */
-					anon->u.an_page = NULL;
-
-					simple_unlock(&anon->an_lock);
-					uvm_anfree(anon);	/* kills anon */
-					pmap_page_protect(p, VM_PROT_NONE);
-					anon = NULL;
-					uvm_lock_pageq();
-					nextpg = TAILQ_NEXT(p, pageq);
-					/* free released page */
-					uvm_pagefree(p);
-
-				} else {
-
-					/*
-					 * pgo_releasepg nukes the page and
-					 * gets "nextpg" for us.  it returns
-					 * with the page queues locked (when
-					 * given nextpg ptr).
-					 */
-
-					if (!uobj->pgops->pgo_releasepg(p,
-					    &nextpg))
-						/* uobj died after release */
-						uobj = NULL;
-
-					/*
-					 * lock page queues here so that they're
-					 * always locked at the end of the loop.
-					 */
-=======
 				KASSERT(anon != NULL);
 				/*
 				 * remove page so we can get nextpg,
@@ -887,7 +831,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 				 */
 				anon->an_page = NULL;
 				p->uanon = NULL;
->>>>>>> origin/master
 
 				simple_unlock(&anon->an_lock);
 				uvm_anfree(anon);	/* kills anon */
@@ -961,7 +904,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 void
 uvmpd_scan(void)
 {
-	int s, free, inactive_shortage, swap_shortage, pages_freed;
+	int free, inactive_shortage, swap_shortage, pages_freed;
 	struct vm_page *p, *nextpg;
 	struct uvm_object *uobj;
 	boolean_t got_it;
@@ -973,13 +916,7 @@ uvmpd_scan(void)
 	/*
 	 * get current "free" page count
 	 */
-<<<<<<< HEAD
-	s = uvm_lock_fpageq();
-	free = uvmexp.free;
-	uvm_unlock_fpageq(s);
-=======
 	free = uvmexp.free - BUFPAGES_DEFICIT;
->>>>>>> origin/master
 
 #ifndef __SWAP_BROKEN
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.h,v 1.7 2002/03/14 01:27:09 millert Exp $	*/
+/*	$OpenBSD: if_ppp.h,v 1.8 2002/07/01 19:31:34 deraadt Exp $	*/
 /*	$NetBSD: if_ppp.h,v 1.11 1996/03/15 02:28:05 paulus Exp $	*/
 
 /*

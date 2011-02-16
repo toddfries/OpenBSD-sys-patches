@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_net.c,v 1.16 2003/09/23 16:51:12 millert Exp $	 */
+/*	$OpenBSD: svr4_net.c,v 1.17 2005/11/21 18:16:38 millert Exp $	 */
 /*	$NetBSD: svr4_net.c,v 1.12 1996/09/07 12:40:51 mycroft Exp $	 */
 
 /*

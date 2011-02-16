@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_input.c,v 1.146 2006/12/28 20:06:10 deraadt Exp $	*/
-=======
 /*	$OpenBSD: ip_input.c,v 1.186 2011/02/11 12:16:30 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -49,6 +45,7 @@
 #include <sys/syslog.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -65,6 +62,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#ifdef MROUTING
+#include <netinet/ip_mroute.h>
 #endif
 
 #ifdef IPSEC
@@ -138,42 +139,10 @@ int	ipqmaxlen = IFQ_MAXLEN;
 struct	in_ifaddrhead in_ifaddr;
 struct	ifqueue ipintrq;
 
-int	ipq_locked;
-static __inline int ipq_lock_try(void);
-static __inline void ipq_unlock(void);
-
 struct pool ipqent_pool;
 struct pool ipq_pool;
 
 struct ipstat ipstat;
-
-static __inline int
-ipq_lock_try()
-{
-	int s;
-
-	/* Use splvm() due to mbuf allocation. */
-	s = splvm();
-	if (ipq_locked) {
-		splx(s);
-		return (0);
-	}
-	ipq_locked = 1;
-	splx(s);
-	return (1);
-}
-
-#define ipq_lock() ipq_lock_try()
-
-static __inline void
-ipq_unlock()
-{
-	int s;
-
-	s = splvm();
-	ipq_locked = 0;
-	splx(s);
-}
 
 char *
 inet_ntoa(ina)
@@ -203,13 +172,8 @@ static	struct ip_srcrt {
 	struct	in_addr route[MAX_IPOPTLEN/sizeof(struct in_addr)];
 } ip_srcrt;
 
-<<<<<<< HEAD
-static void save_rte(u_char *, struct in_addr);
-static int ip_weadvertise(u_int32_t);
-=======
 void save_rte(u_char *, struct in_addr);
 int ip_weadvertise(u_int32_t, u_int);
->>>>>>> origin/master
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -267,7 +231,7 @@ ipintr()
 	struct mbuf *m;
 	int s;
 
-	while (ipintrq.ifq_head) {
+	for (;;) {
 		/*
 		 * Get next datagram off input queue and get IP header
 		 * in first mbuf.
@@ -275,7 +239,7 @@ ipintr()
 		s = splnet();
 		IF_DEQUEUE(&ipintrq, m);
 		splx(s);
-		if (m == 0)
+		if (m == NULL)
 			return;
 #ifdef	DIAGNOSTIC
 		if ((m->m_flags & M_PKTHDR) == 0)
@@ -392,10 +356,8 @@ ipv4_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
-	    ip->ip_p != IPPROTO_ICMP &&
-	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
-	    &ip->ip_dst.s_addr))
+	    ip->ip_p != IPPROTO_ICMP && carp_lsdrop(m, AF_INET,
+	    &ip->ip_src.s_addr, &ip->ip_dst.s_addr))
 		goto bad;
 #endif
 
@@ -428,8 +390,6 @@ ipv4_input(m)
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
 		goto ours;
 
-<<<<<<< HEAD
-=======
 #if NPF > 0
 	if (m->m_pkthdr.pf.statekey &&
 	    ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp)
@@ -446,7 +406,6 @@ ipv4_input(m)
 		    NULL && (ia->ia_ifp->if_flags & IFF_UP))
 			goto ours;
 
->>>>>>> origin/master
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
 #ifdef MROUTING
@@ -509,10 +468,8 @@ ipv4_input(m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
-	    ip->ip_p == IPPROTO_ICMP &&
-	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
-	    &ip->ip_dst.s_addr))
+	    ip->ip_p == IPPROTO_ICMP && carp_lsdrop(m, AF_INET,
+	    &ip->ip_src.s_addr, &ip->ip_dst.s_addr))
 		goto bad;
 #endif
 	/*
@@ -521,8 +478,10 @@ ipv4_input(m)
 	if (ipforwarding == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
-	} else {
+		return;
+	}
 #ifdef IPSEC
+	if (ipsec_in_use) {
 	        /*
 		 * IPsec policy check for forwarded packets. Look at
 		 * inner-most IPsec SA used.
@@ -550,10 +509,10 @@ ipv4_input(m)
 		 * Fall through, forward packet. Outbound IPsec policy
 		 * checking will occur in ip_output().
 		 */
+	}
 #endif /* IPSEC */
 
-		ip_forward(m, pfrdr);
-	}
+	ip_forward(m, pfrdr);
 	return;
 
 ours:
@@ -577,7 +536,6 @@ ours:
 		 * Look for queue of fragments
 		 * of this datagram.
 		 */
-		ipq_lock();
 		LIST_FOREACH(fp, &ipq, ipq_q)
 			if (ip->ip_id == fp->ipq_id &&
 			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
@@ -602,7 +560,6 @@ found:
 			if (ntohs(ip->ip_len) == 0 ||
 			    (ntohs(ip->ip_len) & 0x7) != 0) {
 				ipstat.ips_badfrags++;
-				ipq_unlock();
 				goto bad;
 			}
 		}
@@ -618,14 +575,12 @@ found:
 			if (ip_frags + 1 > ip_maxqueue) {
 				ip_flush();
 				ipstat.ips_rcvmemdrop++;
-				ipq_unlock();
 				goto bad;
 			}
 
 			ipqe = pool_get(&ipqent_pool, PR_NOWAIT);
 			if (ipqe == NULL) {
 				ipstat.ips_rcvmemdrop++;
-				ipq_unlock();
 				goto bad;
 			}
 			ip_frags++;
@@ -634,7 +589,6 @@ found:
 			ipqe->ipqe_ip = ip;
 			m = ip_reass(ipqe, fp);
 			if (m == 0) {
-				ipq_unlock();
 				return;
 			}
 			ipstat.ips_reassembled++;
@@ -644,10 +598,12 @@ found:
 		} else
 			if (fp)
 				ip_freef(fp);
-		ipq_unlock();
 	}
 
 #ifdef IPSEC
+	if (!ipsec_in_use)
+		goto skipipsec;
+
         /*
          * If it's a protected packet for us, skip the policy check.
          * That's because we really only care about the properties of
@@ -784,14 +740,8 @@ ip_reass(ipqe, fp)
 	/*
 	 * If first fragment to arrive, create a reassembly queue.
 	 */
-<<<<<<< HEAD
-	if (fp == 0) {
-		MALLOC(fp, struct ipq *, sizeof (struct ipq),
-		    M_FTABLE, M_NOWAIT);
-=======
 	if (fp == NULL) {
 		fp = pool_get(&ipq_pool, PR_NOWAIT);
->>>>>>> origin/master
 		if (fp == NULL)
 			goto dropfrag;
 		LIST_INSERT_HEAD(&ipq, fp, ipq_q);
@@ -928,11 +878,7 @@ insert:
 	ip->ip_src = fp->ipq_src;
 	ip->ip_dst = fp->ipq_dst;
 	LIST_REMOVE(fp, ipq_q);
-<<<<<<< HEAD
-	FREE(fp, M_FTABLE);
-=======
 	pool_put(&ipq_pool, fp);
->>>>>>> origin/master
 	m->m_len += (ip->ip_hl << 2);
 	m->m_data -= (ip->ip_hl << 2);
 	/* some debugging cruft by sklower, below, will go away soon */
@@ -971,11 +917,7 @@ ip_freef(fp)
 		ip_frags--;
 	}
 	LIST_REMOVE(fp, ipq_q);
-<<<<<<< HEAD
-	FREE(fp, M_FTABLE);
-=======
 	pool_put(&ipq_pool, fp);
->>>>>>> origin/master
 }
 
 /*
@@ -989,7 +931,6 @@ ip_slowtimo()
 	struct ipq *fp, *nfp;
 	int s = splsoftnet();
 
-	ipq_lock();
 	for (fp = LIST_FIRST(&ipq); fp != LIST_END(&ipq); fp = nfp) {
 		nfp = LIST_NEXT(fp, ipq_q);
 		if (--fp->ipq_ttl == 0) {
@@ -997,7 +938,6 @@ ip_slowtimo()
 			ip_freef(fp);
 		}
 	}
-	ipq_unlock();
 	if (ipforward_rt.ro_rt) {
 		RTFREE(ipforward_rt.ro_rt);
 		ipforward_rt.ro_rt = 0;
@@ -1012,13 +952,10 @@ void
 ip_drain()
 {
 
-	if (ipq_lock_try() == 0)
-		return;
 	while (!LIST_EMPTY(&ipq)) {
 		ipstat.ips_fragdropped++;
 		ip_freef(LIST_FIRST(&ipq));
 	}
-	ipq_unlock();
 }
 
 /*
@@ -1315,14 +1252,8 @@ save_rte(option, dst)
  * Check whether we do proxy ARP for this address and we point to ourselves.
  * Code shamelessly copied from arplookup().
  */
-<<<<<<< HEAD
-static int
-ip_weadvertise(addr)
-	u_int32_t addr;
-=======
 int
 ip_weadvertise(u_int32_t addr, u_int rtableid)
->>>>>>> origin/master
 {
 	struct rtentry *rt;
 	struct ifnet *ifp;
@@ -1495,9 +1426,6 @@ ip_forward(m, srcrt)
 	u_int rtableid = 0;
 	struct mbuf *mcopy;
 	n_long dest;
-#if NPF > 0
-	struct pf_mtag	*pft;
-#endif
 
 	dest = 0;
 #ifdef DIAGNOSTIC
@@ -1515,14 +1443,7 @@ ip_forward(m, srcrt)
 		return;
 	}
 
-<<<<<<< HEAD
-#if NPF > 0
-	if ((pft = pf_find_mtag(m)) != NULL)
-		rtableid = pft->rtableid;
-#endif
-=======
 	rtableid = m->m_pkthdr.rdomain;
->>>>>>> origin/master
 
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
@@ -1679,6 +1600,10 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	size_t newlen;
 {
 	int error;
+#ifdef MROUTING
+	extern int ip_mrtproto;
+	extern struct mrtstat mrtstat;
+#endif
 
 	/* Almost all sysctl names at this level are terminal. */
 	if (namelen != 1 && name[0] != IPCTL_IFQUEUE)
@@ -1729,6 +1654,26 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case IPCTL_IFQUEUE:
 	        return (sysctl_ifq(name + 1, namelen - 1,
 		    oldp, oldlenp, newp, newlen, &ipintrq));
+	case IPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ipstat, sizeof(ipstat)));
+	case IPCTL_MRTSTATS:
+#ifdef MROUTING
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &mrtstat, sizeof(mrtstat)));
+#else
+		return (EOPNOTSUPP);
+#endif
+	case IPCTL_MRTPROTO:
+#ifdef MROUTING
+		return (sysctl_rdint(oldp, oldlenp, newp, ip_mrtproto));
+#else
+		return (EOPNOTSUPP);
+#endif
 	default:
 		if (name[0] < IPCTL_MAXID)
 			return (sysctl_int_arr(ipctl_vars, name, namelen,

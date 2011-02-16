@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_vnode.c,v 1.45 2007/04/04 17:44:45 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_vnode.c,v 1.71 2010/05/18 04:41:14 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_vnode.c,v 1.36 2000/11/24 20:34:01 chs Exp $	*/
 
 /*
@@ -79,35 +75,16 @@
  */
 
 LIST_HEAD(uvn_list_struct, uvm_vnode);
-static struct uvn_list_struct uvn_wlist;	/* writeable uvns */
-static simple_lock_data_t uvn_wl_lock;		/* locks uvn_wlist */
+struct uvn_list_struct uvn_wlist;	/* writeable uvns */
 
 SIMPLEQ_HEAD(uvn_sq_struct, uvm_vnode);
-static struct uvn_sq_struct uvn_sync_q;		/* sync'ing uvns */
+struct uvn_sq_struct uvn_sync_q;		/* sync'ing uvns */
 struct rwlock uvn_sync_lock;			/* locks sync operation */
 
 /*
  * functions
  */
 
-<<<<<<< HEAD
-static void		   uvn_cluster(struct uvm_object *, voff_t,
-					   voff_t *, voff_t *);
-static void                uvn_detach(struct uvm_object *);
-static boolean_t           uvn_flush(struct uvm_object *, voff_t,
-					 voff_t, int);
-static int                 uvn_get(struct uvm_object *, voff_t,
-					vm_page_t *, int *, int,
-					vm_prot_t, int, int);
-static void		   uvn_init(void);
-static int		   uvn_io(struct uvm_vnode *, vm_page_t *,
-				      int, int, int);
-static int		   uvn_put(struct uvm_object *, vm_page_t *,
-					int, boolean_t);
-static void                uvn_reference(struct uvm_object *);
-static boolean_t	   uvn_releasepg(struct vm_page *,
-					      struct vm_page **);
-=======
 void		 uvn_cluster(struct uvm_object *, voff_t, voff_t *, voff_t *);
 void		 uvn_detach(struct uvm_object *);
 boolean_t	 uvn_flush(struct uvm_object *, voff_t, voff_t, int);
@@ -117,7 +94,6 @@ void		 uvn_init(void);
 int		 uvn_io(struct uvm_vnode *, vm_page_t *, int, int, int);
 int		 uvn_put(struct uvm_object *, vm_page_t *, int, boolean_t);
 void		 uvn_reference(struct uvm_object *);
->>>>>>> origin/master
 
 /*
  * master pager structure
@@ -145,12 +121,11 @@ struct uvm_pagerops uvm_vnodeops = {
  * init pager private data structures.
  */
 
-static void
-uvn_init()
+void
+uvn_init(void)
 {
 
 	LIST_INIT(&uvn_wlist);
-	simple_lock_init(&uvn_wl_lock);
 	/* note: uvn_sync_q init'd in uvm_vnp_sync() */
 	rw_init(&uvn_sync_lock, "uvnsync");
 }
@@ -226,9 +201,7 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 		/* check for new writeable uvn */
 		if ((accessprot & VM_PROT_WRITE) != 0 &&
 		    (uvn->u_flags & UVM_VNODE_WRITEABLE) == 0) {
-			simple_lock(&uvn_wl_lock);
 			LIST_INSERT_HEAD(&uvn_wlist, uvn, u_wlist);
-			simple_unlock(&uvn_wl_lock);
 			/* we are now on wlist! */
 			uvn->u_flags |= UVM_VNODE_WRITEABLE;
 		}
@@ -266,7 +239,7 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 		if (result == 0) {
 			/* XXX should remember blocksize */
 			used_vnode_size = (u_quad_t)pi.disklab->d_secsize *
-			    (u_quad_t)pi.part->p_size;
+			    (u_quad_t)DL_GETPSIZE(pi.part);
 		}
 	} else {
 		result = VOP_GETATTR(vp, &vattr, curproc->p_ucred, curproc);
@@ -306,9 +279,7 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 
 	/* if write access, we need to add it to the wlist */
 	if (accessprot & VM_PROT_WRITE) {
-		simple_lock(&uvn_wl_lock);
 		LIST_INSERT_HEAD(&uvn_wlist, uvn, u_wlist);
-		simple_unlock(&uvn_wl_lock);
 		uvn->u_flags |= UVM_VNODE_WRITEABLE;	/* we are on wlist! */
 	}
 
@@ -339,14 +310,8 @@ uvn_attach(void *arg, vm_prot_t accessprot)
  */
 
 
-<<<<<<< HEAD
-static void
-uvn_reference(uobj)
-	struct uvm_object *uobj;
-=======
 void
 uvn_reference(struct uvm_object *uobj)
->>>>>>> origin/master
 {
 #ifdef DEBUG
 	struct uvm_vnode *uvn = (struct uvm_vnode *) uobj;
@@ -376,14 +341,8 @@ uvn_reference(struct uvm_object *uobj)
  * => this starts the detach process, but doesn't have to finish it
  *    (async i/o could still be pending).
  */
-<<<<<<< HEAD
-static void
-uvn_detach(uobj)
-	struct uvm_object *uobj;
-=======
 void
 uvn_detach(struct uvm_object *uobj)
->>>>>>> origin/master
 {
 	struct uvm_vnode *uvn;
 	struct vnode *vp;
@@ -475,9 +434,7 @@ uvn_detach(struct uvm_object *uobj)
 	 * all references are gone.
 	 */
 	if (uvn->u_flags & UVM_VNODE_WRITEABLE) {
-		simple_lock(&uvn_wl_lock);		/* protect uvn_wlist */
 		LIST_REMOVE(uvn, u_wlist);
-		simple_unlock(&uvn_wl_lock);
 	}
 	KASSERT(RB_EMPTY(&uobj->memt));
 	oldflags = uvn->u_flags;
@@ -642,9 +599,7 @@ uvm_vnp_terminate(struct vnode *vp)
 			panic("uvm_vnp_terminate: io sync wanted bit set");
 
 		if (uvn->u_flags & UVM_VNODE_WRITEABLE) {
-			simple_lock(&uvn_wl_lock);
 			LIST_REMOVE(uvn, u_wlist);
-			simple_unlock(&uvn_wl_lock);
 		}
 		uvn->u_flags = 0;	/* uvn is history, clear all bits */
 	}
@@ -658,77 +613,6 @@ uvm_vnp_terminate(struct vnode *vp)
 }
 
 /*
-<<<<<<< HEAD
- * uvn_releasepg: handled a released page in a uvn
- *
- * => "pg" is a PG_BUSY [caller owns it], PG_RELEASED page that we need
- *	to dispose of.
- * => caller must handled PG_WANTED case
- * => called with page's object locked, pageq's unlocked
- * => returns TRUE if page's object is still alive, FALSE if we
- *	killed the page's object.    if we return TRUE, then we
- *	return with the object locked.
- * => if (nextpgp != NULL) => we return pageq.tqe_next here, and return
- *				with the page queues locked [for pagedaemon]
- * => if (nextpgp == NULL) => we return with page queues unlocked [normal case]
- * => we kill the uvn if it is not referenced and we are suppose to
- *	kill it ("relkill").
- */
-
-boolean_t
-uvn_releasepg(pg, nextpgp)
-	struct vm_page *pg;
-	struct vm_page **nextpgp;	/* OUT */
-{
-	struct uvm_vnode *uvn = (struct uvm_vnode *) pg->uobject;
-#ifdef DIAGNOSTIC
-	if ((pg->pg_flags & PG_RELEASED) == 0)
-		panic("uvn_releasepg: page not released!");
-#endif
-
-	/*
-	 * dispose of the page [caller handles PG_WANTED]
-	 */
-	pmap_page_protect(pg, VM_PROT_NONE);
-	uvm_lock_pageq();
-	if (nextpgp)
-		*nextpgp = TAILQ_NEXT(pg, pageq); /* next page for daemon */
-	uvm_pagefree(pg);
-	if (!nextpgp)
-		uvm_unlock_pageq();
-
-	/*
-	 * now see if we need to kill the object
-	 */
-	if (uvn->u_flags & UVM_VNODE_RELKILL) {
-		if (uvn->u_obj.uo_refs)
-			panic("uvn_releasepg: kill flag set on referenced "
-			    "object!");
-		if (uvn->u_obj.uo_npages == 0) {
-			if (uvn->u_flags & UVM_VNODE_WRITEABLE) {
-				simple_lock(&uvn_wl_lock);
-				LIST_REMOVE(uvn, u_wlist);
-				simple_unlock(&uvn_wl_lock);
-			}
-#ifdef DIAGNOSTIC
-			if (!TAILQ_EMPTY(&uvn->u_obj.memq))
-	panic("uvn_releasepg: pages in object with npages == 0");
-#endif
-			if (uvn->u_flags & UVM_VNODE_WANTED)
-				/* still holding object lock */
-				wakeup(uvn);
-
-			uvn->u_flags = 0;		/* DEAD! */
-			simple_unlock(&uvn->u_obj.vmobjlock);
-			return (FALSE);
-		}
-	}
-	return (TRUE);
-}
-
-/*
-=======
->>>>>>> origin/master
  * NOTE: currently we have to use VOP_READ/VOP_WRITE because they go
  * through the buffer cache and allow I/O in any size.  These VOPs use
  * synchronous i/o.  [vs. VOP_STRATEGY which can be async, but doesn't
@@ -801,16 +685,8 @@ uvn_releasepg(pg, nextpgp)
 
 #define UVN_HASH_PENALTY 4	/* XXX: a guess */
 
-<<<<<<< HEAD
-static boolean_t
-uvn_flush(uobj, start, stop, flags)
-	struct uvm_object *uobj;
-	voff_t start, stop;
-	int flags;
-=======
 boolean_t
 uvn_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
->>>>>>> origin/master
 {
 	struct uvm_vnode *uvn = (struct uvm_vnode *) uobj;
 	struct vm_page *pp, *ptmp;
@@ -1111,17 +987,9 @@ ReTry:
  * - currently doesn't matter if obj locked or not.
  */
 
-<<<<<<< HEAD
-static void
-uvn_cluster(uobj, offset, loffset, hoffset)
-	struct uvm_object *uobj;
-	voff_t offset;
-	voff_t *loffset, *hoffset; /* OUT */
-=======
 void
 uvn_cluster(struct uvm_object *uobj, voff_t offset, voff_t *loffset,
     voff_t *hoffset)
->>>>>>> origin/master
 {
 	struct uvm_vnode *uvn = (struct uvm_vnode *) uobj;
 	*loffset = offset;
@@ -1150,16 +1018,8 @@ uvn_cluster(struct uvm_object *uobj, voff_t offset, voff_t *loffset,
  *	[thus we never do async i/o!  see iodone comment]
  */
 
-<<<<<<< HEAD
-static int
-uvn_put(uobj, pps, npages, flags)
-	struct uvm_object *uobj;
-	struct vm_page **pps;
-	int npages, flags;
-=======
 int
 uvn_put(struct uvm_object *uobj, struct vm_page **pps, int npages, int flags)
->>>>>>> origin/master
 {
 	int retval;
 
@@ -1182,20 +1042,9 @@ uvn_put(struct uvm_object *uobj, struct vm_page **pps, int npages, int flags)
  * => NOTE: caller must check for released pages!!
  */
 
-<<<<<<< HEAD
-static int
-uvn_get(uobj, offset, pps, npagesp, centeridx, access_type, advice, flags)
-	struct uvm_object *uobj;
-	voff_t offset;
-	struct vm_page **pps;		/* IN/OUT */
-	int *npagesp;			/* IN (OUT if PGO_LOCKED) */
-	int centeridx, advice, flags;
-	vm_prot_t access_type;
-=======
 int
 uvn_get(struct uvm_object *uobj, voff_t offset, struct vm_page **pps,
     int *npagesp, int centeridx, vm_prot_t access_type, int advice, int flags)
->>>>>>> origin/master
 {
 	voff_t current_offset;
 	struct vm_page *ptmp;
@@ -1439,16 +1288,8 @@ uvn_get(struct uvm_object *uobj, voff_t offset, struct vm_page **pps,
  *	[thus we never do async i/o!  see iodone comment]
  */
 
-<<<<<<< HEAD
-static int
-uvn_io(uvn, pps, npages, flags, rw)
-	struct uvm_vnode *uvn;
-	vm_page_t *pps;
-	int npages, flags, rw;
-=======
 int
 uvn_io(struct uvm_vnode *uvn, vm_page_t *pps, int npages, int flags, int rw)
->>>>>>> origin/master
 {
 	struct vnode *vn;
 	struct uio uio;
@@ -1664,8 +1505,7 @@ uvn_io(struct uvm_vnode *uvn, vm_page_t *pps, int npages, int flags, int rw)
  */
 
 boolean_t
-uvm_vnp_uncache(vp)
-	struct vnode *vp;
+uvm_vnp_uncache(struct vnode *vp)
 {
 	struct uvm_vnode *uvn = &vp->v_uvm;
 
@@ -1700,36 +1540,14 @@ uvm_vnp_uncache(vp)
 	uvn->u_obj.uo_refs++;		/* value is now 1 */
 	simple_unlock(&uvn->u_obj.vmobjlock);
 
-
-#ifdef DEBUG
+#ifdef VFSDEBUG
 	/*
 	 * carry over sanity check from old vnode pager: the vnode should
 	 * be VOP_LOCK'd, and we confirm it here.
 	 */
-	if (!VOP_ISLOCKED(vp)) {
-		boolean_t is_ok_anyway = FALSE;
-#if defined(NFSCLIENT)
-		extern int (**nfsv2_vnodeop_p)(void *);
-		extern int (**spec_nfsv2nodeop_p)(void *);
-#if defined(FIFO)
-		extern int (**fifo_nfsv2nodeop_p)(void *);
-#endif	/* defined(FIFO) */
-
-		/* vnode is NOT VOP_LOCKed: some vnode types _never_ lock */
-		if (vp->v_op == nfsv2_vnodeop_p ||
-		    vp->v_op == spec_nfsv2nodeop_p) {
-			is_ok_anyway = TRUE;
-		}
-#if defined(FIFO)
-		if (vp->v_op == fifo_nfsv2nodeop_p) {
-			is_ok_anyway = TRUE;
-		}
-#endif	/* defined(FIFO) */
-#endif	/* defined(NFSSERVER) || defined(NFSCLIENT) */
-		if (!is_ok_anyway)
-			panic("uvm_vnp_uncache: vnode not locked!");
-	}
-#endif	/* DEBUG */
+	if ((vp->v_flag & VLOCKSWORK) && !VOP_ISLOCKED(vp))
+		panic("uvm_vnp_uncache: vnode not locked!");
+#endif	/* VFSDEBUG */
 
 	/*
 	 * now drop our reference to the vnode.   if we have the sole
@@ -1810,14 +1628,11 @@ uvm_vnp_setsize(struct vnode *vp, voff_t newsize)
  *    other processes attempting a sync will sleep on this lock
  *    until we are done.
  */
-
 void
-uvm_vnp_sync(mp)
-	struct mount *mp;
+uvm_vnp_sync(struct mount *mp)
 {
 	struct uvm_vnode *uvn;
 	struct vnode *vp;
-	boolean_t got_lock;
 
 	/*
 	 * step 1: ensure we are only ones using the uvn_sync_q by locking
@@ -1827,43 +1642,26 @@ uvm_vnp_sync(mp)
 
 	/*
 	 * step 2: build up a simpleq of uvns of interest based on the
-	 * write list.   we gain a reference to uvns of interest.  must
-	 * be careful about locking uvn's since we will be holding uvn_wl_lock
-	 * in the body of the loop.
+	 * write list.   we gain a reference to uvns of interest. 
 	 */
 	SIMPLEQ_INIT(&uvn_sync_q);
-	simple_lock(&uvn_wl_lock);
 	LIST_FOREACH(uvn, &uvn_wlist, u_wlist) {
 
-		vp = (struct vnode *) uvn;
+		vp = (struct vnode *)uvn;
 		if (mp && vp->v_mount != mp)
 			continue;
 
-		/* attempt to gain reference */
-		while ((got_lock = simple_lock_try(&uvn->u_obj.vmobjlock)) ==
-								FALSE &&
-				(uvn->u_flags & UVM_VNODE_BLOCKED) == 0)
-			/* spin */;
-
 		/*
-		 * we will exit the loop if either if the following are true:
-		 *  - we got the lock [always true if NCPU == 1]
-		 *  - we failed to get the lock but noticed the vnode was
-		 *	"blocked" -- in this case the vnode must be a dying
-		 *	vnode, and since dying vnodes are in the process of
-		 *	being flushed out, we can safely skip this one
-		 *
-		 * we want to skip over the vnode if we did not get the lock,
-		 * or if the vnode is already dying (due to the above logic).
+		 * If the vnode is "blocked" it means it must be dying, which
+		 * in turn means its in the process of being flushed out so
+		 * we can safely skip it.
 		 *
 		 * note that uvn must already be valid because we found it on
 		 * the wlist (this also means it can't be ALOCK'd).
 		 */
-		if (!got_lock || (uvn->u_flags & UVM_VNODE_BLOCKED) != 0) {
-			if (got_lock)
-				simple_unlock(&uvn->u_obj.vmobjlock);
-			continue;		/* skip it */
-		}
+		if ((uvn->u_flags & UVM_VNODE_BLOCKED) != 0)
+			continue;
+
 
 		/*
 		 * gain reference.   watch out for persisting uvns (need to
@@ -1872,30 +1670,18 @@ uvm_vnp_sync(mp)
 		if (uvn->u_obj.uo_refs == 0)
 			vref(vp);
 		uvn->u_obj.uo_refs++;
-		simple_unlock(&uvn->u_obj.vmobjlock);
 
-		/*
-		 * got it!
-		 */
 		SIMPLEQ_INSERT_HEAD(&uvn_sync_q, uvn, u_syncq);
 	}
-	simple_unlock(&uvn_wl_lock);
 
-	/*
-	 * step 3: we now have a list of uvn's that may need cleaning.
-	 * we are holding the uvn_sync_lock, but have dropped the uvn_wl_lock
-	 * (so we can now safely lock uvn's again).
-	 */
-
+	/* step 3: we now have a list of uvn's that may need cleaning. */
 	SIMPLEQ_FOREACH(uvn, &uvn_sync_q, u_syncq) {
-		simple_lock(&uvn->u_obj.vmobjlock);
 #ifdef DEBUG
 		if (uvn->u_flags & UVM_VNODE_DYING) {
 			printf("uvm_vnp_sync: dying vnode on sync list\n");
 		}
 #endif
-		uvn_flush(&uvn->u_obj, 0, 0,
-		    PGO_CLEANIT|PGO_ALLPAGES|PGO_DOACTCLUST);
+		uvn_flush(&uvn->u_obj, 0, 0, PGO_CLEANIT|PGO_ALLPAGES|PGO_DOACTCLUST);
 
 		/*
 		 * if we have the only reference and we just cleaned the uvn,
@@ -1909,14 +1695,9 @@ uvm_vnp_sync(mp)
 			uvn->u_flags &= ~UVM_VNODE_WRITEABLE;
 		}
 
-		simple_unlock(&uvn->u_obj.vmobjlock);
-
 		/* now drop our reference to the uvn */
 		uvn_detach(&uvn->u_obj);
 	}
 
-	/*
-	 * done!  release sync lock
-	 */
 	rw_exit_write(&uvn_sync_lock);
 }

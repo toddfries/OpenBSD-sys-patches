@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_subr.c,v 1.20 2006/03/04 22:40:15 brad Exp $	*/
+/*	$OpenBSD: altq_subr.c,v 1.26 2008/05/09 14:10:05 dlg Exp $	*/
 /*	$KAME: altq_subr.c,v 1.11 2002/01/11 08:11:49 kjc Exp $	*/
 
 /*
@@ -55,12 +55,6 @@
 
 #include <net/pfvar.h>
 #include <altq/altq.h>
-
-/* machine dependent clock related includes */
-#if defined(__i386__)
-#include <machine/cpufunc.h>		/* for pentium tsc */
-#include <machine/specialreg.h>		/* for CPUID_TSC */
-#endif /* __i386__ */
 
 /*
  * internal function prototypes
@@ -275,15 +269,11 @@ tbr_set(ifq, profile)
 		if ((tbr = ifq->altq_tbr) == NULL)
 			return (ENOENT);
 		ifq->altq_tbr = NULL;
-		FREE(tbr, M_DEVBUF);
+		free(tbr, M_DEVBUF);
 		return (0);
 	}
 
-	MALLOC(tbr, struct tb_regulator *, sizeof(struct tb_regulator),
-	       M_DEVBUF, M_WAITOK);
-	if (tbr == NULL)
-		return (ENOMEM);
-	bzero(tbr, sizeof(struct tb_regulator));
+	tbr = malloc(sizeof(struct tb_regulator), M_DEVBUF, M_WAITOK|M_ZERO);
 
 	tbr->tbr_rate = TBR_SCALE(profile->rate / 8) / machclk_freq;
 	tbr->tbr_depth = TBR_SCALE(profile->depth);
@@ -299,7 +289,7 @@ tbr_set(ifq, profile)
 	ifq->altq_tbr = tbr;	/* set the new tbr */
 
 	if (otbr != NULL)
-		FREE(otbr, M_DEVBUF);
+		free(otbr, M_DEVBUF);
 	else {
 		if (tbr_timer == 0) {
 			CALLOUT_RESET(&tbr_callout, 1, tbr_timeout, (void *)0);
@@ -327,27 +317,13 @@ tbr_timeout(arg)
 			continue;
 		active++;
 		if (!IFQ_IS_EMPTY(&ifp->if_snd) && ifp->if_start != NULL)
-			(*ifp->if_start)(ifp);
+			if_start(ifp);
 	}
 	splx(s);
 	if (active > 0)
 		CALLOUT_RESET(&tbr_callout, 1, tbr_timeout, (void *)0);
 	else
 		tbr_timer = 0;	/* don't need tbr_timer anymore */
-#if defined(__alpha__) && !defined(ALTQ_NOPCC)
-	{
-		/*
-		 * XXX read out the machine dependent clock once a second
-		 * to detect counter wrap-around.
-		 */
-		static u_int cnt;
-
-		if (++cnt >= hz) {
-			(void)read_machclk();
-			cnt = 0;
-		}
-	}
-#endif /* __alpha__ && !ALTQ_NOPCC */
 }
 
 /*
@@ -714,73 +690,33 @@ write_dsfield(m, pktattr, dsfield)
 }
 
 
-/*
- * high resolution clock support taking advantage of a machine dependent
- * high resolution time counter (e.g., timestamp counter of intel pentium).
- * we assume
- *  - 64-bit-long monotonically-increasing counter
- *  - frequency range is 100M-4GHz (CPU speed)
- */
-/* if pcc is not available or disabled, emulate 256MHz using microtime() */
 #define	MACHCLK_SHIFT	8
 
-int machclk_usepcc;
+u_int32_t machclk_tc = 0;
 u_int32_t machclk_freq = 0;
 u_int32_t machclk_per_tick = 0;
-
-#ifdef __alpha__
-extern u_int64_t cycles_per_usec;	/* alpha cpu clock frequency */
-#endif /* __alpha__ */
 
 void
 init_machclk(void)
 {
-	machclk_usepcc = 1;
-
-#if (!defined(__i386__) && !defined(__alpha__)) || defined(ALTQ_NOPCC)
-	machclk_usepcc = 0;
-#endif
-#if defined(__FreeBSD__) && defined(SMP)
-	machclk_usepcc = 0;
-#endif
-#if defined(__NetBSD__) && defined(MULTIPROCESSOR)
-	machclk_usepcc = 0;
-#endif
-#if defined(__OpenBSD__) && defined(__HAVE_TIMECOUNTER)
+#if defined(__HAVE_TIMECOUNTER)
 	/*
 	 * If we have timecounters, microtime is good enough and we can
 	 * avoid problems on machines with variable cycle counter
 	 * frequencies.
 	 */
-	machclk_usepcc = 0;
-#endif
-#ifdef __i386__
-	/* check if TSC is available */
-	if (machclk_usepcc == 1 && (cpu_feature & CPUID_TSC) == 0)
-		machclk_usepcc = 0;
+	machclk_tc = 1;
 #endif
 
-	if (machclk_usepcc == 0) {
+	if (machclk_tc == 1) {
 		/* emulate 256MHz using microtime() */
 		machclk_freq = 1000000 << MACHCLK_SHIFT;
 		machclk_per_tick = machclk_freq / hz;
 #ifdef ALTQ_DEBUG
-		printf("altq: emulate %uHz cpu clock\n", machclk_freq);
+		printf("altq: emulating %uHz cpu clock\n", machclk_freq);
 #endif
 		return;
 	}
-
-	/*
-	 * if the clock frequency (of Pentium TSC or Alpha PCC) is
-	 * accessible, just use it.
-	 */
-#if defined(__i386__) && (defined(I586_CPU) || defined(I686_CPU))
-	/* XXX - this will break down with variable cpu frequency. */
-	machclk_freq = cpuspeed * 1000000;
-#endif
-#if defined(__alpha__)
-	machclk_freq = (u_int32_t)(cycles_per_usec * 1000000);
-#endif /* __alpha__ */
 
 	/*
 	 * if we don't know the clock frequency, measure it.
@@ -810,50 +746,14 @@ init_machclk(void)
 #endif
 }
 
-#if defined(__OpenBSD__) && defined(__i386__)
-static __inline u_int64_t
-rdtsc(void)
-{
-	u_int64_t rv;
-	__asm __volatile(".byte 0x0f, 0x31" : "=A" (rv));
-	return (rv);
-}
-#endif /* __OpenBSD__ && __i386__ */
-
 u_int64_t
 read_machclk(void)
 {
+	struct timeval tv;
 	u_int64_t val;
 
-	if (machclk_usepcc) {
-#if defined(__i386__)
-		val = rdtsc();
-#elif defined(__alpha__)
-		static u_int32_t last_pcc, upper;
-		u_int32_t pcc;
-
-		/*
-		 * for alpha, make a 64bit counter value out of the 32bit
-		 * alpha processor cycle counter.
-		 * read_machclk must be called within a half of its
-		 * wrap-around cycle (about 5 sec for 400MHz cpu) to properly
-		 * detect a counter wrap-around.
-		 * tbr_timeout calls read_machclk once a second.
-		 */
-		pcc = (u_int32_t)alpha_rpcc();
-		if (pcc <= last_pcc)
-			upper++;
-		last_pcc = pcc;
-		val = ((u_int64_t)upper << 32) + pcc;
-#else
-		panic("read_machclk");
-#endif
-	} else {
-		struct timeval tv;
-
-		microuptime(&tv);
-		val = (((u_int64_t)(tv.tv_sec) * 1000000
-		    + tv.tv_usec) << MACHCLK_SHIFT);
-	}
+	microuptime(&tv);
+	val = (((u_int64_t)(tv.tv_sec) * 1000000 +
+	    tv.tv_usec) << MACHCLK_SHIFT);
 	return (val);
 }

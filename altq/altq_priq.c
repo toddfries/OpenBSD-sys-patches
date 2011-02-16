@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_priq.c,v 1.18 2005/10/17 08:43:35 henning Exp $	*/
+/*	$OpenBSD: altq_priq.c,v 1.22 2008/05/08 15:22:02 chl Exp $	*/
 /*	$KAME: altq_priq.c,v 1.1 2000/10/18 09:15:23 kjc Exp $	*/
 /*
  * Copyright (C) 2000
@@ -93,11 +93,7 @@ priq_add_altq(struct pf_altq *a)
 	if (!ALTQ_IS_READY(&ifp->if_snd))
 		return (ENODEV);
 
-	MALLOC(pif, struct priq_if *, sizeof(struct priq_if),
-	    M_DEVBUF, M_WAITOK);
-	if (pif == NULL)
-		return (ENOMEM);
-	bzero(pif, sizeof(struct priq_if));
+	pif = malloc(sizeof(struct priq_if), M_DEVBUF, M_WAITOK|M_ZERO);
 	pif->pif_bandwidth = a->ifbandwidth;
 	pif->pif_maxpri = -1;
 	pif->pif_ifq = &ifp->if_snd;
@@ -119,7 +115,7 @@ priq_remove_altq(struct pf_altq *a)
 
 	(void)priq_clear_interface(pif);
 
-	FREE(pif, M_DEVBUF);
+	free(pif, M_DEVBUF);
 	return (0);
 }
 
@@ -266,17 +262,11 @@ priq_class_create(struct priq_if *pif, int pri, int qlimit, int flags, int qid)
 			red_destroy(cl->cl_red);
 #endif
 	} else {
-		MALLOC(cl, struct priq_class *, sizeof(struct priq_class),
-		       M_DEVBUF, M_WAITOK);
-		if (cl == NULL)
-			return (NULL);
-		bzero(cl, sizeof(struct priq_class));
+		cl = malloc(sizeof(struct priq_class), M_DEVBUF,
+		    M_WAITOK|M_ZERO);
 
-		MALLOC(cl->cl_q, class_queue_t *, sizeof(class_queue_t),
-		       M_DEVBUF, M_WAITOK);
-		if (cl->cl_q == NULL)
-			goto err_ret;
-		bzero(cl->cl_q, sizeof(class_queue_t));
+		cl->cl_q = malloc(sizeof(class_queue_t), M_DEVBUF,
+		    M_WAITOK|M_ZERO);
 	}
 
 	pif->pif_classes[pri] = cl;
@@ -314,8 +304,7 @@ priq_class_create(struct priq_if *pif, int pri, int qlimit, int flags, int qid)
 		if (flags & PRCF_RIO) {
 			cl->cl_red = (red_t *)rio_alloc(0, NULL,
 						red_flags, red_pkttime);
-			if (cl->cl_red != NULL)
-				qtype(cl->cl_q) = Q_RIO;
+			qtype(cl->cl_q) = Q_RIO;
 		} else
 #endif
 		if (flags & PRCF_RED) {
@@ -323,29 +312,12 @@ priq_class_create(struct priq_if *pif, int pri, int qlimit, int flags, int qid)
 			    qlimit(cl->cl_q) * 10/100,
 			    qlimit(cl->cl_q) * 30/100,
 			    red_flags, red_pkttime);
-			if (cl->cl_red != NULL)
-				qtype(cl->cl_q) = Q_RED;
+			qtype(cl->cl_q) = Q_RED;
 		}
 	}
 #endif /* ALTQ_RED */
 
 	return (cl);
-
- err_ret:
-	if (cl->cl_red != NULL) {
-#ifdef ALTQ_RIO
-		if (q_is_rio(cl->cl_q))
-			rio_destroy((rio_t *)cl->cl_red);
-#endif
-#ifdef ALTQ_RED
-		if (q_is_red(cl->cl_q))
-			red_destroy(cl->cl_red);
-#endif
-	}
-	if (cl->cl_q != NULL)
-		FREE(cl->cl_q, M_DEVBUF);
-	FREE(cl, M_DEVBUF);
-	return (NULL);
 }
 
 static int
@@ -382,8 +354,8 @@ priq_class_destroy(struct priq_class *cl)
 			red_destroy(cl->cl_red);
 #endif
 	}
-	FREE(cl->cl_q, M_DEVBUF);
-	FREE(cl, M_DEVBUF);
+	free(cl->cl_q, M_DEVBUF);
+	free(cl, M_DEVBUF);
 	return (0);
 }
 
@@ -396,7 +368,6 @@ priq_enqueue(struct ifaltq *ifq, struct mbuf *m, struct altq_pktattr *pktattr)
 {
 	struct priq_if	*pif = (struct priq_if *)ifq->altq_disc;
 	struct priq_class *cl;
-	struct pf_mtag *t;
 	int len;
 
 	/* grab class set by classifier */
@@ -407,9 +378,7 @@ priq_enqueue(struct ifaltq *ifq, struct mbuf *m, struct altq_pktattr *pktattr)
 		m_freem(m);
 		return (ENOBUFS);
 	}
-	t = pf_find_mtag(m);
-	if (t == NULL ||
-	    (cl = clh_to_clp(pif, t->qid)) == NULL) {
+	if ((cl = clh_to_clp(pif, m->m_pkthdr.pf.qid)) == NULL) {
 		cl = pif->pif_default;
 		if (cl == NULL) {
 			m_freem(m);

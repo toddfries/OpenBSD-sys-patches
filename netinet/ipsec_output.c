@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ipsec_output.c,v 1.36 2006/12/19 11:31:10 itojun Exp $ */
-=======
 /*	$OpenBSD: ipsec_output.c,v 1.43 2010/07/09 16:58:06 reyk Exp $ */
->>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -505,7 +501,7 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 
 #if NPF > 0
 	/* Add pf tag if requested. */
-	if (pf_tag_packet(m, NULL, tdb->tdb_tag, -1))
+	if (pf_tag_packet(m, tdb->tdb_tag, -1))
 		DPRINTF(("failed to tag ipsec packet\n"));
 	pf_pkt_addr_changed(m);
 #endif
@@ -527,7 +523,7 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 		 * We don't need massage, IPv6 header fields are always in
 		 * net endian.
 		 */
-		return ip6_output(m, NULL, NULL, 0, NULL, NULL);
+		return ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL);
 #endif /* INET6 */
 	}
 	return EINVAL; /* Not reached. */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pfkeyv2.c,v 1.113 2007/01/18 20:00:19 henning Exp $ */
-=======
 /* $OpenBSD: pfkeyv2.c,v 1.124 2011/01/12 18:49:21 mikeb Exp $ */
->>>>>>> origin/master
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
@@ -81,6 +77,7 @@
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/pool.h>
 #include <net/route.h>
 #include <netinet/ip_ipsp.h>
 #include <net/pfkeyv2.h>
@@ -154,10 +151,9 @@ pfkeyv2_create(struct socket *socket)
 	struct pfkeyv2_socket *pfkeyv2_socket;
 
 	if (!(pfkeyv2_socket = malloc(sizeof(struct pfkeyv2_socket),
-	    M_PFKEY, M_DONTWAIT)))
+	    M_PFKEY, M_DONTWAIT | M_ZERO)))
 		return (ENOMEM);
 
-	bzero(pfkeyv2_socket, sizeof(struct pfkeyv2_socket));
 	pfkeyv2_socket->next = pfkeyv2_sockets;
 	pfkeyv2_socket->socket = socket;
 	pfkeyv2_socket->pid = curproc->p_pid;
@@ -393,13 +389,11 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 		return (EINVAL);
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT))) {
+	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
-	} else {
+	} else
 		*buffer = p;
-		bzero(p, i);
-	}
 
 	if (dir == IPSP_DIRECTION_OUT)
 		headers[SADB_X_EXT_SRC_FLOW] = p;
@@ -569,6 +563,29 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 	if (sa->tdb_emxkey)
 		i+= PADUP(sa->tdb_emxkeylen) + sizeof(struct sadb_key);
 
+	if (sa->tdb_filter.sen_type) {
+		i += 2 * sizeof(struct sadb_protocol);
+
+		/* We'll need four of them: src, src mask, dst, dst mask. */
+		switch (sa->tdb_filter.sen_type) {
+#ifdef INET
+		case SENT_IP4:
+			i += 4 * PADUP(sizeof(struct sockaddr_in));
+			i += 4 * sizeof(struct sadb_address);
+			break;
+#endif /* INET */
+#ifdef INET6
+		case SENT_IP6:
+			i += 4 * PADUP(sizeof(struct sockaddr_in6));
+			i += 4 * sizeof(struct sadb_address);
+			break;
+#endif /* INET6 */
+		default:
+			rval = EINVAL;
+			goto ret;
+		}
+	}
+
 	if (sa->tdb_udpencap_port)
 		i+= sizeof(struct sadb_x_udpencap);
 
@@ -587,13 +604,11 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 		goto ret;
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT))) {
+	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
-	} else {
+	} else
 		*buffer = p;
-		bzero(p, i);
-	}
 
 	headers[SADB_EXT_SA] = p;
 
@@ -679,6 +694,11 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 		headers[SADB_EXT_KEY_ENCRYPT] = p;
 		export_key(&p, sa, PFKEYV2_ENCRYPTION_KEY);
 	}
+
+	/* Export flow/filter, if present */
+	if (sa->tdb_filter.sen_type)
+		export_flow(&p, IPSP_IPSEC_USE, &sa->tdb_filter,
+		    &sa->tdb_filtermask, headers);
 
 	/* Export UDP encapsulation port, if present */
 	if (sa->tdb_udpencap_port) {
@@ -938,12 +958,11 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		/* Send a message back telling what the SA (the SPI really) is */
 		if (!(freeme = malloc(sizeof(struct sadb_sa), M_PFKEY,
-		    M_DONTWAIT))) {
+		    M_DONTWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
 
-		bzero(freeme, sizeof(struct sadb_sa));
 		headers[SADB_EXT_SPIRANGE] = NULL;
 		headers[SADB_EXT_SA] = freeme;
 		bckptr = freeme;
@@ -1320,12 +1339,10 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(ealgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
-
-		bzero(freeme, i);
 
 		ssup = (struct sadb_supported *) freeme;
 		ssup->sadb_supported_len = i / sizeof(uint64_t);
@@ -1340,15 +1357,13 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(aalgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
 
 		/* Keep track what this socket has registered for */
 		pfkeyv2_socket->registration |= (1 << ((struct sadb_msg *)message)->sadb_msg_satype);
-
-		bzero(freeme, i);
 
 		ssup = (struct sadb_supported *) freeme;
 		ssup->sadb_supported_len = i / sizeof(uint64_t);
@@ -1363,12 +1378,10 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(calgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
-
-		bzero(freeme, i);
 
 		ssup = (struct sadb_supported *) freeme;
 		ssup->sadb_supported_len = i / sizeof(uint64_t);
@@ -1589,7 +1602,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 				goto ret;
 			}
 
-			/* If we were asked to delete something non-existant, error. */
+			/* If we were asked to delete something non-existent, error. */
 			splx(s);
 			rval = ESRCH;
 			break;
@@ -1697,8 +1710,8 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 			int clen =  (sid->sadb_ident_len * sizeof(u_int64_t)) -
 			    sizeof(struct sadb_ident);
 
-			MALLOC(ipo->ipo_srcid, struct ipsec_ref *, clen +
-			    sizeof(struct ipsec_ref), M_CREDENTIALS, M_DONTWAIT);
+			ipo->ipo_srcid = malloc(clen + sizeof(struct ipsec_ref),
+			    M_CREDENTIALS, M_DONTWAIT);
 			if (ipo->ipo_srcid == NULL) {
 				if (exists)
 					ipsec_delete_policy(ipo);
@@ -1719,8 +1732,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 			int clen =  (sid->sadb_ident_len * sizeof(u_int64_t)) -
 			    sizeof(struct sadb_ident);
 
-			MALLOC(ipo->ipo_dstid, struct ipsec_ref *,
-			    clen + sizeof(struct ipsec_ref),
+			ipo->ipo_dstid = malloc(clen + sizeof(struct ipsec_ref),
 			    M_CREDENTIALS, M_DONTWAIT);
 			if (ipo->ipo_dstid == NULL) {
 				if (exists)
@@ -1746,14 +1758,6 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 		/* Flow type */
 		if (!exists) {
 			/* Add SPD entry */
-<<<<<<< HEAD
-			if ((rval = rtrequest(RTM_ADD,
-				 (struct sockaddr *) &encapdst,
-				 (struct sockaddr *) &encapgw,
-				 (struct sockaddr *) &encapnetmask,
-				 RTF_UP | RTF_GATEWAY | RTF_STATIC,
-				 (struct rtentry **) 0, 0)) != 0) {
-=======
 			struct rt_addrinfo info;
 
 			bzero(&info, sizeof(info));
@@ -1765,7 +1769,6 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 			info.rti_flags = RTF_UP | RTF_GATEWAY | RTF_STATIC;
 			if ((rval = rtrequest1(RTM_ADD, &info, RTP_DEFAULT,
 			    NULL, rdomain)) != 0) {
->>>>>>> origin/master
 				/* Remove from linked list of policies on TDB */
 				if (ipo->ipo_tdb)
 					TAILQ_REMOVE(&ipo->ipo_tdb->tdb_policy_head,
@@ -1921,7 +1924,7 @@ pfkeyv2_acquire(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		i += sizeof(struct sadb_x_cred) + PADUP(ipo->ipo_local_auth->ref_len);
 
 	/* Allocate */
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT))) {
+	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	}
@@ -1929,7 +1932,6 @@ pfkeyv2_acquire(struct ipsec_policy *ipo, union sockaddr_union *gw,
 	bzero(headers, sizeof(headers));
 
 	buffer = p;
-	bzero(p, i);
 
 	headers[0] = p;
 	p += sizeof(struct sadb_msg);
@@ -2185,7 +2187,7 @@ pfkeyv2_expire(struct tdb *sa, u_int16_t type)
 	    sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_src.sa)) +
 	    sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_dst.sa));
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT))) {
+	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	}
@@ -2193,7 +2195,6 @@ pfkeyv2_expire(struct tdb *sa, u_int16_t type)
 	bzero(headers, sizeof(headers));
 
 	buffer = p;
-	bzero(p, i);
 
 	headers[0] = p;
 	p += sizeof(struct sadb_msg);
@@ -2380,13 +2381,11 @@ pfkeyv2_dump_policy(struct ipsec_policy *ipo, void **headers, void **buffer,
 		goto ret;
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT))) {
+	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
-	} else {
+	} else
 		*buffer = p;
-		bzero(p, i);
-	}
 
 	/* Local address. */
 	if (ipo->ipo_src.sa.sa_family) {

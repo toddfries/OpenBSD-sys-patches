@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_var.h,v 1.8 2003/06/28 01:52:18 tedu Exp $	*/
-=======
 /*	$OpenBSD: db_var.h,v 1.10 2008/11/08 01:14:51 mpf Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.

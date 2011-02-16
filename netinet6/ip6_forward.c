@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip6_forward.c,v 1.36 2006/11/17 01:11:23 itojun Exp $	*/
-=======
 /*	$OpenBSD: ip6_forward.c,v 1.50 2011/01/09 20:25:46 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -109,14 +105,7 @@ ip6_forward(struct mbuf *m, int srcrt)
 	struct ifnet *encif;
 #endif
 #endif /* IPSEC */
-<<<<<<< HEAD
-#if NPF > 0
-	struct pf_mtag *pft;
-#endif
-	int rtableid = 0;
-=======
 	u_int rtableid = 0;
->>>>>>> origin/master
 
 	/*
 	 * Do not forward packets to multicast destination (should be handled
@@ -156,6 +145,9 @@ reroute:
 #endif
 
 #ifdef IPSEC
+	if (!ipsec_in_use)
+		goto done_spd;
+
 	s = splnet();
 
 	/*
@@ -235,12 +227,7 @@ reroute:
 #endif /* IPSEC */
 
 #if NPF > 0
-<<<<<<< HEAD
-	if ((pft = pf_find_mtag(m)) != NULL)
-		rtableid = pft->rtableid;
-=======
 	rtableid = m->m_pkthdr.rdomain;
->>>>>>> origin/master
 #endif
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpb.h,v 1.4 2005/09/28 20:53:56 miod Exp $	*/
+/*	$OpenBSD: bpb.h,v 1.5 2006/12/15 03:04:24 krw Exp $	*/
 /*	$NetBSD: bpb.h,v 1.6 1997/10/17 11:23:35 ws Exp $	*/
 
 /*

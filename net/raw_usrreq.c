@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: raw_usrreq.c,v 1.9 2003/12/10 07:22:42 itojun Exp $	*/
-=======
 /*	$OpenBSD: raw_usrreq.c,v 1.12 2009/11/13 20:54:05 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
 
 /*
@@ -152,10 +148,11 @@ raw_ctlinput(cmd, arg, rdomain, d)
 
 /*ARGSUSED*/
 int
-raw_usrreq(so, req, m, nam, control)
+raw_usrreq(so, req, m, nam, control, p)
 	struct socket *so;
 	int req;
 	struct mbuf *m, *nam, *control;
+	struct proc *p;
 {
 	struct rawcb *rp = sotorawcb(so);
 	int error = 0;

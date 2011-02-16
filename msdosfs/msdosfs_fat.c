@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: msdosfs_fat.c,v 1.18 2006/10/03 19:49:06 pedro Exp $	*/
-=======
 /*	$OpenBSD: msdosfs_fat.c,v 1.21 2009/08/13 22:34:29 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: msdosfs_fat.c,v 1.26 1997/10/17 11:24:02 ws Exp $	*/
 
 /*-

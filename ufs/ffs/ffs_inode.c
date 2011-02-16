@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ffs_inode.c,v 1.45 2006/09/20 13:43:47 pedro Exp $	*/
-=======
 /*	$OpenBSD: ffs_inode.c,v 1.56 2009/01/15 07:58:36 grange Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -57,7 +53,7 @@
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
-int ffs_indirtrunc(struct inode *, daddr_t, daddr_t, daddr_t, int, long *);
+int ffs_indirtrunc(struct inode *, daddr64_t, daddr64_t, daddr64_t, int, long *);
 
 /*
  * Update the access, modified, and inode change times as specified by the
@@ -83,11 +79,6 @@ ffs_update(struct inode *ip, struct timespec *atime,
 		ip->i_flag &=
 		    ~(IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE);
 		return (0);
-	}
-
-	if ((vp->v_mount->mnt_flag & MNT_NOATIME) &&
-	    !(ip->i_flag & (IN_CHANGE | IN_UPDATE))) {
-		ip->i_flag &= ~IN_ACCESS;
 	}
 
 	if ((ip->i_flag &
@@ -166,9 +157,9 @@ int
 ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 {
 	struct vnode *ovp;
-	ufs2_daddr_t lastblock;
-	ufs2_daddr_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
-	ufs2_daddr_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
+	daddr64_t lastblock;
+	daddr64_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
+	daddr64_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
 	struct fs *fs;
 	struct buf *bp;
 	int offset, size, level;
@@ -300,7 +291,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		if (ovp->v_type != VDIR)
 			bzero((char *)bp->b_data + offset,
 			      (u_int)(size - offset));
-		allocbuf(bp, size);
+		bp->b_bcount = size;
 		if (aflags & B_SYNC)
 			bwrite(bp);
 		else
@@ -477,21 +468,21 @@ done:
  * NB: triple indirect blocks are untested.
  */
 int
-ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
-    int level, long *countp)
+ffs_indirtrunc(struct inode *ip, daddr64_t lbn, daddr64_t dbn,
+    daddr64_t lastbn, int level, long *countp)
 {
 	int i;
 	struct buf *bp;
 	struct fs *fs = ip->i_fs;
 	struct vnode *vp;
 	void *copy = NULL;
-	daddr_t nb, nlbn, last;
+	daddr64_t nb, nlbn, last;
 	long blkcount, factor;
 	int nblocks, blocksreleased = 0;
 	int error = 0, allerror = 0;
-	ufs1_daddr_t *bap1 = NULL;
+	int32_t *bap1 = NULL;
 #ifdef FFS2
-	ufs2_daddr_t *bap2 = NULL;
+	int64_t *bap2 = NULL;
 #endif
 
 	/*
@@ -535,13 +526,13 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 
 #ifdef FFS2
 	if (ip->i_ump->um_fstype == UM_UFS2)
-		bap2 = (ufs2_daddr_t *) bp->b_data;
+		bap2 = (int64_t *)bp->b_data;
 	else
 #endif
-		bap1 = (ufs1_daddr_t *) bp->b_data;
+		bap1 = (int32_t *)bp->b_data;
 
 	if (lastbn != -1) {
-		MALLOC(copy, void *, fs->fs_bsize, M_TEMP, M_WAITOK);
+		copy = malloc(fs->fs_bsize, M_TEMP, M_WAITOK);
 		bcopy(bp->b_data, copy, (u_int) fs->fs_bsize);
 
 		for (i = last + 1; i < NINDIR(fs); i++)
@@ -557,10 +548,10 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 
 #ifdef FFS2
 		if (ip->i_ump->um_fstype == UM_UFS2)
-			bap2 = (ufs2_daddr_t *) copy;
+			bap2 = (int64_t *)copy;
 		else
 #endif
-			bap1 = (ufs1_daddr_t *) copy;
+			bap1 = (int32_t *)copy;
 	}
 
 	/*
@@ -573,7 +564,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 			continue;
 		if (level > SINGLE) {
 			error = ffs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
-					       (daddr_t)-1, level - 1,
+					       (daddr64_t)-1, level - 1,
 					       &blkcount);
 			if (error)
 				allerror = error;
@@ -598,7 +589,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 		}
 	}
 	if (copy != NULL) {
-		FREE(copy, M_TEMP);
+		free(copy, M_TEMP);
 	} else {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);

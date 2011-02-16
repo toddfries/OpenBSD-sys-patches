@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd9660_vfsops.c,v 1.43 2007/03/21 13:44:04 pedro Exp $	*/
-=======
 /*	$OpenBSD: cd9660_vfsops.c,v 1.56 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -520,18 +516,19 @@ iso_disklabelspoof(dev, strat, lp)
 	strncpy(lp->d_typename, pri->volume_id, sizeof lp->d_typename);
 	strncpy(lp->d_packname, pri->volume_id+16, sizeof lp->d_packname);
 	for (i = 0; i < MAXPARTITIONS; i++) {
-		lp->d_partitions[i].p_size = 0;
-		lp->d_partitions[i].p_offset = 0;
+		DL_SETPSIZE(&lp->d_partitions[i], 0);
+		DL_SETPOFFSET(&lp->d_partitions[i], 0);
 	}
-	lp->d_partitions[0].p_offset = 0;
-	lp->d_partitions[0].p_size = lp->d_secperunit;
+	DL_SETPOFFSET(&lp->d_partitions[0], 0);
+	DL_SETPSIZE(&lp->d_partitions[0], DL_GETDSIZE(lp));
 	lp->d_partitions[0].p_fstype = FS_ISO9660;
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
+	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETPSIZE(&lp->d_partitions[RAW_PART], DL_GETDSIZE(lp));
 	lp->d_partitions[RAW_PART].p_fstype = FS_ISO9660;
 	lp->d_npartitions = MAXPARTITIONS;
 	lp->d_bbsize = 8192;		/* fake */
 	lp->d_sbsize = 64*1024;		/* fake */
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -772,9 +769,7 @@ retry:
 		*vpp = NULLVP;
 		return (error);
 	}
-	MALLOC(ip, struct iso_node *, sizeof(struct iso_node), M_ISOFSNODE,
-	    M_WAITOK);
-	bzero((caddr_t)ip, sizeof(struct iso_node));
+	ip = malloc(sizeof(*ip), M_ISOFSNODE, M_WAITOK | M_ZERO);
 	lockinit(&ip->i_lock, PINOD, "isoinode", 0, 0);
 	vp->v_data = ip;
 	ip->i_vnode = vp;

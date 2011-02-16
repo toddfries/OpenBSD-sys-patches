@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: portal_vfsops.c,v 1.19 2004/03/03 06:01:48 tedu Exp $	*/
-=======
 /*	$OpenBSD: portal_vfsops.c,v 1.24 2009/07/09 22:29:56 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: portal_vfsops.c,v 1.14 1996/02/09 22:40:41 christos Exp $	*/
 
 /*
@@ -78,12 +74,8 @@ int	portal_statfs(struct mount *, struct statfs *, struct proc *);
  * Mount the per-process file descriptors (/dev/fd)
  */
 int
-portal_mount(mp, path, data, ndp, p)
-	struct mount *mp;
-	const char *path;
-	void *data;
-	struct nameidata *ndp;
-	struct proc *p;
+portal_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
+    struct proc *p)
 {
 	struct file *fp;
 	struct portal_args args;
@@ -116,8 +108,7 @@ portal_mount(mp, path, data, ndp, p)
 		FRELE(fp);
 		return (error);
 	}
-	MALLOC(rvp->v_data, void *, sizeof(struct portalnode),
-		M_TEMP, M_WAITOK);
+	rvp->v_data = malloc(sizeof(struct portalnode), M_TEMP, M_WAITOK);
 
 	fmp = (struct portalmount *) malloc(sizeof(struct portalmount),
 				 M_MISCFSMNT, M_WAITOK);
@@ -146,20 +137,14 @@ portal_mount(mp, path, data, ndp, p)
 }
 
 int
-portal_start(mp, flags, p)
-	struct mount *mp;
-	int flags;
-	struct proc *p;
+portal_start(struct mount *mp, int flags, struct proc *p)
 {
 
 	return (0);
 }
 
 int
-portal_unmount(mp, mntflags, p)
-	struct mount *mp;
-	int mntflags;
-	struct proc *p;
+portal_unmount(struct mount *mp, int mntflags, struct proc *p)
 {
 	struct vnode *rvp = VFSTOPORTAL(mp)->pm_root;
 	int error, flags = 0;
@@ -212,9 +197,7 @@ portal_unmount(mp, mntflags, p)
 }
 
 int
-portal_root(mp, vpp)
-	struct mount *mp;
-	struct vnode **vpp;
+portal_root(struct mount *mp, struct vnode **vpp)
 {
 	struct vnode *vp;
 	struct proc *p = curproc;
@@ -230,10 +213,7 @@ portal_root(mp, vpp)
 }
 
 int
-portal_statfs(mp, sbp, p)
-	struct mount *mp;
-	struct statfs *sbp;
-	struct proc *p;
+portal_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 {
 
 	sbp->f_bsize = DEV_BSIZE;

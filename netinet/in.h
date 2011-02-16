@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in.h,v 1.71 2006/06/18 11:47:45 pascoe Exp $	*/
-=======
 /*	$OpenBSD: in.h,v 1.85 2010/09/23 04:45:15 yasuoka Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -283,11 +279,8 @@ struct ip_opts {
 #define IP_RECVIF		30   /* bool; receive reception if w/dgram */
 #define IP_RECVTTL		31   /* bool; receive IP TTL w/dgram */
 #define IP_MINTTL		32   /* minimum TTL for packet or drop */
-<<<<<<< HEAD
-=======
 #define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
 #define IP_PIPEX		34   /* bool; using PIPEX */
->>>>>>> origin/master
 
 /*
  * Security levels - IPsec, not IPSO
@@ -311,7 +304,13 @@ struct ip_opts {
  */
 #define	IP_DEFAULT_MULTICAST_TTL  1	/* normally limit m'casts to 1 hop  */
 #define	IP_DEFAULT_MULTICAST_LOOP 1	/* normally hear sends if a member  */
-#define	IP_MAX_MEMBERSHIPS	20	/* per socket; must fit in one mbuf */
+/*
+ * The imo_membership vector for each socket starts at IP_MIN_MEMBERSHIPS
+ * and is dynamically allocated at run-time, bounded by IP_MAX_MEMBERSHIPS,
+ * and is reallocated when needed, sized according to a power-of-two increment.
+ */
+#define	IP_MIN_MEMBERSHIPS	15
+#define	IP_MAX_MEMBERSHIPS	4095
 
 /*
  * Argument structure for IP_ADD_MEMBERSHIP and IP_DROP_MEMBERSHIP.
@@ -340,11 +339,7 @@ struct ip_mreq {
  * Third level is protocol number.
  * Fourth level is desired variable within that protocol.
  */
-<<<<<<< HEAD
-#define	IPPROTO_MAXID	(IPPROTO_CARP + 1)	/* don't list to IPPROTO_MAX */
-=======
 #define	IPPROTO_MAXID	(IPPROTO_DIVERT + 1)	/* don't list to IPPROTO_MAX */
->>>>>>> origin/master
 
 #define	CTL_IPPROTO_NAMES { \
 	{ "ip", CTLTYPE_NODE }, \
@@ -460,8 +455,6 @@ struct ip_mreq {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "carp", CTLTYPE_NODE }, \
-<<<<<<< HEAD
-=======
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ 0, 0 }, \
@@ -608,7 +601,6 @@ struct ip_mreq {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ "divert", CTLTYPE_NODE }, \
->>>>>>> origin/master
 }
 
 /*
@@ -650,15 +642,11 @@ struct ip_mreq {
 #define	IPCTL_IFQUEUE		30
 #define	IPCTL_MFORWARDING	31
 #define	IPCTL_MULTIPATH		32
-<<<<<<< HEAD
-#define	IPCTL_MAXID		33
-=======
 #define	IPCTL_STATS		33	/* IP statistics */
 #define	IPCTL_MRTPROTO		34	/* type of multicast */
 #define	IPCTL_MRTSTATS		35
 #define	IPCTL_ARPQUEUED		36
 #define	IPCTL_MAXID		37
->>>>>>> origin/master
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -693,15 +681,11 @@ struct ip_mreq {
 	{ "ipsec-comp-alg", CTLTYPE_STRING }, \
 	{ "ifq", CTLTYPE_NODE }, \
 	{ "mforwarding", CTLTYPE_INT }, \
-<<<<<<< HEAD
-	{ "multipath", CTLTYPE_INT } \
-=======
 	{ "multipath", CTLTYPE_INT }, \
 	{ "stats", CTLTYPE_STRUCT }, \
 	{ "mrtproto", CTLTYPE_INT }, \
 	{ "mrtstats", CTLTYPE_STRUCT }, \
 	{ "arpqueued", CTLTYPE_INT }, \
->>>>>>> origin/master
 }
 #define	IPCTL_VARS { \
 	NULL, \
@@ -736,15 +720,11 @@ struct ip_mreq {
 	NULL, \
 	NULL, \
 	&ipmforwarding, \
-<<<<<<< HEAD
-	&ipmultipath \
-=======
 	&ipmultipath, \
 	NULL, \
 	NULL, \
 	NULL, \
 	&la_hold_total \
->>>>>>> origin/master
 }
 
 /* INET6 stuff */

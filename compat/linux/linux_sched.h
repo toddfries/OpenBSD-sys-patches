@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_sched.h,v 1.1 1999/05/12 19:49:09 thorpej Exp $	*/
-=======
 /*	$OpenBSD: linux_sched.h,v 1.3 2009/12/28 02:54:24 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_sched.h,v 1.1 1999/05/12 19:49:09 thorpej Exp $	*/
 
 /*-

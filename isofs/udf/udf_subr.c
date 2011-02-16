@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udf_subr.c,v 1.10 2006/07/11 16:24:09 pedro Exp $	*/
-=======
 /*	$OpenBSD: udf_subr.c,v 1.20 2009/05/21 23:45:48 krw Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006, Miodrag Vallat
@@ -159,23 +155,19 @@ udf_disklabelspoof(dev_t dev, void (*strat)(struct buf *),
 		strlcpy(lp->d_typename, vid, sizeof(lp->d_typename));
 
 	for (i = 0; i < MAXPARTITIONS; i++) {
-		lp->d_partitions[i].p_size = 0;
-		lp->d_partitions[i].p_offset = 0;
+		DL_SETPSIZE(&lp->d_partitions[i], 0);
+		DL_SETPOFFSET(&lp->d_partitions[i], 0);
 	}
 
 	/*
 	 * Fake two partitions, 'a' and 'c'.
 	 */
-	lp->d_partitions[0].p_size = lp->d_secperunit;
+	DL_SETPSIZE(&lp->d_partitions[0], DL_GETDSIZE(lp));
 	lp->d_partitions[0].p_fstype = FS_UDF;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
+	DL_SETPSIZE(&lp->d_partitions[RAW_PART], DL_GETDSIZE(lp));
 	lp->d_partitions[RAW_PART].p_fstype = FS_UDF;
-<<<<<<< HEAD
-	lp->d_npartitions = RAW_PART + 1;
-=======
 	lp->d_npartitions = MAXPARTITIONS;
 	lp->d_version = 1;
->>>>>>> origin/master
 
 	lp->d_bbsize = 8192;	/* Fake. */
 	lp->d_sbsize = 64*1024;	/* Fake. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_variables.h,v 1.6 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: db_variables.h,v 1.7 2006/07/06 19:05:58 miod Exp $	*/
 /*	$NetBSD: db_variables.h,v 1.5 1996/02/05 01:57:21 christos Exp $	*/
 
 /* 

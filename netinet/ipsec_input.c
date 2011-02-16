@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ipsec_input.c,v 1.82 2006/12/15 09:32:30 otto Exp $	*/
-=======
 /*	$OpenBSD: ipsec_input.c,v 1.99 2010/12/21 19:16:15 markus Exp $	*/
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -578,7 +574,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 
 #if NPF > 0
 	/* Add pf tag if requested. */
-	if (pf_tag_packet(m, NULL, tdbp->tdb_tag, -1))
+	if (pf_tag_packet(m, tdbp->tdb_tag, -1))
 		DPRINTF(("failed to tag ipsec packet\n"));
 	pf_pkt_addr_changed(m);
 #endif
@@ -662,30 +658,66 @@ int
 esp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen)
 {
-	if (name[0] < ESPCTL_MAXID)
-		return (sysctl_int_arr(espctl_vars, name, namelen,
-		    oldp, oldlenp, newp, newlen));
-	return (ENOPROTOOPT);
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case ESPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &espstat, sizeof(espstat)));
+	default:
+		if (name[0] < ESPCTL_MAXID)
+			return (sysctl_int_arr(espctl_vars, name, namelen,
+			    oldp, oldlenp, newp, newlen));
+		return (ENOPROTOOPT);
+	}
 }
 
 int
 ah_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen)
 {
-	if (name[0] < AHCTL_MAXID)
-		return (sysctl_int_arr(ahctl_vars, name, namelen,
-		    oldp, oldlenp, newp, newlen));
-	return (ENOPROTOOPT);
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case AHCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ahstat, sizeof(ahstat)));
+	default:
+		if (name[0] < AHCTL_MAXID)
+			return (sysctl_int_arr(ahctl_vars, name, namelen,
+			    oldp, oldlenp, newp, newlen));
+		return (ENOPROTOOPT);
+	}
 }
 
 int
 ipcomp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen)
 {
-	if (name[0] < IPCOMPCTL_MAXID)
-		return (sysctl_int_arr(ipcompctl_vars, name, namelen,
-		    oldp, oldlenp, newp, newlen));
-	return (ENOPROTOOPT);
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case IPCOMPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ipcompstat, sizeof(ipcompstat)));
+	default:
+		if (name[0] < IPCOMPCTL_MAXID)
+			return (sysctl_int_arr(ipcompctl_vars, name, namelen,
+			    oldp, oldlenp, newp, newlen));
+		return (ENOPROTOOPT);
+	}
 }
 
 #ifdef INET

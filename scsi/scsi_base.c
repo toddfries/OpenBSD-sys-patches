@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsi_base.c,v 1.119 2007/04/03 04:47:59 dlg Exp $	*/
-=======
 /*	$OpenBSD: scsi_base.c,v 1.197 2010/09/20 00:19:47 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -50,31 +46,11 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/pool.h>
-#include <sys/kthread.h>
-#include <sys/queue.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
-<<<<<<< HEAD
-struct scsi_task {
-	void			(*func)(void *, void *);
-	void			*sc;
-	void			*arg;
-
-	TAILQ_ENTRY(scsi_task)	entry;
-};
-
-void	scsi_create_task_thread(void *);
-void	scsi_create_task(void *);
-void	scsi_task_thread(void *);
-
-static __inline struct scsi_xfer *scsi_make_xs(struct scsi_link *,
-    struct scsi_generic *, int cmdlen, u_char *data_addr,
-    int datalen, int retries, int timeout, struct buf *, int flags);
-=======
->>>>>>> origin/master
 static __inline void asc2ascii(u_int8_t, u_int8_t ascq, char *result,
     size_t len);
 int	scsi_xs_error(struct scsi_xfer *);
@@ -88,11 +64,6 @@ void	scsi_xs_sync_done(struct scsi_xfer *);
 #define DECODE_SKSV		3
 
 struct pool		scsi_xfer_pool;
-<<<<<<< HEAD
-struct pool		scsi_task_pool;
-TAILQ_HEAD(, scsi_task)	scsi_task_list;
-volatile int		scsi_running = 0;
-=======
 struct pool		scsi_plug_pool;
 
 struct scsi_plug {
@@ -138,7 +109,6 @@ void scsi_move_done(void *, void *);
 
 void scsi_io_get_done(void *, void *);
 void scsi_xs_get_done(void *, void *);
->>>>>>> origin/master
 
 /*
  * Called when a scsibus is attached to initialize global data.
@@ -160,16 +130,6 @@ scsi_init()
 	/* Initialize the scsi_xfer pool. */
 	pool_init(&scsi_xfer_pool, sizeof(struct scsi_xfer), 0,
 	    0, 0, "scxspl", NULL);
-<<<<<<< HEAD
-
-	/* Initialize the scsi_task pool. */
-	pool_init(&scsi_task_pool, sizeof(struct scsi_task), 0,
-	    0, 0, "sctkpl", NULL);
-
-	/* Get the creation of the task thread underway. */
-	TAILQ_INIT(&scsi_task_list);
-	kthread_create_deferred(scsi_create_task_thread, NULL);
-=======
 	pool_setipl(&scsi_xfer_pool, IPL_BIO);
 	/* Initialize the scsi_plug pool */
 	pool_init(&scsi_plug_pool, sizeof(struct scsi_plug), 0,
@@ -210,7 +170,6 @@ scsi_req_detach(struct scsibus_softc *sc, int target, int lun, int how)
 	workq_queue_task(NULL, &p->wqt, 0, scsi_plug_detach, sc, p);
 
 	return (0);
->>>>>>> origin/master
 }
 
 void
@@ -252,65 +211,6 @@ scsi_plug_detach(void *xsc, void *xp)
 	if (target == -1)
 		return;
 
-<<<<<<< HEAD
-	wakeup(&scsi_task_list);
-}
-
-void
-scsi_create_task_thread(void *arg)
-{
-	if (kthread_create(scsi_task_thread, NULL, NULL, "scsi") != 0)
-		panic("unable to create scsi task thread");
-}
-
-void
-scsi_task_thread(void *arg)
-{
-	struct scsi_task		*task;
-	int				s;
-
-	s = splbio();
-	while (scsi_running) {
-		while ((task = TAILQ_FIRST(&scsi_task_list)) != NULL) {
-			TAILQ_REMOVE(&scsi_task_list, task, entry);
-			splx(s);
-
-			task->func(task->sc, task->arg);
-
-			s = splbio();
-			pool_put(&scsi_task_pool, task);
-		}
-		tsleep(&scsi_task_list, PWAIT, "slacking", 10 * hz);
-	}
-
-	if (!TAILQ_EMPTY(&scsi_task_list))
-		panic("outstanding scsi tasks");
-	splx(s);
-
-	kthread_exit(0);
-}
-
-/*
- * Must be called at splbio.
- */
-int
-scsi_task(void (*func)(void *, void *), void *sc, void *arg, int nosleep)
-{
-	struct scsi_task		*task;
-
-	task = pool_get(&scsi_task_pool, nosleep ? PR_NOWAIT : PR_WAITOK);
-	if (task == NULL)
-		return (ENOMEM);
-
-	task->func = func;
-	task->sc = sc;
-	task->arg = arg;
-
-	TAILQ_INSERT_TAIL(&scsi_task_list, task, entry);
-	wakeup(&scsi_task_list);
-
-	return (0);
-=======
 	if (lun == -1)
 		scsi_detach_target(sc, target, how);
 
@@ -397,7 +297,6 @@ scsi_default_put(void *iocookie, void *io)
 	if (iocookie != io)
 		panic("unexpected opening returned");
 #endif
->>>>>>> origin/master
 }
 
 /*
@@ -865,15 +764,9 @@ scsi_xs_put(struct scsi_xfer *xs)
 /*
  * Find out from the device what its capacity is.
  */
-u_long
+daddr64_t
 scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 {
-<<<<<<< HEAD
-	struct scsi_read_capacity	scsi_cmd;
-	struct scsi_read_cap_data	rdcap;
-	u_long				max_addr;
-	int				error;
-=======
 	struct scsi_read_cap_data_16 *rdcap16;
 	struct scsi_read_capacity_16 *cmd;
 	struct scsi_read_cap_data *rdcap;
@@ -881,29 +774,15 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	struct scsi_xfer *xs;
 	daddr64_t max_addr;
 	int error;
->>>>>>> origin/master
 
 	if (blksize != NULL)
 		*blksize = 0;
 
-<<<<<<< HEAD
-	/*
-	 * make up a scsi command and ask the scsi driver to do it for you.
-	 */
-	bzero(&scsi_cmd, sizeof(scsi_cmd));
-	scsi_cmd.opcode = READ_CAPACITY;
-=======
 	CLR(flags, SCSI_IGNORE_ILLEGAL_REQUEST);
->>>>>>> origin/master
 
 	/*
 	 * Start with a READ CAPACITY(10).
 	 */
-<<<<<<< HEAD
-	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)&rdcap, sizeof(rdcap), 2, 20000, NULL,
-	    flags | SCSI_DATA_IN);
-=======
 	rdcap = malloc(sizeof(*rdcap), M_TEMP, ((flags & SCSI_NOSLEEP) ?
 	    M_NOWAIT : M_WAITOK) | M_ZERO);
 	if (rdcap == NULL)
@@ -925,7 +804,6 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
->>>>>>> origin/master
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
 		    error));
@@ -938,19 +816,6 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 		*blksize = _4btol(rdcap->length);
 	free(rdcap, M_TEMP);
 
-<<<<<<< HEAD
-	if (max_addr == 0xffffffffUL) {
-		/*
-		 * The device is reporting it has more than 2^32-1 sectors. The
-		 * 16-byte READ CAPACITY command must be issued to get full
-		 * capacity.
-		 */
-		sc_print_addr(sc_link);
-		printf("only the first 4,294,967,295 sectors will be used.\n");
-		return (0xffffffffUL);
-	}
-
-=======
 	if (SCSISPC(sc_link->inqdata.version) < 3 && max_addr != 0xffffffff)
 		goto exit;
 
@@ -993,7 +858,6 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	/* XXX The other READ CAPACITY(16) info could be stored away. */
 	free(rdcap16, M_TEMP);
 
->>>>>>> origin/master
 	return (max_addr + 1);
 
 exit:
@@ -1841,10 +1705,12 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 void
 sc_print_addr(struct scsi_link *sc_link)
 {
+	struct device *adapter_device = sc_link->bus->sc_dev.dv_parent;
+
 	printf("%s(%s:%d:%d): ",
 	    sc_link->device_softc ?
 	    ((struct device *)sc_link->device_softc)->dv_xname : "probe",
-	    ((struct device *)sc_link->adapter_softc)->dv_xname,
+	    adapter_device->dv_xname,
 	    sc_link->target, sc_link->lun);
 }
 

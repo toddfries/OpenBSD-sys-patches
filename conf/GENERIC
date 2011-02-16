@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: GENERIC,v 1.124 2006/06/14 06:18:55 mbalmer Exp $
-=======
 #	$OpenBSD: GENERIC,v 1.171 2011/02/15 07:14:45 deraadt Exp $
->>>>>>> origin/master
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -32,20 +28,13 @@ option		SYSVSHM		# System V-like memory sharing
 
 option		UVM_SWAP_ENCRYPT# support encryption of pages going to swap
 
-<<<<<<< HEAD
-#option		COMPAT_23	# Kernel compatibility with OpenBSD 2.3,
-#option		COMPAT_25	# 2.5,
-option		COMPAT_35	# 3.5,
-option		COMPAT_43	# and 4.3BSD
-#option		TCP_COMPAT_42	# TCP bug compatibility with 4.2BSD
-=======
 option		COMPAT_43	# Kernel compatibility with 4.3BSD
 option		COMPAT_O47	# Compatibility with OpenBSD 4.7
->>>>>>> origin/master
 
 option		LKM		# loadable kernel modules
 
 option		FFS		# UFS
+option		FFS2		# UFS2
 option		FFS_SOFTUPDATES	# Soft updates
 option		UFS_DIRHASH	# hash large directories
 option		QUOTA		# UFS quotas
@@ -71,8 +60,6 @@ option		ALTQ		# ALTQ base
 option		INET6		# IPv6 (needs INET)
 option		IPSEC		# IPsec
 #option		KEY		# PF_KEY (implied by IPSEC)
-#option		IPX		# IPX+SPX
-#option		IPXIP		# IPX tunneling over IP
 #option		NETATALK	# AppleTalk
 option		PPP_BSDCOMP	# PPP BSD compression
 option		PPP_DEFLATE
@@ -84,8 +71,8 @@ option		MPLS		# Multi-Protocol Label Switching
 #mpath0		at root		# SCSI Multipathing
 #scsibus*	at mpath?
 
-#softraid0	at root		# Software RAID
-#scsibus*	at softraid?
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
 
 vscsi0		at root		# Userland backed Virtual SCSI
 scsibus*	at vscsi?
@@ -98,13 +85,9 @@ pseudo-device	enc		# option IPSEC needs the encapsulation interface
 
 pseudo-device	pty	16	# initial number of pseudo-terminals
 pseudo-device	nmea	1	# NMEA 0183 line discipline
-<<<<<<< HEAD
-pseudo-device	vnd	4	# paging to files
-=======
 pseudo-device	msts	1	# MSTS line discipline
 pseudo-device	endrun	1	# EndRun line discipline
 pseudo-device	vnd	4	# vnode disk devices
->>>>>>> origin/master
 pseudo-device	ccd	4	# concatenated disk devices
 pseudo-device	ksyms	1	# kernel symbols device
 pseudo-device	systrace 1	# system call tracing device
@@ -130,10 +113,6 @@ pseudo-device	vlan 		# IEEE 802.1Q VLAN
 # for IPv6
 #pseudo-device	faith	1	# IPv[46] tcp relay translation i/f
 
-<<<<<<< HEAD
-pseudo-device	pppoe	1	# PPP over Ethernet (RFC 2516)
-=======
 pseudo-device	bio	1	# ioctl multiplexing device
->>>>>>> origin/master
 
 option		BOOT_CONFIG	# add support for boot -c

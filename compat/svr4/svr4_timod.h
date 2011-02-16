@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_timod.h,v 1.2 1996/04/21 22:18:39 deraadt Exp $	*/
+/*	$OpenBSD: svr4_timod.h,v 1.3 1997/02/13 19:45:26 niklas Exp $	*/
 /*	$NetBSD: svr4_timod.h,v 1.5 1996/08/30 23:06:42 christos Exp $	 */
 
 /*

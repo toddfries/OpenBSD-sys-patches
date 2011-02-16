@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_exec.c,v 1.24 2005/12/30 19:46:55 miod Exp $	*/
-=======
 /*	$OpenBSD: linux_exec.c,v 1.31 2009/03/05 19:52:24 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -154,15 +150,16 @@ linux_e_proc_init(p, vmspace)
 {
 	if (!p->p_emuldata) {
 		/* allocate new Linux emuldata */
-		MALLOC(p->p_emuldata, void *, sizeof(struct linux_emuldata),
-		    M_EMULDATA, M_WAITOK);
+		p->p_emuldata = malloc(sizeof(struct linux_emuldata),
+		    M_EMULDATA, M_WAITOK|M_ZERO);
 	}
-
-	memset(p->p_emuldata, '\0', sizeof(struct linux_emuldata));
+	else {
+		memset(p->p_emuldata, '\0', sizeof(struct linux_emuldata));
+	}
 
 	/* Set the process idea of the break to the real value */
 	((struct linux_emuldata *)(p->p_emuldata))->p_break = 
-	    vmspace->vm_daddr + ctob(vmspace->vm_dsize);
+	    vmspace->vm_daddr + ptoa(vmspace->vm_dsize);
 }
 
 void
@@ -182,7 +179,7 @@ linux_e_proc_exit(p)
 	struct proc *p;
 {
 	/* free Linux emuldata and set the pointer to null */
-	FREE(p->p_emuldata, M_EMULDATA);
+	free(p->p_emuldata, M_EMULDATA);
 	p->p_emuldata = NULL;
 }
 

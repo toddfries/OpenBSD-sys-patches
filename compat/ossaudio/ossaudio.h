@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ossaudio.h,v 1.2 1998/04/26 22:15:44 provos Exp $	*/
-=======
 /*	$OpenBSD: ossaudio.h,v 1.4 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ossaudio.h,v 1.5 1997/10/16 16:49:37 augustss Exp $	*/
 
 /*

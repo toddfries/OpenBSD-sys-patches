@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: if_gre.h,v 1.9 2003/12/03 14:52:23 markus Exp $ */
-=======
 /*      $OpenBSD: if_gre.h,v 1.13 2010/06/26 19:49:54 claudio Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_gre.h,v 1.5 1999/11/19 20:41:19 thorpej Exp $ */
 
 /*

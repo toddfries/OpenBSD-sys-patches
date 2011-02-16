@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: inode.h,v 1.33 2006/06/14 20:01:50 sturm Exp $	*/
-=======
 /*	$OpenBSD: inode.h,v 1.38 2010/08/20 22:29:52 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: inode.h,v 1.8 1995/06/15 23:22:50 cgd Exp $	*/
 
 /*
@@ -51,8 +47,8 @@
  * Per-filesystem inode extensions.
  */
 struct ext2fs_inode_ext {
-       ufs1_daddr_t	ext2fs_last_lblk; /* last logical block allocated */
-       ufs1_daddr_t	ext2fs_last_blk; /* last block allocated on disk */
+       int32_t	ext2fs_last_lblk; /* last logical block allocated */
+       int32_t	ext2fs_last_blk; /* last block allocated on disk */
        u_int32_t	ext2fs_effective_uid; /* effective inode uid */
        u_int32_t	ext2fs_effective_gid; /* effective inode gid */
 };
@@ -309,7 +305,7 @@ struct inode_vtbl {
  * ufs_getlbns and used by truncate and bmap code.
  */
 struct indir {
-	daddr_t in_lbn;			/* Logical block number. */
+	daddr64_t in_lbn;		/* Logical block number. */
 	int	in_off;			/* Offset in buffer. */
 	int	in_exists;		/* Flag if the block exists. */
 };

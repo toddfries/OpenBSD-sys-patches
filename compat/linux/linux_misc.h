@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_misc.h,v 1.2 2002/03/14 01:26:50 millert Exp $	*/
-=======
 /*	$OpenBSD: linux_misc.h,v 1.4 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_misc.h,v 1.3 1999/05/13 00:31:57 thorpej Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfs_srvcache.c,v 1.11 2004/07/16 15:01:51 henning Exp $	*/
-=======
 /*	$OpenBSD: nfs_srvcache.c,v 1.23 2009/06/04 18:36:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nfs_srvcache.c,v 1.12 1996/02/18 11:53:49 fvdl Exp $	*/
 
 /*
@@ -45,7 +41,6 @@
  *		pages 53-63. San Diego, February 1989.
  */
 #include <sys/param.h>
-#include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
@@ -53,14 +48,9 @@
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/socket.h>
-<<<<<<< HEAD
-#include <sys/socketvar.h>
-=======
 #include <sys/queue.h>
->>>>>>> origin/master
 
 #include <netinet/in.h>
-#include <nfs/nfsm_subs.h>
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
@@ -71,33 +61,19 @@ extern struct nfsstats nfsstats;
 extern int nfsv2_procid[NFS_NPROCS];
 long numnfsrvcache, desirednfsrvcache = NFSRVCACHESIZ;
 
-<<<<<<< HEAD
-#define	NFSRCHASH(xid) \
-=======
 struct nfsrvcache	*nfsrv_lookupcache(struct nfsrv_descript *);
 void			 nfsrv_cleanentry(struct nfsrvcache *);
 
 #define	NFSRCHASH(xid)	\
->>>>>>> origin/master
 	(&nfsrvhashtbl[((xid) + ((xid) >> 24)) & nfsrvhash])
 LIST_HEAD(nfsrvhash, nfsrvcache) *nfsrvhashtbl;
 TAILQ_HEAD(nfsrvlru, nfsrvcache) nfsrvlruhead;
 u_long nfsrvhash;
 
-<<<<<<< HEAD
-#define TRUE	1
-#define	FALSE	0
-
-#define	NETFAMILY(rp) \
-		(((rp)->rc_flag & RC_INETADDR) ? AF_INET : AF_UNSPEC)
-=======
 #define	NETFAMILY(rp)	\
 	(((rp)->rc_flag & RC_INETADDR) ? AF_INET : AF_UNSPEC)
->>>>>>> origin/master
 
-/*
- * Static array that defines which nfs rpc's are nonidempotent
- */
+/* Array that defines which nfs rpc's are nonidempotent */
 int nonidempotent[NFS_NPROCS] = {
 	0, 0, 1, 0, 0, 0, 0, 1,
 	1, 1, 1, 1, 1, 1, 1, 1,
@@ -105,32 +81,6 @@ int nonidempotent[NFS_NPROCS] = {
 };
 
 /* True iff the rpc reply is an nfs status ONLY! */
-<<<<<<< HEAD
-static int nfsv2_repstat[NFS_NPROCS] = {
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	FALSE,
-	TRUE,
-	TRUE,
-	TRUE,
-	TRUE,
-	FALSE,
-	TRUE,
-	FALSE,
-	FALSE,
-};
-
-/*
- * Initialize the server request cache list
- */
-=======
 int nfsv2_repstat[NFS_NPROCS] = {
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 1, 1, 1, 1, 0, 1,
@@ -150,9 +100,8 @@ nfsrv_cleanentry(struct nfsrvcache *rp)
 }
 
 /* Initialize the server request cache list */
->>>>>>> origin/master
 void
-nfsrv_initcache()
+nfsrv_initcache(void)
 {
 
 	nfsrvhashtbl = hashinit(desirednfsrvcache, M_NFSD, M_WAITOK, &nfsrvhash);
@@ -174,10 +123,8 @@ nfsrv_initcache()
  * Update/add new request at end of lru list
  */
 int
-nfsrv_getcache(nd, slp, repp)
-	struct nfsrv_descript *nd;
-	struct nfssvc_sock *slp;
-	struct mbuf **repp;
+nfsrv_getcache(struct nfsrv_descript *nd, struct nfssvc_sock *slp,
+    struct mbuf **repp)
 {
 	struct nfsrvcache *rp;
 	struct mbuf *mb;
@@ -190,49 +137,6 @@ nfsrv_getcache(nd, slp, repp)
 	 */
 	if (!nd->nd_nam2)
 		return (RC_DOIT);
-<<<<<<< HEAD
-loop:
-	LIST_FOREACH(rp, NFSRCHASH(nd->nd_retxid), rc_hash) {
-	    if (nd->nd_retxid == rp->rc_xid && nd->nd_procnum == rp->rc_proc &&
-		netaddr_match(NETFAMILY(rp), &rp->rc_haddr, nd->nd_nam)) {
-			if ((rp->rc_flag & RC_LOCKED) != 0) {
-				rp->rc_flag |= RC_WANTED;
-				(void) tsleep((caddr_t)rp, PZERO-1, "nfsrc", 0);
-				goto loop;
-			}
-			rp->rc_flag |= RC_LOCKED;
-			/* If not at end of LRU chain, move it there */
-			if (TAILQ_NEXT(rp, rc_lru)) {
-				TAILQ_REMOVE(&nfsrvlruhead, rp, rc_lru);
-				TAILQ_INSERT_TAIL(&nfsrvlruhead, rp, rc_lru);
-			}
-			if (rp->rc_state == RC_UNUSED)
-				panic("nfsrv cache");
-			if (rp->rc_state == RC_INPROG) {
-				nfsstats.srvcache_inproghits++;
-				ret = RC_DROPIT;
-			} else if (rp->rc_flag & RC_REPSTATUS) {
-				nfsstats.srvcache_nonidemdonehits++;
-				nfs_rephead(0, nd, slp, rp->rc_status,
-				   (u_quad_t *)0, repp, &mb, &bpos);
-				ret = RC_REPLY;
-			} else if (rp->rc_flag & RC_REPMBUF) {
-				nfsstats.srvcache_nonidemdonehits++;
-				*repp = m_copym(rp->rc_reply, 0, M_COPYALL,
-						M_WAIT);
-				ret = RC_REPLY;
-			} else {
-				nfsstats.srvcache_idemdonehits++;
-				rp->rc_state = RC_INPROG;
-				ret = RC_DOIT;
-			}
-			rp->rc_flag &= ~RC_LOCKED;
-			if (rp->rc_flag & RC_WANTED) {
-				rp->rc_flag &= ~RC_WANTED;
-				wakeup((caddr_t)rp);
-			}
-			return (ret);
-=======
 
 	rp = nfsrv_lookupcache(nd);
 	if (rp) {
@@ -263,21 +167,20 @@ loop:
 		if (rp->rc_flag & RC_WANTED) {
 			rp->rc_flag &= ~RC_WANTED;
 			wakeup(rp);
->>>>>>> origin/master
 		}
+		return (ret);
 	}
+
 	nfsstats.srvcache_misses++;
 	if (numnfsrvcache < desirednfsrvcache) {
-		rp = (struct nfsrvcache *)malloc((u_long)sizeof *rp,
-		    M_NFSD, M_WAITOK);
-		bzero((char *)rp, sizeof *rp);
+		rp = malloc(sizeof(*rp), M_NFSD, M_WAITOK|M_ZERO);
 		numnfsrvcache++;
 		rp->rc_flag = RC_LOCKED;
 	} else {
 		rp = TAILQ_FIRST(&nfsrvlruhead);
 		while ((rp->rc_flag & RC_LOCKED) != 0) {
 			rp->rc_flag |= RC_WANTED;
-			(void) tsleep((caddr_t)rp, PZERO-1, "nfsrc", 0);
+			tsleep(rp, PZERO-1, "nfsrc", 0);
 			rp = TAILQ_FIRST(&nfsrvlruhead);
 		}
 		rp->rc_flag |= RC_LOCKED;
@@ -305,34 +208,20 @@ loop:
 	rp->rc_flag &= ~RC_LOCKED;
 	if (rp->rc_flag & RC_WANTED) {
 		rp->rc_flag &= ~RC_WANTED;
-		wakeup((caddr_t)rp);
+		wakeup(rp);
 	}
 	return (RC_DOIT);
 }
 
-/*
- * Update a request cache entry after the rpc has been done
- */
+/* Update a request cache entry after the rpc has been done */
 void
-nfsrv_updatecache(nd, repvalid, repmbuf)
-	struct nfsrv_descript *nd;
-	int repvalid;
-	struct mbuf *repmbuf;
+nfsrv_updatecache(struct nfsrv_descript *nd, int repvalid,
+    struct mbuf *repmbuf)
 {
 	struct nfsrvcache *rp;
 
 	if (!nd->nd_nam2)
 		return;
-<<<<<<< HEAD
-loop:
-	LIST_FOREACH(rp, NFSRCHASH(nd->nd_retxid), rc_hash) {
-	    if (nd->nd_retxid == rp->rc_xid && nd->nd_procnum == rp->rc_proc &&
-		netaddr_match(NETFAMILY(rp), &rp->rc_haddr, nd->nd_nam)) {
-			if ((rp->rc_flag & RC_LOCKED) != 0) {
-				rp->rc_flag |= RC_WANTED;
-				(void) tsleep((caddr_t)rp, PZERO-1, "nfsrc", 0);
-				goto loop;
-=======
 
 	rp = nfsrv_lookupcache(nd);
 	if (rp) {
@@ -351,40 +240,20 @@ loop:
 				rp->rc_reply = m_copym(repmbuf, 0, M_COPYALL,
 				    M_WAIT);
 				rp->rc_flag |= RC_REPMBUF;
->>>>>>> origin/master
 			}
-			rp->rc_flag |= RC_LOCKED;
-			rp->rc_state = RC_DONE;
-			/*
-			 * If we have a valid reply update status and save
-			 * the reply for non-idempotent rpc's.
-			 */
-			if (repvalid && nonidempotent[nd->nd_procnum]) {
-				if ((nd->nd_flag & ND_NFSV3) == 0 &&
-				  nfsv2_repstat[nfsv2_procid[nd->nd_procnum]]) {
-					rp->rc_status = nd->nd_repstat;
-					rp->rc_flag |= RC_REPSTATUS;
-				} else {
-					rp->rc_reply = m_copym(repmbuf,
-						0, M_COPYALL, M_WAIT);
-					rp->rc_flag |= RC_REPMBUF;
-				}
-			}
-			rp->rc_flag &= ~RC_LOCKED;
-			if (rp->rc_flag & RC_WANTED) {
-				rp->rc_flag &= ~RC_WANTED;
-				wakeup((caddr_t)rp);
-			}
-			return;
 		}
+		rp->rc_flag &= ~RC_LOCKED;
+		if (rp->rc_flag & RC_WANTED) {
+			rp->rc_flag &= ~RC_WANTED;
+			wakeup(rp);
+		}
+		return;
 	}
 }
 
-/*
- * Clean out the cache. Called when the last nfsd terminates.
- */
+/* Clean out the cache. Called when the last nfsd terminates. */
 void
-nfsrv_cleancache()
+nfsrv_cleancache(void)
 {
 	struct nfsrvcache *rp, *nextrp;
 
@@ -396,4 +265,27 @@ nfsrv_cleancache()
 		free(rp, M_NFSD);
 	}
 	numnfsrvcache = 0;
+}
+
+struct nfsrvcache *
+nfsrv_lookupcache(struct nfsrv_descript *nd)
+{
+	struct nfsrvcache	*rp;
+
+loop:
+	LIST_FOREACH(rp, NFSRCHASH(nd->nd_retxid), rc_hash) {
+		if (nd->nd_retxid == rp->rc_xid &&
+		    nd->nd_procnum == rp->rc_proc &&
+		    netaddr_match(NETFAMILY(rp), &rp->rc_haddr, nd->nd_nam)) {
+			if ((rp->rc_flag & RC_LOCKED)) {
+				rp->rc_flag |= RC_WANTED;
+				tsleep(rp, PZERO - 1, "nfsrc", 0);
+				goto loop;
+			}
+			rp->rc_flag |= RC_LOCKED;
+			return (rp);
+		}
+	}
+
+	return (NULL);
 }

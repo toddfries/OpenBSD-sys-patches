@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: udf_vnops.c,v 1.23 2007/03/25 18:38:20 thib Exp $	*/
-=======
 /*	$OpenBSD: udf_vnops.c,v 1.42 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -33,7 +29,7 @@
  */
 
 /*
- * Ported to OpenBSD by Pedro Martelletto <pedro@openbsd.org> in February 2005.
+ * Ported to OpenBSD by Pedro Martelletto in February 2005.
  */
 
 #include <sys/param.h>
@@ -61,29 +57,6 @@
 
 int udf_bmap_internal(struct unode *, off_t, daddr64_t *, uint32_t *);
 
-<<<<<<< HEAD
-int (**udf_vnodeop_p)(void *);
-struct vnodeopv_entry_desc udf_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
-	{ &vop_access_desc, udf_access },		/* access */
-	{ &vop_bmap_desc, udf_bmap },			/* bmap */
-	{ &vop_lookup_desc, udf_lookup },		/* lookup */
-	{ &vop_getattr_desc, udf_getattr },		/* getattr */
-	{ &vop_open_desc, udf_open },			/* open */
-	{ &vop_close_desc, udf_close },			/* close */
-	{ &vop_ioctl_desc, udf_ioctl },			/* ioctl */
-	{ &vop_read_desc, udf_read },			/* read */
-	{ &vop_readdir_desc, udf_readdir },		/* readdir */
-	{ &vop_readlink_desc, udf_readlink },		/* readlink */
-	{ &vop_inactive_desc, udf_inactive },		/* inactive */
-	{ &vop_reclaim_desc, udf_reclaim },		/* reclaim */
-	{ &vop_strategy_desc, udf_strategy },		/* strategy */
-	{ &vop_lock_desc, udf_lock },			/* lock */
-	{ &vop_unlock_desc, udf_unlock },		/* unlock */
-	{ &vop_islocked_desc, udf_islocked },		/* islocked */
-	{ &vop_print_desc, udf_print },			/* print */
-	{ NULL, NULL }
-=======
 struct vops udf_vops = {
 	.vop_default	= eopnotsupp,
 	.vop_access	= udf_access,
@@ -103,7 +76,6 @@ struct vops udf_vops = {
 	.vop_unlock	= udf_unlock,
 	.vop_islocked	= udf_islocked,
 	.vop_print	= udf_print
->>>>>>> origin/master
 };
 
 #define UDF_INVALID_BMAP	-1
@@ -223,12 +195,7 @@ udf_permtomode(struct unode *up)
 int
 udf_access(void *v)
 {
-	struct vop_access_args /* {
-		struct vnode *a_vp;
-		int a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_access_args *ap = v;
 	struct vnode *vp;
 	struct unode *up;
 	mode_t a_mode, mode;
@@ -335,12 +302,7 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 int
 udf_getattr(void *v)
 {
-	struct vop_getattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *v_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_getattr_args *ap = v;
 	struct vnode *vp;
 	struct unode *up;
 	struct vattr *vap;
@@ -455,12 +417,7 @@ udf_pathconf(struct vop_pathconf_args *a)
 int
 udf_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct uio *uio = ap->a_uio;
 	struct unode *up = VTOU(vp);
@@ -667,8 +624,7 @@ udf_getfid(struct udf_dirstream *ds)
 		 * File ID descriptors can only be at most one
 		 * logical sector in size.
 		 */
-		ds->buf = malloc(ds->ump->um_bsize, M_UDFFID, M_WAITOK);
-		bzero(ds->buf, ds->ump->um_bsize);
+		ds->buf = malloc(ds->ump->um_bsize, M_UDFFID, M_WAITOK|M_ZERO);
 		bcopy(fid, ds->buf, frag_size);
 
 		/* Reduce all of the casting magic */
@@ -752,14 +708,7 @@ udf_closedir(struct udf_dirstream *ds)
 int
 udf_readdir(void *v)
 {
-	struct vop_readdir_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-		int *a_eofflag;
-		u_long **a_cookies;
-		int *ncookies;
-	} */ *ap = v;
+	struct vop_readdir_args *ap = v;
 	struct vnode *vp;
 	struct uio *uio;
 	struct dirent dir;
@@ -788,8 +737,7 @@ udf_readdir(void *v)
 		 * it left off.
 		 */
 		ncookies = uio->uio_resid / 8;
-		MALLOC(cookies, u_long *, sizeof(u_long) * ncookies,
-		    M_TEMP, M_WAITOK);
+		cookies = malloc(sizeof(u_long) * ncookies, M_TEMP, M_WAITOK);
 		uiodir.ncookies = ncookies;
 		uiodir.cookies = cookies;
 		uiodir.acookies = 0;
@@ -881,7 +829,7 @@ udf_readdir(void *v)
 
 	if (ap->a_ncookies != NULL) {
 		if (error)
-			FREE(cookies, M_TEMP);
+			free(cookies, M_TEMP);
 		else {
 			*ap->a_ncookies = uiodir.acookies;
 			*ap->a_cookies = cookies;
@@ -901,9 +849,7 @@ udf_readlink(void *v)
 int
 udf_strategy(void *v)
 {
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap = v;
+	struct vop_strategy_args *ap = v;
 	struct buf *bp;
 	struct vnode *vp;
 	struct unode *up;
@@ -954,11 +900,7 @@ udf_strategy(void *v)
 int
 udf_lock(void *v)
 {
-	struct vop_lock_args /* {
-		struct vnode *a_vp;
-		int a_flags;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_lock_args *ap = v;
 
 	struct vnode *vp = ap->a_vp;
 
@@ -968,11 +910,7 @@ udf_lock(void *v)
 int
 udf_unlock(void *v)
 {
-	struct vop_unlock_args /* {
-		struct vnode *a_vp;
-		int a_flags;
-		struct proc *a_p;
-	} */ *ap= v;
+	struct vop_unlock_args *ap = v;
 
 	struct vnode *vp = ap->a_vp;
 
@@ -982,9 +920,7 @@ udf_unlock(void *v)
 int
 udf_islocked(void *v)
 {
-	struct vop_islocked_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_islocked_args *ap = v;
 
 	return (lockstatus(&VTOU(ap->a_vp)->u_lock));
 }
@@ -992,9 +928,7 @@ udf_islocked(void *v)
 int
 udf_print(void *v)
 {
-	struct vop_print_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_print_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct unode *up = VTOU(vp);
 
@@ -1002,22 +936,17 @@ udf_print(void *v)
 	 * Complete the information given by vprint().
 	 */
 	printf("tag VT_UDF, hash id %u\n", up->u_ino);
+#ifdef DIAGNOSTIC
 	lockmgr_printinfo(&up->u_lock);
 	printf("\n");
-
+#endif
 	return (0);
 }
 
 int
 udf_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 	struct unode *up;
 	uint32_t max_size;
 	daddr64_t lsector;
@@ -1051,11 +980,7 @@ udf_bmap(void *v)
 int
 udf_lookup(void *v)
 {
-	struct vop_lookup_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 	struct vnode *dvp;
 	struct vnode *tdp = NULL;
 	struct vnode **vpp = ap->a_vpp;
@@ -1224,10 +1149,7 @@ lookloop:
 int
 udf_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct proc *p = ap->a_p;
 
@@ -1242,10 +1164,7 @@ udf_inactive(void *v)
 int
 udf_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	struct vnode *vp;
 	struct unode *up;
 
@@ -1343,7 +1262,7 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 	void *icb;
 	struct icb_tag *tag;
 	uint32_t icblen = 0;
-	daddr_t lsector;
+	daddr64_t lsector;
 	int ad_offset, ad_num = 0;
 	int i, p_offset, l_ea, l_ad;
 

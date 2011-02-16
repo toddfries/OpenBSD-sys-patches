@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /*	$OpenBSD: if_enc.h,v 1.10 2010/07/01 02:09:45 reyk Exp $	*/
 
->>>>>>> origin/master
 /*
  * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
  *

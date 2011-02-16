@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: radix.h,v 1.12 2004/04/25 02:48:03 itojun Exp $	*/
-=======
 /*	$OpenBSD: radix.h,v 1.16 2010/06/28 18:50:37 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: radix.h,v 1.8 1996/02/13 22:00:37 christos Exp $	*/
 
 /*
@@ -116,7 +112,8 @@ struct radix_node_head {
 	int	rnh_pktsize;		/* permit, but not require fixed keys */
 					/* add based on sockaddr */
 	struct	radix_node *(*rnh_addaddr)(void *v, void *mask,
-		     struct radix_node_head *head, struct radix_node nodes[]);
+		     struct radix_node_head *head, struct radix_node nodes[],
+		     u_int8_t prio);
 					/* remove based on sockaddr */
 	struct	radix_node *(*rnh_deladdr)(void *v, void *mask,
 		    struct radix_node_head *head, struct radix_node *rn);
@@ -150,7 +147,7 @@ int	rn_walktree(struct radix_node_head *,
 
 struct radix_node	*rn_addmask(void *, int, int);
 struct radix_node	*rn_addroute(void *, void *, struct radix_node_head *,
-			    struct radix_node [2]);
+			    struct radix_node [2], u_int8_t);
 struct radix_node	*rn_delete(void *, void *, struct radix_node_head *,
 			    struct radix_node *);
 struct radix_node	*rn_insert(void *, struct radix_node_head *, int *,

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: param.c,v 1.24 2007/02/14 16:47:04 mickey Exp $	*/
-=======
 /*	$OpenBSD: param.c,v 1.31 2009/12/08 22:12:06 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: param.c,v 1.16 1996/03/12 03:08:40 mrg Exp $	*/
 
 /*
@@ -86,9 +82,12 @@ int	hz = HZ;
 int	tick = 1000000 / HZ;
 int	tickadj = 240000 / (60 * HZ);		/* can adjust 240ms in 60s */
 struct	timezone tz = { TIMEZONE, DST };
-#define	NPROC (20 + 16 * MAXUSERS)
+#define	NPROC (30 + 16 * MAXUSERS)
+#define	NTEXT (80 + NPROC / 8)			/* actually the object cache */
+#define	NVNODE (NPROC * 2 + NTEXT + 100)	 
+int	desiredvnodes = NVNODE;
 int	maxproc = NPROC;
-int	maxfiles = 3 * (NPROC + MAXUSERS) + 80;
+int	maxfiles = 5 * (NPROC + MAXUSERS) + 80;
 int	nmbclust = NMBCLUSTERS;
 
 #ifndef MBLOWAT
@@ -141,30 +140,8 @@ struct	seminfo seminfo = {
 #endif
 
 /*
-<<<<<<< HEAD
- * Values in support of System V compatible messages.
- */
-#ifdef SYSVMSG
-struct	msginfo msginfo = {
-	MSGMAX,		/* max chars in a message */
-	MSGMNI,		/* # of message queue identifiers */
-	MSGMNB,		/* max chars in a queue */
-	MSGTQL,		/* max messages in system */
-	MSGSSZ,		/* size of a message segment */
-			/* (must be small power of 2 greater than 4) */
-	MSGSEG		/* number of message segments */
-};
-#endif
-
-/*
- * These have to be allocated somewhere; allocating
-=======
  * This has to be allocated somewhere; allocating
->>>>>>> origin/master
  * them here forces loader errors if this file is omitted
  * (if they've been externed everywhere else; hah!).
  */
-struct	buf *buf;
-char	*buffers;
-
 struct	utsname utsname;

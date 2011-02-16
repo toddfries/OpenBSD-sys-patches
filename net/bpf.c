@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bpf.c,v 1.64 2007/03/04 23:36:34 canacar Exp $	*/
-=======
 /*	$OpenBSD: bpf.c,v 1.77 2011/01/04 15:24:11 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -513,12 +509,8 @@ bpf_wakeup(struct bpf_d *d)
 		    d->bd_siguid, d->bd_sigeuid);
 
 	selwakeup(&d->bd_sel);
-<<<<<<< HEAD
-	KNOTE(&d->bd_sel.si_note, 0);
-=======
 	/* XXX */
 	d->bd_sel.si_selpid = 0;
->>>>>>> origin/master
 }
 
 int
@@ -1038,6 +1030,15 @@ bpfpoll(dev_t dev, int events, struct proc *p)
 	 * An imitation of the FIONREAD ioctl code.
 	 */
 	d = bpfilter_lookup(minor(dev));
+	/*
+	 * XXX The USB stack manages it to trigger some race condition
+	 * which causes bpfilter_lookup to return NULL when a USB device
+	 * gets detached while it is up and has an open bpf handler (e.g.
+	 * dhclient).  We still should recheck if we can fix the root
+	 * cause of this issue.
+	 */
+	if (d == NULL)
+		return (POLLERR);
 	s = splnet();
 	if (d->bd_hlen == 0 && (!d->bd_immediate || d->bd_slen == 0)) {
 		revents = 0;		/* no data waiting */
@@ -1591,8 +1592,7 @@ bpfilter_create(int unit)
 
 	if ((bd = bpfilter_lookup(unit)) != NULL)
 		return (NULL);
-	if ((bd = malloc(sizeof(*bd), M_DEVBUF, M_NOWAIT)) != NULL) {
-		bzero(bd, sizeof(*bd));
+	if ((bd = malloc(sizeof(*bd), M_DEVBUF, M_NOWAIT|M_ZERO)) != NULL) {
 		bd->bd_unit = unit;
 		LIST_INSERT_HEAD(&bpf_d_list, bd, bd_list);
 	}

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_spppsubr.c,v 1.46 2007/02/14 00:53:48 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_spppsubr.c,v 1.84 2011/01/11 15:42:05 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -12,6 +8,9 @@
  *
  * Heavily revamped to conform to RFC 1661.
  * Copyright (C) 1997, Joerg Wunsch.
+ *
+ * RFC2472 IPv6CP support.
+ * Copyright (C) 2000, Jun-ichiro itojun Hagino <itojun@iijlab.net>.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,6 +43,7 @@
 #include <sys/kernel.h>
 #include <sys/sockio.h>
 #include <sys/socket.h>
+#include <sys/proc.h>
 #include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -59,6 +59,9 @@
 #include <net/netisr.h>
 #include <net/if_types.h>
 #include <net/route.h>
+
+/* for arc4random() */
+#include <dev/rndvar.h>
 
 #if defined (__FreeBSD__) || defined(__OpenBSD_) || defined(__NetBSD__)
 #include <machine/random.h>
@@ -79,13 +82,10 @@
 # else
 #  include <net/ethertypes.h>
 # endif
-#else
-# error Huh? sppp without INET?
 #endif
 
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
+#ifdef INET6
+#include <netinet6/in6_var.h>
 #endif
 
 #include <net/if_sppp.h>
@@ -135,10 +135,12 @@
 #define PPP_ISO		0x0023		/* ISO OSI Protocol */
 #define PPP_XNS		0x0025		/* Xerox NS Protocol */
 #define PPP_IPX		0x002b		/* Novell IPX Protocol */
+#define PPP_IPV6	0x0057		/* Internet Protocol v6 */
 #define PPP_LCP		0xc021		/* Link Control Protocol */
 #define PPP_PAP		0xc023		/* Password Authentication Protocol */
 #define PPP_CHAP	0xc223		/* Challenge-Handshake Auth Protocol */
 #define PPP_IPCP	0x8021		/* Internet Protocol Control Protocol */
+#define PPP_IPV6CP	0x8057		/* IPv6 Control Protocol */
 
 #define CONF_REQ	1		/* PPP configure request */
 #define CONF_ACK	2		/* PPP configure acknowledge */
@@ -164,6 +166,9 @@
 #define IPCP_OPT_ADDRESSES	1	/* both IP addresses; deprecated */
 #define IPCP_OPT_COMPRESSION	2	/* IP compression protocol (VJ) */
 #define IPCP_OPT_ADDRESS	3	/* local IP address */
+
+#define IPV6CP_OPT_IFID		1	/* interface identifier */
+#define IPV6CP_OPT_COMPRESSION	2	/* IPv6 compression protocol */
 
 #define PAP_REQ			1	/* PAP name/password request */
 #define PAP_ACK			2	/* PAP acknowledge */
@@ -346,6 +351,27 @@ HIDE void sppp_ipcp_tls(struct sppp *sp);
 HIDE void sppp_ipcp_tlf(struct sppp *sp);
 HIDE void sppp_ipcp_scr(struct sppp *sp);
 
+HIDE void sppp_ipv6cp_init(struct sppp *sp);
+HIDE void sppp_ipv6cp_up(struct sppp *sp);
+HIDE void sppp_ipv6cp_down(struct sppp *sp);
+HIDE void sppp_ipv6cp_open(struct sppp *sp);
+HIDE void sppp_ipv6cp_close(struct sppp *sp);
+HIDE void sppp_ipv6cp_TO(void *sp);
+HIDE int sppp_ipv6cp_RCR(struct sppp *sp, struct lcp_header *h, int len);
+HIDE void sppp_ipv6cp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len);
+HIDE void sppp_ipv6cp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len);
+HIDE void sppp_ipv6cp_tlu(struct sppp *sp);
+HIDE void sppp_ipv6cp_tld(struct sppp *sp);
+HIDE void sppp_ipv6cp_tls(struct sppp *sp);
+HIDE void sppp_ipv6cp_tlf(struct sppp *sp);
+HIDE void sppp_ipv6cp_scr(struct sppp *sp);
+HIDE const char *sppp_ipv6cp_opt_name(u_char opt);
+HIDE void sppp_get_ip6_addrs(struct sppp *sp, struct in6_addr *src,
+			       struct in6_addr *dst, struct in6_addr *srcmask);
+HIDE void sppp_set_ip6_addr(struct sppp *sp, const struct in6_addr *src);
+HIDE void sppp_gen_ip6_addr(struct sppp *sp, struct in6_addr *addr);
+HIDE void sppp_suggest_ip6_addr(struct sppp *sp, struct in6_addr *suggest);
+
 HIDE void sppp_pap_input(struct sppp *sp, struct mbuf *m);
 HIDE void sppp_pap_init(struct sppp *sp);
 HIDE void sppp_pap_open(struct sppp *sp);
@@ -382,15 +408,11 @@ HIDE void sppp_phase_network(struct sppp *sp);
 HIDE void sppp_print_bytes(const u_char *p, u_short len);
 HIDE void sppp_print_string(const char *p, u_short len);
 HIDE void sppp_qflush(struct ifqueue *ifq);
-<<<<<<< HEAD
-HIDE void sppp_set_ip_addr(struct sppp *sp, u_int32_t src);
-=======
 int sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int);
 void sppp_update_gw(struct ifnet *ifp);
 HIDE void sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr,
 			      u_int32_t hisaddr);
 HIDE void sppp_clear_ip_addrs(struct sppp *sp);
->>>>>>> origin/master
 HIDE void sppp_set_phase(struct sppp *sp);
 
 /* our control protocol descriptors */
@@ -403,11 +425,31 @@ static const struct cp lcp = {
 };
 
 static const struct cp ipcp = {
-	PPP_IPCP, IDX_IPCP, CP_NCP, "ipcp",
+	PPP_IPCP, IDX_IPCP,
+#ifdef INET	/* don't run IPCP if there's no IPv4 support */
+	CP_NCP,
+#else
+	0,
+#endif
+	"ipcp",
 	sppp_ipcp_up, sppp_ipcp_down, sppp_ipcp_open, sppp_ipcp_close,
 	sppp_ipcp_TO, sppp_ipcp_RCR, sppp_ipcp_RCN_rej, sppp_ipcp_RCN_nak,
 	sppp_ipcp_tlu, sppp_ipcp_tld, sppp_ipcp_tls, sppp_ipcp_tlf,
 	sppp_ipcp_scr
+};
+
+static const struct cp ipv6cp = {
+	PPP_IPV6CP, IDX_IPV6CP,
+#ifdef INET6	/*don't run IPv6CP if there's no IPv6 support*/
+	CP_NCP,
+#else
+	0,
+#endif
+	"ipv6cp",
+	sppp_ipv6cp_up, sppp_ipv6cp_down, sppp_ipv6cp_open, sppp_ipv6cp_close,
+	sppp_ipv6cp_TO, sppp_ipv6cp_RCR, sppp_ipv6cp_RCN_rej, sppp_ipv6cp_RCN_nak,
+	sppp_ipv6cp_tlu, sppp_ipv6cp_tld, sppp_ipv6cp_tls, sppp_ipv6cp_tlf,
+	sppp_ipv6cp_scr
 };
 
 static const struct cp pap = {
@@ -429,6 +471,7 @@ static const struct cp chap = {
 static const struct cp *cps[IDX_COUNT] = {
 	&lcp,			/* IDX_LCP */
 	&ipcp,			/* IDX_IPCP */
+	&ipv6cp,		/* IDX_IPV6CP */
 	&pap,			/* IDX_PAP */
 	&chap,			/* IDX_CHAP */
 };
@@ -456,7 +499,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	struct ifqueue *inq = 0;
 	struct sppp *sp = (struct sppp *)ifp;
 	struct timeval tv;
-	void *prej;
 	int debug = ifp->if_flags & IFF_DEBUG;
 	int s;
 
@@ -485,8 +527,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (sp->pp_flags & PP_NOFRAMING) {
-		prej = mtod(m, void *);
-		memcpy(&ht.protocol, prej, sizeof(ht.protocol));
+		memcpy(&ht.protocol, mtod(m, char *), sizeof(ht.protocol));
 		m_adj(m, 2);
 		ht.control = PPP_UI;
 		ht.address = PPP_ALLSTATIONS;
@@ -494,8 +535,20 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	} else {
 		/* Get PPP header. */
 		h = mtod (m, struct ppp_header*);
-		prej = &h->protocol;
 		m_adj (m, PPP_HEADER_LEN);
+	}
+
+	/* preserve the alignment */
+	if (m->m_len < m->m_pkthdr.len) {
+		m = m_pullup2(m, m->m_pkthdr.len);
+		if (m == NULL) {
+			if (debug)
+				log(LOG_DEBUG,
+				    SPP_FMT "Failed to align packet!\n", SPP_ARGS(ifp));
+			++ifp->if_ierrors;
+			++ifp->if_iqdrops;
+			return;
+		}
 	}
 
 	switch (h->address) {
@@ -515,7 +568,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		default:
 			if (sp->state[IDX_LCP] == STATE_OPENED)
 				sppp_cp_send (sp, PPP_LCP, PROTO_REJ,
-				    ++sp->pp_seq, m->m_pkthdr.len + 2, prej);
+				    ++sp->pp_seq, 2, &h->protocol);
 			if (debug)
 				log(LOG_DEBUG,
 				    SPP_FMT "invalid input protocol "
@@ -552,12 +605,17 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			}
 			break;
 #endif
-#ifdef IPX
-		case PPP_IPX:
-			/* IPX IPXCP not implemented yet */
-			if (sp->pp_phase == PHASE_NETWORK) {
-				schednetisr (NETISR_IPX);
-				inq = &ipxintrq;
+#ifdef INET6
+		case PPP_IPV6CP:
+			if (sp->pp_phase == PHASE_NETWORK)
+				sppp_cp_input(&ipv6cp, sp, m);
+			m_freem (m);
+			return;
+		case PPP_IPV6:
+			if (sp->state[IDX_IPV6CP] == STATE_OPENED) {
+				schednetisr (NETISR_IPV6);
+				inq = &ip6intrq;
+				sp->pp_last_activity = tv.tv_sec;
 			}
 			break;
 #endif
@@ -589,10 +647,10 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			inq = &ipintrq;
 			break;
 #endif
-#ifdef IPX
-		case ETHERTYPE_IPX:
-			schednetisr (NETISR_IPX);
-			inq = &ipxintrq;
+#ifdef INET6
+		case ETHERTYPE_IPV6:
+			schednetisr (NETISR_IPV6);
+			inq = &ip6intrq;
 			break;
 #endif
 		}
@@ -771,10 +829,24 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 		}
 		break;
 #endif
-#ifdef IPX
-	case AF_IPX:     /* Novell IPX Protocol */
-		protocol = htons ((sp->pp_flags & PP_CISCO) ?
-			ETHERTYPE_IPX : PPP_IPX);
+#ifdef INET6
+	case AF_INET6:   /* Internet Protocol v6 */
+		if (sp->pp_flags & PP_CISCO)
+			protocol = htons (ETHERTYPE_IPV6);
+		else {
+			/*
+			 * Don't choke with an ENETDOWN early.  It's
+			 * possible that we just started dialing out,
+			 * so don't drop the packet immediately.  If
+			 * we notice that we run out of buffer space
+			 * below, we will however remember that we are
+			 * not ready to carry IPv6 packets, and return
+			 * ENETDOWN, as opposed to ENOBUFS.
+			 */
+			protocol = htons(PPP_IPV6);
+			if (sp->state[IDX_IPV6CP] != STATE_OPENED)
+				rv = ENETDOWN;
+		}
 		break;
 #endif
 	default:
@@ -842,6 +914,7 @@ void
 sppp_attach(struct ifnet *ifp)
 {
 	struct sppp *sp = (struct sppp*) ifp;
+	int i;
 
 	/* Initialize keepalive handler. */
 	if (! spppq) {
@@ -872,8 +945,14 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_up = lcp.Up;
 	sp->pp_down = lcp.Down;
 
+
+	for (i = 0; i < IDX_COUNT; i++)
+		timeout_set(&sp->ch[i], (cps[i])->TO, (void *)sp);
+	timeout_set(&sp->pap_my_to_ch, sppp_pap_my_TO, (void *)sp);
+
 	sppp_lcp_init(sp);
 	sppp_ipcp_init(sp);
+	sppp_ipv6cp_init(sp);
 	sppp_pap_init(sp);
 	sppp_chap_init(sp);
 }
@@ -1535,12 +1614,50 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 		break;
 	case CODE_REJ:
 	case PROTO_REJ:
+	    {
+		int catastrophic = 0;
+		const struct cp *upper = NULL;
+		int i;
+		u_int16_t proto;
+
+		if (len < 2) {
+			if (debug)
+				log(LOG_DEBUG, SPP_FMT "invalid proto-rej length\n",
+				       SPP_ARGS(ifp));
+			++ifp->if_ierrors;
+			break;
+		}
+
+		proto = ntohs(*((u_int16_t *)p));
+		for (i = 0; i < IDX_COUNT; i++) {
+			if (cps[i]->proto == proto) {
+				upper = cps[i];
+				break;
+			}
+		}
+		if (upper == NULL)
+			catastrophic++;
+
+		if (catastrophic || debug)
+			log(catastrophic? LOG_INFO: LOG_DEBUG,
+			    SPP_FMT "%s: RXJ%c (%s) for proto 0x%x (%s/%s)\n",
+			    SPP_ARGS(ifp), cp->name, catastrophic ? '-' : '+',
+			    sppp_cp_type_name(h->type), proto,
+			    upper ? upper->name : "unknown",
+			    upper ? sppp_state_name(sp->state[upper->protoidx]) : "?");
+
+		/*
+		 * if we got RXJ+ against conf-req, the peer does not implement
+		 * this particular protocol type.  terminate the protocol.
+		 */
+		if (upper) {
+			if (sp->state[upper->protoidx] == STATE_REQ_SENT) {
+				upper->Close(sp);
+				break;
+			}
+		}
+
 		/* XXX catastrophic rejects (RXJ-) aren't handled yet. */
-		log(LOG_INFO,
-		    SPP_FMT "%s: ignoring RXJ (%s) for proto 0x%x, "
-		    "danger will robinson\n",
-		    SPP_ARGS(ifp), cp->name,
-		    sppp_cp_type_name(h->type), ntohs(*((u_short *)p)));
 		switch (sp->state[cp->protoidx]) {
 		case STATE_CLOSED:
 		case STATE_STOPPED:
@@ -1561,6 +1678,7 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 			++ifp->if_ierrors;
 		}
 		break;
+	    }
 	case DISC_REQ:
 		if (cp->proto != PPP_LCP)
 			goto illegal;
@@ -1800,7 +1918,6 @@ sppp_increasing_timeout (const struct cp *cp, struct sppp *sp)
 	sp->ch[cp->protoidx] = 
 	    timeout(cp->TO, (void *)sp, timo * sp->lcp.timeout);
 #elif defined(__OpenBSD__)
-	timeout_set(&sp->ch[cp->protoidx], cp->TO, (void *)sp);
 	timeout_add(&sp->ch[cp->protoidx], timo * sp->lcp.timeout);
 #endif
 }
@@ -1909,7 +2026,7 @@ sppp_lcp_init(struct sppp *sp)
 	sp->state[IDX_LCP] = STATE_INITIAL;
 	sp->fail_counter[IDX_LCP] = 0;
 	sp->lcp.protos = 0;
-	sp->lcp.mru = sp->lcp.their_mru = PP_MTU;
+	sp->lcp.mru = sp->lcp.their_mru = sp->pp_if.if_mtu;
 
 	/*
 	 * Initialize counters and timeout values.  Note that we don't
@@ -1945,7 +2062,7 @@ sppp_lcp_up(struct sppp *sp)
  	sp->lcp.opts = (1 << LCP_OPT_MAGIC);
  	sp->lcp.magic = 0;
  	sp->lcp.protos = 0;
- 	sp->lcp.mru = sp->lcp.their_mru = PP_MTU;
+ 	sp->lcp.mru = sp->lcp.their_mru = sp->pp_if.if_mtu;
 
 	getmicrouptime(&tv);
 	sp->pp_last_receive = sp->pp_last_activity = tv.tv_sec;
@@ -2368,8 +2485,10 @@ sppp_lcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 				u_int mru = p[2] * 256 + p[3];
 				if (debug)
 					addlog("%d ", mru);
-				if (mru < PP_MTU || mru > PP_MAX_MRU)
-					mru = PP_MTU;
+				if (mru < PP_MIN_MRU)
+					mru = PP_MIN_MRU;
+				if (mru > PP_MAX_MRU)
+					mru = PP_MAX_MRU;
 				sp->lcp.mru = mru;
 				sp->lcp.opts |= (1 << LCP_OPT_MRU);
 			}
@@ -2535,7 +2654,7 @@ sppp_lcp_scr(struct sppp *sp)
 	}
 
 	sp->confid[IDX_LCP] = ++sp->pp_seq;
-	sppp_cp_send (sp, PPP_LCP, CONF_REQ, sp->confid[IDX_LCP], i, &opt);
+	sppp_cp_send (sp, PPP_LCP, CONF_REQ, sp->confid[IDX_LCP], i, opt);
 }
 
 /*
@@ -2604,32 +2723,6 @@ sppp_ipcp_down(struct sppp *sp)
 HIDE void
 sppp_ipcp_open(struct sppp *sp)
 {
-	STDDCL;
-	u_int32_t myaddr, hisaddr;
-
-	sppp_get_ip_addrs(sp, &myaddr, &hisaddr, 0);
-	/*
-	 * If we don't have his address, this probably means our
-	 * interface doesn't want to talk IP at all.  (This could
-	 * be the case if somebody wants to speak only IPX, for
-	 * example.)  Don't open IPCP in this case.
-	 */
-	if (hisaddr == 0) {
-		/* XXX this message should go away */
-		if (debug)
-			log(LOG_DEBUG, SPP_FMT "ipcp_open(): no IP interface\n",
-			    SPP_ARGS(ifp));
-		return;
-	}
-
-	if (myaddr == 0) {
-		/*
-		 * I don't have an assigned address, so i need to
-		 * negotiate my address.
-		 */
-		sp->ipcp.flags |= IPCP_MYADDR_DYN;
-		sp->ipcp.opts |= (1 << IPCP_OPT_ADDRESS);
-	}
 	sppp_open_event(&ipcp, sp);
 }
 
@@ -2637,11 +2730,6 @@ HIDE void
 sppp_ipcp_close(struct sppp *sp)
 {
 	sppp_close_event(&ipcp, sp);
-	if (sp->ipcp.flags & IPCP_MYADDR_DYN)
-		/*
-		 * My address was dynamic, clear it again.
-		 */
-		sppp_set_ip_addr(sp, 0);
 }
 
 HIDE void
@@ -2725,7 +2813,10 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 		addlog("\n");
 
 	/* pass 2: parse option values */
-	sppp_get_ip_addrs(sp, 0, &hisaddr, 0);
+	if (sp->ipcp.flags & IPCP_HISADDR_SEEN)
+		hisaddr = sp->ipcp.req_hisaddr; /* we already agreed on that */
+	else
+		sppp_get_ip_addrs(sp, 0, &hisaddr, 0); /* user configuration */
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "ipcp parse opt values: ",
 		       SPP_ARGS(ifp));
@@ -2743,7 +2834,8 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 			desiredaddr = p[2] << 24 | p[3] << 16 |
 				p[4] << 8 | p[5];
 			if (desiredaddr == hisaddr ||
-			    (hisaddr == 1 && desiredaddr != 0)) {
+			    ((sp->ipcp.flags & IPCP_HISADDR_DYN) &&
+			    desiredaddr != 0)) {
 				/*
 				 * Peer's address is same as our value,
 				 * or we have set it to 0.0.0.1 to
@@ -2756,6 +2848,8 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 					       sppp_dotted_quad(desiredaddr));
 				/* record that we've seen it already */
 				sp->ipcp.flags |= IPCP_HISADDR_SEEN;
+				sp->ipcp.req_hisaddr = desiredaddr;
+				hisaddr = desiredaddr;
 				continue;
 			}
 			/*
@@ -2910,9 +3004,10 @@ sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 				 * our already existing value.
 				 */
 				if (sp->ipcp.flags & IPCP_MYADDR_DYN) {
-					sppp_set_ip_addr(sp, wantaddr);
 					if (debug)
 						addlog("[agree] ");
+					sp->ipcp.flags |= IPCP_MYADDR_SEEN;
+					sp->ipcp.req_myaddr = wantaddr;
 				}
 			}
 			break;
@@ -2932,6 +3027,16 @@ sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 HIDE void
 sppp_ipcp_tlu(struct sppp *sp)
 {
+	/* we are up. Set addresses and notify anyone interested */
+	u_int32_t myaddr, hisaddr;
+	sppp_get_ip_addrs(sp, &myaddr, &hisaddr, 0);
+	if ((sp->ipcp.flags & IPCP_MYADDR_DYN) &&
+	    (sp->ipcp.flags & IPCP_MYADDR_SEEN))
+		myaddr = sp->ipcp.req_myaddr;
+	if ((sp->ipcp.flags & IPCP_HISADDR_DYN) &&
+	    (sp->ipcp.flags & IPCP_HISADDR_SEEN))
+		hisaddr = sp->ipcp.req_hisaddr;
+	sppp_set_ip_addrs(sp, myaddr, hisaddr);
 }
 
 HIDE void
@@ -2942,6 +3047,45 @@ sppp_ipcp_tld(struct sppp *sp)
 HIDE void
 sppp_ipcp_tls(struct sppp *sp)
 {
+	STDDCL;
+	u_int32_t myaddr, hisaddr;
+
+	sp->ipcp.flags &= ~(IPCP_HISADDR_SEEN|IPCP_MYADDR_SEEN|
+	    IPCP_MYADDR_DYN|IPCP_HISADDR_DYN);
+	sp->ipcp.req_myaddr = 0;
+	sp->ipcp.req_hisaddr = 0;
+
+	sppp_get_ip_addrs(sp, &myaddr, &hisaddr, 0);
+	/*
+	 * If we don't have his address, this probably means our
+	 * interface doesn't want to talk IP at all.  (This could
+	 * be the case if somebody wants to speak only IPX, for
+	 * example.)  Don't open IPCP in this case.
+	 */
+	if (hisaddr == 0) {
+		/* XXX this message should go away */
+		if (debug)
+			log(LOG_DEBUG, SPP_FMT "ipcp_open(): no IP interface\n",
+			    SPP_ARGS(ifp));
+		return;
+	}
+
+	if (myaddr == 0) {
+		/*
+		 * I don't have an assigned address, so i need to
+		 * negotiate my address.
+		 */
+		sp->ipcp.flags |= IPCP_MYADDR_DYN;
+		sp->ipcp.opts |= (1 << IPCP_OPT_ADDRESS);
+	}
+	if (hisaddr == 1) {
+		/*
+		 * XXX - remove this hack!
+		 * remote has no valid address, we need to get one assigned.
+		 */
+		sp->ipcp.flags |= IPCP_HISADDR_DYN;
+	}
+
 	/* indicate to LCP that it must stay alive */
 	sp->lcp.protos |= (1 << IDX_IPCP);
 }
@@ -2949,6 +3093,10 @@ sppp_ipcp_tls(struct sppp *sp)
 HIDE void
 sppp_ipcp_tlf(struct sppp *sp)
 {
+	if (sp->ipcp.flags & (IPCP_MYADDR_DYN|IPCP_HISADDR_DYN))
+		/* Some address was dynamic, clear it again. */
+		sppp_clear_ip_addrs(sp);
+
 	/* we no longer need LCP */
 	sp->lcp.protos &= ~(1 << IDX_IPCP);
 	sppp_lcp_check_and_close(sp);
@@ -2973,7 +3121,11 @@ sppp_ipcp_scr(struct sppp *sp)
 #endif
 
 	if (sp->ipcp.opts & (1 << IPCP_OPT_ADDRESS)) {
-		sppp_get_ip_addrs(sp, &ouraddr, 0, 0);
+		if (sp->ipcp.flags & IPCP_MYADDR_SEEN)
+			/* not sure if this can ever happen */
+			ouraddr = sp->ipcp.req_myaddr;
+		else
+			sppp_get_ip_addrs(sp, &ouraddr, 0, 0);
 		opt[i++] = IPCP_OPT_ADDRESS;
 		opt[i++] = 6;
 		opt[i++] = ouraddr >> 24;
@@ -2983,118 +3135,68 @@ sppp_ipcp_scr(struct sppp *sp)
 	}
 
 	sp->confid[IDX_IPCP] = ++sp->pp_seq;
-	sppp_cp_send(sp, PPP_IPCP, CONF_REQ, sp->confid[IDX_IPCP], i, &opt);
+	sppp_cp_send(sp, PPP_IPCP, CONF_REQ, sp->confid[IDX_IPCP], i, opt);
 }
 
-
-/*
+/*
  *--------------------------------------------------------------------------*
  *                                                                          *
- *                        The CHAP implementation.                          *
+ *                      The IPv6CP implementation.                          *
  *                                                                          *
  *--------------------------------------------------------------------------*
  */
 
-/*
- * The authentication protocols don't employ a full-fledged state machine as
- * the control protocols do, since they do have Open and Close events, but
- * not Up and Down, nor are they explicitly terminated.  Also, use of the
- * authentication protocols may be different in both directions (this makes
- * sense, think of a machine that never accepts incoming calls but only
- * calls out, it doesn't require the called party to authenticate itself).
- *
- * Our state machine for the local authentication protocol (we are requesting
- * the peer to authenticate) looks like:
- *
- *						    RCA-
- *	      +--------------------------------------------+
- *	      V					    scn,tld|
- *	  +--------+			       Close   +---------+ RCA+
- *	  |	   |<----------------------------------|	 |------+
- *   +--->| Closed |				TO*    | Opened	 | sca	|
- *   |	  |	   |-----+		       +-------|	 |<-----+
- *   |	  +--------+ irc |		       |       +---------+
- *   |	    ^		 |		       |	   ^
- *   |	    |		 |		       |	   |
- *   |	    |		 |		       |	   |
- *   |	 TO-|		 |		       |	   |
- *   |	    |tld  TO+	 V		       |	   |
- *   |	    |	+------->+		       |	   |
- *   |	    |	|	 |		       |	   |
- *   |	  +--------+	 V		       |	   |
- *   |	  |	   |<----+<--------------------+	   |
- *   |	  | Req-   | scr				   |
- *   |	  | Sent   |					   |
- *   |	  |	   |					   |
- *   |	  +--------+					   |
- *   | RCA- |	| RCA+					   |
- *   +------+	+------------------------------------------+
- *   scn,tld	  sca,irc,ict,tlu
- *
- *
- *   with:
- *
- *	Open:	LCP reached authentication phase
- *	Close:	LCP reached terminate phase
- *
- *	RCA+:	received reply (pap-req, chap-response), acceptable
- *	RCN:	received reply (pap-req, chap-response), not acceptable
- *	TO+:	timeout with restart counter >= 0
- *	TO-:	timeout with restart counter < 0
- *	TO*:	reschedule timeout for CHAP
- *
- *	scr:	send request packet (none for PAP, chap-challenge)
- *	sca:	send ack packet (pap-ack, chap-success)
- *	scn:	send nak packet (pap-nak, chap-failure)
- *	ict:	initialize re-challenge timer (CHAP only)
- *
- *	tlu:	this-layer-up, LCP reaches network phase
- *	tld:	this-layer-down, LCP enters terminate phase
- *
- * Note that in CHAP mode, after sending a new challenge, while the state
- * automaton falls back into Req-Sent state, it doesn't signal a tld
- * event to LCP, so LCP remains in network phase.  Only after not getting
- * any response (or after getting an unacceptable response), CHAP closes,
- * causing LCP to enter terminate phase.
- *
- * With PAP, there is no initial request that can be sent.  The peer is
- * expected to send one based on the successful negotiation of PAP as
- * the authentication protocol during the LCP option negotiation.
- *
- * Incoming authentication protocol requests (remote requests
- * authentication, we are peer) don't employ a state machine at all,
- * they are simply answered.  Some peers [Ascend P50 firmware rev
- * 4.50] react allergically when sending IPCP requests while they are
- * still in authentication phase (thereby violating the standard that
- * demands that these NCP packets are to be discarded), so we keep
- * track of the peer demanding us to authenticate, and only proceed to
- * phase network once we've seen a positive acknowledge for the
- * authentication.
- */
+#ifdef INET6
+HIDE void
+sppp_ipv6cp_init(struct sppp *sp)
+{
+	sp->ipv6cp.opts = 0;
+	sp->ipv6cp.flags = 0;
+	sp->state[IDX_IPV6CP] = STATE_INITIAL;
+	sp->fail_counter[IDX_IPV6CP] = 0;
+#if defined (__FreeBSD__)
+	callout_handle_init(&sp->ch[IDX_IPV6CP]);
+#endif
+}
 
-/*
- * Handle incoming CHAP packets.
- */
-void
-sppp_chap_input(struct sppp *sp, struct mbuf *m)
+HIDE void
+sppp_ipv6cp_up(struct sppp *sp)
+{
+	sppp_up_event(&ipv6cp, sp);
+}
+
+HIDE void
+sppp_ipv6cp_down(struct sppp *sp)
+{
+	sppp_down_event(&ipv6cp, sp);
+}
+
+HIDE void
+sppp_ipv6cp_open(struct sppp *sp)
 {
 	STDDCL;
-	struct lcp_header *h;
-	int len, x;
-	u_char *value, *name, digest[AUTHKEYLEN], dsize;
-	int value_len, name_len;
-	MD5_CTX ctx;
+	struct in6_addr myaddr, hisaddr;
 
-	len = m->m_pkthdr.len;
-	if (len < 4) {
+#ifdef IPV6CP_MYIFID_DYN
+	sp->ipv6cp.flags &= ~(IPV6CP_MYIFID_SEEN|IPV6CP_MYIFID_DYN);
+#else
+	sp->ipv6cp.flags &= ~IPV6CP_MYIFID_SEEN;
+#endif
+
+	sppp_get_ip6_addrs(sp, &myaddr, &hisaddr, 0);
+	/*
+	 * If we don't have our address, this probably means our
+	 * interface doesn't want to talk IPv6 at all.  (This could
+	 * be the case if somebody wants to speak only IPX, for
+	 * example.)  Don't open IPv6CP in this case.
+	 */
+	if (IN6_IS_ADDR_UNSPECIFIED(&myaddr)) {
+		/* XXX this message should go away */
 		if (debug)
-			log(LOG_DEBUG,
-			    SPP_FMT "chap invalid packet length: %d bytes\n",
-			    SPP_ARGS(ifp), len);
+			log(LOG_DEBUG, SPP_FMT "ipv6cp_open(): no IPv6 interface\n",
+			    SPP_ARGS(ifp));
 		return;
 	}
-<<<<<<< HEAD
-=======
 	sp->ipv6cp.flags |= IPV6CP_MYIFID_SEEN;
 	sp->ipv6cp.opts |= (1 << IPV6CP_OPT_IFID);
 	sppp_open_event(&ipv6cp, sp);
@@ -3634,7 +3736,6 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 			    SPP_ARGS(ifp), len);
 		return;
 	}
->>>>>>> origin/master
 	h = mtod (m, struct lcp_header*);
 	if (len > ntohs (h->len))
 		len = ntohs (h->len);
@@ -3936,12 +4037,7 @@ sppp_chap_tlu(struct sppp *sp)
 #if defined (__FreeBSD__)
 		sp->ch[IDX_CHAP] = timeout(chap.TO, (void *)sp, i * hz);
 #elif defined(__OpenBSD__)
-<<<<<<< HEAD
-		timeout_set(&sp->ch[IDX_CHAP], chap.TO, (void *)sp);
-		timeout_add(&sp->ch[IDX_CHAP], i * hz);
-=======
 		timeout_add_sec(&sp->ch[IDX_CHAP], i);
->>>>>>> origin/master
 #endif
 	}
 
@@ -3953,7 +4049,7 @@ sppp_chap_tlu(struct sppp *sp)
 		if ((sp->hisauth.flags & AUTHFLAG_NORECHALLENGE) == 0)
 			addlog("next re-challenge in %d seconds\n", i);
 		else
-			addlog("re-challenging supressed\n");
+			addlog("re-challenging suppressed\n");
 	}
 
 	x = splnet();
@@ -3995,21 +4091,11 @@ sppp_chap_tld(struct sppp *sp)
 HIDE void
 sppp_chap_scr(struct sppp *sp)
 {
-	u_int32_t *ch;
 	u_char clen;
 
 	/* Compute random challenge. */
-<<<<<<< HEAD
-	ch = (u_int32_t *)sp->myauth.challenge;
-	ch[0] = arc4random();
-	ch[1] = arc4random();
-	ch[2] = arc4random();
-	ch[3] = arc4random();
-	clen = AUTHKEYLEN;
-=======
 	arc4random_buf(sp->chap_challenge, sizeof(sp->chap_challenge));
 	clen = AUTHCHALEN;
->>>>>>> origin/master
 
 	sp->confid[IDX_CHAP] = ++sp->pp_seq;
 
@@ -4207,7 +4293,6 @@ sppp_pap_open(struct sppp *sp)
 		sp->pap_my_to_ch =
 		    timeout(sppp_pap_my_TO, (void *)sp, sp->lcp.timeout);
 #elif defined (__OpenBSD__)
-		timeout_set(&sp->pap_my_to_ch, sppp_pap_my_TO, (void *)sp);
 		timeout_add(&sp->pap_my_to_ch, sp->lcp.timeout);
 #endif
 	}
@@ -4492,9 +4577,10 @@ sppp_keepalive(void *dummy)
 				/* And now prepare LCP to reestablish the link, if configured to do so. */
 				sppp_cp_change_state(&lcp, sp, STATE_STOPPED);
 
-				/* Close connection imediatly, completition of this
+				/* Close connection immediately, completition of this
 				 * will summon the magic needed to reestablish it. */
-				sp->pp_tlf(sp);
+				if (sp->pp_tlf)
+					sp->pp_tlf(sp);
 				continue;
 			}
 		}
@@ -4603,14 +4689,15 @@ sppp_update_gw(struct ifnet *ifp)
 }
 
 /*
- * Set my IP address.  Must be called at splnet.
+ * If an address is 0, leave it the way it is.
  */
 HIDE void
-sppp_set_ip_addr(struct sppp *sp, u_int32_t src)
+sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr, u_int32_t hisaddr)
 {
-	struct ifnet *ifp = &sp->pp_if;
-	struct ifaddr *ifa;
-	struct sockaddr_in *si;
+	STDDCL;
+ 	struct ifaddr *ifa;
+ 	struct sockaddr_in *si;
+	struct sockaddr_in *dest;
 
 	/*
 	 * Pick the first AF_INET address from the list,
@@ -4629,15 +4716,13 @@ sppp_set_ip_addr(struct sppp *sp, u_int32_t src)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 		{
 			si = (struct sockaddr_in *)ifa->ifa_addr;
+			dest = (struct sockaddr_in *)ifa->ifa_dstaddr;
 			if (si)
 				break;
 		}
 	}
 
 	if (ifa && si) {
-<<<<<<< HEAD
-		si->sin_addr.s_addr = htonl(src);
-=======
 		int error;
 		struct sockaddr_in new_sin = *si;
 		struct sockaddr_in new_dst = *dest;
@@ -4804,10 +4889,35 @@ sppp_set_ip6_addr(struct sppp *sp, const struct in6_addr *src)
 	if (ifa && sin6) {
 		struct sockaddr_in6 new_sin6 = *sin6;
 		bcopy(src, &new_sin6.sin6_addr, sizeof(new_sin6.sin6_addr));
->>>>>>> origin/master
 		dohooks(ifp->if_addrhooks, 0);
 	}
 }
+#endif
+
+/*
+ * Suggest a candidate address to be used by peer.
+ */
+HIDE void
+sppp_suggest_ip6_addr(struct sppp *sp, struct in6_addr *suggest)
+{
+	struct in6_addr myaddr;
+	struct timeval tv;
+
+	sppp_get_ip6_addrs(sp, &myaddr, 0, 0);
+
+	myaddr.s6_addr[8] &= ~0x02;	/* u bit to "local" */
+	getmicrouptime(&tv);
+	if ((tv.tv_usec & 0xff) == 0 && (tv.tv_sec & 0xff) == 0) {
+		myaddr.s6_addr[14] ^= 0xff;
+		myaddr.s6_addr[15] ^= 0xff;
+	} else {
+		myaddr.s6_addr[14] ^= (tv.tv_usec & 0xff);
+		myaddr.s6_addr[15] ^= (tv.tv_sec & 0xff);
+	}
+	if (suggest)
+		bcopy(&myaddr, suggest, sizeof(myaddr));
+}
+#endif /*INET6*/
 
 HIDE int
 sppp_get_params(struct sppp *sp, struct ifreq *ifr)
@@ -4831,18 +4941,6 @@ sppp_get_params(struct sppp *sp, struct ifreq *ifr)
 		 * called by any user.  No need to ever get PAP or
 		 * CHAP secrets back to userland anyway.
 		 */
-<<<<<<< HEAD
-		bcopy(sp, &spr.defs, sizeof(struct sppp));
-		bzero(spr.defs.myauth.secret, AUTHKEYLEN);
-		bzero(spr.defs.myauth.challenge, AUTHKEYLEN);
-		bzero(spr.defs.hisauth.secret, AUTHKEYLEN);
-		bzero(spr.defs.hisauth.challenge, AUTHKEYLEN);
-		return copyout(&spr, (caddr_t)ifr->ifr_data, sizeof spr);
-
-	case (int)SPPPIOSDEFS:
-		if (cmd != SIOCSIFGENERIC)
-			return EINVAL;
-=======
 
 		spr->cmd = cmd;
 		bcopy(sp, &spr->defs, sizeof(struct sppp));
@@ -4922,7 +5020,6 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 			free(spr, M_DEVBUF);
 			return EFAULT;
 		}
->>>>>>> origin/master
 		/*
 		 * Also, we only allow for authentication parameters to be
 		 * specified.
@@ -5105,6 +5202,20 @@ sppp_ipcp_opt_name(u_char opt)
 	snprintf (buf, sizeof buf, "0x%x", opt);
 	return buf;
 }
+
+#ifdef INET6
+HIDE const char *
+sppp_ipv6cp_opt_name(u_char opt)
+{
+	static char buf[12];
+	switch (opt) {
+	case IPV6CP_OPT_IFID:		return "ifid";
+	case IPV6CP_OPT_COMPRESSION:	return "compression";
+	}
+	snprintf (buf, sizeof buf, "0x%x", opt);
+	return buf;
+}
+#endif
 
 HIDE const char *
 sppp_state_name(int state)

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: crypto.c,v 1.47 2006/03/04 21:33:39 brad Exp $	*/
-=======
 /*	$OpenBSD: crypto.c,v 1.59 2011/01/11 15:42:05 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -29,27 +25,18 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/pool.h>
-<<<<<<< HEAD
-#include <crypto/cryptodev.h>
-
-=======
 
 #include <crypto/cryptodev.h>
 
 void crypto_init(void);
 
->>>>>>> origin/master
 struct cryptocap *crypto_drivers = NULL;
 int crypto_drivers_num = 0;
 
 struct pool cryptop_pool;
 struct pool cryptodesc_pool;
 
-struct cryptop *crp_req_queue = NULL;
-struct cryptop **crp_req_queue_tail = NULL;
-
-struct cryptkop *krp_req_queue = NULL;
-struct cryptkop **krp_req_queue_tail = NULL;
+struct workq *crypto_workq;
 
 /*
  * Create a new session.
@@ -428,51 +415,28 @@ crypto_dispatch(struct cryptop *crp)
 	hid = (crp->crp_sid >> 32) & 0xffffffff;
 	if (hid < crypto_drivers_num)
 		crypto_drivers[hid].cc_queued++;
+	splx(s);
 
-<<<<<<< HEAD
-	crp->crp_next = NULL;
-	if (crp_req_queue == NULL) {
-		crp_req_queue = crp;
-		crp_req_queue_tail = &(crp->crp_next);
-		splx(s);
-		wakeup(&crp_req_queue); /* Shared wait channel. */
-=======
 	if (crypto_workq) {
 		workq_queue_task(crypto_workq, &crp->crp_wqt, 0,
 		    (workq_fn)crypto_invoke, crp, NULL);
->>>>>>> origin/master
 	} else {
-		*crp_req_queue_tail = crp;
-		crp_req_queue_tail = &(crp->crp_next);
-		splx(s);
+		crypto_invoke(crp);
 	}
+
 	return 0;
 }
 
 int
 crypto_kdispatch(struct cryptkop *krp)
 {
-<<<<<<< HEAD
-	int s;
-	
-	s = splvm();
-
-	krp->krp_next = NULL;
-	if (krp_req_queue == NULL) {
-		krp_req_queue = krp;
-		krp_req_queue_tail = &(krp->krp_next);
-		splx(s);
-		wakeup(&crp_req_queue); /* Shared wait channel. */
-=======
 	if (crypto_workq) {
 		workq_queue_task(crypto_workq, &krp->krp_wqt, 0,
 		    (workq_fn)crypto_kinvoke, krp, NULL);
->>>>>>> origin/master
 	} else {
-		*krp_req_queue_tail = krp;
-		krp_req_queue_tail = &(krp->krp_next);
-		splx(s);
+		crypto_kinvoke(krp);
 	}
+
 	return 0;
 }
 
@@ -485,11 +449,13 @@ crypto_kinvoke(struct cryptkop *krp)
 	extern int cryptodevallowsoft;
 	u_int32_t hid;
 	int error;
+	int s;
 
 	/* Sanity checks. */
 	if (krp == NULL || krp->krp_callback == NULL)
 		return (EINVAL);
 
+	s = splvm();
 	for (hid = 0; hid < crypto_drivers_num; hid++) {
 		if ((crypto_drivers[hid].cc_flags & CRYPTOCAP_F_SOFTWARE) &&
 		    cryptodevallowsoft == 0)
@@ -505,6 +471,7 @@ crypto_kinvoke(struct cryptkop *krp)
 	if (hid == crypto_drivers_num) {
 		krp->krp_status = ENODEV;
 		crypto_kdone(krp);
+		splx(s);
 		return (0);
 	}
 
@@ -517,6 +484,7 @@ crypto_kinvoke(struct cryptkop *krp)
 		krp->krp_status = error;
 		crypto_kdone(krp);
 	}
+	splx(s);
 	return (0);
 }
 
@@ -530,14 +498,17 @@ crypto_invoke(struct cryptop *crp)
 	u_int64_t nid;
 	u_int32_t hid;
 	int error;
+	int s;
 
 	/* Sanity checks. */
 	if (crp == NULL || crp->crp_callback == NULL)
 		return EINVAL;
 
+	s = splvm();
 	if (crp->crp_desc == NULL || crypto_drivers == NULL) {
 		crp->crp_etype = EINVAL;
 		crypto_done(crp);
+		splx(s);
 		return 0;
 	}
 
@@ -566,10 +537,10 @@ crypto_invoke(struct cryptop *crp)
 			goto migrate;
 		} else {
 			crp->crp_etype = error;
-			crypto_done(crp);
 		}
 	}
 
+	splx(s);
 	return 0;
 
  migrate:
@@ -582,6 +553,7 @@ crypto_invoke(struct cryptop *crp)
 
 	crp->crp_etype = EAGAIN;
 	crypto_done(crp);
+	splx(s);
 	return 0;
 }
 
@@ -644,39 +616,7 @@ crypto_getreq(int num)
 	return crp;
 }
 
-/*
- * Crypto thread, runs as a kernel thread to process crypto requests.
- */
 void
-<<<<<<< HEAD
-crypto_thread(void)
-{
-	struct cryptop *crp;
-	struct cryptkop *krp;
-	int s;
-
-	s = splvm();
-
-	for (;;) {
-		crp = crp_req_queue;
-		krp = krp_req_queue;
-		if (crp == NULL && krp == NULL) {
-			(void)tsleep(&crp_req_queue, PLOCK, "crypto_wait", 0);
-			continue;
-		}
-
-		if (crp) {
-			/* Remove from the queue. */
-			crp_req_queue = crp->crp_next;
-			crypto_invoke(crp);
-		}
-		if (krp) {
-			/* Remove from the queue. */
-			krp_req_queue = krp->krp_next;
-			crypto_kinvoke(krp);
-		}
-	}
-=======
 crypto_init(void)
 {
 	crypto_workq = workq_create("crypto", 1, IPL_HIGH);
@@ -685,7 +625,6 @@ crypto_init(void)
 	    0, "cryptop", NULL);
 	pool_init(&cryptodesc_pool, sizeof(struct cryptodesc), 0, 0,
 	    0, "cryptodesc", NULL);
->>>>>>> origin/master
 }
 
 /*

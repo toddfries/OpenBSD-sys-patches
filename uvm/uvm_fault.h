@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_fault.h,v 1.11 2001/12/19 08:58:07 art Exp $	*/
-=======
 /*	$OpenBSD: uvm_fault.h,v 1.13 2009/03/25 20:00:18 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_fault.h,v 1.14 2000/06/26 14:21:17 mrg Exp $	*/
 
 /*

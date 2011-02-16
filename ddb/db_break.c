@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_break.c,v 1.12 2002/05/16 13:01:41 art Exp $	*/
-=======
 /*	$OpenBSD: db_break.c,v 1.14 2010/11/27 19:59:11 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_break.c,v 1.7 1996/03/30 22:30:03 christos Exp $	*/
 
 /* 

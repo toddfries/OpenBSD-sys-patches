@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip6_output.c,v 1.97 2006/12/10 10:16:12 miod Exp $	*/
-=======
 /*	$OpenBSD: ip6_output.c,v 1.118 2010/09/23 04:45:15 yasuoka Exp $	*/
->>>>>>> origin/master
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -156,19 +152,9 @@ struct idgen32_ctx ip6_id_ctx;
  * ifpp - XXX: just for statistics
  */
 int
-<<<<<<< HEAD
-ip6_output(m0, opt, ro, flags, im6o, ifpp)
-	struct mbuf *m0;
-	struct ip6_pktopts *opt;
-	struct route_in6 *ro;
-	int flags;
-	struct ip6_moptions *im6o;
-	struct ifnet **ifpp;		/* XXX: just for statistics */
-=======
 ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
     int flags, struct ip6_moptions *im6o, struct ifnet **ifpp, 
     struct inpcb *inp)
->>>>>>> origin/master
 {
 	struct ip6_hdr *ip6, *mhip6;
 	struct ifnet *ifp, *origifp = NULL;
@@ -192,7 +178,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	union sockaddr_union sdst;
 	struct tdb_ident *tdbi;
 	u_int32_t sspi;
-	struct inpcb *inp;
 	struct tdb *tdb;
 	int s;
 #if NPF > 0
@@ -201,7 +186,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 #endif /* IPSEC */
 
 #ifdef IPSEC
-	inp = NULL;	/*XXX*/
 	if (inp && (inp->inp_flags & INP_IPV6) == 0)
 		panic("ip6_output: IPv4 pcb is passed");
 #endif /* IPSEC */
@@ -234,6 +218,9 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	}
 
 #ifdef IPSEC
+	if (!ipsec_in_use && !inp)
+		goto done_spd;
+
 	/*
 	 * splnet is chosen over spltdb because we are not allowed to
 	 * lower the level, and udp6_output calls us in splnet(). XXX check
@@ -2690,7 +2677,10 @@ int
 ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt, 
     struct ip6_pktopts *stickyopt, int priv, int uproto)
 {
+	u_int clen;
 	struct cmsghdr *cm = 0;
+	caddr_t cmsgs;
+	int error;
 
 	if (control == NULL || opt == NULL)
 		return (EINVAL);
@@ -2719,24 +2709,25 @@ ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt,
 	if (control->m_next)
 		return (EINVAL);
 
-	for (; control->m_len; control->m_data += CMSG_ALIGN(cm->cmsg_len),
-	    control->m_len -= CMSG_ALIGN(cm->cmsg_len)) {
-		int error;
-
-		if (control->m_len < CMSG_LEN(0))
+	clen = control->m_len;
+	cmsgs = mtod(control, caddr_t);
+	do {
+		if (clen < CMSG_LEN(0))
 			return (EINVAL);
-
-		cm = mtod(control, struct cmsghdr *);
-		if (cm->cmsg_len == 0 || cm->cmsg_len > control->m_len)
+		cm = (struct cmsghdr *)cmsgs;
+		if (cm->cmsg_len < CMSG_LEN(0) ||
+		    CMSG_ALIGN(cm->cmsg_len) > clen)
 			return (EINVAL);
-		if (cm->cmsg_level != IPPROTO_IPV6)
-			continue;
+		if (cm->cmsg_level == IPPROTO_IPV6) {
+			error = ip6_setpktopt(cm->cmsg_type, CMSG_DATA(cm),
+			    cm->cmsg_len - CMSG_LEN(0), opt, priv, 0, 1, uproto);
+			if (error)
+				return (error);
+		}
 
-		error = ip6_setpktopt(cm->cmsg_type, CMSG_DATA(cm),
-		    cm->cmsg_len - CMSG_LEN(0), opt, priv, 0, 1, uproto);
-		if (error)
-			return (error);
-	}
+		clen -= CMSG_ALIGN(cm->cmsg_len);
+		cmsgs += CMSG_ALIGN(cm->cmsg_len);
+	} while (clen);
 
 	return (0);
 }

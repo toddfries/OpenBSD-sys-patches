@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ddp_usrreq.c,v 1.6 2002/03/14 01:27:10 millert Exp $	*/
-=======
 /*	$OpenBSD: ddp_usrreq.c,v 1.14 2010/06/30 20:37:54 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1990,1994 Regents of The University of Michigan.
@@ -77,7 +73,7 @@
 #include <netatalk/at_extern.h>
 
 int ddp_usrreq(struct socket *, int, struct mbuf *,
-			struct mbuf *, struct mbuf * );
+			struct mbuf *, struct mbuf *, struct proc *);
 static void at_sockaddr( struct ddpcb *, struct mbuf * );
 static int at_pcbsetaddr( struct ddpcb *, struct mbuf *,
 			struct proc * );
@@ -90,19 +86,25 @@ struct ddpcb *ddp_search( struct sockaddr_at *,
 			struct sockaddr_at *, struct at_ifaddr * );
 void ddp_init(void);
 
+struct at_ifaddr	*at_ifaddr;
+struct ifqueue		atintrq1, atintrq2;
+int			atdebug;
+
+struct ddpcb		*ddp_ports[ ATPORT_LAST ];
+struct ddpstat		ddpstat;
+
 struct ddpcb	*ddpcb = NULL;
 u_long		ddp_sendspace = DDP_MAXSZ; /* Max ddp size + 1 (ddp_type) */
 u_long		ddp_recvspace = 10 * ( 587 + sizeof( struct sockaddr_at ));
 
 /*ARGSUSED*/
 int
-ddp_usrreq( so, req, m, addr, rights )
+ddp_usrreq( so, req, m, addr, rights, p )
     struct socket	*so;
     int			req;
     struct mbuf		*m, *addr, *rights;
+    struct proc		*p;
 {
-    /* XXX Need to pass p into this routine */
-    struct proc *p = curproc;
     struct ddpcb	*ddp;
     int			error = 0;
 
@@ -466,11 +468,10 @@ at_pcballoc( so )
 {
     struct ddpcb	*ddp;
 
-    MALLOC( ddp, struct ddpcb *, sizeof( *ddp ), M_PCB, M_NOWAIT );
+    ddp = malloc(sizeof(*ddp), M_PCB, M_NOWAIT | M_ZERO);
     if ( ddp == NULL ) {
 	return (ENOBUFS);
     }
-    bzero( ddp, sizeof( *ddp ));
 
     ddp->ddp_lsat.sat_port = ATADDR_ANYPORT;
 
@@ -523,7 +524,7 @@ at_pcbdetach( so, ddp )
 	ddp->ddp_next->ddp_prev = ddp->ddp_prev;
     }
 
-    FREE( ddp, M_PCB );
+    free( ddp, M_PCB );
 }
 
 /*
@@ -584,4 +585,28 @@ ddp_init()
 {
     atintrq1.ifq_maxlen = IFQ_MAXLEN;
     atintrq2.ifq_maxlen = IFQ_MAXLEN;
+}
+
+/*
+ * Sysctl for ddp variables.
+ */
+int
+ddp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case DDPCTL_STATS:
+		if (newp != NULL)
+			return (EPERM);
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ddpstat, sizeof(ddpstat)));
+
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOTREACHED */
 }

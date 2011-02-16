@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: krpc_subr.c,v 1.13 2004/11/18 15:09:07 markus Exp $	*/
-=======
 /*	$OpenBSD: krpc_subr.c,v 1.20 2009/10/19 22:24:18 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
 
 /*
@@ -279,7 +275,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = INADDR_ANY;
 	sin->sin_port = htons(0);
-	error = sobind(so, m);
+	error = sobind(so, m, &proc0);
 	m_freem(m);
 	if (error) {
 		printf("bind failed\n");

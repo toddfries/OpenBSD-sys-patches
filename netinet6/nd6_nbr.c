@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nd6_nbr.c,v 1.42 2006/11/17 01:11:23 itojun Exp $	*/
-=======
 /*	$OpenBSD: nd6_nbr.c,v 1.55 2010/02/08 11:56:09 jsing Exp $	*/
->>>>>>> origin/master
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -207,7 +203,7 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 #if NCARP > 0
 	if (ifp->if_type == IFT_CARP) {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
-		if (ifa && !carp_iamatch6(ifp, ifa))
+		if (ifa && !carp_iamatch6(ifp, lladdr, &proxydl))
 			ifa = NULL;
 	} else {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
@@ -520,7 +516,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	nd_ns->nd_ns_cksum =
 	    in6_cksum(m, IPPROTO_ICMPV6, sizeof(*ip6), icmp6len);
 
-	ip6_output(m, NULL, &ro, dad ? IPV6_UNSPECSRC : 0, &im6o, NULL);
+	ip6_output(m, NULL, &ro, dad ? IPV6_UNSPECSRC : 0, &im6o, NULL, NULL);
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);
 	icmp6_ifstat_inc(ifp, ifs6_out_neighborsolicit);
 	icmp6stat.icp6s_outhist[ND_NEIGHBOR_SOLICIT]++;
@@ -698,6 +694,8 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 			 * affect the status of associated prefixes..
 			 */
 			pfxlist_onlink_check();
+			if ((rt->rt_flags & RTF_LLINFO) == 0)
+				goto freeit;	/* ln is gone */
 		}
 	} else {
 		int llchange;
@@ -817,13 +815,18 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	rt->rt_flags &= ~RTF_REJECT;
 	ln->ln_asked = 0;
 	if (ln->ln_hold) {
+		struct mbuf *n = ln->ln_hold;
+		ln->ln_hold = NULL;
 		/*
 		 * we assume ifp is not a loopback here, so just set the 2nd
 		 * argument as the 1st one.
 		 */
-		nd6_output(ifp, ifp, ln->ln_hold,
-			   (struct sockaddr_in6 *)rt_key(rt), rt);
-		ln->ln_hold = NULL;
+		nd6_output(ifp, ifp, n, (struct sockaddr_in6 *)rt_key(rt), rt);
+		if (ln->ln_hold == n) {
+			/* n is back in ln_hold. Discard. */
+			m_freem(ln->ln_hold);
+			ln->ln_hold = NULL;
+		}
 	}
 
  freeit:
@@ -988,7 +991,7 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	nd_na->nd_na_cksum =
 	    in6_cksum(m, IPPROTO_ICMPV6, sizeof(struct ip6_hdr), icmp6len);
 
-	ip6_output(m, NULL, &ro, 0, &im6o, NULL);
+	ip6_output(m, NULL, &ro, 0, &im6o, NULL, NULL);
 
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);
 	icmp6_ifstat_inc(ifp, ifs6_out_neighboradvert);
@@ -1011,7 +1014,6 @@ caddr_t
 nd6_ifptomac(struct ifnet *ifp)
 {
 	switch (ifp->if_type) {
-	case IFT_ARCNET:
 	case IFT_ETHER:
 	case IFT_FDDI:
 	case IFT_IEEE1394:
@@ -1115,7 +1117,7 @@ nd6_dad_start(struct ifaddr *ifa, int *tick)
 		return;
 	}
 
-	dp = malloc(sizeof(*dp), M_IP6NDP, M_NOWAIT);
+	dp = malloc(sizeof(*dp), M_IP6NDP, M_NOWAIT | M_ZERO);
 	if (dp == NULL) {
 		log(LOG_ERR, "nd6_dad_start: memory allocation failed for "
 			"%s(%s)\n",
@@ -1123,7 +1125,6 @@ nd6_dad_start(struct ifaddr *ifa, int *tick)
 			ifa->ifa_ifp ? ifa->ifa_ifp->if_xname : "???");
 		return;
 	}
-	bzero(dp, sizeof(*dp));
 	bzero(&dp->dad_timer_ch, sizeof(dp->dad_timer_ch));
 	TAILQ_INSERT_TAIL(&dadq, (struct dadq *)dp, dad_list);
 	ip6_dad_pending++;
@@ -1150,9 +1151,10 @@ nd6_dad_start(struct ifaddr *ifa, int *tick)
 		int ntick;
 
 		if (*tick == 0)
-			ntick = arc4random() % (MAX_RTR_SOLICITATION_DELAY * hz);
+			ntick = arc4random_uniform(MAX_RTR_SOLICITATION_DELAY *
+			    hz);
 		else
-			ntick = *tick + arc4random() % (hz / 2);
+			ntick = *tick + arc4random_uniform(hz / 2);
 		*tick = ntick;
 		nd6_dad_starttimer(dp, ntick);
 	}

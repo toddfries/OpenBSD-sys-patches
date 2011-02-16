@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: xform.h,v 1.15 2004/12/20 20:31:18 hshoexer Exp $	*/
-=======
 /*	$OpenBSD: xform.h,v 1.22 2010/10/06 22:19:20 mikeb Exp $	*/
->>>>>>> origin/master
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -44,13 +40,9 @@ struct auth_hash {
 	u_int16_t ctxsize;
 	u_int16_t blocksize;
 	void (*Init) (void *);
-<<<<<<< HEAD
-	int  (*Update) (void *, u_int8_t *, u_int16_t);
-=======
 	void (*Setkey) (void *, const u_int8_t *, u_int16_t);
 	void (*Reinit) (void *, const u_int8_t *, u_int16_t);
 	int  (*Update) (void *, const u_int8_t *, u_int16_t);
->>>>>>> origin/master
 	void (*Final) (u_int8_t *, void *);
 };
 

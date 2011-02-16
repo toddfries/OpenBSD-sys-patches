@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pmap.h,v 1.17 2004/01/29 20:50:33 drahn Exp $	*/
-=======
 /*	$OpenBSD: uvm_pmap.h,v 1.22 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvm_pmap.h,v 1.1 2000/06/27 09:00:14 mrg Exp $	*/
 
 /* 
@@ -152,13 +148,8 @@ boolean_t	 pmap_is_referenced(struct vm_page *);
 
 void		 pmap_page_protect(struct vm_page *, vm_prot_t);
 
-<<<<<<< HEAD
-#if !defined(pmap_phys_address)
-paddr_t	 pmap_phys_address(int);
-=======
 #if !defined(pmap_proc_iflush)
 void		pmap_proc_iflush(struct proc *, vaddr_t, vsize_t);
->>>>>>> origin/master
 #endif
 void		 pmap_protect(pmap_t, vaddr_t, vaddr_t, vm_prot_t);
 #if !defined(pmap_reference)
@@ -166,6 +157,9 @@ void		 pmap_reference(pmap_t);
 #endif
 #if !defined(pmap_remove)
 void		 pmap_remove(pmap_t, vaddr_t, vaddr_t);
+#endif
+#if !defined(pmap_remove_holes)
+void		pmap_remove_holes(struct vm_map *);
 #endif
 #if !defined(pmap_update)
 void		 pmap_update(pmap_t);

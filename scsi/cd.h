@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd.h,v 1.13 2006/07/19 01:21:28 krw Exp $	*/
-=======
 /*	$OpenBSD: cd.h,v 1.25 2009/12/16 10:51:28 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_cd.h,v 1.6 1996/03/19 03:06:39 mycroft Exp $	*/
 
 /*
@@ -176,6 +172,17 @@ struct scsi_load_unload {
 	u_int8_t control;
 };
 
+struct scsi_set_cd_speed {
+	u_int8_t opcode;
+	u_int8_t rotation;
+#define ROTATE_CLV 0
+#define ROTATE_CAV 1
+	u_int8_t read[2];
+	u_int8_t write[2];
+	u_int8_t reserved[5];
+	u_int8_t control;
+};
+
 /*
  * Opcodes
  */
@@ -194,6 +201,7 @@ struct scsi_load_unload {
 #define PLAY_BIG		0xa5	/* cdrom pause in 'play audio' mode */
 #define LOAD_UNLOAD		0xa6	/* cdrom load/unload media */
 #define PLAY_TRACK_REL_BIG	0xa9	/* cdrom play track/index mode */
+#define SET_CD_SPEED		0xbb	/* set cdrom read/write speed */
 
 /*
  * Mode pages

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: if_gre.c,v 1.40 2006/03/25 22:41:47 djm Exp $ */
-=======
 /*      $OpenBSD: if_gre.c,v 1.52 2010/09/23 11:34:50 blambert Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -137,10 +133,9 @@ gre_clone_create(struct if_clone *ifc, int unit)
 	struct gre_softc *sc;
 	int s;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!sc)
 		return (ENOMEM);
-	bzero(sc, sizeof(*sc));
 	snprintf(sc->sc_if.if_xname, sizeof sc->sc_if.if_xname, "%s%d",
 	    ifc->ifc_name, unit);
 	sc->sc_if.if_softc = sc;
@@ -657,7 +652,7 @@ recompute:
 		ifr->ifr_rdomainid = sc->g_rtableid;
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	splx(s);

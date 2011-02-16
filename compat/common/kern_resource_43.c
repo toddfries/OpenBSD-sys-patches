@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_resource_43.c,v 1.4 2002/10/03 00:07:19 nordin Exp $	*/
+/*	$OpenBSD: kern_resource_43.c,v 1.5 2003/06/02 23:27:59 millert Exp $	*/
 /*	$NetBSD: kern_resource_43.c,v 1.4 1996/03/14 19:31:46 christos Exp $	*/
 
 /*-

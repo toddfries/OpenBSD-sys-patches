@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsiconf.h,v 1.83 2007/04/03 04:47:59 dlg Exp $	*/
-=======
 /*	$OpenBSD: scsiconf.h,v 1.142 2010/12/24 02:45:33 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -56,11 +52,8 @@
 
 #include <sys/queue.h>
 #include <sys/timeout.h>
-<<<<<<< HEAD
-=======
 #include <sys/workq.h>
 #include <sys/mutex.h>
->>>>>>> origin/master
 #include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
 
@@ -296,6 +289,7 @@ void		devid_free(struct devid *);
 
 struct scsi_xfer;
 struct scsi_link;
+struct scsibus_softc;
 
 /*
  * Temporary hack
@@ -308,20 +302,11 @@ extern int scsi_autoconf;
  * of these statically allocated.
  */
 struct scsi_adapter {
-<<<<<<< HEAD
-	int		(*scsi_cmd)(struct scsi_xfer *);
-	void		(*scsi_minphys)(struct buf *);
-	int		(*open_target_lu)(void);
-	int		(*close_target_lu)(void);
-	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int,
-			    struct proc *);
-=======
 	void		(*scsi_cmd)(struct scsi_xfer *);
 	void		(*scsi_minphys)(struct buf *, struct scsi_link *);
 	int		(*dev_probe)(struct scsi_link *);
 	void		(*dev_free)(struct scsi_link *);
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
->>>>>>> origin/master
 };
 
 struct scsi_iopool;
@@ -406,6 +391,7 @@ struct scsi_link {
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
+	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
 	struct  devid *id;
 
@@ -543,18 +529,11 @@ struct scsi_xfer {
 const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 	    int, int *);
 
+#define scsi_task(_f, _a1, _a2, _fl) \
+    workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
+
 void	scsi_init(void);
-<<<<<<< HEAD
-void	scsi_deinit(void);
-int	scsi_task(void (*func)(void *, void *), void *, void *, int);
-struct scsi_xfer *
-	scsi_get_xs(struct scsi_link *, int);
-void	scsi_free_xs(struct scsi_xfer *, int);
-int	scsi_execute_xs(struct scsi_xfer *);
-u_long	scsi_size(struct scsi_link *, int, u_int32_t *);
-=======
 daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
->>>>>>> origin/master
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: procfs_cmdline.c,v 1.6 2005/12/11 21:30:31 miod Exp $	*/
-=======
 /*	$OpenBSD: procfs_cmdline.c,v 1.9 2008/11/10 03:38:53 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: procfs_cmdline.c,v 1.3 1999/03/13 22:26:48 thorpej Exp $	*/
 
 /*
@@ -57,11 +53,7 @@
  * code for returning process's command line arguments
  */
 int
-procfs_docmdline(curp, p, pfs, uio)
-	struct proc *curp;
-	struct proc *p;
-	struct pfsnode *pfs;
-	struct uio *uio;
+procfs_docmdline(struct proc *curp, struct proc *p, struct pfsnode *pfs, struct uio *uio)
 {
 	struct ps_strings pss;
 	int count, error, i;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: igmp_var.h,v 1.6 2003/02/12 14:41:07 jason Exp $	*/
+/*	$OpenBSD: igmp_var.h,v 1.9 2008/04/18 06:42:20 djm Exp $	*/
 /*	$NetBSD: igmp_var.h,v 1.9 1996/02/13 23:41:31 christos Exp $	*/
 
 /*
@@ -62,6 +62,21 @@ struct igmpstat {
 	u_long	igps_snd_reports;	/* sent membership reports */
 };
 
+/*
+ * Names for IGMP sysctl objects
+ */
+#define IGMPCTL_STATS		1	/* IGMP statistics */
+#define IGMPCTL_MAXID		2
+
+#define IGMPCTL_NAMES { \
+	{ 0, 0 }, \
+	{ "stats",	CTLTYPE_STRUCT } \
+}
+
+#define IGMPCTL_VARS { \
+	NULL \
+}
+
 #ifdef _KERNEL
 extern struct igmpstat igmpstat;
 
@@ -70,7 +85,7 @@ extern struct igmpstat igmpstat;
  * DELAY * countdown frequency).  We assume that the routine random()
  * is defined somewhere (and that it returns a positive number).
  */
-#define	IGMP_RANDOM_DELAY(X)	(arc4random() % (X) + 1)
+#define	IGMP_RANDOM_DELAY(X)	(arc4random_uniform(X) + 1)
 
 void	igmp_init(void);
 void	igmp_input(struct mbuf *, ...);
@@ -78,5 +93,6 @@ void	igmp_joingroup(struct in_multi *);
 void	igmp_leavegroup(struct in_multi *);
 void	igmp_fasttimo(void);
 void	igmp_slowtimo(void);
+int	igmp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 #endif /* _KERNEL */
 #endif /* _NETINET_IGMP_VAR_H_ */

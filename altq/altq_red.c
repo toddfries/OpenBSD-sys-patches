@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_red.c,v 1.11 2003/05/12 00:50:12 henning Exp $	*/
+/*	$OpenBSD: altq_red.c,v 1.16 2008/05/08 15:22:02 chl Exp $	*/
 /*	$KAME: altq_red.c,v 1.10 2002/04/03 05:38:51 kjc Exp $	*/
 
 /*
@@ -162,10 +162,7 @@ red_alloc(int weight, int inv_pmax, int th_min, int th_max, int flags,
 	int	 w, i;
 	int	 npkts_per_sec;
 
-	MALLOC(rp, red_t *, sizeof(red_t), M_DEVBUF, M_WAITOK);
-	if (rp == NULL)
-		return (NULL);
-	bzero(rp, sizeof(red_t));
+	rp = malloc(sizeof(red_t), M_DEVBUF, M_WAITOK|M_ZERO);
 
 	rp->red_avg = 0;
 	rp->red_idle = 1;
@@ -244,7 +241,7 @@ void
 red_destroy(red_t *rp)
 {
 	wtab_destroy(rp->red_wtab);
-	FREE(rp, M_DEVBUF);
+	free(rp, M_DEVBUF);
 }
 
 void
@@ -404,7 +401,7 @@ drop_early(int fp_len, int fp_probd, int count)
 	 * drop probability = (avg - TH_MIN) / d
 	 */
 
-	if ((random() % d) < fp_len) {
+	if (arc4random_uniform(d) < fp_len) {
 		/* drop or mark */
 		return (1);
 	}
@@ -420,33 +417,26 @@ int
 mark_ecn(struct mbuf *m, struct altq_pktattr *pktattr, int flags)
 {
 	struct mbuf	*m0;
-	struct pf_mtag	*t;
+	void		*hdr;
 
-	if ((t = pf_find_mtag(m)) == NULL)
-		return (0);
-
-	if (t->af != AF_INET && t->af != AF_INET6)
-		return (0);
+	hdr = m->m_pkthdr.pf.hdr;
 
 	/* verify that pattr_hdr is within the mbuf data */
 	for (m0 = m; m0 != NULL; m0 = m0->m_next)
-		if (((caddr_t)(t->hdr) >= m0->m_data) &&
-		    ((caddr_t)(t->hdr) < m0->m_data + m0->m_len))
+		if (((caddr_t)(hdr) >= m0->m_data) &&
+		    ((caddr_t)(hdr) < m0->m_data + m0->m_len))
 			break;
 	if (m0 == NULL) {
 		/* ick, tag info is stale */
 		return (0);
 	}
 
-	switch (t->af) {
-	case AF_INET:
+	switch (((struct ip *)hdr)->ip_v) {
+	case 4:
 		if (flags & REDF_ECN4) {
-			struct ip *ip = t->hdr;
+			struct ip *ip = hdr;
 			u_int8_t otos;
 			int sum;
-
-			if (ip->ip_v != 4)
-				return (0);	/* version mismatch! */
 
 			if ((ip->ip_tos & IPTOS_ECN_MASK) == IPTOS_ECN_NOTECT)
 				return (0);	/* not-ECT */
@@ -472,9 +462,9 @@ mark_ecn(struct mbuf *m, struct altq_pktattr *pktattr, int flags)
 		}
 		break;
 #ifdef INET6
-	case AF_INET6:
+	case 6:
 		if (flags & REDF_ECN6) {
-			struct ip6_hdr *ip6 = t->hdr;
+			struct ip6_hdr *ip6 = hdr;
 			u_int32_t flowlabel;
 
 			flowlabel = ntohl(ip6->ip6_flow);
@@ -541,10 +531,7 @@ wtab_alloc(int weight)
 			return (w);
 		}
 
-	MALLOC(w, struct wtab *, sizeof(struct wtab), M_DEVBUF, M_WAITOK);
-	if (w == NULL)
-		panic("wtab_alloc: malloc failed!");
-	bzero(w, sizeof(struct wtab));
+	w = malloc(sizeof(struct wtab), M_DEVBUF, M_WAITOK|M_ZERO);
 	w->w_weight = weight;
 	w->w_refcount = 1;
 	w->w_next = wtab_list;
@@ -577,7 +564,7 @@ wtab_destroy(struct wtab *w)
 			break;
 		}
 
-	FREE(w, M_DEVBUF);
+	free(w, M_DEVBUF);
 	return (0);
 }
 

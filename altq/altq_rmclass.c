@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rmclass.c,v 1.11 2003/10/17 19:13:01 henning Exp $	*/
+/*	$OpenBSD: altq_rmclass.c,v 1.15 2008/05/08 15:22:02 chl Exp $	*/
 /*	$KAME: altq_rmclass.c,v 1.10 2001/02/09 07:20:40 kjc Exp $	*/
 
 /*
@@ -200,19 +200,9 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 	}
 #endif
 
-	MALLOC(cl, struct rm_class *, sizeof(struct rm_class),
-	       M_DEVBUF, M_WAITOK);
-	if (cl == NULL)
-		return (NULL);
-	bzero(cl, sizeof(struct rm_class));
+	cl = malloc(sizeof(struct rm_class), M_DEVBUF, M_WAITOK|M_ZERO);
 	CALLOUT_INIT(&cl->callout_);
-	MALLOC(cl->q_, class_queue_t *, sizeof(class_queue_t),
-	       M_DEVBUF, M_WAITOK);
-	if (cl->q_ == NULL) {
-		FREE(cl, M_DEVBUF);
-		return (NULL);
-	}
-	bzero(cl->q_, sizeof(class_queue_t));
+	cl->q_ = malloc(sizeof(class_queue_t), M_DEVBUF, M_WAITOK|M_ZERO);
 
 	/*
 	 * Class initialization.
@@ -274,15 +264,13 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 			    qlimit(cl->q_) * 10/100,
 			    qlimit(cl->q_) * 30/100,
 			    red_flags, red_pkttime);
-			if (cl->red_ != NULL)
-				qtype(cl->q_) = Q_RED;
+			qtype(cl->q_) = Q_RED;
 		}
 #ifdef ALTQ_RIO
 		else {
 			cl->red_ = (red_t *)rio_alloc(0, NULL,
 						      red_flags, red_pkttime);
-			if (cl->red_ != NULL)
-				qtype(cl->q_) = Q_RIO;
+			qtype(cl->q_) = Q_RIO;
 		}
 #endif
 	}
@@ -620,8 +608,8 @@ rmc_delete_class(struct rm_ifdat *ifd, struct rm_class *cl)
 			red_destroy(cl->red_);
 #endif
 	}
-	FREE(cl->q_, M_DEVBUF);
-	FREE(cl, M_DEVBUF);
+	free(cl->q_, M_DEVBUF);
+	free(cl, M_DEVBUF);
 }
 
 
@@ -1733,7 +1721,7 @@ _getq_random(class_queue_t *q)
 	} else {
 		struct mbuf *prev = NULL;
 
-		n = random() % qlen(q) + 1;
+		n = arc4random_uniform(qlen(q)) + 1;
 		for (i = 0; i < n; i++) {
 			prev = m;
 			m = m->m_nextpkt;

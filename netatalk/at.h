@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: at.h,v 1.2 1997/09/06 14:49:02 deraadt Exp $	*/
-=======
 /*	$OpenBSD: at.h,v 1.4 2010/09/23 09:27:49 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

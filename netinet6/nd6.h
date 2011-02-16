@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nd6.h,v 1.24 2003/06/27 22:47:32 itojun Exp $	*/
-=======
 /*	$OpenBSD: nd6.h,v 1.27 2010/04/06 14:12:10 stsp Exp $	*/
->>>>>>> origin/master
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*

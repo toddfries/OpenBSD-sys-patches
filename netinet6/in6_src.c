@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_src.c,v 1.21 2006/12/09 01:12:28 itojun Exp $	*/
-=======
 /*	$OpenBSD: in6_src.c,v 1.25 2010/05/07 13:33:17 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6_src.c,v 1.36 2001/02/06 04:08:17 itojun Exp $	*/
 
 /*

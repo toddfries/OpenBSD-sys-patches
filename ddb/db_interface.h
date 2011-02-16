@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_interface.h,v 1.8 2006/07/11 21:17:58 mickey Exp $	*/
-=======
 /*	$OpenBSD: db_interface.h,v 1.16 2010/11/05 15:17:50 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_interface.h,v 1.1 1996/02/05 01:57:03 christos Exp $	*/
 
 /*

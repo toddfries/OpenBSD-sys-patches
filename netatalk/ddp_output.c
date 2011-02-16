@@ -1,4 +1,4 @@
-/*	$OpenBSD: ddp_output.c,v 1.5 2002/03/15 18:19:52 millert Exp $	*/
+/*	$OpenBSD: ddp_output.c,v 1.6 2003/06/06 09:45:08 itojun Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.

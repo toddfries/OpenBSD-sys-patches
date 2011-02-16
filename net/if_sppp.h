@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_sppp.h,v 1.9 2005/03/23 00:26:06 canacar Exp $	*/
-=======
 /*	$OpenBSD: if_sppp.h,v 1.15 2009/02/16 20:03:36 canacar Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_sppp.h,v 1.2.2.1 1999/04/04 06:57:39 explorer Exp $	*/
 
 /*
@@ -63,6 +59,7 @@ struct slcp {
 };
 
 #define IDX_IPCP 1		/* idx into state table */
+#define IDX_IPV6CP 2
 
 struct sipcp {
 	u_long	opts;		/* IPCP options to send (bitfield) */
@@ -70,6 +67,13 @@ struct sipcp {
 #define IPCP_HISADDR_SEEN 1	/* have seen his address already */
 #define IPCP_MYADDR_DYN   2	/* my address is dynamically assigned */
 #define IPCP_MYADDR_SEEN  4	/* have seen his address already */
+#define IPCP_HISADDR_DYN  8	/* his address is dynamically assigned */
+#define IPV6CP_MYIFID_DYN	2
+#define IPV6CP_MYIFID_SEEN	4
+	u_int32_t saved_hisaddr; /* if hisaddr (IPv4) is dynamic, save
+				  * original one here, in network byte order */
+	u_int32_t req_hisaddr;	/* remote address requested */
+	u_int32_t req_myaddr;	/* local address requested */
 };
 
 #define AUTHMAXLEN	256	/* including terminating '\0' */
@@ -85,8 +89,8 @@ struct sauth {
 	u_char	*secret;	/* secret password */
 };
 
-#define IDX_PAP		2
-#define IDX_CHAP	3
+#define IDX_PAP		3
+#define IDX_CHAP	4
 
 #define IDX_COUNT (IDX_CHAP + 1) /* bump this when adding cp's! */
 
@@ -123,6 +127,7 @@ struct sppp {
 	struct timeout pap_my_to_ch;
 	struct slcp lcp;		/* LCP params */
 	struct sipcp ipcp;		/* IPCP params */
+	struct sipcp ipv6cp;		/* IPV6CP params */
 	struct sauth myauth;		/* auth params, i'm peer */
 	struct sauth hisauth;		/* auth params, i'm authenticator */
 	u_char chap_challenge[AUTHCHALEN]; /* random challenge used by CHAP */
@@ -165,7 +170,8 @@ struct sppp {
                                    around PPP frames (i.e. the serial
                                    HDLC like encapsulation, RFC1662) */
 
-#define PP_MTU          1500    /* default/minimal MRU */
+#define PP_MIN_MRU	IP_MSS	/* minimal MRU */
+#define PP_MTU		1500	/* default MTU */
 #define PP_MAX_MRU	2048	/* maximal MRU we want to negotiate */
 
 /*

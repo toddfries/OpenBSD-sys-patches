@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_output.h,v 1.14 2003/08/24 01:27:07 avsm Exp $ */
+/*	$OpenBSD: db_output.h,v 1.15 2006/07/06 18:14:48 miod Exp $ */
 /*	$NetBSD: db_output.h,v 1.9 1996/04/04 05:13:50 cgd Exp $	*/
 
 /* 

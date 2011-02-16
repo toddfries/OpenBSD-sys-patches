@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.45 2006/04/19 11:55:55 pedro Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_vfsops.c,v 1.59 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -96,8 +92,7 @@ struct pool ext2fs_dinode_pool;
 extern u_long ext2gennumber;
 
 int
-ext2fs_init(vfsp)
-	struct vfsconf *vfsp;
+ext2fs_init(struct vfsconf *vfsp)
 {
 	pool_init(&ext2fs_inode_pool, sizeof(struct inode), 0, 0, 0,
 	    "ext2inopl", &pool_allocator_nointr);
@@ -115,9 +110,9 @@ ext2fs_init(vfsp)
 #define ROOTNAME	"root_device"
 
 int
-ext2fs_mountroot()
+ext2fs_mountroot(void)
 {
-	register struct m_ext2fs *fs;
+	struct m_ext2fs *fs;
         struct mount *mp;
 	struct proc *p = curproc;	/* XXX */
 	struct ufsmount *ump;
@@ -165,17 +160,13 @@ ext2fs_mountroot()
  * mount system call
  */
 int
-ext2fs_mount(mp, path, data, ndp, p)
-	register struct mount *mp;
-	const char *path;
-	void *data;
-	struct nameidata *ndp;
-	struct proc *p;
+ext2fs_mount(struct mount *mp, const char *path, void *data,
+    struct nameidata *ndp, struct proc *p)
 {
 	struct vnode *devvp;
 	struct ufs_args args;
 	struct ufsmount *ump = NULL;
-	register struct m_ext2fs *fs;
+	struct m_ext2fs *fs;
 	size_t size;
 	int error, flags;
 	mode_t accessmode;
@@ -320,7 +311,8 @@ struct ext2fs_reload_args {
 };
 
 int
-ext2fs_reload_vnode(struct vnode *vp, void *args) {
+ext2fs_reload_vnode(struct vnode *vp, void *args)
+{
 	struct ext2fs_reload_args *era = args;
 	struct buf *bp;
 	struct inode *ip;
@@ -376,10 +368,7 @@ ext2fs_reload_vnode(struct vnode *vp, void *args) {
  *	6) re-read inode data for all active vnodes.
  */
 int
-ext2fs_reload(mountp, cred, p)
-	register struct mount *mountp;
-	struct ucred *cred;
-	struct proc *p;
+ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 {
 	struct vnode *devvp;
 	struct buf *bp;
@@ -405,7 +394,7 @@ ext2fs_reload(mountp, cred, p)
 		size = DEV_BSIZE;
 	else
 		size = dpart.disklab->d_secsize;
-	error = bread(devvp, (ufs1_daddr_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
+	error = bread(devvp, (int32_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -468,15 +457,12 @@ ext2fs_reload(mountp, cred, p)
  * Common code for mount and mountroot
  */
 int
-ext2fs_mountfs(devvp, mp, p)
-	register struct vnode *devvp;
-	struct mount *mp;
-	struct proc *p;
+ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 {
-	register struct ufsmount *ump;
+	struct ufsmount *ump;
 	struct buf *bp;
-	register struct ext2fs *fs;
-	register struct m_ext2fs *m_fs;
+	struct ext2fs *fs;
+	struct m_ext2fs *m_fs;
 	dev_t dev;
 	struct partinfo dpart;
 	int error, i, size, ronly;
@@ -494,10 +480,7 @@ ext2fs_mountfs(devvp, mp, p)
 		return (error);
 	if (vcount(devvp) > 1 && devvp != rootvp)
 		return (EBUSY);
-	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
-	error = vinvalbuf(devvp, V_SAVE, cred, p, 0, 0);
-	VOP_UNLOCK(devvp, 0, p);
-	if (error)
+	if ((error = vinvalbuf(devvp, V_SAVE, cred, p, 0, 0)) != 0)
 		return (error);
 
 	ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
@@ -522,10 +505,9 @@ ext2fs_mountfs(devvp, mp, p)
 	error = ext2fs_checksb(fs, ronly);
 	if (error)
 		goto out;
-	ump = malloc(sizeof *ump, M_UFSMNT, M_WAITOK);
-	memset((caddr_t)ump, 0, sizeof *ump);
-	ump->um_e2fs = malloc(sizeof(struct m_ext2fs), M_UFSMNT, M_WAITOK);
-	memset((caddr_t)ump->um_e2fs, 0, sizeof(struct m_ext2fs));
+	ump = malloc(sizeof *ump, M_UFSMNT, M_WAITOK | M_ZERO);
+	ump->um_e2fs = malloc(sizeof(struct m_ext2fs), M_UFSMNT,
+	    M_WAITOK | M_ZERO);
 	e2fs_sbload((struct ext2fs*)bp->b_data, &ump->um_e2fs->e2fs);
 	brelse(bp);
 	bp = NULL;
@@ -608,13 +590,10 @@ out:
  * unmount system call
  */
 int
-ext2fs_unmount(mp, mntflags, p)
-	struct mount *mp;
-	int mntflags;
-	struct proc *p;
+ext2fs_unmount(struct mount *mp, int mntflags, struct proc *p)
 {
-	register struct ufsmount *ump;
-	register struct m_ext2fs *fs;
+	struct ufsmount *ump;
+	struct m_ext2fs *fs;
 	int error, flags;
 
 	flags = 0;
@@ -649,12 +628,9 @@ ext2fs_unmount(mp, mntflags, p)
  * Flush out all the files in a filesystem.
  */
 int
-ext2fs_flushfiles(mp, flags, p)
-	register struct mount *mp;
-	int flags;
-	struct proc *p;
+ext2fs_flushfiles(struct mount *mp, int flags, struct proc *p)
 {
-	register struct ufsmount *ump;
+	struct ufsmount *ump;
 	int error;
 
 	ump = VFSTOUFS(mp);
@@ -676,13 +652,10 @@ ext2fs_flushfiles(mp, flags, p)
  * Get file system statistics.
  */
 int
-ext2fs_statfs(mp, sbp, p)
-	struct mount *mp;
-	register struct statfs *sbp;
-	struct proc *p;
+ext2fs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 {
-	register struct ufsmount *ump;
-	register struct m_ext2fs *fs;
+	struct ufsmount *ump;
+	struct m_ext2fs *fs;
 	u_int32_t overhead, overhead_per_group;
 	int i, ngroups;
 
@@ -764,11 +737,7 @@ ext2fs_sync_vnode(struct vnode *vp, void *args)
  * Should always be called with the mount point locked.
  */
 int
-ext2fs_sync(mp, waitfor, cred, p)
-	struct mount *mp;
-	int waitfor;
-	struct ucred *cred;
-	struct proc *p;
+ext2fs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct proc *p)
 {
 	struct ufsmount *ump = VFSTOUFS(mp);
 	struct m_ext2fs *fs;
@@ -821,13 +790,10 @@ ext2fs_sync(mp, waitfor, cred, p)
  * done by the calling routine.
  */
 int
-ext2fs_vget(mp, ino, vpp)
-	struct mount *mp;
-	ino_t ino;
-	struct vnode **vpp;
+ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 {
-	register struct m_ext2fs *fs;
-	register struct inode *ip;
+	struct m_ext2fs *fs;
+	struct inode *ip;
 	struct ext2fs_dinode *dp;
 	struct ufsmount *ump;
 	struct buf *bp;
@@ -960,15 +926,12 @@ ext2fs_vget(mp, ino, vpp)
  *   those rights via. exflagsp and credanonp
  */
 int
-ext2fs_fhtovp(mp, fhp, vpp)
-	register struct mount *mp;
-	struct fid *fhp;
-	struct vnode **vpp;
+ext2fs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 {
-	register struct inode *ip;
+	struct inode *ip;
 	struct vnode *nvp;
 	int error;
-	register struct ufid *ufhp;
+	struct ufid *ufhp;
 	struct m_ext2fs *fs;
 
 	ufhp = (struct ufid *)fhp;
@@ -997,12 +960,10 @@ ext2fs_fhtovp(mp, fhp, vpp)
  */
 /* ARGSUSED */
 int
-ext2fs_vptofh(vp, fhp)
-	struct vnode *vp;
-	struct fid *fhp;
+ext2fs_vptofh(struct vnode *vp, struct fid *fhp)
 {
-	register struct inode *ip;
-	register struct ufid *ufhp;
+	struct inode *ip;
+	struct ufid *ufhp;
 
 	ip = VTOI(vp);
 	ufhp = (struct ufid *)fhp;
@@ -1017,14 +978,8 @@ ext2fs_vptofh(vp, fhp)
  */
 
 int
-ext2fs_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+ext2fs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen, struct proc *p)
 {
 	return (EOPNOTSUPP);
 }
@@ -1033,12 +988,10 @@ ext2fs_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
  * Write a superblock and associated information back to disk.
  */
 int
-ext2fs_sbupdate(mp, waitfor)
-	struct ufsmount *mp;
-	int waitfor;
+ext2fs_sbupdate(struct ufsmount *mp, int waitfor)
 {
-	register struct m_ext2fs *fs = mp->um_e2fs;
-	register struct buf *bp;
+	struct m_ext2fs *fs = mp->um_e2fs;
+	struct buf *bp;
 	int error = 0;
 
 	bp = getblk(mp->um_devvp, SBLOCK, SBSIZE, 0, 0);
@@ -1051,12 +1004,10 @@ ext2fs_sbupdate(mp, waitfor)
 }
 
 int
-ext2fs_cgupdate(mp, waitfor)
-	struct ufsmount *mp;
-	int waitfor;
+ext2fs_cgupdate(struct ufsmount *mp, int waitfor)
 {
-	register struct m_ext2fs *fs = mp->um_e2fs;
-	register struct buf *bp;
+	struct m_ext2fs *fs = mp->um_e2fs;
+	struct buf *bp;
 	int i, error = 0, allerror = 0;
 
 	allerror = ext2fs_sbupdate(mp, waitfor);
@@ -1076,9 +1027,7 @@ ext2fs_cgupdate(mp, waitfor)
 }
 
 static int
-ext2fs_checksb(fs, ronly)
-	struct ext2fs *fs;
-	int ronly;
+ext2fs_checksb(struct ext2fs *fs, int ronly)
 {
 	if (fs2h16(fs->e2fs_magic) != E2FS_MAGIC) {
 		return (EIO);		/* XXX needs translation */

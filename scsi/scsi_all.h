@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsi_all.h,v 1.42 2007/04/03 04:55:34 dlg Exp $	*/
-=======
 /*	$OpenBSD: scsi_all.h,v 1.52 2010/12/24 02:45:33 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -86,12 +82,10 @@ struct scsi_inquiry {
 	u_int8_t flags;
 #define SI_EVPD		0x01
 	u_int8_t pagecode;
+#define SI_PG_SUPPORTED	0x00
 #define SI_PG_SERIAL	0x80
-<<<<<<< HEAD
-=======
 #define SI_PG_DEVID	0x83
 #define SI_PG_ATA	0x89
->>>>>>> origin/master
 	u_int8_t length[2];
 	u_int8_t control;
 };
@@ -266,16 +260,9 @@ struct scsi_inquiry_data {
 	u_int8_t reserved;
 };
 
-struct scsi_inquiry_vpd {
+struct scsi_vpd_hdr {
 	u_int8_t device;
 	u_int8_t page_code;
-<<<<<<< HEAD
-	u_int8_t reserved;
-	u_int8_t page_length;
-	char serial[32];
-};
-
-=======
 	u_int8_t page_length[2];
 };
 
@@ -322,7 +309,6 @@ struct scsi_vpd_devid_hdr {
 	u_int8_t len;
 };
 
->>>>>>> origin/master
 struct scsi_sense_data_unextended {
 /* 1*/	u_int8_t error_code;
 /* 4*/	u_int8_t block[3];
@@ -451,8 +437,10 @@ struct scsi_mode_header_big {
 union scsi_mode_sense_buf {
 	struct scsi_mode_header hdr;
 	struct scsi_mode_header_big hdr_big;
-	u_char buf[255];	/* 256 bytes breaks some devices. */
-} __packed;			/* Ensure sizeof() is 255! */
+	u_char buf[254];	/* 255 & 256 bytes breaks some devices. */
+				/* ahci doesn't like 255, various don't like */
+				/* 256 because length must fit in 8 bits. */
+} __packed;			/* Ensure sizeof() is 254! */
 
 struct scsi_report_luns_data {
 	u_int8_t length[4];	/* length of LUN inventory, in bytes */

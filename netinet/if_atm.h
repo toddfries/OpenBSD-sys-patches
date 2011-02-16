@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atm.h,v 1.5 2002/03/14 01:27:11 millert Exp $       */
+/*      $OpenBSD: if_atm.h,v 1.6 2002/06/09 16:26:10 itojun Exp $       */
 
 /*
  *

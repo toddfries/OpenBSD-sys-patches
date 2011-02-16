@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_gif.c,v 1.23 2007/02/10 15:34:22 claudio Exp $	*/
-=======
 /*	$OpenBSD: in6_gif.c,v 1.29 2010/05/11 09:36:07 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6_gif.c,v 1.43 2001/01/22 07:27:17 itojun Exp $	*/
 
 /*
@@ -156,29 +152,10 @@ in6_gif_output(struct ifnet *ifp, int family, struct mbuf **m0)
 
 	m = *m0;
 
-<<<<<<< HEAD
-	if (sc->gif_ro6.ro_rt == NULL) {
-		rtalloc((struct route *)&sc->gif_ro6);
-		if (sc->gif_ro6.ro_rt == NULL) {
-			m_freem(m);
-			return ENETUNREACH;
-		}
-	}
-	
-	/*
-	 * force fragmentation to minimum MTU, to avoid path MTU discovery.
-	 * it is too painful to ask for resend of inner packet, to achieve
-	 * path MTU discovery for encapsulated packets.
-	 */
-	error = ip6_output(m, 0, &sc->gif_ro6, IPV6_MINMTU, 0, NULL);
-
-	return error;
-=======
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 	return 0;
->>>>>>> origin/master
 }
 
 int in6_gif_input(struct mbuf **mp, int *offp, int proto)

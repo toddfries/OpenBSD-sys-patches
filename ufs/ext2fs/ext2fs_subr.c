@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_subr.c,v 1.13 2005/12/11 20:46:28 pedro Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_subr.c,v 1.23 2010/12/21 20:14:44 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_subr.c,v 1.1 1997/06/11 09:34:03 bouyer Exp $	*/
 
 /*
@@ -86,7 +82,7 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 	struct vnode *vp;
 	struct m_ext2fs *fs;
 	struct buf *bp;
-	ufs1_daddr_t lbn;
+	int32_t lbn;
 	int error;
 
 	vp = ITOV(ip);
@@ -107,27 +103,19 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 
 #if defined(_KERNEL) && defined(DIAGNOSTIC)
 void
-ext2fs_checkoverlap(bp, ip)
-	struct buf *bp;
-	struct inode *ip;
+ext2fs_checkoverlap(struct buf *bp, struct inode *ip)
 {
-<<<<<<< HEAD
-	struct buf *ebp, *ep;
-	ufs1_daddr_t start, last;
-=======
 	struct buf *ep;
->>>>>>> origin/master
 	struct vnode *vp;
 	daddr64_t start, last;
 
-	ebp = &buf[nbuf];
 	start = bp->b_blkno;
 	last = start + btodb(bp->b_bcount) - 1;
-	for (ep = buf; ep < ebp; ep++) {
+	LIST_FOREACH(ep, &bufhead, b_list) {
 		if (ep == bp || (ep->b_flags & B_INVAL) ||
 			ep->b_vp == NULLVP)
 			continue;
-		if (VOP_BMAP(ep->b_vp, (daddr_t)0, &vp, (daddr_t)0, NULL))
+		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, (daddr64_t)0, NULL))
 			continue;
 		if (vp != ip->i_devvp)
 			continue;

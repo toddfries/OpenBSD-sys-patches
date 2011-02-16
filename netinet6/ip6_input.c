@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip6_input.c,v 1.74 2006/12/28 20:08:15 deraadt Exp $	*/
-=======
 /*	$OpenBSD: ip6_input.c,v 1.98 2010/09/09 09:46:13 claudio Exp $	*/
->>>>>>> origin/master
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -109,6 +105,10 @@
 #include "gif.h"
 #include "bpfilter.h"
 
+#ifdef MROUTING
+#include <netinet6/ip6_mroute.h>
+#endif
+
 #if NPF > 0
 #include <net/pfvar.h>
 #endif
@@ -128,12 +128,8 @@ struct ifqueue ip6intrq;
 
 struct ip6stat ip6stat;
 
-<<<<<<< HEAD
-static void ip6_init2(void *);
-=======
 void ip6_init2(void *);
 int ip6_check_rh0hdr(struct mbuf *);
->>>>>>> origin/master
 
 int ip6_hopopts_input(u_int32_t *, u_int32_t *, struct mbuf **, int *);
 struct mbuf *ip6_pullexthdr(struct mbuf *, size_t, int);
@@ -185,11 +181,11 @@ ip6intr(void)
 	int s;
 	struct mbuf *m;
 
-	while (ip6intrq.ifq_head) {
+	for (;;) {
 		s = splnet();
 		IF_DEQUEUE(&ip6intrq, m);
 		splx(s);
-		if (m == 0)
+		if (m == NULL)
 			return;
 		ip6_input(m);
 	}
@@ -208,7 +204,6 @@ ip6_input(struct mbuf *m)
 	struct ifnet *deliverifp = NULL;
 #if NPF > 0
 	struct in6_addr odst;
-	struct pf_mtag *pft;
 #endif
 	int srcrt = 0, isanycast = 0;
 	u_int rtableid = 0;
@@ -256,7 +251,6 @@ ip6_input(struct mbuf *m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 	    ip6->ip6_nxt != IPPROTO_ICMPV6 &&
 	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
 	    ip6->ip6_dst.s6_addr32))
@@ -323,6 +317,15 @@ ip6_input(struct mbuf *m)
 		goto bad;
 	}
 #endif
+
+	if (ip6_check_rh0hdr(m)) {
+		ip6stat.ip6s_badoptions++;
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
+		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_OPTION, 0);
+		/* m is already freed */
+		return;
+	}
 
 #if NPF > 0 
         /*
@@ -393,6 +396,12 @@ ip6_input(struct mbuf *m)
 		goto hbhcheck;
 	}
 
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+		ours = 1;
+		deliverifp = m->m_pkthdr.rcvif;
+		goto hbhcheck;
+	}
+
 	/*
 	 * Multicast check
 	 */
@@ -408,10 +417,11 @@ ip6_input(struct mbuf *m)
 		if (in6m)
 			ours = 1;
 #ifdef MROUTING
-		else if (!ip6_mforwarding || !ip6_mrouter) {
+		else if (!ip6_mforwarding || !ip6_mrouter)
 #else
-		else {
+		else
 #endif
+		{
 			ip6stat.ip6s_notmember++;
 			if (!IN6_IS_ADDR_MC_LINKLOCAL(&ip6->ip6_dst))
 				ip6stat.ip6s_cantforward++;
@@ -423,12 +433,7 @@ ip6_input(struct mbuf *m)
 	}
 
 #if NPF > 0
-<<<<<<< HEAD
-	if ((pft = pf_find_mtag(m)) != NULL)
-		rtableid = pft->rtableid;
-=======
 	rtableid = m->m_pkthdr.rdomain;
->>>>>>> origin/master
 #endif
 
 	/*
@@ -545,7 +550,6 @@ ip6_input(struct mbuf *m)
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
-	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
 	    ip6->ip6_nxt == IPPROTO_ICMPV6 &&
 	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
 	    ip6->ip6_dst.s6_addr32))
@@ -725,8 +729,6 @@ ip6_input(struct mbuf *m)
 	m_freem(m);
 }
 
-<<<<<<< HEAD
-=======
 /* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test6() */
 int
 ip6_check_rh0hdr(struct mbuf *m)
@@ -792,7 +794,6 @@ ip6_check_rh0hdr(struct mbuf *m)
 	return (0);
 }
 
->>>>>>> origin/master
 /*
  * Hop-by-Hop options header processing. If a valid jumbo payload option is
  * included, the real payload length will be stored in plenp.
@@ -1450,6 +1451,11 @@ int
 ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, 
     void *newp, size_t newlen)
 {
+#ifdef MROUTING
+	extern int ip6_mrtproto;
+	extern struct mrt6stat mrt6stat;
+#endif
+
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return ENOTDIR;
@@ -1459,8 +1465,6 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
 	case IPV6CTL_V6ONLY:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
-<<<<<<< HEAD
-=======
 	case IPV6CTL_DAD_PENDING:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_dad_pending);
 	case IPV6CTL_STATS:
@@ -1483,7 +1487,6 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 #else
 		return (EOPNOTSUPP);
 #endif
->>>>>>> origin/master
 	default:
 		if (name[0] < IPV6CTL_MAXID)
 			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,

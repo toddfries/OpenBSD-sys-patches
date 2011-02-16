@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_media.h,v 1.22 2006/12/27 12:00:17 kettenis Exp $	*/
-=======
 /*	$OpenBSD: if_media.h,v 1.31 2010/02/09 13:18:04 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_media.h,v 1.22 2000/02/17 21:53:16 sommerfeld Exp $	*/
 
 /*-
@@ -142,7 +138,7 @@ struct	ifmedia_entry *ifmedia_match(struct ifmedia *, u_int, u_int);
 void	ifmedia_delete_instance(struct ifmedia *, u_int);
 
 /* Compute baudrate for a given media. */
-int	ifmedia_baudrate(int);
+u_int64_t	ifmedia_baudrate(int);
 #endif /*_KERNEL */
 
 /*
@@ -180,28 +176,13 @@ int	ifmedia_baudrate(int);
 #define	IFM_10G_LR	18		/* 10GBase-LR - single-mode fiber */
 #define	IFM_10G_SR	19		/* 10GBase-SR - multi-mode fiber */
 #define	IFM_10G_CX4	20		/* 10GBase-CX4 - copper */
-<<<<<<< HEAD
-=======
 #define	IFM_2500_SX	21		/* 2500baseSX - multi-mode fiber */
 #define	IFM_10G_T	22		/* 10GbaseT cat 6 */
 #define	IFM_10G_SFP_CU	23		/* 10G SFP+ direct attached cable */
->>>>>>> origin/master
 
 #define	IFM_ETH_MASTER	0x00000100	/* master mode (1000baseT) */
 #define	IFM_ETH_RXPAUSE	0x00000200	/* receive PAUSE frames */
 #define	IFM_ETH_TXPAUSE	0x00000400	/* transmit PAUSE frames */
-
-/*
- * Token ring
- */
-#define	IFM_TOKEN	0x00000040
-#define	IFM_TOK_STP4	3		/* Shielded twisted pair 4m - DB9 */
-#define	IFM_TOK_STP16	4		/* Shielded twisted pair 16m - DB9 */
-#define	IFM_TOK_UTP4	5		/* Unshielded twisted pair 4m - RJ45 */
-#define	IFM_TOK_UTP16	6		/* Unshielded twisted pair 16m - RJ45 */
-#define	IFM_TOK_ETR	0x00000200	/* Early token release */
-#define	IFM_TOK_SRCRT	0x00000400	/* Enable source routing features */
-#define	IFM_TOK_ALLR	0x00000800	/* All routes / Single route bcast */
 
 /*
  * FDDI
@@ -372,8 +353,6 @@ struct ifmedia_description {
 #define	IFM_TYPE_DESCRIPTIONS {						\
 	{ IFM_ETHER,			"Ethernet" },			\
 	{ IFM_ETHER,			"ether" },			\
-	{ IFM_TOKEN,			"TokenRing" },			\
-	{ IFM_TOKEN,			"token" },			\
 	{ IFM_FDDI,			"FDDI" },			\
 	{ IFM_IEEE80211,		"IEEE802.11" },			\
 	{ IFM_TDM,			"TDM" },			\
@@ -439,17 +418,6 @@ struct ifmedia_description {
 	{ IFM_ETHER|IFM_10G_CX4,	"10GbaseCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GCX4" },			\
 	{ IFM_ETHER|IFM_10G_CX4,	"10GBASE-CX4" },		\
-<<<<<<< HEAD
-									\
-	{ IFM_TOKEN|IFM_TOK_STP4,	"DB9/4Mbit" },			\
-	{ IFM_TOKEN|IFM_TOK_STP4,	"4STP" },			\
-	{ IFM_TOKEN|IFM_TOK_STP16,	"DB9/16Mbit" },			\
-	{ IFM_TOKEN|IFM_TOK_STP16,	"16STP" },			\
-	{ IFM_TOKEN|IFM_TOK_UTP4,	"UTP/4Mbit" },			\
-	{ IFM_TOKEN|IFM_TOK_UTP4,	"4UTP" },			\
-	{ IFM_TOKEN|IFM_TOK_UTP16,	"UTP/16Mbit" },			\
-	{ IFM_TOKEN|IFM_TOK_UTP16,	"16UTP" },			\
-=======
 	{ IFM_ETHER|IFM_2500_SX,	"2500baseSX" },			\
 	{ IFM_ETHER|IFM_2500_SX,	"2500SX" },			\
 	{ IFM_ETHER|IFM_10G_T,		"10GbaseT" },			\
@@ -457,7 +425,6 @@ struct ifmedia_description {
 	{ IFM_ETHER|IFM_10G_T,		"10GBASE-T" },			\
 	{ IFM_ETHER|IFM_10G_SFP_CU,	"10GSFP+Cu" },			\
 	{ IFM_ETHER|IFM_10G_SFP_CU,	"10GCu" },			\
->>>>>>> origin/master
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"Single-mode" },		\
 	{ IFM_FDDI|IFM_FDDI_SMF,	"SMF" },			\
@@ -526,13 +493,6 @@ struct ifmedia_description {
 	{ IFM_ETHER|IFM_ETH_RXPAUSE,	"rxpause" },			\
 	{ IFM_ETHER|IFM_ETH_TXPAUSE,	"txpause" },			\
 									\
-	{ IFM_TOKEN|IFM_TOK_ETR,	"EarlyTokenRelease" },		\
-	{ IFM_TOKEN|IFM_TOK_ETR,	"ETR" },			\
-	{ IFM_TOKEN|IFM_TOK_SRCRT,	"SourceRouting" },		\
-	{ IFM_TOKEN|IFM_TOK_SRCRT,	"SRCRT" },			\
-	{ IFM_TOKEN|IFM_TOK_ALLR,	"AllRoutes" },			\
-	{ IFM_TOKEN|IFM_TOK_ALLR,	"ALLR" },			\
-									\
 	{ IFM_FDDI|IFM_FDDI_DA,		"dual-attach" },		\
 	{ IFM_FDDI|IFM_FDDI_DA,		"das" },			\
 									\
@@ -557,7 +517,7 @@ struct ifmedia_description {
  */
 struct ifmedia_baudrate {
 	int	ifmb_word;		/* media word */
-	int	ifmb_baudrate;		/* corresponding baudrate */
+	u_int64_t	ifmb_baudrate;		/* corresponding baudrate */
 };
 
 #define	IFM_BAUDRATE_DESCRIPTIONS {					\
@@ -576,23 +536,12 @@ struct ifmedia_baudrate {
 	{ IFM_ETHER|IFM_1000_CX,	IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_1000_T,		IF_Mbps(1000) },		\
 	{ IFM_ETHER|IFM_HPNA_1,		IF_Mbps(1) },			\
-<<<<<<< HEAD
-	{ IFM_ETHER|IFM_10G_LR,		IF_Mbps(1000) },		\
-	{ IFM_ETHER|IFM_10G_SR,		IF_Mbps(1000) },		\
-	{ IFM_ETHER|IFM_10G_CX4,	IF_Mbps(1000) },		\
-									\
-	{ IFM_TOKEN|IFM_TOK_STP4,	IF_Mbps(4) },			\
-	{ IFM_TOKEN|IFM_TOK_STP16,	IF_Mbps(16) },			\
-	{ IFM_TOKEN|IFM_TOK_UTP4,	IF_Mbps(4) },			\
-	{ IFM_TOKEN|IFM_TOK_UTP16,	IF_Mbps(16) },			\
-=======
 	{ IFM_ETHER|IFM_10G_LR,		IF_Gbps(10) },			\
 	{ IFM_ETHER|IFM_10G_SR,		IF_Gbps(10) },			\
 	{ IFM_ETHER|IFM_10G_CX4,	IF_Gbps(10) },			\
 	{ IFM_ETHER|IFM_2500_SX,	IF_Mbps(2500) },		\
 	{ IFM_ETHER|IFM_10G_T,		IF_Gbps(10) },			\
 	{ IFM_ETHER|IFM_10G_SFP_CU,	IF_Gbps(10) },			\
->>>>>>> origin/master
 									\
 	{ IFM_FDDI|IFM_FDDI_SMF,	IF_Mbps(100) },			\
 	{ IFM_FDDI|IFM_FDDI_MMF,	IF_Mbps(100) },			\
@@ -648,8 +597,6 @@ struct ifmedia_status_description {
 	{ IFM_ETHER,		IFM_AVALID,	IFM_ACTIVE,		\
 	    { "no carrier", "active" } },				\
 	{ IFM_FDDI,		IFM_AVALID,	IFM_ACTIVE,		\
-	    { "no ring", "inserted" } },				\
-	{ IFM_TOKEN,		IFM_AVALID,	IFM_ACTIVE,		\
 	    { "no ring", "inserted" } },				\
 	{ IFM_IEEE80211,	IFM_AVALID,	IFM_ACTIVE,		\
 	    { "no network", "active" } },				\

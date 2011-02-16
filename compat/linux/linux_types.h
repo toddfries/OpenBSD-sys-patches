@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_types.h,v 1.7 2002/12/16 16:27:41 fgsch Exp $	*/
-=======
 /*	$OpenBSD: linux_types.h,v 1.9 2011/02/10 11:58:43 pirofti Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_types.h,v 1.5 1996/05/20 01:59:28 fvdl Exp $	*/
 
 /*

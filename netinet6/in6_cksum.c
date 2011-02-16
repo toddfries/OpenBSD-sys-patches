@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: in6_cksum.c,v 1.13 2003/11/16 20:30:07 avsm Exp $	*/
-=======
 /*	$OpenBSD: in6_cksum.c,v 1.15 2008/06/11 19:00:50 mcbride Exp $	*/
->>>>>>> origin/master
 /*	$KAME: in6_cksum.c,v 1.10 2000/12/03 00:53:59 itojun Exp $	*/
 
 /*

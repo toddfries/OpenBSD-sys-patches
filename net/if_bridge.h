@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_bridge.h,v 1.30 2006/12/03 13:41:19 reyk Exp $	*/
-=======
 /*	$OpenBSD: if_bridge.h,v 1.34 2010/11/20 14:23:09 fgsch Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ieee80211.h,v 1.10 2005/09/08 13:24:52 reyk Exp $	*/
-=======
 /*	$OpenBSD: ieee80211.h,v 1.49 2009/01/28 18:55:18 damien Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ieee80211.h,v 1.6 2004/04/30 23:51:53 dyoung Exp $	*/
 
 /*-
@@ -18,10 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -55,8 +47,6 @@ struct ieee80211_frame {
 	u_int8_t	i_addr2[IEEE80211_ADDR_LEN];
 	u_int8_t	i_addr3[IEEE80211_ADDR_LEN];
 	u_int8_t	i_seq[2];
-	/* possibly followed by addr4[IEEE80211_ADDR_LEN]; */
-	/* see below */
 } __packed;
 
 struct ieee80211_qosframe {
@@ -67,13 +57,8 @@ struct ieee80211_qosframe {
 	u_int8_t	i_addr3[IEEE80211_ADDR_LEN];
 	u_int8_t	i_seq[2];
 	u_int8_t	i_qos[2];
-	/* possibly followed by addr4[IEEE80211_ADDR_LEN]; */
-	/* see below */
 } __packed;
 
-<<<<<<< HEAD
-struct ieee80211_qoscntl {
-=======
 struct ieee80211_htframe {		/* 11n */
 	u_int8_t	i_fc[2];
 	u_int8_t	i_dur[2];
@@ -81,9 +66,9 @@ struct ieee80211_htframe {		/* 11n */
 	u_int8_t	i_addr2[IEEE80211_ADDR_LEN];
 	u_int8_t	i_addr3[IEEE80211_ADDR_LEN];
 	u_int8_t	i_seq[2];
->>>>>>> origin/master
 	u_int8_t	i_qos[2];
-};
+	u_int8_t	i_ht[4];
+} __packed;
 
 struct ieee80211_frame_addr4 {
 	u_int8_t	i_fc[2];
@@ -95,12 +80,7 @@ struct ieee80211_frame_addr4 {
 	u_int8_t	i_addr4[IEEE80211_ADDR_LEN];
 } __packed;
 
-
-<<<<<<< HEAD
 struct ieee80211_qosframe_addr4 {
-=======
-struct ieee80211_htframe_addr4 {	/* 11n */
->>>>>>> origin/master
 	u_int8_t	i_fc[2];
 	u_int8_t	i_dur[2];
 	u_int8_t	i_addr1[IEEE80211_ADDR_LEN];
@@ -111,63 +91,18 @@ struct ieee80211_htframe_addr4 {	/* 11n */
 	u_int8_t	i_qos[2];
 } __packed;
 
-<<<<<<< HEAD
-/*
- * Management Notification Frame
- */
-struct ieee80211_mnf {
-	u_int8_t	mnf_category;
-	u_int8_t	mnf_action;
-	u_int8_t	mnf_dialog;
-	u_int8_t	mnf_status;
-} __packed;
-#define	MNF_SETUP_REQ	0
-#define	MNF_SETUP_RESP	1
-#define	MNF_TEARDOWN	2
-
- /*
- * WME/802.11e information element.
- */
-struct ieee80211_ie_wme {
-	u_int8_t	wme_id;		/* IEEE80211_ELEMID_VENDOR */
-	u_int8_t	wme_len;	/* length in bytes */
-	u_int8_t	wme_oui[3];	/* 0x00, 0x50, 0xf2 */
-	u_int8_t	wme_type;	/* OUI type */
-	u_int8_t	wme_subtype;	/* OUI subtype */
-	u_int8_t	wme_version;	/* spec revision */
-	u_int8_t	wme_info;	/* AC info */
+struct ieee80211_htframe_addr4 {	/* 11n */
+	u_int8_t	i_fc[2];
+	u_int8_t	i_dur[2];
+	u_int8_t	i_addr1[IEEE80211_ADDR_LEN];
+	u_int8_t	i_addr2[IEEE80211_ADDR_LEN];
+	u_int8_t	i_addr3[IEEE80211_ADDR_LEN];
+	u_int8_t	i_seq[2];
+	u_int8_t	i_addr4[IEEE80211_ADDR_LEN];
+	u_int8_t	i_qos[2];
+	u_int8_t	i_ht[4];
 } __packed;
 
-/*
- * WME/802.11e Tspec Element
- */
-struct ieee80211_wme_tspec {
-	u_int8_t	ts_id;
-	u_int8_t	ts_len;
-	u_int8_t	ts_oui[3];
-	u_int8_t	ts_oui_type;
-	u_int8_t	ts_oui_subtype;
-	u_int8_t	ts_version;
-	u_int8_t	ts_tsinfo[3];
-	u_int8_t	ts_nom_msdu[2];
-	u_int8_t	ts_max_msdu[2];
-	u_int8_t	ts_min_svc[4];
-	u_int8_t	ts_max_svc[4];
-	u_int8_t	ts_inactv_intv[4];
-	u_int8_t	ts_susp_intv[4];
-	u_int8_t	ts_start_svc[4];
-	u_int8_t	ts_min_rate[4];
-	u_int8_t	ts_mean_rate[4];
-	u_int8_t	ts_max_burst[4];
-	u_int8_t	ts_min_phy[4];
-	u_int8_t	ts_peak_rate[4];
-	u_int8_t	ts_delay[4];
-	u_int8_t	ts_surplus[2];
-	u_int8_t	ts_medium_time[2];
-} __packed;
-
-=======
->>>>>>> origin/master
 #define	IEEE80211_FC0_VERSION_MASK		0x03
 #define	IEEE80211_FC0_VERSION_SHIFT		0
 #define	IEEE80211_FC0_VERSION_0			0x00
@@ -191,11 +126,8 @@ struct ieee80211_wme_tspec {
 #define	IEEE80211_FC0_SUBTYPE_DISASSOC		0xa0
 #define	IEEE80211_FC0_SUBTYPE_AUTH		0xb0
 #define	IEEE80211_FC0_SUBTYPE_DEAUTH		0xc0
-<<<<<<< HEAD
-=======
 #define IEEE80211_FC0_SUBTYPE_ACTION		0xd0
 #define IEEE80211_FC0_SUBTYPE_ACTION_NOACK	0xe0	/* 11n */
->>>>>>> origin/master
 /* for TYPE_CTL */
 #define IEEE80211_FC0_SUBTYPE_WRAPPER		0x70	/* 11n */
 #define IEEE80211_FC0_SUBTYPE_BAR		0x80
@@ -227,7 +159,8 @@ struct ieee80211_wme_tspec {
 #define	IEEE80211_FC1_RETRY			0x08
 #define	IEEE80211_FC1_PWR_MGT			0x10
 #define	IEEE80211_FC1_MORE_DATA			0x20
-#define	IEEE80211_FC1_WEP			0x40
+#define	IEEE80211_FC1_PROTECTED			0x40
+#define	IEEE80211_FC1_WEP			0x40	/* pre-RSNA compat */
 #define	IEEE80211_FC1_ORDER			0x80
 
 /*
@@ -304,27 +237,6 @@ struct ieee80211_frame_cfend {		/* NB: also CF-End+CF-Ack */
 	/* FCS */
 } __packed;
 
-<<<<<<< HEAD
-/*
- * BEACON management packets
- *
- *	octet timestamp[8]
- *	octet beacon interval[2]
- *	octet capability information[2]
- *	information element
- *		octet elemid
- *		octet length
- *		octet information[length]
- */
-
-typedef u_int8_t *ieee80211_mgt_beacon_t;
-
-#define	IEEE80211_BEACON_INTERVAL(beacon) \
-	((beacon)[8] | ((beacon)[9] << 8))
-#define	IEEE80211_BEACON_CAPABILITY(beacon) \
-	((beacon)[10] | ((beacon)[11] << 8))
-
-=======
 #ifdef _KERNEL
 static __inline int
 ieee80211_has_seq(const struct ieee80211_frame *wh)
@@ -374,7 +286,6 @@ ieee80211_get_qos(const struct ieee80211_frame *wh)
 /*
  * Capability Information field (see 7.3.1.4).
  */
->>>>>>> origin/master
 #define	IEEE80211_CAPINFO_ESS			0x0001
 #define	IEEE80211_CAPINFO_IBSS			0x0002
 #define	IEEE80211_CAPINFO_CF_POLLABLE		0x0004
@@ -383,93 +294,23 @@ ieee80211_get_qos(const struct ieee80211_frame *wh)
 #define	IEEE80211_CAPINFO_SHORT_PREAMBLE	0x0020
 #define	IEEE80211_CAPINFO_PBCC			0x0040
 #define	IEEE80211_CAPINFO_CHNL_AGILITY		0x0080
-/* bits 8-9 are reserved */
+#define IEEE80211_CAPINFO_SPECTRUM_MGMT		0x0100
+#define IEEE80211_CAPINFO_QOS			0x0200
 #define	IEEE80211_CAPINFO_SHORT_SLOTTIME	0x0400
-#define	IEEE80211_CAPINFO_RSN			0x0800
+#define	IEEE80211_CAPINFO_APSD			0x0800
 /* bit 12 is reserved */
 #define	IEEE80211_CAPINFO_DSSSOFDM		0x2000
-/* bits 14-15 are reserved */
+#define IEEE80211_CAPINFO_DELAYED_B_ACK		0x4000
+#define IEEE80211_CAPINFO_IMMEDIATE_B_ACK	0x8000
 #define IEEE80211_CAPINFO_BITS					\
-	"\20\01ESS\02IBSS\03POLLABLE\04POLLREQ\05PRIVACY"	\
-	"\06SHORT_PREAMBLE\07PBCC\10CHNL_AGILITY"		\
-	"\13SHORT_SLOTTIME\14RSN\16DSSSOFDM"
+	"\10\01ESS\02IBSS\03CF_POLLABLE\04CF_POLLREQ"		\
+	"\05PRIVACY\06SHORT_PREAMBLE\07PBCC\10CHNL_AGILITY"	\
+	"\11SPECTRUM_MGMT\12QOS\13SHORT_SLOTTIME\14APSD"	\
+	"\16DSSSOFDM\17DELAYED_B_ACK\20IMMEDIATE_B_ACK"
 
 /*
-<<<<<<< HEAD
- * 802.11i/WPA information element (maximally sized).
- */
-struct ieee80211_ie_wpa {
-	u_int8_t	wpa_id;		/* IEEE80211_ELEMID_VENDOR */
-	u_int8_t	wpa_len;	/* length in bytes */
-	u_int8_t	wpa_oui[3];	/* 0x00, 0x50, 0xf2 */
-	u_int8_t	wpa_type;	/* OUI type */
-	u_int16_t	wpa_version;	/* spec revision */
-	u_int32_t	wpa_mcipher[1];	/* multicast/group key cipher */
-	u_int16_t	wpa_uciphercnt;	/* # pairwise key ciphers */
-	u_int32_t	wpa_uciphers[8];/* ciphers */
-	u_int16_t	wpa_authselcnt;	/* authentication selector cnt*/
-	u_int32_t	wpa_authsels[8];/* selectors */
-	u_int16_t	wpa_caps;	/* 802.11i capabilities */
-	u_int16_t	wpa_pmkidcnt;	/* 802.11i pmkid count */
-	u_int16_t	wpa_pmkids[8];	/* 802.11i pmkids */
-} __packed;
-
-/*
- * Management information element payloads
- */
-union ieee80211_information {
-	char	ssid[IEEE80211_NWID_LEN+1];
-	struct rates {
-		u_int8_t	*p;
-	} rates;
-	struct fh {
-		u_int16_t	dwell;
-		u_int8_t	set;
-		u_int8_t	pattern;
-		u_int8_t	index;
-	} fh;
-	struct ds {
-		u_int8_t	channel;
-	} ds;
-	struct cf {
-		u_int8_t	count;
-		u_int8_t	period;
-		u_int8_t	maxdur[2];
-		u_int8_t	dur[2];
-	} cf;
-	struct tim {
-		u_int8_t	count;
-		u_int8_t	period;
-		u_int8_t	bitctl;
-		/* u_int8_t	pvt[251]; The driver needs to use this. */
-	} tim;
-	struct ibss {
-		u_int16_t	atim;
-	} ibss;
-	struct challenge {
-		u_int8_t	*p;
-		u_int8_t	len;
-	} challenge;
-	struct erp {
-		u_int8_t	flags;
-	} erp;
-	struct country {
-		u_int8_t	cc[3];		/* ISO CC+(I)ndoor/(O)utdoor */
-		struct {
-			u_int8_t schan;		/* starting channel */
-			u_int8_t nchan;		/* number channels */
-			u_int8_t maxtxpwr;
-		} band[4];			/* up to 4 sub bands */
-	} country;
-	struct ath {
-		u_int8_t	flags;
-	} ath;
-};
-
-=======
  * Information elements (see Table 7-26).
  */
->>>>>>> origin/master
 enum {
 	IEEE80211_ELEMID_SSID			= 0,
 	IEEE80211_ELEMID_RATES			= 1,
@@ -479,14 +320,13 @@ enum {
 	IEEE80211_ELEMID_TIM			= 5,
 	IEEE80211_ELEMID_IBSSPARMS		= 6,
 	IEEE80211_ELEMID_COUNTRY		= 7,
+	IEEE80211_ELEMID_QBSS_LOAD		= 11,
+	IEEE80211_ELEMID_EDCAPARMS		= 12,
 	IEEE80211_ELEMID_CHALLENGE		= 16,
 	/* 17-31 reserved for challenge text extension */
 	IEEE80211_ELEMID_ERP			= 42,
-<<<<<<< HEAD
-=======
 	IEEE80211_ELEMID_HTCAPS			= 45,	/* 11n */
 	IEEE80211_ELEMID_QOS_CAP		= 46,
->>>>>>> origin/master
 	IEEE80211_ELEMID_RSN			= 48,
 	IEEE80211_ELEMID_XRATES			= 50,
 	IEEE80211_ELEMID_TIE			= 56,	/* 11r */
@@ -553,8 +393,6 @@ enum {
 #define	IEEE80211_ERP_USE_PROTECTION		0x02
 #define	IEEE80211_ERP_BARKER_MODE		0x04
 
-<<<<<<< HEAD
-=======
 /*
  * RSN capabilities (see 7.3.2.25.3).
  */
@@ -682,7 +520,6 @@ enum ieee80211_edca_ac {
 /* number of TID values (traffic identifier) */
 #define IEEE80211_NUM_TID	16
 
->>>>>>> origin/master
 /* Atheros private advanced capabilities info */
 #define	ATHEROS_CAP_TURBO_PRIME			0x01
 #define	ATHEROS_CAP_COMPRESSION			0x02
@@ -690,63 +527,6 @@ enum ieee80211_edca_ac {
 /* bits 3-6 reserved */
 #define	ATHEROS_CAP_BOOST			0x80
 
-<<<<<<< HEAD
-#define	ATH_OUI			0x7f0300		/* Atheros OUI */
-#define	ATH_OUI_TYPE		0x01
-#define	ATH_OUI_VERSION		0x01
-
-#define	WPA_OUI			0xf25000
-#define	WPA_OUI_TYPE		0x01
-#define	WPA_OUI_VERSION		1		/* current supported version */
-
-#define	WPA_CSE_NULL		0x00
-#define	WPA_CSE_WEP40		0x01
-#define	WPA_CSE_TKIP		0x02
-#define	WPA_CSE_WRAP		0x03		/* WPA2/802.11i */
-#define	WPA_CSE_CCMP		0x04
-#define	WPA_CSE_WEP104		0x05
-
-#define	WPA_ASE_NONE		0x00
-#define	WPA_ASE_8021X_UNSPEC	0x01
-#define	WPA_ASE_8021X_PSK	0x02
-
-#define	RSN_OUI			0xac0f00
-#define	RSN_OUI_VERSION		1		/* current supported version */
-
-#define	RSN_CSE_NULL		0x00
-#define	RSN_CSE_WEP40		0x01
-#define	RSN_CSE_TKIP		0x02
-#define	RSN_CSE_WRAP		0x03
-#define	RSN_CSE_CCMP		0x04
-#define	RSN_CSE_WEP104		0x05
-
-#define	RSN_ASE_NONE		0x00
-#define	RSN_ASE_8021X_UNSPEC	0x01
-#define	RSN_ASE_8021X_PSK	0x02
-
-#define	WME_OUI			0xf25000
-#define	WME_OUI_TYPE		0x02
-#define	WME_OUI_VERSION		1
-
-/* WME stream classes */
-#define	WME_AC_BE	0		/* best effort */
-#define	WME_AC_BK	1		/* background */
-#define	WME_AC_VI	2		/* video */
-#define	WME_AC_VO	3		/* voice */
-
-/*
- * AUTH management packets
- *
- *	octet algo[2]
- *	octet seq[2]
- *	octet status[2]
- *	octet chal.id
- *	octet chal.length
- *	octet chal.text[253]
- */
-
-typedef u_int8_t *ieee80211_mgt_auth_t;
-=======
 /*-
  * Organizationally Unique Identifiers.
  * See http://standards.ieee.org/regauth/oui/oui.txt for a list.
@@ -755,7 +535,6 @@ typedef u_int8_t *ieee80211_mgt_auth_t;
 #define BROADCOM_OUI	((const u_int8_t[]){ 0x00, 0x90, 0x4c })
 #define IEEE80211_OUI	((const u_int8_t[]){ 0x00, 0x0f, 0xac })
 #define MICROSOFT_OUI	((const u_int8_t[]){ 0x00, 0x50, 0xf2 })
->>>>>>> origin/master
 
 #define	IEEE80211_AUTH_ALGORITHM(auth) \
 	((auth)[0] | ((auth)[1] << 8))
@@ -786,11 +565,8 @@ enum {
 };
 
 /*
- * Reason codes
- *
- * Unlisted codes are reserved
+ * Reason codes (see Table 22).
  */
-
 enum {
 	IEEE80211_REASON_UNSPECIFIED		= 1,
 	IEEE80211_REASON_AUTH_EXPIRE		= 2,
@@ -802,12 +578,12 @@ enum {
 	IEEE80211_REASON_ASSOC_LEAVE		= 8,
 	IEEE80211_REASON_ASSOC_NOT_AUTHED	= 9,
 
+	/* XXX the following two reason codes are not correct */
 	IEEE80211_REASON_RSN_REQUIRED		= 11,
 	IEEE80211_REASON_RSN_INCONSISTENT	= 12,
+
 	IEEE80211_REASON_IE_INVALID		= 13,
 	IEEE80211_REASON_MIC_FAILURE		= 14,
-<<<<<<< HEAD
-=======
 	IEEE80211_REASON_4WAY_TIMEOUT		= 15,
 	IEEE80211_REASON_GROUP_TIMEOUT		= 16,
 	IEEE80211_REASON_RSN_DIFFERENT_IE	= 17,
@@ -822,8 +598,11 @@ enum {
 	IEEE80211_REASON_SETUP_REQUIRED		= 38,
 	IEEE80211_REASON_TIMEOUT		= 39
 };
->>>>>>> origin/master
 
+/*
+ * Status codes (see Table 23).
+ */
+enum {
 	IEEE80211_STATUS_SUCCESS		= 0,
 	IEEE80211_STATUS_UNSPECIFIED		= 1,
 	IEEE80211_STATUS_CAPINFO		= 10,
@@ -841,9 +620,6 @@ enum {
 	IEEE80211_STATUS_TOO_MANY_STATIONS	= 22,
 	IEEE80211_STATUS_RATES			= 23,
 	IEEE80211_STATUS_SHORTSLOT_REQUIRED	= 25,
-<<<<<<< HEAD
-	IEEE80211_STATUS_DSSSOFDM_REQUIRED	= 26
-=======
 	IEEE80211_STATUS_DSSSOFDM_REQUIRED	= 26,
 
 	IEEE80211_STATUS_TRY_AGAIN_LATER	= 30,
@@ -859,7 +635,6 @@ enum {
 	IEEE80211_STATUS_RSN_IE_VER_UNSUP	= 44,
 
 	IEEE80211_STATUS_CIPHER_REJ_POLICY	= 46,
->>>>>>> origin/master
 };
 
 #define	IEEE80211_WEP_KEYLEN			5	/* 40bit */
@@ -922,22 +697,9 @@ enum {
 #define	IEEE80211_RTS_MIN			1
 #define	IEEE80211_RTS_MAX			IEEE80211_MAX_LEN
 
-<<<<<<< HEAD
-/*
- * 802.11 frame duration definitions.
- */
-
-struct ieee80211_duration {
-	uint16_t	d_rts_dur;
-	uint16_t	d_data_dur;
-	uint16_t	d_plcp_len;
-	uint8_t		d_residue;	/* unused octets in time slot */
-};
-=======
 #define IEEE80211_PLCP_SERVICE		0x00
 #define IEEE80211_PLCP_SERVICE_PBCC	0x08	/* PBCC encoded */
 #define IEEE80211_PLCP_SERVICE_LENEXT	0x80	/* length extension bit */
->>>>>>> origin/master
 
 /* One Time Unit (TU) is 1Kus = 1024 microseconds. */
 #define IEEE80211_DUR_TU		1024
@@ -966,18 +728,6 @@ struct ieee80211_duration {
 				 IEEE80211_DUR_DS_SLOW_PLCPHDR + \
 				 IEEE80211_DUR_DIFS)
 
-<<<<<<< HEAD
-enum {
-	IEEE80211_AUTH_NONE	= 0,
-	IEEE80211_AUTH_OPEN	= 1,		/* open */
-	IEEE80211_AUTH_SHARED	= 2,		/* shared-key */
-	IEEE80211_AUTH_8021X	= 3,		/* 802.1x */
-	IEEE80211_AUTH_AUTO	= 4,		/* auto-select/accept */
-	IEEE80211_AUTH_WPA	= 5,		/* WPA w/ 802.1x */
-	IEEE80211_AUTH_WPA_PSK	= 6,		/* WPA w/ preshared key */
-	IEEE80211_AUTH_WPA2	= 7,		/* WPA2 w/ 802.1x */
-	IEEE80211_AUTH_WPA2_PSK	= 8		/* WPA2 w/ preshared key */
-=======
 /*
  * The RSNA key descriptor used by IEEE 802.11 does not use the IEEE 802.1X
  * key descriptor.  Instead, it uses the key descriptor described in 8.5.2.
@@ -1056,7 +806,6 @@ enum {
 	IEEE80211_KDE_LIFETIME	= 7,
 	IEEE80211_KDE_ERROR	= 8,
 	IEEE80211_KDE_IGTK	= 9	/* 11w */
->>>>>>> origin/master
 };
 
 #endif /* _NET80211_IEEE80211_H_ */

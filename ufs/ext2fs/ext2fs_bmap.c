@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ext2fs_bmap.c,v 1.11 2005/07/03 20:14:01 drahn Exp $	*/
-=======
 /*	$OpenBSD: ext2fs_bmap.c,v 1.18 2008/06/12 06:58:40 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ext2fs_bmap.c,v 1.5 2000/03/30 12:41:11 augustss Exp $	*/
 
 /*
@@ -60,7 +56,7 @@
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 
-static int ext2fs_bmaparray(struct vnode *, ufs1_daddr_t, daddr64_t *,
+static int ext2fs_bmaparray(struct vnode *, int32_t, daddr64_t *,
     struct indir *, int *, int *);
 
 /*
@@ -69,16 +65,9 @@ static int ext2fs_bmaparray(struct vnode *, ufs1_daddr_t, daddr64_t *,
  * number to index into the array of block pointers described by the dinode.
  */
 int
-ext2fs_bmap(v)
-	void *v;
+ext2fs_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 	/*
 	 * Check for underlying vnode requests and ensure that logical
 	 * to physical mapping is requested.
@@ -107,13 +96,8 @@ ext2fs_bmap(v)
  */
 
 int
-ext2fs_bmaparray(vp, bn, bnp, ap, nump, runp)
-	struct vnode *vp;
-	ufs1_daddr_t bn;
-	daddr64_t *bnp;
-	struct indir *ap;
-	int *nump;
-	int *runp;
+ext2fs_bmaparray(struct vnode *vp, int32_t bn, daddr64_t *bnp,
+    struct indir *ap, int *nump, int *runp)
 {
 	struct inode *ip;
 	struct buf *bp;
@@ -121,7 +105,7 @@ ext2fs_bmaparray(vp, bn, bnp, ap, nump, runp)
 	struct mount *mp;
 	struct vnode *devvp;
 	struct indir a[NIADDR+1], *xap;
-	ufs1_daddr_t daddr;
+	int32_t daddr;
 	long metalbn;
 	int error, maxrun = 0, num;
 
@@ -213,12 +197,12 @@ ext2fs_bmaparray(vp, bn, bnp, ap, nump, runp)
 			}
 		}
 
-		daddr = fs2h32(((ufs1_daddr_t *)bp->b_data)[xap->in_off]);
+		daddr = fs2h32(((int32_t *)bp->b_data)[xap->in_off]);
 		if (num == 1 && daddr && runp)
 			for (bn = xap->in_off + 1;
 				bn < MNINDIR(ump) && *runp < maxrun &&
-				is_sequential(ump, ((ufs1_daddr_t *)bp->b_data)[bn - 1],
-				((ufs1_daddr_t *)bp->b_data)[bn]);
+				is_sequential(ump, ((int32_t *)bp->b_data)[bn - 1],
+				((int32_t *)bp->b_data)[bn]);
 				++bn, ++*runp);
 	}
 	if (bp)

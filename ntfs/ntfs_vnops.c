@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ntfs_vnops.c,v 1.9 2005/10/19 16:50:47 pedro Exp $	*/
-=======
 /*	$OpenBSD: ntfs_vnops.c,v 1.22 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ntfs_vnops.c,v 1.6 2003/04/10 21:57:26 jdolecek Exp $	*/
 
 /*
@@ -39,11 +35,6 @@
  *	Id: ntfs_vnops.c,v 1.5 1999/05/12 09:43:06 semenu Exp
  *
  */
-
-#include <sys/cdefs.h>
-#ifdef __KERNEL_RCSID
-__KERNEL_RCSID(0, "$NetBSD: ntfs_vnops.c,v 1.6 2003/04/10 21:57:26 jdolecek Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,19 +79,7 @@ int	ntfs_prtactive = 1;	/* 1 => print out reclaim of active vnodes */
  * This is a noop, simply returning what one has been given.
  */
 int
-<<<<<<< HEAD
-ntfs_bmap(ap)
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-		int *a_runb;
-	} */ *ap;
-=======
 ntfs_bmap(void *v)
->>>>>>> origin/master
 {
 	struct vop_bmap_args *ap = v;
 	dprintf(("ntfs_bmap: vn: %p, blk: %d\n", ap->a_vp,(u_int32_t)ap->a_bn));
@@ -114,17 +93,7 @@ ntfs_bmap(void *v)
 }
 
 static int
-<<<<<<< HEAD
-ntfs_read(ap)
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap;
-=======
 ntfs_read(void *v)
->>>>>>> origin/master
 {
 	struct vop_read_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -161,30 +130,7 @@ ntfs_read(void *v)
 }
 
 static int
-<<<<<<< HEAD
-ntfs_bypass(ap)
-	struct vop_generic_args /* {
-		struct vnodeop_desc *a_desc;
-		<other random data follows, presumably>
-	} */ *ap;
-{
-	int error = ENOTTY;
-	dprintf(("ntfs_bypass: %s\n", ap->a_desc->vdesc_name));
-	return (error);
-}
-
-
-static int
-ntfs_getattr(ap)
-	struct vop_getattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_getattr(void *v)
->>>>>>> origin/master
 {
 	struct vop_getattr_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -219,15 +165,7 @@ ntfs_getattr(void *v)
  * Last reference to an ntnode.  If necessary, write or delete it.
  */
 int
-<<<<<<< HEAD
-ntfs_inactive(ap)
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_inactive(void *v)
->>>>>>> origin/master
 {
 	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -255,15 +193,7 @@ ntfs_inactive(void *v)
  * Reclaim an fnode/ntnode so that it can be used for other purposes.
  */
 int
-<<<<<<< HEAD
-ntfs_reclaim(ap)
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_reclaim(void *v)
->>>>>>> origin/master
 {
 	struct vop_reclaim_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -294,14 +224,7 @@ ntfs_reclaim(void *v)
 }
 
 static int
-<<<<<<< HEAD
-ntfs_print(ap)
-	struct vop_print_args /* {
-		struct vnode *a_vp;
-	} */ *ap;
-=======
 ntfs_print(void *v)
->>>>>>> origin/master
 {
 	struct vop_print_args *ap = v;
 	struct ntnode *ip = VTONT(ap->a_vp);
@@ -317,14 +240,7 @@ ntfs_print(void *v)
  * then call the device strategy routine.
  */
 int
-<<<<<<< HEAD
-ntfs_strategy(ap)
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap;
-=======
 ntfs_strategy(void *v)
->>>>>>> origin/master
 {
 	struct vop_strategy_args *ap = v;
 	struct buf *bp = ap->a_bp;
@@ -397,17 +313,7 @@ ntfs_strategy(void *v)
 }
 
 static int
-<<<<<<< HEAD
-ntfs_write(ap)
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap;
-=======
 ntfs_write(void *v)
->>>>>>> origin/master
 {
 	struct vop_write_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -442,17 +348,7 @@ ntfs_write(void *v)
 }
 
 int
-<<<<<<< HEAD
-ntfs_access(ap)
-	struct vop_access_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_access(void *v)
->>>>>>> origin/master
 {
 	struct vop_access_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -526,17 +422,7 @@ ntfs_access(void *v)
  */
 /* ARGSUSED */
 static int
-<<<<<<< HEAD
-ntfs_open(ap)
-	struct vop_open_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_open(void *v)
->>>>>>> origin/master
 {
 #if NTFS_DEBUG
 	struct vop_open_args *ap = v;
@@ -560,17 +446,7 @@ ntfs_open(void *v)
  */
 /* ARGSUSED */
 static int
-<<<<<<< HEAD
-ntfs_close(ap)
-	struct vop_close_args /* {
-		struct vnode *a_vp;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_close(void *v)
->>>>>>> origin/master
 {
 #if NTFS_DEBUG
 	struct vop_close_args *ap = v;
@@ -584,19 +460,7 @@ ntfs_close(void *v)
 }
 
 int
-<<<<<<< HEAD
-ntfs_readdir(ap)
-	struct vop_readdir_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-		int *a_eofflag;
-		int *a_ncookies;
-		u_long **a_cookies;
-	} */ *ap;
-=======
 ntfs_readdir(void *v)
->>>>>>> origin/master
 {
 	struct vop_readdir_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -614,7 +478,7 @@ ntfs_readdir(void *v)
 
 	off = uio->uio_offset;
 
-	MALLOC(cde, struct dirent *, sizeof(struct dirent), M_TEMP, M_WAITOK);
+	cde = malloc(sizeof(struct dirent), M_TEMP, M_WAITOK);
 
 	/* Simulate . in every dir except ROOT */
 	if (ip->i_number != NTFS_ROOTINO
@@ -727,21 +591,12 @@ ntfs_readdir(void *v)
 	    *ap->a_eofflag = VTONT(ap->a_vp)->i_size <= uio->uio_offset;
 */
     out:
-	FREE(cde, M_TEMP);
+	free(cde, M_TEMP);
 	return (error);
 }
 
 int
-<<<<<<< HEAD
-ntfs_lookup(ap)
-	struct vop_lookup_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-	} */ *ap;
-=======
 ntfs_lookup(void *v)
->>>>>>> origin/master
 {
 	struct vop_lookup_args *ap = v;
 	struct vnode *dvp = ap->a_dvp;
@@ -847,19 +702,7 @@ ntfs_lookup(void *v)
  * could just do a sync if they try an fsync on a directory file.
  */
 static int
-<<<<<<< HEAD
-ntfs_fsync(ap)
-	struct vop_fsync_args /* {
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int a_waitfor;
-		off_t offlo;
-		off_t offhi;
-		struct proc *a_p;
-	} */ *ap;
-=======
 ntfs_fsync(void *v)
->>>>>>> origin/master
 {
 	return (0);
 }
@@ -870,11 +713,7 @@ ntfs_fsync(void *v)
 static int
 ntfs_pathconf(void *v)
 {
-	struct vop_pathconf_args /* {
-		struct vnode *a_vp;
-		int a_name;
-		register_t *a_retval;
-	} */ *ap = v;
+	struct vop_pathconf_args *ap = v;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsi_debug.h,v 1.7 1997/09/05 05:56:49 millert Exp $	*/
-=======
 /*	$OpenBSD: scsi_debug.h,v 1.9 2008/11/10 18:04:41 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsi_debug.h,v 1.7 1996/10/12 23:23:16 christos Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_carp.h,v 1.21 2006/06/02 19:53:12 mpf Exp $	*/
-=======
 /*	$OpenBSD: ip_carp.h,v 1.28 2010/04/25 17:38:53 mpf Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -113,7 +109,7 @@ struct carpstats {
 	u_int64_t	carps_onomem;		/* no memory for an mbuf */
 	u_int64_t	carps_ostates;		/* total state updates sent */
 
-	u_int64_t	carps_preempt;		/* if enabled, preemptions */
+	u_int64_t	carps_preempt;		/* transitions to master */
 };
 
 #define CARPDEVNAMSIZ	16
@@ -130,10 +126,20 @@ struct carpreq {
 	int		carpr_state;
 #define	CARP_STATES	"INIT", "BACKUP", "MASTER"
 #define	CARP_MAXSTATE	2
+#define	CARP_MAXNODES	32
 
 	char		carpr_carpdev[CARPDEVNAMSIZ];
-	int		carpr_vhid;
-	int		carpr_advskew;
+	u_int8_t	carpr_vhids[CARP_MAXNODES];
+	u_int8_t	carpr_advskews[CARP_MAXNODES];
+	u_int8_t	carpr_states[CARP_MAXNODES];
+#define	CARP_BAL_MODES	"none", "arp", "ip", "ip-stealth", "ip-unicast"
+#define CARP_BAL_NONE		0
+#define CARP_BAL_ARP		1
+#define CARP_BAL_IP		2
+#define CARP_BAL_IPSTEALTH	3
+#define CARP_BAL_IPUNICAST	4
+#define CARP_BAL_MAXID		4
+	u_int8_t	carpr_balancing;
 	int		carpr_advbase;
 	unsigned char	carpr_key[CARP_KEY_LEN];
 	struct in_addr	carpr_peer;
@@ -145,7 +151,7 @@ struct carpreq {
 #define	CARPCTL_ALLOW		1	/* accept incoming CARP packets */
 #define	CARPCTL_PREEMPT		2	/* high-pri backup preemption mode */
 #define	CARPCTL_LOG		3	/* log bad packets */
-#define	CARPCTL_ARPBALANCE	4	/* balance arp responses */
+#define	CARPCTL_STATS		4	/* CARP stats */
 #define	CARPCTL_MAXID		5
 
 #define	CARPCTL_NAMES { \
@@ -153,7 +159,7 @@ struct carpreq {
 	{ "allow", CTLTYPE_INT }, \
 	{ "preempt", CTLTYPE_INT }, \
 	{ "log", CTLTYPE_INT }, \
-	{ "arpbalance", CTLTYPE_INT }, \
+	{ "stats", CTLTYPE_STRUCT }, \
 }
 
 #ifdef _KERNEL
@@ -162,21 +168,16 @@ void		 carp_proto_input (struct mbuf *, ...);
 void		 carp_carpdev_state(void *);
 void		 carp_group_demote_adj(struct ifnet *, int, char *);
 int		 carp6_proto_input(struct mbuf **, int *, int);
-<<<<<<< HEAD
-int		 carp_iamatch(struct in_ifaddr *, u_char *,
-		     u_int32_t *, u_int32_t);
-int		 carp_iamatch6(struct ifnet *, struct ifaddr *);
-struct ifnet	*carp_ourether(void *, struct ether_header *, u_char, int);
-=======
 int		 carp_iamatch(struct in_ifaddr *, u_char *, u_int8_t **,
 		     u_int8_t **);
 int		 carp_iamatch6(struct ifnet *, u_char *, struct sockaddr_dl **);
 struct ifnet	*carp_ourether(void *, struct ether_header *, int);
->>>>>>> origin/master
 int		 carp_input(struct mbuf *, u_int8_t *, u_int8_t *, u_int16_t);
 int		 carp_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);
 int		 carp_sysctl(int *, u_int,  void *, size_t *, void *, size_t);
 int		 carp_lsdrop(struct mbuf *, sa_family_t, u_int32_t *, u_int32_t *);
+void		 carp_rewrite_lladdr(struct ifnet *, u_int8_t *);
+int		 carp_our_mcastaddr(struct ifnet *, u_int8_t *);
 #endif /* _KERNEL */
 #endif /* _NETINET_IP_CARP_H_ */

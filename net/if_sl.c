@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_sl.c,v 1.31 2006/03/11 22:44:47 brad Exp $	*/
-=======
 /*	$OpenBSD: if_sl.c,v 1.43 2011/01/06 11:52:41 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -210,10 +206,9 @@ sl_clone_create(ifc, unit)
 	struct sl_softc *sc;
 	int s;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!sc)
 		return (ENOMEM);
-	bzero(sc, sizeof(*sc));
 
 	sc->sc_unit = unit;	/* XXX */
 	snprintf(sc->sc_if.if_xname, sizeof sc->sc_if.if_xname, "%s%d",
@@ -563,8 +558,8 @@ slstart(tp)
 			 * to the packet transmission time).
 			 */
 			struct mbuf *m1 = m;
-			u_char *cp = bpfbuf + SLIP_HDRLEN;
 
+			cp = bpfbuf + SLIP_HDRLEN;
 			len = 0;
 			do {
 				int mlen = m1->m_len;
@@ -990,7 +985,7 @@ slioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 	splx(s);
 	return (error);

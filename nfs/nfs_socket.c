@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nfs_socket.c,v 1.45 2006/09/20 21:56:21 thib Exp $	*/
-=======
 /*	$OpenBSD: nfs_socket.c,v 1.98 2010/07/05 16:32:07 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -57,11 +53,8 @@
 #include <sys/syslog.h>
 #include <sys/tprintf.h>
 #include <sys/namei.h>
-<<<<<<< HEAD
-=======
 #include <sys/pool.h>
 #include <sys/queue.h>
->>>>>>> origin/master
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -269,7 +262,7 @@ nfs_connect(struct nfsmount *nmp, struct nfsreq *rep)
 		sin->sin_family = AF_INET;
 		sin->sin_addr.s_addr = INADDR_ANY;
 		sin->sin_port = htons(0);
-		error = sobind(so, m);
+		error = sobind(so, m, &proc0);
 		m_freem(m);
 		if (error)
 			goto bad;
@@ -423,13 +416,8 @@ nfs_disconnect(struct nfsmount *nmp)
 
 	if (nmp->nm_so) {
 		so = nmp->nm_so;
-<<<<<<< HEAD
-		nmp->nm_so = (struct socket *)0;
-		soshutdown(so, 2);
-=======
 		nmp->nm_so = NULL;
 		soshutdown(so, SHUT_RDWR);
->>>>>>> origin/master
 		soclose(so);
 	}
 }
@@ -480,8 +468,6 @@ nfs_send(struct socket *so, struct mbuf *nam, struct mbuf *top,
 	error = sosend(so, sendnam, NULL, top, NULL, flags);
 	if (error) {
 		if (rep) {
-			log(LOG_INFO, "nfs send error %d for server %s\n",error,
-			    rep->r_nmp->nm_mountp->mnt_stat.f_mntfromname);
 			/*
 			 * Deal with errors for the client side.
 			 */
@@ -489,8 +475,7 @@ nfs_send(struct socket *so, struct mbuf *nam, struct mbuf *top,
 				error = EINTR;
 			else
 				rep->r_flags |= R_MUSTRESEND;
-		} else
-			log(LOG_INFO, "nfsd send error %d\n", error);
+		}
 
 		/*
 		 * Handle any recoverable (soft) socket errors here. (???)
@@ -757,12 +742,8 @@ nfs_reply(struct nfsreq *myrep)
 		 */
 		error = nfs_rcvlock(myrep);
 		if (error)
-			return (error);
-		/* Already received, bye bye */
-		if (myrep->r_mrep != NULL) {
-			nfs_rcvunlock(&nmp->nm_flag);
-			return (0);
-		}
+			return (error == EALREADY ? 0 : error);
+
 		/*
 		 * Get the next Rpc reply off the socket
 		 */
@@ -863,18 +844,6 @@ nfs_request(struct vnode *vp, int procnum, struct nfsm_info *infop)
 	struct mbuf *m;
 	u_int32_t *tl;
 	struct nfsmount *nmp;
-<<<<<<< HEAD
-	struct mbuf *md, *mheadend;
-	char nickv[RPCX_NICKVERF];
-	time_t reqtime, waituntil;
-	caddr_t dpos, cp2;
-	int t1, s, error = 0, mrest_len, auth_len, auth_type;
-	int trylater_delay, failed_auth = 0;
-	int verf_len, verf_type;
-	u_int32_t xid;
-	char *auth_str, *verf_str;
-	NFSKERBKEY_T key;		/* save session key */
-=======
 	struct timeval tv;
 	caddr_t cp2;
 	int t1, i, s, error = 0;
@@ -882,7 +851,6 @@ nfs_request(struct vnode *vp, int procnum, struct nfsm_info *infop)
 	struct nfsreq *rep;
 	int  mrest_len;
 	struct nfsm_info	info;
->>>>>>> origin/master
 
 	rep = pool_get(&nfsreqpl, PR_WAITOK);
 	rep->r_nmp = VFSTONFS(vp->v_mount);
@@ -906,42 +874,9 @@ nfs_request(struct vnode *vp, int procnum, struct nfsm_info *infop)
 
 	nmp = rep->r_nmp;
 
-<<<<<<< HEAD
-	/*
-	 * Get the RPC header with authorization.
-	 */
-kerbauth:
-	verf_str = auth_str = (char *)0;
-	if (nmp->nm_flag & NFSMNT_KERB) {
-		verf_str = nickv;
-		verf_len = sizeof (nickv);
-		auth_type = RPCAUTH_KERB4;
-		bzero((caddr_t)key, sizeof (key));
-		if (failed_auth || nfs_getnickauth(nmp, cred, &auth_str,
-			&auth_len, verf_str, verf_len)) {
-			error = nfs_getauth(nmp, rep, cred, &auth_str,
-				&auth_len, verf_str, &verf_len, key);
-			if (error) {
-				pool_put(&nfsreqpl, rep);
-				m_freem(mrest);
-				return (error);
-			}
-		}
-	} else {
-		auth_type = RPCAUTH_UNIX;
-		auth_len = (((cred->cr_ngroups > nmp->nm_numgrps) ?
-			nmp->nm_numgrps : cred->cr_ngroups) << 2) +
-			5 * NFSX_UNSIGNED;
-	}
-	m = nfsm_rpchead(cred, nmp->nm_flag, procnum, auth_type, auth_len,
-	     auth_str, verf_len, verf_str, mrest, mrest_len, &mheadend, &xid);
-	if (auth_str)
-		free(auth_str, M_TEMP);
-=======
 	/* Get the RPC header with authorization. */
 	nfsm_rpchead(rep, infop->nmi_cred, RPCAUTH_UNIX);
 	m = rep->r_mreq;
->>>>>>> origin/master
 
 	/*
 	 * For stream protocols, insert a Sun RPC Record Mark.
@@ -951,8 +886,7 @@ kerbauth:
 		*mtod(m, u_int32_t *) = htonl(0x80000000 |
 			 (m->m_pkthdr.len - NFSX_UNSIGNED));
 	}
-	rep->r_mreq = m;
-	rep->r_xid = xid;
+
 tryagain:
 	rep->r_rtt = rep->r_rexmit = 0;
 	if (nfs_ptimers[rep->r_procnum] != NFS_DEFAULT_TIMER)
@@ -973,9 +907,6 @@ tryagain:
 	if (TAILQ_EMPTY(&nmp->nm_reqsq))
 		timeout_add(&nmp->nm_rtimeout, nfs_ticks);
 	TAILQ_INSERT_TAIL(&nmp->nm_reqsq, rep, r_chain);
-
-	/* Get send time for nqnfs */
-	reqtime = time_second;
 
 	/*
 	 * If backing off another request or avoiding congestion, don't
@@ -1048,27 +979,6 @@ tryagain:
 	if (*tl++ == rpc_msgdenied) {
 		if (*tl == rpc_mismatch)
 			error = EOPNOTSUPP;
-<<<<<<< HEAD
-		else if ((nmp->nm_flag & NFSMNT_KERB) && *tl++ == rpc_autherr) {
-			if (!failed_auth) {
-				failed_auth++;
-				mheadend->m_next = (struct mbuf *)0;
-				m_freem(mrep);
-				m_freem(rep->r_mreq);
-				goto kerbauth;
-			} else
-				error = EAUTH;
-		} else
-			error = EACCES;
-		m_freem(mrep);
-		m_freem(rep->r_mreq);
-		pool_put(&nfsreqpl, rep);
-		return (error);
-	}
-
-	/*
-	 * Grab any Kerberos verifier, otherwise just throw it away.
-=======
 		else
 			error = EACCES;	/* Should be EAUTH. */
 		infop->nmi_mrep = NULL;
@@ -1079,16 +989,12 @@ tryagain:
 	 * Since we only support RPCAUTH_UNIX atm we step over the
 	 * reply verifer type, and in the (error) case that there really
 	 * is any data in it, we advance over it.
->>>>>>> origin/master
 	 */
-	verf_type = fxdr_unsigned(int, *tl++);
+	tl++;			/* Step over verifer type */
 	i = fxdr_unsigned(int32_t, *tl);
-	if ((nmp->nm_flag & NFSMNT_KERB) && verf_type == RPCAUTH_KERB4) {
-		error = nfs_savenickauth(nmp, cred, i, key, &md, &dpos, mrep);
-		if (error)
-			goto nfsmout;
-	} else if (i > 0)
-		nfsm_adv(nfsm_rndup(i));
+	if (i > 0)
+		nfsm_adv(nfsm_rndup(i));	/* Should not happen */
+
 	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 	/* 0 == ok */
 	if (*tl == 0) {
@@ -1114,21 +1020,7 @@ tryagain:
 			 * lookup cache, just in case.
 			 */
 			if (error == ESTALE)
-<<<<<<< HEAD
-				cache_purge(vp);
-			if (nmp->nm_flag & NFSMNT_NFSV3) {
-				*mrp = mrep;
-				*mdp = md;
-				*dposp = dpos;
-				error |= NFSERR_RETERR;
-			} else
-				m_freem(mrep);
-			m_freem(rep->r_mreq);
-			pool_put(&nfsreqpl, rep);
-			return (error);
-=======
 				cache_purge(rep->r_vp);
->>>>>>> origin/master
 		}
 		goto nfsmout;
 	}
@@ -1151,29 +1043,12 @@ nfsmout1:
  * siz arg. is used to decide if adding a cluster is worthwhile
  */
 int
-<<<<<<< HEAD
-nfs_rephead(siz, nd, slp, err, frev, mrq, mbp, bposp)
-	int siz;
-	struct nfsrv_descript *nd;
-	struct nfssvc_sock *slp;
-	int err;
-	u_quad_t *frev;
-	struct mbuf **mrq;
-	struct mbuf **mbp;
-	caddr_t *bposp;
-{
-	u_int32_t *tl;
-	struct mbuf *mreq;
-	caddr_t bpos;
-	struct mbuf *mb, *mb2;
-=======
 nfs_rephead(int siz, struct nfsrv_descript *nd, struct nfssvc_sock *slp,
     int err, struct mbuf **mrq, struct mbuf **mbp)
 {
 	u_int32_t *tl;
 	struct mbuf *mreq;
 	struct mbuf *mb;
->>>>>>> origin/master
 
 	MGETHDR(mreq, M_WAIT, MT_DATA);
 	mb = mreq;
@@ -1204,63 +1079,19 @@ nfs_rephead(int siz, struct nfsrv_descript *nd, struct nfssvc_sock *slp,
 	} else {
 		*tl++ = rpc_msgaccepted;
 
-<<<<<<< HEAD
-		/*
-		 * For Kerberos authentication, we must send the nickname
-		 * verifier back, otherwise just RPCAUTH_NULL.
-		 */
-		if (nd->nd_flag & ND_KERBFULL) {
-		    struct nfsuid *nuidp;
-		    struct timeval ktvin, ktvout;
-
-		    LIST_FOREACH(nuidp, NUIDHASH(slp, nd->nd_cr.cr_uid),
-		     nu_hash) {
-			if (nuidp->nu_cr.cr_uid == nd->nd_cr.cr_uid &&
-			    (!nd->nd_nam2 || netaddr_match(NU_NETFAM(nuidp),
-			     &nuidp->nu_haddr, nd->nd_nam2)))
-			    break;
-		    }
-		    if (nuidp) {
-			ktvin.tv_sec =
-			    txdr_unsigned(nuidp->nu_timestamp.tv_sec - 1);
-			ktvin.tv_usec =
-			    txdr_unsigned(nuidp->nu_timestamp.tv_usec);
-
-			*tl++ = rpc_auth_kerb;
-			*tl++ = txdr_unsigned(3 * NFSX_UNSIGNED);
-			*tl = ktvout.tv_sec;
-			nfsm_build(tl, u_int32_t *, 3 * NFSX_UNSIGNED);
-			*tl++ = ktvout.tv_usec;
-			*tl++ = txdr_unsigned(nuidp->nu_cr.cr_uid);
-		    } else {
-			*tl++ = 0;
-			*tl++ = 0;
-		    }
-		} else {
-			*tl++ = 0;
-			*tl++ = 0;
-		}
-=======
 		/* AUTH_UNIX requires RPCAUTH_NULL. */
 		*tl++ = 0;
 		*tl++ = 0;
 
->>>>>>> origin/master
 		switch (err) {
 		case EPROGUNAVAIL:
 			*tl = txdr_unsigned(RPC_PROGUNAVAIL);
 			break;
 		case EPROGMISMATCH:
 			*tl = txdr_unsigned(RPC_PROGMISMATCH);
-<<<<<<< HEAD
-			nfsm_build(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
-			*tl++ = txdr_unsigned(2);
-			*tl = txdr_unsigned(3);
-=======
 			tl = nfsm_build(&mb, 2 * NFSX_UNSIGNED);
 			*tl++ = txdr_unsigned(NFS_VER2);
 			*tl = txdr_unsigned(NFS_VER3);
->>>>>>> origin/master
 			break;
 		case EPROCUNAVAIL:
 			*tl = txdr_unsigned(RPC_PROCUNAVAIL);
@@ -1271,11 +1102,7 @@ nfs_rephead(int siz, struct nfsrv_descript *nd, struct nfssvc_sock *slp,
 		default:
 			*tl = 0;
 			if (err != NFSERR_RETVOID) {
-<<<<<<< HEAD
-				nfsm_build(tl, u_int32_t *, NFSX_UNSIGNED);
-=======
 				tl = nfsm_build(&mb, NFSX_UNSIGNED);
->>>>>>> origin/master
 				if (err)
 				    *tl = txdr_unsigned(nfsrv_errmap(nd, err));
 				else
@@ -1307,13 +1134,7 @@ nfs_timer(void *arg)
 	int timeo, s, error;
 
 	s = splsoftnet();
-<<<<<<< HEAD
-	for (rep = TAILQ_FIRST(&nfs_reqq); rep != NULL;
-	    rep = TAILQ_NEXT(rep, r_chain)) {
-		nmp = rep->r_nmp;
-=======
 	TAILQ_FOREACH(rep, &nmp->nm_reqsq, r_chain) {
->>>>>>> origin/master
 		if (rep->r_mrep || (rep->r_flags & R_SOFTTERM))
 			continue;
 		if (nfs_sigintr(nmp, rep, rep->r_procp)) {
@@ -1366,17 +1187,10 @@ nfs_timer(void *arg)
 		   (m = m_copym(rep->r_mreq, 0, M_COPYALL, M_DONTWAIT))){
 			if ((nmp->nm_flag & NFSMNT_NOCONN) == 0)
 			    error = (*so->so_proto->pr_usrreq)(so, PRU_SEND, m,
-<<<<<<< HEAD
-			    (struct mbuf *)0, (struct mbuf *)0);
-			else
-			    error = (*so->so_proto->pr_usrreq)(so, PRU_SEND, m,
-			    nmp->nm_nam, (struct mbuf *)0);
-=======
 			    NULL, NULL, curproc);
 			else
 			    error = (*so->so_proto->pr_usrreq)(so, PRU_SEND, m,
 			    nmp->nm_nam, NULL, curproc);
->>>>>>> origin/master
 			if (error) {
 				if (NFSIGNORE_SOERROR(nmp->nm_soflags, error))
 					so->so_error = 0;
@@ -1402,24 +1216,6 @@ nfs_timer(void *arg)
 			}
 		}
 	}
-<<<<<<< HEAD
-
-#ifdef NFSSERVER
-	/*
-	 * Scan the write gathering queues for writes that need to be
-	 * completed now.
-	 */
-	getmicrotime(&tv);
-	cur_usec = (u_quad_t)tv.tv_sec * 1000000 + (u_quad_t)tv.tv_usec;
-	for (slp = TAILQ_FIRST(&nfssvc_sockhead); slp != NULL;
-	    slp = TAILQ_NEXT(slp, ns_chain)) {
-	    if (LIST_FIRST(&slp->ns_tq) &&
-	        LIST_FIRST(&slp->ns_tq)->nd_time <= cur_usec)
-		nfsrv_wakenfsd(slp);
-	}
-#endif /* NFSSERVER */
-=======
->>>>>>> origin/master
 	splx(s);
 	timeout_add(&nmp->nm_rtimeout, nfs_ticks);
 }
@@ -1462,7 +1258,7 @@ nfs_sndlock(int *flagp, struct nfsreq *rep)
 	} else
 		p = NULL;
 	while (*flagp & NFSMNT_SNDLOCK) {
-		if (nfs_sigintr(rep->r_nmp, rep, p))
+		if (rep && nfs_sigintr(rep->r_nmp, rep, p))
 			return (EINTR);
 		*flagp |= NFSMNT_WANTSND;
 		(void) tsleep((caddr_t)flagp, slpflag | (PZERO - 1), "nfsndlck",
@@ -1509,6 +1305,13 @@ nfs_rcvlock(struct nfsreq *rep)
 		*flagp |= NFSMNT_WANTRCV;
 		(void) tsleep((caddr_t)flagp, slpflag | (PZERO - 1), "nfsrcvlk",
 			slptimeo);
+		if (rep->r_mrep != NULL) {
+			/*
+			 * Don't take the lock if our reply has been received
+			 * while we where sleeping.
+			 */
+			 return (EALREADY);
+		}
 		if (slpflag == PCATCH) {
 			slpflag = 0;
 			slptimeo = 2 * hz;
@@ -2009,12 +1812,7 @@ nfsrv_dorec(struct nfssvc_sock *slp, struct nfsd *nfsd,
 		nam->m_next = NULL;
 	} else
 		nam = NULL;
-<<<<<<< HEAD
-	MALLOC(nd, struct nfsrv_descript *, sizeof (struct nfsrv_descript),
-		M_NFSRVDESC, M_WAITOK);
-=======
 	nd = pool_get(&nfsrv_descript_pl, PR_WAITOK);
->>>>>>> origin/master
 	nfs_realign(&m, 10 * NFSX_UNSIGNED);
 	nd->nd_md = nd->nd_mrep = m;
 	nd->nd_nam2 = nam;
@@ -2022,11 +1820,7 @@ nfsrv_dorec(struct nfssvc_sock *slp, struct nfsd *nfsd,
 	error = nfs_getreq(nd, nfsd, 1);
 	if (error) {
 		m_freem(nam);
-<<<<<<< HEAD
-		free((caddr_t)nd, M_NFSRVDESC);
-=======
 		pool_put(&nfsrv_descript_pl, nd);
->>>>>>> origin/master
 		return (error);
 	}
 	*ndp = nd;

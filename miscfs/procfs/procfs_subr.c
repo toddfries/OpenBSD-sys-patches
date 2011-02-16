@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: procfs_subr.c,v 1.24 2005/12/11 21:30:31 miod Exp $	*/
-=======
 /*	$OpenBSD: procfs_subr.c,v 1.34 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: procfs_subr.c,v 1.15 1996/02/12 15:01:42 christos Exp $	*/
 
 /*
@@ -58,9 +54,7 @@ struct rwlock pfs_vlock = RWLOCK_INITIALIZER("procfsl");
 
 /*ARGSUSED*/
 int
-procfs_init(vfsp)
-	struct vfsconf *vfsp;
-
+procfs_init(struct vfsconf *vfsp)
 {
 	TAILQ_INIT(&pfshead);
 	return (0);
@@ -93,11 +87,7 @@ procfs_init(vfsp)
  * the vnode free list.
  */
 int
-procfs_allocvp(mp, vpp, pid, pfs_type)
-	struct mount *mp;
-	struct vnode **vpp;
-	long pid;
-	pfstype pfs_type;
+procfs_allocvp(struct mount *mp, struct vnode **vpp, pid_t pid, pfstype pfs_type)
 {
 	struct proc *p = curproc;
 	struct pfsnode *pfs;
@@ -125,10 +115,10 @@ loop:
 		goto out;
 	vp = *vpp;
 
-	MALLOC(pfs, void *, sizeof(struct pfsnode), M_TEMP, M_WAITOK);
+	pfs = malloc(sizeof(*pfs), M_TEMP, M_WAITOK);
 	vp->v_data = pfs;
 
-	pfs->pfs_pid = (pid_t) pid;
+	pfs->pfs_pid = pid;
 	pfs->pfs_type = pfs_type;
 	pfs->pfs_vnode = vp;
 	pfs->pfs_flags = 0;
@@ -189,20 +179,18 @@ out:
 }
 
 int
-procfs_freevp(vp)
-	struct vnode *vp;
+procfs_freevp(struct vnode *vp)
 {
 	struct pfsnode *pfs = VTOPFS(vp);
 
 	TAILQ_REMOVE(&pfshead, pfs, list);
-	FREE(vp->v_data, M_TEMP);
+	free(vp->v_data, M_TEMP);
 	vp->v_data = 0;
 	return (0);
 }
 
 int
-procfs_rw(v)
-	void *v;
+procfs_rw(void *v)
 {
 	struct vop_read_args *ap = v;
 	struct vnode *vp = ap->a_vp;
@@ -261,10 +249,7 @@ procfs_rw(v)
  * EFAULT:    user i/o buffer is not addressable
  */
 int
-vfs_getuserstr(uio, buf, buflenp)
-	struct uio *uio;
-	char *buf;
-	int *buflenp;
+vfs_getuserstr(struct uio *uio, char *buf, int *buflenp)
 {
 	int xlen;
 	int error;
@@ -296,12 +281,8 @@ vfs_getuserstr(uio, buf, buflenp)
 }
 
 const vfs_namemap_t *
-vfs_findname(nm, buf, buflen)
-	const vfs_namemap_t *nm;
-	char *buf;
-	int buflen;
+vfs_findname(const vfs_namemap_t *nm, char *buf, int buflen)
 {
-
 	for (; nm->nm_name; nm++)
 		if (bcmp(buf, nm->nm_name, buflen + 1) == 0)
 			return (nm);

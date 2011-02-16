@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: linux_blkio.c,v 1.4 2002/02/13 19:08:06 art Exp $	*/
-=======
 /*	$OpenBSD: linux_blkio.c,v 1.8 2010/05/18 04:41:14 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: linux_blkio.c,v 1.3 2001/01/18 17:48:04 tv Exp $	*/
 
 /*
@@ -96,7 +92,8 @@ linux_ioctl_blkio(struct proc *p, struct linux_sys_ioctl_args *uap,
 			size = label.d_nsectors * label.d_ntracks *
 			    label.d_ncylinders;
 		} else
-			size = partp.part->p_size;
+			/* XXX ignores > 32bit blocks */
+			size = DL_GETPSIZE(partp.part);
 		error = copyout(&size, SCARG(uap, data), sizeof size);
 		break;
 	case LINUX_BLKSECTGET:

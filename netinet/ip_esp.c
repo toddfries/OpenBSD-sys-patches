@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_esp.c,v 1.99 2006/09/21 11:10:52 otto Exp $ */
-=======
 /*	$OpenBSD: ip_esp.c,v 1.116 2011/01/11 15:42:05 deraadt Exp $ */
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -255,8 +251,8 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 	if (tdbp->tdb_encalgxform) {
 		/* Save the raw keys */
 		tdbp->tdb_emxkeylen = ii->ii_enckeylen;
-		MALLOC(tdbp->tdb_emxkey, u_int8_t *, tdbp->tdb_emxkeylen,
-		    M_XDATA, M_WAITOK);
+		tdbp->tdb_emxkey = malloc(tdbp->tdb_emxkeylen, M_XDATA,
+		    M_WAITOK);
 		bcopy(ii->ii_enckey, tdbp->tdb_emxkey, tdbp->tdb_emxkeylen);
 
 		bzero(&crie, sizeof(crie));
@@ -276,7 +272,7 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 	if (tdbp->tdb_authalgxform) {
 		/* Save the raw keys */
 		tdbp->tdb_amxkeylen = ii->ii_authkeylen;
-		MALLOC(tdbp->tdb_amxkey, u_int8_t *, tdbp->tdb_amxkeylen, M_XDATA,
+		tdbp->tdb_amxkey = malloc(tdbp->tdb_amxkeylen, M_XDATA,
 		    M_WAITOK);
 		bcopy(ii->ii_authkey, tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 
@@ -301,24 +297,14 @@ esp_zeroize(struct tdb *tdbp)
 	int err;
 
 	if (tdbp->tdb_amxkey) {
-<<<<<<< HEAD
-		bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
-		FREE(tdbp->tdb_amxkey, M_XDATA);
-=======
 		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 		free(tdbp->tdb_amxkey, M_XDATA);
->>>>>>> origin/master
 		tdbp->tdb_amxkey = NULL;
 	}
 
 	if (tdbp->tdb_emxkey) {
-<<<<<<< HEAD
-		bzero(tdbp->tdb_emxkey, tdbp->tdb_emxkeylen);
-		FREE(tdbp->tdb_emxkey, M_XDATA);
-=======
 		explicit_bzero(tdbp->tdb_emxkey, tdbp->tdb_emxkeylen);
 		free(tdbp->tdb_emxkey, M_XDATA);
->>>>>>> origin/master
 		tdbp->tdb_emxkey = NULL;
 	}
 
@@ -451,11 +437,9 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 
 	/* Get IPsec-specific opaque pointer */
 	if (esph == NULL || mtag != NULL)
-		MALLOC(tc, struct tdb_crypto *, sizeof(struct tdb_crypto),
-		    M_XDATA, M_NOWAIT);
+		tc = malloc(sizeof(*tc), M_XDATA, M_NOWAIT | M_ZERO);
 	else
-		MALLOC(tc, struct tdb_crypto *,
-		    sizeof(struct tdb_crypto) + alen, M_XDATA, M_NOWAIT);
+		tc = malloc(sizeof(*tc) + alen, M_XDATA, M_NOWAIT | M_ZERO);
 	if (tc == NULL)	{
 		m_freem(m);
 		crypto_freereq(crp);
@@ -464,7 +448,6 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		return ENOBUFS;
 	}
 
-	bzero(tc, sizeof(struct tdb_crypto));
 	tc->tc_ptr = (caddr_t) mtag;
 
 	if (esph) {
@@ -566,7 +549,7 @@ esp_input_cb(void *op)
 	m = (struct mbuf *) crp->crp_buf;
 	if (m == NULL) {
 		/* Shouldn't happen... */
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		crypto_freereq(crp);
 		espstat.esps_crypto++;
 		DPRINTF(("esp_input_cb(): bogus returned buffer from crypto\n"));
@@ -577,7 +560,7 @@ esp_input_cb(void *op)
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		espstat.esps_notdb++;
 		DPRINTF(("esp_input_cb(): TDB is expired while in crypto"));
 		error = EPERM;
@@ -595,7 +578,7 @@ esp_input_cb(void *op)
 			splx(s);
 			return crypto_dispatch(crp);
 		}
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		espstat.esps_noxform++;
 		DPRINTF(("esp_input_cb(): crypto error %d\n", crp->crp_etype));
 		error = crp->crp_etype;
@@ -616,13 +599,8 @@ esp_input_cb(void *op)
 			ptr = (caddr_t) (tc + 1);
 
 			/* Verify authenticator */
-<<<<<<< HEAD
-			if (bcmp(ptr, aalg, esph->authsize)) {
-				FREE(tc, M_XDATA);
-=======
 			if (timingsafe_bcmp(ptr, aalg, esph->authsize)) {
 				free(tc, M_XDATA);
->>>>>>> origin/master
 				DPRINTF(("esp_input_cb(): authentication failed for packet in SA %s/%08x\n", ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
 				espstat.esps_badauth++;
 				error = EACCES;
@@ -633,7 +611,7 @@ esp_input_cb(void *op)
 		/* Remove trailing authenticator */
 		m_adj(m, -(esph->authsize));
 	}
-	FREE(tc, M_XDATA);
+	free(tc, M_XDATA);
 
 	/* Replay window checking, if appropriate */
 	if ((tdb->tdb_wnd > 0) && (!(tdb->tdb_flags & TDBF_NOREPLAY))) {
@@ -1022,8 +1000,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		crda = crp->crp_desc;
 
 	/* IPsec-specific opaque crypto info. */
-	MALLOC(tc, struct tdb_crypto *, sizeof(struct tdb_crypto),
-	    M_XDATA, M_NOWAIT);
+	tc = malloc(sizeof(*tc), M_XDATA, M_NOWAIT | M_ZERO);
 	if (tc == NULL) {
 		m_freem(m);
 		crypto_freereq(crp);
@@ -1032,7 +1009,6 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		return ENOBUFS;
 	}
 
-	bzero(tc, sizeof(struct tdb_crypto));
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
 	tc->tc_rdomain = tdb->tdb_rdomain;
@@ -1085,7 +1061,7 @@ esp_output_cb(void *op)
 	m = (struct mbuf *) crp->crp_buf;
 	if (m == NULL) {
 		/* Shouldn't happen... */
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		crypto_freereq(crp);
 		espstat.esps_crypto++;
 		DPRINTF(("esp_output_cb(): bogus returned buffer from "
@@ -1098,7 +1074,7 @@ esp_output_cb(void *op)
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		espstat.esps_notdb++;
 		DPRINTF(("esp_output_cb(): TDB is expired while in crypto\n"));
 		error = EPERM;
@@ -1114,14 +1090,14 @@ esp_output_cb(void *op)
 			splx(s);
 			return crypto_dispatch(crp);
 		}
-		FREE(tc, M_XDATA);
+		free(tc, M_XDATA);
 		espstat.esps_noxform++;
 		DPRINTF(("esp_output_cb(): crypto error %d\n",
 		    crp->crp_etype));
 		error = crp->crp_etype;
 		goto baddone;
 	}
-	FREE(tc, M_XDATA);
+	free(tc, M_XDATA);
 
 	/* Release crypto descriptors. */
 	crypto_freereq(crp);

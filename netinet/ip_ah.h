@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ip_ah.h,v 1.30 2003/02/12 14:41:07 jason Exp $	*/
-=======
 /*	$OpenBSD: ip_ah.h,v 1.33 2010/01/10 12:43:07 markus Exp $	*/
->>>>>>> origin/master
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -80,16 +76,19 @@ struct ah
  * Names for AH sysctl objects
  */
 #define	AHCTL_ENABLE	1		/* Enable AH processing */
-#define AHCTL_MAXID	2
+#define	AHCTL_STATS	2		/* AH stats */
+#define	AHCTL_MAXID	3
 
 #define AHCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "enable", CTLTYPE_INT }, \
+	{ "stats", CTLTYPE_STRUCT } \
 }
 
 #define AHCTL_VARS { \
 	NULL, \
 	&ah_enable, \
+	NULL \
 }
 
 #ifdef _KERNEL

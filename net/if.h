@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if.h,v 1.86 2007/02/09 09:16:59 jmc Exp $	*/
-=======
 /*	$OpenBSD: if.h,v 1.121 2010/11/17 18:51:57 henning Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -125,25 +121,26 @@ struct mclpool {
  */
 struct	if_data {
 	/* generic interface information */
-	u_char	ifi_type;		/* ethernet, tokenring, etc. */
-	u_char	ifi_addrlen;		/* media address length */
-	u_char	ifi_hdrlen;		/* media header length */
-	u_char	ifi_link_state;		/* current link state */
-	u_long	ifi_mtu;		/* maximum transmission unit */
-	u_long	ifi_metric;		/* routing metric (external only) */
-	u_long	ifi_baudrate;		/* linespeed */
+	u_char		ifi_type;		/* ethernet, tokenring, etc. */
+	u_char		ifi_addrlen;		/* media address length */
+	u_char		ifi_hdrlen;		/* media header length */
+	u_char		ifi_link_state;		/* current link state */
+	u_int32_t	ifi_mtu;		/* maximum transmission unit */
+	u_int32_t	ifi_metric;		/* routing metric (external only) */
+	u_int32_t	ifi_pad;
+	u_int64_t	ifi_baudrate;		/* linespeed */
 	/* volatile statistics */
-	u_long	ifi_ipackets;		/* packets received on interface */
-	u_long	ifi_ierrors;		/* input errors on interface */
-	u_long	ifi_opackets;		/* packets sent on interface */
-	u_long	ifi_oerrors;		/* output errors on interface */
-	u_long	ifi_collisions;		/* collisions on csma interfaces */
-	u_long	ifi_ibytes;		/* total number of octets received */
-	u_long	ifi_obytes;		/* total number of octets sent */
-	u_long	ifi_imcasts;		/* packets received via multicast */
-	u_long	ifi_omcasts;		/* packets sent via multicast */
-	u_long	ifi_iqdrops;		/* dropped on input, this interface */
-	u_long	ifi_noproto;		/* destined for unsupported protocol */
+	u_int64_t	ifi_ipackets;		/* packets received on interface */
+	u_int64_t	ifi_ierrors;		/* input errors on interface */
+	u_int64_t	ifi_opackets;		/* packets sent on interface */
+	u_int64_t	ifi_oerrors;		/* output errors on interface */
+	u_int64_t	ifi_collisions;		/* collisions on csma interfaces */
+	u_int64_t	ifi_ibytes;		/* total number of octets received */
+	u_int64_t	ifi_obytes;		/* total number of octets sent */
+	u_int64_t	ifi_imcasts;		/* packets received via multicast */
+	u_int64_t	ifi_omcasts;		/* packets sent via multicast */
+	u_int64_t	ifi_iqdrops;		/* dropped on input, this interface */
+	u_int64_t	ifi_noproto;		/* destined for unsupported protocol */
 	struct	timeval ifi_lastchange;	/* last operational state change */
 
 	struct mclpool	ifi_mclpool[MCLPOOLS];
@@ -151,6 +148,7 @@ struct	if_data {
 
 /*
  * Structure defining a queue for a network interface.
+ * XXX keep in sync with struct ifaltq.
  */
 struct	ifqueue {
 	struct	mbuf *ifq_head;
@@ -234,6 +232,7 @@ TAILQ_HEAD(ifnet_head, ifnet);		/* the actual queue head */
 struct ifnet {				/* and the entries */
 	void	*if_softc;		/* lower-level data for this if */
 	TAILQ_ENTRY(ifnet) if_list;	/* all struct ifnets are chained */
+	TAILQ_ENTRY(ifnet) if_txlist;	/* list of ifnets ready to tx */
 	TAILQ_HEAD(, ifaddr) if_addrlist; /* linked list of addresses per if */
 	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
 	struct hook_desc_head *if_addrhooks; /* address change callbacks */
@@ -254,16 +253,14 @@ struct ifnet {				/* and the entries */
 	u_short	if_index;		/* numeric abbreviation for this if */
 	short	if_timer;		/* time 'til if_watchdog called */
 	short	if_flags;		/* up/down, broadcast, etc. */
+	int	if_xflags;		/* extra softnet flags */
 	struct	if_data if_data;	/* stats and other data about if */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
 	int	if_capabilities;	/* interface capabilities */
 	u_int	if_rdomain;		/* routing instance */
 	char	if_description[IFDESCRSIZE]; /* interface description */
-<<<<<<< HEAD
-=======
 	u_short	if_rtlabelid;		/* next route label */
 	u_int8_t if_priority;
->>>>>>> origin/master
 
 	/* procedure handles */
 					/* output routine (enqueue) */
@@ -328,8 +325,6 @@ struct ifnet {				/* and the entries */
 	(IFF_BROADCAST|IFF_POINTOPOINT|IFF_RUNNING|IFF_OACTIVE|\
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
-<<<<<<< HEAD
-=======
 #define IFXF_TXREADY		0x1		/* interface is ready to tx */
 #define	IFXF_NOINET6		0x2		/* don't do inet6 */
 #define	IFXF_INET6_PRIVACY	0x4		/* autoconf privacy extension */
@@ -338,13 +333,12 @@ struct ifnet {				/* and the entries */
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
 
->>>>>>> origin/master
 /*
  * Some convenience macros used for setting ifi_baudrate.
  */
-#define	IF_Kbps(x)	((x) * 1000)		/* kilobits/sec. */
-#define	IF_Mbps(x)	(IF_Kbps((x) * 1000))	/* megabits/sec. */
-#define	IF_Gbps(x)	(IF_Mbps((x) * 1000))	/* gigabits/sec. */
+#define	IF_Kbps(x)	((x) * 1000ULL)			/* kilobits/sec. */
+#define	IF_Mbps(x)	(IF_Kbps((x) * 1000ULL))	/* megabits/sec. */
+#define	IF_Gbps(x)	(IF_Mbps((x) * 1000ULL))	/* gigabits/sec. */
 
 /* Capabilities that interfaces can advertise. */
 #define	IFCAP_CSUM_IPv4		0x00000001	/* can do IPv4 header csum */
@@ -367,43 +361,6 @@ struct ifnet {				/* and the entries */
  */
 #define	IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
-<<<<<<< HEAD
-#define	IF_ENQUEUE(ifq, m) { \
-	(m)->m_nextpkt = 0; \
-	if ((ifq)->ifq_tail == 0) \
-		(ifq)->ifq_head = m; \
-	else \
-		(ifq)->ifq_tail->m_nextpkt = m; \
-	(ifq)->ifq_tail = m; \
-	(ifq)->ifq_len++; \
-}
-#define	IF_PREPEND(ifq, m) { \
-	(m)->m_nextpkt = (ifq)->ifq_head; \
-	if ((ifq)->ifq_tail == 0) \
-		(ifq)->ifq_tail = (m); \
-	(ifq)->ifq_head = (m); \
-	(ifq)->ifq_len++; \
-}
-#define	IF_DEQUEUE(ifq, m) { \
-	(m) = (ifq)->ifq_head; \
-	if (m) { \
-		if (((ifq)->ifq_head = (m)->m_nextpkt) == 0) \
-			(ifq)->ifq_tail = 0; \
-		(m)->m_nextpkt = 0; \
-		(ifq)->ifq_len--; \
-	} \
-}
-
-#define	IF_INPUT_ENQUEUE(ifq, m) {			\
-	if (IF_QFULL(ifq)) {				\
-		IF_DROP(ifq);				\
-		m_freem(m);				\
-		if (!(ifq)->ifq_congestion)		\
-			if_congestion(ifq);		\
-	} else						\
-		IF_ENQUEUE(ifq, m);			\
-}
-=======
 #define	IF_ENQUEUE(ifq, m)						\
 do {									\
 	(m)->m_nextpkt = 0;						\
@@ -443,7 +400,6 @@ do {									\
 	} else								\
 		IF_ENQUEUE(ifq, m);					\
 } while (/* CONSTCOND */0)
->>>>>>> origin/master
 
 #define	IF_POLL(ifq, m)		((m) = (ifq)->ifq_head)
 #define	IF_PURGE(ifq)							\
@@ -460,7 +416,7 @@ do {									\
 } while (/* CONSTCOND */0)
 #define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
 
-#define	IFQ_MAXLEN	50
+#define	IFQ_MAXLEN	256
 #define	IFNET_SLOWHZ	1		/* granularity is 1 second */
 
 /* symbolic names for terminal (per-protocol) CTL_IFQ_ nodes */
@@ -516,11 +472,6 @@ struct if_msghdr {
 	u_short	ifm_msglen;	/* to skip over non-understood messages */
 	u_char	ifm_version;	/* future binary compatibility */
 	u_char	ifm_type;	/* message type */
-<<<<<<< HEAD
-	int	ifm_addrs;	/* like rtm_addrs */
-	int	ifm_flags;	/* value of if_flags */
-	u_short	ifm_index;	/* index for associated ifp */
-=======
 	u_short ifm_hdrlen;	/* sizeof(if_msghdr) to skip over the header */
 	u_short	ifm_index;	/* index for associated ifp */
 	u_short	ifm_tableid;	/* routing table id */
@@ -529,7 +480,6 @@ struct if_msghdr {
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
 	int	ifm_xflags;
->>>>>>> origin/master
 	struct	if_data ifm_data;/* statistics and other data about if */
 };
 
@@ -541,17 +491,13 @@ struct ifa_msghdr {
 	u_short	ifam_msglen;	/* to skip over non-understood messages */
 	u_char	ifam_version;	/* future binary compatibility */
 	u_char	ifam_type;	/* message type */
-<<<<<<< HEAD
-=======
 	u_short ifam_hdrlen;	/* sizeof(ifa_msghdr) to skip over the header */
 	u_short	ifam_index;	/* index for associated ifp */
 	u_short	ifam_tableid;	/* routing table id */
 	u_char	ifam_pad1;
 	u_char	ifam_pad2;
->>>>>>> origin/master
 	int	ifam_addrs;	/* like rtm_addrs */
 	int	ifam_flags;	/* value of ifa_flags */
-	u_short	ifam_index;	/* index for associated ifp */
 	int	ifam_metric;	/* value of ifa_metric */
 };
 
@@ -563,9 +509,10 @@ struct if_announcemsghdr {
 	u_short	ifan_msglen;	/* to skip over non-understood messages */
 	u_char	ifan_version;	/* future binary compatibility */
 	u_char	ifan_type;	/* message type */
+	u_short ifan_hdrlen;	/* sizeof(ifa_msghdr) to skip over the header */
 	u_short	ifan_index;	/* index for associated ifp */
-	char	ifan_name[IFNAMSIZ];	/* if name, e.g. "en0" */
 	u_short	ifan_what;	/* what type of announcement */
+	char	ifan_name[IFNAMSIZ];	/* if name, e.g. "en0" */
 };
 
 #define IFAN_ARRIVAL	0	/* interface arrival */
@@ -829,14 +776,11 @@ do {									\
 #define	IFQ_INC_DROPS(ifq)		((ifq)->ifq_drops++)
 #define	IFQ_SET_MAXLEN(ifq, len)	((ifq)->ifq_maxlen = (len))
 
-<<<<<<< HEAD
-=======
 /* default interface priorities */
 #define IF_WIRED_DEFAULT_PRIORITY 0
 #define IF_WIRELESS_DEFAULT_PRIORITY 4
 
 extern int ifqmaxlen;
->>>>>>> origin/master
 extern struct ifnet_head ifnet;
 extern struct ifnet **ifindex2ifnet;
 extern struct ifnet *lo0ifp;
@@ -874,11 +818,8 @@ int	if_addgroup(struct ifnet *, const char *);
 int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
-<<<<<<< HEAD
-=======
 void	if_start(struct ifnet *);
 void	ifnewlladdr(struct ifnet *);
->>>>>>> origin/master
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithaf(int, u_int);

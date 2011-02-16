@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_fcntl.h,v 1.3 1997/08/07 09:16:20 niklas Exp $	 */
+/*	$OpenBSD: svr4_fcntl.h,v 1.4 2000/08/23 19:31:34 fgsch Exp $	 */
 /*	$NetBSD: svr4_fcntl.h,v 1.3 1994/10/29 00:43:19 christos Exp $	 */
 
 /*

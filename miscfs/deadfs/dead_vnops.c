@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dead_vnops.c,v 1.16 2007/03/21 17:29:32 thib Exp $	*/
-=======
 /*	$OpenBSD: dead_vnops.c,v 1.25 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dead_vnops.c,v 1.16 1996/02/13 13:12:48 mycroft Exp $	*/
 
 /*
@@ -52,82 +48,18 @@
 int	dead_badop(void *);
 int	dead_ebadf(void *);
 
-int	dead_lookup(void *);
-#define dead_create	dead_badop
-#define dead_mknod	dead_badop
 int	dead_open(void *);
-#define dead_close	nullop
-#define dead_access	dead_ebadf
-#define dead_getattr	dead_ebadf
-#define dead_setattr	dead_ebadf
 int	dead_read(void *);
 int	dead_write(void *);
 int	dead_ioctl(void *);
 int	dead_poll(void *);
-#define dead_fsync	nullop
-#define dead_remove	dead_badop
-#define dead_link	dead_badop
-#define dead_rename	dead_badop
-#define dead_mkdir	dead_badop
-#define dead_rmdir	dead_badop
-#define dead_symlink	dead_badop
-#define dead_readdir	dead_ebadf
-#define dead_readlink	dead_ebadf
-#define dead_abortop	dead_badop
-#define dead_inactive	nullop
-#define dead_reclaim	nullop
 int	dead_lock(void *);
-#define dead_unlock	vop_generic_unlock
 int	dead_bmap(void *);
 int	dead_strategy(void *);
 int	dead_print(void *);
-#define dead_islocked	vop_generic_islocked
-#define dead_pathconf	dead_ebadf
-#define dead_advlock	dead_ebadf
-#define dead_bwrite	nullop
 
 int	chkvnlock(struct vnode *);
 
-<<<<<<< HEAD
-int (**dead_vnodeop_p)(void *);
-
-struct vnodeopv_entry_desc dead_vnodeop_entries[] = {
-	{ &vop_default_desc, vn_default_error },
-	{ &vop_lookup_desc, dead_lookup },	/* lookup */
-	{ &vop_create_desc, dead_create },	/* create */
-	{ &vop_mknod_desc, dead_mknod },	/* mknod */
-	{ &vop_open_desc, dead_open },		/* open */
-	{ &vop_close_desc, dead_close },	/* close */
-	{ &vop_access_desc, dead_access },	/* access */
-	{ &vop_getattr_desc, dead_getattr },	/* getattr */
-	{ &vop_setattr_desc, dead_setattr },	/* setattr */
-	{ &vop_read_desc, dead_read },		/* read */
-	{ &vop_write_desc, dead_write },	/* write */
-	{ &vop_ioctl_desc, dead_ioctl },	/* ioctl */
-	{ &vop_poll_desc, dead_poll },		/* poll */
-	{ &vop_fsync_desc, dead_fsync },	/* fsync */
-	{ &vop_remove_desc, dead_remove },	/* remove */
-	{ &vop_link_desc, dead_link },		/* link */
-	{ &vop_rename_desc, dead_rename },	/* rename */
-	{ &vop_mkdir_desc, dead_mkdir },	/* mkdir */
-	{ &vop_rmdir_desc, dead_rmdir },	/* rmdir */
-	{ &vop_symlink_desc, dead_symlink },	/* symlink */
-	{ &vop_readdir_desc, dead_readdir },	/* readdir */
-	{ &vop_readlink_desc, dead_readlink },	/* readlink */
-	{ &vop_abortop_desc, dead_abortop },	/* abortop */
-	{ &vop_inactive_desc, dead_inactive },	/* inactive */
-	{ &vop_reclaim_desc, dead_reclaim },	/* reclaim */
-	{ &vop_lock_desc, dead_lock },		/* lock */
-	{ &vop_unlock_desc, dead_unlock },	/* unlock */
-	{ &vop_bmap_desc, dead_bmap },		/* bmap */
-	{ &vop_strategy_desc, dead_strategy },	/* strategy */
-	{ &vop_print_desc, dead_print },	/* print */
-	{ &vop_islocked_desc, dead_islocked },	/* islocked */
-	{ &vop_pathconf_desc, dead_pathconf },	/* pathconf */
-	{ &vop_advlock_desc, dead_advlock },	/* advlock */
-	{ &vop_bwrite_desc, dead_bwrite },	/* bwrite */
-	{ (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
-=======
 struct vops dead_vops = {
 	.vop_default	= eopnotsupp,
 	.vop_lookup	= vop_generic_lookup,
@@ -163,25 +95,7 @@ struct vops dead_vops = {
 	.vop_pathconf	= dead_ebadf,
 	.vop_advlock	= dead_ebadf,
 	.vop_bwrite	= nullop,
->>>>>>> origin/master
 };
-
-/*
- * Trivial lookup routine that always fails.
- */
-/* ARGSUSED */
-int
-dead_lookup(void *v)
-{
-	struct vop_lookup_args /* {
-		struct vnode * a_dvp;
-		struct vnode ** a_vpp;
-		struct componentname * a_cnp;
-	} */ *ap = v;
-
-	*ap->a_vpp = NULL;
-	return (ENOTDIR);
-}
 
 /*
  * Open always fails as if device did not exist.
@@ -200,12 +114,7 @@ dead_open(void *v)
 int
 dead_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 
 	if (chkvnlock(ap->a_vp))
 		panic("dead_read: lock");
@@ -224,12 +133,7 @@ dead_read(void *v)
 int
 dead_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 
 	if (chkvnlock(ap->a_vp))
 		panic("dead_write: lock");
@@ -243,14 +147,7 @@ dead_write(void *v)
 int
 dead_ioctl(void *v)
 {
-	struct vop_ioctl_args /* {
-		struct vnode *a_vp;
-		u_long a_command;
-		caddr_t  a_data;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_ioctl_args *ap = v;
 
 	if (!chkvnlock(ap->a_vp))
 		return (EBADF);
@@ -262,11 +159,7 @@ int
 dead_poll(void *v)
 {
 #if 0
-	struct vop_poll_args /* {
-		struct vnode *a_vp;
-		int a_events;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_poll_args *ap = v;
 #endif
 
 	/*
@@ -281,9 +174,7 @@ dead_poll(void *v)
 int
 dead_strategy(void *v)
 {
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap = v;
+	struct vop_strategy_args *ap = v;
 	int s;
 
 	if (ap->a_bp->b_vp == NULL || !chkvnlock(ap->a_bp->b_vp)) {
@@ -302,11 +193,7 @@ dead_strategy(void *v)
 int
 dead_lock(void *v)
 {
-	struct vop_lock_args /* {
-		struct vnode *a_vp;
-		int a_flags;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_lock_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 
 	if (ap->a_flags & LK_DRAIN || !chkvnlock(vp))
@@ -321,13 +208,7 @@ dead_lock(void *v)
 int
 dead_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 
 	if (!chkvnlock(ap->a_vp))
 		return (EIO);

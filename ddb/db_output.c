@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_output.c,v 1.24 2006/03/13 06:23:20 jsg Exp $	*/
-=======
 /*	$OpenBSD: db_output.c,v 1.26 2010/09/08 04:28:29 marco Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_output.c,v 1.13 1996/04/01 17:27:14 christos Exp $	*/
 
 /*
