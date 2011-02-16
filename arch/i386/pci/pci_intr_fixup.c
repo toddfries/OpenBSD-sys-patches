@@ -174,6 +174,14 @@ const struct pciintr_icu_table {
 	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GHM_LPC,
 	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801IB_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801IH_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801IO_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801IR_LPC,
+	  piix_init },
 
 	{ PCI_VENDOR_OPTI,	PCI_PRODUCT_OPTI_82C558,
 	  opti82c558_init },
@@ -201,6 +209,10 @@ const struct pciintr_icu_table {
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8235_ISA,
 	  via8231_init },
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8237_ISA,
+	  via8231_init },
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8237A_ISA,
+	  via8231_init },
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8237S_ISA,
 	  via8231_init },
 
 	{ PCI_VENDOR_SIS,	PCI_PRODUCT_SIS_85C503,
@@ -297,10 +309,8 @@ pciintr_link_alloc(pci_chipset_tag_t pc, struct pcibios_intr_routing *pir, int p
 		}
 	}
 
-	if ((l = malloc(sizeof(*l), M_DEVBUF, M_NOWAIT)) == NULL)
+	if ((l = malloc(sizeof(*l), M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (NULL);
-
-	memset(l, 0, sizeof(*l));
 
 	l->link = link;
 	l->bitmap = pir->linkmap[pin].bitmap;

@@ -46,7 +46,7 @@ struct x86_soft_intr x86_soft_intrs[X86_NSOFTINTR];
 const int x86_soft_intr_to_ssir[X86_NSOFTINTR] = {
 	SIR_CLOCK,
 	SIR_NET,
-	SIR_SERIAL,
+	SIR_TTY,
 };
 
 /*
@@ -119,8 +119,8 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 		break;
 
 	case IPL_TTY:
-	case IPL_SOFTSERIAL:
-		which = X86_SOFTINTR_SOFTSERIAL;
+	case IPL_SOFTTTY:
+		which = X86_SOFTINTR_SOFTTTY;
 		break;
 
 	default:

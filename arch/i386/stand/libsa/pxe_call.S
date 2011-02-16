@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxe_call.S,v 1.3 2005/04/25 23:09:04 tom Exp $ */
+/*	$OpenBSD: pxe_call.S,v 1.4 2006/01/02 00:26:29 tom Exp $ */
 /*	$NetBSD: pxe_call.S,v 1.2 2002/03/27 17:24:22 kanaoka Exp $	*/
 
 /*

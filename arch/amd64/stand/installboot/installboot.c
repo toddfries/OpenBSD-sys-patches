@@ -499,7 +499,7 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 		fprintf(stderr, "%s is %d blocks x %d bytes\n",
 		    boot, ndb, fs->fs_bsize);
 		fprintf(stderr, "fs block shift %u; part offset %u; "
-		    "inode block %u, offset %u\n",
+		    "inode block %lld, offset %u\n",
 		    fs->fs_fsbtodb, pl->p_offset,
 		    ino_to_fsba(fs, statbuf.st_ino),
 		    (unsigned int)((((char *)ap) - buf) + INODEOFF));

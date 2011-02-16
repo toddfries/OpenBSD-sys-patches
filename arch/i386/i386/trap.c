@@ -302,8 +302,10 @@ trap(struct trapframe *frame)
 				    offsetof(struct trapframe, tf_gs));
 				resume = (int)resume_pop_gs;
 				break;
+			default:
+				goto we_re_toast;
 			}
-                        break;
+			break;
 		default:
 			goto we_re_toast;
 		}
@@ -441,7 +443,7 @@ trap(struct trapframe *frame)
 			goto we_re_toast;
 #endif
 		cr2 = rcr2();
-		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
+		KERNEL_LOCK();
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -562,31 +564,6 @@ out:
 }
 
 /*
- * Compensate for 386 brain damage (missing URKR)
- */
-int
-trapwrite(unsigned int addr)
-{
-	vaddr_t va;
-	struct proc *p;
-	struct vmspace *vm;
-
-	va = trunc_page((vaddr_t)addr);
-	if (va >= VM_MAXUSER_ADDRESS)
-		return 1;
-
-	p = curproc;
-	vm = p->p_vmspace;
-
-	if (uvm_fault(&vm->vm_map, va, 0, VM_PROT_READ | VM_PROT_WRITE))
-		return 1;
-
-	uvm_grow(p, va);
-
-	return 0;
-}
-
-/*
  * syscall(frame):
  *	System call request from POSIX system call gate interface to kernel.
  */
@@ -597,12 +574,12 @@ syscall(struct trapframe *frame)
 	caddr_t params;
 	struct sysent *callp;
 	struct proc *p;
-	int orig_error, error, opc, nsys;
-	size_t argsize;
+	int orig_error, error, opc, nsys, lock;
 	register_t code, args[8], rval[2];
 #ifdef DIAGNOSTIC
 	int ocpl = lapic_tpr;
 #endif
+	short argsize;
 
 	uvmexp.syscalls++;
 #ifdef DIAGNOSTIC
@@ -706,28 +683,44 @@ syscall(struct trapframe *frame)
 	else
 		error = 0;
 	orig_error = error;
-	KERNEL_PROC_LOCK(p);
+
+	lock = !(callp->sy_flags & SY_NOLOCK);	
+
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, args);
+	KERNEL_PROC_UNLOCK(p);
 #endif
+
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
+	if (KTRPOINT(p, KTR_SYSCALL)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsyscall(p, code, argsize, args);
-#endif
-	if (error) {
 		KERNEL_PROC_UNLOCK(p);
+	}
+#endif
+
+	if (error) {
 		goto bad;
 	}
 	rval[0] = 0;
 	rval[1] = frame->tf_edx;
 
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
+		KERNEL_PROC_LOCK(p);
 		orig_error = error = systrace_redirect(code, p, args, rval);
-	else
+		KERNEL_PROC_UNLOCK(p);
+	} else
 #endif
-		orig_error = error = (*callp->sy_call)(p, args, rval);
-	KERNEL_PROC_UNLOCK(p);
+	{
+		if (lock)
+			KERNEL_PROC_LOCK(p);
+			orig_error = error = (*callp->sy_call)(p, args, rval);
+		if (lock)
+			KERNEL_PROC_UNLOCK(p);
+	}
+
 	switch (error) {
 	case 0:
 		frame->tf_eax = rval[0];

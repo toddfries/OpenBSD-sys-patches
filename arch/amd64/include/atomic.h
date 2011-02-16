@@ -90,6 +90,16 @@ x86_atomic_clearbits_u32(volatile u_int32_t *ptr, u_int32_t bits)
 	__asm __volatile(LOCK " andl %1,%0" :  "=m" (*ptr) : "ir" (~bits));
 }
 
+static __inline u_long
+x86_atomic_cas_ul(volatile u_long *ptr, u_long expect, u_long set)
+{
+	u_long res;
+
+	__asm volatile(LOCK " cmpxchgq %2, %1" : "=a" (res), "=m" (*ptr)
+	    : "r" (set), "a" (expect), "m" (*ptr) : "memory");
+
+	return (res);
+}
 
 /*
  * XXX XXX XXX

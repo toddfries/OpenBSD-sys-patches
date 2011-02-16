@@ -1,15 +1,9 @@
-/*	$OpenBSD: aapic.c,v 1.2 2006/03/11 02:37:54 brad Exp $	*/
+/*	$OpenBSD: aapic.c,v 1.5 2008/04/24 20:47:05 thib Exp $	*/
 /* 	$NetBSD: aapic.c,v 1.3 2005/01/13 23:40:01 fvdl Exp $	*/
 
 /*
  * The AMD 8131 IO APIC can hang the box when an APIC IRQ is masked.
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: aapic.c,v 1.3 2005/01/13 23:40:01 fvdl Exp $");
-#endif
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -19,13 +13,17 @@ __KERNEL_RCSID(0, "$NetBSD: aapic.c,v 1.3 2005/01/13 23:40:01 fvdl Exp $");
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include <arch/amd64/pci/amd8131reg.h>
-
 #include "ioapic.h"
 
 #if NIOAPIC > 0
 extern int nioapics;
 #endif
+
+#define AMD8131_PCIX_MISC	0x40
+#define AMD8131_NIOAMODE	0x00000001
+
+#define AMD8131_IOAPIC_CTL	0x44
+#define AMD8131_IOAEN		0x00000002
 
 int	aapic_match(struct device *, void *, void *);
 void	aapic_attach(struct device *, struct device *, void *);

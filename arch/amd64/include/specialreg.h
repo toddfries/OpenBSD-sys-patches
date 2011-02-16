@@ -180,6 +180,7 @@
 #define	MSR_CTR1		0x013	/* P5 only (trap on P6) */
 #define MSR_APICBASE		0x01b
 #define MSR_EBL_CR_POWERON	0x02a
+#define MSR_EBC_FREQUENCY_ID    0x02c   /* Pentium 4 only */
 #define	MSR_TEST_CTL		0x033
 #define MSR_BIOS_UPDT_TRIG	0x079
 #define	MSR_BBL_CR_D0		0x088	/* PII+ only */
@@ -188,6 +189,10 @@
 #define MSR_BIOS_SIGN		0x08b
 #define MSR_PERFCTR0		0x0c1
 #define MSR_PERFCTR1		0x0c2
+#define MSR_FSB_FREQ		0x0cd	/* Core Duo/Solo only */   
+/* not documented anywhere, see intelcore_update_sensor() */
+#define MSR_TEMPERATURE_TARGET	0x0ee
+#define MSR_TEMPERATURE_TARGET_LOW_BIT	0x40000000
 #define MSR_MTRRcap		0x0fe
 #define	MSR_BBL_CR_ADDR		0x116	/* PII+ only */
 #define	MSR_BBL_CR_DECC		0x118	/* PII+ only */
@@ -203,6 +208,14 @@
 #define MSR_MCG_CTL		0x17b
 #define MSR_EVNTSEL0		0x186
 #define MSR_EVNTSEL1		0x187
+#define MSR_PERF_STATUS		0x198	/* Pentium M */
+#define MSR_PERF_CTL		0x199	/* Pentium M */
+#define MSR_THERM_CONTROL	0x19a
+#define MSR_THERM_INTERRUPT	0x19b
+#define MSR_THERM_STATUS	0x19c
+#define MSR_THERM_STATUS_VALID_BIT	0x80000000
+#define	MSR_THERM_STATUS_TEMP(msr)	((msr >> 16) & 0x7f)
+#define MSR_THERM2_CTL		0x19d	/* Pentium M */
 #define MSR_DEBUGCTLMSR		0x1d9
 #define MSR_LASTBRANCHFROMIP	0x1db
 #define MSR_LASTBRANCHTOIP	0x1dc

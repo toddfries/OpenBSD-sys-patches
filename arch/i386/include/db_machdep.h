@@ -97,14 +97,12 @@ void		db_task_name(/* task_t */);
 
 /* macro for checking if a thread has used floating-point */
 
-#define db_thread_fp_used(thread)	((thread)->pcb->ims.ifps != 0)
-
 int kdb_trap(int, int, db_regs_t *);
 
 void db_machine_init(void);
 int db_enter_ddb(void);
-void db_startcpu(int cpu);
-void db_stopcpu(int cpu);
+void db_startcpu(int);
+void db_stopcpu(int);
 void i386_ipi_db(struct cpu_info *);
 
 extern struct mutex ddb_mp_mutex;

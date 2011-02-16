@@ -53,6 +53,8 @@ typedef	__volatile int		__cpu_simple_lock_t;
 #define __lockbarrier() __asm __volatile("": : :"memory")
 #define SPINLOCK_SPIN_HOOK __asm __volatile("pause": : :"memory");
 
+#include <machine/atomic.h>
+
 #ifdef LOCKDEBUG
 
 extern void __cpu_simple_lock_init(__cpu_simple_lock_t *);
@@ -61,8 +63,6 @@ extern int __cpu_simple_lock_try(__cpu_simple_lock_t *);
 extern void __cpu_simple_unlock(__cpu_simple_lock_t *);
 
 #else
-
-#include <machine/atomic.h>
 
 static __inline void __cpu_simple_lock_init(__cpu_simple_lock_t *)
 	__attribute__((__unused__));
@@ -109,5 +109,7 @@ __cpu_simple_unlock(__cpu_simple_lock_t *lockp)
 }
 
 #endif /* !LOCKDEBUG */
+
+#define rw_cas(p, o, n) (x86_atomic_cas_ul(p, o, n) != o)
 
 #endif /* _AMD64_LOCK_H_ */

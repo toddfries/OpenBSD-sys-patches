@@ -89,7 +89,7 @@ longrun_update(void *arg)
 }
 
 /*
- * Transmeta documentation says performance window boundries
+ * Transmeta documentation says performance window boundaries
  * must be between 0 and 100 or a GP0 exception is generated.
  * mode is really only a bit, 0 or 1
  * These values will be rounded by the CPU to within the

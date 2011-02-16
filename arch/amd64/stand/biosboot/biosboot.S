@@ -548,7 +548,7 @@ done_load:
 
 	/*
 	 * Check the magic signature at the beginning of /boot.
-	 * Since /boot is now ELF, this should be 0xFF E L F.
+	 * Since /boot is now ELF, this should be 0x7F E L F.
 	 */
 	movw	$(LOADADDR >> 4), %ax	/* Target segment */
 	movw	%ax, %es
@@ -573,7 +573,7 @@ err_stop:
 	call	Lmessage
 stay_stopped:
 	sti				/* Ensure Ctl-Alt-Del will work */
-	hlt
+	hlt				/* (don't require power cycle) */
 	jmp	stay_stopped		/* Just to make sure :-) */
 
 exec_boot:

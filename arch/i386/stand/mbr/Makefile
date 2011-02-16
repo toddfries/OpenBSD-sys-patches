@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.13 2000/06/08 00:56:08 mickey Exp $
+#	$OpenBSD: Makefile,v 1.14 2003/04/17 03:43:19 drahn Exp $
 #
 
 PROG=	mbr

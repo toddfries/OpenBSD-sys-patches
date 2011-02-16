@@ -22,7 +22,6 @@ file	arch/amd64/amd64/syscall.c
 file	arch/amd64/amd64/trap.c
 file	arch/amd64/amd64/vm_machdep.c
 file	arch/amd64/amd64/fpu.c
-file	arch/amd64/amd64/Locore.c
 file	arch/amd64/amd64/softintr.c
 file	arch/amd64/amd64/i8259.c
 file	arch/amd64/amd64/cacheinfo.c
@@ -40,6 +39,7 @@ file	arch/amd64/amd64/sg_dma.c		!small_kernel
 file	arch/amd64/amd64/mptramp.S		multiprocessor
 file	arch/amd64/amd64/ipifuncs.c		multiprocessor
 file	arch/amd64/amd64/ipi.c			multiprocessor
+file	arch/amd64/amd64/mp_setperf.c		multiprocessor
 
 file	arch/amd64/amd64/apic.c			ioapic | lapic
 
@@ -62,7 +62,8 @@ file	arch/amd64/amd64/kgdb_machdep.c		kgdb
 # Basic clock - required
 file	arch/amd64/isa/clock.c
 
-file	arch/amd64/amd64/powernow-k8.c
+file	arch/amd64/amd64/powernow-k8.c		!small_kernel
+file	arch/amd64/amd64/est.c			!small_kernel
 
 include "dev/rasops/files.rasops"
 include "dev/wsfont/files.wsfont"
@@ -150,7 +151,12 @@ include	"dev/pcmcia/files.pcmcia"
 # PCI-ISA bridges
 device	pcib: isabus
 attach	pcib at pci
-file	arch/amd64/pci/pcib.c			pcib
+file	arch/amd64/pci/pcib.c			pcib | amdpcib
+
+# AMD 8111 LPC bridge
+device	amdpcib: isabus
+attach	amdpcib at pci
+file	dev/pci/amdpcib.c			amdpcib
 
 device	aapic
 attach	aapic at pci
@@ -202,6 +208,11 @@ file	arch/amd64/amd64/nvram.c	nvram needs-flag
 include	"dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
 # I2C
 #
 include "dev/i2c/files.i2c"
@@ -247,5 +258,4 @@ major	{st = 5}
 major	{cd = 6}
 major	{rd = 17}
 major	{wd = 0}
-major	{wt = 3}
 major	{fd = 2}

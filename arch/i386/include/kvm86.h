@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: kvm86.h,v 1.1 2006/06/13 03:01:04 gwk Exp $ */
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gwk@openbsd.org>
  *

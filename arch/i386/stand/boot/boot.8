@@ -136,13 +136,8 @@ By default,
 .Nm
 attempts to load the kernel executable
 .Pa /bsd .
-If that fails, it will attempt to load
-.Pa /obsd
-and then
-.Pa /bsd.old .
-If it fails to find any of these files,
-and no alternative kernel image has been specified,
-the system will be unable to boot.
+If it fails to find the kernel and no alternative kernel image has
+been specified, the system will be unable to boot.
 .Sh COMMANDS
 The following commands are accepted at the
 .Nm

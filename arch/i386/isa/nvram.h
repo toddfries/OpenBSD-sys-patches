@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.h,v 1.6 2003/06/02 23:27:47 millert Exp $	*/
+/*	$OpenBSD: nvram.h,v 1.7 2004/06/09 10:17:10 art Exp $	*/
 /*	$NetBSD: nvram.h,v 1.5 1995/05/05 22:08:43 mycroft Exp $	*/
 
 /*-

@@ -156,31 +156,22 @@ extern struct proc *npxproc;
 
 #include "bios.h"
 #include "com.h"
-#include "pccom.h"
 
-#if NPCCOM > 0
+#if NCOM > 0
 #include <sys/termios.h>
 #include <dev/ic/comreg.h>
-#if NCOM > 0
 #include <dev/ic/comvar.h>
-#elif NPCCOM > 0
-#include <arch/i386/isa/pccomvar.h>
-#endif
-#endif /* NCOM > 0 || NPCCOM > 0 */
-
-/*
- * The following defines are for the code in setup_buffers that tries to
- * ensure that enough ISA DMAable memory is still left after the buffercache
- * has been allocated.
- */
-#define CHUNKSZ		(3 * 1024 * 1024)
-#define ISADMA_LIMIT	(16 * 1024 * 1024)	/* XXX wrong place */
-#define ALLOC_PGS(sz, limit, pgs) \
-    uvm_pglistalloc((sz), 0, (limit), PAGE_SIZE, 0, &(pgs), 1, 0)
-#define FREE_PGS(pgs) uvm_pglistfree(&(pgs))
+#endif /* NCOM > 0 */
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
+
+/*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -193,14 +184,8 @@ int	cpu_apmhalt = 0;	/* sysctl'd to 1 for halt -p hack */
 int	user_ldt_enable = 0;	/* sysctl'd to 1 to enable */
 #endif
 
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
+#define BUFCACHEPERCENT 10
 #endif
 
 #ifdef	BUFPAGES
@@ -250,7 +235,7 @@ paddr_t avail_end;
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
-int kbd_reset;
+#if !defined(SMALL_KERNEL)
 int p4_model;
 int p3_early;
 void (*update_cpuspeed)(void) = NULL;
@@ -267,12 +252,14 @@ int	safepri = 0;
 
 #if !defined(SMALL_KERNEL)
 int bus_clock;
+#endif
 void (*setperf_setup)(struct cpu_info *);
 int setperf_prio = 0;		/* for concurrent handlers */
 
+void (*cpusensors_setup)(struct cpu_info *);
+
 void (*delay_func)(int) = i8254_delay;
 void (*initclock_func)(void) = i8254_initclocks;
-void (*update_cpuspeed)(void) = NULL;
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
@@ -303,14 +290,10 @@ int	bus_mem_add_mapping(bus_addr_t, bus_size_t,
 
 #ifdef KGDB
 #ifndef KGDB_DEVNAME
-#ifdef __i386__
-#define KGDB_DEVNAME "pccom"
-#else
 #define KGDB_DEVNAME "com"
-#endif
 #endif /* KGDB_DEVNAME */
 char kgdb_devname[] = KGDB_DEVNAME;
-#if (NCOM > 0 || NPCCOM > 0)
+#if NCOM > 0
 #ifndef KGDBADDR
 #define KGDBADDR 0x3f8
 #endif
@@ -323,7 +306,7 @@ int comkgdbrate = KGDBRATE;
 #define KGDBMODE ((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8) /* 8N1 */
 #endif
 int comkgdbmode = KGDBMODE;
-#endif /* NCOM  || NPCCOM */
+#endif /* NCOM > 0 */
 void kgdb_port_init(void);
 #endif /* KGDB */
 
@@ -345,10 +328,12 @@ void	cyrix3_cpu_setup(struct cpu_info *);
 void	cyrix6x86_cpu_setup(struct cpu_info *);
 void	natsem6x86_cpu_setup(struct cpu_info *);
 void	intel586_cpu_setup(struct cpu_info *);
+void	intel686_cpusensors_setup(struct cpu_info *);
 void	intel686_setperf_setup(struct cpu_info *);
 void	intel686_common_cpu_setup(struct cpu_info *);
 void	intel686_cpu_setup(struct cpu_info *);
 void	intel686_p4_cpu_setup(struct cpu_info *);
+void	intelcore_update_sensor(void *);
 void	tm86_cpu_setup(struct cpu_info *);
 char *	intel686_cpu_name(int);
 char *	cyrix3_cpu_name(int, int);
@@ -360,7 +345,6 @@ void	p4_update_cpuspeed(void);
 void	p3_update_cpuspeed(void);
 int	pentium_cpuspeed(int *);
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 static __inline u_char
 cyrix_read_reg(u_char reg)
 {
@@ -374,7 +358,6 @@ cyrix_write_reg(u_char reg, u_char data)
 	outb(0x22, reg);
 	outb(0x23, data);
 }
-#endif
 
 /*
  * cpuid instruction.  request in eax, result in eax, ebx, ecx, edx.
@@ -410,7 +393,7 @@ cpu_startup()
 	 */
 	pa = avail_end;
 	va = (vaddr_t)msgbufp;
-	for (i = 0; i < btoc(MSGBUFSIZE); i++) {
+	for (i = 0; i < atop(MSGBUFSIZE); i++) {
 		pmap_kenter_pa(va, pa, VM_PROT_READ|VM_PROT_WRITE);
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
@@ -431,8 +414,9 @@ cpu_startup()
 	curcpu()->ci_feature_flags = cpu_feature;
 	identifycpu(curcpu());
 
-	printf("real mem  = %lu (%uK)\n", ctob((paddr_t)physmem),
-	    ctob((paddr_t)physmem)/1024U);
+	printf("real mem  = %llu (%lluMB)\n",
+	    (unsigned long long)ptoa((psize_t)physmem),
+	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
 
 	/*
 	 * Determine how many buffers to allocate.  We use bufcachepercent%
@@ -445,6 +429,7 @@ cpu_startup()
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -454,10 +439,9 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%uK)\n", ptoa((paddr_t)uvmexp.free),
-	    ptoa((paddr_t)uvmexp.free) / 1024U);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %llu (%lluMB)\n",
+	    (unsigned long long)ptoa((psize_t)uvmexp.free),
+	    (unsigned long long)ptoa((psize_t)uvmexp.free)/1024U/1024U);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -889,6 +873,51 @@ const struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 				"686 class"		/* Default */
 			},
 			NULL
+		},
+		/* Family 7 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family 8 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family 9 */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family A */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family B */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family C */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family D */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family E */
+		{
+			CPUCLASS_686,
+		} ,
+		/* Family F */
+		{
+			/* Extended processor family - Transmeta Efficeon */
+			CPUCLASS_686,
+			{
+				0, 0, "TM8000", "TM8000",
+				0, 0, 0, 0,
+				0, 0, 0, 0,
+				0, 0, 0, 0,
+				"TM8000"	/* Default */
+			},
+			tm86_cpu_setup
 		} }
 	},
 	{
@@ -1007,7 +1036,6 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 void
 winchip_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU)
 
 	switch ((ci->ci_signature >> 4) & 15) { /* model */
 	case 4: /* WinChip C6 */
@@ -1017,10 +1045,9 @@ winchip_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
-#if defined(I686_CPU) && !defined(SMALL_KERNEL)
+#if !defined(SMALL_KERNEL)
 void
 cyrix3_setperf_setup(struct cpu_info *ci)
 {
@@ -1037,7 +1064,6 @@ cyrix3_setperf_setup(struct cpu_info *ci)
 void
 cyrix3_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I686_CPU)
 	int model = (ci->ci_signature >> 4) & 15;
 	int step = ci->ci_signature & 15;
 
@@ -1056,6 +1082,11 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 #endif
 
 	switch (model) {
+	/* Possible earlier models */
+	case 0: case 1: case 2:
+	case 3: case 4: case 5:
+		break;
+
 	case 6: /* C3 Samuel 1 */
 	case 7: /* C3 Samuel 2 or C3 Ezra */
 	case 8: /* C3 Ezra-T */
@@ -1072,7 +1103,7 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		if (step < 3)
 			break;
 		/*
-		 * C3 Nehemiah: fall through.
+		 * C3 Nehemiah & later: fall through.
 		 */
 	
 	case 10: /* C7-M Type A */
@@ -1092,7 +1123,7 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 
 	default:
 		/*
-		 * C3 Nehemiah/Esther:
+		 * C3 Nehemiah/Esther & later models:
 		 * First we check for extended feature flags, and then
 		 * (if present) retrieve the ones at 0xC0000001.  In this
 		 * bit 2 tells us if the RNG is present.  Bit 3 tells us
@@ -1181,7 +1212,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		printf("\n");
 		break;
 	}
-#endif
 }
 
 #if !defined(SMALL_KERNEL)
@@ -1211,7 +1241,6 @@ via_update_sensor(void *args)
 void
 cyrix6x86_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
 
 	switch ((ci->ci_signature >> 4) & 15) { /* model */
@@ -1240,13 +1269,11 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
 void
 natsem6x86_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
 	int model = (ci->ci_signature >> 4) & 15;
 
@@ -1257,22 +1284,19 @@ natsem6x86_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
 void
 intel586_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I586_CPU)
 	if (!cpu_f00f_bug) {
 		fix_f00f();
 		printf("%s: F00F bug workaround installed\n",
 		    ci->ci_dev.dv_xname);
 	}
-#endif
 }
 
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 void
 amd_family5_setperf_setup(struct cpu_info *ci)
 {
@@ -1302,14 +1326,14 @@ amd_family5_setup(struct cpu_info *ci)
 		break;
 	case 12:
 	case 13:
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 		setperf_setup = amd_family5_setperf_setup;
 #endif
 		break;
 	}
 }
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU) && !defined(MULTIPROCESSOR)
+#if !defined(SMALL_KERNEL)
 void
 amd_family6_setperf_setup(struct cpu_info *ci)
 {
@@ -1324,12 +1348,13 @@ amd_family6_setperf_setup(struct cpu_info *ci)
 		break;
 	}
 }
-#endif /* !SMALL_KERNEL && I686_CPU && !MULTIPROCESSOR */
+#endif
 
 void
 amd_family6_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
+	int family = (ci->ci_signature >> 8) & 15;
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
 	extern void i686_pagezero(void *, size_t);
@@ -1339,8 +1364,11 @@ amd_family6_setup(struct cpu_info *ci)
 	else
 		pagezero = i686_pagezero;
 
-#if !defined(MULTIPROCESSOR)
 	setperf_setup = amd_family6_setperf_setup;
+
+	if (family == 0xf) {
+		amd64_errata(ci);
+	}
 #endif
 }
 
@@ -1403,9 +1431,8 @@ intel686_cpusensors_setup(struct cpu_info *ci)
 	sensordev_install(&ci->ci_sensordev);
 }
 #endif
-}
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU) && !defined(MULTIPROCESSOR)
+#if !defined(SMALL_KERNEL)
 void
 intel686_setperf_setup(struct cpu_info *ci)
 {
@@ -1428,10 +1455,9 @@ void
 intel686_common_cpu_setup(struct cpu_info *ci)
 {
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
-#if !defined(MULTIPROCESSOR)
+#if !defined(SMALL_KERNEL)
 	setperf_setup = intel686_setperf_setup;
-#endif
+	cpusensors_setup = intel686_cpusensors_setup;
 	{
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
@@ -1457,7 +1483,7 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p3_get_bus_clock(ci);
 #endif
 
@@ -1484,7 +1510,7 @@ intel686_cpu_setup(struct cpu_info *ci)
 		ci->ci_level = 2;
 	}
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p3_early = (model == 8 && step == 1) ? 1 : 0;
 	update_cpuspeed = p3_update_cpuspeed;
 #endif
@@ -1493,13 +1519,13 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p4_get_bus_clock(ci);
 #endif
 
 	intel686_common_cpu_setup(ci);
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+#if !defined(SMALL_KERNEL)
 	p4_model = (ci->ci_signature >> 4) & 15;
 	update_cpuspeed = p4_update_cpuspeed;
 #endif
@@ -1508,7 +1534,7 @@ intel686_p4_cpu_setup(struct cpu_info *ci)
 void
 tm86_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+#if !defined(SMALL_KERNEL)
 	longrun_init();
 #endif
 }
@@ -1783,7 +1809,6 @@ identifycpu(struct cpu_info *ci)
 		printf("%s: %s", cpu_device, cpu_model);
 	}
 
-#if defined(I586_CPU) || defined(I686_CPU)
 	if (ci->ci_feature_flags && (ci->ci_feature_flags & CPUID_TSC)) {
 		/* Has TSC */
 		calibrate_cyclecounter();
@@ -1804,7 +1829,6 @@ identifycpu(struct cpu_info *ci)
 			}
 		}
 	}
-#endif
 	if ((ci->ci_flags & CPUF_PRIMARY) == 0) {
 		printf("\n");
 
@@ -1837,56 +1861,15 @@ identifycpu(struct cpu_info *ci)
 	}
 
 #ifndef SMALL_KERNEL
-#if defined(I586_CPU) || defined(I686_CPU)
 	if (cpuspeed != 0 && cpu_cpuspeed == NULL)
 		cpu_cpuspeed = pentium_cpuspeed;
-#endif
 #endif
 
 	cpu_class = class;
 
-	/*
-	 * Now that we have told the user what they have,
-	 * let them know if that machine type isn't configured.
-	 */
-	switch (cpu_class) {
-#if !defined(I386_CPU) && !defined(I486_CPU) && !defined(I586_CPU) && !defined(I686_CPU)
-#error No CPU classes configured.
-#endif
-#ifndef I686_CPU
-	case CPUCLASS_686:
-		printf("NOTICE: this kernel does not support Pentium Pro CPU class\n");
-#ifdef I586_CPU
-		printf("NOTICE: lowering CPU class to i586\n");
-		cpu_class = CPUCLASS_586;
-		break;
-#endif
-#endif
-#ifndef I586_CPU
-	case CPUCLASS_586:
-		printf("NOTICE: this kernel does not support Pentium CPU class\n");
-#ifdef I486_CPU
-		printf("NOTICE: lowering CPU class to i486\n");
+	if (cpu_class == CPUCLASS_386) {
+		printf("WARNING: 386 (possibly unknown?) cpu class, assuming 486\n");
 		cpu_class = CPUCLASS_486;
-		break;
-#endif
-#endif
-#ifndef I486_CPU
-	case CPUCLASS_486:
-		printf("NOTICE: this kernel does not support i486 CPU class\n");
-#ifdef I386_CPU
-		printf("NOTICE: lowering CPU class to i386\n");
-		cpu_class = CPUCLASS_386;
-		break;
-#endif
-#endif
-#ifndef I386_CPU
-	case CPUCLASS_386:
-		printf("NOTICE: this kernel does not support i386 CPU class\n");
-		panic("no appropriate CPU class available");
-#endif
-	default:
-		break;
 	}
 
 	ci->cpu_class = class;
@@ -1894,15 +1877,12 @@ identifycpu(struct cpu_info *ci)
 	if (cpu == CPU_486DLC)
 		printf("WARNING: CYRIX 486DLC CACHE UNCHANGED.\n");
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
-	 * On a 486 or above, enable ring 0 write protection.
+	 * Enable ring 0 write protection (486 or above, but 386
+	 * no longer supported).
 	 */
-	if (ci->cpu_class >= CPUCLASS_486)
-		lcr0(rcr0() | CR0_WP);
-#endif
+	lcr0(rcr0() | CR0_WP);
 
-#if defined(I686_CPU)
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */
@@ -1924,9 +1904,6 @@ identifycpu(struct cpu_info *ci)
 	} else
 		i386_use_fxsave = 0;
 
-	if (vendor == CPUVENDOR_AMD)
-		amd64_errata(ci);
-#endif /* I686_CPU */
 }
 
 char *
@@ -1949,7 +1926,6 @@ tm86_cpu_name(int model)
 }
 
 #ifndef SMALL_KERNEL
-#ifdef I686_CPU
 void
 cyrix3_get_bus_clock(struct cpu_info *ci)
 {
@@ -1960,16 +1936,16 @@ cyrix3_get_bus_clock(struct cpu_info *ci)
 	bus = (msr >> 18) & 0x3;
 	switch (bus) {
 	case 0:
-		bus_clock = 10000;
+		bus_clock = BUS100;
 		break;
 	case 1:
-		bus_clock = 13333;
+		bus_clock = BUS133;
 		break;
 	case 2:
-		bus_clock = 20000;
+		bus_clock = BUS200;
 		break;
 	case 3:
-		bus_clock = 16666;
+		bus_clock = BUS166;
 		break;
 	}
 }
@@ -1986,10 +1962,10 @@ p4_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 21) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		default:
 			printf("%s: unknown Pentium 4 (model %d) "
@@ -2001,16 +1977,16 @@ p4_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 16) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = (model == 2) ? 10000 : 26666;
+			bus_clock = (model == 2) ? BUS100 : BUS266;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 2:
-			bus_clock = 20000;
+			bus_clock = BUS200;
 			break;
 		case 3:
-			bus_clock = 16666;
+			bus_clock = BUS166;
 			break;
 		default:
 			printf("%s: unknown Pentium 4 (model %d) "
@@ -2029,17 +2005,17 @@ p3_get_bus_clock(struct cpu_info *ci)
 
 	switch (ci->ci_model) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
-		bus_clock = 10000;
+		bus_clock = BUS100;
 		break;
 	case 0xd: /* Pentium M (90 nm, Dothan) */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		default:
 			printf("%s: unknown Pentium M FSB_FREQ value %d",
@@ -2057,19 +2033,22 @@ p3_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
 		case 5:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 3:
-			bus_clock = 16666;
+			bus_clock = BUS166;
+			break;
+		case 2:
+			bus_clock = BUS200;
 			break;
 		case 0:
-			bus_clock = 26666;
+			bus_clock = BUS266;
 			break;
 		case 4:
-			bus_clock = 33333;
+			bus_clock = BUS333;
 			break;
 		default:
 			printf("%s: unknown Core FSB_FREQ value %d",
@@ -2111,13 +2090,13 @@ p3_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 18) & 0x3;
 		switch (bus) {
 		case 0:
-			bus_clock = 6666;
+			bus_clock = BUS66;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 2:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		default:
 			printf("%s: unknown i686 EBL_CR_POWERON value %d",
@@ -2182,40 +2161,14 @@ p3_update_cpuspeed(void)
 
 	cpuspeed = (bus_clock * mult) / 1000;
 }
-#endif	/* I686_CPU */
 
-#if defined(I586_CPU) || defined(I686_CPU)
 int
 pentium_cpuspeed(int *freq)
 {
 	*freq = cpuspeed;
 	return (0);
 }
-#endif
 #endif	/* !SMALL_KERNEL */
-
-/*
- * To send an AST to a process on another cpu we send an IPI to that cpu,
- * the IPI schedules a special soft interrupt (that does nothing) and then
- * returns through the normal interrupt return path which in turn handles
- * the AST.
- *
- * The IPI can't handle the AST because it usually requires grabbing the
- * biglock and we can't afford spinning in the IPI handler with interrupts
- * unlocked (so that we take further IPIs and grow our stack until it
- * overflows).
- */
-void
-aston(struct proc *p)
-{
-#ifdef MULTIPROCESSOR
-	if (i386_atomic_testset_i(&p->p_md.md_astpending, 1) == 0 &&
-	    p->p_cpu != curcpu())
-		i386_ipi(LAPIC_IPI_AST, p->p_cpu->ci_cpuid, LAPIC_DLMODE_FIXED);
-#else
-	p->p_md.md_astpending = 1;
-#endif
-}
 
 /*
  * Send an interrupt to process.
@@ -2489,8 +2442,10 @@ boot(int howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	delay(4*1000000);	/* XXX */
+
+	uvm_shutdown();
+	splhigh();		/* Disable interrupts. */
 
 	/* Do a dump if requested. */
 	if (howto & RB_DUMP)
@@ -2499,13 +2454,17 @@ boot(int howto)
 haltsys:
 	doshutdownhooks();
 
+#ifdef MULTIPROCESSOR
+	i386_broadcast_ipi(I386_IPI_HALT);
+#endif
+
 	if (howto & RB_HALT) {
 #if NACPI > 0 && !defined(SMALL_KERNEL)
-		extern int acpi_s5, acpi_enabled;
+		extern int acpi_enabled;
 
 		if (acpi_enabled) {
 			delay(500000);
-			if ((howto & RB_POWERDOWN) || acpi_s5)
+			if (howto & RB_POWERDOWN)
 				acpi_powerdown();
 		}
 #endif
@@ -2548,7 +2507,9 @@ haltsys:
 		printf("\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
+		cnpollc(1);	/* for proper keyboard command handling */
 		cngetc();
+		cnpollc(0);
 	}
 
 	printf("rebooting...\n");
@@ -2565,19 +2526,14 @@ haltsys:
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj, i;
+	int i;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -2601,7 +2557,7 @@ dumpconf()
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -2638,8 +2594,8 @@ dumpsys()
 {
 	u_int i, j, npg;
 	int maddr;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 	char *str;
 	extern int msgbufmapped;
@@ -2683,19 +2639,19 @@ dumpsys()
 	for (i = 0; !error && i < ndumpmem; i++) {
 
 		npg = dumpmem[i].end - dumpmem[i].start;
-		maddr = ctob(dumpmem[i].start);
+		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
-		printf("(%d %ld %d) ", maddr, blkno, npg);
+		printf("(%d %lld %d) ", maddr, blkno, npg);
 #endif
 		for (j = npg; j--; maddr += NBPG, blkno += btodb(NBPG)) {
 
 			/* Print out how many MBs we have more to go. */
 			if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
 				printf("%d ",
-				    (ctob(dumpsize) - maddr) / (1024 * 1024));
+				    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 #if 0
-			printf("(%x %d) ", maddr, blkno);
+			printf("(%x %lld) ", maddr, blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 			    VM_PROT_READ, PMAP_WIRED);
@@ -2727,27 +2683,6 @@ dumpsys()
 
 	delay(5000000);		/* 5 seconds */
 }
-
-#ifdef HZ
-/*
- * If HZ is defined we use this code, otherwise the code in
- * /sys/arch/i386/i386/microtime.s is used.  The other code only works
- * for HZ=100.
- */
-void
-i8254_microtime(struct timeval *tvp)
-{
-	int s = splhigh();
-
-	*tvp = time;
-	tvp->tv_usec += tick;
-	splx(s);
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-}
-#endif /* HZ */
 
 /*
  * Clear registers on exec
@@ -2880,7 +2815,6 @@ extern int IDTVEC(div), IDTVEC(dbg), IDTVEC(nmi), IDTVEC(bpt), IDTVEC(ofl),
     IDTVEC(rsvd), IDTVEC(fpu), IDTVEC(align), IDTVEC(syscall), IDTVEC(mchk),
     IDTVEC(osyscall), IDTVEC(simd);
 
-#if defined(I586_CPU)
 extern int IDTVEC(f00f_redirect);
 
 int cpu_f00f_bug = 0;
@@ -2916,7 +2850,6 @@ fix_f00f(void)
 	/* Tell the rest of the world */
 	cpu_f00f_bug = 1;
 }
-#endif
 
 #ifdef MULTIPROCESSOR
 void
@@ -2962,6 +2895,7 @@ init386(paddr_t first_avail)
 	bios_memmap_t *im;
 
 	proc0.p_addr = proc0paddr;
+	cpu_info_primary.ci_self = &cpu_info_primary;
 	cpu_info_primary.ci_curpcb = &proc0.p_addr->u_pcb;
 
 	/*
@@ -3031,8 +2965,10 @@ init386(paddr_t first_avail)
 	isa_defaultirq();
 #endif
 
-	consinit();	/* XXX SHOULD NOT BE DONE HERE */
-			/* XXX here, until we can use bios for printfs */
+	/*
+	 * Attach the glass console early in case we need to display a panic.
+	 */
+	cninit();
 
 	/*
 	 * Saving SSE registers won't work if the save area isn't
@@ -3201,20 +3137,20 @@ init386(paddr_t first_avail)
 			if (a < atop(16 * 1024 * 1024)) {
 				lim = MIN(atop(16 * 1024 * 1024), e);
 #ifdef DEBUG
--				printf(" %x-%x (<16M)", a, lim);
+				printf(" %x-%x (<16M)", a, lim);
 #endif
 				uvm_page_physload(a, lim, a, lim,
 				    VM_FREELIST_FIRST16);
 				if (e > lim) {
 #ifdef DEBUG
--					printf(" %x-%x", lim, e);
+					printf(" %x-%x", lim, e);
 #endif
 					uvm_page_physload(lim, e, lim, e,
 					    VM_FREELIST_DEFAULT);
 				}
 			} else {
 #ifdef DEBUG
--				printf(" %x-%x", a, e);
+				printf(" %x-%x", a, e);
 #endif
 				uvm_page_physload(a, e, a, e,
 				    VM_FREELIST_DEFAULT);
@@ -3278,6 +3214,8 @@ init386(paddr_t first_avail)
 		kgdb_connect(1);
 	}
 #endif /* KGDB */
+
+	softintr_init();
 }
 
 /*
@@ -3296,18 +3234,11 @@ cpu_exec_aout_makecmds(struct proc *p, struct exec_package *epp)
 /*
  * consinit:
  * initialize the system console.
- * XXX - shouldn't deal with this initted thing, but then,
- * it shouldn't be called from init386 either.
  */
 void
 consinit()
 {
-	static int initted;
-
-	if (initted)
-		return;
-	initted = 1;
-	cninit();
+	/* Already done in init386(). */
 }
 
 #ifdef KGDB
@@ -3315,8 +3246,8 @@ void
 kgdb_port_init()
 {
 
-#if (NCOM > 0 || NPCCOM > 0)
-	if (!strcmp(kgdb_devname, "com") || !strcmp(kgdb_devname, "pccom")) {
+#if NCOM > 0
+	if (!strcmp(kgdb_devname, "com")) {
 		bus_space_tag_t tag = I386_BUS_SPACE_IO;
 		com_kgdb_attach(tag, comkgdbaddr, comkgdbrate, COM_FREQ,
 		    comkgdbmode);
@@ -3402,7 +3333,7 @@ idt_vec_alloc(int low, int high)
 void
 idt_vec_set(int vec, void (*function)(void))
 {
-	setgate(&idt[vec], function, 0, SDT_SYS386IGT, SEL_KPL, GCODE_SEL);
+	setgate(&idt[vec], function, 0, SDT_SYS386IGT, SEL_KPL, GICODE_SEL);
 }
 
 void
@@ -3497,7 +3428,7 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 }
 
 int
-bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	int error;
@@ -3509,6 +3440,8 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 	switch (t) {
 	case I386_BUS_SPACE_IO:
 		ex = ioport_ex;
+		if (flags & BUS_SPACE_MAP_LINEAR)
+			return (EINVAL);
 		break;
 
 	case I386_BUS_SPACE_MEM:
@@ -3545,7 +3478,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	error = bus_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -3560,7 +3493,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 _bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	/*
 	 * For I/O space, that's all she wrote.
@@ -3574,13 +3507,13 @@ _bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	return (bus_mem_add_mapping(bpa, size, cacheable, bshp));
+	return (bus_mem_add_mapping(bpa, size, flags, bshp));
 }
 
 int
 bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary,
-    int cacheable, bus_addr_t *bpap, bus_space_handle_t *bshp)
+    int flags, bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
 	struct extent *ex;
 	u_long bpa;
@@ -3630,7 +3563,7 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	error = bus_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -3646,7 +3579,7 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 }
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	paddr_t pa, endpa;
@@ -3714,6 +3647,9 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		(void) pmap_extract(pmap_kernel(), va, &bpa);
 		bpa += (bsh & PGOFSET);
 
+		pmap_kremove(va, endva - va);
+		pmap_update(pmap_kernel());
+
 		/*
 		 * Free the kernel virtual mapping.
 		 */
@@ -3758,6 +3694,9 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 		(void) pmap_extract(pmap_kernel(), va, &bpa);
 		bpa += (bsh & PGOFSET);
 
+		pmap_kremove(va, endva - va);
+		pmap_update(pmap_kernel());
+
 		/*
 		 * Free the kernel virtual mapping.
 		 */
@@ -3792,6 +3731,8 @@ splassert_check(int wantipl, const char *func)
 {
 	if (lapic_tpr < wantipl)
 		splassert_fail(wantipl, lapic_tpr, func);
+	if (wantipl == IPL_NONE && curcpu()->ci_idepth != 0)
+		splassert_fail(-1, curcpu()->ci_idepth, func);
 }
 #endif
 
@@ -3829,13 +3770,12 @@ i386_softintunlock(void)
  * We hand-code this to ensure that it's atomic.
  */
 void
-softintr(int sir, int vec)
+softintr(int sir)
 {
-	__asm __volatile("orl %1, %0" : "=m" (ipending) : "ir" (sir));
-#ifdef MULTIPROCESSOR
-	i82489_writereg(LAPIC_ICRLO,
-	    vec | LAPIC_DLMODE_FIXED | LAPIC_LVL_ASSERT | LAPIC_DEST_SELF);
-#endif
+	struct cpu_info *ci = curcpu();
+
+	__asm __volatile("orl %1, %0" :
+	    "=m" (ci->ci_ipending) : "ir" (1 << sir));
 }
 
 /*

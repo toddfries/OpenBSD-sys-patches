@@ -42,7 +42,7 @@ struct apic_attach_args {
 	int flags;
 #define IOAPIC_PICMODE		0x01
 #define IOAPIC_VWIRE		0x02
-	paddr_t apic_address;
+	u_int32_t apic_address;
 	int apic_vecbase;
 };
 

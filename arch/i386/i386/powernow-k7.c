@@ -42,6 +42,13 @@
 #include <dev/isa/isareg.h>
 #include <i386/isa/isa_machdep.h>
 
+#include "acpicpu.h"
+
+#if NACPICPU > 0
+#include <dev/acpi/acpidev.h>
+#include <dev/acpi/acpivar.h>
+#endif
+
 #define BIOS_START			0xe0000
 #define	BIOS_LEN			0x20000
 #define BIOS_STEP			16
@@ -76,6 +83,7 @@
 /*
  * ACPI ctr_val status register to powernow k7 configuration
  */
+#define PN7_ACPI_CTRL_TO_FID(x)		((x) & 0x1f)
 #define PN7_ACPI_CTRL_TO_VID(x)		(((x) >> 5) & 0x1f)
 #define PN7_ACPI_CTRL_TO_SGTC(x)	(((x) >> 10) & 0xffff)
 
@@ -130,33 +138,32 @@ struct pst_s {
 struct k7pnow_cpu_state *k7pnow_current_state;
 extern int setperf_prio;
 
-/*
- * Prototypes
- */
 int k7pnow_decode_pst(struct k7pnow_cpu_state *, uint8_t *, int);
 int k7pnow_states(struct k7pnow_cpu_state *, uint32_t, unsigned int,
     unsigned int);
 
+#if NACPICPU > 0
+int k7pnow_acpi_init(struct k7pnow_cpu_state * cstate, uint64_t status);
+int k7pnow_acpi_states(struct k7pnow_cpu_state * cstate,
+    struct acpicpu_pss *pss, int nstates, uint64_t status);
+void k7pnow_acpi_pss_changed(struct acpicpu_pss *pss, int npss);
+#endif
+
 void
 k7_powernow_setperf(int level)
 {
-	unsigned int i, low, high, freq;
+	unsigned int i;
 	int cvid, cfid, vid = 0, fid = 0;
 	uint64_t status, ctl;
 	struct k7pnow_cpu_state * cstate;
 
 	cstate = k7pnow_current_state;
-	high = cstate->state_table[cstate->n_states - 1].freq;
-	low = cstate->state_table[0].freq;
-	freq = low + (high - low) * level / 100;
 
-	for (i = 0; i < cstate->n_states; i++) {
-		if (cstate->state_table[i].freq >= freq) {
-			fid = cstate->state_table[i].fid;
-			vid = cstate->state_table[i].vid;
-			break;
-		}
-	}
+	i = ((level * cstate->n_states) + 1) / 101;
+	if (i >= cstate->n_states)
+		i = cstate->n_states - 1;
+	fid = cstate->state_table[i].fid;
+	vid = cstate->state_table[i].vid;
 
 	if (fid == 0 || vid == 0)
 		return;
@@ -270,7 +277,7 @@ k7pnow_states(struct k7pnow_cpu_state *cstate, uint32_t cpusig,
 
 				if (cpusig == pst->signature && fid == pst->fid
 				    && vid == pst->vid) {
-					
+
 					if (abs(cstate->fsb - pst->fsb) > 5)
 						continue;
 					cstate->n_states = pst->n_states;
@@ -278,13 +285,99 @@ k7pnow_states(struct k7pnow_cpu_state *cstate, uint32_t cpusig,
 					    p + sizeof(struct pst_s),
 					    cstate->n_states));
 				}
-				p += sizeof(struct pst_s) + (2 * pst->n_states);
+				p += sizeof(struct pst_s) +
+				    (2 * pst->n_states);
 			}
 		}
 	}
 
 	return 0;
 }
+
+#if NACPICPU > 0
+
+int
+k7pnow_acpi_states(struct k7pnow_cpu_state * cstate, struct acpicpu_pss *pss,
+    int nstates, uint64_t status)
+{
+	struct k7pnow_state state;
+	int j, k, n;
+	uint32_t ctrl;
+
+	k = -1;
+	for (n = 0; n < cstate->n_states; n++) {
+		if (status == pss[n].pss_status)
+			k = n;
+		ctrl = pss[n].pss_ctrl;
+		state.fid = PN7_ACPI_CTRL_TO_FID(ctrl);
+		state.vid = PN7_ACPI_CTRL_TO_VID(ctrl);
+
+		if ((cstate->flags & PN7_FLAG_ERRATA_A0) &&
+		    (k7pnow_fid_to_mult[state.fid] % 10) == 5)
+			continue;
+
+		state.freq = pss[n].pss_core_freq;
+		j = n;
+		while (j > 0 && cstate->state_table[j - 1].freq > state.freq) {
+			memcpy(&cstate->state_table[j],
+			    &cstate->state_table[j - 1],
+			sizeof(struct k7pnow_state));
+			--j;
+		}
+		memcpy(&cstate->state_table[j], &state,
+		    sizeof(struct k7pnow_state));
+	}
+	return k;
+}
+
+void
+k7pnow_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
+{
+	int curs;
+	struct k7pnow_cpu_state *cstate;
+	uint32_t ctrl;
+	uint64_t status;
+
+	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
+	cstate = k7pnow_current_state;
+
+	curs = k7pnow_acpi_states(cstate, pss, npss, status);
+	ctrl = pss[curs].pss_ctrl;
+	cstate->sgtc = PN7_ACPI_CTRL_TO_SGTC(ctrl);
+	cstate->n_states = npss;
+}
+
+int
+k7pnow_acpi_init(struct k7pnow_cpu_state *cstate, uint64_t status)
+{
+	int curs;
+	uint32_t ctrl;
+	struct acpicpu_pss *pss;
+	int mfid;
+
+	cstate->n_states = acpicpu_fetch_pss(&pss);
+	if (cstate->n_states == 0)
+		return 0;
+
+	curs = k7pnow_acpi_states(cstate, pss, cstate->n_states, status);
+	/* 
+	 * XXX: Some BIOS supplied _PSS implementations have the wrong
+	 * maximum frequency, if we encounter one of these punt and 
+	 * hope the legacy tables have correct values.
+	 */
+	mfid = PN7_STA_MFID(status);
+	if (mfid != cstate->state_table[cstate->n_states - 1].fid) {
+		return 0;
+	}
+
+	acpicpu_set_notify(k7pnow_acpi_pss_changed);
+	ctrl = pss[curs].pss_ctrl;
+	cstate->sgtc = PN7_ACPI_CTRL_TO_SGTC(ctrl);
+
+	return 1;
+}
+
+#endif /* NACPICPU */
 
 void
 k7_powernow_init(void)
@@ -318,7 +411,7 @@ k7_powernow_init(void)
 	if (!cstate)
 		return;
 
-	cstate->flags = cstate->n_states = 0;	
+	cstate->flags = cstate->n_states = 0;
 	if (ci->ci_signature == AMD_ERRATA_A0_CPUSIG)
 		cstate->flags |= PN7_FLAG_ERRATA_A0;
 
@@ -329,9 +422,14 @@ k7_powernow_init(void)
 
 	cstate->fsb = cpuspeed / (k7pnow_fid_to_mult[currentfid]/10);
 
-	/* if the base CPUID signature fails to match try, the extended one */
 	if (!k7pnow_states(cstate, ci->ci_signature, maxfid, startvid))
-		k7pnow_states(cstate, regs[0], maxfid, startvid); 
+		if (!k7pnow_states(cstate, regs[0], maxfid, startvid)) {
+#if NACPICPU > 0
+			/* If we have it try ACPI */
+			k7pnow_acpi_init(cstate, status);
+#endif
+	}
+
 	if (cstate->n_states) {
 		if (cstate->flags & PN7_FLAG_DESKTOP_VRM)
 			techname = "Cool'n'Quiet K7";
@@ -343,8 +441,8 @@ k7_powernow_init(void)
 			state = &cstate->state_table[i-1];
 			printf(" %d", state->freq);
 		}
-		printf(" MHz\n");	
-		
+		printf(" MHz\n");
+
 		k7pnow_current_state = cstate;
 		cpu_setperf = k7_powernow_setperf;
 		setperf_prio = 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdbr.S,v 1.1 2004/06/22 23:12:18 tom Exp $	*/
+/*	$OpenBSD: cdbr.S,v 1.2 2004/08/24 15:24:05 tom Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove <tom.cosgrove@arches-consulting.com>

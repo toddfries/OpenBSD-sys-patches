@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixreg.h,v 1.3 2000/03/28 03:37:59 mickey Exp $	*/
+/*	$OpenBSD: piixreg.h,v 1.4 2003/03/28 23:12:33 mickey Exp $	*/
 /*	$NetBSD: piixreg.h,v 1.1 1999/11/17 01:21:21 thorpej Exp $	*/
 
 /*

@@ -117,7 +117,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 		tf->tf_esp = (u_int)stack + stacksize;
 
 	sf = (struct switchframe *)tf - 1;
-	sf->sf_ppl = 0;
 	sf->sf_esi = (int)func;
 	sf->sf_ebx = (int)arg;
 	sf->sf_eip = (int)proc_trampoline;
@@ -126,11 +125,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 
 /*
  * cpu_exit is called as the last action during exit.
- *
- * We clean up a little and then call switch_exit() with the old proc as an
- * argument.  switch_exit() first switches to proc0's context, then does the
- * vmspace_free() and kmem_free() that we don't do here, and finally jumps
- * into switch() to wait for another process to wake up.
  */
 void
 cpu_exit(struct proc *p)
@@ -194,64 +188,6 @@ cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 
 	chdr->c_nseg++;
 	return 0;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(caddr_t from, caddr_t to, size_t size)
-{
-	pt_entry_t *fpte, *tpte;
-	pt_entry_t ofpte, otpte;
-#ifdef MULTIPROCESSOR
-	u_int32_t cpumask = 0;
-#endif
-
-#ifdef DIAGNOSTIC
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	fpte = kvtopte((vaddr_t)from);
-	tpte = kvtopte((vaddr_t)to);
-	while (size > 0) {
-		ofpte = *fpte;
-		otpte = *tpte;
-		*tpte++ = *fpte;
-		*fpte++ = 0;
-#if defined(I386_CPU) && !defined(MULTIPROCESSOR)
-		if (cpu_class != CPUCLASS_386)
-#endif
-		{
-			if (otpte & PG_V)
-#ifdef MULTIPROCESSOR
-				pmap_tlb_shootdown(pmap_kernel(), (vaddr_t)to,
-				    otpte, &cpumask);
-#else
-				pmap_update_pg((vaddr_t)to);
-#endif
-			if (ofpte & PG_V)
-#ifdef MULTIPROCESSOR
-				pmap_tlb_shootdown(pmap_kernel(),
-				    (vaddr_t)from, ofpte, &cpumask);
-#else
-				pmap_update_pg((vaddr_t)from);
-#endif
-		}
-
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-#ifdef MULTIPROCESSOR
-	pmap_tlb_shootnow(cpumask);
-#else
-#if defined(I386_CPU)
-	if (cpu_class == CPUCLASS_386)
-		tlbflush();		
-#endif
-#endif
 }
 
 /*

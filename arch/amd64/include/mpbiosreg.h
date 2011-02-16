@@ -51,6 +51,31 @@
 
 #define MPS_MCT_NTYPES	5
 
+/*
+ * Interrupt typess
+ */
+
+#define MPS_INTTYPE_INT		0
+#define MPS_INTTYPE_NMI		1
+#define MPS_INTTYPE_SMI		2
+#define MPS_INTTYPE_ExtINT	3
+
+#define MPS_INTPO_DEF		0
+#define MPS_INTPO_ACTHI		1
+#define MPS_INTPO_ACTLO		3
+#define MPS_INTPO_SHIFT		0
+#define MPS_INTPO_MASK		3
+
+#define MPS_INTTR_DEF		0
+#define MPS_INTTR_EDGE		1
+#define MPS_INTTR_LEVEL		3
+#define MPS_INTTR_SHIFT		2
+#define MPS_INTTR_MASK		3
+
+#define MPS_INT(p,t) \
+    ((((p) & MPS_INTPO_MASK) << MPS_INTPO_SHIFT) | \
+     (((t) & MPS_INTTR_MASK) << MPS_INTTR_SHIFT))
+
 /* MP Floating Pointer Structure */
 struct mpbios_fps {
 	u_int32_t	signature;

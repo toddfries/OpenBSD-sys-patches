@@ -115,13 +115,14 @@
 #define	VM_FREELIST_LOW	1
 #define	VM_FREELIST_HIGH	2
 
-/*
- * pmap specific data stored in the vm_physmem[] array
- */
-#define __HAVE_PMAP_PHYSSEG
-struct pmap_physseg {
-	struct pv_head *pvhead;		/* pv_head array */
-	unsigned char *attrs;		/* attrs array */
+#define __HAVE_VM_PAGE_MD
+struct pv_entry;
+struct vm_page_md {
+	struct pv_entry *pv_list;
 };
+
+#define VM_MDPAGE_INIT(pg) do {		\
+	(pg)->mdpage.pv_list = NULL;	\
+} while (0)
 
 #endif /* _VMPARAM_H_ */

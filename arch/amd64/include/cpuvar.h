@@ -87,10 +87,6 @@ struct cpu_attach_args {
 
 #ifdef _KERNEL
 
-#ifdef MULTIPROCESSOR
-extern u_int32_t cpus_running;
-#endif
-
 int x86_ipi(int,int,int);
 void x86_self_ipi(int);
 int x86_ipi_init(int);

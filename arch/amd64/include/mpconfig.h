@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpconfig.h,v 1.3 2006/05/10 01:39:04 krw Exp $	*/
+/*	$OpenBSD: mpconfig.h,v 1.6 2008/01/15 19:30:32 kettenis Exp $	*/
 /*	$NetBSD: mpconfig.h,v 1.2 2003/05/11 00:05:52 fvdl Exp $	*/
 
 /*
@@ -6,31 +6,14 @@
  * MP config as well.
  */
 
-#ifndef _X86_MPCONFIG_H
-#define _X86_MPCONFIG_H
-
-/* 
- * Interrupt typess
- */
-#define MPS_INTTYPE_INT         0
-#define MPS_INTTYPE_NMI         1
-#define MPS_INTTYPE_SMI         2
-#define MPS_INTTYPE_ExtINT      3
- 
-#define MPS_INTPO_DEF           0
-#define MPS_INTPO_ACTHI         1
-#define MPS_INTPO_ACTLO         3
- 
-#define MPS_INTTR_DEF           0 
-#define MPS_INTTR_EDGE          1
-#define MPS_INTTR_LEVEL         3
+#ifndef _AMD64_MPCONFIG_H
+#define _AMD64_MPCONFIG_H
 
 #ifndef _LOCORE
 
 struct mpbios_int;
 
-struct mp_bus
-{
+struct mp_bus {
 	char *mb_name;		/* XXX bus name */
 	int mb_idx;		/* XXX bus index */
 	void (*mb_intr_print)(int);
@@ -39,8 +22,7 @@ struct mp_bus
 	u_int32_t mb_data;	/* random bus-specific datum. */
 };
 
-struct mp_intr_map
-{
+struct mp_intr_map {
 	struct mp_intr_map *next;
 	struct mp_bus *bus;
 	int bus_pin;
@@ -58,11 +40,11 @@ struct mp_intr_map
 extern int mp_verbose;
 extern struct mp_bus *mp_busses;
 extern struct mp_intr_map *mp_intrs;
-extern int mp_nintr;
+extern int mp_nintrs;
 extern struct mp_bus *mp_isa_bus;
 extern struct mp_bus *mp_eisa_bus;
 extern int mp_nbus;
 #endif
 #endif
 
-#endif /* _X86_MPCONFIG_H */
+#endif /* _AMD64_MPCONFIG_H */

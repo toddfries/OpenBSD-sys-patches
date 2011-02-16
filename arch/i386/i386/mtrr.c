@@ -41,14 +41,20 @@ void mtrrattach(int);
 void
 mtrrattach(int num)
 {
+	int family, model, step;
+
 	if (num > 1)
 		return;
 
+	family = (cpu_id >> 8) & 0xf;
+	model  = (cpu_id >> 4) & 0xf;
+	step   = (cpu_id >> 0) & 0xf;
+
 	if (strcmp(cpu_vendor, "AuthenticAMD") == 0 &&
-	    (cpu_id & 0xf00) == 0x500 &&
-	    ((cpu_id & 0xf0) > 0x80 ||
-	     ((cpu_id & 0xf0) == 0x80 &&
-	      (cpu_id & 0xf) > 0x7))) {
+	    family == 0x5 &&
+	    (model > 0x8 ||
+	     (model == 0x8 &&
+	      step > 0x7))) {
 		mem_range_softc.mr_op = &k6_mrops;
 		
 		/* Try for i686 MTRRs */

@@ -78,7 +78,7 @@ ENTRY(mtx_enter)
 	movl	SOFF(%ebp), %ecx		# %ecx clobbered
 4:
 #ifdef DIAGNOSTIC
-	GET_CPUINFO(%edx)
+	movl	CPUVAR(SELF), %edx
 	cmpl	MTX_OWNER(%ecx), %edx
 	je	5f
 #endif

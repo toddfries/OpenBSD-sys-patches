@@ -1,4 +1,4 @@
-/*	$OpenBSD: debug.h,v 1.5 2002/03/14 01:26:34 millert Exp $	*/
+/*	$OpenBSD: debug.h,v 1.7 2004/02/10 00:41:44 tom Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff

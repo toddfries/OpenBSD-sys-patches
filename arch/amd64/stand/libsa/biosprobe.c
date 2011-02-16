@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosprobe.c,v 1.3 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: biosprobe.c,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Tobias Weingartner

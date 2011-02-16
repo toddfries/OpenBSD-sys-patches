@@ -104,12 +104,10 @@ k6_mrinit(struct mem_range_softc *sc)
 	sc->mr_cap = 0;
 	sc->mr_ndesc = 2; /* XXX (BFF) For now, we only have one msr for this */
 	sc->mr_desc = malloc(sc->mr_ndesc * sizeof(struct mem_range_desc),
-			     M_MEMDESC, M_NOWAIT);
+	    M_MEMDESC, M_NOWAIT|M_ZERO);
 	if (sc->mr_desc == NULL)
 		panic("k6_mrinit: malloc returns NULL");
-	
-	bzero(sc->mr_desc, sc->mr_ndesc * sizeof(struct mem_range_desc));
-	
+
 	reg = rdmsr(UWCCR);
 	for (d = 0; d < sc->mr_ndesc; d++) {
 		u_int32_t one = (reg & (0xffffffff << (32 * d))) >> (32 * d);

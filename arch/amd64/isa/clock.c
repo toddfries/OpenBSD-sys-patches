@@ -106,7 +106,7 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <dev/isa/isavar.h>
 #include <dev/ic/mc146818reg.h>
 #include <dev/ic/i8253reg.h>
-#include <i386/isa/nvram.h>
+#include <amd64/isa/nvram.h>
 #include <dev/clock_subr.h>
 #include <machine/specialreg.h>
 
@@ -396,31 +396,6 @@ cmoscheck(void)
 			  + mc146818_read(NULL, 0x2f));
 }
 
-#if NMCA > 0
-/*
- * Check whether the CMOS layout is PS/2 like, to be called at splclock().
- */
-static int cmoscheckps2(void);
-static int
-cmoscheckps2(void)
-{
-#if 0
-	/* Disabled until I find out the CRC checksum algorithm IBM uses */
-	int i;
-	unsigned short cksum = 0;
-
-	for (i = 0x10; i <= 0x31; i++)
-		cksum += mc146818_read(NULL, i); /* XXX softc */
-
-	return (cksum == (mc146818_read(NULL, 0x32) << 8)
-			  + mc146818_read(NULL, 0x33));
-#else
-	/* Check 'incorrect checksum' bit of IBM PS/2 Diagnostic Status Byte */
-	return ((mc146818_read(NULL, NVRAM_DIAG) & (1<<6)) == 0);
-#endif
-}
-#endif /* NMCA > 0 */
-
 /*
  * patchable to control century byte handling:
  * 1: always update
@@ -450,10 +425,6 @@ clock_expandyear(int clockyear)
 	s = splclock();
 	if (cmoscheck())
 		cmoscentury = mc146818_read(NULL, NVRAM_CENTURY);
-#if NMCA > 0
-	else if (MCA_system && cmoscheckps2())
-		cmoscentury = mc146818_read(NULL, (centb = 0x37));
-#endif
 	else
 		cmoscentury = 0;
 	splx(s);

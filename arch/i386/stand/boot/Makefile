@@ -24,10 +24,13 @@ SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
 S	=${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
-LDADD=	${LIBSA} ${LIBZ} ${LIBKERN}
-DPADD=	${LIBSA} ${LIBZ} ${LIBKERN}
+LDADD=	${LIBSA} ${LIBZ}
+DPADD=	${LIBSA} ${LIBZ}
 
 .PATH:	${S}/stand/boot
+
+.PATH:	${S}/lib/libkern/arch/i386 ${S}/lib/libkern
+SRCS+=	strlcpy.c moddi3.c divdi3.c qdivrem.c
 
 boot.bin: boot
 	objcopy -v -O binary ${PROG} boot.bin

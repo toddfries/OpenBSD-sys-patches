@@ -89,25 +89,17 @@ typedef u_long bus_size_t;
 typedef	int bus_space_tag_t;
 typedef	u_long bus_space_handle_t;
 
-#define	bus_space_map(t, a, s, f, hp)	x86_memio_map((t),(a),(s),(f),(hp))
-#define	bus_space_unmap(t, h, s)	x86_memio_unmap((t),(h),(s))
-#define bus_space_subregion(t, h, o, s, nhp)	\
-    x86_memio_subregion((t), (h), (o), (s), (nhp))
-
-int	x86_memio_map(bus_space_tag_t t, bus_addr_t addr,
+int	bus_space_map(bus_space_tag_t t, bus_addr_t addr,
     bus_size_t size, int flags, bus_space_handle_t *bshp);
 /* like map, but without extent map checking/allocation */ 
-int	_x86_memio_map(bus_space_tag_t t, bus_addr_t addr,
+int	_bus_space_map(bus_space_tag_t t, bus_addr_t addr,
     bus_size_t size, int flags, bus_space_handle_t *bshp);
 
-#define	bus_space_alloc(t,beg,end,sz,align,bound,flag,addrp,h) \
-    x86_memio_alloc((t),(beg),(end),(sz),(align),(bound),(flag),(addrp),(h))
-int	x86_memio_alloc(bus_space_tag_t t, bus_addr_t rstart,
+int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,
 	    bus_size_t boundary, int flags, bus_addr_t *addrp,
 	    bus_space_handle_t *bshp);
-#define	bus_space_free(t,h,z)	x86_memio_free((t),(h),(z))
-void	x86_memio_free(bus_space_tag_t t, bus_space_handle_t bsh,  
+void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,  
 	    bus_size_t size);
 
 /* 
@@ -117,9 +109,9 @@ void	x86_memio_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * Unmap a region of bus space.
  */
  
-void	x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
+void	bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
-void	_x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
+void	_bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size, bus_addr_t *);
 
 /* like bus_space_map(), but without extent map checking/allocation */
@@ -134,7 +126,7 @@ int	_bus_space_map(bus_space_tag_t t, bus_addr_t addr,
  * Get a new handle for a subregion of an already-mapped area of bus space.
  */
  
-int	x86_memio_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp);
 
 /*
@@ -422,6 +414,18 @@ void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t,
 void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_size_t, int);
 
+#define	BUS_SPACE_MAP_CACHEABLE		0x0001
+#define	BUS_SPACE_MAP_LINEAR		0x0002
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x0008
+
+/*
+ *	void *bus_space_vaddr(bus_space_tag_t, bus_space_handle_t);
+ *
+ * Get the kernel virtual address for the mapped bus space.
+ * Only allowed for regions mapped with BUS_SPACE_MAP_LINEAR.
+ */
+#define bus_space_vaddr(t, h) \
+	((t) == X86_BUS_SPACE_IO ? (void *)(NULL) : (void *)(h))
 /*
  * Flags used in various bus DMA methods.
  */

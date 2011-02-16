@@ -1,4 +1,4 @@
-/*	$OpenBSD: crt0.c,v 1.4 2002/03/14 01:26:34 millert Exp $	*/
+/*	$OpenBSD: crt0.c,v 1.5 2003/06/03 20:22:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997-1998 Michael Shalayeff

@@ -27,6 +27,8 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
+#include <machine/conf.h>
+#include <machine/acpiapm.h>
 #include <i386/isa/isa_machdep.h>
 
 #include <machine/cpu.h>
@@ -167,7 +169,7 @@ acpi_probe(struct device *parent, struct cfdata *match,
 	return (0);
 
 havebase:
-	aaa->aaa_pbase = ptr - handle.va + handle.pa;
+	ba->ba_acpipbase = ptr - handle.va + handle.pa;
 	acpi_unmap(&handle);
 #if NAPM > 0
 	if (apm_attached) {
@@ -176,14 +178,6 @@ havebase:
 	}
 #endif
 
-#ifdef notyet
-	/*
-	 * Disable APM if we are using ACPI
-	 */
-#if NAPM > 0 && NBIOS > 0
-	apm = NULL;
-#endif
-#endif
 	return (1);
 }
 
@@ -192,7 +186,8 @@ havebase:
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
-#ifdef ACPI_ENABLE
+	extern void (*cpuresetfn)(void);
+
 	sc->sc_interrupt = isa_intr_establish(NULL, sc->sc_fadt->sci_int,
 	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
 	acpiapm_open = acpiopen;

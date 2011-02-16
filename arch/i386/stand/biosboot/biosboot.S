@@ -190,7 +190,7 @@ ebpb:	.long	16			/* hidden sectors */
 	.word	0			/* physical disk */
 	.byte	0x29			/* signature, needed by NT */
 	.space	4, 0			/* volume serial number */
-	.ascii	"UNIX LABEL"
+	.asciz	"UNIX LABEL"
 	.asciz	"UFS 4.4"
 
 	/* boot code */
@@ -548,7 +548,7 @@ done_load:
 
 	/*
 	 * Check the magic signature at the beginning of /boot.
-	 * Since /boot is now ELF, this should be 0xFF E L F.
+	 * Since /boot is now ELF, this should be 0x7F E L F.
 	 */
 	movw	$(LOADADDR >> 4), %ax	/* Target segment */
 	movw	%ax, %es

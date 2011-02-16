@@ -113,7 +113,6 @@ _C_LABEL(splx):
  * splipi() and defers it, lands in here via splx(), and handles
  * a lower-prio one first, which needs to take the kernel lock -->
  * the sending CPU will never see the that CPU accept the IPI
- * (see pmap_tlb_shootnow).
  */
 IDTVEC(spllower)
 	_PROF_PROLOGUE

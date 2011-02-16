@@ -491,10 +491,7 @@ void
 apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 {
 	struct ioapic_pin *pp = &sc->sc_pins[pin];
-	int ovector = 0;
-	int nvector = 0;
-
-	ovector = pp->ip_vector;
+	int nvector, ovector = pp->ip_vector;
 	
 	if (maxlevel == 0) {
 		/* no vector needed. */
@@ -536,7 +533,7 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 	apic_maxlevel[pp->ip_vector] = maxlevel;
 	apic_intrhand[pp->ip_vector] = pp->ip_handler;
 
-	if (ovector) {
+	if (ovector && ovector != pp->ip_vector) {
 		/*
 		 * XXX should defer this until we're sure the old vector
 		 * doesn't have a pending interrupt on any processor.

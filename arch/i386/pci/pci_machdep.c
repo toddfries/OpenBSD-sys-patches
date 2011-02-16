@@ -98,6 +98,7 @@ extern bios_pciinfo_t *bios_pciinfo;
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
+#include <dev/pci/ppbreg.h>
 
 #include "ioapic.h"
 

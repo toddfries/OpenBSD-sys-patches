@@ -188,7 +188,6 @@ gdt_get_slot()
 		slot = gdt_next++;
 	}
 
-	gdt_count++;
 	gdt_unlock();
 	return (slot);
 }
@@ -201,7 +200,6 @@ gdt_put_slot(int slot)
 {
 
 	gdt_lock();
-	gdt_count--;
 
 	gdt[slot].gd.gd_type = SDT_SYSNULL;
 	gdt[slot].gd.gd_selector = gdt_free;
@@ -228,6 +226,7 @@ tss_free(int sel)
 	gdt_put_slot(IDXSEL(sel));
 }
 
+#ifdef USER_LDT
 /*
  * Caller must have pmap locked for both of these functions.
  */
@@ -250,3 +249,4 @@ ldt_free(struct pmap *pmap)
 
 	gdt_put_slot(slot);
 }
+#endif /* USER_LDT */

@@ -248,9 +248,7 @@ mp_cont:
 	HALTT(0x30,%ecx)
 	pushl	%ecx
 	call	_C_LABEL(cpu_hatch)
-	HALT(0x33)
-	xorl	%esi,%esi
-	jmp	_C_LABEL(idle_start)
+	/* NOTREACHED */
 
 	.data
 _C_LABEL(mp_pdirpa):

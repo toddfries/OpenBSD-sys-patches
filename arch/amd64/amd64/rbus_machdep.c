@@ -37,7 +37,6 @@
 #include <dev/cardbus/rbus.h>
 
 #include <dev/pci/pcivar.h>
-#include <arch/amd64/pci/pchbvar.h>
 
 #ifndef RBUS_MEM_START
 /* Avoid the ISA hole and everything below it. */
@@ -90,4 +89,10 @@ rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 	size = ex->ex_end - start;
 
 	return (rbus_new_root_share(pa->pa_iot, ex, start, size));
+}
+
+void
+pccbb_attach_hook(struct device *parent, struct device *self,
+    struct pci_attach_args *pa)
+{
 }

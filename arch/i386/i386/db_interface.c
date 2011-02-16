@@ -49,6 +49,7 @@
 #include <ddb/db_extern.h>
 #include <ddb/db_access.h>
 #include <ddb/db_output.h>
+#include <ddb/db_run.h>
 #include <ddb/db_var.h>
 
 #include "acpi.h"
@@ -59,7 +60,6 @@
 extern label_t	*db_recover;
 extern char *trap_type[];
 extern int trap_types;
-extern boolean_t db_cmd_loop_done;
 
 #ifdef MULTIPROCESSOR
 extern volatile int ddb_state;
@@ -214,7 +214,7 @@ db_cpuinfo_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
 	int i;
 
-	for (i = 0; i < I386_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		if (cpu_info[i] != NULL) {
 			db_printf("%c%4d: ", (i == cpu_number()) ? '*' : ' ',
 			    cpu_info[i]->ci_dev.dv_unit);
@@ -334,7 +334,7 @@ db_machine_init(void)
 
 	db_machine_commands_install(db_machine_command_table);
 #ifdef MULTIPROCESSOR
-	for (i = 0; i < I386_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		if (cpu_info[i] != NULL)
 			cpu_info[i]->ci_ddb_paused = CI_DDB_RUNNING;
 	}

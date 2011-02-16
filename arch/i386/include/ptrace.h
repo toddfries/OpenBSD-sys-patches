@@ -1,4 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.2 2000/08/05 22:07:32 niklas Exp $	*/
+/*	$OpenBSD: ptrace.h,v 1.3 2005/04/03 20:21:44 kettenis Exp $	*/
 /*	$NetBSD: ptrace.h,v 1.6 1995/08/06 05:33:23 mycroft Exp $	*/
 
 /*

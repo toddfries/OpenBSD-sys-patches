@@ -110,4 +110,9 @@ __cpu_simple_unlock(__cpu_simple_lock_t *lockp)
 
 #endif /* !LOCKDEBUG */
 
+#ifdef _KERNEL
+extern int rw_cas_486(volatile unsigned long *, unsigned long, unsigned long);
+#define rw_cas rw_cas_486
+#endif
+
 #endif /* _I386_LOCK_H_ */

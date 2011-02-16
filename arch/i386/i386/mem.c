@@ -183,9 +183,8 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				break;
 			}
 			if (zeropage == NULL) {
-				zeropage = (caddr_t)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK|M_ZERO);
 			}
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);

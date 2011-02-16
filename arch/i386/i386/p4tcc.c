@@ -103,7 +103,7 @@ p4tcc_init(int family, int step)
 int
 p4tcc_cpuspeed(int *speed)
 {
-	*speed = cpuspeed / 100 * (p4tcc_level + 12);
+	*speed = cpuspeed * (p4tcc_level + 12) / 100;
 
 	return 0;
 }

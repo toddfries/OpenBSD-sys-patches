@@ -379,7 +379,7 @@ ahc_isa_attach(struct device *parent, struct device *self, void *aux)
 #ifdef DEBUG
 	/*
 	 * Tell the user what type of interrupts we're using.
-	 * usefull for debugging irq problems
+	 * useful for debugging irq problems
 	 */
 	printf( "%s: Using %s Interrupts\n", ahc_name(ahc),
 	    ahc->pause & IRQMS ?  "Level Sensitive" : "Edge Triggered");

@@ -5,11 +5,6 @@ machine		i386		# architecture, used by config; REQUIRED
 option		SCSITERSE
 option		APM_NOPRINT
 
-option		I386_CPU	# CPU classes; at least one is REQUIRED
-option		I486_CPU
-option		I586_CPU
-option		I686_CPU
-
 option		SMALL_KERNEL
 option		NO_PROPOLICE
 
@@ -42,7 +37,7 @@ config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
 
-acpi0		at mainbus?	disable
+acpi0		at bios?
 #acpitimer*	at acpi?
 #acpihpet*	at acpi?
 #acpiac*	at acpi?
@@ -167,18 +162,18 @@ pcdisplay0	at isa?		# CGA, MDA, EGA, HGA
 wsdisplay*	at vga?
 wsdisplay*	at pcdisplay?
 
-pccom0	at isa? port 0x3f8 irq 4	# standard PC serial ports
-pccom1	at isa? port 0x2f8 irq 3
-pccom2	at isa? port 0x3e8 irq 5
-#pccom3	at isa? port 0x2e8 irq 9
+com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
+com1	at isa? port 0x2f8 irq 3
+com2	at isa? port 0x3e8 irq 5
+#com3	at isa? port 0x2e8 irq 9
 #ast0	at isa? port 0x1a0 irq 5	# AST 4-port serial cards
-#pccom*	at ast?
+#com*	at ast?
 #boca0	at isa? port 0x100 irq 5	# BOCA 8-port serial cards
-#pccom*	at boca?
+#com*	at boca?
 #rtfps0	at isa? port 0x1230 irq 10	# RT 4-port serial cards
-#pccom*	at rtfps?
-pccom*	at pcmcia?			# PCMCIA modem cards
-pccom*	at isapnp?
+#com*	at rtfps?
+com*	at pcmcia?			# PCMCIA modem cards
+com*	at isapnp?
 
 # option for using CD1400 handshaking for incoming data
 # requires a special cable that exchanges the RTS and DTR lines
@@ -206,6 +201,9 @@ scsibus* at ahb?
 ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940/3940/78?? SCSI controllers
 scsibus* at ahc?
+jmb*	at pci?			# JMicron JMB36x controllers
+ahci*	at jmb?
+pciide*	at jmb?
 ahci*	at pci?			# AHCI SATA controllers
 scsibus* at ahci?
 sili*	at pci?			# Silicon Image 3124/3132/3531 SATA controllers
@@ -301,8 +299,6 @@ atapiscsi* at wdc?
 atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
-#wt0	at isa? port 0x308 irq 5 drq 1	# Archive/Wangtek QIC tapes
-
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet series
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#
 we*	at isapnp?
@@ -383,22 +379,33 @@ jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 vte*	at pci?				# RDC R6040 Ethernet
 
 # Wireless network cards
+acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
+acx*	at cardbus?			# TI ACX100/ACX111 (802.11b/g)
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
 athn*	at pci?				# Atheros AR9k (802.11a/g/n)
 athn*	at cardbus?			# Atheros AR9k (802.11a/g/n)
 atw*	at pci?				# ADMtek ADM8211 (802.11)
 atw*	at cardbus?			# ADMtek ADM8211 (802.11)
+bwi*	at pci?				# Broadcom AirForce (802.11b/g)
+bwi*	at cardbus?			# Broadcom AirForce (802.11b/g)
 wi*	at pci?				# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
-#awi*	at pcmcia?			# Bay Networks IEEE 802.11FH
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
 ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
+ipw*	at pci?				# Intel PRO/Wireless 2100
+iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
+wpi*	at pci?				# Intel PRO/Wireless 3945ABG
+iwn*	at pci?				# Intel Wireless WiFi Link 4965AGN
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
 rtw*	at cardbus?			# Realtek 8180
+pgt*	at pci?				# Prism54 (only full-mac varients)
+pgt*	at cardbus?			# Prism54 (only full-mac varients)
+malo*	at cardbus?			# Marvell Libertas
+malo*	at pcmcia?			# Marvell 88W8385
 
 # Media Independent Interface (mii) drivers
 exphy*	at mii?				# 3Com internal PHYs

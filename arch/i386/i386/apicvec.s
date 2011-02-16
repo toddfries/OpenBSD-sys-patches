@@ -60,8 +60,9 @@ XINTR(ipi):
 	popl	CPL
 	INTRFASTEXIT
 
-	.globl XINTR(ipi_ast)
-XINTR(ipi_ast):
+	.globl	XINTR(ipi_invltlb)
+	.p2align 4,0x90
+XINTR(ipi_invltlb):
 	pushl	%eax
 	pushl	%ds
 	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
@@ -69,13 +70,12 @@ XINTR(ipi_ast):
 
 	ioapic_asm_ack()
 
-	movl	$IPL_SOFTAST, %eax
-	orl	$(1 << SIR_AST), _C_LABEL(ipending)
+	movl	%cr3, %eax
+	movl	%eax, %cr3
 
-	orl	$(LAPIC_DLMODE_FIXED|LAPIC_LVL_ASSERT|LAPIC_DEST_SELF), %eax
-	movl	%eax, _C_LABEL(local_apic) + LAPIC_ICRLO
+	lock
+	decl	tlb_shoot_wait
 
-	movl	_C_LABEL(local_apic) + LAPIC_ID, %eax
 	popl	%ds
 	popl	%eax
 	iret
@@ -183,7 +183,7 @@ XINTR(ltimer):
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
-	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty), XINTR(softast)
+	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
 XINTR(softclock):
 	pushl	$0
 	pushl	$T_ASTFLT
@@ -191,14 +191,16 @@ XINTR(softclock):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTCLOCK,CPL
-	andl	$~(1<<SIR_CLOCK),_C_LABEL(ipending)
+	andl	$~(1<<SIR_CLOCK),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(softclock)
+	pushl	$I386_SOFTINTR_SOFTCLOCK
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
@@ -212,7 +214,7 @@ XINTR(softnet):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTNET,CPL
-	andl	$~(1<<SIR_NET),_C_LABEL(ipending)
+	andl	$~(1<<SIR_NET),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
@@ -236,30 +238,20 @@ XINTR(softtty):
 	MAKE_FRAME
 	pushl	CPL
 	movl	$IPL_SOFTTTY,CPL
-	andl	$~(1<<SIR_TTY),_C_LABEL(ipending)
+	andl	$~(1<<SIR_TTY),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	call	_C_LABEL(comsoft)
+	pushl	$I386_SOFTINTR_SOFTTTY
+	call	_C_LABEL(softintr_dispatch)
+	addl	$4,%esp
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
 	decl	CPUVAR(IDEPTH)
-	jmp	_C_LABEL(Xdoreti)
-
-XINTR(softast):
-	pushl	$0
-	pushl	$T_ASTFLT
-	INTRENTRY
-	MAKE_FRAME
-	pushl	CPL
-	movl	$IPL_SOFTAST,CPL
-	andl	$~(1<<SIR_AST),_C_LABEL(ipending)
-	ioapic_asm_ack()
-	sti
 	jmp	_C_LABEL(Xdoreti)
 
 #if NIOAPIC > 0

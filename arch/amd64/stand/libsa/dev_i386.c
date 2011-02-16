@@ -35,7 +35,7 @@ extern int debug;
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
 const char bdevs[][4] = {
-	"wd", "", "fd", "wt", "sd", "st", "cd", "mcd",
+	"wd", "", "fd", "", "sd", "st", "cd", "mcd",
 	"", "", "", "", "", "", "", "scd", "", "hd", ""
 };
 const int nbdevs = nitems(bdevs);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: smpprobe.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: smpprobe.c,v 1.6 2004/03/09 19:12:13 tom Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner

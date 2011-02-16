@@ -1,4 +1,4 @@
-/*	$OpenBSD: varargs.h,v 1.4 2000/08/05 22:07:33 niklas Exp $	*/
+/*	$OpenBSD: varargs.h,v 1.5 2003/06/02 23:27:47 millert Exp $	*/
 /*	$NetBSD: varargs.h,v 1.14 1995/12/26 01:16:26 mycroft Exp $	*/
 
 /*-

@@ -40,6 +40,8 @@
 typedef void (*startfuncp)(int, int, int, int, int, int, int, int)
 	__attribute__ ((noreturn));
 
+char *bootmac = NULL;
+
 void
 run_loadfile(u_long *marks, int howto)
 {

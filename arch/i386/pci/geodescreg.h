@@ -1,4 +1,4 @@
-/*      $OpenBSD: geodescreg.h,v 1.2 2003/08/07 16:59:37 mickey Exp $     */
+/*      $OpenBSD: geodescreg.h,v 1.3 2006/02/01 13:08:12 mickey Exp $     */
 
 /*
  * Copyright (c) 2003 Markus Friedl <markus@openbsd.org>

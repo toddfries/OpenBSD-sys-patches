@@ -41,7 +41,6 @@
 
 extern volatile u_int32_t lapic_tpr;	/* Current interrupt priority level. */
 
-extern volatile u_int32_t ipending;	/* Interrupts pending. */
 extern int imask[];	/* Bitmasks telling what interrupts are blocked. */
 extern int iunmask[];	/* Bitmasks telling what interrupts are accepted. */
 
@@ -53,7 +52,7 @@ extern void Xspllower(void);
 extern int splraise(int);
 extern int spllower(int);
 extern void splx(int);
-extern void softintr(int, int);
+extern void softintr(int);
 
 /*
  * compiler barrier: prevent reordering of instructions.
@@ -75,7 +74,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -97,7 +96,7 @@ void splassert_check(int, const char *);
 
 #define _SPLX(ncpl) 			\
 	lapic_tpr = ncpl;		\
-	if (ipending & IUNMASK(ncpl))	\
+	if (curcpu()->ci_ipending & IUNMASK(ncpl))	\
 		Xspllower()
 
 /*
@@ -133,13 +132,14 @@ struct cpu_info;
 
 #ifdef MULTIPROCESSOR
 int i386_send_ipi(struct cpu_info *, int);
+int i386_fast_ipi(struct cpu_info *, int);
 void i386_broadcast_ipi(int);
 void i386_ipi_handler(void);
-void i386_ipi_microset(struct cpu_info *);
 void i386_intlock(int);
 void i386_intunlock(int);
 void i386_softintlock(void);
 void i386_softintunlock(void);
+void i386_setperf_ipi(struct cpu_info *);
 
 extern void (*ipifunc[I386_NIPI])(struct cpu_info *);
 #endif

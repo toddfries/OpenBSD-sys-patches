@@ -41,6 +41,13 @@
 #include <machine/cpufunc.h>
 #include <machine/bus.h>
 
+#include "acpicpu.h"
+
+#if NACPICPU > 0
+#include <dev/acpi/acpidev.h>
+#include <dev/acpi/acpivar.h>
+#endif
+
 #define BIOS_START			0xe0000
 #define	BIOS_LEN			0x20000
 #define BIOS_STEP			16
@@ -137,13 +144,17 @@ struct k8pnow_cpu_state *k8pnow_current_state = NULL;
 extern int setperf_prio;
 extern int perflevel;
 
-/*
- * Prototypes
- */
 int k8pnow_read_pending_wait(uint64_t *);
 int k8pnow_decode_pst(struct k8pnow_cpu_state *, uint8_t *);
 int k8pnow_states(struct k8pnow_cpu_state *, uint32_t, unsigned int, unsigned int);
 void k8pnow_transition(struct k8pnow_cpu_state *e, int);
+
+#if NACPICPU > 0
+int k8pnow_acpi_init(struct k8pnow_cpu_state *, uint64_t);
+void k8pnow_acpi_pss_changed(struct acpicpu_pss *, int);
+int k8pnow_acpi_states(struct k8pnow_cpu_state *, struct acpicpu_pss *, int,
+    uint64_t);
+#endif
 
 int
 k8pnow_read_pending_wait(uint64_t *status)
@@ -336,7 +347,8 @@ k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
 					return (k8pnow_decode_pst(cstate,
 					    p+= sizeof (struct pst_s)));
 				}
-				p += sizeof(struct pst_s) + 2 * cstate->n_states;
+				p += sizeof(struct pst_s) + 2
+				     * cstate->n_states;
 			}
 		}
 	}
@@ -452,11 +464,11 @@ k8_powernow_init(void)
 	cpuid(0x80000000, regs);
 	if (regs[0] < 0x80000007)
 		return;
-	
+
 	cpuid(0x80000007, regs);
 	if (!(regs[3] & AMD_PN_FID_VID))
 		return;
-	
+
 	/* Extended CPUID signature value */
 	cpuid(0x80000001, regs);
 
@@ -479,8 +491,14 @@ k8_powernow_init(void)
 	else
 		techname = "Cool'n'Quiet K8";
 
-	if (!k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid))
-		k8pnow_states(cstate, regs[0], maxfid, maxvid);
+#if NACPICPU > 0
+	/* If we have acpi check acpi first */
+	if (!k8pnow_acpi_init(cstate, status))
+#endif
+	{
+		if (!k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid))
+			k8pnow_states(cstate, regs[0], maxfid, maxvid);
+	}
 	if (cstate->n_states) {
 		printf("%s: %s %d MHz: speeds:",
 		    ci->ci_dev.dv_xname, techname, cpuspeed);

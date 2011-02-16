@@ -1,4 +1,4 @@
-/*	$OpenBSD: esmreg.h,v 1.9 2005/11/30 11:46:57 dlg Exp $ */
+/*	$OpenBSD: esmreg.h,v 1.10 2005/12/13 02:31:45 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>

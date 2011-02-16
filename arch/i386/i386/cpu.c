@@ -130,7 +130,7 @@ void	cpu_set_tss_gates(struct cpu_info *);
  * curproc, etc. are used early.
  */
 
-struct cpu_info *cpu_info[I386_MAXPROCS] = { &cpu_info_primary };
+struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
 void   	cpu_hatch(void *);
 void   	cpu_boot_secondary(struct cpu_info *);
@@ -236,7 +236,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	pcb->pcb_tss.tss_esp = kstack + USPACE - 16 -
 	    sizeof (struct trapframe);
 	pcb->pcb_pmap = pmap_kernel();
-	pcb->pcb_cr3 = vtophys((vaddr_t)pcb->pcb_pmap->pm_pdir);
+	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
 	/* pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdir - KERNBASE; XXX ??? */
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
@@ -284,6 +284,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		cpu_alloc_ldt(ci);
 		ci->ci_flags |= CPUF_PRESENT | CPUF_AP;
 		identifycpu(ci);
+		sched_init_cpu(ci);
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ncpus++;
@@ -315,7 +316,6 @@ cpu_init(struct cpu_info *ci)
 	if (ci->cpu_setup != NULL)
 		(*ci->cpu_setup)(ci);
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
 	 * We do this here after identifycpu() because errata may affect
 	 * what we do.
@@ -326,9 +326,8 @@ cpu_init(struct cpu_info *ci)
 	 * Enable ring 0 write protection (486 or above, but 386
 	 * no longer supported).
 	 */
-	if (ci->cpu_class >= CPUCLASS_486)
-		lcr0(rcr0() | CR0_WP);
-#endif
+	lcr0(rcr0() | CR0_WP);
+
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
@@ -349,11 +348,7 @@ cpu_init(struct cpu_info *ci)
 		if (cpu_feature & (CPUID_SSE|CPUID_SSE2))
 			lcr4(rcr4() | CR4_OSXMMEXCPT);
 	}
-#endif /* I686_CPU */
 }
-
-
-#ifdef MULTIPROCESSOR
 
 void
 patinit(struct cpu_info *ci)
@@ -396,7 +391,7 @@ cpu_boot_secondary_processors()
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i = 0; i < I386_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -417,7 +412,7 @@ cpu_init_idle_pcbs()
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i=0; i < I386_MAXPROCS; i++) {
+	for (i=0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -441,7 +436,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 		printf("%s: starting", ci->ci_dev.dv_xname);
 
 	/* XXX move elsewhere, not per CPU. */
-	mp_pdirpa = vtophys((vaddr_t)kpm->pm_pdir);
+	mp_pdirpa = kpm->pm_pdirpa;
 
 	pcb = ci->ci_idle_pcb;
 
@@ -497,6 +492,9 @@ cpu_hatch(void *v)
 		    ci->ci_dev.dv_xname, ci->ci_cpuid);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 void
@@ -557,7 +555,7 @@ cpu_set_tss_gates(struct cpu_info *ci)
 
 #if defined(DDB) && defined(MULTIPROCESSOR)
 	/*
-	 * Set up seperate handler for the DDB IPI, so that it doesn't
+	 * Set up separate handler for the DDB IPI, so that it doesn't
 	 * stomp on a possibly corrupted stack.
 	 *
 	 * XXX overwriting the gate set in db_machine_init.

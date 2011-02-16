@@ -75,3 +75,5 @@ extern bios_diskinfo_t bios_diskinfo[];
 extern u_int32_t bios_cksumlen;
 
 #define MACHINE_CMD	cmd_machine /* we have i386 specific sommands */
+
+#define CHECK_SKIP_CONF	check_skip_conf	/* we can skip boot.conf with Ctrl */

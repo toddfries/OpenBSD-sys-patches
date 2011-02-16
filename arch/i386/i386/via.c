@@ -188,6 +188,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 				cw0 = C3_CRYPT_CWLO_KEY256;
 				break;
 			default:
+				viac3_crypto_freesession(sesn);
 				return (EINVAL);
 			}
 			cw0 |= C3_CRYPT_CWLO_ALG_AES | C3_CRYPT_CWLO_KEYGEN_SW |
@@ -201,7 +202,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			    c->cri_klen);
 			rijndaelKeySetupDec(ses->ses_dkey, c->cri_key,
 			    c->cri_klen);
-			for (i = 0; i < 4 * (MAXNR + 1); i++) {
+			for (i = 0; i < 4 * (AES_MAXROUNDS + 1); i++) {
 				ses->ses_ekey[i] = ntohl(ses->ses_ekey[i]);
 				ses->ses_dkey[i] = ntohl(ses->ses_dkey[i]);
 			}
@@ -226,14 +227,12 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 		case CRYPTO_SHA2_512_HMAC:
 			axf = &auth_hash_hmac_sha2_512_256;
 		authcommon:
-			MALLOC(swd, struct swcr_data *,
-			    sizeof(struct swcr_data), M_CRYPTO_DATA,
-			    M_NOWAIT);
+			swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
+			    M_NOWAIT|M_ZERO);
 			if (swd == NULL) {
 				viac3_crypto_freesession(sesn);
 				return (ENOMEM);
 			}
-			bzero(swd, sizeof(struct swcr_data));
 			ses->swd = swd;
 
 			swd->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
@@ -275,6 +274,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 
 			break;
 		default:
+			viac3_crypto_freesession(sesn);
 			return (EINVAL);
 		}
 	}
@@ -310,7 +310,7 @@ viac3_crypto_freesession(u_int64_t tid)
 			explicit_bzero(swd->sw_octx, axf->ctxsize);
 			free(swd->sw_octx, M_CRYPTO_DATA);
 		}
-		FREE(swd, M_CRYPTO_DATA);
+		free(swd, M_CRYPTO_DATA);
 	}
 
 	explicit_bzero(&sc->sc_sessions[sesn], sizeof(sc->sc_sessions[sesn]));
@@ -455,6 +455,10 @@ viac3_crypto_process(struct cryptop *crp)
 		goto out;
 	}
 	ses = &sc->sc_sessions[sesn];
+	if (ses->ses_used == 0) {
+		err = EINVAL;
+		goto out;
+	}
 
 	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
 		switch (crd->crd_alg) {
@@ -488,7 +492,6 @@ out:
 
 #endif /* CRYPTO */
 
-#if defined(I686_CPU)
 /*
  * Note, the VIA C3 Nehemiah provides 4 internal 8-byte buffers, which
  * store random data, and can be accessed a lot quicker than waiting
@@ -520,6 +523,9 @@ viac3_rnd(void *v)
 	struct timeout *tmo = v;
 	unsigned int *p, i, rv, creg0, len = VIAC3_RNG_BUFSIZ;
 	static int buffer[VIAC3_RNG_BUFSIZ + 2];	/* XXX why + 2? */
+#ifdef MULTIPROCESSOR
+	int s = splipi();
+#endif
 
 	creg0 = rcr0();		/* Permit access to SIMD/FPU path */
 	lcr0(creg0 & ~(CR0_EM|CR0_TS));
@@ -535,10 +541,12 @@ viac3_rnd(void *v)
 
 	lcr0(creg0);
 
+#ifdef MULTIPROCESSOR
+	splx(s);
+#endif
+
 	for (i = 0, p = buffer; i < VIAC3_RNG_BUFSIZ; i++, p++)
 		add_true_randomness(*p);
 
 	timeout_add_msec(tmo, 10);
 }
-
-#endif /* defined(I686_CPU) */

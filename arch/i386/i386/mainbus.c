@@ -63,10 +63,7 @@
 #include <machine/biosvar.h>
 #endif
 
-#if NACPI > 0
-#include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
-#endif
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
@@ -86,12 +83,6 @@
 
 #if NVESABIOS > 0
 #include <dev/vesa/vesabiosvar.h>
-#endif
-
-#if 0
-#ifdef SMP /* XXX MULTIPROCESSOR */
-#include <machine/mp.h>
-#endif
 #endif
 
 int	mainbus_match(struct device *, void *, void *);
@@ -118,17 +109,11 @@ union mainbus_attach_args {
 #endif
 	struct cpu_attach_args mba_caa;
 	struct apic_attach_args	aaa_caa;
-#if NACPI > 0
-	struct acpi_attach_args mba_aaa;
-#endif
 #if NIPMI > 0
 	struct ipmi_attach_args mba_iaa;
 #endif
 #if NESM > 0
 	struct esm_attach_args mba_eaa;
-#endif
-#if NSOFTRAID > 0
-	struct sr_attach_args mba_maa;
 #endif
 };
 
@@ -155,29 +140,16 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	union mainbus_attach_args	mba;
 	extern void			(*setperf_setup)(struct cpu_info *);
+	extern void			(*cpusensors_setup)(struct cpu_info *);
 
 	printf("\n");
 
 #if NBIOS > 0
 	{
-		mba.mba_bios.bios_dev = "bios";
-		mba.mba_bios.bios_iot = I386_BUS_SPACE_IO;
-		mba.mba_bios.bios_memt = I386_BUS_SPACE_MEM;
+		mba.mba_bios.ba_name = "bios";
+		mba.mba_bios.ba_iot = I386_BUS_SPACE_IO;
+		mba.mba_bios.ba_memt = I386_BUS_SPACE_MEM;
 		config_found(self, &mba.mba_bios, mainbus_print);
-	}
-#endif
-#if NACPI > 0
-#if NPCI > 0
-	if (pci_mode_detect() != 0)
-#endif
-	{
-		memset(&mba.mba_aaa, 0, sizeof(mba.mba_aaa));
-		mba.mba_aaa.aaa_name = "acpi";
-		mba.mba_aaa.aaa_iot = I386_BUS_SPACE_IO;
-		mba.mba_aaa.aaa_memt = I386_BUS_SPACE_MEM;
-
-		if (acpi_probe(self, aux, &mba.mba_aaa))
-			config_found(self, &mba.mba_aaa, mainbus_print);
 	}
 #endif
 
@@ -227,26 +199,18 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 			setperf_setup(&cpu_info_primary);
 	}
 
+#ifdef MULTIPROCESSOR
+	mp_setperf_init();
+#endif
+
+	if (cpusensors_setup != NULL)
+		cpusensors_setup(&cpu_info_primary);
+
 #if NVESABIOS > 0
 	if (vbeprobe())	{
 		mba.mba_busname = "vesabios";
 		config_found(self, &mba.mba_busname, NULL);
 	}
-#endif
-
-#if 0
-#ifdef SMP
-	if (bios_smpinfo != NULL) {
-		struct mp_float *mp = bios_smpinfo;
-
-		printf("%s: MP 1.%d configuration %d\n", self->dv_xname,
-		    mp->revision, mp->feature1);
-	}
-#ifdef CPU_DEBUG
-	else
-		printf ("%s: No MP configuration found.", self->dv_xname);
-#endif
-#endif
 #endif
 
 #if NESM > 0

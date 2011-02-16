@@ -103,8 +103,8 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 #include <dev/ic/mc146818reg.h>
+#include <dev/ic/i8253reg.h>
 #include <i386/isa/nvram.h>
-#include <i386/isa/timerreg.h>
 
 void	spinwait(int);
 int	clockintr(void *);
@@ -119,12 +119,8 @@ void	rtcdrain(void *);
 u_int mc146818_read(void *, u_int);
 void mc146818_write(void *, u_int, u_int);
 
-#if defined(I586_CPU) || defined(I686_CPU)
 int cpuspeed;
-#endif
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 int clock_broken_latch;
-#endif
 
 /* Timecounter on the i8254 */
 uint32_t i8254_lastcount;
@@ -249,7 +245,6 @@ int
 gettick(void)
 {
 
-#if defined(I586_CPU) || defined(I686_CPU)
 	if (clock_broken_latch) {
 		int v1, v2, v3;
 		int w1, w2, w3;
@@ -261,12 +256,12 @@ gettick(void)
 
 		disable_intr();
 
-		v1 = inb(TIMER_CNTR0);
-		v1 |= inb(TIMER_CNTR0) << 8;
-		v2 = inb(TIMER_CNTR0);
-		v2 |= inb(TIMER_CNTR0) << 8;
-		v3 = inb(TIMER_CNTR0);
-		v3 |= inb(TIMER_CNTR0) << 8;
+		v1 = inb(IO_TIMER1 + TIMER_CNTR0);
+		v1 |= inb(IO_TIMER1 + TIMER_CNTR0) << 8;
+		v2 = inb(IO_TIMER1 + TIMER_CNTR0);
+		v2 |= inb(IO_TIMER1 + TIMER_CNTR0) << 8;
+		v3 = inb(IO_TIMER1 + TIMER_CNTR0);
+		v3 |= inb(IO_TIMER1 + TIMER_CNTR0) << 8;
 
 		enable_intr();
 
@@ -301,9 +296,7 @@ gettick(void)
 				return (v2);
 		}
 		return (v3);
-	} else
-#endif
-	{
+	} else {
 		u_char lo, hi;
 		u_long ef;
 
@@ -311,9 +304,9 @@ gettick(void)
 		ef = read_eflags();
 		disable_intr();
 		/* Select counter 0 and latch it. */
-		outb(TIMER_MODE, TIMER_SEL0 | TIMER_LATCH);
-		lo = inb(TIMER_CNTR0);
-		hi = inb(TIMER_CNTR0);
+		outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_LATCH);
+		lo = inb(IO_TIMER1 + TIMER_CNTR0);
+		hi = inb(IO_TIMER1 + TIMER_CNTR0);
 
 		write_eflags(ef);
 		mtx_leave(&timer_mutex);
@@ -380,7 +373,6 @@ i8254_delay(int n)
 	}
 }
 
-#if defined(I586_CPU) || defined(I686_CPU)
 void
 calibrate_cyclecounter(void)
 {
@@ -391,7 +383,6 @@ calibrate_cyclecounter(void)
 	__asm __volatile("rdtsc" : "=A" (count));
 	cpuspeed = ((count - last_count) + 999999) / 1000000;
 }
-#endif
 
 void
 i8254_initclocks(void)
@@ -736,9 +727,9 @@ i8254_get_timecount(struct timecounter *tc)
 	ef = read_eflags();
 	disable_intr();
 
-	outb(TIMER_MODE, TIMER_SEL0 | TIMER_LATCH);
-	lo = inb(TIMER_CNTR0);
-	hi = inb(TIMER_CNTR0);
+	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_LATCH);
+	lo = inb(IO_TIMER1 + TIMER_CNTR0);
+	hi = inb(IO_TIMER1 + TIMER_CNTR0);
 
 	count = rtclock_tval - ((hi << 8) | lo);
 

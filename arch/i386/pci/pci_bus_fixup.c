@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_bus_fixup.c,v 1.8 2001/01/27 04:59:40 mickey Exp $	*/
+/*	$OpenBSD: pci_bus_fixup.c,v 1.9 2006/08/18 22:18:18 kettenis Exp $	*/
 /*	$NetBSD: pci_bus_fixup.c,v 1.1 1999/11/17 07:32:58 thorpej Exp $  */
 
 /*

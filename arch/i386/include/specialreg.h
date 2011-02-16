@@ -177,6 +177,8 @@
 #define P6MSR_CTR0		0x0c1
 #define P6MSR_CTR1		0x0c2
 #define MSR_FSB_FREQ		0x0cd	/* Core Duo/Solo only */
+#define MSR_TEMPERATURE_TARGET	0x0ee
+#define MSR_TEMPERATURE_TARGET_LOW_BIT	0x40000000
 #define MSR_MTRRcap		0x0fe
 #define	MSR_BBL_CR_ADDR		0x116	/* PII+ only */
 #define	MSR_BBL_CR_DECC		0x118	/* PII+ only */
@@ -197,6 +199,8 @@
 #define MSR_THERM_CONTROL	0x19a
 #define MSR_THERM_INTERRUPT	0x19b
 #define MSR_THERM_STATUS	0x19c
+#define MSR_THERM_STATUS_VALID_BIT	0x80000000
+#define MSR_THERM_STATUS_TEMP(msr)	((msr >> 16) & 0x7f)
 #define MSR_THERM2_CTL		0x19d	/* Pentium M */
 #define MSR_MISC_ENABLE		0x1a0
 #define MSR_DEBUGCTLMSR		0x1d9
@@ -261,6 +265,14 @@
 
 /* AMD MSRs */
 #define MSR_K6_EPMR		0xc0000086
+#define MSR_K7_EVNTSEL0		0xc0010000
+#define MSR_K7_EVNTSEL1		0xc0010001
+#define MSR_K7_EVNTSEL2		0xc0010002
+#define MSR_K7_EVNTSEL3		0xc0010003
+#define MSR_K7_PERFCTR0		0xc0010004
+#define MSR_K7_PERFCTR1		0xc0010005
+#define MSR_K7_PERFCTR2		0xc0010006
+#define MSR_K7_PERFCTR3		0xc0010007
 
 /*
  * AMD K8 (Opteron) MSRs.

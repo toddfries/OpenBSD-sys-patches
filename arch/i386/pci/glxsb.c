@@ -42,6 +42,8 @@
 #ifdef CRYPTO
 #include <crypto/cryptodev.h>
 #include <crypto/rijndael.h>
+#include <crypto/xform.h>
+#include <crypto/cryptosoft.h>
 #endif
 
 #define SB_GLD_MSR_CAP		0x58002000	/* RO - Capabilities */
@@ -193,7 +195,6 @@ struct cfdriver glxsb_cd = {
 #define	GLXSB_SID(crd,ses)		(((crd) << 28) | ((ses) & 0x0fffffff))
 
 static struct glxsb_softc *glxsb_sc;
-extern int i386_has_xcrypt;
 
 int glxsb_crypto_setup(struct glxsb_softc *);
 int glxsb_crypto_newsession(uint32_t *, struct cryptoini *);
@@ -333,6 +334,12 @@ glxsb_crypto_setup(struct glxsb_softc *sc)
 
 	bzero(algs, sizeof(algs));
 	algs[CRYPTO_AES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_MD5_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_SHA1_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_RIPEMD160_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_SHA2_256_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_SHA2_384_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_SHA2_512_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 
 	sc->sc_cid = crypto_get_driverid(0);
 	if (sc->sc_cid < 0)
@@ -359,9 +366,7 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 	struct swcr_data	*swd;
 	int sesn, i;
 
-	if (sc == NULL || sidp == NULL || cri == NULL ||
-	    cri->cri_next != NULL || cri->cri_alg != CRYPTO_AES_CBC ||
-	    cri->cri_klen != 128)
+	if (sc == NULL || sidp == NULL || cri == NULL)
 		return (EINVAL);
 
 	for (sesn = 0; sesn < sc->sc_nsessions; sesn++) {
@@ -632,9 +637,6 @@ static int
 glxsb_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
     struct glxsb_session *ses, struct glxsb_softc *sc, caddr_t buf)
 {
-	struct glxsb_softc *sc = glxsb_sc;
-	struct glxsb_session *ses;
-	struct cryptodesc *crd;
 	char *op_src, *op_dst;
 	uint32_t op_psrc, op_pdst;
 	uint8_t op_iv[SB_AES_BLOCK_SIZE];
@@ -642,28 +644,11 @@ glxsb_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 	int len, tlen, xlen;
 	int offset;
 	uint32_t control;
-	int s;
 
-	s = splnet();
-
-	if (crp == NULL || crp->crp_callback == NULL) {
+	if (crd == NULL || (crd->crd_len % SB_AES_BLOCK_SIZE) != 0) {
 		err = EINVAL;
 		goto out;
 	}
-	crd = crp->crp_desc;
-	if (crd == NULL || crd->crd_next != NULL ||
-	    crd->crd_alg != CRYPTO_AES_CBC ||
-	    (crd->crd_len % SB_AES_BLOCK_SIZE) != 0) {
-		err = EINVAL;
-		goto out;
-	}
-
-	sesn = GLXSB_SESSION(crp->crp_sid);
-	if (sesn >= sc->sc_nsessions) {
-		err = EINVAL;
-		goto out;
-	}
-	ses = &sc->sc_sessions[sesn];
 
 	/* How much of our buffer will we need to use? */
 	xlen = crd->crd_len > GLXSB_MAX_AES_LEN ?
@@ -831,7 +816,6 @@ glxsb_crypto_process(struct cryptop *crp)
 		}
 	}
 
-	bzero(sc->sc_dma.dma_vaddr, xlen * 2);
 out:
 	crp->crp_etype = err;
 	crypto_done(crp);

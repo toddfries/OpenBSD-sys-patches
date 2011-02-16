@@ -54,6 +54,9 @@
 #include <sys/device.h>
 #include <sys/lock.h>
 #include <sys/sched.h>
+#include <sys/sensors.h>
+
+#ifdef _KERNEL
 
 struct x86_64_tss;
 struct cpu_info {
@@ -103,7 +106,6 @@ struct cpu_info {
 	void (*ci_info)(struct cpu_info *);
 
 	int		ci_want_resched;
-	int		ci_astpending;
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
 
@@ -170,7 +172,7 @@ extern void need_resched(struct cpu_info *);
 
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
 
-extern struct cpu_info *cpu_info[X86_MAXPROCS];
+extern struct cpu_info *cpu_info[MAXCPUS];
 
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
@@ -179,7 +181,7 @@ void cpu_unidle(struct cpu_info *);
 
 #else /* !MULTIPROCESSOR */
 
-#define X86_MAXPROCS		1
+#define MAXCPUS		1
 
 #ifdef _KERNEL
 extern struct cpu_info cpu_info_primary;
@@ -199,6 +201,8 @@ extern struct cpu_info cpu_info_primary;
 
 #endif	/* MULTIPROCESSOR */
 
+#endif /* _KERNEL */
+
 #include <machine/psl.h>
 
 #ifdef MULTIPROCESSOR
@@ -208,7 +212,6 @@ extern struct cpu_info cpu_info_primary;
 #define aston(p)	((p)->p_md.md_astpending = 1)
 
 #define curpcb		curcpu()->ci_curpcb
-#define curproc		curcpu()->ci_curproc
 
 /*
  * Arguments to hardclock, softclock and statclock
@@ -311,8 +314,16 @@ void x86_bus_space_init(void);
 void x86_bus_space_mallocok(void);
 
 /* powernow-k8.c */
-void k8_powernow_init(void);
+void k8_powernow_init(struct cpu_info *);
 void k8_powernow_setperf(int);
+
+void est_init(struct cpu_info *);
+void est_setperf(int);
+
+#ifdef MULTIPROCESSOR
+/* mp_setperf.c */
+void mp_setperf_init(void);
+#endif
 
 #endif /* _KERNEL */
 

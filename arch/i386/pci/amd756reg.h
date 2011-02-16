@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: amd756reg.h,v 1.1 2000/11/07 18:21:22 mickey Exp $	*/
 /*	$NetBSD$	*/
 
 /*

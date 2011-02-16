@@ -15,12 +15,15 @@ LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
 CLEANFILES+=	crt0.o ${PROG}.whole
 SRCS=	srt0.S
 
-SRCS+=	cdboot.c cmd.c vars.c bootarg.c conf.c
+SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
 S	=${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
-LDADD=	${LIBSA} ${LIBZ} ${LIBKERN}
-DPADD=	${LIBSA} ${LIBZ} ${LIBKERN}
+LDADD=	${LIBSA} ${LIBZ}
+DPADD=	${LIBSA} ${LIBZ}
+
+.PATH:	${S}/lib/libkern/arch/i386 ${S}/lib/libkern
+SRCS+=	strlcpy.c moddi3.c divdi3.c qdivrem.c
 
 .PATH:	${S}/stand/boot
 
@@ -44,5 +47,6 @@ CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
 CPPFLAGS+=-DLINKADDR=${LINKADDR}
 CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD
 CFLAGS+=-DOSREV=\"${OSREV}\" -DMACHINE=\"${MACHINE}\"
+CFLAGS+=-DKERNEL=\"/${OSREV}/${MACHINE}/bsd.rd\"
 #AFLAGS+=-Wa,-R
 # AFLAGS+=-Wa,-a

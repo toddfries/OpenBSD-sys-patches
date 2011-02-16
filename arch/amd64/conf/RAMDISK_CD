@@ -29,13 +29,14 @@ option		BOOT_CONFIG	# boot-time kernel config
 option		CRYPTO		# Cryptographic framework
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3584
+option		MINIROOTSIZE=4480
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
+bios0	at mainbus?
 
-acpi0		at mainbus?	disable
+acpi0		at bios?
 #acpitimer*	at acpi?
 #acpihpet*	at acpi?
 #acpiac*	at acpi?
@@ -158,6 +159,9 @@ com2	at isa? port 0x3e8 irq 5
 #scsibus* at bha?
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
+jmb*	at pci?			# JMicron JMB36x controllers
+ahci*	at jmb?
+pciide*	at jmb?
 ahci*	at pci?			# AHCI SATA controllers
 scsibus* at ahci?
 sili*	at pci?			# Silicon Image 3124/3132/3531 SATA controllers
@@ -293,22 +297,34 @@ lii*	at pci?			# Attansic L2 Ethernet
 jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
 
 # Wireless network cards
+acx*	at pci?			# TI ACX100/ACX111 (802.11b/g)
+acx*	at cardbus?		# TI ACX100/ACX111 (802.11b/g)
 ath*	at pci?			# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
 athn*	at pci?				# Atheros AR9k (802.11a/g/n)
 athn*	at cardbus?			# Atheros AR9k (802.11a/g/n)
 atw*	at pci?			# ADMtek ADM8211 (802.11)
 atw*	at cardbus?		# ADMtek ADM8211 (802.11)
+bwi*	at pci?			# Broadcom AirForce (802.11b/g)
+bwi*	at cardbus?		# Broadcom AirForce (802.11b/g)
 wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
-#awi*	at pcmcia?		# Bay Networks IEEE 802.11FH
 an*	at pcmcia?		# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?		# Xircom Netwave
 #ray*	at pcmcia?		# Raylink Aviator2.4/Pro 802.11FH
+ipw*	at pci?			# Intel PRO/Wireless 2100
+iwi*	at pci?			# Intel PRO/Wireless 2200BG/2915ABG
+wpi*	at pci?			# Intel PRO/Wireless 3945ABG
+iwn*	at pci?			# Intel Wireless WiFi Link 4965AGN
 ral*	at pci?			# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?		# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?			# Realtek 8180
 rtw*	at cardbus?		# Realtek 8180
+pgt*	at pci?			# Prism54 (only full-mac varients)
+pgt*	at cardbus?		# Prism54 (only full-mac varients)
+malo*	at pci?			# Marvell 88W8385
+malo*	at cardbus?		# Marvell Libertas
+malo*	at pcmcia?		# Marvell 88W8385
 
 # Media Independent Interface (mii) drivers
 exphy*	at mii?			# 3Com internal PHYs

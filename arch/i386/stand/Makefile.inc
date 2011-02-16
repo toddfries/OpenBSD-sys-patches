@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.37 2005/07/30 14:32:46 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.40 2007/11/26 10:26:02 deraadt Exp $
 
 CFLAGS=${DEBUG} ${COPTS} -Os -Wall -Werror
 CFLAGS+=	-fno-stack-protector
@@ -27,7 +27,7 @@ CLEANFILES+=	machine
 SACFLAGS+=-nostdinc -fno-builtin -fpack-struct
 .endif
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ X$(S) = X -o -h machine ] || ln -s $(S)/arch/i386/include machine)
 .endif
@@ -42,11 +42,6 @@ CPPFLAGS+=-I${SADIR}/etc/${__objdir}
 LIBSA=${SADIR}/libsa/libsa.a
 .else
 LIBSA=${SADIR}/libsa/${__objdir}/libsa.a
-.endif
-.if exists(${SADIR}/libkern/libkern.a)
-LIBKERN=${SADIR}/libkern/libkern.a
-.else
-LIBKERN=${SADIR}/libkern/${__objdir}/libkern.a
 .endif
 .if exists(${SADIR}/libz/libz.a)
 LIBZ=${SADIR}/libz/libz.a

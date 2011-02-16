@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.c,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
+/*	$OpenBSD: time.c,v 1.2 2004/08/18 19:13:07 tom Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff

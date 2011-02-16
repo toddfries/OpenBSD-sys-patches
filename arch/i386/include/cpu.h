@@ -61,18 +61,20 @@
 #define clockframe intrframe
 
 #include <sys/device.h>
-#include <sys/lock.h>                  /* will also get LOCKDEBUG */
+#include <sys/lock.h>			/* will also get LOCKDEBUG */
 #include <sys/sched.h>
+#include <sys/sensors.h>
 
 struct intrsource;
 
+#ifdef _KERNEL
 /* XXX stuff to move to cpuvar.h later */
 struct cpu_info {
 	struct device ci_dev;		/* our device */
 	struct cpu_info *ci_self;	/* pointer to this structure */
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 	struct cpu_info *ci_next;	/* next cpu */
-	
+
 	/* 
 	 * Public members. 
 	 */
@@ -112,8 +114,7 @@ struct cpu_info {
 	volatile u_long	ci_flags;	/* flags; see below */
 	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
 	int		sc_apic_version;/* local APIC version */
-	u_int64_t	ci_tscbase;
-	
+
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
 	u_int32_t	ci_signature;		/* X86 cpuid type */
@@ -138,6 +139,15 @@ struct cpu_info {
 #define CI_DDB_STOPPED		2
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
+
+	volatile int ci_setperf_state;
+#define CI_SETPERF_READY	0
+#define CI_SETPERF_SHOULDSTOP	1
+#define CI_SETPERF_INTRANSIT	2
+#define CI_SETPERF_DONE		3
+
+	struct ksensordev	ci_sensordev;
+	struct ksensor		ci_sensor;
 };
 
 /*
@@ -173,19 +183,30 @@ extern struct cpu_info *cpu_info_list;
 
 #ifdef MULTIPROCESSOR
 
-#define I386_MAXPROCS		32	/* because we use a bitmask */
+#define MAXCPUS			32	/* because we use a bitmask */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
 #define CPU_START_CLEANUP(_ci)	((_ci)->ci_func->cleanup(_ci))
 
-#define cpu_number()		(i82489_readreg(LAPIC_ID)>>LAPIC_ID_SHIFT)
-#define	curcpu()		(cpu_info[cpu_number()])
+static struct cpu_info *curcpu(void);
+
+__inline static struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	/* Can't include sys/param.h for offsetof() since it includes us */
+	__asm __volatile("movl %%fs:%1, %0" :
+		"=r" (ci) : "m"
+		(*(struct cpu_info * const *)&((struct cpu_info *)0)->ci_self));
+	return ci;
+}
+#define cpu_number() 		(curcpu()->ci_cpuid)
 
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
 
-extern struct cpu_info	*cpu_info[I386_MAXPROCS];
-extern u_long		 cpus_running;
+extern struct cpu_info	*cpu_info[MAXCPUS];
 
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
@@ -194,7 +215,7 @@ void cpu_unidle(struct cpu_info *);
 
 #else /* MULTIPROCESSOR */
 
-#define I386_MAXPROCS		1
+#define MAXCPUS			1
 
 #define cpu_number()		0
 #define	curcpu()		(&cpu_info_primary)
@@ -204,6 +225,8 @@ void cpu_unidle(struct cpu_info *);
 #define cpu_unidle(ci)
 
 #endif
+
+#define aston(p)	((p)->p_md.md_astpending = 1)
 
 #define curpcb			curcpu()->ci_curpcb
 
@@ -225,8 +248,6 @@ extern void need_resched(struct cpu_info *);
  */
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_eip)
 
-void aston(struct proc *);
-
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the i386, request an ast to send us
@@ -238,7 +259,7 @@ void aston(struct proc *);
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define signotify(p)		aston(p)
+void signotify(struct proc *);
 
 /*
  * We need a machine-independent name for this.
@@ -249,12 +270,10 @@ struct timeval;
 #define	DELAY(x)		(*delay_func)(x)
 #define delay(x)		(*delay_func)(x)
 
-#if defined(I586_CPU) || defined(I686_CPU)
 /*
  * High resolution clock support (Pentium only)
  */
 void	calibrate_cyclecounter(void);
-#endif
 
 /*
  * pull in #defines for kinds of processors
@@ -285,7 +304,6 @@ struct cpu_cpuid_feature {
 	const char *feature_name;
 };
 
-#ifdef _KERNEL
 /* locore.s */
 extern int cpu;
 extern int cpu_id;
@@ -299,25 +317,36 @@ extern int cpu_cache_eax;
 extern int cpu_cache_ebx;
 extern int cpu_cache_ecx;
 extern int cpu_cache_edx;
+
 /* machdep.c */
 extern int cpu_apmhalt;
 extern int cpu_class;
 extern char cpu_model[];
 extern const struct cpu_nocpuid_nameclass i386_nocpuid_cpus[];
 extern const struct cpu_cpuid_nameclass i386_cpuid_cpus[];
+extern void (*cpu_idle_enter_fcn)(void);
+extern void (*cpu_idle_cycle_fcn)(void);
+extern void (*cpu_idle_leave_fcn)(void);
+
 /* apm.c */
 extern int cpu_apmwarn;
 
-#if defined(I586_CPU) || defined(I686_CPU)
 extern int cpuspeed;
+
+#if !defined(SMALL_KERNEL)
+#define BUS66  6667
+#define BUS100 10000
+#define BUS133 13333
+#define BUS166 16667
+#define BUS200 20000
+#define BUS266 26667
+#define BUS333 33333
 extern int bus_clock;
 #endif
 
-#ifdef I586_CPU
 /* F00F bug fix stuff for pentium cpu */
 extern int cpu_f00f_bug;
 void fix_f00f(void);
-#endif
 
 /* dkcsum.c */
 void	dkcsumattach(void);
@@ -358,29 +387,17 @@ void	i8254_inittimecounter_simple(void);
 
 #if !defined(SMALL_KERNEL)
 /* est.c */
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void	est_init(const char *, int);
 void	est_setperf(int);
-#endif
-
 /* longrun.c */
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
 void	longrun_init(void);
 void	longrun_setperf(int);
-#endif
-
 /* p4tcc.c */
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void	p4tcc_init(int, int);
 void	p4tcc_setperf(int);
-#endif
-
-#if !defined(SMALL_KERNEL) && defined(I586_CPU)
 /* powernow.c */
 void	k6_powernow_init(void);
 void	k6_powernow_setperf(int);
-#endif
-#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 /* powernow-k7.c */
 void	k7_powernow_init(void);
 void	k7_powernow_setperf(int);
@@ -411,6 +428,11 @@ void	pmap_bootstrap(vaddr_t);
 
 /* vm_machdep.c */
 int	kvtop(caddr_t);
+
+#ifdef MULTIPROCESSOR
+/* mp_setperf.c */
+void	mp_setperf_init(void);
+#endif
 
 #ifdef VM86
 /* vm86.c */

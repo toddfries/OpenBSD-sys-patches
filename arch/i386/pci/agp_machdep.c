@@ -65,27 +65,6 @@ void	intagp_dma_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 	    bus_size_t, int);
 #endif
 
-const struct agp_product agp_products[] = {
-	{ PCI_VENDOR_ALI, -1, agp_ali_attach },
-	{ PCI_VENDOR_AMD, -1, agp_amd_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82810_GC, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82810_DC100_GC, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82810E_GC, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82815_FULL_GRAPH, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830MP_IV, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82852GM_AGP, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865_IGD, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IV, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_IGD, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_IGD_1, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_IGD, agp_i810_attach },
-	{ PCI_VENDOR_INTEL, -1, agp_intel_attach },
-	{ PCI_VENDOR_SIS, -1, agp_sis_attach },
-	{ PCI_VENDOR_VIATECH, -1, agp_via_attach },
-	{ 0, 0, NULL }
-};
-
 void
 agp_flush_cache(void)
 {

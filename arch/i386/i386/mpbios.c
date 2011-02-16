@@ -638,8 +638,7 @@ mpbios_scan(struct device *self)
 		}
 
 		mp_busses = malloc(sizeof(struct mp_bus) * mp_nbus,
-		    M_DEVBUF, M_NOWAIT);
-		memset(mp_busses, 0, sizeof(struct mp_bus) * mp_nbus);
+		    M_DEVBUF, M_NOWAIT|M_ZERO);
 		mp_intrs = malloc(sizeof(struct mp_intr_map) * intr_cnt,
 		    M_DEVBUF, M_NOWAIT);
 
@@ -1050,7 +1049,7 @@ mpbios_ioapic(const u_int8_t *ent, struct device *self)
 	aaa.aaa_name = "ioapic";
 	aaa.apic_id = entry->apic_id;
 	aaa.apic_version = entry->apic_version;
-	aaa.apic_address = (paddr_t)entry->apic_address;
+	aaa.apic_address = (u_int32_t)entry->apic_address;
 	aaa.apic_vecbase = -1;
 	aaa.flags = (mp_fps->mpfb2 & 0x80) ? IOAPIC_PICMODE : IOAPIC_VWIRE;
 

@@ -65,6 +65,7 @@ syscall(struct trapframe *frame)
 	int nsys;
 	size_t argsize, argoff;
 	register_t code, args[9], rval[2], *argp;
+	int lock;
 
 	uvmexp.syscalls++;
 	p = curproc;
@@ -123,24 +124,36 @@ syscall(struct trapframe *frame)
 		}
 	}
 
-	KERNEL_PROC_LOCK(p);
+	lock = !(callp->sy_flags & SY_NOLOCK);
+
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, argp);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
+	if (KTRPOINT(p, KTR_SYSCALL)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsyscall(p, code, callp->sy_argsize, argp);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
-
 	rval[0] = 0;
 	rval[1] = frame->tf_rdx;
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
+		KERNEL_PROC_LOCK(p);
 		error = systrace_redirect(code, p, argp, rval);
-	else
+		KERNEL_PROC_UNLOCK(p);
+	} else
 #endif
+	{
+		if (lock)
+			KERNEL_PROC_LOCK(p);
 		error = (*callp->sy_call)(p, argp, rval);
-	KERNEL_PROC_UNLOCK(p);
+		if (lock)
+			KERNEL_PROC_UNLOCK(p);
+	}
 	switch (error) {
 	case 0:
 		frame->tf_rax = rval[0];

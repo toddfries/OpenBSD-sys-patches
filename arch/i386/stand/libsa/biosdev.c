@@ -266,11 +266,11 @@ biosd_io(int rw, bios_diskinfo_t *bd, daddr_t off, int nsect, void *buf)
 
 	/*
 	 * Use a bounce buffer to not cross 64k DMA boundary, and to
-	 * not access above 1 MB.
+	 * not access 1 MB or above.
 	 */
 	if (((((u_int32_t)buf) & ~0xffff) !=
 	    (((u_int32_t)buf + bbsize) & ~0xffff)) ||
-	    (((u_int32_t)buf) > 0x100000)) {
+	    (((u_int32_t)buf) >= 0x100000)) {
 		/*
 		 * XXX we believe that all the io is buffered
 		 * by fs routines, so no big reads anyway

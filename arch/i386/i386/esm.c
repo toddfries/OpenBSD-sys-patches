@@ -856,11 +856,11 @@ esm_make_sensors(struct esm_softc *sc, struct esm_devmap *devmap,
 			break;
 		}
 
-		es = malloc(sizeof(struct esm_sensor), M_DEVBUF, M_NOWAIT);
+		es = malloc(sizeof(struct esm_sensor), M_DEVBUF,
+		    M_NOWAIT|M_ZERO);
 		if (es == NULL)
 			return;
 
-		memset(es, 0, sizeof(struct esm_sensor));
 		es->es_dev = devmap->index;
 		es->es_id = i;
 		es->es_type = sensor_map[i].type;
@@ -873,12 +873,11 @@ esm_make_sensors(struct esm_softc *sc, struct esm_devmap *devmap,
 			 */
 			nsensors = 4;
 			s = malloc(sizeof(struct ksensor) * nsensors, M_DEVBUF,
-			    M_NOWAIT);
+			    M_NOWAIT|M_ZERO);
 			if (s == NULL) {
 				free(es, M_DEVBUF);
 				return;
 			}
-			memset(s, 0, sizeof(struct ksensor) * nsensors);
 
 			for (j = 0; j < nsensors; j++) {
 				snprintf(s[j].desc, sizeof(s[j].desc), "%s %d",
@@ -892,12 +891,11 @@ esm_make_sensors(struct esm_softc *sc, struct esm_devmap *devmap,
 			 */
 			nsensors = 6;
 			s = malloc(sizeof(struct ksensor) * nsensors, M_DEVBUF,
-			    M_NOWAIT);
+			    M_NOWAIT|M_ZERO);
 			if (s == NULL) {
 				free(es, M_DEVBUF);
 				return;
 			}
-			memset(s, 0, sizeof(struct ksensor) * nsensors);
 
 			for (j = 0; j < nsensors; j++) {
 				snprintf(s[j].desc, sizeof(s[j].desc), "%s %s",
@@ -918,12 +916,12 @@ esm_make_sensors(struct esm_softc *sc, struct esm_devmap *devmap,
 
 		default:
 			nsensors = 1;
-			s = malloc(sizeof(struct ksensor), M_DEVBUF, M_NOWAIT);
+			s = malloc(sizeof(struct ksensor), M_DEVBUF,
+			    M_NOWAIT|M_ZERO);
 			if (s == NULL) {
 				free(es, M_DEVBUF);
 				return;
 			}
-			memset(s, 0, sizeof(struct ksensor));
 
 			strlcpy(s->desc, sensor_map[i].name, sizeof(s->desc));
 			break;

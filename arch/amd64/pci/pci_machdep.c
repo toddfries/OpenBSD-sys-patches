@@ -87,6 +87,7 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
+#include <dev/pci/ppbreg.h>
 
 #include "ioapic.h"
 
@@ -318,20 +319,18 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	 * that the BIOS did its job, we also recognize that as meaning that
 	 * the BIOS has not configured the device.
 	 */
-	if (line == 0 || line == X86_PCI_INTERRUPT_LINE_NO_CONNECTION) {
-		printf("pci_intr_map: no mapping for pin %c (line=%02x)\n",
-		       '@' + pin, line);
+	if (line == 0 || line == X86_PCI_INTERRUPT_LINE_NO_CONNECTION)
 		goto bad;
-	} else {
-		if (line >= NUM_LEGACY_IRQS) {
-			printf("pci_intr_map: bad interrupt line %d\n", line);
-			goto bad;
-		}
-		if (line == 2) {
-			printf("pci_intr_map: changed line 2 to line 9\n");
-			line = 9;
-		}
+
+	if (line >= NUM_LEGACY_IRQS) {
+		printf("pci_intr_map: bad interrupt line %d\n", line);
+		goto bad;
 	}
+	if (line == 2) {
+		printf("pci_intr_map: changed line 2 to line 9\n");
+		line = 9;
+	}
+
 #if NIOAPIC > 0
 	if (mp_busses != NULL) {
 		if (mp_isa_bus != NULL &&

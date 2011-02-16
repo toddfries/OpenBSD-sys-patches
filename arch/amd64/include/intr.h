@@ -60,7 +60,7 @@
 
 struct intrstub {
 	void *ist_entry;
-	void *ist_recurse; 
+	void *ist_recurse;
 	void *ist_resume;
 };
 
@@ -71,7 +71,6 @@ struct intrsource {
 	struct pic *is_pic;		/* originating PIC */
 	void *is_recurse;		/* entry for spllower */
 	void *is_resume;		/* entry for doreti */
-	struct evcnt is_evcnt;		/* interrupt counter */
 	char is_evname[32];		/* event counter name */
 	int is_flags;			/* see below */
 	int is_type;			/* level, edge */
@@ -134,7 +133,6 @@ void softintr(int);
 #define	splaudio()	splraise(IPL_AUDIO)
 #define	splclock()	splraise(IPL_CLOCK)
 #define	splstatclock()	splclock()
-#define	splserial()	splraise(IPL_SERIAL)
 #define splipi()	splraise(IPL_IPI)
 
 /*
@@ -142,7 +140,7 @@ void softintr(int);
  */
 #define	splsoftclock()	splraise(IPL_SOFTCLOCK)
 #define	splsoftnet()	splraise(IPL_SOFTNET)
-#define	splsoftserial()	splraise(IPL_SOFTSERIAL)
+#define	splsofttty()	splraise(IPL_SOFTTTY)
 
 /*
  * Miscellaneous
@@ -164,7 +162,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -185,7 +183,7 @@ void splassert_check(int, const char *);
 
 extern void Xsoftclock(void);
 extern void Xsoftnet(void);
-extern void Xsoftserial(void);
+extern void Xsofttty(void);
 
 extern struct intrstub i8259_stubs[];
 extern struct intrstub ioapic_edge_stubs[];
@@ -210,12 +208,14 @@ void intr_printconfig(void);
 
 #ifdef MULTIPROCESSOR
 int x86_send_ipi(struct cpu_info *, int);
+int x86_fast_ipi(struct cpu_info *, int);
 void x86_broadcast_ipi(int);
 void x86_ipi_handler(void);
 void x86_intlock(struct intrframe);
 void x86_intunlock(struct intrframe);
 void x86_softintlock(void);
 void x86_softintunlock(void);
+void x86_setperf_ipi(struct cpu_info *);
 
 extern void (*ipifunc[X86_NIPI])(struct cpu_info *);
 #endif
@@ -228,7 +228,7 @@ extern void (*ipifunc[X86_NIPI])(struct cpu_info *);
 
 #define	X86_SOFTINTR_SOFTCLOCK		0
 #define	X86_SOFTINTR_SOFTNET		1
-#define	X86_SOFTINTR_SOFTSERIAL	2
+#define	X86_SOFTINTR_SOFTTTY		2
 #define	X86_NSOFTINTR			3
 
 #ifndef _LOCORE

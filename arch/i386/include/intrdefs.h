@@ -56,7 +56,6 @@
  * The level numbers are picked to fit into APIC vector priorities.
  */
 #define	IPL_NONE	0		/* nothing */
-#define IPL_SOFTAST	MAKEIPL(0)	/* AST */
 #define	IPL_SOFTCLOCK	MAKEIPL(1)	/* timeouts */
 #define	IPL_SOFTNET	MAKEIPL(2)	/* protocol stacks */
 #define	IPL_BIO		MAKEIPL(3)	/* block I/O */
@@ -88,7 +87,6 @@
 #define	SIR_CLOCK	29
 #define	SIR_NET		28
 #define	SIR_TTY		27
-#define SIR_AST		26
 
 
 /*
@@ -108,20 +106,20 @@
 #define IDT_INTR_HIGH	0xef
 
 #define I386_IPI_HALT		0x00000001
-#define I386_IPI_MICROSET	0x00000002
+#define I386_IPI_NOP		0x00000002
 #define I386_IPI_FLUSH_FPU	0x00000004
 #define I386_IPI_SYNCH_FPU	0x00000008
-#define I386_IPI_TLB		0x00000010
-#define I386_IPI_MTRR		0x00000020
-#define I386_IPI_GDT		0x00000040
-#define I386_IPI_DDB		0x00000080	/* synchronize while in ddb */
+#define I386_IPI_MTRR		0x00000010
+#define I386_IPI_GDT		0x00000020
+#define I386_IPI_DDB		0x00000040	/* synchronize while in ddb */
+#define I386_IPI_SETPERF	0x00000080
 
 #define I386_NIPI	8
 
-#define I386_IPI_NAMES { "halt IPI", "timeset IPI", "FPU flush IPI", \
-			 "FPU synch IPI", "TLB shootdown IPI", \
+#define I386_IPI_NAMES { "halt IPI", "nop IPI", "FPU flush IPI", \
+			 "FPU synch IPI", \
 			 "MTRR update IPI", "GDT update IPI", \
-			 "DDB IPI" }
+			 "DDB IPI", "setperf IPI" }
 
 #define IREENT_MAGIC	0x18041969
 

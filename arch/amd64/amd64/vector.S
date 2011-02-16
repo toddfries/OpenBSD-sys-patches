@@ -67,6 +67,7 @@
 
 #define ALIGN_TEXT	.align 16,0x90
 
+#include <machine/param.h>
 #include <machine/i8259.h>
 #include <machine/i82093reg.h>
 #include <machine/i82489reg.h>
@@ -340,6 +341,54 @@ IDTVEC(resume_lapic_ipi)
 	sti
 	INTRFASTEXIT
 
+IDTVEC(ipi_invltlb)
+	pushq	%rax
+
+	ioapic_asm_ack()
+
+	movq	%cr3, %rax
+	movq	%rax, %cr3
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rax
+	iretq
+
+IDTVEC(ipi_invlpg)
+	pushq	%rax
+
+	ioapic_asm_ack()
+
+	movq	tlb_shoot_addr1, %rax
+	invlpg	(%rax)
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rax
+	iretq
+
+IDTVEC(ipi_invlrange)
+	pushq	%rax
+	pushq	%rdx
+
+	ioapic_asm_ack()
+
+	movq	tlb_shoot_addr1, %rax
+	movq	tlb_shoot_addr2, %rdx
+1:	invlpg	(%rax)
+	addq	$PAGE_SIZE, %rax
+	cmpq	%rdx, %rax
+	jb	1b
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rdx
+	popq	%rax
+	iretq
+
 #endif /* MULTIPROCESSOR */
 	
 	/*
@@ -416,7 +465,6 @@ IDTVEC(intr_##name##num)						;\
 	cmpl	%ebx,%r13d						;\
 	jae	10f			/* currently masked; hold it */	;\
 	incl	MY_COUNT+V_INTR		/* statistical info */		;\
-	incq	IS_EVCNT(%r14)						;\
 1:									\
 	pushq	%r13							;\
 	movl	%ebx,CPUVAR(ILEVEL)					;\
@@ -748,7 +796,6 @@ _C_LABEL(ioapic_level_stubs):
 #endif
 
 	.data
-
 /*
  * Soft interrupt handlers
  */
@@ -760,9 +807,8 @@ IDTVEC(softtty)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(x86_softintlock)
 #endif
-	movq	CPUVAR(ISOURCES) + SIR_SERIAL * 8, %r12
-	incq	IS_EVCNT(%r12)
-	movl	$X86_SOFTINTR_SOFTSERIAL,%edi
+	movq	CPUVAR(ISOURCES) + SIR_TTY * 8, %r12
+	movl	$X86_SOFTINTR_SOFTTTY,%edi
 	call	_C_LABEL(softintr_dispatch)
 #ifdef MULTIPROCESSOR	
 	call	_C_LABEL(x86_softintunlock)
@@ -794,7 +840,6 @@ IDTVEC(softclock)
 	call	_C_LABEL(x86_softintlock)
 #endif
 	movq	CPUVAR(ISOURCES) + SIR_CLOCK * 8, %r12
-	incq	IS_EVCNT(%r12)
 
 	movl	$X86_SOFTINTR_SOFTCLOCK,%edi
 	call	_C_LABEL(softintr_dispatch)

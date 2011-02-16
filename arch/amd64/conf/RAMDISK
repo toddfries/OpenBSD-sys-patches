@@ -26,13 +26,14 @@ option		INET		# IP + ICMP + TCP + UDP
 option		BOOT_CONFIG	# boot-time kernel config
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3584
+option		MINIROOTSIZE=4480
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
+bios0	at mainbus?
 
-acpi0		at mainbus?	disable
+acpi0		at bios?
 #acpitimer*	at acpi?
 #acpihpet*	at acpi?
 #acpiac*	at acpi?
@@ -236,7 +237,6 @@ nfe*	at pci?			# NVIDIA nForce Ethernet
 # Wireless network cards
 #wi*	at pci?			# WaveLAN IEEE 802.11DS
 #wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
-#awi*	at pcmcia?		# Bay Networks IEEE 802.11FH
 #an*	at pcmcia?		# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?		# Xircom Netwave
 #ray*	at pcmcia?		# Raylink Aviator2.4/Pro 802.11FH
@@ -251,7 +251,7 @@ nsphy*	at mii?			# NS and compatible PHYs
 nsphyter* at mii?		# NS and compatible PHYs
 #qsphy*	at mii?			# Quality Semi QS6612 PHYs
 #sqphy*	at mii?			# Seeq 8x220 PHYs
-#rlphy* at mii?			# RealTek 8139 internal PHYs
+rlphy* at mii?			# RealTek 8139 internal PHYs
 #mtdphy* at mii?		# Myson MTD972 PHYs
 #dcphy*	at mii?			# Digital Clone PHYs
 #acphy*	at mii?			# Altima AC101 PHYs

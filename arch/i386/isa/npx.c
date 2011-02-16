@@ -142,13 +142,11 @@ static __inline void
 fpu_save(union savefpu *addr)
 {
 
-#ifdef I686_CPU
 	if (i386_use_fxsave) {
 		fxsave(&addr->sv_xmm);
 		/* FXSAVE doesn't FNINIT like FNSAVE does -- so do it here. */
 		fninit();
 	} else
-#endif /* I686_CPU */
 		fnsave(&addr->sv_87);
 }
 
@@ -160,9 +158,7 @@ npxdna_notset(struct cpu_info *ci)
 
 int    (*npxdna_func)(struct cpu_info *) = npxdna_notset;
 int    npxdna_s87(struct cpu_info *);
-#ifdef I686_CPU
 int    npxdna_xmm(struct cpu_info *);
-#endif /* I686_CPU */
 void   npxexit(void);
 
 /*
@@ -392,11 +388,9 @@ npxattach(struct device *parent, struct device *self, void *aux)
 	npxinit(&cpu_info_primary);
 	i386_fpu_present = 1;
 
-#ifdef I686_CPU
 	if (i386_use_fxsave)
 		npxdna_func = npxdna_xmm;
 	else
-#endif /* I686_CPU */
 		npxdna_func = npxdna_s87;
 }
 
@@ -685,7 +679,6 @@ npxdna_xmm(struct cpu_info *ci)
 
 	return (1);
 }
-#endif /* I686_CPU */
 
 int
 npxdna_s87(struct cpu_info *ci)

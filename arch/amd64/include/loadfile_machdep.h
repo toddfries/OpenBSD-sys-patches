@@ -32,6 +32,10 @@
  */
 
 #define BOOT_ELF
+#define BOOT_ELF32
+#define BOOT_ELF64
+
+/* Keep a default ELFSIZE */
 #define ELFSIZE 64
 
 #define LOAD_KERNEL	(LOAD_ALL & ~LOAD_TEXTA)

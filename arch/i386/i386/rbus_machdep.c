@@ -90,3 +90,9 @@ rbus_pccbb_parent_io(struct device *self, struct pci_attach_args *pa)
 
 	return (rbus_new_root_share(pa->pa_iot, ex, start, size));
 }
+
+void
+pccbb_attach_hook(struct device *parent, struct device *self,
+    struct pci_attach_args *pa)
+{
+}

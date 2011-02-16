@@ -113,7 +113,7 @@
  *  |                                 |
  *  +---------------------------------+ 0xffff800000000000 = 0x0000800000000000
  *  |                                 |
- *  |    alt.L1 table (PTE pages)     |
+ *  |    L1 table (PTE pages)	      |
  *  |                                 |
  *  +---------------------------------+ 0x00007f8000000000
  *  ~                                 ~
@@ -202,6 +202,10 @@
 #define NKL4_KIMG_ENTRIES	1
 #define NKL3_KIMG_ENTRIES	1
 #define NKL2_KIMG_ENTRIES	8
+
+#define NDML4_ENTRIES		1
+#define NDML3_ENTRIES		1
+#define NDML2_ENTRIES		4	/* 4GB */
 
 /*
  * Since kva space is below the kernel in its entirety, we start off
@@ -333,19 +337,8 @@ struct pmap {
 
 /*
  * for each managed physical page we maintain a list of <PMAP,VA>'s
- * which it is mapped at.  the list is headed by a pv_head structure.
- * there is one pv_head per managed phys page (allocated at boot time).
- * the pv_head structure points to a list of pv_entry structures (each
- * describes one mapping).
+ * which it is mapped at.
  */
-
-struct pv_entry;
-
-struct pv_head {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
-	struct pv_entry *pvh_list;	/* head of list (locked by pvh_lock) */
-};
-
 struct pv_entry {			/* locked by its list's pvh_lock */
 	struct pv_entry *pv_next;	/* next entry */
 	struct pmap *pv_pmap;		/* the pmap */
@@ -399,6 +392,7 @@ extern pd_entry_t *pdes[];
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 
 /*
@@ -570,7 +564,6 @@ kvtopte(vaddr_t va)
 
 #define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + pa)
 #define PMAP_DIRECT_UNMAP(va)	((paddr_t)va - PMAP_DIRECT_BASE)
-
 #define pmap_map_direct(pg)	PMAP_DIRECT_MAP(VM_PAGE_TO_PHYS(pg))
 #define pmap_unmap_direct(va)	PHYS_TO_VM_PAGE(PMAP_DIRECT_UNMAP(va))
 

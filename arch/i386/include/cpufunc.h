@@ -174,13 +174,11 @@ tlbflushg(void)
 	 * pre-P6-family processors.
 	 */
 
-#if defined(I686_CPU)
 	if (cpu_feature & CPUID_PGE) {
 		u_int cr4 = rcr4();
 		lcr4(cr4 & ~CR4_PGE);
 		lcr4(cr4);
 	} else
-#endif
 		tlbflush();
 }
 
@@ -288,7 +286,6 @@ breakpoint(void)
 #define write_psl(x)	write_eflags(x)
 
 void amd64_errata(struct cpu_info *);
-#endif
 
 #endif /* _KERNEL */
 #endif /* !_I386_CPUFUNC_H_ */

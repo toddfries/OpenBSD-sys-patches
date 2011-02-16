@@ -1,4 +1,4 @@
-/*	$OpenBSD: lms.c,v 1.19 2006/09/19 11:06:34 jsg Exp $	*/
+/*	$OpenBSD: lms.c,v 1.20 2007/04/10 22:37:17 miod Exp $	*/
 /*	$NetBSD: lms.c,v 1.38 2000/01/08 02:57:25 takemura Exp $	*/
 
 /*-

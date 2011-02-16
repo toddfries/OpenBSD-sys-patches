@@ -243,9 +243,8 @@ IDTVEC(resume)
 	.long	_C_LABEL(Xresume_legacy12), _C_LABEL(Xresume_legacy13)
 	.long	_C_LABEL(Xresume_legacy14), _C_LABEL(Xresume_legacy15)
 	/* for soft interrupts */
-	.long	0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-	.long	_C_LABEL(Xsoftast), _C_LABEL(Xsofttty) 
-	.long	_C_LABEL(Xsoftnet), _C_LABEL(Xsoftclock)
+	.long	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	.long	_C_LABEL(Xsofttty), _C_LABEL(Xsoftnet), _C_LABEL(Xsoftclock)
 	.long	0, 0
 /* fake interrupts to resume from splx() */
 IDTVEC(recurse)
@@ -258,7 +257,6 @@ IDTVEC(recurse)
 	.long	_C_LABEL(Xrecurse_legacy12), _C_LABEL(Xrecurse_legacy13)
 	.long	_C_LABEL(Xrecurse_legacy14), _C_LABEL(Xrecurse_legacy15)
 	/* for soft interrupts */
-	.long	0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-	.long	_C_LABEL(Xsoftast), _C_LABEL(Xsofttty) 
-	.long	_C_LABEL(Xsoftnet), _C_LABEL(Xsoftclock)
+	.long	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	.long	_C_LABEL(Xsofttty), _C_LABEL(Xsoftnet), _C_LABEL(Xsoftclock)
 	.long	0, 0

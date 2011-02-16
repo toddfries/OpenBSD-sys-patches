@@ -95,7 +95,6 @@ extern void Xintrltimer(void);
 #define LAPIC_SOFTCLOCK_VECTOR		IPL_SOFTCLOCK
 #define LAPIC_SOFTNET_VECTOR		IPL_SOFTNET
 #define LAPIC_SOFTTTY_VECTOR		IPL_SOFTTTY
-#define LAPIC_SOFTAST_VECTOR		IPL_SOFTAST
 
 /*
  * Special IPI vectors. We can use IDT 0xf0 - 0xff for this.
@@ -114,7 +113,6 @@ extern void Xintripi_reloadcr3(void);
 extern void Xintrsoftclock(void);
 extern void Xintrsoftnet(void);
 extern void Xintrsofttty(void);
-extern void Xintrsoftast(void);
 
 extern void (*apichandler[])(void);
 
@@ -127,5 +125,7 @@ extern void lapic_set_lvt(void);
 extern void lapic_set_softvectors(void);
 extern void lapic_enable(void);
 extern void lapic_calibrate_timer(struct cpu_info *);
+
+#define lapic_cpu_number() 	(i82489_readreg(LAPIC_ID)>>LAPIC_ID_SHIFT)
 
 #endif

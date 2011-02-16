@@ -50,3 +50,6 @@ cdev_decl(bios);
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
 cdev_decl(acpi);
+
+#define pctrpoll seltrue
+cdev_decl(pctr);

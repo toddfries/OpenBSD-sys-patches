@@ -530,7 +530,7 @@ extern boolean_t pmap_initialized;	/* pmap_init done yet? */
 
 /*
  * MULTIPROCESSOR: special VA's/ PTE's are actually allocated inside a
- * I386_MAXPROCS*NPTECL array of PTE's, to avoid cache line thrashing
+ * MAXCPUS*NPTECL array of PTE's, to avoid cache line thrashing
  * due to false sharing.
  */
 
@@ -1139,10 +1139,9 @@ pmap_zero_page_uncached_pae(paddr_t pa)
 		panic("pmap_zero_page_uncached: lock botch");
 #endif
 
-	*zpte = (pa & PG_FRAME) | PG_V | PG_RW |	/* map in */
-	    ((cpu_class != CPUCLASS_386) ? PG_N : 0);
+	*zpte = (pa & PG_FRAME) | PG_V | PG_RW | PG_N);	/* map in */
 	pmap_update_pg((vaddr_t)zerova);		/* flush TLB */
-	pagezero(zerova, PAGE_SIZE);				/* zero */
+	pagezero(zerova, PAGE_SIZE);			/* zero */
 	*zpte = 0;					/* zap! */
 
 	return (TRUE);
@@ -1366,10 +1365,13 @@ pmap_remove_pae(struct pmap *pmap, vaddr_t sva, vaddr_t eva)
 	vaddr_t blkendva;
 	struct vm_page *ptp;
 	int32_t cpumask = 0;
+	TAILQ_HEAD(, vm_page) empty_ptps;
 
 	/*
 	 * we lock in the pmap => pv_head direction
 	 */
+
+	TAILQ_INIT(&empty_ptps);
 
  	PMAP_MAP_TO_HEAD_LOCK();
 	ptes = pmap_map_ptes_pae(pmap);	/* locks pmap */
@@ -1565,6 +1567,8 @@ pmap_page_remove_pae(struct vm_page *pg)
 	struct pv_entry *pve;
 	pt_entry_t *ptes, opte;
 	int32_t cpumask = 0;
+	TAILQ_HEAD(, vm_page) empty_ptps;
+	struct vm_page *ptp;
 
 	/* XXX: vm_page should either contain pv_head or have a pointer to it */
 	bank = vm_physseg_find(atop(VM_PAGE_TO_PHYS(pg)), &off);
@@ -1577,6 +1581,8 @@ pmap_page_remove_pae(struct vm_page *pg)
 	if (pvh->pvh_list == NULL) {
 		return;
 	}
+
+	TAILQ_INIT(&empty_ptps);
 
 	/* set pv_head => pmap locking */
 	PMAP_HEAD_TO_MAP_LOCK();

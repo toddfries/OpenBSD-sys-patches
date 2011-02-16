@@ -26,11 +26,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * TODO:
- *	- map the PTE uncacheable and disable table walk probes
- */
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -356,7 +351,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	}
 	ptepa = seg.ds_addr;
 
-	scrib = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+	scrib = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (scrib == NULL) {
 		printf("\nGART: didn't get scribble page");
 		goto err;

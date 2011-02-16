@@ -75,7 +75,7 @@ void i386_ipi_reload_mtrr(struct cpu_info *);
 void (*ipifunc[I386_NIPI])(struct cpu_info *) =
 {
 	i386_ipi_halt,
-	i386_ipi_microset,
+	i386_ipi_nop,
 	i386_ipi_flush_fpu,
 	i386_ipi_synch_fpu,
 	i386_ipi_reload_mtrr,
@@ -89,7 +89,13 @@ void (*ipifunc[I386_NIPI])(struct cpu_info *) =
 #else
 	NULL,
 #endif
+	i386_setperf_ipi,
 };
+
+void
+i386_ipi_nop(struct cpu_info *ci)
+{
+}
 
 void
 i386_ipi_halt(struct cpu_info *ci)
@@ -100,7 +106,6 @@ i386_ipi_halt(struct cpu_info *ci)
 	ci->ci_flags &= ~CPUF_RUNNING;
 	wbinvd();
 
-	printf("%s: shutting down\n", ci->ci_dev.dv_xname);
 	for(;;) {
 		asm volatile("hlt");
 	}
@@ -192,7 +197,7 @@ i386_broadcast_ipi(int ipimask)
 	if (!count)
 		return;
 
-	i386_ipi(LAPIC_IPI_VECTOR, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED);   
+	i386_ipi(LAPIC_IPI_VECTOR, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED); 
 }
 
 void

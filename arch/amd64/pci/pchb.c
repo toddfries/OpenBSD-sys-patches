@@ -1,6 +1,30 @@
 /*	$OpenBSD: pchb.c,v 1.37 2010/08/31 17:13:46 deraadt Exp $	*/
 /*	$NetBSD: pchb.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
-
+/*
+ * Copyright (c) 2000 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
 /*-
  * Copyright (c) 1996, 1998, 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -30,31 +54,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 
 #include <machine/bus.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
-
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/agpvar.h>
 #include <dev/pci/ppbreg.h>
 
-#define PCISET_BRIDGETYPE_MASK	0x3
-#define PCISET_TYPE_COMPAT	0x1
-#define PCISET_TYPE_AUX		0x2
+#include <dev/rndvar.h>
 
-#define PCISET_BUSCONFIG_REG	0x48
-#define PCISET_BRIDGE_NUMBER(reg)	(((reg) >> 8) & 0xff)
-#define PCISET_PCI_BUS_NUMBER(reg)	(((reg) >> 16) & 0xff)
+#include <dev/ic/i82802reg.h>
 
-/* XXX should be in dev/ic/i82443reg.h */
-#define	I82443BX_SDRAMC_REG	0x76
+#include "agp.h"
 
 /* XXX should be in dev/ic/i82424{reg.var}.h */
 #define I82424_CPU_BCTL_REG		0x53
@@ -100,9 +118,6 @@ int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
 int	pchbactivate(struct device *, int);
 
-int	pchb_print(void *, const char *);
-void	pchb_amd64ht_attach (struct device *, struct pci_attach_args *, int);
-
 struct cfattach pchb_ca = {
 	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
 	pchbactivate
@@ -112,15 +127,18 @@ struct cfdriver pchb_cd = {
 	NULL, "pchb", DV_DULL
 };
 
+int	pchb_print(void *, const char *);
+void	pchb_rnd(void *);
+void	pchb_amd64ht_attach(struct device *, struct pci_attach_args *, int);
+
 int
 pchbmatch(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_BRIDGE &&
-	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_BRIDGE_HOST) {
+	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_BRIDGE_HOST)
 		return (1);
-	}
 
 	return (0);
 }
@@ -128,6 +146,7 @@ pchbmatch(struct device *parent, void *match, void *aux)
 void
 pchbattach(struct device *parent, struct device *self, void *aux)
 {
+	struct pchb_softc *sc = (struct pchb_softc *)self;
 	struct pci_attach_args *pa = aux;
 	struct pcibus_attach_args pba;
 	pcireg_t bcreg, bir;
@@ -138,6 +157,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 
 	switch (PCI_VENDOR(pa->pa_id)) {
 	case PCI_VENDOR_AMD:
+		printf("\n");
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_AMD_AMD64_0F_HT:
 		case PCI_PRODUCT_AMD_AMD64_10_HT:
@@ -289,8 +309,36 @@ pchb_print(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
+/*
+ * Should do FIPS testing as per:
+ *	http://csrc.nist.gov/publications/fips/fips140-1/fips1401.pdf
+ */
 void
-pchb_amd64ht_attach (struct device *self, struct pci_attach_args *pa, int i)
+pchb_rnd(void *v)
+{
+	struct pchb_softc *sc = v;
+
+	/*
+	 * Don't wait for data to be ready. If it's not there, we'll check
+	 * next time.
+	 */
+	if ((bus_space_read_1(sc->sc_bt, sc->sc_bh, I82802_RNG_RNGST) &
+	    I82802_RNG_RNGST_DATAV)) {
+
+		sc->sc_rng_ax = (sc->sc_rng_ax << 8) |
+		    bus_space_read_1(sc->sc_bt, sc->sc_bh, I82802_RNG_DATA);
+
+		if (!sc->sc_rng_i--) {
+			sc->sc_rng_i = 4;
+			add_true_randomness(sc->sc_rng_ax);
+		}
+	}
+
+	timeout_add(&sc->sc_rng_to, 1);
+}
+
+void
+pchb_amd64ht_attach(struct device *self, struct pci_attach_args *pa, int i)
 {
 	struct pcibus_attach_args pba;
 	pcireg_t type, bus;
@@ -310,6 +358,7 @@ pchb_amd64ht_attach (struct device *self, struct pci_attach_args *pa, int i)
 		pba.pba_iot = pa->pa_iot;
 		pba.pba_memt = pa->pa_memt;
 		pba.pba_dmat = pa->pa_dmat;
+		pba.pba_domain = pa->pa_domain;
 		pba.pba_bus = AMD64HT_LDT_SEC_BUS_NUM(bus);
 		pba.pba_pc = pa->pa_pc;
 		config_found(self, &pba, pchb_print);

@@ -85,6 +85,20 @@ i386_atomic_clearbits_l(volatile u_int32_t *ptr, unsigned long bits)
 	__asm __volatile(LOCK " andl %1,%0" :  "=m" (*ptr) : "ir" (bits));
 }
 
+/*
+ * cas = compare and set
+ */
+static __inline int
+i486_atomic_cas_int(volatile u_int *ptr, u_int expect, u_int set)
+{
+	int res;
+
+	__asm volatile(LOCK " cmpxchgl %2, %1" : "=a" (res), "=m" (*ptr)
+	     : "r" (set), "a" (expect), "m" (*ptr) : "memory");
+
+	return (res);
+}
+
 #define atomic_setbits_int i386_atomic_setbits_l
 #define atomic_clearbits_int i386_atomic_clearbits_l
 
