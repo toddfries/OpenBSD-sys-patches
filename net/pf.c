@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.722 2011/01/22 11:43:57 bluhm Exp $ */
+/*	$OpenBSD: pf.c,v 1.726 2011/02/14 11:01:36 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -2178,8 +2178,8 @@ pf_match_addr_range(struct pf_addr *b, struct pf_addr *e,
 	switch (af) {
 #ifdef INET
 	case AF_INET:
-		if ((a->addr32[0] < b->addr32[0]) ||
-		    (a->addr32[0] > e->addr32[0]))
+		if ((ntohl(a->addr32[0]) < ntohl(b->addr32[0])) ||
+		    (ntohl(a->addr32[0]) > ntohl(e->addr32[0])))
 			return (0);
 		break;
 #endif /* INET */
@@ -2189,15 +2189,15 @@ pf_match_addr_range(struct pf_addr *b, struct pf_addr *e,
 
 		/* check a >= b */
 		for (i = 0; i < 4; ++i)
-			if (a->addr32[i] > b->addr32[i])
+			if (ntohl(a->addr32[i]) > ntohl(b->addr32[i]))
 				break;
-			else if (a->addr32[i] < b->addr32[i])
+			else if (ntohl(a->addr32[i]) < ntohl(b->addr32[i]))
 				return (0);
 		/* check a <= e */
 		for (i = 0; i < 4; ++i)
-			if (a->addr32[i] < e->addr32[i])
+			if (ntohl(a->addr32[i]) < ntohl(e->addr32[i]))
 				break;
-			else if (a->addr32[i] > e->addr32[i])
+			else if (ntohl(a->addr32[i]) > ntohl(e->addr32[i]))
 				return (0);
 		break;
 	}
@@ -2774,8 +2774,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 		break;
 #ifdef INET
 	case IPPROTO_ICMP:
-		if (pd->af != AF_INET)
-			break;
 		icmptype = pd->hdr.icmp->icmp_type;
 		icmpcode = pd->hdr.icmp->icmp_code;
 		state_icmp = pf_icmp_mapping(pd, icmptype,
@@ -2791,8 +2789,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 #endif /* INET */
 #ifdef INET6
 	case IPPROTO_ICMPV6:
-		if (af != AF_INET6)
-			break;
 		icmptype = pd->hdr.icmp6->icmp6_type;
 		icmpcode = pd->hdr.icmp6->icmp6_code;
 		state_icmp = pf_icmp_mapping(pd, icmptype,
@@ -3045,7 +3041,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	}
 
 	/* copy back packet headers if we performed NAT operations */
-	if (rewrite)
+	if (rewrite && hdrlen)
 		m_copyback(m, off, hdrlen, pd->hdr.any, M_NOWAIT);
 
 #if NPFSYNC > 0
@@ -3308,6 +3304,10 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 
 #ifdef INET
 	case IPPROTO_ICMP:
+		/* pf_translate() is also used when logging invalid packets */
+		if (pd->af != AF_INET)
+			return (0);
+
 		if (PF_ANEQ(saddr, pd->src, pd->af)) {
 			pf_change_a(&pd->src->v4.s_addr, pd->ip_sum,
 			    saddr->v4.s_addr, 0);
@@ -3334,20 +3334,21 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 
 #ifdef INET6
 	case IPPROTO_ICMPV6:
-		if (pd->af == AF_INET6) {
-			if (PF_ANEQ(saddr, pd->src, pd->af)) {
-				pf_change_a6(pd->src,
-				    &pd->hdr.icmp6->icmp6_cksum, saddr, 0);
-				rewrite = 1;
-			}
-			if (PF_ANEQ(daddr, pd->dst, pd->af)) {
-				pf_change_a6(pd->dst,
-				    &pd->hdr.icmp6->icmp6_cksum, daddr, 0);
-				rewrite = 1;
-			}
-			break;
+		/* pf_translate() is also used when logging invalid packets */
+		if (pd->af != AF_INET6)
+			return (0);
+
+		if (PF_ANEQ(saddr, pd->src, pd->af)) {
+			pf_change_a6(pd->src, &pd->hdr.icmp6->icmp6_cksum,
+			    saddr, 0);
+			rewrite = 1;
 		}
-		/* FALLTHROUGH */
+		if (PF_ANEQ(daddr, pd->dst, pd->af)) {
+			pf_change_a6(pd->dst, &pd->hdr.icmp6->icmp6_cksum,
+			    daddr, 0);
+			rewrite = 1;
+		}
+		break;
 #endif /* INET6 */
 
 	default:
@@ -5515,6 +5516,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf *m,
 	if (pd->hdr.any == NULL)
 		panic("pf_setup_pdesc: no storage for headers provided");
 
+	*hdrlen = 0;
 	switch (af) {
 #ifdef INET
 	case AF_INET: {
