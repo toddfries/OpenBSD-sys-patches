@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2001/05/21 21:02:47 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.7 2003/07/19 00:03:52 david Exp $
 
 
 MAN=	installboot.8

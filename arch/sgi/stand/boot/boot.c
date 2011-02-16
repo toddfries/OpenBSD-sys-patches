@@ -32,6 +32,7 @@
 #include <stand.h>
 
 #include <mips64/arcbios.h>
+#include <mips64/cpu.h>
 
 #include <sys/exec_elf.h>
 #include "loadfile.h"
@@ -48,36 +49,13 @@ enum {
 	AUTO_MINI,
 	AUTO_DEBUG
 } bootauto = AUTO_NONE;
+
 char *OSLoadPartition = NULL;
 char *OSLoadFilename = NULL;
 int	IP;
 
-unsigned long tablebase;
-
-static void *
-readtable(int fd, int offs, void *base, int size, char *name, int flags)
-{
-	if (lseek(fd, offs, SEEK_SET) != offs ||
-	    read(fd, base, size) != size) {
-		printf("\ncannot read %s table", name);
-		return 0;
-	}
-	return (void *) base;
-}
-
-static void *
-gettable(int size, char *name, int flags, size_t align)
-{
-	long base;
-
-	/* Put table after loaded code to support kernel DDB */
-	tablebase = roundup(tablebase, align);
-	base = tablebase;
-	tablebase += size;
-	return (void *) base;
-}
-
 /*
+ * OpenBSD/sgi Boot Loader.
  */
 int
 main(int argc, char *argv[])
@@ -139,7 +117,7 @@ _rtt()
 }
 
 /*
- *  Decode boot options.
+ * Decode boot options.
  */
 void
 dobootopts(int argc, char **argv)
@@ -169,7 +147,8 @@ dobootopts(int argc, char **argv)
 		else if (strncmp(cp, "SystemPartition=", 16) == 0)
 			SystemPartition = &cp[16];
 	}
-	/* If "OSLoadOptions=" is missing, see if any arg was given */
+
+	/* If "OSLoadOptions=" is missing, see if any arg was given. */
 	if (bootauto == AUTO_NONE && *argv[1] == '/')
 		OSLoadFilename = argv[1];
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nireg.h,v 1.1 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD: if_nireg.h,v 1.2 2003/06/02 23:27:56 millert Exp $ */
 /*	$NetBSD: if_nireg.h,v 1.3 2001/08/20 12:20:07 wiz Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.

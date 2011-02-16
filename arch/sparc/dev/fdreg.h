@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdreg.h,v 1.4 2003/06/02 23:27:54 millert Exp $	*/
+/*	$OpenBSD: fdreg.h,v 1.5 2004/09/22 22:12:58 miod Exp $	*/
 /*	$NetBSD: fdreg.h,v 1.6 1997/05/02 13:03:44 pk Exp $	*/
 
 /*-

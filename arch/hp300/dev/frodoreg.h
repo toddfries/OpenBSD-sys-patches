@@ -1,4 +1,4 @@
-/*	$OpenBSD: frodoreg.h,v 1.1 1997/07/06 08:01:51 downsj Exp $	*/
+/*	$OpenBSD: frodoreg.h,v 1.2 2007/01/06 20:17:43 miod Exp $	*/
 /*	$NetBSD: frodoreg.h,v 1.1 1997/05/12 08:03:49 thorpej Exp $	*/
 
 /*

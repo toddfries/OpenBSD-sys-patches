@@ -1,4 +1,4 @@
-/*	$OpenBSD: dartreg.h,v 1.6 2006/04/15 22:32:42 miod Exp $	*/
+/*	$OpenBSD: dartreg.h,v 1.7 2006/11/18 22:45:41 miod Exp $	*/
 
 #define MAXPORTS	2		/* max count of PORTS/DUART */
 

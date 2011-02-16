@@ -848,6 +848,8 @@ snintr(void *arg)
 			if (isr & ISR_RFO)
 				printf("%s: receive FIFO overrun\n",
 				    sc->sc_dev.dv_xname);
+			if (isr & (ISR_RDE | ISR_RBE | ISR_RBAE /* | ISR_RFO */))
+				snreset(sc);
 		}
 		if (isr & (ISR_CRC | ISR_FAE | ISR_MP)) {
 #ifdef notdef

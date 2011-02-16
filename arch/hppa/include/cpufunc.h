@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.26 2004/07/01 21:03:33 mickey Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.27 2005/04/07 00:19:28 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

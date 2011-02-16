@@ -71,10 +71,6 @@
 #include <hp300/hp300/leds.h>
 #endif
 
-#define	HDUNIT(x)	DISKUNIT(x)
-#define HDPART(x)	DISKPART(x)
-#define HDLABELDEV(d)	MAKEDISKDEV(major(d), HDUNIT(d), RAW_PART)
-
 #ifndef	HDRETRY
 #define	HDRETRY		5
 #endif
@@ -486,11 +482,9 @@ hdgetdisklabel(dev, rs, lp, spoofonly)
 	dev_t dev;
 	struct hd_softc *rs;
 	struct disklabel *lp;
-	struct cpu_disklabel *clp;
 	int spoofonly;
 {
 	bzero(lp, sizeof(struct disklabel));
-	bzero(clp, sizeof(struct cpu_disklabel));
 
 	/*
 	 * Create a default disk label based on geometry.
@@ -513,15 +507,11 @@ hdgetdisklabel(dev, rs, lp, spoofonly)
 
 	DL_SETDSIZE(lp, hdidentinfo[rs->sc_type].ri_nblocks);
 	lp->d_flags = 0;
+	lp->d_version = 1;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
 	lp->d_bbsize = BBSIZE;
 	lp->d_sbsize = SBSIZE;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -539,7 +529,7 @@ hdopen(dev, flags, mode, p)
 	int flags, mode;
 	struct proc *p;
 {
-	int unit = HDUNIT(dev);
+	int unit = DISKUNIT(dev);
 	struct hd_softc *rs;
 	int mask, part;
 	int error;
@@ -574,7 +564,7 @@ hdopen(dev, flags, mode, p)
 			goto out;
 	}
 
-	part = HDPART(dev);
+	part = DISKPART(dev);
 	mask = 1 << part;
 
 	/* Check that the partition exists. */
@@ -610,7 +600,7 @@ hdclose(dev, flag, mode, p)
 	int flag, mode;
 	struct proc *p;
 {
-	int unit = HDUNIT(dev);
+	int unit = DISKUNIT(dev);
 	struct hd_softc *rs;
 	struct disk *dk;
 	int mask, s;
@@ -625,7 +615,7 @@ hdclose(dev, flag, mode, p)
 		return (error);
 	}
 
-	mask = 1 << HDPART(dev);
+	mask = 1 << DISKPART(dev);
  	dk = &rs->sc_dkdev;
 	switch (mode) {
 	case S_IFCHR:
@@ -663,11 +653,11 @@ void
 hdstrategy(bp)
 	struct buf *bp;
 {
-	int unit = HDUNIT(bp->b_dev);
+	int unit = DISKUNIT(bp->b_dev);
 	struct hd_softc *rs;
 	struct buf *dp;
+	struct disklabel *lp;
 	int s;
-	struct partition *pinfo;
 
 	rs = hdlookup(unit);
 	if (rs == NULL) {
@@ -682,6 +672,8 @@ hdstrategy(bp)
 		       (bp->b_flags & B_READ) ? 'R' : 'W');
 #endif
 
+	lp = rs->sc_dkdev.dk_label;
+
 	/*
 	 * If it's a null transfer, return immediately
 	 */
@@ -691,7 +683,7 @@ hdstrategy(bp)
 	/*
 	 * The transfer must be a whole number of blocks.
 	 */
-	if ((bp->b_bcount % rs->sc_dkdev.dk_label->d_secsize) != 0) {
+	if ((bp->b_bcount % lp->d_secsize) != 0) {
 		bp->b_error = EINVAL;
 		goto bad;
 	}
@@ -700,28 +692,12 @@ hdstrategy(bp)
 	 * Do bounds checking, adjust transfer. if error, process;
 	 * If end of partition, just return.
 	 */
-
- 	dp = &rs->sc_tab;
-
-	if (HDPART(bp->b_dev) == RAW_PART) {
-		/* valid regardless of the disklabel */
-		bp->b_cylinder = bp->b_blkno;
-	} else {
-		if (bounds_check_with_label(bp, rs->sc_dkdev.dk_label,
-		    rs->sc_dkdev.dk_cpulabel,
-		    (rs->sc_flags & HDF_WLABEL) != 0) <= 0)
+	if (bounds_check_with_label(bp, lp,
+	    (rs->sc_flags & HDF_WLABEL) != 0) <= 0)
 			goto done;
 
-		/*
-		 * XXX Note that since b_cylinder is stored over b_resid, this  
-		 * XXX destroys the disksort ordering hint
-		 * XXX bounds_check_with_label() has put in there.
-		*/
-		pinfo = &rs->sc_dkdev.dk_label->d_partitions[HDPART(bp->b_dev)];
-		bp->b_cylinder = bp->b_blkno + pinfo->p_offset;
-	}
-
 	s = splbio();
+ 	dp = &rs->sc_tab;
 	disksort(dp, bp);
 	if (dp->b_active == 0) {
 		dp->b_active = 1;
@@ -800,8 +776,10 @@ hdstart(arg)
 	void *arg;
 {
 	struct hd_softc *rs = arg;
+	struct disklabel *lp;
 	struct buf *bp = rs->sc_tab.b_actf;
-	int part, ctlr, slave;
+	int ctlr, slave;
+	daddr64_t bn;
 
 	ctlr = rs->sc_dev.dv_parent->dv_unit;
 	slave = rs->sc_slave;
@@ -812,13 +790,16 @@ again:
 		printf("hdstart(%s): bp %p, %c\n", rs->sc_dev.dv_xname, bp,
 		       (bp->b_flags & B_READ) ? 'R' : 'W');
 #endif
-	part = HDPART(bp->b_dev);
+	lp = rs->sc_dkdev.dk_label;
+	bn = bp->b_blkno +
+	    DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)]);
+
 	rs->sc_flags |= HDF_SEEK;
 	rs->sc_ioc.c_unit = C_SUNIT(rs->sc_punit);
 	rs->sc_ioc.c_volume = C_SVOL(0);
 	rs->sc_ioc.c_saddr = C_SADDR;
 	rs->sc_ioc.c_hiaddr = 0;
-	rs->sc_ioc.c_addr = HDBTOS(bp->b_cylinder);
+	rs->sc_ioc.c_addr = HDBTOS(bn);
 	rs->sc_ioc.c_nop2 = C_NOP;
 	rs->sc_ioc.c_slen = C_SLEN;
 	rs->sc_ioc.c_len = rs->sc_resid;
@@ -1024,7 +1005,7 @@ hderror(unit)
 	struct hd_softc *rs = hd_cd.cd_devs[unit];
 	struct hd_stat *sp;
 	struct buf *bp;
-	daddr_t hwbn, pbn;
+	daddr64_t hwbn, pbn;
 
 	if (hdstatus(rs)) {
 #ifdef DEBUG
@@ -1074,7 +1055,7 @@ hderror(unit)
 	 * we just use b_blkno.
  	 */
 	bp = rs->sc_tab.b_actf;
-	pbn = rs->sc_dkdev.dk_label->d_partitions[HDPART(bp->b_dev)].p_offset;
+	pbn = DL_GETPOFFSET(&rs->sc_dkdev.dk_label->d_partitions[DISKPART(bp->b_dev)]);
 	if ((sp->c_fef & FEF_CU) || (sp->c_fef & FEF_DR) ||
 	    (sp->c_ief & IEF_RRMASK)) {
 		hwbn = HDBTOS(pbn + bp->b_blkno);
@@ -1086,7 +1067,7 @@ hderror(unit)
 
 	diskerr(bp, hd_cd.cd_name, "hard error", LOG_PRINTF,
 	    pbn - bp->b_blkno, rs->sc_dkdev.dk_label);
-	printf("\n%s%c: ", rs->sc_dev.dv_xname, 'a' + HDPART(bp->b_dev));
+	printf("\n%s%c: ", rs->sc_dev.dv_xname, 'a' + DISKPART(bp->b_dev));
 	
 #ifdef DEBUG
 	if (hddebug & HDB_ERROR) {
@@ -1168,11 +1149,7 @@ hdioctl(dev, cmd, data, flag, p)
 		return 0;
 
 	case DIOCGPDINFO:
-	    {
-		struct cpu_disklabel osdep;
-
-		hdgetdisklabel(dev, sc, (struct disklabel *)data, &osdep, 1);
-	    }
+		hdgetdisklabel(dev, sc, (struct disklabel *)data, 1);
 		goto exit;
 
 	case DIOCGDINFO:
@@ -1182,7 +1159,7 @@ hdioctl(dev, cmd, data, flag, p)
 	case DIOCGPART:
 		((struct partinfo *)data)->disklab = sc->sc_dkdev.dk_label;
 		((struct partinfo *)data)->part =
-			&sc->sc_dkdev.dk_label->d_partitions[HDPART(dev)];
+			&sc->sc_dkdev.dk_label->d_partitions[DISKPART(dev)];
 		goto exit;
 
 	case DIOCWLABEL:
@@ -1208,13 +1185,11 @@ hdioctl(dev, cmd, data, flag, p)
 		sc->sc_flags |= HDF_WLABEL;
 
 		error = setdisklabel(sc->sc_dkdev.dk_label,
-		    (struct disklabel *)data, /* sc->sc_dkdev.dk_openmask */ 0,
-		    sc->sc_dkdev.dk_cpulabel);
+		    (struct disklabel *)data, /* sc->sc_dkdev.dk_openmask */ 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
-				error = writedisklabel(HDLABELDEV(dev),
-				    hdstrategy, sc->sc_dkdev.dk_label,
-				    sc->sc_dkdev.dk_cpulabel);
+				error = writedisklabel(DISKLABELDEV(dev),
+				    hdstrategy, sc->sc_dkdev.dk_label);
 		}
 
 		sc->sc_flags &= ~HDF_WLABEL;
@@ -1231,12 +1206,12 @@ exit:
 	return (error);
 }
 
-int
+daddr64_t
 hdsize(dev)
 	dev_t dev;
 {
 	struct hd_softc *rs;
-	int unit = HDUNIT(dev);
+	int unit = DISKUNIT(dev);
 	int part, omask;
 	int size;
 
@@ -1244,7 +1219,7 @@ hdsize(dev)
 	if (rs == NULL)
 		return (-1);
 
-	part = HDPART(dev);
+	part = DISKPART(dev);
 	omask = rs->sc_dkdev.dk_openmask & (1 << part);
 
 	/*
@@ -1260,7 +1235,7 @@ hdsize(dev)
 	if (rs->sc_dkdev.dk_label->d_partitions[part].p_fstype != FS_SWAP)
 		size = -1;
 	else
-		size = rs->sc_dkdev.dk_label->d_partitions[part].p_size *
+		size = DL_GETPSIZE(&rs->sc_dkdev.dk_label->d_partitions[part]) *
 		    (rs->sc_dkdev.dk_label->d_secsize / DEV_BSIZE);
 
 	if (hdclose(dev, FREAD | FWRITE, S_IFBLK, NULL) != 0)
@@ -1300,13 +1275,13 @@ static int hddoingadump;	/* simple mutex */
 int
 hddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
 	int sectorsize;		/* size of a disk sector */
-	int nsects;		/* number of sectors in partition */
-	int sectoff;		/* sector offset of partition */
+	daddr64_t nsects;	/* number of sectors in partition */
+	daddr64_t sectoff;	/* sector offset of partition */
 	int totwrt;		/* total number of sectors left to write */
 	int nwrt;		/* current number of sectors to write */
 	int unit, part;
@@ -1321,8 +1296,8 @@ hddump(dev, blkno, va, size)
 	hddoingadump = 1;
 
 	/* Decompose unit and partition. */
-	unit = HDUNIT(dev);
-	part = HDPART(dev);
+	unit = DISKUNIT(dev);
+	part = DISKPART(dev);
 
 	/* Make sure dump device is ok. */
 	rs = hdlookup(unit);
@@ -1343,8 +1318,8 @@ hddump(dev, blkno, va, size)
 	totwrt = size / sectorsize;
 	blkno = dbtob(blkno) / sectorsize;	/* blkno in DEV_BSIZE units */
 
-	nsects = lp->d_partitions[part].p_size;
-	sectoff = lp->d_partitions[part].p_offset;
+	nsects = DL_GETPSIZE(&lp->d_partitions[part]);
+	sectoff = DL_GETPOFFSET(&lp->d_partitions[part]);
 
 	/* Check transfer bounds against partition size. */
 	if ((blkno < 0) || (blkno + totwrt) > nsects)

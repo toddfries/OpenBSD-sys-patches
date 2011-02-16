@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_machdep.c,v 1.3 2003/10/15 23:00:57 drahn Exp $	*/
+/*	$OpenBSD: pciide_machdep.c,v 1.4 2005/12/12 18:25:47 kettenis Exp $	*/
 /*	$NetBSD: pciide_machdep.c,v 1.2 1999/02/19 18:01:27 mycroft Exp $	*/
 
 /*

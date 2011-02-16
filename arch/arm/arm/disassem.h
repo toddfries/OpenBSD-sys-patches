@@ -1,4 +1,4 @@
-/*	$OpenBSD: disassem.h,v 1.1 2004/01/15 01:19:50 drahn Exp $	*/
+/*	$OpenBSD: disassem.h,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: disassem.h,v 1.4 2001/03/04 04:15:58 matt Exp $	*/
 
 /*

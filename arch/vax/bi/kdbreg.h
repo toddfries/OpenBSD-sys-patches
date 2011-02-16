@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdbreg.h,v 1.4 2002/06/11 09:36:23 hugh Exp $ */
+/*	$OpenBSD: kdbreg.h,v 1.5 2003/06/02 23:27:57 millert Exp $ */
 /*	$NetBSD: kdbreg.h,v 1.3 1999/11/03 21:57:40 ragge Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.

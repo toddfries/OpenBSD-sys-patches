@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mmu.c,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: mmu.c,v 1.4 2010/06/02 05:35:17 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mmu.c,v 1.15 2006/02/12 02:30:55 uwe Exp $	*/
 
 /*-

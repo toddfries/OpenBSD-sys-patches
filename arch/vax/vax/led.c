@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: led.c,v 1.3 2006/08/01 18:08:55 deraadt Exp $	*/
-=======
 /*	$OpenBSD: led.c,v 1.6 2008/08/20 18:50:17 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: leds.c,v 1.4 2005/12/11 12:19:37 christos Exp $	*/
 
 /*

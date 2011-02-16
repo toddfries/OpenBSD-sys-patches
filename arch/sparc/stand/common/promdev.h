@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: promdev.h,v 1.2 2002/03/14 01:26:44 millert Exp $	*/
-=======
 /*	$OpenBSD: promdev.h,v 1.4 2010/06/29 21:33:54 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: promdev.h,v 1.3 1995/09/18 21:31:50 pk Exp $ */
 
 /*

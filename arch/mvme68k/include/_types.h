@@ -1,6 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.1 2006/01/06 18:50:09 millert Exp $ */
+/*	$OpenBSD: _types.h,v 1.3 2007/05/15 01:56:46 deraadt Exp $ */
 
 /* public domain */
 #include <m68k/_types.h>
-
-#define	__HAVE_DEVICE_REGISTER

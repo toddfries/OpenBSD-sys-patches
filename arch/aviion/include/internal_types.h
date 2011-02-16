@@ -1,3 +1,3 @@
-/* $OpenBSD: internal_types.h,v 1.3 2004/04/26 14:31:11 miod Exp $ */
+/* $OpenBSD: internal_types.h,v 1.1.1.1 2006/04/18 10:56:58 miod Exp $ */
 /* public domain */
 #include <m88k/internal_types.h>

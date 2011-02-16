@@ -1,4 +1,4 @@
-/*	$OpenBSD: devs.c,v 1.5 2006/10/29 14:53:45 drahn Exp $	*/
+/*	$OpenBSD: devs.c,v 1.6 2006/11/16 23:12:56 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff

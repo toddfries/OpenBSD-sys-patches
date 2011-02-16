@@ -75,8 +75,8 @@
 /*
  * Convert PSL values to CPU IPLs and vice-versa.
  */
-#define	PSLTOIPL(x)		(((x) >> 8) & 0xf)
-#define	IPLTOPSL(x)		((((x) & 0xf) << 8) | PSL_S)
+#define	PSLTOIPL(x)		(((x) >> 8) & 0x7)
+#define	IPLTOPSL(x)		((((x) & 0x7) << 8) | PSL_S)
 
 /*
  * spl functions; all but spl0 are done in-line

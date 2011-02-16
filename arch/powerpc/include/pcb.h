@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.9 2003/02/26 21:54:44 drahn Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.12 2008/04/27 16:01:47 drahn Exp $	*/
 /*	$NetBSD: pcb.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@ struct pcb {
 	struct pmap *pcb_pm;	/* pmap of our vmspace */
 	struct pmap *pcb_pmreal; /* real address of above */
 	register_t pcb_sp;	/* saved SP */
-	int pcb_spl;		/* saved SPL */
 	faultbuf *pcb_onfault;	/* For use during copyin/copyout */
 	int pcb_flags;
 #define	PCB_FPU		1	/* Process had FPU initialized */
@@ -58,6 +57,8 @@ struct pcb {
 		double fpcsr;	/* FPCSR stored as double for easier access */
 	} pcb_fpu;		/* Floating point processor */
 	struct vreg *pcb_vr;    /* Vector unit */
+	struct cpu_info *pcb_fpcpu;
+	struct cpu_info *pcb_veccpu;
 };
 
 struct md_coredump {

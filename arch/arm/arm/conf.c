@@ -310,7 +310,7 @@ struct cdevsw cdevsw[] = {
 	cdev_disk_init(NVND,vnd),		/* 19: vnode disk driver */
 	cdev_lkm_dummy(),			/* 20: */
 	cdev_disk_init(NCCD,ccd),		/* 21: concatenated disk driver */
-	cdev_bpftun_init(NBPFILTER,bpf),	/* 22: Berkeley packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),		/* 22: Berkeley packet filter */
 	cdev_lkm_dummy(),			/* 23: */
 	cdev_disk_init(NSD,sd),			/* 24: SCSI disk */
 	cdev_tape_init(NST,st),			/* 25: SCSI tape */
@@ -321,7 +321,7 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 30: */
 	cdev_lkm_dummy(),			/* 31: */
 	cdev_lkm_dummy(),			/* 32: */
-	cdev_bpftun_init(NTUN,tun),		/* 33: network tunnel */
+	cdev_tun_init(NTUN,tun),		/* 33: network tunnel */
 	cdev_apm_init(NAPM,apm),		/* 34: APM interface */
 	cdev_lkm_init(NLKM,lkm),		/* 35: loadable module driver */
 	cdev_audio_init(NAUDIO,audio),		/* 36: generic audio I/O */
@@ -344,7 +344,7 @@ struct cdevsw cdevsw[] = {
 #else
 	cdev_notdef(),				/* 51: reserved */
 #endif
-	cdev_notdef(),				/* 52: reserved */
+ 	cdev_bio_init(NBIO,bio),		/* 52: ioctl tunnel */
 	cdev_notdef(),				/* 53: reserved */
 	cdev_notdef(),				/* 54 was FOOTBRIDGE console */
 	cdev_lkm_dummy(),			/* 55: Reserved for bypass device */	
@@ -443,7 +443,7 @@ int chrtoblktbl[] = {
 /* XXXX This needs to be dynamic for LKMs. */
     /*VCHR*/        /*VBLK*/
     /*  0 */        NODEV,
-    /*  1 */        1,
+    /*  1 */        NODEV,
     /*  2 */        NODEV,
     /*  3 */        NODEV,
     /*  4 */        NODEV,
@@ -458,17 +458,17 @@ int chrtoblktbl[] = {
     /* 13 */        NODEV,
     /* 14 */        NODEV,
     /* 15 */        NODEV,
-    /* 16 */        16,
-    /* 17 */        17,
-    /* 18 */        18,
-    /* 19 */        19,
+    /* 16 */        16,		/* wd */
+    /* 17 */        NODEV,
+    /* 18 */        18,		/* rd */
+    /* 19 */        19,		/* vnd */
     /* 20 */        NODEV,
-    /* 21 */        21,
+    /* 21 */        21,		/* ccd */
     /* 22 */        NODEV,
     /* 23 */        NODEV,
-    /* 24 */        24,
-    /* 25 */        25,
-    /* 26 */        26,
+    /* 24 */        24,		/* sd */
+    /* 25 */        25,		/* st */
+    /* 26 */        26,		/* cd */
     /* 27 */        NODEV,
     /* 28 */        NODEV,
     /* 29 */        NODEV,
@@ -513,36 +513,9 @@ int chrtoblktbl[] = {
     /* 68 */	    NODEV,
     /* 69 */	    NODEV,
     /* 70 */	    NODEV,
-    /* 71 */	    71,
-    /* 72 */	    NODEV,
-    /* 73 */	    NODEV,
-    /* 74 */	    NODEV,
-    /* 75 */	    NODEV,
-    /* 76 */	    NODEV,
-    /* 77 */	    NODEV,
-    /* 78 */	    NODEV,
-    /* 79 */	    NODEV,
-    /* 80 */	    NODEV,
-    /* 81 */	    NODEV,
-    /* 82 */	    NODEV,
-    /* 83 */	    NODEV,
-    /* 84 */	    NODEV,
-    /* 85 */	    NODEV,
-    /* 86 */	    NODEV,
-    /* 87 */	    NODEV,
-    /* 88 */	    NODEV,
-    /* 89 */	    NODEV,
-    /* 90 */	    NODEV,
-    /* 91 */	    NODEV,
-    /* 92 */	    92,
-    /* 93 */	    NODEV,
-    /* 94 */	    NODEV,
-    /* 95 */	    NODEV,
-    /* 96 */	    NODEV,
-    /* 97 */	    NODEV,
+    /* 71 */	    71,		/* raid */
 };
 int nchrtoblktbl = nitems(chrtoblktbl);
-
 
 dev_t
 getnulldev()

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ka53.c,v 1.4 2001/08/25 13:33:37 hugh Exp $	*/
-=======
 /*	$OpenBSD: ka53.c,v 1.7 2008/08/18 23:05:38 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ka53.c,v 1.2 2000/06/04 02:19:27 matt Exp $	*/
 /*
  * Copyright (c) 2002 Hugh Graham.

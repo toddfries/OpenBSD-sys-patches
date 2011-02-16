@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pci_machdep.c,v 1.27 2007/04/01 12:26:15 kettenis Exp $	*/
-=======
 /*	$OpenBSD: pci_machdep.c,v 1.40 2010/12/04 17:06:32 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -116,6 +112,9 @@ pci_make_tag(pc, b, d, f)
 	bzero(name, sizeof(name));
 #endif
 
+	if (pc->busnode[b])
+		return PCITAG_CREATE(0, b, d, f);
+
 	/* 
 	 * Hunt for the node that corresponds to this device 
 	 *
@@ -128,38 +127,10 @@ pci_make_tag(pc, b, d, f)
 
 	tag = PCITAG_CREATE(-1, b, d, f);
 	node = pc->rootnode;
+
 	/*
-	 * First make sure we're on the right bus.  If our parent
-	 * has a bus-range property and we're not in the range,
-	 * then we're obviously on the wrong bus.  So go up one
-	 * level.
-	 */
-#ifdef DEBUG
-	if (sparc_pci_debug & SPDB_PROBE) {
-		OF_getprop(node, "name", &name, sizeof(name));
-		printf("curnode %x %s\n", node, name);
-	}
-#endif
-#if 0
-	while ((OF_getprop(OF_parent(node), "bus-range", (void *)&busrange,
-		sizeof(busrange)) == sizeof(busrange)) &&
-		(b < busrange[0] || b > busrange[1])) {
-		/* Out of range, go up one */
-		node = OF_parent(node);
-#ifdef DEBUG
-		if (sparc_pci_debug & SPDB_PROBE) {
-			OF_getprop(node, "name", &name, sizeof(name));
-			printf("going up to node %x %s\n", node, name);
-		}
-#endif
-	}
-#endif	
-	/*
-	 * Now traverse all peers until we find the node or we find
+	 * Traverse all peers until we find the node or we find
 	 * the right bridge. 
-	 *
-	 * XXX We go up one and down one to make sure nobody's missed.
-	 * but this should not be necessary.
 	 */
 	for (node = ((node)); node; node = OF_peer(node)) {
 
@@ -170,7 +141,6 @@ pci_make_tag(pc, b, d, f)
 		}
 #endif
 
-#if 1
 		/*
 		 * Check for PCI-PCI bridges.  If the device we want is
 		 * in the bus-range for that bridge, work our way down.
@@ -188,7 +158,7 @@ pci_make_tag(pc, b, d, f)
 			}
 #endif
 		}
-#endif
+
 		/* 
 		 * We only really need the first `reg' property. 
 		 *
@@ -278,12 +248,12 @@ sparc64_pci_enumerate_bus(struct pci_softc *sc,
 	 * ecache line and the streaming cache (64 byte).
 	 */
 	cacheline = max(cacheinfo.ec_linesize, 64);
-	KASSERT((cacheline/64)*64 == cacheline &&
-	    (cacheline/cacheinfo.ec_linesize)*cacheinfo.ec_linesize == cacheline &&
-	    (cacheline/4)*4 == cacheline);
 
 	for (node = OF_child(node); node != 0 && node != -1;
 	     node = OF_peer(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		name[0] = name[29] = 0;
 		OF_getprop(node, "name", name, sizeof(name));
 
@@ -346,9 +316,6 @@ sparc64_pci_enumerate_bus(struct pci_softc *sc,
 	return (0);
 }
 
-<<<<<<< HEAD
-/* assume we are mapped little-endian/side-effect */
-=======
 int
 pci_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
 {
@@ -360,21 +327,13 @@ pci_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
         return (val);
 }
 
->>>>>>> origin/master
 pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
         pcireg_t val = (pcireg_t)~0;
 
-        DPRINTF(SPDB_CONF, ("pci_conf_read: tag %lx reg %x ",
-                (long)PCITAG_OFFSET(tag), reg));
-        if (PCITAG_NODE(tag) != -1) {
-                val = bus_space_read_4(pc->bustag, pc->bushandle,
-                        (PCITAG_OFFSET(tag) << pc->tagshift) + reg);
-        } else
-		DPRINTF(SPDB_CONF, ("pci_conf_read: bogus pcitag %x\n",
-	            (int)PCITAG_OFFSET(tag)));
-        DPRINTF(SPDB_CONF, (" returning %08x\n", (u_int)val));
+        if (PCITAG_NODE(tag) != -1)
+		val = pc->conf_read(pc, tag, reg);
 
         return (val);
 }
@@ -382,17 +341,8 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
-        DPRINTF(SPDB_CONF, ("pci_conf_write: tag %lx; reg %x; data %x; ",
-                (long)PCITAG_OFFSET(tag), reg, (int)data));
-
-        /* If we don't know it, just punt. */
-        if (PCITAG_NODE(tag) == -1) {
-                DPRINTF(SPDB_CONF, ("pci_config_write: bad addr"));
-                return;
-        }
-
-        bus_space_write_4(pc->bustag, pc->bushandle,
-                (PCITAG_OFFSET(tag) << pc->tagshift) + reg, data);
+        if (PCITAG_NODE(tag) != -1)
+		pc->conf_write(pc, tag, reg, data);
 }
 
 /*
@@ -410,11 +360,7 @@ pci_intr_map(pa, ihp)
 	char devtype[30];
 
 	len = OF_getproplen(node, "interrupts");
-<<<<<<< HEAD
-	if (len < sizeof(interrupts)) {
-=======
 	if (len < 0 || len < sizeof(interrupts[0])) {
->>>>>>> origin/master
 		DPRINTF(SPDB_INTMAP,
 			("pci_intr_map: interrupts len %d too small\n", len));
 		return (ENODEV);
@@ -457,15 +403,12 @@ pci_intr_map(pa, ihp)
 		return (0);
 }
 
-<<<<<<< HEAD
-=======
 int
 pci_intr_line(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	return (ih);
 }
 
->>>>>>> origin/master
 const char *
 pci_intr_string(pc, ih)
 	pci_chipset_tag_t pc;
@@ -490,11 +433,10 @@ pci_intr_establish(pc, ih, level, func, arg, what)
 	const char *what;
 {
 	void *cookie;
-	struct psycho_pbm *pp = (struct psycho_pbm *)pc->cookie;
 
 	DPRINTF(SPDB_INTR, ("pci_intr_establish: ih %lu; level %d",
 	    (u_long)ih, level));
-	cookie = bus_intr_establish(pp->pp_memt, ih, level, 0, func, arg, what);
+	cookie = bus_intr_establish(pc->bustag, ih, level, 0, func, arg, what);
 
 	DPRINTF(SPDB_INTR, ("; returning handle %p\n", cookie));
 	return (cookie);

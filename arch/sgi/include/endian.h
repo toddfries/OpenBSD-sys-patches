@@ -1,3 +1,3 @@
-/*	$OpenBSD: endian.h,v 1.7 1997/11/10 00:10:13 niklas Exp $	*/
+/*	$OpenBSD: endian.h,v 1.1 2004/08/06 21:12:19 pefo Exp $	*/
 
 #include <mips64/endian.h>

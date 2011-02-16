@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: cpgreg.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
 /*	$NetBSD: cpgreg.h,v 1.5 2002/04/28 17:10:34 uch Exp $	*/
 
 /*-

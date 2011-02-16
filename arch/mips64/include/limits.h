@@ -38,7 +38,7 @@
 
 #if __POSIX_VISIBLE || __XPG_VISIBLE
 #ifndef	SIZE_MAX
-#define SIZE_MAX	ULONG_MAX	/* max value for a size_t */
+#define	SIZE_MAX	ULONG_MAX	/* max value for a size_t */
 #endif
 #define	SSIZE_MAX	LONG_MAX	/* max value for a ssize_t */
 #endif
@@ -46,11 +46,10 @@
 #if __BSD_VISIBLE
 #define	SIZE_T_MAX	ULONG_MAX	/* max value for a size_t (historic) */
 
-/* GCC requires that quad constants be written as expressions. */
-#define	UQUAD_MAX	((u_quad_t)0-1)	/* max value for a uquad_t */
-					/* max value for a quad_t */
-#define	QUAD_MAX	((quad_t)(UQUAD_MAX >> 1))
-#define	QUAD_MIN	(-QUAD_MAX-1)	/* min value for a quad_t */
+/* Quads and longs are the same on mips64 */
+#define	UQUAD_MAX	(ULONG_MAX)	/* max value for a uquad_t */
+#define	QUAD_MAX	(LONG_MAX)	/* max value for a quad_t */
+#define	QUAD_MIN	(LONG_MIN)	/* min value for a quad_t */
 
 #endif /* __BSD_VISIBLE */
 

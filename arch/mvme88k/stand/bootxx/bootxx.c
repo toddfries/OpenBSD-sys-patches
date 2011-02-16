@@ -141,3 +141,15 @@ copyboot(struct open_file *fp, char *addr)
 
 	return 0;
 }
+
+void
+bugexec(void (*addr)())
+{
+	(*addr)(bugargs.dev_lun, bugargs.ctrl_lun, bugargs.flags,
+	    bugargs.ctrl_addr, (u_int)addr, bugargs.conf_blk,
+	    bugargs.arg_start, bugargs.arg_end);
+
+	printf("bugexec: %p returned!\n", addr);
+
+	_rtt();
+}

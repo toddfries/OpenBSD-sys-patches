@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: GENERIC,v 1.47 2006/08/30 19:29:20 miod Exp $
-=======
 #	$OpenBSD: GENERIC,v 1.53 2010/07/03 03:59:17 krw Exp $
->>>>>>> origin/master
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.

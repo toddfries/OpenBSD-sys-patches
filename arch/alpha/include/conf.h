@@ -1,4 +1,4 @@
-/* $OpenBSD: conf.h,v 1.2 2003/04/16 17:35:33 nate Exp $ */
+/* $OpenBSD: conf.h,v 1.3 2003/06/04 18:04:42 nate Exp $ */
 /*
  * Copyright (c) 2001 Nathan L. Binkert <binkertn@umich.edu>
  *

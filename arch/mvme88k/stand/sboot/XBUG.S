@@ -1,4 +1,4 @@
-/*	$OpenBSD: XBUG.S,v 1.4 2003/06/04 16:36:15 deraadt Exp $	*/
+/*	$OpenBSD: XBUG.S,v 1.5 2006/05/16 22:52:26 miod Exp $	*/
 
 /*
  * Copyright (c) 1995 Theo de Raadt

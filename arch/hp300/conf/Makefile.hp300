@@ -1,3 +1,4 @@
+#	$OpenBSD: Makefile.hp300,v 1.73 2010/12/30 18:49:30 deraadt Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -88,6 +89,7 @@ HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
+NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 
@@ -135,6 +137,9 @@ param.c: $S/conf/param.c
 
 param.o: param.c Makefile
 	${NORMAL_C}
+
+mcount.o: $S/lib/libkern/mcount.c Makefile
+	${NORMAL_C_NOP}
 
 ioconf.o: ioconf.c
 	${NORMAL_C}

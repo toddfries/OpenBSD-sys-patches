@@ -75,12 +75,6 @@ struct vm_map *phys_map = NULL;
 
 extern int physmem;
 
-#ifdef  NBUF
-int     nbuf = NBUF;
-#else
-int     nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -122,16 +116,6 @@ int allowaperture = 0;
 /* Permit console keyboard to do a nice halt. */
 int kbd_reset;
 int lid_suspend;
-
-/* Touch pad scaling disable flag and scaling parameters. */
-extern int zts_rawmode;
-struct ztsscale {
-	int ts_minx;
-	int ts_maxx;
-	int ts_miny;
-	int ts_maxy;
-};
-extern struct ztsscale zts_scale;
 extern int xscale_maxspeed;
 #endif
 
@@ -286,20 +270,11 @@ cpu_startup()
 	 */
 
 	/* msgbufphys was setup during the secondary boot strap */
-	for (loop = 0; loop < btoc(MSGBUFSIZE); ++loop)
+	for (loop = 0; loop < atop(MSGBUFSIZE); ++loop)
 		pmap_kenter_pa((vaddr_t)msgbufaddr + loop * PAGE_SIZE,
 		    msgbufphys + loop * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 	initmsgbuf(msgbufaddr, round_page(MSGBUFSIZE));
-
-	/*
-	 * Look at arguments passed to us and compute boothowto.
-	 * Default to SINGLE and ASKNAME if no args or
-	 * SINGLE and DFLTROOT if this is a ramdisk kernel.
-	 */
-#ifdef RAMDISK_HOOKS
-	boothowto = RB_SINGLE | RB_DFLTROOT;
-#endif /* RAMDISK_HOOKS */
 
 	/*
 	 * Identify ourselves for the msgbuf (everything printed earlier will
@@ -307,13 +282,14 @@ cpu_startup()
 	 */
 	printf(version);
 
-	printf("real mem  = %u (%uK) %uMB\n", ctob(physmem),
-	    ctob(physmem)/1024, ctob(physmem)/1024/1024);
+	printf("real mem  = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -328,10 +304,8 @@ cpu_startup()
 	 */
 	bufinit(); 
 
-	printf("avail mem = %lu (%uK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %lu (%uMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	curpcb = &proc0.p_addr->u_pcb;
 	curpcb->pcb_flags = 0;
@@ -394,7 +368,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
 #endif
 #if defined(__zaurus__)
-#include "zts.h"
 	case CPU_KBDRESET:
 		if (securelevel > 0)
 			return (sysctl_rdint(oldp, oldlenp, newp,
@@ -416,45 +389,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		    &xscale_maxspeed));
 		pxa2x0_maxspeed(&xscale_maxspeed);
 		return err;
-	}
-		
-	case CPU_ZTSRAWMODE:
-#if NZTS > 0
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &zts_rawmode));
-#else
-		return (EINVAL);
-#endif /* NZTS > 0 */
-	case CPU_ZTSSCALE:
-	{
-		int err = EINVAL;
-#if NZTS > 0
-		struct ztsscale *p = newp;
-		struct ztsscale ts;
-		int s;
-
-		if (!newp && newlen == 0)
-			return (sysctl_struct(oldp, oldlenp, 0, 0,
-			    &zts_scale, sizeof zts_scale));
-
-		if (!(newlen == sizeof zts_scale &&
-		    p->ts_minx < p->ts_maxx && p->ts_miny < p->ts_maxy &&
-		    p->ts_minx >= 0 && p->ts_maxx >= 0 &&
-		    p->ts_miny >= 0 && p->ts_maxy >= 0 &&
-		    p->ts_minx < 32768 && p->ts_maxx < 32768 &&
-		    p->ts_miny < 32768 && p->ts_maxy < 32768))
-			return (EINVAL);
-
-		ts = zts_scale;
-		err = sysctl_struct(oldp, oldlenp, newp, newlen,
-		    &ts, sizeof ts);
-		if (err == 0) {
-			s = splhigh();
-			zts_scale = ts;
-			splx(s);
-		}
-#endif /* NZTS > 0 */
-		return (err);
 	}
 #endif
 

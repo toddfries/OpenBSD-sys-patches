@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.2 2006/07/28 19:31:12 kettenis Exp $	*/
+/*	$OpenBSD: exec.c,v 1.3 2006/07/30 21:38:12 drahn Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vectors.s,v 1.8 2006/01/01 13:16:01 miod Exp $	*/
+/*	$OpenBSD: vectors.s,v 1.9 2006/01/13 19:36:47 miod Exp $	*/
 |	$NetBSD: vectors.s,v 1.10 1998/08/12 06:58:42 scottr Exp $
 
 | Copyright (c) 1988 University of Utah

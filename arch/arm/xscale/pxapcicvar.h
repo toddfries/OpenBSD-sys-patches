@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxapcicvar.h,v 1.6 2005/07/01 23:51:55 uwe Exp $ */
+/*	$OpenBSD: pxapcicvar.h,v 1.7 2005/12/14 15:08:51 uwe Exp $ */
 
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>

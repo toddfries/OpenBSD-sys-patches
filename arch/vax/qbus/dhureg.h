@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhureg.h,v 1.3 2003/04/03 22:47:27 hugh Exp $	*/
+/*	$OpenBSD: dhureg.h,v 1.4 2003/04/06 01:33:32 hugh Exp $	*/
 /*	$NetBSD: dhureg.h,v 1.4 1999/05/28 20:17:29 ragge Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

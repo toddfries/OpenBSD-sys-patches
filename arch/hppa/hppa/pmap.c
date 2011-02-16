@@ -562,7 +562,7 @@ pmap_bootstrap(vstart)
 	if (nkpdes < 4)
 		nkpdes = 4;		/* ... but no less than four */
 	nkpdes += HPPA_IOLEN / PDE_SIZE; /* ... and io space too */
-	npdes = nkpdes + (physmem + btoc(PDE_SIZE) - 1) / btoc(PDE_SIZE);
+	npdes = nkpdes + (physmem + atop(PDE_SIZE) - 1) / atop(PDE_SIZE);
 
 	/* map the pdes */
 	for (va = 0; npdes--; va += PDE_SIZE, addr += PAGE_SIZE) {
@@ -658,7 +658,7 @@ pmap_create()
 
 	uvm_objinit(&pmap->pm_obj, NULL, 1);
 
-	for (space = 1 + (arc4random() % hppa_sid_max);
+	for (space = 1 + arc4random_uniform(hppa_sid_max);
 	    pmap_sdir_get(space); space = (space + 1) % hppa_sid_max);
 
 	if ((pmap->pm_pdir_pg = pmap_pagealloc(NULL, 0)) == NULL)

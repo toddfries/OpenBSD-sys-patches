@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ts102.c,v 1.17 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: ts102.c,v 1.19 2009/04/10 20:54:57 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  *

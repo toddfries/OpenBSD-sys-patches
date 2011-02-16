@@ -126,7 +126,7 @@ ASLOCAL(main_start)
 	/* save PROM vbr */
 	ldcr	r12, VBR
 	or.u	r13, r0,  hi16(_C_LABEL(prom_vbr))
-	st	r12,  r13, lo16(_C_LABEL(prom_vbr))
+	st	r12, r13, lo16(_C_LABEL(prom_vbr))
 	stcr	r0,  VBR
 	FLUSH_PIPELINE
 
@@ -147,13 +147,13 @@ ASLOCAL(main_start)
 	 */
 #endif	/* MULTIPROCESSOR */
 
-	/* Switch to interrupt stack */
-	or.u	r31, r0,  hi16(_ASM_LABEL(intstack_end))
-	or	r31, r31, lo16(_ASM_LABEL(intstack_end))
+	/* Switch to startup stack */
+	or.u	r31, r0,  hi16(_ASM_LABEL(initstack_end))
+	or	r31, r31, lo16(_ASM_LABEL(initstack_end))
 
 #ifdef M88110
 #ifdef M88100
-	cmp	r2, r8, CPU_88110 /* r8 contains cputyp */
+	cmp	r2, r8, CPU_88110
 	bb1	ne, r2, 1f	/* if it's a 'mc88110, use different vectors */
 #endif
 	or.u	r3, r0, hi16(_C_LABEL(m88110_vector_list))
@@ -189,7 +189,7 @@ ASLOCAL(main_start)
 
 	/* call main() - no arguments although main() still defines one */
 	bsr.n	_C_LABEL(main)
-	 addu	r31, r31, USIZE
+	 addu	r31, r31, USPACE
 
 	or.u	r2, r0, hi16(_ASM_LABEL(main_panic))
 	bsr.n	_C_LABEL(panic)
@@ -243,22 +243,6 @@ GLOBAL(secondary_start)
 	bsr.n	_ASM_LABEL(setup_psr)
 	 or	r31, r31, lo16(_ASM_LABEL(slavestack_end))
 
-	set	r11, r0,  1<PSR_SUPERVISOR_MODE_BIT>
-	set	r11, r11, 1<PSR_INTERRUPT_DISABLE_BIT>
-	set	r11, r11, 1<PSR_GRAPHICS_DISABLE_BIT>
-	/*
-	 * XXX On 88110 processors, force serial instruction execution for now.
-	 * Situation where OoO would break will be hopefully taken care of in
-	 * the near future -- miod
-	 */
-#if 0
-	clr	r11, r11, 1<PSR_SERIAL_MODE_BIT>
-#else
-	set	r11, r11, 1<PSR_SERIAL_MODE_BIT>
-#endif
-	set	r11, r11, 1<PSR_SERIALIZE_BIT>
-	stcr	r11, PSR
-	FLUSH_PIPELINE
 	stcr	r0,  VBR	/* set Vector Base Register to 0, ALWAYS! */
 	FLUSH_PIPELINE
 
@@ -281,18 +265,11 @@ GLOBAL(secondary_start)
 
 	bsr	_C_LABEL(secondary_pre_main)	/* set cpu number */
 
-	ldcr	r2, CPU
-	ld	r3, r2, CI_IDLE_PCB
-	bsr.n	_C_LABEL(secondary_main)
-	 addu	r31, r3, USIZE			/* switch to idle stack */
+	ldcr	r1, CPU
+	st	r2,  r1, CI_CURPCB	/* save stack as curpcb for traps */
 
-	/*
-	 * At this point, the CPU has been correctly initialized and has
-	 * identified itself on the console.
-	 * All it needs now is to jump to the idle loop and wait for work to
-	 * be offered.
-	 */
-	br	_ASM_LABEL(cpu_switch_idle)
+	bsr.n	_C_LABEL(secondary_main)
+	 addu	r31, r2, USPACE			/* switch to startup stack */
 
 	/*
 	 * Dummy mp_atomic_begin() and mp_atomic_end() routine, so that
@@ -312,8 +289,9 @@ ASLOCAL(dummy_mplock)
  * (originally from Mach 2.5) 
  */
 GLOBAL(delay)
-	or.u	r3, r0, hi16(_cpuspeed)
-	ld	r3, r3, lo16(_cpuspeed)
+	bcnd	eq0, r2, 2f
+	or.u	r3, r0, hi16(_C_LABEL(aviion_delay_const))
+	ld	r3, r3, lo16(_C_LABEL(aviion_delay_const))
 	mul	r4, r2, r3
 	subu	r4, r4, 4	/* overhead of these instructions */
 
@@ -321,7 +299,7 @@ GLOBAL(delay)
 1: 
 	bcnd.n	gt0, r4, 1b
 	 subu	r4, r4, 2	/* two cycles per iteration */
-
+2:
 	jmp	r1
 
 /*****************************************************************************/
@@ -332,9 +310,9 @@ GLOBAL(kernel_sdt)		/* SDT (segment descriptor table */
 	space	0x2000		/* 8K - 4K phys, 4K virt*/
 
 	.align	PAGE_SIZE
-ASGLOBAL(intstack)
-	space	USIZE
-ASGLOBAL(intstack_end)
+ASGLOBAL(initstack)
+	space	USPACE
+ASGLOBAL(initstack_end)
 
 #ifdef MULTIPROCESSOR
 	space	PAGE_SIZE	/* 4K, small, interim stack */
@@ -342,32 +320,18 @@ ASLOCAL(slavestack_end)
 #endif
 
 /*
- * Main processor's idle pcb and stack.
- * Should be page aligned.
- */
-	.align	PAGE_SIZE
-GLOBAL(idle_u)
-	space	USIZE
-
-/*
  * Process 0's u.
  * Should be page aligned.
  */
 	.align	PAGE_SIZE
 ASLOCAL(u0)
-	space	USIZE
+	space	USPACE
 GLOBAL(proc0paddr)
 	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
 
 #ifdef MULTIPROCESSOR
 /* Dummy cpuinfo structure, for cpu_number() to work early. */
 ASLOCAL(dummy_cpu)
-<<<<<<< HEAD
-	word	1	/* ci_alive */
-	word	0	/* ci_curproc */
-	word	0	/* ci_curpcb */
-	word	0	/* ci_cpuid */
-=======
 	word	3 /* CIF_PRIMARY | CIF_ALIVE */	/* ci_alive */
 	word	0				/* ci_curproc */
 	word	0				/* ci_curpcb */
@@ -377,7 +341,6 @@ ASLOCAL(dummy_cpu)
 	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_end */
 
 	space	CPU_INFO_SIZEOF - 7 * 4
->>>>>>> origin/master
 #endif	/* MULTIPROCESSOR */
 
 #if defined(DDB) || NKSYMS > 0

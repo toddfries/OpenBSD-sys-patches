@@ -1,5 +1,9 @@
-#	$OpenBSD: Makefile,v 1.3 2006/10/11 17:19:06 drahn Exp $
+#	$OpenBSD: Makefile,v 1.6 2008/05/28 21:16:43 miod Exp $
 
+MAN=	boot.8
+MLINKS=	boot.8 boot.conf.5
+
+.if ${MACHINE} == "landisk"
 PROG=	boot
 SRCS=	srt0.S conf.c devs.c getsecs.c scifcons.c delay.c
 LDFLAGS=-nostdlib -Ttext 0x8ff00000 -N -x -Bstatic -e start
@@ -17,6 +21,9 @@ CFLAGS+=-m4-nofpu
 .PATH:  ${S}/stand/boot
 SRCS+=	boot.c cmd.c vars.c bootarg.c
 
+.PATH:	${S}/lib/libkern/arch/sh ${S}/lib/libkern
+SRCS+=	strlen.c strlcpy.c
+
 SAREL=
 SA_ZLIB=
 USE_LOADFILE=
@@ -25,11 +32,6 @@ SRCS+=	ctime.c strtol.c
 .include "${S}/lib/libsa/Makefile.inc"
 DPADD+= $(SALIB)
 LDADD+= $(SALIB)
-
-KERN_AS?=	library
-.include "${S}/lib/libkern/Makefile.inc"
-DPADD+= $(KERNLIB)
-LDADD+= $(KERNLIB)
 
 Z_AS?=	library
 .include "${S}/lib/libz/Makefile.inc"
@@ -44,6 +46,8 @@ ${PROG}: ${OBJS} ${DPADD}
 		-Map ${PROG}.map -cref ${OBJS} ${LDADD}
 	${OBJCOPY} -O binary ${PROG}.sym ${PROG}
 
-NOMAN=
+.else
+NOPROG=
+.endif
 
 .include <bsd.prog.mk>

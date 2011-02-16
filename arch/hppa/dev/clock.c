@@ -29,7 +29,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/time.h>
+#include <sys/timetc.h>
 
 #include <dev/clock_subr.h>
 
@@ -136,6 +136,7 @@ inittodr(time_t t)
 {
 	struct pdc_tod tod PDC_ALIGNMENT;
 	int 	error, tbad = 0;
+	struct timespec ts;
 
 	if (t < 12*SECYR) {
 		printf ("WARNING: preposterous time in file system");
@@ -155,12 +156,12 @@ inittodr(time_t t)
 	if (!tbad) {
 		u_long	dt;
 
-		dt = (time.tv_sec < t)?  t - time.tv_sec : time.tv_sec - t;
+		dt = (tod.sec < t)?  t - tod.sec : tod.sec - t;
 
 		if (dt < 2 * SECDAY)
 			return;
 		printf("WARNING: clock %s %ld days",
-		    time.tv_sec < t? "lost" : "gained", dt / SECDAY);
+		    tod.sec < t? "lost" : "gained", dt / SECDAY);
 	}
 
 	printf (" -- CHECK AND RESET THE DATE!\n");
@@ -172,6 +173,7 @@ inittodr(time_t t)
 void
 resettodr()
 {
+	struct timeval tv;
 	int error;
 
 	/*
@@ -184,7 +186,7 @@ resettodr()
 	microtime(&tv);
 
 	if ((error = pdc_call((iodcio_t)pdc, 1, PDC_TOD, PDC_TOD_WRITE,
-	    time.tv_sec, time.tv_usec)))
+	    tv.tv_sec, tv.tv_usec)))
 		printf("clock: failed to save (%d)\n", error);
 }
 
@@ -192,4 +194,13 @@ void
 setstatclockrate(int newhz)
 {
 	/* nothing we can do */
+}
+
+u_int
+itmr_get_timecount(struct timecounter *tc)
+{
+	u_long __itmr;
+
+	mfctl(CR_ITMR, __itmr);
+	return (__itmr);
 }

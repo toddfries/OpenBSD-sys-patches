@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bsd_openprom.h,v 1.10 2003/06/02 23:27:54 millert Exp $	*/
-=======
 /*	$OpenBSD: bsd_openprom.h,v 1.12 2010/06/29 21:28:08 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bsd_openprom.h,v 1.11 1996/05/18 12:27:43 mrg Exp $ */
 
 /*

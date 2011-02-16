@@ -1,4 +1,4 @@
-/* $OpenBSD: zaurus_kbdmap.h,v 1.18 2005/04/21 02:34:07 dlg Exp $ */
+/* $OpenBSD: zaurus_kbdmap.h,v 1.19 2005/05/10 08:26:12 espie Exp $ */
 
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>

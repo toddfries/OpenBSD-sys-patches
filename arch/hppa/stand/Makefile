@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile,v 1.2 2000/05/31 19:59:31 mickey Exp $
+#	$OpenBSD: Makefile,v 1.4 2007/11/25 20:37:24 maja Exp $
 
 .if ${MACHINE} == "hppa"
-SUBDIR= libsa libkern libz
+SUBDIR= libsa libz
 .endif
 SUBDIR+= mkboot boot
 .if ${MACHINE} == "hppa"

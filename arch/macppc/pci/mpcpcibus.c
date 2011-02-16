@@ -891,6 +891,8 @@ mpc_intr_map(void *lcv, pcitag_t bustag, int buspin, int  line,
                 printf("mpc_intr_map: bad interrupt pin %d\n", buspin);
                 error = 1;
         }
+	if (line == 0xff)
+		error = 1;
 
 	if (!error)
 		*ihp = line;

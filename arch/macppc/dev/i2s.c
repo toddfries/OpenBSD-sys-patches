@@ -45,6 +45,7 @@
 #include <machine/pio.h>
 
 #include <macppc/dev/i2svar.h>
+#include <macppc/dev/i2sreg.h>
 
 #ifdef I2S_DEBUG
 # define DPRINTF(x) printf x 
@@ -64,7 +65,6 @@ struct audio_params i2s_audio_default = {
 };
 
 struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
-void i2s_cs16mts(void *, u_char *, int);
 
 static int gpio_read(char *);
 static void gpio_write(char *, int);
@@ -94,24 +94,6 @@ static u_char *headphone_detect;
 static int headphone_detect_active;
 static u_char *lineout_detect;
 static int lineout_detect_active;
-
-
-/* I2S registers */
-#define I2S_INT		0x00
-#define I2S_FORMAT	0x10
-#define I2S_FRAMECOUNT	0x40
-#define I2S_FRAMEMATCH	0x50
-#define I2S_WORDSIZE	0x60
-
-/* I2S_INT register definitions */
-#define I2SClockOffset		0x3c
-#define I2S_INT_CLKSTOPPEND	0x01000000
-
-/* FCR(0x3c) bits */
-#define I2S0CLKEN	0x1000
-#define I2S0EN		0x2000
-#define I2S1CLKEN	0x080000
-#define I2S1EN		0x100000
 
 /* GPIO bits */
 #define GPIO_OUTSEL	0xf0	/* Output select */
@@ -333,41 +315,6 @@ i2s_query_encoding(h, ae)
 	return (err);
 }
 
-static void
-mono16_to_stereo16(v, p, cc)
-	void *v;
-	u_char *p;
-	int cc;
-{
-	int x;
-	int16_t *src, *dst;
-
-	src = (void *)(p + cc);
-	dst = (void *)(p + cc * 2);
-	while (cc > 0) {
-		x = *--src;
-		*--dst = x;
-		*--dst = x;
-		cc -= 2;
-	}
-}
-
-static void
-swap_bytes_mono16_to_stereo16(v, p, cc)
-	void *v;
-	u_char *p;
-	int cc;
-{
-	swap_bytes(v, p, cc);
-	mono16_to_stereo16(v, p, cc);
-}
-
-void
-i2s_cs16mts(void *v, u_char *p, int cc)
-{
-	mono16_to_stereo16(v, p, cc);
-	change_sign16_be(v, p, cc * 2);
-}
 
 struct i2s_mode {
 	u_int encoding;
@@ -378,11 +325,11 @@ struct i2s_mode {
 } i2s_modes[] = {
 	{ AUDIO_ENCODING_SLINEAR_LE,  8, 1, linear8_to_linear16_be_mts, 4 },
 	{ AUDIO_ENCODING_SLINEAR_LE,  8, 2, linear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_SLINEAR_LE, 16, 1, swap_bytes_mono16_to_stereo16, 2 },
+	{ AUDIO_ENCODING_SLINEAR_LE, 16, 1, swap_bytes_mts, 2 },
 	{ AUDIO_ENCODING_SLINEAR_LE, 16, 2, swap_bytes, 1 },
 	{ AUDIO_ENCODING_SLINEAR_BE,  8, 1, linear8_to_linear16_be_mts, 4 },
 	{ AUDIO_ENCODING_SLINEAR_BE,  8, 2, linear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_SLINEAR_BE, 16, 1, mono16_to_stereo16, 2 },
+	{ AUDIO_ENCODING_SLINEAR_BE, 16, 1, noswap_bytes_mts, 2 },
 	{ AUDIO_ENCODING_SLINEAR_BE, 16, 2, NULL, 1 },
 	{ AUDIO_ENCODING_ULINEAR_LE,  8, 1, ulinear8_to_linear16_be_mts, 4 },
 	{ AUDIO_ENCODING_ULINEAR_LE,  8, 2, ulinear8_to_linear16_be, 2 },
@@ -390,7 +337,7 @@ struct i2s_mode {
 	{ AUDIO_ENCODING_ULINEAR_LE, 16, 2, swap_bytes_change_sign16_be, 1 },
 	{ AUDIO_ENCODING_ULINEAR_BE,  8, 1, ulinear8_to_linear16_be_mts, 4 },
 	{ AUDIO_ENCODING_ULINEAR_BE,  8, 2, ulinear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_ULINEAR_BE, 16, 1, i2s_cs16mts, 2 },
+	{ AUDIO_ENCODING_ULINEAR_BE, 16, 1, change_sign16_be_mts, 2 },
 	{ AUDIO_ENCODING_ULINEAR_BE, 16, 2, change_sign16_be, 1 }
 };
 
@@ -916,33 +863,14 @@ i2s_trigger_input(h, start, end, bsize, intr, arg, param)
 	return 0;
 }
 
-#define CLKSRC_49MHz	0x80000000	/* Use 49152000Hz Osc. */
-#define CLKSRC_45MHz	0x40000000	/* Use 45158400Hz Osc. */
-#define CLKSRC_18MHz	0x00000000	/* Use 18432000Hz Osc. */
-#define MCLK_DIV	0x1f000000	/* MCLK = SRC / DIV */
-#define  MCLK_DIV1	0x14000000	/*  MCLK = SRC */
-#define  MCLK_DIV3	0x13000000	/*  MCLK = SRC / 3 */
-#define  MCLK_DIV5	0x12000000	/*  MCLK = SRC / 5 */
-#define SCLK_DIV	0x00f00000	/* SCLK = MCLK / DIV */
-#define  SCLK_DIV1	0x00800000
-#define  SCLK_DIV3	0x00900000
-#define SCLK_MASTER	0x00080000	/* Master mode */
-#define SCLK_SLAVE	0x00000000	/* Slave mode */
-#define SERIAL_FORMAT	0x00070000
-#define  SERIAL_SONY	0x00000000
-#define  SERIAL_64x	0x00010000
-#define  SERIAL_32x	0x00020000
-#define  SERIAL_DAV	0x00040000
-#define  SERIAL_SILICON	0x00050000
 
-// rate = fs = LRCLK
-// SCLK = 64*LRCLK (I2S)
-// MCLK = 256fs (typ. -- changeable)
-
-// MCLK = clksrc / mdiv
-// SCLK = MCLK / sdiv
-// rate = SCLK / 64    ( = LRCLK = fs)
-
+/* rate = fs = LRCLK
+ * SCLK = 64*LRCLK (I2S)
+ * MCLK = 256fs (typ. -- changeable)
+ * MCLK = clksrc / mdiv
+ *  SCLK = MCLK / sdiv
+ * rate = SCLK / 64    ( = LRCLK = fs)
+ */
 int
 i2s_set_rate(sc, rate)
 	struct i2s_softc *sc;
@@ -961,12 +889,6 @@ i2s_set_rate(sc, rate)
 		rate = 44100;
 
 	switch (rate) {
-	case 8000:
-		clksrc = 18432000;		/* 18MHz */
-		reg = CLKSRC_18MHz;
-		mclk_fs = 256;
-		break;
-
 	case 44100:
 		clksrc = 45158400;		/* 45MHz */
 		reg = CLKSRC_45MHz;
@@ -984,8 +906,8 @@ i2s_set_rate(sc, rate)
 	}
 
 	MCLK = rate * mclk_fs;
-	mdiv = clksrc / MCLK;			// 4
-	sdiv = mclk_fs / 64;			// 4
+	mdiv = clksrc / MCLK;			/* 4 */
+	sdiv = mclk_fs / 64;			/* 4 */
 
 	switch (mdiv) {
 	case 1:
@@ -1292,11 +1214,11 @@ i2s_gpio_init(sc, node, parent)
 
 	if (headphone_detect_intr != -1)
 		mac_intr_establish(parent, headphone_detect_intr, IST_EDGE,
-		    IPL_AUDIO, i2s_cint, sc, "i2s_h");
+		    IPL_AUDIO, i2s_cint, sc, sc->sc_dev.dv_xname);
 
 	if (lineout_detect_intr != -1)
 		mac_intr_establish(parent, lineout_detect_intr, IST_EDGE,
-		    IPL_AUDIO, i2s_cint, sc, "i2s_l");
+		    IPL_AUDIO, i2s_cint, sc, sc->sc_dev.dv_xname);
 
 	/* Enable headphone interrupt? */
 	*headphone_detect |= 0x80;
@@ -1316,10 +1238,9 @@ i2s_allocm(void *h, int dir, size_t size, int type, int flags)
 	if (size > I2S_DMALIST_MAX * I2S_DMASEG_MAX)
 		return (NULL);
 
-	p = malloc(sizeof(*p), type, flags);
+	p = malloc(sizeof(*p), type, flags | M_ZERO);
 	if (!p)
 		return (NULL);
-	bzero(p, sizeof(*p));
 
 	/* convert to the bus.h style, not used otherwise */
 	if (flags & M_NOWAIT)

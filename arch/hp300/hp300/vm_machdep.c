@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.41 2006/06/24 13:20:17 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.45 2007/10/13 07:17:59 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.60 2001/07/06 05:53:35 chs Exp $	*/
 
 /*
@@ -126,17 +126,14 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 /*
  * cpu_exit is called as the last action during exit.
  *
- * Block context switches and then call switch_exit() which will
- * switch to another process thus we never return.
+ * Call switch_exit() which will switch to another process thus we never return.
  */
 void
 cpu_exit(p)
 	struct proc *p;
 {
-
-	(void) splhigh();
-	switch_exit(p);
-	/* NOTREACHED */
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -195,40 +192,6 @@ cpu_coredump(p, vp, cred, chdr)
 
 	chdr->c_nseg++;
 	return 0;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap,
- * and size must be a multiple of PAGE_SIZE.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t)from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t)to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ | VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
 }
 
 /*

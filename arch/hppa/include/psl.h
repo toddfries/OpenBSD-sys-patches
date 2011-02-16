@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.9 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: psl.h,v 1.10 2004/09/14 22:41:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff

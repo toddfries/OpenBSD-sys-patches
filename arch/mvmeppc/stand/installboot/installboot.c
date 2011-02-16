@@ -34,6 +34,7 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/time.h>
+#include <sys/disklabel.h>
 #include <sys/stat.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
@@ -47,7 +48,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <util.h>
-#include <machine/disklabel.h> 	
 
 int	verbose, nowrite, hflag;
 char	*boot, *proto, *dev;

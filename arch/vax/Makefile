@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile,v 1.1 1996/03/16 11:03:11 ragge Exp $
-#	$NetBSD: Makefile,v 1.1 1996/03/16 11:03:11 ragge Exp $
-#
-=======
 #	$OpenBSD: Makefile,v 1.5 2010/11/12 17:11:44 deraadt Exp $
 
 S=	${.CURDIR}/../..
@@ -15,7 +10,6 @@ TAGS=	${.CURDIR}/tags
 
 NOPROG=
 NOMAN=
->>>>>>> origin/master
 SUBDIR=	boot
 
 # config the fattest kernel we can find into a temporary dir

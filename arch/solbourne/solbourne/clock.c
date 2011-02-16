@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: clock.c,v 1.1 2005/04/19 21:30:18 miod Exp $	*/
 /*	OpenBSD: clock.c,v 1.19 2004/04/08 01:11:21 deraadt Exp 	*/
 
 /*

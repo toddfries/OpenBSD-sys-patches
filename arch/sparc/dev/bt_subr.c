@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_subr.c,v 1.8 2002/08/12 10:44:03 miod Exp $	*/
+/*	$OpenBSD: bt_subr.c,v 1.9 2003/06/02 23:27:53 millert Exp $	*/
 /*	$NetBSD: bt_subr.c,v 1.5 1996/03/14 19:44:32 christos Exp $ */
 
 /*

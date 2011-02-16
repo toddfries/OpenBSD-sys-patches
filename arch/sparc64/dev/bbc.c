@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: bbc.c,v 1.3 2008/12/14 17:10:44 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -104,7 +100,7 @@ bbc_attach(struct device *parent, struct device *self, void *aux)
 	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) == 0) {
 		sc->sc_iot = ea->ea_memtag;
 	} else {
-		printf("%s: can't map register space\n", self->dv_xname);
+		printf(": can't map register space\n");
 		return;
 	}
 

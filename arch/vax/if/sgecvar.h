@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sgecvar.h,v 1.4 2004/07/07 23:10:45 deraadt Exp $	*/
-=======
 /*	$OpenBSD: sgecvar.h,v 1.6 2008/08/22 17:09:06 deraadt Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: sgecvar.h,v 1.2 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.

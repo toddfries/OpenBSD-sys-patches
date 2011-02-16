@@ -1,4 +1,4 @@
-/*	$OpenBSD: memdevs.c,v 1.4 2003/06/04 04:11:37 deraadt Exp $ */
+/*	$OpenBSD: memdevs.c,v 1.5 2003/10/05 20:27:48 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

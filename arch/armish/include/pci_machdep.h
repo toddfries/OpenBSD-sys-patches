@@ -1,2 +1,2 @@
-/*	$OpenBSD: pci_machdep.h,v 1.2 2004/01/29 03:15:34 drahn Exp $ */
+/*	$OpenBSD: pci_machdep.h,v 1.1 2006/05/29 17:13:19 drahn Exp $ */
 #include <arm/pci_machdep.h>

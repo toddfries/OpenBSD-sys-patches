@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ka48.c,v 1.7 2002/03/14 01:26:48 millert Exp $	*/
-=======
 /*	$OpenBSD: ka48.c,v 1.10 2008/08/18 23:05:38 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.

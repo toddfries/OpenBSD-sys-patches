@@ -44,7 +44,7 @@ pci0	at shpcic?
 # SH bus
 shb*	at mainbus?
 
-# ob-board I/O bus
+# on-board I/O bus
 obio0	at mainbus?
 
 # Serial Devices

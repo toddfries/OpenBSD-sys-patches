@@ -1,3 +1,4 @@
+/*	$OpenBSD: disklabel.h,v 1.10 2010/04/24 20:14:03 miod Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.

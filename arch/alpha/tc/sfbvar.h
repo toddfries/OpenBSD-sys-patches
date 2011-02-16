@@ -1,4 +1,4 @@
-/*	$OpenBSD: sfbvar.h,v 1.6 2002/03/14 01:26:28 millert Exp $	*/
+/*	$OpenBSD: sfbvar.h,v 1.7 2005/12/17 07:31:25 miod Exp $	*/
 /*	$NetBSD: sfbvar.h,v 1.1 1996/05/01 21:15:51 cgd Exp $	*/
 
 /*

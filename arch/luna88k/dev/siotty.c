@@ -588,7 +588,7 @@ struct consdev syscons = {
 	nullcnpollc,
 	NULL,
 	NODEV,
-	CN_REMOTE,
+	CN_HIGHPRI,
 };
 
 /* EXPORT */ void

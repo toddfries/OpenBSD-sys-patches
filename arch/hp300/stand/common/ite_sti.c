@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: ite_sti.c,v 1.1 2006/08/17 06:31:10 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  * Copyright (c) 2000-2003 Michael Shalayeff

@@ -21,21 +21,6 @@ LD?=		ld
 LIBSA_CPPFLAGS?= -DNEEDS_HEAP_H
 .endif
 
-
-
-### Figure out what to use for libkern
-LIBKERNDIR=             ${.CURDIR}/../libkern
-
-.if exists(${LIBKERNDIR}/obj.${MACHINE})
-LIBKERNOBJDIR=          ${LIBKERNDIR}/obj.${MACHINE}
-.elif exists(${LIBKERNDIR}/obj)
-LIBKERNOBJDIR=          ${LIBKERNDIR}/obj
-.else 
-LIBKERNOBJDIR=          ${LIBKERNDIR}
-.endif
-
-LIBKERN=                ${LIBKERNOBJDIR}/libkern.a
-
 ### Figure out what to use for libsa
 LIBSADIR?=               ${.CURDIR}/../libsa
 

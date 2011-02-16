@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sgec.c,v 1.14 2006/08/30 19:28:11 miod Exp $	*/
-=======
 /*	$OpenBSD: sgec.c,v 1.19 2008/11/28 02:44:17 brad Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.

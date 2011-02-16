@@ -41,6 +41,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#include <machine/atomic.h>
 #include <machine/intr.h>
 
 struct soft_intrq soft_intrq[SI_NQUEUES];
@@ -53,9 +54,6 @@ struct soft_intrq soft_intrq[SI_NQUEUES];
 void
 softintr_init(void)
 {
-#if 0
-	static const char *softintr_names[] = SI_QUEUENAMES;
-#endif
 	struct soft_intrq *siq;
 	int i;
 
@@ -80,7 +78,6 @@ softintr_dispatch(int si)
 	struct soft_intrq *siq = &soft_intrq[si];
 	struct soft_intrhand *sih;
 
-	siq->siq_evcnt.ev_count++;
 	for (;;) {
 		mtx_enter(&siq->siq_mtx);
 		sih = TAILQ_FIRST(&siq->siq_list);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: autoconf.h,v 1.12 2006/05/31 20:11:31 jason Exp $	*/
-=======
 /*	$OpenBSD: autoconf.h,v 1.18 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: autoconf.h,v 1.10 2001/07/24 19:32:11 eeh Exp $ */
 
 /*-
@@ -89,7 +85,7 @@ struct intrmap {
 extern struct intrmap intrmap[];
 
 /* The "mainbus" on ultra desktops is actually the UPA bus.  We need to
- * separate this from peripheral buses like SBUS and PCI because each bus may
+ * separate this from peripheral buses like SBus and PCI because each bus may
  * have different ways of encoding properties, such as "reg" and "interrupts".
  */
 
@@ -126,6 +122,7 @@ long	getproplen(int node, char *name);
 int	getprop(int, char *, size_t, int *, void **);
 char	*getpropstring(int node, char *name);
 int	getpropint(int node, char *name, int deflt);
+int	getpropspeed(int node, char *name);
 
 /* Frequently used options node */
 extern int optionsnode;
@@ -149,9 +146,6 @@ struct bootpath {
 };
 struct bootpath	*bootpath_store(int, struct bootpath *);
 
-/* Parse a disk string into a dev_t, return device struct pointer */
-struct	device *parsedisk(char *, int, int, dev_t *);
-
 /* Establish a mountroot_hook, for benefit of floppy drive, mostly. */
 void	mountroot_hook_establish(void (*)(struct device *), struct device *);
 
@@ -164,5 +158,6 @@ void	*findzs(int);
 int	romgetcursoraddr(int **, int **);
 int	findroot(void);
 int	findnode(int, const char *);
+int	checkstatus(int);
 int	node_has_property(int, const char *);
 void	device_register(struct device *, void *);

@@ -44,6 +44,8 @@
 #include <dev/ofw/openfirm.h>
 
 #include <machine/autoconf.h>
+#include <machine/bat.h>
+#include <machine/trap.h>
 
 /* only valid on 603(e,ev) and G3, G4 */
 #define HID0_DOZE	(1 << (31-8))
@@ -55,6 +57,7 @@
 #define HID0_LRSTK	(1 << (31-27))
 #define HID0_FOLD	(1 << (31-28))
 #define HID0_BHT	(1 << (31-29))
+extern u_int32_t	hid0_idle;
 
 /* SCOM addresses (24-bit) */
 #define SCOM_PCR	0x0aa001 /* Power Control Register */
@@ -238,15 +241,18 @@ ppc_check_procid()
 void
 cpuattach(struct device *parent, struct device *dev, void *aux)
 {
+	struct confargs *ca = aux;
+	int *reg = ca->ca_reg;
 	u_int32_t cpu, pvr, hid0;
 	char name[32];
 	int qhandle, phandle;
 	u_int32_t clock_freq = 0;
 	struct cpu_info *ci;
 
-	ci = &cpu_info[dev->dv_unit];
-	ci->ci_cpuid = dev->dv_unit;
+	ci = &cpu_info[reg[0]];
+	ci->ci_cpuid = reg[0];
 	ci->ci_intrdepth = -1;
+	ci->ci_randseed = 1;
 	ci->ci_dev = dev;
 
 	pvr = ppc_mfpvr();
@@ -374,16 +380,18 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case PPC_CPU_IBM750FX:
 	case PPC_CPU_MPC7410:
 		/* select DOZE mode */
-		hid0 &= ~(HID0_NAP | HID0_SLEEP);
-		hid0 |= HID0_DOZE | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0_idle = HID0_DOZE;
+		hid0 |= HID0_DPM;
 		break;
 	case PPC_CPU_MPC7447A:
 	case PPC_CPU_MPC7450:
 	case PPC_CPU_MPC7455:
 	case PPC_CPU_MPC7457:
 		/* select NAP mode */
-		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
-		hid0 |= HID0_NAP | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0_idle = HID0_NAP;
+		hid0 |= HID0_DPM;
 		/* try some other flags */
 		hid0 |= HID0_SGE | HID0_BTIC;
 		hid0 |= HID0_LRSTK | HID0_FOLD | HID0_BHT;
@@ -393,8 +401,8 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		break;
 	case PPC_CPU_IBM970FX:
 		/* select NAP mode */
-		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
-		hid0 |= HID0_NAP | HID0_DPM;
+		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
+		hid0 |= HID0_DPM;
 		break;
 	}
 	if (ppc_proc_is_64b == 0)

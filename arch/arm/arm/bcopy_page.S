@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcopy_page.S,v 1.2 2004/01/29 16:17:16 drahn Exp $	*/
+/*	$OpenBSD: bcopy_page.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: bcopy_page.S,v 1.7 2003/10/13 21:03:13 scw Exp $	*/
 
 

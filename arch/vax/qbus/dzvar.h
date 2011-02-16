@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dzvar.h,v 1.5 2003/06/02 23:27:58 millert Exp $	*/
-=======
 /*	$OpenBSD: dzvar.h,v 1.7 2008/08/15 22:50:25 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dzvar.h,v 1.8 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intreg.h,v 1.2 2002/03/14 01:26:45 millert Exp $	*/
+/*	$OpenBSD: intreg.h,v 1.3 2003/06/02 23:27:56 millert Exp $	*/
 /*	$NetBSD: intreg.h,v 1.4 2000/06/24 04:21:05 eeh Exp $ */
 
 /*

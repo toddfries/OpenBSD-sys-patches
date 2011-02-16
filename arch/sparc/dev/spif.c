@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: spif.c,v 1.19 2004/09/29 07:35:11 miod Exp $	*/
-=======
 /*	$OpenBSD: spif.c,v 1.27 2010/07/02 17:27:01 nicm Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

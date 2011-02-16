@@ -99,18 +99,12 @@ static struct consdev bootcons = {
 	bootcnpollc,
 	NULL,
 	makedev(14, 0), 
-	CN_NORMAL,
+	CN_LOWPRI,
 };
 
 /* 
  * Declare these as initialized data so we can patch them.
  */
-#ifdef NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -283,15 +277,15 @@ initppc(startkernel, endkernel, args)
 	/* MVME2[67]00 max out at 256MB, and we need BAT2 for now. */
 #else
 	/* use BATs to map 1GB memory, no pageable BATs now */
-	if (physmem > btoc(0x10000000)) {
+	if (physmem > atop(0x10000000)) {
 		ppc_mtdbat1l(BATL(0x10000000, BAT_M));
 		ppc_mtdbat1u(BATU(0x10000000));
 	}
-	if (physmem > btoc(0x20000000)) {
+	if (physmem > atop(0x20000000)) {
 		ppc_mtdbat2l(BATL(0x20000000, BAT_M));
 		ppc_mtdbat2u(BATU(0x20000000));
 	}
-	if (physmem > btoc(0x30000000)) {
+	if (physmem > atop(0x30000000)) {
 		ppc_mtdbat3l(BATL(0x30000000, BAT_M));
 		ppc_mtdbat3u(BATU(0x30000000));
 	}
@@ -387,13 +381,13 @@ void
 cpu_startup()
 {
 	vaddr_t minaddr, maxaddr;
-	int base, residual;
 
 	proc0.p_addr = proc0paddr;
 
 	printf("%s", version);
 	
-	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem)/1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -410,11 +404,9 @@ cpu_startup()
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 	ppc_malloc_ok = 1;
 	
-	printf("avail mem = %ld (%ldK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024);
-	printf("using %d buffers containing %d bytes of memory\n", nbuf,
-	    bufpages * PAGE_SIZE);
-	
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
+
 	/*
 	 * Set up the buffers.
 	 */
@@ -638,6 +630,8 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+
+	uvm_shutdown();
 	splhigh();
 	if (howto & RB_HALT) {
 		doshutdownhooks();

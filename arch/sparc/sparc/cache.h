@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cache.h,v 1.9 2005/04/19 21:30:20 miod Exp $	*/
-=======
 /*	$OpenBSD: cache.h,v 1.11 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cache.h,v 1.16 1997/07/06 21:15:14 pk Exp $ */
 
 /*

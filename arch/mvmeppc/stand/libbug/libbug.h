@@ -1,4 +1,4 @@
-/*	$OpenBSD: libbug.h,v 1.4 2004/01/24 21:12:38 miod Exp $ */
+/*	$OpenBSD: libbug.h,v 1.5 2004/11/15 14:03:21 miod Exp $ */
 
 #include <machine/prom.h>
 

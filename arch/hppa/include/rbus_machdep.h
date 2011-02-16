@@ -47,4 +47,6 @@ struct pci_attach_args;
 #define rbus_pccbb_parent_mem(d, p) (*(p)->pa_pc->pc_alloc_parent)((d), (p), 0)
 #define rbus_pccbb_parent_io(d, p)  (*(p)->pa_pc->pc_alloc_parent)((d), (p), 1)
 
+#define pccbb_attach_hook(parent, self, pa)	/* nothing */
+
 #endif /* _ARCH_HPPA_HPPA_RBUS_MACHDEP_H_ */

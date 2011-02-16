@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: Locore.c,v 1.6 2006/08/31 21:28:35 kettenis Exp $	*/
-=======
 /*	$OpenBSD: Locore.c,v 1.9 2009/08/17 14:23:09 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: Locore.c,v 1.1 2000/08/20 14:58:36 mrg Exp $	*/
 
 /*

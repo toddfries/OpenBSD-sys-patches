@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskrd.c,v 1.3 2001/07/04 08:09:26 niklas Exp $	*/
+/*	$OpenBSD: diskrd.c,v 1.4 2003/09/07 21:35:35 miod Exp $	*/
 
 /*
  * bug routines -- assumes that the necessary sections of memory

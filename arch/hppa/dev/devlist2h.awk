@@ -1,4 +1,4 @@
-#	$OpenBSD: devlist2h.awk,v 1.5 2003/10/30 19:25:12 mickey Exp $
+#	$OpenBSD: devlist2h.awk,v 1.6 2004/04/07 18:24:19 mickey Exp $
 
 #
 # Copyright (c) 1998-2003 Michael Shalayeff

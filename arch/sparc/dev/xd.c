@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: xd.c,v 1.33 2006/12/03 16:40:43 miod Exp $	*/
-=======
 /*	$OpenBSD: xd.c,v 1.53 2010/11/11 17:46:58 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -293,10 +289,6 @@ xdgetdisklabel(xd, b)
 	struct xd_softc *xd;
 	void *b;
 {
-<<<<<<< HEAD
-	char *err;
-	struct sun_disklabel *sdl;
-=======
 	struct disklabel *lp = xd->sc_dk.dk_label;
 	struct sun_disklabel *sl = b;
 	int error;
@@ -310,61 +302,34 @@ xdgetdisklabel(xd, b)
 	} else {
 		lp->d_secpercyl = 1;
 	}
->>>>>>> origin/master
 
 	/* We already have the label data in `b'; setup for dummy strategy */
 	xd_labeldata = b;
 
-<<<<<<< HEAD
-	/* Required parameters for readdisklabel() */
-	xd->sc_dk.dk_label->d_secsize = XDFM_BPS;
-	xd->sc_dk.dk_label->d_secpercyl = 1;
-
-	err = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
-			    xddummystrat,
-			    xd->sc_dk.dk_label, xd->sc_dk.dk_cpulabel, 0);
-	if (err) {
-		/*printf("%s: %s\n", xd->sc_dev.dv_xname, err);*/
-		return(XD_ERR_FAIL);
-	}
-=======
 	error = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
 	    xddummystrat, lp, 0);
 	if (error)
 		return (error);
->>>>>>> origin/master
 
 	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
-	sdl = (struct sun_disklabel *)xd->sc_dk.dk_cpulabel->cd_block;
-	if (sdl->sl_magic == SUN_DKMAGIC)
-		xd->pcyl = sdl->sl_pcylinders;
+	sl = b;
+	if (sl->sl_magic == SUN_DKMAGIC)
+		xd->pcyl = sl->sl_pcylinders;
 	else {
 		printf("%s: WARNING: no `pcyl' in disk label.\n",
-							xd->sc_dev.dv_xname);
-		xd->pcyl = xd->sc_dk.dk_label->d_ncylinders +
-			xd->sc_dk.dk_label->d_acylinders;
+			xd->sc_dev.dv_xname);
+		xd->pcyl = lp->d_ncylinders +
+			lp->d_acylinders;
 		printf("%s: WARNING: guessing pcyl=%d (ncyl+acyl)\n",
-			xd->sc_dev.dv_xname, xd->pcyl);
+		xd->sc_dev.dv_xname, xd->pcyl);
 	}
 
-<<<<<<< HEAD
-	xd->ncyl = xd->sc_dk.dk_label->d_ncylinders;
-	xd->acyl = xd->sc_dk.dk_label->d_acylinders;
-	xd->nhead = xd->sc_dk.dk_label->d_ntracks;
-	xd->nsect = xd->sc_dk.dk_label->d_nsectors;
-	xd->sectpercyl = xd->sc_dk.dk_label->d_secpercyl =
-	    xd->nhead * xd->nsect;
-	xd->sc_dk.dk_label->d_secsize = XDFM_BPS; /* not handled by
-						  * sun->bsd */
-	return(XD_ERR_AOK);
-=======
 	xd->ncyl = lp->d_ncylinders;
 	xd->acyl = lp->d_acylinders;
 	xd->nhead = lp->d_ntracks;
 	xd->nsect = lp->d_nsectors;
 	xd->sectpercyl = lp->d_secpercyl;
 	return (0);
->>>>>>> origin/master
 }
 
 /*
@@ -453,11 +418,10 @@ xdcattach(parent, self, aux)
 	/* Setup device view of DVMA address */
 	xdc->dvmaiopb = (struct xd_iopb *) ((u_long) xdc->iopbase - DVMA_BASE);
 
-	xdc->reqs = (struct xd_iorq *)
-	    malloc(XDC_MAXIOPB * sizeof(struct xd_iorq), M_DEVBUF, M_NOWAIT);
+	xdc->reqs = malloc(XDC_MAXIOPB * sizeof(struct xd_iorq), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (xdc->reqs == NULL)
 		panic("xdc malloc");
-	bzero(xdc->reqs, XDC_MAXIOPB * sizeof(struct xd_iorq));
 
 	/* init free list, iorq to iopb pointers, and non-zero fields in the
 	 * iopb which never change. */
@@ -669,7 +633,7 @@ xdattach(parent, self, aux)
 	xd->nhead = 1;
 	xd->nsect = 1;
 	xd->sectpercyl = 1;
-	for (lcv = 0; lcv < 126; lcv++)	/* init empty bad144 table */
+	for (lcv = 0; lcv < NBT_BAD; lcv++)	/* init empty bad144 table */
 		xd->dkb.bt_bad[lcv].bt_cyl = xd->dkb.bt_bad[lcv].bt_trksec = 0xffff;
 	rqno = xdc_cmd(xdc, XDCMD_WRP, XDFUN_DRV, xd->xd_drive, 0, 0, 0, fmode);
 	XDC_DONE(xdc, rqno, err);
@@ -732,7 +696,7 @@ xdattach(parent, self, aux)
 
 	/* check dkbad for sanity */
 	dkb = (struct dkbad *) xa->buf;
-	for (lcv = 0; lcv < 126; lcv++) {
+	for (lcv = 0; lcv < NBT_BAD; lcv++) {
 		if ((dkb->bt_bad[lcv].bt_cyl == 0xffff ||
 				dkb->bt_bad[lcv].bt_cyl == 0) &&
 		     dkb->bt_bad[lcv].bt_trksec == 0xffff)
@@ -744,7 +708,7 @@ xdattach(parent, self, aux)
 		if ((dkb->bt_bad[lcv].bt_trksec & 0xff) >= xd->nsect)
 			break;
 	}
-	if (lcv != 126) {
+	if (lcv != NBT_BAD) {
 		printf("%s: warning: invalid bad144 sector!\n",
 			xd->sc_dev.dv_xname);
 	} else {
@@ -808,7 +772,7 @@ xdclose(dev, flag, fmt, p)
 int
 xddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -830,7 +794,7 @@ xddump(dev, blkno, va, size)
 	/* outline: globals: "dumplo" == sector number of partition to start
 	 * dump at (convert to physical sector with partition table)
 	 * "dumpsize" == size of dump in clicks "physmem" == size of physical
-	 * memory (clicks, ctob() to get bytes) (normal case: dumpsize ==
+	 * memory (clicks, ptoa() to get bytes) (normal case: dumpsize ==
 	 * physmem)
 	 *
 	 * dump a copy of physical memory to the dump device starting at sector
@@ -884,21 +848,6 @@ xdioctl(dev, command, addr, flag, p)
 		    &xd->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
-<<<<<<< HEAD
-	case DIOCSDINFO:	/* set disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		error = setdisklabel(xd->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0,
-		    xd->sc_dk.dk_cpulabel);
-		if (error == 0) {
-			if (xd->state == XD_DRIVE_NOLABEL)
-				xd->state = XD_DRIVE_ONLINE;
-		}
-		return error;
-
-=======
->>>>>>> origin/master
 	case DIOCWLABEL:	/* change write status of disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
@@ -913,21 +862,11 @@ xdioctl(dev, command, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xd->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0,
-		    xd->sc_dk.dk_cpulabel);
+		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0);
 		if (error == 0) {
 			if (xd->state == XD_DRIVE_NOLABEL)
 				xd->state = XD_DRIVE_ONLINE;
 
-<<<<<<< HEAD
-			/* Simulate opening partition 0 so write succeeds. */
-			xd->sc_dk.dk_openmask |= (1 << 0);
-			error = writedisklabel(MAKEDISKDEV(major(dev), DISKUNIT(dev), RAW_PART),
-			    xdstrategy, xd->sc_dk.dk_label,
-			    xd->sc_dk.dk_cpulabel);
-			xd->sc_dk.dk_openmask =
-			    xd->sc_dk.dk_copenmask | xd->sc_dk.dk_bopenmask;
-=======
 			if (command == DIOCWDINFO) {
 				/*
 				 * Simulate opening partition 0 so write
@@ -939,7 +878,6 @@ xdioctl(dev, command, addr, flag, p)
 				xd->sc_dk.dk_openmask = xd->sc_dk.dk_copenmask |
 				    xd->sc_dk.dk_bopenmask;
 			}
->>>>>>> origin/master
 		}
 		return error;
 
@@ -1034,7 +972,7 @@ xdwrite(dev, uio, flags)
  * xdsize: return size of a partition for a dump
  */
 
-int
+daddr64_t
 xdsize(dev)
 	dev_t   dev;
 
@@ -1057,7 +995,7 @@ xdsize(dev)
 	if (xdsc->sc_dk.dk_label->d_partitions[part].p_fstype != FS_SWAP)
 		size = -1;	/* only give valid size for swap partitions */
 	else
-		size = xdsc->sc_dk.dk_label->d_partitions[part].p_size *
+		size = DL_GETPSIZE(&xdsc->sc_dk.dk_label->d_partitions[part]) *
 		    (xdsc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
 	if (omask == 0 && xdclose(dev, 0, S_IFBLK, NULL) != 0)
 		return (-1);
@@ -1118,7 +1056,7 @@ xdstrategy(bp)
 	 * completion. */
 
 	if (bounds_check_with_label(bp, xd->sc_dk.dk_label,
-	    xd->sc_dk.dk_cpulabel, (xd->flags & XD_WLABEL) != 0) <= 0)
+	    (xd->flags & XD_WLABEL) != 0) <= 0)
 		goto done;
 
 	/*
@@ -1458,8 +1396,9 @@ xdc_startbuf(xdcsc, xdsc, bp)
 	}
 	partno = DISKPART(bp->b_dev);
 #ifdef XDC_DEBUG
-	printf("xdc_startbuf: %s%c: %s block %d\n", xdsc->sc_dev.dv_xname,
-	    'a' + partno, (bp->b_flags & B_READ) ? "read" : "write", bp->b_blkno);
+	printf("xdc_startbuf: %s%c: %s block %lld\n",
+	    xdsc->sc_dev.dv_xname, 'a' + partno,
+	    (bp->b_flags & B_READ) ? "read" : "write", bp->b_blkno);
 	printf("xdc_startbuf: b_bcount %d, b_data 0x%x\n",
 	    bp->b_bcount, bp->b_data);
 #endif
@@ -1473,7 +1412,7 @@ xdc_startbuf(xdcsc, xdsc, bp)
 	 */
 
 	block = bp->b_blkno + ((partno == RAW_PART) ? 0 :
-	    xdsc->sc_dk.dk_label->d_partitions[partno].p_offset);
+	    DL_GETPOFFSET(&xdsc->sc_dk.dk_label->d_partitions[partno]));
 
 	dbuf = kdvma_mapin(bp->b_data, bp->b_bcount, 0);
 	if (dbuf == NULL) {	/* out of DVMA space */

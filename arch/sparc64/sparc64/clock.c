@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: clock.c,v 1.31 2007/04/07 19:24:58 kettenis Exp $	*/
-=======
 /*	$OpenBSD: clock.c,v 1.48 2010/07/07 15:37:22 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -84,7 +80,6 @@
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
-#include <machine/eeprom.h>
 #include <machine/cpu.h>
 #include <machine/idprom.h>
 
@@ -466,11 +461,13 @@ timermatch(parent, cf, aux)
 	void *cf;
 	void *aux;
 {
+#ifndef MULTIPROCESSOR
 	struct mainbus_attach_args *ma = aux;
 
 	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr)
 		return (strcmp("counter-timer", ma->ma_name) == 0);
 	else
+#endif
 		return (0);
 }
 
@@ -493,13 +490,13 @@ timerattach(parent, self, aux)
 	timerreg_4u.t_mapintr = (int64_t *)(u_long)va[2];
 
 	/* Install the appropriate interrupt vector here */
-	level10.ih_number = ma->ma_interrupts[0];
+	level10.ih_number = INTVEC(ma->ma_interrupts[0]);
 	level10.ih_clr = (void *)&timerreg_4u.t_clrintr[0];
 	level10.ih_map = (void *)&timerreg_4u.t_mapintr[0];
 	strlcpy(level10.ih_name, "clock", sizeof(level10.ih_name));
 	intr_establish(10, &level10);
 
-	level14.ih_number = ma->ma_interrupts[1];
+	level14.ih_number = INTVEC(ma->ma_interrupts[1]);
 	level14.ih_clr = (void *)&timerreg_4u.t_clrintr[1];
 	level14.ih_map = (void *)&timerreg_4u.t_mapintr[1];
 	strlcpy(level14.ih_name, "prof", sizeof(level14.ih_name));
@@ -608,13 +605,8 @@ cpu_initclocks(void)
 	 */
 
 	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr) {
-<<<<<<< HEAD
-		printf("No counter-timer -- using %%tick at %ldMHz as "
-		    "system clock.\n", (long)(cpu_clockrate/1000000));
-=======
 		struct cpu_info *ci;
 
->>>>>>> origin/master
 		/* We don't have a counter-timer -- use %tick */
 		level0.ih_clr = 0;
 
@@ -631,18 +623,6 @@ cpu_initclocks(void)
 		/* We only have one timer so we have no statclock */
 		stathz = 0;	
 
-<<<<<<< HEAD
-		/* set the next interrupt time */
-		tick_increment = cpu_clockrate / hz;
-#ifdef DEBUG
-		printf("Using %%tick -- intr in %ld cycles...",
-		    tick_increment);
-#endif
-		next_tick(tick_increment);
-#ifdef DEBUG
-		printf("done.\n");
-#endif
-=======
 		if (sys_tick_rate > 0) {
 			tick_increment = sys_tick_rate / hz;
 			if (impl == IMPL_HUMMINGBIRD) {
@@ -664,7 +644,6 @@ cpu_initclocks(void)
 
 		cpu_start_clock();
 
->>>>>>> origin/master
 		return;
 	}
 
@@ -773,8 +752,6 @@ clockintr(cap)
 	/* Let locore.s clear the interrupt for us. */
 	hardclock((struct clockframe *)cap);
 
-	level10.ih_count.ec_count++;
-
 	return (1);
 }
 
@@ -790,11 +767,9 @@ int
 tickintr(cap)
 	void *cap;
 {
-	int s;
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
 
-<<<<<<< HEAD
-	hardclock((struct clockframe *)cap);
-=======
 	/*
 	 * No need to worry about overflow; %tick is architecturally
 	 * defined not to do that for at least 10 years.
@@ -804,13 +779,11 @@ tickintr(cap)
 		hardclock((struct clockframe *)cap);
 		atomic_add_ulong((unsigned long *)&level0.ih_count.ec_count, 1);
 	}
->>>>>>> origin/master
 
-	s = splhigh();
-	/* Reset the interrupt */
-	next_tick(tick_increment);
-	level0.ih_count.ec_count++;
-	splx(s);
+	/* Reset the interrupt. */
+	s = intr_disable();
+	tickcmpr_set(ci->ci_tick);
+	intr_restore(s);
 
 	return (1);
 }
@@ -901,8 +874,6 @@ statintr(cap)
 			send_softint(-1, PIL_SCHED, &schedint);
 	stxa((vaddr_t)&timerreg_4u.t_timer[1].t_limit, ASI_NUCLEUS, 
 	     tmr_ustolim(newint)|TMR_LIM_IEN|TMR_LIM_RELOAD);
-
-	level14.ih_count.ec_count++;
 
 	return (1);
 }
@@ -1006,16 +977,21 @@ resettodr()
 		printf("Cannot set time in time-of-day clock\n");
 }
 
-/*
- * XXX: these may actually belong somewhere else, but since the
- * EEPROM is so closely tied to the clock on some models, perhaps
- * it needs to stay here...
- */
-int
-eeprom_uio(uio)
-	struct uio *uio;
+void
+tick_start(void)
 {
-	return (ENODEV);
+	struct cpu_info *ci = curcpu();
+	u_int64_t s;
+
+	/*
+	 * Try to make the tick interrupts as synchronously as possible on
+	 * all CPUs to avoid inaccuracies for migrating processes.
+	 */
+
+	s = intr_disable();
+	ci->ci_tick = roundup(tick(), tick_increment);
+	tickcmpr_set(ci->ci_tick);
+	intr_restore(s);
 }
 
 void

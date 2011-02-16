@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.h,v 1.5 2006/06/02 17:39:58 miod Exp $	*/
-=======
 /*	$OpenBSD: intr.h,v 1.13 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /* 	$NetBSD: intr.h,v 1.1 1998/08/18 23:55:00 matt Exp $	*/
 
 /*
@@ -100,6 +96,7 @@
 #define splclock()	_splraise(IPL_CLOCK)
 #define splstatclock()	_splraise(IPL_STATCLOCK)
 #define splhigh()	_splset(IPL_HIGH)
+#define	splsched()	splhigh()
 
 /* These are better to use when playing with VAX buses */
 #define	spl4()		_splraise(0x14)
@@ -117,7 +114,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)

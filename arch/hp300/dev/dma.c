@@ -209,7 +209,7 @@ dmacomputeipl()
 	 * Our interrupt level must be as high as the highest
 	 * device using DMA (i.e. splbio).
 	 */
-	sc->sc_isr.isr_ipl = PSLTOIPL(hp300_bioipl);
+	sc->sc_isr.isr_ipl = PSLTOIPL(hp300_varpsl[IPL_BIO]);
 
 	sc->sc_isr.isr_func = dmaintr;
 	intr_establish(&sc->sc_isr, "dma");

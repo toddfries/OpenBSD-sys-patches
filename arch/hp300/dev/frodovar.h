@@ -1,4 +1,4 @@
-/*	$OpenBSD: frodovar.h,v 1.6 2007/01/06 20:09:12 miod Exp $	*/
+/*	$OpenBSD: frodovar.h,v 1.7 2007/01/06 20:17:43 miod Exp $	*/
 /*	$NetBSD: frodovar.h,v 1.1 1997/05/12 08:03:50 thorpej Exp $	*/
 
 /*

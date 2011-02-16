@@ -78,10 +78,10 @@ static void	mac68k_ncr5380_scsi_cmd(struct scsi_xfer *xs);
 static void	ncr5380_show_scsi_cmd(struct scsi_xfer *xs);
 
 struct scsi_adapter ncr5380_switch = {
-	mac68k_ncr5380_scsi_cmd,	/* scsi_cmd()			*/
-	ncr5380_minphys,		/* scsi_minphys()		*/
-	0,				/* open_target_lu()		*/
-	0				/* close_target_lu()		*/
+	mac68k_ncr5380_scsi_cmd,	/* scsi_cmd() */
+	ncr5380_minphys,		/* scsi_minphys() */
+	NULL,				/* probe_dev() */
+	NULL				/* free_dev() */
 };
 
 
@@ -586,8 +586,8 @@ main_exit:
  * The SCSI-DMA interrupt.
  * This interrupt can only be triggered when running in non-polled DMA
  * mode. When DMA is not active, it will be silently ignored, it is usually
- * to late because the EOP interrupt of the controller happens just a tiny
- * bit earlier. It might become usefull when scatter/gather is implemented,
+ * too late because the EOP interrupt of the controller happens just a tiny
+ * bit earlier. It might become useful when scatter/gather is implemented,
  * because in that case only part of the DATAIN/DATAOUT transfer is taken
  * out of a single buffer.
  */

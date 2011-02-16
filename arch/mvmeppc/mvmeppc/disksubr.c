@@ -29,20 +29,13 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)ufs_disksubr.c	7.16 (Berkeley) 5/4/91
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/device.h>
 #include <sys/disklabel.h>
-#include <sys/syslog.h>
 #include <sys/disk.h>
-
-#define BOOT_MAGIC 0xAA55
-#define BOOT_MAGIC_OFF (DOSPARTOFF+NDOSPART*sizeof(struct dos_partition))
 
 /*
  * Attempt to read a disk label from a device
@@ -56,7 +49,7 @@
  * find disklabel inside a DOS partition. Return buffer
  * for use in signalling errors if requested.
  *
- * We would like to check if each MBR has a valid BOOT_MAGIC, but
+ * We would like to check if each MBR has a valid DOSMBR_SIGNATURE, but
  * we cannot because it doesn't always exist. So.. we assume the
  * MBR is valid.
  *
@@ -100,136 +93,29 @@ done:
 }
 
 /*
- * Check new disk label for sensibility
- * before setting it.
- */
-int
-setdisklabel(olp, nlp, openmask, osdep)
-	struct disklabel *olp, *nlp;
-	u_long openmask;
-	struct cpu_disklabel *osdep;
-{
-	int i;
-	struct partition *opp, *npp;
-
-	/* sanity clause */
-	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
-	    (nlp->d_secsize % DEV_BSIZE) != 0)
-		return(EINVAL);
-
-	/* special case to allow disklabel to be invalidated */
-	if (nlp->d_magic == 0xffffffff) {
-		*olp = *nlp;
-		return (0);
-	}
-
-	if (nlp->d_magic != DISKMAGIC || nlp->d_magic2 != DISKMAGIC ||
-	    dkcksum(nlp) != 0)
-		return (EINVAL);
-
-	/* XXX missing check if other dos partitions will be overwritten */
-
-	while (openmask != 0) {
-		i = ffs(openmask) - 1;
-		openmask &= ~(1 << i);
-		if (nlp->d_npartitions <= i)
-			return (EBUSY);
-		opp = &olp->d_partitions[i];
-		npp = &nlp->d_partitions[i];
-		if (npp->p_offset != opp->p_offset || npp->p_size < opp->p_size)
-			return (EBUSY);
-		/*
-		 * Copy internally-set partition information
-		 * if new label doesn't include it.		XXX
-		 */
-		if (npp->p_fstype == FS_UNUSED && opp->p_fstype != FS_UNUSED) {
-			npp->p_fstype = opp->p_fstype;
-			npp->p_fsize = opp->p_fsize;
-			npp->p_frag = opp->p_frag;
-			npp->p_cpg = opp->p_cpg;
-		}
-	}
-	nlp->d_checksum = 0;
-	nlp->d_checksum = dkcksum(nlp);
-	*olp = *nlp;
-	return (0);
-}
-
-
-/*
  * Write disk label back to device after modification.
- * XXX cannot handle OpenBSD partitions in extended partitions!
  */
 int
-writedisklabel(dev, strat, lp, osdep)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
+writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
-	struct dos_partition dp[NDOSPART], *dp2;
+	int error = EIO, partoff = -1, cyl = 0;
 	struct disklabel *dlp;
-	struct buf *bp;
-	int error, dospartoff, cyl, i;
-	int ourpart = -1;
+	struct buf *bp = NULL;
 
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	/* do dos partitions in the process of getting disklabel? */
-	dospartoff = 0;
-	cyl = LABELSECTOR / lp->d_secpercyl;
-	/* read master boot record */
-	bp->b_blkno = DOSBBSECTOR;
-	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylinder = DOSBBSECTOR / lp->d_secpercyl;
-	(*strat)(bp);
-
-	if ((error = biowait(bp)) != 0)
+	if (readdoslabel(bp, strat, lp, &partoff, 1) != NULL)
 		goto done;
 
-	/* XXX how do we check veracity/bounds of this? */
-	bcopy(bp->b_data + DOSPARTOFF, dp, sizeof(dp));
-
-	for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
-		if (letoh32(dp2->dp_size) && dp2->dp_typ == DOSPTYP_OPENBSD)
-			ourpart = i;
-
-	if (ourpart != -1) {
-		dp2 = &dp[ourpart];
-
-		/*
-		 * need sector address for SCSI/IDE,
-		 * cylinder for ESDI/ST506/RLL
-		 */
-		dospartoff = letoh32(dp2->dp_start);
-		cyl = DPCYL(dp2->dp_scyl, dp2->dp_ssect);
-	}
-
-	/* next, dig out disk label */
-	bp->b_blkno = dospartoff + LABELSECTOR;
-	bp->b_cylinder = cyl;
+	/* Read it in, slap the new label in, and write it back out */
+	bp->b_blkno = partoff + LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
-
-	/* if successful, locate disk label within block and validate */
 	if ((error = biowait(bp)) != 0)
 		goto done;
-	for (dlp = (struct disklabel *)bp->b_data;
-	    dlp <= (struct disklabel *)(bp->b_data + lp->d_secsize - sizeof(*dlp));
-	    dlp = (struct disklabel *)((char *)dlp + sizeof(long))) {
-		if (dlp->d_magic == DISKMAGIC && dlp->d_magic2 == DISKMAGIC &&
-		    dkcksum(dlp) == 0) {
-			*dlp = *lp;
-			bp->b_flags = B_BUSY | B_WRITE;
-			(*strat)(bp);
-			error = biowait(bp);
-			goto done;
-		}
-	}
 
 	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	*dlp = *lp;
@@ -238,68 +124,9 @@ writedisklabel(dev, strat, lp, osdep)
 	error = biowait(bp);
 
 done:
-	bp->b_flags |= B_INVAL;
-	brelse(bp);
+	if (bp) {
+		bp->b_flags |= B_INVAL;
+		brelse(bp);
+	}
 	return (error);
-}
-
-/*
- * Determine the size of the transfer, and make sure it is
- * within the boundaries of the partition. Adjust transfer
- * if needed, and signal errors or early completion.
- */
-int
-bounds_check_with_label(bp, lp, osdep, wlabel)
-	struct buf *bp;
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int wlabel;
-{
-#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
-	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
-	int labelsector = blockpersec(lp->d_partitions[RAW_PART].p_offset, lp) +
-	    LABELSECTOR;
-	int sz = howmany(bp->b_bcount, DEV_BSIZE);
-
-	/* avoid division by zero */
-	if (lp->d_secpercyl == 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
-	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
-		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
-		if (sz == 0) {
-			/* If exactly at end of disk, return EOF. */
-			bp->b_resid = bp->b_bcount;
-			goto done;
-		}
-		if (sz < 0) {
-			/* If past end of disk, return EINVAL. */
-			bp->b_error = EINVAL;
-			goto bad;
-		}
-		/* Otherwise, truncate request. */
-		bp->b_bcount = sz << DEV_BSHIFT;
-	}
-
-	/* Overwriting disk label? */
-	if (bp->b_blkno + blockpersec(p->p_offset, lp) <= labelsector &&
-#if LABELSECTOR != 0
-	    bp->b_blkno + blockpersec(p->p_offset, lp) + sz > labelsector &&
-#endif
-	    (bp->b_flags & B_READ) == 0 && !wlabel) {
-		bp->b_error = EROFS;
-		goto bad;
-	}
-
-	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
-	    lp->d_secpercyl;
-	return (1);
-
-bad:
-	bp->b_flags |= B_ERROR;
-done:
-	return (0);
 }

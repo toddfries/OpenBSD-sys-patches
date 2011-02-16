@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka820.h,v 1.4 2002/03/14 01:26:48 millert Exp $	*/
+/*	$OpenBSD: ka820.h,v 1.5 2003/06/02 23:27:57 millert Exp $	*/
 /*	$NetBSD: ka820.h,v 1.3 2000/01/24 02:40:32 matt Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.

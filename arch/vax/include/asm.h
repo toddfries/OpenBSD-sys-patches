@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: asm.h,v 1.7 2002/11/05 18:04:36 miod Exp $ */
-=======
 /*	$OpenBSD: asm.h,v 1.10 2010/05/29 14:08:21 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: asm.h,v 1.9 1999/01/15 13:31:28 bouyer Exp $ */
 /*
  * Copyright (c) 1982, 1993
@@ -80,10 +76,12 @@
 # endif
 #endif
 
+#define _ALTENTRY(x) \
+	.globl x; .type x,@function; x:
 #define	_ENTRY(x, regs) \
-	.text; _ALIGN_TEXT; .globl x; .type x,@function; x: .word regs
+	.text; _ALIGN_TEXT; _ALTENTRY(x) .word regs
 
-#ifdef GPROF
+#if defined(PROF) || defined(GPROF)
 # ifdef __ELF__
 #  define _PROF_PROLOGUE	\
 	.data; 1:; .long 0; .text; moval 1b,r0; jsb _ASM_LABEL(__mcount)
@@ -101,7 +99,7 @@
 #define ASENTRY(x, regs)		_ENTRY(_ASM_LABEL(x), regs); _PROF_PROLOGUE
 #define ASENTRY_NOPROFILE(x, regs)	_ENTRY(_ASM_LABEL(x), regs)
 
-#define ALTENTRY(x)		.globl _C_LABEL(x); _C_LABEL(x):
+#define ALTENTRY(x)		_ALTENTRY(_C_LABEL(x))
 #define RCSID(x)		.text; .asciz x
 
 #ifdef	__ELF__

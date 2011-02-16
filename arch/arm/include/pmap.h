@@ -240,7 +240,8 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 #define	pmap_is_referenced(pg)	\
 	(((pg)->mdpage.pvh_attrs & PVF_REF) != 0)
 
-#define	pmap_copy(dp, sp, da, l, sa)	/* nothing */
+#define	pmap_deactivate(p)		do { /* nothing */ } while (0)
+#define	pmap_copy(dp, sp, da, l, sa)	do { /* nothing */ } while (0)
 
 #define pmap_proc_iflush(p, va, len)	do { /* nothing */ } while (0)
 #define pmap_unuse_final(p)		do { /* nothing */ } while (0)
@@ -309,20 +310,6 @@ vtopte(vaddr_t va)
 	if (pmap_get_pde_pte(pmap_kernel(), va, &pdep, &ptep) == FALSE)
 		return (NULL);
 	return (ptep);
-}
-
-/*
- * Virtual address to physical address
- */
-static __inline paddr_t
-vtophys(vaddr_t va)
-{
-	paddr_t pa;
-
-	if (pmap_extract(pmap_kernel(), va, &pa) == FALSE)
-		return (0);	/* XXXSCW: Panic? */
-
-	return (pa);
 }
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fga.c,v 1.14 2004/09/29 07:35:11 miod Exp $	*/
-=======
 /*	$OpenBSD: fga.c,v 1.17 2010/11/11 17:46:58 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

@@ -32,7 +32,7 @@
 #include <machine/bugio.h>
 #include <machine/prom.h>
 
-register_t ossr0, ossr1, ossr2, ossr3;
+register_t ossr3;
 register_t bugsr3;
 
 #ifdef MULTIPROCESSOR
@@ -56,17 +56,12 @@ __cpu_simple_lock_t bug_lock = __SIMPLELOCK_UNLOCKED;
 	psr = get_psr();						\
 	set_psr(psr | PSR_IND);			/* paranoia */		\
 	__asm__ __volatile__ ("ldcr %0, cr20" : "=r" (ossr3));		\
-									\
 	__asm__ __volatile__ ("stcr %0, cr20" :: "r"(bugsr3));		\
 }
 
 #define	OSCTXT()							\
 {									\
 	__asm__ __volatile__ ("ldcr %0, cr20" : "=r" (bugsr3));		\
-									\
-	__asm__ __volatile__ ("stcr %0, cr17" :: "r"(ossr0));		\
-	__asm__ __volatile__ ("stcr %0, cr18" :: "r"(ossr1));		\
-	__asm__ __volatile__ ("stcr %0, cr19" :: "r"(ossr2));		\
 	__asm__ __volatile__ ("stcr %0, cr20" :: "r"(ossr3));		\
 	set_psr(psr);							\
 	BUG_UNLOCK();							\

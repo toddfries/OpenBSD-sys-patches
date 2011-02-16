@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: qscms.c,v 1.2 2008/08/22 21:05:07 miod Exp $	*/
->>>>>>> origin/master
 /*	from OpenBSD: qscms.c,v 1.6 2006/07/31 18:50:13 miod Exp	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.

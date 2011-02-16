@@ -174,14 +174,14 @@ ASLOCAL(main_start)
 	 */
 #endif	/* MULTIPROCESSOR */
 
-	/* Switch to interrupt stack */
-	or.u	r31, r0,  hi16(_ASM_LABEL(intstack_end))
-	or	r31, r31, lo16(_ASM_LABEL(intstack_end))
+	/* Switch to startup stack */
+	or.u	r31, r0,  hi16(_ASM_LABEL(initstack_end))
+	or	r31, r31, lo16(_ASM_LABEL(initstack_end))
 
 	/* ...and to our exception vectors */
 #ifdef M88110
 #ifdef M88100
-	cmp	r2, r8, CPU_88110 /* r8 contains cputyp */
+	cmp	r2, r8, CPU_88110
 	bb1	ne, r2, 1f	/* if it's a 'mc88110, use different vectors */
 #endif
 	or.u	r3, r0, hi16(_C_LABEL(m88110_vector_list))
@@ -212,22 +212,11 @@ ASLOCAL(main_start)
 	 * ...and we can switch to the u area stack now.
 	 */
 	ldcr	r10, CPU
-	ld	r31, r10, CI_CURPCB
+	ld	r2,  r10, CI_CURPCB
 
 	/* call main() - no arguments although main() still defines one */
 	bsr.n	_C_LABEL(main)
-	 addu	r31, r31, USIZE
-
-	or.u	r2, r0, hi16(_ASM_LABEL(main_panic))
-	bsr.n	_C_LABEL(panic)
-	 or	r2, r2, lo16(_ASM_LABEL(main_panic))
-
-	data
-	.align	4
-ASLOCAL(main_panic)
-	string	"main() returned\0"
-	text
-	.align	8
+	 addu	r31, r2, USPACE
 
 #ifdef MULTIPROCESSOR
 
@@ -257,29 +246,6 @@ GLOBAL(secondary_start)
 	stcr	r11, CPU
 
 	/*
-	 * Since there may be more than one secondary MPU, compete with them
-	 * to initialize safely.
-	 */
-	or.u	r11, r0,  hi16(_C_LABEL(cpu_mutex))
-	or	r11, r11, lo16(_C_LABEL(cpu_mutex))
-1:
-	or	r22, r0,  1
-	xmem	r22, r11, r0		/* If r22 gets 0, we have the lock... */
-	bcnd	eq0, r22, 4f		/* ...but if not, we must wait */
-2:
-	/* just watch the lock until it looks clear */
-	ld	r22, r11, r0
-	bcnd	eq0, r22, 1b
-	/* since we can be here with caches off, add a few nops to
-	   keep the bus from getting overloaded */
-	or	r2,  r0,  lo16(1000)
-3:
-	subu	r2,  r2,  1
-	bcnd	ne0, r2,  3b
-	br	1b
-4:
-	
-	/*
 	 * While holding the cpu_mutex, the secondary cpu can use the slavestack
 	 * to call secondary_pre_main() to determine its cpu number.
 	 * After that, however, it should allocate its own stack and switch
@@ -288,18 +254,11 @@ GLOBAL(secondary_start)
 
 	bsr	_C_LABEL(secondary_pre_main)	/* set cpu number */
 
-	ldcr	r2, CPU
-	ld	r3, r2, CI_IDLE_PCB
-	bsr.n	_C_LABEL(secondary_main)
-	 addu	r31, r3, USIZE			/* switch to idle stack */
+	ldcr	r1, CPU
+	st	r2,  r1, CI_CURPCB	/* save stack as curpcb for traps */
 
-	/*
-	 * At this point, the CPU has been correctly initialized and has
-	 * identified itself on the console.
-	 * All it needs now is to jump to the idle loop and wait for work to
-	 * be offered.
-	 */
-	br	_ASM_LABEL(cpu_switch_idle)
+	bsr.n	_C_LABEL(secondary_main)
+	 addu	r31, r2, USPACE			/* switch to startup stack */
 
 	/*
 	 * Dummy mp_atomic_begin() and mp_atomic_end() routine, so that
@@ -335,9 +294,22 @@ GLOBAL(doboot)
 	 set	r4, r4, 1<23>		/* set SYSRST bit - bit 23 */
 	st	r4, r3, 0x0060		/* and store it back  */
 1:
-	ld	r4, r3, 0x0104		/* try local reset, then */
+	/*
+	 * MVME197LE Errata #7:
+	 * ``When asserting the RST bit in the VMEchip2 GCSR, the pulse
+	 *   generated is too short for the BusSwitch1 to recognize
+	 *   properly.''
+	 */
+#ifdef MVME197
+	or.u	r2, r0, hi16(0x20000)
+#endif
+	ld	r4, r3, 0x0104		/* try local reset, then... */
 	set	r4, r4, 1<7>
 	st	r4, r3, 0x0104
+#ifdef MVME197
+	bcnd.n	ne0,r2, 1b		/* ...for a while */
+	 subu	r2, r2, 1
+#endif
 
 	/*
 	 * We will be here if the reset above failed. In this case,
@@ -350,9 +322,9 @@ GLOBAL(doboot)
 	 */
 
 8:
-	or.u	r31, r0,  hi16(_ASM_LABEL(intstack_end))
+	or.u	r31, r0,  hi16(_ASM_LABEL(initstack_end))
 	bsr.n	_C_LABEL(_doboot)
-	 or	r31, r31, lo16(_ASM_LABEL(intstack_end))
+	 or	r31, r31, lo16(_ASM_LABEL(initstack_end))
 	/*NOTREACHED*/
 
 /*
@@ -368,8 +340,9 @@ GLOBAL(doboot)
  * (originally from Mach 2.5) 
  */
 GLOBAL(m188_delay)
-	or.u	r3, r0, hi16(_cpuspeed)
-	ld	r3, r3, lo16(_cpuspeed)
+	bcnd	eq0, r2, 2f
+	or.u	r3, r0, hi16(_C_LABEL(m188_delay_const))
+	ld	r3, r3, lo16(_C_LABEL(m188_delay_const))
 	mul	r4, r2, r3
 	subu	r4, r4, 4	/* overhead of these instructions */
 
@@ -377,7 +350,7 @@ GLOBAL(m188_delay)
 1: 
 	bcnd.n	gt0, r4, 1b
 	 subu	r4, r4, 2	/* two cycles per iteration */
-
+2:
 	jmp	r1
 #endif
 
@@ -389,22 +362,14 @@ GLOBAL(kernel_sdt)		/* SDT (segment descriptor table */
 	space	0x2000		/* 8K - 4K phys, 4K virt*/
 
 	.align	PAGE_SIZE
-ASGLOBAL(intstack)
-	space	USIZE
-ASGLOBAL(intstack_end)
+ASGLOBAL(initstack)
+	space	USPACE
+ASGLOBAL(initstack_end)
 
 #ifdef MULTIPROCESSOR
 	space	PAGE_SIZE	/* 4K, small, interim stack */
 ASLOCAL(slavestack_end)
 #endif
-
-/*
- * Main processor's idle pcb and stack.
- * Should be page aligned.
- */
-	.align	PAGE_SIZE
-GLOBAL(idle_u)
-	space	USIZE
 
 /*
  * Process 0's u.

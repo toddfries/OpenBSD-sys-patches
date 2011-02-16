@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iommureg.h,v 1.13 2006/08/27 18:55:57 kettenis Exp $	*/
-=======
 /*	$OpenBSD: iommureg.h,v 1.16 2008/07/12 13:08:04 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: iommureg.h,v 1.6 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -154,7 +150,7 @@ struct iommu_strbuf {
 #define INTMAP_IGN_SHIFT	6
 #define INTMAP_INO	0x00000003fLL	/* Interrupt number */
 #define INTMAP_INR	(INTMAP_IGN|INTMAP_INO)
-#define INTMAP_SBUSSLOT	0x000000018LL	/* SBUS slot # */
+#define INTMAP_SBUSSLOT	0x000000018LL	/* SBus slot # */
 #define INTMAP_PCIBUS	0x000000010LL	/* PCI bus number (A or B) */
 #define INTMAP_PCISLOT	0x00000000cLL	/* PCI slot # */
 #define INTMAP_PCIINT	0x000000003LL	/* PCI interrupt #A,#B,#C,#D */

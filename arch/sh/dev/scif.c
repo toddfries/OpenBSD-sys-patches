@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scif.c,v 1.3 2006/11/09 04:25:38 deraadt Exp $	*/
-=======
 /*	$OpenBSD: scif.c,v 1.14 2010/07/02 17:27:01 nicm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scif.c,v 1.47 2006/07/23 22:06:06 ad Exp $ */
 
 /*-
@@ -1351,9 +1347,9 @@ scifcnprobe(struct consdev *cp)
 
 	cp->cn_dev = makedev(maj, 0);
 #ifdef SCIFCONSOLE
-	cp->cn_pri = CN_REMOTE;
+	cp->cn_pri = CN_HIGHPRI;
 #else
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 #endif
 }
 

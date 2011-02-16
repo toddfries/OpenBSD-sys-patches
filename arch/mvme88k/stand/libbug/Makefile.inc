@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.3 1997/10/20 00:33:46 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.2 1998/08/22 07:39:52 smurph Exp $
 
 LIB_BUG_DIR=${S}/arch/mvme88k/stand/libbug
 

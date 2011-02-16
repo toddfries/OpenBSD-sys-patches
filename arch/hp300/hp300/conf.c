@@ -82,6 +82,7 @@ int	nblkdev = nitems(bdevsw);
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) nullop, \
 	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
 
+#include "bio.h"
 #define	mmread	mmrw
 #define	mmwrite	mmrw
 cdev_decl(mm);
@@ -127,7 +128,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tape_init(NCT,ct),		/* 7: cs80 cartridge tape */
 	cdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	cdev_disk_init(NHD,hd),		/* 9: HPIB disk */
-	cdev_notdef(),			/* 10: vas frame buffer */
+	cdev_notdef(),			/* 10 */
 	cdev_ppi_init(NPPI,ppi),	/* 11: printer/plotter interface */
 	cdev_tty_init(NDCA,dca),	/* 12: built-in single-port serial */
 	cdev_notdef(),			/* 13: was console terminal emulator */
@@ -139,8 +140,8 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk driver */
 	cdev_tape_init(NST,st),		/* 20: SCSI tape */
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 22: Berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 23: network tunnel */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 22: Berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 23: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
 	cdev_lkm_dummy(),		/* 25 */
 	cdev_lkm_dummy(),		/* 26 */
@@ -166,7 +167,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */
-	cdev_notdef(),			/* 49 */
+	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
@@ -232,20 +233,20 @@ int chrtoblktbl[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	0,
-	/*  8 */	4,
-	/*  9 */	2,
+	/*  7 */	0,		/* ct */
+	/*  8 */	4,		/* sd */
+	/*  9 */	2,		/* hd */
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
 	/* 13 */	NODEV,
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
-	/* 16 */	NODEV,
-	/* 17 */	5,
-	/* 18 */	9,
-	/* 19 */	6,
-	/* 20 */	7,
+	/* 16 */	1,		/* mt */
+	/* 17 */	5,		/* ccd */
+	/* 18 */	9,		/* cd */
+	/* 19 */	6,		/* vnd */
+	/* 20 */	7,		/* st */
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
@@ -259,7 +260,7 @@ int chrtoblktbl[] = {
 	/* 31 */	NODEV,
 	/* 32 */	NODEV,
 	/* 33 */	NODEV,
-	/* 34 */	8,
+	/* 34 */	8,		/* rd */
 };
 int nchrtoblktbl = nitems(chrtoblktbl);
 

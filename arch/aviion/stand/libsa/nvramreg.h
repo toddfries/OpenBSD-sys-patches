@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvramreg.h,v 1.1 2006/05/16 22:48:18 miod Exp $ */
+/*	$OpenBSD: nvramreg.h,v 1.2 2007/04/10 17:47:54 miod Exp $ */
 
 /*
  * Copyright (c) 1992, 1993

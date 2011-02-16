@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bus.h,v 1.5 2003/07/08 20:29:36 mickey Exp $	*/
-=======
 /*	$OpenBSD: bus.h,v 1.10 2009/12/25 20:51:43 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  *

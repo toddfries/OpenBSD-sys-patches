@@ -68,14 +68,20 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/asm_macro.h>
+#include <machine/bugio.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#include <machine/m88410.h>
 #include <machine/mvme197.h>
 
 #include <mvme88k/dev/busswreg.h>
 #include <mvme88k/mvme88k/clockvar.h>
+
+#ifdef MULTIPROCESSOR
+#include <machine/db_machdep.h>
+#endif
 
 void	m197_bootstrap(void);
 void	m197_delay(int);
@@ -94,50 +100,58 @@ void	m197_soft_ipi(void);
 
 /*
  * Figure out how much real memory is available.
- * Start looking from the megabyte after the end of the kernel data,
- * until we find non-memory.
+ *
+ * This relies on the fact that the BUG will configure the BusSwitch
+ * system translation decoders to allow access to the whole memory
+ * from address zero.
+ *
+ * If the BUG is not configured correctly wrt to the real amount of
+ * memory in the system, this will return incorrect values, but we do
+ * not care if you can't configure your system correctly.
  */
 vaddr_t
 m197_memsize()
 {
-	unsigned int *volatile look;
-	unsigned int *max;
-	extern char *end;
-#define PATTERN   0x5a5a5a5a
-#define STRIDE    (4*1024) 	/* 4k at a time */
-#define Roundup(value, stride) (((unsigned)(value) + (stride) - 1) & ~((stride)-1))
+	int i;
+	u_int8_t sar;
+	u_int16_t ssar, sear;
+	struct mvmeprom_brdid brdid;
+
 	/*
-	 * count it up.
+	 * MVME197LE 01-W3869B0[12][EF] boards shipped with a broken DCAM2
+	 * chip, which can only address 32MB of memory. Unfortunately, 02[EF]
+	 * were fitted with 64MB...
+	 * Note that we can't decide on letter < F since this would match
+	 * post-Z boards (AA, AB, etc).
+	 *
+	 * If the CNFG memory has been lost, you're on your own...
 	 */
-#define	MAXPHYSMEM	0x30000000	/* 768MB */
-	max = (void *)MAXPHYSMEM;
-	for (look = (void *)Roundup(end, STRIDE); look < max;
-	    look = (int *)((unsigned)look + STRIDE)) {
-		unsigned save;
-
-		/* if can't access, we've reached the end */
-		if (badaddr((vaddr_t)look, 4)) {
-#if defined(DEBUG)
-			printf("%x\n", look);
-#endif
-			look = (int *)((int)look - STRIDE);
-			break;
-		}
-
-		/*
-		 * If we write a value, we expect to read the same value back.
-		 * We'll do this twice, the 2nd time with the opposite bit
-		 * pattern from the first, to make sure we check all bits.
-		 */
-		save = *look;
-		if (*look = PATTERN, *look != PATTERN)
-			break;
-		if (*look = ~PATTERN, *look != ~PATTERN)
-			break;
-		*look = save;
+	bzero(&brdid, sizeof(brdid));
+	bugbrdid(&brdid);
+	if (bcmp(brdid.pwa, "01-W3869B02", 11) == 0) {
+		if (brdid.pwa[11] == 'E' || brdid.pwa[11] == 'F')
+			return (32 * 1024 * 1024);
 	}
 
-	return (trunc_page((unsigned)look));
+	for (i = 0; i < 4; i++) {
+		sar = *(u_int8_t *)(BS_BASE + BS_SAR + i);
+		if (!ISSET(sar, BS_SAR_DEN))
+			continue;
+
+		ssar = *(u_int16_t *)(BS_BASE + BS_SSAR1 + i * 4);
+		sear = *(u_int16_t *)(BS_BASE + BS_SEAR1 + i * 4);
+
+		if (ssar != 0)
+			continue;
+
+		return ((sear + 1) << 16);
+	}
+
+	/*
+	 * If no decoder was enabled, how could we run so far?
+	 * Return a ``safe'' 32MB.
+	 */
+	return (32 * 1024 * 1024);
 }
 
 /*
@@ -277,21 +291,35 @@ m197_getipl(void)
 u_int
 m197_setipl(u_int level)
 {
-	u_int curspl;
+	u_int curspl, psr;
 
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = *(u_int8_t *)M197_IMASK & 0x07;
 	*(u_int8_t *)M197_IMASK = level;
+	/*
+	 * We do not flush the pipeline here, because interrupts are disabled,
+	 * and set_psr() will synchronize the pipeline.
+	 */
+	set_psr(psr);
 	return curspl;
 }
 
 u_int
 m197_raiseipl(u_int level)
 {
-	u_int curspl;
+	u_int curspl, psr;
 
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = *(u_int8_t *)M197_IMASK & 0x07;
 	if (curspl < level)
 		*(u_int8_t *)M197_IMASK = level;
+	/*
+	 * We do not flush the pipeline here, because interrupts are disabled,
+	 * and set_psr() will synchronize the pipeline.
+	 */
+	set_psr(psr);
 	return curspl;
 }
 
@@ -357,7 +385,6 @@ m197_bootstrap()
 
 	*(volatile u_int8_t *)(BS_BASE + BS_BTIMER) = btimer | pbt;
 
-	cmmu = &cmmu88110;
 	md_interrupt_func_ptr = m197_ext_int;
 	md_nmi_func_ptr = m197_nmi;
 	md_nmi_wrapup_func_ptr = m197_nmi_wrapup;

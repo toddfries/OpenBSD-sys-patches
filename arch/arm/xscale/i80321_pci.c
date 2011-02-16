@@ -184,7 +184,7 @@ i80321_pci_conf_setup(struct i80321_softc *sc, pcitag_t tag, int offset,
 		if (ps->ps_d > (31 - 16))
 			return (1);
 		/*
-		 * NOTE: PCI-X requires that that devices updated their
+		 * NOTE: PCI-X requires that devices update their
 		 * PCIXSR on every config write with the device number
 		 * specified in AD[15:11].  If we don't set this field,
 		 * each device could end of thinking it is at device 0,

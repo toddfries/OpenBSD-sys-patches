@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsixreg.h,v 1.5 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: cgsixreg.h,v 1.6 2003/06/02 23:27:54 millert Exp $	*/
 /*	$NetBSD: cgsixreg.h,v 1.4 1996/02/27 22:09:31 thorpej Exp $ */
 
 /*

@@ -58,11 +58,13 @@
  */
 
 /* per-processor interrupt enable registers */
+#define	MVME188_IENBASE	0xfff84000
 #define MVME188_IEN0	0xfff84004	/* interrupt enable CPU 0 */
 #define MVME188_IEN1	0xfff84008	/* interrupt enable CPU 1 */
 #define MVME188_IEN2	0xfff84010	/* interrupt enable CPU 2 */
 #define MVME188_IEN3	0xfff84020	/* interrupt enable CPU 3 */
 #define	MVME188_IENALL	0xfff8403c	/* simultaneous write */
+#define	MVME188_IEN(cpu)	(MVME188_IENBASE + (4 << (cpu)))
 
 #define MVME188_IST	0xfff84040 	/* interrupt status register */
 
@@ -144,46 +146,25 @@
 	"\17IRQ5\15IRQ4\13IRQ3\11LMI" \
 	"\10SIGLPI\7IRQ2\5IRQ1\4SWI3\3SWI2\2SWI1\1SWI0"
 
-/* groups by function */
+/* IPI bits (see below) */
+#define	CLOCK_IPI_MASK		(IRQ_SWI7 | IRQ_SWI6 | IRQ_SWI5 | IRQ_SWI4)
+#define	IPI_MASK		(IRQ_SWI3 | IRQ_SWI2 | IRQ_SWI1 | IRQ_SWI0)
 
-/* hardware irq bits */
-#define HW_FAILURE_MASK		(IRQ_ABORT | IRQ_ACF | IRQ_ARBTO | IRQ_SF)
-/* software irq bits */
-#define SOFT_INTERRUPT_MASK	(IRQ_SWI7 | IRQ_SWI6 | IRQ_SWI5 | IRQ_SWI4 | \
-				 IRQ_SWI3 | IRQ_SWI2 | IRQ_SWI1 | IRQ_SWI0)
-/* VME irq bits */
-#define VME_INTERRUPT_MASK	(IRQ_VME7 | IRQ_VME6 | IRQ_VME5 | IRQ_VME4 | \
-				 IRQ_VME3 | IRQ_VME2 | IRQ_VME1)
-/* on-board irq bits */
-#define OBIO_INTERRUPT_MASK	(IRQ_DTI | IRQ_CIOI | IRQ_DI | IRQ_SIGHPI | \
-				 IRQ_LMI | IRQ_SIGLPI)
-
-/* groups by interrupt levels */
-
-#define LVL7			(IRQ_ABORT | IRQ_ACF | IRQ_VME7 | IRQ_SF)
-#define LVL6			(IRQ_VME6)
-#define LVL5			(IRQ_VME5 | IRQ_DTI | IRQ_CIOI)
-#define LVL4			(IRQ_VME4)
-#define LVL3			(IRQ_VME3 | IRQ_DI)
-#define LVL2			(IRQ_VME2)
-#define LVL1			(IRQ_VME1)
-#define LVL0			(0x0)
-
-/* interrupts we want to process on the master CPU only */
-#define SLAVE_MASK		(HW_FAILURE_MASK | OBIO_INTERRUPT_MASK)
-
-#define MASK_LVL_0		(LVL7 | LVL6 | LVL5 | LVL4 | LVL3 | LVL2 | LVL1)
-#define MASK_LVL_1		(LVL7 | LVL6 | LVL5 | LVL4 | LVL3 | LVL2)
-#define MASK_LVL_2		(LVL7 | LVL6 | LVL5 | LVL4 | LVL3)
-#define MASK_LVL_3		(LVL7 | LVL6 | LVL5 | LVL4)
-#define MASK_LVL_4		(LVL7 | LVL6 | LVL5)
-#define MASK_LVL_5		(LVL7 | LVL6)
-#define MASK_LVL_6		(LVL7)
-#define MASK_LVL_7		(IRQ_ABORT)
-
-#define INT_LEVEL	        8		/* # of interrupt level + 1 */
 #define ISR_GET_CURRENT_MASK(cpu) \
-	(*(volatile u_int *)MVME188_IST & *int_mask_reg[cpu])
+	(*(volatile u_int *)MVME188_IST & int_mask_reg[cpu])
+
+/*
+ * Software interrupts 0 to 3, and 4 to 7, are used to deliver IPIs to cpu0-3.
+ * We use two bits because we want clock ipis to be maskable.
+ * We rely on the fact that the control bits for these interrupts are
+ * the same in the interrupt registers and the set/clear SWI registers.
+ */
+/* values for SETSWI and CLRSWI registers */
+#define	SWI_IPI_BIT(cpuid)		(0x01 << (cpuid))
+#define	SWI_CLOCK_IPI_BIT(cpuid)	(0x10 << (cpuid))
+/* values for IEN and IST registers */
+#define	SWI_IPI_MASK(cpuid)		(IRQ_SWI0 << (cpuid))
+#define	SWI_CLOCK_IPI_MASK(cpuid)	(IRQ_SWI4 << (cpuid))
 
 /*
  * ISTATE and CLRINT register bits
@@ -238,6 +219,8 @@
 extern u_int32_t pfsr_save_188_straight[];
 extern u_int32_t pfsr_save_188_double[];
 extern u_int32_t pfsr_save_188_quad[];
+
+extern u_int32_t int_mask_val[NIPLS];
 #endif
 
 #endif	/* __MACHINE_MVME188_H__ */

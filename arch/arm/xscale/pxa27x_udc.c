@@ -23,6 +23,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/timeout.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -117,7 +118,7 @@ struct usbf_pipe_methods pxaudc_bulk_methods = {
 
 #endif /* NUSBF > 0 */
 
-#define DEVNAME(sc)	USBDEVNAME((sc)->sc_bus.bdev)
+#define DEVNAME(sc)	((sc)->sc_bus.bdev.dv_xname)
 
 #define CSR_READ_4(sc, reg) \
 	bus_space_read_4((sc)->sc_iot, (sc)->sc_ioh, (reg))
@@ -1053,7 +1054,7 @@ pxaudc_ctrl_abort(usbf_xfer_handle xfer)
 	 */
 	s = splusb();
 	xfer->status = USBF_CANCELLED;
-	usb_uncallout(xfer->timeout_handle, pxaudc_timeout, NULL);
+	timeout_del(&xfer->timeout_handle);
 	splx(s);
 
 	/*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: findcpu.c,v 1.11 2006/07/20 19:07:14 miod Exp $	*/
-=======
 /*	$OpenBSD: findcpu.c,v 1.14 2008/08/20 19:00:01 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: findcpu.c,v 1.5 1999/08/23 19:10:43 ragge Exp $	*/
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.

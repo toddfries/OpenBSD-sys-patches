@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: atomic.h,v 1.6 2010/07/07 15:36:18 kettenis Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -25,11 +21,22 @@
 #if defined(_KERNEL)
 
 static __inline unsigned int
-sparc64_casa(volatile unsigned int *uip, unsigned int expect, unsigned int new)
+sparc64_cas(volatile unsigned int *uip, unsigned int expect, unsigned int new)
 {
-	__asm __volatile("casa [%2] %3, %4, %0"
+	__asm __volatile("cas [%2], %3, %0"
 	    : "+r" (new), "=m" (*uip)
-	    : "r" (uip), "n" (ASI_N), "r" (expect), "m" (*uip));
+	    : "r" (uip), "r" (expect), "m" (*uip));
+
+	return (new);
+}
+
+static __inline unsigned long
+sparc64_casx(volatile unsigned long *uip, unsigned long expect,
+    unsigned long new)
+{
+	__asm __volatile("casx [%2], %3, %0"
+	    : "+r" (new), "=m" (*uip)
+	    : "r" (uip), "r" (expect), "m" (*uip));
 
 	return (new);
 }
@@ -42,7 +49,7 @@ atomic_setbits_int(volatile unsigned int *uip, unsigned int v)
 	r = *uip;
 	do {
 		e = r;
-		r = sparc64_casa(uip, e, e | v);
+		r = sparc64_cas(uip, e, e | v);
 	} while (r != e);
 }
 
@@ -54,7 +61,7 @@ atomic_clearbits_int(volatile unsigned int *uip, unsigned int v)
 	r = *uip;
 	do {
 		e = r;
-		r = sparc64_casa(uip, e, e & ~v);
+		r = sparc64_cas(uip, e, e & ~v);
 	} while (r != e);
 }
 

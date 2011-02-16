@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ctlreg.h,v 1.10 2006/10/27 19:59:14 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ctlreg.h,v 1.23 2009/11/30 22:59:29 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -103,7 +99,11 @@
 #define	ASI_PHYS_CACHED_LITTLE		0x1c	/* [4u] MMU bypass to main memory, little endian */
 #define	ASI_PHYS_NON_CACHED_LITTLE	0x1d	/* [4u] MMU bypass to I/O location, little endian */
 
+#define	ASI_SCRATCHPAD			0x20	/* [4v] scratchpad registers */
+#define	ASI_MMU_CONTEXTID		0x21	/* [4v] MMU context */
+
 #define	ASI_NUCLEUS_QUAD_LDD		0x24	/* [4u] use w/LDDA to load 128-bit item */
+#define	ASI_QUEUE			0x25	/* [4v] interrupt queue registers */
 #define	ASI_NUCLEUS_QUAD_LDD_LITTLE	0x2c	/* [4u] use w/LDDA to load 128-bit item, little endian */
 
 #define	ASI_FLUSH_D_PAGE_PRIMARY	0x38	/* [4u] flush D-cache page using primary context */
@@ -449,6 +449,7 @@
 #define	SOFTINT13	(0x1<<13)
 #define	SOFTINT14	(0x1<<14)
 #define	SOFTINT15	(0x1<<15)
+#define	STICK_INT	(0x1<<16)
 
 /* Interrupt Dispatch -- usually reserved for cross-calls */
 #define	ASR_IDSR	0x48 /* Interrupt dispatch status reg */
@@ -457,15 +458,18 @@
 #define	IDSR_BUSY	0x01
 
 #define	ASI_INTERRUPT_DISPATCH		0x77	/* [4u] spitfire interrupt dispatch regs */
-#define	IDCR(x)		(((x)<<14)&0x70)	/* Store anything to this address to dispatch crosscall to CPU (x) */
-#define	IDDR_0H		0x40			/* Store data to send in these regs */
+
+/* Interrupt delivery initiation */
+#define	IDCR(x)		((((u_int64_t)(x)) << 14) | 0x70)
+
+#define	IDDR_0H		0x40	/* Store data to send in these regs */
 #define	IDDR_0L		0x48	/* unimplemented */
 #define	IDDR_1H		0x50
 #define	IDDR_1L		0x58	/* unimplemented */
 #define	IDDR_2H		0x60
 #define	IDDR_2L		0x68	/* unimplemented */
-#define	IDDR_3H		0x70	/* unimplemented */
-#define	IDDR_3L		0x78	/* unimplemented */
+#define	IDDR_3H		0x80	/* unimplemented */
+#define	IDDR_3L		0x88	/* unimplemented */
 
 /*
  * Error registers 
@@ -516,28 +520,6 @@
  * D$ so we need to flush the D$ to make sure we don't get data pollution.
  */
 
-extern __inline u_int32_t sparc_cas(u_int32_t *, u_int32_t, u_int32_t);
-extern __inline u_int32_t
-sparc_cas(u_int32_t *rs1, u_int32_t rs2, u_int32_t rd)
-{
-	__asm __volatile("casa [%1] ASI_PRIMARY, %2, %0"
-	    : "+r" (rd)
-	    : "r" (rs1), "r" (rs2)
-	    : "memory" );
-	return (rd);
-}
-
-extern __inline u_int64_t sparc_casx(u_int64_t *, u_int64_t, u_int64_t);
-extern __inline u_int64_t
-sparc_casx(u_int64_t *rs1, u_int64_t rs2, u_int64_t rd)
-{
-	__asm __volatile("casxa [%1] ASI_PRIMARY, %3, %0"
-	    : "+r" (rd)
-	    : "r" (rs1), "r" (rs2)
-	    : "memory" );
-	return (rd);
-}
-
 #define sparc_membar(mask) do {                                         \
         if (mask)                                                       \
                 __asm __volatile("membar %0" : : "n" (mask) : "memory");\
@@ -572,6 +554,7 @@ do {									\
 	else								\
 		__asm __volatile("wrpr %0, %1, %%" #name		\
 		    : : "r" (val), "rI" (xor) : "%g0");			\
+	__asm __volatile("" : : : "memory");				\
 } while(0)
 
 
@@ -753,13 +736,9 @@ void flush(void *p)
 #define sys_tick() (sparc_rd(sys_tick) & TICK_TICKS)
 extern u_int64_t stick(void);
 
-<<<<<<< HEAD
-extern void next_tick(long);
-=======
 extern void tickcmpr_set(u_int64_t);
 extern void sys_tickcmpr_set(u_int64_t);
 extern void stickcmpr_set(u_int64_t);
->>>>>>> origin/master
 
 #endif /* _LOCORE */
 #endif /* _SPARC64_CTLREG_ */

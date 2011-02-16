@@ -118,7 +118,7 @@ struct timecounter pcc_timecounter = {
 };
 
 #define	PROF_RESET	(IPL_CLOCK | PCC2_IRQ_IEN | PCC2_IRQ_ICLR)
-#define	STAT_RESET	(IPL_CLOCK | PCC2_IRQ_IEN | PCC2_IRQ_ICLR)
+#define	STAT_RESET	(IPL_STATCLOCK | PCC2_IRQ_IEN | PCC2_IRQ_ICLR)
 
 void
 m1x7_init_clocks(void)
@@ -177,7 +177,7 @@ m1x7_init_clocks(void)
 	statclock_ih.ih_fn = m1x7_statintr;
 	statclock_ih.ih_arg = 0;
 	statclock_ih.ih_wantframe = 1;
-	statclock_ih.ih_ipl = IPL_CLOCK;
+	statclock_ih.ih_ipl = IPL_STATCLOCK;
 	pcctwointr_establish(PCC2V_TIMER2, &statclock_ih, "stat");
 
 	tc_init(&pcc_timecounter);
@@ -252,8 +252,6 @@ m1x7_statintr(void *eframe)
 
 	*(volatile u_int8_t *)(PCC2_BASE + PCCTWO_T2ICR) = STAT_RESET;
 
-	statclock((struct clockframe *)eframe);
-
 	/*
 	 * Compute new randomized interval.  The intervals are uniformly
 	 * distributed on [statint - statvar / 2, statint + statvar / 2],
@@ -272,6 +270,16 @@ m1x7_statintr(void *eframe)
 	*(volatile u_int8_t *)(PCC2_BASE + PCCTWO_T2ICR) = STAT_RESET;
 	*(volatile u_int8_t *)(PCC2_BASE + PCCTWO_T2CTL) =
 	    PCC2_TCTL_CEN | PCC2_TCTL_COC;
+
+	statclock((struct clockframe *)eframe);
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * Send an IPI to all other processors as well.
+	 */
+	m88k_broadcast_ipi(CI_IPI_STATCLOCK);
+#endif
+
 	return (1);
 }
 

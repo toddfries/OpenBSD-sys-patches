@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: tod.c,v 1.1 2005/04/20 01:00:16 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *

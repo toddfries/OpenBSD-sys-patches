@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bpp.c,v 1.3 2002/03/14 01:26:42 millert Exp $	*/
-=======
 /*	$OpenBSD: bpp.c,v 1.5 2010/08/06 00:00:38 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.

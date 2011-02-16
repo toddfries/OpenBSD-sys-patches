@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.2 1998/08/22 08:07:51 smurph Exp $
+#	$OpenBSD: Makefile.inc,v 1.1 2001/06/26 21:58:06 smurph Exp $
 
 LIB_SA_DIR=${S}/arch/mvmeppc/stand/libsa
 

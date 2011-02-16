@@ -139,8 +139,6 @@ m8820x_setup_board_config()
 
  		cr = m8820x_cmmu[num << cmmu_shift].cmmu_regs;
 
-		m88k_cpus[num].ci_alive = 1;	/* This cpu installed... */
-
 		type = CMMU_TYPE(cr[CMMU_IDR]);
 		printf("CPU%d is associated to %d MC8820%c CMMUs\n",
 		    num, 1 << cmmu_shift, type == M88204_ID ? '4' : '0');

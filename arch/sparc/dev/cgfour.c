@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgfour.c,v 1.26 2006/07/25 21:23:30 miod Exp $	*/
-=======
 /*	$OpenBSD: cgfour.c,v 1.29 2010/06/07 19:43:45 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cgfour.c,v 1.13 1997/05/24 20:16:06 pk Exp $	*/
 
 /*

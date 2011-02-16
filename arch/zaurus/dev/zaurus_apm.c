@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zaurus_apm.c,v 1.12 2005/12/22 00:38:48 deraadt Exp $	*/
-=======
 /*	$OpenBSD: zaurus_apm.c,v 1.20 2010/09/07 16:21:41 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

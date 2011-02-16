@@ -52,7 +52,6 @@
  * of the vector table.
  */
 #define ISRLOC		0x18
-#define NISR		8
 
 typedef LIST_HEAD(, isr) isr_list_t;
 isr_list_t isr_list[NISR];
@@ -82,10 +81,6 @@ intr_init()
 	/* Initialize the ISR lists. */
 	for (i = 0; i < NISR; ++i)
 		LIST_INIT(&isr_list[i]);
-
-	/* Default interrupt priorities. */
-	hp300_bioipl = hp300_netipl = hp300_ttyipl = hp300_vmipl =
-	    (PSL_S|PSL_IPL3);
 }
 
 /*
@@ -110,24 +105,23 @@ intr_computeipl()
 			 */
 			switch (isr->isr_priority) {
 			case IPL_BIO:
-				if (ipl > PSLTOIPL(hp300_bioipl))
-					hp300_bioipl = IPLTOPSL(ipl);
+				if (ipl > PSLTOIPL(hp300_varpsl[IPL_BIO]))
+					hp300_varpsl[IPL_BIO] = IPLTOPSL(ipl);
 				break;
 
 			case IPL_NET:
-				if (ipl > PSLTOIPL(hp300_netipl))
-					hp300_netipl = IPLTOPSL(ipl);
+				if (ipl > PSLTOIPL(hp300_varpsl[IPL_NET]))
+					hp300_varpsl[IPL_NET] = IPLTOPSL(ipl);
 				break;
 
 			case IPL_TTY:
-			case IPL_TTYNOBUF:
-				if (ipl > PSLTOIPL(hp300_ttyipl))
-					hp300_ttyipl = IPLTOPSL(ipl);
+				if (ipl > PSLTOIPL(hp300_varpsl[IPL_TTY]))
+					hp300_varpsl[IPL_TTY] = IPLTOPSL(ipl);
 				break;
 
 			default:
-				printf("priority = %d\n", isr->isr_priority);
-				panic("intr_computeipl: bad priority");
+				panic("intr_computeipl: bad priority %d",
+				    isr->isr_priority);
 			}
 		}
 	}
@@ -136,8 +130,8 @@ intr_computeipl()
 	 * Enforce `bio <= net <= tty <= vm'
 	 */
 
-	if (hp300_netipl < hp300_bioipl)
-		hp300_netipl = hp300_bioipl;
+	if (hp300_varpsl[IPL_NET] < hp300_varpsl[IPL_BIO])
+		hp300_varpsl[IPL_NET] = hp300_varpsl[IPL_BIO];
 
 	if (hp300_varpsl[IPL_TTY] < hp300_varpsl[IPL_NET])
 		hp300_varpsl[IPL_TTY] = hp300_varpsl[IPL_NET];
@@ -154,8 +148,8 @@ intr_printlevels()
 #endif
 
 	printf("interrupt levels: bio = %d, net = %d, tty = %d\n",
-	    PSLTOIPL(hp300_bioipl), PSLTOIPL(hp300_netipl),
-	    PSLTOIPL(hp300_ttyipl));
+	    PSLTOIPL(hp300_varpsl[IPL_BIO]), PSLTOIPL(hp300_varpsl[IPL_NET]),
+	    PSLTOIPL(hp300_varpsl[IPL_TTY]));
 }
 
 /*
@@ -298,3 +292,4 @@ splassert_check(int wantipl, const char *func)
 		_spl(hp300_varpsl[wantipl]);
 	}
 }
+#endif

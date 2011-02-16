@@ -1,4 +1,4 @@
-/* $OpenBSD: db_machdep.h,v 1.30 2005/10/24 19:28:29 miod Exp $ */
+/* $OpenBSD: db_machdep.h,v 1.1.1.1 2006/04/18 10:56:58 miod Exp $ */
 /* public domain */
 #include <m88k/db_machdep.h>
 

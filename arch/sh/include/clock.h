@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: clock.h,v 1.2 2008/06/26 05:42:12 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock.h,v 1.2 2002/04/28 17:10:33 uch Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lcgreg.h,v 1.2 2006/08/06 15:04:22 miod Exp $	*/
-=======
 /*	$OpenBSD: lcgreg.h,v 1.4 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: lcgreg.h,v 1.4 2005/12/11 12:19:34 christos Exp $ */
 
 /*-

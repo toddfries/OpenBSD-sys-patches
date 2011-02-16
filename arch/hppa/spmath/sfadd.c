@@ -1,4 +1,4 @@
-/*	$OpenBSD: sfadd.c,v 1.5 2002/05/07 22:19:30 mickey Exp $	*/
+/*	$OpenBSD: sfadd.c,v 1.6 2002/11/29 09:27:34 deraadt Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

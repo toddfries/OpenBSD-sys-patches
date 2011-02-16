@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: pmc.c,v 1.2 2009/11/09 20:45:37 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Mark Kettenis

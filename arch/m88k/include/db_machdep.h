@@ -94,6 +94,10 @@ void	m88k_print_instruction(int, u_int, u_int32_t);	/* db_disasm.c */
 
 #define	DB_AOUT_SYMBOLS
 
+#ifdef MULTIPROCESSOR
+extern cpuid_t ddb_mp_nextcpu;
+#endif
+
 #endif	/* DDB */
 #endif	/* _LOCORE */
 

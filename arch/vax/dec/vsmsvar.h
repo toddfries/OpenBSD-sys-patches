@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: vsmsvar.h,v 1.2 2008/08/22 21:05:07 miod Exp $	*/
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -17,7 +14,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
->>>>>>> origin/master
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

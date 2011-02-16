@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vgafb.c,v 1.49 2007/01/13 21:03:23 miod Exp $	*/
-=======
 /*	$OpenBSD: vgafb.c,v 1.58 2009/06/02 18:51:03 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -114,18 +110,6 @@ struct cfdriver vgafb_cd = {
 extern int allowaperture;
 #endif
 
-<<<<<<< HEAD
-static const struct pci_matchid ifb_devices[] = {
-	{ PCI_VENDOR_INTERGRAPH, 0x108 },	/* XXX */
-	{ PCI_VENDOR_INTERGRAPH, 0x140 },	/* XXX */
-	{ PCI_VENDOR_INTERGRAPH, PCI_PRODUCT_INTERGRAPH_EXPERT3D },
-	{ PCI_VENDOR_3DLABS,	 0x7a1 },	/* Wildcat III 6210 */
-	{ PCI_VENDOR_3DLABS,	 0x7a2 },	/* Sun XVR-500 */
-	{ PCI_VENDOR_3DLABS,	 0x7a3 },	/* Wildcat IV 7210 */
-};
-
-=======
->>>>>>> origin/master
 int
 vgafbmatch(parent, vcf, aux)
 	struct device *parent;
@@ -140,8 +124,6 @@ vgafbmatch(parent, vcf, aux)
 	if (ifb_ident(aux) != 0)
 		return (0);
 
-<<<<<<< HEAD
-=======
 	/*
 	 * XXX Non-console devices do not get configured by the PROM,
 	 * XXX so do not attach them yet.
@@ -149,7 +131,6 @@ vgafbmatch(parent, vcf, aux)
 	node = PCITAG_NODE(pa->pa_tag);
 	if (!vgafb_is_console(node))
 		return (0);
->>>>>>> origin/master
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_PREHISTORIC &&
 	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_PREHISTORIC_VGA)

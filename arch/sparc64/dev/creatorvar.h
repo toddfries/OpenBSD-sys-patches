@@ -1,4 +1,4 @@
-/*	$OpenBSD: creatorvar.h,v 1.10 2003/06/17 17:35:40 miod Exp $	*/
+/*	$OpenBSD: creatorvar.h,v 1.11 2006/05/15 21:38:36 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net),

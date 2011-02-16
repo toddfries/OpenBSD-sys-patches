@@ -284,11 +284,17 @@ mbus_barrier(void *v, bus_space_handle_t h, bus_size_t o, bus_size_t l, int op)
 	sync_caches();
 }
 
+void *
+mbus_vaddr(void *v, bus_space_handle_t h)
+{
+	return ((void *)h);
+}
+
 struct hppa64_bus_space_tag hppa_bustag = {
 	NULL,
 
 	mbus_map, mbus_unmap, mbus_subregion, mbus_alloc, mbus_free,
-	mbus_barrier,
+	mbus_barrier, mbus_vaddr
 };
 
 int
@@ -299,12 +305,11 @@ mbus_dmamap_create(void *v, bus_size_t size, int nsegments,
 	size_t mapsize;
 
 	mapsize = sizeof(*map) + (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	map = malloc(mapsize, M_DEVBUF,
-		(flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK);
+	map = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO));
 	if (!map)
 		return (ENOMEM);
 
-	bzero(map, mapsize);
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
 	map->_dm_maxsegsz = maxsegsz;
@@ -336,7 +341,7 @@ mbus_dmamap_destroy(void *v, bus_dmamap_t map)
 /*
  * Utility function to load a linear buffer.  lastaddrp holds state
  * between invocations (for multiple-buffer loads).  segp contains
- * the starting segment on entrace, and the ending segment on exit.
+ * the starting segment on entrance, and the ending segment on exit.
  * first indicates if this is the first invocation of this function.
  */
 int

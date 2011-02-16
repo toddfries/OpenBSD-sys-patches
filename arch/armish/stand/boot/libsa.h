@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: libsa.h,v 1.1 2006/07/29 15:01:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis

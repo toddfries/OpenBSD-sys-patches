@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ni.c,v 1.7 2006/01/17 20:26:14 miod Exp $ */
-=======
 /*	$OpenBSD: if_ni.c,v 1.15 2010/09/20 07:40:41 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -123,7 +119,6 @@
 
 struct	ni_softc {
 	struct device	sc_dev;		/* Configuration common part	*/
-	struct evcnt	sc_intrcnt;	/* Interrupt counting		*/
 	struct ethercom sc_ec;		/* Ethernet common part		*/
 #define sc_if	sc_ec.ec_if		/* network-visible interface	*/
 	bus_space_tag_t sc_iot;
@@ -249,10 +244,7 @@ niattach(parent, self, aux)
 	sc->sc_ioh = ba->ba_ioh;
 	sc->sc_dmat = ba->ba_dmat;
 
-	bi_intr_establish(ba->ba_icookie, ba->ba_ivec,
-		niintr, sc, &sc->sc_intrcnt);
-	evcnt_attach_dynamic(&sc->sc_intrcnt, EVCNT_TYPE_INTR, NULL,
-		sc->sc_dev.dv_xname, "intr");
+	bi_intr_establish(ba->ba_icookie, ba->ba_ivec, niintr, sc);
 
 	ni_getpgs(sc, sizeof(struct ni_gvppqb), (caddr_t *)&sc->sc_gvppqb, 
 	    (paddr_t *)&sc->sc_pgvppqb);
@@ -600,7 +592,7 @@ niintr(void *arg)
 	if ((NI_RREG(NI_PSR) & PSR_ERR))
 		printf("%s: PSR %x\n", sc->sc_dev.dv_xname, NI_RREG(NI_PSR));
 
-	KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
+	KERNEL_LOCK();
 	/* Got any response packets?  */
 	while ((NI_RREG(NI_PSR) & PSR_RSQ) && (data = REMQHI(&gvp->nc_forwr))) {
 

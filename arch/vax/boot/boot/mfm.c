@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfm.c,v 1.3 2002/06/11 09:36:23 hugh Exp $	*/
+/*	$OpenBSD: mfm.c,v 1.4 2003/08/15 23:16:30 deraadt Exp $	*/
 /*	$NetBSD: mfm.c,v 1.4 2001/07/26 22:55:13 wiz Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

@@ -775,6 +775,10 @@ pxa2x0_lcd_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		wsdisp_info->cmsize = 0;
 		break;
 
+	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
+		*(u_int *)data = WSDISPLAYIO_DEPTH_16;
+		break;
+
 	case WSDISPLAYIO_GETCMAP:
 	case WSDISPLAYIO_PUTCMAP:
 		return EINVAL;	/* XXX Colormap */

@@ -1,14 +1,3 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile,v 1.2 2002/07/15 21:29:16 mickey Exp $
-
-
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
-
-NOPROG=	noprog
-NOMAN=	noman
-
-=======
 #	$OpenBSD: Makefile,v 1.6 2010/11/12 17:11:44 deraadt Exp $
 
 S=	${.CURDIR}/../..
@@ -21,7 +10,6 @@ TAGS=	${.CURDIR}/tags
 
 NOPROG=
 NOMAN=
->>>>>>> origin/master
 SUBDIR=	stand
 
 # config the fattest kernel we can find into a temporary dir

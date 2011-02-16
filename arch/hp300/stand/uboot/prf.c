@@ -1,4 +1,4 @@
-/*	$OpenBSD: prf.c,v 1.3 2005/04/22 00:42:16 miod Exp $	*/
+/*	$OpenBSD: prf.c,v 1.1 2006/08/17 06:31:10 miod Exp $	*/
 /*	$NetBSD: prf.c,v 1.5 1994/10/26 07:27:50 cgd Exp $	*/
 
 /*

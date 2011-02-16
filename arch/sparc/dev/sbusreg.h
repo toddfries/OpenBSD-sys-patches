@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sbusreg.h,v 1.3 1997/09/17 06:47:11 downsj Exp $	*/
-=======
 /*	$OpenBSD: sbusreg.h,v 1.6 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sbusreg.h,v 1.3 1997/09/14 19:17:25 pk Exp $ */
 
 /*
@@ -48,10 +44,10 @@
 /*
  * Sun-4c S-bus definitions.  (Should be made generic!)
  *
- * Sbus slot 0 is not a separate slot; it talks to the onboard I/O devices.
- * It is, however, addressed just like any `real' Sbus.
+ * SBus slot 0 is not a separate slot; it talks to the onboard I/O devices.
+ * It is, however, addressed just like any `real' SBus.
  *
- * Sbus device addresses are obtained from the FORTH PROMs.  They come
+ * SBus device addresses are obtained from the FORTH PROMs.  They come
  * in `absolute' and `relative' address flavors, so we have to handle both.
  * Relative addresses do *not* include the slot number.
  */
@@ -71,5 +67,5 @@ struct sbusreg {
 
 #define NSBUSCFG	20
 	/* Actual number dependent on machine model */
-	u_int32_t	sbus_sbuscfg[NSBUSCFG];	/* Sbus configuration control */
+	u_int32_t	sbus_sbuscfg[NSBUSCFG];	/* SBus configuration control */
 };

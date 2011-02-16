@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpicreg.h,v 1.1 2001/09/01 15:50:00 drahn Exp $	*/
+/*	$OpenBSD: openpicreg.h,v 1.2 2007/01/07 13:39:28 miod Exp $	*/
 /*	$NetBSD: openpicreg.h,v 1.1 2000/02/14 12:45:53 tsubai Exp $	*/
 
 /*-

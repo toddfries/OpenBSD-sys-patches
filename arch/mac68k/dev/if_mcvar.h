@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mcvar.h,v 1.4 2004/12/15 06:48:24 martin Exp $	*/
+/*	$OpenBSD: if_mcvar.h,v 1.5 2006/06/24 13:23:27 miod Exp $	*/
 /*	$NetBSD: if_mcvar.h,v 1.8 2004/03/26 12:15:46 wiz Exp $	*/
 
 /*-

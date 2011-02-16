@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofb_mono.c,v 1.2 2006/08/05 09:58:56 miod Exp $	*/
+/*	$OpenBSD: diofb_mono.c,v 1.3 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

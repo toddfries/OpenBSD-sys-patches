@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4231var.h,v 1.9 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: cs4231var.h,v 1.10 2006/06/02 20:00:54 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

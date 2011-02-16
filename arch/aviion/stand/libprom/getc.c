@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: getc.c,v 1.1 2006/05/16 22:48:18 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

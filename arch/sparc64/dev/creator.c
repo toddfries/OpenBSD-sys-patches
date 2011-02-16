@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: creator.c,v 1.38 2006/12/17 22:18:16 miod Exp $	*/
-=======
 /*	$OpenBSD: creator.c,v 1.45 2009/12/16 11:06:17 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

@@ -44,6 +44,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/evcount.h>
+#include <sys/timetc.h>
 
 #include <dev/clock_subr.h>
 
@@ -63,6 +64,11 @@ const struct clockfns *clockfns;
 int clockinitted;
 struct evcount clk_count;
 int clk_irq = 0;
+
+u_int rpcc_get_timecount(struct timecounter *);
+struct timecounter rpcc_timecounter = {
+	rpcc_get_timecount, NULL, ~0u, 0, "rpcc", 0, NULL
+};
 
 void
 clockattach(dev, fns)
@@ -99,20 +105,17 @@ clockattach(dev, fns)
  * are no other timers available.
  */
 void
-cpu_initclocks()
+cpu_initclocks(void)
 {
+	u_int32_t cycles_per_sec;
+	struct clocktime ct;
+	u_int32_t first_rpcc, second_rpcc; /* only lower 32 bits are valid */
+	int first_sec;
+
 	if (clockfns == NULL)
 		panic("cpu_initclocks: no clock attached");
 
 	tick = 1000000 / hz;	/* number of microseconds between interrupts */
-	tickfix = 1000000 - (hz * tick);
-	if (tickfix) {
-		int ftp;
-
-		ftp = min(ffs(tickfix), ffs(hz));
-		tickfix >>= (ftp - 1);
-		tickfixinterval = hz >> (ftp - 1);
-        }
 
 	/*
 	 * Establish the clock interrupt; it's a special case.
@@ -135,6 +138,30 @@ cpu_initclocks()
 	 * Get the clock started.
 	 */
 	(*clockfns->cf_init)(clockdev);
+
+	/*
+	 * Calibrate the cycle counter frequency.
+	 */
+	(*clockfns->cf_get)(clockdev, 0, &ct);
+	first_sec = ct.sec;
+
+	/* Let the clock tick one second. */
+	do {
+		first_rpcc = alpha_rpcc();
+		(*clockfns->cf_get)(clockdev, 0, &ct);
+	} while (ct.sec == first_sec);
+	first_sec = ct.sec;
+	/* Let the clock tick one more second. */
+	do {
+		second_rpcc = alpha_rpcc();
+		(*clockfns->cf_get)(clockdev, 0, &ct);
+	} while (ct.sec == first_sec);
+
+	cycles_per_sec = second_rpcc - first_rpcc;
+
+	rpcc_timecounter.tc_frequency = cycles_per_sec;
+
+	tc_init(&rpcc_timecounter);
 }
 
 /*
@@ -156,14 +183,16 @@ setstatclockrate(newhz)
  * and the time of year clock (if any) provides the rest.
  */
 void
-inittodr(base)
-	time_t base;
+inittodr(time_t base)
 {
 	struct clocktime ct;
 	int year;
 	struct clock_ymdhms dt;
 	time_t deltat;
 	int badbase;
+	struct timespec ts;
+
+	ts.tv_sec = ts.tv_nsec = 0;
 
 	if (base < (MINYEAR-1970)*SECYR) {
 		printf("WARNING: preposterous time in file system");
@@ -191,7 +220,7 @@ inittodr(base)
 		 * Believe the time in the file system for lack of
 		 * anything better, resetting the TODR.
 		 */
-		time.tv_sec = base;
+		ts.tv_sec = base;
 		if (!badbase) {
 			printf("WARNING: preposterous clock chip time\n");
 			resettodr();
@@ -205,9 +234,9 @@ inittodr(base)
 	dt.dt_hour = ct.hour;
 	dt.dt_min = ct.min;
 	dt.dt_sec = ct.sec;
-	time.tv_sec = clock_ymdhms_to_secs(&dt);
+	ts.tv_sec = clock_ymdhms_to_secs(&dt);
 #ifdef DEBUG
-	printf("=>%ld (%d)\n", time.tv_sec, base);
+	printf("=>%ld (%d)\n", ts.tv_sec, base);
 #endif
 
 	if (!badbase) {
@@ -215,16 +244,19 @@ inittodr(base)
 		 * See if we gained/lost two or more days;
 		 * if so, assume something is amiss.
 		 */
-		deltat = time.tv_sec - base;
+		deltat = ts.tv_sec - base;
 		if (deltat < 0)
 			deltat = -deltat;
-		if (deltat < 2 * SECDAY)
+		if (deltat < 2 * SECDAY) {
+			tc_setclock(&ts);
 			return;
+		}
 		printf("WARNING: clock %s %ld days",
-		    time.tv_sec < base ? "lost" : "gained",
+		    ts.tv_sec < base ? "lost" : "gained",
 		    (long)deltat / SECDAY);
 	}
 bad:
+	tc_setclock(&ts);
 	printf(" -- CHECK AND RESET THE DATE!\n");
 }
 
@@ -244,7 +276,7 @@ resettodr()
 	if (!clockinitted)
 		return;
 
-	clock_secs_to_ymdhms(time.tv_sec, &dt);
+	clock_secs_to_ymdhms(time_second, &dt);
 
 	/* rt clock wants 2 digits */
 	ct.year = (dt.dt_year - UNIX_YEAR_OFFSET) % 100;
@@ -260,4 +292,10 @@ resettodr()
 #endif
 
 	(*clockfns->cf_set)(clockdev, &ct);
+}
+
+u_int
+rpcc_get_timecount(struct timecounter *tc)
+{
+	return alpha_rpcc();
 }

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vm_machdep.c,v 1.46 2005/08/18 18:40:51 kettenis Exp $	*/
-=======
 /*	$OpenBSD: vm_machdep.c,v 1.53 2010/06/29 21:26:12 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vm_machdep.c,v 1.30 1997/03/10 23:55:40 pk Exp $ */
 
 /*
@@ -72,34 +68,6 @@
 #include <machine/trap.h>
 
 #include <sparc/sparc/cpuvar.h>
-
-/*
- * Move pages from one kernel virtual address to another.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0 ||
-	    ((vaddr_t)from & PAGE_MASK) != 0 ||
-	    ((vaddr_t)to & PAGE_MASK) != 0)
-		panic("pagemove 1");
-#endif
-	while (size > 0) {
-		if (pmap_extract(pmap_kernel(), (vaddr_t)from, &pa) == FALSE)
-			panic("pagemove 2");
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
 
 /*
  * Wrapper for dvma_mapin() in kernel space,
@@ -198,7 +166,7 @@ dvma_mapin_space(map, va, len, canwait, space)
 	off = va & PAGE_MASK;
 	va &= ~PAGE_MASK;
 	len = round_page(len + off);
-	npf = btoc(len);
+	npf = atop(len);
 
 	s = splhigh();
 	if (space & M_SPACE_D24)
@@ -361,6 +329,8 @@ vunmapbuf(bp, sz)
 	off = (vaddr_t)bp->b_data - kva;
 	size = round_page(sz + off);
 
+	pmap_remove(pmap_kernel(), kva, kva + size);
+	pmap_update(pmap_kernel());
 	uvm_km_free_wakeup(kernel_map, kva, size);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
@@ -479,10 +449,9 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 /*
  * cpu_exit is called as the last action during exit.
  *
- * We clean up a little and then call switchexit() with the old proc
- * as an argument.  switchexit() switches to the idle context, schedules
- * the old vmspace and stack to be freed, then selects a new process to
- * run.
+ * We clean up a little and then call sched_exit() with the old proc
+ * as an argument.  sched_exit() schedules the old vmspace and stack
+ * to be freed, then selects a new process to run.
  */
 void
 cpu_exit(p)
@@ -498,8 +467,8 @@ cpu_exit(p)
 		free((void *)fs, M_SUBPROC);
 	}
 
-	switchexit(p);
-	/* NOTREACHED */
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*

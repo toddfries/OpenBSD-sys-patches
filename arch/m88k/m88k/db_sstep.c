@@ -174,8 +174,7 @@ db_clear_single_step(regs)
 {
 #ifdef M88110
 	if (CPU_IS88110) {
-		/* do not remove PSR_SER as we don't enable OoO */
-		regs->epsr &= ~PSR_TRACE;
+		regs->epsr &= ~(PSR_TRACE | PSR_SER);
 	}
 #endif
 #ifdef M88100

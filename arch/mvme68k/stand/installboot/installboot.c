@@ -35,6 +35,7 @@
 #include <sys/mount.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/disklabel.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
@@ -47,7 +48,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <util.h>
-#include <machine/disklabel.h>
 
 int	verbose, nowrite, hflag;
 char	*boot, *proto, *dev;
@@ -391,8 +391,8 @@ vid_to_disklabel(char *dkname, char *bootproto)
 	unsigned short exe_addr_u;
 	unsigned short exe_addr_l;
 
-	pcpul = (struct cpu_disklabel *)malloc(sizeof(struct cpu_disklabel));
-	bzero(pcpul, sizeof(struct cpu_disklabel));
+	pcpul = (struct mvmedisklabel *)malloc(sizeof(struct mvmedisklabel));
+	bzero(pcpul, sizeof(struct mvmedisklabel));
 
 	if (verbose)
 		printf("modifying vid.\n");
@@ -406,8 +406,8 @@ vid_to_disklabel(char *dkname, char *bootproto)
 	f = opendev(dkname, O_RDWR, OPENDEV_PART, &specname);
 
 	if (lseek(f, 0, SEEK_SET) < 0 ||
-	    read(f, pcpul, sizeof(struct cpu_disklabel)) <
-	    sizeof(struct cpu_disklabel))
+	    read(f, pcpul, sizeof(struct mvmedisklabel)) !=
+	    sizeof(struct mvmedisklabel))
 		err(4, "%s", specname);
 
 
@@ -455,8 +455,8 @@ vid_to_disklabel(char *dkname, char *bootproto)
 
 	if (!nowrite) {
 		if (lseek(f, 0, SEEK_SET) < 0 ||
-		    write(f, pcpul, sizeof(struct cpu_disklabel)) <
-		    sizeof(struct cpu_disklabel))
+		    write(f, pcpul, sizeof(struct mvmedisklabel)) <
+		    sizeof(struct mvmedisklabel))
 		    	err(4, "%s", specname);
 	}
 	free(pcpul);

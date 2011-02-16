@@ -44,7 +44,9 @@
 
 #define GET_CPUINFO(r)	mfsprg r,0
 
-#define	INTSTK	(8*1024)		/* 8K interrupt stack */
+#define	INTSTK		(8*1024)	/* 8K interrupt stack */
+#define	SPILLSTK	(1*1024)
+#define	DDBSTK		(7*1024)
 
 /*
  * Globals
@@ -60,6 +62,9 @@ fwargsave:
 			.long 0
 			.long 0
 
+       .globl  _C_LABEL(hid0_idle),
+       .type   _C_LABEL(hid0_idle),@object
+_C_LABEL(hid0_idle):   .long   0       /* hid0 bits to set on idle, DOZE/NAP *
 /*
  * Startup entry
  */
@@ -110,10 +115,9 @@ start:
 	mtsprg	0,%r9
 	addi	%r8,%r8,INTSTK
 	stw	%r8,CI_INTSTK(%r9)
-	stw	%r8,CI_IDLE_PCB(%r9)
-	addi	%r8,%r8,USPACE		/* space for idle_u */
 	li	%r0,-1
 	stw	%r0,CI_INTRDEPTH(%r9)
+	addi	%r8,%r8,SPILLSTK+DDBSTK	/* leave room for spillstk and ddbstk */
 	lis	%r9,_C_LABEL(proc0paddr)@ha
 	stw	%r8,_C_LABEL(proc0paddr)@l(%r9)
 	addi	%r1,%r8,USPACE-FRAMELEN	/* stackpointer for proc0 */
@@ -133,76 +137,15 @@ _ENTRY(_C_LABEL(cpu_spinup_trampoline))
 	lis	%r3,_C_LABEL(cpu_hatch_stack)@ha
 	lwz	%r1,_C_LABEL(cpu_hatch_stack)@l(%r3)
 
-	bl	_C_LABEL(cpu_hatch)
-	bl	_C_LABEL(sched_lock_idle)
-	li	%r30,0
-	b	_C_LABEL(idle)
-#endif
-/*
- * No processes are runnable, so loop waiting for one.
- * Separate label here for accounting purposes.
- */
-	.globl	_C_LABEL(idle)
-	.type	_C_LABEL(idle),@function
-_C_LABEL(idle):
-	mfmsr	%r3
-	/* disable interrupts while manipulating runque */
-	andi.	%r3,%r3,~PSL_EE@l
-	mtmsr	%r3
-
-	lis	%r8,_C_LABEL(whichqs)@ha
-	lwz	%r9,_C_LABEL(whichqs)@l(%r8)
-
-	or.	%r9,%r9,%r9
-	bne-	_C_LABEL(sw1)			/* at least one queue non-empty */
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	bl	_C_LABEL(sched_unlock_idle)
+	b	_C_LABEL(cpu_hatch)
+	/* NOTREACHED */
 #endif
 
-	ori	%r3,%r3,PSL_EE		/* reenable ints again */
-	mtmsr	%r3
-	isync
-	sync
-	/* low power mode */
-	mfmsr	%r3
-	oris	%r3, %r3, PSL_POW@h
-	mtmsr	%r3
-	isync
-
-/* May do some power saving here? */
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-	bl	_C_LABEL(sched_lock_idle)
-#endif
-	b	_C_LABEL(idle)
-
 /*
- * switchexit gets called from cpu_exit to free the user structure
- * and kernel stack of the current process.
+ * void cpu_switchto(struct proc *old, struct proc *new)
+ * Switch from "old" proc to "new".
  */
-_ENTRY(_C_LABEL(switchexit))
-/* First switch to the idle pcb/kernel stack */
-	GET_CPUINFO(%r7)
-	lwz	%r6,CI_IDLE_PCB(%r7)
-	stw	%r6,CI_CURPCB(%r7)
-	addi	%r1,%r6,USPACE-16	/* 16 bytes are reserved at stack top */
-	/*
-	 * Schedule the vmspace and stack to be freed (the proc arg is
-	 * already in r3).
-	 */
-	bl	_C_LABEL(exit2)
-
-	/* Fall through to cpu_switch to actually select another proc */
-	li	%r3,0			/* indicate exited process */
-
-/* Fall through to cpu_switch to actually select another proc */
-
-/*
- * void cpu_switch(struct proc *p)
- * Find a runnable process and switch to it.
- */
-_ENTRY(_C_LABEL(cpu_switch))
+_ENTRY(_C_LABEL(cpu_switchto_asm))
 	mflr	%r0			/* save lr */
 	stw	%r0,4(%r1)
 	stwu	%r1,-16(%r1)
@@ -216,17 +159,10 @@ _ENTRY(_C_LABEL(cpu_switch))
  */
 	GET_CPUINFO(%r5)
 
-	li	%r3,SONPROC
-	stb	%r3,P_STAT(%r31)
+	li	%r31,SONPROC
+	stb	%r31,P_STAT(%r4)
 
-	mfmsr	%r3
-	ori	%r3,%r3,PSL_EE		/* Now we can interrupt again */
-	mtmsr	%r3
-
-	cmpl	0,%r31,%r30		/* is it the same process? */
-	beq	switch_return
-
-	or.	%r30,%r30,%r30		/* old process was exiting? */
+	or.	%r3,%r3,%r3		/* old process was exiting? */
 	beq	switch_exited
 
 	mfsr	%r10,PPC_USER_SR	/* save PPC_USER_SR for copyin/copyout*/
@@ -234,33 +170,37 @@ _ENTRY(_C_LABEL(cpu_switch))
 	mr	%r12,%r2		/* save r2 */
 	stwu	%r1,-SFRAMELEN(%r1)	/* still running on old stack */
 	stmw	%r10,8(%r1)
-	lwz	%r3,P_ADDR(%r30)
-	stw	%r1,PCB_SP(%r3)		/* save SP */
+	lwz	%r31,P_ADDR(%r3)
+	stw	%r1,PCB_SP(%r31)	/* save SP */
 
 switch_exited:
 	/* disable interrupts while actually switching */
-	mfmsr	%r3
-	andi.	%r3,%r3,~PSL_EE@l
-	mtmsr	%r3
+	mfmsr	%r30
+	andi.	%r30,%r30,~PSL_EE@l
+	mtmsr	%r30
 
-	lwz	%r4,P_ADDR(%r31)
-	GET_CPUINFO(%r5)
-	stw	%r4,CI_CURPCB(%r5)	/* indicate new pcb */
+	stw	%r4,CI_CURPROC(%r5)	/* record new process */
 
-	lwz	%r5,PCB_PMR(%r4)
+#ifdef MULTIPROCESSOR
+	stw	%r5,P_CPU(%r4)
+#endif
+
+	lwz	%r31,P_ADDR(%r4)
+	stw	%r31,CI_CURPCB(%r5)	/* indicate new pcb */
+
+	lwz	%r6,PCB_PMR(%r31)
 
 	/* save real pmap pointer for spill fill */
-	GET_CPUINFO(%r6)
-	stwu	%r5,CI_CURPM(%r6)
-	stwcx.	%r5,%r0,%r6		/* clear possible reservation */
+	stwu	%r6,CI_CURPM(%r5)
+	stwcx.	%r6,%r0,%r5		/* clear possible reservation */
 
-	addic.	%r5,%r5,64
-	li	%r6,0
+	addic.	%r6,%r6,64
+	li	%r5,0
 
-	lwz	%r1,PCB_SP(%r4)		/* get new procs SP */
+	lwz	%r1,PCB_SP(%r31)	/* get new procs SP */
 
-	ori	%r3,%r3,PSL_EE		/* interrupts are okay again */
-	mtmsr	%r3
+	ori	%r30,%r30,PSL_EE	/* interrupts are okay again */
+	mtmsr	%r30
 
 	lmw	%r10,8(%r1)		/* get other regs */
 	lwz	%r1,0(%r1)		/* get saved SP */
@@ -270,17 +210,6 @@ switch_exited:
 	mtsr	PPC_USER_SR,%r10	/* get saved PPC_USER_SR */
 	isync
 
-switch_return:
-	mr	%r30,%r7		/* save proc pointer */
-	lwz	%r3,PCB_SPL(%r4)
-	bl	_C_LABEL(lcsplx)
-
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
-        bl      _C_LABEL(sched_unlock_idle)
-#endif
-
-	mr	%r3,%r30		/* curproc for special fork returns */
-
 	lwz	%r31,12(%r1)
 	lwz	%r30,8(%r1)
 	addi	%r1,%r1,16
@@ -288,14 +217,69 @@ switch_return:
 	mtlr	%r0
 	blr
 
-
-/*
- * Data used during primary/secondary traps/interrupts
- */
+_ENTRY(_C_LABEL(cpu_idle_enter))
+	/* must disable external interrupts during idle queue checking */
+	mfmsr	%r3
+	andi.	%r3,%r3,~PSL_EE@l
+	mtmsr	%r3
+	blr
 
-	.data
-#define	SPILLSTK 1024			/* 1K spill stack */
-.lcomm	spillstk,SPILLSTK,8
+_ENTRY(_C_LABEL(cpu_idle_cycle))
+	/*
+	 * interrupts were disabled in cpu_idle_enter, but must be enabled
+	 * for sleeping
+	 */
+	lis	%r4, _C_LABEL(hid0_idle)@ha
+	lwz	%r4, _C_LABEL(hid0_idle)@l(%r4)
+	mfmsr	%r3
+	//* if hid0_idle is 0, no low power */
+	cmpwi	%r4, 0
+	beq	idledone
+	/* set HID0_(HID|NAP|DOZ) as appropriate in hid0 */
+	mfspr	%r5, 1008
+	or	%r5, %r5, %r4
+	mtspr	1008,	%r5
+	isync
+	/* enable interrupts, required before setting POW */
+	ori	%r5,%r3,PSL_EE@l
+	mtmsr	%r5
+	oris	%r5, %r5, PSL_POW@h
+	sync
+	/* low power mode */
+	mtmsr	%r5
+	sync
+	isync
+
+	/*
+	 * restore interrupts to disabled, so hid0 is only modified with
+	 * interrupts disabled.
+	 */
+	mtmsr %r3
+	isync
+
+	/* clear HID0_(HID|NAP|DOZ) since sleeping is over */
+	mfspr	%r5, 1008
+	andc	%r5, %r5, %r4
+	mtspr	1008, %r5
+idledone:
+	/*
+	 * enable interrupts for a small window here to catch machines
+	 * that do not have any sleep mode
+	 */
+	ori     %r5,%r3,PSL_EE@l
+	mtmsr	%r5
+	isync
+	mtmsr	%r3
+	blr
+
+
+_ENTRY(_C_LABEL(cpu_idle_leave))
+	/* enable interrupts disabled in cpu_idle_enter. */
+	mfmsr	%r3
+	ori	%r3,%r3,PSL_EE@l
+	mtmsr	%r3
+	blr
+
 
 /*
  * This code gets copied to all the trap vectors
@@ -722,9 +706,6 @@ _C_LABEL(tlbdsmsize) =	.-_C_LABEL(tlbdsmiss)
 /*
  * In case of DDB we want a separate trap catcher for it
  */
-	.local	ddbstk
-	.comm	ddbstk,INTSTK,8	/* ddb stack */
-
 	.globl	_C_LABEL(ddblow),_C_LABEL(ddbsize)
 _C_LABEL(ddblow):
 	mtsprg	1,%r1			/* save SP */
@@ -744,6 +725,18 @@ nop32_7e:
 _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 #endif  /* DDB */
 
+#define HID_IDLE_CHECK(sr1,sr2,sr3,rSRR0)				\
+	/* detect if interrupt occurred from idle */			\
+	mfspr	sr1, 1008;						\
+	lis	sr2,_C_LABEL(hid0_idle)@ha;				\
+	lwz	sr2,_C_LABEL(hid0_idle)@l(sr2);				\
+	and.	sr3,sr1,sr2;						\
+	andc	sr1,sr1,sr2;						\
+	beq+	1f;							\
+	mtspr	1008, sr1;						\
+	lis	rSRR0,_C_LABEL(idledone)@ha;				\
+	addi	rSRR0,rSRR0,_C_LABEL(idledone)@l;			\
+1:
 
 /*
  * FRAME_SETUP assumes:
@@ -805,6 +798,7 @@ _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 	stw	%r5,FRAME_EXC+8(%r1);					\
 	stw	%r28,FRAME_DAR+8(%r1);					\
 	stw	%r29,FRAME_DSISR+8(%r1);				\
+	HID_IDLE_CHECK(%r5,%r6,%r0,%r30)				\
 	stw	%r30,FRAME_SRR0+8(%r1);					\
 	stw	%r31,FRAME_SRR1+8(%r1)
 
@@ -917,7 +911,8 @@ trapexit:
 	mtcr	%r5
 	bc	4,17,1f			/* branch if PSL_PR is false */
 	GET_CPUINFO(%r3)
-	lwz	%r4,CI_ASTPENDING(%r3)
+	lwz	%r4,CI_CURPROC(%r3)
+	lwz	%r4,P_MD_ASTPENDING(%r4)
 	andi.	%r4,%r4,1
 	beq	1f
 	li	%r6,EXC_AST
@@ -1150,7 +1145,8 @@ intr_exit:
 	lwz	%r4,52(3);	mtsr 13,%r4;
 	lwz	%r4,56(3);	mtsr 14,%r4;
 	lwz	%r4,60(3);	mtsr 15,%r4;
-	lwz	%r4,CI_ASTPENDING(%r5)	/* Test AST pending */
+	lwz	%r4,CI_CURPROC(%r5)
+	lwz	%r4,P_MD_ASTPENDING(%r4)	/* Test AST pending */
 	andi.	%r4,%r4,1
 	beq	1f
 /* Setup for entry to realtrap: */

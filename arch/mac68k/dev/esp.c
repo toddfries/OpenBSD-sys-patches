@@ -595,7 +595,7 @@ esp_iosb_have_dreq(esc)
 /* Faster spl constructs, without saving old values */
 #define	__splx(s)	__asm __volatile ("movew %0,sr" : : "di" (s));
 #define	__splvm()	__splx(mac68k_vmipl)
-#define	__splbio()	__splx(mac68k_bioipl)
+#define	__splbio()	__splx(PSL_S | PSL_IPL2)
 
 void
 esp_quick_dma_go(sc)

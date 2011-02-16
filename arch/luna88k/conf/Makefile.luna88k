@@ -52,6 +52,7 @@ HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
+NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 PROFILE_C=	${CC} -S -c ${CFLAGS} ${CPPFLAGS} $<; \
@@ -103,6 +104,9 @@ param.c: $S/conf/param.c
 
 param.o: param.c Makefile
 	${NORMAL_C}
+
+mcount.o: $S/lib/libkern/mcount.c Makefile
+	${NORMAL_C_NOP}
 
 ioconf.o: ioconf.c
 	${NORMAL_C}

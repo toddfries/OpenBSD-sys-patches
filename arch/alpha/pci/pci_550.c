@@ -375,7 +375,7 @@ dec_550_pciide_compat_intr_establish(v, dev, pa, chan, func, arg)
 	irq = PCIIDE_COMPAT_IRQ(chan);
 #if NSIO
 	cookie = sio_intr_establish(NULL /*XXX*/, irq, IST_EDGE, IPL_BIO,
-	    func, arg, "dec 550 irq");
+	    func, arg, dev->dv_xname);
 #endif
 	return (cookie);
 }

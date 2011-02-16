@@ -143,6 +143,7 @@ extern enum hppa_cpu_type cpu_type;
 extern const char *cpu_typename;
 extern int cpu_hvers;
 #endif
+#endif
 
 /*
  * COPR/SFUs
@@ -252,12 +253,14 @@ extern void need_resched(struct cpu_info *);
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_FPU			2	/* int: fpu present/enabled */
-#define	CPU_MAXID		3	/* number of valid machdep ids */
+#define	CPU_LED_BLINK		3	/* int: twiddle heartbeat LED/LCD */
+#define	CPU_MAXID		4	/* number of valid machdep ids */
 
 #define CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
 	{ "fpu", CTLTYPE_INT }, \
+	{ "led_blink", CTLTYPE_INT }, \
 }
 
 #ifdef _KERNEL

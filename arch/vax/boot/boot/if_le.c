@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_le.c,v 1.2 2002/06/11 09:36:23 hugh Exp $ */
-=======
 /*	$OpenBSD: if_le.c,v 1.6 2008/08/18 23:20:44 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_le.c,v 1.6 2000/05/20 13:30:03 ragge Exp $ */
 /*
  * Copyright (c) 1997, 1999 Ludd, University of Lule}, Sweden.

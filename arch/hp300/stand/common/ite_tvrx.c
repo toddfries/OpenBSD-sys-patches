@@ -1,4 +1,4 @@
-/*	$OpenBSD: ite_tvrx.c,v 1.1 2006/04/14 21:05:44 miod Exp $	*/
+/*	$OpenBSD: ite_tvrx.c,v 1.2 2006/08/17 06:31:10 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

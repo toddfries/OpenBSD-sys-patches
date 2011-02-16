@@ -60,8 +60,8 @@
 #define	BS_TCTRL2	0x0063
 #define	BS_LEVEL	0x0064
 #define	BS_MASK		0x0065
-#define	BS_ISEL0	0x0066
-#define	BS_ISEL1	0x0067
+#define	BS_ISEL0	0x0066	/* do not access on 197LE!!! */
+#define	BS_ISEL1	0x0067	/* do not access on 197LE!!! */
 #define	BS_ABORT	0x0068
 #define	BS_CPINT	0x0069
 #define	BS_TINT1	0x006a
@@ -99,6 +99,10 @@
 #define BS_GCSR_TBB	0x4000	/* Test Bus Busy */
 #define BS_GCSR_POR	0x8000	/* Power On Reset */
 
+/* Processor Attribute Registers bit definitions */
+#define BS_PAR_DEN	0x01	/* Decode Enable */
+#define BS_PAR_WPEN	0x02	/* Write Post Enable */
+
 /* System Attribute Registers bit definitions */
 #define BS_SAR_DEN	0x01	/* Decode Enable */
 #define BS_SAR_INVR	0x04	/* Invalidate On Reads */
@@ -109,16 +113,12 @@
 #define BS_BTIMER_PBT64		0x01	/* Processor Bus Timout, 64 usec */
 #define BS_BTIMER_PBT256	0x02	/* Processor Bus Timout, 256 usec */
 #define BS_BTIMER_PBTD		0x03	/* Processor Bus Timout, disable */
-#define BS_BTIMER_SBT8		(0x00 << 2)	/* System Bus Timout, 8 usec */
-#define BS_BTIMER_SBT64		(0x01 << 2)	/* System Bus Timout, 64 usec */
-#define BS_BTIMER_SBT256	(0x02 << 2)	/* System Bus Timout, 256 usec */
-#define BS_BTIMER_SBTD		(0x03 << 2)	/* System Bus Timout, disable */
-
-/* Prescaler Adjust values */
-#define BS_PADJUST_50	0xce	/* 50 MHz clock */
-#define BS_PADJUST_40	0xd8	/* 40 MHz clock */
-#define BS_PADJUST_33	0xdf	/* 33 MHz clock */
-#define BS_PADJUST_25	0xe7	/* 25 MHz clock */
+#define	BS_BTIMER_PBT_MASK	0x03
+#define BS_BTIMER_SBT8		0x00	/* System Bus Timout, 8 usec */
+#define BS_BTIMER_SBT64		0x04	/* System Bus Timout, 64 usec */
+#define BS_BTIMER_SBT256	0x08	/* System Bus Timout, 256 usec */
+#define BS_BTIMER_SBTD		0x0c	/* System Bus Timout, disable */
+#define	BS_BTIMER_SBT_MASK	0x0c
 
 /* ROM Control Register bit definitions */
 #define BS_ROMCR_WEN0	0x0100
@@ -190,16 +190,18 @@
 #define BS_VBASE_SRC_EXT	0x4	/* external interrupt */
 #define BS_VBASE_SRC_SPUR	0x7	/* spurious interrupt */
 
-/* We lock off BusSwitch vectors at 0x40 */
-#define BS_VECBASE	0x40
+/*
+ * BusSwitch wired interrupt vectors
+ */
+
+#define BS_VECBASE	0x40		/* vector base */
 #define BS_NVEC		0x10
 
-/* Bottom 4 bits of the vector returned during IACK cycle */
-#define BS_TMR1IRQ	0x01	/* lowest */
-#define BS_TMR2IRQ	0x02
-#define BS_ABORTIRQ	0x03
-
-/* Define the Abort vector */
-#define BS_ABORTVEC  	(BS_VECBASE | BS_ABORTIRQ)
+#define BS_TMR1IRQ	0x00		/* timer1 */
+#define BS_TMR2IRQ	0x01		/* timer2 */
+#define	BS_WPEIRQ	0x02		/* write post error */
+#define	BS_PALIRQ	0x03		/* processor address log interrupt */
+#define	BS_EXTIRQ	0x04		/* external interrupt */
+#define	BS_SPURIRQ	0x07		/* spurious interrupt */
 
 #endif	/* BUSSWREG_H */

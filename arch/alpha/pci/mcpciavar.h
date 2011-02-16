@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: mcpciavar.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcpciavar.h,v 1.4 1999/04/16 02:18:07 thorpej Exp $ */
 
 /*

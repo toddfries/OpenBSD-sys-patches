@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_scoopreg.h,v 1.7 2005/07/01 23:51:55 uwe Exp $	*/
+/*	$OpenBSD: zaurus_scoopreg.h,v 1.8 2007/03/18 20:50:23 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

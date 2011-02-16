@@ -1,4 +1,4 @@
-/*	$OpenBSD: hmereg.h,v 1.11 2004/09/28 00:21:23 brad Exp $	*/
+/*	$OpenBSD: hmereg.h,v 1.12 2005/02/22 20:44:26 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

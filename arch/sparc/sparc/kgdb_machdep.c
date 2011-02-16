@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kgdb_machdep.c,v 1.7 2003/06/02 23:27:55 millert Exp $ */
-=======
 /*	$OpenBSD: kgdb_machdep.c,v 1.10 2010/07/10 19:32:25 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: kgdb_machdep.c,v 1.1 1997/08/31 21:22:45 pk Exp $ */
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.

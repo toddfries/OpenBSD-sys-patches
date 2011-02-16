@@ -328,7 +328,7 @@ dec_eb164_pciide_compat_intr_establish(v, dev, pa, chan, func, arg)
 	irq = PCIIDE_COMPAT_IRQ(chan);
 #if NSIO
 	cookie = sio_intr_establish(NULL /*XXX*/, irq, IST_EDGE, IPL_BIO,
-	    func, arg, "eb164 irq");
+	    func, arg, dev->dv_xname);
 	if (cookie == NULL)
 		return (NULL);
 #endif

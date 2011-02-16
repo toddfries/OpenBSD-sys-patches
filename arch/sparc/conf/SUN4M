@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: SUN4M,v 1.71 2006/06/26 22:16:23 miod Exp $
-=======
 #	$OpenBSD: SUN4M,v 1.78 2010/07/03 03:59:17 krw Exp $
->>>>>>> origin/master
 #	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
@@ -152,7 +148,7 @@ gem*	at sbus?
 bwtwo*	at sbus?				# sun4c and sun4m
 wsdisplay* at bwtwo?
 
-# Sun "cgthree" Sbus color framebuffer.
+# Sun "cgthree" SBus color framebuffer.
 cgthree* at sbus?
 wsdisplay* at cgthree?
 

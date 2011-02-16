@@ -11,7 +11,7 @@
 
 machine		alpha
 include		"../../../conf/GENERIC"
-maxusers	32			# estimated number of users
+maxusers	80			# estimated number of users
 
 # CPU Support
 option		DEC_3000_500	# Flamingo etc:	3000/[4-9]00*
@@ -43,6 +43,7 @@ option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
 option		APERTURE		# in-kernel aperture driver for XFree86
 option		USER_PCICONF		# user-space PCI configuration
+#option		NTFS			# Experimental NTFS support
 
 config		bsd	swap generic
 
@@ -82,6 +83,8 @@ uark*	at uhub?			# Arkmicro ARK3116 serial
 ucom*	at uark?
 uipaq*	at uhub?			# iPAQ serial adapter
 ucom*	at uipaq?
+uchcom*	at uhub?			# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?			# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?			# USB MIDI
@@ -114,7 +117,6 @@ uscanner* at uhub? disable		# USB Scanners
 #uyap*	at uhub?			# Y@P firmware loader
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
-#ubt*	at uhub?			# USB Bluetooth
 ugen*	at uhub?			# USB Generic driver
 uath*	at uhub?			# Atheros AR5005UG/AR5005UX
 ural*	at uhub?			# Ralink RT2500USB
@@ -206,6 +208,8 @@ twe*	at pci?				# 3ware Escalade RAID controllers
 scsibus* at twe?
 mpi*	at pci?				# LSI Logic Message Passing Interface
 scsibus* at mpi?
+sili*	at pci?				# Silicon Image 3124/3132/3531 SATA
+scsibus* at sili?
 
 #UNTESTED: the following drivers are untested.
 adw*	at pci?				# AdvanSys ULTRA WIDE SCSI
@@ -266,6 +270,7 @@ pgt*	at pci?				# Prism54 (only full-mac varients)
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 #rtw*	at pci?				# Realtek 8180
 wi*	at pci?				# WaveLAN IEEE 802.11DS
+malo*	at pci?				# Marvell Libertas
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
@@ -313,6 +318,8 @@ lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
 maxds*	at iic?				# Maxim DS1631
 maxtmp*	at iic?				# Maxim MAX6642/MAX6690
+spdmem* at iic?				# SPD memory eeproms
+sdtemp*	at iic?				# SO-DIMM (JC-42.4) temperature
 
 # ISA/EISA bus support
 isa*	at	pceb?
@@ -382,16 +389,16 @@ atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
 # Audio devices
+cmpci*	at pci?				# C-Media CMI8338/8738
 eap*	at pci?				# Ensoniq AudioPCI S5016
 emu*	at pci?				# SB Live!
+eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 
 puc*	at pci?				# PCI "universal" comm device
 com*	at puc?
 
 # UNTESTED.  The following drivers are untested
-eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 sv*	at pci?				# S3 SonicVibes (S3 617)
-cmpci*	at pci?				# C-Media CMI8338/8738
 fms*	at pci?				# Forte Media FM801
 auvia*	at pci?				# VIA VT82C686A
 ##
@@ -428,7 +435,6 @@ lofn*	at pci?				# Hi/fn 6500 crypto card
 nofn*	at pci?				# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?				# Bluesteel Networks 5xxx crypto card
 safe*	at pci?				# SafeNet SafeXcel 1141/1741
-#ises*	at pci?				# Pijnenburg PCC-ISES
 
 # 1-Wire devices
 option ONEWIREVERBOSE

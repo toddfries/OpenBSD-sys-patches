@@ -46,6 +46,7 @@
 #include <uvm/uvm.h>
 #include <ddb/db_var.h>
 
+#include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/intr.h>
 #include <machine/psl.h>

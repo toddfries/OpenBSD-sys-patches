@@ -1,5 +1,5 @@
 #
-# $OpenBSD: isp.s,v 1.5 2004/01/09 21:16:06 deraadt Exp $
+# $OpenBSD: isp.s,v 1.6 2007/04/10 17:47:54 miod Exp $
 # $NetBSD: isp.s,v 1.2 1996/05/15 19:48:48 is Exp $
 #
 

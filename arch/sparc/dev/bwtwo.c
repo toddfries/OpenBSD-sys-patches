@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bwtwo.c,v 1.33 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: bwtwo.c,v 1.38 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bwtwo.c,v 1.33 1997/05/24 20:16:02 pk Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: pmap.h,v 1.26 2005/11/06 22:21:30 miod Exp $     */
-=======
 /*      $OpenBSD: pmap.h,v 1.31 2010/12/26 15:41:00 miod Exp $     */
->>>>>>> origin/master
 /*	$NetBSD: pmap.h,v 1.37 1999/08/01 13:48:07 ragge Exp $	   */
 
 /* 
@@ -47,6 +43,8 @@
 #ifndef PMAP_H
 #define PMAP_H
 
+#ifdef _KERNEL
+
 #include <machine/pte.h>
 #include <machine/mtpr.h>
 #include <machine/pcb.h>
@@ -78,14 +76,13 @@ typedef struct pmap {
 
 /*
  * For each vm_page_t, there is a list of all currently valid virtual
- * mappings of that page.  An entry is a pv_entry_t, the list is pv_table.
+ * mappings of that page.  An entry is a pv_entry_t.
  */
 
 struct pv_entry {
 	struct pv_entry *pv_next;	/* next pv_entry */
 	pt_entry_t	*pv_pte;	/* pte for this physical page */
 	struct pmap	*pv_pmap;	/* pmap this entry belongs to */
-	int		 pv_attr;	/* write/modified bits */
 };
 
 /* Mapping macros used when allocating SPT */
@@ -96,8 +93,6 @@ struct pv_entry {
 #define MAPPHYS(ptr, count, perm)				\
 	(paddr_t)ptr = avail_start + KERNBASE;			\
 	avail_start += (count) * VAX_NBPG;
-
-#ifdef	_KERNEL
 
 extern	struct pmap kernel_pmap_store;
 

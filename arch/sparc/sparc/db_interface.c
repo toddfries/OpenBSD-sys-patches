@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_interface.c,v 1.11 2003/05/13 22:25:33 miod Exp $	*/
-=======
 /*	$OpenBSD: db_interface.c,v 1.13 2010/06/29 21:28:11 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_interface.c,v 1.18 1997/09/01 00:16:31 pk Exp $ */
 
 /*

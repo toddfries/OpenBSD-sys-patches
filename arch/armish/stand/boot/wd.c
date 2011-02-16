@@ -165,7 +165,7 @@ wdgetdisklabel(wd)
 	if (wdstrategy(wd, F_READ, DOSBBSECTOR, DEV_BSIZE, buf, &rsize))
 		return EOFFSET;
 
-	if (*(u_int16_t *)&buf[DOSMAGICOFF] == DOSMAGIC) {
+	if (*(u_int16_t *)&buf[DOSMBR_SIGNATURE_OFF] == DOSMBR_SIGNATURE) {
 		int i;
 		struct dos_partition *dp = (struct dos_partition *)buf;
 

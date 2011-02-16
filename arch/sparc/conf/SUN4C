@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: SUN4C,v 1.55 2006/06/26 22:16:23 miod Exp $
-=======
 #	$OpenBSD: SUN4C,v 1.62 2010/07/03 03:59:17 krw Exp $
->>>>>>> origin/master
 #	$NetBSD: GENERIC,v 1.48 1997/08/23 19:19:01 mjacob Exp $
 
 # Machine architecture; required by config(8)
@@ -107,6 +103,12 @@ isp*	at sbus?
 le0	at sbus0					# sun4c on-board
 le*	at sbus?
 
+# Additional SBus LANCE devices - glued on by lebuffer
+lebuffer0	at sbus0				# sun4m SBus
+lebuffer*	at sbus?				# sun4m SBus
+le0	at lebuffer0					#
+le*	at lebuffer?					#
+
 # Quad-ethernet glue device, and sub-devices
 qec*	at sbus?
 qe*	at qec?
@@ -118,7 +120,7 @@ bwtwo0	at sbus0					# sun4c on-board
 bwtwo*	at sbus?					# sun4c and sun4m
 wsdisplay* at bwtwo?
 
-# Sun "cgthree" Sbus color framebuffer.
+# Sun "cgthree" SBus color framebuffer.
 cgthree* at sbus?
 wsdisplay* at cgthree?
 

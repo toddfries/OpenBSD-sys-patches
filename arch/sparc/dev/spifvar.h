@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: spifvar.h,v 1.3 2003/06/02 18:40:59 jason Exp $	*/
-=======
 /*	$OpenBSD: spifvar.h,v 1.5 2009/04/10 20:53:51 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

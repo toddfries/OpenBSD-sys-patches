@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.3 2002/03/14 03:15:58 millert Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.4 2003/06/09 16:34:22 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

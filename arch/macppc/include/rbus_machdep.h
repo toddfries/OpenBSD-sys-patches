@@ -56,4 +56,7 @@ rbus_tag_t rbus_pccbb_parent_io(struct device *self,
 rbus_tag_t rbus_pccbb_parent_mem(struct device *self,
     struct pci_attach_args *pa);
 
+void	pccbb_attach_hook(struct device *, struct device *,
+	    struct pci_attach_args *);
+
 #endif /* _ARCH_MACPPC_MACPPC_RBUS_MACHDEP_H_ */

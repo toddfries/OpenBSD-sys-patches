@@ -131,12 +131,6 @@ void	printregs(struct reg *);
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
 #endif
@@ -183,12 +177,6 @@ int	alpha_cpus;
 
 int	bootdev_debug = 0;	/* patchable, or from DDB */
 
-/*
- * XXX We need an address to which we can assign things so that they
- * won't be optimized away because we didn't use the value.
- */
-u_int32_t no_optimize;
-
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[128];
@@ -219,6 +207,9 @@ int	alpha_fp_sync_complete = 0;	/* fp fixup if sync even without /s */
 #if NIOASIC > 0
 int	alpha_led_blink = 0;
 #endif
+
+/* used by hw_sysctl */
+extern char *hw_serial;
 
 /*
  * XXX This should be dynamically sized, but we have the chicken-egg problem!
@@ -829,10 +820,7 @@ consinit()
 void
 cpu_startup()
 {
-	register unsigned i;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #if defined(DEBUG)
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -886,8 +874,6 @@ cpu_startup()
 		printf("stolen memory for VM structures = %d\n", pmap_pages_stolen * PAGE_SIZE);
 	}
 #endif
-	printf("using %ld buffers containing %ld bytes (%ldK) of memory\n",
-	    (long)nbuf, (long)bufpages * PAGE_SIZE, (long)bufpages * (PAGE_SIZE / 1024));
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -967,6 +953,7 @@ void
 identifycpu()
 {
 	char *s;
+	int slen;
 
 	/*
 	 * print out CPU identification information.
@@ -977,15 +964,19 @@ identifycpu()
 			goto skipMHz;
 	printf(", %ldMHz", hwrpb->rpb_cc_freq / 1000000);
 skipMHz:
+	/* fill in hw_serial if a serial number is known */
+	slen = strlen(hwrpb->rpb_ssn) + 1;
+	if (slen > 1) {
+		hw_serial = malloc(slen, M_SYSCTL, M_NOWAIT);
+		if (hw_serial)
+			strlcpy(hw_serial, (char *)hwrpb->rpb_ssn, slen);
+	}
+
 	printf("\n");
 	printf("%ld byte page size, %d processor%s.\n",
 	    hwrpb->rpb_page_size, alpha_cpus, alpha_cpus == 1 ? "" : "s");
 #if 0
-	/* this isn't defined for any systems that we run on? */
-	printf("serial number 0x%lx 0x%lx\n",
-	    ((long *)hwrpb->rpb_ssn)[0], ((long *)hwrpb->rpb_ssn)[1]);
-
-	/* and these aren't particularly useful! */
+	/* this is not particularly useful! */
 	printf("variation: 0x%lx, revision 0x%lx\n",
 	    hwrpb->rpb_variation, *(long *)hwrpb->rpb_revision);
 #endif
@@ -1038,8 +1029,8 @@ boot(howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();		/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested do it. */
 	if (howto & RB_DUMP)
@@ -1124,7 +1115,7 @@ cpu_dump_mempagecnt()
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -1171,41 +1162,30 @@ cpu_dump()
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks, dumpblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
-		goto bad;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		goto bad;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
 	if (nblks <= ctod(1))
-		goto bad;
+		return;
 
 	dumpblks = cpu_dumpsize();
 	if (dumpblks < 0)
-		goto bad;
+		return;
 	dumpblks += ctod(cpu_dump_mempagecnt());
 
 	/* If dump won't fit (incl. room for possible label), punt. */
 	if (dumpblks > (nblks - ctod(1)))
-		goto bad;
+		return;
 
 	/* Put dump at end of partition */
 	dumplo = nblks - dumpblks;
 
 	/* dumpsize is in page units, and doesn't include headers. */
 	dumpsize = cpu_dump_mempagecnt();
-	return;
-
-bad:
-	dumpsize = 0;
-	return;
 }
 
 /*
@@ -1219,8 +1199,8 @@ dumpsys()
 	u_long totalbytesleft, bytes, i, n, memcl;
 	u_long maddr;
 	int psize;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 	extern int msgbufmapped;
 
@@ -1480,7 +1460,7 @@ sendsig(catcher, sig, mask, code, type, val)
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		scp = (struct sigcontext *)(alpha_pal_rdusp() - rndfsize);
-	if ((u_long)scp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
+	if ((u_long)scp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
 		(void)uvm_grow(p, (u_long)scp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -1860,97 +1840,6 @@ spl0()
 	}
 
 	return (alpha_pal_swpipl(ALPHA_PSL_IPL_0));
-}
-
-/*
- * The following primitives manipulate the run queues.  _whichqs tells which
- * of the 32 queues _qs have processes in them.  Setrunqueue puts processes
- * into queues, Remrunqueue removes them from queues.  The running process is
- * on no queue, other processes are on a queue related to p->p_priority,
- * divided by 4 actually to shrink the 0-127 range of priorities into the 32
- * available queues.
- */
-/*
- * setrunqueue(p)
- *	proc *p;
- *
- * Call should be made at splclock(), and p->p_stat should be SRUN.
- */
-
-/* XXXART - grmble */
-#define sched_qs qs
-#define sched_whichqs whichqs
-
-void
-setrunqueue(p)
-	struct proc *p;
-{
-	int bit;
-
-	/* firewall: p->p_back must be NULL */
-	if (p->p_back != NULL)
-		panic("setrunqueue");
-
-	bit = p->p_priority >> 2;
-	sched_whichqs |= (1 << bit);
-	p->p_forw = (struct proc *)&sched_qs[bit];
-	p->p_back = sched_qs[bit].ph_rlink;
-	p->p_back->p_forw = p;
-	sched_qs[bit].ph_rlink = p;
-}
-
-/*
- * remrunqueue(p)
- *
- * Call should be made at splclock().
- */
-void
-remrunqueue(p)
-	struct proc *p;
-{
-	int bit;
-
-	bit = p->p_priority >> 2;
-	if ((sched_whichqs & (1 << bit)) == 0)
-		panic("remrunqueue");
-
-	p->p_back->p_forw = p->p_forw;
-	p->p_forw->p_back = p->p_back;
-	p->p_back = NULL;	/* for firewall checking. */
-
-	if ((struct proc *)&sched_qs[bit] == sched_qs[bit].ph_link)
-		sched_whichqs &= ~(1 << bit);
-}
-
-/*
- * Return the best possible estimate of the time in the timeval
- * to which tvp points.  Unfortunately, we can't read the hardware registers.
- * We guarantee that the time will be greater than the value obtained by a
- * previous call.
- */
-void
-microtime(tvp)
-	register struct timeval *tvp;
-{
-	int s = splclock();
-	static struct timeval lasttime;
-
-	*tvp = time;
-#ifdef notdef
-	tvp->tv_usec += clkread();
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-#endif
-	if (tvp->tv_sec == lasttime.tv_sec &&
-	    tvp->tv_usec <= lasttime.tv_usec &&
-	    (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
 }
 
 /*

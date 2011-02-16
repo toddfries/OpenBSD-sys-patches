@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ka820.c,v 1.11 2003/06/02 23:27:59 millert Exp $	*/
-=======
 /*	$OpenBSD: ka820.c,v 1.13 2008/08/18 23:05:38 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ka820.c,v 1.22 2000/06/04 02:19:27 matt Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.

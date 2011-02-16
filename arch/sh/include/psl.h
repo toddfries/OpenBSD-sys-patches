@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: psl.h,v 1.2 2006/11/05 05:38:18 drahn Exp $	*/
-=======
 /*	$OpenBSD: psl.h,v 1.4 2010/04/25 18:11:36 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: psl.h,v 1.8 2005/12/11 12:18:58 christos Exp $	*/
 
 /*-

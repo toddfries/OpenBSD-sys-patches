@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_machdep.h,v 1.8 2003/02/12 06:32:59 jason Exp $	*/
-=======
 /*	$OpenBSD: db_machdep.h,v 1.12 2010/11/27 19:57:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_machdep.h,v 1.12 2001/07/07 15:16:13 eeh Exp $ */
 
 /*
@@ -144,16 +140,7 @@ int kdb_trap(int, struct trapframe64 *);
 #define	DB_ELF_SYMBOLS
 #define DB_ELFSIZE	64
 
-<<<<<<< HEAD
-/*
- * KGDB definitions
- */
-typedef u_long		kgdb_reg_t;
-#define KGDB_NUMREGS	72
-#define KGDB_BUFLEN	1024
-=======
 /* Register device-specific method for triggering XIRs. */
 void db_register_xir(void (*)(void *, int), void *);
->>>>>>> origin/master
 
 #endif	/* _SPARC_DB_MACHDEP_H_ */

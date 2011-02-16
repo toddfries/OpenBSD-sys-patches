@@ -524,7 +524,7 @@ pmap_bootstrap(vstart)
 		kpm->pm_stats.resident_count++;	/* count PTP as resident */
 	}
 
-	pmap_maphys(0x1000000, ctob(physmem));
+	pmap_maphys(0x1000000, ptoa(physmem));
 
 	eaddr = physmem - atop(round_page(MSGBUFSIZE));
 	resvphysmem = atop(addr);

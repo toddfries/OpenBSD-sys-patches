@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: RAMDISK,v 1.27 2006/08/30 19:29:20 miod Exp $
-=======
 #	$OpenBSD: RAMDISK,v 1.33 2010/07/03 03:59:17 krw Exp $
->>>>>>> origin/master
 
 machine		vax			# machine type
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: genassym.cf,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $
-=======
 #	$OpenBSD: genassym.cf,v 1.6 2010/12/14 20:24:25 jasper Exp $
->>>>>>> origin/master
 #	$NetBSD: genassym.cf,v 1.10 2005/12/11 12:19:00 christos Exp $
 
 #-
@@ -52,8 +48,6 @@ member	tf_spc
 
 struct	proc
 member	p_addr
-member	p_back
-member	p_forw
 member	p_stat
 member	p_wchan
 member	P_MD_UPTE	p_md.md_upte
@@ -91,3 +85,6 @@ struct	mbuf
 member	m_data
 member	m_len
 member	m_next
+
+struct cpu_info
+member ci_curproc

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apecsvar.h,v 1.9 2002/03/14 01:26:27 millert Exp $	*/
+/*	$OpenBSD: apecsvar.h,v 1.10 2006/03/16 22:32:44 miod Exp $	*/
 /*	$NetBSD: apecsvar.h,v 1.5 1996/11/25 03:49:36 cgd Exp $	*/
 
 /*

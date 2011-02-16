@@ -1,4 +1,4 @@
-/*	$OpenBSD: daadio.c,v 1.5 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: daadio.c,v 1.6 2004/09/29 07:35:11 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

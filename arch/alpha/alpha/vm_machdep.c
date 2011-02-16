@@ -96,9 +96,6 @@ cpu_coredump(p, vp, cred, chdr)
 
 /*
  * cpu_exit is called as the last action during exit.
- * We block interrupts and call switch_exit.  switch_exit switches
- * to proc0's PCB and stack, then jumps into the middle of cpu_switch,
- * as if it were switching from proc0.
  */
 void
 cpu_exit(p)
@@ -114,9 +111,7 @@ cpu_exit(p)
 	 * vmspace's context until the switch to proc0 in switch_exit().
 	 */
 	pmap_deactivate(p);
-
-	(void) splhigh();
-	switch_exit(p);
+	sched_exit(p);
 	/* NOTREACHED */
 }
 
@@ -214,7 +209,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 		p2tf->tf_regs[FRAME_A4] = 1;		/* is child */
 
 		/*
-		 * If specificed, give the child a different stack.
+		 * If specified, give the child a different stack.
 		 */
 		if (stack != NULL)
 			p2tf->tf_regs[FRAME_SP] = (u_long)stack + stacksize;
@@ -232,48 +227,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 		up->u_pcb.pcb_context[7] =
 		    (u_int64_t)switch_trampoline;	/* ra: assembly magic */
 		up->u_pcb.pcb_context[8] = ALPHA_PSL_IPL_0; /* ps: IPL */
-	}
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to have valid page table pages.
- *
- * Note that since all kernel page table pages are pre-allocated
- * and mapped in, we can use the Virtual Page Table.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	long fidx, tidx;
-	ssize_t todo;
-
-#ifdef DIAGNOSTIC
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-
-	todo = size;			/* if testing > 0, need sign... */
-	while (todo > 0) {
-		fidx = VPT_INDEX(from);
-		tidx = VPT_INDEX(to);
-
-		VPT[tidx] = VPT[fidx];
-		VPT[fidx] = 0;
-
-		ALPHA_TBIS((vaddr_t)from);
-		ALPHA_TBIS((vaddr_t)to);
-
-#if defined(MULTIPROCESSOR) && 0
-		pmap_tlb_shootdown(pmap_kernel(), (vaddr_t)from, PG_ASM);
-		pmap_tlb_shootdown(pmap_kernel(), (vaddr_t)to, PG_ASM);
-#endif
-
-		todo -= PAGE_SIZE;
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
 	}
 }
 

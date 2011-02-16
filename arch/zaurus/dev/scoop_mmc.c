@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: scoop_mmc.c,v 1.2 2009/09/03 21:40:29 marex Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sparc64.h,v 1.5 2003/12/16 20:00:16 jason Exp $	*/
-=======
 /*	$OpenBSD: sparc64.h,v 1.13 2008/12/30 00:54:24 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sparc64.h,v 1.3 2000/10/20 05:47:03 mrg Exp $	*/
 
 /*
@@ -43,7 +39,7 @@ struct mem_region {
 	u_int64_t size;
 };
 
-int prom_set_trap_table(vaddr_t tba);
+int prom_set_trap_table(vaddr_t tba, paddr_t mmfsa);
 paddr_t prom_vtop(vaddr_t vaddr);
 vaddr_t prom_claim_virt(vaddr_t vaddr, int len);
 vaddr_t prom_alloc_virt(int len, int align);
@@ -54,8 +50,6 @@ paddr_t prom_alloc_phys(int len, int align);
 paddr_t prom_claim_phys(paddr_t phys, int len);
 int prom_free_phys(paddr_t paddr, int len);
 paddr_t prom_get_msgbuf(int len, int align);
-<<<<<<< HEAD
-=======
 int prom_itlb_load(int index, u_int64_t data, vaddr_t vaddr);
 int prom_dtlb_load(int index, u_int64_t data, vaddr_t vaddr);
 void prom_start_cpu(int cpu, void *func, long arg);
@@ -64,7 +58,6 @@ const char *prom_serengeti_set_console_input(const char *);
 time_t prom_opl_get_tod(void);
 uint64_t prom_set_sun4v_api_version(uint64_t, uint64_t, uint64_t, uint64_t *);
 void prom_sun4v_soft_state_supported(void);
->>>>>>> origin/master
 
 /*
  * Debug

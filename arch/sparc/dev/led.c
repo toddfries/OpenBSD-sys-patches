@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: led.c,v 1.11 2006/03/04 12:38:58 miod Exp $	*/
-=======
 /*	$OpenBSD: led.c,v 1.13 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

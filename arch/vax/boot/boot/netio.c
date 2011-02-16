@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: netio.c,v 1.5 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: netio.c,v 1.6 2000/05/26 20:16:46 ragge Exp $	*/
 
 /*-

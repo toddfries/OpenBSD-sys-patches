@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.5 2002/11/05 18:04:35 miod Exp $	*/
+/*	$OpenBSD: asm.h,v 1.8 2007/11/24 20:58:26 deraadt Exp $	*/
 /*	$NetBSD: asm.h,v 1.13 1997/04/24 22:49:39 thorpej Exp $	*/
 
 /*
@@ -88,7 +88,7 @@
  * to use it would be a desirable change.
  */
 #ifdef PROF
-#define ALTENTRY(name, rname)	ENTRY(name); jra rname+12
+#define ALTENTRY(name, rname)	ENTRY(name); jra _C_LABEL(rname)+12
 #else
 #define ALTENTRY(name, rname)	_ENTRY(_C_LABEL(name))
 #endif
@@ -164,6 +164,8 @@
 
 #define	VECTOR_UNUSED					\
 	.long	0
+
+#define CURPROC	_C_LABEL(cpu_info_store) + CI_CURPROC
 
 #endif /* _KERNEL */
 

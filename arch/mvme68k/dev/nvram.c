@@ -487,7 +487,7 @@ nvrammmap(dev, off, prot)
 		return (-1);
 
 	/* allow access only in RAM */
-	if (off < 0 || off > sc->sc_len)
+	if (off < 0 || off >= round_page(sc->sc_len))
 		return (-1);
 	return (sc->sc_paddr + off);
 }

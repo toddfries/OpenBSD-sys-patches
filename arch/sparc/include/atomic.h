@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atomic.h,v 1.1 2007/02/06 17:13:33 art Exp $	*/
-=======
 /*	$OpenBSD: atomic.h,v 1.4 2010/04/21 03:03:24 deraadt Exp $	*/
->>>>>>> origin/master
 
 /* Public Domain */
 
@@ -16,13 +12,23 @@
 static __inline void
 atomic_setbits_int(__volatile unsigned int *uip, unsigned int v)
 {
+	int psr;
+
+	psr = getpsr();
+	setpsr(psr | PSR_PIL);
 	*uip |= v;
+	setpsr(psr);
 }
 
 static __inline void
 atomic_clearbits_int(__volatile unsigned int *uip, unsigned int v)
 {
+	int psr;
+
+	psr = getpsr();
+	setpsr(psr | PSR_PIL);
 	*uip &= ~v;
+	setpsr(psr);
 }
 
 #endif /* defined(_KERNEL) */

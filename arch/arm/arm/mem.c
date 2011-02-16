@@ -215,11 +215,9 @@ mmrw(dev, uio, flags)
 				uio->uio_resid = 0;
 				return (0);
 			}
-			if (zeropage == NULL) {
-				zeropage = (caddr_t)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				memset(zeropage, 0, PAGE_SIZE);
-			}
+			if (zeropage == NULL)
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK | M_ZERO);
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			break;
@@ -258,7 +256,7 @@ mmmmap(dev, off, prot)
 
 	/* minor device 0 is physical memory */
 
-	if ((paddr_t)off >= ctob((paddr_t)physmem) &&
+	if ((paddr_t)off >= ptoa((paddr_t)physmem) &&
 	    suser(p, 0) != 0)
 		return -1;
 	return off;

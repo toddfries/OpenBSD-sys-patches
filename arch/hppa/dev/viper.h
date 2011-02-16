@@ -1,4 +1,4 @@
-/*	$OpenBSD: viper.h,v 1.5 2003/04/07 17:24:09 mickey Exp $	*/
+/*	$OpenBSD: viper.h,v 1.6 2007/04/10 17:47:54 miod Exp $	*/
 
 /* 
  * Copyright (c) 1991,1994 The University of Utah and

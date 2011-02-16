@@ -1,4 +1,4 @@
-/* $OpenBSD: ciavar.h,v 1.12 2002/03/14 01:26:27 millert Exp $ */
+/* $OpenBSD: ciavar.h,v 1.13 2006/03/16 22:32:44 miod Exp $ */
 /* $NetBSD: ciavar.h,v 1.17 2000/03/19 01:43:25 thorpej Exp $ */
 
 /*

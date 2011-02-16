@@ -1,4 +1,4 @@
-/*	$OpenBSD: in4_cksum.c,v 1.1 2005/05/10 04:04:39 brad Exp $	*/
+/*	$OpenBSD: in4_cksum.c,v 1.4 2008/05/15 22:17:08 brad Exp $	*/
 /*	$NetBSD: in4_cksum.c,v 1.8 2003/09/29 22:54:28 matt Exp $	*/
 
 /*
@@ -61,11 +61,6 @@
  *	@(#)in_cksum.c	8.1 (Berkeley) 6/10/93
  */
 
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in4_cksum.c,v 1.8 2003/09/29 22:54:28 matt Exp $");
-#endif
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -120,7 +115,7 @@ in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
 #endif
 
 	if (nxt != 0) {
-#ifdef DIAGNOSTIC
+#ifdef DEBUG
 		if (off < sizeof(struct ipovly))
 			panic("in4_cksum: offset too short");
 		if (m->m_len < sizeof(struct ip))

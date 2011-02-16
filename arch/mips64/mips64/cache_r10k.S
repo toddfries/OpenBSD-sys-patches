@@ -39,7 +39,6 @@
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
-#include <machine/pte.h>
 
 #include "assym.h"
 
@@ -203,7 +202,7 @@ LEAF(Mips10k_SyncCache, 0)
  * Sync the instruction cache.
  */
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, t1			# Compute end address
 	PTR_SUBU t1, 128
 
@@ -222,7 +221,7 @@ LEAF(Mips10k_SyncCache, 0)
  * the selected cache and differs from Hit in that sense.
  */
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, t2			# End address
 	PTR_SUBU t1, t1, 128
 1:
@@ -262,7 +261,7 @@ END(Mips10k_SyncCache)
  *
  *	Invalidate the L1 instruction cache for at least range
  *	of addr to addr + len - 1.
- *	The address is reduced to a KSEG0 index to avoid TLB faults.
+ *	The address is reduced to a XKPHYS index to avoid TLB faults.
  *
  * Results:
  *	None.
@@ -301,7 +300,7 @@ END(Mips10k_InvalidateICache)
  *	void Mips10k_SyncDCachePage(struct cpu_info *ci, vaddr_t addr)
  *
  *	Sync the L1 data cache page for address addr.
- *	The address is reduced to a KSEG0 index to avoid TLB faults.
+ *	The address is reduced to a XKPHYS index to avoid TLB faults.
  *
  * Results:
  *	None.

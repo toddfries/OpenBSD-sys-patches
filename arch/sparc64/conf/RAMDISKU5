@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: RAMDISKU5,v 1.11 2006/06/21 19:28:08 jason Exp $
-=======
 #	$OpenBSD: RAMDISKU5,v 1.16 2009/06/24 11:38:40 deraadt Exp $
->>>>>>> origin/master
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -20,7 +16,6 @@ option		DST=0		# daylight saving time used by RTC
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-#option		DIAGNOSTIC	# internal consistency checks
 option		FFS		# UFS
 #option		NFSCLIENT	# Network File System client
 #option		CD9660		# ISO 9660 + Rock Ridge file system

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: apmvar.h,v 1.2 2009/02/26 17:19:47 oga Exp $	*/
->>>>>>> origin/master
 
 /*
  *  Copyright (c) 1995 John T. Kohl

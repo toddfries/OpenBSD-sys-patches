@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: consio2.S,v 1.2 2008/08/12 17:23:21 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: consio2.S,v 1.1 2002/02/24 01:04:24 matt Exp $ */
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.

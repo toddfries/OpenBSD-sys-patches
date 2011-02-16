@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zs_kgdb.c,v 1.1 2002/08/12 10:44:04 miod Exp $	*/
-=======
 /*	$OpenBSD: zs_kgdb.c,v 1.4 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: zs_kgdb.c,v 1.1 1997/10/18 00:00:51 gwr Exp $	*/
 
 /*-

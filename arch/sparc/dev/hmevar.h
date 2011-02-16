@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hmevar.h,v 1.11 2004/09/28 00:21:23 brad Exp $	*/
-=======
 /*	$OpenBSD: hmevar.h,v 1.14 2009/07/16 07:18:47 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

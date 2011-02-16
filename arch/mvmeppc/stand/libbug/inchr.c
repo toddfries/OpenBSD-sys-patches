@@ -1,4 +1,4 @@
-/*	$OpenBSD: inchr.c,v 1.1 2001/06/26 21:58:04 smurph Exp $ */
+/*	$OpenBSD: inchr.c,v 1.2 2004/01/24 21:12:38 miod Exp $ */
 
 /*
  * bug routines -- assumes that the necessary sections of memory

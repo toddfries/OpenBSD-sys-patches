@@ -70,48 +70,19 @@ END(savectx)
 
 LEAF(cpu_idle_enter, 0)
 	j	ra
-	PTR_S	zero, P_BACK(a0)	# for firewall checking
-
-2:
-	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
-	PTR_S	ra, CF_RA_OFFS(sp)
-	PANIC("remrunqueue empty")
-	jr	ra
 	nop
-END(remrunqueue)
+END(cpu_idle_enter)
 
 LEAF(cpu_idle_leave, 0)
 	j	ra
 	nop
-2:
-	break   BREAK_SOVER_VAL		# interrupt stuck!?
-	b	1b
-	nop
-	jr	ra			# DDB trace
-	nop
-	.globl e_idle
-e_idle:
-END(idle)
+END(cpu_idle_leave)
 
-/*
- * switch_exit(p)
- *
- * At exit of a process, do a cpu_switch for the last time.
- * All interrupts should be blocked at this point.
- */
-LEAF(switch_exit, 0)
-	mfc0	v0, COP_0_STATUS_REG
-	li	v1, ~SR_INT_ENAB
-	and	v0, v0, v1
-	mtc0	v0, COP_0_STATUS_REG
-	ITLBNOPFIX
-	LA	sp, idle_stack - FRAMESZ(CF_SZ)
-	jal	exit2
+LEAF(cpu_idle_cycle, 0)
+	j	ra
 	nop
+END(cpu_idle_cycle)
 
-	PTR_S	zero, curproc
-END(switch_exit)
-	/* FALL THROUGH TO cpu switch! */
 /*
  * cpu_switchto_asm(struct proc *oldproc, struct proc *newproc)
  */
@@ -119,6 +90,7 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	GET_CPU_INFO(t1, t3)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	REG_S	sp, PCB_CONTEXT+8*REGSZ(t3)	# save old sp
+
 	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
 	REG_S	ra, CF_RA_OFFS(sp)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
@@ -142,13 +114,10 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(t3)
 #endif
 
-	lw	t1, whichqs			# look for non-empty queue
-#	addu	t2, t2, 1
-#	sw	t2, cnt+V_SWTCH
-	beq	t1, zero, _idle			# if none, idle
-	nop
-sw1:
-	mfc0	v0, COP_0_STATUS_REG
+1:
+	/*
+	 * Disable interrupts
+	 */
 	li	v1, ~SR_INT_ENAB
 	and	v0, v0, v1
 	mtc0	v0, COP_0_STATUS_REG

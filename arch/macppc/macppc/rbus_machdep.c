@@ -107,3 +107,9 @@ macppc_cardbus_init(pci_chipset_tag_t pc, pcitag_t tag)
 		pci_conf_write(pc, tag, 0x8c, x);
 	}
 }
+
+void
+pccbb_attach_hook(struct device *parent, struct device *self,
+    struct pci_attach_args *pa)
+{
+}

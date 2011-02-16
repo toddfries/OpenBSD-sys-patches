@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: schizo.c,v 1.46 2007/02/23 21:52:01 kettenis Exp $	*/
-=======
 /*	$OpenBSD: schizo.c,v 1.61 2010/12/04 17:06:32 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -89,32 +85,23 @@ pci_chipset_tag_t schizo_alloc_chipset(struct schizo_pbm *, int,
 bus_space_tag_t schizo_alloc_mem_tag(struct schizo_pbm *);
 bus_space_tag_t schizo_alloc_io_tag(struct schizo_pbm *);
 bus_space_tag_t schizo_alloc_config_tag(struct schizo_pbm *);
-bus_space_tag_t _schizo_alloc_bus_tag(struct schizo_pbm *, const char *,
+bus_space_tag_t schizo_alloc_bus_tag(struct schizo_pbm *, const char *,
     int, int, int);
 bus_dma_tag_t schizo_alloc_dma_tag(struct schizo_pbm *);
 
-<<<<<<< HEAD
-paddr_t schizo_bus_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
-=======
 int schizo_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t schizo_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void schizo_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
 
->>>>>>> origin/master
 int schizo_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
-int _schizo_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
+int schizo_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
     bus_size_t, int, bus_space_handle_t *);
-<<<<<<< HEAD
-void *_schizo_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
-=======
 paddr_t schizo_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t,
     int, int);
 bus_addr_t schizo_bus_addr(bus_space_tag_t, bus_space_tag_t,
     bus_space_handle_t);
 void *schizo_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
->>>>>>> origin/master
     int (*)(void *), void *, const char *);
-paddr_t _schizo_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 int schizo_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
@@ -192,10 +179,9 @@ schizo_init(struct schizo_softc *sc, int busa)
 	int *busranges = NULL, nranges;
 	u_int64_t match, reg;
 
-	pbm = (struct schizo_pbm *)malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT);
+	pbm = malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (pbm == NULL)
 		panic("schizo: can't alloc schizo pbm");
-	bzero(pbm, sizeof(*pbm));
 
 	pbm->sp_sc = sc;
 	pbm->sp_bus_a = busa;
@@ -253,12 +239,9 @@ schizo_init(struct schizo_softc *sc, int busa)
 	pba.pba_dmat = pbm->sp_dmat;
 	pba.pba_memt = pbm->sp_memt;
 	pba.pba_iot = pbm->sp_iot;
-<<<<<<< HEAD
-=======
 	pba.pba_pc->conf_size = schizo_conf_size;
 	pba.pba_pc->conf_read = schizo_conf_read;
 	pba.pba_pc->conf_write = schizo_conf_write;
->>>>>>> origin/master
 	pba.pba_pc->intr_map = schizo_intr_map;
 
 	free(busranges, M_DEVBUF);
@@ -347,7 +330,7 @@ schizo_pci_error(void *vpbm)
 	printf("PCIAFSR=%lb\n", afsr, SCZ_PCIAFSR_BITS);
 	printf("PCIAFAR=%lx\n", afar);
 	printf("PCICTRL=%lb\n", ctrl, SCZ_PCICTRL_BITS);
-	printf("PCICSR=%lb\n", csr, PCI_COMMAND_STATUS_BITS);
+	printf("PCICSR=%b\n", csr, PCI_COMMAND_STATUS_BITS);
 
 	if (ctrl & SCZ_PCICTRL_MMU_ERR) {
 		u_int32_t ctrl, tfar;
@@ -391,6 +374,10 @@ schizo_safari_error(void *vsc)
 	printf("%s: safari error\n", sc->sc_dv.dv_xname);
 
 	printf("ERRLOG=%lx\n", schizo_read(sc, SCZ_SAFARI_ERRLOG));
+	printf("UE_AFSR=%lx\n", schizo_read(sc, SCZ_UE_AFSR));
+	printf("UE_AFAR=%lx\n", schizo_read(sc, SCZ_UE_AFAR));
+	printf("CE_AFSR=%lx\n", schizo_read(sc, SCZ_CE_AFSR));
+	printf("CE_AFAR=%lx\n", schizo_read(sc, SCZ_CE_AFAR));
 
 	panic("%s: fatal", sc->sc_dv.dv_xname);
 	return (1);
@@ -475,8 +462,6 @@ schizo_print(void *aux, const char *p)
 	return (QUIET);
 }
 
-<<<<<<< HEAD
-=======
 int
 schizo_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
 {
@@ -497,7 +482,6 @@ schizo_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	    PCITAG_OFFSET(tag) + reg, data);
 }
 
->>>>>>> origin/master
 /*
  * Bus-specific interrupt mapping
  */
@@ -569,7 +553,7 @@ schizo_set_intr(struct schizo_softc *sc, struct schizo_pbm *pbm, int ipl,
 bus_space_tag_t
 schizo_alloc_mem_tag(struct schizo_pbm *sp)
 {
-	return (_schizo_alloc_bus_tag(sp, "mem",
+	return (schizo_alloc_bus_tag(sp, "mem",
 	    0x02,       /* 32-bit mem space (where's the #define???) */
 	    ASI_PRIMARY, ASI_PRIMARY_LITTLE));
 }
@@ -577,7 +561,7 @@ schizo_alloc_mem_tag(struct schizo_pbm *sp)
 bus_space_tag_t
 schizo_alloc_io_tag(struct schizo_pbm *sp)
 {
-	return (_schizo_alloc_bus_tag(sp, "io",
+	return (schizo_alloc_bus_tag(sp, "io",
 	    0x01,       /* IO space (where's the #define???) */
 	    ASI_PHYS_NON_CACHED_LITTLE, ASI_PHYS_NON_CACHED));
 }
@@ -585,23 +569,22 @@ schizo_alloc_io_tag(struct schizo_pbm *sp)
 bus_space_tag_t
 schizo_alloc_config_tag(struct schizo_pbm *sp)
 {
-	return (_schizo_alloc_bus_tag(sp, "cfg",
+	return (schizo_alloc_bus_tag(sp, "cfg",
 	    0x00,       /* Config space (where's the #define???) */
 	    ASI_PHYS_NON_CACHED_LITTLE, ASI_PHYS_NON_CACHED));
 }
 
 bus_space_tag_t
-_schizo_alloc_bus_tag(struct schizo_pbm *pbm, const char *name, int ss,
+schizo_alloc_bus_tag(struct schizo_pbm *pbm, const char *name, int ss,
     int asi, int sasi)
 {
 	struct schizo_softc *sc = pbm->sp_sc;
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("schizo: could not allocate bus tag");
 
-	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s-pbm_%s(%d/%2.2x)",
 	    sc->sc_dv.dv_xname, name, ss, asi);
 
@@ -610,16 +593,10 @@ _schizo_alloc_bus_tag(struct schizo_pbm *pbm, const char *name, int ss,
 	bt->default_type = ss;
 	bt->asi = asi;
 	bt->sasi = sasi;
-<<<<<<< HEAD
-	bt->sparc_bus_map = _schizo_bus_map;
-	bt->sparc_bus_mmap = _schizo_bus_mmap;
-	bt->sparc_intr_establish = _schizo_intr_establish;
-=======
 	bt->sparc_bus_map = schizo_bus_map;
 	bt->sparc_bus_mmap = schizo_bus_mmap;
 	bt->sparc_bus_addr = schizo_bus_addr;
 	bt->sparc_intr_establish = schizo_intr_establish;
->>>>>>> origin/master
 	return (bt);
 }
 
@@ -629,12 +606,10 @@ schizo_alloc_dma_tag(struct schizo_pbm *pbm)
 	struct schizo_softc *sc = pbm->sp_sc;
 	bus_dma_tag_t dt, pdt = sc->sc_dmat;
 
-	dt = (bus_dma_tag_t)malloc(sizeof(struct sparc_bus_dma_tag),
-	    M_DEVBUF, M_NOWAIT);
+	dt = malloc(sizeof(*dt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (dt == NULL)
 		panic("schizo: could not alloc dma tag");
 
-	bzero(dt, sizeof(*dt));
 	dt->_cookie = pbm;
 	dt->_parent = pdt;
 	dt->_dmamap_create	= schizo_dmamap_create;
@@ -655,9 +630,9 @@ schizo_alloc_chipset(struct schizo_pbm *pbm, int node, pci_chipset_tag_t pc)
 
 	npc = malloc(sizeof *npc, M_DEVBUF, M_NOWAIT);
 	if (npc == NULL)
-		panic("could not allocate pci_chipset_tag_t");
+		panic("schizo: could not allocate pci_chipset_tag_t");
 	memcpy(npc, pc, sizeof *pc);
-	npc->cookie = pbm; 
+	npc->cookie = pbm;
 	npc->rootnode = node;
 	return (npc);
 }
@@ -674,13 +649,13 @@ schizo_dmamap_create(bus_dma_tag_t t, bus_dma_tag_t t0, bus_size_t size,
 }
 
 int
-_schizo_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
+schizo_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
     bus_size_t size, int flags, bus_space_handle_t *hp)
 {
 	struct schizo_pbm *pbm = t->cookie;
 	int i, ss;
 
-	DPRINTF(SDB_BUSMAP, ("_schizo_bus_map: type %d off %qx sz %qx flags %d",
+	DPRINTF(SDB_BUSMAP, ("schizo_bus_map: type %d off %qx sz %qx flags %d",
 	    t->default_type,
 	    (unsigned long long)offset,
 	    (unsigned long long)size,
@@ -690,7 +665,7 @@ _schizo_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
 	DPRINTF(SDB_BUSMAP, (" cspace %d", ss));
 
 	if (t->parent == 0 || t->parent->sparc_bus_map == 0) {
-		printf("\n_schizo_bus_map: invalid parent");
+		printf("\nschizo_bus_map: invalid parent");
 		return (EINVAL);
 	}
 
@@ -715,7 +690,7 @@ _schizo_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
 }
 
 paddr_t
-_schizo_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
+schizo_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
     off_t off, int prot, int flags)
 {
 	bus_addr_t offset = paddr;
@@ -724,11 +699,11 @@ _schizo_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 
 	ss = t->default_type;
 
-	DPRINTF(SDB_BUSMAP, ("_schizo_bus_mmap: prot %d flags %d pa %qx\n",
+	DPRINTF(SDB_BUSMAP, ("schizo_bus_mmap: prot %d flags %d pa %qx\n",
 	    prot, flags, (unsigned long long)paddr));
 
 	if (t->parent == 0 || t->parent->sparc_bus_mmap == 0) {
-		printf("\n_schizo_bus_mmap: invalid parent");
+		printf("\nschizo_bus_mmap: invalid parent");
 		return (-1);
 	}
 
@@ -778,7 +753,7 @@ schizo_bus_addr(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h)
 }
 
 void *
-_schizo_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
+schizo_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
     int level, int flags, int (*handler)(void *), void *arg, const char *what)
 {
 	struct schizo_pbm *pbm = t->cookie;

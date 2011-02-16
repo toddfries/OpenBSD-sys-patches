@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: devopen.c,v 1.2 2000/10/04 04:09:01 bjc Exp $ */
-=======
 /*	$OpenBSD: devopen.c,v 1.4 2008/08/26 18:36:21 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: devopen.c,v 1.10 2002/05/24 21:40:59 ragge Exp $ */
 /*
  * Copyright (c) 1997 Ludd, University of Lule}, Sweden.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: beeper.c,v 1.9 2003/12/16 15:08:50 jason Exp $	*/
+/*	$OpenBSD: beeper.c,v 1.10 2005/12/20 16:50:33 martin Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

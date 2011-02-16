@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mscp_disk.c,v 1.18 2007/02/15 00:53:26 krw Exp $	*/
-=======
 /*	$OpenBSD: mscp_disk.c,v 1.32 2010/09/22 06:40:25 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mscp_disk.c,v 1.30 2001/11/13 07:38:28 lukem Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -115,8 +111,8 @@ void	rastrategy(struct buf *);
 int	raread(dev_t, struct uio *);
 int	rawrite(dev_t, struct uio *);
 int	raioctl(dev_t, int, caddr_t, int, struct proc *);
-int	radump(dev_t, daddr_t, caddr_t, size_t);
-int	rasize(dev_t);
+int	radump(dev_t, daddr64_t, caddr_t, size_t);
+daddr64_t	rasize(dev_t);
 int	ra_putonline(struct ra_softc *);
 
 struct	cfattach ra_ca = {
@@ -166,21 +162,15 @@ ra_putonline(ra)
 
 	ra->ra_state = DK_RDLABEL;
 	printf("%s", ra->ra_dev.dv_xname);
-<<<<<<< HEAD
-	if ((msg = readdisklabel(MAKEDISKDEV(RAMAJOR, ra->ra_dev.dv_unit,
-	    RAW_PART), rastrategy, dl, NULL, 0)) != NULL) {
-		/*printf(": %s", msg);*/
-=======
 	if ((readdisklabel(MAKEDISKDEV(RAMAJOR, ra->ra_dev.dv_unit,
 	    RAW_PART), rastrategy, dl, 0)) != 0) {
 		/* EIO and others */
->>>>>>> origin/master
 	} else {
 		ra->ra_havelabel = 1;
 		ra->ra_state = DK_OPEN;
 	}
 
-	printf(": size %d sectors\n", dl->d_secperunit);
+	printf(": size %lld sectors\n", DL_GETDSIZE(dl));
 
 	return MSCP_DONE;
 }
@@ -333,7 +323,7 @@ rastrategy(bp)
 	 * within the boundaries of the partition.
 	 */
 	if (bounds_check_with_label(bp, ra->ra_disk.dk_label,
-	    ra->ra_disk.dk_cpulabel, ra->ra_wlabel) <= 0)
+	    ra->ra_wlabel) <= 0)
 		goto done;
 
 	/* Make some statistics... /bqt */
@@ -405,10 +395,10 @@ raioctl(dev, cmd, data, flag, p)
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
 		else {
-			error = setdisklabel(lp, tp, 0, 0);
+			error = setdisklabel(lp, tp, 0);
 			if (error == 0 && cmd == DIOCWDINFO) {
 				ra->ra_wlabel = 1;
-				error = writedisklabel(dev, rastrategy, lp,0);
+				error = writedisklabel(dev, rastrategy, lp);
 				ra->ra_wlabel = 0;
 			}
 		}
@@ -432,7 +422,7 @@ raioctl(dev, cmd, data, flag, p)
 int
 radump(dev, blkno, va, size)
 	dev_t	dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t	size;
 {
@@ -442,7 +432,7 @@ radump(dev, blkno, va, size)
 /*
  * Return the size of a partition, if known, or -1 if not.
  */
-int
+daddr64_t
 rasize(dev)
 	dev_t dev;
 {
@@ -458,7 +448,7 @@ rasize(dev)
 		if (ra_putonline(ra) == MSCP_FAILED)
 			return -1;
 
-	return ra->ra_disk.dk_label->d_partitions[DISKPART(dev)].p_size *
+	return DL_GETPSIZE(&ra->ra_disk.dk_label->d_partitions[DISKPART(dev)]) *
 	    (ra->ra_disk.dk_label->d_secsize / DEV_BSIZE);
 }
 
@@ -473,8 +463,8 @@ void	rxstrategy(struct buf *);
 int	rxread(dev_t, struct uio *);
 int	rxwrite(dev_t, struct uio *);
 int	rxioctl(dev_t, int, caddr_t, int, struct proc *);
-int	rxdump(dev_t, daddr_t, caddr_t, size_t);
-int	rxsize(dev_t);
+int	rxdump(dev_t, daddr64_t, caddr_t, size_t);
+daddr64_t	rxsize(dev_t);
 
 struct	cfattach rx_ca = {
 	sizeof(struct rx_softc), (cfmatch_t)rxmatch, rxattach
@@ -662,7 +652,7 @@ rxstrategy(bp)
 	 * Determine the size of the transfer, and make sure it is
 	 * within the boundaries of the partition.
 	 */
-	if (bp->b_blkno >= rx->ra_disk.dk_label->d_secperunit) {
+	if (bp->b_blkno >= DL_GETDSIZE(rx->ra_disk.dk_label)) {
 		bp->b_resid = bp->b_bcount;
 		goto done;
 	}
@@ -744,7 +734,7 @@ rxioctl(dev, cmd, data, flag, p)
 int
 rxdump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -753,7 +743,7 @@ rxdump(dev, blkno, va, size)
 	return ENXIO;
 }
 
-int
+daddr64_t
 rxsize(dev)
 	dev_t dev;
 {
@@ -855,10 +845,10 @@ rronline(usc, mp)
 	rx->ra_state = DK_OPEN;
  
 	dl = rx->ra_disk.dk_label;
-	dl->d_secperunit = (daddr_t)mp->mscp_onle.onle_unitsize;
+	DL_SETDSIZE(dl, mp->mscp_onle.onle_unitsize);
 
 	if (dl->d_secpercyl) {
-		dl->d_ncylinders = dl->d_secperunit/dl->d_secpercyl;
+		dl->d_ncylinders = DL_GETDSIZE(dl) / dl->d_secpercyl;
 		dl->d_type = DTYPE_MSCP;
 	} else {
 		dl->d_type = DTYPE_FLOPPY;
@@ -895,18 +885,11 @@ rrmakelabel(dl, type)
 	dl->d_typename[p++] = n + '0';
 	dl->d_typename[p] = 0;
 	dl->d_npartitions = MAXPARTITIONS;
-<<<<<<< HEAD
-	dl->d_partitions[0].p_size = dl->d_partitions[2].p_size =
-	    dl->d_secperunit;
-	dl->d_partitions[0].p_offset = dl->d_partitions[2].p_offset = 0;
-	dl->d_interleave = dl->d_headswitch = 1;
-=======
 	DL_SETPSIZE(&dl->d_partitions[0], DL_GETDSIZE(dl));
 	DL_SETPSIZE(&dl->d_partitions[2], DL_GETDSIZE(dl));
 	DL_SETPOFFSET(&dl->d_partitions[0], 0);
 	DL_SETPOFFSET(&dl->d_partitions[2], 0);
 	dl->d_version = 1;
->>>>>>> origin/master
 	dl->d_magic = dl->d_magic2 = DISKMAGIC;
 	dl->d_checksum = dkcksum(dl);
 }
@@ -1004,7 +987,7 @@ rrfillin(bp, mp)
 #endif
 	lp = rx->ra_disk.dk_label;
 
-	mp->mscp_seq.seq_lbn = lp->d_partitions[part].p_offset + bp->b_blkno;
+	mp->mscp_seq.seq_lbn = DL_GETPOFFSET(&lp->d_partitions[part]) + bp->b_blkno;
 	mp->mscp_unit = rx->ra_hwunit;
 	mp->mscp_seq.seq_bytecount = bp->b_bcount;
 }

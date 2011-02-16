@@ -78,11 +78,10 @@ _dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	 */
 	mapsize = sizeof(struct powerpc_bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
-	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+	if ((mapstore = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL)
 		return (ENOMEM);
 
-	bzero(mapstore, mapsize);
 	map = (struct powerpc_bus_dmamap *)mapstore;
 	map->_dm_size = size;
 	map->_dm_segcnt = nsegments;
@@ -379,8 +378,36 @@ void
 _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 bus_size_t len, int op)
 {
+	int i;
+	bus_size_t minlen, wlen;
+	bus_addr_t pa, addr;
+	struct vm_page *pg;
 
-	/* Nothing to do here. */
+	for (i = 0; i < map->dm_nsegs && len != 0; i++) {
+		/* Find the beginning segment. */
+		if (offset >= map->dm_segs[i].ds_len) {
+			offset -= map->dm_segs[i].ds_len;
+			continue;
+		}
+
+		minlen = len < map->dm_segs[i].ds_len - offset ?
+		    len : map->dm_segs[i].ds_len - offset;
+
+		addr = map->dm_segs[i].ds_addr + offset;
+
+		switch (op) {
+		case BUS_DMASYNC_POSTWRITE:
+			for (pa = trunc_page(addr), wlen = 0;
+			    pa < round_page(addr + minlen);
+			    pa += PAGE_SIZE) {
+				pg = PHYS_TO_VM_PAGE(pa);
+				if (pg != NULL)
+					atomic_clearbits_int(&pg->pg_flags,
+					    PG_PMAP_EXE);
+			}
+		}
+		
+	}
 }
 
 /*
@@ -489,7 +516,7 @@ _dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 }
 
 /*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common function for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t

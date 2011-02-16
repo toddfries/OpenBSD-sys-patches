@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: idprom.h,v 1.2 1997/08/08 08:26:22 downsj Exp $	*/
 /*	$NetBSD: idprom.h,v 1.5 1997/03/10 22:47:52 pk Exp $ */
 
 /*

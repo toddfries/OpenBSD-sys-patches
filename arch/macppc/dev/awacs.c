@@ -122,10 +122,6 @@ void awacs_write_codec(struct awacs_softc *, int);
 void awacs_set_speaker_volume(struct awacs_softc *, int, int);
 void awacs_set_ext_volume(struct awacs_softc *, int, int);
 void awacs_set_rate(struct awacs_softc *, struct audio_params *);
-void awacs_mono16_to_stereo16(void *, u_char *, int);
-void awacs_swap_bytes_mono16_to_stereo16(void *, u_char *, int);
-void awacs_cvt_ulinear_mono_16_be(void *, u_char *, int);
-void awacs_cvt_ulinear_mono_16_le(void *, u_char *, int);
 
 struct cfattach awacs_ca = {
 	sizeof(struct awacs_softc), awacs_match, awacs_attach
@@ -161,7 +157,8 @@ struct audio_hw_if awacs_hw_if = {
 	awacs_mappage,
 	awacs_get_props,
 	awacs_trigger_output,
-	awacs_trigger_input
+	awacs_trigger_input,
+	NULL
 };
 
 struct audio_device awacs_device = {
@@ -300,11 +297,11 @@ awacs_attach(struct device *parent, struct device *self, void *aux)
 		cirq_type = oirq_type = iirq_type = IST_LEVEL;
 	}
 	mac_intr_establish(parent, cirq, cirq_type, IPL_AUDIO, awacs_intr,
-	    sc, "awacs");
+	    sc, sc->sc_dev.dv_xname);
 	mac_intr_establish(parent, oirq, oirq_type, IPL_AUDIO, awacs_tx_intr,
-	    sc, "awacs/tx");
+	    sc, sc->sc_dev.dv_xname);
 	mac_intr_establish(parent, iirq, iirq_type, IPL_AUDIO, awacs_rx_intr,
-	    sc, "awacs/rx");
+	    sc, sc->sc_dev.dv_xname);
 
 	printf(": irq %d,%d,%d",
 		cirq, oirq, iirq);
@@ -556,43 +553,6 @@ awacs_query_encoding(void *h, struct audio_encoding *ae)
 	ae->msb = 1;
 
 	return (0);
-}
-
-void
-awacs_mono16_to_stereo16(void *v, u_char *p, int cc)
-{
-	int x;
-	int16_t *src, *dst;
-
-	src = (void *)(p + cc);
-	dst = (void *)(p + cc * 2);
-	while (cc > 0) {
-		x = *--src;
-		*--dst = x;
-		*--dst = x;
-		cc -= 2;
-	}
-}
-
-void
-awacs_swap_bytes_mono16_to_stereo16(void *v, u_char *p, int cc)
-{
-	swap_bytes(v, p, cc);
-	awacs_mono16_to_stereo16(v, p, cc);
-}
-
-void
-awacs_cvt_ulinear_mono_16_le(void *v, u_char *p, int cc)
-{
-	swap_bytes_change_sign16_be(v, p, cc);
-	awacs_mono16_to_stereo16(v, p, cc);
-}
-
-void
-awacs_cvt_ulinear_mono_16_be(void *v, u_char *p, int cc)
-{
-	change_sign16_be(v, p, cc);
-	awacs_mono16_to_stereo16(v, p, cc);
 }
 
 int
@@ -994,10 +954,9 @@ awacs_allocm(void *h, int dir, size_t size, int type, int flags)
 	if (size > AWACS_DMALIST_MAX * AWACS_DMASEG_MAX)
 		return (NULL);
 
-	p = malloc(sizeof(*p), type, flags);
+	p = malloc(sizeof(*p), type, flags | M_ZERO);
 	if (!p)
 		return (NULL);
-	bzero(p, sizeof(*p));
 
 	/* convert to the bus.h style, not used otherwise */
 	if (flags & M_NOWAIT)

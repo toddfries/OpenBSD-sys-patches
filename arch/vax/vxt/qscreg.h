@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: qscreg.h,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

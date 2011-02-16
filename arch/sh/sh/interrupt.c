@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: interrupt.c,v 1.3 2006/10/23 19:44:54 drahn Exp $	*/
-=======
 /*	$OpenBSD: interrupt.c,v 1.12 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: interrupt.c,v 1.18 2006/01/25 00:02:57 uwe Exp $	*/
 
 /*-
@@ -43,6 +39,7 @@
 #include <sh/trap.h>
 #include <sh/intcreg.h>
 #include <sh/tmureg.h>
+#include <machine/atomic.h>
 #include <machine/intr.h>
 
 void intc_intr_priority(int, int);
@@ -130,14 +127,10 @@ intc_intr_establish(int evtcode, int trigger, int level,
 	ih->ih_arg	= ih_arg;
 	ih->ih_level	= level << 4;	/* convert to SR.IMASK format. */
 	ih->ih_evtcode	= evtcode;
-<<<<<<< HEAD
-	ih->ih_name = (char *)name; /* XXX strdup? */
-=======
 	ih->ih_irq	= evtcode >> 5;
 	ih->ih_name	= name;
 	if (name)
 		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
->>>>>>> origin/master
 
 	/* Map interrupt handler */
 	EVTCODE_TO_IH_INDEX(evtcode) = ih->ih_idx;
@@ -162,6 +155,8 @@ intc_intr_disestablish(void *arg)
 	/* Unmap interrupt handler */
 	EVTCODE_TO_IH_INDEX(evtcode) = 0;
 
+	if (ih->ih_name)
+		evcount_detach(&ih->ih_count);
 	intc_free_ih(ih);
 }
 
@@ -578,9 +573,6 @@ intpri_intr_disable(int evtcode)
 void
 softintr_init(void)
 {
-#if 0
-	static const char *softintr_names[] = IPL_SOFTNAMES;
-#endif
 	struct sh_soft_intr *asi;
 	int i;
 
@@ -589,14 +581,6 @@ softintr_init(void)
 		TAILQ_INIT(&asi->softintr_q);
 		mtx_init(&asi->softintr_lock, IPL_HIGH);
 		asi->softintr_ipl = IPL_SOFT + i;
-<<<<<<< HEAD
-		simple_lock_init(&asi->softintr_slock);
-#if 0
-		evcnt_attach_dynamic(&asi->softintr_evcnt, EVCNT_TYPE_INTR,
-		    NULL, "soft", softintr_names[i]);
-#endif
-=======
->>>>>>> origin/master
 	}
 
 	intc_intr_establish(SH_INTEVT_TMU1_TUNI1, IST_LEVEL, IPL_SOFT,
@@ -613,12 +597,6 @@ softintr_dispatch(int ipl)
 
 	asi = &sh_soft_intrs[ipl - IPL_SOFT];
 
-<<<<<<< HEAD
-	if (TAILQ_FIRST(&asi->softintr_q) != NULL)
-		asi->softintr_evcnt.ev_count++;
-
-	while ((sih = TAILQ_FIRST(&asi->softintr_q)) != NULL) {
-=======
 	for (;;) {
 		mtx_enter(&asi->softintr_lock);
 		sih = TAILQ_FIRST(&asi->softintr_q);
@@ -626,7 +604,6 @@ softintr_dispatch(int ipl)
 			mtx_leave(&asi->softintr_lock);
 			break;
 		}
->>>>>>> origin/master
 		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
 		sih->sih_pending = 0;
 
@@ -690,23 +667,6 @@ softintr_disestablish(void *arg)
 /* Schedule a software interrupt. */
 void softintr_schedule(void *arg)
 {
-<<<<<<< HEAD
-#define	DONETISR(bit, fn)						\
-	do {								\
-		if (n & (1 << bit))					\
-			fn();						\
-	} while (/*CONSTCOND*/0)
-
-	int s, n;
-
-	s = splnet();
-	n = netisr;
-	netisr = 0;
-	splx(s);
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-=======
 	struct sh_soft_intrhand *sih = arg;
 	struct sh_soft_intr *si = sih->sih_intrhead;
 
@@ -717,7 +677,6 @@ void softintr_schedule(void *arg)
 		setsoft(si->softintr_ipl);
 	}
 	mtx_leave(&si->softintr_lock);
->>>>>>> origin/master
 }
 
 /*

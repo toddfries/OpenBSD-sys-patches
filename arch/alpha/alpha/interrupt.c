@@ -471,7 +471,7 @@ softintr_init()
 	struct alpha_soft_intr *asi;
 	int i;
 
-	for (i = 0; i < IPL_NSOFT; i++) {
+	for (i = 0; i < SI_NSOFT; i++) {
 		asi = &alpha_soft_intrs[i];
 		TAILQ_INIT(&asi->softintr_q);
 		mtx_init(&asi->softintr_mtx, IPL_HIGH);
@@ -492,9 +492,10 @@ softintr_dispatch()
 	u_int64_t n, i;
 
 	while ((n = atomic_loadlatch_ulong(&ssir, 0)) != 0) {
-		for (i = 0; i < IPL_NSOFT; i++) {
+		for (i = 0; i < SI_NSOFT; i++) {
 			if ((n & (1 << i)) == 0)
 				continue;
+	
 			asi = &alpha_soft_intrs[i];
 
 			for (;;) {
@@ -514,10 +515,33 @@ softintr_dispatch()
 
 				(*sih->sih_fn)(sih->sih_arg);
 			}
-
-			simple_unlock(&asi->softintr_slock);
 		}
 	}
+}
+
+static int
+ipl2si(int ipl)
+{
+	int si;
+
+	switch (ipl) {
+	case IPL_TTY:			/* XXX */
+	case IPL_SOFTSERIAL:
+		si = SI_SOFTSERIAL;
+		break;
+	case IPL_SOFTNET:
+		si = SI_SOFTNET;
+		break;
+	case IPL_SOFTCLOCK:
+		si = SI_SOFTCLOCK;
+		break;
+	case IPL_SOFT:
+		si = SI_SOFT;
+		break;
+	default:
+		panic("ipl2si: %d", ipl);
+	}
+	return si;
 }
 
 /*
@@ -530,12 +554,10 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 {
 	struct alpha_soft_intr *asi;
 	struct alpha_soft_intrhand *sih;
-	int s;
+	int si;
 
-	if (__predict_false(ipl >= IPL_NSOFT || ipl < 0))
-		panic("softintr_establish");
-
-	asi = &alpha_soft_intrs[ipl];
+	si = ipl2si(ipl);
+	asi = &alpha_soft_intrs[si];
 
 	sih = malloc(sizeof(*sih), M_DEVBUF, M_NOWAIT);
 	if (__predict_true(sih != NULL)) {
@@ -543,11 +565,6 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 		sih->sih_fn = func;
 		sih->sih_arg = arg;
 		sih->sih_pending = 0;
-		s = splsoft();
-		simple_lock(&asi->softintr_slock);
-		LIST_INSERT_HEAD(&asi->softintr_q, sih, sih_q);
-		simple_unlock(&asi->softintr_slock);
-		splx(s);
 	}
 	return (sih);
 }

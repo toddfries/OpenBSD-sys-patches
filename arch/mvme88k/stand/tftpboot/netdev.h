@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.3 2002/03/14 01:26:41 millert Exp $	*/
+/*	$OpenBSD: netdev.h,v 1.1 2004/01/26 19:48:34 miod Exp $	*/
 
 int net_open(struct open_file *, ...);
 int net_close(struct open_file *);

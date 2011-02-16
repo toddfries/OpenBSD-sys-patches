@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qd.c,v 1.11 2006/01/01 11:59:39 miod Exp $	*/
-=======
 /*	$OpenBSD: qd.c,v 1.20 2010/09/22 01:18:57 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qd.c,v 1.17 2000/01/24 02:40:29 matt Exp $	*/
 
 /*-
@@ -442,7 +438,7 @@ qdcnprobe(cndev)
 	for (i = 0; i < nchrdev; i++)
 		if (cdevsw[i].d_open == qdopen)  {
 			      cndev->cn_dev = makedev(i,0);
-			      cndev->cn_pri = CN_INTERNAL;
+			      cndev->cn_pri = CN_MIDPRI;
 			      return;
 		 }
 	return;

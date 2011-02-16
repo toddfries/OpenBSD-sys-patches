@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ofdev.h,v 1.2 2001/08/20 19:55:33 jason Exp $	*/
-=======
 /*	$OpenBSD: ofdev.h,v 1.4 2009/11/04 12:03:57 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ofdev.h,v 1.1 2000/08/20 14:58:41 mrg Exp $	*/
 
 /*

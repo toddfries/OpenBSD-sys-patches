@@ -75,6 +75,8 @@
 
 #include <machine/pte.h>
 
+#ifdef _KERNEL
+
 /*
  * Machine-dependent virtual memory state.
  *
@@ -154,8 +156,6 @@ struct pv_head {
 	"l3pt",								\
 }
 
-#ifdef _KERNEL
-
 #ifndef _LKM
 #if defined(NEW_SCC_DRIVER)
 #if defined(DEC_KN8AE)
@@ -186,6 +186,7 @@ void	pmap_tlb_shootdown_q_drain(u_long, boolean_t);
 
 #define pmap_proc_iflush(p, va, len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 extern	pt_entry_t *VPT;		/* Virtual Page Table */
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ts.c,v 1.15 2003/11/08 19:17:28 jmc Exp $ */
-=======
 /*	$OpenBSD: ts.c,v 1.20 2008/06/12 06:58:37 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ts.c,v 1.11 1997/01/11 11:34:43 ragge Exp $ */
 
 /*-
@@ -197,7 +193,7 @@ int	tsclose(dev_t, int, int, struct proc *);
 int	tsioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int	tsread(dev_t, struct uio *);
 int	tswrite(dev_t, struct uio *);
-int	tsdump(dev_t, daddr_t, caddr_t, size_t);
+int	tsdump(dev_t, daddr64_t, caddr_t, size_t);
 
 struct	cfdriver ts_cd = {
 	NULL, "ts", DV_DULL
@@ -1346,7 +1342,7 @@ tswrite (dev, uio)
 int
 tsdump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {

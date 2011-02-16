@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uperf_ebus.c,v 1.3 2003/02/17 01:29:20 henric Exp $	*/
-=======
 /*	$OpenBSD: uperf_ebus.c,v 1.5 2008/12/15 22:33:06 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

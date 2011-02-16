@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: creatorreg.h,v 1.7 2003/06/02 20:02:49 jason Exp $	*/
-=======
 /*	$OpenBSD: creatorreg.h,v 1.9 2009/11/30 23:32:57 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

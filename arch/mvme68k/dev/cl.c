@@ -948,7 +948,7 @@ clcnprobe(cp)
 		if (cdevsw[maj].d_open == clopen)
 			break;
 	cp->cn_dev = makedev (maj, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void

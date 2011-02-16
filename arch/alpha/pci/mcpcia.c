@@ -172,8 +172,7 @@ mcpciaattach(parent, self, aux)
 	    ma->ma_gid == mcpcia_console_configuration.cc_gid)
 		ccp = &mcpcia_console_configuration;
 	else {
-		ccp = malloc(sizeof(struct mcpcia_config), M_DEVBUF, M_WAITOK);
-		memset(ccp, 0, sizeof(struct mcpcia_config));
+		ccp = malloc(sizeof(*ccp), M_DEVBUF, M_WAITOK | M_ZERO);
 
 		ccp->cc_mid = ma->ma_mid;
 		ccp->cc_gid = ma->ma_gid;

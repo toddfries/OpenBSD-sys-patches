@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: unixdev.h,v 1.1 2005/05/24 20:38:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

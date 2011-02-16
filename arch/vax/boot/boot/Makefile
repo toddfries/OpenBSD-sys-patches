@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2003/08/10 15:51:18 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.8 2008/03/30 19:54:05 miod Exp $
 #	$NetBSD: Makefile,v 1.27 2002/04/07 07:00:25 matt Exp $
 
 S!=	cd ${.CURDIR}/../../../../; pwd
@@ -7,7 +7,6 @@ NOMAN=	# defined
 .include <bsd.own.mk>
 
 PROG=	boot
-WARNS?=	1
 DEVS=	hp.c ctu.c ra.c mfm.c if_qe.c if_le.c if_ze.c if_de.c if_ni.c
 SRCS=	srt0.S boot.c devopen.c conf.c autoconf.c netio.c rom.c romread.S \
 	urem.s udiv.s consio.c consio2.S str.S ${DEVS} findcpu.c
@@ -20,9 +19,8 @@ CPPFLAGS+=-DSUPPORT_BOOTPARAMS -DSUPPORT_DHCP -D_STANDALONE \
 
 BINDIR=/usr/mdec
 
-#SA_AS= library
-#SAMISCMAKEFLAGS=SA_USE_CREAD=yes SA_INCLUDE_NET=yes SA_USE_LOADFILE=yes
 SA_ZLIB=	yes
+USE_LOADFILE=	yes
 SAREL=
 .include "${S}/lib/libsa/Makefile.inc"
 LIBSA=	${SALIB}
@@ -32,12 +30,7 @@ CFLAGS+=-I${S}/lib/libsa
 .include "${S}/lib/libz/Makefile.inc"
 LIBZ=	${ZLIB}
 
-#KERN_AS=library
-#.include "${S}/lib/libkern/Makefile.inc"
-#LIBKERN=${KERNLIB}
-
-# Only need these from libkern
-.PATH:	${S}/lib/libkern
+.PATH:	${S}/lib/libkern/arch/vax ${S}/lib/libkern
 SRCS+= moddi3.c negdi2.c
 
 .if ${MACHINE} == "vax"
@@ -48,17 +41,14 @@ machine-links:
 	@rm -f ${MACHINE_ARCH} && ln -s ${S}/arch/${MACHINE_ARCH}/include ${MACHINE_ARCH}
 .NOPATH: machine ${MACHINE_ARCH}
 CLEANFILES+= machine ${MACHINE_ARCH}
+CPPFLAGS+=	-I${.OBJDIR}
 .endif
 
-#.if ${OBJECT_FMT} == "ELF"
-#START=start
-#.else
 START=nisse
-#.endif
 
-${PROG}: machine-links ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
+${PROG}: machine-links ${OBJS} ${LIBSA} ${LIBZ}
 	${LD} -N -Ttext ${RELOC} -e ${START} -o ${PROG}.sym -Llib/sa -L. ${OBJS} \
-	    ${LIBSA} ${LIBZ} ${LIBSA} ${LIBKERN}
+	    ${LIBSA} ${LIBZ} ${LIBSA}
 	/usr/sbin/mopa.out ${PROG}.sym ${PROG}.mop
 	/bin/cp ${PROG}.sym ${PROG}
 	/usr/bin/strip ${PROG}

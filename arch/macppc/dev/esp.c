@@ -258,7 +258,7 @@ espattach(struct device *parent, struct device *self, void *aux)
 
 	/* and the interuppts */
 	mac_intr_establish(parent, esc->sc_intr, IST_LEVEL, IPL_BIO,
-	    ncr53c9x_intr, sc, "esp");
+	    ncr53c9x_intr, sc, sc->sc_dev.dv_xname);
 
 	/* Reset SCSI bus when halt. */
 	shutdownhook_establish(esp_shutdownhook, sc);

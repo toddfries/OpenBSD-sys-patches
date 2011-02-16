@@ -1,4 +1,5 @@
 /*	$OpenBSD: syscon.c,v 1.6 2010/09/20 06:33:47 matthew Exp $ */
+/*
  * Copyright (c) 2007 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -46,10 +47,11 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <machine/board.h>
 #include <machine/cpu.h>
 
 #include <machine/avcommon.h>
-#include <aviion/dev/sysconreg.h>
+#include <aviion/dev/sysconvar.h>
 
 struct sysconsoftc {
 	struct device	sc_dev;
@@ -67,7 +69,6 @@ int	syscon_scan(struct device *, void *, void *);
 int	sysconabort(void *);
 int	sysconacfail(void *);
 int	sysconsysfail(void *);
-int	sysconav400(void *);
 
 struct cfattach syscon_ca = {
 	sizeof(struct sysconsoftc), sysconmatch, sysconattach
@@ -87,6 +88,7 @@ void
 sysconattach(struct device *parent, struct device *self, void *args)
 {
 	struct sysconsoftc *sc = (struct sysconsoftc *)self;
+	int i;
 
 	printf("\n");
 
@@ -101,27 +103,24 @@ sysconattach(struct device *parent, struct device *self, void *args)
 	 */
 	*(volatile u_int32_t *)AV_UCSR |= UCSR_DRVSFBIT;
 
-	/*
-	 * pseudo driver, abort interrupt handler
-	 */
 	sc->sc_abih.ih_fn = sysconabort;
 	sc->sc_abih.ih_arg = 0;
-	sc->sc_abih.ih_wantframe = 1;
+	sc->sc_abih.ih_flags = INTR_WANTFRAME;
 	sc->sc_abih.ih_ipl = IPL_ABORT;
 
 	sc->sc_acih.ih_fn = sysconacfail;
 	sc->sc_acih.ih_arg = 0;
-	sc->sc_acih.ih_wantframe = 1;
+	sc->sc_acih.ih_flags = INTR_WANTFRAME;
 	sc->sc_acih.ih_ipl = IPL_ABORT;
 
 	sc->sc_sfih.ih_fn = sysconsysfail;
 	sc->sc_sfih.ih_arg = 0;
-	sc->sc_sfih.ih_wantframe = 1;
+	sc->sc_sfih.ih_flags = INTR_WANTFRAME;
 	sc->sc_sfih.ih_ipl = IPL_ABORT;
 
-	sysconintr_establish(SYSCV_ABRT, &sc->sc_abih, "abort");
-	sysconintr_establish(SYSCV_ACF, &sc->sc_acih, "acfail");
-	sysconintr_establish(SYSCV_SYSF, &sc->sc_sfih, "sysfail");
+	sysconintr_establish(INTSRC_ABORT, &sc->sc_abih, "abort");
+	sysconintr_establish(INTSRC_ACFAIL, &sc->sc_acih, "acfail");
+	sysconintr_establish(INTSRC_SYSFAIL, &sc->sc_sfih, "sysfail");
 
 	config_search(syscon_scan, self, args);
 }
@@ -167,14 +166,18 @@ syscon_print(void *args, const char *pnp)
 intrhand_t sysconintr_handlers[NINTSRC_SYSCON];
 
 int
-sysconintr_establish(u_int vec, struct intrhand *ih, const char *name)
+sysconintr_establish(u_int intsrc, struct intrhand *ih, const char *name)
 {
+	intrhand_t *list;
+
+	list = &sysconintr_handlers[intsrc];
+	if (!SLIST_EMPTY(list)) {
 #ifdef DIAGNOSTIC
-	if (vec < 0 || vec >= SYSCON_NVEC) {
-		printf("sysconintr_establish: illegal vector 0x%x\n", vec);
+		printf("%s: interrupt source %u already registered\n",
+		    __func__, intsrc);
+#endif
 		return (EINVAL);
 	}
-#endif
 
 	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 	SLIST_INSERT_HEAD(list, ih, ih_link);

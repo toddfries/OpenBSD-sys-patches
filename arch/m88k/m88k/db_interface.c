@@ -52,6 +52,7 @@
 #include <ddb/db_extern.h>
 #include <ddb/db_interface.h>
 #include <ddb/db_output.h>
+#include <ddb/db_run.h>
 #include <ddb/db_sym.h>
 
 extern label_t *db_recover;
@@ -75,6 +76,7 @@ db_regs_t ddb_regs;
 #ifdef MULTIPROCESSOR
 #include <sys/mplock.h>
 struct __mp_lock ddb_mp_lock;
+cpuid_t	ddb_mp_nextcpu = (cpuid_t)-1;
 
 void	m88k_db_cpu_cmd(db_expr_t, int, db_expr_t, char *);
 #endif
@@ -374,8 +376,9 @@ m88k_db_trap(type, frame)
 	int type;
 	struct trapframe *frame;
 {
-	if (get_psr() & PSR_IND)
-		db_printf("WARNING: entered debugger with interrupts disabled\n");
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+#endif
 
 	switch(type) {
 	case T_KDB_BREAK:
@@ -393,9 +396,11 @@ m88k_db_trap(type, frame)
 	}
 
 #ifdef MULTIPROCESSOR
-	curcpu()->ci_ddb_state = CI_DDB_ENTERDDB;
+	ci->ci_ddb_state = CI_DDB_ENTERDDB;
 	__mp_lock(&ddb_mp_lock);
-	curcpu()->ci_ddb_state = CI_DDB_INDDB;
+	ci->ci_ddb_state = CI_DDB_INDDB;
+	ddb_mp_nextcpu = (cpuid_t)-1;
+	m88k_broadcast_ipi(CI_IPI_DDB);		/* pause other processors */
 #endif
 
 	ddb_regs = frame->tf_regs;
@@ -407,7 +412,7 @@ m88k_db_trap(type, frame)
 	frame->tf_regs = ddb_regs;
 
 #ifdef MULTIPROCESSOR
-	curcpu()->ci_ddb_state = CI_DDB_RUNNING;
+	ci->ci_ddb_state = CI_DDB_RUNNING;
 	__mp_release_all(&ddb_mp_lock);
 #endif
 }
@@ -600,26 +605,38 @@ m88k_db_cpu_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
 	cpuid_t cpu;
 	struct cpu_info *ci;
+	char state[15];
+
+	/* switch to another processor if requested */
+	if (have_addr) {
+		cpu = (cpuid_t)addr;
+		if (cpu >= 0 && cpu < MAX_CPUS &&
+		    ISSET(m88k_cpus[cpu].ci_flags, CIF_ALIVE)) {
+			ddb_mp_nextcpu = cpu;
+			db_cmd_loop_done = 1;
+		} else {
+			db_printf("cpu%d is not active\n", cpu);
+		}
+		return;
+	}
 
 	db_printf(" cpu  flags state          curproc  curpcb   depth    ipi\n");
 	CPU_INFO_FOREACH(cpu, ci) {
-		db_printf("%c%4d: ", (cpu == cpu_number()) ? '*' : ' ',
-		    CPU_INFO_UNIT(ci));
 		switch (ci->ci_ddb_state) {
 		case CI_DDB_RUNNING:
-			db_printf("running\n");
+			strlcpy(state, "running", sizeof state);
 			break;
 		case CI_DDB_ENTERDDB:
-			db_printf("entering ddb\n");
+			strlcpy(state, "entering ddb", sizeof state);
 			break;
 		case CI_DDB_INDDB:
-			db_printf("ddb\n");
+			strlcpy(state, "in ddb", sizeof state);
 			break;
 		case CI_DDB_PAUSE:
 			strlcpy(state, "paused", sizeof state);
 			break;
 		default:
-			db_printf("? (%d)\n",
+			snprintf(state, sizeof state, "unknown (%d)",
 			    ci->ci_ddb_state);
 			break;
 		}

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: trap.h,v 1.2 2001/08/20 20:23:52 jason Exp $	*/
-=======
 /*	$OpenBSD: trap.h,v 1.4 2008/07/04 22:04:37 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: trap.h,v 1.4 1999/06/07 05:28:04 eeh Exp $ */
 
 /*

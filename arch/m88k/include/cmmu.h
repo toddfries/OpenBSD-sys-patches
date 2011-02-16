@@ -33,25 +33,6 @@
  */
 #if defined(_KERNEL) && !defined(_LOCORE)
 
-#ifdef MULTIPROCESSOR
-/*
- * This lock protects the cmmu SAR and SCR's; other ports
- * can be accessed without locking it.
- *
- * May be used from "db_interface.c".
- */
-extern __cpu_simple_lock_t cmmu_cpu_lock;
-
-#define CMMU_LOCK   __cpu_simple_lock(&cmmu_cpu_lock)
-#define CMMU_UNLOCK __cpu_simple_unlock(&cmmu_cpu_lock)
-
-#else
-
-#define	CMMU_LOCK	do { /* nothing */ } while (0)
-#define	CMMU_UNLOCK	do { /* nothing */ } while (0)
-
-#endif	/* MULTIPROCESSOR */
-
 /* machine dependent cmmu function pointer structure */
 struct cmmu_p {
 	cpuid_t (*init)(void);
@@ -59,7 +40,7 @@ struct cmmu_p {
 	void (*cpu_configuration_print)(int);
 	void (*shutdown)(void);
 	cpuid_t (*cpu_number)(void);
-	void (*set_sapr)(cpuid_t, apr_t);
+	void (*set_sapr)(apr_t);
 	void (*set_uapr)(apr_t);
 	void (*tlb_inv)(cpuid_t, u_int, vaddr_t);
 	void (*tlb_inv_all)(cpuid_t);
@@ -74,6 +55,21 @@ struct cmmu_p {
 };
 
 extern struct cmmu_p *cmmu;
+
+#ifdef MULTIPROCESSOR
+/*
+ * On 8820x-based systems, this lock protects the CMMU SAR and SCR registers;
+ * other registers may be accessed without locking it.
+ * On 88410-based systems, this lock protects accesses to the BusSwitch GCSR
+ * register, which masks or unmasks the 88410 control addresses.
+ */
+extern __cpu_simple_lock_t cmmu_cpu_lock;
+#define CMMU_LOCK   __cpu_simple_lock(&cmmu_cpu_lock)
+#define CMMU_UNLOCK __cpu_simple_unlock(&cmmu_cpu_lock)
+#else
+#define	CMMU_LOCK	do { /* nothing */ } while (0)
+#define	CMMU_UNLOCK	do { /* nothing */ } while (0)
+#endif	/* MULTIPROCESSOR */
 
 #define cmmu_init			(cmmu->init)
 #define setup_board_config		(cmmu->setup_board_config)

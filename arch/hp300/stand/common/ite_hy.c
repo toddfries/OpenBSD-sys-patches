@@ -1,4 +1,4 @@
-/*	$OpenBSD: ite_hy.c,v 1.6 2006/08/05 09:58:57 miod Exp $	*/
+/*	$OpenBSD: ite_hy.c,v 1.7 2006/08/17 06:31:10 miod Exp $	*/
 /*	$NetBSD: ite_hy.c,v 1.3 1996/03/03 04:23:37 thorpej Exp $	*/
 
 /*

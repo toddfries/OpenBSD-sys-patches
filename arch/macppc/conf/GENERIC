@@ -11,7 +11,7 @@
 
 machine		macppc powerpc
 include		"../../../conf/GENERIC"
-maxusers	32			# estimated number of users
+maxusers	80			# estimated number of users
 
 # default type, instructs system to try to determine what proper type is
 # actual machine type probed via name of openfirmware root node.
@@ -31,11 +31,12 @@ config		bsd	swap generic
 
 mainbus0	at root
 cpu*		at mainbus0
+mem*		at mainbus0
 
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
 openpic*	at memc?	# openpic interrupt controller
-ki2c*           at memc?        # Keywest I2C
+kiic*           at memc?        # Keywest I2C
 pchb*		at pci?
 ht*		at mainbus0
 smu*		at mainbus0
@@ -86,10 +87,12 @@ mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 an*		at pci?		# Cisco/Aironet
 atw*		at pci?		# ADMtek ADM8211 (802.11)
+bwi*		at pci?		# Broadcom AirForce (802.11b/g)
 wi*		at pci?		# WaveLAN IEEE 802.11DS
 ral*		at pci?		# Ralink RT2500/RT2501/RT2600
 rtw*		at pci?		# Realtek 8180
 vr*		at pci?		# VIA Rhine ethernet
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
 musycc*		at pci?		# Conexant HDLC controller
 art*		at musycc?	# Accoom Artery E1/T1 cards
 xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
@@ -146,7 +149,7 @@ mesh*		at macobio? flags 0xffff # MESH SCSI
 #nvram*		at macobio?	# nvram
 adb*		at macobio?	# Apple Desktop Bus
 apm0		at adb?		# APM emulation
-pi2c0		at adb?		# PMU I2C
+piic0		at adb?		# PMU I2C
 wi*		at macobio?	# airport
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
@@ -161,7 +164,7 @@ zsc*		at macobio?
 zstty*		at zsc?
 
 awacs*		at macobio?	# Apple audio device
-ki2c*		at macobio?	# Keywest I2C
+kiic*		at macobio?	# Keywest I2C
 snapper*	at macobio?	# Snapper audio device
 tumbler*	at macobio?	# Tumbler audio device
 onyx*		at macobio?	# Onyx audio device
@@ -172,8 +175,10 @@ bktr0		at pci?		# Bt8[47][89] tv/fmradio/video
 radio*		at bktr?
 
 # PCI audio devices
+cmpci*		at pci?		# C-Media CMI8338/8738
 eap*		at pci?		# Ensoniq AudioPCI S5016
 emu*		at pci?		# SB Live!
+eso*		at pci?		# ESS Solo-1 PCI AudioDrive
 
 puc*		at pci?		# PCI "universal" comm device
 #puc*		at cardbus?
@@ -241,6 +246,8 @@ uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 umsm*	at uhub?		# Qualcomm MSM EVDO
 ucom*	at umsm?
+uchcom*	at uhub?		# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -321,8 +328,8 @@ btsco*	at bthub?		# Bluetooth audio support
 audio*	at btsco?
 
 # I2C bus support
-iic*		at ki2c?
-iic*		at pi2c?
+iic*		at kiic?
+iic*		at piic?
 iic*		at smu?
 
 # I2C devices
@@ -338,6 +345,7 @@ maxds*		at iic?
 fcu*		at iic?
 adt*		at iic?
 asms*		at iic?
+spdmem*		at mem?
 
 # CardBus bus support
 cardbus*	at cardslot?
@@ -347,29 +355,31 @@ cardslot*	at cbb?
 ep*		at pcmcia?	# PCMCIA based 3C5xx ethernet
 an*		at pcmcia?	# Cisco/Aironet
 wi*		at pcmcia?	# WaveLAN IEEE 802.11DS
+malo*		at pcmcia?	# Marvell 88W8385
 dc*		at cardbus?	# 21143, "tulip" clone ethernet
 fxp*		at cardbus?	# Intel PRO/100 ethernet
 xl*		at cardbus?	# 3C575/3C656 ethernet
 rl*		at cardbus?	# RealTek 81[23]9 ethernet
+re*		at cardbus?	# Realtek 8169/8169S/8110S
 rtw*		at cardbus?	# Realtek 8180
 wdc*		at pcmcia?
 com*		at pcmcia?
 com*		at cardbus?
 malo*		at cardbus?	# Marvell Libertas
 acx*		at cardbus?	# TI ACX100/ACX111 (802.11b/g)
+bwi*		at cardbus?	# Broadcom AirForce (802.11b/g)
 
 wsdisplay*	at vgafb?
-
-# MIDI support
-midi*		at eap?
 
 # Audio support
 audio*		at awacs?
 audio*		at snapper?
 audio*		at tumbler?
 audio*		at onyx?
+audio*		at cmpci?
 audio*		at eap?
 audio*		at emu?
+audio*		at eso?
 audio*		at uaudio?
 audio*		at aoa?
 audio*		at daca?
@@ -394,4 +404,3 @@ owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
-pseudo-device	bio	1	# ioctl multiplexing

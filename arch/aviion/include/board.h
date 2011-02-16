@@ -1,6 +1,6 @@
 /*	$OpenBSD: board.h,v 1.9 2011/01/02 13:40:07 miod Exp $	*/
 /*
- * Copyright (c) 2006, Miodrag Vallat
+ * Copyright (c) 2006, 2007, Miodrag Vallat
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

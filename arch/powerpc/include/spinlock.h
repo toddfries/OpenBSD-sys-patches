@@ -1,4 +1,4 @@
-/*	$OpenBSD: spinlock.h,v 1.1 1999/01/08 08:25:36 d Exp $	*/
+/*	$OpenBSD: spinlock.h,v 1.2 2001/09/01 15:49:05 drahn Exp $	*/
 
 #ifndef _POWERPC_SPINLOCK_H_
 #define _POWERPC_SPINLOCK_H_

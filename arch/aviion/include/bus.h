@@ -1,4 +1,5 @@
 /*	$OpenBSD: bus.h,v 1.3 2010/04/20 22:53:24 miod Exp $	*/
+
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
  * Copyright (c) 2004, Miodrag Vallat.

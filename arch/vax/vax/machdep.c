@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: machdep.c,v 1.83 2006/07/19 20:41:34 miod Exp $ */
-=======
 /* $OpenBSD: machdep.c,v 1.111 2010/12/21 14:56:24 claudio Exp $ */
->>>>>>> origin/master
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -116,11 +112,6 @@
 #define BUFCACHEPERCENT 5
 #endif
 
-#ifdef	NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
 #ifdef	BUFPAGES
 int bufpages = BUFPAGES;
 #else
@@ -167,29 +158,17 @@ int iospace_inited = 0;
 int	vax_led_blink = 0;
 #endif
 
-<<<<<<< HEAD
-void cpu_dumpconf(void);
-=======
 struct cpu_info cpu_info_store;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 void dumpconf(void);
->>>>>>> origin/master
 
 void
 cpu_startup()
 {
-<<<<<<< HEAD
-	caddr_t		v;
-	int		base, residual, i, sz;
 	vaddr_t		minaddr, maxaddr;
-	vsize_t		size;
-	extern unsigned int avail_end;
-=======
-	vaddr_t		minaddr, maxaddr;
->>>>>>> origin/master
 	extern char	cpu_model[];
 
 	/*
@@ -205,107 +184,36 @@ cpu_startup()
         if (dep_call->cpu_conf)
                 (*dep_call->cpu_conf)();
 
-<<<<<<< HEAD
-	printf("total memory = %d\n", avail_end);
-	physmem = btoc(avail_end);
-	panicstr = NULL;
-=======
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
->>>>>>> origin/master
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
 
 	/*
-<<<<<<< HEAD
-	 * Find out how much space we need, allocate it, and then give
-	 * everything true virtual addresses.
-	 */
-
-	sz = (int) allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (((unsigned long)allocsys(v) - (unsigned long)v) != sz)
-		panic("startup: table size inconsistency");
-	/*
-	 * Now allocate buffers proper.	 They are different than the above in
-	 * that they usually occupy more virtual memory than physical.
-	 */
-	size = MAXBSIZE * nbuf;		/* # bytes for buffers */
-
-	/* allocate VM for buffers... area is not managed by VM system */
-	if (uvm_map(kernel_map, (vaddr_t *)&buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-			UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-
-	minaddr = (vaddr_t)buffers;
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	/* now allocate RAM for buffers */
-	for (i = 0; i < nbuf; i++) {
-		vaddr_t curbuf;
-		vsize_t curbufsize;
-		struct vm_page *pg;
-
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.	The rest get (base) physical pages.
-		 * 
-		 * The rest of each buffer occupies virtual space, but has no
-		 * physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: "
-				    "not enough RAM for buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(kernel_map->pmap);
-
-	/*
-=======
->>>>>>> origin/master
 	 * Allocate a submap for exec arguments.  This map effectively limits
 	 * the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
-<<<<<<< HEAD
-=======
 #if VAX46 || VAX48 || VAX49 || VAX53 || VAX60
->>>>>>> origin/master
 	/*
 	 * Allocate a submap for physio.  This map effectively limits the
 	 * number of processes doing physio at any one time.
+	 *
+	 * Note that machines on which all mass storage I/O controllers 
+	 * can perform address translation, do not need this.
 	 */
-<<<<<<< HEAD
-	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-				   VM_PHYS_SIZE, 0, FALSE, NULL);
-=======
 	if (vax_boardtype == VAX_BTYP_46 || vax_boardtype == VAX_BTYP_48 ||
 	    vax_boardtype == VAX_BTYP_49 || vax_boardtype == VAX_BTYP_1303 ||
 	    vax_boardtype == VAX_BTYP_60)
 		phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 		    VM_PHYS_SIZE, 0, FALSE, NULL);
 #endif
->>>>>>> origin/master
 
-	printf("avail memory = %ld\n", ptoa(uvmexp.free));
-	printf("using %d buffers containing %d bytes of memory\n", nbuf, bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -335,23 +243,10 @@ long	dumplo = 0;
 cpu_kcore_hdr_t cpu_kcore_hdr;
 
 void
-cpu_dumpconf()
+dumpconf(void)
 {
 	int nblks;
 
-<<<<<<< HEAD
-	/*
-	 * XXX include the final RAM page which is not included in physmem.
-	 */
-	dumpsize = physmem + 1;
-	if (dumpdev != NODEV && bdevsw[major(dumpdev)].d_psize) {
-		nblks = (*bdevsw[major(dumpdev)].d_psize) (dumpdev);
-		if (dumpsize > btoc(dbtob(nblks - dumplo)))
-			dumpsize = btoc(dbtob(nblks - dumplo));
-		else if (dumplo == 0)
-			dumplo = nblks - btodb(ctob(dumpsize));
-	}
-=======
 	if (dumpdev == NODEV ||
 	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
@@ -363,7 +258,6 @@ cpu_dumpconf()
 		dumpsize = atop(dbtob(nblks - dumplo));
 	else if (dumplo == 0)
 		dumplo = nblks - btodb(ptoa(dumpsize));
->>>>>>> origin/master
 
 	/*
 	 * Don't dump on the first block in case the dump
@@ -433,7 +327,7 @@ void
 setstatclockrate(hzrate)
 	int hzrate;
 {
-	panic("setstatclockrate");
+	/* nothing to do */
 }
 
 void
@@ -657,6 +551,8 @@ boot(howto)
 		 */
 		resettodr();
 	}
+
+	uvm_shutdown();
 	splhigh();		/* extreme priority */
 
 	/* If rebooting and a dump is requested, do it. */
@@ -728,8 +624,8 @@ void
 dumpsys()
 {
 	int maj, psize, pg;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	paddr_t maddr;
 	int error;
 	kcore_seg_t *kseg_p;
@@ -745,7 +641,7 @@ dumpsys()
 	 * configured...
 	 */
 	if (dumpsize == 0) {
-		cpu_dumpconf();
+		dumpconf();
 		if (dumpsize == 0)
 			return;
 	}
@@ -973,57 +869,6 @@ vax_unmap_physmem(addr, size)
 }
 
 /*
-<<<<<<< HEAD
- * Allocate space for system data structures.  We are given a starting
- * virtual address and we return a final virtual address; along the way we
- * set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want, allocate that
- * much and fill it with zeroes, and then call allocsys() again with the
- * correct base virtual address.
- */
-#define VALLOC(name, type, num) v = (caddr_t)(((name) = (type *)v) + (num))
-
-caddr_t
-allocsys(v)
-    register caddr_t v;
-{
-
-#ifdef SYSVMSG
-    VALLOC(msgpool, char, msginfo.msgmax);
-    VALLOC(msgmaps, struct msgmap, msginfo.msgseg);
-    VALLOC(msghdrs, struct msg, msginfo.msgtql);
-    VALLOC(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	/*
-	 * Determine how many buffers to allocate.  We make sure we allocate
-	 * at least 16 buffers.  	 
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-    if (nbuf == 0) 
-        nbuf = bufpages < 16 ? 16 : bufpages;
-
-    /* Restrict to at most 70% filled kvm */
-    if (nbuf * MAXBSIZE >
-        (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-        nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-            MAXBSIZE * 7 / 10;
-
-    /* More buffer pages than fits into the buffers is senseless.  */
-    if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-        bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-    VALLOC(buf, struct buf, nbuf);
-    return (v);
-}
-
-/*
-=======
->>>>>>> origin/master
  * The following is a very stripped-down db_disasm.c, with only the logic
  * to skip instructions.
  */

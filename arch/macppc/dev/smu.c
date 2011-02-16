@@ -20,7 +20,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/proc.h>
 #include <sys/sensors.h>
 
@@ -61,7 +61,7 @@ struct smu_softc {
         bus_dmamap_t    sc_cmdmap;
         bus_dma_segment_t sc_cmdseg[1];
         caddr_t         sc_cmd;
-	struct lock	sc_lock;
+	struct rwlock	sc_lock;
 
 	/* Doorbell and mailbox. */
 	struct ppc_bus_space sc_mem_bus_space;
@@ -245,11 +245,11 @@ smu_attach(struct device *parent, struct device *self, void *aux)
                 return;
         }
 
-	lockinit(&sc->sc_lock, PZERO, sc->sc_dev.dv_xname, 0, 0);
+	rw_init(&sc->sc_lock, sc->sc_dev.dv_xname);
 
 	/* Establish smu-doorbell interrupt. */
 	mac_intr_establish(parent, intr, IST_EDGE, IPL_BIO,
-	    smu_intr, sc, "smu");
+	    smu_intr, sc, sc->sc_dev.dv_xname);
 
 	/* Initialize global variables that control RTC functionality. */
 	time_read = smu_time_read;
@@ -443,14 +443,14 @@ smu_time_read(time_t *secs)
 	struct clock_ymdhms dt;
 	int error;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 	cmd->cmd = SMU_RTC;
 	cmd->len = 1;
 	cmd->data[0] = SMU_RTC_GET_DATETIME;
 	error = smu_do_cmd(sc, 800);
 	if (error) {
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+		rw_exit_write(&sc->sc_lock);
 
 		*secs = 0;
 		return (error);
@@ -463,7 +463,7 @@ smu_time_read(time_t *secs)
 	dt.dt_min = FROMBCD(cmd->data[1]);
 	dt.dt_sec = FROMBCD(cmd->data[0]);
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 
 	*secs = clock_ymdhms_to_secs(&dt);
 	return (0);
@@ -479,7 +479,7 @@ smu_time_write(time_t secs)
 
 	clock_secs_to_ymdhms(secs, &dt);
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 	cmd->cmd = SMU_RTC;
 	cmd->len = 8;
@@ -493,7 +493,7 @@ smu_time_write(time_t secs)
 	cmd->data[7] = TOBCD(dt.dt_year - 2000);
 	error = smu_do_cmd(sc, 800);
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 
 	return (error);
 }
@@ -649,12 +649,12 @@ smu_refresh_sensors(void *arg)
 	struct smu_softc *sc = arg;
 	int i;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 	for (i = 0; i < sc->sc_num_sensors; i++)
 		smu_sensor_refresh(sc, &sc->sc_sensors[i]);
 	for (i = 0; i < sc->sc_num_fans; i++)
 		smu_fan_refresh(sc, &sc->sc_fans[i]);
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 }
 
 int
@@ -665,7 +665,7 @@ smu_i2c_acquire_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&sc->sc_lock, RW_WRITE));
 }
 
 void
@@ -676,7 +676,7 @@ smu_i2c_release_bus(void *cookie, int flags)
         if (flags & I2C_F_POLL)
                 return;
 
-        lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_lock);
 }
 
 int

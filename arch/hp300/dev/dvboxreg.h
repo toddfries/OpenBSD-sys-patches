@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvboxreg.h,v 1.1 2005/01/14 22:39:25 miod Exp $	*/
+/*	$OpenBSD: dvboxreg.h,v 1.2 2005/01/24 21:36:39 miod Exp $	*/
 /*	$NetBSD: grf_dvreg.h,v 1.5 1994/10/26 07:23:50 cgd Exp $	*/
 
 /*

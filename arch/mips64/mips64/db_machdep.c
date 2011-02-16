@@ -149,7 +149,7 @@ kdb_trap(type, fp)
 			db_error("Caught exception in ddb.\n");
 			/*NOTREACHED*/
 		}
-		printf("stoped on non ddb fault\n");
+		printf("stopped on non ddb fault\n");
 	}
 	
 #ifdef MULTIPROCESSOR
@@ -365,7 +365,7 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
  *	both the address for a branch taken and for not taken, NOT! :-)
  *	MipsEmulateBranch will do the job to find out _exactly_ which
  *	address we will end up at so the 'dual bp' method is not
- *	requiered.
+ *	required.
  */
 db_addr_t
 next_instr_address(db_addr_t pc, boolean_t bd)

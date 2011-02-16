@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dzkbd.c,v 1.11 2006/08/05 22:05:55 miod Exp $	*/
-=======
 /*	$OpenBSD: dzkbd.c,v 1.14 2008/08/20 16:31:41 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dzkbd.c,v 1.1 2000/12/02 17:03:55 ragge Exp $	*/
 
 /*

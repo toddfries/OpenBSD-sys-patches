@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dz_uba.c,v 1.5 2004/07/09 15:57:16 deraadt Exp $	*/
-=======
 /*	$OpenBSD: dz_uba.c,v 1.7 2010/09/20 06:33:48 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dz_uba.c,v 1.11 2000/06/04 06:17:02 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden. All rights reserved.

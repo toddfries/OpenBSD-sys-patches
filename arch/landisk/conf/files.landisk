@@ -71,6 +71,11 @@ include "dev/rasops/files.rasops"
 include "dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
 # SH bus
 #
 include	"arch/sh/conf/files.shb"

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: srt0.S,v 1.1 1997/09/17 10:46:20 downsj Exp $	*/
-=======
 /*	$OpenBSD: srt0.S,v 1.4 2010/07/06 20:41:06 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: srt0.S,v 1.5.4.2 1996/07/17 01:51:46 jtc Exp $	*/
 
 /*

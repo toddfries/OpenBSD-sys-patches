@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0var.h,v 1.4 2005/04/06 01:31:06 pascoe Exp $ */
+/*	$OpenBSD: pxa2x0var.h,v 1.5 2005/05/27 21:10:05 uwe Exp $ */
 /* $NetBSD: pxa2x0var.h,v 1.2 2003/06/05 13:48:28 scw Exp $ */
 
 /*

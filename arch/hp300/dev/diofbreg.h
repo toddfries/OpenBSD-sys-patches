@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofbreg.h,v 1.2 2005/01/24 21:36:39 miod Exp $	*/
+/*	$OpenBSD: diofbreg.h,v 1.3 2007/01/07 15:13:52 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.

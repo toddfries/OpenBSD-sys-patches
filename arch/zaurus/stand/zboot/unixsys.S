@@ -1,4 +1,4 @@
-/*	$OpenBSD: unixsys.S,v 1.5 2005/04/13 04:33:47 uwe Exp $	*/
+/*	$OpenBSD: unixsys.S,v 1.6 2005/05/24 20:38:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -56,7 +56,6 @@
 #if defined(_KERNEL) || defined(_STANDALONE)
 #if !defined(_LOCORE)
 extern int brdtyp;
-extern int cpumod;
 #endif
 
 /*

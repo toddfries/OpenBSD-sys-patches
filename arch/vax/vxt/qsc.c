@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: qsc.c,v 1.8 2010/07/02 17:27:01 nicm Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -827,7 +823,7 @@ qsccnprobe(struct consdev *cp)
 	ioaccess(iospace, QSCADDR, 1);
 
 	cp->cn_dev = makedev(maj, QSC_LINE_SERIAL);
-	cp->cn_pri = vax_confdata & 2 ? CN_NORMAL : CN_REMOTE;
+	cp->cn_pri = vax_confdata & 2 ? CN_LOWPRI : CN_HIGHPRI;
 }
 
 void

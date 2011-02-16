@@ -49,6 +49,8 @@
 #define IPL_NMI		7
 #define IPL_ABORT	7
 
+#define	NIPLS		8
+
 #include <m88k/intr.h>
 
 #endif /* _AVIION_INTR_H_ */

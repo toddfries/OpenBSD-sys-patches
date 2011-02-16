@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nexus.h,v 1.12 2006/07/20 19:15:34 miod Exp $	*/
-=======
 /*	$OpenBSD: nexus.h,v 1.14 2008/08/18 23:19:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nexus.h,v 1.17 2000/06/04 17:58:19 ragge Exp $	*/
 
 /*-

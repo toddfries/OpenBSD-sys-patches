@@ -54,6 +54,7 @@
 #if defined(_KERNEL) && !defined(_LOCORE)
 
 #include <sys/evcount.h>
+#include <machine/atomic.h>
 
 #define PPC_NIRQ	66
 #define PPC_CLK_IRQ	64

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vaxstand.h,v 1.6 1998/05/11 07:35:24 niklas Exp $ */
+/*	$OpenBSD: vaxstand.h,v 1.1 2000/04/27 02:26:26 bjc Exp $ */
 /*	$NetBSD: vaxstand.h,v 1.1 1999/03/06 16:36:05 ragge Exp $ */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.

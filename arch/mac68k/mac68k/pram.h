@@ -1,4 +1,4 @@
-/*	$OpenBSD: pram.h,v 1.8 2006/01/13 21:02:38 miod Exp $	*/
+/*	$OpenBSD: pram.h,v 1.9 2007/04/10 17:14:42 miod Exp $	*/
 /*	$NetBSD: pram.h,v 1.3 1996/05/05 06:18:53 briggs Exp $	*/
 
 /*

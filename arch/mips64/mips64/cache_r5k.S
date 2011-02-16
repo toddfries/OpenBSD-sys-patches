@@ -48,7 +48,6 @@
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
-#include <machine/pte.h>
 
 #include "assym.h"
 
@@ -131,7 +130,7 @@
 #define	CTYPE_HAS_XL3		0x0400	/* External L3 Cache present */
 
 /*
- *  Due to a flaw in RM7000 1.x processors a pipleine 'drain' is
+ *  Due to a flaw in RM7000 1.x processors a pipeline 'drain' is
  *  required after some mtc0 instructions.
  *  Ten nops in sequence does the trick.
  */
@@ -236,7 +235,7 @@ Conf5K:						# R5xxx type, check for L2 cache
 
 	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
 	or	t2, CTYPE_HAS_XL2		# External L2 present.
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta2
 1:
 	cache	InvalidateSecondaryPage, 0(t0)
@@ -266,7 +265,7 @@ Conf52K:					# R5200 type, check for L2 cache
 
 	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
 	or	t2, CTYPE_HAS_XL2		# External L2 present.
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta2
 1:
 	cache	InvalidateSecondaryPage, 0(t0)
@@ -307,7 +306,7 @@ Conf7K:					# RM7000, check for L2 and L3 cache
 	mtc0	v0, COP_0_CONFIG		# Enable L3 cache
 	or	t2, CTYPE_HAS_XL3
 #endif
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta3
 1:
 	cache	InvalidatePage_T, 0(t0)
@@ -325,7 +324,7 @@ Conf7KL2:
 	ori	v0, CF_7_SE
 
 	mtc0	v0, COP_0_CONFIG		# Enable and init L2 cache
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta3
 1:
 	PTR_ADDU t0, 32
@@ -333,7 +332,7 @@ Conf7KL2:
 	cache	IndexStoreTag_S, -4(t0)
 	sync
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta3
 1:
 	PTR_ADDU t0, 32
@@ -341,7 +340,7 @@ Conf7KL2:
 	lw	zero, -4(t0)
 	sync
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta3
 1:
 	PTR_ADDU t0, 32
@@ -418,7 +417,7 @@ LEAF(Mips5k_SyncCache, 0)
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, t1			# Compute end address
 	PTR_SUBU t1, 128
 
@@ -436,7 +435,7 @@ LEAF(Mips5k_SyncCache, 0)
  * the selected cache and differs from Hit in that sense.
  */
 
-	LA	t0, KSEG0_BASE
+	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, t2			# End address
 	PTR_SUBU t1, t1, 128
 1:
@@ -512,7 +511,7 @@ END(Mips5k_SyncCache)
  *
  *	Invalidate the L1 instruction cache for at least range
  *	of addr to addr + len - 1.
- *	The address is reduced to a KSEG0 index to avoid TLB faults.
+ *	The address is reduced to a XKPHYS index to avoid TLB faults.
  *
  * Results:
  *	None.
@@ -575,7 +574,7 @@ END(Mips5k_InvalidateICache)
  *	void Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t addr)
  *
  *	Sync the L1 data cache page for address addr.
- *	The address is reduced to a KSEG0 index to avoid TLB faults.
+ *	The address is reduced to a XKPHYS index to avoid TLB faults.
  *
  * Results:
  *	None.

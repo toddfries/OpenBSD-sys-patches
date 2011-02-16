@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.h,v 1.6 2007/03/03 21:37:27 miod Exp $	*/
-=======
 /*	$OpenBSD: cpu.h,v 1.21 2010/09/28 20:27:55 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -55,8 +51,6 @@
 #ifdef _KERNEL
 
 /*
-<<<<<<< HEAD
-=======
  * Per-CPU information.
  */
 
@@ -86,7 +80,6 @@ extern struct cpu_info cpu_info_store;
 
 
 /*
->>>>>>> origin/master
  * Arguments to hardclock and gatherstats encapsulate the previous
  * machine state in an opaque clockframe.
  */
@@ -97,7 +90,6 @@ struct clockframe {
 };
 
 #define	CLKF_USERMODE(cf)	(!KERNELMODE((cf)->ssr))
-#define	CLKF_BASEPRI(cf)	(((cf)->ssr & 0xf0) == 0)
 #define	CLKF_PC(cf)		((cf)->spc)
 #define	CLKF_INTR(cf)		0	/* XXX */
 
@@ -141,6 +133,11 @@ extern int want_resched;		/* need_resched() was called */
  * We need a machine-independent name for this.
  */
 #define	DELAY(x)		delay(x)
+
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle()	__asm volatile("sleep")
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
+
 #endif /* _KERNEL */
 
 /*
@@ -169,26 +166,65 @@ extern int want_resched;		/* need_resched() was called */
 #ifdef _KERNEL
 #ifndef __lint__
 
-/* switch from P1 to P2 */
-#define	RUN_P2 do {							\
-		void *p;						\
-		p = &&P2;						\
-		goto *(void *)SH3_P1SEG_TO_P2SEG(p);			\
-	    P2:	(void)0;						\
+/*
+ * Switch from P1 (cached) to P2 (uncached).  This used to be written
+ * using gcc's assigned goto extension, but gcc4 aggressive optimizations
+ * tend to optimize that away under certain circumstances.
+ */
+#define RUN_P2						\
+	do {						\
+		register uint32_t r0 asm("r0");		\
+		uint32_t pc;				\
+		__asm volatile(				\
+			"	mov.l	1f, %1	;"	\
+			"	mova	2f, %0	;"	\
+			"	or	%0, %1	;"	\
+			"	jmp	@%1	;"	\
+			"	 nop		;"	\
+			"	.align 2	;"	\
+			"1:	.long	0x20000000;"	\
+			"2:;"				\
+			: "=r"(r0), "=r"(pc));		\
 	} while (0)
 
-/* switch from P2 to P1 */
-#define	RUN_P1 do {							\
-		void *p;						\
-		p = &&P1;						\
-		__asm volatile("nop;nop;nop;nop;nop;nop;nop;nop");	\
-		goto *(void *)SH3_P2SEG_TO_P1SEG(p);			\
-	    P1:	(void)0;						\
+/*
+ * Switch from P2 (uncached) back to P1 (cached).  We need to be
+ * running on P2 to access cache control, memory-mapped cache and TLB
+ * arrays, etc. and after touching them at least 8 instructinos are
+ * necessary before jumping to P1, so provide that padding here.
+ */
+#define RUN_P1						\
+	do {						\
+		register uint32_t r0 asm("r0");		\
+		uint32_t pc;				\
+		__asm volatile(				\
+		/*1*/	"	mov.l	1f, %1	;"	\
+		/*2*/	"	mova	2f, %0	;"	\
+		/*3*/	"	nop		;"	\
+		/*4*/	"	and	%0, %1	;"	\
+		/*5*/	"	nop		;"	\
+		/*6*/	"	nop		;"	\
+		/*7*/	"	nop		;"	\
+		/*8*/	"	nop		;"	\
+			"	jmp	@%1	;"	\
+			"	 nop		;"	\
+			"	.align 2	;"	\
+			"1:	.long	~0x20000000;"	\
+			"2:;"				\
+			: "=r"(r0), "=r"(pc));		\
 	} while (0)
+
+/*
+ * If RUN_P1 is the last thing we do in a function we can omit it, b/c
+ * we are going to return to a P1 caller anyway, but we still need to
+ * ensure there's at least 8 instructions before jump to P1.
+ */
+#define PAD_P1_SWITCH	__asm volatile ("nop;nop;nop;nop;nop;nop;nop;nop;")
 
 #else  /* __lint__ */
-#define	RUN_P2	do {} while (/* CONSTCOND */ 0)
-#define	RUN_P1	do {} while (/* CONSTCOND */ 0)
+#define	RUN_P2		do {} while (/* CONSTCOND */ 0)
+#define	RUN_P1		do {} while (/* CONSTCOND */ 0)
+#define	PAD_P1_SWITCH	do {} while (/* CONSTCOND */ 0)
 #endif
 #endif
 
@@ -215,19 +251,6 @@ extern int want_resched;		/* need_resched() was called */
  */
 #include <machine/cputypes.h>
 
-/*
- * CTL_MACHDEP definitions.
- */
-#define	CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_KBDRESET		2	/* keyboard reset */
-#define	CPU_MAXID		3	/* number of valid machdep ids */
-
-#define	CTL_MACHDEP_NAMES {						\
-	{ 0, 0 },							\
-	{ "console_device",	CTLTYPE_STRUCT },			\
-	{ "kbdreset",		CTLTYPE_INT },				\
-}
-
 #ifdef _KERNEL
 void sh_cpu_init(int, int);
 void sh_startup(void);
@@ -239,7 +262,7 @@ void savectx(struct pcb *);
 struct fpreg;
 void fpu_save(struct fpreg *);
 void fpu_restore(struct fpreg *);
-u_int cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
+u_int cpu_dump(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *);
 u_int cpu_dumpsize(void);
 void dumpconf(void);
 void dumpsys(void);

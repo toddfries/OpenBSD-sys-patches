@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hdc9224.c,v 1.13 2006/11/06 20:28:23 miod Exp $	*/
-=======
 /*	$OpenBSD: hdc9224.c,v 1.34 2010/09/28 13:20:50 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -82,7 +78,6 @@
 #include <machine/uvax.h>
 #include <machine/ka410.h>
 #include <machine/vsbus.h>
-#include <machine/rpb.h>
 #include <machine/scb.h>
 
 #include <arch/vax/mscp/mscp.h> /* For DEC disk encoding */
@@ -146,7 +141,7 @@ struct	hdcsoftc {
 	caddr_t	sc_dmabase;		/* */
 	int	sc_dmasize;
 	caddr_t sc_bufaddr;		/* Current in-core address */
-	int sc_diskblk;			/* Current block on disk */
+	daddr64_t sc_diskblk;		/* Current block on disk */
 	int sc_bytecnt;			/* How much left to transfer */
 	int sc_xfer;			/* Current transfer size */
 	int sc_retries;
@@ -375,23 +370,11 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	hd_readgeom(sc, hd);
 	disk_printtype(hd->sc_drive, hd->sc_xbn.media_id);
 	dl = hd->sc_disk.dk_label;
-<<<<<<< HEAD
-	hdmakelabel(dl, &hd->sc_xbn);
-	msg = readdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
-	    hdstrategy, dl, NULL, 0);
-	printf("%s: %luMB, %lu sectors\n",
-	    hd->sc_dev.dv_xname, dl->d_secperunit / (1048576 / DEV_BSIZE),
-	    dl->d_secperunit);
-	if (msg) {
-		/*printf("%s: %s\n", hd->sc_dev.dv_xname, msg);*/
-	}
-=======
 	error = hdgetdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
 	    hd, dl, 0);
 	printf("%s: %luMB, %lu sectors\n",
 	    hd->sc_dev.dv_xname, DL_GETDSIZE(dl) / (1048576 / DEV_BSIZE),
 	    DL_GETDSIZE(dl));
->>>>>>> origin/master
 #ifdef HDDEBUG
 	hdc_printgeom(&hd->sc_xbn);
 #endif
@@ -459,7 +442,6 @@ hdstrategy(struct buf *bp)
 	struct hdcsoftc *sc;
 	struct disklabel *lp;
 	int unit, s;
-	daddr_t bn;
 
 	unit = DISKUNIT(bp->b_dev);
 	if (unit > hd_cd.cd_ndevs || (hd = hd_cd.cd_devs[unit]) == NULL) {
@@ -470,23 +452,11 @@ hdstrategy(struct buf *bp)
 	sc = (void *)hd->sc_dev.dv_parent;
 
 	lp = hd->sc_disk.dk_label;
-	if ((bounds_check_with_label(bp, hd->sc_disk.dk_label,
-	    hd->sc_disk.dk_cpulabel, 1)) <= 0)
+	if ((bounds_check_with_label(bp, hd->sc_disk.dk_label, 1)) <= 0)
 		goto done;
 
 	if (bp->b_bcount == 0)
 		goto done;
-
-	/*
-	 * XXX Since we need to know blkno in hdcstart() and do not have a
-	 * b_rawblkno field in struct buf (yet), abuse b_cylinder to store
-	 * the block number instead of the cylinder number.
-	 * This will be suboptimal in disksort(), but not harmful. Of course,
-	 * this also truncates the block number at 4G, but there shouldn't be
-	 * any MFM disk that large.
-	 */
-	bn = bp->b_blkno + lp->d_partitions[DISKPART(bp->b_dev)].p_offset;
-	bp->b_cylinder = bn;
 
 	s = splbio();
 	disksort(&sc->sc_buf_queue, bp);
@@ -526,22 +496,22 @@ hdcstart(struct hdcsoftc *sc, struct buf *ob)
 	struct disklabel *lp;
 	struct hdsoftc *hd;
 	struct buf *dp, *bp;
-	int cn, sn, tn, bn, blks;
+	int cn, sn, tn, blks;
 	volatile char ch;
+	daddr64_t bn;
 
 	splassert(IPL_BIO);
 
 	if (sc->sc_active)
 		return; /* Already doing something */
 
-	if (ob == 0) {
+	if (ob == NULL) {
 		dp = &sc->sc_buf_queue;
 		if ((bp = dp->b_actf) == NULL)
 			return; /* Nothing to do */
+
 		dp->b_actf = bp->b_actf;
 		sc->sc_bufaddr = bp->b_data;
-		/* XXX see hdstrategy() comments regarding b_cylinder usage */
-		sc->sc_diskblk = bp->b_cylinder;
 		sc->sc_bytecnt = bp->b_bcount;
 		sc->sc_retries = 0;
 		bp->b_resid = 0;
@@ -549,12 +519,17 @@ hdcstart(struct hdcsoftc *sc, struct buf *ob)
 		bp = ob;
 
 	hd = hd_cd.cd_devs[DISKUNIT(bp->b_dev)];
+	lp = hd->sc_disk.dk_label;
 	hdc_hdselect(sc, hd->sc_drive);
 	sc->sc_active = bp;
 
+	if (ob == NULL) {
+		sc->sc_diskblk = bp->b_blkno +
+		    DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)]);
+	}
 	bn = sc->sc_diskblk;
-	lp = hd->sc_disk.dk_label;
-        if (bn) {
+
+        if (bn != 0) {
                 cn = bn / lp->d_secpercyl;
                 sn = bn % lp->d_secpercyl;
                 tn = sn / lp->d_nsectors;
@@ -647,7 +622,7 @@ hdc_printgeom(p)
 /*
  * Return the size of a partition, if known, or -1 if not.
  */
-int
+daddr64_t
 hdsize(dev_t dev)
 {
 	struct hdsoftc *hd;
@@ -657,7 +632,7 @@ hdsize(dev_t dev)
 	if (unit >= hd_cd.cd_ndevs || hd_cd.cd_devs[unit] == 0)
 		return -1;
 	hd = hd_cd.cd_devs[unit];
-	size = hd->sc_disk.dk_label->d_partitions[DISKPART(dev)].p_size *
+	size = DL_GETPSIZE(&hd->sc_disk.dk_label->d_partitions[DISKPART(dev)]) *
 	    (hd->sc_disk.dk_label->d_secsize / DEV_BSIZE);
 
 	return (size);
@@ -752,18 +727,11 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
-<<<<<<< HEAD
-		else
-			err = (cmd == DIOCSDINFO ?
-			    setdisklabel(lp, (struct disklabel *)addr, 0, 0) :
-			    writedisklabel(dev, hdstrategy, lp, 0));
-=======
 		error = setdisklabel(lp, (struct disklabel *)addr, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(dev, hdstrategy, lp);
 		}
->>>>>>> origin/master
 		break;
 
 	case DIOCWLABEL:
@@ -800,7 +768,7 @@ hdwrite(dev_t dev, struct uio *uio, int flag)
  *
  */
 int
-hddump(dev_t dev, daddr_t daddr, caddr_t addr, size_t size)
+hddump(dev_t dev, daddr64_t daddr, caddr_t addr, size_t size)
 {
 	return 0;
 }
@@ -898,26 +866,19 @@ hdmakelabel(struct disklabel *dl, struct hdgeom *g)
 	dl->d_type = DTYPE_MSCP; /* XXX - what to use here??? */
 	dl->d_secsize = DEV_BSIZE;
 
-	dl->d_secperunit = g->lbn_count;
+	DL_SETDSIZE(dl, g->lbn_count);
 	dl->d_nsectors = g->nspt;
 	dl->d_ntracks = g->ntracks;
 	dl->d_secpercyl = dl->d_nsectors * dl->d_ntracks;
-	dl->d_ncylinders = dl->d_secperunit / dl->d_secpercyl;
+	dl->d_ncylinders = DL_GETDSIZE(dl) / dl->d_secpercyl;
 
 	dl->d_npartitions = MAXPARTITIONS;
-<<<<<<< HEAD
-	dl->d_partitions[0].p_size = dl->d_partitions[2].p_size =
-	    dl->d_secperunit;
-	dl->d_partitions[0].p_offset = dl->d_partitions[2].p_offset = 0;
-	dl->d_interleave = dl->d_headswitch = 1;
-=======
 	DL_SETPSIZE(&dl->d_partitions[0], DL_GETDSIZE(dl));
 	DL_SETPSIZE(&dl->d_partitions[2], DL_GETDSIZE(dl));
 	    
 	DL_SETPOFFSET(&dl->d_partitions[0], 0);
 	DL_SETPOFFSET(&dl->d_partitions[2], 0);
 	dl->d_version = 1;
->>>>>>> origin/master
 	dl->d_magic = dl->d_magic2 = DISKMAGIC;
 	dl->d_checksum = dkcksum(dl);
 }

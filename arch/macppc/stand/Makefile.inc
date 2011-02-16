@@ -8,7 +8,7 @@ KERN_AS=	library
 
 S=$(.CURDIR)/../../../$(R)
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj) && !defined(NOMACHINE)
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj) && !defined(NOMACHINE)
 .BEGIN:
 	@([ -h machine ] || ln -s $(S)/arch/$(MACHINE)/include machine)
 .endif

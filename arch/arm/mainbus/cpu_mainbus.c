@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu_mainbus.c,v 1.1 2004/01/15 01:19:51 drahn Exp $	*/
+/*	$OpenBSD: cpu_mainbus.c,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
 /*	$NetBSD: cpu_mainbus.c,v 1.3 2002/01/05 22:41:48 chris Exp $	*/
 
 /*

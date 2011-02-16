@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_de.c,v 1.18 2005/12/10 11:45:43 miod Exp $	*/
-=======
 /*	$OpenBSD: if_de.c,v 1.22 2008/10/09 00:43:48 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*

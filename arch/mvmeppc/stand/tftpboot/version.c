@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.2 1998/08/22 08:38:05 smurph Exp $ */
+/*	$OpenBSD: version.c,v 1.1 2001/06/26 21:58:10 smurph Exp $ */
 
 /*
  * make a random change to this file when you want the bootblock

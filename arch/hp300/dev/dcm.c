@@ -1501,11 +1501,11 @@ dcm_console_scan(scode, va, arg)
 
 	switch (dcm->dcm_rsid) {
 	case DCMID:
-		pri = CN_NORMAL;
+		pri = CN_LOWPRI;
 		break;
 
 	case DCMID|DCMCON:
-		pri = CN_REMOTE;
+		pri = CN_HIGHPRI;
 		break;
 
 	default:

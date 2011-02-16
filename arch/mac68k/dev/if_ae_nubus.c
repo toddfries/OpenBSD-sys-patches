@@ -378,7 +378,7 @@ ae_nubus_attach(parent, self, aux)
 	}
 
 	/* make sure interrupts are vectored to us */
-	add_nubus_intr(na->slot, dp8390_intr, sc, sc->sc_dev.dv_xname);
+	add_nubus_intr(na->slot, IPL_NET, dp8390_intr, sc, sc->sc_dev.dv_xname);
 }
 
 static int

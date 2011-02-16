@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: conf.c,v 1.42 2005/07/17 12:21:28 miod Exp $	*/
-=======
 /*	$OpenBSD: conf.c,v 1.56 2011/01/14 19:04:08 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -55,6 +51,7 @@
 
 #include <machine/conf.h>
 
+#include "bio.h"
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
@@ -250,13 +247,13 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NSTTY,stty),	/* 102: spif */
 	cdev_gen_init(NSBPP,sbpp),	/* 103: spif */
 	cdev_bpp_init(NBPP,bpp),	/* 104: bpp */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 105: packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 105: packet filter */
 	cdev_disk_init(NRD,rd),		/* 106: ram disk driver */
 	cdev_scf_init(NSCF,scf),	/* 107: sysconfig regs */
 	cdev_flash_init(NFLASH,flash),	/* 108: flash memory */
 	cdev_notdef(),			/* 109: was /dev/tcx */
 	cdev_disk_init(NVND,vnd),	/* 110: vnode disk driver */
-	cdev_bpftun_init(NTUN,tun),	/* 111: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 111: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 112: loadable module driver */
 	cdev_lkm_dummy(),		/* 113 */
 	cdev_lkm_dummy(),		/* 114 */
@@ -269,7 +266,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 121 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 122: Kernel symbols device */
 	cdev_disk_init(NRAID,raid),     /* 123: RAIDframe disk driver */
-	cdev_notdef(),			/* 124 */
+	cdev_bio_init(NBIO,bio),	/* 124: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 125: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
 	cdev_disk_init(1,diskmap),	/* 129: disk mapper */

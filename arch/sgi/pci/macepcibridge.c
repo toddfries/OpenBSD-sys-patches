@@ -56,7 +56,6 @@
 #include <uvm/uvm.h>
 
 #include <machine/autoconf.h>
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/vmparam.h>
 
@@ -68,6 +67,7 @@
 #include <dev/cardbus/rbus.h>
 
 #include <mips64/archtype.h>
+#include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
 #include <sgi/localbus/macebusvar.h>
 #include <sgi/pci/macepcibrvar.h>
@@ -171,7 +171,9 @@ struct machine_bus_dma_tag mace_pci_bus_dma_tag = {
 	_dmamem_map,
 	_dmamem_unmap,
 	_dmamem_mmap,
-	NULL
+	mace_pcibr_pa_to_device,
+	mace_pcibr_device_to_pa,
+	CRIME_MEMORY_MASK
 };
 
 const struct _perr_map {

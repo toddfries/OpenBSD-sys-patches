@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: z8530var.h,v 1.2 2003/06/02 23:27:55 millert Exp $	*/
-=======
 /*	$OpenBSD: z8530var.h,v 1.4 2009/04/10 20:53:54 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: z8530var.h,v 1.1 1997/10/18 00:01:30 gwr Exp $	*/
 
 /*

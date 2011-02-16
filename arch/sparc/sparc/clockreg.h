@@ -1,4 +1,4 @@
-/*	$OpenBSD: clockreg.h,v 1.4 2006/06/23 19:54:30 kettenis Exp $	*/
+/*	$OpenBSD: clockreg.h,v 1.5 2007/04/10 17:47:55 miod Exp $	*/
 /*	$NetBSD: clockreg.h,v 1.5 1994/11/20 20:54:07 deraadt Exp $ */
 
 /*

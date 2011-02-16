@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: agten.c,v 1.9 2005/03/23 17:16:34 miod Exp $	*/
-=======
 /*	$OpenBSD: agten.c,v 1.12 2008/12/26 22:30:21 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.
  * All rights reserved.

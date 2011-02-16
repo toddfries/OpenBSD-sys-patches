@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: spinlock.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
 
 #ifndef _MACHINE_SPINLOCK_H_
 #define _MACHINE_SPINLOCK_H_

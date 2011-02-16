@@ -34,7 +34,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 

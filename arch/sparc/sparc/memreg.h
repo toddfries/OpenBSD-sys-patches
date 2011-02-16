@@ -1,4 +1,4 @@
-/*	$OpenBSD: memreg.h,v 1.7 2003/05/13 22:25:33 miod Exp $	*/
+/*	$OpenBSD: memreg.h,v 1.8 2003/06/02 23:27:55 millert Exp $	*/
 /*	$NetBSD: memreg.h,v 1.4 1996/03/31 22:52:13 pk Exp $ */
 
 /*

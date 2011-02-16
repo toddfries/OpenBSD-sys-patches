@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fpu_implode.c,v 1.4 2002/03/14 01:26:43 millert Exp $	*/
-=======
 /*	$OpenBSD: fpu_implode.c,v 1.7 2010/05/23 11:40:30 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: fpu_implode.c,v 1.3 1996/03/14 19:41:59 christos Exp $ */
 
 /*

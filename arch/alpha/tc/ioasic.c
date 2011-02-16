@@ -213,7 +213,7 @@ void
 ioasic_intr_establish(ioa, cookie, level, func, arg, name)
 	struct device *ioa;
 	void *cookie, *arg;
-	tc_intrlevel_t level;
+	int level;
 	int (*func)(void *);
 	const char *name;
 {

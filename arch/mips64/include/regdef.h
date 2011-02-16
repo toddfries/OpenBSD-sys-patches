@@ -1,4 +1,4 @@
-/*	$OpenBSD: regdef.h,v 1.2 2004/09/09 22:21:41 pefo Exp $	*/
+/*	$OpenBSD: regdef.h,v 1.3 2005/08/07 07:29:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993

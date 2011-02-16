@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: conf.c,v 1.3 2005/05/09 14:09:20 uwe Exp $	*/
-=======
 /*	$OpenBSD: conf.c,v 1.7 2010/12/06 22:51:46 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

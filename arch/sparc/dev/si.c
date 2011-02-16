@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: si.c,v 1.24 2006/12/10 16:15:03 miod Exp $	*/
-=======
 /*	$OpenBSD: si.c,v 1.35 2010/06/28 18:31:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: si.c,v 1.38 1997/08/27 11:24:20 bouyer Exp $	*/
 
 /*-
@@ -82,7 +78,7 @@
  * reselection failing on Sun Shoebox-type configurations where
  * there are multiple non-SCSI devices behind Emulex or Adaptec
  * bridges.  These devices pre-date the SCSI-I spec, and might not
- * bahve the way the 5380 code expects.  For this reason, only
+ * behave the way the 5380 code expects.  For this reason, only
  * DMA is enabled by default in this driver.
  *
  *	Jason R. Thorpe <thorpej@NetBSD.ORG>
@@ -111,14 +107,6 @@
 
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/sparc/cpuvar.h>
-
-#ifndef DDB
-#define	Debugger()
-#endif
-
-#ifndef DEBUG
-#define DEBUG XXX
-#endif
 
 #define COUNT_SW_LEFTOVERS	XXX	/* See sw DMA completion code */
 
@@ -217,10 +205,10 @@ void si_obio_intr_on(struct ncr5380_softc *);
 void si_obio_intr_off(struct ncr5380_softc *);
 
 static struct scsi_adapter	si_ops = {
-	ncr5380_scsi_cmd,		/* scsi_cmd()		*/
-	si_minphys,			/* scsi_minphys()	*/
-	NULL,				/* open_target_lu()	*/
-	NULL,				/* close_target_lu()	*/
+	ncr5380_scsi_cmd,		/* scsi_cmd() */
+	si_minphys,			/* scsi_minphys() */
+	NULL,				/* probe_dev() */
+	NULL,				/* free_dev() */
 };
 
 /* The Sun SCSI-3 VME controller. */
@@ -492,7 +480,9 @@ si_minphys(struct buf *bp, struct scsi_link *sl)
 #ifdef DEBUG
 		if (si_debug) {
 			printf("si_minphys len = 0x%x.\n", MAX_DMA_LEN);
+#ifdef DDB
 			Debugger();
+#endif
 		}
 #endif
 		bp->b_bcount = MAX_DMA_LEN;
@@ -541,9 +531,11 @@ si_intr(void *arg)
 #ifdef DEBUG
 		if (!claimed) {
 			printf("si_intr: spurious from SBC\n");
+#ifdef DDB
 			if (si_debug & 4) {
 				Debugger();	/* XXX */
 			}
+#endif
 		}
 #endif
 	}
@@ -636,7 +628,9 @@ si_dma_alloc(ncr_sc)
 
 	/* If the DMA start addr is misaligned then do PIO */
 	if ((addr & 1) || (xlen & 1)) {
+#ifdef DEBUG
 		printf("si_dma_alloc: misaligned.\n");
+#endif
 		return;
 	}
 
@@ -904,7 +898,9 @@ si_vme_dma_start(ncr_sc)
 	if (si->fifo_count != xlen) {
 		printf("si_dma_start: Fifo_count=0x%x, xlen=0x%x\n",
 		    si->fifo_count, xlen);
+#ifdef DDB
 		Debugger();
+#endif
 	}
 #endif
 

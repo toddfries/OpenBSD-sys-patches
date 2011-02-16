@@ -88,7 +88,7 @@ vaddr_t virtual_avail = VM_MIN_KERNEL_ADDRESS;
 vaddr_t virtual_end = VM_MAX_KERNEL_ADDRESS;
 
 
-#ifdef	DEBUG
+#ifdef	PMAPDEBUG
 /*
  * conditional debugging
  */
@@ -880,22 +880,7 @@ pmap_collect(pmap_t pmap)
 	paddr_t pa;
 	int s;
 
-#ifdef DEBUG
-	if (pmap_con_dbg & CD_EXP)
-		printf ("(pmap_expand: %x) map %x v %x\n", curproc, pmap, v);
-#endif
-
-	/* XXX */
-	pdt_vaddr = uvm_km_zalloc(kernel_map, PAGE_SIZE);
-	if (pmap_extract(kernel_pmap, pdt_vaddr, &pdt_paddr) == FALSE)
-		panic("pmap_expand: pmap_extract failed");
-
-	/* memory for page tables should not be writeback or local */
-	pmap_cache_ctrl(kernel_pmap,
-	    pdt_vaddr, pdt_vaddr + PAGE_SIZE, CACHE_WT);
-
-	spl = splvm();
-	PMAP_LOCK(pmap);
+	DPRINTF(CD_COL, ("pmap_collect(%p)\n", pmap));
 
 	s = splvm();
 	for (sdt = pmap->pm_stab, va = 0, u = SDT_ENTRIES; u != 0;
@@ -911,12 +896,10 @@ pmap_collect(pmap_t pmap)
 		/* found a suitable pte page to reclaim */
 		pmap_remove_range(pmap, va, va + (1 << SDT_SHIFT));
 
-#ifdef DEBUG
-		if (pmap_con_dbg & CD_EXP)
-			printf("(pmap_expand: %x) table has already been allocated\n", curproc);
-#endif
-		splx(spl);
-		return;
+		pa = *sdt & PG_FRAME;
+		*sdt = SG_NV;
+		pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_DFL);
+		uvm_pagefree(PHYS_TO_VM_PAGE(pa));
 	}
 	splx(s);
 
@@ -944,14 +927,8 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
 	struct vm_page *pg;
 
-#ifdef DEBUG
-	if (pmap_con_dbg & CD_ENT) {
-		if (pmap == kernel_pmap)
-			printf("(pmap_enter: %x) pmap kernel va %x pa %x\n", curproc, va, pa);
-		else
-			printf("(pmap_enter: %x) pmap %x va %x pa %x\n", curproc, pmap, va, pa);
-	}
-#endif
+	DPRINTF(CD_ENT, ("pmap_enter(%p, %p, %p, %x, %x)\n",
+	    pmap, va, pa, prot, flags));
 
 	template = m88k_protection(prot);
 
@@ -1002,13 +979,12 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 			 */
 			if (pvl->pv_pmap == NULL) {
 				/*
-				 *	No mappings yet
+				 * No mappings yet.
 				 */
 				pvl->pv_va = va;
 				pvl->pv_pmap = pmap;
 				pvl->pv_next = NULL;
 				pvl->pv_flags = 0;
-
 			} else {
 				/*
 				 * Add new pv_entry after header.
@@ -1063,11 +1039,6 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	 */
 	if (pa >= last_addr)
 		template |= CACHE_INH;
-
-	if (flags & VM_PROT_WRITE)
-		template |= PG_M_U;
-	else if (flags & VM_PROT_ALL)
-		template |= PG_U;
 
 	/*
 	 * Invalidate pte temporarily to avoid being written
@@ -1634,7 +1605,10 @@ pmap_unsetbit(struct vm_page *pg, int bit)
 	/*
 	 * Clear saved attributes
 	 */
-	pvl->pv_flags &= ~bit;
+	if (pvl->pv_flags & bit) {
+		pvl->pv_flags ^= bit;
+		rv = TRUE;
+	}
 
 	if (pvl->pv_pmap != NULL) {
 		/* for each listed pmap, update the specified bit */

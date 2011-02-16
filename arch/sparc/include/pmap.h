@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pmap.h,v 1.39 2005/04/04 23:40:02 miod Exp $	*/
-=======
 /*	$OpenBSD: pmap.h,v 1.50 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pmap.h,v 1.30 1997/08/04 20:00:47 pk Exp $ */
 
 /*
@@ -131,6 +127,22 @@
 #define NKREG	((int)((-(unsigned)VM_MIN_KERNEL_ADDRESS) / NBPRG))	/* 8 */
 #define NUREG	(256 - NKREG)					      /* 248 */
 
+struct regmap {
+	struct segmap	*rg_segmap;	/* point to NSGPRG PMEGs */
+	int		*rg_seg_ptps; 	/* SRMMU-edible segment tables (NULL
+					 * indicates invalid region (4m) */
+	smeg_t		rg_smeg;	/* the MMU region number (4c) */
+	u_char		rg_nsegmap;	/* number of valid PMEGS */
+};
+
+struct segmap {
+	int	*sg_pte;		/* points to NPTESG PTEs */
+	pmeg_t	sg_pmeg;		/* the MMU segment number (4c) */
+	u_char	sg_npte;		/* number of valid PTEs per seg */
+};
+
+#ifdef _KERNEL
+
 TAILQ_HEAD(mmuhd,mmuentry);
 
 /*
@@ -159,20 +171,6 @@ struct pmap {
 	int		pm_gap_end;	/* no valid mapping until here */
 
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
-};
-
-struct regmap {
-	struct segmap	*rg_segmap;	/* point to NSGPRG PMEGs */
-	int		*rg_seg_ptps; 	/* SRMMU-edible segment tables (NULL
-					 * indicates invalid region (4m) */
-	smeg_t		rg_smeg;	/* the MMU region number (4c) */
-	u_char		rg_nsegmap;	/* number of valid PMEGS */
-};
-
-struct segmap {
-	int	*sg_pte;		/* points to NPTESG PTEs */
-	pmeg_t	sg_pmeg;		/* the MMU segment number (4c) */
-	u_char	sg_npte;		/* number of valid PTEs per seg */
 };
 
 typedef struct pmap *pmap_t;
@@ -218,8 +216,6 @@ struct kvm_cpustate {
 }/*not yet used*/;
 #endif
 
-#ifdef _KERNEL
-
 #define PMAP_NULL	((pmap_t)0)
 
 extern struct pmap	kernel_pmap_store;
@@ -260,7 +256,7 @@ extern struct pmap	kernel_pmap_store;
 #define PMAP_IOENC(io)	(CPU_ISSUN4M ? PMAP_IOENC_SRMMU(io) : PMAP_IOENC_4(io))
 
 int             pmap_dumpsize(void);
-int             pmap_dumpmmu(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t);
+int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t);
 
 #define	pmap_kernel()	(&kernel_pmap_store)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
@@ -286,7 +282,7 @@ vaddr_t		pmap_map(vaddr_t, paddr_t, paddr_t, int);
 void		pmap_reference(pmap_t);
 void		pmap_release(pmap_t);
 void		pmap_remove(pmap_t, vaddr_t, vaddr_t);
-int		pmap_page_index(paddr_t);
+void		pmap_remove_holes(struct vm_map *);
 void		pmap_virtual_space(vaddr_t *, vaddr_t *);
 void		pmap_redzone(void);
 void		kvm_setcache(caddr_t, int, int);

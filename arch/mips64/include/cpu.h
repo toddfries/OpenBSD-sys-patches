@@ -504,7 +504,8 @@ void cpu_startclock(struct cpu_info *);
  * CTL_MACHDEP definitions.
  */
 #define	CPU_ALLOWAPERTURE	1	/* allow mmap of /dev/xf86 */
-#define	CPU_MAXID		2	/* number of valid machdep ids */
+#define	CPU_KBDRESET		2	/* keyboard reset */
+#define	CPU_MAXID		3	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES {			\
 	{ 0, 0 },				\
@@ -542,7 +543,7 @@ void cpu_startclock(struct cpu_info *);
 #define	MIPS_LOONGSON2	0x63	/* STC LoongSon2 CPU		ISA III */
 
 /*
- * MIPS FPU types. Only soft, rest is teh same as cpu type.
+ * MIPS FPU types. Only soft, rest is the same as cpu type.
  */
 #define	MIPS_SOFT	0x00	/* Software emulation		ISA I   */
 

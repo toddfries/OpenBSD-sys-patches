@@ -1,4 +1,4 @@
-/*	$OpenBSD: sid.h,v 1.14 2006/03/04 19:33:21 miod Exp $	*/
+/*	$OpenBSD: sid.h,v 1.15 2006/07/19 20:22:36 miod Exp $	*/
 /*	$NetBSD: sid.h,v 1.12 1999/12/11 17:55:13 ragge Exp $	*/
 
 /*

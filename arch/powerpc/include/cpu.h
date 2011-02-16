@@ -50,14 +50,15 @@ struct cpu_info {
 	struct pmap *ci_curpm;
 	struct proc *ci_fpuproc;
 	struct proc *ci_vecproc;
-	struct pcb *ci_idle_pcb;	/* PA of our idle pcb */
 	int ci_cpuid;
 
-	volatile int ci_astpending;
 	volatile int ci_want_resched;
 	volatile int ci_cpl;
 	volatile int ci_iactive;
+#define		CI_IACTIVE_PROCESSING_SOFT	1
+#define		CI_IACTIVE_PROCESSING_HARD	2
 	volatile int ci_ipending;
+
 	int ci_intrdepth;
 	char *ci_intstk;
 #define CPUSAVE_LEN	8
@@ -109,7 +110,7 @@ cpu_number(void)
 {
 	int pir;
 
-	__asm ("mfspr %0,1023" : "=r"(pir));
+	pir = curcpu()->ci_cpuid;
 	return pir;
 }
 

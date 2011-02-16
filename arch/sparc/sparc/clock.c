@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: clock.c,v 1.23 2006/06/26 20:21:02 kettenis Exp $	*/
-=======
 /*	$OpenBSD: clock.c,v 1.26 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.52 1997/05/24 20:16:05 pk Exp $ */
 
 /*

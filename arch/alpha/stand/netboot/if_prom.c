@@ -244,7 +244,7 @@ reallypunt:
 	printf("\n");
 	printf("Boot device name was: \"%s\"\n", devname);
 	printf("\n");
-	printf("Your firmware may be too old to network-boot OpenBSD/Alpha,\n");
+	printf("Your firmware may be too old to network-boot OpenBSD/alpha,\n");
 	printf("or you might have to hard-code an ethernet address into\n");
 	printf("your network boot block with setnetbootinfo(8).\n");
 	halt();

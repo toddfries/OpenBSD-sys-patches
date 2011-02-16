@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: devreg.c,v 1.2 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: devreg.c,v 1.6 2006/03/04 01:13:35 uwe Exp $	*/
 
 /*-

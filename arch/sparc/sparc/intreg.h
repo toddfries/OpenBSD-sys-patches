@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intreg.h,v 1.7 2005/04/19 21:30:20 miod Exp $	*/
-=======
 /*	$OpenBSD: intreg.h,v 1.11 2010/07/10 19:32:25 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: intreg.h,v 1.6 1997/07/22 20:19:10 pk Exp $ */
 
 /*

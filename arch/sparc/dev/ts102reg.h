@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ts102reg.h,v 1.6 2005/07/02 09:15:42 miod Exp $	*/
-=======
 /*	$OpenBSD: ts102reg.h,v 1.8 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ts102reg.h,v 1.7 2002/09/29 23:23:58 wiz Exp $ */
 
 /*-

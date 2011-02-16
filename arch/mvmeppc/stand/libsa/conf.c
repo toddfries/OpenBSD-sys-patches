@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.2 1998/08/22 08:57:29 smurph Exp $	*/
+/*	$OpenBSD: conf.c,v 1.1 2001/06/26 21:58:07 smurph Exp $	*/
 
 #include <sys/types.h>
 #include <machine/prom.h>

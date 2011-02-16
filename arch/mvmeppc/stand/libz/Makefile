@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1998/08/22 06:39:14 smurph Exp $
+#	$OpenBSD: Makefile,v 1.1 2001/06/26 21:58:08 smurph Exp $
 
 S=${.CURDIR}/../../../..
 ZDST=${.OBJDIR}

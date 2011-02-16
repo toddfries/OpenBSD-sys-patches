@@ -60,7 +60,6 @@
 #include <machine/cpu.h>
 #include <machine/trap.h>
 
-extern void proc_do_uret(struct proc *);
 extern void savectx(struct pcb *);
 extern void switch_exit(struct proc *);
 
@@ -82,10 +81,9 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	void (*func)(void *);
 	void *arg;
 {
-	struct switchframe *p2sf;
 	struct ksigframe {
 		void (*func)(void *);
-		void *proc;
+		void *arg;
 	} *ksfp;
 	extern void proc_trampoline(void);
 
@@ -103,31 +101,20 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	p2->p_md.md_tf = (struct trapframe *)USER_REGS(p2);
 
 	/*
-	 * Create a switch frame for proc 2
-	 */
-	p2sf = (struct switchframe *)((char *)p2->p_addr + USPACE - 8) - 1;
-
-	p2sf->sf_pc = (u_int)proc_do_uret;
-	p2sf->sf_proc = p2;
-	p2->p_addr->u_pcb.kernel_state.pcb_sp = (u_int)p2sf;
-
-	/*
 	 * If specified, give the child a different stack.
 	 */
 	if (stack != NULL)
 		USER_REGS(p2)->r[31] = (u_int)stack + stacksize;
 
-	ksfp = (struct ksigframe *)p2->p_addr->u_pcb.kernel_state.pcb_sp - 1;
-
+	ksfp = (struct ksigframe *)((char *)p2->p_addr + USPACE) - 1;
 	ksfp->func = func;
-	ksfp->proc = arg;
+	ksfp->arg = arg;
 
 	/*
 	 * When this process resumes, r31 will be ksfp and
 	 * the process will be at the beginning of proc_trampoline().
 	 * proc_trampoline will execute the function func, pop off
-	 * ksfp frame, and call the function in the switchframe
-	 * now exposed.
+	 * ksfp frame, and resume to userland.
 	 */
 
 	p2->p_addr->u_pcb.kernel_state.pcb_sp = (u_int)ksfp;
@@ -136,20 +123,12 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 
 /*
  * cpu_exit is called as the last action during exit.
- * We release the address space and machine-dependent resources,
- * including the memory for the user structure and kernel stack.
- * Once finished, we call switch_exit, which switches to a temporary
- * pcb and stack and never returns.  We block memory allocation
- * until switch_exit has made things safe again.
  */
 void
 cpu_exit(struct proc *p)
 {
-	splhigh();
-
 	pmap_deactivate(p);
-	switch_exit(p);
-	/* NOTREACHED */
+	sched_exit(p);
 }
 
 /*
@@ -220,22 +199,7 @@ vmapbuf(bp, len)
 	len = round_page(off + len);
 	pmap = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 
-	/*
-	 * You may ask: Why phys_map? kernel_map should be OK - after all,
-	 * we are mapping user va to kernel va or remapping some
-	 * kernel va to another kernel va. The answer is TLB flushing
-	 * when the address gets a new mapping.
-	 */
-
 	ova = kva = uvm_km_valloc_wait(phys_map, len);
-
-	/*
-	 * Flush the TLB for the range [kva, kva + off]. Strictly speaking,
-	 * we should do this in vunmapbuf(), but we do it lazily here, when
-	 * new pages get mapped in.
-	 */
-
-	cmmu_flush_tlb(cpu_number(), 1, kva, btoc(len));
 
 	bp->b_data = (caddr_t)(kva + off);
 	for (pg = atop(len); pg != 0; pg--) {
@@ -269,39 +233,9 @@ vunmapbuf(bp, len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data & PGOFSET;
 	len = round_page(off + len);
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + len);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = 0;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t)from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t)to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
 }

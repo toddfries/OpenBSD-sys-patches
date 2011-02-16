@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: bt445.c,v 1.2 2008/12/26 15:33:40 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  *

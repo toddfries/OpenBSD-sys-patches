@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iommuvar.h,v 1.8 2003/03/06 08:26:08 henric Exp $	*/
-=======
 /*	$OpenBSD: iommuvar.h,v 1.15 2009/05/04 16:48:37 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: iommuvar.h,v 1.9 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*
@@ -41,6 +37,8 @@
 #include <sys/tree.h>
 #endif
 
+#include <sys/mutex.h>
+
 /*
  * per-Streaming Buffer state
  */
@@ -53,8 +51,11 @@ struct strbuf_ctl {
 	 * flush areas are not used other than as a boolean flag to indicate
 	 * the presence of a working and enabled STC.  For inconsistency's
 	 * sake, the "sb" pointers of iommu_state are sometimes used for the
-	 * same purpose.  This should be consolidated.
+	 * same purpose.  This should be consolidated.  DEFINATELY, since
+	 * mutex operations must happen at this level.
 	 */
+	struct mutex		sb_mtx;		/* one flush at a time */
+
 	paddr_t			sb_flushpa;	/* to flush streaming buffers */
 	volatile int64_t	*sb_flush;
 };
@@ -91,6 +92,7 @@ struct iommu_page_map {
 struct iommu_map_state {
 	struct strbuf_flush ims_flush;	/* flush should be first (alignment) */
 	struct strbuf_ctl *ims_sb;	/* Link to parent */
+	struct iommu_state *ims_iommu;
 	int ims_flags;
 	struct iommu_page_map ims_map;	/* map must be last (array at end) */
 };
@@ -106,6 +108,7 @@ struct iommu_state {
 	u_int			is_dvmabase;
 	u_int			is_dvmaend;
 	int64_t			is_cr;		/* Control register value */
+	struct mutex		is_mtx;
 	struct extent		*is_dvmamap;	/* DVMA map for this instance */
 	int			is_flags;
 #define IOMMU_FLUSH_CACHE	0x00000001
@@ -115,9 +118,10 @@ struct iommu_state {
 	/* copies of our parents state, to allow us to be self contained */
 	bus_space_tag_t		is_bustag;	/* our bus tag */
 	bus_space_handle_t	is_iommu;	/* IOMMU registers */
+	uint64_t		is_devhandle;
 };
 
-/* interfaces for PCI/SBUS code */
+/* interfaces for PCI/SBus code */
 void	iommu_init(char *, struct iommu_state *, int, u_int32_t);
 void	iommu_reset(struct iommu_state *);
 paddr_t iommu_extract(struct iommu_state *, bus_addr_t);

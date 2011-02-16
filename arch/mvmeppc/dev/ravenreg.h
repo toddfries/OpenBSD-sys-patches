@@ -1,4 +1,4 @@
-/*	$OpenBSD: ravenreg.h,v 1.3 2004/01/29 10:58:06 miod Exp $ */
+/*	$OpenBSD: ravenreg.h,v 1.4 2004/11/19 22:11:04 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.

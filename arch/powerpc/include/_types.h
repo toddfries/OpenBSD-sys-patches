@@ -118,8 +118,6 @@ typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
 
 /* Feature test macros */
-#define __HAVE_CPUINFO
-#define __HAVE_MUTEX
 #define __HAVE_TIMECOUNTER
 
 #endif	/* _POWERPC__TYPES_H_ */

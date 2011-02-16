@@ -61,7 +61,7 @@
  */
 
 /*
- * MACE MAC-110 ethernet driver
+ * MACE MAC-110 Ethernet driver.
  */
 
 #include "bpfilter.h"
@@ -122,26 +122,26 @@ uint32_t mec_debug = 0xff;
 #endif
 
 /*
- * Transmit descriptor list size
+ * Transmit descriptor list size.
  */
 #define MEC_NTXDESC		64
 #define MEC_NTXDESC_MASK	(MEC_NTXDESC - 1)
 #define MEC_NEXTTX(x)		(((x) + 1) & MEC_NTXDESC_MASK)
 
 /*
- * software state for TX
+ * Software state for TX.
  */
 struct mec_txsoft {
-	struct mbuf *txs_mbuf;		/* head of our mbuf chain */
-	bus_dmamap_t txs_dmamap;	/* our DMA map */
+	struct mbuf *txs_mbuf;		/* Head of our mbuf chain. */
+	bus_dmamap_t txs_dmamap;	/* Our DMA map. */
 	uint32_t txs_flags;
-#define MEC_TXS_BUFLEN_MASK	0x0000007f	/* data len in txd_buf */
-#define MEC_TXS_TXDBUF		0x00000080	/* txd_buf is used */
-#define MEC_TXS_TXDPTR1		0x00000100	/* txd_ptr[0] is used */
+#define MEC_TXS_BUFLEN_MASK	0x0000007f	/* Data len in txd_buf. */
+#define MEC_TXS_TXDBUF		0x00000080	/* txd_buf is used. */
+#define MEC_TXS_TXDPTR1		0x00000100	/* txd_ptr[0] is used. */
 };
 
 /*
- * Transmit buffer descriptor
+ * Transmit buffer descriptor.
  */
 #define MEC_TXDESCSIZE		128
 #define MEC_NTXPTR		3
@@ -155,53 +155,53 @@ struct mec_txsoft {
 
 struct mec_txdesc {
 	volatile uint64_t txd_cmd;
-#define MEC_TXCMD_DATALEN	0x000000000000ffff	/* data length */
-#define MEC_TXCMD_BUFSTART	0x00000000007f0000	/* start byte offset */
+#define MEC_TXCMD_DATALEN	0x000000000000ffff	/* Data length. */
+#define MEC_TXCMD_BUFSTART	0x00000000007f0000	/* Start byte offset. */
 #define  TXCMD_BUFSTART(x)	((x) << 16)
-#define MEC_TXCMD_TERMDMA	0x0000000000800000	/* stop DMA on abort */
-#define MEC_TXCMD_TXINT		0x0000000001000000	/* INT after TX done */
-#define MEC_TXCMD_PTR1		0x0000000002000000	/* valid 1st txd_ptr */
-#define MEC_TXCMD_PTR2		0x0000000004000000	/* valid 2nd txd_ptr */
-#define MEC_TXCMD_PTR3		0x0000000008000000	/* valid 3rd txd_ptr */
-#define MEC_TXCMD_UNUSED	0xfffffffff0000000ULL	/* should be zero */
+#define MEC_TXCMD_TERMDMA	0x0000000000800000	/* Stop DMA on abort. */
+#define MEC_TXCMD_TXINT		0x0000000001000000	/* INT after TX done. */
+#define MEC_TXCMD_PTR1		0x0000000002000000	/* Valid 1st txd_ptr. */
+#define MEC_TXCMD_PTR2		0x0000000004000000	/* Valid 2nd txd_ptr. */
+#define MEC_TXCMD_PTR3		0x0000000008000000	/* Valid 3rd txd_ptr. */
+#define MEC_TXCMD_UNUSED	0xfffffffff0000000ULL	/* Should be zero. */
 
 #define txd_stat	txd_cmd
-#define MEC_TXSTAT_LEN		0x000000000000ffff	/* TX length */
-#define MEC_TXSTAT_COLCNT	0x00000000000f0000	/* collision count */
+#define MEC_TXSTAT_LEN		0x000000000000ffff	/* TX length. */
+#define MEC_TXSTAT_COLCNT	0x00000000000f0000	/* Collision count. */
 #define MEC_TXSTAT_COLCNT_SHIFT	16
-#define MEC_TXSTAT_LATE_COL	0x0000000000100000	/* late collision */
+#define MEC_TXSTAT_LATE_COL	0x0000000000100000	/* Late collision. */
 #define MEC_TXSTAT_CRCERROR	0x0000000000200000	/* */
 #define MEC_TXSTAT_DEFERRED	0x0000000000400000	/* */
-#define MEC_TXSTAT_SUCCESS	0x0000000000800000	/* TX complete */
+#define MEC_TXSTAT_SUCCESS	0x0000000000800000	/* TX complete. */
 #define MEC_TXSTAT_TOOBIG	0x0000000001000000	/* */
 #define MEC_TXSTAT_UNDERRUN	0x0000000002000000	/* */
 #define MEC_TXSTAT_COLLISIONS	0x0000000004000000	/* */
 #define MEC_TXSTAT_EXDEFERRAL	0x0000000008000000	/* */
 #define MEC_TXSTAT_COLLIDED	0x0000000010000000	/* */
-#define MEC_TXSTAT_UNUSED	0x7fffffffe0000000ULL	/* should be zero */
-#define MEC_TXSTAT_SENT		0x8000000000000000ULL	/* packet sent */
+#define MEC_TXSTAT_UNUSED	0x7fffffffe0000000ULL	/* Should be zero. */
+#define MEC_TXSTAT_SENT		0x8000000000000000ULL	/* Packet sent. */
 
 	uint64_t txd_ptr[MEC_NTXPTR];
-#define MEC_TXPTR_UNUSED2	0x0000000000000007	/* should be zero */
-#define MEC_TXPTR_DMAADDR	0x00000000fffffff8	/* TX DMA address */
-#define MEC_TXPTR_LEN		0x0000ffff00000000ULL	/* buffer length */
+#define MEC_TXPTR_UNUSED2	0x0000000000000007	/* Should be zero. */
+#define MEC_TXPTR_DMAADDR	0x00000000fffffff8	/* TX DMA address. */
+#define MEC_TXPTR_LEN		0x0000ffff00000000ULL	/* Buffer length. */
 #define  TXPTR_LEN(x)		((uint64_t)(x) << 32)
-#define MEC_TXPTR_UNUSED1	0xffff000000000000ULL	/* should be zero */
+#define MEC_TXPTR_UNUSED1	0xffff000000000000ULL	/* Should be zero. */
 
 	uint8_t txd_buf[MEC_TXD_BUFSIZE];
 };
 
 /*
- * Receive buffer size
+ * Receive buffer size.
  */
 #define MEC_NRXDESC		16
 #define MEC_NRXDESC_MASK	(MEC_NRXDESC - 1)
 #define MEC_NEXTRX(x)		(((x) + 1) & MEC_NRXDESC_MASK)
 
 /*
- * Receive buffer description
+ * Receive buffer description.
  */
-#define MEC_RXDESCSIZE		4096	/* umm, should be 4kbyte aligned */
+#define MEC_RXDESCSIZE		4096	/* Umm, should be 4kbyte aligned. */
 #define MEC_RXD_NRXPAD		3
 #define MEC_RXD_DMAOFFSET	(1 + MEC_RXD_NRXPAD)
 #define MEC_RXD_BUFOFFSET	(MEC_RXD_DMAOFFSET * sizeof(uint64_t))
@@ -209,37 +209,37 @@ struct mec_txdesc {
 
 struct mec_rxdesc {
 	volatile uint64_t rxd_stat;
-#define MEC_RXSTAT_LEN		0x000000000000ffff	/* data length */
-#define MEC_RXSTAT_VIOLATION	0x0000000000010000	/* code violation (?) */
-#define MEC_RXSTAT_UNUSED2	0x0000000000020000	/* unknown (?) */
-#define MEC_RXSTAT_CRCERROR	0x0000000000040000	/* CRC error */
-#define MEC_RXSTAT_MULTICAST	0x0000000000080000	/* multicast packet */
-#define MEC_RXSTAT_BROADCAST	0x0000000000100000	/* broadcast packet */
-#define MEC_RXSTAT_INVALID	0x0000000000200000	/* invalid preamble */
-#define MEC_RXSTAT_LONGEVENT	0x0000000000400000	/* long packet */
-#define MEC_RXSTAT_BADPACKET	0x0000000000800000	/* bad packet */
-#define MEC_RXSTAT_CAREVENT	0x0000000001000000	/* carrier event */
-#define MEC_RXSTAT_MATCHMCAST	0x0000000002000000	/* match multicast */
-#define MEC_RXSTAT_MATCHMAC	0x0000000004000000	/* match MAC */
-#define MEC_RXSTAT_SEQNUM	0x00000000f8000000	/* sequence number */
-#define MEC_RXSTAT_CKSUM	0x0000ffff00000000ULL	/* IP checksum */
-#define MEC_RXSTAT_UNUSED1	0x7fff000000000000ULL	/* should be zero */
-#define MEC_RXSTAT_RECEIVED	0x8000000000000000ULL	/* set to 1 on RX */
+#define MEC_RXSTAT_LEN		0x000000000000ffff	/* Data length. */
+#define MEC_RXSTAT_VIOLATION	0x0000000000010000	/* Code violation (?). */
+#define MEC_RXSTAT_UNUSED2	0x0000000000020000	/* Unknown (?). */
+#define MEC_RXSTAT_CRCERROR	0x0000000000040000	/* CRC error. */
+#define MEC_RXSTAT_MULTICAST	0x0000000000080000	/* Multicast packet. */
+#define MEC_RXSTAT_BROADCAST	0x0000000000100000	/* Broadcast packet. */
+#define MEC_RXSTAT_INVALID	0x0000000000200000	/* Invalid preamble. */
+#define MEC_RXSTAT_LONGEVENT	0x0000000000400000	/* Long packet. */
+#define MEC_RXSTAT_BADPACKET	0x0000000000800000	/* Bad packet. */
+#define MEC_RXSTAT_CAREVENT	0x0000000001000000	/* Carrier event. */
+#define MEC_RXSTAT_MATCHMCAST	0x0000000002000000	/* Match multicast. */
+#define MEC_RXSTAT_MATCHMAC	0x0000000004000000	/* Match MAC. */
+#define MEC_RXSTAT_SEQNUM	0x00000000f8000000	/* Sequence number. */
+#define MEC_RXSTAT_CKSUM	0x0000ffff00000000ULL	/* IP checksum. */
+#define MEC_RXSTAT_UNUSED1	0x7fff000000000000ULL	/* Should be zero. */
+#define MEC_RXSTAT_RECEIVED	0x8000000000000000ULL	/* Set to 1 on RX. */
 	uint64_t rxd_pad1[MEC_RXD_NRXPAD];
 	uint8_t  rxd_buf[MEC_RXD_BUFSIZE];
 };
 
 /*
- * control structures for DMA ops
+ * Control structures for DMA ops.
  */
 struct mec_control_data {
 	/*
-	 * TX descriptors and buffers
+	 * TX descriptors and buffers.
 	 */
 	struct mec_txdesc mcd_txdesc[MEC_NTXDESC];
 
 	/*
-	 * RX descriptors and buffers
+	 * RX descriptors and buffers.
 	 */
 	struct mec_rxdesc mcd_rxdesc[MEC_NRXDESC];
 };
@@ -262,36 +262,36 @@ struct mec_control_data {
 #define MEC_CDRXOFF(x)	MEC_CDOFF(mcd_rxdesc[(x)])
 
 /*
- * software state per device
+ * Software state per device.
  */
 struct mec_softc {
-	struct device sc_dev;		/* generic device structures */
-	struct arpcom sc_ac;		/* Ethernet common part */
+	struct device sc_dev;		/* Generic device structures. */
+	struct arpcom sc_ac;		/* Ethernet common part. */
 
 	bus_space_tag_t sc_st;		/* bus_space tag. */
 	bus_space_handle_t sc_sh;	/* bus_space handle. */
 	bus_dma_tag_t sc_dmat;		/* bus_dma tag. */
 
-	struct mii_data sc_mii;		/* MII/media information */
-	int sc_phyaddr;			/* MII address */
-	struct timeout sc_tick_ch;	/* tick timeout */
+	struct mii_data sc_mii;		/* MII/media information. */
+	int sc_phyaddr;			/* MII address. */
+	struct timeout sc_tick_ch;	/* Tick timeout. */
 
-	bus_dmamap_t sc_cddmamap;	/* bus_dma map for control data */
+	bus_dmamap_t sc_cddmamap;	/* bus_dma map for control data. */
 #define sc_cddma	sc_cddmamap->dm_segs[0].ds_addr
 
-	/* pointer to allocalted control data */
+	/* Pointer to allocated control data. */
 	struct mec_control_data *sc_control_data;
 #define sc_txdesc	sc_control_data->mcd_txdesc
 #define sc_rxdesc	sc_control_data->mcd_rxdesc
 
-	/* software state for TX descs */
+	/* Software state for TX descs. */
 	struct mec_txsoft sc_txsoft[MEC_NTXDESC];
 
-	int sc_txpending;		/* number of TX requests pending */
-	int sc_txdirty;			/* first dirty TX descriptor */
-	int sc_txlast;			/* last used TX descriptor */
+	int sc_txpending;		/* Number of TX requests pending. */
+	int sc_txdirty;			/* First dirty TX descriptor. */
+	int sc_txlast;			/* Last used TX descriptor. */
 
-	int sc_rxptr;			/* next ready RX buffer */
+	int sc_rxptr;			/* Next ready RX buffer. */
 };
 
 #define MEC_CDTXADDR(sc, x)	((sc)->sc_cddma + MEC_CDTXOFF(x))
@@ -341,18 +341,13 @@ int	mec_ioctl(struct ifnet *, u_long, caddr_t);
 void	mec_reset(struct mec_softc *);
 void	mec_iff(struct mec_softc *);
 int	mec_intr(void *arg);
-void	mec_stop(struct ifnet *, int);
+void	mec_stop(struct ifnet *);
 void	mec_rxintr(struct mec_softc *, uint32_t);
 void	mec_txintr(struct mec_softc *, uint32_t);
 
 int
 mec_match(struct device *parent, void *match, void *aux)
 {
-	struct confargs *ca = aux;
-
-	if (ca->ca_sys != SGI_O2 || strcmp(ca->ca_name, mec_cd.cd_name))
-		return (0);
-
 	return (1);
 }
 
@@ -363,7 +358,6 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	struct macebus_attach_args *maa = aux;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	uint32_t command;
-	char *macaddr;
 	struct mii_softc *child;
 	bus_dma_segment_t seg;
 	int i, err, rseg;
@@ -395,7 +389,7 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	 * BUS_DMA_COHERENT (which disables cache) may cause some performance
 	 * issue on copying data from the RX buffer to mbuf on normal memory,
 	 * though we have to make sure all bus_dmamap_sync(9) ops are called
-	 * proprely in that case.
+	 * properly in that case.
 	 */
 	if ((err = bus_dmamem_map(sc->sc_dmat, &seg, rseg,
 	    sizeof(struct mec_control_data),
@@ -420,7 +414,7 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_3;
 	}
 
-	/* create TX buffer DMA maps */
+	/* Create TX buffer DMA maps. */
 	for (i = 0; i < MEC_NTXDESC; i++) {
 		if ((err = bus_dmamap_create(sc->sc_dmat,
 		    MCLBYTES, 1, MCLBYTES, 0, 0,
@@ -433,14 +427,10 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 
 	timeout_set(&sc->sc_tick_ch, mec_tick, sc);
 
-	/* get ethernet address from ARCBIOS */
-	if ((macaddr = Bios_GetEnvironmentVariable("eaddr")) == NULL) {
-		printf(": unable to get MAC address!\n");
-		goto fail_4;
-	}
-	enaddr_aton(macaddr, sc->sc_ac.ac_enaddr);
+	/* Use the Ethernet address from the ARCBIOS. */
+	enaddr_aton(bios_enaddr, sc->sc_ac.ac_enaddr);
 
-	/* reset device */
+	/* Reset device. */
 	mec_reset(sc);
 
 	command = bus_space_read_8(sc->sc_st, sc->sc_sh, MEC_MAC_CONTROL);
@@ -449,14 +439,14 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	    (command & MEC_MAC_REVISION) >> MEC_MAC_REVISION_SHIFT,
 	    ether_sprintf(sc->sc_ac.ac_enaddr));
 
-	/* Done, now attach everything */
+	/* Done, now attach everything. */
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = mec_mii_readreg;
 	sc->sc_mii.mii_writereg = mec_mii_writereg;
 	sc->sc_mii.mii_statchg = mec_statchg;
 
-	/* Set up PHY properties */
+	/* Set up PHY properties. */
 	ifmedia_init(&sc->sc_mii.mii_media, 0, mec_mediachange,
 	    mec_mediastatus);
 	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
@@ -464,7 +454,7 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 
 	child = LIST_FIRST(&sc->sc_mii.mii_phys);
 	if (child == NULL) {
-		/* No PHY attached */
+		/* No PHY attached. */
 		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER | IFM_MANUAL,
 		    0, NULL);
 		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER | IFM_MANUAL);
@@ -493,7 +483,7 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 
 	/*
 	 * Free any resources we've allocated during the failed attach
-	 * attempt.  Do this in reverse order and fall though.
+	 * attempt. Do this in reverse order and fall though.
 	 */
  fail_4:
 	for (i = 0; i < MEC_NTXDESC; i++) {
@@ -600,11 +590,11 @@ mec_statchg(struct device *self)
 	control &= ~(MEC_MAC_IPGT | MEC_MAC_IPGR1 | MEC_MAC_IPGR2 |
 	    MEC_MAC_FULL_DUPLEX | MEC_MAC_SPEED_SELECT);
 
-	/* must also set IPG here for duplex stuff ... */
+	/* Must also set IPG here for duplex stuff... */
 	if ((sc->sc_mii.mii_media_active & IFM_FDX) != 0) {
 		control |= MEC_MAC_FULL_DUPLEX;
 	} else {
-		/* set IPG */
+		/* Set IPG. */
 		control |= MEC_MAC_IPG_DEFAULT;
 	}
 
@@ -644,23 +634,23 @@ mec_init(struct ifnet *ifp)
 	struct mec_rxdesc *rxd;
 	int i;
 
-	/* cancel any pending I/O */
-	mec_stop(ifp, 0);
+	/* Cancel any pending I/O. */
+	mec_stop(ifp);
 
-	/* reset device */
+	/* Reset device. */
 	mec_reset(sc);
 
 	/* Setup filter for multicast or promisc mode. */
 	mec_iff(sc);
 
-	/* set the TX ring pointer to the base address */
+	/* Set the TX ring pointer to the base address. */
 	bus_space_write_8(st, sh, MEC_TX_RING_BASE, MEC_CDTXADDR(sc, 0));
 
 	sc->sc_txpending = 0;
 	sc->sc_txdirty = 0;
 	sc->sc_txlast = MEC_NTXDESC - 1;
 
-	/* put RX buffers into FIFO */
+	/* Put RX buffers into FIFO. */
 	for (i = 0; i < MEC_NRXDESC; i++) {
 		rxd = &sc->sc_rxdesc[i];
 		rxd->rxd_stat = 0;
@@ -676,7 +666,7 @@ mec_init(struct ifnet *ifp)
 
 	/*
 	 * MEC_DMA_TX_INT_ENABLE will be set later otherwise it causes
-	 * spurious interrupts when TX buffers are empty
+	 * spurious interrupts when TX buffers are empty.
 	 */
 	bus_space_write_8(st, sh, MEC_DMA_CONTROL,
 	    (MEC_RXD_DMAOFFSET << MEC_DMA_RX_DMA_OFFSET_SHIFT) |
@@ -703,13 +693,13 @@ mec_reset(struct mec_softc *sc)
 	uint64_t address;
 	int i;
 
-	/* reset chip */
+	/* Reset chip. */
 	bus_space_write_8(st, sh, MEC_MAC_CONTROL, MEC_MAC_CORE_RESET);
 	delay(1000);
 	bus_space_write_8(st, sh, MEC_MAC_CONTROL, 0);
 	delay(1000);
 
-	/* set ethernet address */
+	/* Set Ethernet address. */
 	address = 0;
 	for (i = 0; i < ETHER_ADDR_LEN; i++) {
 		address = address << 8;
@@ -801,12 +791,12 @@ mec_start(struct ifnet *ifp)
 		} else {
 			/*
 			 * If the packet won't fit the buffer in txdesc,
-			 * we have to use concatinate pointer to handle it.
+			 * we have to use concatenate pointer to handle it.
 			 * While MEC can handle up to three segments to
-			 * concatinate, MEC requires that both the second and
+			 * concatenate, MEC requires that both the second and
 			 * third segments have to be 8 byte aligned.
 			 * Since it's unlikely for mbuf clusters, we use
-			 * only the first concatinate pointer. If the packet
+			 * only the first concatenate pointer. If the packet
 			 * doesn't fit in one DMA segment, allocate new mbuf
 			 * and copy the packet to it.
 			 *
@@ -841,11 +831,11 @@ mec_start(struct ifnet *ifp)
 				}
 				/*
 				 * Each packet has the Ethernet header, so
-				 * in many case the header isn't 4-byte aligned
+				 * in many cases the header isn't 4-byte aligned
 				 * and data after the header is 4-byte aligned.
 				 * Thus adding 2-byte offset before copying to
 				 * new mbuf avoids unaligned copy and this may
-				 * improve some performance.
+				 * improve performance.
 				 * As noted above, unaligned part has to be
 				 * copied to txdesc buffer so this may cause
 				 * extra copy ops, but for now MEC always
@@ -868,7 +858,7 @@ mec_start(struct ifnet *ifp)
 				}
 			}
 
-			/* handle unaligned part */
+			/* Handle unaligned part. */
 			txdaddr = MEC_TXD_ROUNDUP(dmamap->dm_segs[0].ds_addr);
 			txs->txs_flags = MEC_TXS_TXDPTR1;
 			unaligned =
@@ -914,7 +904,7 @@ mec_start(struct ifnet *ifp)
 			    txdaddr, txdlen));
 
 			/*
-			 * sync the DMA map for TX mbuf
+			 * Sync the DMA map for TX mbuf.
 			 *
 			 * XXX unaligned part doesn't have to be sync'ed,
 			 *     but it's harmless...
@@ -932,12 +922,12 @@ mec_start(struct ifnet *ifp)
 #endif
 
 		/*
-		 * setup the transmit descriptor.
+		 * Setup the transmit descriptor.
 		 */
 
-		/* TXINT bit will be set later on the last packet */
+		/* TXINT bit will be set later on the last packet. */
 		txd->txd_cmd = (len - 1);
-		/* but also set TXINT bit on a half of TXDESC */
+		/* But also set TXINT bit on a half of TXDESC. */
 		if (sc->sc_txpending == (MEC_NTXDESC / 2))
 			txd->txd_cmd |= MEC_TXCMD_TXINT;
 
@@ -967,11 +957,11 @@ mec_start(struct ifnet *ifp)
 		    ("mec_start: len = %d (0x%04x), buflen = %d (0x%02x)\n",
 		    len, len, buflen, buflen));
 
-		/* sync TX descriptor */
+		/* Sync TX descriptor. */
 		MEC_TXDESCSYNC(sc, nexttx,
 		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
-		/* advance the TX pointer. */
+		/* Advance the TX pointer. */
 		sc->sc_txpending++;
 		sc->sc_txlast = nexttx;
 	}
@@ -990,13 +980,13 @@ mec_start(struct ifnet *ifp)
 		MEC_TXCMDSYNC(sc, sc->sc_txlast,
 		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
-		/* start TX */
+		/* Start TX. */
 		bus_space_write_8(st, sh, MEC_TX_RING_PTR,
 		    MEC_NEXTTX(sc->sc_txlast));
 
 		/*
 		 * If the transmitter was idle,
-		 * reset the txdirty pointer and reenable TX interrupt.
+		 * reset the txdirty pointer and re-enable TX interrupt.
 		 */
 		if (opending == 0) {
 			sc->sc_txdirty = firsttx;
@@ -1010,7 +1000,7 @@ mec_start(struct ifnet *ifp)
 }
 
 void
-mec_stop(struct ifnet *ifp, int disable)
+mec_stop(struct ifnet *ifp)
 {
 	struct mec_softc *sc = ifp->if_softc;
 	struct mec_txsoft *txs;
@@ -1024,7 +1014,10 @@ mec_stop(struct ifnet *ifp, int disable)
 	timeout_del(&sc->sc_tick_ch);
 	mii_down(&sc->sc_mii);
 
-	/* release any TX buffers */
+	/* Disable DMA. */
+	bus_space_write_8(sc->sc_st, sc->sc_sh, MEC_DMA_CONTROL, 0);
+
+	/* Release any TX buffers. */
 	for (i = 0; i < MEC_NTXDESC; i++) {
 		txs = &sc->sc_txsoft[i];
 		if ((txs->txs_flags & MEC_TXS_TXDPTR1) != 0) {
@@ -1209,7 +1202,7 @@ mec_intr(void *arg)
 	}
 
 	if (sent) {
-		/* try to get more packets going */
+		/* Try to get more packets going. */
 		mec_start(ifp);
 	}
 
@@ -1254,7 +1247,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 		    (u_int)bus_space_read_8(st, sh, MEC_RX_FIFO)));
 
 		if ((rxstat & MEC_RXSTAT_RECEIVED) == 0) {
-			/* Status not received but fifo counted? Drop it! */
+			/* Status not received but FIFO counted? Drop it! */
 			goto dropit;
 		}
 
@@ -1262,7 +1255,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 
 		if (len < ETHER_MIN_LEN ||
 		    len > ETHER_MAX_LEN) {
-			/* invalid length packet; drop it. */
+			/* Invalid length packet; drop it. */
 			DPRINTF(MEC_DEBUG_RXINTR,
 			    ("mec_rxintr: wrong packet\n"));
  dropit:
@@ -1286,7 +1279,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 		}
 
 		/*
-		 * now allocate an mbuf (and possibly a cluster) to hold
+		 * Now allocate an mbuf (and possibly a cluster) to hold
 		 * the received packet.
 		 */
 		MGETHDR(m, M_DONTWAIT, MT_DATA);
@@ -1307,7 +1300,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 		}
 
 		/*
-		 * Note MEC chip seems to insert 2 byte paddingat the start of
+		 * Note MEC chip seems to insert 2 byte padding at the start of
 		 * RX buffer, but we copy whole buffer to avoid unaligned copy.
 		 */
 		MEC_RXBUFSYNC(sc, i, len + ETHER_ALIGN, BUS_DMASYNC_POSTREAD);
@@ -1316,7 +1309,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 		MEC_RXBUFSYNC(sc, i, ETHER_MAX_LEN, BUS_DMASYNC_PREREAD);
 		m->m_data += ETHER_ALIGN;
 
-		/* put RX buffer into FIFO again */
+		/* Put RX buffer into FIFO again. */
 		rxd->rxd_stat = 0;
 		MEC_RXSTATSYNC(sc, i, BUS_DMASYNC_PREREAD);
 		bus_space_write_8(st, sh, MEC_MCL_RX_FIFO, MEC_CDRXADDR(sc, i));
@@ -1329,7 +1322,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 #if NBPFILTER > 0
 		/*
 		 * Pass this up to any BPF listeners, but only
-		 * pass it up the stack it its for us.
+		 * pass it up the stack if it is for us.
 		 */
 		if (ifp->if_bpf)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
@@ -1339,7 +1332,7 @@ mec_rxintr(struct mec_softc *sc, uint32_t stat)
 		ether_input_mbuf(ifp, m);
 	}
 
-	/* update RX pointer */
+	/* Update RX pointer. */
 	sc->sc_rxptr = i;
 
 	bus_space_write_8(st, sh, MEC_RX_ALIAS,
@@ -1405,13 +1398,13 @@ mec_txintr(struct mec_softc *sc, uint32_t stat)
 		}
 	}
 
-	/* update the dirty TX buffer pointer */
+	/* Update the dirty TX buffer pointer. */
 	sc->sc_txdirty = i;
 	DPRINTF(MEC_DEBUG_INTR,
 	    ("mec_txintr: sc_txdirty = %2d, sc_txpending = %2d\n",
 	    sc->sc_txdirty, sc->sc_txpending));
 
-	/* cancel the watchdog timer if there are no pending TX packets */
+	/* Cancel the watchdog timer if there are no pending TX packets. */
 	if (sc->sc_txpending == 0)
 		ifp->if_timer = 0;
 	else if (!(stat & MEC_INT_TX_EMPTY))

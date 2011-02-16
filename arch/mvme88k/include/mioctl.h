@@ -1,4 +1,4 @@
-/*	$OpenBSD: mioctl.h,v 1.1 1998/12/15 04:45:50 smurph Exp $ */
+/*	$OpenBSD: mioctl.h,v 1.2 2003/06/02 07:06:56 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

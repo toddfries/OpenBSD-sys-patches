@@ -5,7 +5,7 @@
 #
 maxpartitions 16
 
-maxusers 2 8 64
+maxusers 2 8 128
 
 file	arch/macppc/macppc/autoconf.c
 file	arch/macppc/macppc/clock.c
@@ -18,6 +18,7 @@ file	arch/macppc/macppc/mem.c
 file	arch/macppc/macppc/dma.c
 file	arch/macppc/macppc/ofw_machdep.c
 file	arch/macppc/macppc/openfirm.c
+file	arch/macppc/macppc/openprom.c
 file	dev/cninit.c
 file	arch/macppc/macppc/ofwreal.S
 file	arch/macppc/macppc/db_interface.c		ddb
@@ -44,11 +45,7 @@ file	arch/macppc/macppc/mainbus.c			mainbus
 device	cpu
 attach	cpu at mainbus
 file	arch/macppc/macppc/cpu.c
-
-include "../../../dev/ofw/files.ofw"
 file	arch/macppc/macppc/opendev.c
-major	{ofdisk = 4}
-
 
 device	memc {}
 attach	memc at mainbus
@@ -179,19 +176,24 @@ attach	mediabay at macobio
 file	arch/macppc/dev/mediabay.c			mediabay
 
 # Keywest I2C
-device	ki2c: i2cbus
-attach	ki2c at macobio
-attach	ki2c at memc	with ki2c_memc
-file	arch/macppc/dev/ki2c.c				ki2c
+device	kiic: i2cbus
+attach	kiic at macobio
+attach	kiic at memc	with kiic_memc
+file	arch/macppc/dev/kiic.c				kiic
 
 # PMU I2C
-device	pi2c: i2cbus
-attach	pi2c at adb
-file	arch/macppc/dev/pi2c.c				pi2c
+device	piic: i2cbus
+attach	piic at adb
+file	arch/macppc/dev/piic.c				piic
 
 # I2S
 define	i2s
 file	arch/macppc/dev/i2s.c				i2s
+
+# blinkenlights
+device	xlights
+attach	xlights at macobio
+file	arch/macppc/dev/xlights.c			xlights
 
 # snapper audio
 device	snapper: audio, auconv, mulaw, i2s
@@ -270,10 +272,18 @@ include "dev/pcmcia/files.pcmcia"
 include "dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
 # Machine-independent I2C drivers
 #
 include "dev/i2c/files.i2c"
 file	arch/macppc/dev/maci2c.c			i2cbus
+
+device	mem: i2c
+attach	mem at mainbus
 
 #
 # Machine-independent GPIO drivers

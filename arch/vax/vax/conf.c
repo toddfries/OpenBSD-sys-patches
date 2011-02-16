@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: conf.c,v 1.48 2006/07/30 12:32:43 miod Exp $ */
-=======
 /*	$OpenBSD: conf.c,v 1.62 2011/01/14 19:04:08 jasper Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -233,6 +229,7 @@ struct	consdev constab[]={
 #define mmread	mmrw
 #define mmwrite mmrw
 cdev_decl(mm);
+#include "bio.h"
 #include "pty.h"
 
 cdev_decl(hp);
@@ -418,8 +415,8 @@ struct cdevsw	cdevsw[] =
 	cdev_fd_init(1,filedesc),	/* 53: file descriptor pseudo-device */
 	cdev_disk_init(NCCD,ccd),	/* 54: concatenated disk driver */
 	cdev_disk_init(NVND,vnd),	/* 55: vnode disk driver */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 56: berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 57: tunnel filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 56: berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 57: tunnel filter */
 	cdev_disk_init(NHD,hd),		/* 58: HDC9224/RD?? */
 	cdev_disk_init(NSD,sd),		/* 59: SCSI disk */
 	cdev_tape_init(NST,st),		/* 60: SCSI tape */
@@ -434,7 +431,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD, wskbd),	/* 69: keyboards */
 	cdev_mouse_init(NWSMOUSE, wsmouse), /* 70: mice */
 	cdev_disk_init(NRY,ry),		/* 71: VS floppy */
-	cdev_notdef(),			/* 72: was: SCSI bus */
+	cdev_bio_init(NBIO,bio),	/* 72: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 73: RAIDframe disk driver */
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 74: nnpfs communication device */
@@ -467,7 +464,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 2 */
 	NODEV,	/* 3 */
 	0,	/* 4 */
-	1,	/* 5 */
+	NODEV,	/* 5 */
 	NODEV,	/* 6 */
 	NODEV,	/* 7 */
 	NODEV,	/* 8 */
@@ -494,7 +491,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 29 */
 	12,	/* 30 */
 	NODEV,	/* 31 */
-	14,	/* 32 */
+	NODEV,	/* 32 */
 	NODEV,	/* 33 */
 	NODEV,	/* 34 */
 	NODEV,	/* 35 */
@@ -514,7 +511,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 49 */
 	NODEV,	/* 50 */
 	NODEV,	/* 51 */
-	16,	/* 52 */
+	NODEV,	/* 52 */
 	NODEV,	/* 53 */
 	17,	/* 54 */
 	18,	/* 55 */
@@ -533,7 +530,7 @@ int	chrtoblktbl[] = {
 	NODEV,	/* 68 */
 	NODEV,	/* 69 */
 	NODEV,	/* 70 */
-	NODEV,	/* 71 */
+	24,	/* 71 */
 	NODEV,	/* 72 */
 	25,	/* 73 */
 	NODEV,	/* 74 */

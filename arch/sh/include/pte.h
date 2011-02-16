@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: pte.h,v 1.2 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pte.h,v 1.11 2006/03/04 01:55:03 uwe Exp $	*/
 
 /*-

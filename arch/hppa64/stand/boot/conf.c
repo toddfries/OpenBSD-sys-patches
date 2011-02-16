@@ -24,7 +24,7 @@
 #include <lib/libsa/cd9660.h>
 #include <dev/cons.h>
 
-const char version[] = "0.8";
+const char version[] = "0.9";
 int	debug = 0;
 
 struct fs_ops file_system[] = {

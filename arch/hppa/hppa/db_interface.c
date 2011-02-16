@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.31 2004/12/22 20:36:00 mickey Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.32 2005/04/07 00:17:32 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff

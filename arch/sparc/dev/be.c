@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: be.c,v 1.39 2006/03/25 22:41:41 djm Exp $	*/
-=======
 /*	$OpenBSD: be.c,v 1.43 2008/11/28 02:44:17 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

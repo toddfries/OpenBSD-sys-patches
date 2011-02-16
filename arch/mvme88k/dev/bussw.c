@@ -1,4 +1,4 @@
-/*	$OpenBSD: bussw.c,v 1.16 2005/07/18 02:43:25 fgsch Exp $ */
+/*	$OpenBSD: bussw.c,v 1.20 2007/12/13 18:50:10 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  *
@@ -36,7 +36,6 @@
 
 struct bussw_softc {
 	struct device		sc_dev;
-	struct intrhand 	sc_abih;	/* `abort' switch */
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
 };
@@ -54,8 +53,6 @@ struct cfdriver bussw_cd = {
 
 int	bussw_print(void *, const char *);
 int	bussw_scan(struct device *, void *, void *);
-int	busswabort(void *);
-int	busswintr_establish(int, struct intrhand *, const char *);
 
 int
 bussw_match(parent, vcf, args)
@@ -96,6 +93,7 @@ bussw_attach(parent, self, args)
 	struct confargs *ca = args;
 	struct bussw_softc *sc = (struct bussw_softc *)self;
 	bus_space_handle_t ioh;
+	int i;
 
 	if (bus_space_map(ca->ca_iot, ca->ca_paddr, BS_SIZE, 0, &ioh) != 0) {
 		printf(": can't map registers!\n");
@@ -107,20 +105,19 @@ bussw_attach(parent, self, args)
 
 	bus_space_write_1(sc->sc_iot, ioh, BS_VBASE,
 	    bus_space_read_1(sc->sc_iot, ioh, BS_VBASE) | BS_VECBASE);
+
+	/* enable external interrupts */
 	bus_space_write_2(sc->sc_iot, ioh, BS_GCSR,
 	    bus_space_read_2(sc->sc_iot, ioh, BS_GCSR) | BS_GCSR_XIPL);
 
-	/*
-	 * pseudo driver, abort interrupt handler
-	 */
-	sc->sc_abih.ih_fn = busswabort;
-	sc->sc_abih.ih_arg = 0;
-	sc->sc_abih.ih_wantframe = 1;
-	sc->sc_abih.ih_ipl = IPL_NMI;
+	/* disable write posting */
+	for (i = 0; i < 4; i++)
+		bus_space_write_1(sc->sc_iot, ioh, BS_PAR + i,
+		    bus_space_read_1(sc->sc_iot, ioh, BS_PAR + i) & ~BS_PAR_WPEN);
 
-	busswintr_establish(BS_ABORTIRQ, &sc->sc_abih, "abort");
+	/* enable abort switch */
 	bus_space_write_1(sc->sc_iot, ioh, BS_ABORT,
-	    bus_space_read_4(sc->sc_iot, ioh, BS_ABORT) | BS_ABORT_IEN);
+	    bus_space_read_1(sc->sc_iot, ioh, BS_ABORT) | BS_ABORT_IEN);
 
 	printf(": rev %x\n",
 	    bus_space_read_1(sc->sc_iot, ioh, BS_CHIPREV));
@@ -166,34 +163,4 @@ bussw_scan(parent, child, args)
 		return (0);
 	config_attach(parent, cf, &oca, bussw_print);
 	return (1);
-}
-
-int
-busswintr_establish(int vec, struct intrhand *ih, const char *name)
-{
-#ifdef DIAGNOSTIC
-	if (vec < 0 || vec >= BS_NVEC)
-		panic("busswintr_establish: illegal vector 0x%x", vec);
-#endif
-
-	return intr_establish(BS_VECBASE + vec, ih, name);
-}
-
-int
-busswabort(eframe)
-	void *eframe;
-{
-	struct frame *frame = eframe;
-
-	struct bussw_softc *sc = (struct bussw_softc *)bussw_cd.cd_devs[0];
-	u_int8_t abort;
-
-	abort = bus_space_read_1(sc->sc_iot, sc->sc_ioh, BS_ABORT);
-	if (abort & BS_ABORT_INT) {
-		bus_space_write_1(sc->sc_iot, sc->sc_ioh, BS_ABORT,
-		    abort | BS_ABORT_ICLR);
-		nmihand(frame);
-		return 1;
-	}
-	return 0;
 }

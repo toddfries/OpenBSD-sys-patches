@@ -54,7 +54,7 @@ static const struct systypes {
 #define KNOWNSYSTEMS (nitems(sys_types))
 
 /*
- *	ARC Bios trampoline code.
+ * ARCBios trampoline code.
  */
 #define ARC_Call(Name,Offset)	\
 __asm__("\n"			\
@@ -117,7 +117,7 @@ ARC_Call(Bios_TestUnicodeCharacter,	0x8c);
 ARC_Call(Bios_GetDisplayStatus,		0x90);
 
 /*
- *	Simple getchar/putchar interface.
+ * Simple getchar/putchar interface.
  */
 
 int
@@ -127,13 +127,13 @@ getchar()
 	long cnt;
 
 	if (Bios_Read(0, &buf[0], 1, &cnt) != 0)
-		return(-1);
-	return(buf[0] & 255);
+		return (-1);
+
+	return (buf[0] & 255);
 }
 
 void
-putchar(c)
-char c;
+putchar(int c)
 {
 	char buf[4];
 	long cnt;
@@ -142,23 +142,12 @@ char c;
 		buf[0] = '\r';
 		buf[1] = c;
 		cnt = 2;
-		if (displayinfo.CursorYPosition < displayinfo.CursorMaxYPosition)
-			displayinfo.CursorYPosition++;
-	}
-	else {
+	} else {
 		buf[0] = c;
 		cnt = 1;
 	}
-	Bios_Write(1, &buf[0], cnt, &cnt);
-}
 
-void
-bios_putstring(s)
-char *s;
-{
-	while (*s) {
-		putchar(*s++);
-	}
+	Bios_Write(1, &buf[0], cnt, &cnt);
 }
 
 /*
@@ -190,14 +179,13 @@ arcbios_init()
 	 */
 	sid = (arc_sid_t *)Bios_GetSystemId();
 	cf = (arc_config_t *)Bios_GetChild(NULL);
-	if (cf) {
-		for (i = 0; i < KNOWNSYSTEMS; i++) {
-			if (strcmp(sys_types[i].sys_name, (char *)cf->id) != 0)
-				continue;
-			if (sys_types[i].sys_vend &&
-			    strncmp(sys_types[i].sys_vend, sid->vendor, 8) != 0)
-				continue;
-			return (sys_types[i].sys_type);	/* Found it. */
+	if (cf != NULL) {
+		if (bios_is_32bit) {
+			sysid = (char *)(long)cf->id;
+			sysid_len = cf->id_len;
+		} else {
+			sysid = (char *)((arc_config64_t *)cf)->id;
+			sysid_len = ((arc_config64_t *)cf)->id_len;
 		}
 
 		if (sysid_len > 0 && sysid != NULL) {
@@ -232,7 +220,6 @@ arcbios_init()
 	for (;;) ;
 }
 
-
 /*
  *  Decompose the device pathname and find driver.
  *  Returns pointer to remaining filename path in file.
@@ -250,7 +237,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	ecp = cp = fname;
 
 	/*
-	 *  Scan the component list and find device and partition.
+	 * Scan the component list and find device and partition.
 	 */
 	if (strncmp(cp, "dksc(", 5) == 0) {
 		strncpy(devname, "scsi", sizeof(devname));
@@ -291,7 +278,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	}
 
 	/*
-	 *  Dig out the driver.
+	 * Dig out the driver.
 	 */
 	dp = devsw;
 	n = ndevs;
@@ -307,19 +294,18 @@ devopen(struct open_file *f, const char *fname, char **file)
 		}
 		dp++;
 	}
-	return ENXIO;
+	return (ENXIO);
 }
 
 const char *
 boot_get_path_component(const char *p, char *comp, int *no)
 {
-	while (*p && *p != '(') {
+	while (*p && *p != '(')
 		*comp++ = *p++;
-	}
 	*comp = '\0';
 
 	if (*p == NULL)
-		return NULL;
+		return (NULL);
 
 	*no = 0;
 	p++;
@@ -327,9 +313,9 @@ boot_get_path_component(const char *p, char *comp, int *no)
 		if (*p >= '0' && *p <= '9')
 			*no = *no * 10 + *p++ - '0';
 		else
-			return NULL;
+			return (NULL);
 	}
-	return ++p;
+	return (++p);
 }
 
 const char *

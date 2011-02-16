@@ -1,4 +1,4 @@
-/*	$OpenBSD: apcireg.h,v 1.1 1997/04/16 11:55:57 downsj Exp $	*/
+/*	$OpenBSD: apcireg.h,v 1.2 1997/07/06 08:01:45 downsj Exp $	*/
 /*	$NetBSD: apcireg.h,v 1.2 1997/05/12 08:14:01 thorpej Exp $	*/
 
 /*

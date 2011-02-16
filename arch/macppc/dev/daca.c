@@ -54,8 +54,8 @@
 #define daca_softc i2s_softc
 
 /* XXX */
-int ki2c_write(struct device *, int, int, const void *, int);
-int ki2c_writereg(struct device *, int, u_int);
+int kiic_write(struct device *, int, int, const void *, int);
+int kiic_writereg(struct device *, int, u_int);
 
 int daca_getdev(void *, struct audio_device *);
 int daca_match(struct device *, void *, void *);
@@ -176,7 +176,7 @@ void
 daca_init(struct daca_softc *sc)
 {
 	i2s_set_rate(sc, 44100);
-	ki2c_writereg(sc->sc_i2c, 4, 0x01 | 0x02 | 0x04);
+	kiic_writereg(sc->sc_i2c, 4, 0x01 | 0x02 | 0x04);
 }
 
 int
@@ -197,7 +197,7 @@ daca_set_volume(struct daca_softc *sc, int left, int right)
 	left >>= 2;
 	right >>= 2;
 	data = left << 8 | right;
-	ki2c_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2);
+	kiic_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2);
 }
 
 void

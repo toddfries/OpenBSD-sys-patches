@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: boot.c,v 1.15 2006/08/24 20:29:38 miod Exp $ */
-=======
 /*	$OpenBSD: boot.c,v 1.19 2008/08/26 18:36:21 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: boot.c,v 1.18 2002/05/31 15:58:26 ragge Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
@@ -37,11 +33,10 @@
 
 #include <sys/param.h>
 #include <sys/reboot.h>
-#include "lib/libsa/stand.h"
-#ifdef notyet
-#include "lib/libsa/loadfile.h"
-#include "lib/libkern/libkern.h"
-#endif
+
+#include <lib/libkern/libkern.h>
+#include <lib/libsa/stand.h>
+#include <lib/libsa/loadfile.h>
 
 #define V750UCODE(x)    ((x>>8)&255)
 
@@ -93,9 +88,7 @@ Xmain(void)
 	int io;
 	int j, nu;
 	char transition = '\010';
-#ifdef noyet
 	u_long marks[MARK_MAX];
-#endif
 
 	io = 0;
 	skip = 1;
@@ -116,11 +109,7 @@ Xmain(void)
 		transition = ' ';
 
 	askname = bootrpb.rpb_bootr5 & RB_ASKNAME;
-<<<<<<< HEAD
-	printf("\n\r>> OpenBSD/vax boot [%s] [%s] <<\n", "1.12", __DATE__);
-=======
 	printf("\n\r>> OpenBSD/vax boot [%s] <<\n", "1.15");
->>>>>>> origin/master
 	printf(">> Press enter to autoboot now, or any other key to abort:  ");
 	sluttid = getsecs() + 5;
 	senast = 0;
@@ -150,13 +139,10 @@ Xmain(void)
 
 	/* First try to autoboot */
 	if (askname == 0) {
-#ifdef notyet
 		int err;
-#endif
+
 		errno = 0;
 		printf("> boot bsd\n");
-		exec("bsd", 0, 0);
-#ifdef notyet
 		marks[MARK_START] = 0;
 		err = loadfile("bsd", marks,
 		    LOAD_KERNEL|COUNT_KERNEL);
@@ -167,7 +153,6 @@ Xmain(void)
 				      (void *)marks[MARK_SYM],
 				      (void *)marks[MARK_END]);
 		}
-#endif
 		printf("bsd: boot failed: %s\n", strerror(errno));
 	}
 
@@ -212,9 +197,7 @@ boot(char *arg)
 {
 	char *fn = "bsd";
 	int howto, fl, err;
-#ifdef notyet
 	u_long marks[MARK_MAX];
-#endif
 
 	if (arg) {
 		while (*arg == ' ')
@@ -251,18 +234,15 @@ fail:			printf("usage: boot [filename] [-acsd]\n");
 		bootrpb.rpb_bootr5 = howto;
 	}
 load:  
-	exec(fn, 0, 0);
-#ifdef notyet
 	marks[MARK_START] = 0;
 	err = loadfile(fn, marks, LOAD_KERNEL|COUNT_KERNEL);
 	if (err == 0) {
 		machdep_start((char *)marks[MARK_ENTRY],
-				       marks[MARK_NSYM],
+				      marks[MARK_NSYM],
 			      (void *)marks[MARK_START],
-				(void *)marks[MARK_SYM],
-				(void *)marks[MARK_END]);
+			      (void *)marks[MARK_SYM],
+			      (void *)marks[MARK_END]);
 	}
-#endif
 	printf("Boot failed: %s\n", strerror(errno));
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.3 2005/10/12 19:05:43 miod Exp $ */
+/*	$OpenBSD: proc.h,v 1.4 2005/11/28 22:21:15 miod Exp $ */
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pte.h,v 1.4 1997/09/17 06:47:14 downsj Exp $	*/
-=======
 /*	$OpenBSD: pte.h,v 1.8 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pte.h,v 1.19 1997/08/05 11:00:10 pk Exp $ */
 
 /*
@@ -273,7 +269,7 @@ extern int mmu_has_hole;
 #define	PG_TYPE		0x0c000000	/* both type bits */
 
 #define	PG_OBMEM	0x00000000	/* on board memory */
-#define	PG_OBIO		0x04000000	/* on board I/O (incl. Sbus on 4c) */
+#define	PG_OBIO		0x04000000	/* on board I/O (incl. SBus on 4c) */
 #define	PG_VME16	0x08000000	/* 16-bit-data VME space */
 #define	PG_VME32	0x0c000000	/* 32-bit-data VME space */
 #if defined(SUN4D) || defined(SUN4M)

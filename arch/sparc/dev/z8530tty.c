@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: z8530tty.c,v 1.6 2006/04/27 19:31:43 deraadt Exp $ */
-=======
 /*	$OpenBSD: z8530tty.c,v 1.17 2010/07/02 17:27:01 nicm Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*-
@@ -300,7 +296,7 @@ zstty_attach(parent, self, aux)
 	 */
 	i = o = NULL;
 	if ((zst->zst_hwflags & ZS_HWFLAG_CONSOLE_INPUT) != 0) {
-		i = "input";
+		i = " input";
 		if ((args->hwflags & ZS_HWFLAG_USE_CONSDEV) != 0) {
 			args->consdev->cn_dev = dev;
 			cn_tab->cn_pollc = args->consdev->cn_pollc;
@@ -310,14 +306,14 @@ zstty_attach(parent, self, aux)
 		/* Set console magic to BREAK */
 	}
 	if ((zst->zst_hwflags & ZS_HWFLAG_CONSOLE_OUTPUT) != 0) {
-		o = "output";
+		o = " output";
 		if ((args->hwflags & ZS_HWFLAG_USE_CONSDEV) != 0) {
 			cn_tab->cn_putc = args->consdev->cn_putc;
 		}
 		cn_tab->cn_dev = dev;
 	}
 	if (i != NULL || o != NULL)
-		printf(" (console %s)", i ? (o ? "i/o" : i) : o);
+		printf(": console%s", i ? (o ? "" : i) : o);
 
 #ifdef KGDB
 	/*
@@ -1129,7 +1125,7 @@ zsparam(tp, t)
 }
 
 /*
- * Compute interupt enable bits and set in the pending bits. Called both
+ * Compute interrupt enable bits and set in the pending bits. Called both
  * in zsparam() and when PPS (pulse per second timing) state changes.
  * Must be called at splzs().
  */

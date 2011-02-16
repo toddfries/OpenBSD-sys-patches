@@ -1,4 +1,4 @@
-/*	$OpenBSD: hyper.c,v 1.14 2005/12/31 18:13:41 miod Exp $	*/
+/*	$OpenBSD: hyper.c,v 1.15 2006/04/14 21:05:43 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

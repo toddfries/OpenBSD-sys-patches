@@ -1,4 +1,4 @@
-/*	$OpenBSD: flashreg.h,v 1.5 2000/01/29 04:11:25 smurph Exp $ */
+/*	$OpenBSD: flashreg.h,v 1.6 2003/06/02 05:09:14 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dnkbdmap.c,v 1.1 2005/04/22 11:59:11 miod Exp $	*/
+/*	$OpenBSD: dnkbdmap.c,v 1.2 2005/05/06 22:22:53 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *

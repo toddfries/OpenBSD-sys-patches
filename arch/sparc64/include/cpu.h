@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.h,v 1.37 2006/12/24 20:30:35 miod Exp $	*/
-=======
 /*	$OpenBSD: cpu.h,v 1.75 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -99,6 +95,17 @@
  */
 
 struct cpu_info {
+	/*
+	 * SPARC cpu_info structures live at two VAs: one global
+	 * VA (so each CPU can access any other CPU's cpu_info)
+	 * and an alias VA CPUINFO_VA which is the same on each
+	 * CPU and maps to that CPU's cpu_info.  Since the alias
+	 * CPUINFO_VA is how we locate our cpu_info, we have to
+	 * self-reference the global VA so that we can return it
+	 * in the curcpu() macro.
+	 */
+	struct cpu_info * volatile ci_self;
+
 	/* Most important fields first */
 	struct proc		*ci_curproc;
 	struct pcb		*ci_cpcb;	/* also initial stack */
@@ -106,11 +113,8 @@ struct cpu_info {
 
 	struct proc		*ci_fpproc;
 	int			ci_number;
+	int			ci_flags;
 	int			ci_upaid;
-<<<<<<< HEAD
-	struct schedstate_percpu ci_schedstate; /* scheduler state */
-
-=======
 #ifdef MULTIPROCESSOR
 	int			ci_itid;
 #endif
@@ -124,7 +128,6 @@ struct cpu_info {
 	u_int64_t		ci_tick;
 	struct intrhand		ci_tickintr;
 
->>>>>>> origin/master
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long			ci_spin_locks;	/* # of spin locks held */
 	u_long			ci_simple_locks;/* # of simple locks held */
@@ -133,8 +136,6 @@ struct cpu_info {
 	void			(*ci_spinup)(void); /* spinup routine */
 	void			*ci_initstack;
 	paddr_t			ci_paddr;	/* Phys addr of this structure. */
-<<<<<<< HEAD
-=======
 
 #ifdef SUN4V
 	struct rwindow64	ci_rw;
@@ -151,16 +152,12 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
->>>>>>> origin/master
 };
 
-extern struct cpu_info *cpus;
-extern struct cpu_info cpu_info_store;
+#define CPUF_RUNNING	0x0001		/* CPU is running */
 
-<<<<<<< HEAD
-#if 1
-#define	curcpu()	(&cpu_info_store)
-=======
+extern struct cpu_info *cpus;
+
 #define curpcb		curcpu()->ci_cpcb
 #define fpproc		curcpu()->ci_fpproc
 
@@ -192,22 +189,10 @@ void	sparc64_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
 
 void	cpu_unidle(struct cpu_info *);
 
->>>>>>> origin/master
 #else
-#define	curcpu()	((struct cpu_info *)CPUINFO_VA)
-<<<<<<< HEAD
-#endif
 
-/*
- * definitions of cpu-dependent requirements
- * referenced in generic code
- */
-#define	cpu_wait(p)	/* nothing */
-#if 1
 #define cpu_number()	0
-#else
-#define	cpu_number()	(curcpu()->ci_number)
-=======
+#define	curcpu()	((struct cpu_info *)CPUINFO_VA)
 
 #define CPU_IS_PRIMARY(ci)	1
 #define CPU_INFO_ITERATOR	int
@@ -218,42 +203,32 @@ void	cpu_unidle(struct cpu_info *);
 
 #define cpu_unidle(ci)
 
->>>>>>> origin/master
 #endif
 
 /*
  * Arguments to hardclock, softclock and gatherstats encapsulate the
  * previous machine state in an opaque clockframe.  The ipl is here
  * as well for strayintr (see locore.s:interrupt and intr.c:strayintr).
- * Note that CLKF_INTR is valid only if CLKF_USERMODE is false.
  */
-extern int intstack[];
-extern int eintstack[];
 struct clockframe {
 	struct trapframe64 t;
+	int saved_intr_level;
 };
 
 #define	CLKF_USERMODE(framep)	(((framep)->t.tf_tstate & TSTATE_PRIV) == 0)
 #define	CLKF_PC(framep)		((framep)->t.tf_pc)
-#define	CLKF_INTR(framep)	((!CLKF_USERMODE(framep))&&\
-				(((framep)->t.tf_kstack < (vaddr_t)EINTSTACK)&&\
-				((framep)->t.tf_kstack > (vaddr_t)INTSTACK)))
+#define	CLKF_INTR(framep)	((framep)->saved_intr_level != 0)
 
 extern void (*cpu_start_clock)(void);
 
-extern	int want_ast;
+#define aston(p)	((p)->p_md.md_astpending = 1)
 
 /*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-<<<<<<< HEAD
-extern	int want_resched;	/* resched() was called */
-#define	need_resched(ci)	(want_resched = 1, want_ast = 1)
-=======
 extern void need_resched(struct cpu_info *);
 #define clear_resched(ci) (ci)->ci_want_resched = 0
->>>>>>> origin/master
 
 /*
  * This is used during profiling to integrate system time.
@@ -265,22 +240,12 @@ extern void need_resched(struct cpu_info *);
  * buffer pages are invalid.  On the sparc, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	do { want_ast = 1; } while (0)
+#define	need_proftick(p)	aston(p)
 
-/*
- * Notify the current process (p) that it has a signal pending,
- * process as soon as possible.
- */
-#define	signotify(p)		(want_ast = 1)
+void signotify(struct proc *);
 
-/*
- * Only one process may own the FPU state.
- *
- * XXX this must be per-cpu (eventually)
- */
-extern	struct proc *fpproc;	/* FPU owner */
-extern	int foundfpu;		/* true => we have an FPU */
-
+/* cpu.c */
+int	cpu_myid(void);
 /* machdep.c */
 int	ldcontrolb(caddr_t);
 void	dumpconf(void);
@@ -293,6 +258,7 @@ int	statintr(void *);	/* level 14 (statclock) interrupt code */
 struct fpstate64;
 void	savefpstate(struct fpstate64 *);
 void	loadfpstate(struct fpstate64 *);
+void	clearfpstate(void);
 u_int64_t	probeget(paddr_t, int, int);
 #define	 write_all_windows() __asm __volatile("flushw" : : )
 void	write_user_windows(void);
@@ -305,28 +271,20 @@ void	copywords(const void *, void *, size_t);
 void	qcopy(const void *, void *, size_t);
 void	qzero(void *, size_t);
 void	switchtoctx(int);
-/* locore2.c */
-void	remrq(struct proc *);
 /* trap.c */
 void	pmap_unuse_final(struct proc *);
 int	rwindow_save(struct proc *);
-/* amd7930intr.s */
-void	amd7930_trap(void);
+/* vm_machdep.c */
+void	fpusave_cpu(struct cpu_info *, int);
+void	fpusave_proc(struct proc *, int);
 /* cons.c */
 int	cnrom(void);
 /* zs.c */
 void zsconsole(struct tty *, int, int, void (**)(struct tty *, int));
-#ifdef KGDB
-void zs_kgdb_init(void);
-#endif
 /* fb.c */
 void	fb_unblank(void);
-/* kgdb_stub.c */
-#ifdef KGDB
-void kgdb_attach(int (*)(void *), void (*)(void *, int), void *);
-void kgdb_connect(int);
-void kgdb_panic(void);
-#endif
+/* tda.c */
+void	tda_full_blast(void);
 /* emul.c */
 int	emulinstr(vaddr_t, struct trapframe64 *);
 int	emul_qf(int32_t, struct proc *, union sigval, struct trapframe64 *);
@@ -361,6 +319,10 @@ struct blink_led {
 };
 
 extern void blink_led_register(struct blink_led *);
+
+#ifdef MULTIPROCESSOR
+#include <sys/mplock.h>
+#endif
 
 #endif /* _KERNEL */
 #endif /* _CPU_H_ */

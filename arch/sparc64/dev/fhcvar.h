@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhcvar.h,v 1.7 2004/09/28 18:37:43 jason Exp $	*/
+/*	$OpenBSD: fhcvar.h,v 1.8 2004/10/01 18:18:49 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net).

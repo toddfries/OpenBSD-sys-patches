@@ -6,31 +6,6 @@
 /*
  *	88110 CMMU definitions
  */
-#define CMMU_ICMD 0
-#define CMMU_ICTL 1
-#define CMMU_ISAR 2
-#define CMMU_ISAP 3
-#define CMMU_IUAP 4
-#define CMMU_IIR  5
-#define CMMU_IBP  6
-#define CMMU_IPPU 7
-#define CMMU_IPPL 8
-#define CMMU_ISR  9
-#define CMMU_ILAR 10
-#define CMMU_IPAR 11
-
-#define CMMU_DCMD 12
-#define CMMU_DCTL 13
-#define CMMU_DSAR 14
-#define CMMU_DSAP 15
-#define CMMU_DUAP 16
-#define CMMU_DIR  17
-#define CMMU_DBP  18
-#define CMMU_DPPU 19
-#define CMMU_DPPL 20
-#define CMMU_DSR  21
-#define CMMU_DLAR 22
-#define CMMU_DPAR 23
 
 #define	CMMU_ICMD_INV_ITIC	0x001	/* Invalidate Inst Cache & TIC */
 #define	CMMU_ICMD_INV_TIC	0x002	/* Invalidate TIC */
@@ -105,11 +80,6 @@
 #define	CMMU_DSR_WA		0x000002 /* Write-Allocate Bus Error */
 #define	CMMU_DSR_BE		0x000001 /* Bus Error */
 
-#define CMMU_READ 0
-#define CMMU_WRITE 1
-#define CMMU_DATA 1
-#define CMMU_INST 0
-
 /* definitions for use of the BATC */
 #define	BATC_512K		(0x00 << BATC_BLKSHIFT)
 #define	BATC_1M			(0x01 << BATC_BLKSHIFT)
@@ -120,8 +90,11 @@
 #define	BATC_32M		(0x3f << BATC_BLKSHIFT)
 #define	BATC_64M		(0x7f << BATC_BLKSHIFT)
 
-#define CLINE_MASK	0x1f
-#define CLINE_SIZE	(8 * 32)
+/*
+ * Cache line information
+ */
+#define	MC88110_CACHE_SHIFT	5
+#define	MC88110_CACHE_LINE	(1 << MC88110_CACHE_SHIFT)
 
 #ifndef	_LOCORE
 
@@ -174,13 +147,15 @@ mc88110_wb_data(void)
 	set_dcmd(CMMU_DCMD_WB_ALL);
 }
 
-static __inline__ void mc88110_inval_data_line(paddr_t x)
+static __inline__ void
+mc88110_inval_data_line(paddr_t x)
 {
-	set_dsar(line_addr(x));
+	set_dsar(x);
 	set_dcmd(CMMU_DCMD_INV_LINE);
 }
 
-static __inline__ void mc88110_inval_data(void)
+static __inline__ void
+mc88110_inval_data(void)
 {
 	set_dcmd(CMMU_DCMD_INV_ALL);
 }
@@ -205,15 +180,27 @@ mc88110_wbinv_data(void)
 	set_dcmd(CMMU_DCMD_WBINV_ALL);
 }
 
-static __inline__ void mc88110_inval_inst_line(paddr_t x)
+static __inline__ void
+mc88110_inval_inst_line(paddr_t x)
 {
-	set_isar(line_addr(x));
+	set_isar(x);
 	set_icmd(CMMU_ICMD_INV_LINE);
 }
 
-static __inline__ void mc88110_inval_inst(void)
+static __inline__ void
+mc88110_inval_inst(void)
 {
 	set_icmd(CMMU_ICMD_INV_ITIC);
+}
+
+/* skip one instruction */
+static __inline__ void
+m88110_skip_insn(struct trapframe *frame)
+{
+	if (frame->tf_exip & 1)
+		frame->tf_exip = frame->tf_enip;
+	else
+		frame->tf_exip += 4;
 }
 
 #endif	/* _LOCORE */

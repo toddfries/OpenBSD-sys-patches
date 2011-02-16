@@ -97,17 +97,14 @@ void	dumb_delay(int);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
-u_int	getipl(void);
 void	identifycpu(void);
 void	mvme_bootstrap(void);
 void	mvme88k_vector_init(uint32_t *, uint32_t *);
 void	myetheraddr(u_char *);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-void	secondary_pre_main(void);
+vaddr_t	secondary_pre_main(void);
 void	_doboot(void);
-
-extern void setlevel(unsigned int);
 
 extern void	m187_bootstrap(void);
 extern vaddr_t	m187_memsize(void);
@@ -151,12 +148,6 @@ __cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -186,7 +177,6 @@ int boothowto;					/* set in locore.S */
 int bootdev;					/* set in locore.S */
 int cputyp;					/* set in locore.S */
 int brdtyp;					/* set in locore.S */
-int cpumod;					/* set in mvme_bootstrap() */
 int cpuspeed = 25;				/* safe guess */
 
 vaddr_t first_addr;
@@ -228,7 +218,7 @@ struct consdev bootcons = {
 	bootcnpollc,
 	NULL,
 	makedev(14, 0),
-	CN_NORMAL,
+	CN_LOWPRI,
 };
 
 /*
@@ -295,10 +285,8 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 #endif
 #ifdef MVME197
 	case BRD_197:
-		if (speed == 40 || speed == 50)
-			return speed;
-		speed = 50;
-		break;
+		/* we already computed the speed in m197_bootstrap() */
+		return cpuspeed;
 #endif
 	}
 
@@ -367,12 +355,14 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem  = %d\n", ctob(physmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -382,9 +372,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
-	printf("using %d buffers containing %d bytes of memory\n", nbuf,
-	    bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -450,8 +439,8 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();		/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP)
@@ -487,19 +476,13 @@ cpu_kcore_hdr_t cpu_kcore_hdr;
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -507,7 +490,7 @@ dumpconf()
 
 	/* mvme88k only uses a single segment. */
 	cpu_kcore_hdr.ram_segs[0].start = 0;
-	cpu_kcore_hdr.ram_segs[0].size = ctob(physmem);
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
 	cpu_kcore_hdr.cputype = cputyp;
 
 	/*
@@ -534,9 +517,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr_t blkno;		/* current block to write */
+	daddr64_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -643,14 +626,15 @@ abort:
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ * Determine CPU number and set it, then allocate the startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-void
+vaddr_t
 secondary_pre_main()
 {
 	struct cpu_info *ci;
+	vaddr_t init_stack;
 
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	ci = curcpu();
@@ -665,7 +649,7 @@ secondary_pre_main()
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
 	/*
-	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 * Allocate UPAGES contiguous pages for the startup stack.
 	 */
 	init_stack = uvm_km_zalloc(kernel_map, USPACE);
 	if (init_stack == (vaddr_t)NULL) {
@@ -674,18 +658,21 @@ secondary_pre_main()
 		__cpu_simple_unlock(&cpu_hatch_mutex);
 		for (;;) ;
 	}
+
+	return (init_stack);
 }
 
 /*
  * Further secondary CPU initialization.
  *
- * We are now running on our idle stack, with proper page tables.
+ * We are now running on our startup stack, with proper page tables.
  * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
 secondary_main()
 {
 	struct cpu_info *ci = curcpu();
+	int s;
 
 	cpu_configuration_print(0);
 	ncpus++;
@@ -742,30 +729,22 @@ intr_findvec(int start, int end, int skip)
 }
 
 /*
- * Try to insert ihand in the list of handlers for vector vec.
+ * Try to insert ih in the list of handlers for vector vec.
  */
 int
-intr_establish(int vec, struct intrhand *ihand, const char *name)
+intr_establish(int vec, struct intrhand *ih, const char *name)
 {
 	struct intrhand *intr;
 	intrhand_t *list;
 
-	if (vec < 0 || vec >= NVMEINTR) {
-#ifdef DIAGNOSTIC
-		panic("intr_establish: vec (0x%x) not between 0x00 and 0xff",
-		      vec);
-#endif /* DIAGNOSTIC */
-		return (EINVAL);
-	}
-
 	list = &intr_handlers[vec];
 	if (!SLIST_EMPTY(list)) {
 		intr = SLIST_FIRST(list);
-		if (intr->ih_ipl != ihand->ih_ipl) {
+		if (intr->ih_ipl != ih->ih_ipl) {
 #ifdef DIAGNOSTIC
 			panic("intr_establish: there are other handlers with "
 			    "vec (0x%x) at ipl %x, but you want it at %x",
-			    vec, intr->ih_ipl, ihand->ih_ipl);
+			    vec, intr->ih_ipl, ih->ih_ipl);
 #endif /* DIAGNOSTIC */
 			return (EINVAL);
 		}
@@ -855,6 +834,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			consdev = NODEV;
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
+	case CPU_CPUTYPE:
+		return (sysctl_rdint(oldp, oldlenp, newp, cputyp));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -968,7 +949,7 @@ mvme_bootstrap()
 		break;
 #endif
 	}
-	physmem = btoc(last_addr);
+	physmem = atop(last_addr);
 
 	setup_board_config();
 	master_cpu = cmmu_init();
@@ -1046,6 +1027,7 @@ mvme_bootstrap()
 void
 cpu_hatch_secondary_processors(void *unused)
 {
+	struct cpu_info *ci = curcpu();
 	cpuid_t cpu;
 	int rc;
 	extern void secondary_start(void);
@@ -1099,7 +1081,7 @@ bootcnprobe(cp)
 	struct consdev *cp;
 {
 	cp->cn_dev = makedev(14, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void
@@ -1127,50 +1109,51 @@ bootcnputc(dev, c)
 		bugoutchr(c);
 }
 
-u_int
+int
 getipl(void)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = (*md_getipl)();
-	set_psr(psr);
-	return curspl;
+	return (int)(*md_getipl)();
 }
 
-unsigned
-setipl(unsigned level)
+int
+setipl(int level)
 {
-	u_int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = (*md_setipl)(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
-	set_psr(psr);
-	return curspl;
+	return (int)(*md_setipl)((u_int)level);
 }
 
-unsigned
-raiseipl(unsigned level)
+int
+raiseipl(int level)
 {
-	u_int curspl, psr;
+	return (int)(*md_raiseipl)((u_int)level);
+}
 
-	disable_interrupt(psr);
-	curspl = (*md_raiseipl)(level);
+#ifdef MULTIPROCESSOR
 
-	/*
-	 * The flush pipeline is required to make sure the above change gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
+void
+m88k_send_ipi(int ipi, cpuid_t cpu)
+{
+	struct cpu_info *ci;
+
+	ci = &m88k_cpus[cpu];
+	if (ISSET(ci->ci_flags, CIF_ALIVE))
+		(*md_send_ipi)(ipi, cpu);
+}
+
+void
+m88k_broadcast_ipi(int ipi)
+{
+	struct cpu_info *us = curcpu();
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == us)
+			continue;
+
+		if (ISSET(ci->ci_flags, CIF_ALIVE))
+			(*md_send_ipi)(ipi, ci->ci_cpuid);
+	}
+}
 
 #endif
 

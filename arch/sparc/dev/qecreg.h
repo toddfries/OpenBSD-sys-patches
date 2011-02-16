@@ -1,4 +1,4 @@
-/*	$OpenBSD: qecreg.h,v 1.3 1998/11/02 05:50:59 jason Exp $	*/
+/*	$OpenBSD: qecreg.h,v 1.4 2003/06/02 15:54:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

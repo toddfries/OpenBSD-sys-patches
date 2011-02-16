@@ -121,7 +121,7 @@ ht_attach(struct device *parent, struct device *self, void *aux)
 	int len;
 
 	if (ca->ca_node == 0) {
-		printf("invalid node on ht config\n");
+		printf(": invalid node on ht config\n");
 		return;
 	}
 
@@ -195,7 +195,7 @@ ht_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 
-	printf(": %d devices\n", sc->sc_maxdevs);
+	printf(", %d devices\n", sc->sc_maxdevs);
 
 	extern void fix_node_irq(int, struct pcibus_attach_args *);
 

@@ -118,7 +118,7 @@ save_vec(struct proc *p)
 	 * in kernel mode
 	 */
 	oldmsr = ppc_mfmsr();
-	msr = oldmsr | PSL_VEC;
+	msr = (oldmsr & ~PSL_EE) | PSL_VEC;
 	ppc_mtmsr(msr);
 	__asm__ volatile ("sync;isync");
 
@@ -163,6 +163,9 @@ save_vec(struct proc *p)
 	__asm__ volatile ("mfvscr 0");
 	SAVE_VEC_REG(0,&pcb_vr->vscr);
 
+	curcpu()->ci_vecproc = NULL;
+	pcb->pcb_veccpu = NULL;
+
 	/* fix kernel msr back */
 	ppc_mtmsr(oldmsr);
 }
@@ -175,6 +178,7 @@ enable_vec(struct proc *p)
 {
 	struct pcb *pcb = &p->p_addr->u_pcb;
 	struct vreg *pcb_vr = pcb->pcb_vr;
+	struct cpu_info *ci = curcpu();
 	u_int32_t oldmsr, msr;
 
 	/* If this is the very first altivec instruction executed
@@ -183,13 +187,19 @@ enable_vec(struct proc *p)
 	if (pcb->pcb_vr == NULL)
 		pcb->pcb_vr = pool_get(&ppc_vecpl, PR_WAITOK | PR_ZERO);
 
+	if (curcpu()->ci_vecproc != NULL || pcb->pcb_veccpu != NULL)
+		printf("attempting to restore vector in use vecproc %x"
+		    " veccpu %x\n", curcpu()->ci_vecproc, pcb->pcb_veccpu);
+
 	/* first we enable vector so that we dont throw an exception
 	 * in kernel mode
 	 */
 	oldmsr = ppc_mfmsr();
-	msr = oldmsr | PSL_VEC;
+	msr = (oldmsr & ~PSL_EE) | PSL_VEC;
 	ppc_mtmsr(msr);
 	__asm__ volatile ("sync;isync");
+	ci->ci_vecproc = p;
+	pcb->pcb_veccpu = ci;
 
 #define LOAD_VEC_REG(reg, addr)   \
 	__asm__ volatile ("lvxl %0, 0, %1" :: "n"(reg), "r" (addr));
@@ -312,8 +322,12 @@ trap(struct trapframe *frame)
 				ftype = VM_PROT_READ | VM_PROT_WRITE;
 			else
 				ftype = VM_PROT_READ;
-			if (uvm_fault(map, trunc_page(va), 0, ftype) == 0)
+			KERNEL_LOCK();
+			if (uvm_fault(map, trunc_page(va), 0, ftype) == 0) {
+				KERNEL_UNLOCK();
 				return;
+			}
+			KERNEL_UNLOCK();
 
 			if ((fb = p->p_addr->u_pcb.pcb_onfault)) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
@@ -398,7 +412,7 @@ printf("isi iar %x lr %x\n", frame->srr0, frame->lr);
 			size_t argsize;
 			register_t code, error;
 			register_t *params, rval[2];
-			int nsys, n;
+			int nsys, n, nolock;
 			register_t args[10];
 			
 			uvmexp.syscalls++;
@@ -454,27 +468,39 @@ printf("isi iar %x lr %x\n", frame->srr0, frame->lr);
 				params = args;
 			}
 
-			KERNEL_PROC_LOCK(p);
 #ifdef	KTRACE
-			if (KTRPOINT(p, KTR_SYSCALL))
+			if (KTRPOINT(p, KTR_SYSCALL)) {
+				KERNEL_PROC_LOCK(p);
 				ktrsyscall(p, code, argsize, params);
+				KERNEL_PROC_UNLOCK(p);
+			}
 #endif
 			rval[0] = 0;
 			rval[1] = frame->fixreg[FIRSTARG + 1];
 
 #ifdef SYSCALL_DEBUG
+			KERNEL_PROC_LOCK(p);
 			scdebug_call(p, code, params);
+			KERNEL_PROC_UNLOCK(p);
 #endif
 
 			
 #if NSYSTRACE > 0
-			if (ISSET(p->p_flag, P_SYSTRACE))
+			if (ISSET(p->p_flag, P_SYSTRACE)) {
+				KERNEL_PROC_LOCK(p);
 				error = systrace_redirect(code, p, params,
 				    rval);
-			else
+				KERNEL_PROC_UNLOCK(p);
+			} else
 #endif
+			{
+				nolock = (callp->sy_flags & SY_NOLOCK);
+				if (!nolock)
+					KERNEL_PROC_LOCK(p);
 				error = (*callp->sy_call)(p, params, rval);
-			KERNEL_PROC_UNLOCK(p);
+				if (!nolock)
+					KERNEL_PROC_UNLOCK(p);
+			}
 			switch (error) {
 			case 0:
 				frame->fixreg[0] = error;
@@ -637,7 +663,6 @@ for (i = 0; i < errnum; i++) {
 		if (ci->ci_vecproc)
 			save_vec(ci->ci_vecproc);
 
-		ci->ci_vecproc = p;
 		enable_vec(p);
 		break;
 #else  /* ALTIVEC */
@@ -648,9 +673,15 @@ for (i = 0; i < errnum; i++) {
 		break;
 #endif
 
+	case EXC_VECAST|EXC_USER:
+		KERNEL_PROC_LOCK(p);
+		trapsignal(p, SIGFPE, 0, FPE_FLTRES, sv);
+		KERNEL_PROC_UNLOCK(p);
+		break;
+
 	case EXC_AST|EXC_USER:
 		uvmexp.softs++;
-		ci->ci_astpending = 0;		/* we are about to do it */
+		p->p_md.md_astpending = 0;	/* we are about to do it */
 		if (p->p_flag & P_OWEUPC) {
 			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);

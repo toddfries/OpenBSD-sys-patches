@@ -99,7 +99,7 @@ apciprobe(struct consdev *cp)
 	frodoregs = (volatile u_int8_t *)IIOV(FRODO_BASE);
 	if (badaddr((caddr_t)frodoregs) == 0 &&
 	    (frodoregs[FRODO_IISR] & FRODO_IISR_SERVICE) == 0)
-		cp->cn_pri = CN_REMOTE;
+		cp->cn_pri = CN_HIGHPRI;
 	else
 		cp->cn_pri = CN_LOWPRI;
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qec.c,v 1.16 2003/06/02 15:54:22 deraadt Exp $	*/
-=======
 /*	$OpenBSD: qec.c,v 1.19 2010/09/05 18:10:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

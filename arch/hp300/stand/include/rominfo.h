@@ -1,4 +1,4 @@
-/*	$OpenBSD: rominfo.h,v 1.1 1997/07/14 08:14:37 downsj Exp $	*/
+/*	$OpenBSD: rominfo.h,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
 /*	$NetBSD: rominfo.h,v 1.5 1994/10/26 07:27:53 cgd Exp $	*/
 
 /*

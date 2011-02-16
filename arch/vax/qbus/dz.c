@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dz.c,v 1.13 2006/07/29 17:06:27 miod Exp $	*/
-=======
 /*	$OpenBSD: dz.c,v 1.22 2010/06/28 14:13:31 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dz.c,v 1.23 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

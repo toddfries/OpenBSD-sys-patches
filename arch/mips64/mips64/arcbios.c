@@ -28,11 +28,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <machine/pte.h>
+
+#include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <machine/memconf.h>
-#include <machine/param.h>
-#include <machine/autoconf.h>
+#include <machine/vmparam.h>
+
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
@@ -204,8 +205,10 @@ char c;
 		buf[0] = '\r';
 		buf[1] = c;
 		cnt = 2;
+#ifdef __arc__
 		if (displayinfo.CursorYPosition < displayinfo.CursorMaxYPosition)
 			displayinfo.CursorYPosition++;
+#endif
 	}
 	else {
 		buf[0] = c;
@@ -406,6 +409,8 @@ bios_get_system_type()
 {
 	arc_config_t	*cf;
 	arc_sid_t	*sid;
+	char		*sysid;
+	int		sysid_len;
 	int		i;
 
 	/*
@@ -429,14 +434,29 @@ bios_get_system_type()
 	sid = (arc_sid_t *)Bios_GetSystemId();
 
 	cf = (arc_config_t *)Bios_GetChild(NULL);
-	if (cf) {
-		for (i = 0; i < KNOWNSYSTEMS; i++) {
-			if (strcmp(sys_types[i].sys_name, (char *)(long)cf->id) != 0)
-				continue;
-			if (sys_types[i].sys_vend &&
-			    strncmp(sys_types[i].sys_vend, sid->vendor, 8) != 0)
-				continue;
-			return (sys_types[i].sys_type);	/* Found it. */
+	if (cf != NULL) {
+		if (bios_is_32bit) {
+			sysid = (char *)(long)cf->id;
+			sysid_len = cf->id_len;
+		} else {
+			sysid = (char *)((arc_config64_t *)cf)->id;
+			sysid_len = ((arc_config64_t *)cf)->id_len;
+		}
+
+		if (sysid_len > 0 && sysid != NULL) {
+			sysid_len--;
+			for (i = 0; i < KNOWNSYSTEMS; i++) {
+				if (strlen(sys_types[i].sys_name) !=sysid_len)
+					continue;
+				if (strncmp(sys_types[i].sys_name, sysid,
+				    sysid_len) != 0)
+					continue;
+				if (sys_types[i].sys_vend &&
+				    strncmp(sys_types[i].sys_vend, sid->vendor,
+				      8) != 0)
+					continue;
+				return (sys_types[i].sys_type);	/* Found it. */
+			}
 		}
 	} else {
 #ifdef TGT_ORIGIN
@@ -465,10 +485,6 @@ void
 bios_ident()
 {
 	sys_config.system_type = bios_get_system_type();
-	if (sys_config.system_type < 0 || sys_config.system_type == SGI_O200) {
-		return;
-	}
-	/* If not an IP27 platform, get memory configuration from bios */
 	bios_configure_memory();
 #ifdef __arc__
 	displayinfo = *(arc_dsp_stat_t *)Bios_GetDisplayStatus(1);
@@ -493,4 +509,3 @@ bios_display_info(xpos, ypos, xsize, ysize)
 	*ysize = displayinfo.CursorMaxYPosition;
 #endif
 }
-

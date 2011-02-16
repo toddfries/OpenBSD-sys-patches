@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ebus.c,v 1.16 2007/04/04 18:38:54 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ebus.c,v 1.22 2008/06/11 05:15:43 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ebus.c,v 1.24 2001/07/25 03:49:54 eeh Exp $	*/
 
 /*
@@ -212,6 +208,9 @@ ebus_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	DPRINTF(EDB_CHILD, ("ebus node %08x, searching children...\n", node));
 	for (node = firstchild(node); node; node = nextsibling(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		if (ebus_setup_attach_args(sc, node, &eba) != 0) {
 			DPRINTF(EDB_CHILD,
 			    ("ebus_attach: %s: incomplete\n",
@@ -295,7 +294,7 @@ ebus_print(void *aux, const char *p)
 		    ea->ea_regs[i].lo,
 		    ea->ea_regs[i].lo + ea->ea_regs[i].size - 1);
 	for (i = 0; i < ea->ea_nintrs; i++)
-		printf(" ipl %d", ea->ea_intrs[i]);
+		printf(" ivec 0x%x", ea->ea_intrs[i]);
 	return (UNCONF);
 }
 
@@ -384,11 +383,10 @@ _ebus_alloc_bus_tag(struct ebus_softc *sc, const char *name,
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("could not allocate ebus bus tag");
 
-	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s_%s",
 		sc->sc_dev.dv_xname, name);
 	bt->cookie = sc;
@@ -407,12 +405,10 @@ ebus_alloc_dma_tag(struct ebus_softc *sc, bus_dma_tag_t pdt)
 {
 	bus_dma_tag_t dt;
 
-	dt = (bus_dma_tag_t)
-		malloc(sizeof(struct sparc_bus_dma_tag), M_DEVBUF, M_NOWAIT);
+	dt = malloc(sizeof(*dt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (dt == NULL)
 		panic("could not allocate ebus dma tag");
 
-	bzero(dt, sizeof *dt);
 	dt->_cookie = sc;
 	dt->_parent = pdt;
 	sc->sc_dmatag = dt;

@@ -927,7 +927,7 @@ ctioctl(dev, cmd, data, flag, p)
 int
 ctdump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: qfont.c,v 1.1 2000/04/27 03:14:48 bjc Exp $	*/
+/*	$OpenBSD: qfont.c,v 1.2 2003/06/02 23:27:58 millert Exp $	*/
 /*	$NetBSD: qfont.c,v 1.4 1999/06/20 17:58:57 ragge Exp $	*/
 /*-
  * Copyright (c) 1982, 1986

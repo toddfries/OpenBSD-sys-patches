@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fd.c,v 1.46 2006/11/29 12:24:17 miod Exp $	*/
-=======
 /*	$OpenBSD: fd.c,v 1.80 2010/11/18 21:13:19 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -205,7 +201,7 @@ struct fd_softc {
 	struct fd_type *sc_deftype;	/* default type descriptor */
 	struct fd_type *sc_type;	/* current type descriptor */
 
-	daddr_t	sc_blkno;	/* starting block number */
+	daddr64_t sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
 	int sc_skip;		/* bytes already transferred */
 	int sc_nblks;		/* number of blocks currently transferring */
@@ -241,11 +237,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-<<<<<<< HEAD
-void fdgetdisklabel(dev_t);
-=======
 int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
->>>>>>> origin/master
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -375,7 +367,7 @@ fdconf(fdc)
 	/* No result phase for the NE7CMD_CFG command */
 
 	if ((fdc->sc_flags & FDC_82077) != 0) {
-		/* Lock configuration accross soft resets. */
+		/* Lock configuration across soft resets. */
 		if (fdc_wrfifo(fdc, NE7CMD_LOCK | CFG_LOCK) != 0 ||
 		    fdcresult(fdc) != 1) {
 #ifdef FD_DEBUG
@@ -962,7 +954,7 @@ fdopen(dev, flags, fmt, p)
 	 * Only update the disklabel if we're not open anywhere else.
 	 */
 	if (fd->sc_dk.dk_openmask == 0)
-		fdgetdisklabel(dev);
+		fdgetdisklabel(dev, fd, fd->sc_dk.dk_label, 0);
 
 	pmask = (1 << FDPART(dev));
 
@@ -1715,7 +1707,7 @@ fdcretry(fdc)
 	fdc->sc_errors++;
 }
 
-int
+daddr64_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -1727,7 +1719,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -1745,11 +1737,29 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		fdgetdisklabel(dev, fd, lp, 0);
+		bcopy(lp, fd->sc_dk.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		return 0;
+
+	case DIOCGPDINFO:
+		fdgetdisklabel(dev, fd, (struct disklabel *)addr, 1);
+		return 0;
+
 	case DIOCGDINFO:
 		*(struct disklabel *)addr = *(fd->sc_dk.dk_label);
+		return 0;
+
+	case DIOCGPART:
+		((struct partinfo *)addr)->disklab = fd->sc_dk.dk_label;
+		((struct partinfo *)addr)->part =
+		    &fd->sc_dk.dk_label->d_partitions[FDPART(dev)];
 		return 0;
 
 	case DIOCWLABEL:
@@ -1764,23 +1774,12 @@ fdioctl(dev, cmd, addr, flag, p)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
-<<<<<<< HEAD
-				    (struct disklabel *)addr, 0,
-				    fd->sc_dk.dk_cpulabel);
-		if (error)
-			return (error);
-
-		error = writedisklabel(dev, fdstrategy,
-				       fd->sc_dk.dk_label,
-				       fd->sc_dk.dk_cpulabel);
-=======
 		    (struct disklabel *)addr, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    fdstrategy, fd->sc_dk.dk_label);
 		}
->>>>>>> origin/master
 		return (error);
 
 	case DIOCLOCK:
@@ -1875,16 +1874,11 @@ fdformat(dev, finfo, p)
 	struct buf *bp;
 
 	/* set up a buffer header for fdstrategy() */
-	bp = (struct buf *)malloc(sizeof(struct buf), M_TEMP, M_NOWAIT);
+	bp = malloc(sizeof(*bp), M_TEMP, M_NOWAIT | M_ZERO);
 	if (bp == 0)
 		return (ENOBUFS);
 
-<<<<<<< HEAD
-	bzero((void *)bp, sizeof(struct buf));
-	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
-=======
 	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT | B_RAW;
->>>>>>> origin/master
 	bp->b_proc = p;
 	bp->b_dev = dev;
 
@@ -1933,25 +1927,11 @@ fdformat(dev, finfo, p)
 	return (rv);
 }
 
-<<<<<<< HEAD
-void
-fdgetdisklabel(dev)
-	dev_t dev;
-{
-	int unit = FDUNIT(dev);
-	struct fd_softc *fd = fd_cd.cd_devs[unit];
-	struct disklabel *lp = fd->sc_dk.dk_label;
-	struct cpu_disklabel *clp = fd->sc_dk.dk_cpulabel;
-	char *errstring;
-
-=======
 int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
 {
->>>>>>> origin/master
 	bzero(lp, sizeof(struct disklabel));
-	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
 	lp->d_secsize = FD_BSIZE(fd);
@@ -1959,25 +1939,11 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
-<<<<<<< HEAD
-	lp->d_secperunit = fd->sc_type->size;
-	lp->d_rpm = 300;	/* XXX like it matters... */
-
-	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
-	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
-=======
 	DL_SETDSIZE(lp, fd->sc_type->size);
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_version = 1;
->>>>>>> origin/master
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -1986,14 +1952,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-<<<<<<< HEAD
-	errstring = readdisklabel(dev, fdstrategy, lp, clp, 0);
-	if (errstring) {
-		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
-	}
-=======
 	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
->>>>>>> origin/master
 }
 
 void

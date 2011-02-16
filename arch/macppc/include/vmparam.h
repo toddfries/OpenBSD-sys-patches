@@ -97,18 +97,26 @@ extern vaddr_t ppc_kvm_stolen;
 
 #define	VM_PHYS_SIZE		(USRIOSIZE * PAGE_SIZE)
 
-#define __HAVE_PMAP_PHYSSEG
-struct pmap_physseg {
-	struct pted_pv_head *pvent;
-	char *attrs;
-	/* NULL ??? */
-};
-
 #define	VM_PHYSSEG_MAX	32	/* actually we could have this many segments */
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 #define	VM_PHYSSEG_NOADD	/* can't add RAM after vm_mem_init */
 
 #define VM_NFREELIST		1
 #define VM_FREELIST_DEFAULT	0
+
+#ifdef _KERNEL
+
+#define __HAVE_VM_PAGE_MD
+struct pv_entry;
+struct vm_page_md {
+	LIST_HEAD(,pte_desc) pv_list;
+};
+
+#define VM_MDPAGE_INIT(pg) do {                 \
+	LIST_INIT(&((pg)->mdpage.pv_list)); 	\
+} while (0)
+
+#endif
+
 
 #endif

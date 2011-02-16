@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpuvar.h,v 1.8 2002/03/14 01:26:44 millert Exp $	*/
-=======
 /*	$OpenBSD: cpuvar.h,v 1.19 2010/09/28 20:27:55 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpuvar.h,v 1.4 1997/07/06 21:14:25 pk Exp $ */
 
 /*
@@ -38,6 +34,7 @@
 #define _SPARC_CPUVAR_H
 
 #include <sys/device.h>
+#include <sys/sched.h>
 
 #include <sparc/sparc/cache.h>	/* for cacheinfo */
 
@@ -74,8 +71,6 @@ struct module_info {
 };
 
 
-<<<<<<< HEAD
-=======
 struct cpu_softc;
 struct cpu_info {
 	struct cpu_softc *ci_softc;
@@ -101,7 +96,6 @@ struct cpu_info {
 #define MAXCPUS	1
 #define cpu_unidle(ci)
 
->>>>>>> origin/master
 /*
  * The cpu_softc structure. This structure maintains information about one
  * currently installed CPU (there may be several of these if the machine
@@ -112,6 +106,8 @@ struct cpu_info {
 
 struct cpu_softc {
 	struct device	dv;		/* generic device info */
+
+	struct cpu_info ci;
 
 	int		node;		/* PROM node for this CPU */
 
@@ -242,23 +238,8 @@ struct cpu_softc {
 #define CPUTYP_4_300		3	/* Sun4/300 */
 #define CPUTYP_4_400		4	/* Sun4/400 */
 
-<<<<<<< HEAD
-#define CPUTYP_SLC		10	/* SPARCstation SLC */
-#define CPUTYP_ELC		11	/* SPARCstation ELC */
-#define CPUTYP_IPX		12	/* SPARCstation IPX */
-#define CPUTYP_IPC		13	/* SPARCstation IPC */
-#define CPUTYP_1		14	/* SPARCstation 1 */
-#define CPUTYP_1P		15	/* SPARCstation 1+ */
-#define CPUTYP_2		16	/* SPARCstation 2 */
-
-/* We classify the Sun4m's by feature, not by model (XXX: do same for 4/4c) */
-#define	CPUTYP_SS2_MBUS_MXCC	20 	/* SuperSPARC-II, Mbus, MXCC (SS20) */
-#define CPUTYP_SS1_MBUS_MXCC	21	/* SuperSPARC-I, Mbus, MXCC (SS10) */
-#define CPUTYP_SS2_MBUS_NOMXCC	22	/* SuperSPARC-II, on MBus w/o MXCC */
-=======
 /* rough sun4m families; not really used */
 #define CPUTYP_SS1_MBUS_MXCC	21	/* SuperSPARC-I, MBus, MXCC (SS10) */
->>>>>>> origin/master
 #define CPUTYP_SS1_MBUS_NOMXCC	23	/* SuperSPARC-I, on MBus w/o MXCC */
 #define CPUTYP_MS2		24	/* MicroSPARC-2 */
 #define CPUTYP_MS1		25 	/* MicroSPARC-1 */

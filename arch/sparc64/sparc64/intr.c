@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.c,v 1.23 2005/04/26 18:54:39 miod Exp $	*/
-=======
 /*	$OpenBSD: intr.c,v 1.39 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -52,12 +48,7 @@
 
 #include <dev/cons.h>
 
-<<<<<<< HEAD
-#include <net/netisr.h>
-
-=======
 #include <machine/atomic.h>
->>>>>>> origin/master
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
@@ -77,6 +68,7 @@ struct intrhand *intrlev[MAXINTNUM];
 void	strayintr(const struct trapframe64 *, int);
 int	softintr(void *);
 int	intr_list_handler(void *);
+void	intr_ack(struct intrhand *);
 
 /*
  * Stray interrupt handler.  Clear it if possible.
@@ -84,8 +76,6 @@ int	intr_list_handler(void *);
  */
 int ignore_stray = 1;
 int straycnt[16];
-
-int handled_intr_level;	/* interrupt level that we're handling now */
 
 void
 strayintr(fp, vectored)
@@ -126,46 +116,12 @@ strayintr(fp, vectored)
 }
 
 /*
- * Level 1 software interrupt (could also be Sbus level 1 interrupt).
+ * Level 1 software interrupt (could also be SBus level 1 interrupt).
  * Three possible reasons:
  *	Network software interrupt
  *	Soft clock interrupt
  */
 
-<<<<<<< HEAD
-int netisr;
-
-int
-softnet(fp)
-	void *fp;
-{
-	int n, s;
-	
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
-	
-#define DONETISR(bit, fn) do {		\
-	if (n & (1 << bit))		\
-		fn();			\
-} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-	return (1);
-}
-
-struct intrhand soft01net = { softnet, NULL, 1 };
-
-void 
-setsoftnet() {
-	send_softint(-1, IPL_SOFTNET, &soft01net);
-}
-
-int fastvec = 0;
-
-=======
->>>>>>> origin/master
 /*
  * PCI devices can share interrupts so we need to have
  * a handler to hand out interrupts.
@@ -192,6 +148,11 @@ intr_list_handler(void *arg)
 	return (claimed);
 }
 
+void
+intr_ack(struct intrhand *ih)
+{
+	*ih->ih_clr = INTCLR_IDLE;
+}
 
 /*
  * Attach an interrupt handler to the vector chain for the given level.
@@ -211,9 +172,12 @@ intr_establish(int level, struct intrhand *ih)
 	 * and we do want to preserve order.
 	 */
 	ih->ih_pil = level; /* XXXX caller should have done this before */
-	ih->ih_busy = 0;    /* XXXX caller should have done this before */
 	ih->ih_pending = 0; /* XXXX caller should have done this before */
 	ih->ih_next = NULL;
+	if (ih->ih_clr)
+		ih->ih_ack = intr_ack;
+	else
+		ih->ih_ack = NULL;
 
 	/*
 	 * Store in fast lookup table
@@ -311,20 +275,15 @@ softintr_establish(level, fun, arg)
 {
 	struct intrhand *ih;
 
-<<<<<<< HEAD
-	ih = malloc(sizeof(*ih), M_DEVBUF, 0);
-	bzero(ih, sizeof(*ih));
-=======
 	if (level == IPL_TTY)
 		level = IPL_SOFTTTY;
 
 	ih = malloc(sizeof(*ih), M_DEVBUF, M_WAITOK | M_ZERO);
->>>>>>> origin/master
 	ih->ih_fun = (int (*)(void *))fun;	/* XXX */
 	ih->ih_arg = arg;
 	ih->ih_pil = level;
-	ih->ih_busy = 0;
 	ih->ih_pending = 0;
+	ih->ih_ack = NULL;
 	ih->ih_clr = NULL;
 	return (void *)ih;
 }
@@ -349,6 +308,7 @@ softintr_schedule(cookie)
 void
 splassert_check(int wantipl, const char *func)
 {
+	struct cpu_info *ci = curcpu();
 	int oldipl;
 
 	__asm __volatile("rdpr %%pil,%0" : "=r" (oldipl));
@@ -357,17 +317,15 @@ splassert_check(int wantipl, const char *func)
 		splassert_fail(wantipl, oldipl, func);
 	}
 
-	if (handled_intr_level > wantipl) {
+	if (ci->ci_handled_intr_level > wantipl) {
 		/*
 		 * XXX - need to show difference between what's blocked and
 		 * what's running.
 		 */
-		splassert_fail(wantipl, handled_intr_level, func);
+		splassert_fail(wantipl, ci->ci_handled_intr_level, func);
 	}
 }
 #endif
-<<<<<<< HEAD
-=======
 
 #ifdef MULTIPROCESSOR
 
@@ -389,4 +347,3 @@ sparc64_intunlock(struct trapframe64 *tf)
 }
 
 #endif
->>>>>>> origin/master

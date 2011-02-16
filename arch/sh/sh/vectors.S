@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: vectors.S,v 1.8 2010/12/14 20:24:25 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: exception_vector.S,v 1.19 2006/08/22 21:47:57 uwe Exp $	*/
 
 /*-
@@ -123,13 +119,8 @@ NENTRY(sh_vector_generic)
 #endif /* DDB */
 2:	__EXCEPTION_RETURN
 	/* NOTREACHED */
-<<<<<<< HEAD
-	.align	2
-_L.curproc:	.long	_C_LABEL(curproc)
-=======
 	.align	5
 .Lg_curproc:			.long	_C_LABEL(cpu_info_store) + CI_CURPROC
->>>>>>> origin/master
 REG_SYMBOL(EXPEVT)
 REG_SYMBOL(BBRA)
 REG_SYMBOL(TEA)
@@ -285,15 +276,6 @@ NENTRY(sh3_vector_tlbmiss)
 	mov.l	.L3_tlb_exception,	r0
 	ov.l	r2, @(TF_EXPEVT, r14)	/* tf->tf_expevt = EXPEVT */
 	jsr	@r0
-<<<<<<< HEAD
-	 mov	r14,	r5	/* 2nd arg */
-3:	__EXCEPTION_RETURN
-	.align	2
-2:		.long	_C_LABEL(curproc)
-1:		.long	_C_LABEL(tlb_exception)
-__L.VPN_MASK:	.long	0xfffff000
-_L.CURUPTE:	.long	_C_LABEL(curupte)
-=======
 	 mov	r14, r5			/* arg2: trapframe */
 	__EXCEPTION_RETURN
 
@@ -310,7 +292,6 @@ _L.CURUPTE:	.long	_C_LABEL(curupte)
 .L3_SH3_EXPEVT:			.long	SH3_EXPEVT
 .L3_curproc:			.long	_C_LABEL(cpu_info_store) + CI_CURPROC
 .L3_tlb_exception:		.long	_C_LABEL(tlb_exception)
->>>>>>> origin/master
 
 /* LINTSTUB: Var: char sh3_vector_tlbmiss_end[1]; */
 VECTOR_END_MARKER(sh3_vector_tlbmiss_end)
@@ -461,13 +442,6 @@ NENTRY(sh4_vector_tlbmiss)
 	jsr	@r0
 	 mov	r14,	r5	/* arg2: trapframe */
 	__EXCEPTION_RETURN
-<<<<<<< HEAD
-	.align	2
-1:		.long	_C_LABEL(tlb_exception)
-2:		.long	_C_LABEL(curproc)
-_L.EXPEVT4:	.long	SH4_EXPEVT
-_L.TEA4:	.long	SH4_TEA
-=======
 
 	.align	5
 
@@ -484,7 +458,6 @@ _L.TEA4:	.long	SH4_TEA
 .L4_curproc:			.long	_C_LABEL(cpu_info_store) + CI_CURPROC
 .L4_tlb_exception:		.long	_C_LABEL(tlb_exception)
 
->>>>>>> origin/master
 
 /* LINTSTUB: Var: char sh4_vector_tlbmiss_end[1]; */
 VECTOR_END_MARKER(sh4_vector_tlbmiss_end)
@@ -522,20 +495,12 @@ NENTRY(sh_vector_interrupt)
 	jsr	@r0
 	 mov	r14,	r5	/* 2nd arg */
 	__EXCEPTION_RETURN
-<<<<<<< HEAD
-	.align	2
-1:			.long	_C_LABEL(curproc)
-__L.intc_intr:		.long	_C_LABEL(intc_intr)
-__L.ast:		.long	_C_LABEL(ast)
-__L.uvmexp.intrs:	.long	_C_LABEL(uvmexp) + UVMEXP_INTRS
-=======
 
 	.align	5
 .Li_curproc:		.long	_C_LABEL(cpu_info_store) + CI_CURPROC
 .Li_intc_intr:		.long	_C_LABEL(intc_intr)
 .Li_ast:		.long	_C_LABEL(ast)
 .Li_uvmexp_intrs:	.long	_C_LABEL(uvmexp) + UVMEXP_INTRS
->>>>>>> origin/master
 
 /* LINTSTUB: Var: char sh_vector_interrupt_end[1]; */
 VECTOR_END_MARKER(sh_vector_interrupt_end)

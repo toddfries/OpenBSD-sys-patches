@@ -52,6 +52,8 @@
 #include <sys/device.h>
 #include <sys/timeout.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/iomod.h>
 #include <machine/autoconf.h>
 
@@ -64,19 +66,11 @@
 #include <dev/pci/pcireg.h>
 #endif
 
-void	setroot(void);
-void	dumpconf(void);
-
-int findblkmajor(struct device *dv);
-const char *findblkname(int maj);
-struct device *parsedisk(char *str, int len, int defpart, dev_t *devp);
-struct device *getdisk(char *str, int len, int defpart, dev_t *devp);
-int getstr(char *cp, int size);
-
-void (*cold_hook)(int); /* see below */
-
 /* device we booted from */
 struct device *bootdv;
+void	dumpconf(void);
+
+void (*cold_hook)(int); /* see below */
 
 /*
  * LED blinking thing
@@ -96,32 +90,6 @@ void heartbeat(void *);
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 #endif
-
-/*
- * cpu_configure:
- * called at boot time, configure all devices on system
- */
-void
-cpu_configure(void)
-{
-	splhigh();
-	if (config_rootfound("mainbus", "mainbus") == NULL)
-		panic("no mainbus found");
-
-	cpu_intr_init();
-	spl0();
-
-	setroot();
-	dumpconf();
-	if (cold_hook)
-		(*cold_hook)(HPPA_COLD_HOT);
-
-#ifdef USELEDS
-	timeout_set(&heartbeat_tmo, heartbeat, NULL);
-	heartbeat(NULL);
-#endif
-	cold = 0;
-}
 
 #ifdef USELEDS
 /*
@@ -181,161 +149,27 @@ dumpconf(void)
 {
 	extern int dumpsize;
 	int nblks, dumpblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
-		goto bad;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		goto bad;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
 	if (nblks <= ctod(1))
-		goto bad;
+		return;
+
 	dumpblks = cpu_dumpsize();
 	if (dumpblks < 0)
-		goto bad;
+		return;
 	dumpblks += ctod(physmem);
 
 	/* If dump won't fit (incl. room for possible label), punt. */
 	if (dumpblks > (nblks - ctod(1)))
-		goto bad;
+		return;
 
 	/* Put dump at end of partition */
 	dumplo = nblks - dumpblks;
 
 	/* dumpsize is in page units, and doesn't include headers. */
 	dumpsize = physmem;
-	return;
-
-bad:
-	dumpsize = 0;
-	return;
-}
-
-const struct nam2blk {
-	char name[4];
-	int maj;
-} nam2blk[] = {
-	{ "rd",		3 },
-	{ "sd",		4 },
-	{ "st",		5 },
-	{ "cd",		6 },
-#if 0
-	{ "wd",		? },
-	{ "fd",		7 },
-#endif
-};
-
-#ifdef RAMDISK_HOOKS
-struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
-#endif
-
-int
-findblkmajor(dv)
-	struct device *dv;
-{
-	char *name = dv->dv_xname;
-	int i;
-
-	for (i = 0; i < sizeof(nam2blk)/sizeof(nam2blk[0]); ++i)
-		if (!strncmp(name, nam2blk[i].name, strlen(nam2blk[0].name)))
-			return (nam2blk[i].maj);
-	return (-1);
-}
-
-const char *
-findblkname(maj)
-	int maj;
-{
-	int i;
-
-	for (i = 0; i < sizeof(nam2blk) / sizeof(nam2blk[0]); ++i)
-		if (maj == nam2blk[i].maj)
-			return (nam2blk[i].name);
-	return (NULL);
-}
-
-struct device *
-getdisk(str, len, defpart, devp)
-	char *str;
-	int len, defpart;
-	dev_t *devp;
-{
-	struct device *dv;
-
-	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
-		printf("use one of:");
-#ifdef RAMDISK_HOOKS
-		printf(" %s[a-p]", fakerdrootdev.dv_xname);
-#endif
-		TAILQ_FOREACH(dv, &alldevs, dv_list) {
-			if (dv->dv_class == DV_DISK)
-				printf(" %s[a-p]", dv->dv_xname);
-#ifdef NFSCLIENT
-			if (dv->dv_class == DV_IFNET)
-				printf(" %s", dv->dv_xname);
-#endif
-		}
-		printf(" halt\n");
-	}
-	return (dv);
-}
-
-struct device *
-parsedisk(str, len, defpart, devp)
-	char *str;
-	int len, defpart;
-	dev_t *devp;
-{
-	struct device *dv;
-	char *cp, c;
-	int majdev, part;
-
-	if (len == 0)
-		return (NULL);
-
-	if (len == 4 && !strcmp(str, "halt"))
-		boot(RB_HALT);
-
-	cp = str + len - 1;
-	c = *cp;
-	if (c >= 'a' && c <= ('a' + MAXPARTITIONS - 1)) {
-		part = c - 'a';
-		*cp = '\0';
-	} else
-		part = defpart;
-
-#ifdef RAMDISK_HOOKS
-	if (strcmp(str, fakerdrootdev.dv_xname) == 0) {
-		dv = &fakerdrootdev;
-		goto gotdisk;
-	}
-#endif
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class == DV_DISK &&
-		    strcmp(str, dv->dv_xname) == 0) {
-#ifdef RAMDISK_HOOKS
-gotdisk:
-#endif
-			majdev = findblkmajor(dv);
-			if (majdev < 0)
-				panic("parsedisk");
-			*devp = MAKEDISKDEV(majdev, dv->dv_unit, part);
-			break;
-		}
-#ifdef NFSCLIENT
-		if (dv->dv_class == DV_IFNET &&
-		    strcmp(str, dv->dv_xname) == 0) {
-			*devp = NODEV;
-			break;
-		}
-#endif
-	}
-
-	*cp = c;
-	return (dv);
 }
 
 void	print_devpath(const char *label, struct pz_device *pz);
@@ -357,248 +191,6 @@ print_devpath(const char *label, struct pz_device *pz)
 
 	printf(" class=%d flags=%b hpa=%p spa=%p io=%p\n", pz->pz_class,
 	    pz->pz_flags, PZF_BITS, pz->pz_hpa, pz->pz_spa, pz->pz_iodc_io);
-}
-
-/*
- * Attempt to find the device from which we were booted.
- * If we can do so, and not instructed not to do so,
- * change rootdev to correspond to the load device.
- *
- * XXX Actually, swap and root must be on the same type of device,
- * (ie. DV_DISK or DV_IFNET) because of how (*mountroot) is written.
- * That should be fixed.
- */
-void
-setroot(void)
-{
-	struct swdevt *swp;
-	struct device *dv;
-	int len, majdev, part;
-	dev_t nrootdev, nswapdev = NODEV;
-	char buf[128];
-	dev_t temp;
-	const char *rootdevname;
-	struct device *rootdv, *swapdv;
-#ifdef NFSCLIENT
-	extern char *nfsbootdevname;
-#endif
-
-#ifdef RAMDISK_HOOKS
-	bootdv = &fakerdrootdev;
-#endif
-	part = 0;
-
-	print_devpath("boot path", &PAGE0->mem_boot);
-
-	/*
-	 * If 'swap generic' and we couldn't determine boot device,
-	 * ask the user.
-	 */
-	if (mountroot == NULL && bootdv == NULL)
-		boothowto |= RB_ASKNAME;
-
-	if (boothowto & RB_ASKNAME) {
-		for (;;) {
-			printf("root device? ");
-			if (bootdv != NULL) {
-				printf(" (default %s", bootdv->dv_xname);
-				if (bootdv->dv_class == DV_DISK)
-					printf("%c", part + 'a');
-				printf(")");
-			}
-			printf(": ");
-			len = getstr(buf, sizeof(buf));
-			if (len == 0 && bootdv != NULL) {
-				strlcpy(buf, bootdv->dv_xname, sizeof buf);
-				len = strlen(buf);
-			}
-			if (len > 0 && buf[len - 1] == '*') {
-				buf[--len] = '\0';
-				dv = getdisk(buf, len, 1, &nrootdev);
-				if (dv != NULL) {
-					rootdv = swapdv = dv;
-					nswapdev = nrootdev;
-					goto gotswap;
-				}
-			}
-			dv = getdisk(buf, len, part, &nrootdev);
-			if (dv != NULL) {
-				rootdv = dv;
-				break;
-			}
-		}
-
-		/*
-		 * because swap must be on same device type as root, for
-		 * network devices this is easy.
-		 */
-		if (rootdv->dv_class == DV_IFNET) {
-			swapdv = NULL;
-			goto gotswap;
-		}
-		for (;;) {
-			printf("swap device (default %s", rootdv->dv_xname);
-			if (rootdv->dv_class == DV_DISK)
-				printf("b");
-			printf("): ");
-			len = getstr(buf, sizeof(buf));
-			if (len == 0) {
-				switch (rootdv->dv_class) {
-				case DV_IFNET:
-					nswapdev = NODEV;
-					break;
-				case DV_DISK:
-					nswapdev = MAKEDISKDEV(major(nrootdev),
-					    DISKUNIT(nrootdev), 1);
-					break;
-				case DV_TAPE:
-				case DV_TTY:
-				case DV_DULL:
-				case DV_CPU:
-					break;
-				}
-				swapdv = rootdv;
-				break;
-			}
-			dv = getdisk(buf, len, 1, &nswapdev);
-			if (dv) {
-				if (dv->dv_class == DV_IFNET)
-					nswapdev = NODEV;
-				swapdv = dv;
-				break;
-			}
-		}
-gotswap:
-		majdev = major(nrootdev);
-		rootdev = nrootdev;
-		dumpdev = nswapdev;
-		swdevt[0].sw_dev = nswapdev;
-		swdevt[1].sw_dev = NODEV;
-	} else if (mountroot == NULL) {
-
-		/*
-		 * `swap generic': Use the device the ROM told us to use.
-		 */
-		majdev = findblkmajor(bootdv);
-		if (majdev >= 0) {
-			/*
-			 * Root and swap are on a disk.
-			 * Assume swap is on partition b.
-			 */
-			rootdv = swapdv = bootdv;
-			rootdev = MAKEDISKDEV(majdev, bootdv->dv_unit, part);
-			nswapdev = dumpdev =
-			    MAKEDISKDEV(majdev, bootdv->dv_unit, 1);
-		} else {
-			/*
-			 * Root and swap are on a net.
-			 */
-			rootdv = swapdv = bootdv;
-			nswapdev = dumpdev = NODEV;
-		}
-		swdevt[0].sw_dev = nswapdev;
-		swdevt[1].sw_dev = NODEV;
-	} else {
-		/*
-		 * `root DEV swap DEV': honour rootdev/swdevt.
-		 * rootdev/swdevt/mountroot already properly set.
-		 */
-
-		rootdevname = findblkname(major(rootdev));
-		return;
-	}
-
-	switch (rootdv->dv_class) {
-#ifdef NFSCLIENT
-	case DV_IFNET:
-		mountroot = nfs_mountroot;
-		nfsbootdevname = rootdv->dv_xname;
-		return;
-#endif
-#ifndef DISKLESS
-	case DV_DISK:
-		mountroot = dk_mountroot;
-		printf("root on %s%c", rootdv->dv_xname,
-		    DISKPART(rootdev) + 'a');
-		if (nswapdev != NODEV)
-			printf(" swap on %s%c", swapdv->dv_xname,
-			    DISKPART(nswapdev) + 'a');
-		printf("\n");
-		break;
-#endif
-	default:
-		printf("can't figure root, hope your kernel is right\n");
-		return;
-	}
-
-	/*
-	 * Make the swap partition on the root drive the primary swap.
-	 */
-	temp = NODEV;
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		if (majdev == major(swp->sw_dev) &&
-		    DISKUNIT(rootdev) == DISKUNIT(swp->sw_dev)) {
-			temp = swdevt[0].sw_dev;
-			swdevt[0].sw_dev = swp->sw_dev;
-			swp->sw_dev = temp;
-			break;
-		}
-	}
-	if (swp->sw_dev == NODEV)
-		return;
-
-	/*
-	 * If dumpdev was the same as the old primary swap device,
-	 * move it to the new primary swap device.
-	 */
-	if (temp == dumpdev)
-		dumpdev = swdevt[0].sw_dev;
-}
-
-int
-getstr(cp, size)
-	char *cp;
-	int size;
-{
-	char *lp;
-	int c;
-	int len;
-
-	lp = cp;
-	len = 0;
-	for (;;) {
-		c = cngetc();
-		switch (c) {
-		case '\n':
-		case '\r':
-			printf("\n");
-			*lp++ = '\0';
-			return (len);
-		case '\b':
-		case '\177':
-		case '#':
-			if (len) {
-				--len;
-				--lp;
-				printf("\b \b");
-			}
-			continue;
-		case '@':
-		case 'u'&037:
-			len = 0;
-			lp = cp;
-			printf("\n");
-			continue;
-		default:
-			if (len + 1 >= size || c < ' ') {
-				printf("\007");
-				continue;
-			}
-			printf("%c", c);
-			++len;
-			*lp++ = c;
-		}
-	}
 }
 
 struct pdc_memmap pdc_memmap PDC_ALIGNMENT;
@@ -676,7 +268,7 @@ pdc_scanbus(struct device *self, struct confargs *ca, int maxmod,
 
 				for (ia = 0; !(error = pdc_call((iodcio_t)pdc,
 				    0, PDC_SYSMAP, PDC_SYSMAP_ADDR, &pdc_addr,
-				    im, ia)) && ia < nca.ca_naddrs; ia++) {
+				    im, ia + 1)) && ia < nca.ca_naddrs; ia++) {
 					nca.ca_addrs[ia].addr = pdc_addr.hpa;
 					nca.ca_addrs[ia].size =
 					    pdc_addr.size << PGSHIFT;

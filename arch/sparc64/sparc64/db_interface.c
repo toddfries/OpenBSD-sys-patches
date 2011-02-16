@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_interface.c,v 1.21 2006/07/06 19:05:56 miod Exp $	*/
-=======
 /*	$OpenBSD: db_interface.c,v 1.30 2010/11/27 19:57:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_interface.c,v 1.61 2001/07/31 06:55:47 eeh Exp $ */
 
 /*
@@ -63,6 +59,8 @@
 #include "fb.h"
 #include "esp_sbus.h"
 #endif
+
+#include "tda.h"
 
 db_regs_t	ddb_regs;	/* register state */
 
@@ -264,6 +262,10 @@ kdb_trap(type, tf)
 	extern int trap_trace_dis;
 
 	trap_trace_dis++;
+
+#if NTDA > 0
+	tda_full_blast();
+#endif
 
 	fb_unblank();
 
@@ -793,17 +795,17 @@ db_proc_cmd(addr, have_addr, count, modif)
 	}
 	db_printf("process %p:", p);
 	db_printf("pid:%d vmspace:%p pmap:%p ctx:%x wchan:%p pri:%d upri:%d\n",
-		  p->p_pid, p->p_vmspace, p->p_vmspace->vm_map.pmap, 
-		  p->p_vmspace->vm_map.pmap->pm_ctx,
-		  p->p_wchan, p->p_priority, p->p_usrpri);
+	    p->p_pid, p->p_vmspace, p->p_vmspace->vm_map.pmap, 
+	    p->p_vmspace->vm_map.pmap->pm_ctx,
+	    p->p_wchan, p->p_priority, p->p_usrpri);
 	db_printf("maxsaddr:%p ssiz:%dpg or %llxB\n",
-		  p->p_vmspace->vm_maxsaddr, p->p_vmspace->vm_ssize, 
-		  (unsigned long long)ctob(p->p_vmspace->vm_ssize));
+	    p->p_vmspace->vm_maxsaddr, p->p_vmspace->vm_ssize, 
+	    (unsigned long long)ptoa(p->p_vmspace->vm_ssize));
 	db_printf("profile timer: %ld sec %ld usec\n",
-		  p->p_stats->p_timer[ITIMER_PROF].it_value.tv_sec,
-		  p->p_stats->p_timer[ITIMER_PROF].it_value.tv_usec);
-	db_printf("pcb: %p fpstate: %p\n", &p->p_addr->u_pcb, 
-		p->p_md.md_fpstate);
+	    p->p_stats->p_timer[ITIMER_PROF].it_value.tv_sec,
+	    p->p_stats->p_timer[ITIMER_PROF].it_value.tv_usec);
+	db_printf("pcb: %p tf: %p fpstate: %p\n", &p->p_addr->u_pcb, 
+	    p->p_md.md_tf, p->p_md.md_fpstate);
 	return;
 }
 
@@ -839,11 +841,10 @@ db_dump_pcb(addr, have_addr, count, modif)
 	db_expr_t count;
 	char *modif;
 {
-	extern struct pcb *cpcb;
 	struct pcb *pcb;
 	int i;
 
-	pcb = cpcb;
+	pcb = curpcb;
 	if (have_addr) 
 		pcb = (struct pcb*) addr;
 
@@ -854,7 +855,7 @@ db_dump_pcb(addr, have_addr, count, modif)
 	
 	for (i=0; i<pcb->pcb_nsaved; i++) {
 		db_printf("win %d: at %llx local, in\n", i, 
-			  (unsigned long long)pcb->pcb_rw[i+1].rw_in[6]);
+			  (unsigned long long)pcb->pcb_rwsp[i]);
 		db_printf("%16llx %16llx %16llx %16llx\n",
 			  (unsigned long long)pcb->pcb_rw[i].rw_local[0],
 			  (unsigned long long)pcb->pcb_rw[i].rw_local[1],
@@ -888,8 +889,6 @@ db_setpcb(addr, have_addr, count, modif)
 {
 	struct proc *p;
 
-	extern struct pcb *cpcb;
-
 	if (!have_addr) {
 		db_printf("What PID do you want to map in?\n");
 		return;
@@ -898,7 +897,7 @@ db_setpcb(addr, have_addr, count, modif)
 	LIST_FOREACH(p, &allproc, p_list) {
 		if (p->p_stat && p->p_pid == addr) {
 			curproc = p;
-			cpcb = (struct pcb*)p->p_addr;
+			curpcb = (struct pcb*)p->p_addr;
 			if (p->p_vmspace->vm_map.pmap->pm_ctx) {
 				switchtoctx(p->p_vmspace->vm_map.pmap->pm_ctx);
 				return;

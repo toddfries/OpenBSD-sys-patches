@@ -56,49 +56,15 @@
 	.align	3
 onfault_table:
 	PTR_VAL	0		# invalid index number
-	PTR_VAL	baderr
 	PTR_VAL	_copyerr
-	PTR_VAL	_copyerr
+	PTR_VAL	_kcopyerr
 #if defined(DDB) || defined(DEBUG)
 	PTR_VAL	kt_ddberr
 #else
 	PTR_VAL	0
 #endif
+	PTR_VAL	_guarderr
 	.text
-
-/*
- * See if access to addr with a len type instruction causes a machine check.
- * len is length of access (1=byte, 2=short, 4=long)
- *
- * badaddr(addr, len)
- *	char *addr;
- *	int len;
- */
-LEAF(badaddr, 0)
-	li	v0, KT_BADERR
-	PTR_L	t3, curprocpaddr
-	bne	a1, 1, 2f
-	sw	v0, PCB_ONFAULT(t3)
-	lbu	v0, (a0)		# don't put in bd-slot!
-	b	5f
-	nop
-2:
-	bne	a1, 2, 4f
-	nop
-	lhu	v0, (a0)		# don't put in bd-slot!
-	b	5f
-	nop
-4:
-	lw	v0, (a0)
-5:
-	sync
-	sw	zero, PCB_ONFAULT(t3)
-	j	ra
-	move	v0, zero		# made it w/o errors
-baderr:
-	j	ra
-	li	v0, 1			# trap sends us here
-END(badaddr)
 
 /*
  * This code is copied the user's stack for returning from signal handlers
@@ -159,119 +125,6 @@ LEAF(mem_zero_page, 0)
 	jr	ra
 	nop
 END(mem_zero_page)
-
-/*
- *	Block I/O routines mainly used by I/O drivers.
- *
- *	Args as:	a0 = port
- *			a1 = memory address
- *			a2 = count
- */
-LEAF(insb, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a1
-1:
-	lbu	v0, 0(a0)
-	PTR_ADDU a1, 1
-	bne	a1, a2, 1b
-	sb	v0, -1(a1)
-2:
-	jr	ra
-	nop
-END(insb)
-
-LEAF(insw, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a2
-	PTR_ADDU a2, a1
-1:
-	lhu	v0, 0(a0)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 1b
-	sh	v0, -2(a1)
-2:
-	jr	ra
-	nop
-END(insw)
-
-LEAF(insl, 0)
-	beq	a2, zero, 2f
-	PTR_SLL	a2, 2
-	PTR_ADDU a2, a1
-1:
-	lw	v0, 0(a0)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 1b
-	sw	v0, -4(a1)
-2:
-	jr	ra
-	nop
-END(insl)
-
-LEAF(outsb, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a1
-1:
-	lbu	v0, 0(a1)
-	PTR_ADDU a1, 1
-	bne	a1, a2, 1b
-	sb	v0, 0(a0)
-2:
-	jr	ra
-	nop
-END(outsb)
-
-LEAF(outsw, 0)
-	beq	a2, zero, 2f
-	PTR_ADDU a2, a2
-	LI	v0, 1
-	and	v0, a1
-	bne	v0, zero, 3f		# arghh, unaligned.
-	PTR_ADDU a2, a1
-1:
-	lhu	v0, 0(a1)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 1b
-	sh	v0, 0(a0)
-2:
-	jr	ra
-	nop
-3:
-	LWHI	v0, 0(a1)
-	LWLO	v0, 3(a1)
-	PTR_ADDU a1, 2
-	bne	a1, a2, 3b
-	sh	v0, 0(a0)
-
-	jr	ra
-	nop
-END(outsw)
-
-LEAF(outsl, 0)
-	beq	a2, zero, 2f
-	PTR_SLL	a2, 2
-	LI	v0, 3
-	and	v0, a1
-	bne	v0, zero, 3f		# arghh, unaligned.
-	PTR_ADDU a2, a1
-1:
-	lw	v0, 0(a1)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 1b
-	sw	v0, 0(a0)
-2:
-	jr	ra
-	nop
-3:
-	LWHI	v0, 0(a1)
-	LWLO	v0, 3(a1)
-	PTR_ADDU a1, 4
-	bne	a1, a2, 3b
-	sw	v0, 0(a0)
-
-	jr	ra
-	nop
-END(outsl)
 
 /*
  * Copy a null terminated string from the user address space into
@@ -407,7 +260,7 @@ NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	lw	v1, PCB_ONFAULT(t3)
 	li	v0, KT_KCOPYERR
-	PTR_L	t3, curprocpaddr
+	PTR_S	v1, CF_ARGSZ(sp)	# save old pcb_onfault
 	jal	bcopy
 	sw	v0, PCB_ONFAULT(t3)
 

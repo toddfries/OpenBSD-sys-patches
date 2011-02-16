@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm_macro.h,v 1.2 2005/04/30 16:42:36 miod Exp $ */
+/*	$OpenBSD: asm_macro.h,v 1.6 2007/12/20 21:19:34 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -34,25 +34,23 @@
  * Anyone can include.
  */
 
-#include <machine/asm.h>
-
 /*
- * Flushes the data pipeline.
+ * Flush the data pipeline.
  */
 #define	flush_pipeline() \
-	__asm__ __volatile__ (FLUSH_PIPELINE_STRING)
+	__asm__ __volatile__ ("tb1 0, r0, 0");
 
 /*
- * Sets the PSR.
+ * Set the PSR.
  */
 static __inline__ void set_psr(u_int psr)
 {
 	__asm__ __volatile__ ("stcr %0, cr1" :: "r" (psr));
-	__asm__ __volatile__ (FLUSH_PIPELINE_STRING);
+	flush_pipeline();
 }
 
 /*
- * Gets the PSR.
+ * Get the PSR.
  */
 static __inline__ u_int get_psr(void)
 {
@@ -61,12 +59,10 @@ static __inline__ u_int get_psr(void)
 	return (psr);
 }
 
-#define	disable_interrupt(psr)	set_psr(((psr) = get_psr()) | PSR_IND)
-
 /*
  * Provide access from C code to the assembly instruction ff1
  */
-static __inline__ unsigned ff1(unsigned val)
+static __inline__ u_int ff1(u_int val)
 {
 	__asm__ __volatile__ ("ff1 %0, %0" : "=r" (val) : "0" (val));
 	return (val);

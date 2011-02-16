@@ -112,7 +112,7 @@ void
 tc_3000_300_intr_establish(tcadev, cookie, level, func, arg, name)
 	struct device *tcadev;
 	void *cookie, *arg;
-	tc_intrlevel_t level;
+	int level;
 	int (*func)(void *);
 	const char *name;
 {

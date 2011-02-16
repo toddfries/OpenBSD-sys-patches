@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: zaurus_flash.c,v 1.9 2009/05/21 23:45:48 krw Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -119,8 +115,7 @@ u_int8_t zflash_reg8_read(void *, int);
 int	 zflash_regx_read_page(void *, caddr_t, caddr_t);
 void	 zflash_reg8_write(void *, int, u_int8_t);
 int	 zflash_regx_write_page(void *, caddr_t, caddr_t);
-void	 zflash_default_disklabel(void *, dev_t, struct disklabel *,
-	     struct cpu_disklabel *);
+void	 zflash_default_disklabel(void *, dev_t, struct disklabel *);
 int	 zflash_safe_strategy(void *, struct buf *);
 
 int	 zflash_safe_start(struct zflash_softc *, dev_t);
@@ -347,46 +342,41 @@ zflash_regx_write_page(void *arg, caddr_t data, caddr_t oob)
  * device is passed to us. We add the partitions besides RAW_PART.
  */
 void
-zflash_default_disklabel(void *arg, dev_t dev, struct disklabel *lp,
-    struct cpu_disklabel *clp)
+zflash_default_disklabel(void *arg, dev_t dev, struct disklabel *lp)
 {
 	struct zflash_softc *sc = arg;
 	long bsize = sc->sc_flash.sc_flashdev->pagesize;
 
 	switch (sc->sc_flash.sc_flashdev->id) {
 	case FLASH_DEVICE_SAMSUNG_K9F2808U0C:
-		lp->d_partitions[8].p_size = 7*1024*1024 / bsize;
-		lp->d_partitions[9].p_size = 5*1024*1024 / bsize;
-		lp->d_partitions[10].p_size = 4*1024*1024 / bsize;
+		DL_SETPSIZE(&lp->d_partitions[8], 7*1024*1024 / bsize);
+		DL_SETPSIZE(&lp->d_partitions[9], 5*1024*1024 / bsize);
+		DL_SETPSIZE(&lp->d_partitions[10], 4*1024*1024 / bsize);
 		break;
 	case FLASH_DEVICE_SAMSUNG_K9F1G08U0A:
-		lp->d_partitions[8].p_size = 7*1024*1024 / bsize;
-		lp->d_partitions[9].p_size = 32*1024*1024 / bsize;
-		lp->d_partitions[10].p_size = 89*1024*1024 / bsize;
+		DL_SETPSIZE(&lp->d_partitions[8], 7*1024*1024 / bsize);
+		DL_SETPSIZE(&lp->d_partitions[9], 32*1024*1024 / bsize);
+		DL_SETPSIZE(&lp->d_partitions[10], 89*1024*1024 / bsize);
 		break;
 	default:
 		return;
 	}
 
 	/* The "smf" partition uses logical addressing. */
-	lp->d_partitions[8].p_offset = 0;
+	DL_SETPOFFSET(&lp->d_partitions[8], 0);
 	lp->d_partitions[8].p_fstype = FS_OTHER;
 
 	/* The "root" partition uses physical addressing. */
-	lp->d_partitions[9].p_offset = lp->d_partitions[8].p_size;
+	DL_SETPSIZE(&lp->d_partitions[9], DL_GETPSIZE(&lp->d_partitions[8]));
 	lp->d_partitions[9].p_fstype = FS_OTHER;
 
 	/* The "home" partition uses physical addressing. */
-	lp->d_partitions[10].p_offset = lp->d_partitions[9].p_offset +
-	    lp->d_partitions[9].p_size;
+	DL_SETPOFFSET(&lp->d_partitions[10],
+	    DL_GETPOFFSET(&lp->d_partitions[9]) + DL_GETPSIZE(&lp->d_partitions[9]));
 	lp->d_partitions[10].p_fstype = FS_OTHER;
-<<<<<<< HEAD
-
-	lp->d_npartitions = 11;
-=======
 	lp->d_npartitions = MAXPARTITIONS;
->>>>>>> origin/master
 
+	lp->d_version = 1;
 	/* Re-calculate the checksum. */
 	lp->d_checksum = dkcksum(lp);
 }
@@ -629,18 +619,16 @@ zflash_safe_start(struct zflash_softc *sc, dev_t dev)
 	/* Safe partitions must start on a flash block boundary. */
 	blksect = (sc->sc_flash.sc_flashdev->blkpages *
 	    sc->sc_flash.sc_flashdev->pagesize) / lp->d_secsize;
-	if (lp->d_partitions[part].p_offset % blksect)
+	if (DL_GETPOFFSET(&lp->d_partitions[part]) % blksect)
 		return EIO;
 
-	MALLOC(sp, struct zflash_safe *, sizeof(struct zflash_safe),
-	    M_DEVBUF, M_NOWAIT);
+	sp = malloc(sizeof(*sp), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sp == NULL)
 		return ENOMEM;
 
-	bzero(sp, sizeof(struct zflash_safe));
 	sp->sp_dev = dev;
 
-	sp->sp_pblks = lp->d_partitions[part].p_size / blksect;
+	sp->sp_pblks = DL_GETPSIZE(&lp->d_partitions[part]) / blksect;
 	sp->sp_lblks = sp->sp_pblks;
 
 	/* Try to reserve a number of spare physical blocks. */
@@ -656,13 +644,13 @@ zflash_safe_start(struct zflash_softc *sc, dev_t dev)
 	DPRINTF(("pblks %u lblks %u\n", sp->sp_pblks, sp->sp_lblks));
 
 	/* Next physical block to use; randomize for wear-leveling. */
-	sp->sp_pnext = arc4random() % sp->sp_pblks;
+	sp->sp_pnext = arc4random_uniform(sp->sp_pblks);
 
 	/* Allocate physical block usage map. */
 	phyuse = (u_int16_t *)malloc(sp->sp_pblks * sizeof(u_int16_t),
 	    M_DEVBUF, M_NOWAIT);
 	if (phyuse == NULL) {
-		FREE(sp, M_DEVBUF);
+		free(sp, M_DEVBUF);
 		return ENOMEM;
 	}
 	sp->sp_phyuse = phyuse;
@@ -671,8 +659,8 @@ zflash_safe_start(struct zflash_softc *sc, dev_t dev)
 	logmap = (u_int *)malloc(sp->sp_lblks * sizeof(u_int),
 	    M_DEVBUF, M_NOWAIT);
 	if (logmap == NULL) {
-		FREE(phyuse, M_DEVBUF);
-		FREE(sp, M_DEVBUF);
+		free(phyuse, M_DEVBUF);
+		free(sp, M_DEVBUF);
 		return ENOMEM;
 	}
 	sp->sp_logmap = logmap;
@@ -761,7 +749,7 @@ zflash_safe_stop(struct zflash_softc *sc, dev_t dev)
 	sp = sc->sc_safe[part];
 	free(sp->sp_phyuse, M_DEVBUF);
 	free(sp->sp_logmap, M_DEVBUF);
-	FREE(sp, M_DEVBUF);
+	free(sp, M_DEVBUF);
 	sc->sc_safe[part] = NULL;
 }
 

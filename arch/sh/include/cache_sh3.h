@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: cache_sh3.h,v 1.2 2008/06/26 05:42:12 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cache_sh3.h,v 1.8 2006/03/04 01:55:03 uwe Exp $	*/
 
 /*-

@@ -45,7 +45,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -79,6 +78,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/asm_macro.h>
+#include <machine/bugio.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/lock.h>
@@ -93,11 +93,14 @@ extern	void m88110_zeropage(vaddr_t);
 extern	void m88110_copypage(vaddr_t, vaddr_t);
 
 cpuid_t	m88110_init(void);
+cpuid_t	m88410_init(void);
 void	m88110_setup_board_config(void);
+void	m88410_setup_board_config(void);
 void	m88110_cpu_configuration_print(int);
+void	m88410_cpu_configuration_print(int);
 void	m88110_shutdown(void);
 cpuid_t	m88110_cpu_number(void);
-void	m88110_set_sapr(cpuid_t, apr_t);
+void	m88110_set_sapr(apr_t);
 void	m88110_set_uapr(apr_t);
 void	m88110_tlb_inv(cpuid_t, u_int, vaddr_t);
 void	m88110_tlb_inv_all(cpuid_t);
@@ -112,10 +115,14 @@ void	m88110_dma_cachectl_local(paddr_t, psize_t, int);
 void	m88410_dma_cachectl(paddr_t, psize_t, int);
 void	m88410_dma_cachectl_local(paddr_t, psize_t, int);
 void	m88110_initialize_cpu(cpuid_t);
+void	m88410_initialize_cpu(cpuid_t);
 
-/* This is the function table for the MC88110 built-in CMMUs */
+/*
+ * This is the function table for the MC88110 built-in CMMUs without
+ * external 88410.
+ */
 struct cmmu_p cmmu88110 = {
-        m88110_init,
+	m88110_init,
 	m88110_setup_board_config,
 	m88110_cpu_configuration_print,
 	m88110_shutdown,
@@ -209,7 +216,7 @@ m88410_setup_board_config(void)
 
 /*
  * Should only be called after the calling cpus knows its cpu
- * number and master/slave status . Should be called first
+ * number and master/slave status. Should be called first
  * by the master, before the slaves are started.
  */
 void
@@ -263,12 +270,33 @@ m88110_init(void)
 	return (cpu);
 }
 
+cpuid_t
+m88410_init(void)
+{
+	cpuid_t cpu;
+
+	cpu = m88110_cpu_number();
+	m88410_initialize_cpu(cpu);
+	return (cpu);
+}
+
+cpuid_t
+m88110_cpu_number(void)
+{
+	u_int16_t gcsr;
+
+	gcsr = *(volatile u_int16_t *)(BS_BASE + BS_GCSR);
+
+	return ((gcsr & BS_GCSR_CPUID) != 0 ? 1 : 0);
+}
+
 void
 m88110_initialize_cpu(cpuid_t cpu)
 {
 	struct cpu_info *ci;
 	u_int ictl, dctl;
 	int i;
+	int procvers = (get_cpu_pid() & PID_VN) >> VN_SHIFT;
 
 	ci = &m88k_cpus[cpu];
 
@@ -283,28 +311,65 @@ m88110_initialize_cpu(cpuid_t cpu)
 	/* clear PATCs */
 	patc_clear();
 
-	/* Do NOT enable ICTL_PREN (branch prediction) */
-	set_ictl(BATC_32M
-		 | CMMU_ICTL_DID	/* Double instruction disable */
-		 | CMMU_ICTL_MEN
-		 | CMMU_ICTL_CEN
-		 | CMMU_ICTL_BEN
-		 | CMMU_ICTL_HTEN);
+	ictl = BATC_512K | CMMU_ICTL_DID | CMMU_ICTL_CEN | CMMU_ICTL_BEN;
 
-	set_dctl(BATC_32M
-                 | CMMU_DCTL_RSVD1	/* Data Matching Disable */
-                 | CMMU_DCTL_MEN
-		 | CMMU_DCTL_CEN
-		 | CMMU_DCTL_SEN
-		 | CMMU_DCTL_ADS
-		 | CMMU_DCTL_HTEN);
+	/*
+	 * 88110 errata #10 (4.2) or #2 (5.1.1):
+	 * ``Under some circumstances, the 88110 may incorrectly latch data
+	 *   as it comes from the bus.
+	 *   [...]
+	 *   It is the data matching mechanism that may give corrupt data to
+	 *   the register files.
+	 *   Suggested fix: Set the Data Matching Disable bit (bit 2) of the
+	 *   DCTL.  This bit is not documented in the user's manual. This bit
+	 *   is only present for debug purposes and its functionality should
+	 *   not be depended upon long term.''
+	 *
+	 * 88110 errata #5 (5.1.1):
+	 * ``Setting the xmem bit in the dctl register to perform st/ld
+	 *   xmems can cause the cpu to hang if a st instruction follows the
+	 *   xmem.
+	 *   Work-Around: do not set the xmem bit in dctl, or separate st
+	 *   from xmem instructions.''
+	 */
+	dctl = BATC_512K | CMMU_DCTL_CEN | CMMU_DCTL_ADS;
+	dctl |= CMMU_DCTL_RSVD1; /* Data Matching Disable */
+
+	/*
+	 * 88110 rev 4.2 errata #1:
+	 * ``Under certain conditions involving exceptions, with branch
+	 *   prediction enabled, the CPU may hang.
+	 *   Suggested fix: Clear the PREN bit of the ICTL.  This will
+	 *   disable branch prediction.''
+	 *
+	 * ...but this errata becomes...
+	 *
+	 * 88110 rev 5.1 errata #1:
+	 * ``Under certain conditions involving exceptions, with branch
+	 *   prediction enabled and decoupled loads/stores enabled, load
+	 *   instructions may complete incorrectly or stores may execute
+	 *   to the wrong. address.
+	 *   Suggested fix: Clear the PREN bit of the ICTL or the DEN bit
+	 *   of the DCTL.''
+	 *
+	 * So since branch prediction appears to give better performance
+	 * than data cache decoupling, and it is not known whether the
+	 * problem has been understood better and thus the conditions
+	 * narrowed on 5.1, or changes between 4.2 and 5.1 only restrict
+	 * the conditions on which it may occur, we'll enable branch
+	 * prediction on 5.1 processors and data cache decoupling on
+	 * earlier versions.
+	 */
+	if (procvers >= 0xf)	/* > 0xb ? */
+		ictl |= CMMU_ICTL_PREN;
+	else
+		dctl |= CMMU_DCTL_DEN;
 
 	mc88110_inval_inst();		/* clear instruction cache & TIC */
 	mc88110_inval_data();		/* clear data cache */
-	if (mc88410_present())
-		mc88410_inval();	/* clear external data cache */
 
-	set_dcmd(CMMU_DCMD_INV_SATC);	/* invalidate ATCs */
+	set_ictl(ictl);
+	set_dctl(dctl);
 
 	set_isr(0);
 	set_dsr(0);
@@ -370,32 +435,16 @@ m88110_shutdown(void)
 {
 }
 
-cpuid_t
-m88110_cpu_number(void)
-{
-	u_int16_t gcsr;
-
-	gcsr = *(volatile u_int16_t *)(BS_BASE + BS_GCSR);
-
-	return ((gcsr & BS_GCSR_CPUID) != 0 ? 1 : 0);
-}
-
 void
-m88110_set_sapr(cpuid_t cpu, apr_t ap)
+m88110_set_sapr(apr_t ap)
 {
 	u_int ictl, dctl;
-
-	CMMU_LOCK;
 
 	set_icmd(CMMU_ICMD_INV_SATC);
 	set_dcmd(CMMU_DCMD_INV_SATC);
 
 	ictl = get_ictl();
 	dctl = get_dctl();
-
-	/* disable translation */
-	set_ictl((ictl & ~CMMU_ICTL_MEN));
-	set_dctl((dctl & ~CMMU_DCTL_MEN));
 
 	set_isap(ap);
 	set_dsap(ap);
@@ -407,17 +456,16 @@ m88110_set_sapr(cpuid_t cpu, apr_t ap)
 	set_dcmd(CMMU_DCMD_INV_UATC);
 	set_dcmd(CMMU_DCMD_INV_SATC);
 
-	/* restore MMU settings */
+	/* Enable translation */
+	ictl |= CMMU_ICTL_MEN | CMMU_ICTL_HTEN;
+	dctl |= CMMU_DCTL_MEN | CMMU_DCTL_HTEN;
 	set_ictl(ictl);
 	set_dctl(dctl);
-
-	CMMU_UNLOCK;
 }
 
 void
 m88110_set_uapr(apr_t ap)
 {
-	CMMU_LOCK;
 	set_iuap(ap);
 	set_duap(ap);
 
@@ -425,8 +473,7 @@ m88110_set_uapr(apr_t ap)
 	set_dcmd(CMMU_DCMD_INV_UATC);
 
 	/* We need to at least invalidate the TIC, as it is va-addressed */
-	mc88110_inval_inst();
-	CMMU_UNLOCK;
+	set_icmd(CMMU_ICMD_INV_TIC);
 }
 
 /*
@@ -437,10 +484,19 @@ void
 m88110_tlb_inv(cpuid_t cpu, u_int kernel, vaddr_t vaddr)
 {
 	u_int32_t psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
 
-	disable_interrupt(psr);
+	if (cpu != ci->ci_cpuid) {
+		m197_send_ipi(kernel ?
+		    CI_IPI_TLB_FLUSH_KERNEL : CI_IPI_TLB_FLUSH_USER, cpu);
+		return;
+	}
+#endif
 
-	CMMU_LOCK;
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
 	if (kernel) {
 		set_icmd(CMMU_ICMD_INV_SATC);
 		set_dcmd(CMMU_DCMD_INV_SATC);
@@ -448,7 +504,6 @@ m88110_tlb_inv(cpuid_t cpu, u_int kernel, vaddr_t vaddr)
 		set_icmd(CMMU_ICMD_INV_UATC);
 		set_dcmd(CMMU_DCMD_INV_UATC);
 	}
-	CMMU_UNLOCK;
 
 	set_psr(psr);
 }
@@ -468,22 +523,20 @@ m88110_tlb_inv_all(cpuid_t cpu)
 
 /*
  *	Functions that invalidate caches.
- *
- * Cache invalidates require physical addresses.  Care must be exercised when
- * using segment invalidates.  This implies that the starting physical address
- * plus the segment length should be invalidated.  A typical mistake is to
- * extract the first physical page of a segment from a virtual address, and
- * then expecting to invalidate when the pages are not physically contiguous.
- *
- * We don't push Instruction Caches prior to invalidate because they are not
- * snooped and never modified (I guess it doesn't matter then which form
- * of the command we use then).
  */
 
 /*
- * Care must be taken to avoid flushing the data cache when
- * the data cache is not on!  From the 0F92L Errata Documentation
- * Package, Version 1.1
+ * 88110 general information #22:
+ * ``Issuing a command to flush and invalidate the data cache while the
+ *   dcache is disabled (CEN = 0 in dctl) will cause problems.  Do not
+ *   flush a disabled data cache.  In general, there is no reason to
+ *   perform this operation with the cache disabled, since it may be
+ *   incoherent with the proper state of memory.  Before 5.0 the flush
+ *   command was treated like a nop when the cache was disabled.  This
+ *   is no longer the case.''
+ *
+ * Since we always enable the data cache, and no cmmu cache operation
+ * will occur before we do, it is not necessary to pay attention to this.
  */
 
 #ifdef MULTIPROCESSOR
@@ -511,9 +564,6 @@ m88110_tlb_inv_all(cpuid_t cpu)
  * invalidate I$, writeback and invalidate D$
  */
 
-/*
- *	flush both Instruction and Data caches
- */
 void
 m88110_cache_wbinv(cpuid_t cpu, paddr_t pa, psize_t size)
 {
@@ -523,7 +573,8 @@ m88110_cache_wbinv(cpuid_t cpu, paddr_t pa, psize_t size)
 	size = round_cache_line(pa + size) - trunc_cache_line(pa);
 	pa = trunc_cache_line(pa);
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 
 	mc88110_inval_inst();
 	while (size != 0) {
@@ -547,9 +598,6 @@ m88110_cache_wbinv(cpuid_t cpu, paddr_t pa, psize_t size)
 	set_psr(psr);
 }
 
-/*
- *	flush Instruction caches
- */
 void
 m88410_cache_wbinv(cpuid_t cpu, paddr_t pa, psize_t size)
 {
@@ -681,6 +729,14 @@ void
 m88410_icache_inv(cpuid_t cpu, paddr_t pa, psize_t size)
 {
 	u_int32_t psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+
+	if (cpu != ci->ci_cpuid) {
+		m197_send_complex_ipi(CI_IPI_ICACHE_FLUSH, cpu, pa, size);
+		return;
+	}
+#endif
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
@@ -690,9 +746,6 @@ m88410_icache_inv(cpuid_t cpu, paddr_t pa, psize_t size)
 	mc88410_wb();
 	CMMU_UNLOCK;
 
-	mc88110_flush_data();
-	if (mc88410_present())
-		mc88410_flush();
 	set_psr(psr);
 }
 
@@ -831,16 +884,13 @@ m88110_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 		}
 	}
 
-	mc88110_inval_inst();
-	mc88110_inval_data();
-	if (mc88410_present())
-		mc88410_inval();
 	set_psr(psr);
 }
 
 void
 m88410_dma_cachectl_local(paddr_t _pa, psize_t _size, int op)
 {
+	u_int32_t psr;
 	paddr_t pa;
 	psize_t size, count;
 	void (*flusher)(paddr_t, psize_t);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: genassym.cf,v 1.13 2004/12/01 14:31:25 miod Exp $
-=======
 #	$OpenBSD: genassym.cf,v 1.34 2010/09/28 20:27:55 miod Exp $
->>>>>>> origin/master
 #	$NetBSD: genassym.cf,v 1.23 2001/08/08 00:09:30 eeh Exp $
 
 #
@@ -90,15 +86,9 @@ include <machine/db_machdep.h>
 endif
 include <machine/pmap.h>
 include <machine/cpu.h>
+include <machine/mutex.h>
 
-include <machine/bsd_openprom.h>
 include <machine/reg.h>
-
-#include <sparc64/sparc64/cpuvar.h>
-
-ifdef COMPAT_NETBSD
-include <compat/netbsd/netbsd_syscall.h>
-endif
 
 ifdef notyet
 include <sparc64/dev/zsreg.h>
@@ -117,7 +107,9 @@ member	p_stat
 member	p_wchan
 member	p_vmspace
 member	p_pid
+member	p_cpu
 member	P_FPSTATE	p_md.md_fpstate
+member	P_MD_ASTPENDING	p_md.md_astpending
 
 export	SRUN
 export	SONPROC
@@ -145,17 +137,13 @@ member	faults
 
 # CPU info structure
 struct	cpu_info
+member	ci_self
 member	ci_curproc
 member	ci_cpcb
 member	ci_next
 member	ci_fpproc
 member	ci_number
 member	ci_upaid
-<<<<<<< HEAD
-member	ci_spinup
-member	ci_initstack
-member	ci_paddr
-=======
 member	ci_want_resched
 member	ci_handled_intr_level
 member	ci_intrpending
@@ -173,7 +161,6 @@ endif
 ifdef DIAGNOSTIC
 member	ci_mutex_level
 endif
->>>>>>> origin/master
 
 # FPU state
 struct	fpstate64
@@ -205,6 +192,7 @@ member	pcb_pstate
 member	pcb_cwp
 member	pcb_pil
 member	pcb_rw
+member	pcb_rwsp
 member	pcb_sp
 member	pcb_wcookie
 member	pcb_pc
@@ -250,13 +238,11 @@ member	ih_fun
 member	ih_arg
 member	ih_number
 member	ih_pil
-member	ih_busy
 member	IH_PEND		ih_pending
 member	ih_next
-member	ih_map
-member	ih_clr
+member	ih_ack
 member	IH_COUNT	ih_count.ec_count
-	
+
 # mbuf fields of import
 struct	mbuf
 member	m_next
@@ -283,22 +269,24 @@ member	dbr_local
 member	dbr_in
 endif
 
-ifdef COMPAT_NETBSD
-export	NETBSD_SYS___sigreturn14
-export	NETBSD_SYS_exit
-endif
+export	TSB_TAG_LOCKED
 
-export	TLB_ACCESS
-export	TLB_MODIFY
-export	TLB_REAL_W
-export	TLB_TSB_LOCK
-export	TLB_EXEC
-export	TLB_EXEC_ONLY
-export	TLB_L
-export	TLB_CACHE_MASK
-export	TLB_CP
-export	TLB_CV
-export	TLB_E
-export	TLB_P
-export	TLB_W
-export	TLB_G
+export	SUN4U_TLB_ACCESS
+export	SUN4U_TLB_MODIFY
+export	SUN4U_TLB_REAL_W
+export	SUN4U_TLB_EXEC
+export	SUN4U_TLB_W
+
+export	SUN4V_TLB_ACCESS
+export	SUN4V_TLB_MODIFY
+export	SUN4V_TLB_REAL_W
+export	SUN4V_TLB_EXEC
+export	SUN4V_TLB_W
+
+struct	mutex
+member	mtx_wantipl
+member	mtx_oldipl
+member	mtx_owner
+
+export	CPU_SUN4U
+export	CPU_SUN4V

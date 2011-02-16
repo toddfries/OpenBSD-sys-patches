@@ -46,6 +46,7 @@
 #include <uvm/uvm.h>
 #include <ddb/db_var.h>
 
+#include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/intr.h>
 #include <machine/psl.h>
@@ -57,15 +58,14 @@
 #define ICU_LEN 128
 #define LEGAL_IRQ(x) ((x >= 0) && (x < ICU_LEN))
 
-int o_intrtype[ICU_LEN], o_intrmask[ICU_LEN], o_intrlevel[ICU_LEN];
+int o_intrtype[ICU_LEN], o_intrmaxlvl[ICU_LEN];
 struct intrhand *o_intrhand[ICU_LEN] = { 0 };
 int o_hwirq[ICU_LEN], o_virq[ICU_LEN];
-unsigned int imen_o = 0xffffffff;
 int o_virq_max;
 
 static int fakeintr(void *);
 static char *intr_typename(int type);
-static void intr_calculatemasks(void);
+void openpic_calc_mask(void);
 static __inline int cntlzw(int x);
 static int mapirq(int irq);
 void openpic_enable_irq_mask(int irq_mask);
@@ -152,6 +152,7 @@ void openpic_intr_disestablish( void *lcp, void *arg);
 intr_send_ipi_t openpic_send_ipi;
 #endif
 void openpic_collect_preconf_intr(void);
+int openpic_big_endian;
 
 void
 openpic_attach(struct device *parent, struct device  *self, void *aux)
@@ -166,7 +167,8 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	openpic_base = (vaddr_t) mapiodev (ca->ca_baseaddr +
 			ca->ca_reg[0], 0x40000);
 
-	printf(": version 0x%x", openpic_read(OPENPIC_VENDOR_ID));
+	printf(": version 0x%x %s endian", openpic_read(OPENPIC_VENDOR_ID),
+		openpic_big_endian ? "big" : "little" );
 
 	openpic_init();
 
@@ -278,7 +280,7 @@ printf("vI %d ", irq);
 	fakehand.ih_level = level;
 	*p = &fakehand;
 
-	intr_calculatemasks();
+	openpic_calc_mask();
 
 	/*
 	 * Poke the real handler in now.
@@ -321,7 +323,7 @@ openpic_intr_disestablish(void *lcp, void *arg)
 	evcount_detach(&ih->ih_count);
 	free((void *)ih, M_DEVBUF);
 
-	intr_calculatemasks();
+	openpic_calc_mask();
 
 	if (o_intrhand[irq] == NULL)
 		o_intrtype[irq] = IST_NONE;
@@ -355,46 +357,43 @@ intr_typename(int type)
  * would be faster, but the code would be nastier, and we don't expect this to
  * happen very much anyway.
  */
-static void
-intr_calculatemasks()
+
+void
+openpic_calc_mask()
 {
-	int irq, level;
-	struct intrhand *q;
+	int irq;
+	struct intrhand *ih;
+	int i;
 
-	/* First, figure out which levels each IRQ uses. */
+	/* disable all openpic interrupts */
+	openpic_set_priority(0, 15);
+
 	for (irq = 0; irq < ICU_LEN; irq++) {
-		register int levels = 0;
-		for (q = o_intrhand[irq]; q; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		o_intrlevel[irq] = levels;
-	}
+		int max = IPL_NONE;
+		int min = IPL_HIGH;
+		int reg;
+		if (o_virq[irq] != 0) {
+			for (ih = o_intrhand[o_virq[irq]]; ih;
+			    ih = ih->ih_next) {
+				if (ih->ih_level > max)
+					max = ih->ih_level;
+				if (ih->ih_level < min)
+					min = ih->ih_level;
+			}
+		}
 
-	/* Then figure out which IRQs use each level. */
-	for (level = IPL_NONE; level < IPL_NUM; level++) {
-		register int irqs = 0;
-		for (irq = 0; irq < ICU_LEN; irq++)
-			if (o_intrlevel[irq] & (1 << level))
-				irqs |= 1 << irq;
-		imask[level] = irqs | SINT_MASK;
-	}
+		o_intrmaxlvl[irq] = max;
 
-	/*
-	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so vm > (tty | net | bio).
-	 *
-	 * Enforce a hierarchy that gives slow devices a better chance at not
-	 * dropping data.
-	 */
-	imask[IPL_NET] |= imask[IPL_BIO];
-	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCK;
+		/* adjust priority if it changes */
+		reg = openpic_read(OPENPIC_SRC_VECTOR(irq));
+		if (max != ((reg >> OPENPIC_PRIORITY_SHIFT) & 0xf)) {
+			openpic_write(OPENPIC_SRC_VECTOR(irq),
+				(reg & ~(0xf << OPENPIC_PRIORITY_SHIFT)) |
+				(max << OPENPIC_PRIORITY_SHIFT) );
+		}
 
-	/*
-	 * These are pseudo-levels.
-	 */
-	imask[IPL_NONE] = 0x00000000;
-	imask[IPL_HIGH] = 0xffffffff;
+		if (max == IPL_NONE)
+			min = IPL_NONE; /* Interrupt not enabled */
 
 		if (o_virq[irq] != 0) {
 			/* Enable (dont mask) interrupts at lower levels */ 
@@ -459,6 +458,7 @@ cntlzw(int x)
 	return a;
 }
 
+void openpic_do_pending_softint(int pcpl);
 
 void
 openpic_do_pending_int()
@@ -468,18 +468,17 @@ openpic_do_pending_int()
 	int irq;
 	int pcpl;
 	int hwpend;
+	int pri, pripending;
 	int s;
 
-	if (ci->ci_iactive)
+	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_HARD)
 		return;
 
-	ci->ci_iactive = 1;
-	pcpl = splhigh();		/* Turn off all */
+	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_HARD);
 	s = ppc_intr_disable();
+	pcpl = ci->ci_cpl;
 
 	hwpend = ci->ci_ipending & ~pcpl;	/* Do now unmasked pendings */
-	imen_o &= ~hwpend;
-	openpic_enable_irq_mask(~imen_o);
 	hwpend &= HWIRQ_MASK;
 	while (hwpend) {
 		/* this still doesn't handle the interrupts in priority order */
@@ -495,13 +494,18 @@ openpic_do_pending_int()
 			while(ih) {
 				ppc_intr_enable(1);
 
-			if ((*ih->ih_fun)(ih->ih_arg))
-				ih->ih_count.ec_count++;
+				KERNEL_LOCK();
+				if ((*ih->ih_fun)(ih->ih_arg))
+					ih->ih_count.ec_count++;
+				KERNEL_UNLOCK();
 
-			(void)ppc_intr_disable();
-			
-			ih = ih->ih_next;
+				(void)ppc_intr_disable();
+				
+				ih = ih->ih_next;
+			}
 		}
+		hwpend = ci->ci_ipending & ~pcpl;/* Catch new pendings */
+		hwpend &= HWIRQ_MASK;
 	}
 	ci->ci_cpl = pcpl | SINT_ALLMASK;
 	openpic_enable_irq_mask(~ci->ci_cpl);
@@ -509,7 +513,18 @@ openpic_do_pending_int()
 
 	openpic_do_pending_softint(pcpl);
 
-	/*out32rb(INT_ENABLE_REG, ~imen_o);*/
+	ppc_intr_enable(s);
+}
+
+void
+openpic_do_pending_softint(int pcpl)
+{
+	struct cpu_info *ci = curcpu();
+
+	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT)
+		return;
+
+	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
 
 	do {
 		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
@@ -538,8 +553,8 @@ openpic_do_pending_int()
 		}
 	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
-	ppc_intr_enable(s);
-	ci->ci_iactive = 0;
+
+	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
 }
 
 u_int
@@ -547,7 +562,10 @@ openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
-	return in32rb(addr);
+	if (openpic_big_endian)
+		return in32(addr);
+	else
+		return in32rb(addr);
 }
 
 void
@@ -555,7 +573,10 @@ openpic_write(int reg, u_int val)
 {
 	char *addr = (void *)(openpic_base + reg);
 
-	out32rb(addr, val);
+	if (openpic_big_endian)
+		out32(addr, val);
+	else
+		out32rb(addr, val);
 }
 
 void
@@ -664,7 +685,7 @@ ext_intr_openpic()
 
 	pcpl = ci->ci_cpl;
 
-	realirq = openpic_read_irq(0);
+	realirq = openpic_read_irq(ci->ci_cpuid);
 
 	while (realirq != 255) {
 #ifdef MULTIPROCESSOR
@@ -703,8 +724,10 @@ ext_intr_openpic()
 			while (ih) {
 				ppc_intr_enable(1);
 
+				KERNEL_LOCK();
 				if ((*ih->ih_fun)(ih->ih_arg))
 					ih->ih_count.ec_count++;
+				KERNEL_UNLOCK();
 
 				(void)ppc_intr_disable();
 				ih = ih->ih_next;
@@ -714,10 +737,10 @@ ext_intr_openpic()
 			__asm__ volatile("":::"memory"); /* don't reorder.... */
 			ci->ci_cpl = ocpl;
 			__asm__ volatile("":::"memory"); /* don't reorder.... */
-			openpic_enable_irq(realirq);
+			openpic_enable_irq_mask(~pcpl);
 		}
 
-		realirq = openpic_read_irq(0);
+		realirq = openpic_read_irq(ci->ci_cpuid);
 	}
 	ppc_intr_enable(1);
 

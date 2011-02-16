@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.h,v 1.3 2002/03/14 03:15:58 millert Exp $	*/
+/*	$OpenBSD: isa_machdep.h,v 1.4 2003/06/02 23:27:53 millert Exp $	*/
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.

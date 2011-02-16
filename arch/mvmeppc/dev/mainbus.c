@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.9 2004/05/14 20:38:32 miod Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.10 2004/11/18 16:10:43 miod Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.

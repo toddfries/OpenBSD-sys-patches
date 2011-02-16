@@ -32,7 +32,6 @@
 #include <sys/tty.h>
 
 #include <machine/autoconf.h>
-#include <mips64/archtype.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -40,26 +39,19 @@
 #include <dev/ic/comvar.h>
 #include <dev/ic/ns16550reg.h>
 
-int	com_localbus_probe(struct device *, void *, void *);
-void	com_localbus_attach(struct device *, struct device *, void *);
+#include <mips64/archtype.h>
 
 #include <sgi/localbus/macebusvar.h>
 
-struct cfattach com_localbus_ca = {
-	sizeof(struct com_softc), com_localbus_probe, com_localbus_attach
-};
+int	com_macebus_probe(struct device *, void *, void *);
+void	com_macebus_attach(struct device *, struct device *, void *);
 
-struct cfattach com_xbow_ca = {
-	sizeof(struct com_softc), com_localbus_probe, com_localbus_attach
+struct cfattach com_macebus_ca = {
+	sizeof(struct com_softc), com_macebus_probe, com_macebus_attach
 };
-
-extern void com_raisedtr(void *);
-extern struct timeout compoll_to;
 
 int
-com_localbus_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+com_macebus_probe(struct device *parent, void *match, void *aux)
 {
 	struct macebus_attach_args *maa = aux;
 	bus_space_handle_t ioh;
@@ -79,9 +71,7 @@ com_localbus_probe(parent, match, aux)
 }
 
 void
-com_localbus_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+com_macebus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (void *)self;
 	struct macebus_attach_args *maa = aux;
@@ -105,11 +95,6 @@ com_localbus_attach(parent, self, aux)
 			return;
 		}
 	}
-	else {
-		ioh = comconsioh;
-	}
-
-	sc->sc_ioh = ioh;
 
 	com_attach_subr(sc);
 

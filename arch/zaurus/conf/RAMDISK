@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: RAMDISK,v 1.35 2006/11/28 15:25:10 deraadt Exp $
-=======
 #	$OpenBSD: RAMDISK,v 1.41 2010/07/03 03:59:17 krw Exp $
->>>>>>> origin/master
 
 machine	zaurus	arm
 

@@ -10,6 +10,7 @@ maxusers 2 8 64
 
 file	dev/cninit.c
 file	arch/sgi/sgi/autoconf.c
+file	arch/sgi/sgi/bus_dma.c
 file	arch/sgi/sgi/conf.c
 file	arch/sgi/sgi/disksubr.c			disk
 file	arch/sgi/sgi/lock_machdep.c		multiprocessor
@@ -50,6 +51,10 @@ attach	mainbus at root
 device	cpu
 attach	cpu at mainbus
 
+#	Clock device
+device	clock
+attach	clock at mainbus
+
 #
 #	O2 MACE localbus autoconfiguration devices
 #
@@ -73,10 +78,6 @@ include "dev/onewire/files.onewire"
 device	macepcibr {} : pcibus
 attach	macepcibr at macebus
 file	arch/sgi/pci/macepcibridge.c		macepcibr
-
-device	xiopcibr {} : pcibus
-attach	xiopcibr at xbowmux
-file	arch/sgi/pci/xiopcibridge.c		xiopcibr needs-flag
 
 #	Use machine independent SCSI driver routines
 include	"scsi/files.scsi"
@@ -144,13 +145,8 @@ attach	gbe at mainbus
 file	arch/sgi/dev/gbe.c			gbe	needs-flag
 
 # 16[45]50-based "com" ports on localbus
-attach	com at xbowmux with com_xbow
-attach	com at macebus with com_localbus
-file	arch/sgi/localbus/com_lbus.c		com_localbus | com_xbow
-
-# PC parallel ports (XXX what chip?)
-attach	lpt at macebus with lpt_localbus
-file	arch/sgi/dev/lpt_lbus.c			lpt_localbus
+attach	com at macebus with com_macebus
+file	arch/sgi/localbus/com_lbus.c		com_macebus
 
 # MACE MAC-110 ethernet
 device	mec: ether, ifnet, ifmedia, mii
@@ -181,7 +177,7 @@ include	"dev/rasops/files.rasops"
 include	"dev/wsfont/files.wsfont"
 
 #
-#  wscons console
+# wscons console
 #
 include	"dev/wscons/files.wscons"
 

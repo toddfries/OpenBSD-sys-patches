@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sbus.c,v 1.25 2006/06/27 20:20:48 jason Exp $	*/
-=======
 /*	$OpenBSD: sbus.c,v 1.39 2010/12/26 15:37:20 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-
@@ -99,7 +95,7 @@
 
 
 /*
- * Sbus stuff.
+ * SBus stuff.
  */
 
 #include <sys/param.h>
@@ -114,6 +110,7 @@
 #include <sparc64/dev/iommureg.h>
 #include <sparc64/dev/iommuvar.h>
 #include <sparc64/dev/sbusreg.h>
+#include <sparc64/dev/starfire.h>
 #include <dev/sbus/sbusvar.h>
 #include <dev/sbus/xboxvar.h>
 
@@ -121,6 +118,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/openfirm.h>
 #include <machine/sparc64.h>
 
 #ifdef DEBUG
@@ -134,7 +132,7 @@ int sbus_debug = 0;
 #endif
 
 bus_space_tag_t sbus_alloc_bustag(struct sbus_softc *, int);
-bus_dma_tag_t sbus_alloc_dmatag(struct sbus_softc *, bus_dma_tag_t);
+bus_dma_tag_t sbus_alloc_dma_tag(struct sbus_softc *, bus_dma_tag_t);
 int sbus_get_intr(struct sbus_softc *, int,
     struct sbus_intr **, int *, int);
 int sbus_overtemp(void *);
@@ -144,7 +142,7 @@ int _sbus_bus_map(bus_space_tag_t, bus_space_tag_t,
     int,		/*flags*/
     bus_space_handle_t *);
 void *sbus_intr_establish(bus_space_tag_t, bus_space_tag_t,
-    int,		/*Sbus interrupt level*/
+    int,		/*SBus interrupt level*/
     int,		/*`device class' priority*/
     int,		/*flags*/
     int (*)(void *),	/*handler*/
@@ -170,8 +168,6 @@ struct cfdriver sbus_cd = {
 	NULL, "sbus", DV_DULL
 };
 
-extern struct cfdriver sbus_cd;
-
 /*
  * DVMA routines
  */
@@ -179,17 +175,17 @@ int sbus_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
 
 /*
- * Child devices receive the Sbus interrupt level in their attach
+ * Child devices receive the SBus interrupt level in their attach
  * arguments. We translate these to CPU IPLs using the following
  * tables. Note: obio bus interrupt levels are identical to the
  * processor IPL.
  *
- * The second set of tables is used when the Sbus interrupt level
+ * The second set of tables is used when the SBus interrupt level
  * cannot be had from the PROM as an `interrupt' property. We then
  * fall back on the `intr' property which contains the CPU IPL.
  */
 
-/* Translate Sbus interrupt level to processor IPL */
+/* Translate SBus interrupt level to processor IPL */
 static int intr_sbus2ipl_4u[] = {
 	0, 2, 3, 5, 7, 9, 11, 13
 };
@@ -197,7 +193,7 @@ static int intr_sbus2ipl_4u[] = {
 /*
  * This value is or'ed into the attach args' interrupt level cookie
  * if the interrupt level comes from an `intr' property, i.e. it is
- * not an Sbus interrupt level.
+ * not an SBus interrupt level.
  */
 #define SBUS_INTR_COMPAT	0x80000000
 
@@ -216,7 +212,7 @@ sbus_print(void *args, const char *busname)
 	int i;
 
 	if (busname != NULL) {
-		printf("%s at %s", sa->sa_name, busname);
+		printf("\"%s\" at %s", sa->sa_name, busname);
 		class = getpropstring(sa->sa_node, "device_type");
 		if (*class != '\0')
 			printf(" class %s", class);
@@ -268,7 +264,7 @@ sbus_xbox_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_master = sbus->sc_master;
 
 	sc->sc_bustag = xa->xa_bustag;
-	sc->sc_dmatag = sbus_alloc_dmatag(sc, xa->xa_dmatag);
+	sc->sc_dmatag = sbus_alloc_dma_tag(sc, xa->xa_dmatag);
 
 	/*
 	 * Parent has already done the address translation computations.
@@ -295,6 +291,7 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 	struct intrhand *ih;
 	int ipl, error;
 	struct sysioreg *sysio;
+	char buf[32];
 	char *name;
 
 	sc->sc_master = sc;
@@ -352,12 +349,15 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: ", sc->sc_dev.dv_xname);
 	iommu_init(name, &sc->sc_is, 0, -1);
 
+	/* Initialize Starfire PC interrupt translation. */
+	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
+	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
+		starfire_pc_ittrans_init(ma->ma_upaid);
+
 	/* Enable the over temp intr */
-	ih = (struct intrhand *)
-		malloc(sizeof(struct intrhand), M_DEVBUF, M_NOWAIT);
+	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ih == NULL)
 		panic("couldn't malloc intrhand");
-	memset(ih, 0, sizeof(struct intrhand));
 	ih->ih_map = &sysio->therm_int_map;
 	ih->ih_clr = NULL; /* &sysio->therm_clr_int; */
 	ih->ih_fun = sbus_overtemp;
@@ -369,7 +369,7 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 	*(ih->ih_map) |= INTMAP_V;
 	
 	/*
-	 * Note: the stupid SBUS IOMMU ignores the high bits of an address, so a
+	 * Note: the stupid SBus IOMMU ignores the high bits of an address, so a
 	 * NULL DMA pointer will be translated by the first page of the IOTSB.
 	 * To avoid bugs we'll alloc and ignore the first entry in the IOTSB.
 	 */
@@ -383,13 +383,13 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 			panic("sbus iommu: can't toss first dvma page");
 	}
 
-	sc->sc_dmatag = sbus_alloc_dmatag(sc, ma->ma_dmatag);
+	sc->sc_dmatag = sbus_alloc_dma_tag(sc, ma->ma_dmatag);
 
 	sbus_attach_common(sc, node, 0);
 }
 
 /*
- * Attach an Sbus (main part).
+ * Attach an SBus (main part).
  */
 void
 sbus_attach_common(struct sbus_softc *sc, int node, int indirect)
@@ -416,6 +416,9 @@ sbus_attach_common(struct sbus_softc *sc, int node, int indirect)
 	 */
 	node0 = firstchild(node);
 	for (node = node0; node; node = nextsibling(node)) {
+		if (!checkstatus(node))
+			continue;
+
 		if (sbus_setup_attach_args(sc, sbt, sc->sc_dmatag,
 					   node, &sa) != 0) {
 			DPRINTF(SDB_CHILD,
@@ -574,7 +577,7 @@ sbus_overtemp(void *arg)
 }
 
 /*
- * Get interrupt attributes for an Sbus device.
+ * Get interrupt attributes for an SBus device.
  */
 int
 sbus_get_intr(struct sbus_softc *sc, int node, struct sbus_intr **ipp, int *np,
@@ -585,7 +588,7 @@ sbus_get_intr(struct sbus_softc *sc, int node, struct sbus_intr **ipp, int *np,
 	char buf[32];
 
 	/*
-	 * The `interrupts' property contains the Sbus interrupt level.
+	 * The `interrupts' property contains the SBus interrupt level.
 	 */
 	ipl = NULL;
 	if (getprop(node, "interrupts", sizeof(int), np, (void **)&ipl) == 0) {
@@ -617,7 +620,7 @@ sbus_get_intr(struct sbus_softc *sc, int node, struct sbus_intr **ipp, int *np,
 			}
 
 		/*
-		 * Sbus card devices need the slot number encoded into
+		 * SBus card devices need the slot number encoded into
 		 * the vector as this is generally not done.
 		 */
 		if ((ipl[0] & INTMAP_OBIO) == 0)
@@ -644,7 +647,7 @@ sbus_get_intr(struct sbus_softc *sc, int node, struct sbus_intr **ipp, int *np,
 
 
 /*
- * Install an interrupt handler for an Sbus device.
+ * Install an interrupt handler for an SBus device.
  */
 void *
 sbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int pri, int level,
@@ -681,7 +684,7 @@ sbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int pri, int level,
 		    ("\nsbus: intr[%ld]%lx: %lx\nHunting for IRQ...\n",
 		    (long)ipl, (long)vec, (u_long)intrlev[vec]));
 		if ((vec & INTMAP_OBIO) == 0) {
-			/* We're in an SBUS slot */
+			/* We're in an SBus slot */
 			/* Register the map and clear intr registers */
 			bus_space_handle_t maph;
 			int slot = INTSLOT(pri);
@@ -692,7 +695,7 @@ sbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int pri, int level,
 			if (sbus_debug & SDB_INTR) {
 				int64_t intrmap = *map;
 				
-				printf("SBUS %lx IRQ as %llx in slot %d\n", 
+				printf("SBus %lx IRQ as %llx in slot %d\n", 
 				       (long)vec, (long long)intrmap, slot);
 				printf("\tmap addr %p clr addr %p\n",
 				    map, clr);
@@ -769,17 +772,11 @@ sbus_alloc_bustag(struct sbus_softc *sc, int indirect)
 {
 	struct sparc_bus_space_tag *sbt;
 
-	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT);
+	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sbt == NULL)
 		return (NULL);
 
-<<<<<<< HEAD
-	bzero(sbt, sizeof *sbt);
-	snprintf(sbt->name, sizeof(sbt->name), "%s",
-		sc->sc_dev.dv_xname);
-=======
 	strlcpy(sbt->name, sc->sc_dev.dv_xname, sizeof(sbt->name));
->>>>>>> origin/master
 	sbt->cookie = sc;
 	if (indirect)
 		sbt->parent = sc->sc_bustag->parent;
@@ -796,7 +793,7 @@ sbus_alloc_bustag(struct sbus_softc *sc, int indirect)
 
 
 bus_dma_tag_t
-sbus_alloc_dmatag(struct sbus_softc *sc, bus_dma_tag_t psdt)
+sbus_alloc_dma_tag(struct sbus_softc *sc, bus_dma_tag_t psdt)
 {
 	bus_dma_tag_t sdt;
 

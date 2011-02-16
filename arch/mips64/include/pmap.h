@@ -40,6 +40,8 @@
 
 #ifdef	_KERNEL
 
+#include <machine/pte.h>
+
 /*
  * The user address space is currently limited to 2Gb (0x0 - 0x80000000).
  *
@@ -77,10 +79,8 @@
 
 #define PMAP_SEGTABSIZE		(PMAP_L2SIZE / sizeof(void *))
 
-union pt_entry;
-
 struct segtab {
-	union pt_entry	*seg_tab[PMAP_SEGTABSIZE];
+	pt_entry_t	*seg_tab[PMAP_SEGTABSIZE];
 };
 
 struct pmap_asid_info {
@@ -109,10 +109,10 @@ typedef struct pmap {
 
 
 /* flags for pv_entry */
-#define	PV_UNCACHED	0x0001		/* Page is mapped unchached */
-#define	PV_CACHED	0x0002		/* Page has been cached */
-#define	PV_ATTR_MOD	0x0004
-#define	PV_ATTR_REF	0x0008
+#define	PV_UNCACHED	PG_PMAP0	/* Page is mapped unchached */
+#define	PV_CACHED	PG_PMAP1	/* Page has been cached */
+#define	PV_ATTR_MOD	PG_PMAP2
+#define	PV_ATTR_REF	PG_PMAP3
 #define	PV_PRESERVE	(PV_ATTR_MOD | PV_ATTR_REF)
 
 extern	struct pmap *const kernel_pmap_ptr;
@@ -136,6 +136,7 @@ void	pmap_page_cache(vm_page_t, int);
 
 #define	pmap_collect(x)			do { /* nothing */ } while (0)
 #define pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 void pmap_update_user_page(pmap_t, vaddr_t, pt_entry_t);
 #ifdef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: som.h,v 1.3 1999/12/23 04:09:44 mickey Exp $	*/
+/*	$OpenBSD: som.h,v 1.4 2004/04/07 18:24:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff

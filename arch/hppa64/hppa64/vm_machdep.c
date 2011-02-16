@@ -81,29 +81,6 @@ cpu_coredump(p, vp, cred, core)
 	return error;
 }
 
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-
-	while (size > 0) {
-		if (pmap_extract(pmap_kernel(), (vaddr_t)from, &pa) == FALSE)
-			panic("pagemove");
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, UVM_PROT_RW);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
-
 void
 cpu_fork(p1, p2, stack, stacksize, func, arg)
 	struct proc *p1, *p2;
@@ -204,8 +181,8 @@ cpu_exit(p)
 		fpu_curpcb = 0;
 	}
 
-	exit2(p);
-	cpu_switch(p);
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -262,7 +239,9 @@ vunmapbuf(bp, len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - addr;
 	len = round_page(off + len);
-	uvm_km_free_wakeup(kernel_map, addr, len);
+	pmap_kremove(addr, len);
+	pmap_update(pmap_kernel());
+	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
 }

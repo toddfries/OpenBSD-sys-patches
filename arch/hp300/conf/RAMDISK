@@ -24,8 +24,6 @@ maxusers	32
 option		TIMEZONE=0	# time zone to adjust RTC time by
 option		DST=0		# daylight saving time used by RTC
 
-option		DIAGNOSTIC	# internal consistency checks
-
 option		FFS		# UFS
 #option		EXT2FS		# Linux ext2fs
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.4 2003/06/02 23:27:56 millert Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.8 2008/01/16 20:55:37 kettenis Exp $	*/
 /*	$NetBSD: pcb.h,v 1.7 2000/12/29 17:12:05 eeh Exp $ */
 
 /*
@@ -133,13 +133,14 @@ struct pcb {
 
 	/* The rest is probably not needed except for pcb_rw */
 	char	pcb_cwp;	/* %cwp when switch() was called */
-	char	pcb_pil;	/* %pil when switch() was called -- prolly not needed */
+	char	pcb_pil;	/* %pil when switch() was called -- probably not needed */
 
 	const char *lastcall;	/* DEBUG -- name of last system call */
 	u_int64_t	pcb_wcookie;
 
 	/* the following MUST be aligned on a 64-bit boundary */
 	struct	rwindow64 pcb_rw[PCB_MAXWIN];	/* saved windows */
+	u_int64_t	pcb_rwsp[PCB_MAXWIN];
 };
 
 /*
@@ -154,9 +155,7 @@ struct md_coredump {
 	u_int64_t md_wcookie;
 };
 
-#ifdef _KERNEL
-extern struct pcb *cpcb;
-#else
+#ifndef _KERNEL
 /* Let gdb compile.  We need fancier macros to make these make sense. */
 #define pcb_psr	pcb_pstate
 #define pcb_wim	pcb_cwp

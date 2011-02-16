@@ -441,9 +441,9 @@ mc_attach(struct device *parent, struct device *self, void *aux)
 
 	/* install interrupt handlers */
 	mac_intr_establish(parent, ca->ca_intr[2], IST_LEVEL, IPL_NET,
-	    mc_dmaintr, sc, "mace");
+	    mc_dmaintr, sc, sc->sc_dev.dv_xname);
 	mac_intr_establish(parent, ca->ca_intr[0],  IST_LEVEL, IPL_NET,
-	    mc_intr, sc, "mace");
+	    mc_intr, sc, sc->sc_dev.dv_xname);
 
 	sc->sc_biucc = XMTSP_64;
 	sc->sc_fifocc = XMTFW_16 | RCVFW_64 | XMTFWU | RCVFWU |

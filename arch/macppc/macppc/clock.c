@@ -54,17 +54,19 @@ u_int tb_get_timecount(struct timecounter *);
 static u_int32_t ticks_per_sec = 3125000;
 static u_int32_t ns_per_tick = 320;
 static int32_t ticks_per_intr;
-static volatile u_int64_t lasttb;
 
 static struct timecounter tb_timecounter = {
 	tb_get_timecount, NULL, 0x7fffffff, 0, "tb", 0, NULL
 };
 
+/* calibrate the timecounter frequency for the listed models */
+static const char *calibrate_tc_models[] = {
+	"PowerMac10,1"
+};
+extern char *hw_prod;
+
 time_read_t  *time_read;
 time_write_t *time_write;
-
-/* event tracking variables, when the next events of each time should occur */
-u_int64_t nexttimerevent, prevtb, nextstatevent;
 
 /* vars for stats */
 int statint;
@@ -75,6 +77,7 @@ static struct evcount clk_count;
 static struct evcount stat_count;
 static int clk_irq = PPC_CLK_IRQ;
 static int stat_irq = PPC_STAT_IRQ;
+
 
 /*
  * Set up the system's time, given a `reasonable' time value.
@@ -174,13 +177,12 @@ resettodr(void)
 	}
 }
 
-volatile int statspending;
-
 void
 decr_intr(struct clockframe *frame)
 {
 	u_int64_t tb;
 	u_int64_t nextevent;
+	struct cpu_info *ci = curcpu();
 	int nstats;
 	int s;
 
@@ -190,33 +192,32 @@ decr_intr(struct clockframe *frame)
 	if (!ticks_per_intr)
 		return;
 
-
 	/*
 	 * Based on the actual time delay since the last decrementer reload,
 	 * we arrange for earlier interrupt next time.
 	 */
 
 	tb = ppc_mftb();
-	while (nexttimerevent <= tb)
-		nexttimerevent += ticks_per_intr;
+	while (ci->ci_nexttimerevent <= tb)
+		ci->ci_nexttimerevent += ticks_per_intr;
 
-	prevtb = nexttimerevent - ticks_per_intr;
+	ci->ci_prevtb = ci->ci_nexttimerevent - ticks_per_intr;
 
-	for (nstats = 0; nextstatevent <= tb; nstats++) {
+	for (nstats = 0; ci->ci_nextstatevent <= tb; nstats++) {
 		int r;
 		do {
 			r = random() & (statvar -1);
 		} while (r == 0); /* random == 0 not allowed */
-		nextstatevent += statmin + r;
+		ci->ci_nextstatevent += statmin + r;
 	}
 
 	/* only count timer ticks for CLK_IRQ */
 	stat_count.ec_count += nstats;
 
-	if (nexttimerevent < nextstatevent)
-		nextevent = nexttimerevent;
+	if (ci->ci_nexttimerevent < ci->ci_nextstatevent)
+		nextevent = ci->ci_nexttimerevent;
 	else
-		nextevent = nextstatevent;
+		nextevent = ci->ci_nextstatevent;
 
 	/*
 	 * Need to work about the near constant skew this introduces???
@@ -227,8 +228,10 @@ decr_intr(struct clockframe *frame)
 	if (ci->ci_cpl & SPL_CLOCKMASK) {
 		ci->ci_statspending += nstats;
 	} else {
-		nstats += statspending;
-		statspending = 0;
+		KERNEL_LOCK();
+
+		nstats += ci->ci_statspending;
+		ci->ci_statspending = 0;
 
 		s = splclock();
 
@@ -239,20 +242,10 @@ decr_intr(struct clockframe *frame)
 
 		/*
 		 * Do standard timer interrupt stuff.
-		 * Do softclock stuff only on the last iteration.
 		 */
-		frame->pri = s | SINT_CLOCK;
-		while (lasttb < prevtb - ticks_per_intr) {
+		while (ci->ci_lasttb < ci->ci_prevtb) {
 			/* sync lasttb with hardclock */
-			lasttb += ticks_per_intr;
-			clk_count.ec_count++;
-			hardclock(frame);
-		}
-
-		frame->pri = s;
-		while (lasttb < prevtb) {
-			/* sync lasttb with hardclock */
-			lasttb += ticks_per_intr;
+			ci->ci_lasttb += ticks_per_intr;
 			clk_count.ec_count++;
 			hardclock(frame);
 		}
@@ -266,16 +259,48 @@ decr_intr(struct clockframe *frame)
 		/* if a tick has occurred while dealing with these,
 		 * dont service it now, delay until the next tick.
 		 */
+		KERNEL_UNLOCK();
 	}
 }
+
+void cpu_startclock(void);
 
 void
 cpu_initclocks()
 {
 	int intrstate;
-	int r;
 	int minint;
-	u_int64_t nextevent;
+	u_int32_t first_tb, second_tb;
+	time_t first_sec, sec;
+	int calibrate = 0, n;
+
+	/* check if we should calibrate the timecounter frequency */
+	for (n = 0; n < sizeof(calibrate_tc_models) /
+	    sizeof(calibrate_tc_models[0]); n++) {
+		if (!strcmp(calibrate_tc_models[n], hw_prod)) {
+			calibrate = 1;
+			break;
+		}
+	}
+
+	/* if a RTC is available, calibrate the timecounter frequency */
+	if (calibrate && time_read != NULL) {
+		time_read(&first_sec);
+		do {
+			first_tb = ppc_mftbl();
+			time_read(&sec);
+		} while (sec == first_sec);
+		first_sec = sec;
+		do {
+			second_tb = ppc_mftbl();
+			time_read(&sec);
+		} while (sec == first_sec);
+		ticks_per_sec = second_tb - first_tb;
+#ifdef DEBUG
+		printf("tb: using measured timecounter frequency of %ld Hz\n",
+		    ticks_per_sec);
+#endif
+	}
 
 	intrstate = ppc_intr_disable();
 
@@ -289,17 +314,36 @@ cpu_initclocks()
 	minint = statint / 2 + 100;
 	while (statvar > minint)
 		statvar >>= 1;
-
 	statmin = statint - (statvar >> 1);
 
 	evcount_attach(&clk_count, "clock", &clk_irq);
 	evcount_attach(&stat_count, "stat", &stat_irq);
 
+	cpu_startclock();
+
 	tb_timecounter.tc_frequency = ticks_per_sec;
 	tc_init(&tb_timecounter);
-
-	ppc_mtdec(nextevent-lasttb);
 	ppc_intr_enable(intrstate);
+}
+
+void
+cpu_startclock()
+{
+	struct cpu_info *ci = curcpu();
+	u_int64_t nextevent;
+
+	ci->ci_lasttb = ppc_mftb();
+
+	/*
+	 * no point in having random on the first tick, 
+	 * it just complicates the code.
+	 */
+	ci->ci_nexttimerevent = ci->ci_lasttb + ticks_per_intr;
+	nextevent = ci->ci_nextstatevent = ci->ci_nexttimerevent;
+
+	ci->ci_statspending = 0;
+
+	ppc_mtdec(nextevent - ci->ci_lasttb);
 }
 
 void

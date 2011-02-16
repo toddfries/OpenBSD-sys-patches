@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: conf.c,v 1.40 2005/07/31 06:39:07 dlg Exp $	*/
-=======
 /*	$OpenBSD: conf.c,v 1.59 2011/01/14 19:04:08 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -55,6 +51,7 @@
 
 #include <machine/conf.h>
 
+#include "bio.h"
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
@@ -77,12 +74,9 @@
 #include "zstty.h"
 #include "sab.h"
 #include "pcons.h"
-<<<<<<< HEAD
-=======
 #include "vcons.h"
 #include "vcctty.h"
 #include "sbbc.h"
->>>>>>> origin/master
 #include "com.h"
 #include "lpt.h"
 #include "bpp.h"
@@ -276,13 +270,13 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 102 */
 	cdev_notdef(),			/* 103 */
 	cdev_notdef(),			/* 104 */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 105: packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 105: packet filter */
 	cdev_notdef(),			/* 106 */
 	cdev_bpp_init(NBPP,bpp),	/* 107: on-board parallel port */
 	cdev_tty_init(NSTTY,stty),	/* 108: spif serial ports */
 	cdev_gen_init(NSBPP,sbpp),	/* 109: spif parallel ports */
 	cdev_disk_init(NVND,vnd),	/* 110: vnode disk driver */
-	cdev_bpftun_init(NTUN,tun),	/* 111: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 111: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 112: loadable module driver */
 	cdev_lkm_dummy(),		/* 113 */
 	cdev_lkm_dummy(),		/* 114 */
@@ -291,13 +285,11 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 117 */
 	cdev_lkm_dummy(),		/* 118 */
 	cdev_random_init(1,random),	/* 119: random data source */
-	cdev_notdef(),			/* 120 */
+	cdev_bio_init(NBIO,bio),	/* 120: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 121: RAIDframe disk driver */
 	cdev_tty_init(NPCONS,pcons),	/* 122: PROM console */
 	cdev_ptm_init(NPTY,ptm),	/* 123: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
-<<<<<<< HEAD
-=======
 	cdev_tty_init(NVCONS,vcons),	/* 125: virtual console */
 	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
 	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
@@ -305,7 +297,6 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
->>>>>>> origin/master
 };
 int	nchrdev = nitems(cdevsw);
 

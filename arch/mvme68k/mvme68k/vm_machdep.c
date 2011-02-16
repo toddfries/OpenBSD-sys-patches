@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.42 2006/06/24 14:04:04 miod Exp $ */
+/*	$OpenBSD: vm_machdep.c,v 1.48 2007/11/02 19:18:54 martin Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -117,20 +117,13 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 
 /*
  * cpu_exit is called as the last action during exit.
- * We release the address space and machine-dependent resources,
- * including the memory for the user structure and kernel stack.
- * Once finished, we call switch_exit, which switches to a temporary
- * pcb and stack and never returns.  We block memory allocation
- * until switch_exit has made things safe again.
  */
 void
 cpu_exit(p)
 	struct proc *p;
 {
-
-	splhigh();
-	switch_exit(p);
-	/* NOTREACHED */
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -192,39 +185,6 @@ cpu_coredump(p, vp, cred, chdr)
 }
 
 /*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t)from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t)to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
-
-/*
  * Convert kernel VA to physical address
  */
 paddr_t
@@ -267,8 +227,8 @@ vmapbuf(bp, siz)
 	addr = bp->b_saveaddr = bp->b_data;
 	off = (int)addr & PGOFSET;
 	p = bp->b_proc;
-	npf = btoc(round_page(bp->b_bcount + off));
-	kva = uvm_km_valloc_wait(phys_map, ctob(npf));
+	npf = atop(round_page(bp->b_bcount + off));
+	kva = uvm_km_valloc_wait(phys_map, ptoa(npf));
 	bp->b_data = (caddr_t)(kva + off);
 	while (npf--) {
 		if (pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map),
@@ -300,9 +260,11 @@ vunmapbuf(bp, siz)
 #endif
 
 	addr = bp->b_data;
-	npf = btoc(round_page(bp->b_bcount + ((int)addr & PGOFSET)));
+	npf = atop(round_page(bp->b_bcount + ((int)addr & PGOFSET)));
 	kva = (vaddr_t)((int)addr & ~PGOFSET);
-	uvm_km_free_wakeup(phys_map, kva, ctob(npf));
+	pmap_remove(vm_map_pmap(phys_map), kva, kva + ptoa(npf));
+	pmap_update(vm_map_pmap(phys_map));
+	uvm_km_free_wakeup(phys_map, kva, ptoa(npf));
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
 }

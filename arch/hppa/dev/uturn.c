@@ -92,6 +92,7 @@ uturnattach(parent, self, aux)
 	struct confargs *ca = aux, nca;
 	struct uturn_softc *sc = (struct uturn_softc *)self;
 	bus_space_handle_t ioh;
+	hppa_hpa_t hpa;
 
 	if (bus_space_map(ca->ca_iot, ca->ca_hpa, IOMOD_HPASIZE, 0, &ioh)) {
 		printf(": can't map IO space\n");
@@ -106,7 +107,14 @@ uturnattach(parent, self, aux)
 	/* keep it real */
 	((struct iomod *)ioh)->io_control = 0x80;
 
-	nca = *ca;	/* clone from us */
+	/*
+	 * U2/UTurn is actually a combination of an Upper Bus
+	 * Converter (UBC) and a Lower Bus Converter (LBC).  This
+	 * driver attaches to the UBC; the LBC isn't very interesting,
+	 * so we skip it.  This is easy, since it always is module 63,
+	 * hence the MAXMODBUS - 1 below.
+	 */
+	nca = *ca;
 	nca.ca_hpamask = HPPA_IOBEGIN;
 	pdc_scanbus(self, &nca, MAXMODBUS - 1, 0, 0);
 

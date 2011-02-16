@@ -1,4 +1,4 @@
-/*	$OpenBSD: bat.h,v 1.3 1997/10/13 10:53:41 pefo Exp $	*/
+/*	$OpenBSD: bat.h,v 1.4 2001/09/01 15:49:05 drahn Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.

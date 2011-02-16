@@ -3,7 +3,6 @@
 file	arch/mips64/mips64/arcbios.c		arcbios
 file	arch/mips64/mips64/clock.c
 file	arch/mips64/mips64/cpu.c
-file	arch/mips64/mips64/busdma.c
 file	arch/mips64/mips64/interrupt.c
 file	arch/mips64/mips64/mem.c
 file	arch/mips64/mips64/mips64_machdep.c

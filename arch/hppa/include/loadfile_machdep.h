@@ -33,6 +33,11 @@
 #define	_HPPA_LOADFILE_MACHDEP_H_
 
 #define	BOOT_ELF
+#define	BOOT_ELF32
+#define	BOOT_ELF64
+
+/* Keep a default ELFSIZE */
+#define	ELFSIZE 32
 
 #define	LOAD_KERNEL	LOAD_ALL
 #define	COUNT_KERNEL	COUNT_ALL

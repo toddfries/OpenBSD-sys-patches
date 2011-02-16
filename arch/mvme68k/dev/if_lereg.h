@@ -50,7 +50,7 @@ struct lereg1 {
  */
 struct vlereg1 {
    volatile u_int16_t      ler1_csr;       /* board control/status register */
-   volatile u_int16_t      ler1_vec;       /* interupt vector register */
+   volatile u_int16_t      ler1_vec;       /* interrupt vector register */
    volatile u_int16_t      ler1_rdp;       /* data port */
    volatile u_int16_t      ler1_rap;       /* register select port */
    volatile u_int16_t      ler1_ear;       /* ethernet address register */

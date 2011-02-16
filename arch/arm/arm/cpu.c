@@ -73,9 +73,11 @@ void identify_arm_cpu(struct device *dv, struct cpu_info *);
 void
 cpu_attach(struct device *dv)
 {
+#ifdef ARMFPE
 	int usearmfpe;
 
 	usearmfpe = 1;	/* when compiled in, its enabled by default */
+#endif
 
 	curcpu()->ci_dev = dv;
 

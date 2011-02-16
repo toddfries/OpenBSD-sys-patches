@@ -33,14 +33,10 @@
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
-#include <machine/pte.h>
 
 #include "assym.h"
 
 	.set	noreorder		# Noreorder is default style!
-
-	.globl	idle_stack	# idle stack just below kernel.
-idle_stack:
 
 	.globl	start
 	.globl	kernel_text

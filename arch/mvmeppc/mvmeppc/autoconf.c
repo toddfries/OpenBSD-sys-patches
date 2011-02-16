@@ -59,8 +59,6 @@
 #include <machine/autoconf.h>
 #include <machine/bugio.h>
 
-struct  device *parsedisk(char *, int, int, dev_t *);
-void    setroot(void);
 extern void	dumpconf(void);
 void calc_delayconst(void);	/* clock.c */
 
@@ -94,15 +92,15 @@ cpu_configure()
 	 * as the console for now, and it requires the clock to be ticking
 	 * for proper operation (think boot -a ...)
 	 */
-	md_diskconf = diskconf;
-
 	cold = 0;
 }
 
 void
-diskconf()
+diskconf(void)
 {
-	setroot();
+	printf("boot device: %s\n",
+	    (bootdv != NULL) ? bootdv->dv_xname : "<unknown>");
+	setroot(bootdv, 0, RB_USERREQ);
 #if 0
 	dumpconf();
 #endif
@@ -124,23 +122,17 @@ long dumplo = -1;			/* blocks */
  */
 #if 0
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
-	dumpsize = btoc(IOM_END + ctob(dumpmem_high));
+	dumpsize = atop(IOM_END + ptoa(dumpmem_high));
 
 	/* Always skip the first CLBYTES, in case there is a label there. */
 	if (dumplo < ctod(1))

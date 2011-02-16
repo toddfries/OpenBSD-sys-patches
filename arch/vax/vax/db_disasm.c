@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_disasm.c,v 1.14 2006/01/11 22:49:52 miod Exp $ */
-=======
 /*	$OpenBSD: db_disasm.c,v 1.16 2008/08/15 22:41:02 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: db_disasm.c,v 1.10 1998/04/13 12:10:27 ragge Exp $ */
 /*
  * Copyright (c) 2002, Miodrag Vallat.

@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: mcbusreg.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcbusreg.h,v 1.3 1999/11/16 18:36:27 mjacob Exp $ */
 
 /*

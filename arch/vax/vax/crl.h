@@ -1,4 +1,4 @@
-/*	$OpenBSD: crl.h,v 1.2 1997/05/29 00:05:14 niklas Exp $	*/
+/*	$OpenBSD: crl.h,v 1.3 2000/04/27 01:10:11 bjc Exp $	*/
 /*	$NetBSD: crl.h,v 1.2 1999/04/12 20:57:52 pk Exp $	*/
 /* 
  * @(#)crl.h	7.1 (Berkeley) 6/5/86

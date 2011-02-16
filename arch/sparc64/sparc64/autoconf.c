@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: autoconf.c,v 1.60 2007/03/15 20:50:35 kettenis Exp $	*/
-=======
 /*	$OpenBSD: autoconf.c,v 1.109 2010/11/18 21:13:19 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -64,25 +60,20 @@
 #include <net/if.h>
 
 #include <dev/cons.h>
+#include <dev/clock_subr.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
-<<<<<<< HEAD
-=======
 #include <machine/hypervisor.h>
 #include <machine/mdesc.h>
->>>>>>> origin/master
 #include <machine/openfirm.h>
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
 #include <machine/pmap.h>
-<<<<<<< HEAD
-=======
 #include <machine/trap.h>
 #include <sparc64/sparc64/cache.h>
->>>>>>> origin/master
 #include <sparc64/sparc64/timerreg.h>
 #include <sparc64/dev/vbusvar.h>
 #include <sparc64/dev/cbusvar.h>
@@ -100,7 +91,6 @@
 #include <ddb/db_extern.h>
 #endif
 
-
 int printspl = 0;
 
 /*
@@ -112,10 +102,6 @@ int	stdinnode;	/* node ID of ROM's console input device */
 int	fbnode;		/* node ID of ROM's console output device */
 int	optionsnode;	/* node ID of ROM's options */
 
-#ifdef KGDB
-extern	int kgdb_debug_panic;
-#endif
-
 static	int rootnode;
 
 /* for hw.product/vendor see sys/kern/kern_sysctl.c */
@@ -126,12 +112,7 @@ static	int mbprint(void *, const char *);
 void	sync_crash(void);
 int	mainbus_match(struct device *, void *, void *);
 static	void mainbus_attach(struct device *, struct device *, void *);
-static	int getstr(char *, int);
-void	setroot(void);
-void	diskconf(void);
-static	struct device *getdisk(char *, int, int, dev_t *);
-int	findblkmajor(struct device *);
-char	*findblkname(int);
+int	get_ncpus(void);
 
 struct device *booted_device;
 struct	bootpath bootpath[16];
@@ -162,10 +143,6 @@ struct intrmap intrmap[] = {
 	{ NULL,		0 }
 };
 
-<<<<<<< HEAD
-#ifdef RAMDISK_HOOKS
-static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
-=======
 #ifdef SUN4V
 void	sun4v_soft_state_init(void);
 void	sun4v_set_soft_state(int, const char *);
@@ -173,7 +150,6 @@ void	sun4v_set_soft_state(int, const char *);
 #define __align32 __attribute__((__aligned__(32)))
 char sun4v_soft_state_booting[] __align32 = "OpenBSD booting";
 char sun4v_soft_state_running[] __align32 = "OpenBSD running";
->>>>>>> origin/master
 #endif
 
 #ifdef DEBUG
@@ -229,8 +205,6 @@ str2hex(char *str, long *vp)
 	return (str);
 }
 
-<<<<<<< HEAD
-=======
 /*
  * Hunt through the device tree for CPUs.  There should be no need to
  * go more than four levels deep; an UltraSPARC-IV on Seregeti shows
@@ -278,7 +252,6 @@ done:
 #endif
 }
 
->>>>>>> origin/master
 /*
  * locore.s code calls bootstrap() just before calling main().
  *
@@ -299,8 +272,6 @@ bootstrap(nctx)
 	int nctx;
 {
 	extern int end;	/* End of kernel */
-<<<<<<< HEAD
-=======
 	struct trapvec *romtba;
 #if defined(SUN4US) || defined(SUN4V)
 	char buf[32];
@@ -310,7 +281,6 @@ bootstrap(nctx)
 
 	/* Initialize the PROM console so printf will not panic. */
 	(*cn_tab->cn_init)(cn_tab);
->>>>>>> origin/master
 
 	/* 
 	 * Initialize ddb first and register OBP callbacks.
@@ -321,12 +291,6 @@ bootstrap(nctx)
 	 * By doing this first and installing the OBP callbacks
 	 * we get to do symbolic debugging of pmap_bootstrap().
 	 */
-#ifdef KGDB
-/* Moved zs_kgdb_init() to dev/zs.c:consinit(). */
-	zs_kgdb_init();		/* XXX */
-#endif
-	/* Initialize the PROM console so printf will not panic */
-	(*cn_tab->cn_init)(cn_tab);
 #ifdef DDB
 	db_machine_init();
 	ddb_init();
@@ -334,9 +298,6 @@ bootstrap(nctx)
 	OF_set_symbol_lookup(OF_sym2val, OF_val2sym);
 #endif
 
-<<<<<<< HEAD
-	pmap_bootstrap(KERNBASE, (u_long)&end, nctx);
-=======
 #if defined (SUN4US) || defined(SUN4V)
 	if (OF_getprop(findroot(), "compatible", buf, sizeof(buf)) > 0) {
 		if (strcmp(buf, "sun4us") == 0)
@@ -441,7 +402,6 @@ bootstrap(nctx)
 		sun4v_set_soft_state(SIS_TRANSITION, sun4v_soft_state_booting);
 	}
 #endif
->>>>>>> origin/master
 }
 
 void
@@ -538,7 +498,6 @@ bootpath_build()
 	bp->name[0] = 0;
 	
 	bootpath_nodes(bootpath, nbootpath);
-	bootpath_print(bootpath);
 	
 	/* Setup pointer to boot flags */
 	OF_getprop(chosen, "bootargs", buf, sizeof(buf));
@@ -586,10 +545,7 @@ bootpath_build()
 
 		/* specialties */
 		if (*cp == 'd') {
-#if defined(KGDB)
-			kgdb_debug_panic = 1;
-			kgdb_connect(1);
-#elif defined(DDB)
+#if defined(DDB)
 			Debugger();
 #else
 			printf("kernel has no debugger\n");
@@ -658,14 +614,9 @@ bootpath_store(storep, bp)
 void
 cpu_configure()
 {
-<<<<<<< HEAD
-#if 0
-	extern struct user *proc0paddr;	/* XXX see below */
-=======
 #ifdef SUN4V
 	if (CPU_ISSUN4V)
 		mdesc_init();
->>>>>>> origin/master
 #endif
 
 	/* build the bootpath */
@@ -695,18 +646,7 @@ cpu_configure()
 	/* Enable device interrupts */
         setpstate(getpstate()|PSTATE_IE);
 
-#if 0
-	/*
-	 * XXX Re-zero proc0's user area, to nullify the effect of the
-	 * XXX stack running into it during auto-configuration.
-	 * XXX - should fix stack usage.
-	 */
-	bzero(proc0paddr, sizeof(struct user));
-#endif
-
 	(void)spl0();
-
-	md_diskconf = diskconf;
 	cold = 0;
 
 #ifdef SUN4V
@@ -754,380 +694,16 @@ sun4v_set_soft_state(int state, const char *desc)
 void
 diskconf(void)
 {
-	setroot();
-	dumpconf();
-}
-
-void
-setroot()
-{
-	struct swdevt *swp;
-	struct device *dv;
-	int len, majdev, unit, part;
-	dev_t nrootdev, nswapdev = NODEV;
-	char buf[128];
-	dev_t temp;
-	struct device *bootdv;
 	struct bootpath *bp;
-#if defined(NFSCLIENT)
-	extern char *nfsbootdevname;
-#endif
+	struct device *bootdv;
+
+	bootpath_print(bootpath);
 
 	bp = nbootpath == 0 ? NULL : &bootpath[nbootpath-1];
-#ifdef RAMDISK_HOOKS
-	bootdv = &fakerdrootdev;
-#else
 	bootdv = (bp == NULL) ? NULL : bp->dev;
-#endif
 
-	/*
-	 * (raid) device auto-configuration could have returned
-	 * the root device's id in rootdev.  Check this case.
-	 */
-	if (rootdev != NODEV) {
-		majdev = major(rootdev);
-		unit = DISKUNIT(rootdev);
-		part = DISKPART(rootdev);
-
-		len = snprintf(buf, sizeof buf, "%s%d", findblkname(majdev),
-		    unit);
-		if (len == -1 || len >= sizeof(buf))
-			panic("setroot: device name too long");
-
-		bootdv = getdisk(buf, len, part, &rootdev);
-	}
-
-	/*
-	 * If `swap generic' and we couldn't determine boot device,
-	 * ask the user.
-	 */
-	if (mountroot == NULL && bootdv == NULL)
-		boothowto |= RB_ASKNAME;
-
-	if (boothowto & RB_ASKNAME) {
-		for (;;) {
-			printf("root device");
-			if (bootdv != NULL)
-				printf(" (default %s%c)",
-					bootdv->dv_xname,
-					bootdv->dv_class == DV_DISK
-						? bp->val[2]+'a' : ' ');
-			printf(": ");
-			len = getstr(buf, sizeof(buf));
-			if (len == 0 && bootdv != NULL) {
-				strlcpy(buf, bootdv->dv_xname, sizeof buf);
-				len = strlen(buf);
-			}
-			if (len > 0 && buf[len - 1] == '*') {
-				buf[--len] = '\0';
-				dv = getdisk(buf, len, 1, &nrootdev);
-				if (dv != NULL) {
-					bootdv = dv;
-					nswapdev = nrootdev;
-					goto gotswap;
-				}
-			}
-			if (len == 4 && strncmp(buf, "exit", 4) == 0) {
-				doshutdownhooks();
-				OF_exit();
-			}
-			dv = getdisk(buf, len, bp?bp->val[2]:0, &nrootdev);
-			if (dv != NULL) {
-				bootdv = dv;
-				break;
-			}
-		}
-
-		/*
-		 * because swap must be on same device as root, for
-		 * network devices this is easy.
-		 */
-		if (bootdv->dv_class == DV_IFNET) {
-			goto gotswap;
-		}
-		for (;;) {
-			printf("swap device ");
-			if (bootdv != NULL)
-				printf("(default %s%c)",
-					bootdv->dv_xname,
-					bootdv->dv_class == DV_DISK?'b':' ');
-			printf(": ");
-			len = getstr(buf, sizeof(buf));
-			if (len == 0 && bootdv != NULL) {
-				switch (bootdv->dv_class) {
-				case DV_IFNET:
-					nswapdev = NODEV;
-					break;
-				case DV_DISK:
-					nswapdev = MAKEDISKDEV(major(nrootdev),
-					    DISKUNIT(nrootdev), 1);
-					break;
-				case DV_TAPE:
-				case DV_TTY:
-				case DV_DULL:
-				case DV_CPU:
-					break;
-				}
-				break;
-			}
-			if (len == 4 && strncmp(buf, "exit", 4) == 0)
-				OF_exit();
-			dv = getdisk(buf, len, 1, &nswapdev);
-			if (dv) {
-				if (dv->dv_class == DV_IFNET)
-					nswapdev = NODEV;
-				break;
-			}
-		}
-gotswap:
-		rootdev = nrootdev;
-		dumpdev = nswapdev;
-		swdevt[0].sw_dev = nswapdev;
-		swdevt[1].sw_dev = NODEV;
-
-	} else if (mountroot == NULL) {
-
-		/*
-		 * `swap generic': Use the device the ROM told us to use.
-		 */
-		majdev = findblkmajor(bootdv);
-		if (majdev >= 0) {
-			/*
-			 * Root and swap are on a disk.
-			 * val[2] of the boot device is the partition number.
-			 * Assume swap is on partition b.
-			 */
-			part = bp->val[2];
-			unit = bootdv->dv_unit;
-			rootdev = MAKEDISKDEV(majdev, unit, part);
-			nswapdev = dumpdev = MAKEDISKDEV(major(rootdev),
-			    DISKUNIT(rootdev), 1);
-		} else {
-			/*
-			 * Root and swap are on a net.
-			 */
-			nswapdev = dumpdev = NODEV;
-		}
-		swdevt[0].sw_dev = nswapdev;
-		/* swdevt[1].sw_dev = NODEV; */
-
-	} else {
-
-		/*
-		 * `root DEV swap DEV': honour rootdev/swdevt.
-		 * rootdev/swdevt/mountroot already properly set.
-		 */
-		if (bootdv->dv_class == DV_DISK)
-			printf("root on %s%c\n", bootdv->dv_xname,
-			    part + 'a');
-		majdev = major(rootdev);
-		unit = DISKUNIT(rootdev);
-		part = DISKPART(rootdev);
-		return;
-	}
-
-	switch (bootdv->dv_class) {
-#if defined(NFSCLIENT)
-	case DV_IFNET:
-		mountroot = nfs_mountroot;
-		nfsbootdevname = bootdv->dv_xname;
-		return;
-#endif
-	case DV_DISK:
-		mountroot = dk_mountroot;
-		majdev = major(rootdev);
-		unit = DISKUNIT(rootdev);
-		part = DISKPART(rootdev);
-		printf("root on %s%c\n", bootdv->dv_xname,
-		    part + 'a');
-		break;
-	default:
-		printf("can't figure root, hope your kernel is right\n");
-		return;
-	}
-
-	/*
-	 * Make the swap partition on the root drive the primary swap.
-	 */
-	temp = NODEV;
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		if (majdev == major(swp->sw_dev) &&
-		    unit == DISKUNIT(swp->sw_dev)) {
-			temp = swdevt[0].sw_dev;
-			swdevt[0].sw_dev = swp->sw_dev;
-			swp->sw_dev = temp;
-			break;
-		}
-	}
-	if (swp->sw_dev != NODEV) {
-		/*
-		 * If dumpdev was the same as the old primary swap device,
-		 * move it to the new primary swap device.
-		 */
-		if (temp == dumpdev)
-			dumpdev = swdevt[0].sw_dev;
-	}
-}
-
-struct nam2blk {
-	char *name;
-	int maj;
-} nam2blk[] = {
-	{ "sd",		 7 },
-	{ "rd",		 5 },
-	{ "wd",		12 },
-	{ "cd",		18 },
-	{ "raid",	25 },
-};
-
-int
-findblkmajor(dv)
-	struct device *dv;
-{
-	char *name = dv->dv_xname;
-	int i;
-
-	for (i = 0; i < sizeof(nam2blk)/sizeof(nam2blk[0]); ++i)
-		if (strncmp(name, nam2blk[i].name, strlen(nam2blk[i].name)) == 0)
-			return (nam2blk[i].maj);
-	return (-1);
-}
-
-char *
-findblkname(maj)
-	int maj;
-{
-	int i;
-
-	for (i = 0; i < sizeof(nam2blk)/sizeof(nam2blk[0]); ++i)
-		if (nam2blk[i].maj == maj)
-			return (nam2blk[i].name);
-	return (NULL);
-}
-
-static struct device *
-getdisk(str, len, defpart, devp)
-	char *str;
-	int len, defpart;
-	dev_t *devp;
-{
-	struct device *dv;
-
-	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
-		printf("use one of: exit");
-#ifdef RAMDISK_HOOKS
-		printf(" %s[a-p]", fakerdrootdev.dv_xname);
-#endif
-		TAILQ_FOREACH(dv, &alldevs, dv_list) {
-			if (dv->dv_class == DV_DISK)
-				printf(" %s[a-p]", dv->dv_xname);
-#ifdef NFSCLIENT
-			if (dv->dv_class == DV_IFNET)
-				printf(" %s", dv->dv_xname);
-#endif
-		}
-		printf("\n");
-	}
-	return (dv);
-}
-
-struct device *
-parsedisk(str, len, defpart, devp)
-	char *str;
-	int len, defpart;
-	dev_t *devp;
-{
-	struct device *dv;
-	char *cp, c;
-	int majdev, unit, part;
-
-	if (len == 0)
-		return (NULL);
-	cp = str + len - 1;
-	c = *cp;
-	if (c >= 'a' && (c - 'a') < MAXPARTITIONS) {
-		part = c - 'a';
-		*cp = '\0';
-	} else
-		part = defpart;
-
-#ifdef RAMDISK_HOOKS
-	if (strcmp(str, fakerdrootdev.dv_xname) == 0) {
-		dv = &fakerdrootdev;
-		goto gotdisk;
-	}
-#endif
-
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class == DV_DISK &&
-		    strcmp(str, dv->dv_xname) == 0) {
-#ifdef RAMDISK_HOOKS
-gotdisk:
-#endif
-			majdev = findblkmajor(dv);
-			unit = dv->dv_unit;
-			if (majdev < 0)
-				panic("parsedisk");
-			*devp = MAKEDISKDEV(majdev, unit, part);
-			break;
-		}
-#ifdef NFSCLIENT
-		if (dv->dv_class == DV_IFNET &&
-		    strcmp(str, dv->dv_xname) == 0) {
-			*devp = NODEV;
-			break;
-		}
-#endif
-	}
-
-	*cp = c;
-	return (dv);
-}
-
-static int
-getstr(cp, size)
-	char *cp;
-	int size;
-{
-	char *lp;
-	int c;
-	int len;
-
-	lp = cp;
-	len = 0;
-	for (;;) {
-		c = cngetc();
-		switch (c) {
-		case '\n':
-		case '\r':
-			printf("\n");
-			*lp++ = '\0';
-			return (len);
-		case '\b':
-		case '\177':
-		case '#':
-			if (len) {
-				--len;
-				--lp;
-				printf("\b \b");
-			}
-			continue;
-		case '@':
-		case 'u'&037:
-			len = 0;
-			lp = cp;
-			printf("\n");
-			continue;
-		default:
-			if (len + 1 >= size || c < ' ') {
-				printf("\007");
-				continue;
-			}
-			printf("%c", c);
-			++len;
-			*lp++ = c;
-		}
-	}
+	setroot(bootdv, bp->val[2], RB_USERREQ | RB_HALT);
+	dumpconf();
 }
 
 /*
@@ -1169,7 +745,7 @@ mbprint(aux, name)
 	struct mainbus_attach_args *ma = aux;
 
 	if (name)
-		printf("%s at %s", ma->ma_name, name);
+		printf("\"%s\" at %s", ma->ma_name, name);
 	if (ma->ma_address)
 		printf(" addr 0x%08lx", (u_long)ma->ma_address[0]);
 	if (ma->ma_pri)
@@ -1254,26 +830,6 @@ extern bus_space_tag_t mainbus_space_tag;
 		NULL
 	};
 
-<<<<<<< HEAD
-	if ((len = OF_getprop(findroot(), "banner-name", platform_type,
-	    sizeof(platform_type))) <= 0)
-		OF_getprop(findroot(), "name", platform_type,
-		    sizeof(platform_type));
-	printf(": %s\n", platform_type);
-
-	hw_vendor = malloc(sizeof(platform_type), M_DEVBUF, M_NOWAIT);
-	if (len > 0 && hw_vendor != NULL) {
-		strlcpy(hw_vendor, platform_type, sizeof(platform_type));
-		if ((strncmp(hw_vendor, "SUNW,", 5)) == 0) {
-			p = hw_prod = hw_vendor + 5;
-			hw_vendor = "Sun";
-		} else if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
-			*p = '\0';
-			hw_prod = ++p;
-		}
-		if ((p = memchr(hw_prod, '(', len - (p - hw_prod))) != NULL)
-			*p = '\0';
-=======
 	/*
 	 * Print the "banner-name" property in dmesg.  It provides a
 	 * description of the machine that is generally more
@@ -1314,19 +870,12 @@ extern bus_space_tag_t mainbus_space_tag;
 		if (OF_getprop(findroot(), "model", buf, sizeof(buf)) > 0 &&
 		    strncmp(buf, "MOMENTUM,", 9) == 0)
 			hw_vendor = "Momentum";
->>>>>>> origin/master
 	}
 
-	/*
-	 * Locate and configure the ``early'' devices.  These must be
-	 * configured before we can do the rest.  For instance, the
-	 * EEPROM contains the Ethernet address for the LANCE chip.
-	 * If the device cannot be located or configured, panic.
-	 */
+	/* Establish the first component of the boot path */
+	bootpath_store(1, bootpath);
 
-/*
- * The rest of this routine is for OBP machines exclusively.
- */
+	/* We configure the CPUs first. */
 
 	node = findroot();
 	for (node0 = OF_child(node); node0; node0 = OF_peer(node0)) {
@@ -1334,53 +883,12 @@ extern bus_space_tag_t mainbus_space_tag;
 			continue;
 	}
 
-<<<<<<< HEAD
-	/* Establish the first component of the boot path */
-	bootpath_store(1, bootpath);
-=======
 	for (node = OF_child(node); node; node = OF_peer(node)) {
 		if (!checkstatus(node))
 			continue;
->>>>>>> origin/master
 
-	/* the first early device to be configured is the cpu */
-
-	{
 		/* 
 		 * UltraSPARC-IV cpus appear as two "cpu" nodes below
-<<<<<<< HEAD
-		 * a "cmp" node.  Lookup the first "cmp" node, such
-		 * that we find the "cpu" node in the code below.
-		 */
-
-		for (node = OF_child(node); node; node = OF_peer(node)) {
-			if (OF_getprop(node, "name", buf, sizeof(buf)) <= 0)
-				continue;
-			if (strcmp(buf, "cmp") == 0)
-				break;
-		}
-
-		if (node == 0)
-			node = findroot();
-	}
-
-	{
-		/* XXX - what to do on multiprocessor machines? */
-
-		for (node = OF_child(node); node; node = OF_peer(node)) {
-			if (OF_getprop(node, "device_type", 
-				buf, sizeof(buf)) <= 0)
-				continue;
-			if (strcmp(buf, "cpu") == 0) {
-				bzero(&ma, sizeof(ma));
-				ma.ma_bustag = mainbus_space_tag;
-				ma.ma_dmatag = &mainbus_dma_tag;
-				ma.ma_node = node;
-				ma.ma_name = "cpu";
-				config_found(dev, (void *)&ma, mbprint);
-				break;
-			}
-=======
 		 * a "cmp" node.
 		 */
 		if (OF_getprop(node, "name", buf, sizeof(buf)) <= 0)
@@ -1408,16 +916,9 @@ extern bus_space_tag_t mainbus_space_tag;
 			    &ma.ma_nreg, (void **)&ma.ma_reg);
 			config_found(dev, &ma, mbprint);
 			continue;
->>>>>>> origin/master
 		}
-		if (node == 0)
-			panic("None of the CPUs found");
 	}
 
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
 	node = findroot();	/* re-init root node */
 
 	/* Find the "options" node */
@@ -1440,8 +941,8 @@ extern bus_space_tag_t mainbus_space_tag;
 		int portid;
 
 		DPRINTF(ACDB_PROBE, ("Node: %x", node));
-		if ((OF_getprop(node, "device_type", buf, sizeof(buf)) > 0) &&
-			strcmp(buf, "cpu") == 0)
+		if (OF_getprop(node, "device_type", buf, sizeof(buf)) > 0 &&
+		    strcmp(buf, "cpu") == 0)
 			continue;
 		if (OF_getprop(node, "name", buf, sizeof(buf)) > 0 &&
 		    strcmp(buf, "cmp") == 0)
@@ -1452,6 +953,9 @@ extern bus_space_tag_t mainbus_space_tag;
 				break;
 		if (sp != NULL)
 			continue; /* an "early" device already configured */
+
+		if (!checkstatus(node))
+			continue;
 
 		bzero(&ma, sizeof ma);
 		ma.ma_bustag = mainbus_space_tag;
@@ -1511,17 +1015,30 @@ extern bus_space_tag_t mainbus_space_tag;
 				printf(" no address\n");
 		}
 #endif
-		(void) config_found(dev, (void *)&ma, mbprint);
+		config_found(dev, &ma, mbprint);
 		free(ma.ma_reg, M_DEVBUF);
 		if (ma.ma_ninterrupts)
 			free(ma.ma_interrupts, M_DEVBUF);
 		if (ma.ma_naddress)
 			free(ma.ma_address, M_DEVBUF);
 	}
-	/* Try to attach PROM console */
-	bzero(&ma, sizeof ma);
-	ma.ma_name = "pcons";
-	(void) config_found(dev, (void *)&ma, mbprint);
+
+	extern int prom_cngetc(dev_t);
+
+	/* Attach PROM console if no other console attached. */
+	if (cn_tab->cn_getc == prom_cngetc) {
+		bzero(&ma, sizeof ma);
+		ma.ma_name = "pcons";
+		config_found(dev, &ma, mbprint);
+	}
+
+	extern todr_chip_handle_t todr_handle;
+
+	if (todr_handle == NULL) {
+		bzero(&ma, sizeof ma);
+		ma.ma_name = "prtc";
+		config_found(dev, &ma, mbprint);
+	}
 }
 
 struct cfattach mainbus_ca = {
@@ -1550,7 +1067,7 @@ getprop(node, name, size, nitem, bufp)
 	buf = *bufp;
 	if (buf == NULL) {
 		/* No storage provided, so we allocate some */
-		buf = malloc(len, M_DEVBUF, M_NOWAIT);
+		buf = malloc(len + 1, M_DEVBUF, M_NOWAIT);
 		if (buf == NULL)
 			return (ENOMEM);
 	}
@@ -1616,12 +1133,33 @@ getpropint(node, name, deflt)
 {
 	int intbuf;
 
-	
-
 	if (OF_getprop(node, name, &intbuf, sizeof(intbuf)) != sizeof(intbuf))
 		return (deflt);
 
 	return (intbuf);
+}
+
+int
+getpropspeed(node, name)
+	int node;
+	char *name;
+{
+	char buf[128];
+	int i, speed = 0;
+
+	if (OF_getprop(node, name, buf, sizeof(buf)) != -1) {
+		for (i = 0; i < sizeof(buf); i++) {
+			if (buf[i] < '0' || buf[i] > '9')
+				break;
+			speed *= 10;
+			speed += buf[i] - '0';
+		}
+	}
+
+	if (speed == 0)
+		speed = 9600;
+
+	return (speed);
 }
 
 /*
@@ -1644,7 +1182,26 @@ nextsibling(node)
 	return OF_peer(node);
 }
 
-/* The following are used primarily in consinit() */
+int
+checkstatus(int node)
+{
+	char buf[32];
+
+	/* If there is no "status" property, assume everything is fine. */
+	if (OF_getprop(node, "status", buf, sizeof(buf)) <= 0)
+		return 1;
+
+	/*
+	 * If OpenBoot Diagnostics discovers a problem with a device
+	 * it will mark it with "fail" or "fail-xxx", where "xxx" is
+	 * additional human-readable information about the particular
+	 * fault-condition.
+	 */
+	if (strcmp(buf, "disabled") == 0 || strncmp(buf, "fail", 4) == 0)
+		return 0;
+
+	return 1;
+}
 
 int
 node_has_property(node, prop)	/* returns 1 if node has given property */
@@ -1755,8 +1312,6 @@ device_register(struct device *dev, void *aux)
 	if (strcmp(busname, "mainbus") == 0 ||
 	    strcmp(busname, "ssm") == 0 || strcmp(busname, "upa") == 0)
 		node = ma->ma_node;
-<<<<<<< HEAD
-=======
 	else if (strcmp(busname, "sbus") == 0 ||
 	    strcmp(busname, "dma") == 0 || strcmp(busname, "ledma") == 0)
 		node = sa->sa_node;
@@ -1764,11 +1319,8 @@ device_register(struct device *dev, void *aux)
 		node = va->va_node;
 	else if (strcmp(busname, "cbus") == 0)
 		node = ca->ca_node;
->>>>>>> origin/master
 	else if (strcmp(busname, "pci") == 0)
 		node = PCITAG_NODE(pa->pa_tag);
-	else if (strcmp(busname, "sbus") == 0)
-		node = sa->sa_node;
 
 	if (node == bootnode) {
 		if (strcmp(devname, "vdsk") == 0) {
@@ -1857,9 +1409,19 @@ device_register(struct device *dev, void *aux)
 	if (strcmp("wd", devname) == 0) {
 		/* IDE disks. */
 		struct ata_atapi_attach *aa = aux;
+		u_int channel, drive;
 
-		if ((bp->val[0] / 2) == aa->aa_channel &&
-		    (bp->val[0] % 2) == aa->aa_drv_data->drive) {
+		if (strcmp(bp->name, "ata") == 0 &&
+		    bp->val[0] == aa->aa_channel) {
+			channel = bp->val[0]; bp++;
+			drive = bp->val[0];
+		} else {
+			channel = bp->val[0] / 2;
+			drive = bp->val[0] % 2;
+		}
+
+		if (channel == aa->aa_channel &&
+		    drive == aa->aa_drv_data->drive) {
 			nail_bootdev(dev, bp);
 			return;
 		}
@@ -1890,8 +1452,6 @@ nail_bootdev(dev, bp)
 	 */
 	bootpath_store(1, NULL);
 }
-<<<<<<< HEAD
-=======
 
 struct nam2blk nam2blk[] = {
 	{ "sd",		 7 },
@@ -1902,4 +1462,3 @@ struct nam2blk nam2blk[] = {
 	{ "vnd",	8 },
 	{ NULL,		-1 }
 };
->>>>>>> origin/master

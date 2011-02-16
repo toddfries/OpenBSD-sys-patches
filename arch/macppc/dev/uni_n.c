@@ -1,4 +1,4 @@
-/*	$OpenBSD: uni_n.c,v 1.14 2006/02/14 23:06:41 kettenis Exp $	*/
+/*	$OpenBSD: uni_n.c,v 1.15 2006/06/19 22:41:35 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2001 Dale Rahn.

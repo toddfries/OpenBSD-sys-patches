@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hme.c,v 1.54 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: hme.c,v 1.62 2009/08/13 17:01:31 phessler Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

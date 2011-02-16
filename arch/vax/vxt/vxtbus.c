@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vxtbus.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
-=======
 /*	$OpenBSD: vxtbus.c,v 1.3 2010/09/20 06:33:48 matthew Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *

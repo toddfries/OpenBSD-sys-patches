@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vsms_ws.c,v 1.1 2006/08/27 16:52:15 miod Exp $	*/
-=======
 /*	$OpenBSD: vsms_ws.c,v 1.4 2008/08/26 19:46:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dzms.c,v 1.1 2000/12/02 17:03:55 ragge Exp $	*/
 
 /*

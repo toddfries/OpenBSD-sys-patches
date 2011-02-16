@@ -73,8 +73,6 @@ extern pv_addr_t systempage;
 int process_read_regs	(struct proc *p, struct reg *regs);
 int process_read_fpregs	(struct proc *p, struct fpreg *regs);
 
-void	switch_exit	(struct proc *p, struct proc *p0,
-			     void (*)(struct proc *));
 extern void proc_trampoline	(void);
 
 /*
@@ -84,23 +82,6 @@ extern void proc_trampoline	(void);
  *		 on forking and check the pattern on exit, reporting
  *		 the amount of stack used.
  */
-
-#if 0
-void
-cpu_proc_fork(p1, p2)
-	struct proc *p1, *p2;
-{
-
-#if defined(PERFCTRS)
-	if (PMC_ENABLED(p1))
-		pmc_md_fork(p1, p2);
-	else {
-		p2->p_md.pmc_enabled = 0;
-		p2->p_md.pmc_state = NULL;
-	}
-#endif
-}
-#endif
 
 /*
  * Finish a fork operation, with process p2 nearly set up.
@@ -201,61 +182,11 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb->pcb_un.un_32.pcb32_sp = (u_int)sf;
 }
 
-#if 0
-void
-cpu_setfunc(struct proc *p, void (*func)(void *), void *arg)
-{
-	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct trapframe *tf = pcb->pcb_tf;
-	struct switchframe *sf = (struct switchframe *)tf - 1;
-
-	sf->sf_r4 = (u_int)func;
-	sf->sf_r5 = (u_int)arg;
-	sf->sf_pc = (u_int)proc_trampoline;
-	pcb->pcb_un.un_32.pcb32_sp = (u_int)sf;
-}
-#endif
-
-
 void
 cpu_exit(struct proc *p)
 {
-	pmap_update(p->p_vmspace->vm_map.pmap); /* XXX DSR help stability */
-	switch_exit(p, &proc0, exit2);
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap,
- * and size must be a multiple of PAGE_SIZE.
- */
-
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-	if (size % PAGE_SIZE)
-		panic("pagemove: size=%08lx", (u_long) size);
-
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t) from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t) to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t) from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t) to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*

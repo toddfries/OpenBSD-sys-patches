@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgdb_m68k.c,v 1.1 1997/03/21 00:36:41 niklas Exp $	*/
+/*	$OpenBSD: kgdb_m68k.c,v 1.2 2003/06/02 23:27:48 millert Exp $	*/
 /*	$NetBSD: kgdb_m68k.c,v 1.1 1997/02/12 00:58:01 gwr Exp $	*/
 
 /*

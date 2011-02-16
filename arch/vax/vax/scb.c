@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scb.c,v 1.4 2002/03/14 01:26:49 millert Exp $	*/
-=======
 /*	$OpenBSD: scb.c,v 1.6 2008/08/18 23:19:29 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scb.c,v 1.12 2000/06/04 06:16:59 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden.

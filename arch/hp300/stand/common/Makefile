@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2006/04/14 21:05:44 miod Exp $
+#	$OpenBSD: Makefile,v 1.6 2006/08/17 06:31:10 miod Exp $
 
 LIB=	common
 

@@ -61,7 +61,6 @@ define	SFRAMELEN	roundup(sizeof(struct switchframe), 16)
 struct	pcb
 member	PCB_PMR		pcb_pmreal
 member	pcb_sp
-member	pcb_spl
 member	PCB_FAULT	pcb_onfault
 
 struct	pmap
@@ -70,11 +69,10 @@ member	PM_USRSR	pm_sr[PPC_USER_SR]
 member	PM_KERNELSR	pm_sr[PPC_KERNEL_SR]
 
 struct	proc
-member	p_forw
-member	p_back
 member	p_addr
 member	p_stat
 member	p_cpu
+member  P_MD_ASTPENDING	p_md.md_astpending
 
 struct	sigframe
 member	sf_sc
@@ -87,8 +85,6 @@ struct	cpu_info
 member	ci_curproc
 member	ci_curpcb
 member	ci_curpm
-member	ci_idle_pcb
-member	ci_astpending
 member	ci_want_resched
 member	ci_cpl
 member	ci_intrdepth

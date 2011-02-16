@@ -82,6 +82,7 @@
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
+#include <machine/lock.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
 #include <machine/m88100.h>
@@ -101,17 +102,16 @@
 #endif /* DDB */
 
 void	consinit(void);
+void	cpu_boot_secondary_processors(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(void);
-u_int	getipl(void);
 void	identifycpu(void);
 void	luna88k_bootstrap(void);
-u_int	safe_level(u_int, u_int);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-void	secondary_pre_main(void);
-void	setlevel(unsigned int);
+vaddr_t	secondary_pre_main(void);
+void	setlevel(u_int);
 
 vaddr_t size_memory(void);
 void powerdown(void);
@@ -125,27 +125,16 @@ int clockintr(void *);				/* in clock.c */
  * *int_mask_reg[CPU]
  * Points to the hardware interrupt status register for each CPU.
  */
-unsigned int *volatile int_mask_reg[] = {
-	(unsigned int *)INT_ST_MASK0,
-	(unsigned int *)INT_ST_MASK1,
-	(unsigned int *)INT_ST_MASK2,
-	(unsigned int *)INT_ST_MASK3
+u_int32_t *volatile int_mask_reg[] = {
+	(u_int32_t *)INT_ST_MASK0,
+	(u_int32_t *)INT_ST_MASK1,
+	(u_int32_t *)INT_ST_MASK2,
+	(u_int32_t *)INT_ST_MASK3
 };
 
-unsigned int luna88k_curspl[] = {0, 0, 0, 0};
+u_int luna88k_curspl[] = { IPL_HIGH, IPL_HIGH, IPL_HIGH, IPL_HIGH };
 
-unsigned int int_mask_val[INT_LEVEL] = {
-	INT_MASK_LV0,
-	INT_MASK_LV1,
-	INT_MASK_LV2,
-	INT_MASK_LV3,
-	INT_MASK_LV4,
-	INT_MASK_LV5,
-	INT_MASK_LV6,
-	INT_MASK_LV7
-};
-
-unsigned int int_set_val[INT_LEVEL] = {
+u_int32_t int_set_val[INT_LEVEL] = {
 	INT_SET_LV0,
 	INT_SET_LV1,
 	INT_SET_LV2,
@@ -159,11 +148,11 @@ unsigned int int_set_val[INT_LEVEL] = {
 /*
  * *clock_reg[CPU]
  */
-unsigned int *volatile clock_reg[] = {
-	(unsigned int *)OBIO_CLOCK0,
-	(unsigned int *)OBIO_CLOCK1,
-	(unsigned int *)OBIO_CLOCK2,
-	(unsigned int *)OBIO_CLOCK3
+u_int32_t *volatile clock_reg[] = {
+	(u_int32_t *)OBIO_CLOCK0,
+	(u_int32_t *)OBIO_CLOCK1,
+	(u_int32_t *)OBIO_CLOCK2,
+	(u_int32_t *)OBIO_CLOCK3
 };
 
 /*
@@ -189,15 +178,11 @@ int physmem;	  /* available physical memory, in pages */
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
+__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -262,7 +247,7 @@ struct consdev romttycons = {
 	nullcnpollc,
 	NULL,
 	makedev(14, 0),
-	CN_NORMAL,
+	CN_LOWPRI,
 };
 
 struct consdev *cn_tab = &romttycons;
@@ -341,7 +326,7 @@ size_memory()
 		*look = save;
 	}
 
-	return (trunc_page((unsigned)look));
+	return (trunc_page((vaddr_t)look));
 }
 
 int
@@ -446,6 +431,7 @@ cpu_startup()
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -510,8 +496,8 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();			/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP)
@@ -552,19 +538,13 @@ cpu_kcore_hdr_t cpu_kcore_hdr;
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -572,7 +552,7 @@ dumpconf()
 
 	/* luna88k only uses a single segment. */
 	cpu_kcore_hdr.ram_segs[0].start = 0;
-	cpu_kcore_hdr.ram_segs[0].size = ctob(physmem);
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
 	cpu_kcore_hdr.cputype = cputyp;
 
 	/*
@@ -599,9 +579,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr_t blkno;		/* current block to write */
+	daddr64_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -704,15 +684,25 @@ abort:
 	}
 }
 
+/*
+ * Release the cpu_mutex; secondary processors will now have their
+ * chance to initialize.
+ */
+void
+cpu_boot_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_mutex);
+}
+
 #ifdef MULTIPROCESSOR
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ * Determine CPU number and set it, then allocate the startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-void
+vaddr_t
 secondary_pre_main()
 {
 	struct cpu_info *ci;
@@ -728,32 +718,41 @@ secondary_pre_main()
 	/*
 	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
 	 */
-	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
-	if (ci->ci_idle_pcb == NULL) {
-		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	init_stack = uvm_km_zalloc(kernel_map, USPACE);
+	if (init_stack == (vaddr_t)NULL) {
+		printf("cpu%d: unable to allocate startup stack\n",
+		    ci->ci_cpuid);
+		for (;;) ;
 	}
+
+	return (init_stack);
 }
 
 /*
  * Further secondary CPU initialization.
  *
- * We are now running on our idle stack, with proper page tables.
+ * We are now running on our startup stack, with proper page tables.
  * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
 secondary_main()
 {
 	struct cpu_info *ci = curcpu();
+	int s;
 
 	cpu_configuration_print(0);
+	sched_init_cpu(ci);
+	ncpus++;
+	__cpu_simple_unlock(&cpu_mutex);
 
 	microuptime(&ci->ci_schedstate.spc_runtime);
+	ci->ci_curproc = NULL;
 
-	/*
-	 * Upon return, the secondary cpu bootstrap code in locore will
-	 * enter the idle loop, waiting for some food to process on this
-	 * processor.
-	 */
+	set_psr(get_psr() & ~PSR_IND);
+	spl0();
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #endif	/* MULTIPROCESSOR */
@@ -766,8 +765,8 @@ void
 luna88k_ext_int(struct trapframe *eframe)
 {
 	int cpu = cpu_number();
-	unsigned int cur_mask, cur_int;
-	unsigned int level, old_spl;
+	u_int32_t cur_mask, cur_int;
+	u_int level, old_spl;
 
 	cur_mask = *int_mask_reg[cpu];
 	old_spl = luna88k_curspl[cpu];
@@ -780,7 +779,9 @@ luna88k_ext_int(struct trapframe *eframe)
 		 * Spurious interrupts - may be caused by debug output clearing
 		 * serial port interrupts.
 		 */
+#ifdef DEBUG
 		printf("luna88k_ext_int(): Spurious interrupts?\n");
+#endif
 		flush_pipeline();
 		goto out;
 	}
@@ -797,23 +798,6 @@ luna88k_ext_int(struct trapframe *eframe)
 	/* XXX: This is very rough. Should be considered more. (aoyama) */
 	do {
 		level = (cur_int > old_spl ? cur_int : old_spl);
-		if (level >= 8) {
-			register int i;
-
-			printf("safe level %d <= old level %d\n", level, old_spl);
-			printf("cur_int = 0x%x\n", cur_int);
-
-			for (i = 0; i < 4; i++)
-				printf("IEN%d = 0x%x  ", i, *int_mask_reg[i]);
-			printf("\nCPU0 spl %d  CPU1 spl %d  CPU2 spl %d  CPU3 spl %d\n",
-			       luna88k_curspl[0], luna88k_curspl[1],
-			       luna88k_curspl[2], luna88k_curspl[3]);
-			for (i = 0; i < 8; i++)
-				printf("int_mask[%d] = 0x%08x\n", i, int_mask_val[i]);
-			printf("--CPU %d halted--\n", cpu_number());
-			setipl(IPL_ABORT);
-			for(;;) ;
-		}
 
 #ifdef DEBUG
 		if (level > 7 || (char)level < 0) {
@@ -840,20 +824,19 @@ luna88k_ext_int(struct trapframe *eframe)
 		}
 	} while ((cur_int = (*int_mask_reg[cpu]) >> 29) != 0);
 
+out:
 	/*
 	 * process any remaining data access exceptions before
 	 * returning to assembler
 	 */
-	set_psr(get_psr() | PSR_IND);
-out:
 	if (eframe->tf_dmt0 & DMT_VALID)
 		m88100_trap(T_DATAFLT, eframe);
 
 	/*
-	 * Restore the mask level to what it was when the interrupt
-	 * was taken.
+	 * Disable interrupts before returning to assembler, the spl will
+	 * be restored later.
 	 */
-	setipl(eframe->tf_mask);
+	set_psr(get_psr() | PSR_IND);
 }
 
 int
@@ -909,6 +892,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			consdev = NODEV;
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
+	case CPU_CPUTYPE:
+		return (sysctl_rdint(oldp, oldlenp, newp, cputyp));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -929,7 +914,6 @@ luna88k_bootstrap()
 #endif
 	extern void m8820x_initialize_cpu(cpuid_t);
 	extern void m8820x_set_sapr(cpuid_t, apr_t);
-	extern void cpu_boot_secondary_processors(void);
 
 	cmmu = &cmmu8820x;
 
@@ -944,11 +928,12 @@ luna88k_bootstrap()
 
 	first_addr = round_page((vaddr_t)&end);	/* XXX temp until symbols */
 	last_addr = size_memory();
-	physmem = btoc(last_addr);
+	physmem = atop(last_addr);
 
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
 
 	m88100_apply_patches();
 
@@ -1010,7 +995,7 @@ romttycnprobe(cp)
 	struct consdev *cp;
 {
 	cp->cn_dev = makedev(14, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void
@@ -1179,27 +1164,10 @@ nvram_by_symbol(symbol)
 	return value;
 }
 
-/*
- * return next safe spl to reenable interrupts.
- */
-u_int
-safe_level(u_int mask, u_int curlevel)
-{
-	int i;
-
-	for (i = curlevel; i < 8; i++)
-		if (!(int_mask_val[i] & mask))
-			return i;
-
-	panic("safe_level: no safe level for mask 0x%08x level %d found",
-	       mask, curlevel);
-	/* NOTREACHED */
-}
-
 void
-setlevel(unsigned int level)
+setlevel(u_int level)
 {
-	unsigned int set_value;
+	u_int32_t set_value;
 	int cpu = cpu_number();
 
 	set_value = int_set_val[level];
@@ -1209,58 +1177,44 @@ setlevel(unsigned int level)
 		set_value &= INT_SLAVE_MASK;
 #endif
 
-	*int_mask_reg[cpu] = set_value;
 	luna88k_curspl[cpu] = level;
+	*int_mask_reg[cpu] = set_value;
+	/*
+	 * We do not flush the pipeline here, because we are invoked
+	 * with interrupts disabled, and the caller will synchronize
+	 * the pipeline when restoring the psr.
+	 */
 }
 
-u_int
+int
 getipl(void)
+{
+	return (int)luna88k_curspl[cpu_number()];
+}
+
+int
+setipl(int level)
 {
 	u_int curspl, psr;
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = luna88k_curspl[cpu_number()];
+	setlevel((u_int)level);
 	set_psr(psr);
-	return curspl;
+	return (int)curspl;
 }
 
-unsigned
-setipl(unsigned level)
+int
+raiseipl(int level)
 {
-	unsigned int curspl, psr;
+	u_int curspl, psr;
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = luna88k_curspl[cpu_number()];
-	setlevel(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above write gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
+	if (curspl < (u_int)level)
+		setlevel((u_int)level);
 	set_psr(psr);
-	return curspl;
-}
-
-unsigned
-raiseipl(unsigned level)
-{
-	unsigned int curspl, psr;
-
-	disable_interrupt(psr);
-	curspl = luna88k_curspl[cpu_number()];
-	if (curspl < level)
-		setlevel(level);
-
-	/*
-	 * The flush pipeline is required to make sure the above write gets
-	 * through the data pipe and to the hardware; otherwise, the next
-	 * bunch of instructions could execute at the wrong spl protection.
-	 */
-	flush_pipeline();
-
-	set_psr(psr);
-	return curspl;
+	return (int)curspl;
 }

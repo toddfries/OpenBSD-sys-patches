@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: _types.h,v 1.2 2006/01/13 17:50:06 millert Exp $	*/
-=======
 /*	$OpenBSD: _types.h,v 1.10 2009/11/04 19:14:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1990, 1993
@@ -119,9 +115,5 @@ typedef int			__wint_t;
 typedef	int			__rune_t;
 typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
-
-/* Feature test macros */
-#define __HAVE_DEVICE_REGISTER
-#define	__HAVE_MUTEX
 
 #endif	/* _MACHINE__TYPES_H_ */

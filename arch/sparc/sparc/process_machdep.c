@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: process_machdep.c,v 1.11 2005/12/17 03:54:30 deraadt Exp $	*/
-=======
 /*	$OpenBSD: process_machdep.c,v 1.13 2009/03/05 19:52:23 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: process_machdep.c,v 1.6 1996/03/14 21:09:26 christos Exp $ */
 
 /*

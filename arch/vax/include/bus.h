@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bus.h,v 1.8 2007/04/10 18:02:48 miod Exp $	*/
-=======
 /*	$OpenBSD: bus.h,v 1.15 2010/04/04 12:49:30 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bus.h,v 1.14 2000/06/26 04:56:13 simonb Exp $	*/
 
 /*-

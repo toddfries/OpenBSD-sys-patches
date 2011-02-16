@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 2005/04/01 10:40:48 mickey Exp $
+#	$OpenBSD: Makefile.inc,v 1.4 2007/11/26 10:26:02 deraadt Exp $
 
 CFLAGS=${DEBUG} -Os -Wall -Werror
 CPPFLAGS+=-I${S} -I. -I${.CURDIR}
@@ -15,7 +15,7 @@ HEAP_LIMIT=0x7f8000
 CLEANFILES+=	machine
 DEBUGLIBS=	no
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj) && !(defined(PROG) && ${PROG} == "mkboot")
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj) && !(defined(PROG) && ${PROG} == "mkboot")
 .BEGIN:
 	@([ -h machine ] || ln -s $(S)/arch/hppa64/include machine)
 .endif
@@ -24,11 +24,6 @@ DEBUGLIBS=	no
 LIBSA=${STANDIR}/libsa/libsa.a
 .else
 LIBSA=${STANDIR}/libsa/${__objdir}/libsa.a
-.endif
-.if exists(${STANDIR}/libkern/libkern.a)
-LIBKERN=${STANDIR}/libkern/libkern.a
-.else
-LIBKERN=${STANDIR}/libkern/${__objdir}/libkern.a
 .endif
 .if exists(${STANDIR}/libz/libz.a)
 LIBZ=${STANDIR}/libz/libz.a

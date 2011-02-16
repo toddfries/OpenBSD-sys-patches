@@ -260,9 +260,9 @@ bmac_attach(struct device *parent, struct device *self, void *aux)
 		ether_sprintf(laddr));
 
 	mac_intr_establish(parent, ca->ca_intr[0], IST_LEVEL, IPL_NET,
-	    bmac_intr, sc, "bmac intr");
+	    bmac_intr, sc, sc->sc_dev.dv_xname);
 	mac_intr_establish(parent, ca->ca_intr[2], IST_LEVEL, IPL_NET,
-	    bmac_rint, sc, "bmac rint");
+	    bmac_rint, sc, sc->sc_dev.dv_xname);
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = sc;

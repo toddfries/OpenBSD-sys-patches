@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom_swpal.S,v 1.4 1996/10/17 02:50:41 cgd Exp $	*/
+/*	$OpenBSD: prom_swpal.S,v 1.3 1996/10/30 22:40:45 niklas Exp $	*/
 /*	$NetBSD: prom_swpal.S,v 1.4 1996/10/17 02:50:41 cgd Exp $	*/
 
 /*

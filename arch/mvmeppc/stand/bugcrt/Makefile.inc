@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.4 2001/01/13 05:19:01 smurph Exp $
+#	$OpenBSD: Makefile.inc,v 1.1 2001/06/26 21:58:02 smurph Exp $
 
 BUG_CRT_DIR=${S}/arch/mvmeppc/stand/bugcrt
 

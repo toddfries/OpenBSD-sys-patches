@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: openprom.c,v 1.10 2003/03/07 14:54:49 jason Exp $	*/
-=======
 /*	$OpenBSD: openprom.c,v 1.15 2009/04/12 22:17:52 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: openprom.c,v 1.4 2002/01/10 06:21:53 briggs Exp $ */
 
 /*
@@ -54,7 +50,6 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 
-#include <machine/bsd_openprom.h>
 #include <machine/openpromio.h>
 #include <machine/autoconf.h>
 #include <machine/conf.h>
@@ -63,13 +58,10 @@
 #include <dev/clock_subr.h>
 #include <dev/ofw/openfirm.h>
 
-<<<<<<< HEAD
-=======
 extern todr_chip_handle_t todr_handle;
 
 #define OPROMMAXPARAM		32
 
->>>>>>> origin/master
 static	int lastnode;			/* speed hack */
 extern	int optionsnode;		/* node ID of ROM's options */
 
@@ -258,7 +250,11 @@ openpromioctl(dev, cmd, data, flags, p)
 		error = openpromgetstr(op->op_namelen, op->op_name, &name);
 		if (error)
 			break;
-		value = nextprop = malloc(op->op_buflen, M_TEMP, M_WAITOK);
+		if (op->op_buflen <= 0) {
+			error = ENAMETOOLONG;
+			break;
+		}
+		value = nextprop = malloc(OPROMMAXPARAM, M_TEMP, M_WAITOK);
 		if (nextprop == NULL) {
 			error = ENOMEM;
 			break;

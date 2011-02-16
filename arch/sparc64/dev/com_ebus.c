@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: com_ebus.c,v 1.11 2005/06/06 01:08:47 miod Exp $	*/
-=======
 /*	$OpenBSD: com_ebus.c,v 1.20 2009/01/12 22:17:36 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: com_ebus.c,v 1.6 2001/07/24 19:27:10 eeh Exp $	*/
 
 /*
@@ -58,6 +54,7 @@ cdev_decl(com); /* XXX this belongs elsewhere */
 
 int	com_ebus_match(struct device *, void *, void *);
 void	com_ebus_attach(struct device *, struct device *, void *);
+int	com_ebus_speed(struct ebus_attach_args *);
 
 struct cfattach com_ebus_ca = {
 	sizeof(struct com_softc), com_ebus_match, com_ebus_attach
@@ -66,14 +63,13 @@ struct cfattach com_ebus_ca = {
 static char *com_names[] = {
 	"su",
 	"su_pnp",
+	"rsc-console",
+	"lom-console",
 	NULL
 };
 
 int
-com_ebus_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+com_ebus_match(struct device *parent, void *match, void *aux)
 {
 	struct ebus_attach_args *ea = aux;
 	int i;
@@ -91,6 +87,7 @@ com_ebus_match(parent, match, aux)
 				sizeof(compat)) == i) {
 			if (strcmp(compat, "su16552") == 0 ||
 			    strcmp(compat, "su16550") == 0 ||
+			    strcmp(compat, "FJSV,su") == 0 ||
 			    strcmp(compat, "su") == 0) {
 				return (1);
 			}
@@ -103,9 +100,7 @@ com_ebus_match(parent, match, aux)
 #define BAUD_BASE       (1843200)
 
 void
-com_ebus_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+com_ebus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (void *)self;
 	struct ebus_attach_args *ea = aux;
@@ -184,11 +179,14 @@ com_ebus_attach(parent, self, aux)
 
 	if (com_is_input || com_is_output) {
 		struct consdev *cn_orig;
+		int speed;
+
+		speed = com_ebus_speed(ea);
 
 		comconsioh = sc->sc_ioh;
 		cn_orig = cn_tab;
 		/* Attach com as the console. */
-		if (comcnattach(sc->sc_iot, sc->sc_iobase, 9600,
+		if (comcnattach(sc->sc_iot, sc->sc_iobase, speed,
 		    sc->sc_frequency,
 		    ((TTYDEF_CFLAG & ~(CSIZE | PARENB))|CREAD | CS8 | HUPCL))) {
 			printf("Error: comcnattach failed\n");
@@ -223,4 +221,29 @@ com_ebus_attach(parent, self, aux)
 
 	/* Now attach the driver */
 	com_attach_subr(sc);
+}
+
+int
+com_ebus_speed(struct ebus_attach_args *ea)
+{
+	char buf[128];
+	char *name = NULL;
+	int aliases, options;
+
+	if (strcmp(ea->ea_name, "rsc-console") == 0)
+		return 115200;
+
+	aliases = OF_finddevice("/aliases");
+	if (OF_getprop(aliases, "ttya", buf, sizeof(buf)) != -1 &&
+	    OF_finddevice(buf) == ea->ea_node)
+		name = "ttya-mode";
+	if (OF_getprop(aliases, "ttyb", buf, sizeof(buf)) != -1 &&
+	    OF_finddevice(buf) == ea->ea_node)
+		name = "ttyb-mode";
+
+	if (name == NULL)
+		return TTYDEF_SPEED;
+
+	options = OF_finddevice("/options");
+	return (getpropspeed(options, name));
 }

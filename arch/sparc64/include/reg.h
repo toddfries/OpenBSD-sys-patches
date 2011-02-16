@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: reg.h,v 1.3 2002/06/15 17:23:31 art Exp $	*/
-=======
 /*	$OpenBSD: reg.h,v 1.5 2008/12/22 23:01:31 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: reg.h,v 1.8 2001/06/19 12:59:16 wiz Exp $ */
 
 /*

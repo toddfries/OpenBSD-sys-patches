@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_aout.c,v 1.1 2006/05/16 22:48:18 miod Exp $	*/
+/*	$OpenBSD: exec_aout.c,v 1.2 2006/05/20 22:40:46 miod Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993

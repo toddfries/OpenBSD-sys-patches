@@ -1,5 +1,5 @@
 #
-# $OpenBSD: fpsp.s,v 1.8 2005/02/17 18:07:36 jfb Exp $
+# $OpenBSD: fpsp.s,v 1.9 2007/04/10 17:47:54 miod Exp $
 # $NetBSD: fpsp.s,v 1.2 1996/05/15 19:48:03 is Exp $
 #
 

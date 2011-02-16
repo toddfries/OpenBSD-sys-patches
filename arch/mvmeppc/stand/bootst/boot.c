@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.1 2001/06/26 21:58:00 smurph Exp $ */
+/*	$OpenBSD: boot.c,v 1.2 2003/06/02 23:27:53 millert Exp $ */
 /*-
  * Changes Copyright (c) 1998 steve Murphree, Jr.
  * Copyright (c) 1982, 1986, 1990, 1993

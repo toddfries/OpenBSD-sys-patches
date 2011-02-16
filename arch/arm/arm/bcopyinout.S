@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcopyinout.S,v 1.1 2004/01/29 16:17:11 drahn Exp $	*/
+/*	$OpenBSD: bcopyinout.S,v 1.1 2004/02/01 05:09:48 drahn Exp $	*/
 /*	$NetBSD: bcopyinout.S,v 1.13 2003/10/31 16:54:05 scw Exp $	*/
 
 /*

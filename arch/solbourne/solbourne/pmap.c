@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: pmap.c,v 1.4 2010/12/06 20:57:18 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *

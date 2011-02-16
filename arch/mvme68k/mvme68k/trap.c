@@ -168,7 +168,7 @@ userret(struct proc *p)
 	/* take pending signals */
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
-	curpriority = p->p_priority = p->p_usrpri;
+	curcpu()->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 #ifdef M68040
@@ -204,7 +204,7 @@ wb_userret(struct proc *p, struct frame *fp)
 			p->p_priority = p->p_usrpri;
 		}
 	}
-	curpriority = p->p_priority;
+	curcpu()->ci_schedstate.spc_curpriority = p->p_priority;
 }
 #endif
 

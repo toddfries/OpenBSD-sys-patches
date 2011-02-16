@@ -39,7 +39,7 @@
 #include "libsa.h"
 #include <lib/libsa/ufs.h>
 
-const char version[] = "1.0";
+const char version[] = "1.1";
 int	debug = 0;
 
 /*

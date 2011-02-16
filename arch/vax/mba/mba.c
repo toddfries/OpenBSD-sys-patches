@@ -1,4 +1,4 @@
-/*	$OpenBSD: mba.c,v 1.9 2002/03/14 01:26:48 millert Exp $ */
+/*	$OpenBSD: mba.c,v 1.10 2006/01/20 23:27:25 miod Exp $ */
 /*	$NetBSD: mba.c,v 1.18 2000/01/24 02:40:36 matt Exp $ */
 /*
  * Copyright (c) 1994, 1996 Ludd, University of Lule}, Sweden.

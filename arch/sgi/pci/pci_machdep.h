@@ -65,11 +65,6 @@ struct mips_pci_chipset {
     void	*(*pc_rbus_parent_mem)(struct pci_attach_args *);
 };
 
-#define	NEED_PCI_SYNC_CACHE_FUNC
-
-#define	SYNC_R	0	/* Sync caches for reading data */
-#define	SYNC_W	1	/* Sync caches for writing data */
-
 /*
  * Functions provided to machine-independent PCI code.
  */

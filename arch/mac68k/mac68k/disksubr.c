@@ -28,9 +28,8 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)ufs_disksubr.c	7.16 (Berkeley) 5/4/91
  */
+
 /*-
  * Copyright (C) 1993	Allen K. Briggs, Chris P. Caputo,
  *			Michael L. Finch, Bradley A. Grantham, and
@@ -105,9 +104,8 @@ int	read_mac_label(char *, struct disklabel *, int);
  * Find an entry in the disk label that is unused and return it
  * or -1 if no entry
  */
-int 
-getFreeLabelEntry(lp)
-	struct disklabel *lp;
+int
+getFreeLabelEntry(struct disklabel *lp)
 {
 	int i;
 
@@ -115,16 +113,14 @@ getFreeLabelEntry(lp)
 		if (i != RAW_PART && lp->d_partitions[i].p_fstype == FS_UNUSED)
 			return i;
 	}
-
 	return -1;
 }
 
 /*
  * figure out what the type of the given part is and return it
  */
-int 
-whichType(part)
-	struct partmapentry *part;
+int
+whichType(struct partmapentry *part)
 {
 	struct blockzeroblock *bzb;
 
@@ -150,10 +146,10 @@ whichType(part)
 		if (bzb->bzbFlags & BZB_ROOTFS)
 			return ROOT_PART;
 
-		if ((bzb->bzbFlags & BZB_USRFS)
-		    || (bzb->bzbFlags & BZB_EXFS4)
-		    || (bzb->bzbFlags & BZB_EXFS5)
-		    || (bzb->bzbFlags & BZB_EXFS6))
+		if ((bzb->bzbFlags & BZB_USRFS) ||
+		    (bzb->bzbFlags & BZB_EXFS4) ||
+		    (bzb->bzbFlags & BZB_EXFS5) ||
+		    (bzb->bzbFlags & BZB_EXFS6))
 			return UFS_PART;
 
 		if (bzb->bzbType == BZB_TYPESWAP)
@@ -171,18 +167,14 @@ whichType(part)
  * of part types.
  */
 int
-fixPartTable(partTable, size, base)
-	struct partmapentry *partTable;
-	long size;
-	char *base;
+fixPartTable(struct partmapentry *partTable, long size, char *base)
 {
-	int i;
 	struct partmapentry *pmap;
 	char *s;
+	int i;
 
 	for (i = 0; i < NUM_PARTS_PROBED; i++) {
 		pmap = (struct partmapentry *)((i * size) + base + DEV_BSIZE);
-
 		partTable[i] = *pmap;
 		pmap = &partTable[i];
 
@@ -199,15 +191,14 @@ fixPartTable(partTable, size, base)
 			if ((*s >= 'a') && (*s <= 'z'))
 				*s = (*s - 'a' + 'A');
 	}
-
 	return NUM_PARTS_PROBED;
 }
 
-void 
+void
 setPart(struct partmapentry *part, struct disklabel *lp, int fstype, int slot)
 {
-	lp->d_partitions[slot].p_size = part->pmPartBlkCnt;
-	lp->d_partitions[slot].p_offset = part->pmPyPartStart;
+	DL_SETPSIZE(&lp->d_partitions[slot], part->pmPartBlkCnt);
+	DL_SETPOFFSET(&lp->d_partitions[slot], part->pmPyPartStart);
 	lp->d_partitions[slot].p_fstype = fstype;
 }
 
@@ -234,7 +225,6 @@ getNamedType(struct partmapentry *part, int8_t *parttypes, int num_parts,
 		}
 		return i;
 	}
-
 	return -1;
 }
 
@@ -248,7 +238,7 @@ getNamedType(struct partmapentry *part, int8_t *parttypes, int num_parts,
  *	A: root
  *	B: Swap
  *	C: Whole disk
- * 
+ *
  * AKB -- I added to Mike's original algorithm by searching for a bzbCluster
  *	of zero for root, first.  This allows A/UX to live on cluster 1 and
  *	NetBSD to live on cluster 0--regardless of the actual order on the
@@ -263,8 +253,8 @@ read_mac_label(char *dlbuf, struct disklabel *lp, int spoofonly)
 	struct partmapentry *pmap;
 	int8_t parttype[NUM_PARTS_PROBED];
 
-	MALLOC(pmap, struct partmapentry *,
-	    NUM_PARTS_PROBED * sizeof(struct partmapentry), M_DEVBUF, M_NOWAIT);
+	pmap = (struct partmapentry *)malloc(NUM_PARTS_PROBED *
+	    sizeof(struct partmapentry), M_DEVBUF, M_NOWAIT);
 	if (pmap == NULL)
 		return (ENOMEM);
 
@@ -401,12 +391,7 @@ read_mac_label(char *dlbuf, struct disklabel *lp, int spoofonly)
  * routine.  The label must be partly set up before this: secpercyl and
  * anything required in the strategy routine (e.g., sector size) must be
  * filled in before calling us.  Returns null on success and an error
- * string on failure. 
- *
- * This will read sector zero.  If this contains what looks like a valid
- * Macintosh boot sector, we attempt to fill in the disklabel structure.
- * If the first longword of the disk is a OpenBSD disk label magic number,
- * then we assume that it's a real disklabel and return it.
+ * string on failure.
  */
 int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
@@ -483,85 +468,23 @@ done:
 }
 
 /*
- * Check new disk label for sensibility before setting it.
- */
-int
-setdisklabel(olp, nlp, openmask, osdep)
-	struct disklabel *olp, *nlp;
-	u_long openmask;
-	struct cpu_disklabel *osdep;
-{
-	int i;
-	struct partition *opp, *npp;
-
-	/* sanity clause */
-	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
-	    (nlp->d_secsize % DEV_BSIZE) != 0)
-		return (EINVAL);
-
-	/* special case to allow disklabel to be invalidated */
-	if (nlp->d_magic == 0xffffffff) {
-		*olp = *nlp;
-		return (0);
-	}
-
-	if (nlp->d_magic != DISKMAGIC || nlp->d_magic2 != DISKMAGIC ||
-	    dkcksum(nlp) != 0)
-		return (EINVAL);
-
-	while ((i = ffs((long)openmask)) != 0) {
-		i--;
-		openmask &= ~(1 << i);
-		if (nlp->d_npartitions <= i)
-			return (EBUSY);
-		opp = &olp->d_partitions[i];
-		npp = &nlp->d_partitions[i];
-		if (npp->p_offset != opp->p_offset || npp->p_size < opp->p_size)
-			return (EBUSY);
-		/*
-		 * Copy internally-set partition information
-		 * if new label doesn't include it.		XXX
-		 */
-		if (npp->p_fstype == FS_UNUSED && opp->p_fstype != FS_UNUSED) {
-			npp->p_fstype = opp->p_fstype;
-			npp->p_fsize = opp->p_fsize;
-			npp->p_frag = opp->p_frag;
-			npp->p_cpg = opp->p_cpg;
-		}
-	}
-	nlp->d_checksum = 0;
-	nlp->d_checksum = dkcksum(nlp);
-	*olp = *nlp;
-	return (0);
-}
-
-/*
  * Write disk label back to device after modification.
  *
  * To avoid spreading havoc into the MacOS partition structures, we will
  * refuse to write a disklabel if the media has a MacOS signature.
  */
 int
-writedisklabel(dev, strat, lp, osdep)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
+writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
-	struct buf *bp;
+	struct buf *bp = NULL;
 	struct disklabel *dlp;
-	int labelpart;
 	int error = 0;
 	u_int16_t *sbSigp;
 
-	labelpart = DISKPART(dev);
-	if (lp->d_partitions[labelpart].p_offset != 0) {
-		if (lp->d_partitions[0].p_offset != 0)
-			return (EXDEV);	/* not quite right */
-		labelpart = 0;
-	}
+	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
-	bp->b_dev = MAKEDISKDEV(major(dev), DISKUNIT(dev), labelpart);
+	bp->b_dev = dev;
+
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
@@ -569,19 +492,13 @@ writedisklabel(dev, strat, lp, osdep)
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	/*
-	 * Check for MacOS fingerprints
-	 */
+	/* Check for MacOS fingerprints */
 	sbSigp = (u_int16_t *)bp->b_data;
 	if (*sbSigp == 0x4552) {
-		/*
-		 * Read the partition map again, in case it has changed.
-		 */
-		if (readdisklabel(dev, strat, lp, osdep, 0) != NULL)
-			error = EINVAL;
+		/* XXX AND THEN DO NOT WRITE?? */
 		goto done;
 	}
-	
+
 	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	*dlp = *lp;
 	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
@@ -589,69 +506,9 @@ writedisklabel(dev, strat, lp, osdep)
 	error = biowait(bp);
 
 done:
-	bp->b_flags |= B_INVAL;
-	brelse(bp);
+	if (bp) {
+		bp->b_flags |= B_INVAL;
+		brelse(bp);
+	}
 	return (error);
-}
-
-/*
- * Determine the size of the transfer, and make sure it is
- * within the boundaries of the partition. Adjust transfer
- * if needed, and signal errors or early completion.
- */
-int
-bounds_check_with_label(bp, lp, osdep, wlabel)
-	struct buf *bp;
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int wlabel;
-{
-#define	blockpersec(count, lp)	((count) * (((lp)->d_secsize) / DEV_BSIZE))
-	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
-	int labelsect = blockpersec(lp->d_partitions[RAW_PART].p_offset, lp) +
-	    LABELSECTOR;
-	int sz = howmany(bp->b_bcount, DEV_BSIZE);
-
-	/* avoid division by zero */
-	if (lp->d_secpercyl == 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
-	/* beyond partition? */
-	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
-		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
-		if (sz == 0) {
-			/* if exactly at end of disk, return an EOF */
-			bp->b_resid = bp->b_bcount;
-			goto done;
-		}
-		if (sz <= 0) {
-			bp->b_error = EINVAL;
-			goto bad;
-		}
-		/* or truncate if part of it fits */
-		bp->b_bcount = sz << DEV_BSHIFT;
-	}
-
-	/* overwriting disk label ? */
-	/* XXX should also protect bootstrap in first 8K */
-	if (bp->b_blkno + blockpersec(p->p_offset, lp) <= labelsect &&
-#if LABELSECTOR != 0
-	    bp->b_blkno + blockpersec(p->p_offset, lp) + sz > labelsect &&
-#endif /* LABELSECTOR != 0 */
-	    (bp->b_flags & B_READ) == 0 && wlabel == 0) {
-		bp->b_error = EROFS;
-		goto bad;
-	}
-
-	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
-	    lp->d_secpercyl;
-	return (1);
-
-bad:
-	bp->b_flags |= B_ERROR;
-done:
-	return (0);
 }

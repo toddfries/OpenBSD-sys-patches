@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: _types.h,v 1.2 2007/02/03 20:08:50 miod Exp $	*/
-=======
 /*	$OpenBSD: _types.h,v 1.10 2010/05/10 21:41:08 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1990, 1993
@@ -121,12 +117,6 @@ typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
 
 /* Feature test macros */
-<<<<<<< HEAD
-#define __HAVE_DEVICE_REGISTER
-#define __HAVE_GENERIC_SOFT_INTERRUPTS
-#define	__HAVE_MUTEX
-=======
->>>>>>> origin/master
 #define __HAVE_TIMECOUNTER
 
 #endif	/* _SPARC64__TYPES_H_ */

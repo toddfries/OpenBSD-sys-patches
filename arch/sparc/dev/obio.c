@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: obio.c,v 1.15 2003/06/02 18:47:58 deraadt Exp $	*/
-=======
 /*	$OpenBSD: obio.c,v 1.22 2010/09/05 18:10:10 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: obio.c,v 1.37 1997/07/29 09:58:11 fair Exp $	*/
 
 /*
@@ -235,7 +231,7 @@ obioattach(parent, self, args)
 		return;
 
 	/*
-	 * There is only one obio bus (it is in fact one of the Sbus slots)
+	 * There is only one obio bus (it is in fact one of the SBus slots)
 	 * How about VME?
 	 */
 	if (self->dv_unit > 0) {
@@ -314,11 +310,10 @@ vmesattach(parent, self, args)
 	printf("\n");
 
 	if (vmeints == NULL) {
-		vmeints = (struct intrhand **)malloc(256 *
-		    sizeof(struct intrhand *), M_TEMP, M_NOWAIT);
+		vmeints = malloc(256 * sizeof(struct intrhand *), M_TEMP,
+		    M_NOWAIT | M_ZERO);
 		if (vmeints == NULL)
 			panic("vmesattach: can't allocate intrhand");
-		bzero(vmeints, 256 * sizeof(struct intrhand *));
 	}
 	(void)config_search(vmes_scan, self, args);
 	bus_untmp();
@@ -337,11 +332,10 @@ vmelattach(parent, self, args)
 	printf("\n");
 
 	if (vmeints == NULL) {
-		vmeints = (struct intrhand **)malloc(256 *
-		    sizeof(struct intrhand *), M_TEMP, M_NOWAIT);
+		vmeints = malloc(256 * sizeof(struct intrhand *), M_TEMP,
+		    M_NOWAIT | M_ZERO);
 		if (vmeints == NULL)
 			panic("vmelattach: can't allocate intrhand");
-		bzero(vmeints, 256 * sizeof(struct intrhand *));
 	}
 	(void)config_search(vmel_scan, self, args);
 	bus_untmp();
@@ -366,9 +360,9 @@ vmeattach(parent, self, aux)
 	node = ra->ra_node;
 
 	sc->sc_reg = (struct vmebusreg *)
-		mapdev(&ra->ra_reg[0], 0, 0, ra->ra_reg[0].rr_len);
+		mapiodev(&ra->ra_reg[0], 0, ra->ra_reg[0].rr_len);
 	sc->sc_vec = (struct vmebusvec *)
-		mapdev(&ra->ra_reg[1], 0, 0, ra->ra_reg[1].rr_len);
+		mapiodev(&ra->ra_reg[1], 0, ra->ra_reg[1].rr_len);
 
 	/*
 	 * Get "range" property, though we don't do anything with it yet.
@@ -642,11 +636,9 @@ vmeintr_establish(vec, level, ih, ipl_block, name)
 		if (ihs->ih_fun == vmeintr)
 			return;
 
-	ihs = (struct intrhand *)malloc(sizeof(struct intrhand),
-	    M_TEMP, M_NOWAIT);
+	ihs = malloc(sizeof(*ihs), M_TEMP, M_NOWAIT | M_ZERO);
 	if (ihs == NULL)
 		panic("vme_addirq");
-	bzero(ihs, sizeof *ihs);
 	ihs->ih_fun = vmeintr;
 	ihs->ih_arg = (void *)level;
 	intr_establish(level, ihs, ipl_block, NULL);

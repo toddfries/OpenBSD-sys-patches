@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: spinlock.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: spinlock.h,v 1.3 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lock.h,v 1.10 2006/01/03 01:29:46 uwe Exp $	*/
 
 /*-

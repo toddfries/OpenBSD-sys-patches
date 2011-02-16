@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofwi2c.c,v 1.4 2006/06/14 01:15:19 deraadt Exp $	*/
+/*	$OpenBSD: ofwi2c.c,v 1.8 2007/10/22 23:55:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Theo de Raadt
@@ -83,10 +83,31 @@ ofwiic_scan(struct device *self, struct i2cbus_attach_args *iba, void *aux)
 		if (strncmp(ia.ia_name, "i2c-", strlen("i2c-")) == 0)
 			ia.ia_name += strlen("i2c-");
 
-		/* skip totally boring devices */
+		/* Skip non-SPD EEPROMs.  */
 		if (strcmp(ia.ia_name, "at24c64") == 0 ||
-		    strcmp(ia.ia_name, "at34c02") == 0)
+		    strcmp(ia.ia_name, "at34c02") == 0) {
+			if (OF_getprop(node, "name", name, sizeof(name)) == -1)
+				continue;
+			if (strcmp(name, "dimm") == 0 ||
+			    strcmp(name, "dimm-spd") == 0)
+				ia.ia_name = "spd";
+			else
+				continue;
+		}
+
+		/*
+		 * XXX alipm crashes on some machines for an unknown, skip
+		 * reason when doing the periodic i2c accesses things like
+		 * sensors need.  However, devices accessed only at boot
+		 * are fine.
+		 */
+		if (strcmp(self->dv_parent->dv_xname, "alipm0") == 0 &&
+		    (ia.ia_addr < 0x50 || ia.ia_addr > 0x57)) {
+			iic_print(&ia, self->dv_parent->dv_xname);
+			printf(" skipped due to %s bugs\n",
+			    self->dv_parent->dv_xname);
 			continue;
+		}
 
 		config_found(self, &ia, iic_print);
 	}

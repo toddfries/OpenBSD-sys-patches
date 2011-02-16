@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: iop.c,v 1.1 2006/01/22 13:53:16 miod Exp $	*/
 /*	$NetBSD: iop.c,v 1.10 2005/12/24 23:24:00 perry Exp $	*/
 
 /*

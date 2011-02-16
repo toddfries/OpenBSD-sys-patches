@@ -167,19 +167,19 @@ void splassert_check(int, const char *);
 /* IPL-raising functions/macros */
 int _splraise(int);
 
-#define splsoft()		_splraise(ALPHA_PSL_IPL_SOFT)
+#define splsoft()		_splraise(IPL_SOFTINT)
 #define splsoftserial()		splsoft()
 #define splsoftclock()		splsoft()
 #define splsoftnet()		splsoft()
-#define splnet()                _splraise(ALPHA_PSL_IPL_IO)
-#define splbio()                _splraise(ALPHA_PSL_IPL_IO)
-#define spltty()                _splraise(ALPHA_PSL_IPL_IO)
-#define splserial()             _splraise(ALPHA_PSL_IPL_IO)
-#define splaudio()		_splraise(ALPHA_PSL_IPL_IO)
-#define splvm()			_splraise(ALPHA_PSL_IPL_IO)
-#define splclock()              _splraise(ALPHA_PSL_IPL_CLOCK)
-#define splstatclock()          _splraise(ALPHA_PSL_IPL_CLOCK)
-#define splhigh()               _splraise(ALPHA_PSL_IPL_HIGH)
+#define splnet()                _splraise(IPL_NET)
+#define splbio()                _splraise(IPL_BIO)
+#define spltty()                _splraise(IPL_TTY)
+#define splserial()             _splraise(IPL_SERIAL)
+#define splaudio()		_splraise(IPL_AUDIO)
+#define splvm()			_splraise(IPL_VM)
+#define splclock()              _splraise(IPL_CLOCK)
+#define splstatclock()          _splraise(IPL_CLOCK)
+#define splhigh()               _splraise(IPL_HIGH)
 
 #define spllock()		splhigh()
 #define splsched()		splhigh()
@@ -242,9 +242,8 @@ extern unsigned long ssir;
 
 #define	setsoft(x)	atomic_setbits_ulong(&ssir, 1 << (x))
 
-#define	__GENERIC_SOFT_INTERRUPTS
 struct alpha_soft_intrhand {
-	LIST_ENTRY(alpha_soft_intrhand)
+	TAILQ_ENTRY(alpha_soft_intrhand)
 		sih_q;
 	struct alpha_soft_intr *sih_intrhead;
 	void	(*sih_fn)(void *);
@@ -253,7 +252,7 @@ struct alpha_soft_intrhand {
 };
 
 struct alpha_soft_intr {
-	LIST_HEAD(, alpha_soft_intrhand)
+	TAILQ_HEAD(, alpha_soft_intrhand)
 		softintr_q;
 	struct mutex softintr_mtx;
 	unsigned long softintr_siq;

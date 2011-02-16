@@ -27,12 +27,31 @@
 /*
  * Trap codes
  */
-#ifndef __MACHINE_TRAP_H__
-#define __MACHINE_TRAP_H__
+#ifndef __M88K_TRAP_H__
+#define __M88K_TRAP_H__
 
 /*
  * Trap type values
  */
+#define	T_PRIVINFLT	0	/* privileged instruction fault */
+#define	T_INSTFLT	1	/* instruction access exception */
+#define	T_DATAFLT	2	/* data access exception */
+#define	T_MISALGNFLT	3	/* misaligned access exception */
+#define	T_ILLFLT	4	/* unimplemented opcode exception */
+#define	T_BNDFLT	5	/* bounds check violation exception */
+#define	T_ZERODIV	6	/* illegal divide exception */
+#define	T_OVFFLT	7	/* integer overflow exception */
+#define	T_FPEPFLT	8	/* floating point precise exception */
+#define	T_KDB_ENTRY	9	/* force entry to kernel debugger */
+#define	T_KDB_BREAK	10	/* break point hit */
+#define	T_KDB_TRACE	11	/* trace */
+#define	T_UNKNOWNFLT	12	/* unknown exception */
+#define	T_SIGSYS	13	/* generate SIGSYS */
+#define	T_STEPBPT	14	/* special breakpoint for single step */
+#define	T_USERBPT	15	/* user set breakpoint (for debugger) */
+#define	T_110_DRM	16	/* 88110 data read miss (sw table walk) */
+#define	T_110_DWM	17	/* 88110 data write miss (sw table walk) */
+#define	T_110_IAM	18	/* 88110 inst ATC miss (sw table walk) */
 
 #define	T_USER		19	/* user mode fault */
 
@@ -53,4 +72,4 @@ void	m88110_fpu_exception(struct trapframe *);
 
 #endif /* _LOCORE */
 
-#endif /* __MACHINE_TRAP_H__ */
+#endif /* __M88K_TRAP_H__ */

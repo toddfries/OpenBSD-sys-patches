@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ubareg.h,v 1.10 2003/06/02 23:27:58 millert Exp $ */
-=======
 /*	$OpenBSD: ubareg.h,v 1.13 2008/08/18 23:19:27 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ubareg.h,v 1.11 2000/01/24 02:40:36 matt Exp $ */
 
 /*-

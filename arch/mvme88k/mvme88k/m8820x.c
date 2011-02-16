@@ -83,12 +83,13 @@ void
 m8820x_setup_board_config()
 {
 	extern u_int32_t pfsr_save[];
-	struct m8820x_cmmu *cmmu;
-	int num, cmmu_num;
+	int num;
 	int vme188_config;
 	u_int32_t *m8820x_pfsr;
 #ifdef MVME188
 	u_int32_t whoami;
+	struct m8820x_cmmu *cmmu;
+	int cmmu_num;
 #endif
 
 	switch (brdtyp) {
@@ -152,7 +153,7 @@ m8820x_setup_board_config()
 	 * Check CMMU type
 	 */
 	for (cmmu_num = 0; cmmu_num < max_cmmus; cmmu_num++) {
-		volatile unsigned *cr = m8820x_cmmu[cmmu_num].cmmu_regs;
+		volatile u_int32_t *cr = m8820x_cmmu[cmmu_num].cmmu_regs;
 		if (badaddr((vaddr_t)cr, 4) == 0) {
 			int type;
 
@@ -202,8 +203,8 @@ m8820x_setup_board_config()
 	 * discarded. Just don't do this on a 187...
 	 */
 	if (brdtyp == BRD_188) {
-		*(volatile unsigned long *)MVME188_PCNFA = 0;
-		*(volatile unsigned long *)MVME188_PCNFB = 0;
+		*(volatile u_int32_t *)MVME188_PCNFA = 0;
+		*(volatile u_int32_t *)MVME188_PCNFB = 0;
 	}
 
 	/*
@@ -272,7 +273,9 @@ m8820x_cpu_number()
 #endif
 
 #ifdef MVME187
+#ifdef MVME188
 	if (brdtyp != BRD_188)
+#endif
 		return 0;
 #endif
 

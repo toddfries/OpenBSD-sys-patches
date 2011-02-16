@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgcvar.h,v 1.1 2005/01/14 22:39:26 miod Exp $	*/
+/*	$OpenBSD: sgcvar.h,v 1.2 2007/01/06 20:09:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

@@ -35,7 +35,6 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
-#include <machine/pio.h>
 #include <machine/intr.h>
 #include <machine/frame.h>
 
@@ -71,7 +70,7 @@ int_f	*splx_hand = &dummy_splx;
  *  Basically there are <n> interrupt inputs to the processor and
  *  typically the HW designer ties these interrupts to various
  *  sources in the HW. The low level code does not deal with interrupts
- *  in more than it dispatches handling to the code that has registred
+ *  in more than it dispatches handling to the code that has registered
  *  an interrupt handler for that particular interrupt. More than one
  *  handler can register to an interrupt input and one handler may register
  *  for more than one interrupt input. A handler is only called once even
@@ -106,7 +105,7 @@ interrupt(struct trap_frame *trapframe)
 	/*
 	 *  Paranoic? Perhaps. But if we got here with the enable
 	 *  bit reset a mtc0 COP_0_STATUS_REG may have been interrupted.
-	 *  If this was a disable and the pipleine had advanced long
+	 *  If this was a disable and the pipeline had advanced long
 	 *  enough... i don't know but better safe than sorry...
 	 *  The main effect is not the interrupts but the spl mechanism.
 	 */
@@ -139,12 +138,7 @@ interrupt(struct trap_frame *trapframe)
 		if (active != 0)
 			(*cpu_int_tab[i].int_hand)(active, trapframe);
 	}
-#if 0
-if ((pending & cause & ~(SOFT_INT_MASK_1|SOFT_INT_MASK_0)) != 0) {
-printf("Unhandled interrupt %x:%x\n", cause, pending);
-//Debugger();
-}
-#endif
+
 	/*
 	 * Dispatch soft interrupts if current ipl allows them.
 	 */
@@ -188,7 +182,7 @@ set_intr(int pri, uint32_t mask,
 
 	cpu_int_tab[pri].int_hand = int_hand;
 	cpu_int_tab[pri].int_mask = mask;
-	idle_mask |= (mask | SOFT_INT_MASK) >> 8;
+	idle_mask |= mask | SOFT_INT_MASK;
 }
 
 void
@@ -219,11 +213,6 @@ splinit()
 	pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
 	    (idle_mask & SR_INT_MASK);
 
-/*
- *  Process interrupts. The parameter pending has non-masked interrupts.
- */
-intrmask_t
-generic_iointr(intrmask_t pending, struct trap_frame *cf)
 	spl0();
 	(void)updateimask(0);
 }

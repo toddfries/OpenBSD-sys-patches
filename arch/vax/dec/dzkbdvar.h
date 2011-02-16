@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dzkbdvar.h,v 1.1 2001/05/16 22:15:17 hugh Exp $	*/
-=======
 /*	$OpenBSD: dzkbdvar.h,v 1.4 2008/08/20 16:31:41 miod Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: dzkbdvar.h,v 1.2 2001/03/06 07:40:52 matt Exp $ */
 
 struct dzkm_attach_args {

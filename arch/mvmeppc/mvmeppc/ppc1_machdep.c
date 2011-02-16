@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppc1_machdep.c,v 1.15 2004/11/17 20:24:44 miod Exp $	*/
+/*	$OpenBSD: ppc1_machdep.c,v 1.18 2008/01/23 16:37:57 jsing Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.1 1996/09/30 16:34:50 ws Exp $	*/
 
 /*
@@ -132,7 +132,7 @@ size_memory(void)
 			break;
 		*look = save;
 	}
-	physmem = btoc(trunc_page((unsigned)look)); /* in pages */
+	physmem = atop(trunc_page((unsigned)look)); /* in pages */
 	total_mem = trunc_page((unsigned)look);
 #ifdef USE_BUG
 	/* Initialize the off-board (non-local) memory. */
@@ -365,7 +365,7 @@ void
 bootcnprobe(struct consdev *cp)
 {
 	cp->cn_dev = makedev(14, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void

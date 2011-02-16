@@ -1,4 +1,4 @@
-/*	$OpenBSD: mac68k5380.c,v 1.21 2005/07/23 23:36:26 martin Exp $	*/
+/*	$OpenBSD: mac68k5380.c,v 1.22 2006/01/16 21:45:57 miod Exp $	*/
 /*	$NetBSD: mac68k5380.c,v 1.29 1997/02/28 15:50:50 scottr Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vaddrs.h,v 1.6 2003/04/23 19:34:07 miod Exp $	*/
-=======
 /*	$OpenBSD: vaddrs.h,v 1.8 2010/06/29 21:26:12 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vaddrs.h,v 1.8 1997/03/10 23:54:41 pk Exp $ */
 
 /*

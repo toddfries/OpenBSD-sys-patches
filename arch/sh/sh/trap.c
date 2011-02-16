@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: trap.c,v 1.11 2007/03/13 19:29:33 miod Exp $	*/
-=======
 /*	$OpenBSD: trap.c,v 1.16 2010/06/27 12:41:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 

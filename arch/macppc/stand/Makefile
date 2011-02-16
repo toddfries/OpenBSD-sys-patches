@@ -14,12 +14,11 @@ USE_LOADFILE=yes
 .include "Makefile.inc"
 .include "$S/lib/libz/Makefile.inc"
 .include "$S/lib/libsa/Makefile.inc"
-.include "$S/lib/libkern/Makefile.inc"
 
-all:	${ZLIB} ${SALIB} ${KERNLIB} _SUBDIRUSE
+all:	${ZLIB} ${SALIB} _SUBDIRUSE
 
 libdep:
-	@echo ${.OBJDIR}/${SALIB} ${ZLIB} ${KERNLIB}
+	@echo ${.OBJDIR}/${SALIB} ${ZLIB}
 
 
 ${PROG}:	

@@ -37,7 +37,7 @@
 #include "stand.h"
 #include "libsa.h"
 
-void cputobsdlabel(struct disklabel *lp, struct cpu_disklabel *clp);
+void cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp);
 
 int errno;
 
@@ -86,7 +86,7 @@ devopen(f, fname, file)
 	if (i != DEV_BSIZE)
 		return (EINVAL);
 
-	cputobsdlabel(&sdlabel, (struct cpu_disklabel *)iobuf);
+	cputobsdlabel(&sdlabel, (struct mvmedisklabel *)iobuf);
 	pp->poff = sdlabel.d_partitions[pn].p_offset;
 	pp->psize = sdlabel.d_partitions[pn].p_size;
 
@@ -175,7 +175,7 @@ bugscioctl(f, cmd, data)
 void
 cputobsdlabel(lp, clp)
 	struct disklabel *lp;
-	struct cpu_disklabel *clp;
+	struct mvmedisklabel *clp;
 {
 	int i;
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: p9000.c,v 1.19 2007/02/18 18:40:35 miod Exp $	*/
-=======
 /*	$OpenBSD: p9000.c,v 1.23 2009/09/05 14:09:35 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2003, Miodrag Vallat.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vmparam.h,v 1.14 2005/04/11 15:13:01 deraadt Exp $	*/
-=======
 /*	$OpenBSD: vmparam.h,v 1.22 2010/12/15 05:30:19 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vmparam.h,v 1.18 2001/05/01 02:19:19 thorpej Exp $ */
 
 /*
@@ -46,7 +42,7 @@
  */
 
 /*
- * Machine dependent constants for Sun-4c SPARC
+ * Machine dependent constants for sun4u and sun4v UltraSPARC
  */
 
 #ifndef VMPARAM_H
@@ -66,7 +62,7 @@
  * Since the compiler generates `call' instructions we can't
  * have more than 4GB in a single text segment.
  *
- * And since we only have a 40-bit adderss space, allow half
+ * And since we only have a 40-bit address space, allow half
  * of that for data and the other half for stack.
  */
 #ifndef MAXTSIZ
@@ -122,14 +118,30 @@
 #define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0
 
+#define __HAVE_VM_PAGE_MD
 /*
- * pmap specific data stored in the vm_physmem[] array
+ * For each struct vm_page, there is a list of all currently valid virtual
+ * mappings of that page.  An entry is a pv_entry_t, the list is pv_table.
+ *
+ * XXX - this doesn't belong here, but for now we have to keep it here
+ *       because of include ordering issues.
  */
+typedef struct pv_entry {
+	struct pv_entry	*pv_next;	/* next pv_entry */
+	struct pmap	*pv_pmap;	/* pmap where mapping lies */
+	vaddr_t	pv_va;		/* virtual address for mapping */
+} *pv_entry_t;
+/* PV flags encoded in the low bits of the VA of the first pv_entry */
 
-#define __HAVE_PMAP_PHYSSEG
-struct pmap_physseg {
-	struct pv_entry *pvent;
+struct vm_page_md {
+	struct pv_entry pvent;
 };
+
+#define VM_MDPAGE_INIT(pg) do {			\
+	(pg)->mdpage.pvent.pv_next = NULL;	\
+	(pg)->mdpage.pvent.pv_pmap = NULL;	\
+	(pg)->mdpage.pvent.pv_va = 0;		\
+} while (0)
 
 #if defined (_KERNEL) && !defined(_LOCORE)
 struct vm_map;

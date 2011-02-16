@@ -22,6 +22,7 @@ file	arch/arm/xscale/pxa2x0_dma.c
 device	pxaintc
 attach	pxaintc at pxaip
 file	arch/arm/xscale/pxa2x0_intr.c		pxaintc needs-flag
+file	arch/arm/xscale/pxa2x0_mutex.c		pxaintc
 #defflag  opt_pxa2x0_gpio.h		PXAGPIO_HAS_GPION_INTRS
 
 # GPIO controller

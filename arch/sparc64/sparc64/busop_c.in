@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-ECHO:/*      $OpenBSD: $   */
-=======
 ECHO:/*      $OpenBSD: busop_c.in,v 1.2 2010/04/04 12:49:30 miod Exp $   */
->>>>>>> origin/master
 ECHO:
 ECHO:/*
 ECHO: * Copyright (c) 2003 Henric Jungheim

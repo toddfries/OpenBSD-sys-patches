@@ -1,4 +1,4 @@
-/*	$OpenBSD: gboxreg.h,v 1.1 2005/01/14 22:39:25 miod Exp $	*/
+/*	$OpenBSD: gboxreg.h,v 1.2 2005/01/24 21:36:39 miod Exp $	*/
 /*	$NetBSD: grf_gbreg.h,v 1.4 1994/10/26 07:23:53 cgd Exp $	*/
 
 /*

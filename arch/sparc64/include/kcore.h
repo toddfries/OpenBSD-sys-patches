@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: kcore.h,v 1.3 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kcore.h,v 1.4 2000/08/01 00:40:26 eeh Exp $	*/
 
 /*-

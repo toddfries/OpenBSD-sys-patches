@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: reloc.h,v 1.2 2001/09/25 07:15:05 art Exp $	*/
-=======
 /*	$OpenBSD: reloc.h,v 1.4 2010/06/27 03:11:44 guenther Exp $	*/
->>>>>>> origin/master
 /* 
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>
  *   

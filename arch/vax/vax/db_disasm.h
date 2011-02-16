@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.h,v 1.3 2002/05/16 07:37:44 miod Exp $ */
+/*	$OpenBSD: db_disasm.h,v 1.4 2003/11/07 10:16:45 jmc Exp $ */
 /*	$NetBSD: db_disasm.h,v 1.1 1996/01/28 11:31:27 ragge Exp $ */
 /*
  * Copyright (c) 2002, Miodrag Vallat.

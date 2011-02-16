@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: compat_linux.h,v 1.4 2006/01/10 18:17:15 jolan Exp $	*/
-=======
 /*	$OpenBSD: compat_linux.h,v 1.7 2010/12/24 14:22:59 grange Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

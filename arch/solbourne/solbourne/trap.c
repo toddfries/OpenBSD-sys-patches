@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: trap.c,v 1.8 2006/12/24 20:30:35 miod Exp $	*/
-=======
 /*	$OpenBSD: trap.c,v 1.11 2009/04/10 20:57:28 miod Exp $	*/
->>>>>>> origin/master
 /*	OpenBSD: trap.c,v 1.42 2004/12/06 20:12:25 miod Exp 	*/
 
 /*
@@ -229,7 +225,7 @@ userret(struct proc *p)
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
-	curpriority = p->p_priority = p->p_usrpri;
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 /*

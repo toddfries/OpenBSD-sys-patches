@@ -1,4 +1,4 @@
-/*	$OpenBSD: endian.h,v 1.14 2004/10/16 14:26:01 miod Exp $	*/
+/*	$OpenBSD: endian.h,v 1.15 2005/12/13 00:35:23 millert Exp $	*/
 
 /*-
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.

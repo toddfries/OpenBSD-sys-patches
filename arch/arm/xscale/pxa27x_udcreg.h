@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa27x_udcreg.h,v 1.4 2007/02/13 18:32:57 drahn Exp $ */
+/*	$OpenBSD: pxa27x_udcreg.h,v 1.5 2007/02/25 01:40:12 drahn Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>

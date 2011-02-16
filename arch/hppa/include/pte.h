@@ -1,4 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.10 2002/04/01 16:23:01 mickey Exp $	*/
+/*	$OpenBSD: pte.h,v 1.11 2002/09/05 18:41:19 mickey Exp $	*/
 
 /* 
  * Copyright (c) 1990,1993,1994 The University of Utah and

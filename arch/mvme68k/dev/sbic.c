@@ -56,6 +56,7 @@
 #include <sys/kernel.h> /* For hz */
 #include <sys/disklabel.h>
 #include <sys/buf.h>
+#include <sys/queue.h>
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 #include <uvm/uvm_extern.h>
@@ -618,7 +619,7 @@ sbic_scsidone(acb, stat)
             dosched = 1;    /* start next command */
 
     } else
-    if ( dev->ready_list.tqh_last == &acb->chain.tqe_next ) {
+    if (TAILQ_LAST(&dev->ready_list, acb_list) == TAILQ_NEXT(acb, chain)) {
 
         TAILQ_REMOVE(&dev->ready_list, acb, chain);
 

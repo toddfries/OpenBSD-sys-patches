@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: files.shb,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $
 #	$NetBSD: files.shb,v 1.4 2005/12/11 12:18:58 christos Exp $
 #
 # SuperH internal devices.

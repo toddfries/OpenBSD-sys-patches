@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcclockvar.h,v 1.3 1996/10/30 22:38:17 niklas Exp $	*/
+/*	$OpenBSD: mcclockvar.h,v 1.4 2002/03/14 01:26:26 millert Exp $	*/
 /*	$NetBSD: mcclockvar.h,v 1.2 1996/04/17 22:22:38 cgd Exp $	*/
 
 /*

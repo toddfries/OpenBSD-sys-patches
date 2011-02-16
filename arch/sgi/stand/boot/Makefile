@@ -20,7 +20,9 @@ SRCS+=		loadfile.c
 SRCS+=		strlcpy.c memcpy.c strlen.c strrchr.c strlcat.c strncmp.c \
 		strcmp.S
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+CLEANFILES+=	machine mips64
+
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ -h machine ] || ln -s ${.CURDIR}/../../include machine)
 	@([ -h mips64 ] || ln -s ${.CURDIR}/../../../mips64/include mips64)

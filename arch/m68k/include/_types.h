@@ -116,7 +116,4 @@ typedef	int			__rune_t;
 typedef	void *			__wctrans_t;
 typedef	void *			__wctype_t;
 
-/* Feature test macros */
-#define	__HAVE_MUTEX
-
 #endif	/* _M68K__TYPES_H_ */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ze_vxtbus.c,v 1.1 2006/08/27 16:55:41 miod Exp $	*/
-=======
 /*	$OpenBSD: if_ze_vxtbus.c,v 1.3 2008/08/22 17:09:08 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
  *

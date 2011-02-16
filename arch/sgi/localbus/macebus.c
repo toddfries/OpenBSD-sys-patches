@@ -27,8 +27,8 @@
  */
 
 /*
- *  This is a combined macebus/crimebus driver. It handles
- *  configuration of all devices on the processor bus.
+ * This is a combined macebus/crimebus driver. It handles configuration of all
+ * devices on the processor bus.
  */
 
 #include <sys/param.h>
@@ -45,6 +45,7 @@
 #include <machine/intr.h>
 #include <machine/atomic.h>
 
+#include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
 #include <sgi/localbus/macebusvar.h>
 
@@ -103,7 +104,7 @@ struct cfattach macebus_ca = {
 };
 
 struct cfdriver macebus_cd = {
-	NULL, "macebus", DV_DULL, 1
+	NULL, "macebus", DV_DULL
 };
 
 bus_space_t macebus_tag = {
@@ -155,7 +156,9 @@ struct machine_bus_dma_tag mace_bus_dma_tag = {
 	_dmamem_map,
 	_dmamem_unmap,
 	_dmamem_mmap,
-	NULL
+	macebus_pa_to_device,
+	macebus_device_to_pa,
+	CRIME_MEMORY_MASK
 };
 
 /*
@@ -226,7 +229,6 @@ macebusprint(void *aux, const char *macebus)
 	return (UNCONF);
 }
 
-
 int
 macebussubmatch(struct device *parent, void *vcf, void *args)
 {
@@ -245,14 +247,11 @@ macebussubmatch(struct device *parent, void *vcf, void *args)
 void
 macebusattach(struct device *parent, struct device *self, void *aux)
 {
-	struct device *dev;
-	struct confargs lba;
-	struct abus lbus;
 	u_int32_t creg;
 	uint i;
 
 	/*
-	 *  Map and set up CRIME control registers.
+	 * Map and setup CRIME control registers.
 	 */
 	if (bus_space_map(&crimebus_tag, 0x00000000, 0x400, 0, &crime_h)) {
 		printf(": can't map CRIME control registers\n");
@@ -271,7 +270,7 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_STAT, 0);
 
 	/*
-	 *  Map and set up MACE ISA control registers.
+	 * Map and setup MACE ISA control registers.
 	 */
 	if (bus_space_map(&macebus_tag, MACE_ISA_OFFS, 0x400, 0, &mace_h)) {
 		printf("%s: can't map MACE control registers\n",
@@ -283,20 +282,8 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT, 0);
 
 	/*
-	 *  Now attach all devices to macebus in proper order.
-	 */
-	memset(&lba, 0, sizeof(lba));
-	memset(&lbus, 0, sizeof(lbus));
-	lba.ca_bus = &lbus;
-	lba.ca_bus->ab_type = BUS_LOCAL;
-	lba.ca_bus->ab_matchname = NULL;
-	lba.ca_iot = &macebus_tag;
-	lba.ca_memt = &macebus_tag;
-	lba.ca_dmat = &mace_bus_dma_tag;
-
-	/*
-	 *  On O2 systems all interrupts are handled by the
-	 *  macebus interrupt handler. Register all except clock.
+	 * On O2 systems all interrupts are handled by the macebus interrupt
+	 * handler. Register all except clock.
 	 */
 	set_intr(INTPRI_MACEIO, CR_INT_0, macebus_iointr);
 	register_splx_handler(macebus_splx);
@@ -312,9 +299,8 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 		    macebusprint, macebussubmatch);
 }
 
-
 /*
- *  Bus access primitives. These are really ugly...
+ * Bus access primitives. These are really ugly...
  */
 
 u_int8_t
@@ -338,11 +324,7 @@ mace_read_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
 u_int64_t
 mace_read_8(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
 {
-#ifdef __LP64__
 	return *(volatile u_int64_t *)(h + o);
-#else
-	return lp32_read8((u_int64_t *)(h + o));
-#endif
 }
 
 void
@@ -366,11 +348,7 @@ mace_write_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int32_t v)
 void
 mace_write_8(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int64_t v)
 {
-#ifdef __LP64__
 	*(volatile u_int64_t *)(h + o) = v;
-#else
-	lp32_write8((u_int64_t *)(h + o), v);
-#endif
 }
 
 void
@@ -459,8 +437,36 @@ mace_space_region(bus_space_tag_t t, bus_space_handle_t bsh,
 	return (0);
 }
 
+void *
+mace_space_vaddr(bus_space_tag_t t, bus_space_handle_t h)
+{
+	return (void *)h;
+}
+
 /*
- *  Macebus interrupt handler driver.
+ * Macebus bus_dma helpers.
+ * Mace accesses memory contiguously at 0x40000000 onwards.
+ */
+
+bus_addr_t
+macebus_pa_to_device(paddr_t pa)
+{
+	return (pa | CRIME_MEMORY_OFFSET);
+}
+
+paddr_t
+macebus_device_to_pa(bus_addr_t addr)
+{
+	paddr_t pa = (paddr_t)addr & CRIME_MEMORY_MASK;
+
+	if (pa >= 256 * 1024 * 1024)
+		pa |= CRIME_MEMORY_OFFSET;
+
+	return (pa);
+}
+
+/*
+ * Macebus interrupt handler driver.
  */
 
 /*
@@ -614,23 +620,20 @@ macebus_iointr_skip(struct intrhand *ih, uint64_t mace_isr, uint64_t mace_imr)
 }
 
 /*
- *  Macebus auxilary functions run each clock interrupt.
+ * Macebus auxilary functions run each clock interrupt.
  */
 uint32_t
 macebus_aux(uint32_t hwpend, struct trap_frame *cf)
 {
-	extern char idle[], e_idle[];
 	u_int64_t mask;
 
 	mask = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_MISC_REG);
 	mask |= MACE_ISA_MISC_RLED_OFF | MACE_ISA_MISC_GLED_OFF;
 
-	/* GREEN - User mode */
+	/* GREEN - Idle */
 	/* AMBER - System mode */
-	/* RED   - IDLE */
+	/* RED   - User mode */
 	if (cf->sr & SR_KSU_USER) {
-		mask &= ~MACE_ISA_MISC_GLED_OFF;
-	} else if (cf->pc >= (long)idle && cf->pc < (long)e_idle) {
 		mask &= ~MACE_ISA_MISC_RLED_OFF;
 	} else if (curproc == NULL ||
 	    curproc == curcpu()->ci_schedstate.spc_idleproc) {

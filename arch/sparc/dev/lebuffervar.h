@@ -1,4 +1,4 @@
-/*	$OpenBSD: lebuffervar.h,v 1.1 1997/08/08 08:25:18 downsj Exp $	*/
+/*	$OpenBSD: lebuffervar.h,v 1.2 2006/06/02 20:00:54 miod Exp $	*/
 /*	$NetBSD: lebuffervar.h,v 1.2 1997/03/10 22:56:54 pk Exp $ */
 
 /*

@@ -39,7 +39,9 @@ struct phys_mem_desc {
 };
 
 #ifdef _KERNEL
+#ifndef	MAXMEMSEGS
 #define	MAXMEMSEGS	16
+#endif
 extern struct phys_mem_desc mem_layout[];
 int	memrange_register(uint64_t, uint64_t, uint64_t, unsigned int);
 #endif

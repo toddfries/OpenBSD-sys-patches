@@ -1,4 +1,4 @@
-/*	$OpenBSD: ebusvar.h,v 1.5 2003/02/17 01:29:20 henric Exp $	*/
+/*	$OpenBSD: ebusvar.h,v 1.6 2007/04/04 18:38:54 kettenis Exp $	*/
 /*	$NetBSD: ebusvar.h,v 1.5 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*

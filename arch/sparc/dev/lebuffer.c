@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lebuffer.c,v 1.5 2002/03/14 01:26:43 millert Exp $	*/
-=======
 /*	$OpenBSD: lebuffer.c,v 1.9 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lebuffer.c,v 1.3 1997/05/24 20:16:28 pk Exp $ */
 
 /*

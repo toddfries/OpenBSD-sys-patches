@@ -33,7 +33,6 @@
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
-#include <machine/pte.h>
 
 #include "assym.h"
 
@@ -61,7 +60,7 @@
  */
 LEAF(MipsSwitchFPState, 0)
 	mfc0	t1, COP_0_STATUS_REG	# Save old SR
-	li	t0, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
+	or	t0, t1, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 
@@ -164,7 +163,7 @@ END(MipsSwitchFPState)
 
 LEAF(MipsSwitchFPState16, 0)
 	mfc0	t1, COP_0_STATUS_REG	# Save old SR
-	li	t0, SR_COP_1_BIT	# enable the coprocessor
+	or	t0, t1, SR_COP_1_BIT	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 
@@ -285,7 +284,7 @@ END(MipsSwitchFPState16)
 LEAF(MipsSaveCurFPState, 0)
 	PTR_L	a0, P_ADDR(a0)			# get pointer to pcb for proc
 	mfc0	t1, COP_0_STATUS_REG	# Disable interrupts and
-	li	t0, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
+	or	t0, t1, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 	GET_CPU_INFO(t2, t3)
@@ -346,7 +345,7 @@ END(MipsSaveCurFPState)
 LEAF(MipsSaveCurFPState16, 0)
 	PTR_L	a0, P_ADDR(a0)			# get pointer to pcb for proc
 	mfc0	t1, COP_0_STATUS_REG	# Disable interrupts and
-	li	t0, SR_COP_1_BIT	# enable the coprocessor
+	or	t0, t1, SR_COP_1_BIT	# enable the coprocessor
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 	GET_CPU_INFO(t2, t3)
@@ -425,10 +424,7 @@ LEAF(cp1_get_prid, 0)
 	li	a0, SR_COP_1_BIT
 	or	v1, a0
 	mtc0	v1, COP_0_STATUS_REG
-	nop
-	nop
-	nop
-	nop
+	ITLBNOPFIX
 	cfc1	v0, FPC_ID
 	xor	v1, a0
 	mtc0	v1, COP_0_STATUS_REG

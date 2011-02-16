@@ -49,177 +49,22 @@
 #include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+
+#include <uvm/uvm_extern.h>
+
 #include <machine/bootconfig.h>
 #include <machine/intr.h>
-
 #include <dev/cons.h>
 
 struct device *bootdv = NULL;
-
-int findblkmajor(struct device *dv);
-char *findblkname(int maj);
-
-void rootconf(void);
-void diskconf(void);
-
-static struct device * getdisk(char *str, int len, int defpart, dev_t *devp);
-struct  device *parsedisk(char *, int, int, dev_t *);
 extern char *boot_file;
 
-#include "wd.h"
-#if NWD > 0  
-extern  struct cfdriver wd_cd;
-#endif
-#include "sd.h"
-#if NSD > 0
-extern  struct cfdriver sd_cd;
-#endif
-#include "cd.h"
-#if NCD > 0
-extern  struct cfdriver cd_cd;
-#endif
-#if NRD > 0
-extern  struct cfdriver rd_cd;
-#endif
-#include "raid.h"
-#if NRAID > 0
-extern  struct cfdriver raid_cd;
-#endif
+void dumpconf(void);
 
-struct  genericconf {
-	char *gc_name;
-	dev_t gc_major;
-} genericconf[] = {
-#if NWD > 0
-	{ "wd",  16 },
-#endif
-#if NSD > 0
-	{ "sd",  24 },
-#endif
-#if NCD > 0
-	{ "cd",  26 },
-#endif
-#if NRD > 0
-	{ "rd",  18 },
-#endif
-#if NRAID > 0
-	{ "raid",  71 },
-#endif
-	{ 0 }
-};
-
-int
-findblkmajor(dv)
-	struct device *dv;
-{
-	char *name = dv->dv_xname;
-	int i;
-
-	for (i = 0; i < sizeof(genericconf)/sizeof(genericconf[0]); ++i)
-		if (strncmp(name, genericconf[i].gc_name,
-		    strlen(genericconf[i].gc_name)) == 0)
-			return (genericconf[i].gc_major);
-	return (-1);
-}
-
-char *
-findblkname(maj)
-	int maj;
-{
-	int i;
-
-	for (i = 0; i < sizeof(genericconf)/sizeof(genericconf[0]); ++i)
-		if (maj == genericconf[i].gc_major)
-			return (genericconf[i].gc_name);
-	return (NULL);
-}
-
-static struct device *
-getdisk(char *str, int len, int defpart, dev_t *devp)
-{
-	struct device *dv;
-
-	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
-		printf("use one of: reboot");
-		for (dv = alldevs.tqh_first; dv != NULL;
-		    dv = dv->dv_list.tqe_next) {
-			if (dv->dv_class == DV_DISK)
-				printf(" %s[a-p]", dv->dv_xname);
-#ifdef NFSCLIENT
-			if (dv->dv_class == DV_IFNET)
-				printf(" %s", dv->dv_xname);
-#endif
-		}
-		printf("\n");
-	}
-	return (dv);
-}
-
-struct device *
-parsedisk(char *str, int len, int defpart, dev_t *devp)
-{
-	struct device *dv;
-	char *cp, c;
-	int majdev, part;
-
-	if (len == 0)
-		return (NULL);
-	cp = str + len - 1;
-	c = *cp;
-	if (c >= 'a' && (c - 'a') < MAXPARTITIONS) {
-		part = c - 'a';
-		*cp = '\0';
-	} else
-		part = defpart;
-
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
-		if (dv->dv_class == DV_DISK &&
-		    strcmp(str, dv->dv_xname) == 0) {
-			majdev = findblkmajor(dv);
-			if (majdev < 0)
-				panic("parsedisk");
-			*devp = MAKEDISKDEV(majdev, dv->dv_unit, part);
-			break;
-		}
-#ifdef NFSCLIENT
-		if (dv->dv_class == DV_IFNET &&
-		    strcmp(str, dv->dv_xname) == 0) {
-			*devp = NODEV;
-			break;
-		}
-#endif
-	}
-
-	*cp = c;
-	return (dv);
-}
-
-
-/*
- * Now that we are fully operational, we can checksum the
- * disks, and using some heuristics, hopefully are able to
- * always determine the correct root disk.
- */
 void
-diskconf()
+device_register(struct device *dev, void *aux)
 {
-	/*
-	 * Configure root, swap, and dump area.  This is
-	 * currently done by running the same checksum
-	 * algorithm over all known disks, as was done in
-	 * /boot.  Then we basically fixup the *dev vars
-	 * from the info we gleaned from this.
-	 */
-#if 0
-	dkcsumattach();
-
-#endif
-	rootconf();
-#if 0
-	dumpconf();
-#endif
 }
-
 
 /*
  * void cpu_configure()
@@ -245,7 +90,6 @@ cpu_configure(void)
 	 * We can not know which is our root disk, defer
 	 * until we can checksum blocks to figure it out.
 	 */
-	md_diskconf = diskconf;
 	cold = 0;
 
 	/* Time to start taking interrupts so lets open the flood gates .... */
@@ -254,44 +98,25 @@ cpu_configure(void)
 }
 
 /*
- * Attempt to find the device from which we were booted.
- * If we can do so, and not instructed not to do so,
- * change rootdev to correspond to the load device.
+ * Now that we are fully operational, we can checksum the
+ * disks, and using some heuristics, hopefully are able to
+ * always determine the correct root disk.
  */
 void
-rootconf()
+diskconf(void)
 {
-	int  majdev, mindev, unit, part, len;
-	dev_t temp;
-	struct swdevt *swp;
-	struct device *dv;
-	dev_t nrootdev, nswapdev = NODEV;
-	char buf[128];
-	int s;
+	dev_t tmpdev;
 
-#if defined(NFSCLIENT)
-	extern char *nfsbootdevname;
-#endif
-
-	if (boothowto & RB_DFLTROOT)
-		return;		/* Boot compiled in */
-
+#if 0
 	/*
-	 * (raid) device auto-configuration could have returned
-	 * the root device's id in rootdev.  Check this case.
+	 * Configure root, swap, and dump area.  This is
+	 * currently done by running the same checksum
+	 * algorithm over all known disks, as was done in
+	 * /boot.  Then we basically fixup the *dev vars
+	 * from the info we gleaned from this.
 	 */
-	if (rootdev != NODEV) {
-		majdev = major(rootdev);
-		unit = DISKUNIT(rootdev);
-		part = DISKPART(rootdev);
-
-		len = snprintf(buf, sizeof buf, "%s%d", findblkname(majdev),
-			unit);
-		if (len == -1 || len >= sizeof(buf))
-			panic("rootconf: device name too long");
-
-		bootdv = getdisk(buf, len, part, &rootdev);
-	}
+	dkcsumattach();
+#endif
 
 	/* Lookup boot device from boot if not set by configuration */
 	if (bootdv == NULL) {
@@ -304,14 +129,15 @@ rootconf()
 		else
 			len = strlen(boot_file);
 		
-		bootdv = parsedisk(boot_file, len, 0, &temp);
+		bootdv = parsedisk(boot_file, len, 0, &tmpdev);
 	}
-	if (bootdv == NULL) {
+	if (bootdv == NULL)
 		printf("boot device: lookup '%s' failed.\n", boot_file);
-		boothowto |= RB_ASKNAME; /* Don't Panic :-) */
-		/* boothowto |= RB_SINGLE; */
-	} else
-		printf("boot device: %s.\n", bootdv->dv_xname);
+	else
+		printf("boot device: %s\n", bootdv->dv_xname);
+	setroot(bootdv, 0, RB_USERREQ);
+	dumpconf();
+}
 
 struct nam2blk nam2blk[] = {
 	{ "wd",		16 },

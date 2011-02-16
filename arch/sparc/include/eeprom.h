@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: eeprom.h,v 1.10 2003/06/02 18:17:36 deraadt Exp $	*/
-=======
 /*	$OpenBSD: eeprom.h,v 1.12 2010/06/07 19:43:49 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1995 Theo de Raadt

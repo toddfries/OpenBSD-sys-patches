@@ -172,12 +172,6 @@ struct vm_map *phys_map = NULL;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef	BUFCACHEPERCENT
 #define	BUFCACHEPERCENT	5
 #endif
@@ -221,7 +215,7 @@ u_long	get_physical(u_int, u_long *);
 
 void	initcpu(void);
 int	cpu_dumpsize(void);
-int	cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
+int	cpu_dump(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *);
 void	cpu_init_kcore_hdr(void);
 int	fpu_probe(void);
 
@@ -362,7 +356,6 @@ cpu_startup(void)
 {
 	unsigned i;
 	int vers;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
 	int delay;
 
@@ -375,7 +368,7 @@ cpu_startup(void)
 	 * Initialize error message buffer (at end of core).
 	 * high[numranges-1] was decremented in pmap_bootstrap.
 	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
+	for (i = 0; i < atop(MSGBUFSIZE); i++)
 		pmap_enter(pmap_kernel(), (vaddr_t)msgbufp + i * NBPG,
 		    high[numranges - 1] + i * NBPG,
 		    VM_PROT_READ|VM_PROT_WRITE,
@@ -402,12 +395,14 @@ cpu_startup(void)
 		printf("this kernel.\n\n");
 		for (delay = 0; delay < 1000000; delay++);
 	}
-	printf("real mem = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -417,10 +412,8 @@ cpu_startup(void)
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%luK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up CPU-specific registers, cache, etc.
@@ -526,8 +519,8 @@ boot(howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();			/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP) {
@@ -608,8 +601,8 @@ cpu_dumpsize()
  */
 int
 cpu_dump(dump, blknop)
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
-	daddr_t *blknop;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr64_t *blknop;
 {
 	int buf[dbtob(1) / sizeof(int)];
 	cpu_kcore_hdr_t *chdr;
@@ -645,27 +638,21 @@ long	dumplo = 0;		/* blocks */
  * that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	cpu_kcore_hdr_t *h = &cpu_kcore_hdr;
 	int nblks;	/* size of dump area */
-	int maj;
 	int i;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
 	dumpsize = 0;
 	for (i = 0; h->ram_segs[i].size && i < NPHYS_RAM_SEGS; i++)
-		dumpsize += btoc(h->ram_segs[i].size);
+		dumpsize += atop(h->ram_segs[i].size);
 	dumpsize += cpu_dumpsize();
 
 	/* Always skip the first block, in case there is a label there. */
@@ -683,9 +670,9 @@ void
 dumpsys()
 {
 	cpu_kcore_hdr_t *h = &cpu_kcore_hdr;
-	daddr_t blkno;		/* current block to write */
+	daddr64_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	vaddr_t maddr;	/* PA being dumped */
 	int seg;		/* RAM segment being dumped */
@@ -1418,7 +1405,6 @@ setmachdep()
 	current_mac_model = cpui;
 
 	mac68k_machine.via1_ipl = 1;
-	mac68k_machine.via2_ipl = 2;
 	mac68k_machine.aux_interrupts = 0;
 
 	/*
@@ -1476,7 +1462,6 @@ setmachdep()
 		via_reg(VIA1, vBufB) &= (0xff ^ DB1O_AuxIntEnb);
 		via_reg(VIA1, vDirB) |= DB1O_AuxIntEnb;
 		mac68k_machine.via1_ipl = 6;
-		mac68k_machine.via2_ipl = 2;
 
 		break;
 	case MACH_CLASSAV:

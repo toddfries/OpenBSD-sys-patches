@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: crl.c,v 1.7 2003/06/02 23:27:58 millert Exp $	*/
-=======
 /*	$OpenBSD: crl.c,v 1.9 2010/06/26 23:24:44 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: crl.c,v 1.6 2000/01/24 02:40:33 matt Exp $	*/
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.

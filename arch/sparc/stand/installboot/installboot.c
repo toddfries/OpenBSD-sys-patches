@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: installboot.c,v 1.3 2002/03/14 01:26:44 millert Exp $	*/
-=======
 /*	$OpenBSD: installboot.c,v 1.5 2010/11/19 18:11:21 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: installboot.c,v 1.1 1997/06/01 03:39:45 mrg Exp $	*/
 
 /*

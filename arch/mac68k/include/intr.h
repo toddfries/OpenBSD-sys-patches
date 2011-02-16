@@ -40,7 +40,6 @@
  * splvm must be > spltty
  */
 extern u_short	mac68k_ttyipl;
-extern u_short	mac68k_bioipl;
 extern u_short	mac68k_netipl;
 extern u_short	mac68k_vmipl;
 extern u_short	mac68k_audioipl;
@@ -61,6 +60,7 @@ extern u_short	mac68k_statclockipl;
 #define	IPL_AUDIO	PSLTOIPL(mac68k_audioipl)
 #define	IPL_NET		PSLTOIPL(mac68k_netipl)
 #define	IPL_TTY		PSLTOIPL(mac68k_ttyipl)
+#define	IPL_VM		PSLTOIPL(mac68k_vmipl)
 #define	IPL_CLOCK	PSLTOIPL(mac68k_clockipl)
 #define	IPL_STATCLOCK	PSLTOIPL(mac68k_statclockipl)
 #define	IPL_SCHED	7
@@ -81,7 +81,7 @@ extern u_short	mac68k_statclockipl;
 #define	splsoftclock()		splsoft()
 #define	splsoftnet()		splsoft()
 #define	spltty()		_splraise(mac68k_ttyipl)
-#define	splbio()		_splraise(mac68k_bioipl)
+#define	splbio()		_splraise(PSL_S | PSL_IPL2)
 #define	splnet()		_splraise(mac68k_netipl)
 #define	splvm()			_splraise(mac68k_vmipl)
 #define	splaudio()		_splraise(mac68k_audioipl)
@@ -89,6 +89,7 @@ extern u_short	mac68k_statclockipl;
 #define	splstatclock()		_splraise(mac68k_statclockipl)
 #define	splserial()		_splraise(PSL_S | PSL_IPL4)
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
+#define	splsched()		splhigh()
 
 /* These spl calls are _not_ to be used by machine-independent code. */
 #define	splzs()			splserial()

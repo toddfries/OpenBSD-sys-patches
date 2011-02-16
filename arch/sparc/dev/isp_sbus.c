@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isp_sbus.c,v 1.23 2002/10/12 01:09:43 krw Exp $	*/
-=======
 /*	$OpenBSD: isp_sbus.c,v 1.30 2010/11/11 17:46:58 miod Exp $	*/
->>>>>>> origin/master
 /*
  * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
  *
@@ -210,6 +206,9 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 #endif
 	}
 	sbc->sbus_mdvec.dv_clock = freq;
+
+	DEFAULT_IID(isp) =
+	    getpropint(ca->ca_ra.ra_node, "scsi-initiator-id", 7);
 
 	if ((bp = ca->ca_ra.ra_bp) != NULL) {
 		if (bp->val[0] == ca->ca_slot &&

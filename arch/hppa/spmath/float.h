@@ -1,4 +1,4 @@
-/*	$OpenBSD: float.h,v 1.6 2002/09/20 19:26:59 mickey Exp $	*/
+/*	$OpenBSD: float.h,v 1.7 2004/01/02 14:39:01 mickey Exp $	*/
 /*
   (c) Copyright 1986 HEWLETT-PACKARD COMPANY
   To anyone who acknowledges that this file is provided "AS IS"

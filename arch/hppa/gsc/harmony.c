@@ -104,6 +104,7 @@ struct audio_hw_if harmony_sa_hw_if = {
 	harmony_get_props,
 	harmony_trigger_output,
 	harmony_trigger_input,
+	NULL
 };
 
 int harmony_match(struct device *, void *, void *);

@@ -89,8 +89,8 @@ int	vs_alloc_wq(struct vs_softc *);
 void	vs_build_sg_list(struct vs_softc *, struct vs_cb *, bus_addr_t);
 void	vs_chksense(struct vs_cb *, struct scsi_xfer *);
 int	vs_eintr(void *);
-bus_addr_t vs_getcqe(struct vs_softc *);
-bus_addr_t vs_getiopb(struct vs_softc *);
+int	vs_getcqe(struct vs_softc *, bus_addr_t *, bus_addr_t *);
+int	vs_identify(struct vs_channel *, int);
 int	vs_initialize(struct vs_softc *);
 int	vs_intr(struct vs_softc *);
 int	vs_load_command(struct vs_softc *, struct vs_cb *, bus_addr_t,
@@ -103,8 +103,9 @@ struct vs_cb *vs_find_queue(struct scsi_link *, struct vs_softc *);
 void	vs_reset(struct vs_softc *, int);
 void	vs_resync(struct vs_softc *);
 void	vs_scsidone(struct vs_softc *, struct vs_cb *);
+int	vs_unit_value(int, int, int);
 
-static __inline__ void vs_free(struct vs_cb *);
+static __inline__ void vs_free(struct vs_softc *, struct vs_cb *);
 static __inline__ void vs_clear_return_info(struct vs_softc *);
 
 int
@@ -114,10 +115,23 @@ vsmatch(struct device *device, void *cf, void *args)
 	bus_space_tag_t iot = ca->ca_iot;
 	bus_space_handle_t ioh;
 	int rc;
+	u_int16_t id;
 
 	if (bus_space_map(iot, ca->ca_paddr, S_SHORTIO, 0, &ioh) != 0)
 		return 0;
-	rc = badaddr((vaddr_t)bus_space_vaddr(iot, ioh), 1);
+	rc = badaddr((vaddr_t)bus_space_vaddr(iot, ioh) + sh_CSS + CSB_TYPE, 2);
+	if (rc == 0) {
+		id = bus_space_read_2(iot, ioh, sh_CSS + CSB_TYPE);
+		if (id != JAGUAR && id != COUGAR)
+			rc = 1;
+		/*
+		 * Note that this will reject Cougar boards configured with
+		 * less than 2KB of short I/O memory.
+		 * Is it worth checking for a Cougar signature at lower
+		 * addresses, knowing that we can't really work unless
+		 * the board is jumped to enable the whole 2KB?
+		 */
+	}
 	bus_space_unmap(iot, ioh, S_SHORTIO);
 
 	return rc == 0;
@@ -127,6 +141,7 @@ void
 vsattach(struct device *parent, struct device *self, void *args)
 {
 	struct vs_softc *sc = (struct vs_softc *)self;
+	struct vs_channel *vc;
 	struct confargs *ca = args;
 	struct scsi_link *sc_link;
 	struct scsibus_attach_args saa;
@@ -153,6 +168,7 @@ vsattach(struct device *parent, struct device *self, void *args)
 		return;
 	}
 
+	sc->sc_bid = csb_read(2, CSB_TYPE);
 	sc->sc_ipl = ca->ca_ipl;
 	sc->sc_nvec = ca->ca_vec;
 	sc->sc_evec = evec;
@@ -184,12 +200,13 @@ vsattach(struct device *parent, struct device *self, void *args)
 		bootpart = -1;		/* invalid flag to device_register */
 
 	for (bus = 0; bus < 2; bus++) {
-		if (sc->sc_id[bus] < 0)
+		vc = &sc->sc_channel[bus];
+		if (vc->vc_id < 0)
 			continue;
 
-		sc_link = &sc->sc_link[bus];
+		sc_link = &vc->vc_link;
 		sc_link->adapter = &vs_scsiswitch;
-		sc_link->adapter_buswidth = 8;
+		sc_link->adapter_buswidth = vc->vc_width;
 		sc_link->adapter_softc = sc;
 		sc_link->adapter_target = vc->vc_id;
 		if (sc->sc_bid != JAGUAR)
@@ -209,22 +226,15 @@ vsattach(struct device *parent, struct device *self, void *args)
 		}
 		printf("\n");
 
-	printf("\n");
-
-	/*
-	 * Attach all scsi units on us, watching for boot device
-	 * (see device_register).
-	 */
-	tmp = bootpart;
-	if (sc->sc_paddr != bootaddr)
-		bootpart = -1;		/* invalid flag to device_register */
-
-	for (bus = 0; bus < 2; bus++) {
-		if (sc->sc_id[bus] < 0)
+		if (vc->vc_width == 0) {
+			printf("%s: daughterboard disabled, "
+			    "not enough on-board memory\n",
+			    sc->sc_dev.dv_xname);
 			continue;
+		}
 
 		bzero(&saa, sizeof(saa));
-		saa.saa_sc_link = &sc->sc_link[bus];
+		saa.saa_sc_link = &vc->vc_link;
 
 		bootbus = bus;
 		config_found(self, &saa, scsiprint);
@@ -251,8 +261,8 @@ vs_print_addr(struct vs_softc *sc, struct scsi_xfer *xs)
 		sc_print_addr(xs->sc_link);
 
 		/* print bus number too if appropriate */
-		if (sc->sc_id[1] >= 0)
-			printf("(bus %d) ",
+		if (sc->sc_channel[1].vc_width >= 0)
+			printf("(channel %d) ",
 			    !!(xs->sc_link->flags & SDEV_2NDBUS));
 	}
 }
@@ -286,6 +296,10 @@ do_vspoll(struct vs_softc *sc, struct scsi_xfer *xs, int canreset)
 		}
 		delay(1000);
 	}
+#ifdef VS_DEBUG
+	printf("%s: crsw %04x to %d/%d\n",
+	    __func__, crsw, to, xs ? xs->timeout : 2000);
+#endif
 	return 0;
 }
 
@@ -308,8 +322,6 @@ vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 #endif
 		vs_free(sc, cb);
 		scsi_done(xs);
-#endif
-		vs_free(cb);
 	} else
 		vs_scsidone(sc, cb);
 	splx(s);
@@ -336,7 +348,7 @@ thaw_all_queues(struct vs_softc *sc)
 {
 	int i;
 
-	for (i = 1; i < NUM_WQ; i++)
+	for (i = 1; i <= sc->sc_nwq; i++)
 		thaw_queue(sc, i);
 }
 
@@ -351,6 +363,14 @@ vs_scsidone(struct vs_softc *sc, struct vs_cb *cb)
 	xs->resid = xs->datalen - len;
 
 	error = vs_read(2, sh_RET_IOPB + IOPB_STATUS);
+#ifdef VS_DEBUG
+	printf("%s: queue %d, len %u (resid %d) error %d\n",
+	    __func__, cb->cb_q, len, xs->resid, error);
+	if (error != 0)
+		printf("%s: last select %d %d, phase %02x %02x\n",
+		    __func__, csb_read(1, CSB_LPDS), csb_read(1, CSB_LSDS),
+		    csb_read(1, CSB_PPS), csb_read(1, CSB_SPS));
+#endif
 	if ((error & 0xff) == SCSI_SELECTION_TO) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
@@ -371,8 +391,6 @@ vs_scsidone(struct vs_softc *sc, struct vs_cb *cb)
 
 	vs_free(sc, cb);
 	scsi_done(xs);
-
-	vs_free(cb);
 }
 
 void
@@ -416,14 +434,15 @@ vs_scsicmd(struct scsi_xfer *xs)
 		if (cb == NULL) {
 			splx(s);
 #ifdef VS_DEBUG
-			printf("%s: no free queues\n", sc->sc_dev.dv_xname);
+			printf("%s: queue for target %d is busy\n",
+			    sc->sc_dev.dv_xname, slp->target);
 #endif
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			return;
 		}
-		cqep = vs_getcqe(sc);
-		if (cqep == 0) {
+		if (vs_getcqe(sc, &cqep, &iopb)) {
+			/* XXX shouldn't happen since our queue is ready */
 			splx(s);
 #ifdef VS_DEBUG
 			printf("%s: no free CQEs\n", sc->sc_dev.dv_xname);
@@ -434,7 +453,6 @@ vs_scsicmd(struct scsi_xfer *xs)
 			splx(s);
 			return;
 		}
-		iopb = vs_getiopb(sc);
 	}
 
 #ifdef VS_DEBUG
@@ -482,7 +500,7 @@ vs_load_command(struct vs_softc *sc, struct vs_cb *cb, bus_addr_t cqep,
 	/*
 	 * We should only provide the iopb len if the controller is not
 	 * able to compute it from the SCSI command group.
-	 * Note that it has no knowledge of group 2.
+	 * Note that Jaguar has no knowledge of group 2.
 	 */
 	switch ((cmd->opcode) >> 5) {
 	case 0:
@@ -490,6 +508,11 @@ vs_load_command(struct vs_softc *sc, struct vs_cb *cb, bus_addr_t cqep,
 	case 5:
 		iopb_len = 0;
 		break;
+	case 2:
+		if (sc->sc_bid == COUGAR)
+			iopb_len = 0;
+		else
+		/* FALLTHROUGH */
 	default:
 		iopb_len = IOPB_SHORT_SIZE + ((cmdlen + 1) >> 1);
 		break;
@@ -500,7 +523,12 @@ vs_load_command(struct vs_softc *sc, struct vs_cb *cb, bus_addr_t cqep,
 	    (u_int8_t *)cmd, cmdlen);
 	vs_write(2, iopb + IOPB_CMD, IOPB_PASSTHROUGH);
 	vs_write(2, iopb + IOPB_UNIT,
-	  IOPB_UNIT_VALUE(!!(slp->flags & SDEV_2NDBUS), slp->target, slp->lun));
+	  vs_unit_value(slp->flags & SDEV_2NDBUS, slp->target, slp->lun));
+#ifdef VS_DEBUG
+	printf("%s: target %d lun %d encoded as %04x\n",
+	    __func__, slp->target, slp->lun, (u_int)
+	    vs_unit_value(slp->flags & SDEV_2NDBUS, slp->target, slp->lun));
+#endif
 	vs_write(1, iopb + IOPB_NVCT, sc->sc_nvec);
 	vs_write(1, iopb + IOPB_EVCT, sc->sc_evec);
 
@@ -524,6 +552,8 @@ vs_load_command(struct vs_softc *sc, struct vs_cb *cb, bus_addr_t cqep,
 	option = 0;
 	if (flags & SCSI_DATA_OUT)
 		option |= M_OPT_DIR;
+	if (slp->adapter_buswidth > 8)
+		option |= M_OPT_GO_WIDE;
 
 	if (flags & SCSI_POLL) {
 		vs_write(2, iopb + IOPB_OPTION, option);
@@ -554,6 +584,9 @@ vs_chksense(struct vs_cb *cb, struct scsi_xfer *xs)
 	int rc;
 	int s;
 
+#ifdef VS_DEBUG
+	printf("%s: target %d\n", slp->target);
+#endif
 	/* ack and clear the error */
 	if (CRSW & M_CRSW_ER)
 		CRB_CLR_ER;
@@ -595,44 +628,64 @@ vs_chksense(struct vs_cb *cb, struct scsi_xfer *xs)
 	splx(s);
 }
 
-bus_addr_t
-vs_getcqe(struct vs_softc *sc)
+int
+vs_getcqe(struct vs_softc *sc, bus_addr_t *cqep, bus_addr_t *iopbp)
 {
-	bus_addr_t cqep;
+	bus_addr_t cqe, iopb;
 	int qhdp;
 
 	qhdp = mcsb_read(2, MCSB_QHDP);
-	cqep = sh_CQE(qhdp);
+	cqe = sh_CQE(qhdp);
+	iopb = sh_IOPB(qhdp);
 
-	if (vs_read(2, cqep + CQE_QECR) & M_QECR_GO) {
-		/* should never happen */
-		return 0;
+	if (vs_read(2, cqe + CQE_QECR) & M_QECR_GO) {
+		/* queue still in use, should never happen */
+		return EAGAIN;
 	}
 
 	if (++qhdp == NUM_CQE)
 		qhdp = 0;
 	mcsb_write(2, MCSB_QHDP, qhdp);
 
-	vs_bzero(cqep, CQE_SIZE);
-	return cqep;
+	vs_bzero(cqe, CQE_SIZE);
+	*cqep = cqe;
+	*iopbp = iopb;
+	return (0);
 }
 
-bus_addr_t
-vs_getiopb(struct vs_softc *sc)
+int
+vs_identify(struct vs_channel *vc, int cid)
 {
-	bus_addr_t iopb;
-	int qhdp;
+	vc->vc_width = 0;
+	vc->vc_type = VCT_UNKNOWN;
 
-	/*
-	 * Since we are always invoked after vs_getcqe(), qhdp has already
-	 * been incremented...
-	 */
-	qhdp = mcsb_read(2, MCSB_QHDP);
-	if (--qhdp < 0)
-		qhdp = NUM_CQE - 1;
+	if (vc->vc_id < 0)
+		return (0);
 
-	iopb = sh_IOPB(qhdp);
-	return iopb;
+	switch (cid) {
+	case 0x00:
+		vc->vc_width = 8;
+		vc->vc_type = VCT_SE;
+		break;
+	case 0x01:
+		vc->vc_width = 8;
+		vc->vc_type = VCT_DIFFERENTIAL;
+		break;
+	case 0x02:
+		vc->vc_width = 16;
+		vc->vc_type = VCT_SE;
+		break;
+	case 0x03:
+	case 0x0e:
+		vc->vc_width = 16;
+		vc->vc_type = VCT_DIFFERENTIAL;
+		break;
+	default:
+		vc->vc_id = -1;
+		return (0);
+	}
+
+	return (vc->vc_width - 1);
 }
 
 int
@@ -688,15 +741,12 @@ vs_initialize(struct vs_softc *sc)
 	}
 
 	/* initialize channels id */
-	sc->sc_id[0] = csb_read(1, CSB_PID);
-	sc->sc_id[1] = -1;
-	switch (dbid = csb_read(1, CSB_DBID)) {
+	sc->sc_channel[0].vc_id = csb_read(1, CSB_PID);
+	sc->sc_channel[1].vc_id = -1;
+	switch (id = csb_read(1, CSB_DBID)) {
 	case DBID_SCSI2:
 	case DBID_SCSI:
-#if 0
-		printf("daughter board, ");
-#endif
-		sc->sc_id[1] = csb_read(1, CSB_SID);
+		sc->sc_channel[1].vc_id = csb_read(1, CSB_SID);
 		break;
 	case DBID_PRINTER:
 		printf(", printer port");
@@ -772,8 +822,8 @@ vs_initialize(struct vs_softc *sc)
 	cib_write(2, CIB_BURST, 0);
 	cib_write(2, CIB_NVECT, (sc->sc_ipl << 8) | sc->sc_nvec);
 	cib_write(2, CIB_EVECT, (sc->sc_ipl << 8) | sc->sc_evec);
-	cib_write(2, CIB_PID, 0x08);	/* XXX default */
-	cib_write(2, CIB_SID, 0x08);
+	cib_write(2, CIB_PID, 0x08);	/* use default */
+	cib_write(2, CIB_SID, 0x08);	/* use default */
 	cib_write(2, CIB_CRBO, sh_CRB);
 	cib_write(4, CIB_SELECT, SELECTION_TIMEOUT);
 	cib_write(4, CIB_WQTIMO, 4);
@@ -829,8 +879,13 @@ vs_initialize(struct vs_softc *sc)
 		mce_iopb_write(2, WQCF_ILVL, 0 /* sc->sc_ipl */);
 		mce_iopb_write(2, WQCF_WORKQ, i);
 		mce_iopb_write(2, WQCF_WOPT, M_WOPT_FE | M_WOPT_IWQ);
-		mce_iopb_write(2, WQCF_SLOTS, JAGUAR_MAX_Q_SIZ);
+		if (sc->sc_bid == JAGUAR)
+			mce_iopb_write(2, WQCF_SLOTS, JAGUAR_MAX_Q_SIZ);
 		mce_iopb_write(4, WQCF_CMDTO, 4);	/* 1 second */
+		if (sc->sc_bid != JAGUAR)
+			mce_iopb_write(2, WQCF_UNIT,
+			    vs_unit_value(i > sc->sc_channel[0].vc_width,
+				i - sc->sc_channel[0].vc_width, 0));
 
 		vs_bzero(sh_MCE, CQE_SIZE);
 		mce_write(2, CQE_IOPB_ADDR, sh_MCE_IOPB);
@@ -966,14 +1021,16 @@ fail:
 void
 vs_resync(struct vs_softc *sc)
 {
+	struct vs_channel *vc;
 	int bus, target;
 
 	for (bus = 0; bus < 2; bus++) {
-		if (sc->sc_id[bus] < 0)
+		vc = &sc->sc_channel[bus];
+		if (vc->vc_id < 0 || vc->vc_width == 0)
 			break;
 
-		for (target = 0; target < 8; target++) {
-			if (target == sc->sc_id[bus])
+		for (target = 0; target < vc->vc_width; target++) {
+			if (target == vc->vc_id)
 				continue;
 
 			/* Wait until we can use the command queue entry. */
@@ -987,7 +1044,7 @@ vs_resync(struct vs_softc *sc)
 			mce_iopb_write(1, DRCF_EVCT, sc->sc_evec);
 			mce_iopb_write(2, DRCF_ILVL, 0);
 			mce_iopb_write(2, DRCF_UNIT,
-			    IOPB_UNIT_VALUE(bus, target, 0));
+			    vs_unit_value(bus, target, 0));
 
 			vs_bzero(sh_MCE, CQE_SIZE);
 			mce_write(2, CQE_IOPB_ADDR, sh_MCE_IOPB);
@@ -1051,9 +1108,9 @@ vs_reset(struct vs_softc *sc, int bus)
 	splx(s);
 }
 
-/* free a cb; invoked at splbio */
+/* free a cb and thaw its queue; invoked at splbio */
 static __inline__ void
-vs_free(struct vs_cb *cb)
+vs_free(struct vs_softc *sc, struct vs_cb *cb)
 {
 	if (cb->cb_q != 0)
 		thaw_queue(sc, cb->cb_q);
@@ -1068,8 +1125,10 @@ vs_nintr(void *vsc)
 	struct vs_cb *cb;
 	int s;
 
+#if 0	/* bogus! */
 	if ((CRSW & CONTROLLER_ERROR) == CONTROLLER_ERROR)
 		return vs_eintr(sc);
+#endif
 
 	/* Got a valid interrupt on this device */
 	s = splbio();
@@ -1081,8 +1140,17 @@ vs_nintr(void *vsc)
 	 * to point to address 0.  But then, we should have caught
 	 * the controller error above.
 	 */
-	if (cb != NULL)
+	if (cb != NULL) {
+#ifdef VS_DEBUG
+		printf("%s: interrupt for queue %d\n", __func__, cb->cb_q);
+#endif
 		vs_scsidone(sc, cb);
+	} else {
+#ifdef VS_DEBUG
+		printf("%s: normal interrupt but no related command???\n",
+		    __func__);
+#endif
+	}
 
 	/* ack the interrupt */
 	if (CRSW & M_CRSW_ER)
@@ -1113,6 +1181,10 @@ vs_eintr(void *vsc)
 	cb = (struct vs_cb *)crb_read(4, CRB_CTAG);
 	xs = cb != NULL ? cb->cb_xs : NULL;
 
+#ifdef VS_DEBUG
+	printf("%s: error interrupt, crsw %04x, error %d, queue %d\n",
+	    __func__, (u_int)crsw, ecode, cb ? cb->cb_q : -1);
+#endif
 	vs_print_addr(sc, xs);
 
 	if (crsw & M_CRSW_RST) {
@@ -1178,7 +1250,6 @@ struct vs_cb *
 vs_find_queue(struct scsi_link *sl, struct vs_softc *sc)
 {
 	struct vs_cb *cb;
-	static u_int last = 0;
 	u_int q;
 
 	/*
@@ -1209,13 +1280,17 @@ vs_unit_value(int bus, int tgt, int lun)
 	if (bus != 0)
 		unit |= M_UNIT_BUS;	/* secondary bus */
 
-		if ((cb = &sc->sc_cb[q])->cb_xs == NULL) {
-			last = q;
-			return (cb);
-		}
+	if (tgt > 7 || lun > 7) {
+		/* extended addressing (for Cougar II-Wide only) */
+		unit |= M_UNIT_EXT;
+		unit |= (lun & 0x3f) << 8;
+		unit |= (tgt & 0x0f) << 0;
+	} else {
+		unit |= lun << 3;
+		unit |= tgt << 0;
 	}
 
-	return (NULL);
+	return (unit);
 }
 
 /*
@@ -1225,70 +1300,11 @@ vs_unit_value(int bus, int tgt, int lun)
 void
 vs_build_sg_list(struct vs_softc *sc, struct vs_cb *cb, bus_addr_t iopb)
 {
-	int i;
-
-	if (sg->level > 0) {
-		for (i = 0; sg->down[i] && i < MAX_SG_ELEMENTS; i++) {
-			vs_dealloc_scatter_gather(sg->down[i]);
-		}
-	}
-	FREE(sg, M_DEVBUF);
-}
-
-void
-vs_link_sg_element(sg_list_element_t *element, vaddr_t phys_add, int len)
-{
-	element->count.bytes = len;
-	element->addrlo = phys_add;
-	element->addrhi = phys_add >> 16;
-	element->link = 0; /* FALSE */
-	element->transfer_type = NORMAL_TYPE;
-	element->memory_type = LONG_TRANSFER;
-	element->address_modifier = ADRM_EXT_S_D;
-}
-
-void
-vs_link_sg_list(sg_list_element_t *list, vaddr_t phys_add, int elements)
-{
-	list->count.scatter.gather = elements;
-	list->addrlo = phys_add;
-	list->addrhi = phys_add >> 16;
-	list->link = 1;	   /* TRUE */
-	list->transfer_type = NORMAL_TYPE;
-	list->memory_type = LONG_TRANSFER;
-	list->address_modifier = ADRM_EXT_S_D;
-}
-
-M328_SG
-vs_build_memory_structure(struct vs_softc *sc, struct scsi_xfer *xs,
-     bus_addr_t iopb)
-{
-	M328_SG sg;
-	vaddr_t starting_point_virt, starting_point_phys, point_virt,
-	point1_phys, point2_phys, virt;
-	unsigned int len;
-	int level;
-
-	sg = NULL;	/* Hopefully we need no scatter/gather list */
-
-	/*
-	 * We have the following things:
-	 *	virt			va of the virtual memory block
-	 *	len			length of the virtual memory block
-	 *	starting_point_virt	va of the physical memory block
-	 *	starting_point_phys	pa of the physical memory block
-	 *	point_virt		va of the virtual memory
-	 *				    we are checking at the moment
-	 *	point1_phys		pa of the physical memory
-	 *				    we are checking at the moment
-	 *	point2_phys		pa of another physical memory
-	 *				    we are checking at the moment
-	 */
-
-	level = 0;
-	virt = starting_point_virt = (vaddr_t)xs->data;
-	point1_phys = starting_point_phys = kvtop((vaddr_t)xs->data);
-	len = xs->datalen;
+	struct vs_sg_entry *sgentry;
+	int segno;
+	bus_dma_segment_t *seg = cb->cb_dmamap->dm_segs;
+	bus_size_t sgoffs;
+	bus_size_t len;
 
 	/*
 	 * No need to build a scatter/gather chain if there is only

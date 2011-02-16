@@ -40,7 +40,7 @@
 #include <dev/cons.h>
 
 #include <machine/mvme188.h>
-#include <mvme88k/dev/sysconreg.h>
+#include <mvme88k/dev/sysconvar.h>
 #include <mvme88k/dev/dartreg.h>
 
 #ifdef	DDB
@@ -220,7 +220,6 @@ dartattach(struct device *parent, struct device *self, void *aux)
 	dart_write(sc, DART_ACR, BDSET2 | CCLK16 | IPDCDIB | IPDCDIA);
 	dart_write(sc, DART_IMR, sc->sc_sv_reg.sv_imr);
 	dart_write(sc, DART_OPCR, OPSET);
-	dart_write(sc, DART_IVR, SYSCON_VECT + SYSCV_SCC);
 
 	/* enable interrupts */
 	sc->sc_ih.ih_fn = dartintr;
@@ -228,7 +227,7 @@ dartattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih.ih_wantframe = 0;
 	sc->sc_ih.ih_ipl = ca->ca_ipl;
 
-	sysconintr_establish(SYSCV_SCC, &sc->sc_ih, self->dv_xname);
+	sysconintr_establish(INTSRC_DUART, &sc->sc_ih, self->dv_xname);
 	printf("\n");
 }
 
@@ -763,11 +762,14 @@ dartrint(struct dartsoftc *sc, int port)
 		} else {
 			if (sr & (FRERR|PERR|ROVRN)) { /* errors */
 				if (sr & ROVRN)
-					printf("dart0: receiver overrun port %c\n", 'A' + port);
+					printf("%s: receiver overrun port %c\n",
+					    sc->sc_dev.dv_xname, 'A' + port);
 				if (sr & FRERR)
-					printf("dart0: framing error port %c\n", 'A' + port);
+					printf("%s: framing error port %c\n",
+					    sc->sc_dev.dv_xname, 'A' + port);
 				if (sr & PERR)
-					printf("dart0: parity error port %c\n", 'A' + port);
+					printf("%s: parity error port %c\n",
+					    sc->sc_dev.dv_xname, 'A' + port);
 				/* clear error state */
 				dart_write(sc, ptaddr + DART_CRA, ERRRESET);
 			} else {
@@ -839,7 +841,7 @@ dartintr(void *arg)
 		 * ready change on a disabled port). This should not happen,
 		 * but we have to claim the interrupt anyway.
 		 */
-#ifdef DIAGNOSTIC
+#if defined(DIAGNOSTIC) && !defined(MULTIPROCESSOR)
 		printf("dartintr: spurious interrupt, isr %x imr %x\n",
 		    isr, imr);
 #endif
@@ -905,7 +907,7 @@ dartcnprobe(struct consdev *cp)
 		return;
 
 	cp->cn_dev = makedev(maj, CONS_PORT);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lcg.c,v 1.9 2006/08/22 21:05:03 miod Exp $	*/
-=======
 /*	$OpenBSD: lcg.c,v 1.15 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -162,32 +158,39 @@ lcg_match(struct device *parent, void *vcf, void *aux)
 	struct vsbus_softc *sc = (void *)parent;
 	struct vsbus_attach_args *va = aux;
 	vaddr_t cfgreg;
-	int depth, missing;
+	int depth;
+#ifdef PARANOIA
+	int missing;
 	volatile u_int8_t *ch;
+#endif
+
+	if (va->va_paddr != LCG_REG_ADDR)
+		return (0);
 
 	switch (vax_boardtype) {
 	default:
 		return (0);
 
 	case VAX_BTYP_46:
-	case VAX_BTYP_48:
-		if (va->va_paddr != LCG_REG_ADDR)
+		if ((vax_confdata & 0x40) == 0)
 			return (0);
-
+		break;
+	case VAX_BTYP_48:
+		/* KA48 can't boot without the frame buffer board */
 		break;
 	}
 
 	/*
-	 * Check the configuration register.
-	 * This is done to sort out empty frame buffer slots, since the video
-	 * memory test sometimes passes!
+	 * Check the configuration register. The frame buffer might not be
+	 * an lcg board.
 	 */
 	cfgreg = vax_map_physmem(LCG_CONFIG_ADDR, 1);
 	depth = lcg_probe_screen(*(volatile u_int32_t *)cfgreg, NULL, NULL);
 	vax_unmap_physmem(cfgreg, 1);
-	if (depth < 0)	/* no frame buffer */
+	if (depth < 0)	/* no lcg frame buffer */
 		return (0);
 
+#ifdef PARANOIA
 	/*
 	 * Check for video memory.
 	 * We can not use badaddr() on these models.
@@ -205,6 +208,7 @@ lcg_match(struct device *parent, void *vcf, void *aux)
 	vax_unmap_physmem((vaddr_t)ch, 1);
 	if (missing != 0)
 		return (0);
+#endif
 
 	sc->sc_mask = 0x04;	/* XXX - should be generated */
 	scb_fake(0x120, 0x15);
@@ -251,12 +255,11 @@ lcg_attach(struct device *parent, struct device *self, void *aux)
 		ss = &lcg_consscr;
 		sc->sc_nscreens = 1;
 	} else {
-		ss = malloc(sizeof(struct lcg_screen), M_DEVBUF, M_NOWAIT);
+		ss = malloc(sizeof(*ss), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (ss == NULL) {
 			printf(": can not allocate memory\n");
 			return;
 		}
-		bzero(ss, sizeof(struct lcg_screen));
 
 		ss->ss_cfg = cfg;
 		ss->ss_depth = lcg_probe_screen(ss->ss_cfg,
@@ -703,7 +706,7 @@ lcg_resetcmap(struct lcg_screen *ss)
  */
 
 int	lcgcnprobe(void);
-void	lcgcninit(void);
+int	lcgcninit(void);
 
 int
 lcgcnprobe()
@@ -711,15 +714,16 @@ lcgcnprobe()
 	extern vaddr_t virtual_avail;
 	u_int32_t cfg;
 	vaddr_t tmp;
+#ifdef PARANOIA
 	volatile u_int8_t *ch;
-<<<<<<< HEAD
-=======
 	int rc;
 #endif
->>>>>>> origin/master
 
 	switch (vax_boardtype) {
 	case VAX_BTYP_46:
+		if ((vax_confdata & 0x40) == 0)
+			break;	/* no frame buffer */
+		/* FALLTHROUGH */
 	case VAX_BTYP_48:
 		if ((vax_confdata & 0x100) != 0)
 			break; /* doesn't use graphics console */
@@ -731,8 +735,9 @@ lcgcnprobe()
 		iounaccess(tmp, 1);
 
 		if (lcg_probe_screen(cfg, NULL, NULL) <= 0)
-			break;	/* unsupported configuration */
+			break;	/* no lcg or unsupported configuration */
 
+#ifdef PARANOIA
 		/*
 		 * Check for video memory.
 		 * We can not use badaddr() on these models.
@@ -749,6 +754,7 @@ lcgcnprobe()
 		iounaccess(tmp, 1);
 		if (rc == 0)
 			break;
+#endif
 
 		return (1);
 
@@ -764,7 +770,7 @@ lcgcnprobe()
  * Because it's called before the VM system is initialized, virtual memory
  * for the framebuffer can be stolen directly without disturbing anything.
  */
-void
+int
 lcgcninit()
 {
 	struct lcg_screen *ss = &lcg_consscr;
@@ -799,11 +805,6 @@ lcgcninit()
 
 	virtual_avail = round_page(virtual_avail);
 
-<<<<<<< HEAD
-	/* this had better not fail as we can't recover there */
-	if (lcg_setup_screen(ss) != 0)
-		panic(__func__);
-=======
 	/* this had better not fail */
 	if (lcg_setup_screen(ss) != 0) {
 		iounaccess((vaddr_t)ss->ss_lut, LCG_LUT_SIZE / VAX_NBPG);
@@ -812,9 +813,10 @@ lcgcninit()
 		virtual_avail = ova;
 		return (1);
 	}
->>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
 	wsdisplay_cnattach(&lcg_stdscreen, ri, 0, 0, defattr);
+
+	return (0);
 }

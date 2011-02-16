@@ -1,4 +1,4 @@
-/*	$OpenBSD: maskbits.h,v 1.5 2005/01/14 22:39:26 miod Exp $	*/
+/*	$OpenBSD: maskbits.h,v 1.6 2006/08/05 09:58:56 miod Exp $	*/
 /*	$NetBSD: maskbits.h,v 1.3 1997/03/31 07:37:28 scottr Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile,v 1.7 2003/06/10 02:42:58 brad Exp $
-=======
 #	$OpenBSD: Makefile,v 1.16 2010/08/25 12:53:38 jsing Exp $
->>>>>>> origin/master
 #	$NetBSD: Makefile,v 1.2 2001/03/04 14:50:05 mrg Exp $
 
 CURDIR=	${.CURDIR}
@@ -16,10 +12,6 @@ WARNS=		0
 
 PROG?=		ofwboot
 NOMAN=		ja, man!
-<<<<<<< HEAD
-SRCS=		srt0.s Locore.c boot.c ofdev.c alloc.c net.c netif_of.c vers.c
-.PATH:		${S}/arch/sparc64/sparc64
-=======
 
 .PATH:		${S}/arch/sparc64/sparc64
 SRCS=		srt0.s Locore.c alloc.c boot.c elf64_exec.c net.c netif_of.c \
@@ -27,7 +19,6 @@ SRCS=		srt0.s Locore.c alloc.c boot.c elf64_exec.c net.c netif_of.c \
 
 .PATH:		${S}/lib/libkern/arch/sparc64 ${S}/lib/libkern
 SRCS+=		strlcpy.c strcmp.c strlcat.c strlen.c
->>>>>>> origin/master
 
 CWARNFLAGS+=	-Wno-main
 AFLAGS+=	-Wa,-Av9a
@@ -47,7 +38,7 @@ RELOC=		100000
 
 ENTRY=		_start
 
-CLEANFILES+=	vers.c sparc machine
+CLEANFILES+=	sparc machine
 
 CPPFLAGS+=	-I${CURDIR}/../../.. -I${CURDIR}/../../../.. -I${CURDIR} -I.
 CPPFLAGS+=	-DRELOC=0x${RELOC}
@@ -58,17 +49,14 @@ CPPFLAGS+=	-DRELOC=0x${RELOC}
 CPPFLAGS+=	-DSPARC_BOOT_UFS
 #CPPFLAGS+=	-DSPARC_BOOT_HSFS
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ -h machine ] || ln -s ${.CURDIR}/../../include machine)
 .endif
 
-vers.c: version
-	sh ${S}/conf/newvers.sh ${CURDIR}/version "sparc64" ${NEWVERSWHAT}
-
-${PROG}: ${OBJS} ${LIBSA} ${LIBZ} ${LIBKERN}
+${PROG}: ${OBJS} ${LIBSA} ${LIBZ}
 	${LD} -N -Ttext ${RELOC} -e ${ENTRY} -o ${PROG} \
-	    ${OBJS} -L${LIBSADIR} ${LIBSA} -L${LIBKERNDIR} ${LIBKERN} \
+	    ${OBJS} -L${LIBSADIR} ${LIBSA} \
 	    -L${LIBZDIR} ${LIBZ}
 
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<

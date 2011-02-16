@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530var.h,v 1.6 2004/09/29 19:17:43 miod Exp $	*/
+/*	$OpenBSD: z8530var.h,v 1.7 2005/12/28 22:39:52 miod Exp $	*/
 /*	$NetBSD: z8530var.h,v 1.4 2000/11/08 23:41:42 eeh Exp $	*/
 
 /*

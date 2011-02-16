@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_net.h,v 1.3 2002/03/14 01:26:38 millert Exp $ */
+/*	$OpenBSD: dev_net.h,v 1.4 2003/08/20 00:26:00 deraadt Exp $ */
 
 int	net_open(struct open_file *, char *);
 int	net_close(struct open_file *);

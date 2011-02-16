@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: param.h,v 1.37 2006/08/12 17:54:38 krw Exp $	*/
-=======
 /*	$OpenBSD: param.h,v 1.43 2010/07/11 14:09:10 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: param.h,v 1.29 1997/03/10 22:50:37 pk Exp $ */
 
 /*
@@ -96,15 +92,7 @@
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than the software page size, and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11		/* log2(MCLBYTES) */
-#define	MCLBYTES	(1 << MCLSHIFT)	/* enough for whole Ethernet packet */
-#define	MCLOFSET	(MCLBYTES - 1)
 #define	NMBCLUSTERS	2048		/* map size, max cluster allocation */
 
 #define MSGBUFSIZE	4096		/* cannot be changed without great pain */
@@ -119,10 +107,6 @@
 /* pages ("clicks") to disk blocks */
 #define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
-
-/* pages to bytes */
-#define	ctob(x)		((x) << PGSHIFT)
-#define	btoc(x)		(((x) + PGOFSET) >> PGSHIFT)
 
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)

@@ -36,7 +36,7 @@
 #include <machine/bus.h>
 
 /*
- *  Structure holding all misc config information.
+ * Structure holding all misc config information.
  */
 struct cpu_info;
 

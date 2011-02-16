@@ -1,3 +1,3 @@
-/* $OpenBSD: spinlock.h,v 1.3 2004/04/26 14:31:11 miod Exp $ */
+/* $OpenBSD: spinlock.h,v 1.1.1.1 2006/04/18 10:56:57 miod Exp $ */
 /* public domain */
 #include <m88k/spinlock.h>

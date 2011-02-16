@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_machdep.h,v 1.2 2006/10/06 21:16:57 mickey Exp $	*/
-=======
 /*	$OpenBSD: db_machdep.h,v 1.5 2010/11/27 19:57:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_machdep.h,v 1.12 2006/05/10 06:24:03 skrll Exp $	*/
 
 /*
@@ -61,15 +57,6 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define	IS_BREAKPOINT_TRAP(type, code)	((type) == EXPEVT_TRAPA)
 #define	IS_WATCHPOINT_TRAP(type, code)	(0) /* XXX (msaitoh) */
 
-<<<<<<< HEAD
-#define	inst_load(ins)		0
-#define	inst_store(ins)		0
-
-/* macro for checking if a thread has used floating-point */
-#define	db_thread_fp_used(thread)	((thread)->pcb->ims.ifps != 0)
-
-=======
->>>>>>> origin/master
 int kdb_trap(int, int, db_regs_t *);
 void db_machine_init (void);
 boolean_t inst_call(int);

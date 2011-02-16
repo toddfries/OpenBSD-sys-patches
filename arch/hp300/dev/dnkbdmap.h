@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: dnkbdmap.h,v 1.1 2005/04/22 11:59:11 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *

@@ -128,8 +128,8 @@ process_write_regs(struct proc *p, struct reg *regs)
 	tf->tf_ret1 = regs->r_regs[29];
 	tf->tf_sp   = regs->r_regs[30];
 	tf->tf_r31  = regs->r_regs[31];
-	tf->tf_iioq_head = regs->r_pc | 3;
-	tf->tf_iioq_tail = regs->r_npc | 3;
+	tf->tf_iioq_head = regs->r_pc | HPPA_PC_PRIV_USER;
+	tf->tf_iioq_tail = regs->r_npc | HPPA_PC_PRIV_USER;
 
 	return (0);
 }
@@ -149,8 +149,8 @@ process_write_fpregs(struct proc *p, struct fpreg *fpregs)
 int
 process_set_pc(struct proc *p, caddr_t addr)
 {
-	p->p_md.md_regs->tf_iioq_tail = 4 +
-	    (p->p_md.md_regs->tf_iioq_head = (register_t)addr | 3);
+	p->p_md.md_regs->tf_iioq_head = (register_t)addr | HPPA_PC_PRIV_USER;
+	p->p_md.md_regs->tf_iioq_tail = p->p_md.md_regs->tf_iioq_head + 4;
 
 	return (0);
 }

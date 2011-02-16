@@ -1,5 +1,5 @@
 #	from: @(#)Makefile	8.1 (Berkeley) 6/10/93
-#	$OpenBSD: Makefile,v 1.1 2001/06/26 21:58:00 smurph Exp $
+#	$OpenBSD: Makefile,v 1.2 2001/08/25 20:36:54 miod Exp $
 
 SIZE?=	size
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pmap.c,v 1.5 2007/03/05 21:47:55 miod Exp $	*/
-=======
 /*	$OpenBSD: pmap.c,v 1.17 2010/12/14 20:24:25 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pmap.c,v 1.55 2006/08/07 23:19:36 tsutsui Exp $	*/
 
 /*-
@@ -442,17 +438,18 @@ __pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t va, vm_prot_t prot)
 	int s;
 	int have_writeable = 0;
 
-	if (prot & VM_PROT_WRITE)
-		have_writeable = 1;
-
 	s = splvm();
 	if (SH_HAS_VIRTUAL_ALIAS) {
 		/* Remove all other mapping on this physical page */
 		pvh = &pg->mdpage;
-		SLIST_FOREACH(pv, &pvh->pvh_head, pv_link) {
-			if (pv->pv_prot & VM_PROT_WRITE) {
-				have_writeable = 1;
-				break;
+		if (prot & VM_PROT_WRITE)
+			have_writeable = 1;
+		else {
+			SLIST_FOREACH(pv, &pvh->pvh_head, pv_link) {
+				if (pv->pv_prot & VM_PROT_WRITE) {
+					have_writeable = 1;
+					break;
+				}
 			}
 		}
 		if (have_writeable != 0) {
@@ -624,7 +621,7 @@ void
 pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	boolean_t kernel = pmap == pmap_kernel();
-	pt_entry_t *pte, entry;
+	pt_entry_t *pte, entry, protbits;
 	vaddr_t va;
 	paddr_t pa;
 	struct vm_page *pg;
@@ -636,6 +633,22 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 	if ((prot & VM_PROT_READ) == VM_PROT_NONE) {
 		pmap_remove(pmap, sva, eva);
 		return;
+	}
+
+	switch (prot) {
+	default:
+		panic("pmap_protect: invalid protection mode %x", prot);
+		/* NOTREACHED */
+	case VM_PROT_READ:
+		/* FALLTHROUGH */
+	case VM_PROT_READ | VM_PROT_EXECUTE:
+		protbits = kernel ? PG_PR_KRO : PG_PR_URO;
+		break;
+	case VM_PROT_READ | VM_PROT_WRITE:
+		/* FALLTHROUGH */
+	case VM_PROT_ALL:
+		protbits = kernel ? PG_PR_KRW : PG_PR_URW;
+		break;
 	}
 
 	for (va = sva; va < eva; va += PAGE_SIZE) {
@@ -651,54 +664,38 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 				sh_dcache_wbinv_range_index(va, PAGE_SIZE);
 		}
 
-		entry &= ~PG_PR_MASK;
-		switch (prot) {
-		default:
-			panic("pmap_protect: invalid protection mode %x", prot);
-			/* NOTREACHED */
-		case VM_PROT_READ:
-			/* FALLTHROUGH */
-		case VM_PROT_READ | VM_PROT_EXECUTE:
-			entry |= kernel ? PG_PR_KRO : PG_PR_URO;
-			break;
-		case VM_PROT_READ | VM_PROT_WRITE:
-			/* FALLTHROUGH */
-		case VM_PROT_ALL:
-			entry |= kernel ? PG_PR_KRW : PG_PR_URW;
-			break;
-		}
+		entry = (entry & ~PG_PR_MASK) | protbits;
 		*pte = entry;
 
 		if (pmap->pm_asid != -1)
 			sh_tlb_update(pmap->pm_asid, va, entry);
 
-		if (pmap_extract(pmap, va, &pa)) {
-			pg = PHYS_TO_VM_PAGE(pa);
-			if (pg == NULL)
-				continue;
-			pvh = &pg->mdpage;
+		pa = entry & PG_PPN;
+		pg = PHYS_TO_VM_PAGE(pa);
+		if (pg == NULL)
+			continue;
+		pvh = &pg->mdpage;
 
-			while ((pv = SLIST_FIRST(&pvh->pvh_head)) != NULL) {
-				if (pv->pv_pmap == pmap && pv->pv_va == va) {
-					break;
-				}
+		while ((pv = SLIST_FIRST(&pvh->pvh_head)) != NULL) {
+			if (pv->pv_pmap == pmap && pv->pv_va == va) {
+				break;
+			}
+			pmap_remove(pv->pv_pmap, pv->pv_va,
+			    pv->pv_va + PAGE_SIZE);
+		}
+		/* the matching pv is first in the list */
+		SLIST_FOREACH(pv, &pvh->pvh_head, pv_link) {
+			if (pv->pv_pmap == pmap && pv->pv_va == va) {
+				pv->pv_prot = prot;
+				break;
+			}
+		}
+		/* remove the rest of the elements */
+		head = SLIST_FIRST(&pvh->pvh_head);
+		if (head != NULL)
+			while((pv = SLIST_NEXT(head, pv_link))!= NULL)
 				pmap_remove(pv->pv_pmap, pv->pv_va,
 				    pv->pv_va + PAGE_SIZE);
-			}
-			/* the matching pv is first in the list */
-			SLIST_FOREACH(pv, &pvh->pvh_head, pv_link) {
-				if (pv->pv_pmap == pmap && pv->pv_va == va) {
-					pv->pv_prot = prot;
-					break;
-				}
-			}
-			/* remove the rest of the elements */
-			head = SLIST_FIRST(&pvh->pvh_head);
-			if (head != NULL)
-				while((pv = SLIST_NEXT(head, pv_link))!= NULL)
-					pmap_remove(pv->pv_pmap, pv->pv_va,
-					    pv->pv_va + PAGE_SIZE);
-		}
 	}
 }
 
@@ -1040,7 +1037,7 @@ __pmap_pte_load(pmap_t pmap, vaddr_t va, int flags)
 
 /*
  * int __pmap_asid_alloc(void):
- *	Allocate new ASID. if all ASID is used, steal from other process.
+ *	Allocate new ASID. if all ASID are used, steal from other process.
  */
 int
 __pmap_asid_alloc()

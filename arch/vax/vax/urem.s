@@ -1,4 +1,4 @@
-/*	$OpenBSD: urem.s,v 1.3 2003/06/02 23:27:59 millert Exp $	*/
+/*	$OpenBSD: urem.s,v 1.4 2005/05/06 18:55:02 miod Exp $	*/
 /*	$NetBSD: urem.s,v 1.2 1994/10/26 08:03:37 cgd Exp $	*/
 
 /*-

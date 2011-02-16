@@ -1,4 +1,4 @@
-/*	$OpenBSD$ */
+/*	$OpenBSD: outstr.c,v 1.2 1996/05/16 02:25:42 chuck Exp $ */
 
 /*
  * bug routines -- assumes that the necessary sections of memory

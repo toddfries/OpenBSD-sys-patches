@@ -147,7 +147,7 @@ i80321intc_calc_mask(void)
 		/* Enable interrupts at lower levels */
 		for (i = 0; i < min; i++)
 			i80321intc_imask[i] |= (1 << irq);
-		/* Diable interrupts at upper levels */
+		/* Disable interrupts at upper levels */
 		for (;i <= IPL_HIGH; i++)
 			i80321intc_imask[i] &= ~(1 << irq);
 	}
@@ -398,3 +398,20 @@ i80321_irq_handler(void *arg)
 	if(softint_pending & i80321intc_smask[current_ipl_level])
 		i80321intc_do_pending();
 }
+
+#ifdef DIAGNOSTIC
+void
+i80321_splassert_check(int wantipl, const char *func)
+{
+	int oldipl = current_ipl_level;
+
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		i80321intc_setipl(wantipl);
+	}
+}
+#endif

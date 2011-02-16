@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.1.1.1 2006/05/09 18:11:25 miod Exp $
+#	$OpenBSD: AV400,v 1.2 2006/05/20 12:06:18 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.

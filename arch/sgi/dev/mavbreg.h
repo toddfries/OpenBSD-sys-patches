@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: mavbreg.h,v 1.1 2005/01/02 19:25:41 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis

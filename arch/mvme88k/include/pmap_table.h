@@ -1,3 +1,3 @@
-/* $OpenBSD: pmap_table.h,v 1.10 2003/10/05 20:27:46 miod Exp $ */
+/* $OpenBSD: pmap_table.h,v 1.11 2004/07/25 11:06:42 miod Exp $ */
 /* public domain */
 #include <m88k/pmap_table.h>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_trace.c,v 1.3 2006/11/04 00:01:24 mickey Exp $	*/
-=======
 /*	$OpenBSD: db_trace.c,v 1.5 2008/06/22 21:02:11 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_trace.c,v 1.19 2006/01/21 22:10:59 uwe Exp $	*/
 
 /*-

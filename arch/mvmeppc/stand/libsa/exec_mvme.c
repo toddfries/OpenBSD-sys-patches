@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_mvme.c,v 1.7 2004/01/28 23:46:40 miod Exp $	*/
+/*	$OpenBSD: exec_mvme.c,v 1.8 2004/01/29 21:30:04 miod Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1990, 1993

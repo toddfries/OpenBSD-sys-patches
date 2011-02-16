@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: _types.h,v 1.7 2009/11/04 19:14:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1990, 1993

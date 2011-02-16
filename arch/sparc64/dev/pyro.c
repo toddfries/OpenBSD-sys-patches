@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pyro.c,v 1.6 2007/04/01 21:41:09 kettenis Exp $	*/
-=======
 /*	$OpenBSD: pyro.c,v 1.20 2010/12/05 15:15:14 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -96,13 +92,10 @@ bus_space_tag_t _pyro_alloc_bus_tag(struct pyro_pbm *, const char *,
     int, int, int);
 bus_dma_tag_t pyro_alloc_dma_tag(struct pyro_pbm *);
 
-<<<<<<< HEAD
-=======
 int pyro_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t pyro_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void pyro_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
 
->>>>>>> origin/master
 int pyro_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 int _pyro_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t,
     bus_size_t, int, bus_space_handle_t *);
@@ -128,7 +121,8 @@ pyro_match(struct device *parent, void *match, void *aux)
 		return (0);
 
 	str = getpropstring(ma->ma_node, "compatible");
-	if (strcmp(str, "pciex108e,80f0") == 0)
+	if (strcmp(str, "pciex108e,80f0") == 0 ||
+	    strcmp(str, "pciex108e,80f8") == 0)
 		return (1);
 
 	return (0);
@@ -139,6 +133,7 @@ pyro_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pyro_softc *sc = (struct pyro_softc *)self;
 	struct mainbus_attach_args *ma = aux;
+	char *str;
 	int busa;
 
 	sc->sc_node = ma->ma_node;
@@ -165,6 +160,10 @@ pyro_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	str = getpropstring(ma->ma_node, "compatible");
+	if (strcmp(str, "pciex108e,80f8") == 0)
+		sc->sc_oberon = 1;
+
 	pyro_init(sc, busa);
 }
 
@@ -175,10 +174,9 @@ pyro_init(struct pyro_softc *sc, int busa)
 	struct pcibus_attach_args pba;
 	int *busranges = NULL, nranges;
 
-	pbm = (struct pyro_pbm *)malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT);
+	pbm = malloc(sizeof(*pbm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (pbm == NULL)
 		panic("pyro: can't alloc pyro pbm");
-	bzero(pbm, sizeof(*pbm));
 
 	pbm->pp_sc = sc;
 	pbm->pp_bus_a = busa;
@@ -223,12 +221,9 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pba.pba_dmat = pbm->pp_dmat;
 	pba.pba_memt = pbm->pp_memt;
 	pba.pba_iot = pbm->pp_iot;
-<<<<<<< HEAD
-=======
 	pba.pba_pc->conf_size = pyro_conf_size;
 	pba.pba_pc->conf_read = pyro_conf_read;
 	pba.pba_pc->conf_write = pyro_conf_write;
->>>>>>> origin/master
 	pba.pba_pc->intr_map = pyro_intr_map;
 
 	free(busranges, M_DEVBUF);
@@ -278,8 +273,6 @@ pyro_print(void *aux, const char *p)
 	return (QUIET);
 }
 
-<<<<<<< HEAD
-=======
 int
 pyro_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
 {
@@ -300,7 +293,6 @@ pyro_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	    (PCITAG_OFFSET(tag) << 4) + reg, data);
 }
 
->>>>>>> origin/master
 /*
  * Bus-specific interrupt mapping
  */
@@ -370,11 +362,10 @@ _pyro_alloc_bus_tag(struct pyro_pbm *pbm, const char *name, int ss,
 	struct pyro_softc *sc = pbm->pp_sc;
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("pyro: could not allocate bus tag");
 
-	bzero(bt, sizeof *bt);
 	snprintf(bt->name, sizeof(bt->name), "%s-pbm_%s(%d/%2.2x)",
 	    sc->sc_dv.dv_xname, name, ss, asi);
 
@@ -395,12 +386,10 @@ pyro_alloc_dma_tag(struct pyro_pbm *pbm)
 	struct pyro_softc *sc = pbm->pp_sc;
 	bus_dma_tag_t dt, pdt = sc->sc_dmat;
 
-	dt = (bus_dma_tag_t)malloc(sizeof(struct sparc_bus_dma_tag),
-	    M_DEVBUF, M_NOWAIT);
+	dt = malloc(sizeof(*dt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (dt == NULL)
 		panic("pyro: could not alloc dma tag");
 
-	bzero(dt, sizeof(*dt));
 	dt->_cookie = pbm;
 	dt->_parent = pdt;
 	dt->_dmamap_create	= pyro_dmamap_create;
@@ -425,7 +414,6 @@ pyro_alloc_chipset(struct pyro_pbm *pbm, int node, pci_chipset_tag_t pc)
 	memcpy(npc, pc, sizeof *pc);
 	npc->cookie = pbm;
 	npc->rootnode = node;
-	npc->tagshift = 4;	/* PCIe has a larger config space */
 	return (npc);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: consinit.c,v 1.9 2004/09/13 20:31:25 deraadt Exp $	*/
+/*	$OpenBSD: consinit.c,v 1.13 2008/01/23 16:37:57 jsing Exp $	*/
 /*	$NetBSD: consinit.c,v 1.9 2000/10/20 05:32:35 mrg Exp $	*/
 
 /*-
@@ -46,10 +46,8 @@
 
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
-#include <machine/bsd_openprom.h>
 #include <machine/conf.h>
 #include <machine/cpu.h>
-#include <machine/eeprom.h>
 #include <machine/psl.h>
 #include <machine/z8530var.h>
 #include <machine/sparc64.h>
@@ -95,7 +93,7 @@ prom_cnprobe(struct consdev *cd)
 		if (cdevsw[maj].d_open == pconsopen)
 			break;
 	cd->cn_dev = makedev(maj, 0);
-	cd->cn_pri = CN_INTERNAL;
+	cd->cn_pri = CN_MIDPRI;
 #endif
 }
 

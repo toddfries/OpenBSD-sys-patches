@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: float.h,v 1.5 2002/05/11 14:46:41 millert Exp $	*/
-=======
 /*	$OpenBSD: float.h,v 1.7 2008/07/21 20:50:55 martynas Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: float.h,v 1.5 1998/10/10 02:13:55 matt Exp $	*/
 
 /*

@@ -47,11 +47,13 @@ extern	u_int32_t pfsr_six[];
 void
 m8820x_setup_board_config()
 {
+	extern u_int32_t pfsr_save[];
 	struct m8820x_cmmu *cmmu;
 	struct scm_cpuconfig scc;
 	int type, cpu_num, cpu_cmmu_num, cmmu_num, cmmu_per_cpu;
 	volatile u_int *cr;
 	u_int32_t whoami;
+	u_int32_t *m8820x_pfsr;
 
 	/*
 	 * First, find if any CPU0 CMMU is a 88204. If so, we can
@@ -231,6 +233,14 @@ done:
 			}
 		}
 	}
+
+	/*
+	 * Patch the exception handling code to invoke the correct pfsr
+	 * analysis chunk.
+	 */
+	pfsr_save[0] = 0xc4000000 |
+	    (((vaddr_t)m8820x_pfsr + 4 - (vaddr_t)pfsr_save) >> 2);
+	pfsr_save[1] = m8820x_pfsr[0];
 }
 
 /*

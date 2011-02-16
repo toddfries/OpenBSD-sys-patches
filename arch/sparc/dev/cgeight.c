@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgeight.c,v 1.27 2006/12/03 16:38:12 miod Exp $	*/
-=======
 /*	$OpenBSD: cgeight.c,v 1.30 2010/06/07 19:43:45 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cgeight.c,v 1.13 1997/05/24 20:16:04 pk Exp $	*/
 
 /*

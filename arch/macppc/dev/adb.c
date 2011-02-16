@@ -1668,7 +1668,7 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	adb_reinit();
 
 	mac_intr_establish(parent, ca->ca_intr[0], IST_LEVEL, IPL_HIGH,
-	    adb_intr, sc, "adb");
+	    adb_intr, sc, sc->sc_dev.dv_xname);
 
 	/* init powerpc globals which control RTC functionality */
 	time_read = adb_read_date_time;
@@ -1709,7 +1709,7 @@ adbattach(struct device *parent, struct device *self, void *aux)
 		if (OF_getprop(node, "name", name, sizeof name) <= 0)
 			continue;
 		if (strcmp(name, "pmu-i2c") == 0) {
-			nca.ca_name = "pi2c";
+			nca.ca_name = "piic";
 			nca.ca_node = node;
 			config_found(self, &nca, NULL);
 		}

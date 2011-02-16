@@ -291,9 +291,10 @@ const struct cfattach tpms_ca = {
 
 /* Try to match the device at some uhidev. */
 
-USB_MATCH(tpms)
+int
+tpms_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(tpms, uaa);
+	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
 	usb_device_descriptor_t *udd;
 	int i;
@@ -319,9 +320,11 @@ USB_MATCH(tpms)
 
 /* Attach the device. */
 
-USB_ATTACH(tpms)
+void
+tpms_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(tpms, sc, uaa);
+	struct tpms_softc *sc = (struct tpms_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
 	struct wsmousedev_attach_args a;
 	struct tpms_dev *pd;
@@ -367,7 +370,7 @@ USB_ATTACH(tpms)
 	    sc->sc_y_sensors <= 0 || sc->sc_y_sensors > TPMS_Y_SENSORS) {
 		printf(": unexpected sensors configuration (%d:%d)\n",
 		    sc->sc_x_sensors, sc->sc_y_sensors);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	sc->sc_hdev.sc_intr = tpms_intr;
@@ -379,15 +382,14 @@ USB_ATTACH(tpms)
 	a.accessops = &tpms_accessops;
 	a.accesscookie = sc;
 	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
 /* Detach the device. */
 
-USB_DETACH(tpms)
+int
+tpms_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(tpms, sc);
+	struct tpms_softc *sc = (struct tpms_softc *)self;
 	int ret;
 
 	/* The wsmouse driver does all the work. */
@@ -419,7 +421,7 @@ tpms_activate(struct device *self, int act)
 
 /* Enable the device. */
 
-Static int
+int
 tpms_enable(void *v)
 {
 	struct tpms_softc *sc = v;
@@ -440,7 +442,7 @@ tpms_enable(void *v)
 
 /* Disable the device. */
 
-Static void
+void
 tpms_disable(void *v)
 {
 	struct tpms_softc *sc = v;
@@ -452,8 +454,8 @@ tpms_disable(void *v)
 	uhidev_close(&sc->sc_hdev);
 }
 
-Static int
-tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, usb_proc_ptr p)
+int
+tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, struct proc *p)
 {
 	switch (cmd) {
 	case WSMOUSEIO_GTYPE:
@@ -470,7 +472,7 @@ tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, usb_proc_ptr p)
 
 /* Handle interrupts. */
 
-Static void
+void
 tpms_intr(struct uhidev *addr, void *ibuf, unsigned int len)
 {
 	struct tpms_softc *sc = (struct tpms_softc *)addr;
@@ -578,7 +580,7 @@ reorder_sample(struct tpms_softc *sc, unsigned char *to, unsigned char *from)
 
 /* XXX Could we report something useful in dz? */
 
-Static int
+int
 compute_delta(struct tpms_softc *sc, int *dx, int *dy, int *dz, 
 	      uint32_t * buttons)
 {
@@ -645,7 +647,7 @@ compute_delta(struct tpms_softc *sc, int *dx, int *dy, int *dz,
  * and the raw position.
  */
 
-Static int
+int
 smooth_pos(int pos_old, int pos_raw, int noise)
 {
 	int ad, delta;
@@ -672,7 +674,7 @@ smooth_pos(int pos_old, int pos_raw, int noise)
  * is in [0, (n_sensors - 1) * factor - 1].
  */
 
-Static int
+int
 detect_pos(int *sensors, int n_sensors, int threshold, int fact,
 	   int *pos_ret, int *fingers_ret)
 {

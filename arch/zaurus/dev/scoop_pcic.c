@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: scoop_pcic.c,v 1.3 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.h,v 1.27 2006/12/24 20:30:35 miod Exp $	*/
-=======
 /*	$OpenBSD: cpu.h,v 1.33 2010/11/27 19:41:45 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpu.h,v 1.24 1997/03/15 22:25:15 pk Exp $ */
 
 /*
@@ -71,12 +67,10 @@
  */
 
 #include <machine/psl.h>
-<<<<<<< HEAD
-=======
 #include <machine/reg.h>
 #include <machine/intr.h>
->>>>>>> origin/master
 #include <sparc/sparc/intreg.h>
+#include <sparc/sparc/cpuvar.h>
 
 /*
  * Arguments to hardclock, softclock and gatherstats encapsulate the

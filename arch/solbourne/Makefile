@@ -1,14 +1,3 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile,v 1.2 2005/05/06 11:16:48 pedro Exp $
-#	$NetBSD: Makefile,v 1.4 1996/03/25 22:48:09 mrg Exp $
-
-#
-# Makefile for solbourne links, tags file
-
-S=${.CURDIR}/../..
-.include "$S/kern/Make.tags.inc"
-
-=======
 #	$OpenBSD: Makefile,v 1.6 2010/11/12 17:11:44 deraadt Exp $
 
 S=	${.CURDIR}/../..
@@ -21,7 +10,6 @@ TAGS=	${.CURDIR}/tags
 
 NOPROG=
 NOMAN=
->>>>>>> origin/master
 SUBDIR=
 
 # config the fattest kernel we can find into a temporary dir

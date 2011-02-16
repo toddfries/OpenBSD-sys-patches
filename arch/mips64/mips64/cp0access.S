@@ -37,7 +37,6 @@
 #include <machine/asm.h>
 #include <machine/cpu.h>
 #include <machine/regnum.h>
-#include <machine/pte.h>
 
 #include "assym.h"
 
@@ -93,6 +92,7 @@ LEAF(enableintr, 0)
 	nop
 	or	v1, v0, SR_INT_ENAB
 	mtc0	v1, COP_0_STATUS_REG	# enable all interrupts
+	ITLBNOPFIX
 	j	ra
 	nop
 END(enableintr)
@@ -102,16 +102,7 @@ LEAF(disableintr, 0)
 	nop
 	and	v1, v0, ~SR_INT_ENAB
 	mtc0	v1, COP_0_STATUS_REG	# disable all interrupts
-	nop				# Propagate new status
-	nop
-	nop
-	nop				# so int's are off before
-	nop				# return to caller.
-	nop				# total 10 nops to handle
-	nop				# RM7000 1.x bug.
-	nop
-	nop
-	nop
+	ITLBNOPFIX			# Propagate new status
 	j	ra
 	nop
 END(disableintr)
@@ -124,6 +115,8 @@ LEAF(updateimask, 0)
 	cfc0	v0, COP_0_ICR
 	li	v1, ~IC_INT_MASK
 	and	v1, v0
+	sll	v0, a0, 8
+	and	v0, IC_INT_MASK
 	and	v0, a0, IC_INT_MASK
 	or	v1, v0
 	ctc0	v1, COP_0_ICR
@@ -131,8 +124,7 @@ LEAF(updateimask, 0)
 	mfc0	v0, COP_0_STATUS_REG
 	li	v1, ~SR_INT_MASK
 	and	v1, v0
-	sll	v0, a0, 8
-	and	v0, SR_INT_MASK
+	and	v0, a0, SR_INT_MASK
 	or	v1, v0
 	mtc0	v1, COP_0_STATUS_REG
 	ITLBNOPFIX
@@ -145,16 +137,7 @@ END(updateimask)
 
 LEAF(setsr, 0)
 	mtc0	a0, COP_0_STATUS_REG
-	nop				# total 10 nops to handle
-	nop				# RM7000 1.x bug.
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
-	nop
+	ITLBNOPFIX
 	jr	ra
 	move	v0, a0
 END(setsr)

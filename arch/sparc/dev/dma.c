@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dma.c,v 1.22 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: dma.c,v 1.28 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dma.c,v 1.46 1997/08/27 11:24:16 bouyer Exp $ */
 
 /*
@@ -352,7 +348,7 @@ dma_reset(sc, isledma)
 
 	csr |= D_RESET;				/* reset DMA */
 	DMACSR(sc) = csr;
-	DELAY(200);				/* > 10 Sbus clocks(?) */
+	DELAY(200);				/* > 10 SBus clocks(?) */
 
 	/*DMAWAIT1(sc); why was this here? */
 	DMACSR(sc) &= ~D_RESET;			/* de-assert reset line */

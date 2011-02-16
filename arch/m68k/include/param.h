@@ -111,28 +111,12 @@
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than CLBYTES (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define	MSIZE		256		/* size of an mbuf */
-
-#ifndef	MCLSHIFT
-#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
-#endif	/* MCLSHIFT */
-
-#define	MCLBYTES	(1 << MCLSHIFT)
-#define	MCLOFSET	(MCLBYTES - 1)
 #define	NMBCLUSTERS	1024		/* map size, max cluster allocation */
 
 /* pages ("clicks") to disk blocks */
 #define	ctod(x)		((x) << (PAGE_SHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PAGE_SHIFT - DEV_BSHIFT))
-
-/* pages to bytes */
-#define	ctob(x)		((x) << PAGE_SHIFT)
-#define	btoc(x)		(((x) + PAGE_MASK) >> PAGE_SHIFT)
 
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)

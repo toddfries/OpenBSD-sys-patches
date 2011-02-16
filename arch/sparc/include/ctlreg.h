@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.6 2000/02/18 16:12:26 art Exp $	*/
+/*	$OpenBSD: ctlreg.h,v 1.7 2003/06/02 23:27:54 millert Exp $	*/
 /*	$NetBSD: ctlreg.h,v 1.15 1997/07/20 18:55:03 pk Exp $ */
 
 /*

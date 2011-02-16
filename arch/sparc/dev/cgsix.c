@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgsix.c,v 1.37 2006/12/03 16:38:13 miod Exp $	*/
-=======
 /*	$OpenBSD: cgsix.c,v 1.43 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cgsix.c,v 1.33 1997/08/07 19:12:30 pk Exp $ */
 
 /*

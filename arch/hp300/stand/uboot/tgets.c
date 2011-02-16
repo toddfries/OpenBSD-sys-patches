@@ -1,4 +1,4 @@
-/*	$OpenBSD: tgets.c,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: tgets.c,v 1.3 2006/08/17 06:31:10 miod Exp $	*/
 /*	$NetBSD: tgets.c,v 1.4 1994/10/26 07:28:05 cgd Exp $	*/
 
 /*-

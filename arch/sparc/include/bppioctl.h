@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: bppioctl.h,v 1.3 2008/11/29 01:55:06 ray Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998 Iain Hibbert

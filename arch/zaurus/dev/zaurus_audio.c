@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zaurus_audio.c,v 1.7 2005/05/26 03:52:07 pascoe Exp $	*/
-=======
 /*	$OpenBSD: zaurus_audio.c,v 1.14 2010/09/07 16:21:41 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Christopher Pascoe <pascoe@openbsd.org>
@@ -160,7 +156,8 @@ struct audio_hw_if wm8750_hw_if = {
 	pxa2x0_i2s_mappage,
 	zaudio_get_props,
 	NULL /* zaudio_trigger_output */,
-	NULL /* zaudio_trigger_input */
+	NULL /* zaudio_trigger_input */,
+	NULL
 };
 
 static const unsigned short playback_registers[][2] = {
@@ -546,11 +543,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = mulaw_to_slinear16_mts;
+				play->sw_code = mulaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = mulaw_to_slinear16;
+				play->sw_code = mulaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -562,11 +559,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -595,11 +592,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				case 1:
 					play->factor = 4;
 					play->sw_code =
-					    ulinear8_to_linear16_mts;
+					    ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -609,10 +606,10 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_mts;
+					play->sw_code = change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16;
+					play->sw_code = change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -626,10 +623,10 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = alaw_to_slinear16_mts;
+				play->sw_code = alaw_to_slinear16_le_mts;
 			case 2:
 				play->factor = 2;
-				play->sw_code = alaw_to_slinear16;
+				play->sw_code = alaw_to_slinear16_le;
 			default:
 				return (EINVAL);
 			}
@@ -641,11 +638,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				case 1:
 					play->factor = 4;
 					play->sw_code =
-					    linear8_to_linear16_mts;
+					    linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -675,11 +672,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				case 1:
 					play->factor = 4;
 					play->sw_code =
-					    ulinear8_to_linear16_mts;
+					    ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -690,11 +687,11 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 				case 1:
 					play->factor = 2;
 					play->sw_code =
-					    change_sign16_swap_bytes_mts;
+					    swap_bytes_change_sign16_le_mts;
 					break;
 				case 2:
 					play->sw_code =
-					    change_sign16_swap_bytes;
+					    swap_bytes_change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -728,7 +725,7 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_LE:
 			if (rec->precision == 16)
-				rec->sw_code = change_sign16;
+				rec->sw_code = change_sign16_le;
 			break;
 		case AUDIO_ENCODING_ALAW:
 			rec->sw_code = ulinear8_to_alaw;
@@ -741,7 +738,7 @@ zaudio_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_BE:
 			if (rec->precision == 16)
-				rec->sw_code = swap_bytes_change_sign16;
+				rec->sw_code = change_sign16_swap_bytes_le;
 			break;
 		default:
 			return (EINVAL);

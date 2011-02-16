@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: proc.h,v 1.2 1997/08/08 08:26:39 downsj Exp $	*/
-=======
 /*	$OpenBSD: proc.h,v 1.4 2010/11/27 19:41:45 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: proc.h,v 1.3 1996/09/26 18:51:17 christos Exp $ */
 
 /*

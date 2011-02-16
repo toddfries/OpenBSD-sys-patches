@@ -122,7 +122,7 @@ do { \
 #define	PMAP_MD_MEMSIZE() \
 do { \
 	RELOC(avail_end, paddr_t) = ptoa(RELOC(physmem, int)) - \
-	    (round_page(MSGBUFSIZE) + ptoa(1)); \
+	    round_page(MSGBUFSIZE); \
 } while (0)
 
 #define	PMAP_MD_RELOC3()	/* nothing */

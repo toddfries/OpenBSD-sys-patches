@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ka410.c,v 1.8 2001/11/06 19:53:17 miod Exp $ */
-=======
 /*	$OpenBSD: ka410.c,v 1.11 2008/08/18 23:07:26 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ka410.c,v 1.21 1999/09/06 19:52:53 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.

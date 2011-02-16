@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: kcore.h,v 1.1 2006/06/11 22:09:32 miod Exp $	*/
 /* public domain */
 
 /* Keep this define consistent with VM_PHYSSEG_MAX in <machine/vmparam.h> */

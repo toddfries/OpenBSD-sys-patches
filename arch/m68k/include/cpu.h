@@ -100,7 +100,9 @@ extern	int cputype;		/* CPU on this host */
 extern	int ectype;		/* external cache on this host */
 extern	int fputype;		/* FPU on this host */
 extern	int mmutype;		/* MMU on this host */
-#endif
+
+#endif /* !_LOCORE */
+#endif /* _KERNEL */
 
 /* values for cputype */
 #define	CPU_68020	0	/* 68020 */
@@ -274,6 +276,9 @@ int	cachectl(struct proc *, int, vaddr_t, int);
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	(((struct trapframe *)((p)->p_md.md_regs))->tf_pc)
+
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
 
 #endif /* _KERNEL */
 

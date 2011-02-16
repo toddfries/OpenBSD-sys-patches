@@ -152,9 +152,6 @@ void	trap(unsigned long, unsigned long, unsigned long, unsigned long,
 void	trap_init(void);
 void	enable_nsio_ide(bus_space_tag_t);
 
-void	release_fpu(int);
-void	synchronize_fpstate(struct proc *, int);
-
 /* Multiprocessor glue; cpu.c */
 struct cpu_info;
 int	cpu_iccb_send(cpuid_t, const char *);
@@ -273,7 +270,7 @@ struct clockframe {
 /*
  * This isn't perfect; if the clock interrupt comes in before the
  * r/m/w cycle is complete, we won't be counted... but it's not
- * like this stastic has to be extremely accurate.
+ * like this statistic has to be extremely accurate.
  */
 #define	CLKF_INTR(framep)	(curcpu()->ci_intrdepth)
 

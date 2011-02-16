@@ -1,4 +1,4 @@
-/* $OpenBSD: internal_types.h,v 1.1 2004/02/01 05:09:49 drahn Exp $ */
+/* $OpenBSD: internal_types.h,v 1.2 2004/05/06 15:53:39 drahn Exp $ */
 /* Public domain */
 #ifndef _ARM_INTERNAL_TYPES_H_
 #define _ARM_INTERNAL_TYPES_H_

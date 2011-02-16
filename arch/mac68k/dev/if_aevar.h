@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: if_aevar.h,v 1.5 2007/01/22 13:17:45 martin Exp $	*/
 /*	$NetBSD: if_aevar.h,v 1.10 2005/12/11 12:18:02 christos Exp $	*/
 
 /*

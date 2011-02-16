@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atomic.h,v 1.2 2007/02/19 17:18:43 deraadt Exp $	*/
-=======
 /*	$OpenBSD: atomic.h,v 1.4 2010/04/21 03:03:26 deraadt Exp $	*/
->>>>>>> origin/master
 
 /* Public Domain */
 

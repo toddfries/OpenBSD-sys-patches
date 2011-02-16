@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ebus_mainbus.c,v 1.2 2007/04/05 19:14:00 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ebus_mainbus.c,v 1.7 2010/11/11 17:58:23 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -45,6 +41,7 @@ extern int ebus_debug;
 #define _SPARC_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 #include <machine/autoconf.h>
+#include <machine/hypervisor.h>
 #include <machine/openfirm.h>
 
 #include <dev/pci/pcivar.h>
@@ -64,12 +61,12 @@ struct cfattach ebus_mainbus_ca = {
 };
 
 
-int _ebus_mainbus_bus_map(bus_space_tag_t, bus_space_tag_t,
+int ebus_mainbus_bus_map(bus_space_tag_t, bus_space_tag_t,
     bus_addr_t, bus_size_t, int, bus_space_handle_t *);
-void *_ebus_mainbus_intr_establish(bus_space_tag_t, bus_space_tag_t,
+void *ebus_mainbus_intr_establish(bus_space_tag_t, bus_space_tag_t,
     int, int, int, int (*)(void *), void *, const char *);
 bus_space_tag_t ebus_alloc_bus_tag(struct ebus_softc *, bus_space_tag_t);
-
+void ebus_mainbus_intr_ack(struct intrhand *);
 
 int
 ebus_mainbus_match(struct device *parent, void *match, void *aux)
@@ -95,21 +92,23 @@ ebus_mainbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_node = node = ma->ma_node;
 	sc->sc_ign = INTIGN((ma->ma_upaid) << INTMAP_IGN_SHIFT);
 
-	printf(": ign %x", sc->sc_ign);
+	if (CPU_ISSUN4U) {
+		printf(": ign %x", sc->sc_ign);
 
-	for (i = 0; i < pyro_cd.cd_ndevs; i++) {
-		psc = pyro_cd.cd_devs[i];
-		if (psc && psc->sc_ign == sc->sc_ign) {
-			sc->sc_bust = psc->sc_bust;
-			sc->sc_csr = psc->sc_csr;
-			sc->sc_csrh = psc->sc_csrh;
-			break;
+		for (i = 0; i < pyro_cd.cd_ndevs; i++) {
+			psc = pyro_cd.cd_devs[i];
+			if (psc && psc->sc_ign == sc->sc_ign) {
+				sc->sc_bust = psc->sc_bust;
+				sc->sc_csr = psc->sc_csr;
+				sc->sc_csrh = psc->sc_csrh;
+				break;
+			}
 		}
-	}
 
-	if (sc->sc_csr == 0) {
-		printf(": can't find matching host bridge leaf\n");
-		return;
+		if (sc->sc_csr == 0) {
+			printf(": can't find matching host bridge leaf\n");
+			return;
+		}
 	}
 
 	printf("\n");
@@ -173,28 +172,23 @@ ebus_alloc_bus_tag(struct ebus_softc *sc, bus_space_tag_t parent)
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("could not allocate ebus bus tag");
 
-<<<<<<< HEAD
-	bzero(bt, sizeof *bt);
-	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dev.dv_xname);
-=======
 	strlcpy(bt->name, sc->sc_dev.dv_xname, sizeof(bt->name));
->>>>>>> origin/master
 	bt->cookie = sc;
 	bt->parent = parent;
 	bt->asi = parent->asi;
 	bt->sasi = parent->sasi;
-	bt->sparc_bus_map = _ebus_mainbus_bus_map;
-	bt->sparc_intr_establish = _ebus_mainbus_intr_establish;
+	bt->sparc_bus_map = ebus_mainbus_bus_map;
+	bt->sparc_intr_establish = ebus_mainbus_intr_establish;
 
 	return (bt);
 }
 
 int
-_ebus_mainbus_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
+ebus_mainbus_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
     bus_size_t size, int flags, bus_space_handle_t *hp)
 {
 	struct ebus_softc *sc = t->cookie;
@@ -245,13 +239,64 @@ _ebus_mainbus_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
 }
 
 void *
-_ebus_mainbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
+ebus_mainbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
     int level, int flags, int (*handler)(void *), void *arg, const char *what)
 {
 	struct ebus_softc *sc = t->cookie;
 	struct intrhand *ih = NULL;
 	volatile u_int64_t *intrmapptr = NULL, *intrclrptr = NULL;
 	int ino;
+
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		struct upa_reg reg;
+		u_int64_t devhandle, devino = INTINO(ihandle);
+		u_int64_t sysino;
+		int node = -1;
+		int i, err;
+
+		for (i = 0; i < sc->sc_nintmap; i++) {
+			if (sc->sc_intmap[i].cintr == ihandle) {
+				node = sc->sc_intmap[i].cnode;
+				break;
+			}
+		}
+		if (node == -1)
+			return (NULL);
+
+		if (OF_getprop(node, "reg", &reg, sizeof(reg)) != sizeof(reg))
+			return (NULL);
+		devhandle = (reg.ur_paddr >> 32) & 0x0fffffff;
+
+		err = hv_intr_devino_to_sysino(devhandle, devino, &sysino);
+		if (err != H_EOK)
+			return (NULL);
+
+		KASSERT(sysino == INTVEC(sysino));
+		ih = bus_intr_allocate(t0, handler, arg, sysino, level,
+		    NULL, NULL, what);
+		if (ih == NULL)
+			return (NULL);
+
+		intr_establish(ih->ih_pil, ih);
+		ih->ih_ack = ebus_mainbus_intr_ack;
+
+		err = hv_intr_settarget(sysino, cpus->ci_upaid);
+		if (err != H_EOK)
+			return (NULL);
+
+		/* Clear pending interrupts. */
+		err = hv_intr_setstate(sysino, INTR_IDLE);
+		if (err != H_EOK)
+			return (NULL);
+
+		err = hv_intr_setenabled(sysino, INTR_ENABLED);
+		if (err != H_EOK)
+			return (NULL);
+
+		return (ih);
+	}
+#endif
 
 	ihandle |= sc->sc_ign;
 	ino = INTINO(ihandle);
@@ -287,3 +332,13 @@ _ebus_mainbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 	return (ih);
 }
+
+#ifdef SUN4V
+
+void
+ebus_mainbus_intr_ack(struct intrhand *ih)
+{
+	hv_intr_setstate(ih->ih_number, INTR_IDLE);
+}
+
+#endif

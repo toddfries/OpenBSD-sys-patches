@@ -96,19 +96,23 @@ m187_memsize()
 void
 m187_ext_int(struct trapframe *eframe)
 {
-	int mask, level;
+	int level;
 	struct intrhand *intr;
 	intrhand_t *list;
 	int ret;
 	vaddr_t ivec;
 	u_int8_t vec;
 
-	mask = *(u_int8_t *)M187_IMASK & 0x07;
 	level = *(u_int8_t *)M187_ILEVEL & 0x07;
 
 	/* generate IACK and get the vector */
 	ivec = M187_IACK + (level << 2) + 0x03;
 	vec = *(volatile u_int8_t *)ivec;
+
+#ifdef MULTIPROCESSOR
+	if (eframe->tf_mask < IPL_SCHED)
+		__mp_lock(&kernel_lock);
+#endif
 
 	uvmexp.intrs++;
 
@@ -160,15 +164,19 @@ m187_ext_int(struct trapframe *eframe)
 	 * process any remaining data access exceptions before
 	 * returning to assembler
 	 */
-	set_psr(get_psr() | PSR_IND);
 	if (eframe->tf_dmt0 & DMT_VALID)
 		m88100_trap(T_DATAFLT, eframe);
 
 	/*
-	 * Restore the mask level to what it was when the interrupt
-	 * was taken.
+	 * Disable interrupts before returning to assembler, the spl will
+	 * be restored later.
 	 */
-	m187_setipl(mask);
+	set_psr(get_psr() | PSR_IND);
+
+#ifdef MULTIPROCESSOR
+	if (eframe->tf_mask < IPL_SCHED)
+		__mp_unlock(&kernel_lock);
+#endif
 }
 
 u_int
@@ -180,21 +188,35 @@ m187_getipl(void)
 u_int
 m187_setipl(u_int level)
 {
-	unsigned curspl;
+	u_int curspl, psr;
 
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = *(u_int8_t *)M187_IMASK & 0x07;
 	*(u_int8_t *)M187_IMASK = level;
+	/*
+	 * We do not flush the pipeline here, because interrupts are disabled,
+	 * and set_psr() will synchronize the pipeline.
+	 */
+	set_psr(psr);
 	return curspl;
 }
 
 u_int
 m187_raiseipl(u_int level)
 {
-	unsigned curspl;
+	u_int curspl, psr;
 
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	curspl = *(u_int8_t *)M187_IMASK & 0x07;
 	if (curspl < level)
 		*(u_int8_t *)M187_IMASK = level;
+	/*
+	 * We do not flush the pipeline here, because interrupts are disabled,
+	 * and set_psr() will synchronize the pipeline.
+	 */
+	set_psr(psr);
 	return curspl;
 }
 

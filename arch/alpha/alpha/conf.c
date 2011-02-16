@@ -96,6 +96,7 @@ cdev_decl(com);
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmouse.h"
+#include "wsmux.h"
 #include "midi.h"
 cdev_decl(midi);
 #include "sequencer.h"
@@ -104,6 +105,7 @@ cdev_decl(music);
 #include "spkr.h"
 cdev_decl(spkr);
 
+#include "bio.h"
 #include "lpt.h"
 cdev_decl(lpt);
 cdev_decl(prom);			/* XXX XXX XXX */
@@ -146,11 +148,11 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
-	cdev_bpftun_init(NTUN,tun),	/* 7: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 7: network tunnel */
 	cdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	cdev_disk_init(NVND,vnd),	/* 9: vnode disk driver */
 	cdev_fd_init(1,filedesc),	/* 10: file descriptor pseudo-dev */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 11: Berkeley packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 11: Berkeley packet filter */
 	cdev_tape_init(NST,st),		/* 12: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 13: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),		/* 14: SCSI autochanger */
@@ -200,7 +202,7 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),
 #endif
-	cdev_notdef(),			/* 53: ALTQ (deprecated) */
+	cdev_bio_init(NBIO,bio),	/* 53: ioctl tunnel */
 	cdev_iop_init(NIOP, iop),	/* 54: I2O IOP control interface */
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 56: devices hot plugging */

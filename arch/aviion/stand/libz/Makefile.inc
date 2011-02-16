@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile.inc,v 1.1 2006/05/16 22:48:18 miod Exp $
 
 LIB_Z_DIR=${S}/arch/aviion/stand/libz
 

@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: mcbusvar.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcbusvar.h,v 1.6 2005/12/11 12:16:17 christos Exp $ */
 
 /*

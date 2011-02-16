@@ -1,5 +1,5 @@
 #ifndef _SH_FPU_H_
-/*	$OpenBSD$	*/
+/*	$OpenBSD: fpu.h,v 1.1 2006/11/05 18:57:20 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *

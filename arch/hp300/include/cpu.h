@@ -51,6 +51,8 @@
  */
 #include <m68k/cpu.h>
 
+#ifdef _KERNEL
+
 /*
  * Get interrupt glue.
  */
@@ -101,6 +103,8 @@ extern int want_resched;	/* resched() was called */
 
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending = 1)
+
+#endif	/* _KERNEL */
 
 /*
  * CTL_MACHDEP definitions.
@@ -168,7 +172,7 @@ void	dumpconf(void);
 #define	IIOV(pa)	((int)(pa)-INTIOBASE+(int)intiobase)
 #define	IIOP(va)	((int)(va)-(int)intiobase+INTIOBASE)
 #define	IIOPOFF(pa)	((int)(pa)-INTIOBASE)
-#define	IIOMAPSIZE	btoc(INTIOTOP-INTIOBASE)	/* 2mb */
+#define	IIOMAPSIZE	atop(INTIOTOP-INTIOBASE)	/* 2mb */
 
 /*
  * HP MMU

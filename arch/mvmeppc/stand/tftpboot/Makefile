@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2003/04/10 22:42:29 millert Exp $
+#	$OpenBSD: Makefile,v 1.4 2004/01/24 21:10:55 miod Exp $
 
 SIZE?=	size
 STRIP?= strip

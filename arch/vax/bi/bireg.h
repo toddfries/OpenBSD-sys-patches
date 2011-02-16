@@ -1,4 +1,4 @@
-/*	$OpenBSD: bireg.h,v 1.4 2002/06/11 09:36:23 hugh Exp $	*/
+/*	$OpenBSD: bireg.h,v 1.5 2003/06/02 23:27:56 millert Exp $	*/
 /*	$NetBSD: bireg.h,v 1.7 2000/07/06 17:47:02 ragge Exp $	*/
 /*
  * Copyright (c) 1988 Regents of the University of California.

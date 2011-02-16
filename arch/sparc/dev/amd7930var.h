@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: amd7930var.h,v 1.6 2003/06/02 23:27:53 millert Exp $	*/
-=======
 /*	$OpenBSD: amd7930var.h,v 1.8 2009/04/10 20:53:51 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: amd7930var.h,v 1.3 1996/02/01 22:32:25 mycroft Exp $ */
 
 /*

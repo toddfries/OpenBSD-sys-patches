@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: fpu.h,v 1.1 2002/04/28 20:55:14 pvalchev Exp $	*/
 /*	$NetBSD: fpu.h,v 1.4 2001/04/26 03:10:46 ross Exp $	*/
 
 /*-

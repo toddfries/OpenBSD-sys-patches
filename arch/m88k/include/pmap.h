@@ -17,6 +17,8 @@
 
 #include <machine/mmu.h>
 
+#ifdef	_KERNEL
+
 /*
  * PMAP structure
  */
@@ -40,8 +42,6 @@ struct pmap {
 typedef struct pmap *pmap_t;
 typedef struct pv_entry *pv_entry_t;
 
-#ifdef	_KERNEL
-
 extern	pmap_t		kernel_pmap;
 extern	struct pmap	kernel_pmap_store;
 extern	caddr_t		vmmap;
@@ -63,6 +63,8 @@ void	pmap_bootstrap(paddr_t, paddr_t);
 void	pmap_bootstrap_cpu(cpuid_t);
 void	pmap_cache_ctrl(vaddr_t, vaddr_t, u_int);
 #define pmap_unuse_final(p)		/* nothing */
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+int	pmap_set_modify(pmap_t, vaddr_t);
 boolean_t pmap_unsetbit(struct vm_page *, int);
 
 int	pmap_translation_info(pmap_t, vaddr_t, paddr_t *, uint32_t *);

@@ -539,7 +539,7 @@ if (kdb_trap (type, va, frame))
 
 	/*
 	 * in case we were interrupted from the syscall gate page
-	 * treat this as we were not realy running user code no more
+	 * treat this as we were not really running user code no more
 	 * for weird things start to happen on return to the userland
 	 * and also see a note in locore.S:TLABEL(all)
 	 */

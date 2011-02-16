@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sgmap.h,v 1.5 2002/03/14 01:26:48 millert Exp $	*/
-=======
 /*	$OpenBSD: sgmap.h,v 1.7 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: sgmap.h,v 1.3 2000/05/17 21:22:18 matt Exp $ */
 
 /*-

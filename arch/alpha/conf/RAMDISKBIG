@@ -5,6 +5,9 @@
 
 machine	alpha
 
+option		SMALL_KERNEL
+option		NO_PROPOLICE
+
 # CPU Support
 option		DEC_3000_500	# Flamingo etc:	3000/[4-9]00*
 option		DEC_3000_300	# Pelican etc:	3000/300*
@@ -47,7 +50,7 @@ option		TCVERBOSE		# recognize "unknown" TC devices
 
 option		BOOT_CONFIG
 
-config	bsd	swap generic
+config	bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
 cpu*	at mainbus0
@@ -213,11 +216,9 @@ ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 
-#UNTESTED:  the following drivers are untested.
-en*	at pci?				# ENI PCI ATM (untested)
+#en*	at pci?				# ENI PCI ATM (untested)
 wb*	at pci?				# Winbond W89C840F ethernet
 an*	at pci?				# Cisco/Aironet 802.11DS
-##
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics

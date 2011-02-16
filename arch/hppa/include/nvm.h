@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvm.h,v 1.1 1998/06/23 19:45:24 mickey Exp $	*/
+/*	$OpenBSD: nvm.h,v 1.2 1998/11/23 03:28:22 mickey Exp $	*/
 
 /* 
  * Copyright (c) 1990, 1994 The University of Utah and

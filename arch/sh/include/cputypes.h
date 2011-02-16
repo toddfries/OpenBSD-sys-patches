@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: cputypes.h,v 1.2 2008/06/26 05:42:12 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cputypes.h,v 1.10 2006/01/21 00:40:36 uwe Exp $	*/
 
 /*-

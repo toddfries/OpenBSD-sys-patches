@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vigra.c,v 1.16 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: vigra.c,v 1.18 2008/12/26 22:30:21 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.

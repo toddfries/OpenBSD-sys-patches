@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: cpu.h,v 1.23 2007/03/15 10:22:30 art Exp $      */
-=======
 /*      $OpenBSD: cpu.h,v 1.36 2010/09/28 20:27:56 miod Exp $      */
->>>>>>> origin/master
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -51,10 +47,6 @@
 #include <machine/trap.h>
 #include <machine/intr.h>
 
-<<<<<<< HEAD
-#define	cpu_wait(p)
-#define	cpu_number()			0
-=======
 #include <sys/sched.h>
 struct cpu_info {
 	struct proc *ci_curproc;
@@ -81,7 +73,6 @@ struct clockframe {
         int     pc;
         int     ps;
 };
->>>>>>> origin/master
 
 /*
  * All cpu-dependent info is kept in this struct. Pointer to the
@@ -141,6 +132,10 @@ extern	int     want_resched;   /* resched() was called */
  * through trap, marking the proc as needing a profiling tick.
  */
 #define need_proftick(p) mtpr(AST_OK,PR_ASTLVL)
+
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle()	do { /* nothing */ } while (0)
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
 
 /*
  * This defines the I/O device register space size in pages.

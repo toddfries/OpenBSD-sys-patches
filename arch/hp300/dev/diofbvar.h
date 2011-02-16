@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofbvar.h,v 1.9 2006/08/09 21:23:51 miod Exp $	*/
+/*	$OpenBSD: diofbvar.h,v 1.10 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

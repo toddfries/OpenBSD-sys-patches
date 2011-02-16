@@ -47,14 +47,7 @@ struct isr {
 	struct evcount	isr_count;
 };
 
-/*
- * These four globals contain the appropriate PSL_S|PSL_IPL? values
- * to raise interupt priority to the requested level.
- */
-extern	unsigned short hp300_bioipl;
-extern	unsigned short hp300_netipl;
-extern	unsigned short hp300_ttyipl;
-extern	unsigned short hp300_vmipl;
+#define NISR		8
 
 /*
  * Interrupt "levels".  These are a more abstract representation
@@ -86,13 +79,14 @@ extern	unsigned short hp300_varpsl[NISR];
 #define	splsoft()		_splraise(PSL_S | PSL_IPL1)
 #define	splsoftclock()		splsoft()
 #define	splsoftnet()		splsoft()
-#define	splbio()		_splraise(hp300_bioipl)
-#define	splnet()		_splraise(hp300_netipl)
-#define	spltty()		_splraise(hp300_ttyipl)
+#define	splbio()		_splraise(hp300_varpsl[IPL_BIO])
+#define	splnet()		_splraise(hp300_varpsl[IPL_NET])
+#define	spltty()		_splraise(hp300_varpsl[IPL_TTY])
 #define	splclock()		_splraise(PSL_S | PSL_IPL6)
 #define	splstatclock()		_splraise(PSL_S | PSL_IPL6)
 #define	splvm()			_splraise(PSL_S | PSL_IPL5)
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
+#define	splsched()		splhigh()
 
 /* watch out for side effects */
 #define	splx(s)			((s) & PSL_IPL ? _spl((s)) : spl0())

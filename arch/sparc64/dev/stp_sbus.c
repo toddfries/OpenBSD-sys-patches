@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stp_sbus.c,v 1.6 2004/03/02 23:10:17 miod Exp $	*/
-=======
 /*	$OpenBSD: stp_sbus.c,v 1.10 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: stp4020.c,v 1.23 2002/06/01 23:51:03 lukem Exp $	*/
 
 /*-
@@ -62,6 +58,7 @@
 
 struct stp4020_sbus_softc {
 	struct stp4020_softc stp;
+	struct sparc_bus_space_tag *sc_bustag_le;
 };
 
 int	stpmatch(struct device *, void *, void *);
@@ -91,12 +88,21 @@ stpattach(parent, self, aux)
 	void *aux;
 {
 	struct sbus_attach_args *sa = aux;
+	struct stp4020_sbus_softc *ssc = (void *)self;
 	struct stp4020_softc *sc = (void *)self;
 	int node;
 	int i;
+	bus_space_tag_t bt;
 	bus_space_handle_t bh;
 
 	node = sa->sa_node;
+
+	/* Allocate little-endian bus tag */
+	ssc->sc_bustag_le = malloc(sizeof(*sa->sa_bustag), M_DEVBUF, M_NOWAIT);
+	if (ssc->sc_bustag_le == NULL)
+		panic("could not allocate stp bus tag");
+	*ssc->sc_bustag_le = *sa->sa_bustag;
+	ssc->sc_bustag_le->asi = ASI_PRIMARY_LITTLE;
 
 	/* Transfer bus tags */
 	sc->sc_bustag = sa->sa_bustag;
@@ -111,7 +117,7 @@ stpattach(parent, self, aux)
 	}
 
 	if (sa->sa_nintr != 2) {
-		printf(": expect 2 interrupt Sbus levels; got %d\n",
+		printf(": expect 2 interrupt SBus levels; got %d\n",
 		    sa->sa_nintr);
 		return;
 	}
@@ -132,7 +138,12 @@ stpattach(parent, self, aux)
 			/* Skip the PROM */
 			continue;
 
-		if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[i].sbr_slot,
+		if (i == STP4020_BANK_CTRL)
+			bt = sc->sc_bustag;
+		else
+			bt = ssc->sc_bustag_le;
+
+		if (sbus_bus_map(bt, sa->sa_reg[i].sbr_slot,
 		    sa->sa_reg[i].sbr_offset, sa->sa_reg[i].sbr_size, 0, 0,
 		    &bh) != 0) {
 			printf(": attach: cannot map registers\n");
@@ -148,11 +159,11 @@ stpattach(parent, self, aux)
 		} else if (i < STP4020_BANK_CTRL) {
 			/* banks 1-3 */
 			sc->sc_socks[0].windows[i-1].winaddr = bh;
-			sc->sc_socks[0].wintag = sc->sc_bustag;
+			sc->sc_socks[0].wintag = bt;
 		} else {
 			/* banks 5-7 */
 			sc->sc_socks[1].windows[i-5].winaddr = bh;
-			sc->sc_socks[1].wintag = sc->sc_bustag;
+			sc->sc_socks[1].wintag = bt;
 		}
 	}
 

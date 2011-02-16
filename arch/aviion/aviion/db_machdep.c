@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.1 2005/10/24 19:28:30 miod Exp $	*/
+/*	$OpenBSD: db_machdep.c,v 1.1.1.1 2006/05/09 18:08:53 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University

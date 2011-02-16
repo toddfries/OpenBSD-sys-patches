@@ -72,7 +72,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -140,35 +140,17 @@ hppa_intr_enable(register_t eiem)
 #define	splvm()		splraise(IPL_VM)
 #define	splaudio()	splraise(IPL_AUDIO)
 #define	splclock()	splraise(IPL_CLOCK)
+#define	splsched()	splraise(IPL_SCHED)
 #define	splstatclock()	splraise(IPL_STATCLOCK)
 #define	splhigh()	splraise(IPL_HIGH)
 #define	splipi()	splraise(IPL_IPI)
 #define	spl0()		spllower(IPL_NONE)
 
-<<<<<<< HEAD
-static __inline void
-softintr(u_long mask)
-{
-	register_t eiem;
-
-	__asm __volatile("mfctl	%%cr15, %0": "=r" (eiem));
-	__asm __volatile("mtctl	%r0, %cr15");
-	ipending |= mask;
-	__asm __volatile("mtctl	%0, %%cr15":: "r" (eiem));
-}
-=======
 #define	softintr(mask)	atomic_setbits_long(&curcpu()->ci_ipending, mask)
->>>>>>> origin/master
 
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))
 
-<<<<<<< HEAD
-#define	setsoftast()	(astpending = 1)
-#define	setsoftclock()	softintr(1 << (IPL_SOFTCLOCK - 1))
-#define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
-#define	setsofttty()	softintr(1 << (IPL_SOFTTTY - 1))
-=======
 #ifdef MULTIPROCESSOR
 void	 hppa_ipi_init(struct cpu_info *);
 int	 hppa_ipi_send(struct cpu_info *, u_long);
@@ -180,7 +162,6 @@ int	 hppa_ipi_broadcast(u_long);
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_disestablish(void *);
 void	 softintr_schedule(void *);
->>>>>>> origin/master
 
 #ifdef MULTIPROCESSOR
 void	 hppa_ipi_init(struct cpu_info *);

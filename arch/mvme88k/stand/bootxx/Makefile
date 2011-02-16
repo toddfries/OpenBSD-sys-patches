@@ -24,8 +24,8 @@ ALL=	${BOOTS}
 
 all: ${ALL}
 
-bootxx: ${OBJS} ${STAGE1} ${LIBS}
-	${LD} -S -N -T ${STAGE1_RELOC} ${STAGE1} -o $@ \
+bootxx: ${OBJS} ${STAGE1_CRT} ${LIBS}
+	${LD} -S -N -T ${STAGE1_RELOC} ${STAGE1_CRT} -o $@ \
 	    ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
 
 install:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dzreg.h,v 1.2 2006/07/29 17:06:27 miod Exp $	*/
+/*	$OpenBSD: dzreg.h,v 1.3 2006/07/31 18:51:06 miod Exp $	*/
 /*	$NetBSD: dzreg.h,v 1.4 1999/05/27 16:03:13 ragge Exp $ */
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.

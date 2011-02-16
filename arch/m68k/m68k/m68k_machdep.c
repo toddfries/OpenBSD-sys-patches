@@ -42,6 +42,8 @@
 #include <machine/frame.h>
 #include <machine/reg.h>
 
+struct cpu_info cpu_info_store;
+
 /*
  * Set registers on exec.
  */
@@ -90,24 +92,3 @@ child_return(arg)
 		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
-
-#ifdef DIAGNOSTIC
-void
-splassert_check(int wantipl, const char *func)
-{
-	int oldipl;
-
-	__asm __volatile ("movew sr,%0" : "=&d" (oldipl));
-
-	oldipl = PSLTOIPL(oldipl);
-
-	if (oldipl < wantipl) {
-		splassert_fail(wantipl, oldipl, func);
-		/*
-		 * If the splassert_ctl is set to not panic, raise the ipl
-		 * in a feeble attempt to reduce damage.
-		 */
-		_spl(PSL_S | IPLTOPSL(wantipl));
-	}
-}
-#endif

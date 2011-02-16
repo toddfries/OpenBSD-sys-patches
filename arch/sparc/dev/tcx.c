@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tcx.c,v 1.29 2007/02/18 18:40:35 miod Exp $	*/
-=======
 /*	$OpenBSD: tcx.c,v 1.45 2010/05/13 20:35:43 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tcx.c,v 1.8 1997/07/29 09:58:14 fair Exp $ */
 
 /*

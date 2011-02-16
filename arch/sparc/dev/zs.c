@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zs.c,v 1.42 2005/07/08 12:38:31 miod Exp $	*/
-=======
 /*	$OpenBSD: zs.c,v 1.48 2010/07/10 19:32:24 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: zs.c,v 1.50 1997/10/18 00:00:40 gwr Exp $	*/
 
 /*-
@@ -515,7 +511,7 @@ zs_set_modes(cs, cflag)
 	/*
 	 * Output hardware flow control on the chip is horrendous:
 	 * if carrier detect drops, the receiver is disabled, and if
-	 * CTS drops, the transmitter is stoped IN MID CHARACTER!
+	 * CTS drops, the transmitter is stopped IN MID CHARACTER!
 	 * Therefore, NEVER set the HFC bit, and instead use the
 	 * status interrupt to detect CTS changes.
 	 */
@@ -782,7 +778,7 @@ zscnprobe(cn)
 	struct consdev *cn;
 {
 	cn->cn_dev = makedev(zs_major, zstty_unit);
-	cn->cn_pri = CN_REMOTE;
+	cn->cn_pri = CN_HIGHPRI;
 }
 
 void
@@ -861,7 +857,7 @@ promcnprobe(cn)
 	struct consdev *cn;
 {
 	cn->cn_dev = makedev(0, 0);
-	cn->cn_pri = CN_INTERNAL;
+	cn->cn_pri = CN_MIDPRI;
 }
 
 void

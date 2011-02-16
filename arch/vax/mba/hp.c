@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hp.c,v 1.15 2004/02/15 02:45:46 tedu Exp $ */
-=======
 /*	$OpenBSD: hp.c,v 1.23 2010/09/22 06:40:25 krw Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -62,7 +58,6 @@
 #include <machine/pte.h>
 #include <machine/mtpr.h>
 #include <machine/cpu.h>
-#include <machine/rpb.h>
 
 #include <vax/mba/mbavar.h>
 #include <vax/mba/mbareg.h>
@@ -87,10 +82,10 @@ enum	xfer_action hpfinish(struct mba_device *, int, int *);
 int	hpopen(dev_t, int, int);
 int	hpclose(dev_t, int, int);
 int	hpioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	hpdump(dev_t, caddr_t, caddr_t, size_t);
+int	hpdump(dev_t, daddr64_t, caddr_t, size_t);
 int	hpread(dev_t, struct uio *);
 int	hpwrite(dev_t, struct uio *);
-int	hpsize(dev_t);
+daddr64_t hpsize(dev_t);
 
 struct	cfattach hp_ca = {
 	sizeof(struct hp_softc), hpmatch, hpattach
@@ -171,7 +166,7 @@ hpattach(parent, self, aux)
 		/*printf(": %s", msg);*/
 	}
 	printf(": %.*s, size = %d sectors\n",
-	    (int)sizeof(dl->d_typename), dl->d_typename, dl->d_secperunit);
+	    (int)sizeof(dl->d_typename), dl->d_typename, DL_GETDSIZE(dl));
 	/*
 	 * check if this was what we booted from.
 	 */
@@ -198,7 +193,7 @@ hpstrategy(bp)
 		goto done;
 
 	bp->b_rawblkno =
-	    bp->b_blkno + lp->d_partitions[DISKPART(bp->b_dev)].p_offset;
+	    bp->b_blkno + DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)]);
 	bp->b_cylinder = bp->b_rawblkno / lp->d_secpercyl;
 
 	s = splbio();
@@ -448,7 +443,7 @@ hpattn(md)
 }
 
 
-int
+daddr64_t
 hpsize(dev)
 	dev_t	dev;
 {
@@ -459,7 +454,7 @@ hpsize(dev)
 		return -1;
 
 	sc = hp_cd.cd_devs[unit];
-	size = sc->sc_disk.dk_label->d_partitions[DISKPART(dev)].p_size *
+	size = DL_GETPSIZE(&sc->sc_disk.dk_label->d_partitions[DISKPART(dev)]) *
 	    (sc->sc_disk.dk_label->d_secsize / DEV_BSIZE);
 
 	return size;
@@ -468,7 +463,8 @@ hpsize(dev)
 int
 hpdump(dev, a1, a2, size)
 	dev_t	dev;
-	caddr_t	a1, a2;
+	daddr64_t a1;
+	caddr_t a2;
 	size_t	size;
 {
 	printf("hpdump: Not implemented yet.\n");

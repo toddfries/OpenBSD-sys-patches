@@ -43,13 +43,6 @@ lint:
 
 .include <bsd.prog.mk>
 
-### find out what to use for libkern
-KERN_AS=	library
-KERNDST=	${.CURDIR}/../libkern/${__objdir}
-.include "${.CURDIR}/../libkern/Makefile.inc"
-LIBKERN=	${KERNLIB}
-
-${PROG}.sym: ${OBJS} ${LIBKERN}
-	${LD} -Ttext ${BOOT_RELOC} -N -e start -o ${PROG}.sym ${OBJS} \
-	    ${LIBKERN}
+${PROG}.sym: ${OBJS}
+	${LD} -Ttext ${BOOT_RELOC} -N -e start -o ${PROG}.sym ${OBJS}
 	size ${PROG}.sym

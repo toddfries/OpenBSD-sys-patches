@@ -193,6 +193,12 @@ typedef struct arc_mem {
 	u_int32_t	PageCount;	/* Number of pages */
 } arc_mem_t;
 
+typedef struct arc_mem64 {
+	MEMORYTYPE	Type;		/* Memory chunk type */
+	u_int64_t	BasePage;	/* Page no, first page */
+	u_int64_t	PageCount;	/* Number of pages */
+} arc_mem64_t;
+
 typedef caddr_t arc_time_t; /* XXX */
 
 typedef struct arc_dsp_stat {
@@ -426,7 +432,7 @@ void bios_ident(void);
 void bios_display_info(int *, int *, int *, int *);
 
 /*
- *  Direct ARC-Bios calls.
+ * Direct ARC-BIOS calls.
  */
 long Bios_Load(char *, u_long, u_long, u_long *);
 long Bios_Invoke(u_long, u_long, u_long, char **, char **);
@@ -463,5 +469,4 @@ long Bios_SetFileInformation(u_long, u_long, u_long);
 void Bios_FlushAllCaches(void);
 long Bios_TestUnicodeCharacter(u_long, u_int16_t);
 arc_dsp_stat_t *Bios_GetDisplayStatus(u_long);
-
 

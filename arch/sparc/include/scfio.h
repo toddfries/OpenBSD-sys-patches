@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scfio.h,v 1.1 1999/07/25 23:49:37 jason Exp $	*/
-=======
 /*	$OpenBSD: scfio.h,v 1.3 2009/11/02 22:31:50 sobrado Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

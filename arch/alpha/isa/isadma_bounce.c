@@ -148,12 +148,11 @@ isadma_bounce_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	/*
 	 * Allocate our cookie.
 	 */
-	if ((cookiestore = malloc(cookiesize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL) {
+	if ((cookiestore = malloc(cookiesize, M_DEVBUF, (flags & BUS_DMA_NOWAIT)
+	    ? (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL) {
 		error = ENOMEM;
 		goto out;
 	}
-	memset(cookiestore, 0, cookiesize);
 	cookie = (struct isadma_bounce_cookie *)cookiestore;
 	cookie->id_flags = cookieflags;
 	map->_dm_cookie = cookie;

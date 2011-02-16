@@ -59,8 +59,6 @@ extern int	bootdevlun;	/* dev_lun of boot device */
 extern int	bootpart;	/* boot partition (disk) */
 extern int	bootbus;	/* scsi bus (disk) */
 
-extern struct	device *bootdv; /* boot device */
-
 vaddr_t	mapiodev(paddr_t, int);
 void	unmapiodev(vaddr_t, int);
 

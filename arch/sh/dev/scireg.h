@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: scireg.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
 /* $NetBSD: scireg.h,v 1.8 2003/07/01 11:49:37 uwe Exp $ */
 
 /*-

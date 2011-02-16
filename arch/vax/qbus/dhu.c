@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dhu.c,v 1.11 2004/07/07 23:10:45 deraadt Exp $	*/
-=======
 /*	$OpenBSD: dhu.c,v 1.19 2010/09/20 06:33:48 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dhu.c,v 1.19 2000/06/04 06:17:01 matt Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.

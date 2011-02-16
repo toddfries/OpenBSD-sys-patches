@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: comkbd_ebus.c,v 1.17 2005/05/14 15:25:20 miod Exp $	*/
-=======
 /*	$OpenBSD: comkbd_ebus.c,v 1.20 2009/01/11 16:12:15 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

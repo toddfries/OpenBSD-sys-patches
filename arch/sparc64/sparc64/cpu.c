@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.c,v 1.18 2007/01/07 18:13:41 kettenis Exp $	*/
-=======
 /*	$OpenBSD: cpu.c,v 1.56 2011/01/13 22:55:33 matthieu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -68,45 +64,41 @@
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
+#include <machine/hypervisor.h>
+#include <machine/openfirm.h>
 #include <machine/pmap.h>
+#include <machine/sparc64.h>
 
 #include <sparc64/sparc64/cache.h>
+
+#include <sparc64/dev/starfire.h>
 
 /* This is declared here so that you must include a CPU for the cache code. */
 struct cacheinfo cacheinfo = {
 	us_dcache_flush_page
 };
 
-<<<<<<< HEAD
-/* Our exported CPU info; we have only one for now. */  
-struct cpu_info cpu_info_store;
-=======
 void (*cpu_start_clock)(void);
->>>>>>> origin/master
 
 /* Linked list of all CPUs in system. */
 struct cpu_info *cpus = NULL;
+
+struct cpu_info *alloc_cpuinfo(struct mainbus_attach_args *);
 
 /* The following are used externally (sysctl_hw). */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[100];
 
-struct	proc *fpproc;
-int	foundfpu;
-int	want_ast;
-extern	int want_resched;
-
 /* The CPU configuration driver. */
-static void cpu_attach(struct device *, struct device *, void *);
-int  cpu_match(struct device *, void *, void *);
+int cpu_match(struct device *, void *, void *);
+void cpu_attach(struct device *, struct device *, void *);
 
 struct cfattach cpu_ca = {
 	sizeof(struct device), cpu_match, cpu_attach
 };
 
-extern struct cfdriver cpu_cd;
-
-static char *fsrtoname(int, int, int, char *, size_t);
+void cpu_init(struct cpu_info *ci);
+void cpu_hatch(void);
 
 int sparc64_cpuspeed(int *);
 
@@ -121,8 +113,6 @@ void hummingbird_init(struct cpu_info *ci);
 #define	IU_IMPL(v)	((((u_int64_t)(v))&VER_IMPL) >> VER_IMPL_SHIFT)
 #define	IU_VERS(v)	((((u_int64_t)(v))&VER_MASK) >> VER_MASK_SHIFT)
 
-<<<<<<< HEAD
-=======
 struct cpu_info *
 alloc_cpuinfo(struct mainbus_attach_args *ma)
 {
@@ -200,7 +190,6 @@ alloc_cpuinfo(struct mainbus_attach_args *ma)
 	return (cpi);
 }
 
->>>>>>> origin/master
 int
 cpu_match(parent, vcf, aux)
 	struct device *parent;
@@ -208,11 +197,15 @@ cpu_match(parent, vcf, aux)
 	void *aux;
 {
 	struct mainbus_attach_args *ma = aux;
-	struct cfdata *cf = (struct cfdata *)vcf;
+#ifndef MULTIPROCESSOR
+	int portid;
+#endif
+	char buf[32];
 
-<<<<<<< HEAD
-	return (strcmp(cf->cf_driver->cd_name, ma->ma_name) == 0);
-=======
+	if (OF_getprop(ma->ma_node, "device_type", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "cpu") != 0)
+		return (0);
+
 #ifndef MULTIPROCESSOR
 	/*
 	 * On singleprocessor kernels, only match the CPU we're
@@ -239,7 +232,6 @@ cpu_match(parent, vcf, aux)
 #endif
 
 	return (1);
->>>>>>> origin/master
 }
 
 /*
@@ -247,53 +239,26 @@ cpu_match(parent, vcf, aux)
  * Discover interesting goop about the virtual address cache
  * (slightly funny place to do it, but this is where it is to be found).
  */
-static void
+void
 cpu_attach(parent, dev, aux)
 	struct device *parent;
 	struct device *dev;
 	void *aux;
 {
 	int node;
-<<<<<<< HEAD
-	long clk;
-	int impl, vers, fver;
-	char *cpuname;
-	char *fpuname;
-=======
 	u_int clk;
 	int impl, vers;
->>>>>>> origin/master
 	struct mainbus_attach_args *ma = aux;
-	struct fpstate64 *fpstate;
-	struct fpstate64 fps[2];
-	char *sep;
-	char fpbuf[40];
+	struct cpu_info *ci;
+	const char *sep;
 	register int i, l;
-	u_int64_t ver;
+	u_int64_t ver = 0;
 	extern u_int64_t cpu_clockrate[];
 
-	/* This needs to be 64-bit aligned */
-	fpstate = ALIGNFPSTATE(&fps[1]);
-	/*
-	 * Get the FSR and clear any exceptions.  If we do not unload
-	 * the queue here and it is left over from a previous crash, we
-	 * will panic in the first loadfpstate(), due to a sequence error,
-	 * so we need to dump the whole state anyway.
-	 *
-	 * If there is no FPU, trap.c will advance over all the stores,
-	 * so we initialize fs_fsr here.
-	 */
-	fpstate->fs_fsr = 7 << FSR_VER_SHIFT;	/* 7 is reserved for "none" */
-	savefpstate(fpstate);
-	fver = (fpstate->fs_fsr >> FSR_VER_SHIFT) & (FSR_VER >> FSR_VER_SHIFT);
-	ver = getver();
+	if (CPU_ISSUN4U || CPU_ISSUN4US)
+		ver = getver();
 	impl = IU_IMPL(ver);
 	vers = IU_VERS(ver);
-	if (fver != 7) {
-		foundfpu = 1;
-		fpuname = fsrtoname(impl, vers, fver, fpbuf, sizeof fpbuf);
-	} else
-		fpuname = "no";
 
 	/* tell them what we have */
 	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "core") == 0)
@@ -301,15 +266,12 @@ cpu_attach(parent, dev, aux)
 	else
 		node = ma->ma_node;
 
-<<<<<<< HEAD
-=======
 	/*
 	 * Allocate cpu_info structure if needed.
 	 */
 	ci = alloc_cpuinfo(ma);
 	ci->ci_node = ma->ma_node;
 
->>>>>>> origin/master
 	clk = getpropint(node, "clock-frequency", 0);
 	if (clk == 0) {
 		/*
@@ -321,22 +283,15 @@ cpu_attach(parent, dev, aux)
 		cpu_clockrate[0] = clk; /* Tell OS what frequency we run on */
 		cpu_clockrate[1] = clk/1000000;
 	}
-	cpuname = getpropstring(node, "name");
-	if (strcmp(cpuname, "cpu") == 0)
-		cpuname = getpropstring(node, "compatible");
-	snprintf(cpu_model, sizeof cpu_model,
-		"%s (rev %d.%d) @ %s MHz, %s FPU", cpuname,
-		vers >> 4, vers & 0xf, clockfreq(clk), fpuname);
+	snprintf(cpu_model, sizeof cpu_model, "%s (rev %d.%d) @ %s MHz",
+	    ma->ma_name, vers >> 4, vers & 0xf, clockfreq(clk));
 	printf(": %s\n", cpu_model);
 
-<<<<<<< HEAD
-=======
 	cpu_cpuspeed = sparc64_cpuspeed;
 
 	if (ci->ci_upaid == cpu_myid())
 		cpu_init(ci);
 
->>>>>>> origin/master
 	cacheinfo.c_physical = 1; /* Dunno... */
 	cacheinfo.c_split = 1;
 	l = getpropint(node, "icache-line-size", 0);
@@ -434,8 +389,6 @@ cpu_attach(parent, dev, aux)
 
 	printf("\n");
 	cache_enable();
-<<<<<<< HEAD
-=======
 }
 
 int
@@ -443,28 +396,14 @@ cpu_myid(void)
 {
 	char buf[32];
 	int impl;
->>>>>>> origin/master
 
-	if (impl >= IMPL_CHEETAH) {
-		extern vaddr_t ktext, dlflush_start;
-		extern paddr_t ktextp;
-		vaddr_t *pva;
-		paddr_t pa;
-		u_int32_t inst;
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		uint64_t myid;
 
-		for (pva = &dlflush_start; *pva; pva++) {
-			inst = *(u_int32_t *)(*pva);
-			inst &= ~(ASI_DCACHE_TAG << 5);
-			inst |= (ASI_DCACHE_INVALIDATE << 5);
-			pa = (paddr_t) (ktextp - ktext + *pva);
-			stwa(pa, ASI_PHYS_CACHED, inst);
-			flush((void *)KERNBASE);
-		}
-
-		cacheinfo.c_dcache_flush_page = us3_dcache_flush_page;
+		hv_cpu_myid(&myid);
+		return myid;
 	}
-<<<<<<< HEAD
-=======
 #endif
 
 	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
@@ -520,30 +459,12 @@ cpu_init(struct cpu_info *ci)
 	ci->ci_cpuset = pa;
 	pa += 64;
 #endif
->>>>>>> origin/master
 }
 
-/*
- * The following tables convert <IU impl, IU version, FPU version> triples
- * into names for the CPU and FPU chip.  In most cases we do not need to
- * inspect the FPU version to name the IU chip, but there is one exception
- * (for Tsunami), and this makes the tables the same.
- *
- * The table contents (and much of the structure here) are from Guy Harris.
- *
- */
-struct info {
-	u_char	valid;
-	u_char	iu_impl;
-	u_char	iu_vers;
-	u_char	fpu_vers;
-	char	*name;
+struct cfdriver cpu_cd = {
+	NULL, "cpu", DV_DULL
 };
 
-<<<<<<< HEAD
-#define	ANY	0xff	/* match any FPU version (or, later, IU version) */
-
-=======
 int
 sparc64_cpuspeed(int *freq)
 {
@@ -795,74 +716,41 @@ cpu_boot_secondary_processors(void)
 			prom_start_cpu(ci->ci_node,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
 		}
->>>>>>> origin/master
 
-/* NB: table order matters here; specific numbers must appear before ANY. */
-static struct info fpu_types[] = {
-	/*
-	 * Vendor 0, IU Fujitsu0.
-	 */
-	{ 1, 0x0, ANY, 0, "MB86910 or WTL1164/5" },
-	{ 1, 0x0, ANY, 1, "MB86911 or WTL1164/5" },
-	{ 1, 0x0, ANY, 2, "L64802 or ACT8847" },
-	{ 1, 0x0, ANY, 3, "WTL3170/2" },
-	{ 1, 0x0, 4,   4, "on-chip" },		/* Swift */
-	{ 1, 0x0, ANY, 4, "L64804" },
+		for (i = 0; i < 2000; i++) {
+			sparc_membar(Sync);
+			if (ci->ci_flags & CPUF_RUNNING)
+				break;
+			delay(10000);
+		}
+	}
+}
 
-	/*
-	 * Vendor 1, IU ROSS0/1 or Pinnacle.
-	 */
-	{ 1, 0x1, 0xf, 0, "on-chip" },		/* Pinnacle */
-	{ 1, 0x1, ANY, 0, "L64812 or ACT8847" },
-	{ 1, 0x1, ANY, 1, "L64814" },
-	{ 1, 0x1, ANY, 2, "TMS390C602A" },
-	{ 1, 0x1, ANY, 3, "RT602 or WTL3171" },
-
-	/*
-	 * Vendor 2, IU BIT0.
-	 */
-	{ 1, 0x2, ANY, 0, "B5010 or B5110/20 or B5210" },
-
-	/*
-	 * Vendor 4, Texas Instruments.
-	 */
-	{ 1, 0x4, ANY, 0, "on-chip" },		/* Viking */
-	{ 1, 0x4, ANY, 4, "on-chip" },		/* Tsunami */
-
-	/*
-	 * Vendor 5, IU Matsushita0.
-	 */
-	{ 1, 0x5, ANY, 0, "on-chip" },
-
-<<<<<<< HEAD
-	/*
-	 * Vendor 9, Weitek.
-	 */
-	{ 1, 0x9, ANY, 3, "on-chip" },
-=======
-	cpu_start_clock();
->>>>>>> origin/master
-
-	{ 0 }
-};
-
-static char *
-fsrtoname(impl, vers, fver, buf, buflen)
-	register int impl, vers, fver;
-	char *buf;
-	size_t buflen;
+void
+cpu_hatch(void)
 {
-<<<<<<< HEAD
-	register struct info *p;
+	struct cpu_info *ci = curcpu();
+	int s;
 
-	for (p = fpu_types; p->valid; p++)
-		if (p->iu_impl == impl &&
-		    (p->iu_vers == vers || p->iu_vers == ANY) &&
-		    (p->fpu_vers == fver))
-			return (p->name);
-	snprintf(buf, buflen, "version %x", fver);
-	return (buf);
-=======
+	cpu_init(ci);
+
+	ci->ci_flags |= CPUF_RUNNING;
+	sparc_membar(Sync);
+
+	s = splhigh();
+	microuptime(&ci->ci_schedstate.spc_runtime);
+	splx(s);
+
+	cpu_start_clock();
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
+}
+#endif
+
+void
+need_resched(struct cpu_info *ci)
+{
 	ci->ci_want_resched = 1;
 
 	/* There's a risk we'll be called before the idle threads start */
@@ -908,9 +796,4 @@ cpu_idle_leave()
 	if (CPU_ISSUN4V) {
 		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);
 	}
->>>>>>> origin/master
 }
-
-struct cfdriver cpu_cd = {
-	NULL, "cpu", DV_DULL
-};

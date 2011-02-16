@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: limits.h,v 1.12 2005/12/14 21:46:31 millert Exp $	*/
-=======
 /*	$OpenBSD: limits.h,v 1.14 2009/11/27 19:54:35 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: limits.h,v 1.9 2000/03/07 19:33:01 kleink Exp $	*/
 
 /*

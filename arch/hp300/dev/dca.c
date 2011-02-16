@@ -235,8 +235,7 @@ dcaattach(parent, self, aux)
 	sc->sc_isr.isr_func = dcaintr;
 	sc->sc_isr.isr_arg = sc;
 	sc->sc_isr.isr_ipl = ipl;
-	sc->sc_isr.isr_priority =
-	    (sc->sc_flags & DCA_HASFIFO) ? IPL_TTY : IPL_TTYNOBUF;
+	sc->sc_isr.isr_priority = IPL_TTY;
 	dio_intr_establish(&sc->sc_isr, self->dv_xname);
 
 	sc->sc_flags |= DCA_ACTIVE;
@@ -991,12 +990,12 @@ dca_console_scan(scode, va, arg)
 	switch (dca->dca_id) {
 	case DCAID0:
 	case DCAID1:
-		pri = CN_NORMAL;
+		pri = CN_LOWPRI;
 		break;
 
 	case DCAID0 | DCACON:
 	case DCAID1 | DCACON:
-		pri = CN_REMOTE;
+		pri = CN_HIGHPRI;
 		break;
 
 	default:

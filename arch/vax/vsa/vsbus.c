@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vsbus.c,v 1.17 2006/07/20 19:08:15 miod Exp $ */
-=======
 /*	$OpenBSD: vsbus.c,v 1.21 2010/11/18 21:13:19 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: vsbus.c,v 1.29 2000/06/29 07:14:37 mrg Exp $ */
 /*
  * Copyright (c) 1996, 1999 Ludd, University of Lule}, Sweden.

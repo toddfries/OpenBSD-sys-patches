@@ -1,4 +1,4 @@
-/*	$OpenBSD: uboot.c,v 1.3 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: uboot.c,v 1.5 2007/05/29 00:03:09 deraadt Exp $	*/
 /*	$NetBSD: uboot.c,v 1.3 1997/04/27 21:17:13 thorpej Exp $	*/
 
 /*-
@@ -60,7 +60,7 @@ extern	const char version[];
  */
 char *name;
 char *names[] = {
-	"bsd", "bsd.gz", "obsd", "obsd.gz", "bsd.old", "bsd.old.gz"
+	"bsd"
 };
 #define NUMNAMES	(sizeof(names) / sizeof(char *))
 

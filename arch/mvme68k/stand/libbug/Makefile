@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.5 1996/05/16 02:25:39 chuck Exp $
 
 LIB=bug
 

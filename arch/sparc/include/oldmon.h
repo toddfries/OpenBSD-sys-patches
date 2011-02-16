@@ -1,4 +1,4 @@
-/*	$OpenBSD: oldmon.h,v 1.8 2002/03/14 01:26:43 millert Exp $	*/
+/*	$OpenBSD: oldmon.h,v 1.9 2002/03/15 01:20:04 millert Exp $	*/
 /*	$NetBSD: oldmon.h,v 1.11 1996/03/31 22:21:38 pk Exp $ */
 
 /*

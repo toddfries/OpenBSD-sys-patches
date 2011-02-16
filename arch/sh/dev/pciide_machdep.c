@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pciide_machdep.c,v 1.1 2006/05/29 17:13:19 drahn Exp $	*/
-=======
 /*	$OpenBSD: pciide_machdep.c,v 1.2 2010/08/07 03:50:01 krw Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998 Christopher G. Demetriou.  All rights reserved.

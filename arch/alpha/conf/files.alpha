@@ -6,7 +6,7 @@
 # maxpartitions must be first item in files.${ARCH}
 maxpartitions 16
 
-maxusers 2 8 64
+maxusers 2 8 128
 
 # this loses, but there's no way to define attributes which have attributes
 define	alpha_shared_intr
@@ -272,8 +272,6 @@ file	dev/pci/if_hme_pci.c		hme_pci
 include	"dev/isa/files.isapnp"
 file	arch/alpha/isa/isapnp_machdep.c		isapnp
 
-attach	com at isapnp with com_isapnp
-
 #
 # Devices that can live on multiple busses
 #
@@ -309,6 +307,7 @@ file	arch/alpha/alpha/fp_complete.c		!no_ieee
 file	arch/alpha/alpha/vm_machdep.c
 file	arch/alpha/alpha/disksubr.c
 file	arch/alpha/dev/bus_dma.c
+file	arch/alpha/alpha/mutex.c
 
 #
 # Network protocol checksum routines
@@ -346,6 +345,22 @@ include "dev/i2c/files.i2c"
 include	"dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
 # Machine-independent 1-Wire drivers
 #
 include "dev/onewire/files.onewire"
+
+# Machine-dependent libkern components
+file	lib/libkern/softfloat.c			!no_ieee
+file	lib/libkern/arch/alpha/__divl.S
+file	lib/libkern/arch/alpha/__divlu.S
+file	lib/libkern/arch/alpha/__divq.S
+file	lib/libkern/arch/alpha/__divqu.S
+file	lib/libkern/arch/alpha/__reml.S
+file	lib/libkern/arch/alpha/__remlu.S
+file	lib/libkern/arch/alpha/__remq.S
+file	lib/libkern/arch/alpha/__remqu.S

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zaurus_ssp.c,v 1.5 2005/02/22 21:53:03 uwe Exp $	*/
-=======
 /*	$OpenBSD: zaurus_ssp.c,v 1.8 2010/09/07 16:21:41 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -74,11 +74,10 @@
 /*
  *  Defines for trap handler catching kernel accessing memory.
  */
-#define	KT_BADERR	1		/* Bad address */
-#define	KT_COPYERR	2		/* User space copy error */
-#define	KT_KCOPYERR	3		/* Kernel space copy error */
-#define	KT_DDBERR	4		/* DDB access error */
-
+#define	KT_COPYERR	1		/* User space copy error */
+#define	KT_KCOPYERR	2		/* Kernel space copy error */
+#define	KT_DDBERR	3		/* DDB access error */
+#define	KT_GUARDERR	4		/* guarded access error */
 
 #ifndef _LOCORE
 

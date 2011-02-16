@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_ARM32_VMPARAM_H_
-#define	_ARM32_VMPARAM_H_
+#ifndef	_ARMISH_VMPARAM_H_
+#define	_ARMISH_VMPARAM_H_
 
 #define	ARM_KERNEL_BASE		0xc0000000
 
@@ -97,4 +97,4 @@
 #define	VM_FREELIST_DEFAULT	0
 
 
-#endif	/* _ARM32_VMPARAM_H_ */
+#endif	/* _ARMISH_VMPARAM_H_ */

@@ -40,11 +40,6 @@
  */
 
 #include <sys/cdefs.h>
-/*
-__KERNEL_RCSID(0, "$NetBSD: pxa2x0_intr.c,v 1.5 2003/07/15 00:24:55 lukem Exp $");
-*/
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -552,7 +547,7 @@ pxa2x0_intr_establish(int irqno, int level,
 
 #ifdef MULTIPLE_HANDLERS_ON_ONE_IRQ
 	/* no point in sleeping unless someone can free memory. */
-	MALLOC(ih, struct intrhand *, sizeof *ih, M_DEVBUF, 
+	ih = (struct intrhand *)malloc(sizeof *ih, M_DEVBUF, 
 	    cold ? M_NOWAIT : M_WAITOK);
 	if (ih == NULL)
 		panic("intr_establish: can't malloc handler info");
@@ -597,7 +592,7 @@ pxa2x0_intr_disestablish(void *cookie)
 	psw = disable_interrupts(I32_bit);
 	TAILQ_REMOVE(&handler[irqno].list, ih, ih_list);
 
-	FREE(ih, M_DEVBUF);
+	free(ih, M_DEVBUF);
 
 	pxa2x0_update_intr_masks();
 
@@ -721,3 +716,22 @@ pxa2x0_intr_string(void *cookie)
 
 	return irqstr;
 }
+
+#ifdef DIAGNOSTIC
+void
+pxa2x0_splassert_check(int wantipl, const char *func)
+{
+	int oldipl = current_spl_level, psw;
+
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		psw = disable_interrupts(I32_bit);
+		pxa2x0_setipl(wantipl);
+		restore_interrupts(psw);
+	}
+}
+#endif

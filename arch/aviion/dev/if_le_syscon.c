@@ -36,6 +36,8 @@
 #include <sys/socket.h>
 #include <sys/device.h>
 
+#include <uvm/uvm.h>
+
 #include <net/if.h>
 
 #ifdef INET
@@ -46,9 +48,10 @@
 #include <net/if_media.h>
 
 #include <machine/autoconf.h>
+#include <machine/board.h>
 #include <machine/cpu.h>
 
-#include <aviion/dev/sysconreg.h>
+#include <aviion/dev/sysconvar.h>
 
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
@@ -166,11 +169,7 @@ le_syscon_attach(struct device *parent, struct device *self, void *aux)
 
 	lesc->sc_r1 = (struct av_lereg *)ca->ca_paddr;
 
-        sc->sc_mem = (void *)etherbuf;
-	etherbuf = NULL;
-        sc->sc_conf3 = LE_C3_BSWP;
-        sc->sc_addr = (u_long)sc->sc_mem & 0x00ffffff;
-        sc->sc_memsize = etherlen;
+	sc->sc_conf3 = LE_C3_BSWP;
 
 	myetheraddr(sc->sc_arpcom.ac_enaddr);
 
@@ -189,10 +188,10 @@ le_syscon_attach(struct device *parent, struct device *self, void *aux)
 
 	lesc->sc_ih.ih_fn = le_syscon_intr;
 	lesc->sc_ih.ih_arg = sc;
-	lesc->sc_ih.ih_wantframe = 0;
+	lesc->sc_ih.ih_flags = 0;
 	lesc->sc_ih.ih_ipl = ca->ca_ipl;
 
-	sysconintr_establish(SYSCV_LE, &lesc->sc_ih, self->dv_xname);
+	sysconintr_establish(INTSRC_ETHERNET1, &lesc->sc_ih, self->dv_xname);
 }
 
 int

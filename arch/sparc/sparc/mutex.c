@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: mutex.c,v 1.5 2010/09/28 20:27:55 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>

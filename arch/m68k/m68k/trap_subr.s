@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap_subr.s,v 1.1 1997/07/06 07:46:31 downsj Exp $	*/
+/*	$OpenBSD: trap_subr.s,v 1.2 2003/06/02 23:27:48 millert Exp $	*/
 /*	$NetBSD: trap_subr.s,v 1.2 1997/06/04 22:12:43 is Exp $	*/
 
 /*

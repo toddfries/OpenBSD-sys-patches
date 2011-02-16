@@ -1,4 +1,4 @@
-/*	$OpenBSD: srec.c,v 1.4 2001/04/30 00:06:26 miod Exp $ */
+/*	$OpenBSD: srec.c,v 1.5 2003/08/19 10:22:30 deraadt Exp $ */
 
 /*
  * Public domain, believed to be by Mike Price.

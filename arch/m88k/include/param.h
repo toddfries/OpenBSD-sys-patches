@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.8 2005/10/13 19:47:12 miod Exp $ */
+/*	$OpenBSD: param.h,v 1.12 2007/12/31 09:23:53 martin Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1988 University of Utah.
@@ -83,16 +83,7 @@
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than the software page size, and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define MSIZE		256		/* size of an mbuf */
-#define MCLSHIFT	11		/* convert bytes to m_buf clusters */
-#define MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
-#define MCLOFSET	(MCLBYTES - 1)	/* offset within a m_buf cluster */
-
 #define NMBCLUSTERS	2048		/* map size, max cluster allocation */
 
 /*
@@ -107,10 +98,6 @@
 /* pages ("clicks") to disk blocks */
 #define ctod(x)			((x) << (PGSHIFT - DEV_BSHIFT))
 #define dtoc(x)			((x) >> (PGSHIFT - DEV_BSHIFT))
-
-/* pages to bytes */
-#define ctob(x)			((x) << PGSHIFT)
-#define btoc(x)			(((x) + PGOFSET) >> PGSHIFT)
 
 /* bytes to disk blocks */
 #define btodb(x)		((x) >> DEV_BSHIFT)
@@ -133,8 +120,8 @@ extern int cputyp;
 /*
  * Values for the cputyp variable.
  */
-#define CPU_88100	0x100
-#define CPU_88110	0x110
+#define CPU_88100	0x00
+#define CPU_88110	0x01
 
 #ifdef M88100
 #ifdef M88110

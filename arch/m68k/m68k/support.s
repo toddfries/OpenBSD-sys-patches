@@ -1,4 +1,4 @@
-/*	$OpenBSD: support.s,v 1.2 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: support.s,v 1.3 2006/02/22 22:16:07 miod Exp $	*/
 /*	$NetBSD: support.s,v 1.1 1997/03/16 10:47:33 thorpej Exp $	*/
 
 /*

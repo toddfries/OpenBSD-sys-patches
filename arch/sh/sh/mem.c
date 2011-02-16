@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mem.c,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: mem.c,v 1.4 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mem.c,v 1.21 2006/07/23 22:06:07 ad Exp $	*/
 
 /*
@@ -197,10 +193,9 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				uio->uio_resid = 0;
 				return (0);
 			}
-			if (zeropage == NULL) {
-				zeropage = malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				memset(zeropage, 0, PAGE_SIZE);
-			}
+			if (zeropage == NULL)
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK | M_ZERO);
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			break;

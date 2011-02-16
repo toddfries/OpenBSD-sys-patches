@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile,v 1.3 2004/07/13 21:03:39 marc Exp $
-=======
 #	$OpenBSD: Makefile,v 1.5 2010/06/29 21:33:54 miod Exp $
->>>>>>> origin/master
 
 LIB=	sa
 

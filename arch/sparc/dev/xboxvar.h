@@ -1,4 +1,4 @@
-/*	$OpenBSD: xboxvar.h,v 1.2 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: xboxvar.h,v 1.3 2006/06/02 20:00:54 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uba_cmi.c,v 1.2 2002/03/14 01:26:48 millert Exp $	*/
+/*	$OpenBSD: uba_cmi.c,v 1.3 2003/06/02 23:27:58 millert Exp $	*/
 /*	$NetBSD: uba_cmi.c,v 1.2 1999/08/14 11:31:48 ragge Exp $	   */
 /*
  * Copyright (c) 1996 Jonathan Stone.

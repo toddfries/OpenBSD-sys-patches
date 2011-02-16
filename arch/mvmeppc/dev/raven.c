@@ -1,4 +1,4 @@
-/*	$OpenBSD: raven.c,v 1.5 2004/01/29 10:58:06 miod Exp $ */
+/*	$OpenBSD: raven.c,v 1.6 2004/05/14 20:38:32 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.

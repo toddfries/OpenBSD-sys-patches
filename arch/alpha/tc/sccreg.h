@@ -1,4 +1,4 @@
-/* $OpenBSD: sccreg.h,v 1.4 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: sccreg.h,v 1.5 2003/06/02 23:27:44 millert Exp $ */
 /* $NetBSD: sccreg.h,v 1.3 1997/04/06 22:30:30 cgd Exp $ */
 
 /* 

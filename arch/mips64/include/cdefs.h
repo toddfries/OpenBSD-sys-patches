@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.3 2005/11/24 20:46:47 deraadt Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.4 2006/01/10 00:04:04 millert Exp $	*/
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)

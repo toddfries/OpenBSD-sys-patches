@@ -79,6 +79,7 @@ int	nblkdev = nitems(bdevsw);
 #define mmread	mmrw
 #define mmwrite	mmrw
 cdev_decl(mm);
+#include "bio.h"
 #include "pty.h"
 #include "uk.h"
 cdev_decl(fd);
@@ -131,9 +132,9 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk driver */
 	cdev_disk_init(NCCD,ccd),	/* 20: concatenated disk driver */
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 22: Berkeley packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 22: Berkeley packet filter */
 	cdev_notdef(),			/* 23 was ADB */
-	cdev_bpftun_init(NTUN,tun),	/* 24: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 24: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 25: loadable module driver */
 	cdev_lkm_dummy(),		/* 26 */
 	cdev_lkm_dummy(),		/* 27 */
@@ -158,7 +159,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */
-	cdev_notdef(),			/* 49 */
+	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
@@ -219,7 +220,7 @@ int chrtoblktbl[] = {
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,
 	/*  2 */	NODEV,
-	/*  3 */	3,
+	/*  3 */	NODEV,
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
@@ -229,14 +230,14 @@ int chrtoblktbl[] = {
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
-	/* 13 */	4,
-	/* 14 */	5,
-	/* 15 */	6,
+	/* 13 */	4,		/* sd */
+	/* 14 */	5,		/* st */
+	/* 15 */	6,		/* cd */
 	/* 16 */	NODEV,
 	/* 17 */	NODEV,
-	/* 18 */	13,
-	/* 19 */	8,
-	/* 20 */	9,
+	/* 18 */	13,		/* rd */
+	/* 19 */	8,		/* vnd */
+	/* 20 */	9,		/* ccd */
 };
 int nchrtoblktbl = nitems(chrtoblktbl);
 

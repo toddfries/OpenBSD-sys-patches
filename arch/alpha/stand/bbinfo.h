@@ -1,4 +1,4 @@
-/*	$OpenBSD: bbinfo.h,v 1.4 1996/10/30 22:40:28 niklas Exp $	*/
+/*	$OpenBSD: bbinfo.h,v 1.5 1997/05/05 06:01:45 millert Exp $	*/
 /*	$NetBSD: bbinfo.h,v 1.2 1997/04/06 08:40:57 cgd Exp $	*/
 
 /*

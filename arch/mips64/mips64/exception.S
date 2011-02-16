@@ -213,7 +213,7 @@ END(k_intr)
  *	Handle an interrupt in user mode. Save the relevant user
  *	registers into the u.u_pcb struct. This will allow us
  *	to preempt the interrupted process. Full save is held
- *	off though until a switch() really is requiered.
+ *	off though until a switch() really is required.
  */
 NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	.set	noat
@@ -370,12 +370,12 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 
-	move	a0, v0
 	.set	noat
 #ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, sp, CF_RA_OFFS)
 	ctc0	t0, COP_0_ICR
 #endif
+	RESTORE_REG(a0, PC, sp, CF_RA_OFFS)
 	RESTORE_CPU(sp, CF_RA_OFFS)
 	PTR_ADDU sp, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
 	sync
@@ -469,7 +469,7 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	ITLBNOPFIX
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exeption level bit.
+	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
 	GET_CPU_INFO(k1, k0)
@@ -496,14 +496,6 @@ END(u_general)
  *	Setup for and return to user.
  */
 LEAF(proc_trampoline, 0)
-	sw	zero, cpl		# lower to spl0
-	lw	t0, ipending
-	beq	t0, zero, 0f
-	nop
-
-	jal	setsoftintr0		# process any pending ints
-	nop
-0:
 #ifdef DDB
 	move	zero, ra
 #endif
@@ -524,7 +516,7 @@ LEAF(proc_trampoline, 0)
 	xor	a0, a0			# and interrupts enabled
 
 	jal	s0
-	move	a0,s1			# set up for return to user.
+	move	a0,s1			# invoke callback.
 
 #if 0	/* && defined(RM7000_ICR) */
 	lw	t0, cpu_is_rm7k
@@ -548,14 +540,15 @@ LEAF(proc_trampoline, 0)
 	ctc0	v0, COP_0_ICR		# enable perfcntr interrupt.
 1:
 #endif
-	mfc0	t0, COP_0_STATUS_REG	# dis int preserve settings.
+
+	mfc0	t0, COP_0_STATUS_REG
 	li	t1, ~SR_INT_ENAB
 	and	t0, t0, t1
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exeption level bit.
+	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
 	.set	noat

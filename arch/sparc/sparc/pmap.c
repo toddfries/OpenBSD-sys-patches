@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pmap.c,v 1.143 2005/04/17 18:47:50 miod Exp $	*/
-=======
 /*	$OpenBSD: pmap.c,v 1.158 2010/12/06 20:57:18 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -862,14 +858,6 @@ pmap_page_upload(void)
 			 */
 			paddr_t	chop = PMAP_BOOTSTRAP_VA2PA(KERNBASE);
 
-<<<<<<< HEAD
-	/*
-	 * Compute physmem
-	 */
-	physmem = 0;
-	for (n = 0; n < npmemarr; n++)
-		physmem += btoc(pmemarr[n].len);
-=======
 			if (end < chop)
 				chop = end;
 #ifdef DEBUG
@@ -878,7 +866,6 @@ pmap_page_upload(void)
 #endif
 			uvm_page_physload(atop(start), atop(chop),
 				atop(start), atop(chop), VM_FREELIST_DEFAULT);
->>>>>>> origin/master
 
 			/*
 			 * Adjust the start address to reflect the
@@ -6273,8 +6260,6 @@ pmap_prefer(vaddr_t foff, vaddr_t va)
 }
 
 void
-<<<<<<< HEAD
-=======
 pmap_remove_holes(struct vm_map *map)
 {
 #if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
@@ -6296,7 +6281,6 @@ pmap_remove_holes(struct vm_map *map)
 }
 
 void
->>>>>>> origin/master
 pmap_redzone()
 {
 #if defined(SUN4M)
@@ -6521,7 +6505,7 @@ pmap_dumpsize()
 	if (CPU_ISSUN4OR4COR4E)
 		sz += (seginval + 1) * NPTESG * sizeof(int);
 
-	return (btoc(sz));
+	return (atop(sz));
 }
 
 /*
@@ -6531,8 +6515,8 @@ pmap_dumpsize()
  */
 int
 pmap_dumpmmu(dump, blkno)
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 {
 	kcore_seg_t	*ksegp;
 	cpu_kcore_hdr_t	*kcpup;
@@ -6571,7 +6555,7 @@ pmap_dumpmmu(dump, blkno)
 	/* Fill in MI segment header */
 	ksegp = (kcore_seg_t *)bp;
 	CORE_SETMAGIC(*ksegp, KCORE_MAGIC, MID_MACHINE, CORE_CPU);
-	ksegp->c_size = ctob(pmap_dumpsize()) - ALIGN(sizeof(kcore_seg_t));
+	ksegp->c_size = ptoa(pmap_dumpsize()) - ALIGN(sizeof(kcore_seg_t));
 
 	/* Fill in MD segment header (interpreted by MD part of libkvm) */
 	kcpup = (cpu_kcore_hdr_t *)((int)bp + ALIGN(sizeof(kcore_seg_t)));

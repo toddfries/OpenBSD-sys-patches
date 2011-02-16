@@ -1,4 +1,4 @@
-/*	$OpenBSD: adbvar.h,v 1.12 2006/01/18 23:21:16 miod Exp $	*/
+/*	$OpenBSD: adbvar.h,v 1.13 2006/01/22 15:25:30 miod Exp $	*/
 /*	$NetBSD: adbvar.h,v 1.22 2005/01/15 16:00:59 chs Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zs.c,v 1.17 2004/09/29 19:17:43 miod Exp $	*/
-=======
 /*	$OpenBSD: zs.c,v 1.23 2009/09/10 21:30:00 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: zs.c,v 1.29 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -56,10 +52,8 @@
 
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
-#include <machine/bsd_openprom.h>
 #include <machine/conf.h>
 #include <machine/cpu.h>
-#include <machine/eeprom.h>
 #include <machine/psl.h>
 #include <machine/z8530var.h>
 
@@ -608,7 +602,7 @@ zs_set_modes(cs, cflag)
 	/*
 	 * Output hardware flow control on the chip is horrendous:
 	 * if carrier detect drops, the receiver is disabled, and if
-	 * CTS drops, the transmitter is stoped IN MID CHARACTER!
+	 * CTS drops, the transmitter is stopped IN MID CHARACTER!
 	 * Therefore, NEVER set the HFC bit, and instead use the
 	 * status interrupt to detect CTS changes.
 	 */

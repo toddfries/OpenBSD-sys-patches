@@ -901,7 +901,7 @@ clcnprobe(cp)
 		return;
 
 	cp->cn_dev = makedev(maj, 0);
-	cp->cn_pri = CN_NORMAL;
+	cp->cn_pri = CN_LOWPRI;
 }
 
 void

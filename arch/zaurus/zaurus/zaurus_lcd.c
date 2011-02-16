@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zaurus_lcd.c,v 1.20 2006/06/02 20:50:14 miod Exp $	*/
-=======
 /*	$OpenBSD: zaurus_lcd.c,v 1.24 2010/09/07 16:21:41 deraadt Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: lubbock_lcd.c,v 1.1 2003/08/09 19:38:53 bsh Exp $ */
 
 /*

@@ -197,7 +197,7 @@ iteconfig()
 				break;
 			ip = &ite_data[i];
 			ip->isw = &itesw[dtype];
-			ip->regbase = (caddr_t)GRFIADDR;/* to get CN_INTERNAL */
+			ip->regbase = (caddr_t)GRFIADDR; /* to get CN_MIDPRI */
 			ip->fbbase = (caddr_t)slotno;
 			ip->alive = 1;
 			i++;
@@ -222,10 +222,10 @@ iteprobe(struct consdev *cp)
 		if (ip->alive == 0)
 			continue;
 		if ((int)ip->regbase == GRFIADDR) {
-			pri = CN_INTERNAL;
+			pri = CN_MIDPRI;
 			unit = ite;
 		} else if (unit < 0) {
-			pri = CN_NORMAL;
+			pri = CN_LOWPRI;
 			unit = ite;
 		}
 	}

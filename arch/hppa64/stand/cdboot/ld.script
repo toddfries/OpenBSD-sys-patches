@@ -1,4 +1,4 @@
-/*	$OpenBSD: ld.script,v 1.1 2003/03/28 22:42:26 mickey Exp $	*/
+/*	$OpenBSD: ld.script,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
 
 OUTPUT_FORMAT("elf64-hppa")
 OUTPUT_ARCH(hppa2.0w)

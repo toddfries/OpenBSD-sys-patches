@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.13 2004/07/13 21:03:37 marc Exp $
+#	$OpenBSD: Makefile.inc,v 1.17 2008/03/04 22:33:03 deraadt Exp $
 
 CFLAGS=${DEBUG} -Os -Wall -Werror
 CPPFLAGS+=-I${S} -I. -I${.CURDIR}
@@ -10,13 +10,13 @@ SACFLAGS+=-fno-stack-protector
 #DEBUGFLAGS+=-DLIFDEBUG
 #DEBUGFLAGS+=-DEXEC_DEBUG
 #DEBUGFLAGS+=-DALLOC_TRACE
-LINKADDR=0x780000
-LOADADDR=0x780000
-HEAP_LIMIT=0x7f8000
+LINKADDR=0xf80000
+LOADADDR=0xf80000
+HEAP_LIMIT=0xff8000
 CLEANFILES+=	machine
 DEBUGLIBS=	no
 
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj) && !(defined(PROG) && ${PROG} == "mkboot")
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj) && !(defined(PROG) && ${PROG} == "mkboot")
 .BEGIN:
 	@([ -h machine ] || ln -s $(S)/arch/hppa/include machine)
 .endif
@@ -25,11 +25,6 @@ DEBUGLIBS=	no
 LIBSA=${STANDIR}/libsa/libsa.a
 .else
 LIBSA=${STANDIR}/libsa/${__objdir}/libsa.a
-.endif
-.if exists(${STANDIR}/libkern/libkern.a)
-LIBKERN=${STANDIR}/libkern/libkern.a
-.else
-LIBKERN=${STANDIR}/libkern/${__objdir}/libkern.a
 .endif
 .if exists(${STANDIR}/libz/libz.a)
 LIBZ=${STANDIR}/libz/libz.a

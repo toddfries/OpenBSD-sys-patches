@@ -31,14 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-__KERNEL_RCSID(5, "$NetBSD: multiproc.s,v 1.5 1999/12/16 20:17:23 thorpej Exp $")
+.file	4 __FILE__
+.loc	4 __LINE__
 
 /*
  * Multiprocessor glue code.
  */
 
 	.text
-inc5:	.stabs	__FILE__,132,0,0,inc5; .loc	1 __LINE__
 
 /*
  * cpu_spinup_trampoline:

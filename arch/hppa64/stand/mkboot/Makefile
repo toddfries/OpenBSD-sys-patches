@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.1 2005/04/01 10:40:49 mickey Exp $
 
 MAN=	mkboot.8
 MANSUBDIR=hppa64

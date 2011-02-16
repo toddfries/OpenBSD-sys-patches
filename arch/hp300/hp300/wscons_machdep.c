@@ -278,7 +278,7 @@ wscnprobe(struct consdev *cp)
 	return;
 
 found:
-	cp->cn_pri = CN_INTERNAL;
+	cp->cn_pri = CN_MIDPRI;
 #ifdef CONSCODE
 	if (CONSCODE == tmpconscode)
 		cp->cn_pri = CN_FORCED;
@@ -297,7 +297,6 @@ found:
 		conscode = tmpconscode;
 		conaddr = (caddr_t)va;
 		convasize = mapsize;
-		
 	}
 }
 

@@ -47,7 +47,6 @@
 
 #include <arm/armreg.h>
 #include <arm/cpufunc.h>
-#include <machine/intr.h>
 #include <arm/softintr.h>
 
 extern vaddr_t pxaic_base;		/* Shared with pxa2x0_irq.S */
@@ -126,4 +125,3 @@ void pxa2x0_splassert_check(int, const char *);
 #endif /* ! _LOCORE */
 
 #endif /* _PXA2X0_INTR_H_ */
-

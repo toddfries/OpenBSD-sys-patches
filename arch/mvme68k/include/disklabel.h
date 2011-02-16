@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.7 2003/02/24 22:13:09 miod Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.11 2007/06/20 18:15:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Nivas Madhur
@@ -34,31 +34,29 @@
 #define LABELSECTOR     0                       /* sector containing label */
 #define LABELOFFSET	0			/* offset of label in sector */
 #define MAXPARTITIONS	16			/* number of partitions */
-#define RAW_PART	2			/* raw partition: xx?c */
 
 /*
- * a cpu_disklabel is a disklabel that the bug (prom) can understand
+ * a mvmedisklabel is a disklabel that the bug (prom) can understand
  * and live with.   the bug works in terms of 256 byte blocks.   in our
- * case the first two bug blocks make up the cpu_disklabel (which is 512
+ * case the first two bug blocks make up the mvmedisklabel (which is 512
  * bytes [i.e. one sector] in length).
  *
  * we use a fixed layout the BSD disk structure (in 256 byte blocks):
- *   block 0  = the volume ID block  (part of cpu_disklabel)
- *   block 1  = media configuration area (part of cpu_disklabel)
+ *   block 0  = the volume ID block  (part of mvmedisklabel)
+ *   block 1  = media configuration area (part of mvmedisklabel)
  *   block 2  = start of first level OS bootstrap (continues ...)
  *   block 31 = end of OS bootstrap
  *   block 32 = BSD filesystem superblock
  *
  * this gives us 30 blocks (30*256 = 7680 bytes) for the bootstrap's text+data
  *
- * disksubr.c translates between cpu_disklabel and BSD disklabel.
+ * disksubr.c translates between mvmedisklabel and BSD disklabel.
  *
  * Note: this structure is exactly 512 bytes in size. If you move fields
  * around, make sure the various members are properly aligned and the
  * compiler won't do any additional padding.
  */
-
-struct cpu_disklabel {
+struct mvmedisklabel {
 	/* VID */
 	u_char		vid_id[4];
 	u_char		vid_0[16];

@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.5 2005/12/13 00:18:18 jsg Exp $
+#	$OpenBSD: genassym.cf,v 1.8 2007/10/10 15:53:51 art Exp $
 #	$NetBSD: genassym.cf,v 1.27 2003/11/04 10:33:16 dsl Exp$
 
 # Copyright (c) 1982, 1990 The Regents of the University of California.
@@ -82,11 +82,9 @@ export	P_PROFIL
 export	SONPROC
 
 struct	proc
-member	p_forw
-member	p_back
 member	p_addr
-member	p_priority
-member	p_wchan
+#member	p_priority
+#member	p_wchan
 member	p_stat
 # XXX use PROC_SIZEOF in new code whenever possible
 define	PROCSIZE		sizeof(struct proc)
@@ -162,10 +160,8 @@ member	cf_control
 
 struct	cpu_info
 #member	CI_CURPRIORITY		ci_schedstate.spc_curpriority
-ifdef MULTIPROCESSOR
-member	ci_curlwp
-member	ci_curpcb
-endif
+member	ci_curproc
+#member	ci_curpcb
 
 # Constants required for in_cksum() and friends.
 define	M_LEN			offsetof(struct mbuf, m_len)

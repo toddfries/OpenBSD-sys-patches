@@ -73,6 +73,7 @@ void	pdc_scanbus(struct device *, struct confargs *, int, hppa_hpa_t hpa,
 	    int);
 int	mbprint(void *, const char *);
 int	mbsubmatch(struct device *, void *, void *);
+int	cpu_intr_findirq(void);
 void	*cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *),
 	    void *arg, const char *name);
 void	*cpu_intr_establish(int pri, int irq, int (*handler)(void *),

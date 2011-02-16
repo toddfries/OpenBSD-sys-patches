@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stdarg.h,v 1.8 2006/01/06 18:53:05 millert Exp $	*/
-=======
 /*	$OpenBSD: stdarg.h,v 1.10 2008/10/23 21:25:08 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: stdarg.h,v 1.11 1999/05/03 16:30:34 christos Exp $	*/
 
 /*-

@@ -92,7 +92,7 @@ main(int argc, char *argv[])
 	long	protosize;
 	struct stat disksb, bootsb;
 	struct disklabel dl;
-	unsigned long partoffset;
+	daddr64_t partoffset;
 #define BBPAD   0x1e0
 	struct bb {
 		char	bb_pad[BBPAD];	/* disklabel lives in here, actually */
@@ -165,8 +165,8 @@ main(int argc, char *argv[])
 	 * into the disk.  If disklabels not supported, assume zero.
 	 */
 	if (ioctl(devfd, DIOCGDINFO, &dl) != -1) {
-		partoffset = dl.d_partitions[minor(bootsb.st_dev) %
-		    getmaxpartitions()].p_offset;
+		partoffset = DL_GETPOFFSET(&dl.d_partitions[minor(bootsb.st_dev) %
+		    getmaxpartitions()]);
 	} else {
 		if (errno != ENOTTY)
 			err(1, "read disklabel: %s", dev);

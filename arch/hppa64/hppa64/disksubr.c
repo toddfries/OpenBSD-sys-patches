@@ -30,24 +30,12 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)ufs_disksubr.c	7.16 (Berkeley) 5/4/91
- */
-
-/*
- * This disksubr.c module started to take its present form on OpenBSD/alpha
- * but it was always thought it should be made completely MI and not need to
- * be in that alpha-specific tree at all.
- *
- * XXX HPUX disklabel is not understood yet.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/device.h>
 #include <sys/disklabel.h>
-#include <sys/syslog.h>
 #include <sys/disk.h>
 
 int	readliflabel(struct buf *, void (*)(struct buf *),
@@ -96,10 +84,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 		goto done;
 #endif
 
-	/* If there was an error, still provide a decent fake one.  */
-	if (msg)
-		*lp = fallbacklabel;
-
+done:
 	if (bp) {
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
@@ -131,11 +116,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *),
 		goto done;
 	}
 
-	/* record the OpenBSD partition's placement for the caller */
-	if (partoffp)
-		*partoffp = dospartoff;
-	if (cylp)
-		*cylp = cyl;
+	dbp = geteblk(LIF_DIRSIZE);
+	dbp->b_dev = bp->b_dev;
 
 	/* read LIF directory */
 	dbp->b_blkno = lifstodb(lvp->vol_addr);
@@ -147,17 +129,11 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *),
 		goto done;
 	}
 
-char *
-readliflabel (bp, strat, lp, osdep, partoffp, cylp, spoofonly)
-	struct buf *bp;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int *partoffp;
-	int *cylp;
-	int spoofonly;
-{
-	int fsoff;
+	/* scan for LIF_DIR_FS dir entry */
+	for (i=0, p=(struct lifdir *)dbp->b_data; i < LIF_NUMDIR; p++, i++) {
+		if (p->dir_type == LIF_DIR_FS || p->dir_type == LIF_DIR_HPLBL)
+			break;
+	}
 
 	if (p->dir_type == LIF_DIR_FS) {
 		fsoff = lifstodb(p->dir_addr);
@@ -169,12 +145,14 @@ readliflabel (bp, strat, lp, osdep, partoffp, cylp, spoofonly)
 	if (partoffp)
 		goto finished;
 
-		dev = bp->b_dev;
-		dbp = geteblk(LIF_DIRSIZE);
-		dbp->b_dev = dev;
+	if (p->dir_type == LIF_DIR_HPLBL) {
+		struct hpux_label *hl;
+		struct partition *pp;
+		u_int8_t fstype;
+		int i;
 
 		/* read LIF directory */
-		dbp->b_blkno = lifstodb(osdep->u._hppa.lifvol.vol_addr);
+		dbp->b_blkno = lifstodb(p->dir_addr);
 		dbp->b_bcount = lp->d_secsize;
 		dbp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(dbp);
@@ -191,106 +169,44 @@ readliflabel (bp, strat, lp, osdep, partoffp, cylp, spoofonly)
 			goto done;
 		}
 
-		bcopy(dbp->b_data, osdep->u._hppa.lifdir, LIF_DIRSIZE);
-		dbp->b_flags |= B_INVAL;
-		brelse(dbp);
-
-		/* scan for LIF_DIR_FS dir entry */
-		for (fsoff = -1,  p = &osdep->u._hppa.lifdir[0];
-		    fsoff < 0 && p < &osdep->u._hppa.lifdir[LIF_NUMDIR]; p++) {
-			if (p->dir_type == LIF_DIR_FS ||
-			    p->dir_type == LIF_DIR_HPLBL)
-				break;
+		lp->d_bbsize = 8192;
+		lp->d_sbsize = 8192;
+		for (i = 0; i < MAXPARTITIONS; i++) {
+			DL_SETPSIZE(&lp->d_partitions[i], 0);
+			DL_SETPOFFSET(&lp->d_partitions[i], 0);
+			lp->d_partitions[i].p_fstype = 0;
 		}
 
-		if (p->dir_type == LIF_DIR_FS)
-			fsoff = lifstodb(p->dir_addr);
-		else if (p->dir_type == LIF_DIR_HPLBL) {
-			struct hpux_label *hl;
-			struct partition *pp;
-			u_int8_t fstype;
-			int i;
+		for (i = 0; i < HPUX_MAXPART; i++) {
+			if (!hl->hl_flags[i])
+				continue;
+			if (hl->hl_flags[i] == HPUX_PART_ROOT) {
+				pp = &lp->d_partitions[0];
+				fstype = FS_BSDFFS;
+			} else if (hl->hl_flags[i] == HPUX_PART_SWAP) {
+				pp = &lp->d_partitions[1];
+				fstype = FS_SWAP;
+			} else if (hl->hl_flags[i] == HPUX_PART_BOOT) {
+				pp = &lp->d_partitions[RAW_PART + 1];
+				fstype = FS_BSDFFS;
+			} else
+				continue;
 
-			dev = bp->b_dev;
-			dbp = geteblk(LIF_DIRSIZE);
-			dbp->b_dev = dev;
-
-			/* read LIF directory */
-			dbp->b_blkno = lifstodb(p->dir_addr);
-			dbp->b_bcount = lp->d_secsize;
-			dbp->b_flags = B_BUSY | B_READ;
-			dbp->b_cylinder = dbp->b_blkno / lp->d_secpercyl;
-			(*strat)(dbp);
-
-			if (biowait(dbp)) {
-				if (partoffp)
-					*partoffp = -1;
-
-				dbp->b_flags |= B_INVAL;
-				brelse(dbp);
-				return ("HOUX label I/O error");
-			}
-
-			bcopy(dbp->b_data, &osdep->u._hppa.hplabel,
-			    sizeof(osdep->u._hppa.hplabel));
-			dbp->b_flags |= B_INVAL;
-			brelse(dbp);
-
-			hl = &osdep->u._hppa.hplabel;
-			if (hl->hl_magic1 != hl->hl_magic2 ||
-			    hl->hl_magic != HPUX_MAGIC ||
-			    hl->hl_version != 1) {
-				if (partoffp)
-					*partoffp = -1;
-
-				return "HPUX label magic mismatch";
-			}
-
-			lp->d_bbsize = 8192;
-			lp->d_sbsize = 8192;
-			for (i = 0; i < MAXPARTITIONS; i++) {
-				lp->d_partitions[i].p_size = 0;
-				lp->d_partitions[i].p_offset = 0;
-				lp->d_partitions[i].p_fstype = 0;
-			}
-
-			for (i = 0; i < HPUX_MAXPART; i++) {
-				if (!hl->hl_flags[i])
-					continue;
-
-				if (hl->hl_flags[i] == HPUX_PART_ROOT) {
-					pp = &lp->d_partitions[0];
-					fstype = FS_BSDFFS;
-				} else if (hl->hl_flags[i] == HPUX_PART_SWAP) {
-					pp = &lp->d_partitions[1];
-					fstype = FS_SWAP;
-				} else if (hl->hl_flags[i] == HPUX_PART_BOOT) {
-					pp = &lp->d_partitions[RAW_PART + 1];
-					fstype = FS_BSDFFS;
-				} else
-					continue;
-
-				pp->p_size = hl->hl_parts[i].hlp_length * 2;
-				pp->p_offset = hl->hl_parts[i].hlp_start * 2;
-				pp->p_fstype = fstype;
-			}
-
-			lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-			lp->d_partitions[RAW_PART].p_offset = 0;
-			lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-			lp->d_npartitions = MAXPARTITIONS;
-			lp->d_magic = DISKMAGIC;
-			lp->d_magic2 = DISKMAGIC;
-			lp->d_checksum = 0;
-			lp->d_checksum = dkcksum(lp);
-
-			return (NULL);
+			DL_SETPSIZE(pp, hl->hl_parts[i].hlp_length * 2);
+			DL_SETPOFFSET(pp, hl->hl_parts[i].hlp_start * 2);
+			pp->p_fstype = fstype;
 		}
 
-		/* if no suitable lifdir entry found assume zero */
-		if (fsoff < 0) {
-			fsoff = 0;
-		}
+		DL_SETPSIZE(&lp->d_partitions[RAW_PART], DL_GETDSIZE(lp));
+		DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+		lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
+		lp->d_npartitions = MAXPARTITIONS;
+		lp->d_magic = DISKMAGIC;
+		lp->d_magic2 = DISKMAGIC;
+		lp->d_version = 1;
+		lp->d_checksum = 0;
+		lp->d_checksum = dkcksum(lp);
+		/* drop through */
 	}
 
 finished:
@@ -326,51 +242,23 @@ done:
 	return (error);
 }
 
-
 /*
  * Write disk label back to device after modification.
  */
 int
-writedisklabel(dev, strat, lp, osdep)
-	dev_t dev;
-	void (*strat)(struct buf *);
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
+writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
-	char *msg = "no disk label";
-	struct buf *bp;
-	struct disklabel dl;
-	struct cpu_disklabel cdl;
-	int labeloffset, error, partoff = 0, cyl = 0;
+	int error = EIO, partoff = -1;
+	struct disklabel *dlp;
+	struct buf *bp = NULL;
 
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	/*
-	 * I once played with the thought of using osdep->label{tag,sector}
-	 * as a cache for knowing where (and what) to write.  However, now I
-	 * think it might be useful to reprobe if someone has written
-	 * a newer disklabel of another type with disklabel(8) and -r.
-	 */
-	dl = *lp;
-	msg = readliflabel(bp, strat, &dl, &cdl, &partoff, &cyl, 0);
-	labeloffset = HPPA_LABELOFFSET;
-	if (msg) {	
-		dl = *lp;
-		msg = readdoslabel(bp, strat, &dl, &cdl, &partoff, &cyl, 0);
-		labeloffset = I386_LABELOFFSET;
-	}
-	if (msg) {
-		if (partoff == -1)
-			return EIO;
-
-		/* Write it in the regular place with native byte order. */
-		labeloffset = LABELOFFSET;
-		bp->b_blkno = partoff + LABELSECTOR;
-		bp->b_cylinder = cyl;
-		bp->b_bcount = lp->d_secsize;
-	}
+	if (readliflabel(bp, strat, lp, &partoff, 1) != NULL &&
+	    readdoslabel(bp, strat, lp, &partoff, 1) != NULL)
+		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
 	bp->b_blkno = partoff + LABELSECTOR;
@@ -386,67 +274,10 @@ writedisklabel(dev, strat, lp, osdep)
 	(*strat)(bp);
 	error = biowait(bp);
 
-	bp->b_flags |= B_INVAL;
-	brelse(bp);
-	return (error);
-}
-
-/*
- * Determine the size of the transfer, and make sure it is
- * within the boundaries of the partition. Adjust transfer
- * if needed, and signal errors or early completion.
- */
-int
-bounds_check_with_label(bp, lp, osdep, wlabel)
-	struct buf *bp;
-	struct disklabel *lp;
-	struct cpu_disklabel *osdep;
-	int wlabel;
-{
-#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
-	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
-	int labelsector = blockpersec(lp->d_partitions[RAW_PART].p_offset,
-	    lp) + osdep->labelsector;
-	int sz = howmany(bp->b_bcount, DEV_BSIZE);
-
-	/* avoid division by zero */
-	if (lp->d_secpercyl == 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
-	/* beyond partition? */
-	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
-		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
-		if (sz == 0) {
-			/* If exactly at end of disk, return EOF. */
-			bp->b_resid = bp->b_bcount;
-			goto done;
-		}
-		if (sz < 0) {
-			/* If past end of disk, return EINVAL. */
-			bp->b_error = EINVAL;
-			goto bad;
-		}
-		/* Otherwise, truncate request. */
-		bp->b_bcount = sz << DEV_BSHIFT;
-	}
-
-	/* Overwriting disk label? */
-	if (bp->b_blkno + blockpersec(p->p_offset, lp) <= labelsector &&
-	    bp->b_blkno + blockpersec(p->p_offset, lp) + sz > labelsector &&
-	    (bp->b_flags & B_READ) == 0 && !wlabel) {
-		bp->b_error = EROFS;
-		goto bad;
-	}
-
-	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
-	    lp->d_secpercyl;
-	return (1);
-
-bad:
-	bp->b_flags |= B_ERROR;
 done:
-	return (0);
+	if (bp) {
+		bp->b_flags |= B_INVAL;
+		brelse(bp);
+	}
+	return (error);
 }

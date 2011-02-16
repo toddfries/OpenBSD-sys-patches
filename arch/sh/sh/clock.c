@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: clock.c,v 1.2 2006/10/07 20:52:40 miod Exp $	*/
-=======
 /*	$OpenBSD: clock.c,v 1.6 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.32 2006/09/05 11:09:36 uwe Exp $	*/
 
 /*-
@@ -60,7 +56,7 @@
  * OpenBSD/sh clock module
  *  + default 64Hz
  *  + use TMU channel 0 as clock interrupt source.
- *  + use TMU channel 1 and 2 as emulated software interrupt soruce.
+ *  + use TMU channel 1 and 2 as emulated software interrupt source.
  *  + If RTC module is active, TMU channel 0 input source is RTC output.
  *    (1.6384kHz)
  */
@@ -206,14 +202,15 @@ void
 microtime(struct timeval *tv)
 {
 	static struct timeval lasttime;
+	u_int32_t tcnt0;
 	int s;
 
 	s = splclock();
 	*tv = time;
+	tcnt0 = _reg_read_4(SH_(TCNT0));
 	splx(s);
 
-	tv->tv_usec += ((sh_clock.hz_cnt - _reg_read_4(SH_(TCNT0)))
-	    * 1000000) / sh_clock.tmuclk;
+	tv->tv_usec += ((sh_clock.hz_cnt - tcnt0) * 1000000) / sh_clock.tmuclk;
 	while (tv->tv_usec >= 1000000) {
 		tv->tv_usec -= 1000000;
 		tv->tv_sec++;

@@ -150,7 +150,7 @@ userret(struct proc *p)
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
-	curpriority = p->p_priority = p->p_usrpri;
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 /*
@@ -219,13 +219,12 @@ trap(struct trap_frame *trapframe)
 	case T_TLB_MOD:
 		/* check for kernel address */
 		if (trapframe->badvaddr < 0) {
-			pt_entry_t *pte;
-			unsigned int entry;
+			pt_entry_t *pte, entry;
 			paddr_t pa;
 			vm_page_t pg;
 
 			pte = kvtopte(trapframe->badvaddr);
-			entry = pte->pt_entry;
+			entry = *pte;
 #ifdef DIAGNOSTIC
 			if (!(entry & PG_V) || (entry & PG_M))
 				panic("trap: ktlbmod: invalid pte");
@@ -253,8 +252,7 @@ trap(struct trap_frame *trapframe)
 
 	case T_TLB_MOD+T_USER:
 	    {
-		pt_entry_t *pte;
-		unsigned int entry;
+		pt_entry_t *pte, entry;
 		paddr_t pa;
 		vm_page_t pg;
 		pmap_t pmap = p->p_vmspace->vm_map.pmap;
@@ -262,7 +260,7 @@ trap(struct trap_frame *trapframe)
 		if (!(pte = pmap_segmap(pmap, trapframe->badvaddr)))
 			panic("trap: utlbmod: invalid segmap");
 		pte += uvtopte(trapframe->badvaddr);
-		entry = pte->pt_entry;
+		entry = *pte;
 #ifdef DIAGNOSTIC
 		if (!(entry & PG_V) || (entry & PG_M))
 			panic("trap: utlbmod: invalid pte");
@@ -291,7 +289,7 @@ trap(struct trap_frame *trapframe)
 		else
 			KERNEL_UNLOCK();
 		if (!USERMODE(trapframe->sr))
-			return (trapframe->pc);
+			return;
 		goto out;
 	    }
 
@@ -312,10 +310,11 @@ trap(struct trap_frame *trapframe)
 			KERNEL_UNLOCK();
 			p->p_addr->u_pcb.pcb_onfault = onfault;
 			if (rv == 0)
-				return (trapframe->pc);
+				return;
 			if (onfault != 0) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
-				return (onfault_table[onfault]);
+				trapframe->pc = onfault_table[onfault];
+				return;
 			}
 			goto err;
 		}
@@ -379,13 +378,14 @@ fault_common:
 			KERNEL_UNLOCK();
 		if (rv == 0) {
 			if (!USERMODE(trapframe->sr))
-				return (trapframe->pc);
+				return;
 			goto out;
 		}
 		if (!USERMODE(trapframe->sr)) {
 			if (onfault != 0) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
-				return (onfault_table[onfault]);
+				trapframe->pc =  onfault_table[onfault];
+				return;
 			}
 			goto err;
 		}
@@ -576,10 +576,9 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		goto out;
 	    }
 
-#ifdef DDB
 	case T_BREAK:
+#ifdef DDB
 		kdb_trap(type, trapframe);
-		return(trapframe->pc);
 #endif
 		/* Reenable interrupts if necessary */
 		if (trapframe->sr & SR_INT_ENAB) {
@@ -783,7 +782,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 	case T_BUS_ERR_LD_ST:	/* BERR asserted to cpu */
 		if ((onfault = p->p_addr->u_pcb.pcb_onfault) != 0) {
 			p->p_addr->u_pcb.pcb_onfault = 0;
-			return (onfault_table[onfault]);
+			trapframe->pc = onfault_table[onfault];
+			return;
 		}
 		goto err;
 
@@ -794,7 +794,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		trapDump("trap");
 #endif
 		printf("\nTrap cause = %d Frame %p\n", type, trapframe);
-		printf("Trap PC %p RA %p\n", trapframe->pc, trapframe->ra);
+		printf("Trap PC %p RA %p fault %p\n",
+		    trapframe->pc, trapframe->ra, trapframe->badvaddr);
 #ifdef DDB
 		stacktrace(!USERMODE(trapframe->sr) ? trapframe : p->p_md.md_regs);
 		kdb_trap(type, trapframe);
@@ -823,7 +824,6 @@ out:
 	 * Note: we should only get here if returning to user mode.
 	 */
 	userret(p);
-	return (trapframe->pc);
 }
 
 void
@@ -902,23 +902,6 @@ trapDump(char *msg)
 			    ptrp->ra, ptrp->sp, ptrp->vadr);
 		}
 	}
-
-#ifdef TLBTRACE
-	if (tlbtrcptr != NULL) {
-		register_t *next;
-
-		printf("tlbtrace:\n");
-		next = tlbtrcptr;
-		do {
-			if (next[0] != NULL) {
-				printf("pc %p, va %p segtab %p pte %p\n",
-				    next[0], next[1], next[2], next[3]);
-			}
-			next +=  4;
-			next = (register_t *)((long)next & ~0x100);
-		} while (next != tlbtrcptr);
-	}
-#endif
 
 	splx(s);
 }

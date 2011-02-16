@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: shpcicvar.h,v 1.2 2006/10/07 20:52:40 miod Exp $	*/
-=======
 /*	$OpenBSD: shpcicvar.h,v 1.6 2010/12/04 17:06:32 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: shpcicvar.h,v 1.6 2005/12/11 12:18:58 christos Exp $	*/
 
 /*-

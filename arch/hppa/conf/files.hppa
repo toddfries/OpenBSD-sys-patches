@@ -5,7 +5,7 @@
 # maxpartitions must be the first item in files.${ARCH}
 maxpartitions 16
 
-maxusers 2 8 64
+maxusers 2 8 128
 
 # 
 # "workstation console" routines
@@ -37,6 +37,7 @@ include "dev/i2o/files.i2o"
 #
 include "dev/atapiscsi/files.atapiscsi"
 include "dev/ata/files.ata"
+major	{wd = 8}
 
 #
 # ISA Bus support
@@ -54,6 +55,11 @@ include "dev/eisa/files.eisa"
 #
 include "dev/pci/files.pci"
 
+device	hme: ether, ifnet, mii, ifmedia
+file	dev/ic/hme.c			hme
+attach	hme at pci with hme_pci
+file	dev/pci/if_hme_pci.c		hme_pci
+
 #
 # CardBus support
 #
@@ -68,6 +74,11 @@ include	"dev/pcmcia/files.pcmcia"
 # Machine-independent USB drivers
 #
 include "dev/usb/files.usb"
+
+#
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
 
 #
 # HIL Human Interface Loop devices
@@ -102,6 +113,10 @@ device	power
 attach	power at gedoens
 file	arch/hppa/dev/power.c			power needs-flag
 
+device	lcd
+attach	lcd at gedoens
+file	arch/hppa/dev/lcd.c			lcd needs-flag
+
 device	mem
 attach	mem at gedoens
 file	arch/hppa/dev/mem.c			mem
@@ -119,10 +134,20 @@ device	phantomas: gedoens
 attach	phantomas at gedoens
 file	arch/hppa/dev/phantomas.c		phantomas
 
-# U2/Uturn, Runway to GSC Bus bridge & IOA.
+# GeckoBOA BC GSC+ port
+device	gecko: gedoens
+attach	gecko at gedoens
+file	arch/hppa/dev/gecko.c			gecko
+
+# U2/Uturn, Runway to GSC Bus bridge & IOA
 device	uturn: gedoens
 attach	uturn at gedoens
 file	arch/hppa/dev/uturn.c			uturn
+
+# Astro memory & I/O controller
+device	astro: gedoens
+attach	astro at gedoens
+file	arch/hppa/dev/astro.c			astro
 
 # 1FT1-0002, 1FU2-0002
 # as goes w/ 7100LC, 7300LC, 7200 and some of 8000, 8200, 8500
@@ -155,6 +180,13 @@ file	arch/hppa/dev/dino.c			dino
 attach	com at dinobus with com_dino
 file	arch/hppa/dev/com_dino.c		com_dino
 
+# Elroy, Ropes to PCI Bridge. Supports 4X PCI and dual address cycle.
+# Mercury; QuickSilver is an AGP also
+device	elroy: pcibus
+attach	elroy at gedoens
+file	arch/hppa/dev/elroy.c		elroy
+file	arch/hppa/dev/apic.c		elroy
+
 # EPIC, Excalibur PCI Interface Chip. Integrated IOA
 # SAGA is a 64-bit data path EPIC
 #device	epic: pcibus
@@ -165,8 +197,18 @@ attach	sti at gedoens with sti_gedoens
 file	arch/hppa/dev/sti_sgc.c			sti_gedoens
 file	arch/hppa/dev/sti_pci_machdep.c		sti_pci
 
-attach	siop at gedoens with siop_sgc
-file	arch/hppa/dev/siop_sgc.c		siop_sgc
+attach	siop at gedoens with siop_gedoens
+file	arch/hppa/dev/siop_sgc.c		siop_gedoens
+
+device	ssio {[irq = -1]}
+attach	ssio at pci
+file	arch/hppa/dev/ssio.c			ssio
+
+attach	com at ssio with com_ssio
+file	arch/hppa/dev/com_ssio.c		com_ssio
+
+attach	lpt at ssio with lpt_ssio
+file	arch/hppa/dev/lpt_ssio.c		lpt_ssio
 
 ###
 
@@ -194,12 +236,14 @@ file	arch/hppa/gsc/mongoose_gsc.c		mg_gsc
 
 #include "dev/fdc/files.fdc"
 #major	{fd = 7}
-#major	{ft = 8}
 #attach	fdc at gsc with fdc_gsc
 #file	arch/hppa/gsc/fdc_gsc.c			fdc_gsc
 
 attach	ie at gsc with ie_gsc
 file	arch/hppa/gsc/if_ie_gsc.c		ie_gsc
+
+attach	siop at gsc with siop_gsc
+file	arch/hppa/gsc/siop_gsc.c		siop_gsc
 
 attach	osiop at gsc with osiop_gsc
 file	arch/hppa/gsc/osiop_gsc.c		osiop_gsc
@@ -239,7 +283,7 @@ file	arch/hppa/gsc/harmony.c			harmony
 #file	dev/pci/myri.c				myri
 
 # PS/2 input ports
-#device	gsckbc {[slot = -1]}
+device	gsckbc: pckbcslot
 attach	gsckbc at gsc
 file	arch/hppa/gsc/gsckbc.c			gsckbc
 
@@ -259,6 +303,7 @@ file	arch/hppa/hppa/fpu.c
 file	arch/hppa/hppa/ipi.c			multiprocessor
 file	arch/hppa/hppa/lock_machdep.c		multiprocessor
 file	arch/hppa/hppa/machdep.c
+file	arch/hppa/hppa/mutex.c
 file	arch/hppa/hppa/pmap.c
 file	arch/hppa/hppa/process_machdep.c
 file	arch/hppa/hppa/sys_machdep.c
@@ -270,4 +315,28 @@ file	netinet/in4_cksum.c			inet
 file	arch/hppa/dev/clock.c
 file	arch/hppa/hppa/fpemu.S			fpemul
 
-file	dev/cninit.c
+# quad support is necessary for 32 bit architectures
+file	lib/libkern/adddi3.c
+file	lib/libkern/anddi3.c
+file	lib/libkern/ashldi3.c
+file	lib/libkern/ashrdi3.c
+file	lib/libkern/cmpdi2.c
+file	lib/libkern/divdi3.c
+file	lib/libkern/iordi3.c
+file	lib/libkern/lshldi3.c
+file	lib/libkern/lshrdi3.c
+file	lib/libkern/moddi3.c
+file	lib/libkern/muldi3.c
+file	lib/libkern/negdi2.c
+file	lib/libkern/notdi2.c
+file	lib/libkern/qdivrem.c
+file	lib/libkern/subdi3.c
+file	lib/libkern/ucmpdi2.c
+file	lib/libkern/udivdi3.c
+file	lib/libkern/umoddi3.c
+file	lib/libkern/xordi3.c
+
+# kern..
+file	lib/libkern/arch/hppa/milli.S
+file	lib/libkern/arch/hppa/spcopy.S
+

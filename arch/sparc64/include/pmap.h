@@ -107,6 +107,8 @@ extern struct page_size_map page_size_map[];
 #define va_to_dir(v)	(int)((((paddr_t)(v))>>PDSHIFT)&PDMASK)
 #define va_to_pte(v)	(int)((((paddr_t)(v))>>PTSHIFT)&PTMASK)
 
+#ifdef	_KERNEL
+
 struct pmap {
 	int pm_ctx;		/* Current context */
 	int pm_refs;		/* ref count */
@@ -154,7 +156,6 @@ typedef	struct pmap *pmap_t;
  */
 #define PMAP_IOENC(io)	0
 
-#ifdef	_KERNEL
 extern struct pmap kernel_pmap_;
 #define	pmap_kernel()	(&kernel_pmap_)
 
@@ -164,7 +165,7 @@ extern struct pmap kernel_pmap_;
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
 
-void pmap_bootstrap(u_long kernelstart, u_long kernelend, u_int numctx);
+void pmap_bootstrap(u_long, u_long, u_int, u_int);
 /* make sure all page mappings are modulo 16K to prevent d$ aliasing */
 #define PMAP_PREFER(pa, va)	((va) + (((va) ^ (pa)) & VA_ALIAS_MASK))
 
@@ -173,7 +174,7 @@ void pmap_bootstrap(u_long kernelstart, u_long kernelend, u_int numctx);
 /* SPARC specific? */
 void		pmap_redzone(void);
 int             pmap_dumpsize(void);
-int             pmap_dumpmmu(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t);
+int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t);
 int		pmap_pa_exists(paddr_t);
 struct proc;
 void		switchexit(struct proc *);

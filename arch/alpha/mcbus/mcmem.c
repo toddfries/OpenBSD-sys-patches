@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: mcmem.c,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 /* $NetBSD: mcmem.c,v 1.4 2002/10/02 04:06:38 thorpej Exp $ */
 
 /*

@@ -86,7 +86,7 @@ pci_display_console(iot, memt, pc, bus, device, function)
 	fn = NULL;
 
 #if NVGA_PCI
-	nmatch = DEVICE_IS_VGA_PCI(class, id);
+	nmatch = DEVICE_IS_VGA_PCI(class);
 	if (nmatch > match) {
 		match = nmatch;
 		fn = vga_pci_cnattach;

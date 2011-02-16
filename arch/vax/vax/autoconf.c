@@ -1,11 +1,9 @@
-<<<<<<< HEAD
-/*	$OpenBSD: autoconf.c,v 1.23 2006/07/23 19:23:09 miod Exp $	*/
-=======
 /*	$OpenBSD: autoconf.c,v 1.32 2009/03/20 18:39:30 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
 
 /*
+ * Copyright (c) 1988 University of Utah.
+ * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
  *
@@ -40,6 +38,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/reboot.h>
+#include <sys/disklabel.h>
 #include <sys/conf.h>
 
 #include <uvm/uvm_extern.h>
@@ -58,31 +57,23 @@
 #include <vax/mbus/mbusreg.h>
 #endif
 
+#include <dev/cons.h>
+
 #include "led.h"
 
 #include <vax/vax/gencons.h>
 
 #include <vax/bi/bireg.h>
 
-<<<<<<< HEAD
-void	cpu_dumpconf(void);	/* machdep.c */
-void	gencnslask(void);
-void	setroot(void);		/* rootfil.c */
-=======
 void	dumpconf(void);	/* machdep.c */
->>>>>>> origin/master
 
 struct cpu_dep *dep_call;
-extern struct device *bootdv;
 
 int	mastercpu;	/* chief of the system */
 
-<<<<<<< HEAD
-=======
 struct device *bootdv;
 int booted_partition;	/* defaults to 0 (aka 'a' partition) */
 
->>>>>>> origin/master
 void
 cpu_configure()
 {
@@ -91,17 +82,23 @@ cpu_configure()
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("mainbus not configured");
 
-	setroot();
-	cpu_dumpconf();
-
 	/*
 	 * We're ready to start up. Clear CPU cold start flag.
 	 */
-
 	cold = 0;
 
 	if (dep_call->cpu_clrf) 
 		(*dep_call->cpu_clrf)();
+}
+
+void
+diskconf(void)
+{
+	printf("boot device: %s\n",
+	    bootdv ? bootdv->dv_xname : "<unknown>");
+
+	setroot(bootdv, booted_partition, RB_USERREQ);
+	dumpconf();
 }
 
 int	mainbus_print(void *, const char *);
@@ -458,8 +455,6 @@ booted_hd(struct device *dev, void *aux)
 	return 1;
 }
 #endif
-<<<<<<< HEAD
-=======
 
 struct  ngcconf {
         struct  cfdriver *ng_cf;
@@ -480,4 +475,3 @@ struct nam2blk nam2blk[] = {
 	{ "vnd",	18 },
 	{ NULL,		-1 }
 };
->>>>>>> origin/master

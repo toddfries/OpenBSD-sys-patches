@@ -91,50 +91,8 @@ ASGLOBAL(start)
 	 * Startup code common to all processors.
 	 */
 ASLOCAL(main_start)
-	/*
-	 * CPU Initialization
-	 *
-	 * Every CPU starts from here..
-	 * (well, from 'start' above, which just jumps here).
-	 *
-	 * I use r11 and r22 here 'cause they're easy to not
-	 * get mixed up -- r10, for example, looks too similar
-	 * to r0 when not being careful....
-	 *
-	 * Ensure that the PSR is as we like:
-	 *	supervisor mode
-	 *	big-endian byte ordering
-	 *	concurrent operation allowed
-	 *	carry bit clear (I don't think we really care about this)
-	 *	FPU enabled
-	 *	misaligned access raises an exception
-	 *	interrupts disabled
-	 *	shadow registers frozen
-	 *
-	 * The manual says not to disable interrupts and freeze shadowing
-	 * at the same time because interrupts are not actually disabled
-	 * until after the next instruction. Well, if an interrupt
-	 * occurs now, we're in deep trouble anyway, so I'm going to do
-	 * the two together.
-	 *
-	 * Upon a reset (or poweron, I guess), the PSR indicates:
-	 *   supervisor mode
-	 *   interrupts, shadowing, FPU, misaligned exception: all disabled
-	 *
-	 * We'll just construct our own turning on what we want.
-	 *
-	 *	jfriedl@omron.co.jp
-	 */
+	bsr	_ASM_LABEL(setup_psr)
 
-	stcr	r0, SSBR	/* clear this for later */
-	stcr	r0, SR1		/* clear the CPU flags */
-
-	set	r11, r0,  1<PSR_SUPERVISOR_MODE_BIT>
-	set	r11, r11, 1<PSR_INTERRUPT_DISABLE_BIT>
-	set	r11, r11, 1<PSR_GRAPHICS_DISABLE_BIT>
-
-	stcr	r11, PSR
-	FLUSH_PIPELINE
 	stcr	r0,  VBR	/* set Vector Base Register to 0, ALWAYS! */
 	FLUSH_PIPELINE
 
@@ -150,8 +108,8 @@ ASLOCAL(main_start)
 	 * Now we will compete with the other processors to see which one
 	 * will be elected as the main one.
 	 */
-	or.u	r11, r0,  hi16(_ASM_LABEL(cpu_mutex))
-	or	r11, r11, lo16(_ASM_LABEL(cpu_mutex))
+	or.u	r11, r0,  hi16(_C_LABEL(cpu_mutex))
+	or	r11, r11, lo16(_C_LABEL(cpu_mutex))
 1:
 	FLUSH_PIPELINE
 	or	r22, r0,  1
@@ -189,9 +147,9 @@ ASLOCAL(main_start)
 	 * Main processor specific initialization (with cpu_mutex held).
 	 */
 ASLOCAL(main_init)
-	/* Switch to interrupt stack */
-	or.u	r31, r0,  hi16(_ASM_LABEL(intstack_end))
-	or	r31, r31, lo16(_ASM_LABEL(intstack_end))
+	/* Switch to startup stack */
+	or.u	r31, r0,  hi16(_ASM_LABEL(initstack_end))
+	or	r31, r31, lo16(_ASM_LABEL(initstack_end))
 
 	or.u	r3, r0, hi16(_C_LABEL(vector_list))
 	or	r3, r3, lo16(_C_LABEL(vector_list))
@@ -250,7 +208,7 @@ ASLOCAL(main_init)
 	 */
 	ldcr	r10, CPU
 	ld	r31, r10, CI_CURPCB
-	addu	r31, r31, USIZE
+	addu	r31, r31, USPACE
 
 	/* call main() - no arguments although main() still defines one */
 	bsr	_C_LABEL(main)
@@ -282,30 +240,12 @@ ASLOCAL(secondary_init)
 	bsr.n	_C_LABEL(secondary_pre_main)	/* set cpu number */
 	 or	r31, r31, lo16(_ASM_LABEL(slavestack_end))
 
-	/*
-	 * Release cpu_mutex; we have a race with other secondary CPUs here
-	 * because the stack has not been switched yet. However, since our
-	 * interrupts are disabled, the worst we can get is an NMI, and, oh
-	 * well, it means we're in deep trouble anyway.
-	 */
-	or.u	r10, r0, hi16(_ASM_LABEL(cpu_mutex))
-	st	r0, r10, lo16(_ASM_LABEL(cpu_mutex))
+	ldcr	r1, CPU
+	st	r2,  r1, CI_CURPCB	/* save stack as curpcb for traps */
 
-	ldcr	r2, CPU
-1:
-	ld	r3, r2, CI_CURPCB
-	bcnd	eq0, r3, 1b
+	bsr.n	_C_LABEL(secondary_main)
+	 addu	r31, r2, USPACE			/* switch to startup stack */
 
-	br.n	_C_LABEL(secondary_main)
-	 add	r31, r3, USIZE 		/* switch to idle stack */
-
-	/*
-	 * At this point, the CPU has been correctly initialized and has
-	 * identified itself on the console.
-	 * All it needs now is to jump to the idle loop and wait for work to
-	 * be offered.
-	 */
-	br	_ASM_LABEL(cpu_switch_search)
 #else
 
 	/*
@@ -314,15 +254,6 @@ ASLOCAL(secondary_init)
 1:	br	1b
 
 #endif	/* MULTIPROCESSOR */
-
-	/*
-	 * Release the cpu_mutex; secondary processors will now have their
-	 * chance to initialize.
-	 */
-GLOBAL(cpu_boot_secondary_processors)
-	or.u	r2,  r0,  hi16(_ASM_LABEL(cpu_mutex))
-	jmp.n	r1
-	 st	r0,  r2,  lo16(_ASM_LABEL(cpu_mutex))
 
 /*
  * void delay(int count)
@@ -333,8 +264,9 @@ GLOBAL(cpu_boot_secondary_processors)
  */
 
 GLOBAL(delay)
-	or.u	r3, r0, hi16(_cpuspeed)
-	ld	r3, r3, lo16(_cpuspeed)
+	bcnd	eq0, r2, 2f
+	or.u	r3, r0, hi16(_C_LABEL(cpuspeed))
+	ld	r3, r3, lo16(_C_LABEL(cpuspeed))
 	mul	r4, r2, r3
 	subu	r4, r4, 4	/* overhead of these instructions */
 
@@ -342,7 +274,7 @@ GLOBAL(delay)
 1:
 	bcnd.n	gt0, r4, 1b
 	 subu	r4, r4, 2	/* two cycles per iteration */
-
+2:
 	jmp	r1
 
 /*****************************************************************************/
@@ -353,9 +285,9 @@ GLOBAL(kernel_sdt)		/* SDT (segment descriptor table */
 	space	0x2000		/* 8K - 4K phys, 4K virt*/
 
 	.align	PAGE_SIZE
-ASGLOBAL(intstack)
-	space	USIZE
-ASGLOBAL(intstack_end)
+ASGLOBAL(initstack)
+	space	USPACE
+ASGLOBAL(initstack_end)
 
 #ifdef MULTIPROCESSOR
 	space	PAGE_SIZE	/* 4K, small, interim stack */
@@ -363,29 +295,17 @@ ASLOCAL(slavestack_end)
 #endif
 
 /*
- * Main processor's idle pcb and stack.
- * Should be page aligned.
- */
-	.align	PAGE_SIZE
-GLOBAL(idle_u)
-	space	USIZE
-
-/*
  * Process 0's u.
  * Should be page aligned.
  */
 	.align	PAGE_SIZE
 ASLOCAL(u0)
-	space	USIZE
+	space	USPACE
 GLOBAL(proc0paddr)
 	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
 
 /* The first processor that XMEMs this becomes the master */
 ASLOCAL(master_mpu)
-	word 0
-
-/* XMEM spin lock -- controls access to master_mpu */
-ASLOCAL(cpu_mutex)
 	word 0
 
 #if defined(DDB) || NKSYMS > 0

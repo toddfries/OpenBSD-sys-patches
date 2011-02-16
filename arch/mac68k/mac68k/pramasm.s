@@ -1,4 +1,4 @@
-/*	$OpenBSD: pramasm.s,v 1.6 2006/01/13 19:36:47 miod Exp $	*/
+/*	$OpenBSD: pramasm.s,v 1.7 2007/04/10 17:14:42 miod Exp $	*/
 /*	$NetBSD: pramasm.s,v 1.4 1995/09/28 03:15:54 briggs Exp $	*/
 
 /*

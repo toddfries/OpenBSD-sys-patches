@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pcfiic_ebus.c,v 1.5 2006/06/22 08:33:45 deraadt Exp $ */
-=======
 /*	$OpenBSD: pcfiic_ebus.c,v 1.13 2008/06/08 03:07:40 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -30,6 +26,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
+#include <sys/rwlock.h>
 
 #include <machine/bus.h>
 #include <machine/openfirm.h>
@@ -57,11 +54,18 @@ struct cfattach pcfiic_ebus_ca = {
 	sizeof(struct pcfiic_ebus_softc), pcfiic_ebus_match, pcfiic_ebus_attach
 };
 
+void	envctrl_scan(struct device *, struct i2cbus_attach_args *, void *);
+void	envctrltwo_scan(struct device *, struct i2cbus_attach_args *, void *);
+
 int
 pcfiic_ebus_match(struct device *parent, void *match, void *aux)
 {
 	struct ebus_attach_args		*ea = aux;
 	char				compat[32];
+
+	if (strcmp(ea->ea_name, "SUNW,envctrl") == 0 ||
+	    strcmp(ea->ea_name, "SUNW,envctrltwo") == 0)
+		return (1);
 
 	if (strcmp(ea->ea_name, "i2c") != 0)
 		return (0);
@@ -69,8 +73,10 @@ pcfiic_ebus_match(struct device *parent, void *match, void *aux)
 	if (OF_getprop(ea->ea_node, "compatible", compat, sizeof(compat)) == -1)
 		return (0);
 
-	if (strcmp(compat, "i2cpcf,8584") ||
-	    strcmp(compat, "SUNW,bbc-i2c"))
+	if (strcmp(compat, "pcf8584") == 0 ||
+	    strcmp(compat, "i2cpcf,8584") == 0 ||
+	    strcmp(compat, "SUNW,i2c-pic16f747") == 0 ||
+	    strcmp(compat, "SUNW,bbc-i2c") == 0)
 		return (1);
 
 	return (0);
@@ -92,10 +98,8 @@ pcfiic_ebus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (OF_getprop(ea->ea_node, "compatible", compat, sizeof(compat)) == -1)
-		return;
-
-	if (strcmp(compat, "SUNW,bbc-i2c") == 0) {
+	if (OF_getprop(ea->ea_node, "compatible", compat, sizeof(compat)) > 0 &&
+	    strcmp(compat, "SUNW,bbc-i2c") == 0) {
 		/*
 		 * On BBC-based machines, Sun swapped the order of
 		 * the registers on their clone pcf, plus they feed
@@ -160,6 +164,68 @@ fail:
 	if (esc->esc_ih == NULL)
 		sc->sc_poll = 1;
 
-	pcfiic_attach(sc, (i2c_addr_t)(addr >> 1), clock, swapregs,
-	    ofwiic_scan, &ea->ea_node);
+	if (strcmp(ea->ea_name, "SUNW,envctrl") == 0)
+		pcfiic_attach(sc, 0x55, PCF_CLOCK_12 | PCF_FREQ_45, 0,
+		    envctrl_scan, &ea->ea_node);
+	else if (strcmp(ea->ea_name, "SUNW,envctrltwo") == 0)
+		pcfiic_attach(sc, 0x55, PCF_CLOCK_12 | PCF_FREQ_45, 0,
+		    envctrltwo_scan, &ea->ea_node);
+	else
+		pcfiic_attach(sc, (i2c_addr_t)(addr >> 1), clock, swapregs,
+		    ofwiic_scan, &ea->ea_node);
+}
+
+void
+envctrl_scan(struct device *self, struct i2cbus_attach_args *iba, void *aux)
+{
+	extern int iic_print(void *, const char *);
+	struct i2c_attach_args ia;
+
+	memset(&ia, 0, sizeof(ia));
+	ia.ia_tag = iba->iba_tag;
+	ia.ia_cookie = aux;
+
+	/* Power supply 1 temperature. */
+	ia.ia_addr = 0x48;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
+
+	/* Power supply 2 termperature. */
+	ia.ia_addr = 0x49;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
+
+	/* Power supply 3 tempterature. */
+	ia.ia_addr = 0x4a;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
+
+	/* Ambient tempterature. */
+	ia.ia_addr = 0x4d;
+	ia.ia_name = "lm75";
+	config_found(self, &ia, iic_print);
+
+	/* CPU temperatures. */
+	ia.ia_addr = 0x4f;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
+}
+
+void
+envctrltwo_scan(struct device *self, struct i2cbus_attach_args *iba, void *aux)
+{
+	extern int iic_print(void *, const char *);
+	struct i2c_attach_args ia;
+
+	memset(&ia, 0, sizeof(ia));
+	ia.ia_tag = iba->iba_tag;
+	ia.ia_cookie = aux;
+
+	ia.ia_addr = 0x4a;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
+
+	ia.ia_addr = 0x4f;
+	ia.ia_name = "ecadc";
+	config_found(self, &ia, iic_print);
 }

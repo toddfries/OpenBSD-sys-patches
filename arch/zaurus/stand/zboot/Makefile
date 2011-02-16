@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2005/05/24 20:38:20 uwe Exp $
+#	$OpenBSD: Makefile,v 1.9 2007/11/26 10:26:03 deraadt Exp $
 
 MAN=	boot.8
 MANSUBDIR=zaurus
@@ -14,7 +14,7 @@ SRCS=	crt0.c
 S=	${.CURDIR}/../../../..
 
 CLEANFILES+= arm machine
-.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(obj)
 .BEGIN:
 	@([ X$(S) = X -o -h arm ] || ln -s $(S)/arch/arm/include arm)
 	@([ X$(S) = X -o -h machine ] || ln -s $(S)/arch/zaurus/include machine)
@@ -28,7 +28,7 @@ SRCS+=	close.c closeall.c cons.c ctime.c disklabel.c dkcksum.c fstat.c \
 	lseek.c memcmp.c memcpy.c memset.c open.c printf.c read.c \
 	readdir.c snprintf.c stat.c strerror.c strtol.c ufs.c
 
-# libkern
+.PATH:	${S}/lib/libkern/arch/arm ${S}/lib/libkern
 SRCS+=	strcmp.c strlcpy.c strlen.c strncmp.c strncpy.c write.c \
 	ashrdi3.c divsi3.S
 
@@ -38,8 +38,6 @@ SRCS+=	alloc.c cmd.c devopen.c diskprobe.c exec.c exit.c loadfile.c \
 
 .PATH:	${S}/stand/boot
 .PATH:	${S}/lib/libsa
-.PATH:	${S}/lib/libkern
-.PATH:	${S}/lib/libkern/arch/arm
 
 .else
 NOPROG=

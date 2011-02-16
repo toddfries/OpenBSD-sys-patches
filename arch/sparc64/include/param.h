@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: param.h,v 1.22 2007/03/20 14:42:52 deanna Exp $	*/
-=======
 /*	$OpenBSD: param.h,v 1.33 2010/11/22 20:28:31 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -77,12 +73,6 @@
 #define	MACHINE_ARCH	"sparc64"
 #define	MID_MACHINE	MID_SPARC64
 
-#ifdef _KERNEL				/* XXX */
-#ifndef _LOCORE				/* XXX */
-#include <machine/cpu.h>		/* XXX */
-#endif					/* XXX */
-#endif					/* XXX */
-
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for
  * the machine's strictest data type.  The result is u_int and must be
@@ -97,17 +87,6 @@
 #define	ALIGNBYTES		0xf
 #define	ALIGN(p)		(((u_long)(p) + ALIGNBYTES) & ~ALIGNBYTES)
 #define ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
-
-
-/*
- * The following variables are always defined and initialized (in locore)
- * so independently compiled modules (e.g. LKMs) can be used irrespective
- * of the `options SUN4?' combination a particular kernel was configured with.
- * See also the definitions of NBPG, PGOFSET and PGSHIFT below.
- */
-#if (defined(_KERNEL) || defined(_STANDALONE)) && !defined(_LOCORE)
-extern int nbpg, pgofset, pgshift;
-#endif
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
@@ -127,7 +106,7 @@ extern int nbpg, pgofset, pgshift;
  * 0x00000000f0100000.  It also uses some space around 0x00000000fff00000 to
  * map in device registers.  The rest is pretty much ours to play with.
  *
- * The kernel starts at KERNBASE.  Here's they layout.  We use macros to set
+ * The kernel starts at KERNBASE.  Here's the layout.  We use macros to set
  * the addresses so we can relocate everything easily.  We use 4MB locked TTEs
  * to map in the kernel text and data segments.  Any extra pages are recycled,
  * so they can potentially be double-mapped.  This shouldn't really be a
@@ -153,8 +132,6 @@ extern int nbpg, pgofset, pgshift;
  * KERNEND+0x010000:	64K locked TTE -- different for each CPU
  *			Contains interrupt stack, cpu_info structure,
  *			and 32KB kernel TSB.
- * KERNEND+0x020000:	IODEV_BASE -- begin mapping IO devices here.
- * 0x00000000fe000000:	IODEV_END -- end of device mapping space.
  *
  */
 #define	KERNBASE	0x001000000	/* start of kernel virtual space */
@@ -171,20 +148,10 @@ extern int nbpg, pgofset, pgshift;
 #define INTSTACK	(      KERNEND + 8*_MAXNBPG)/* 64K after kernel end */
 #define	EINTSTACK	(     INTSTACK + 2*USPACE)	/* 32KB */
 #define	CPUINFO_VA	(    EINTSTACK)
-#define	IODEV_BASE	(   CPUINFO_VA + 8*_MAXNBPG)/* 64K long */
-#define	IODEV_END	0x0f0000000UL		/* 16 MB of iospace */
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than NBPG (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11		/* log2(MCLBYTES) */
-#define	MCLBYTES	(1 << MCLSHIFT)	/* enough for whole Ethernet packet */
-#define	MCLOFSET	(MCLBYTES - 1)
 #define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
 
 #define MSGBUFSIZE	NBPG
@@ -200,10 +167,6 @@ extern int nbpg, pgofset, pgshift;
 #define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
 
-/* pages to bytes */
-#define	ctob(x)		((x) << PGSHIFT)
-#define	btoc(x)		(((vsize_t)(x) + PGOFSET) >> PGSHIFT)
-
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)
 #define	dbtob(x)	((x) << DEV_BSHIFT)
@@ -213,6 +176,18 @@ extern int nbpg, pgofset, pgshift;
 
 extern void	delay(unsigned int);
 #define	DELAY(n)	delay(n)
+
+extern int cputyp;
+
+#if defined (SUN4US) || defined (SUN4V)
+#define CPU_ISSUN4U	(cputyp == CPU_SUN4U)
+#define CPU_ISSUN4US	(cputyp == CPU_SUN4US)
+#define CPU_ISSUN4V	(cputyp == CPU_SUN4V)
+#else
+#define CPU_ISSUN4U	(1)
+#define CPU_ISSUN4US	(0)
+#define CPU_ISSUN4V	(0)
+#endif
 
 #endif /* _LOCORE */
 #endif /* _KERNEL */
@@ -224,25 +199,13 @@ extern void	delay(unsigned int);
 #define CPU_SUN4C	1
 #define CPU_SUN4M	2
 #define CPU_SUN4U	3
+#define CPU_SUN4US	4
+#define CPU_SUN4V	5 
 
 /*
- * Shorthand CPU-type macros. Enumerate all seven cases.
- * Let compiler optimize away code conditional on constants.
- *
  * On a sun4u machine, the page size is 8192.
- *
- * Note that whenever the macros defined below evaluate to expressions
- * involving variables, the kernel will perform slightly worse due to the
- * extra memory references they'll generate.
  */
 
-#define CPU_ISSUN4U	(1)
-#define CPU_ISSUN4MOR4U	(1)
-#define CPU_ISSUN4M	(0)
-#define CPU_ISSUN4C	(0)
-#define CPU_ISSUN4	(0)
-#define CPU_ISSUN4OR4C	(0)
-#define CPU_ISSUN4COR4M	(0)
 #define	NBPG		8192		/* bytes/page */
 #define	PGOFSET		(NBPG-1)	/* byte offset into page */
 #define	PGSHIFT		13		/* log2(NBPG) */
@@ -250,5 +213,11 @@ extern void	delay(unsigned int);
 #define PAGE_SHIFT	13
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
+
+#ifdef _KERNEL
+#ifndef _LOCORE
+#include <machine/cpu.h>
+#endif
+#endif
 
 #endif	/* _SPARC64_PARAM_H_ */

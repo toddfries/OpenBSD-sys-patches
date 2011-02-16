@@ -83,6 +83,9 @@
 #include <ddb/db_extern.h>
 #endif
 
+#include <powerpc/reg.h>
+#include <powerpc/fpu.h>
+
 /*
  * Global variables used here and there
  */
@@ -92,12 +95,6 @@ struct pool ppc_vecpl;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -307,31 +304,31 @@ initppc(startkernel, endkernel, args)
 	pmap_bootstrap(startkernel, endkernel);
 
 	/* now that we know physmem size, map physical memory with BATs */
-	if (physmem > btoc(0x10000000)) {
+	if (physmem > atop(0x10000000)) {
 		battable[0x1].batl = BATL(0x10000000, BAT_M);
 		battable[0x1].batu = BATU(0x10000000);
 	}
-	if (physmem > btoc(0x20000000)) {
+	if (physmem > atop(0x20000000)) {
 		battable[0x2].batl = BATL(0x20000000, BAT_M);
 		battable[0x2].batu = BATU(0x20000000);
 	}
-	if (physmem > btoc(0x30000000)) {
+	if (physmem > atop(0x30000000)) {
 		battable[0x3].batl = BATL(0x30000000, BAT_M);
 		battable[0x3].batu = BATU(0x30000000);
 	}
-	if (physmem > btoc(0x40000000)) {
+	if (physmem > atop(0x40000000)) {
 		battable[0x4].batl = BATL(0x40000000, BAT_M);
 		battable[0x4].batu = BATU(0x40000000);
 	}
-	if (physmem > btoc(0x50000000)) {
+	if (physmem > atop(0x50000000)) {
 		battable[0x5].batl = BATL(0x50000000, BAT_M);
 		battable[0x5].batu = BATU(0x50000000);
 	}
-	if (physmem > btoc(0x60000000)) {
+	if (physmem > atop(0x60000000)) {
 		battable[0x6].batl = BATL(0x60000000, BAT_M);
 		battable[0x6].batu = BATU(0x60000000);
 	}
-	if (physmem > btoc(0x70000000)) {
+	if (physmem > atop(0x70000000)) {
 		battable[0x7].batl = BATL(0x70000000, BAT_M);
 		battable[0x7].batu = BATU(0x70000000);
 	}
@@ -351,14 +348,8 @@ initppc(startkernel, endkernel, args)
 
 	/*
 	 * Look at arguments passed to us and compute boothowto.
-	 * Default to SINGLE and ASKNAME if no args or
-	 * SINGLE and DFLTROOT if this is a ramdisk kernel.
 	 */
-#ifdef RAMDISK_HOOKS
-	boothowto = RB_SINGLE | RB_DFLTROOT;
-#else
 	boothowto = RB_AUTOBOOT;
-#endif /* RAMDISK_HOOKS */
 
 	/*
 	 * Parse arg string.
@@ -497,7 +488,8 @@ cpu_startup()
 
 	printf("%s", version);
 
-	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem)/1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -514,10 +506,8 @@ cpu_startup()
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 	ppc_malloc_ok = 1;
 
-	printf("avail mem = %ld (%ldK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024);
-	printf("using %u buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up the buffers.
@@ -702,27 +692,20 @@ long dumplo = -1;			/* blocks */
  * reduce the chance that swapping trashes it.
  */
 void dumpconf(void);
+
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 	int i;
 
-
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
 	/* Always skip the first block, in case there is a label there. */
-
 	if (dumplo < ctod(1))
 		dumplo = ctod(1);
 
@@ -754,7 +737,7 @@ int cpu_dump(void);
 int
 cpu_dump()
 {
-	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -777,8 +760,8 @@ dumpsys()
 #if 0
 	u_int npg;
 	u_int i, j;
-	daddr_t blkno;
-	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
 	char *str;
 	int maddr;
 	extern int msgbufmapped;
@@ -814,7 +797,7 @@ dumpsys()
 	error = cpu_dump();
 	for (i = 0; !error && i < ndumpmem; i++) {
 		npg = dumpmem[i].end - dumpmem[i].start;
-		maddr = ctob(dumpmem[i].start);
+		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 
 		for (j = npg; j;
@@ -823,7 +806,7 @@ dumpsys()
 			/* Print out how many MBs we have to go. */
                         if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
                                 printf("%d ",
-                                    (ctob(dumpsize) - maddr) / (1024 * 1024));
+                                    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 				VM_PROT_READ, PMAP_WIRED);
@@ -885,6 +868,8 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+
+	uvm_shutdown();
 	splhigh();
 	if (howto & RB_HALT) {
 		doshutdownhooks();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dmareg.h,v 1.8 2003/06/02 23:27:44 millert Exp $	*/
+/*	$OpenBSD: dmareg.h,v 1.9 2005/11/17 23:56:02 miod Exp $	*/
 /*	$NetBSD: dmareg.h,v 1.12 1997/05/05 21:02:40 thorpej Exp $	*/
 
 /*

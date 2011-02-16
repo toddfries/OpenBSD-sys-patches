@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugio.h,v 1.2 2003/04/16 17:34:50 miod Exp $	*/
+/*	$OpenBSD: bugio.h,v 1.3 2004/01/24 21:10:31 miod Exp $	*/
 /*
  * Copyright (c) 2002, Miodrag Vallat.
  * All rights reserved.

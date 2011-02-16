@@ -134,7 +134,7 @@ sendsig(catcher, sig, mask, code, type, val)
 		psp->ps_sigstk.ss_flags |= SA_ONSTACK;
 	} else
 		fp = (struct sigframe *)(regs->sp - fsize);
-	if ((vaddr_t)fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
+	if ((vaddr_t)fp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
 		(void)uvm_grow(p, (vaddr_t)fp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) ||

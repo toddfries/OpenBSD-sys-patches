@@ -1,4 +1,4 @@
-/*	$OpenBSD: rawfs.h,v 1.1 2001/06/26 21:58:08 smurph Exp $	*/
+/*	$OpenBSD: rawfs.h,v 1.2 2002/03/14 01:26:41 millert Exp $	*/
 
 /*
  * Raw file system - for stream devices like tapes.

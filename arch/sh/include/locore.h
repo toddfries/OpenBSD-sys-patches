@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: locore.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: locore.h,v 1.5 2010/09/06 08:00:31 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: locore.h,v 1.11 2006/01/23 22:32:50 uwe Exp $	*/
 
 /*-
@@ -47,7 +43,7 @@
 
 /*
  * BANK1 r7 contains kernel stack top address.
- * BANK1 r6 conatins current frame pointer. (per process)
+ * BANK1 r6 contains current frame pointer. (per process)
  */
 /*
  * __EXCEPTION_ENTRY:

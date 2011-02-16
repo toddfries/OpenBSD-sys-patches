@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bus.h,v 1.20 2006/12/30 21:19:24 claudio Exp $	*/
-=======
 /*	$OpenBSD: bus.h,v 1.25 2009/04/20 00:42:06 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bus.h,v 1.31 2001/09/21 15:30:41 wiz Exp $	*/
 
 /*-
@@ -122,7 +118,7 @@ extern int bus_space_debug;
 
 
 /*
- * UPA and SBUS spaces are non-cached and big endian
+ * UPA and SBus spaces are non-cached and big endian
  * (except for RAM and PROM)
  *
  * PCI spaces are non-cached and little endian
@@ -216,6 +212,8 @@ struct sparc_bus_space_tag {
 		int (*)(void *), void *,
 		const char *);
 
+	bus_addr_t (*sparc_bus_addr)(bus_space_tag_t,
+		bus_space_tag_t, bus_space_handle_t);
 };
 
 /*

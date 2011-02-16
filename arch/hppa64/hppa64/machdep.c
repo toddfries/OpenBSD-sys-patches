@@ -70,12 +70,6 @@
 /*
  * Patchable buffer cache parameters
  */
-#ifdef NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
 #endif /* BUFCACHEPERCENT */
@@ -263,8 +257,8 @@ TODO hpmc/toc/pfr
 	avail_end = trunc_page(PAGE0->imm_max_mem);
 	if (avail_end > 0x4000000)
 		avail_end = 0x4000000;
-	physmem = btoc(avail_end);
-	resvmem = btoc(((vaddr_t)&kernel_text));
+	physmem = atop(avail_end);
+	resvmem = atop(((vaddr_t)&kernel_text));
 
 	/* we hope this won't fail */
 	hppa_ex = extent_create("mem", 0, HPPA_PHYSMAP, M_DEVBUF,
@@ -276,29 +270,6 @@ TODO hpmc/toc/pfr
 
 	/* sets resvphysmem */
 	pmap_bootstrap(round_page(start));
-
-	/* buffer cache parameters */
-	if (bufpages == 0)
-		bufpages = physmem / 100 *
-		    (physmem <= 0x1000? 5 : bufcachepercent);
-
-	if (nbuf == 0)
-		nbuf = bufpages < 16? 16 : bufpages;
-
-	/* Restrict to at most 50% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / 2)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE / 2;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	if (!(buf = (struct buf *)pmap_steal_memory(round_page(nbuf *
-	    sizeof(struct buf)), NULL, NULL)))
-		panic("cpu_startup: no space for bufs");
-	bzero(buf, nbuf * sizeof(struct buf));
 
 	/* space has been reserved in pmap_bootstrap() */
 	msgbufp = (struct msgbuf *)((vaddr_t)ptoa(physmem) -
@@ -402,8 +373,6 @@ void
 cpu_startup(void)
 {
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
-	int i, base, residual;
 
 	/*
 	 * psychodelic kingdom come
@@ -421,6 +390,7 @@ printf("here3\n");
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -598,6 +568,7 @@ boot(int howto)
 
 		/* XXX probably save howto into stable storage */
 
+		uvm_shutdown();
 		splhigh();
 
 		if (howto & RB_DUMP)
@@ -625,6 +596,10 @@ boot(int howto)
 	} else {
 		printf("rebooting...");
 		DELAY(2000000);
+
+		/* ask firmware to reset */
+                pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
+
 		__asm __volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
 		__asm __volatile("stwas %0, 0(%1)"
@@ -700,10 +675,10 @@ void
 dumpsys(void)
 {
 	int psize, bytes, i, n;
-	register caddr_t maddr;
-	register daddr_t blkno;
-	register int (*dump)(dev_t, daddr_t, caddr_t, size_t);
-	register int error;
+	caddr_t maddr;
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int error;
 
 	/* Save registers
 	savectx(&dumppcb); */
@@ -729,7 +704,7 @@ dumpsys(void)
 
 	if (!(error = cpu_dump())) {
 
-		bytes = ctob(physmem);
+		bytes = ptoa(physmem);
 		maddr = NULL;
 		blkno = dumplo + cpu_dumpsize();
 		dump = bdevsw[major(dumpdev)].d_dump;
@@ -1045,12 +1020,9 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 void
 consinit(void)
 {
-	static int initted;
-
-	if (!initted) {
-		initted++;
-		cninit();
-	}
+	/*
+	 * Initial console setup has been done in pdc_init().
+	 */
 }
 
 #ifdef DIAGNOSTIC

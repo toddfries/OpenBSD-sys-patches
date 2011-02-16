@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.6 2005/12/14 21:46:30 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.7 2006/01/08 14:20:17 millert Exp $	*/
 
 /* 
  * Copyright (c) 1994, The University of Utah and

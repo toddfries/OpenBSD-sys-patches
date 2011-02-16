@@ -65,7 +65,7 @@
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
 #define BLKDEV_IOSIZE	2048
-#define	MAXPHYS		(32 * 1024)	/* max raw I/O transfer size */
+#define	MAXPHYS		(64 * 1024)	/* max raw I/O transfer size */
 
 #define USPACE		(16384)
 #ifdef _KERNEL
@@ -79,18 +79,8 @@
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than PAGE_SIZE (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
  */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11
-#define	MCLBYTES	(1 << MCLSHIFT)	/* enough for whole Ethernet packet */
-#define	MCLOFSET	(MCLBYTES - 1)
-#ifndef NMBCLUSTERS
 #define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
-#endif
 
 #ifdef _KERNEL
 #if PAGE_SHIFT > 12
@@ -107,10 +97,6 @@
 /* pages ("clicks") to disk blocks */
 #define	ctod(x)	((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)	((x) >> (PGSHIFT - DEV_BSHIFT))
-
-/* pages to bytes */
-#define	ctob(x)	((x) << PGSHIFT)
-#define btoc(x) (((x) + PGOFSET) >> PGSHIFT)
 
 /* bytes to disk blocks */
 #define	btodb(x)	((x) >> DEV_BSHIFT)

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: GENERIC,v 1.175 2007/04/10 19:13:13 kettenis Exp $
-=======
 #	$OpenBSD: GENERIC,v 1.262 2011/01/08 11:56:30 damien Exp $
->>>>>>> origin/master
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -16,6 +12,9 @@
 machine		sparc64
 include		"../../../conf/GENERIC"
 maxusers	64			# estimated number of users
+
+option		SUN4US
+option		SUN4V
 
 option		PCIVERBOSE
 option		USER_PCICONF		# user-space PCI configuration
@@ -53,16 +52,15 @@ schizo*	at ssm?
 pci*	at schizo?
 pyro*	at mainbus0
 pci*	at pyro?
+vpci*	at mainbus0
+pci*	at vpci?
 pci*	at ppb?
 ppb*	at pci?
 ebus*	at mainbus0
 ebus*	at pci?
-<<<<<<< HEAD
-=======
 vbus0	at mainbus0
 sbbc*	at pci?
 cbus*	at vbus?
->>>>>>> origin/master
 
 # PCI Ethernet
 lmc*	at pci?			# Lan Media Corp SSI/T3/HSSI
@@ -93,12 +91,9 @@ re*	at pci?			# RealTek 8169/8169S/8110S
 re*	at cardbus?		# RealTek 8169/8169S/8110S
 musycc* at pci?			# Conexant HDLC controller
 art*	at musycc?		# Accoom Artery E1/T1 cards
-<<<<<<< HEAD
-=======
 thtc*	at pci?			# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
->>>>>>> origin/master
 
 ath*	at pci?			# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
@@ -125,6 +120,12 @@ mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
 scsibus* at mpi?
 arc*	at pci?			# Areca RAID Controllers
 scsibus* at arc?
+jmb*	at pci?			# JMicron JMB36x controllers
+ahci*	at jmb? flags 0x0000	# flags 0x0001 to force SATA 1 (1.5Gb/s)
+pciide*	at jmb?
+ahci*	at pci? flags 0x0000	# AHCI SATA controllers
+				# flags 0x0001 to force SATA 1 (1.5Gb/s)
+scsibus* at ahci?
 sili*	at pci?			# Silicon Image 3124/3132/3531 SATA controllers
 scsibus* at sili?
 
@@ -137,7 +138,9 @@ ubsec*	at pci?			# Broadcom 580[125]/582[012]
 # PCI sound
 auacer*	at pci?			# Acer Labs M5455
 autri*	at pci? flags 0x0000	# Trident 4D WAVE
+cmpci*  at pci?			# C-Media CMI8338/8738
 eap*	at pci?			# Ensoniq AudioPCI S5016
+emu*	at pci?			# SB Live!
 eso*	at pci?			# ESS Solo-1 PCI AudioDrive
 
 puc*	at pci?			# PCI "universal" comm device
@@ -149,22 +152,14 @@ audio*	at auacer?
 audio*	at audioce?
 audio*	at audiocs?
 audio*	at autri?
+audio*	at cmpci?
 audio*	at eap?
+audio*	at emu?
 audio*	at eso?
 
-<<<<<<< HEAD
-# OPL[23] FM synthesizers
-opl*	at eso?
-
-# MIDI support
-midi*	at autri?
-midi*	at opl?
-#midi*	at eap?
-=======
 # MIDI support
 midi*	at autri?
 midi*	at eap?
->>>>>>> origin/master
 
 # USB Controllers
 ohci*	at pci?			# Open Host Controller
@@ -201,6 +196,8 @@ uark*	at uhub?		# Arkmicro ARK3116 serial
 ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
+uchcom*	at uhub?		# WinChipHead CH341/340 serial
+ucom*	at uchcom?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -242,14 +239,8 @@ uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-#ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
-<<<<<<< HEAD
-uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
-onewire* at uow?
-
-=======
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uthum*	at uhidev?		# TEMPerHUM sensor
 utwitch* at uhidev?		# UYUREX BBU sensor
@@ -278,11 +269,11 @@ pcmcia*	at cardslot?
 cbb*	at pci?
 cardslot* at cbb?
 
->>>>>>> origin/master
 #### Standard system devices -- all required for a given architecture
 
 auxio*	at ebus?
 auxio*	at sbus?
+beep*	at ebus?
 beeper*	at ebus?
 power*	at ebus?
 
@@ -320,11 +311,8 @@ bpp*	at sbus?
 lpt*	at ebus?
 
 bbc*	at ebus?
-<<<<<<< HEAD
-=======
 led*	at ebus?
 lom*	at ebus?
->>>>>>> origin/master
 pmc*	at ebus?
 ppm*	at ebus?
 wbsd*	at ebus?
@@ -343,14 +331,16 @@ wsdisplay* at pcons?
 clock*	at sbus?
 clock*	at ebus?
 rtc*	at ebus?
-clock0	at fhc0
+clock0	at fhc?
 clkbrd*	at fhc?
+#environ* at fhc?
+
+## PROM clock -- if all else failse
+prtc0	at mainbus0
 
 ## Timer chip found on (some) sun4u systems.
 timer*	at mainbus0
 
-<<<<<<< HEAD
-=======
 # Virtual devices for sun4v systems.
 vcons0	at vbus?
 vrtc0	at vbus?
@@ -365,7 +355,6 @@ vdsp*	at vds?
 vsw*	at cbus?
 vnet*	at vsw?
 
->>>>>>> origin/master
 ## Lance Ethernet - AMD7990
 le*		at sbus?
 ledma*		at sbus?
@@ -451,20 +440,17 @@ lxtphy*	at mii?				# Level1 LXT970 PHYs
 rlphy*	at mii?				# RealTek 8139 internal PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
-<<<<<<< HEAD
-=======
 gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 nsgphy*	at mii?				# NS gigabit PHYs
 tqphy*	at mii?				# TDK 78Q212x PHYs
 jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
 ipgphy*	at mii?				# IC Plus IP1000A PHYs
->>>>>>> origin/master
 ukphy*	at mii?				# Unknown PHYs
 
 # sensors
 pcfiic*	at ebus?
 iic*	at pcfiic?
-alipm*	at pci? disable
+alipm*	at pci?
 iic*	at alipm?
 mbg*	at pci?				# Meinberg Funkuhren radio clocks
 
@@ -480,7 +466,10 @@ lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
 maxds*	at iic?				# Maxim DS1631
 maxtmp*	at iic?				# Maxim MAX6642/MAX6690
-pcfadc*	at iic?				# Philips PCF8591
+pcfadc*	at iic?				# Philips PCF8591 
+ecadc*	at iic?				# SUNW,envctrl temperature sensors
+spdmem* at iic?				# SPD memory eeproms
+tda*	at iic?				# Philips TDA8444
 
 # Framebuffers
 agten*		at sbus?		# Fujitsu AG-10e framebuffer
@@ -528,13 +517,9 @@ lpt*		at apio?
 
 stp*		at sbus?		# STP4020
 pcmcia*		at stp?
-<<<<<<< HEAD
-#com*		at pcmcia?		# PCMCIA modems/serial ports
-=======
 com*		at pcmcia?		# PCMCIA modems/serial ports
 ep*		at pcmcia?		# PCMCIA based 3C5xx ethernet
 ne*		at pcmcia?		# PCMCIA based NE2000 ethernet
->>>>>>> origin/master
 wi*		at pci?			# WaveLAN IEEE 802.11DS
 wi*		at pcmcia?		# WaveLAN IEEE 802.11DS
 

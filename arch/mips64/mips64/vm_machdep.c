@@ -53,7 +53,6 @@
 #include <sys/signalvar.h>
 
 
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -109,8 +108,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	 * If specified, give the child a different stack.
 	 */
 	if (stack != NULL)
-		/* XXX How??? */;
-#endif
+		p2->p_md.md_regs->sp = (u_int64_t)stack + stacksize;
 
 	/*
 	 * Copy the process control block to the new proc and
@@ -133,7 +131,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 
 /*
  * cpu_exit is called as the last action during exit.
- * release adress space and machine dependent resources.
  */
 void
 cpu_exit(p)
@@ -202,44 +199,11 @@ cpu_coredump(p, vp, cred, chdr)
 	return error;
 }
 
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap,
- * and size must be a multiple of CLSIZE.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	pt_entry_t *fpte, *tpte;
-
-	if (size % PAGE_SIZE)
-		panic("pagemove");
-	fpte = kvtopte(from);
-	tpte = kvtopte(to);
-	if (((vaddr_t)from & CpuCacheAliasMask) != ((vaddr_t)to & CpuCacheAliasMask)) {
-		Mips_HitSyncDCache((vaddr_t)from, size);
-	}
-	while (size > 0) {
-		tlb_flush_addr((vaddr_t)from);
-		tlb_update((vaddr_t)to, fpte->pt_entry);
-		*tpte++ = *fpte;
-		fpte->pt_entry = PG_NV | PG_G;
-		fpte++;
-		size -= NBPG;
-		from += NBPG;
-		to += NBPG;
-	}
-}
-
 extern vm_map_t phys_map;
 
 /*
  * Map an user IO request into kernel virtual address space.
  */
-
-#define trunc_page_align(x) ((vaddr_t)(x) & ~(CpuCacheAliasMask | PAGE_SIZE))
 
 void
 vmapbuf(bp, len)
@@ -276,6 +240,7 @@ vmapbuf(bp, len)
 		kva += PAGE_SIZE;
 		sz -= PAGE_SIZE;
 	}
+	pmap_update(vm_map_pmap(phys_map));
 }
 
 /*
@@ -295,6 +260,8 @@ vunmapbuf(bp, len)
 	}
 	addr = trunc_page((vaddr_t)bp->b_data);
 	sz = round_page(len + ((vaddr_t)bp->b_data - addr));
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + sz);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, sz);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;

@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-CVS
-obj
-.cvsignore
-=======
 *.log
 *.orig
 *.rej
@@ -11,4 +6,3 @@ obj
 .cvsignore
 CVS
 obj
->>>>>>> origin/master

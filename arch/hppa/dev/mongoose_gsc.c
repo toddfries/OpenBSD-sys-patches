@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: mongoose_gsc.c,v 1.1 2004/10/29 20:23:37 miod Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.

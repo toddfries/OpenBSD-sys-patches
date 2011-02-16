@@ -191,6 +191,7 @@
 #include <sys/user.h>
 #include <sys/pool.h>
 #include <sys/cdefs.h>
+#include <sys/sched.h>
  
 #include <uvm/uvm.h>
 
@@ -273,7 +274,6 @@ struct pool_allocator pmap_bootstrap_pv_allocator = {
  * allocated. (196 bytes)
  */
 static struct pool pmap_l2dtable_pool;
-static struct pool_cache pmap_l2dtable_cache;
 static vaddr_t pmap_kernel_l2dtable_kva;
 
 /*
@@ -282,7 +282,6 @@ static vaddr_t pmap_kernel_l2dtable_kva;
  * when they're allocated. (1KB)
  */
 static struct pool pmap_l2ptp_pool;
-static struct pool_cache pmap_l2ptp_cache;
 static vaddr_t pmap_kernel_l2ptp_kva;
 static paddr_t pmap_kernel_l2ptp_phys;
 
@@ -413,9 +412,9 @@ struct l2_dtable {
  * L2 allocation.
  */
 #define	pmap_alloc_l2_dtable()		\
-	    pool_cache_get(&pmap_l2dtable_cache, PR_NOWAIT)
+	    pool_get(&pmap_l2dtable_pool, PR_NOWAIT)
 #define	pmap_free_l2_dtable(l2)		\
-	    pool_cache_put(&pmap_l2dtable_cache, (l2))
+	    pool_put(&pmap_l2dtable_pool, (l2))
 /*
 #define POOL_CACHE_PADDR
 */
@@ -427,10 +426,10 @@ struct l2_dtable {
 static __inline pt_entry_t *
 pmap_alloc_l2_ptp(paddr_t *pap)		
 {
-	pt_entry_t * pted;
+	pt_entry_t *pted;
 
-	pted = pool_cache_get(&pmap_l2ptp_cache, PR_NOWAIT);
-	*pap  = vtophys((vaddr_t)pted);
+	pted = pool_get(&pmap_l2ptp_pool, PR_NOWAIT);
+	(void)pmap_extract(pmap_kernel(), (vaddr_t)pted, pap);
 	return pted;
 }
 #endif /* POOL_CACHE_PADDR */
@@ -518,9 +517,6 @@ extern void bcopy_page(vaddr_t, vaddr_t);
 vaddr_t virtual_avail;
 vaddr_t virtual_end;
 vaddr_t pmap_curmaxkvaddr;
-
-vaddr_t avail_start;
-vaddr_t avail_end;
 
 extern pv_addr_t systempage;
 
@@ -990,7 +986,7 @@ pmap_free_l2_ptp(boolean_t need_sync, pt_entry_t *l2, paddr_t pa)
 #ifdef  POOL_CACHE_PADDR
 	pool_cache_put_paddr(&pmap_l2ptp_cache, (void *)l2, pa);
 #else
-	pool_cache_put(&pmap_l2ptp_cache, (void *)l2);
+	pool_put(&pmap_l2ptp_pool, (void *)l2);
 #endif
 }
 
@@ -1889,7 +1885,7 @@ pmap_create(void)
 {
 	pmap_t pm;
 
-	pm = pool_cache_get(&pmap_pmap_cache, PR_WAITOK);
+	pm = pool_get(&pmap_pmap_pool, PR_WAITOK);
 
 	simple_lock_init(&pm->pm_lock);
 	pm->pm_refs = 1;
@@ -3104,11 +3100,6 @@ pmap_activate(struct proc *p)
 }
 
 void
-pmap_deactivate(struct proc *p)
-{
-}
-
-void
 pmap_update(pmap_t pm)
 {
 
@@ -3215,7 +3206,7 @@ pmap_destroy(pmap_t pm)
 		pmap_update(pm);
 
 		/*
-		 * Make sure cpu_switch(), et al, DTRT. This is safe to do
+		 * Make sure cpu_switchto(), et al, DTRT. This is safe to do
 		 * since this process has no remaining mappings of its own.
 		 */
 		curpcb->pcb_pl1vec = pcb->pcb_pl1vec;
@@ -3230,7 +3221,7 @@ pmap_destroy(pmap_t pm)
 	pmap_free_l1(pm);
 
 	/* return the pmap to the pool */
-	pool_cache_put(&pmap_pmap_cache, pm);
+	pool_put(&pmap_pmap_pool, pm);
 }
 
 
@@ -4026,16 +4017,15 @@ pmap_bootstrap(pd_entry_t *kernel_l1pt, vaddr_t vstart, vaddr_t vend)
 	 */
 	pool_init(&pmap_l2dtable_pool, sizeof(struct l2_dtable), 0, 0, 0,
 	    "l2dtblpl", NULL);
-	pool_cache_init(&pmap_l2dtable_cache, &pmap_l2dtable_pool,
-	    pmap_l2dtable_ctor, NULL, NULL);
+	 pool_set_ctordtor(&pmap_l2dtable_pool, pmap_l2dtable_ctor, NULL,
+	     NULL);
 
 	/*
 	 * Initialise the L2 descriptor table pool and cache
 	 */
 	pool_init(&pmap_l2ptp_pool, L2_TABLE_SIZE_REAL, 0, L2_TABLE_SIZE_REAL,
 	    0, "l2ptppl", NULL);
-	pool_cache_init(&pmap_l2ptp_cache, &pmap_l2ptp_pool,
-	    pmap_l2ptp_ctor, NULL, NULL);
+	pool_set_ctordtor(&pmap_l2ptp_pool, pmap_l2ptp_ctor, NULL, NULL);
 
 	cpu_dcache_wbinv_all();
 }
@@ -4104,18 +4094,6 @@ pmap_alloc_specials(vaddr_t *availp, int pages, vaddr_t *vap, pt_entry_t **ptep)
 void
 pmap_init(void)
 {
-	extern int physmem;
-
-	/*
-	 * Set the available memory vars - These do not map to real memory
-	 * addresses and cannot as the physical memory is fragmented.
-	 * They are used by ps for %mem calculations.
-	 * One could argue whether this should be the entire memory or just
-	 * the memory that is useable in a user process.
-	 */
-	avail_start = 0;
-	avail_end = physmem * PAGE_SIZE;
-
 	/*
 	 * Now we need to free enough pv_entry structures to allow us to get
 	 * the kmem_map allocated and inited (done after this

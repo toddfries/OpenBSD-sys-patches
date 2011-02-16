@@ -53,16 +53,17 @@ ENTRY(mtx_enter)
 
 	st	r2,  r31, 0		/* save mtx */
 enter_again:
-	bsr.n	_C_LABEL(raiseipl)	/* raiseipl(mtx->mtx_wantipl) */
-	 ld	r2,  r2,  MTX_WANTIPL
-
+	ld	r2,  r2,  MTX_WANTIPL
+	bcnd	eq0, r2,  1f
+	bsr	_C_LABEL(raiseipl)	/* raiseipl(mtx->mtx_wantipl) */
+1:
 	ld	r4,  r31, 0
 	or	r3,  r0,  1
 	xmem	r3,  r4,  r0		/* attempt to claim the lock, old */
 	bcnd	ne0, r3,  enter_failed	/* mtx->mtx_lock is 0 if successful */
 
-	st	r2,  r4,  MTX_OLDIPL	/* save into mtx_oldipl */
 	ldcr	r3,  CPU
+	st	r2,  r4,  MTX_OLDIPL	/* save into mtx_oldipl */
 	st	r3,  r4,  MTX_CPU	/* mtx->mtx_cpu = curcpu() */
 #ifdef DIAGNOSTIC
 	ld	r2,  r3,  CI_MUTEX_LEVEL
@@ -75,6 +76,8 @@ enter_again:
 	 addu	r31, r31, 8
 
 enter_failed:	/* the lock is not ours... */
+	ld	r3,  r4,  MTX_WANTIPL
+	bcnd	eq0, r3,  2f
 	bcnd	ne0, r2,  1f		/* splx(oldipl) */
 	bsr.n	_C_LABEL(spl0)
 	 addu	r1,  r1,  2f - . - 4
@@ -107,9 +110,10 @@ enter_panic:
 #else	/* MULTIPROCESSOR */
 
 	st	r2,  r31, 0		/* save mtx */
-	bsr.n	_C_LABEL(raiseipl)	/* raiseipl(mtx->mtx_wantipl) */
-	 ld	r2,  r2,  MTX_WANTIPL
-
+	ld	r2,  r2,  MTX_WANTIPL
+	bcnd	eq0, r2,  1f
+	bsr	_C_LABEL(raiseipl)	/* raiseipl(mtx->mtx_wantipl) */
+1:
 	ld	r4,  r31, 0
 	ldcr	r3,  CPU
 	st	r3,  r4,  MTX_LOCK	/* locked! */
@@ -238,13 +242,13 @@ ENTRY(mtx_leave)
 	st	r6,  r5,  CI_MUTEX_LEVEL
 #endif
 	st	r0,  r2,  MTX_CPU		/* mtx->mtx_cpu = NULL */
-#ifdef DEBUG
-	st	r0,  r2,  MTX_OLDIPL		/* mtx->mtx_oldipl = IPL_NONE */
-#endif
-
-	bcnd.n	ne0, r3,  1f			/* splx(mtx->mtx_oldipl) */
+	bcnd.n	eq0, r4,  2f
 	 st	r0,  r2,  MTX_LOCK		/* mtx->mtx_lock = 0 */
+
+	bcnd	ne0, r3,  1f			/* splx(mtx->mtx_oldipl) */
 	br	_C_LABEL(spl0)
 1:
 	br.n	_C_LABEL(setipl)
 	 or	r2,  r3,  r0
+2:
+	jmp	r1

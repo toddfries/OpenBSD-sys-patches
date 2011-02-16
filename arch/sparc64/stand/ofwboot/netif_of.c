@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: netif_of.c,v 1.3 2001/08/22 10:41:08 art Exp $	*/
-=======
 /*	$OpenBSD: netif_of.c,v 1.6 2009/11/04 12:03:57 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: netif_of.c,v 1.1 2000/08/20 14:58:39 mrg Exp $	*/
 
 /*

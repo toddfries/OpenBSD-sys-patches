@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: lk201reg.h,v 1.1 2001/05/16 22:15:17 hugh Exp $	*/
 /* $NetBSD: lk201reg.h,v 1.1 1998/09/17 20:01:57 drochner Exp $ */
 
 /* 

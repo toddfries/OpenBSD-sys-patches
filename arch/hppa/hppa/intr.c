@@ -85,12 +85,6 @@ splassert_check(int wantipl, const char *func)
 #endif
 
 void
-softtty(void)
-{
-
-}
-
-void
 cpu_intr_init(void)
 {
 	struct cpu_info *ci = curcpu();
@@ -142,6 +136,19 @@ cpu_intr_init(void)
 	ssm(PSL_I, mask);
 }
 
+int
+cpu_intr_findirq(void)
+{
+	int irq;
+
+	for (irq = 0; irq < CPU_NINTS; irq++)
+		if (intr_table[irq].handler == NULL &&
+		    intr_table[irq].pri == 0)
+			return irq;
+
+	return -1;
+}
+
 void *
 cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *), void *arg,
     const char *name)
@@ -152,14 +159,14 @@ cpu_intr_map(void *v, int pri, int irq, int (*handler)(void *), void *arg,
 	if (irq < 0 || irq >= CPU_NINTS)
 		return (NULL);
 
-	MALLOC(cnt, struct evcount *, sizeof *cnt, M_DEVBUF, M_NOWAIT);
+	cnt = (struct evcount *)malloc(sizeof *cnt, M_DEVBUF, M_NOWAIT);
 	if (!cnt)
 		return (NULL);
 
 	iv = &ivb[irq];
 	if (iv->handler) {
 		if (!pv->share) {
-			FREE(cnt, M_DEVBUF);
+			free(cnt, M_DEVBUF);
 			return (NULL);
 		} else {
 			iv = pv->share;
@@ -220,7 +227,7 @@ cpu_intr_establish(int pri, int irq, int (*handler)(void *), void *arg,
 		intr_more += 2 * CPU_NINTS;
 		for (ev = iv->next + CPU_NINTS; ev < intr_more; ev++)
 			ev->share = iv->share, iv->share = ev;
-		FREE(cnt, M_DEVBUF);
+		free(cnt, M_DEVBUF);
 		iv->cnt = NULL;
 	} else
 		evcount_attach(cnt, name, NULL);

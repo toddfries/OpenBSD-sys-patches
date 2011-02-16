@@ -20,3 +20,5 @@
 #define	VM_FREELIST_DMA32	1	/* memory suitable for 32-bit DMA */
 
 #include <mips64/vmparam.h>
+
+#endif	/* _SGI_VMPARAM_H_ */

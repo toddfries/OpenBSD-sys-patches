@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fbvar.h,v 1.4 2005/03/07 16:44:52 miod Exp $	*/
-=======
 /*	$OpenBSD: fbvar.h,v 1.8 2008/12/29 22:07:35 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: fbvar.h,v 1.9 1997/07/07 23:31:30 pk Exp $ */
 
 /*

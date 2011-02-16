@@ -45,7 +45,6 @@
 
 #include <arm/armreg.h>
 #include <arm/cpufunc.h>
-#include <machine/intr.h>
 #include <arm/softintr.h>
 
 extern __volatile int current_ipl_level;
@@ -58,7 +57,6 @@ void i80321_splx(int new);
 int i80321_splraise(int ipl);
 int i80321_spllower(int ipl);
 void i80321_setsoftintr(int si);
-
 
 /*
  * An useful function for interrupt handlers.

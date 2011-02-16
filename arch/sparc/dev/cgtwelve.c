@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgtwelve.c,v 1.15 2006/06/02 20:00:54 miod Exp $	*/
-=======
 /*	$OpenBSD: cgtwelve.c,v 1.17 2008/12/26 22:30:21 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002, 2003 Miodrag Vallat.  All rights reserved.

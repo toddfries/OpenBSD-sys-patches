@@ -1,4 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.2 1998/12/01 03:05:44 mickey Exp $	*/
+/*	$OpenBSD: ptrace.h,v 1.3 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff

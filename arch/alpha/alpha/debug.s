@@ -31,12 +31,19 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#if defined (MULTIPROCESSOR)
+.file	5 __FILE__
+.loc	5 __LINE__
+#else
+.file	4 __FILE__
+.loc	4 __LINE__
+#endif
+
 /*
  * Debugger glue.
  */
 
 	.text
-inc6:	.stabs	__FILE__,132,0,0,inc6; .loc	1 __LINE__
 
 /*
  * Debugger stack.

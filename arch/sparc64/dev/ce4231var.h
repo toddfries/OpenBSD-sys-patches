@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ce4231var.h,v 1.7 2004/09/29 19:17:43 miod Exp $	*/
-=======
 /*	$OpenBSD: ce4231var.h,v 1.11 2010/07/26 23:17:19 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: autoconf.h,v 1.14 2005/03/23 17:10:24 miod Exp $	*/
-=======
 /*	$OpenBSD: autoconf.h,v 1.18 2010/06/29 21:28:08 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: autoconf.h,v 1.20 1997/05/24 20:03:03 pk Exp $ */
 
 /*
@@ -183,9 +179,6 @@ struct bootpath {
 
 struct bootpath	*bootpath_store(int, struct bootpath *);
 int		sd_crazymap(int);
-
-/* Parse a disk string into a dev_t, return device struct pointer */
-struct	device *parsedisk(char *, int, int, dev_t *);
 
 void	bootstrap(void);
 int	firstchild(int);

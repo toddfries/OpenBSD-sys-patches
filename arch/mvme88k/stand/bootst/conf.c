@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.2 1997/04/22 16:02:20 gvf Exp $ */
+/*	$OpenBSD: conf.c,v 1.1 1998/12/15 06:09:51 smurph Exp $ */
 
 #include <stand.h>
 #include <rawfs.h>

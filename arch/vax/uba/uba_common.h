@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uba_common.h,v 1.3 2003/06/02 23:27:58 millert Exp $	*/
-=======
 /*	$OpenBSD: uba_common.h,v 1.5 2008/08/18 23:10:39 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uba_common.h,v 1.2 1999/06/21 16:23:01 ragge Exp $ */
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile.inc,v 1.12 2004/07/13 21:03:38 marc Exp $
-=======
 #	$OpenBSD: Makefile.inc,v 1.16 2010/06/29 21:33:54 miod Exp $
->>>>>>> origin/master
 #	$NetBSD: Makefile.inc,v 1.5 1996/02/01 22:33:01 mycroft Exp $
 
 BINDIR=	/usr/mdec
@@ -48,19 +44,6 @@ CFLAGS+=	-fno-stack-protector
 # XXX <machine/param.h> incorrectly uses STANDALONE instead of _STANDALONE
 DEFS=		-DSTANDALONE -D_STANDALONE -DRELOC=${RELOC} -DSUN_BOOTPARAMS \
 		-DSUN4 -DSUN4C -DSUN4D -DSUN4M
-
-### Figure out what to use for libkern
-LIBKERNDIR=		${.CURDIR}/../libkern
-
-.if exists(${LIBKERNDIR}/obj.${MACHINE})
-LIBKERNOBJDIR=		${LIBKERNDIR}/obj.${MACHINE}
-.elif exists(${LIBKERNDIR}/obj)
-LIBKERNOBJDIR=		${LIBKERNDIR}/obj
-.else
-LIBKERNOBJDIR=		${LIBKERNDIR}
-.endif
-
-LIBKERN=		${LIBKERNOBJDIR}/libkern.a
 
 ### Figure out what to use for libsa
 LIBSADIR=		${.CURDIR}/../libsa

@@ -87,11 +87,10 @@ bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
          */
         mapsize = sizeof(struct m88k_bus_dmamap) +
             (sizeof(bus_dma_segment_t) * (nsegments - 1));
-        if ((mapstore = malloc(mapsize, M_DEVBUF,
-            (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+        if ((mapstore = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL)
                 return (ENOMEM);
 
-        memset(mapstore, 0, mapsize);
         map = (struct m88k_bus_dmamap *)mapstore;
         map->_dm_size = size;
         map->_dm_segcnt = nsegments;
@@ -581,7 +580,7 @@ bus_dmamem_unmap(t, kva, size)
 }
 
 /*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common function for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t

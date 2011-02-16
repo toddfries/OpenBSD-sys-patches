@@ -87,13 +87,13 @@
 #define SHMMAXPGS	8192		/* 8mb */
 #endif
 
+#ifndef	VM_PHYSSEG_MAX
 #define	VM_PHYSSEG_MAX	8	/* Max number of physical memory segments */
 #endif
 #ifndef	VM_PHYSSEG_STRAT
 #define VM_PHYSSEG_STRAT VM_PSTRAT_BSEARCH
 #endif
 #define VM_PHYSSEG_NOADD
-
 
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		((vaddr_t)0x0000000000004000L)
@@ -106,7 +106,9 @@
 #define VM_PIE_MIN_ADDR		PAGE_SIZE
 #define VM_PIE_MAX_ADDR		(0x10000000UL)
 
+#ifndef VM_NFREELIST
 #define	VM_NFREELIST		1
+#endif
 #define	VM_FREELIST_DEFAULT	0
 
 /* virtual sizes (bytes) for various kernel submaps */
@@ -122,20 +124,18 @@ typedef struct pv_entry {
 	struct pv_entry	*pv_next;	/* next pv_entry */
 	struct pmap	*pv_pmap;	/* pmap where mapping lies */
 	vaddr_t		pv_va;		/* virtual address for mapping */
-	int		pv_flags;	/* Some flags for the mapping */
 } *pv_entry_t;
 
 #define __HAVE_VM_PAGE_MD
 struct vm_page_md {
-	struct pv_entry pvent;		/* pv list of this seg */
+	struct pv_entry pv_ent;		/* pv list of this seg */
 };
 
 #define	VM_MDPAGE_INIT(pg) \
 	do { \
-		(pg)->mdpage.pvent.pv_next = NULL; \
-		(pg)->mdpage.pvent.pv_pmap = NULL; \
-		(pg)->mdpage.pvent.pv_va = 0; \
-		(pg)->mdpage.pvent.pv_flags = 0; \
+		(pg)->mdpage.pv_ent.pv_next = NULL; \
+		(pg)->mdpage.pv_ent.pv_pmap = NULL; \
+		(pg)->mdpage.pv_ent.pv_va = 0; \
 	} while (0)
 
 #endif	/* _KERNEL && !_LOCORE */

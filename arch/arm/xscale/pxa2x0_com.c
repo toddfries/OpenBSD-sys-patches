@@ -36,11 +36,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-/*
-__KERNEL_RCSID(0, "$NetBSD: pxa2x0_com.c,v 1.4 2003/07/15 00:24:55 lukem Exp $");
-*/
-
 #ifndef COM_PXA2X0
 #error "You must use options COM_PXA2X0 to get PXA2x0 serial port support"
 #endif

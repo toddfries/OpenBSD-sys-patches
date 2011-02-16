@@ -1,4 +1,4 @@
-/*	$OpenBSD: frame.h,v 1.15 2003/07/15 18:15:41 mickey Exp $	*/
+/*	$OpenBSD: frame.h,v 1.16 2004/04/07 18:24:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff

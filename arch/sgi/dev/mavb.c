@@ -1280,7 +1280,7 @@ mavb_match(struct device *parent, void *match, void *aux)
 	control = bus_space_read_8(maa->maa_iot, ioh, MAVB_CONTROL);
 	bus_space_unmap(maa->maa_iot, ioh, MAVB_NREGS);
 
-	return (1);
+	return ((control & MAVB_CONTROL_CODEC_PRESENT) != 0);
 }
 
 void
@@ -1289,7 +1289,6 @@ mavb_attach(struct device *parent, struct device *self, void *aux)
 	struct mavb_softc *sc = (void *)self;
 	struct macebus_attach_args *maa = aux;
 	bus_dma_segment_t seg;
-	u_int64_t control;
 	u_int16_t value;
 	int rseg;
 
@@ -1340,12 +1339,6 @@ mavb_attach(struct device *parent, struct device *self, void *aux)
 	/* Establish interrupt.  */
 	macebus_intr_establish(maa->maa_intr, maa->maa_mace_intr,
 	    IST_EDGE, IPL_AUDIO, mavb_intr, sc, sc->sc_dev.dv_xname);
-
-	control = bus_space_read_8(sc->sc_st, sc->sc_sh, MAVB_CONTROL);
-	if (!(control & MAVB_CONTROL_CODEC_PRESENT)) {
-		printf(": no codec present\n");
-		return;
-	}
 
 	/* 2. Assert the RESET signal.  */
 	bus_space_write_8(sc->sc_st, sc->sc_sh, MAVB_CONTROL,

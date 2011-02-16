@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: prom_machdep.c,v 1.1 2005/04/19 21:30:18 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat
  *

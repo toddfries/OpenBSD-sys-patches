@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zbsdmod.c,v 1.7 2005/05/02 02:34:06 uwe Exp $	*/
-=======
 /*	$OpenBSD: zbsdmod.c,v 1.8 2010/12/24 14:16:58 grange Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

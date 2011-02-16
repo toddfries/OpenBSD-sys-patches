@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: devopen.c,v 1.4 2005/05/12 05:10:30 uwe Exp $	*/
-=======
 /*	$OpenBSD: devopen.c,v 1.9 2010/12/06 22:51:46 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -38,7 +34,7 @@
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
 const char bdevs[][4] = {
-	"wd", "", "fd", "wt", "sd", "st", "cd", "mcd",
+	"wd", "", "fd", "", "sd", "st", "cd", "mcd",
 	"", "", "", "", "", "", "", "scd", "", "hd", ""
 
 };

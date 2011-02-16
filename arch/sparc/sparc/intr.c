@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.c,v 1.27 2004/09/29 07:35:14 miod Exp $ */
-=======
 /*	$OpenBSD: intr.c,v 1.37 2010/12/21 14:56:24 claudio Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: intr.c,v 1.20 1997/07/29 09:42:03 fair Exp $ */
 
 /*
@@ -55,13 +51,7 @@
 
 #include <dev/cons.h>
 
-<<<<<<< HEAD
-#include <net/netisr.h>
-#include <net/if.h>
-
-=======
 #include <machine/atomic.h>
->>>>>>> origin/master
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
@@ -101,47 +91,6 @@ strayintr(fp)
 
 static struct intrhand level10 = { clockintr, NULL, (IPL_CLOCK << 8) };
 static struct intrhand level14 = { statintr, NULL, (IPL_STATCLOCK << 8) };
-<<<<<<< HEAD
-union sir sir;
-int netisr;
-
-/*
- * Level 1 software interrupt (could also be Sbus level 1 interrupt).
- * Three possible reasons:
- *	ROM console input needed
- *	Network software interrupt
- *	Soft clock interrupt
- */
-int
-soft01intr(fp)
-	void *fp;
-{
-	if (sir.sir_any) {
-		if (sir.sir_which[SIR_NET]) {
-			int n, s;
-
-			s = splhigh();
-			n = netisr;
-			netisr = 0;
-			splx(s);
-			sir.sir_which[SIR_NET] = 0;
-#define DONETISR(bit, fn) \
-	do { \
-		if (n & (1 << bit)) \
-			fn(); \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-		}
-		if (sir.sir_which[SIR_CLOCK]) {
-			sir.sir_which[SIR_CLOCK] = 0;
-			softclock();
-		}
-	}
-	return (1);
-}
-=======
->>>>>>> origin/master
 
 #if defined(SUN4M)
 void	nmi_hard(void);
@@ -222,21 +171,15 @@ intr_init()
  */
 struct intrhand *intrhand[15] = {
 	NULL,			/*  0 = error */
-<<<<<<< HEAD
-	&level01,		/*  1 = software level 1 + Sbus */
-	NULL,	 		/*  2 = Sbus level 2 (4m: Sbus L1) */
-	NULL,			/*  3 = SCSI + DMA + Sbus level 3 (4m: L2,lpt)*/
-=======
 	NULL,			/*  1 = software level 1 + SBus */
 	NULL,	 		/*  2 = SBus level 2 (4m: SBus L1) */
 	NULL,			/*  3 = SCSI + DMA + SBus level 3 (4m: L2,lpt)*/
->>>>>>> origin/master
 	NULL,			/*  4 = software level 4 (tty softint) (scsi) */
-	NULL,			/*  5 = Ethernet + Sbus level 4 (4m: Sbus L3) */
+	NULL,			/*  5 = Ethernet + SBus level 4 (4m: SBus L3) */
 	NULL,			/*  6 = software level 6 (not used) (4m: enet)*/
-	NULL,			/*  7 = video + Sbus level 5 */
-	NULL,			/*  8 = Sbus level 6 */
-	NULL,			/*  9 = Sbus level 7 */
+	NULL,			/*  7 = video + SBus level 5 */
+	NULL,			/*  8 = SBus level 6 */
+	NULL,			/*  9 = SBus level 7 */
 	&level10,		/* 10 = counter 0 = clock */
 	NULL,			/* 11 = floppy */
 	NULL,			/* 12 = zs hardware interrupt */
@@ -288,10 +231,8 @@ static struct {
 	void *data;
 } fastvec_share[15];
 
-#ifdef DIAGNOSTIC
 extern int sparc_interrupt4m[];
 extern int sparc_interrupt44c[];
-#endif
 
 /*
  * Attach an interrupt handler to the vector chain for the given level.

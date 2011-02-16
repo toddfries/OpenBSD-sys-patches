@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bsd_fdintr.s,v 1.10 2004/09/22 22:12:59 miod Exp $	*/
-=======
 /*	$OpenBSD: bsd_fdintr.s,v 1.13 2010/08/17 20:05:08 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bsd_fdintr.s,v 1.11 1997/04/07 21:00:36 pk Exp $ */
 
 /*

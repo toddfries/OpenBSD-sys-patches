@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ieee.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: ieee.h,v 1.3 2008/09/07 20:36:07 martynas Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1992, 1993

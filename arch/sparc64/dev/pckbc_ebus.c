@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pckbc_ebus.c,v 1.6 2003/12/16 15:08:50 jason Exp $	*/
-=======
 /*	$OpenBSD: pckbc_ebus.c,v 1.12 2010/11/23 04:07:55 shadchin Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -158,13 +154,8 @@ pckbc_ebus_attach(parent, self, aux)
 			return;
 		}
 
-<<<<<<< HEAD
-		t = malloc(sizeof(struct pckbc_internal), M_DEVBUF, M_NOWAIT);
-		bzero(t, sizeof(struct pckbc_internal));
-=======
 		t = malloc(sizeof(*t), M_DEVBUF, M_NOWAIT | M_ZERO);
 		t->t_flags = flags;
->>>>>>> origin/master
 	}
 
 	psc->intr_establish = pckbc_ebus_intr_establish;

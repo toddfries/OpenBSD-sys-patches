@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 1997/04/22 16:13:42 gvf Exp $
+#	$OpenBSD: Makefile.inc,v 1.2 1997/10/20 00:33:47 deraadt Exp $
 
 LIB_Z_DIR=${S}/arch/mvme68k/stand/libz
 

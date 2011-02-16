@@ -1,4 +1,4 @@
-/*	$OpenBSD: sigcode.s,v 1.2 2001/12/06 23:24:59 miod Exp $	*/
+/*	$OpenBSD: sigcode.s,v 1.3 2003/06/02 23:27:48 millert Exp $	*/
 /*	$NetBSD: sigcode.s,v 1.2 1997/04/25 02:22:03 thorpej Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vm_machdep.c,v 1.31 2006/07/24 17:26:29 miod Exp $	*/
-=======
 /*	$OpenBSD: vm_machdep.c,v 1.38 2008/08/18 23:19:29 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vm_machdep.c,v 1.67 2000/06/29 07:14:34 mrg Exp $	     */
 
 /*
@@ -62,27 +58,11 @@
 
 #include <sys/syscallargs.h>
 
-volatile int whichqs;
-
-/*
- * pagemove - moves pages at virtual address from to virtual address to,
- * block moved of size size. Using fast insn bcopy for pte move.
- */
 void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
+cpu_exit(struct proc *p)
 {
-	pt_entry_t *fpte, *tpte;
-	int	stor;
-
-	fpte = kvtopte(from);
-	tpte = kvtopte(to);
-
-	stor = (size >> VAX_PGSHIFT) * sizeof(pt_entry_t);
-	bcopy(fpte, tpte, stor);
-	bzero(fpte, stor);
-	mtpr(0, PR_TBIA);
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -136,13 +116,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	tf = (struct trapframe *)((u_int)p2->p_addr + USPACE) - 1;
 	p2->p_addr->u_pcb.framep = tf;
 	bcopy(p1->p_addr->u_pcb.framep, tf, sizeof(*tf));
-
-	/*
-	 * Activate address space for the new process.	The PTEs have
-	 * already been allocated by way of pmap_create().
-	 * This writes the page table registers to the PCB.
-	 */
-	pmap_activate(p2);
 
 	/* Mark guard page invalid in kernel stack */
 	*kvtopte((u_int)p2->p_addr + REDZONEADDR) &= ~PG_V;
@@ -298,10 +271,7 @@ vmapbuf(bp, len)
 	paddr_t pa;
 	struct proc *p;
 
-	if (vax_boardtype != VAX_BTYP_46
-	    && vax_boardtype != VAX_BTYP_48
-	    && vax_boardtype != VAX_BTYP_49
-	    && vax_boardtype != VAX_BTYP_1303)
+	if (phys_map == NULL)
 		return;
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vmapbuf");
@@ -336,16 +306,15 @@ vunmapbuf(bp, len)
 #if VAX46 || VAX48 || VAX49 || VAX53 || VAX60
 	vaddr_t addr, off;
 
-	if (vax_boardtype != VAX_BTYP_46
-	    && vax_boardtype != VAX_BTYP_48
-	    && vax_boardtype != VAX_BTYP_49
-	    && vax_boardtype != VAX_BTYP_1303)
+	if (phys_map == NULL)
 		return;
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vunmapbuf");
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - addr;
 	len = round_page(off + len);
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + len);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;

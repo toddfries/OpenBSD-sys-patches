@@ -230,8 +230,7 @@ apciattach(parent, self, aux)
 	/* Establish our interrupt handler. */
 	sc->sc_isr.isr_func = apciintr;
 	sc->sc_isr.isr_arg = sc;
-	sc->sc_isr.isr_priority =
-	    (sc->sc_flags & APCI_HASFIFO) ? IPL_TTY : IPL_TTYNOBUF;
+	sc->sc_isr.isr_priority = IPL_TTY;
 	frodo_intr_establish(parent, fa->fa_line, &sc->sc_isr, self->dv_xname);
 
 	/* Set soft carrier if requested by operator. */
@@ -894,9 +893,9 @@ apcicnprobe(cp)
 	frodoregs = (volatile u_int8_t *)IIOV(FRODO_BASE);
 	if (badaddr((caddr_t)frodoregs) == 0 &&
 	    !ISSET(frodoregs[FRODO_IISR], FRODO_IISR_SERVICE))
-		cp->cn_pri = CN_REMOTE;
+		cp->cn_pri = CN_HIGHPRI;
 	else
-		cp->cn_pri = CN_NORMAL;
+		cp->cn_pri = CN_LOWPRI;
 
 	/*
 	 * If our priority is higher than the currently-remembered

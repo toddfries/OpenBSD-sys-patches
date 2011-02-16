@@ -98,7 +98,6 @@ struct cfdriver pxammc_cd = {
 	NULL, "pxammc", DV_DULL
 };
 
-#define SDMMC_DEBUG
 #ifdef SDMMC_DEBUG
 int sdhcdebug = 0;	/* XXX must be named sdhcdebug for sdmmc.c */
 #define DPRINTF(n,s)	do { if ((n) <= sdhcdebug) printf s; } while (0)

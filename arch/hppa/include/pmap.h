@@ -33,6 +33,8 @@
 #include <uvm/uvm_pglist.h>
 #include <uvm/uvm_object.h>
 
+#ifdef	_KERNEL
+
 struct pmap {
 	struct uvm_object pm_obj;	/* object (lck by object lock) */
 #define	pm_lock	pm_obj.vmobjlock
@@ -69,8 +71,6 @@ struct vp_entry {
 	u_int	vp_tlbpage;
 	u_int	vp_ptr;
 };
-
-#ifdef	_KERNEL
 
 extern void gateway_page(void);
 extern struct pmap kernel_pmap_store;
@@ -113,6 +113,7 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_PROT(TLB_REFTRAP))
 
 #define pmap_unuse_final(p)		/* nothing */
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
 void pmap_bootstrap(vaddr_t);
 boolean_t pmap_changebit(struct vm_page *, u_int, u_int);

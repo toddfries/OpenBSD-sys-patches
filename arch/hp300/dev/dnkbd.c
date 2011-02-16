@@ -556,7 +556,7 @@ dnkbd_input(struct dnkbd_softc *sc, int dat)
 			 * Identify the keyboard again. This will switch it to
 			 * raw mode again. If this fails, we'll consider the
 			 * keyboard as unplugged (to ignore further events until
-			 * a successfull reset).
+			 * a successful reset).
 			 */
 			if (dnkbd_probe(sc) == 0) {
 				/*

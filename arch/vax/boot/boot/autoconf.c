@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: autoconf.c,v 1.8 2002/06/11 09:36:23 hugh Exp $ */
-=======
 /*	$OpenBSD: autoconf.c,v 1.13 2008/08/18 23:20:43 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: autoconf.c,v 1.19 2002/06/01 15:33:22 ragge Exp $ */
 /*
  * Copyright (c) 1994, 1998 Ludd, University of Lule}, Sweden.
@@ -58,12 +54,8 @@ void scbinit(void);
 void clkstart(void);
 int getsecs(void);
 void scb_stray(void *);
-<<<<<<< HEAD
-void longjmp(int *, int);
-=======
 void scb_silent(void *);
 void longjmp(int *);
->>>>>>> origin/master
 void rtimer(void *);
 
 long *bootregs;
@@ -156,17 +148,11 @@ mcheck(void *arg)
 {
 	int off, *mfp = (int *)&arg;
 
-<<<<<<< HEAD
-	off = (mfp[7]/4 + 8);
-	printf("Machine check, pc=%x, psl=%x\n", mfp[off], mfp[off+1]);
-	longjmp(jbuf, 1);
-=======
 	if (!mcheck_silent) {
 		off = (mfp[7]/4 + 8);
 		printf("Machine check, pc=%x, psl=%x\n", mfp[off], mfp[off+1]);
 	}
 	longjmp(jbuf);
->>>>>>> origin/master
 }
 
 /*
@@ -237,7 +223,7 @@ rtimer(void *arg)
 		int nu = sluttid - getsecs();
 		if (senast != nu) {
 			mtpr(20, PR_IPL);
-			longjmp(jbuf, 1);
+			longjmp(jbuf);
 		}
 	}
 }

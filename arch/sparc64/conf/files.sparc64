@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.sparc64,v 1.81 2007/04/10 19:03:10 kettenis Exp $
-=======
 #	$OpenBSD: files.sparc64,v 1.132 2011/01/14 20:12:39 matthieu Exp $
->>>>>>> origin/master
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -42,8 +38,6 @@ device	clkbrd
 attach	clkbrd at fhc
 file	arch/sparc64/dev/clkbrd.c		clkbrd
 
-<<<<<<< HEAD
-=======
 device	environ
 attach	environ at fhc
 file	arch/sparc64/dev/environ.c		environ
@@ -56,7 +50,6 @@ device	cbus {}
 attach	cbus at vbus
 file	arch/sparc64/dev/cbus.c			cbus
 
->>>>>>> origin/master
 # Sun HME Ethernet controllers
 device	hme: ether, ifnet, mii, ifmedia
 file	dev/ic/hme.c				hme
@@ -75,6 +68,10 @@ device	pcons: wsemuldisplaydev
 attach	pcons at mainbus
 file	arch/sparc64/dev/pcons.c		pcons needs-flag
 
+device	prtc
+attach	prtc at mainbus
+file	arch/sparc64/dev/prtc.c			prtc
+
 include	"dev/sbus/files.sbus"
 include	"dev/i2o/files.i2o"
 include	"dev/mii/files.mii"
@@ -83,14 +80,8 @@ include	"dev/ata/files.ata"
 include	"dev/pckbc/files.pckbc"
 include	"dev/pcmcia/files.pcmcia"
 
-<<<<<<< HEAD
-# COMPAT_NETBSD
-include	"compat/netbsd/files.netbsd"
-file	arch/sparc64/sparc64/netbsd_machdep.c	compat_netbsd
-=======
 # Needs to be declared before including files.sun
 device	zs {[channel = -1]}
->>>>>>> origin/master
 
 # Sun specific files
 include	"dev/sun/files.sun"
@@ -129,15 +120,11 @@ device	pyro: pcibus, iommu
 attach	pyro at mainbus
 file	arch/sparc64/dev/pyro.c			pyro
 
-<<<<<<< HEAD
-file	arch/sparc64/dev/pci_machdep.c		psycho | schizo | pyro
-=======
 device	vpci: pcibus, viommu
 attach	vpci at mainbus
 file	arch/sparc64/dev/vpci.c			vpci
 
 file	arch/sparc64/dev/pci_machdep.c		psycho | schizo | pyro | vpci
->>>>>>> origin/master
 
 attach	hme at pci with hme_pci
 file	dev/pci/if_hme_pci.c			hme_pci
@@ -149,10 +136,6 @@ device	vgafb: ifb_ident, wsemuldisplaydev, rasops_bswap, rasops8, rasops16, raso
 attach	vgafb at pci
 file	arch/sparc64/dev/vgafb.c		vgafb
 
-<<<<<<< HEAD
-# IOMMU is for both
-file	arch/sparc64/dev/iommu.c		sbus | psycho
-=======
 device	machfb: wsemuldisplaydev, rasops_bswap, rasops8
 attach	machfb at pci
 file	arch/sparc64/dev/machfb.c		machfb
@@ -179,7 +162,6 @@ file	arch/sparc64/dev/sbbc.c			sbbc needs-flag
 
 # Starfire PC is needed for sbus and pci
 file	arch/sparc64/dev/starfire.c		sbus | psycho
->>>>>>> origin/master
 
 device	ebus {[addr = -1]}: pcibus
 attach	ebus at pci
@@ -231,8 +213,6 @@ device	beep
 attach	beep at ebus
 file	arch/sparc64/dev/beep.c			beep
 
-<<<<<<< HEAD
-=======
 device	led
 attach	led at ebus
 file	arch/sparc64/dev/led.c			led
@@ -241,7 +221,6 @@ device	lom
 attach	lom at ebus
 file	arch/sparc64/dev/lom.c			lom
 
->>>>>>> origin/master
 device	pmc
 attach	pmc at ebus
 file	arch/sparc64/dev/pmc.c			pmc
@@ -333,39 +312,36 @@ file	arch/sparc64/fpu/fpu_mul.c
 file	arch/sparc64/fpu/fpu_sqrt.c
 file	arch/sparc64/fpu/fpu_subr.c
 
-# N.B.: optimizer breaks pmap.c and/or cache.c somehow -- have not
-# identified the exact problem yet.  NOOPT_C suffices for now.
 file	arch/sparc64/sparc64/autoconf.c
 file	arch/sparc64/sparc64/busop.c
 file	arch/sparc64/sparc64/cache.c
 file	arch/sparc64/sparc64/conf.c
 file	arch/sparc64/sparc64/disksubr.c
 file	arch/sparc64/sparc64/emul.c
+file	arch/sparc64/sparc64/hvcall.S		sun4v
 file	arch/sparc64/sparc64/in_cksum.S		inet
 file	arch/sparc64/sparc64/in4_cksum.c	inet
 file	arch/sparc64/sparc64/intr.c
+file	arch/sparc64/sparc64/ipifuncs.c		multiprocessor
 file	arch/sparc64/sparc64/kgdb_machdep.c	kgdb
 # sparc64/sparc64/locore.s is handled specially in the makefile,
 # because it must come first in the "ld" command line.
-file	arch/sparc64/sparc64/locore2.c
+file	arch/sparc64/sparc64/lock_machdep.c	multiprocessor
 file	arch/sparc64/sparc64/machdep.c
 file	arch/sparc64/sparc64/mdesc.c		sun4v
 file	arch/sparc64/sparc64/mem.c
-file	arch/sparc64/sparc64/mutex.c
+file	arch/sparc64/sparc64/mutex.S
 file	arch/sparc64/sparc64/openprom.c
 file	arch/sparc64/sparc64/openfirm.c
 file	arch/sparc64/sparc64/ofw_machdep.c
 file	arch/sparc64/sparc64/pmap.c
 file	arch/sparc64/sparc64/process_machdep.c
-# the following overrides the generic "sys_process.c"
-# commented out by deraadt
-#file	arch/sparc64/sparc64/sys_process.c
 file	arch/sparc64/sparc64/sys_machdep.c
 file	arch/sparc64/sparc64/trap.c
 file	arch/sparc64/sparc64/vm_machdep.c
 
 file	arch/sparc64/sparc64/db_interface.c	ddb | kgdb
-file	arch/sparc64/sparc64/db_trace.c	ddb
+file	arch/sparc64/sparc64/db_trace.c		ddb
 file	arch/sparc64/sparc64/db_disasm.c	ddb
 
 file	arch/sparc64/dev/md_root.c	memory_disk_hooks
@@ -396,6 +372,17 @@ include "dev/sdmmc/files.sdmmc"
 include	"dev/usb/files.usb"
 
 #
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
+
+#
+# Cardbus
+#
+include "dev/cardbus/files.cardbus"
+file	arch/sparc64/sparc64/rbus_machdep.c	cardbus
+
+#
 # Machine-dependent I2C drivers
 #
 
@@ -403,6 +390,16 @@ include	"dev/usb/files.usb"
 device	pcfadc
 attach	pcfadc at i2c
 file	arch/sparc64/dev/pcf8591_ofw.c		pcfadc
+
+# PCF8591 ADC I2C Sensor (envctrl, so sparc64 only)
+device	ecadc
+attach	ecadc at i2c
+file	arch/sparc64/dev/pcf8591_envctrl.c	ecadc
+
+# TDA8444 (sparc64 only for now)
+device	tda
+attach	tda at i2c
+file	arch/sparc64/dev/tda.c			tda needs-flag
 
 #
 # Machine-independent GPIO drivers
@@ -413,8 +410,6 @@ include "dev/gpio/files.gpio"
 # Machine-independent 1-Wire drivers
 #
 include "dev/onewire/files.onewire"
-<<<<<<< HEAD
-=======
 
 # Virtual console
 device	vcons
@@ -471,4 +466,3 @@ file	arch/sparc64/dev/vcctty.c		vcctty needs-flag
 device	mgiic: i2cbus
 attach	mgiic at mainbus
 file	arch/sparc64/dev/mgiic.c		mgiic
->>>>>>> origin/master

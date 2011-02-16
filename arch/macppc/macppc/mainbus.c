@@ -186,6 +186,12 @@ mbattach(struct device *parent, struct device *self, void *aux)
 				    node);
 				continue;
 		}
+		if (strcmp(name, "memory") == 0) {
+			nca.ca_name = "mem";
+			nca.ca_node = node;
+			nca.ca_bus = &sc->sc_bus;
+			config_found(self, &nca, mbprint);
+		}
 		if (strcmp(name, "memory-controller") == 0) {
 			nca.ca_name = "memc";
 			nca.ca_node = node;

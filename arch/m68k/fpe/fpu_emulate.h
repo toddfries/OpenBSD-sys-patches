@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu_emulate.h,v 1.6 2006/01/30 21:23:22 miod Exp $	*/
+/*	$OpenBSD: fpu_emulate.h,v 1.7 2006/06/11 20:43:28 miod Exp $	*/
 /*	$NetBSD: fpu_emulate.h,v 1.11 2005/08/13 05:38:45 he Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: loadfile_machdep.h,v 1.2 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: loadfile_machdep.h,v 1.3 2000/08/16 08:16:58 mrg Exp $	 */
 
 /*-

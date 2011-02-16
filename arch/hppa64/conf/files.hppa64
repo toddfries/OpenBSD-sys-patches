@@ -5,7 +5,7 @@
 # maxpartitions must be the first item in files.${ARCH}
 maxpartitions 16
 
-maxusers 2 8 64
+maxusers 2 8 128
 
 # 
 # "workstation console" routines
@@ -91,9 +91,9 @@ attach	cpu at gedoens
 file	arch/hppa64/dev/cpu.c		cpu
 
 # Astro/Pluto, integrated Runway-Ropes bridge, MIOC and IOA
-device	plut: gedoens
-attach	plut at gedoens
-file	arch/hppa64/dev/pluto.c		plut
+device	astro: gedoens
+attach	astro at gedoens
+file	arch/hppa64/dev/astro.c		astro
 
 # Elroy, Ropes to PCI Bridge. Supports 4X PCI and dual address cycle.
 # Mercury; QuickSilver is an AGP also
@@ -122,6 +122,7 @@ file	arch/hppa64/hppa64/db_disasm.c		ddb
 file	arch/hppa64/hppa64/disksubr.c		disk
 file	arch/hppa64/hppa64/intr.c
 file	arch/hppa64/hppa64/machdep.c
+file	arch/hppa64/hppa64/mutex.c
 file	arch/hppa64/hppa64/pmap.c
 file	arch/hppa64/hppa64/process_machdep.c
 file	arch/hppa64/hppa64/sys_machdep.c
@@ -131,4 +132,15 @@ file	arch/hppa64/hppa64/in_cksum.c		inet
 file	netinet/in4_cksum.c			inet
 file	arch/hppa64/dev/clock.c
 
-file	dev/cninit.c
+
+# hppa64 doesn't have multiplication or division instructions
+file	lib/libkern/divdi3.c
+file	lib/libkern/moddi3.c
+file	lib/libkern/muldi3.c
+file	lib/libkern/qdivrem.c
+file	lib/libkern/udivdi3.c
+file	lib/libkern/umoddi3.c
+
+# kern..
+file	lib/libkern/arch/hppa64/milli.S
+file	lib/libkern/arch/hppa64/spcopy.S

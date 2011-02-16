@@ -1,4 +1,4 @@
-/*	$OpenBSD: hil_intio.c,v 1.7 2007/01/06 20:09:12 miod Exp $	*/
+/*	$OpenBSD: hil_intio.c,v 1.8 2007/01/06 20:10:57 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.

@@ -64,6 +64,7 @@
 #define	splclock()		_splraise(PSL_S | PSL_IPL5)
 #define	splstatclock()		_splraise(PSL_S | PSL_IPL5)
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
+#define	splsched()		splhigh()
 
 /* watch out for side effects */
 #define	splx(s)			((s) & PSL_IPL ? _spl(s) : spl0())

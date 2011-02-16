@@ -27,8 +27,6 @@
 #ifndef _MACHINE_BUS_H_
 #define _MACHINE_BUS_H_
 
-#include <machine/pio.h>
-
 #ifdef __STDC__
 #define CAT(a,b)	a##b
 #define CAT3(a,b,c)	a##b##c
@@ -137,8 +135,7 @@ CAT(bus_space_read_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
 bus_space_read_multi(1,8)
 bus_space_read_multi(2,16)
 bus_space_read_multi(4,32)
-
-#define	bus_space_read_multi_8	!!! bus_space_read_multi_8 not implemented !!!
+bus_space_read_multi(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_read_region(n,m)					      \
@@ -153,8 +150,7 @@ CAT(bus_space_read_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,    \
 bus_space_read_region(1,8)
 bus_space_read_region(2,16)
 bus_space_read_region(4,32)
-
-#define	bus_space_read_region_8	!!! bus_space_read_region_8 not implemented !!!
+bus_space_read_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_read_raw_region(n,m)					      \
@@ -189,8 +185,7 @@ CAT(bus_space_write_multi_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,    \
 bus_space_write_multi(1,8)
 bus_space_write_multi(2,16)
 bus_space_write_multi(4,32)
-
-#define	bus_space_write_multi_8	!!! bus_space_write_multi_8 not implemented !!!
+bus_space_write_multi(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_write_region(n,m)					      \
@@ -207,9 +202,7 @@ CAT(bus_space_write_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,   \
 bus_space_write_region(1,8)
 bus_space_write_region(2,16)
 bus_space_write_region(4,32)
-
-#define	bus_space_write_region_8					      \
-    !!! bus_space_write_region_8 not implemented !!!
+bus_space_write_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_write_raw_region(n,m)					      \
@@ -245,6 +238,7 @@ CAT(bus_space_set_region_,n)(bus_space_tag_t bst, bus_space_handle_t bsh,     \
 bus_space_set_region(1,8)
 bus_space_set_region(2,16)
 bus_space_set_region(4,32)
+bus_space_set_region(8,64)
 
 /*----------------------------------------------------------------------------*/
 static __inline void
@@ -281,8 +275,16 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_size_t o1,
 		*d++ = *s++;
 }
 
-#define bus_space_copy_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
+static __inline void
+bus_space_copy_8(void *v, bus_space_handle_t h1, bus_size_t o1,
+	bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
+{
+	int64_t *s = (int64_t *)(h1 + o1);
+	int64_t *d = (int64_t *)(h2 + o2);
+
+	while (c--)
+		*d++ = *s++;
+}
 
 /*----------------------------------------------------------------------------*/
 /*
@@ -305,23 +307,19 @@ bus_space_barrier(bus_space_tag_t t, bus_space_handle_t h, bus_size_t offs,
 
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
-/* Compatibility defines */
-#define BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
 
-
-#define	BUS_DMA_WAITOK		0x00
-#define	BUS_DMA_NOWAIT		0x01
-#define	BUS_DMA_ALLOCNOW	0x02
-#define	BUS_DMAMEM_NOSYNC	0x04
-#define	BUS_DMA_COHERENT	0x08
-#define	BUS_DMA_BUS1		0x10	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x20
-#define	BUS_DMA_BUS3		0x40
-#define	BUS_DMA_BUS4		0x80
-#define BUS_DMA_READ		0x100   /* mapping is device -> memory only */
-#define BUS_DMA_WRITE		0x200   /* mapping is memory -> device only */
-#define BUS_DMA_STREAMING	0x400   /* hint: sequential, unidirectional */
+#define	BUS_DMA_WAITOK		0x000
+#define	BUS_DMA_NOWAIT		0x001
+#define	BUS_DMA_ALLOCNOW	0x002
+#define	BUS_DMA_COHERENT	0x008
+#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x020
+#define	BUS_DMA_BUS3		0x040
+#define	BUS_DMA_BUS4		0x080
+#define	BUS_DMA_READ		0x100   /* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x200   /* mapping is memory -> device only */
+#define	BUS_DMA_STREAMING	0x400   /* hint: sequential, unidirectional */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -392,7 +390,13 @@ struct machine_bus_dma_tag {
 	void	(*_dmamem_unmap)(bus_dma_tag_t, caddr_t, size_t);
 	paddr_t	(*_dmamem_mmap)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, off_t, int, int);
-	paddr_t	dma_offs;
+
+	/*
+	 * internal memory address translation information.
+	 */
+	bus_addr_t (*_pa_to_device)(paddr_t);
+	paddr_t	(*_device_to_pa)(bus_addr_t);
+	bus_addr_t _dma_mask;
 };
 
 #define	bus_dmamap_create(t, s, n, m, b, f, p)			\

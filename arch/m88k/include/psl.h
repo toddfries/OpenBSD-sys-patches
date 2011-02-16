@@ -46,8 +46,6 @@
 #ifndef __M88K_PSL_H__
 #define __M88K_PSL_H__
 
-#ifdef _KERNEL
-
 /*
  * 881x0 control registers
  */
@@ -94,7 +92,5 @@
 #define XIP_V		0x00000002	/* valid */
 #define XIP_E		0x00000001	/* exception */
 #define XIP_ADDR	0xfffffffc	/* address mask */
-
-#endif	/* _KERNEL */
 
 #endif /* __M88K_PSL_H__ */

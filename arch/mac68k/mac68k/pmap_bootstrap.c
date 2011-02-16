@@ -65,7 +65,7 @@ u_long	low[8];
 u_long	high[8];
 u_long	maxaddr;	/* PA of the last physical page */
 int	vidlen;
-#define VIDMAPSIZE	btoc(vidlen)
+#define VIDMAPSIZE	atop(vidlen)
 extern u_int32_t	mac68k_vidphys;
 extern u_int32_t	videoaddr;
 extern u_int32_t	videorowbytes;
@@ -148,8 +148,7 @@ do { \
 } while (0)
 
 /*
- * If the MMU was disabled, compute available memory size from the memory
- * segment information.
+ * Compute memory size from the memory segment information.
  */
 #define	PMAP_MD_MEMSIZE() \
 do { \

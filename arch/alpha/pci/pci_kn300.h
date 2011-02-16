@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: pci_kn300.h,v 1.1 2007/03/16 21:22:27 robert Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>

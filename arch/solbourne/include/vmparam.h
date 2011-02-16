@@ -1,4 +1,4 @@
-/* $OpenBSD: vmparam.h,v 1.1 2005/04/19 21:30:18 miod Exp $ */
+/* $OpenBSD: vmparam.h,v 1.2 2006/06/04 17:21:24 miod Exp $ */
 /* public domain */
 
 #ifndef _SOLBOURNE_VMPARAM_H_

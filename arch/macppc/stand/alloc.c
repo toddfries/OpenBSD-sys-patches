@@ -1,4 +1,4 @@
-/*	$OpenBSD: alloc.c,v 1.3 2003/10/16 04:30:09 drahn Exp $	*/
+/*	$OpenBSD: alloc.c,v 1.6 2008/05/25 16:55:31 miod Exp $	*/
 /*	$NetBSD: alloc.c,v 1.1 1997/04/16 20:29:16 thorpej Exp $	*/
 
 /*
@@ -86,9 +86,6 @@ struct ml {
 	LIST_ENTRY(ml)	list;
 };
 
-/* XXX - this is from NetBSD  */
-#define LIST_HEAD_INITIALIZER(head) { NULL }
-
 LIST_HEAD(, ml) freelist = LIST_HEAD_INITIALIZER(freelist);
 LIST_HEAD(, ml) allocatedlist = LIST_HEAD_INITIALIZER(allocatedlist);
 
@@ -97,7 +94,7 @@ LIST_HEAD(, ml) allocatedlist = LIST_HEAD_INITIALIZER(allocatedlist);
 void *
 alloc(unsigned size)
 {
-	struct ml *f, *bestf;
+	struct ml *f, *bestf = NULL;
 	unsigned bestsize = 0xffffffff;	/* greater than any real size */
 	char *help;
 	int failed;
@@ -114,15 +111,14 @@ alloc(unsigned size)
 
 #ifdef ALLOC_FIRST_FIT
 	/* scan freelist */
-	for (f = freelist.lh_first; f != NULL && f->size < size;
-	    f = f->list.le_next)
-		/* noop */ ;
+	LIST_FOREACH(f, &freelist, list)
+		if (f->size >= size)
+			break;
 	bestf = f;
 	failed = (bestf == (struct fl *)0);
 #else
 	/* scan freelist */
-	f = freelist.lh_first;
-	while (f != NULL) {
+	LIST_FOREACH(f, &freelist, list) {
 		if (f->size >= size) {
 			if (f->size == size)	/* exact match */
 				goto found;
@@ -133,7 +129,6 @@ alloc(unsigned size)
 				bestsize = f->size;
 			}
 		}
-		f = f->list.le_next;
 	}
 
 	/* no match in freelist if bestsize unchanged */
@@ -201,13 +196,13 @@ freeall()
 	struct ml *m;
 
 	/* Release chunks on freelist... */
-	while ((m = freelist.lh_first) != NULL) {
+	while ((m = LIST_FIRST(&freelist)) != NULL) {
 		LIST_REMOVE(m, list);
 		OF_release(m, m->size);
 	}
 
 	/* ...and allocated list. */
-	while ((m = allocatedlist.lh_first) != NULL) {
+	while ((m = LIST_FIRST(&allocated)) != NULL)) {
 		LIST_REMOVE(m, list);
 		OF_release(m, m->size);
 	}

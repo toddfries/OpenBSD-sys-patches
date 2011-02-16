@@ -257,7 +257,7 @@ sn_nubus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	add_nubus_intr(sc->slotno, snintr, sc, sc->sc_dev.dv_xname);
+	add_nubus_intr(sc->slotno, IPL_NET, snintr, sc, sc->sc_dev.dv_xname);
 }
 
 static int

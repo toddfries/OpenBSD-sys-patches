@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dz_ibus.c,v 1.21 2006/08/01 23:36:51 miod Exp $	*/
-=======
 /*	$OpenBSD: dz_ibus.c,v 1.28 2010/09/20 06:33:48 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dz_ibus.c,v 1.15 1999/08/27 17:50:42 ragge Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
@@ -114,8 +110,6 @@ dz_vsbus_attach(parent, self, aux)
 	extern vaddr_t dz_console_regs;
 	vaddr_t dz_regs;
 
-<<<<<<< HEAD
-=======
 	printf(": ");
 
 	/*
@@ -129,19 +123,11 @@ dz_vsbus_attach(parent, self, aux)
 	} else
 		dz_regs = vax_map_physmem(va->va_paddr, 1);
 
->>>>>>> origin/master
 	/* 
 	 * XXX - This is evil and ugly, but...
 	 * due to the nature of how bus_space_* works on VAX, this will
 	 * be perfectly good until everything is converted.
 	 */
-<<<<<<< HEAD
-
-	if (dz_regs == 0) /* This isn't console */
-		dz_regs = vax_map_physmem(va->va_paddr, 1);
-
-=======
->>>>>>> origin/master
 	sc->sc_ioh = dz_regs;
 	sc->sc_dr.dr_csr = DZ_VSBUS_CSR;
 	sc->sc_dr.dr_rbuf = DZ_VSBUS_RBUF;
@@ -164,7 +150,7 @@ dz_vsbus_attach(parent, self, aux)
 	evcount_attach(&sc->sc_rintrcnt, sc->sc_dev.dv_xname, &sc->sc_rcvec);
 	evcount_attach(&sc->sc_tintrcnt, sc->sc_dev.dv_xname, &sc->sc_tcvec);
 
-	printf(": 4 lines");
+	printf("4 lines");
 
 	dzattach(sc);
 
@@ -196,212 +182,3 @@ dz_vsbus_attach(parent, self, aux)
 	splx(s);
 #endif
 }
-<<<<<<< HEAD
-
-int
-dzcngetc(dev) 
-	dev_t dev;
-{
-	int c = 0, s;
-	int mino = minor(dev);
-	u_short rbuf;
-
-	s = spltty();
-	do {
-		while ((dz->csr & DZ_CSR_RX_DONE) == 0)
-			; /* Wait for char */
-		rbuf = dz->rbuf;
-		if (((rbuf >> 8) & 3) != mino)
-			continue;
-		c = rbuf & 0x7f;
-	} while (c == 17 || c == 19);		/* ignore XON/XOFF */
-	splx(s);
-
-	if (c == 13)
-		c = 10;
-
-	return (c);
-}
-
-int
-dz_can_have_kbd()
-{
-	switch (vax_boardtype) {
-	case VAX_BTYP_410:
-	case VAX_BTYP_420:
-	case VAX_BTYP_43:
-		if ((vax_confdata & KA420_CFG_MULTU) == 0)
-			return (1);
-		break;
-
-	case VAX_BTYP_46:
-		if ((vax_siedata & 0xff) == VAX_VTYP_46)
-			return (1);
-		break;
-	case VAX_BTYP_48:
-		if (((vax_siedata >> 8) & 0xff) == VAX_STYP_48)
-			return (1);
-		break;
-
-	case VAX_BTYP_49:
-		return (1);
-
-	default:
-		break;
-	}
-
-	return (0);
-}
-
-void
-dzcnprobe(cndev)
-	struct	consdev *cndev;
-{
-	extern	vaddr_t iospace;
-	int diagcons, major;
-	paddr_t ioaddr = 0x200a0000;
-
-	if ((major = getmajor(dzopen)) < 0)
-		return;
-
-	switch (vax_boardtype) {
-	case VAX_BTYP_410:
-	case VAX_BTYP_420:
-	case VAX_BTYP_43:
-		diagcons = (vax_confdata & KA420_CFG_L3CON ? 3 : 0);
-		break;
-
-	case VAX_BTYP_46:
-	case VAX_BTYP_48:
-		diagcons = (vax_confdata & 0x100 ? 3 : 0);
-		break;
-
-	case VAX_BTYP_49:
-		ioaddr = 0x25000000;
-		diagcons = (vax_confdata & 8 ? 3 : 0);
-		break;
-
-	case VAX_BTYP_1303:
-		ioaddr = 0x25000000;
-		diagcons = 3;
-		break;
-
-	default:
-		return;
-	}
-	cndev->cn_pri = diagcons != 0 ? CN_REMOTE : CN_NORMAL;
-	cndev->cn_dev = makedev(major, dz_can_have_kbd() ? 3 : diagcons);
-	dz_regs = iospace;
-	dz = (void *)dz_regs;
-	ioaccess(iospace, ioaddr, 1);
-}
-
-void
-dzcninit(cndev)
-	struct	consdev *cndev;
-{
-	dz = (void *)dz_regs;
-
-	dz->csr = 0;    /* Disable scanning until initting is done */
-	dz->tcr = (1 << minor(cndev->cn_dev));    /* Turn on xmitter */
-	dz->csr = DZ_CSR_MSE; /* Turn scanning back on */
-}
-
-void
-dzcnputc(dev,ch)
-	dev_t	dev;
-	int	ch;
-{
-	int timeout = 1<<15;       /* don't hang the machine! */
-	int s;
-	int mino = minor(dev);
-	u_short tcr;
-
-	if (mfpr(PR_MAPEN) == 0)
-		return;
-
-	/*
-	 * If we are past boot stage, dz* will interrupt,
-	 * therefore we block.
-	 */
-	s = spltty(); 
-	tcr = dz->tcr;	/* remember which lines to scan */
-	dz->tcr = (1 << mino);
-
-	while ((dz->csr & DZ_CSR_TX_READY) == 0) /* Wait until ready */
-		if (--timeout < 0)
-			break;
-	dz->tdr = ch;                    /* Put the character */
-	timeout = 1<<15;
-	while ((dz->csr & DZ_CSR_TX_READY) == 0) /* Wait until ready */
-		if (--timeout < 0)
-			break;
-
-	dz->tcr = tcr;
-	splx(s);
-}
-
-void 
-dzcnpollc(dev, pollflag)
-	dev_t dev;
-	int pollflag;
-{
-	static	u_char mask;
-
-	if (pollflag)
-		mask = vsbus_setmask(0);
-	else
-		vsbus_setmask(mask);
-}
-
-#if NDZKBD > 0 || NDZMS > 0
-int
-dzgetc(struct dz_linestate *ls)
-{
-	int line;
-	int s;
-	u_short rbuf;
-
-	if (ls != NULL)
-		line = ls->dz_line;
-	else
-		line = 0;	/* keyboard */
-
-	s = spltty();
-	for (;;) {
-		for(; (dz->csr & DZ_CSR_RX_DONE) == 0;)
-			;
-		rbuf = dz->rbuf;
-		if (((rbuf >> 8) & 3) == line) {
-			splx(s);
-			return (rbuf & 0xff);
-		}
-	}
-}
-
-void
-dzputc(struct dz_linestate *ls, int ch)
-{
-	int line;
-	u_short tcr;
-	int s;
-
-	/* if the dz has already been attached, the MI
-	   driver will do the transmitting: */
-	if (ls && ls->dz_sc) {
-		s = spltty();
-		line = ls->dz_line;
-		putc(ch, &ls->dz_tty->t_outq);
-		tcr = dz->tcr;
-		if (!(tcr & (1 << line)))
-			dz->tcr = tcr | (1 << line);
-		dzxint(ls->dz_sc);
-		splx(s);
-		return;
-	}
-	/* use dzcnputc to do the transmitting: */
-	dzcnputc(makedev(getmajor(dzopen), 0), ch);
-}
-#endif /* NDZKBD > 0 || NDZMS > 0 */
-=======
->>>>>>> origin/master

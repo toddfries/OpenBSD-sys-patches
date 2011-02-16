@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.2 2005/05/11 16:42:15 deraadt Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.3 2007/03/21 03:29:05 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff

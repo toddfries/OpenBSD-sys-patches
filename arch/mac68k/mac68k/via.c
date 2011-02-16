@@ -148,14 +148,12 @@ via_init()
 			break;
 		}
 
-		intr_establish(via2_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(via2_intr, NULL, 2, "via2");
 	} else if (current_mac_model->class == MACH_CLASSIIfx) { /* OSS */
 		volatile u_char *ossintr;
 		ossintr = (volatile u_char *)Via2Base + 6;
 		*ossintr = 0;
-		intr_establish(oss_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(oss_intr, NULL, 2, "via2");
 	} else {	/* RBV */
 		if (current_mac_model->class == MACH_CLASSIIci) {
 			/*
@@ -163,14 +161,13 @@ via_init()
 			 */
 			via2_reg(rBufB) |= DB2O_CEnable;
 		}
-		intr_establish(rbv_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(rbv_intr, NULL, 2, "via2");
 
 		nubus_intr.vh_ipl = 1;
 		nubus_intr.vh_fn = rbv_nubus_intr;
 		via2_register_irq(&nubus_intr, NULL);
 		/* XXX necessary? */
-		add_nubus_intr(0, slot_ignore, (void *)0, "dummy");
+		add_nubus_intr(0, IPL_NONE, slot_ignore, (void *)0, "dummy");
 	}
 }
 
@@ -297,10 +294,10 @@ rbv_intr(void *arg)
 	return (1);
 }
 
-static int nubus_intr_mask = 0;
+int nubus_intr_mask = 0;
 
 void
-add_nubus_intr(int slot, int (*func)(void *), void *client_data,
+add_nubus_intr(int slot, int ipl, int (*func)(void *), void *client_data,
     const char *name)
 {
 	struct intrhand *ih;
@@ -310,13 +307,14 @@ add_nubus_intr(int slot, int (*func)(void *), void *client_data,
 	 * Map Nubus slot 0 to "slot" 15; see note on Nubus slot
 	 * interrupt tables.
 	 */
-	if (slot == 0)
-		slot = 15;
-	slot -= 9;
 #ifdef DIAGNOSTIC
-	if (slot < 0 || slot > 7)
+	if (slot != 0 && (slot < 9 || slot > 14))
 		panic("add_nubus_intr: wrong slot %d", slot + 9);
 #endif
+	if (slot == 0)
+		slot = 15 - 9;
+	else
+		slot -= 9;
 
 	s = splhigh();
 
@@ -332,7 +330,7 @@ add_nubus_intr(int slot, int (*func)(void *), void *client_data,
 	ih->ih_ipl = ipl;
 	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 
-	nubus_intr_mask |= (1 << slot);
+	nubus_intr_mask |= 1 << slot;
 
 	splx(s);
 }
@@ -355,6 +353,7 @@ oss_intr(void *arg)
 	struct intrhand *ih;
 	u_int8_t intbits, bitnum;
 	u_int mask;
+	int s;
 
 	intbits = via2_reg(vIFR + rIFR);
 
@@ -366,8 +365,10 @@ oss_intr(void *arg)
 	for (bitnum = 0, ih = slotintrs; ; bitnum++, ih++) {
 		if (intbits & mask) {
 			if (ih->ih_fn != NULL) {
+				s = _splraise(IPLTOPSL(ih->ih_ipl));
 				if ((*ih->ih_fn)(ih->ih_arg) != 0)
 					ih->ih_count.ec_count++;
+				splx(s);
 			}
 			via2_reg(rIFR) = mask;
 		}
@@ -385,7 +386,7 @@ via2_nubus_intr(void *bitarg)
 {
 	struct intrhand *ih;
 	u_int8_t i, intbits, mask;
-	int rv = 0;
+	int s, rv = 0;
 
 	via2_reg(vIFR) = V2IF_SLOTINT;
 	while ((intbits = (~via2_reg(vBufA)) & nubus_intr_mask)) {
@@ -393,10 +394,12 @@ via2_nubus_intr(void *bitarg)
 		    i--, ih--, mask >>= 1) {
 			if (intbits & mask) {
 				if (ih->ih_fn != NULL) {
+					s = _splraise(IPLTOPSL(ih->ih_ipl));
 					if ((*ih->ih_fn)(ih->ih_arg) != 0) {
 						ih->ih_count.ec_count++;
 						rv = 1;
 					}
+					splx(s);
 				}
 			}
 		}
@@ -411,7 +414,7 @@ rbv_nubus_intr(void *bitarg)
 {
 	struct intrhand *ih;
 	u_int8_t i, intbits, mask;
-	int rv = 0;
+	int s, rv = 0;
 
 	via2_reg(rIFR) = 0x80 | V2IF_SLOTINT;
 	while ((intbits = (~via2_reg(rBufA)) & via2_reg(rSlotInt))) {
@@ -419,10 +422,12 @@ rbv_nubus_intr(void *bitarg)
 		    i--, ih--, mask >>= 1) {
 			if (intbits & mask) {
 				if (ih->ih_fn != NULL) {
+					s = _splraise(IPLTOPSL(ih->ih_ipl));
 					if ((*ih->ih_fn)(ih->ih_arg) != 0) {
 						ih->ih_count.ec_count++;
 						rv = 1;
 					}
+					splx(s);
 				}
 			}
 		}

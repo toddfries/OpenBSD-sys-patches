@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: ncr.c,v 1.20 2006/11/28 23:59:45 dlg Exp $ */
-=======
 /* $OpenBSD: ncr.c,v 1.28 2010/09/20 06:33:48 matthew Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -123,10 +119,10 @@ static	void si_dma_go(void *);
 	0, sc->ncr_sc.reg, val)
 
 struct scsi_adapter	si_ops = {
-	ncr5380_scsi_cmd,       /* scsi_cmd()       */
-	si_minphys,         /* scsi_minphys()   */
-	NULL,               /* open_target_lu() */
-	NULL,               /* close_target_lu()    */
+	ncr5380_scsi_cmd,	/* scsi_cmd() */
+	si_minphys,		/* scsi_minphys() */
+	NULL,			/* probe_dev() */
+	NULL			/* free_dev() */
 };
 
 struct cfattach ncr_ca = {

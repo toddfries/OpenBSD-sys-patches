@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vsbus_dma.c,v 1.3 2001/11/06 19:53:17 miod Exp $ */
-=======
 /* $OpenBSD: vsbus_dma.c,v 1.5 2008/06/26 05:42:14 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD: vsbus_dma.c,v 1.7 2000/07/26 21:50:49 matt Exp $ */
 
 /*-

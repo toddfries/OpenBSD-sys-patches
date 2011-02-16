@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvbox.c,v 1.12 2005/12/31 18:13:41 miod Exp $	*/
+/*	$OpenBSD: dvbox.c,v 1.13 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

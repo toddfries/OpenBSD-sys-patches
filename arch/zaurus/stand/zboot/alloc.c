@@ -1,4 +1,4 @@
-/*	$OpenBSD: alloc.c,v 1.9 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: alloc.c,v 1.1 2005/01/10 00:25:03 deraadt Exp $	*/
 /*	$NetBSD: alloc.c,v 1.6 1997/02/04 18:36:33 thorpej Exp $	*/
 
 /*

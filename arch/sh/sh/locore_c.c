@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: locore_c.c,v 1.2 2006/11/28 18:52:23 kettenis Exp $	*/
-=======
 /*	$OpenBSD: locore_c.c,v 1.10 2010/06/27 12:41:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: locore_c.c,v 1.13 2006/03/04 01:13:35 uwe Exp $	*/
 
 /*-
@@ -114,7 +110,7 @@
 #include <sys/sched.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <sh/locore.h>
 #include <sh/cpu.h>
@@ -125,26 +121,14 @@
 #include <sh/ubcreg.h>
 
 void (*__sh_switch_resume)(struct proc *);
-struct proc *cpu_switch_search(struct proc *);
-struct proc *cpu_switch_prepare(struct proc *, struct proc *);
-void switch_exit(struct proc *, void (*)(struct proc *));
-void idle(void);
+void cpu_switch_prepare(struct proc *, struct proc *);
 int want_resched;
-
-#ifdef LOCKDEBUG
-#define	SCHED_LOCK_IDLE()	sched_lock_idle()
-#define	SCHED_UNLOCK_IDLE()	sched_unlock_idle()
-#else
-#define	SCHED_LOCK_IDLE()	do {} while (/* CONSTCOND */ 0)
-#define	SCHED_UNLOCK_IDLE()	do {} while (/* CONSTCOND */ 0)
-#endif
-
 
 /*
  * Prepare context switch from oproc to nproc.
- * This code is shared by cpu_switch and cpu_switchto.
+ * This code is used by cpu_switchto.
  */
-struct proc *
+void
 cpu_switch_prepare(struct proc *oproc, struct proc *nproc)
 {
 	nproc->p_stat = SONPROC;
@@ -152,10 +136,8 @@ cpu_switch_prepare(struct proc *oproc, struct proc *nproc)
 	if (oproc && (oproc->p_md.md_flags & MDP_STEP))
 		_reg_write_2(SH_(BBRB), 0);
 
-	if (nproc != oproc) {
-		curpcb = nproc->p_md.md_pcb;
-		pmap_activate(nproc);
-	}
+	curpcb = nproc->p_md.md_pcb;
+	pmap_activate(nproc);
 
 	if (nproc->p_md.md_flags & MDP_STEP) {
 		int pm_asid = nproc->p_vmspace->vm_map.pmap->pm_asid;
@@ -169,34 +151,6 @@ cpu_switch_prepare(struct proc *oproc, struct proc *nproc)
 	}
 
 	curproc = nproc;
-	return (nproc);
-}
-
-/*
- * Find the highest priority proc and prepare to switching to it.
- */
-struct proc *
-cpu_switch_search(struct proc *oproc)
-{
-	struct prochd *q;
-	struct proc *p;
-
-	curproc = NULL;
-
-	SCHED_LOCK_IDLE();
-	while (whichqs == 0) {
-		SCHED_UNLOCK_IDLE();
-		idle();
-		SCHED_LOCK_IDLE();
-	}
-
-	q = &qs[ffs(whichqs) - 1];
-	p = q->ph_link;
-	remrunqueue(p);
-	want_resched = 0;
-	SCHED_UNLOCK_IDLE();
-
-	return (cpu_switch_prepare(oproc, p));
 }
 
 void
@@ -205,21 +159,8 @@ cpu_exit(struct proc *p)
 	if (p->p_md.md_flags & MDP_STEP)
 		_reg_write_2(SH_(BBRB), 0);
 
-	switch_exit(p, exit2);
-}
-
-/*
- * void idle(void):
- *	When no processes are on the run queue, wait for something to come
- *	ready. Separated function for profiling.
- */
-void
-idle()
-{
-	spl0();
-	uvm_pageidlezero();
-	__asm volatile("sleep");
-	splsched();
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 #ifndef P1_STACK

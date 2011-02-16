@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qe.c,v 1.29 2006/03/25 22:41:41 djm Exp $	*/
-=======
 /*	$OpenBSD: qe.c,v 1.33 2010/11/11 17:46:58 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.

@@ -352,12 +352,12 @@ mmrw(dev, uio, flags)
 
 			/* If the address isn't in RAM, bail. */
 			v = uio->uio_offset;
-			if (btoc(v) > physmem) {
+			if (atop(v) > physmem) {
 				error = EFAULT;
 				/* this will break us out of the loop */
 				continue;
 			}
-			c = ctob(physmem) - v;
+			c = ptoa(physmem) - v;
 			c = min(c, uio->uio_resid);
 			error = uiomove((caddr_t)v, c, uio);
 			break;
@@ -366,7 +366,7 @@ mmrw(dev, uio, flags)
 			v = uio->uio_offset;
 			o = v & PGOFSET;
 			c = min(uio->uio_resid, (int)(PAGE_SIZE - o));
-			if (btoc(v) > physmem && !uvm_kernacc((caddr_t)v,
+			if (atop(v) > physmem && !uvm_kernacc((caddr_t)v,
 			    c, (uio->uio_rw == UIO_READ) ? B_READ : B_WRITE)) {
 				error = EFAULT;
 				/* this will break us out of the loop */
@@ -390,10 +390,9 @@ mmrw(dev, uio, flags)
 			 * On the first call, allocate and zero a page
 			 * of memory for use with /dev/zero.
 			 */
-			if (zeropage == NULL) {
-				zeropage = malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
-			}
+			if (zeropage == NULL) 
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK | M_ZERO);
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			break;
@@ -419,8 +418,8 @@ mmmmap(dev, off, prot)
 	 * Allow access only in RAM.
 	 */
 #if 0
-	if (off < ctob(firstusablepage) ||
-	    off >= ctob(lastusablepage + 1))
+	if (off < ptoa(firstusablepage) ||
+	    off >= ptoa(lastusablepage + 1))
 		return (-1);
 #endif
 	return (off);

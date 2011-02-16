@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zaurus_machdep.c,v 1.25 2006/06/20 18:24:04 todd Exp $	*/
-=======
 /*	$OpenBSD: zaurus_machdep.c,v 1.36 2010/10/02 23:31:34 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -125,6 +121,7 @@
 #include <sys/msgbuf.h>
 #include <sys/reboot.h>
 #include <sys/termios.h>
+#include <sys/kcore.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -145,6 +142,7 @@
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
+#include <arm/kcore.h>
 #include <arm/undefined.h>
 #include <arm/machdep.h>
 
@@ -559,6 +557,7 @@ u_int
 initarm(void *arg)
 {
 	extern vaddr_t xscale_cache_clean_addr;
+	extern cpu_kcore_hdr_t cpu_kcore_hdr;
 	int loop;
 	int loop1;
 	u_int l1pagetable;
@@ -656,9 +655,6 @@ initarm(void *arg)
 	/* XXX should really be done after setting up the console, but we
 	 * XXX need to parse the console selection flags right now. */
 	process_kernel_args((char *)0xa0200000 - MAX_BOOT_STRING - 1);
-#ifdef RAMDISK_HOOKS
-        boothowto |= RB_DFLTROOT;
-#endif /* RAMDISK_HOOKS */
 
 	/*
 	 * This test will work for now but has to be revised when support
@@ -934,6 +930,11 @@ initarm(void *arg)
 		
 		logical = 0x00200000;	/* offset of kernel in RAM */
 
+		/* Update dump information */
+		cpu_kcore_hdr.kernelbase = KERNEL_BASE;
+		cpu_kcore_hdr.kerneloffs = logical;
+		cpu_kcore_hdr.staticsize = totalsize;
+
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, textsize,
 		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
@@ -1098,6 +1099,10 @@ initarm(void *arg)
 #endif
 	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
 	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
+
+	/* Update dump information */
+	cpu_kcore_hdr.pmap_kernel_l1 = (u_int32_t)pmap_kernel()->pm_l1;
+	cpu_kcore_hdr.pmap_kernel_l2 = (u_int32_t)&(pmap_kernel()->pm_l2);
 
 #ifdef __HAVE_MEMORY_DISK__
 	md_root_setconf(memory_disk, sizeof memory_disk);

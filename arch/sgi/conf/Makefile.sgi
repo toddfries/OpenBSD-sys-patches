@@ -59,22 +59,7 @@ HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
-### find out what to use for libkern
-.include "$S/lib/libkern/Makefile.inc"
-.ifndef PROF
-LIBKERN=	${KERNLIB}
-.else
-LIBKERN=	${KERNLIB_PROF}
-.endif
-
-### find out what to use for libcompat
-.include "$S/compat/common/Makefile.inc"
-.ifndef PROF
-LIBCOMPAT=	${COMPATLIB}
-.else
-LIBCOMPAT=	${COMPATLIB_PROF}
-.endif
-
+NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 

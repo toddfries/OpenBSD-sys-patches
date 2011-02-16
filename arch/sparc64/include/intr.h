@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.h,v 1.7 2004/06/23 01:17:01 aaron Exp $	*/
-=======
 /*	$OpenBSD: intr.h,v 1.12 2008/06/26 05:42:13 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: intr.h,v 1.8 2001/01/14 23:50:30 thorpej Exp $ */
 
 /*-
@@ -55,11 +51,11 @@ struct intrhand {
 	short			ih_number;	/* interrupt number */
 						/* the H/W provides */
 	char			ih_pil;		/* interrupt priority */
-	volatile char		ih_busy;	/* handler is on list */
 	struct intrhand		*ih_next;	/* global list */
 	struct intrhand		*ih_pending;	/* pending list */
 	volatile u_int64_t	*ih_map;	/* interrupt map reg */
 	volatile u_int64_t	*ih_clr;	/* clear interrupt reg */
+	void			(*ih_ack)(struct intrhand *);
 	struct evcount		ih_count;	/* # of interrupts */
 	const void		*ih_bus;	/* parent bus */
 	char			ih_name[32];	/* device name */
@@ -76,7 +72,7 @@ void    intr_establish(int, struct intrhand *);
 #define	IPL_SOFTNET	1		/* protocol stack */
 #define	IPL_BIO		PIL_BIO		/* block I/O */
 #define	IPL_NET		PIL_NET		/* network */
-#define	IPL_SOFTSERIAL	4		/* serial */
+#define	IPL_SOFTTTY	4		/* delayed terminal handling */
 #define	IPL_TTY		PIL_TTY		/* terminal */
 #define	IPL_VM		PIL_VM		/* memory allocation */
 #define	IPL_AUDIO	PIL_AUD		/* audio */
@@ -87,13 +83,8 @@ void    intr_establish(int, struct intrhand *);
 #define IPL_STATCLOCK	PIL_STATCLOCK	/* statclock */
 #define	IPL_HIGH	PIL_HIGH	/* everything */
 
-void *
-softintr_establish(int level, void (*fun)(void *), void *arg);
-
-void
-softintr_disestablish(void *cookie);
-
-void
-softintr_schedule(void *cookie);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_disestablish(void *);
+void	 softintr_schedule(void *);
 
 #endif /* _SPARC64_INTR_H_ */

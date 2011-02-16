@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: Makefile.vax,v 1.26 2003/11/24 16:11:25 espie Exp $
-#	$NetBSD: Makefile.vax,v 1.49 1999/07/26 05:20:49 cgd Exp $
-=======
 #	$OpenBSD: Makefile.vax,v 1.61 2010/12/30 18:49:31 deraadt Exp $
->>>>>>> origin/master
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -23,16 +18,6 @@ STRIP?=	strip
 .ifndef S
 S!=	cd ../../../..; pwd
 .endif
-<<<<<<< HEAD
-VAX=	$S/arch/vax
-
-INCLUDES=	-I. -I$S/arch -I$S -nostdinc
-CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL \
-		-D_VAX_INLINE_
-CWARNFLAGS?=	-Werror -Wall -Wmissing-prototypes -Wstrict-prototypes \
-		-Wno-main -Wno-format -Wno-uninitialized \
-		-Wstack-larger-than-2047
-=======
 
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
@@ -47,7 +32,6 @@ CMACHFLAGS=
 CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
 		-fno-builtin-vsnprintf -fno-builtin-log \
 		-fno-builtin-log2 -fno-builtin-malloc 
->>>>>>> origin/master
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
@@ -66,31 +50,9 @@ DB_STRUCTINFO=
 HOSTCC?=	${CC}
 HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
-<<<<<<< HEAD
-
-### find out what to use for libkern
-KERN_AS=	obj
-.include "$S/lib/libkern/Makefile.inc"
-.ifndef PROF
-LIBKERN=	${KERNLIB}
-.else
-LIBKERN=        ${KERNLIB_PROF}
-.endif
-
-### find out what to use for libcompat
-.include "$S/compat/common/Makefile.inc"
-.ifndef PROF
-LIBCOMPAT=      ${COMPATLIB}
-.else
-LIBCOMPAT=      ${COMPATLIB_PROF}
-.endif
-
-# compile rules: rules are named ${TYPE}_${SUFFIX} where TYPE is NORMAL or
-# HOSTED}, and SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
-=======
 HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
->>>>>>> origin/master
 
+NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 
@@ -105,14 +67,8 @@ NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 #	${SYSTEM_LD_HEAD}
 #	${SYSTEM_LD} swapxxx.o
 #	${SYSTEM_LD_TAIL}
-<<<<<<< HEAD
-SYSTEM_OBJ=	intvec.o subr.o \
-		param.o ioconf.o ${OBJS} ${LIBCOMPAT} ${LIBKERN}
-SYSTEM_DEP=	Makefile ${SYSTEM_OBJ}
-=======
 SYSTEM_HEAD=	locore.o param.o ioconf.o
 SYSTEM_DEP=	Makefile ${SYSTEM_HEAD} ${OBJS}
->>>>>>> origin/master
 SYSTEM_LD_HEAD=	@rm -f $@
 SYSTEM_LD=	@echo ${LD} ${LINKFLAGS} -o $@ '$${SYSTEM_HEAD} vers.o $${OBJS}'; \
 		${LD} ${LINKFLAGS} -o $@ ${SYSTEM_HEAD} vers.o ${OBJS}
@@ -144,6 +100,9 @@ param.c: $S/conf/param.c
 
 param.o: param.c Makefile
 	${NORMAL_C}
+
+mcount.o: $S/lib/libkern/mcount.c Makefile
+	${NORMAL_C_NOP}
 
 ioconf.o: ioconf.c
 	${NORMAL_C}

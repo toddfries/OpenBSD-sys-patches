@@ -4,9 +4,7 @@ maxpartitions 16
 
 device	mainbus {[addr = -1]}
 attach	mainbus at root
-
-device	ile: ether, ifnet, ifmedia
-file	arch/aviion/dev/if_ile.c			ile
+file	arch/aviion/dev/mainbus.c
 
 #
 # On-board devices
@@ -27,6 +25,9 @@ file	arch/aviion/dev/dart_syscon.c			dart_syscon
 
 attach	le at syscon with le_syscon
 file	arch/aviion/dev/if_le_syscon.c			le_syscon
+
+device	ile: ether, ifnet, ifmedia
+file	arch/aviion/dev/if_ile.c			ile
 
 attach	ile at syscon with ile_syscon
 file	arch/aviion/dev/if_ile_syscon.c			ile_syscon

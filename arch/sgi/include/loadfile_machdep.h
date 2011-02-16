@@ -30,15 +30,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _SGIMIPS_LOADFILE_MACHDEP_H_
-#define _SGIMIPS_LOADFILE_MACHDEP_H_
+#define BOOT_ELF
+#define ELFSIZE	64
 
-#define BOOT_AOUT
-#define BOOT_ECOFF
-#define BOOT_ELF32
-
-#define LOAD_KERNEL	(LOAD_ALL & ~LOAD_TEXTA)
-#define COUNT_KERNEL	(COUNT_ALL & ~COUNT_TEXTA)
+#define LOAD_KERNEL		(LOAD_ALL & ~LOAD_TEXTA)
+#define COUNT_KERNEL		(COUNT_ALL & ~COUNT_TEXTA)
 
 #define LOADADDR(a)		(((u_long)(a)) + offset)
 #define ALIGNENTRY(a)		((u_long)(a))

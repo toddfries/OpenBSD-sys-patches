@@ -70,13 +70,12 @@ struct bdevsw   bdevsw[] =
 	bdev_disk_init(NCD,cd),		/*  6: SCSI CD-ROM */
 	bdev_disk_init(NFD,fd),		/*  7: floppy drive */
 	bdev_disk_init(NWD,wd),		/*  8: ST506 drive */
-					/*  9: */
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
+	bdev_lkm_dummy(),		/*  9: */
+	bdev_lkm_dummy(),		/* 10: */
+	bdev_lkm_dummy(),		/* 11: */
+	bdev_lkm_dummy(),		/* 12: */
+	bdev_lkm_dummy(),		/* 13: */
+	bdev_lkm_dummy(),		/* 14: */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -146,8 +145,8 @@ struct cdevsw   cdevsw[] =
 	cdev_notdef(),			/* 14: */
 	cdev_uk_init(NUK,uk),		/* 15: SCSI unknown */
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 17: Berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 18: network tunnel */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 17: Berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 18: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 19: loadable module driver */
 	cdev_random_init(1,random),	/* 20: random generator */
 	cdev_pf_init(NPF,pf),		/* 21: packet filter */
@@ -164,7 +163,7 @@ struct cdevsw   cdevsw[] =
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 31: PCI user */
 #else
-	cdev_notdef(),
+	cdev_notdef(),			/* 31: */
 #endif
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 32: nnpfs communication device */
@@ -175,7 +174,7 @@ struct cdevsw   cdevsw[] =
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 34: system call tracing */
 	cdev_audio_init(NAUDIO,audio),	/* 35: /dev/audio */
 	cdev_crypto_init(NCRYPTO,crypto), /* 36: /dev/crypto */
-	cdev_notdef(),			/* 37 */
+	cdev_bio_init(NBIO,bio),	/* 37: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 38: pseudo-tty ptm device */
 	cdev_disk_init(NWD,wd),		/* 39: ST506 disk */
 	cdev_usb_init(NUSB,usb),	/* 40: USB controller */
@@ -222,12 +221,12 @@ int chrtoblktbl[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	1,
-	/*  8 */	2,
-	/*  9 */	3,
-	/* 10 */	4,
-	/* 11 */	5,
-	/* 12 */	6,
+	/*  7 */	1,		/* ccd */
+	/*  8 */	2,		/* vnd */
+	/*  9 */	3,		/* rd */
+	/* 10 */	4,		/* sd */
+	/* 11 */	5,		/* st */
+	/* 12 */	6,		/* cd */
 	/* 13 */	NODEV,
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
@@ -239,7 +238,7 @@ int chrtoblktbl[] = {
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
-	/* 24 */	7,
+	/* 24 */	7,		/* fd */
 	/* 25 */	NODEV,
 	/* 26 */	NODEV,
 	/* 27 */	NODEV,
@@ -254,14 +253,7 @@ int chrtoblktbl[] = {
 	/* 36 */	NODEV,
 	/* 37 */	NODEV,
 	/* 38 */	NODEV,
-	/* 39 */	NODEV,
-	/* 40 */	NODEV,
-	/* 41 */	NODEV,
-	/* 42 */	NODEV,
-	/* 43 */	NODEV,
-	/* 44 */	NODEV,
-	/* 45 */	NODEV,
-	/* 46 */	NODEV
+	/* 39 */	8,		/* wd */
 };
 int nchrtoblktbl = nitems(chrtoblktbl);
 
@@ -290,21 +282,3 @@ iskmemdev(dev)
 {
 	return (major(dev) == mem_no && minor(dev) < 2);
 }
-
-#include <dev/cons.h>
-
-cons_decl(pdc);
-cons_decl(ws);
-cons_decl(com);
-
-struct  consdev constab[] = {
-	cons_init(pdc),		/* XXX you'd better leave it here for pdc.c */
-#if NWSDISPLAY > 0
-	cons_init(ws),
-#endif
-#if NCOM > 0
-	cons_init(com),
-#endif
-	{ 0 }
-};
-

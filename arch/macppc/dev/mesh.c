@@ -357,7 +357,7 @@ mesh_attach(struct device *parent, struct device *self, void *aux)
 	config_found(&sc->sc_dev, &saa, scsiprint);
 
 	mac_intr_establish(parent, sc->sc_irq, IST_LEVEL, IPL_BIO, mesh_intr,
-	    sc, "mesh");
+	    sc, sc->sc_dev.dv_xname);
 
 	/* Reset SCSI bus when halt. */
 	shutdownhook_establish(mesh_shutdownhook, sc);

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 1999/09/27 19:30:00 smurph Exp $
+#	$OpenBSD: Makefile,v 1.1 2001/06/26 21:58:03 smurph Exp $
 
 LIB=bug
 

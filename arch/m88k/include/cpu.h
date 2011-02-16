@@ -42,21 +42,25 @@
 #define __M88K_CPU_H__
 
 /*
- * CTL_MACHDEP definitinos.
+ * CTL_MACHDEP definitions.
  */
 #define	CPU_CONSDEV	1	/* dev_t: console terminal device */
-#define	CPU_MAXID	2	/* number of valid machdep ids */
+#define	CPU_CPUTYPE	2	/* int: cpu type */
+#define	CPU_MAXID	3	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
+	{ "cputype", CTLTYPE_INT }, \
 }
 
 #ifdef _KERNEL
 
+#include <machine/atomic.h>
 #include <machine/pcb.h>
 #include <machine/psl.h>
 #include <machine/intr.h>
+#include <sys/queue.h>
 #include <sys/sched.h>
 
 #if defined(MULTIPROCESSOR)
@@ -177,21 +181,22 @@ extern struct cpu_info m88k_cpus[MAX_CPUS];
 #define	CPU_INFO_ITERATOR	cpuid_t
 #define	CPU_INFO_FOREACH(cii, ci) \
 	for ((cii) = 0; (cii) < MAX_CPUS; (cii)++) \
-		if (((ci) = &m88k_cpus[cii])->ci_alive != 0)
+		if (((ci) = &m88k_cpus[cii])->ci_flags & CIF_ALIVE)
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_cpuid)
 #define MAXCPUS	MAX_CPUS
 
 #if defined(MULTIPROCESSOR)
 
-#define	curcpu() \
-({									\
-	struct cpu_info *cpuptr;					\
-									\
-	__asm__ __volatile__ ("ldcr %0, cr17" : "=r" (cpuptr));		\
-	cpuptr;								\
-})
+static __inline__ struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *cpuptr;
 
-#define	CPU_IS_PRIMARY(ci)	((ci)->ci_primary != 0)
+	__asm__ __volatile__ ("ldcr %0, cr17" : "=r" (cpuptr));
+	return cpuptr;
+}
+
+#define	CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CIF_PRIMARY)
 
 void	cpu_boot_secondary_processors(void);
 __dead void cpu_emergency_disable(void);
@@ -225,6 +230,10 @@ void	set_cpu_number(cpuid_t);
  * referenced in generic code
  */
 #define	cpu_exec(p)		do { /* nothing */ } while (0)
+
+#define	cpu_idle_enter()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle()	do { /* nothing */ } while (0)
+#define	cpu_idle_leave()	do { /* nothing */ } while (0)
 
 #if defined(MULTIPROCESSOR)
 #include <sys/lock.h>

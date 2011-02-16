@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: opcodes.c,v 1.1 2002/05/16 07:37:44 miod Exp $	*/
 
 /*
  * Copyright (c) 2002, Miodrag Vallat.

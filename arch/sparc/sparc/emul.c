@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: emul.c,v 1.2 2000/02/21 21:05:59 art Exp $	*/
-=======
 /*	$OpenBSD: emul.c,v 1.5 2010/11/27 19:41:48 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: emul.c,v 1.3 1997/07/29 09:42:01 fair Exp $	*/
 
 /*

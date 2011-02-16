@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: sgcreg.h,v 1.1 2005/01/14 22:39:26 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

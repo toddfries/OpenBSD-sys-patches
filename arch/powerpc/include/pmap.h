@@ -98,17 +98,17 @@ typedef	struct pmap *pmap_t;
 
 extern struct pmap kernel_pmap_;
 #define	pmap_kernel()	(&kernel_pmap_)
-boolean_t pteclrbits(paddr_t pa, u_int mask, u_int clear);
+boolean_t pteclrbits(struct vm_page *pg, u_int mask, u_int clear);
 
 
 #define pmap_clear_modify(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG_32, TRUE))
+	(pteclrbits((page), PG_PMAP_MOD, TRUE))
 #define	pmap_clear_reference(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF_32, TRUE))
+	(pteclrbits((page), PG_PMAP_REF, TRUE))
 #define	pmap_is_modified(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG_32, FALSE))
+	(pteclrbits((page), PG_PMAP_MOD, FALSE))
 #define	pmap_is_referenced(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF_32, FALSE))
+	(pteclrbits((page), PG_PMAP_REF, FALSE))
 
 #define	pmap_unwire(pm, va)
 #define pmap_update(pmap)	/* nothing (yet) */
@@ -137,6 +137,13 @@ int pte_spill_v(struct pmap *pm, u_int32_t va, u_int32_t dsisr, int exec_fault);
 int reserve_dumppages(caddr_t p);
 
 #define pmap_unuse_final(p)		/* nothing */
+#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+
+#define	PMAP_STEAL_MEMORY
+
+#define PG_PMAP_MOD     PG_PMAP0
+#define PG_PMAP_REF     PG_PMAP1
+#define PG_PMAP_EXE     PG_PMAP2
 
 #endif	/* _KERNEL */
 #endif	/* _LOCORE */

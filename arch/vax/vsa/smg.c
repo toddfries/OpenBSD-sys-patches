@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: smg.c,v 1.18 2006/11/29 12:13:54 miod Exp $	*/
-=======
 /*	$OpenBSD: smg.c,v 1.24 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: smg.c,v 1.21 2000/03/23 06:46:44 thorpej Exp $ */
 /*
  * Copyright (c) 2006, Miodrag Vallat
@@ -287,12 +283,11 @@ smg_attach(struct device *parent, struct device *self, void *aux)
 		scr = &smg_consscr;
 		sc->sc_nscreens = 1;
 	} else {
-		scr = malloc(sizeof(struct smg_screen), M_DEVBUF, M_NOWAIT);
+		scr = malloc(sizeof(*scr), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (scr == NULL) {
 			printf(": can not allocate memory\n");
 			return;
 		}
-		bzero(scr, sizeof(struct smg_screen));
 
 		scr->ss_addr =
 		    (caddr_t)vax_map_physmem(SMADDR, SMSIZE / VAX_NBPG);
@@ -819,7 +814,7 @@ smg_erasecols(void *cookie, int row, int col, int num, long attr)
  */
 
 int	smgcnprobe(void);
-void	smgcninit(void);
+int	smgcninit(void);
 
 int
 smgcnprobe()
@@ -848,7 +843,7 @@ smgcnprobe()
  * Because it's called before the VM system is initialized, virtual memory
  * for the framebuffer can be stolen directly without disturbing anything.
  */
-void
+int
 smgcninit()
 {
 	struct smg_screen *ss = &smg_consscr;
@@ -869,11 +864,6 @@ smgcninit()
 
 	virtual_avail = round_page(virtual_avail);
 
-<<<<<<< HEAD
-	/* this had better not fail as we can't recover there */
-	if (smg_setup_screen(ss) != 0)
-		panic(__func__);
-=======
 	/* this had better not fail */
 	if (smg_setup_screen(ss) != 0) {
 		iounaccess((vaddr_t)ss->ss_addr, SMSIZE / VAX_NBPG);
@@ -881,9 +871,10 @@ smgcninit()
 		virtual_avail = ova;
 		return (1);
 	}
->>>>>>> origin/master
 
 	ri = &ss->ss_ri;
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
 	wsdisplay_cnattach(&smg_stdscreen, ri, 0, 0, defattr);
+
+	return (0);
 }

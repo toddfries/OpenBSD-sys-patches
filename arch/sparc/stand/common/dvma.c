@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dvma.c,v 1.2 2002/03/14 01:26:44 millert Exp $	*/
-=======
 /*	$OpenBSD: dvma.c,v 1.4 2010/06/29 21:33:54 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dvma.c,v 1.2 1995/09/17 00:50:56 pk Exp $	*/
 /*
  * Copyright (c) 1995 Gordon W. Ross

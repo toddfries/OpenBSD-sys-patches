@@ -78,10 +78,10 @@ int	sbc_options = 0 /* | SBC_PDMA */;
 static	void	sbc_minphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter	sbc_ops = {
-	ncr5380_scsi_cmd,		/* scsi_cmd()		*/
-	sbc_minphys,			/* scsi_minphys()	*/
-	NULL,				/* open_target_lu()	*/
-	NULL,				/* close_target_lu()	*/
+	ncr5380_scsi_cmd,		/* scsi_cmd() */
+	sbc_minphys,			/* scsi_minphys() */
+	NULL,				/* probe_dev() */
+	NULL,				/* free_dev() */
 };
 
 struct cfdriver sbc_cd = {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop_gsc.c,v 1.11 2004/03/12 00:04:57 miod Exp $	*/
+/*	$OpenBSD: osiop_gsc.c,v 1.12 2005/12/13 23:13:45 mickey Exp $	*/
 /*	$NetBSD: osiop_gsc.c,v 1.6 2002/10/02 05:17:50 thorpej Exp $	*/
 
 /*

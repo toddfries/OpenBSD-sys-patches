@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vmparam.h,v 1.30 2005/04/11 15:13:01 deraadt Exp $	*/
-=======
 /*	$OpenBSD: vmparam.h,v 1.36 2010/12/15 05:30:19 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vmparam.h,v 1.13 1997/07/12 16:20:03 perry Exp $	*/
 
 /*

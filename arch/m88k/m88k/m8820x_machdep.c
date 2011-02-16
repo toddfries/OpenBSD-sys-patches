@@ -90,7 +90,7 @@ extern	void m8820x_copypage(vaddr_t, vaddr_t);
 cpuid_t	m8820x_init(void);
 void	m8820x_cpu_configuration_print(int);
 void	m8820x_shutdown(void);
-void	m8820x_set_sapr(cpuid_t, apr_t);
+void	m8820x_set_sapr(apr_t);
 void	m8820x_set_uapr(apr_t);
 void	m8820x_tlb_inv(cpuid_t, u_int, vaddr_t);
 void	m8820x_tlb_inv_all(cpuid_t);
@@ -361,7 +361,7 @@ m8820x_cpu_configuration_print(int main)
 	{
 		static int errata_warn = 0;
 
-		if (proctype == ARN_88100 && procvers < 2) {
+		if (proctype == ARN_88100 && procvers <= 10) {
 			if (!errata_warn++)
 				printf("WARNING: M88100 bug workaround code "
 				    "not enabled.\nPlease recompile the kernel "
@@ -515,8 +515,10 @@ m8820x_shutdown()
 }
 
 void
-m8820x_set_sapr(cpuid_t cpu, apr_t ap)
+m8820x_set_sapr(apr_t ap)
 {
+	int cpu = cpu_number();
+
 	CMMU_LOCK;
 
 	m8820x_cmmu_set_reg(CMMU_SAPR, ap, 0, cpu, 0);
@@ -530,7 +532,8 @@ m8820x_set_uapr(apr_t ap)
 	u_int32_t psr;
 	int cpu = cpu_number();
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	m8820x_cmmu_set_reg(CMMU_UAPR, ap, 0, cpu, 0);
@@ -548,7 +551,8 @@ m8820x_tlb_inv(cpuid_t cpu, u_int kernel, vaddr_t vaddr)
 {
 	u_int32_t psr;
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 	m8820x_cmmu_set_cmd(kernel ? CMMU_FLUSH_SUPER_PAGE :
 	    CMMU_FLUSH_USER_PAGE, ADDR_VAL, cpu, 0, vaddr);
@@ -597,7 +601,8 @@ m8820x_cache_wbinv(cpuid_t cpu, paddr_t pa, psize_t size)
 	size = round_cache_line(pa + size) - trunc_cache_line(pa);
 	pa = trunc_cache_line(pa);
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	while (size != 0) {
@@ -631,7 +636,8 @@ m8820x_dcache_wb(cpuid_t cpu, paddr_t pa, psize_t size)
 	size = round_cache_line(pa + size) - trunc_cache_line(pa);
 	pa = trunc_cache_line(pa);
 
-	disable_interrupt(psr);
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	while (size != 0) {
@@ -688,22 +694,6 @@ m8820x_icache_inv(cpuid_t cpu, paddr_t pa, psize_t size)
 	set_psr(psr);
 }
 
-void
-m8820x_flush_data_page(cpuid_t cpu, paddr_t pa)
-{
-	u_int32_t psr;
-
-	disable_interrupt(psr);
-	CMMU_LOCK;
-
-	m8820x_cmmu_set_cmd(CMMU_FLUSH_CACHE_CBI_PAGE,
-	    MODE_VAL /* | ADDR_VAL */, cpu, DATA_CMMU, pa);
-	m8820x_cmmu_wait(cpu);
-
-	CMMU_UNLOCK;
-	set_psr(psr);
-}
-
 /*
  * writeback D$
  */
@@ -750,6 +740,14 @@ m8820x_cmmu_inv_locked(int cpu, paddr_t pa, psize_t size)
 	m8820x_cmmu_wait(cpu);
 }
 
+/*
+ * High level cache handling functions (used by bus_dma).
+ *
+ * On multiprocessor systems, since the CMMUs snoop each other, they
+ * all have a coherent view of the data. Thus, we only need to writeback
+ * on a single CMMU. However, invalidations need to be done on all CMMUs.
+ */
+
 void
 m8820x_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 {
@@ -786,7 +784,12 @@ m8820x_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 		break;
 	}
 
-	disable_interrupt(psr);
+#ifndef MULTIPROCESSOR
+	cpu = cpu_number();
+#endif
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 	CMMU_LOCK;
 
 	/*

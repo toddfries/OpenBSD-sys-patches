@@ -37,7 +37,7 @@ cpu0		at mainbus0
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
 openpic*	at memc?	# openpic interrupt controller
-ki2c*           at memc?        # Keywest I2C
+kiic*           at memc?        # Keywest I2C
 pchb*		at pci?		# host bridge identifiers
 ht*		at mainbus0
 smu*		at mainbus0
@@ -87,6 +87,7 @@ msk*		at mskc?	#  each port of above
 an*		at pci?		# Cisco/Aironet 802.11DS
 wi*		at pci?		# WaveLAN IEEE 802.11DS
 vr*		at pci?		# VIA Rhine ethernet
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
 xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
 
 iop*		at pci?		# I2O processor
@@ -213,6 +214,7 @@ dc*		at cardbus?		# 21143, "tulip" clone ethernet
 fxp*		at cardbus?		# Intel PRO/100 ethernet
 xl*		at cardbus?		# 3C575/3C656 ethernet
 rl*		at cardbus?		# RealTek 81[23]9 ethernet
+re*		at cardbus?		# Realtek 8169/8169S/8110S
 wdc*		at pcmcia?
 
 wsdisplay*	at vgafb?

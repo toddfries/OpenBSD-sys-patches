@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: sys_machdep.c,v 1.1 2005/04/01 10:40:47 mickey Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993

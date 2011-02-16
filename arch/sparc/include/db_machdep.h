@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: db_machdep.h,v 1.12 2005/04/19 15:23:08 miod Exp $	*/
-=======
 /*	$OpenBSD: db_machdep.h,v 1.14 2010/11/27 19:57:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: db_machdep.h,v 1.10 1997/08/31 21:23:40 pk Exp $ */
 
 /*

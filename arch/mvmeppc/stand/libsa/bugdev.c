@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugdev.c,v 1.3 2004/01/26 18:39:20 miod Exp $ */
+/*	$OpenBSD: bugdev.c,v 1.4 2006/10/12 12:14:17 krw Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg

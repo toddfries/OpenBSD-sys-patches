@@ -37,9 +37,10 @@
 
 /* Interrupt priority levels */
 #define	IPL_BIO		10	/* block I/O */
+#define	IPL_AUDIO	IPL_BIO
 #define	IPL_NET		11	/* network */
 #define	IPL_TTY		12	/* terminal */
-#define	IPL_AUDIO	13	/* serial */
+#define	IPL_VM		12
 #define	IPL_CLOCK	14	/* clock */
 #define	IPL_SCHED	14	/* scheduling */
 #define	IPL_HIGH	15	/* everything */
@@ -50,7 +51,7 @@
 #define	splbio()		_cpu_intr_raise(IPL_BIO << 4)
 #define	splnet()		_cpu_intr_raise(IPL_NET << 4)
 #define	spltty()		_cpu_intr_raise(IPL_TTY << 4)
-#define	splvm()			spltty()
+#define	splvm()			_cpu_intr_raise(IPL_VM << 4)
 #define	splaudio()		_cpu_intr_raise(IPL_AUDIO << 4)
 #define	splclock()		_cpu_intr_raise(IPL_CLOCK << 4)
 #define	splstatclock()		splclock()
@@ -71,7 +72,7 @@ extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define	splassert(__wantipl) \
 do {									\
-	if (__predict_false(splassert_ctl > 0)) {			\
+	if (splassert_ctl > 0) {					\
 		splassert_check(__wantipl, __func__);			\
 	}								\
 } while (0)

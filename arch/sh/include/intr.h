@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
-=======
 /*	$OpenBSD: intr.h,v 1.8 2010/12/21 14:56:24 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: intr.h,v 1.22 2006/01/24 23:51:42 uwe Exp $	*/
 
 /*-
@@ -72,8 +68,9 @@ struct intc_intrhand {
 	int	ih_level;	/* SR.I[0:3] value */
 	int	ih_evtcode;	/* INTEVT or INTEVT2(SH7709/SH7709A) */
 	int	ih_idx;		/* evtcode -> intrhand mapping */
+	int	ih_irq;
 	struct evcount ih_count;
-	char *ih_name;
+	const char *ih_name;
 };
 
 /* from 0x200 by 0x20 -> from 0 by 1 */
@@ -105,17 +102,10 @@ struct sh_soft_intrhand {
 };
 
 struct sh_soft_intr {
-<<<<<<< HEAD
-	TAILQ_HEAD(, sh_soft_intrhand) softintr_q;
-	struct evcnt softintr_evcnt;
-	struct simplelock softintr_slock;
-	unsigned long softintr_ipl;
-=======
 	TAILQ_HEAD(, sh_soft_intrhand)
 			softintr_q;
 	unsigned long	softintr_ipl;
 	struct mutex	softintr_lock;
->>>>>>> origin/master
 };
 
 void	 softintr_disestablish(void *);

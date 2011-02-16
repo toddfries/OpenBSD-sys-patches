@@ -90,29 +90,6 @@ cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 	return error;
 }
 
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-
-	while (size > 0) {
-		if (pmap_extract(pmap_kernel(), (vaddr_t)from, &pa) == FALSE)
-			panic("pagemove");
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, UVM_PROT_RW);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
-
 void
 cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
     void (*func)(void *), void *arg)
@@ -173,12 +150,11 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 		tf->tf_sp = (register_t)stack;
 
 	/*
-	 * Build stack frames for the cpu_switch & co.
+	 * Build stack frames for the cpu_switchto & co.
 	 */
 	osp = sp + HPPA_FRAME_SIZE;
 	*(register_t*)(osp - HPPA_FRAME_SIZE) = 0;
 	*(register_t*)(osp + HPPA_FRAME_CRP) = (register_t)&switch_trampoline;
-	*(register_t*)(osp + HPPA_FRAME_SL) = 0;	/* cpl */
 	*(register_t*)(osp) = (osp - HPPA_FRAME_SIZE);
 
 	sp = osp + HPPA_FRAME_SIZE + 20*4; /* frame + calee-save registers */
@@ -196,8 +172,8 @@ cpu_exit(struct proc *p)
 
 	pool_put(&hppa_fppl, pcb->pcb_fpstate);
 
-	exit2(p);
-	cpu_switch(p);
+	pmap_deactivate(p);
+	sched_exit(p);
 }
 
 /*
@@ -250,7 +226,9 @@ vunmapbuf(struct buf *bp, vsize_t len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - addr;
 	len = round_page(off + len);
-	uvm_km_free_wakeup(kernel_map, addr, len);
+	pmap_kremove(addr, len);
+	pmap_update(pmap_kernel());
+	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
 }

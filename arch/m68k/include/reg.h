@@ -1,4 +1,4 @@
-/*	$OpenBSD: reg.h,v 1.6 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: reg.h,v 1.7 2005/09/25 22:26:13 miod Exp $	*/
 /*	$NetBSD: reg.h,v 1.12 1996/12/17 19:24:31 gwr Exp $	*/
 
 /*

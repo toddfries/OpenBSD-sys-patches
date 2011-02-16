@@ -252,7 +252,6 @@ TAILQ_HEAD(, pmap) pmap_all_pmaps;
  */
 struct pool pmap_pmap_pool;
 struct pool pmap_l1pt_pool;
-struct pool_cache pmap_l1pt_cache;
 struct pool pmap_asn_pool;
 struct pool pmap_asngen_pool;
 struct pool pmap_pv_pool;
@@ -433,25 +432,12 @@ pa_to_pvh(paddr_t pa)
 }
 
 /*
- * Optional argument passed to pmap_remove_mapping() for stealing mapping
- * resources.
- */
-struct prm_thief {
-	int	prmt_flags;		/* flags; what to steal */
-	struct pv_entry *prmt_pv;	/* the stolen PV entry */
-	pt_entry_t *prmt_ptp;		/* the stolen PT page */
-};
-
-#define	PRMT_PV		0x0001		/* steal the PV entry */
-#define	PRMT_PTP	0x0002		/* steal the PT page */
-
-/*
  * Internal routines
  */
 void	alpha_protection_init(void);
 void	pmap_do_remove(pmap_t, vaddr_t, vaddr_t, boolean_t);
 boolean_t pmap_remove_mapping(pmap_t, vaddr_t, pt_entry_t *,
-	    boolean_t, cpuid_t, struct prm_thief *);
+	    boolean_t, cpuid_t);
 void	pmap_changebit(paddr_t, pt_entry_t, pt_entry_t, cpuid_t);
 
 /*
@@ -460,7 +446,6 @@ void	pmap_changebit(paddr_t, pt_entry_t, pt_entry_t, cpuid_t);
 int	pmap_lev1map_create(pmap_t, cpuid_t);
 void	pmap_lev1map_destroy(pmap_t, cpuid_t);
 int	pmap_ptpage_alloc(pmap_t, pt_entry_t *, int);
-boolean_t pmap_ptpage_steal(pmap_t, int, paddr_t *);
 void	pmap_ptpage_free(pmap_t, pt_entry_t *, pt_entry_t **);
 void	pmap_l3pt_delref(pmap_t, vaddr_t, pt_entry_t *, cpuid_t,
 	    pt_entry_t **);
@@ -771,9 +756,8 @@ pmap_bootstrap(paddr_t ptaddr, u_int maxasn, u_long ncpuids)
 	/*
 	 * Figure out how many PTE's are necessary to map the kernel.
 	 */
-	lev3mapsize = (VM_PHYS_SIZE +
-		nbuf * MAXBSIZE + 16 * NCARGS + PAGER_MAP_SIZE) / PAGE_SIZE +
-		(maxproc * UPAGES) + nkmempages;
+	lev3mapsize = (VM_PHYS_SIZE + 16 * NCARGS + PAGER_MAP_SIZE) /
+	    PAGE_SIZE + (maxproc * UPAGES) + nkmempages;
 
 #ifdef SYSVSHM
 	lev3mapsize += shminfo.shmall;
@@ -910,8 +894,7 @@ pmap_bootstrap(paddr_t ptaddr, u_int maxasn, u_long ncpuids)
 	    &pool_allocator_nointr);
 	pool_init(&pmap_l1pt_pool, PAGE_SIZE, 0, 0, 0, "l1ptpl",
 	    &pmap_l1pt_allocator);
-	pool_cache_init(&pmap_l1pt_cache, &pmap_l1pt_pool, pmap_l1pt_ctor,
-	    NULL, NULL);
+	pool_set_ctordtor(&pmap_l1pt_pool, pmap_l1pt_ctor, NULL, NULL);
 	pool_init(&pmap_asn_pool, pmap_ncpuids * sizeof(u_int), 0, 0, 0,
 	    "pmasnpl", &pool_allocator_nointr);
 	pool_init(&pmap_asngen_pool, pmap_ncpuids * sizeof(u_long), 0, 0, 0,
@@ -1350,7 +1333,7 @@ pmap_do_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva, boolean_t dowired)
 					    sva);
 #endif
 				needisync |= pmap_remove_mapping(pmap, sva,
-				    l3pte, TRUE, cpu_id, NULL);
+				    l3pte, TRUE, cpu_id);
 			}
 			sva += PAGE_SIZE;
 		}
@@ -1427,7 +1410,7 @@ pmap_do_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva, boolean_t dowired)
 							    pmap_remove_mapping(
 								pmap, sva,
 								l3pte, TRUE,
-								cpu_id, NULL);
+								cpu_id);
 						}
 					}
 
@@ -1519,7 +1502,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 #endif
 		if (pmap_pte_w(pv->pv_pte) == 0) {
 			if (pmap_remove_mapping(pmap, pv->pv_va, pv->pv_pte,
-			    FALSE, cpu_id, NULL) == TRUE) {
+			    FALSE, cpu_id) == TRUE) {
 				if (pmap == pmap_kernel())
 					needkisync |= TRUE;
 				else
@@ -1848,7 +1831,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		 */
 		pmap_physpage_addref(pte);
 	}
-	needisync |= pmap_remove_mapping(pmap, va, pte, TRUE, cpu_id, NULL);
+	needisync |= pmap_remove_mapping(pmap, va, pte, TRUE, cpu_id);
 
  validate_enterpv:
 	/*
@@ -2169,6 +2152,7 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	rv = TRUE;
  out:
 	PMAP_UNLOCK(pmap);
+ out_nolock:
 #ifdef DEBUG
 	if (pmapdebug & PDB_FOLLOW) {
 		if (rv)
@@ -2581,7 +2565,7 @@ alpha_protection_init(void)
  */
 boolean_t
 pmap_remove_mapping(pmap_t pmap, vaddr_t va, pt_entry_t *pte,
-    boolean_t dolock, cpuid_t cpu_id, struct prm_thief *prmt)
+    boolean_t dolock, cpuid_t cpu_id)
 {
 	paddr_t pa;
 	boolean_t onpv;
@@ -2597,19 +2581,8 @@ pmap_remove_mapping(pmap_t pmap, vaddr_t va, pt_entry_t *pte,
 		       pmap, va, pte, dolock, cpu_id, pvp);
 #endif
 
-	if (prmt != NULL) {
-		if (prmt->prmt_flags & PRMT_PV)
-			pvp = &prmt->prmt_pv;
-		else
-			pvp = NULL;
-		if (prmt->prmt_flags & PRMT_PTP)
-			ptp = &prmt->prmt_ptp;
-		else
-			ptp = NULL;
-	} else {
-		pvp = NULL;
-		ptp = NULL;
-	}
+	pvp = NULL;
+	ptp = NULL;
 
 	/*
 	 * PTE not provided, compute it from pmap and va.
@@ -3083,13 +3056,10 @@ pmap_pv_alloc(void)
 	pt_entry_t *pte;
 	pmap_t pvpmap;
 	cpuid_t cpu_id;
-	struct prm_thief prmt;
 
 	pv = pool_get(&pmap_pv_pool, PR_NOWAIT);
 	if (pv != NULL)
 		return (pv);
-
-	prmt.prmt_flags = PRMT_PV;
 
 	/*
 	 * We were unable to allocate one from the pool.  Try to
@@ -3139,13 +3109,13 @@ pmap_pv_alloc(void)
 				 * remove it and grab the pv_entry.
 				 */
 				if (pmap_remove_mapping(pvpmap, pv->pv_va,
-				    pte, FALSE, cpu_id, &prmt))
+				    pte, FALSE, cpu_id))
 					PMAP_SYNC_ISTREAM(pvpmap);
 
 				/* Unlock everything and return. */
 				simple_unlock(&pvpmap->pm_slock);
 				simple_unlock(&pvh->pvh_slock);
-				return (prmt.prmt_pv);
+				return NULL;
 			}
 			simple_unlock(&pvh->pvh_slock);
 		}
@@ -3423,8 +3393,10 @@ pmap_growkernel(vaddr_t maxkvaddr)
 		va += ALPHA_L2SEG_SIZE;
 	}
 
+#if 0
 	/* Invalidate the L1 PT cache. */
 	pool_cache_invalidate(&pmap_l1pt_cache);
+#endif
 
 	pmap_maxkvaddr = va;
 
@@ -3460,7 +3432,7 @@ pmap_lev1map_create(pmap_t pmap, cpuid_t cpu_id)
 
 	simple_lock(&pmap_growkernel_slock);
 
-	l1pt = pool_cache_get(&pmap_l1pt_cache, PR_NOWAIT);
+	l1pt = pool_get(&pmap_l1pt_pool, PR_NOWAIT);
 	if (l1pt == NULL) {
 		simple_unlock(&pmap_growkernel_slock);
 		return (ENOMEM);
@@ -3528,7 +3500,7 @@ pmap_lev1map_destroy(pmap_t pmap, cpuid_t cpu_id)
 	/*
 	 * Free the old level 1 page table page.
 	 */
-	pool_cache_put(&pmap_l1pt_cache, l1pt);
+	pool_put(&pmap_l1pt_pool, l1pt);
 }
 
 /*
@@ -3612,14 +3584,8 @@ pmap_ptpage_alloc(pmap_t pmap, pt_entry_t *pte, int usage)
 	/*
 	 * Allocate the page table page.
 	 */
-	if (pmap_physpage_alloc(usage, &ptpa) == FALSE) {
-		/*
-		 * Yow!  No free pages!  Try to steal a PT page from
-		 * another pmap!
-		 */
-		if (pmap_ptpage_steal(pmap, usage, &ptpa) == FALSE)
-			return (ENOMEM);
-	}
+	if (pmap_physpage_alloc(usage, &ptpa) == FALSE)
+		return (ENOMEM);
 
 	/*
 	 * Initialize the referencing PTE.
@@ -3664,146 +3630,6 @@ pmap_ptpage_free(pmap_t pmap, pt_entry_t *pte, pt_entry_t **ptp)
 #endif
 		pmap_physpage_free(ptpa);
 	}
-}
-
-/*
- * pmap_ptpage_steal:
- *
- *	Steal a PT page from a pmap.
- */
-boolean_t
-pmap_ptpage_steal(pmap_t pmap, int usage, paddr_t *pap)
-{
-	struct pv_head *pvh;
-	pmap_t spmap;
-	int l1idx, l2idx, l3idx;
-	pt_entry_t *lev2map, *lev3map;
-	vaddr_t va;
-	paddr_t pa;
-	struct prm_thief prmt;
-	cpuid_t cpu_id = cpu_number();
-	boolean_t needisync = FALSE;
-
-	prmt.prmt_flags = PRMT_PTP;
-	prmt.prmt_ptp = NULL;
-
-	/*
-	 * We look for pmaps which do not reference kernel_lev1map (which
-	 * would indicate that they are either the kernel pmap, or a user
-	 * pmap with no valid mappings).  Since the list of all pmaps is
-	 * maintained in an LRU fashion, we should get a pmap that is
-	 * `more inactive' than our current pmap (although this may not
-	 * always be the case).
-	 *
-	 * We start looking for valid L1 PTEs at the lowest address,
-	 * go to that L2, look for the first valid L2 PTE, and steal
-	 * that L3 PT page.
-	 */
-	simple_lock(&pmap_all_pmaps_slock);
-	for (spmap = TAILQ_FIRST(&pmap_all_pmaps);
-	     spmap != NULL; spmap = TAILQ_NEXT(spmap, pm_list)) {
-		/*
-		 * Skip the kernel pmap and ourselves.
-		 */
-		if (spmap == pmap_kernel() || spmap == pmap)
-			continue;
-
-		PMAP_LOCK(spmap);
-		if (spmap->pm_lev1map == kernel_lev1map) {
-			PMAP_UNLOCK(spmap);
-			continue;
-		}
-
-		/*
-		 * Have a candidate pmap.  Loop through the PT pages looking
-		 * for one we can steal.
-		 */
-		for (l1idx = 0;
-		     l1idx < l1pte_index(VM_MAXUSER_ADDRESS); l1idx++) {
-			if (pmap_pte_v(&spmap->pm_lev1map[l1idx]) == 0)
-				continue;
-
-			lev2map = (pt_entry_t *)ALPHA_PHYS_TO_K0SEG(
-			    pmap_pte_pa(&spmap->pm_lev1map[l1idx]));
-			for (l2idx = 0; l2idx < NPTEPG; l2idx++) {
-				if (pmap_pte_v(&lev2map[l2idx]) == 0)
-					continue;
-				lev3map = (pt_entry_t *)ALPHA_PHYS_TO_K0SEG(
-				    pmap_pte_pa(&lev2map[l2idx]));
-				for (l3idx = 0; l3idx < NPTEPG; l3idx++) {
-					/*
-					 * If the entry is valid and wired,
-					 * we cannot steal this page.
-					 */
-					if (pmap_pte_v(&lev3map[l3idx]) &&
-					    pmap_pte_w(&lev3map[l3idx]))
-						break;
-				}
-				
-				/*
-				 * If we scanned all of the current L3 table
-				 * without finding a wired entry, we can
-				 * steal this page!
-				 */
-				if (l3idx == NPTEPG)
-					goto found_one;
-			}
-		}
-
-		/*
-		 * Didn't find something we could steal in this
-		 * pmap, try the next one.
-		 */
-		PMAP_UNLOCK(spmap);
-		continue;
-
- found_one:
-		/* ...don't need this anymore. */
-		simple_unlock(&pmap_all_pmaps_slock);
-
-		/*
-		 * Okay!  We have a PT page we can steal.  l1idx and
-		 * l2idx indicate which L1 PTP and L2 PTP we should
-		 * use to compute the virtual addresses the L3 PTP
-		 * maps.  Loop through all the L3 PTEs in this range
-		 * and nuke the mappings for them.  When we're through,
-		 * we'll have a PT page pointed to by prmt.prmt_ptp!
-		 */
-		for (l3idx = 0,
-		     va = (l1idx * ALPHA_L1SEG_SIZE) +
-		          (l2idx * ALPHA_L2SEG_SIZE);
-		     l3idx < NPTEPG && prmt.prmt_ptp == NULL;
-		     l3idx++, va += PAGE_SIZE) {
-			if (pmap_pte_v(&lev3map[l3idx])) {
-				needisync |= pmap_remove_mapping(spmap, va,
-				    &lev3map[l3idx], TRUE, cpu_id, &prmt);
-			}
-		}
-
-		if (needisync)
-			PMAP_SYNC_ISTREAM(pmap);
-
-		PMAP_UNLOCK(spmap);
-
-#ifdef DIAGNOSTIC
-		if (prmt.prmt_ptp == NULL)
-			panic("pmap_ptptage_steal: failed");
-		if (prmt.prmt_ptp != lev3map)
-			panic("pmap_ptpage_steal: inconsistent");
-#endif
-		pa = ALPHA_K0SEG_TO_PHYS((vaddr_t)prmt.prmt_ptp);
-
-		/*
-		 * Don't bother locking here; the assignment is atomic.
-		 */
-		pvh = pa_to_pvh(pa);
-		pvh->pvh_usage = usage;
-
-		*pap = pa;
-		return (TRUE);
-	}
-	simple_unlock(&pmap_all_pmaps_slock);
-	return (FALSE);
 }
 
 /*

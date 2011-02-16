@@ -40,6 +40,7 @@
 
 #include <machine/conf.h>
 
+#include "bio.h"
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
@@ -158,8 +159,8 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk */
 	cdev_tape_init(NST,st),		/* 20: SCSI tape */
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-dev */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 22: berkeley packet filter */
-	cdev_bpftun_init(NTUN,tun),	/* 23: network tunnel */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 22: berkeley packet filter */
+	cdev_tun_init(NTUN,tun),	/* 23: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
 	cdev_notdef(),			/* 25 */
 #ifdef notyet
@@ -194,7 +195,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */
-	cdev_notdef(),			/* 49 */
+	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
@@ -260,8 +261,8 @@ int chrtoblktbl[] = {
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
 	/*  7 */	NODEV,
-	/*  8 */	4,	/* SCSI disk */
-	/*  9 */	6,	/* SCSI CD-ROM */
+	/*  8 */	4,	/* sd */
+	/*  9 */	6,	/* cd */
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
@@ -269,16 +270,16 @@ int chrtoblktbl[] = {
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
 	/* 16 */	NODEV,
-	/* 17 */	NODEV,
-	/* 18 */	7,	/* ram disk */
-	/* 19 */	8,	/* vnode disk */
-	/* 20 */	NODEV,
+	/* 17 */	9,	/* ccd */
+	/* 18 */	7,	/* rd */
+	/* 19 */	8,	/* vnd */
+	/* 20 */	5,	/* st */
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
 	/* 24 */	NODEV,
 	/* 25 */	NODEV,
-	/* 26 */	10,	/* XD disk */
+	/* 26 */	10,	/* xd */
 };
 int nchrtoblktbl = nitems(chrtoblktbl);
 

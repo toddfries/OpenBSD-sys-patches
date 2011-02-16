@@ -87,6 +87,7 @@
 #include <sys/syscallargs.h>
 #include <sys/evcount.h>
 
+#include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
@@ -127,12 +128,6 @@ extern vaddr_t avail_end;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef	BUFCACHEPERCENT
 #define	BUFCACHEPERCENT	5
 #endif
@@ -232,7 +227,7 @@ cpu_startup()
 	 * Initialize error message buffer (at end of core).
 	 * avail_end was pre-decremented in pmap_bootstrap to compensate.
 	 */
-	for (i = 0; i < btoc(MSGBUFSIZE); i++)
+	for (i = 0; i < atop(MSGBUFSIZE); i++)
 		pmap_kenter_pa((vaddr_t)msgbufp + i * PAGE_SIZE,
 		    avail_end + i * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
@@ -243,12 +238,14 @@ cpu_startup()
 	 */
 	printf("%s", version);
 	identifycpu();
-	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem) / 1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -267,10 +264,8 @@ cpu_startup()
 	 */
 	bufinit();
 
-	printf("avail mem = %d (%dK)\n",
-	    ptoa(uvmexp.free), ptoa(uvmexp.free) / 1024);
-	printf("using %d buffers containing %d bytes of memory\n",
-			 nbuf, bufpages * PAGE_SIZE);
+	printf("avail mem = %u (%uMB)\n",
+	    ptoa(uvmexp.free), ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Configure the system.
@@ -500,8 +495,8 @@ boot(howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	uvm_shutdown();
+	splhigh();			/* Disable interrupts. */
 
 	/* If rebooting and a dump is requested, do it. */
 	if (howto & RB_DUMP)
@@ -540,19 +535,13 @@ cpu_kcore_hdr_t cpu_kcore_hdr;
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -560,7 +549,7 @@ dumpconf()
 
 	/* mvme68k only uses a single segment. */
 	cpu_kcore_hdr.ram_segs[0].start = 0;
-	cpu_kcore_hdr.ram_segs[0].size = ctob(physmem);
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
 	cpu_kcore_hdr.mmutype = mmutype;
 	cpu_kcore_hdr.kernel_pa = 0;
 	cpu_kcore_hdr.sysseg_pa = pmap_kernel()->pm_stpa;
@@ -586,9 +575,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr_t blkno;			/* current block to write */
+	daddr64_t blkno;		/* current block to write */
 					/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int pg;				/* page being dumped */
 	paddr_t maddr;			/* PA being dumped */
 	int error;			/* error code from (*dump)() */
@@ -931,6 +920,27 @@ memsize162()
 		 * perhaps it has a MCECC or MEMC040 controller?
 		 */
 		return (memsize1x7());
+	}
+}
+#endif
+
+#ifdef DIAGNOSTIC
+void
+splassert_check(int wantipl, const char *func)
+{
+	int oldipl;
+
+	__asm __volatile ("movew sr,%0" : "=&d" (oldipl));
+
+	oldipl = PSLTOIPL(oldipl);
+
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		_spl(PSL_S | IPLTOPSL(wantipl));
 	}
 }
 #endif

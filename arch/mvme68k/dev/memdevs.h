@@ -1,4 +1,4 @@
-/*	$OpenBSD: memdevs.h,v 1.2 2003/04/16 17:34:46 miod Exp $	*/
+/*	$OpenBSD: memdevs.h,v 1.3 2005/11/24 22:43:16 miod Exp $	*/
 /*
  * Copyright (c) 2002, Miodrag Vallat.
  * All rights reserved.

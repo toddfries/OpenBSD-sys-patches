@@ -62,8 +62,8 @@
 #define	CPU_ALLOWAPERTURE	6	/* int: allow mmap of /dev/xf86 */
 #define CPU_APMWARN		7	/* APM battery warning percentage */
 #define CPU_KBDRESET		8	/* int: console keyboard reset */
-#define CPU_ZTSRAWMODE		9	/* int: zts returns unscaled x/y */
-#define CPU_ZTSSCALE		10	/* struct: zts scaling parameters */
+		/*		9	   formerly int: CPU_ZTSRAWMODE */
+		/*		10	   formerly struct: CPU_ZTSSCALE */
 #define	CPU_MAXSPEED		11	/* int: number of valid machdep ids */
 #define CPU_LIDSUSPEND		12	/* int: closing lid causes suspend */
 #define	CPU_MAXID		13	/* number of valid machdep ids */
@@ -78,11 +78,11 @@
 	{ "allowaperture", CTLTYPE_INT }, \
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
-	{ "ztsrawmode", CTLTYPE_INT }, \
-	{ "ztsscale", CTLTYPE_STRUCT }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
 	{ "maxspeed", CTLTYPE_INT }, \
 	{ "lidsuspend", CTLTYPE_INT } \
-}    
+}
 
 #ifdef _KERNEL
 
@@ -199,13 +199,11 @@ void	arm32_vector_init(vaddr_t, int);
  */
 
 #include <sys/device.h>
-/*
 #include <sys/sched.h>
-*/
 struct cpu_info {
-#if 0 
+	struct proc *ci_curproc;
+
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
-#endif
 #if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */

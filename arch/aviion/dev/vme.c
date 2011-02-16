@@ -1,4 +1,3 @@
- * Copyright (c) 2006, Miodrag Vallat.
 /*	$OpenBSD: vme.c,v 1.11 2010/12/31 21:38:08 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, 2010 Miodrag Vallat.
@@ -34,6 +33,7 @@
 #include <sys/proc.h>
 #include <sys/uio.h>
 
+#include <machine/board.h>
 #include <machine/bus.h>
 #include <machine/conf.h>
 
@@ -61,7 +61,7 @@ const struct cfattach vme_ca = {
 };
 
 struct cfdriver vme_cd = {
-        NULL, "vme", DV_DULL
+	NULL, "vme", DV_DULL
 };
 
 /* minor device number encoding */
@@ -130,6 +130,13 @@ vmeattach(struct device *parent, struct device *self, void *aux)
 	const struct vme_range *r;
 	const char *fmt;
 	u_int32_t ucsr;
+	int i;
+
+	/*
+	 * Set up interrupt handlers.
+	 */
+	for (i = 0; i < NVMEINTR; i++)
+		SLIST_INIT(&vmeintr_handlers[i]);
 
 	/*
 	 * Initialize extents
@@ -146,8 +153,6 @@ vmeattach(struct device *parent, struct device *self, void *aux)
 	    M_DEVBUF, NULL, 0, EX_NOWAIT);
 	if (sc->sc_ext_a32 == NULL)
 		goto out3;
-
-	vmevecbase = 0x80;  /* Hard coded */
 
 	/*
 	 * Force a reasonable timeout for VME data transfers.
@@ -243,18 +248,29 @@ vmeprint(void *aux, const char *pnp)
  * Interrupt related code
  */
 
-/* allocate interrupt vectors */
+intrhand_t vmeintr_handlers[NVMEINTR];
+
 int
-vmeintr_allocate(u_int count, int flags, u_int *array)
+vmeintr_allocate(u_int count, int flags, int ipl, u_int *array)
 {
 	u_int vec, v;
+	struct intrhand *ih;
 
-	if ((flags & VMEINTR_CONTIGUOUS) == 0) {
-		for (vec = vmevecbase; vec <= NVMEINTR - count; vec++) {
-			if (SLIST_EMPTY(&intr_handlers[vec])) {
-				*array++ = vec;
-				if (--count == 0)
-					return (0);
+	if (count > 1 && ISSET(flags, VMEINTR_CONTIGUOUS)) {
+		/*
+		 * Try to find a range of count unused vectors first.
+		 * If there isn't, it is not possible to provide exclusive
+		 * contiguous vectors.
+		 */
+		for (vec = 0; vec <= NVMEINTR - count; vec++) {
+			for (v = count; v != 0; v--)
+				if (!SLIST_EMPTY(&vmeintr_handlers[vec + v - 1]))
+					break;
+
+			if (v == 0) {
+				for (v = 0; v < count; v++)
+					*array++ = vec++;
+				return (0);
 			}
 		}
 		if (ISSET(flags, VMEINTR_EXCLUSIVE))
@@ -274,6 +290,7 @@ vmeintr_allocate(u_int count, int flags, u_int *array)
 				if (ih->ih_ipl != ipl ||
 				    ISSET(ih->ih_flags, INTR_EXCLUSIVE))
 					break;
+			}
 
 			if (v == 0) {
 				for (v = 0; v < count; v++)
@@ -313,7 +330,6 @@ vmeintr_allocate(u_int count, int flags, u_int *array)
 	return EPERM;
 }
 
-/* enable and establish interrupt */
 int
 vmeintr_establish(u_int vec, struct intrhand *ih, const char *name)
 {
@@ -365,8 +381,8 @@ vmeintr_disestablish(u_int vec, struct intrhand *ih)
 		return;
 
 	/*
-	 * No need to enable the VME interrupt source in the interrupt
-	 * controller, as they are enabled by default.
+	 * Walk the interrupts table to check if this level needs
+	 * to be disabled.
 	 */
 	for (vec = 0; vec < NVMEINTR; vec++) {
 		intr = SLIST_FIRST(&vmeintr_handlers[vec]);

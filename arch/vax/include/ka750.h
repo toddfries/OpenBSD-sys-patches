@@ -1,5 +1,5 @@
 /*	$NetBSD: ka750.h,v 1.8 1997/02/12 17:58:56 ragge Exp $	*/
-/*	$OpenBSD: ka750.h,v 1.7 1997/09/10 11:47:08 maja Exp $	*/
+/*	$OpenBSD: ka750.h,v 1.8 2000/04/26 03:08:41 bjc Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.

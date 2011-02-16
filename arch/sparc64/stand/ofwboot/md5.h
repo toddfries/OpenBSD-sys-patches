@@ -1,4 +1,4 @@
-/*	$OpenBSD: md5.h,v 1.2 2001/08/20 19:55:33 jason Exp $	*/
+/*	$OpenBSD: md5.h,v 1.3 2002/03/14 01:26:46 millert Exp $	*/
 /*	$NetBSD: md5.h,v 1.1 2000/08/20 14:58:38 mrg Exp $	*/
 
 /*

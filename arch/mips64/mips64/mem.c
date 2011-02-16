@@ -55,7 +55,6 @@
 #include <sys/malloc.h>
 
 #include <machine/autoconf.h>
-#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 
@@ -80,17 +79,6 @@ mmopen(dev_t dev, int flag, int mode, struct proc *p)
 	case 2:
 	case 12:
 		return (0);
-#ifdef APERTURE
-	case 4:
-		if (suser(p->p_ucred, &p->p_acflag) != 0 || !allowaperture)
-			return (EPERM);
-
-		/* authorize only one simultaneous open() */
-		if (ap_open_count > 0)
-			return(EPERM);
-		ap_open_count++;
-		return (0);
-#endif
 	default:
 		return (ENXIO);
 	}
@@ -100,10 +88,6 @@ mmopen(dev_t dev, int flag, int mode, struct proc *p)
 int
 mmclose(dev_t dev, int flag, int mode, struct proc *p)
 {
-#ifdef APERTURE
-	if (minor(dev) == 4)
-		ap_open_count--;
-#endif
 	return (0);
 }
 
@@ -112,6 +96,7 @@ int
 mmrw(dev_t dev, struct uio *uio, int flags)
 {
 	struct iovec *iov;
+	boolean_t allowed;
 	int error = 0, c;
 	vaddr_t v;
 
@@ -130,9 +115,9 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 		case 0:
 			v = uio->uio_offset;
 			c = iov->iov_len;
-			if (v + c > ctob(physmem))
+			if (v + c > ptoa(physmem))
 				return (EFAULT);
-			v = (vaddr_t)PHYS_TO_KSEG0(v);
+			v = (vaddr_t)PHYS_TO_XKPHYS(v, CCA_NONCOHERENT);
 			error = uiomove((caddr_t)v, c, uio);
 			continue;
 
@@ -179,11 +164,9 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				c = iov->iov_len;
 				break;
 			}
-			if (zeropage == NULL) {
-				zeropage = (caddr_t)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
-			}
+			if (zeropage == NULL)
+				zeropage = malloc(PAGE_SIZE, M_TEMP,
+				    M_WAITOK | M_ZERO);
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			continue;
@@ -205,19 +188,6 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 paddr_t
 mmmmap(dev_t dev, off_t off, int prot)
 {
-#ifdef APERTURE
-	if (minor(dev) == 4) {
-		if (off >= 0x0000 && off < 0x10000) {
-			off += sys_config.pci_io[0].bus_base;
-			return atop(off);
-		} else if (off >= 0xa0000 && off < 0x10000000) {
-			off += sys_config.pci_mem[0].bus_base;
-			return atop(off);
-		} else {
-			return -1;
-		}
-	}
-#endif
 	return -1;
 }
 

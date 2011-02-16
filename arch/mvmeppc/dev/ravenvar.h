@@ -1,4 +1,4 @@
-/*	$OpenBSD: ravenvar.h,v 1.2 2004/01/28 23:52:10 miod Exp $ */
+/*	$OpenBSD: ravenvar.h,v 1.3 2004/01/29 10:58:06 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.

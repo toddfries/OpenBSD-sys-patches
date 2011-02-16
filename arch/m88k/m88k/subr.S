@@ -32,7 +32,9 @@
 
 #include <sys/errno.h>
 
+#include <machine/param.h>
 #include <machine/asm.h>
+#include <machine/psl.h>
 #include <machine/trap.h>
 
 #ifdef	M88100
@@ -359,7 +361,7 @@ ASLOCAL(Lcidone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT
+	 st	r0,   r6,   PCB_ONFAULT
 
 ASLOCAL(Lciflt)
 	br.n	_ASM_LABEL(Lcidone)
@@ -635,7 +637,7 @@ ASLOCAL(Lcodone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT	/* clear the handler */
+	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
 
 ASLOCAL(Lcoflt)
 	br.n	_ASM_LABEL(Lcodone)
@@ -703,7 +705,7 @@ ASLOCAL(Lcosdone)
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	jmp.n	r1
-	 st	r0,r6,PCB_ONFAULT	/* clear the handler */
+	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
 
 #undef	SRC
 #undef	DEST
@@ -718,10 +720,13 @@ ASLOCAL(Lcosdone)
  * Copy len bytes from src to dst, aborting if we encounter a page fault.
  */
 ENTRY(kcopy)
+	subu	r31,  r31,  16
 	ldcr	r5,   CPU
 	ld	r6,   r5,   CI_CURPCB
 	or.u	r5,   r0,   hi16(_ASM_LABEL(kcopy_fault))
+	ld	r7,   r6,   PCB_ONFAULT
 	or	r5,   r5,   lo16(_ASM_LABEL(kcopy_fault))
+	st	r7,   r31,  0			/* save old pcb_onfault */
 	st	r5,   r6,   PCB_ONFAULT		/* pcb_onfault = kcopy_fault */
 	bcnd	le0,r4,_ASM_LABEL(kcopy_out)	/* nothing to do if <= 0 */
 /*
@@ -971,9 +976,11 @@ ASLOCAL(kcopy_out)
 	or	r2,   r0,   0		/* return success */
 ASLOCAL(kcopy_out_fault)
 	ldcr	r5,   CPU
+	ld	r7,   r31,  0
 	ld	r6,   r5,   CI_CURPCB
+	add	r31,  r31,  16
 	jmp.n	r1		/* all done, return to caller */
-	 st	r0,   r6,   PCB_ONFAULT	/* clear the handler */
+	 st	r7,   r6,   PCB_ONFAULT	/* restore previous pcb_onfault */
 
 ASLOCAL(kcopy_fault)
 	br.n	_ASM_LABEL(kcopy_out_fault)
@@ -1017,6 +1024,7 @@ ASLOCAL(kr_strat)
 	word	_ASM_LABEL(kr_byte_copy)
 	word	_ASM_LABEL(kr_3byte_word_copy)
 
+#ifdef DDB
 /*
  * non-local goto
  *	int setjmp(label_t *);
@@ -1067,13 +1075,14 @@ ENTRY(longjmp)
 	ld	r31,r2,18*4
 	jmp.n	r1
 	 or	r2,r0,1
+#endif
 
 /*
  * Signal trampoline code.
  * The kernel arranges for the handler to be invoked directly, and return
  * here.
  */
-GLOBAL(sigcode)			/* r31 points to sigframe */
+ENTRY(sigcode)			/* r31 points to sigframe */
 	ld	r2,  r31, 0	/* pick sigcontext* */
 	or	r13, r0,  SYS_sigreturn
 	tb0	0,   r0,  128	/* syscall trap, calling sigreturn */

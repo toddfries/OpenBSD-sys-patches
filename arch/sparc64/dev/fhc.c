@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fhc.c,v 1.11 2004/09/28 18:37:43 jason Exp $	*/
-=======
 /*	$OpenBSD: fhc.c,v 1.17 2010/11/11 17:58:23 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)
@@ -59,8 +55,6 @@ int _fhc_bus_map(bus_space_tag_t, bus_space_tag_t, bus_addr_t, bus_size_t,
 void *fhc_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
     int (*)(void *), void *, const char *);
 bus_space_handle_t *fhc_find_intr_handle(struct fhc_softc *, int);
-bus_space_handle_t *fhc_try_intr_handle(struct fhc_softc *,
-    bus_space_handle_t *, bus_size_t, int);
 void fhc_led_blink(void *, int);
 
 void
@@ -102,6 +96,9 @@ fhc_attach(struct fhc_softc *sc)
 	for (node = node0; node; node = nextsibling(node)) {
 		struct fhc_attach_args fa;
 
+		if (!checkstatus(node))
+			continue;
+
 		bzero(&fa, sizeof(fa));
 
 		fa.fa_node = node;
@@ -142,7 +139,7 @@ fhc_print(void *args, const char *busname)
 	char *class;
 
 	if (busname != NULL) {
-		printf("%s at %s", fa->fa_name, busname);
+		printf("\"%s\" at %s", fa->fa_name, busname);
 		class = getpropstring(fa->fa_node, "device_type");
 		if (*class != '\0')
 			printf(" class %s", class);
@@ -173,16 +170,11 @@ fhc_alloc_bus_tag(struct fhc_softc *sc)
 {
 	struct sparc_bus_space_tag *bt;
 
-	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT);
+	bt = malloc(sizeof(*bt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (bt == NULL)
 		panic("fhc: couldn't alloc bus tag");
 
-<<<<<<< HEAD
-	bzero(bt, sizeof(*bt));
-	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dv.dv_xname);
-=======
 	strlcpy(bt->name, sc->sc_dv.dv_xname, sizeof(bt->name));
->>>>>>> origin/master
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;
 	bt->asi = bt->parent->asi;
@@ -229,34 +221,21 @@ _fhc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t addr,
 }
 
 bus_space_handle_t *
-fhc_try_intr_handle(struct fhc_softc *sc, bus_space_handle_t *hp,
-    bus_size_t off, int val)
+fhc_find_intr_handle(struct fhc_softc *sc, int ino)
 {
-	u_int64_t r;
+	switch (FHC_INO(ino)) {
+	case FHC_F_INO:
+		return &sc->sc_freg;
+	case FHC_S_INO:
+		return &sc->sc_sreg;
+	case FHC_U_INO:
+		return &sc->sc_ureg;
+	case FHC_T_INO:
+		return &sc->sc_treg;
+	default:
+		break;
+	}
 
-	r = bus_space_read_8(sc->sc_bt, *hp, off);
-	if (INTINO(r) == INTINO(val))
-		return (hp);
-	return (NULL);
-}
-
-bus_space_handle_t *
-fhc_find_intr_handle(struct fhc_softc *sc, int val)
-{
-	bus_space_handle_t *hp;
-
-	hp = fhc_try_intr_handle(sc, &sc->sc_freg, FHC_F_IMAP, val);
-	if (hp != NULL)
-		return (hp);
-	hp = fhc_try_intr_handle(sc, &sc->sc_sreg, FHC_S_IMAP, val);
-	if (hp != NULL)
-		return (hp);
-	hp = fhc_try_intr_handle(sc, &sc->sc_ureg, FHC_U_IMAP, val);
-	if (hp != NULL)
-		return (hp);
-	hp = fhc_try_intr_handle(sc, &sc->sc_treg, FHC_T_IMAP, val);
-	if (hp != NULL)
-		return (hp);
 	return (NULL);
 }
 

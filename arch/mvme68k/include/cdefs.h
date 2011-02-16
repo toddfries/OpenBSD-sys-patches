@@ -1,3 +1,3 @@
-/*	$OpenBSD: cdefs.h,v 1.3 1996/04/28 10:56:05 deraadt Exp $ */
+/*	$OpenBSD: cdefs.h,v 1.4 1997/03/31 00:23:58 downsj Exp $ */
 
 #include <m68k/cdefs.h>

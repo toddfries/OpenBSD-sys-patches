@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: RAMDISK,v 1.61 2007/04/04 20:47:54 kettenis Exp $
-=======
 #	$OpenBSD: RAMDISK,v 1.98 2010/04/19 10:44:33 dcoppa Exp $
->>>>>>> origin/master
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -12,6 +8,9 @@ maxusers	2
 
 option		RAMDISK_HOOKS
 option		MINIROOTSIZE=6144
+
+option		SUN4US
+option		SUN4V
 
 option		PCIVERBOSE
 #option		USBVERBOSE
@@ -23,7 +22,6 @@ option		DST=0		# daylight saving time used by RTC
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-option		DIAGNOSTIC	# internal consistency checks
 option		FFS		# UFS
 option		FFS2		# UFS2
 option		NFSCLIENT	# Network File System client
@@ -64,12 +62,12 @@ schizo*	at ssm?
 pci*	at schizo?
 pyro*	at mainbus0
 pci*	at pyro?
+vpci*	at mainbus0
+pci*	at vpci?
 pci*	at ppb?
 ppb*	at pci?
 ebus*	at mainbus0
 ebus*	at pci?
-<<<<<<< HEAD
-=======
 vbus0	at mainbus0
 sbbc*	at pci?
 cbus*	at vbus?
@@ -91,7 +89,6 @@ ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
 wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
->>>>>>> origin/master
 
 # PCI Ethernet
 hme*	at pci?			# Sun Happy Meal 10/100
@@ -117,12 +114,9 @@ bnx*	at pci?			# Broadcom BCM5706/5708 GigE
 stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
-<<<<<<< HEAD
-=======
 re*	at pci?			# RealTek 8169/8169S/8110S
 re*	at cardbus?		# RealTek 8169/8169S/8110S
 jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
->>>>>>> origin/master
 
 auxio*	at ebus?
 auxio*	at sbus?
@@ -133,8 +127,6 @@ clock0	at fhc?
 rtc*	at ebus?			# DS1287/M5819 clock
 timer*	at mainbus0			# Timer chip
 
-<<<<<<< HEAD
-=======
 # Virtual devices for sun4v systems.
 vcons0	at vbus?
 vrtc0	at vbus?
@@ -142,7 +134,6 @@ vdsk*	at cbus?
 scsibus* at vdsk?
 vnet*	at cbus?
 
->>>>>>> origin/master
 ## Lance Ethernet - AMD7990
 le*		at sbus?
 ledma*		at sbus?
@@ -187,17 +178,19 @@ siop*	at pci?
 isp*	at pci?
 mpi*	at pci?
 sili*	at pci?
+arc*	at pci?
+jmb*	at pci?
+ahci*	at jmb?
+pciide*	at jmb?
+ahci*	at pci?
 
 scsibus*	at ahc?
 scsibus*	at siop?
 scsibus*	at mpi?
 scsibus*	at sili?
-<<<<<<< HEAD
-=======
 scsibus*	at arc?
 scsibus*	at ahci?
 scsibus*	at isp?
->>>>>>> origin/master
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
@@ -224,14 +217,11 @@ inphy*	at mii?			# Intel 82555 PHYs
 lxtphy*	at mii?			# Level1 LXT970 PHYs
 rlphy*	at mii?			# RealTek 8139 internal PHYs
 urlphy*	at mii?			# Realtek RTL8150L internal PHY
-<<<<<<< HEAD
-=======
 rgephy*	at mii?			# Realtek 8169S/8110S PHY
 gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 nsgphy*	at mii?			# NS gigabit PHYs
 jmphy*	at mii?			# JMicron JMP202/JMP211 PHYs
 ipgphy*	at mii?			# IC Plus IP1000A PHYs
->>>>>>> origin/master
 ukphy*	at mii?			# Unknown PHYs
 
 # PCI USB Controllers
@@ -331,6 +321,9 @@ sbus*		at xbox?
 ## PROM console driver -- if all else fails
 pcons0	at mainbus0			# PROM console
 wsdisplay* at pcons?
+
+## PROM clock -- if all else failse
+prtc0	at mainbus0
 
 pseudo-device	rd	2	# ramdisk
 pseudo-device	loop	1	# network loopback

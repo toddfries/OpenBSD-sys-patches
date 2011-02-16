@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbox.c,v 1.4 2006/03/04 12:38:58 miod Exp $	*/
+/*	$OpenBSD: xbox.c,v 1.5 2006/06/02 20:00:54 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

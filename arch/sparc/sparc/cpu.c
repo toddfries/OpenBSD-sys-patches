@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.c,v 1.40 2005/04/19 21:30:20 miod Exp $	*/
-=======
 /*	$OpenBSD: cpu.c,v 1.48 2010/11/11 17:58:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cpu.c,v 1.56 1997/09/15 20:52:36 pk Exp $ */
 
 /*
@@ -243,6 +239,8 @@ cpu_attach(parent, self, aux)
 
 	if (sc->cacheinfo.c_totalsize != 0)
 		cache_print(sc);
+
+	sc->ci.ci_softc = sc;
 
 	if (sc->master) {
 		int s;

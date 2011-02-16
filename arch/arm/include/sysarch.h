@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
+/*	$OpenBSD: sysarch.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
 /*	$NetBSD: sysarch.h,v 1.4 2002/03/30 06:23:39 thorpej Exp $	*/
 
 /*

@@ -168,7 +168,7 @@ dec_1000_intr_map(pa, ihp)
 		return 0;
 	}
 
-bad:	printf("dec_1000_intr_map: can't map dev %d pin %d\n", device, buspin);
+bad:
 	return 1;
 }
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: genassym.cf,v 1.7 2005/06/07 21:32:43 martin Exp $
-=======
 #	$OpenBSD: genassym.cf,v 1.10 2008/08/18 23:05:38 miod Exp $
->>>>>>> origin/master
 #	$NetBSD: genassym.cf,v 1.10 1999/11/19 22:09:55 ragge Exp $
 #
 # Copyright (c) 1997 Ludd, University of Lule}, Sweden.
@@ -66,6 +62,9 @@ struct	cpu_dep
 member	MCHK		cpu_mchk
 member	MEMERR		cpu_memerr
 member	HARDCLOCK	cpu_hardclock
+
+struct	cpu_info
+member	ci_curproc
 
 export	KERNBASE
 

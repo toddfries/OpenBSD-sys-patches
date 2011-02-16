@@ -41,19 +41,15 @@
 static struct evcount clk_count;
 static int clk_irq = 5;
 
-/* Definition of the driver for autoconfig. */
 int	clockmatch(struct device *, void *, void *);
 void	clockattach(struct device *, struct device *, void *);
-intrmask_t clock_int5_dummy(intrmask_t, struct trap_frame *);
-intrmask_t clock_int5(intrmask_t, struct trap_frame *);
-void clock_int5_init(struct clock_softc *);
 
 struct cfdriver clock_cd = {
-	NULL, "clock", DV_DULL, NULL, 0
+	NULL, "clock", DV_DULL
 };
 
 struct cfattach clock_ca = {
-	sizeof(struct clock_softc), clockmatch, clockattach
+	sizeof(struct device), clockmatch, clockattach
 };
 
 void	clock_calibrate(struct cpu_info *);
@@ -78,15 +74,13 @@ struct timecounter cp0_timecounter = {
 			  (((year) + 1900) % 400) == 0)) ? 366 : 365)
 
 int
-clockmatch(struct device *parent, void *cfdata, void *aux)
+clockmatch(struct device *parent, void *vcf, void *aux)
 {
 	struct mainbus_attach_args *maa = aux;
 
 	if (strcmp(maa->maa_name, clock_cd.cd_name) != 0)
 		return 0;
 
-	if (cf->cf_unit >= 1)
-		return 0;
 	return 10;	/* Try to get clock early */
 }
 
@@ -113,17 +107,6 @@ clockattach(struct device *parent, struct device *self, void *aux)
  *
  *	The code is enabled by setting 'cpu_counter_interval'.
  */
-
-/*
- *  Dummy count register interrupt handler used on some targets.
- *  Just resets the compare register and acknowledge the interrupt.
- */
-intrmask_t
-clock_int5_dummy(intrmask_t mask, struct trap_frame *tf)
-{
-        cp0_set_compare(0);      /* Shut up counter int's for a while */
-	return CR_INT_5;	/* Clock is always on 5 */
-}
 
 /*
  *  Interrupt handler for targets using the internal count register
@@ -225,13 +208,18 @@ delay(int n)
  *	Mips machine independent clock routines.
  */
 
+struct tod_desc sys_tod;
+
 /*
  * Calibrate cpu clock against the TOD clock if available.
  */
 void
 clock_calibrate(struct cpu_info *ci)
 {
-	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
+	struct tod_desc *cd = &sys_tod;
+	struct tod_time ct;
+	u_int first_cp0, second_cp0, cycles_per_sec;
+	int first_sec;
 
 	if (cd->tod_get == NULL)
 		return;
@@ -330,12 +318,12 @@ inittodr(time_t base)
 {
 	struct timespec ts;
 	struct tod_time c;
-	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
+	struct tod_desc *cd = &sys_tod;
 	int days, yr;
 
 	ts.tv_nsec = 0;
 
-	if (base < 15*SECYR) {
+	if (base < 35 * SECYR) {
 		printf("WARNING: preposterous time in file system");
 		/* read the system clock anyway */
 		base = 40 * SECYR;	/* 2010 */
@@ -346,8 +334,8 @@ inittodr(time_t base)
 	 * for sanity checking clock. Dates after 19991231 should be
 	 * returned as year >= 100.
 	 */
-	if (sc->sc_clock.clk_get) {
-		(*sc->sc_clock.clk_get)(sc, base, &c);
+	if (cd->tod_get) {
+		(*cd->tod_get)(cd->tod_cookie, base, &c);
 	} else {
 		printf("WARNING: No TOD clock, believing file system.\n");
 		goto bad;
@@ -366,7 +354,7 @@ inittodr(time_t base)
 	/* now have days since Jan 1, 1970; the rest is easy... */
 	ts.tv_sec = days * SECDAY + c.hour * 3600 + c.min * 60 + c.sec;
 	tc_setclock(&ts);
-	sc->sc_initted = 1;
+	cd->tod_valid = 1;
 
 	/*
 	 * See if we gained/lost time.
@@ -383,7 +371,7 @@ inittodr(time_t base)
 bad:
 	ts.tv_sec = base;
 	tc_setclock(&ts);
-	sc->sc_initted = 1;
+	cd->tod_valid = 1;
 	printf("WARNING: CHECK AND RESET THE DATE!\n");
 }
 
@@ -399,11 +387,10 @@ resettodr()
 	int t, t2;
 
 	/*
-	 *  Don't reset clock if time has not been set!
+	 *  Don't reset TOD if time has not been set!
 	 */
-	if (!sc->sc_initted) {
+	if (!cd->tod_valid)
 		return;
-	}
 
 	/* compute the day of week. 1 is Sunday*/
 	t2 = time_second / SECDAY;
@@ -437,9 +424,8 @@ resettodr()
 	c.min = t / 60;
 	c.sec = t % 60;
 
-	if (sc->sc_clock.clk_set) {
-		(*sc->sc_clock.clk_set)(sc, &c);
-	}
+	if (cd->tod_set)
+		(*cd->tod_set)(cd->tod_cookie, &c);
 }
 
 u_int
