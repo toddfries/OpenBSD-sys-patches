@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.58 2010/09/19 13:10:21 yasuoka Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.60 2011/02/15 19:15:25 miod Exp $ */
 /*
  * if_em_hw.c Shared functions for accessing and configuring the MAC
  */
@@ -5353,8 +5353,14 @@ em_init_eeprom_params(struct em_hw *hw)
 			    E1000_EECD_SIZE_EX_SHIFT);
 		}
 
-		eeprom->word_size = 1 << 
-		    (eeprom_size + EEPROM_WORD_SIZE_SHIFT);
+		/* EEPROM access above 16k is unsupported */
+		if (eeprom_size + EEPROM_WORD_SIZE_SHIFT >
+		    EEPROM_WORD_SIZE_SHIFT_MAX) {
+			eeprom->word_size = 1 << EEPROM_WORD_SIZE_SHIFT_MAX;
+		} else {
+			eeprom->word_size = 1 << 
+			    (eeprom_size + EEPROM_WORD_SIZE_SHIFT);
+		}
 	}
 	return ret_val;
 }
@@ -7109,6 +7115,7 @@ em_clear_hw_cntrs(struct em_hw *hw)
 	temp = E1000_READ_REG(hw, ICRXDMTC);
 }
 
+#ifndef SMALL_KERNEL
 /******************************************************************************
  * Adjusts the statistic counters when a frame is accepted by TBI_ACCEPT
  *
@@ -7188,6 +7195,7 @@ em_tbi_adjust_stats(struct em_hw *hw, struct em_hw_stats *stats,
 		stats->prc1522++;
 	}
 }
+#endif	/* !SMALL_KERNEL */
 
 /******************************************************************************
  * Gets the current PCI bus type, speed, and width of the hardware
