@@ -67,6 +67,15 @@ x86_send_ipi(struct cpu_info *ci, int ipimask)
 	return ret;
 }
 
+int
+x86_fast_ipi(struct cpu_info *ci, int ipi)
+{
+	if (!(ci->ci_flags & CPUF_RUNNING))
+		return (ENOENT);
+
+	return (x86_ipi(ipi, ci->ci_apicid, LAPIC_DLMODE_FIXED));
+}
+
 void
 x86_broadcast_ipi(int ipimask)
 {
@@ -101,7 +110,6 @@ x86_ipi_handler(void)
 	for (bit = 0; bit < X86_NIPI && pending; bit++) {
 		if (pending & (1<<bit)) {
 			pending &= ~(1<<bit);
-			ci->ci_ipi_events[bit].ev_count++;
 			(*ipifunc[bit])(ci);
 			ipi_count.ec_count++;
 		}

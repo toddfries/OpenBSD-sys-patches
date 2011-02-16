@@ -108,6 +108,7 @@
 #include "lapic.h"
 #include "ioapic.h"
 #include "ksyms.h"
+#include "acpi.h"
 
 #include <sys/errno.h>
 #include <sys/syscall.h>
@@ -356,9 +357,11 @@ bi_size_ok:
 #define PROC0_PTP3_OFF	(PROC0_STK_OFF + UPAGES * NBPG)
 #define PROC0_PTP2_OFF	(PROC0_PTP3_OFF + NKL4_KIMG_ENTRIES * NBPG)
 #define PROC0_PTP1_OFF	(PROC0_PTP2_OFF + TABLE_L3_ENTRIES * NBPG)
+#define	PROC0_DMP3_OFF	(PROC0_PTP1_OFF + TABLE_L2_ENTRIES * NBPG)
+#define PROC0_DMP2_OFF	(PROC0_DMP3_OFF + NDML3_ENTRIES * NBPG)
 #define TABLESIZE \
-  ((NKL4_KIMG_ENTRIES + TABLE_L3_ENTRIES + TABLE_L2_ENTRIES + 1 + UPAGES) \
-    * NBPG)
+    ((NKL4_KIMG_ENTRIES + TABLE_L3_ENTRIES + TABLE_L2_ENTRIES + 1 + UPAGES + \
+	NDML3_ENTRIES + NDML2_ENTRIES) * NBPG)
 
 #define fillkpt	\
 1:	movl	%eax,(%ebx)	; 	/* store phys addr */ \
@@ -477,9 +480,36 @@ bi_size_ok:
 	movl	$NKL4_KIMG_ENTRIES,%ecx
 	fillkpt
 
+	/*
+	 * Map the first 4 GB with the direct map. We'll map the rest
+	 * in pmap_bootstrap. But we always need the first 4GB during
+	 * bootstrap.
+	 */
+	leal	(PROC0_DMP2_OFF)(%esi), %ebx
+	xorl	%eax, %eax
+	orl	$(PG_V|PG_KW|PG_PS|PG_G), %eax
+	movl	$(NDML2_ENTRIES * NPDPG), %ecx
+1:	movl	%eax, (%ebx)
+	movl	$0, 4(%ebx)
+	addl	$8, %ebx
+	addl	$NBPD_L2, %eax
+	loop	1b
+
+	leal	(PROC0_DMP3_OFF)(%esi), %ebx
+	leal	(PROC0_DMP2_OFF)(%esi), %eax
+	orl	$(PG_V|PG_KW), %eax
+	movl	$NDML2_ENTRIES, %ecx
+	fillkpt
+
+	leal	(PROC0_PML4_OFF + PDIR_SLOT_DIRECT * 8)(%esi), %ebx
+	leal	(PROC0_DMP3_OFF)(%esi), %eax
+	orl	$(PG_V|PG_KW), %eax
+	movl	$NDML3_ENTRIES, %ecx
+	fillkpt
+
 	/* Install recursive top level PDE */
-	leal    (PROC0_PML4_OFF + PDIR_SLOT_PTE*8)(%esi),%ebx
-	leal    (PROC0_PML4_OFF)(%esi),%eax
+	leal	(PROC0_PML4_OFF + PDIR_SLOT_PTE*8)(%esi),%ebx
+	leal	(PROC0_PML4_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW),%eax
 	movl	%eax,(%ebx)
 	movl	$0, 4(%ebx)
@@ -688,7 +718,7 @@ ENTRY(longjmp)
  * int cpu_switchto(struct proc *old, struct proc *new)
  * Switch from "old" proc to "new".
  */
-ENTRY(cpu_switch)
+ENTRY(cpu_switchto)
 	pushq	%rbx
 	pushq	%rbp
 	pushq	%r12
@@ -696,72 +726,8 @@ ENTRY(cpu_switch)
 	pushq	%r14
 	pushq	%r15
 
-	movq	%rdi,%r13
-
-	/*
-	 * Clear curproc so that we don't accumulate system time while idle.
-	 * This also insures that schedcpu() will move the old proc to
-	 * the correct queue if it happens to get called from the spllower()
-	 * below and changes the priority.  (See corresponding comment in
-	 * userret()).
-	 */
-	movq	$0,CPUVAR(CURPROC)
-
-
-	/*
-	 * First phase: find new proc.
-	 *
-	 * Registers:
-	 *   %rax - queue head, scratch, then zero
-	 *   %r8 - queue number
-	 *   %ecx - cached value of whichqs
-	 *   %rdx - next process in queue
-	 *   %r13 - old proc
-	 *   %r12 - new proc
-	 */
-
-	/* Look for new proc. */
-	cli				# splhigh doesn't do a cli
-	movl	_C_LABEL(whichqs)(%rip),%ecx
-	bsfl	%ecx,%r8d		# find a full q
-	jnz	switch_dequeue
-
-	/*
-	 * idling: save old context
-	 *
-	 * Registers:
-	 * %rax, %rcx - scratch
-	 * %r13 - old proc, then old pcb
-	 * %r12 - idle pcb
-	 */
-
-	/* old proc still in %rdi */
-	call	_C_LABEL(pmap_deactivate)
-
-	movq	P_ADDR(%r13),%r13
-
-	/* Save stack pointers */
-
-	movq	%rsp,PCB_RSP(%r13)
-	movq	%rbp,PCB_RBP(%r13)
-
-	/* Find idle PCB for this CPU */
-#ifndef MULTIPROCESSOR
-	leaq	_C_LABEL(proc0)(%rip),%rcx
-	movq	P_ADDR(%rcx),%r12
-	movl	P_MD_TSS_SEL(%rcx),%edx
-#else
-	movq	CPUVAR(IDLE_PCB),%r12
-	movl	CPUVAR(IDLE_TSS_SEL),%edx
-#endif
-	movq	$0,CPUVAR(CURPROC)
-
-	/* Restore the idle context (avoid interrupts) */
-	cli
-
-	/* Restore stack pointers. */
-	movq	PCB_RSP(%r12),%rsp
-	movq	PCB_RBP(%r12),%rbp
+	movq	%rdi, %r13
+	movq	%rsi, %r12
 
 #ifdef DIAGNOSTIC
 	xorq	%rax,%rax
@@ -770,9 +736,6 @@ ENTRY(cpu_switch)
 	cmpb	$SRUN,P_STAT(%r12)
 	jne	_C_LABEL(switch_error3)
 #endif
-
-	/* Isolate proc.  XXX Is this necessary? */
-	movq	%rax,P_BACK(%r12)
 
 	/* Record new proc. */
 	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
@@ -785,7 +748,7 @@ ENTRY(cpu_switch)
 	jz	switch_exited
 
 	/*
-	 * Second phase: save old context.
+	 * Save old context.
 	 *
 	 * Registers:
 	 *   %rax, %rcx - scratch
@@ -807,7 +770,7 @@ ENTRY(cpu_switch)
 
 switch_exited:
 	/*
-	 * Third phase: restore saved context.
+	 * Restore saved context.
 	 *
 	 * Registers:
 	 *   %rax, %rcx, %rdx - scratch
@@ -861,9 +824,6 @@ switch_restored:
 	sti
 
 switch_return:
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)     
-	call	_C_LABEL(sched_unlock_idle)
-#endif
 
 	popq	%r15
 	popq	%r14
@@ -924,71 +884,6 @@ NENTRY(switch_pmcpu_set)
 	/* NOTREACHED */
 1:	.asciz	"activate already active pmap"
 #endif /* DIAGNOSTIC */
-
-/*
- * void switch_exit(struct proc *l, void (*exit)(struct proc *));
- * Switch to proc0's saved context and deallocate the address space and kernel
- * stack for p.  Then jump into cpu_switch(), as if we were in proc0 all along.
- */
-	.globl	_C_LABEL(proc0)
-ENTRY(switch_exit)
-#ifdef MULTIPROCESSOR
-	movq	CPUVAR(IDLE_PCB),%r8
-	movl	CPUVAR(IDLE_TSS_SEL),%edx
-#else
-	leaq	_C_LABEL(proc0)(%rip),%r9
-	movq	P_ADDR(%r9),%r8
-	movl	P_MD_TSS_SEL(%r9),%edx
-#endif
-
-	/* In case we fault... */
-	movq	$0,CPUVAR(CURPROC)
-
-	cli
-
-	/* Restore stack pointers. */
-	movq	PCB_RSP(%r8),%rsp
-	movq	PCB_RBP(%r8),%rbp
-
-	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	movq	CPUVAR(GDT),%rax
-#else
-	movq	_C_LABEL(gdtstore)(%rip),%rax
-#endif
-
-	/* Switch address space. */
-	movq	PCB_CR3(%r8),%rcx
-	movq	%rcx,%cr3
-
-	/* Switch TSS. */
-	andl	$~0x0200,4-SEL_KPL(%rax,%rdx,1)
-	ltr	%dx
-
-	/* We're always in the kernel, so we don't need the LDT. */
-
-	/* Restore cr0 (including FPU state). */
-	movl	PCB_CR0(%r8),%ecx
-	movq	%rcx,%cr0
-
-	/* Record new pcb. */
-	SET_CURPCB(%r8)
-
-	/* Interrupts are okay again. */
-	sti
-
-	/*
-	 * Schedule the dead process's vmspace and stack to be freed.
-	 * {lpw_}exit2(l). Function still in %rsi (2nd arg), proc in
-	 * %rdi (first arg).
-	 */
-
-	call	*%rsi
-
-	/* Jump into cpu_switch() with the right state. */
-	xorq	%r13,%r13
-	movq	%r13, CPUVAR(CURPROC)
-	jmp	switch_search
 
 /*
  * savectx(struct pcb *pcb);

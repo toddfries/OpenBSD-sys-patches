@@ -47,8 +47,6 @@ bdev_decl(wd);
 #include "fdc.h"
 #include "fd.h"
 bdev_decl(fd);
-#include "wt.h"
-bdev_decl(wt);
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -65,7 +63,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NWD,wd),		/* 0: ST506/ESDI/IDE disk */
 	bdev_swap_init(1,sw),		/* 1: swap pseudo-device */
 	bdev_disk_init(NFD,fd),		/* 2: floppy diskette */
-	bdev_tape_init(NWT,wt),		/* 3: QIC-02/QIC-36 tape */
+	bdev_notdef(),			/* 3 */
 	bdev_disk_init(NSD,sd),		/* 4: SCSI disk */
 	bdev_tape_init(NST,st),		/* 5: SCSI tape */
 	bdev_disk_init(NCD,cd),		/* 6: SCSI CD-ROM */
@@ -77,7 +75,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 12 */
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_disk_init(NVND,vnd),	/* 14: vnode disk driver */
-	bdev_lkm_dummy(),	/* 15: Sony CD-ROM */
+	bdev_lkm_dummy(),		/* 15: Sony CD-ROM */
 	bdev_disk_init(NCCD,ccd),	/* 16: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_lkm_dummy(),		/* 18 */
@@ -102,8 +100,15 @@ int	nblkdev = nitems(bdevsw);
 #define cdev_ocis_init(c,n) { \
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-        (dev_type_stop((*))) enodev, 0,  dev_init(c,n,select), \
+        (dev_type_stop((*))) enodev, 0,  dev_init(c,n,poll), \
         (dev_type_mmap((*))) enodev, 0 }
+
+/* open, close, read */
+#define cdev_nvram_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	(dev_type_write((*))) enodev, (dev_type_ioctl((*))) enodev, \
+	(dev_type_stop((*))) enodev, 0, seltrue, \
+	(dev_type_mmap((*))) enodev, 0 }
 
 
 #define	mmread	mmrw
@@ -116,7 +121,6 @@ cdev_decl(wd);
 #include "com.h"
 cdev_decl(com);
 cdev_decl(fd);
-cdev_decl(wt);
 cdev_decl(scd);
 #include "lpt.h"
 cdev_decl(lpt);
@@ -146,6 +150,8 @@ cdev_decl(mcd);
 #include "sequencer.h"
 cdev_decl(music);
 #include "acpi.h"
+#include "bthub.h"
+#include "pctr.h"
 #include "iop.h"
 #ifdef NNPFS
 #include <nnpfs/nnnpfs.h>
@@ -198,7 +204,7 @@ struct cdevsw	cdevsw[] =
 	cdev_log_init(1,log),		/* 7: /dev/klog */
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
-	cdev_tape_init(NWT,wt),		/* 10: QIC-02/QIC-36 tape */
+	cdev_notdef(),			/* 10 */
 	cdev_lkm_dummy(),		/* 11: Sony CD-ROM */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 12: frame buffers, etc. */
 	    wsdisplay),
@@ -212,7 +218,7 @@ struct cdevsw	cdevsw[] =
 	cdev_uk_init(NUK,uk),		/* 20: unknown SCSI */
 	cdev_notdef(), 			/* 21 */
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
-	cdev_bpftun_init(NBPFILTER,bpf),/* 23: Berkeley packet filter */
+	cdev_bpf_init(NBPFILTER,bpf),	/* 23: Berkeley packet filter */
 	cdev_notdef(),			/* 24 */
 #if 0
 	cdev_ocis_init(NPCMCIA,pcmcia), /* 25: PCMCIA Bus */
@@ -233,7 +239,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 37: Extended PS/2 mouse */
 	cdev_tty_init(NCY,cy),		/* 38: Cyclom serial port */
 	cdev_disk_init(NMCD,mcd),	/* 39: Mitsumi CD-ROM */
-	cdev_bpftun_init(NTUN,tun),	/* 40: network tunnel */
+	cdev_tun_init(NTUN,tun),	/* 40: network tunnel */
 	cdev_disk_init(NVND,vnd),	/* 41: vnode disk driver */
 	cdev_audio_init(NAUDIO,audio),	/* 42: generic audio I/O */
 #ifdef COMPAT_SVR4
@@ -243,7 +249,7 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_random_init(1,random),	/* 45: random data source */
-	cdev_notdef(),			/* 46 */
+	cdev_ocis_init(NPCTR,pctr),	/* 46: performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 	cdev_notdef(),			/* 48 */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
@@ -348,28 +354,28 @@ int chrtoblktbl[] = {
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,
 	/*  2 */	NODEV,
-	/*  3 */	0,
+	/*  3 */	0,		/* wd */
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
 	/*  7 */	NODEV,
 	/*  8 */	NODEV,
-	/*  9 */	2,
-	/* 10 */	3,
-	/* 11 */	15,
+	/*  9 */	2,		/* fd */
+	/* 10 */	NODEV,
+	/* 11 */	NODEV,
 	/* 12 */	NODEV,
-	/* 13 */	4,
-	/* 14 */	5,
-	/* 15 */	6,
+	/* 13 */	4,		/* sd */
+	/* 14 */	5,		/* st */
+	/* 15 */	6,		/* cd */
 	/* 16 */	NODEV,
 	/* 17 */	NODEV,
-	/* 18 */	16,
+	/* 18 */	16,		/* ccd */
 	/* 19 */	NODEV,
 	/* 20 */	NODEV,
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
-	/* 24 */	18,
+	/* 24 */	NODEV,
 	/* 25 */	NODEV,
 	/* 26 */	NODEV,
 	/* 27 */	NODEV,
@@ -384,22 +390,22 @@ int chrtoblktbl[] = {
 	/* 36 */	NODEV,
 	/* 37 */	NODEV,
 	/* 38 */	NODEV,
-	/* 39 */	7,
+	/* 39 */	7,		/* mcd */
 	/* 40 */	NODEV,
-	/* 41 */	14,
+	/* 41 */	14,		/* vnd */
 	/* 42 */	NODEV,
 	/* 43 */	NODEV,
 	/* 44 */	NODEV,
 	/* 45 */	NODEV,
 	/* 46 */	NODEV,
-	/* 47 */	17,
+	/* 47 */	17,		/* rd */
 	/* 48 */	NODEV,
 	/* 49 */	NODEV,
 	/* 50 */	NODEV,
 	/* 51 */	NODEV,
 	/* 52 */	NODEV,
 	/* 53 */	NODEV,
-	/* 54 */	19,
+	/* 54 */	19,		/* raid */
 };
 
 int nchrtoblktbl = nitems(chrtoblktbl);
@@ -444,7 +450,7 @@ struct	consdev constab[] = {
 #if 1 || NWSDISPLAY > 0
 	cons_init(ws),
 #endif
-#if NCOM + NPCCOM > 0
+#if NCOM > 0
 	cons_init(com),
 #endif
 	{ 0 },

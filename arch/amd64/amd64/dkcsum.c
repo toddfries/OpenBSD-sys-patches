@@ -156,9 +156,11 @@ dkcsumattach(void)
 			picked = hit || (bdi->flags & BDI_PICKED);
 			if (!picked)
 				hit = bdi;
+#ifdef DEBUG
 			printf("dkcsum: %s matches BIOS drive %#x%s\n",
 			    dv->dv_xname, bdi->bios_number,
 			    (picked ? " IGNORED" : ""));
+#endif
 		}
 
 		/*

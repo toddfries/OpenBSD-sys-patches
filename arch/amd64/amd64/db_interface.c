@@ -54,6 +54,7 @@
 #include <ddb/db_extern.h>
 #include <ddb/db_access.h>
 #include <ddb/db_output.h>
+#include <ddb/db_run.h>
 #include <ddb/db_var.h>
 
 #include "acpi.h"
@@ -64,7 +65,6 @@
 extern label_t *db_recover;
 extern char *trap_type[];
 extern int trap_types;
-extern boolean_t db_cmd_loop_done;
 
 #ifdef MULTIPROCESSOR
 struct mutex ddb_mp_mutex = MUTEX_INITIALIZER(IPL_HIGH);
@@ -166,7 +166,7 @@ db_cpuinfo_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
 	int i;
 
-	for (i = 0; i < X86_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		if (cpu_info[i] != NULL) {
 			db_printf("%c%4d: ", (i == cpu_number()) ? '*' : ' ',
 			    CPU_INFO_UNIT(cpu_info[i]));
@@ -264,7 +264,7 @@ db_enter_ddb(void)
 		ddb_state = DDB_STATE_RUNNING;
 		curcpu()->ci_ddb_paused = CI_DDB_INDDB;
 		mtx_leave(&ddb_mp_mutex);
-		for (i = 0; i < X86_MAXPROCS; i++) {
+		for (i = 0; i < MAXCPUS; i++) {
 			if (cpu_info[i] != NULL && i != cpu_number() &&
 			    cpu_info[i]->ci_ddb_paused != CI_DDB_STOPPED) {
 				cpu_info[i]->ci_ddb_paused = CI_DDB_SHOULDSTOP;
@@ -276,7 +276,7 @@ db_enter_ddb(void)
 
 	/* Leaving ddb completely.  Start all other CPUs and return 0 */
 	if (ddb_active_cpu == cpu_number() && ddb_state == DDB_STATE_EXITING) {
-		for (i = 0; i < X86_MAXPROCS; i++) {
+		for (i = 0; i < MAXCPUS; i++) {
 			if (cpu_info[i] != NULL) {
 				cpu_info[i]->ci_ddb_paused = CI_DDB_RUNNING;
 			}
@@ -383,7 +383,7 @@ db_machine_init(void)
 
 	db_machine_commands_install(db_machine_command_table);
 #ifdef MULTIPROCESSOR
-	for (i = 0; i < X86_MAXPROCS; i++) {
+	for (i = 0; i < MAXCPUS; i++) {
 		if (cpu_info[i] != NULL)
 			cpu_info[i]->ci_ddb_paused = CI_DDB_RUNNING;
 	}

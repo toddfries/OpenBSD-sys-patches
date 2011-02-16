@@ -49,6 +49,7 @@ struct bios_softc {
 void smbios_info(char *);
 int bios_match(struct device *, void *, void *);
 void bios_attach(struct device *, struct device *, void *);
+int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
@@ -79,7 +80,7 @@ bios_match(struct device *parent, void *match , void *aux)
 	struct bios_attach_args *bia = aux;
 
 	/* only one */
-	if (bios_cd.cd_ndevs || strcmp(bia->bios_dev, bios_cd.cd_name))
+	if (bios_cd.cd_ndevs || strcmp(bia->ba_name, bios_cd.cd_name))
 		return 0;
 	return 1;
 }
@@ -88,6 +89,9 @@ void
 bios_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct bios_softc *sc = (struct bios_softc *)self;
+	struct smbios_struct_bios *sb;
+	struct smbtable bios;
+	char scratch[64];
 	vaddr_t va;
 	paddr_t pa, end;
 	u_int8_t *p;
@@ -132,6 +136,24 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 
 		printf(": SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 		    hdr->majrev, hdr->minrev, hdr->addr, hdr->count);
+
+		bios.cookie = 0;
+		if (smbios_find_table(SMBIOS_TYPE_BIOS, &bios)) {
+			sb = bios.tblhdr;
+			printf("\n%s:", sc->sc_dev.dv_xname);
+			if ((smbios_get_string(&bios, sb->vendor,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" vendor %s",
+				    fixstring(scratch));
+			if ((smbios_get_string(&bios, sb->version,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" version \"%s\"",
+				    fixstring(scratch));
+			if ((smbios_get_string(&bios, sb->release,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" date %s", fixstring(scratch));
+		}
+
 		smbios_info(sc->sc_dev.dv_xname);
 		break;
 	}
@@ -167,7 +189,7 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 /*
  * smbios_find_table() takes a caller supplied smbios struct type and
  * a pointer to a handle (struct smbtable) returning one if the structure
- * is sucessfully located and zero otherwise. Callers should take care
+ * is successfully located and zero otherwise. Callers should take care
  * to initialize the cookie field of the smbtable structure to zero before
  * the first invocation of this function.
  * Multiple tables of the same type can be located by repeatedly calling
@@ -186,7 +208,7 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 	/*
 	 * The cookie field of the smtable structure is used to locate
 	 * multiple instances of a table of an arbitrary type. Following the
-	 * sucessful location of a table, the type is encoded as bits 0:7 of
+	 * successful location of a table, the type is encoded as bits 0:7 of
 	 * the cookie value, the offset in terms of the number of structures
 	 * preceding that referenced by the handle is encoded in bits 15:31.
 	 */
@@ -398,4 +420,15 @@ smbios_info(char * str)
 			}
 		}
 	}
+}
+
+int
+bios_print(void *aux, const char *pnp)
+{
+        struct bios_attach_args *ba = aux;
+
+        if (pnp)
+                printf("%s at %s",
+                    ba->ba_name, pnp);
+        return (UNCONF);
 }

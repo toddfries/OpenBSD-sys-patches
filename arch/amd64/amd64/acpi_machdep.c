@@ -28,6 +28,7 @@
 
 #include <machine/bus.h>
 #include <machine/biosvar.h>
+#include <machine/isa_machdep.h>
 
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -57,11 +58,6 @@ extern u_int32_t acpi_pdirpa;
 extern paddr_t tramp_pdirpa;
 
 extern int acpi_savecpu(void) __returns_twice;
-
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
-#endif
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -164,7 +160,7 @@ acpi_probe(struct device *parent, struct cfdata *match,
 	return (0);
 
 havebase:
-	aaa->aaa_pbase = ptr - handle.va + handle.pa;
+	ba->ba_acpipbase = ptr - handle.va + handle.pa;
 	acpi_unmap(&handle);
 
 	return (1);

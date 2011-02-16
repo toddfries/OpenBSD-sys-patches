@@ -356,13 +356,13 @@ identifycpu(struct cpu_info *ci)
 
 	x86_print_cacheinfo(ci);
 
-#ifndef MULTIPROCESSOR
+#ifndef SMALL_KERNEL
 	if (pnfeatset > 0x80000007) {
-		CPUID(0x80000007, dummy, dummy, dummy, pnfeatset);	
-		
+		CPUID(0x80000007, dummy, dummy, dummy, pnfeatset);
+
 		if (pnfeatset & 0x06) {
 			if ((ci->ci_signature & 0xF00) == 0xf00)
-				k8_powernow_init();
+				setperf_setup = k8_powernow_init;
 		}
 	}
 
@@ -391,6 +391,7 @@ identifycpu(struct cpu_info *ci)
 	}
 
 #endif
+
 
 	/* AuthenticAMD:    h t u A                    i t n e */
 	if (vendor[0] == 0x68747541 && vendor[1] == 0x69746e65 &&

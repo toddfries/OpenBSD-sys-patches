@@ -99,7 +99,7 @@
 #endif
 
 #include <dev/ic/mc146818reg.h>
-#include <i386/isa/nvram.h>
+#include <amd64/isa/nvram.h>
 #include <dev/isa/isareg.h>
 
 int     cpu_match(struct device *, void *, void *);
@@ -140,9 +140,7 @@ struct cpu_info *cpu_info_list = &cpu_info_primary;
  * Array of CPU info structures.  Must be statically-allocated because
  * curproc, etc. are used early.
  */
-struct cpu_info *cpu_info[X86_MAXPROCS] = { &cpu_info_primary };
-
-u_int32_t cpus_running = 0;
+struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
 void    	cpu_hatch(void *);
 void    	cpu_boot_secondary(struct cpu_info *ci);
@@ -232,8 +230,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	 * structure, otherwise use the primary's.
 	 */
 	if (caa->cpu_role == CPU_ROLE_AP) {
-		ci = malloc(sizeof(*ci), M_DEVBUF, M_WAITOK);
-		memset(ci, 0, sizeof(*ci));
+		ci = malloc(sizeof(*ci), M_DEVBUF, M_WAITOK|M_ZERO);
 #if defined(MULTIPROCESSOR)
 		if (cpu_info[cpunum] != NULL)
 			panic("cpu at apic id %d already attached?", cpunum);
@@ -333,6 +330,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 #if defined(MULTIPROCESSOR)
 		cpu_intr_init(ci);
 		gdt_alloc_cpu(ci);
+		sched_init_cpu(ci);
 		cpu_start_secondary(ci);
 		ncpus++;
 		if (ci->ci_flags & CPUF_PRESENT) {
@@ -393,7 +391,7 @@ cpu_boot_secondary_processors(void)
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i=0; i < X86_MAXPROCS; i++) {
+	for (i=0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -414,7 +412,7 @@ cpu_init_idle_pcbs(void)
 	struct cpu_info *ci;
 	u_long i;
 
-	for (i=0; i < X86_MAXPROCS; i++) {
+	for (i=0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
@@ -523,6 +521,9 @@ cpu_hatch(void *v)
 
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
 }
 
 #if defined(DDB)

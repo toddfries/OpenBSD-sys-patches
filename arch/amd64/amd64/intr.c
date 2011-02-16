@@ -205,6 +205,14 @@ intr_allocate_slot_cpu(struct cpu_info *ci, struct pic *pic, int pin,
 	slot = -1;
 
 	simple_lock(&ci->ci_slock);
+	for (i = 0; i < start; i++) {
+		isp = ci->ci_isources[i];
+		if (isp != NULL && isp->is_pic == pic && isp->is_pin == pin) {
+			slot = i;
+			start = MAX_INTR_SOURCES;
+			break;
+		}
+	}
 	for (i = start; i < MAX_INTR_SOURCES ; i++) {
 		isp = ci->ci_isources[i];
 		if (isp != NULL && isp->is_pic == pic && isp->is_pin == pin) {
@@ -223,19 +231,14 @@ intr_allocate_slot_cpu(struct cpu_info *ci, struct pic *pic, int pin,
 
 	isp = ci->ci_isources[slot];
 	if (isp == NULL) {
-		MALLOC(isp, struct intrsource *, sizeof (struct intrsource),
-		    M_DEVBUF, M_NOWAIT);
+		isp = malloc(sizeof (struct intrsource), M_DEVBUF,
+		    M_NOWAIT|M_ZERO);
 		if (isp == NULL) {
 			simple_unlock(&ci->ci_slock);
 			return ENOMEM;
 		}
-		memset(isp, 0, sizeof(struct intrsource));
 		snprintf(isp->is_evname, sizeof (isp->is_evname),
 		    "pin %d", pin);
-#if notyet
-		evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
-		    pic->pic_dev.dv_xname, isp->is_evname);
-#endif
 		ci->ci_isources[slot] = isp;
 	}
 	simple_unlock(&ci->ci_slock);
@@ -277,19 +280,13 @@ intr_allocate_slot(struct pic *pic, int legacy_irq, int pin, int level,
 		slot = legacy_irq;
 		isp = ci->ci_isources[slot];
 		if (isp == NULL) {
-			MALLOC(isp, struct intrsource *,
-			    sizeof (struct intrsource), M_DEVBUF,
-			     M_NOWAIT);
+			isp = malloc(sizeof (struct intrsource), M_DEVBUF,
+			     M_NOWAIT|M_ZERO);
 			if (isp == NULL)
 				return ENOMEM;
-			memset(isp, 0, sizeof(struct intrsource));
 			snprintf(isp->is_evname, sizeof (isp->is_evname),
 			    "pin %d", pin);
 
-#if notyet
-			evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR,
-			    NULL, pic->pic_dev.dv_xname, isp->is_evname);
-#endif
 			simple_lock(&ci->ci_slock);
 			ci->ci_isources[slot] = isp;
 			simple_unlock(&ci->ci_slock);
@@ -342,7 +339,7 @@ found:
 		idtvec = idt_vec_alloc(APIC_LEVEL(level), IDT_INTR_HIGH);
 		if (idtvec == 0) {
 			simple_lock(&ci->ci_slock);
-			FREE(ci->ci_isources[slot], M_DEVBUF);
+			free(ci->ci_isources[slot], M_DEVBUF);
 			ci->ci_isources[slot] = NULL;
 			simple_unlock(&ci->ci_slock);
 			return EBUSY;
@@ -529,10 +526,7 @@ intr_disestablish(struct intrhand *ih)
 #endif
 
 	if (source->is_handlers == NULL) {
-#if notyet
-		evcnt_detach(&source->is_evcnt);
-#endif
-		FREE(source, M_DEVBUF);
+		free(source, M_DEVBUF);
 		ci->ci_isources[ih->ih_slot] = NULL;
 		if (pic != &i8259_pic)
 			idt_vec_free(idtvec);
@@ -552,7 +546,7 @@ intr_disestablish(struct intrhand *ih)
  */
 struct intrhand fake_softclock_intrhand;
 struct intrhand fake_softnet_intrhand;
-struct intrhand fake_softserial_intrhand;
+struct intrhand fake_softtty_intrhand;
 struct intrhand fake_timer_intrhand;
 struct intrhand fake_ipi_intrhand;
 
@@ -575,7 +569,6 @@ cpu_intr_init(struct cpu_info *ci)
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	memset(isp, 0, sizeof(struct intrsource));
 	isp->is_recurse = Xsoftclock;
 	isp->is_resume = Xsoftclock;
 	fake_softclock_intrhand.ih_level = IPL_SOFTCLOCK;
@@ -585,7 +578,6 @@ cpu_intr_init(struct cpu_info *ci)
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	memset(isp, 0, sizeof(struct intrsource));
 	isp->is_recurse = Xsoftnet;
 	isp->is_resume = Xsoftnet;
 	fake_softnet_intrhand.ih_level = IPL_SOFTNET;
@@ -595,37 +587,26 @@ cpu_intr_init(struct cpu_info *ci)
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	memset(isp, 0, sizeof(struct intrsource));
-	isp->is_recurse = Xsoftserial;
-	isp->is_resume = Xsoftserial;
-	fake_softserial_intrhand.ih_level = IPL_SOFTSERIAL;
-	isp->is_handlers = &fake_softserial_intrhand;
+	isp->is_recurse = Xsofttty;
+	isp->is_resume = Xsofttty;
+	fake_softtty_intrhand.ih_level = IPL_SOFTTTY;
+	isp->is_handlers = &fake_softtty_intrhand;
 	isp->is_pic = &softintr_pic;
-	ci->ci_isources[SIR_SERIAL] = isp;
-#if notyet
-	evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "softserial");
-#endif
+	ci->ci_isources[SIR_TTY] = isp;
 #if NLAPIC > 0
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	memset(isp, 0, sizeof(struct intrsource));
 	isp->is_recurse = Xrecurse_lapic_ltimer;
 	isp->is_resume = Xresume_lapic_ltimer;
 	fake_timer_intrhand.ih_level = IPL_CLOCK;
 	isp->is_handlers = &fake_timer_intrhand;
 	isp->is_pic = &local_pic;
 	ci->ci_isources[LIR_TIMER] = isp;
-#if notyet
-	evcnt_attach_dynamic(&isp->is_evcnt, EVCNT_TYPE_INTR, NULL,
-	    ci->ci_dev->dv_xname, "timer");
-#endif
 #ifdef MULTIPROCESSOR
 	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
-	memset(isp, 0, sizeof(struct intrsource));
 	isp->is_recurse = Xrecurse_lapic_ipi;
 	isp->is_resume = Xresume_lapic_ipi;
 	fake_ipi_intrhand.ih_level = IPL_IPI;
@@ -633,11 +614,6 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_pic = &local_pic;
 	ci->ci_isources[LIR_IPI] = isp;
 
-#ifdef notyet
-	for (i = 0; i < X86_NIPI; i++)
-		evcnt_attach_dynamic(&ci->ci_ipi_events[i], EVCNT_TYPE_INTR,
-		    NULL, ci->ci_dev->dv_xname, x86_ipi_names[i]);
-#endif
 #endif
 #endif
 

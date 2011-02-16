@@ -116,6 +116,7 @@
 #include <dev/isa/isareg.h>
 #include <machine/isa_machdep.h>
 #include <dev/ic/i8042reg.h>
+#include <amd64/isa/nvram.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -132,6 +133,12 @@ extern int db_console;
 #include <dev/acpi/acpivar.h>
 #endif
 
+#include "com.h"
+#if NCOM > 0
+#include <sys/tty.h>
+#include <dev/ic/comvar.h>
+#include <dev/ic/comreg.h>
+#endif
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -180,14 +187,14 @@ int lid_suspend;
  */
 int	safepri = 0;
 
+#ifdef LKM
+vaddr_t lkm_start, lkm_end;
+static struct vm_map lkm_map_store;
+extern struct vm_map *lkm_map;
+#endif
+
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
-
-#ifdef NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
 
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
@@ -235,9 +242,7 @@ typedef struct _boot_args32 {
 
 #define BOOTARGC_MAX	NBPG	/* one page */
 
-#ifdef NFSCLIENT
 bios_bootmac_t *bios_bootmac;
-#endif
 
 /* locore copies the arguments from /boot to here for us */
 char bootinfo[BOOTARGC_MAX];
@@ -269,6 +274,7 @@ void	dumpsys(void);
 void	cpu_init_extents(void);
 void	map_tramps(void);
 void	init_x86_64(paddr_t);
+void	(*cpuresetfn)(void);
 
 #ifdef KGDB
 #ifndef KGDB_DEVNAME
@@ -314,7 +320,8 @@ cpu_startup(void)
 	printf("%s", version);
 	startclocks();
 
-	printf("real mem = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -331,10 +338,14 @@ cpu_startup(void)
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%luK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024);
-	printf("using %u buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+#ifdef LKM
+	uvm_map_setup(&lkm_map_store, lkm_start, lkm_end, VM_MAP_PAGEABLE);
+	lkm_map_store.pmap = pmap_kernel();
+	lkm_map = &lkm_map_store;
+#endif
+
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	bufinit();
 
@@ -349,18 +360,6 @@ cpu_startup(void)
 	/* Safe for i/o port / memory space allocation to use malloc now. */
 	x86_bus_space_mallocok();
 }
-
-
-/*
- * The following defines are for the code in setup_buffers that tries to
- * ensure that enough ISA DMAable memory is still left after the buffercache
- * has been allocated.
- */
-#define CHUNKSZ		(3 * 1024 * 1024)
-#define ISADMA_LIMIT	(16 * 1024 * 1024)	/* XXX wrong place */
-#define ALLOC_PGS(sz, limit, pgs) \
-    uvm_pglistalloc((sz), 0, (limit), PAGE_SIZE, 0, &(pgs), 1, 0)
-#define FREE_PGS(pgs) uvm_pglistfree(&(pgs))
 
 /*
  * Set up proc0's PCB and the cpu's TSS.
@@ -493,6 +492,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		    newp, newlen, p);
 	case CPU_CPUVENDOR:
 		return (sysctl_rdstring(oldp, oldlenp, newp, cpu_vendor));
+	case CPU_CPUID:
+		return (sysctl_rdint(oldp, oldlenp, newp, cpu_id));
 	case CPU_CPUFEATURE:
 		return (sysctl_rdint(oldp, oldlenp, newp, cpu_feature));
 	case CPU_KBDRESET:
@@ -734,8 +735,10 @@ boot(int howto)
 		}
 	}
 
-	/* Disable interrupts. */
-	splhigh();
+	delay(4*1000000);	/* XXX */
+
+	uvm_shutdown();
+	splhigh();		/* Disable interrupts. */
 
 	/* Do a dump if requested. */
 	if (howto & RB_DUMP)
@@ -750,11 +753,11 @@ haltsys:
 
 	if (howto & RB_HALT) {
 #if NACPI > 0 && !defined(SMALL_KERNEL)
-		extern int acpi_s5, acpi_enabled;
+		extern int acpi_enabled;
 
 		if (acpi_enabled) {
 			delay(500000);
-			if (howto & RB_POWERDOWN || acpi_s5)
+			if (howto & RB_POWERDOWN)
 				acpi_powerdown();
 		}
 #endif
@@ -791,7 +794,7 @@ long	dumplo = 0; 		/* blocks */
 int
 cpu_dump(void)
 {
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -839,39 +842,28 @@ cpu_dump(void)
 void
 dumpconf(void)
 {
-	const struct bdevsw *bdev;
 	int nblks, dumpblks;	/* size of dump area */
 
-	if (dumpdev == NODEV)
-		goto bad;
-	bdev = &bdevsw[major(dumpdev)];
-
-	if (bdev == NULL)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdev->d_psize == NULL)
-		goto bad;
-	nblks = (*bdev->d_psize)(dumpdev);
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
 	if (nblks <= ctod(1))
-		goto bad;
+		return;
 
 	dumpblks = cpu_dumpsize();
 	if (dumpblks < 0)
-		goto bad;
+		return;
 	dumpblks += ctod(cpu_dump_mempagecnt());
 
 	/* If dump won't fit (incl. room for possible label), punt. */
 	if (dumpblks > (nblks - ctod(1)))
-		goto bad;
+		return;
 
 	/* Put dump at end of partition */
 	dumplo = nblks - dumpblks;
 
 	/* dumpsize is in page units, and doesn't include headers. */
 	dumpsize = cpu_dump_mempagecnt();
-	return;
-
- bad:
-	dumpsize = 0;
 }
 
 /*
@@ -886,8 +878,8 @@ dumpsys(void)
 {
 	u_long totalbytesleft, bytes, i, n, memseg;
 	u_long maddr;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers. */
@@ -1204,17 +1196,16 @@ init_x86_64(paddr_t first_avail)
 
 	x86_bus_space_init();
 
-	consinit();	/* XXX SHOULD NOT BE DONE HERE */
+	/*
+	 * Attach the glass console early in case we need to display a panic.
+	 */
+	cninit();
 
 	/*
 	 * Initailize PAGE_SIZE-dependent variables.
 	 */
 	uvm_setpagesize();
 
-#if 0
-	uvmexp.ncolors = 2;
-#endif
- 
 	/*
 	 * Boot arguments are in a single page specified by /boot.
 	 *
@@ -1515,6 +1506,12 @@ init_x86_64(paddr_t first_avail)
 
 	cpu_init_idt();
 
+	intr_default_setup();
+
+	softintr_init();
+	splraise(IPL_IPI);
+	enable_intr();
+
 #ifdef DDB
 	db_machine_init();
 	ddb_init();
@@ -1550,6 +1547,9 @@ cpu_reset(void)
 {
 
 	disable_intr();
+
+	if (cpuresetfn)
+		(*cpuresetfn)();
 
 	/*
 	 * The keyboard controller has 4 random output pins, one of which is
@@ -1771,11 +1771,9 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 #endif
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_consdev_t))
-			{
+			if (q->ba_size >= sizeof(bios_consdev_t)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
-#include "com.h"
 #if NCOM > 0
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
@@ -1797,11 +1795,9 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				cnset(cdp->consdev);
 			}
 			break;
-#ifdef NFSCLIENT
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
-#endif                 
 
 		case BOOTARG_DDB:
 			bios_ddb = (bios_ddb_t *)q->ba_arg;

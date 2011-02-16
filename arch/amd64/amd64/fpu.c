@@ -119,7 +119,7 @@ fputrap(struct trapframe *frame)
 {
 	struct proc *p = curcpu()->ci_fpcurproc;
 	struct savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
-	u_int32_t statbits;
+	u_int32_t mxcsr, statbits;
 	u_int16_t cw;
 	int code;
 	union sigval sv;
@@ -135,7 +135,10 @@ fputrap(struct trapframe *frame)
 
 	fxsave(sfp);
 	if (frame->tf_trapno == T_XMM) {
-	  	statbits = sfp->fp_fxsave.fx_mxcsr;
+		mxcsr = sfp->fp_fxsave.fx_mxcsr;
+	  	statbits = mxcsr;
+		mxcsr &= ~0x3f;
+		ldmxcsr(&mxcsr);
 	} else {
 		fninit();
 		fwait();
@@ -209,11 +212,6 @@ fpudna(struct cpu_info *ci)
 	if (ci->ci_fpcurproc != NULL && ci->ci_fpcurproc != p) {
 		fpusave_cpu(ci, ci->ci_fpcurproc != &proc0);
 		uvmexp.fpswtch++;
-	} else {
-		clts();
-		fninit();
-		fwait();
-		stts();
 	}
 	splx(s);
 

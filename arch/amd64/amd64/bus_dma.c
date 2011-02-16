@@ -143,7 +143,8 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	mapsize = sizeof(struct bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
 	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+	    (flags & BUS_DMA_NOWAIT) ?
+	        (M_NOWAIT|M_ZERO) : (M_WAITOK|M_ZERO))) == NULL)
 		return (ENOMEM);
 
 	map = (struct bus_dmamap *)mapstore;
@@ -520,7 +521,7 @@ _bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 }
 
 /*
- * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * Common function for mmap(2)'ing DMA-safe memory.  May be called by
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t
@@ -557,7 +558,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 /*
  * Utility function to load a linear buffer.  lastaddrp holds state
  * between invocations (for multiple-buffer loads).  segp contains
- * the starting segment on entrace, and the ending segment on exit.
+ * the starting segment on entrance, and the ending segment on exit.
  * first indicates if this is the first invocation of this function.
  */
 int

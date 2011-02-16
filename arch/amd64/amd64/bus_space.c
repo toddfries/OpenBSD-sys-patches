@@ -94,7 +94,7 @@ x86_bus_space_mallocok(void)
 }
 
 int
-x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	int error;
@@ -105,10 +105,12 @@ x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	 */
 	if (t == X86_BUS_SPACE_IO) {
 		ex = ioport_ex;
+		if (flags & BUS_SPACE_MAP_LINEAR)
+			return (EINVAL);
 	} else if (t == X86_BUS_SPACE_MEM)
 		ex = iomem_ex;
 	else
-		panic("x86_memio_map: bad bus space tag");
+		panic("bus_space_map: bad bus space tag");
 
 	/*
 	 * Before we go any further, let's make sure that this
@@ -140,9 +142,9 @@ x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	if (error) {
 		if (extent_free(ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
-			printf("x86_memio_map: pa 0x%lx, size 0x%lx\n",
+			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
 			    bpa, size);
-			printf("x86_memio_map: can't free region\n");
+			printf("bus_space_map: can't free region\n");
 		}
 	}
 
@@ -150,7 +152,7 @@ x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 }
 
 int
-_x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
+_bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 
@@ -170,7 +172,7 @@ _x86_memio_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 }
 
 int
-x86_memio_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
+bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
@@ -186,13 +188,13 @@ x86_memio_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	} else if (t == X86_BUS_SPACE_MEM)
 		ex = iomem_ex;
 	else
-		panic("x86_memio_alloc: bad bus space tag");
+		panic("bus_space_alloc: bad bus space tag");
 
 	/*
 	 * Sanity check the allocation against the extent's boundaries.
 	 */
 	if (rstart < ex->ex_start || rend > ex->ex_end)
-		panic("x86_memio_alloc: bad region start/end");
+		panic("bus_space_alloc: bad region start/end");
 
 	/*
 	 * Do the requested allocation.
@@ -221,9 +223,9 @@ x86_memio_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	if (error) {
 		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
-			printf("x86_memio_alloc: pa 0x%lx, size 0x%lx\n",
+			printf("bus_space_alloc: pa 0x%lx, size 0x%lx\n",
 			    bpa, size);
-			printf("x86_memio_alloc: can't free region\n");
+			printf("bus_space_alloc: can't free region\n");
 		}
 	}
 
@@ -272,17 +274,17 @@ x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 }
 
 /*
- * void _x86_memio_unmap(bus_space_tag bst, bus_space_handle bsh,
+ * void _bus_space_unmap(bus_space_tag bst, bus_space_handle bsh,
  *                        bus_size_t size, bus_addr_t *adrp)
  *
  *   This function unmaps memory- or io-space mapped by the function
- *   _x86_memio_map().  This function works nearly as same as
- *   x86_memio_unmap(), but this function does not ask kernel
+ *   _bus_space_map().  This function works nearly as same as
+ *   bus_space_unmap(), but this function does not ask kernel
  *   built-in extents and returns physical address of the bus space,
  *   for the convenience of the extra extent manager.
  */
 void
-_x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
+_bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
     bus_addr_t *adrp)
 {
 	u_long va, endva;
@@ -325,7 +327,7 @@ ok:
 }
 
 void
-x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
+bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
 	struct extent *ex;
 	u_long va, endva;
@@ -362,27 +364,27 @@ x86_memio_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		 */
 		uvm_km_free(kernel_map, va, endva - va);
 	} else
-		panic("x86_memio_unmap: bad bus space tag");
+		panic("bus_space_unmap: bad bus space tag");
 
 ok:
 	if (extent_free(ex, bpa, size,
 	    EX_NOWAIT | (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
-		printf("x86_memio_unmap: %s 0x%lx, size 0x%lx\n",
+		printf("bus_space_unmap: %s 0x%lx, size 0x%lx\n",
 		    (t == X86_BUS_SPACE_IO) ? "port" : "pa", bpa, size);
-		printf("x86_memio_unmap: can't free region\n");
+		printf("bus_space_unmap: can't free region\n");
 	}
 }
 
 void
-x86_memio_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
+bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
 
-	/* x86_memio_unmap() does all that we need to do. */
-	x86_memio_unmap(t, bsh, size);
+	/* bus_space_unmap() does all that we need to do. */
+	bus_space_unmap(t, bsh, size);
 }
 
 int
-x86_memio_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
 
@@ -391,7 +393,7 @@ x86_memio_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 }
 
 paddr_t
-x86_memio_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flags)
+bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flags)
 {
 
 	/* Can't mmap I/O space. */

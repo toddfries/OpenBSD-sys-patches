@@ -53,10 +53,8 @@
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
 
-#if NACPI > 0
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
-#endif
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
@@ -90,9 +88,6 @@ union mainbus_attach_args {
 	struct isabus_attach_args mba_iba;
 	struct cpu_attach_args mba_caa;
 	struct apic_attach_args aaa_caa;
-#if NACPI > 0
-	struct acpi_attach_args mba_aaa;
-#endif	
 #if NIPMI > 0
 	struct ipmi_attach_args mba_iaa;
 #endif
@@ -122,8 +117,8 @@ struct isabus_attach_args mba_iba = {
 struct mp_bus *mp_busses;
 int mp_nbus;
 struct mp_intr_map *mp_intrs;
-int mp_nintr;
- 
+int mp_nintrs;
+
 struct mp_bus *mp_isa_bus;
 struct mp_bus *mp_eisa_bus;
 
@@ -159,24 +154,10 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 #if NBIOS > 0
 	{
-		mba.mba_bios.bios_dev = "bios";
-		mba.mba_bios.bios_iot = X86_BUS_SPACE_IO;
-		mba.mba_bios.bios_memt = X86_BUS_SPACE_MEM;
+		mba.mba_bios.ba_name = "bios";
+		mba.mba_bios.ba_iot = X86_BUS_SPACE_IO;
+		mba.mba_bios.ba_memt = X86_BUS_SPACE_MEM;
 		config_found(self, &mba.mba_bios, mainbus_print);
-	}
-#endif
-
-#if NACPI > 0
-#if NPCI > 0
-	if (pci_mode != 0)
-#endif
-	{
-		memset(&mba.mba_aaa, 0, sizeof(mba.mba_aaa));
-		mba.mba_aaa.aaa_name = "acpi";
-		mba.mba_aaa.aaa_iot = X86_BUS_SPACE_IO;
-		mba.mba_aaa.aaa_memt = X86_BUS_SPACE_MEM;
-
-		config_found(self, &mba.mba_aaa, mainbus_print);
 	}
 #endif
 
@@ -200,15 +181,27 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
 		struct cpu_attach_args caa;
-                        
+
 		memset(&caa, 0, sizeof(caa));
 		caa.caa_name = "cpu";
 		caa.cpu_number = 0;
 		caa.cpu_role = CPU_ROLE_SP;
 		caa.cpu_func = 0;
-                        
+
 		config_found(self, &caa, mainbus_print);
 	}
+
+#if NACPI > 0
+	if (!acpi_hasprocfvs)
+#endif
+	{
+		if (setperf_setup != NULL)
+			setperf_setup(&cpu_info_primary);
+	}
+
+#ifdef MULTIPROCESSOR
+	mp_setperf_init();
+#endif
 
 #if NPCI > 0
 	{

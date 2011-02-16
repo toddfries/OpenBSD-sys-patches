@@ -183,7 +183,7 @@ ENTRY(copyoutstr)
 	 */
 	movq	$VM_MAXUSER_ADDRESS,%rax
 	subq	%rdi,%rax
-	jc	_C_LABEL(copystr_efault)
+	jbe	_C_LABEL(copystr_efault)	/* die if CF == 1 || ZF == 1 */
 	cmpq	%rdx,%rax
 	jae	1f
 	movq	%rax,%rdx
@@ -225,7 +225,7 @@ ENTRY(copyinstr)
 	 */
 	movq	$VM_MAXUSER_ADDRESS,%rax
 	subq	%rsi,%rax
-	jc	_C_LABEL(copystr_efault)
+	jbe	_C_LABEL(copystr_efault)	/* die if CF == 1 || ZF == 1 */
 	cmpq	%rdx,%rax
 	jae	1f
 	movq	%rax,%rdx

@@ -654,7 +654,7 @@ mpbios_scan(struct device *self)
 
 			position += mp_conf[type].length;
 		}
-		mp_nintr = cur_intr;
+		mp_nintrs = cur_intr;
 
 		if (mp_verbose && mp_cth->ext_len)
 			printf("%s: MP WARNING: %d "
