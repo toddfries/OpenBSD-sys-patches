@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: copy_subr.S,v 1.3 2011/01/27 20:42:47 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University

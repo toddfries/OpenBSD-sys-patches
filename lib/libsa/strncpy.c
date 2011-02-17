@@ -1,4 +1,4 @@
-/*	$OpenBSD: strncpy.c,v 1.3 2003/06/02 20:20:53 mickey Exp $ */
+/*	$OpenBSD: strncpy.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1996 Michael Shalayeff

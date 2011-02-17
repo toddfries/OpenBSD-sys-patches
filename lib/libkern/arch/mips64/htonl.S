@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: htonl.S,v 1.2 2004/08/13 13:07:24 pefo Exp $	*/
-=======
 /*	$OpenBSD: htonl.S,v 1.4 2009/12/12 20:03:54 miod Exp $	*/
->>>>>>> origin/master
 /*-
  * Copyright (c) 1991, 1993
  *      The Regents of the University of California.  All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tftp.h,v 1.1 2004/03/19 13:48:20 tom Exp $	*/
-=======
 /*	$OpenBSD: tftp.h,v 1.3 2009/03/02 00:00:56 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tftp.h,v 1.3 2003/08/07 16:32:30 agc Exp $	*/
 
 /*

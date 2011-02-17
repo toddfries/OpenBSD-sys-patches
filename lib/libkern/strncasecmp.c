@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: strncasecmp.c,v 1.3 1998/06/27 01:21:09 mickey Exp $	*/
-=======
 /*	$OpenBSD: strncasecmp.c,v 1.5 2009/10/27 23:59:35 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1994 Christian E. Hopps

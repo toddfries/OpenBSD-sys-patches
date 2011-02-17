@@ -1,4 +1,4 @@
-/*	$OpenBSD: iodesc.h,v 1.2 1996/09/23 14:18:56 mickey Exp $	*/
+/*	$OpenBSD: iodesc.h,v 1.3 2003/06/01 17:00:32 deraadt Exp $	*/
 /*	$NetBSD: iodesc.h,v 1.4 1995/09/23 03:31:50 gwr Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: inffast.c,v 1.10 2004/12/03 03:07:09 djm Exp $	*/
+/*	$OpenBSD: inffast.c,v 1.11 2005/07/20 15:56:46 millert Exp $	*/
 /* inffast.c -- fast decoding
  * Copyright (C) 1995-2004 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h

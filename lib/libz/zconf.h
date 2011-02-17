@@ -1,4 +1,4 @@
-/*	$OpenBSD: zconf.h,v 1.9 2004/12/03 03:07:09 djm Exp $	*/
+/*	$OpenBSD: zconf.h,v 1.10 2005/07/20 15:56:46 millert Exp $	*/
 /* zconf.h -- configuration of the zlib compression library
  * Copyright (C) 1995-2005 Jean-loup Gailly.
  * For conditions of distribution and use, see copyright notice in zlib.h

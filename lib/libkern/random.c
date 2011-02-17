@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: random.c,v 1.6 2003/06/02 23:28:08 millert Exp $	*/
-=======
 /*	$OpenBSD: random.c,v 1.8 2008/10/15 23:23:51 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: random.c,v 1.2 1994/10/26 06:42:42 cgd Exp $	*/
 
 /*-

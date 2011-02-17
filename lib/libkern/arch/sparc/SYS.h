@@ -1,4 +1,4 @@
-/*	$OpenBSD: SYS.h,v 1.2 1997/11/07 15:57:31 niklas Exp $	*/
+/*	$OpenBSD: SYS.h,v 1.3 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: SYS.h,v 1.2 1994/10/26 06:39:53 cgd Exp $	*/
 
 /*-

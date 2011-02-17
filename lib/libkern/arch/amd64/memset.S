@@ -6,10 +6,6 @@
 
 #include <machine/asm.h>
 
-#if defined(LIBC_SCCS)
-	RCSID("$NetBSD: memset.S,v 1.1 2001/06/19 00:22:46 fvdl Exp $")
-#endif
-
 ENTRY(memset)
 	movq	%rsi,%rax
 	movq	%rdx,%rcx
@@ -19,7 +15,7 @@ ENTRY(memset)
 
 	/*
 	 * if the string is too short, it's really not worth the overhead
-	 * of aligning to word boundries, etc.  So we jump to a plain
+	 * of aligning to word boundaries, etc.  So we jump to a plain
 	 * unaligned set.
 	 */
 	cmpq	$0x0f,%rcx

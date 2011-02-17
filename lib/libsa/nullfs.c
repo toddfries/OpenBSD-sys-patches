@@ -1,4 +1,4 @@
-/*	$OpenBSD: nullfs.c,v 1.6 2003/06/02 23:28:09 millert Exp $	*/
+/*	$OpenBSD: nullfs.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
 /*	$NetBSD: open.c,v 1.9 1995/09/19 09:16:52 thorpej Exp $	*/
 
 /*-

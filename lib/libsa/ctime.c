@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctime.c,v 1.4 2003/06/02 20:20:53 mickey Exp $	*/
+/*	$OpenBSD: ctime.c,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff

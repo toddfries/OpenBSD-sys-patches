@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: alloc.c,v 1.8 2003/06/02 23:28:09 millert Exp $	*/
-=======
 /*	$OpenBSD: alloc.c,v 1.10 2009/05/14 18:54:03 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: alloc.c,v 1.6 1997/02/04 18:36:33 thorpej Exp $	*/
 
 /*

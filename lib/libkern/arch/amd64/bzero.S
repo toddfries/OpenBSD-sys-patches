@@ -6,10 +6,6 @@
 
 #include <machine/asm.h>
 
-#if defined(LIBC_SCCS)
-	RCSID("$NetBSD: bzero.S,v 1.1 2001/06/19 00:22:45 fvdl Exp $")
-#endif
-
 ENTRY(bzero)
 	movq	%rsi,%rdx
 
@@ -18,7 +14,7 @@ ENTRY(bzero)
 
 	/*
 	 * if the string is too short, it's really not worth the overhead
-	 * of aligning to word boundries, etc.  So we jump to a plain
+	 * of aligning to word boundaries, etc.  So we jump to a plain
 	 * unaligned set.
 	 */
 	cmpq	$16,%rdx

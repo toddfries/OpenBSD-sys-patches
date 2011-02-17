@@ -1,9 +1,5 @@
 /*	$NetBSD: loadfile.h,v 1.1 1999/04/28 09:08:50 christos Exp $	 */
-<<<<<<< HEAD
-/*	$OpenBSD: loadfile.h,v 1.1 2001/06/23 01:47:40 drahn Exp $	 */
-=======
 /*	$OpenBSD: loadfile.h,v 1.3 2008/06/26 05:42:20 ray Exp $	 */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

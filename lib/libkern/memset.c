@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: memset.c,v 1.4 2003/06/02 23:28:08 millert Exp $	*/
-=======
 /*	$OpenBSD: memset.c,v 1.6 2009/10/27 23:59:35 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: memset.c,v 1.6 1998/03/27 05:35:47 cgd Exp $	*/
 
 /*-

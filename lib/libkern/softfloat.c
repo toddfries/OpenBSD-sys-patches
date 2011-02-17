@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: softfloat.c,v 1.4 2009/10/27 23:59:35 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: softfloat.c,v 1.1 2001/04/26 03:10:47 ross Exp $	*/
 
 /*
@@ -52,8 +48,6 @@ this code that are retained.
 
 ===============================================================================
 */
-
-#ifndef NO_IEEE
 
 #include <sys/cdefs.h>
 
@@ -5588,5 +5582,3 @@ uint32 float32_to_uint32_round_to_zero( float32 a )
 }
 
 #endif
-
-#endif /* !NO_IEEE */

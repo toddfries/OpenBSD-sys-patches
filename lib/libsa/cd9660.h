@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660.h,v 1.2 1997/02/16 14:39:39 mickey Exp $	*/
+/*	$OpenBSD: cd9660.h,v 1.3 2002/03/14 01:27:07 millert Exp $	*/
 /*	$NetBSD: cd9660.h,v 1.1 1996/09/30 16:01:20 ws Exp $	*/
 
 /*

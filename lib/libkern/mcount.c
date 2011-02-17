@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mcount.c,v 1.7 2004/07/22 16:06:34 art Exp $	*/
-=======
 /*	$OpenBSD: mcount.c,v 1.9 2009/10/27 23:59:35 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mcount.c,v 1.3.6.1 1996/06/12 04:23:01 cgd Exp $	*/
 
 /*-
@@ -34,17 +30,6 @@
  * SUCH DAMAGE.
  */
 
-<<<<<<< HEAD
-#if !defined(lint) && !defined(_KERNEL) && defined(LIBC_SCCS)
-#if 0
-static char sccsid[] = "@(#)mcount.c	8.1 (Berkeley) 6/4/93";
-#else
-static char rcsid[] = "$OpenBSD: mcount.c,v 1.7 2004/07/22 16:06:34 art Exp $";
-#endif
-#endif
-
-=======
->>>>>>> origin/master
 #include <sys/param.h>
 #include <sys/gmon.h>
 

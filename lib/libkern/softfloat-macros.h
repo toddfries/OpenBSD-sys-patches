@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: softfloat-macros.h,v 1.3 2007/12/29 17:43:14 miod Exp $	*/
 /*	$NetBSD: softfloat-macros.h,v 1.1 2001/04/26 03:10:47 ross Exp $	*/
 
 /*
@@ -34,8 +34,6 @@ this code that are retained.
 
 ===============================================================================
 */
-
-#ifndef NO_IEEE
 
 /*
 -------------------------------------------------------------------------------
@@ -137,6 +135,8 @@ INLINE void
     *z0Ptr = z0;
 
 }
+
+#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -305,6 +305,10 @@ INLINE void
 
 }
 
+#endif	/* FLOATX80 || FLOAT128 */
+
+#ifdef FLOAT128
+
 /*
 -------------------------------------------------------------------------------
 Shifts the 192-bit value formed by concatenating `a0', `a1', and `a2' left
@@ -342,6 +346,8 @@ INLINE void
 
 }
 
+#endif	/* FLOAT128 */
+
 /*
 -------------------------------------------------------------------------------
 Adds the 128-bit value formed by concatenating `a0' and `a1' to the 128-bit
@@ -361,6 +367,8 @@ INLINE void
     *z0Ptr = a0 + b0 + ( z1 < a1 );
 
 }
+
+#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -401,6 +409,8 @@ INLINE void
 
 }
 
+#endif	/* FLOATX80 || FLOAT128 */
+
 /*
 -------------------------------------------------------------------------------
 Subtracts the 128-bit value formed by concatenating `b0' and `b1' from the
@@ -419,6 +429,8 @@ INLINE void
     *z0Ptr = a0 - b0 - ( a1 < b1 );
 
 }
+
+#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -459,6 +471,8 @@ INLINE void
 
 }
 
+#endif	/* FLOATX80 || FLOAT128 */
+
 /*
 -------------------------------------------------------------------------------
 Multiplies `a' by `b' to obtain a 128-bit product.  The product is broken
@@ -488,6 +502,8 @@ INLINE void mul64To128( bits64 a, bits64 b, bits64 *z0Ptr, bits64 *z1Ptr )
     *z0Ptr = z0;
 
 }
+
+#ifdef FLOAT128
 
 /*
 -------------------------------------------------------------------------------
@@ -555,6 +571,8 @@ INLINE void
     *z0Ptr = z0;
 
 }
+
+#endif	/* FLOAT128 */
 
 /*
 -------------------------------------------------------------------------------
@@ -636,6 +654,7 @@ Returns the number of leading 0 bits before the most-significant 1 bit of
 `a'.  If `a' is zero, 32 is returned.
 -------------------------------------------------------------------------------
 */
+#ifndef SOFTFLOAT_MD_CLZ
 static int8 countLeadingZeros32( bits32 a )
 {
     static const int8 countLeadingZerosHigh[] = {
@@ -671,6 +690,7 @@ static int8 countLeadingZeros32( bits32 a )
     return shiftCount;
 
 }
+#endif
 
 /*
 -------------------------------------------------------------------------------
@@ -693,6 +713,8 @@ static int8 countLeadingZeros64( bits64 a )
     return shiftCount;
 
 }
+
+#if defined(FLOATX80) || defined(FLOAT128)
 
 /*
 -------------------------------------------------------------------------------
@@ -736,6 +758,10 @@ INLINE flag lt128( bits64 a0, bits64 a1, bits64 b0, bits64 b1 )
 
 }
 
+#endif	/* FLOATX80 || FLOAT128 */
+
+#if 0
+
 /*
 -------------------------------------------------------------------------------
 Returns 1 if the 128-bit value formed by concatenating `a0' and `a1' is
@@ -750,4 +776,4 @@ INLINE flag ne128( bits64 a0, bits64 a1, bits64 b0, bits64 b1 )
 
 }
 
-#endif /* !NO_IEEE */
+#endif

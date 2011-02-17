@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc.h,v 1.4 2002/03/14 01:27:07 millert Exp $	*/
+/*	$OpenBSD: rpc.h,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
 /*	$NetBSD: rpc.h,v 1.8 1996/09/26 23:22:03 cgd Exp $	*/
 
 /*

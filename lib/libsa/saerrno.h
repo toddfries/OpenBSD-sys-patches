@@ -1,4 +1,4 @@
-/*	$OpenBSD: saerrno.h,v 1.5 2002/03/14 01:27:07 millert Exp $	*/
+/*	$OpenBSD: saerrno.h,v 1.6 2003/06/02 23:28:09 millert Exp $	*/
 /*	$NetBSD: saerrno.h,v 1.6 1995/09/18 21:19:45 pk Exp $	*/
 
 /*

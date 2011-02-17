@@ -1,4 +1,4 @@
-/*	$OpenBSD: prefix.h,v 1.1.1.1 1998/06/23 18:56:54 mickey Exp $	*/
+/*	$OpenBSD: prefix.h,v 1.2 2001/03/29 04:08:21 mickey Exp $	*/
 
 /*
  *  (c) Copyright 1985 HEWLETT-PACKARD COMPANY

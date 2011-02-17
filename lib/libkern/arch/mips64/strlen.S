@@ -1,4 +1,4 @@
-/*	$OpenBSD: strlen.S,v 1.3 2004/09/09 15:41:18 pefo Exp $	*/
+/*	$OpenBSD: strlen.S,v 1.4 2004/10/08 14:42:09 pefo Exp $	*/
 /*-
  * Copyright (c) 1991, 1993
  *      The Regents of the University of California.  All rights reserved.

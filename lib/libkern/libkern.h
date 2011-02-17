@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: libkern.h,v 1.21 2004/06/21 22:55:04 itojun Exp $	*/
-=======
 /*	$OpenBSD: libkern.h,v 1.28 2011/01/10 23:23:56 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: libkern.h,v 1.7 1996/03/14 18:52:08 christos Exp $	*/
 
 /*-
@@ -149,7 +145,6 @@ int	 bcmp(const void *, const void *, size_t);
 void	 bzero(void *, size_t);
 void	 explicit_bzero(void *, size_t);
 int	 ffs(int);
-int	 locc(int, char *, u_int);
 void	*memchr(const void *, int, size_t);
 int	 memcmp(const void *, const void *, size_t);
 u_int32_t random(void);
@@ -170,9 +165,5 @@ int	 getsn(char *, int);
 char	*strchr(const char *, int);
 char	*strrchr(const char *, int);
 int	 timingsafe_bcmp(const void *, const void *, size_t);
-
-extern u_int8_t const __bcd2bin[], __bin2bcd[];
-#define	bcd2bin(b)	(__bcd2bin[(b)&0xff])
-#define	bin2bcd(b)	(__bin2bcd[(b)&0xff])
 
 #endif /* __LIBKERN_H__ */
