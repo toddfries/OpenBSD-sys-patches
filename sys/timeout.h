@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: timeout.h,v 1.15 2002/06/25 19:41:41 mickey Exp $	*/
-=======
 /*	$OpenBSD: timeout.h,v 1.20 2010/05/26 17:50:00 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 

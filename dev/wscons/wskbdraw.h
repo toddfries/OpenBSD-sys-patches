@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: wskbdraw.h,v 1.3 2011/01/30 16:21:05 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, Miodrag Vallat

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: bt463reg.h,v 1.3 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: bt463reg.h,v 1.1 1998/08/18 07:43:09 thorpej Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: oosiopreg.h,v 1.2 2010/04/20 20:21:56 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: oosiopreg.h,v 1.3 2003/11/02 11:07:45 wiz Exp $	*/
 
 /*

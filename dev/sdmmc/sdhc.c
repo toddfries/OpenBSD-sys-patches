@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdhc.c,v 1.17 2007/01/31 12:54:47 claudio Exp $	*/
-=======
 /*	$OpenBSD: sdhc.c,v 1.33 2010/09/07 16:21:46 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -86,6 +82,8 @@ int	sdhc_host_maxblklen(sdmmc_chipset_handle_t);
 int	sdhc_card_detect(sdmmc_chipset_handle_t);
 int	sdhc_bus_power(sdmmc_chipset_handle_t, u_int32_t);
 int	sdhc_bus_clock(sdmmc_chipset_handle_t, int);
+void	sdhc_card_intr_mask(sdmmc_chipset_handle_t, int);
+void	sdhc_card_intr_ack(sdmmc_chipset_handle_t);
 void	sdhc_exec_command(sdmmc_chipset_handle_t, struct sdmmc_command *);
 int	sdhc_start_command(struct sdhc_host *, struct sdmmc_command *);
 int	sdhc_wait_state(struct sdhc_host *, u_int32_t, u_int32_t);
@@ -115,7 +113,10 @@ struct sdmmc_chip_functions sdhc_functions = {
 	sdhc_bus_power,
 	sdhc_bus_clock,
 	/* command execution */
-	sdhc_exec_command
+	sdhc_exec_command,
+	/* card interrupt */
+	sdhc_card_intr_mask,
+	sdhc_card_intr_ack
 };
 
 struct cfdriver sdhc_cd = {
@@ -152,12 +153,10 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 
 	/* Allocate one more host structure. */
 	sc->sc_nhosts++;
-	MALLOC(hp, struct sdhc_host *, sizeof(struct sdhc_host),
-	    M_DEVBUF, M_WAITOK);
+	hp = malloc(sizeof(*hp), M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->sc_host[sc->sc_nhosts - 1] = hp;
 
 	/* Fill in the new host structure. */
-	bzero(hp, sizeof(struct sdhc_host));
 	hp->sc = sc;
 	hp->iot = iot;
 	hp->ioh = ioh;
@@ -243,7 +242,7 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 	return 0;
 
 err:
-	FREE(hp, M_DEVBUF);
+	free(hp, M_DEVBUF);
 	sc->sc_host[sc->sc_nhosts - 1] = NULL;
 	sc->sc_nhosts--;
 	return (error);
@@ -337,6 +336,7 @@ sdhc_host_reset(sdmmc_chipset_handle_t sch)
 	    SDHC_BUFFER_READ_READY | SDHC_BUFFER_WRITE_READY |
 	    SDHC_DMA_INTERRUPT | SDHC_BLOCK_GAP_EVENT |
 	    SDHC_TRANSFER_COMPLETE | SDHC_COMMAND_COMPLETE;
+
 	HWRITE2(hp, SDHC_NINTR_STATUS_EN, imask);
 	HWRITE2(hp, SDHC_EINTR_STATUS_EN, SDHC_EINTR_STATUS_MASK);
 	HWRITE2(hp, SDHC_NINTR_SIGNAL_EN, imask);
@@ -387,7 +387,8 @@ sdhc_bus_power(sdmmc_chipset_handle_t sch, u_int32_t ocr)
 	/*
 	 * Disable bus power before voltage change.
 	 */
-	HWRITE1(hp, SDHC_POWER_CTL, 0);
+	if (!(hp->sc->sc_flags & SDHC_F_NOPWR0))
+		HWRITE1(hp, SDHC_POWER_CTL, 0);
 
 	/* If power is disabled, reset the host and return now. */
 	if (ocr == 0) {
@@ -513,6 +514,27 @@ ret:
 	return error;
 }
 
+void
+sdhc_card_intr_mask(sdmmc_chipset_handle_t sch, int enable)
+{
+	struct sdhc_host *hp = sch;
+
+	if (enable) {
+		HSET2(hp, SDHC_NINTR_STATUS_EN, SDHC_CARD_INTERRUPT);
+		HSET2(hp, SDHC_NINTR_SIGNAL_EN, SDHC_CARD_INTERRUPT);
+	} else {
+		HCLR2(hp, SDHC_NINTR_SIGNAL_EN, SDHC_CARD_INTERRUPT);
+		HCLR2(hp, SDHC_NINTR_STATUS_EN, SDHC_CARD_INTERRUPT);
+	}
+}
+
+void
+sdhc_card_intr_ack(sdmmc_chipset_handle_t sch)
+{
+	struct sdhc_host *hp = sch;
+
+	HSET2(hp, SDHC_NINTR_STATUS_EN, SDHC_CARD_INTERRUPT);
+}
 
 int
 sdhc_wait_state(struct sdhc_host *hp, u_int32_t mask, u_int32_t value)
@@ -611,7 +633,7 @@ sdhc_start_command(struct sdhc_host *hp, struct sdmmc_command *cmd)
 
 	/* Fragment the data into proper blocks. */
 	if (cmd->c_datalen > 0) {
-		blksize = cmd->c_blklen;
+		blksize = MIN(cmd->c_datalen, cmd->c_blklen);
 		blkcount = cmd->c_datalen / blksize;
 		if (cmd->c_datalen % blksize > 0) {
 			/* XXX: Split this command. (1.7.4) */
@@ -635,6 +657,7 @@ sdhc_start_command(struct sdhc_host *hp, struct sdmmc_command *cmd)
 		mode |= SDHC_BLOCK_COUNT_ENABLE;
 		if (blkcount > 1) {
 			mode |= SDHC_MULTI_BLOCK_MODE;
+			/* XXX only for memory commands? */
 			mode |= SDHC_AUTO_CMD12_ENABLE;
 		}
 	}
@@ -683,10 +706,11 @@ sdhc_start_command(struct sdhc_host *hp, struct sdmmc_command *cmd)
 	 * Start a CPU data transfer.  Writing to the high order byte
 	 * of the SDHC_COMMAND register triggers the SD command. (1.5)
 	 */
-	HWRITE2(hp, SDHC_BLOCK_SIZE, blksize);
-	HWRITE2(hp, SDHC_BLOCK_COUNT, blkcount);
-	HWRITE4(hp, SDHC_ARGUMENT, cmd->c_arg);
 	HWRITE2(hp, SDHC_TRANSFER_MODE, mode);
+	HWRITE2(hp, SDHC_BLOCK_SIZE, blksize);
+	if (blkcount > 1)
+		HWRITE2(hp, SDHC_BLOCK_COUNT, blkcount);
+	HWRITE4(hp, SDHC_ARGUMENT, cmd->c_arg);
 	HWRITE2(hp, SDHC_COMMAND, command);
 
 	splx(s);
@@ -709,8 +733,6 @@ sdhc_transfer_data(struct sdhc_host *hp, struct sdmmc_command *cmd)
 	DPRINTF(1,("%s: resp=%#x datalen=%d\n", DEVNAME(hp->sc),
 	    MMC_R1(cmd->c_resp), datalen));
 
-<<<<<<< HEAD
-=======
 #ifdef SDHC_DEBUG
 	/* XXX I forgot why I wanted to know when this happens :-( */
 	if ((cmd->c_opcode == 52 || cmd->c_opcode == 53) &&
@@ -719,7 +741,6 @@ sdhc_transfer_data(struct sdhc_host *hp, struct sdmmc_command *cmd)
 		    DEVNAME(hp->sc), MMC_R1(cmd->c_resp) & 0xff00);
 #endif
 
->>>>>>> origin/master
 	while (datalen > 0) {
 		if (!sdhc_wait_intr(hp, SDHC_BUFFER_READ_READY|
 		    SDHC_BUFFER_WRITE_READY, SDHC_BUFFER_TIMEOUT)) {
@@ -755,41 +776,23 @@ sdhc_transfer_data(struct sdhc_host *hp, struct sdmmc_command *cmd)
 void
 sdhc_read_data(struct sdhc_host *hp, u_char *datap, int datalen)
 {
-	while (datalen > 0) {
-		if (datalen > 3) {
-			*((u_int32_t *)datap) = HREAD4(hp, SDHC_DATA);
-			datap += 4;
-			datalen -= 4;
-		} else if (datalen > 1) {
-			*((u_int16_t *)datap) = HREAD2(hp, SDHC_DATA);
-			datap += 2;
-			datalen -= 2;
-		} else {
-			*datap++ = HREAD1(hp, SDHC_DATA);
-			datalen -= 1;
-		}
+	while (datalen > 3) {
+		*(u_int32_t *)datap = HREAD4(hp, SDHC_DATA);
+		datap += 4;
+		datalen -= 4;
+	}
+	if (datalen > 0) {
+		u_int32_t rv = HREAD4(hp, SDHC_DATA);
+		do {
+			*datap++ = rv & 0xff;
+			rv = rv >> 8;
+		} while (--datalen > 0);
 	}
 }
 
 void
 sdhc_write_data(struct sdhc_host *hp, u_char *datap, int datalen)
 {
-<<<<<<< HEAD
-	while (datalen > 0) {
-		if (datalen > 3) {
-			HWRITE4(hp, SDHC_DATA, *(u_int32_t *)datap);
-			datap += 4;
-			datalen -= 4;
-		} else if (datalen > 1) {
-			HWRITE2(hp, SDHC_DATA, *(u_int16_t *)datap);
-			datap += 2;
-			datalen -= 2;
-		} else {
-			HWRITE1(hp, SDHC_DATA, *datap);
-			datap++;
-			datalen -= 1;
-		}
-=======
 	while (datalen > 3) {
 		DPRINTF(3,("%08x\n", *(u_int32_t *)datap));
 		HWRITE4(hp, SDHC_DATA, *((u_int32_t *)datap));
@@ -804,7 +807,6 @@ sdhc_write_data(struct sdhc_host *hp, u_char *datap, int datalen)
 			rv |= *datap++ << 16;
 		DPRINTF(3,("rv %08x\n", rv));
 		HWRITE4(hp, SDHC_DATA, rv);
->>>>>>> origin/master
 	}
 }
 
@@ -939,14 +941,9 @@ sdhc_intr(void *arg)
 		 * Service SD card interrupts.
 		 */
 		if (ISSET(status, SDHC_CARD_INTERRUPT)) {
-<<<<<<< HEAD
-			printf("%s: card interrupt\n", HDEVNAME(hp));
-=======
 			DPRINTF(0,("%s: card interrupt\n", DEVNAME(hp->sc)));
->>>>>>> origin/master
 			HCLR2(hp, SDHC_NINTR_STATUS_EN, SDHC_CARD_INTERRUPT);
-			/* XXX service card interrupt */
-			HSET2(hp, SDHC_NINTR_STATUS_EN, SDHC_CARD_INTERRUPT);
+			sdmmc_card_intr(hp->sdmmc);
 		}
 	}
 	return done;

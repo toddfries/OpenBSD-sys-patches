@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: protosw.h,v 1.8 2002/03/15 01:20:04 millert Exp $	*/
-=======
 /*	$OpenBSD: protosw.h,v 1.15 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: protosw.h,v 1.10 1996/04/09 20:55:32 cgd Exp $	*/
 
 /*-
@@ -63,6 +59,7 @@ struct mbuf;
 struct sockaddr;
 struct socket;
 struct domain;
+struct proc;
 
 struct protosw {
 	short	pr_type;		/* socket type used for */
@@ -83,7 +80,7 @@ struct protosw {
 /* user-protocol hook */
 					/* user request: see list below */
 	int	(*pr_usrreq)(struct socket *, int, struct mbuf *,
-		    struct mbuf *, struct mbuf *);
+		    struct mbuf *, struct mbuf *, struct proc *);
 
 /* utility hooks */
 	void	(*pr_init)(void);	/* initialization hook */
@@ -133,7 +130,7 @@ struct protosw {
 #define	PRU_SHUTDOWN		7	/* won't send any more data */
 #define	PRU_RCVD		8	/* have taken data; more room now */
 #define	PRU_SEND		9	/* send this data */
-#define	PRU_ABORT		10	/* abort (fast DISCONNECT, DETATCH) */
+#define	PRU_ABORT		10	/* abort (fast DISCONNECT, DETACH) */
 #define	PRU_CONTROL		11	/* control operations on protocol */
 #define	PRU_SENSE		12	/* return status into m */
 #define	PRU_RCVOOB		13	/* retrieve out of band data */

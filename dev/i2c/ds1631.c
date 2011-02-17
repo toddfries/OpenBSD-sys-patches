@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ds1631.c,v 1.7 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: ds1631.c,v 1.11 2009/08/12 17:13:30 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -124,7 +120,7 @@ dostart:
 	strlcpy(sc->sc_sensor[MAXDS_TEMP].desc, "Internal",
 	    sizeof(sc->sc_sensor[MAXDS_TEMP].desc));
 
-	if (sensor_task_register(sc, maxds_refresh, 5)) {
+	if (sensor_task_register(sc, maxds_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -140,7 +136,8 @@ void
 maxds_refresh(void *arg)
 {
 	struct maxds_softc *sc = arg;
-	u_int8_t cmd, data[2];
+	u_int8_t cmd;
+	u_int16_t data;
 
 	iic_acquire_bus(sc->sc_tag, 0);
 
@@ -148,14 +145,10 @@ maxds_refresh(void *arg)
 	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 	    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0) == 0) {
 		sc->sc_sensor[MAXDS_TEMP].value = 273150000 +
-<<<<<<< HEAD
-		    ((int)((u_int16_t)data[0] << 8 | data[1])) / 8 * 31250;
-=======
 		    (int)(betoh16(data)) / 8 * 31250;
 		sc->sc_sensor[MAXDS_TEMP].flags &= ~SENSOR_FINVALID;
 	} else
 		sc->sc_sensor[MAXDS_TEMP].flags |= SENSOR_FINVALID;
->>>>>>> origin/master
 
 	iic_release_bus(sc->sc_tag, 0);
 }

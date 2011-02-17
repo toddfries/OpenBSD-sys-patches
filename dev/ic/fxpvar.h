@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fxpvar.h,v 1.24 2006/01/05 21:22:24 brad Exp $	*/
-=======
 /*	$OpenBSD: fxpvar.h,v 1.34 2010/09/07 16:21:42 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_fxpvar.h,v 1.1 1997/06/05 02:01:58 thorpej Exp $	*/
 
 /*                  
@@ -61,7 +57,7 @@
  * microcode is loaded.
  */
 #ifndef FXP_INT_DELAY
-#define FXP_INT_DELAY 64 
+#define FXP_INT_DELAY 128 
 #endif
 
 /*
@@ -149,14 +145,10 @@ struct fxp_softc {
 };
 
 /* Macros to ease CSR access. */
-#define	CSR_READ_1(sc, reg)						\
-	bus_space_read_1((sc)->sc_st, (sc)->sc_sh, (reg))
 #define	CSR_READ_2(sc, reg)						\
 	bus_space_read_2((sc)->sc_st, (sc)->sc_sh, (reg))
 #define	CSR_READ_4(sc, reg)						\
 	bus_space_read_4((sc)->sc_st, (sc)->sc_sh, (reg))
-#define	CSR_WRITE_1(sc, reg, val)					\
-	bus_space_write_1((sc)->sc_st, (sc)->sc_sh, (reg), (val))
 #define	CSR_WRITE_2(sc, reg, val)					\
 	bus_space_write_2((sc)->sc_st, (sc)->sc_sh, (reg), (val))
 #define	CSR_WRITE_4(sc, reg, val)					\
@@ -164,15 +156,11 @@ struct fxp_softc {
 
 extern int fxp_intr(void *);
 extern int fxp_attach(struct fxp_softc *, const char *);
-<<<<<<< HEAD
-extern int fxp_detach(struct fxp_softc *);
-=======
 void fxp_detach(struct fxp_softc *);
 void fxp_init(void *);
 void fxp_stop(struct fxp_softc *, int, int);
 int fxp_activate(struct device *, int);
 void fxp_resume(void *, void *);
->>>>>>> origin/master
 
 #define	FXP_RXMAP_GET(sc)	((sc)->sc_rxmaps[(sc)->sc_rxfree++])
 #define	FXP_RXMAP_PUT(sc,map)	((sc)->sc_rxmaps[--(sc)->sc_rxfree] = (map))

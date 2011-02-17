@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uyap_firmware.h,v 1.1 2001/12/17 01:39:08 deraadt Exp $ */
-=======
 /*	$OpenBSD: uyap_firmware.h,v 1.3 2008/06/26 05:42:16 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: uyap_firmware.h,v 1.2 2001/01/16 03:10:09 augustss Exp $	*/
 
 /*

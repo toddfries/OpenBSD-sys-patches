@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pgt.c,v 1.40 2006/12/30 22:43:01 claudio Exp $  */
-=======
 /*	$OpenBSD: pgt.c,v 1.66 2010/09/20 07:40:41 deraadt Exp $  */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -311,7 +307,7 @@ pgt_load_firmware(struct pgt_softc *sc)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		DPRINTF(("%s: error %d, could not read microcode %s!\n",
+		DPRINTF(("%s: error %d, could not read firmware %s\n",
 		    sc->sc_dev.dv_xname, error, name));
 		return (EIO);
 	}
@@ -832,10 +828,13 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 	}
 
 	M_PREPEND(m, sizeof(*frame) + sizeof(*snap), M_DONTWAIT);
-	if (m != NULL)
-		m = m_pullup(m, sizeof(*frame) + sizeof(*snap));
 	if (m == NULL)
 		return (m);
+	if (m->m_len < sizeof(*frame) + sizeof(*snap)) {
+		m = m_pullup(m, sizeof(*frame) + sizeof(*snap));
+		if (m == NULL)
+			return (m);
+	}
 	frame = mtod(m, struct ieee80211_frame *);
 	snap = (struct llc *)&frame[1];
 	if (ni != NULL) {
@@ -1539,7 +1538,6 @@ pgt_datarx_completion(struct pgt_softc *sc, enum pgt_queue pq)
 	}
 
 	if (top) {
-		ifp->if_ipackets++;
 		top->m_pkthdr.len = tlen;
 		top->m_pkthdr.rcvif = ifp;
 	}
@@ -1813,9 +1811,8 @@ pgt_ieee80211_node_alloc(struct ieee80211com *ic)
 {
 	struct pgt_ieee80211_node *pin;
 
-	pin = malloc(sizeof(*pin), M_DEVBUF, M_NOWAIT);
+	pin = malloc(sizeof(*pin), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (pin != NULL) {
-		bzero(pin, sizeof *pin);
 		pin->pin_dot1x_auth = PIN_DOT1X_UNAUTHORIZED;
 	}
 	return (struct ieee80211_node *)pin;
@@ -2274,8 +2271,7 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 	case SIOCG80211ALLNODES: {
 		struct ieee80211_nodereq *nr = NULL;
 		na = (struct ieee80211_nodereq_all *)req;
-		wreq = malloc(sizeof(*wreq), M_DEVBUF, M_WAITOK);
-		bzero(wreq, sizeof(*wreq));
+		wreq = malloc(sizeof(*wreq), M_DEVBUF, M_WAITOK | M_ZERO);
 
 		maxscan = PGT_OBJ_BSSLIST_NBSS;
 		pob = malloc(sizeof(*pob) +
@@ -2768,32 +2764,32 @@ badopmode:
 			keyobj.pok_length = min(sizeof(keyobj.pok_key),
 			    IEEE80211_KEYBUF_SIZE);
 			keyobj.pok_length = min(keyobj.pok_length,
-			    ic->ic_nw_keys[0].wk_len);
-			bcopy(ic->ic_nw_keys[0].wk_key, keyobj.pok_key,
+			    ic->ic_nw_keys[0].k_len);
+			bcopy(ic->ic_nw_keys[0].k_key, keyobj.pok_key,
 			    keyobj.pok_length);
 			SETOID(PGT_OID_DEFAULT_KEY0, &keyobj, sizeof(keyobj));
 			/* key 2 */
 			keyobj.pok_length = min(sizeof(keyobj.pok_key),
 			    IEEE80211_KEYBUF_SIZE);
 			keyobj.pok_length = min(keyobj.pok_length,
-			    ic->ic_nw_keys[1].wk_len);
-			bcopy(ic->ic_nw_keys[1].wk_key, keyobj.pok_key,
+			    ic->ic_nw_keys[1].k_len);
+			bcopy(ic->ic_nw_keys[1].k_key, keyobj.pok_key,
 			    keyobj.pok_length);
 			SETOID(PGT_OID_DEFAULT_KEY1, &keyobj, sizeof(keyobj));
 			/* key 3 */
 			keyobj.pok_length = min(sizeof(keyobj.pok_key),
 			    IEEE80211_KEYBUF_SIZE);
 			keyobj.pok_length = min(keyobj.pok_length,
-			    ic->ic_nw_keys[2].wk_len);
-			bcopy(ic->ic_nw_keys[2].wk_key, keyobj.pok_key,
+			    ic->ic_nw_keys[2].k_len);
+			bcopy(ic->ic_nw_keys[2].k_key, keyobj.pok_key,
 			    keyobj.pok_length);
 			SETOID(PGT_OID_DEFAULT_KEY2, &keyobj, sizeof(keyobj));
 			/* key 4 */
 			keyobj.pok_length = min(sizeof(keyobj.pok_key),
 			    IEEE80211_KEYBUF_SIZE);
 			keyobj.pok_length = min(keyobj.pok_length,
-			    ic->ic_nw_keys[3].wk_len);
-			bcopy(ic->ic_nw_keys[3].wk_key, keyobj.pok_key,
+			    ic->ic_nw_keys[3].k_len);
+			bcopy(ic->ic_nw_keys[3].k_key, keyobj.pok_key,
 			    keyobj.pok_length);
 			SETOID(PGT_OID_DEFAULT_KEY3, &keyobj, sizeof(keyobj));
 
@@ -2973,10 +2969,6 @@ pgt_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			ic->ic_if.if_timer = 0;
 		ic->ic_mgt_timer = 0;
 		ic->ic_flags &= ~IEEE80211_F_SIBSS;
-		if (ic->ic_wep_ctx != NULL) {
-			free(ic->ic_wep_ctx, M_DEVBUF);  
-			ic->ic_wep_ctx = NULL;
-		}
 		ieee80211_free_allnodes(ic);
 		break;
 	case IEEE80211_S_SCAN:
@@ -3056,7 +3048,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    BUS_DMA_NOWAIT, &sc->sc_cbdmam);
 	if (error != 0) {
 		printf("%s: can not create DMA tag for control block\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3064,7 +3056,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    0, &sc->sc_cbdmas, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: can not allocate DMA memory for control block\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3072,7 +3064,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    size, (caddr_t *)&sc->sc_cb, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		printf("%s: can not map DMA memory for control block\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3080,7 +3072,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    sc->sc_cb, size, NULL, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		printf("%s: can not load DMA map for control block\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3093,7 +3085,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    BUS_DMA_ALLOCNOW, &sc->sc_psmdmam);
 	if (error != 0) {
 		printf("%s: can not create DMA tag for powersave\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3101,7 +3093,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	   0, &sc->sc_psmdmas, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: can not allocate DMA memory for powersave\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3109,7 +3101,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    size, (caddr_t *)&sc->sc_psmbuf, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		printf("%s: can not map DMA memory for powersave\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3117,7 +3109,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 	    sc->sc_psmbuf, size, NULL, BUS_DMA_WAITOK);
 	if (error != 0) {
 		printf("%s: can not load DMA map for powersave\n",
-		    sc->sc_dev);
+		    sc->sc_dev.dv_xname);
 		goto out;
 	}
 
@@ -3150,7 +3142,7 @@ pgt_dma_alloc(struct pgt_softc *sc)
 
 out:
 	if (error) {
-		printf("%s: error in DMA allocation\n", sc->sc_dev);
+		printf("%s: error in DMA allocation\n", sc->sc_dev.dv_xname);
 		pgt_dma_free(sc);
 	}
 

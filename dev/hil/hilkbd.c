@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hilkbd.c,v 1.12 2005/05/13 14:54:44 miod Exp $	*/
-=======
 /*	$OpenBSD: hilkbd.c,v 1.14 2009/01/21 21:53:59 grange Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

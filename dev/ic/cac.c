@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cac.c,v 1.22 2006/08/31 12:34:39 marco Exp $	*/
-=======
 /*	$OpenBSD: cac.c,v 1.42 2010/10/12 00:53:32 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
@@ -235,13 +231,12 @@ cac_init(struct cac_softc *sc, int startfw)
 
 	sc->sc_nunits = cinfo.num_drvs;
 	sc->sc_dinfos = malloc(cinfo.num_drvs * sizeof(struct cac_drive_info),
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_dinfos == NULL) {
 		printf("%s: cannot allocate memory for drive_info\n",
 		    sc->sc_dv.dv_xname);
 		return (-1);
 	}
-	bzero(sc->sc_dinfos, cinfo.num_drvs * sizeof(struct cac_drive_info));
 
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &cac_switch;
@@ -424,11 +419,7 @@ int
 cac_ccb_poll(struct cac_softc *sc, struct cac_ccb *wantccb, int timo)
 {
 	struct cac_ccb *ccb;
-<<<<<<< HEAD
-	int t = timo * 10;
-=======
 	int s, t = timo * 100;
->>>>>>> origin/master
 
 	do {
 		for (; t--; DELAY(10))
@@ -438,7 +429,9 @@ cac_ccb_poll(struct cac_softc *sc, struct cac_ccb *wantccb, int timo)
 			printf("%s: timeout\n", sc->sc_dv.dv_xname);
 			return (EBUSY);
 		}
+		s = splbio();
 		cac_ccb_done(sc, ccb);
+		splx(s);
 	} while (ccb != wantccb);
 
 	return (0);

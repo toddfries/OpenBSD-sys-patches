@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atwreg.h,v 1.3 2004/07/15 16:09:20 millert Exp $	*/
-=======
 /*	$OpenBSD: atwreg.h,v 1.7 2009/08/16 18:03:48 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: atwreg.h,v 1.10 2004/07/23 05:01:29 dyoung Exp $	*/
 
 /*

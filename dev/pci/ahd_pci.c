@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ahd_pci.c,v 1.14 2006/07/11 18:50:05 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ahd_pci.c,v 1.18 2009/05/31 04:47:59 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -343,9 +339,9 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct ahd_softc *ahd = (void *)self;
 	pci_intr_handle_t ih;
 	const char *intrstr;
-	pcireg_t devconfig, memtype, reg, subid;
+	pcireg_t devconfig, memtype, subid;
 	uint16_t device, subvendor; 
-	int error, ioh_valid, ioh2_valid, l, memh_valid, offset;
+	int error, ioh_valid, ioh2_valid, l, memh_valid;
 
 	ahd->dev_softc = pa;
 	ahd->parent_dmat = pa->pa_dmat;
@@ -461,16 +457,7 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Set Power State D0.
 	 */
-	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PWRMGMT, &offset,
-	    NULL)) {
-		/* Increment offset from cap register to csr register. */
-		offset += 4;
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, offset);
-		if ((reg & PCI_PMCSR_STATE_MASK) != PCI_PMCSR_STATE_D0) {
-			pci_conf_write(pa->pa_pc, pa->pa_tag, offset,
-			    (reg & ~PCI_PMCSR_STATE_MASK) | PCI_PMCSR_STATE_D0);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Should we bother disabling 39Bit addressing
@@ -486,8 +473,6 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 	 * 64bit bus (PCI64BIT set in devconfig).
 	 */
 	if ((ahd->flags & (AHD_39BIT_ADDRESSING|AHD_64BIT_ADDRESSING)) != 0) {
-		pcireg_t devconfig;
-
 		if (bootverbose)
 			printf("%s: Enabling 39Bit Addressing\n",
 			       ahd_name(ahd));
@@ -619,8 +604,6 @@ ahd_pci_test_register_access(struct ahd_softc *ahd)
 		goto fail;
 
 	if ((ahd_inb(ahd, INTSTAT) & PCIINT) != 0) {
-		u_int targpcistat;
-
 		ahd_set_modes(ahd, AHD_MODE_CFG, AHD_MODE_CFG);
 		targpcistat = ahd_inb(ahd, TARGPCISTAT);
 		if ((targpcistat & STA) != 0)

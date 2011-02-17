@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uftdireg.h,v 1.10 2005/03/12 21:38:48 tdeval Exp $ 	*/
-=======
 /*	$OpenBSD: uftdireg.h,v 1.12 2008/07/05 14:41:28 mbalmer Exp $ 	*/
->>>>>>> origin/master
 /*	$NetBSD: uftdireg.h,v 1.6 2002/07/11 21:14:28 augustss Exp $ */
 
 /*

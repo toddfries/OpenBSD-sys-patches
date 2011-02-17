@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: wskbdmap_mfii.h,v 1.2 2008/06/26 05:42:17 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: wskbdmap_mfii.h,v 1.1 1998/09/17 18:21:04 drochner Exp $	*/
 
 /*-

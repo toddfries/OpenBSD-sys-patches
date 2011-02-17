@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsdisplayvar.h,v 1.21 2006/11/29 19:11:17 miod Exp $ */
-=======
 /* $OpenBSD: wsdisplayvar.h,v 1.24 2010/03/30 17:40:55 oga Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsdisplayvar.h,v 1.30 2005/02/04 02:10:49 perry Exp $ */
 
 /*

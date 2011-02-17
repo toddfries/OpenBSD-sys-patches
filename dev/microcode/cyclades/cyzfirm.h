@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: cyzfirm.h,v 1.1 2001/06/21 13:21:47 nate Exp $	*/
 /*	$NetBSD$	*/
 
 /*

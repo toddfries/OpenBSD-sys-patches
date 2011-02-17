@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: athvar.h,v 1.18 2006/06/23 21:53:01 reyk Exp $  */
-=======
 /*      $OpenBSD: athvar.h,v 1.31 2010/09/07 16:21:42 deraadt Exp $  */
->>>>>>> origin/master
 /*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
 
 /*-
@@ -22,10 +18,6 @@
  * 3. Neither the names of the above-listed copyright holders nor the names
  *    of any contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * NO WARRANTY
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS

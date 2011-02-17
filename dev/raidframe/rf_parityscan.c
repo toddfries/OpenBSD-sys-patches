@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_parityscan.c,v 1.6 2000/08/08 16:07:44 peter Exp $	*/
+/*	$OpenBSD: rf_parityscan.c,v 1.7 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_parityscan.c,v 1.9 2000/05/28 03:00:31 oster Exp $	*/
 
 /*

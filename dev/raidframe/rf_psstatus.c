@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_psstatus.c,v 1.5 2002/12/03 11:31:35 tdeval Exp $	*/
+/*	$OpenBSD: rf_psstatus.c,v 1.6 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_psstatus.c,v 1.5 2000/01/08 22:57:31 oster Exp $	*/
 
 /*

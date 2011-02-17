@@ -1,4 +1,4 @@
-/* $OpenBSD: ioasicreg.h,v 1.1 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: ioasicreg.h,v 1.2 2003/06/02 23:28:04 millert Exp $ */
 /* $NetBSD: ioasicreg.h,v 1.6 2000/07/17 02:18:17 thorpej Exp $ */
 
 /* 

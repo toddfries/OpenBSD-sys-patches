@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_default.c,v 1.31 2007/01/16 17:52:18 thib Exp $  */
+/*	$OpenBSD: vfs_default.c,v 1.37 2008/05/03 14:41:29 thib Exp $  */
 
 /*
  * Portions of this code are:
@@ -47,8 +47,6 @@
 #include <sys/event.h>
 #include <miscfs/specfs/specdev.h>
 
-extern struct simplelock spechash_slock;
-
 int filt_generic_readwrite(struct knote *, long);
 void filt_generic_detach(struct knote *);
 
@@ -59,11 +57,7 @@ void filt_generic_detach(struct knote *);
 int
 vop_generic_revoke(void *v)
 {
-	struct vop_revoke_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		int a_flags;
-	} */ *ap = v;
+	struct vop_revoke_args *ap = v;
 	struct vnode *vp, *vq;
 	struct proc *p = curproc;
 
@@ -74,6 +68,18 @@ vop_generic_revoke(void *v)
 
 	vp = ap->a_vp;
  
+	if (vp->v_type == VBLK && vp->v_specinfo != 0) {
+		struct mount *mp = vp->v_specmountpoint;
+
+		/*
+		 * If we have a mount point associated with the vnode, we must
+		 * flush it out now, as to not leave a dangling zombie mount
+		 * point laying around in VFS.
+		 */
+		if (mp != NULL && !vfs_busy(mp, VB_WRITE|VB_WAIT))
+			dounmount(mp, MNT_FORCE | MNT_DOOMED, p, NULL);
+	}
+
 	if (vp->v_flag & VALIASED) {
 		/*
 		 * If a vgone (or vclean) is already in progress,
@@ -92,16 +98,13 @@ vop_generic_revoke(void *v)
 		 */
 		vp->v_flag |= VXLOCK;
 		while (vp->v_flag & VALIASED) {
-			simple_lock(&spechash_slock);
 			for (vq = *vp->v_hashchain; vq; vq = vq->v_specnext) {
 				if (vq->v_rdev != vp->v_rdev ||
 				    vq->v_type != vp->v_type || vp == vq)
 					continue;
-				simple_unlock(&spechash_slock);
 				vgone(vq);
 				break;
 			}
-			simple_unlock(&spechash_slock);
 		}
 
 		/*
@@ -118,6 +121,21 @@ vop_generic_revoke(void *v)
 }
 
 int
+vop_generic_bmap(void *v)
+{
+	struct vop_bmap_args *ap = v;
+
+	if (ap->a_vpp)
+		*ap->a_vpp = ap->a_vp;
+	if (ap->a_bnp)
+		*ap->a_bnp = ap->a_bn;
+	if (ap->a_runp)
+		*ap->a_runp = 0;
+
+	return (0);
+}
+
+int
 vop_generic_bwrite(void *v)
 {
 	struct vop_bwrite_args *ap = v;
@@ -128,11 +146,7 @@ vop_generic_bwrite(void *v)
 int
 vop_generic_abortop(void *v)
 {
-	struct vop_abortop_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_dvp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_abortop_args *ap = v;
  
 	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
 		pool_put(&namei_pool, ap->a_cnp->cn_pnbuf);
@@ -177,11 +191,7 @@ struct filterops generic_filtops =
 int
 vop_generic_kqfilter(void *v)
 {
-	struct vop_kqfilter_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		struct knote *a_kn;
-	} */ *ap = v;
+	struct vop_kqfilter_args *ap = v;
 	struct knote *kn = ap->a_kn;
 
 	switch (kn->kn_filter) {
@@ -194,6 +204,16 @@ vop_generic_kqfilter(void *v)
 	}
 
 	return (0);
+}
+
+/* Trivial lookup routine that always fails. */
+int
+vop_generic_lookup(void *v)
+{
+	struct vop_lookup_args	*ap = v;
+
+	*ap->a_vpp = NULL;
+	return (ENOTDIR);
 }
 
 void

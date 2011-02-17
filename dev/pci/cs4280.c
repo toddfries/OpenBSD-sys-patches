@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cs4280.c,v 1.24 2005/11/29 05:42:17 tedu Exp $	*/
-=======
 /*	$OpenBSD: cs4280.c,v 1.38 2010/09/12 03:17:34 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cs4280.c,v 1.5 2000/06/26 04:56:23 simonb Exp $	*/
 
 /*
@@ -205,6 +201,7 @@ void	cs4280_close(void *);
 int	cs4280_query_encoding(void *, struct audio_encoding *);
 int	cs4280_set_params(void *, int, int, struct audio_params *, struct audio_params *);
 int	cs4280_round_blocksize(void *, int);
+void	cs4280_get_default_params(void *, int, struct audio_params *);
 
 int	cs4280_halt_output(void *);
 int	cs4280_halt_input(void *);
@@ -272,6 +269,7 @@ struct audio_hw_if cs4280_hw_if = {
 	cs4280_get_props,
 	cs4280_trigger_output,
 	cs4280_trigger_input,
+	cs4280_get_default_params
 };
 
 #if NMIDI > 0
@@ -621,6 +619,9 @@ cs4280_attach(parent, self, aux)
 
 	sc->sc_dmatag = pa->pa_dmat;
 
+	/* Get out of power save mode if needed. */
+	pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+
 	/* LATENCY_TIMER setting */
 	mem = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_BHLC_REG);
 	if ( PCI_LATTIMER(mem) < 32 ) {
@@ -812,7 +813,7 @@ cs4280_intr(p)
 #if 1
 		/* XXX:
 		 * It seems "Transmit Buffer Full" never activate until EOI
-		 * is deliverd.  Shall I throw EOI top of this routine ?
+		 * is delivered.  Shall I throw EOI top of this routine ?
 		 */
 		if ((BA0READ4(sc, CS4280_MIDSR) & MIDSR_TBF) == 0) {
 			DPRINTF(("w: "));
@@ -1165,7 +1166,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULINEAR_BE:
 			if (mode == AUMODE_RECORD) {
 				if (p->precision == 16)
-					p->sw_code = change_sign16_swap_bytes;
+					p->sw_code = change_sign16_swap_bytes_le;
 				else
 					p->sw_code = change_sign8;
 			}
@@ -1173,7 +1174,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULINEAR_LE:
 			if (mode == AUMODE_RECORD) {
 				if (p->precision == 16)
-					p->sw_code = change_sign16;
+					p->sw_code = change_sign16_le;
 				else
 					p->sw_code = change_sign8;
 			}
@@ -1181,7 +1182,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = mulaw_to_slinear16;
+				p->sw_code = mulaw_to_slinear16_le;
 			} else {
 				p->sw_code = slinear8_to_mulaw;
 			}
@@ -1189,7 +1190,7 @@ cs4280_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ALAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = alaw_to_slinear16;
+				p->sw_code = alaw_to_slinear16_le;
 			} else {
 				p->sw_code = slinear8_to_alaw;
 			}
@@ -1226,6 +1227,12 @@ cs4280_round_buffersize(addr, direction, size)
 	 * ( suggested by Lennart Augustsson. )
 	 */
 	return (size);
+}
+
+void
+cs4280_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 int

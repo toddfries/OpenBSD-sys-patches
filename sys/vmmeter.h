@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmmeter.h,v 1.11 2001/06/27 04:51:49 art Exp $	*/
+/*	$OpenBSD: vmmeter.h,v 1.12 2003/06/02 23:28:22 millert Exp $	*/
 /*	$NetBSD: vmmeter.h,v 1.9 1995/03/26 20:25:04 jtc Exp $	*/
 
 /*-

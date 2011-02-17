@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cz.c,v 1.8 2003/08/15 20:32:17 tedu Exp $ */
-=======
 /*	$OpenBSD: cz.c,v 1.18 2010/07/02 17:27:01 nicm Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: cz.c,v 1.15 2001/01/20 19:10:36 thorpej Exp $	*/
 
 /*-
@@ -393,10 +389,8 @@ cz_attach(parent, self, aux)
 	}
 
 	cz->cz_ports = malloc(sizeof(struct cztty_softc) * cz->cz_nchannels,
-	    M_DEVBUF, M_WAITOK);
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 	cztty_attached_ttys += cz->cz_nchannels;
-	memset(cz->cz_ports, 0,
-	    sizeof(struct cztty_softc) * cz->cz_nchannels);
 
 	for (i = 0; i < cz->cz_nchannels; i++) {
 		sc = &cz->cz_ports[i];

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: exec_conf.c,v 1.16 2003/08/23 20:27:30 tedu Exp $	*/
-=======
 /*	$OpenBSD: exec_conf.c,v 1.25 2010/07/05 22:20:22 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: exec_conf.c,v 1.16 1995/12/09 05:34:47 cgd Exp $	*/
 
 /*
@@ -85,15 +81,6 @@ struct execsw execsw[] = {
 #endif
 #ifdef _KERN_DO_ELF64
 	{ sizeof(Elf64_Ehdr), exec_elf64_makecmds, &emul_native },	/* elf binaries */
-<<<<<<< HEAD
-#ifdef COMPAT_NETBSD
-	{ sizeof(Elf64_Ehdr), exec_elf64_makecmds, &emul_netbsd_elf64 },
-#endif
-#ifdef COMPAT_OSF1
-	{ sizeof(Elf64_Ehdr), exec_elf64_makecmds, &emul_osf1 },
-#endif
-=======
->>>>>>> origin/master
 #endif /* ELF64 */
 #ifdef COMPAT_LINUX
 	{ LINUX_AOUT_HDR_SIZE, exec_linux_aout_makecmds, &emul_linux_aout }, /* linux a.out */

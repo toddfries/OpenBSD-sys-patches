@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vesafb.c,v 1.3 2007/01/28 20:28:50 gwk Exp $ */
-=======
 /*	$OpenBSD: vesafb.c,v 1.7 2009/11/11 00:01:34 fgsch Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006 Jared D. McNeill <jmcneill@invisible.ca>
@@ -104,7 +100,7 @@ vesafb_get_ddc_version(struct vga_pci_softc *sc)
 	if (res || VBECALL_SUPPORT(tf.tf_eax) != VBECALL_SUPPORTED)
 		return 0;
 
-	return VBECALL_SUCESS(tf.tf_eax);
+	return VBECALL_SUCCESS(tf.tf_eax);
 }
 
 
@@ -135,7 +131,7 @@ vesafb_get_ddc_info(struct vga_pci_softc *sc, struct edid *info)
 
 	memcpy(info, buf, sizeof(struct edid));
 	kvm86_bios_delpage(KVM86_CALL_TASKVA, buf);
-	return VBECALL_SUCESS(tf.tf_eax);
+	return VBECALL_SUCCESS(tf.tf_eax);
 }
 
 int
@@ -237,7 +233,7 @@ vesafb_set_mode(struct vga_pci_softc *sc, int mode)
 
 	bzero(&tf, sizeof(struct trapframe));
 	tf.tf_eax = VBE_FUNC_SETMODE;
-	tf.tf_ebx = mode | 0x4000; /* flat */
+	tf.tf_ebx = mode;
 
 	res = kvm86_bioscall(BIOS_VIDEO_INTR, &tf);
 	if (res || VBECALL_SUPPORT(tf.tf_eax) != VBECALL_SUPPORTED) {
@@ -275,7 +271,7 @@ vesafb_find_mode(struct vga_pci_softc *sc, int width, int height, int bpp)
 	if (i == vesabios_softc->sc_nmodes)
 		return -1;
 	else
-		return vesabios_softc->sc_modes[i];
+		return vesabios_softc->sc_modes[i] | 0x4000; /* flat */
 }
 
 int

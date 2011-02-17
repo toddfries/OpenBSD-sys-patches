@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gpioow.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
-=======
 /*	$OpenBSD: gpioow.c,v 1.4 2009/10/13 19:33:16 pirofti Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

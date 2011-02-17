@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: zxreg.h,v 1.1 2003/03/09 01:46:37 miod Exp $	*/
-=======
 /*	$OpenBSD: zxreg.h,v 1.2 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: zxreg.h,v 1.1 2002/09/13 14:03:53 ad Exp $	*/
 
 /*

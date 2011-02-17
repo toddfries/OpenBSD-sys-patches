@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sys_pipe.c,v 1.50 2005/12/13 10:33:14 jsg Exp $	*/
-=======
 /*	$OpenBSD: sys_pipe.c,v 1.58 2010/01/14 23:12:11 schwarze Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -215,7 +211,7 @@ pipe_create(struct pipe *cpipe)
 	if (error != 0)
 		return (error);
 
-	nanotime(&cpipe->pipe_ctime);
+	getnanotime(&cpipe->pipe_ctime);
 	cpipe->pipe_atime = cpipe->pipe_ctime;
 	cpipe->pipe_mtime = cpipe->pipe_ctime;
 	cpipe->pipe_pgid = NO_PID;
@@ -357,7 +353,7 @@ pipe_read(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 	pipeunlock(rpipe);
 
 	if (error == 0)
-		nanotime(&rpipe->pipe_atime);
+		getnanotime(&rpipe->pipe_atime);
 unlocked_error:
 	--rpipe->pipe_busy;
 
@@ -593,7 +589,7 @@ retrywrite:
 	}
 
 	if (error == 0)
-		nanotime(&wpipe->pipe_mtime);
+		getnanotime(&wpipe->pipe_mtime);
 	/*
 	 * We have something to offer, wake up select/poll.
 	 */
@@ -739,9 +735,10 @@ pipeclose(struct pipe *cpipe)
 		 * If the other side is blocked, wake it up saying that
 		 * we want to close it down.
 		 */
+		cpipe->pipe_state |= PIPE_EOF;
 		while (cpipe->pipe_busy) {
 			wakeup(cpipe);
-			cpipe->pipe_state |= PIPE_WANT | PIPE_EOF;
+			cpipe->pipe_state |= PIPE_WANT;
 			tsleep(cpipe, PRIBIO, "pipecl", 0);
 		}
 

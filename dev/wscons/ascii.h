@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: ascii.h,v 1.5 2009/01/12 20:43:53 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: ascii.h,v 1.3 1998/06/20 19:11:04 drochner Exp $ */
 
 #define ASCII_NUL	0x00		/* nul */

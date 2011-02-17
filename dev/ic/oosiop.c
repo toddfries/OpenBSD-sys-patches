@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: oosiop.c,v 1.4 2004/03/14 19:23:33 miod Exp $	*/
-=======
 /*	$OpenBSD: oosiop.c,v 1.17 2010/06/28 18:31:02 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -217,10 +213,10 @@ oosiop_attach(struct oosiop_softc *sc)
 	if (sc->sc_minperiod < 25)
 		sc->sc_minperiod = 25;	/* limit to 10MB/s */
 
-	printf(": NCR53C700%s rev %d, %dMHz, SCSI ID %d\n",
+	printf(": NCR53C700%s rev %d, %dMHz\n",
 	    sc->sc_chip == OOSIOP_700_66 ? "-66" : "",
 	    oosiop_read_1(sc, OOSIOP_CTEST7) >> 4,
-	    sc->sc_freq / 1000000, sc->sc_id);
+	    sc->sc_freq / 1000000);
 	/*
 	 * Reset all
 	 */
@@ -265,12 +261,11 @@ oosiop_alloc_cb(struct oosiop_softc *sc, int ncb)
 	/*
 	 * Allocate oosiop_cb.
 	 */
-	cb = malloc(sizeof(struct oosiop_cb) * ncb, M_DEVBUF, M_NOWAIT);
+	cb = malloc(sizeof(*cb) * ncb, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (cb == NULL) {
 		printf(": failed to allocate cb memory\n");
 		return (ENOMEM);
 	}
-	bzero(cb, sizeof(struct oosiop_cb) * ncb);
 
 	/*
 	 * Allocate DMA-safe memory for the oosiop_xfer and map it.
@@ -722,7 +717,6 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 	s = splbio();
 	cb = TAILQ_FIRST(&sc->sc_free_cb);
 	TAILQ_REMOVE(&sc->sc_free_cb, cb, chain);
-	splx(s);
 
 	cb->xs = xs;
 	cb->xsflags = xs->flags;
@@ -744,12 +738,8 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
 		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
-<<<<<<< HEAD
-		return (COMPLETE);
-=======
 		splx(s);
 		return;
->>>>>>> origin/master
 	}
 	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
 	    BUS_DMASYNC_PREWRITE);
@@ -771,12 +761,8 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 			bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
 			scsi_done(xs);
 			TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
-<<<<<<< HEAD
-			return (COMPLETE);
-=======
 			splx(s);
 			return;
->>>>>>> origin/master
 		}
 		bus_dmamap_sync(sc->sc_dmat, cb->datadma,
 		    0, xs->datalen,
@@ -785,13 +771,6 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 
 	xfer->status = SCSI_OOSIOP_NOSTATUS;
 
-<<<<<<< HEAD
-	oosiop_setup(sc, cb);
-
-	s = splbio();
-
-=======
->>>>>>> origin/master
 	/*
 	 * Always initialize timeout so it does not contain trash
 	 * that could confuse timeout_del().
@@ -818,20 +797,6 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 	}
 	if (dopoll)
 		oosiop_poll(sc, cb);
-<<<<<<< HEAD
-	else {
-		/* start expire timer */
-		timeout_add(&xs->stimeout, (xs->timeout / 1000) * hz);
-	}
-
-	splx(s);
-
-	if ((xs->flags & ITSDONE) == 0)
-		return (SUCCESSFULLY_QUEUED);
-	else
-		return (COMPLETE);
-=======
->>>>>>> origin/master
 }
 
 void

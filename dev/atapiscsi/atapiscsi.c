@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: atapiscsi.c,v 1.76 2006/11/28 23:59:45 dlg Exp $     */
-=======
 /*      $OpenBSD: atapiscsi.c,v 1.96 2010/11/18 21:13:19 miod Exp $     */
->>>>>>> origin/master
 
 /*
  * This code is derived from code with the copyright below.
@@ -692,8 +688,12 @@ wdc_atapi_the_machine(chp, xfer, ctxt)
 		}
 
 		if (retargs.expect_irq) {
+			int timeout_period;
 			chp->ch_flags |= WDCF_IRQ_WAIT;
-			timeout_add(&chp->ch_timo, xfer->endticks - ticks);
+			timeout_period =  xfer->endticks - ticks;
+			if (timeout_period < 1)
+				timeout_period = 1;
+			timeout_add(&chp->ch_timo, timeout_period);
 			return;
 		}
 
@@ -829,7 +829,7 @@ wdc_atapi_send_packet(chp, xfer, timeout, ret)
 	 * Limit length to what can be stuffed into the cylinder register
 	 * (16 bits).  Some CD-ROMs seem to interpret '0' as 65536,
 	 * but not all devices do that and it's not obvious from the
-	 * ATAPI spec that that behaviour should be expected.  If more
+	 * ATAPI spec that this behaviour should be expected.  If more
 	 * data is necessary, multiple data transfer phases will be done.
 	 */
 
@@ -1575,15 +1575,8 @@ wdc_atapi_done(chp, xfer, timeout, ret)
 
 	if (xfer->c_flags & C_POLL)
 		wdc_enable_intr(chp);
-<<<<<<< HEAD
-	} else {
-		WDCDEBUG_PRINT(("wdc_atapi_done: scsi_done\n"), DEBUG_XFERS);
-		scsi_done(sc_xfer);
-	}
-=======
 
 	scsi_done(sc_xfer);
->>>>>>> origin/master
 
 	xfer->next = NULL;
 	return;

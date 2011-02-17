@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bwtwo.c,v 1.16 2006/06/02 20:00:56 miod Exp $	*/
-=======
 /*	$OpenBSD: bwtwo.c,v 1.18 2008/12/27 17:23:03 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

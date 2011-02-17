@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aha1742.c,v 1.23 2006/12/21 02:44:55 krw Exp $	*/
-=======
 /*	$OpenBSD: aha1742.c,v 1.42 2010/08/07 03:50:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aha1742.c,v 1.61 1996/05/12 23:40:01 mycroft Exp $	*/
 
 /*
@@ -296,7 +292,10 @@ void ahb_print_active_ecb(struct ahb_softc *);
 int ahbprint(void *, const char *);
 
 #define	MAX_SLOTS	15
+
+#ifdef	AHBDEBUG
 int     ahb_debug = 0;
+#endif /* AHBDEBUG */
 #define AHB_SHOWECBS 0x01
 #define AHB_SHOWINTS 0x02
 #define AHB_SHOWCMDS 0x04
@@ -358,14 +357,18 @@ ahb_poll(sc, xs, count)
 {				/* in msec  */
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
+	int s;
 
 	while (count) {
 		/*
 		 * If we had interrupts enabled, would we
 		 * have got an interrupt?
 		 */
-		if (bus_space_read_1(iot, ioh, G2STAT) & G2STAT_INT_PEND)
+		if (bus_space_read_1(iot, ioh, G2STAT) & G2STAT_INT_PEND) {
+			s = splbio();
 			ahbintr(sc);
+			splx(s);
+		}
 		if (xs->flags & ITSDONE)
 			return 0;
 		delay(1000);

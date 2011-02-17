@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pcmciavar.h,v 1.19 2005/08/05 18:21:04 fgsch Exp $	*/
-=======
 /*	$OpenBSD: pcmciavar.h,v 1.21 2010/09/04 12:59:27 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pcmciavar.h,v 1.5 1998/07/19 17:28:17 christos Exp $	*/
 
 /*

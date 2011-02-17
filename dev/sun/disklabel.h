@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: disklabel.h,v 1.2 2001/09/18 21:04:33 jason Exp $	*/
-=======
 /*	$OpenBSD: disklabel.h,v 1.8 2010/04/25 06:15:17 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: disklabel.h,v 1.2 1998/08/22 14:55:28 mrg Exp $ */
 
 /*
@@ -47,57 +43,42 @@
 
 /*
  * SunOS disk label layout (only relevant portions discovered here).
+ * This describes the format typically found on SPARC systems, but not
+ * that usually seen on SunOS/x86 and SunOS/amd64 systems.
  */
 
 #define	SUN_DKMAGIC	55998
 
-/* These are the guys that Sun's dkinfo needs... */
-#define DKIOCGGEOM	_IOR('d', 2, struct sun_dkgeom)	/* geometry info */
-#define DKIOCINFO	_IOR('d', 8, struct sun_dkctlr)	/* controller info */
-#define DKIOCGPART	_IOR('d', 4, struct sun_dkpart)	/* partition info */
-
-/* geometry info */
-struct sun_dkgeom {
-	u_short	sdkc_ncylinders;	/* data cylinders */
-	u_short	sdkc_acylinders;	/* alternate cylinders */
-	u_short	sdkc_xxx1;
-	u_short	sdkc_ntracks;		/* tracks per cylinder */
-	u_short	sdkc_xxx2;
-	u_short	sdkc_nsectors;		/* sectors per track */
-	u_short	sdkc_interleave;	/* interleave factor */
-	u_short	sdkc_xxx3;
-	u_short	sdkc_xxx4;
-	u_short	sdkc_sparespercyl;	/* spare sectors per cylinder */
-	u_short	sdkc_rpm;		/* rotational speed */
-	u_short	sdkc_pcylinders;	/* physical cylinders */
-	u_short	sdkc_xxx5[7];
-};
-
-/* controller info */
-struct sun_dkctlr {
-	int	sdkc_addr;		/* controller address */
-	short	sdkc_unit;		/* unit (slave) address */
-	short	sdkc_type;		/* controller type */
-	short	sdkc_flags;		/* flags */
-};
-
 /* partition info */
 struct sun_dkpart {
-	int	sdkp_cyloffset;		/* starting cylinder */
-	int	sdkp_nsectors;		/* number of sectors */
+	u_int	sdkp_cyloffset;		/* starting cylinder */
+	u_int	sdkp_nsectors;		/* number of sectors */
 };
 
-#define	SUNXPART 8
-#define	SL_XPMAG (0x199d1fe2+SUNXPART)
+/* partition types */
+struct sun_partinfo {
+	u_short	spi_tag;		/* filesystem type */
+	u_short	spi_flag;		/* flags */
+};
+
+/* some spi_tag values */
+#define SPTAG_EMPTY		0x00
+#define SPTAG_BOOT		0x01
+#define SPTAG_SUNOS_ROOT	0x02
+#define SPTAG_SUNOS_SWAP	0x03
+#define SPTAG_SUNOS_USR		0x04
+#define SPTAG_WHOLE_DISK	0x05
+#define SPTAG_SUNOS_STAND	0x06
+#define SPTAG_SUNOS_VAR		0x07
+#define SPTAG_SUNOS_HOME	0x08
+#define SPTAG_LINUX_SWAP	0x82
+#define SPTAG_LINUX_EXT2	0x83
+
+#define	SUNXPART	8
+#define	SL_XPMAG	(0x199d1fe2+SUNXPART)
+#define	SL_XPMAGTYP	(0x199d1fe2+SUNXPART+1)		/* contains types */
 
 struct sun_disklabel {			/* total size = 512 bytes */
-<<<<<<< HEAD
-	char	sl_text[128];
-	u_int	sl_xpsum;		/* additive cksum, [xl_xpmag,sl_xx1) */
-	u_int	sl_xpmag;		/* "extended" magic number */
-	struct sun_dkpart sl_xpart[SUNXPART];	/* "extended" partitions, i through p */
-	char	sl_xxx1[292-8-(8*SUNXPART)];	/* [292] include sl_x* */
-=======
 	char		sl_text[128];
 	u_int		sl_xpsum;	/* additive cksum, [xl_xpmag,sl_xx1) */
 	u_int		sl_xpmag;	/* "extended" magic number */
@@ -112,10 +93,9 @@ struct sun_disklabel {			/* total size = 512 bytes */
 			    sizeof(u_int8_t) * MAXPARTITIONS -
 			    sizeof(u_int16_t) * MAXPARTITIONS -
 			    sizeof(u_int64_t)];
->>>>>>> origin/master
 	u_short sl_rpm;			/* rotational speed */
 	u_short	sl_pcylinders;		/* number of physical cyls */
-#define	sl_pcyl	 sl_pcylinders		/* XXX: old sun3 */
+#define	sl_pcyl	sl_pcylinders		/* XXX: old sun3 */
 	u_short sl_sparespercyl;	/* spare sectors per cylinder */
 	char	sl_xxx3[4];
 	u_short sl_interleave;		/* interleave factor */
@@ -129,4 +109,12 @@ struct sun_disklabel {			/* total size = 512 bytes */
 	u_short	sl_cksum;		/* xor checksum of all shorts */
 };
 
-#define SUN_LABELOFFSET	128		/* XXX we don't use this */
+/* Sun standard fields, also used on Linux. */
+struct sun_preamble {
+	char	sl_text[128];
+	u_int	sl_version;	/* label version */
+	char	sl_volume[8];	/* short volume name */
+	u_short	sl_nparts;	/* partition count */
+
+	struct sun_partinfo sl_part[8];
+};

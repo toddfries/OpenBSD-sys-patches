@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: azalia.c,v 1.23 2006/07/21 20:41:51 brad Exp $	*/
-=======
 /*	$OpenBSD: azalia.c,v 1.188 2010/09/12 03:17:34 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -43,11 +39,6 @@
  *  - multiple codecs (needed?)
  *  - multiple streams (needed?)
  */
-
-#include <sys/cdefs.h>
-#ifdef NETBSD_GOOP
-__KERNEL_RCSID(0, "$NetBSD: azalia.c,v 1.15 2005/09/29 04:14:03 kent Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -179,15 +170,12 @@ typedef struct azalia_t {
 	int rirb_entries;
 	uint8_t rirbsize;
 	int rirb_rp;
-<<<<<<< HEAD
-=======
 #define UNSOLQ_SIZE	256
 	rirb_entry_t *unsolq;
 	int unsolq_wp;
 	int unsolq_rp;
 	boolean_t unsolq_kick;
 	struct timeout unsol_to;
->>>>>>> origin/master
 
 	boolean_t ok64;
 	int nistreams, nostreams, nbstreams;
@@ -204,16 +192,13 @@ typedef struct azalia_t {
 
 
 /* prototypes */
+uint8_t azalia_pci_read(pci_chipset_tag_t, pcitag_t, int);
+void	azalia_pci_write(pci_chipset_tag_t, pcitag_t, int, uint8_t);
 int	azalia_pci_match(struct device *, void *, void *);
 void	azalia_pci_attach(struct device *, struct device *, void *);
 int	azalia_pci_activate(struct device *, int);
 int	azalia_pci_detach(struct device *, int);
 int	azalia_intr(void *);
-<<<<<<< HEAD
-int	azalia_attach(azalia_t *);
-void	azalia_attach_intr(struct device *);
-int	azalia_init_corb(azalia_t *);
-=======
 void	azalia_print_codec(codec_t *);
 int	azalia_reset(azalia_t *);
 int	azalia_get_ctrlr_caps(azalia_t *);
@@ -223,21 +208,14 @@ int	azalia_init_streams(azalia_t *);
 void	azalia_shutdown(void *);
 int	azalia_halt_corb(azalia_t *);
 int	azalia_init_corb(azalia_t *, int);
->>>>>>> origin/master
 int	azalia_delete_corb(azalia_t *);
 int	azalia_halt_rirb(azalia_t *);
 int	azalia_init_rirb(azalia_t *, int);
 int	azalia_delete_rirb(azalia_t *);
-<<<<<<< HEAD
-int	azalia_set_command(const azalia_t *, nid_t, int, uint32_t,
-	uint32_t);
-int	azalia_get_response(azalia_t *, uint32_t *);
-=======
 int	azalia_set_command(azalia_t *, nid_t, int, uint32_t, uint32_t);
 int	azalia_get_response(azalia_t *, uint32_t *);
 void	azalia_rirb_kick_unsol_events(void *);
 void	azalia_rirb_intr(azalia_t *);
->>>>>>> origin/master
 int	azalia_alloc_dmamem(azalia_t *, size_t, size_t, azalia_dma_t *);
 int	azalia_free_dmamem(const azalia_t *, azalia_dma_t*);
 
@@ -260,6 +238,7 @@ int	azalia_codec_select_spkrdac(codec_t *);
 int	azalia_codec_find_inputmixer(codec_t *);
 
 int	azalia_widget_init(widget_t *, const codec_t *, int);
+int	azalia_widget_label_widgets(codec_t *);
 int	azalia_widget_init_audio(widget_t *, const codec_t *);
 int	azalia_widget_init_pin(widget_t *, const codec_t *);
 int	azalia_widget_init_connection(widget_t *, const codec_t *);
@@ -281,6 +260,7 @@ void	azalia_close(void *);
 int	azalia_query_encoding(void *, audio_encoding_t *);
 int	azalia_set_params(void *, int, int, audio_params_t *,
 	audio_params_t *);
+void	azalia_get_default_params(void *, int, struct audio_params*);
 int	azalia_round_blocksize(void *, int);
 int	azalia_halt_output(void *);
 int	azalia_halt_input(void *);
@@ -347,22 +327,9 @@ struct audio_hw_if azalia_hw_if = {
 	azalia_get_props,
 	azalia_trigger_output,
 	azalia_trigger_input,
+	azalia_get_default_params
 };
 
-<<<<<<< HEAD
-static const char *pin_colors[16] = {
-	"unknown", "black", "gray", "blue",
-	"green", "red", "orange", "yellow",
-	"purple", "pink", "col0a", "col0b",
-	"col0c", "col0d", "white", "other"};
-#ifdef AZALIA_DEBUG
-static const char *pin_devices[16] = {
-	"line-out", AudioNspeaker, AudioNheadphone, AudioNcd,
-	"SPDIF-out", "digital-out", "modem-line", "modem-handset",
-	"line-in", AudioNaux, AudioNmicrophone, "telephony",
-	"SPDIF-in", "digital-in", "dev0e", "other"};
-#endif
-=======
 static const char *pin_devices[16] = {
 	AudioNline, AudioNspeaker, AudioNheadphone, AudioNcd,
 	"SPDIF", "digital-out", "modem-line", "modem-handset",
@@ -375,19 +342,11 @@ static const char *wtypes[16] = {
 static const char *line_colors[16] = {
 	"unk", "blk", "gry", "blu", "grn", "red", "org", "yel",
 	"pur", "pnk", "0xa", "0xb", "0xc", "0xd", "wht", "oth"};
->>>>>>> origin/master
 
 /* ================================================================
  * PCI functions
  * ================================================================ */
 
-<<<<<<< HEAD
-#define PCI_ID_CODE0(v, p)	PCI_ID_CODE(PCI_VENDOR_##v, PCI_PRODUCT_##v##_##p)
-#define PCIID_NVIDIA_MCP51	PCI_ID_CODE0(NVIDIA, MCP51_HDA)
-#define PCIID_NVIDIA_MCP55	PCI_ID_CODE0(NVIDIA, MCP55_HDA)
-#define PCIID_ALI_M5461		PCI_ID_CODE0(ALI, M5461)
-#define PCIID_VIATECH_HDA	PCI_ID_CODE0(VIATECH, HDA)
-=======
 #define ATI_PCIE_SNOOP_REG		0x42
 #define ATI_PCIE_SNOOP_MASK		0xf8
 #define ATI_PCIE_SNOOP_ENABLE		0x02
@@ -415,7 +374,6 @@ azalia_pci_write(pci_chipset_tag_t pc, pcitag_t pa, int reg, uint8_t val)
 	pcival |= (val << ((reg & 0x03) * 8));
 	pci_conf_write(pc, pa, (reg & ~0x03), pcival);
 }
->>>>>>> origin/master
 
 int
 azalia_pci_match(struct device *parent, void *match, void *aux)
@@ -436,7 +394,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa;
 	pcireg_t v;
 	pci_intr_handle_t ih;
-	const char *intrrupt_str;
+	const char *interrupt_str;
+	uint8_t reg;
 
 	sc = (azalia_t*)self;
 	pa = aux;
@@ -456,10 +415,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
 	    v | PCI_COMMAND_BACKTOBACK_ENABLE);
 
-<<<<<<< HEAD
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x44);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x44, v & (~0x7));
-=======
 	/* traffic class select */
 	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
@@ -531,7 +486,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 		break;
 	}
->>>>>>> origin/master
 
 	/* interrupt */
 	if (pci_intr_map(pa, &ih)) {
@@ -539,22 +493,18 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	sc->pc = pa->pa_pc;
-<<<<<<< HEAD
-	intrrupt_str = pci_intr_string(pa->pa_pc, ih);
-=======
 	sc->tag = pa->pa_tag;
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
->>>>>>> origin/master
 	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
 	    sc, sc->dev.dv_xname);
 	if (sc->ih == NULL) {
 		printf(": can't establish interrupt");
-		if (intrrupt_str != NULL)
-			printf(" at %s", intrrupt_str);
+		if (interrupt_str != NULL)
+			printf(" at %s", interrupt_str);
 		printf("\n");
 		return;
 	}
-	printf(": %s\n", intrrupt_str);
+	printf(": %s\n", interrupt_str);
 
 	sc->pciid = pa->pa_id;
 	sc->subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
@@ -645,6 +595,14 @@ azalia_pci_detach(struct device *self, int flags)
 	azalia_delete_corb(az);
 	azalia_delete_rirb(az);
 
+	DPRINTF(("%s: disable interrupts\n", __func__));
+	AZ_WRITE_4(az, INTCTL, 0);
+
+	DPRINTF(("%s: clear interrupts\n", __func__));
+	AZ_WRITE_4(az, INTSTS, HDA_INTSTS_CIS | HDA_INTSTS_GIS);
+	AZ_WRITE_2(az, STATESTS, HDA_STATESTS_SDIWAKE);
+	AZ_WRITE_1(az, RIRBSTS, HDA_RIRBSTS_RINTFL | HDA_RIRBSTS_RIRBOIS);
+
 	DPRINTF(("%s: delete PCI resources\n", __func__));
 	if (az->ih != NULL) {
 		pci_intr_disestablish(az->pc, az->ih);
@@ -662,10 +620,6 @@ azalia_intr(void *v)
 {
 	azalia_t *az = v;
 	uint32_t intsts;
-<<<<<<< HEAD
-	uint8_t rirbsts;
-=======
->>>>>>> origin/master
 
 	intsts = AZ_READ_4(az, INTSTS);
 	if (intsts == 0)
@@ -673,18 +627,6 @@ azalia_intr(void *v)
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
-<<<<<<< HEAD
-	ret += azalia_stream_intr(&az->pstream, intsts);
-#if 0
-	ret += azalia_stream_intr(&az->rstream, intsts);
-#endif
-
-	if (intsts & HDA_INTCTL_CIE) {
-		rirbsts = AZ_READ_1(az, RIRBSTS);
-		AZ_WRITE_1(az, RIRBSTS, rirbsts |
-		    HDA_RIRBSTS_RIRBOIS | HDA_RIRBSTS_RINTFL);
-	}
-=======
 	if (intsts & az->pstream.intr_bit)
 		azalia_stream_intr(&az->pstream);
 
@@ -695,7 +637,6 @@ azalia_intr(void *v)
 	    (AZ_READ_1(az, RIRBCTL) & HDA_RIRBCTL_RINTCTL) &&
 	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL))
 		azalia_rirb_intr(az);
->>>>>>> origin/master
 
 	return (1);
 }
@@ -721,26 +662,27 @@ azalia_shutdown(void *v)
  * HDA controller functions
  * ================================================================ */
 
+void
+azalia_print_codec(codec_t *codec)
+{
+	const char *vendor;
+
+	if (codec->name == NULL) {
+		vendor = pci_findvendor(codec->vid >> 16);
+		if (vendor == NULL)
+			printf("0x%04x/0x%04x",
+			    codec->vid >> 16, codec->vid & 0xffff);
+		else
+			printf("%s/0x%04x", vendor, codec->vid & 0xffff);
+	} else
+		printf("%s", codec->name);
+}
+
 int
 azalia_reset(azalia_t *az)
 {
 	uint32_t gctl;
-<<<<<<< HEAD
-	uint16_t gcap;
-	uint16_t statests;
-
-	printf("%s: host: High Definition Audio rev. %d.%d\n",
-	    XNAME(az), AZ_READ_1(az, VMAJ), AZ_READ_1(az, VMIN));
-	gcap = AZ_READ_2(az, GCAP);
-	az->nistreams = HDA_GCAP_ISS(gcap);
-	az->nostreams = HDA_GCAP_OSS(gcap);
-	az->nbstreams = HDA_GCAP_BSS(gcap);
-	az->ok64 = (gcap & HDA_GCAP_64OK) != 0;
-	DPRINTF(("%s: host: %d output, %d input, and %d bidi streams\n",
-	    XNAME(az), az->nostreams, az->nistreams, az->nbstreams));
-=======
 	int i;
->>>>>>> origin/master
 
 	/* 4.2.2 Starting the High Definition Audio Controller */
 	DPRINTF(("%s: resetting\n", __func__));
@@ -771,8 +713,6 @@ azalia_reset(azalia_t *az)
 	}
 	DELAY(1000);
 
-<<<<<<< HEAD
-=======
 	return(0);
 }
 
@@ -794,7 +734,6 @@ azalia_get_ctrlr_caps(azalia_t *az)
 	DPRINTF(("%s: host: %d output, %d input, and %d bidi streams\n",
 	    XNAME(az), az->nostreams, az->nistreams, az->nbstreams));
 
->>>>>>> origin/master
 	/* 4.3 Codec discovery */
 	statests = AZ_READ_2(az, STATESTS);
 	for (i = 0, n = 0; i < HDA_MAX_CODECS; i++) {
@@ -909,13 +848,6 @@ azalia_init_codecs(azalia_t *az)
 		if (!azalia_codec_init(&az->codecs[i]))
 			c++;
 	}
-<<<<<<< HEAD
-	if (c < 0)
-		goto err_exit;
-	/* Use the first audio codec */
-	az->codecno = c;
-	DPRINTF(("%s: using the #%d codec\n", XNAME(az), az->codecno));
-=======
 	if (c == 0) {
 		printf("%s: No codecs found\n", XNAME(az));
 		return(1);
@@ -955,7 +887,6 @@ azalia_init_codecs(azalia_t *az)
 		azalia_print_codec(&az->codecs[az->codecno]);
 	}
 	printf("\n");
->>>>>>> origin/master
 
 	/* All codecs with audio are enabled, but only one will be used. */
 	for (i = 0; i < az->ncodecs; i++) {
@@ -1147,14 +1078,7 @@ azalia_init_rirb(azalia_t *az, int resuming)
 	}
 	AZ_WRITE_4(az, RIRBLBASE, (uint32_t)AZALIA_DMA_DMAADDR(&az->rirb_dma));
 	AZ_WRITE_4(az, RIRBUBASE, PTR_UPPER32(AZALIA_DMA_DMAADDR(&az->rirb_dma)));
-<<<<<<< HEAD
-	AZ_WRITE_1(az, RIRBSIZE, rirbsize);
-	az->rirb_size = entries;
-
-	DPRINTF(("%s: RIRB allocation succeeded.\n", __func__));
-=======
 	AZ_WRITE_1(az, RIRBSIZE, az->rirbsize);
->>>>>>> origin/master
 
 	/* reset the write pointer */
 	rirbwp = AZ_READ_2(az, RIRBWP);
@@ -1185,6 +1109,10 @@ azalia_delete_rirb(azalia_t *az)
 	int i;
 	uint8_t rirbctl;
 
+	if (az->unsolq != NULL) {
+		free(az->unsolq, M_DEVBUF);
+		az->unsolq = NULL;
+	}
 	if (az->rirb_dma.addr == NULL)
 		return 0;
 	/* stop the RIRB */
@@ -1201,13 +1129,8 @@ azalia_delete_rirb(azalia_t *az)
 }
 
 int
-<<<<<<< HEAD
-azalia_set_command(const azalia_t *az, int caddr, nid_t nid, uint32_t control,
-		   uint32_t param)
-=======
 azalia_comresp(const codec_t *codec, nid_t nid, uint32_t control,
     uint32_t param, uint32_t* result)
->>>>>>> origin/master
 {
 	int err, s;
 
@@ -1245,10 +1168,7 @@ azalia_set_command(azalia_t *az, int caddr, nid_t nid, uint32_t control,
 	if (++wp >= az->corb_entries)
 		wp = 0;
 	corb[wp] = verb;
-<<<<<<< HEAD
-=======
 
->>>>>>> origin/master
 	AZ_WRITE_2(az, CORBWP, (corbwp & ~HDA_CORBWP_CORBWP) | wp);
 
 	return(0);
@@ -1284,26 +1204,16 @@ azalia_get_response(azalia_t *az, uint32_t *result)
 		}
 		if (++az->rirb_rp >= az->rirb_entries)
 			az->rirb_rp = 0;
-		if (rirb[az->rirb_rp].resp_ex & RIRB_UNSOLICITED_RESPONSE) {
-			DPRINTF(("%s: unsolicited response\n", __func__));
+		if (rirb[az->rirb_rp].resp_ex & RIRB_RESP_UNSOL) {
+			az->unsolq[az->unsolq_wp].resp = rirb[az->rirb_rp].resp;
+			az->unsolq[az->unsolq_wp++].resp_ex = rirb[az->rirb_rp].resp_ex;
+			az->unsolq_wp %= UNSOLQ_SIZE;
 		} else
 			break;
 	}
 	if (result != NULL)
 		*result = rirb[az->rirb_rp].resp;
 
-<<<<<<< HEAD
-#if 0
-	for (i = 0; i < 16 /*az->rirb_size*/; i++) {
-		DPRINTF(("rirb[%d] 0x%8.8x:0x%8.8x ", i, rirb[i].resp, rirb[i].resp_ex));
-		if ((i % 2) == 1)
-			DPRINTF(("\n"));
-	}
-#endif
-	return 0;
-}
-
-=======
 	return(0);
 }
 
@@ -1359,7 +1269,6 @@ azalia_rirb_intr(azalia_t *az)
 	    rirbsts | HDA_RIRBSTS_RIRBOIS | HDA_RIRBSTS_RINTFL);
 }
 
->>>>>>> origin/master
 int
 azalia_alloc_dmamem(azalia_t *az, size_t size, size_t align, azalia_dma_t *d)
 {
@@ -1617,8 +1526,6 @@ azalia_codec_init(codec_t *this)
 	int err, addr, n, i, nspdif, nhdmi;
 
 	addr = this->address;
-	DPRINTF(("%s: information of codec[%d] follows:\n",
-	    XNAME(this->az), addr));
 	/* codec vendor/device/revision */
 	err = azalia_comresp(this, CORB_NID_ROOT, CORB_GET_PARAMETER,
 	    COP_REVISION_ID, &rev);
@@ -1631,15 +1538,11 @@ azalia_codec_init(codec_t *this)
 	this->vid = id;
 	this->subid = this->az->subid;
 	azalia_codec_init_vtbl(this);
-
-	printf("%s: codec:", XNAME(this->az));
-	if (this->name == NULL)
-		printf(" 0x04x/0x%04x", id >> 16, id & 0xffff);
-	else
-		printf(" %s", this->name);
-	printf(" (rev. %u.%u), HDA version %u.%u\n",
-	    COP_RID_REVISION(rev), COP_RID_STEPPING(rev),
-	    COP_RID_MAJ(rev), COP_RID_MIN(rev));
+	DPRINTF(("%s: codec[%d] vid 0x%8.8x, subid 0x%8.8x, rev. %u.%u,",
+	    XNAME(this->az), addr, this->vid, this->subid,
+	    COP_RID_REVISION(rev), COP_RID_STEPPING(rev)));
+	DPRINTF((" HDA version %u.%u\n",
+	    COP_RID_MAJ(rev), COP_RID_MIN(rev)));
 
 	/* identify function nodes */
 	err = azalia_comresp(this, CORB_NID_ROOT, CORB_GET_PARAMETER,
@@ -1648,7 +1551,8 @@ azalia_codec_init(codec_t *this)
 		return err;
 	this->nfunctions = COP_NSUBNODES(result);
 	if (COP_NSUBNODES(result) <= 0) {
-		printf("%s: No function groups\n", XNAME(this->az));
+		DPRINTF(("%s: codec[%d]: No function groups\n",
+		    XNAME(this->az), addr));
 		return -1;
 	}
 	/* iterate function nodes and find an audio function */
@@ -1665,14 +1569,11 @@ azalia_codec_init(codec_t *this)
 		if (COP_FTYPE(result) == COP_FTYPE_AUDIO) {
 			this->audiofunc = n + i;
 			break;	/* XXX multiple audio functions? */
-		} else if (COP_FTYPE(result) == COP_FTYPE_MODEM) {
-			printf("%s: codec[%d]: No support for modem function groups\n",
-			    XNAME(this->az), addr);
 		}
 	}
 	if (this->audiofunc < 0) {
-		printf("%s: codec[%d]: No audio function groups\n",
-		    XNAME(this->az), addr);
+		DPRINTF(("%s: codec[%d]: No audio function groups\n",
+		    XNAME(this->az), addr));
 		return -1;
 	}
 
@@ -1694,12 +1595,11 @@ azalia_codec_init(codec_t *this)
 		return -1;
 	}
 	this->wend = this->wstart + COP_NSUBNODES(result);
-	this->w = malloc(sizeof(widget_t) * this->wend, M_DEVBUF, M_NOWAIT);
+	this->w = malloc(sizeof(widget_t) * this->wend, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->w == NULL) {
 		printf("%s: out of memory\n", XNAME(this->az));
 		return ENOMEM;
 	}
-	bzero(this->w, sizeof(widget_t) * this->wend);
 
 	/* query the base parameters */
 	azalia_comresp(this, this->audiofunc, CORB_GET_PARAMETER,
@@ -1714,22 +1614,8 @@ azalia_codec_init(codec_t *this)
 	azalia_comresp(this, this->audiofunc, CORB_GET_PARAMETER,
 	    COP_OUTPUT_AMPCAP, &result);
 	this->w[this->audiofunc].outamp_cap = result;
-<<<<<<< HEAD
-#ifdef AZALIA_DEBUG
-	azalia_widget_print_audio(&this->w[this->audiofunc], "\t");
-	result = this->w[this->audiofunc].inamp_cap;
-	DPRINTF(("\tinamp: mute=%u size=%u steps=%u offset=%u\n",
-	    (result & COP_AMPCAP_MUTE) != 0, COP_AMPCAP_STEPSIZE(result),
-	    COP_AMPCAP_NUMSTEPS(result), COP_AMPCAP_OFFSET(result)));
-	result = this->w[this->audiofunc].outamp_cap;
-	DPRINTF(("\toutamp: mute=%u size=%u steps=%u offset=%u\n",
-	    (result & COP_AMPCAP_MUTE) != 0, COP_AMPCAP_STEPSIZE(result),
-	    COP_AMPCAP_NUMSTEPS(result), COP_AMPCAP_OFFSET(result)));
-#endif
-=======
 
 	azalia_codec_print_audiofunc(this);
->>>>>>> origin/master
 
 	strlcpy(this->w[CORB_NID_ROOT].name, "root",
 	    sizeof(this->w[CORB_NID_ROOT].name));
@@ -1742,18 +1628,6 @@ azalia_codec_init(codec_t *this)
 		err = azalia_widget_init(w, this, i);
 		if (err)
 			return err;
-<<<<<<< HEAD
-	}
-
-	err = this->init_dacgroup(this);
-	if (err)
-		return err;
-#ifdef AZALIA_DEBUG
-	for (i = 0; i < this->dacs.ngroups; i++) {
-		DPRINTF(("%s: dacgroup[%d]:", __func__, i));
-		for (n = 0; n < this->dacs.groups[i].nconv; n++) {
-			DPRINTF((" %2.2x", this->dacs.groups[i].conv[n]));
-=======
 		err = azalia_widget_init_connection(w, this);
 		if (err)
 			return err;
@@ -1762,7 +1636,6 @@ azalia_codec_init(codec_t *this)
 
 		if (this->qrks & AZ_QRK_WID_MASK) {
 			azalia_codec_widget_quirks(this, i);
->>>>>>> origin/master
 		}
 	}
 
@@ -1780,24 +1653,7 @@ azalia_codec_init(codec_t *this)
 		if (!w->enable)
 			continue;
 
-<<<<<<< HEAD
-int
-azalia_codec_delete(codec_t *this)
-{
-	if (this->mixer_delete != NULL)
-		this->mixer_delete(this);
-	if (this->formats != NULL) {
-		free(this->formats, M_DEVBUF);
-		this->formats = NULL;
-	}
-	printf("delete_encodings...\n");
-	auconv_delete_encodings(this->encodings);
-	this->encodings = NULL;
-	return 0;
-}
-=======
 		switch (w->type) {
->>>>>>> origin/master
 
 		case COP_AWTYPE_AUDIO_MIXER:
 		case COP_AWTYPE_AUDIO_SELECTOR:
@@ -1825,17 +1681,6 @@ azalia_codec_delete(codec_t *this)
 			}
 			break;
 
-<<<<<<< HEAD
-	if (this->formats != NULL)
-		free(this->formats, M_DEVBUF);
-	this->nformats = 0;
-	this->formats = malloc(sizeof(struct audio_format) *
-	    (pvariation + rvariation), M_DEVBUF, M_NOWAIT);
-	if (this->formats == NULL) {
-		printf("%s: out of memory in %s\n",
-		    XNAME(this->az), __func__);
-		return ENOMEM;
-=======
 		case COP_AWTYPE_PIN_COMPLEX:
 			switch (CORB_CD_PORT(w->d.pin.config)) {
 			case CORB_CD_FIXED:
@@ -1902,10 +1747,7 @@ azalia_codec_delete(codec_t *this)
 		this->codec_type = AZ_CODEC_TYPE_DIGITAL;
 		if (nspdif == 0 && nhdmi > 0)
 			this->codec_type = AZ_CODEC_TYPE_HDMI;
->>>>>>> origin/master
 	}
-	bzero(this->formats, sizeof(struct audio_format) *
-	    (pvariation + rvariation));
 
 	/* make sure built-in mic is connected to an adc */
 	if (this->mic != -1 && this->mic_adc == -1) {
@@ -3054,18 +2896,6 @@ azalia_codec_disconnect_stream(stream_t *this)
 			azalia_comresp(codec, nid, CORB_SET_DIGITAL_CONTROL_L,
 			    v, NULL);
 		}
-<<<<<<< HEAD
-
-		err = this->comresp(this, nid, CORB_SET_CONVERTER_FORMAT, fmt, NULL);
-		if (err)
-			goto exit;
-		err = this->comresp(this, nid, CORB_SET_CONVERTER_STREAM_CHANNEL,
-				    (number << 4) | startchan, NULL);
-		if (err)
-			goto exit;
-		startchan += WIDGET_CHANNELS(&this->w[nid]);
-=======
->>>>>>> origin/master
 	}
 	return 0;
 }
@@ -3087,75 +2917,11 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 	this->nid = nid;
 	this->widgetcap = result;
 	this->type = COP_AWCAP_TYPE(result);
-	DPRINTF(("%s: ", XNAME(codec->az)));
 	if (this->widgetcap & COP_AWCAP_POWER) {
 		azalia_comresp(codec, nid, CORB_SET_POWER_STATE, CORB_PS_D0,
 		    &result);
 		DELAY(100);
 	}
-<<<<<<< HEAD
-	switch (this->type) {
-	case COP_AWTYPE_AUDIO_OUTPUT:
-		snprintf(this->name, sizeof(this->name), "dac%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		azalia_widget_init_audio(this, codec);
-		break;
-	case COP_AWTYPE_AUDIO_INPUT:
-		snprintf(this->name, sizeof(this->name), "adc%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		azalia_widget_init_audio(this, codec);
-		break;
-	case COP_AWTYPE_AUDIO_MIXER:
-		snprintf(this->name, sizeof(this->name), "mix%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		break;
-	case COP_AWTYPE_AUDIO_SELECTOR:
-		snprintf(this->name, sizeof(this->name), "sel%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		break;
-	case COP_AWTYPE_PIN_COMPLEX:
-		azalia_widget_init_pin(this, codec);
-		snprintf(this->name, sizeof(this->name), "%s%2.2x",
-		    pin_colors[this->d.pin.color], nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		azalia_widget_print_pin(this);
-		break;
-	case COP_AWTYPE_POWER:
-		snprintf(this->name, sizeof(this->name), "pow%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		break;
-	case COP_AWTYPE_VOLUME_KNOB:
-		snprintf(this->name, sizeof(this->name), "volume%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		err = codec->comresp(codec, nid, CORB_GET_PARAMETER,
-		    COP_VOLUME_KNOB_CAPABILITIES, &result);
-		if (!err) {
-			this->d.volume.cap = result;
-			DPRINTF(("\tdelta=%d steps=%d\n",
-			    !!(result & COP_VKCAP_DELTA),
-			    COP_VKCAP_NUMSTEPS(result)));
-		}
-		break;
-	case COP_AWTYPE_BEEP_GENERATOR:
-		snprintf(this->name, sizeof(this->name), "beep%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		break;
-	default:
-		snprintf(this->name, sizeof(this->name), "widget%2.2x", nid);
-		DPRINTF(("%s wcap=%b\n", this->name,
-		    this->widgetcap, WIDGETCAP_BITS));
-		break;
-	}
-	azalia_widget_init_connection(this, codec);
-=======
 
 	this->enable = 1;
 	this->mixer_class = -1;
@@ -3183,7 +2949,6 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 		this->enable = 0;
 		break;
 	}
->>>>>>> origin/master
 
 	/* amplifier information */
 	/* XXX (ab)use bits 24-30 to store the "control offset", which is
@@ -3196,15 +2961,7 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 			    COP_INPUT_AMPCAP, &this->inamp_cap);
 		else
 			this->inamp_cap = codec->w[codec->audiofunc].inamp_cap;
-<<<<<<< HEAD
-		DPRINTF(("\tinamp: mute=%u size=%u steps=%u offset=%u\n",
-		    (this->inamp_cap & COP_AMPCAP_MUTE) != 0,
-		    COP_AMPCAP_STEPSIZE(this->inamp_cap),
-		    COP_AMPCAP_NUMSTEPS(this->inamp_cap),
-		    COP_AMPCAP_OFFSET(this->inamp_cap)));
-=======
 		this->inamp_cap &= ~(0x7f << 24);
->>>>>>> origin/master
 	}
 	if (this->widgetcap & COP_AWCAP_OUTAMP) {
 		if (this->widgetcap & COP_AWCAP_AMPOV)
@@ -3212,16 +2969,6 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 			    COP_OUTPUT_AMPCAP, &this->outamp_cap);
 		else
 			this->outamp_cap = codec->w[codec->audiofunc].outamp_cap;
-<<<<<<< HEAD
-		DPRINTF(("\toutamp: mute=%u size=%u steps=%u offset=%u\n",
-		    (this->outamp_cap & COP_AMPCAP_MUTE) != 0,
-		    COP_AMPCAP_STEPSIZE(this->outamp_cap),
-		    COP_AMPCAP_NUMSTEPS(this->outamp_cap),
-		    COP_AMPCAP_OFFSET(this->outamp_cap)));
-	}
-	if (codec->init_widget != NULL)
-		codec->init_widget(codec, this, nid);
-=======
 		this->outamp_cap &= ~(0x7f << 24);
 	}
 	return 0;
@@ -3462,7 +3209,6 @@ azalia_widget_label_widgets(codec_t *codec)
 		}
 	}
 
->>>>>>> origin/master
 	return 0;
 }
 
@@ -3497,16 +3243,12 @@ azalia_widget_init_audio(widget_t *this, const codec_t *codec)
 				return err;
 			this->d.audio.bits_rates = result;
 		}
-		this->d.audio.bits_rates = result;
 	} else {
 		this->d.audio.encodings =
 		    codec->w[codec->audiofunc].d.audio.encodings;
 		this->d.audio.bits_rates =
 		    codec->w[codec->audiofunc].d.audio.bits_rates;
 	}
-#ifdef AZALIA_DEBUG
-	azalia_widget_print_audio(this, "\t");
-#endif
 	return 0;
 }
 
@@ -3765,40 +3507,6 @@ azalia_widget_print_audio(const widget_t *this, const char *lead)
 void
 azalia_widget_print_widget(const widget_t *w, const codec_t *codec)
 {
-<<<<<<< HEAD
-	uint32_t result;
-	int err;
-
-	err = codec->comresp(codec, this->nid, CORB_GET_CONFIGURATION_DEFAULT,
-	    0, &result);
-	if (err)
-		return err;
-	this->d.pin.config = result;
-	this->d.pin.sequence = CORB_CD_SEQUENCE(result);
-	this->d.pin.association = CORB_CD_ASSOCIATION(result);
-	this->d.pin.color = CORB_CD_COLOR(result);
-	this->d.pin.device = CORB_CD_DEVICE(result);
-
-	err = codec->comresp(codec, this->nid, CORB_GET_PARAMETER,
-	    COP_PINCAP, &result);
-	if (err)
-		return err;
-	this->d.pin.cap = result;
-	return 0;
-}
-
-#define	PINCAP_BITS	"\20\021EAPD\07BALANCE\06INPUT" \
-    "\05OUTPUT\04HEADPHONE\03PRESENCE\02TRIGGER\01IMPEDANCE"
-
-int
-azalia_widget_print_pin(const widget_t *this)
-{
-	DPRINTF(("\tpin config; device=%s color=%s assoc=%d seq=%d",
-	    pin_devices[this->d.pin.device], pin_colors[this->d.pin.color],
-	    this->d.pin.association, this->d.pin.sequence));
-	DPRINTF((" cap=%b\n", this->d.pin.cap, PINCAP_BITS));
-	return 0;
-=======
 	int i;
 
 	printf("%s: ", XNAME(codec->az));
@@ -3872,7 +3580,6 @@ azalia_widget_print_pin(const widget_t *this)
 	} else
 		printf("none");
 	printf("\n");
->>>>>>> origin/master
 }
 
 #else	/* AZALIA_DEBUG */
@@ -3926,6 +3633,11 @@ azalia_stream_delete(stream_t *this, azalia_t *az)
 {
 	if (this->bdlist.addr == NULL)
 		return 0;
+
+	/* disable stream interrupts */
+	STR_WRITE_1(this, CTL, STR_READ_1(this, CTL) |
+	    ~(HDA_SD_CTL_DEIE | HDA_SD_CTL_FEIE | HDA_SD_CTL_IOCE));
+
 	azalia_free_dmamem(az, &this->bdlist);
 	return 0;
 }
@@ -3941,6 +3653,7 @@ azalia_stream_reset(stream_t *this)
 	ctl = STR_READ_2(this, CTL);
 	ctl &= ~HDA_SD_CTL_RUN;
 	STR_WRITE_2(this, CTL, ctl);
+	DELAY(40);
 
 	/* Start reset and wait for chip to enter. */
 	ctl = STR_READ_2(this, CTL);
@@ -4146,8 +3859,6 @@ azalia_query_encoding(void *v, audio_encoding_t *enc)
 	return (0);
 }
 
-<<<<<<< HEAD
-=======
 void
 azalia_get_default_params(void *addr, int mode, struct audio_params *params)
 {
@@ -4161,7 +3872,6 @@ azalia_get_default_params(void *addr, int mode, struct audio_params *params)
 	params->factor = 1;
 }
 
->>>>>>> origin/master
 int
 azalia_match_format(codec_t *codec, int mode, audio_params_t *par)
 {
@@ -4197,63 +3907,6 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 	int i, j;
 	uint ochan, oenc, opre;
 
-<<<<<<< HEAD
-	az = v;
-	codec = &az->codecs[az->codecno];
-	if (smode & AUMODE_RECORD && r != NULL) {
-		if (r->encoding == AUDIO_ENCODING_ULAW) {	 /*XXX*/
-			r->encoding = AUDIO_ENCODING_SLINEAR_LE;
-			r->precision = 16;
-			r->channels = 2;
-			r->sample_rate = 44100;
-		}
-		for (i = 0; i < codec->nformats; i++) {
-			if (r->encoding != codec->formats[i].encoding)
-				continue;
-			if (r->precision != codec->formats[i].precision)
-				continue;
-			if (r->channels != codec->formats[i].channels)
-				continue;
-			break;
-		}
-		if (i == codec->nformats) {
-			printf("didn't find Record format %u/%u/%u\n",
-			    r->encoding, r->precision, r->channels);
-			return (EINVAL);
-		}
-		for (j = 0; j < codec->formats[i].frequency_type; j++) {
-			if (r->sample_rate != codec->formats[i].frequency[j])
-				continue;
-			break;
-		}
-		if (j == codec->formats[i].frequency_type) {
-			printf("didn't find Record rate %u\n",
-			    r->sample_rate);
-			return (EINVAL);
-		}
-		r->sw_code = rswcode;
-	}
-	if (smode & AUMODE_PLAY && p != NULL) {
-		if (p->encoding == AUDIO_ENCODING_ULAW) {	 /*XXX*/
-			p->encoding = AUDIO_ENCODING_SLINEAR_LE;
-			p->precision = 16;
-			p->channels = 2;
-			p->sample_rate = 44100;
-		}
-		for (i = 0; i < codec->nformats; i++) {
-			if (p->encoding != codec->formats[i].encoding)
-				continue;
-			if (p->precision != codec->formats[i].precision)
-				continue;
-			if (p->channels != codec->formats[i].channels)
-				continue;
-			break;
-		}
-		if (i == codec->nformats) {
-			printf("can't find playback format %u/%u/%u\n",
-			    r->encoding, r->precision, r->channels);
-			return (EINVAL);
-=======
 	if (mode == AUMODE_PLAY)
 		cmode = "play";
 	else
@@ -4323,7 +3976,6 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 			    __func__, cmode, par->encoding,
 			    par->precision, par->channels));
 			return EINVAL;
->>>>>>> origin/master
 		}
 	}
 	if (codec->formats[i].frequency_type == 0) {
@@ -4346,15 +3998,9 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 			break;
 		}
 		if (j == codec->formats[i].frequency_type) {
-<<<<<<< HEAD
-			printf("can't find playback rate %u\n",
-			    p->sample_rate);
-			return (EINVAL);
-=======
 			DPRINTF(("%s: can't find %s rate %u\n",
 			    __func__, cmode, par->sample_rate));
 			return EINVAL;
->>>>>>> origin/master
 		}
 	}
 	par->sw_code = swcode;
@@ -4463,9 +4109,6 @@ azalia_set_port(void *v, mixer_ctrl_t *mc)
 
 	az = v;
 	co = &az->codecs[az->codecno];
-<<<<<<< HEAD
-	return co->set_port(co, mc);
-=======
 	if (mc->dev < 0 || mc->dev >= co->nmixers)
 		return EINVAL;
 
@@ -4474,7 +4117,6 @@ azalia_set_port(void *v, mixer_ctrl_t *mc)
 		return EINVAL;
 
 	return azalia_mixer_set(co, m->nid, m->target, mc);
->>>>>>> origin/master
 }
 
 int
@@ -4486,9 +4128,6 @@ azalia_get_port(void *v, mixer_ctrl_t *mc)
 
 	az = v;
 	co = &az->codecs[az->codecno];
-<<<<<<< HEAD
-	return co->get_port(co, mc);
-=======
 	if (mc->dev < 0 || mc->dev >= co->nmixers)
 		return EINVAL;
 
@@ -4496,7 +4135,6 @@ azalia_get_port(void *v, mixer_ctrl_t *mc)
 	mc->type = m->devinfo.type;
 
 	return azalia_mixer_get(co, m->nid, m->target, mc);
->>>>>>> origin/master
 }
 
 int
@@ -4507,7 +4145,7 @@ azalia_query_devinfo(void *v, mixer_devinfo_t *mdev)
 
 	az = v;
 	co = &az->codecs[az->codecno];
-	if (mdev->index >= co->nmixers)
+	if (mdev->index < 0 || mdev->index >= co->nmixers)
 		return ENXIO;
 	*mdev = co->mixers[mdev->index].devinfo;
 	return 0;
@@ -4644,10 +4282,6 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 		    param->channels);
 		return EINVAL;
 	}
-<<<<<<< HEAD
-#endif
-	ret |= param->channels - 1;
-=======
 
 	DPRINTFN(1, ("%s: prec=%d, chan=%d, rate=%d\n", __func__,
 	    param->precision, param->channels, param->sample_rate));
@@ -4657,7 +4291,6 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 		ret |= 1;
 	else
 		ret |= param->channels - 1;
->>>>>>> origin/master
 
 	switch (param->precision) {
 	case 8:

@@ -1,9 +1,5 @@
 /* $NetBSD: ibm561reg.h,v 1.1 2001/12/12 07:46:48 elric Exp $ */
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: ibm561reg.h,v 1.2 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

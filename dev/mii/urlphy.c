@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: urlphy.c,v 1.11 2005/05/27 08:04:15 brad Exp $ */
-=======
 /*	$OpenBSD: urlphy.c,v 1.13 2008/09/08 07:50:15 brad Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: urlphy.c,v 1.1 2002/03/28 21:07:53 ichiro Exp $	*/
 /*
  * Copyright (c) 2001, 2002

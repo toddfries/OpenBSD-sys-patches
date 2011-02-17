@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: termios.h,v 1.9 2003/08/28 16:59:34 jmc Exp $	*/
-=======
 /*	$OpenBSD: termios.h,v 1.11 2009/12/26 09:46:17 jmc Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: termios.h,v 1.14 1996/04/09 20:55:41 cgd Exp $	*/
 
 /*

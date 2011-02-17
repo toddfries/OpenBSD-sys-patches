@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_geniq.c,v 1.4 2001/07/09 17:20:07 fgsch Exp $	*/
+/*	$OpenBSD: rf_geniq.c,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_geniq.c,v 1.3 1999/02/05 00:06:12 oster Exp $	*/
 
 /*

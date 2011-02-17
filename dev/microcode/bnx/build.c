@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: build.c,v 1.3 2006/10/02 06:03:31 deraadt Exp $	*/
-=======
 /*	$OpenBSD: build.c,v 1.5 2009/07/03 04:34:51 dlg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>

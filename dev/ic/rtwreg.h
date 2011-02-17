@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtwreg.h,v 1.12 2006/01/05 05:36:06 jsg Exp $	*/
-=======
 /*	$OpenBSD: rtwreg.h,v 1.14 2009/08/16 18:21:57 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rtwreg.h,v 1.12 2005/01/16 11:50:43 dyoung Exp $	*/
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.

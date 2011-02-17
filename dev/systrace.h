@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: systrace.h,v 1.19 2006/05/23 22:28:22 alek Exp $	*/
-=======
 /*	$OpenBSD: systrace.h,v 1.21 2008/11/09 05:13:53 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.

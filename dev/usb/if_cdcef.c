@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_cdcef.c,v 1.10 2007/02/26 15:41:28 drahn Exp $	*/
-=======
 /*	$OpenBSD: if_cdcef.c,v 1.27 2010/12/30 03:06:31 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -33,6 +29,7 @@
 #include <sys/socket.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 
@@ -127,7 +124,7 @@ struct usbf_function_methods cdcef_methods = {
 #define DPRINTF(x)	printf x
 #endif
 
-#define DEVNAME(sc)	USBDEVNAME((sc)->sc_dev.bdev)
+#define DEVNAME(sc)	((sc)->sc_dev.bdev.dv_xname)
 
 extern int ticks;
 
@@ -135,17 +132,18 @@ extern int ticks;
  * USB function match/attach/detach
  */
 
-USB_MATCH(cdcef)
+int
+cdcef_match(struct device *parent, void *match, void *aux)
 {
 	return UMATCH_GENERIC;
 }
 
-USB_ATTACH(cdcef)
+void
+cdcef_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct cdcef_softc *sc = (struct cdcef_softc *)self;
 	struct usbf_attach_arg *uaa = aux;
 	usbf_device_handle dev = uaa->device;
-	char *devinfop;
 	struct ifnet *ifp;
 	usbf_status err;
 	usb_cdc_union_descriptor_t udesc;
@@ -158,14 +156,10 @@ USB_ATTACH(cdcef)
 	    CDCEF_PRODUCT_ID, CDCEF_DEVICE_CODE, CDCEF_VENDOR_STRING,
 	    CDCEF_PRODUCT_STRING, CDCEF_SERIAL_STRING);
 
-	devinfop = usbf_devinfo_alloc(dev);
-	printf(": %s\n", devinfop);
-	usbf_devinfo_free(devinfop);
-
 	/* Fill in the fields needed by the parent device. */
 	sc->sc_dev.methods = &cdcef_methods;
 
-	/* timeout to start delayed tranfers */
+	/* timeout to start delayed transfers */
 	timeout_set(&sc->start_to, cdcef_start_timeout, sc);
 
 	/*
@@ -173,15 +167,15 @@ USB_ATTACH(cdcef)
 	 */
 	err = usbf_add_config(dev, &sc->sc_config);
 	if (err) {
-		printf("%s: usbf_add_config failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_add_config failed\n");
+		return;
 	}
 	err = usbf_add_interface(sc->sc_config, UICLASS_CDC,
 	    UISUBCLASS_ETHERNET_NETWORKING_CONTROL_MODEL, 0, NULL,
 	    &sc->sc_iface);
 	if (err) {
-		printf("%s: usbf_add_interface failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_add_interface failed\n");
+		return;
 	}
 	/* XXX don't use hard-coded values 128 and 16. */
 	err = usbf_add_endpoint(sc->sc_iface, UE_DIR_IN | 2, UE_BULK,
@@ -189,8 +183,8 @@ USB_ATTACH(cdcef)
 	    usbf_add_endpoint(sc->sc_iface, UE_DIR_OUT | 1, UE_BULK,
 	    64, 16, &sc->sc_ep_out);
 	if (err) {
-		printf("%s: usbf_add_endpoint failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_add_endpoint failed\n");
+		return;
 	}
 
 	/* Append a CDC union descriptor. */
@@ -202,8 +196,8 @@ USB_ATTACH(cdcef)
 	err = usbf_add_config_desc(sc->sc_config,
 	    (usb_descriptor_t *)&udesc, NULL);
 	if (err) {
-		printf("%s: usbf_add_config_desc failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_add_config_desc failed\n");
+		return;
 	}
 
 	/*
@@ -211,8 +205,8 @@ USB_ATTACH(cdcef)
 	 */
 	err = usbf_end_config(sc->sc_config);
 	if (err) {
-		printf("%s: usbf_end_config failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_end_config failed\n");
+		return;
 	}
 
 	/* Preallocate xfers and data buffers. */
@@ -223,8 +217,8 @@ USB_ATTACH(cdcef)
 	sc->sc_buffer_out = usbf_alloc_buffer(sc->sc_xfer_out,
 	    CDCEF_BUFSZ);
 	if (sc->sc_buffer_in == NULL || sc->sc_buffer_out == NULL) {
-		printf("%s: usbf_alloc_buffer failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_alloc_buffer failed\n");
+		return;
 	}
 
 	/* Open the bulk pipes. */
@@ -233,8 +227,8 @@ USB_ATTACH(cdcef)
 	    usbf_open_pipe(sc->sc_iface,
 	    usbf_endpoint_address(sc->sc_ep_in), &sc->sc_pipe_in);
 	if (err) {
-		printf("%s: usbf_open_pipe failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_open_pipe failed\n");
+		return;
 	}
 
 	/* Get ready to receive packets. */
@@ -242,8 +236,8 @@ USB_ATTACH(cdcef)
 	    sc->sc_buffer_out, CDCEF_BUFSZ, USBD_SHORT_XFER_OK, 0, cdcef_rxeof);
 	err = usbf_transfer(sc->sc_xfer_out);
 	if (err && err != USBF_IN_PROGRESS) {
-		printf("%s: usbf_transfer failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		printf(": usbf_transfer failed\n");
+		return;
 	}
 
 	s = splnet();
@@ -253,8 +247,7 @@ USB_ATTACH(cdcef)
 	bcopy(&ticks, &sc->sc_arpcom.ac_enaddr[2], sizeof(u_int32_t));
 	sc->sc_arpcom.ac_enaddr[5] = (u_int8_t)(sc->sc_unit);
 
-	printf("%s: address %s\n", DEVNAME(sc),
-	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
@@ -267,12 +260,10 @@ USB_ATTACH(cdcef)
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);
-	Ether_ifattach(ifp, sc->cdcef_arpcom.ac_enaddr);
+	ether_ifattach(ifp);
 
 	sc->sc_attached = 1;
 	splx(s);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
 usbf_status
@@ -440,7 +431,7 @@ cdcef_rxeof(usbf_xfer_handle xfer, usbf_private_handle priv,
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
-		IF_INPUT(ifp, m);
+		ether_input_mbuf(ifp, m);
 	}
 
 done1:
@@ -454,7 +445,7 @@ done:
 	status = usbf_transfer(xfer);
 	if (status && status != USBF_IN_PROGRESS) {
 		printf("%s: usbf_transfer failed\n", DEVNAME(sc));
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 }
 

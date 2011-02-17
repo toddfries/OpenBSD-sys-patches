@@ -1,15 +1,7 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ral_cardbus.c,v 1.8 2006/10/12 16:35:52 grange Exp $  */
-
-/*-
- * Copyright (c) 2005, 2006
- *	Damien Bergamini <damien.bergamini@free.fr>
-=======
 /*	$OpenBSD: if_ral_cardbus.c,v 1.19 2010/08/25 21:37:59 kettenis Exp $  */
 
 /*-
  * Copyright (c) 2005-2010 Damien Bergamini <damien.bergamini@free.fr>
->>>>>>> origin/master
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,11 +17,7 @@
  */
 
 /*
-<<<<<<< HEAD
- * CardBus front-end for the Ralink RT2560/RT2561/RT2561S/RT2661 driver.
-=======
  * CardBus front-end for the Ralink RT2560/RT2561/RT2860/RT3090 driver.
->>>>>>> origin/master
  */
 
 #include "bpfilter.h"
@@ -61,6 +49,7 @@
 
 #include <dev/ic/rt2560var.h>
 #include <dev/ic/rt2661var.h>
+#include <dev/ic/rt2860var.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -88,8 +77,6 @@ static struct ral_opns {
 	rt2661_suspend,
 	rt2661_resume,
 	rt2661_intr
-<<<<<<< HEAD
-=======
 
 }, ral_rt2860_opns = {
 	rt2860_attach,
@@ -97,13 +84,13 @@ static struct ral_opns {
 	rt2860_suspend,
 	rt2860_resume,
 	rt2860_intr
->>>>>>> origin/master
 };
 
 struct ral_cardbus_softc {
 	union {
 		struct rt2560_softc	sc_rt2560;
 		struct rt2661_softc	sc_rt2661;
+		struct rt2860_softc	sc_rt2860;
 	} u;
 #define sc_sc	u.sc_rt2560
 
@@ -130,13 +117,6 @@ struct cfattach ral_cardbus_ca = {
 	ral_cardbus_activate
 };
 
-<<<<<<< HEAD
-static const struct cardbus_matchid ral_cardbus_devices[] = {
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2560  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561S },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2661  }
-=======
 static const struct pci_matchid ral_cardbus_devices[] = {
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2560 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561 },
@@ -161,7 +141,6 @@ static const struct pci_matchid ral_cardbus_devices[] = {
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3562 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3592 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3593 }
->>>>>>> origin/master
 };
 
 int	ral_cardbus_enable(struct rt2560_softc *);
@@ -186,12 +165,6 @@ ral_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	bus_addr_t base;
 	int error;
 
-<<<<<<< HEAD
-	csc->sc_opns =
-	    (CARDBUS_PRODUCT(ca->ca_id) == PCI_PRODUCT_RALINK_RT2560) ?
-	    &ral_rt2560_opns : &ral_rt2661_opns;
-
-=======
 	if (PCI_VENDOR(ca->ca_id) == PCI_VENDOR_RALINK) {
 		switch (PCI_PRODUCT(ca->ca_id)) {
 		case PCI_PRODUCT_RALINK_RT2560:
@@ -210,7 +183,6 @@ ral_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		/* all other vendors are RT2860 only */
 		csc->sc_opns = &ral_rt2860_opns;
 	}
->>>>>>> origin/master
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;

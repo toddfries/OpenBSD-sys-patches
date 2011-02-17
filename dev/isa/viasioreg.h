@@ -1,4 +1,4 @@
-/*	$OpenBSD: viasioreg.h,v 1.2 2005/09/29 19:53:24 grange Exp $	*/
+/*	$OpenBSD: viasioreg.h,v 1.3 2006/02/24 11:16:17 grange Exp $	*/
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>
  *

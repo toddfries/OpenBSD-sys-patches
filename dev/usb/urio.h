@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: urio.h,v 1.2 2000/07/04 11:44:24 fgsch Exp $	*/
-=======
 /*	$OpenBSD: urio.h,v 1.4 2008/06/26 05:42:19 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: urio.h,v 1.2 2000/04/27 15:26:49 augustss Exp $	*/
 
 /*

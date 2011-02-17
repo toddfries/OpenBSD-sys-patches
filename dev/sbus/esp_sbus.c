@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: esp_sbus.c,v 1.19 2006/06/21 22:25:17 miod Exp $	*/
-=======
 /*	$OpenBSD: esp_sbus.c,v 1.23 2010/06/28 18:31:02 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: esp_sbus.c,v 1.14 2001/04/25 17:53:37 bouyer Exp $	*/
 
 /*-

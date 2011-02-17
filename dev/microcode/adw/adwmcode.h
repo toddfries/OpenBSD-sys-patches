@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: adwmcode.h,v 1.2 2002/03/14 01:26:57 millert Exp $ */
-=======
 /*	$OpenBSD: adwmcode.h,v 1.4 2008/06/26 05:42:16 ray Exp $ */
->>>>>>> origin/master
 /*      $NetBSD: adwmcode.h,v 1.5 2000/05/27 18:24:51 dante Exp $        */
 
 /*

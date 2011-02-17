@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgtwelvereg.h,v 1.1 2005/03/05 01:49:03 miod Exp $	*/
+/*	$OpenBSD: cgtwelvereg.h,v 1.2 2006/07/20 11:23:49 martin Exp $	*/
 
 /*
  * Copyright (c) 2002 Miodrag Vallat.  All rights reserved.

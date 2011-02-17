@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sunkbd.c,v 1.19 2005/02/28 20:32:34 miod Exp $	*/
-=======
 /*	$OpenBSD: sunkbdmap.c,v 1.4 2011/01/30 16:21:04 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002, 2003 Miodrag Vallat.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ezload.h,v 1.2 2001/05/03 02:20:32 aaron Exp $ */
-=======
 /*	$OpenBSD: ezload.h,v 1.4 2008/06/26 05:42:18 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ezload.h,v 1.2 2001/01/18 20:28:23 jdolecek Exp $	*/
 
 /*

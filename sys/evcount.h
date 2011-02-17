@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: evcount.h,v 1.1 2004/06/28 01:34:46 aaron Exp $ */
-=======
 /*	$OpenBSD: evcount.h,v 1.3 2010/09/20 06:33:46 matthew Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vga_isa.c,v 1.7 2000/11/15 20:17:38 aaron Exp $ */
-=======
 /* $OpenBSD: vga_isa.c,v 1.9 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: vga_isa.c,v 1.3 1998/06/12 18:45:48 drochner Exp $ */
 
 /*

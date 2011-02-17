@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82365_isa.c,v 1.19 2005/01/27 17:03:23 millert Exp $	*/
-=======
 /*	$OpenBSD: i82365_isa.c,v 1.22 2010/09/07 16:21:43 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: i82365_isa.c,v 1.11 1998/06/09 07:25:00 thorpej Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rbus.h,v 1.5 2006/06/08 22:38:40 fkr Exp $ */
-=======
 /*	$OpenBSD: rbus.h,v 1.10 2010/09/22 02:28:37 jsg Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: rbus.h,v 1.3 1999/12/15 12:28:55 kleink Exp $	*/
 /*
  * Copyright (c) 1999

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: bppreg.h,v 1.3 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bppreg.h,v 1.1 1998/09/21 21:20:48 pk Exp $ */
 
 /*-
@@ -36,9 +32,9 @@
 
 /* Hardware Configuration Register */
 #define BPP_HCR_DSS_MASK	0x003f	/* Data before strobe */
-#define BPP_HCR_DSS_SHFT	0	/*   (in Sbus clocks)*/
+#define BPP_HCR_DSS_SHFT	0	/*   (in SBus clocks)*/
 #define BPP_HCR_DSW_MASK	0x7f00	/* Data Strobe Width */
-#define BPP_HCR_DSW_SHFT	8	/*   (in Sbus clocks)*/
+#define BPP_HCR_DSW_SHFT	8	/*   (in SBus clocks)*/
 #define BPP_HCR_TEST		0x8000	/* */
 
 

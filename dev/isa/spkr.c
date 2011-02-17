@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: spkr.c,v 1.8 2006/01/02 05:21:40 brad Exp $	*/
-=======
 /*	$OpenBSD: spkr.c,v 1.12 2009/12/04 09:49:21 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: spkr.c,v 1.1 1998/04/15 20:26:18 drochner Exp $	*/
 
 /*

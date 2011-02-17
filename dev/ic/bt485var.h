@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: bt485var.h,v 1.2 2001/04/21 20:03:55 aaron Exp $ */
-=======
 /* $OpenBSD: bt485var.h,v 1.4 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD$ */
 
 /*-

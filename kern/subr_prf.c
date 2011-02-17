@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_prf.c,v 1.68 2006/11/17 09:21:52 jmc Exp $	*/
-=======
 /*	$OpenBSD: subr_prf.c,v 1.75 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -106,7 +102,6 @@ struct mutex kprintf_mutex = MUTEX_INITIALIZER(IPL_HIGH);
  */
 
 extern struct	tty *constty;	/* pointer to console "window" tty */
-int	consintr = 1;	/* ok to handle console interrupts? */
 extern	int log_open;	/* subr_log: is /dev/klog open? */
 const	char *panicstr; /* arg to first call to panic (used as a flag
 			   to indicate that panic has already been called). */
@@ -133,7 +128,7 @@ int	db_console = 0;
 /*
  * panic on spl assertion failure?
  */
-int splassert_ctl = 0;
+int splassert_ctl = 1;
 
 /*
  * v_putc: routine to putc on virtual console
@@ -494,18 +489,15 @@ int
 printf(const char *fmt, ...)
 {
 	va_list ap;
-	int savintr, retval;
+	int retval;
 
 	mtx_enter(&kprintf_mutex);
 
-	savintr = consintr;		/* disable interrupts */
-	consintr = 0;
 	va_start(ap, fmt);
 	retval = kprintf(fmt, TOCONS | TOLOG, NULL, NULL, ap);
 	va_end(ap);
 	if (!panicstr)
 		logwakeup();
-	consintr = savintr;		/* reenable interrupts */
 
 	mtx_leave(&kprintf_mutex);
 
@@ -520,16 +512,13 @@ printf(const char *fmt, ...)
 int
 vprintf(const char *fmt, va_list ap)
 {
-	int savintr, retval;
+	int retval;
 
 	mtx_enter(&kprintf_mutex);
 
-	savintr = consintr;		/* disable interrupts */
-	consintr = 0;
 	retval = kprintf(fmt, TOCONS | TOLOG, NULL, NULL, ap);
 	if (!panicstr)
 		logwakeup();
-	consintr = savintr;		/* reenable interrupts */
 
 	mtx_leave(&kprintf_mutex);
 
@@ -581,9 +570,7 @@ vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
  * this version based on vfprintf() from libc which was derived from
  * software contributed to Berkeley by Chris Torek.
  *
- * Two additional formats:
- *
- * The format %b is supported to decode error registers.
+ * The additional format %b is supported to decode error registers.
  * Its usage is:
  *
  *	printf("reg=%b\n", regval, "<base><arg>*");
@@ -634,6 +621,7 @@ vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 #define	SHORTINT	0x040		/* short integer */
 #define	ZEROPAD		0x080		/* zero (as opposed to blank) pad */
 #define FPT		0x100		/* Floating point number */
+#define SIZEINT		0x200		/* (signed) size_t */
 
 	/*
 	 * To extend shorts properly, we need both signed and unsigned
@@ -642,11 +630,13 @@ vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 #define	SARG() \
 	(flags&QUADINT ? va_arg(ap, quad_t) : \
 	    flags&LONGINT ? va_arg(ap, long) : \
+	    flags&SIZEINT ? va_arg(ap, ssize_t) : \
 	    flags&SHORTINT ? (long)(short)va_arg(ap, int) : \
 	    (long)va_arg(ap, int))
 #define	UARG() \
 	(flags&QUADINT ? va_arg(ap, u_quad_t) : \
 	    flags&LONGINT ? va_arg(ap, u_long) : \
+	    flags&SIZEINT ? va_arg(ap, size_t) : \
 	    flags&SHORTINT ? (u_long)(u_short)va_arg(ap, int) : \
 	    (u_long)va_arg(ap, u_int))
 
@@ -761,43 +751,6 @@ reswitch:	switch (ch) {
 			continue;	/* no output */
 		}
 
-#ifdef DDB
-		/* XXX: non-standard '%r' format (print int in db_radix) */
-		case 'r':
-			if ((oflags & TODDB) == 0)
-				goto default_case;
-
-			if (db_radix == 16)
-				goto case_z;	/* signed hex */
-			_uquad = SARG();
-			if ((quad_t)_uquad < 0) {
-				_uquad = -_uquad;
-				sign = '-';
-			}
-			base = (db_radix == 8) ? OCT : DEC;
-			goto number;
-
-
-		/* XXX: non-standard '%z' format ("signed hex", a "hex %i")*/
-		case 'z':
-		case_z:
-			if ((oflags & TODDB) == 0)
-				goto default_case;
-
-			xdigs = "0123456789abcdef";
-			ch = 'x';	/* the 'x' in '0x' (below) */
-			_uquad = SARG();
-			base = HEX;
-			/* leading 0x/X only if non-zero */
-			if (flags & ALT && _uquad != 0)
-				flags |= HEXPREFIX;
-			if ((quad_t)_uquad < 0) {
-				_uquad = -_uquad;
-				sign = '-';
-			}
-			goto number;
-#endif
-
 		case ' ':
 			/*
 			 * ``If the space and + flags both appear, the space
@@ -871,6 +824,9 @@ reswitch:	switch (ch) {
 		case 'q':
 			flags |= QUADINT;
 			goto rflag;
+		case 'z':
+			flags |= SIZEINT;
+			goto rflag;
 		case 'c':
 			*(cp = buf) = va_arg(ap, int);
 			size = 1;
@@ -889,34 +845,14 @@ reswitch:	switch (ch) {
 			base = DEC;
 			goto number;
 		case 'n':
-#ifdef DDB
-		/* XXX: non-standard '%n' format */
-		/*
-		 * XXX: HACK!   DDB wants '%n' to be a '%u' printed
-		 * in db_radix format.   this should die since '%n'
-		 * is already defined in standard printf to write
-		 * the number of chars printed so far to the arg (which
-		 * should be a pointer.
-		 */
-			if (oflags & TODDB) {
-				if (db_radix == 16)
-					ch = 'x';	/* convert to %x */
-				else if (db_radix == 8)
-					ch = 'o';	/* convert to %o */
-				else
-					ch = 'u';	/* convert to %u */
-
-				/* ... and start again */
-				goto reswitch;
-			}
-
-#endif
 			if (flags & QUADINT)
 				*va_arg(ap, quad_t *) = ret;
 			else if (flags & LONGINT)
 				*va_arg(ap, long *) = ret;
 			else if (flags & SHORTINT)
 				*va_arg(ap, short *) = ret;
+			else if (flags & SIZEINT)
+				*va_arg(ap, ssize_t *) = ret;
 			else
 				*va_arg(ap, int *) = ret;
 			continue;	/* no output */
@@ -1040,9 +976,6 @@ number:			if ((dprec = prec) >= 0)
 		skipsize:
 			break;
 		default:	/* "%?" prints ?, unless ? is NUL */
-#ifdef DDB
-		default_case:	/* DDB */
-#endif
 			if (ch == '\0')
 				goto done;
 			/* pretend it was %c with argument ch */

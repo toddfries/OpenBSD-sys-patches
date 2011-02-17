@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wsfont.h,v 1.3 2002/03/14 03:16:08 millert Exp $ */
-=======
 /*	$OpenBSD: wsfont.h,v 1.5 2008/06/26 05:42:20 ray Exp $ */
->>>>>>> origin/master
 /* 	$NetBSD: wsfont.h,v 1.12 2000/06/13 13:37:07 ad Exp $	*/
 
 /*-

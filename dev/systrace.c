@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: systrace.c,v 1.43 2006/10/06 05:47:27 djm Exp $	*/
-=======
 /*	$OpenBSD: systrace.c,v 1.53 2010/07/21 18:44:01 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -327,7 +323,7 @@ systracef_ioctl(fp, cmd, data, p)
 			ret = EINVAL;
 		break;
 	default:
-		ret = EINVAL;
+		ret = ENOTTY;
 		break;
 	}
 
@@ -402,7 +398,7 @@ systracef_ioctl(fp, cmd, data, p)
 		ret = systrace_getcwd(fst, strp);
 		break;
 	default:
-		ret = EINVAL;
+		ret = ENOTTY;
 		break;
 	}
 
@@ -497,7 +493,7 @@ systracef_close(fp, p)
 		vrele(fst->fd_rdir);
 	rw_exit_write(&fst->lock);
 
-	FREE(fp->f_data, M_XDATA);
+	free(fp->f_data, M_XDATA);
 	fp->f_data = NULL;
 
 	return (0);
@@ -547,10 +543,8 @@ systraceioctl(dev, cmd, data, flag, p)
 
 	switch (cmd) {
 	case STRIOCCLONE:
-		MALLOC(fst, struct fsystrace *, sizeof(struct fsystrace),
-		    M_XDATA, M_WAITOK);
-
-		memset(fst, 0, sizeof(struct fsystrace));
+		fst = (struct fsystrace *)malloc(sizeof(struct fsystrace),
+		    M_XDATA, M_WAITOK | M_ZERO);
 		rw_init(&fst->lock, "systrace");
 		TAILQ_INIT(&fst->processes);
 		TAILQ_INIT(&fst->messages);
@@ -563,7 +557,7 @@ systraceioctl(dev, cmd, data, flag, p)
 
 		error = falloc(p, &f, &fd);
 		if (error) {
-			FREE(fst, M_XDATA);
+			free(fst, M_XDATA);
 			return (error);
 		}
 		f->f_flag = FREAD | FWRITE;

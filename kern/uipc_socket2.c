@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uipc_socket2.c,v 1.41 2006/01/05 05:05:07 jsg Exp $	*/
-=======
 /*	$OpenBSD: uipc_socket2.c,v 1.51 2010/09/24 02:59:45 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uipc_socket2.c,v 1.11 1996/02/04 02:17:55 christos Exp $	*/
 
 /*
@@ -48,6 +44,7 @@
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
 #include <sys/event.h>
+#include <sys/pool.h>
 
 /*
  * Primitive routines for operating on sockets and socket buffers
@@ -55,12 +52,9 @@
 
 u_long	sb_max = SB_MAX;		/* patchable */
 
-<<<<<<< HEAD
-=======
 extern struct pool mclpools[];
 extern struct pool mbpool;
 
->>>>>>> origin/master
 /*
  * Procedures to manipulate state flags of socket
  * and do appropriate wakeups.  Normal sequence from the
@@ -186,8 +180,8 @@ sonewconn(struct socket *head, int connstatus)
 	so->so_rcv.sb_wat = head->so_rcv.sb_wat;
 
 	soqinsque(head, so, soqueue);
-	if ((*so->so_proto->pr_usrreq)(so, PRU_ATTACH,
-	    (struct mbuf *)0, (struct mbuf *)0, (struct mbuf *)0)) {
+	if ((*so->so_proto->pr_usrreq)(so, PRU_ATTACH, NULL, NULL, NULL,
+	    curproc)) {
 		(void) soqremque(so, soqueue);
 		pool_put(&socket_pool, so);
 		return ((struct socket *)0);

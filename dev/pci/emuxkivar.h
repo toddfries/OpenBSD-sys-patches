@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: emuxkivar.h,v 1.6 2003/04/26 08:01:42 jmc Exp $	*/
-=======
 /*	$OpenBSD: emuxkivar.h,v 1.10 2008/12/09 12:30:12 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: emuxkivar.h,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-

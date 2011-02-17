@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpireg.h,v 1.30 2006/09/18 13:01:26 dlg Exp $ */
-=======
 /*	$OpenBSD: mpireg.h,v 1.40 2010/09/13 05:28:29 dlg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -1383,8 +1379,6 @@ struct mpi_cfg_fc_port_pg0 {
 	u_int8_t		reserved2;
 } __packed;
 
-<<<<<<< HEAD
-=======
 struct mpi_cfg_fc_port_pg1 {
 	struct mpi_cfg_hdr	config_header;
 
@@ -1426,7 +1420,6 @@ struct mpi_cfg_fc_port_pg1 {
 	u_int8_t		initiator_lo_pend_to;
 } __packed;
 
->>>>>>> origin/master
 struct mpi_cfg_fc_device_pg0 {
 	struct mpi_cfg_hdr	config_header;
 

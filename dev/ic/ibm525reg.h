@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: ibm525reg.h,v 1.2 2010/08/02 20:55:49 kettenis Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  *

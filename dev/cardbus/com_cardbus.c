@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: com_cardbus.c,v 1.25 2006/06/02 20:11:48 fkr Exp $ */
-=======
 /* $OpenBSD: com_cardbus.c,v 1.40 2010/11/15 23:19:34 mikeb Exp $ */
->>>>>>> origin/master
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*
@@ -61,17 +57,9 @@
 #include <dev/pcmcia/pcmciareg.h>
 
 #include "com.h"
-#ifdef i386
-#include "pccom.h"
-#endif
 
 #include <dev/ic/comreg.h>
-#if NPCCOM > 0
-#include <i386/isa/pccomvar.h>
-#endif
-#if NCOM > 0
 #include <dev/ic/comvar.h>
-#endif
 #include <dev/ic/ns16550reg.h>
 
 #define	com_lcr		com_cfcr
@@ -105,17 +93,10 @@ struct csdev *com_cardbus_find_csdev(struct cardbus_attach_args *);
 int	com_cardbus_gofigure(struct cardbus_attach_args *,
     struct com_cardbus_softc *);
 
-#if NCOM_CARDBUS
 struct cfattach com_cardbus_ca = {
 	sizeof(struct com_cardbus_softc), com_cardbus_match,
 	com_cardbus_attach, com_cardbus_detach, com_activate
 };
-#elif NPCCOM_CARDBUS
-struct cfattach pccom_cardbus_ca = {
-	sizeof(struct com_cardbus_softc), com_cardbus_match,
-	com_cardbus_attach, com_cardbus_detach, com_activate
-};
-#endif
 
 #define BUG_BROADCOM	0x01
 
@@ -267,11 +248,7 @@ com_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	if (Cardbus_mapreg_map(ca->ca_ct, csc->cc_reg, csc->cc_type, 0,
 	    &sc->sc_iot, &sc->sc_ioh, &csc->cc_addr, &csc->cc_size) != 0) {
-<<<<<<< HEAD
-		printf("failed to map memory");
-=======
 		printf(": can't map memory\n");
->>>>>>> origin/master
 		return;
 	}
 
@@ -293,14 +270,8 @@ com_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->disable = com_cardbus_disable;
 	sc->enabled = 0;
 
-	if (ca->ca_cis.cis1_info[0] && ca->ca_cis.cis1_info[1]) {
-		printf(": %s %s\n", ca->ca_cis.cis1_info[0],
-		    ca->ca_cis.cis1_info[1]);
-		printf("%s", DEVNAME(csc));
-	}
-
 	if (com_cardbus_enable(sc))
-		printf(": function enable failed\n");
+		return;
 	sc->enabled = 1;
 
 	sc->sc_hwflags = 0;
@@ -362,11 +333,7 @@ com_cardbus_enable(struct com_softc *sc)
 	csc->cc_ih = cardbus_intr_establish(cc, cf, psc->sc_intrline,
 	    IPL_TTY, comintr, sc, DEVNAME(csc));
 	if (csc->cc_ih == NULL) {
-<<<<<<< HEAD
-		printf("%s: couldn't establish interrupt\n", DEVNAME(csc));
-=======
 		printf(": couldn't establish interrupt\n");
->>>>>>> origin/master
 		return (1);
 	}
 

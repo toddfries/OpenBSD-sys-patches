@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_kthread.c,v 1.26 2006/11/29 12:24:17 miod Exp $	*/
-=======
 /*	$OpenBSD: kern_kthread.c,v 1.30 2008/06/26 05:42:20 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_kthread.c,v 1.3 1998/12/22 21:21:36 kleink Exp $	*/
 
 /*-
@@ -72,8 +68,8 @@ kthread_create(void (*func)(void *), void *arg,
 	 * descriptors and don't leave the exit status around for the
 	 * parent to wait for.
 	 */
-	error = fork1(&proc0, 0, FORK_SHAREVM |FORK_NOZOMBIE |FORK_SIGHAND,
-	    NULL, 0, func, arg, NULL, &p2);
+	error = fork1(&proc0, 0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
+	    FORK_SIGHAND, NULL, 0, func, arg, NULL, &p2);
 	if (error)
 		return (error);
 
@@ -142,10 +138,9 @@ kthread_create_deferred(void (*func)(void *), void *arg)
 		return;
 	}
 
-	kq = malloc(sizeof *kq, M_TEMP, M_NOWAIT);
+	kq = malloc(sizeof *kq, M_TEMP, M_NOWAIT|M_ZERO);
 	if (kq == NULL)
 		panic("unable to allocate kthread_q");
-	bzero(kq, sizeof *kq);
 
 	kq->kq_func = func;
 	kq->kq_arg = arg;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ad1848var.h,v 1.11 2002/03/14 01:26:56 millert Exp $	*/
-=======
 /*	$OpenBSD: ad1848var.h,v 1.13 2010/06/30 11:21:35 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ad1848var.h,v 1.22 1998/01/19 22:18:26 augustss Exp $	*/
 
 /*

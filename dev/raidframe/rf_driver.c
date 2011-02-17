@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rf_driver.c,v 1.10 2002/08/09 15:10:20 tdeval Exp $	*/
-=======
 /*	$OpenBSD: rf_driver.c,v 1.12 2008/06/26 05:42:17 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rf_driver.c,v 1.37 2000/06/04 02:05:13 oster Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: icsphy.c,v 1.17 2005/02/19 06:00:04 brad Exp $	*/
-=======
 /*	$OpenBSD: icsphy.c,v 1.20 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: icsphy.c,v 1.17 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*-

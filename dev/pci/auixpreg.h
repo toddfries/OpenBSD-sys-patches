@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: auixpreg.h,v 1.1 2005/08/07 20:08:45 mickey Exp $ */
 /* $NetBSD: auixpreg.h,v 1.2 2005/01/12 00:28:03 reinoud Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ami.c,v 1.176 2007/01/27 05:09:51 dlg Exp $	*/
-=======
 /*	$OpenBSD: ami.c,v 1.217 2010/10/12 00:53:32 krw Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -125,10 +121,6 @@ int		ami_alloc_ccbs(struct ami_softc *, int);
 int		ami_poll(struct ami_softc *, struct ami_ccb *);
 void		ami_start(struct ami_softc *, struct ami_ccb *);
 void		ami_complete(struct ami_softc *, struct ami_ccb *, int);
-<<<<<<< HEAD
-int		ami_done(struct ami_softc *, int);
-=======
->>>>>>> origin/master
 void		ami_runqueue_tick(void *);
 void		ami_runqueue(struct ami_softc *);
 
@@ -168,8 +160,10 @@ int		ami_ioctl_disk(struct ami_softc *, struct bioc_disk *);
 int		ami_ioctl_alarm(struct ami_softc *, struct bioc_alarm *);
 int		ami_ioctl_setstate(struct ami_softc *, struct bioc_setstate *);
 
+#ifndef SMALL_KERNEL
 int		ami_create_sensors(struct ami_softc *);
 void		ami_refresh_sensors(void *);
+#endif
 #endif /* NBIO > 0 */
 
 #define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
@@ -223,7 +217,7 @@ ami_read(struct ami_softc *sc, bus_size_t r)
 void
 ami_write(struct ami_softc *sc, bus_size_t r, u_int32_t v)
 {
-	AMI_DPRINTF(AMI_D_CMD, ("awo 0x%x 0x%08x", r, v));
+	AMI_DPRINTF(AMI_D_CMD, ("awo 0x%x 0x%08x ", r, v));
 
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, r, v);
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, r, 4,
@@ -236,11 +230,10 @@ ami_allocmem(struct ami_softc *sc, size_t size)
 	struct ami_mem		*am;
 	int			nsegs;
 
-	am = malloc(sizeof(struct ami_mem), M_DEVBUF, M_NOWAIT);
+	am = malloc(sizeof(struct ami_mem), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (am == NULL)
 		return (NULL);
 
-	memset(am, 0, sizeof(struct ami_mem));
 	am->am_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -404,7 +397,8 @@ ami_attach(struct ami_softc *sc)
 	}
 	sc->sc_mbox = (volatile struct ami_iocmd *)AMIMEM_KVA(sc->sc_mbox_am);
 	sc->sc_mbox_pa = htole32(AMIMEM_DVA(sc->sc_mbox_am));
-	AMI_DPRINTF(AMI_D_CMD, ("mbox_pa=%llx ", sc->sc_mbox_pa));
+	AMI_DPRINTF(AMI_D_CMD, ("mbox=%p ", sc->sc_mbox));
+	AMI_DPRINTF(AMI_D_CMD, ("mbox_pa=0x%llx ", (long long)sc->sc_mbox_pa));
 
 	/* create a spartan ccb for use with ami_poll */
 	bzero(&iccb, sizeof(iccb));
@@ -565,18 +559,19 @@ ami_attach(struct ami_softc *sc)
 	else
 		sc->sc_ioctl = ami_ioctl;
 
+#ifndef SMALL_KERNEL
 	if (ami_create_sensors(sc) != 0)
 		printf("%s: unable to create sensors\n", DEVNAME(sc));
 #endif
+#endif
 
 	rsc = malloc(sizeof(struct ami_rawsoftc) * sc->sc_channels,
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!rsc) {
 		printf("%s: no memory for raw interface\n", DEVNAME(sc));
 		return (0);
 	}
 
-	bzero(rsc, sizeof(struct ami_rawsoftc) * sc->sc_channels);
 	for (sc->sc_rawsoftcs = rsc;
 	     rsc < &sc->sc_rawsoftcs[sc->sc_channels]; rsc++) {
 
@@ -937,18 +932,8 @@ ami_start_xs(struct ami_softc *sc, struct ami_ccb *ccb, struct scsi_xfer *xs)
 {
 	if (xs->flags & SCSI_POLL)
 		ami_complete(sc, ccb, xs->timeout);
-<<<<<<< HEAD
-		return (COMPLETE);
-	}
- 
-	timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
-	ami_start(sc, ccb);
-
-	return (SUCCESSFULLY_QUEUED);
-=======
 	else
 		ami_start(sc, ccb);
->>>>>>> origin/master
 }
 
 void
@@ -1034,68 +1019,11 @@ ami_complete(struct ami_softc *sc, struct ami_ccb *ccb, int timeout)
 		DELAY(1000);
 		i++;
 	}
-<<<<<<< HEAD
-	if (ccb->ccb_state != AMI_CCB_QUEUED)
-		goto err;
-
-	i = 0;
-	while (i < timeout) {
-		if (sc->sc_done(sc, &mbox) != 0) {
-			for (j = 0; j < mbox.acc_nstat; j++) {
-				int ready = mbox.acc_cmplidl[j];
-				ami_done(sc, ready);
-				if (ready == ccb->ccb_cmd.acc_id)
-					done = 1;
-			}
-			if (done)
-				break;
-		}
-
-		DELAY(1000);
-		i++;
-	}
-	if (!done) {
-		printf("%s: timeout ccb %d\n", DEVNAME(sc),
-		    ccb->ccb_cmd.acc_id);
-		TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
-		goto err;
-	}
-
-	/* start the runqueue again */
-	ami_runqueue(sc);
-
-	splx(s);
-
-	return;
-=======
 	ready = (ccb->ccb_state == AMI_CCB_QUEUED);
 	mtx_leave(&sc->sc_cmd_mtx);
->>>>>>> origin/master
 
 	if (!ready) {
 		ccb->ccb_flags |= AMI_CCB_F_ERR;
-<<<<<<< HEAD
-		break;
-
-	case AMI_CCB_QUEUED:
-		/* XXX create a list to save ccb to and print the whole list */
-		printf("%s: timeout ccb %d\n", DEVNAME(sc), cmd->acc_id);
-		TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
-		break;
-
-	default:
-		panic("%s: ami_stimeout(%d) botch", DEVNAME(sc), cmd->acc_id);
-	}
-
-	ccb->ccb_done(sc, ccb);
-	splx(s);
-}
-
-int
-ami_done(struct ami_softc *sc, int idx)
-{
-	struct ami_ccb *ccb = &sc->sc_ccbs[idx - 1];
-=======
 		ccb->ccb_state = AMI_CCB_READY;
 		goto done;
 	}
@@ -1108,7 +1036,6 @@ ami_done(struct ami_softc *sc, int idx)
 	 * timeouts are as expected.
 	 */
 	timeout = MAX(30000, timeout); /* timeout */
->>>>>>> origin/master
 
 	while (ccb->ccb_state == AMI_CCB_QUEUED) {
 		s = splbio(); /* interrupt handlers are called at their IPL */
@@ -1127,17 +1054,8 @@ ami_done(struct ami_softc *sc, int idx)
 		}
 	}
 
-<<<<<<< HEAD
-	ccb->ccb_state = AMI_CCB_READY;
-	TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
-
-	ccb->ccb_done(sc, ccb);
-
-	return (0);
-=======
 done:
 	done(sc, ccb);
->>>>>>> origin/master
 }
 
 void
@@ -1165,7 +1083,9 @@ ami_done_pt(struct ami_softc *sc, struct ami_ccb *ccb)
 
 	if (ccb->ccb_flags & AMI_CCB_F_ERR)
 		xs->error = XS_DRIVER_STUFFUP;
- 	else if (xs->flags & SCSI_POLL && xs->cmd->opcode == INQUIRY) {
+ 	else if (ccb->ccb_status != 0x00)
+		xs->error = XS_DRIVER_STUFFUP;
+	else if (xs->flags & SCSI_POLL && xs->cmd->opcode == INQUIRY) {
 		type = ((struct scsi_inquiry_data *)xs->data)->device &
 		    SID_TYPE;
 		if (!(type == T_PROCESSOR || type == T_ENCLOSURE))
@@ -1591,10 +1511,6 @@ ami_intr(void *v)
 			ready = mbox.acc_cmplidl[i] - 1;
 			AMI_DPRINTF(AMI_D_CMD, ("ready=%d ", ready));
 
-<<<<<<< HEAD
-			if (!ami_done(sc, ready))
-				rv |= 1;
-=======
 			ccb = &sc->sc_ccbs[ready];
 			ccb->ccb_status = mbox.acc_status;
 			ccb->ccb_state = AMI_CCB_READY;
@@ -1605,7 +1521,6 @@ ami_intr(void *v)
 			mtx_enter(&sc->sc_cmd_mtx);
 
 			rv = 1;
->>>>>>> origin/master
 		}
 	}
 	ready = (sc->sc_drainio && TAILQ_EMPTY(&sc->sc_ccb_runq));
@@ -1953,20 +1868,6 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	if (!p)
 		return (ENOMEM);
 
-<<<<<<< HEAD
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
-	if (!plist) {
-		error = ENOMEM;
-		goto bail;
-	}
-
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
-		goto bail2;
-	}
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
-=======
 	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p,
 	    p))) {
 		error = EINVAL;
@@ -1974,7 +1875,6 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	}
 
 	bzero(sc->sc_plist, sizeof sc->sc_plist);
->>>>>>> origin/master
 
 	bi->bi_novol = p->ada_nld;
 	bi->bi_nodisk = 0;
@@ -2029,42 +1929,11 @@ bail:
 int
 ami_vol(struct ami_softc *sc, struct bioc_vol *bv, struct ami_big_diskarray *p)
 {
-<<<<<<< HEAD
-	struct scsi_inquiry_data inqbuf;
-	char *plist;
-	int i, s, t, off;
-	int ld = p->ada_nld, error = EINVAL;
-	u_int8_t ch, tg;
-
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
-	if (!plist)
-		return (ENOMEM);
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
-
-	/* setup plist */
-	for (i = 0; i < p->ada_nld; i++)
-		for (s = 0; s < p->ald[i].adl_spandepth; s++)
-			for (t = 0; t < p->ald[i].adl_nstripes; t++) {
-				off = p->ald[i].asp[s].adv[t].add_channel *
-				    AMI_MAX_TARGET +
-				    p->ald[i].asp[s].adv[t].add_target;
-
-				if (!plist[off])
-					plist[off] = 1;
-			}
-
-	for(i = 0; i < ((sc->sc_flags & AMI_QUARTZ) ?
-	    AMI_BIG_MAX_PDRIVES : AMI_MAX_PDRIVES); i++) {
-	    	/* skip claimed drives */
-	    	if (plist[i])
-=======
 	int i, ld = p->ada_nld, error = EINVAL;
 
 	for(i = 0; i < sc->sc_channels * 16; i++) {
 	    	/* skip claimed/unused drives */
 	    	if (sc->sc_plist[i] != 2)
->>>>>>> origin/master
 			continue;
 
 		/* are we it? */
@@ -2102,48 +1971,14 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 	char vend[8+16+4+1], *vendp;
 	char ser[32 + 1];
 	struct scsi_inquiry_data inqbuf;
-<<<<<<< HEAD
-	struct scsi_inquiry_vpd vpdbuf;
-	char *plist;
-	int i, s, t, off;
-	int ld = p->ada_nld, error = EINVAL;
-=======
 	struct scsi_vpd_serial vpdbuf;
 	int i, ld = p->ada_nld, error = EINVAL;
->>>>>>> origin/master
 	u_int8_t ch, tg;
 	daddr64_t sz = 0;
 
-<<<<<<< HEAD
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT);
-	if (!plist)
-		return (ENOMEM);
-
-	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
-
-	/* setup plist */
-	for (i = 0; i < p->ada_nld; i++)
-		for (s = 0; s < p->ald[i].adl_spandepth; s++)
-			for (t = 0; t < p->ald[i].adl_nstripes; t++) {
-				off = p->ald[i].asp[s].adv[t].add_channel *
-				    AMI_MAX_TARGET +
-				    p->ald[i].asp[s].adv[t].add_target;
-
-				if (!plist[off])
-					plist[off] = 1;
-			}
-
-	for(i = 0; i < ((sc->sc_flags & AMI_QUARTZ) ?
-	    AMI_BIG_MAX_PDRIVES : AMI_MAX_PDRIVES); i++) {
-		char vend[8+16+4+1];
-
-	    	/* skip claimed drives */
-	    	if (plist[i])
-=======
 	for(i = 0; i < sc->sc_channels * 16; i++) {
 	    	/* skip claimed/unused drives */
 	    	if (sc->sc_plist[i] != 2)
->>>>>>> origin/master
 			continue;
 
 		/* are we it? */
@@ -2166,14 +2001,8 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 		if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
 			bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 			ser[sizeof ser - 1] = '\0';
-<<<<<<< HEAD
-			if (vpdbuf.page_length < sizeof ser)
-				ser[vpdbuf.page_length] = '\0';
-
-=======
 			if (_2btol(vpdbuf.hdr.page_length) < sizeof ser)
 				ser[_2btol(vpdbuf.hdr.page_length)] = '\0';
->>>>>>> origin/master
 			strlcpy(bd->bd_serial, ser, sizeof(bd->bd_serial));
 		}
 
@@ -2220,10 +2049,8 @@ ami_ioctl_vol(struct ami_softc *sc, struct bioc_vol *bv)
 	if (!p)
 		return (ENOMEM);
 
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)))
 		goto bail;
-	}
 
 	if (bv->bv_volid >= p->ada_nld) {
 		error = ami_vol(sc, bv, p);
@@ -2330,7 +2157,7 @@ int
 ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 {
 	struct scsi_inquiry_data inqbuf;
-	struct scsi_inquiry_vpd vpdbuf;
+	struct scsi_vpd_serial vpdbuf;
 	struct ami_big_diskarray *p; /* struct too large for stack */
 	int i, s, t, d;
 	int off;
@@ -2343,10 +2170,8 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 	if (!p)
 		return (ENOMEM);
 
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)))
 		goto bail;
-	}
 
 	if (bd->bd_volid >= p->ada_nld) {
 		error = ami_disk(sc, bd, p);
@@ -2422,14 +2247,9 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 			if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
 				bcopy(vpdbuf.serial, ser, sizeof ser - 1);
 				ser[sizeof ser - 1] = '\0';
-<<<<<<< HEAD
-				if (vpdbuf.page_length < sizeof ser)
-					ser[vpdbuf.page_length] = '\0';
-=======
 				if (_2btol(vpdbuf.hdr.page_length) < sizeof ser)
 					ser[_2btol(vpdbuf.hdr.page_length)] =
 					    '\0';
->>>>>>> origin/master
 				strlcpy(bd->bd_serial, ser,
 				    sizeof(bd->bd_serial));
 			}
@@ -2476,13 +2296,13 @@ int ami_ioctl_alarm(struct ami_softc *sc, struct bioc_alarm *ba)
 		return (EINVAL);
 	}
 
-	if (ami_mgmt(sc, AMI_SPEAKER, func, 0, 0, sizeof ret, &ret))
-		error = EINVAL;
-	else
+	if (!(error = ami_mgmt(sc, AMI_SPEAKER, func, 0, 0, sizeof ret,
+	    &ret))) {
 		if (ba->ba_opcode == BIOC_GASTATUS)
 			ba->ba_status = ret;
 		else
 			ba->ba_status = 0;
+	}
 
 	return (error);
 }
@@ -2491,12 +2311,7 @@ int
 ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 {
 	struct scsi_inquiry_data inqbuf;
-<<<<<<< HEAD
-	int func;
-	int off;
-=======
 	int func, error;
->>>>>>> origin/master
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
@@ -2521,13 +2336,14 @@ ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 		return (EINVAL);
 	}
 
-	if (ami_mgmt(sc, AMI_CHSTATE, bs->bs_channel, bs->bs_target, func,
-	    0, NULL))
-		return (EINVAL);
+	if ((error = ami_mgmt(sc, AMI_CHSTATE, bs->bs_channel, bs->bs_target,
+	    func, 0, NULL)))
+		return (error);
 
 	return (0);
 }
 
+#ifndef SMALL_KERNEL
 int
 ami_create_sensors(struct ami_softc *sc)
 {
@@ -2550,14 +2366,9 @@ ami_create_sensors(struct ami_softc *sc)
 		return (1);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nunits,
-<<<<<<< HEAD
-	    M_DEVBUF, M_WAITOK);
-=======
 	    M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
->>>>>>> origin/master
 	if (sc->sc_sensors == NULL)
 		return (1);
-	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nunits);	
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
@@ -2582,7 +2393,7 @@ ami_create_sensors(struct ami_softc *sc)
 	if (sc->sc_bd == NULL)
 		goto bad;
 
-	if (sensor_task_register(sc, ami_refresh_sensors, 10) != 0)
+	if (sensor_task_register(sc, ami_refresh_sensors, 10) == NULL)
 		goto freebd;
 
 	sensordev_install(&sc->sc_sensordev);
@@ -2604,8 +2415,13 @@ ami_refresh_sensors(void *arg)
 	int i;
 
 	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof(*sc->sc_bd),
-	    sc->sc_bd))
+	    sc->sc_bd)) {
+		for (i = 0; i < sc->sc_nunits; i++) {
+			sc->sc_sensors[i].value = 0; /* unknown */
+			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
+		}
 		return;
+	}
 
 	for (i = 0; i < sc->sc_nunits; i++) {
 		switch (sc->sc_bd->ald[i].adl_status) {
@@ -2630,6 +2446,7 @@ ami_refresh_sensors(void *arg)
 		}
 	}
 }
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 #ifdef AMI_DEBUG
@@ -2638,7 +2455,7 @@ ami_print_mbox(struct ami_iocmd *mbox)
 {
 	int i;
 
-	printf("acc_cmd: %d  aac_id: %d  acc_busy: %d  acc_nstat: %d",
+	printf("acc_cmd: %d  aac_id: %d  acc_busy: %d  acc_nstat: %d  ",
 	    mbox->acc_cmd, mbox->acc_id, mbox->acc_busy, mbox->acc_nstat);
 	printf("acc_status: %d  acc_poll: %d  acc_ack: %d\n",
 	    mbox->acc_status, mbox->acc_poll, mbox->acc_ack);

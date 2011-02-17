@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ad1848.c,v 1.31 2005/04/15 13:05:14 mickey Exp $	*/
-=======
 /*	$OpenBSD: ad1848.c,v 1.38 2010/07/31 08:08:18 ratchov Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ad1848.c,v 1.45 1998/01/30 02:02:38 augustss Exp $	*/
 
 /*
@@ -999,34 +995,6 @@ ad1848_set_params(void *addr, int setmode, int usemode, struct audio_params *p,
 	DPRINTF(("ad1848_set_params: %d %d %d %ld\n", 
 	     p->encoding, p->precision, p->channels, p->sample_rate));
 
-<<<<<<< HEAD
-    enc = p->encoding;
-    pswcode = rswcode = 0;
-    switch (enc) {
-    case AUDIO_ENCODING_SLINEAR_LE:
-	if (p->precision == 8) {
-	    enc = AUDIO_ENCODING_ULINEAR_LE;
-	    pswcode = rswcode = change_sign8;
-	}
-	break;
-    case AUDIO_ENCODING_SLINEAR_BE:
-	if (p->precision == 16 && sc->mode == 1) {
-	    enc = AUDIO_ENCODING_SLINEAR_LE;
-	    pswcode = rswcode = swap_bytes;
-	}
-	break;
-    case AUDIO_ENCODING_ULINEAR_LE:
-	if (p->precision == 16) {
-	    enc = AUDIO_ENCODING_SLINEAR_LE;
-	    pswcode = rswcode = change_sign16;
-	}
-	break;
-    case AUDIO_ENCODING_ULINEAR_BE:
-	if (p->precision == 16) {
-	    enc = AUDIO_ENCODING_SLINEAR_LE;
-	    pswcode = swap_bytes_change_sign16;
-	    rswcode = change_sign16_swap_bytes;
-=======
 	enc = p->encoding;
 	pswcode = rswcode = 0;
 	switch (enc) {
@@ -1086,7 +1054,6 @@ ad1848_set_params(void *addr, int setmode, int usemode, struct audio_params *p,
 		break;
 	default:
 		return EINVAL;
->>>>>>> origin/master
 	}
 
 	if (p->channels < 1 || p->channels > 2)

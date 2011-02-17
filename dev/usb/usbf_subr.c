@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usbf_subr.c,v 1.2 2007/02/07 16:26:49 drahn Exp $	*/
-=======
 /*	$OpenBSD: usbf_subr.c,v 1.15 2009/11/04 19:14:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -28,6 +24,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/timeout.h>
 
 #include <machine/bus.h>
 
@@ -105,10 +102,10 @@ usbf_realloc(void **pp, size_t *sizep, size_t newsize)
  * Attach a function driver.
  */
 static usbf_status
-usbf_probe_and_attach(device_ptr_t parent, usbf_device_handle dev, int port)
+usbf_probe_and_attach(struct device *parent, usbf_device_handle dev, int port)
 {
 	struct usbf_attach_arg uaa;
-	device_ptr_t dv;
+	struct device *dv;
 
 	KASSERT(dev->function == NULL);
 
@@ -121,7 +118,7 @@ usbf_probe_and_attach(device_ptr_t parent, usbf_device_handle dev, int port)
 	 * be initialized in the function driver's attach routine.  Also, it
 	 * should use usbf_devinfo_setup() to set the device identification.
 	 */
-	dv = USB_DO_ATTACH(dev, NULL, parent, &uaa, NULL, NULL);
+	dv = config_found_sm(parent, &uaa, NULL, NULL);
 	if (dv != NULL) {
 		dev->function = (struct usbf_function *)dv;
 		return USBF_NORMAL_COMPLETION;
@@ -141,7 +138,7 @@ usbf_remove_device(usbf_device_handle dev, struct usbf_port *up)
 	KASSERT(dev != NULL && dev == up->device);
 
 	if (dev->function != NULL)
-		config_detach((device_ptr_t)dev->function, DETACH_FORCE);
+		config_detach((struct device *)dev->function, DETACH_FORCE);
 	if (dev->default_pipe != NULL)
 		usbf_close_pipe(dev->default_pipe);
 	up->device = NULL;
@@ -149,7 +146,7 @@ usbf_remove_device(usbf_device_handle dev, struct usbf_port *up)
 }
 
 usbf_status
-usbf_new_device(device_ptr_t parent, usbf_bus_handle bus, int depth,
+usbf_new_device(struct device *parent, usbf_bus_handle bus, int depth,
     int speed, int port, struct usbf_port *up)
 {
 	struct usbf_device *dev;
@@ -160,11 +157,10 @@ usbf_new_device(device_ptr_t parent, usbf_bus_handle bus, int depth,
 	KASSERT(up->device == NULL);
 #endif
 
-	dev = malloc(sizeof(*dev), M_USB, M_NOWAIT);
+	dev = malloc(sizeof(*dev), M_USB, M_NOWAIT | M_ZERO);
 	if (dev == NULL)
 		return USBF_NOMEM;
 
-	bzero(dev, sizeof *dev);
 	dev->bus = bus;
 	dev->string_id = USBF_STRING_ID_MIN;
 	SIMPLEQ_INIT(&dev->configs);
@@ -317,8 +313,8 @@ usbf_add_string(usbf_device_handle dev, const char *string)
 	    dev->string_id == USBF_STRING_ID_MAX)
 		return USBF_EMPTY_STRING_ID;
 
-	if ((len = strlen(string)) > USB_MAX_STRING_LEN)
-		len = USB_MAX_STRING_LEN;
+	if ((len = strlen(string)) >= USB_MAX_STRING_LEN)
+		len = USB_MAX_STRING_LEN - 1;
 
 	oldsize = dev->sdesc_size;
 	newsize = oldsize + 2 + 2 * len;
@@ -331,7 +327,7 @@ usbf_add_string(usbf_device_handle dev, const char *string)
 	sd = (usb_string_descriptor_t *)((char *)sd + oldsize);
 	sd->bLength = newsize - oldsize;
 	sd->bDescriptorType = UDESC_STRING;
-	for (i = 0; string[i] != '\0'; i++)
+	for (i = 0; string[i] != '\0' && i < len; i++)
 		USETW(sd->bString[i], string[i]);
 
 	id = dev->string_id++;
@@ -406,23 +402,21 @@ usbf_add_config(usbf_device_handle dev, usbf_config_handle *ucp)
 	struct usbf_config *uc;
 	usb_config_descriptor_t *cd;
 
-	uc = malloc(sizeof *uc, M_USB, M_NOWAIT);
+	uc = malloc(sizeof *uc, M_USB, M_NOWAIT | M_ZERO);
 	if (uc == NULL)
 		return USBF_NOMEM;
 
-	cd = malloc(sizeof *cd, M_USB, M_NOWAIT);
+	cd = malloc(sizeof *cd, M_USB, M_NOWAIT | M_ZERO);
 	if (cd == NULL) {
 		free(uc, M_USB);
 		return USBF_NOMEM;
 	}
 
-	bzero(uc, sizeof *uc);
 	uc->uc_device = dev;
 	uc->uc_cdesc = cd;
 	uc->uc_cdesc_size = sizeof *cd;
 	SIMPLEQ_INIT(&uc->iface_head);
 
-	bzero(cd, sizeof *cd);
 	cd->bLength = USB_CONFIG_DESCRIPTOR_SIZE;
 	cd->bDescriptorType = UDESC_CONFIG;
 	USETW(cd->wTotalLength, USB_CONFIG_DESCRIPTOR_SIZE);
@@ -484,23 +478,21 @@ usbf_add_interface(usbf_config_handle uc, u_int8_t bInterfaceClass,
 	if (uc->uc_closed)
 		return USBF_INVAL;
 
-	ui = malloc(sizeof *ui, M_USB, M_NOWAIT);
+	ui = malloc(sizeof *ui, M_USB, M_NOWAIT | M_ZERO);
 	if (ui == NULL)
 		return USBF_NOMEM;
 
-	id = malloc(sizeof *id, M_USB, M_NOWAIT);
+	id = malloc(sizeof *id, M_USB, M_NOWAIT | M_ZERO);
 	if (id == NULL) {
 		free(ui, M_USB);
 		return USBF_NOMEM;
 	}
 
-	bzero(ui, sizeof *ui);
 	ui->config = uc;
 	ui->idesc = id;
 	LIST_INIT(&ui->pipes);
 	SIMPLEQ_INIT(&ui->endpoint_head);
 
-	bzero(id, sizeof *id);
 	id->bLength = USB_INTERFACE_DESCRIPTOR_SIZE;
 	id->bDescriptorType = UDESC_INTERFACE;
 	id->bInterfaceNumber = uc->uc_cdesc->bNumInterface;
@@ -527,21 +519,19 @@ usbf_add_endpoint(usbf_interface_handle ui, u_int8_t bEndpointAddress,
 	if (ui->config->uc_closed)
 		return USBF_INVAL;
 
-	ue = malloc(sizeof *ue, M_USB, M_NOWAIT);
+	ue = malloc(sizeof *ue, M_USB, M_NOWAIT | M_ZERO);
 	if (ue == NULL)
 		return USBF_NOMEM;
 
-	ed = malloc(sizeof *ed, M_USB, M_NOWAIT);
+	ed = malloc(sizeof *ed, M_USB, M_NOWAIT | M_ZERO);
 	if (ed == NULL) {
 		free(ue, M_USB);
 		return USBF_NOMEM;
 	}
 
-	bzero(ue, sizeof *ue);
 	ue->iface = ui;
 	ue->edesc = ed;
 
-	bzero(ed, sizeof *ed);
 	ed->bLength = USB_ENDPOINT_DESCRIPTOR_SIZE;
 	ed->bDescriptorType = UDESC_ENDPOINT;
 	ed->bEndpointAddress = bEndpointAddress;
@@ -820,7 +810,7 @@ usbf_alloc_xfer(usbf_device_handle dev)
 	if (xfer == NULL)
 		return NULL;
 	xfer->device = dev;
-	usb_callout_init(xfer->timeout_handle);
+	timeout_set(&xfer->timeout_handle, NULL, NULL);
 	DPRINTF(1,("usbf_alloc_xfer() = %p\n", xfer));
 	return xfer;
 }
@@ -892,14 +882,14 @@ usbf_free_buffer(usbf_xfer_handle xfer)
 static void
 usbf_dump_buffer(usbf_xfer_handle xfer)
 {
-	device_ptr_t dev = (device_ptr_t)xfer->pipe->device->bus->usbfctl;
+	struct device *dev = (struct device *)xfer->pipe->device->bus->usbfctl;
 	usbf_endpoint_handle ep = xfer->pipe->endpoint;
 	int index = usbf_endpoint_index(ep);
 	int dir = usbf_endpoint_dir(ep);
 	u_char *p = xfer->buffer;
 	u_int i;
 
-	printf("%s: ep%d-%s, length=%u, %s", USBDEVNAME(*dev), index,
+	printf("%s: ep%d-%s, length=%u, %s", dev->dv_xname, index,
 	    (xfer->rqflags & URQ_REQUEST) ? "setup" :
 	    (index == 0 ? "in" : (dir == UE_DIR_IN ? "in" : "out")),
 	    xfer->length, usbf_errstr(xfer->status));
@@ -1076,11 +1066,6 @@ usbf_transfer_complete(usbf_xfer_handle xfer)
 usbf_status
 usbf_softintr_establish(struct usbf_bus *bus)
 {
-<<<<<<< HEAD
-#ifdef USB_USE_SOFTINTR
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-=======
->>>>>>> origin/master
 	KASSERT(bus->soft == NULL);
 
 	/* XXX we should have our own level */
@@ -1088,33 +1073,12 @@ usbf_softintr_establish(struct usbf_bus *bus)
 	    bus->methods->soft_intr, bus);
 	if (bus->soft == NULL)
 		return USBF_INVAL;
-<<<<<<< HEAD
-#else
-	usb_callout_init(bus->softi);
-#endif
-#endif
-=======
 
->>>>>>> origin/master
 	return USBF_NORMAL_COMPLETION;
 }
 
 void
 usbf_schedsoftintr(struct usbf_bus *bus)
 {
-<<<<<<< HEAD
-#ifdef USB_USE_SOFTINTR
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(bus->soft);
-#else
-	if (!usb_callout_pending(bus->softi))
-		usb_callout(bus->softi, 0, bus->methods->soft_intr,
-		    bus);
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
-#else
-	bus->methods->soft_intr(bus);
-#endif /* USB_USE_SOFTINTR */
-=======
-	softintr_schedule(bus->soft);
->>>>>>> origin/master
 }

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rf_copyback.c,v 1.6 2000/08/08 16:07:39 peter Exp $	*/
-=======
 /*	$OpenBSD: rf_copyback.c,v 1.9 2010/05/23 13:49:35 naddy Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rf_copyback.c,v 1.14 2000/03/07 02:59:50 oster Exp $	*/
 
 /*
@@ -182,7 +178,7 @@ rf_CopybackReconstructedData(RF_Raid_t *raidPtr)
 		}
 		raidPtr->Disks[frow][fcol].blockSize = dpart.disklab->d_secsize;
 
-		raidPtr->Disks[frow][fcol].numBlocks = dpart.part->p_size -
+		raidPtr->Disks[frow][fcol].numBlocks = DL_GETPSIZE(dpart.part) -
 		    rf_protectedSectors;
 
 		raidPtr->raid_cinfo[frow][fcol].ci_vp = vp;

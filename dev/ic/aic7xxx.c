@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aic7xxx.c,v 1.72 2006/02/06 17:29:10 jmc Exp $	*/
-=======
 /*	$OpenBSD: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -44,11 +40,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
-<<<<<<< HEAD
- * $Id: aic7xxx.c,v 1.73 2006/07/30 14:21:14 krw Exp $
-=======
  * $Id: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $
->>>>>>> origin/master
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
@@ -473,6 +465,7 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 {
 	struct scb *scb;
 	struct ahc_devinfo devinfo;
+	u_int scb_index;
 	
 	ahc_fetch_devinfo(ahc, &devinfo);
 
@@ -486,7 +479,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 	switch (intstat & SEQINT_MASK) {
 	case BAD_STATUS:
 	{
-		u_int  scb_index;
 		struct hardware_scb *hscb;
 
 		/*
@@ -754,8 +746,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 		 * loop.
 		 */
 		if (ahc->msg_type == MSG_TYPE_NONE) {
-			struct scb *scb;
-			u_int scb_index;
 			u_int bus_phase;
 
 			bus_phase = ahc_inb(ahc, SCSISIGI) & PHASE_MASK;
@@ -858,9 +848,6 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 				ahc_outb(ahc, SXFRCTL1,
 					 ahc_inb(ahc, SXFRCTL1) & ~BITBUCKET);
 				if (wait == 0) {
-					struct	scb *scb;
-					u_int	scb_index;
-
 					ahc_print_devinfo(ahc, &devinfo);
 					printf("Unable to clear parity error.  "
 					       "Resetting bus.\n");
@@ -1181,7 +1168,7 @@ ahc_handle_scsiint(struct ahc_softc *ahc, u_int intstat)
 					printf("\tCRC Value Mismatch\n");
 				if ((sstat2 & CRCENDERR) != 0)
 					printf("\tNo terminal CRC packet "
-					       "recevied\n");
+					       "received\n");
 				if ((sstat2 & CRCREQERR) != 0)
 					printf("\tIllegal CRC packet "
 					       "request\n");
@@ -1241,7 +1228,7 @@ ahc_handle_scsiint(struct ahc_softc *ahc, u_int intstat)
 		/*
 		 * Although the driver does not care about the
 		 * 'Selection in Progress' status bit, the busy
-		 * LED does.  SELINGO is only cleared by a sucessfull
+		 * LED does.  SELINGO is only cleared by a successful
 		 * selection, so we must manually clear it to insure
 		 * the LED turns off just incase no future successful
 		 * selections occur (e.g. no devices on the bus).
@@ -1656,8 +1643,7 @@ ahc_alloc_tstate(struct ahc_softc *ahc, u_int scsi_id, char channel)
 	    && ahc->enabled_targets[scsi_id] != master_tstate)
 		panic("%s: ahc_alloc_tstate - Target already allocated",
 		      ahc_name(ahc));
-	tstate = (struct ahc_tmode_tstate*)malloc(sizeof(*tstate),
-						   M_DEVBUF, M_NOWAIT);
+	tstate = malloc(sizeof(*tstate), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (tstate == NULL)
 		return (NULL);
 
@@ -1677,8 +1663,7 @@ ahc_alloc_tstate(struct ahc_softc *ahc, u_int scsi_id, char channel)
 			memset(&tstate->transinfo[i].goal, 0,
 			      sizeof(tstate->transinfo[i].goal));
 		}
-	} else
-		memset(tstate, 0, sizeof(*tstate));
+	}
 	ahc->enabled_targets[scsi_id] = tstate;
 	return (tstate);
 }
@@ -3901,11 +3886,10 @@ ahc_softc_init(struct ahc_softc *ahc)
 	ahc->pause = ahc->unpause | PAUSE; 
 	/* XXX The shared scb data stuff should be deprecated */
 	if (ahc->scb_data == NULL) {
-		ahc->scb_data = malloc(sizeof(*ahc->scb_data),
-				       M_DEVBUF, M_NOWAIT);
+		ahc->scb_data = malloc(sizeof(*ahc->scb_data), M_DEVBUF,
+		    M_NOWAIT | M_ZERO);
 		if (ahc->scb_data == NULL)
 			return (ENOMEM);
-		memset(ahc->scb_data, 0, sizeof(*ahc->scb_data));
 	}
 
 	return (0);
@@ -3965,22 +3949,6 @@ ahc_softc_insert(struct ahc_softc *ahc)
 	else
 		TAILQ_INSERT_TAIL(&ahc_tailq, ahc, links);
 	ahc->init_level++;
-}
-
-/*
- * Verify that the passed in softc pointer is for a
- * controller that is still configured.
- */
-struct ahc_softc *
-ahc_find_softc(struct ahc_softc *ahc)
-{
-	struct ahc_softc *list_ahc;
-
-	TAILQ_FOREACH(list_ahc, &ahc_tailq, links) {
-		if (list_ahc == ahc)
-			return (ahc);
-	}
-	return (NULL);
 }
 
 void
@@ -4094,8 +4062,6 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	ahc_pause(ahc);
 	sxfrctl1_b = 0;
 	if ((ahc->chip & AHC_CHIPID_MASK) == AHC_AIC7770) {
-		u_int sblkctl;
-
 		/*
 		 * Save channel B's settings in case this chip
 		 * is setup for TWIN channel operation.
@@ -4157,8 +4123,6 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	 * by turning it on.
 	 */
 	if ((ahc->features & AHC_TWIN) != 0) {
-		u_int sblkctl;
-
 		sblkctl = ahc_inb(ahc, SBLKCTL);
 		ahc_outb(ahc, SBLKCTL, sblkctl | SELBUSB);
 		ahc_outb(ahc, SXFRCTL1, sxfrctl1_b);
@@ -4274,12 +4238,10 @@ ahc_init_scbdata(struct ahc_softc *ahc)
 	SLIST_INIT(&scb_data->sg_maps);
 
 	/* Allocate SCB resources */
-	scb_data->scbarray =
-	    (struct scb *)malloc(sizeof(struct scb) * AHC_SCB_MAX_ALLOC,
-				 M_DEVBUF, M_NOWAIT);
+	scb_data->scbarray = malloc(sizeof(struct scb) * AHC_SCB_MAX_ALLOC,
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (scb_data->scbarray == NULL)
 		return (ENOMEM);
-	memset(scb_data->scbarray, 0, sizeof(struct scb) * AHC_SCB_MAX_ALLOC);
 
 	/* Determine the number of hardware SCBs and initialize them */
 
@@ -4340,7 +4302,7 @@ ahc_init_scbdata(struct ahc_softc *ahc)
 	ahc->next_queued_scb = ahc_get_scb(ahc);
 
 	/*
-	 * Note that we were successfull
+	 * Note that we were successful
 	 */
 	return (0); 
 
@@ -4439,11 +4401,10 @@ ahc_alloc_scbs(struct ahc_softc *ahc)
 		int error;
 
 		if (sizeof(*pdata) > 0) { 
-			pdata = (struct scb_platform_data *)
-			    malloc(sizeof(*pdata), M_DEVBUF, M_NOWAIT);
+			pdata = malloc(sizeof(*pdata), M_DEVBUF,
+			    M_NOWAIT | M_ZERO);
 			if (pdata == NULL)
 				break;
-			bzero(pdata, sizeof(*pdata));
 		}
 
 		next_scb->platform_data = pdata;
@@ -4475,6 +4436,7 @@ ahc_alloc_scbs(struct ahc_softc *ahc)
 	}
 }
 
+#ifndef DEBUG
 void
 ahc_controller_info(struct ahc_softc *ahc, char *buf, size_t buf_len)
 {
@@ -4517,6 +4479,7 @@ ahc_controller_info(struct ahc_softc *ahc, char *buf, size_t buf_len)
 		snprintf(buf + len, buf_len - len, "%d SCBs",
 			 ahc->scb_data->maxhscbs);
 }
+#endif /* !DEBUG */
 
 int
 ahc_chip_init(struct ahc_softc *ahc)
@@ -5016,89 +4979,6 @@ ahc_intr_enable(struct ahc_softc *ahc, int enable)
 		ahc->unpause |= INTEN;
 	}
 	ahc_outb(ahc, HCNTRL, hcntrl);
-}
-
-/*
- * Ensure that the card is paused in a location
- * outside of all critical sections and that all
- * pending work is completed prior to returning.
- * This routine should only be called from outside
- * an interrupt context.
- */
-void
-ahc_pause_and_flushwork(struct ahc_softc *ahc)
-{
-	int intstat;
-	int maxloops;
-	int paused;
-
-	maxloops = 1000;
-	ahc->flags |= AHC_ALL_INTERRUPTS;
-	paused = FALSE;
-	do {
-		if (paused) {
-			ahc_unpause(ahc);
-			/*
-			 * Give the sequencer some time to service
-			 * any active selections.
-			 */
-			aic_delay(500);
-		}
-		ahc_intr(ahc);
-		ahc_pause(ahc);
-		paused = TRUE;
-		ahc_outb(ahc, SCSISEQ, ahc_inb(ahc, SCSISEQ) & ~ENSELO);
-		intstat = ahc_inb(ahc, INTSTAT);
-		if ((intstat & INT_PEND) == 0) {
-			ahc_clear_critical_section(ahc);
-			intstat = ahc_inb(ahc, INTSTAT);
-		}
-	} while (--maxloops
-	      && (intstat != 0xFF || (ahc->features & AHC_REMOVABLE) == 0)
-	      && ((intstat & INT_PEND) != 0
-	       || (ahc_inb(ahc, SSTAT0) & (SELDO|SELINGO)) != 0));
-	if (maxloops == 0) {
-		printf("Infinite interrupt loop, INTSTAT = %x",
-		       ahc_inb(ahc, INTSTAT));
-	}
-	ahc_platform_flushwork(ahc);
-	ahc->flags &= ~AHC_ALL_INTERRUPTS;
-}
-
-int
-ahc_suspend(struct ahc_softc *ahc)
-{
-
-	ahc_pause_and_flushwork(ahc);
-
-	if (LIST_FIRST(&ahc->pending_scbs) != NULL) {
-		ahc_unpause(ahc);
-		return (EBUSY);
-	}
-
-#ifdef AHC_TARGET_MODE
-	/*
-	 * XXX What about ATIOs that have not yet been serviced?
-	 * Perhaps we should just refuse to be suspended if we
-	 * are acting in a target role.
-	 */
-	if (ahc->pending_device != NULL) {
-		ahc_unpause(ahc);
-		return (EBUSY);
-	}
-#endif
-	ahc_shutdown(ahc);
-	return (0);
-}
-
-int
-ahc_resume(struct ahc_softc *ahc)
-{
-
-	ahc_reset(ahc, /*reinit*/TRUE);
-	ahc_intr_enable(ahc, TRUE); 
-	ahc_restart(ahc);
-	return (0);
 }
 
 /************************** Busy Target Table *********************************/
@@ -6043,8 +5923,6 @@ ahc_reset_channel(struct ahc_softc *ahc, char channel, int initiate_reset)
 		if (ahc->enabled_targets[target] == NULL)
 			continue;
 		for (initiator = 0; initiator <= max_scsiid; initiator++) {
-			struct ahc_devinfo devinfo;
-
 			ahc_compile_devinfo(&devinfo, target, initiator,
 					    CAM_LUN_WILDCARD,
 					    channel, ROLE_UNKNOWN);
@@ -6535,6 +6413,7 @@ ahc_download_instr(struct ahc_softc *ahc, u_int instrptr, uint8_t *dconsts)
 	}
 }
 
+#ifndef SMALL_KERNEL
 int
 ahc_print_register(ahc_reg_parse_entry_t *table, u_int num_entries,
 		   const char *name, u_int address, u_int value,
@@ -6580,6 +6459,7 @@ ahc_print_register(ahc_reg_parse_entry_t *table, u_int num_entries,
 
 	return (printed);
 }
+#endif
 
 void
 ahc_dump_card_state(struct ahc_softc *ahc)
@@ -6902,10 +6782,10 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 		ahc_flag saved_flags;
 
 		printf("Configuring Target Mode\n");
-		ahc_lock(ahc, &s);
+		s = splbio();
 		if (LIST_FIRST(&ahc->pending_scbs) != NULL) {
 			ccb->ccb_h.status = CAM_BUSY;
-			ahc_unlock(ahc, &s);
+			splx(s);
 			return;
 		}
 		saved_flags = ahc->flags;
@@ -6926,12 +6806,12 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 			ahc->flags = saved_flags;
 			(void)ahc_loadseq(ahc);
 			ahc_restart(ahc);
-			ahc_unlock(ahc, &s);
+			splx(s);
 			ccb->ccb_h.status = CAM_FUNC_NOTAVAIL;
 			return;
 		}
 		ahc_restart(ahc);
-		ahc_unlock(ahc, &s);
+		splx(s);
 	}
 	cel = &ccb->cel;
 	target = ccb->ccb_h.target_id;
@@ -6976,14 +6856,13 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 				return;
 			}
 		}
-		lstate = malloc(sizeof(*lstate), M_DEVBUF, M_NOWAIT);
+		lstate = malloc(sizeof(*lstate), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (lstate == NULL) {
 			xpt_print_path(ccb->ccb_h.path);
 			printf("Couldn't allocate lstate\n");
 			ccb->ccb_h.status = CAM_RESRC_UNAVAIL;
 			return;
 		}
-		memset(lstate, 0, sizeof(*lstate));
 		status = xpt_create_path(&lstate->path, /*periph*/NULL,
 					 xpt_path_path_id(ccb->ccb_h.path),
 					 xpt_path_target_id(ccb->ccb_h.path),
@@ -6997,7 +6876,7 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 		}
 		SLIST_INIT(&lstate->accept_tios);
 		SLIST_INIT(&lstate->immed_notifies);
-		ahc_lock(ahc, &s);
+		s = splbio();
 		ahc_pause(ahc);
 		if (target != CAM_TARGET_WILDCARD) {
 			tstate->enabled_luns[lun] = lstate;
@@ -7063,7 +6942,7 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 			ahc_outb(ahc, SCSISEQ, scsiseq);
 		}
 		ahc_unpause(ahc);
-		ahc_unlock(ahc, &s);
+		splx(s);
 		ccb->ccb_h.status = CAM_REQ_CMP;
 		xpt_print_path(ccb->ccb_h.path);
 		printf("Lun now enabled for target mode\n");
@@ -7076,8 +6955,8 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 			return;
 		}
 
-		ahc_lock(ahc, &s);
-		
+		s = splbio();
+
 		ccb->ccb_h.status = CAM_REQ_CMP;
 		LIST_FOREACH(scb, &ahc->pending_scbs, pending_links) {
 			struct ccb_hdr *ccbh;
@@ -7087,7 +6966,7 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 			 && !xpt_path_comp(ccbh->path, ccb->ccb_h.path)){
 				printf("CTIO pending\n");
 				ccb->ccb_h.status = CAM_REQ_INVALID;
-				ahc_unlock(ahc, &s);
+				splx(s);
 				return;
 			}
 		}
@@ -7103,7 +6982,7 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 		}
 
 		if (ccb->ccb_h.status != CAM_REQ_CMP) {
-			ahc_unlock(ahc, &s);
+			splx(s);
 			return;
 		}
 
@@ -7178,7 +7057,7 @@ ahc_handle_en_lun(struct ahc_softc *ahc, struct cam_sim *sim, union ccb *ccb)
 			}
 		}
 		ahc_unpause(ahc);
-		ahc_unlock(ahc, &s);
+		splx(s);
 	}
 }
 
@@ -7220,6 +7099,7 @@ ahc_update_scsiid(struct ahc_softc *ahc, u_int targid_mask)
 		ahc_outb(ahc, SCSIID, scsiid);
 }
 
+#ifdef AHC_TARGET_MODE
 void
 ahc_run_tqinfifo(struct ahc_softc *ahc, int paused)
 {
@@ -7278,6 +7158,7 @@ ahc_run_tqinfifo(struct ahc_softc *ahc, int paused)
 		}
 	}
 }
+#endif
 
 static int
 ahc_handle_target_cmd(struct ahc_softc *ahc, struct target_cmd *cmd)

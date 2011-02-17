@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ipc.h,v 1.9 2004/07/14 23:45:11 millert Exp $	*/
-=======
 /*	$OpenBSD: ipc.h,v 1.11 2011/01/03 23:08:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ipc.h,v 1.15 1996/02/09 18:25:12 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiopreg.h,v 1.4 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: osiopreg.h,v 1.5 2005/11/21 21:52:47 miod Exp $	*/
 /*	$NetBSD: osiopreg.h,v 1.1 2001/04/30 04:47:51 tsutsui Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lsi64854var.h,v 1.5 2005/03/03 01:41:44 miod Exp $	*/
-=======
 /*	$OpenBSD: lsi64854var.h,v 1.7 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lsi64854var.h,v 1.4 2001/03/29 02:58:39 petrov Exp $ */
 
 /*-

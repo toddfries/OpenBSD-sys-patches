@@ -1,4 +1,4 @@
-/* $OpenBSD: sf16fmr2.c,v 1.5 2002/01/07 18:32:19 mickey Exp $ */
+/* $OpenBSD: sf16fmr2.c,v 1.6 2002/10/15 15:00:11 mickey Exp $ */
 /* $RuOBSD: sf16fmr2.c,v 1.12 2001/10/18 16:51:36 pva Exp $ */
 
 /*

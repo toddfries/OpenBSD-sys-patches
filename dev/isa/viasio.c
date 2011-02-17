@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: viasio.c,v 1.8 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: viasio.c,v 1.12 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -189,7 +185,7 @@ viasio_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Read device revision */
 	reg = viasio_conf_read(sc->sc_iot, sc->sc_ioh, VT1211_REV);
-	printf(": VT1211 rev 0x%02x:", reg);
+	printf(": VT1211 rev 0x%02x", reg);
 
 	/* Initialize logical devices */
 	viasio_hm_init(sc);
@@ -207,7 +203,7 @@ viasio_hm_init(struct viasio_softc *sc)
 	u_int16_t iobase;
 	int i;
 
-	printf(" HM");
+	printf(", HM");
 
 	/* Select HM logical device */
 	viasio_conf_write(sc->sc_iot, sc->sc_ioh, VT1211_LDN, VT1211_LDN_HM);
@@ -228,11 +224,11 @@ viasio_hm_init(struct viasio_softc *sc)
 			    VT1211_HM_ACT);
 			DPRINTF((", new ACT 0x%02x", reg0));
 			if ((reg0 & VT1211_HM_ACT_EN) == 0) {
-				printf(": failed to activate");
+				printf(" failed to activate");
 				return;
 			}
 		} else {
-			printf(": not activated");
+			printf(" not activated");
 			return;
 		}
 	}
@@ -246,11 +242,7 @@ viasio_hm_init(struct viasio_softc *sc)
 	/* Map HM I/O space */
 	if (bus_space_map(sc->sc_iot, iobase, VT1211_HM_IOSIZE, 0,
 	    &sc->sc_hm_ioh)) {
-<<<<<<< HEAD
-		printf(": can't map I/O space");
-=======
 		printf(" can't map i/o space");
->>>>>>> origin/master
 		return;
 	}
 
@@ -270,11 +262,11 @@ viasio_hm_init(struct viasio_softc *sc)
 			    VT1211_HM_CONF);
 			DPRINTF((", new CONF 0x%02x", reg0));
 			if ((reg0 & VT1211_HM_CONF_START) == 0) {
-				printf(": failed to enable monitoring");
+				printf(" failed to enable monitoring");
 				return;
 			}
 		} else {
-			printf(": monitoring not enabled");
+			printf(" monitoring not enabled");
 			return;
 		}
 	}
@@ -442,7 +434,7 @@ viasio_wdg_init(struct viasio_softc *sc)
 	u_int8_t reg0, reg1;
 	u_int16_t iobase;
 
-	printf(" WDG");
+	printf(", WDG");
 
 	/* Select WDG logical device */
 	viasio_conf_write(sc->sc_iot, sc->sc_ioh, VT1211_LDN, VT1211_LDN_WDG);
@@ -463,11 +455,11 @@ viasio_wdg_init(struct viasio_softc *sc)
 			    VT1211_WDG_ACT);
 			DPRINTF((", new ACT 0x%02x", reg0));
 			if ((reg0 & VT1211_WDG_ACT_EN) == 0) {
-				printf(": failed to activate");
+				printf(" failed to activate");
 				return;
 			}
 		} else {
-			printf(": not activated");
+			printf(" not activated");
 			return;
 		}
 	}
@@ -481,11 +473,7 @@ viasio_wdg_init(struct viasio_softc *sc)
 	/* Map WDG I/O space */
 	if (bus_space_map(sc->sc_iot, iobase, VT1211_WDG_IOSIZE, 0,
 	    &sc->sc_wdg_ioh)) {
-<<<<<<< HEAD
-		printf(": can't map I/O space");
-=======
 		printf(" can't map i/o space");
->>>>>>> origin/master
 		return;
 	}
 

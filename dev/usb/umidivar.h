@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: umidivar.h,v 1.9 2005/09/07 06:57:09 jsg Exp $ */
-=======
 /*	$OpenBSD: umidivar.h,v 1.12 2008/06/26 05:42:19 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: umidivar.h,v 1.5 2002/09/12 21:00:42 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -106,7 +102,7 @@ struct umidi_endpoint {
 
 /* software context */
 struct umidi_softc {
-	USBBASEDEVICE		sc_dev;
+	struct device		sc_dev;
 	usbd_device_handle	sc_udev;
 	usbd_interface_handle	sc_iface;
 	struct umidi_quirk	*sc_quirk;

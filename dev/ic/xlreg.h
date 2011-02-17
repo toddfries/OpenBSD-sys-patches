@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: xlreg.h,v 1.18 2004/05/19 12:11:34 brad Exp $	*/
-=======
 /*	$OpenBSD: xlreg.h,v 1.26 2010/09/21 01:05:12 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998

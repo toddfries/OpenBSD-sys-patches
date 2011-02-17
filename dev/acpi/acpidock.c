@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpidock.c,v 1.17 2007/02/15 21:02:17 mk Exp $ */
-=======
 /* $OpenBSD: acpidock.c,v 1.42 2010/07/27 01:21:19 jordan Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2006,2007 Michael Knudsen <mk@openbsd.org>
  *
@@ -33,6 +29,11 @@
 #include <dev/acpi/amltypes.h>
 #include <dev/acpi/dsdt.h>
 
+struct aml_nodelist {
+	struct aml_node *node;
+	TAILQ_ENTRY(aml_nodelist) entries;
+};
+
 int	acpidock_match(struct device *, void *, void *);
 void	acpidock_attach(struct device *, struct device *, void *);
 
@@ -44,13 +45,14 @@ struct cfdriver acpidock_cd = {
 	NULL, "acpidock", DV_DULL
 };
 
-
 int	acpidock_docklock(struct acpidock_softc *, int);
 int	acpidock_dockctl(struct acpidock_softc *, int);
 int	acpidock_eject(struct acpidock_softc *, struct aml_node *);
 int	acpidock_notify(struct aml_node *, int, void *);
 int	acpidock_status(struct acpidock_softc *);
 int	acpidock_walkchildren(struct aml_node *, void *);
+
+int	acpidock_foundejd(struct aml_node *, void *);
 
 int
 acpidock_match(struct device *parent, void *match, void *aux)
@@ -72,11 +74,12 @@ acpidock_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct acpidock_softc	*sc = (struct acpidock_softc *)self;
 	struct acpi_attach_args *aa = aux;
+	extern struct aml_node	aml_root;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
-	sc->sc_devnode = aa->aaa_node->child;
+	sc->sc_devnode = aa->aaa_node;
 
-	printf(": %s", sc->sc_devnode->parent->name);
+	printf(": %s", sc->sc_devnode->name);
 
 	acpidock_status(sc);
 	if (sc->sc_docked == ACPIDOCK_STATUS_DOCKED) {
@@ -92,39 +95,29 @@ acpidock_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensdev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensdev.xname));
 	if (sc->sc_docked)
-		strlcpy(sc->sc_sens[0].desc, "docked",
-		    sizeof(sc->sc_sens[0].desc));
+		strlcpy(sc->sc_sens.desc, "docked",
+		    sizeof(sc->sc_sens.desc));
 	else
-		strlcpy(sc->sc_sens[0].desc, "not docked",
-		    sizeof(sc->sc_sens[0].desc));
+		strlcpy(sc->sc_sens.desc, "not docked",
+		    sizeof(sc->sc_sens.desc));
 
-	sc->sc_sens[0].type = SENSOR_INDICATOR;
-	sc->sc_sens[0].value = sc->sc_docked == ACPIDOCK_STATUS_DOCKED;
-	sensor_attach(&sc->sc_sensdev, &sc->sc_sens[0]);
+	sc->sc_sens.type = SENSOR_INDICATOR;
+	sc->sc_sens.value = sc->sc_docked == ACPIDOCK_STATUS_DOCKED;
+	sensor_attach(&sc->sc_sensdev, &sc->sc_sens);
 	sensordev_install(&sc->sc_sensdev);
 
-<<<<<<< HEAD
-	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev, 
-=======
 	TAILQ_INIT(&sc->sc_deps_h);
 	aml_find_node(&aml_root, "_EJD", acpidock_foundejd, sc);
 
 	aml_register_notify(sc->sc_devnode, aa->aaa_dev,
->>>>>>> origin/master
 	    acpidock_notify, sc, ACPIDEV_NOPOLL);
-
 }
 
 int
 acpidock_status(struct acpidock_softc *sc)
 {
-<<<<<<< HEAD
-	struct aml_value	res;
-	int			rv, sta;
-=======
 	int64_t			sta;
 	int			rv;
->>>>>>> origin/master
 
 	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL,
 	    &sta) != 0) {
@@ -132,17 +125,9 @@ acpidock_status(struct acpidock_softc *sc)
 		rv = 0;
 	} else
 		rv = 1;
-	
-	sta = aml_val2int(&res);
-	sc->sc_sta = sta;
 
-<<<<<<< HEAD
-	/* XXX: _STA bit defines */
-	sc->sc_docked = sta & 0x01;
-=======
 	sc->sc_sta = sta;
 	sc->sc_docked = sc->sc_sta & STA_PRESENT;
->>>>>>> origin/master
 
 	return (rv);
 }
@@ -179,7 +164,7 @@ acpidock_dockctl(struct acpidock_softc *sc, int dock)
 	int			rv;
 
 	memset(&cmd, 0, sizeof cmd);
-	cmd.v_integer = 1;
+	cmd.v_integer = dock;
 	cmd.type = AML_OBJTYPE_INTEGER;
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_DCK", 1, &cmd,
 	    &res) != 0) {
@@ -228,17 +213,11 @@ acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 	struct acpidock_softc	*sc = arg;
 	struct aml_nodelist	*n;
 
-	printf("acpidock_notify: notify %d\n", notify_type);
+	dnprintf(5, "%s: acpidock_notify: notify %d\n", DEVNAME(sc),
+	    notify_type);
+
 	switch (notify_type) {
 	case ACPIDOCK_EVENT_INSERT:
-<<<<<<< HEAD
-		dnprintf(10, "INSERT\n");
-		acpidock_docklock(sc, 1);
-		acpidock_dockctl(sc, 1);
-		break;
-	case ACPIDOCK_EVENT_EJECT:
-		dnprintf(10, "EJECT\n");
-=======
 		acpidock_docklock(sc, 1);
 		acpidock_dockctl(sc, 1);
 
@@ -252,42 +231,30 @@ acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 		 * a Notify(Device, 1); */
 		TAILQ_FOREACH(n, &sc->sc_deps_h, entries)
 			acpidock_eject(sc, n->node);
->>>>>>> origin/master
 		acpidock_dockctl(sc, 0);
 		acpidock_docklock(sc, 0);
 
 		/* now actually undock */
 		acpidock_eject(sc, sc->sc_devnode);
-<<<<<<< HEAD
-		
-=======
->>>>>>> origin/master
 		break;
 	}
 
 	acpidock_status(sc);
-	sc->sc_sens[0].value = sc->sc_docked == ACPIDOCK_STATUS_DOCKED;
+	sc->sc_sens.value = sc->sc_docked == ACPIDOCK_STATUS_DOCKED;
 	if (sc->sc_docked)
-		strlcpy(sc->sc_sens[0].desc, "docked",
-		    sizeof(sc->sc_sens[0].desc));
+		strlcpy(sc->sc_sens.desc, "docked",
+		    sizeof(sc->sc_sens.desc));
 	else
-		strlcpy(sc->sc_sens[0].desc, "not docked",
-		    sizeof(sc->sc_sens[0].desc));
+		strlcpy(sc->sc_sens.desc, "not docked",
+		    sizeof(sc->sc_sens.desc));
 
-<<<<<<< HEAD
-	dnprintf(5, "acpidock_notify: status %s\n",
-	    sc->sc_docked == ACPIDOCK_STATUS_DOCKED ? "docked" : "undocked");
-=======
 	printf("%s: %s\n",
 	    DEVNAME(sc), sc->sc_docked == ACPIDOCK_STATUS_DOCKED ?
 	    "docked" : "undocked");
->>>>>>> origin/master
 
 	return (0);
 }
 
-<<<<<<< HEAD
-=======
 int
 acpidock_walkchildren(struct aml_node *node, void *arg)
 {
@@ -329,4 +296,3 @@ acpidock_foundejd(struct aml_node *node, void *arg)
 
 	return (0);
 }
->>>>>>> origin/master

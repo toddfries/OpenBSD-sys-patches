@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpivar.h,v 1.21 2006/09/21 09:44:05 dlg Exp $ */
-=======
 /*	$OpenBSD: mpivar.h,v 1.35 2010/09/13 07:48:12 dlg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>

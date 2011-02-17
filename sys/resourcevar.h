@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: resourcevar.h,v 1.10 2006/12/24 20:28:44 miod Exp $	*/
-=======
 /*	$OpenBSD: resourcevar.h,v 1.12 2010/06/29 20:14:46 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: resourcevar.h,v 1.12 1995/11/22 23:01:53 cgd Exp $	*/
 
 /*

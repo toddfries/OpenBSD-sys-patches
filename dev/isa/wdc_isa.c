@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: wdc_isa.c,v 1.11 2004/01/15 17:51:42 miod Exp $     */
-=======
 /*      $OpenBSD: wdc_isa.c,v 1.13 2008/06/26 05:42:16 ray Exp $     */
->>>>>>> origin/master
 /*	$NetBSD: wdc_isa.c,v 1.15 1999/05/19 14:41:25 bouyer Exp $ */
 
 /*-

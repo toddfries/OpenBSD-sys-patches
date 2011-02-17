@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: biovar.h,v 1.25 2006/06/10 18:47:43 deraadt Exp $	*/
-=======
 /*	$OpenBSD: biovar.h,v 1.38 2010/03/26 16:50:59 jsing Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -179,11 +175,8 @@ struct bioc_setstate {
 #define BIOCCREATERAID _IOWR('B', 38, struct bioc_createraid)
 struct bioc_createraid {
 	void		*bc_cookie;
-	char		*bc_dev_list;
+	void		*bc_dev_list;
 	u_int16_t	bc_dev_list_len;
-<<<<<<< HEAD
-	u_int16_t	bc_level;
-=======
 	int32_t		bc_key_disk;
 #define BIOC_CRMAXLEN		1024
 	u_int16_t	bc_level;
@@ -228,7 +221,6 @@ struct bioc_installboot {
 	void		*bb_bootldr;
 	u_int32_t	bb_bootblk_size;
 	u_int32_t	bb_bootldr_size;
->>>>>>> origin/master
 };
 
 /* kernel and userspace defines */

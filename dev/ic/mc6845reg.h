@@ -1,4 +1,4 @@
-/* $OpenBSD: mc6845reg.h,v 1.1 2000/11/15 20:21:09 aaron Exp $ */
+/* $OpenBSD: mc6845reg.h,v 1.2 2004/04/02 04:39:50 deraadt Exp $ */
 /* $NetBSD: mc6845reg.h,v 1.1 1998/05/28 16:48:40 drochner Exp $ */
 
 /*

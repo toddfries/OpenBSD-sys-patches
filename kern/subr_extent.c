@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_extent.c,v 1.32 2006/03/16 22:14:28 miod Exp $	*/
-=======
 /*	$OpenBSD: subr_extent.c,v 1.45 2011/01/05 13:36:19 fgsch Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: subr_extent.c,v 1.7 1996/11/21 18:46:34 cgd Exp $	*/
 
 /*-

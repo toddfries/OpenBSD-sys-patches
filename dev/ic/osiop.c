@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: osiop.c,v 1.26 2005/12/03 16:53:16 krw Exp $	*/
-=======
 /*	$OpenBSD: osiop.c,v 1.47 2011/01/02 13:38:27 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -71,13 +67,7 @@
  *	NetBSD: siop.c,v 1.43 1999/09/30 22:59:53 thorpej Exp
  *
  * bus_space/bus_dma'fied by Izumi Tsutsui <tsutsui@ceres.dti.ne.jp>
- *
- * The 53c710 datasheet is available at:
- * http://www.lsilogic.com/techlib/techdocs/storage_stand_prod/index.html
  */
-
-#include <sys/cdefs.h>
-/* __KERNEL_RCSID(0, "$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $"); */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -277,13 +267,11 @@ osiop_attach(sc)
 	/*
 	 * Allocate (malloc) memory for acb's.
 	 */
-	acb = malloc(sizeof(struct osiop_acb) * OSIOP_NACB,
-	    M_DEVBUF, M_NOWAIT);
+	acb = malloc(sizeof(*acb) * OSIOP_NACB, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (acb == NULL) {
 		printf(": can't allocate memory for acb\n");
 		return;
 	}
-	bzero(acb, sizeof(struct osiop_acb) * OSIOP_NACB);
 	sc->sc_acb = acb;
 
 	sc->sc_cfflags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -329,16 +317,11 @@ osiop_attach(sc)
 		TAILQ_INSERT_TAIL(&sc->free_list, acb, chain);
 	}
 
-<<<<<<< HEAD
-	printf(": NCR53C710 rev %d, %dMHz, SCSI ID %d\n",
-	    osiop_read_1(sc, OSIOP_CTEST8) >> 4, sc->sc_clock_freq, sc->sc_id);
-=======
 	mtx_init(&sc->free_list_mtx, IPL_BIO);
 	scsi_iopool_init(&sc->sc_iopool, sc, osiop_io_get, osiop_io_put);
 
 	printf(": NCR53C710 rev %d, %dMHz\n",
 	    osiop_read_1(sc, OSIOP_CTEST8) >> 4, sc->sc_clock_freq);
->>>>>>> origin/master
 
 	/*
 	 * Initialize all
@@ -479,17 +462,6 @@ osiop_scsicmd(xs)
 
 	if (dopoll)
 		osiop_poll(sc, acb);
-<<<<<<< HEAD
-	else
-		/* start expire timer */
-		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
-
-	if ((xs->flags & ITSDONE) == 0)
-		return (SUCCESSFULLY_QUEUED);
-	else
-		return (COMPLETE);
-=======
->>>>>>> origin/master
 }
 
 void
@@ -1345,7 +1317,11 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 		if (acb == NULL) {
 			printf("%s: Select timeout with no active command?\n",
 			    sc->sc_dev.dv_xname);
+#if 0
 			return (0);
+#else
+			goto bad_phase;
+#endif
 		}
 #ifdef OSIOP_DEBUG
 		if (osiop_read_1(sc, OSIOP_SBCL) & OSIOP_BSY) {
@@ -1716,16 +1692,11 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 #ifdef OSIOP_DEBUG
 	if (osiop_debug & DEBUG_DMA)
 		panic("osiop_chkintr: **** temp ****");
-<<<<<<< HEAD
-#ifdef DDB
-	Debugger();
-#endif
-=======
->>>>>>> origin/master
 #endif
 	osiop_reset(sc);	/* hard reset */
 	*status = SCSI_OSIOP_NOSTATUS;
-	acb->status = ACB_S_DONE;
+	if (acb != NULL)
+		acb->status = ACB_S_DONE;
 	return (0);		/* osiop_reset cleaned up */
 }
 

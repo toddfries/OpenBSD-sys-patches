@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cissvar.h,v 1.6 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: cissvar.h,v 1.14 2010/06/03 01:03:55 dlg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff

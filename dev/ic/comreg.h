@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: comreg.h,v 1.14 2005/07/03 19:46:45 deraadt Exp $	*/
-=======
 /*	$OpenBSD: comreg.h,v 1.16 2008/06/08 13:55:06 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: comreg.h,v 1.8 1996/02/05 23:01:50 scottr Exp $	*/
 
 /*

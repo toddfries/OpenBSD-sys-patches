@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_pqdegdags.c,v 1.4 2000/01/07 14:50:22 peter Exp $	*/
+/*	$OpenBSD: rf_pqdegdags.c,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_pqdegdags.c,v 1.5 1999/08/15 02:36:40 oster Exp $	*/
 
 /*

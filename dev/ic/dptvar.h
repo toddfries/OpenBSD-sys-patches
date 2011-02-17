@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dptvar.h,v 1.1 1999/11/30 07:55:56 cmetz Exp $	*/
-=======
 /*	$OpenBSD: dptvar.h,v 1.6 2010/07/20 20:46:18 mk Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dptvar.h,v 1.5 1999/10/23 16:26:32 ad Exp $	*/
 
 /*

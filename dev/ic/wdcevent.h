@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wdcevent.h,v 1.3 2002/12/22 18:24:45 grange Exp $ */
-
-=======
 /*	$OpenBSD: wdcevent.h,v 1.6 2008/07/02 03:00:55 fgsch Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2001 Constantine Sapuntzakis
  *

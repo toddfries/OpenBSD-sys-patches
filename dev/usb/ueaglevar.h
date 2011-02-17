@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: ueaglevar.h,v 1.3 2010/12/06 04:41:40 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2003-2005
@@ -160,7 +156,7 @@ struct ueagle_stats {
 #define UEAGLE_COND_SYNC(sc)	((char *)(sc) + 3)
 
 struct ueagle_softc {
-	USBBASEDEVICE		sc_dev;
+	struct device		sc_dev;
 	struct ifnet		sc_if;
 
 	usbd_device_handle	sc_udev;

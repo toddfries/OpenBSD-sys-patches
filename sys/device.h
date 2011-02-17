@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: device.h,v 1.31 2006/05/27 23:51:27 mk Exp $	*/
-=======
 /*	$OpenBSD: device.h,v 1.42 2010/08/31 17:13:48 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: device.h,v 1.15 1996/04/09 20:55:24 cgd Exp $	*/
 
 /*
@@ -72,8 +68,6 @@ enum devclass {
 #define	DVACT_RESUME		3	/* resume the device */
 #define	DVACT_QUIESCE		4	/* warn the device about suspend */
 
-#include <sys/lock.h>
-
 struct device {
 	enum	devclass dv_class;	/* this device's classification */
 	TAILQ_ENTRY(device) dv_list;	/* entry on list of all devices */
@@ -89,15 +83,6 @@ struct device {
 #define	DVF_ACTIVE	0x0001		/* device is activated */
 
 TAILQ_HEAD(devicelist, device);
-
-/* `event' counters (use zero or more per device instance, as needed) */
-struct evcnt {
-	TAILQ_ENTRY(evcnt) ev_list;	/* entry on list of all counters */
-	struct	device *ev_dev;		/* associated device */
-	int	ev_count;		/* how many have occurred */
-	char	ev_name[8];		/* what to call them (systat display) */
-};
-TAILQ_HEAD(evcntlist, evcnt);
 
 /*
  * Configuration data (i.e., data placed in ioconf.c).
@@ -186,7 +171,6 @@ struct cftable {
 TAILQ_HEAD(cftable_head, cftable);
 
 extern struct devicelist alldevs;	/* list of all devices */
-extern struct evcntlist allevents;	/* list of all event counters */
 
 extern int autoconf_verbose;
 extern __volatile int config_pending;	/* semaphore for mountroot */
@@ -208,7 +192,6 @@ int config_activate_children(struct device *, int);
 struct device *config_make_softc(struct device *parent,
     struct cfdata *cf);
 void config_defer(struct device *, void (*)(struct device *));
-void evcnt_attach(struct device *, const char *, struct evcnt *);
 void config_pending_incr(void);
 void config_pending_decr(void);
 
@@ -216,9 +199,17 @@ struct device *device_lookup(struct cfdriver *, int unit);
 void device_ref(struct device *);
 void device_unref(struct device *);
 
-#ifdef __HAVE_DEVICE_REGISTER
-void device_register(struct device *, void *);
-#endif
+struct nam2blk {
+	char	*name;
+	int	maj;
+};
+
+int	findblkmajor(struct device *dv);
+char	*findblkname(int);
+void	setroot(struct device *, int, int);
+struct	device *getdisk(char *str, int len, int defpart, dev_t *devp);
+struct	device *parsedisk(char *str, int len, int defpart, dev_t *devp);
+void	device_register(struct device *, void *);
 
 int loadfirmware(const char *name, u_char **bufp, size_t *buflen);
 #define FIRMWARE_MAX	5*1024*1024

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ar5xxx.h,v 1.39 2007/03/12 01:04:52 reyk Exp $	*/
-=======
 /*	$OpenBSD: ar5xxx.h,v 1.48 2010/04/20 22:05:41 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -1117,6 +1113,8 @@ struct ath_hal {
 	HAL_BOOL		ah_single_chip;
 	HAL_BOOL		ah_pci_express;
 	HAL_RFGAIN		ah_rf_gain;
+
+	int			ah_chanoff;
 
 	HAL_RATE_TABLE		ah_rt_11a;
 	HAL_RATE_TABLE		ah_rt_11b;
@@ -2287,9 +2285,6 @@ struct ath_hal		*ath_hal_attach(u_int16_t, void *, bus_space_tag_t,
 
 u_int16_t		 ath_hal_computetxtime(struct ath_hal *,
     const HAL_RATE_TABLE *, u_int32_t, u_int16_t, HAL_BOOL);
-
-u_int			 ath_hal_mhz2ieee(u_int, u_int);
-u_int			 ath_hal_ieee2mhz(u_int, u_int);
 
 HAL_BOOL		 ath_hal_init_channels(struct ath_hal *, HAL_CHANNEL *,
     u_int, u_int *, u_int16_t, HAL_BOOL, HAL_BOOL);

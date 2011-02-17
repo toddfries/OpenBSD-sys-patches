@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: osiopvar.h,v 1.9 2003/11/16 20:30:06 avsm Exp $	*/
-=======
 /*	$OpenBSD: osiopvar.h,v 1.11 2010/06/28 04:39:57 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: osiopvar.h,v 1.3 2002/05/14 02:58:35 matt Exp $	*/
 
 /*

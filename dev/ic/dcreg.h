@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dcreg.h,v 1.41 2005/01/02 13:39:21 brad Exp $ */
-=======
 /*	$OpenBSD: dcreg.h,v 1.48 2010/09/07 16:21:42 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999

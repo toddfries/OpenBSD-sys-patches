@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sqphy.c,v 1.14 2005/02/05 04:28:23 brad Exp $	*/
-=======
 /*	$OpenBSD: sqphy.c,v 1.18 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sqphy.c,v 1.17 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-

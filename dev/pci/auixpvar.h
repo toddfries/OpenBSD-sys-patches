@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: auixpvar.h,v 1.3 2010/09/21 02:09:15 jakemsr Exp $ */
->>>>>>> origin/master
 /* $NetBSD: auixpvar.h,v 1.3 2005/01/12 15:54:34 kent Exp $*/
 
 /*

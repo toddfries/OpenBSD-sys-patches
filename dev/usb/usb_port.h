@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usb_port.h,v 1.61 2006/04/23 04:48:07 dlg Exp $ */
-=======
 /*	$OpenBSD: usb_port.h,v 1.99 2009/11/04 19:14:10 kettenis Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -40,51 +36,10 @@
 #define _USB_PORT_H
 
 /*
- * Macro's to cope with the differences between operating systems.
+ * Macros to ease the import of USB drivers from other operating systems, e.g.
+ * NetBSD or FreeBSD.
  */
 
-<<<<<<< HEAD
-#include <sys/timeout.h>
-
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-#define USB_USE_SOFTINTR
-#else
-#undef USB_USE_SOFTINTR
-#endif
-
-#ifdef USB_DEBUG
-#define UKBD_DEBUG 1
-#define UHIDEV_DEBUG 1
-#define UHID_DEBUG 1
-#define OHCI_DEBUG 1
-#define UGEN_DEBUG 1
-#define UHCI_DEBUG 1
-#define UHUB_DEBUG 1
-#define ULPT_DEBUG 1
-#define UCOM_DEBUG 1
-#define UPLCOM_DEBUG 1
-#define UMCT_DEBUG 1
-#define UMODEM_DEBUG 1
-#define UAUDIO_DEBUG 1
-#define AUE_DEBUG 1
-#define CUE_DEBUG 1
-#define KUE_DEBUG 1
-#define UDAV_DEBUG 1
-#define UMASS_DEBUG 1
-#define UVISOR_DEBUG 1
-#define UPL_DEBUG 1
-#define UZCOM_DEBUG 1
-#define URIO_DEBUG 1
-#define UFTDI_DEBUG 1
-#define USCANNER_DEBUG 1
-#define USSCANNER_DEBUG 1
-#define UISDATA_DEBUG 1
-#define UDSBR_DEBUG 1
-#define UIPAQ_DEBUG 1
-#endif
-
-=======
->>>>>>> origin/master
 #define Static
 
 #define UMASS_ATAPISTR		"atapiscsi"
@@ -102,30 +57,14 @@ typedef struct proc *usb_proc_ptr;
 #define UHIDBUSCF_REPORTID		0
 #define UHIDBUSCF_REPORTID_DEFAULT	-1
 
-#define bswap32(x)		swap32(x)
-#define bswap16(x)		swap16(x)
-
 #define mstohz(ms) ((ms) * hz / 1000)
-
-/*
- * The UHCI/OHCI controllers are little endian, so on big endian machines
- * the data stored in memory needs to be swapped.
- */
-
-#if defined(letoh32)
-#define le32toh(x) letoh32(x)
-#define le16toh(x) letoh16(x)
-#endif
 
 #define sel_klist si_note
 
 typedef int usb_malloc_type;
 
-#define Ether_ifattach(ifp, eaddr) ether_ifattach(ifp)
 #define if_deactivate(x)
 #define IF_INPUT(ifp, m) ether_input_mbuf((ifp), (m))
-
-#define logprintf printf
 
 #define swap_bytes_change_sign16_le swap_bytes_change_sign16
 #define change_sign16_swap_bytes_le change_sign16_swap_bytes
@@ -161,8 +100,6 @@ typedef struct timeout usb_callout_t;
 	} while (0)
 #define usb_callout_pending(h)	timeout_pending(&(h))
 #define usb_uncallout(h, f, d) timeout_del(&(h))
-
-#define usb_lockmgr(l, f, sl, p) lockmgr((l), (f), (sl))
 
 #define USB_DECLARE_DRIVER_CLASS(dname, devclass)  \
 int __CONCAT(dname,_match)(struct device *, void *, void *); \

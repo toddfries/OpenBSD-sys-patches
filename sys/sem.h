@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sem.h,v 1.18 2004/07/15 11:24:46 millert Exp $	*/
-=======
 /*	$OpenBSD: sem.h,v 1.21 2011/01/03 23:08:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sem.h,v 1.8 1996/02/09 18:25:29 christos Exp $	*/
 
 /*

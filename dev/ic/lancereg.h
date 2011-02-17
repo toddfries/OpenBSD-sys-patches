@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: lancereg.h,v 1.2 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lancereg.h,v 1.11 2003/11/02 11:07:45 wiz Exp $	*/
 
 /*-

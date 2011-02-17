@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rumvar.h,v 1.6 2006/08/18 15:11:12 damien Exp $	*/
+/*	$OpenBSD: if_rumvar.h,v 1.8 2007/06/06 19:25:49 mk Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006 Damien Bergamini <damien.bergamini@free.fr>
@@ -69,7 +69,7 @@ struct rum_rx_data {
 };
 
 struct rum_softc {
-	USBBASEDEVICE			sc_dev;
+	struct device			sc_dev;
 	struct ieee80211com		sc_ic;
 	int				(*sc_newstate)(struct ieee80211com *,
 					    enum ieee80211_state, int);

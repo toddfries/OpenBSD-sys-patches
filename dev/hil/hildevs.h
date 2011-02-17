@@ -1,4 +1,4 @@
-/*	$OpenBSD: hildevs.h,v 1.3 2003/02/26 20:22:04 miod Exp $	*/
+/*	$OpenBSD: hildevs.h,v 1.4 2005/05/13 14:54:44 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

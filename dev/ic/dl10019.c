@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dl10019.c,v 1.2 2001/06/16 22:43:12 fgsch Exp $	*/
-=======
 /*	$OpenBSD: dl10019.c,v 1.4 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-

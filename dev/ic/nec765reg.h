@@ -1,4 +1,4 @@
-/*	$OpenBSD: nec765reg.h,v 1.3 1996/08/29 14:33:13 downsj Exp $	*/
+/*	$OpenBSD: nec765reg.h,v 1.4 2003/06/02 23:28:02 millert Exp $	*/
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
  * All rights reserved.

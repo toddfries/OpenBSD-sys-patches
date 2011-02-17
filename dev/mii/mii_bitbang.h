@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mii_bitbang.h,v 1.1 2001/03/11 02:48:19 aaron Exp $	*/
-=======
 /*	$OpenBSD: mii_bitbang.h,v 1.3 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-

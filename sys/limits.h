@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: limits.h,v 1.5 2004/09/16 13:10:57 miod Exp $ */
-=======
 /* $OpenBSD: limits.h,v 1.8 2009/11/27 19:54:35 guenther Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2002 Marc Espie.
  *
@@ -54,7 +50,7 @@
 #define	SCHAR_MAX	0x7f		/* max value for a signed char */
 #define SCHAR_MIN	(-0x7f-1)	/* min value for a signed char */
 
-#define	UCHAR_MAX	0xffU		/* max value for an unsigned char */
+#define	UCHAR_MAX	0xff		/* max value for an unsigned char */
 #ifdef __machine_has_unsigned_chars
 # define CHAR_MIN	0		/* min value for a char */
 # define CHAR_MAX	0xff		/* max value for a char */
@@ -63,13 +59,9 @@
 # define CHAR_MIN	(-0x7f-1)
 #endif
 
-<<<<<<< HEAD
-#define	USHRT_MAX	0xffffU		/* max value for an unsigned short */
-=======
 #define	MB_LEN_MAX	4		/* Allow UTF-8 (RFC 3629) */
 
 #define	USHRT_MAX	0xffff		/* max value for an unsigned short */
->>>>>>> origin/master
 #define	SHRT_MAX	0x7fff		/* max value for a short */
 #define SHRT_MIN        (-0x7fff-1)     /* min value for a short */
 

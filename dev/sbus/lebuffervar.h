@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lebuffervar.h,v 1.2 2001/08/20 19:48:33 jason Exp $	*/
-=======
 /*	$OpenBSD: lebuffervar.h,v 1.4 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lebuffervar.h,v 1.2 1998/07/27 19:25:34 pk Exp $ */
 
 /*-

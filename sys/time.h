@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: time.h,v 1.23 2006/06/19 15:13:35 deraadt Exp $	*/
-=======
 /*	$OpenBSD: time.h,v 1.26 2009/11/27 19:45:54 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*
@@ -298,7 +294,6 @@ void	bintime(struct bintime *);
 void	nanotime(struct timespec *);
 void	microtime(struct timeval *);
 
-void	getbintime(struct bintime *);
 void	getnanotime(struct timespec *);
 void	getmicrotime(struct timeval *);
 
@@ -306,7 +301,6 @@ void	binuptime(struct bintime *);
 void	nanouptime(struct timespec *);
 void	microuptime(struct timeval *);
 
-void	getbinuptime(struct bintime *);
 void	getnanouptime(struct timespec *);
 void	getmicrouptime(struct timeval *);
 

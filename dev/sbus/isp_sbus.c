@@ -1,11 +1,7 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isp_sbus.c,v 1.7 2005/03/02 17:10:03 miod Exp $	*/
-=======
 /*	$OpenBSD: isp_sbus.c,v 1.17 2009/09/02 16:05:16 kettenis Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: isp_sbus.c,v 1.46 2001/09/26 20:53:14 eeh Exp $ */
 /*
- * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
+ * SBus specific probe and attach routines for QLogic ISP SCSI adapters.
  *
  * Copyright (c) 1997, 2001 by Matthew Jacob
  * NASA AMES Research Center
@@ -67,7 +63,6 @@
 #endif
 
 #include <dev/sbus/sbusvar.h>
-#include <sys/reboot.h>
 
 static int isp_sbus_intr(void *);
 static int
@@ -148,11 +143,7 @@ isp_match(struct device *parent, void *vcf, void *aux)
 #ifdef DEBUG
 	if (rv && oneshot) {
 		oneshot = 0;
-<<<<<<< HEAD
-		printf("Qlogic ISP Driver, NetBSD (sbus) Platform Version "
-=======
 		printf("QLogic ISP Driver, OpenBSD (sbus) Platform Version "
->>>>>>> origin/master
 		    "%d.%d Core Version %d.%d\n",
 		    ISP_PLATFORM_VERSION_MAJOR, ISP_PLATFORM_VERSION_MINOR,
 		    ISP_CORE_VERSION_MAJOR, ISP_CORE_VERSION_MINOR);
@@ -206,6 +197,8 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 #endif
 	}
 	sbc->sbus_mdvec.dv_clock = freq;
+
+	DEFAULT_IID(isp) = getpropint(sa->sa_node, "scsi-initiator-id", 7);
 
 	/*
 	 * Now figure out what the proper burst sizes, etc., to use.
@@ -460,12 +453,12 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 		return (0);
 
 	n = isp->isp_maxcmds * sizeof (XS_T *);
-	isp->isp_xflist = (XS_T **) malloc(n, M_DEVBUF, M_WAITOK);
+	isp->isp_xflist = (XS_T **) malloc(n, M_DEVBUF, M_WAITOK | M_ZERO);
 	if (isp->isp_xflist == NULL) {
 		isp_prt(isp, ISP_LOGERR, "cannot alloc xflist array");
 		return (1);
 	}
-	MEMZERO(isp->isp_xflist, n);
+
 	n = sizeof (bus_dmamap_t) * isp->isp_maxcmds;
 	sbc->sbus_dmamap = (bus_dmamap_t *) malloc(n, M_DEVBUF, M_WAITOK);
 	if (sbc->sbus_dmamap == NULL) {

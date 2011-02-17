@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_disks.h,v 1.4 2000/08/08 16:07:40 peter Exp $	*/
+/*	$OpenBSD: rf_disks.h,v 1.5 2002/12/16 07:01:03 tdeval Exp $	*/
 /*	$NetBSD: rf_disks.h,v 1.8 2000/03/27 03:25:17 oster Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpi.c,v 1.83 2007/03/17 10:25:39 dlg Exp $ */
-=======
 /*	$OpenBSD: mpi.c,v 1.165 2010/09/24 01:27:11 dlg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -100,6 +96,7 @@ void			mpi_reply(struct mpi_softc *, u_int32_t);
 void			mpi_wait(struct mpi_softc *sc, struct mpi_ccb *);
 void			mpi_wait_done(struct mpi_ccb *);
 
+int			mpi_cfg_spi_port(struct mpi_softc *);
 void			mpi_squash_ppr(struct mpi_softc *);
 void			mpi_run_ppr(struct mpi_softc *);
 int			mpi_ppr(struct mpi_softc *, struct scsi_link *,
@@ -292,10 +289,6 @@ mpi_attach(struct mpi_softc *sc)
 		goto free_replies;
 	}
 
-<<<<<<< HEAD
-	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SCSI)
-		mpi_squash_ppr(sc);
-=======
 	switch (sc->sc_porttype) {
 	case MPI_PORTFACTS_PORTTYPE_SCSI:
 		if (mpi_cfg_spi_port(sc) != 0)
@@ -345,7 +338,6 @@ mpi_attach(struct mpi_softc *sc)
 		}
 	}
 #endif /* NBIO > 0 */
->>>>>>> origin/master
 
 	/* we should be good to go now, attach scsibus */
 	sc->sc_link.adapter = &mpi_switch;
@@ -391,6 +383,46 @@ free_ccbs:
 	free(sc->sc_ccbs, M_DEVBUF);
 
 	return(1);
+}
+
+int
+mpi_cfg_spi_port(struct mpi_softc *sc)
+{
+	struct mpi_cfg_hdr		hdr;
+	struct mpi_cfg_spi_port_pg1	port;
+
+	if (mpi_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_SCSI_SPI_PORT, 1, 0x0,
+	    &hdr) != 0)
+		return (1);
+
+	if (mpi_cfg_page(sc, 0x0, &hdr, 1, &port, sizeof(port)) != 0)
+		return (1);
+
+	DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_spi_port_pg1\n", DEVNAME(sc));
+	DNPRINTF(MPI_D_MISC, "%s:  port_scsi_id: %d port_resp_ids 0x%04x\n",
+	    DEVNAME(sc), port.port_scsi_id, letoh16(port.port_resp_ids));
+	DNPRINTF(MPI_D_MISC, "%s:  on_bus_timer_value: 0x%08x\n", DEVNAME(sc),
+	    letoh32(port.port_scsi_id));
+	DNPRINTF(MPI_D_MISC, "%s:  target_config: 0x%02x id_config: 0x%04x\n",
+	    DEVNAME(sc), port.target_config, letoh16(port.id_config));
+
+	if (port.port_scsi_id == sc->sc_target &&
+	    port.port_resp_ids == htole16(1 << sc->sc_target) &&
+	    port.on_bus_timer_value != htole32(0x0))
+		return (0);
+
+	DNPRINTF(MPI_D_MISC, "%s: setting port scsi id to %d\n", DEVNAME(sc),
+	    sc->sc_target);
+	port.port_scsi_id = sc->sc_target;
+	port.port_resp_ids = htole16(1 << sc->sc_target);
+	port.on_bus_timer_value = htole32(0x07000000); /* XXX magic */
+
+	if (mpi_cfg_page(sc, 0x0, &hdr, 0, &port, sizeof(port)) != 0) {
+		printf("%s: unable to configure port scsi id\n", DEVNAME(sc));
+		return (1);
+	}
+
+	return (0);
 }
 
 void
@@ -477,7 +509,7 @@ mpi_run_ppr(struct mpi_softc *sc)
 	}
 
 	pagelen = hdr.page_length * 4; /* dwords to bytes */
-	physdisk_pg = malloc(pagelen, M_TEMP, M_WAITOK);
+	physdisk_pg = malloc(pagelen, M_TEMP, M_WAITOK|M_CANFAIL);
 	if (physdisk_pg == NULL) {
 		DNPRINTF(MPI_D_RAID|MPI_D_PPR, "%s: mpi_run_ppr unable to "
 		    "allocate ioc pg 3\n", DEVNAME(sc));
@@ -923,11 +955,10 @@ mpi_dmamem_alloc(struct mpi_softc *sc, size_t size)
 	struct mpi_dmamem		*mdm;
 	int				nsegs;
 
-	mdm = malloc(sizeof(struct mpi_dmamem), M_DEVBUF, M_NOWAIT);
+	mdm = malloc(sizeof(struct mpi_dmamem), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (mdm == NULL)
 		return (NULL);
 
-	bzero(mdm, sizeof(struct mpi_dmamem));
 	mdm->mdm_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -987,12 +1018,11 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct mpi_ccb) * sc->sc_maxcmds,
-	    M_DEVBUF, M_WAITOK);
+	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_ccbs == NULL) {
 		printf("%s: unable to allocate ccbs\n", DEVNAME(sc));
 		return (1);
 	}
-	bzero(sc->sc_ccbs, sizeof(struct mpi_ccb) * sc->sc_maxcmds);
 
 	sc->sc_requests = mpi_dmamem_alloc(sc,
 	    MPI_REQUEST_SIZE * sc->sc_maxcmds);
@@ -1007,7 +1037,8 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 		ccb = &sc->sc_ccbs[i];
 
 		if (bus_dmamap_create(sc->sc_dmat, MAXPHYS,
-		    sc->sc_max_sgl_len, MAXPHYS, 0, 0,
+		    sc->sc_max_sgl_len, MAXPHYS, 0,
+		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &ccb->ccb_dmamap) != 0) {
 			printf("%s: unable to create dma map\n", DEVNAME(sc));
 			goto free_maps;
@@ -1090,13 +1121,8 @@ mpi_alloc_replies(struct mpi_softc *sc)
 {
 	DNPRINTF(MPI_D_MISC, "%s: mpi_alloc_replies\n", DEVNAME(sc));
 
-<<<<<<< HEAD
-	sc->sc_rcbs = malloc(MPI_REPLY_COUNT * sizeof(struct mpi_rcb),
-	    M_DEVBUF, M_WAITOK);
-=======
 	sc->sc_rcbs = malloc(sc->sc_repq * sizeof(struct mpi_rcb), M_DEVBUF,
 	    M_WAITOK|M_CANFAIL);
->>>>>>> origin/master
 	if (sc->sc_rcbs == NULL)
 		return (1);
 
@@ -1294,7 +1320,8 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 		break;
 	}
 
-	if (link->quirks & SDEV_NOTAGS)
+	if (sc->sc_porttype != MPI_PORTFACTS_PORTTYPE_SCSI &&
+	    (link->quirks & SDEV_NOTAGS))
 		io->tagging = MPI_SCSIIO_ATTR_UNTAGGED;
 	else 
 		io->tagging = MPI_SCSIIO_ATTR_SIMPLE_Q;
@@ -2148,7 +2175,8 @@ mpi_portfacts(struct mpi_softc *sc)
 	    letoh16(pfp->max_lan_buckets));
 
 	sc->sc_porttype = pfp->port_type;
-	sc->sc_target = letoh16(pfp->port_scsi_id);
+	if (sc->sc_target == -1)
+		sc->sc_target = letoh16(pfp->port_scsi_id);
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
 	rv = 0;
@@ -2265,16 +2293,9 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		if (sc->sc_scsibus == NULL)
 			break;
 
-<<<<<<< HEAD
-		if (scsi_task(mpi_evt_sas, sc, ccb->ccb_rcb, 1) != 0) {
-			printf("%s: unable to run SAS device status change\n",
-			    DEVNAME(sc));
-			break;
-=======
 		if (mpi_evt_sas(sc, rcb) != 0) {
 			/* reply is freed later on */
 			return;
->>>>>>> origin/master
 		}
 		break;
 
@@ -2657,7 +2678,7 @@ mpi_get_raid(struct mpi_softc *sc)
 	}
 
 	pagelen = hdr.page_length * 4; /* dwords to bytes */
-	vol_page = malloc(pagelen, M_TEMP, M_WAITOK);
+	vol_page = malloc(pagelen, M_TEMP, M_WAITOK|M_CANFAIL);
 	if (vol_page == NULL) {
 		DNPRINTF(MPI_D_RAID, "%s: mpi_get_raid unable to allocate "
 		    "space for ioc config page 2\n", DEVNAME(sc));

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uipc_mbuf2.c,v 1.27 2007/02/26 20:15:33 claudio Exp $	*/
-=======
 /*	$OpenBSD: uipc_mbuf2.c,v 1.33 2011/01/29 13:15:39 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$KAME: uipc_mbuf2.c,v 1.29 2001/02/14 13:42:10 itojun Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.40 1999/04/01 00:23:25 thorpej Exp $	*/
 

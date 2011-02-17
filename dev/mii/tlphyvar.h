@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: tlphyvar.h,v 1.2 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tlphyvar.h,v 1.1 1998/08/10 23:59:58 thorpej Exp $	*/
 
 /*-

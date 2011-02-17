@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stivar.h,v 1.22 2007/01/11 22:02:04 miod Exp $	*/
-=======
 /*	$OpenBSD: stivar.h,v 1.24 2009/02/06 22:51:04 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff

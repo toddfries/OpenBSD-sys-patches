@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lm_i2c.c,v 1.10 2006/01/26 22:07:14 kettenis Exp $	*/
-=======
 /*	$OpenBSD: lm78_i2c.c,v 1.2 2008/11/03 00:17:47 cnst Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Mark Kettenis

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360var.h,v 1.5 2006/06/02 06:26:15 martin Exp $	*/
+/*	$OpenBSD: aic6360var.h,v 1.6 2006/06/03 01:51:54 martin Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 /*

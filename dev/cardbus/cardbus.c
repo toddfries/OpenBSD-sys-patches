@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cardbus.c,v 1.33 2006/06/21 11:27:03 fkr Exp $	*/
-=======
 /*	$OpenBSD: cardbus.c,v 1.45 2010/08/25 21:37:59 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cardbus.c,v 1.24 2000/04/02 19:11:37 mycroft Exp $	*/
 
 /*
@@ -52,11 +48,15 @@
 
 #include <dev/pcmcia/pcmciareg.h>
 
-#if defined CARDBUS_DEBUG
+#ifdef CARDBUS_DEBUG
 #define STATIC
 #define DPRINTF(a) printf a
 #else
+#ifdef DDB
+#define STATIC
+#else
 #define STATIC static
+#endif
 #define DPRINTF(a)
 #endif
 
@@ -64,26 +64,22 @@ STATIC void cardbusattach(struct device *, struct device *, void *);
 /* STATIC int cardbusprint(void *, const char *); */
 
 STATIC int cardbusmatch(struct device *, void *, void *);
-static int cardbussubmatch(struct device *, void *, void *);
-static int cardbusprint(void *, const char *);
+STATIC int cardbussubmatch(struct device *, void *, void *);
+STATIC int cardbusprint(void *, const char *);
 
 typedef void (*tuple_decode_func)(u_int8_t *, int, void *);
 
-static int decode_tuples(u_int8_t *, int, tuple_decode_func, void *);
+STATIC int decode_tuples(u_int8_t *, int, tuple_decode_func, void *);
+STATIC void parse_tuple(u_int8_t *, int, void *);
 #ifdef CARDBUS_DEBUG
 static void print_tuple(u_int8_t *, int, void *);
 #endif
 
-<<<<<<< HEAD
-static int cardbus_read_tuples(struct cardbus_attach_args *,
-    cardbusreg_t, u_int8_t *, size_t);
-=======
 STATIC int cardbus_read_tuples(struct cardbus_attach_args *,
     pcireg_t, u_int8_t *, size_t);
->>>>>>> origin/master
 
-static void enable_function(struct cardbus_softc *, int, int);
-static void disable_function(struct cardbus_softc *, int);
+STATIC void enable_function(struct cardbus_softc *, int, int);
+STATIC void disable_function(struct cardbus_softc *, int);
 
 
 struct cfattach cardbus_ca = {
@@ -141,13 +137,8 @@ cardbusattach(struct device *parent, struct device *self, void *aux)
 	cdstatus = 0;
 }
 
-<<<<<<< HEAD
-static int
-cardbus_read_tuples(struct cardbus_attach_args *ca, cardbusreg_t cis_ptr,
-=======
 STATIC int
 cardbus_read_tuples(struct cardbus_attach_args *ca, pcireg_t cis_ptr,
->>>>>>> origin/master
     u_int8_t *tuples, size_t len)
 {
 	struct cardbus_softc *sc = ca->ca_ct->ct_sc;
@@ -286,7 +277,7 @@ cardbus_read_tuples(struct cardbus_attach_args *ca, pcireg_t cis_ptr,
 	return (!found);
 }
 
-static void
+STATIC void
 parse_tuple(u_int8_t *tuple, int len, void *data)
 {
 	struct cardbus_cis_info *cis = data;
@@ -566,7 +557,7 @@ cardbus_attach_card(struct cardbus_softc *sc)
 	return (no_work_funcs);
 }
 
-static int
+STATIC int
 cardbussubmatch(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
@@ -584,40 +575,22 @@ cardbussubmatch(struct device *parent, void *match, void *aux)
 	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
 }
 
-static int
+STATIC int
 cardbusprint(void *aux, const char *pnp)
 {
 	struct cardbus_attach_args *ca = aux;
 	char devinfo[256];
-	int i;
 
 	if (pnp) {
 		pci_devinfo(ca->ca_id, ca->ca_class, 1, devinfo,
 		    sizeof(devinfo));
-		for (i = 0; i < 4; i++) {
-			if (ca->ca_cis.cis1_info[i] == NULL)
-				break;
-			if (i)
-				printf(", ");
-			printf("%s", ca->ca_cis.cis1_info[i]);
-		}
-		if (i)
-			printf(" ");
-		if (ca->ca_cis.manufacturer)
-			printf("(manufacturer 0x%x, product 0x%x) ",
-			    ca->ca_cis.manufacturer, ca->ca_cis.product);
 		printf("%s at %s", devinfo, pnp);
 	}
 	printf(" dev %d function %d", ca->ca_device, ca->ca_function);
-
 	if (!pnp) {
-		pci_devinfo(ca->ca_id, ca->ca_class, 1, devinfo,
+		pci_devinfo(ca->ca_id, ca->ca_class, 0, devinfo,
 		    sizeof(devinfo));
-		for (i = 0; i < 3 && ca->ca_cis.cis1_info[i]; i++)
-			printf("%s%s", i ? ", " : " \"",
-			    ca->ca_cis.cis1_info[i]);
-		if (ca->ca_cis.cis1_info[0])
-			printf("\"");
+		printf(" %s", devinfo);
 	}
 
 	return (UNCONF);
@@ -696,7 +669,7 @@ cardbus_intr_disestablish(cardbus_chipset_tag_t cc, cardbus_function_tag_t cf,
 /* XXX this should be merged with cardbus_function_{enable,disable},
    but we don't have a ct when these functions are called */
 
-static void
+STATIC void
 enable_function(struct cardbus_softc *sc, int cdstatus, int function)
 {
 	if (sc->sc_poweron_func == 0) {
@@ -712,7 +685,7 @@ enable_function(struct cardbus_softc *sc, int cdstatus, int function)
 	sc->sc_poweron_func |= (1 << function);
 }
 
-static void
+STATIC void
 disable_function(struct cardbus_softc *sc, int function)
 {
 	sc->sc_poweron_func &= ~(1 << function);
@@ -792,10 +765,10 @@ cardbus_matchbyid(struct cardbus_attach_args *ca,
  * They should go out from this file.
  */
 
-static u_int8_t *
+STATIC u_int8_t *
 decode_tuple(u_int8_t *, u_int8_t *, tuple_decode_func, void *);
 
-static int
+STATIC int
 decode_tuples(u_int8_t *tuple, int buflen, tuple_decode_func func, void *data)
 {
 	u_int8_t *tp = tuple;
@@ -811,7 +784,7 @@ decode_tuples(u_int8_t *tuple, int buflen, tuple_decode_func func, void *data)
 	return (1);
 }
 
-static u_int8_t *
+STATIC u_int8_t *
 decode_tuple(u_int8_t *tuple, u_int8_t *end, tuple_decode_func func,
     void *data)
 {

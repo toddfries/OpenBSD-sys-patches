@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uipaq.c,v 1.3 2006/04/16 04:01:12 brad Exp $	*/
-=======
 /*	$OpenBSD: uipaq.c,v 1.19 2011/01/25 20:03:36 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -78,27 +74,27 @@ int uipaqdebug = 0;
 #define UIPAQOBUFSIZE 1024
 
 struct uipaq_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;	/* device */
-	usbd_interface_handle	sc_iface;	/* interface */
+	struct device		 sc_dev;	/* base device */
+	usbd_device_handle	 sc_udev;	/* device */
+	usbd_interface_handle	 sc_iface;	/* interface */
 
-	device_ptr_t		sc_subdev;	/* ucom uses that */
-	u_int16_t		sc_lcr;		/* state for DTR/RTS */
+	struct device		*sc_subdev;	/* ucom uses that */
+	u_int16_t		 sc_lcr;	/* state for DTR/RTS */
 
-	u_int16_t		sc_flags;
+	u_int16_t		 sc_flags;
 
-	u_char			sc_dying;
+	u_char			 sc_dying;
 };
 
 /* Callback routines */
-Static void	uipaq_set(void *, int, int, int);
+void	uipaq_set(void *, int, int, int);
 
 
 /* Support routines. */
 /* based on uppc module by Sam Lawrance */
-Static void	uipaq_dtr(struct uipaq_softc *sc, int onoff);
-Static void	uipaq_rts(struct uipaq_softc *sc, int onoff);
-Static void	uipaq_break(struct uipaq_softc* sc, int onoff);
+void	uipaq_dtr(struct uipaq_softc *sc, int onoff);
+void	uipaq_rts(struct uipaq_softc *sc, int onoff);
+void	uipaq_break(struct uipaq_softc* sc, int onoff);
 
 
 struct ucom_methods uipaq_methods = {
@@ -118,18 +114,17 @@ struct uipaq_type {
 };
 
 static const struct uipaq_type uipaq_devs[] = {
+	{{ USB_VENDOR_ASUS, USB_PRODUCT_ASUS_MYPAL_A730} , 0},
+	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0},
+	{{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQPOCKETPC} , 0},
+	{{ USB_VENDOR_HTC, USB_PRODUCT_HTC_SMARTPHONE }, 0},
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_2215 }, 0 },
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_568J }, 0},
-	{{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQPOCKETPC} , 0},
-	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0},
-	{{ USB_VENDOR_ASUS, USB_PRODUCT_ASUS_MYPAL_A730} , 0}
+	{{ USB_VENDOR_HTC, USB_PRODUCT_HTC_PPC6700MODEM }, 0}
 };
 
 #define uipaq_lookup(v, p) ((struct uipaq_type *)usb_lookup(uipaq_devs, v, p))
 
-<<<<<<< HEAD
-USB_DECLARE_DRIVER(uipaq);
-=======
 int uipaq_match(struct device *, void *, void *); 
 void uipaq_attach(struct device *, struct device *, void *); 
 int uipaq_detach(struct device *, int); 
@@ -146,11 +141,11 @@ const struct cfattach uipaq_ca = {
 	uipaq_detach, 
 	uipaq_activate, 
 };
->>>>>>> origin/master
 
-USB_MATCH(uipaq)
+int
+uipaq_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uipaq, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -162,15 +157,16 @@ USB_MATCH(uipaq)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
-USB_ATTACH(uipaq)
+void
+uipaq_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uipaq, sc, uaa);
+	struct uipaq_softc *sc = (struct uipaq_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
-	char *devname = USBDEVNAME(sc->sc_dev);
+	char *devname = sc->sc_dev.dv_xname;
 	int i;
 	usbd_status err;
 	struct ucom_attach_args uca;
@@ -180,22 +176,17 @@ USB_ATTACH(uipaq)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UIPAQ_CONFIG_NO, 1);
 	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
-		    devname, usbd_errstr(err));
+		printf(": failed to set configuration, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
 
 	err = usbd_device2interface_handle(dev, UIPAQ_IFACE_INDEX, &iface);
 	if (err) {
-		printf("\n%s: failed to get interface, err=%s\n",
-		    devname, usbd_errstr(err));
+		printf(": failed to get interface, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uipaq_lookup(uaa->vendor, uaa->product)->uv_flags;
 
@@ -217,17 +208,11 @@ USB_ATTACH(uipaq)
 
 /*	err = uipaq_init(sc);
 	if (err) {
-		printf("%s: init failed, %s\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: init failed, %s\n", sc->sc_dev.dv_xname,
 		    usbd_errstr(err));
 		goto bad;
 	}*/
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-=======
->>>>>>> origin/master
 	uca.bulkin = uca.bulkout = -1;
 	for (i=0; i<id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(iface, i);
@@ -251,12 +236,11 @@ USB_ATTACH(uipaq)
 		printf("%s: no proper endpoints found (%d,%d) \n",
 		    devname, uca.bulkin, uca.bulkout);
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 bad:
 	DPRINTF(("uipaq_attach: ATTACH ERROR\n"));
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
 
@@ -267,7 +251,7 @@ uipaq_dtr(struct uipaq_softc* sc, int onoff)
 	usbd_status err;
 	int retries = 3;
 
-	DPRINTF(("%s: uipaq_dtr: onoff=%x\n", USBDEVNAME(sc->sc_dev), onoff));
+	DPRINTF(("%s: uipaq_dtr: onoff=%x\n", sc->sc_dev.dv_xname, onoff));
 
 	/* Avoid sending unnecessary requests */
 	if (onoff && (sc->sc_lcr & UCDC_LINE_DTR))
@@ -300,7 +284,7 @@ uipaq_rts(struct uipaq_softc* sc, int onoff)
 	usbd_status err;
 	int retries = 3;
 
-	DPRINTF(("%s: uipaq_rts: onoff=%x\n", USBDEVNAME(sc->sc_dev), onoff));
+	DPRINTF(("%s: uipaq_rts: onoff=%x\n", sc->sc_dev.dv_xname, onoff));
 
 	/* Avoid sending unnecessary requests */
 	if (onoff && (sc->sc_lcr & UCDC_LINE_RTS)) return;
@@ -329,7 +313,7 @@ uipaq_break(struct uipaq_softc* sc, int onoff)
 	usbd_status err;
 	int retries = 3;
 
-	DPRINTF(("%s: uipaq_break: onoff=%x\n", USBDEVNAME(sc->sc_dev), onoff));
+	DPRINTF(("%s: uipaq_break: onoff=%x\n", sc->sc_dev.dv_xname, onoff));
 
 	req.bmRequestType = UT_WRITE_CLASS_INTERFACE;
 	req.bRequest = UCDC_SEND_BREAK;
@@ -364,18 +348,14 @@ uipaq_set(void *addr, int portno, int reg, int onoff)
 		break;
 	default:
 		printf("%s: unhandled set request: reg=%x onoff=%x\n",
-		    USBDEVNAME(sc->sc_dev), reg, onoff);
+		    sc->sc_dev.dv_xname, reg, onoff);
 		return;
 	}
 }
 
 
 int
-<<<<<<< HEAD
-uipaq_activate(device_ptr_t self, enum devact act)
-=======
 uipaq_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
 	int rv = 0;
@@ -394,7 +374,7 @@ uipaq_activate(struct device *self, int act)
 }
 
 int
-uipaq_detach(device_ptr_t self, int flags)
+uipaq_detach(struct device *self, int flags)
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
 	int rv = 0;
@@ -405,12 +385,6 @@ uipaq_detach(device_ptr_t self, int flags)
 		sc->sc_subdev = NULL;
 	}
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-=======
->>>>>>> origin/master
 	return (rv);
 }
 

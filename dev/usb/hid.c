@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hid.c,v 1.14 2002/07/25 04:07:32 nate Exp $ */
-=======
 /*	$OpenBSD: hid.c,v 1.22 2009/07/24 08:37:47 jsg Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: hid.c,v 1.23 2002/07/11 21:14:25 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/hid.c,v 1.11 1999/11/17 22:33:39 n_hibma Exp $ */
 
@@ -38,9 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#if defined(__NetBSD__)
-#include <sys/kernel.h>
-#endif
 #include <sys/malloc.h>
 
 #include <dev/usb/usb.h>
@@ -49,15 +42,15 @@
 #include <dev/usb/hid.h>
 
 #ifdef UHIDEV_DEBUG
-#define DPRINTF(x)	do { if (uhidevdebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (uhidevdebug>(n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (uhidevdebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (uhidevdebug>(n)) printf x; } while (0)
 extern int uhidevdebug;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
 
-Static void hid_clear_local(struct hid_item *);
+void hid_clear_local(struct hid_item *);
 
 #define MAXUSAGE 256
 struct hid_data {
@@ -73,7 +66,7 @@ struct hid_data {
 	enum hid_kind kind;
 };
 
-Static void
+void
 hid_clear_local(struct hid_item *c)
 {
 
@@ -95,10 +88,9 @@ hid_start_parse(void *d, int len, enum hid_kind kind)
 {
 	struct hid_data *s;
 
-	s = malloc(sizeof *s, M_TEMP, M_WAITOK);
+	s = malloc(sizeof *s, M_TEMP, M_WAITOK | M_ZERO);
 	if (s == NULL)
 		panic("hid_start_parse");
-	memset(s, 0, sizeof *s);
 
 	s->start = s->p = d;
 	s->end = (char *)d + len;

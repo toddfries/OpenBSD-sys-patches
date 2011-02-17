@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: an.c,v 1.52 2006/06/25 18:50:51 mickey Exp $	*/
-=======
 /*	$OpenBSD: an.c,v 1.58 2010/08/27 17:08:00 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: an.c,v 1.34 2005/06/20 02:49:18 atatat Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -475,7 +471,7 @@ an_rxeof(struct an_softc *sc)
 		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 	wh = mtod(m, struct ieee80211_frame *);
 	rxi.rxi_flags = 0;

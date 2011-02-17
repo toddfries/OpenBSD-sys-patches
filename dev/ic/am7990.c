@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: am7990.c,v 1.40 2006/03/25 22:41:42 djm Exp $	*/
-=======
 /*	$OpenBSD: am7990.c,v 1.44 2009/08/10 20:29:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-

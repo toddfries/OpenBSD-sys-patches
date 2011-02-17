@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rt2560.c,v 1.31 2007/01/24 17:56:24 damien Exp $  */
-=======
 /*	$OpenBSD: rt2560.c,v 1.57 2010/09/07 16:21:42 deraadt Exp $  */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2005, 2006
@@ -250,7 +246,8 @@ rt2560_attach(void *xsc, int id)
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
-	    IEEE80211_C_WEP;		/* s/w WEP */
+	    IEEE80211_C_WEP |		/* s/w WEP */
+	    IEEE80211_C_RSN;		/* WPA/RSN */
 
 	/* set supported .11b and .11g rates */
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
@@ -393,7 +390,7 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
-	    M_NOWAIT);
+	    M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -401,7 +398,6 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->data, 0, count * sizeof (struct rt2560_tx_data));
 	for (i = 0; i < count; i++) {
 		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
 		    RT2560_MAX_SCATTER, MCLBYTES, 0, BUS_DMA_NOWAIT,
@@ -538,7 +534,7 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
-	    M_NOWAIT);
+	    M_NOWAIT | M_ZERO);
 	if (ring->data == NULL) {
 		printf("%s: could not allocate soft data\n",
 		    sc->sc_dev.dv_xname);
@@ -549,7 +545,6 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	/*
 	 * Pre-allocate Rx buffers and populate Rx ring.
 	 */
-	memset(ring->data, 0, count * sizeof (struct rt2560_rx_data));
 	for (i = 0; i < count; i++) {
 		struct rt2560_rx_desc *desc = &sc->rxq.desc[i];
 		struct rt2560_rx_data *data = &sc->rxq.data[i];
@@ -651,12 +646,8 @@ rt2560_free_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring)
 struct ieee80211_node *
 rt2560_node_alloc(struct ieee80211com *ic)
 {
-	struct rt2560_node *rn;
-
-	rn = malloc(sizeof (struct rt2560_node), M_DEVBUF, M_NOWAIT);
-	if (rn != NULL)
-		bzero(rn, sizeof (struct rt2560_node));
-	return (struct ieee80211_node *)rn;
+	return malloc(sizeof (struct rt2560_node), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 }
 
 int
@@ -1156,6 +1147,8 @@ rt2560_decryption_intr(struct rt2560_softc *sc)
 				panic("%s: could not load old rx mbuf",
 				    sc->sc_dev.dv_xname);
 			}
+			/* physical address may have changed */
+			desc->physaddr = htole32(data->map->dm_segs->ds_addr);
 			ifp->if_ierrors++;
 			goto skip;
 		}
@@ -1614,7 +1607,6 @@ rt2560_tx_mgt(struct rt2560_softc *sc, struct mbuf *m0,
     struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
 	struct rt2560_tx_desc *desc;
 	struct rt2560_tx_data *data;
 	struct ieee80211_frame *wh;
@@ -1624,17 +1616,6 @@ rt2560_tx_mgt(struct rt2560_softc *sc, struct mbuf *m0,
 
 	desc = &sc->prioq.desc[sc->prioq.cur];
 	data = &sc->prioq.data[sc->prioq.cur];
-
-	wh = mtod(m0, struct ieee80211_frame *);
-
-	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
-			return ENOBUFS;
-
-		/* packet header may have moved, reset our local pointer */
-		wh = mtod(m0, struct ieee80211_frame *);
-	}
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
@@ -1712,26 +1693,22 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
     struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
 	struct rt2560_tx_ring *txq = &sc->txq;
 	struct rt2560_tx_desc *desc;
 	struct rt2560_tx_data *data;
 	struct ieee80211_frame *wh;
-<<<<<<< HEAD
-	struct mbuf *mnew;
-=======
 	struct ieee80211_key *k;
 	struct mbuf *m1;
->>>>>>> origin/master
 	uint16_t dur;
 	uint32_t flags = 0;
 	int pktlen, rate, needcts = 0, needrts = 0, error;
 
 	wh = mtod(m0, struct ieee80211_frame *);
 
-	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
+	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
+		k = ieee80211_get_txkey(ic, wh, ni);
+
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
 			return ENOBUFS;
 
 		/* packet header may have moved, reset our local pointer */
@@ -1779,7 +1756,6 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	if (needrts || needcts) {
 		struct mbuf *mprot;
 		int protrate, ackrate;
-		uint16_t dur;
 
 		protrate = 2;	/* XXX */
 		ackrate  = rt2560_ack_rate(ic, rate);

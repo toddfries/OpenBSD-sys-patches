@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wscons_callbacks.h,v 1.6 2005/05/15 11:29:15 miod Exp $ */
-=======
 /* $OpenBSD: wscons_callbacks.h,v 1.8 2010/11/20 20:52:10 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wscons_callbacks.h,v 1.16 2001/11/10 17:14:51 augustss Exp $ */
 
 /*

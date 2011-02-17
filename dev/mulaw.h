@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mulaw.h,v 1.11 2004/02/23 23:59:21 deraadt Exp $ */
-=======
 /*	$OpenBSD: mulaw.h,v 1.14 2008/06/26 05:42:14 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: mulaw.h,v 1.11 1999/11/01 18:12:19 augustss Exp $	*/
 
 /*-
@@ -72,6 +68,12 @@ extern void slinear8_to_alaw(void *, u_char *, int);
 /* Convert 8-bit a-law to/from mulaw */
 void alaw_to_mulaw(void *, u_char *, int);
 void mulaw_to_alaw(void *, u_char *, int);
+/* Convert 16-bit signed linear stereo to 8-bit a-law mono */
+void slinear16_to_alaw_le_stm(void *, u_char *, int);
+void slinear16_to_alaw_be_stm(void *, u_char *, int);
+/* Convert 16-bit signed linear stereo to 8-bit mu-law mono */
+void slinear16_to_mulaw_le_stm(void *, u_char *, int);
+void slinear16_to_mulaw_be_stm(void *, u_char *, int);
 
 /* backwards compat for now */
 #if BYTE_ORDER == LITTLE_ENDIAN

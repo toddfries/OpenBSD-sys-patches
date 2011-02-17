@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mman.h,v 1.17 2003/07/01 23:23:04 tedu Exp $	*/
-=======
 /*	$OpenBSD: mman.h,v 1.21 2010/07/04 20:16:41 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mman.h,v 1.11 1995/03/26 20:24:23 jtc Exp $	*/
 
 /*-

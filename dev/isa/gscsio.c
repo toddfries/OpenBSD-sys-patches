@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gscsio.c,v 1.7 2006/01/01 20:52:26 deraadt Exp $	*/
-=======
 /*	$OpenBSD: gscsio.c,v 1.12 2010/02/16 00:05:23 mk Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -28,7 +24,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/proc.h>
 
 #include <machine/bus.h>
@@ -54,7 +50,7 @@ struct gscsio_softc {
 	struct gscsio_acb {
 		void *sc;
 		bus_space_handle_t ioh;
-		struct lock buslock;
+		struct rwlock buslock;
 	} sc_acb[2];
 	struct i2c_controller sc_acb1_tag;
 	struct i2c_controller sc_acb2_tag;
@@ -211,8 +207,7 @@ gscsio_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_ld_en[GSCSIO_LDN_ACB1]) {
 		sc->sc_acb[0].sc = sc;
 		sc->sc_acb[0].ioh = sc->sc_ld_ioh0[GSCSIO_LDN_ACB1];
-		lockinit(&sc->sc_acb[0].buslock, PRIBIO | PCATCH,
-		    "iiclk", 0, 0);
+		rw_init(&sc->sc_acb[0].buslock, "iiclk");
 		gscsio_acb_init(&sc->sc_acb[0], &sc->sc_acb1_tag);
 	}
 
@@ -220,8 +215,7 @@ gscsio_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_ld_en[GSCSIO_LDN_ACB2]) {
 		sc->sc_acb[1].sc = sc;
 		sc->sc_acb[1].ioh = sc->sc_ld_ioh0[GSCSIO_LDN_ACB2];
-		lockinit(&sc->sc_acb[1].buslock, PRIBIO | PCATCH,
-		    "iiclk", 0, 0);
+		rw_init(&sc->sc_acb[1].buslock, "iiclk");
 		gscsio_acb_init(&sc->sc_acb[1], &sc->sc_acb2_tag);
 	}
 }
@@ -327,7 +321,7 @@ gscsio_acb_acquire_bus(void *cookie, int flags)
 	if (cold || flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&acb->buslock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&acb->buslock, RW_WRITE | RW_INTR));
 }
 
 void
@@ -338,7 +332,7 @@ gscsio_acb_release_bus(void *cookie, int flags)
 	if (cold || flags & I2C_F_POLL)
 		return;
 
-	lockmgr(&acb->buslock, LK_RELEASE, NULL);
+	rw_exit(&acb->buslock);
 }
 
 int

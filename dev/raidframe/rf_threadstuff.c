@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_threadstuff.c,v 1.3 2000/01/07 14:50:23 peter Exp $	*/
+/*	$OpenBSD: rf_threadstuff.c,v 1.4 2002/12/16 07:01:05 tdeval Exp $	*/
 /*	$NetBSD: rf_threadstuff.c,v 1.5 1999/12/07 02:13:28 oster Exp $	*/
 
 /*

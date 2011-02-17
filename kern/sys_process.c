@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sys_process.c,v 1.38 2007/03/15 10:22:30 art Exp $	*/
-=======
 /*	$OpenBSD: sys_process.c,v 1.47 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-

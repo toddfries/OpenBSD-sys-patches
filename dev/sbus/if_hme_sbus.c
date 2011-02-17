@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_hme_sbus.c,v 1.10 2006/06/02 20:00:56 miod Exp $	*/
-=======
 /*	$OpenBSD: if_hme_sbus.c,v 1.13 2009/07/12 21:27:09 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_hme_sbus.c,v 1.6 2001/02/28 14:52:48 mrg Exp $	*/
 
 /*-

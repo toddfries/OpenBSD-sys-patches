@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx.h,v 1.20 2005/12/28 02:43:54 krw Exp $	*/
+/*	$OpenBSD: aic79xx.h,v 1.21 2006/12/21 02:28:47 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom

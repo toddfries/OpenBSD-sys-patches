@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: extent.h,v 1.7 2002/03/14 01:27:14 millert Exp $	*/
-=======
 /*	$OpenBSD: extent.h,v 1.12 2009/04/19 15:26:52 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: extent.h,v 1.6 1997/10/09 07:43:05 jtc Exp $	*/
 
 /*-

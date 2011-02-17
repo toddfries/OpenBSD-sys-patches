@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-/*      $OpenBSD: isp_openbsd.h,v 1.25 2004/06/24 19:35:23 tholo Exp $ */
-=======
 /*      $OpenBSD: isp_openbsd.h,v 1.33 2010/06/26 23:24:44 guenther Exp $ */
->>>>>>> origin/master
 /*
- * OpenBSD Specific definitions for the Qlogic ISP Host Adapter
+ * OpenBSD Specific definitions for the QLogic ISP Host Adapter
  */
 /*
  * Copyright (C) 1999, 2000, 2001 by Matthew Jacob
@@ -99,13 +95,9 @@ struct isposinfo {
 		mboxcmd_done	: 1,
 		mboxbsy		: 1,
 		no_mbox_ints	: 1,
-<<<<<<< HEAD
-		blocked		: 2;
-=======
 		blocked		: 2,
 		rtpend		: 1;
 	int			_iid;
->>>>>>> origin/master
 	union {
 		u_int64_t 	_wwn;
 		u_int16_t	_discovered[2];
@@ -261,7 +253,7 @@ default:							\
 
 #define	XS_SET_STATE_STAT(a, b, c)
 
-#define	DEFAULT_IID(x)		7
+#define	DEFAULT_IID(isp)	(isp)->isp_osinfo._iid
 #define	DEFAULT_LOOPID(x)	107
 #define	DEFAULT_NODEWWN(isp)	(isp)->isp_osinfo.un._wwn
 #define	DEFAULT_PORTWWN(isp)	(isp)->isp_osinfo.un._wwn

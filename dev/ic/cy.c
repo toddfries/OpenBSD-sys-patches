@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cy.c,v 1.24 2003/10/03 16:44:51 miod Exp $	*/
-=======
 /*	$OpenBSD: cy.c,v 1.33 2010/11/18 21:15:15 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.

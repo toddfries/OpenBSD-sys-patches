@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_time.c,v 1.61 2007/01/10 07:58:08 art Exp $	*/
-=======
 /*	$OpenBSD: kern_time.c,v 1.71 2010/06/30 01:47:35 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -298,7 +294,7 @@ sys_nanosleep(struct proc *p, void *v, register_t *retval)
 	struct timespec sts, ets;
 	struct timespec *rmtp;
 	struct timeval tv;
-	int error;
+	int error, error1;
 
 	rmtp = SCARG(uap, rmtp);
 	error = copyin(SCARG(uap, rqtp), &rqt, sizeof(struct timespec));
@@ -328,14 +324,9 @@ sys_nanosleep(struct proc *p, void *v, register_t *retval)
 		if (rmt.tv_sec < 0)
 			timespecclear(&rmt);
 
-<<<<<<< HEAD
-		error = copyout((void *)&rmt, (void *)SCARG(uap,rmtp),
-		    sizeof(rmt));
-=======
 		error1 = copyout(&rmt, rmtp, sizeof(rmt));
 		if (error1 != 0)
 			error = error1;
->>>>>>> origin/master
 	}
 
 	return error;
@@ -813,7 +804,7 @@ ratecheck(struct timeval *lasttime, const struct timeval *mininterval)
 	struct timeval tv, delta;
 	int rv = 0;
 
-	microuptime(&tv);
+	getmicrouptime(&tv);
 
 	timersub(&tv, lasttime, &delta);
 

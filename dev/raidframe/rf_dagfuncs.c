@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_dagfuncs.c,v 1.6 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_dagfuncs.c,v 1.7 2004/09/20 17:51:07 miod Exp $	*/
 /*	$NetBSD: rf_dagfuncs.c,v 1.6 2000/03/30 12:45:40 augustss Exp $	*/
 
 /*

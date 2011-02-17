@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# $OpenBSD: files.gpio,v 1.5 2006/01/14 13:55:14 grange Exp $
-=======
 # $OpenBSD: files.gpio,v 1.8 2008/11/28 17:42:43 mbalmer Exp $
->>>>>>> origin/master
 
 define	gpio {[offset = -1], [mask = 0]}
 

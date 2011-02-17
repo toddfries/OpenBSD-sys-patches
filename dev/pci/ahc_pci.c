@@ -1,4 +1,6 @@
-/*	$OpenBSD: ahc_pci.c,v 1.49 2005/08/09 04:10:10 mickey Exp $	*/
+/*	$OpenBSD: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $	*/
+/*	$NetBSD: ahc_pci.c,v 1.43 2003/08/18 09:16:22 taca Exp $	*/
+
 /*
  * Product specific probe and attach routines for:
  *      3940, 2940, aic7895, aic7890, aic7880,
@@ -40,7 +42,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: ahc_pci.c,v 1.50 2006/07/11 18:48:27 kettenis Exp $
+ * $Id: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $
  *
  * //depot/aic7xxx/aic7xxx/aic7xxx_pci.c#57 $
  *
@@ -49,9 +51,6 @@
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
  */
-
-#include <sys/cdefs.h>
-/* __KERNEL_RCSID(0, "$NetBSD: ahc_pci.c,v 1.43 2003/08/18 09:16:22 taca Exp $"); */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -593,8 +592,6 @@ struct ahc_pci_identity ahc_pci_ident_table [] =
 	}
 };
 
-const u_int ahc_num_pci_devs = NUM_ELEMENTS(ahc_pci_ident_table);
-		
 #define AHC_394X_SLOT_CHANNEL_A	4
 #define AHC_394X_SLOT_CHANNEL_B	5
 
@@ -677,7 +674,7 @@ ahc_find_pci_device(id, subid, func)
 	    && SUBID_9005_MFUNCENB(PCI_PRODUCT(subid)) == 0)
 		return (NULL);
 
-	for (i = 0; i < ahc_num_pci_devs; i++) {
+	for (i = 0; i < NUM_ELEMENTS(ahc_pci_ident_table); i++) {
 		entry = &ahc_pci_ident_table[i];
 		if (entry->full_id == (full_id & entry->id_mask))
 			return (entry);
@@ -757,12 +754,13 @@ ahc_pci_attach(parent, self, aux)
 		return;
 
 	/* Keep information about the PCI bus */
-	bd = malloc(sizeof (struct ahc_pci_busdata), M_DEVBUF, M_NOWAIT);
+	bd = malloc(sizeof (struct ahc_pci_busdata), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (bd == NULL) {
-		printf("%s: unable to allocate bus-specific data\n", ahc_name(ahc));
+		printf("%s: unable to allocate bus-specific data\n",
+		    ahc_name(ahc));
 		return;
 	}
-	memset(bd, 0, sizeof(struct ahc_pci_busdata));
 
 	bd->pc = pa->pa_pc;
 	bd->tag = pa->pa_tag;
@@ -969,13 +967,11 @@ ahc_pci_attach(parent, self, aux)
 			ahc->features &= ~AHC_ULTRA;
 	}
 
-	ahc->seep_config = malloc(sizeof(*ahc->seep_config),
-				  M_DEVBUF, M_NOWAIT);
+	ahc->seep_config = malloc(sizeof(*ahc->seep_config), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (ahc->seep_config == NULL)
 		goto error_out;
 	
-	memset(ahc->seep_config, 0, sizeof(*ahc->seep_config));
-
 	/* See if we have a SEEPROM and perform auto-term */
 	ahc_check_extport(ahc, &sxfrctl1);
 

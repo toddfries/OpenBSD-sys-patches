@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dkio.h,v 1.5 2003/06/02 23:28:21 millert Exp $	*/
-=======
 /*	$OpenBSD: dkio.h,v 1.8 2010/06/08 12:46:49 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dkio.h,v 1.1 1996/01/30 18:21:48 thorpej Exp $	*/
 
 /*

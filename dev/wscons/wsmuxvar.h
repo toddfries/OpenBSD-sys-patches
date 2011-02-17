@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wsmuxvar.h,v 1.6 2005/05/15 11:29:15 miod Exp $	*/
-=======
 /*	$OpenBSD: wsmuxvar.h,v 1.8 2008/06/26 05:42:19 ray Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: wsmuxvar.h,v 1.10 2005/04/30 03:47:12 augustss Exp $   */
 
 /*

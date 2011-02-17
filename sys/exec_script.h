@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: exec_script.h,v 1.3 1996/03/03 12:11:43 niklas Exp $	*/
-=======
 /*	$OpenBSD: exec_script.h,v 1.5 2008/09/19 05:41:29 djm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: exec_script.h,v 1.6 1995/03/26 20:24:11 jtc Exp $	*/
 
 /*

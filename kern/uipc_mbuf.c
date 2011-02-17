@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uipc_mbuf.c,v 1.79 2006/12/29 13:04:37 pedro Exp $	*/
-=======
 /*	$OpenBSD: uipc_mbuf.c,v 1.149 2011/01/29 13:15:39 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -167,9 +163,6 @@ nmbclust_update(void)
 	 * mbuf clusters the kernel is to support.  Log the limit
 	 * reached message max once a minute.
 	 */
-<<<<<<< HEAD
-	(void)pool_sethardlimit(&mclpool, nmbclust, mclpool_warnmsg, 60);
-=======
 	for (i = 0; i < nitems(mclsizes); i++) {
 		(void)pool_sethardlimit(&mclpools[i], nmbclust,
 		    mclpool_warnmsg, 60);
@@ -183,7 +176,6 @@ nmbclust_update(void)
 		pool_sethiwat(&mclpools[i], nmbclust);
 	}
 	pool_sethiwat(&mbpool, nmbclust);
->>>>>>> origin/master
 }
 
 void
@@ -203,17 +195,11 @@ m_reclaim(void *arg, int flags)
 
 /*
  * Space allocation routines.
- * These are also available as macros
- * for critical paths.
  */
 struct mbuf *
 m_get(int nowait, int type)
 {
 	struct mbuf *m;
-<<<<<<< HEAD
-
-	MGET(m, nowait, type);
-=======
 	int s;
 
 	s = splnet();
@@ -228,7 +214,6 @@ m_get(int nowait, int type)
 		m->m_data = m->m_dat;
 		m->m_flags = 0;
 	}
->>>>>>> origin/master
 	return (m);
 }
 
@@ -240,8 +225,6 @@ struct mbuf *
 m_gethdr(int nowait, int type)
 {
 	struct mbuf *m;
-<<<<<<< HEAD
-=======
 	int s;
 
 	s = splnet();
@@ -271,9 +254,7 @@ m_inithdr(struct mbuf *m)
 	m->m_data = m->m_pktdat;
 	m->m_flags = M_PKTHDR;
 	bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
->>>>>>> origin/master
 
-	MGETHDR(m, nowait, type);
 	return (m);
 }
 
@@ -289,8 +270,6 @@ m_getclr(int nowait, int type)
 	return (m);
 }
 
-<<<<<<< HEAD
-=======
 int
 m_clpool(u_int pktlen)
 {
@@ -470,13 +449,10 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 	return (m);
 }
 
->>>>>>> origin/master
 struct mbuf *
 m_free_unlocked(struct mbuf *m)
 {
 	struct mbuf *n;
-<<<<<<< HEAD
-=======
 
 	mbstat.m_mtypes[m->m_type]--;
 	if (m->m_flags & M_PKTHDR)
@@ -498,9 +474,7 @@ m_free(struct mbuf *m)
 	s = splnet();
 	n = m_free_unlocked(m);
 	splx(s);
->>>>>>> origin/master
 
-	MFREE(m, n);
 	return (n);
 }
 
@@ -1360,43 +1334,19 @@ m_apply(struct mbuf *m, int off, int len,
 	return (0);
 }
 
-#ifdef SMALL_KERNEL
-/*
- * The idea of adding code in a small kernel might look absurd, but this is
- * instead of macros.
- */
-struct mbuf *
-_sk_mget(int how, int type)
+int
+m_leadingspace(struct mbuf *m)
 {
-<<<<<<< HEAD
-	struct mbuf *m;
-	_MGET(m, how, type);
-	return m;
-=======
 	if (M_READONLY(m))
 		return 0;
 	return (m->m_flags & M_EXT ? m->m_data - m->m_ext.ext_buf :
 	    m->m_flags & M_PKTHDR ? m->m_data - m->m_pktdat :
 	    m->m_data - m->m_dat);
->>>>>>> origin/master
 }
 
-struct mbuf *
-_sk_mgethdr(int how, int type)
+int
+m_trailingspace(struct mbuf *m)
 {
-	struct mbuf *m;
-	_MGETHDR(m, how, type);
-	return m;
-}
-
-void
-_sk_mclget(struct mbuf *m, int how)
-{
-<<<<<<< HEAD
-	_MCLGET(m, how);
-}
-#endif /* SMALL_KERNEL */
-=======
 	if (M_READONLY(m))
 		return 0;
 	return (m->m_flags & M_EXT ? m->m_ext.ext_buf +
@@ -1479,4 +1429,3 @@ m_print(void *v, int (*pr)(const char *, ...))
 	}
 }
 #endif
->>>>>>> origin/master

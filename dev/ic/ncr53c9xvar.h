@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ncr53c9xvar.h,v 1.16 2006/05/23 20:35:40 miod Exp $	*/
-=======
 /*	$OpenBSD: ncr53c9xvar.h,v 1.20 2010/06/28 18:31:02 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ncr53c9xvar.h,v 1.13 1998/05/26 23:17:34 thorpej Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_rl_cardbus.c,v 1.14 2006/10/12 16:35:52 grange Exp $ */
-=======
 /*	$OpenBSD: if_rl_cardbus.c,v 1.21 2010/03/27 21:40:13 jsg Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_rl_cardbus.c,v 1.3.8.3 2001/11/14 19:14:02 nathanw Exp $	*/
 
 /*

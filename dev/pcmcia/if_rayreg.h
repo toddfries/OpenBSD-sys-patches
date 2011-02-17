@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_rayreg.h,v 1.6 2003/10/22 09:58:46 jmc Exp $	*/
-=======
 /*	$OpenBSD: if_rayreg.h,v 1.8 2008/09/01 17:30:56 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_rayreg.h,v 1.3 2000/08/10 11:48:46 ad Exp $	*/
 
 /* 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpidev.h,v 1.20 2007/01/27 19:37:57 marco Exp $ */
-=======
 /* $OpenBSD: acpidev.h,v 1.32 2010/08/06 21:12:27 marco Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
@@ -25,6 +21,7 @@
 
 #include <sys/sensors.h>
 #include <sys/rwlock.h>
+#include <dev/acpi/acpireg.h>
 
 #define DEVNAME(s)  ((s)->sc_dev.dv_xname)
 
@@ -67,10 +64,10 @@ struct acpibat_bif {
 	u_int32_t	bif_low;
 	u_int32_t	bif_cap_granu1;
 	u_int32_t	bif_cap_granu2;
-	char	        bif_model[20];
-	char	        bif_serial[20];
-	char	        bif_type[20];
-	char	        bif_oem[20];
+	char		bif_model[20];
+	char		bif_serial[20];
+	char		bif_type[20];
+	char		bif_oem[20];
 };
 
 /*
@@ -230,6 +227,8 @@ struct acpicpu_pss {
 	u_int32_t	pss_status;
 };
 
+int acpicpu_fetch_pss(struct acpicpu_pss **);
+void acpicpu_set_notify(void (*)(struct acpicpu_pss *, int));
 /*
  * XXX this is returned in a buffer and is not a "natural" type.
  *
@@ -286,17 +285,6 @@ struct acpibat_softc {
 TAILQ_HEAD(aml_nodelisth, aml_nodelist);
 
 struct acpidock_softc {
-<<<<<<< HEAD
-	struct device           sc_dev;
-
-	bus_space_tag_t         sc_iot;
-	bus_space_handle_t      sc_ioh;
-			 
-	struct acpi_softc       *sc_acpi;
-	struct aml_node		*sc_devnode;
-
-	struct ksensor		sc_sens[1];
-=======
 	struct device		sc_dev;
 
 	struct acpi_softc	*sc_acpi;
@@ -306,7 +294,6 @@ struct acpidock_softc {
 	struct aml_nodelist	*sc_deps;
 
 	struct ksensor		sc_sens;
->>>>>>> origin/master
 	struct ksensordev	sc_sensdev;
 
 	int			sc_docked;

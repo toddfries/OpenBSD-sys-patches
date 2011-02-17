@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: magmareg.h,v 1.7 2003/03/27 17:39:05 jason Exp $	*/
-=======
 /*	$OpenBSD: magmareg.h,v 1.9 2008/11/29 01:55:06 ray Exp $	*/
->>>>>>> origin/master
 
 /*-
  *  Copyright (c) 1998 Iain Hibbert

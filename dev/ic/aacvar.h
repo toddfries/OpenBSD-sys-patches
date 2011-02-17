@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aacvar.h,v 1.6 2006/04/22 02:36:26 brad Exp $	*/
-=======
 /*	$OpenBSD: aacvar.h,v 1.8 2009/02/16 21:19:06 miod Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2000 Michael Smith

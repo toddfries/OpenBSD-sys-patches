@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: auixp.c,v 1.7 2007/02/14 01:12:16 jsg Exp $ */
-=======
 /* $OpenBSD: auixp.c,v 1.28 2010/09/21 02:09:15 jakemsr Exp $ */
->>>>>>> origin/master
 /* $NetBSD: auixp.c,v 1.9 2005/06/27 21:13:09 thorpej Exp $ */
 
 /*
@@ -141,20 +137,8 @@ int	auixp_allocmem(struct auixp_softc *, size_t, size_t,
     struct auixp_dma *);
 int	auixp_freemem(struct auixp_softc *, struct auixp_dma *);
 paddr_t	auixp_mappage(void *, void *, off_t, int);
+void	auixp_get_default_params(void *, int, struct audio_params *);
 
-<<<<<<< HEAD
-
-/* power management (do we support that already?) */
-int	auixp_power(struct auixp_softc *, int);
-#if 0
-void	auixp_powerhook(int, void *);
-int	auixp_suspend(struct auixp_softc *);
-int	auixp_resume(struct auixp_softc *);
-#endif
-
-
-=======
->>>>>>> origin/master
 /* Supporting subroutines */
 int	auixp_init(struct auixp_softc *);
 void	auixp_autodetect_codecs(struct auixp_softc *);
@@ -212,7 +196,8 @@ struct audio_hw_if auixp_hw_if = {
 	auixp_mappage,
 	auixp_get_props,
 	auixp_trigger_output,
-	auixp_trigger_input
+	auixp_trigger_input,
+	auixp_get_default_params
 };
 
 int
@@ -225,6 +210,12 @@ auixp_open(void *v, int flags)
 void
 auixp_close(void *v)
 {
+}
+
+void
+auixp_get_default_params(void *v, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 int
@@ -361,7 +352,7 @@ auixp_commit_settings(void *hdl)
 		value &= ~ATI_REG_CMD_SPDF_CONFIG_MASK;
 		value |=  ATI_REG_CMD_SPDF_CONFIG_34; /* NetBSD AC'97 default */
 
-		/* XXX this prolly is not nessisary unless splitted XXX */
+		/* XXX this is probably not necessary unless splitted XXX */
 		value &= ~ATI_REG_CMD_INTERLEAVE_SPDF;
 		if (params->precision <= 16)
 			value |= ATI_REG_CMD_INTERLEAVE_SPDF;
@@ -379,6 +370,7 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 {
 	struct auixp_codec *co;
 	int error;
+	u_int temprate;
 
 	co = (struct auixp_codec *) hdl;
 	if (setmode & AUMODE_PLAY) {
@@ -393,11 +385,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = mulaw_to_slinear16_mts;
+				play->sw_code = mulaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = mulaw_to_slinear16;
+				play->sw_code = mulaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -409,11 +401,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -441,11 +433,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -455,10 +447,10 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_mts;
+					play->sw_code = change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16;
+					play->sw_code = change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -472,11 +464,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = alaw_to_slinear16_mts;
+				play->sw_code = alaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = alaw_to_slinear16;
+				play->sw_code = alaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -488,11 +480,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -521,11 +513,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -535,10 +527,10 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_swap_bytes_mts;
+					play->sw_code = swap_bytes_change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16_swap_bytes;
+					play->sw_code = swap_bytes_change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -554,9 +546,24 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 		play->bps = AUDIO_BPS(play->precision);
 		play->msb = 1;
 
-		error = ac97_set_rate(co->codec_if, play, AUMODE_PLAY);
+		temprate = play->sample_rate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_LFE_DAC_RATE, &play->sample_rate);
 		if (error)
 			return (error);
+
+		play->sample_rate = temprate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_SURR_DAC_RATE, &play->sample_rate);
+		if (error)
+			return (error);
+
+		play->sample_rate = temprate;
+		error = ac97_set_rate(co->codec_if,
+		    AC97_REG_PCM_FRONT_DAC_RATE, &play->sample_rate);
+		if (error)
+			return (error);
+
 	}
 
 	if (setmode & AUMODE_RECORD) {		
@@ -576,7 +583,7 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_LE:
 			if (rec->precision == 16)
-				rec->sw_code = change_sign16;
+				rec->sw_code = change_sign16_le;
 			break;
 		case AUDIO_ENCODING_ALAW:
 			rec->sw_code = ulinear8_to_alaw;
@@ -589,7 +596,7 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			break;
 		case AUDIO_ENCODING_ULINEAR_BE:
 			if (rec->precision == 16)
-				rec->sw_code = swap_bytes_change_sign16;
+				rec->sw_code = swap_bytes_change_sign16_le;
 			break;
 		default:
 			return (EINVAL);
@@ -597,7 +604,8 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 		rec->bps = AUDIO_BPS(rec->precision);
 		rec->msb = 1;
 
-		error = ac97_set_rate(co->codec_if, rec, AUMODE_RECORD);
+		error = ac97_set_rate(co->codec_if, AC97_REG_PCM_LR_ADC_RATE,
+		    &rec->sample_rate);
 		if (error)
 			return (error);
 	}
@@ -806,10 +814,9 @@ auixp_allocate_dma_chain(struct auixp_softc *sc, struct auixp_dma **dmap)
 
 	/* allocate keeper of dma area */
 	*dmap = NULL;
-	dma = malloc(sizeof(*dma), M_DEVBUF, M_NOWAIT);
+	dma = malloc(sizeof(*dma), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!dma)
 		return ENOMEM;
-	bzero(dma, sizeof(*dma));
 
 	/* allocate for daisychain of IXP hardware-dma descriptors */
 	error = auixp_allocmem(sc, DMA_DESC_CHAIN * sizeof(atiixp_dma_desc_t),
@@ -841,7 +848,7 @@ auixp_program_dma_chain(struct auixp_softc *sc, struct auixp_dma *dma)
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
 	/* get hardware start address of DMA chain and set valid-flag in it */
-	/* XXX allways at start? XXX */
+	/* XXX always at start? XXX */
 	value = DMAADDR(dma);
 	value = value | ATI_REG_LINKPTR_EN;
 
@@ -905,7 +912,7 @@ auixp_update_busbusy(struct auixp_softc *sc)
  * audio is refilled by calling the intr() function when space is available
  * again.
  */
-/* XXX allmost literaly a copy of trigger-input; could be factorised XXX */
+/* XXX almost literally a copy of trigger-input; could be factorised XXX */
 int
 auixp_trigger_output(void *hdl, void *start, void *end, int blksize,
     void (*intr)(void *), void *intrarg, struct audio_params *param)
@@ -980,7 +987,7 @@ auixp_halt_output(void *hdl)
 }
 
 
-/* XXX allmost literaly a copy of trigger-output; could be factorised XXX */
+/* XXX almost literally a copy of trigger-output; could be factorised XXX */
 int
 auixp_trigger_input(void *hdl, void *start, void *end, int blksize,
     void (*intr)(void *), void *intrarg, struct audio_params *param)
@@ -1059,8 +1066,8 @@ auixp_halt_input(void *hdl)
  * IXP audio interrupt handler
  *
  * note that we return the number of bits handled; the return value is not
- * documentated but i saw it implemented in other drivers. Prolly returning a
- * value > 0 means "i've dealt with it"
+ * documented but I saw it implemented in other drivers. Probably returning a
+ * value > 0 means "I've dealt with it"
  *
  */
 int
@@ -1112,7 +1119,7 @@ auixp_intr(void *softc)
 		detected_codecs = status & CODEC_CHECK_BITS;
 		sc->sc_codec_not_ready_bits |= detected_codecs;
 
-		/* disable detected interupt sources */
+		/* disable detected interrupt sources */
 		enable  = bus_space_read_4(iot, ioh, ATI_REG_IER);
 		enable &= ~detected_codecs;
 		bus_space_write_4(iot, ioh, ATI_REG_IER, enable);
@@ -1291,21 +1298,6 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	if (!sc->sc_output_dma || !sc->sc_input_dma)
 		return;
 
-	/* fill in the missing details about the dma channels. */
-
-	/* for output */
-	sc->sc_output_dma->linkptr        = ATI_REG_OUT_DMA_LINKPTR;
-	sc->sc_output_dma->dma_enable_bit = ATI_REG_CMD_OUT_DMA_EN |
-					    ATI_REG_CMD_SEND_EN;
-	/* have spdif? then this too! XXX not seeing LED yet! XXX */
-	if (sc->has_spdif)
-		sc->sc_output_dma->dma_enable_bit |= ATI_REG_CMD_SPDF_OUT_EN;
-
-	/* and for input */
-	sc->sc_input_dma->linkptr         = ATI_REG_IN_DMA_LINKPTR;
-	sc->sc_input_dma->dma_enable_bit  = ATI_REG_CMD_IN_DMA_EN  |
-					    ATI_REG_CMD_RECEIVE_EN;
-
 #if 0
 	/* could preliminary program DMA chain */
 	auixp_program_dma_chain(sc, sc->sc_output_dma);
@@ -1335,7 +1327,7 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof sc->sc_audev.config);
 
 	/* power up chip */
-	auixp_power(sc, PCI_PMCSR_STATE_D0);
+	pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D0);
 
 	/* init chip */
 	if (auixp_init(sc) == -1) {
@@ -1378,14 +1370,6 @@ auixp_post_config(void *self)
 	sc->has_spdif = AC97_HAS_SPDIF(sc->sc_codec.codec_if);
 #endif
 
-<<<<<<< HEAD
-	/* attach audio devices for all detected codecs */
-	for (codec_nr = 0; codec_nr < ATI_IXP_CODECS; codec_nr++) {
-		codec = &sc->sc_codec[codec_nr];
-		if (codec->present)
-			audio_attach_mi(&auixp_hw_if, codec, &sc->sc_dev);
-	}
-=======
 	if (sc->has_spdif)
 		sc->has_spdif = 0;
 
@@ -1402,7 +1386,6 @@ auixp_post_config(void *self)
 	sc->sc_input_dma->linkptr         = ATI_REG_IN_DMA_LINKPTR;
 	sc->sc_input_dma->dma_enable_bit  = ATI_REG_CMD_IN_DMA_EN  |
 					    ATI_REG_CMD_RECEIVE_EN;
->>>>>>> origin/master
 
 	/* done! now enable all interrupts we can service */
 	auixp_enable_interrupts(sc);
@@ -1651,27 +1634,6 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 	auixp_disable_interrupts(sc);
 
 	/* Attach AC97 host interfaces */
-<<<<<<< HEAD
-	for (codec_nr = 0; codec_nr < ATI_IXP_CODECS; codec_nr++) {
-		codec = &sc->sc_codec[codec_nr];
-		bzero(codec, sizeof(struct auixp_codec));
-
-		codec->sc       = sc;
-		codec->codec_nr = codec_nr;
-		codec->present  = 0;
-
-		codec->host_if.arg    = codec;
-		codec->host_if.attach = auixp_attach_codec;
-		codec->host_if.read   = auixp_read_codec;
-		codec->host_if.write  = auixp_write_codec;
-		codec->host_if.reset  = auixp_reset_codec;
-		codec->host_if.flags  = auixp_flags_codec;
-		switch (subdev) {
-		case 0x1311462: /* MSI S270 */
-			codec->codec_flags = AC97_HOST_DONT_ENABLE_SPDIF;
-			break;
-		}
-=======
 	codec = &sc->sc_codec;
 	bzero(codec, sizeof(struct auixp_codec));
 
@@ -1691,7 +1653,6 @@ auixp_autodetect_codecs(struct auixp_softc *sc)
 	case 0x0611462: /* MSI S250 */
 		codec->codec_flags = AC97_HOST_ALC650_PIN47_IS_EAPD;
 		break;
->>>>>>> origin/master
 	}
 
 	if (!(sc->sc_codec_not_ready_bits & ATI_REG_ISR_CODEC0_NOT_READY)) {
@@ -1734,7 +1695,7 @@ auixp_disable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
-	/* lets not stress the DMA engine more than nessisary */
+	/* lets not stress the DMA engine more than necessary */
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	if (value & dma->dma_enable_bit) {
 		value &= ~dma->dma_enable_bit;
@@ -1751,7 +1712,7 @@ auixp_enable_dma(struct auixp_softc *sc, struct auixp_dma *dma)
 
 	iot = sc->sc_iot;
 	ioh = sc->sc_ioh;
-	/* lets not stress the DMA engine more than nessisary */
+	/* lets not stress the DMA engine more than necesssary */
 	value = bus_space_read_4(iot, ioh, ATI_REG_CMD);
 	if (!(value & dma->dma_enable_bit)) {
 		value |= dma->dma_enable_bit;
@@ -1872,65 +1833,3 @@ auixp_init(struct auixp_softc *sc)
 
 	return 0;
 }
-<<<<<<< HEAD
-
-/*
- * TODO power saving and suspend / resume support
- */
-int
-auixp_power(struct auixp_softc *sc, int state)
-{
-	pcitag_t tag;
-	pci_chipset_tag_t pc;
-	pcireg_t data;
-	int pmcapreg;
-
-	tag = sc->sc_tag;
-	pc = sc->sc_pct;
-	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &pmcapreg, 0)) {
-		data = pci_conf_read(pc, tag, pmcapreg + PCI_PMCSR);
-		if ((data & PCI_PMCSR_STATE_MASK) != state)
-			pci_conf_write(pc, tag, pmcapreg + PCI_PMCSR, state);
-	}
-
-	return 0;
-}
-
-#if 0
-void
-auixp_powerhook(int why, void *hdl)
-{
-	struct auixp_softc *sc;
-
-	sc = (struct auixp_softc *)hdl;
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		auixp_suspend(sc);
-		break;
-	case PWR_RESUME:
-		auixp_resume(sc);
-/* XXX fix me XXX */
-		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
-		break;
-	}
-}
-
-int
-auixp_suspend(struct auixp_softc *sc)
-{
-
-	/* XXX no power functions yet XXX */
-	return 0;
-}
-
-int
-auixp_resume(struct auixp_softc *sc)
-{
-
-	/* XXX no power functions yet XXX */
-	return 0;
-}
-#endif /* 0 */
-=======
->>>>>>> origin/master

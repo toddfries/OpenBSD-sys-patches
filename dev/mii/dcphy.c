@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dcphy.c,v 1.17 2006/08/05 17:01:34 brad Exp $	*/
-=======
 /*	$OpenBSD: dcphy.c,v 1.23 2008/09/11 17:20:18 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999

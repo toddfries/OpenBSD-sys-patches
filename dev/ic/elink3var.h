@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: elink3var.h,v 1.16 2000/11/09 18:06:39 mickey Exp $	*/
-=======
 /*	$OpenBSD: elink3var.h,v 1.19 2009/11/23 16:36:22 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: elink3var.h,v 1.12 1997/03/30 22:47:11 jonathan Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ar5212reg.h,v 1.9 2007/03/05 15:13:26 reyk Exp $	*/
-=======
 /*	$OpenBSD: ar5212reg.h,v 1.12 2008/07/30 07:15:39 reyk Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>

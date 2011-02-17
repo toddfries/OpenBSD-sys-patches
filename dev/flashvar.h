@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: flashvar.h,v 1.5 2009/10/13 19:33:16 pirofti Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -31,8 +27,7 @@ struct flash_ctl_tag {
 	int	 (*regx_read_page)(void *, caddr_t, caddr_t);
 	void	 (*reg8_write)(void *, int, u_int8_t);
 	int	 (*regx_write_page)(void *, caddr_t, caddr_t);
-	void	 (*default_disklabel)(void *, dev_t, struct disklabel *,
-	             struct cpu_disklabel *);
+	void	 (*default_disklabel)(void *, dev_t, struct disklabel *);
 	int	 (*safe_strategy)(void *, struct buf *);
 };
 

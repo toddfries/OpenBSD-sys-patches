@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dpt.c,v 1.11 2005/12/03 16:53:16 krw Exp $	*/
-=======
 /*	$OpenBSD: dpt.c,v 1.28 2010/07/20 20:46:18 mk Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -65,11 +61,6 @@
  * o An interface to userland applications.
  * o Some sysctls or a utility (eg dptctl(8)) to control parameters.
  */
-
-#include <sys/cdefs.h>
-#ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $");
-#endif /* __NetBSD__ */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -508,7 +499,7 @@ dpt_poll(sc, ccb)
         struct dpt_softc *sc;
         struct dpt_ccb *ccb;
 {
-	int i;
+	int i, s;
 
 #ifdef DEBUG
 	if ((ccb->ccb_flg & CCB_PRIVATE) == 0)
@@ -519,8 +510,11 @@ dpt_poll(sc, ccb)
         	return (0);                
 
         for (i = ccb->ccb_timeout * 20; i; i--) {
-                if ((dpt_inb(sc, HA_AUX_STATUS) & HA_AUX_INTR) != 0)
+                if ((dpt_inb(sc, HA_AUX_STATUS) & HA_AUX_INTR) != 0) {
+			s = splbio();
                 	dpt_intr(sc);
+			splx(s);
+		}
                 if ((ccb->ccb_flg & CCB_INTR) != 0)
                 	return (0);
                 DELAY(50);
@@ -1075,12 +1069,9 @@ dpt_scsi_cmd(struct scsi_xfer *xs)
 			dpt_timeout(ccb);
 	} 
 	
+	s = splbio();
 	dpt_done_ccb(sc, ccb);
-<<<<<<< HEAD
-	return (COMPLETE);
-=======
 	splx(s);
->>>>>>> origin/master
 }
 
 /*

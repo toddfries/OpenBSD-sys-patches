@@ -1,4 +1,4 @@
-/*	$OpenBSD: fintek.c,v 1.4 2006/12/24 01:26:20 deraadt Exp $ */
+/*	$OpenBSD: fintek.c,v 1.7 2007/10/31 20:46:17 cnst Exp $ */
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
  *
@@ -155,15 +155,13 @@ fintek_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sensor[F_FAN1].type = SENSOR_FANRPM;
 	sc->sc_sensor[F_FAN2].type = SENSOR_FANRPM;
 
-	if (sensor_task_register(sc, fintek_refresh, 5)) {
+	if (sensor_task_register(sc, fintek_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
 
-	for (i = 0; i < F_NUM_SENSORS; i++) {
-		sc->sc_sensor[i].flags &= ~SENSOR_FINVALID;
+	for (i = 0; i < F_NUM_SENSORS; i++)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[i]);
-	}
 	sensordev_install(&sc->sc_sensordev);
 
 	printf("\n");

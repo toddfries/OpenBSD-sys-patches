@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sti.c,v 1.52 2007/01/11 22:02:03 miod Exp $	*/
-=======
 /*	$OpenBSD: sti.c,v 1.61 2009/09/05 14:09:35 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -184,29 +180,16 @@ sti_attach_screen(struct sti_softc *sc, int flags)
 	struct sti_screen *scr;
 	int rc;
 
-<<<<<<< HEAD
-	scr = malloc(sizeof(struct sti_screen), M_DEVBUF, M_NOWAIT);
-=======
 	scr = (struct sti_screen *)malloc(sizeof(*scr), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
->>>>>>> origin/master
 	if (scr == NULL) {
 		printf("cannot allocate screen data\n");
 		return (NULL);
 	}
 
-<<<<<<< HEAD
-	bzero(scr, sizeof(struct sti_screen));
-	sc->sc_scr = scr;
-	scr->scr_main = sc;
-
-	if ((rc = sti_screen_setup(scr, sc->iot, sc->memt, sc->romh, sc->bases,
-	    codebase)) != 0) {
-=======
 	scr->scr_rom = sc->sc_rom;
 	rc = sti_screen_setup(scr, flags);
 	if (rc != 0) {
->>>>>>> origin/master
 		free(scr, M_DEVBUF);
 		return (NULL);
 	}
@@ -397,27 +380,6 @@ sti_rom_setup(struct sti_rom *rom, bus_space_tag_t iot, bus_space_tag_t memt,
 	return (0);
 }
 
-<<<<<<< HEAD
-	cc = &scr->scr_cfg;
-	bzero(cc, sizeof (*cc));
-	cc->ext_cfg = &scr->scr_ecfg;
-	bzero(&cc->ext_cfg, sizeof(*cc->ext_cfg));
-	if (dd->dd_stimemreq) {
-		scr->scr_ecfg.addr =
-		    malloc(dd->dd_stimemreq, M_DEVBUF, M_NOWAIT);
-		if (!scr->scr_ecfg.addr) {
-			printf("cannot allocate %d bytes for STI\n",
-			    dd->dd_stimemreq);
-			uvm_km_free(kernel_map, scr->scr_code,
-			    round_page(size));
-			return (ENOMEM);
-		}
-	}
-	{
-		int i = dd->dd_reglst;
-		u_int32_t *p;
-		struct sti_region r;
-=======
 /*
  * Map all regions.
  */
@@ -434,7 +396,6 @@ sti_region_setup(struct sti_screen *scr)
 	struct sti_region regions[STI_REGION_MAX], *r;
 	u_int regno, regcnt;
 	bus_addr_t addr;
->>>>>>> origin/master
 
 #ifdef STIDEBUG
 	printf("stiregions @%p:\n", dd->dd_reglst);
@@ -486,26 +447,6 @@ sti_region_setup(struct sti_screen *scr)
 		    r->last ? " last" : "");
 #endif
 
-<<<<<<< HEAD
-			/* rom has already been mapped */
-			if (p != cc->regions) {
-				if (bus_space_map(memt, *p,
-				    r.length << PGSHIFT,
-				    r.cache ? BUS_SPACE_MAP_CACHEABLE : 0,
-				    &fbh)) {
-#ifdef STIDEBUG
-					STI_DISABLE_ROM(scr->scr_main);
-					printf("already mapped region\n");
-					STI_ENABLE_ROM(scr->scr_main);
-#endif
-				} else {
-					if (p - cc->regions == 1) {
-						scr->fbaddr = *p;
-						scr->fblen = r.length << PGSHIFT;
-					}
-					*p = fbh;
-				}
-=======
 		/*
 		 * Region #0 is always the rom, and it should have been
 		 * mapped already.
@@ -527,7 +468,6 @@ sti_region_setup(struct sti_screen *scr)
 			if (regno == 1) {
 				scr->fbaddr = addr;
 				scr->fblen = r->length << PGSHIFT;
->>>>>>> origin/master
 			}
 		}
 
@@ -922,6 +862,7 @@ sti_init(struct sti_screen *scr, int mode)
 	struct {
 		struct sti_initflags flags;
 		struct sti_initin in;
+		struct sti_einitin ein;
 		struct sti_initout out;
 	} a;
 
@@ -932,19 +873,15 @@ sti_init(struct sti_screen *scr, int mode)
 	     STI_INITF_PBETI | STI_INITF_ICMT : 0) |
 	    (mode & STI_CLEARSCR ? STI_INITF_CLEAR : 0);
 	a.in.text_planes = 1;
+	a.in.ext_in = &a.ein;
 #ifdef STIDEBUG
 	printf("sti_init,%p(%x, %p, %p, %p)\n",
 	    rom->init, a.flags.flags, &a.in, &a.out, &scr->scr_cfg);
 #endif
-<<<<<<< HEAD
-	(*scr->init)(&a.flags, &a.in, &a.out, &scr->scr_cfg);
-	return (a.out.text_planes != a.in.text_planes || a.out.errno);
-=======
 	(*rom->init)(&a.flags, &a.in, &a.out, &scr->scr_cfg);
 	if (a.out.text_planes != a.in.text_planes)
 		return (-1);	/* not colliding with sti errno values */
 	return (a.out.errno);
->>>>>>> origin/master
 }
 
 int

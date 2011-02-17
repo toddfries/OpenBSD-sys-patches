@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: init_main.c,v 1.138 2007/04/03 08:05:43 art Exp $	*/
-=======
 /*	$OpenBSD: init_main.c,v 1.174 2011/01/08 19:45:09 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -78,6 +74,7 @@
 #include <sys/domain.h>
 #include <sys/mbuf.h>
 #include <sys/pipe.h>
+#include <sys/workq.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
@@ -110,11 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-<<<<<<< HEAD
-"Copyright (c) 1995-2007 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
-=======
 "Copyright (c) 1995-2011 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
->>>>>>> origin/master
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -125,21 +118,14 @@ struct	pcred cred0;
 struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
-#if !defined(__HAVE_CPUINFO) && !defined(curproc)
-struct	proc *curproc;
-#endif
 struct	proc *initproc;
 
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
 
-void	(*md_diskconf)(void) = NULL;
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
 struct	timeval boottime;
-#ifndef __HAVE_CPUINFO
-struct	timeval runtime;
-#endif
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
@@ -155,13 +141,10 @@ void	start_init(void *);
 void	start_cleaner(void *);
 void	start_update(void *);
 void	start_reaper(void *);
-<<<<<<< HEAD
-void	start_crypto(void *);
-=======
 void	crypto_init(void);
->>>>>>> origin/master
 void	init_exec(void);
 void	kqueue_init(void);
+void	workq_init(void);
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
@@ -218,9 +201,7 @@ main(void *framep)
 	 * any possible traps/probes to simplify trap processing.
 	 */
 	curproc = p = &proc0;
-#ifdef __HAVE_CPUINFO
 	p->p_cpu = curcpu();
-#endif
 
 	/*
 	 * Initialize timeouts.
@@ -325,8 +306,6 @@ main(void *framep)
 	/* Create the file descriptor table. */
 	p->p_fd = fdinit(NULL);
 
-	TAILQ_INIT(&p->p_selects);
-
 	/* Create the limits structures. */
 	pr->ps_limit = &limit0;
 	for (i = 0; i < nitems(p->p_rlimit); i++)
@@ -344,7 +323,7 @@ main(void *framep)
 
 	/* Allocate a prototype map so we have something to fork. */
 	uvmspace_init(&vmspace0, pmap_kernel(), round_page(VM_MIN_ADDRESS),
-	    trunc_page(VM_MAX_ADDRESS), TRUE);
+	    trunc_page(VM_MAX_ADDRESS), TRUE, TRUE);
 	p->p_vmspace = &vmspace0;
 
 	p->p_addr = proc0paddr;				/* XXX */
@@ -361,7 +340,12 @@ main(void *framep)
 	(void)chgproccnt(0, 1);
 
 	/* Initialize run queues */
-	rqinit();
+	sched_init_runqueues();
+	sleep_queue_init();
+	sched_init_cpu(curcpu());
+
+	/* Initialize work queues */
+	workq_init();
 
 	random_start();
 
@@ -429,7 +413,6 @@ main(void *framep)
 #if !defined(NO_PROPOLICE)
 	{
 		volatile long newguard[8];
-		int i;
 
 		arc4random_buf((long *)newguard, sizeof(newguard));
 
@@ -485,12 +468,11 @@ main(void *framep)
 #endif
 
 	/* Configure root/swap devices */
-	if (md_diskconf)
-		(*md_diskconf)();
+	diskconf();
 
-	/* Mount the root file system. */
-	if (vfs_mountroot())
+	if (mountroot == NULL || ((*mountroot)() != 0))
 		panic("cannot mount root");
+
 	CIRCLEQ_FIRST(&mountlist)->mnt_flag |= MNT_ROOTFS;
 
 	/* Get the vnode for '/'.  Set p->p_fd->fd_cdir to reference it. */
@@ -520,14 +502,9 @@ main(void *framep)
 #else
 	boottime = mono_time = time;	
 #endif
-#ifndef __HAVE_CPUINFO
-	microuptime(&runtime);
-#endif
 	LIST_FOREACH(p, &allproc, p_list) {
 		p->p_stats->p_start = boottime;
-#ifdef __HAVE_CPUINFO
 		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
-#endif
 		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
 	}
 
@@ -553,15 +530,6 @@ main(void *framep)
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
 
-<<<<<<< HEAD
-#ifdef CRYPTO
-	/* Create the crypto kernel thread. */
-	if (kthread_create(start_crypto, NULL, NULL, "crypto"))
-		panic("crypto thread");
-#endif /* CRYPTO */
-
-=======
->>>>>>> origin/master
 	microtime(&rtv);
 	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());
 
@@ -775,12 +743,3 @@ start_reaper(void *arg)
 	reaper();
 	/* NOTREACHED */
 }
-
-#ifdef CRYPTO
-void
-start_crypto(void *arg)
-{
-	crypto_thread();
-	/* NOTREACHED */
-}
-#endif /* CRYPTO */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: malloc.h,v 1.82 2005/12/14 22:03:01 pedro Exp $	*/
-=======
 /*	$OpenBSD: malloc.h,v 1.99 2010/12/25 00:13:21 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -56,16 +52,10 @@
 /*
  * flags to malloc
  */
-<<<<<<< HEAD
-#define	M_WAITOK	0x0000
-#define	M_NOWAIT	0x0001
-#define M_CANFAIL	0x0002
-=======
 #define	M_WAITOK	0x0001
 #define	M_NOWAIT	0x0002
 #define	M_CANFAIL	0x0004
 #define	M_ZERO		0x0008
->>>>>>> origin/master
 
 /*
  * Types of memory to be allocated
@@ -128,13 +118,7 @@
 #define	M_TTYS		62	/* allocated tty structures */
 #define	M_EXEC		63	/* argument lists & other mem used by exec */
 #define	M_MISCFSMNT	64	/* miscfs mount structures */
-/* 65 - free */
-#define	M_ADOSFSMNT	66	/* adosfs mount structures */
-/* 67 - free */
-#define	M_ANODE		68	/* adosfs anode structures and tables. */
-/* 69-70 - free */
-#define	M_ADOSFSBITMAP	71	/* adosfs bitmap */
-/* 72-73 - free */
+/* 65-73 - free */
 #define	M_PFKEY		74	/* pfkey data */
 #define	M_TDB		75	/* Transforms database */
 #define	M_XDATA		76	/* IPsec data */
@@ -191,7 +175,13 @@
 #define M_UDFFENTRY	141	/* UDF file entry */
 #define M_UDFFID	142	/* UDF file id */
 
-#define	M_LAST		143	/* Must be last type + 1 */
+#define	M_BTHIDEV	143	/* Bluetooth HID */
+
+#define M_AGP		144	/* AGP Memory */
+
+#define M_DRM		145	/* Direct Rendering Manager */
+
+#define	M_LAST		146	/* Must be last type + 1 */
 
 #define	INITKMEMNAMES { \
 	"free",		/* 0 M_FREE */ \
@@ -260,12 +250,12 @@
 	"exec",		/* 63 M_EXEC */ \
 	"miscfs mount",	/* 64 M_MISCFSMNT */ \
 	NULL, \
-	"adosfs mount",	/* 66 M_ADOSFSMNT */ \
-	NULL, \
-	"adosfs anode",	/* 68 M_ANODE */ \
 	NULL, \
 	NULL, \
-	"adosfs bitmap", /* 71 M_ADOSFSBITMAP */ \
+	NULL, \
+	NULL, \
+	NULL, \
+	NULL, \
 	NULL, \
 	NULL, \
 	"pfkey data",	/* 74 M_PFKEY */ \
@@ -322,12 +312,9 @@
 	"UDF mount",	/* 140 M_UDFMOUNT */ \
 	"UDF file entry",	/* 141 M_UDFFENTRY */ \
 	"UDF file id",	/* 142 M_UDFFID */ \
-<<<<<<< HEAD
-=======
 	"Bluetooth HID",	/* 143 M_BTHIDEV */ \
 	"AGP Memory",	/* 144 M_AGP */ \
 	"DRM",	/* 145 M_DRM */ \
->>>>>>> origin/master
 }
 
 struct kmemstats {
@@ -380,50 +367,6 @@ struct kmembuckets {
 #define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / NBPG)
 #define	btokup(addr)	(&kmemusage[((caddr_t)(addr) - kmembase) >> PAGE_SHIFT])
 
-<<<<<<< HEAD
-/*
- * Macro versions for the usual cases of malloc/free
- */
-#if defined(KMEMSTATS) || defined(DIAGNOSTIC) || defined(_LKM) || defined(SMALL_KERNEL)
-#define	MALLOC(space, cast, size, type, flags) \
-	(space) = (cast)malloc((u_long)(size), type, flags)
-#define	FREE(addr, type) free((caddr_t)(addr), type)
-
-#else /* do not collect statistics */
-#define	MALLOC(space, cast, size, type, flags) do { \
-	u_long kbp_size = (u_long)(size); \
-	register struct kmembuckets *kbp = &bucket[BUCKETINDX(kbp_size)]; \
-	int __s = splvm(); \
-	if (kbp->kb_next == NULL) { \
-		(space) = (cast)malloc(kbp_size, type, flags); \
-	} else { \
-		(space) = (cast)kbp->kb_next; \
-		kbp->kb_next = *(caddr_t *)(space); \
-	} \
-	splx(__s); \
-} while (0)
-
-#define	FREE(addr, type) do { \
-	register struct kmembuckets *kbp; \
-	register struct kmemusage *kup = btokup(addr); \
-	int __s = splvm(); \
-	if (1 << kup->ku_indx > MAXALLOCSAVE) { \
-		free((caddr_t)(addr), type); \
-	} else { \
-		kbp = &bucket[kup->ku_indx]; \
-		if (kbp->kb_next == NULL) \
-			kbp->kb_next = (caddr_t)(addr); \
-		else \
-			*(caddr_t *)(kbp->kb_last) = (caddr_t)(addr); \
-		*(caddr_t *)(addr) = NULL; \
-		kbp->kb_last = (caddr_t)(addr); \
-	} \
-	splx(__s); \
-} while(0)
-#endif /* do not collect statistics */
-
-=======
->>>>>>> origin/master
 extern struct kmemstats kmemstats[];
 extern struct kmemusage *kmemusage;
 extern char *kmembase;

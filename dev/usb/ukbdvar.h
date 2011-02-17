@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: ukbdvar.h,v 1.5 2010/07/31 16:04:50 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ukbdvar.h,v 1.2 2000/06/01 14:29:00 augustss Exp $	*/
 
 /*-

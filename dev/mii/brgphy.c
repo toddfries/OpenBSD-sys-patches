@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: brgphy.c,v 1.70 2007/01/10 23:04:53 kettenis Exp $	*/
-=======
 /*	$OpenBSD: brgphy.c,v 1.93 2010/05/24 21:23:23 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000
@@ -96,11 +92,8 @@ void	brgphy_bcm54k2_dspcode(struct mii_softc *);
 void	brgphy_adc_bug(struct mii_softc *);
 void	brgphy_5704_a0_bug(struct mii_softc *);
 void	brgphy_ber_bug(struct mii_softc *);
-<<<<<<< HEAD
-=======
 void	brgphy_crc_bug(struct mii_softc *);
 void	brgphy_disable_early_dac(struct mii_softc *sc);
->>>>>>> origin/master
 void	brgphy_jumbo_settings(struct mii_softc *);
 void	brgphy_eth_wirespeed(struct mii_softc *);
 
@@ -153,8 +146,6 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM_BCM5752 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5780,
 	  MII_STR_xxBROADCOM_BCM5780 },
-<<<<<<< HEAD
-=======
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM54XX,
 	  MII_STR_xxBROADCOM2_BCM54XX },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5481,
@@ -163,7 +154,6 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM2_BCM5482 },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5722,
 	  MII_STR_xxBROADCOM2_BCM5722 },
->>>>>>> origin/master
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5755,
 	  MII_STR_xxBROADCOM2_BCM5755 },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5761,
@@ -172,12 +162,10 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM2_BCM5784 },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5787,
 	  MII_STR_xxBROADCOM2_BCM5787 },
-	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5706C,
-	  MII_STR_xxBROADCOM_BCM5706C },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5706,
+	  MII_STR_xxBROADCOM_BCM5706 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5708C,
 	  MII_STR_xxBROADCOM_BCM5708C },
-<<<<<<< HEAD
-=======
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5708S,
 	  MII_STR_xxBROADCOM2_BCM5708S },
 	{ MII_OUI_xxBROADCOM2,		MII_MODEL_xxBROADCOM2_BCM5709C,
@@ -190,7 +178,6 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM3_BCM57780 },
 	{ MII_OUI_BROADCOM2,		MII_MODEL_BROADCOM2_BCM5906,
 	  MII_STR_BROADCOM2_BCM5906 },
->>>>>>> origin/master
 
 	{ 0,				0,
 	  NULL },
@@ -502,7 +489,7 @@ brgphy_copper_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX | IFM_FDX;
 			break;
 		case BRGPHY_RES_100T4:
-			mii->mii_media_active |= IFM_100_T4;
+			mii->mii_media_active |= IFM_100_T4 | IFM_HDX;
 			break;
 		case BRGPHY_RES_100HD:
 			mii->mii_media_active |= IFM_100_TX | IFM_HDX;
@@ -823,8 +810,6 @@ brgphy_reset(struct mii_softc *sc)
 					& ~BRGPHY_PHY_EXTCTL_3_LED);
 			}
 		}
-<<<<<<< HEAD
-=======
 	/* Handle any bnx (NetXtreme II) workarounds. */
 	} else if (strcmp(devname, "bnx") == 0) {
 		bnx_sc = sc->mii_pdata->mii_ifp->if_softc;
@@ -866,7 +851,6 @@ brgphy_reset(struct mii_softc *sc)
 				PHY_WRITE(sc, BRGPHY_5708S_BLOCK_ADDR, 
 					BRGPHY_5708S_DIG_PG0);
 			}
->>>>>>> origin/master
 
 			/* Backplanes use special driver/pre-driver/pre-emphasis values. */
 			if ((bnx_sc->bnx_shared_hw_cfg & BNX_SHARED_HW_CFG_PHY_BACKPLANE) &&
@@ -904,10 +888,6 @@ brgphy_reset(struct mii_softc *sc)
 				    BRGPHY_5708S_ANEG_NXT_PG_XMIT1_25G);
 			}
 
-<<<<<<< HEAD
-		/* Enable Ethernet@Wirespeed */
-		if (!(bge_sc->bge_flags & BGE_NO_ETH_WIRE_SPEED))
-=======
                         /*
                          * Select the Multi-Rate Backplane Ethernet block of
                          * the AN MMD.
@@ -942,7 +922,6 @@ brgphy_reset(struct mii_softc *sc)
 			brgphy_jumbo_settings(sc);
 
 			/* Enable Ethernet@Wirespeed */
->>>>>>> origin/master
 			brgphy_eth_wirespeed(sc);
 		} else {
 			if (!(sc->mii_flags & MIIF_HAVEFIBER)) {
@@ -1094,6 +1073,26 @@ brgphy_ber_bug(struct mii_softc *sc)
 		{ BRGPHY_MII_DSP_ADDR_REG,	0x401f },
 		{ BRGPHY_MII_DSP_RW_PORT,	0x14e2 },
 		{ BRGPHY_MII_AUXCTL,		0x0400 },
+		{ 0,				0 },
+	};
+	int i;
+
+	for (i = 0; dspcode[i].reg != 0; i++)
+		PHY_WRITE(sc, dspcode[i].reg, dspcode[i].val);
+}
+
+/* BCM5701 A0/B0 CRC bug workaround */
+void
+brgphy_crc_bug(struct mii_softc *sc)
+{
+	static const struct {
+		int		reg;
+		uint16_t	val;
+	} dspcode[] = {
+		{ BRGPHY_MII_DSP_ADDR_REG,	0x0a75 },
+		{ 0x1c,				0x8c68 },
+		{ 0x1c,				0x8d68 },
+		{ 0x1c,				0x8c68 },
 		{ 0,				0 },
 	};
 	int i;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: sdmmc_cis.c,v 1.5 2010/08/24 14:52:23 blambert Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

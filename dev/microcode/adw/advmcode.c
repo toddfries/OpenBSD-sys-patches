@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: advmcode.c,v 1.4 2003/10/21 18:58:48 jmc Exp $	*/
-=======
 /*	$OpenBSD: advmcode.c,v 1.2 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: advmcode.c,v 1.3 1998/09/26 16:02:57 dante Exp $        */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vnode.h,v 1.76 2007/04/11 16:08:50 thib Exp $	*/
-=======
 /*	$OpenBSD: vnode.h,v 1.107 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -70,17 +66,6 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
  * the rest, so don't believe the above comment!
  */
 enum vtagtype	{
-<<<<<<< HEAD
-	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS, VT_LFS, VT_LOFS, VT_FDESC,
-	VT_PORTAL, VT_KERNFS, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS, VT_EXT2FS,
-	VT_NCPFS, VT_VFS, VT_XFS, VT_NTFS, VT_UDF
-};
-
-#define	VTAG_NAMES \
-    "NON", "UFS", "NFS", "MFS", "MSDOSFS", "LFS", "LOFS", \
-    "FDESC", "PORTAL", "KERNFS", "PROCFS", "AFS", "ISOFS", \
-    "ADOSFS", "EXT2FS", "NCPFS", "VFS", "XFS", "NTFS", "UDF"
-=======
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
 	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
 	VT_EXT2FS, VT_VFS, VT_NNPFS, VT_NTFS, VT_UDF, VT_XFS = VT_NNPFS
@@ -90,7 +75,6 @@ enum vtagtype	{
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
     "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
     "EXT2FS", "VFS", "NNPFS", "NTFS", "UDF"
->>>>>>> origin/master
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
@@ -134,10 +118,7 @@ struct vnode {
 
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
-	struct {
-		struct	simplelock vsi_lock;	/* lock to protect below */
-		struct	selinfo vsi_selinfo;	/* identity of poller(s) */
-	} v_selectinfo;
+	struct	selinfo v_selectinfo;		/* identity of poller(s) */
 };
 #define	v_mountedhere	v_un.vu_mountedhere
 #define	v_socket	v_un.vu_socket
@@ -157,12 +138,9 @@ struct vnode {
 #define	VALIASED	0x0800	/* vnode has an alias */
 #define	VLARVAL		0x1000	/* vnode data not yet set up by higher level */
 #define	VLOCKSWORK	0x4000	/* FS supports locking discipline */
+#define	VCLONE		0x8000	/* vnode is a clone */
 #define	VBITS	"\010\001ROOT\002TEXT\003SYSTEM\004ISTTY\010XLOCK" \
-<<<<<<< HEAD
-    "\011XWANT\013ALIASED\016LOCKSWORK"
-=======
     "\011XWANT\013ALIASED\014LARVAL\016LOCKSWORK\017CLONE"
->>>>>>> origin/master
 
 /*
  * (v_bioflag) Flags that may be manipulated by interrupt handlers
@@ -256,53 +234,28 @@ extern int		vttoif_tab[];
 #define	V_SAVE		0x0001		/* vinvalbuf: sync file first */
 #define	V_SAVEMETA	0x0002		/* vinvalbuf: leave indirect blocks */
 
-#define REVOKEALL	0x0001		/* vop_reovke: revoke all aliases */
+#define REVOKEALL	0x0001		/* vop_revoke: revoke all aliases */
 
 
 TAILQ_HEAD(freelst, vnode);
 extern struct freelst vnode_hold_list;	/* free vnodes referencing buffers */
 extern struct freelst vnode_free_list;	/* vnode free list */
-extern struct simplelock vnode_free_list_slock;
 
-#ifdef DIAGNOSTIC
 #define	VATTR_NULL(vap)	vattr_null(vap)
-<<<<<<< HEAD
-
-#define	VREF(vp)	vref(vp)
-void	vref(struct vnode *);
-#else
-#define	VATTR_NULL(vap)	(*(vap) = va_null)	/* initialize a vattr */
-
-static __inline void vref(struct vnode *);
-#define	VREF(vp)	vref(vp)		/* increase reference */
-static __inline void
-vref(vp)
-	struct vnode *vp;
-{
-	vp->v_usecount++;
-}
-#endif /* DIAGNOSTIC */
-
-=======
->>>>>>> origin/master
 #define	NULLVP	((struct vnode *)NULL)
 #define	VN_KNOTE(vp, b)					\
-	KNOTE(&vp->v_selectinfo.vsi_selinfo.si_note, (b))
+	KNOTE(&vp->v_selectinfo.si_note, (b))
 
 /*
  * Global vnode data.
  */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
-extern	int desiredvnodes;		/* number of vnodes desired */
+extern	int desiredvnodes;		/* XXX number of vnodes desired */
+extern	int maxvnodes;			/* XXX number of vnodes to allocate */
 extern	time_t syncdelay;		/* time to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
-<<<<<<< HEAD
-extern	struct vattr va_null;		/* predefined null vattr structure */
-
-=======
 extern void    vhold(struct vnode *);
 extern void    vdrop(struct vnode *);
->>>>>>> origin/master
 #endif /* _KERNEL */
 
 /* vnode operations */
@@ -361,45 +314,11 @@ struct vop_islocked_args {
 };
 int VOP_ISLOCKED(struct vnode *);
 
-<<<<<<< HEAD
-/*
- * VDESC_NO_OFFSET is used to identify the end of the offset list
- * and in places where no such field exists.
- */
-#define VDESC_NO_OFFSET -1
-
-/*
- * This structure describes the vnode operation taking place.
- */
-struct vnodeop_desc {
-	int	vdesc_offset;		/* offset in vector--first for speed */
-	char    *vdesc_name;		/* a readable name for debugging */
-	int	vdesc_flags;		/* VDESC_* flags */
-
-	/*
-	 * These ops are used by bypass routines to map and locate arguments.
-	 * Creds and procs are not needed in bypass routines, but sometimes
-	 * they are useful to (for example) transport layers.
-	 * Nameidata is useful because it has a cred in it.
-	 */
-	int	*vdesc_vp_offsets;	/* list ended by VDESC_NO_OFFSET */
-	int	vdesc_vpp_offset;	/* return vpp location */
-	int	vdesc_cred_offset;	/* cred location, if any */
-	int	vdesc_proc_offset;	/* proc location, if any */
-	int	vdesc_componentname_offset; /* if any */
-	/*
-	 * Finally, we've got a list of private data (about each operation)
-	 * for each transport layer.  (Support to manage this list is not
-	 * yet part of BSD.)
-	 */
-	caddr_t	*vdesc_transports;
-=======
 struct vop_lookup_args {
 	struct vnodeop_desc *a_desc;
 	struct vnode *a_dvp;
 	struct vnode **a_vpp;
 	struct componentname *a_cnp;
->>>>>>> origin/master
 };
 int VOP_LOOKUP(struct vnode *, struct vnode **, struct componentname *);
 
@@ -423,41 +342,12 @@ struct vop_mknod_args {
 int VOP_MKNOD(struct vnode *, struct vnode **, struct componentname *, 
     struct vattr *);
 
-<<<<<<< HEAD
-/*
- * Interlock for scanning list of vnodes attached to a mountpoint
- */
-extern struct simplelock mntvnode_slock;
-
-/*
- * This macro is very helpful in defining those offsets in the vdesc struct.
- *
- * This is stolen from X11R4.  I ingored all the fancy stuff for
- * Crays, so if you decide to port this to such a serious machine,
- * you might want to consult Intrisics.h's XtOffset{,Of,To}.
- */
-#define VOPARG_OFFSET(p_type,field) \
-	((int) (((char *) (&(((p_type)NULL)->field))) - ((char *) NULL)))
-#define VOPARG_OFFSETOF(s_type,field) \
-	VOPARG_OFFSET(s_type*,field)
-#define VOPARG_OFFSETTO(S_TYPE,S_OFFSET,STRUCT_P) \
-	((S_TYPE)(((char *)(STRUCT_P))+(S_OFFSET)))
-
-
-/*
- * This structure is used to configure the new vnodeops vector.
- */
-struct vnodeopv_entry_desc {
-	struct vnodeop_desc *opve_op;   /* which operation this is */
-	int (*opve_impl)(void *);	/* code implementing this operation */
-=======
 struct vop_open_args {
 	struct vnodeop_desc *a_desc;
 	struct vnode *a_vp;
 	int a_mode;
 	struct ucred *a_cred;
 	struct proc *a_p;
->>>>>>> origin/master
 };
 int VOP_OPEN(struct vnode *, int, struct ucred *, struct proc *);
 
@@ -470,20 +360,7 @@ struct vop_close_args {
 };
 int VOP_CLOSE(struct vnode *, int, struct ucred *, struct proc *);
 
-<<<<<<< HEAD
-/*
- * A default routine which just returns an error.
- */
-int vn_default_error(void *);
-
-/*
- * A generic structure.
- * This can be used by bypass routines to identify generic arguments.
- */
-struct vop_generic_args {
-=======
 struct vop_access_args {
->>>>>>> origin/master
 	struct vnodeop_desc *a_desc;
 	struct vnode *a_vp;
 	int a_mode;
@@ -748,6 +625,7 @@ struct mount;
 struct nameidata;
 struct proc;
 struct stat;
+struct statfs;
 struct ucred;
 struct uio;
 struct vattr;
@@ -776,13 +654,10 @@ int	vwaitforio(struct vnode *, int, char *, int);
 void	vwakeup(struct vnode *);
 void	vput(struct vnode *);
 int	vrecycle(struct vnode *, struct proc *);
-<<<<<<< HEAD
-void	vrele(struct vnode *);
-=======
 int	vrele(struct vnode *);
 void	vref(struct vnode *);
->>>>>>> origin/master
 void	vprint(char *, struct vnode *);
+void	copy_statfs_info(struct statfs *, const struct mount *);
 
 /* vfs_getcwd.c */
 int vfs_getcwd_scandir(struct vnode **, struct vnode **, char **, char *,
@@ -793,15 +668,16 @@ int vfs_getcwd_getcache(struct vnode **, struct vnode **, char **, char *);
 
 /* vfs_default.c */
 int	vop_generic_abortop(void *);
+int	vop_generic_bmap(void *);
 int	vop_generic_bwrite(void *);
 int	vop_generic_islocked(void *);
 int	vop_generic_lock(void *);
 int	vop_generic_unlock(void *);
 int	vop_generic_revoke(void *);
 int	vop_generic_kqfilter(void *);
+int	vop_generic_lookup(void *);
 
 /* vfs_vnops.c */
-int	vn_access(struct vnode *, int);
 int	vn_isunder(struct vnode *, struct vnode *, struct proc *);
 int	vn_close(struct vnode *, int, struct ucred *, struct proc *);
 int	vn_open(struct nameidata *, int, int);
@@ -811,6 +687,7 @@ int	vn_stat(struct vnode *, struct stat *, struct proc *);
 int	vn_statfile(struct file *, struct stat *, struct proc *);
 int	vn_lock(struct vnode *, int, struct proc *);
 int	vn_writechk(struct vnode *);
+int	vn_ioctl(struct file *, u_long, caddr_t, struct proc *);
 void	vn_marktext(struct vnode *);
 
 /* vfs_sync.c */

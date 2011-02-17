@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_fork.c,v 1.89 2007/04/03 08:05:43 art Exp $	*/
-=======
 /*	$OpenBSD: kern_fork.c,v 1.123 2010/10/31 00:03:44 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -147,12 +143,7 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 		flags |= FORK_SHAREVM;
 
 	if (rforkflags & RFTHREAD)
-<<<<<<< HEAD
-		flags |= FORK_THREAD;
-#endif
-=======
 		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
->>>>>>> origin/master
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -278,7 +269,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	p2->p_stat = SIDL;			/* protect against others */
 	p2->p_exitsig = exitsig;
-	p2->p_forw = p2->p_back = NULL;
+	p2->p_flag = 0;
 
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p2->p_flag, P_THREAD);
@@ -305,30 +296,16 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	timeout_set(&p2->p_sleep_to, endtsleep, p2);
 	timeout_set(&p2->p_realit_to, realitexpire, p2);
 
-<<<<<<< HEAD
-#if defined(__HAVE_CPUINFO)
-	p2->p_cpu = p1->p_cpu;
-#endif
-
-=======
->>>>>>> origin/master
 	/*
 	 * Duplicate sub-structures as needed.
 	 * Increase reference counts on shared objects.
 	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-<<<<<<< HEAD
-	p2->p_flag = 0;
-	p2->p_emul = p1->p_emul;
-=======
->>>>>>> origin/master
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
 	if (flags & FORK_PTRACE)
 		atomic_setbits_int(&p2->p_flag, p1->p_flag & P_TRACED);
-
-	TAILQ_INIT(&p2->p_selects);
 
 	/* bump references to the text vnode (for procfs) */
 	p2->p_textvp = p1->p_textvp;
@@ -541,7 +518,12 @@ proc_trampoline_mp(void)
 
 	p = curproc;
 
+	SCHED_ASSERT_LOCKED();
+	__mp_unlock(&sched_lock);
+	spl0();
 	SCHED_ASSERT_UNLOCKED();
+	KASSERT(__mp_lock_held(&kernel_lock) == 0);
+
 	KERNEL_PROC_LOCK(p);
 }
 #endif

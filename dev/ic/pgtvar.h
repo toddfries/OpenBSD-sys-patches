@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pgtvar.h,v 1.10 2006/10/09 20:45:27 mglocker Exp $  */
-=======
 /*	$OpenBSD: pgtvar.h,v 1.13 2010/09/20 07:40:41 deraadt Exp $  */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

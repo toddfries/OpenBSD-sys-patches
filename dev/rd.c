@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: rd.c,v 1.2 2008/08/22 03:12:37 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1995 Gordon W. Ross

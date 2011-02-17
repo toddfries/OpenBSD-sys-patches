@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: ym.c,v 1.12 2003/04/27 11:22:53 ho Exp $ */
-=======
 /* $OpenBSD: ym.c,v 1.17 2010/07/31 11:25:38 ratchov Exp $ */
->>>>>>> origin/master
 
 
 /*
@@ -307,12 +303,8 @@ struct audio_hw_if ym_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	ad1848_get_props,
-<<<<<<< HEAD
-	NULL,
-=======
 	ad1848_trigger_output,
 	ad1848_trigger_input,
->>>>>>> origin/master
 	NULL
 };
 

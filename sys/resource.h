@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: resource.h,v 1.6 2003/12/11 22:55:22 millert Exp $	*/
-=======
 /*	$OpenBSD: resource.h,v 1.9 2010/11/02 10:51:06 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
 
 /*

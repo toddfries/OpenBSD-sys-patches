@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rfx.c,v 1.6 2006/06/02 20:00:56 miod Exp $	*/
-=======
 /*	$OpenBSD: rfx.c,v 1.9 2008/12/27 17:23:03 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -293,7 +289,7 @@ rfxattach(struct device *parent, struct device *self, void *args)
 
 	/*
 	 * If we are not the console, the frame buffer has not been
-	 * initalized by the PROM - do this ourselves.
+	 * initialized by the PROM - do this ourselves.
 	 */
 	if (!isconsole) {
 		if (rfx_initialize(sc, sa, &cf) != 0)

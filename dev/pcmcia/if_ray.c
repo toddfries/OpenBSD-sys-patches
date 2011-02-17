@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ray.c,v 1.33 2006/08/18 07:50:50 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_ray.c,v 1.45 2010/09/07 16:21:46 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*

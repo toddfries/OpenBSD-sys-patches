@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wdc_pcmcia.c,v 1.16 2005/01/27 17:04:56 millert Exp $	*/
-=======
 /*	$OpenBSD: wdc_pcmcia.c,v 1.24 2010/08/31 17:13:47 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: wdc_pcmcia.c,v 1.19 1999/02/19 21:49:43 abs Exp $ */
 
 /*-

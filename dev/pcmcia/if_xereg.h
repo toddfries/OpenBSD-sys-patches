@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xereg.h,v 1.3 2001/06/27 05:44:57 nate Exp $	*/
+/*	$OpenBSD: if_xereg.h,v 1.4 2003/10/22 09:58:46 jmc Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, C Stone, Job de Haas

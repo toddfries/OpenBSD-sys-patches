@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ne_pcmcia.c,v 1.88 2006/07/09 19:37:00 miod Exp $	*/
-=======
 /*	$OpenBSD: if_ne_pcmcia.c,v 1.94 2010/08/30 20:33:18 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -913,6 +909,7 @@ ne_pcmcia_activate(dev, act)
 	return (0);
 }
 
+#ifdef notyet
 int
 ne_pcmcia_enable(dsc)
 	struct dp8390_softc *dsc;
@@ -940,6 +937,7 @@ ne_pcmcia_disable(dsc)
 	pcmcia_intr_disestablish(psc->sc_pf, psc->sc_ih);
 	pcmcia_function_disable(psc->sc_pf);
 }
+#endif
 
 u_int8_t *
 ne_pcmcia_get_enaddr(psc, maddr, myea)

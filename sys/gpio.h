@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: gpio.h,v 1.7 2008/11/26 14:51:20 mbalmer Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -37,14 +33,11 @@
 #define GPIO_PIN_PUSHPULL	0x0010	/* push-pull output */
 #define GPIO_PIN_TRISTATE	0x0020	/* output disabled */
 #define GPIO_PIN_PULLUP		0x0040	/* internal pull-up enabled */
-<<<<<<< HEAD
-=======
 #define GPIO_PIN_PULLDOWN	0x0080	/* internal pull-down enabled */
 #define GPIO_PIN_INVIN		0x0100	/* invert input */
 #define GPIO_PIN_INVOUT		0x0200	/* invert output */
 #define GPIO_PIN_USER		0x0400	/* user != 0 can access */
 #define GPIO_PIN_SET		0x8000	/* set for securelevel access */
->>>>>>> origin/master
 
 /* GPIO controller description */
 struct gpio_info {

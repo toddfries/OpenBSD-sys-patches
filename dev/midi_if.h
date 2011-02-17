@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: midi_if.h,v 1.5 2002/03/15 01:20:04 millert Exp $	*/
-=======
 /*	$OpenBSD: midi_if.h,v 1.7 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: midi_if.h,v 1.3 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*

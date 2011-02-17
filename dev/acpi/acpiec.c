@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpiec.c,v 1.17 2007/02/21 04:12:47 marco Exp $ */
-=======
 /* $OpenBSD: acpiec.c,v 1.44 2011/01/09 22:27:21 jordan Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -273,16 +269,8 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_attach_args *aa = aux;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
-	sc->sc_devnode = aa->aaa_node->child;
+	sc->sc_devnode = aa->aaa_node;
 
-<<<<<<< HEAD
-	if (sc->sc_acpi->sc_ec != NULL) {
-		printf(": Only single EC is supported!\n");
-		return;
-	}
-
-=======
->>>>>>> origin/master
 	if (acpiec_getcrs(sc, aa)) {
 		printf(": Failed to read resource settings\n");
 		return;
@@ -304,7 +292,7 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	    sc, 1);
 #endif
 
-	printf(": %s\n", sc->sc_devnode->parent->name);
+	printf("\n");
 }
 
 void
@@ -510,23 +498,16 @@ ecdtdone:
 int
 acpiec_reg(struct acpiec_softc *sc)
 {
-	struct aml_value	arg[2];
-	struct aml_node		*root;
+	struct aml_value arg[2];
 
 	memset(&arg, 0, sizeof(arg));
-
 	arg[0].type = AML_OBJTYPE_INTEGER;
 	arg[0].v_integer = REG_TYPE_EC;
 	arg[1].type = AML_OBJTYPE_INTEGER;
 	arg[1].v_integer = 1;
 
-	root = aml_searchname(sc->sc_devnode, "_REG");
-	if (root == NULL) {
-		dnprintf(10, "%s: no _REG method\n", DEVNAME(sc));
-		return (1);
-	}
-
-	if (aml_evalnode(sc->sc_acpi, root, 2, arg, NULL) != 0) {
+	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_REG", 2,
+	    arg, NULL) != 0) {
 		dnprintf(10, "%s: eval method _REG failed\n", DEVNAME(sc));
 		printf("acpiec _REG failed, broken BIOS\n");
 	}

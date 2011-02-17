@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cacvar.h,v 1.2 2002/03/14 01:26:54 millert Exp $	*/
-=======
 /*	$OpenBSD: cacvar.h,v 1.5 2008/10/29 21:17:15 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cacvar.h,v 1.7 2000/10/19 14:28:47 ad Exp $	*/
 
 /*-

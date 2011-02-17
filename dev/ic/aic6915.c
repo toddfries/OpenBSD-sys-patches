@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aic6915.c,v 1.2 2006/12/07 13:30:24 martin Exp $	*/
-=======
 /*	$OpenBSD: aic6915.c,v 1.9 2009/08/10 20:29:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-
@@ -1199,6 +1195,7 @@ sf_stop(struct ifnet *ifp, int disable)
 			ds->ds_mbuf = NULL;
 		}
 	}
+	sc->sc_txpending = 0;
 
 	if (disable)
 		sf_rxdrain(sc);

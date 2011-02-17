@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usbhid.h,v 1.7 2002/05/09 15:06:29 nate Exp $ */
-=======
 /*	$OpenBSD: usbhid.h,v 1.13 2009/12/09 21:27:19 matthieu Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: usbhid.h,v 1.11 2001/12/28 00:20:24 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbhid.h,v 1.7 1999/11/17 22:33:51 n_hibma Exp $ */
 
@@ -62,7 +58,7 @@ typedef struct usb_hid_descriptor {
 		uByte		bDescriptorType;
 		uWord		wDescriptorLength;
 	} descrs[1];
-} UPACKED usb_hid_descriptor_t;
+} __packed usb_hid_descriptor_t;
 #define USB_HID_DESCRIPTOR_SIZE(n) (9+(n)*3)
 
 /* Usage pages */
@@ -121,6 +117,7 @@ typedef struct usb_hid_descriptor {
 #define HUG_VBRY		0x0044
 #define HUG_VBRZ		0x0045
 #define HUG_VNO			0x0046
+#define HUG_TWHEEL		0x0048
 #define HUG_SYSTEM_CONTROL	0x0080
 #define HUG_SYSTEM_POWER_DOWN	0x0081
 #define HUG_SYSTEM_SLEEP	0x0082
@@ -171,6 +168,9 @@ typedef struct usb_hid_descriptor {
 #define HUD_LED_SCROLL_LOCK	0x0003
 #define HUD_LED_COMPOSE		0x0004
 #define HUD_LED_KANA		0x0005
+
+/* Usages, Consumer */
+#define HUC_AC_PAN		0x0238
 
 #define HID_USAGE2(p, u) (((p) << 16) | u)
 #define HID_GET_USAGE(u) ((u) & 0xffff)

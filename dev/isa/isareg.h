@@ -1,4 +1,4 @@
-/*	$OpenBSD: isareg.h,v 1.2 1997/11/07 08:07:03 niklas Exp $	*/
+/*	$OpenBSD: isareg.h,v 1.3 2003/06/02 23:28:03 millert Exp $	*/
 /*	$NetBSD: isareg.h,v 1.5 1995/04/17 12:09:13 cgd Exp $	*/
 
 /*-

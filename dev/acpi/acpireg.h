@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acpireg.h,v 1.11 2006/10/12 19:17:26 marco Exp $	*/
-=======
 /*	$OpenBSD: acpireg.h,v 1.24 2011/01/04 21:17:49 kettenis Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -716,11 +712,8 @@ struct acpi_ivrs {
 #define ACPI_DEV_IOSA	"ACPI000B"	/* IO SAPIC Device */
 #define ACPI_DEV_THZ	"THERMALZONE"	/* Thermal Zone */
 #define ACPI_DEV_FFB	"FIXEDBUTTON"	/* Fixed Feature Button */
-<<<<<<< HEAD
-=======
 #define ACPI_DEV_ASUS	"ASUS010"	/* ASUS Hotkeys */
 #define ACPI_DEV_THINKPAD "IBM0068"	/* ThinkPad support */
 #define ACPI_DEV_ASUSAIBOOSTER	"ATK0110"	/* ASUSTeK AI Booster */
->>>>>>> origin/master
 
 #endif	/* !_DEV_ACPI_ACPIREG_H_ */

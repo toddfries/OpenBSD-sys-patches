@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_lockf.c,v 1.11 2005/03/15 03:47:58 tedu Exp $	*/
-=======
 /*	$OpenBSD: vfs_lockf.c,v 1.16 2010/06/29 03:14:42 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vfs_lockf.c,v 1.7 1996/02/04 02:18:21 christos Exp $	*/
 
 /*

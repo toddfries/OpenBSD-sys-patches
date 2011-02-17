@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 /*	$OpenBSD: rs5c372.c,v 1.5 2009/10/05 18:59:36 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rs5c372.c,v 1.5 2006/03/29 06:41:24 thorpej Exp $	*/
 
 /*
@@ -133,7 +130,7 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 
 	cmd = RICOHRTC_SECONDS;
 	if (iic_exec(ia->ia_tag, I2C_OP_READ_WITH_STOP, ia->ia_addr,
-	    &cmd, 1, &data, 1, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, &data, sizeof data, I2C_F_POLL)) {
 		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc read %d fail\n", cmd);
 		return (0);
@@ -146,7 +143,7 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 
 	cmd = RICOHRTC_MINUTES;
 	if (iic_exec(ia->ia_tag, I2C_OP_READ_WITH_STOP, ia->ia_addr,
-	    &cmd, 1, &data, 1, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, &data, sizeof data, I2C_F_POLL)) {
 		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc read %d fail\n", cmd);
 		return (0);
@@ -160,7 +157,7 @@ ricohrtc_match(struct device *parent, void *v, void *arg)
 
 	cmd = RICOHRTC_HOURS;
 	if (iic_exec(ia->ia_tag, I2C_OP_READ_WITH_STOP, ia->ia_addr,
-	    &cmd, 1, &data, 1, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, &data, sizeof data, I2C_F_POLL)) {
 		iic_release_bus(ia->ia_tag, I2C_F_POLL);
 		printf("ricohrtc read %d fail\n", cmd);
 		return (0);
@@ -259,7 +256,7 @@ ricohrtc_reg_write(struct ricohrtc_softc *sc, int reg, uint8_t val)
 	reg &= 0xf;
 	cmd = (reg << 4);
 	if (iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP, sc->sc_address,
-	    &cmd, 1, &val, 1, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, &val, sizeof val, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
 		printf("%s: ricohrtc_reg_write: failed to write reg%d\n",
 		    sc->sc_dev.dv_xname, reg);
@@ -277,7 +274,7 @@ ricohrtc_clock_read(struct ricohrtc_softc *sc, struct clock_ymdhms *dt)
 	iic_acquire_bus(sc->sc_tag, I2C_F_POLL);
 	cmd = (RICOHRTC_SECONDS << 4);
 	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP, sc->sc_address,
-	    &cmd, 1, bcd, RICOHRTC_NRTC_REGS, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, bcd, RICOHRTC_NRTC_REGS, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
 		printf("%s: ricohrtc_clock_read: failed to read rtc\n",
 		    sc->sc_dev.dv_xname);
@@ -318,7 +315,7 @@ ricohrtc_clock_write(struct ricohrtc_softc *sc, struct clock_ymdhms *dt)
 	iic_acquire_bus(sc->sc_tag, I2C_F_POLL);
 	cmd = (RICOHRTC_SECONDS << 4);
 	if (iic_exec(sc->sc_tag, I2C_OP_WRITE_WITH_STOP, sc->sc_address,
-	    &cmd, 1, bcd, RICOHRTC_NRTC_REGS, I2C_F_POLL)) {
+	    &cmd, sizeof cmd, bcd, RICOHRTC_NRTC_REGS, I2C_F_POLL)) {
 		iic_release_bus(sc->sc_tag, I2C_F_POLL);
 		printf("%s: ricohrtc_clock_write: failed to write rtc\n",
 		    sc->sc_dev.dv_xname);

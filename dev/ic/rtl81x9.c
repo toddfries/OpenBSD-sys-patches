@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtl81x9.c,v 1.54 2006/10/15 19:06:38 deraadt Exp $ */
-=======
 /*	$OpenBSD: rtl81x9.c,v 1.74 2010/09/07 16:21:42 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998
@@ -786,9 +782,7 @@ rl_intr(void *arg)
 			CSR_WRITE_2(sc, RL_ISR, status);
 		if ((status & RL_INTRS) == 0)
 			break;
-		if (status & RL_ISR_RX_OK)
-			rl_rxeof(sc);
-		if (status & RL_ISR_RX_ERR)
+		if ((status & RL_ISR_RX_OK) || (status & RL_ISR_RX_ERR))
 			rl_rxeof(sc);
 		if ((status & RL_ISR_TX_OK) || (status & RL_ISR_TX_ERR))
 			rl_txeof(sc);
@@ -1254,39 +1248,7 @@ rl_attach(struct rl_softc *sc)
 }
 
 int
-<<<<<<< HEAD
-rl_detach(sc)
-	struct rl_softc *sc;
-{
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	/* Unhook our tick handler. */
-	timeout_del(&sc->sc_tick_tmo);
-
-	/* Detach any PHYs we might have. */
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
-		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
-
-	/* Delete any remaining media. */
-	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
-
-	ether_ifdetach(ifp);
-	if_detach(ifp);
-
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
-	return (0);
-}
-
-void
-rl_shutdown(arg)
-	void			*arg;
-=======
 rl_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct rl_softc	*sc = (struct rl_softc *)self;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
@@ -1410,17 +1372,11 @@ rl_miibus_statchg(struct device *self)
 void
 rl_tick(void *v)
 {
-<<<<<<< HEAD
-	struct rl_softc *sc = v;
-=======
 	struct rl_softc	*sc = v;
 	int		s;
->>>>>>> origin/master
 
+	s = splnet();
 	mii_tick(&sc->sc_mii);
-<<<<<<< HEAD
-	timeout_add(&sc->sc_tick_tmo, hz);
-=======
 	splx(s);
 
 	timeout_add_sec(&sc->sc_tick_tmo, 1);
@@ -1445,7 +1401,6 @@ rl_detach(struct rl_softc *sc)
 	if_detach(ifp);
 
 	return (0);
->>>>>>> origin/master
 }
 
 struct cfdriver rl_cd = {

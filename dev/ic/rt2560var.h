@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rt2560var.h,v 1.4 2006/06/18 18:44:04 damien Exp $  */
-=======
 /*	$OpenBSD: rt2560var.h,v 1.9 2010/09/07 16:21:42 deraadt Exp $  */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2005, 2006

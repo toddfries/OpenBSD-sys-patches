@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.h,v 1.4 1996/04/21 22:19:56 deraadt Exp $	*/
+/*	$OpenBSD: ramdisk.h,v 1.5 2002/03/14 01:26:52 millert Exp $	*/
 /*	$NetBSD: ramdisk.h,v 1.4 1996/03/22 23:02:04 gwr Exp $	*/
 
 /*

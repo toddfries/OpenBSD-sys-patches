@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gpiovar.h,v 1.2 2006/01/05 11:52:24 grange Exp $	*/
-=======
 /*	$OpenBSD: gpiovar.h,v 1.5 2008/11/26 14:51:20 mbalmer Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2006 Alexander Yurchenko <grange@openbsd.org>

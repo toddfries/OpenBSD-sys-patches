@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_shutdown.c,v 1.4 2000/08/08 16:07:45 peter Exp $	*/
+/*	$OpenBSD: rf_shutdown.c,v 1.6 2008/05/19 18:42:13 miod Exp $	*/
 /*	$NetBSD: rf_shutdown.c,v 1.6 2000/01/13 23:41:18 oster Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ void rf_FreeShutdownEnt(RF_ShutdownList_t *);
 void
 rf_FreeShutdownEnt(RF_ShutdownList_t *ent)
 {
-	FREE(ent, M_RAIDFRAME);
+	free(ent, M_RAIDFRAME);
 }
 
 int

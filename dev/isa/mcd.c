@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mcd.c,v 1.40 2006/08/13 16:24:13 krw Exp $ */
-=======
 /*	$OpenBSD: mcd.c,v 1.56 2010/09/22 01:18:57 matthew Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: mcd.c,v 1.60 1998/01/14 12:14:41 drochner Exp $	*/
 
 /*
@@ -93,19 +89,13 @@
 #define MCD_TRACE(fmt,a,b,c,d)	{if (sc->debug) {printf("%s: st=%02x: ", sc->sc_dev.dv_xname, sc->status); printf(fmt,a,b,c,d);}}
 #endif
 
-#define	MCDPART(dev)	DISKPART(dev)
-#define	MCDUNIT(dev)	DISKUNIT(dev)
-#define	MAKEMCDDEV(maj, unit, part)	MAKEDISKDEV(maj, unit, part)
-
-#define	MCDLABELDEV(dev) (MAKEMCDDEV(major(dev), MCDUNIT(dev), RAW_PART))
-
 /* toc */
 #define MCD_MAXTOCS	104	/* from the Linux driver */
 
 struct mcd_mbx {
 	int		retry, count;
 	struct buf	*bp;
-	daddr_t		blkno;
+	daddr64_t		blkno;
 	int		nblk;
 	int		sz;
 	u_long		skip;
@@ -159,8 +149,36 @@ struct mcd_softc {
 cdev_decl(mcd);
 bdev_decl(mcd);
 
+u_int8_t const __bcd2bin[] = {
+	0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 0, 0, 0, 0, 0, 0,
+	10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 0, 0, 0, 0, 0, 0,
+	20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 0, 0, 0, 0, 0, 0,
+	30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 0, 0, 0, 0, 0, 0,
+	40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 0, 0, 0, 0, 0, 0,
+	50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 0, 0, 0, 0, 0, 0,
+	60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 0, 0, 0, 0, 0, 0,
+	70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 0, 0, 0, 0, 0, 0,
+	80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 0, 0, 0, 0, 0, 0,
+	90, 91, 92, 93, 94, 95, 96, 97, 98, 99
+};
+
+u_int8_t const __bin2bcd[] = {
+	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29,
+	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
+	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+	0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+	0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79,
+	0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+	0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99
+};
+#define	bcd2bin(b)	(__bcd2bin[(b)&0xff])
+#define	bin2bcd(b)	(__bin2bcd[(b)&0xff])
+
 static void hsg2msf(int, bcd_t *);
-static daddr_t msf2hsg(bcd_t *, int);
+static daddr64_t msf2hsg(bcd_t *, int);
 
 int mcd_playtracks(struct mcd_softc *, struct ioc_play_track *);
 int mcd_playmsf(struct mcd_softc *, struct ioc_play_msf *);
@@ -200,8 +218,7 @@ struct cfdriver mcd_cd = {
 	NULL, "mcd", DV_DISK
 };
 
-void	mcdgetdisklabel(dev_t, struct mcd_softc *, struct disklabel *,
-			     struct cpu_disklabel *, int);
+void	mcdgetdisklabel(dev_t, struct mcd_softc *, struct disklabel *, int);
 int	mcd_get_parms(struct mcd_softc *);
 void	mcdstrategy(struct buf *);
 void	mcdstart(struct mcd_softc *);
@@ -318,7 +335,7 @@ mcdopen(dev, flag, fmt, p)
 	int unit, part;
 	struct mcd_softc *sc;
 
-	unit = MCDUNIT(dev);
+	unit = DISKUNIT(dev);
 	if (unit >= mcd_cd.cd_ndevs)
 		return ENXIO;
 	sc = mcd_cd.cd_devs[unit];
@@ -367,15 +384,14 @@ mcdopen(dev, flag, fmt, p)
 				goto bad2;
 
 			/* Fabricate a disk label. */
-			mcdgetdisklabel(dev, sc, sc->sc_dk.dk_label,
-			    sc->sc_dk.dk_cpulabel, 0);
+			mcdgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
 		}
 	}
 
 	MCD_TRACE("open: partition=%d disksize=%d blksize=%d\n", part,
 	    sc->disksize, sc->blksize, 0);
 
-	part = MCDPART(dev);
+	part = DISKPART(dev);
 	
 	/* Check that the partition exists. */
 	if (part != RAW_PART &&
@@ -421,8 +437,8 @@ mcdclose(dev, flag, fmt, p)
 	int flag, fmt;
 	struct proc *p;
 {
-	struct mcd_softc *sc = mcd_cd.cd_devs[MCDUNIT(dev)];
-	int part = MCDPART(dev);
+	struct mcd_softc *sc = mcd_cd.cd_devs[DISKUNIT(dev)];
+	int part = DISKPART(dev);
 	int error;
 	
 	MCD_TRACE("close: partition=%d\n", part, 0, 0, 0);
@@ -460,7 +476,7 @@ void
 mcdstrategy(bp)
 	struct buf *bp;
 {
-	struct mcd_softc *sc = mcd_cd.cd_devs[MCDUNIT(bp->b_dev)];
+	struct mcd_softc *sc = mcd_cd.cd_devs[DISKUNIT(bp->b_dev)];
 	int s;
 	
 	/* Test validity. */
@@ -489,13 +505,7 @@ mcdstrategy(bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-<<<<<<< HEAD
-	if (MCDPART(bp->b_dev) != RAW_PART &&
-	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    sc->sc_dk.dk_cpulabel,
-=======
 	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
->>>>>>> origin/master
 	    (sc->flags & (MCDF_WLABEL|MCDF_LABELLING)) != 0) <= 0)
 		goto done;
 	
@@ -560,10 +570,10 @@ loop:
 	sc->mbx.retry = MCD_RDRETRIES;
 	sc->mbx.bp = bp;
 	sc->mbx.blkno = bp->b_blkno / (sc->blksize / DEV_BSIZE);
-	if (MCDPART(bp->b_dev) != RAW_PART) {
+	if (DISKPART(bp->b_dev) != RAW_PART) {
 		struct partition *p;
-		p = &sc->sc_dk.dk_label->d_partitions[MCDPART(bp->b_dev)];
-		sc->mbx.blkno += p->p_offset;
+		p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
+		sc->mbx.blkno += DL_GETPOFFSET(p);
 	}
 	sc->mbx.nblk = bp->b_bcount / sc->blksize;
 	sc->mbx.sz = sc->blksize;
@@ -604,7 +614,8 @@ mcdioctl(dev, cmd, addr, flag, p)
 	int flag;
 	struct proc *p;
 {
-	struct mcd_softc *sc = mcd_cd.cd_devs[MCDUNIT(dev)];
+	struct mcd_softc *sc = mcd_cd.cd_devs[DISKUNIT(dev)];
+	struct disklabel *lp;
 	int error;
 	
 	MCD_TRACE("ioctl: cmd=0x%x\n", cmd, 0, 0, 0);
@@ -614,9 +625,12 @@ mcdioctl(dev, cmd, addr, flag, p)
 
 	switch (cmd) {
 	case DIOCRLDINFO:
-		mcdgetdisklabel(dev, sc, sc->sc_dk.dk_label,
-		    sc->sc_dk.dk_cpulabel, 0);
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		mcdgetdisklabel(dev, sc, lp, 0);
+		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
 		return 0;
+
 	case DIOCGDINFO:
 	case DIOCGPDINFO:
 		*(struct disklabel *)addr = *(sc->sc_dk.dk_label);
@@ -625,7 +639,7 @@ mcdioctl(dev, cmd, addr, flag, p)
 	case DIOCGPART:
 		((struct partinfo *)addr)->disklab = sc->sc_dk.dk_label;
 		((struct partinfo *)addr)->part =
-		    &sc->sc_dk.dk_label->d_partitions[MCDPART(dev)];
+		    &sc->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
 	case DIOCWDINFO:
@@ -638,8 +652,7 @@ mcdioctl(dev, cmd, addr, flag, p)
 		sc->flags |= MCDF_LABELLING;
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*sc->sc_dk.dk_openmask : */0,
-		    sc->sc_dk.dk_cpulabel);
+		    (struct disklabel *)addr, /*sc->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 		}
 
@@ -713,17 +726,15 @@ mcdioctl(dev, cmd, addr, flag, p)
 }
 
 void
-mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
+mcdgetdisklabel(dev, sc, lp, spoofonly)
 	dev_t dev;
 	struct mcd_softc *sc;
 	struct disklabel *lp;
-	struct cpu_disklabel *clp;
 	int spoofonly;
 {
 	char *errstring;
 	
 	bzero(lp, sizeof(struct disklabel));
-	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = sc->blksize;
 	lp->d_ntracks = 1;
@@ -738,19 +749,8 @@ mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
 	strncpy(lp->d_typename, "Mitsumi CD-ROM", sizeof lp->d_typename);
 	lp->d_type = DTYPE_SCSI;	/* XXX */
 	strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
-<<<<<<< HEAD
-	lp->d_secperunit = sc->disksize;
-	lp->d_rpm = 300;
-	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
-=======
 	DL_SETDSIZE(lp, sc->disksize);
 	lp->d_version = 1;
->>>>>>> origin/master
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -759,8 +759,7 @@ mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	errstring = readdisklabel(MCDLABELDEV(dev), mcdstrategy, lp, clp,
-	    spoofonly);
+	errstring = readdisklabel(DISKLABELDEV(dev), mcdstrategy, lp, spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
 		return;
@@ -772,7 +771,7 @@ mcd_get_parms(sc)
 	struct mcd_softc *sc;
 {
 	struct mcd_mbox mbx;
-	daddr_t size;
+	daddr64_t size;
 	int error;
 
 	/* Send volume info command. */
@@ -794,7 +793,7 @@ mcd_get_parms(sc)
 	return 0;
 }
 
-int
+daddr64_t
 mcdsize(dev)
 	dev_t dev;
 {
@@ -806,7 +805,7 @@ mcdsize(dev)
 int
 mcddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -1095,12 +1094,12 @@ hsg2msf(hsg, msf)
 	M_msf(msf) = bin2bcd(hsg);
 }
 
-static daddr_t
+static daddr64_t
 msf2hsg(msf, relative)
 	bcd_t *msf;
 	int relative;
 {
-	daddr_t blkno;
+	daddr64_t blkno;
 
 	blkno = bcd2bin(M_msf(msf)) * 75 * 60 +
 		bcd2bin(S_msf(msf)) * 75 +
@@ -1448,7 +1447,7 @@ mcd_toc_entries(sc, te)
 		struct cd_toc_entry entries[MCD_MAXTOCS];
 	} data;
 	u_char trk;
-	daddr_t lba;
+	daddr64_t lba;
 	int error, n;
 
 	if (len > sizeof(data.entries) ||
@@ -1568,7 +1567,7 @@ mcd_read_subchannel(sc, ch)
 	int len = ch->data_len;
 	union mcd_qchninfo q;
 	struct cd_sub_channel_info data;
-	daddr_t lba;
+	daddr64_t lba;
 	int error;
 
 	if (sc->debug)

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: agp_ali.c,v 1.1 2002/07/12 20:17:03 mickey Exp $	*/
-=======
 /*	$OpenBSD: agp_ali.c,v 1.12 2010/08/07 18:15:38 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: agp_ali.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 
@@ -64,13 +60,6 @@ struct agp_ali_softc {
 	pcireg_t		 asc_tlbctrl;
 };
 
-<<<<<<< HEAD
-u_int32_t agp_ali_get_aperture(struct vga_pci_softc *);
-int	agp_ali_set_aperture(struct vga_pci_softc *sc, u_int32_t);
-int	agp_ali_bind_page(struct vga_pci_softc *, off_t, bus_addr_t);
-int	agp_ali_unbind_page(struct vga_pci_softc *, off_t);
-void	agp_ali_flush_tlb(struct vga_pci_softc *);
-=======
 void	agp_ali_attach(struct device *, struct device *, void *);
 int	agp_ali_activate(struct device *, int);
 void	agp_ali_save(struct agp_ali_softc *);
@@ -86,7 +75,6 @@ struct cfattach aliagp_ca = {
 	sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach,
 	NULL, agp_ali_activate
 };
->>>>>>> origin/master
 
 struct cfdriver aliagp_cd = {
 	NULL, "aliagp", DV_DULL
@@ -98,32 +86,12 @@ const struct agp_methods agp_ali_methods = {
 	agp_ali_flush_tlb,
 };
 
-<<<<<<< HEAD
-int 
-agp_ali_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa,
-	       struct pci_attach_args *pchb_pa)
-=======
 int
 agp_ali_probe(struct device *parent, void *match, void *aux)
->>>>>>> origin/master
 {
 	struct agp_attach_args	*aa = aux;
 	struct pci_attach_args	*pa = aa->aa_pa;
 
-<<<<<<< HEAD
-	asc = malloc(sizeof *asc, M_DEVBUF, M_NOWAIT);
-	if (asc == NULL) {
-		printf(": failed to allocate softc\n");
-		return (ENOMEM);
-	}
-	sc->sc_chipc = asc;
-	sc->sc_methods = &agp_ali_methods;
-
-	if (agp_map_aperture(sc) != 0) {
-		printf(": failed to map aperture\n");
-		free(asc, M_DEVBUF);
-		return (ENXIO);
-=======
 	/* Must be a pchb, don't attach to iommu-style agp devs */
 	if (agpbus_probe(aa) == 1 && PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ALI &&
 	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_ALI_M1689)
@@ -148,7 +116,6 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 	    PCI_MAPREG_TYPE_MEM, &asc->asc_apaddr, NULL, NULL) != 0) {
 		printf(": can't get aperture info\n");
 		return;
->>>>>>> origin/master
 	}
 
 	for (;;) {
@@ -159,17 +126,10 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-<<<<<<< HEAD
-		if (AGP_SET_APERTURE(sc, AGP_GET_APERTURE(sc) / 2)) {
-			agp_generic_detach(sc);
-			printf(": failed to set aperture\n");
-			return (ENOMEM);
-=======
 		asc->asc_apsize /= 2;
 		if (agp_ali_set_aperture(asc, asc->asc_apsize)) {
 			printf("failed to set aperture\n");
 			return;
->>>>>>> origin/master
 		}
 	}
 	asc->gatt = gatt;
@@ -191,7 +151,7 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 
 #if 0
 int
-agp_ali_detach(struct vga_pci_softc *sc)
+agp_ali_detach(struct agp_softc *sc)
 {
 	int error;
 	pcireg_t reg;
@@ -274,13 +234,8 @@ static const u_int32_t agp_ali_table[] = {
 };
 #define agp_ali_table_size (sizeof(agp_ali_table) / sizeof(agp_ali_table[0]))
 
-<<<<<<< HEAD
-u_int32_t
-agp_ali_get_aperture(struct vga_pci_softc *sc)
-=======
 bus_size_t
 agp_ali_get_aperture(void *sc)
->>>>>>> origin/master
 {
 	struct agp_ali_softc	*asc = sc;
 	int			 i;
@@ -297,11 +252,7 @@ agp_ali_get_aperture(void *sc)
 }
 
 int
-<<<<<<< HEAD
-agp_ali_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
-=======
 agp_ali_set_aperture(void *sc, bus_size_t aperture)
->>>>>>> origin/master
 {
 	struct agp_ali_softc	*asc = sc;
 	int			 i;
@@ -311,7 +262,7 @@ agp_ali_set_aperture(void *sc, bus_size_t aperture)
 		if (agp_ali_table[i] == aperture)
 			break;
 	if (i == agp_ali_table_size)
-		return EINVAL;
+		return (EINVAL);
 
 	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE);
 	reg &= ~0xff;
@@ -320,13 +271,8 @@ agp_ali_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-<<<<<<< HEAD
-int
-agp_ali_bind_page(struct vga_pci_softc *sc, off_t offset, bus_addr_t physical)
-=======
 void
 agp_ali_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
->>>>>>> origin/master
 {
 	struct agp_ali_softc *asc = sc;
 
@@ -334,13 +280,8 @@ agp_ali_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 	    physical;
 }
 
-<<<<<<< HEAD
-int
-agp_ali_unbind_page(struct vga_pci_softc *sc, off_t offset)
-=======
 void
 agp_ali_unbind_page(void *sc, bus_size_t offset)
->>>>>>> origin/master
 {
 	struct agp_ali_softc *asc = sc;
 
@@ -348,11 +289,7 @@ agp_ali_unbind_page(void *sc, bus_size_t offset)
 }
 
 void
-<<<<<<< HEAD
-agp_ali_flush_tlb(struct vga_pci_softc *sc)
-=======
 agp_ali_flush_tlb(void *sc)
->>>>>>> origin/master
 {
 	struct agp_ali_softc	*asc = sc;
 	pcireg_t		reg;

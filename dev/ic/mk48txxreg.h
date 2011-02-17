@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mk48txxreg.h,v 1.2 2001/08/18 22:08:18 jason Exp $	*/
-=======
 /*	$OpenBSD: mk48txxreg.h,v 1.5 2009/05/15 23:02:25 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mk48txxreg.h,v 1.4 2000/11/11 11:59:42 pk Exp $ */
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

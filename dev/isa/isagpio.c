@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isagpio.c,v 1.2 2006/03/27 07:16:04 grange Exp $	*/
-=======
 /*	$OpenBSD: isagpio.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Oleg Safiullin <form@pdp-11.org.ru>

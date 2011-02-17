@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: atmel_at76c503_rfmd_acc_fw.h,v 1.1 2005/03/07 13:48:15 dlg Exp $ */
 
 /*
  *   Target: AT76c503 with RFMD Accton design radio

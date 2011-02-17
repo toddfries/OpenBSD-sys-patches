@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iha.c,v 1.25 2005/12/03 16:53:16 krw Exp $ */
-=======
 /*	$OpenBSD: iha.c,v 1.40 2010/10/03 21:14:40 krw Exp $ */
->>>>>>> origin/master
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -58,10 +54,10 @@ struct cfdriver iha_cd = {
 };
 
 struct scsi_adapter iha_switch = {
-	iha_scsi_cmd,	/*  int (*scsi_cmd)(struct scsi_xfer *); */
-	iha_minphys,	/* void (*scsi_minphys)(struct buf *);   */
-	NULL,		/*  int (*open_target_lu)(void);         */
-	NULL		/*  int (*close_target_lu)(void);        */
+	iha_scsi_cmd,	/* scsi_cmd() */
+	iha_minphys,	/* scsi_minphys() */
+	NULL,		/* probe_dev(void) */
+	NULL		/* free_dev() */
 };
 
 /*
@@ -334,14 +330,6 @@ iha_scsi_cmd(xs)
 		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	iha_exec_scb(sc, pScb);
-<<<<<<< HEAD
-
-	if ((xs->flags & ITSDONE) == 0)
-		return (SUCCESSFULLY_QUEUED);
-	else
-		return (COMPLETE);
-=======
->>>>>>> origin/master
 }
 
 /*
@@ -2547,11 +2535,6 @@ iha_done_scb(sc, pScb)
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
 		}
-<<<<<<< HEAD
-
-		xs->flags |= ITSDONE;
-=======
->>>>>>> origin/master
 		scsi_done(xs);
 	}
 }

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acpimadt.c,v 1.9 2007/02/14 22:45:37 kettenis Exp $	*/
-=======
 /* $OpenBSD: acpimadt.c,v 1.23 2009/04/19 17:53:39 deraadt Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -44,9 +40,7 @@
 
 #include "ioapic.h"
 
-#ifdef __amd64__ /* XXX */
-#define mp_nintrs mp_nintr
-#endif
+u_int8_t acpi_lapic_flags[LAPIC_MAP_SIZE];
 
 int acpimadt_match(struct device *, void *, void *);
 void acpimadt_attach(struct device *, struct device *, void *);
@@ -151,8 +145,8 @@ struct mp_bus acpimadt_isa_bus;
 void
 acpimadt_cfg_intr(int flags, u_int32_t *redir)
 {
-	int mpspo = flags & 0x03; /* XXX magic */
-	int mpstrig = (flags >> 2) & 0x03; /* XXX magic */
+	int mpspo = (flags >> MPS_INTPO_SHIFT) & MPS_INTPO_MASK;
+	int mpstrig = (flags >> MPS_INTTR_SHIFT) & MPS_INTTR_MASK;
 
 	*redir &= ~IOAPIC_REDLO_DEL_MASK;
 	switch (mpspo) {
@@ -188,11 +182,10 @@ void
 acpimadt_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct acpi_softc *acpi_sc = (struct acpi_softc *)parent;
-	struct device *mainbus = parent->dv_parent;
+	struct device *mainbus = parent->dv_parent->dv_parent;
 	struct acpi_attach_args *aaa = aux;
 	struct acpi_madt *madt = (struct acpi_madt *)aaa->aaa_table;
 	caddr_t addr = (caddr_t)(madt + 1);
-	struct aml_node *node;
 	struct aml_value arg;
 	struct mp_intr_map *map;
 	struct ioapic_softc *apic;
@@ -211,13 +204,12 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	/* Tell the BIOS we will be using APIC mode. */
-	node = aml_searchname(NULL, "\\_PIC");
-	if (node == 0)
-		return;
 	memset(&arg, 0, sizeof(arg));
 	arg.type = AML_OBJTYPE_INTEGER;
 	arg.v_integer = 1;
-	aml_evalnode(acpi_sc, node, 1, &arg, NULL);
+
+	if (aml_evalname(acpi_sc, NULL, "\\_PIC", 1, &arg, NULL) != 0)
+		return;
 
 	mp_busses = acpimadt_busses;
 	mp_isa_bus = &acpimadt_isa_bus;
@@ -239,6 +231,8 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 
 			lapic_map[entry->madt_lapic.acpi_proc_id] =
 			    entry->madt_lapic.apic_id;
+			acpi_lapic_flags[entry->madt_lapic.acpi_proc_id] =
+			    entry->madt_lapic.flags;
 
 			if ((entry->madt_lapic.flags & ACPI_PROC_ENABLE) == 0)
 				break;
@@ -256,11 +250,6 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			caa.cpu_func = &mp_cpu_funcs;
 #endif
 #ifdef __i386__
-<<<<<<< HEAD
-				extern int cpu_id, cpu_feature;
-				caa.cpu_signature = cpu_id;
-				caa.feature_flags = cpu_feature;
-=======
 			/*
 			 * XXX utterly wrong.  These are the
 			 * cpu_feature/cpu_id from the BSP cpu, now
@@ -270,7 +259,6 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			extern int cpu_id, cpu_feature;
 			caa.cpu_signature = cpu_id;
 			caa.feature_flags = cpu_feature;
->>>>>>> origin/master
 #endif
 
 			config_found(mainbus, &caa, acpimadt_print);
@@ -320,11 +308,10 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			pin = entry->madt_override.global_int;
 			apic = ioapic_find_bybase(pin);
 
-			map = malloc(sizeof (struct mp_intr_map), M_DEVBUF, M_NOWAIT);
+			map = malloc(sizeof(*map), M_DEVBUF, M_NOWAIT | M_ZERO);
 			if (map == NULL)
 				return;
 
-			memset(map, 0, sizeof *map);
 			map->ioapic = apic;
 			map->ioapic_pin = pin - apic->sc_apic_vecbase;
 			map->bus_pin = entry->madt_override.source;
@@ -371,16 +358,25 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 		addr += entry->madt_lapic.length;
 	}
 
+	/*
+	 * ISA interrupts are supposed to be identity mapped unless
+	 * there is an override, in which case we will already have a
+	 * mapping for the interrupt.
+	 */
 	for (pin = 0; pin < ICU_LEN; pin++) {
-		apic = ioapic_find_bybase(pin);
-		if (apic->sc_pins[pin].ip_map != NULL)
+		/* Skip if we already have a mapping for this interrupt. */
+		for (map = mp_isa_bus->mb_intrs; map != NULL; map = map->next)
+			if (map->bus_pin == pin)
+				break;
+		if (map != NULL)
 			continue;
 
-		map = malloc(sizeof (struct mp_intr_map), M_DEVBUF, M_NOWAIT);
+		apic = ioapic_find_bybase(pin);
+
+		map = malloc(sizeof(*map), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (map == NULL)
 			return;
 
-		memset(map, 0, sizeof *map);
 		map->ioapic = apic;
 		map->ioapic_pin = pin;
 		map->bus_pin = pin;

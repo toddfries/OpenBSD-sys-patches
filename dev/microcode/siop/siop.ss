@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-;	$OpenBSD: siop.ss,v 1.8 2005/11/20 22:28:11 krw Exp $
-=======
 ;	$OpenBSD: siop.ss,v 1.10 2010/07/23 07:47:13 jsg Exp $
->>>>>>> origin/master
 ;	$NetBSD: siop.ss,v 1.20 2005/11/18 23:10:32 bouyer Exp $
 
 ;

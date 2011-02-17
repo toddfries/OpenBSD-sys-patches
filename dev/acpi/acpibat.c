@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpibat.c,v 1.39 2007/02/17 18:53:28 deanna Exp $ */
-=======
 /* $OpenBSD: acpibat.c,v 1.58 2010/11/10 21:40:55 kettenis Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -72,7 +68,7 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 	int64_t			sta;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
-	sc->sc_devnode = aa->aaa_node->child;
+	sc->sc_devnode = aa->aaa_node;
 
 	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, &sta)) {
 		dnprintf(10, "%s: no _STA\n", DEVNAME(sc));
@@ -83,18 +79,6 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_bat_present = 1;
 		acpibat_getbif(sc);
 		acpibat_getbst(sc);
-<<<<<<< HEAD
-		printf(": %s: model: %s serial: %s type: %s oem: %s\n",
-		    sc->sc_devnode->parent->name,
-		    sc->sc_bif.bif_model,
-		    sc->sc_bif.bif_serial,
-		    sc->sc_bif.bif_type,
-		    sc->sc_bif.bif_oem);
-	} else
-		printf(": %s: not present\n", sc->sc_devnode->parent->name);
-
-	aml_freevalue(&res);
-=======
 
 		printf(": %s", sc->sc_devnode->name);
 		if (sc->sc_bif.bif_model[0])
@@ -110,7 +94,6 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_bat_present = 0;
 		printf(": %s not present\n", sc->sc_devnode->name);
 	}
->>>>>>> origin/master
 
 	/* create sensors */
 	acpibat_monitor(sc);
@@ -118,7 +101,7 @@ acpibat_attach(struct device *parent, struct device *self, void *aux)
 	/* populate sensors */
 	acpibat_refresh(sc);
 
-	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev,
+	aml_register_notify(sc->sc_devnode, aa->aaa_dev,
 	    acpibat_notify, sc, ACPIDEV_POLL);
 }
 
@@ -189,7 +172,7 @@ acpibat_refresh(void *arg)
 	int			i;
 
 	dnprintf(30, "%s: %s: refresh\n", DEVNAME(sc),
-	    sc->sc_devnode->parent->name);
+	    sc->sc_devnode->name);
 
 	if (!sc->sc_bat_present) {
 		for (i = 0; i < 8; i++) {
@@ -231,7 +214,7 @@ acpibat_refresh(void *arg)
 	sc->sc_sens[4].status = SENSOR_S_OK;
 	sc->sc_sens[4].flags = 0;
 	if (sc->sc_bif.bif_last_capacity == BIF_UNKNOWN ||
-	    sc->sc_bst.bst_capacity == BST_UNKNOWN) { 
+	    sc->sc_bst.bst_capacity == BST_UNKNOWN) {
 		sc->sc_sens[4].status = SENSOR_S_UNKNOWN;
 		sc->sc_sens[4].flags = SENSOR_FUNKNOWN;
 		strlcpy(sc->sc_sens[4].desc, "battery unknown",
@@ -239,7 +222,7 @@ acpibat_refresh(void *arg)
 	} else if (sc->sc_bst.bst_capacity >= sc->sc_bif.bif_last_capacity)
 		strlcpy(sc->sc_sens[4].desc, "battery full",
 		    sizeof(sc->sc_sens[4].desc));
-        else if (sc->sc_bst.bst_state & BST_DISCHARGE)
+	else if (sc->sc_bst.bst_state & BST_DISCHARGE)
 		strlcpy(sc->sc_sens[4].desc, "battery discharging",
 		    sizeof(sc->sc_sens[4].desc));
 	else if (sc->sc_bst.bst_state & BST_CHARGE)
@@ -281,7 +264,7 @@ acpibat_refresh(void *arg)
 			sc->sc_sens[6].status = SENSOR_S_OK;
 	}
 
-	if(sc->sc_bst.bst_voltage == BST_UNKNOWN) {
+	if (sc->sc_bst.bst_voltage == BST_UNKNOWN) {
 		sc->sc_sens[7].value = 0;
 		sc->sc_sens[7].status = SENSOR_S_UNKNOWN;
 		sc->sc_sens[7].flags = SENSOR_FUNKNOWN;
@@ -296,7 +279,7 @@ acpibat_refresh(void *arg)
 int
 acpibat_getbif(struct acpibat_softc *sc)
 {
-	struct aml_value        res;
+	struct aml_value	res;
 	int			rv = EINVAL;
 
 	if (!sc->sc_bat_present) {
@@ -325,13 +308,13 @@ acpibat_getbif(struct acpibat_softc *sc)
 	sc->sc_bif.bif_cap_granu1 = aml_val2int(res.v_package[7]);
 	sc->sc_bif.bif_cap_granu2 = aml_val2int(res.v_package[8]);
 
-	strlcpy(sc->sc_bif.bif_model, aml_strval(res.v_package[9]),
+	strlcpy(sc->sc_bif.bif_model, aml_val_to_string(res.v_package[9]),
 		sizeof(sc->sc_bif.bif_model));
-	strlcpy(sc->sc_bif.bif_serial, aml_strval(res.v_package[10]),
+	strlcpy(sc->sc_bif.bif_serial, aml_val_to_string(res.v_package[10]),
 		sizeof(sc->sc_bif.bif_serial));
-	strlcpy(sc->sc_bif.bif_type, aml_strval(res.v_package[11]),
+	strlcpy(sc->sc_bif.bif_type, aml_val_to_string(res.v_package[11]),
 		sizeof(sc->sc_bif.bif_type));
-	strlcpy(sc->sc_bif.bif_oem, aml_strval(res.v_package[12]),
+	strlcpy(sc->sc_bif.bif_oem, aml_val_to_string(res.v_package[12]),
 		sizeof(sc->sc_bif.bif_oem));
 
 	dnprintf(60, "power_unit: %u capacity: %u last_cap: %u tech: %u "
@@ -413,7 +396,7 @@ acpibat_notify(struct aml_node *node, int notify_type, void *arg)
 	int64_t			sta;
 
 	dnprintf(10, "acpibat_notify: %.2x %s\n", notify_type,
-	    sc->sc_devnode->parent->name);
+	    sc->sc_devnode->name);
 
 	/* Check if installed state of battery has changed */
 	if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta) == 0) {
@@ -426,26 +409,10 @@ acpibat_notify(struct aml_node *node, int notify_type, void *arg)
 	switch (notify_type) {
 	case 0x00:	/* Poll sensors */
 	case 0x80:	/* _BST changed */
-<<<<<<< HEAD
-		if (!sc->sc_bat_present) {
-			printf("%s: %s: inserted\n", DEVNAME(sc),
-			    sc->sc_devnode->parent->name);
-			sc->sc_bat_present = 1;
-		}
-		break;
-	case 0x81:	/* _BIF changed */
-		/* XXX consider this a device removal */
-		if (sc->sc_bat_present) {
-			printf("%s: %s: removed\n", DEVNAME(sc),
-			    sc->sc_devnode->parent->name);
-			sc->sc_bat_present = 0;
-		}
-=======
 		acpibat_getbst(sc);
 		break;
 	case 0x81:	/* _BIF changed */
 		acpibat_getbif(sc);
->>>>>>> origin/master
 		break;
 	default:
 		break;

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usbdivar.h,v 1.23 2005/03/13 02:54:04 pascoe Exp $ */
-=======
 /*	$OpenBSD: usbdivar.h,v 1.42 2011/01/16 22:35:29 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -36,12 +32,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(__NetBSD__)
-#include <sys/callout.h>
-#endif
-
 /* From usb_mem.h */
-DECLARE_USB_DMA_T;
+struct usb_dma_block;
+typedef struct {
+	struct usb_dma_block	*block;
+	u_int			 offs;
+} usb_dma_t;
 
 struct usbd_xfer;
 struct usbd_pipe;
@@ -101,7 +97,7 @@ struct usb_softc;
 
 struct usbd_bus {
 	/* Filled by HC driver */
-	USBBASEDEVICE		bdev; /* base device, host adapter */
+	struct device		bdev; /* base device, host adapter */
 	struct usbd_bus_methods	*methods;
 	u_int32_t		pipe_size; /* size of a pipe struct */
 	/* Filled by usb driver */
@@ -122,34 +118,16 @@ struct usbd_bus {
 #define USBREV_1_1	3
 #define USBREV_2_0	4
 #define USBREV_STR { "unknown", "pre 1.0", "1.0", "1.1", "2.0" }
-<<<<<<< HEAD
-
-#ifdef USB_USE_SOFTINTR
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void		       *soft; /* soft interrupt cookie */
-#else
-	usb_callout_t		softi;
-#endif
-#endif
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-=======
-	void		       *soft; /* soft interrupt cookie */
->>>>>>> origin/master
 	bus_dma_tag_t		dmatag;	/* DMA tag */
-#endif
 };
 
 struct usbd_device {
 	struct usbd_bus	       *bus;           /* our controller */
 	struct usbd_pipe       *default_pipe;  /* pipe 0 */
-<<<<<<< HEAD
-	u_int8_t		address;       /* device addess */
-=======
 	u_int8_t		dying;	       /* hardware removed */
 	u_int8_t		ref_cnt;       /* # of procs using device */
 	u_int8_t		address;       /* device address */
->>>>>>> origin/master
 	u_int8_t		config;	       /* current configuration # */
 	u_int8_t		depth;         /* distance from root hub */
 	u_int8_t		speed;         /* low/full/high speed */
@@ -168,12 +146,8 @@ struct usbd_device {
 	usb_config_descriptor_t *cdesc;	       /* full config descr */
 	const struct usbd_quirks     *quirks;  /* device quirks, always set */
 	struct usbd_hub	       *hub;           /* only if this is a hub */
-<<<<<<< HEAD
-	device_ptr_t	       *subdevs;       /* sub-devices, 0 terminated */
-=======
 	struct device         **subdevs;       /* sub-devices, 0 terminated */
 	int			ndevs;	       /* # of subdevs */
->>>>>>> origin/master
 };
 
 struct usbd_interface {
@@ -243,7 +217,7 @@ struct usbd_xfer {
 
 	void		       *hcpriv; /* private use by the HC driver */
 
-	usb_callout_t		timeout_handle;
+	struct timeout		timeout_handle;
 };
 
 void usbd_init(void);
@@ -265,15 +239,12 @@ void		usb_delay_ms(usbd_bus_handle, u_int);
 usbd_status	usbd_port_disown_to_1_1(usbd_device_handle dev, 
 		    int port, usb_port_status_t *ps);
 usbd_status	usbd_reset_port(usbd_device_handle dev,
-				int port, usb_port_status_t *ps);
+		    int port, usb_port_status_t *ps);
 usbd_status	usbd_setup_pipe(usbd_device_handle dev,
-				usbd_interface_handle iface,
-				struct usbd_endpoint *, int,
-				usbd_pipe_handle *pipe);
-usbd_status	usbd_new_device(device_ptr_t parent,
-				usbd_bus_handle bus, int depth,
-				int lowspeed, int port,
-				struct usbd_port *);
+		    usbd_interface_handle iface, struct usbd_endpoint *, int,
+		    usbd_pipe_handle *pipe);
+usbd_status	usbd_new_device(struct device *parent, usbd_bus_handle bus,
+		    int depth, int lowspeed, int port, struct usbd_port *);
 void		usbd_remove_device(usbd_device_handle, struct usbd_port *);
 int		usbd_printBCD(char *cp, size_t len, int bcd);
 usbd_status	usbd_fill_iface_data(usbd_device_handle dev, int i, int a);
@@ -281,7 +252,7 @@ void		usb_free_device(usbd_device_handle);
 
 usbd_status	usb_insert_transfer(usbd_xfer_handle xfer);
 void		usb_transfer_complete(usbd_xfer_handle xfer);
-void		usb_disconnect_port(struct usbd_port *up, device_ptr_t);
+void		usb_disconnect_port(struct usbd_port *up, struct device *);
 
 /* Routines from usb.c */
 void		usb_needs_explore(usbd_device_handle, int);
@@ -290,9 +261,6 @@ void		usb_schedsoftintr(struct usbd_bus *);
 
 /* Locator stuff. */
 
-#if defined(__NetBSD__)
-#include "locators.h"
-#elif defined(__FreeBSD__) || defined(__OpenBSD__)
 /* XXX these values are used to statically bind some elements in the USB tree
  * to specific driver instances. This should be somehow emulated in FreeBSD
  * but can be done later on.
@@ -304,16 +272,13 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define UHUBCF_VENDOR_DEFAULT -1
 #define UHUBCF_PRODUCT_DEFAULT -1
 #define UHUBCF_RELEASE_DEFAULT -1
-#endif
 
-#if defined (__OpenBSD__)
 #define	UHUBCF_PORT		0
 #define	UHUBCF_CONFIGURATION	1
 #define	UHUBCF_INTERFACE	2
 #define	UHUBCF_VENDOR		3
 #define	UHUBCF_PRODUCT		4
 #define	UHUBCF_RELEASE		5
-#endif
 
 #define	uhubcf_port		cf_loc[UHUBCF_PORT]
 #define	uhubcf_configuration	cf_loc[UHUBCF_CONFIGURATION]
@@ -327,4 +292,3 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define	UHUB_UNK_VENDOR		UHUBCF_VENDOR_DEFAULT /* wildcarded 'vendor' */
 #define	UHUB_UNK_PRODUCT	UHUBCF_PRODUCT_DEFAULT /* wildcarded 'product' */
 #define	UHUB_UNK_RELEASE	UHUBCF_RELEASE_DEFAULT /* wildcarded 'release' */
-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: midiio.h,v 1.2 2002/03/14 03:16:12 millert Exp $	*/
-=======
 /*	$OpenBSD: midiio.h,v 1.4 2008/06/26 05:42:20 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: midiio.h,v 1.7 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*-

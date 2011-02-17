@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bio.c,v 1.8 2006/05/29 09:34:38 mk Exp $	*/
-=======
 /*	$OpenBSD: bio.c,v 1.12 2010/01/22 21:56:04 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -84,7 +80,7 @@ bioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	switch (cmd) {
 	case BIOCLOCATE:
 		locate = (struct bio_locate *)addr;
-		error = copyinstr(locate->bl_name, name, 16, NULL);
+		error = copyinstr(locate->bl_name, name, sizeof name, NULL);
 		if (error != 0)
 			return (error);
 		locate->bl_cookie = bio_lookup(name);
@@ -118,7 +114,7 @@ bio_register(struct device *dev, int (*ioctl)(struct device *, u_long, caddr_t))
 {
 	struct bio_mapping *bm;
 
-	MALLOC(bm, struct bio_mapping *, sizeof *bm, M_DEVBUF, M_NOWAIT);
+	bm = malloc(sizeof *bm, M_DEVBUF, M_NOWAIT);
 	if (bm == NULL)
 		return (ENOMEM);
 	bm->bm_dev = dev;

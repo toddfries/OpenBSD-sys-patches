@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_sstf.c,v 1.3 2000/01/11 18:02:23 peter Exp $	*/
+/*	$OpenBSD: rf_sstf.c,v 1.4 2002/12/16 07:01:05 tdeval Exp $	*/
 /*	$NetBSD: rf_sstf.c,v 1.4 2000/01/08 23:45:05 oster Exp $	*/
 
 /*

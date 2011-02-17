@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qsphy.c,v 1.13 2005/02/19 06:00:04 brad Exp $	*/
-=======
 /*	$OpenBSD: qsphy.c,v 1.18 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qsphy.c,v 1.19 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-
@@ -252,7 +248,7 @@ qsphy_status(struct mii_softc *sc)
 			mii->mii_media_active |= IFM_100_TX|IFM_FDX;
 			break;
 		case PCTL_100_T4:
-			mii->mii_media_active |= IFM_100_T4;
+			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 			break;
 		default:
 			/* Erg... this shouldn't happen. */

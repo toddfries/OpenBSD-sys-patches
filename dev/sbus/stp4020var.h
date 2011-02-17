@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stp4020var.h,v 1.2 2003/06/25 17:36:49 miod Exp $	*/
-=======
 /*	$OpenBSD: stp4020var.h,v 1.5 2009/04/10 20:54:59 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: stp4020.c,v 1.23 2002/06/01 23:51:03 lukem Exp $	*/
 
 /*-

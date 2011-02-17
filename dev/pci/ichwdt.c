@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ichwdt.c,v 1.1 2005/05/02 17:26:00 grange Exp $	*/
-=======
 /*	$OpenBSD: ichwdt.c,v 1.3 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2005 Alexander Yurchenko <grange@openbsd.org>

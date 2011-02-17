@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsdisplay.c,v 1.79 2007/04/10 17:47:55 miod Exp $ */
-=======
 /* $OpenBSD: wsdisplay.c,v 1.103 2010/11/20 20:52:10 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -263,7 +259,7 @@ void	(*wsdisplay_cons_kbd_pollc)(dev_t, int);
 
 struct consdev wsdisplay_cons = {
 	NULL, NULL, wsdisplay_getc_dummy, wsdisplay_cnputc,
-	    wsdisplay_pollc, NULL, NODEV, CN_NORMAL
+	    wsdisplay_pollc, NULL, NODEV, CN_LOWPRI
 };
 
 #ifndef WSDISPLAY_DEFAULTSCREENS
@@ -614,7 +610,16 @@ wsdisplay_common_detach(struct wsdisplay_softc *sc, int flags)
 #if NWSKBD > 0
 	if (sc->sc_input != NULL) {
 #if NWSMUX > 0
-		wsmux_detach_sc(sc->sc_input);	/* XXX not exactly correct */
+		/*
+		 * If we are the display of the mux we are attached to,
+		 * disconnect all input devices from us.
+		 */
+		if (sc->sc_input->me_dispdv == &sc->sc_dv) {
+			if ((rc = wsmux_set_display((struct wsmux_softc *)
+						    sc->sc_input, NULL)) != 0)
+				return (rc);
+		}
+
 		/*
 		 * XXX
 		 * If we created a standalone mux (dmux), we should destroy it
@@ -669,7 +674,7 @@ wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
 	if (mux == NULL)
 		panic("wsdisplay_common_attach: no memory");
 	sc->sc_input = &mux->sc_base;
-	mux->sc_displaydv = &sc->sc_dv;
+
 	if (kbdmux >= 0)
 		printf(" mux %d", kbdmux);
 #else
@@ -712,7 +717,12 @@ wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
 	printf("\n");
 
 #if NWSKBD > 0 && NWSMUX > 0
-	wsmux_set_display(mux, &sc->sc_dv);
+	/*
+	 * If this mux did not have a display device yet, volunteer for
+	 * the job.
+	 */
+	if (mux->sc_displaydv == NULL)
+		wsmux_set_display(mux, &sc->sc_dv);
 #endif
 
 	sc->sc_accessops = accessops;
@@ -1128,6 +1138,10 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			wsmoused_release(sc);
 #endif
 
+			/* clear cursor */
+			(*scr->scr_dconf->wsemul->reset)
+			    (scr->scr_dconf->wsemulcookie, WSEMUL_CLEARCURSOR);
+
 #ifdef BURNER_SUPPORT
 			/* enable video _immediately_ if it nedes to be... */
 			if (sc->sc_burnman)
@@ -1426,7 +1440,7 @@ wsdisplaystart(struct tty *tp)
 		splx(s);
 		return;
 	}
-	if (tp->t_outq.c_cc == 0 && tp->t_wsel.si_selproc == NULL)
+	if (tp->t_outq.c_cc == 0 && tp->t_wsel.si_selpid == 0)
 		goto low;
 
 	if ((scr = sc->sc_scr[WSDISPLAYSCREEN(tp->t_dev)]) == NULL) {
@@ -1569,7 +1583,7 @@ wsdisplay_kbdinput(struct device *dev, keysym_t *ks, int num)
 {
 	struct wsdisplay_softc *sc = (struct wsdisplay_softc *)dev;
 	struct wsscreen *scr;
-	char *dp;
+	const char *dp;
 	int count;
 	struct tty *tp;
 
@@ -1879,18 +1893,12 @@ wsdisplay_switch(struct device *dev, int no, int waitok)
 	    (no != WSDISPLAY_NULLSCREEN &&
 	     (sc->sc_scr[no]->scr_flags & SCR_GRAPHICS))) {
 		/* switching from a text console to a graphic console */
-<<<<<<< HEAD
-	
-		/* remote a potential wsmoused(8) selection */
-		mouse_remove(sc);
-=======
 
 		/* remove a potential wsmoused(8) selection */
 		mouse_remove(scr);
->>>>>>> origin/master
 		wsmoused_release(sc);
 	}
-	
+
 	if ((scr->scr_flags & SCR_GRAPHICS) &&
 	    (no == WSDISPLAY_NULLSCREEN ||
 	     !(sc->sc_scr[no]->scr_flags & SCR_GRAPHICS))) {
@@ -3418,10 +3426,9 @@ wsmoused_release(struct wsdisplay_softc *sc)
 		}
 
 		/* inject event to notify wsmoused(8) to close mouse device */
-		if (wsms_dev != NULL) 
+		if (wsms_dev != NULL)
 			wsmouse_input(wsms_dev, 0, 0, 0, 0, 0,
 				      WSMOUSE_INPUT_WSMOUSED_CLOSE);
-		
 	}
 #endif /* NWSMOUSE > 0 */
 }

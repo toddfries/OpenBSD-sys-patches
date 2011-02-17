@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: advlib.c,v 1.11 2004/01/10 00:13:36 brad Exp $	*/
-=======
 /*	$OpenBSD: advlib.c,v 1.13 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: advlib.c,v 1.7 1998/10/28 20:39:46 dante Exp $        */
 
 /*

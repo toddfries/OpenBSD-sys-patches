@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_disk.c,v 1.33 2007/03/27 18:04:01 thib Exp $	*/
-=======
 /*	$OpenBSD: subr_disk.c,v 1.114 2010/11/24 15:31:34 jsing Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -50,15 +46,15 @@
 #include <sys/buf.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
+#include <sys/device.h>
 #include <sys/time.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
 #include <sys/lock.h>
 #include <sys/disk.h>
+#include <sys/reboot.h>
 #include <sys/dkio.h>
 #include <sys/proc.h>
-<<<<<<< HEAD
-=======
 #include <sys/vnode.h>
 #include <sys/workq.h>
 #include <uvm/uvm_extern.h>
@@ -67,9 +63,9 @@
 #include <sys/socketvar.h>
 
 #include <net/if.h>
->>>>>>> origin/master
 
 #include <dev/rndvar.h>
+#include <dev/cons.h>
 
 /*
  * A global list of all disks attached to the system.  May grow or
@@ -197,8 +193,6 @@ dkcksum(struct disklabel *lp)
 	return (sum);
 }
 
-<<<<<<< HEAD
-=======
 int
 initdisklabel(struct disklabel *lp)
 {
@@ -722,7 +716,6 @@ bad:
 	return (-1);
 }
 
->>>>>>> origin/master
 /*
  * Disk error is the preface to plaintive error messages
  * about failing disk transfers.  It prints messages of the form
@@ -744,7 +737,7 @@ diskerr(struct buf *bp, char *dname, char *what, int pri, int blkdone,
 	int unit = DISKUNIT(bp->b_dev), part = DISKPART(bp->b_dev);
 	int (*pr)(const char *, ...);
 	char partname = 'a' + part;
-	int sn;
+	daddr64_t sn;
 
 	if (pri != LOG_PRINTF) {
 		static const char fmt[] = "";
@@ -756,21 +749,22 @@ diskerr(struct buf *bp, char *dname, char *what, int pri, int blkdone,
 	    bp->b_flags & B_READ ? "read" : "writ");
 	sn = bp->b_blkno;
 	if (bp->b_bcount <= DEV_BSIZE)
-		(*pr)("%d", sn);
+		(*pr)("%lld", sn);
 	else {
 		if (blkdone >= 0) {
 			sn += blkdone;
-			(*pr)("%d of ", sn);
+			(*pr)("%lld of ", sn);
 		}
-		(*pr)("%d-%d", bp->b_blkno,
+		(*pr)("%lld-%lld", bp->b_blkno,
 		    bp->b_blkno + (bp->b_bcount - 1) / DEV_BSIZE);
 	}
 	if (lp && (blkdone >= 0 || bp->b_bcount <= lp->d_secsize)) {
-		sn += lp->d_partitions[part].p_offset;
-		(*pr)(" (%s%d bn %d; cn %d", dname, unit, sn,
+		sn += DL_GETPOFFSET(&lp->d_partitions[part]);
+		(*pr)(" (%s%d bn %lld; cn %lld", dname, unit, sn,
 		    sn / lp->d_secpercyl);
 		sn %= lp->d_secpercyl;
-		(*pr)(" tn %d sn %d)", sn / lp->d_nsectors, sn % lp->d_nsectors);
+		(*pr)(" tn %lld sn %lld)", sn / lp->d_nsectors,
+		    sn % lp->d_nsectors);
 	}
 }
 
@@ -785,36 +779,12 @@ disk_init(void)
 	disk_count = disk_change = 0;
 }
 
-/*
- * Searches the disklist for the disk corresponding to the
- * name provided.
- */
-struct disk *
-disk_find(char *name)
-{
-	struct disk *diskp;
-
-	if ((name == NULL) || (disk_count <= 0))
-		return (NULL);
-
-	TAILQ_FOREACH(diskp, &disklist, dk_link)
-		if (strcmp(diskp->dk_name, name) == 0)
-			return (diskp);
-
-	return (NULL);
-}
-
 int
 disk_construct(struct disk *diskp, char *lockname)
 {
-<<<<<<< HEAD
-	rw_init(&diskp->dk_lock, lockname);
-	
-=======
 	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
 
->>>>>>> origin/master
 	diskp->dk_flags |= DKF_CONSTRUCTED;
 	    
 	return (0);
@@ -836,14 +806,10 @@ disk_attach(struct device *dv, struct disk *diskp)
 	 * it's not safe to sleep here, since we're probably going to be
 	 * called during autoconfiguration.
 	 */
-	diskp->dk_label = malloc(sizeof(struct disklabel), M_DEVBUF, M_NOWAIT);
-	diskp->dk_cpulabel = malloc(sizeof(struct cpu_disklabel), M_DEVBUF,
-	    M_NOWAIT);
-	if ((diskp->dk_label == NULL) || (diskp->dk_cpulabel == NULL))
+	diskp->dk_label = malloc(sizeof(struct disklabel), M_DEVBUF,
+	    M_NOWAIT|M_ZERO);
+	if (diskp->dk_label == NULL)
 		panic("disk_attach: can't allocate storage for disklabel");
-
-	bzero(diskp->dk_label, sizeof(struct disklabel));
-	bzero(diskp->dk_cpulabel, sizeof(struct cpu_disklabel));
 
 	/*
 	 * Set the attached timestamp.
@@ -911,7 +877,6 @@ disk_detach(struct disk *diskp)
 	 * Free the space used by the disklabel structures.
 	 */
 	free(diskp->dk_label, M_DEVBUF);
-	free(diskp->dk_cpulabel, M_DEVBUF);
 
 	/*
 	 * Remove from the disklist.
@@ -934,9 +899,10 @@ disk_busy(struct disk *diskp)
 	 * XXX We'd like to use something as accurate as microtime(),
 	 * but that doesn't depend on the system TOD clock.
 	 */
-	if (diskp->dk_busy++ == 0) {
+	mtx_enter(&diskp->dk_mtx);
+	if (diskp->dk_busy++ == 0)
 		microuptime(&diskp->dk_timestamp);
-	}
+	mtx_leave(&diskp->dk_mtx);
 }
 
 /*
@@ -947,6 +913,8 @@ void
 disk_unbusy(struct disk *diskp, long bcount, int read)
 {
 	struct timeval dv_time, diff_time;
+
+	mtx_enter(&diskp->dk_mtx);
 
 	if (diskp->dk_busy-- == 0)
 		printf("disk_unbusy: %s: dk_busy < 0\n", diskp->dk_name);
@@ -968,6 +936,8 @@ disk_unbusy(struct disk *diskp, long bcount, int read)
 	} else
 		diskp->dk_seek++;
 
+	mtx_leave(&diskp->dk_mtx);
+
 	add_disk_randomness(bcount ^ diff_time.tv_usec);
 }
 
@@ -987,31 +957,6 @@ disk_unlock(struct disk *dk)
 	rw_exit(&dk->dk_lock);
 }
 
-/*
- * Reset the metrics counters on the given disk.  Note that we cannot
- * reset the busy counter, as it may case a panic in disk_unbusy().
- * We also must avoid playing with the timestamp information, as it
- * may skew any pending transfer results.
- */
-void
-disk_resetstat(struct disk *diskp)
-{
-	int s = splbio();
-
-	diskp->dk_rxfer = 0;
-	diskp->dk_rbytes = 0;
-	diskp->dk_wxfer = 0;
-	diskp->dk_wbytes = 0;
-	diskp->dk_seek = 0;
-
-	microuptime(&diskp->dk_attachtime);
-
-	timerclear(&diskp->dk_time);
-
-	splx(s);
-}
-
-
 int
 dk_mountroot(void)
 {
@@ -1021,24 +966,11 @@ dk_mountroot(void)
 	struct disklabel dl;
 	char *error;
 
-<<<<<<< HEAD
-	rrootdev = blktochr(rootdev);
-	rawdev = MAKEDISKDEV(major(rrootdev), DISKUNIT(rootdev), RAW_PART);
-	printf("rootdev=0x%x rrootdev=0x%x rawdev=0x%x\n", rootdev,
-	    rrootdev, rawdev);
-
-	/*
-	 * open device, ioctl for the disklabel, and close it.
-	 */
-	error = (cdevsw[major(rrootdev)].d_open)(rawdev, FREAD,
-	    S_IFCHR, curproc);
-=======
 	error = disk_readlabel(&dl, rootdev, errbuf, sizeof(errbuf));
->>>>>>> origin/master
 	if (error)
 		panic(error);
 
-	if (dl.d_partitions[part].p_size == 0)
+	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");
 	switch (dl.d_partitions[part].p_fstype) {
 #ifdef EXT2FS
@@ -1082,64 +1014,6 @@ dk_mountroot(void)
 	return (*mountrootfn)();
 }
 
-<<<<<<< HEAD
-struct bufq *
-bufq_default_alloc(void)
-{
-	struct bufq_default *bq;
-
-	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT);
-	if (bq == NULL)
-		panic("bufq_default_alloc: no memory");
-
-	memset(bq, 0, sizeof(*bq));
-	bq->bufq.bufq_free = bufq_default_free;
-	bq->bufq.bufq_add = bufq_default_add;
-	bq->bufq.bufq_get = bufq_default_get;
-
-	return ((struct bufq *)bq);
-}
-
-void
-bufq_default_free(struct bufq *bq)
-{
-	free(bq, M_DEVBUF);
-}
-
-void
-bufq_default_add(struct bufq *bq, struct buf *bp)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct proc *p = bp->b_proc;
-	struct buf *head;
-
-	if (p == NULL || p->p_nice < NZERO)
-		head = &bufq->bufq_head[0];
-	else if (p->p_nice == NZERO)
-		head = &bufq->bufq_head[1];
-	else
-		head = &bufq->bufq_head[2];
-
-	disksort(head, bp);
-}
-
-struct buf *
-bufq_default_get(struct bufq *bq)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct buf *bp, *head;
-	int i;
-
-	for (i = 0; i < 3; i++) {
-		head = &bufq->bufq_head[i];
-		if ((bp = head->b_actf))
-			break;
-	}
-	if (bp == NULL)
-		return (NULL);
-	head->b_actf = bp->b_actf;
-	return (bp);
-=======
 struct device *
 getdisk(char *str, int len, int defpart, dev_t *devp)
 {
@@ -1565,5 +1439,4 @@ disk_lookup(struct cfdriver *cd, int unit)
 	}
 
 	return (dv);
->>>>>>> origin/master
 }

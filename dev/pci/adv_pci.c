@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: adv_pci.c,v 1.8 2005/09/11 18:17:08 mickey Exp $	*/
-=======
 /*	$OpenBSD: adv_pci.c,v 1.10 2008/06/26 05:42:17 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: adv_pci.c,v 1.5 1998/09/26 15:52:55 dante Exp $	*/
 
 /*

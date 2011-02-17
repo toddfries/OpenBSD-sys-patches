@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: agpio.h,v 1.3 2008/07/09 23:33:07 oga Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -35,7 +31,7 @@
 #ifndef _SYS_AGPIO_H_
 #define _SYS_AGPIO_H_
 
-#define	AGP_DEVICE		"/dev/ttyC0"
+#define	AGP_DEVICE		"/dev/agp0"
 
 /*
  * The AGP gatt uses 4k pages irrespective of the host page size.

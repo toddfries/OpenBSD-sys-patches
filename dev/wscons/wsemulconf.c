@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsemulconf.c,v 1.5 2002/01/03 21:58:59 jason Exp $ */
-=======
 /* $OpenBSD: wsemulconf.c,v 1.8 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsemulconf.c,v 1.4 2000/01/05 11:19:37 drochner Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: syslog.h,v 1.11 2003/08/24 01:27:07 avsm Exp $	*/
-=======
 /*	$OpenBSD: syslog.h,v 1.13 2010/10/19 19:01:05 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: syslog.h,v 1.14 1996/04/03 20:46:44 christos Exp $	*/
 
 /*

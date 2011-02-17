@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtl81x9reg.h,v 1.35 2006/12/01 01:13:01 todd Exp $	*/
-=======
 /*	$OpenBSD: rtl81x9reg.h,v 1.72 2010/11/28 22:08:59 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998
@@ -96,6 +92,9 @@
 					/* 005F reserved */
 #define RL_TXSTAT_ALL	0x0060		/* TX status of all descriptors */
 
+#define RL_CSIDR	0x0064
+#define RL_CSIAR	0x0068
+
 /* Direct PHY access registers only available on 8139 */
 #define RL_BMCR		0x0062		/* PHY basic mode control */
 #define RL_BMSR		0x0064		/* PHY basic mode status */
@@ -130,21 +129,20 @@
 /*
  * Registers specific to the 8169 gigE chip
  */
+#define RL_GTXSTART		0x0038	/* 8 bits */
 #define RL_TIMERINT_8169	0x0058	/* different offset than 8139 */
 #define RL_PHYAR		0x0060
 #define RL_TBICSR		0x0064
 #define RL_TBI_ANAR		0x0068
 #define RL_TBI_LPAR		0x006A
 #define RL_GMEDIASTAT		0x006C	/* 8 bits */
-<<<<<<< HEAD
-=======
 #define RL_MACDBG		0x006D	/* 8 bits */
 #define RL_GPIO			0x006E	/* 8 bits */
 #define RL_PMCH			0x006F	/* 8 bits */
 #define RL_LDPS			0x0082	/* Link Down Power Saving */
->>>>>>> origin/master
 #define RL_MAXRXPKTLEN		0x00DA	/* 16 bits, chip multiplies by 8 */
-#define RL_GTXSTART		0x0038	/* 16 bits */
+#define RL_IM			0x00E2
+
 /*
  * TX config register bits
  */
@@ -166,28 +164,22 @@
 #define RL_HWREV_8169S		0x00800000
 #define RL_HWREV_8110S		0x04000000
 #define RL_HWREV_8169_8110SB	0x10000000
-<<<<<<< HEAD
-#define RL_HWREV_8169_8110SC	0x18000000
-=======
 #define RL_HWREV_8169_8110SCd	0x18000000
 #define RL_HWREV_8102EL		0x24800000
 #define RL_HWREV_8103E		0x24C00000
 #define RL_HWREV_8168D		0x28000000
 #define RL_HWREV_8168DP		0x28800000
 #define RL_HWREV_8168E		0x2C000000
->>>>>>> origin/master
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
 #define RL_HWREV_8102E		0x34800000
 #define RL_HWREV_8168_SPIN2	0x38000000
+#define RL_HWREV_8168_SPIN3	0x38400000
 #define RL_HWREV_8100E_SPIN2	0x38800000
-<<<<<<< HEAD
-=======
 #define RL_HWREV_8168C		0x3c000000
 #define RL_HWREV_8168C_SPIN2	0x3c400000
 #define RL_HWREV_8168CP		0x3c800000
->>>>>>> origin/master
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
 #define RL_HWREV_8139AG		0x70800000
@@ -198,11 +190,8 @@
 #define RL_HWREV_8139CPLUS	0x74800000
 #define RL_HWREV_8101		0x74c00000
 #define RL_HWREV_8100		0x78800000
-<<<<<<< HEAD
-=======
 #define RL_HWREV_8169_8110SBL	0x7cc00000
 #define RL_HWREV_8169_8110SCe	0x98000000
->>>>>>> origin/master
 
 #define RL_TXDMA_16BYTES	0x00000000
 #define RL_TXDMA_32BYTES	0x00000100
@@ -349,6 +338,9 @@
 
 /* 9346/9356 EEPROM commands */
 
+#define RL_9346_ADDR_LEN	6	/* 93C46 1K: 128x16 */
+#define RL_9356_ADDR_LEN	8	/* 93C56 2K: 256x16 */
+ 
 #define RL_9346_WRITE		0x5
 #define RL_9346_READ		0x6
 #define RL_9346_ERASE		0x7
@@ -513,7 +505,7 @@
 
 /*
  * The RealTek doesn't use a fragment-based descriptor mechanism.
- * Instead, there are only four register sets, each or which represents
+ * Instead, there are only four register sets, each of which represents
  * one 'descriptor.' Basically, each TX descriptor is just a contiguous
  * packet buffer (32-bit aligned!) and we place the buffer addresses in
  * the registers so the chip knows where they are.
@@ -532,7 +524,7 @@
 #define RL_MIN_FRAMELEN		60
 #define RL_TXTHRESH(x)		((x) << 11)
 #define RL_TX_THRESH_INIT	96
-#define RL_RX_FIFOTHRESH	RL_RXFIFO_256BYTES
+#define RL_RX_FIFOTHRESH	RL_RXFIFO_NOTHRESH
 #define RL_RX_MAXDMA		RL_RXDMA_UNLIMITED
 #define RL_TX_MAXDMA		RL_TXDMA_2048BYTES
 
@@ -766,11 +758,6 @@ struct rl_mii_frame {
 #define	RL_UNKNOWN		0
 #define RL_8129			1
 #define RL_8139			2
-#define RL_8139CPLUS		3
-#define RL_8169			4
-
-#define RL_ISCPLUS(x)	((x)->rl_type == RL_8139CPLUS || \
-			 (x)->rl_type == RL_8169)
 
 struct rl_rxsoft {
 	struct mbuf		*rxs_mbuf;
@@ -818,11 +805,11 @@ struct rl_softc {
 	struct arpcom		sc_arpcom;	/* interface info */
 	struct mii_data		sc_mii;		/* MII information */
 	u_int8_t		rl_type;
+	u_int32_t		sc_hwrev;
 	int			rl_eecmd_read;
 	int			rl_eewidth;
 	int			rl_bus_speed;
 	int			rl_txthresh;
-	int			sc_flags;	/* misc flags */
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
 
@@ -880,11 +867,6 @@ struct rl_softc {
 #define RL_TXPADOFF		RL_RX_LIST_SZ
 #define RL_TXPADDADDR(sc)	\
 	((sc)->rl_ldata.rl_rx_list_map->dm_segs[0].ds_addr + RL_TXPADOFF)
-
-
-#define RL_ATTACHED	0x00000001	/* attach has succeeded */
-#define RL_ENABLED	0x00000002	/* chip is enabled      */
-#define RL_IS_ENABLED(sc)	((sc)->sc_flags & RL_ENABLED)
 
 /*
  * register space access macros
@@ -1015,14 +997,13 @@ struct rl_softc {
 
 #define RL_PSTATE_MASK		0x0003
 #define RL_PSTATE_D0		0x0000
-#define RL_PSTATE_D1		0x0002
+#define RL_PSTATE_D1		0x0001
 #define RL_PSTATE_D2		0x0002
 #define RL_PSTATE_D3		0x0003
 #define RL_PME_EN		0x0010
 #define RL_PME_STATUS		0x8000
 
 extern int rl_attach(struct rl_softc *);
-extern int rl_detach(struct rl_softc *);
 extern int rl_intr(void *);
 extern void rl_setmulti(struct rl_softc *);
 int rl_detach(struct rl_softc *);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_autoconf.c,v 1.48 2006/05/28 07:12:11 deraadt Exp $	*/
-=======
 /*	$OpenBSD: subr_autoconf.c,v 1.63 2010/09/08 15:50:11 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -62,8 +58,6 @@
  * Autoconfiguration subroutines.
  */
 
-typedef int (*cond_predicate_t)(struct device *, void *);
-
 /*
  * ioconf.c exports exactly two names: cfdata and cfroots.  All system
  * devices and drivers are found via these tables.
@@ -103,7 +97,6 @@ TAILQ_HEAD(, deferred_config) deferred_config_queue;
 void config_process_deferred_children(struct device *);
 
 struct devicelist alldevs;		/* list of all devices */
-struct evcntlist allevents;		/* list of all event counters */
 
 __volatile int config_pending;		/* semaphore for mountroot */
 
@@ -117,7 +110,6 @@ config_init(void)
 {
 	TAILQ_INIT(&deferred_config_queue);
 	TAILQ_INIT(&alldevs);
-	TAILQ_INIT(&allevents);
 	TAILQ_INIT(&allcftables);
 	TAILQ_INSERT_TAIL(&allcftables, &staticcftable, list);
 }
@@ -374,7 +366,7 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	device_ref(dev);
 
 	if (parent == ROOT)
-		printf("%s (root)", dev->dv_xname);
+		printf("%s at root", dev->dv_xname);
 	else {
 		printf("%s at %s", dev->dv_xname, parent->dv_xname);
 		if (print)
@@ -396,9 +388,7 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 					cf->cf_unit++;
 			}
 	}
-#ifdef __HAVE_DEVICE_REGISTER
 	device_register(dev, aux);
-#endif
 	(*ca->ca_attach)(parent, dev, aux);
 	config_process_deferred_children(dev);
 #if NHOTPLUG > 0
@@ -421,10 +411,10 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		panic("config_make_softc");
 
 	/* get memory for all device vars */
-	dev = (struct device *)malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT);
+	dev = malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!dev)
 		panic("config_make_softc: allocation for device softc failed");
-	bzero(dev, ca->ca_devsize);
+
 	dev->dv_class = cd->cd_class;
 	dev->dv_cfdata = cf;
 	dev->dv_flags = DVF_ACTIVE;	/* always initially active */
@@ -461,11 +451,10 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		while (new <= dev->dv_unit)
 			new *= 2;
 		cd->cd_ndevs = new;
-		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT);	
+		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (nsp == 0)
 			panic("config_make_softc: %sing dev array",
 			    old != 0 ? "expand" : "creat");
-		bzero(nsp + old, (new - old) * sizeof(void *));
 		if (old != 0) {
 			bcopy(cd->cd_devs, nsp, old * sizeof(void *));
 			free(cd->cd_devs, M_DEVBUF);
@@ -726,7 +715,7 @@ config_pending_decr(void)
 int
 config_detach_children(struct device *parent, int flags)
 {
-	struct device *dev, *next_dev, *prev_dev;
+	struct device *dev, *next_dev;
 	int rv = 0;
 
 	/*
@@ -741,15 +730,13 @@ config_detach_children(struct device *parent, int flags)
 	 * we are about to detach, so it would disappear.
 	 * Just play it safe and restart from the parent.
 	 */
-	for (prev_dev = NULL, dev = TAILQ_LAST(&alldevs, devicelist);
+	for (dev = TAILQ_LAST(&alldevs, devicelist);
 	    dev != NULL; dev = next_dev) {
 		if (dev->dv_parent == parent) {
 			if ((rv = config_detach(dev, flags)) != 0)
 				return (rv);
-			next_dev = prev_dev ? prev_dev : TAILQ_LAST(&alldevs,
-			    devicelist);
+			next_dev = TAILQ_LAST(&alldevs, devicelist);
 		} else {
-			prev_dev = dev;
 			next_dev = TAILQ_PREV(dev, devicelist, dv_list);
 		}
 	}
@@ -885,24 +872,4 @@ device_unref(struct device *dv)
 	if (dv->dv_ref == 0) {
 		free(dv, M_DEVBUF);
 	}
-}
-
-/*
- * Attach an event.  These must come from initially-zero space (see
- * commented-out assignments below), but that occurs naturally for
- * device instance variables.
- */
-void
-evcnt_attach(struct device *dev, const char *name, struct evcnt *ev)
-{
-
-#ifdef DIAGNOSTIC
-	if (strlen(name) >= sizeof(ev->ev_name))
-		panic("evcnt_attach");
-#endif
-	/* ev->ev_next = NULL; */
-	ev->ev_dev = dev;
-	/* ev->ev_count = 0; */
-	strlcpy(ev->ev_name, name, sizeof ev->ev_name);
-	TAILQ_INSERT_TAIL(&allevents, ev, ev_list);
 }

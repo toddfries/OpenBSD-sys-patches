@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: satareg.h,v 1.2 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: satareg.h,v 1.3 2004/05/23 23:07:59 wiz Exp $	*/
 
 /*-

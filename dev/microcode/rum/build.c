@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: build.c,v 1.3 2009/05/15 15:53:55 damien Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006

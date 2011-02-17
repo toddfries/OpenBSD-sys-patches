@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aps.c,v 1.13 2007/01/05 07:00:37 jsg Exp $	*/
-=======
 /*	$OpenBSD: aps.c,v 1.23 2011/01/05 07:37:09 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>
  * Copyright (c) 2008 Can Erkin Acar <canacar@openbsd.org>
@@ -277,18 +273,6 @@ aps_match(struct device *parent, void *match, void *aux)
 	 * 0x03: T41
 	 * 0x05: T61
 	 */
-<<<<<<< HEAD
-	for (i = 0; i < 10; i++) {
-		cr = bus_space_read_1(iot, ioh, APS_STATE);
-		if (cr > 0 && cr < 4)
-			break;
-		delay(5 * 1000);
-	}
-	
-	bus_space_unmap(iot, ioh, APS_ADDR_SIZE);
-	DPRINTF(("aps: state register 0x%x\n", cr));
-	if (cr < 1 || cr > 3) {
-=======
 
 	cr = iobuf[APS_ARG1];
 
@@ -296,7 +280,6 @@ aps_match(struct device *parent, void *match, void *aux)
 	DPRINTF(("aps: state register 0x%x\n", cr));
 
 	if (iobuf[APS_RET] != 0 || cr < 1 || cr > 5) {
->>>>>>> origin/master
 		DPRINTF(("aps0: unsupported state %d\n", cr));
 		return (0);
 	}
@@ -525,18 +508,11 @@ aps_activate(struct device *self, int act)
 	bus_space_handle_t ioh = sc->aps_ioh;
 	unsigned char iobuf[16];
 
-<<<<<<< HEAD
-	if (why != PWR_RESUME) {
-		if (timeout_pending(&aps_timeout))
-			timeout_del(&aps_timeout);
-	} else {
-=======
 	switch (act) {
 	case DVACT_SUSPEND:
 		timeout_del(&aps_timeout);
 		break;
 	case DVACT_RESUME:
->>>>>>> origin/master
 		/*
 		 * Redo the init sequence on resume, because APS is 
 		 * as forgetful as it is deaf.

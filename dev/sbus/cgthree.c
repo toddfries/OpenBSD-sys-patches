@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgthree.c,v 1.42 2006/07/25 21:23:32 miod Exp $	*/
-=======
 /*	$OpenBSD: cgthree.c,v 1.44 2008/12/27 17:23:03 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

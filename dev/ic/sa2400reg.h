@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: sa2400reg.h,v 1.2 2009/08/16 18:21:57 jsg Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: sa2400reg.h,v 1.2 2004/12/12 06:37:59 dyoung Exp $ */
 
 /*

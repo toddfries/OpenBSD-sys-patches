@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_etimer.h,v 1.6 2002/12/16 07:01:03 tdeval Exp $	*/
+/*	$OpenBSD: rf_etimer.h,v 1.7 2004/06/24 19:35:24 tholo Exp $	*/
 /*	$NetBSD: rf_etimer.h,v 1.4 1999/08/13 03:26:55 oster Exp $	*/
 
 /*

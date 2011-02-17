@@ -1,11 +1,6 @@
-<<<<<<< HEAD
-/* $OpenBSD: asm_12160.h,v 1.2 2001/02/12 23:17:00 mjacob Exp $ */
-/*
-=======
 /* $OpenBSD: asm_12160.h,v 1.5 2008/09/28 00:07:00 krw Exp $ */
 /* $FreeBSD: src/sys/dev/ispfw/asm_12160.h,v 1.7 2006/07/09 17:50:17 mjacob Exp $ */
 /*-
->>>>>>> origin/master
  * Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000 Qlogic, Inc.
  * All rights reserved.
  *

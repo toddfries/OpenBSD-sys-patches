@@ -1,41 +1,3 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isp_target.h,v 1.10 2002/05/17 01:33:50 mjacob Exp $	*/
-
-/* @(#)isp_target.h 1.3 */
-/*
- * Qlogic Target Mode Structure and Flag Definitions
- *
- * Copyright (c) 1997, 1998
- * Patrick Stirling
- * pms@psconsult.com
- * All rights reserved.
- *
- * Additional Copyright (c) 1999, 2000, 2001
- * Matthew Jacob
- * mjacob@feral.com
- * All rights reserved.
- *
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice immediately at the beginning of the file, without modification,
- *    this list of conditions, and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
-=======
 /*	$OpenBSD: isp_target.h,v 1.14 2009/06/24 11:00:53 krw Exp $	*/
 /* $FreeBSD: src/sys/dev/isp/isp_target.h,v 1.30 2007/03/10 02:39:54 mjacob Exp $ */
 /*-
@@ -66,7 +28,6 @@
  */
 /*
  * QLogic Target Mode Structure and Flag Definitions
->>>>>>> origin/master
  */
 #ifndef	_ISP_TARGET_H
 #define	_ISP_TARGET_H
@@ -933,7 +894,7 @@ typedef struct {
 #ifndef	ISP_TOOLS
 /*
  * The functions below are for the publicly available
- * target mode functions that are internal to the Qlogic driver.
+ * target mode functions that are internal to the QLogic driver.
  */
 
 /*

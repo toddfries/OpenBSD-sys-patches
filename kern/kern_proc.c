@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_proc.c,v 1.32 2007/03/15 10:22:30 art Exp $	*/
-=======
 /*	$OpenBSD: kern_proc.c,v 1.45 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -124,8 +120,7 @@ uid_find(uid_t uid)
 			break;
 	if (uip)
 		return (uip);
-	MALLOC(nuip, struct uidinfo *, sizeof(*nuip), M_PROC, M_WAITOK);
-	/* may have slept, have to check again */
+	nuip = malloc(sizeof(*nuip), M_PROC, M_WAITOK|M_ZERO);
 	LIST_FOREACH(uip, uipp, ui_hash)
 		if (uip->ui_uid == uid)
 			break;
@@ -133,7 +128,6 @@ uid_find(uid_t uid)
 		free(nuip, M_PROC);
 		return (uip);
 	}
-	bzero(nuip, sizeof(*nuip));
 	nuip->ui_uid = uid;
 	LIST_INSERT_HEAD(uipp, nuip, ui_hash);
 
@@ -404,17 +398,10 @@ proc_printit(struct proc *p, const char *modif, int (*pr)(const char *, ...))
 	    p->p_comm, p->p_pid, pst, p->p_flag, P_BITS);
 	(*pr)("    pri=%u, usrpri=%u, nice=%d\n",
 	    p->p_priority, p->p_usrpri, p->p_nice);
-<<<<<<< HEAD
-	(*pr)("    forw=%p, back=%p, list=%p,%p\n",
-	    p->p_forw, p->p_back, p->p_list.le_next, p->p_list.le_prev);
-	(*pr)("    user=%p, vmspace=%p\n",
-	    p->p_addr, p->p_vmspace);
-=======
 	(*pr)("    forw=%p, list=%p,%p\n",
 	    TAILQ_NEXT(p, p_runq), p->p_list.le_next, p->p_list.le_prev);
 	(*pr)("    process=%p user=%p, vmspace=%p\n",
 	    p->p_p, p->p_addr, p->p_vmspace);
->>>>>>> origin/master
 	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u%, swtime=%u\n",
 	    p->p_estcpu, p->p_cpticks, p->p_pctcpu / 100, p->p_pctcpu % 100,
 	    p->p_swtime);
@@ -457,7 +444,7 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 		    "COMMAND", "STRUCT PROC *", "UAREA *", "VMSPACE/VM_MAP");
 		break;
 	case 'n':
-		db_printf("   PID  %5s  %5s  %5s  S  %10s  %-9s  %-16s\n",
+		db_printf("   PID  %5s  %5s  %5s  S  %10s  %-12s  %-16s\n",
 		    "PPID", "PGRP", "UID", "FLAGS", "WAIT", "COMMAND");
 		break;
 	case 'w':
@@ -483,16 +470,10 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 
 			case 'n':
 				db_printf("%5d  %5d  %5d  %d  %#10x  "
-<<<<<<< HEAD
-				    "%-9.9s  %-16s\n",
-				    pp ? pp->p_pid : -1, p->p_pgrp->pg_id,
-				    p->p_cred->p_ruid, p->p_stat, p->p_flag,
-=======
 				    "%-12.12s  %-16s\n",
 				    ppr ? ppr->ps_pid : -1,
 				    pr->ps_pgrp ? pr->ps_pgrp->pg_id : -1,
 				    pr->ps_cred->p_ruid, p->p_stat, p->p_flag,
->>>>>>> origin/master
 				    (p->p_wchan && p->p_wmesg) ?
 					p->p_wmesg : "", p->p_comm);
 				break;

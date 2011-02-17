@@ -1,4 +1,4 @@
-/*	$OpenBSD: isapnpreg.h,v 1.3 1997/12/21 14:41:26 downsj Exp $	*/
+/*	$OpenBSD: isapnpreg.h,v 1.4 1997/12/25 09:22:41 downsj Exp $	*/
 /*	$NetBSD: isapnpreg.h,v 1.5 1997/08/12 07:34:34 mikel Exp $	*/
 
 /*

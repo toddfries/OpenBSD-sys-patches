@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: malo.h,v 1.8 2006/11/07 21:39:32 mglocker Exp $ */
-=======
 /*	$OpenBSD: malo.h,v 1.10 2010/08/08 16:36:33 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

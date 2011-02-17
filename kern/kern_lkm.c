@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_lkm.c,v 1.42 2005/11/28 00:14:28 jsg Exp $	*/
-=======
 /*	$OpenBSD: kern_lkm.c,v 1.46 2010/01/14 23:12:11 schwarze Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_lkm.c,v 1.31 1996/03/31 21:40:27 christos Exp $	*/
 
 /*
@@ -82,6 +78,8 @@
 #define	LKMS_LOADED		0x04
 #define	LKMS_UNLOADING		0x08
 
+struct vm_map *lkm_map = NULL;
+
 static int lkm_v = 0;
 static int lkm_state = LKMS_IDLE;
 
@@ -106,6 +104,12 @@ void
 lkminit(void)
 {
 
+	/*
+	 * If machine-dependent code hasn't initialized the lkm_map
+	 * then just use kernel_map.
+	 */
+	if (lkm_map == NULL)
+		lkm_map = kernel_map;
 	TAILQ_INIT(&lkmods);
 	lkm_v |= LKM_INIT;
 }
@@ -155,7 +159,7 @@ lkmalloc(void)
 	struct lkm_table *p, *ret = NULL;
 	int id = 0;
 
-	MALLOC(ret, struct lkm_table *, sizeof(*ret), M_DEVBUF, M_WAITOK);
+	ret = malloc(sizeof(*ret), M_DEVBUF, M_WAITOK);
 	ret->refcnt = ret->depcnt = 0;
 	ret->sym_id = -1;
 	/* 
@@ -263,7 +267,7 @@ lkmunreserve(void)
 #endif
 
 	if (curp && curp->syms) {
-		uvm_km_free(kernel_map, (vaddr_t)curp->syms, curp->sym_size);
+		uvm_km_free(lkm_map, (vaddr_t)curp->syms, curp->sym_size);
 		curp->syms = NULL;
 	}
 
@@ -271,7 +275,7 @@ lkmunreserve(void)
 	 * Actually unreserve the memory
 	 */
 	if (curp && curp->area) {
-		uvm_km_free(kernel_map, curp->area, curp->size);
+		uvm_km_free(lkm_map, curp->area, curp->size);
 		curp->area = 0;
 	}
 	lkm_state = LKMS_IDLE;
@@ -343,14 +347,14 @@ lkmioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		 * Get memory for module
 		 */
 		curp->size = resrvp->size;
-		curp->area = uvm_km_zalloc(kernel_map, curp->size);
+		curp->area = uvm_km_zalloc(lkm_map, curp->size);
 		curp->offset = 0;
 		resrvp->addr = curp->area;
 
 		if (cmd == LMRESERV && resrvp->sym_size) {
 			curp->sym_size = resrvp->sym_size;
 			curp->sym_symsize = resrvp->sym_symsize;
-			curp->syms = (caddr_t)uvm_km_zalloc(kernel_map,
+			curp->syms = (caddr_t)uvm_km_zalloc(lkm_map,
 							    curp->sym_size);
 			curp->sym_offset = 0;
 			resrvp->sym_addr = curp->syms;

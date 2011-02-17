@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: usbfvar.h,v 1.7 2009/11/04 19:14:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -55,7 +51,7 @@ struct usbf_config {
 };
 
 struct usbf_device {
-	USBBASEDEVICE		 bdev;		/* base device */
+	struct device		 bdev;		/* base device */
 	struct usbf_bus		*bus;		/* device controller */
 	struct usbf_function	*function;	/* function driver */
 	struct usbf_pipe	*default_pipe;	/* pipe 0 (device control) */
@@ -97,7 +93,7 @@ struct usbf_softc;
 
 struct usbf_bus {
 	/* Filled by DC driver */
-	USBBASEDEVICE		 bdev;		/* base device */
+	struct device		 bdev;		/* base device */
 	struct usbf_bus_methods	*methods;
 	size_t			 pipe_size;	/* size of pipe struct */
 	u_int8_t		 ep0_maxp;	/* packet size for EP0 */
@@ -105,17 +101,7 @@ struct usbf_bus {
 	/* Filled by usbf driver */
 	struct usbf_softc	*usbfctl;
 	int			 intr_context;
-<<<<<<< HEAD
-#ifdef USB_USE_SOFTINTR
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void			*soft;		/* soft interrupt cookie */
-#else
-	usb_callout_t		 softi;		/* timeout handle */
-#endif
-#endif
-=======
-	void			*soft;		/* soft interrupt cookie */
->>>>>>> origin/master
 	bus_dma_tag_t		 dmatag;	/* DMA tag */
 };
 
@@ -159,7 +145,7 @@ struct usbf_xfer {
 	int			 rqflags;
 	usb_dma_t		 dmabuf;
 
-	usb_callout_t		 timeout_handle;
+	struct timeout		 timeout_handle;
 };
 
 
@@ -169,8 +155,8 @@ void	    usbf_do_request(usbf_xfer_handle, usbf_private_handle,
 			    usbf_status);
 
 /* usbf_subr.c */
-usbf_status usbf_new_device(device_ptr_t, usbf_bus_handle, int,
-			    int, int, struct usbf_port *);
+usbf_status usbf_new_device(struct device *, usbf_bus_handle, int, int, int,
+				     struct usbf_port *);
 usbf_status usbf_set_endpoint_feature(usbf_config_handle, u_int8_t,
 				      u_int16_t);
 usbf_status usbf_clear_endpoint_feature(usbf_config_handle, u_int8_t,

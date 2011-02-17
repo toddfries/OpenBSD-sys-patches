@@ -1,4 +1,4 @@
-/*	$OpenBSD: i8253reg.h,v 1.2 2002/07/31 19:02:08 nordin Exp $	*/
+/*	$OpenBSD: i8253reg.h,v 1.3 2003/06/02 23:28:02 millert Exp $	*/
 /*	$NetBSD: i8253reg.h,v 1.5 1998/01/19 11:38:00 drochner Exp $	*/
 
 /*-

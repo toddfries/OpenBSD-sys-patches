@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kuereg.h,v 1.5 2004/05/19 11:37:00 brad Exp $ */
+/*	$OpenBSD: if_kuereg.h,v 1.9 2007/06/26 06:33:17 jsg Exp $ */
 /*	$NetBSD: if_kuereg.h,v 1.11 2001/01/21 02:35:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -67,14 +67,18 @@ struct kue_ether_desc {
 	u_int8_t		kue_maxseg[2];
 	u_int8_t		kue_mcastfilt[2];
 	u_int8_t		kue_rsvd2;
-};
+} __packed;
 
 #define KUE_ETHERSTATS(x)	\
-	(*(u_int32_t *)&(x)->kue_desc.kue_etherstats)
+	(((x)->kue_desc.kue_etherstats[3] << 24) | \
+	 ((x)->kue_desc.kue_etherstats[2] << 16) | \
+	 ((x)->kue_desc.kue_etherstats[1] << 8) | \
+	  (x)->kue_desc.kue_etherstats[0])
 #define KUE_MAXSEG(x)		\
-	(*(u_int16_t *)&(x)->kue_desc.kue_maxseg)
+	(((x)->kue_desc.kue_maxseg[1] << 8) | (x)->kue_desc.kue_maxseg[0])
 #define KUE_MCFILTCNT(x)	\
-	((*(u_int16_t *)&(x)->kue_desc.kue_mcastfilt) & 0x7FFF)
+	((((x)->kue_desc.kue_mcastfilt[1] << 8) | \
+	   (x)->kue_desc.kue_mcastfilt[0]) & 0x7FFF)
 #define KUE_MCFILT(x, y)	\
 	(char *)&(sc->kue_mcfilters[y * ETHER_ADDR_LEN])
 
@@ -160,15 +164,10 @@ struct kue_cdata {
 };
 
 struct kue_softc {
-	USBBASEDEVICE		kue_dev;
+	struct device		kue_dev;
 
-#if defined(__FreeBSD__) || defined(__OpenBSD__)
 	struct arpcom		arpcom;
 #define GET_IFP(sc) (&(sc)->arpcom.ac_if)
-#elif defined(__NetBSD__)
-	struct ethercom		kue_ec;
-#define GET_IFP(sc) (&(sc)->kue_ec.ec_if)
-#endif
 
 	usbd_device_handle	kue_udev;
 	usbd_interface_handle	kue_iface;

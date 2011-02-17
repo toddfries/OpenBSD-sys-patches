@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pcdisplay_chars.c,v 1.3 2003/11/20 17:47:02 millert Exp $ */
-=======
 /* $OpenBSD: pcdisplay_chars.c,v 1.5 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: pcdisplay_chars.c,v 1.5 2000/06/08 07:01:19 cgd Exp $ */
 
 /*

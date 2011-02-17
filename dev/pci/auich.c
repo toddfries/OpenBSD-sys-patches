@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: auich.c,v 1.62 2006/08/19 19:06:51 brad Exp $	*/
-=======
 /*	$OpenBSD: auich.c,v 1.93 2010/09/12 03:17:34 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -162,6 +158,17 @@ struct auich_dma {
 	size_t size;
 };
 
+struct auich_cdata {
+	struct auich_dmalist ic_dmalist_pcmo[AUICH_DMALIST_MAX];
+	struct auich_dmalist ic_dmalist_pcmi[AUICH_DMALIST_MAX];
+	struct auich_dmalist ic_dmalist_mici[AUICH_DMALIST_MAX];
+};
+
+#define	AUICH_CDOFF(x)		offsetof(struct auich_cdata, x)
+#define	AUICH_PCMO_OFF(x)	AUICH_CDOFF(ic_dmalist_pcmo[(x)])
+#define	AUICH_PCMI_OFF(x)	AUICH_CDOFF(ic_dmalist_pcmi[(x)])
+#define	AUICH_MICI_OFF(x)	AUICH_CDOFF(ic_dmalist_mici[(x)])
+
 struct auich_softc {
 	struct device sc_dev;
 	void *sc_ih;
@@ -180,28 +187,6 @@ struct auich_softc {
 	struct ac97_host_if host_if;
 	int sc_spdif;
 
-<<<<<<< HEAD
-	/* dma scatter-gather buffer lists, aligned to 8 bytes */
-	struct auich_dmalist *dmalist_pcmo, *dmap_pcmo;
-	struct auich_dmalist *dmalist_pcmi, *dmap_pcmi;
-	struct auich_dmalist *dmalist_mici, *dmap_mici;
-
-	bus_dmamap_t dmalist_map;
-	bus_dma_segment_t dmalist_seg[2];
-	caddr_t dmalist_kva;
-	bus_addr_t dmalist_pcmo_pa;
-	bus_addr_t dmalist_pcmi_pa;
-	bus_addr_t dmalist_mici_pa;
-
-	/* i/o buffer pointers */
-	u_int32_t pcmo_start, pcmo_p, pcmo_end;
-	int pcmo_blksize, pcmo_fifoe;
-	u_int32_t pcmi_start, pcmi_p, pcmi_end;
-	int pcmi_blksize, pcmi_fifoe;
-	u_int32_t mici_start, mici_p, mici_end;
-	int mici_blksize, mici_fifoe;
-	struct auich_dma *sc_dmas;
-=======
 	/* dma scatter-gather buffer lists */
 
 	bus_dmamap_t sc_cddmamap;
@@ -226,18 +211,17 @@ struct auich_softc {
 	struct auich_dma *sc_pdma;	/* play */
 	struct auich_dma *sc_rdma;	/* record */
 	struct auich_dma *sc_cdma;	/* calibrate */
->>>>>>> origin/master
 
-	void (*sc_pintr)(void *);
-	void *sc_parg;
-
-	void (*sc_rintr)(void *);
-	void *sc_rarg;
+#ifdef AUICH_DEBUG
+	int pcmi_fifoe;
+	int pcmo_fifoe;
+#endif
 
 	int suspend;
 	u_int16_t ext_ctrl;
 	int sc_sample_size;
 	int sc_sts_reg;
+	int sc_dmamap_flags;
 	int sc_ignore_codecready;
 	int flags;
 	int sc_ac97rate;
@@ -258,7 +242,7 @@ struct auich_softc {
 int auich_debug = 0x0002;
 #define	AUICH_DEBUG_CODECIO	0x0001
 #define	AUICH_DEBUG_DMA		0x0002
-#define	AUICH_DEBUG_PARAM	0x0004
+#define	AUICH_DEBUG_INTR	0x0004
 #else
 #define	DPRINTF(x,y)	/* nothing */
 #endif
@@ -316,10 +300,7 @@ int auich_query_encoding(void *, struct audio_encoding *);
 int auich_set_params(void *, int, int, struct audio_params *,
     struct audio_params *);
 int auich_round_blocksize(void *, int);
-<<<<<<< HEAD
-=======
 void auich_halt_pipe(struct auich_softc *, int, struct auich_ring *);
->>>>>>> origin/master
 int auich_halt_output(void *);
 int auich_halt_input(void *);
 int auich_getdev(void *, struct audio_device *);
@@ -331,10 +312,16 @@ void auich_freem(void *, void *, int);
 size_t auich_round_buffersize(void *, int, size_t);
 paddr_t auich_mappage(void *, void *, off_t, int);
 int auich_get_props(void *);
+void auich_trigger_pipe(struct auich_softc *, int, struct auich_ring *);
+void auich_intr_pipe(struct auich_softc *, int, struct auich_ring *);
 int auich_trigger_output(void *, void *, void *, int, void (*)(void *),
     void *, struct audio_params *);
 int auich_trigger_input(void *, void *, void *, int, void (*)(void *),
     void *, struct audio_params *);
+int auich_alloc_cdata(struct auich_softc *);
+int auich_allocmem(struct auich_softc *, size_t, size_t, struct auich_dma *);
+int auich_freemem(struct auich_softc *, struct auich_dma *);
+void auich_get_default_params(void *, int, struct audio_params *);
 
 int auich_resume(struct auich_softc *);
 
@@ -364,7 +351,8 @@ struct audio_hw_if auich_hw_if = {
 	auich_mappage,
 	auich_get_props,
 	auich_trigger_output,
-	auich_trigger_input
+	auich_trigger_input,
+	auich_get_default_params
 };
 
 int  auich_attach_codec(void *, struct ac97_codec_if *);
@@ -404,8 +392,7 @@ auich_attach(parent, self, aux)
 	pcireg_t csr;
 	const char *intrstr;
 	u_int32_t status;
-	bus_size_t dmasz;
-	int i, segs;
+	int i;
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
 	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801DB_ACA ||
@@ -456,37 +443,6 @@ auich_attach(parent, self, aux)
 	}
 	sc->dmat = pa->pa_dmat;
 	sc->pci_id = pa->pa_id;
-
-	/* allocate dma memory */
-	dmasz = AUICH_DMALIST_MAX * 3 * sizeof(struct auich_dma);
-	segs = 1;
-	if (bus_dmamem_alloc(sc->dmat, dmasz, PAGE_SIZE, 0, sc->dmalist_seg,
-	    segs, &segs, BUS_DMA_NOWAIT)) {
-		printf(": failed to alloc dmalist\n");
-		return;
-	}
-	if (bus_dmamem_map(sc->dmat, sc->dmalist_seg, segs, dmasz,
-	    &sc->dmalist_kva, BUS_DMA_NOWAIT)) {
-		printf(": failed to map dmalist\n");
-		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
-		return;
-	}
-	if (bus_dmamap_create(sc->dmat, dmasz, segs, dmasz, 0, BUS_DMA_NOWAIT,
-	    &sc->dmalist_map)) {
-		printf(": failed to create dmalist map\n");
-		bus_dmamem_unmap(sc->dmat, sc->dmalist_kva, dmasz);
-		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
-		return;
-	}
-	if (bus_dmamap_load_raw(sc->dmat, sc->dmalist_map, sc->dmalist_seg,
-	    segs, dmasz, BUS_DMA_NOWAIT)) {
-		printf(": failed to load dmalist map: %d segs %lu size\n",
-		    segs, (u_long)dmasz);
-		bus_dmamap_destroy(sc->dmat, sc->dmalist_map);
-		bus_dmamem_unmap(sc->dmat, sc->dmalist_kva, dmasz);
-		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
-		return;
-	}
 
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
@@ -542,23 +498,20 @@ auich_attach(parent, self, aux)
 		sc->sc_pcm6 = AUICH_PCM6;
 	}
 
-	sc->dmalist_pcmo = (struct auich_dmalist *)(sc->dmalist_kva +
-	    (0 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
-	sc->dmalist_pcmo_pa = sc->dmalist_map->dm_segs[0].ds_addr +
-	    (0 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
+	/* Workaround for a 440MX B-stepping erratum */
+	sc->sc_dmamap_flags = BUS_DMA_COHERENT;
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82440MX_ACA) {
+		sc->sc_dmamap_flags |= BUS_DMA_NOCACHE;
+		printf("%s: DMA bug workaround enabled\n", sc->sc_dev.dv_xname);
+	}
 
-	sc->dmalist_pcmi = (struct auich_dmalist *)(sc->dmalist_kva +
-	    (1 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
-	sc->dmalist_pcmi_pa = sc->dmalist_map->dm_segs[0].ds_addr +
-	    (1 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
-
-	sc->dmalist_mici = (struct auich_dmalist *)(sc->dmalist_kva +
-	    (2 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
-	sc->dmalist_mici_pa = sc->dmalist_map->dm_segs[0].ds_addr +
-	    (2 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
+	/* Set up DMA lists. */
+	sc->pcmo.qptr = sc->pcmi.qptr = sc->mici.qptr = 0;
+	auich_alloc_cdata(sc);
 
 	DPRINTF(AUICH_DEBUG_DMA, ("auich_attach: lists %p %p %p\n",
-	    sc->dmalist_pcmo, sc->dmalist_pcmi, sc->dmalist_mici));
+	    sc->pcmo.dmalist, sc->pcmi.dmalist, sc->mici.dmalist));
 
 	/* Reset codec and AC'97 */
 	auich_reset_codec(sc);
@@ -751,61 +704,17 @@ auich_close(v)
 	sc->codec_if->vtbl->unlock(sc->codec_if);
 }
 
+void
+auich_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
+}
+
 int
 auich_query_encoding(v, aep)
 	void *v;
 	struct audio_encoding *aep;
 {
-<<<<<<< HEAD
-	switch (aep->index) {
-	case 0:
-		strlcpy(aep->name, AudioEulinear, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR;
-		aep->precision = 8;
-		aep->flags = 0;
-		return (0);
-	case 1:
-		strlcpy(aep->name, AudioEmulaw, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULAW;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 2:
-		strlcpy(aep->name, AudioEalaw, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ALAW;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 3:
-		strlcpy(aep->name, AudioEslinear, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR;
-		aep->precision = 8;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 4:
-		strlcpy(aep->name, AudioEslinear_le, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR_LE;
-		aep->precision = 16;
-		aep->flags = 0;
-		return (0);
-	case 5:
-		strlcpy(aep->name, AudioEulinear_le, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR_LE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 6:
-		strlcpy(aep->name, AudioEslinear_be, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_SLINEAR_BE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
-	case 7:
-		strlcpy(aep->name, AudioEulinear_be, sizeof aep->name);
-		aep->encoding = AUDIO_ENCODING_ULINEAR_BE;
-		aep->precision = 16;
-		aep->flags = AUDIO_ENCODINGFLAG_EMULATED;
-=======
 	struct auich_softc *sc = v;
 	if (sc->sc_spdif) {
 		switch (aep->index) {
@@ -875,7 +784,6 @@ auich_query_encoding(v, aep)
 		}
 		aep->bps = AUDIO_BPS(aep->precision);
 		aep->msb = 1;
->>>>>>> origin/master
 		return (0);
 	}
 }
@@ -914,11 +822,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = mulaw_to_slinear16_mts;
+				play->sw_code = mulaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = mulaw_to_slinear16;
+				play->sw_code = mulaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -932,11 +840,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -979,11 +887,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -993,10 +901,10 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_mts;
+					play->sw_code = change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16;
+					play->sw_code = change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -1012,11 +920,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 			switch (play->channels) {
 			case 1:
 				play->factor = 4;
-				play->sw_code = alaw_to_slinear16_mts;
+				play->sw_code = alaw_to_slinear16_le_mts;
 				break;
 			case 2:
 				play->factor = 2;
-				play->sw_code = alaw_to_slinear16;
+				play->sw_code = alaw_to_slinear16_le;
 				break;
 			default:
 				return (EINVAL);
@@ -1030,11 +938,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = linear8_to_linear16_mts;
+					play->sw_code = linear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = linear8_to_linear16;
+					play->sw_code = linear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -1065,11 +973,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 4;
-					play->sw_code = ulinear8_to_linear16_mts;
+					play->sw_code = ulinear8_to_linear16_le_mts;
 					break;
 				case 2:
 					play->factor = 2;
-					play->sw_code = ulinear8_to_linear16;
+					play->sw_code = ulinear8_to_linear16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -1079,10 +987,10 @@ auich_set_params(v, setmode, usemode, play, rec)
 				switch (play->channels) {
 				case 1:
 					play->factor = 2;
-					play->sw_code = change_sign16_swap_bytes_mts;
+					play->sw_code = swap_bytes_change_sign16_le_mts;
 					break;
 				case 2:
-					play->sw_code = change_sign16_swap_bytes;
+					play->sw_code = swap_bytes_change_sign16_le;
 					break;
 				default:
 					return (EINVAL);
@@ -1101,8 +1009,6 @@ auich_set_params(v, setmode, usemode, play, rec)
 		orate = adj_rate = play->sample_rate;
 		if (sc->sc_ac97rate != 0)
 			adj_rate = orate * AUICH_FIXED_RATE / sc->sc_ac97rate;
-<<<<<<< HEAD
-=======
 
 		play->sample_rate = adj_rate;
 		sc->last_prate = play->sample_rate;
@@ -1112,15 +1018,20 @@ auich_set_params(v, setmode, usemode, play, rec)
 		if (error)
 			return (error);
 
->>>>>>> origin/master
 		play->sample_rate = adj_rate;
-		error = ac97_set_rate(sc->codec_if, play, AUMODE_PLAY);
-		if (play->sample_rate == adj_rate)
-			play->sample_rate = orate;
-<<<<<<< HEAD
+		error = ac97_set_rate(sc->codec_if,
+		    AC97_REG_PCM_SURR_DAC_RATE, &play->sample_rate);
 		if (error)
 			return (error);
-=======
+
+		play->sample_rate = adj_rate;
+		error = ac97_set_rate(sc->codec_if,
+		    AC97_REG_PCM_FRONT_DAC_RATE, &play->sample_rate);
+		if (error)
+			return (error);
+
+		if (play->sample_rate == adj_rate)
+			play->sample_rate = orate;
 
 		control = bus_space_read_4(sc->iot, sc->aud_ioh, AUICH_GCTRL);
 		control &= ~(sc->sc_pcm246_mask);
@@ -1131,7 +1042,6 @@ auich_set_params(v, setmode, usemode, play, rec)
 		bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GCTRL, control);
 
 		sc->last_pchan = play->channels;
->>>>>>> origin/master
 	}
 
 	if (setmode & AUMODE_RECORD) {
@@ -1143,28 +1053,143 @@ auich_set_params(v, setmode, usemode, play, rec)
 			rec->precision = 16;
 		switch(rec->encoding) {
 		case AUDIO_ENCODING_ULAW:
-			rec->sw_code = ulinear8_to_mulaw;
-			break;
-		case AUDIO_ENCODING_SLINEAR_LE:
-			if (rec->precision == 8)
-				rec->sw_code = change_sign8;
-			break;
-		case AUDIO_ENCODING_ULINEAR_LE:
-			if (rec->precision == 16)
-				rec->sw_code = change_sign16;
+			switch (rec->channels) {
+			case 1:
+				rec->sw_code = slinear16_to_mulaw_le_stm;
+				rec->factor = 4;
+				break;
+			case 2:
+				rec->sw_code = slinear16_to_mulaw_le;
+				rec->factor = 2;
+				break;
+			}
 			break;
 		case AUDIO_ENCODING_ALAW:
-			rec->sw_code = ulinear8_to_alaw;
+			switch (rec->channels) {
+			case 1:
+				rec->sw_code = slinear16_to_alaw_le_stm;
+				rec->factor = 4;
+				break;
+			case 2:
+				rec->sw_code = slinear16_to_alaw_le;
+				rec->factor = 2;
+				break;
+			}
+			break;
+		case AUDIO_ENCODING_SLINEAR_LE:
+			switch (rec->precision) {
+			case 8:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = linear16_to_linear8_le_stm;
+					rec->factor = 4;
+					break;
+				case 2:
+					rec->sw_code = linear16_to_linear8_le;
+					rec->factor = 2;
+					break;
+				}
+				break;
+			case 16:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = linear16_decimator;
+					rec->factor = 2;
+					break;
+				case 2:
+					break;
+				}
+				break;
+			default:
+				return (EINVAL);
+			}
+			break;
+		case AUDIO_ENCODING_ULINEAR_LE:
+			switch (rec->precision) {
+			case 8:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = linear16_to_ulinear8_le_stm;
+					rec->factor = 4;
+					break;
+				case 2:
+					rec->sw_code = linear16_to_ulinear8_le;
+					rec->factor = 2;
+					break;
+				}
+				break;
+			case 16:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = change_sign16_le_stm;
+					rec->factor = 2;
+					break;
+				case 2:
+					rec->sw_code = change_sign16_le;
+					break;
+				}
+				break;
+			default:
+				return (EINVAL);
+			}
 			break;
 		case AUDIO_ENCODING_SLINEAR_BE:
-			if (rec->precision == 16)
-				rec->sw_code = swap_bytes;
-			else
-				rec->sw_code = change_sign8;
+			switch (rec->precision) {
+			case 8:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = linear16_to_linear8_le_stm;
+					rec->factor = 4;
+					break;
+				case 2:
+					rec->sw_code = linear16_to_linear8_le;
+					rec->factor = 2;
+					break;
+				}
+				break;
+			case 16:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = swap_bytes_stm;
+					rec->factor = 2;
+					break;
+				case 2:
+					rec->sw_code = swap_bytes;
+					break;
+				}
+				break;
+			default:
+				return (EINVAL);
+			}
 			break;
 		case AUDIO_ENCODING_ULINEAR_BE:
-			if (rec->precision == 16)
-				rec->sw_code = swap_bytes_change_sign16;
+			switch (rec->precision) {
+			case 8:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = linear16_to_ulinear8_le_stm;
+					rec->factor = 4;
+					break;
+				case 2:
+					rec->sw_code = linear16_to_ulinear8_le;
+					rec->factor = 2;
+					break;
+				}
+				break;
+			case 16:
+				switch (rec->channels) {
+				case 1:
+					rec->sw_code = change_sign16_swap_bytes_le_stm;
+					rec->factor = 2;
+					break;
+				case 2:
+					rec->sw_code = change_sign16_swap_bytes_le;
+					break;
+				}
+				break;
+			default:
+				return (EINVAL);
+			}
 			break;
 		default:
 			return (EINVAL);
@@ -1176,16 +1201,12 @@ auich_set_params(v, setmode, usemode, play, rec)
 		if (sc->sc_ac97rate != 0)
 			rec->sample_rate = orate * AUICH_FIXED_RATE /
 			    sc->sc_ac97rate;
-<<<<<<< HEAD
-		error = ac97_set_rate(sc->codec_if, rec, AUMODE_RECORD);
-		rec->sample_rate = orate;
-=======
 		sc->last_rrate = rec->sample_rate;
 		error = ac97_set_rate(sc->codec_if, AC97_REG_PCM_LR_ADC_RATE,
 		    &rec->sample_rate);
->>>>>>> origin/master
 		if (error)
 			return (error);
+		rec->sample_rate = orate;
 	}
 
 	return (0);
@@ -1199,8 +1220,6 @@ auich_round_blocksize(v, blk)
 	return (blk + 0x3f) & ~0x3f;
 }
 
-<<<<<<< HEAD
-=======
 
 void
 auich_halt_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
@@ -1233,7 +1252,6 @@ auich_halt_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
 }
 
 
->>>>>>> origin/master
 int
 auich_halt_output(v)
 	void *v;
@@ -1242,13 +1260,9 @@ auich_halt_output(v)
 
 	DPRINTF(AUICH_DEBUG_DMA, ("%s: halt_output\n", sc->sc_dev.dv_xname));
 
-<<<<<<< HEAD
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_CTRL, AUICH_RR);
-=======
 	auich_halt_pipe(sc, AUICH_PCMO, &sc->pcmo);
 
 	sc->pcmo.intr = NULL;
->>>>>>> origin/master
 
 	return 0;
 }
@@ -1264,15 +1278,10 @@ auich_halt_input(v)
 
 	/* XXX halt both unless known otherwise */
 
-<<<<<<< HEAD
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CTRL, AUICH_RR);
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_MICI + AUICH_CTRL, AUICH_RR);
-=======
 	auich_halt_pipe(sc, AUICH_PCMI, &sc->pcmi);
 	auich_halt_pipe(sc, AUICH_MICI, &sc->mici);
 
 	sc->pcmi.intr = NULL;
->>>>>>> origin/master
 
 	return 0;
 }
@@ -1325,49 +1334,20 @@ auich_allocm(v, direction, size, pool, flags)
 	struct auich_dma *p;
 	int error;
 
-	if (size > AUICH_DMALIST_MAX * AUICH_DMASEG_MAX)
+	/* can only use 1 segment */
+	if (size > AUICH_DMASEG_MAX) {
+		DPRINTF(AUICH_DEBUG_DMA,
+		    ("%s: requested buffer size too large: %d", \
+		    sc->sc_dev.dv_xname, size));
 		return NULL;
+	}
 
-	p = malloc(sizeof(*p), pool, flags);
+	p = malloc(sizeof(*p), pool, flags | M_ZERO);
 	if (!p)
 		return NULL;
-	bzero(p, sizeof(*p));
 
-	p->size = size;
-	if ((error = bus_dmamem_alloc(sc->dmat, p->size, NBPG, 0, p->segs,
-	    1, &p->nsegs, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: unable to allocate dma, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
-		free(p, pool);
-		return NULL;
-	}
-
-	if ((error = bus_dmamem_map(sc->dmat, p->segs, p->nsegs, p->size,
-	    &p->addr, BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
-		printf("%s: unable to map dma, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
-		bus_dmamem_free(sc->dmat, p->segs, p->nsegs);
-		free(p, pool);
-		return NULL;
-	}
-
-	if ((error = bus_dmamap_create(sc->dmat, p->size, 1,
-	    p->size, 0, BUS_DMA_NOWAIT, &p->map)) != 0) {
-		printf("%s: unable to create dma map, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
-		bus_dmamem_unmap(sc->dmat, p->addr, size);
-		bus_dmamem_free(sc->dmat, p->segs, p->nsegs);
-		free(p, pool);
-		return NULL;
-	}
-
-	if ((error = bus_dmamap_load(sc->dmat, p->map, p->addr, p->size,
-	    NULL, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: unable to load dma map, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
-		bus_dmamap_destroy(sc->dmat, p->map);
-		bus_dmamem_unmap(sc->dmat, p->addr, size);
-		bus_dmamem_free(sc->dmat, p->segs, p->nsegs);
+	error = auich_allocmem(sc, size, PAGE_SIZE, p);
+	if (error) {
 		free(p, pool);
 		return NULL;
 	}
@@ -1383,26 +1363,8 @@ auich_allocm(v, direction, size, pool, flags)
 }
 
 void
-auich_freem(v, ptr, pool)
-	void *v;
-	void *ptr;
-	int pool;
+auich_freem(void *v, void *ptr, int pool)
 {
-<<<<<<< HEAD
-	struct auich_softc *sc = v;
-	struct auich_dma *p;
-
-	for (p = sc->sc_dmas; p->addr != ptr; p = p->next)
-		if (p->next == NULL) {
-			printf("auich_freem: trying to free not allocated memory");
-			return;
-		}
-
-	bus_dmamap_unload(sc->dmat, p->map);
-	bus_dmamap_destroy(sc->dmat, p->map);
-	bus_dmamem_unmap(sc->dmat, p->addr, p->size);
-	bus_dmamem_free(sc->dmat, p->segs, p->nsegs);
-=======
 	struct auich_softc *sc;
 	struct auich_dma *p;
 
@@ -1417,7 +1379,6 @@ auich_freem(v, ptr, pool)
 		return;
 
 	auich_freemem(sc, p);
->>>>>>> origin/master
 	free(p, pool);
 }
 
@@ -1470,15 +1431,15 @@ auich_intr(v)
 	void *v;
 {
 	struct auich_softc *sc = v;
-	int ret = 0, sts, gsts, i;
+	int ret = 0, sts, gsts;
 
-	gsts = bus_space_read_2(sc->iot, sc->aud_ioh, AUICH_GSTS);
-	DPRINTF(AUICH_DEBUG_DMA, ("auich_intr: gsts=%b\n", gsts, AUICH_GSTS_BITS));
+	gsts = bus_space_read_4(sc->iot, sc->aud_ioh, AUICH_GSTS);
+	DPRINTF(AUICH_DEBUG_INTR, ("auich_intr: gsts=%b\n", gsts, AUICH_GSTS_BITS));
 
 	if (gsts & AUICH_POINT) {
 		sts = bus_space_read_2(sc->iot, sc->aud_ioh,
 		    AUICH_PCMO + sc->sc_sts_reg);
-		DPRINTF(AUICH_DEBUG_DMA,
+		DPRINTF(AUICH_DEBUG_INTR,
 		    ("auich_intr: osts=%b\n", sts, AUICH_ISTS_BITS));
 
 #ifdef AUICH_DEBUG
@@ -1494,53 +1455,22 @@ auich_intr(v)
 			    AUICH_ISTS_BITS);
 		}
 #endif
-		i = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_CIV);
-		if (sts & (AUICH_LVBCI | AUICH_CELV)) {
-			struct auich_dmalist *q, *qe;
 
-			q = sc->dmap_pcmo;
-			qe = &sc->dmalist_pcmo[i];
-
-			while (q != qe) {
-
-				q->base = sc->pcmo_p;
-				q->len = (sc->pcmo_blksize /
-				    sc->sc_sample_size) | AUICH_DMAF_IOC;
-				DPRINTF(AUICH_DEBUG_DMA,
-				    ("auich_intr: %p, %p = %x @ %p\n",
-				    qe, q, sc->pcmo_blksize /
-				    sc->sc_sample_size, sc->pcmo_p));
-
-				sc->pcmo_p += sc->pcmo_blksize;
-				if (sc->pcmo_p >= sc->pcmo_end)
-					sc->pcmo_p = sc->pcmo_start;
-
-				if (++q == &sc->dmalist_pcmo[AUICH_DMALIST_MAX])
-					q = sc->dmalist_pcmo;
-			}
-
-			sc->dmap_pcmo = q;
-			bus_space_write_1(sc->iot, sc->aud_ioh,
-			    AUICH_PCMO + AUICH_LVI,
-			    (sc->dmap_pcmo - sc->dmalist_pcmo - 1) &
-			    AUICH_LVI_MASK);
-		}
-
-		if (sts & AUICH_BCIS && sc->sc_pintr)
-			sc->sc_pintr(sc->sc_parg);
+		if (sts & AUICH_BCIS)
+			auich_intr_pipe(sc, AUICH_PCMO, &sc->pcmo);
 
 		/* int ack */
 		bus_space_write_2(sc->iot, sc->aud_ioh,
 		    AUICH_PCMO + sc->sc_sts_reg, sts &
-		    (AUICH_LVBCI | AUICH_CELV | AUICH_BCIS | AUICH_FIFOE));
-		bus_space_write_2(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_POINT);
+		    (AUICH_BCIS | AUICH_FIFOE));
+		bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_POINT);
 		ret++;
 	}
 
 	if (gsts & AUICH_PIINT) {
 		sts = bus_space_read_2(sc->iot, sc->aud_ioh,
 		    AUICH_PCMI + sc->sc_sts_reg);
-		DPRINTF(AUICH_DEBUG_DMA,
+		DPRINTF(AUICH_DEBUG_INTR,
 		    ("auich_intr: ists=%b\n", sts, AUICH_ISTS_BITS));
 
 #ifdef AUICH_DEBUG
@@ -1556,53 +1486,22 @@ auich_intr(v)
 			    AUICH_ISTS_BITS);
 		}
 #endif
-		i = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CIV);
-		if (sts & (AUICH_LVBCI | AUICH_CELV)) {
-			struct auich_dmalist *q, *qe;
 
-			q = sc->dmap_pcmi;
-			qe = &sc->dmalist_pcmi[i];
-
-			while (q != qe) {
-
-				q->base = sc->pcmi_p;
-				q->len = (sc->pcmi_blksize /
-				    sc->sc_sample_size) | AUICH_DMAF_IOC;
-				DPRINTF(AUICH_DEBUG_DMA,
-				    ("auich_intr: %p, %p = %x @ %p\n",
-				    qe, q, sc->pcmi_blksize /
-				    sc->sc_sample_size, sc->pcmi_p));
-
-				sc->pcmi_p += sc->pcmi_blksize;
-				if (sc->pcmi_p >= sc->pcmi_end)
-					sc->pcmi_p = sc->pcmi_start;
-
-				if (++q == &sc->dmalist_pcmi[AUICH_DMALIST_MAX])
-					q = sc->dmalist_pcmi;
-			}
-
-			sc->dmap_pcmi = q;
-			bus_space_write_1(sc->iot, sc->aud_ioh,
-			    AUICH_PCMI + AUICH_LVI,
-			    (sc->dmap_pcmi - sc->dmalist_pcmi - 1) &
-			    AUICH_LVI_MASK);
-		}
-
-		if (sts & AUICH_BCIS && sc->sc_rintr)
-			sc->sc_rintr(sc->sc_rarg);
+		if (sts & AUICH_BCIS)
+			auich_intr_pipe(sc, AUICH_PCMI, &sc->pcmi);
 
 		/* int ack */
 		bus_space_write_2(sc->iot, sc->aud_ioh,
 		    AUICH_PCMI + sc->sc_sts_reg, sts &
-		    (AUICH_LVBCI | AUICH_CELV | AUICH_BCIS | AUICH_FIFOE));
-		bus_space_write_2(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_PIINT);
+		    (AUICH_BCIS | AUICH_FIFOE));
+		bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_PIINT);
 		ret++;
 	}
 
-	if (gsts & AUICH_MIINT) {
+	if (gsts & AUICH_MINT) {
 		sts = bus_space_read_2(sc->iot, sc->aud_ioh,
 		    AUICH_MICI + sc->sc_sts_reg);
-		DPRINTF(AUICH_DEBUG_DMA,
+		DPRINTF(AUICH_DEBUG_INTR,
 		    ("auich_intr: ists=%b\n", sts, AUICH_ISTS_BITS));
 #ifdef AUICH_DEBUG
 		if (sts & AUICH_FIFOE) {
@@ -1617,22 +1516,21 @@ auich_intr(v)
 			    AUICH_ISTS_BITS);
 		}
 #endif
-<<<<<<< HEAD
-
-		/* TODO mic input dma */
-=======
 		if (sts & AUICH_BCIS)
 			auich_intr_pipe(sc, AUICH_MICI, &sc->mici);
->>>>>>> origin/master
 
-		bus_space_write_2(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_MIINT);
+		/* int ack */
+		bus_space_write_2(sc->iot, sc->aud_ioh,
+		    AUICH_MICI + sc->sc_sts_reg,
+		    sts + (AUICH_BCIS | AUICH_FIFOE));
+
+		bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GSTS, AUICH_MINT);
+		ret++;
 	}
 
 	return ret;
 }
 
-<<<<<<< HEAD
-=======
 
 void
 auich_trigger_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
@@ -1718,7 +1616,6 @@ auich_intr_pipe(struct auich_softc *sc, int pipe, struct auich_ring *ring)
 }
 
 
->>>>>>> origin/master
 int
 auich_trigger_output(v, start, end, blksize, intr, arg, param)
 	void *v;
@@ -1729,17 +1626,12 @@ auich_trigger_output(v, start, end, blksize, intr, arg, param)
 	struct audio_params *param;
 {
 	struct auich_softc *sc = v;
-	struct auich_dmalist *q;
 	struct auich_dma *p;
-<<<<<<< HEAD
-
-=======
 	size_t size;
 #ifdef AUICH_DEBUG
 	uint16_t sts;
 	sts = bus_space_read_2(sc->iot, sc->aud_ioh,
 	    AUICH_PCMO + sc->sc_sts_reg);
->>>>>>> origin/master
 	DPRINTF(AUICH_DEBUG_DMA,
 	    ("auich_trigger_output(%x, %x, %d, %p, %p, %p) sts=%b\n",
 		start, end, blksize, intr, arg, param, sts, AUICH_ISTS_BITS));
@@ -1750,39 +1642,24 @@ auich_trigger_output(v, start, end, blksize, intr, arg, param)
 	else
 		return -1;
 
-<<<<<<< HEAD
-	sc->sc_pintr = intr;
-	sc->sc_parg = arg;
-=======
 	size = (size_t)((caddr_t)end - (caddr_t)start);
 	sc->pcmo.size = size;
 	sc->pcmo.intr = intr;
 	sc->pcmo.arg = arg;
->>>>>>> origin/master
 
 	/*
 	 * The logic behind this is:
 	 * setup one buffer to play, then LVI dump out the rest
 	 * to the scatter-gather chain.
 	 */
-	sc->pcmo_start = p->segs->ds_addr;
-	sc->pcmo_p = sc->pcmo_start + blksize;
-	sc->pcmo_end = sc->pcmo_start + ((char *)end - (char *)start);
-	sc->pcmo_blksize = blksize;
-
-	q = sc->dmap_pcmo = sc->dmalist_pcmo;
-	q->base = sc->pcmo_start;
-	q->len = (blksize / sc->sc_sample_size) | AUICH_DMAF_IOC;
-	if (++q == &sc->dmalist_pcmo[AUICH_DMALIST_MAX])
-		q = sc->dmalist_pcmo;
-	sc->dmap_pcmo = q;
+	sc->pcmo.start = p->segs->ds_addr;
+	sc->pcmo.p = sc->pcmo.start;
+	sc->pcmo.end = sc->pcmo.start + size;
+	sc->pcmo.blksize = blksize;
 
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_BDBAR,
-	    sc->dmalist_pcmo_pa);
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_CTRL,
-	    AUICH_IOCE | AUICH_FEIE | AUICH_LVBIE | AUICH_RPBM);
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_LVI,
-	    (sc->dmap_pcmo - 1 - sc->dmalist_pcmo) & AUICH_LVI_MASK);
+	    sc->sc_cddma + AUICH_PCMO_OFF(0));
+	auich_trigger_pipe(sc, AUICH_PCMO, &sc->pcmo);
 
 	return 0;
 }
@@ -1797,8 +1674,8 @@ auich_trigger_input(v, start, end, blksize, intr, arg, param)
 	struct audio_params *param;
 {
 	struct auich_softc *sc = v;
-	struct auich_dmalist *q;
 	struct auich_dma *p;
+	size_t size;
 
 #ifdef AUICH_DEBUG
 	DPRINTF(AUICH_DEBUG_DMA,
@@ -1813,41 +1690,22 @@ auich_trigger_input(v, start, end, blksize, intr, arg, param)
 	else
 		return -1;
 
-<<<<<<< HEAD
-	sc->sc_rintr = intr;
-	sc->sc_rarg = arg;
-=======
 	size = (size_t)((caddr_t)end - (caddr_t)start);
 	sc->pcmi.size = size;
 	sc->pcmi.intr = intr;
 	sc->pcmi.arg = arg;
->>>>>>> origin/master
 
 	/*
 	 * The logic behind this is:
 	 * setup one buffer to play, then LVI dump out the rest
 	 * to the scatter-gather chain.
 	 */
-	sc->pcmi_start = p->segs->ds_addr;
-	sc->pcmi_p = sc->pcmi_start + blksize;
-	sc->pcmi_end = sc->pcmi_start + ((char *)end - (char *)start);
-	sc->pcmi_blksize = blksize;
-
-	q = sc->dmap_pcmi = sc->dmalist_pcmi;
-	q->base = sc->pcmi_start;
-	q->len = (blksize / sc->sc_sample_size) | AUICH_DMAF_IOC;
-	if (++q == &sc->dmalist_pcmi[AUICH_DMALIST_MAX])
-		q = sc->dmalist_pcmi;
-	sc->dmap_pcmi = q;
+	sc->pcmi.start = p->segs->ds_addr;
+	sc->pcmi.p = sc->pcmi.start;
+	sc->pcmi.end = sc->pcmi.start + size;
+	sc->pcmi.blksize = blksize;
 
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_BDBAR,
-<<<<<<< HEAD
-	    sc->dmalist_pcmi_pa);
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CTRL,
-	    AUICH_IOCE | AUICH_FEIE | AUICH_LVBIE | AUICH_RPBM);
-	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_LVI,
-	    (sc->dmap_pcmi - 1 - sc->dmalist_pcmi) & AUICH_LVI_MASK);
-=======
 	    sc->sc_cddma + AUICH_PCMI_OFF(0));
 	auich_trigger_pipe(sc, AUICH_PCMI, &sc->pcmi);
 
@@ -1963,20 +1821,22 @@ auich_alloc_cdata(struct auich_softc *sc)
 	sc->pcmo.dmalist = sc->sc_cdata->ic_dmalist_pcmo;
 	sc->pcmi.dmalist = sc->sc_cdata->ic_dmalist_pcmi;
 	sc->mici.dmalist = sc->sc_cdata->ic_dmalist_mici;
->>>>>>> origin/master
 
 	return 0;
+
+ fail_3:
+	bus_dmamap_destroy(sc->dmat, sc->sc_cddmamap);
+ fail_2:
+	bus_dmamem_unmap(sc->dmat, (caddr_t) sc->sc_cdata,
+	    sizeof(struct auich_cdata));
+ fail_1:
+	bus_dmamem_free(sc->dmat, &seg, rseg);
+ fail_0:
+	return error;
 }
 
-<<<<<<< HEAD
-void
-auich_powerhook(why, self)
-	int why;
-	void *self;
-=======
 int
 auich_resume(struct auich_softc *sc)
->>>>>>> origin/master
 {
 	/* SiS 7012 needs special handling */
 	if (PCI_VENDOR(sc->pci_id) == PCI_VENDOR_SIS &&
@@ -1992,11 +1852,6 @@ auich_resume(struct auich_softc *sc)
 	return (0);
 }
 
-<<<<<<< HEAD
-
-
-=======
->>>>>>> origin/master
 /* -------------------------------------------------------------------- */
 /* Calibrate card (some boards are overclocked and need scaling) */
 
@@ -2009,7 +1864,6 @@ auich_calibrate(struct auich_softc *sc)
 	u_int32_t wait_us, actual_48k_rate, bytes, ac97rate;
 	void *temp_buffer;
 	struct auich_dma *p;
-	int i;
 
 	ac97rate = AUICH_FIXED_RATE;
 	/*
@@ -2033,18 +1887,11 @@ auich_calibrate(struct auich_softc *sc)
 		return (ac97rate);
 	}
 
-<<<<<<< HEAD
-	for (i = 0; i < AUICH_DMALIST_MAX; i++) {
-		sc->dmalist_pcmi[i].base = p->map->dm_segs[0].ds_addr;
-		sc->dmalist_pcmi[i].len = bytes / sc->sc_sample_size;
-	}
-=======
 	/* get current CIV (usually 0 after reboot) */
 	ociv = civ = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CIV);
 	sc->pcmi.dmalist[civ].base = p->map->dm_segs[0].ds_addr;
 	sc->pcmi.dmalist[civ].len = bytes / sc->sc_sample_size;
 
->>>>>>> origin/master
 
 	/*
 	 * our data format is stereo, 16 bit so each sample is 4 bytes.
@@ -2060,14 +1907,10 @@ auich_calibrate(struct auich_softc *sc)
 
 	/* prepare */
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_BDBAR,
-<<<<<<< HEAD
-	    sc->dmalist_pcmi_pa);
-=======
 	    sc->sc_cddma + AUICH_PCMI_OFF(0));
 	/* we got only one valid sample, so set LVI to CIV
 	 * otherwise we provoke a AUICH_FIFOE FIFO error
 	 * which will confuse the chip later on. */
->>>>>>> origin/master
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_LVI,
 	    civ & AUICH_LVI_MASK);
 

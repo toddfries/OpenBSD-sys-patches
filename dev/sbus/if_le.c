@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_le.c,v 1.11 2006/06/02 19:58:34 miod Exp $	*/
-=======
 /*	$OpenBSD: if_le.c,v 1.14 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_le.c,v 1.17 2001/05/30 11:46:35 mrg Exp $	*/
 
 /*-
@@ -106,7 +102,7 @@ le_sbus_wrcsr(struct am7990_softc *sc, u_int16_t port, u_int16_t val)
 
 #if defined(SUN4M)
 	/*
-	 * We need to flush the Sbus->Mbus write buffers. This can most
+	 * We need to flush the SBus->MBus write buffers. This can most
 	 * easily be accomplished by reading back the register that we
 	 * just wrote (thanks to Chris Torek for this solution).
 	 */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdmmcvar.h,v 1.6 2007/03/18 20:53:10 uwe Exp $	*/
-=======
 /*	$OpenBSD: sdmmcvar.h,v 1.18 2010/08/24 14:52:23 blambert Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -24,10 +20,7 @@
 #define _SDMMCVAR_H_
 
 #include <sys/queue.h>
-<<<<<<< HEAD
-=======
 #include <sys/rwlock.h>
->>>>>>> origin/master
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -178,16 +171,11 @@ struct sdmmc_softc {
 	struct proc *sc_task_thread;	/* asynchronous tasks */
 	TAILQ_HEAD(, sdmmc_task) sc_tskq;   /* task thread work queue */
 	struct sdmmc_task sc_discover_task; /* card attach/detach task */
-<<<<<<< HEAD
-	struct lock sc_lock;		/* lock around host controller */
-	void *sc_scsibus;		/* SCSI bus emulation softc */
-=======
 	struct sdmmc_task sc_intr_task;	/* card interrupt task */
 	struct rwlock sc_lock;		/* lock around host controller */
 	void *sc_scsibus;		/* SCSI bus emulation softc */
 	TAILQ_HEAD(, sdmmc_intr_handler) sc_intrq; /* interrupt handlers */
 	long sc_max_xfer;		/* maximum transfer size */
->>>>>>> origin/master
 };
 
 /*
@@ -218,6 +206,13 @@ int	sdmmc_set_relative_addr(struct sdmmc_softc *,
 	    struct sdmmc_function *);
 int	sdmmc_send_if_cond(struct sdmmc_softc *, uint32_t);
 
+void	sdmmc_intr_enable(struct sdmmc_function *);
+void	sdmmc_intr_disable(struct sdmmc_function *);
+void	*sdmmc_intr_establish(struct device *, int (*)(void *),
+	    void *, const char *);
+void	sdmmc_intr_disestablish(void *);
+void	sdmmc_intr_task(void *);
+
 int	sdmmc_io_enable(struct sdmmc_softc *);
 void	sdmmc_io_scan(struct sdmmc_softc *);
 int	sdmmc_io_init(struct sdmmc_softc *, struct sdmmc_function *);
@@ -226,10 +221,13 @@ void	sdmmc_io_detach(struct sdmmc_softc *);
 u_int8_t sdmmc_io_read_1(struct sdmmc_function *, int);
 u_int16_t sdmmc_io_read_2(struct sdmmc_function *, int);
 u_int32_t sdmmc_io_read_4(struct sdmmc_function *, int);
+int	sdmmc_io_read_multi_1(struct sdmmc_function *, int, u_char *, int);
 void	sdmmc_io_write_1(struct sdmmc_function *, int, u_int8_t);
 void	sdmmc_io_write_2(struct sdmmc_function *, int, u_int16_t);
 void	sdmmc_io_write_4(struct sdmmc_function *, int, u_int32_t);
-void	sdmmc_io_function_enable(struct sdmmc_function *);
+int	sdmmc_io_write_multi_1(struct sdmmc_function *, int, u_char *, int);
+int	sdmmc_io_function_ready(struct sdmmc_function *);
+int	sdmmc_io_function_enable(struct sdmmc_function *);
 void	sdmmc_io_function_disable(struct sdmmc_function *);
 
 int	sdmmc_read_cis(struct sdmmc_function *, struct sdmmc_cis *);

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ioctl.h,v 1.7 2002/03/14 01:27:14 millert Exp $	*/
-=======
 /*	$OpenBSD: ioctl.h,v 1.11 2010/07/02 19:57:15 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ioctl.h,v 1.20 1996/01/30 18:21:47 thorpej Exp $	*/
 
 /*-

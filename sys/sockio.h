@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sockio.h,v 1.37 2006/06/02 19:53:12 mpf Exp $	*/
-=======
 /*	$OpenBSD: sockio.h,v 1.48 2010/07/03 04:44:51 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -159,14 +155,15 @@
 #define	SIOCSIFDESCR	 _IOW('i', 128, struct ifreq)	/* set ifnet descr */
 #define	SIOCGIFDESCR	_IOWR('i', 129, struct ifreq)	/* get ifnet descr */
 
+#define	SIOCSIFRTLABEL	 _IOW('i', 130, struct ifreq)	/* set ifnet rtlabel */
+#define	SIOCGIFRTLABEL	_IOWR('i', 131, struct ifreq)	/* set ifnet rtlabel */
+
 #define	SIOCSIFTIMESLOT	 _IOW('i', 133, struct ifreq)	/* set ifnet timeslot */
 #define	SIOCGIFTIMESLOT	_IOWR('i', 134, struct ifreq)	/* get ifnet timeslot */
 
 #define SIOCSETVLANPRIO	 _IOW('i', 143, struct ifreq)	/* set VLAN priority */
 #define SIOCGETVLANPRIO	_IOWR('i', 144, struct ifreq)	/* get VLAN priority */
 
-<<<<<<< HEAD
-=======
 #define SIOCSETLABEL	 _IOW('i', 153, struct ifreq)	/* set MPLS label */
 #define SIOCGETLABEL	 _IOW('i', 154, struct ifreq)	/* get MPLS label */
 
@@ -185,7 +182,6 @@
 #define SIOCSETKALIVE	_IOW('i', 163, struct ifkalivereq)
 #define SIOCGETKALIVE	_IOWR('i', 164, struct ifkalivereq)
 
->>>>>>> origin/master
 #define	SIOCSVH		_IOWR('i', 245, struct ifreq)	/* set carp param */
 #define	SIOCGVH		_IOWR('i', 246, struct ifreq)	/* get carp param */
 

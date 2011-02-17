@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_vnops.c,v 1.54 2007/01/16 17:52:18 thib Exp $	*/
-=======
 /*	$OpenBSD: vfs_vnops.c,v 1.65 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -66,7 +62,6 @@ int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_poll(struct file *, int, struct proc *);
 int vn_kqfilter(struct file *, struct knote *);
 int vn_closefile(struct file *, struct proc *);
-int vn_ioctl(struct file *, u_long, caddr_t, struct proc *);
 
 struct 	fileops vnops =
 	{ vn_read, vn_write, vn_ioctl, vn_poll, vn_kqfilter, vn_statfile,
@@ -83,6 +78,7 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	struct proc *p = ndp->ni_cnd.cn_proc;
 	struct ucred *cred = p->p_ucred;
 	struct vattr va;
+	struct cloneinfo *cip;
 	int error;
 
 	if ((fmode & (FREAD|FWRITE)) == 0)
@@ -164,13 +160,14 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 		goto bad;
 
 	if (vp->v_flag & VCLONED) {
-		struct cloneinfo *cip = (struct cloneinfo *) vp->v_data;
+		cip = (struct cloneinfo *)vp->v_data;
 
 		vp->v_flag &= ~VCLONED;
-		ndp->ni_vp = cip->ci_vp; /* return cloned vnode */
-		vp->v_data = cip->ci_data; /* restore v_data */
-		VOP_UNLOCK(vp, 0, p); /* keep a reference */
-		vp = ndp->ni_vp; /* for the increment below */
+
+		ndp->ni_vp = cip->ci_vp;	/* return cloned vnode */
+		vp->v_data = cip->ci_data;	/* restore v_data */
+		VOP_UNLOCK(vp, 0, p);		/* keep a reference */
+		vp = ndp->ni_vp;		/* for the increment below */
 
 		free(cip, M_TEMP);
 	}
@@ -427,9 +424,6 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 			*(int *)data = vattr.va_size - fp->f_offset;
 			return (0);
 		}
-		if (com == FIBMAP)
-			return VOP_IOCTL(vp, com, data, fp->f_flag,
-					 p->p_ucred, p);
 		if (com == FIONBIO || com == FIOASYNC)  /* XXX */
 			return (0);			/* XXX */
 		/* FALLTHROUGH */
@@ -515,20 +509,6 @@ vn_kqfilter(struct file *fp, struct knote *kn)
 /*
  * Common code for vnode access operations.
  */
-int
-vn_access(struct vnode *vp, int mode)
-{
-	struct proc *p = curproc;
-	int error;
-
-	if ((error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p)))
-		return (error);
-
-	error = VOP_ACCESS(vp, mode, p->p_ucred, p);
-	VOP_UNLOCK(vp, 0, p);
-
-	return (error);
-}
 
 /* Check if a directory can be found inside another in the hierarchy */
 int

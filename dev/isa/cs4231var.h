@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: cs4231var.h,v 1.2 1996/03/08 16:42:53 niklas Exp $ */
-=======
 /* $OpenBSD: cs4231var.h,v 1.4 2008/06/26 05:42:16 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD: cs4231var.h,v 1.2 1996/02/05 02:21:51 jtc Exp $ */
 
 /*-

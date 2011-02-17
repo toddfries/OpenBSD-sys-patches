@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sys_socket.c,v 1.10 2005/12/13 10:33:14 jsg Exp $	*/
-=======
 /*	$OpenBSD: sys_socket.c,v 1.14 2009/02/22 07:47:22 otto Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sys_socket.c,v 1.13 1995/08/12 23:59:09 mycroft Exp $	*/
 
 /*
@@ -129,7 +125,7 @@ soo_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 	if (IOCGROUP(cmd) == 'r')
 		return (rtioctl(cmd, data, p));
 	return ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL, 
-	    (struct mbuf *)cmd, (struct mbuf *)data, (struct mbuf *)0));
+	    (struct mbuf *)cmd, (struct mbuf *)data, (struct mbuf *)0, p));
 }
 
 int
@@ -181,12 +177,8 @@ soo_stat(struct file *fp, struct stat *ub, struct proc *p)
 	ub->st_gid = so->so_egid;
 	(void) ((*so->so_proto->pr_usrreq)(so, PRU_SENSE,
 	    (struct mbuf *)ub, (struct mbuf *)0, 
-<<<<<<< HEAD
-	    (struct mbuf *)0));
-=======
 	    (struct mbuf *)0, p));
 	return (0);
->>>>>>> origin/master
 }
 
 /* ARGSUSED */

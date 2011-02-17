@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ne_isapnp.c,v 1.10 2006/10/20 16:54:01 brad Exp $	*/
-=======
 /*	$OpenBSD: if_ne_isapnp.c,v 1.12 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_ne_isapnp.c,v 1.7 1998/07/23 19:30:45 christos Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_synch.c,v 1.78 2007/03/21 09:09:52 art Exp $	*/
-=======
 /*	$OpenBSD: kern_synch.c,v 1.96 2011/01/25 18:42:45 stsp Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -71,10 +67,17 @@ void endtsleep(void *);
  */
 #define TABLESIZE	128
 #define LOOKUP(x)	(((long)(x) >> 8) & (TABLESIZE - 1))
-struct slpque {
-	struct proc *sq_head;
-	struct proc **sq_tailp;
-} slpque[TABLESIZE];
+TAILQ_HEAD(slpque,proc) slpque[TABLESIZE];
+
+void
+sleep_queue_init(void)
+{
+	int i;
+
+	for (i = 0; i < TABLESIZE; i++)
+		TAILQ_INIT(&slpque[i]);
+}
+
 
 /*
  * During autoconfiguration or after a panic, a sleep will simply
@@ -133,8 +136,6 @@ tsleep(const volatile void *ident, int priority, const char *wmesg, int timo)
 	return (error);
 }
 
-<<<<<<< HEAD
-=======
 /*
  * Same as tsleep, but if we have a mutex provided, then once we've 
  * entered the sleep queue we drop the mutex. After sleeping we re-lock.
@@ -178,21 +179,17 @@ msleep(const volatile void *ident, struct mutex *mtx, int priority,
 	return (error);
 }
 
->>>>>>> origin/master
 void
 sleep_setup(struct sleep_state *sls, const volatile void *ident, int prio,
     const char *wmesg)
 {
 	struct proc *p = curproc;
-	struct slpque *qp;
 
 #ifdef DIAGNOSTIC
 	if (ident == NULL)
 		panic("tsleep: no ident");
 	if (p->p_stat != SONPROC)
 		panic("tsleep: not SONPROC");
-	if (p->p_back != NULL)
-		panic("tsleep: p_back not NULL");
 #endif
 
 #ifdef KTRACE
@@ -210,12 +207,7 @@ sleep_setup(struct sleep_state *sls, const volatile void *ident, int prio,
 	p->p_wmesg = wmesg;
 	p->p_slptime = 0;
 	p->p_priority = prio & PRIMASK;
-	qp = &slpque[LOOKUP(ident)];
-	if (qp->sq_head == 0)
-		qp->sq_head = p;
-	else
-		*qp->sq_tailp = p;
-	*(qp->sq_tailp = &p->p_forw) = NULL;
+	TAILQ_INSERT_TAIL(&slpque[LOOKUP(ident)], p, p_runq);
 }
 
 void
@@ -230,17 +222,14 @@ sleep_finish(struct sleep_state *sls, int do_sleep)
 		mi_switch();
 	} else if (!do_sleep) {
 		unsleep(p);
-#ifdef DIAGNOSTIC
-		if (p->p_stat != SONPROC)
-			panic("sleep_finish !SONPROC");
-#endif
 	}
 
-#ifdef __HAVE_CPUINFO
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_usrpri;
-#else
-	curpriority = p->p_usrpri;
+#ifdef DIAGNOSTIC
+	if (p->p_stat != SONPROC)
+		panic("sleep_finish !SONPROC");
 #endif
+
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_usrpri;
 	SCHED_UNLOCK(sls->sls_s);
 
 	/*
@@ -351,17 +340,9 @@ endtsleep(void *arg)
 void
 unsleep(struct proc *p)
 {
-	struct slpque *qp;
-	struct proc **hp;
-
 	if (p->p_wchan) {
-		hp = &(qp = &slpque[LOOKUP(p->p_wchan)])->sq_head;
-		while (*hp != p)
-			hp = &(*hp)->p_forw;
-		*hp = p->p_forw;
-		if (qp->sq_tailp == &p->p_forw)
-			qp->sq_tailp = hp;
-		p->p_wchan = 0;
+		TAILQ_REMOVE(&slpque[LOOKUP(p->p_wchan)], p, p_runq);
+		p->p_wchan = NULL;
 	}
 }
 
@@ -372,25 +353,22 @@ void
 wakeup_n(const volatile void *ident, int n)
 {
 	struct slpque *qp;
-	struct proc *p, **q;
+	struct proc *p;
+	struct proc *pnext;
 	int s;
 
 	SCHED_LOCK(s);
 	qp = &slpque[LOOKUP(ident)];
-restart:
-	for (q = &qp->sq_head; (p = *q) != NULL; ) {
+	for (p = TAILQ_FIRST(qp); p != NULL && n != 0; p = pnext) {
+		pnext = TAILQ_NEXT(p, p_runq);
 #ifdef DIAGNOSTIC
-		if (p->p_back)
-			panic("wakeup: p_back not NULL");
 		if (p->p_stat != SSLEEP && p->p_stat != SSTOP)
 			panic("wakeup: p_stat is %d", (int)p->p_stat);
 #endif
 		if (p->p_wchan == ident) {
 			--n;
 			p->p_wchan = 0;
-			*q = p->p_forw;
-			if (qp->sq_tailp == &p->p_forw)
-				qp->sq_tailp = q;
+			TAILQ_REMOVE(qp, p, p_runq);
 			if (p->p_stat == SSLEEP) {
 				/* OPTIMIZED EXPANSION OF setrunnable(p); */
 				if (p->p_slptime > 1)
@@ -399,24 +377,11 @@ restart:
 				p->p_stat = SRUN;
 				p->p_cpu = sched_choosecpu(p);
 				setrunqueue(p);
-<<<<<<< HEAD
-#ifdef __HAVE_CPUINFO
-				KASSERT(p->p_cpu != NULL);
-=======
->>>>>>> origin/master
 				need_resched(p->p_cpu);
-#else
-				need_resched(NULL);
-#endif
 				/* END INLINE EXPANSION */
 
-				if (n != 0)
-					goto restart;
-				else
-					break;
 			}
-		} else
-			q = &p->p_forw;
+		}
 	}
 	SCHED_UNLOCK(s);
 }

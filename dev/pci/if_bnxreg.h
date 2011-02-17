@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_bnxreg.h,v 1.19 2007/03/03 11:17:48 reyk Exp $	*/
-=======
 /*	$OpenBSD: if_bnxreg.h,v 1.37 2010/09/20 07:40:38 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -242,11 +238,10 @@
 #define BNX_CHIP_ID_5706_A0			0x57060000
 #define BNX_CHIP_ID_5706_A1			0x57060010
 #define BNX_CHIP_ID_5706_A2			0x57060020
+#define BNX_CHIP_ID_5706_A3			0x57060030
 #define BNX_CHIP_ID_5708_A0			0x57080000
 #define BNX_CHIP_ID_5708_B0			0x57081000
 #define BNX_CHIP_ID_5708_B1			0x57081010
-<<<<<<< HEAD
-=======
 #define BNX_CHIP_ID_5708_B2			0x57081020
 #define BNX_CHIP_ID_5709_A0			0x57090000
 #define BNX_CHIP_ID_5709_A1			0x57090010
@@ -255,7 +250,6 @@
 #define BNX_CHIP_ID_5709_B2			0x57091020
 #define BNX_CHIP_ID_5709_C0			0x57092000
 #define BNX_CHIP_ID_5716_C0			0x57162000
->>>>>>> origin/master
 
 #define BNX_CHIP_BOND_ID(sc)		(((sc)->bnx_chipid) & 0xf)
 
@@ -684,7 +678,7 @@ struct flash_spec {
  * PCI registers defined in the PCI 2.2 spec.
  */
 #define BNX_PCI_BAR0			0x10
-#define BNX_PCI_PCIX_CMD		0x42
+#define BNX_PCI_PCIX_CMD		0x40
 
 /****************************************************************************/
 /* Convenience definitions.                                                 */
@@ -4777,15 +4771,8 @@ struct bnx_softc {
 	struct pci_attach_args	bnx_pa;
 	pci_intr_handle_t	bnx_ih;
 
-<<<<<<< HEAD
-	struct ifmedia		bnx_ifmedia;		/* TBI media info */
-
-	bus_space_tag_t		bnx_btag;			/* Device bus tag */
-	bus_space_handle_t	bnx_bhandle;		/* Device bus handle */
-=======
 	bus_space_tag_t		bnx_btag;	/* Device bus tag */
 	bus_space_handle_t	bnx_bhandle;	/* Device bus handle */
->>>>>>> origin/master
 	bus_size_t		bnx_size;
 
 	void			*bnx_intrhand;		/* Interrupt handler */
@@ -4816,17 +4803,11 @@ struct bnx_softc {
 #define BNX_PHY_INT_MODE_LINK_READY_FLAG	0x200
 #define BNX_PHY_IEEE_CLAUSE_45_FLAG		0x400
 
-<<<<<<< HEAD
-	int					bnx_if_flags;
-
-	u_int16_t					bus_speed_mhz;		/* PCI bus speed */
-=======
 	/* Values that need to be shared with the PHY driver. */
 	u_int32_t		bnx_shared_hw_cfg;
 	u_int32_t		bnx_port_hw_cfg;
 
 	u_int16_t		bus_speed_mhz;		/* PCI bus speed */
->>>>>>> origin/master
 	struct flash_spec	*bnx_flash_info;	/* Flash NVRAM settings */
 	u_int32_t		bnx_flash_size;		/* Flash NVRAM size */
 	u_int32_t		bnx_shmem_base;		/* ShMem base address */

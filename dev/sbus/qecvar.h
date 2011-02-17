@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qecvar.h,v 1.2 2002/03/14 01:27:02 millert Exp $	*/
-=======
 /*	$OpenBSD: qecvar.h,v 1.4 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qecvar.h,v 1.4 1999/01/17 20:47:50 pk Exp $	*/
 
 /*-

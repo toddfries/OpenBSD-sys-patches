@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_evcount.c,v 1.7 2005/12/09 09:09:52 jsg Exp $ */
-=======
 /*	$OpenBSD: subr_evcount.c,v 1.10 2010/09/20 06:33:46 matthew Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>

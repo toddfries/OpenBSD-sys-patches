@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dkstat.h,v 1.6 2002/07/03 21:19:08 miod Exp $	*/
-=======
 /*	$OpenBSD: dkstat.h,v 1.8 2010/11/18 21:12:48 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dkstat.h,v 1.8 1995/12/28 19:16:31 thorpej Exp $	*/
 
 /*-

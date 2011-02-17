@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: adw.h,v 1.8 2001/11/05 17:25:58 art Exp $ */
-=======
 /*	$OpenBSD: adw.h,v 1.10 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 /*      $NetBSD: adw.h,v 1.9 2000/05/26 15:13:43 dante Exp $        */
 
 /*

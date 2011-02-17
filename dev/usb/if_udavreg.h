@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_udavreg.h,v 1.3 2005/01/30 13:22:58 dlg Exp $ */
-=======
 /*	$OpenBSD: if_udavreg.h,v 1.11 2010/12/06 04:41:39 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
 /*
@@ -139,11 +135,7 @@
 #define	 UDAV_GPR_GEPIO1	(1<<1) /* General purpose 1 */
 #define	 UDAV_GPR_GEPIO0	(1<<0) /* General purpose 0 */
 
-#if defined(__NetBSD__)
-#define GET_IFP(sc)             (&(sc)->sc_ec.ec_if)
-#else
 #define GET_IFP(sc)             (&(sc)->sc_ac.ac_if)
-#endif
 #define	GET_MII(sc)		(&(sc)->sc_mii)
 
 struct udav_chain {
@@ -158,7 +150,7 @@ struct udav_cdata {
 	struct udav_chain	udav_tx_chain[UDAV_TX_LIST_CNT];
 	struct udav_chain	udav_rx_chain[UDAV_TX_LIST_CNT];
 #if 0
-	/* XXX: Intrrupt Endpoint is not yet supported! */
+	/* XXX: Interrupt Endpoint is not yet supported! */
 	struct udav_intrpkg	udav_ibuf;
 #endif
 	int			udav_tx_prod;
@@ -168,7 +160,7 @@ struct udav_cdata {
 };
 
 struct udav_softc {
-	USBBASEDEVICE		sc_dev;	/* base device */
+	struct device		sc_dev;	/* base device */
 	usbd_device_handle	sc_udev;
 
 	/* USB */
@@ -180,19 +172,15 @@ struct udav_softc {
 	usbd_pipe_handle	sc_pipe_rx;
 	usbd_pipe_handle	sc_pipe_tx;
 	usbd_pipe_handle	sc_pipe_intr;
-	usb_callout_t		sc_stat_ch;
+	struct timeout		sc_stat_ch;
 	u_int			sc_rx_errs;
 	/* u_int		sc_intr_errs; */
 	struct timeval		sc_rx_notice;
 
 	/* Ethernet */
-#if defined(__NetBSD__)
-        struct ethercom         sc_ec; /* ethernet common */
-#else
         struct arpcom           sc_ac; /* ethernet common */
-#endif
 	struct mii_data		sc_mii;
-	struct lock		sc_mii_lock;
+	struct rwlock		sc_mii_lock;
 	int			sc_link;
 #define	sc_media udav_mii.mii_media
 	struct udav_cdata	sc_cdata;
@@ -208,7 +196,7 @@ struct udav_softc {
 struct udav_rx_hdr {
 	uByte			pktstat;
 	uWord			length;
-} UPACKED;
+} __packed;
 #define UDAV_RX_HDRLEN		sizeof(struct udav_rx_hdr)
 
 /* Packet length */

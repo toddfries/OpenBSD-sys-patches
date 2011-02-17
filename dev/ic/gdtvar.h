@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gdtvar.h,v 1.11 2006/05/07 20:34:09 marco Exp $	*/
-=======
 /*	$OpenBSD: gdtvar.h,v 1.17 2009/08/12 17:51:33 jsg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -220,7 +216,7 @@ extern int gdt_debug;
 /* Miscellaneous constants */
 #define GDT_RETRIES		100000000	/* 100000 * 1us = 100s */
 #define GDT_TIMEOUT		100000000	/* 100000 * 1us = 100s */
-#define GDT_POLL_TIMEOUT	10000000	/* 10000 * 1us = 10s */
+#define GDT_POLL_TIMEOUT	10000		/* 10000 * 1ms = 10s */
 #define GDT_WATCH_TIMEOUT	10000		/* 10000 * 1ms = 10s */
 
 /* Context structure for interrupt services */
@@ -402,16 +398,7 @@ struct gdt_softc {
 	int (*sc_test_busy)(struct gdt_softc *);
 };
 
-<<<<<<< HEAD
-/* XXX These have to become spinlocks in case of SMP */
-#define GDT_LOCK_GDT(gdt) splbio()
-#define GDT_UNLOCK_GDT(gdt, lock) splx(lock)
-typedef int gdt_lock_t;
-
-void	gdtminphys(struct buf *);
-=======
 void	gdtminphys(struct buf *, struct scsi_link *);
->>>>>>> origin/master
 int	gdt_attach(struct gdt_softc *);
 int	gdt_intr(void *);
 

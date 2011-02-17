@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: seagate.c,v 1.19 2005/12/03 17:13:22 krw Exp $	*/
-=======
 /*	$OpenBSD: seagate.c,v 1.36 2010/06/28 18:31:02 krw Exp $	*/
->>>>>>> origin/master
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -275,24 +271,6 @@ static const char *bases[] = {
 #define	nbases		(sizeof(bases) / sizeof(bases[0]))
 #endif
 
-<<<<<<< HEAD
-int seaintr(void *);
-int sea_scsi_cmd(struct scsi_xfer *);
-void sea_timeout(void *);
-void sea_done(struct sea_softc *, struct sea_scb *);
-struct sea_scb *sea_get_scb(struct sea_softc *, int);
-void sea_free_scb(struct sea_softc *, struct sea_scb *, int);
-static void sea_main(void);
-static void sea_information_transfer(struct sea_softc *);
-int sea_poll(struct sea_softc *, struct scsi_xfer *, int);
-void sea_init(struct sea_softc *);
-void sea_send_scb(struct sea_softc *sea, struct sea_scb *scb);
-void sea_reselect(struct sea_softc *sea);
-int sea_select(struct sea_softc *sea, struct sea_scb *scb);
-int sea_transfer_pio(struct sea_softc *sea, u_char *phase,
-    int *count, u_char **data);
-int sea_abort(struct sea_softc *, struct sea_scb *scb);
-=======
 struct		sea_scb *sea_get_scb(struct sea_softc *, int);
 int		seaintr(void *);
 void		sea_scsi_cmd(struct scsi_xfer *);
@@ -309,7 +287,6 @@ void		sea_free_scb(struct sea_softc *, struct sea_scb *, int);
 void 		sea_init(struct sea_softc *);
 void 		sea_send_scb(struct sea_softc *sea, struct sea_scb *scb);
 void		sea_reselect(struct sea_softc *sea);
->>>>>>> origin/master
 
 struct scsi_adapter sea_switch = {
 	sea_scsi_cmd,
@@ -332,8 +309,7 @@ struct cfdriver sea_cd = {
 
 #ifdef SEA_DEBUGQUEUE
 void
-sea_queue_length(sea)
-	struct sea_softc *sea;
+sea_queue_length(struct sea_softc *sea)
 {
 	struct sea_scb *scb;
 	int connected, issued, disconnected;
@@ -357,9 +333,7 @@ sea_queue_length(sea)
  * Returns 1 if card recognized, 0 if errors.
  */
 int
-seaprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+seaprobe(struct device *parent, void *match, void *aux)
 {
 	struct sea_softc *sea = match;
 	struct isa_attach_args *ia = aux;
@@ -427,9 +401,7 @@ seaprobe(parent, match, aux)
 }
 
 int
-seaprint(aux, name)
-	void *aux;
-	const char *name;
+seaprint(void *aux, const char *name)
 {
 	if (name != NULL)
 		printf("%s: scsibus ", name);
@@ -440,9 +412,7 @@ seaprint(aux, name)
  * Attach all sub-devices we can find
  */
 void
-seaattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+seaattach(struct device *parent, struct device *self, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	struct sea_softc *sea = (void *)self;
@@ -476,8 +446,7 @@ seaattach(parent, self, aux)
  * Catch an interrupt from the adaptor
  */
 int
-seaintr(arg)
-	void *arg;
+seaintr(void *arg)
 {
 	struct sea_softc *sea = arg;
 
@@ -512,8 +481,7 @@ loop:
  * Setup data structures, and reset the board and the SCSI bus.
  */
 void
-sea_init(sea)
-	struct sea_softc *sea;
+sea_init(struct sea_softc *sea)
 {
 	int i;
 
@@ -554,14 +522,8 @@ sea_init(sea)
  * start a scsi operation given the command and the data address. Also needs
  * the unit, target and lu.
  */
-<<<<<<< HEAD
-int
-sea_scsi_cmd(xs)
-	struct scsi_xfer *xs;
-=======
 void
 sea_scsi_cmd(struct scsi_xfer *xs)
->>>>>>> origin/master
 {
 	struct scsi_link *sc_link = xs->sc_link;
 	struct sea_softc *sea = sc_link->adapter_softc;
@@ -632,9 +594,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
  * put it in the hash table too; otherwise return an error or sleep.
  */
 struct sea_scb *
-sea_get_scb(sea, flags)
-	struct sea_softc *sea;
-	int flags;
+sea_get_scb(struct sea_softc *sea, int flags)
 {
 	int s;
 	struct sea_scb *scb;
@@ -652,10 +612,8 @@ sea_get_scb(sea, flags)
 			break;
 		}
 		if (sea->numscbs < SEA_SCB_MAX) {
-			scb = (struct sea_scb *) malloc(sizeof(struct sea_scb),
-			    M_TEMP, M_NOWAIT);
+			scb = malloc(sizeof(*scb), M_TEMP, M_NOWAIT | M_ZERO);
 			if (scb) {
-				bzero(scb, sizeof(struct sea_scb));
 				sea->numscbs++;
 			} else
 				printf("%s: can't malloc scb\n",
@@ -680,9 +638,7 @@ sea_get_scb(sea, flags)
  * to the end of the queue. ?? Not correct ??
  */
 void
-sea_send_scb(sea, scb)
-	struct sea_softc *sea;
-	struct sea_scb *scb;
+sea_send_scb(struct sea_softc *sea, struct sea_scb *scb)
 {
 
 	TAILQ_INSERT_TAIL(&sea->ready_list, scb, chain);
@@ -697,7 +653,7 @@ sea_send_scb(sea, scb)
  * case it is not running.
  */
 void
-sea_main()
+sea_main(void)
 {
 	struct sea_softc *sea;
 	struct sea_scb *scb;
@@ -793,10 +749,7 @@ loop:
 }
 
 void
-sea_free_scb(sea, scb, flags)
-	struct sea_softc *sea;
-	struct sea_scb *scb;
-	int flags;
+sea_free_scb(struct sea_softc *sea, struct sea_scb *scb, int flags)
 {
 	int s;
 
@@ -816,8 +769,7 @@ sea_free_scb(sea, scb, flags)
 }
 
 void
-sea_timeout(arg)
-	void *arg;
+sea_timeout(void *arg)
 {
 	struct sea_scb *scb = arg;
 	struct scsi_xfer *xs = scb->xs;
@@ -855,8 +807,7 @@ sea_timeout(arg)
 }
 
 void
-sea_reselect(sea)
-	struct sea_softc *sea;
+sea_reselect(struct sea_softc *sea)
 {
 	u_char target_mask;
 	int i;
@@ -951,15 +902,11 @@ sea_reselect(sea)
  * Transfer data in given phase using polled I/O.
  */
 int
-sea_transfer_pio(sea, phase, count, data)
-	struct sea_softc *sea;
-	u_char *phase;
-	int *count;
-	u_char **data;
+sea_transfer_pio(struct sea_softc *sea, u_char *phase, int *count, u_char **data)
 {
-	register u_char p = *phase, tmp;
-	register int c = *count;
-	register u_char *d = *data;
+	u_char p = *phase, tmp;
+	int c = *count;
+	u_char *d = *data;
 	int timeout;
 
 	do {
@@ -1037,9 +984,7 @@ sea_transfer_pio(sea, phase, count, data)
  * selection succeded or failed because the target did not respond.
  */
 int
-sea_select(sea, scb)
-	struct sea_softc *sea;
-	struct sea_scb *scb;
+sea_select(struct sea_softc *sea, struct sea_scb *scb)
 {
 	u_char msg[3], phase;
 	u_char *data;
@@ -1133,9 +1078,7 @@ sea_select(sea, scb)
  * Send an abort to the target.  Return 1 success, 0 on failure.
  */
 int
-sea_abort(sea, scb)
-	struct sea_softc *sea;
-	struct sea_scb *scb;
+sea_abort(struct sea_softc *sea, struct sea_scb *scb)
 {
 	struct sea_scb *tmp;
 	u_char msg, phase, *msgptr;
@@ -1192,9 +1135,7 @@ sea_abort(sea, scb)
 }
 
 void
-sea_done(sea, scb)
-	struct sea_softc *sea;
-	struct sea_scb *scb;
+sea_done(struct sea_softc *sea, struct sea_scb *scb)
 {
 	struct scsi_xfer *xs = scb->xs;
 
@@ -1219,10 +1160,7 @@ sea_done(sea, scb)
  * Wait for completion of command in polled mode.
  */
 int
-sea_poll(sea, xs, count)
-	struct sea_softc *sea;
-	struct scsi_xfer *xs;
-	int count;
+sea_poll(struct sea_softc *sea, struct scsi_xfer *xs, int count)
 {
 	int s;
 
@@ -1245,8 +1183,7 @@ sea_poll(sea, xs, count)
  * sea_done() when task accomplished.  Dialog controlled by the target.
  */
 void
-sea_information_transfer(sea)
-	struct sea_softc *sea;
+sea_information_transfer(struct sea_softc *sea)
 {
 	int timeout;
 	u_char msgout = MSG_NOOP;

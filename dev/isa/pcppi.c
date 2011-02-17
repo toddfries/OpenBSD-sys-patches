@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pcppi.c,v 1.6 2006/01/02 05:21:40 brad Exp $ */
-=======
 /* $OpenBSD: pcppi.c,v 1.10 2010/08/20 02:34:15 deraadt Exp $ */
->>>>>>> origin/master
 /* $NetBSD: pcppi.c,v 1.1 1998/04/15 20:26:18 drochner Exp $ */
 
 /*

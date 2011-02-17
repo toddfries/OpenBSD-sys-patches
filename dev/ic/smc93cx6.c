@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: smc93cx6.c,v 1.17 2003/09/25 06:43:34 fgsch Exp $	*/
 /*	$NetBSD: smc93cx6.c,v 1.10 2003/05/02 19:12:19 dyoung Exp $	*/
 
 /*

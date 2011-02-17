@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stireg.h,v 1.10 2005/01/24 19:20:04 miod Exp $	*/
-=======
 /*	$OpenBSD: stireg.h,v 1.13 2009/01/28 17:37:40 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

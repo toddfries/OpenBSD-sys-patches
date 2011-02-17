@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isadmavar.h,v 1.14 2002/06/10 22:27:33 niklas Exp $	*/
-=======
 /*	$OpenBSD: isadmavar.h,v 1.16 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: isadmavar.h,v 1.10 1997/08/04 22:13:33 augustss Exp $	*/
 
 /*-

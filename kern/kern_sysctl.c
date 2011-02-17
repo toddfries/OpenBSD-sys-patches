@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_sysctl.c,v 1.149 2007/03/22 16:55:31 deraadt Exp $	*/
-=======
 /*	$OpenBSD: kern_sysctl.c,v 1.196 2010/12/14 20:26:44 mikeb Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -135,8 +131,8 @@ int rthreads_enabled = 0;
  * Lock to avoid too many processes vslocking a large amount of memory
  * at the same time.
  */
-struct rwlock sysctl_lock = RWLOCK_INITIALIZER;
-struct rwlock sysctl_disklock = RWLOCK_INITIALIZER;
+struct rwlock sysctl_lock = RWLOCK_INITIALIZER("sysctllk");
+struct rwlock sysctl_disklock = RWLOCK_INITIALIZER("sysctldlk");
 
 int
 sys___sysctl(struct proc *p, void *v, register_t *retval)
@@ -212,6 +208,10 @@ sys___sysctl(struct proc *p, void *v, register_t *retval)
 		if ((error = rw_enter(&sysctl_lock, RW_WRITE|RW_INTR)) != 0)
 			return (error);
 		if (dolock) {
+			if (atop(oldlen) > uvmexp.wiredmax - uvmexp.wired) {
+				rw_exit_write(&sysctl_lock);
+				return (ENOMEM);
+			}
 			error = uvm_vslock(p, SCARG(uap, old), oldlen,
 			    VM_PROT_READ|VM_PROT_WRITE);
 			if (error) {
@@ -311,7 +311,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_VERSION:
 		return (sysctl_rdstring(oldp, oldlenp, newp, version));
 	case KERN_MAXVNODES:
-		return(sysctl_int(oldp, oldlenp, newp, newlen, &desiredvnodes));
+		return(sysctl_int(oldp, oldlenp, newp, newlen, &maxvnodes));
 	case KERN_MAXPROC:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxproc));
 	case KERN_MAXFILES:
@@ -457,7 +457,6 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_malloc(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen, p));
 	case KERN_CPTIME:
-#ifdef __HAVE_CPUINFO
 	{
 		CPU_INFO_ITERATOR cii;
 		struct cpu_info *ci;
@@ -469,17 +468,13 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			for (i = 0; i < CPUSTATES; i++)
 				cp_time[i] += ci->ci_schedstate.spc_cp_time[i];
 		}
-<<<<<<< HEAD
-	}
-#endif
-=======
 
 		for (i = 0; i < CPUSTATES; i++)
 			cp_time[i] /= ncpus;
 
->>>>>>> origin/master
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &cp_time,
 		    sizeof(cp_time)));
+	}
 	case KERN_NCHSTATS:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &nchstats,
 		    sizeof(struct nchstats)));
@@ -570,13 +565,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #endif
 	case KERN_MAXLOCKSPERUID:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
-#ifdef __HAVE_CPUINFO
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
-<<<<<<< HEAD
-#endif
-=======
 	case KERN_RTHREADS:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &rthreads_enabled));
@@ -606,7 +597,6 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
 	case KERN_NETLIVELOCKS:
 		return (sysctl_rdint(oldp, oldlenp, newp, mcllivelocks));
->>>>>>> origin/master
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -641,10 +631,10 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case HW_BYTEORDER:
 		return (sysctl_rdint(oldp, oldlenp, newp, BYTE_ORDER));
 	case HW_PHYSMEM:
-		return (sysctl_rdint(oldp, oldlenp, newp, ctob(physmem)));
+		return (sysctl_rdint(oldp, oldlenp, newp, ptoa(physmem)));
 	case HW_USERMEM:
 		return (sysctl_rdint(oldp, oldlenp, newp,
-		    ctob(physmem - uvmexp.wired)));
+		    ptoa(physmem - uvmexp.wired)));
 	case HW_PAGESIZE:
 		return (sysctl_rdint(oldp, oldlenp, newp, PAGE_SIZE));
 	case HW_DISKNAMES:
@@ -716,6 +706,12 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return (sysctl_rdstring(oldp, oldlenp, newp, hw_uuid));
 		else
 			return (EOPNOTSUPP);
+	case HW_PHYSMEM64:
+		return (sysctl_rdquad(oldp, oldlenp, newp,
+		    ptoa((psize_t)physmem)));
+	case HW_USERMEM64:
+		return (sysctl_rdquad(oldp, oldlenp, newp,
+		    ptoa((psize_t)physmem - uvmexp.wired)));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1579,90 +1575,10 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 		ki->p_tpgid = -1;
 	}
 
-<<<<<<< HEAD
-	ki->p_estcpu = p->p_estcpu;
-	ki->p_rtime_sec = p->p_rtime.tv_sec;
-	ki->p_rtime_usec = p->p_rtime.tv_usec;
-	ki->p_cpticks = p->p_cpticks;
-	ki->p_pctcpu = p->p_pctcpu;
-
-	ki->p_uticks = p->p_uticks;
-	ki->p_sticks = p->p_sticks;
-	ki->p_iticks = p->p_iticks;
-
-	ki->p_tracep = PTRTOINT64(p->p_tracep);
-	ki->p_traceflag = p->p_traceflag;
-
-	ki->p_siglist = p->p_siglist;
-	ki->p_sigmask = p->p_sigmask;
-	ki->p_sigignore = p->p_sigignore;
-	ki->p_sigcatch = p->p_sigcatch;
-
-	ki->p_stat = p->p_stat;
-	ki->p_nice = p->p_nice;
-
-	ki->p_xstat = p->p_xstat;
-	ki->p_acflag = p->p_acflag;
-
-	strlcpy(ki->p_emul, p->p_emul->e_name, sizeof(ki->p_emul));
-	strlcpy(ki->p_comm, p->p_comm, sizeof(ki->p_comm));
-	strncpy(ki->p_login, p->p_session->s_login,
-	    min(sizeof(ki->p_login) - 1, sizeof(p->p_session->s_login)));
-
-	if (p->p_stat == SIDL || P_ZOMBIE(p)) {
-		ki->p_vm_rssize = 0;
-		ki->p_vm_tsize = 0;
-		ki->p_vm_dsize = 0;
-		ki->p_vm_ssize = 0;
-	} else {
-		struct vmspace *vm = p->p_vmspace;
-
-		ki->p_vm_rssize = vm_resident_count(vm);
-		ki->p_vm_tsize = vm->vm_tsize;
-		ki->p_vm_dsize = vm->vm_dused;
-		ki->p_vm_ssize = vm->vm_ssize;
-
-		ki->p_forw = PTRTOINT64(p->p_forw);
-		ki->p_back = PTRTOINT64(p->p_back);
-		ki->p_addr = PTRTOINT64(p->p_addr);
-		ki->p_stat = p->p_stat;
-		ki->p_swtime = p->p_swtime;
-		ki->p_slptime = p->p_slptime;
-#ifdef __HAVE_CPUINFO
-		ki->p_schedflags = 0;
-#else
-		ki->p_schedflags = p->p_schedflags;
-#endif
-		ki->p_holdcnt = 1;
-		ki->p_priority = p->p_priority;
-		ki->p_usrpri = p->p_usrpri;
-		if (p->p_wmesg)
-			strlcpy(ki->p_wmesg, p->p_wmesg, sizeof(ki->p_wmesg));
-		ki->p_wchan = PTRTOINT64(p->p_wchan);
-
-	}
-
-	if (p->p_session->s_ttyvp)
-		ki->p_eflag |= EPROC_CTTY;
-	if (SESS_LEADER(p))
-		ki->p_eflag |= EPROC_SLEADER;
-	if (p->p_rlimit)
-		ki->p_rlim_rss_cur = p->p_rlimit[RLIMIT_RSS].rlim_cur;
-
-	/* XXX Is this double check necessary? */
-	if (P_ZOMBIE(p)) {
-		ki->p_uvalid = 0;
-	} else {
-		ki->p_uvalid = 1;
-
-		ki->p_ustart_sec = p->p_stats->p_start.tv_sec;
-		ki->p_ustart_usec = p->p_stats->p_start.tv_usec;
-=======
 	/* fixups that can only be done in the kernel */
 	if (!P_ZOMBIE(p)) {
 		if (p->p_stat != SIDL)
 			ki->p_vm_rssize = vm_resident_count(p->p_vmspace);
->>>>>>> origin/master
 
 		calcru(p, &ut, &st, NULL);
 		ki->p_uutime_sec = ut.tv_sec;
@@ -1937,6 +1853,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk = diskstats + i;
 			strlcpy(sdk->ds_name, dk->dk_name,
 			    sizeof(sdk->ds_name));
+			mtx_enter(&dk->dk_mtx);
 			sdk->ds_busy = dk->dk_busy;
 			sdk->ds_rxfer = dk->dk_rxfer;
 			sdk->ds_wxfer = dk->dk_wxfer;
@@ -1946,6 +1863,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk->ds_attachtime = dk->dk_attachtime;
 			sdk->ds_timestamp = dk->dk_timestamp;
 			sdk->ds_time = dk->dk_time;
+			mtx_leave(&dk->dk_mtx);
 		}
 
 		/* Eliminate trailing comma */
@@ -1959,6 +1877,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk = diskstats + i;
 			strlcpy(sdk->ds_name, dk->dk_name,
 			    sizeof(sdk->ds_name));
+			mtx_enter(&dk->dk_mtx);
 			sdk->ds_busy = dk->dk_busy;
 			sdk->ds_rxfer = dk->dk_rxfer;
 			sdk->ds_wxfer = dk->dk_wxfer;
@@ -1968,6 +1887,7 @@ sysctl_diskinit(int update, struct proc *p)
 			sdk->ds_attachtime = dk->dk_attachtime;
 			sdk->ds_timestamp = dk->dk_timestamp;
 			sdk->ds_time = dk->dk_time;
+			mtx_leave(&dk->dk_mtx);
 		}
 	}
 	rw_exit_write(&sysctl_disklock);
@@ -2034,8 +1954,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 		*sizep = 0;
 		return (ENOMEM);
 	}
-	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK);
-	bzero(buf, min(tsize, buflen));
+	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK|M_ZERO);
 
 	switch (*name) {
 #ifdef SYSVSEM
@@ -2122,8 +2041,7 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (ret);
 
 		/* Grab a copy, to clear the kernel pointers */
-		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK);
-		bzero(usd, sizeof(*usd));
+		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK|M_ZERO);
 		usd->num = ksd->num;
 		strlcpy(usd->xname, ksd->xname, sizeof(usd->xname));
 		memcpy(usd->maxnumt, ksd->maxnumt, sizeof(usd->maxnumt));
@@ -2144,9 +2062,8 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ret);
 
 	/* Grab a copy, to clear the kernel pointers */
-	us = malloc(sizeof(*us), M_TEMP, M_WAITOK);
-	bzero(us, sizeof(*us));
-	memcpy(us->desc, ks->desc, sizeof(ks->desc));
+	us = malloc(sizeof(*us), M_TEMP, M_WAITOK|M_ZERO);
+	memcpy(us->desc, ks->desc, sizeof(us->desc));
 	us->tv = ks->tv;
 	us->value = ks->value;
 	us->type = ks->type;
@@ -2197,7 +2114,6 @@ sysctl_emul(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 #endif	/* SMALL_KERNEL */
 
-#ifdef __HAVE_CPUINFO
 int
 sysctl_cptime2(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     void *newp, size_t newlen)
@@ -2222,4 +2138,3 @@ sysctl_cptime2(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	    &ci->ci_schedstate.spc_cp_time,
 	    sizeof(ci->ci_schedstate.spc_cp_time)));
 }
-#endif

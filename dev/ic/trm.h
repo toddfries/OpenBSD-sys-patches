@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$
-=======
 /*	$OpenBSD: trm.h,v 1.2 2010/10/11 14:56:44 krw Exp $
->>>>>>> origin/master
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.h

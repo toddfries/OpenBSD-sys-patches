@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pckbcvar.h,v 1.4 2004/11/02 21:21:00 miod Exp $ */
-=======
 /* $OpenBSD: pckbcvar.h,v 1.10 2010/11/23 04:07:55 shadchin Exp $ */
->>>>>>> origin/master
 /* $NetBSD: pckbcvar.h,v 1.4 2000/06/09 04:58:35 soda Exp $ */
 
 /*

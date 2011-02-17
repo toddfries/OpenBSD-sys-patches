@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpiac.c,v 1.16 2007/01/03 05:52:28 marco Exp $ */
-=======
 /* $OpenBSD: acpiac.c,v 1.28 2010/08/07 16:55:38 canacar Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -70,14 +66,8 @@ acpiac_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_attach_args *aa = aux;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
-	sc->sc_devnode = aa->aaa_node->child;
+	sc->sc_devnode = aa->aaa_node;
 
-<<<<<<< HEAD
-	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev,
-	    acpiac_notify, sc, ACPIDEV_NOPOLL);
-
-=======
->>>>>>> origin/master
 	acpiac_getsta(sc);
 	printf(": AC unit ");
 	if (sc->sc_ac_stat == PSR_ONLINE)
@@ -135,9 +125,11 @@ acpiac_notify(struct aml_node *node, int notify_type, void *arg)
 	struct acpiac_softc *sc = arg;
 
 	dnprintf(10, "acpiac_notify: %.2x %s\n", notify_type,
-	    sc->sc_devnode->parent->name);
+	    sc->sc_devnode->name);
 
 	switch (notify_type) {
+	case 0x00:
+	case 0x01:
 	case 0x81:
 		/*
 		 * XXX some sony vaio's use the wrong notify type

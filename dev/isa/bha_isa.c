@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bha_isa.c,v 1.2 2002/03/14 01:26:56 millert Exp $	*/
-=======
 /*	$OpenBSD: bha_isa.c,v 1.4 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bha_isa.c,v 1.14 1998/08/15 10:10:51 mycroft Exp $	*/
 
 /*-

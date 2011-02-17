@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_dc_cardbus.c,v 1.22 2006/04/23 19:33:28 brad Exp $	*/
-=======
 /*	$OpenBSD: if_dc_cardbus.c,v 1.34 2010/08/31 17:01:15 deraadt Exp $	*/
 
 /*
@@ -36,7 +33,6 @@
  *
  * $FreeBSD: src/sys/pci/if_dc.c,v 1.5 2000/01/12 22:24:05 wpaul Exp $
  */
->>>>>>> origin/master
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -153,7 +149,7 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	    &sc->dc_btag, &sc->dc_bhandle, &addr, &csc->sc_mapsize) == 0) {
 		csc->sc_actype = CARDBUS_MEM_ENABLE;
 	} else {
-		printf(": can\'t map device registers\n");
+		printf(": can't map device registers\n");
 		return;
 	}
 
@@ -235,8 +231,8 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't establish interrupt at %d\n",
 		    ca->ca_intrline);
 		return;
-	} else
-		printf(" irq %d", ca->ca_intrline);
+	}
+	printf(": irq %d", ca->ca_intrline);
 
 	dc_reset(sc);
 
@@ -245,13 +241,7 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-<<<<<<< HEAD
-dc_cardbus_detach(self, flags)
-	struct device *self;
-	int flags;
-=======
 dc_cardbus_detach(struct device *self, int flags)
->>>>>>> origin/master
 {
 	struct dc_cardbus_softc *csc = (struct dc_cardbus_softc *)self;
 	struct dc_softc *sc = &csc->sc_dc;

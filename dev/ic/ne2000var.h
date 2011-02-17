@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ne2000var.h,v 1.7 2002/03/14 01:26:55 millert Exp $	*/
-=======
 /*	$OpenBSD: ne2000var.h,v 1.9 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ne2000var.h,v 1.2 1997/10/14 22:54:12 thorpej Exp $	*/
 
 /*-

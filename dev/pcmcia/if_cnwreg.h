@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: if_cnwreg.h,v 1.3 2008/06/26 05:42:17 ray Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

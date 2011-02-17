@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: signalvar.h,v 1.15 2005/06/17 22:33:34 niklas Exp $	*/
-=======
 /*	$OpenBSD: signalvar.h,v 1.19 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: signalvar.h,v 1.17 1996/04/22 01:23:31 christos Exp $	*/
 
 /*

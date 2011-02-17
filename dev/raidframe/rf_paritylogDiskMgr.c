@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_paritylogDiskMgr.c,v 1.5 2000/08/08 16:07:43 peter Exp $	*/
+/*	$OpenBSD: rf_paritylogDiskMgr.c,v 1.6 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_paritylogDiskMgr.c,v 1.10 2000/01/15 01:57:57 oster Exp $	*/
 
 /*

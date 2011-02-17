@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atavar.h,v 1.17 2003/10/21 09:57:04 jmc Exp $	*/
-=======
 /*	$OpenBSD: atavar.h,v 1.19 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: atavar.h,v 1.13 1999/03/10 13:11:43 bouyer Exp $	*/
 
 /*

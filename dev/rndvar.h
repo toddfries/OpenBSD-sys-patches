@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rndvar.h,v 1.18 2003/06/02 19:24:22 mickey Exp $	*/
-=======
 /*	$OpenBSD: rndvar.h,v 1.29 2011/01/08 19:45:08 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996,2000 Michael Shalayeff.
@@ -84,6 +80,7 @@ void random_start(void);
 void enqueue_randomness(int, int);
 void arc4random_buf(void *, size_t);
 u_int32_t arc4random(void);
+u_int32_t arc4random_uniform(u_int32_t);
 
 #endif /* _KERNEL */
 

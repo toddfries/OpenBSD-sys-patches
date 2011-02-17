@@ -1,4 +1,4 @@
-/*	$OpenBSD: uperf_sbusreg.h,v 1.2 2002/04/08 17:49:42 jason Exp $	*/
+/*	$OpenBSD: uperf_sbusreg.h,v 1.3 2003/06/02 18:32:41 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_layout.h,v 1.4 2000/08/08 16:07:42 peter Exp $	*/
+/*	$OpenBSD: rf_layout.h,v 1.5 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_layout.h,v 1.4 2000/05/23 00:44:38 thorpej Exp $	*/
 
 /*

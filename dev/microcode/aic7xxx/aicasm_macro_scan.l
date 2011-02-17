@@ -1,6 +1,6 @@
 %{
 /*
-/*	$OpenBSD: aicasm_macro_scan.l,v 1.3 2004/06/12 03:37:20 krw Exp $	*/
+/*	$OpenBSD: aicasm_macro_scan.l,v 1.4 2004/09/18 19:51:53 mickey Exp $	*/
 /*
  * Sub-Lexical Analyzer for macro invokation in 
  * the Aic7xxx SCSI Host adapter sequencer assembler.

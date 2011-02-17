@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tty_conf.c,v 1.10 2006/06/01 20:10:28 mbalmer Exp $	*/
-=======
 /*	$OpenBSD: tty_conf.c,v 1.16 2010/06/29 19:09:12 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tty_conf.c,v 1.18 1996/05/19 17:17:55 jonathan Exp $	*/
 
 /*-
@@ -85,8 +81,6 @@ int	nmeaclose(struct tty *, int, struct proc *);
 int	nmeainput(int, struct tty *);
 #endif
 
-<<<<<<< HEAD
-=======
 #include "msts.h"
 #if NMSTS > 0
 int	mstsopen(dev_t, struct tty *, struct proc *);
@@ -101,7 +95,6 @@ int	endrunclose(struct tty *, int, struct proc *);
 int	endruninput(int, struct tty *);
 #endif
 
->>>>>>> origin/master
 struct	linesw linesw[] =
 {
 	{ ttyopen, ttylclose, ttread, ttwrite, nullioctl,
@@ -144,8 +137,6 @@ struct	linesw linesw[] =
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },
 #endif
-<<<<<<< HEAD
-=======
 
 #if NMSTS > 0
 	{ mstsopen, mstsclose, ttread, ttwrite, nullioctl,
@@ -162,7 +153,6 @@ struct	linesw linesw[] =
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },
 #endif
->>>>>>> origin/master
 };
 
 int	nlinesw = sizeof (linesw) / sizeof (linesw[0]);

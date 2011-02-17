@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tc.c,v 1.15 2004/06/28 02:28:43 aaron Exp $	*/
-=======
 /*	$OpenBSD: tc.c,v 1.20 2010/11/11 17:54:54 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tc.c,v 1.29 2001/11/13 06:26:10 lukem Exp $	*/
 
 /*
@@ -292,7 +288,7 @@ tc_intr_disestablish(dev, cookie, name)
 
 #ifdef TCVERBOSE
 /*
- * Descriptions of of known devices.
+ * Descriptions of known devices.
  */
 struct tc_knowndev {
 	const char *id, *description;

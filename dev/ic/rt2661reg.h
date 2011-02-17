@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rt2661reg.h,v 1.8 2006/06/18 18:44:04 damien Exp $	*/
-=======
 /*	$OpenBSD: rt2661reg.h,v 1.11 2010/02/14 09:20:34 damien Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006

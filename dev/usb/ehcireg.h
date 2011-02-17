@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ehcireg.h,v 1.12 2004/12/29 01:52:27 dlg Exp $ */
-=======
 /*	$OpenBSD: ehcireg.h,v 1.16 2008/11/29 08:52:03 mglocker Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ehcireg.h,v 1.17 2004/06/23 06:45:56 mycroft Exp $	*/
 
 /*

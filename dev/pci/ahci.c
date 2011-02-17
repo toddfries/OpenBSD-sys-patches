@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ahci.c,v 1.111 2007/04/08 09:05:48 pascoe Exp $ */
-=======
 /*	$OpenBSD: ahci.c,v 1.172 2011/01/28 06:32:31 dlg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -30,6 +26,7 @@
 #include <sys/device.h>
 #include <sys/timeout.h>
 #include <sys/queue.h>
+#include <sys/mutex.h>
 
 #include <machine/bus.h>
 
@@ -40,7 +37,8 @@
 #include <dev/ata/atascsi.h>
 #include <dev/ata/pmreg.h>
 
-#define AHCI_DEBUG
+/* change to AHCI_DEBUG for dmesg spam */
+#define NO_AHCI_DEBUG
 
 #ifdef AHCI_DEBUG
 #define DPRINTF(m, f...) do { if ((ahcidebug & (m)) == (m)) printf(f); } \
@@ -55,11 +53,8 @@ int ahcidebug = AHCI_D_VERBOSE;
 #endif
 
 #define AHCI_PCI_BAR		0x24
-<<<<<<< HEAD
-=======
 #define AHCI_PCI_ATI_SB600_MAGIC	0x40
 #define AHCI_PCI_ATI_SB600_LOCKED	0x01
->>>>>>> origin/master
 #define AHCI_PCI_INTERFACE	0x01
 
 #define AHCI_REG_CAP		0x000 /* HBA Capabilities */
@@ -103,11 +98,8 @@ int ahcidebug = AHCI_D_VERBOSE;
 #define  AHCI_REG_VS_0_95		0x00000905 /* 0.95 */
 #define  AHCI_REG_VS_1_0		0x00010000 /* 1.0 */
 #define  AHCI_REG_VS_1_1		0x00010100 /* 1.1 */
-<<<<<<< HEAD
-=======
 #define  AHCI_REG_VS_1_2		0x00010200 /* 1.2 */
 #define  AHCI_REG_VS_1_3		0x00010300 /* 1.3 */
->>>>>>> origin/master
 #define AHCI_REG_CCC_CTL	0x014 /* Coalescing Control */
 #define  AHCI_REG_CCC_CTL_INT(_r)	(((_r) & 0xf8) >> 3) /* CCC INT slot */
 #define AHCI_REG_CCC_PORTS	0x018 /* Coalescing Ports */
@@ -379,6 +371,7 @@ struct ahci_port {
 
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_free;
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_pending;
+	struct mutex		ap_ccb_mtx;
 
 	u_int32_t		ap_state;
 #define AP_S_NORMAL			0
@@ -412,6 +405,7 @@ struct ahci_softc {
 	struct device		sc_dev;
 
 	void			*sc_ih;
+	pci_chipset_tag_t	sc_pc;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -420,13 +414,11 @@ struct ahci_softc {
 
 	int			sc_flags;
 #define AHCI_F_NO_NCQ			(1<<0)
-<<<<<<< HEAD
-=======
 #define AHCI_F_IGN_FR			(1<<1)
 #define AHCI_F_IPMS_PROBE		(1<<2)	/* IPMS on failed PMP probe */
->>>>>>> origin/master
 
 	u_int			sc_ncmds;
+
 	struct ahci_port	*sc_ports[AHCI_MAX_PORTS];
 
 	struct atascsi		*sc_atascsi;
@@ -439,7 +431,7 @@ struct ahci_softc {
 	u_int32_t		sc_ccc_ports_cur;
 #endif
 };
-#define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
+#define DEVNAME(_s)		((_s)->sc_dev.dv_xname)
 
 struct ahci_device {
 	pci_vendor_id_t		ad_vendor;
@@ -452,34 +444,8 @@ struct ahci_device {
 const struct ahci_device *ahci_lookup_device(struct pci_attach_args *);
 
 int			ahci_no_match(struct pci_attach_args *);
-int			ahci_jmicron_match(struct pci_attach_args *);
-int			ahci_jmicron_attach(struct ahci_softc *,
-			    struct pci_attach_args *);
-<<<<<<< HEAD
 int			ahci_vt8251_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
-
-static const struct ahci_device ahci_devices[] = {
-	{ PCI_VENDOR_JMICRON,	PCI_PRODUCT_JMICRON_JMB360,
-	    ahci_jmicron_match, ahci_jmicron_attach },
-	{ PCI_VENDOR_JMICRON,	PCI_PRODUCT_JMICRON_JMB361,
-	    ahci_jmicron_match, ahci_jmicron_attach },
-	{ PCI_VENDOR_JMICRON,	PCI_PRODUCT_JMICRON_JMB363,
-	    ahci_jmicron_match, ahci_jmicron_attach },
-	{ PCI_VENDOR_JMICRON,	PCI_PRODUCT_JMICRON_JMB365,
-	    ahci_jmicron_match, ahci_jmicron_attach },
-	{ PCI_VENDOR_JMICRON,	PCI_PRODUCT_JMICRON_JMB366,
-	    ahci_jmicron_match, ahci_jmicron_attach },
-	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
-	    ahci_no_match,	ahci_vt8251_attach }
-};
-
-int			ahci_match(struct device *, void *, void *);
-void			ahci_attach(struct device *, struct device *, void *);
-
-struct cfattach ahci_ca = {
-	sizeof(struct ahci_softc), ahci_match, ahci_attach
-=======
 void			ahci_ati_sb_idetoahci(struct ahci_softc *,
 			    struct pci_attach_args *pa);
 int			ahci_ati_sb600_attach(struct ahci_softc *,
@@ -554,27 +520,20 @@ struct cfattach ahci_jmb_ca = {
 	ahci_pci_match,
 	ahci_pci_attach,
 	ahci_pci_detach
->>>>>>> origin/master
 };
 
 struct cfdriver ahci_cd = {
 	NULL, "ahci", DV_DULL
 };
 
+
 int			ahci_map_regs(struct ahci_softc *,
 			    struct pci_attach_args *);
-void			ahci_unmap_regs(struct ahci_softc *,
-			    struct pci_attach_args *);
+void			ahci_unmap_regs(struct ahci_softc *);
 int			ahci_map_intr(struct ahci_softc *,
-<<<<<<< HEAD
-			    struct pci_attach_args *);
-void			ahci_unmap_intr(struct ahci_softc *,
-			    struct pci_attach_args *);
-=======
 			    struct pci_attach_args *, pci_intr_handle_t);
 void			ahci_unmap_intr(struct ahci_softc *);
 void			ahci_enable_interrupts(struct ahci_port *);
->>>>>>> origin/master
 
 int			ahci_init(struct ahci_softc *);
 int			ahci_port_alloc(struct ahci_softc *, u_int);
@@ -620,19 +579,12 @@ void			ahci_dmamem_free(struct ahci_softc *,
 
 u_int32_t		ahci_read(struct ahci_softc *, bus_size_t);
 void			ahci_write(struct ahci_softc *, bus_size_t, u_int32_t);
-int			ahci_wait_eq(struct ahci_softc *, bus_size_t,
-			    u_int32_t, u_int32_t);
 int			ahci_wait_ne(struct ahci_softc *, bus_size_t,
 			    u_int32_t, u_int32_t);
 
 u_int32_t		ahci_pread(struct ahci_port *, bus_size_t);
 void			ahci_pwrite(struct ahci_port *, bus_size_t, u_int32_t);
 int			ahci_pwait_eq(struct ahci_port *, bus_size_t,
-<<<<<<< HEAD
-			    u_int32_t, u_int32_t);
-int			ahci_pwait_ne(struct ahci_port *, bus_size_t,
-			    u_int32_t, u_int32_t);
-=======
 			    u_int32_t, u_int32_t, int);
 void			ahci_flush_tfd(struct ahci_port *ap);
 u_int32_t		ahci_active_mask(struct ahci_port *);
@@ -646,7 +598,6 @@ int			ahci_pmp_phy_status(struct ahci_port *, int,
 			    u_int32_t *);
 int 			ahci_pmp_identify(struct ahci_port *, int *);
 
->>>>>>> origin/master
 
 /* Wait for all bits in _b to be cleared */
 #define ahci_pwait_clr(_ap, _r, _b, _n) \
@@ -659,18 +610,15 @@ int 			ahci_pmp_identify(struct ahci_port *, int *);
 
 
 /* provide methods for atascsi to call */
-<<<<<<< HEAD
-int			ahci_ata_probe(void *, int);
-=======
 int			ahci_ata_probe(void *, int, int);
 void			ahci_ata_free(void *, int, int);
->>>>>>> origin/master
 struct ata_xfer *	ahci_ata_get_xfer(void *, int);
 void			ahci_ata_put_xfer(struct ata_xfer *);
 void			ahci_ata_cmd(struct ata_xfer *);
 
 struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
+	ahci_ata_free,
 	ahci_ata_get_xfer,
 	ahci_ata_cmd
 };
@@ -704,26 +652,13 @@ ahci_no_match(struct pci_attach_args *pa)
 }
 
 int
-ahci_jmicron_match(struct pci_attach_args *pa)
+ahci_vt8251_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
-	if (pa->pa_function != 0)
-		return (0);
+	sc->sc_flags |= AHCI_F_NO_NCQ;
 
-	return (1);
+	return (0);
 }
 
-<<<<<<< HEAD
-int
-ahci_jmicron_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
-{
-	u_int32_t			ccr;
-
-	/* Switch JMICRON ports to AHCI mode */
-	ccr = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x40);
-	ccr &= ~0x0000ff00;
-	ccr |=  0x0000a100;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x40, ccr);
-=======
 void
 ahci_ati_sb_idetoahci(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
@@ -753,17 +688,11 @@ ahci_ati_sb600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 	ahci_ati_sb_idetoahci(sc, pa);
 
 	sc->sc_flags |= AHCI_F_IGN_FR | AHCI_F_IPMS_PROBE;
->>>>>>> origin/master
 
 	return (0);
 }
 
 int
-<<<<<<< HEAD
-ahci_vt8251_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
-{
-	sc->sc_flags |= AHCI_F_NO_NCQ;
-=======
 ahci_ati_sb700_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_IPMS_PROBE;
@@ -774,15 +703,11 @@ int
 ahci_amd_hudson2_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	ahci_ati_sb_idetoahci(sc, pa);
->>>>>>> origin/master
 
 	return (0);
 }
 
 int
-<<<<<<< HEAD
-ahci_match(struct device *parent, void *match, void *aux)
-=======
 ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_IGN_FR;
@@ -792,7 +717,6 @@ ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 
 int
 ahci_pci_match(struct device *parent, void *match, void *aux)
->>>>>>> origin/master
 {
 	struct pci_attach_args		*pa = aux;
 	const struct ahci_device	*ad;
@@ -815,19 +739,17 @@ ahci_pci_match(struct device *parent, void *match, void *aux)
 }
 
 void
-ahci_attach(struct device *parent, struct device *self, void *aux)
+ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ahci_softc		*sc = (struct ahci_softc *)self;
 	struct pci_attach_args		*pa = aux;
-	const struct ahci_device	*ad;
-<<<<<<< HEAD
 	struct atascsi_attach_args	aaa;
-	u_int32_t			cap, pi;
-=======
+	const struct ahci_device	*ad;
 	pci_intr_handle_t		ih;
 	u_int32_t			pi;
->>>>>>> origin/master
 	int				i;
+
+	sc->sc_pc = pa->pa_pc;
 
 	ad = ahci_lookup_device(pa);
 	if (ad != NULL && ad->ad_attach != NULL) {
@@ -836,6 +758,12 @@ ahci_attach(struct device *parent, struct device *self, void *aux)
 			return;
 		}
 	}
+
+	if (pci_intr_map(pa, &ih) != 0) {
+		printf(": unable to map interrupt\n");
+		return;
+	}
+	printf(": %s,", pci_intr_string(pa->pa_pc, ih));
 
 	if (ahci_map_regs(sc, pa) != 0) {
 		/* error already printed by ahci_map_regs */
@@ -847,7 +775,7 @@ ahci_attach(struct device *parent, struct device *self, void *aux)
 		goto unmap;
 	}
 
-	if (ahci_map_intr(sc, pa) != 0) {
+	if (ahci_map_intr(sc, pa, ih) != 0) {
 		/* error already printed by ahci_map_intr */
 		goto unmap;
 	}
@@ -874,15 +802,9 @@ ahci_attach(struct device *parent, struct device *self, void *aux)
 			break;
 		}
 
-<<<<<<< HEAD
-		printf("%s: capabilities: 0x%b ports: %d ncmds: %d gen: %s\n",
-		    DEVNAME(sc), cap, AHCI_FMT_CAP,
-		    AHCI_REG_CAP_NP(cap), sc->sc_ncmds, gen);
-=======
 		printf("%s: capabilities 0x%b, %d ports, %d cmds, gen %s\n",
 		    DEVNAME(sc), sc->sc_cap, AHCI_FMT_CAP,
 		    AHCI_REG_CAP_NP(sc->sc_cap), sc->sc_ncmds, gen);
->>>>>>> origin/master
 	}
 #endif
 
@@ -956,7 +878,7 @@ noccc:
 		 */
 	}
 
-	sc->sc_atascsi = atascsi_attach(self, &aaa);
+	sc->sc_atascsi = atascsi_attach(&sc->sc_dev, &aaa);
 
 	/* Enable interrupts */
 	ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_AE | AHCI_REG_GHC_IE);
@@ -964,14 +886,38 @@ noccc:
 	return;
 
 freeports:
-	for (i = 0; i < AHCI_MAX_PORTS; i++)
+	for (i = 0; i < AHCI_MAX_PORTS; i++) {
 		if (sc->sc_ports[i] != NULL)
 			ahci_port_free(sc, i);
+	}
 unmap:
 	/* Disable controller */
 	ahci_write(sc, AHCI_REG_GHC, 0);
+	ahci_unmap_regs(sc);
+	return;
+}
 
-	ahci_unmap_regs(sc, pa);
+int
+ahci_pci_detach(struct device *self, int flags)
+{
+	struct ahci_softc		*sc = (struct ahci_softc *)self;
+	int				 rv, i;
+
+	if (sc->sc_atascsi != NULL) {
+		rv = atascsi_detach(sc->sc_atascsi, flags);
+		if (rv != 0)
+			return (rv);
+	}
+
+	for (i = 0; i < AHCI_MAX_PORTS; i++) {
+		if (sc->sc_ports[i] != NULL)
+			ahci_port_free(sc, i);
+	}
+
+	ahci_unmap_intr(sc);
+	ahci_unmap_regs(sc);
+
+	return (0);
 }
 
 int
@@ -1020,7 +966,7 @@ ahci_map_regs(struct ahci_softc *sc, struct pci_attach_args *pa)
 	maptype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, AHCI_PCI_BAR);
 	if (pci_mapreg_map(pa, AHCI_PCI_BAR, maptype, 0, &sc->sc_iot,
 	    &sc->sc_ioh, NULL, &sc->sc_ios, 0) != 0) {
-		printf(": unable to map registers\n");
+		printf(" unable to map registers\n");
 		return (1);
 	}
 
@@ -1028,40 +974,30 @@ ahci_map_regs(struct ahci_softc *sc, struct pci_attach_args *pa)
 }
 
 void
-ahci_unmap_regs(struct ahci_softc *sc, struct pci_attach_args *pa)
+ahci_unmap_regs(struct ahci_softc *sc)
 {
 	bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
 	sc->sc_ios = 0;
 }
 
 int
-ahci_map_intr(struct ahci_softc *sc, struct pci_attach_args *pa)
+ahci_map_intr(struct ahci_softc *sc, struct pci_attach_args *pa,
+    pci_intr_handle_t ih)
 {
-	pci_intr_handle_t		ih;
-	const char			*intrstr;
-
-	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": unable to map interrupt\n");
-		return (1);
-	}
-	intrstr = pci_intr_string(pa->pa_pc, ih);
-	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
+	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_BIO,
 	    ahci_intr, sc, DEVNAME(sc));
 	if (sc->sc_ih == NULL) {
-		printf(": unable to map interrupt%s%s\n",
-		    intrstr == NULL ? "" : " at ",
-		    intrstr == NULL ? "" : intrstr);
+		printf("%s: unable to map interrupt\n", DEVNAME(sc));
 		return (1);
 	}
-	printf(": %s", intrstr);
 
 	return (0);
 }
 
 void
-ahci_unmap_intr(struct ahci_softc *sc, struct pci_attach_args *pa)
+ahci_unmap_intr(struct ahci_softc *sc)
 {
-	pci_intr_disestablish(pa->pa_pc, sc->sc_ih);
+	pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
 }
 
 int
@@ -1084,7 +1020,7 @@ ahci_init(struct ahci_softc *sc)
 		ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_HR);
 		if (ahci_wait_ne(sc, AHCI_REG_GHC, AHCI_REG_GHC_HR,
 		    AHCI_REG_GHC_HR) != 0) {
-			printf(": unable to reset controller\n");
+			printf(" unable to reset controller\n");
 			return (1);
 		}
 	}
@@ -1108,22 +1044,19 @@ ahci_init(struct ahci_softc *sc)
 	case AHCI_REG_VS_1_1:
 		revision = "1.1";
 		break;
-<<<<<<< HEAD
-=======
 	case AHCI_REG_VS_1_2:
 		revision = "1.2";
 		break;
 	case AHCI_REG_VS_1_3:
 		revision = "1.3";
 		break;
->>>>>>> origin/master
 
 	default:
-		printf(": unsupported AHCI revision 0x%08x\n", reg);
+		printf(" unsupported AHCI revision 0x%08x\n", reg);
 		return (1);
 	}
 
-	printf(": AHCI %s", revision);
+	printf(" AHCI %s", revision);
 
 	return (0);
 }
@@ -1155,13 +1088,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 	struct ahci_cmd_table		*table;
 	int				i, rc = ENOMEM;
 
-	ap = malloc(sizeof(struct ahci_port), M_DEVBUF, M_NOWAIT);
+	ap = malloc(sizeof(*ap), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ap == NULL) {
 		printf("%s: unable to allocate memory for port %d\n",
 		    DEVNAME(sc), port);
 		goto reterr;
 	}
-	bzero(ap, sizeof(struct ahci_port));
 
 #ifdef AHCI_DEBUG
 	snprintf(ap->ap_name, sizeof(ap->ap_name), "%s.%d",
@@ -1183,6 +1115,7 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 #endif
 	TAILQ_INIT(&ap->ap_ccb_free);
 	TAILQ_INIT(&ap->ap_ccb_pending);
+	mtx_init(&ap->ap_ccb_mtx, IPL_BIO);
 
 	/* Disable port interrupts */
 	ahci_pwrite(ap, AHCI_PREG_IE, 0);
@@ -1236,13 +1169,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 
 	/* Allocate a CCB for each command slot */
 	ap->ap_ccbs = malloc(sizeof(struct ahci_ccb) * sc->sc_ncmds, M_DEVBUF,
-	    M_NOWAIT);
+	    M_NOWAIT | M_ZERO);
 	if (ap->ap_ccbs == NULL) {
 		printf("%s: unable to allocate command list for port %d\n",
 		    DEVNAME(sc), port);
 		goto freeport;
 	}
-	bzero(ap->ap_ccbs, sizeof(struct ahci_ccb) * sc->sc_ncmds);
 
 	/* Command List Structures and Command Tables */
 	ap->ap_dmamem_cmd_list = ahci_dmamem_alloc(sc,
@@ -1556,17 +1488,11 @@ ahci_port_start(struct ahci_port *ap, int fre_only)
 	}
 #endif
 
-<<<<<<< HEAD
-	/* Wait for FR to come on */
-	if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR))
-		return (2);
-=======
 	if (!(ap->ap_sc->sc_flags & AHCI_F_IGN_FR)) {
 		/* Wait for FR to come on */
 		if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR, 1))
 			return (2);
 	}
->>>>>>> origin/master
 
 	/* Wait for CR to come on */
 	if (!fre_only &&
@@ -2093,14 +2019,19 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 
 	/* Perform device detection */
 	ahci_pwrite(ap, AHCI_PREG_SCTL, 0);
-	r = AHCI_PREG_SCTL_IPM_DISABLED | AHCI_PREG_SCTL_SPD_ANY |
-	    AHCI_PREG_SCTL_DET_INIT;
+	delay(10000);
+	r = AHCI_PREG_SCTL_IPM_DISABLED | AHCI_PREG_SCTL_DET_INIT;
+	if ((ap->ap_sc->sc_dev.dv_cfdata->cf_flags & 0x01) != 0) {
+		DPRINTF(AHCI_D_VERBOSE, "%s: forcing GEN1\n", PORTNAME(ap));
+		r |= AHCI_PREG_SCTL_SPD_GEN1;
+	} else
+		r |= AHCI_PREG_SCTL_SPD_ANY;
 	ahci_pwrite(ap, AHCI_PREG_SCTL, r);
-	delay(2000);	/* wait at least 1ms for COMRESET to be sent */
+	delay(10000);	/* wait at least 1ms for COMRESET to be sent */
 	r &= ~AHCI_PREG_SCTL_DET_INIT;
 	r |= AHCI_PREG_SCTL_DET_NONE;
 	ahci_pwrite(ap, AHCI_PREG_SCTL, r);
-	delay(2000);
+	delay(10000);
 
 	/* Wait for device to be detected and communications established */
 	if (ahci_pwait_eq(ap, AHCI_PREG_SSTS, AHCI_PREG_SSTS_DET,
@@ -2363,12 +2294,12 @@ ahci_load_prdt(struct ahci_ccb *ccb)
 		if (addr & 1) {
 			printf("%s: requested DMA at an odd address %llx\n",
 			    PORTNAME(ap), (unsigned long long)addr);
-			return (1);
+			goto diagerr;
 		}
 		if (dmap->dm_segs[i].ds_len & 1) {
 			printf("%s: requested DMA length %d is not even\n",
 			    PORTNAME(ap), (int)dmap->dm_segs[i].ds_len);
-			return (1);
+			goto diagerr;
 		}
 #endif
 		prd->flags = htole32(dmap->dm_segs[i].ds_len - 1);
@@ -2383,6 +2314,12 @@ ahci_load_prdt(struct ahci_ccb *ccb)
 	    BUS_DMASYNC_PREWRITE);
 
 	return (0);
+
+#ifdef DIAGNOSTIC
+diagerr:
+	bus_dmamap_unload(sc->sc_dmat, dmap);
+	return (1);
+#endif
 }
 
 void
@@ -2615,7 +2552,7 @@ ahci_intr(void *arg)
 
 	/* Read global interrupt status */
 	is = ahci_read(sc, AHCI_REG_IS);
-	if (is == 0)
+	if (is == 0 || is == 0xffffffff)
 		return (0);
 	ack = is;
 
@@ -3000,12 +2937,14 @@ ahci_get_ccb(struct ahci_port *ap)
 {
 	struct ahci_ccb			*ccb;
 
+	mtx_enter(&ap->ap_ccb_mtx);
 	ccb = TAILQ_FIRST(&ap->ap_ccb_free);
 	if (ccb != NULL) {
 		KASSERT(ccb->ccb_xa.state == ATA_S_PUT);
 		TAILQ_REMOVE(&ap->ap_ccb_free, ccb, ccb_entry);
 		ccb->ccb_xa.state = ATA_S_SETUP;
 	}
+	mtx_leave(&ap->ap_ccb_mtx);
 
 	return (ccb);
 }
@@ -3026,7 +2965,9 @@ ahci_put_ccb(struct ahci_ccb *ccb)
 #endif
 
 	ccb->ccb_xa.state = ATA_S_PUT;
+	mtx_enter(&ap->ap_ccb_mtx);
 	TAILQ_INSERT_TAIL(&ap->ap_ccb_free, ccb, ccb_entry);
+	mtx_leave(&ap->ap_ccb_mtx);
 }
 
 struct ahci_ccb *
@@ -3211,6 +3152,7 @@ err:
 	}
 
 	/* Done with the error CCB now. */
+	ahci_unload_prdt(ccb);
 	ahci_put_err_ccb(ccb);
 
 	/* Extract failed register set and tags from the scratch space. */
@@ -3249,11 +3191,10 @@ ahci_dmamem_alloc(struct ahci_softc *sc, size_t size)
 	struct ahci_dmamem		*adm;
 	int				nsegs;
 
-	adm = malloc(sizeof(struct ahci_dmamem), M_DEVBUF, M_NOWAIT);
+	adm = malloc(sizeof(*adm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (adm == NULL)
 		return (NULL);
 
-	bzero(adm, sizeof(struct ahci_dmamem));
 	adm->adm_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -3313,21 +3254,6 @@ ahci_write(struct ahci_softc *sc, bus_size_t r, u_int32_t v)
 }
 
 int
-ahci_wait_eq(struct ahci_softc *sc, bus_size_t r, u_int32_t mask,
-    u_int32_t target)
-{
-	int				i;
-
-	for (i = 0; i < 1000; i++) {
-		if ((ahci_read(sc, r) & mask) == target)
-			return (0);
-		delay(1000);
-	}
-
-	return (1);
-}
-
-int
 ahci_wait_ne(struct ahci_softc *sc, bus_size_t r, u_int32_t mask,
     u_int32_t target)
 {
@@ -3374,26 +3300,7 @@ ahci_pwait_eq(struct ahci_port *ap, bus_size_t r, u_int32_t mask,
 }
 
 int
-<<<<<<< HEAD
-ahci_pwait_ne(struct ahci_port *ap, bus_size_t r, u_int32_t mask,
-    u_int32_t target)
-{
-	int				i;
-
-	for (i = 0; i < 1000; i++) {
-		if ((ahci_pread(ap, r) & mask) != target)
-			return (0);
-		delay(1000);
-	}
-
-	return (1);
-}
-
-int
-ahci_ata_probe(void *xsc, int port)
-=======
 ahci_ata_probe(void *xsc, int port, int lun)
->>>>>>> origin/master
 {
 	struct ahci_softc		*sc = xsc;
 	struct ahci_port		*ap = sc->sc_ports[port];
@@ -3401,15 +3308,6 @@ ahci_ata_probe(void *xsc, int port, int lun)
 	if (ap == NULL)
 		return (ATA_PORT_T_NONE);
 
-<<<<<<< HEAD
-	sig = ahci_pread(ap, AHCI_PREG_SIG);
-	if ((sig & 0xffff0000) == 0xeb140000)
-		return (ATA_PORT_T_ATAPI);
-	else
-		return (ATA_PORT_T_DISK);
-}
-
-=======
 	if (lun != 0) {
 		int pmp_port = lun - 1;
 		if (pmp_port >= ap->ap_pmp_ports) {
@@ -3427,15 +3325,12 @@ ahci_ata_free(void *xsc, int port, int lun)
 
 }
 
->>>>>>> origin/master
 struct ata_xfer *
 ahci_ata_get_xfer(void *aaa_cookie, int port)
 {
 	struct ahci_softc		*sc = aaa_cookie;
 	struct ahci_port		*ap = sc->sc_ports[port];
 	struct ahci_ccb			*ccb;
-
-	splassert(IPL_BIO);
 
 	ccb = ahci_get_ccb(ap);
 	if (ccb == NULL) {
@@ -3454,8 +3349,6 @@ void
 ahci_ata_put_xfer(struct ata_xfer *xa)
 {
 	struct ahci_ccb			*ccb = (struct ahci_ccb *)xa;
-
-	splassert(IPL_BIO);
 
 	DPRINTF(AHCI_D_XFER, "ahci_ata_put_xfer slot %d\n", ccb->ccb_slot);
 
@@ -3641,7 +3534,7 @@ ret:
 void
 ahci_empty_done(struct ahci_ccb *ccb)
 {
-	/* do nothing */
+	ccb->ccb_xa.state = ATA_S_COMPLETE;
 }
 
 int

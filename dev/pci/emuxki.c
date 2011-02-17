@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: emuxki.c,v 1.22 2005/11/30 22:17:46 brad Exp $	*/
-=======
 /*	$OpenBSD: emuxki.c,v 1.37 2010/09/12 03:17:34 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: emuxki.c,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-
@@ -171,6 +167,7 @@ int	emuxki_query_encoding(void *, struct audio_encoding *);
 int	emuxki_set_params(void *, int, int,
 				      struct audio_params *,
 				      struct audio_params *);
+void	emuxki_get_default_params(void *, int, struct audio_params *);
 
 int	emuxki_round_blocksize(void *, int);
 size_t	emuxki_round_buffersize(void *, int, size_t);
@@ -205,7 +202,6 @@ void emuxki_ac97_reset(void *);
 
 const struct pci_matchid emuxki_devices[] = {
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_SBLIVE },
-	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_SBLIVE2 },
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_AUDIGY },
 	{ PCI_VENDOR_CREATIVELABS, PCI_PRODUCT_CREATIVELABS_AUDIGY2 },
 };
@@ -252,6 +248,7 @@ struct audio_hw_if emuxki_hw_if = {
 	emuxki_get_props,
 	emuxki_trigger_output,
 	emuxki_trigger_input,
+	emuxki_get_default_params
 };
 
 #if 0
@@ -1695,13 +1692,16 @@ emuxki_voice_set_audioparms(struct emuxki_voice *voice, u_int8_t stereo,
 	       stereo ? "stereo" : "mono", (b16 + 1) * 8, srate);
 #endif
 	
-	if (voice->stereo != stereo) {
-		if ((error = emuxki_voice_set_stereo(voice, stereo)))
-			return (error);
-	 }
 	voice->b16 = b16;
-	if (voice->sample_rate != srate)
+
+	/* sample rate must be set after any channel number changes */ 
+	if ((voice->stereo != stereo) || (voice->sample_rate != srate)) {
+		if (voice->stereo != stereo) {
+			if ((error = emuxki_voice_set_stereo(voice, stereo)))
+				return (error);
+		}
 		error = emuxki_voice_set_srate(voice, srate);
+	}
 	return error;
 }
 
@@ -2204,8 +2204,6 @@ emuxki_set_vparms(struct emuxki_voice *voice, struct audio_params *p)
 	if (mode == AUMODE_PLAY)
 		b16 = (p->precision == 16);
 	else {
-		p->encoding = AUDIO_ENCODING_SLINEAR_LE;
-		p->precision = 16;
 		b16 = 1;
 		if (p->precision == 8)
 			p->factor *= 2;
@@ -2299,6 +2297,12 @@ emuxki_set_params(void *addr, int setmode, int usemode,
 	}
 
 	return (0);
+}
+
+void
+emuxki_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 int

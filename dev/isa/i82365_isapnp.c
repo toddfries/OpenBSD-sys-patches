@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82365_isapnp.c,v 1.5 2004/01/09 21:32:23 brad Exp $ */
-=======
 /*	$OpenBSD: i82365_isapnp.c,v 1.8 2010/09/07 16:21:43 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: i82365_isapnp.c,v 1.8 2000/02/23 17:22:11 soren Exp $	*/
 
 /*

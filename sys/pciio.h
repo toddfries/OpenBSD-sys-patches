@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: pciio.h,v 1.7 2010/09/05 18:14:33 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1997, Stefan Esser <se@FreeBSD.ORG>

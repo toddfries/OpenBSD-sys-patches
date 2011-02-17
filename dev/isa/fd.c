@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fd.c,v 1.59 2007/02/14 00:53:48 jsg Exp $	*/
-=======
 /*	$OpenBSD: fd.c,v 1.90 2010/11/18 21:13:19 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -61,6 +57,7 @@
 #include <sys/proc.h>
 #include <sys/syslog.h>
 #include <sys/queue.h>
+#include <sys/stat.h>
 #include <sys/timeout.h>
 #include <sys/dkio.h>
 
@@ -106,7 +103,7 @@ struct fd_softc {
 	struct fd_type *sc_deftype;	/* default type descriptor */
 	struct fd_type *sc_type;	/* current type descriptor */
 
-	daddr_t	sc_blkno;	/* starting block number */
+	daddr64_t	sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
  	int sc_opts;			/* user-set options */
 	int sc_skip;		/* bytes already transferred */
@@ -142,11 +139,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-<<<<<<< HEAD
-void fdgetdisklabel(struct fd_softc *);
-=======
 int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
->>>>>>> origin/master
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -157,12 +150,10 @@ void fd_motor_off(void *arg);
 void fd_motor_on(void *arg);
 void fdfinish(struct fd_softc *fd, struct buf *bp);
 int fdformat(dev_t, struct fd_formb *, struct proc *);
-__inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
+static __inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
 void fdretry(struct fd_softc *);
 void fdtimeout(void *);
 
-<<<<<<< HEAD
-=======
 int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
@@ -192,7 +183,6 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 }
 
->>>>>>> origin/master
 int
 fdprobe(parent, match, aux)
 	struct device *parent;
@@ -365,7 +355,7 @@ fd_nvtotype(fdc, nvraminfo, drive)
 #endif
 }
 
-__inline struct fd_type *
+static __inline struct fd_type *
 fd_dev_to_type(fd, dev)
 	struct fd_softc *fd;
 	dev_t dev;
@@ -573,13 +563,13 @@ fd_motor_on(arg)
 }
 
 int
-fdopen(dev, flags, mode, p)
+fdopen(dev, flags, fmt, p)
 	dev_t dev;
 	int flags;
-	int mode;
+	int fmt;
 	struct proc *p;
 {
- 	int unit;
+ 	int unit, pmask;
 	struct fd_softc *fd;
 	struct fd_type *type;
 
@@ -601,24 +591,58 @@ fdopen(dev, flags, mode, p)
 	fd->sc_cylin = -1;
 	fd->sc_flags |= FD_OPEN;
 
+	/*
+	 * Only update the disklabel if we're not open anywhere else.
+	 */
+	if (fd->sc_dk.dk_openmask == 0)
+		fdgetdisklabel(dev, fd, fd->sc_dk.dk_label, 0);
+
+	pmask = (1 << FDPART(dev));
+
+	switch (fmt) {
+	case S_IFCHR:
+		fd->sc_dk.dk_copenmask |= pmask;
+		break;
+
+	case S_IFBLK:
+		fd->sc_dk.dk_bopenmask |= pmask;
+		break;
+	}
+	fd->sc_dk.dk_openmask =
+	    fd->sc_dk.dk_copenmask | fd->sc_dk.dk_bopenmask;
+
 	return 0;
 }
 
 int
-fdclose(dev, flags, mode, p)
+fdclose(dev, flags, fmt, p)
 	dev_t dev;
 	int flags;
-	int mode;
+	int fmt;
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
+	int pmask = (1 << FDPART(dev));
 
 	fd->sc_flags &= ~FD_OPEN;
 	fd->sc_opts &= ~FDOPT_NORETRY;
-	return 0;
+
+	switch (fmt) {
+	case S_IFCHR:
+		fd->sc_dk.dk_copenmask &= ~pmask;
+		break;
+
+	case S_IFBLK:
+		fd->sc_dk.dk_bopenmask &= ~pmask;
+		break;
+	}
+	fd->sc_dk.dk_openmask =
+	    fd->sc_dk.dk_copenmask | fd->sc_dk.dk_bopenmask;
+
+	return (0);
 }
 
-int
+daddr64_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -630,7 +654,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -994,13 +1018,7 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-<<<<<<< HEAD
-	struct disklabel dl, *lp = &dl;
-	struct cpu_disklabel cdl;
-	char *errstring;
-=======
 	struct disklabel *lp;
->>>>>>> origin/master
 	int error;
 
 	switch (cmd) {
@@ -1008,38 +1026,26 @@ fdioctl(dev, cmd, addr, flag, p)
 		if (((struct mtop *)addr)->mt_op != MTOFFL)
 			return EIO;
 		return (0);
+
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		fdgetdisklabel(dev, fd, lp, 0);
+		bcopy(lp, fd->sc_dk.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		return 0;
+
+	case DIOCGPDINFO:
+		fdgetdisklabel(dev, fd, (struct disklabel *)addr, 1);
+		return 0;
+
 	case DIOCGDINFO:
-		bzero(lp, sizeof(*lp));
-		bzero(&cdl, sizeof(struct cpu_disklabel));
+		*(struct disklabel *)addr = *(fd->sc_dk.dk_label);
+		return 0;
 
-		lp->d_secsize = FD_BSIZE(fd);
-		lp->d_secpercyl = fd->sc_type->seccyl;
-		lp->d_ntracks = fd->sc_type->heads;
-		lp->d_nsectors = fd->sc_type->sectrac;
-		lp->d_ncylinders = fd->sc_type->tracks;
-
-		strncpy(lp->d_typename, "floppy disk", sizeof lp->d_typename);
-		lp->d_type = DTYPE_FLOPPY;
-		strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
-		lp->d_secperunit = fd->sc_type->size;
-		lp->d_rpm = 300;
-		lp->d_interleave = 1;
-
-		lp->d_partitions[RAW_PART].p_offset = 0;
-		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-		lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-		lp->d_npartitions = RAW_PART + 1;
-
-		lp->d_magic = DISKMAGIC;
-		lp->d_magic2 = DISKMAGIC;
-		lp->d_checksum = dkcksum(lp);
-
-		errstring = readdisklabel(dev, fdstrategy, lp, &cdl, 0);
-		if (errstring) {
-			/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring);*/
-		}
-
-		*(struct disklabel *)addr = *lp;
+	case DIOCGPART:
+		((struct partinfo *)addr)->disklab = fd->sc_dk.dk_label;
+		((struct partinfo *)addr)->part =
+		    &fd->sc_dk.dk_label->d_partitions[FDPART(dev)];
 		return 0;
 
 	case DIOCWLABEL:
@@ -1053,13 +1059,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-<<<<<<< HEAD
-		error = setdisklabel(lp, (struct disklabel *)addr, 0, NULL);
-		if (error)
-			return error;
-
-		error = writedisklabel(dev, fdstrategy, lp, NULL);
-=======
 		error = setdisklabel(fd->sc_dk.dk_label,
 		    (struct disklabel *)addr, 0);
 		if (error == 0) {
@@ -1067,7 +1066,6 @@ fdioctl(dev, cmd, addr, flag, p)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    fdstrategy, fd->sc_dk.dk_label);
 		}
->>>>>>> origin/master
 		return error;
 
         case FD_FORM:
@@ -1114,16 +1112,11 @@ fdformat(dev, finfo, p)
 	int fd_bsize = FD_BSIZE(fd);
 
         /* set up a buffer header for fdstrategy() */
-        bp = (struct buf *)malloc(sizeof(struct buf), M_TEMP, M_NOWAIT);
+        bp = malloc(sizeof(*bp), M_TEMP, M_NOWAIT | M_ZERO);
         if (bp == NULL)
                 return ENOBUFS;
 
-<<<<<<< HEAD
-        bzero((void *)bp, sizeof(struct buf));
-        bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
-=======
         bp->b_flags = B_BUSY | B_PHYS | B_FORMAT | B_RAW;
->>>>>>> origin/master
         bp->b_proc = p;
         bp->b_dev = dev;
 

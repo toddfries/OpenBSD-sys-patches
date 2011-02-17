@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: akbd.c,v 1.5 2006/03/23 21:54:26 miod Exp $	*/
-=======
 /*	$OpenBSD: akbd.c,v 1.8 2010/05/23 15:09:38 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: akbd.c,v 1.17 2005/01/15 16:00:59 chs Exp $	*/
 
 /*

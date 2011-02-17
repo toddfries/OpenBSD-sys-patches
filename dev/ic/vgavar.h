@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vgavar.h,v 1.7 2002/03/14 03:16:05 millert Exp $ */
-=======
 /* $OpenBSD: vgavar.h,v 1.11 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: vgavar.h,v 1.4 2000/06/17 07:11:50 soda Exp $ */
 
 /*

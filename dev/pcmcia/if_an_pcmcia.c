@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_an_pcmcia.c,v 1.18 2006/01/30 11:41:00 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_an_pcmcia.c,v 1.21 2010/08/30 20:33:18 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Michael Shalayeff

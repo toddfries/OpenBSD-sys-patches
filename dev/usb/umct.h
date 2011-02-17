@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: umct.h,v 1.4 2008/06/26 05:42:19 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: umct.h,v 1.1 2001/03/28 18:42:13 ichiro Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.

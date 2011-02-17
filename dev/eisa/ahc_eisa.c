@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ahc_eisa.c,v 1.17 2004/08/01 01:36:23 krw Exp $	*/
-=======
 /*	$OpenBSD: ahc_eisa.c,v 1.20 2010/11/18 21:15:15 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ahc_eisa.c,v 1.10 1996/10/21 22:30:58 thorpej Exp $	*/
 
 /*

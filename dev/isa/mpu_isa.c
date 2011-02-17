@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpu_isa.c,v 1.2 2003/01/29 20:32:23 mickey Exp $	*/
-=======
 /*	$OpenBSD: mpu_isa.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Sergey Smitienko. All rights reserved.

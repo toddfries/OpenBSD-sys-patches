@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sequencervar.h,v 1.2 2000/06/26 22:43:45 art Exp $	*/
-=======
 /*	$OpenBSD: sequencervar.h,v 1.4 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sequencervar.h,v 1.5 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*

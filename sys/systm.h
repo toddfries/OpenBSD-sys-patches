@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: systm.h,v 1.69 2006/04/27 02:17:21 tedu Exp $	*/
-=======
 /*	$OpenBSD: systm.h,v 1.87 2011/01/10 23:23:56 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -118,8 +114,13 @@ typedef int	sy_call_t(struct proc *, void *, register_t *);
 extern struct sysent {		/* system call table */
 	short	sy_narg;	/* number of args */
 	short	sy_argsize;	/* total size of arguments */
+	int	sy_flags;
 	sy_call_t *sy_call;	/* implementing function */
 } sysent[];
+
+#define SY_MPSAFE		0x01
+#define SY_NOLOCK		0x02
+
 #if	_BYTE_ORDER == _BIG_ENDIAN
 #define SCARG(p, k)	((p)->k.be.datum)	/* get arg from args pointer */
 #elif	_BYTE_ORDER == _LITTLE_ENDIAN
@@ -150,7 +151,6 @@ int	eopnotsupp(void *);
 int	lkmenodev(void);
 
 struct vnodeopv_desc;
-void vfs_opv_init(void);
 void vfs_opv_init_explicit(struct vnodeopv_desc *);
 void vfs_opv_init_default(struct vnodeopv_desc *);
 void vfs_op_init(void);
@@ -310,8 +310,7 @@ void	consinit(void);
 
 void	cpu_startup(void);
 void	cpu_configure(void);
-extern void (*md_diskconf)(void);
-
+void	diskconf(void);
 
 #ifdef GPROF
 void	kmstartup(void);
@@ -335,13 +334,13 @@ void	user_config(void);
 
 #if defined(MULTIPROCESSOR)
 void	_kernel_lock_init(void);
-void	_kernel_lock(int);
+void	_kernel_lock(void);
 void	_kernel_unlock(void);
 void	_kernel_proc_lock(struct proc *);
 void	_kernel_proc_unlock(struct proc *);
 
 #define	KERNEL_LOCK_INIT()		_kernel_lock_init()
-#define	KERNEL_LOCK(flag)		_kernel_lock((flag))
+#define	KERNEL_LOCK()			_kernel_lock()
 #define	KERNEL_UNLOCK()			_kernel_unlock()
 #define	KERNEL_PROC_LOCK(p)		_kernel_proc_lock((p))
 #define	KERNEL_PROC_UNLOCK(p)		_kernel_proc_unlock((p))
@@ -349,7 +348,7 @@ void	_kernel_proc_unlock(struct proc *);
 #else /* ! MULTIPROCESSOR */
 
 #define	KERNEL_LOCK_INIT()		/* nothing */
-#define	KERNEL_LOCK(flag)		/* nothing */
+#define	KERNEL_LOCK()			/* nothing */
 #define	KERNEL_UNLOCK()			/* nothing */
 #define	KERNEL_PROC_LOCK(p)		/* nothing */
 #define	KERNEL_PROC_UNLOCK(p)		/* nothing */

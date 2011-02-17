@@ -1,33 +1,3 @@
-<<<<<<< HEAD
-/*     $OpenBSD: ispvar.h,v 1.22 2003/03/03 18:37:25 mjacob Exp $ */
-/*
- * Soft Definitions for for Qlogic ISP SCSI adapters.
- *
- * Copyright (c) 1997, 1998, 1999, 2000 by Matthew Jacob
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice immediately at the beginning of the file, without modification,
- *    this list of conditions, and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
-=======
 /*     $OpenBSD: ispvar.h,v 1.28 2010/02/18 10:40:53 sobrado Exp $ */
 /* $FreeBSD: src/sys/dev/isp/ispvar.h,v 1.85 2007/07/02 20:08:20 mjacob Exp $ */
 /*-
@@ -58,7 +28,6 @@
  */
 /*
  * Soft Definitions for for QLogic ISP SCSI adapters.
->>>>>>> origin/master
  */
 
 #ifndef	_ISPVAR_H
@@ -805,7 +774,7 @@ void isp_done(XS_T *);
  * below).
  *
  * ISPCTL_SCAN_LOOP does a local loop scan. This is only done if the connection
- * topology is NL or FL port (private or public loop). Since the Qlogic f/w
+ * topology is NL or FL port (private or public loop). Since the QLogic f/w
  * 'automatically' manages local loop connections, this function essentially
  * notes the arrival, departure, and possible shuffling around of local loop
  * entities. Thus for each arrival and departure this generates an isp_async
@@ -1033,13 +1002,8 @@ int isp_async(struct ispsoftc *, ispasync_t, void *);
  *		read from NVRAM (possibly corrected for card botches).
  *		Each platform can take that information and override
  *		it or ignore and return the Node and Port WWNs to be
-<<<<<<< HEAD
- * 		used when sending the Qlogic f/w the Initialization Control
- *		Block.
-=======
  * 		used when sending the QLogic f/w the Initialization
  *		Control Block.
->>>>>>> origin/master
  *
  *	(XXX these do endian specific transformations- in transition XXX)
  *

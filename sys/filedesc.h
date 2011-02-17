@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: filedesc.h,v 1.18 2004/07/21 12:10:20 art Exp $	*/
-=======
 /*	$OpenBSD: filedesc.h,v 1.20 2008/09/19 12:24:55 art Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: filedesc.h,v 1.14 1996/04/09 20:55:28 cgd Exp $	*/
 
 /*

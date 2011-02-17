@@ -6,11 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
-<<<<<<< HEAD
- * $OpenBSD: kern_tc.c,v 1.7 2006/11/15 17:25:40 jmc Exp $
-=======
  * $OpenBSD: kern_tc.c,v 1.16 2010/09/24 07:29:30 deraadt Exp $
->>>>>>> origin/master
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
@@ -185,19 +181,6 @@ microtime(struct timeval *tvp)
 }
 
 void
-getbinuptime(struct bintime *bt)
-{
-	struct timehands *th;
-	u_int gen;
-
-	do {
-		th = timehands;
-		gen = th->th_generation;
-		*bt = th->th_offset;
-	} while (gen == 0 || gen != th->th_generation);
-}
-
-void
 getnanouptime(struct timespec *tsp)
 {
 	struct timehands *th;
@@ -221,20 +204,6 @@ getmicrouptime(struct timeval *tvp)
 		gen = th->th_generation;
 		bintime2timeval(&th->th_offset, tvp);
 	} while (gen == 0 || gen != th->th_generation);
-}
-
-void
-getbintime(struct bintime *bt)
-{
-	struct timehands *th;
-	u_int gen;
-
-	do {
-		th = timehands;
-		gen = th->th_generation;
-		*bt = th->th_offset;
-	} while (gen == 0 || gen != th->th_generation);
-	bintime_add(bt, &boottimebin);
 }
 
 void
@@ -603,11 +572,11 @@ ntp_update_second(int64_t *adjust, time_t *sec)
 	if (adjtimedelta.tv_sec > 0)
 		adj.tv_usec = 5000;
 	else if (adjtimedelta.tv_sec == 0)
-		adj.tv_usec = MIN(500, adjtimedelta.tv_usec);
+		adj.tv_usec = MIN(5000, adjtimedelta.tv_usec);
 	else if (adjtimedelta.tv_sec < -1)
 		adj.tv_usec = -5000;
 	else if (adjtimedelta.tv_sec == -1)
-		adj.tv_usec = MAX(-500, adjtimedelta.tv_usec - 1000000);
+		adj.tv_usec = MAX(-5000, adjtimedelta.tv_usec - 1000000);
 	timersub(&adjtimedelta, &adj, &adjtimedelta);
 	*adjust = ((int64_t)adj.tv_usec * 1000) << 32;
 	*adjust += timecounter->tc_freq_adj;

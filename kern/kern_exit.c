@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_exit.c,v 1.70 2007/04/11 14:27:08 tedu Exp $	*/
-=======
 /*	$OpenBSD: kern_exit.c,v 1.97 2010/08/02 19:54:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -330,16 +326,8 @@ exit1(struct proc *p, int rv, int flags)
 	sigactsfree(p);
 
 	/*
-	 * Clear curproc after we've done all operations
-	 * that could block, and before tearing down the rest
-	 * of the process state that might be used from clock, etc.
-	 * Also, can't clear curproc while we're still runnable,
-	 * as we're not on a run queue (we are current, just not
-	 * a proper proc any longer!).
-	 *
-	 * Other substructures are freed from wait().
+	 * Other substructures are freed from reaper and wait().
 	 */
-	curproc = NULL;
 
 	/*
 	 * If emulation has process exit hook, call it now.
@@ -386,15 +374,11 @@ struct proclist deadproc = LIST_HEAD_INITIALIZER(deadproc);
 void
 exit2(struct proc *p)
 {
-	int s;
-
 	mtx_enter(&deadproc_mutex);
 	LIST_INSERT_HEAD(&deadproc, p, p_hash);
 	mtx_leave(&deadproc_mutex);
 
 	wakeup(&deadproc);
-
-	SCHED_LOCK(s);
 }
 
 /*
@@ -408,6 +392,8 @@ reaper(void)
 	struct proc *p;
 
 	KERNEL_PROC_UNLOCK(curproc);
+
+	SCHED_ASSERT_UNLOCKED();
 
 	for (;;) {
 		mtx_enter(&deadproc_mutex);
@@ -613,25 +599,12 @@ proc_zap(struct proc *p)
 	 * Remove us from our process list, possibly killing the process
 	 * in the process (pun intended).
 	 */
-<<<<<<< HEAD
-#if 0
-	TAILQ_REMOVE(&p->p_p->ps_threads, p, p_thr_link);
-#endif
-	if (TAILQ_EMPTY(&p->p_p->ps_threads)) {
-		limfree(p->p_p->ps_limit);
-		if (--p->p_p->ps_cred->p_refcnt == 0) {
-			crfree(p->p_p->ps_cred->pc_ucred);
-			pool_put(&pcred_pool, p->p_p->ps_cred);
-		}
-		pool_put(&process_pool, p->p_p);
-=======
 	if (--pr->ps_refcnt == 0) {
 		KASSERT(TAILQ_EMPTY(&pr->ps_threads));
 		limfree(pr->ps_limit);
 		crfree(pr->ps_cred->pc_ucred);
 		pool_put(&pcred_pool, pr->ps_cred);
 		pool_put(&process_pool, pr);
->>>>>>> origin/master
 	}
 
 	pool_put(&proc_pool, p);

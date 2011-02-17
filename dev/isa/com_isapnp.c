@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_isapnp.c,v 1.1 2001/09/30 00:11:57 art Exp $	*/
+/*	$OpenBSD: com_isapnp.c,v 1.4 2008/04/27 09:29:40 kettenis Exp $	*/
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
  *
@@ -72,14 +72,12 @@
 
 #include <dev/isa/isavar.h>
 
-#if NCOM_ISAPNP
-struct cfattach com_isapnp_ca = {
-	sizeof(struct com_softc), comprobe, comattach
-};
-#endif
-
 int com_isapnp_probe(struct device *, void *, void *);
-int com_isapnp_attach(struct device *, struct device *, void *);
+void com_isapnp_attach(struct device *, struct device *, void *);
+
+struct cfattach com_isapnp_ca = {
+	sizeof(struct com_softc), com_isapnp_probe, com_isapnp_attach
+};
 
 int
 com_isapnp_probe(struct device *parent, void *match, void *aux)
@@ -104,7 +102,7 @@ com_isapnp_probe(struct device *parent, void *match, void *aux)
 	return comprobe1(iot, ioh);
 }
 
-int
+void
 com_isapnp_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (void *)self;

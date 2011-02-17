@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: miivar.h,v 1.26 2005/11/06 09:27:19 brad Exp $	*/
-=======
 /*	$OpenBSD: miivar.h,v 1.31 2010/04/20 20:42:16 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: miivar.h,v 1.17 2000/03/06 20:56:57 thorpej Exp $	*/
 
 /*-

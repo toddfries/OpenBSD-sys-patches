@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: bold8x16-iso1.h,v 1.3 2009/06/21 20:30:35 jsg Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.

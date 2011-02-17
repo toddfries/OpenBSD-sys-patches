@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atascsi.h,v 1.24 2007/04/10 07:57:21 jsg Exp $ */
-=======
 /*	$OpenBSD: atascsi.h,v 1.45 2011/01/26 21:41:00 drahn Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -44,8 +40,15 @@ struct scsi_link;
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
+#define ATA_C_SET_FEATURES	0xef
 #define ATA_C_SEC_FREEZE_LOCK	0xf5
 #define ATA_C_DSM		0x06
+
+/*
+ * ATA SET FEATURES subcommands
+ */
+#define ATA_SF_WRITECACHE_EN	0x02
+#define ATA_SF_LOOKAHEAD_EN	0xaa
 
 struct ata_identify {
 	u_int16_t	config;		/*   0 */
@@ -105,6 +108,7 @@ struct ata_identify {
 	u_int16_t	features85;	/*  85 */
 	u_int16_t	features86;	/*  86 */
 	u_int16_t	features87;	/*  87 */
+#define ATA_ID_F87_WWN		(1<<8)
 	u_int16_t	ultradma;	/*  88 */
 	u_int16_t	erasetime;	/*  89 */
 	u_int16_t	erasetimex;	/*  90 */
@@ -158,8 +162,6 @@ struct ata_identify {
 } __packed;
 
 /*
-<<<<<<< HEAD
-=======
  * IDENTIFY DEVICE data
  */
 #define ATA_IDENTIFY_WRITECACHE		(1 << 5)
@@ -171,7 +173,6 @@ struct ata_identify {
 #define ATA_DSM_TRIM		0x01
 
 /*
->>>>>>> origin/master
  * Frame Information Structures
  */
 
@@ -284,28 +285,13 @@ struct ata_log_page_10h {
  * ATA interface
  */
 
-<<<<<<< HEAD
-struct ata_port {
-	struct atascsi		*ap_as;
-	int			ap_port;
-	int			ap_type;
-#define ATA_PORT_T_NONE			0
-#define ATA_PORT_T_DISK			1
-#define ATA_PORT_T_ATAPI		2
-	int			ap_features;
-#define ATA_PORT_F_PROBED		(1 << 0)
-	int			ap_ncqdepth;
-};
-
-=======
->>>>>>> origin/master
 struct ata_xfer {
 	struct ata_fis_h2d	*fis;
 	struct ata_fis_d2h	rfis;
 	u_int8_t		*packetcmd;
 	u_int8_t		tag;
 
-	u_int8_t		*data;
+	void			*data;
 	size_t			datalen;
 	size_t			resid;
 
@@ -321,8 +307,6 @@ struct ata_xfer {
 #define ATA_F_PIO			(1<<4)
 #define ATA_F_PACKET			(1<<5)
 #define ATA_F_NCQ			(1<<6)
-<<<<<<< HEAD
-=======
 #define ATA_F_DONE			(1<<7)
 #define ATA_F_GET_RFIS			(1<<8)
 #define ATA_FMT_FLAGS			"\020" "\011GET_RFIS" "\010DONE" \
@@ -330,7 +314,6 @@ struct ata_xfer {
 					"\004POLL" "\003NOWAIT" "\002WRITE" \
 					"\001READ"
 
->>>>>>> origin/master
 	volatile int		state;
 #define ATA_S_SETUP			0
 #define ATA_S_PENDING			1
@@ -353,16 +336,10 @@ struct ata_xfer {
  */
 
 struct atascsi_methods {
-<<<<<<< HEAD
-	int			(*probe)(void *, int);
-	struct ata_xfer *	(*ata_get_xfer)(void *, int );
-	int			(*ata_cmd)(struct ata_xfer *);
-=======
 	int			(*probe)(void *, int, int);
 	void			(*free)(void *, int, int);
 	struct ata_xfer *	(*ata_get_xfer)(void *, int);
 	void			(*ata_cmd)(struct ata_xfer *);
->>>>>>> origin/master
 };
 
 struct atascsi_attach_args {
@@ -385,14 +362,9 @@ struct atascsi_attach_args {
 #define ATA_PORT_T_PM		3
 
 struct atascsi	*atascsi_attach(struct device *, struct atascsi_attach_args *);
-int		atascsi_detach(struct atascsi *);
+int		atascsi_detach(struct atascsi *, int);
 
-<<<<<<< HEAD
-int		atascsi_probe_dev(struct atascsi *, int);
-int		atascsi_detach_dev(struct atascsi *, int);
-=======
 int		atascsi_probe_dev(struct atascsi *, int, int);
 int		atascsi_detach_dev(struct atascsi *, int, int, int);
 
 void		ata_complete(struct ata_xfer *);
->>>>>>> origin/master

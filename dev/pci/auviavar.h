@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: auviavar.h,v 1.5 2002/05/30 15:13:20 mickey Exp $ */
-=======
 /*	$OpenBSD: auviavar.h,v 1.12 2010/09/12 02:03:35 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: auviavar.h,v 1.1 2000/03/31 04:45:29 tsarna Exp $	*/
 
 /*-
@@ -45,6 +41,7 @@ struct auvia_softc_chan {
 	struct auvia_dma_op *sc_dma_ops;
 	struct auvia_dma *sc_dma_ops_dma;
 	u_int16_t sc_dma_op_count;
+	int sc_base;
 	u_int16_t sc_reg;
 };
 

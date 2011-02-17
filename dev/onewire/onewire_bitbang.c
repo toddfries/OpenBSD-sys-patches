@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: onewire_bitbang.c,v 1.2 2010/07/02 03:13:42 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

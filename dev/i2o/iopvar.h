@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iopvar.h,v 1.6 2001/06/26 20:05:22 niklas Exp $	*/
-=======
 /*	$OpenBSD: iopvar.h,v 1.10 2009/04/02 18:44:49 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: iopvar.h,v 1.5 2001/03/20 13:01:49 ad Exp $	*/
 
 /*-
@@ -101,7 +97,7 @@ struct iop_initiator {
 struct iop_pgop {
 	struct	i2o_param_op_list_header olh;
 	struct	i2o_param_op_all_template oat;
-} __attribute__ ((__packed__));
+} __packed;
 
 /*
  * Per-IOP context.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mii.h,v 1.10 2005/11/06 09:27:19 brad Exp $	*/
-=======
 /*	$OpenBSD: mii.h,v 1.12 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mii.h,v 1.8 2001/05/31 03:06:46 thorpej Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: umass_scsi.h,v 1.4 2008/06/26 05:42:19 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: umass_scsipi.h,v 1.1 2001/12/24 13:25:53 augustss Exp $	*/
 
 /*

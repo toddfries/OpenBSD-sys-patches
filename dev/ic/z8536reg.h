@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: z8536reg.h,v 1.1 1997/04/10 17:13:53 pefo Exp $ */
-=======
 /*	$OpenBSD: z8536reg.h,v 1.3 2009/03/08 16:03:06 miod Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

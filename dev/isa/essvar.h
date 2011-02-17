@@ -1,4 +1,4 @@
-/*	$OpenBSD: essvar.h,v 1.4 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: essvar.h,v 1.5 2002/03/14 03:16:05 millert Exp $	*/
 /*	$NetBSD: essvar.h,v 1.14 1999/03/18 06:03:31 mycroft Exp $	*/
 /*
  * Copyright 1997

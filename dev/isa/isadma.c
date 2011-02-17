@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isadma.c,v 1.29 2005/11/23 10:00:12 mpf Exp $	*/
-=======
 /*	$OpenBSD: isadma.c,v 1.31 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: isadma.c,v 1.32 1997/09/05 01:48:33 thorpej Exp $	*/
 
 /*-

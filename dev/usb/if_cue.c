@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_cue.c,v 1.31 2006/06/23 06:27:11 miod Exp $ */
-=======
 /*	$OpenBSD: if_cue.c,v 1.59 2011/01/25 20:03:35 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -64,36 +60,20 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#if !defined(__OpenBSD__)
-#include <sys/callout.h>
-#endif
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
-#include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
-
+#include <sys/timeout.h>
 #include <sys/device.h>
 
 #include <net/if.h>
-#if defined(__NetBSD__)
-#include <net/if_arp.h>
-#endif
 #include <net/if_dl.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#if defined(__NetBSD__)
-#include <net/if_ether.h>
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_inarp.h>
-#endif
-#endif /* defined(__NetBSD__) */
-
-#if defined(__OpenBSD__)
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -101,7 +81,6 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
-#endif /* defined(__OpenBSD__) */
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -111,8 +90,8 @@
 #include <dev/usb/if_cuereg.h>
 
 #ifdef CUE_DEBUG
-#define DPRINTF(x)	do { if (cuedebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (cuedebug >= (n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (cuedebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (cuedebug >= (n)) printf x; } while (0)
 int	cuedebug = 0;
 #else
 #define DPRINTF(x)
@@ -122,38 +101,13 @@ int	cuedebug = 0;
 /*
  * Various supported device vendors/products.
  */
-Static struct usb_devno cue_devs[] = {
+struct usb_devno cue_devs[] = {
 	{ USB_VENDOR_CATC, USB_PRODUCT_CATC_NETMATE },
 	{ USB_VENDOR_CATC, USB_PRODUCT_CATC_NETMATE2 },
 	{ USB_VENDOR_SMARTBRIDGES, USB_PRODUCT_SMARTBRIDGES_SMARTLINK },
 	/* Belkin F5U111 adapter covered by NETMATE entry */
 };
 
-<<<<<<< HEAD
-USB_DECLARE_DRIVER_CLASS(cue, DV_IFNET);
-
-Static int cue_open_pipes(struct cue_softc *);
-Static int cue_tx_list_init(struct cue_softc *);
-Static int cue_rx_list_init(struct cue_softc *);
-Static int cue_newbuf(struct cue_softc *, struct cue_chain *, struct mbuf *);
-Static int cue_send(struct cue_softc *, struct mbuf *, int);
-Static void cue_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-Static void cue_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-Static void cue_tick(void *);
-Static void cue_tick_task(void *);
-Static void cue_start(struct ifnet *);
-Static int cue_ioctl(struct ifnet *, u_long, caddr_t);
-Static void cue_init(void *);
-Static void cue_stop(struct cue_softc *);
-Static void cue_watchdog(struct ifnet *);
-
-Static void cue_setmulti(struct cue_softc *);
-Static void cue_reset(struct cue_softc *);
-
-Static int cue_csr_read_1(struct cue_softc *, int);
-Static int cue_csr_write_1(struct cue_softc *, int, int);
-Static int cue_csr_read_2(struct cue_softc *, int);
-=======
 int cue_match(struct device *, void *, void *); 
 void cue_attach(struct device *, struct device *, void *); 
 int cue_detach(struct device *, int); 
@@ -192,12 +146,11 @@ void cue_reset(struct cue_softc *);
 int cue_csr_read_1(struct cue_softc *, int);
 int cue_csr_write_1(struct cue_softc *, int, int);
 int cue_csr_read_2(struct cue_softc *, int);
->>>>>>> origin/master
 #if 0
-Static int cue_csr_write_2(struct cue_softc *, int, int);
+int cue_csr_write_2(struct cue_softc *, int, int);
 #endif
-Static int cue_mem(struct cue_softc *, int, int, void *, int);
-Static int cue_getmac(struct cue_softc *, void *);
+int cue_mem(struct cue_softc *, int, int, void *, int);
+int cue_getmac(struct cue_softc *, void *);
 
 #define CUE_SETBIT(sc, reg, x)				\
 	cue_csr_write_1(sc, reg, cue_csr_read_1(sc, reg) | (x))
@@ -205,7 +158,7 @@ Static int cue_getmac(struct cue_softc *, void *);
 #define CUE_CLRBIT(sc, reg, x)				\
 	cue_csr_write_1(sc, reg, cue_csr_read_1(sc, reg) & ~(x))
 
-Static int
+int
 cue_csr_read_1(struct cue_softc *sc, int reg)
 {
 	usb_device_request_t	req;
@@ -225,17 +178,17 @@ cue_csr_read_1(struct cue_softc *sc, int reg)
 
 	if (err) {
 		DPRINTF(("%s: cue_csr_read_1: reg=0x%x err=%s\n",
-			 USBDEVNAME(sc->cue_dev), reg, usbd_errstr(err)));
+			 sc->cue_dev.dv_xname, reg, usbd_errstr(err)));
 		return (0);
 	}
 
 	DPRINTFN(10,("%s: cue_csr_read_1 reg=0x%x val=0x%x\n",
-		     USBDEVNAME(sc->cue_dev), reg, val));
+		     sc->cue_dev.dv_xname, reg, val));
 
 	return (val);
 }
 
-Static int
+int
 cue_csr_read_2(struct cue_softc *sc, int reg)
 {
 	usb_device_request_t	req;
@@ -254,18 +207,18 @@ cue_csr_read_2(struct cue_softc *sc, int reg)
 	err = usbd_do_request(sc->cue_udev, &req, &val);
 
 	DPRINTFN(10,("%s: cue_csr_read_2 reg=0x%x val=0x%x\n",
-		     USBDEVNAME(sc->cue_dev), reg, UGETW(val)));
+		     sc->cue_dev.dv_xname, reg, UGETW(val)));
 
 	if (err) {
 		DPRINTF(("%s: cue_csr_read_2: reg=0x%x err=%s\n",
-			 USBDEVNAME(sc->cue_dev), reg, usbd_errstr(err)));
+			 sc->cue_dev.dv_xname, reg, usbd_errstr(err)));
 		return (0);
 	}
 
 	return (UGETW(val));
 }
 
-Static int
+int
 cue_csr_write_1(struct cue_softc *sc, int reg, int val)
 {
 	usb_device_request_t	req;
@@ -275,7 +228,7 @@ cue_csr_write_1(struct cue_softc *sc, int reg, int val)
 		return (0);
 
 	DPRINTFN(10,("%s: cue_csr_write_1 reg=0x%x val=0x%x\n",
-		     USBDEVNAME(sc->cue_dev), reg, val));
+		     sc->cue_dev.dv_xname, reg, val));
 
 	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
 	req.bRequest = CUE_CMD_WRITEREG;
@@ -287,18 +240,18 @@ cue_csr_write_1(struct cue_softc *sc, int reg, int val)
 
 	if (err) {
 		DPRINTF(("%s: cue_csr_write_1: reg=0x%x err=%s\n",
-			 USBDEVNAME(sc->cue_dev), reg, usbd_errstr(err)));
+			 sc->cue_dev.dv_xname, reg, usbd_errstr(err)));
 		return (-1);
 	}
 
 	DPRINTFN(20,("%s: cue_csr_write_1, after reg=0x%x val=0x%x\n",
-		     USBDEVNAME(sc->cue_dev), reg, cue_csr_read_1(sc, reg)));
+		     sc->cue_dev.dv_xname, reg, cue_csr_read_1(sc, reg)));
 
 	return (0);
 }
 
 #if 0
-Static int
+int
 cue_csr_write_2(struct cue_softc *sc, int reg, int aval)
 {
 	usb_device_request_t	req;
@@ -310,7 +263,7 @@ cue_csr_write_2(struct cue_softc *sc, int reg, int aval)
 		return (0);
 
 	DPRINTFN(10,("%s: cue_csr_write_2 reg=0x%x val=0x%x\n",
-		     USBDEVNAME(sc->cue_dev), reg, aval));
+		     sc->cue_dev.dv_xname, reg, aval));
 
 	USETW(val, aval);
 	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
@@ -323,7 +276,7 @@ cue_csr_write_2(struct cue_softc *sc, int reg, int aval)
 
 	if (err) {
 		DPRINTF(("%s: cue_csr_write_2: reg=0x%x err=%s\n",
-			 USBDEVNAME(sc->cue_dev), reg, usbd_errstr(err)));
+			 sc->cue_dev.dv_xname, reg, usbd_errstr(err)));
 		return (-1);
 	}
 
@@ -331,14 +284,14 @@ cue_csr_write_2(struct cue_softc *sc, int reg, int aval)
 }
 #endif
 
-Static int
+int
 cue_mem(struct cue_softc *sc, int cmd, int addr, void *buf, int len)
 {
 	usb_device_request_t	req;
 	usbd_status		err;
 
 	DPRINTFN(10,("%s: cue_mem cmd=0x%x addr=0x%x len=%d\n",
-		     USBDEVNAME(sc->cue_dev), cmd, addr, len));
+		     sc->cue_dev.dv_xname, cmd, addr, len));
 
 	if (cmd == CUE_CMD_READSRAM)
 		req.bmRequestType = UT_READ_VENDOR_DEVICE;
@@ -353,20 +306,20 @@ cue_mem(struct cue_softc *sc, int cmd, int addr, void *buf, int len)
 
 	if (err) {
 		DPRINTF(("%s: cue_csr_mem: addr=0x%x err=%s\n",
-			 USBDEVNAME(sc->cue_dev), addr, usbd_errstr(err)));
+			 sc->cue_dev.dv_xname, addr, usbd_errstr(err)));
 		return (-1);
 	}
 
 	return (0);
 }
 
-Static int
+int
 cue_getmac(struct cue_softc *sc, void *buf)
 {
 	usb_device_request_t	req;
 	usbd_status		err;
 
-	DPRINTFN(10,("%s: cue_getmac\n", USBDEVNAME(sc->cue_dev)));
+	DPRINTFN(10,("%s: cue_getmac\n", sc->cue_dev.dv_xname));
 
 	req.bmRequestType = UT_READ_VENDOR_DEVICE;
 	req.bRequest = CUE_CMD_GET_MACADDR;
@@ -378,7 +331,7 @@ cue_getmac(struct cue_softc *sc, void *buf)
 
 	if (err) {
 		printf("%s: read MAC address failed\n",
-		       USBDEVNAME(sc->cue_dev));
+		       sc->cue_dev.dv_xname);
 		return (-1);
 	}
 
@@ -387,7 +340,7 @@ cue_getmac(struct cue_softc *sc, void *buf)
 
 #define CUE_BITS	9
 
-Static void
+void
 cue_setmulti(struct cue_softc *sc)
 {
 	struct ifnet		*ifp;
@@ -398,7 +351,7 @@ cue_setmulti(struct cue_softc *sc)
 	ifp = GET_IFP(sc);
 
 	DPRINTFN(2,("%s: cue_setmulti if_flags=0x%x\n",
-		    USBDEVNAME(sc->cue_dev), ifp->if_flags));
+		    sc->cue_dev.dv_xname, ifp->if_flags));
 
 	if (ifp->if_flags & IFF_PROMISC) {
 allmulti:
@@ -415,11 +368,7 @@ allmulti:
 		sc->cue_mctab[i] = 0;
 
 	/* now program new ones */
-#if defined(__NetBSD__)
-	ETHER_FIRST_MULTI(step, &sc->cue_ec, enm);
-#else
 	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
-#endif
 	while (enm != NULL) {
 		if (memcmp(enm->enm_addrlo,
 		    enm->enm_addrhi, ETHER_ADDR_LEN) != 0)
@@ -447,13 +396,13 @@ allmulti:
 	    &sc->cue_mctab, CUE_MCAST_TABLE_LEN);
 }
 
-Static void
+void
 cue_reset(struct cue_softc *sc)
 {
 	usb_device_request_t	req;
 	usbd_status		err;
 
-	DPRINTFN(2,("%s: cue_reset\n", USBDEVNAME(sc->cue_dev)));
+	DPRINTFN(2,("%s: cue_reset\n", sc->cue_dev.dv_xname));
 
 	if (usbd_is_dying(sc->cue_udev))
 		return;
@@ -467,7 +416,7 @@ cue_reset(struct cue_softc *sc)
 	err = usbd_do_request(sc->cue_udev, &req, NULL);
 
 	if (err)
-		printf("%s: reset failed\n", USBDEVNAME(sc->cue_dev));
+		printf("%s: reset failed\n", sc->cue_dev.dv_xname);
 
 	/* Wait a little while for the chip to get its brains in order. */
 	usbd_delay_ms(sc->cue_udev, 1);
@@ -476,9 +425,10 @@ cue_reset(struct cue_softc *sc)
 /*
  * Probe for a CATC chip.
  */
-USB_MATCH(cue)
+int
+cue_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(cue, uaa);
+	struct usb_attach_arg	*uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -491,10 +441,11 @@ USB_MATCH(cue)
  * Attach the interface. Allocate softc structures, do ifmedia
  * setup and ethernet/BPF attach.
  */
-USB_ATTACH(cue)
+void
+cue_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(cue, sc, uaa);
-	char			*devinfop;
+	struct cue_softc	*sc = (struct cue_softc *)self;
+	struct usb_attach_arg	*uaa = aux;
 	int			s;
 	u_char			eaddr[ETHER_ADDR_LEN];
 	usbd_device_handle	dev = uaa->device;
@@ -507,20 +458,13 @@ USB_ATTACH(cue)
 
 	DPRINTFN(5,(" : cue_attach: sc=%p, dev=%p", sc, dev));
 
-<<<<<<< HEAD
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->cue_dev), devinfop);
-	usbd_devinfo_free(devinfop);
-=======
 	sc->cue_udev = dev;
->>>>>>> origin/master
 
 	err = usbd_set_config_no(dev, CUE_CONFIG_NO, 1);
 	if (err) {
 		printf("%s: setting config no failed\n",
-		    USBDEVNAME(sc->cue_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->cue_dev.dv_xname);
+		return;
 	}
 
 	sc->cue_product = uaa->product;
@@ -534,8 +478,8 @@ USB_ATTACH(cue)
 	err = usbd_device2interface_handle(dev, CUE_IFACE_IDX, &iface);
 	if (err) {
 		printf("%s: getting interface handle failed\n",
-		    USBDEVNAME(sc->cue_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->cue_dev.dv_xname);
+		return;
 	}
 
 	sc->cue_iface = iface;
@@ -546,8 +490,8 @@ USB_ATTACH(cue)
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
 			printf("%s: couldn't get ep %d\n",
-			    USBDEVNAME(sc->cue_dev), i);
-			USB_ATTACH_ERROR_RETURN;
+			    sc->cue_dev.dv_xname, i);
+			return;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
@@ -575,12 +519,10 @@ USB_ATTACH(cue)
 	/*
 	 * A CATC chip was detected. Inform the world.
 	 */
-	printf("%s: address %s\n", USBDEVNAME(sc->cue_dev),
+	printf("%s: address %s\n", sc->cue_dev.dv_xname,
 	    ether_sprintf(eaddr));
 
-#if defined(__OpenBSD__)
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
-#endif
 
 	/* Initialize interface info.*/
 	ifp = GET_IFP(sc);
@@ -589,42 +531,31 @@ USB_ATTACH(cue)
 	ifp->if_ioctl = cue_ioctl;
 	ifp->if_start = cue_start;
 	ifp->if_watchdog = cue_watchdog;
-	strlcpy(ifp->if_xname, USBDEVNAME(sc->cue_dev), IFNAMSIZ);
+	strlcpy(ifp->if_xname, sc->cue_dev.dv_xname, IFNAMSIZ);
 
 	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Attach the interface. */
 	if_attach(ifp);
-	Ether_ifattach(ifp, eaddr);
+	ether_ifattach(ifp);
 
-	usb_callout_init(sc->cue_stat_ch);
+	timeout_set(&sc->cue_stat_ch, cue_tick, sc);
 
 	splx(s);
-<<<<<<< HEAD
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->cue_udev,
-	    USBDEV(sc->cue_dev));
-
-	USB_ATTACH_SUCCESS_RETURN;
-=======
->>>>>>> origin/master
 }
 
-USB_DETACH(cue)
+int
+cue_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(cue, sc);
+	struct cue_softc	*sc = (struct cue_softc *)self;
 	struct ifnet		*ifp = GET_IFP(sc);
 	int			s;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev), __func__));
+	DPRINTFN(2,("%s: %s: enter\n", sc->cue_dev.dv_xname, __func__));
 
-<<<<<<< HEAD
-	usb_uncallout(sc->cue_stat_ch, cue_tick, sc);
-=======
 	if (timeout_initialized(&sc->cue_stat_ch))
 		timeout_del(&sc->cue_stat_ch);
 
->>>>>>> origin/master
 	/*
 	 * Remove any pending task.  It cannot be executing because it run
 	 * in the same thread as detach.
@@ -647,43 +578,27 @@ USB_DETACH(cue)
 	    sc->cue_ep[CUE_ENDPT_RX] != NULL ||
 	    sc->cue_ep[CUE_ENDPT_INTR] != NULL)
 		printf("%s: detach has active endpoints\n",
-		       USBDEVNAME(sc->cue_dev));
+		       sc->cue_dev.dv_xname);
 #endif
 
 	splx(s);
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->cue_udev,
-	    USBDEV(sc->cue_dev));
-
-=======
->>>>>>> origin/master
 	return (0);
 }
 
 int
-<<<<<<< HEAD
-cue_activate(device_ptr_t self, enum devact act)
-=======
 cue_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct cue_softc *sc = (struct cue_softc *)self;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev), __func__));
+	DPRINTFN(2,("%s: %s: enter\n", sc->cue_dev.dv_xname, __func__));
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
-<<<<<<< HEAD
-		/* Deactivate the interface. */
-		if_deactivate(&sc->cue_ec.ec_if);
-		sc->cue_dying = 1;
-=======
 		usbd_deactivate(sc->cue_udev);
->>>>>>> origin/master
 		break;
 	}
 	return (0);
@@ -692,7 +607,7 @@ cue_activate(struct device *self, int act)
 /*
  * Initialize an RX descriptor and attach an MBUF cluster.
  */
-Static int
+int
 cue_newbuf(struct cue_softc *sc, struct cue_chain *c, struct mbuf *m)
 {
 	struct mbuf		*m_new = NULL;
@@ -701,14 +616,14 @@ cue_newbuf(struct cue_softc *sc, struct cue_chain *c, struct mbuf *m)
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 		if (m_new == NULL) {
 			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n", USBDEVNAME(sc->cue_dev));
+			    "-- packet dropped!\n", sc->cue_dev.dv_xname);
 			return (ENOBUFS);
 		}
 
 		MCLGET(m_new, M_DONTWAIT);
 		if (!(m_new->m_flags & M_EXT)) {
 			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n", USBDEVNAME(sc->cue_dev));
+			    "-- packet dropped!\n", sc->cue_dev.dv_xname);
 			m_freem(m_new);
 			return (ENOBUFS);
 		}
@@ -725,7 +640,7 @@ cue_newbuf(struct cue_softc *sc, struct cue_chain *c, struct mbuf *m)
 	return (0);
 }
 
-Static int
+int
 cue_rx_list_init(struct cue_softc *sc)
 {
 	struct cue_cdata	*cd;
@@ -754,7 +669,7 @@ cue_rx_list_init(struct cue_softc *sc)
 	return (0);
 }
 
-Static int
+int
 cue_tx_list_init(struct cue_softc *sc)
 {
 	struct cue_cdata	*cd;
@@ -786,7 +701,7 @@ cue_tx_list_init(struct cue_softc *sc)
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  */
-Static void
+void
 cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct cue_chain	*c = priv;
@@ -797,7 +712,7 @@ cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	u_int16_t		len;
 	int			s;
 
-	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->cue_dev),
+	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->cue_dev.dv_xname,
 		     __func__, status));
 
 	if (usbd_is_dying(sc->cue_udev))
@@ -812,7 +727,7 @@ cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		sc->cue_rx_errs++;
 		if (usbd_ratecheck(&sc->cue_rx_notice)) {
 			printf("%s: %u usb errors on rx: %s\n",
-			    USBDEVNAME(sc->cue_dev), sc->cue_rx_errs,
+			    sc->cue_dev.dv_xname, sc->cue_rx_errs,
 			    usbd_errstr(status));
 			sc->cue_rx_errs = 0;
 		}
@@ -861,9 +776,9 @@ cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
-	DPRINTFN(10,("%s: %s: deliver %d\n", USBDEVNAME(sc->cue_dev),
+	DPRINTFN(10,("%s: %s: deliver %d\n", sc->cue_dev.dv_xname,
 		    __func__, m->m_len));
-	IF_INPUT(ifp, m);
+	ether_input_mbuf(ifp, m);
  done1:
 	splx(s);
 
@@ -874,7 +789,7 @@ done:
 	    USBD_NO_TIMEOUT, cue_rxeof);
 	usbd_transfer(c->cue_xfer);
 
-	DPRINTFN(10,("%s: %s: start rx\n", USBDEVNAME(sc->cue_dev),
+	DPRINTFN(10,("%s: %s: start rx\n", sc->cue_dev.dv_xname,
 		    __func__));
 }
 
@@ -882,7 +797,7 @@ done:
  * A frame was downloaded to the chip. It's safe for us to clean up
  * the list buffers.
  */
-Static void
+void
 cue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct cue_chain	*c = priv;
@@ -895,7 +810,7 @@ cue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	s = splnet();
 
-	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->cue_dev),
+	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->cue_dev.dv_xname,
 		    __func__, status));
 
 	ifp->if_timer = 0;
@@ -907,7 +822,7 @@ cue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			return;
 		}
 		ifp->if_oerrors++;
-		printf("%s: usb error on tx: %s\n", USBDEVNAME(sc->cue_dev),
+		printf("%s: usb error on tx: %s\n", sc->cue_dev.dv_xname,
 		    usbd_errstr(status));
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(sc->cue_ep[CUE_ENDPT_TX]);
@@ -926,7 +841,7 @@ cue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	splx(s);
 }
 
-Static void
+void
 cue_tick(void *xsc)
 {
 	struct cue_softc	*sc = xsc;
@@ -937,13 +852,13 @@ cue_tick(void *xsc)
 	if (usbd_is_dying(sc->cue_udev))
 		return;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev), __func__));
+	DPRINTFN(2,("%s: %s: enter\n", sc->cue_dev.dv_xname, __func__));
 
 	/* Perform statistics update in process context. */
 	usb_add_task(sc->cue_udev, &sc->cue_tick_task);
 }
 
-Static void
+void
 cue_tick_task(void *xsc)
 {
 	struct cue_softc	*sc = xsc;
@@ -952,7 +867,7 @@ cue_tick_task(void *xsc)
 	if (usbd_is_dying(sc->cue_udev))
 		return;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev), __func__));
+	DPRINTFN(2,("%s: %s: enter\n", sc->cue_dev.dv_xname, __func__));
 
 	ifp = GET_IFP(sc);
 
@@ -964,7 +879,7 @@ cue_tick_task(void *xsc)
 		ifp->if_ierrors++;
 }
 
-Static int
+int
 cue_send(struct cue_softc *sc, struct mbuf *m, int idx)
 {
 	int			total_len;
@@ -983,7 +898,7 @@ cue_send(struct cue_softc *sc, struct mbuf *m, int idx)
 	total_len = m->m_pkthdr.len + 2;
 
 	DPRINTFN(10,("%s: %s: total_len=%d\n",
-		     USBDEVNAME(sc->cue_dev), __func__, total_len));
+		     sc->cue_dev.dv_xname, __func__, total_len));
 
 	/* The first two bytes are the frame length */
 	c->cue_buf[0] = (u_int8_t)m->m_pkthdr.len;
@@ -996,7 +911,7 @@ cue_send(struct cue_softc *sc, struct mbuf *m, int idx)
 	/* Transmit */
 	err = usbd_transfer(c->cue_xfer);
 	if (err != USBD_IN_PROGRESS) {
-		printf("%s: cue_send error=%s\n", USBDEVNAME(sc->cue_dev),
+		printf("%s: cue_send error=%s\n", sc->cue_dev.dv_xname,
 		       usbd_errstr(err));
 		/* Stop the interface from process context. */
 		usb_add_task(sc->cue_udev, &sc->cue_stop_task);
@@ -1008,7 +923,7 @@ cue_send(struct cue_softc *sc, struct mbuf *m, int idx)
 	return (0);
 }
 
-Static void
+void
 cue_start(struct ifnet *ifp)
 {
 	struct cue_softc	*sc = ifp->if_softc;
@@ -1017,7 +932,7 @@ cue_start(struct ifnet *ifp)
 	if (usbd_is_dying(sc->cue_udev))
 		return;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev),__func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->cue_dev.dv_xname,__func__));
 
 	if (ifp->if_flags & IFF_OACTIVE)
 		return;
@@ -1050,7 +965,7 @@ cue_start(struct ifnet *ifp)
 	ifp->if_timer = 5;
 }
 
-Static void
+void
 cue_init(void *xsc)
 {
 	struct cue_softc	*sc = xsc;
@@ -1061,7 +976,7 @@ cue_init(void *xsc)
 	if (usbd_is_dying(sc->cue_udev))
 		return;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev),__func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->cue_dev.dv_xname,__func__));
 
 	if (ifp->if_flags & IFF_RUNNING)
 		return;
@@ -1079,11 +994,7 @@ cue_init(void *xsc)
 	cue_csr_write_1(sc, CUE_ADVANCED_OPMODES,
 	    CUE_AOP_EMBED_RXLEN | 0x03); /* 1 wait state */
 
-#if defined(__OpenBSD__)
 	eaddr = sc->arpcom.ac_enaddr;
-#elif defined(__NetBSD__)
-	eaddr = LLADDR(ifp->if_sadl);
-#endif
 	/* Set MAC address */
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
 		cue_csr_write_1(sc, CUE_PAR0 - i, eaddr[i]);
@@ -1096,14 +1007,14 @@ cue_init(void *xsc)
 
 	/* Init TX ring. */
 	if (cue_tx_list_init(sc) == ENOBUFS) {
-		printf("%s: tx list init failed\n", USBDEVNAME(sc->cue_dev));
+		printf("%s: tx list init failed\n", sc->cue_dev.dv_xname);
 		splx(s);
 		return;
 	}
 
 	/* Init RX ring. */
 	if (cue_rx_list_init(sc) == ENOBUFS) {
-		printf("%s: rx list init failed\n", USBDEVNAME(sc->cue_dev));
+		printf("%s: rx list init failed\n", sc->cue_dev.dv_xname);
 		splx(s);
 		return;
 	}
@@ -1137,14 +1048,10 @@ cue_init(void *xsc)
 
 	splx(s);
 
-<<<<<<< HEAD
-	usb_callout(sc->cue_stat_ch, hz, cue_tick, sc);
-=======
 	timeout_add_sec(&sc->cue_stat_ch, 1);
->>>>>>> origin/master
 }
 
-Static int
+int
 cue_open_pipes(struct cue_softc *sc)
 {
 	struct cue_chain	*c;
@@ -1156,14 +1063,14 @@ cue_open_pipes(struct cue_softc *sc)
 	    USBD_EXCLUSIVE_USE, &sc->cue_ep[CUE_ENDPT_RX]);
 	if (err) {
 		printf("%s: open rx pipe failed: %s\n",
-		    USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+		    sc->cue_dev.dv_xname, usbd_errstr(err));
 		return (EIO);
 	}
 	err = usbd_open_pipe(sc->cue_iface, sc->cue_ed[CUE_ENDPT_TX],
 	    USBD_EXCLUSIVE_USE, &sc->cue_ep[CUE_ENDPT_TX]);
 	if (err) {
 		printf("%s: open tx pipe failed: %s\n",
-		    USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+		    sc->cue_dev.dv_xname, usbd_errstr(err));
 		return (EIO);
 	}
 
@@ -1180,7 +1087,7 @@ cue_open_pipes(struct cue_softc *sc)
 	return (0);
 }
 
-Static int
+int
 cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cue_softc	*sc = ifp->if_softc;
@@ -1200,11 +1107,7 @@ cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
-#if defined(__NetBSD__)
-			arp_ifinit(ifp, ifa);
-#else
 			arp_ifinit(&sc->arpcom, ifa);
-#endif
 			break;
 #endif /* INET */
 		}
@@ -1246,7 +1149,7 @@ cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	return (error);
 }
 
-Static void
+void
 cue_watchdog(struct ifnet *ifp)
 {
 	struct cue_softc	*sc = ifp->if_softc;
@@ -1254,13 +1157,13 @@ cue_watchdog(struct ifnet *ifp)
 	usbd_status		stat;
 	int			s;
 
-	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev),__func__));
+	DPRINTFN(5,("%s: %s: enter\n", sc->cue_dev.dv_xname,__func__));
 
 	if (usbd_is_dying(sc->cue_udev))
 		return;
 
 	ifp->if_oerrors++;
-	printf("%s: watchdog timeout\n", USBDEVNAME(sc->cue_dev));
+	printf("%s: watchdog timeout\n", sc->cue_dev.dv_xname);
 
 	s = splusb();
 	c = &sc->cue_cdata.cue_tx_chain[0];
@@ -1276,14 +1179,14 @@ cue_watchdog(struct ifnet *ifp)
  * Stop the adapter and free any mbufs allocated to the
  * RX and TX lists.
  */
-Static void
+void
 cue_stop(struct cue_softc *sc)
 {
 	usbd_status		err;
 	struct ifnet		*ifp;
 	int			i;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->cue_dev),__func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->cue_dev.dv_xname,__func__));
 
 	ifp = GET_IFP(sc);
 	ifp->if_timer = 0;
@@ -1291,19 +1194,19 @@ cue_stop(struct cue_softc *sc)
 
 	cue_csr_write_1(sc, CUE_ETHCTL, 0);
 	cue_reset(sc);
-	usb_uncallout(sc->cue_stat_ch, cue_tick, sc);
+	timeout_del(&sc->cue_stat_ch);
 
 	/* Stop transfers. */
 	if (sc->cue_ep[CUE_ENDPT_RX] != NULL) {
 		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: abort rx pipe failed: %s\n",
-			USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
-			USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->cue_ep[CUE_ENDPT_RX] = NULL;
 	}
@@ -1312,12 +1215,12 @@ cue_stop(struct cue_softc *sc)
 		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: abort tx pipe failed: %s\n",
-			USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
-			    USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			    sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->cue_ep[CUE_ENDPT_TX] = NULL;
 	}
@@ -1326,12 +1229,12 @@ cue_stop(struct cue_softc *sc)
 		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: abort intr pipe failed: %s\n",
-			USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",
-			    USBDEVNAME(sc->cue_dev), usbd_errstr(err));
+			    sc->cue_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->cue_ep[CUE_ENDPT_INTR] = NULL;
 	}

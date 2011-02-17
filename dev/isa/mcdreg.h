@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcdreg.h,v 1.5 2000/12/06 17:18:41 deraadt Exp $	*/
+/*	$OpenBSD: mcdreg.h,v 1.6 2003/11/16 20:30:06 avsm Exp $	*/
 /*	$NetBSD: mcdreg.h,v 1.8 1997/04/04 18:59:37 christos Exp $	*/
 
 /*

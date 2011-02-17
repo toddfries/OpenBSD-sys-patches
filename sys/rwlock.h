@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rwlock.h,v 1.8 2006/06/05 05:15:22 tedu Exp $	*/
-=======
 /*	$OpenBSD: rwlock.h,v 1.13 2010/09/24 13:21:30 matthew Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -80,7 +76,7 @@ struct rwlock {
 	const char *rwl_name;
 };
 
-#define RWLOCK_INITIALIZER	{ 0 }
+#define RWLOCK_INITIALIZER(name)	{ 0, name }
 
 #define RWLOCK_WAIT		0x01UL
 #define RWLOCK_WRWANT		0x02UL
@@ -120,6 +116,8 @@ void rw_exit(struct rwlock *);
 #define RW_SLEEPFAIL	0x20UL		/* fail if we slept for the lock */
 #define RW_NOSLEEP	0x40UL		/* don't wait for the lock */
 
-int rw_test_and_set(volatile unsigned long *, unsigned long, unsigned long);
+#ifndef rw_cas
+int rw_cas(volatile unsigned long *, unsigned long, unsigned long);
+#endif
 
 #endif

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_urlreg.h,v 1.6 2004/09/29 09:51:07 dlg Exp $ */
-=======
 /*	$OpenBSD: if_urlreg.h,v 1.13 2010/12/06 04:41:39 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_urlreg.h,v 1.1 2002/03/28 21:09:11 ichiro Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -129,11 +125,7 @@ typedef	uWord url_rxhdr_t;	/* Recive Header */
 #define	URL_RXHDR_PHYPKT_MASK	(0x4000) /* Physical match packet */
 #define	URL_RXHDR_MCASTPKT_MASK	(0x8000) /* Multicast packet */
 
-#if defined(__NetBSD__)
-#define	GET_IFP(sc)		(&(sc)->sc_ec.ec_if)
-#else
 #define	GET_IFP(sc)		(&(sc)->sc_ac.ac_if)
-#endif
 #define	GET_MII(sc)		(&(sc)->sc_mii)
 
 struct url_chain {
@@ -148,7 +140,7 @@ struct url_cdata {
 	struct url_chain	url_tx_chain[URL_TX_LIST_CNT];
 	struct url_chain	url_rx_chain[URL_TX_LIST_CNT];
 #if 0
-	/* XXX: Intrrupt Endpoint is not yet supported! */
+	/* XXX: Interrupt Endpoint is not yet supported! */
 	struct url_intrpkg	url_ibuf;
 #endif
 	int			url_tx_prod;
@@ -158,7 +150,7 @@ struct url_cdata {
 };
 
 struct url_softc {
-	USBBASEDEVICE		sc_dev;	/* base device */
+	struct device		sc_dev;	/* base device */
 	usbd_device_handle	sc_udev;
 
 	/* USB */
@@ -170,19 +162,15 @@ struct url_softc {
 	usbd_pipe_handle	sc_pipe_rx;
 	usbd_pipe_handle	sc_pipe_tx;
 	usbd_pipe_handle	sc_pipe_intr;
-	usb_callout_t		sc_stat_ch;
+	struct timeout		sc_stat_ch;
 	u_int			sc_rx_errs;
 	/* u_int		sc_intr_errs; */
 	struct timeval		sc_rx_notice;
 
 	/* Ethernet */
-#if defined(__NetBSD__)
-	struct ethercom		sc_ec; /* ethernet common */
-#else
 	struct arpcom		sc_ac; /* ethernet common */
-#endif
 	struct mii_data		sc_mii;
-	struct lock		sc_mii_lock;
+	struct rwlock		sc_mii_lock;
 	int			sc_link;
 #define	sc_media url_mii.mii_media
 	struct url_cdata	sc_cdata;

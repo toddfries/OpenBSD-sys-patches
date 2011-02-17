@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: ipgphyreg.h,v 1.2 2009/08/08 17:12:40 naddy Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006, Pyun YongHyeon

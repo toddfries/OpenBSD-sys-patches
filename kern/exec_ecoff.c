@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_ecoff.c,v 1.9 2001/11/15 06:22:30 art Exp $	*/
+/*	$OpenBSD: exec_ecoff.c,v 1.10 2005/11/12 04:31:24 jsg Exp $	*/
 /*	$NetBSD: exec_ecoff.c,v 1.8 1996/05/19 20:36:06 jonathan Exp $	*/
 
 /*

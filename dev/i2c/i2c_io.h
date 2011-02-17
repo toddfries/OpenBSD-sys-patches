@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: i2c_io.h,v 1.1 2004/05/23 17:33:43 grange Exp $	*/
 /*	$NetBSD: i2c_io.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.pci,v 1.227 2007/03/22 02:48:42 dlg Exp $
-=======
 #	$OpenBSD: files.pci,v 1.277 2011/01/15 04:35:34 kevlo Exp $
->>>>>>> origin/master
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -19,7 +15,6 @@ file	dev/pci/pci_subr.c		pci
 # Generic VGA
 attach	vga at pci with vga_pci
 file	dev/pci/vga_pci.c		vga_pci
-file	dev/pci/agp.c			vga_pci & pciagp
 
 device	tga: wsemuldisplaydev, rasops8, rasops32
 attach	tga at pci
@@ -83,10 +78,16 @@ device	arc: scsi
 attach	arc at pci
 file	dev/pci/arc.c			arc
 
+# JMicron JMB36x controllers
+device	jmb {}
+attach	jmb at pci
+file	dev/pci/jmb.c			jmb
+
 # Advanced Host Controller Interface for Serial ATA
 device	ahci: scsi, atascsi
-attach	ahci at pci
-file	dev/pci/ahci.c			ahci
+attach	ahci at pci with ahci_pci
+attach	ahci at jmb with ahci_jmb
+file	dev/pci/ahci.c			ahci | ahci_pci | ahci_jmb
 
 # AMI MegaRAID Express x00/Elite 1500/Express 1x00 RAID Controllers
 attach	ami at pci with ami_pci
@@ -131,14 +132,11 @@ attach	azalia at pci
 file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
-<<<<<<< HEAD
-=======
 # VIA Envy24 (aka ICE1712)
 device	envy: audio, ac97, midibus
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
->>>>>>> origin/master
 # Creative Labs EMU10k1 (SBLive! series and PCI512)
 device	emu: audio, auconv, mulaw, ac97
 attach	emu at pci
@@ -209,7 +207,7 @@ file	dev/pci/cac_pci.c		cac_pci
 attach	ciss at pci with ciss_pci
 file	dev/pci/ciss_pci.c		ciss_pci
 
-# Qlogic ISP 10x0 (PCI) family
+# QLogic ISP 10x0 (PCI) family
 # device declaration in sys/conf/files
 attach	isp at pci with isp_pci
 file	dev/pci/isp_pci.c		isp_pci
@@ -218,8 +216,6 @@ file	dev/pci/isp_pci.c		isp_pci
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
 
-<<<<<<< HEAD
-=======
 # LSI Logic Fusion-MPT Message Passing Interface 2.0
 device	mpii: scsi
 attach	mpii at pci
@@ -229,10 +225,14 @@ file	dev/pci/mpii.c			mpii
 attach	sli at pci with sli_pci
 file	dev/pci/sli_pci.c		sli_pci
 
->>>>>>> origin/master
 # Silicon Image 3124/3132/3531 SATALink
 attach	sili at pci with sili_pci
 file	dev/pci/sili_pci.c		sili_pci
+
+# QLogic iSCSI HBAs
+device	qli: scsi
+attach	qli at pci with qli_pci
+file	dev/pci/qli_pci.c		qli_pci
 
 # Ethernet driver for DC21040-based boards
 device	de: ether, ifnet, ifmedia
@@ -270,8 +270,9 @@ file	dev/pci/neo.c			neo
 
 # PCI IDE controllers
 device	pciide {[channel = -1]}: cy82c693, wdc_base, ata, atapi
-attach	pciide at pci
-file	dev/pci/pciide.c		pciide
+attach	pciide at pci with pciide_pci
+attach	pciide at jmb with pciide_jmb
+file	dev/pci/pciide.c		pciide | pciide_pci | pciide_jmb
 
 # PCI-PCI bridge chips
 device	ppb: pcibus
@@ -372,6 +373,30 @@ device	xge: ether, ifnet, ifmedia
 attach	xge  at pci
 file	dev/pci/if_xge.c		xge
 
+# NetXen NX2031/NX2035 10Gb Ethernet
+device	nxe: ether, ifnet, ifmedia
+attach	nxe at pci
+file	dev/pci/if_nxe.c		nxe
+
+# Tehuti Networks 10Gb Ethernet
+device	thtc {}
+attach	thtc at pci
+device	tht: ether, ifnet, ifmedia, firmload
+attach	tht at thtc   
+file	dev/pci/if_tht.c		thtc | tht
+
+# Chelsio 10Gb Ethernet
+device	cheg {}
+attach	cheg at pci
+device	che: ether, ifnet, ifmedia, firmload
+attach	che at cheg   
+file	dev/pci/if_che.c		cheg | che
+
+# Myricom Myri-10G Ethernet
+device	myx: ether, ifnet, ifmedia
+attach	myx at pci
+file	dev/pci/if_myx.c		myx
+
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
 file	dev/pci/if_dc_pci.c		dc_pci
@@ -422,11 +447,6 @@ device	noct: crypto
 attach	noct at pci
 file	dev/pci/noct.c			noct
 
-# Pijnenburg PCC-ISES
-device	ises: crypto
-attach	ises at pci
-file	dev/pci/ises.c			ises
-
 # Safenet SafeXcel 1141
 device	safe: crypto
 attach	safe at pci
@@ -459,7 +479,7 @@ file	dev/pci/if_ste.c		ste
 # Industrial Computer Source WDT-50x
 device	wdt: pcibus
 attach	wdt at pci
-file	dev/pci/wdt.c			wdt	needs-flag
+file	dev/pci/wdt.c			wdt
 
 # Berkshire PCI-PC Watchdog
 device	berkwdt: pcibus
@@ -540,6 +560,11 @@ device	wpi: ifnet, wlan, firmload
 attach	wpi at pci
 file	dev/pci/if_wpi.c		wpi
 
+# Intel Wireless WiFi Link 4965AGN
+device	iwn: ifnet, wlan, firmload
+attach	iwn at pci
+file	dev/pci/if_iwn.c		iwn
+
 # C-Media CMI8x38 Audio Chip
 device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
@@ -584,7 +609,7 @@ attach	bge at pci
 file	dev/pci/if_bge.c		bge
 
 # Broadcom BCM570[68] gigabit ethernet
-device	bnx: ether, ifnet, mii, ifmedia, mii_phy
+device	bnx: ether, ifnet, mii, ifmedia, mii_phy, firmload
 attach	bnx at pci
 file	dev/pci/if_bnx.c		bnx
 
@@ -603,8 +628,6 @@ device	nfe: ether, ifnet, mii, ifmedia, mii_phy
 attach	nfe at pci
 file	dev/pci/if_nfe.c		nfe
 
-<<<<<<< HEAD
-=======
 # Agere ET1310 Ethernet
 device	et: ether, ifnet, mii, ifmedia, mii_phy
 attach	et at pci
@@ -630,7 +653,6 @@ device	ale: ether, ifnet, mii, ifmedia, mii_phy
 attach	ale at pci
 file	dev/pci/if_ale.c		ale
 
->>>>>>> origin/master
 # AMD-76x PM and SMBus controller
 device	amdpm: i2cbus
 attach	amdpm at pci
@@ -684,6 +706,12 @@ file	dev/pci/if_pgt_pci.c		pgt_pci
 attach	malo at pci with malo_pci
 file	dev/pci/if_malo_pci.c		malo_pci
 
+#
+# Broadcom AirForce
+#
+attach	bwi at pci with bwi_pci
+file	dev/pci/if_bwi_pci.c		bwi_pci
+
 # Sangoma PCI card
 device	san: ifnet, ifmedia, sppp
 attach	san at pci
@@ -720,6 +748,11 @@ device	vic: ether, ifnet, ifmedia
 attach	vic at pci
 file	dev/pci/if_vic.c		vic
 
+# Atheros L2 Ethernet
+device	lii: ether, ifnet, ifmedia, mii
+attach	lii at pci
+file	dev/pci/if_lii.c		lii
+
 # Intel ICH SMBus controller
 device	ichiic: i2cbus
 attach	ichiic at pci
@@ -748,8 +781,6 @@ file	dev/pci/nviic.c			nviic
 # SD Host Controller
 attach	sdhc at pci with sdhc_pci
 file	dev/pci/sdhc_pci.c		sdhc
-<<<<<<< HEAD
-=======
 
 # AMD NPT Family 0Fh Processors, Function 3 -- Miscellaneous Control
 device	kate
@@ -780,4 +811,3 @@ file	dev/pci/itherm.c		itherm
 device	glxpcib: isabus, gpiobus
 attach	glxpcib at pci
 file	dev/pci/glxpcib.c		glxpcib
->>>>>>> origin/master

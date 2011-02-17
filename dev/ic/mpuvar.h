@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpuvar.h,v 1.4 2002/11/28 22:37:20 mickey Exp $	*/
-=======
 /*	$OpenBSD: mpuvar.h,v 1.6 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mpu401var.h,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
 
 /*

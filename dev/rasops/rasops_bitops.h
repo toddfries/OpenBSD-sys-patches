@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rasops_bitops.h,v 1.2 2002/07/27 22:17:49 miod Exp $ */
-=======
 /*	$OpenBSD: rasops_bitops.h,v 1.6 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* 	$NetBSD: rasops_bitops.h,v 1.6 2000/04/12 14:22:30 pk Exp $	*/
 
 /*-

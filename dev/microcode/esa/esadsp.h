@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: esadsp.h,v 1.1 2002/04/08 01:47:33 frantzen Exp $ */
-=======
 /* $OpenBSD: esadsp.h,v 1.3 2009/06/02 18:06:34 deraadt Exp $ */
->>>>>>> origin/master
 /* $NetBSD: esadsp.h,v 1.4 2002/01/07 07:33:09 jmcneill Exp $ */
 
 /*

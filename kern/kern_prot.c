@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_prot.c,v 1.29 2007/03/15 10:22:30 art Exp $	*/
-=======
 /*	$OpenBSD: kern_prot.c,v 1.46 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -791,8 +787,7 @@ crget(void)
 {
 	struct ucred *cr;
 
-	cr = pool_get(&ucred_pool, PR_WAITOK);
-	bzero((caddr_t)cr, sizeof(*cr));
+	cr = pool_get(&ucred_pool, PR_WAITOK|PR_ZERO);
 	cr->cr_ref = 1;
 	return (cr);
 }

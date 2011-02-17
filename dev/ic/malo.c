@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: malo.c,v 1.63 2007/02/14 20:52:26 mglocker Exp $ */
-=======
 /*	$OpenBSD: malo.c,v 1.92 2010/08/27 17:08:00 jsg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -58,12 +54,10 @@
 #include <dev/ic/malo.h>
 
 #ifdef MALO_DEBUG
-#define DPRINTF(x)	do { if (malo_debug > 0) printf x; } while (0)
-#define DPRINTFN(n, x)	do { if (malo_debug >= (n)) printf x; } while (0)
-int malo_debug = 1;
+int malo_d = 1;
+#define DPRINTF(l, x...)	do { if ((l) <= malo_d) printf(x); } while (0)
 #else
-#define DPRINTF(x)
-#define DPRINTFN(n, x)
+#define DPRINTF(l, x...)
 #endif
 
 /* internal structures and defines */
@@ -115,12 +109,12 @@ struct malo_tx_desc {
 #define MALO_RX_RING_COUNT	256
 #define MALO_TX_RING_COUNT	256
 #define MALO_MAX_SCATTER	8	/* XXX unknown, wild guess */
+#define MALO_CMD_TIMEOUT	50	/* MALO_CMD_TIMEOUT * 100us */
 
 /*
  * Firmware commands
  */
 #define MALO_CMD_GET_HW_SPEC		0x0003
-#define MALO_CMD_SET_WEPKEY		0x0013
 #define MALO_CMD_SET_RADIO		0x001c
 #define MALO_CMD_SET_AID		0x010d
 #define MALO_CMD_SET_TXPOWER		0x001e
@@ -165,18 +159,6 @@ struct malo_hw_spec {
 	uint32_t	WcbBase3;
 } __packed;
 
-struct malo_cmd_wepkey {
-	uint16_t	action;
-	uint8_t		len;
-	uint8_t		flags;
-	uint16_t	index;
-	uint8_t		value[IEEE80211_KEYBUF_SIZE];
-	uint8_t		txmickey[IEEE80211_WEP_MICLEN];
-	uint8_t		rxmickey[IEEE80211_WEP_MICLEN];
-	uint64_t	rxseqctr;
-	uint64_t	txseqctr;
-} __packed;
-
 struct malo_cmd_radio {
 	uint16_t	action;
 	uint16_t	preamble_mode;
@@ -217,6 +199,11 @@ struct malo_cmd_rate {
 	uint8_t		dataratetype;
 	uint8_t		rateindex;
 	uint8_t		aprates[14];
+} __packed;
+
+struct malo_cmd_rts {
+	uint16_t	action;
+	uint32_t	threshold;
 } __packed;
 
 struct malo_cmd_slot {
@@ -287,17 +274,16 @@ void	malo_rx_intr(struct malo_softc *sc);
 int	malo_load_bootimg(struct malo_softc *sc);
 int	malo_load_firmware(struct malo_softc *sc);
 
-int	malo_set_wepkey(struct malo_softc *sc);
 int	malo_set_slot(struct malo_softc *sc);
 void	malo_update_slot(struct ieee80211com *ic);
+#ifdef MALO_DEBUG
 void	malo_hexdump(void *buf, int len);
+#endif
 static char *
 	malo_cmd_string(uint16_t cmd);
 static char *
 	malo_cmd_string_result(uint16_t result);
 int	malo_cmd_get_spec(struct malo_softc *sc);
-int	malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_wepkey *wk,
-	    uint16_t wk_i);
 int	malo_cmd_set_prescan(struct malo_softc *sc);
 int	malo_cmd_set_postscan(struct malo_softc *sc, uint8_t *macaddr,
 	    uint8_t ibsson);
@@ -311,6 +297,7 @@ int	malo_cmd_set_txpower(struct malo_softc *sc, unsigned int powerlevel);
 int	malo_cmd_set_rts(struct malo_softc *sc, uint32_t threshold);
 int	malo_cmd_set_slot(struct malo_softc *sc, uint8_t slot);
 int	malo_cmd_set_rate(struct malo_softc *sc, uint8_t rate);
+void	malo_cmd_response(struct malo_softc *sc);
 
 int
 malo_intr(void *arg)
@@ -328,27 +315,14 @@ malo_intr(void *arg)
 	if (status & 0x2)
 		malo_rx_intr(sc);
 	if (status & 0x4) {
-		struct malo_cmdheader *hdr = sc->sc_cmd_mem;
-
-		if (letoh16(hdr->result) != MALO_CMD_RESULT_OK) {
-			printf("%s: firmware cmd %s failed with %s\n",
-			    sc->sc_dev.dv_xname,
-			    malo_cmd_string(hdr->cmd),
-			    malo_cmd_string_result(hdr->result));
-		}
-#ifdef MALO_DEBUG
-		printf("%s: cmd answer for %s=%s\n",
-		    sc->sc_dev.dv_xname,
-		    malo_cmd_string(hdr->cmd),
-		    malo_cmd_string_result(hdr->result));
-		if (malo_debug > 2)
-			malo_hexdump(hdr, letoh16(hdr->size));
-#endif
+		/* XXX cmd done interrupt handling doesn't work yet */
+		DPRINTF(1, "%s: got cmd done interrupt\n", sc->sc_dev.dv_xname);
+		//malo_cmd_response(sc);
 	}
 
 	if (status & ~0x7)
-		DPRINTF(("%s: unkown interrupt %x\n", sc->sc_dev.dv_xname,
-		    status));
+		DPRINTF(1, "%s: unknown interrupt %x\n",
+		    sc->sc_dev.dv_xname, status);
 
 	/* just ack the interrupt */
 	malo_ctl_write4(sc, 0x0c30, 0);
@@ -402,7 +376,8 @@ malo_attach(struct malo_softc *sc)
 	    IEEE80211_C_MONITOR |
 	    IEEE80211_C_SHPREAMBLE |
 	    IEEE80211_C_SHSLOT |
-	    IEEE80211_C_WEP;
+	    IEEE80211_C_WEP |
+	    IEEE80211_C_RSN;
 	ic->ic_opmode = IEEE80211_M_STA;
 	ic->ic_state = IEEE80211_S_INIT;
 	ic->ic_max_rssi = 75;
@@ -535,16 +510,20 @@ malo_send_cmd_dma(struct malo_softc *sc, bus_addr_t addr)
 	malo_ctl_write4(sc, 0x0c18, 2); /* CPU_TRANSFER_CMD */
 	malo_ctl_barrier(sc, BUS_SPACE_BARRIER_WRITE);
 
-	for (i = 0; i < 10; i++) {
+	for (i = 0; i < MALO_CMD_TIMEOUT; i++) {
 		delay(100);
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
 		    BUS_DMASYNC_POSTWRITE | BUS_DMASYNC_POSTREAD);
 		if (hdr->cmd & htole16(0x8000))
 			break;
 	}
-
-	if (i == 10)
+	if (i == MALO_CMD_TIMEOUT) {
+		printf("%s: timeout while waiting for cmd response!\n",
+		    sc->sc_dev.dv_xname);
 		return (ETIMEDOUT);
+	}
+
+	malo_cmd_response(sc);
 
 	return (0);
 }
@@ -869,7 +848,7 @@ malo_init(struct ifnet *ifp)
 	uint8_t chan;
 	int error;
 
-	DPRINTF(("%s: %s\n", ifp->if_xname, __func__));
+	DPRINTF(1, "%s: %s\n", ifp->if_xname, __func__);
 
 	/* if interface already runs stop it first */
 	if (ifp->if_flags & IFF_RUNNING)
@@ -879,8 +858,6 @@ malo_init(struct ifnet *ifp)
 	if (sc->sc_enable)
 		sc->sc_enable(sc);
 
-	/* ???, what is this for, seems unnecessary */
-	/* malo_ctl_write4(sc, 0x0c38, 0x1f); */
 	/* disable interrupts */
 	malo_ctl_read4(sc, 0x0c30);
 	malo_ctl_write4(sc, 0x0c30, 0);
@@ -938,16 +915,6 @@ malo_init(struct ifnet *ifp)
 		goto fail;
 	}
 
-	/* WEP */
-	if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
-		/* set key */
-		if (malo_set_wepkey(sc)) {
-			printf("%s: setting WEP key failed!\n",
-			    sc->sc_dev.dv_xname);
-			goto fail;
-		}
-	}
-
 	ifp->if_flags |= IFF_RUNNING;
 
 	if (ic->ic_opmode != IEEE80211_M_MONITOR)
@@ -961,15 +928,9 @@ malo_init(struct ifnet *ifp)
 
 fail:
 	/* reset adapter */
-<<<<<<< HEAD
-	DPRINTF(("%s: malo_init failed, reseting card\n",
-	    sc->sc_dev.dv_xname));
-	malo_ctl_write4(sc, 0x0c18, (1 << 15));
-=======
 	DPRINTF(1, "%s: malo_init failed, resetting card\n",
 	    sc->sc_dev.dv_xname);
 	malo_stop(sc);
->>>>>>> origin/master
 	return (error);
 }
 
@@ -981,6 +942,7 @@ malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
 	int s, error = 0;
+	uint8_t chan;
 
 	s = splnet();
 
@@ -1012,6 +974,21 @@ malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (error == ENETRESET)
 			error = 0;
 		break;
+	case SIOCS80211CHANNEL:
+		/* allow fast channel switching in monitor mode */
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING)) {
+				ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+				chan = ieee80211_chan2ieee(ic,
+				    ic->ic_bss->ni_chan);
+				malo_cmd_set_channel(sc, chan);
+			}
+			error = 0;
+		}
+		break;
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
 		break;
@@ -1037,7 +1014,7 @@ malo_start(struct ifnet *ifp)
 	struct mbuf *m0;
 	struct ieee80211_node *ni;
 
-	DPRINTFN(2, ("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1097,7 +1074,7 @@ malo_stop(struct malo_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 
-	DPRINTF(("%s: %s\n", ifp->if_xname, __func__));
+	DPRINTF(1, "%s: %s\n", ifp->if_xname, __func__);
 
 	/* reset adapter */
 	if (ifp->if_flags & IFF_RUNNING)
@@ -1135,7 +1112,7 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	uint8_t chan;
 	int rate;
 
-	DPRINTF(("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	ostate = ic->ic_state;
 	timeout_del(&sc->sc_scan_to);
@@ -1146,8 +1123,8 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	case IEEE80211_S_SCAN:
 		if (ostate == IEEE80211_S_INIT) {
 			if (malo_cmd_set_prescan(sc) != 0)
-				DPRINTF(("%s: can't set prescan\n",
-				    sc->sc_dev.dv_xname));
+				DPRINTF(1, "%s: can't set prescan\n",
+				    sc->sc_dev.dv_xname);
 		} else {
 			chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 
@@ -1156,13 +1133,13 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		timeout_add_msec(&sc->sc_scan_to, 500);
 		break;
 	case IEEE80211_S_AUTH:
-		DPRINTF(("newstate AUTH\n"));
+		DPRINTF(1, "%s: newstate AUTH\n", sc->sc_dev.dv_xname);
 		malo_cmd_set_postscan(sc, ic->ic_myaddr, 1);
 		chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 		malo_cmd_set_channel(sc, chan);
 		break;
 	case IEEE80211_S_ASSOC:
-		DPRINTF(("newstate ASSOC\n"));
+		DPRINTF(1, "%s: newstate ASSOC\n", sc->sc_dev.dv_xname);
 		if (ic->ic_flags & IEEE80211_F_SHPREAMBLE)
 			malo_cmd_set_radio(sc, 1, 3); /* short preamble */
 		else
@@ -1183,7 +1160,7 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		malo_set_slot(sc);
 		break;
 	case IEEE80211_S_RUN:
-		DPRINTF(("newstate RUN\n"));
+		DPRINTF(1, "%s: newstate RUN\n", sc->sc_dev.dv_xname);
 		break;
 	default:
 		break;
@@ -1203,11 +1180,9 @@ malo_node_alloc(struct ieee80211com *ic)
 {
 	struct malo_node *wn;
 
-	wn = malloc(sizeof(struct malo_node), M_DEVBUF, M_NOWAIT);
+	wn = malloc(sizeof(*wn), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (wn == NULL)
 		return (NULL);
-
-	bzero(wn, sizeof(struct malo_node));
 
 	return ((struct ieee80211_node *)wn);
 }
@@ -1217,7 +1192,7 @@ malo_media_change(struct ifnet *ifp)
 {
 	int error;
 
-	DPRINTF(("%s: %s\n", ifp->if_xname, __func__));
+	DPRINTF(1, "%s: %s\n", ifp->if_xname, __func__);
 
 	error = ieee80211_media_change(ifp);
 	if (error != ENETRESET)
@@ -1332,7 +1307,7 @@ malo_next_scan(void *arg)
 	struct ifnet *ifp = &ic->ic_if;
 	int s;
 
-	DPRINTF(("%s: %s\n", ifp->if_xname, __func__));
+	DPRINTF(1, "%s: %s\n", ifp->if_xname, __func__);
 
 	s = splnet();
 
@@ -1352,7 +1327,7 @@ malo_tx_intr(struct malo_softc *sc)
 	struct malo_node *rn;
 	int stat;
 
-	DPRINTFN(2, ("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	stat = sc->sc_txring.stat;
 	for (;;) {
@@ -1372,11 +1347,13 @@ malo_tx_intr(struct malo_softc *sc)
 		/* check TX state */
 		switch (letoh32(desc->status) & 0x1) {
 		case 0x1:
-			DPRINTFN(2, ("data frame was sent successfully\n"));
+			DPRINTF(2, "%s: data frame was sent successfully\n",
+			    sc->sc_dev.dv_xname);
 			ifp->if_opackets++;
 			break;
 		default:
-			DPRINTF(("data frame sending error\n"));
+			DPRINTF(1, "%s: data frame sending error\n",
+			    sc->sc_dev.dv_xname);
 			ifp->if_oerrors++;
 			break;
 		}
@@ -1396,7 +1373,8 @@ malo_tx_intr(struct malo_softc *sc)
 		desc->status = 0;
 		desc->len = 0;
 
-		DPRINTFN(2, ("tx done idx=%u\n", sc->sc_txring.stat));
+		DPRINTF(2, "%s: tx done idx=%u\n",
+		    sc->sc_txring.stat, sc->sc_dev.dv_xname);
 
 		sc->sc_txring.queued--;
 next:
@@ -1421,7 +1399,7 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	struct ieee80211_frame *wh;
 	int error;
 
-	DPRINTFN(2, ("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	desc = &sc->sc_txring.desc[sc->sc_txring.cur];
 	data = &sc->sc_txring.data[sc->sc_txring.cur];
@@ -1434,15 +1412,6 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		}
 	}
 	wh = mtod(m0, struct ieee80211_frame *);
-
-	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
-			return (ENOBUFS);
-
-		/* packet header may have moved, reset our local pointer */
-		wh = mtod(m0, struct ieee80211_frame *);
-	}
 
 #if NBPFILTER > 0
 	if (sc->sc_drvbpf != NULL) {
@@ -1508,8 +1477,8 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    sc->sc_txring.cur * sizeof(struct malo_tx_desc),
 	    sizeof(struct malo_tx_desc), BUS_DMASYNC_PREWRITE);
 
-	DPRINTFN(2, ("%s: sending mgmt frame, pktlen=%u, idx=%u\n",
-	    sc->sc_dev.dv_xname, m0->m_pkthdr.len, sc->sc_txring.cur));
+	DPRINTF(2, "%s: sending mgmt frame, pktlen=%u, idx=%u\n",
+	    sc->sc_dev.dv_xname, m0->m_pkthdr.len, sc->sc_txring.cur);
 
 	sc->sc_txring.queued++;
 	sc->sc_txring.cur = (sc->sc_txring.cur + 1) % MALO_TX_RING_COUNT;
@@ -1530,10 +1499,11 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	struct malo_tx_desc *desc;
 	struct malo_tx_data *data;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *mnew;
 	int error;
 
-	DPRINTFN(2, ("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	desc = &sc->sc_txring.desc[sc->sc_txring.cur];
 	data = &sc->sc_txring.data[sc->sc_txring.cur];
@@ -1548,8 +1518,8 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	wh = mtod(m0, struct ieee80211_frame *);
 
 	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
+		k = ieee80211_get_txkey(ic, wh, ni);
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
 			return (ENOBUFS);
 
 		/* packet header may have moved, reset our local pointer */
@@ -1626,8 +1596,8 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	    sc->sc_txring.cur * sizeof(struct malo_tx_desc),
 	    sizeof(struct malo_tx_desc), BUS_DMASYNC_PREWRITE);
 
-	DPRINTFN(2, ("%s: sending data frame, pktlen=%u, idx=%u\n",
-	    sc->sc_dev.dv_xname, m0->m_pkthdr.len, sc->sc_txring.cur));
+	DPRINTF(2, "%s: sending data frame, pktlen=%u, idx=%u\n",
+	    sc->sc_dev.dv_xname, m0->m_pkthdr.len, sc->sc_txring.cur);
 
 	sc->sc_txring.queued++;
 	sc->sc_txring.cur = (sc->sc_txring.cur + 1) % MALO_TX_RING_COUNT;
@@ -1674,13 +1644,14 @@ malo_rx_intr(struct malo_softc *sc)
 		    sc->sc_rxring.cur * sizeof(struct malo_rx_desc),
 		    sizeof(struct malo_rx_desc), BUS_DMASYNC_POSTREAD);
 
-		DPRINTFN(3, ("rx intr idx=%d, rxctrl=0x%02x, rssi=%d, "
+		DPRINTF(3, "%s: rx intr idx=%d, rxctrl=0x%02x, rssi=%d, "
 		    "status=0x%02x, channel=%d, len=%d, res1=%02x, rate=%d, "
 		    "physdata=0x%04x, physnext=0x%04x, qosctrl=%02x, res2=%d\n",
+		    sc->sc_dev.dv_xname,
 		    sc->sc_rxring.cur, desc->rxctrl, desc->rssi, desc->status,
 		    desc->channel, letoh16(desc->len), desc->reserved1,
 		    desc->datarate, letoh32(desc->physdata),
-		    letoh32(desc->physnext), desc->qosctrl, desc->reserved2));
+		    letoh32(desc->physnext), desc->qosctrl, desc->reserved2);
 
 		if ((desc->rxctrl & 0x80) == 0)
 			break;
@@ -1793,14 +1764,14 @@ skip:
 int
 malo_load_bootimg(struct malo_softc *sc)
 {
-	char *name = "mrv8k-b.fw";
+	char *name = "malo8335-h";
 	uint8_t	*ucode;
 	size_t size;
 	int error, i;
 
 	/* load boot firmware */
 	if ((error = loadfirmware(name, &ucode, &size)) != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    sc->sc_dev.dv_xname, error, name);
 		return (EIO);
 	}
@@ -1810,7 +1781,7 @@ malo_load_bootimg(struct malo_softc *sc)
 	 * the ARM cpu. I don't know why we need to instruct the DMA
 	 * engine to move the code. This is a big riddle without docu.
 	 */
-	DPRINTF(("%s: loading boot firmware\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, "%s: loading boot firmware\n", sc->sc_dev.dv_xname);
 	malo_mem_write2(sc, 0xbef8, 0x001);
 	malo_mem_write2(sc, 0xbefa, size);
 	malo_mem_write4(sc, 0xbefc, 0);
@@ -1846,7 +1817,7 @@ malo_load_bootimg(struct malo_softc *sc)
 	malo_mem_write4(sc, 0xbefc, 0);
 	malo_send_cmd(sc, 0xc000bef8);
 
-	DPRINTF(("%s: boot firmware loaded\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, "%s: boot firmware loaded\n", sc->sc_dev.dv_xname);
 
 	return (0);
 }
@@ -1855,7 +1826,7 @@ int
 malo_load_firmware(struct malo_softc *sc)
 {
 	struct malo_cmdheader *hdr;
-	char *name = "mrv8k-f.fw";
+	char *name = "malo8335-m";
 	void *data;
 	uint8_t *ucode;
 	size_t size, count, bsize;
@@ -1863,12 +1834,12 @@ malo_load_firmware(struct malo_softc *sc)
 
 	/* load real firmware now */
 	if ((error = loadfirmware(name, &ucode, &size)) != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    sc->sc_dev.dv_xname, error, name);
 		return (EIO);
 	}
 
-	DPRINTF(("%s: uploading firmware\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, "%s: uploading firmware\n", sc->sc_dev.dv_xname);
 
 	hdr = sc->sc_cmd_mem;
 	data = hdr + 1;
@@ -1888,11 +1859,11 @@ malo_load_firmware(struct malo_softc *sc)
 		malo_send_cmd(sc, sc->sc_cmd_dmaaddr);
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
 		    BUS_DMASYNC_POSTWRITE);
-		delay(100);
+		delay(500);
 	}
 	free(ucode, M_DEVBUF);
 
-	DPRINTF(("%s: firmware upload finished\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, "%s: firmware upload finished\n", sc->sc_dev.dv_xname);
 
 	/*
 	 * send a command with size 0 to tell that the firmware has been
@@ -1910,7 +1881,7 @@ malo_load_firmware(struct malo_softc *sc)
 	    BUS_DMASYNC_POSTWRITE);
 	delay(100);
 
-	DPRINTF(("%s: loading firmware\n", sc->sc_dev.dv_xname));
+	DPRINTF(1, "%s: loading firmware\n", sc->sc_dev.dv_xname);
 
 	/* wait until firmware has been loaded */
 	for (i = 0; i < 200; i++) {
@@ -1926,26 +1897,7 @@ malo_load_firmware(struct malo_softc *sc)
 		return (ETIMEDOUT);
 	}
 
-	DPRINTF(("%s: firmware loaded\n", sc->sc_dev.dv_xname));
-
-	return (0);
-}
-
-int
-malo_set_wepkey(struct malo_softc *sc)
-{
-	struct ieee80211com *ic = &sc->sc_ic;
-	int i;
-
-	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
-
-		if (wk->wk_len == 0)
-			continue;
-
-		if (malo_cmd_set_wepkey(sc, wk, i))
-			return (ENXIO);
-	}
+	DPRINTF(1, "%s: firmware loaded\n", sc->sc_dev.dv_xname);
 
 	return (0);
 }
@@ -1988,20 +1940,39 @@ malo_update_slot(struct ieee80211com *ic)
 #endif
 }
 
+#ifdef MALO_DEBUG
 void
 malo_hexdump(void *buf, int len)
 {
-	int i;
+	u_char b[16];
+	int i, j, l;
 
-	for (i = 0; i < len; i++) {
-		if (i % 16 == 0)
-			printf("%s%4i:", i ? "\n" : "", i);
-		if (i % 4 == 0)
-			printf(" ");
-		printf("%02x", (int)*((u_char *)buf + i));
+	for (i = 0; i < len; i += l) {
+		printf("%4i:", i);
+		l = min(sizeof(b), len - i);
+		bcopy(buf + i, b, l);
+		
+		for (j = 0; j < sizeof(b); j++) {
+			if (j % 2 == 0)
+				printf(" ");
+			if (j % 8 == 0)
+				printf(" ");
+			if (j < l)
+				printf("%02x", (int)b[j]);
+			else
+				printf("  ");
+		}
+		printf("  |");
+		for (j = 0; j < l; j++) {
+			if (b[j] >= 0x20 && b[j] <= 0x7e)
+				printf("%c", b[j]);
+			else
+				printf(".");
+		}
+		printf("|\n");
 	}
-	printf("\n");
 }
+#endif
 
 static char *
 malo_cmd_string(uint16_t cmd)
@@ -2014,12 +1985,15 @@ malo_cmd_string(uint16_t cmd)
 	} cmds[] = {
 		{ MALO_CMD_GET_HW_SPEC,		"GetHwSpecifications"	},
 		{ MALO_CMD_SET_RADIO,		"SetRadio"		},
+		{ MALO_CMD_SET_AID,		"SetAid"		},
 		{ MALO_CMD_SET_TXPOWER,		"SetTxPower"		},
 		{ MALO_CMD_SET_ANTENNA,		"SetAntenna"		},
 		{ MALO_CMD_SET_PRESCAN,		"SetPrescan"		},
 		{ MALO_CMD_SET_POSTSCAN,	"SetPostscan"		},
+		{ MALO_CMD_SET_RATE,		"SetRate"		},
 		{ MALO_CMD_SET_CHANNEL,		"SetChannel"		},
 		{ MALO_CMD_SET_RTS,		"SetRTS"		},
+		{ MALO_CMD_SET_SLOT,		"SetSlot"		},
 	};
 
 	for (i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
@@ -2075,12 +2049,12 @@ malo_cmd_get_spec(struct malo_softc *sc)
 	if (malo_send_cmd_dma(sc, sc->sc_cmd_dmaaddr) != 0)
 		return (ETIMEDOUT);
 
-	/* XXX get the data from the buffer and feed it to ieee80211 */
-	DPRINTF(("%s: get_hw_spec: V%x R%x, #WCB %d, #Mcast %d, Regcode %d, "
+	/* get the data from the buffer */
+	DPRINTF(1, "%s: get_hw_spec: V%x R%x, #WCB %d, #Mcast %d, Regcode %d, "
 	    "#Ant %d\n", sc->sc_dev.dv_xname, htole16(spec->HwVersion),
 	    htole32(spec->FWReleaseNumber), htole16(spec->NumOfWCB),
 	    htole16(spec->NumOfMCastAdr), htole16(spec->RegionCode),
-	    htole16(spec->NumberOfAntenna)));
+	    htole16(spec->NumberOfAntenna));
 
 	/* tell the DMA engine where our rings are */
 	malo_mem_write4(sc, letoh32(spec->RxPdRdPtr) & 0xffff,
@@ -2095,32 +2069,6 @@ malo_cmd_get_spec(struct malo_softc *sc)
 	sc->sc_RxPdWrPtr = letoh32(spec->RxPdWrPtr) & 0xffff;
 
 	return (0);
-}
-
-int
-malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_wepkey *wk,
-    uint16_t wk_index)
-{
-	struct malo_cmdheader *hdr = sc->sc_cmd_mem;
-	struct malo_cmd_wepkey *body;
-
-	hdr->cmd = htole16(MALO_CMD_SET_WEPKEY);
-	hdr->size = htole16(sizeof(*hdr) + sizeof(*body));
-	hdr->seqnum = 1;
-	hdr->result = 0;
-	body = (struct malo_cmd_wepkey *)(hdr + 1);
-
-	bzero(body, sizeof(*body));
-	body->action = htole16(1);
-	body->flags = 0;
-	body->index = wk_index;
-	body->len = wk->wk_len;
-	memcpy(body->value, wk->wk_key, wk->wk_len);
-
-	bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
-	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
-
-	return (malo_send_cmd_dma(sc, sc->sc_cmd_dmaaddr));
 }
 
 int
@@ -2285,13 +2233,17 @@ int
 malo_cmd_set_rts(struct malo_softc *sc, uint32_t threshold)
 {
 	struct malo_cmdheader *hdr = sc->sc_cmd_mem;
+	struct malo_cmd_rts *body;
 
 	hdr->cmd = htole16(MALO_CMD_SET_RTS);
-	hdr->size = htole16(sizeof(*hdr) + sizeof(threshold));
+	hdr->size = htole16(sizeof(*hdr) + sizeof(*body));
 	hdr->seqnum = 1;
 	hdr->result = 0;
+	body = (struct malo_cmd_rts *)(hdr + 1);
 
-	*(uint32_t *)(hdr + 1) = htole32(threshold);
+	bzero(body, sizeof(*body));
+	body->action = htole16(1);
+	body->threshold = htole32(threshold);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
@@ -2375,4 +2327,27 @@ malo_cmd_set_rate(struct malo_softc *sc, uint8_t rate)
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 
 	return (malo_send_cmd_dma(sc, sc->sc_cmd_dmaaddr));
+}
+
+void
+malo_cmd_response(struct malo_softc *sc)
+{
+	struct malo_cmdheader *hdr = sc->sc_cmd_mem;
+
+	if (letoh16(hdr->result) != MALO_CMD_RESULT_OK) {
+		printf("%s: firmware cmd %s failed with %s\n",
+		    sc->sc_dev.dv_xname,
+		    malo_cmd_string(hdr->cmd),
+		    malo_cmd_string_result(hdr->result));
+	}
+
+#ifdef MALO_DEBUG
+	printf("%s: cmd answer for %s=%s\n",
+	    sc->sc_dev.dv_xname,
+	    malo_cmd_string(hdr->cmd),
+	    malo_cmd_string_result(hdr->result));
+
+	if (malo_d > 2)
+		malo_hexdump(hdr, letoh16(hdr->size));
+#endif
 }

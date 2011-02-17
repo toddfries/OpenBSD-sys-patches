@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: eephy.c,v 1.39 2007/01/05 21:40:45 kettenis Exp $	*/
-=======
 /*	$OpenBSD: eephy.c,v 1.50 2010/11/23 06:59:27 kevlo Exp $	*/
->>>>>>> origin/master
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -73,13 +69,9 @@ struct cfdriver eephy_cd = {
 	NULL, "eephy", DV_DULL
 };
 
-<<<<<<< HEAD
-int	eephy_mii_phy_auto(struct mii_softc *);
-=======
 void	eephy_init(struct mii_softc *);
 int	eephy_service(struct mii_softc *, struct mii_data *, int);
 void	eephy_status(struct mii_softc *);
->>>>>>> origin/master
 void	eephy_reset(struct mii_softc *);
 
 const struct mii_phy_funcs eephy_funcs = {
@@ -163,8 +155,6 @@ eephy_attach(struct device *parent, struct device *self, void *aux)
 	/* XXX No loopback support yet, although the hardware can do it. */
 	sc->mii_flags |= MIIF_NOLOOP;
 
-<<<<<<< HEAD
-=======
 	/* Make sure page 0 is selected. */
         PHY_WRITE(sc, E1000_EADR, 0);
 
@@ -188,7 +178,6 @@ eephy_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
->>>>>>> origin/master
 	/* Switch to fiber-only mode if necessary. */
 	if (sc->mii_model == MII_MODEL_MARVELL_E1112 &&
 	    sc->mii_flags & MIIF_HAVEFIBER) {

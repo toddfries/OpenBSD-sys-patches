@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tty_pty.c,v 1.32 2006/01/18 23:42:12 miod Exp $	*/
-=======
 /*	$OpenBSD: tty_pty.c,v 1.52 2010/09/24 02:59:39 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -91,7 +87,8 @@ struct	pt_softc {
 static struct pt_softc **pt_softc = NULL;	/* pty array */
 static int npty = 0;				/* size of pty array */
 static int maxptys = NPTY_MAX;			/* maximum number of ptys */
-struct rwlock pt_softc_lock = RWLOCK_INITIALIZER;  /* for pty array */
+/* for pty array */
+struct rwlock pt_softc_lock = RWLOCK_INITIALIZER("ptarrlk");
 
 #define	PF_PKT		0x08		/* packet mode */
 #define	PF_STOPPED	0x10		/* user told stopped */
@@ -153,8 +150,8 @@ ptyarralloc(int nelem)
 {
 	struct pt_softc **pt;
 
-	pt = malloc(nelem * sizeof(struct pt_softc *), M_DEVBUF, M_WAITOK);
-	bzero(pt, nelem * sizeof(struct pt_softc *));
+	pt = malloc(nelem * sizeof(struct pt_softc *), M_DEVBUF,
+	    M_WAITOK|M_ZERO);
 	return pt;
 }
 
@@ -194,16 +191,9 @@ check_pty(int minor)
 	 * If the entry is not yet allocated, allocate one.
 	 */
 	if (!pt_softc[minor]) {
-<<<<<<< HEAD
-		MALLOC(pti, struct pt_softc *, sizeof(struct pt_softc),
-		    M_DEVBUF, M_WAITOK);
-		bzero(pti, sizeof(struct pt_softc));
-		pti->pt_tty = ttymalloc();
-=======
 		pti = malloc(sizeof(struct pt_softc), M_DEVBUF,
 		    M_WAITOK|M_ZERO);
 		pti->pt_tty = ttymalloc(0);
->>>>>>> origin/master
 		ptydevname(minor, pti);
 		pt_softc[minor] = pti;
 	}
@@ -457,7 +447,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	char buf[BUFSIZ];
-	int error = 0, cc;
+	int error = 0, cc, bufcc = 0;
 
 	/*
 	 * We want to block until the slave
@@ -503,31 +493,17 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 	if (pti->pt_flags & (PF_PKT|PF_UCNTL))
 		error = ureadc(0, uio);
 	while (uio->uio_resid > 0 && error == 0) {
-<<<<<<< HEAD
-		cc = q_to_b(&tp->t_outq, buf, min(uio->uio_resid, BUFSIZ));
-=======
 		cc = MIN(uio->uio_resid, BUFSIZ);
 		cc = q_to_b(&tp->t_outq, buf, cc);
 		if (cc > bufcc)
 			bufcc = cc;
->>>>>>> origin/master
 		if (cc <= 0)
 			break;
 		error = uiomove(buf, cc, uio);
 	}
-<<<<<<< HEAD
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state&TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
-=======
 	ttwakeupwr(tp);
 	if (bufcc)
 		bzero(buf, bufcc);
->>>>>>> origin/master
 	return (error);
 }
 
@@ -538,15 +514,9 @@ ptcwrite(dev_t dev, struct uio *uio, int flag)
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	u_char *cp = NULL;
-<<<<<<< HEAD
-	int cc = 0;
-	u_char locbuf[BUFSIZ];
-	int cnt = 0;
-=======
 	int cc = 0, bufcc = 0;
 	u_char buf[BUFSIZ];
 	size_t cnt = 0;
->>>>>>> origin/master
 	int error = 0;
 
 again:
@@ -557,23 +527,19 @@ again:
 			goto block;
 		while (uio->uio_resid > 0 && tp->t_canq.c_cc < TTYHOG(tp) - 1) {
 			if (cc == 0) {
-<<<<<<< HEAD
-				cc = min(uio->uio_resid, BUFSIZ);
-				cc = min(cc, TTYHOG - 1 - tp->t_canq.c_cc);
-				cp = locbuf;
-=======
 				cc = MIN(uio->uio_resid, BUFSIZ);
 				cc = min(cc, TTYHOG(tp) - 1 - tp->t_canq.c_cc);
 				if (cc > bufcc)
 					bufcc = cc;
 				cp = buf;
->>>>>>> origin/master
 				error = uiomove(cp, cc, uio);
 				if (error)
-					return (error);
+					goto done;
 				/* check again for safety */
-				if ((tp->t_state&TS_ISOPEN) == 0)
-					return (EIO);
+				if ((tp->t_state&TS_ISOPEN) == 0) {
+					error = EIO;
+					goto done;
+				}
 			}
 			if (cc)
 				(void) b_to_q((char *)cp, cc, &tp->t_canq);
@@ -582,26 +548,24 @@ again:
 		(void) putc(0, &tp->t_canq);
 		ttwakeup(tp);
 		wakeup(&tp->t_canq);
-		return (0);
+		goto done;
 	}
 	while (uio->uio_resid > 0) {
 		if (cc == 0) {
-<<<<<<< HEAD
-			cc = min(uio->uio_resid, BUFSIZ);
-			cp = locbuf;
-=======
 			cc = MIN(uio->uio_resid, BUFSIZ);
 			if (cc > bufcc)
 				bufcc = cc;
 			cp = buf;
->>>>>>> origin/master
 			error = uiomove(cp, cc, uio);
 			if (error)
-				return (error);
+				goto done;
 			/* check again for safety */
-			if ((tp->t_state&TS_ISOPEN) == 0)
-				return (EIO);
+			if ((tp->t_state&TS_ISOPEN) == 0) {
+				error = EIO;
+				goto done;
+			}
 		}
+		bufcc = cc;
 		while (cc > 0) {
 			if ((tp->t_rawq.c_cc + tp->t_canq.c_cc) >= TTYHOG(tp) - 2 &&
 			   (tp->t_canq.c_cc > 0 || !ISSET(tp->t_lflag, ICANON))) {
@@ -614,29 +578,34 @@ again:
 		}
 		cc = 0;
 	}
-	return (0);
+	goto done;
 block:
 	/*
 	 * Come here to wait for slave to open, for space
 	 * in outq, or space in rawq.
 	 */
-	if ((tp->t_state&TS_CARR_ON) == 0)
-		return (EIO);
+	if ((tp->t_state&TS_CARR_ON) == 0) {
+		error = EIO;
+		goto done;
+	}
 	if (flag & IO_NDELAY) {
 		/* adjust for data copied in but not written */
 		uio->uio_resid += cc;
 		if (cnt == 0)
-			return (EWOULDBLOCK);
-		return (0);
+			error = EWOULDBLOCK;
+		goto done;
 	}
 	error = tsleep(&tp->t_rawq.c_cf, TTOPRI | PCATCH,
 	    ttyout, 0);
-	if (error) {
-		/* adjust for data copied in but not written */
-		uio->uio_resid += cc;
-		return (error);
-	}
-	goto again;
+	if (error == 0)
+		goto again;
+
+	/* adjust for data copied in but not written */
+	uio->uio_resid += cc;
+done:
+	if (bufcc)
+		bzero(buf, bufcc);
+	return (error);
 }
 
 int
@@ -827,8 +796,7 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			tp->t_lflag &= ~EXTPROC;
 		}
 		return(0);
-	} else
-	if (cdevsw[major(dev)].d_open == ptcopen)
+	} else if (cdevsw[major(dev)].d_open == ptcopen)
 		switch (cmd) {
 
 		case TIOCGPGRP:
@@ -877,7 +845,8 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			break;
 
 		case TIOCSIG:
-			if (*(unsigned int *)data >= NSIG)
+			if (*(unsigned int *)data >= NSIG ||
+			    *(unsigned int *)data == 0)
 				return(EINVAL);
 			if ((tp->t_lflag&NOFLSH) == 0)
 				ttyflush(tp, FREAD|FWRITE);

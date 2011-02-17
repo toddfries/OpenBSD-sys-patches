@@ -1,10 +1,7 @@
-<<<<<<< HEAD
-/* $OpenBSD: softraidvar.h,v 1.6 2007/04/11 22:05:09 marco Exp $ */
-=======
 /* $OpenBSD: softraidvar.h,v 1.97 2011/01/29 15:01:22 marco Exp $ */
->>>>>>> origin/master
 /*
- * Copyright (c) 2006 Marco Peereboom <sro@peereboom.us>
+ * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
+ * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,8 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-<<<<<<< HEAD
-=======
 #ifndef SOFTRAIDVAR_H
 #define SOFTRAIDVAR_H
 
@@ -246,7 +241,6 @@ struct sr_crypto_kdfpair {
 };
 
 #ifdef _KERNEL
->>>>>>> origin/master
 #include <dev/biovar.h>
 
 #include <sys/buf.h>
@@ -302,14 +296,11 @@ struct sr_ccb {
 #define SR_CCB_OK		2
 #define SR_CCB_FAILED		3
 
-<<<<<<< HEAD
-=======
 	int			ccb_flag;
 #define SR_CCBF_FREEBUF		(1<<0)		/* free ccb_buf.b_data */
 
 	void			*ccb_opaque; /* discipline usable pointer */
 
->>>>>>> origin/master
 	TAILQ_ENTRY(sr_ccb)	ccb_link;
 };
 
@@ -327,9 +318,9 @@ struct sr_workunit {
 #define SR_WU_PARTIALLYFAILED	4
 #define SR_WU_DEFERRED		5
 #define SR_WU_PENDING		6
+#define SR_WU_RESTART		7
+#define SR_WU_REQUEUE		8
 
-<<<<<<< HEAD
-=======
 	int			swu_flags;	/* additional hints */
 #define SR_WUF_REBUILD		(1<<0)		/* rebuild io */
 #define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rbuild io complete */
@@ -337,7 +328,6 @@ struct sr_workunit {
 #define SR_WUF_FAILIOCOMP	(1<<3)
 
 	int			swu_fake;	/* faked wu */
->>>>>>> origin/master
 	/* workunit io range */
 	daddr64_t		swu_blk_start;
 	daddr64_t		swu_blk_end;
@@ -366,49 +356,6 @@ struct sr_workunit {
 
 TAILQ_HEAD(sr_wu_list, sr_workunit);
 
-<<<<<<< HEAD
-#define SR_META_PD		1   /* only 1 PD per metadata block */
-#define SR_META_VD		1   /* only 1 VD per metadata block */
-#define SR_META_DATA		1   /* only 1 metadata block per disk */
-#define SR_META_FUDGE		32  /* save some space at the end of chunk */
-#define SR_META_VERSION		1 /* bump when sr_metadata changes */
-struct sr_metadata {
-	/* do not change order of ssd_magic, ssd_version and ssd_big_endian */
-	u_int64_t		ssd_magic;	/* magic id */
-#define	SR_MAGIC		0x4d4152436372616dllu
-	u_int8_t		ssd_version;	/* meta data version */
-	u_int8_t		ssd_big_endian;	/* set if big endian */
-	u_int8_t		ssd_pad[2];
-
-	/* meta-data */
-	u_int32_t		ssd_checksum;	/* xor of the structure */
-	u_int32_t		ssd_size;	/* sizeof(sr_metadata) */
-	u_int32_t		ssd_ondisk;	/* on disk version counter */
-	struct sr_uuid	ssd_uuid;	/* unique identifier */
-
-	/* virtual disk data */
-	u_int32_t		ssd_vd_ver;	/* vd structure version */
-	u_int32_t		ssd_vd_size;	/* vd structure size */
-	u_int32_t		ssd_vd_chk;	/* vd structure xor */
-
-	/* chunk data */
-	u_int32_t		ssd_chunk_ver;	/* chunk structure version */
-	u_int32_t		ssd_chunk_no;	/* number of chunks */
-	u_int32_t		ssd_chunk_size;	/* chunk structure size */
-	u_int32_t		ssd_chunk_chk;	/* chunk structure xor */
-} __packed;
-
-#define SR_CHUNK_VERSION	1	/* bump when sr_chunk_meta changes */
-struct sr_chunk_meta {
-	int			scm_volid;	/* vd we belong to */
-	int			scm_chunk_id;	/* chunk id */
-	char			scm_devname[32];/* /dev/XXXXX */
-	int			scm_status;	/* use bio bioc_disk status */
-	u_quad_t		scm_size;	/* size of partition */
-	u_quad_t		scm_coerced_size; /* coerced size of part */
-	struct sr_uuid		scm_uuid;	/* unique identifier */
-} __packed;
-=======
 /* RAID 0 */
 #define SR_RAID0_NOWU		16
 struct sr_raid0 {
@@ -481,51 +428,33 @@ struct sr_boot_volume {
 };
 
 SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
->>>>>>> origin/master
 
 struct sr_chunk {
 	struct sr_meta_chunk	src_meta;	/* chunk meta data */
 
 	/* runtime data */
-	struct vnode		*src_dev_vn;	/* vnode */
 	dev_t			src_dev_mm;	/* major/minor */
 	struct vnode		*src_vn;	/* vnode */
+
+	/* helper members before metadata makes it onto the chunk  */
+	int			src_meta_ondisk;/* set when meta is on disk */
+	char			src_devname[32];
+	int64_t			src_size;	/* in blocks */
 
 	SLIST_ENTRY(sr_chunk)	src_link;
 };
 
 SLIST_HEAD(sr_chunk_head, sr_chunk);
 
-<<<<<<< HEAD
-#define SR_VOL_VERSION	1	/* bump when sr_vol_meta changes */
-struct sr_vol_meta {
-	int			svm_volid;	/* volume id */
-	int			svm_status; 	/* use bioc_vol status */
-	int			svm_flags;	/* flags */
-#define SR_VDF_DIRTY		0x01
-	u_quad_t		svm_size;	/* virtual disk size */
-	int			svm_level;	/* raid level */
-	char			svm_vendor[8];	/* scsi vendor */
-	char			svm_product[16];/* scsi product */
-	char			svm_revision[4];/* scsi revision */
-	char			svm_pad[4];
-	char			svm_devname[32];/* /dev/XXXXX */
-	int			svm_no_chunk;	/* number of chunks */
-	struct sr_uuid 		svm_uuid;	/* volume unique identifier */
-} __packed;
-
-=======
->>>>>>> origin/master
 struct sr_volume {
 	/* runtime data */
 	struct sr_chunk_head	sv_chunk_list;	/* linked list of all chunks */
 	struct sr_chunk		**sv_chunks;	/* array to same chunks */
-};
 
-/* RAID 1 */
-#define SR_RAID1_NOWU		16
-struct sr_raid1 {
-	u_int32_t		sr1_counter;
+	/* sensors */
+	struct ksensor		sv_sensor;
+	struct ksensordev	sv_sensordev;
+	int			sv_sensor_valid;
 };
 
 struct sr_discipline {
@@ -535,14 +464,11 @@ struct sr_discipline {
 #define	SR_MD_RAID1		1
 #define	SR_MD_RAID5		2
 #define	SR_MD_CACHE		3
-<<<<<<< HEAD
-=======
 #define	SR_MD_CRYPTO		4
 #define	SR_MD_AOE_INIT		5
 #define	SR_MD_AOE_TARG		6
 #define	SR_MD_RAID4		7
 #define	SR_MD_RAID6		8
->>>>>>> origin/master
 	char			sd_name[10];	/* human readable dis name */
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
@@ -553,12 +479,8 @@ struct sr_discipline {
 #define SR_CAP_REBUILD		0x00000004
 
 	union {
+	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
-<<<<<<< HEAD
-	}			sd_dis_specific;/* dis specific members */
-#define mds			sd_dis_specific
-
-=======
 	    struct sr_raidp	mdd_raidp;
 	    struct sr_raid6	mdd_raid6;
 	    struct sr_crypto	mdd_crypto;
@@ -585,7 +507,6 @@ struct sr_discipline {
 	struct device		*sd_scsibus_dev;
 	void			(*sd_shutdownhook)(void *);
 
->>>>>>> origin/master
 	/* discipline volume */
 	struct sr_volume	sd_vol;		/* volume associated */
 	int			sd_vol_status;	/* runtime vol status */
@@ -604,6 +525,10 @@ struct sr_discipline {
 	struct sr_wu_list	sd_wu_pendq;	/* pending wu queue */
 	struct sr_wu_list	sd_wu_defq;	/* deferred wu queue */
 	int			sd_wu_sleep;	/* wu sleepers counter */
+
+	/* discipline stats */
+	int			sd_wu_pending;
+	u_int64_t		sd_wu_collisions;
 
 	/* discipline functions */
 	int			(*sd_create)(struct sr_discipline *,
@@ -642,8 +567,6 @@ struct sr_softc {
 	int			(*sc_ioctl)(struct device *, u_long, caddr_t);
 
 	struct rwlock		sc_lock;
-<<<<<<< HEAD
-=======
 
 	struct sr_chunk_head	sc_hotspare_list;	/* List of hotspares. */
 	struct sr_chunk		**sc_hotspares;	/* Array to hotspare chunks. */
@@ -651,12 +574,12 @@ struct sr_softc {
 	int			sc_hotspare_no; /* Number of hotspares. */
 
 	int			sc_sensors_running;
->>>>>>> origin/master
 	/*
 	 * during scsibus attach this is the discipline that is in use
 	 * this variable is protected by sc_lock and splhigh
 	 */
 	struct sr_discipline	*sc_attach_dis;
+
 	/*
 	 * XXX expensive, alternative would be nice but has to be cheap
 	 * since the scsibus lookup happens on each IO
@@ -664,8 +587,6 @@ struct sr_softc {
 #define SR_MAXSCSIBUS		256
 	struct sr_discipline	*sc_dis[SR_MAXSCSIBUS]; /* scsibus is u_int8_t */
 };
-<<<<<<< HEAD
-=======
 
 /* hotplug */
 void			sr_hotplug_register(struct sr_discipline *, void *);
@@ -743,4 +664,3 @@ void			sr_dump_mem(u_int8_t *, int);
 #endif /* _KERNEL */
 
 #endif /* SOFTRAIDVAR_H */
->>>>>>> origin/master

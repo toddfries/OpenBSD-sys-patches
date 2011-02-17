@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sched.h,v 1.13 2005/06/17 22:33:34 niklas Exp $	*/
-=======
 /*	$OpenBSD: sched.h,v 1.28 2010/05/14 18:47:56 kettenis Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -73,6 +69,8 @@
 #ifndef	_SYS_SCHED_H_
 #define	_SYS_SCHED_H_
 
+#include <sys/queue.h>
+
 /*
  * Posix defines a <sched.h> which may want to include <sys/sched.h>
  */
@@ -104,8 +102,6 @@ struct schedstate_percpu {
 	int spc_rrticks;		/* ticks until roundrobin() */
 	int spc_pscnt;			/* prof/stat counter */
 	int spc_psdiv;			/* prof/stat divisor */	
-<<<<<<< HEAD
-=======
 	struct proc *spc_idleproc;	/* idle proc for this cpu */
 
 	u_int spc_nrun;			/* procs on the run queues */
@@ -118,7 +114,6 @@ struct schedstate_percpu {
 	struct proc *spc_reaper;	/* dead proc reaper */
 #endif
 	LIST_HEAD(,proc) spc_deadproc;
->>>>>>> origin/master
 };
 
 #ifdef	_KERNEL
@@ -130,11 +125,7 @@ struct schedstate_percpu {
 #define SPCF_SHOULDHALT		0x0004	/* CPU should be vacated */
 #define SPCF_HALTED		0x0008	/* CPU has been halted */
 
-<<<<<<< HEAD
-#define	PPQ	(128 / NQS)		/* priorities per queue */
-=======
 #define	SCHED_PPQ	(128 / SCHED_NQS)	/* priorities per queue */
->>>>>>> origin/master
 #define NICE_WEIGHT 2			/* priorities per nice level */
 #define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - SCHED_PPQ)
 
@@ -143,12 +134,8 @@ extern int rrticks_init;		/* ticks per roundrobin() */
 
 struct proc;
 void schedclock(struct proc *);
-#ifdef __HAVE_CPUINFO
 struct cpu_info;
 void roundrobin(struct cpu_info *);
-<<<<<<< HEAD
-#endif
-=======
 
 void sched_init_cpu(struct cpu_info *);
 void sched_idle(void *);
@@ -173,7 +160,6 @@ void sched_stop_secondary_cpus(void);
 void sched_init_runqueues(void);
 void setrunqueue(struct proc *);
 void remrunqueue(struct proc *);
->>>>>>> origin/master
 
 /* Inherit the parent's scheduler history */
 #define scheduler_fork_hook(parent, child) do {				\
@@ -185,16 +171,6 @@ void remrunqueue(struct proc *);
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
 
-<<<<<<< HEAD
-#if !defined(__HAVE_CPUINFO) && !defined(splsched)
-#define splsched() splhigh()
-#endif
-#ifndef IPL_SCHED
-#define IPL_SCHED IPL_HIGH
-#endif
-
-=======
->>>>>>> origin/master
 #if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
 #include <sys/lock.h>
 
@@ -222,10 +198,6 @@ do {									\
 	__mp_unlock(&sched_lock);					\
 	splx(s);							\
 } while (/* CONSTCOND */ 0)
-
-
-void	sched_lock_idle(void);
-void	sched_unlock_idle(void);
 
 #else /* ! MULTIPROCESSOR || LOCKDEBUG */
 

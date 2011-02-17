@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: msg.h,v 1.12 2004/07/14 23:45:11 millert Exp $	*/
-=======
 /*	$OpenBSD: msg.h,v 1.16 2011/01/03 23:08:07 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: msg.h,v 1.9 1996/02/09 18:25:18 christos Exp $	*/
 
 /*
@@ -94,7 +90,7 @@ struct que {
  * this user defined buffer might look like, and includes the following
  * members:".  This sentence is followed by two lines equivalent
  * to the mtype and mtext field declarations below.  It isn't clear
- * if "mymsg" refers to the naem of the structure type or the name of an
+ * if "mymsg" refers to the name of the structure type or the name of an
  * instance of the structure...
  */
 struct mymsg {

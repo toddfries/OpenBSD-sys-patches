@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$ */
-=======
 /*	$OpenBSD: bold8x16.h,v 1.3 2009/06/21 20:30:35 jsg Exp $ */
->>>>>>> origin/master
 /*	 $NetBSD: bold8x16.h,v 1.4 2000/01/05 18:44:22 ad Exp $ */
 
 /*-

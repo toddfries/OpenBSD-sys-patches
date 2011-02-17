@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_gem_sbus.c,v 1.1 2006/11/25 15:54:35 brad Exp $	*/
-=======
 /*	$OpenBSD: if_gem_sbus.c,v 1.6 2009/07/12 21:27:09 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_gem_sbus.c,v 1.1 2006/11/24 13:23:32 martin Exp $	*/
 
 /*-
@@ -37,11 +33,6 @@
 /*
  * SBus front-end for the GEM network driver
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_gem_sbus.c,v 1.1 2006/11/24 13:23:32 martin Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>

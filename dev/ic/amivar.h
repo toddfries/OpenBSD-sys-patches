@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: amivar.h,v 1.51 2007/01/27 05:09:51 dlg Exp $	*/
-=======
 /*	$OpenBSD: amivar.h,v 1.58 2010/06/23 04:53:53 dlg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -72,6 +68,7 @@ struct ami_ccb {
 	}			ccb_state;
 	int			ccb_flags;
 #define AMI_CCB_F_ERR			(1<<0)
+	int			ccb_status;
 	TAILQ_ENTRY(ami_ccb)	ccb_link;
 };
 

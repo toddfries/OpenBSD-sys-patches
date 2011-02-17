@@ -1,14 +1,7 @@
-<<<<<<< HEAD
-/*	$OpenBSD: microcode.h,v 1.2 2006/06/16 22:27:53 niallo Exp $	*/
-
-/*-
- * Copyright (c) 2005-2006, Ralink Technology, Corp.
-=======
 /*	$OpenBSD: microcode.h,v 1.7 2010/04/05 14:14:02 damien Exp $	*/
 
 /*-
  * Copyright (c) 2005-2010, Ralink Technology, Corp.
->>>>>>> origin/master
  *	Paul Lin <paul_lin@ralinktech.com.tw>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -26,7 +19,7 @@
 
 /*
  * This file contains the loadable 8051 microcodes for the Ralink RT2561,
- * RT2561S and RT2661 chipsets.
+ * RT2561S, RT2661 and RT2860 chipsets.
  */
 
 static const uint8_t rt2561[] = {
@@ -2272,8 +2265,6 @@ static const uint8_t rt2661[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43, 0xcf
 };
-<<<<<<< HEAD
-=======
 
 static const uint8_t rt2860[] = {
 	0x02, 0x03, 0x5b, 0x02, 0x02, 0xa6, 0x22, 0x22, 0xff, 0xff, 0xff,
@@ -3022,4 +3013,3 @@ static const uint8_t rt2860[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0x53, 0x88
 };
->>>>>>> origin/master

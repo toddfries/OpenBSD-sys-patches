@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: tcreg.h,v 1.3 2002/05/02 22:56:06 miod Exp $	*/
 /*	$NetBSD: tcreg.h,v 1.1 1995/12/20 00:48:36 cgd Exp $	*/
 
 /*

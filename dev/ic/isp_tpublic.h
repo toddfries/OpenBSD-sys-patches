@@ -1,32 +1,3 @@
-<<<<<<< HEAD
-/* $OpenBSD: isp_tpublic.h,v 1.8 2003/12/04 21:13:37 miod Exp $ */
-/*
- * Qlogic ISP Host Adapter Public Target Interface Structures && Routines
- *---------------------------------------
- * Copyright (c) 2000, 2001 by Matthew Jacob
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification, immediately at the beginning of the file.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
-=======
 /* $OpenBSD: isp_tpublic.h,v 1.12 2009/06/24 11:00:53 krw Exp $ */
 /* $FreeBSD: src/sys/dev/isp/isp_tpublic.h,v 1.19 2007/05/05 20:17:23 mjacob Exp $ */
 /*-
@@ -42,7 +13,6 @@
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
->>>>>>> origin/master
  * 
  *  THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  *  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -248,25 +218,6 @@ typedef struct {
  * port host adapters) that this applies to (consider it an extra port
  * parameter). The iid, tgt and lun values are deliberately chosen to be
  * fat so that, for example, World Wide Names can be used instead of
-<<<<<<< HEAD
- * the units that the Qlogic firmware uses (in the case where the MD
- * layer maintains a port database, for example).
- *
- * The cd_tagtype field specifies what kind of command tag has been
- * sent with the command. The cd_tagval is the tag's value (low 16
- * bits). It also contains (in the upper 16 bits) any command handle.
- *
- *
- * N.B.: when the MD layer sends this command to outside software
- * the outside software likely *MUST* return the same cd_tagval that
- * was in place because this value is likely what the Qlogic f/w uses
- * to identify a command.
- *
- * The cd_cdb contains storage for the passed in command descriptor block.
- * This is the maximum size we can get out of the Qlogic f/w. There's no
- * passed in length because whoever decodes the command to act upon it
- * will know what the appropriate length is.
-=======
  * the units that the firmware uses (in the case where the MD
  * layer maintains a port database, for example).
  *
@@ -278,7 +229,6 @@ typedef struct {
  * The cd_cdb contains storage for the passed in command descriptor block.
  * There is no need to define length as the callee should be able to
  * figure this out.
->>>>>>> origin/master
  *
  * The tag cd_lflags are the flags set by the MD driver when it gets
  * command incoming or when it needs to inform any outside entities
@@ -383,24 +333,6 @@ typedef struct tmd_cmd {
 #define    TMD_SIZE     (sizeof (tmd_cmd_t))
 #endif
 
-<<<<<<< HEAD
-/*
- * Action codes set by the Qlogic MD target driver for
- * the external layer to figure out what to do with.
- */
-typedef enum {
-	QOUT_HBA_REG=0,	/* the argument is a pointer to a hba_register_t */
-	QOUT_TMD_START,	/* the argument is a pointer to a tmd_cmd_t */
-	QOUT_TMD_DONE,	/* the argument is a pointer to a tmd_cmd_t */
-	QOUT_TEVENT,	/* the argument is a pointer to a tmd_event_t */
-	QOUT_TMSG,	/* the argument is a pointer to a tmd_msg_t */
-	QOUT_HBA_UNREG	/* the argument is a pointer to a hba_register_t */
-} tact_e;
-
-/*
- * Action codes set by the external layer for the
- * MD Qlogic driver to figure out what to do with.
-=======
 #define L0LUN_TO_FLATLUN(lptr)              ((((lptr)[0] & 0x3f) << 8) | ((lptr)[1]))
 #define FLATLUN_TO_L0LUN(lptr, lun)                 \
     (lptr)[1] = lun & 0xff;                         \
@@ -430,7 +362,6 @@ typedef enum {
  * The principle selector for MD layer to know whether data is to
  * be transferred in any QOUT_TMD_CONT call is cd_xfrlen- the
  * flags CDFH_DATA_IN and CDFH_DATA_OUT define which direction.
->>>>>>> origin/master
  */
 #define	CDFL_SNSVALID	0x01	/* sense data (from f/w) good */
 #define	CDFL_SENTSTATUS	0x02	/* last action sent status */
@@ -454,20 +385,6 @@ typedef enum {
 /*
  * A word about the START/CONT/DONE/FIN dance:
  *
-<<<<<<< HEAD
- *	When the HBA is enabled for receiving commands, one may	show up
- *	without notice. When that happens, the Qlogic target mode driver
- *	gets a tmd_cmd_t, fills it with the info that just arrived, and
- *	calls the outer layer with a QOUT_TMD_START code and pointer to
- *	the tmd_cmd_t.
- *
- *	The outer layer decodes the command, fetches data, prepares stuff,
- *	whatever, and starts by passing back the pointer with a QIN_TMD_CONT
- *	code which causes the Qlogic target mode driver to generate CTIOs to
- *	satisfy whatever action needs to be taken. When those CTIOs complete,
- *	the Qlogic target driver sends the pointer to the cmd_tmd_t back with
- *	a QOUT_TMD_DONE code. This repeats for as long as necessary.
-=======
  *    When the HBA is enabled for receiving commands, one may show up
  *    without notice. When that happens, the MD target mode driver
  *    gets a tmd_cmd_t, fills it with the info that just arrived, and
@@ -481,7 +398,6 @@ typedef enum {
  *    the MD target driver sends the pointer to the cmd_tmd_t back with
  *    a QOUT_TMD_DONE code. This repeats for as long as necessary. These
  *    may not be done in parallel- they are sequential operations.
->>>>>>> origin/master
  *
  *    The outer layer signals it wants to end the command by settings within
  *    the tmd_cmd_t itself. When the final QIN_TMD_CONT is reported completed,

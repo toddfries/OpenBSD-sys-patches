@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: si4136reg.h,v 1.3 2009/08/16 18:03:48 jsg Exp $	*/
->>>>>>> origin/master
 /* $NetBSD$ */
 
 /*

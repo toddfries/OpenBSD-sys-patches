@@ -1,33 +1,3 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ispreg.h,v 1.12 2002/05/17 01:35:19 mjacob Exp $ */
-/*
- * Machine Independent (well, as best as possible) register
- * definitions for Qlogic ISP SCSI adapters.
- *
- * Copyright (c) 1997, 1998, 1999, 2000 by Matthew Jacob
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice immediately at the beginning of the file, without modification,
- *    this list of conditions, and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
-=======
 /*	$OpenBSD: ispreg.h,v 1.17 2010/02/18 10:40:53 sobrado Exp $ */
 /* $FreeBSD: src/sys/dev/isp/ispreg.h,v 1.29 2007/03/10 02:39:54 mjacob Exp $ */
 /*-
@@ -59,17 +29,12 @@
 /*
  * Machine Independent (well, as best as possible) register
  * definitions for QLogic ISP SCSI adapters.
->>>>>>> origin/master
  */
 #ifndef	_ISPREG_H
 #define	_ISPREG_H
 
 /*
-<<<<<<< HEAD
- * Hardware definitions for the Qlogic ISP  registers.
-=======
  * Hardware definitions for the QLogic ISP  registers.
->>>>>>> origin/master
  */
 
 /*
@@ -830,7 +795,7 @@ typedef struct {
 #define	ISPBSMX(c, byte, shift, mask)	\
 	(((c)[(byte)] >> (shift)) & (mask))
 /*
- * Qlogic 1020/1040 NVRAM is an array of 128 bytes.
+ * QLogic 1020/1040 NVRAM is an array of 128 bytes.
  *
  * Some portion of the front of this is for general host adapter properties
  * This is followed by an array of per-target parameters, and is tailed off
@@ -890,7 +855,7 @@ typedef struct {
 #define	ISP_NVRAM_TGT_LUN_DISABLE(c, t)		ISPBSMX(c, _IxT(t, 3), 5, 0x01)
 
 /*
- * Qlogic 1080/1240 NVRAM is an array of 256 bytes.
+ * QLogic 1080/1240 NVRAM is an array of 256 bytes.
  *
  * Some portion of the front of this is for general host adapter properties
  * This is followed by an array of per-target parameters, and is tailed off
@@ -1073,11 +1038,7 @@ typedef struct {
 	ISPBSMX(c, _IxT16(t, 4, (b)), 7, 0x01)
 
 /*
-<<<<<<< HEAD
- * Qlogic 2XXX NVRAM is an array of 256 bytes.
-=======
  * QLogic 2100 thru 2300 NVRAM is an array of 256 bytes.
->>>>>>> origin/master
  *
  * Some portion of the front of this is for general RISC engine parameters,
  * mostly reflecting the state of the last INITIALIZE FIRMWARE mailbox command.

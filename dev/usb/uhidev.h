@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uhidev.h,v 1.5 2006/03/07 04:41:19 krw Exp $	*/
-=======
 /*	$OpenBSD: uhidev.h,v 1.11 2010/08/02 23:17:34 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uhidev.h,v 1.3 2002/10/08 09:56:17 dan Exp $	*/
 
 /*
@@ -35,17 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(__NetBSD__)
-#include "locators.h"
-#include "rnd.h"
-
-#endif
+#define UHIDBUSCF_REPORTID		0
+#define UHIDBUSCF_REPORTID_DEFAULT	-1
 
 #define uhidevcf_reportid cf_loc[UHIDBUSCF_REPORTID]
 #define UHIDEV_UNK_REPORTID UHIDBUSCF_REPORTID_DEFAULT
 
 struct uhidev_softc {
-	USBBASEDEVICE sc_dev;		/* base device */
+	struct device sc_dev;		/* base device */
 	usbd_device_handle sc_udev;
 	usbd_interface_handle sc_iface;	/* interface */
 	usbd_pipe_handle sc_ipipe;	/* input interrupt pipe */
@@ -71,7 +64,7 @@ struct uhidev_softc {
 };
 
 struct uhidev {
-	USBBASEDEVICE sc_dev;		/* base device */
+	struct device sc_dev;		/* base device */
 	struct uhidev_softc *sc_parent;
 	uByte sc_report_id;
 	u_int8_t sc_state;

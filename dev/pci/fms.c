@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fms.c,v 1.16 2005/04/14 12:42:16 mickey Exp $ */
-=======
 /*	$OpenBSD: fms.c,v 1.22 2010/07/15 03:43:11 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: fms.c,v 1.5.4.1 2000/06/30 16:27:50 simonb Exp $	*/
 
 /*-
@@ -85,6 +81,7 @@ void	fms_close(void *);
 int	fms_query_encoding(void *, struct audio_encoding *);
 int	fms_set_params(void *, int, int, struct audio_params *, 
 			    struct audio_params *);
+void	fms_get_default_params(void *, int, struct audio_params *);
 int	fms_round_blocksize(void *, int);
 int	fms_halt_output(void *);
 int	fms_halt_input(void *);
@@ -142,7 +139,8 @@ struct audio_hw_if fms_hw_if = {
 	fms_mappage,
 	fms_get_props,
 	fms_trigger_output,
-	fms_trigger_input
+	fms_trigger_input,
+	fms_get_default_params
 };
 
 int	fms_attach_codec(void *, struct ac97_codec_if *);
@@ -515,6 +513,12 @@ fms_query_encoding(addr, fp)
 	fp->msb = 1;
 
 	return 0;
+}
+
+void
+fms_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	ac97_get_default_params(params);
 }
 
 /*

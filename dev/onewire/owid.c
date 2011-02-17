@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: owid.c,v 1.3 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: owid.c,v 1.8 2010/07/08 07:19:54 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -87,7 +83,6 @@ owid_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_sensor.type = SENSOR_INTEGER;
-	strlcpy(sc->sc_sensor.desc, "ID", sizeof(sc->sc_sensor.desc));
 	sc->sc_sensor.value = ONEWIRE_ROM_SN(sc->sc_rom);
 	snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc), "sn %012llx",
 	    ONEWIRE_ROM_SN(oa->oa_rom));

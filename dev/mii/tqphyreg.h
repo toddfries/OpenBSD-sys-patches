@@ -1,4 +1,4 @@
-/*	$OpenBSD: tqphyreg.h,v 1.1 1999/12/07 22:01:33 jason Exp $	*/
+/*	$OpenBSD: tqphyreg.h,v 1.2 2002/05/04 11:30:06 fgsch Exp $	*/
 /*	$NetBSD: tqphyreg.h,v 1.2 1999/09/16 05:58:18 soren Exp $	*/
 
 /*

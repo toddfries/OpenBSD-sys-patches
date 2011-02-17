@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdmmc_mem.c,v 1.6 2006/11/29 14:16:43 uwe Exp $	*/
-=======
 /*	$OpenBSD: sdmmc_mem.c,v 1.16 2010/08/24 14:52:23 blambert Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

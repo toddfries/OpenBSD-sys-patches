@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_levar.h,v 1.6 2002/05/02 22:56:06 miod Exp $	*/
-=======
 /*	$OpenBSD: if_levar.h,v 1.8 2010/05/23 11:41:22 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_levar.h,v 1.4 1997/03/15 18:12:07 is Exp $	*/
 
 /*-

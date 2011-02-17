@@ -1,33 +1,3 @@
-<<<<<<< HEAD
-/*     $OpenBSD: ispmbox.h,v 1.18 2002/08/17 17:41:26 mjacob Exp $ */
-/*
- * Mailbox and Queue Entry Definitions for for Qlogic ISP SCSI adapters.
- *
- * Copyright (c) 1997, 1998, 1999, 2000 by Matthew Jacob
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice immediately at the beginning of the file, without modification,
- *    this list of conditions, and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
-=======
 /*     $OpenBSD: ispmbox.h,v 1.24 2010/02/18 10:40:53 sobrado Exp $ */
 /* $FreeBSD: src/sys/dev/isp/ispmbox.h,v 1.59 2007/03/10 02:39:54 mjacob Exp $ */
 /*-
@@ -58,7 +28,6 @@
  */
 /*
  * Mailbox and Queue Entry Definitions for for QLogic ISP SCSI adapters.
->>>>>>> origin/master
  */
 #ifndef	_ISPMBOX_H
 #define	_ISPMBOX_H
@@ -637,7 +606,7 @@ typedef struct {
 } isp24xx_statusreq_t;
 
 /* 
- * For Qlogic 2X00, the high order byte of SCSI status has
+ * For QLogic 2X00, the high order byte of SCSI status has
  * additional meaning.
  */
 #define	RQCS_RU	0x800	/* Residual Under */
@@ -1043,23 +1012,6 @@ typedef struct {
 	array[ICB_NNM6] = (u_int8_t) ((wwn >> 48) & 0xff), \
 	array[ICB_NNM7] = (u_int8_t) ((wwn >> 56) & 0xff)
 
-<<<<<<< HEAD
-/*
- * FC-AL Position Map
- *
- * This is an at most 128 byte map that returns either
- * the LILP or Firmware generated list of ports.
- *
- * We deviate a bit from the returned qlogic format to
- * use an extra bit to say whether this was a LILP or
- * f/w generated map.
- */
-typedef struct {
-	u_int8_t	fwmap	: 1,
-			count	: 7;
-	u_int8_t	map[127];
-} fcpos_map_t;
-=======
 #define	MAKE_WWN_FROM_NODE_NAME(wwn, array)	\
 	wwn =	((u_int64_t) array[ICB_NNM0]) | \
 		((u_int64_t) array[ICB_NNM1] <<  8) | \
@@ -1069,7 +1021,6 @@ typedef struct {
 		((u_int64_t) array[ICB_NNM5] << 40) | \
 		((u_int64_t) array[ICB_NNM6] << 48) | \
 		((u_int64_t) array[ICB_NNM7] << 56)
->>>>>>> origin/master
 
 /*
  * Port Data Base Element

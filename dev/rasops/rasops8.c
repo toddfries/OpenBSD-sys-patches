@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rasops8.c,v 1.6 2002/07/27 22:17:49 miod Exp $	*/
-=======
 /*	$OpenBSD: rasops8.c,v 1.10 2010/08/28 12:48:14 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rasops8.c,v 1.8 2000/04/12 14:22:29 pk Exp $	*/
 
 /*-

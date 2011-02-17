@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: brgphyreg.h,v 1.8 2003/10/22 09:39:29 jmc Exp $	*/
-=======
 /*	$OpenBSD: brgphyreg.h,v 1.15 2010/07/10 07:59:33 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000
@@ -166,6 +162,7 @@
 
 #define BRGPHY_MII_DSP_RW_PORT	0x15	/* DSP coefficient r/w port */
 
+#define BRGPHY_MII_EPHY_PTEST	0x17	/* 5906 PHY register */
 #define BRGPHY_MII_DSP_ADDR_REG	0x17	/* DSP coefficient addr register */
 
 #define BRGPHY_DSP_TAP_NUMBER_MASK		0x00
@@ -215,7 +212,7 @@
 #define BRGPHY_AUXSTS_AN_ACK	0x4000	/* autoneg complete ack */
 #define BRGPHY_AUXSTS_AN_ACK_D	0x2000	/* autoneg complete ack detect */
 #define BRGPHY_AUXSTS_AN_NPW	0x1000	/* autoneg next page wait */
-#define BRGPHY_AUXSTS_AN_RES	0x0700	/* AN HDC */
+#define BRGPHY_AUXSTS_AN_RES	0x0700	/* autoneg HCD */
 #define BRGPHY_AUXSTS_PDF	0x0080	/* Parallel detect. fault */
 #define BRGPHY_AUXSTS_RF	0x0040	/* remote fault */
 #define BRGPHY_AUXSTS_ANP_R	0x0020	/* AN page received */
@@ -270,10 +267,50 @@
 #define BRGPHY_IMR_LNK_CHG	0x0002	/* Link status change */
 #define BRGPHY_IMR_CRCERR	0x0001	/* CEC error */
 
+/*******************************************************/
+/* Begin: Shared SerDes PHY register definitions       */
+/*******************************************************/
+
+/* SerDes autoneg is different from copper */
+#define BRGPHY_SERDES_ANAR		0x04
+#define BRGPHY_SERDES_ANAR_FDX		0x0020
+#define BRGPHY_SERDES_ANAR_HDX		0x0040
+#define BRGPHY_SERDES_ANAR_NO_PAUSE	(0x0 << 7)
+#define BRGPHY_SERDES_ANAR_SYM_PAUSE	(0x1 << 7)
+#define BRGPHY_SERDES_ANAR_ASYM_PAUSE	(0x2 << 7)
+#define BRGPHY_SERDES_ANAR_BOTH_PAUSE	(0x3 << 7)
+
+#define BRGPHY_SERDES_ANLPAR		0x05
+#define BRGPHY_SERDES_ANLPAR_FDX	0x0020
+#define BRGPHY_SERDES_ANLPAR_HDX	0x0040
+#define BRGPHY_SERDES_ANLPAR_NO_PAUSE	(0x0 << 7)
+#define BRGPHY_SERDES_ANLPAR_SYM_PAUSE	(0x1 << 7)
+#define BRGPHY_SERDES_ANLPAR_ASYM_PAUSE	(0x2 << 7)
+#define BRGPHY_SERDES_ANLPAR_BOTH_PAUSE	(0x3 << 7)
+
+/*******************************************************/
+/* End: Shared SerDes PHY register definitions         */
+/*******************************************************/
+
+/*******************************************************/
+/* Begin: PHY register values for the 5706 PHY         */
+/*******************************************************/
+
+/* 
+ * Shadow register 0x1C, bit 15 is write enable,
+ * bits 14-10 select function (0x00 to 0x1F).
+ */
+#define BRGPHY_MII_SHADOW_1C		0x1C
+#define BRGPHY_SHADOW_1C_WRITE_EN	0x8000
+#define BRGPHY_SHADOW_1C_SELECT_MASK	0x7C00
+
+/* Shadow 0x1C Mode Control Register (select value 0x1F) */
+#define BRGPHY_SHADOW_1C_MODE_CTRL	(0x1F << 10)
+/* When set, Regs 0-0x0F are 1000X, else 1000T */
+#define BRGPHY_SHADOW_1C_ENA_1000X	0x0001
+
 #define BRGPHY_TEST1		0x1E
 #define BRGPHY_TEST1_TRIM_EN	0x0010
-<<<<<<< HEAD
-=======
 #define BRGPHY_TEST1_CRC_EN	0x8000
 
 #define BRGPHY_MII_TEST2	0x1F
@@ -331,7 +368,6 @@
 /*******************************************************/
 /* End: PHY register values for the 5708S SerDes PHY   */
 /*******************************************************/
->>>>>>> origin/master
 
 /*******************************************************/
 /* Begin: PHY register values for the 5709S SerDes PHY */

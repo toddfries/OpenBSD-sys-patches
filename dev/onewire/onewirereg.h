@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: onewirereg.h,v 1.2 2009/06/02 18:19:47 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

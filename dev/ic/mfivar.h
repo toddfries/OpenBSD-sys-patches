@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: mfivar.h,v 1.29 2006/12/23 17:46:39 deraadt Exp $ */
-=======
 /* $OpenBSD: mfivar.h,v 1.40 2010/12/30 08:53:50 dlg Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -96,8 +92,6 @@ struct mfi_ccb {
 
 SLIST_HEAD(mfi_ccb_list, mfi_ccb);
 
-<<<<<<< HEAD
-=======
 enum mfi_iop {
 	MFI_IOP_XSCALE,
 	MFI_IOP_PPC,
@@ -111,12 +105,13 @@ struct mfi_iop_ops {
 	void		(*mio_post)(struct mfi_softc *, struct mfi_ccb *);
 };
 
->>>>>>> origin/master
 struct mfi_softc {
 	struct device		sc_dev;
 	void			*sc_ih;
 	struct scsi_link	sc_link;
 	struct scsi_iopool	sc_iopool;
+
+	const struct mfi_iop_ops *sc_iop;
 
 	u_int32_t		sc_flags;
 
@@ -173,5 +168,5 @@ struct mfi_softc {
 	struct ksensordev	sc_sensordev;
 };
 
-int	mfi_attach(struct mfi_softc *sc);
+int	mfi_attach(struct mfi_softc *sc, enum mfi_iop);
 int	mfi_intr(void *);

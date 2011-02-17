@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atw.c,v 1.51 2007/02/14 04:46:44 jsg Exp $	*/
-=======
 /*	$OpenBSD: atw.c,v 1.75 2010/11/11 17:47:00 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -37,11 +33,6 @@
 /*
  * Device driver for the ADMtek ADM8211 802.11 MAC/BBP.
  */
-
-#include <sys/cdefs.h>
-#if defined(__NetBSD__)
-__KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $");
-#endif
 
 #include "bpfilter.h"
 
@@ -254,6 +245,9 @@ void	atw_node_free(struct ieee80211com *, struct ieee80211_node *);
 static	__inline uint32_t atw_last_even_tsft(uint32_t, uint32_t, uint32_t);
 uint64_t atw_get_tsft(struct atw_softc *sc);
 void	atw_change_ibss(struct atw_softc *);
+int	atw_compute_duration1(int, int, uint32_t, int, struct atw_duration *);
+int	atw_compute_duration(struct ieee80211_frame *, int, uint32_t, int,
+	    int, struct atw_duration *, struct atw_duration *, int *, int);
 
 /*
  * Tuner/transceiver/modem
@@ -2193,17 +2187,17 @@ atw_write_wep(struct atw_softc *sc)
 
 #if 0
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		if (ic->ic_nw_keys[i].wk_len > 5) {
+		if (ic->ic_nw_keys[i].k_len > 5) {
 			buf[i][1] = ATW_WEP_ENABLED | ATW_WEP_104BIT;
-		} else if (ic->ic_nw_keys[i].wk_len != 0) {
+		} else if (ic->ic_nw_keys[i].k_len != 0) {
 			buf[i][1] = ATW_WEP_ENABLED;
 		} else {
 			buf[i][1] = 0;
 			continue;
 		}
-		buf[i][0] = ic->ic_nw_keys[i].wk_key[0];
-		memcpy(&buf[i][2], &ic->ic_nw_keys[i].wk_key[1],
-		    ic->ic_nw_keys[i].wk_len - 1);
+		buf[i][0] = ic->ic_nw_keys[i].k_key[0];
+		memcpy(&buf[i][2], &ic->ic_nw_keys[i].k_key[1],
+		    ic->ic_nw_keys[i].k_len - 1);
 	}
 
 	reg = ATW_READ(sc, ATW_MACTEST);
@@ -3137,7 +3131,6 @@ atw_rxintr(struct atw_softc *sc)
 			continue;
 		}
 
-		ifp->if_ipackets++;
 		if (sc->sc_opmode & ATW_NAR_PR)
 			len -= IEEE80211_CRC_LEN;
 		m->m_pkthdr.rcvif = ifp;
@@ -3183,7 +3176,7 @@ atw_rxintr(struct atw_softc *sc)
 			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
  		}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 		wh = mtod(m, struct ieee80211_frame *);
 		ni = ieee80211_find_rxnode(ic, wh);
@@ -3370,6 +3363,171 @@ atw_watchdog(struct ifnet *ifp)
 	ieee80211_watchdog(ifp);
 }
 
+/*
+ * Arguments in:
+ *
+ * paylen:  payload length (no FCS, no WEP header)
+ *
+ * hdrlen:  header length
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * flags:   IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d:       802.11 Duration field for RTS,
+ *          802.11 Duration field for data frame,
+ *          PLCP Length for data frame,
+ *          residual octets at end of data slot
+ */
+int
+atw_compute_duration1(int len, int use_ack, uint32_t flags, int rate,
+    struct atw_duration *d)
+{
+	int pre, ctsrate;
+	int ack, bitlen, data_dur, remainder;
+
+	/* RTS reserves medium for SIFS | CTS | SIFS | (DATA) | SIFS | ACK
+	 * DATA reserves medium for SIFS | ACK
+	 *
+	 * XXXMYC: no ACK on multicast/broadcast or control packets
+	 */
+
+	bitlen = len * 8;
+
+	pre = IEEE80211_DUR_DS_SIFS;
+	if ((flags & IEEE80211_F_SHPREAMBLE) != 0)
+		pre += IEEE80211_DUR_DS_SHORT_PREAMBLE +
+		    IEEE80211_DUR_DS_FAST_PLCPHDR;
+	else
+		pre += IEEE80211_DUR_DS_LONG_PREAMBLE +
+		    IEEE80211_DUR_DS_SLOW_PLCPHDR;
+
+	d->d_residue = 0;
+	data_dur = (bitlen * 2) / rate;
+	remainder = (bitlen * 2) % rate;
+	if (remainder != 0) {
+		d->d_residue = (rate - remainder) / 16;
+		data_dur++;
+	}
+
+	switch (rate) {
+	case 2:		/* 1 Mb/s */
+	case 4:		/* 2 Mb/s */
+		/* 1 - 2 Mb/s WLAN: send ACK/CTS at 1 Mb/s */
+		ctsrate = 2;
+		break;
+	case 11:	/* 5.5 Mb/s */
+	case 22:	/* 11  Mb/s */
+	case 44:	/* 22  Mb/s */
+		/* 5.5 - 11 Mb/s WLAN: send ACK/CTS at 2 Mb/s */
+		ctsrate = 4;
+		break;
+	default:
+		/* TBD */
+		return -1;
+	}
+
+	d->d_plcp_len = data_dur;
+
+	ack = (use_ack) ? pre + (IEEE80211_DUR_DS_SLOW_ACK * 2) / ctsrate : 0;
+
+	d->d_rts_dur =
+	    pre + (IEEE80211_DUR_DS_SLOW_CTS * 2) / ctsrate +
+	    pre + data_dur +
+	    ack;
+
+	d->d_data_dur = ack;
+
+	return 0;
+}
+
+/*
+ * Arguments in:
+ *
+ * wh:      802.11 header
+ *
+ * len: packet length 
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * fraglen: fragment length, set to maximum (or higher) for no
+ *          fragmentation
+ *
+ * flags:   IEEE80211_F_WEPON (hardware adds WEP),
+ *          IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d0: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ *
+ * dn: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ */
+int
+atw_compute_duration(struct ieee80211_frame *wh, int len, uint32_t flags,
+    int fraglen, int rate, struct atw_duration *d0, struct atw_duration *dn,
+    int *npktp, int debug)
+{
+	int ack, rc;
+	int firstlen, hdrlen, lastlen, lastlen0, npkt, overlen, paylen;
+
+	if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) == IEEE80211_FC1_DIR_DSTODS)
+		hdrlen = sizeof(struct ieee80211_frame_addr4);
+	else
+		hdrlen = sizeof(struct ieee80211_frame);
+
+	paylen = len - hdrlen;
+
+	if ((flags & IEEE80211_F_WEPON) != 0)
+		overlen = IEEE80211_WEP_TOTLEN + IEEE80211_CRC_LEN;
+	else
+		overlen = IEEE80211_CRC_LEN;
+
+	npkt = paylen / fraglen;
+	lastlen0 = paylen % fraglen;
+
+	if (npkt == 0)			/* no fragments */
+		lastlen = paylen + overlen;
+	else if (lastlen0 != 0) {	/* a short "tail" fragment */
+		lastlen = lastlen0 + overlen;
+		npkt++;
+	} else				/* full-length "tail" fragment */
+		lastlen = fraglen + overlen;
+
+	if (npktp != NULL)
+		*npktp = npkt;
+
+	if (npkt > 1)
+		firstlen = fraglen + overlen;
+	else
+		firstlen = paylen + overlen;
+
+	if (debug) {
+		printf("%s: npkt %d firstlen %d lastlen0 %d lastlen %d "
+		    "fraglen %d overlen %d len %d rate %d flags %08x\n",
+		    __func__, npkt, firstlen, lastlen0, lastlen, fraglen,
+		    overlen, len, rate, flags);
+	}
+
+	ack = !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
+	    (wh->i_fc[1] & IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL;
+
+	rc = atw_compute_duration1(firstlen + hdrlen, ack, flags, rate, d0);
+	if (rc == -1)
+		return rc;
+
+	if (npkt <= 1) {
+		*dn = *d0;
+		return 0;
+	}
+	return atw_compute_duration1(lastlen + hdrlen, ack, flags, rate, dn);
+}
+
 #ifdef ATW_DEBUG
 void
 atw_dump_pkt(struct ifnet *ifp, struct mbuf *m0)
@@ -3407,6 +3565,7 @@ atw_start(struct ifnet *ifp)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni;
 	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct atw_frame *hh;
 	struct mbuf *m0, *m;
 	struct atw_txsoft *txs, *last_txs;
@@ -3463,8 +3622,11 @@ atw_start(struct ifnet *ifp)
 				break;
 			}
 
-			if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
-				if ((m0 = ieee80211_wep_crypt(ifp, m0, 1)) == NULL) {
+			if (ic->ic_flags & IEEE80211_F_WEPON) {
+				wh = mtod(m0, struct ieee80211_frame *);
+				k = ieee80211_get_txkey(ic, wh, ni);
+				m0 = ieee80211_encrypt(ic, m0, k);
+				if (m0 == NULL) {
 					ifp->if_oerrors++;
 					break;	
 				}
@@ -3480,7 +3642,7 @@ atw_start(struct ifnet *ifp)
 		else
 			rate = MAX(2, ieee80211_get_rate(ic));
 
-		if (ieee80211_compute_duration(wh, m0->m_pkthdr.len,
+		if (atw_compute_duration(wh, m0->m_pkthdr.len,
 		    ic->ic_flags & ~IEEE80211_F_WEPON, ic->ic_fragthreshold,
 		    rate, &txs->txs_d0, &txs->txs_dn, &npkt,
 		    (sc->sc_if.if_flags & (IFF_DEBUG|IFF_LINK2)) ==

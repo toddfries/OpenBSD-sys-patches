@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: emuxkireg.h,v 1.4 2005/11/30 22:17:47 brad Exp $	*/
-=======
 /*	$OpenBSD: emuxkireg.h,v 1.6 2008/06/26 05:42:17 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: emuxkireg.h,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-

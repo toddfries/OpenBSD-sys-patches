@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsemul_dumb.c,v 1.3 2007/02/14 01:12:16 jsg Exp $ */
-=======
 /* $OpenBSD: wsemul_dumb.c,v 1.10 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsemul_dumb.c,v 1.7 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -35,8 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/time.h>
@@ -52,16 +46,9 @@ void	*wsemul_dumb_cnattach(const struct wsscreen_descr *, void *,
 				   int, int, long);
 void	*wsemul_dumb_attach(int, const struct wsscreen_descr *,
 				 void *, int, int, void *, long);
-<<<<<<< HEAD
-void	wsemul_dumb_output(void *cookie, const u_char *data, u_int count,
-				int);
-int	wsemul_dumb_translate(void *cookie, keysym_t, char **);
-void	wsemul_dumb_detach(void *cookie, u_int *crowp, u_int *ccolp);
-=======
 u_int	wsemul_dumb_output(void *, const u_char *, u_int, int);
 int	wsemul_dumb_translate(void *, keysym_t, const char **);
 void	wsemul_dumb_detach(void *, u_int *, u_int *);
->>>>>>> origin/master
 void	wsemul_dumb_resetop(void *, enum wsemul_resetops);
 
 const struct wsemul_ops wsemul_dumb_ops = {
@@ -269,14 +256,10 @@ wsemul_dumb_output(void *cookie, const u_char *data, u_int count, int kernel)
 			}
 			edp->crow -= n - 1;
 			break;
-<<<<<<< HEAD
-		}	
-=======
 		}
 		if (rc != 0)
 			break;
 		processed++;
->>>>>>> origin/master
 	}
 
 	if (rc != 0)
@@ -302,14 +285,7 @@ wsemul_dumb_output(void *cookie, const u_char *data, u_int count, int kernel)
 }
 
 int
-<<<<<<< HEAD
-wsemul_dumb_translate(cookie, in, out)
-	void *cookie;
-	keysym_t in;
-	char **out;
-=======
 wsemul_dumb_translate(void *cookie, keysym_t in, const char **out)
->>>>>>> origin/master
 {
 	return (0);
 }
@@ -339,6 +315,10 @@ wsemul_dumb_resetop(void *cookie, enum wsemul_resetops op)
 					   edp->defattr);
 		edp->ccol = edp->crow = 0;
 		(*edp->emulops->cursor)(edp->emulcookie, 1, 0, 0);
+		break;
+	case WSEMUL_CLEARCURSOR:
+		(*edp->emulops->cursor)(edp->emulcookie, 0,
+		    edp->crow, edp->ccol);
 		break;
 	default:
 		break;

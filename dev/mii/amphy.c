@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: amphy.c,v 1.14 2006/12/27 19:11:08 kettenis Exp $	*/
-=======
 /*	$OpenBSD: amphy.c,v 1.18 2008/09/08 07:38:33 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -217,7 +213,7 @@ amphy_status(struct mii_softc *sc)
 
 	if (bmcr & BMCR_AUTOEN) {
 		/*
-		 * The PAR status bits are only valid of autonegotiation
+		 * The PAR status bits are only valid if autonegotiation
 		 * has completed (or it's disabled).
 		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
@@ -253,7 +249,7 @@ amphy_status(struct mii_softc *sc)
 		else if (par & DSCSR_100HDX)
 			mii->mii_media_active |= IFM_100_TX|IFM_HDX;
 		else if (par & DSCSR_10FDX)
-			mii->mii_media_active |= IFM_10_T|IFM_HDX;
+			mii->mii_media_active |= IFM_10_T|IFM_FDX;
 		else if (par & DSCSR_10HDX)
 			mii->mii_media_active |= IFM_10_T|IFM_HDX;
 	} else

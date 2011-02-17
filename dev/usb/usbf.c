@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usbf.c,v 1.1 2006/11/25 18:10:29 uwe Exp $	*/
-=======
 /*	$OpenBSD: usbf.c,v 1.12 2010/10/28 16:07:53 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -76,14 +72,6 @@ int usbfdebug = 0;
 #endif
 
 struct usbf_softc {
-<<<<<<< HEAD
-	USBBASEDEVICE	 sc_dev;	/* base device */
-	usbf_bus_handle	 sc_bus;	/* USB device controller */
-	struct usbf_port sc_port;	/* dummy port for function */
-	usb_proc_ptr	 sc_proc;	/* task thread */
-	TAILQ_HEAD(,usbf_task) sc_tskq;	/* task queue head */
-	int		 sc_dying;
-=======
 	struct device	 	 sc_dev;	/* base device */
 	usbf_bus_handle	 	 sc_bus;	/* USB device controller */
 	struct usbf_port 	 sc_port;	/* dummy port for function */
@@ -92,22 +80,22 @@ struct usbf_softc {
 	int			 sc_dying;
 
 	u_int8_t		*sc_hs_config;
->>>>>>> origin/master
 };
 
-#define DEVNAME(sc)	USBDEVNAME((sc)->sc_dev)
+#define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
 
-int	    usbf_match(struct device *, void *, void *);
-void	    usbf_attach(struct device *, struct device *, void *);
-void	    usbf_create_thread(void *);
-void	    usbf_task_thread(void *);
+int	    	usbf_match(struct device *, void *, void *);
+void	    	usbf_attach(struct device *, struct device *, void *);
+void	    	usbf_create_thread(void *);
+void	    	usbf_task_thread(void *);
 
-usbf_status usbf_get_descriptor(usbf_device_handle, usb_device_request_t *, void **);
-void	    usbf_set_address(usbf_device_handle, u_int8_t);
-usbf_status usbf_set_config(usbf_device_handle, u_int8_t);
+usbf_status	usbf_get_descriptor(usbf_device_handle, usb_device_request_t *,
+		    void **);
+void		usbf_set_address(usbf_device_handle, u_int8_t);
+usbf_status	usbf_set_config(usbf_device_handle, u_int8_t);
 
 #ifdef USBF_DEBUG
-void	    usbf_dump_request(usbf_device_handle, usb_device_request_t *);
+void		usbf_dump_request(usbf_device_handle, usb_device_request_t *);
 #endif
 
 struct cfattach usbf_ca = {
@@ -120,12 +108,14 @@ struct cfdriver usbf_cd = {
 
 static const char * const usbrev_str[] = USBREV_STR;
 
-USB_MATCH(usbf)
+int
+usbf_match(struct device *parent, void *match, void *aux)
 {
 	return UMATCH_GENERIC;
 }
 
-USB_ATTACH(usbf)
+void
+usbf_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct usbf_softc *sc = (struct usbf_softc *)self;
 	int usbrev;
@@ -149,7 +139,7 @@ USB_ATTACH(usbf)
 	default:
 		printf(", not supported\n");
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 	printf("\n");
 
@@ -160,7 +150,7 @@ USB_ATTACH(usbf)
 	if (usbf_softintr_establish(sc->sc_bus)) {
 		printf("%s: can't establish softintr\n", DEVNAME(sc));
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* Attach the function driver. */
@@ -169,7 +159,7 @@ USB_ATTACH(usbf)
 		printf("%s: usbf_new_device failed, %s\n", DEVNAME(sc),
 		    usbf_errstr(err));
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* Create a process context for asynchronous tasks. */
@@ -268,8 +258,7 @@ usbf_task_thread(void *arg)
 			splx(s);
 			task->fun(task->arg);
 			s = splusb();
-			DPRINTF(1,("usbf_task_thread: done task=%p\n",
-			    task));
+			DPRINTF(1,("usbf_task_thread: done task=%p\n", task));
 		}
 	}
 	splx(s);
@@ -417,8 +406,7 @@ usbf_set_config(usbf_device_handle dev, u_int8_t new)
 		if (dev->function->methods->set_config)
 			err = fun->methods->set_config(fun, NULL);
 		if (err) {
-			DPRINTF(0,("usbf_set_config: %s\n",
-			    usbf_errstr(err)));
+			DPRINTF(0,("usbf_set_config: %s\n", usbf_errstr(err)));
 		}
 		dev->config = NULL;
 		return USBF_NORMAL_COMPLETION;

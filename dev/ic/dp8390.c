@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dp8390.c,v 1.37 2006/10/20 16:54:01 brad Exp $	*/
-=======
 /*	$OpenBSD: dp8390.c,v 1.43 2010/08/29 18:01:21 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: dp8390.c,v 1.13 1998/07/05 06:49:11 jonathan Exp $	*/
 
 /*
@@ -66,14 +62,9 @@ static __inline__ int	dp8390_write_mbuf(struct dp8390_softc *,
 
 static int		dp8390_test_mem(struct dp8390_softc *);
 
-<<<<<<< HEAD
-int	dp8390_enable(struct dp8390_softc *);
-void	dp8390_disable(struct dp8390_softc *);
-
-=======
 #ifdef DEBUG
->>>>>>> origin/master
 int	dp8390_debug = 0;
+#endif
 
 /*
  * Standard media init routine for the dp8390.

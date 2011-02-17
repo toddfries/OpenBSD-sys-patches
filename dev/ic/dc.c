@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: dc.c,v 1.95 2006/05/22 20:35:12 krw Exp $	*/
-=======
 /*	$OpenBSD: dc.c,v 1.121 2010/09/07 16:21:42 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1440,10 +1436,9 @@ dc_decode_leaf_sia(struct dc_softc *sc, struct dc_eblock_sia *l)
 {
 	struct dc_mediainfo *m;
 
-	m = malloc(sizeof(struct dc_mediainfo), M_DEVBUF, M_NOWAIT);
+	m = malloc(sizeof(*m), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (m == NULL)
 		return;
-	bzero(m, sizeof(struct dc_mediainfo));
 	switch (l->dc_sia_code & ~DC_SIA_CODE_EXT) {
 	case DC_SIA_CODE_10BT:
 		m->dc_media = IFM_10_T;
@@ -1487,10 +1482,9 @@ dc_decode_leaf_sym(struct dc_softc *sc, struct dc_eblock_sym *l)
 {
 	struct dc_mediainfo *m;
 
-	m = malloc(sizeof(struct dc_mediainfo), M_DEVBUF, M_NOWAIT);
+	m = malloc(sizeof(*m), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (m == NULL)
 		return;
-	bzero(m, sizeof(struct dc_mediainfo));
 	if (l->dc_sym_code == DC_SYM_CODE_100BT)
 		m->dc_media = IFM_100_TX;
 
@@ -1512,10 +1506,9 @@ dc_decode_leaf_mii(struct dc_softc *sc, struct dc_eblock_mii *l)
 	u_int8_t *p;
 	struct dc_mediainfo *m;
 
-	m = malloc(sizeof(struct dc_mediainfo), M_DEVBUF, M_NOWAIT);
+	m = malloc(sizeof(*m), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (m == NULL)
 		return;
-	bzero(m, sizeof(struct dc_mediainfo));
 	/* We abuse IFM_AUTO to represent MII. */
 	m->dc_media = IFM_AUTO;
 	m->dc_gp_len = l->dc_gpr_len;
@@ -1730,7 +1723,7 @@ hasmac:
 	/*
 	 * A 21143 or clone chip was detected. Inform the world.
 	 */
-	printf(" address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -1822,31 +1815,6 @@ hasmac:
 
 fail:
 	return;
-}
-
-int
-dc_detach(sc)
-	struct dc_softc *sc;
-{
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
-		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
-
-	if (sc->dc_srom)
-		free(sc->dc_srom, M_DEVBUF);
-
-	timeout_del(&sc->dc_tick_tmo);
-
-	ether_ifdetach(ifp);
-	if_detach(ifp);
-
-	if (sc->sc_dhook != NULL)
-		shutdownhook_disestablish(sc->sc_dhook);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
-	return (0);
 }
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: com_puc.c,v 1.13 2006/07/31 11:06:36 mickey Exp $	*/
-=======
 /*	$OpenBSD: com_puc.c,v 1.18 2010/08/06 21:07:27 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
@@ -51,17 +47,9 @@
 #include <dev/pci/pucvar.h>
 
 #include "com.h"
-#ifdef i386
-#include "pccom.h"
-#endif
 
 #include <dev/ic/comreg.h>
-#if NPCCOM > 0
-#include <i386/isa/pccomvar.h>
-#endif
-#if NCOM > 0
 #include <dev/ic/comvar.h>
-#endif
 #include <dev/ic/ns16550reg.h>
 
 #define	com_lcr		com_cfcr
@@ -71,18 +59,10 @@ void	com_puc_attach(struct device *, struct device *, void *);
 int	com_puc_detach(struct device *, int);
 int	com_puc_activate(struct device *, int);
 
-#if NCOM > 0
 struct cfattach com_puc_ca = {
 	sizeof(struct com_softc), com_puc_match,
 	com_puc_attach, com_puc_detach, com_puc_activate
 };
-#endif
-
-#if NPCCOM > 0
-struct cfattach pccom_puc_ca = {
-	sizeof(struct com_softc), com_puc_match, com_puc_attach, com_puc_detach
-};
-#endif
 
 int
 com_puc_match(parent, match, aux)
@@ -138,15 +118,7 @@ com_puc_attach(parent, self, aux)
 int
 com_puc_detach(struct device *self, int flags)
 {
-	/* struct com_softc *sc = (void *)self; */
-	int error;
-
-	if ((error = com_detach(self, flags)) != 0)
-		return (error);
-
-	/* cardbus_intr_disestablish(psc->sc_cc, psc->sc_cf, csc->cc_ih); */
-
-	return (0);
+	return com_detach(self, flags);
 }
 
 int

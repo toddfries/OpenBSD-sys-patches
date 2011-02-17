@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aha.c,v 1.55 2005/12/03 17:13:22 krw Exp $	*/
-=======
 /*	$OpenBSD: aha.c,v 1.73 2010/08/07 03:50:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -659,7 +655,7 @@ aha_get_ccb(sc, flags)
 			break;
 		}
 		if (sc->sc_numccbs < AHA_CCB_MAX) {
-			MALLOC(ccb, struct aha_ccb *, sizeof *ccb, M_DEVBUF,
+			ccb = malloc(sizeof *ccb, M_DEVBUF,
 			    (flags & SCSI_NOSLEEP) ? M_NOWAIT : M_WAITOK);
 			if (ccb == NULL) {
 				printf("%s: can't malloc ccb\n",
@@ -670,7 +666,7 @@ aha_get_ccb(sc, flags)
 				sc->sc_numccbs++;
 				break;
 			}
-			FREE(ccb, M_DEVBUF);
+			free(ccb, M_DEVBUF);
 			ccb = NULL;
 		}
 		if (flags & SCSI_NOSLEEP)
@@ -1372,6 +1368,7 @@ aha_poll(sc, xs, count)
 	int count;
 {
 	int iobase = sc->sc_iobase;
+	int s;
 
 	/* timeouts are in msec, so we loop in 1000 usec cycles */
 	while (count) {
@@ -1379,8 +1376,11 @@ aha_poll(sc, xs, count)
 		 * If we had interrupts enabled, would we
 		 * have got an interrupt?
 		 */
-		if (inb(iobase + AHA_INTR_PORT) & AHA_INTR_ANYINTR)
+		if (inb(iobase + AHA_INTR_PORT) & AHA_INTR_ANYINTR) {
+			s = splbio();
 			ahaintr(sc);
+			splx(s);
+		}
 		if (xs->flags & ITSDONE)
 			return (0);
 		delay(1000);	/* only happens in boot so ok */

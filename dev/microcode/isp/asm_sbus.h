@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: asm_sbus.h,v 1.5 1999/11/22 13:13:08 mjacob Exp $ */
-=======
 /*	$OpenBSD: asm_sbus.h,v 1.7 2008/07/11 14:46:25 sobrado Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (C) 1995, 1996, 1997, 1998, 1999 QLogic, Inc.
  * All rights reserved.

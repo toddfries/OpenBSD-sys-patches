@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: lemac.c,v 1.9 2006/03/25 22:41:43 djm Exp $ */
-=======
 /* $OpenBSD: lemac.c,v 1.13 2009/08/10 22:08:04 deraadt Exp $ */
->>>>>>> origin/master
 /* $NetBSD: lemac.c,v 1.20 2001/06/13 10:46:02 wiz Exp $ */
 
 /*-

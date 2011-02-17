@@ -1,4 +1,4 @@
-/*	$OpenBSD: essreg.h,v 1.2 1999/09/30 22:13:52 kstailey Exp $	*/
+/*	$OpenBSD: essreg.h,v 1.3 2001/01/29 06:27:59 mickey Exp $	*/
 /*	$NetBSD: essreg.h,v 1.12 1999/06/18 20:25:23 augustss Exp $	*/
 /*
  * Copyright 1997

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: sony12x24.h,v 1.3 2006/08/06 16:00:46 miod Exp $	*/
 /*	$NetBSD: sony12x24.h,v 1.9 2005/12/11 12:24:12 christos Exp $	*/
 /*
  * Copyright (c) 1992, 1993

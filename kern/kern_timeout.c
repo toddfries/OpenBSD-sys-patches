@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_timeout.c,v 1.24 2006/04/21 01:35:27 dlg Exp $	*/
-=======
 /*	$OpenBSD: kern_timeout.c,v 1.32 2009/11/04 19:14:10 kettenis Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -34,12 +30,8 @@
 #include <sys/lock.h>
 #include <sys/timeout.h>
 #include <sys/mutex.h>
-<<<<<<< HEAD
-#include <sys/queue.h>
-=======
 #include <sys/kernel.h>
 #include <sys/queue.h>			/* _Q_INVALIDATE */
->>>>>>> origin/master
 
 #ifdef DDB
 #include <machine/db_machdep.h>

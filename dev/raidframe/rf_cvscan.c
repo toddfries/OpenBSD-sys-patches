@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_cvscan.c,v 1.4 2000/01/07 14:50:20 peter Exp $	*/
+/*	$OpenBSD: rf_cvscan.c,v 1.5 2002/12/16 07:01:03 tdeval Exp $	*/
 /*	$NetBSD: rf_cvscan.c,v 1.5 1999/08/13 03:41:53 oster Exp $	*/
 
 /*

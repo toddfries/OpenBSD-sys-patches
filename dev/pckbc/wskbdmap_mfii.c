@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wskbdmap_mfii.c,v 1.33 2006/07/20 16:45:05 mickey Exp $ */
-=======
 /*	$OpenBSD: wskbdmap_mfii.c,v 1.41 2010/08/28 16:39:18 miod Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: wskbdmap_mfii.c,v 1.15 2000/05/19 16:40:04 drochner Exp $	*/
 
 /*
@@ -162,7 +158,7 @@ static const keysym_t pckbd_keydesc_us[] = {
     KC(221),			KS_Menu,
 };
 
-#if !defined(SMALL_KERNEL) || !defined(__alpha__)
+#if !defined(WSKBD_NO_INTL_LAYOUTS)
 
 static const keysym_t pckbd_keydesc_de[] = {
 /*  pos      normal		shifted		altgr		shift-altgr */
@@ -1032,14 +1028,14 @@ static const keysym_t pckbd_keydesc_nl_nodead[] = {
     KC(40),  KS_apostrophe,	KS_grave,
 };
 
-#endif	/* SMALL_KERNEL */
+#endif	/* WSKBD_NO_INTL_LAYOUTS */
 
 #define KBD_MAP(name, base, map) \
 			{ name, base, sizeof(map)/sizeof(keysym_t), map }
 
 const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_US,			0,	pckbd_keydesc_us),
-#if !defined(SMALL_KERNEL) || !defined(__alpha__)
+#if !defined(WSKBD_NO_INTL_LAYOUTS)
 	KBD_MAP(KB_DE,			KB_US,	pckbd_keydesc_de),
 	KBD_MAP(KB_DE | KB_NODEAD,	KB_DE,	pckbd_keydesc_de_nodead),
 	KBD_MAP(KB_FR,			KB_US,	pckbd_keydesc_fr),
@@ -1089,7 +1085,7 @@ const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_LV,			KB_US,	pckbd_keydesc_lv),
 	KBD_MAP(KB_NL,			KB_US, 	pckbd_keydesc_nl),
 	KBD_MAP(KB_NL | KB_NODEAD,	KB_NL,	pckbd_keydesc_nl_nodead),
-#endif	/* SMALL_KERNEL */
+#endif	/* WSKBD_NO_INTL_LAYOUTS */
 	{0, 0, 0, 0}
 };
 

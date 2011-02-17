@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunkbdreg.h,v 1.3 2002/08/12 10:43:56 miod Exp $	*/
+/*	$OpenBSD: sunkbdreg.h,v 1.4 2003/06/02 19:08:58 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

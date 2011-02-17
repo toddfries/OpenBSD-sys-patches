@@ -1,4 +1,4 @@
-/*	$OpenBSD: tea5757.c,v 1.2 2001/12/06 16:28:18 mickey Exp $	*/
+/*	$OpenBSD: tea5757.c,v 1.3 2002/01/07 18:32:19 mickey Exp $	*/
 
 /*
  * Copyright (c) 2001 Vladimir Popov <jumbo@narod.ru>

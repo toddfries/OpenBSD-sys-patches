@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_nwayxor.c,v 1.3 2000/08/08 16:07:43 peter Exp $	*/
+/*	$OpenBSD: rf_nwayxor.c,v 1.4 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_nwayxor.c,v 1.4 2000/03/30 12:45:41 augustss Exp $	*/
 
 /*

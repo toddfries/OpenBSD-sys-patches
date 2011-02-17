@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sysv_msg.c,v 1.18 2004/07/15 11:24:46 millert Exp $	*/
-=======
 /*	$OpenBSD: sysv_msg.c,v 1.23 2010/01/14 23:12:11 schwarze Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sysv_msg.c,v 1.19 1996/02/09 19:00:18 christos Exp $	*/
 /*
  * Copyright (c) 2009 Bret S. Lambert <blambert@openbsd.org>
@@ -48,32 +44,6 @@
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/syscallargs.h>
-<<<<<<< HEAD
-
-#ifdef MSG_DEBUG
-#define	DPRINTF(x)	printf x
-#else
-#define	DPRINTF(x)
-#endif
-
-/* XXX - OpenBSD doesn't have EIDRM or ENOMSG */
-#ifndef	EIDRM
-#define	EIDRM	EINVAL
-#endif
-#ifndef	ENOMSG
-#define	ENOMSG	EAGAIN
-#endif
-
-int nfree_msgmaps;		/* # of free map entries */
-short free_msgmaps;		/* head of linked list of free map entries */
-struct msg *free_msghdrs;	/* list of free msg headers */
-char *msgpool;			/* MSGMAX byte long msg buffer pool */
-struct msgmap *msgmaps;		/* MSGSEG msgmap structures */
-struct msg *msghdrs;		/* MSGTQL msg headers */
-struct msqid_ds *msqids;	/* MSGMNI msqid_ds struct's */
-
-void msg_freehdr(struct msg *);
-=======
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
@@ -100,7 +70,6 @@ int num_ques;
 int num_msgs;
 int sequence;
 int maxmsgs;
->>>>>>> origin/master
 
 void
 msginit(void)

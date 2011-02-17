@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mount.h,v 1.77 2006/12/15 03:04:24 krw Exp $	*/
-=======
 /*	$OpenBSD: mount.h,v 1.100 2010/06/29 04:09:32 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -229,18 +225,6 @@ struct msdosfs_args {
 #define MSDOSFSMNT_ALLOWDIRX	0x10	/* dir is mode +x if r */
 
 /*
- * Arguments to mount amigados filesystems.
- */
-struct adosfs_args {
-	char	*fspec;		/* blocks special holding the fs to mount */
-	struct	export_args export_info;
-				/* network export information */
-	uid_t	uid;		/* uid that owns adosfs files */
-	gid_t	gid;		/* gid that owns adosfs files */
-	mode_t	mask;		/* mask to be applied for adosfs perms */
-};
-
-/*
  * Arguments to mount ntfs filesystems
  */
 struct ntfs_args {
@@ -294,13 +278,44 @@ union mount_info {
 	struct iso_args iso_args;
 	struct procfs_args procfs_args;
 	struct msdosfs_args msdosfs_args;
-	struct adosfs_args adosfs_args;
 	struct ntfs_args ntfs_args;
 	char __align[160];	/* 64-bit alignment and room to grow */
 };
 
-/* new statfs structure with mount options */
+/* new statfs structure with mount options and statvfs fields */
 struct statfs {
+	u_int32_t	f_flags;	/* copy of mount flags */
+	u_int32_t	f_bsize;	/* file system block size */
+	u_int32_t	f_iosize;	/* optimal transfer block size */
+
+					/* unit is f_bsize */
+	u_int64_t  	f_blocks;	/* total data blocks in file system */
+	u_int64_t  	f_bfree;	/* free blocks in fs */
+	int64_t  	f_bavail;	/* free blocks avail to non-superuser */
+
+	u_int64_t 	f_files;	/* total file nodes in file system */
+	u_int64_t  	f_ffree;	/* free file nodes in fs */
+	int64_t  	f_favail;	/* free file nodes avail to non-root */
+
+	u_int64_t  	f_syncwrites;	/* count of sync writes since mount */
+	u_int64_t  	f_syncreads;	/* count of sync reads since mount */
+	u_int64_t  	f_asyncwrites;	/* count of async writes since mount */
+	u_int64_t  	f_asyncreads;	/* count of async reads since mount */
+
+	fsid_t	   	f_fsid;		/* file system id */
+	u_int32_t	f_namemax;      /* maximum filename length */
+	uid_t	   	f_owner;	/* user that mounted the file system */
+	u_int32_t  	f_ctime;	/* last mount [-u] time */
+	u_int32_t	f_spare[3];	/* spare for later */
+
+	char f_fstypename[MFSNAMELEN];	/* fs type name */
+	char f_mntonname[MNAMELEN];	/* directory on which mounted */
+	char f_mntfromname[MNAMELEN];	/* mounted file system */
+	union mount_info mount_info;	/* per-filesystem mount options */
+};
+
+/* old (pre-4.3) statfs structure with mount options */
+struct o43statfs {
 	u_int32_t  f_flags;		/* copy of mount flags */
 	int32_t    f_bsize;		/* fundamental file system block size */
 	u_int32_t  f_iosize;		/* optimal transfer block size */
@@ -346,7 +361,6 @@ struct ostatfs {
  * File system types.
  */
 #define	MOUNT_FFS	"ffs"		/* UNIX "Fast" Filesystem */
-#define	MOUNT_FFS2	"ffs2"		/* UNIX "Fast" Filesystem, version 2 */
 #define	MOUNT_UFS	MOUNT_FFS	/* for compatibility */
 #define	MOUNT_NFS	"nfs"		/* Network Filesystem */
 #define	MOUNT_MFS	"mfs"		/* Memory Filesystem */
@@ -355,7 +369,6 @@ struct ostatfs {
 #define	MOUNT_PROCFS	"procfs"	/* /proc Filesystem */
 #define	MOUNT_AFS	"afs"		/* Andrew Filesystem */
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
-#define	MOUNT_ADOSFS	"adosfs"	/* AmigaDOS Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
 #define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
@@ -473,7 +486,6 @@ struct vfsconf {
 	int	vfc_typenum;		/* historic filesystem type number */
 	int	vfc_refcount;		/* number mounted of this type */
 	int	vfc_flags;		/* permanent flags */
-	int	(*vfc_mountroot)(void);	/* if != NULL, routine to mount root */
 	struct	vfsconf *vfc_next;	/* next in list */
 };
 
@@ -615,7 +627,6 @@ int     vfs_mount_foreach_vnode(struct mount *, int (*func)(struct vnode *,
 void	vfs_getnewfsid(struct mount *);
 struct	mount *vfs_getvfs(fsid_t *);
 int	vfs_mountedon(struct vnode *);
-int	vfs_mountroot(void);
 int	vfs_rootmountalloc(char *, char *, struct mount **);
 void	vfs_unbusy(struct mount *);
 void	vfs_unmountall(void);
@@ -634,12 +645,6 @@ int	vfs_syncwait(int);	/* sync and wait for complete */
 void	vfs_shutdown(void);	/* unmount and sync file systems */
 int	dounmount(struct mount *, int, struct proc *, struct vnode *);
 void	vfsinit(void);
-<<<<<<< HEAD
-#ifdef DEBUG
-void	vfs_bufstats(void);
-#endif
-=======
->>>>>>> origin/master
 int	vfs_register(struct vfsconf *);
 int	vfs_unregister(struct vfsconf *);
 #else /* _KERNEL */

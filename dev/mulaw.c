@@ -1,4 +1,4 @@
-/*	$OpenBSD: mulaw.c,v 1.11 2004/02/23 23:59:21 deraadt Exp $ */
+/*	$OpenBSD: mulaw.c,v 1.14 2007/10/23 19:54:36 jakemsr Exp $ */
 /*	$NetBSD: mulaw.c,v 1.15 2001/01/18 20:28:20 jdolecek Exp $	*/
 
 /*
@@ -363,7 +363,7 @@ slinear16_to_mulaw_le(void *v, u_char* p, int cc)
 {
 	u_char *q = p + 1;	/* q points higher byte. */
 
-	while (--cc >= 0) {
+	while ((cc-= 2) >= 0) {
 		*p++ = lintomulaw[*q ^ 0x80];
 		q +=2 ;
 	}
@@ -490,7 +490,7 @@ slinear16_to_alaw_le(void *v, u_char *p, int cc)
 {
 	u_char *q = p;
 
-	while (--cc >= 0) {
+	while ((cc -= 2) >= 0) {
 		*p = lintoalaw[q[1] ^ 0x80];
 		++p;
 		q += 2;
@@ -503,7 +503,7 @@ slinear16_to_alaw_be(void *v, u_char *p, int cc)
 {
 	u_char *q = p;
 
-	while (--cc >= 0) {
+	while ((cc -= 2) >= 0) {
 		*p = lintoalaw[q[0] ^ 0x80];
 		++p;
 		q += 2;
@@ -597,5 +597,54 @@ mulaw_to_alaw(void *v, u_char *p, int cc)
 	while (--cc >= 0) {
 		*p = lintoalaw[mulawtolin16[*p][0]];
 		++p;
+	}
+}
+
+
+
+void
+slinear16_to_alaw_le_stm(void *v, u_char *p, int cc)
+{
+	u_char *q = p;
+
+	while ((cc -= 4) >= 0) {
+		*p = lintoalaw[q[1] ^ 0x80];
+		++p;
+		q += 4;
+	}
+}
+
+
+void
+slinear16_to_alaw_be_stm(void *v, u_char *p, int cc)
+{
+	u_char *q = p;
+
+	while ((cc -= 4) >= 0) {
+		*p = lintoalaw[q[0] ^ 0x80];
+		++p;
+		q += 4;
+	}
+}
+
+void
+slinear16_to_mulaw_le_stm(void *v, u_char* p, int cc)
+{
+	u_char *q = p;
+
+	while ((cc -= 4) >= 0) {
+		*p++ = lintomulaw[q[1] ^ 0x80];
+		q += 4 ;
+	}
+}
+
+void
+slinear16_to_mulaw_be_stm(void *v, u_char* p, int cc)
+{
+	u_char *q = p;
+
+	while ((cc -= 4) >= 0) {
+		*p++ = lintomulaw[q[0] ^ 0x80];
+		q += 4 ;
 	}
 }

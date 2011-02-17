@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdmmcreg.h,v 1.2 2006/06/01 21:53:41 uwe Exp $	*/
-=======
 /*	$OpenBSD: sdmmcreg.h,v 1.4 2009/01/09 10:55:22 jsg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

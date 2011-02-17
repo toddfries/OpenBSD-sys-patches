@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: core.h,v 1.2 1996/03/03 12:11:28 niklas Exp $	*/
-=======
 /*	$OpenBSD: core.h,v 1.4 2009/03/05 19:52:24 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: core.h,v 1.4 1994/10/29 08:20:14 cgd Exp $	*/
 
 /*

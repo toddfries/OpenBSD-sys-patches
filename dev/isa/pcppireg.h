@@ -1,4 +1,4 @@
-/* $OpenBSD: pcppireg.h,v 1.1 1998/04/15 20:26:18 drochner Exp $ */
+/* $OpenBSD: pcppireg.h,v 1.1 1999/01/02 00:02:44 niklas Exp $ */
 /* $NetBSD: pcppireg.h,v 1.1 1998/04/15 20:26:18 drochner Exp $ */
 
 /*

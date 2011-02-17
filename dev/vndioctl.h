@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vndioctl.h,v 1.5 2003/06/02 23:28:01 millert Exp $	*/
-=======
 /*	$OpenBSD: vndioctl.h,v 1.8 2008/09/03 23:24:25 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vndioctl.h,v 1.5 1995/01/25 04:46:30 cgd Exp $	*/
 
 /*

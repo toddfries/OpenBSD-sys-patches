@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: smc83c170var.h,v 1.3 2009/08/10 20:29:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: smc83c170var.h,v 1.9 2005/02/04 02:10:37 perry Exp $	*/
 
 /*-

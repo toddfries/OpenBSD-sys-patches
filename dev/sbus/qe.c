@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qe.c,v 1.19 2006/06/02 20:00:56 miod Exp $	*/
-=======
 /*	$OpenBSD: qe.c,v 1.23 2008/11/28 02:44:18 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qe.c,v 1.16 2001/03/30 17:30:18 christos Exp $	*/
 
 /*-

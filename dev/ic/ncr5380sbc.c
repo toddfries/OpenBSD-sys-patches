@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ncr5380sbc.c,v 1.18 2005/11/12 20:29:45 brad Exp $	*/
-=======
 /*	$OpenBSD: ncr5380sbc.c,v 1.26 2010/06/26 23:24:44 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ncr5380sbc.c,v 1.13 1996/10/13 01:37:25 christos Exp $	*/
 
 /*

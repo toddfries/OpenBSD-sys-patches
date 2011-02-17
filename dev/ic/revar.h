@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: revar.h,v 1.4 2006/09/19 07:23:02 mickey Exp $	*/
-=======
 /*	$OpenBSD: revar.h,v 1.7 2010/07/27 20:53:39 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>

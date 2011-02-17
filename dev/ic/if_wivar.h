@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_wivar.h,v 1.27 2005/10/31 05:37:13 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_wivar.h,v 1.30 2010/08/30 20:42:27 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999

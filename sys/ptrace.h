@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ptrace.h,v 1.9 2005/09/14 20:55:59 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ptrace.h,v 1.12 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ptrace.h,v 1.21 1996/02/09 18:25:26 christos Exp $	*/
 
 /*-

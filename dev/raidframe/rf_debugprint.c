@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_debugprint.c,v 1.2 1999/02/16 00:02:34 niklas Exp $	*/
+/*	$OpenBSD: rf_debugprint.c,v 1.3 2002/12/16 07:01:03 tdeval Exp $	*/
 /*	$NetBSD: rf_debugprint.c,v 1.3 1999/02/05 00:06:08 oster Exp $	*/
 
 /*

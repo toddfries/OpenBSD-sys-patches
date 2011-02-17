@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ioasicvar.h,v 1.6 2002/05/02 22:56:06 miod Exp $	*/
-=======
 /*	$OpenBSD: ioasicvar.h,v 1.10 2009/11/07 23:01:38 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ioasicvar.h,v 1.14 2000/10/17 09:45:49 nisimura Exp $	*/
 
 /*

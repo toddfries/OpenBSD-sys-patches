@@ -1,4 +1,4 @@
-/*	$OpenBSD: dptreg.h,v 1.2 2001/01/25 03:50:50 todd Exp $	*/
+/*	$OpenBSD: dptreg.h,v 1.3 2001/07/26 03:55:54 mickey Exp $	*/
 /*	$NetBSD: dptreg.h,v 1.4 1999/10/19 20:16:48 ad Exp $	*/
 
 /*

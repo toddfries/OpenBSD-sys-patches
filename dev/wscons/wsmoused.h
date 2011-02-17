@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsmoused.h,v 1.6 2006/11/29 19:11:17 miod Exp $ */
-=======
 /* $OpenBSD: wsmoused.h,v 1.8 2009/05/31 17:02:20 miod Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon

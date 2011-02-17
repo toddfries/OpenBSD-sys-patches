@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: ad1843reg.h,v 1.2 2009/11/18 21:13:17 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Mark Kettenis

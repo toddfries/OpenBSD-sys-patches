@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: stdarg.h,v 1.3 2004/02/26 17:21:59 drahn Exp $ */
-=======
 /*	$OpenBSD: stdarg.h,v 1.7 2009/09/17 20:46:55 jsg Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, 2004  Marc espie <espie@openbsd.org>
  *

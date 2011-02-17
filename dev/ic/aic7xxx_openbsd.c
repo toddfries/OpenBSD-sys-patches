@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.32 2006/03/04 14:20:37 krw Exp $	*/
-=======
 /*	$OpenBSD: aic7xxx_openbsd.c,v 1.48 2010/06/28 18:31:02 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -44,9 +40,6 @@
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
  */
 
-#include <sys/cdefs.h>
-/* __KERNEL_RCSID(0, "$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $"); */
-
 #include <dev/ic/aic7xxx_openbsd.h>
 #include <dev/ic/aic7xxx_inline.h>
 
@@ -83,10 +76,9 @@ int
 ahc_attach(struct ahc_softc *ahc)
 {
 	struct scsibus_attach_args saa;
-	char ahc_info[256];
 	int s;
 
-        ahc_lock(ahc, &s);
+        s = splbio();
 
 	/*
 	 * fill in the prototype scsi_links.
@@ -104,10 +96,13 @@ ahc_attach(struct ahc_softc *ahc)
 		ahc->sc_channel_b.adapter_target = ahc->our_id_b;
 	}
 
+#ifndef DEBUG		
 	if (bootverbose) {
+		char ahc_info[256];
 		ahc_controller_info(ahc, ahc_info, sizeof ahc_info);
 		printf("%s: %s\n", ahc->sc_dev.dv_xname, ahc_info);
 	}
+#endif
 
 	ahc_intr_enable(ahc, TRUE);
 
@@ -137,7 +132,7 @@ ahc_attach(struct ahc_softc *ahc)
 		    &saa, scsiprint);
 	}
 
-	ahc_unlock(ahc, &s);
+	splx(s);
 	return (1);
 }
 
@@ -263,15 +258,10 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 		xs->error = XS_SENSE;
 	}
 
-        ahc_lock(ahc, &s);       
+        s = splbio();       
 	ahc_free_scb(ahc, scb);
-<<<<<<< HEAD
-        ahc_unlock(ahc, &s);       
-
-	xs->flags |= ITSDONE;
-=======
->>>>>>> origin/master
 	scsi_done(xs);
+        splx(s);       
 }
 
 void
@@ -309,14 +299,6 @@ ahc_action(struct scsi_xfer *xs)
 	/*
 	 * get an scb to use.
 	 */
-<<<<<<< HEAD
-	ahc_lock(ahc, &s);
-	if ((scb = ahc_get_scb(ahc)) == NULL) {
-		ahc_unlock(ahc, &s);
-		return (TRY_AGAIN_LATER);
-	}
-	ahc_unlock(ahc, &s);
-=======
 	s = splbio();
 	scb = ahc_get_scb(ahc);
 	splx(s);
@@ -325,7 +307,6 @@ ahc_action(struct scsi_xfer *xs)
 		scsi_done(xs);
 		return;
 	}
->>>>>>> origin/master
 
 	hscb = scb->hscb;
 
@@ -422,24 +403,8 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 
 	scb->sg_count = nsegments;
 
-	ahc_lock(ahc, &s);
+	s = splbio();
 
-<<<<<<< HEAD
-	/*
-	 * Last time we need to check if this SCB needs to
-	 * be aborted.
-	 */
-	if (xs->flags & ITSDONE) {
-		if (nsegments != 0)
-			bus_dmamap_unload(ahc->parent_dmat, scb->dmamap);
-
-		ahc_free_scb(ahc, scb);
-		ahc_unlock(ahc, &s);
-		return (COMPLETE);
-	}
-
-=======
->>>>>>> origin/master
 	tinfo = ahc_fetch_transinfo(ahc, SCSIID_CHANNEL(ahc, scb->hscb->scsiid),
 				    SCSIID_OUR_ID(scb->hscb->scsiid),
 				    SCSIID_TARGET(ahc, scb->hscb->scsiid),
@@ -495,13 +460,8 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 			if (xs->flags & SCSI_POLL)
 				goto poll;
 			else {		
-<<<<<<< HEAD
-				ahc_unlock(ahc, &s);
-				return (SUCCESSFULLY_QUEUED);
-=======
 				splx(s);
 				return;
->>>>>>> origin/master
 			}
 		}
 	}
@@ -530,13 +490,8 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 
 			ahc->inited_target[xs->sc_link->target] = 1;
 		}
-<<<<<<< HEAD
-		ahc_unlock(ahc, &s);
-		return (SUCCESSFULLY_QUEUED);
-=======
 		splx(s);
 		return;
->>>>>>> origin/master
 	}
 
 	/*
@@ -554,12 +509,7 @@ poll:
 		}
 	} while (!(xs->flags & ITSDONE));
 
-<<<<<<< HEAD
-	ahc_unlock(ahc, &s);
-	return (COMPLETE);
-=======
 	splx(s);
->>>>>>> origin/master
 }
 
 int
@@ -593,20 +543,12 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 
 	hscb->cdb_len = xs->cmdlen;
 	if (hscb->cdb_len > sizeof(hscb->cdb32)) {
-		ahc_lock(ahc, &s);
+		s = splbio();
 		ahc_free_scb(ahc, scb);
-<<<<<<< HEAD
-		ahc_unlock(ahc, &s);
-=======
 		splx(s);
->>>>>>> origin/master
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
-<<<<<<< HEAD
-		return (COMPLETE);
-=======
 		return;
->>>>>>> origin/master
 	}
 
 	if (hscb->cdb_len > 12) {
@@ -631,17 +573,8 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 			       "= %d\n",
 			       ahc_name(ahc), error);
 #endif
-			ahc_lock(ahc, &s);
+			s = splbio();
 			ahc_free_scb(ahc, scb);
-<<<<<<< HEAD
-			ahc_unlock(ahc, &s);
-			return (TRY_AGAIN_LATER);	/* XXX fvdl */
-}
-		error = ahc_execute_scb(scb,
-					scb->dmamap->dm_segs,
-					scb->dmamap->dm_nsegs);
-		return error;
-=======
 			splx(s);
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
@@ -649,7 +582,6 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 		}
 		ahc_execute_scb(scb, scb->dmamap->dm_segs,
 		    scb->dmamap->dm_nsegs);
->>>>>>> origin/master
 	} else {
 		ahc_execute_scb(scb, NULL, 0);
 	}
@@ -667,7 +599,7 @@ ahc_timeout(void *arg)
 	scb = (struct scb *)arg;
 	ahc = (struct ahc_softc *)scb->xs->sc_link->adapter_softc;
 
-	ahc_lock(ahc, &s);
+	s = splbio();
 
 #ifdef AHC_DEBUG
 	printf("%s: SCB %d timed out\n", ahc_name(ahc), scb->hscb->tag);
@@ -696,7 +628,7 @@ ahc_timeout(void *arg)
 	}
 
 	ahc_unpause(ahc);
-	ahc_unlock(ahc, &s);
+	splx(s);
 }
 
 
@@ -727,10 +659,9 @@ ahc_platform_alloc(struct ahc_softc *ahc, void *platform_arg)
 {
 	if (sizeof(struct ahc_platform_data) > 0) {
 		ahc->platform_data = malloc(sizeof(struct ahc_platform_data),
-		    M_DEVBUF, M_NOWAIT);
+		    M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (ahc->platform_data == NULL)
 			return (ENOMEM);
-		bzero(ahc->platform_data, sizeof(struct ahc_platform_data));
 	}
 
 	return (0);

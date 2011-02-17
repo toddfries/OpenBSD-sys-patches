@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: nsphy.c,v 1.19 2005/03/26 04:40:09 krw Exp $	*/
-=======
 /*	$OpenBSD: nsphy.c,v 1.25 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: nsphy.c,v 1.25 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-
@@ -264,7 +260,7 @@ nsphy_status(struct mii_softc *sc)
 
 	if (bmcr & BMCR_AUTOEN) {
 		/*
-		 * The PAR status bits are only valid of autonegotiation
+		 * The PAR status bits are only valid if autonegotiation
 		 * has completed (or it's disabled).
 		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {
@@ -281,13 +277,7 @@ nsphy_status(struct mii_softc *sc)
 		if (PHY_READ(sc, MII_ANER) & ANER_LPAN) {
 			anlpar = PHY_READ(sc, MII_ANAR) &
 			    PHY_READ(sc, MII_ANLPAR);
-<<<<<<< HEAD
-			if (anlpar & ANLPAR_T4)
-				mii->mii_media_active |= IFM_100_T4;
-			else if (anlpar & ANLPAR_TX_FD)
-=======
 			if (anlpar & ANLPAR_TX_FD)
->>>>>>> origin/master
 				mii->mii_media_active |= IFM_100_TX|IFM_FDX;
 			else if (anlpar & ANLPAR_T4)
 				mii->mii_media_active |= IFM_100_T4|IFM_HDX;

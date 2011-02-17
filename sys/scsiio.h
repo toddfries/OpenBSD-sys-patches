@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: scsiio.h,v 1.7 2006/07/23 02:50:20 dlg Exp $	*/
-=======
 /*	$OpenBSD: scsiio.h,v 1.9 2010/11/16 19:54:58 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: scsiio.h,v 1.3 1994/06/29 06:45:09 cgd Exp $	*/
 
 #ifndef _SYS_SCSIIO_H_

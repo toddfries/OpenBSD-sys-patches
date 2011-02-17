@@ -1,13 +1,6 @@
-<<<<<<< HEAD
-/*	$OpenBSD: magma.c,v 1.14 2005/03/08 21:56:23 martin Exp $	*/
-/*
- * magma.c
- *
-=======
 /*	$OpenBSD: magma.c,v 1.23 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*-
->>>>>>> origin/master
  * Copyright (c) 1998 Iain Hibbert
  * All rights reserved.
  *

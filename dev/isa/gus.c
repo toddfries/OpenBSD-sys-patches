@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gus.c,v 1.28 2005/10/19 22:52:02 fgsch Exp $	*/
-=======
 /*	$OpenBSD: gus.c,v 1.34 2010/07/15 03:43:11 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -301,6 +297,7 @@ struct audio_hw_if gus_hw_if = {
 	gus_get_props,
 
 	NULL,
+	NULL,
 	NULL
 };
 
@@ -337,6 +334,10 @@ static struct audio_hw_if gusmax_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	gusmax_get_props,
+
+	NULL,
+	NULL,
+	NULL
 };
 
 /*

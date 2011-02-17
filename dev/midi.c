@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: midi.c,v 1.15 2006/11/01 03:37:23 tedu Exp $	*/
-=======
 /*	$OpenBSD: midi.c,v 1.25 2011/01/27 20:37:19 ratchov Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2003, 2004 Alexandre Ratchov

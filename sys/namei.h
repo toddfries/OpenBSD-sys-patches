@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: namei.h,v 1.15 2005/06/18 18:09:43 millert Exp $	*/
-=======
 /*	$OpenBSD: namei.h,v 1.25 2010/09/09 10:37:04 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: namei.h,v 1.11 1996/02/09 18:25:20 christos Exp $	*/
 
 /*
@@ -95,10 +91,6 @@ struct nameidata {
 		char	*cn_pnbuf;	/* pathname buffer */
 		char	*cn_nameptr;	/* pointer to looked up name */
 		long	cn_namelen;	/* length of looked up component */
-<<<<<<< HEAD
-		u_long	cn_hash;	/* hash value of looked up name */
-=======
->>>>>>> origin/master
 		long	cn_consume;	/* chars to consume in lookup() */
 	} ni_cnd;
 };
@@ -182,7 +174,6 @@ struct	namecache {
 };
 
 #ifdef _KERNEL
-extern u_long nextvnodeid;
 int	namei(struct nameidata *ndp);
 int	vfs_lookup(struct nameidata *ndp);
 int	vfs_relookup(struct vnode *dvp, struct vnode **vpp,

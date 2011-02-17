@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm_isa.c,v 1.10 2006/01/26 22:07:14 kettenis Exp $	*/
+/*	$OpenBSD: lm78_isa.c,v 1.4 2008/02/17 15:04:08 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis
@@ -26,7 +26,6 @@
 #include <dev/isa/isavar.h>
 
 #include <dev/ic/lm78var.h>
-#include <dev/isa/itvar.h>
 
 /* ISA registers */
 #define LMC_ADDR	0x05
@@ -53,7 +52,13 @@ u_int8_t lm_isa_readreg(struct lm_softc *, int);
 void lm_isa_writereg(struct lm_softc *, int, int);
 
 struct cfattach lm_isa_ca = {
-	sizeof(struct lm_softc),
+	sizeof(struct lm_isa_softc),
+	lm_isa_match,
+	lm_isa_attach
+};
+
+struct cfattach lm_wbsio_ca = {
+	sizeof(struct lm_isa_softc),
 	lm_isa_match,
 	lm_isa_attach
 };
@@ -62,9 +67,10 @@ int
 lm_isa_match(struct device *parent, void *match, void *aux)
 {
 	bus_space_tag_t iot;
+	bus_addr_t iobase;
 	bus_space_handle_t ioh;
 	struct isa_attach_args *ia = aux;
-	int iobase, banksel, vendid, chipid, addr;
+	int banksel, vendid, chipid, addr;
 
 	iot = ia->ia_iot;
 	iobase = ia->ipa_io[0].base;
@@ -84,9 +90,8 @@ lm_isa_match(struct device *parent, void *match, void *aux)
 		goto found;
 
 	/* Probe for ITE chips (and don't attach if we find one). */
-	bus_space_write_1(iot, ioh, LMC_ADDR, ITD_CHIPID);
-	vendid = bus_space_read_1(iot, ioh, LMC_DATA);
-	if (vendid == IT_ID_IT87) 
+	bus_space_write_1(iot, ioh, LMC_ADDR, 0x58);
+	if ((vendid = bus_space_read_1(iot, ioh, LMC_DATA)) == 0x90)
 		goto notfound;
 
 	/*
@@ -136,11 +141,12 @@ lm_isa_attach(struct device *parent, struct device *self, void *aux)
 	struct lm_isa_softc *sc = (struct lm_isa_softc *)self;
 	struct isa_attach_args *ia = aux;
 	struct lm_softc *lmsc;
-	int iobase, i;
+	bus_addr_t iobase;
+	int i;
 	u_int8_t sbusaddr;
 
 	sc->sc_iot = ia->ia_iot;
-        iobase = ia->ipa_io[0].base;
+	iobase = ia->ipa_io[0].base;
 
 	if (bus_space_map(sc->sc_iot, iobase, 8, 0, &sc->sc_ioh)) {
 		printf(": can't map i/o space\n");

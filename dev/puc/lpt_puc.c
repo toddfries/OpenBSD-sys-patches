@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lpt_puc.c,v 1.3 2002/03/14 01:27:01 millert Exp $	*/
-=======
 /*	$OpenBSD: lpt_puc.c,v 1.5 2009/07/15 17:18:14 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lpt_puc.c,v 1.1 1998/06/26 18:52:41 cgd Exp $	*/
 
 /*

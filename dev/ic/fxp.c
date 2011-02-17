@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fxp.c,v 1.84 2006/12/26 17:02:09 krw Exp $	*/
-=======
 /*	$OpenBSD: fxp.c,v 1.107 2010/09/07 16:21:42 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -63,11 +59,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#endif
-
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -168,7 +159,7 @@ void fxp_read_eeprom(struct fxp_softc *, u_int16_t *,
 				    int, int);
 void fxp_stats_update(void *);
 void fxp_mc_setup(struct fxp_softc *, int);
-void fxp_scb_cmd(struct fxp_softc *, u_int8_t);
+void fxp_scb_cmd(struct fxp_softc *, u_int16_t);
 
 /*
  * Set initial transmit threshold at 64 (512 bytes). This is
@@ -204,9 +195,9 @@ int fxp_min_size_mask = FXP_MIN_SIZE_MASK;
 void
 fxp_scb_wait(struct fxp_softc *sc)
 {
-	int i = 10000;
+	int i = FXP_CMD_TMO;
 
-	while (CSR_READ_1(sc, FXP_CSR_SCB_COMMAND) && --i)
+	while ((CSR_READ_2(sc, FXP_CSR_SCB_COMMAND) & 0xff) && --i)
 		DELAY(2);
 	if (i == 0)
 		printf("%s: warning: SCB timed out\n", sc->sc_dev.dv_xname);
@@ -456,7 +447,6 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		fxp_read_eeprom(sc, &data, 10, 1);
 		if (data & 0x02) {			/* STB enable */
 			u_int16_t cksum;
-			int i;
 
 			printf("%s: Disabling dynamic standby mode in EEPROM",
 			    sc->sc_dev.dv_xname);
@@ -538,32 +528,6 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		m = m_free(m);
 	}
 	return (ENOMEM);
-}
-
-int
-fxp_detach(struct fxp_softc *sc)
-{
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	/* Unhook our tick handler. */
-	timeout_del(&sc->stats_update_to);
-
-	/* Detach any PHYs we might have. */
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
-		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
-
-	/* Delete any remaining media. */
-	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
-
-	ether_ifdetach(ifp);
-	if_detach(ifp);
-
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
-	return (0);
 }
 
 /*
@@ -823,7 +787,7 @@ fxp_intr(void *arg)
 {
 	struct fxp_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	u_int8_t statack;
+	u_int16_t statack;
 	bus_dmamap_t rxmap;
 	int claimed = 0;
 	int rnr = 0;
@@ -833,22 +797,25 @@ fxp_intr(void *arg)
 	 * service the interrupt.. just ack it and bail.
 	 */
 	if ((ifp->if_flags & IFF_RUNNING) == 0) {
-		statack = CSR_READ_1(sc, FXP_CSR_SCB_STATACK);
+		statack = CSR_READ_2(sc, FXP_CSR_SCB_STATUS);
 		if (statack) {
 			claimed = 1;
-			CSR_WRITE_1(sc, FXP_CSR_SCB_STATACK, statack);
+			CSR_WRITE_2(sc, FXP_CSR_SCB_STATUS,
+			    statack & FXP_SCB_STATACK_MASK);
 		}
 		return claimed;
 	}
 
-	while ((statack = CSR_READ_1(sc, FXP_CSR_SCB_STATACK)) != 0) {
+	while ((statack = CSR_READ_2(sc, FXP_CSR_SCB_STATUS)) &
+	    FXP_SCB_STATACK_MASK) {
 		claimed = 1;
 		rnr = (statack & (FXP_SCB_STATACK_RNR | 
 		                  FXP_SCB_STATACK_SWI)) ? 1 : 0;
 		/*
 		 * First ACK all the interrupts in this pass.
 		 */
-		CSR_WRITE_1(sc, FXP_CSR_SCB_STATACK, statack);
+		CSR_WRITE_2(sc, FXP_CSR_SCB_STATUS,
+		    statack & FXP_SCB_STATACK_MASK);
 
 		/*
 		 * Free any finished transmit mbuf chains.
@@ -876,10 +843,12 @@ fxp_intr(void *arg)
 				FXP_TXCB_SYNC(sc, txs,
 				    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 			}
-			sc->sc_cbt_cons = txs;
 			sc->sc_cbt_cnt = txcnt;
-			ifp->if_timer = 0;
-			ifp->if_flags &= ~IFF_OACTIVE;
+			/* Did we transmit any packets? */
+			if (sc->sc_cbt_cons != txs)
+				ifp->if_flags &= ~IFF_OACTIVE;
+			ifp->if_timer = sc->sc_cbt_cnt ? 5 : 0;
+			sc->sc_cbt_cons = txs;
 
 			if (!IFQ_IS_EMPTY(&ifp->if_snd)) {
 				/*
@@ -1034,7 +1003,7 @@ fxp_stats_update(void *arg)
 	 * dump. Otherwise punt for now.
 	 */
 	FXP_STATS_SYNC(sc, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-	if (CSR_READ_1(sc, FXP_CSR_SCB_COMMAND) == 0) {
+	if (!(CSR_READ_2(sc, FXP_CSR_SCB_COMMAND) & 0xff)) {
 		/*
 		 * Start another stats dump.
 		 */
@@ -1182,9 +1151,9 @@ fxp_watchdog(struct ifnet *ifp)
  * Submit a command to the i82557.
  */
 void
-fxp_scb_cmd(struct fxp_softc *sc, u_int8_t cmd)
+fxp_scb_cmd(struct fxp_softc *sc, u_int16_t cmd)
 {
-	CSR_WRITE_1(sc, FXP_CSR_SCB_COMMAND, cmd);
+	CSR_WRITE_2(sc, FXP_CSR_SCB_COMMAND, cmd);
 }
 
 void
@@ -1345,10 +1314,17 @@ fxp_init(void *xsc)
 	    offsetof(struct fxp_ctrl, u.cfg));
 	fxp_scb_cmd(sc, FXP_SCB_COMMAND_CU_START);
 	/* ...and wait for it to complete. */
+	i = FXP_CMD_TMO;
 	do {
 		DELAY(1);
 		FXP_CFG_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-	} while ((cbp->cb_status & htole16(FXP_CB_STATUS_C)) == 0);
+	} while ((cbp->cb_status & htole16(FXP_CB_STATUS_C)) == 0 && i--);
+
+	FXP_CFG_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
+	if (!(cbp->cb_status & htole16(FXP_CB_STATUS_C))) {
+		printf("%s: config command timeout\n", sc->sc_dev.dv_xname);
+		return;
+	}
 
 	/*
 	 * Now initialize the station address.
@@ -1369,10 +1345,17 @@ fxp_init(void *xsc)
 	    offsetof(struct fxp_ctrl, u.ias));
 	fxp_scb_cmd(sc, FXP_SCB_COMMAND_CU_START);
 	/* ...and wait for it to complete. */
+	i = FXP_CMD_TMO;
 	do {
 		DELAY(1);
 		FXP_IAS_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-	} while (!(cb_ias->cb_status & htole16(FXP_CB_STATUS_C)));
+	} while (!(cb_ias->cb_status & htole16(FXP_CB_STATUS_C)) && i--);
+
+	FXP_IAS_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
+	if (!(cb_ias->cb_status & htole16(FXP_CB_STATUS_C))) {
+		printf("%s: IAS command timeout\n", sc->sc_dev.dv_xname);
+		return;
+	}
 
 	/* Again, this time really upload the multicast addresses */
 	fxp_mc_setup(sc, 1);
@@ -1453,7 +1436,9 @@ fxp_init(void *xsc)
 	 * the risk of having it overwrite mbuf clusters while they are
 	 * being processed or after they have been returned to the pool.
 	 */
-	CSR_WRITE_1(sc, FXP_CSR_SCB_INTRCNTL, FXP_SCB_INTRCNTL_REQUEST_SWI);
+	CSR_WRITE_2(sc, FXP_CSR_SCB_COMMAND,
+	    CSR_READ_2(sc, FXP_CSR_SCB_COMMAND) |
+	    FXP_SCB_INTRCNTL_REQUEST_SWI);
 	splx(s);
 
 	/*
@@ -1605,7 +1590,7 @@ int
 fxp_mdi_read(struct device *self, int phy, int reg)
 {
 	struct fxp_softc *sc = (struct fxp_softc *)self;
-	int count = 10000;
+	int count = FXP_CMD_TMO;
 	int value;
 
 	CSR_WRITE_4(sc, FXP_CSR_MDICONTROL,
@@ -1631,7 +1616,7 @@ void
 fxp_mdi_write(struct device *self, int phy, int reg, int value)
 {
 	struct fxp_softc *sc = (struct fxp_softc *)self;
-	int count = 10000;
+	int count = FXP_CMD_TMO;
 
 	CSR_WRITE_4(sc, FXP_CSR_MDICONTROL,
 	    (FXP_MDI_WRITE << 26) | (reg << 16) | (phy << 21) |
@@ -1719,11 +1704,7 @@ fxp_mc_setup(struct fxp_softc *sc, int doit)
 	struct fxp_cb_mcs *mcsp = &sc->sc_ctrl->u.mcs;
 	struct ether_multistep step;
 	struct ether_multi *enm;
-<<<<<<< HEAD
-	int nmcasts;
-=======
 	int i, nmcasts = 0;
->>>>>>> origin/master
 
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
@@ -1757,7 +1738,15 @@ fxp_mc_setup(struct fxp_softc *sc, int doit)
 	 * Wait until command unit is not active. This should never
 	 * be the case when nothing is queued, but make sure anyway.
 	 */
-	while ((CSR_READ_1(sc, FXP_CSR_SCB_RUSCUS) >> 6) != FXP_SCB_CUS_IDLE);
+	for (i = FXP_CMD_TMO; (CSR_READ_2(sc, FXP_CSR_SCB_STATUS) &
+	    FXP_SCB_CUS_MASK) != FXP_SCB_CUS_IDLE && i--; DELAY(1));
+
+	if ((CSR_READ_2(sc, FXP_CSR_SCB_STATUS) &
+	    FXP_SCB_CUS_MASK) != FXP_SCB_CUS_IDLE) {
+		printf("%s: timeout waiting for CU ready\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
 
 	/*
 	 * Start the multicast setup command.
@@ -1768,10 +1757,18 @@ fxp_mc_setup(struct fxp_softc *sc, int doit)
 	    offsetof(struct fxp_ctrl, u.mcs));
 	fxp_scb_cmd(sc, FXP_SCB_COMMAND_CU_START);
 
+	i = FXP_CMD_TMO;
 	do {
 		DELAY(1);
 		FXP_MCS_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-	} while (!(mcsp->cb_status & htole16(FXP_CB_STATUS_C)));
+	} while (!(mcsp->cb_status & htole16(FXP_CB_STATUS_C)) && i--);
+
+	FXP_MCS_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
+	if (!(mcsp->cb_status & htole16(FXP_CB_STATUS_C))) {
+		printf("%s: multicast command timeout\n", sc->sc_dev.dv_xname);
+		return;
+	}
+
 }
 
 #ifndef SMALL_KERNEL
@@ -1840,8 +1837,8 @@ fxp_load_ucode(struct fxp_softc *sc)
 
 	error = loadfirmware(uc->uname, (u_char **)&ucode_buf, &ucode_len);
 	if (error) {
-		printf("%s: failed loadfirmware of file %s: errno %d\n",
-		    sc->sc_dev.dv_xname, uc->uname, error);
+		printf("%s: error %d, could not read firmware %s\n",
+		    sc->sc_dev.dv_xname, error, uc->uname);
 		sc->sc_flags |= FXPF_UCODE;
 		return;
 	}
@@ -1875,7 +1872,7 @@ fxp_load_ucode(struct fxp_softc *sc)
 	fxp_scb_cmd(sc, FXP_SCB_COMMAND_CU_START);
 
 	/* ...and wait for it to complete. */
-	i = 10000;
+	i = FXP_CMD_TMO;
 	do {
 		DELAY(2);
 		FXP_UCODE_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);

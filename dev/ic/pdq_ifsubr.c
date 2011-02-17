@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdq_ifsubr.c,v 1.18 2006/03/25 22:41:43 djm Exp $	*/
+/*	$OpenBSD: pdq_ifsubr.c,v 1.19 2006/05/30 21:33:59 fkr Exp $	*/
 /*	$NetBSD: pdq_ifsubr.c,v 1.5 1996/05/20 00:26:21 thorpej Exp $	*/
 
 /*-

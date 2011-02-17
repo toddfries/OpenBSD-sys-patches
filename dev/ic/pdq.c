@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pdq.c,v 1.12 2002/06/02 22:49:59 deraadt Exp $	*/
-=======
 /*	$OpenBSD: pdq.c,v 1.14 2009/12/11 01:43:19 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pdq.c,v 1.9 1996/10/13 01:37:26 christos Exp $	*/
 
 /*-

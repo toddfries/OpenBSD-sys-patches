@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_fta.c,v 1.12 2002/06/09 21:25:40 art Exp $	*/
-=======
 /*	$OpenBSD: if_fta.c,v 1.17 2010/09/20 07:40:42 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: if_fta.c,v 1.7 1996/10/22 21:37:26 cgd Exp $	*/
 
 /*-
@@ -117,19 +113,8 @@ pdq_tc_attach(parent, self, aux)
 	    sc->sc_arpcom.ac_enaddr, 6);
 	pdq_ifattach(sc, NULL);
 
-<<<<<<< HEAD
-	tc_intr_establish(parent, ta->ta_cookie, TC_IPL_NET,
-	    (int (*)(void *)) pdq_interrupt, sc->sc_pdq);
-
-	sc->sc_ats = shutdownhook_establish((void (*)(void *)) pdq_hwreset,
-	    sc->sc_pdq);
-	if (sc->sc_ats == NULL)
-		printf("%s: warning: couldn't establish shutdown hook\n",
-		    self->dv_xname);
-=======
 	tc_intr_establish(parent, ta->ta_cookie, IPL_NET,
 	    (int (*)(void *)) pdq_interrupt, sc->sc_pdq, self->dv_xname);
->>>>>>> origin/master
 }
 
 struct cfattach fta_ca = {

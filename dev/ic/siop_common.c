@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: siop_common.c,v 1.28 2005/11/25 16:33:19 krw Exp $ */
-=======
 /*	$OpenBSD: siop_common.c,v 1.34 2010/07/23 07:47:13 jsg Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: siop_common.c,v 1.37 2005/02/27 00:27:02 perry Exp $	*/
 
 /*
@@ -247,7 +243,7 @@ siop_setuptables(siop_cmd)
 	int *targ_flags = &sc->targets[target]->flags;
 	int quirks;
 
-	siop_cmd->siop_tables->id = htole32(sc->targets[target]->id);
+	siop_cmd->siop_tables->id = siop_htoc32(sc, sc->targets[target]->id);
 	memset(siop_cmd->siop_tables->msg_out, 0,
 	    sizeof(siop_cmd->siop_tables->msg_out));
 	/* request sense doesn't disconnect */
@@ -266,7 +262,7 @@ siop_setuptables(siop_cmd)
 		siop_cmd->siop_tables->msg_out[0] = MSG_IDENTIFY(lun, 0);
 	else
 		siop_cmd->siop_tables->msg_out[0] = MSG_IDENTIFY(lun, 1);
-	siop_cmd->siop_tables->t_msgout.count= htole32(msgoffset);
+	siop_cmd->siop_tables->t_msgout.count = siop_htoc32(sc, msgoffset);
 	if (sc->targets[target]->status == TARST_ASYNC) {
 		*targ_flags &= TARF_DT; /* Save TARF_DT 'cuz we don't set it here */
 		quirks = xs->sc_link->quirks;
@@ -313,7 +309,7 @@ siop_setuptables(siop_cmd)
 		siop_cmd->flags |= CMDFL_TAG;
 	}
 	siop_cmd->siop_tables->status =
-	    htole32(SCSI_SIOP_NOSTATUS); /* set invalid status */
+	    siop_htoc32(sc, SCSI_SIOP_NOSTATUS); /* set invalid status */
 
 	if ((xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) ||
 	    siop_cmd->status == CMDST_SENSE) {
@@ -321,9 +317,11 @@ siop_setuptables(siop_cmd)
 		    sizeof(siop_cmd->siop_tables->data));
 		for (i = 0; i < siop_cmd->dmamap_data->dm_nsegs; i++) {
 			siop_cmd->siop_tables->data[i].count =
-			    htole32(siop_cmd->dmamap_data->dm_segs[i].ds_len);
+			    siop_htoc32(sc,
+				siop_cmd->dmamap_data->dm_segs[i].ds_len);
 			siop_cmd->siop_tables->data[i].addr =
-			    htole32(siop_cmd->dmamap_data->dm_segs[i].ds_addr);
+			    siop_htoc32(sc,
+				siop_cmd->dmamap_data->dm_segs[i].ds_addr);
 		}
 	}
 }
@@ -363,11 +361,11 @@ siop_wdtr_neg(siop_cmd)
 			printf("%s: rejecting invalid wide negotiation from "
 			    "target %d (%d)\n", sc->sc_dev.dv_xname, target,
 			    tables->msg_in[3]);
-			tables->t_msgout.count= htole32(1);
+			tables->t_msgout.count = siop_htoc32(sc, 1);
 			tables->msg_out[0] = MSG_MESSAGE_REJECT;
 			return SIOP_NEG_MSGOUT;
 		}
-		tables->id = htole32(sc->targets[target]->id);
+		tables->id = siop_htoc32(sc, sc->targets[target]->id);
 		bus_space_write_1(sc->sc_rt, sc->sc_rh,
 		    SIOP_SCNTL3,
 		    (sc->targets[target]->id >> 24) & 0xff);
@@ -392,7 +390,7 @@ siop_wdtr_neg(siop_cmd)
 			siop_target->flags &= ~TARF_ISWIDE;
 			sc->targets[target]->id &= ~(SCNTL3_EWS << 24);
 		}
-		tables->id = htole32(sc->targets[target]->id);
+		tables->id = siop_htoc32(sc, sc->targets[target]->id);
 		bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SCNTL3,
 		    (sc->targets[target]->id >> 24) & 0xff);
 		/*
@@ -516,7 +514,7 @@ siop_ppr_neg(siop_cmd)
 		printf("%s: rejecting invalid PPR negotiation from "
 		    "target %d\n", sc->sc_dev.dv_xname, target);
 reject:
-		tables->t_msgout.count= htole32(1);
+		tables->t_msgout.count = siop_htoc32(sc, 1);
 		tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		return SIOP_NEG_MSGOUT;
 	}
@@ -581,7 +579,7 @@ siop_sdtr_neg(siop_cmd)
 		 */
 reject:
 		send_msgout = 1;
-		tables->t_msgout.count= htole32(1);
+		tables->t_msgout.count = siop_htoc32(sc, 1);
 		tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		sc->targets[target]->id &= ~(SCNTL3_SCF_MASK << 24);
 		sc->targets[target]->id &= ~(SCNTL3_ULTRA << 24);
@@ -644,7 +642,7 @@ end:
 #ifdef DEBUG
 	printf("id now 0x%x\n", sc->targets[target]->id);
 #endif
-	tables->id = htole32(sc->targets[target]->id);
+	tables->id = siop_htoc32(sc, sc->targets[target]->id);
 	bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SCNTL3,
 	    (sc->targets[target]->id >> 24) & 0xff);
 	bus_space_write_1(sc->sc_rt, sc->sc_rh, SIOP_SXFER,
@@ -668,7 +666,7 @@ siop_sdtr_msg(siop_cmd, offset, ssync, soff)
 	siop_cmd->siop_tables->msg_out[offset + 3] = ssync;
 	siop_cmd->siop_tables->msg_out[offset + 4] = soff;
 	siop_cmd->siop_tables->t_msgout.count =
-	    htole32(offset + MSG_EXT_SDTR_LEN + 2);
+	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_SDTR_LEN + 2);
 }
 
 void
@@ -682,7 +680,7 @@ siop_wdtr_msg(siop_cmd, offset, wide)
 	siop_cmd->siop_tables->msg_out[offset + 2] = MSG_EXT_WDTR;
 	siop_cmd->siop_tables->msg_out[offset + 3] = wide;
 	siop_cmd->siop_tables->t_msgout.count =
-	    htole32(offset + MSG_EXT_WDTR_LEN + 2);
+	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_WDTR_LEN + 2);
 }
 
 void
@@ -700,7 +698,7 @@ siop_ppr_msg(siop_cmd, offset, ssync, soff)
 	siop_cmd->siop_tables->msg_out[offset + 6] = 1; /* wide */
 	siop_cmd->siop_tables->msg_out[offset + 7] = MSG_EXT_PPR_PROT_DT;
 	siop_cmd->siop_tables->t_msgout.count =
-	    htole32(offset + MSG_EXT_PPR_LEN + 2);
+	    siop_htoc32(siop_cmd->siop_sc, offset + MSG_EXT_PPR_LEN + 2);
 }
 
 void
@@ -784,6 +782,7 @@ siop_sdp(siop_cmd, offset)
 	struct siop_common_cmd *siop_cmd;
 	int offset;
 {
+	struct siop_common_softc *sc = siop_cmd->siop_sc;
 	scr_table_t *table;
 	
 	if ((siop_cmd->xs->flags & (SCSI_DATA_OUT | SCSI_DATA_IN))
@@ -825,9 +824,9 @@ siop_sdp(siop_cmd, offset)
 		table = &siop_cmd->siop_tables->data[offset];
 		/* "cut" already transfered data from this table */
 		table->addr =
-		    htole32(letoh32(table->addr) +
-		    letoh32(table->count) - siop_cmd->resid);
-		table->count = htole32(siop_cmd->resid);
+		    siop_htoc32(sc, siop_ctoh32(sc, table->addr) +
+		    siop_ctoh32(sc, table->count) - siop_cmd->resid);
+		table->count = siop_htoc32(sc, siop_cmd->resid);
 	}
 
 	/*
@@ -845,6 +844,7 @@ siop_update_resid(siop_cmd, offset)
 	struct siop_common_cmd *siop_cmd;
 	int offset;
 {
+	struct siop_common_softc *sc = siop_cmd->siop_sc;
 	scr_table_t *table;
 	int i;
 
@@ -858,7 +858,7 @@ siop_update_resid(siop_cmd, offset)
 	 */
 	for (i = 0; i < offset; i++)
 		siop_cmd->xs->resid -=
-		    letoh32(siop_cmd->siop_tables->data[i].count);
+		    siop_ctoh32(sc, siop_cmd->siop_tables->data[i].count);
 	/*
 	 * if CMDFL_RESID is set, the last table (pointed by offset) is a
 	 * partial transfers. If not, offset points to the entry folloing
@@ -866,7 +866,8 @@ siop_update_resid(siop_cmd, offset)
 	 */
 	if (siop_cmd->flags & CMDFL_RESID) {
 		table = &siop_cmd->siop_tables->data[offset];
-		siop_cmd->xs->resid -= letoh32(table->count) - siop_cmd->resid;
+		siop_cmd->xs->resid -=
+		    siop_ctoh32(sc, table->count) - siop_cmd->resid;
 	}
 }
 
@@ -881,7 +882,7 @@ siop_iwr(siop_cmd)
 
 	/* if target isn't wide, reject */
 	if ((siop_cmd->siop_target->flags & TARF_ISWIDE) == 0) {
-		siop_cmd->siop_tables->t_msgout.count= htole32(1);
+		siop_cmd->siop_tables->t_msgout.count = siop_htoc32(sc, 1);
 		siop_cmd->siop_tables->msg_out[0] = MSG_MESSAGE_REJECT;
 		return SIOP_NEG_MSGOUT;
 	}
@@ -896,7 +897,7 @@ siop_iwr(siop_cmd)
 	table = &siop_cmd->siop_tables->data[offset];
 
 	if ((siop_cmd->flags & CMDFL_RESID) == 0) {
-		if (letoh32(table->count) & 1) {
+		if (siop_ctoh32(sc, table->count) & 1) {
 			/* we really got the number of bytes we expected */
 			return SIOP_NEG_ACK;
 		} else {

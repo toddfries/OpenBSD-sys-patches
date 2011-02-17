@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: alipm.c,v 1.10 2006/05/09 18:49:56 kettenis Exp $	*/
-=======
 /*	$OpenBSD: alipm.c,v 1.15 2010/04/08 00:23:53 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -23,12 +19,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-<<<<<<< HEAD
-#include <sys/lock.h>
-#include <sys/proc.h>
-=======
 #include <sys/rwlock.h>
->>>>>>> origin/master
 #include <sys/systm.h>
 
 #include <dev/i2c/i2cvar.h>
@@ -112,7 +103,7 @@ struct alipm_softc {
 	bus_space_handle_t sc_ioh;
 
 	struct i2c_controller sc_smb_tag;
-	struct lock sc_smb_lock;
+	struct rwlock sc_smb_lock;
 };
 
 int	alipm_match(struct device *, void *, void *);
@@ -219,7 +210,7 @@ alipm_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	/* Attach I2C bus */
-	lockinit(&sc->sc_smb_lock, PRIBIO | PCATCH, "alipm", 0, 0);
+	rw_init(&sc->sc_smb_lock, "alipm");
 	sc->sc_smb_tag.ic_cookie = sc;
 	sc->sc_smb_tag.ic_acquire_bus = alipm_smb_acquire_bus;
 	sc->sc_smb_tag.ic_release_bus = alipm_smb_release_bus;
@@ -248,7 +239,7 @@ alipm_smb_acquire_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_smb_lock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&sc->sc_smb_lock, RW_WRITE | RW_INTR));
 }
 
 void
@@ -259,7 +250,7 @@ alipm_smb_release_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return;
 
-	lockmgr(&sc->sc_smb_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_smb_lock);
 }
 
 int

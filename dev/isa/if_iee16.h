@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: if_iee16.h,v 1.2 1997/11/07 08:06:59 niklas Exp $	*/
 
 
 /*

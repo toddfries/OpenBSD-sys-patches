@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: ata.c,v 1.27 2007/03/25 10:33:52 deraadt Exp $      */
-=======
 /*      $OpenBSD: ata.c,v 1.30 2010/07/23 07:47:12 jsg Exp $      */
->>>>>>> origin/master
 /*      $NetBSD: ata.c,v 1.9 1999/04/15 09:41:09 bouyer Exp $      */
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.

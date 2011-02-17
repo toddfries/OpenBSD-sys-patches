@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_acct.c,v 1.20 2007/01/16 17:52:18 thib Exp $	*/
-=======
 /*	$OpenBSD: kern_acct.c,v 1.23 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_acct.c,v 1.42 1996/02/04 02:15:12 christos Exp $	*/
 
 /*-

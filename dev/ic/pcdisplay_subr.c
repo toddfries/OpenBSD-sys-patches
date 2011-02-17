@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pcdisplay_subr.c,v 1.6 2006/09/29 19:46:02 miod Exp $ */
-=======
 /* $OpenBSD: pcdisplay_subr.c,v 1.9 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: pcdisplay_subr.c,v 1.16 2000/06/08 07:01:19 cgd Exp $ */
 
 /*

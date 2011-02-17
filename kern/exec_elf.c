@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: exec_elf.c,v 1.59 2007/03/20 12:32:07 thib Exp $	*/
-=======
 /*	$OpenBSD: exec_elf.c,v 1.78 2010/12/15 04:59:52 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -108,51 +104,26 @@
 #include <compat/freebsd/freebsd_exec.h>
 #endif
 
-#ifdef COMPAT_NETBSD
-#include <compat/netbsd/netbsd_exec.h>
-#endif
-
 struct ELFNAME(probe_entry) {
 	int (*func)(struct proc *, struct exec_package *, char *,
 	    u_long *, u_int8_t *);
-	int os_mask;
 } ELFNAME(probes)[] = {
 	/* XXX - bogus, shouldn't be size independent.. */
 #ifdef COMPAT_FREEBSD
-	{ freebsd_elf_probe, 1 << OOS_FREEBSD },
+	{ freebsd_elf_probe },
 #endif
-<<<<<<< HEAD
-#ifdef COMPAT_SVR4
-	{ svr4_elf_probe,
-	    1 << OOS_SVR4 | 1 << OOS_ESIX | 1 << OOS_SOLARIS | 1 << OOS_SCO |
-	    1 << OOS_DELL | 1 << OOS_NCR },
-#endif
-=======
->>>>>>> origin/master
 #ifdef COMPAT_LINUX
-	{ linux_elf_probe, 1 << OOS_LINUX },
+	{ linux_elf_probe },
 #endif
-#ifdef COMPAT_NETBSD
-	{ netbsd_elf64_probe, 1 << OOS_NETBSD },
-#endif
-<<<<<<< HEAD
-	{ 0, 1 << OOS_OPENBSD }
-=======
 #ifdef COMPAT_SVR4
 	{ svr4_elf_probe },
 #endif
 	{ NULL }
->>>>>>> origin/master
 };
 
 int ELFNAME(load_file)(struct proc *, char *, struct exec_package *,
 	struct elf_args *, Elf_Addr *);
-<<<<<<< HEAD
-int ELFNAME(check_header)(Elf_Ehdr *, int);
-int ELFNAME(olf_check_header)(Elf_Ehdr *, int, u_int8_t *);
-=======
 int ELFNAME(check_header)(Elf_Ehdr *);
->>>>>>> origin/master
 int ELFNAME(read_from)(struct proc *, struct vnode *, u_long, caddr_t, int);
 void ELFNAME(load_psection)(struct exec_vmcmd_set *, struct vnode *,
 	Elf_Phdr *, Elf_Addr *, Elf_Addr *, int *, int);
@@ -249,54 +220,6 @@ ELFNAME(check_header)(Elf_Ehdr *ehdr)
 
 	return (0);
 }
-
-#ifndef	SMALL_KERNEL
-/*
- * Check header for validity; return 0 for ok, ENOEXEC if error.
- * Remember OS tag for callers sake.
- */
-int
-ELFNAME(olf_check_header)(Elf_Ehdr *ehdr, int type, u_int8_t *os)
-{
-	int i;
-
-	/*
-	 * We need to check magic, class size, endianess, version, and OS
-	 * before we look at the rest of the Elf_Ehdr structure. These few
-	 * elements are represented in a machine independant fashion.
-	 */
-	if (!IS_OLF(*ehdr) ||
-	    ehdr->e_ident[OI_CLASS] != ELF_TARG_CLASS ||
-	    ehdr->e_ident[OI_DATA] != ELF_TARG_DATA ||
-	    ehdr->e_ident[OI_VERSION] != ELF_TARG_VER)
-		return (ENOEXEC);
-
-	for (i = 0;
-	    i < sizeof(ELFNAME(probes)) / sizeof(ELFNAME(probes)[0]);
-	    i++) {
-		if ((1 << ehdr->e_ident[OI_OS]) & ELFNAME(probes)[i].os_mask)
-			goto os_ok;
-	}
-	return (ENOEXEC);
-
-os_ok:
-	/* Now check the machine dependant header */
-	if (ehdr->e_machine != ELF_TARG_MACH ||
-	    ehdr->e_version != ELF_TARG_VER)
-		return (ENOEXEC);
-
-	/* Check the type */
-	if (ehdr->e_type != type)
-		return (ENOEXEC);
-
-	/* Don't allow an insane amount of sections. */
-	if (ehdr->e_phnum > ELF_MAX_VALID_PHDR)
-		return (ENOEXEC);
-
-	*os = ehdr->e_ident[OI_OS];
-	return (0);
-}
-#endif	/* !SMALL_KERNEL */
 
 /*
  * Load a psection at the appropriate address
@@ -409,9 +332,6 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	u_long phsize;
 	Elf_Addr addr;
 	struct vnode *vp;
-#ifndef SMALL_KERNEL
-	u_int8_t os;			/* Just a dummy in this routine */
-#endif
 	Elf_Phdr *base_ph = NULL;
 	struct interp_ld_sec {
 		Elf_Addr vaddr;
@@ -442,15 +362,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 				    (caddr_t)&eh, sizeof(eh))) != 0)
 		goto bad1;
 
-<<<<<<< HEAD
-	if (ELFNAME(check_header)(&eh, ET_DYN)
-#ifndef SMALL_KERNEL
-	    && ELFNAME(olf_check_header)(&eh, ET_DYN, &os)
-#endif
-	    ) {
-=======
 	if (ELFNAME(check_header)(&eh) || eh.e_type != ET_DYN) {
->>>>>>> origin/master
 		error = ENOEXEC;
 		goto bad1;
 	}
@@ -610,16 +522,8 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	if (epp->ep_hdrvalid < sizeof(Elf_Ehdr))
 		return (ENOEXEC);
 
-<<<<<<< HEAD
-	if (ELFNAME(check_header)(eh, ET_EXEC)
-#ifndef SMALL_KERNEL
-	    && ELFNAME(olf_check_header)(eh, ET_EXEC, &os)
-#endif
-	    )
-=======
 	if (ELFNAME(check_header)(eh) ||
 	   (eh->e_type != ET_EXEC && eh->e_type != ET_DYN))
->>>>>>> origin/master
 		return (ENOEXEC);
 
 	/*
@@ -693,18 +597,8 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 		goto native;
 	}
 #endif
-<<<<<<< HEAD
-	for (i = 0;
-	    i < sizeof(ELFNAME(probes)) / sizeof(ELFNAME(probes)[0]) && error;
-	    i++) {
-		if (os == OOS_NULL || ((1 << os) & ELFNAME(probes)[i].os_mask))
-			error = ELFNAME(probes)[i].func ?
-			    (*ELFNAME(probes)[i].func)(p, epp, interp, &pos, &os) :
-			    0;
-=======
 	for (i = 0; ELFNAME(probes)[i].func != NULL && error; i++) {
 		error = (*ELFNAME(probes)[i].func)(p, epp, interp, &pos, &os);
->>>>>>> origin/master
 	}
 	if (!error)
 		p->p_os = os;
@@ -859,18 +753,6 @@ native:
 		epp->ep_interp_pos = pos;
 	}
 
-<<<<<<< HEAD
-#if defined(COMPAT_SVR4) && defined(i386)
-#ifndef ELF_MAP_PAGE_ZERO
-	/* Dell SVR4 maps page zero, yeuch! */
-	if (p->p_os == OOS_DELL)
-#endif
-		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_readvn, PAGE_SIZE, 0,
-		    epp->ep_vp, 0, VM_PROT_READ);
-#endif
-
-=======
->>>>>>> origin/master
 	free(ph, M_TEMP);
 	vn_marktext(epp->ep_vp);
 	return (exec_setup_stack(p, epp));

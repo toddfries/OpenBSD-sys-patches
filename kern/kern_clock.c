@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_clock.c,v 1.61 2007/03/15 10:22:30 art Exp $	*/
-=======
 /*	$OpenBSD: kern_clock.c,v 1.71 2010/08/20 22:03:22 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -220,12 +216,10 @@ hardclock(struct clockframe *frame)
 	extern int64_t ntp_tick_permanent;
 	extern int64_t ntp_tick_acc;
 #endif
-#ifdef __HAVE_CPUINFO
 	struct cpu_info *ci = curcpu();
-#endif
 
 	p = curproc;
-	if (p && ((p->p_flag & P_WEXIT) == 0)) {
+	if (p && ((p->p_flag & (P_SYSTEM | P_WEXIT)) == 0)) {
 		struct pstats *pstats;
 
 		/*
@@ -247,7 +241,6 @@ hardclock(struct clockframe *frame)
 	if (stathz == 0)
 		statclock(frame);
 
-#if defined(__HAVE_CPUINFO)
 	if (--ci->ci_schedstate.spc_rrticks <= 0)
 		roundrobin(ci);
 
@@ -257,7 +250,6 @@ hardclock(struct clockframe *frame)
 	 */
 	if (CPU_IS_PRIMARY(ci) == 0)
 		return;
-#endif
 
 #ifndef __HAVE_TIMECOUNTER
 	/*
@@ -469,17 +461,12 @@ statclock(struct clockframe *frame)
 {
 #ifdef GPROF
 	struct gmonparam *g;
-	int i;
+	u_long i;
 #endif
-#ifdef __HAVE_CPUINFO
 	struct cpu_info *ci = curcpu();
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-#else
-	static int schedclk;
-#endif
 	struct proc *p = curproc;
 
-#ifdef __HAVE_CPUINFO
 	/*
 	 * Notice changes in divisor frequency, and adjust clock
 	 * frequency accordingly.
@@ -494,15 +481,10 @@ statclock(struct clockframe *frame)
 		}
 	}
 
-/* XXX Kludgey */
-#define pscnt spc->spc_pscnt
-#define cp_time spc->spc_cp_time
-#endif
-
 	if (CLKF_USERMODE(frame)) {
 		if (p->p_flag & P_PROFIL)
 			addupc_intr(p, CLKF_PC(frame));
-		if (--pscnt > 0)
+		if (--spc->spc_pscnt > 0)
 			return;
 		/*
 		 * Came from user mode; CPU was in user state.
@@ -510,9 +492,9 @@ statclock(struct clockframe *frame)
 		 */
 		p->p_uticks++;
 		if (p->p_nice > NZERO)
-			cp_time[CP_NICE]++;
+			spc->spc_cp_time[CP_NICE]++;
 		else
-			cp_time[CP_USER]++;
+			spc->spc_cp_time[CP_USER]++;
 	} else {
 #ifdef GPROF
 		/*
@@ -531,7 +513,7 @@ statclock(struct clockframe *frame)
 		if (p != NULL && p->p_flag & P_PROFIL)
 			addupc_intr(p, PROC_PC(p));
 #endif
-		if (--pscnt > 0)
+		if (--spc->spc_pscnt > 0)
 			return;
 		/*
 		 * Came from kernel mode, so we were:
@@ -548,19 +530,14 @@ statclock(struct clockframe *frame)
 		if (CLKF_INTR(frame)) {
 			if (p != NULL)
 				p->p_iticks++;
-			cp_time[CP_INTR]++;
-		} else if (p != NULL) {
+			spc->spc_cp_time[CP_INTR]++;
+		} else if (p != NULL && p != spc->spc_idleproc) {
 			p->p_sticks++;
-			cp_time[CP_SYS]++;
+			spc->spc_cp_time[CP_SYS]++;
 		} else
-			cp_time[CP_IDLE]++;
+			spc->spc_cp_time[CP_IDLE]++;
 	}
-	pscnt = psdiv;
-
-#ifdef __HAVE_CPUINFO
-#undef pscnt
-#undef cp_time
-#endif
+	spc->spc_pscnt = psdiv;
 
 	if (p != NULL) {
 		p->p_cpticks++;
@@ -569,14 +546,9 @@ statclock(struct clockframe *frame)
 		 * ~~16 Hz is best
 		 */
 		if (schedhz == 0) {
-#ifdef __HAVE_CPUINFO
 			if ((++curcpu()->ci_schedstate.spc_schedticks & 3) ==
 			    0)
 				schedclock(p);
-#else
-			if ((++schedclk & 3) == 0)
-				schedclock(p);
-#endif
 		}
 	}
 }

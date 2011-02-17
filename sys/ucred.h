@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucred.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: ucred.h,v 1.6 2003/08/15 20:32:20 tedu Exp $	*/
 /*	$NetBSD: ucred.h,v 1.12 1995/06/01 22:44:50 jtc Exp $	*/
 
 /*

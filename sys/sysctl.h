@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sysctl.h,v 1.90 2007/01/12 07:41:31 art Exp $	*/
-=======
 /*	$OpenBSD: sysctl.h,v 1.107 2010/11/02 09:36:09 dlg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -811,14 +807,10 @@ struct kinfo_file2 {
 #define	HW_VERSION	16		/* string: hardware version */
 #define	HW_SERIALNO	17		/* string: hardware serial number */
 #define	HW_UUID		18		/* string: universal unique id */
-<<<<<<< HEAD
-#define	HW_MAXID	19		/* number of valid hw ids */
-=======
 #define	HW_PHYSMEM64	19		/* quad: total memory */
 #define	HW_USERMEM64	20		/* quad: non-kernel memory */
 #define	HW_NCPUFOUND	21		/* int: number of cpus found*/
 #define	HW_MAXID	22		/* number of valid hw ids */
->>>>>>> origin/master
 
 #define	CTL_HW_NAMES { \
 	{ 0, 0 }, \
@@ -826,8 +818,8 @@ struct kinfo_file2 {
 	{ "model", CTLTYPE_STRING }, \
 	{ "ncpu", CTLTYPE_INT }, \
 	{ "byteorder", CTLTYPE_INT }, \
-	{ "physmem", CTLTYPE_INT }, \
-	{ "usermem", CTLTYPE_INT }, \
+	{ "gap", 0 }, \
+	{ "gap", 0 }, \
 	{ "pagesize", CTLTYPE_INT }, \
 	{ "disknames", CTLTYPE_STRING }, \
 	{ "diskstats", CTLTYPE_STRUCT }, \
@@ -840,12 +832,9 @@ struct kinfo_file2 {
 	{ "version", CTLTYPE_STRING }, \
 	{ "serialno", CTLTYPE_STRING }, \
 	{ "uuid", CTLTYPE_STRING }, \
-<<<<<<< HEAD
-=======
 	{ "physmem", CTLTYPE_QUAD }, \
 	{ "usermem", CTLTYPE_QUAD }, \
 	{ "ncpufound", CTLTYPE_INT }, \
->>>>>>> origin/master
 }
 
 /*

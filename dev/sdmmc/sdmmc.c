@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdmmc.c,v 1.9 2006/11/29 14:16:43 uwe Exp $	*/
-=======
 /*	$OpenBSD: sdmmc.c,v 1.24 2010/08/24 14:52:23 blambert Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -113,13 +109,10 @@ sdmmc_attach(struct device *parent, struct device *self, void *aux)
 
 	SIMPLEQ_INIT(&sc->sf_head);
 	TAILQ_INIT(&sc->sc_tskq);
+	TAILQ_INIT(&sc->sc_intrq);
 	sdmmc_init_task(&sc->sc_discover_task, sdmmc_discover_task, sc);
-<<<<<<< HEAD
-	lockinit(&sc->sc_lock, PRIBIO, DEVNAME(sc), 0, LK_CANRECURSE);
-=======
 	sdmmc_init_task(&sc->sc_intr_task, sdmmc_intr_task, sc);
 	rw_init(&sc->sc_lock, DEVNAME(sc));
->>>>>>> origin/master
 
 #ifdef SDMMC_IOCTL
 	if (bio_register(self, sdmmc_ioctl) != 0)
@@ -473,9 +466,8 @@ sdmmc_function_alloc(struct sdmmc_softc *sc)
 {
 	struct sdmmc_function *sf;
 
-	MALLOC(sf, struct sdmmc_function *, sizeof *sf, M_DEVBUF,
-	    M_WAITOK);
-	bzero(sf, sizeof *sf);
+	sf = (struct sdmmc_function *)malloc(sizeof *sf, M_DEVBUF,
+	    M_WAITOK | M_ZERO);
 	sf->sc = sc;
 	sf->number = -1;
 	sf->cis.manufacturer = SDMMC_VENDOR_INVALID;
@@ -487,7 +479,7 @@ sdmmc_function_alloc(struct sdmmc_softc *sc)
 void
 sdmmc_function_free(struct sdmmc_function *sf)
 {
-	FREE(sf, M_DEVBUF);
+	free(sf, M_DEVBUF);
 }
 
 /*
@@ -778,7 +770,7 @@ sdmmc_ioctl(struct device *self, u_long request, caddr_t addr)
 		cmd.c_blklen = ucmd->c_blklen;
 
 		if (ucmd->c_data) {
-			data = malloc(ucmd->c_datalen, M_DEVBUF,
+			data = malloc(ucmd->c_datalen, M_TEMP,
 			    M_WAITOK | M_CANFAIL);
 			if (data == NULL)
 				return ENOMEM;
@@ -807,7 +799,7 @@ sdmmc_ioctl(struct device *self, u_long request, caddr_t addr)
 			return EFAULT;
 
 		if (ucmd->c_data)
-			free(data, M_DEVBUF);
+			free(data, M_TEMP);
 		break;
 
 	default:

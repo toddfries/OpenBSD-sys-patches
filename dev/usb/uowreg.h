@@ -1,4 +1,4 @@
-/*	$OpenBSD: uowreg.h,v 1.4 2006/09/29 18:35:41 grange Exp $	*/
+/*	$OpenBSD: uowreg.h,v 1.5 2006/10/08 20:04:23 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ad741x.c,v 1.10 2007/03/22 16:55:31 deraadt Exp $	*/
+/*	$OpenBSD: ad741x.c,v 1.14 2008/04/17 19:01:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -54,7 +54,6 @@ struct adc_softc {
 
 int	adc_match(struct device *, void *, void *);
 void	adc_attach(struct device *, struct device *, void *);
-int	adc_check(struct i2c_attach_args *, u_int8_t *, u_int8_t *);
 void	adc_refresh(void *);
 
 struct cfattach adc_ca = {
@@ -139,7 +138,7 @@ adc_attach(struct device *parent, struct device *self, void *aux)
 		nsens += 3;
 	}
 
-	if (sensor_task_register(sc, adc_refresh, 5)) {
+	if (sensor_task_register(sc, adc_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -159,7 +158,8 @@ void
 adc_refresh(void *arg)
 {
 	struct adc_softc *sc = arg;
-	u_int8_t cmd, data[2], reg;
+	u_int8_t cmd, reg;
+	u_int16_t data;
 	int i;
 
 	iic_acquire_bus(sc->sc_tag, 0);
@@ -174,7 +174,7 @@ adc_refresh(void *arg)
 	    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0))
 		goto done;
 	sc->sc_sensor[ADC_TEMP].value = 273150000 +
-	    ((data[0] << 8 | data[1]) >> 6) * 250000;
+	    (betoh16(data) >> 6) * 250000;
 
 	if (sc->sc_chip == 0)
 		goto done;
@@ -189,8 +189,7 @@ adc_refresh(void *arg)
 		if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 		    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0))
 			goto done;
-		sc->sc_sensor[ADC_ADC0].value =
-		    (data[0] << 8 | data[1]) >> 6;
+		sc->sc_sensor[ADC_ADC0].value = betoh16(data) >> 6;
 		goto done;
 	}
 
@@ -204,8 +203,7 @@ adc_refresh(void *arg)
 		if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 		    sc->sc_addr, &cmd, sizeof cmd, &data, sizeof data, 0))
 			goto done;
-		sc->sc_sensor[ADC_ADC0 + i].value =
-		    (data[0] << 8 | data[1]) >> 6;
+		sc->sc_sensor[ADC_ADC0 + i].value = betoh16(data) >> 6;
 	}
 
 done:

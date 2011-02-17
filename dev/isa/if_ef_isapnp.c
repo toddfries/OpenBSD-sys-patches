@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_ef_isapnp.c,v 1.20 2005/11/21 18:16:40 millert Exp $	*/
-=======
 /*	$OpenBSD: if_ef_isapnp.c,v 1.24 2008/11/28 02:44:17 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)

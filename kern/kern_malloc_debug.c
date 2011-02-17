@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_malloc_debug.c,v 1.25 2007/04/11 12:10:42 art Exp $	*/
-=======
 /*	$OpenBSD: kern_malloc_debug.c,v 1.27 2009/04/24 08:13:24 jsg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999, 2000 Artur Grabowski <art@openbsd.org>

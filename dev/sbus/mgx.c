@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mgx.c,v 1.7 2006/12/17 22:18:16 miod Exp $	*/
-=======
 /*	$OpenBSD: mgx.c,v 1.12 2009/09/05 14:09:35 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.
@@ -34,9 +30,15 @@
  * Driver for the Southland Media Systems (now Quantum 3D) MGX and MGXPlus
  * frame buffers.
  *
- * Pretty crude, due to the lack of documentation. Works as a dumb frame
- * buffer in 8 bit mode, although the hardware can run in an 32 bit
- * accelerated mode. Also, interrupts are not handled.
+ * This board is built of an Alliance Promotion AT24 chip, and a simple
+ * SBus-PCI glue logic. It also sports an EEPROM to store configuration
+ * parameters, which can be controlled from SunOS or Solaris with the
+ * mgxconfig utility.
+ *
+ * We currently don't reprogram the video mode at all, so only the resolution
+ * and depth set by the PROM (or mgxconfig) will be used.
+ *
+ * Also, interrupts are not handled.
  */
 
 #include <sys/param.h>
@@ -61,63 +63,74 @@
 #include <dev/rasops/rasops.h>
 #include <machine/fbvar.h>
 
+#include <dev/ic/vgareg.h>
+#include <dev/ic/atxxreg.h>
+
 #include <dev/sbus/sbusvar.h>
 
 /*
  * MGX PROM register layout
+ *
+ * The cards FCode registers 9 regions:
+ *
+ * region  offset     size    description
+ *      0 00000000  00010000  FCode (32KB only)
+ *      1 00100000  00010000  FCode, repeated
+ *      2 00200000  00001000  unknown, repeats every 0x100
+ *                            with little differences, could be the EEPROM image
+ *      3 00400000  00001000  PCI configuration space
+ *      4 00500000  00001000  CRTC
+ *      5 00600000  00001000  AT24 registers (offset 0xb0000)
+ *      6 00700000  00010000  unknown
+ *      7 00800000  00800000  unknown
+ *      8 01000000  00400000  video memory
  */
 
-#define	MGX_NREG	9
-#define	MGX_REG_CRTC	4	/* video control and ramdac */
-#define	MGX_REG_CTRL	5	/* control engine */
-#define	MGX_REG_VRAM8	8	/* 8-bit memory space */
+#define	MGX_NREG			9
+#define	MGX_REG_CRTC			4	/* video control and ramdac */
+#define	MGX_REG_ATREG			5	/* AT24 registers */
+#define	MGX_REG_ATREG_OFFSET	0x000b0000
+#define	MGX_REG_ATREG_SIZE	0x00000400
+#define	MGX_REG_VRAM8			8	/* 8-bit memory space */
 
 /*
- * MGX CRTC empirical constants
+ * MGX CRTC access
+ *
+ * The CRTC only answers to the following ``port'' locations:
+ * - a subset of the VGA registers:
+ *   3c0, 3c1 (ATC)
+ *   3c4, 3c5 (TS sequencer)
+ *   3c6-3c9 (DAC)
+ *   3c2, 3cc (Misc)
+ *   3ce, 3cf (GDC)
+ *
+ * - the CRTC (6845-style) registers:
+ *   3d4 index register
+ *   3d5 data register
  */
-#if _BYTE_ORDER == _LITTLE_ENDIAN
-#define	IO_ADDRESS(x)		(x)
-#else
-#define	IO_ADDRESS(x)		((x) ^ 0x03)
-#endif
-#define	CRTC_INDEX		IO_ADDRESS(0x03c4)
-#define	CRTC_DATA		IO_ADDRESS(0x03c5)
+
+#define	VGA_BASE		0x03c0
+#define	TS_INDEX		(VGA_BASE + VGA_TS_INDEX)
+#define	TS_DATA			(VGA_BASE + VGA_TS_DATA)
 #define	CD_DISABLEVIDEO	0x0020
-#define	CMAP_READ_INDEX		IO_ADDRESS(0x03c7)
-#define	CMAP_WRITE_INDEX	IO_ADDRESS(0x03c8)
-#define	CMAP_DATA		IO_ADDRESS(0x03c9)
+#define	CMAP_WRITE_INDEX	(VGA_BASE + 0x08)
+#define	CMAP_DATA		(VGA_BASE + 0x09)
 
 /* per-display variables */
 struct mgx_softc {
-	struct	sunfb	sc_sunfb;	/* common base device */
-
+	struct	sunfb	sc_sunfb;		/* common base device */
 	bus_space_tag_t	sc_bustag;
-	bus_addr_t	sc_paddr;
-
+	bus_addr_t	sc_paddr;		/* for mmap() */
 	u_int8_t	sc_cmap[256 * 3];	/* shadow colormap */
-	volatile u_int8_t *sc_vidc;	/* ramdac registers */
-
-	int	sc_nscreens;
+	vaddr_t		sc_vidc;		/* ramdac registers */
+	vaddr_t		sc_xreg;		/* AT24 registers */
+	uint32_t	sc_dec;			/* dec register template */
+	int		sc_nscreens;
 };
 
-<<<<<<< HEAD
-int mgx_ioctl(void *, u_long, caddr_t, int, struct proc *);
-int mgx_alloc_screen(void *, const struct wsscreen_descr *, void **,
-    int *, int *, long *);
-void mgx_free_screen(void *, void *);
-int mgx_show_screen(void *, void *, int, void (*cb)(void *, int, int),
-    void *);
-paddr_t mgx_mmap(void *, off_t, int);
-void mgx_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
-int mgx_getcmap(u_int8_t *, struct wsdisplay_cmap *);
-int mgx_putcmap(u_int8_t *, struct wsdisplay_cmap *);
-void mgx_loadcmap(struct mgx_softc *, int, int);
-void mgx_burner(void *, u_int ,u_int);
-=======
 void	mgx_burner(void *, u_int ,u_int);
 int	mgx_ioctl(void *, u_long, caddr_t, int, struct proc *);
 paddr_t	mgx_mmap(void *, off_t, int);
->>>>>>> origin/master
 
 struct wsdisplay_accessops mgx_accessops = {
 	mgx_ioctl,
@@ -131,8 +144,6 @@ struct wsdisplay_accessops mgx_accessops = {
 	mgx_burner
 };
 
-<<<<<<< HEAD
-=======
 int	mgx_getcmap(u_int8_t *, struct wsdisplay_cmap *);
 void	mgx_loadcmap(struct mgx_softc *, int, int);
 int	mgx_putcmap(u_int8_t *, struct wsdisplay_cmap *);
@@ -157,7 +168,6 @@ int	mgx_wait_fifo(struct mgx_softc *, uint);
  * Attachment Glue
  */
 
->>>>>>> origin/master
 int mgxmatch(struct device *, void *, void *);
 void mgxattach(struct device *, struct device *, void *);
 
@@ -198,6 +208,7 @@ mgxattach(struct device *parent, struct device *self, void *args)
 	bus_space_handle_t bh;
 	int node, fbsize;
 	int isconsole;
+	uint16_t chipid;
 
 	bt = sa->sa_bustag;
 	node = sa->sa_node;
@@ -220,7 +231,26 @@ mgxattach(struct device *parent, struct device *self, void *args)
 		printf("\n%s: couldn't map crtc registers\n", self->dv_xname);
 		return;
 	}
-	sc->sc_vidc = (volatile u_int8_t *)bus_space_vaddr(bt, bh);
+	sc->sc_vidc = (vaddr_t)bus_space_vaddr(bt, bh);
+
+	sc->sc_bustag = bt;
+	if (sbus_bus_map(bt, sa->sa_reg[MGX_REG_ATREG].sbr_slot,
+	    sa->sa_reg[MGX_REG_ATREG].sbr_offset + MGX_REG_ATREG_OFFSET,
+	    MGX_REG_ATREG_SIZE, BUS_SPACE_MAP_LINEAR, 0, &bh) != 0) {
+		printf("\n%s: couldn't map crtc registers\n", self->dv_xname);
+		/* XXX unmap vidc */
+		return;
+	}
+	sc->sc_xreg = (vaddr_t)bus_space_vaddr(bt, bh);
+
+	/*
+	 * Check the chip ID. If it's not an AT24, prefer not to access
+	 * the extended registers at all.
+	 */
+	chipid = mgx_read_2(sc->sc_xreg, ATR_ID);
+	if (chipid != ID_AT24) {
+		sc->sc_xreg = (vaddr_t)0;
+	}
 
 	/* enable video */
 	mgx_burner(sc, 1, 0);
@@ -244,6 +274,7 @@ mgxattach(struct device *parent, struct device *self, void *args)
 	    round_page(sc->sc_sunfb.sf_fbsize),
 	    BUS_SPACE_MAP_LINEAR, 0, &bh) != 0) {
 		printf("\n%s: couldn't map video memory\n", self->dv_xname);
+		/* XXX unmap vidc and xreg */
 		return;
 	}
 	sc->sc_sunfb.sf_ro.ri_bits = bus_space_vaddr(bt, bh);
@@ -257,12 +288,6 @@ mgxattach(struct device *parent, struct device *self, void *args)
 	bzero(sc->sc_cmap, sizeof(sc->sc_cmap));
 	fbwscons_setcolormap(&sc->sc_sunfb, mgx_setcolor);
 
-<<<<<<< HEAD
-	printf(", %dx%d\n",
-	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
-
-	if (isconsole) {
-=======
 	if (chipid != ID_AT24) {
 		printf("%s: unexpected engine id %04x\n",
 		    self->dv_xname, chipid);
@@ -271,14 +296,56 @@ mgxattach(struct device *parent, struct device *self, void *args)
 	mgx_ras_init(sc, chipid);
 
 	if (isconsole)
->>>>>>> origin/master
 		fbwscons_console_init(&sc->sc_sunfb, -1);
 
 	fbwscons_attach(&sc->sc_sunfb, &mgx_accessops, isconsole);
 }
 
 /*
- * wsdisplay operations
+ * Register Access
+ *
+ * On big-endian systems such as the sparc, it is necessary to flip
+ * the low-order bits of the addresses to reach the right register.
+ */
+
+uint8_t
+mgx_read_1(vaddr_t regs, uint offs)
+{
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+	return *(volatile uint8_t *)(regs + offs);
+#else
+	return *(volatile uint8_t *)(regs + (offs ^ 3));
+#endif
+}
+
+uint16_t
+mgx_read_2(vaddr_t regs, uint offs)
+{
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+	return *(volatile uint16_t *)(regs + offs);
+#else
+	return *(volatile uint16_t *)(regs + (offs ^ 2));
+#endif
+}
+
+void
+mgx_write_1(vaddr_t regs, uint offs, uint8_t val)
+{
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+	*(volatile uint8_t *)(regs + offs) = val;
+#else
+	*(volatile uint8_t *)(regs + (offs ^ 3)) = val;
+#endif
+}
+
+void
+mgx_write_4(vaddr_t regs, uint offs, uint32_t val)
+{
+	*(volatile uint32_t *)(regs + offs) = val;
+}
+
+/*
+ * Wsdisplay Operations
  */
 
 int
@@ -350,27 +417,47 @@ void
 mgx_burner(void *v, u_int on, u_int flags)
 {
 	struct mgx_softc *sc = v;
+	uint mode;
 
-	sc->sc_vidc[CRTC_INDEX] = 1;	/* TS mode register */
+#ifdef notyet
+	if (sc->sc_xreg != 0) {
+		mode = mgx_read_1(sc->sc_xreg, ATR_DPMS);
+		if (on)
+			CLR(mode, DPMS_HSYNC_DISABLE | DPMS_VSYNC_DISABLE);
+		else {
+			SET(mode, DPMS_HSYNC_DISABLE);
+#if 0	/* needs ramdac reprogramming on resume */
+			if (flags & WSDISPLAY_BURN_VBLANK)
+				SET(mode, DPMS_VSYNC_DISABLE);
+#endif
+		}
+		mgx_write_1(sc->sc_xreg, ATR_DPMS, mode);
+		return;
+	}
+#endif
+
+	mgx_write_1(sc->sc_vidc, TS_INDEX, 1);	/* TS mode register */
+	mode = mgx_read_1(sc->sc_vidc, TS_DATA);
 	if (on)
-		sc->sc_vidc[CRTC_DATA] &= ~CD_DISABLEVIDEO;
+		mode &= ~CD_DISABLEVIDEO;
 	else
-		sc->sc_vidc[CRTC_DATA] |= CD_DISABLEVIDEO;
+		mode |= CD_DISABLEVIDEO;
+	mgx_write_1(sc->sc_vidc, TS_DATA, mode);
 }
 
 /*
- * Colormap handling routines
+ * Colormap Handling Routines
  */
 
 void
 mgx_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
 {
 	struct mgx_softc *sc = v;
+	u_int i = index * 3;
 
-	index *= 3;
-	sc->sc_cmap[index++] = r;
-	sc->sc_cmap[index++] = g;
-	sc->sc_cmap[index] = b;
+	sc->sc_cmap[i++] = r;
+	sc->sc_cmap[i++] = g;
+	sc->sc_cmap[i] = b;
 
 	mgx_loadcmap(sc, index, 1);
 }
@@ -381,19 +468,10 @@ mgx_loadcmap(struct mgx_softc *sc, int start, int ncolors)
 	u_int8_t *color;
 	int i;
 
-#if 0
-	sc->sc_vidc[CMAP_WRITE_INDEX] = start;
+	mgx_write_1(sc->sc_vidc, CMAP_WRITE_INDEX, start);
 	color = sc->sc_cmap + start * 3;
-#else
-	/*
-	 * Apparently there is no way to load an incomplete cmap to this
-	 * DAC. What a waste.
-	 */
-	ncolors = 256;
-	color = sc->sc_cmap;
-#endif
 	for (i = ncolors * 3; i != 0; i--)
-		sc->sc_vidc[CMAP_DATA] = *color++;
+		mgx_write_1(sc->sc_vidc, CMAP_DATA, *color++);
 }
 
 int
@@ -405,15 +483,16 @@ mgx_getcmap(u_int8_t *cm, struct wsdisplay_cmap *rcm)
 	if (index >= 256 || count > 256 - index)
 		return (EINVAL);
 
+	index *= 3;
 	for (i = 0; i < count; i++) {
 		if ((error =
-		    copyout(cm + (index + i) * 3 + 0, &rcm->red[i], 1)) != 0)
+		    copyout(cm + index++, &rcm->red[i], 1)) != 0)
 			return (error);
 		if ((error =
-		    copyout(cm + (index + i) * 3 + 1, &rcm->green[i], 1)) != 0)
+		    copyout(cm + index++, &rcm->green[i], 1)) != 0)
 			return (error);
 		if ((error =
-		    copyout(cm + (index + i) * 3 + 2, &rcm->blue[i], 1)) != 0)
+		    copyout(cm + index++, &rcm->blue[i], 1)) != 0)
 			return (error);
 	}
 
@@ -429,22 +508,21 @@ mgx_putcmap(u_int8_t *cm, struct wsdisplay_cmap *rcm)
 	if (index >= 256 || count > 256 - index)
 		return (EINVAL);
 
+	index *= 3;
 	for (i = 0; i < count; i++) {
 		if ((error =
-		    copyin(&rcm->red[i], cm + (index + i) * 3 + 0, 1)) != 0)
+		    copyin(&rcm->red[i], cm + index++, 1)) != 0)
 			return (error);
 		if ((error =
-		    copyin(&rcm->green[i], cm + (index + i) * 3 + 1, 1)) != 0)
+		    copyin(&rcm->green[i], cm + index++, 1)) != 0)
 			return (error);
 		if ((error =
-		    copyin(&rcm->blue[i], cm + (index + i) * 3 + 2, 1)) != 0)
+		    copyin(&rcm->blue[i], cm + index++, 1)) != 0)
 			return (error);
 	}
 
 	return (0);
 }
-<<<<<<< HEAD
-=======
 
 /*
  * Accelerated Text Console Code
@@ -720,4 +798,3 @@ mgx_ras_do_cursor(struct rasops_info *ri)
 
 	return 0;
 }
->>>>>>> origin/master

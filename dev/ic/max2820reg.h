@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: max2820reg.h,v 1.2 2009/08/16 18:21:57 jsg Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: max2820reg.h,v 1.1 2004/09/26 02:29:15 dyoung Exp $ */
 
 /*

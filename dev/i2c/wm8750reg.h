@@ -1,4 +1,4 @@
-/*	$OpenBSD: wm8750reg.h,v 1.1 2005/04/15 01:05:51 pascoe Exp $	*/
+/*	$OpenBSD: wm8750reg.h,v 1.2 2005/12/31 04:31:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Christopher Pascoe <c.pascoe@itee.uq.edu.au>

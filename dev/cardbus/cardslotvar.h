@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cardslotvar.h,v 1.2 2002/03/14 01:26:53 millert Exp $	*/
-=======
 /*	$OpenBSD: cardslotvar.h,v 1.5 2010/01/13 09:10:33 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cardslotvar.h,v 1.5 2000/03/13 23:52:38 soren Exp $	*/
 
 /*

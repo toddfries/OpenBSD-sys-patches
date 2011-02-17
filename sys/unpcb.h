@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: unpcb.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
-=======
 /*	$OpenBSD: unpcb.h,v 1.8 2010/06/30 19:57:05 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: unpcb.h,v 1.6 1994/06/29 06:46:08 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm78var.h,v 1.10 2007/02/22 20:44:51 kettenis Exp $	*/
+/*	$OpenBSD: lm78var.h,v 1.14 2007/06/25 22:50:18 cnst Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis
@@ -111,8 +111,10 @@
 #define WB_CHIPID_W83791SD	0x72
 #define WB_CHIPID_W83792D	0x7a
 #define WB_CHIPID_W83637HF	0x80
+#define WB_CHIPID_W83627EHF_A	0x88 /* early version, only for ASUS MBs */
 #define WB_CHIPID_W83627THF	0x90
 #define WB_CHIPID_W83627EHF	0xa1
+#define WB_CHIPID_W83627DHG	0xc1
 
 /* Config bits */
 #define WB_CONFIG_VMR9		0x01
@@ -139,6 +141,7 @@ struct lm_softc {
 
 	struct ksensor sensors[WB_MAX_SENSORS];
 	struct ksensordev sensordev;
+	struct sensor_task *sensortask;
 	struct lm_sensor *lm_sensors;
 	u_int numsensors;
 	void (*refresh_sensor_data) (struct lm_softc *);

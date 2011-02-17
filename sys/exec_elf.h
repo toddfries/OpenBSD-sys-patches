@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: exec_elf.h,v 1.41 2006/01/06 18:53:05 millert Exp $	*/
-=======
 /*	$OpenBSD: exec_elf.h,v 1.48 2010/06/07 09:41:16 sthen Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
  *
@@ -582,7 +578,7 @@ struct elfcore_procinfo {
  */
 #if defined(_KERNEL) || defined(_DYN_LOADER)
 
-#define ELF32_NO_ADDR	((u_long) ~0)	/* Indicates addr. not yet filled in */
+#define ELF32_NO_ADDR	((uint32_t) ~0)	/* Indicates addr. not yet filled in */
 #define ELF_AUX_ENTRIES	8		/* Size of aux array passed to loader */
 
 typedef struct {

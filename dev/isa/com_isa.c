@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: com_isa.c,v 1.3 2003/06/02 23:28:02 millert Exp $	*/
-=======
 /*	$OpenBSD: com_isa.c,v 1.6 2010/08/06 21:08:26 deraadt Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
  *

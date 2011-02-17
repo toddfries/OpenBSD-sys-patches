@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: elink3.c,v 1.68 2006/06/17 17:56:10 brad Exp $	*/
-=======
 /*	$OpenBSD: elink3.c,v 1.76 2009/11/24 18:12:39 claudio Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -788,8 +784,6 @@ epsetmedia(sc, medium)
 	 * PHY which media to use.
 	 */
 	if (sc->ep_flags & EP_FLAGS_MII) {
-		int config0, config1;
-
 		GO_WINDOW(3);
 
 		if (sc->ep_chipset == EP_CHIPSET_ROADRUNNER) {
@@ -1392,15 +1386,6 @@ epget(sc, totlen)
 		/* If the queue is no longer full, refill. */
 		if (!timeout_pending(&sc->sc_epmbuffill_tmo))
 			timeout_add(&sc->sc_epmbuffill_tmo, 1);
-<<<<<<< HEAD
-		/* Convert one of our saved mbuf's. */
-		sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
-		m->m_data = m->m_pktdat;
-		m->m_flags = M_PKTHDR;
-		m_tag_init(m);
-		m->m_pkthdr.csum_flags = 0;
-=======
->>>>>>> origin/master
 	}
 	if (!m)
 		return (NULL);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365var.h,v 1.13 2002/03/14 01:26:54 millert Exp $	*/
+/*	$OpenBSD: i82365var.h,v 1.14 2005/11/23 11:39:37 mickey Exp $	*/
 /*	$NetBSD: i82365var.h,v 1.4 1998/05/23 18:32:29 matt Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_acctrace.c,v 1.3 2000/01/07 14:50:19 peter Exp $	*/
+/*	$OpenBSD: rf_acctrace.c,v 1.4 2002/12/16 07:01:02 tdeval Exp $	*/
 /*	$NetBSD: rf_acctrace.c,v 1.4 1999/08/13 03:41:52 oster Exp $	*/
 
 /*

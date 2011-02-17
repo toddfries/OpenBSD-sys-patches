@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cardbusvar.h,v 1.11 2006/07/31 11:06:27 mickey Exp $	*/
-=======
 /*	$OpenBSD: cardbusvar.h,v 1.19 2010/03/27 23:36:36 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cardbusvar.h,v 1.17 2000/04/02 19:11:37 mycroft Exp $	*/
 
 /*

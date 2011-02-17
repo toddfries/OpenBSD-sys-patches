@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_rtw_cardbus.c,v 1.10 2006/06/21 11:27:03 fkr Exp $	*/
-=======
 /*	$OpenBSD: if_rtw_cardbus.c,v 1.19 2010/09/06 19:20:21 deraadt Exp $	*/
->>>>>>> origin/master
 /* $NetBSD: if_rtw_cardbus.c,v 1.4 2004/12/20 21:05:34 dyoung Exp $ */
 
 /*-
@@ -158,18 +154,12 @@ int rtw_cardbus_enable(struct rtw_softc *);
 void rtw_cardbus_disable(struct rtw_softc *);
 void rtw_cardbus_power(struct rtw_softc *, int);
 
-<<<<<<< HEAD
-const struct cardbus_matchid rtw_cardbus_devices[] = {
-	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
-	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
-=======
 const struct pci_matchid rtw_cardbus_devices[] = {
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
 #ifdef RTW_DEBUG
 	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D7010 },
 #endif
->>>>>>> origin/master
 	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6020V3 },
 	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 }
 };
@@ -274,7 +264,7 @@ rtw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	/* Remember which interrupt line. */
 	csc->sc_intrline = ca->ca_intrline;
 
-	printf(" irq %d\n", csc->sc_intrline);
+	printf(": irq %d\n", csc->sc_intrline);
 	    
 	/*
 	 * Finish off the attach.

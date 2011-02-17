@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rbus.c,v 1.9 2005/09/13 18:44:38 fgsch Exp $	*/
-=======
 /*	$OpenBSD: rbus.c,v 1.16 2010/09/22 02:28:37 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rbus.c,v 1.3 1999/11/06 06:20:53 soren Exp $	*/
 /*
  * Copyright (c) 1999
@@ -44,19 +40,16 @@
 #if defined RBUS_DEBUG
 #define STATIC
 #define DPRINTF(a) printf a
-#define DDELAY(x) delay((x)*1000*1000)
+#else
+#ifdef DDB
+#define STATIC
 #else
 #define STATIC static
+#endif
 #define DPRINTF(a)
 #endif
 
 
-<<<<<<< HEAD
-static rbus_tag_t rbus_new_body(bus_space_tag_t, rbus_tag_t, struct extent *,
-		      bus_addr_t, bus_addr_t, bus_addr_t, int);
-
-=======
->>>>>>> origin/master
 int
 rbus_space_alloc(rbus_tag_t rbt, bus_addr_t addr, bus_size_t size,
     bus_addr_t mask, bus_addr_t align, int flags, bus_addr_t *addrp,
@@ -181,26 +174,15 @@ rbus_space_free(rbus_tag_t rbt, bus_space_handle_t bsh, bus_size_t size,
 }
 
 /*
-<<<<<<< HEAD
- * static rbus_tag_t
- * rbus_new_body(bus_space_tag_t bt, rbus_tag_t parent,
-=======
  * rbus_tag_t
  * rbus_new_body(bus_space_tag_t bt,
->>>>>>> origin/master
  *               struct extent *ex, bus_addr_t start, bus_size_t end,
  *               int flags)
  *
  */
-<<<<<<< HEAD
-static rbus_tag_t
-rbus_new_body(bus_space_tag_t bt, rbus_tag_t parent, struct extent *ex,
-    bus_addr_t start, bus_addr_t end, bus_addr_t offset, int flags)
-=======
 rbus_tag_t
 rbus_new_body(bus_space_tag_t bt, struct extent *ex,
     bus_addr_t start, bus_addr_t end, int flags)
->>>>>>> origin/master
 {
 	rbus_tag_t rb;
 

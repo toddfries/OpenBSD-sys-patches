@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: asc_tc.c,v 1.6 2002/05/02 22:56:06 miod Exp $ */
-=======
 /* $OpenBSD: asc_tc.c,v 1.11 2010/11/11 17:54:54 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: asc_tc.c,v 1.19 2001/11/15 09:48:19 lukem Exp $ */
 
 /*-

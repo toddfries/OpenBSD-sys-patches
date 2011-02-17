@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: disk.h,v 1.13 2006/03/15 20:20:42 miod Exp $	*/
-=======
 /*	$OpenBSD: disk.h,v 1.28 2010/11/17 15:01:05 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*
@@ -56,10 +52,10 @@
 #include <sys/time.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
+#include <sys/mutex.h>
 
 struct buf;
 struct disklabel;
-struct cpu_disklabel;
 
 #define DS_DISKNAMELEN	16
 
@@ -79,6 +75,7 @@ struct diskstats {
 struct disk {
 	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
 	struct rwlock	dk_lock;	/* disk lock */
+	struct mutex	dk_mtx;		/* busy/unbusy mtx */
 	char		*dk_name;	/* disk name */
 	struct device	*dk_device;	/* disk device structure. */
 	dev_t		dk_devno;	/* disk device number. */
@@ -113,26 +110,7 @@ struct disk {
 	 * must be dynamically allocated, otherwise the size of this
 	 * structure becomes machine-dependent.
 	 */
-<<<<<<< HEAD
-	daddr_t		dk_labelsector;		/* sector containing label */
-	struct disklabel *dk_label;	/* label */
-	struct cpu_disklabel *dk_cpulabel;
-};
-
-struct dkdriver {
-	void	(*d_strategy)(struct buf *);
-#ifdef notyet
-	int	(*d_open)(dev_t dev, int ifmt, int, struct proc *);
-	int	(*d_close)(dev_t dev, int, int ifmt, struct proc *);
-	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data, int fflag,
-				struct proc *);
-	int	(*d_dump)(dev_t);
-	void	(*d_start)(struct buf *, daddr_t);
-	int	(*d_mklabel)(struct disk *);
-#endif
-=======
 	struct disklabel *dk_label;
->>>>>>> origin/master
 };
 
 /* states */
@@ -178,8 +156,6 @@ void	disk_attach(struct device *, struct disk *);
 void	disk_detach(struct disk *);
 void	disk_busy(struct disk *);
 void	disk_unbusy(struct disk *, long, int);
-void	disk_resetstat(struct disk *);
-struct	disk *disk_find(char *);
 
 int	disk_lock(struct disk *);
 void    disk_unlock(struct disk *);

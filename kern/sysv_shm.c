@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sysv_shm.c,v 1.45 2004/07/14 23:40:27 millert Exp $	*/
-=======
 /*	$OpenBSD: sysv_shm.c,v 1.51 2010/07/03 03:04:55 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*
@@ -77,7 +73,7 @@ struct shmid_ds **shmsegs;	/* linear mapping of shmid -> shmseg */
 struct pool shm_pool;
 unsigned short *shmseqs;	/* array of shm sequence numbers */
 
-struct shmid_ds *shm_find_segment_by_shmid(int, int);
+struct shmid_ds *shm_find_segment_by_shmid(int);
 
 /*
  * Provides the following externally accessible functions:
@@ -93,6 +89,7 @@ struct shmid_ds *shm_find_segment_by_shmid(int, int);
  */
 
 #define	SHMSEG_REMOVED  	0x0200		/* can't overlap ACCESSPERMS */
+#define	SHMSEG_RMLINGER		0x0400
 
 int shm_last_free, shm_nused, shm_committed;
 
@@ -133,7 +130,7 @@ shm_find_segment_by_key(key_t key)
 }
 
 struct shmid_ds *
-shm_find_segment_by_shmid(int shmid, int findremoved)
+shm_find_segment_by_shmid(int shmid)
 {
 	int segnum;
 	struct shmid_ds *shmseg;
@@ -143,7 +140,7 @@ shm_find_segment_by_shmid(int shmid, int findremoved)
 	    (shmseg = shmsegs[segnum]) == NULL ||
 	    shmseg->shm_perm.seq != IPCID_TO_SEQ(shmid))
 		return (NULL);
-	if (!findremoved && (shmseg->shm_perm.mode & SHMSEG_REMOVED))
+	if ((shmseg->shm_perm.mode & (SHMSEG_REMOVED|SHMSEG_RMLINGER)) == SHMSEG_REMOVED)
 		return (NULL);
 	return (shmseg);
 }
@@ -158,7 +155,7 @@ shm_deallocate_segment(struct shmid_ds *shmseg)
 	size = round_page(shmseg->shm_segsz);
 	uao_detach(shm_handle->shm_object);
 	pool_put(&shm_pool, shmseg);
-	shm_committed -= btoc(size);
+	shm_committed -= atop(size);
 	shm_nused--;
 }
 
@@ -213,12 +210,6 @@ sys_shmdt(struct proc *p, void *v, register_t *retval)
 int
 sys_shmat(struct proc *p, void *v, register_t *retval)
 {
-	return (sys_shmat1(p, v, retval, 0));
-}
-
-int
-sys_shmat1(struct proc *p, void *v, register_t *retval, int findremoved)
-{
 	struct sys_shmat_args /* {
 		syscallarg(int) shmid;
 		syscallarg(const void *) shmaddr;
@@ -245,7 +236,7 @@ sys_shmat1(struct proc *p, void *v, register_t *retval, int findremoved)
 			shmmap_s->shmid = -1;
 		p->p_vmspace->vm_shm = (caddr_t)shmmap_h;
 	}
-	shmseg = shm_find_segment_by_shmid(SCARG(uap, shmid), findremoved);
+	shmseg = shm_find_segment_by_shmid(SCARG(uap, shmid));
 	if (shmseg == NULL)
 		return (EINVAL);
 	error = ipcperm(cred, &shmseg->shm_perm,
@@ -318,7 +309,7 @@ shmctl1(struct proc *p, int shmid, int cmd, caddr_t buf,
 	struct shmid_ds inbuf, *shmseg;
 	int error;
 
-	shmseg = shm_find_segment_by_shmid(shmid, 1);
+	shmseg = shm_find_segment_by_shmid(shmid);
 	if (shmseg == NULL)
 		return (EINVAL);
 	switch (cmd) {
@@ -409,10 +400,10 @@ shmget_allocate_segment(struct proc *p,
 	if (shm_nused >= shminfo.shmmni) /* any shmids left? */
 		return (ENOSPC);
 	size = round_page(SCARG(uap, size));
-	if (shm_committed + btoc(size) > shminfo.shmall)
+	if (shm_committed + atop(size) > shminfo.shmall)
 		return (ENOMEM);
 	shm_nused++;
-	shm_committed += btoc(size);
+	shm_committed += atop(size);
 
 	/*
 	 * If a key has been specified and we had to wait for memory
@@ -427,7 +418,7 @@ shmget_allocate_segment(struct proc *p,
 		if (shm_find_segment_by_key(key) != -1) {
 			pool_put(&shm_pool, shmseg);
 			shm_nused--;
-			shm_committed -= btoc(size);
+			shm_committed -= atop(size);
 			return (EAGAIN);
 		}
 	}
@@ -451,7 +442,7 @@ shmget_allocate_segment(struct proc *p,
 
 	shmseg->shm_perm.cuid = shmseg->shm_perm.uid = cred->cr_uid;
 	shmseg->shm_perm.cgid = shmseg->shm_perm.gid = cred->cr_gid;
-	shmseg->shm_perm.mode = (mode & ACCESSPERMS);
+	shmseg->shm_perm.mode = (mode & (ACCESSPERMS|SHMSEG_RMLINGER));
 	shmseg->shm_perm.seq = shmseqs[segnum] = (shmseqs[segnum] + 1) & 0x7fff;
 	shmseg->shm_perm.key = key;
 	shmseg->shm_segsz = SCARG(uap, size);
@@ -476,6 +467,9 @@ sys_shmget(struct proc *p, void *v, register_t *retval)
 	int segnum, mode, error;
 
 	mode = SCARG(uap, shmflg) & ACCESSPERMS;
+	if (SCARG(uap, shmflg) & _SHM_RMLINGER)
+		mode |= SHMSEG_RMLINGER;
+
 	if (SCARG(uap, key) != IPC_PRIVATE) {
 	again:
 		segnum = shm_find_segment_by_key(SCARG(uap, key));
@@ -542,11 +536,9 @@ shminit(void)
 	    sizeof(struct shm_handle), 0, 0, 0, "shmpl",
 	    &pool_allocator_nointr);
 	shmsegs = malloc(shminfo.shmmni * sizeof(struct shmid_ds *),
-	    M_SHM, M_WAITOK);
-	bzero(shmsegs, shminfo.shmmni * sizeof(struct shmid_ds *));
+	    M_SHM, M_WAITOK|M_ZERO);
 	shmseqs = malloc(shminfo.shmmni * sizeof(unsigned short),
-	    M_SHM, M_WAITOK);
-	bzero(shmseqs, shminfo.shmmni * sizeof(unsigned short));
+	    M_SHM, M_WAITOK|M_ZERO);
 
 	shminfo.shmmax *= PAGE_SIZE;	/* actually in pages */
 	shm_last_free = 0;
@@ -585,8 +577,8 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (error);
 
 		/* If new shmmax > shmall, crank shmall */
-		if (btoc(round_page(shminfo.shmmax)) > shminfo.shmall)
-			shminfo.shmall = btoc(round_page(shminfo.shmmax));
+		if (atop(round_page(shminfo.shmmax)) > shminfo.shmall)
+			shminfo.shmall = atop(round_page(shminfo.shmmax));
 		return (0);
 	case KERN_SHMINFO_SHMMIN:
 		val = shminfo.shmmin;
@@ -608,18 +600,15 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 		/* Expand shmsegs and shmseqs arrays */
 		newsegs = malloc(val * sizeof(struct shmid_ds *),
-		    M_SHM, M_WAITOK);
+		    M_SHM, M_WAITOK|M_ZERO);
 		bcopy(shmsegs, newsegs,
 		    shminfo.shmmni * sizeof(struct shmid_ds *));
-		bzero(newsegs + shminfo.shmmni,
-		    (val - shminfo.shmmni) * sizeof(struct shmid_ds *));
 		free(shmsegs, M_SHM);
 		shmsegs = newsegs;
-		newseqs = malloc(val * sizeof(unsigned short), M_SHM, M_WAITOK);
+		newseqs = malloc(val * sizeof(unsigned short), M_SHM,
+		    M_WAITOK|M_ZERO);
 		bcopy(shmseqs, newseqs,
 		    shminfo.shmmni * sizeof(unsigned short));
-		bzero(newseqs + shminfo.shmmni,
-		    (val - shminfo.shmmni) * sizeof(unsigned short));
 		free(shmseqs, M_SHM);
 		shmseqs = newseqs;
 		shminfo.shmmni = val;

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: yds_hwmcode.h,v 1.3 2001/04/16 08:16:40 deraadt Exp $	*/
 
 /*=============================================================================
  Copyright (c) 1997-1999  Yamaha Corporation. All Rights Reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtl80x9var.h,v 1.3 2001/03/12 05:36:59 aaron Exp $	*/
-=======
 /*	$OpenBSD: rtl80x9var.h,v 1.5 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rtl80x9var.h,v 1.1 1998/10/31 00:44:33 thorpej Exp $	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_pgt_cardbus.c,v 1.6 2006/11/10 20:20:04 damien Exp $ */
-=======
 /*	$OpenBSD: if_pgt_cardbus.c,v 1.13 2010/09/06 19:20:21 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Marcus Glocker <mglocker@openbsd.org>

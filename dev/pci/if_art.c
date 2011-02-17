@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_art.c,v 1.12 2006/01/25 14:45:28 claudio Exp $ */
-=======
 /*	$OpenBSD: if_art.c,v 1.18 2010/06/29 07:12:31 matthew Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland
@@ -266,7 +262,8 @@ art_ifm_change(struct ifnet *ifp)
 	struct channel_softc	*cc = ifp->if_softc;
 	struct art_softc	*ac = (struct art_softc *)cc->cc_parent;
 	struct ifmedia		*ifm = &ac->art_ifm;
-	int			 rv, s, baudrate;
+	u_int64_t		baudrate;
+	int			rv, s;
 
 	ACCOOM_PRINTF(2, ("%s: art_ifm_change %08x\n", ifp->if_xname,
 	    ifm->ifm_media));
@@ -322,7 +319,7 @@ art_ifm_change(struct ifnet *ifp)
 	if (baudrate != ifp->if_baudrate) {
 		ifp->if_baudrate = baudrate;
 		s = splsoftnet();
-		if_link_state_change(ifp), baudrate;
+		if_link_state_change(ifp);
 		splx(s);
 	}
 
@@ -339,7 +336,7 @@ art_ifm_status(struct ifnet *ifp, struct ifmediareq *ifmreq)
 	ac = (struct art_softc *)
 	    ((struct channel_softc *)ifp->if_softc)->cc_parent;
 	ifmreq->ifm_status = IFM_AVALID;
-	if (ifp->if_link_state == LINK_STATE_UP)
+	if (LINK_STATE_IS_UP(ifp->if_link_state))
 		ifmreq->ifm_status |= IFM_ACTIVE;
 	ifmreq->ifm_active = ac->art_media;
 
@@ -404,7 +401,7 @@ art_onesec(void *arg)
 
 	if (link_state != ifp->if_link_state) {
 		s = splsoftnet();
-		if (link_state == LINK_STATE_UP)
+		if (LINK_STATE_IS_UP(link_state))
 			ppp->pp_up(ppp);
 		else
 			ppp->pp_down(ppp);
@@ -428,7 +425,7 @@ art_linkstate(void *arg)
 	struct art_softc	*ac = arg;
 	struct ifnet		*ifp = ac->art_channel->cc_ifp;
 
-	if (ifp->if_link_state == LINK_STATE_UP)
+	if (LINK_STATE_IS_UP(ifp->if_link_state))
 		/* turn red led off */
 		ebus_set_led(ac->art_channel, 0, MUSYCC_LED_RED);
 	else

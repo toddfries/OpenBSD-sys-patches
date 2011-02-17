@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vnd.c,v 1.71 2007/03/25 18:02:37 tedu Exp $	*/
-=======
 /*	$OpenBSD: vnd.c,v 1.107 2011/02/15 20:02:11 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -167,20 +163,15 @@ void	vndstart(struct vnd_softc *);
 int	vndsetcred(struct vnd_softc *, struct ucred *);
 void	vndiodone(struct buf *);
 void	vndshutdown(void);
-<<<<<<< HEAD
-void	vndgetdisklabel(dev_t, struct vnd_softc *);
-void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr_t, int);
-=======
 int	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
 size_t	vndbdevsize(struct vnode *, struct proc *);
->>>>>>> origin/master
 
 #define vndlock(sc) rw_enter(&sc->sc_rwlock, RW_WRITE|RW_INTR)
 #define vndunlock(sc) rw_exit_write(&sc->sc_rwlock)
 
 void
-vndencrypt(struct vnd_softc *vnd, caddr_t addr, size_t size, daddr_t off,
+vndencrypt(struct vnd_softc *vnd, caddr_t addr, size_t size, daddr64_t off,
     int encrypt)
 {
 	int i, bsize;
@@ -211,12 +202,11 @@ vndattach(int num)
 	if (num <= 0)
 		return;
 	size = num * sizeof(struct vnd_softc);
-	mem = malloc(size, M_DEVBUF, M_NOWAIT);
+	mem = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (mem == NULL) {
 		printf("WARNING: no memory for vnode disks\n");
 		return;
 	}
-	bzero(mem, size);
 	vnd_softc = (struct vnd_softc *)mem;
 	for (i = 0; i < num; i++) {
 		rw_init(&vnd_softc[i].sc_rwlock, "vndlock");
@@ -244,6 +234,12 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 	if ((error = vndlock(sc)) != 0)
 		return (error);
 
+	if (!vndsimple(dev) && sc->sc_vp != NULL &&
+	    (sc->sc_vp->v_type != VREG || sc->sc_keyctx != NULL)) {
+		error = EINVAL;
+		goto bad;
+	}
+
 	if ((flags & FWRITE) && (sc->sc_flags & VNF_READONLY)) {
 		error = EROFS;
 		goto bad;
@@ -252,7 +248,7 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 	if ((sc->sc_flags & VNF_INITED) &&
 	    (sc->sc_flags & VNF_HAVELABEL) == 0) {
 		sc->sc_flags |= VNF_HAVELABEL;
-		vndgetdisklabel(dev, sc);
+		vndgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
 	}
 
 	part = DISKPART(dev);
@@ -304,21 +300,11 @@ bad:
 /*
  * Load the label information on the named device
  */
-<<<<<<< HEAD
-void
-vndgetdisklabel(dev_t dev, struct vnd_softc *sc)
-{
-	struct disklabel *lp = sc->sc_dk.dk_label;
-	char *errstring = NULL;
-
-=======
 int
 vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
     int spoofonly)
 {
->>>>>>> origin/master
 	bzero(lp, sizeof(struct disklabel));
-	bzero(sc->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = sc->sc_secsize;
 	lp->d_nsectors = sc->sc_nsectors;
@@ -329,36 +315,16 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
 	strncpy(lp->d_typename, "vnd device", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-<<<<<<< HEAD
-	lp->d_secperunit = sc->sc_size;
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
-=======
 	DL_SETDSIZE(lp, sc->sc_size);
->>>>>>> origin/master
 	lp->d_flags = 0;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = dkcksum(lp);
 
 	/* Call the generic disklabel extraction routine */
-<<<<<<< HEAD
-	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp,
-	    sc->sc_dk.dk_cpulabel, 0);
-	if (errstring) {
-		DNPRINTF(VDB_IO, "%s: %s\n", sc->sc_dev.dv_xname,
-		    errstring);
-		return;
-	}
-=======
 	return readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, spoofonly);
->>>>>>> origin/master
 }
 
 int
@@ -459,8 +425,7 @@ vndstrategy(struct buf *bp)
 
 	/* If we have a label, do a boundary check. */
 	if (vnd->sc_flags & VNF_HAVELABEL) {
-		if (bounds_check_with_label(bp, vnd->sc_dk.dk_label,
-		    vnd->sc_dk.dk_cpulabel, 1) <= 0) {
+		if (bounds_check_with_label(bp, vnd->sc_dk.dk_label, 1) <= 0) {
 			s = splbio();
 			biodone(bp);
 			splx(s);
@@ -483,13 +448,8 @@ vndstrategy(struct buf *bp)
 		/* Loop until all queued requests are handled.  */
 		for (;;) {
 			int part = DISKPART(bp->b_dev);
-<<<<<<< HEAD
-			int off = vnd->sc_dk.dk_label->d_partitions[part].p_offset;
-
-=======
 			daddr64_t off = DL_SECTOBLK(vnd->sc_dk.dk_label,
 			    DL_GETPOFFSET(&vnd->sc_dk.dk_label->d_partitions[part]));
->>>>>>> origin/master
 			aiov.iov_base = bp->b_data;
 			auio.uio_resid = aiov.iov_len = bp->b_bcount;
 			auio.uio_iov = &aiov;
@@ -545,13 +505,18 @@ vndstrategy(struct buf *bp)
 		}
 	}
 
+	if (vnd->sc_vp->v_type != VREG || vnd->sc_keyctx != NULL) {
+		bp->b_error = EINVAL;
+		bp->b_flags |= B_ERROR;
+		s = splbio();
+		biodone(bp);
+		splx(s);
+		return;
+	}
+
 	/* The old-style buffercache bypassing method.  */
-<<<<<<< HEAD
-	bn += vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)].p_offset;
-=======
 	bn += DL_SECTOBLK(vnd->sc_dk.dk_label,
 	    DL_GETPOFFSET(&vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)]));
->>>>>>> origin/master
 	bn = dbtob(bn);
 	bsize = vnd->sc_vp->v_mount->mnt_stat.f_iosize;
 	addr = bp->b_data;
@@ -559,7 +524,7 @@ vndstrategy(struct buf *bp)
 	for (resid = bp->b_resid; resid; resid -= sz) {
 		struct vnode *vp;
 		daddr64_t nbn;
-		int off, s, nra;
+		int off, nra;
 
 		nra = 0;
 		vn_lock(vnd->sc_vp, LK_RETRY | LK_EXCLUSIVE, p);
@@ -755,8 +720,6 @@ vndwrite(dev_t dev, struct uio *uio, int flags)
 	return (physio(vndstrategy, dev, B_WRITE, minphys, uio));
 }
 
-<<<<<<< HEAD
-=======
 size_t
 vndbdevsize(struct vnode *vp, struct proc *p)
 {
@@ -775,7 +738,6 @@ vndbdevsize(struct vnode *vp, struct proc *p)
 	return (pi.part->p_size);
 }
 
->>>>>>> origin/master
 /* ARGSUSED */
 int
 vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
@@ -858,14 +820,10 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			return (error);
 		}
 
-		error = VOP_GETATTR(nd.ni_vp, &vattr, p->p_ucred, p);
-		if (error) {
+		if (nd.ni_vp->v_type != VREG && !vndsimple(dev)) {
 			VOP_UNLOCK(nd.ni_vp, 0, p);
-			(void) vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
+			vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
 			vndunlock(vnd);
-<<<<<<< HEAD
-			return (error);
-=======
 			return (EINVAL);
 		}
 
@@ -880,11 +838,9 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 				return (error);
 			}
 			vnd->sc_size = vattr.va_size / vnd->sc_secsize;
->>>>>>> origin/master
 		}
 		VOP_UNLOCK(nd.ni_vp, 0, p);
 		vnd->sc_vp = nd.ni_vp;
-		vnd->sc_size = btodb(vattr.va_size);	/* note truncation */
 		if ((error = vndsetcred(vnd, p->p_ucred)) != 0) {
 			(void) vn_close(nd.ni_vp, VNDRW(vnd), p->p_ucred, p);
 			vndunlock(vnd);
@@ -957,12 +913,8 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			free(vnd->sc_keyctx, M_DEVBUF);
 		}
 
-<<<<<<< HEAD
-		/* Detatch the disk. */
-=======
 		/* Detach the disk. */
 		bufq_destroy(&vnd->sc_bufq);
->>>>>>> origin/master
 		disk_detach(&vnd->sc_dk);
 
 		/* This must be atomic. */
@@ -1041,14 +993,11 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		vnd->sc_flags |= VNF_LABELLING;
 
 		error = setdisklabel(vnd->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*vnd->sc_dk.dk_openmask : */0,
-		    vnd->sc_dk.dk_cpulabel);
+		    (struct disklabel *)addr, /*vnd->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
-				error = writedisklabel(MAKEDISKDEV(major(dev),
-				    DISKUNIT(dev), RAW_PART),
-				    vndstrategy, vnd->sc_dk.dk_label,
-				    vnd->sc_dk.dk_cpulabel);
+				error = writedisklabel(VNDLABELDEV(dev),
+				    vndstrategy, vnd->sc_dk.dk_label);
 		}
 
 		vnd->sc_flags &= ~VNF_LABELLING;
@@ -1134,7 +1083,7 @@ vndclear(struct vnd_softc *vnd)
 	vnd->sc_size = 0;
 }
 
-int
+daddr64_t
 vndsize(dev_t dev)
 {
 	int unit = vndunit(dev);
@@ -1146,7 +1095,7 @@ vndsize(dev_t dev)
 }
 
 int
-vnddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
+vnddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 {
 
 	/* Not implemented. */

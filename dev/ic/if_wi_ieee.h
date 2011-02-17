@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_ieee.h,v 1.28 2006/06/27 09:48:02 reyk Exp $	*/
+/*	$OpenBSD: if_wi_ieee.h,v 1.29 2006/06/27 20:55:51 reyk Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

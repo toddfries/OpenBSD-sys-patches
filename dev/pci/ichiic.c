@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ichiic.c,v 1.16 2006/08/19 19:13:33 brad Exp $	*/
-=======
 /*	$OpenBSD: ichiic.c,v 1.24 2010/04/08 00:23:53 tedu Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -28,12 +24,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-<<<<<<< HEAD
-#include <sys/lock.h>
-#include <sys/proc.h>
-=======
 #include <sys/rwlock.h>
->>>>>>> origin/master
 
 #include <machine/bus.h>
 
@@ -63,7 +54,7 @@ struct ichiic_softc {
 	int			sc_poll;
 
 	struct i2c_controller	sc_i2c_tag;
-	struct lock		sc_i2c_lock;
+	struct rwlock		sc_i2c_lock;
 	struct {
 		i2c_op_t     op;
 		void *       buf;
@@ -106,14 +97,10 @@ const struct pci_matchid ichiic_ids[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801EB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801FB_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GB_SMB },
-<<<<<<< HEAD
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_SMB }
-=======
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JD_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SMB }
->>>>>>> origin/master
 };
 
 int
@@ -172,7 +159,7 @@ ichiic_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	/* Attach I2C bus */
-	lockinit(&sc->sc_i2c_lock, PRIBIO | PCATCH, "iiclk", 0, 0);
+	rw_init(&sc->sc_i2c_lock, "iiclk");
 	sc->sc_i2c_tag.ic_cookie = sc;
 	sc->sc_i2c_tag.ic_acquire_bus = ichiic_i2c_acquire_bus;
 	sc->sc_i2c_tag.ic_release_bus = ichiic_i2c_release_bus;
@@ -194,7 +181,7 @@ ichiic_i2c_acquire_bus(void *cookie, int flags)
 	if (cold || sc->sc_poll || (flags & I2C_F_POLL))
 		return (0);
 
-	return (lockmgr(&sc->sc_i2c_lock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&sc->sc_i2c_lock, RW_WRITE | RW_INTR));
 }
 
 void
@@ -205,7 +192,7 @@ ichiic_i2c_release_bus(void *cookie, int flags)
 	if (cold || sc->sc_poll || (flags & I2C_F_POLL))
 		return;
 
-	lockmgr(&sc->sc_i2c_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_i2c_lock);
 }
 
 int
@@ -310,10 +297,6 @@ timeout:
 	/*
 	 * Transfer timeout. Kill the transaction and clear status bits.
 	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
-	    "flags 0x%02x: timeout, status 0x%b\n",
-	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
-	    st, ICH_SMB_HS_BITS);
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, ICH_SMB_HC,
 	    ICH_SMB_HC_KILL);
 	DELAY(ICHIIC_DELAY);

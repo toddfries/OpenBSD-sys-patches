@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_rumreg.h,v 1.12 2006/08/09 08:21:08 damien Exp $	*/
-=======
 /*	$OpenBSD: if_rumreg.h,v 1.14 2009/08/10 18:04:56 damien Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2005, 2006 Damien Bergamini <damien.bergamini@free.fr>

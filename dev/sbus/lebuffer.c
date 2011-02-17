@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lebuffer.c,v 1.5 2003/07/07 15:37:07 jason Exp $	*/
-=======
 /*	$OpenBSD: lebuffer.c,v 1.9 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lebuffer.c,v 1.12 2002/03/11 16:00:57 pk Exp $ */
 
 /*-
@@ -128,12 +124,11 @@ lebufattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_burst &= sbusburst;
 
 	/* Allocate a bus tag */
-	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT);
+	sbt = malloc(sizeof(*sbt), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sbt == NULL) {
 		printf("%s: attach: out of memory\n", self->dv_xname);
 		return;
 	}
-	bzero(sbt, sizeof(*sbt));
 
 	printf(": %dK memory\n", sc->sc_bufsiz / 1024);
 

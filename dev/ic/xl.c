@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: xl.c,v 1.75 2006/08/10 18:40:54 brad Exp $	*/
-=======
 /*	$OpenBSD: xl.c,v 1.99 2010/09/22 08:49:14 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -813,14 +809,12 @@ xl_reset(struct xl_softc *sc)
 		     XL_RESETOPT_DISADVFD:0));
 
 	/*
-	 * If we're using memory mapped register mode, pause briefly
-	 * after issuing the reset command before trying to access any
-	 * other registers. With my 3c575C cardbus card, failing to do
-	 * this results in the system locking up while trying to poll
-	 * the command busy bit in the status register.
+	 * Pause briefly after issuing the reset command before trying
+	 * to access any other registers. With my 3c575C cardbus card,
+	 * failing to do this results in the system locking up while
+	 * trying to poll the command busy bit in the status register.
 	 */
-	if (sc->xl_flags & XL_FLAG_USE_MMIO)
-		DELAY(100000);
+	DELAY(100000);
 
 	for (i = 0; i < XL_TIMEOUT; i++) {
 		DELAY(10);
@@ -2174,7 +2168,7 @@ xl_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 			if (CSR_READ_1(sc, XL_W3_MAC_CTRL) & XL_MACCTRL_DUPLEX)
 				ifmr->ifm_active |= IFM_FDX;
 			else
-				ifmr->ifm_active |= IFM_FDX;
+				ifmr->ifm_active |= IFM_HDX;
 		} else
 			ifmr->ifm_active = IFM_ETHER|IFM_10_5;
 		break;
@@ -2653,37 +2647,6 @@ xl_attach(struct xl_softc *sc)
 
 int
 xl_detach(struct xl_softc *sc)
-<<<<<<< HEAD
-{
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	/* Unhook our tick handler. */
-	timeout_del(&sc->xl_stsup_tmo);
-
-	xl_freetxrx(sc);
-
-	/* Detach all PHYs */
-	if (sc->xl_hasmii)
-		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
-
-	/* Delete all remaining media. */
-	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
-
-	ether_ifdetach(ifp);
-	if_detach(ifp);
-
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
-	return (0);
-}
-
-void
-xl_shutdown(void *v)
-=======
->>>>>>> origin/master
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	extern void xl_freetxrx(struct xl_softc *);

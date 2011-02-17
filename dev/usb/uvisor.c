@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvisor.c,v 1.26 2006/06/21 01:23:05 jsg Exp $	*/
-=======
 /*	$OpenBSD: uvisor.c,v 1.43 2011/01/25 20:03:36 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -130,7 +126,7 @@ struct uvisor_palm_connection_info {
 #define UVISOROBUFSIZE 1024
 
 struct uvisor_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
+	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* device */
 	usbd_interface_handle	sc_iface;	/* interface */
 /* 
@@ -138,7 +134,7 @@ struct uvisor_softc {
  */
 	int			sc_vendor;	/* USB device vendor */
 
-	device_ptr_t		sc_subdevs[UVISOR_MAX_CONN];
+	struct device		*sc_subdevs[UVISOR_MAX_CONN];
 	int			sc_numcon;
 
 	u_int16_t		sc_flags;
@@ -146,11 +142,11 @@ struct uvisor_softc {
 	u_char			sc_dying;
 };
 
-Static usbd_status uvisor_init(struct uvisor_softc *,
+usbd_status uvisor_init(struct uvisor_softc *,
 			       struct uvisor_connection_info *,
 			       struct uvisor_palm_connection_info *);
 
-Static void uvisor_close(void *, int);
+void uvisor_close(void *, int);
 
 
 struct ucom_methods uvisor_methods = {
@@ -174,6 +170,8 @@ struct uvisor_type {
 };
 static const struct uvisor_type uvisor_devs[] = {
 	{{ USB_VENDOR_ACEECA, USB_PRODUCT_ACEECA_MEZ1000 }, PALM4 },
+	{{ USB_VENDOR_FOSSIL, USB_PRODUCT_FOSSIL_WRISTPDA }, PALM4 },
+	{{ USB_VENDOR_GARMIN, USB_PRODUCT_GARMIN_IQUE3600 }, PALM4 },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_VISOR }, VISOR },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_TREO }, PALM4 },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_TREO600 }, VISOR },
@@ -193,14 +191,10 @@ static const struct uvisor_type uvisor_devs[] = {
 	{{ USB_VENDOR_SONY, USB_PRODUCT_SONY_CLIE_NX60 }, PALM4 },
 	{{ USB_VENDOR_SONY, USB_PRODUCT_SONY_CLIE_TJ25 }, PALM4 },
 /*	{{ USB_VENDOR_SONY, USB_PRODUCT_SONY_CLIE_25 }, PALM4 },*/
-	{{ USB_VENDOR_GARMIN, USB_PRODUCT_GARMIN_IQUE3600 }, PALM4 },
 	{{ USB_VENDOR_TAPWAVE, USB_PRODUCT_TAPWAVE_ZODIAC }, PALM4 },
 };
 #define uvisor_lookup(v, p) ((struct uvisor_type *)usb_lookup(uvisor_devs, v, p))
 
-<<<<<<< HEAD
-USB_DECLARE_DRIVER(uvisor);
-=======
 int uvisor_match(struct device *, void *, void *); 
 void uvisor_attach(struct device *, struct device *, void *); 
 int uvisor_detach(struct device *, int); 
@@ -217,11 +211,11 @@ const struct cfattach uvisor_ca = {
 	uvisor_detach, 
 	uvisor_activate, 
 };
->>>>>>> origin/master
 
-USB_MATCH(uvisor)
+int
+uvisor_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uvisor, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -233,17 +227,17 @@ USB_MATCH(uvisor)
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
-USB_ATTACH(uvisor)
+void
+uvisor_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uvisor, sc, uaa);
+	struct uvisor_softc *sc = (struct uvisor_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	struct uvisor_connection_info coninfo;
 	struct uvisor_palm_connection_info palmconinfo;
 	usb_endpoint_descriptor_t *ed;
-	char *devinfop;
-	char *devname = USBDEVNAME(sc->sc_dev);
 	int i, j, hasin, hasout, port;
 	usbd_status err;
 	struct ucom_attach_args uca;
@@ -253,29 +247,24 @@ USB_ATTACH(uvisor)
 	/* Move the device into the configured state. */
 	err = usbd_set_config_index(dev, UVISOR_CONFIG_INDEX, 1);
 	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
-		       devname, usbd_errstr(err));
+		printf(": failed to set configuration, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
 
 	err = usbd_device2interface_handle(dev, UVISOR_IFACE_INDEX, &iface);
 	if (err) {
-		printf("\n%s: failed to get interface, err=%s\n",
-		       devname, usbd_errstr(err));
+		printf(": failed to get interface, err=%s\n",
+		    usbd_errstr(err));
 		goto bad;
 	}
-
-	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfop);
-	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uvisor_lookup(uaa->vendor, uaa->product)->uv_flags;
 	sc->sc_vendor = uaa->vendor;
 	
 	if ((sc->sc_flags & (VISOR | PALM4)) == 0) {
 		printf("%s: device is neither visor nor palm\n", 
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto bad;
 	}
 
@@ -295,17 +284,11 @@ USB_ATTACH(uvisor)
 
 	err = uvisor_init(sc, &coninfo, &palmconinfo);
 	if (err) {
-		printf("%s: init failed, %s\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: init failed, %s\n", sc->sc_dev.dv_xname,
 		       usbd_errstr(err));
 		goto bad;
 	}
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
-
-=======
->>>>>>> origin/master
 	if (sc->sc_flags & VISOR) {
 		sc->sc_numcon = UGETW(coninfo.num_ports);
 		if (sc->sc_numcon > UVISOR_MAX_CONN)
@@ -355,7 +338,7 @@ USB_ATTACH(uvisor)
 				    ucomprint, ucomsubmatch);
 			else
 				printf("%s: no proper endpoints for port %d (%d,%d)\n",
-				    USBDEVNAME(sc->sc_dev), port, hasin, hasout);
+				    sc->sc_dev.dv_xname, port, hasin, hasout);
 		}
 	} else {
 		sc->sc_numcon = palmconinfo.num_ports;
@@ -385,20 +368,15 @@ USB_ATTACH(uvisor)
 		}
 	}
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 bad:
 	DPRINTF(("uvisor_attach: ATTACH ERROR\n"));
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
 int
-<<<<<<< HEAD
-uvisor_activate(device_ptr_t self, enum devact act)
-=======
 uvisor_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	int i, rv = 0, r;
@@ -420,7 +398,7 @@ uvisor_activate(struct device *self, int act)
 }
 
 int
-uvisor_detach(device_ptr_t self, int flags)
+uvisor_detach(struct device *self, int flags)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	int rv = 0;
@@ -434,12 +412,6 @@ uvisor_detach(device_ptr_t self, int flags)
 		}
 	}
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
-
-=======
->>>>>>> origin/master
 	return (rv);
 }
 

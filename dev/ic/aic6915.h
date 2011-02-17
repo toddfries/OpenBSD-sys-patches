@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aic6915.h,v 1.1 2006/12/06 20:07:52 martin Exp $	*/
-=======
 /*	$OpenBSD: aic6915.h,v 1.4 2009/08/10 20:29:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: aic6915reg.h,v 1.4 2005/12/11 12:21:25 christos Exp $	*/
 
 /*-

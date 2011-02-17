@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wskbdutil.c,v 1.5 2003/12/06 14:46:44 grange Exp $	*/
-=======
 /*	$OpenBSD: wskbdutil.c,v 1.9 2010/08/28 12:48:14 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: wskbdutil.c,v 1.7 1999/12/21 11:59:13 drochner Exp $	*/
 
 /*-

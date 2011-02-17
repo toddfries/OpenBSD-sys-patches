@@ -1,4 +1,4 @@
-/*	$OpenBSD: cy_isa.c,v 1.8 2002/09/14 15:00:03 art Exp $	*/
+/*	$OpenBSD: cy_isa.c,v 1.9 2002/09/15 21:30:25 art Exp $	*/
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.

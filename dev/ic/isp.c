@@ -1,34 +1,3 @@
-<<<<<<< HEAD
-/* 	$OpenBSD: isp.c,v 1.37 2006/05/31 23:25:27 krw Exp $ */
-/*
- * Machine and OS Independent (well, as best as possible)
- * code for the Qlogic ISP SCSI adapters.
- *
- * Copyright (c) 1997, 1998, 1999, 2000, 2001 by Matthew Jacob
- * Feral Software
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice immediately at the beginning of the file, without modification,
- *    this list of conditions, and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
-=======
 /* 	$OpenBSD: isp.c,v 1.51 2010/12/31 19:26:00 kettenis Exp $ */
 /*	$FreeBSD: src/sys/dev/isp/isp.c,v 1.150 2008/12/15 21:42:38 marius Exp $*/
 /*-
@@ -61,7 +30,6 @@
 /*
  * Machine and OS Independent (well, as best as possible)
  * code for the QLogic ISP SCSI and FC-SCSI adapters.
->>>>>>> origin/master
  */
 
 /*
@@ -123,11 +91,7 @@ static const char topology[] =
 static const char ourwwn[] =
     "HBA WWNN 0x%08x%08x HBA WWPN 0x%08x%08x";
 static const char finmsg[] =
-<<<<<<< HEAD
-    "(%d.%d.%d): FIN dl%d resid %zu STS 0x%x SKEY %c XS_ERR=0x%x";
-=======
     "%d.%d.%d: FIN dl%d resid %d STS 0x%x SKEY %c XS_ERR=0x%x";
->>>>>>> origin/master
 static const char sc0[] =
     "%s CHAN %d FTHRSH %d IID %d RESETD %d RETRYC %d RETRYD %d ASD 0x%x";
 static const char sc1[] =
@@ -373,8 +337,6 @@ isp_reset(struct ispsoftc *isp)
 		/*
 		 * XXX: Should probably do some bus sensing.
 		 */
-<<<<<<< HEAD
-=======
 	} else if (IS_ULTRA3(isp)) {
 		sdparam *sdp = isp->isp_param;
 
@@ -392,7 +354,6 @@ isp_reset(struct ispsoftc *isp)
 			sdp++;
 			sdp->isp_lvdmode = 1;
 		}
->>>>>>> origin/master
 	} else if (IS_ULTRA2(isp)) {
 		static const char m[] = "bus %d is in %s Mode";
 		u_int16_t l;
@@ -404,10 +365,6 @@ isp_reset(struct ispsoftc *isp)
 			btype = "1280";
 		else if (IS_1080(isp))
 			btype = "1080";
-		else if (IS_10160(isp))
-			btype = "10160";
-		else if (IS_12160(isp))
-			btype = "12160";
 		else
 			btype = "<UNKLVD>";
 
@@ -2767,81 +2724,6 @@ isp_pdb_sync(struct ispsoftc *isp)
 	/*
 	 * Make sure we're okay for doing this right now.
 	 */
-<<<<<<< HEAD
-	for (lp = &fcp->portdb[base]; lp < &fcp->portdb[lim]; lp++) {
-		u_int32_t portid;
-		mbreg_t mbs;
-
-		loopid = lp - fcp->portdb;
-		if (loopid >= FL_PORT_ID && loopid <= FC_SNS_ID) {
-			continue;
-		}
-
-		/*
-		 * Anything here?
-		 */
-		if (lp->port_wwn == 0) {
-			continue;
-		}
-
-		/*
-		 * Don't try to log into yourself.
-		 */
-		if ((portid = lp->portid) == fcp->isp_portid) {
-			continue;
-		}
-
-
-		/*
-		 * If we'd been logged in- see if we still are and we haven't
-		 * changed. If so, no need to log ourselves out, etc..
-		 *
-		 * Unfortunately, our charming Qlogic f/w has decided to
-		 * return a valid port database entry for a fabric device
-		 * that has, in fact, gone away. And it hangs trying to
-		 * log it out.
-		 */
-		if (lp->loggedin && lp->force_logout == 0 &&
-		    isp_getpdb(isp, lp->loopid, &pdb) == 0) {
-			int nrole;
-			u_int64_t nwwnn, nwwpn;
-			nwwnn =
-			    (((u_int64_t)pdb.pdb_nodename[0]) << 56) |
-			    (((u_int64_t)pdb.pdb_nodename[1]) << 48) |
-			    (((u_int64_t)pdb.pdb_nodename[2]) << 40) |
-			    (((u_int64_t)pdb.pdb_nodename[3]) << 32) |
-			    (((u_int64_t)pdb.pdb_nodename[4]) << 24) |
-			    (((u_int64_t)pdb.pdb_nodename[5]) << 16) |
-			    (((u_int64_t)pdb.pdb_nodename[6]) <<  8) |
-			    (((u_int64_t)pdb.pdb_nodename[7]));
-			nwwpn =
-			    (((u_int64_t)pdb.pdb_portname[0]) << 56) |
-			    (((u_int64_t)pdb.pdb_portname[1]) << 48) |
-			    (((u_int64_t)pdb.pdb_portname[2]) << 40) |
-			    (((u_int64_t)pdb.pdb_portname[3]) << 32) |
-			    (((u_int64_t)pdb.pdb_portname[4]) << 24) |
-			    (((u_int64_t)pdb.pdb_portname[5]) << 16) |
-			    (((u_int64_t)pdb.pdb_portname[6]) <<  8) |
-			    (((u_int64_t)pdb.pdb_portname[7]));
-			nrole = (pdb.pdb_prli_svc3 & SVC3_ROLE_MASK) >>
-			    SVC3_ROLE_SHIFT;
-			if (pdb.pdb_loopid == lp->loopid && lp->portid ==
-			    (u_int32_t) BITS2WORD(pdb.pdb_portid_bits) &&
-			    nwwnn == lp->node_wwn && nwwpn == lp->port_wwn &&
-			    lp->roles == nrole && lp->force_logout == 0) {
-				lp->loggedin = lp->valid = 1;
-				isp_prt(isp, ISP_LOGCONFIG, lretained,
-				    (int) (lp - fcp->portdb),
-				    (int) lp->loopid, lp->portid);
-				continue;
-			}
-		}
-
-		if (fcp->isp_fwstate != FW_READY ||
-		    fcp->isp_loopstate != LOOP_SYNCING_PDB) {
-			return (-1);
-		}
-=======
 	if (fcp->isp_loopstate != LOOP_PDB_RCVD &&
 	    fcp->isp_loopstate != LOOP_FSCAN_DONE &&
 	    fcp->isp_loopstate != LOOP_LSCAN_DONE) {
@@ -2849,7 +2731,6 @@ isp_pdb_sync(struct ispsoftc *isp)
 		    fcp->isp_loopstate);
 		return (-1);
 	}
->>>>>>> origin/master
 
 	if (fcp->isp_topo == TOPO_FL_PORT ||
 	    fcp->isp_topo == TOPO_NL_PORT ||
@@ -4321,7 +4202,7 @@ isp_start(XS_T *xs)
 
 		/*
 		 * Fibre Channel always requires some kind of tag.
-		 * The Qlogic drivers seem be happy not to use a tag,
+		 * The QLogic drivers seem be happy not to use a tag,
 		 * but this breaks for some devices (IBM drives).
 		 */
 		if (XS_TAG_P(xs)) {
@@ -4395,7 +4276,7 @@ isp_start(XS_T *xs)
 
 	/*
 	 * Set up DMA and/or do any bus swizzling of the request entry
-	 * so that the Qlogic F/W understands what is being asked of it.
+	 * so that the QLogic F/W understands what is being asked of it.
 	 */
 	i = ISP_DMASETUP(isp, xs, reqp, &nxti, optr);
 	if (i != CMD_QUEUED) {
@@ -4688,15 +4569,9 @@ again:
 		if (mbox & 0x4000) {
 			isp->isp_intmboxc++;
 			if (isp->isp_mboxbsy) {
-<<<<<<< HEAD
-				int i = 0, obits = isp->isp_obits;
-				isp->isp_mboxtmp[i++] = mbox;
-				for (i = 1; i < MAX_MAILBOX; i++) {
-=======
 				int obits = isp->isp_obits;
 				isp->isp_mboxtmp[0] = mbox;
 				for (i = 1; i < MAX_MAILBOX(isp); i++) {
->>>>>>> origin/master
 					if ((obits & (1 << i)) == 0) {
 						continue;
 					}
@@ -8068,7 +7943,7 @@ isp_parse_nvram_2100(struct ispsoftc *isp, u_int8_t *nvram_data)
 	 * I can find. However, we should account for this being set
 	 * at some point in the future.
 	 *
-	 * Qlogic WWNs have an NAA of 2, but usually nothing shows up in
+	 * QLogic WWNs have an NAA of 2, but usually nothing shows up in
 	 * bits 48..60. In the case of the 2202, it appears that they do
 	 * use bit 48 to distinguish between the two instances on the card.
 	 * The 2204, which I've never seen, *probably* extends this method.

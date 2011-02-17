@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_fxp_cardbus.c,v 1.17 2006/07/01 21:48:08 brad Exp $ */
-=======
 /*	$OpenBSD: if_fxp_cardbus.c,v 1.28 2010/08/27 18:25:46 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: if_fxp_cardbus.c,v 1.12 2000/05/08 18:23:36 thorpej Exp $	*/
 
 /*
@@ -162,12 +158,6 @@ fxp_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	} else
 		panic("%s: failed to allocate mem and io space", __func__);
 
-	if (ca->ca_cis.cis1_info[0] && ca->ca_cis.cis1_info[1])
-		printf(": %s %s", ca->ca_cis.cis1_info[0],
-		    ca->ca_cis.cis1_info[1]);
-	else
-		printf("\n");
-
 	sc->sc_dmat = ca->ca_dmat;
 #if 0
 	sc->sc_enable = fxp_cardbus_enable;
@@ -224,11 +214,7 @@ fxp_cardbus_setup(struct fxp_softc *sc)
 	(cf->cardbus_ctrl) (cc, CARDBUS_BM_ENABLE);
 
 	/* enable the card */
-<<<<<<< HEAD
-	cardbus_conf_write(cc, cf, csc->ct_tag, CARDBUS_COMMAND_STATUS_REG, command);
-=======
 	pci_conf_write(pc, csc->ct_tag, PCI_COMMAND_STATUS_REG, command);
->>>>>>> origin/master
 }
 
 int

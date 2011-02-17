@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: onewire.c,v 1.6 2006/09/30 17:45:31 grange Exp $	*/
-=======
 /*	$OpenBSD: onewire.c,v 1.11 2009/10/13 19:33:16 pirofti Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -55,6 +51,7 @@ struct onewire_softc {
 	TAILQ_HEAD(, onewire_device)	sc_devs;
 
 	int				sc_dying;
+	int				sc_flags;
 	u_int64_t			sc_rombuf[ONEWIRE_MAXDEVS];
 };
 
@@ -102,10 +99,17 @@ onewire_attach(struct device *parent, struct device *self, void *aux)
 	struct onewirebus_attach_args *oba = aux;
 
 	sc->sc_bus = oba->oba_bus;
+	sc->sc_flags = oba->oba_flags;
 	rw_init(&sc->sc_lock, sc->sc_dev.dv_xname);
 	TAILQ_INIT(&sc->sc_devs);
 
 	printf("\n");
+
+	if (sc->sc_flags & ONEWIRE_SCAN_NOW) {
+		onewire_scan(sc);
+		if (sc->sc_flags & ONEWIRE_NO_PERIODIC_SCAN)
+			return;
+	}
 
 	kthread_create_deferred(onewire_createthread, sc);
 }
@@ -397,6 +401,8 @@ onewire_thread(void *arg)
 
 	while (!sc->sc_dying) {
 		onewire_scan(sc);
+		if (sc->sc_flags & ONEWIRE_NO_PERIODIC_SCAN)
+			break;
 		tsleep(sc->sc_thread, PWAIT, "owidle", ONEWIRE_SCANTIME * hz);
 	}
 
@@ -466,20 +472,8 @@ onewire_scan(struct onewire_softc *sc)
 			}
 		}
 		if (!present) {
-<<<<<<< HEAD
-			bzero(&oa, sizeof(oa));
-			oa.oa_onewire = sc;
-			oa.oa_rom = rom;
-			if ((dev = config_found(&sc->sc_dev, &oa,
-			    onewire_print)) == NULL)
-				continue;
-
-			MALLOC(nd, struct onewire_device *,
-			    sizeof(struct onewire_device), M_DEVBUF, M_NOWAIT);
-=======
 			nd = malloc(sizeof(struct onewire_device),
 			    M_DEVBUF, M_NOWAIT);
->>>>>>> origin/master
 			if (nd == NULL)
 				continue;
 
@@ -504,7 +498,7 @@ out:
 			if (d->d_dev != NULL)
 				config_detach(d->d_dev, DETACH_FORCE);
 			TAILQ_REMOVE(&sc->sc_devs, d, d_list);
-			FREE(d, M_DEVBUF);
+			free(d, M_DEVBUF);
 		}
 	}
 }

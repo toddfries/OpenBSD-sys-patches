@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciphyreg.h,v 1.1 2004/12/01 00:24:38 pvalchev Exp $	*/
+/*	$OpenBSD: ciphyreg.h,v 1.2 2006/02/28 08:13:47 jsg Exp $	*/
 /*	$FreeBSD: ciphyreg.h,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004

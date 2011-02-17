@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vga.c,v 1.44 2007/02/06 22:03:23 miod Exp $ */
-=======
 /* $OpenBSD: vga.c,v 1.54 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: vga.c,v 1.28.2.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*-
@@ -116,6 +112,8 @@ int	vga_putchar(void *, int, int, u_int, long);
 int	vga_alloc_attr(void *, int, int, int, long *);
 int	vga_copyrows(void *, int, int, int);
 void	vga_unpack_attr(void *, long, int *, int *, int *);
+
+int	displaysubmatch(struct device *, void *, void *);
 
 static const struct wsdisplay_emulops vga_emulops = {
 	pcdisplay_cursor,
@@ -531,14 +529,9 @@ vga_extended_attach(struct device *self, bus_space_tag_t iot,
 		vc = &vga_console_vc;
 		vga_console_attached = 1;
 	} else {
-		vc = malloc(sizeof(struct vga_config), M_DEVBUF, M_NOWAIT);
+		vc = malloc(sizeof(*vc), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (vc == NULL)
-<<<<<<< HEAD
-			return;
-		bzero(vc, sizeof(struct vga_config));
-=======
 			return NULL;
->>>>>>> origin/master
 		vga_init(vc, iot, memt);
 	}
 
@@ -552,9 +545,6 @@ vga_extended_attach(struct device *self, bus_space_tag_t iot,
 	aa.accesscookie = vc;
 	aa.defaultscreens = 0;
 
-<<<<<<< HEAD
-        config_found(self, &aa, wsemuldisplaydevprint);
-=======
         config_found_sm(self, &aa, wsemuldisplaydevprint, displaysubmatch);
 
 	return vc;
@@ -570,7 +560,6 @@ displaysubmatch(struct device *parent, void *match, void *aux)
 	if (cf->cf_driver == &wsdisplay_cd)
 		return ((*cf->cf_attach->ca_match)(parent, match, aux));
 	return (0);
->>>>>>> origin/master
 }
 
 int

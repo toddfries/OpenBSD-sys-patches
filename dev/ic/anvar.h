@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: anvar.h,v 1.20 2006/01/30 11:41:00 jsg Exp $	*/
-=======
 /*	$OpenBSD: anvar.h,v 1.23 2009/10/13 19:33:16 pirofti Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: anvar.h,v 1.10 2005/02/27 00:27:00 perry Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999

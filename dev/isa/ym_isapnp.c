@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ym_isapnp.c,v 1.7 1999/08/05 05:32:41 deraadt Exp $ */
-=======
 /*	$OpenBSD: ym_isapnp.c,v 1.9 2010/06/30 11:21:35 jakemsr Exp $ */
->>>>>>> origin/master
 
 
 /*

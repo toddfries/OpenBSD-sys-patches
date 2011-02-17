@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.usb,v 1.68 2006/11/28 15:42:30 uwe Exp $
-=======
 #	$OpenBSD: files.usb,v 1.97 2011/01/06 19:32:09 damien Exp $
->>>>>>> origin/master
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -38,8 +34,6 @@ device	uaudio: audio, auconv, mulaw
 attach	uaudio at uhub
 file	dev/usb/uaudio.c		uaudio
 
-<<<<<<< HEAD
-=======
 # Video devices
 device	uvideo: video, firmload
 attach	uvideo at uhub
@@ -49,7 +43,6 @@ device	udl: wsemuldisplaydev, rasops16, edid
 attach	udl at uhub
 file	dev/usb/udl.c			udl
 
->>>>>>> origin/master
 # MIDI devices
 device	umidi: midibus
 attach	umidi at uhub
@@ -134,6 +127,11 @@ file	dev/usb/umass_scsi.c		umass & (scsibus | atapiscsi)
 device	udcf
 attach	udcf at uhub
 file	dev/usb/udcf.c			udcf
+
+# Meinberg USB5131 DCF77 radio clock
+device	umbg
+attach	umbg at uhub
+file	dev/usb/umbg.c			umbg
 
 # Diamond Multimedia Rio 500
 device	urio
@@ -280,6 +278,16 @@ device	umsm: ucombus
 attach	umsm at uhub
 file	dev/usb/umsm.c			umsm
 
+# WinChipHead CH341/340 serial
+device	uchcom: ucombus
+attach	uchcom at uhub
+file	dev/usb/uchcom.c		uchcom
+
+# TI TUSB3410 serial
+device	uticom: ucombus
+attach	uticom at uhub
+file	dev/usb/uticom.c		uticom
+
 # Scanners
 # Generic scanner support
 device	uscanner
@@ -296,9 +304,9 @@ attach	atu at uhub
 file	dev/usb/if_atu.c		atu
 
 # Bluetooth
-device	ubt: ifnet, bluetooth
+device	ubt: btbus, bluetooth
 attach	ubt at uhub
-file	dev/usb/if_ubt.c		ubt
+file	dev/usb/ubt.c			ubt
 
 # Ralink Technology RT2500USB
 device	ural: ether, ifnet, ifmedia, wlan
@@ -320,8 +328,6 @@ device	zyd: ether, ifnet, ifmedia, wlan, firmload
 attach	zyd at uhub
 file	dev/usb/if_zyd.c		zyd
 
-<<<<<<< HEAD
-=======
 # PrismGT
 device	upgt: ether, ifnet, ifmedia, wlan, firmload
 attach	upgt at uhub
@@ -347,7 +353,6 @@ device	otus: ether, ifnet, ifmedia, wlan, firmload
 attach	otus at uhub
 file	dev/usb/if_otus.c		otus
 
->>>>>>> origin/master
 # Analog Devices Eagle driver
 device	ueagle: atm, ifnet, ezload, firmload
 attach	ueagle at uhub

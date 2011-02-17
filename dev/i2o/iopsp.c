@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iopsp.c,v 1.8 2005/11/19 02:18:00 pedro Exp $	*/
-=======
 /*	$OpenBSD: iopsp.c,v 1.18 2010/06/28 18:31:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-
@@ -98,7 +94,7 @@ iopsp_match(struct device *parent, void *match, void *aux)
 		struct	i2o_param_op_results pr;
 		struct	i2o_param_read_results prr;
 		struct	i2o_param_hba_ctlr_info ci;
-	} __attribute__ ((__packed__)) param;
+	} __packed param;
 	int rv;
 
 	if (ia->ia_class != I2O_CLASS_BUS_ADAPTER_PORT)
@@ -138,7 +134,7 @@ iopsp_attach(struct device *parent, struct device *self, void *aux)
 			struct	i2o_param_hba_scsi_ctlr_info sci;
 			struct	i2o_param_hba_scsi_port_info spi;
 		} p;
-	} __attribute__ ((__packed__)) param;
+	} __packed param;
 	int fcal, rv;
 #ifdef I2OVERBOSE
 	int size;
@@ -200,8 +196,7 @@ iopsp_attach(struct device *parent, struct device *self, void *aux)
 	 * purposes only.
 	 */
 	size = sc->sc_link.adapter_buswidth * sizeof(struct iopsp_target);
-	sc->sc_targetmap = malloc(size, M_DEVBUF, M_NOWAIT);
-	bzero(sc->sc_targetmap, size);
+	sc->sc_targetmap = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO);
 #endif
 
  	/* Build the two maps, and attach to scsi. */
@@ -234,7 +229,7 @@ iopsp_reconfig(struct device *dv)
 		struct	i2o_param_op_results pr;
 		struct	i2o_param_read_results prr;
 		struct	i2o_param_scsi_device_info sdi;
-	} __attribute__ ((__packed__)) param;
+	} __packed param;
 	u_int tid, nent, i, targ, lun, size, s, rv, bptid;
 	u_short *tidmap;
 #ifdef I2OVERBOSE
@@ -252,9 +247,8 @@ iopsp_reconfig(struct device *dv)
 	 * and we never address that here).
 	 */
 	size = sc->sc_link.adapter_buswidth * IOPSP_MAX_LUN * sizeof(u_short);
-	if (!(tidmap = malloc(size, M_DEVBUF, M_NOWAIT)))
+	if (!(tidmap = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO)))
 		return (ENOMEM);
-	bzero(tidmap, size);
 
 #ifdef I2OVERBOSE
 	for (i = 0; i < sc->sc_link.adapter_buswidth; i++)
@@ -421,11 +415,7 @@ iopsp_scsi_cmd(xs)
 	if (tid == IOPSP_TID_ABSENT || tid == IOPSP_TID_INUSE) {
 		xs->error = XS_SELTIMEOUT;
 		scsi_done(xs);
-<<<<<<< HEAD
-		return (COMPLETE);
-=======
 		return;
->>>>>>> origin/master
 	}
 
 	SC_DEBUG(xs->sc_link, SDEV_DB2, ("iopsp_scsi_cmd: run_xfer\n"));
@@ -443,11 +433,7 @@ iopsp_scsi_cmd(xs)
 			xs->error = XS_NOERROR;
 
 		scsi_done(xs);
-<<<<<<< HEAD
-		return (COMPLETE);
-=======
 		return;
->>>>>>> origin/master
 	}
 
 #if defined(I2ODEBUG) || defined(SCSIDEBUG)
@@ -492,11 +478,7 @@ iopsp_scsi_cmd(xs)
 			xs->error = XS_DRIVER_STUFFUP;
 			iop_msg_free(iop, im);
 			scsi_done(xs);
-<<<<<<< HEAD
-			return (COMPLETE);
-=======
 			return;
->>>>>>> origin/master
 		}
 		if ((xs->flags & SCSI_DATA_IN) == 0)
 			mf->flags |= I2O_SCB_FLAG_XFER_TO_DEVICE;
@@ -517,10 +499,6 @@ iopsp_scsi_cmd(xs)
 		iop_msg_free(iop, im);
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
-<<<<<<< HEAD
-		return (COMPLETE);
-=======
->>>>>>> origin/master
 	}
 }
 

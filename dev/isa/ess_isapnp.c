@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ess_isapnp.c,v 1.4 2001/09/21 17:55:43 miod Exp $	*/
-=======
 /*	$OpenBSD: ess_isapnp.c,v 1.6 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ess_isa.c,v 1.4 1999/03/18 20:57:11 mycroft Exp $	*/
 
 /*-

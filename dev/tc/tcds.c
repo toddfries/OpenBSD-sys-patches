@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: tcds.c,v 1.3 2003/09/26 21:43:31 miod Exp $ */
-=======
 /* $OpenBSD: tcds.c,v 1.8 2010/09/20 06:33:48 matthew Exp $ */
->>>>>>> origin/master
 /* $NetBSD: tcds.c,v 1.3 2001/11/13 06:26:10 lukem Exp $ */
 
 /*-
@@ -203,12 +199,8 @@ tcdsattach(parent, self, aux)
 
 	sc->sc_cookie = ta->ta_cookie;
 
-<<<<<<< HEAD
-	tc_intr_establish(parent, sc->sc_cookie, TC_IPL_BIO, tcds_intr, sc);
-=======
 	tc_intr_establish(parent, sc->sc_cookie, IPL_BIO, tcds_intr, sc,
 	    self->dv_xname);
->>>>>>> origin/master
 
 	/*
 	 * XXX

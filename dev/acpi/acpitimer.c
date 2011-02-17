@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acpitimer.c,v 1.5 2007/02/20 22:10:27 marco Exp $	*/
-=======
 /* $OpenBSD: acpitimer.c,v 1.8 2008/06/11 04:42:09 marco Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -85,7 +81,8 @@ acpitimerattach(struct device *parent, struct device *self, void *aux)
 	struct acpi_softc *psc = (struct acpi_softc *) parent;
 	int rc;
 
-	if (psc->sc_fadt->hdr_revision >= 3)
+	if (psc->sc_fadt->hdr_revision >= 3 &&
+	    psc->sc_fadt->x_pm_tmr_blk.address != 0)
 		rc = acpi_map_address(psc, &psc->sc_fadt->x_pm_tmr_blk, 0,
 		    psc->sc_fadt->pm_tmr_len, &sc->sc_ioh, &sc->sc_iot);
 	else

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acx.c,v 1.72 2007/04/11 19:49:11 mglocker Exp $ */
-=======
 /*	$OpenBSD: acx.c,v 1.97 2010/08/27 17:08:00 jsg Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -150,6 +146,7 @@ void	 acx_init_info_reg(struct acx_softc *);
 int	 acx_config(struct acx_softc *);
 int	 acx_read_config(struct acx_softc *, struct acx_config *);
 int	 acx_write_config(struct acx_softc *, struct acx_config *);
+int	 acx_rx_config(struct acx_softc *);
 int	 acx_set_crypt_keys(struct acx_softc *);
 void	 acx_next_scan(void *);
 
@@ -199,8 +196,7 @@ int	 acx_newstate(struct ieee80211com *, enum ieee80211_state, int);
 
 void	 acx_init_cmd_reg(struct acx_softc *);
 int	 acx_join_bss(struct acx_softc *, uint8_t, struct ieee80211_node *);
-int	 acx_enable_txchan(struct acx_softc *, uint8_t);
-int	 acx_enable_rxchan(struct acx_softc *, uint8_t);
+int	 acx_set_channel(struct acx_softc *, uint8_t);
 int	 acx_init_radio(struct acx_softc *, uint32_t, uint32_t);
 
 void	 acx_iter_func(void *, struct ieee80211_node *);
@@ -314,16 +310,11 @@ acx_attach(struct acx_softc *sc)
 	/*
 	 * NOTE: Don't overwrite ic_caps set by chip specific code
 	 */
-<<<<<<< HEAD
-	ic->ic_caps |= IEEE80211_C_WEP |	/* WEP */
-	    IEEE80211_C_IBSS |			/* IBSS modes */
-=======
 	ic->ic_caps =
 	    IEEE80211_C_WEP |			/* WEP */
 	    IEEE80211_C_MONITOR |		/* Monitor mode */
 #ifndef IEEE80211_STA_ONLY
 	    IEEE80211_C_IBSS |			/* IBSS mode */
->>>>>>> origin/master
 	    IEEE80211_C_HOSTAP |		/* Access Point */
 #endif
 	    IEEE80211_C_SHPREAMBLE;		/* Short preamble */
@@ -407,6 +398,7 @@ int
 acx_init(struct ifnet *ifp)
 {
 	struct acx_softc *sc = ifp->if_softc;
+	struct ieee80211com *ic = &sc->sc_ic;
 	char fname[] = "tiacx111c16";
 	int error, combined = 0;
 
@@ -491,8 +483,12 @@ acx_init(struct ifnet *ifp)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	/* Begin background scanning */
-	ieee80211_new_state(&sc->sc_ic, IEEE80211_S_SCAN, -1);
+	if (ic->ic_opmode != IEEE80211_M_MONITOR)
+		/* start background scanning */
+		ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+	else
+		/* in monitor mode change directly into run state */
+		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 
 	return (0);
 back:
@@ -515,13 +511,13 @@ acx_set_crypt_keys(struct acx_softc *sc)
 	int i, error, got_wk = 0;
 
 	for (i = 0; i < IEEE80211_WEP_NKID; ++i) {
-		struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
+		struct ieee80211_key *k = &ic->ic_nw_keys[i];
 
-		if (wk->wk_len == 0)
+		if (k->k_len == 0)
 			continue;
 
 		if (sc->chip_hw_crypt) {
-			error = sc->chip_set_wepkey(sc, wk, i);
+			error = sc->chip_set_wepkey(sc, k, i);
 			if (error)
 				return (error);
 			got_wk = 1;
@@ -642,6 +638,10 @@ acx_config(struct acx_softc *sc)
 	if (error)
 		return (error);
 
+	error = acx_rx_config(sc);
+	if (error)
+		return (error);
+
 	if (acx_set_probe_req_tmplt(sc, "", 0) != 0) {
 		printf("%s: can't set probe req template "
 		    "(empty ssid)\n", sc->sc_dev.dv_xname);
@@ -743,7 +743,6 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 	struct acx_conf_rate_fallback rate_fb;
 	struct acx_conf_antenna ant;
 	struct acx_conf_regdom reg_dom;
-	struct acx_conf_rxopt rx_opt;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int error;
 
@@ -798,15 +797,39 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 			return (error);
 	}
 
-	/* What we want to receive and how to receive */
-	/* XXX may not belong here, acx_init() */
-	rx_opt.opt1 = htole16(RXOPT1_FILT_FDEST | RXOPT1_INCL_RXBUF_HDR);
-	rx_opt.opt2 = htole16(RXOPT2_RECV_ASSOC_REQ | RXOPT2_RECV_AUTH |
-	    RXOPT2_RECV_BEACON | RXOPT2_RECV_CF | RXOPT2_RECV_CTRL |
-	    RXOPT2_RECV_DATA | RXOPT2_RECV_MGMT | RXOPT2_RECV_PROBE_REQ |
-	    RXOPT2_RECV_PROBE_RESP | RXOPT2_RECV_OTHER);
+	return (0);
+}
+
+int
+acx_rx_config(struct acx_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct acx_conf_rxopt rx_opt;
+
+	/* tell the RX receiver what frames we want to have */
+	rx_opt.opt1 = htole16(RXOPT1_INCL_RXBUF_HDR);
+	rx_opt.opt2 = htole16(
+	    RXOPT2_RECV_ASSOC_REQ |
+	    RXOPT2_RECV_AUTH |
+	    RXOPT2_RECV_BEACON |
+	    RXOPT2_RECV_CF |
+	    RXOPT2_RECV_CTRL |
+	    RXOPT2_RECV_DATA |
+	    RXOPT2_RECV_MGMT |
+	    RXOPT2_RECV_PROBE_REQ |
+	    RXOPT2_RECV_PROBE_RESP |
+	    RXOPT2_RECV_OTHER);
+
+	/* in monitor mode go promiscuous */
+	if (ic->ic_opmode == IEEE80211_M_MONITOR) {
+		rx_opt.opt1 |= RXOPT1_PROMISC;
+		rx_opt.opt2 |= RXOPT2_RECV_BROKEN | RXOPT2_RECV_ACK;
+	} else
+		rx_opt.opt1 |= RXOPT1_FILT_FDEST;
+
+	/* finally set the RX options */
 	if (acx_set_conf(sc, ACX_CONF_RXOPT, &rx_opt, sizeof(rx_opt)) != 0) {
-		printf("%s: can't set RX option\n", ifp->if_xname);
+		printf("%s: can not set RX options!\n", sc->sc_dev.dv_xname);
 		return (ENXIO);
 	}
 
@@ -821,6 +844,7 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
 	int s, error = 0;
+	uint8_t chan;
 
 	s = splnet();
 
@@ -851,6 +875,21 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (error == ENETRESET)
 			error = 0;
+		break;
+	case SIOCS80211CHANNEL:
+		/* allow fast channel switching in monitor mode */
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING)) {
+				ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+				chan = ieee80211_chan2ieee(ic,
+				    ic->ic_bss->ni_chan);
+				(void)acx_set_channel(sc, chan);
+			}
+			error = 0;
+		}
 		break;
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
@@ -975,10 +1014,11 @@ acx_start(struct ifnet *ifp)
 
 		wh = mtod(m, struct ieee80211_frame *);
 		if ((wh->i_fc[1] & IEEE80211_FC1_WEP) && !sc->chip_hw_crypt) {
-			m = ieee80211_wep_crypt(ifp, m, 1);
-			if (m == NULL) {
+			struct ieee80211_key *k;
+
+			k = ieee80211_get_txkey(ic, wh, ni);
+			if ((m = ieee80211_encrypt(ic, m, k)) == NULL) {
 				ieee80211_release_node(ic, ni);
-				m_freem(m);
 				ifp->if_oerrors++;
 				continue;
 			}
@@ -1156,7 +1196,7 @@ acx_txeof(struct acx_softc *sc)
 
 			wn->amn.amn_txcnt++;
 			if (ntries > 0) {
-				DPRINTF(("%s: tx intr ntries %d\n",
+				DPRINTFN(2, ("%s: tx intr ntries %d\n",
 				    sc->sc_dev.dv_xname, ntries));
 				wn->amn.amn_retrycnt++;
 			}
@@ -1214,7 +1254,7 @@ acx_txerr(struct acx_softc *sc, uint8_t err)
 		stats->err_abort++;
 		break;
 	case DESC_ERR_PARAM:
-		printf("wrong paramters in descriptor\n");
+		printf("wrong parameters in descriptor\n");
 		stats->err_param++;
 		break;
 	case DESC_ERR_NO_WEPKEY:
@@ -1373,7 +1413,6 @@ acx_rxeof(struct acx_softc *sc)
 			ieee80211_input(ifp, m, ni, &rxi);
 
 			ieee80211_release_node(ic, ni);
-			ifp->if_ipackets++;
 		} else {
 			m_freem(m);
 			ifp->if_ierrors++;
@@ -1496,7 +1535,7 @@ acx_load_base_firmware(struct acx_softc *sc, const char *name)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    ifp->if_xname, error, name);
 		return (EIO);
 	}
@@ -1545,7 +1584,7 @@ acx_load_radio_firmware(struct acx_softc *sc, const char *name)
 	error = loadfirmware(name, &ucode, &size);
 
 	if (error != 0) {
-		printf("%s: error %d, could not read microcode %s!\n",
+		printf("%s: error %d, could not read firmware %s\n",
 		    ifp->if_xname, error, name);
 		return (EIO);
 	}
@@ -1680,11 +1719,9 @@ acx_node_alloc(struct ieee80211com *ic)
 {
 	struct acx_node *wn;
 
-	wn = malloc(sizeof(struct acx_node), M_DEVBUF, M_NOWAIT);
+	wn = malloc(sizeof(*wn), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (wn == NULL)
 		return (NULL);
-
-	bzero(wn, sizeof(struct acx_node));
 
 	return ((struct ieee80211_node *)wn);
 }
@@ -1705,20 +1742,9 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			uint8_t chan;
 
 			chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
-<<<<<<< HEAD
-
-			if (acx_enable_txchan(sc, chan) != 0) {
-				DPRINTF(("%s: enable TX on channel %d failed\n",
-				    ifp->if_xname, chan));
-			}
-			if (acx_enable_rxchan(sc, chan) != 0) {
-				DPRINTF(("%s: enable RX on channel %d failed\n",
-				    ifp->if_xname, chan));
-=======
 			if (acx_set_channel(sc, chan) != 0) {
 				error = 1;
 				goto back;
->>>>>>> origin/master
 			}
 
 			/* 200ms => 5 channels per second */
@@ -1768,17 +1794,8 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 			error = 1;
 
-			if (acx_enable_txchan(sc, chan) != 0) {
-				printf("%s: enable TX on channel %d failed\n",
-				    ifp->if_xname, chan);
+			if (acx_set_channel(sc, chan) != 0)
 				goto back;
-			}
-
-			if (acx_enable_rxchan(sc, chan) != 0) {
-				printf("%s: enable RX on channel %d failed\n",
-				    ifp->if_xname, chan);
-				goto back;
-			}
 
 			if (acx_set_beacon_tmplt(sc, ni) != 0) {
 				printf("%s: set beacon template failed\n",
@@ -2314,6 +2331,7 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_probe_req req;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rateset *rs;
 	uint8_t *frm;
 	int len;
 
@@ -2329,34 +2347,47 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 
 	frm = req.data.u_data.var;
 	frm = ieee80211_add_ssid(frm, ssid, ssid_len);
-	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
+	rs = &ic->ic_sup_rates[sc->chip_phymode];
+	frm = ieee80211_add_rates(frm, rs);
+	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
+		frm = ieee80211_add_xrates(frm, rs);
 	len = frm - req.data.u_data.var;
 
 	return (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_REQ, &req,
 	    ACX_TMPLT_PROBE_REQ_SIZ(len)));
 }
 
-<<<<<<< HEAD
-=======
 #ifndef IEEE80211_STA_ONLY
 struct mbuf *ieee80211_get_probe_resp(struct ieee80211com *,
     struct ieee80211_node *);
 
->>>>>>> origin/master
 int
 acx_set_probe_resp_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_probe_resp resp;
+	struct ieee80211_frame *wh;
 	struct mbuf *m;
 	int len;
 
 	bzero(&resp, sizeof(resp));
 
-	m = ieee80211_beacon_alloc(ic, ni);
+	m = ieee80211_get_probe_resp(ic, ni);
 	if (m == NULL)
 		return (1);
+	M_PREPEND(m, sizeof(struct ieee80211_frame), M_DONTWAIT);
+	if (m == NULL)
+		return (1);
+	wh = mtod(m, struct ieee80211_frame *);
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
+	    IEEE80211_FC0_SUBTYPE_PROBE_RESP;
+	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	*(u_int16_t *)&wh->i_dur[0] = 0;
+	IEEE80211_ADDR_COPY(wh->i_addr1, ni->ni_macaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
+	*(u_int16_t *)wh->i_seq = 0;
+
 	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&resp.data);
 	len = m->m_pkthdr.len + sizeof(resp.size);
 	m_freem(m); 
@@ -2468,7 +2499,7 @@ acx_join_bss(struct acx_softc *sc, uint8_t mode, struct ieee80211_node *node)
 		dtim_intvl = 10;
 	sc->chip_set_bss_join_param(sc, bj->chip_spec, dtim_intvl);
 
-	bj->ndata_txrate = ACX_NDATA_TXRATE_2;
+	bj->ndata_txrate = ACX_NDATA_TXRATE_1;
 	bj->ndata_txopt = 0;
 	bj->mode = mode;
 	bj->channel = ieee80211_chan2ieee(&sc->sc_ic, node->ni_chan);
@@ -2482,17 +2513,23 @@ acx_join_bss(struct acx_softc *sc, uint8_t mode, struct ieee80211_node *node)
 }
 
 int
-acx_enable_txchan(struct acx_softc *sc, uint8_t chan)
+acx_set_channel(struct acx_softc *sc, uint8_t chan)
 {
-	return (acx_exec_command(sc, ACXCMD_ENABLE_TXCHAN, &chan, sizeof(chan),
-	    NULL, 0));
-}
+	if (acx_exec_command(sc, ACXCMD_ENABLE_TXCHAN, &chan, sizeof(chan),
+	    NULL, 0) != 0) {
+		DPRINTF(("%s: setting TX channel %d failed\n",
+		    sc->sc_dev.dv_xname, chan));
+		return (ENXIO);
+	}
 
-int
-acx_enable_rxchan(struct acx_softc *sc, uint8_t chan)
-{
-	return (acx_exec_command(sc, ACXCMD_ENABLE_RXCHAN, &chan, sizeof(chan),
-	    NULL, 0));
+	if (acx_exec_command(sc, ACXCMD_ENABLE_RXCHAN, &chan, sizeof(chan),
+	    NULL, 0) != 0) {
+		DPRINTF(("%s: setting RX channel %d failed\n",
+		    sc->sc_dev.dv_xname, chan));
+		return (ENXIO);
+	}
+
+	return (0);
 }
 
 int

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_cnw.c,v 1.15 2005/01/27 17:04:55 millert Exp $	*/
-=======
 /*	$OpenBSD: if_cnw.c,v 1.21 2010/08/30 20:33:18 deraadt Exp $	*/
->>>>>>> origin/master
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hsq.c,v 1.3 2003/06/02 19:37:56 deraadt Exp $	*/
-=======
 /*	$OpenBSD: hsq.c,v 1.5 2008/11/22 10:33:33 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1999 Denis A. Doroshenko. All rights reserved.

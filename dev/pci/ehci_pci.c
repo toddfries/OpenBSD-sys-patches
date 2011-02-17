@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ehci_pci.c,v 1.9 2006/07/10 07:54:43 dlg Exp $ */
-=======
 /*	$OpenBSD: ehci_pci.c,v 1.22 2010/10/20 20:34:19 mk Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -37,6 +33,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/timeout.h>
 #include <sys/queue.h>
@@ -269,6 +266,7 @@ ehci_pci_detach(struct device *self, int flags)
 	return (0);
 }
 
+#if 0	/* not used */
 void
 ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 {
@@ -286,6 +284,7 @@ ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 		    legsup & ~EHCI_LEGSUP_OSOWNED);
 	}
 }
+#endif
 
 void
 ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
@@ -301,11 +300,11 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
 		if (EHCI_EECP_ID(eec) != EHCI_EC_LEGSUP)
 			continue;
 		legsup = eec;
-		pci_conf_write(sc->sc_pc, sc->sc_tag, eecp,
-		    legsup | EHCI_LEGSUP_OSOWNED);
 		if (legsup & EHCI_LEGSUP_BIOSOWNED) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag, eecp,
+			    legsup | EHCI_LEGSUP_OSOWNED);
 			DPRINTF(("%s: waiting for BIOS to give up control\n",
-			    USBDEVNAME(sc->sc.sc_bus.bdev)));
+			    sc->sc.sc_bus.bdev.dv_xname));
 			for (i = 0; i < 5000; i++) {
 				legsup = pci_conf_read(sc->sc_pc, sc->sc_tag,
 				    eecp);
@@ -315,7 +314,7 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
 			}
 			if (silent == 00 && (legsup & EHCI_LEGSUP_BIOSOWNED))
 				printf("%s: timed out waiting for BIOS\n",
-				    USBDEVNAME(sc->sc.sc_bus.bdev));
+				    sc->sc.sc_bus.bdev.dv_xname);
 		}
 	}
 }
@@ -326,7 +325,10 @@ ehci_pci_shutdown(void *v)
 	struct ehci_pci_softc *sc = (struct ehci_pci_softc *)v;
 
 	ehci_shutdown(&sc->sc);
+#if 0
+	/* best not to do this anymore; BIOS SMM spins? */
 	ehci_pci_givecontroller(sc);
+#endif
 }
 
 int

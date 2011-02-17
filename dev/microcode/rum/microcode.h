@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: microcode.h,v 1.5 2010/02/07 09:42:15 damien Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2005-2010, Ralink Technology, Corp.

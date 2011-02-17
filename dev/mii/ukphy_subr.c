@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ukphy_subr.c,v 1.6 2006/12/23 12:34:50 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ukphy_subr.c,v 1.10 2008/10/24 16:50:01 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ukphy_subr.c,v 1.2 1998/11/05 04:08:02 thorpej Exp $	*/
 
 /*-

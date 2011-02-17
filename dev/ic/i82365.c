@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82365.c,v 1.24 2005/09/10 20:32:40 grange Exp $	*/
-=======
 /*	$OpenBSD: i82365.c,v 1.29 2010/09/06 19:20:21 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: i82365.c,v 1.10 1998/06/09 07:36:55 thorpej Exp $	*/
 
 /*
@@ -721,7 +717,7 @@ pcic_intr_socket(h)
 		if ((statreg & PCIC_IF_STATUS_CARDDETECT_MASK) ==
 		    PCIC_IF_STATUS_CARDDETECT_PRESENT) {
 			if (h->laststate != PCIC_LASTSTATE_PRESENT) {
-				DPRINTF(("%s: enqueing INSERTION event\n",
+				DPRINTF(("%s: enqueuing INSERTION event\n",
 				    h->ph_parent->dv_xname));
 				pcic_queue_event(h, PCIC_EVENT_INSERTION);
 			}
@@ -733,7 +729,7 @@ pcic_intr_socket(h)
 				    h->ph_parent->dv_xname));
 				pcic_deactivate_card(h);
 
-				DPRINTF(("%s: enqueing REMOVAL event\n",
+				DPRINTF(("%s: enqueuing REMOVAL event\n",
 				    h->ph_parent->dv_xname));
 				pcic_queue_event(h, PCIC_EVENT_REMOVAL);
 			}
@@ -841,14 +837,8 @@ pcic_power(why, arg)
 	struct pcic_softc *sc = (struct pcic_softc *)h->ph_parent;
 	struct pcic_event *pe;
 
-<<<<<<< HEAD
-	if (why != PWR_RESUME) {
-		if (timeout_pending(&sc->poll_timeout))
-			timeout_del(&sc->poll_timeout);
-=======
 	if (why != DVACT_RESUME) {
 		timeout_del(&sc->poll_timeout);
->>>>>>> origin/master
 	}
 	else {
 		pcic_intr_socket(h);

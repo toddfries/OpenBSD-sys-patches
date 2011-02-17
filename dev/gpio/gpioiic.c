@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gpioiic.c,v 1.5 2006/01/18 21:47:08 grange Exp $	*/
-=======
 /*	$OpenBSD: gpioiic.c,v 1.8 2008/11/24 12:12:12 mbalmer Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -28,6 +24,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/gpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/gpio/gpiovar.h>
 
@@ -49,7 +46,7 @@ struct gpioiic_softc {
 	int			__map[GPIOIIC_NPINS];
 
 	struct i2c_controller	sc_i2c_tag;
-	struct lock		sc_i2c_lock;
+	struct rwlock		sc_i2c_lock;
 
 	int			sc_sda;
 	int			sc_scl;
@@ -173,7 +170,7 @@ gpioiic_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 	/* Attach I2C bus */
-	lockinit(&sc->sc_i2c_lock, PRIBIO | PCATCH, "iiclk", 0, 0);
+	rw_init(&sc->sc_i2c_lock, "iiclk");
 	sc->sc_i2c_tag.ic_cookie = sc;
 	sc->sc_i2c_tag.ic_acquire_bus = gpioiic_i2c_acquire_bus;
 	sc->sc_i2c_tag.ic_release_bus = gpioiic_i2c_release_bus;
@@ -208,7 +205,7 @@ gpioiic_i2c_acquire_bus(void *cookie, int flags)
 	if (cold || (flags & I2C_F_POLL))
 		return (0);
 
-	return (lockmgr(&sc->sc_i2c_lock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&sc->sc_i2c_lock, RW_WRITE | RW_INTR));
 }
 
 void
@@ -219,7 +216,7 @@ gpioiic_i2c_release_bus(void *cookie, int flags)
 	if (cold || (flags & I2C_F_POLL))
 		return;
 
-	lockmgr(&sc->sc_i2c_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_i2c_lock);
 }
 
 int

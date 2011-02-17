@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ioprbs.c,v 1.10 2005/12/04 04:05:25 krw Exp $	*/
-=======
 /*	$OpenBSD: ioprbs.c,v 1.25 2010/11/20 20:11:19 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -406,14 +402,9 @@ ioprbs_scsi_cmd(xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
-<<<<<<< HEAD
-	ioprbs_lock_t lock;
-	int retval = SUCCESSFULLY_QUEUED;
-=======
 	int s;
->>>>>>> origin/master
 
-	lock = IOPRBS_LOCK(sc);
+	s = splbio();
 
 	/* Don't double enqueue if we came from ioprbs_chain. */
 	if (xs != LIST_FIRST(&sc->sc_queue))
@@ -501,15 +492,10 @@ ioprbs_scsi_cmd(xs)
 			 * We are out of commands, try again in a little while.
 			 */
 			if (ccb == NULL) {
-<<<<<<< HEAD
-				IOPRBS_UNLOCK(sc, lock);
-				return (TRY_AGAIN_LATER);
-=======
 				xs->error = XS_NO_CCB;
 				scsi_done(xs);
 				splx(s);
 				return;
->>>>>>> origin/master
 			}
 
 			ccb->ic_blockno = blockno;
@@ -523,7 +509,7 @@ ioprbs_scsi_cmd(xs)
 			if (xs->flags & SCSI_POLL) {
 #if 0
 				if (!ioprbs_wait(sc, ccb, ccb->ic_timeout)) {
-					IOPRBS_UNLOCK(sc, lock);
+					splx(s);
 					printf("%s: command timed out\n",
 					    sc->sc_dv.dv_xname);
 					xs->error = XS_NO_CCB;
@@ -545,19 +531,7 @@ ioprbs_scsi_cmd(xs)
 		}
 	}
 
-<<<<<<< HEAD
-	IOPRBS_UNLOCK(sc, lock);
-	return (retval);
-}
-
-void
-ioprbsminphys(bp)
-	struct buf *bp;
-{
-	minphys(bp);
-=======
 	splx(s);
->>>>>>> origin/master
 }
 
 void
@@ -789,11 +763,11 @@ ioprbs_get_ccb(sc, flags)
 	int flags;
 {
 	struct ioprbs_ccb *ccb;
-	ioprbs_lock_t lock;
+	int s;
 
 	DPRINTF(("ioprbs_get_ccb(%p, 0x%x) ", sc, flags));
 
-	lock = IOPRBS_LOCK(sc);
+	s = splbio();
 
 	for (;;) {
 		ccb = TAILQ_FIRST(&sc->sc_free_ccb);
@@ -810,7 +784,7 @@ ioprbs_get_ccb(sc, flags)
 	ccb->ic_flags = 0;
 
  bail_out:
-	IOPRBS_UNLOCK(sc, lock);
+	splx(s);
 	return (ccb);
 }
 
@@ -819,11 +793,11 @@ ioprbs_free_ccb(sc, ccb)
 	struct ioprbs_softc *sc;
 	struct ioprbs_ccb *ccb;
 {
-	ioprbs_lock_t lock;
+	int s;
 
 	DPRINTF(("ioprbs_free_ccb(%p, %p) ", sc, ccb));
 
-	lock = IOPRBS_LOCK(sc);
+	s = splbio();
 
 	TAILQ_INSERT_HEAD(&sc->sc_free_ccb, ccb, ic_chain);
 
@@ -831,7 +805,7 @@ ioprbs_free_ccb(sc, ccb)
 	if (TAILQ_NEXT(ccb, ic_chain) == NULL)
 		wakeup(&sc->sc_free_ccb);
 
-	IOPRBS_UNLOCK(sc, lock);
+	splx(s);
 }
 
 void
@@ -972,7 +946,7 @@ ioprbs_timeout(arg)
 	struct ioprbs_ccb *ccb = arg;
 	struct scsi_link *link = ccb->ic_xs->sc_link;
 	struct ioprbs_softc *sc = link->adapter_softc;
-	ioprbs_lock_t lock;
+	int s;
 
 	sc_print_addr(link);
 	printf("timed out\n");
@@ -980,9 +954,9 @@ ioprbs_timeout(arg)
 	/* XXX Test for multiple timeouts */
 
 	ccb->ic_xs->error = XS_TIMEOUT;
-	lock = IOPRBS_LOCK(sc);
+	s = splbio();
 	ioprbs_enqueue_ccb(sc, ccb);
-	IOPRBS_UNLOCK(sc, lock);
+	splx(s);
 }
 
 void
@@ -992,10 +966,10 @@ ioprbs_watchdog(arg)
 	struct ioprbs_ccb *ccb = arg;
 	struct scsi_link *link = ccb->ic_xs->sc_link;
 	struct ioprbs_softc *sc = link->adapter_softc;
-	ioprbs_lock_t lock;
+	int s;
 
-	lock = IOPRBS_LOCK(sc);
+	s = splbio();
 	ccb->ic_flags &= ~IOPRBS_ICF_WATCHDOG;
 	ioprbs_start_ccbs(sc);
-	IOPRBS_UNLOCK(sc, lock);
+	splx(s);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: czreg.h,v 1.1 2001/06/21 13:21:50 nate Exp $	*/
+/*	$OpenBSD: czreg.h,v 1.2 2003/11/16 20:30:06 avsm Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uhcivar.h,v 1.14 2002/07/25 02:18:10 nate Exp $ */
-=======
 /*	$OpenBSD: uhcivar.h,v 1.24 2010/12/14 16:13:16 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: uhcivar.h,v 1.36 2002/12/31 00:39:11 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhcivar.h,v 1.14 1999/11/17 22:33:42 n_hibma Exp $	*/
 
@@ -159,13 +155,7 @@ typedef struct uhci_softc {
 	u_int8_t sc_saved_sof;
 	u_int16_t sc_saved_frnum;
 
-<<<<<<< HEAD
-#ifdef USB_USE_SOFTINTR
 	char sc_softwake;
-#endif /* USB_USE_SOFTINTR */
-=======
-	char sc_softwake;
->>>>>>> origin/master
 
 	char sc_isreset;
 	char sc_suspend;
@@ -175,25 +165,18 @@ typedef struct uhci_softc {
 	/* Info for the root hub interrupt "pipe". */
 	int sc_ival;			/* time between root hub intrs */
 	usbd_xfer_handle sc_intr_xfer;	/* root hub interrupt transfer */
-	usb_callout_t sc_poll_handle;
+	struct timeout sc_poll_handle;
 
 	char sc_vendor[32];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
-	device_ptr_t sc_child;		/* /dev/usb# device */
+	struct device *sc_child;		/* /dev/usb# device */
 } uhci_softc_t;
 
 usbd_status	uhci_init(uhci_softc_t *);
 usbd_status	uhci_run(uhci_softc_t *, int run);
 int		uhci_intr(void *);
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 int		uhci_detach(uhci_softc_t *, int);
-<<<<<<< HEAD
-int		uhci_activate(device_ptr_t, enum devact);
-#endif
-
-=======
 int		uhci_activate(struct device *, int);
->>>>>>> origin/master

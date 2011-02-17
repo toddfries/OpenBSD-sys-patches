@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ehci_cardbus.c,v 1.7 2006/07/12 06:26:34 jolan Exp $ */
-=======
 /*	$OpenBSD: ehci_cardbus.c,v 1.15 2010/03/27 21:40:13 jsg Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
 
 /*
@@ -38,6 +34,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/proc.h>
 
@@ -81,7 +78,6 @@ struct cfattach ehci_cardbus_ca = {
 
 #define CARDBUS_CBMEM PCI_CBMEM
 #define cardbus_findvendor pci_findvendor
-#define cardbus_devinfo pci_devinfo
 
 int
 ehci_cardbus_match(struct device *parent, void *match, void *aux)
@@ -105,27 +101,15 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-<<<<<<< HEAD
-	cardbusreg_t csr;
-	char devinfo[256];
-=======
 	pcireg_t csr;
->>>>>>> origin/master
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
 
-	cardbus_devinfo(ca->ca_id, ca->ca_class, 0, devinfo, sizeof(devinfo));
-	printf(" %s", devinfo);
-
 	/* Map I/O registers */
 	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
-<<<<<<< HEAD
-		printf("%s: can't map mem space\n", devname);
-=======
 		printf(": can't map mem space\n");
->>>>>>> origin/master
 		return;
 	}
 

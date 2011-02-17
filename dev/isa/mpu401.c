@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: mpu401.c,v 1.9 2004/01/09 21:32:24 brad Exp $	*/
-=======
 /*	$OpenBSD: mpu401.c,v 1.11 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: mpu401.c,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
 
 /*

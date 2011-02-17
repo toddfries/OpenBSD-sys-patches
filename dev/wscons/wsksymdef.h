@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wsksymdef.h,v 1.30 2006/05/29 20:23:13 miod Exp $	*/
-=======
 /*	$OpenBSD: wsksymdef.h,v 1.33 2010/07/31 16:12:37 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
 
 /*-

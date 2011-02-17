@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iopspvar.h,v 1.1 2001/06/26 02:50:14 niklas Exp $	*/
-=======
 /*	$OpenBSD: iopspvar.h,v 1.3 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-

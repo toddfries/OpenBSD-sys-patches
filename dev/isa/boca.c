@@ -1,4 +1,4 @@
-/*	$OpenBSD: boca.c,v 1.15 1997/07/07 16:38:23 niklas Exp $ */
+/*	$OpenBSD: boca.c,v 1.16 2002/03/14 01:26:56 millert Exp $ */
 /*	$NetBSD: boca.c,v 1.15 1996/05/12 23:51:50 mycroft Exp $	*/
 
 /*

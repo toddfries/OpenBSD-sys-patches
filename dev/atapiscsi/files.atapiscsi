@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.atapiscsi,v 1.5 2005/03/08 20:00:24 tdeval Exp $
-=======
 #	$OpenBSD: files.atapiscsi,v 1.7 2009/06/20 14:35:51 miod Exp $
->>>>>>> origin/master
 # ATAPI transport for SCSI protocol
 #
 

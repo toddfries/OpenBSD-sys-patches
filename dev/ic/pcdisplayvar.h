@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: pcdisplayvar.h,v 1.8 2006/11/29 19:11:15 miod Exp $ */
-=======
 /* $OpenBSD: pcdisplayvar.h,v 1.11 2010/08/28 12:48:14 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: pcdisplayvar.h,v 1.8 2000/01/25 02:44:03 ad Exp $ */
 
 /*

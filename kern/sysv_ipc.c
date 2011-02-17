@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sysv_ipc.c,v 1.4 2004/07/15 11:24:46 millert Exp $	*/
-=======
 /*	$OpenBSD: sysv_ipc.c,v 1.6 2008/06/09 23:38:37 millert Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sysv_ipc.c,v 1.10 1995/06/03 05:53:28 mycroft Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: radioio.h,v 1.3 2005/12/05 15:16:26 robert Exp $ */
+/* $OpenBSD: radioio.h,v 1.4 2006/02/05 23:52:57 jakemsr Exp $ */
 /* $RuOBSD: radioio.h,v 1.4 2001/10/18 16:51:36 pva Exp $ */
 
 /*

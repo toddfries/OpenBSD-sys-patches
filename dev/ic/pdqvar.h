@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pdqvar.h,v 1.17 2005/11/23 11:30:14 mickey Exp $	*/
-=======
 /*	$OpenBSD: pdqvar.h,v 1.19 2010/09/20 07:40:41 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pdqvar.h,v 1.11 1996/10/25 21:33:37 cgd Exp $	*/
 
 /*-

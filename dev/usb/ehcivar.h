@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ehcivar.h,v 1.9 2005/04/11 08:09:32 dlg Exp $ */
-=======
 /*	$OpenBSD: ehcivar.h,v 1.21 2010/12/14 16:13:16 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -163,20 +159,11 @@ typedef struct ehci_softc {
 
 	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
-	struct lock sc_doorbell_lock;
+	struct rwlock sc_doorbell_lock;
 
-<<<<<<< HEAD
-	usb_callout_t sc_tmo_pcd;
-	usb_callout_t sc_tmo_intrlist;
-
-	device_ptr_t sc_child;		/* /dev/usb# device */
-
-	char sc_dying;
-=======
 	struct timeout sc_tmo_intrlist;
 
 	struct device *sc_child;		/* /dev/usb# device */
->>>>>>> origin/master
 } ehci_softc_t;
 
 #define EREAD1(sc, a) bus_space_read_1((sc)->iot, (sc)->ioh, (a))
@@ -195,9 +182,5 @@ typedef struct ehci_softc {
 usbd_status	ehci_init(ehci_softc_t *);
 int		ehci_intr(void *);
 int		ehci_detach(ehci_softc_t *, int);
-<<<<<<< HEAD
-int		ehci_activate(device_ptr_t, enum devact);
-=======
 int		ehci_activate(struct device *, int);
->>>>>>> origin/master
 void		ehci_shutdown(void *);

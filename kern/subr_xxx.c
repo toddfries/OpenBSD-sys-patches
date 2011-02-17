@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: subr_xxx.c,v 1.8 2003/06/02 23:28:06 millert Exp $	*/
-=======
 /*	$OpenBSD: subr_xxx.c,v 1.12 2010/09/28 20:27:56 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: subr_xxx.c,v 1.10 1996/02/04 02:16:51 christos Exp $	*/
 
 /*

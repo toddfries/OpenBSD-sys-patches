@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cacreg.h,v 1.3 2003/03/06 22:31:21 mickey Exp $	*/
-=======
 /*	$OpenBSD: cacreg.h,v 1.6 2008/10/29 21:17:15 brad Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cacreg.h,v 1.5 2001/01/10 16:48:04 ad Exp $	*/
 
 /*-

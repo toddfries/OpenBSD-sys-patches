@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: owtemp.c,v 1.6 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: owtemp.c,v 1.15 2010/07/08 07:19:54 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006, 2009 Alexander Yurchenko <grange@openbsd.org>
@@ -58,6 +54,7 @@ struct owtemp_softc {
 
 	struct ksensor		sc_sensor;
 	struct ksensordev	sc_sensordev;
+	struct sensor_task	*sc_sensortask;
 	struct rwlock		sc_lock;
 };
 
@@ -108,7 +105,8 @@ owtemp_attach(struct device *parent, struct device *self, void *aux)
 	snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc), "sn %012llx",
 	    ONEWIRE_ROM_SN(oa->oa_rom));
 
-	if (sensor_task_register(sc, owtemp_update, 5)) {
+	sc->sc_sensortask = sensor_task_register(sc, owtemp_update, 5);
+	if (sc->sc_sensortask == NULL) {
 		printf(": unable to register update task\n");
 		return;
 	}
@@ -126,7 +124,8 @@ owtemp_detach(struct device *self, int flags)
 
 	rw_enter_write(&sc->sc_lock);
 	sensordev_deinstall(&sc->sc_sensordev);
-	sensor_task_unregister(sc);
+	if (sc->sc_sensortask != NULL)
+		sensor_task_unregister(sc->sc_sensortask);
 	rw_exit_write(&sc->sc_lock);
 
 	return (0);
@@ -143,7 +142,7 @@ owtemp_update(void *arg)
 {
 	struct owtemp_softc *sc = arg;
 	u_int8_t data[9];
-	u_int16_t temp;
+	int16_t temp;
 	int count_perc, count_remain, val;
 
 	rw_enter_write(&sc->sc_lock);

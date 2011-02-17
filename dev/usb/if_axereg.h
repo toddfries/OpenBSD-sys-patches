@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_axereg.h,v 1.13 2007/01/18 04:36:57 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_axereg.h,v 1.20 2010/12/06 04:41:39 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003
@@ -209,14 +205,8 @@ struct axe_sframe_hdr {
 } __packed;
 
 struct axe_softc {
-	USBBASEDEVICE		axe_dev;
-#if defined(__FreeBSD__)
-#define GET_MII(sc) (device_get_softc((sc)->axe_mii))
-#elif defined(__NetBSD__)
+	struct device		axe_dev;
 #define GET_MII(sc) (&(sc)->axe_mii)
-#elif defined(__OpenBSD__)
-#define GET_MII(sc) (&(sc)->axe_mii)
-#endif
 	struct arpcom		arpcom;
 #define GET_IFP(sc) (&(sc)->arpcom.ac_if)
 	struct mii_data		axe_mii;
@@ -233,14 +223,14 @@ struct axe_softc {
 	int			axe_unit;
 	int			axe_if_flags;
 	struct axe_cdata	axe_cdata;
-	usb_callout_t		axe_stat_ch;
+	struct timeout		axe_stat_ch;
 
 	int			axe_refcnt;
 
 	struct usb_task		axe_tick_task;
 	struct usb_task		axe_stop_task;
 
-	struct lock		axe_mii_lock;
+	struct rwlock		axe_mii_lock;
 
 	int			axe_link;
 	unsigned char		axe_ipgs[3];

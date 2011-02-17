@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: unistd.h,v 1.12 2004/05/07 18:39:19 millert Exp $	*/
-=======
 /*	$OpenBSD: unistd.h,v 1.18 2010/10/28 02:05:59 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: unistd.h,v 1.10 1994/06/29 06:46:06 cgd Exp $	*/
 
 /*
@@ -145,14 +141,11 @@
 #define _SC_THREAD_PROCESS_SHARED
 #endif
 
-<<<<<<< HEAD
-=======
 #define	_SC_PHYS_PAGES		500
 #define	_SC_AVPHYS_PAGES	501
 #define	_SC_NPROCESSORS_CONF	502
 #define	_SC_NPROCESSORS_ONLN	503
 
->>>>>>> origin/master
 /* configurable system strings */
 #define	_CS_PATH		 1
 

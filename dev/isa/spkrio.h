@@ -1,4 +1,4 @@
-/*	$OpenBSD: spkrio.h,v 1.1 1998/04/15 20:26:19 drochner Exp $	*/
+/*	$OpenBSD: spkrio.h,v 1.1 1999/01/02 00:02:43 niklas Exp $	*/
 /*	$NetBSD: spkrio.h,v 1.1 1998/04/15 20:26:19 drochner Exp $	*/
 
 /*

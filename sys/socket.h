@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: socket.h,v 1.52 2005/05/27 04:55:28 mcbride Exp $	*/
-=======
 /*	$OpenBSD: socket.h,v 1.71 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -74,11 +70,8 @@
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
 #define SO_JUMBO	0x0400		/* try to use jumbograms */
-<<<<<<< HEAD
-=======
 #define SO_TIMESTAMP	0x0800		/* timestamp received dgram traffic */
 #define SO_BINDANY	0x1000		/* allow bind to any address */
->>>>>>> origin/master
 
 /*
  * Additional options, not kept in so_options.
@@ -157,14 +150,9 @@ struct	splice {
 #define pseudo_AF_HDRCMPLT 31		/* Used by BPF to not rewrite headers
 					   in interface output routine */
 #define	AF_BLUETOOTH	32		/* Bluetooth */
-<<<<<<< HEAD
-
-#define	AF_MAX		33
-=======
 #define AF_MPLS         33              /* MPLS */
 #define pseudo_AF_PFLOW 34		/* pflow */
 #define AF_MAX          35
->>>>>>> origin/master
 
 /*
  * Structure used by kernel to store most
@@ -186,7 +174,7 @@ struct sockaddr {
  * For maximum portability, userland programmer would need to
  * (1) make the code never touch ss_len portion (cast it into sockaddr and
  * touch sa_len), or (2) add "-Dss_len=__ss_len" into CFLAGS to unify all
- * occurences (including header file) to __ss_len.
+ * occurrences (including header file) to __ss_len.
  */
 struct sockaddr_storage {
 	u_int8_t	ss_len;		/* total length */
@@ -243,11 +231,8 @@ struct sockproto {
 #define PF_KEY		AF_KEY
 #define PF_BPF		pseudo_AF_HDRCMPLT
 #define	PF_BLUETOOTH	AF_BLUETOOTH
-<<<<<<< HEAD
-=======
 #define PF_MPLS		AF_MPLS
 #define PF_PFLOW	pseudo_AF_PFLOW
->>>>>>> origin/master
 #define	PF_MAX		AF_MAX
 
 /*
@@ -327,26 +312,20 @@ struct sockpeercred {
 	{ "sip", CTLTYPE_NODE }, \
 	{ "key", CTLTYPE_NODE }, \
 	{ "bpf", CTLTYPE_NODE }, \
-<<<<<<< HEAD
-=======
 	{ "bluetooth", CTLTYPE_NODE }, \
 	{ "mpls", CTLTYPE_NODE }, \
 	{ "pflow", CTLTYPE_NODE }, \
->>>>>>> origin/master
 }
 
 /*
  * PF_ROUTE - Routing table
  *
- * Three additional levels are defined:
+ * Four additional levels are defined:
  *	Fourth: address family, 0 is wildcard
  *	Fifth: type of info, defined below
  *	Sixth: flag(s) to mask with for NET_RT_FLAGS
-<<<<<<< HEAD
-=======
  *	Seventh: routing table to use (facultative, defaults to 0)
  *		 NET_RT_TABLE has the table id as sixth element.
->>>>>>> origin/master
  */
 #define NET_RT_DUMP	1		/* dump; may limit to a.f. */
 #define NET_RT_FLAGS	2		/* by flags, e.g. RESOLVING */
@@ -480,6 +459,7 @@ struct cmsghdr {
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
 #define SCM_CREDS	0x02		/* credentials (struct sockcred) */
+#define	SCM_TIMESTAMP	0x04		/* timestamp (struct timeval) */
 
 /*
  * 4.3 compat sockaddr, move to compat file later

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: twereg.h,v 1.7 2003/06/02 19:24:22 mickey Exp $	*/
-=======
 /*	$OpenBSD: twereg.h,v 1.9 2008/09/01 17:30:56 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

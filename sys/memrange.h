@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: memrange.h,v 1.3 2002/03/14 01:27:14 millert Exp $ */
-=======
 /* $OpenBSD: memrange.h,v 1.5 2009/11/29 17:11:30 kettenis Exp $ */
->>>>>>> origin/master
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.

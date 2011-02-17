@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: dsdt.h,v 1.27 2007/02/22 06:22:31 jordan Exp $ */
-=======
 /* $OpenBSD: dsdt.h,v 1.57 2011/01/08 05:05:09 jordan Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -23,17 +19,6 @@
 #define __DEV_ACPI_DSDT_H__
 
 struct aml_scope {
-<<<<<<< HEAD
-	struct acpi_softc  *sc;
-	uint8_t		   *pos;
-	uint8_t            *end;
-	struct aml_node    *node;
-	struct aml_vallist *tmpvals;
-	struct aml_scope   *parent;
-	struct aml_value   *locals;
-	struct aml_value   *args;
-	int                 nargs;
-=======
 	struct acpi_softc	*sc;
 	uint8_t			*pos;
 	uint8_t			*end;
@@ -46,7 +31,6 @@ struct aml_scope {
 	struct aml_value	*retv;
 	uint8_t			*start;
 	int			type;
->>>>>>> origin/master
 };
 
 
@@ -54,24 +38,13 @@ struct aml_opcode {
 	u_int32_t		opcode;
 	const char		*mnem;
 	const char		*args;
-	struct aml_value	*(*handler)(struct aml_scope *, int,
-				    struct aml_value*);
 };
 
 const char		*aml_eisaid(u_int32_t);
-<<<<<<< HEAD
-const char              *aml_args(int);
-const char		*aml_mnem(int, uint8_t *);
-int64_t			aml_val2int(struct aml_value *);
-struct aml_node		*aml_searchname(struct aml_node *, const void *);
-struct aml_node         *aml_createname(struct aml_node *, const void *,
-			    struct aml_value *);
-=======
 const char		*aml_mnem(int, uint8_t *);
 int64_t			aml_val2int(struct aml_value *);
 struct aml_node		*aml_searchname(struct aml_node *, const void *);
 struct aml_node		*aml_searchrel(struct aml_node *, const void *);
->>>>>>> origin/master
 
 struct aml_value	*aml_getstack(struct aml_scope *, int);
 struct aml_value	*aml_allocvalue(int, int64_t, const void *);
@@ -82,7 +55,7 @@ void			aml_walkroot(void);
 void			aml_walktree(struct aml_node *);
 
 int			aml_find_node(struct aml_node *, const char *,
-			    void (*)(struct aml_node *, void *), void *);
+			    int (*)(struct aml_node *, void *), void *);
 int			acpi_parse_aml(struct acpi_softc *, u_int8_t *,
 			    u_int32_t);
 void			aml_register_notify(struct aml_node *, const char *,
@@ -101,24 +74,6 @@ void			aml_create_defaultobjects(void);
 
 const char		*aml_nodename(struct aml_node *);
 
-<<<<<<< HEAD
-#define SR_IRQ                  0x04
-#define SR_DMA                  0x05
-#define SR_STARTDEP             0x06
-#define SR_ENDDEP               0x07
-#define SR_IOPORT               0x08
-#define SR_FIXEDPORT            0x09
-#define SR_ENDTAG               0x0F
-
-#define LR_24BIT                0x81
-#define LR_GENREGISTER          0x82
-#define LR_32BIT                0x85
-#define LR_32BITFIXED           0x86
-#define LR_DWORD                0x87
-#define LR_WORD                 0x88
-#define LR_EXTIRQ               0x89
-#define LR_QWORD                0x8A
-=======
 #define SRT_IRQ2		0x22
 #define SRT_IRQ3		0x23
 #define SRT_DMA			0x2A
@@ -145,7 +100,6 @@ const char		*aml_nodename(struct aml_node *);
 #define LR_WORD			0x88
 #define LR_EXTIRQ		0x89
 #define LR_QWORD		0x8A
->>>>>>> origin/master
 
 #define __amlflagbit(v,s,l)
 union acpi_resource {
@@ -216,7 +170,7 @@ union acpi_resource {
 		uint8_t  irq_count;
 		uint32_t irq[1];
 	} __packed lr_extirq;
-  	struct {
+	struct {
 		uint8_t		typecode;
 		uint16_t	length;
 		uint8_t		type;
@@ -230,7 +184,7 @@ union acpi_resource {
 		uint8_t		src_index;
 		char		src[1];
 	} __packed lr_word;
-  	struct {
+	struct {
 		uint8_t		typecode;
 		uint16_t	length;
 		uint8_t		type;
@@ -244,7 +198,7 @@ union acpi_resource {
 		uint8_t		src_index;
 		char		src[1];
 	} __packed lr_dword;
-  	struct {
+	struct {
 		uint8_t		typecode;
 		uint16_t	length;
 		uint8_t		type;
@@ -258,7 +212,7 @@ union acpi_resource {
 		uint8_t		src_index;
 		char		src[1];
 	} __packed lr_qword;
-	uint8_t          pad[64];
+	uint8_t		pad[64];
 } __packed;
 
 #define AML_CRSTYPE(x)	((x)->hdr.typecode & 0x80 ? \
@@ -289,8 +243,6 @@ void			aml_hashopcodes(void);
 void			aml_foreachpkg(struct aml_value *, int,
 			    void (*fn)(struct aml_value *, void *), void *);
 
-<<<<<<< HEAD
-=======
 const char		*aml_val_to_string(const struct aml_value *);
 
 void			aml_disasm(struct aml_scope *scope, int lvl,
@@ -326,5 +278,4 @@ void			aml_notify_dev(const char *, int);
 
 void			acpi_freedevlist(struct acpi_devlist_head *);
 
->>>>>>> origin/master
 #endif /* __DEV_ACPI_DSDT_H__ */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usb_mem.h,v 1.10 2003/07/08 13:19:09 nate Exp $ */
-=======
 /*	$OpenBSD: usb_mem.h,v 1.13 2010/09/29 20:06:38 kettenis Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: usb_mem.h,v 1.20 2003/05/03 18:11:42 wiz Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_mem.h,v 1.9 1999/11/17 22:33:47 n_hibma Exp $	*/
 

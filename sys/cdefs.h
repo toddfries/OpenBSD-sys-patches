@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cdefs.h,v 1.23 2006/04/17 16:36:43 cloder Exp $	*/
-=======
 /*	$OpenBSD: cdefs.h,v 1.31 2010/10/01 04:51:49 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -77,7 +73,7 @@
 #define	__const		const		/* define reserved names to standard */
 #define	__signed	signed
 #define	__volatile	volatile
-#if defined(__cplusplus)
+#if defined(__cplusplus) || defined(__PCC__)
 #define	__inline	inline		/* convert to C++ keyword */
 #else
 #if !defined(__GNUC__) && !defined(lint)
@@ -340,7 +336,7 @@
 
 /*
  * _ANSI_SOURCE means to expose ANSI C89 interfaces only.
- * If the the user defines it in addition to one of the POSIX or XOPEN
+ * If the user defines it in addition to one of the POSIX or XOPEN
  * macros, assume the POSIX/XOPEN macro(s) should take precedence.
  */
 #if defined(_ANSI_SOURCE) && !defined(__POSIX_VISIBLE) && \

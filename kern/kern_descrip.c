@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_descrip.c,v 1.75 2006/11/14 18:00:27 jmc Exp $	*/
-=======
 /*	$OpenBSD: kern_descrip.c,v 1.85 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -827,8 +823,7 @@ restart:
 	 * the list of open files.
 	 */
 	nfiles++;
-	fp = pool_get(&file_pool, PR_WAITOK);
-	bzero(fp, sizeof(struct file));
+	fp = pool_get(&file_pool, PR_WAITOK|PR_ZERO);
 	fp->f_iflags = FIF_LARVAL;
 	if ((fq = p->p_fd->fd_ofiles[0]) != NULL) {
 		LIST_INSERT_AFTER(fq, fp, f_list);
@@ -1015,9 +1010,9 @@ fdfree(struct proc *p)
 	if (fdp->fd_rdir)
 		vrele(fdp->fd_rdir);
 	if (fdp->fd_knlist)
-		FREE(fdp->fd_knlist, M_TEMP);
+		free(fdp->fd_knlist, M_TEMP);
 	if (fdp->fd_knhash)
-		FREE(fdp->fd_knhash, M_TEMP);
+		free(fdp->fd_knhash, M_TEMP);
 	pool_put(&fdesc_pool, fdp);
 }
 

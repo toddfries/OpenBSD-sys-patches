@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt_isa.c,v 1.11 2000/07/21 17:41:03 mickey Exp $	*/
+/*	$OpenBSD: lpt_isa.c,v 1.12 2002/03/14 01:26:56 millert Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Charles Hannum.

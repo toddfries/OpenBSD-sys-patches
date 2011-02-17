@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: isapnpres.c,v 1.5 2002/03/14 01:26:56 millert Exp $	*/
-=======
 /*	$OpenBSD: isapnpres.c,v 1.7 2010/06/24 21:17:59 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: isapnpres.c,v 1.7.4.1 1997/11/20 07:46:13 mellon Exp $	*/
 
 /*

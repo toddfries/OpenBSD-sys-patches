@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82365_pci.c,v 1.8 2005/01/27 17:03:23 millert Exp $ */
-=======
 /*	$OpenBSD: i82365_pci.c,v 1.11 2010/09/07 16:21:44 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: i82365_pci.c,v 1.11 2000/02/24 03:42:44 itohy Exp $	*/
 
 /*

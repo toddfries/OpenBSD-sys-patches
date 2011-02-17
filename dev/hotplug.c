@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hotplug.c,v 1.7 2006/05/28 01:33:50 mk Exp $	*/
-=======
 /*	$OpenBSD: hotplug.c,v 1.11 2010/12/15 03:34:33 tedu Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

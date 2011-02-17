@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lock.h,v 1.17 2007/04/11 12:06:37 miod Exp $	*/
-=======
 /*	$OpenBSD: lock.h,v 1.21 2010/04/26 05:48:19 deraadt Exp $	*/
->>>>>>> origin/master
 
 /* 
  * Copyright (c) 1995

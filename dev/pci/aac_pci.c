@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aac_pci.c,v 1.18 2006/04/22 02:36:28 brad Exp $	*/
-=======
 /*	$OpenBSD: aac_pci.c,v 1.24 2009/04/06 15:18:45 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -126,15 +122,11 @@ struct aac_ident {
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI, PCI_VENDOR_DELL,
 	    PCI_PRODUCT_DELL_PERC_3DI, AAC_HWIF_I960RX },
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI, PCI_VENDOR_DELL,
-	    PCI_PRODUCT_DELL_PERC_3DI_2, AAC_HWIF_I960RX },
-	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI, PCI_VENDOR_DELL,
 	    PCI_PRODUCT_DELL_PERC_3DI_3, AAC_HWIF_I960RX },
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI, PCI_VENDOR_DELL,
 	    PCI_PRODUCT_DELL_PERC_3DI_SUB2, AAC_HWIF_I960RX },
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI, PCI_VENDOR_DELL,
 	    PCI_PRODUCT_DELL_PERC_3DI_SUB3, AAC_HWIF_I960RX },
-	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI_2, PCI_VENDOR_DELL,
-	    PCI_PRODUCT_DELL_PERC_3DI_2_SUB, AAC_HWIF_I960RX },
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI_3, PCI_VENDOR_DELL,
 	    PCI_PRODUCT_DELL_PERC_3DI_3_SUB, AAC_HWIF_I960RX },
 	{ PCI_VENDOR_DELL, PCI_PRODUCT_DELL_PERC_3DI_3, PCI_VENDOR_DELL,
@@ -247,6 +239,7 @@ aac_pci_attach(parent, self, aux)
 	struct aac_ident *m;
 	struct aac_sub_ident *subid;
 	u_int32_t subsysid;
+	pcireg_t memtype;
 
 	printf(": ");
 	subsysid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
@@ -265,8 +258,8 @@ aac_pci_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	if (pci_mapreg_map(pa, PCI_MAPREG_START,
-	    PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT, 0, &sc->aac_memt,
+	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, PCI_MAPREG_START);
+	if (pci_mapreg_map(pa, PCI_MAPREG_START, memtype, 0, &sc->aac_memt,
 	    &sc->aac_memh, &membase, &memsize, AAC_REGSIZE)) {
 		printf("can't find mem space\n");
 		goto bail_out;

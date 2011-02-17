@@ -1,4 +1,4 @@
-/*	$OpenBSD: opti.h,v 1.5 2002/03/14 01:26:56 millert Exp $	*/
+/*	$OpenBSD: opti.h,v 1.6 2003/06/02 19:24:22 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

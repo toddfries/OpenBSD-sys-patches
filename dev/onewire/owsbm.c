@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: owsbm.c,v 1.1 2007/02/28 21:54:43 grange Exp $	*/
-=======
 /*	$OpenBSD: owsbm.c,v 1.8 2010/07/08 07:19:54 jasper Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 Aaron Linville <aaron@linville.org>
@@ -73,6 +69,8 @@ struct owsbm_softc {
 	struct ksensor		sc_voltage_vad; /* General purpose, AD = 0 */
 	struct ksensor		sc_voltage_cr; /* Current Register */
 
+	struct sensor_task	*sc_sensortask;
+
 	struct rwlock		sc_lock;
 };
 
@@ -118,12 +116,8 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_temp.type = SENSOR_TEMP;
-<<<<<<< HEAD
-	strlcpy(sc->sc_temp.desc, "Temp", sizeof(sc->sc_temp.desc));
-=======
 	snprintf(sc->sc_temp.desc, sizeof(sc->sc_temp.desc), "sn %012llx",
 	    ONEWIRE_ROM_SN(oa->oa_rom));
->>>>>>> origin/master
 	sensor_attach(&sc->sc_sensordev, &sc->sc_temp);
 
 	/* Initialize voltage sensor */
@@ -141,14 +135,9 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_voltage_cr.desc, "CR", sizeof(sc->sc_voltage_cr.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_voltage_cr);
 
-<<<<<<< HEAD
-	if (sensor_task_register(sc, owsbm_update, 10)) {
-		printf(": unable to register owsbm update task\n");
-=======
 	sc->sc_sensortask = sensor_task_register(sc, owsbm_update, 10);
 	if (sc->sc_sensortask == NULL) {
 		printf(": unable to register update task\n");
->>>>>>> origin/master
 		return;
 	}
 
@@ -165,7 +154,8 @@ owsbm_detach(struct device *self, int flags)
 
 	rw_enter_write(&sc->sc_lock);
 	sensordev_deinstall(&sc->sc_sensordev);
-	sensor_task_unregister(sc);
+	if (sc->sc_sensortask != NULL)
+		sensor_task_unregister(sc->sc_sensortask);
 	rw_exit_write(&sc->sc_lock);
 
 	return (0);

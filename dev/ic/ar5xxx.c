@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ar5xxx.c,v 1.39 2007/03/12 01:04:52 reyk Exp $	*/
-=======
 /*	$OpenBSD: ar5xxx.c,v 1.55 2009/09/23 18:03:30 damien Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -185,13 +181,11 @@ ath_hal_attach(u_int16_t device, void *arg, bus_space_tag_t st,
 	}
 
 	if ((hal = malloc(sizeof(struct ath_hal),
-		 M_DEVBUF, M_NOWAIT)) == NULL) {
+		 M_DEVBUF, M_NOWAIT | M_ZERO)) == NULL) {
 		*status = ENOMEM;
 		AR5K_PRINT("out of memory\n");
 		return (NULL);
 	}
-
-	bzero(hal, sizeof(struct ath_hal));
 
 	hal->ah_sc = sc;
 	hal->ah_st = st;
@@ -367,18 +361,6 @@ ath_hal_computetxtime(struct ath_hal *hal, const HAL_RATE_TABLE *rates,
 	return (value);
 }
 
-u_int
-ath_hal_mhz2ieee(u_int mhz, u_int flags)
-{
-	return (ieee80211_mhz2ieee(mhz, flags));
-}
-
-u_int
-ath_hal_ieee2mhz(u_int ieee, u_int flags)
-{
-	return (ieee80211_ieee2mhz(ieee, flags));
-}
-
 HAL_BOOL
 ar5k_check_channel(struct ath_hal *hal, u_int16_t freq, u_int flags)
 {
@@ -407,7 +389,7 @@ ath_hal_init_channels(struct ath_hal *hal, HAL_CHANNEL *channels,
 	HAL_CHANNEL *all_channels;
 
 	if ((all_channels = malloc(sizeof(HAL_CHANNEL) * max_channels,
-	    M_TEMP, M_NOWAIT)) == NULL)
+	    M_TEMP, M_NOWAIT | M_ZERO)) == NULL)
 		return (AH_FALSE);
 
 	i = c = 0;
@@ -636,14 +618,22 @@ ar5k_get_regdomain(struct ath_hal *hal)
 u_int32_t
 ar5k_bitswap(u_int32_t val, u_int bits)
 {
-	u_int32_t retval = 0, bit, i;
+	if (bits == 8) {
+		val = ((val & 0xF0) >>  4) | ((val & 0x0F) <<  4);
+		val = ((val & 0xCC) >>  2) | ((val & 0x33) <<  2);
+		val = ((val & 0xAA) >>  1) | ((val & 0x55) <<  1);
 
-	for (i = 0; i < bits; i++) {
-		bit = (val >> i) & 1;
-		retval = (retval << 1) | bit;
+		return val;
+	} else {
+		u_int32_t retval = 0, bit, i;
+
+		for (i = 0; i < bits; i++) {
+			bit = (val >> i) & 1;
+			retval = (retval << 1) | bit;
+		}
+
+		return retval;
 	}
-
-	return (retval);
 }
 
 u_int
@@ -1222,7 +1212,7 @@ ar5k_ar5111_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 	 * Set the channel on the AR5111 radio
 	 */
 	data0 = data1 = 0;
-	ath_channel = ieee_channel = ath_hal_mhz2ieee(channel->c_channel,
+	ath_channel = ieee_channel = ieee80211_mhz2ieee(channel->c_channel,
 	    channel->c_channel_flags);
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {
@@ -1259,7 +1249,7 @@ ar5k_ar5112_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 	u_int16_t c;
 
 	data = data0 = data1 = data2 = 0;
-	c = channel->c_channel;
+	c = channel->c_channel + hal->ah_chanoff;
 
 	/*
 	 * Set the channel on the AR5112 or newer
@@ -1516,7 +1506,7 @@ ar5k_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	if (hal->ah_rf_banks == NULL) {
 		/* XXX do extra checks? */
 		if ((hal->ah_rf_banks = malloc(hal->ah_rf_banks_size,
-		    M_DEVBUF, M_NOWAIT)) == NULL) {
+		    M_DEVBUF, M_NOWAIT | M_ZERO)) == NULL) {
 			AR5K_PRINT("out of memory\n");
 			return (AH_FALSE);
 		}
@@ -1560,10 +1550,11 @@ ar5k_ar5111_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	}
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {
-		if (channel->c_channel_flags & IEEE80211_CHAN_B)
-			ee_mode = AR5K_EEPROM_MODE_11B;
-		else
+		if ((channel->c_channel_flags & IEEE80211_CHAN_G) ==
+		    IEEE80211_CHAN_G)
 			ee_mode = AR5K_EEPROM_MODE_11G;
+		else
+			ee_mode = AR5K_EEPROM_MODE_11B;
 		obdb = 0;
 
 		if (!ar5k_rfregs_op(rf, hal->ah_offset[0],
@@ -1664,10 +1655,11 @@ ar5k_ar5112_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int mode)
 	}
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {
-		if (channel->c_channel_flags & IEEE80211_CHAN_B)
-			ee_mode = AR5K_EEPROM_MODE_11B;
-		else
+		if ((channel->c_channel_flags & IEEE80211_CHAN_G) ==
+		    IEEE80211_CHAN_G)
 			ee_mode = AR5K_EEPROM_MODE_11G;
+		else
+			ee_mode = AR5K_EEPROM_MODE_11B;
 		obdb = 0;
 
 		if (!ar5k_rfregs_op(rf, hal->ah_offset[6],

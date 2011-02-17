@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: atareg.h,v 1.12 2004/09/24 07:15:22 grange Exp $	*/
-=======
 /*	$OpenBSD: atareg.h,v 1.14 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: atareg.h,v 1.5 1999/01/18 20:06:24 bouyer Exp $	*/
 
 /*

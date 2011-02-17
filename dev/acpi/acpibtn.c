@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: acpibtn.c,v 1.14 2006/12/21 11:23:41 deraadt Exp $ */
-=======
 /* $OpenBSD: acpibtn.c,v 1.34 2011/01/02 04:56:57 jordan Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -129,7 +125,7 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_lid		*lid;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
-	sc->sc_devnode = aa->aaa_node->child;
+	sc->sc_devnode = aa->aaa_node;
 
 	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD)) {
 		sc->sc_btn_type = ACPIBTN_LID;
@@ -145,9 +141,9 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 
 	acpibtn_getsta(sc);
 
-	printf(": %s\n", sc->sc_devnode->parent->name);
+	printf(": %s\n", sc->sc_devnode->name);
 
-	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev, acpibtn_notify,
+	aml_register_notify(sc->sc_devnode, aa->aaa_dev, acpibtn_notify,
 	    sc, ACPIDEV_NOPOLL);
 }
 
@@ -166,17 +162,13 @@ int
 acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 {
 	struct acpibtn_softc	*sc = arg;
-<<<<<<< HEAD
-	extern int		acpi_s5;
-=======
 #ifndef SMALL_KERNEL
 	extern int lid_suspend;
 	int64_t lid;
 #endif
->>>>>>> origin/master
 
 	dnprintf(10, "acpibtn_notify: %.2x %s\n", notify_type,
-	    sc->sc_devnode->parent->name);
+	    sc->sc_devnode->name);
 
 	switch (sc->sc_btn_type) {
 	case ACPIBTN_LID:
@@ -213,16 +205,9 @@ sleep:
 #endif /* SMALL_KERNEL */
 		break;
 	case ACPIBTN_POWER:
-<<<<<<< HEAD
-		if (notify_type == 0x80) {
-			acpi_s5 = 1;
-			psignal(initproc, SIGUSR1);
-		}
-=======
 		if (notify_type == 0x80)
 			acpi_addtask(sc->sc_acpi, acpi_powerdown_task,
 			    sc->sc_acpi, 0);
->>>>>>> origin/master
 		break;
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),

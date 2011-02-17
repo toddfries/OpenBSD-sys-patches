@@ -1,4 +1,4 @@
-/*	$OpenBSD: scanio.h,v 1.6 1997/04/05 23:34:18 kstailey Exp $	*/
+/*	$OpenBSD: scanio.h,v 1.7 1997/04/15 10:51:33 tholo Exp $	*/
 /*	$NetBSD: scanio.h,v 1.1 1996/02/18 20:33:18 mycroft Exp $	*/
 
 /*

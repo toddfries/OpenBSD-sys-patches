@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: aac_tables.h,v 1.3 2005/11/18 05:39:10 nate Exp $	*/
-=======
 /*	$OpenBSD: aac_tables.h,v 1.5 2009/03/06 07:28:10 grange Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2000 Michael Smith

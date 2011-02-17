@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: umidi_quirks.h,v 1.4 2008/06/26 05:42:19 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: umidi_quirks.h,v 1.2 2001/09/29 22:00:47 tshiozak Exp $	*/
 
 /*

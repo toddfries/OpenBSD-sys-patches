@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: umsm.c,v 1.5 2007/01/13 19:54:21 stevesk Exp $	*/
-=======
 /*	$OpenBSD: umsm.c,v 1.72 2011/02/01 18:31:11 dcoppa Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -21,11 +17,12 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* Driver for Qualcomm MSM EVDO devices */
+/* Driver for Qualcomm MSM EVDO and UMTS communication devices */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/tty.h>
@@ -39,18 +36,6 @@
 #include <dev/usb/umassvar.h>
 #undef DPRINTF	/* undef DPRINTF for umass */
 
-<<<<<<< HEAD
-#define UMSMBUFSZ	2048
-#define UMSM_CONFIG_NO	0
-#define UMSM_IFACE_NO	0
-
-struct umsm_softc {
-	USBBASEDEVICE		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
-	device_ptr_t		sc_subdev;
-	u_char			sc_dying;
-=======
 #ifdef USB_DEBUG
 #define UMSM_DEBUG
 #endif
@@ -99,7 +84,6 @@ struct umsm_softc {
 	u_char			 sc_msr;	/* status register */
 	u_char			 sc_dtr;	/* current DTR state */
 	u_char			 sc_rts;	/* current RTS state */
->>>>>>> origin/master
 };
 
 usbd_status umsm_huawei_changemode(usbd_device_handle);
@@ -107,45 +91,16 @@ usbd_status umsm_truinstall_changemode(usbd_device_handle);
 usbd_status umsm_umass_changemode(struct umsm_softc *);
 
 struct ucom_methods umsm_methods = {
-<<<<<<< HEAD
-	NULL,
-=======
 	umsm_get_status,
 	umsm_set,
->>>>>>> origin/master
 	NULL,
 	NULL,
-	NULL,
-	NULL,
-	NULL,
+	umsm_open,
+	umsm_close,
 	NULL,
 	NULL,
 };
 
-<<<<<<< HEAD
-static const struct usb_devno umsm_devs[] = {
-	{ USB_VENDOR_AIRPRIME,	USB_PRODUCT_AIRPRIME_PC5220 },
-	{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_W5500 },
-	{ USB_VENDOR_KYOCERA2,	USB_PRODUCT_KYOCERA2_KPC650 },
-	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_EXPRESSCARD },
-	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_MERLINV620 },
-	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_S720 },
-	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_U720 },
-	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_XU870 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_EM5625 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_AIRCARD_580 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_AIRCARD_595 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_AIRCARD_875 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC5720 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC5725 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8755 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8755_2 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8765 },
-	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8775 },
-};
-
-USB_DECLARE_DRIVER(umsm);
-=======
 struct umsm_type {
 	struct usb_devno	umsm_dev;
 	uint16_t		umsm_flag;
@@ -288,25 +243,29 @@ static const struct umsm_type umsm_devs[] = {
 };
 
 #define umsm_lookup(v, p) ((const struct umsm_type *)usb_lookup(umsm_devs, v, p))
->>>>>>> origin/master
 
-USB_MATCH(umsm)
+struct cfdriver umsm_cd = { 
+	NULL, "umsm", DV_DULL 
+}; 
+
+const struct cfattach umsm_ca = { 
+	sizeof(struct umsm_softc), 
+	umsm_match, 
+	umsm_attach, 
+	umsm_detach, 
+	umsm_activate, 
+};
+
+int
+umsm_match(struct device *parent, void *match, void *aux)
 {
-<<<<<<< HEAD
-	USB_MATCH_START(umsm, uaa);
-=======
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id;
 	uint16_t flag;
->>>>>>> origin/master
 
-	if (uaa->iface != NULL)
+	if (uaa->iface == NULL)
 		return UMATCH_NONE;
 
-<<<<<<< HEAD
-	return (usb_lookup(umsm_devs, uaa->vendor, uaa->product) != NULL) ?
-	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
-=======
 	/*
 	 * Some devices (eg Huawei E220) have multiple interfaces and some
 	 * of them are of class umass. Don't claim ownership in such case.
@@ -335,47 +294,20 @@ USB_MATCH(umsm)
 	} 
 
 	return UMATCH_NONE;
->>>>>>> origin/master
 }
 
-USB_ATTACH(umsm)
+void
+umsm_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(umsm, sc, uaa);
+	struct umsm_softc *sc = (struct umsm_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ucom_attach_args uca;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	usbd_status error;
-	char *devinfop;
 	int i;
 
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
-<<<<<<< HEAD
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
-	usbd_devinfo_free(devinfop);
-
-	if (usbd_set_config_index(sc->sc_udev, UMSM_CONFIG_NO, 1) != 0) {
-		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
-		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
-	}
-
-	/* get the first interface handle */
-	error = usbd_device2interface_handle(sc->sc_udev, UMSM_IFACE_NO,
-	    &sc->sc_iface);
-	if (error != 0) {
-		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
-		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
-	}
-
-	id = usbd_get_interface_descriptor(sc->sc_iface);
-
-=======
 	sc->sc_iface = uaa->iface;
 	sc->sc_flag  = umsm_lookup(uaa->vendor, uaa->product)->umsm_flag;
 
@@ -411,18 +343,24 @@ USB_ATTACH(umsm)
 	}
 
 	sc->sc_iface_no = id->bInterfaceNumber;
->>>>>>> origin/master
 	uca.bulkin = uca.bulkout = -1;
+	sc->sc_intr_number = sc->sc_isize = -1;
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
+			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
-			USB_ATTACH_ERROR_RETURN;
+			return;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
+		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_INTERRUPT) {
+			sc->sc_intr_number = ed->bEndpointAddress;
+			sc->sc_isize = UGETW(ed->wMaxPacketSize);
+			DPRINTF(("%s: find interrupt endpoint for %s\n", 
+				__func__, sc->sc_dev.dv_xname));
+		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK)
 			uca.bulkin = ed->bEndpointAddress;
 		else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT &&
@@ -430,9 +368,9 @@ USB_ATTACH(umsm)
 			uca.bulkout = ed->bEndpointAddress;
 	}
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	sc->sc_dtr = sc->sc_rts = -1;
@@ -449,21 +387,22 @@ USB_ATTACH(umsm)
 	uca.info = NULL;
 	uca.portno = UCOM_UNK_PORTNO;
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-	
-=======
->>>>>>> origin/master
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(umsm)
+int
+umsm_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(umsm, sc);
+	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;
+
+	/* close the interrupt endpoint if that is opened */
+	if (sc->sc_intr_pipe != NULL) {
+		usbd_abort_pipe(sc->sc_intr_pipe);
+		usbd_close_pipe(sc->sc_intr_pipe);
+		free(sc->sc_intr_buf, M_USBDEV);
+		sc->sc_intr_pipe = NULL;
+	}
 
 	sc->sc_dying = 1;
 	if (sc->sc_subdev != NULL) {
@@ -471,21 +410,11 @@ USB_DETACH(umsm)
 		sc->sc_subdev = NULL;
 	}
 
-<<<<<<< HEAD
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
-
-=======
->>>>>>> origin/master
 	return (rv);
 }
 
 int
-<<<<<<< HEAD
-umsm_activate(device_ptr_t self, enum devact act)
-=======
 umsm_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;
@@ -502,8 +431,6 @@ umsm_activate(struct device *self, int act)
 	}
 	return (rv);
 }
-<<<<<<< HEAD
-=======
 
 int
 umsm_open(void *addr, int portno)
@@ -830,4 +757,3 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		
 	return (err);
 }
->>>>>>> origin/master

@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.1 2006/06/26 14:24:26 deraadt Exp $	*/
+/*	$OpenBSD: build.c,v 1.2 2006/11/13 02:52:46 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2006

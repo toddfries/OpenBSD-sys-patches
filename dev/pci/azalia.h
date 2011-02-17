@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: azalia.h,v 1.8 2006/06/16 06:00:46 brad Exp $	*/
-=======
 /*	$OpenBSD: azalia.h,v 1.62 2010/09/10 15:11:23 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -57,7 +53,7 @@
 #define HDA_OUTPAY	0x004	/* 2 */
 #define HDA_INPAY	0x006	/* 2 */
 #define HDA_GCTL	0x008	/* 4 */
-#define		HDA_GCTL_UNSOL	0x00000080
+#define		HDA_GCTL_UNSOL	0x00000100
 #define		HDA_GCTL_FCNTRL	0x00000002
 #define		HDA_GCTL_CRST	0x00000001
 #define HDA_WAKEEN	0x00c	/* 2 */
@@ -276,6 +272,11 @@
 #define		COP_SUPPORTED_POWER_STATES	0x0f
 #define		COP_PROCESSING_CAPABILITIES	0x10
 #define		COP_GPIO_COUNT			0x11
+#define			COP_GPIO_GPIOS(x)	(x & 0xff)
+#define			COP_GPIO_GPOS(x)	((x >> 8) & 0xff)
+#define			COP_GPIO_GPIS(x)	((x >> 16) & 0xff)
+#define			COP_GPIO_UNSOL		0x40000000
+#define			COP_GPIO_WAKE		0x80000000
 #define		COP_OUTPUT_AMPCAP		0x12
 #define		COP_VOLUME_KNOB_CAPABILITIES	0x13
 #define			COP_VKCAP_DELTA		0x00000080
@@ -345,12 +346,15 @@
 #define		CORB_UNSOL_ENABLE	0x80
 #define		CORB_UNSOL_TAG(x)	(x & 0x3f)
 #define CORB_GET_PIN_SENSE		0xf09
-#define		CORB_PS_PRESENSE	0x80000000
+#define		CORB_PS_PRESENCE	0x80000000
 #define		CORB_PS_IMPEDANCE(x)	(x & 0x7fffffff)
 #define CORB_EXECUTE_PIN_SENSE		0x709
 #define		CORB_PS_RIGHT		0x1
 #define CORB_GET_EAPD_BTL_ENABLE	0xf0c
 #define CORB_SET_EAPD_BTL_ENABLE	0x70c
+#define		CORB_EAPD_BTL		0x01
+#define		CORB_EAPD_EAPD		0x02
+#define		CORB_EAPD_LRSWAP	0x04
 #define CORB_GET_GPI_DATA		0xf10
 #define CORB_SET_GPI_DATA		0x710
 #define CORB_GET_GPI_WAKE_ENABLE_MASK	0xf11
@@ -411,10 +415,6 @@
 #define			CORB_CD_PINK	0x9
 #define			CORB_CD_WHITE	0xe
 #define			CORB_CD_COLOR_OTHER	0xf
-<<<<<<< HEAD
-#define		CORB_CD_CONNECTION_MASK	0x000f0000
-#define		CORB_CD_DEVICE(x)	((x >> 20) & 0xf)
-=======
 #define		CORB_CD_CONNECTION_OFFSET	16
 #define		CORB_CD_CONNECTION_BITS		0xf
 #define		CORB_CD_CONNECTION_MASK	(CORB_CD_CONNECTION_BITS << CORB_CD_CONNECTION_OFFSET)
@@ -436,7 +436,6 @@
 #define		CORB_CD_DEVICE_BITS		0xf
 #define		CORB_CD_DEVICE_MASK (CORB_CD_DEVICE_BITS << CORB_CD_DEVICE_OFFSET)
 #define		CORB_CD_DEVICE(x) ((x >> CORB_CD_DEVICE_OFFSET) & CORB_CD_DEVICE_BITS)
->>>>>>> origin/master
 #define			CORB_CD_LINEOUT		0x0
 #define			CORB_CD_SPEAKER		0x1
 #define			CORB_CD_HEADPHONE	0x2
@@ -454,9 +453,6 @@
 #define			CORB_CD_BEEP		0xe
 #define			CORB_CD_DEVICE_OTHER	0xf
 #define		CORB_CD_LOCATION_MASK	0x3f000000
-<<<<<<< HEAD
-#define		CORB_CD_PORT_MASK	0xc0000000
-=======
 #define		CORB_CD_LOC_GEO(x)	((x >> 24) & 0xf)
 #define			CORB_CD_LOC_GEO_NA	0x0
 #define			CORB_CD_REAR		0x1
@@ -481,7 +477,6 @@
 #define			CORB_CD_NONE		0x1
 #define			CORB_CD_FIXED		0x2
 #define			CORB_CD_BOTH		0x3
->>>>>>> origin/master
 #define CORB_GET_STRIPE_CONTROL		0xf24
 #define CORB_SET_STRIPE_CONTROL		0x720	/* XXX typo in the spec? */
 #define CORB_EXECUTE_FUNCTION_RESET	0x7ff
@@ -535,7 +530,9 @@ typedef uint32_t corb_entry_t;
 typedef struct {
 	uint32_t resp;
 	uint32_t resp_ex;
-#define RIRB_UNSOLICITED_RESPONSE	(1 << 4)
+#define RIRB_UNSOL_TAG(resp)   ((resp) >> 26)
+#define RIRB_RESP_UNSOL                (1 << 4)
+#define RIRB_RESP_CODEC(ex)    ((ex) & 0xf)
 } __packed rirb_entry_t;
 
 
@@ -595,8 +592,6 @@ typedef struct {
 #define MI_TARGET_DAC		0x104
 #define MI_TARGET_ADC		0x105
 #define MI_TARGET_VOLUME	0x106
-<<<<<<< HEAD
-=======
 #define MI_TARGET_SPDIF		0x107
 #define MI_TARGET_SPDIF_CC	0x108
 #define MI_TARGET_EAPD		0x109
@@ -611,7 +606,6 @@ typedef struct {
 		int mask;
 		mixer_level_t value;
 	} saved;
->>>>>>> origin/master
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
@@ -628,16 +622,6 @@ typedef struct {
 	convgroup_t groups[2];
 } convgroupset_t;
 
-<<<<<<< HEAD
-typedef struct codec_t {
-	int (*comresp)(const struct codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
-	int (*init_dacgroup)(struct codec_t *);
-	int (*init_widget)(const struct codec_t *, widget_t *, nid_t);
-	int (*mixer_init)(struct codec_t *);
-	int (*mixer_delete)(struct codec_t *);
-	int (*set_port)(struct codec_t *, mixer_ctrl_t *);
-	int (*get_port)(struct codec_t *, mixer_ctrl_t *);
-=======
 typedef struct {
 	int master;
 	int vol_l;
@@ -656,7 +640,6 @@ struct io_pin {
 	nid_t conv;		/* NID of default converter */
 	int prio;		/* assoc/seq/dir "priority" */
 };
->>>>>>> origin/master
 
 typedef struct codec_t {
 	struct azalia_t *az;
@@ -688,10 +671,6 @@ typedef struct codec_t {
 
 	struct audio_format *formats;
 	int nformats;
-<<<<<<< HEAD
-	struct audio_encoding_set *encodings;
-} codec_t;
-=======
 	struct audio_encoding *encs;
 	int nencs;
 
@@ -726,7 +705,6 @@ typedef struct codec_t {
 #define	AZ_SPKR_MUTE_SPKR_MUTE	1
 #define	AZ_SPKR_MUTE_SPKR_DIR	2
 #define	AZ_SPKR_MUTE_DAC_MUTE	3
->>>>>>> origin/master
 
 	volgroup_t playvols;
 	volgroup_t recvols;

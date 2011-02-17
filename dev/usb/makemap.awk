@@ -1,9 +1,5 @@
 #! /usr/bin/awk -f
-<<<<<<< HEAD
-#	$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $
-=======
 #	$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $
->>>>>>> origin/master
 #
 # Copyright (c) 2005, Miodrag Vallat
 #
@@ -35,16 +31,13 @@
 #
 
 BEGIN {
-<<<<<<< HEAD
-	rcsid = "$OpenBSD: makemap.awk,v 1.5 2005/05/19 17:49:54 miod Exp $"
-=======
 	rcsid = "$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $"
->>>>>>> origin/master
 	ifdepth = 0
 	ignore = 0
 	declk = 0
 	haskeys = 0
 	kbfr = 0
+	nmaps = 0
 
 	# PS/2 id -> UKBD conversion table, or "sanity lossage 101"
 	for (i = 0; i < 256; i++)
@@ -215,10 +208,8 @@ $1 == "#include" {
 	if (ignore)
 		next
 	if ($2 == "<dev/pckbc/wskbdmap_mfii.h>")
-		print "#include <dev/usb/usb_port.h>"
-	else
-		printf("#include %s\n", $2)
-
+		next
+	printf("#include %s\n", $2)
 	next
 }
 $1 == "#define" || $1 == "#undef" {
@@ -319,8 +310,6 @@ $1 == "#define" || $1 == "#undef" {
 			sub("50", "49", lines[49])
 		}
 
-<<<<<<< HEAD
-=======
 		#
 		# Several USB keyboards have extra keys do not appear in
 		# the traditional PS/2 maps. We add them here, except for
@@ -354,7 +343,6 @@ $1 == "#define" || $1 == "#undef" {
 			lines[126] = "    KC(126),\tKS_Find,"
 		}
 
->>>>>>> origin/master
 		for (i = 0; i < 256; i++)
 			if (lines[i]) {
 				print lines[i]

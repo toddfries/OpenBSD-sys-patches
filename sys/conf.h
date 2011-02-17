@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: conf.h,v 1.80 2006/07/12 19:56:18 thib Exp $	*/
-=======
 /*	$OpenBSD: conf.h,v 1.110 2011/01/25 20:03:35 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -94,9 +90,9 @@ struct bdevsw {
 	void	(*d_strategy)(struct buf *bp);
 	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data,
 				     int fflag, struct proc *p);
-	int	(*d_dump)(dev_t dev, daddr_t blkno, caddr_t va,
+	int	(*d_dump)(dev_t dev, daddr64_t blkno, caddr_t va,
 				    size_t size);
-	int	(*d_psize)(dev_t dev);
+	daddr64_t (*d_psize)(dev_t dev);
 	u_int	d_type;
 	/* u_int	d_flags; */
 };
@@ -106,8 +102,8 @@ struct bdevsw {
 extern struct bdevsw bdevsw[];
 
 /* bdevsw-specific types */
-#define	dev_type_dump(n)	int n(dev_t, daddr_t, caddr_t, size_t)
-#define	dev_type_size(n)	int n(dev_t)
+#define	dev_type_dump(n)	int n(dev_t, daddr64_t, caddr_t, size_t)
+#define	dev_type_size(n)	daddr64_t n(dev_t)
 
 /* bdevsw-specific initializations */
 #define	dev_size_init(c,n)	(c > 0 ? __CONCAT(n,size) : 0)
@@ -292,9 +288,6 @@ extern struct cdevsw cdevsw[];
 	0, selfalse, (dev_type_mmap((*))) enodev }
 
 /* open, close, read, write, ioctl, poll, kqfilter -- XXX should be generic device */
-<<<<<<< HEAD
-#define cdev_bpftun_init(c,n) { \
-=======
 #define cdev_tun_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
@@ -318,7 +311,6 @@ extern struct cdevsw cdevsw[];
 
 /* open, close, read, write, ioctl, poll, kqfilter, cloning -- XXX should be generic device */
 #define cdev_bpf_init(c,n) { \
->>>>>>> origin/master
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
@@ -454,8 +446,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
-<<<<<<< HEAD
-=======
 /* open, close, ioctl, read, mmap, poll */
 #define cdev_video_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
@@ -463,7 +453,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
 	dev_init(c,n,mmap) }
 
->>>>>>> origin/master
 /* open, close, write, ioctl */
 #define cdev_spkr_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
@@ -506,8 +495,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
-<<<<<<< HEAD
-=======
 /* open, close, ioctl */
 #define       cdev_bthub_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
@@ -536,7 +523,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
->>>>>>> origin/master
 #endif
 
 /*
@@ -613,6 +599,7 @@ cdev_decl(audio);
 cdev_decl(midi);
 cdev_decl(sequencer);
 cdev_decl(radio);
+cdev_decl(video);
 cdev_decl(cn);
 
 bdev_decl(sw);
@@ -677,11 +664,8 @@ cdev_decl(crypto);
 cdev_decl(systrace);
 
 cdev_decl(bio);
-<<<<<<< HEAD
-=======
 cdev_decl(vscsi);
 cdev_decl(bthub);
->>>>>>> origin/master
 
 cdev_decl(gpr);
 cdev_decl(bktr);

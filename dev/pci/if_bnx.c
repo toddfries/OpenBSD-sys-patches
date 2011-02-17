@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_bnx.c,v 1.47 2007/03/03 11:17:48 reyk Exp $	*/
-=======
 /*	$OpenBSD: if_bnx.c,v 1.90 2010/09/20 07:40:38 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -42,30 +38,20 @@ __FBSDID("$FreeBSD: src/sys/dev/bce/if_bce.c,v 1.3 2006/04/13 14:12:26 ru Exp $"
 /*
  * The following controllers are supported by this driver:
  *   BCM5706C A2, A3
-<<<<<<< HEAD
- *   BCM5708C B1
-=======
  *   BCM5706S A2, A3
  *   BCM5708C B1, B2
  *   BCM5708S B1, B2
  *   BCM5709C A1, C0
  *   BCM5709S A1, C0
  *   BCM5716  C0
->>>>>>> origin/master
  *
  * The following controllers are not supported by this driver:
- * (These are not "Production" versions of the controller.)
- * 
  *   BCM5706C A0, A1
- *   BCM5706S A0, A1, A2, A3
+ *   BCM5706S A0, A1
  *   BCM5708C A0, B0
-<<<<<<< HEAD
- *   BCM5708S A0, B0, B1
-=======
  *   BCM5708S A0, B0
  *   BCM5709C A0  B0, B1, B2 (pre-production)
  *   BCM5709S A0, B0, B1, B2 (pre-production)
->>>>>>> origin/master
  */
 
 #include <dev/pci/if_bnxreg.h>
@@ -172,18 +158,11 @@ const struct pci_matchid bnx_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5706 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5706S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708 },
-<<<<<<< HEAD
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708S }
-#if 0
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709 }
-#endif
-=======
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716S }
->>>>>>> origin/master
 };
 
 /****************************************************************************/
@@ -683,14 +662,8 @@ bnx_attach(struct device *parent, struct device *self, void *aux)
 	 * Map control/status registers.
 	*/
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, BNX_PCI_BAR0);  
-	switch (memtype) {
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
-	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-		if (pci_mapreg_map(pa, BNX_PCI_BAR0,
-		    memtype, 0, &sc->bnx_btag, &sc->bnx_bhandle,
-		    NULL, &sc->bnx_size, 0) == 0)
-			break;
-	default:
+	if (pci_mapreg_map(pa, BNX_PCI_BAR0, memtype, 0, &sc->bnx_btag,
+	    &sc->bnx_bhandle, NULL, &sc->bnx_size, 0)) {
 		printf(": can't find mem space\n");
 		return;
 	}
@@ -713,23 +686,6 @@ bnx_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Save ASIC revsion info. */
 	sc->bnx_chipid =  REG_RD(sc, BNX_MISC_ID);
-
-	/* Weed out any non-production controller revisions. */
-	switch(BNX_CHIP_ID(sc)) {
-	case BNX_CHIP_ID_5706_A0:
-	case BNX_CHIP_ID_5706_A1:
-	case BNX_CHIP_ID_5708_A0:
-	case BNX_CHIP_ID_5708_B0:
-		printf(": unsupported controller revision (%c%d)!\n",
-		    (((pci_conf_read(pa->pa_pc, pa->pa_tag, 0x08) & 0xf0) >> 4)
-		    + 'A'), (pci_conf_read(pa->pa_pc, pa->pa_tag, 0x08) & 0xf));
-		goto bnx_attach_fail;
-	}
-
-	if (BNX_CHIP_BOND_ID(sc) & BNX_CHIP_BOND_ID_SERDES_BIT) {
-		printf(": SerDes controllers are not supported!\n");
-		goto bnx_attach_fail;
-	}
 
 	/*
 	 * Find the base address for shared memory access.
@@ -817,13 +773,6 @@ bnx_attachhook(void *xsc)
 	struct bnx_softc *sc = xsc;
 	struct pci_attach_args *pa = &sc->bnx_pa;
 	struct ifnet		*ifp;
-<<<<<<< HEAD
-	u_int32_t		val;
-	int error;
-
-	if ((error = bnx_read_firmware(sc)) != 0) {
-		printf("%s: could not read firmware (error=%d)\n",
-=======
 	int			error, mii_flags = 0;
 	int			fw = BNX_FW_B06;
 	int			rv2p = BNX_RV2P;
@@ -838,7 +787,6 @@ bnx_attachhook(void *xsc)
 
 	if ((error = bnx_read_firmware(sc, fw)) != 0) {
 		printf("%s: error %d, could not read firmware\n",
->>>>>>> origin/master
 		    sc->bnx_dev.dv_xname, error);
 		return;
 	}
@@ -905,35 +853,17 @@ bnx_attachhook(void *xsc)
 	/* Update statistics once every second. */
 	sc->bnx_stats_ticks = 1000000 & 0xffff00;
 
-<<<<<<< HEAD
-	/*
-	 * The copper based NetXtreme II controllers
-	 * use an integrated PHY at address 1 while
-	 * the SerDes controllers use a PHY at
-	 * address 2.
-	 */
-	sc->bnx_phy_addr = 1;
-
-	if (BNX_CHIP_BOND_ID(sc) & BNX_CHIP_BOND_ID_SERDES_BIT) {
-		sc->bnx_phy_flags |= BNX_PHY_SERDES_FLAG;
-		sc->bnx_flags |= BNX_NO_WOL_FLAG;
-		if (BNX_CHIP_NUM(sc) == BNX_CHIP_NUM_5708) {
-			sc->bnx_phy_addr = 2;
-			val = REG_RD_IND(sc, sc->bnx_shmem_base +
-					 BNX_SHARED_HW_CFG_CONFIG);
-			if (val & BNX_SHARED_HW_CFG_PHY_2_5G)
-				sc->bnx_phy_flags |= BNX_PHY_2_5G_CAPABLE_FLAG;
-		}
-	}
-=======
 	/* Find the media type for the adapter. */
 	bnx_get_media(sc);
->>>>>>> origin/master
 
-	if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG) {
-		printf(": SerDes is not supported by this driver!\n");
-		goto bnx_attach_fail;
-	}
+	/*
+	 * Store config data needed by the PHY driver for
+	 * backplane applications
+	 */
+	sc->bnx_shared_hw_cfg = REG_RD_IND(sc, sc->bnx_shmem_base +
+		BNX_SHARED_HW_CFG_CONFIG);
+	sc->bnx_port_hw_cfg = REG_RD_IND(sc, sc->bnx_shmem_base +
+		BNX_PORT_HW_CFG_CONFIG);
 
 	/* Allocate DMA memory resources. */
 	sc->bnx_dmatag = pa->pa_dmat;
@@ -950,18 +880,17 @@ bnx_attachhook(void *xsc)
 	ifp->if_ioctl = bnx_ioctl;
 	ifp->if_start = bnx_start;
 	ifp->if_watchdog = bnx_watchdog;
-        if (sc->bnx_phy_flags & BNX_PHY_2_5G_CAPABLE_FLAG)
-                ifp->if_baudrate = IF_Gbps(2.5);
-        else
-                ifp->if_baudrate = IF_Gbps(1);
 	IFQ_SET_MAXLEN(&ifp->if_snd, USABLE_TX_BD - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	m_clsetwms(ifp, MCLBYTES, 2, USABLE_RX_BD);
 	bcopy(sc->eaddr, sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 	bcopy(sc->bnx_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_TCPv4 |
-			       IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef BNX_CSUM
+	ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+#endif	
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -983,8 +912,10 @@ bnx_attachhook(void *xsc)
 	/* Look for our PHY. */
 	ifmedia_init(&sc->bnx_mii.mii_media, 0, bnx_ifmedia_upd,
 	    bnx_ifmedia_sts);
+	if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG)
+		mii_flags |= MIIF_HAVEFIBER;
 	mii_attach(&sc->bnx_dev, &sc->bnx_mii, 0xffffffff,
-	    MII_PHY_ANY, MII_OFFSET_ANY, 0);
+	    MII_PHY_ANY, MII_OFFSET_ANY, mii_flags);
 
 	if (LIST_FIRST(&sc->bnx_mii.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->bnx_dev.dv_xname);
@@ -1047,12 +978,8 @@ bnx_detach(void *xsc)
 	ether_ifdetach(ifp);
 
 	/* If we have a child device on the MII bus remove it too. */
-	if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG) {
-		ifmedia_removeall(&sc->bnx_ifmedia);
-	} else {
-		bus_generic_detach(dev);
-		device_delete_child(dev, sc->bnx_mii);
-	}
+	bus_generic_detach(dev);
+	device_delete_child(dev, sc->bnx_mii);
 
 	/* Release all remaining resources. */
 	bnx_release_resources(sc);
@@ -1260,7 +1187,7 @@ bnx_miibus_write_reg(struct device *dev, int phy, int reg, int val)
 
 	/* Make sure we are accessing the correct PHY address. */
 	if (phy != sc->bnx_phy_addr) {
-		DBPRINT(sc, BNX_WARN, "Invalid PHY address %d for PHY write!\n",
+		DBPRINT(sc, BNX_VERBOSE, "Invalid PHY address %d for PHY write!\n",
 		    phy);
 		return;
 	}
@@ -1334,28 +1261,52 @@ bnx_miibus_statchg(struct device *dev)
 {
 	struct bnx_softc	*sc = (struct bnx_softc *)dev;
 	struct mii_data		*mii = &sc->bnx_mii;
+	int			val;
 
-	BNX_CLRBIT(sc, BNX_EMAC_MODE, BNX_EMAC_MODE_PORT);
+	val = REG_RD(sc, BNX_EMAC_MODE);
+	val &= ~(BNX_EMAC_MODE_PORT | BNX_EMAC_MODE_HALF_DUPLEX | 
+		BNX_EMAC_MODE_MAC_LOOP | BNX_EMAC_MODE_FORCE_LINK | 
+		BNX_EMAC_MODE_25G);
 
-	/* Set MII or GMII inerface based on the speed negotiated by the PHY. */
-	if (IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) {
-		DBPRINT(sc, BNX_INFO, "Setting GMII interface.\n");
-		BNX_SETBIT(sc, BNX_EMAC_MODE, BNX_EMAC_MODE_PORT_GMII);
-	} else {
-		DBPRINT(sc, BNX_INFO, "Setting MII interface.\n");
-		BNX_SETBIT(sc, BNX_EMAC_MODE, BNX_EMAC_MODE_PORT_MII);
+	/* Set MII or GMII interface based on the speed
+	 * negotiated by the PHY.
+	 */
+	switch (IFM_SUBTYPE(mii->mii_media_active)) {
+	case IFM_10_T:
+		if (BNX_CHIP_NUM(sc) != BNX_CHIP_NUM_5706) {
+			DBPRINT(sc, BNX_INFO, "Enabling 10Mb interface.\n");
+			val |= BNX_EMAC_MODE_PORT_MII_10;
+			break;
+		}
+		/* FALLTHROUGH */
+	case IFM_100_TX:
+		DBPRINT(sc, BNX_INFO, "Enabling MII interface.\n");
+		val |= BNX_EMAC_MODE_PORT_MII;
+		break;
+	case IFM_2500_SX:
+		DBPRINT(sc, BNX_INFO, "Enabling 2.5G MAC mode.\n");
+		val |= BNX_EMAC_MODE_25G;
+		/* FALLTHROUGH */
+	case IFM_1000_T:
+	case IFM_1000_SX:
+		DBPRINT(sc, BNX_INFO, "Enablinb GMII interface.\n");
+		val |= BNX_EMAC_MODE_PORT_GMII;
+		break;
+	default:
+		val |= BNX_EMAC_MODE_PORT_GMII;
+		break;
 	}
 
 	/* Set half or full duplex based on the duplicity
 	 * negotiated by the PHY.
 	 */
-	if ((mii->mii_media_active & IFM_GMASK) == IFM_FDX) {
-		DBPRINT(sc, BNX_INFO, "Setting Full-Duplex interface.\n");
-		BNX_CLRBIT(sc, BNX_EMAC_MODE, BNX_EMAC_MODE_HALF_DUPLEX);
-	} else {
+	if ((mii->mii_media_active & IFM_GMASK) == IFM_HDX) {
 		DBPRINT(sc, BNX_INFO, "Setting Half-Duplex interface.\n");
-		BNX_SETBIT(sc, BNX_EMAC_MODE, BNX_EMAC_MODE_HALF_DUPLEX);
-	}
+		val |= BNX_EMAC_MODE_HALF_DUPLEX;
+	} else
+		DBPRINT(sc, BNX_INFO, "Setting Full-Duplex interface.\n");
+
+	REG_WR(sc, BNX_EMAC_MODE, val);
 }
 
 /****************************************************************************/
@@ -1566,7 +1517,7 @@ bnx_nvram_erase_page(struct bnx_softc *sc, u_int32_t offset)
 	    BNX_NVM_COMMAND_DOIT;
 
 	/*
-	 * Clear the DONE bit separately, set the NVRAM adress to erase,
+	 * Clear the DONE bit separately, set the NVRAM address to erase,
 	 * and issue the erase command.
 	 */
 	REG_WR(sc, BNX_NVM_COMMAND, BNX_NVM_COMMAND_DONE);
@@ -3270,11 +3221,11 @@ void
 bnx_stop(struct bnx_softc *sc)
 {
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
-	struct mii_data		*mii = NULL;
+	struct ifmedia_entry	*ifm;
+	struct mii_data		*mii;
+	int			mtmp, itmp;
 
 	DBPRINT(sc, BNX_VERBOSE_RESET, "Entering %s()\n", __FUNCTION__);
-
-	mii = &sc->bnx_mii;
 
 	timeout_del(&sc->bnx_timeout);
 
@@ -3295,6 +3246,21 @@ bnx_stop(struct bnx_softc *sc)
 
 	/* Free TX buffers. */
 	bnx_free_tx_chain(sc);
+
+	/*
+	 * Isolate/power down the PHY, but leave the media selection
+	 * unchanged so that things will be put back to normal when
+	 * we bring the interface back up.
+	 */
+	mii = &sc->bnx_mii;
+	itmp = ifp->if_flags;
+	ifp->if_flags |= IFF_UP;
+	ifm = mii->mii_media.ifm_cur;
+	mtmp = ifm->ifm_media;
+	ifm->ifm_media = IFM_ETHER|IFM_NONE;
+	mii_mediachg(mii);
+	ifm->ifm_media = mtmp;
+	ifp->if_flags = itmp;
 
 	ifp->if_timer = 0;
 
@@ -3449,11 +3415,9 @@ bnx_chipinit(struct bnx_softc *sc)
 #if 1
 	/* Clear the PCI-X relaxed ordering bit. See errata E3_5708CA0_570. */
 	if (sc->bnx_flags & BNX_PCIX_FLAG) {
-		u_int16_t val;
-
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, BNX_PCI_PCIX_CMD);
 		pci_conf_write(pa->pa_pc, pa->pa_tag, BNX_PCI_PCIX_CMD,
-		    val & ~0x2);
+		    val & ~0x20000);
 	}
 #endif
 
@@ -4184,13 +4148,9 @@ bnx_ifmedia_upd(struct ifnet *ifp)
 {
 	struct bnx_softc	*sc;
 	struct mii_data		*mii;
-	struct ifmedia		*ifm;
 	int			rc = 0;
 
 	sc = ifp->if_softc;
-	ifm = &sc->bnx_ifmedia;
-
-	/* DRC - ToDo: Add SerDes support. */
 
 	mii = &sc->bnx_mii;
 	sc->bnx_link = 0;
@@ -4222,8 +4182,6 @@ bnx_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	s = splnet();
 
 	mii = &sc->bnx_mii;
-
-	/* DRC - ToDo: Add SerDes support. */
 
 	mii_pollstat(mii);
 	ifmr->ifm_active = mii->mii_media_active;
@@ -4477,32 +4435,17 @@ bnx_rx_intr(struct bnx_softc *sc)
 			 * If we received a packet with a vlan tag,
 			 * attach that information to the packet.
 			 */
-			if (status & L2_FHDR_STATUS_L2_VLAN_TAG) {
+			if ((status & L2_FHDR_STATUS_L2_VLAN_TAG) &&
+			    !(sc->rx_mode & BNX_EMAC_RX_MODE_KEEP_VLAN_TAG)) {
 #if NVLAN > 0
 				DBPRINT(sc, BNX_VERBOSE_SEND,
 				    "%s(): VLAN tag = 0x%04X\n",
 				    __FUNCTION__,
 				    l2fhdr->l2_fhdr_vlan_tag);
 
-<<<<<<< HEAD
-				if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-					m_freem(m);
-					goto bnx_rx_int_next_rx;
-				}
-				m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-				vh.evl_proto = vh.evl_encap_proto;
-				vh.evl_tag = l2fhdr->l2_fhdr_vlan_tag;
-				vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-				m_adj(m, ETHER_HDR_LEN);
-				M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-				if (m == NULL)
-					goto bnx_rx_int_next_rx;
-				m_copyback(m, 0, sizeof(vh), &vh);
-=======
 				m->m_pkthdr.ether_vtag =
 				    l2fhdr->l2_fhdr_vlan_tag;
 				m->m_flags |= M_VLANTAG;
->>>>>>> origin/master
 #else
 				m_freem(m);
 				goto bnx_rx_int_next_rx;
@@ -4755,17 +4698,17 @@ bnx_init(void *xsc)
 	bnx_stop(sc);
 
 	if (bnx_reset(sc, BNX_DRV_MSG_CODE_RESET)) {
-		printf("%s: Controller reset failed!\n");
+		BNX_PRINTF(sc, "Controller reset failed!\n");
 		goto bnx_init_exit;
 	}
 
 	if (bnx_chipinit(sc)) {
-		printf("%s: Controller initialization failed!\n");
+		BNX_PRINTF(sc, "Controller initialization failed!\n");
 		goto bnx_init_exit;
 	}
 
 	if (bnx_blockinit(sc)) {
-		printf("%s: Block initialization failed!\n");
+		BNX_PRINTF(sc, "Block initialization failed!\n");
 		goto bnx_init_exit;
 	}
 
@@ -5101,12 +5044,7 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct bnx_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-<<<<<<< HEAD
-	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct mii_data		*mii;
-=======
 	struct mii_data		*mii = &sc->bnx_mii;
->>>>>>> origin/master
 	int			s, error = 0;
 
 	s = splnet();
@@ -5139,14 +5077,7 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		DBPRINT(sc, BNX_VERBOSE, "bnx_phy_flags = 0x%08X\n",
 		    sc->bnx_phy_flags);
 
-		if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG)
-			error = ifmedia_ioctl(ifp, ifr,
-			    &sc->bnx_ifmedia, command);
-		else {
-			mii = &sc->bnx_mii;
-			error = ifmedia_ioctl(ifp, ifr,
-			    &mii->mii_media, command);
-		}
+		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 
 	default:
@@ -5260,7 +5191,7 @@ bnx_intr(void *xsc)
 		    ~STATUS_ATTN_BITS_LINK_STATE))) {
 			DBRUN(1, sc->unexpected_attentions++);
 
-			printf("%s: Fatal attention detected: 0x%08X\n", 
+			BNX_PRINTF(sc, "Fatal attention detected: 0x%08X\n",
 			    sc->status_block->status_attn_bits);
 
 			DBRUN(BNX_FATAL,
@@ -5631,8 +5562,6 @@ bnx_tick(void *xsc)
 	/* If link is up already up then we're done. */
 	if (sc->bnx_link)
 		goto bnx_tick_exit;
-
-	/* DRC - ToDo: Add SerDes support and check SerDes link here. */
 
 	mii = &sc->bnx_mii;
 	mii_tick(mii);

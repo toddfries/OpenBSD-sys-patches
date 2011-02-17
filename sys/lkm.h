@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lkm.h,v 1.10 2002/01/07 19:23:32 ericj Exp $	*/
-=======
 /*	$OpenBSD: lkm.h,v 1.13 2008/11/07 02:23:04 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lkm.h,v 1.12 1996/02/09 18:25:13 christos Exp $	*/
 
 /*
@@ -278,6 +274,8 @@ extern int lkmdispatch(struct lkm_table *, int);
 	}								\
 	return lkmdispatch(lkmtp, cmd);					\
 } while (/* CONSTCOND */ 0)
+
+extern struct vm_map *lkm_map;
 
 #endif /* _KERNEL */
 

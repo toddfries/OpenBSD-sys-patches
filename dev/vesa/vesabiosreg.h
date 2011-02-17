@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: vesabiosreg.h,v 1.2 2010/11/20 20:11:19 miod Exp $ */
->>>>>>> origin/master
 
 /*
  * Written by M. Drochner

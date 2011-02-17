@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# $OpenBSD: Makefile,v 1.5 2004/12/31 00:28:31 deraadt Exp $
-=======
 # $OpenBSD: Makefile,v 1.8 2010/04/04 21:54:00 deraadt Exp $
->>>>>>> origin/master
 
 NOPROG=
 NOMAN=

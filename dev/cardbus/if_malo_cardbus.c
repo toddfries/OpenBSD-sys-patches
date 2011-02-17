@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_malo_cardbus.c,v 1.4 2006/10/29 11:41:34 mglocker Exp $ */
-=======
 /*	$OpenBSD: if_malo_cardbus.c,v 1.10 2010/08/08 16:36:33 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

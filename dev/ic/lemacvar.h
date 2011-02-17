@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: lemacvar.h,v 1.2 2003/10/21 18:58:49 jmc Exp $ */
-=======
 /*      $OpenBSD: lemacvar.h,v 1.4 2009/08/10 22:08:04 deraadt Exp $ */
->>>>>>> origin/master
 /*      $NetBSD: lemacvar.h,v 1.6 2001/06/13 10:46:03 wiz Exp $ */
 
 /*

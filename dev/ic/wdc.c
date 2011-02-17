@@ -1,12 +1,5 @@
-<<<<<<< HEAD
-/*      $OpenBSD: wdc.c,v 1.92 2006/05/08 00:18:40 jsg Exp $     */
-/*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $ */
-
-
-=======
 /*	$OpenBSD: wdc.c,v 1.109 2010/09/21 03:33:32 matthew Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
  *
@@ -418,18 +411,6 @@ wdprint(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
-int
-atapi_print(aux, pnp)
-	void *aux;
-	const char *pnp;
-{
-	struct ata_atapi_attach *aa_link = aux;
-	if (pnp)
-		printf("atapiscsi at %s", pnp);
-	printf(" channel %d", aa_link->aa_channel);
-	return (UNCONF);
-}
-
 void
 wdc_disable_intr(struct channel_softc *chp)
 {
@@ -638,9 +619,9 @@ wdcprobe(struct channel_softc *chp)
 		    chp->channel, st0, WDCS_BITS, st1, WDCS_BITS),
 		    DEBUG_PROBE);
 
-		if ((st0 & 0x7f) == 0x7f || st0 == WDSD_IBM)
+		if (st0 == 0xff || st0 == WDSD_IBM)
 			ret_value &= ~0x01;
-		if ((st1 & 0x7f) == 0x7f || st1 == (WDSD_IBM | 0x10))
+		if (st1 == 0xff || st1 == (WDSD_IBM | 0x10))
 			ret_value &= ~0x02;
 		if (ret_value == 0)
 			return 0;
@@ -904,20 +885,6 @@ wdcdetach(struct channel_softc *chp, int flags)
 
 	return (rv);
 }
-
-/* restart an interrupted I/O */
-void
-wdcrestart(v)
-	void *v;
-{
-	struct channel_softc *chp = v;
-	int s;
-
-	s = splbio();
-	wdcstart(chp);
-	splx(s);
-}
-
 
 /*
  * Interrupt routine for the controller.  Acknowledge the interrupt, check for
@@ -1972,58 +1939,6 @@ wdcbit_bucket(struct channel_softc *chp, int size)
 
 #include <sys/ataio.h>
 #include <sys/file.h>
-<<<<<<< HEAD
-#include <sys/buf.h>
-
-/*
- * Glue necessary to hook ATAIOCCOMMAND into physio
- */
-
-struct wdc_ioctl {
-	LIST_ENTRY(wdc_ioctl) wi_list;
-	struct buf wi_bp;
-	struct uio wi_uio;
-	struct iovec wi_iov;
-	atareq_t wi_atareq;
-	struct ata_drive_datas *wi_drvp;
-};
-
-struct	wdc_ioctl *wdc_ioctl_find(struct buf *);
-void	wdc_ioctl_free(struct wdc_ioctl *);
-struct	wdc_ioctl *wdc_ioctl_get(void);
-void	wdc_ioctl_strategy(struct buf *);
-
-LIST_HEAD(, wdc_ioctl) wi_head;
-
-/*
- * Allocate space for a ioctl queue structure.  Mostly taken from
- * scsipi_ioctl.c
- */
-struct wdc_ioctl *
-wdc_ioctl_get()
-{
-	struct wdc_ioctl *wi;
-	int s;
-
-	wi = malloc(sizeof(struct wdc_ioctl), M_TEMP, M_WAITOK);
-	bzero(wi, sizeof (struct wdc_ioctl));
-	s = splbio();
-	LIST_INSERT_HEAD(&wi_head, wi, wi_list);
-	splx(s);
-	return (wi);
-}
-
-/*
- * Free an ioctl structure and remove it from our list
- */
-
-void
-wdc_ioctl_free(wi)
-	struct wdc_ioctl *wi;
-{
-	int s;
-=======
->>>>>>> origin/master
 
 int wdc_ioc_ata_cmd(struct ata_drive_datas *, atareq_t *);
 

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: azalia_codec.c,v 1.17 2006/07/20 23:51:48 brad Exp $	*/
-=======
 /*	$OpenBSD: azalia_codec.c,v 1.151 2010/09/10 15:11:23 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -34,11 +30,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#ifdef NETBSD_GOOP
-__KERNEL_RCSID(0, "$NetBSD: azalia_codec.c,v 1.3 2005/09/29 04:14:03 kent Exp $");
-#endif
-
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -47,59 +38,6 @@ __KERNEL_RCSID(0, "$NetBSD: azalia_codec.c,v 1.3 2005/09/29 04:14:03 kent Exp $"
 #include <dev/pci/azalia.h>
 
 #define XNAME(co)	(((struct device *)co->az)->dv_xname)
-<<<<<<< HEAD
-#ifdef MAX_VOLUME_255
-# define MIXER_DELTA(n)	(AUDIO_MAX_GAIN / (n))
-#else
-# define MIXER_DELTA(n)	(1)
-#endif
-#define AZ_CLASS_INPUT	0
-#define AZ_CLASS_OUTPUT	1
-#define AZ_CLASS_RECORD	2
-#define ENUM_OFFON	.un.e={2, {{{AudioNoff}, 0}, {{AudioNon}, 1}}}
-#define ENUM_IO		.un.e={2, {{{"input"}, 0}, {{"output"}, 1}}}
-#define AzaliaNfront	"front"
-#define AzaliaNclfe	"clfe"
-#define AzaliaNside	"side"
-
-
-int	azalia_generic_codec_init_dacgroup(codec_t *);
-int	azalia_generic_codec_add_dacgroup(codec_t *, int, uint32_t);
-int	azalia_generic_codec_find_pin(const codec_t *, int, int, uint32_t);
-int	azalia_generic_codec_find_dac(const codec_t *, int, int);
-
-int	azalia_generic_mixer_init(codec_t *);
-int	azalia_generic_mixer_fix_indexes(codec_t *);
-int	azalia_generic_mixer_default(codec_t *);
-int	azalia_generic_mixer_delete(codec_t *);
-int	azalia_generic_mixer_ensure_capacity(codec_t *, size_t);
-int	azalia_generic_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
-int	azalia_generic_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
-u_char	azalia_generic_mixer_from_device_value
-	(const codec_t *, nid_t, int, uint32_t );
-uint32_t azalia_generic_mixer_to_device_value
-	(const codec_t *, nid_t, int, u_char);
-uint32_t azalia_generic_mixer_max(const codec_t *, nid_t, int);
-boolean_t azalia_generic_mixer_validate_value
-	(const codec_t *, nid_t, int, u_char);
-int	azalia_generic_set_port(codec_t *, mixer_ctrl_t *);
-int	azalia_generic_get_port(codec_t *, mixer_ctrl_t *);
-
-int	azalia_alc260_init_dacgroup(codec_t *);
-int	azalia_alc260_mixer_init(codec_t *);
-int	azalia_alc260_set_port(codec_t *, mixer_ctrl_t *);
-int	azalia_alc880_init_dacgroup(codec_t *);
-int	azalia_alc882_init_dacgroup(codec_t *);
-int	azalia_alc882_mixer_init(codec_t *);
-int	azalia_alc882_set_port(codec_t *, mixer_ctrl_t *);
-int	azalia_alc882_get_port(codec_t *, mixer_ctrl_t *);
-int	azalia_ad1981hd_init_widget(const codec_t *, widget_t *, nid_t);
-int	azalia_ad1981hd_mixer_init(codec_t *);
-int	azalia_cmi9880_init_dacgroup(codec_t *);
-int	azalia_cmi9880_mixer_init(codec_t *);
-int	azalia_stac9221_init_dacgroup(codec_t *);
-int	azalia_stac9220_mixer_init(codec_t *);
-=======
 #define MIXER_DELTA(n)	(AUDIO_MAX_GAIN / (n))
 
 int	azalia_add_convgroup(codec_t *, convgroupset_t *,
@@ -115,7 +53,6 @@ void	azalia_devinfo_offon(mixer_devinfo_t *);
 void	azalia_pin_config_ov(widget_t *, int, int);
 void	azalia_ampcap_ov(widget_t *, int, int, int, int, int, int);
 int	azalia_gpio_unmute(codec_t *, int);
->>>>>>> origin/master
 
 
 int
@@ -124,7 +61,6 @@ azalia_codec_init_vtbl(codec_t *this)
 	/**
 	 * We can refer this->vid and this->subid.
 	 */
-	DPRINTF(("%s: vid=%08x subid=%08x\n", __func__, this->vid, this->subid));
 	this->name = NULL;
 	this->qrks = AZ_QRK_NONE;
 	switch (this->vid) {
@@ -180,13 +116,6 @@ azalia_codec_init_vtbl(codec_t *this)
 			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
 		}
 		break;
-<<<<<<< HEAD
-	case 0x11d41981:
-		/* http://www.analog.com/en/prod/0,2877,AD1981HD,00.html */
-		this->name = "Analog Devices AD1981HD";
-		this->init_widget = azalia_ad1981hd_init_widget;
-		this->mixer_init = azalia_ad1981hd_mixer_init;
-=======
 	case 0x10ec0883:
 		this->name = "Realtek ALC883";
 		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
@@ -282,13 +211,10 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x11d41981:
 		this->name = "Analog Devices AD1981HD";
 		this->qrks |= AZ_QRK_WID_AD1981_OAMP;
->>>>>>> origin/master
 		break;
 	case 0x11d41983:
 		this->name = "Analog Devices AD1983";
 		break;
-<<<<<<< HEAD
-=======
 	case 0x11d41984:
 		this->name = "Analog Devices AD1984";
 		break;
@@ -316,7 +242,6 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x14f15051:
 		this->name = "Conexant CX20561";  /* Hermosa */
 		break;
->>>>>>> origin/master
 	case 0x434d4980:
 		this->name = "CMedia CMI9880";
 		break;
@@ -387,16 +312,11 @@ azalia_codec_init_vtbl(codec_t *this)
 		this->name = "Sigmatel STAC9225";
 		break;
 	case 0x83847680:
-<<<<<<< HEAD
-		this->name = "Sigmatel STAC9221";
-		this->init_dacgroup = azalia_stac9221_init_dacgroup;
-=======
 		this->name = "Sigmatel STAC9220/1";
 		if (this->subid == 0x76808384) {	/* APPLE_ID */
 			this->qrks |= AZ_QRK_GPIO_POL_0 | AZ_QRK_GPIO_UNMUTE_0 |
 			     AZ_QRK_GPIO_UNMUTE_1;
 		}
->>>>>>> origin/master
 		break;
 	case 0x83847682:
 		/* FALLTHROUGH */
@@ -404,10 +324,6 @@ azalia_codec_init_vtbl(codec_t *this)
 		this->name = "Sigmatel STAC9221D";	/* aka IDT 92HD202 */
 		break;
 	case 0x83847690:
-<<<<<<< HEAD
-		this->name = "Sigmatel STAC9220";
-		this->mixer_init = azalia_stac9220_mixer_init;
-=======
 		this->name = "Sigmatel STAC9200";	/* aka IDT 92HD001 */
 		break;
 	case 0x83847691:
@@ -434,7 +350,6 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x838476a3:
 		this->name = "Sigmatel STAC9204D";
->>>>>>> origin/master
 		break;
 	}
 	return 0;
@@ -456,38 +371,6 @@ int
 azalia_init_dacgroup(codec_t *this)
 {
 	this->dacs.ngroups = 0;
-<<<<<<< HEAD
-	for (assoc = 0; assoc < CORB_CD_ASSOCIATION_MAX; assoc++) {
-		azalia_generic_codec_add_dacgroup(this, assoc, 0);
-		azalia_generic_codec_add_dacgroup(this, assoc, COP_AWCAP_DIGITAL);
-	}
-
-	/* find DACs which do not connect with any pins by default */
-	DPRINTF(("%s: find non-connected DACs\n", __func__));
-	FOR_EACH_WIDGET(this, i) {
-		boolean_t found;
-
-		if (this->w[i].type != COP_AWTYPE_AUDIO_OUTPUT)
-			continue;
-		found = FALSE;
-		for (group = 0; group < this->dacs.ngroups; group++) {
-			for (j = 0; j < this->dacs.groups[group].nconv; j++) {
-				if (i == this->dacs.groups[group].conv[j]) {
-					found = TRUE;
-					group = this->dacs.ngroups;
-					break;
-				}
-			}
-		}
-		if (found)
-			continue;
-		if (this->dacs.ngroups >= 32)
-			break;
-		this->dacs.groups[this->dacs.ngroups].nconv = 1;
-		this->dacs.groups[this->dacs.ngroups].conv[0] = i;
-		this->dacs.ngroups++;
-	}
-=======
 	if (this->na_dacs > 0)
 		azalia_add_convgroup(this, &this->dacs,
 		    this->opins, this->nopins,
@@ -498,7 +381,6 @@ azalia_init_dacgroup(codec_t *this)
 		    this->opins_d, this->nopins_d,
 		    this->a_dacs_d, this->na_dacs_d,
 		    COP_AWTYPE_AUDIO_OUTPUT, COP_AWCAP_DIGITAL);
->>>>>>> origin/master
 	this->dacs.cur = 0;
 
 	this->adcs.ngroups = 0;
@@ -538,23 +420,7 @@ azalia_add_convgroup(codec_t *this, convgroupset_t *group,
 			if (convs[j] == conv)
 				break;
 		}
-<<<<<<< HEAD
-		if (j < n)	/* this group already has <dac> */
-			continue;
-		this->dacs.groups[this->dacs.ngroups].conv[n++] = dac;
-		DPRINTF(("%s: assoc=%d seq=%d ==> g=%d n=%d\n",
-			 __func__, assoc, seq, this->dacs.ngroups, n-1));
-	}
-	if (n <= 0)		/* no such DACs */
-		return 0;
-	this->dacs.groups[this->dacs.ngroups].nconv = n;
-
-	/* check if the same combination is already registered */
-	for (i = 0; i < this->dacs.ngroups; i++) {
-		if (n != this->dacs.groups[i].nconv)
-=======
 		if (j < nconvs)
->>>>>>> origin/master
 			continue;
 		convs[nconvs++] = conv;
 		if (nconvs >= nall_convs) {
@@ -629,29 +495,8 @@ azalia_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 	int i, ret;
 
 	w = &this->w[index];
-<<<<<<< HEAD
-	if (w->type == COP_AWTYPE_AUDIO_OUTPUT) {
-		DPRINTF(("%s: DAC: nid=0x%x index=%d\n",
-		    __func__, w->nid, index));
-		return index;
-	}
-	if (++depth > 50) {
-		return -1;
-	}
-	if (w->selected >= 0) {
-		j = w->connections[w->selected];
-		if (VALID_WIDGET_NID(j, this)) {
-			ret = azalia_generic_codec_find_dac(this, j, depth);
-			if (ret >= 0) {
-				DPRINTF(("%s: DAC path: nid=0x%x index=%d\n",
-				    __func__, w->nid, index));
-				return ret;
-			}
-		}
-=======
 	if (w->nid == node) {
 		return index;
->>>>>>> origin/master
 	}
 	/* back at the beginning or a bad end */
 	if (depth > 0 &&
@@ -665,17 +510,9 @@ azalia_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 	for (i = 0; i < w->nconnections; i++) {
 		if (!azalia_widget_enabled(this, w->connections[i]))
 			continue;
-<<<<<<< HEAD
-		ret = azalia_generic_codec_find_dac(this, j, depth);
-		if (ret >= 0) {
-			DPRINTF(("%s: DAC path: nid=0x%x index=%d\n",
-			    __func__, w->nid, index));
-=======
 		ret = azalia_codec_fnode(this, node, w->connections[i], depth);
 		if (ret >= 0)
->>>>>>> origin/master
 			return ret;
-		}
 	}
 	return -1;
 }
@@ -801,15 +638,13 @@ azalia_mixer_init(codec_t *this)
 	this->maxmixers = 10;
 	this->nmixers = 0;
 	this->mixers = malloc(sizeof(mixer_item_t) * this->maxmixers,
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->mixers == NULL) {
 		printf("%s: out of memory in %s\n", XNAME(this), __func__);
 		return ENOMEM;
 	}
-	bzero(this->mixers, sizeof(mixer_item_t) * this->maxmixers);
 
 	/* register classes */
-	DPRINTF(("%s: register classes\n", __func__));
 	m = &this->mixers[AZ_CLASS_INPUT];
 	m->devinfo.index = AZ_CLASS_INPUT;
 	strlcpy(m->devinfo.label.name, AudioCinputs,
@@ -864,7 +699,6 @@ azalia_mixer_init(codec_t *this)
 		    strcmp(w->name, this->w[w->connections[0]].name) == 0) &&
 		    w->nid != this->mic) {
 			MIXER_REG_PROLOG;
-			DPRINTF(("%s: selector %s\n", __func__, w->name));
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s_source", w->name);
 			d->type = AUDIO_MIXER_ENUM;
@@ -881,8 +715,6 @@ azalia_mixer_init(codec_t *this)
 				if (!azalia_widget_enabled(this,
 				    w->connections[j]))
 					continue;
-				DPRINTF(("%s: selector %d=%s\n", __func__, j,
-				    this->w[w->connections[j]].name));
 				d->un.e.member[k].ord = j;
 				strlcpy(d->un.e.member[k].label.name,
 				    this->w[w->connections[j]].name,
@@ -898,7 +730,6 @@ azalia_mixer_init(codec_t *this)
 		    w->outamp_cap & COP_AMPCAP_MUTE &&
 		    w->nid != this->mic) {
 			MIXER_REG_PROLOG;
-			DPRINTF(("%s: output mute %s\n", __func__, w->name));
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s_mute", w->name);
 			if (w->mixer_class >= 0)
@@ -921,7 +752,6 @@ azalia_mixer_init(codec_t *this)
 		    COP_AMPCAP_NUMSTEPS(w->outamp_cap) &&
 		    w->nid != this->mic) {
 			MIXER_REG_PROLOG;
-			DPRINTF(("%s: output gain %s\n", __func__, w->name));
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s", w->name);
 			d->type = AUDIO_MIXER_VALUE;
@@ -945,20 +775,6 @@ azalia_mixer_init(codec_t *this)
 
 		/* input mute */
 		if (w->widgetcap & COP_AWCAP_INAMP &&
-<<<<<<< HEAD
-		    w->inamp_cap & COP_AMPCAP_MUTE) {
-			DPRINTF(("%s: input mute %s\n", __func__, w->name));
-			if (w->type != COP_AWTYPE_AUDIO_SELECTOR &&
-			    w->type != COP_AWTYPE_AUDIO_MIXER) {
-				MIXER_REG_PROLOG;
-				snprintf(d->label.name, sizeof(d->label.name),
-				    "%s.mute", w->name);
-				d->type = AUDIO_MIXER_ENUM;
-				if (w->type == COP_AWTYPE_PIN_COMPLEX)
-					d->mixer_class = AZ_CLASS_OUTPUT;
-				else if (w->type == COP_AWTYPE_AUDIO_INPUT)
-					d->mixer_class = AZ_CLASS_RECORD;
-=======
 		    w->inamp_cap & COP_AMPCAP_MUTE &&
 		    w->nid != this->speaker &&
 		    w->nid != this->speaker2) {
@@ -968,7 +784,6 @@ azalia_mixer_init(codec_t *this)
 				    "%s_mute", w->name);
 				if (w->mixer_class >= 0)
 					d->mixer_class = w->mixer_class;
->>>>>>> origin/master
 				else
 					d->mixer_class = AZ_CLASS_INPUT;
 				m->target = 0;
@@ -989,29 +804,6 @@ azalia_mixer_init(codec_t *this)
 					if (!azalia_widget_enabled(this,
 					    w->connections[j]))
 						continue;
-<<<<<<< HEAD
-					DPRINTF(("%s: input mute %s.%s\n", __func__,
-					    w->name, this->w[w->connections[j]].name));
-					snprintf(d->label.name, sizeof(d->label.name),
-					    "%s.%s.mute", w->name,
-					    this->w[w->connections[j]].name);
-					d->type = AUDIO_MIXER_ENUM;
-					if (w->type == COP_AWTYPE_PIN_COMPLEX)
-						d->mixer_class = AZ_CLASS_OUTPUT;
-					else if (w->type == COP_AWTYPE_AUDIO_INPUT)
-						d->mixer_class = AZ_CLASS_RECORD;
-					else
-						d->mixer_class = AZ_CLASS_INPUT;
-					m->target = j;
-					d->un.e.num_mem = 2;
-					d->un.e.member[0].ord = 0;
-					strlcpy(d->un.e.member[0].label.name,
-					    AudioNoff, MAX_AUDIO_DEV_LEN);
-					d->un.e.member[1].ord = 1;
-					strlcpy(d->un.e.member[1].label.name,
-					    AudioNon, MAX_AUDIO_DEV_LEN);
-					this->nmixers++;
-=======
 					if (w->connections[j] == this->speaker ||
 					    w->connections[j] == this->speaker2)
 						continue;
@@ -1020,7 +812,6 @@ azalia_mixer_init(codec_t *this)
 					    this->w[w->connections[j]].name,
 					    MAX_AUDIO_DEV_LEN);
 					k++;
->>>>>>> origin/master
 				}
 				d->un.s.num_mem = k;
 				if (k != 0)
@@ -1029,31 +820,18 @@ azalia_mixer_init(codec_t *this)
 		}
 
 		/* input gain */
-<<<<<<< HEAD
-		if (w->widgetcap & COP_AWCAP_INAMP
-		    && COP_AMPCAP_NUMSTEPS(w->inamp_cap)) {
-			DPRINTF(("%s: input gain %s\n", __func__, w->name));
-=======
 		if (w->widgetcap & COP_AWCAP_INAMP &&
 		    COP_AMPCAP_NUMSTEPS(w->inamp_cap) &&
 		    w->nid != this->speaker &&
 		    w->nid != this->speaker2) {
->>>>>>> origin/master
 			if (w->type != COP_AWTYPE_AUDIO_SELECTOR &&
 			    w->type != COP_AWTYPE_AUDIO_MIXER) {
 				MIXER_REG_PROLOG;
 				snprintf(d->label.name, sizeof(d->label.name),
 				    "%s", w->name);
 				d->type = AUDIO_MIXER_VALUE;
-<<<<<<< HEAD
-				if (w->type == COP_AWTYPE_PIN_COMPLEX)
-					d->mixer_class = AZ_CLASS_OUTPUT;
-				else if (w->type == COP_AWTYPE_AUDIO_INPUT)
-					d->mixer_class = AZ_CLASS_RECORD;
-=======
 				if (w->mixer_class >= 0)
 					d->mixer_class = w->mixer_class;
->>>>>>> origin/master
 				else
 					d->mixer_class = AZ_CLASS_INPUT;
 				m->target = 0;
@@ -1070,18 +848,6 @@ azalia_mixer_init(codec_t *this)
 					if (w->connections[j] == this->speaker ||
 					    w->connections[j] == this->speaker2)
 						continue;
-<<<<<<< HEAD
-					DPRINTF(("%s: input gain %s.%s\n", __func__,
-					    w->name, this->w[w->connections[j]].name));
-					snprintf(d->label.name, sizeof(d->label.name),
-					    "%s.%s", w->name,
-					    this->w[w->connections[j]].name);
-					d->type = AUDIO_MIXER_VALUE;
-					if (w->type == COP_AWTYPE_PIN_COMPLEX)
-						d->mixer_class = AZ_CLASS_OUTPUT;
-					else if (w->type == COP_AWTYPE_AUDIO_INPUT)
-						d->mixer_class = AZ_CLASS_RECORD;
-=======
 					MIXER_REG_PROLOG;
 					snprintf(d->label.name,
 					    sizeof(d->label.name), "%s_%s",
@@ -1090,7 +856,6 @@ azalia_mixer_init(codec_t *this)
 					d->type = AUDIO_MIXER_VALUE;
 					if (w->mixer_class >= 0)
 						d->mixer_class = w->mixer_class;
->>>>>>> origin/master
 					else
 						d->mixer_class = AZ_CLASS_INPUT;
 					m->target = j;
@@ -1141,7 +906,6 @@ azalia_mixer_init(codec_t *this)
 		    COP_PINCAP_VREF(w->d.pin.cap) > 1)) {
 
 			MIXER_REG_PROLOG;
-			DPRINTF(("%s: pin dir %s\n", __func__, w->name));
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s_dir", w->name);
 			d->type = AUDIO_MIXER_ENUM;
@@ -1205,7 +969,6 @@ azalia_mixer_init(codec_t *this)
 		    w->d.pin.cap & COP_PINCAP_HEADPHONE &&
 		    w->nid != this->mic) {
 			MIXER_REG_PROLOG;
-			DPRINTF(("%s: hpboost %s\n", __func__, w->name));
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s_boost", w->name);
 			d->mixer_class = AZ_CLASS_OUTPUT;
@@ -1214,21 +977,6 @@ azalia_mixer_init(codec_t *this)
 			this->nmixers++;
 		}
 
-<<<<<<< HEAD
-		/* volume knob */
-		if (w->type == COP_AWTYPE_VOLUME_KNOB &&
-		    w->d.volume.cap & COP_VKCAP_DELTA) {
-			MIXER_REG_PROLOG;
-			DPRINTF(("%s: volume knob %s\n", __func__, w->name));
-			strlcpy(d->label.name, w->name, sizeof(d->label.name));
-			d->type = AUDIO_MIXER_VALUE;
-			d->mixer_class = AZ_CLASS_OUTPUT;
-			m->target = MI_TARGET_VOLUME;
-			d->un.v.num_channels = 1;
-			d->un.v.units.name[0] = 0;
-			d->un.v.delta =
-			    MIXER_DELTA(COP_VKCAP_NUMSTEPS(w->d.volume.cap));
-=======
 		if (w->type == COP_AWTYPE_PIN_COMPLEX &&
 		    w->d.pin.cap & COP_PINCAP_EAPD) {
 			MIXER_REG_PROLOG;
@@ -1307,7 +1055,6 @@ azalia_mixer_init(codec_t *this)
 		}
 		d->un.s.num_mem = j;
 		if (j != 0)
->>>>>>> origin/master
 			this->nmixers++;
 	}
 
@@ -1422,12 +1169,7 @@ azalia_mixer_init(codec_t *this)
 	 */
 	if (this->dacs.ngroups > 1) {
 		MIXER_REG_PROLOG;
-<<<<<<< HEAD
-		DPRINTF(("%s: create inputs.usingdac\n", __func__));
-		strlcpy(d->label.name, "usingdac", sizeof(d->label.name));
-=======
 		strlcpy(d->label.name, AudioNmode, sizeof(d->label.name));
->>>>>>> origin/master
 		d->type = AUDIO_MIXER_ENUM;
 		d->mixer_class = AZ_CLASS_OUTPUT;
 		m->target = MI_TARGET_DAC;
@@ -1447,12 +1189,7 @@ azalia_mixer_init(codec_t *this)
 	 */
 	if (this->adcs.ngroups > 1) {
 		MIXER_REG_PROLOG;
-<<<<<<< HEAD
-		DPRINTF(("%s: create inputs.usingadc\n", __func__));
-		strlcpy(d->label.name, "usingadc", sizeof(d->label.name));
-=======
 		strlcpy(d->label.name, AudioNmode, sizeof(d->label.name));
->>>>>>> origin/master
 		d->type = AUDIO_MIXER_ENUM;
 		d->mixer_class = AZ_CLASS_RECORD;
 		m->target = MI_TARGET_ADC;
@@ -1494,12 +1231,11 @@ azalia_mixer_ensure_capacity(codec_t *this, size_t newsize)
 	newmax = this->maxmixers + 10;
 	if (newmax < newsize)
 		newmax = newsize;
-	newbuf = malloc(sizeof(mixer_item_t) * newmax, M_DEVBUF, M_NOWAIT);
+	newbuf = malloc(sizeof(mixer_item_t) * newmax, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (newbuf == NULL) {
 		printf("%s: out of memory in %s\n", XNAME(this), __func__);
 		return ENOMEM;
 	}
-	bzero(newbuf, sizeof(mixer_item_t) * newmax);
 	bcopy(this->mixers, newbuf, this->maxmixers * sizeof(mixer_item_t));
 	free(this->mixers, M_DEVBUF);
 	this->mixers = newbuf;
@@ -1538,7 +1274,6 @@ azalia_mixer_default(codec_t *this)
 	int i, j, tgt, cap, err;
 
 	/* unmute all */
-	DPRINTF(("%s: unmute\n", __func__));
 	for (i = 0; i < this->nmixers; i++) {
 		m = &this->mixers[i];
 		if (!IS_MI_TARGET_INAMP(m->target) &&
@@ -1549,45 +1284,10 @@ azalia_mixer_default(codec_t *this)
 		bzero(&mc, sizeof(mc));
 		mc.dev = i;
 		mc.type = AUDIO_MIXER_ENUM;
-<<<<<<< HEAD
-		mc.un.ord = 0;
-		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
-	}
-
-	/*
-	 * For bidirectional pins,
-	 *   Output: lineout, speaker, headphone, spdifout, digitalout, other
-	 *   Input: others
-	 */
-	DPRINTF(("%s: process bidirectional pins\n", __func__));
-	for (i = 0; i < this->nmixers; i++) {
-		mixer_ctrl_t mc;
-
-		m = &this->mixers[i];
-		if (m->target != MI_TARGET_PINDIR)
-			continue;
-		mc.dev = i;
-		mc.type = AUDIO_MIXER_ENUM;
-		switch (this->w[m->nid].d.pin.device) {
-		case CORB_CD_LINEOUT:
-		case CORB_CD_SPEAKER:
-		case CORB_CD_HEADPHONE:
-		case CORB_CD_SPDIFOUT:
-		case CORB_CD_DIGITALOUT:
-		case CORB_CD_DEVICE_OTHER:
-			mc.un.ord = 1;
-			break;
-		default:
-			mc.un.ord = 0;
-		}
-		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
-=======
 		azalia_mixer_set(this, m->nid, m->target, &mc);
->>>>>>> origin/master
 	}
 
 	/* set unextreme volume */
-	DPRINTF(("%s: set volume\n", __func__));
 	for (i = 0; i < this->nmixers; i++) {
 		m = &this->mixers[i];
 		if (!IS_MI_TARGET_INAMP(m->target) &&
@@ -1932,8 +1632,6 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 		mc->un.value.level[0] = CORB_DCC_CC(result);
 	}
 
-<<<<<<< HEAD
-=======
 	/* EAPD */
 	else if (target == MI_TARGET_EAPD) {
 		err = azalia_comresp(this, nid, CORB_GET_EAPD_BTL_ENABLE,
@@ -2040,7 +1738,6 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 		}
 	}
 
->>>>>>> origin/master
 	else {
 		DPRINTF(("%s: internal error in %s: target=%x\n",
 		    XNAME(this), __func__, target));
@@ -2327,12 +2024,6 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 			return err;
 	}
 
-<<<<<<< HEAD
-	else {
-		printf("%s: internal error in %s: target=%x\n",
-		    XNAME(this), __func__, target);
-		return -1;
-=======
 	/* EAPD */
 	else if (target == MI_TARGET_EAPD) {
 		if (mc->un.ord >= 2)
@@ -2351,33 +2042,8 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 		    CORB_SET_EAPD_BTL_ENABLE, result, &result);
 		if (err)
 			return err;
->>>>>>> origin/master
 	}
 
-<<<<<<< HEAD
-u_char
-azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
-    uint32_t dv)
-{
-#ifdef MAX_VOLUME_255
-	uint32_t dmax;
-
-	if (IS_MI_TARGET_INAMP(target))
-		dmax = COP_AMPCAP_NUMSTEPS(this->w[nid].inamp_cap);
-	else if (target == MI_TARGET_OUTAMP)
-		dmax = COP_AMPCAP_NUMSTEPS(this->w[nid].outamp_cap);
-	else if (target == MI_TARGET_VOLUME)
-		dmax = COP_VKCAP_NUMSTEPS(this->w[nid].d.volume.cap);
-	else {
-		printf("unknown target: %d\n", target);
-		dmax = 255;
-	}
-	return dv * AUDIO_MAX_GAIN / dmax;
-#else
-	return dv;
-#endif
-}
-=======
 	else if (target == MI_TARGET_PINSENSE) {
 		/* do nothing, control is read only */
 	}
@@ -2412,7 +2078,6 @@ azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int targe
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
->>>>>>> origin/master
 
 			if (WIDGET_CHANNELS(w) == 2) {
 				err = azalia_comresp(this, nid,
@@ -2434,14 +2099,6 @@ azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int targe
 			}
 		}
 	}
-<<<<<<< HEAD
-	return uv * dmax / AUDIO_MAX_GAIN;
-#else
-	return uv;
-#endif
-}
-=======
->>>>>>> origin/master
 
 	else if (target == MI_TARGET_MIXERSET && mc->type == AUDIO_MIXER_SET) {
 		/* do nothing, control is read only */
@@ -2463,202 +2120,6 @@ azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int targe
 		const widget_t *w;
 		mixer_ctrl_t mc2;
 
-<<<<<<< HEAD
-/* ----------------------------------------------------------------
- * Realtek ALC260
- *
- * Fujitsu LOOX T70M/T
- *	Internal Speaker: 0x10
- *	Front Headphone: 0x14
- *	Front mic: 0x12
- * ---------------------------------------------------------------- */
-
-#define ALC260_FUJITSU_ID	0x132610cf
-static const mixer_item_t alc260_mixer_items[] = {
-	{{AZ_CLASS_INPUT, {AudioCinputs}, AUDIO_MIXER_CLASS, AZ_CLASS_INPUT, 0, 0}, 0},
-	{{AZ_CLASS_OUTPUT, {AudioCoutputs}, AUDIO_MIXER_CLASS, AZ_CLASS_OUTPUT, 0, 0}, 0},
-	{{AZ_CLASS_RECORD, {AudioCrecord}, AUDIO_MIXER_CLASS, AZ_CLASS_RECORD, 0, 0}, 0},
-
-	{{0, {AudioNmaster}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, 3}}, 0x08, MI_TARGET_OUTAMP}, /* and 0x09, 0x0a(mono) */
-	{{0, {AudioNmaster".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x0f, MI_TARGET_OUTAMP},
-	{{0, {AudioNheadphone".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x10, MI_TARGET_OUTAMP},
-	{{0, {AudioNheadphone".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x10, MI_TARGET_PINBOOST},
-	{{0, {AudioNmono".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x11, MI_TARGET_OUTAMP},
-	{{0, {"mic1.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x12, MI_TARGET_OUTAMP},
-	{{0, {"mic1"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_IO}, 0x12, MI_TARGET_PINDIR},
-	{{0, {"mic2.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x13, MI_TARGET_OUTAMP},
-	{{0, {"mic2"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_IO}, 0x13, MI_TARGET_PINDIR},
-	{{0, {"line1.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_OUTAMP},
-	{{0, {"line1"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_IO}, 0x14, MI_TARGET_PINDIR},
-	{{0, {"line2.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x15, MI_TARGET_OUTAMP},
-	{{0, {"line2"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_IO}, 0x15, MI_TARGET_PINDIR},
-
-	{{0, {AudioNdac".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x08, MI_TARGET_INAMP(0)}, /* and 0x09, 0x0a(mono) */
-	{{0, {"mic1.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {"mic1"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {"mic2.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(1)},
-	{{0, {"mic2"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(1)},
-	{{0, {"line1.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(2)},
-	{{0, {"line1"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, 3}}, 0x07, MI_TARGET_INAMP(2)},
-	{{0, {"line2.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(3)},
-	{{0, {"line2"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(3)},
-	{{0, {AudioNcd".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(4)},
-	{{0, {AudioNcd}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(4)},
-	{{0, {AudioNspeaker".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(5)},
-	{{0, {AudioNspeaker}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(5)},
-
-	{{0, {"adc04.source"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={5, {{{"mic1"}, 0}, {{"mic2"}, 1}, {{"line1"}, 2},
-		     {{"line2"}, 3}, {{AudioNcd}, 4}}}},
-	 0x04, MI_TARGET_CONNLIST},
-	{{0, {"adc04.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  ENUM_OFFON}, 0x04, MI_TARGET_INAMP(0)},
-	{{0, {"adc04"}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD, 0, 0,
-	  .un.v={{""}, 2, MIXER_DELTA(35)}}, 0x04, MI_TARGET_INAMP(0)},
-	{{0, {"adc05.source"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={6, {{{"mic1"}, 0}, {{"mic2"}, 1}, {{"line1"}, 2},
-		     {{"line2"}, 3}, {{AudioNcd}, 4}, {{AudioNmixerout}, 5}}}},
-	 0x05, MI_TARGET_CONNLIST},
-	{{0, {"adc05.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  ENUM_OFFON}, 0x05, MI_TARGET_INAMP(0)},
-	{{0, {"adc05"}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD, 0, 0,
-	  .un.v={{""}, 2, MIXER_DELTA(35)}}, 0x05, MI_TARGET_INAMP(0)},
-
-	{{0, {"usingdac"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT, 0, 0,
-	  .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}}, 0, MI_TARGET_DAC},
-	{{0, {"usingadc"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={3, {{{"adc04"}, 0}, {{"adc05"}, 1}, {{"digital"}, 2}}}}, 0, MI_TARGET_ADC},
-};
-
-static const mixer_item_t alc260_loox_mixer_items[] = {
-	{{AZ_CLASS_INPUT, {AudioCinputs}, AUDIO_MIXER_CLASS, AZ_CLASS_INPUT, 0, 0}, 0},
-	{{AZ_CLASS_OUTPUT, {AudioCoutputs}, AUDIO_MIXER_CLASS, AZ_CLASS_OUTPUT, 0, 0}, 0},
-	{{AZ_CLASS_RECORD, {AudioCrecord}, AUDIO_MIXER_CLASS, AZ_CLASS_RECORD, 0, 0}, 0},
-
-	{{0, {AudioNmaster}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, 3}}, 0x08, MI_TARGET_OUTAMP}, /* and 0x09, 0x0a(mono) */
-	{{0, {AudioNmaster".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x10, MI_TARGET_OUTAMP},
-	{{0, {AudioNmaster".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x10, MI_TARGET_PINBOOST},
-	{{0, {AudioNheadphone".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_OUTAMP},
-	{{0, {AudioNheadphone".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_PINBOOST},
-
-	{{0, {AudioNdac".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x08, MI_TARGET_INAMP(0)}, /* and 0x09, 0x0a(mono) */
-	{{0, {AudioNmicrophone".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {AudioNmicrophone}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {AudioNcd".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(4)},
-	{{0, {AudioNcd}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(4)},
-	{{0, {AudioNspeaker".mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(5)},
-	{{0, {AudioNspeaker}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(65)}}, 0x07, MI_TARGET_INAMP(5)},
-
-	{{0, {"adc04.source"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={2, {{{AudioNmicrophone}, 0}, {{AudioNcd}, 4}}}}, 0x04, MI_TARGET_CONNLIST},
-	{{0, {"adc04.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  ENUM_OFFON}, 0x04, MI_TARGET_INAMP(0)},
-	{{0, {"adc04"}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD, 0, 0,
-	  .un.v={{""}, 2, MIXER_DELTA(35)}}, 0x04, MI_TARGET_INAMP(0)},
-	{{0, {"adc05.source"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={3, {{{AudioNmicrophone}, 0}, {{AudioNcd}, 4}, {{AudioNmixerout}, 5}}}},
-	 0x05, MI_TARGET_CONNLIST},
-	{{0, {"adc05.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  ENUM_OFFON}, 0x05, MI_TARGET_INAMP(0)},
-	{{0, {"adc05"}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD, 0, 0,
-	  .un.v={{""}, 2, MIXER_DELTA(35)}}, 0x05, MI_TARGET_INAMP(0)},
-
-	{{0, {"usingdac"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT, 0, 0,
-	  .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}}, 0, MI_TARGET_DAC},
-	{{0, {"usingadc"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={3, {{{"adc04"}, 0}, {{"adc05"}, 1}, {{"digital"}, 2}}}}, 0, MI_TARGET_ADC},
-};
-
-int
-azalia_alc260_mixer_init(codec_t *this)
-{
-	const mixer_item_t *mi;
-	mixer_ctrl_t mc;
-
-	switch (this->subid) {
-	case ALC260_FUJITSU_ID:
-		this->nmixers = sizeof(alc260_loox_mixer_items) / sizeof(mixer_item_t);
-		mi = alc260_loox_mixer_items;
-		break;
-	default:
-		this->nmixers = sizeof(alc260_mixer_items) / sizeof(mixer_item_t);
-		mi = alc260_mixer_items;
-	}
-	this->mixers = malloc(sizeof(mixer_item_t) * this->nmixers,
-	    M_DEVBUF, M_NOWAIT);
-	if (this->mixers == NULL) {
-		printf("%s: out of memory in %s\n", XNAME(this), __func__);
-		return ENOMEM;
-	}
-	bzero(this->mixers, sizeof(mixer_item_t) * this->nmixers);
-	memcpy(this->mixers, mi, sizeof(mixer_item_t) * this->nmixers);
-	azalia_generic_mixer_fix_indexes(this);
-	azalia_generic_mixer_default(this);
-
-	mc.dev = -1;		/* no need for generic_mixer_set() */
-	mc.type = AUDIO_MIXER_ENUM;
-	mc.un.ord = 1;		/* pindir: output */
-	azalia_generic_mixer_set(this, 0x0f, MI_TARGET_PINDIR, &mc); /* lineout */
-	azalia_generic_mixer_set(this, 0x10, MI_TARGET_PINDIR, &mc); /* headphones */
-	mc.un.ord = 0;		/* pindir: input */
-	azalia_generic_mixer_set(this, 0x12, MI_TARGET_PINDIR, &mc); /* mic1 */
-	azalia_generic_mixer_set(this, 0x13, MI_TARGET_PINDIR, &mc); /* mic2 */
-	azalia_generic_mixer_set(this, 0x14, MI_TARGET_PINDIR, &mc); /* line1 */
-	azalia_generic_mixer_set(this, 0x15, MI_TARGET_PINDIR, &mc); /* line2 */
-	mc.un.ord = 0;		/* mute: off */
-	azalia_generic_mixer_set(this, 0x08, MI_TARGET_INAMP(0), &mc);
-	azalia_generic_mixer_set(this, 0x08, MI_TARGET_INAMP(1), &mc);
-	azalia_generic_mixer_set(this, 0x09, MI_TARGET_INAMP(0), &mc);
-	azalia_generic_mixer_set(this, 0x09, MI_TARGET_INAMP(1), &mc);
-	azalia_generic_mixer_set(this, 0x0a, MI_TARGET_INAMP(0), &mc);
-	azalia_generic_mixer_set(this, 0x0a, MI_TARGET_INAMP(1), &mc);
-	if (this->subid == ALC260_FUJITSU_ID) {
-		mc.un.ord = 1;	/* pindir: output */
-		azalia_generic_mixer_set(this, 0x14, MI_TARGET_PINDIR, &mc); /* line1 */
-		mc.un.ord = 4;	/* connlist: cd */
-		azalia_generic_mixer_set(this, 0x05, MI_TARGET_CONNLIST, &mc);
-	}
-	return 0;
-}
-=======
 		if (mc->type == AUDIO_MIXER_VALUE) {
 			if (mc->un.value.num_channels != 2)
 				return EINVAL;
@@ -2721,7 +2182,6 @@ azalia_alc260_mixer_init(codec_t *this)
 					return err;
 				}
 			}
->>>>>>> origin/master
 
 		} else if (mc->type == AUDIO_MIXER_SET) {
 			this->playvols.cur =
@@ -2730,336 +2190,9 @@ azalia_alc260_mixer_init(codec_t *this)
 		} else {
 			DPRINTF(("%s: invalid output master mixer type\n"));
 			return EINVAL;
-<<<<<<< HEAD
-	}
-	return azalia_generic_mixer_set(this, m->nid, m->target, mc);
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC880
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc880_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
-		 {1, {0x06}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x08, 0x09}}, /* analog 4ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC882
- * ---------------------------------------------------------------- */
-
-static const mixer_item_t alc882_mixer_items[] = {
-	{{AZ_CLASS_INPUT, {AudioCinputs}, AUDIO_MIXER_CLASS, AZ_CLASS_INPUT, 0, 0}, 0},
-	{{AZ_CLASS_OUTPUT, {AudioCoutputs}, AUDIO_MIXER_CLASS, AZ_CLASS_OUTPUT, 0, 0}, 0},
-	{{AZ_CLASS_RECORD, {AudioCrecord}, AUDIO_MIXER_CLASS, AZ_CLASS_RECORD, 0, 0}, 0},
-
-	/* 0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x14,0x15,0x16,0x17 */
-	{{0, {"mic1."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_INAMP(0)},
-	{{0, {"mic1"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_INAMP(0)},
-	{{0, {"mic2."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_INAMP(1)},
-	{{0, {"mic2"}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_INAMP(1)},
-	{{0, {AudioNline"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_INAMP(2)},
-	{{0, {AudioNline}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_INAMP(2)},
-	{{0, {AudioNcd"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_INAMP(4)},
-	{{0, {AudioNcd}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_INAMP(4)},
-	{{0, {AudioNspeaker"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_INAMP(5)},
-	{{0, {AudioNspeaker}, AUDIO_MIXER_VALUE, AZ_CLASS_INPUT,
-	  0, 0, .un.v={{""}, 1, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_INAMP(5)},
-
-	{{0, {AudioNmaster}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0c, MI_TARGET_OUTAMP},
-	{{0, {AudioNmaster"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_OUTAMP},
-	{{0, {AudioNmaster".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_PINBOOST},
-	{{0, {AudioNheadphone"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x1b, MI_TARGET_OUTAMP},
-	{{0, {AudioNheadphone".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x1b, MI_TARGET_PINBOOST},
-	{{0, {AzaliaNfront".dac.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0c, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNfront".mixer.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0c, MI_TARGET_INAMP(1)},
-
-	{{0, {AudioNsurround}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0d, MI_TARGET_OUTAMP},
-	{{0, {AudioNsurround"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x15, MI_TARGET_OUTAMP},
-	{{0, {AudioNsurround".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x15, MI_TARGET_PINBOOST},
-	{{0, {AudioNsurround".dac.mut"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0d, MI_TARGET_INAMP(0)},
-	{{0, {AudioNsurround".mixer.m"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0d, MI_TARGET_INAMP(1)},
-
-	{{0, {AzaliaNclfe}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0e, MI_TARGET_OUTAMP},
-	{{0, {AzaliaNclfe"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x16, MI_TARGET_OUTAMP},
-	{{0, {AzaliaNclfe".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x16, MI_TARGET_PINBOOST},
-	{{0, {AzaliaNclfe".dac.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0e, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNclfe".mixer.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0e, MI_TARGET_INAMP(1)},
-
-	{{0, {AzaliaNside}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0f, MI_TARGET_OUTAMP},
-	{{0, {AzaliaNside"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x17, MI_TARGET_OUTAMP},
-	{{0, {AzaliaNside".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x17, MI_TARGET_PINBOOST},
-	{{0, {AzaliaNside".dac.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0f, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNside".mixer.mute"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, ENUM_OFFON}, 0x0f, MI_TARGET_INAMP(1)},
-
-	/* 0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x14,0x15,0x16,0x17,0xb */
-#define ALC882_MIC1	0x001
-#define ALC882_MIC2	0x002
-#define ALC882_LINE	0x004
-#define ALC882_CD	0x010
-#define ALC882_BEEP	0x020
-#define ALC882_MIX	0x400
-#define ALC882_MASK	0x437
-	{{0, {AzaliaNfront"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
-	  0, 0, ENUM_OFFON}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNfront}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x07, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNfront"."AudioNsource}, AUDIO_MIXER_SET, AZ_CLASS_RECORD,
-	  0, 0, .un.s={6, {{{"mic1"}, ALC882_MIC1}, {{"mic2"}, ALC882_MIC2},
-			   {{AudioNline}, ALC882_LINE}, {{AudioNcd}, ALC882_CD},
-			   {{AudioNspeaker}, ALC882_BEEP},
-			   {{AudioNmixerout}, ALC882_MIX}}}}, 0x24, -1},
-	{{0, {AudioNsurround"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
-	  0, 0, ENUM_OFFON}, 0x08, MI_TARGET_INAMP(0)},
-	{{0, {AudioNsurround}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x08, MI_TARGET_INAMP(0)},
-	{{0, {AudioNsurround"."AudioNsource}, AUDIO_MIXER_SET, AZ_CLASS_RECORD,
-	  0, 0, .un.s={6, {{{"mic1"}, ALC882_MIC1}, {{"mic2"}, ALC882_MIC2},
-			   {{AudioNline}, ALC882_LINE}, {{AudioNcd}, ALC882_CD},
-			   {{AudioNspeaker}, ALC882_BEEP},
-			   {{AudioNmixerout}, ALC882_MIX}}}}, 0x23, -1},
-	{{0, {AzaliaNclfe"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
-	  0, 0, ENUM_OFFON}, 0x09, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNclfe}, AUDIO_MIXER_VALUE, AZ_CLASS_RECORD,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x09, MI_TARGET_INAMP(0)},
-	{{0, {AzaliaNclfe"."AudioNsource}, AUDIO_MIXER_SET, AZ_CLASS_RECORD,
-	  0, 0, .un.s={6, {{{"mic1"}, ALC882_MIC1}, {{"mic2"}, ALC882_MIC2},
-			   {{AudioNline}, ALC882_LINE}, {{AudioNcd}, ALC882_CD},
-			   {{AudioNspeaker}, ALC882_BEEP},
-			   {{AudioNmixerout}, ALC882_MIX}}}}, 0x22, -1},
-
-	{{0, {"usingdac"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT, 0, 0,
-	  .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}}, 0, MI_TARGET_DAC},
-	{{0, {"usingadc"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD, 0, 0,
-	  .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}}, 0, MI_TARGET_ADC},
-};
-
-int
-azalia_alc882_mixer_init(codec_t *this)
-{
-	mixer_ctrl_t mc;
-
-	this->nmixers = sizeof(alc882_mixer_items) / sizeof(mixer_item_t);
-	this->mixers = malloc(sizeof(mixer_item_t) * this->nmixers,
-	    M_DEVBUF, M_NOWAIT);
-	if (this->mixers == NULL) {
-		printf("%s: out of memory in %s\n", XNAME(this), __func__);
-		return ENOMEM;
-	}
-	bzero(this->mixers, sizeof(mixer_item_t) * this->maxmixers);
-	memcpy(this->mixers, alc882_mixer_items,
-	    sizeof(mixer_item_t) * this->nmixers);
-	azalia_generic_mixer_fix_indexes(this);
-	azalia_generic_mixer_default(this);
-
-	mc.dev = -1;
-	mc.type = AUDIO_MIXER_ENUM;
-	mc.un.ord = 1;		/* pindir: output */
-	azalia_generic_mixer_set(this, 0x14, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x1b, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x15, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x16, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x17, MI_TARGET_PINDIR, &mc);
-	mc.un.ord = 0;		/* [0] 0x0c */
-	azalia_generic_mixer_set(this, 0x14, MI_TARGET_CONNLIST, &mc);
-	azalia_generic_mixer_set(this, 0x1b, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 1;		/* [1] 0x0d */
-	azalia_generic_mixer_set(this, 0x15, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 2;		/* [2] 0x0e */
-	azalia_generic_mixer_set(this, 0x16, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 2;		/* [3] 0x0fb */
-	azalia_generic_mixer_set(this, 0x17, MI_TARGET_CONNLIST, &mc);
-
-	mc.un.ord = 0;		/* pindir: input */
-	azalia_generic_mixer_set(this, 0x18, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x19, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x1a, MI_TARGET_PINDIR, &mc);
-	/* XXX: inamp for 18/19/1a */
-
-	mc.un.ord = 0;		/* unmute */
-	azalia_generic_mixer_set(this, 0x24, MI_TARGET_INAMP(0), &mc);
-	azalia_generic_mixer_set(this, 0x23, MI_TARGET_INAMP(1), &mc);
-	azalia_generic_mixer_set(this, 0x22, MI_TARGET_INAMP(2), &mc);
-	return 0;
-}
-
-int
-azalia_alc882_init_dacgroup(codec_t *this)
-{
-#if 0
-	static const convgroupset_t dacs = {
-		-1, 3,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
-		 {1, {0x06}},	/* digital */
-		 {1, {0x25}}}};	/* another analog */
-#else
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
-		 {1, {0x06}}}};	/* digital */
-#endif
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{3, {0x07, 0x08, 0x09}}, /* analog 6ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-int
-azalia_alc882_set_port(codec_t *this, mixer_ctrl_t *mc)
-{
-	const mixer_item_t *m;
-	mixer_ctrl_t mc2;
-	uint32_t mask, bit;
-	int i, err;
-
-	if (mc->dev >= this->nmixers)
-		return ENXIO;
-	m = &this->mixers[mc->dev];
-	if (mc->type != m->devinfo.type)
-		return EINVAL;
-	if (mc->type == AUDIO_MIXER_CLASS)
-		return 0;
-	if ((m->nid == 0x22 || m->nid == 0x23 || m->nid == 0x24)
-	    && m->target == -1) {
-		DPRINTF(("%s: hook for record.*.source\n", __func__));
-		mc2.dev = -1;
-		mc2.type = AUDIO_MIXER_ENUM;
-		bit = 1;
-		mask = mc->un.mask & ALC882_MASK;
-		for (i = 0; i < this->w[m->nid].nconnections && i < 32; i++) {
-			mc2.un.ord = (mask & bit) ? 0 : 1;
-			err = azalia_generic_mixer_set(this, m->nid,
-			    MI_TARGET_INAMP(i), &mc2);
-			if (err)
-				return err;
-			bit = bit << 1;
-		}
-		return 0;
-	}
-	return azalia_generic_mixer_set(this, m->nid, m->target, mc);
-}
-
-int
-azalia_alc882_get_port(codec_t *this, mixer_ctrl_t *mc)
-{
-	const mixer_item_t *m;
-	uint32_t mask, bit, result;
-	int i, err;
-
-	if (mc->dev >= this->nmixers)
-		return ENXIO;
-	m = &this->mixers[mc->dev];
-	mc->type = m->devinfo.type;
-	if (mc->type == AUDIO_MIXER_CLASS)
-		return 0;
-	if ((m->nid == 0x22 || m->nid == 0x23 || m->nid == 0x24)
-	    && m->target == -1) {
-		DPRINTF(("%s: hook for record.*.source\n", __func__));
-		mask = 0;
-		bit = 1;
-		for (i = 0; i < this->w[m->nid].nconnections && i < 32; i++) {
-			err = this->comresp(this, m->nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
-				      CORB_GAGM_INPUT | CORB_GAGM_LEFT |
-				      i, &result);
-			if (err)
-				return err;
-			if ((result & CORB_GAGM_MUTE) == 0)
-				mask |= bit;
-			bit = bit << 1;
-=======
->>>>>>> origin/master
 		}
 	}
 
-<<<<<<< HEAD
-/* ----------------------------------------------------------------
- * Analog Devices AD1981HD
- * ---------------------------------------------------------------- */
-
-#define AD1981HD_THINKPAD	0x201017aa
-
-int
-azalia_ad1981hd_init_widget(const codec_t *this, widget_t *w, nid_t nid)
-{
-	switch (nid) {
-	case 0x05:
-		strlcpy(w->name, AudioNline "out", sizeof(w->name));
-		break;
-	case 0x06:
-		strlcpy(w->name, "hp", sizeof(w->name));
-		break;
-	case 0x07:
-		strlcpy(w->name, AudioNmono, sizeof(w->name));
-		break;
-	case 0x08:
-		strlcpy(w->name, AudioNmicrophone, sizeof(w->name));
-		break;
-	case 0x09:
-		strlcpy(w->name, AudioNline "in", sizeof(w->name));
-		break;
-	case 0x0d:
-		strlcpy(w->name, "beep", sizeof(w->name));
-		break;
-	case 0x17:
-		strlcpy(w->name, AudioNaux, sizeof(w->name));
-		break;
-	case 0x18:
-		strlcpy(w->name, AudioNmicrophone "2", sizeof(w->name));
-		break;
-	case 0x19:
-		strlcpy(w->name, AudioNcd, sizeof(w->name));
-		break;
-	case 0x1d:
-		strlcpy(w->name, AudioNspeaker, sizeof(w->name));
-		break;
-=======
 	else if (target == MI_TARGET_RECVOL) {
 
 		const widget_t *w;
@@ -3138,30 +2271,10 @@ azalia_ad1981hd_init_widget(const codec_t *this, widget_t *w, nid_t nid)
 		DPRINTF(("%s: internal error in %s: target=%x\n",
 		    XNAME(this), __func__, target));
 		return -1;
->>>>>>> origin/master
 	}
 	return 0;
 }
 
-<<<<<<< HEAD
-int
-azalia_ad1981hd_mixer_init(codec_t *this)
-{
-	mixer_ctrl_t mc;
-	int err;
-
-	err = azalia_generic_mixer_init(this);
-	if (err)
-		return err;
-	if (this->subid == AD1981HD_THINKPAD) {
-		mc.dev = -1;
-		mc.type = AUDIO_MIXER_ENUM;
-		mc.un.ord = 1;
-		azalia_generic_mixer_set(this, 0x09, MI_TARGET_PINDIR, &mc);
-	}
-	return 0;
-}
-=======
 u_char
 azalia_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
     uint32_t dv)
@@ -3217,7 +2330,6 @@ int
 azalia_gpio_unmute(codec_t *this, int pin)
 {
 	uint32_t data, mask, dir;
->>>>>>> origin/master
 
 	azalia_comresp(this, this->audiofunc, CORB_GET_GPIO_DATA, 0, &data);
 	azalia_comresp(this, this->audiofunc, CORB_GET_GPIO_ENABLE_MASK, 0, &mask);
@@ -3232,41 +2344,6 @@ azalia_gpio_unmute(codec_t *this, int pin)
 	DELAY(1000);
 	azalia_comresp(this, this->audiofunc, CORB_SET_GPIO_DATA, data, NULL);
 
-<<<<<<< HEAD
-	this->nmixers = sizeof(cmi9880_mixer_items) / sizeof(mixer_item_t);
-	this->mixers = malloc(sizeof(mixer_item_t) * this->nmixers,
-	    M_DEVBUF, M_NOWAIT);
-	if (this->mixers == NULL) {
-		printf("%s: out of memory in %s\n", XNAME(this), __func__);
-		return ENOMEM;
-	}
-	bzero(this->mixers, sizeof(mixer_item_t) * this->maxmixers);
-	memcpy(this->mixers, cmi9880_mixer_items,
-	    sizeof(mixer_item_t) * this->nmixers);
-	azalia_generic_mixer_fix_indexes(this);
-	azalia_generic_mixer_default(this);
-
-	mc.dev = -1;
-	mc.type = AUDIO_MIXER_ENUM;
-	mc.un.ord = 5;		/* record.front.source=mic */
-	azalia_generic_mixer_set(this, 0x08, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 7;		/* record.surround.source=line1 */
-	azalia_generic_mixer_set(this, 0x09, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 1;		/* pindir: output */
-	azalia_generic_mixer_set(this, 0x0b, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x0c, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x0d, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x0e, MI_TARGET_PINDIR, &mc);
-	azalia_generic_mixer_set(this, 0x0f, MI_TARGET_PINDIR, &mc);
-	mc.un.ord = 0;		/* front DAC -> headphones */
-	azalia_generic_mixer_set(this, 0x0f, MI_TARGET_CONNLIST, &mc);
-	mc.un.ord = 0;		/* pindir: input */
-	azalia_generic_mixer_set(this, 0x10, MI_TARGET_PINDIR, &mc);	/* mic */
-	azalia_generic_mixer_set(this, 0x13, MI_TARGET_PINDIR, &mc);	/* SPDIF-in */
-	azalia_generic_mixer_set(this, 0x1f, MI_TARGET_PINDIR, &mc);	/* line1 */
-	azalia_generic_mixer_set(this, 0x20, MI_TARGET_PINDIR, &mc);	/* line2 */
-=======
->>>>>>> origin/master
 	return 0;
 }
 
@@ -3274,123 +2351,6 @@ void
 azalia_ampcap_ov(widget_t *w, int type, int offset, int steps, int size,
    int ctloff, int mute)
 {
-<<<<<<< HEAD
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{4, {0x03, 0x04, 0x05, 0x06}}, /* analog 8ch */
-		 {1, {0x07}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x08, 0x09}}, /* analog 4ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Sigmatel STAC9221 and STAC9221D
- * ---------------------------------------------------------------- */
-
-int
-azalia_stac9221_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 3,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
-		 {1, {0x08}},	/* digital */
-		 {1, {0x1a}}}};	/* another digital? */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x06, 0x07}}, /* analog 4ch */
-		 {1, {0x09}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Sigmatel STAC9220
- * ---------------------------------------------------------------- */
-
-static const mixer_item_t stac9220_mixer_items[] = {
-	{{AZ_CLASS_INPUT, {AudioCinputs}, AUDIO_MIXER_CLASS, AZ_CLASS_INPUT, 0, 0}, 0},
-	{{AZ_CLASS_OUTPUT, {AudioCoutputs}, AUDIO_MIXER_CLASS, AZ_CLASS_OUTPUT, 0, 0}, 0},
-	{{AZ_CLASS_RECORD, {AudioCrecord}, AUDIO_MIXER_CLASS, AZ_CLASS_RECORD, 0, 0}, 0},
-
-	{{0, {AudioNsource}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, .un.e={3, {{{AudioNdac}, 0}, {{"digital-in"}, 1}, {{"selector"}, 2}}}},
-	 0x07, MI_TARGET_CONNLIST},
-	{{0, {"digital."AudioNsource}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, .un.e={2, {{{AudioNdac}, 0}, {{"selector"}, 1}}}},
-	 0x09, MI_TARGET_CONNLIST}, /* AudioNdac is not accurate name */
-	{{0, {"selector."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x0a, MI_TARGET_OUTAMP},
-	{{0, {"selector"}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(15)}}, 0x0a, MI_TARGET_OUTAMP},
-	{{0, {AudioNmaster"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x0b, MI_TARGET_OUTAMP},
-	{{0, {AudioNmaster}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 2, MIXER_DELTA(31)}}, 0x0b, MI_TARGET_OUTAMP},
-	{{0, {"selector."AudioNsource}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, .un.e={3, {{{"mic1"}, 0}, {{"mic2"}, 1}, {{AudioNcd}, 4}}}},
-	 0x0c, MI_TARGET_CONNLIST},
-	{{0, {AudioNheadphone".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x0d, MI_TARGET_PINBOOST},
-	{{0, {AudioNspeaker".boost"}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x0e, MI_TARGET_PINBOOST},
-	{{0, {AudioNmono"."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x11, MI_TARGET_OUTAMP},
-	{{0, {AudioNmono}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 1, MIXER_DELTA(31)}}, 0x11, MI_TARGET_OUTAMP},
-	{{0, {"beep."AudioNmute}, AUDIO_MIXER_ENUM, AZ_CLASS_OUTPUT,
-	  0, 0, ENUM_OFFON}, 0x14, MI_TARGET_OUTAMP},
-	{{0, {"beep"}, AUDIO_MIXER_VALUE, AZ_CLASS_OUTPUT,
-	  0, 0, .un.v={{""}, 1, MIXER_DELTA(3)}}, 0x14, MI_TARGET_OUTAMP},
-	{{0, {"usingdac"}, AUDIO_MIXER_ENUM, AZ_CLASS_INPUT,
-	  0, 0, .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}},
-	 0, MI_TARGET_DAC},
-	{{0, {"usingadc"}, AUDIO_MIXER_ENUM, AZ_CLASS_RECORD,
-	  0, 0, .un.e={2, {{{"analog"}, 0}, {{"digital"}, 1}}}},
-	 0, MI_TARGET_ADC},
-};
-
-int
-azalia_stac9220_mixer_init(codec_t *this)
-{
-	mixer_ctrl_t mc;
-
-	this->nmixers = sizeof(stac9220_mixer_items) / sizeof(mixer_item_t);
-	this->mixers = malloc(sizeof(mixer_item_t) * this->nmixers,
-	    M_DEVBUF, M_NOWAIT);
-	if (this->mixers == NULL) {
-		printf("%s: out of memory in %s\n", XNAME(this), __func__);
-		return ENOMEM;
-	}
-	bzero(this->mixers, sizeof(mixer_item_t) * this->maxmixers);
-	memcpy(this->mixers, stac9220_mixer_items,
-	    sizeof(mixer_item_t) * this->nmixers);
-	azalia_generic_mixer_fix_indexes(this);
-	azalia_generic_mixer_default(this);
-
-	mc.dev = -1;		/* no need for generic_mixer_set() */
-	mc.type = AUDIO_MIXER_ENUM;
-	mc.un.ord = 1;		/* pindir: output */
-	azalia_generic_mixer_set(this, 0x0d, MI_TARGET_PINDIR, &mc); /* headphones */
-	azalia_generic_mixer_set(this, 0x0e, MI_TARGET_PINDIR, &mc); /* speaker */
-	mc.un.ord = 0;		/* pindir: input */
-	azalia_generic_mixer_set(this, 0x0f, MI_TARGET_PINDIR, &mc); /* mic2 */
-	azalia_generic_mixer_set(this, 0x10, MI_TARGET_PINDIR, &mc); /* mic1 */
-	mc.type = AUDIO_MIXER_VALUE;
-	mc.un.value.num_channels = 2;
-	mc.un.value.level[0] = azalia_generic_mixer_max(this, 0x0c, MI_TARGET_OUTAMP);
-	mc.un.value.level[1] = mc.un.value.level[0];
-	azalia_generic_mixer_set(this, 0x0c, MI_TARGET_OUTAMP, &mc);
-
-	return 0;
-=======
 	uint32_t cap;
 
 	cap = (offset & 0x7f) | ((steps & 0x7f) << 8) |
@@ -3477,5 +2437,4 @@ azalia_codec_widget_quirks(codec_t *this, nid_t nid)
 	}
 
 	return(0);
->>>>>>> origin/master
 }

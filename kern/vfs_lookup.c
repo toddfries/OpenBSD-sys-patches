@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_lookup.c,v 1.34 2006/06/23 22:20:39 sturm Exp $	*/
-=======
 /*	$OpenBSD: vfs_lookup.c,v 1.43 2010/09/09 10:37:03 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vfs_lookup.c,v 1.17 1996/02/09 19:00:59 christos Exp $	*/
 
 /*
@@ -224,6 +220,10 @@ badlink:
 			break;
 		}
 		linklen = MAXPATHLEN - auio.uio_resid;
+		if (linklen == 0) {
+			error = ENOENT;
+			goto badlink;
+		}
 		if (linklen + ndp->ni_pathlen >= MAXPATHLEN) {
 			error = ENAMETOOLONG;
 			goto badlink;
@@ -257,11 +257,12 @@ badlink:
  * Search a pathname.
  * This is a very central and rather complicated routine.
  *
- * The pathname is pointed to by ni_ptr and is of length ni_pathlen.
- * The starting directory is taken from ni_startdir. The pathname is
- * descended until done, or a symbolic link is encountered. The variable
- * ni_more is clear if the path is completed; it is set to one if a
- * symbolic link needing interpretation is encountered.
+ * The pathname is pointed to by ni_cnd.cn_nameptr and is of length
+ * ni_pathlen.  The starting directory is taken from ni_startdir. The
+ * pathname is descended until done, or a symbolic link is encountered.
+ * If the path is completed the flag ISLASTCN is set in ni_cnd.cn_flags.
+ * If a symbolic link need interpretation is encountered, the flag ISSYMLINK
+ * is set in ni_cnd.cn_flags.
  *
  * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
  * whether the name is to be looked up, created, renamed, or deleted.
@@ -620,10 +621,6 @@ vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	int rdonly;			/* lookup read-only flag bit */
 	int error = 0;
 #ifdef NAMEI_DIAGNOSTIC
-<<<<<<< HEAD
-	int newhash;			/* DEBUG: check name hash */
-=======
->>>>>>> origin/master
 	char *cp;			/* DEBUG: check name ptr/len */
 #endif
 

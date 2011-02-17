@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: xmphy.c,v 1.16 2006/10/07 23:44:51 brad Exp $	*/
-=======
 /*	$OpenBSD: xmphy.c,v 1.18 2008/09/17 07:19:19 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000

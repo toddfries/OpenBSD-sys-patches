@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: icsphyreg.h,v 1.1 1998/11/11 19:34:46 jason Exp $	*/
-=======
 /*	$OpenBSD: icsphyreg.h,v 1.3 2008/06/26 05:42:16 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: icsphyreg.h,v 1.1 1998/11/02 23:46:20 thorpej Exp $	*/
 
 /*-

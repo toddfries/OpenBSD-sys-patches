@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtl8225reg.h,v 1.2 2005/10/20 02:53:00 reyk Exp $	*/
-=======
 /*	$OpenBSD: rtl8225reg.h,v 1.4 2009/08/16 18:21:57 jsg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>

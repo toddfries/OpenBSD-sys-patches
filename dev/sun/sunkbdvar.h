@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sunkbdvar.h,v 1.9 2005/05/14 15:25:20 miod Exp $	*/
-=======
 /*	$OpenBSD: sunkbdvar.h,v 1.15 2009/01/12 21:11:58 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)

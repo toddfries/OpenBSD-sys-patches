@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.isa,v 1.93 2006/01/28 11:25:17 kettenis Exp $
-=======
 #	$OpenBSD: files.isa,v 1.107 2010/07/31 08:33:20 ratchov Exp $
->>>>>>> origin/master
 #	$NetBSD: files.isa,v 1.21 1996/05/16 03:45:55 mycroft Exp $
 #
 # Config file and device description for machine-independent ISA code.
@@ -11,7 +7,7 @@
 
 # ports should specify appropriate major numbers for the following
 # devices:
-#	mcd, scd, wd, wt
+#	mcd, scd, wd
 
 device	isa {[port = -1], [size = 0],
 	     [iomem = -1], [iosiz = 0],
@@ -140,11 +136,6 @@ file	dev/isa/mcd.c			mcd needs-flag
 attach	wdc at isa with wdc_isa: isa_dma
 file	dev/isa/wdc_isa.c		wdc_isa
 
-# Wangtek- and Archive-compatible tape controller boards
-device	wt: tape, isa_dma
-attach	wt at isa
-file	dev/isa/wt.c			wt needs-flag
-
 #
 # ISA networking drivers
 #
@@ -174,14 +165,6 @@ device	ec: ether, ifnet, dp8390nic, ifmedia
 attach	ec at isa
 file	dev/isa/if_ec.c			ec
 
-# National Semiconductor DS8390/WD83C690-based boards
-# (WD/SMC 80x3 family, SMC Ultra [8216], 3Com 3C503, NE[12]000, and clones)
-# XXX conflicts with amiga if_ed.c
-#device	ed: ether, ifnet
-#attach	ed at isa with ed_isa
-#attach	ed at pcmcia with ed_pcmcia
-#file	dev/isa/if_ed.c			ed & (ed_isa | ed_pcmcia) needs-flag
-
 # 3Com 3C505
 device	eg: ether, ifnet
 attach	eg at isa
@@ -195,18 +178,6 @@ file	dev/isa/if_el.c			el
 # 3Com 3C509 Ethernet controller
 attach	ep at isa with ep_isa: elink
 file	dev/isa/if_ep_isa.c		ep_isa
-
-# Fujitsu MB8696[05]-based boards
-# (Allied Telesis AT1700)
-device	fe: ether, ifnet
-attach	fe at isa
-file	dev/isa/if_fe.c			fe
-
-# HP Lan Ethernet controllers
-# XXX currently broken
-#device hp: ether, ifnet
-#attach	hp at isa
-#file	dev/isa/if_hp.c			hp
 
 # Intel i82586-based boards
 # (AT&T StarLAN 10, AT&T EN100, AT&T StarLAN Fiber, 3Com 3C507)
@@ -224,12 +195,6 @@ device	ex: ether, ifnet
 attach	ex at isa
 file	dev/isa/if_ex.c			ex needs-flag
 
-# XXX ???
-# XXX NOT IN TREE?
-#device	ix: ether, ifnet
-#attach	ix at isa
-#file	dev/isa/if_ix.c			ix
-
 # AMD am7990 (Lance) -based boards
 # (BICC Isolan, NE2100, DEPCA)
 # device declaration in sys/conf/files
@@ -240,17 +205,6 @@ file	dev/isa/if_le_isa.c		le_isa
 # SMC91Cxx Ethernet Controllers
 attach	sm at isa with sm_isa
 file	dev/isa/if_sm_isa.c		sm_isa
-
-# RangeLAN2 wireless network
-attach	rln at isa with rln_isa
-file	dev/isa/if_rln_isa.c		rln_isa
-
-# TROPIC based Token-Ring (IBM/3COM)
-define	tr_isa
-file	dev/isa/if_tr_isa.c		tr_isa
-attach	tr at isa with tr_isa: tr_isa, elink
-file	dev/isa/if_tribm_isa.c		tr_isa
-file	dev/isa/if_trtcm_isa.c		tr_isa
 
 #
 # ISA Sound hardware
@@ -366,8 +320,6 @@ file	dev/isa/spkr.c			spkr	needs-flag
 attach	lpt at isa with lpt_isa
 file	dev/isa/lpt_isa.c		lpt_isa needs-flag
 
-<<<<<<< HEAD
-=======
 # Winbond LPC Super I/O
 device	wbsio {}
 attach	wbsio at isa
@@ -378,10 +330,15 @@ device	schsio {}
 attach	schsio at isa
 file	dev/isa/sch311x.c		schsio
 
->>>>>>> origin/master
 # National Semiconductor LM78/79/81 and compatible hardware monitors
 attach	lm at isa with lm_isa
-file	dev/isa/lm78_isa.c		lm_isa
+attach	lm at wbsio with lm_wbsio
+file	dev/isa/lm78_isa.c		lm_isa | lm_wbsio
+
+# Fintek (Feature Integration Technology) F71805F hardware monitor subfunction
+device	fins
+attach	fins at isa
+file	dev/isa/fins.c			fins
 
 # NSC PC87366 Super IO / monitor chip
 device	nsclpcsio: gpiobus
@@ -393,7 +350,8 @@ device	gscsio: i2cbus
 attach	gscsio at isa
 file	dev/isa/gscsio.c		gscsio
 
-# IT8705F, IT8712F and SiS970 hardware monitors
+# ITE IT8705F, IT8712F, IT8716F, IT8718F, IT8726F and SiS SiS950 hardware
+# monitors and watchdog timers
 device	it
 attach	it at isa
 file	dev/isa/it.c			it

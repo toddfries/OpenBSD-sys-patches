@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cac_pci.c,v 1.9 2003/03/06 22:31:23 mickey Exp $	*/
-=======
 /*	$OpenBSD: cac_pci.c,v 1.13 2009/04/06 15:18:45 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: cac_pci.c,v 1.10 2001/01/10 16:48:04 ad Exp $	*/
 
 /*-
@@ -206,7 +202,7 @@ cac_pci_attach(parent, self, aux)
 		    &sc->sc_iot, &sc->sc_ioh, NULL, &size, 0))
 			ior = -1;
 	if (memr == -1 && ior == -1) {
-		printf("%s: can't map i/o or memory space\n", self->dv_xname);
+		printf(": can't map i/o or memory space\n");
 		return;
 	}
 
@@ -230,7 +226,7 @@ cac_pci_attach(parent, self, aux)
 		return;
 	}
 
-	printf(": %s Compaq %s\n", intrstr, ct->ct_typestr);
+	printf(": %s, %s\n", intrstr, ct->ct_typestr);
 
 	/* Now attach to the bus-independent code. */
 	sc->sc_cl = ct->ct_linkage;

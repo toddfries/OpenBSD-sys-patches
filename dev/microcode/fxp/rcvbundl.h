@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcvbundl.h,v 1.1 2004/08/03 02:34:30 mickey Exp $	*/
+/*	$OpenBSD: rcvbundl.h,v 1.2 2005/04/24 20:41:34 brad Exp $	*/
 
 /*
 Copyright (c) 1999-2001, Intel Corporation 

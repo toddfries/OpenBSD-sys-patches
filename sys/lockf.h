@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: lockf.h,v 1.6 2004/01/14 19:34:05 grange Exp $	*/
-=======
 /*	$OpenBSD: lockf.h,v 1.8 2008/09/19 12:24:55 art Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: lockf.h,v 1.5 1994/06/29 06:44:33 cgd Exp $	*/
 
 /*

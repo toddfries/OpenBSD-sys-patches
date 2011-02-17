@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ax88190.c,v 1.1 2001/08/18 16:15:39 aaron Exp $	*/
-=======
 /*	$OpenBSD: ax88190.c,v 1.3 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD$	*/
 
 /*-

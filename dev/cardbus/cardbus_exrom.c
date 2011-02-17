@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardbus_exrom.c,v 1.3 2005/09/12 22:52:50 miod Exp $	*/
+/*	$OpenBSD: cardbus_exrom.c,v 1.4 2005/09/13 18:44:38 fgsch Exp $	*/
 /*	$NetBSD: cardbus_exrom.c,v 1.4 2000/02/03 06:47:31 thorpej Exp $	*/
 
 /*

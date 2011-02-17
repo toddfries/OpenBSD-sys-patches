@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pca9554.c,v 1.9 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: pca9554.c,v 1.17 2008/09/10 16:13:43 reyk Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -30,11 +26,7 @@
 
 #include <dev/gpio/gpiovar.h>
 
-<<<<<<< HEAD
-/* Phillips 9554 registers */
-=======
 /* Philips 9554/6/7 registers */
->>>>>>> origin/master
 #define PCA9554_IN		0x00
 #define PCA9554_OUT		0x01
 #define PCA9554_POLARITY	0x02
@@ -85,11 +77,7 @@ struct pcagpio_softc {
 
 int	pcagpio_match(struct device *, void *, void *);
 void	pcagpio_attach(struct device *, struct device *, void *);
-<<<<<<< HEAD
-int	pcagpio_check(struct i2c_attach_args *, u_int8_t *, u_int8_t *);
-=======
 int	pcagpio_init(struct pcagpio_softc *, int, u_int8_t *);
->>>>>>> origin/master
 void	pcagpio_refresh(void *);
 
 int     pcagpio_gpio_pin_read(void *, int);
@@ -158,18 +146,6 @@ pcagpio_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 
-<<<<<<< HEAD
-	for (i = 0; i < PCAGPIO_NPINS; i++) {
-		sc->sc_sensor[i].type = SENSOR_INTEGER;
-		if ((sc->sc_control & (1 << i)) == 0) {
-			snprintf(sc->sc_sensor[i].desc,
-			    sizeof(sc->sc_sensor[i].desc), "out%d", i);
-			outputs++;
-		} else
-			snprintf(sc->sc_sensor[i].desc,
-			    sizeof(sc->sc_sensor[i].desc), "in%d", i);
-
-=======
 	for (i = 0; i < sc->sc_npins; i++) {
 		port = PCAGPIO_PORT(i);
 		bit = PCAGPIO_BIT(i);
@@ -181,10 +157,9 @@ pcagpio_attach(struct device *parent, struct device *self, void *aux)
 		} else
 			strlcpy(sc->sc_sensor[i].desc, "in",
 			    sizeof(sc->sc_sensor[i].desc));
->>>>>>> origin/master
 	}
 
-	if (sensor_task_register(sc, pcagpio_refresh, 5)) {
+	if (sensor_task_register(sc, pcagpio_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -196,13 +171,8 @@ pcagpio_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 	printf(":");
-<<<<<<< HEAD
-	if (8 - outputs)
-		printf(" %d inputs", 8 - outputs);
-=======
 	if (sc->sc_npins - outputs)
 		printf(" %d inputs", sc->sc_npins - outputs);
->>>>>>> origin/master
 	if (outputs)
 		printf(" %d outputs", outputs);
 	printf("\n");

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: pt2254a.c,v 1.1 2002/04/25 04:56:59 mickey Exp $	*/
 /*
  * Copyright (c) 2002 Vladimir Popov <jumbo@narod.ru>.
  *

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ipgphy.c,v 1.6 2006/12/30 23:04:39 kettenis Exp $	*/
-=======
 /*	$OpenBSD: ipgphy.c,v 1.13 2010/02/03 16:22:58 sthen Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -353,7 +349,7 @@ ipgphy_status(struct mii_softc *sc)
 }
 
 int
-ipgphy_mii_phy_auto(struct mii_softc *mii)
+ipgphy_mii_phy_auto(struct mii_softc *sc)
 {
 	uint32_t reg = 0;
 
@@ -368,13 +364,6 @@ ipgphy_mii_phy_auto(struct mii_softc *mii)
 	if (sc->mii_flags & MIIF_DOPAUSE)
 		reg |= IPGPHY_ANAR_PAUSE | IPGPHY_ANAR_APAUSE;
 
-<<<<<<< HEAD
-	PHY_WRITE(mii, IPGPHY_MII_ANAR, reg);
-	reg = IPGPHY_1000CR_1000T | IPGPHY_1000CR_1000T_FDX;
-	reg |= IPGPHY_1000CR_MASTER;
-	PHY_WRITE(mii, IPGPHY_MII_1000CR, reg);
-	PHY_WRITE(mii, IPGPHY_MII_BMCR, (IPGPHY_BMCR_FDX |
-=======
 	PHY_WRITE(sc, IPGPHY_MII_ANAR, reg | IPGPHY_ANAR_CSMA);
 
 	reg = IPGPHY_1000CR_1000T | IPGPHY_1000CR_1000T_FDX;
@@ -382,7 +371,6 @@ ipgphy_mii_phy_auto(struct mii_softc *mii)
 	PHY_WRITE(sc, IPGPHY_MII_1000CR, reg);
 
 	PHY_WRITE(sc, IPGPHY_MII_BMCR, (IPGPHY_BMCR_FDX |
->>>>>>> origin/master
 	    IPGPHY_BMCR_AUTOEN | IPGPHY_BMCR_STARTNEG));
 
 	return (EJUSTRETURN);

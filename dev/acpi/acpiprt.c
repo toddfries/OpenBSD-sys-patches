@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acpiprt.c,v 1.15 2007/02/21 19:17:23 kettenis Exp $	*/
-=======
 /* $OpenBSD: acpiprt.c,v 1.43 2010/08/03 22:54:12 kettenis Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -35,6 +31,7 @@
 #include <dev/acpi/dsdt.h>
 
 #include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
 
 #include <machine/i82093reg.h>
@@ -59,12 +56,7 @@ SIMPLEQ_HEAD(, acpiprt_map) acpiprt_map_list =
 int	acpiprt_match(struct device *, void *, void *);
 void	acpiprt_attach(struct device *, struct device *, void *);
 int	acpiprt_getirq(union acpi_resource *crs, void *arg);
-<<<<<<< HEAD
-int	acpiprt_getminbus(union acpi_resource *, void *);
-
-=======
 int	acpiprt_chooseirq(union acpi_resource *, void *);
->>>>>>> origin/master
 
 struct acpiprt_softc {
 	struct device		sc_dev;
@@ -85,10 +77,7 @@ struct cfdriver acpiprt_cd = {
 
 void	acpiprt_prt_add(struct acpiprt_softc *, struct aml_value *);
 int	acpiprt_getpcibus(struct acpiprt_softc *, struct aml_node *);
-<<<<<<< HEAD
-=======
 void	acpiprt_route_interrupt(int bus, int dev, int pin);
->>>>>>> origin/master
 
 int
 acpiprt_match(struct device *parent, void *match, void *aux)
@@ -118,7 +107,7 @@ acpiprt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_bus = acpiprt_getpcibus(sc, sc->sc_devnode);
 	printf(": bus %d (%s)", sc->sc_bus, sc->sc_devnode->parent->name);
 
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PRT", 0, NULL, &res)) {
+	if (aml_evalnode(sc->sc_acpi, sc->sc_devnode, 0, NULL, &res)) {
 		printf(": no PCI interrupt routing table\n");
 		return;
 	}
@@ -140,8 +129,6 @@ acpiprt_attach(struct device *parent, struct device *self, void *aux)
 	aml_freevalue(&res);
 }
 
-<<<<<<< HEAD
-=======
 int
 acpiprt_getirq(union acpi_resource *crs, void *arg)
 {
@@ -162,7 +149,6 @@ acpiprt_getirq(union acpi_resource *crs, void *arg)
 	return (0);
 }
 
->>>>>>> origin/master
 int
 acpiprt_pri[16] = {
 	0,			/* 8254 Counter 0 */
@@ -217,11 +203,7 @@ acpiprt_chooseirq(union acpi_resource *crs, void *arg)
 		}
 		break;
 	default:
-<<<<<<< HEAD
-		printf("Unknown interrupt : %x\n", typ);
-=======
 		printf("unknown interrupt: %x\n", typ);
->>>>>>> origin/master
 	}
 	return (0);
 }
@@ -256,10 +238,18 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 	}
 
 	pp = v->v_package[2];
-	if (pp->type == AML_OBJTYPE_NAMEREF) {
-		node = aml_searchname(sc->sc_devnode, pp->v_nameref);
+	if (pp->type == AML_OBJTYPE_STRING) {
+		node = aml_searchrel(sc->sc_devnode, pp->v_string);
 		if (node == NULL) {
-			printf("Invalid device!\n");
+			printf("Invalid device\n");
+			return;
+		}
+		pp = node->value;
+	}
+	if (pp->type == AML_OBJTYPE_NAMEREF) {
+		node = aml_searchrel(sc->sc_devnode, pp->v_nameref);
+		if (node == NULL) {
+			printf("Invalid device\n");
 			return;
 		}
 		pp = node->value;
@@ -269,24 +259,18 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 	}
 	if (pp->type == AML_OBJTYPE_DEVICE) {
 		node = pp->node;
-<<<<<<< HEAD
-		if (aml_evalname(sc->sc_acpi, node, "_STA", 0, NULL, &res))
-=======
 		if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta)) {
->>>>>>> origin/master
 			printf("no _STA method\n");
+			return;
+		}
 
-<<<<<<< HEAD
-		sta = aml_val2int(&res) & STA_ENABLED;
-		aml_freevalue(&res);
-		if (sta == 0)
-=======
 		if ((sta & STA_PRESENT) == 0)
->>>>>>> origin/master
 			return;
 
-		if (aml_evalname(sc->sc_acpi, node, "_CRS", 0, NULL, &res))
+		if (aml_evalname(sc->sc_acpi, node, "_CRS", 0, NULL, &res)) {
 			printf("no _CRS method\n");
+			return;
+		}
 
 		if (res.type != AML_OBJTYPE_BUFFER || res.length < 5) {
 			printf("invalid _CRS object\n");
@@ -295,8 +279,6 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 		}
 		aml_parse_resource(&res, acpiprt_getirq, &irq);
 		aml_freevalue(&res);
-<<<<<<< HEAD
-=======
 
 		/* Pick a new IRQ if necessary. */
 		if ((irq == 0 || irq == 2 || irq == 13) &&
@@ -314,7 +296,6 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 		p->sc = sc;
 		p->node = node;
 		SIMPLEQ_INSERT_TAIL(&acpiprt_map_list, p, list);
->>>>>>> origin/master
 	} else {
 		irq = aml_val2int(v->v_package[3]);
 	}
@@ -332,11 +313,10 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 			return;
 		}
 
-		map = malloc(sizeof (struct mp_intr_map), M_DEVBUF, M_NOWAIT);
+		map = malloc(sizeof(*map), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (map == NULL)
 			return;
 
-		memset(map, 0, sizeof *map);
 		map->ioapic = apic;
 		map->ioapic_pin = irq - apic->sc_apic_vecbase;
 		map->bus_pin = ((addr >> 14) & 0x7c) | (pin & 0x3);
@@ -380,53 +360,6 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 int
 acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 {
-<<<<<<< HEAD
-	struct aml_node *parent = node->parent;
-	struct aml_value res;
-	pci_chipset_tag_t pc = NULL;
-	pcitag_t tag;
-	pcireg_t reg;
-	int bus, dev, func, rv;
-
-	if (parent == NULL)
-		return 0;
-
-	if (aml_evalname(sc->sc_acpi, parent, "_ADR", 0, NULL, &res) == 0) {
-		bus = acpiprt_getpcibus(sc, parent);
-		dev = ACPI_PCI_DEV(aml_val2int(&res) << 16);
-		func = ACPI_PCI_FN(aml_val2int(&res) << 16);
-		aml_freevalue(&res);
-
-		/*
-		 * Some systems return 255 as the device number for
-		 * devices that are not really there.
-		 */
-		if (dev >= pci_bus_maxdevs(pc, bus))
-			return (-1);
-
-		tag = pci_make_tag(pc, bus, dev, func);
-		reg = pci_conf_read(pc, tag, PCI_CLASS_REG);
-		if (PCI_CLASS(reg) == PCI_CLASS_BRIDGE &&
-		    PCI_SUBCLASS(reg) == PCI_SUBCLASS_BRIDGE_PCI) {
-			reg = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
-			return (PPB_BUSINFO_SECONDARY(reg));
-		}
-	}
-
-	if (aml_evalname(sc->sc_acpi, parent, "_CRS", 0, NULL, &res) == 0) {
-		rv = -1;
-	  	if (res.type == AML_OBJTYPE_BUFFER)
-			aml_parse_resource(res.length, res.v_buffer, 
-			    acpiprt_getminbus, &rv);
-		aml_freevalue(&res);
-		if (rv != -1)
-			return rv;
-	}
-	if (aml_evalname(sc->sc_acpi, parent, "_BBN", 0, NULL, &res) == 0) {
-		rv = aml_val2int(&res);
-		aml_freevalue(&res);
-		return (rv);
-=======
 	/* Check if parent device has PCI mapping */
 	return (node->parent && node->parent->pci) ?
 		node->parent->pci->sub : -1;
@@ -486,8 +419,13 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 	case LR_EXTIRQ:
 		crs->lr_extirq.irq[0] = htole32(newirq);
 		break;
->>>>>>> origin/master
 	}
 
-	return (0);
+	if (aml_evalname(sc->sc_acpi, node, "_SRS", 1, &res, &res2)) {
+		printf("no _SRS method\n");
+		aml_freevalue(&res);
+		return;
+	}
+	aml_freevalue(&res);
+	aml_freevalue(&res2);
 }

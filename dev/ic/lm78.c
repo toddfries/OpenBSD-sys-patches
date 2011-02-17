@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm78.c,v 1.13 2007/02/22 20:44:51 kettenis Exp $	*/
+/*	$OpenBSD: lm78.c,v 1.20 2007/06/25 22:50:18 cnst Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis
@@ -137,13 +137,42 @@ struct lm_sensor w83627ehf_sensors[] = {
 	{ "VCore", SENSOR_VOLTS_DC, 0, 0x20, lm_refresh_volt, RFACT_NONE / 2},
 	{ "+12V", SENSOR_VOLTS_DC, 0, 0x21, lm_refresh_volt, RFACT(56, 10) / 2 },
 	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x22, lm_refresh_volt, RFACT(34, 34) / 2 },
-	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x23, lm_refresh_volt, RFACT(34, 24) / 2 },
+	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x23, lm_refresh_volt, RFACT(34, 34) / 2 },
 	{ "-12V", SENSOR_VOLTS_DC, 0, 0x24, wb_w83627ehf_refresh_nvolt },
 	{ "", SENSOR_VOLTS_DC, 0, 0x25, lm_refresh_volt, RFACT_NONE / 2 },
 	{ "", SENSOR_VOLTS_DC, 0, 0x26, lm_refresh_volt, RFACT_NONE / 2 },
 	{ "3.3VSB", SENSOR_VOLTS_DC, 5, 0x50, lm_refresh_volt, RFACT(34, 34) / 2 },
 	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE / 2 },
 	{ "", SENSOR_VOLTS_DC, 5, 0x52, lm_refresh_volt, RFACT_NONE / 2 },
+
+	/* Temperature */
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+
+	/* Fans */
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+
+	{ NULL }
+};
+
+/* 
+ * w83627dhg is almost identical to w83627ehf, except that 
+ * it has 9 instead of 10 voltage sensors
+ */
+struct lm_sensor w83627dhg_sensors[] = {
+	/* Voltage */
+	{ "VCore", SENSOR_VOLTS_DC, 0, 0x20, lm_refresh_volt, RFACT_NONE / 2},
+	{ "+12V", SENSOR_VOLTS_DC, 0, 0x21, lm_refresh_volt, RFACT(56, 10) / 2 },
+	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x22, lm_refresh_volt, RFACT(34, 34) / 2 },
+	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x23, lm_refresh_volt, RFACT(34, 34) / 2 },
+	{ "-12V", SENSOR_VOLTS_DC, 0, 0x24, wb_w83627ehf_refresh_nvolt },
+	{ "", SENSOR_VOLTS_DC, 0, 0x25, lm_refresh_volt, RFACT_NONE / 2 },
+	{ "", SENSOR_VOLTS_DC, 0, 0x26, lm_refresh_volt, RFACT_NONE / 2 },
+	{ "3.3VSB", SENSOR_VOLTS_DC, 5, 0x50, lm_refresh_volt, RFACT(34, 34) / 2 },
+	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE / 2 },
 
 	/* Temperature */
 	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
@@ -370,7 +399,8 @@ lm_attach(struct lm_softc *sc)
 	if (sc->numsensors == 0)
 		return;
 
-	if (sensor_task_register(sc, lm_refresh, 5)) {
+	sc->sensortask = sensor_task_register(sc, lm_refresh, 5);
+	if (sc->sensortask == NULL) {
 		printf("%s: unable to register update task\n",
 		    sc->sc_dev.dv_xname);
 		return;
@@ -396,7 +426,8 @@ lm_detach(struct lm_softc *sc)
 	for (i = 0; i < sc->numsensors; i++)
 		sensor_detach(&sc->sensordev, &sc->sensors[i]);
 
-	sensor_task_unregister(sc);
+	if (sc->sensortask != NULL)
+		sensor_task_unregister(sc->sensortask);
 
 	return 0;
 }
@@ -455,7 +486,7 @@ wb_match(struct lm_softc *sc)
 	sc->lm_writereg(sc, WB_BANKSEL, 0);
 	vendid |= sc->lm_readreg(sc, WB_VENDID);
 	sc->lm_writereg(sc, WB_BANKSEL, banksel);
-	DPRINTF((" winbond vend id 0x%x\n", j));
+	DPRINTF((" winbond vend id 0x%x\n", vendid));
 	if (vendid != WB_VENDID_WINBOND && vendid != WB_VENDID_ASUS)
 		return 0;
 
@@ -474,9 +505,17 @@ wb_match(struct lm_softc *sc)
 		printf(": W83627THF\n");
 		lm_setup_sensors(sc, w83637hf_sensors);
 		break;
+	case WB_CHIPID_W83627EHF_A:
+		printf(": W83627EHF-A\n");
+		lm_setup_sensors(sc, w83627ehf_sensors);
+		break;
 	case WB_CHIPID_W83627EHF:
 		printf(": W83627EHF\n");
 		lm_setup_sensors(sc, w83627ehf_sensors);
+		break;
+	case WB_CHIPID_W83627DHG:
+		printf(": W83627DHG\n");
+		lm_setup_sensors(sc, w83627dhg_sensors);
 		break;
 	case WB_CHIPID_W83637HF:
 		printf(": W83637HF\n");

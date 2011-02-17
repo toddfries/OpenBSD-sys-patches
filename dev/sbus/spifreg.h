@@ -1,4 +1,4 @@
-/*	$OpenBSD: spifreg.h,v 1.4 2003/02/11 19:20:28 mickey Exp $	*/
+/*	$OpenBSD: spifreg.h,v 1.5 2003/06/02 18:32:41 jason Exp $	*/
 
 /*
  * Copyright (c) 1999-2002 Jason L. Wright (jason@thought.net)

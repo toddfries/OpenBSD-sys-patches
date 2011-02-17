@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: wsmux.c,v 1.18 2006/08/05 19:08:41 miod Exp $	*/
-=======
 /*	$OpenBSD: wsmux.c,v 1.24 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: wsmux.c,v 1.37 2005/04/30 03:47:12 augustss Exp $      */
 
 /*
@@ -37,6 +33,7 @@
 #include "wsmux.h"
 #include "wsdisplay.h"
 #include "wskbd.h"
+#include "wsmouse.h"
 
 /*
  * wscons mux device.
@@ -585,10 +582,9 @@ wsmux_create(const char *name, int unit)
 	struct wsmux_softc *sc;
 
 	DPRINTF(("wsmux_create: allocating\n"));
-	sc = malloc(sizeof *sc, M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof *sc, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc == NULL)
 		return (NULL);
-	bzero(sc, sizeof *sc);
 	CIRCLEQ_INIT(&sc->sc_cld);
 	snprintf(sc->sc_base.me_dv.dv_xname, sizeof sc->sc_base.me_dv.dv_xname,
 		 "%s%d", name, unit);
@@ -759,7 +755,7 @@ wsmux_evsrc_set_display(struct device *dv, struct device *displaydv)
 {
 	struct wsmux_softc *sc = (struct wsmux_softc *)dv;
 
-	DPRINTF(("wsmux_set_display: %s: displaydv=%p\n",
+	DPRINTF(("wsmux_evsrc_set_display: %s: displaydv=%p\n",
 		 sc->sc_base.me_dv.dv_xname, displaydv));
 
 	if (displaydv != NULL) {
@@ -798,7 +794,8 @@ wsmux_set_display(struct wsmux_softc *sc, struct device *displaydv)
 		}
 #endif
 		if (me->me_ops->dsetdisplay != NULL) {
-			error = wsevsrc_set_display(me, nsc->sc_displaydv);
+			error = wsevsrc_set_display(me,
+			    nsc ? nsc->sc_displaydv : NULL);
 			DPRINTF(("wsmux_set_display: m=%p dev=%s error=%d\n",
 				 me, me->me_dv.dv_xname, error));
 			if (!error) {

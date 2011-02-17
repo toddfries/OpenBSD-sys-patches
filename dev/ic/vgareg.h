@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: vgareg.h,v 1.2 2001/03/14 02:49:22 mickey Exp $ */
-=======
 /* $OpenBSD: vgareg.h,v 1.5 2009/02/01 14:37:22 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: vgareg.h,v 1.2 1998/05/28 16:48:41 drochner Exp $ */
 
 /*

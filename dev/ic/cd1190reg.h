@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cd1190reg.h,v 1.2 2001/07/04 09:03:00 niklas Exp $	*/
-=======
 /*	$OpenBSD: cd1190reg.h,v 1.4 2008/11/29 01:55:06 ray Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998 Iain Hibbert.

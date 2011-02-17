@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acx111.c,v 1.14 2006/12/08 00:04:10 mglocker Exp $ */
-=======
 /*	$OpenBSD: acx111.c,v 1.18 2010/04/20 22:05:41 tedu Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -108,7 +104,6 @@
 #define ACX111_RATE_72		0x0400
 #define ACX111_RATE_96		0x0800
 #define ACX111_RATE_108		0x1000
-#define ACX111_RATE(rate)	[rate] = ACX111_RATE_##rate
 
 /* XXX skip ACX111_RATE_44 */
 #define ACX111_RATE_ALL		0x1eff
@@ -260,18 +255,18 @@ static const uint16_t acx111_reg[ACXREG_MAX] = {
 
 /* XXX */
 static uint16_t	acx111_rate_map[109] = {
-	ACX111_RATE(2),
-	ACX111_RATE(4),
-	ACX111_RATE(11),
-	ACX111_RATE(22),
-	ACX111_RATE(12),
-	ACX111_RATE(18),
-	ACX111_RATE(24),
-	ACX111_RATE(36),
-	ACX111_RATE(48),
-	ACX111_RATE(72),
-	ACX111_RATE(96),
-	ACX111_RATE(108)
+	ACX111_RATE_2,
+	ACX111_RATE_4,
+	ACX111_RATE_11,
+	ACX111_RATE_22,
+	ACX111_RATE_12,
+	ACX111_RATE_18,
+	ACX111_RATE_24,
+	ACX111_RATE_36,
+	ACX111_RATE_48,
+	ACX111_RATE_72,
+	ACX111_RATE_96,
+	ACX111_RATE_108
 };
 
 void
@@ -290,7 +285,7 @@ acx111_set_param(struct acx_softc *sc)
 	    IEEE80211_CHAN_OFDM |
 	    IEEE80211_CHAN_DYN |
 	    IEEE80211_CHAN_2GHZ;
-	sc->sc_ic.ic_caps = IEEE80211_C_WEP;
+	sc->sc_ic.ic_caps = IEEE80211_C_WEP | IEEE80211_C_SHSLOT;
 	sc->sc_ic.ic_phytype = IEEE80211_T_OFDM;
 	sc->sc_ic.ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
 	sc->sc_ic.ic_sup_rates[IEEE80211_MODE_11G] = ieee80211_std_rateset_11g;

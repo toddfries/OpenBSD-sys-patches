@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: param.h,v 1.68 2006/07/26 20:34:11 deraadt Exp $	*/
-=======
 /*	$OpenBSD: param.h,v 1.89 2011/01/14 00:04:16 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -45,13 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-<<<<<<< HEAD
-#define OpenBSD	200705		/* OpenBSD version (year & month). */
-#define OpenBSD4_1 1		/* OpenBSD 4.1 */
-=======
 #define OpenBSD	201105		/* OpenBSD version (year & month). */
 #define OpenBSD4_9 1		/* OpenBSD 4.9 */
->>>>>>> origin/master
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -121,8 +112,8 @@
 
 #define	PRIMASK		0x0ff
 #define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
-#define PNORELOCK	0x200	/* OR'd with pri for ltsleep to not relock
-				   the interlock */
+#define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
+				   the mutex */
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
@@ -135,8 +126,6 @@
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
-<<<<<<< HEAD
-=======
  * Constants related to network buffer management.
  * MCLBYTES must be no larger than NBPG (the software page size), and,
  * on machines that exchange pages of input or output buffers with mbuf
@@ -150,7 +139,6 @@
 #define	MCLOFSET	(MCLBYTES - 1)
 
 /*
->>>>>>> origin/master
  * File system parameters and macros.
  *
  * The file system is made out of blocks of at most MAXBSIZE units, with
@@ -184,10 +172,10 @@
 #endif
 
 /* Bit map related macros. */
-#define	setbit(a,i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
-#define	clrbit(a,i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
-#define	isset(a,i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
-#define	isclr(a,i)	(((a)[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
+#define	setbit(a,i)	((a)[(i)>>3] |= 1<<((i)&(NBBY-1)))
+#define	clrbit(a,i)	((a)[(i)>>3] &= ~(1<<((i)&(NBBY-1))))
+#define	isset(a,i)	((a)[(i)>>3] & (1<<((i)&(NBBY-1))))
+#define	isclr(a,i)	(((a)[(i)>>3] & (1<<((i)&(NBBY-1)))) == 0)
 
 /* Macros for counting and rounding. */
 #ifndef howmany

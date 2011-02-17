@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_physio.c,v 1.26 2006/11/29 12:24:17 miod Exp $	*/
-=======
 /*	$OpenBSD: kern_physio.c,v 1.32 2010/09/22 01:18:57 matthew Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kern_physio.c,v 1.28 1997/05/19 10:43:28 pk Exp $	*/
 
 /*-
@@ -262,12 +258,6 @@ struct buf *
 getphysbuf(void)
 {
 	struct buf *bp;
-<<<<<<< HEAD
-
-	bp = pool_get(&bufpool, PR_WAITOK);
-	bzero(bp, sizeof(*bp));
-=======
->>>>>>> origin/master
 
 	bp = pool_get(&bufpool, PR_WAITOK | PR_ZERO);
 	bp->b_vnbufs.le_next = NOLIST;
@@ -284,6 +274,8 @@ getphysbuf(void)
 void
 putphysbuf(struct buf *bp)
 {
+	splassert(IPL_BIO);
+
 	/* XXXCDC: is this necessary? */
 	if (bp->b_vp)
 		brelvp(bp);

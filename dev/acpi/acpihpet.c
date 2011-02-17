@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: acpihpet.c,v 1.3 2007/02/20 22:25:45 marco Exp $	*/
-=======
 /* $OpenBSD: acpihpet.c,v 1.13 2011/01/10 13:36:57 mikeb Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -116,11 +112,8 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_attach_args *aaa = aux;
 	struct acpi_hpet *hpet = (struct acpi_hpet *)aaa->aaa_table;
 	u_int64_t period, freq;	/* timer period in femtoseconds (10^-15) */
-<<<<<<< HEAD
-=======
 	u_int32_t v1, v2;
 	int timeout;
->>>>>>> origin/master
 
 	if (acpi_map_address(psc, &hpet->base_address, 0, HPET_REG_SIZE,
 	    &sc->sc_ioh, &sc->sc_iot))	{
@@ -128,8 +121,6 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-<<<<<<< HEAD
-=======
 	/*
 	 * Revisions 0x30 through 0x3a of the AMD SB700, with spread
 	 * spectrum enabled, have an SMM based HPET emulation that's
@@ -164,9 +155,14 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
->>>>>>> origin/master
 	period = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 	    HPET_CAPABILITIES + sizeof(u_int32_t));
+	if (period == 0) {
+		printf(": invalid period\n");
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+		    HPET_CONFIGURATION, 0);
+		return;
+	}
 	freq =  1000000000000000ull / period;
 	printf(": %lld Hz\n", freq);
 
@@ -174,7 +170,6 @@ acpihpet_attach(struct device *parent, struct device *self, void *aux)
 	hpet_timecounter.tc_frequency = (u_int32_t)freq;
 	hpet_timecounter.tc_priv = sc;
 	hpet_timecounter.tc_name = sc->sc_dev.dv_xname;
-	bus_space_write_4(sc->sc_iot, sc->sc_ioh, HPET_CONFIGURATION, 1);
 	tc_init(&hpet_timecounter);
 #endif
 	acpihpet_attached++;

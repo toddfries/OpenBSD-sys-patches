@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bhavar.h,v 1.1 2002/01/24 22:38:03 mickey Exp $	*/
-=======
 /*	$OpenBSD: bhavar.h,v 1.4 2008/11/26 16:38:00 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bhavar.h,v 1.12 1998/11/19 21:53:00 thorpej Exp $	*/
 
 /*-

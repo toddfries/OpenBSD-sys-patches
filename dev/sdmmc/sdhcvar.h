@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sdhcvar.h,v 1.1 2006/05/28 17:21:14 uwe Exp $	*/
-=======
 /*	$OpenBSD: sdhcvar.h,v 1.5 2010/09/07 16:21:46 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -31,6 +27,7 @@ struct sdhc_softc {
 	struct device sc_dev;
 	struct sdhc_host **sc_host;
 	int sc_nhosts;
+	u_int sc_flags;
 };
 
 /* Host controller functions called by the attachment driver. */
@@ -39,5 +36,8 @@ int	sdhc_host_found(struct sdhc_softc *, bus_space_tag_t,
 int	sdhc_activate(struct device *, int);
 void	sdhc_shutdown(void *);
 int	sdhc_intr(void *);
+
+/* flag values */
+#define SDHC_F_NOPWR0		(1 << 0)
 
 #endif

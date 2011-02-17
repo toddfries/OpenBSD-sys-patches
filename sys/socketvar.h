@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: socketvar.h,v 1.38 2005/11/21 18:16:46 millert Exp $	*/
-=======
 /*	$OpenBSD: socketvar.h,v 1.48 2011/01/07 17:50:42 bluhm Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -216,7 +212,7 @@ struct socket {
  */
 #define sblock(sb, wf) ((sb)->sb_flags & SB_LOCK ? \
 		(((wf) == M_WAITOK) ? sb_lock(sb) : EWOULDBLOCK) : \
-		((sb)->sb_flags |= SB_LOCK), 0)
+		((sb)->sb_flags |= SB_LOCK, 0))
 
 /* release lock on sockbuf sb */
 #define	sbunlock(sb) do {						\
@@ -272,7 +268,7 @@ int	soo_kqfilter(struct file *fp, struct knote *kn);
 int 	soo_close(struct file *fp, struct proc *p);
 int	soo_stat(struct file *, struct stat *, struct proc *);
 int	uipc_usrreq(struct socket *, int , struct mbuf *,
-			 struct mbuf *, struct mbuf *);
+			 struct mbuf *, struct mbuf *, struct proc *);
 void	sbappend(struct sockbuf *sb, struct mbuf *m);
 void	sbappendstream(struct sockbuf *sb, struct mbuf *m);
 int	sbappendaddr(struct sockbuf *sb, struct sockaddr *asa,
@@ -297,7 +293,7 @@ int	sb_lock(struct sockbuf *sb);
 void	soinit(void);
 int	soabort(struct socket *so);
 int	soaccept(struct socket *so, struct mbuf *nam);
-int	sobind(struct socket *so, struct mbuf *nam);
+int	sobind(struct socket *so, struct mbuf *nam, struct proc *p);
 void	socantrcvmore(struct socket *so);
 void	socantsendmore(struct socket *so);
 int	soclose(struct socket *so);

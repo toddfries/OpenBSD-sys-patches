@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: am79900reg.h,v 1.2 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: am79900reg.h,v 1.7 2005/02/27 00:27:00 perry Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wait.h,v 1.13 2006/03/30 20:43:41 deraadt Exp $	*/
+/*	$OpenBSD: wait.h,v 1.14 2006/04/27 02:17:21 tedu Exp $	*/
 /*	$NetBSD: wait.h,v 1.11 1996/04/09 20:55:51 cgd Exp $	*/
 
 /*

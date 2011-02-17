@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uha.c,v 1.8 2005/12/03 16:53:16 krw Exp $	*/
-=======
 /*	$OpenBSD: uha.c,v 1.21 2010/08/07 03:50:01 krw Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG

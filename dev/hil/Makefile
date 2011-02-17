@@ -1,4 +1,4 @@
-#	$OpenBSD$
+#	$OpenBSD: Makefile,v 1.1 2003/02/11 19:39:30 miod Exp $
 
 AWK=	awk
 PROG=	devlist2h.awk

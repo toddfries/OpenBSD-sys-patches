@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: asc.c,v 1.21 2002/05/02 22:56:06 miod Exp $ */
-=======
 /* $OpenBSD: asc.c,v 1.25 2010/06/28 18:31:02 krw Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.

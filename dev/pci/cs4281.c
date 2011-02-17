@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cs4281.c,v 1.18 2005/11/21 21:52:47 miod Exp $ */
-=======
 /*	$OpenBSD: cs4281.c,v 1.26 2010/09/22 22:22:47 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$Tera: cs4281.c,v 1.18 2000/12/27 14:24:45 tacha Exp $	*/
 
 /*
@@ -236,6 +232,7 @@ struct audio_hw_if cs4281_hw_if = {
 	cs4281_get_props,
 	cs4281_trigger_output,
 	cs4281_trigger_input,
+	NULL
 };
 
 #if NMIDI > 0
@@ -297,7 +294,6 @@ cs4281_attach(parent, self, aux)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	char const *intrstr;
 	pci_intr_handle_t ih;
-	int pci_pwrmgmt_cap_reg, pci_pwrmgmt_csr_reg;
 
 	/* Map I/O register */
 	if (pci_mapreg_map(pa, CSCC_PCI_BA0,
@@ -321,18 +317,7 @@ cs4281_attach(parent, self, aux)
 	 * using Windows and rebooting into OpenBSD.
 	 * On my IBM ThinkPad X20, it is set to D3 after using Windows2000.
 	 */
-	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PWRMGMT,
-	    &pci_pwrmgmt_cap_reg, 0)) {
-		pcireg_t reg;
-
-		pci_pwrmgmt_csr_reg = pci_pwrmgmt_cap_reg + PCI_PMCSR;
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, pci_pwrmgmt_csr_reg);
-		if ((reg & PCI_PMCSR_STATE_MASK) != PCI_PMCSR_STATE_D0) {
-			pci_conf_write(pc, pa->pa_tag, pci_pwrmgmt_csr_reg,
-			    (reg & ~PCI_PMCSR_STATE_MASK) |
-			    PCI_PMCSR_STATE_D0);
-		}
-	}
+	pci_set_powerstate(pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_reconmap.c,v 1.3 2000/01/07 14:50:22 peter Exp $	*/
+/*	$OpenBSD: rf_reconmap.c,v 1.4 2002/12/16 07:01:05 tdeval Exp $	*/
 /*	$NetBSD: rf_reconmap.c,v 1.6 1999/08/14 21:44:24 oster Exp $	*/
 
 /*

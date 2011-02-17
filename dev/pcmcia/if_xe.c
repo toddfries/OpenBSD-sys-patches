@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_xe.c,v 1.31 2005/11/23 11:39:37 mickey Exp $	*/
-=======
 /*	$OpenBSD: if_xe.c,v 1.39 2010/08/30 20:33:18 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas
@@ -71,11 +67,6 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
-
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -257,12 +248,11 @@ xe_pcmcia_attach(parent, self, aux)
 
 	/* Fake a cfe. */
 	SIMPLEQ_FIRST(&pa->pf->cfe_head) = cfe = (struct pcmcia_config_entry *)
-	    malloc(sizeof *cfe, M_DEVBUF, M_NOWAIT);
+	    malloc(sizeof *cfe, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!cfe) {
 		printf(": function enable failed\n");
 		return;
 	}
-	bzero(cfe, sizeof *cfe);
 
 	/*
 	 * XXX Use preprocessor symbols instead.

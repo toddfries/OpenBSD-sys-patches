@@ -1,4 +1,4 @@
-/* $OpenBSD: acpidebug.h,v 1.3 2006/03/08 21:04:18 marco Exp $ */
+/* $OpenBSD: acpidebug.h,v 1.4 2006/10/24 19:01:48 jordan Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@openbsd.org>
  *

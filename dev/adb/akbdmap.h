@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: akbdmap.h,v 1.3 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: akbdmap.h,v 1.7 2005/05/05 22:29:41 abs Exp $	*/
 
 /*-

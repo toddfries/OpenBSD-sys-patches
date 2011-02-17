@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: qereg.h,v 1.2 2003/06/02 18:32:41 jason Exp $	*/
-=======
 /*	$OpenBSD: qereg.h,v 1.4 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qereg.h,v 1.3 2000/07/24 04:28:51 mycroft Exp $	*/
 
 /*-

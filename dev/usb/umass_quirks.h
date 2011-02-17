@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: umass_quirks.h,v 1.4 2008/06/26 05:42:19 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: umass_quirks.h,v 1.3 2001/12/29 13:46:23 augustss Exp $	*/
 
 /*

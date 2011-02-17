@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cgsix.c,v 1.55 2006/12/02 11:21:37 miod Exp $	*/
-=======
 /*	$OpenBSD: cgsix.c,v 1.58 2009/09/05 14:09:35 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

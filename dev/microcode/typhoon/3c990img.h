@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: 3c990img.h,v 1.6 2009/03/24 11:12:10 kettenis Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright 1999-2003 3Com Corporation.  All Rights Reserved.    

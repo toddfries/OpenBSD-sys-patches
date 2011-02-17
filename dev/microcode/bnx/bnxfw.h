@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: bnxfw.h,v 1.1 2006/06/26 05:37:05 brad Exp $	*/
-=======
 /*	$OpenBSD: bnxfw.h,v 1.4 2010/07/21 02:17:15 todd Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006-2009 Broadcom Corporation

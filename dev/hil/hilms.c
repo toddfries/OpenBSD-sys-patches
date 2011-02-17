@@ -1,4 +1,4 @@
-/*	$OpenBSD: hilms.c,v 1.4 2006/12/16 20:08:44 miod Exp $	*/
+/*	$OpenBSD: hilms.c,v 1.5 2007/04/10 22:37:17 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

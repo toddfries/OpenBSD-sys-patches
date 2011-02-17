@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rtw.c,v 1.59 2007/04/02 08:41:04 claudio Exp $	*/
-=======
 /*	$OpenBSD: rtw.c,v 1.81 2010/09/07 16:21:43 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -96,7 +92,6 @@ void	 rtw_txdesc_blk_init_all(struct rtw_txdesc_blk *);
 void	 rtw_txsoft_blk_init_all(struct rtw_txsoft_blk *);
 void	 rtw_txdesc_blk_init(struct rtw_txdesc_blk *);
 void	 rtw_txdescs_sync(struct rtw_txdesc_blk *, u_int, u_int, int);
-u_int	 rtw_txring_next(struct rtw_regs *, struct rtw_txdesc_blk *);
 void	 rtw_txring_fixup(struct rtw_softc *);
 void	 rtw_rxbufs_release(bus_dma_tag_t, struct rtw_rxsoft *);
 void	 rtw_rxdesc_init(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int, int);
@@ -153,6 +148,9 @@ void	 rtw_rfmd_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
 int	 rtw_pwrstate(struct rtw_softc *, enum rtw_pwrstate);
 int	 rtw_tune(struct rtw_softc *);
 void	 rtw_set_nettype(struct rtw_softc *, enum ieee80211_opmode);
+int	 rtw_compute_duration1(int, int, uint32_t, int, struct rtw_duration *);
+int	 rtw_compute_duration(struct ieee80211_frame *, int, uint32_t, int,
+	    int, struct rtw_duration *, struct rtw_duration *, int *, int);
 int	 rtw_init(struct ifnet *);
 int	 rtw_ioctl(struct ifnet *, u_long, caddr_t);
 int	 rtw_seg_too_short(bus_dmamap_t);
@@ -172,8 +170,6 @@ int	 rtw_txdesc_dmamaps_create(bus_dma_tag_t, struct rtw_txsoft *, u_int);
 int	 rtw_rxdesc_dmamaps_create(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
 void	 rtw_rxdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
 void	 rtw_txdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_txsoft *, u_int);
-void	 rtw_init_channels(enum rtw_locale, struct ieee80211_channel (*)[],
-	    const char*);
 void	 rtw_identify_country(struct rtw_regs *, enum rtw_locale *);
 int	 rtw_identify_sta(struct rtw_regs *, u_int8_t (*)[], const char *);
 void	 rtw_rxdescs_sync(struct rtw_rxdesc_blk *, int, int, int);
@@ -669,14 +665,12 @@ rtw_srom_read(struct rtw_regs *regs, u_int32_t flags, struct rtw_srom *sr,
 
 	RTW_WRITE8(regs, RTW_9346CR, ecr);
 
-	sr->sr_content = malloc(sr->sr_size, M_DEVBUF, M_NOWAIT);
+	sr->sr_content = malloc(sr->sr_size, M_DEVBUF, M_NOWAIT | M_ZERO);
 
 	if (sr->sr_content == NULL) {
 		printf("%s: unable to allocate SROM buffer\n", dvname);
 		return ENOMEM;
 	}
-
-	bzero(sr->sr_content, sr->sr_size);
 
 	/* RTL8180 has a single 8-bit register for controlling the
 	 * 93cx6 SROM.  There is no "ready" bit. The RTL8180
@@ -764,47 +758,6 @@ rtw_set_rfprog(struct rtw_regs *regs, int rfchipid,
 	RTW_DPRINTF(RTW_DEBUG_INIT,
 	    ("%s: %s RF programming method, %#02x\n", dvname, method,
 	    RTW_READ8(regs, RTW_CONFIG4)));
-}
-
-void
-rtw_init_channels(enum rtw_locale locale,
-    struct ieee80211_channel (*chans)[IEEE80211_CHAN_MAX+1],
-    const char *dvname)
-{
-	int i;
-	const char *name = NULL;
-#define ADD_CHANNEL(_chans, _chan) do {			\
-	(*_chans)[_chan].ic_flags = IEEE80211_CHAN_B;		\
-	(*_chans)[_chan].ic_freq =				\
-	    ieee80211_ieee2mhz(_chan, (*_chans)[_chan].ic_flags);\
-} while (0)
-
-	switch (locale) {
-	case RTW_LOCALE_USA:	/* 1-11 */
-		name = "USA";
-		for (i = 1; i <= 11; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	case RTW_LOCALE_JAPAN:	/* 1-14 */
-		name = "Japan";
-		ADD_CHANNEL(chans, 14);
-		for (i = 1; i <= 14; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	case RTW_LOCALE_EUROPE:	/* 1-13 */
-		name = "Europe";
-		for (i = 1; i <= 13; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	default:			/* 10-11 allowed by most countries */
-		name = "<unknown>";
-		for (i = 10; i <= 11; i++)
-			ADD_CHANNEL(chans, i);
-		break;
-	}
-	RTW_DPRINTF(RTW_DEBUG_ATTACH, ("%s: Geographic Location %s\n",
-	    dvname, name));
-#undef ADD_CHANNEL
 }
 
 void
@@ -1091,11 +1044,9 @@ rtw_rxdesc_init_all(struct rtw_rxdesc_blk *rdb, struct rtw_rxsoft *ctl,
     int kick)
 {
 	int i;
-	struct rtw_rxdesc *rd;
 	struct rtw_rxsoft *rs;
 
 	for (i = 0; i < rdb->rdb_ndesc; i++) {
-		rd = &rdb->rdb_desc[i];
 		rs = &ctl[i];
 		rtw_rxdesc_init(rdb, rs, i, kick);
 	}
@@ -1340,7 +1291,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 		}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 		rxi.rxi_flags = 0;
 		rxi.rxi_rssi = rssi;
@@ -2773,18 +2724,22 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
     struct rtw_txdesc_blk **tdbp, struct mbuf **mp,
     struct ieee80211_node **nip)
 {
+	struct ieee80211com *ic;
+	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
 	struct mbuf *m0;
 	struct rtw_softc *sc;
 	short *if_flagsp;
 
 	sc = (struct rtw_softc *)ifp->if_softc;
+	ic = &sc->sc_ic;
 
 	DPRINTF(sc, RTW_DEBUG_XMIT,
 	    ("%s: enter %s\n", sc->sc_dev.dv_xname, __func__));
 
 	if_flagsp = &ifp->if_flags;
 
-	if (sc->sc_ic.ic_state == IEEE80211_S_RUN &&
+	if (ic->ic_state == IEEE80211_S_RUN &&
 	    (*mp = rtw_80211_dequeue(sc, &sc->sc_beaconq, RTW_TXPRIBCN, tsbp,
 	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue beacon frame\n",
@@ -2792,7 +2747,7 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 		return 0;
 	}
 
-	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_mgtq, RTW_TXPRIMD, tsbp,
+	if ((*mp = rtw_80211_dequeue(sc, &ic->ic_mgtq, RTW_TXPRIMD, tsbp,
 	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue mgt frame\n",
 		    __func__));
@@ -2804,14 +2759,14 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 		return 0;
 	}
 
-	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_pwrsaveq, RTW_TXPRIHI,
+	if ((*mp = rtw_80211_dequeue(sc, &ic->ic_pwrsaveq, RTW_TXPRIHI,
 	    tsbp, tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue pwrsave frame\n",
 		    __func__));
 		return 0;
 	}
 
-	if (sc->sc_ic.ic_state != IEEE80211_S_RUN) {
+	if (ic->ic_state != IEEE80211_S_RUN) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: not running\n", __func__));
 		return 0;
 	}
@@ -2852,8 +2807,10 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 	}
 
 	/* XXX should do WEP in hardware */
-	if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
-		if ((m0 = ieee80211_wep_crypt(ifp, m0, 1)) == NULL)
+	if (ic->ic_flags & IEEE80211_F_WEPON) {
+		wh = mtod(m0, struct ieee80211_frame *);
+		k = ieee80211_get_txkey(ic, wh, *nip);
+		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
 			return -1;
 	}
 
@@ -2936,6 +2893,172 @@ rtw_dmamap_load_txbuf(bus_dma_tag_t dmat, bus_dmamap_t dmam, struct mbuf *chain,
 	return m0;
 }
 
+
+/*
+ * Arguments in:
+ *
+ * paylen:  payload length (no FCS, no WEP header)
+ *
+ * hdrlen:  header length
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * flags:   IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d:       802.11 Duration field for RTS,
+ *          802.11 Duration field for data frame,
+ *          PLCP Length for data frame,
+ *          residual octets at end of data slot
+ */
+int
+rtw_compute_duration1(int len, int use_ack, uint32_t flags, int rate,
+    struct rtw_duration *d)
+{
+	int pre, ctsrate;
+	int ack, bitlen, data_dur, remainder;
+
+	/* RTS reserves medium for SIFS | CTS | SIFS | (DATA) | SIFS | ACK
+	 * DATA reserves medium for SIFS | ACK
+	 *
+	 * XXXMYC: no ACK on multicast/broadcast or control packets
+	 */
+
+	bitlen = len * 8;
+
+	pre = IEEE80211_DUR_DS_SIFS;
+	if ((flags & IEEE80211_F_SHPREAMBLE) != 0)
+		pre += IEEE80211_DUR_DS_SHORT_PREAMBLE +
+		    IEEE80211_DUR_DS_FAST_PLCPHDR;
+	else
+		pre += IEEE80211_DUR_DS_LONG_PREAMBLE +
+		    IEEE80211_DUR_DS_SLOW_PLCPHDR;
+
+	d->d_residue = 0;
+	data_dur = (bitlen * 2) / rate;
+	remainder = (bitlen * 2) % rate;
+	if (remainder != 0) {
+		d->d_residue = (rate - remainder) / 16;
+		data_dur++;
+	}
+
+	switch (rate) {
+	case 2:		/* 1 Mb/s */
+	case 4:		/* 2 Mb/s */
+		/* 1 - 2 Mb/s WLAN: send ACK/CTS at 1 Mb/s */
+		ctsrate = 2;
+		break;
+	case 11:	/* 5.5 Mb/s */
+	case 22:	/* 11  Mb/s */
+	case 44:	/* 22  Mb/s */
+		/* 5.5 - 11 Mb/s WLAN: send ACK/CTS at 2 Mb/s */
+		ctsrate = 4;
+		break;
+	default:
+		/* TBD */
+		return -1;
+	}
+
+	d->d_plcp_len = data_dur;
+
+	ack = (use_ack) ? pre + (IEEE80211_DUR_DS_SLOW_ACK * 2) / ctsrate : 0;
+
+	d->d_rts_dur =
+	    pre + (IEEE80211_DUR_DS_SLOW_CTS * 2) / ctsrate +
+	    pre + data_dur +
+	    ack;
+
+	d->d_data_dur = ack;
+
+	return 0;
+}
+
+/*
+ * Arguments in:
+ *
+ * wh:      802.11 header
+ *
+ * len: packet length 
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * fraglen: fragment length, set to maximum (or higher) for no
+ *          fragmentation
+ *
+ * flags:   IEEE80211_F_WEPON (hardware adds WEP),
+ *          IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d0: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ *
+ * dn: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ */
+int
+rtw_compute_duration(struct ieee80211_frame *wh, int len, uint32_t flags,
+    int fraglen, int rate, struct rtw_duration *d0, struct rtw_duration *dn,
+    int *npktp, int debug)
+{
+	int ack, rc;
+	int firstlen, hdrlen, lastlen, lastlen0, npkt, overlen, paylen;
+
+	if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) == IEEE80211_FC1_DIR_DSTODS)
+		hdrlen = sizeof(struct ieee80211_frame_addr4);
+	else
+		hdrlen = sizeof(struct ieee80211_frame);
+
+	paylen = len - hdrlen;
+
+	if ((flags & IEEE80211_F_WEPON) != 0)
+		overlen = IEEE80211_WEP_TOTLEN + IEEE80211_CRC_LEN;
+	else
+		overlen = IEEE80211_CRC_LEN;
+
+	npkt = paylen / fraglen;
+	lastlen0 = paylen % fraglen;
+
+	if (npkt == 0)			/* no fragments */
+		lastlen = paylen + overlen;
+	else if (lastlen0 != 0) {	/* a short "tail" fragment */
+		lastlen = lastlen0 + overlen;
+		npkt++;
+	} else				/* full-length "tail" fragment */
+		lastlen = fraglen + overlen;
+
+	if (npktp != NULL)
+		*npktp = npkt;
+
+	if (npkt > 1)
+		firstlen = fraglen + overlen;
+	else
+		firstlen = paylen + overlen;
+
+	if (debug) {
+		printf("%s: npkt %d firstlen %d lastlen0 %d lastlen %d "
+		    "fraglen %d overlen %d len %d rate %d flags %08x\n",
+		    __func__, npkt, firstlen, lastlen0, lastlen, fraglen,
+		    overlen, len, rate, flags);
+	}
+
+	ack = !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
+	    (wh->i_fc[1] & IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL;
+
+	rc = rtw_compute_duration1(firstlen + hdrlen, ack, flags, rate, d0);
+	if (rc == -1)
+		return rc;
+
+	if (npkt <= 1) {
+		*dn = *d0;
+		return 0;
+	}
+	return rtw_compute_duration1(lastlen + hdrlen, ack, flags, rate, dn);
+}
+
 #ifdef RTW_DEBUG
 void
 rtw_print_txdesc(struct rtw_softc *sc, const char *action,
@@ -2959,11 +3082,11 @@ rtw_start(struct ifnet *ifp)
 	uint32_t proto_ctl0, ctl0, ctl1;
 	bus_dmamap_t		dmamap;
 	struct ieee80211com	*ic;
-	struct ieee80211_duration *d0;
 	struct ieee80211_frame	*wh;
 	struct ieee80211_node	*ni;
 	struct mbuf		*m0;
 	struct rtw_softc	*sc;
+	struct rtw_duration	*d0;
 	struct rtw_txsoft_blk	*tsb;
 	struct rtw_txdesc_blk	*tdb;
 	struct rtw_txsoft	*ts;
@@ -3050,7 +3173,7 @@ rtw_start(struct ifnet *ifp)
 				ctl0 |= RTW_TXCTL0_BEACON;
 		}
 
-		if (ieee80211_compute_duration(wh, m0->m_pkthdr.len,
+		if (rtw_compute_duration(wh, m0->m_pkthdr.len,
 		    ic->ic_flags & ~IEEE80211_F_WEPON, ic->ic_fragthreshold,
 		    rate, &ts->ts_d0, &ts->ts_dn, &npkt,
 		    (sc->sc_if.if_flags & (IFF_DEBUG|IFF_LINK2)) ==
@@ -3104,7 +3227,7 @@ rtw_start(struct ifnet *ifp)
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 
 		}
-#endif /* NPBFILTER > 0 */
+#endif /* NBPFILTER > 0 */
 
 		for (i = 0, lastdesc = desc = ts->ts_first;
 		     i < dmamap->dm_nsegs;
@@ -3733,7 +3856,7 @@ rtw_attach(struct rtw_softc *sc)
 	const char *vername;
 	struct ifnet *ifp;
 	char scratch[sizeof("unknown 0xXXXXXXXX")];
-	int pri, rc;
+	int pri, rc, i;
 
 
 	/* Use default DMA memory access */
@@ -3879,8 +4002,11 @@ rtw_attach(struct rtw_softc *sc)
 	if (sc->sc_locale == RTW_LOCALE_UNKNOWN)
 		rtw_identify_country(&sc->sc_regs, &sc->sc_locale);
 
-	rtw_init_channels(sc->sc_locale, &sc->sc_ic.ic_channels,
-	    sc->sc_dev.dv_xname);
+	for (i = 1; i <= 14; i++) {
+		sc->sc_ic.ic_channels[i].ic_flags = IEEE80211_CHAN_B;
+		sc->sc_ic.ic_channels[i].ic_freq =
+		    ieee80211_ieee2mhz(i, sc->sc_ic.ic_channels[i].ic_flags);
+	}
 
 	if (rtw_identify_sta(&sc->sc_regs, &sc->sc_ic.ic_myaddr,
 	    sc->sc_dev.dv_xname) != 0)

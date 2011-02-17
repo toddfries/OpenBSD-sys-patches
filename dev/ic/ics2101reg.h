@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: ics2101reg.h,v 1.3 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD: ics2101reg.h,v 1.3 1996/02/05 02:18:52 jtc Exp $ */
 
 /*-

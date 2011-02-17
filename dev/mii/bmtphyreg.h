@@ -1,4 +1,4 @@
-/*	$OpenBSD: bmtphyreg.h,v 1.2 2001/06/18 06:31:59 deraadt Exp $	*/
+/*	$OpenBSD: bmtphyreg.h,v 1.3 2005/02/04 23:23:56 brad Exp $	*/
 /*	$NetBSD: bmtphyreg.h,v 1.1 2001/06/02 21:42:10 thorpej Exp $	*/
 
 /*-

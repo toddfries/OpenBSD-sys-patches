@@ -1,4 +1,4 @@
-/*	$OpenBSD: umassvar.h,v 1.7 2004/07/21 07:43:41 dlg Exp $ */
+/*	$OpenBSD: umassvar.h,v 1.12 2007/06/13 06:25:03 mbalmer Exp $ */
 /*	$NetBSD: umassvar.h,v 1.20 2003/09/08 19:31:01 mycroft Exp $	*/
 /*-
  * Copyright (c) 1999 MAEKAWA Masahide <bishop@rr.iij4u.or.jp>,
@@ -31,7 +31,7 @@
 
 #ifdef UMASS_DEBUG
 #define DIF(m, x)	if (umassdebug & (m)) do { x ; } while (0)
-#define DPRINTF(m, x)	do { if (umassdebug & (m)) logprintf x; } while (0)
+#define DPRINTF(m, x)	do { if (umassdebug & (m)) printf x; } while (0)
 #define UDMASS_UPPER	0x00008000	/* upper layer */
 #define UDMASS_GEN	0x00010000	/* general */
 #define UDMASS_SCSI	0x00020000	/* scsi */
@@ -146,12 +146,12 @@ struct umass_wire_methods {
 };
 
 struct umassbus_softc {
-	device_ptr_t		sc_child;	/* child device, for detach */
+	struct device		*sc_child;	/* child device, for detach */
 };
 
 /* the per device structure */
 struct umass_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
+	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* device */
 	usbd_interface_handle	sc_iface;	/* interface */
 	int			sc_ifaceno;	/* interface number */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: maxim6690.c,v 1.13 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: maxim6690.c,v 1.16 2007/10/20 22:06:43 cnst Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -60,7 +60,6 @@ struct maxtmp_softc {
 
 int	maxtmp_match(struct device *, void *, void *);
 void	maxtmp_attach(struct device *, struct device *, void *);
-int	maxtmp_check(struct i2c_attach_args *, u_int8_t *, u_int8_t *);
 void	maxtmp_refresh(void *);
 
 struct cfattach maxtmp_ca = {
@@ -132,7 +131,7 @@ maxtmp_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensor[MAXTMP_EXT].desc, "External",
 	    sizeof(sc->sc_sensor[MAXTMP_EXT].desc));
 
-	if (sensor_task_register(sc, maxtmp_refresh, 5)) {
+	if (sensor_task_register(sc, maxtmp_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

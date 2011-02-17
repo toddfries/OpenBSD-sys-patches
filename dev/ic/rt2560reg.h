@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560reg.h,v 1.4 2006/06/10 20:30:00 damien Exp $  */
+/*	$OpenBSD: rt2560reg.h,v 1.5 2006/11/13 20:06:38 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_fifo.c,v 1.5 2000/08/08 16:07:41 peter Exp $	*/
+/*	$OpenBSD: rf_fifo.c,v 1.6 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_fifo.c,v 1.5 2000/03/04 03:27:13 oster Exp $	*/
 
 /*

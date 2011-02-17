@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82802reg.h,v 1.2 2003/06/02 19:24:22 mickey Exp $	*/
-=======
 /*	$OpenBSD: i82802reg.h,v 1.4 2009/10/23 12:48:49 jsg Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: poll.h,v 1.10 2003/06/02 04:04:54 deraadt Exp $ */
+/*	$OpenBSD: poll.h,v 1.11 2003/12/10 23:10:08 millert Exp $ */
 
 /*
  * Copyright (c) 1996 Theo de Raadt

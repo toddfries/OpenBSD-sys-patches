@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcreg.h,v 1.15 2005/12/10 11:45:43 miod Exp $     */
+/*      $OpenBSD: wdcreg.h,v 1.16 2006/05/07 21:15:47 miod Exp $     */
 /*	$NetBSD: wdcreg.h,v 1.22 1999/03/07 14:02:54 bouyer Exp $	*/
 
 /*-

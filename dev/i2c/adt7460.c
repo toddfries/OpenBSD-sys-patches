@@ -1,4 +1,4 @@
-/*	$OpenBSD: adt7460.c,v 1.16 2006/12/31 06:47:14 deraadt Exp $	*/
+/*	$OpenBSD: adt7460.c,v 1.21 2007/12/12 16:56:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -29,6 +29,8 @@
 #define ADT7460_VCC		0x22
 #define ADT7460_V5		0x23
 #define ADT7460_V12		0x24
+#define ADT7460_VTR		0x99
+#define ADT7460_VBAT		0x9a
 #define ADT7460_REM1_TEMP	0x25
 #define ADT7460_LOCAL_TEMP	0x26
 #define ADT7460_REM2_TEMP	0x27
@@ -40,6 +42,10 @@
 #define ADT7460_TACH3H		0x2d
 #define ADT7460_TACH4L		0x2e
 #define ADT7460_TACH4H		0x2f
+#define ADT7460_TACH5L		0xa9
+#define ADT7460_TACH5H		0xaa
+#define ADT7460_TACH6L		0xab
+#define ADT7460_TACH6H		0xac
 #define ADT7460_REVISION	0x3f
 #define ADT7460_CONFIG		0x40
 #define ADT7460_CONFIG_Vcc	0x80
@@ -50,34 +56,39 @@
 #define ADT_VCC			2
 #define ADT_V5			3
 #define ADT_V12			4
-#define ADT_REM1_TEMP		5
-#define ADT_LOCAL_TEMP		6
-#define ADT_REM2_TEMP		7
-#define ADT_TACH1		8
-#define ADT_TACH2		9
-#define ADT_TACH3		10
-#define ADT_TACH4		11
-#define ADT_NUM_SENSORS		12
+#define ADT_VTR			5
+#define ADT_VBAT		6
+#define ADT_REM1_TEMP		7
+#define ADT_LOCAL_TEMP		8
+#define ADT_REM2_TEMP		9
+#define ADT_TACH1		10
+#define ADT_TACH2		11
+#define ADT_TACH3		12
+#define ADT_TACH4		13
+#define ADT_TACH5		14
+#define ADT_TACH6		15
+#define ADT_NUM_SENSORS		16
 
 struct adt_chip {
 	const char	*name;
-	short		ratio[5];
+	short		ratio[7];
 	int		type;
 	short		vcc;
 } adt_chips[] = {
-	/* register	0x20  0x21  0x22  0x23  0x24	type	*/
-	/* 		2.5v  vccp   vcc    5v   12v		*/
+	/* register	0x20  0x21  0x22  0x23  0x24  0xa8  0xaa	type	*/
+	/* 		2.5v  vccp   vcc    5v   12v   vtr  vbat		*/
 
-	{ "adt7460",	{ 2500,    0, 3300,    0,     0 },	7460,	5000 },
-	{ "adt7467",	{ 2500, 2250, 3300, 5000, 12000 },	7467,	5000 },
-	{ "adt7475",	{    0, 2250, 3300,    0,     0 },	7475,	   0 },
-	{ "adt7476",	{ 2500, 2250, 3300, 5000, 12000 },	7476,	   0 },
-	{ "adm1027",	{ 2500, 2250, 3300, 5000, 12000 },	1027,	5000 },
-	{ "lm85",	{ 2500, 2250, 3300, 5000, 12000 },	7467,	   0 },
-	{ "emc6d100",	{ 2500, 2250, 3300, 5000, 12000 },	6100,	   0 },
-	{ "emc6w201",	{ 2500, 2250, 3300, 5000, 12000 },	6201,	   0 },
-	{ "lm96000",	{ 2500, 2250, 3300, 5000, 12000 },	96000,	   0 },
-	{ "sch5017",	{ 5000, 2250, 3300, 5000, 12000 },	5017,	   0 }
+	{ "adt7460",	{ 2500,    0, 3300,    0,     0,    0,    0 },	7460,	5000 },
+	{ "adt7467",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	7467,	5000 },
+	{ "adt7475",	{    0, 2250, 3300,    0,     0,    0,    0 },	7475,	   0 },
+	{ "adt7476",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	7476,	   0 },
+	{ "adm1027",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	1027,	5000 },
+	{ "lm85",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	7467,	   0 },
+	{ "emc6d100",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	6100,	   0 },
+	{ "emc6w201",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	6201,	   0 },
+	{ "lm96000",	{ 2500, 2250, 3300, 5000, 12000,    0,    0 },	96000,	   0 },
+	{ "sch5017",	{ 5000, 2250, 3300, 5000, 12000,    0,    0 },	5017,	   0 },
+	{ "sch5027",	{ 5000, 2250, 3300, 5000, 12000, 3300, 3300 },	5027,	   0 }
 };
 
 struct {
@@ -90,6 +101,8 @@ struct {
 	{ ADT_VCC, ADT7460_VCC, 32768 + 2 },
 	{ ADT_V5, ADT7460_V5, 32768 + 3 },
 	{ ADT_V12, ADT7460_V12, 32768 + 4 },
+	{ ADT_VTR, ADT7460_VTR, 32768 + 5 },
+	{ ADT_VBAT, ADT7460_VBAT, 32768 + 6 },
 	{ ADT_REM1_TEMP, ADT7460_REM1_TEMP },
 	{ ADT_LOCAL_TEMP, ADT7460_LOCAL_TEMP },
 	{ ADT_REM2_TEMP, ADT7460_REM2_TEMP },
@@ -97,6 +110,8 @@ struct {
 	{ ADT_TACH2, ADT7460_TACH2L },
 	{ ADT_TACH3, ADT7460_TACH3L },
 	{ ADT_TACH4, ADT7460_TACH4L },
+	{ ADT_TACH5, ADT7460_TACH5L },
+	{ ADT_TACH6, ADT7460_TACH6L },
 };
 
 struct adt_softc {
@@ -197,6 +212,9 @@ adt_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->chip->type == 5017)
 		strlcpy(sc->sc_sensor[ADT_2_5V].desc, "+5VTR",
 		    sizeof(sc->sc_sensor[ADT_2_5V].desc));
+	if (sc->chip->type == 5027)
+		strlcpy(sc->sc_sensor[ADT_2_5V].desc, "+5V",
+		    sizeof(sc->sc_sensor[ADT_2_5V].desc));
 
 	sc->sc_sensor[ADT_VCCP].type = SENSOR_VOLTS_DC;
 	strlcpy(sc->sc_sensor[ADT_VCCP].desc, "Vccp",
@@ -214,6 +232,14 @@ adt_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensor[ADT_V12].desc, "+12V",
 	    sizeof(sc->sc_sensor[ADT_V12].desc));
 
+	sc->sc_sensor[ADT_VTR].type = SENSOR_VOLTS_DC;
+	strlcpy(sc->sc_sensor[ADT_VTR].desc, "+Vtr",
+	    sizeof(sc->sc_sensor[ADT_VTR].desc));
+
+	sc->sc_sensor[ADT_VBAT].type = SENSOR_VOLTS_DC;
+	strlcpy(sc->sc_sensor[ADT_VBAT].desc, "+Vbat",
+	    sizeof(sc->sc_sensor[ADT_VBAT].desc));
+
 	sc->sc_sensor[ADT_REM1_TEMP].type = SENSOR_TEMP;
 	strlcpy(sc->sc_sensor[ADT_REM1_TEMP].desc, "Remote",
 	    sizeof(sc->sc_sensor[ADT_REM1_TEMP].desc));
@@ -230,8 +256,10 @@ adt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sensor[ADT_TACH2].type = SENSOR_FANRPM;
 	sc->sc_sensor[ADT_TACH3].type = SENSOR_FANRPM;
 	sc->sc_sensor[ADT_TACH4].type = SENSOR_FANRPM;
+	sc->sc_sensor[ADT_TACH5].type = SENSOR_FANRPM;
+	sc->sc_sensor[ADT_TACH6].type = SENSOR_FANRPM;
 
-	if (sensor_task_register(sc, adt_refresh, 5)) {
+	if (sensor_task_register(sc, adt_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -240,7 +268,6 @@ adt_attach(struct device *parent, struct device *self, void *aux)
 		if (worklist[i].index >= 32768 &&
 		    sc->chip->ratio[worklist[i].index - 32768] == 0)
 			continue;
-		sc->sc_sensor[i].flags &= ~SENSOR_FINVALID;
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[i]);
 	}
 	sensordev_install(&sc->sc_sensordev);
@@ -283,6 +310,8 @@ adt_refresh(void *arg)
 		case ADT_VCCP:
 		case ADT_V5:
 		case ADT_V12:
+		case ADT_VTR:
+		case ADT_VBAT:
 			sc->sc_sensor[i].value = ratio * 1000 * (u_int)data / 192;
 			break;
 		case ADT_LOCAL_TEMP:
@@ -310,6 +339,25 @@ adt_refresh(void *arg)
 				sc->sc_sensor[i].flags |= SENSOR_FINVALID;
 			else
 				sc->sc_sensor[i].value = (90000 * 60) / fan;
+			break;
+		case ADT_TACH5:
+		case ADT_TACH6:
+			if (sc->chip->type != 5027) {
+				sc->sc_sensor[i].flags |= SENSOR_FINVALID;
+				break;	/* only 5027 has these fans? */
+			}
+			cmd = worklist[i].cmd + 1; /* TACHnH follows TACHnL */
+			if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
+			    sc->sc_addr, &cmd, sizeof cmd, &data2, sizeof data2, 0)) {
+				sc->sc_sensor[i].flags |= SENSOR_FINVALID;
+				continue;
+			}
+
+			fan = data + (data2 << 8);
+			if (fan == 0 || fan == 0xffff)
+				sc->sc_sensor[i].flags |= SENSOR_FINVALID;
+			else
+				sc->sc_sensor[i].value = fan * 60;
 			break;
 		default:
 			sc->sc_sensor[i].flags |= SENSOR_FINVALID;

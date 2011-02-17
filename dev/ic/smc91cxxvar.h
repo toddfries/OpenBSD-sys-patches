@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: smc91cxxvar.h,v 1.5 2006/01/23 14:42:55 martin Exp $	*/
-=======
 /*	$OpenBSD: smc91cxxvar.h,v 1.8 2009/10/13 19:33:16 pirofti Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: smc91cxxvar.h,v 1.4 1997/10/15 05:56:13 explorer Exp $	*/
 
 /*-

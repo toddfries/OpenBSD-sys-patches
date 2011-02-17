@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: qecreg.h,v 1.2 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: qecreg.h,v 1.2 1999/01/16 12:46:08 pk Exp $	*/
 
 /*-

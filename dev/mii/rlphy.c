@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rlphy.c,v 1.26 2006/12/27 19:11:09 kettenis Exp $	*/
-=======
 /*	$OpenBSD: rlphy.c,v 1.30 2008/09/11 18:26:58 brad Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)

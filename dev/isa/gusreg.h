@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: gusreg.h,v 1.4 1998/04/26 21:02:43 provos Exp $ */
-=======
 /* $OpenBSD: gusreg.h,v 1.6 2008/06/26 05:42:16 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD: gusreg.h,v 1.6 1997/10/09 07:57:22 jtc Exp $ */
 
 /*-

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sys_generic.c,v 1.55 2007/03/15 10:22:30 art Exp $	*/
-=======
 /*	$OpenBSD: sys_generic.c,v 1.72 2010/12/19 19:54:46 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -69,8 +65,6 @@
 int selscan(struct proc *, fd_set *, fd_set *, int, int, register_t *);
 void pollscan(struct proc *, struct pollfd *, u_int, register_t *);
 int pollout(struct pollfd *, struct pollfd *, u_int);
-
-void sel_clean_proclist(struct proc *);
 
 /*
  * Read system call.
@@ -550,8 +544,7 @@ sys_select(struct proc *p, void *v, register_t *retval)
 	if (nd > sizeof(bits[0])) {
 		caddr_t mbits;
 
-		mbits = malloc(ni * 6, M_TEMP, M_WAITOK);
-		bzero(mbits, ni * 6);
+		mbits = malloc(ni * 6, M_TEMP, M_WAITOK|M_ZERO);
 		pibits[0] = (fd_set *)&mbits[ni * 0];
 		pibits[1] = (fd_set *)&mbits[ni * 1];
 		pibits[2] = (fd_set *)&mbits[ni * 2];
@@ -619,7 +612,6 @@ retry:
 	if (error == 0)
 		goto retry;
 done:
-	sel_clean_proclist(p);
 	atomic_clearbits_int(&p->p_flag, P_SELECT);
 	/* select is not restarted after signals... */
 	if (error == ERESTART)
@@ -700,12 +692,17 @@ selfalse(dev_t dev, int events, struct proc *p)
 void
 selrecord(struct proc *selector, struct selinfo *sip)
 {
-	if (sip->si_selproc == NULL) {
-		sip->si_selproc = selector;
-		TAILQ_INSERT_TAIL(&selector->p_selects, sip, si_list);
-	} else if (sip->si_selproc != selector) {
+	struct proc *p;
+	pid_t mypid;
+
+	mypid = selector->p_pid;
+	if (sip->si_selpid == mypid)
+		return;
+	if (sip->si_selpid && (p = pfind(sip->si_selpid)) &&
+	    p->p_wchan == (caddr_t)&selwait)
 		sip->si_flags |= SI_COLL;
-	}
+	else
+		sip->si_selpid = mypid;
 }
 
 /*
@@ -717,48 +714,26 @@ selwakeup(struct selinfo *sip)
 	struct proc *p;
 	int s;
 
-<<<<<<< HEAD
-=======
 	KNOTE(&sip->si_note, 0);
 	if (sip->si_selpid == 0)
 		return;
->>>>>>> origin/master
 	if (sip->si_flags & SI_COLL) {
 		nselcoll++;
 		sip->si_flags &= ~SI_COLL;
 		wakeup(&selwait);
 	}
-
-	/*
-	 * We check the process once before locking.
-	 * Then we wake the process and clean up its
-	 * selects list.
-	 */
-	if (sip->si_selproc == NULL)
-		return;
-
-	SCHED_LOCK(s);
-	if ((p = sip->si_selproc) != NULL) {
-		if (p->p_wchan != NULL) {
+	p = pfind(sip->si_selpid);
+	sip->si_selpid = 0;
+	if (p != NULL) {
+		SCHED_LOCK(s);
+		if (p->p_wchan == (caddr_t)&selwait) {
 			if (p->p_stat == SSLEEP)
 				setrunnable(p);
 			else
 				unsleep(p);
-		} else {
+		} else if (p->p_flag & P_SELECT)
 			atomic_clearbits_int(&p->p_flag, P_SELECT);
-		}
-	}
-	SCHED_UNLOCK(s);
-}
-
-void
-sel_clean_proclist(struct proc *p)
-{
-	struct selinfo *sip;
-
-	while ((sip = TAILQ_FIRST(&p->p_selects)) != NULL) {
-		sip->si_selproc = NULL;
-		TAILQ_REMOVE(&p->p_selects, sip, si_list);
+		SCHED_UNLOCK(s);
 	}
 }
 
@@ -888,7 +863,6 @@ retry:
 		goto retry;
 
 done:
-	sel_clean_proclist(p);
 	atomic_clearbits_int(&p->p_flag, P_SELECT);
 	/*
 	 * NOTE: poll(2) is not restarted after a signal and EWOULDBLOCK is

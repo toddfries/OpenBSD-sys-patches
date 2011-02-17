@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hash.h,v 1.3 2003/06/03 00:57:47 weingart Exp $	*/
-=======
 /*	$OpenBSD: hash.h,v 1.5 2010/09/24 13:24:53 claudio Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2001 Tobias Weingartner

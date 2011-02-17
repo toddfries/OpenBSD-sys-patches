@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: opti.c,v 1.8 2004/06/13 21:49:24 niklas Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff

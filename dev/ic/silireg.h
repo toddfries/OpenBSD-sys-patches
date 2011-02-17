@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: silireg.h,v 1.19 2007/04/07 06:12:19 pascoe Exp $ */
-=======
 /*	$OpenBSD: silireg.h,v 1.21 2011/01/26 21:41:00 drahn Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: bpp.c,v 1.2 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: bpp.c,v 1.25 2005/12/11 12:23:44 christos Exp $ */
 
 /*-

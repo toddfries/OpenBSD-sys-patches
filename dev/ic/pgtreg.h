@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgtreg.h,v 1.6 2006/10/01 22:03:25 claudio Exp $  */
+/*	$OpenBSD: pgtreg.h,v 1.7 2006/10/11 12:10:19 claudio Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>

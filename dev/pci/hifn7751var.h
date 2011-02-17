@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hifn7751var.h,v 1.51 2003/10/09 03:47:20 jason Exp $	*/
-=======
 /*	$OpenBSD: hifn7751var.h,v 1.53 2010/12/15 23:34:23 mikeb Exp $	*/
->>>>>>> origin/master
 
 /*
  * Invertex AEON / Hifn 7751 driver

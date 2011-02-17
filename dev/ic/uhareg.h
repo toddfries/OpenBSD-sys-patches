@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uhareg.h,v 1.3 2000/12/06 21:16:45 mickey Exp $	*/
-=======
 /*	$OpenBSD: uhareg.h,v 1.5 2010/06/30 19:06:16 mk Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: uhareg.h,v 1.2 1996/09/01 00:54:41 mycroft Exp $	*/
 
 /*

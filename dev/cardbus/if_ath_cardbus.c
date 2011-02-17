@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*      $OpenBSD: if_ath_cardbus.c,v 1.9 2006/06/21 11:27:03 fkr Exp $   */
-=======
 /*      $OpenBSD: if_ath_cardbus.c,v 1.16 2010/09/06 19:20:21 deraadt Exp $   */
->>>>>>> origin/master
 /*	$NetBSD: if_ath_cardbus.c,v 1.4 2004/08/02 19:14:28 mycroft Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#	$OpenBSD: files.cardbus,v 1.24 2006/11/22 15:12:50 mglocker Exp $
-=======
 #	$OpenBSD: files.cardbus,v 1.28 2009/11/14 16:55:11 damien Exp $
->>>>>>> origin/master
 #	$NetBSD: files.cardbus,v 1.8 2000/01/26 06:37:24 thorpej Exp $
 #
 # files.cardbus
@@ -21,7 +17,7 @@ file	dev/cardbus/rbus.c			cardbus
 
 # Com ports
 attach	com at cardbus with com_cardbus
-file	dev/cardbus/com_cardbus.c		com_cardbus | pccom_cardbus
+file	dev/cardbus/com_cardbus.c		com_cardbus
 
 # PCI "universal" communication device driver, for com, lpt, etc. ports
 attach	puc at cardbus with puc_cardbus
@@ -127,3 +123,9 @@ file	dev/cardbus/uhci_cardbus.c		uhci_cardbus
 #
 attach	malo at cardbus with malo_cardbus
 file	dev/cardbus/if_malo_cardbus.c		malo_cardbus
+
+#
+# Broadcom AirForce
+#
+attach	bwi at cardbus with bwi_cardbus
+file	dev/cardbus/if_bwi_cardbus.c		bwi_cardbus

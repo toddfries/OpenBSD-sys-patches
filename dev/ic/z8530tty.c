@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: z8530tty.c,v 1.15 2004/06/21 23:50:35 tholo Exp $ */
-=======
 /*	$OpenBSD: z8530tty.c,v 1.23 2010/07/02 17:27:01 nicm Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*
@@ -238,7 +234,7 @@ zstty_attach(parent, self, aux)
 		printf(" flags 0x%x", zst->zst_swflags);
 
 	if (zst->zst_hwflags & ZS_HWFLAG_CONSOLE)
-		printf(" (console)");
+		printf(": console");
 	else {
 #ifdef KGDB
 		/*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: rasops_masks.c,v 1.2 2002/05/28 22:10:03 fgsch Exp $	*/
-=======
 /*	$OpenBSD: rasops_masks.c,v 1.4 2008/06/26 05:42:18 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: rasops_masks.c,v 1.5 2000/06/13 13:37:00 ad Exp $	*/
 
 /*-

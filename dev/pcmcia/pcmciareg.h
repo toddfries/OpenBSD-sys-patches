@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pcmciareg.h,v 1.5 2000/06/06 00:56:25 fgsch Exp $	*/
-=======
 /*	$OpenBSD: pcmciareg.h,v 1.7 2010/09/04 12:59:27 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pcmciareg.h,v 1.6 1998/08/13 15:00:02 nathanw Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kuevar.h,v 1.1 2004/11/22 18:49:05 deraadt Exp $ */
+/*	$OpenBSD: if_kuevar.h,v 1.2 2004/11/22 21:23:57 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>

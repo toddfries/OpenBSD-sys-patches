@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt8xx.h,v 1.2 2001/04/07 17:11:11 niklas Exp $	*/
+/*	$OpenBSD: bt8xx.h,v 1.3 2005/06/23 14:57:48 robert Exp $	*/
 /*	$NetBSD: bt8xx.h,v 1.4 2000/12/30 16:55:24 wiz Exp $	*/
 
 /* This file is merged from ioctl_meteor.h and ioctl_bt848.h from FreeBSD. */

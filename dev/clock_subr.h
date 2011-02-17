@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: clock_subr.h,v 1.3 2002/03/14 01:26:52 millert Exp $	*/
-=======
 /*	$OpenBSD: clock_subr.h,v 1.5 2008/06/26 05:42:14 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock_subr.h,v 1.2 1997/03/15 18:11:17 is Exp $	*/
 
 /*-

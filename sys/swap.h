@@ -1,4 +1,4 @@
-/*	$OpenBSD: swap.h,v 1.3 2001/03/09 03:13:47 deraadt Exp $	*/
+/*	$OpenBSD: swap.h,v 1.4 2001/06/27 04:51:48 art Exp $	*/
 /*	$NetBSD: swap.h,v 1.2 1998/09/13 14:46:24 christos Exp $	*/
 
 /*

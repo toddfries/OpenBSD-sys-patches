@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: usb_quirks.c,v 1.25 2006/11/11 14:39:22 jolan Exp $ */
-=======
 /*	$OpenBSD: usb_quirks.c,v 1.63 2010/12/02 06:39:09 jakemsr Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: usb_quirks.c,v 1.45 2003/05/10 17:47:14 hamajima Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.30 2003/01/02 04:15:55 imp Exp $	*/
 
@@ -50,7 +46,7 @@ extern int usbdebug;
 
 #define ANY 0xffff
 
-Static const struct usbd_quirk_entry {
+const struct usbd_quirk_entry {
 	u_int16_t idVendor;
 	u_int16_t idProduct;
 	u_int16_t bcdDevice;
@@ -59,19 +55,6 @@ Static const struct usbd_quirk_entry {
  { USB_VENDOR_KYE, USB_PRODUCT_KYE_NICHE,	    0x100, { UQ_NO_SET_PROTO}},
  { USB_VENDOR_INSIDEOUT, USB_PRODUCT_INSIDEOUT_EDGEPORT4,
    						    0x094, { UQ_SWAP_UNICODE}},
-<<<<<<< HEAD
- { USB_VENDOR_DALLAS, USB_PRODUCT_DALLAS_J6502,	    0x0a2, { UQ_BAD_ADC }},
- { USB_VENDOR_DALLAS, USB_PRODUCT_DALLAS_J6502,	    0x0a2, { UQ_AU_NO_XU }},
- { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ADA70,	    0x103, { UQ_BAD_ADC }},
- { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ASC495,      0x000, { UQ_BAD_AUDIO }},
- { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRONB,
-	0x000, { UQ_BAD_AUDIO }},
- { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRO4K,
-	0x000, { UQ_BAD_AUDIO }},
- { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMZOOM,
-	0x000, { UQ_BAD_AUDIO }},
-=======
->>>>>>> origin/master
  { USB_VENDOR_QTRONIX, USB_PRODUCT_QTRONIX_980N,    0x110, { UQ_SPUR_BUT_UP }},
  { USB_VENDOR_ALCOR2, USB_PRODUCT_ALCOR2_KBD_HUB,   0x001, { UQ_SPUR_BUT_UP }},
  { USB_VENDOR_MCT, USB_PRODUCT_MCT_HUB0100,         0x102, { UQ_BUS_POWERED }},
@@ -101,6 +84,10 @@ Static const struct usbd_quirk_entry {
 	0x100, { UQ_ASSUME_CM_OVER_DATA }},
  { USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CM5100P,
 	ANY, { UQ_ASSUME_CM_OVER_DATA }},
+ { USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CCU550,
+	ANY, { UQ_ASSUME_CM_OVER_DATA }},
+ { USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CNU550pro,
+	ANY, { UQ_ASSUME_CM_OVER_DATA }},
  { USB_VENDOR_SIEMENS2, USB_PRODUCT_SIEMENS2_ES75,
 	ANY, { UQ_ASSUME_CM_OVER_DATA }},
 
@@ -121,14 +108,6 @@ Static const struct usbd_quirk_entry {
  { USB_VENDOR_NEC, USB_PRODUCT_NEC_PICTY760,	    ANY,   { UQ_BROKEN_BIDIR }},
  { USB_VENDOR_NEC, USB_PRODUCT_NEC_PICTY920,	    ANY,   { UQ_BROKEN_BIDIR }},
  { USB_VENDOR_NEC, USB_PRODUCT_NEC_PICTY800,	    ANY,   { UQ_BROKEN_BIDIR }},
-<<<<<<< HEAD
- { USB_VENDOR_METAGEEK, USB_PRODUCT_METAGEEK_WISPY, ANY,   { UQ_BAD_HID }},
- { USB_VENDOR_TENX, USB_PRODUCT_TENX_MISSILE,	    ANY,   { UQ_BAD_HID }},
- { USB_VENDOR_APC, USB_PRODUCT_APC_UPSPRO500,	    ANY,   { UQ_BAD_HID }},
- { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F6C550AVR, ANY,   { UQ_BAD_HID }},
- { USB_VENDOR_MGE, USB_PRODUCT_MGE_UPS1,	    ANY,   { UQ_BAD_HID }},
- { USB_VENDOR_MGE, USB_PRODUCT_MGE_UPS2,	    ANY,   { UQ_BAD_HID }},
-=======
 
  { USB_VENDOR_APC, USB_PRODUCT_APC_UPSPRO500,		ANY,	{ UQ_BAD_HID }},
  { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_SPEAKERS,	ANY,	{ UQ_BAD_HID }},
@@ -174,7 +153,6 @@ const struct usbd_dev_quirk_entry {
 	u_int8_t bDeviceProtocol;
 	struct usbd_quirks quirks;
 } usb_dev_quirks[] = {
->>>>>>> origin/master
  { 0, 0, 0, { 0 } }
 };
 
@@ -212,18 +190,11 @@ usbd_find_quirk(usb_device_descriptor_t *d)
 		    (td->bDeviceProtocol == bANY ||
 		     td->bDeviceProtocol == d->bDeviceProtocol)) {
 #ifdef USB_DEBUG
-<<<<<<< HEAD
-	if (usbdebug && t->quirks.uq_flags)
-		logprintf("usbd_find_quirk 0x%04x/0x%04x/%x: %d\n",
-			  UGETW(d->idVendor), UGETW(d->idProduct),
-			  UGETW(d->bcdDevice), t->quirks.uq_flags);
-=======
 			if (usbdebug && td->quirks.uq_flags)
 				printf("usbd_find_quirk for device class 0x%02x/0x%02x/%x: %d\n",
 					d->bDeviceClass, d->bDeviceSubClass, 
 					UGETW(d->bcdDevice),
 					td->quirks.uq_flags);
->>>>>>> origin/master
 #endif
 			return (&td->quirks);
 		}

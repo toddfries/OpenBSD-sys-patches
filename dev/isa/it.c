@@ -1,10 +1,8 @@
-<<<<<<< HEAD
-/*	$OpenBSD: it.c,v 1.21 2006/12/23 17:46:39 deraadt Exp $	*/
-=======
 /*	$OpenBSD: it.c,v 1.40 2011/01/20 16:59:55 form Exp $	*/
->>>>>>> origin/master
 
 /*
+ * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
+ * Copyright (c) 2006-2007 Juan Romero Pardines <juan@xtrarom.org>
  * Copyright (c) 2003 Julien Bordet <zejames@greyhats.org>
  * All rights reserved.
  *
@@ -32,20 +30,34 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/kernel.h>
 #include <sys/sensors.h>
+
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
-
 #include <dev/isa/itvar.h>
+
 
 #if defined(ITDEBUG)
 #define DPRINTF(x)		do { printf x; } while (0)
 #else
 #define DPRINTF(x)
 #endif
+
+
+int it_match(struct device *, void *, void *);
+void it_attach(struct device *, struct device *, void *);
+u_int8_t it_readreg(bus_space_tag_t, bus_space_handle_t, int);
+void it_writereg(bus_space_tag_t, bus_space_handle_t, int, u_int8_t);
+void it_enter(bus_space_tag_t, bus_space_handle_t, int);
+void it_exit(bus_space_tag_t, bus_space_handle_t);
+
+u_int8_t it_ec_readreg(struct it_softc *, int);
+void it_ec_writereg(struct it_softc *, int, u_int8_t);
+void it_ec_refresh(void *arg);
+
+int it_wdog_cb(void *, int);
 
 /*
  * IT87-compatible chips can typically measure voltages up to 4.096 V.
@@ -54,35 +66,6 @@
  * voltage.  So we have to convert the sensor values back to real
  * voltages by applying the appropriate resistor factor.
  */
-<<<<<<< HEAD
-#define RFACT_NONE	10000
-#define RFACT(x, y)	(RFACT_NONE * ((x) + (y)) / (y))
-
-int  it_match(struct device *, void *, void *);
-void it_attach(struct device *, struct device *, void *);
-u_int8_t it_readreg(struct it_softc *, int);
-void it_writereg(struct it_softc *, int, int);
-void it_setup_volt(struct it_softc *, int, int);
-void it_setup_temp(struct it_softc *, int, int);
-void it_setup_fan(struct it_softc *, int, int);
-
-void it_generic_stemp(struct it_softc *, struct ksensor *);
-void it_generic_svolt(struct it_softc *, struct ksensor *);
-void it_generic_fanrpm(struct it_softc *, struct ksensor *);
-
-void it_refresh_sensor_data(struct it_softc *);
-void it_refresh(void *);
-
-struct cfattach it_ca = {
-	sizeof(struct it_softc),
-	it_match,
-	it_attach
-};
-
-struct cfdriver it_cd = {
-	NULL, "it", DV_DULL
-};
-=======
 #define RFACT_NONE		10000
 #define RFACT(x, y)		(RFACT_NONE * ((x) + (y)) / (y))
 
@@ -142,46 +125,26 @@ int it_fan_ext_regs[] = {
 };
 
 LIST_HEAD(, it_softc) it_softc_list = LIST_HEAD_INITIALIZER(&it_softc_list);
->>>>>>> origin/master
 
-const int it_vrfact[] = {
-	RFACT_NONE,
-	RFACT_NONE,
-	RFACT_NONE,
-	RFACT(68, 100),
-	RFACT(30, 10),
-	RFACT(21, 10),
-	RFACT(83, 20),
-	RFACT(68, 100),
-	RFACT_NONE
-};
 
 int
 it_match(struct device *parent, void *match, void *aux)
 {
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
 	struct isa_attach_args *ia = aux;
-	int iobase;
-	u_int8_t cr;
+	struct it_softc *sc;
+	bus_space_handle_t ioh;
+	int ec_iobase, found = 0;
+	u_int16_t cr;
 
-	iot = ia->ia_iot;
-	iobase = ia->ipa_io[0].base;
+	if (ia->ipa_io[0].base != IO_IT1 && ia->ipa_io[0].base != IO_IT2)
+		return (0);
 
-	if (bus_space_map(iot, iobase, 8, 0, &ioh)) {
-		DPRINTF(("it: can't map i/o space\n"));
+	/* map i/o space */
+	if (bus_space_map(ia->ia_iot, ia->ipa_io[0].base, 2, 0, &ioh) != 0) {
+		DPRINTF(("it_match: can't map i/o space"));
 		return (0);
 	}
 
-<<<<<<< HEAD
-	/* Check Vendor ID */
-	bus_space_write_1(iot, ioh, ITC_ADDR, ITD_CHIPID);
-	cr = bus_space_read_1(iot, ioh, ITC_DATA);
-	bus_space_unmap(iot, ioh, 8);
-	DPRINTF(("it: vendor id 0x%x\n", cr));
-	if (cr != IT_ID_IT87)
-		return (0);
-=======
 	/* enter MB PnP mode */
 	it_enter(ia->ia_iot, ioh, ia->ipa_io[0].base);
 
@@ -227,33 +190,20 @@ it_match(struct device *parent, void *match, void *aux)
 
 	/* exit MB PnP mode */
 	it_exit(ia->ia_iot, ioh);
->>>>>>> origin/master
 
-	ia->ipa_nio = 1;
-	ia->ipa_io[0].length = 8;
-	ia->ipa_nmem = 0;
-	ia->ipa_nirq = 0;
-	ia->ipa_ndrq = 0;
+	/* unmap i/o space */
+	bus_space_unmap(ia->ia_iot, ioh, 2);
 
-	return (1);
+	return (found);
 }
 
 void
 it_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct it_softc *sc = (void *)self;
-	int iobase;
-	bus_space_tag_t iot;
 	struct isa_attach_args *ia = aux;
 	int i;
 
-<<<<<<< HEAD
-	iobase = ia->ipa_io[0].base;
-	iot = sc->it_iot = ia->ia_iot;
-
-	if (bus_space_map(iot, iobase, 8, 0, &sc->it_ioh)) {
-		printf(": can't map i/o space\n");
-=======
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_iobase = ia->ipa_io[0].base;
 	if (bus_space_map(sc->sc_iot, sc->sc_iobase, 2, 0, &sc->sc_ioh) != 0) {
@@ -290,47 +240,36 @@ it_attach(struct device *parent, struct device *self, void *aux)
 
 	if (sc->sc_ec_iobase == 0) {
 		printf(", EC disabled\n");
->>>>>>> origin/master
 		return;
 	}
 
-	i = it_readreg(sc, ITD_CHIPID);
-	switch (i) {
-		case IT_ID_IT87:
-			printf(": IT87\n");
-			break;
+	printf(", EC port 0x%x\n", sc->sc_ec_iobase);
+
+	/* map environment controller i/o space */
+	sc->sc_ec_iot = ia->ia_iot;
+	if (bus_space_map(sc->sc_ec_iot, sc->sc_ec_iobase, 8, 0,
+	    &sc->sc_ec_ioh) != 0) {
+		printf("%s: can't map EC i/o space\n", sc->sc_dev.dv_xname);
+		return;
 	}
 
-	sc->numsensors = IT_NUM_SENSORS;
+	/* initialize sensor structures */
+	for (i = 0; i < IT_EC_NUMSENSORS; i++) {
+		sc->sc_sensors[i].type = it_sensors[i].type;
 
-	it_setup_fan(sc, 0, 3);
-	it_setup_volt(sc, 3, 9);
-	it_setup_temp(sc, 12, 3);
+		if (it_sensors[i].desc != NULL)
+			strlcpy(sc->sc_sensors[i].desc, it_sensors[i].desc,
+			    sizeof(sc->sc_sensors[i].desc));
+	}
 
-<<<<<<< HEAD
-	if (sensor_task_register(sc, it_refresh, 5)) {
-=======
 	/* register sensor update task */
 	if (sensor_task_register(sc, it_ec_refresh, IT_EC_INTERVAL) == NULL) {
->>>>>>> origin/master
 		printf("%s: unable to register update task\n",
 		    sc->sc_dev.dv_xname);
+		bus_space_unmap(sc->sc_ec_iot, sc->sc_ec_ioh, 8);
 		return;
 	}
 
-<<<<<<< HEAD
-	/* Activate monitoring */
-	cr = it_readreg(sc, ITD_CONFIG);
-	cr |= 0x01 | 0x08;
-	it_writereg(sc, ITD_CONFIG, cr);
-
-	/* Initialize sensors */
-	strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
-	    sizeof(sc->sensordev.xname));
-	for (i = 0; i < sc->numsensors; ++i)
-		sensor_attach(&sc->sensordev, &sc->sensors[i]);
-	sensordev_install(&sc->sensordev);
-=======
 	/* use 16-bit FAN tachometer registers for newer chips */
 	if (sc->sc_chipid != IT_ID_8705 && sc->sc_chipid != IT_ID_8712)
 		it_ec_writereg(sc, IT_EC_FAN_ECER,
@@ -346,92 +285,58 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < IT_EC_NUMSENSORS; i++)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	sensordev_install(&sc->sc_sensordev);
->>>>>>> origin/master
 }
 
 u_int8_t
-it_readreg(struct it_softc *sc, int reg)
+it_readreg(bus_space_tag_t iot, bus_space_handle_t ioh, int r)
 {
-	bus_space_write_1(sc->it_iot, sc->it_ioh, ITC_ADDR, reg);
-	return (bus_space_read_1(sc->it_iot, sc->it_ioh, ITC_DATA));
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, r);
+	return (bus_space_read_1(iot, ioh, IT_IO_DATA));
 }
 
 void
-it_writereg(struct it_softc *sc, int reg, int val)
+it_writereg(bus_space_tag_t iot, bus_space_handle_t ioh, int r, u_int8_t v)
 {
-	bus_space_write_1(sc->it_iot, sc->it_ioh, ITC_ADDR, reg);
-	bus_space_write_1(sc->it_iot, sc->it_ioh, ITC_DATA, val);
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, r);
+	bus_space_write_1(iot, ioh, IT_IO_DATA, v);
 }
 
 void
-it_setup_volt(struct it_softc *sc, int start, int n)
+it_enter(bus_space_tag_t iot, bus_space_handle_t ioh, int iobase)
 {
-	int i;
-
-	for (i = 0; i < n; ++i) {
-		sc->sensors[start + i].type = SENSOR_VOLTS_DC;
-	}
-
-	snprintf(sc->sensors[start + 0].desc, sizeof(sc->sensors[0].desc),
-	    "VCORE_A");
-	snprintf(sc->sensors[start + 1].desc, sizeof(sc->sensors[1].desc),
-	    "VCORE_B");
-	snprintf(sc->sensors[start + 2].desc, sizeof(sc->sensors[2].desc),
-	    "+3.3V");
-	snprintf(sc->sensors[start + 3].desc, sizeof(sc->sensors[3].desc),
-	    "+5V");
-	snprintf(sc->sensors[start + 4].desc, sizeof(sc->sensors[4].desc),
-	    "+12V");
-	snprintf(sc->sensors[start + 5].desc, sizeof(sc->sensors[5].desc),
-	    "Unused");
-	snprintf(sc->sensors[start + 6].desc, sizeof(sc->sensors[6].desc),
-	    "-12V");
-	snprintf(sc->sensors[start + 7].desc, sizeof(sc->sensors[7].desc),
-	    "+5VSB");
-	snprintf(sc->sensors[start + 8].desc, sizeof(sc->sensors[8].desc),
-	    "VBAT");
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x87);
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x01);
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x55);
+	if (iobase == IO_IT1)
+		bus_space_write_1(iot, ioh, IT_IO_ADDR, 0x55);
+	else
+		bus_space_write_1(iot, ioh, IT_IO_ADDR, 0xaa);
 }
 
 void
-it_setup_temp(struct it_softc *sc, int start, int n)
+it_exit(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
-	int i;
+	bus_space_write_1(iot, ioh, IT_IO_ADDR, IT_CCR);
+	bus_space_write_1(iot, ioh, IT_IO_DATA, 0x02);
+}
 
-	for (i = 0; i < n; ++i)
-		sc->sensors[start + i].type = SENSOR_TEMP;
+u_int8_t
+it_ec_readreg(struct it_softc *sc, int r)
+{
+	bus_space_write_1(sc->sc_ec_iot, sc->sc_ec_ioh, IT_EC_ADDR, r);
+	return (bus_space_read_1(sc->sc_ec_iot, sc->sc_ec_ioh, IT_EC_DATA));
 }
 
 void
-it_setup_fan(struct it_softc *sc, int start, int n)
+it_ec_writereg(struct it_softc *sc, int r, u_int8_t v)
 {
-	int i;
-
-	for (i = 0; i < n; ++i)
-		sc->sensors[start + i].type = SENSOR_FANRPM;
+	bus_space_write_1(sc->sc_ec_iot, sc->sc_ec_ioh, IT_EC_ADDR, r);
+	bus_space_write_1(sc->sc_ec_iot, sc->sc_ec_ioh, IT_EC_DATA, v);
 }
 
 void
-it_generic_stemp(struct it_softc *sc, struct ksensor *sensors)
+it_ec_refresh(void *arg)
 {
-	int i, sdata;
-
-	for (i = 0; i < 3; i++) {
-		sdata = it_readreg(sc, ITD_SENSORTEMPBASE + i);
-		/* Convert temperature to Fahrenheit degres */
-		sensors[i].value = sdata * 1000000 + 273150000;
-	}
-}
-
-void
-it_generic_svolt(struct it_softc *sc, struct ksensor *sensors)
-{
-<<<<<<< HEAD
-	int i, sdata;
-
-	for (i = 0; i < 9; i++) {
-		sdata = it_readreg(sc, ITD_SENSORVOLTBASE + i);
-		DPRINTF(("sdata[volt%d] 0x%x\n", i, sdata));
-=======
 	struct it_softc *sc = arg;
 	int i, sdata, divisor, odivisor, ndivisor;
 	u_int8_t cr, ecr;
@@ -469,45 +374,16 @@ it_generic_svolt(struct it_softc *sc, struct ksensor *sensors)
 		}
 
 		sdata = it_ec_readreg(sc, IT_EC_VOLTBASE + i);
->>>>>>> origin/master
 		/* voltage returned as (mV >> 4) */
-		sensors[i].value = (sdata << 4);
+		sc->sc_sensors[IT_VOLT_BASE + i].value = sdata << 4;
 		/* these two values are negative and formula is different */
 		if (i == 5 || i == 6)
-			sensors[i].value = ((sdata << 4) - IT_VREF);
+			sc->sc_sensors[IT_VOLT_BASE + i].value -= IT_EC_VREF;
 		/* rfact is (factor * 10^4) */
-		sensors[i].value *= it_vrfact[i];
+		sc->sc_sensors[IT_VOLT_BASE + i].value *= it_vrfact[i];
 		/* division by 10 gets us back to uVDC */
-		sensors[i].value /= 10;
+		sc->sc_sensors[IT_VOLT_BASE + i].value /= 10;
 		if (i == 5 || i == 6)
-<<<<<<< HEAD
-			sensors[i].value += IT_VREF * 1000;
-	}
-}
-
-void
-it_generic_fanrpm(struct it_softc *sc, struct ksensor *sensors)
-{
-	int i, sdata, divisor, odivisor, ndivisor;
-
-	odivisor = ndivisor = divisor = it_readreg(sc, ITD_FAN);
-	for (i = 0; i < 3; i++, divisor >>= 3) {
-		sensors[i].flags &= ~SENSOR_FINVALID;
-		if ((sdata = it_readreg(sc, ITD_SENSORFANBASE + i)) == 0xff) {
-			sensors[i].flags |= SENSOR_FINVALID;
-			if (i == 2)
-				ndivisor ^= 0x40;
-			else {
-				ndivisor &= ~(7 << (i * 3));
-				ndivisor |= ((divisor + 1) & 7) << (i * 3);
-			}
-		} else if (sdata == 0) {
-			sensors[i].value = 0;
-		} else {
-			if (i == 2)
-				divisor = divisor & 1 ? 3 : 1;
-			sensors[i].value = 1350000 / (sdata << (divisor & 7));
-=======
 			sc->sc_sensors[IT_VOLT_BASE + i].value +=
 			    IT_EC_VREF * 1000;
 	}
@@ -576,29 +452,16 @@ it_generic_fanrpm(struct it_softc *sc, struct ksensor *sensors)
 				    1350000 / (sdata << (divisor & 7));
 			} else
 				sc->sc_sensors[IT_FAN_BASE + i].value = 0;
->>>>>>> origin/master
 		}
 
 		if (ndivisor != odivisor)
 			it_ec_writereg(sc, IT_EC_FAN_DIV, ndivisor);
 	}
-	if (ndivisor != odivisor)
-		it_writereg(sc, ITD_FAN, ndivisor);
 }
 
-/*
- * pre:  last read occurred >= 1.5 seconds ago
- * post: sensors[] current data are the latest from the chip
- */
-void
-it_refresh_sensor_data(struct it_softc *sc)
+int
+it_wdog_cb(void *arg, int period)
 {
-<<<<<<< HEAD
-	/* Refresh our stored data for every sensor */
-	it_generic_stemp(sc, &sc->sensors[12]);
-	it_generic_svolt(sc, &sc->sensors[3]);
-	it_generic_fanrpm(sc, &sc->sensors[0]);
-=======
 	struct it_softc *sc = arg;
 	int minutes = 0;
 
@@ -654,13 +517,15 @@ it_refresh_sensor_data(struct it_softc *sc)
 	it_exit(sc->sc_iot, sc->sc_ioh);
 
 	return (period);
->>>>>>> origin/master
 }
 
-void
-it_refresh(void *arg)
-{
-	struct it_softc *sc = (struct it_softc *)arg;
 
-	it_refresh_sensor_data(sc);
-}
+struct cfattach it_ca = {
+	sizeof(struct it_softc),
+	it_match,
+	it_attach
+};
+
+struct cfdriver it_cd = {
+	NULL, "it", DV_DULL
+};

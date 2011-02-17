@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wseventvar.h,v 1.3 2003/02/12 20:35:01 matthieu Exp $ */
-=======
 /* $OpenBSD: wseventvar.h,v 1.7 2010/07/26 01:56:27 guenther Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wseventvar.h,v 1.1 1998/03/22 14:24:03 drochner Exp $ */
 
 /*

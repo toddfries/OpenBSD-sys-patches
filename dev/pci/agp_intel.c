@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: agp_intel.c,v 1.1 2001/10/25 21:44:00 thorpej Exp $	*/
-=======
 /*	$OpenBSD: agp_intel.c,v 1.18 2010/08/07 20:47:24 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: agp_intel.c,v 1.3 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -44,25 +40,13 @@
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
-#include <dev/pci/vga_pcivar.h>
+#include <dev/pci/pcidevs.h>
 #include <dev/pci/agpvar.h>
 #include <dev/pci/agpreg.h>
 
 #include <machine/bus.h>
 
 struct agp_intel_softc {
-<<<<<<< HEAD
-	u_int32_t	initial_aperture; /* aperture size at startup */
-	struct agp_gatt *gatt;
-};
-
-
-static u_int32_t agp_intel_get_aperture(struct vga_pci_softc *);
-static int agp_intel_set_aperture(struct vga_pci_softc *, u_int32_t);
-static int agp_intel_bind_page(struct vga_pci_softc *, off_t, bus_addr_t);
-static int agp_intel_unbind_page(struct vga_pci_softc *, off_t);
-static void agp_intel_flush_tlb(struct vga_pci_softc *);
-=======
 	struct device		 dev;
 	struct agp_softc	*agpdev;
 	struct agp_gatt 	*gatt;
@@ -105,7 +89,6 @@ struct cfattach intelagp_ca = {
 struct cfdriver intelagp_cd = {
 	NULL, "intelagp", DV_DULL
 };
->>>>>>> origin/master
 
 const struct agp_methods agp_intel_methods = {
 	agp_intel_bind_page,
@@ -115,33 +98,6 @@ const struct agp_methods agp_intel_methods = {
 };
 
 int
-<<<<<<< HEAD
-agp_intel_attach(struct vga_pci_softc *sc, struct pci_attach_args *pa,
-		 struct pci_attach_args *pchb_pa)
-{
-	struct agp_intel_softc *isc;
-	struct agp_gatt *gatt;
-	pcireg_t reg;
-
-	isc = malloc(sizeof *isc, M_DEVBUF, M_NOWAIT);
-	if (isc == NULL) {
-		printf(": can't allocate chipset-specific softc\n");
-		return (ENOMEM);
-	}
-	memset(isc, 0, sizeof *isc);
-
-	sc->sc_methods = &agp_intel_methods;
-	sc->sc_chipc = isc;
-
-	if (agp_map_aperture(sc) != 0) {
-		printf(": can't map aperture\n");
-		free(isc, M_DEVBUF);
-		sc->sc_chipc = NULL;
-		return (ENXIO);
-	}
-
-	isc->initial_aperture = AGP_GET_APERTURE(sc);
-=======
 agp_intel_probe(struct device *parent, void *match, void *aux)
 {
 	struct agp_attach_args	*aa = aux;
@@ -228,7 +184,6 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		AGP_INTEL_APSIZE) & APSIZE_MASK;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_APSIZE, value);
 	isc->isc_apsize = agp_intel_get_aperture(isc);
->>>>>>> origin/master
 
 	for (;;) {
 		gatt = agp_alloc_gatt(pa->pa_dmat, isc->isc_apsize);
@@ -239,17 +194,10 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-<<<<<<< HEAD
-		if (AGP_SET_APERTURE(sc, AGP_GET_APERTURE(sc) / 2)) {
-			agp_generic_detach(sc);
-			printf(": failed to set aperture\n");
-			return (ENOMEM);
-=======
 		isc->isc_apsize /= 2;
 		if (agp_intel_set_aperture(isc, isc->isc_apsize)) {
 			printf(": failed to set aperture\n");
 			return;
->>>>>>> origin/master
 		}
 	}
 	isc->gatt = gatt;
@@ -258,20 +206,6 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_ATTBASE,
 	    gatt->ag_physical);
 	
-<<<<<<< HEAD
-	/* Enable things, clear errors etc. */
-	/* XXXfvdl get rid of the magic constants */
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_AGPCTRL, 0x2280);
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_NBXCFG);
-	reg &= ~(1 << 10);
-	reg |=	(1 << 9);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_NBXCFG, reg);
-
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_STS);
-	reg &= ~0x00ff0000;
-	reg |= (7 << 16);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_STS, reg);
-=======
 	/* Enable the GLTB and setup the control register. */
 	switch (isc->chiptype) {
 	case CHIP_I443:
@@ -347,7 +281,6 @@ agp_intel_activate(struct device *arg, int act)
 		agp_intel_restore(isc);
 		break;
 	}
->>>>>>> origin/master
 
 	return (0);
 }
@@ -448,8 +381,8 @@ agp_intel_restore(struct agp_intel_softc *isc)
 }
 
 #if 0
-static int
-agp_intel_detach(struct vga_pci_softc *sc)
+int
+agp_intel_detach(struct agp_softc *sc)
 {
 	int error;
 	pcireg_t reg;
@@ -459,12 +392,8 @@ agp_intel_detach(struct vga_pci_softc *sc)
 	if (error)
 		return (error);
 
-<<<<<<< HEAD
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_NBXCFG);
-=======
 	/* XXX i845/i855PM/i840/i850E */
 	reg = pci_conf_read(sc->sc_pc, sc->sc_tag, AGP_INTEL_NBXCFG);
->>>>>>> origin/master
 	reg &= ~(1 << 9);
 	printf("%s: set NBXCFG to %x\n", __FUNCTION__, reg);
 	pci_conf_write(sc->sc_pc, sc->sc_tag, AGP_INTEL_NBXCFG, reg);
@@ -476,15 +405,6 @@ agp_intel_detach(struct vga_pci_softc *sc)
 }
 #endif
 
-<<<<<<< HEAD
-static u_int32_t
-agp_intel_get_aperture(struct vga_pci_softc *sc)
-{
-	u_int32_t apsize;
-
-	apsize = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
-	    AGP_INTEL_APSIZE) & 0x1f;
-=======
 bus_size_t
 agp_intel_get_aperture(void *sc)
 {
@@ -493,7 +413,6 @@ agp_intel_get_aperture(void *sc)
 
 	apsize = pci_conf_read(isc->isc_pc, isc->isc_tag,
 	    AGP_INTEL_APSIZE) & isc->aperture_mask;
->>>>>>> origin/master
 
 	/*
 	 * The size is determined by the number of low bits of
@@ -502,52 +421,34 @@ agp_intel_get_aperture(void *sc)
 	 * field just read forces the corresponding bit in the 27:22
 	 * to be zero. We calculate the aperture size accordingly.
 	 */
-	return ((((apsize ^ 0x1f) << 22) | ((1 << 22) - 1)) + 1);
+	return ((((apsize ^ isc->aperture_mask) << 22) | ((1 << 22) - 1)) + 1);
 }
 
-<<<<<<< HEAD
-static int
-agp_intel_set_aperture(struct vga_pci_softc *sc, u_int32_t aperture)
-{
-	u_int32_t apsize;
-	pcireg_t reg;
-=======
 int
 agp_intel_set_aperture(void *sc, bus_size_t aperture)
 {
 	struct agp_intel_softc *isc = sc;
 	bus_size_t apsize;
->>>>>>> origin/master
 
 	/*
 	 * Reverse the magic from get_aperture.
 	 */
-	apsize = ((aperture - 1) >> 22) ^ 0x1f;
+	apsize = ((aperture - 1) >> 22) ^ isc->aperture_mask;
 
 	/*
 	 * Double check for sanity.
 	 */
-	if ((((apsize ^ 0x1f) << 22) | ((1 << 22) - 1)) + 1 != aperture)
+	if ((((apsize ^ isc->aperture_mask) << 22) |
+	    ((1 << 22) - 1)) + 1 != aperture)
 		return (EINVAL);
 
-<<<<<<< HEAD
-	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_APSIZE);
-	reg = (reg & 0xffffff00) | apsize;
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_APSIZE, reg);
-=======
 	pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_APSIZE, apsize);
->>>>>>> origin/master
 
 	return (0);
 }
 
-<<<<<<< HEAD
-static int
-agp_intel_bind_page(struct vga_pci_softc *sc, off_t offset, bus_addr_t physical)
-=======
 void
 agp_intel_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
->>>>>>> origin/master
 {
 	struct agp_intel_softc *isc = sc;
 
@@ -555,26 +456,14 @@ agp_intel_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 	    physical | 0x17;
 }
 
-<<<<<<< HEAD
-static int
-agp_intel_unbind_page(struct vga_pci_softc *sc, off_t offset)
-=======
 void
 agp_intel_unbind_page(void *sc, bus_size_t offset)
->>>>>>> origin/master
 {
 	struct agp_intel_softc *isc = sc;
 
 	isc->gatt->ag_virtual[(offset - isc->isc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
-<<<<<<< HEAD
-static void
-agp_intel_flush_tlb(struct vga_pci_softc *sc)
-{
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_AGPCTRL, 0x2200);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, AGP_INTEL_AGPCTRL, 0x2280);
-=======
 void
 agp_intel_flush_tlb(void *sc)
 {
@@ -602,5 +491,4 @@ agp_intel_flush_tlb(void *sc)
 		    0x2280);
 		break;
 	}
->>>>>>> origin/master
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_kintf.h,v 1.7 2001/12/29 21:51:18 tdeval Exp $	*/
+/*	$OpenBSD: rf_kintf.h,v 1.8 2002/12/16 07:01:04 tdeval Exp $	*/
 /*	$NetBSD: rf_kintf.h,v 1.15 2000/10/20 02:24:45 oster Exp $	*/
 
 /*

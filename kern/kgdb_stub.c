@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kgdb_stub.c,v 1.7 2005/11/13 17:50:45 fgsch Exp $	*/
-=======
 /*	$OpenBSD: kgdb_stub.c,v 1.9 2010/10/30 04:17:07 tedu Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kgdb_stub.c,v 1.6 1998/08/30 20:30:57 scottr Exp $	*/
 
 /*

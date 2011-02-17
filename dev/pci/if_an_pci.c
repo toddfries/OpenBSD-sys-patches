@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_an_pci.c,v 1.15 2006/01/30 11:41:00 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_an_pci.c,v 1.17 2009/03/29 21:53:52 sthen Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ksyms.c,v 1.16 2004/08/09 22:22:50 pefo Exp $	*/
-=======
 /*	$OpenBSD: ksyms.c,v 1.20 2010/12/26 15:41:00 miod Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>

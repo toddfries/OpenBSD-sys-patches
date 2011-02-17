@@ -1,4 +1,4 @@
-/*	$OpenBSD: akbdvar.h,v 1.1 2006/01/18 23:21:17 miod Exp $	*/
+/*	$OpenBSD: akbdvar.h,v 1.2 2006/03/23 21:54:26 miod Exp $	*/
 /*	$NetBSD: akbdvar.h,v 1.4 1999/02/17 14:56:56 tsubai Exp $	*/
 
 /*

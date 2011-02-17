@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: i82596var.h,v 1.10 2002/12/19 01:24:03 mickey Exp $	*/
-=======
 /*	$OpenBSD: i82596var.h,v 1.12 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: i82586var.h,v 1.10 1998/08/15 04:42:42 mycroft Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: dc503reg.h,v 1.1 2006/07/23 19:17:23 miod Exp $	*/
 /*	$NetBSD: pmreg.h,v 1.7 2005/12/11 12:18:36 christos Exp $	*/
 
 /*

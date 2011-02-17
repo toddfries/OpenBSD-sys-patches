@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ohci_cardbus.c,v 1.7 2006/07/12 06:26:34 jolan Exp $ */
-=======
 /*	$OpenBSD: ohci_cardbus.c,v 1.17 2010/09/07 16:21:41 deraadt Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: ohci_cardbus.c,v 1.19 2004/08/02 19:14:28 mycroft Exp $	*/
 
 /*
@@ -81,7 +77,6 @@ struct cfattach ohci_cardbus_ca = {
 
 #define CARDBUS_CBMEM PCI_CBMEM
 #define cardbus_findvendor pci_findvendor
-#define cardbus_devinfo pci_devinfo
 
 int
 ohci_cardbus_match(struct device *parent, void *match, void *aux)
@@ -105,27 +100,15 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-<<<<<<< HEAD
-	cardbusreg_t csr;
-	char devinfo[256];
-=======
 	pcireg_t csr;
->>>>>>> origin/master
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
 
-	cardbus_devinfo(ca->ca_id, ca->ca_class, 0, devinfo, sizeof(devinfo));
-	printf(" %s", devinfo);
-
 	/* Map I/O registers */
 	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
-<<<<<<< HEAD
-		printf("%s: can't map mem space\n", devname);
-=======
 		printf(": can't map mem space\n");
->>>>>>> origin/master
 		return;
 	}
 
@@ -151,11 +134,7 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
 					   IPL_USB, ohci_intr, sc, devname);
 	if (sc->sc_ih == NULL) {
-<<<<<<< HEAD
-		printf("%s: couldn't establish interrupt\n", devname);
-=======
 		printf(": couldn't establish interrupt\n");
->>>>>>> origin/master
 		return;
 	}
 	printf(": irq %d", ca->ca_intrline);

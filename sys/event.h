@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: event.h,v 1.9 2004/01/12 04:47:01 tedu Exp $	*/
-=======
 /*	$OpenBSD: event.h,v 1.15 2010/08/02 19:54:07 guenther Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -41,8 +37,9 @@
 #define EVFILT_VNODE		(-4)	/* attached to vnodes */
 #define EVFILT_PROC		(-5)	/* attached to struct proc */
 #define EVFILT_SIGNAL		(-6)	/* attached to struct proc */
+#define EVFILT_TIMER		(-7)	/* timers */
 
-#define EVFILT_SYSCOUNT		6
+#define EVFILT_SYSCOUNT		7
 
 #define EV_SET(kevp, a, b, c, d, e, f) do {	\
 	(kevp)->ident = (a);			\

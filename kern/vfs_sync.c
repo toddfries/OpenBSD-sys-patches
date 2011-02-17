@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*       $OpenBSD: vfs_sync.c,v 1.41 2006/06/25 15:01:54 sturm Exp $  */
-=======
 /*       $OpenBSD: vfs_sync.c,v 1.49 2010/12/21 20:14:43 thib Exp $  */
->>>>>>> origin/master
 
 /*
  *  Portions of this code are:
@@ -262,25 +258,6 @@ speedup_syncer(void)
 int   sync_fsync(void *);
 int   sync_inactive(void *);
 int   sync_print(void *);
-<<<<<<< HEAD
-#define sync_islocked vop_generic_islocked
-
-int (**sync_vnodeop_p)(void *);
-struct vnodeopv_entry_desc sync_vnodeop_entries[] = {
-      { &vop_default_desc, vn_default_error },
-      { &vop_close_desc, sync_close },                /* close */
-      { &vop_fsync_desc, sync_fsync },                /* fsync */
-      { &vop_inactive_desc, sync_inactive },          /* inactive */
-      { &vop_reclaim_desc, sync_reclaim },            /* reclaim */
-      { &vop_lock_desc, sync_lock },                  /* lock */
-      { &vop_unlock_desc, sync_unlock },              /* unlock */
-      { &vop_print_desc, sync_print },                /* print */
-      { &vop_islocked_desc, sync_islocked },          /* islocked */
-      { (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
-};
-struct vnodeopv_desc sync_vnodeop_opv_desc = {
-	&sync_vnodeop_p, sync_vnodeop_entries
-=======
 
 struct vops sync_vops = {
 	.vop_default	= eopnotsupp,
@@ -292,7 +269,6 @@ struct vops sync_vops = {
 	.vop_unlock	= vop_generic_unlock,
 	.vop_islocked	= vop_generic_islocked,
 	.vop_print	= sync_print
->>>>>>> origin/master
 };
 
 /*
@@ -339,13 +315,7 @@ vfs_allocate_syncvnode(struct mount *mp)
 int
 sync_fsync(void *v)
 {
-	struct vop_fsync_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int a_waitfor;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_fsync_args *ap = v;
 	struct vnode *syncvp = ap->a_vp;
 	struct mount *mp = syncvp->v_mount;
 	int asyncflag;
@@ -383,11 +353,7 @@ sync_fsync(void *v)
 int
 sync_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 
 	struct vnode *vp = ap->a_vp;
 	int s;

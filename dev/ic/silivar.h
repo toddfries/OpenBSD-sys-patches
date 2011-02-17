@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: silivar.h,v 1.4 2007/03/31 03:59:53 dlg Exp $ */
-=======
 /*	$OpenBSD: silivar.h,v 1.7 2010/08/05 20:21:36 kettenis Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

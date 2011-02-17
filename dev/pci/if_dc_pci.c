@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_dc_pci.c,v 1.56 2007/02/13 10:38:00 jsg Exp $	*/
-=======
 /*	$OpenBSD: if_dc_pci.c,v 1.67 2010/08/27 19:54:03 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -164,19 +160,10 @@ dc_pci_match(struct device *parent, void *match, void *aux)
 	    PCI_REVISION(pa->pa_class) == 0x21)
 		return (1);
 
-	/*
-	 * Since dc doesn't fit on the alpha floppy, we want de to win by
-	 * default on alpha so that RAMDISK* and GENERIC will use the same
-	 * driver.
-	 */
 	for (t = dc_devs; t->dc_vid != 0; t++) {
 		if ((PCI_VENDOR(pa->pa_id) == t->dc_vid) &&
 		    (PCI_PRODUCT(pa->pa_id) == t->dc_did)) {
-#ifdef __alpha__
-			return (1);
-#else
 			return (3);
-#endif
 		}
 	}
 
@@ -283,7 +270,7 @@ dc_pci_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 		goto fail_1;
 	}
-	printf(": %s,", intrstr);
+	printf(": %s", intrstr);
 
 	/* Need this info to decide on a chip type. */
 	sc->dc_revision = PCI_REVISION(pa->pa_class);

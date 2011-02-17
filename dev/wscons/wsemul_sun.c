@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsemul_sun.c,v 1.19 2007/01/07 13:28:50 miod Exp $ */
-=======
 /* $OpenBSD: wsemul_sun.c,v 1.28 2009/09/05 16:51:19 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsemul_sun.c,v 1.11 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -62,13 +58,8 @@ void	*wsemul_sun_cnattach(const struct wsscreen_descr *, void *,
     int, int, long);
 void	*wsemul_sun_attach(int, const struct wsscreen_descr *,
     void *, int, int, void *, long);
-<<<<<<< HEAD
-void	wsemul_sun_output(void *, const u_char *, u_int, int);
-int	wsemul_sun_translate(void *, keysym_t, char **);
-=======
 u_int	wsemul_sun_output(void *, const u_char *, u_int, int);
 int	wsemul_sun_translate(void *, keysym_t, const char **);
->>>>>>> origin/master
 void	wsemul_sun_detach(void *, u_int *, u_int *);
 void	wsemul_sun_resetop(void *, enum wsemul_resetops);
 
@@ -111,19 +102,6 @@ struct wsemul_sun_emuldata {
 #endif
 };
 
-<<<<<<< HEAD
-void wsemul_sun_init(struct wsemul_sun_emuldata *,
-    const struct wsscreen_descr *, void *, int, int, long);
-void wsemul_sun_reset(struct wsemul_sun_emuldata *);
-void wsemul_sun_output_lowchars(struct wsemul_sun_emuldata *, u_char, int);
-void wsemul_sun_output_normal(struct wsemul_sun_emuldata *, u_char, int);
-u_int wsemul_sun_output_haveesc(struct wsemul_sun_emuldata *, u_char);
-u_int wsemul_sun_output_control(struct wsemul_sun_emuldata *, u_char);
-void wsemul_sun_control(struct wsemul_sun_emuldata *, u_char);
-int wsemul_sun_selectattribute(struct wsemul_sun_emuldata *, int, int, int,
-    long *, long *);
-void wsemul_sun_scrollup(struct wsemul_sun_emuldata *, u_int);
-=======
 void	wsemul_sun_init(struct wsemul_sun_emuldata *,
 	    const struct wsscreen_descr *, void *, int, int, long);
 int	wsemul_sun_jump_scroll(struct wsemul_sun_emuldata *, const u_char *,
@@ -137,7 +115,6 @@ int	wsemul_sun_control(struct wsemul_sun_emuldata *, u_char);
 int	wsemul_sun_selectattribute(struct wsemul_sun_emuldata *, int, int, int,
 	    long *, long *);
 int	wsemul_sun_scrollup(struct wsemul_sun_emuldata *, u_int);
->>>>>>> origin/master
 
 struct wsemul_sun_emuldata wsemul_sun_console_emuldata;
 
@@ -149,12 +126,9 @@ struct wsemul_sun_emuldata wsemul_sun_console_emuldata;
 #define	ROWS_LEFT		(edp->nrows - 1 - edp->crow)
 
 void
-wsemul_sun_init(edp, type, cookie, ccol, crow, defattr)
-	struct wsemul_sun_emuldata *edp;
-	const struct wsscreen_descr *type;
-	void *cookie;
-	int ccol, crow;
-	long defattr;
+wsemul_sun_init(struct wsemul_sun_emuldata *edp,
+    const struct wsscreen_descr *type, void *cookie, int ccol, int crow,
+    long defattr)
 {
 	edp->emulops = type->textops;
 	edp->emulcookie = cookie;
@@ -168,8 +142,7 @@ wsemul_sun_init(edp, type, cookie, ccol, crow, defattr)
 }
 
 void
-wsemul_sun_reset(edp)
-	struct wsemul_sun_emuldata *edp;
+wsemul_sun_reset(struct wsemul_sun_emuldata *edp)
 {
 	edp->state = SUN_EMUL_STATE_NORMAL;
 	edp->bkgdattr = edp->curattr = edp->defattr;
@@ -180,11 +153,8 @@ wsemul_sun_reset(edp)
 }
 
 void *
-wsemul_sun_cnattach(type, cookie, ccol, crow, defattr)
-	const struct wsscreen_descr *type;
-	void *cookie;
-	int ccol, crow;
-	long defattr;
+wsemul_sun_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
+    int crow, long defattr)
 {
 	struct wsemul_sun_emuldata *edp;
 	int res;
@@ -227,13 +197,8 @@ wsemul_sun_cnattach(type, cookie, ccol, crow, defattr)
 }
 
 void *
-wsemul_sun_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
-	int console;
-	const struct wsscreen_descr *type;
-	void *cookie;
-	int ccol, crow;
-	void *cbcookie;
-	long defattr;
+wsemul_sun_attach(int console, const struct wsscreen_descr *type, void *cookie,
+    int ccol, int crow, void *cbcookie, long defattr)
 {
 	struct wsemul_sun_emuldata *edp;
 
@@ -259,17 +224,9 @@ wsemul_sun_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
 	return (edp);
 }
 
-<<<<<<< HEAD
-void
-wsemul_sun_output_lowchars(edp, c, kernel)
-	struct wsemul_sun_emuldata *edp;
-	u_char c;
-	int kernel;
-=======
 int
 wsemul_sun_output_lowchars(struct wsemul_sun_emuldata *edp, u_char c,
     int kernel)
->>>>>>> origin/master
 {
 	u_int n;
 	int rc = 0;
@@ -343,16 +300,8 @@ wsemul_sun_output_lowchars(struct wsemul_sun_emuldata *edp, u_char c,
 	return rc;
 }
 
-<<<<<<< HEAD
-void
-wsemul_sun_output_normal(edp, c, kernel)
-	struct wsemul_sun_emuldata *edp;
-	u_char c;
-	int kernel;
-=======
 int
 wsemul_sun_output_normal(struct wsemul_sun_emuldata *edp, u_char c, int kernel)
->>>>>>> origin/master
 {
 	int rc;
 
@@ -381,15 +330,8 @@ wsemul_sun_output_normal(struct wsemul_sun_emuldata *edp, u_char c, int kernel)
 	return 0;
 }
 
-<<<<<<< HEAD
-u_int
-wsemul_sun_output_haveesc(edp, c)
-	struct wsemul_sun_emuldata *edp;
-	u_char c;
-=======
 void
 wsemul_sun_output_haveesc(struct wsemul_sun_emuldata *edp, u_char c)
->>>>>>> origin/master
 {
 	switch (c) {
 	case '[':		/* continuation of multi-char sequence */
@@ -407,15 +349,8 @@ wsemul_sun_output_haveesc(struct wsemul_sun_emuldata *edp, u_char c)
 	}
 }
 
-<<<<<<< HEAD
-void
-wsemul_sun_control(edp, c)
-	struct wsemul_sun_emuldata *edp;
-	u_char c;
-=======
 int
 wsemul_sun_control(struct wsemul_sun_emuldata *edp, u_char c)
->>>>>>> origin/master
 {
 	u_int n, src, dst;
 	int flags, fgcol, bgcol;
@@ -608,15 +543,8 @@ setattr:
 	return rc;
 }
 
-<<<<<<< HEAD
-u_int
-wsemul_sun_output_control(edp, c)
-	struct wsemul_sun_emuldata *edp;
-	u_char c;
-=======
 int
 wsemul_sun_output_control(struct wsemul_sun_emuldata *edp, u_char c)
->>>>>>> origin/master
 {
 	int oargs;
 	int rc;
@@ -659,22 +587,6 @@ wsemul_sun_output_control(struct wsemul_sun_emuldata *edp, u_char c)
 	return 0;
 }
 
-<<<<<<< HEAD
-void
-wsemul_sun_output(cookie, data, count, kernel)
-	void *cookie;
-	const u_char *data;
-	u_int count;
-	int kernel;
-{
-	struct wsemul_sun_emuldata *edp = cookie;
-	u_int newstate;
-#ifdef JUMP_SCROLL
-	const u_char *eot;
-	u_char curchar;
-	u_int cnt, pos, lines;
-#endif
-=======
 u_int
 wsemul_sun_output(void *cookie, const u_char *data, u_int count, int kernel)
 {
@@ -685,7 +597,6 @@ wsemul_sun_output(void *cookie, const u_char *data, u_int count, int kernel)
 	int lines;
 #endif
 	int rc = 0;
->>>>>>> origin/master
 
 #ifdef DIAGNOSTIC
 	if (kernel && !edp->console)
@@ -716,53 +627,6 @@ wsemul_sun_output(void *cookie, const u_char *data, u_int count, int kernel)
 
 	for (; count > 0; data++, count--) {
 #ifdef JUMP_SCROLL
-<<<<<<< HEAD
-		/*
-		 * If scrolling is not disabled and we are the bottom of
-		 * the screen, count newlines until an escape sequence
-		 * appears.
-		 */
-		if ((edp->state == SUN_EMUL_STATE_NORMAL || kernel) &&
-		    ROWS_LEFT == 0 && edp->scrolldist != 0) {
-			lines = 0;
-			pos = edp->ccol;
-			for (eot = data, cnt = count; cnt != 0; eot++, cnt--) {
-				curchar = *eot;
-				if (curchar == ASCII_FF ||
-				    curchar == ASCII_VT || curchar == ASCII_ESC)
-					break;
-
-				switch (curchar) {
-				case ASCII_BS:
-					if (pos > 0)
-						pos--;
-					break;
-				case ASCII_CR:
-					pos = 0;
-					break;
-				case ASCII_HT:
-					pos = (pos + 7) & ~7;
-					if (pos >= edp->ncols)
-						pos = edp->ncols - 1;
-					break;
-				default:
-					if (++pos >= edp->ncols) {
-						pos = 0;
-						curchar = ASCII_LF;
-					}
-					break;
-				}
-				if (curchar == ASCII_LF) {
-					if (++lines >= edp->nrows - 1)
-						break;
-				}
-			}
-
-			if (lines > 1) {
-				wsemul_sun_scrollup(edp, lines);
-				edp->crow--;
-			}
-=======
 		switch (edp->abortstate.state) {
 		case ABORT_FAILED_JUMP_SCROLL:
 			/*
@@ -805,7 +669,6 @@ wsemul_sun_output(void *cookie, const u_char *data, u_int count, int kernel)
 			}
 			wsemul_reset_abortstate(&edp->abortstate);
 			edp->crow--;
->>>>>>> origin/master
 		}
 #endif
 
@@ -875,8 +738,6 @@ wsemul_sun_output(void *cookie, const u_char *data, u_int count, int kernel)
 	return processed;
 }
 
-<<<<<<< HEAD
-=======
 #ifdef JUMP_SCROLL
 int
 wsemul_sun_jump_scroll(struct wsemul_sun_emuldata *edp, const u_char *data,
@@ -924,17 +785,14 @@ wsemul_sun_jump_scroll(struct wsemul_sun_emuldata *edp, const u_char *data,
 	return lines;
 }
 #endif
->>>>>>> origin/master
 
 /*
  * Get an attribute from the graphics driver.
  * Try to find replacements if the desired appearance is not supported.
  */
 int
-wsemul_sun_selectattribute(edp, flags, fgcol, bgcol, attr, bkgdattr)
-	struct wsemul_sun_emuldata *edp;
-	int flags, fgcol, bgcol;
-	long *attr, *bkgdattr;
+wsemul_sun_selectattribute(struct wsemul_sun_emuldata *edp, int flags,
+    int fgcol, int bgcol, long *attr, long *bkgdattr)
 {
 	int error;
 
@@ -994,7 +852,7 @@ wsemul_sun_selectattribute(edp, flags, fgcol, bgcol, attr, bkgdattr)
 	return (0);
 }
 
-static char *sun_fkeys[] = {
+static const char *sun_fkeys[] = {
 	"\033[224z",	/* F1 */
 	"\033[225z",
 	"\033[226z",
@@ -1009,7 +867,7 @@ static char *sun_fkeys[] = {
 	"\033[235z",	/* F12 */
 };
 
-static char *sun_lkeys[] = {
+static const char *sun_lkeys[] = {
 	"\033[207z",	/* KS_Help */
 	NULL,		/* KS_Execute */
 	"\033[200z",	/* KS_Find */
@@ -1025,10 +883,7 @@ static char *sun_lkeys[] = {
 };
 
 int
-wsemul_sun_translate(cookie, in, out)
-	void *cookie;
-	keysym_t in;
-	char **out;
+wsemul_sun_translate(void *cookie, keysym_t in, const char **out)
 {
 	static char c;
 
@@ -1101,9 +956,7 @@ wsemul_sun_translate(cookie, in, out)
 }
 
 void
-wsemul_sun_detach(cookie, crowp, ccolp)
-	void *cookie;
-	u_int *crowp, *ccolp;
+wsemul_sun_detach(void *cookie, u_int *crowp, u_int *ccolp)
 {
 	struct wsemul_sun_emuldata *edp = cookie;
 
@@ -1114,9 +967,7 @@ wsemul_sun_detach(cookie, crowp, ccolp)
 }
 
 void
-wsemul_sun_resetop(cookie, op)
-	void *cookie;
-	enum wsemul_resetops op;
+wsemul_sun_resetop(void *cookie, enum wsemul_resetops op)
 {
 	struct wsemul_sun_emuldata *edp = cookie;
 
@@ -1130,27 +981,17 @@ wsemul_sun_resetop(cookie, op)
 		edp->ccol = edp->crow = 0;
 		(*edp->emulops->cursor)(edp->emulcookie, 1, 0, 0);
 		break;
-<<<<<<< HEAD
-=======
 	case WSEMUL_CLEARCURSOR:
 		(*edp->emulops->cursor)(edp->emulcookie, 0, edp->crow,
 		    edp->ccol);
 		break;
->>>>>>> origin/master
 	default:
 		break;
 	}
 }
 
-<<<<<<< HEAD
-void
-wsemul_sun_scrollup(edp, lines)
-	struct wsemul_sun_emuldata *edp;
-	u_int lines;
-=======
 int
 wsemul_sun_scrollup(struct wsemul_sun_emuldata *edp, u_int lines)
->>>>>>> origin/master
 {
 	int rc;
 

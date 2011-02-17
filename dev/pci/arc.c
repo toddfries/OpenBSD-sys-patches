@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: arc.c,v 1.60 2007/03/27 11:22:59 jmc Exp $ */
-=======
 /*	$OpenBSD: arc.c,v 1.92 2010/09/07 16:21:44 deraadt Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -61,73 +57,65 @@ int arcdebug = 0;
 #define DNPRINTF(n, p...)	/* n, p */
 #endif
 
-static const struct pci_matchid arc_devices[] = {
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1110 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1120 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1130 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1160 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1170 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1210 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1220 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1230 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1260 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1270 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1280 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1380 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1381 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1680 },
-	{ PCI_VENDOR_ARECA,	PCI_PRODUCT_ARECA_ARC1681 }
-};
+/* Areca boards using the Intel IOP are Revision A (RA) */
 
-#define ARC_PCI_BAR			PCI_MAPREG_START
+#define ARC_RA_PCI_BAR			PCI_MAPREG_START
 
-#define ARC_REG_INB_MSG0		0x0010
-#define  ARC_REG_INB_MSG0_NOP			(0x00000000)
-#define  ARC_REG_INB_MSG0_GET_CONFIG		(0x00000001)
-#define  ARC_REG_INB_MSG0_SET_CONFIG		(0x00000002)
-#define  ARC_REG_INB_MSG0_ABORT_CMD		(0x00000003)
-#define  ARC_REG_INB_MSG0_STOP_BGRB		(0x00000004)
-#define  ARC_REG_INB_MSG0_FLUSH_CACHE		(0x00000005)
-#define  ARC_REG_INB_MSG0_START_BGRB		(0x00000006)
-#define  ARC_REG_INB_MSG0_CHK331PENDING		(0x00000007)
-#define  ARC_REG_INB_MSG0_SYNC_TIMER		(0x00000008)
-#define ARC_REG_INB_MSG1		0x0014
-#define ARC_REG_OUTB_ADDR0		0x0018
-#define ARC_REG_OUTB_ADDR1		0x001c
-#define  ARC_REG_OUTB_ADDR1_FIRMWARE_OK		(1<<31)
-#define ARC_REG_INB_DOORBELL		0x0020
-#define  ARC_REG_INB_DOORBELL_WRITE_OK		(1<<0)
-#define  ARC_REG_INB_DOORBELL_READ_OK		(1<<1)
-#define ARC_REG_OUTB_DOORBELL		0x002c
-#define  ARC_REG_OUTB_DOORBELL_WRITE_OK		(1<<0)
-#define  ARC_REG_OUTB_DOORBELL_READ_OK		(1<<1)
-#define ARC_REG_INTRSTAT		0x0030
-#define  ARC_REG_INTRSTAT_MSG0			(1<<0)
-#define  ARC_REG_INTRSTAT_MSG1			(1<<1)
-#define  ARC_REG_INTRSTAT_DOORBELL		(1<<2)
-#define  ARC_REG_INTRSTAT_POSTQUEUE		(1<<3)
-#define  ARC_REG_INTRSTAT_PCI			(1<<4)
-#define ARC_REG_INTRMASK		0x0034
-#define  ARC_REG_INTRMASK_MSG0			(1<<0)
-#define  ARC_REG_INTRMASK_MSG1			(1<<1)
-#define  ARC_REG_INTRMASK_DOORBELL		(1<<2)
-#define  ARC_REG_INTRMASK_POSTQUEUE		(1<<3)
-#define  ARC_REG_INTRMASK_PCI			(1<<4)
-#define ARC_REG_POST_QUEUE		0x0040
-#define  ARC_REG_POST_QUEUE_ADDR_SHIFT		5
-#define  ARC_REG_POST_QUEUE_IAMBIOS		(1<<30)
-#define  ARC_REG_POST_QUEUE_BIGFRAME		(1<<31)
-#define ARC_REG_REPLY_QUEUE		0x0044
-#define  ARC_REG_REPLY_QUEUE_ADDR_SHIFT		5
-#define  ARC_REG_REPLY_QUEUE_ERR		(1<<28)
-#define  ARC_REG_REPLY_QUEUE_IAMBIOS		(1<<30)
-#define ARC_REG_MSGBUF			0x0a00
-#define  ARC_REG_MSGBUF_LEN		1024
-#define ARC_REG_IOC_WBUF_LEN		0x0e00
-#define ARC_REG_IOC_WBUF		0x0e04
-#define ARC_REG_IOC_RBUF_LEN		0x0f00
-#define ARC_REG_IOC_RBUF		0x0f04
-#define  ARC_REG_IOC_RWBUF_MAXLEN	124 /* for both RBUF and WBUF */
+#define ARC_RA_INB_MSG0			0x0010
+#define  ARC_RA_INB_MSG0_NOP			(0x00000000)
+#define  ARC_RA_INB_MSG0_GET_CONFIG		(0x00000001)
+#define  ARC_RA_INB_MSG0_SET_CONFIG		(0x00000002)
+#define  ARC_RA_INB_MSG0_ABORT_CMD		(0x00000003)
+#define  ARC_RA_INB_MSG0_STOP_BGRB		(0x00000004)
+#define  ARC_RA_INB_MSG0_FLUSH_CACHE		(0x00000005)
+#define  ARC_RA_INB_MSG0_START_BGRB		(0x00000006)
+#define  ARC_RA_INB_MSG0_CHK331PENDING		(0x00000007)
+#define  ARC_RA_INB_MSG0_SYNC_TIMER		(0x00000008)
+#define ARC_RA_INB_MSG1			0x0014
+#define ARC_RA_OUTB_ADDR0		0x0018
+#define ARC_RA_OUTB_ADDR1		0x001c
+#define  ARC_RA_OUTB_ADDR1_FIRMWARE_OK		(1<<31)
+#define ARC_RA_INB_DOORBELL		0x0020
+#define  ARC_RA_INB_DOORBELL_WRITE_OK		(1<<0)
+#define  ARC_RA_INB_DOORBELL_READ_OK		(1<<1)
+#define ARC_RA_OUTB_DOORBELL		0x002c
+#define  ARC_RA_OUTB_DOORBELL_WRITE_OK		(1<<0)
+#define  ARC_RA_OUTB_DOORBELL_READ_OK		(1<<1)
+#define ARC_RA_INTRSTAT			0x0030
+#define  ARC_RA_INTRSTAT_MSG0			(1<<0)
+#define  ARC_RA_INTRSTAT_MSG1			(1<<1)
+#define  ARC_RA_INTRSTAT_DOORBELL		(1<<2)
+#define  ARC_RA_INTRSTAT_POSTQUEUE		(1<<3)
+#define  ARC_RA_INTRSTAT_PCI			(1<<4)
+#define ARC_RA_INTRMASK			0x0034
+#define  ARC_RA_INTRMASK_MSG0			(1<<0)
+#define  ARC_RA_INTRMASK_MSG1			(1<<1)
+#define  ARC_RA_INTRMASK_DOORBELL		(1<<2)
+#define  ARC_RA_INTRMASK_POSTQUEUE		(1<<3)
+#define  ARC_RA_INTRMASK_PCI			(1<<4)
+#define ARC_RA_POST_QUEUE		0x0040
+#define  ARC_RA_POST_QUEUE_ADDR_SHIFT		5
+#define  ARC_RA_POST_QUEUE_IAMBIOS		(1<<30)
+#define  ARC_RA_POST_QUEUE_BIGFRAME		(1<<31)
+#define ARC_RA_REPLY_QUEUE		0x0044
+#define  ARC_RA_REPLY_QUEUE_ADDR_SHIFT		5
+#define  ARC_RA_REPLY_QUEUE_ERR			(1<<28)
+#define  ARC_RA_REPLY_QUEUE_IAMBIOS		(1<<30)
+#define ARC_RA_MSGBUF			0x0a00
+#define  ARC_RA_MSGBUF_LEN			1024
+#define ARC_RA_IOC_WBUF_LEN		0x0e00
+#define ARC_RA_IOC_WBUF			0x0e04
+#define ARC_RA_IOC_RBUF_LEN		0x0f00
+#define ARC_RA_IOC_RBUF			0x0f04
+#define  ARC_RA_IOC_RWBUF_MAXLEN	124 /* for both RBUF and WBUF */
+
+/* Areca boards using the Marvel IOP are Revision B (RB) */
+
+#define ARC_RB_DRV2IOP_DOORBELL		0x00020400
+#define ARC_RB_DRV2IOP_DOORBELL_MASK	0x00020404
+#define ARC_RB_IOP2DRV_DOORBELL		0x00020408
+#define  ARC_RB_IOP2DRV_DOORBELL_FIRMWARE_OK	(1<<31)
+#define ARC_RB_IOP2DRV_DOORBELL_MASK	0x0002040c
 
 struct arc_msg_firmware_info {
 	u_int32_t		signature;
@@ -225,13 +213,10 @@ struct arc_fw_bufhdr {
 #define ARC_FW_NOP		0x38	/* opcode only */
 
 #define ARC_FW_CMD_OK		0x41
-<<<<<<< HEAD
-=======
 #define ARC_FW_BLINK		0x43
 #define  ARC_FW_BLINK_ENABLE			0x00
 #define  ARC_FW_BLINK_DISABLE			0x01
 #define ARC_FW_CMD_PASS_REQD	0x4d
->>>>>>> origin/master
 
 struct arc_fw_comminfo {
 	u_int8_t		baud_rate;
@@ -365,11 +350,13 @@ int			arc_detach(struct device *, int);
 void			arc_shutdown(void *);
 int			arc_intr(void *);
 
+struct arc_iop;
 struct arc_ccb;
 SLIST_HEAD(arc_ccb_list, arc_ccb);
 
 struct arc_softc {
 	struct device		sc_dev;
+	const struct arc_iop	*sc_iop;
 	struct scsi_link	sc_link;
 
 	pci_chipset_tag_t	sc_pc;
@@ -434,8 +421,8 @@ int			arc_wait_ne(struct arc_softc *, bus_size_t,
 			    u_int32_t, u_int32_t);
 int			arc_msg0(struct arc_softc *, u_int32_t);
 
-#define arc_push(_s, _r)	arc_write((_s), ARC_REG_POST_QUEUE, (_r))
-#define arc_pop(_s)		arc_read((_s), ARC_REG_REPLY_QUEUE)
+#define arc_push(_s, _r)	arc_write((_s), ARC_RA_POST_QUEUE, (_r))
+#define arc_pop(_s)		arc_read((_s), ARC_RA_REPLY_QUEUE)
 
 /* wrap up the bus_dma api */
 struct arc_dmamem {
@@ -477,10 +464,15 @@ void			arc_scsi_cmd_done(struct arc_softc *, struct arc_ccb *,
 			    u_int32_t);
 
 /* real stuff for dealing with the hardware */
+struct arc_iop {
+	int			(*iop_query_firmware)(struct arc_softc *);
+};
+
 int			arc_map_pci_resources(struct arc_softc *,
 			    struct pci_attach_args *);
-int			arc_query_firmware(struct arc_softc *);
-
+void			arc_unmap_pci_resources(struct arc_softc *);
+int			arc_intel_query_firmware(struct arc_softc *);
+int			arc_marvell_query_firmware(struct arc_softc *);
 
 #if NBIO > 0
 /* stuff to do messaging via the doorbells */
@@ -504,16 +496,70 @@ int			arc_bio_blink(struct arc_softc *, struct bioc_blink *);
 int			arc_bio_getvol(struct arc_softc *, int,
 			    struct arc_fw_volinfo *);
 
+#ifndef SMALL_KERNEL
 /* sensors */
 void			arc_create_sensors(void *, void *);
 void			arc_refresh_sensors(void *);
+#endif /* SMALL_KERNEL */
 #endif
+
+static const struct arc_iop arc_intel = {
+	arc_intel_query_firmware
+};
+
+static const struct arc_iop arc_marvell = {
+	arc_marvell_query_firmware
+};
+
+struct arc_board {
+	pcireg_t		ab_vendor;
+	pcireg_t		ab_product;
+	const struct arc_iop	*ab_iop;
+};
+const struct arc_board	*arc_match_board(struct pci_attach_args *);
+
+static const struct arc_board arc_devices[] = {
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1110, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1120, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1130, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1160, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1170, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1200, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1200_B, &arc_marvell },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1202, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1210, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1220, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1230, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1260, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1270, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1280, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1380, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1381, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1680, &arc_intel },
+	{ PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1681, &arc_intel }
+};
+
+const struct arc_board *
+arc_match_board(struct pci_attach_args *pa)
+{
+	const struct arc_board		*ab;
+	int				i;
+
+	for (i = 0; i < sizeof(arc_devices) / sizeof(arc_devices[0]); i++) {
+		ab = &arc_devices[i];
+
+		if (PCI_VENDOR(pa->pa_id) == ab->ab_vendor &&
+		    PCI_PRODUCT(pa->pa_id) == ab->ab_product)
+			return (ab);
+	}
+
+	return (NULL);
+}
 
 int
 arc_match(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, arc_devices,
-	    sizeof(arc_devices) / sizeof(arc_devices[0])));
+	return ((arc_match_board(aux) == NULL) ? 0 : 1);
 }
 
 void
@@ -527,19 +573,21 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_talking = 0;
 	rw_init(&sc->sc_lock, "arcmsg");
 
+	sc->sc_iop = arc_match_board(pa)->ab_iop;
+
 	if (arc_map_pci_resources(sc, pa) != 0) {
 		/* error message printed by arc_map_pci_resources */
 		return;
 	}
 
-	if (arc_query_firmware(sc) != 0) {
+	if (sc->sc_iop->iop_query_firmware(sc) != 0) {
 		/* error message printed by arc_query_firmware */
-		return;
+		goto unmap_pci;
 	}
 
 	if (arc_alloc_ccbs(sc) != 0) {
 		/* error message printed by arc_alloc_ccbs */
-		return;
+		goto unmap_pci;
 	}
 
 	sc->sc_shutdownhook = shutdownhook_establish(arc_shutdown, sc);
@@ -560,13 +608,14 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_scsibus = (struct scsibus_softc *)child;
 
 	/* enable interrupts */
-	arc_write(sc, ARC_REG_INTRMASK,
-	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRSTAT_DOORBELL));
+	arc_write(sc, ARC_RA_INTRMASK,
+	    ~(ARC_RA_INTRMASK_POSTQUEUE|ARC_RA_INTRSTAT_DOORBELL));
 
 #if NBIO > 0
 	if (bio_register(self, arc_bioctl) != 0)
 		panic("%s: bioctl registration failed", DEVNAME(sc));
 
+#ifndef SMALL_KERNEL
 	/*
 	 * you need to talk to the firmware to get volume info. our firmware
 	 * interface relies on being able to sleep, so we need to use a thread
@@ -576,8 +625,11 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 		printf("%s: unable to schedule arc_create_sensors as a "
 		    "scsi task", DEVNAME(sc));
 #endif
+#endif
 
 	return;
+unmap_pci:
+	arc_unmap_pci_resources(sc);
 }
 
 int
@@ -587,11 +639,11 @@ arc_detach(struct device *self, int flags)
 
 	shutdownhook_disestablish(sc->sc_shutdownhook);
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
-		printf("%s: timeout waiting to stop bg rebuild\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_STOP_BGRB) != 0)
+		printf("%s: timeout waiting to stop bg rebuild\n", DEVNAME(sc));
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_FLUSH_CACHE) != 0)
-		printf("%s: timeout waiting to flush cache\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_FLUSH_CACHE) != 0)
+		printf("%s: timeout waiting to flush cache\n", DEVNAME(sc));
 
 	return (0);
 }
@@ -601,11 +653,11 @@ arc_shutdown(void *xsc)
 {
 	struct arc_softc		*sc = xsc;
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
-		printf("%s: timeout waiting to stop bg rebuild\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_STOP_BGRB) != 0)
+		printf("%s: timeout waiting to stop bg rebuild\n", DEVNAME(sc));
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_FLUSH_CACHE) != 0)
-		printf("%s: timeout waiting to flush cache\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_FLUSH_CACHE) != 0)
+		printf("%s: timeout waiting to flush cache\n", DEVNAME(sc));
 }
 
 int
@@ -617,31 +669,31 @@ arc_intr(void *arg)
 	struct arc_io_cmd		*cmd;
 	u_int32_t			reg, intrstat;
 
-	intrstat = arc_read(sc, ARC_REG_INTRSTAT);
+	intrstat = arc_read(sc, ARC_RA_INTRSTAT);
 	if (intrstat == 0x0)
 		return (0);
-	intrstat &= ARC_REG_INTRSTAT_POSTQUEUE | ARC_REG_INTRSTAT_DOORBELL;
-	arc_write(sc, ARC_REG_INTRSTAT, intrstat);
+	intrstat &= ARC_RA_INTRSTAT_POSTQUEUE | ARC_RA_INTRSTAT_DOORBELL;
+	arc_write(sc, ARC_RA_INTRSTAT, intrstat);
 
-	if (intrstat & ARC_REG_INTRSTAT_DOORBELL) {
+	if (intrstat & ARC_RA_INTRSTAT_DOORBELL) {
 		if (sc->sc_talking) {
 			/* if an ioctl is talking, wake it up */
-			arc_write(sc, ARC_REG_INTRMASK,
-			    ~ARC_REG_INTRMASK_POSTQUEUE);
+			arc_write(sc, ARC_RA_INTRMASK,
+			    ~ARC_RA_INTRMASK_POSTQUEUE);
 			wakeup(sc);
 		} else {
 			/* otherwise drop it */
-			reg = arc_read(sc, ARC_REG_OUTB_DOORBELL);
-			arc_write(sc, ARC_REG_OUTB_DOORBELL, reg);
-			if (reg & ARC_REG_OUTB_DOORBELL_WRITE_OK)
-				arc_write(sc, ARC_REG_INB_DOORBELL,
-				    ARC_REG_INB_DOORBELL_READ_OK);
+			reg = arc_read(sc, ARC_RA_OUTB_DOORBELL);
+			arc_write(sc, ARC_RA_OUTB_DOORBELL, reg);
+			if (reg & ARC_RA_OUTB_DOORBELL_WRITE_OK)
+				arc_write(sc, ARC_RA_INB_DOORBELL,
+				    ARC_RA_INB_DOORBELL_READ_OK);
 		}
 	}
 
 	while ((reg = arc_pop(sc)) != 0xffffffff) {
 		cmd = (struct arc_io_cmd *)(kva +
-		    ((reg << ARC_REG_REPLY_QUEUE_ADDR_SHIFT) -
+		    ((reg << ARC_RA_REPLY_QUEUE_ADDR_SHIFT) -
 		    (u_int32_t)ARC_DMA_DVA(sc->sc_requests)));
 		ccb = &sc->sc_ccbs[letoh32(cmd->cmd.context)];
 
@@ -698,7 +750,7 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 		cmd->flags = ARC_MSG_SCSICMD_FLAG_WRITE;
 	if (ccb->ccb_dmamap->dm_nsegs > ARC_SGL_256LEN) {
 		cmd->flags |= ARC_MSG_SCSICMD_FLAG_SGL_BSIZE_512;
-		reg |= ARC_REG_POST_QUEUE_BIGFRAME;
+		reg |= ARC_RA_POST_QUEUE_BIGFRAME;
 	}
 
 	cmd->context = htole32(ccb->ccb_id);
@@ -772,14 +824,7 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 	}
 
-<<<<<<< HEAD
-	/* timeout_del */
-	xs->flags |= ITSDONE;
-
-	if (reg & ARC_REG_REPLY_QUEUE_ERR) {
-=======
 	if (reg & ARC_RA_REPLY_QUEUE_ERR) {
->>>>>>> origin/master
 		cmd = &ccb->ccb_cmd->cmd;
 
 		switch (cmd->status) {
@@ -834,7 +879,7 @@ arc_complete(struct arc_softc *sc, struct arc_ccb *nccb, int timeout)
 		}
 
 		cmd = (struct arc_io_cmd *)(kva +
-		    ((reg << ARC_REG_REPLY_QUEUE_ADDR_SHIFT) -
+		    ((reg << ARC_RA_REPLY_QUEUE_ADDR_SHIFT) -
 		    ARC_DMA_DVA(sc->sc_requests)));
 		ccb = &sc->sc_ccbs[letoh32(cmd->cmd.context)];
 
@@ -861,14 +906,13 @@ arc_map_pci_resources(struct arc_softc *sc, struct pci_attach_args *pa)
 {
 	pcireg_t			memtype;
 	pci_intr_handle_t		ih;
-	const char			*intrstr;
 
 	sc->sc_pc = pa->pa_pc;
 	sc->sc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
-	memtype = pci_mapreg_type(sc->sc_pc, sc->sc_tag, ARC_PCI_BAR);
-	if (pci_mapreg_map(pa, ARC_PCI_BAR, memtype, 0, &sc->sc_iot,
+	memtype = pci_mapreg_type(sc->sc_pc, sc->sc_tag, ARC_RA_PCI_BAR);
+	if (pci_mapreg_map(pa, ARC_RA_PCI_BAR, memtype, 0, &sc->sc_iot,
 	    &sc->sc_ioh, NULL, &sc->sc_ios, 0) != 0) {
 		printf(": unable to map system interface register\n");
 		return(1);
@@ -878,16 +922,13 @@ arc_map_pci_resources(struct arc_softc *sc, struct pci_attach_args *pa)
 		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
-	intrstr = pci_intr_string(pa->pa_pc, ih);
 	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
 	    arc_intr, sc, DEVNAME(sc));
 	if (sc->sc_ih == NULL) {
-		printf(": unable to map interrupt%s%s\n",
-		    intrstr == NULL ? "" : " at ",
-		    intrstr == NULL ? "" : intrstr);
+		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
-	printf(": %s\n", intrstr);
+	printf(": %s\n", pci_intr_string(pa->pa_pc, ih));
 
 	return (0);
 
@@ -897,24 +938,32 @@ unmap:
 	return (1);
 }
 
+void
+arc_unmap_pci_resources(struct arc_softc *sc)
+{
+	pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
+	bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
+	sc->sc_ios = 0;
+}
+
 int
-arc_query_firmware(struct arc_softc *sc)
+arc_intel_query_firmware(struct arc_softc *sc)
 {
 	struct arc_msg_firmware_info	fwinfo;
 	char				string[81]; /* sizeof(vendor)*2+1 */
 
-	if (arc_wait_eq(sc, ARC_REG_OUTB_ADDR1, ARC_REG_OUTB_ADDR1_FIRMWARE_OK,
-	    ARC_REG_OUTB_ADDR1_FIRMWARE_OK) != 0) {
-		printf("%s: timeout waiting for firmware ok\n");
+	if (arc_wait_eq(sc, ARC_RA_OUTB_ADDR1, ARC_RA_OUTB_ADDR1_FIRMWARE_OK,
+	    ARC_RA_OUTB_ADDR1_FIRMWARE_OK) != 0) {
+		printf("%s: timeout waiting for firmware ok\n", DEVNAME(sc));
 		return (1);
 	}
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_GET_CONFIG) != 0) {
-		printf("%s: timeout waiting for get config\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_GET_CONFIG) != 0) {
+		printf("%s: timeout waiting for get config\n", DEVNAME(sc));
 		return (1);
 	}
 
-	arc_read_region(sc, ARC_REG_MSGBUF, &fwinfo, sizeof(fwinfo));
+	arc_read_region(sc, ARC_RA_MSGBUF, &fwinfo, sizeof(fwinfo));
 
 	DNPRINTF(ARC_D_INIT, "%s: signature: 0x%08x\n", DEVNAME(sc),
 	    letoh32(fwinfo.signature));
@@ -951,16 +1000,30 @@ arc_query_firmware(struct arc_softc *sc)
 
 	sc->sc_req_count = letoh32(fwinfo.queue_len);
 
-	if (arc_msg0(sc, ARC_REG_INB_MSG0_START_BGRB) != 0) {
-		printf("%s: timeout waiting to start bg rebuild\n");
+	if (arc_msg0(sc, ARC_RA_INB_MSG0_START_BGRB) != 0) {
+		printf("%s: timeout waiting to start bg rebuild\n",
+		    DEVNAME(sc));
 		return (1);
 	}
 
-	printf("%s: %d SATA Ports, %dMB SDRAM, FW Version: %s\n",
+	printf("%s: %d ports, %dMB SDRAM, firmware %s\n",
 	    DEVNAME(sc), letoh32(fwinfo.sata_ports),
 	    letoh32(fwinfo.sdram_size), string);
 
 	return (0);
+}
+
+int
+arc_marvell_query_firmware(struct arc_softc *sc)
+{
+	if (arc_wait_eq(sc, ARC_RB_IOP2DRV_DOORBELL,
+	    ARC_RA_OUTB_ADDR1_FIRMWARE_OK,
+	    ARC_RA_OUTB_ADDR1_FIRMWARE_OK) != 0) {
+		printf("%s: timeout waiting for firmware ok\n", DEVNAME(sc));
+		return (1);
+	}
+
+	return (1);
 }
 
 #if NBIO > 0
@@ -1038,10 +1101,14 @@ arc_bio_alarm(struct arc_softc *sc, struct bioc_alarm *ba)
 	if (error != 0)
 		return (error);
 
-	if (reply[0] != ARC_FW_CMD_OK)
+	switch (reply[0]) {
+	case ARC_FW_CMD_OK:
+		return (0);
+	case ARC_FW_CMD_PASS_REQD:
+		return (EPERM);
+	default:
 		return (EIO);
-
-	return (0);
+	}
 }
 
 int
@@ -1106,7 +1173,7 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 		 * except to say that if it has no capacity then it isn't there.
 		 * Ignore passthru volumes, bioc_vol doesn't understand them.
 		 */
-		if (volinfo->capacity != 0 &&
+		if ((volinfo->capacity != 0 || volinfo->capacity2 != 0) &&
 		    volinfo->raid_level != ARC_FW_VOL_RAIDLEVEL_PASSTHRU)
 			nvols++;
 	}
@@ -1177,7 +1244,7 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 		if (error != 0)
 			goto out;
 
-		if (volinfo->capacity == 0 ||
+		if ((volinfo->capacity == 0 && volinfo->capacity2 == 0) ||
 		    volinfo->raid_level == ARC_FW_VOL_RAIDLEVEL_PASSTHRU)
 			continue;
 
@@ -1187,7 +1254,8 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 		nvols++;
 	}
 
-	if (nvols != vol || volinfo->capacity == 0 ||
+	if (nvols != vol ||
+	    (volinfo->capacity == 0 && volinfo->capacity2 == 0) ||
 	    volinfo->raid_level == ARC_FW_VOL_RAIDLEVEL_PASSTHRU) {
 		error = ENODEV;
 		goto out;
@@ -1204,6 +1272,7 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 	struct arc_fw_volinfo		*volinfo;
 	struct scsi_link		*sc_link;
 	struct device			*dev;
+	u_int64_t			blocks;
 	u_int32_t			status;
 	int				error = 0;
 
@@ -1237,7 +1306,9 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 		bv->bv_percent = letoh32(volinfo->progress) / 10;
 	}
 
-	bv->bv_size = (u_int64_t)letoh32(volinfo->capacity) * ARC_BLOCKSIZE;
+	blocks = (u_int64_t)letoh32(volinfo->capacity2) << 32;
+	blocks += (u_int64_t)letoh32(volinfo->capacity);
+	bv->bv_size = blocks * ARC_BLOCKSIZE; /* XXX */
 
 	switch (volinfo->raid_level) {
 	case ARC_FW_VOL_RAIDLEVEL_0:
@@ -1282,6 +1353,7 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	struct arc_fw_raidinfo		*raidinfo;
 	struct arc_fw_diskinfo		*diskinfo;
 	int				error = 0;
+	u_int64_t			blocks;
 	char				model[81];
 	char				serial[41];
 	char				rev[17];
@@ -1342,7 +1414,9 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	bd->bd_lun = 0;
 
 	bd->bd_status = BIOC_SDONLINE;
-	bd->bd_size = (u_int64_t)letoh32(diskinfo->capacity) * ARC_BLOCKSIZE;
+	blocks = (u_int64_t)letoh32(diskinfo->capacity2) << 32;
+	blocks += (u_int64_t)letoh32(diskinfo->capacity);
+	bd->bd_size = blocks * ARC_BLOCKSIZE; /* XXX */
 
 	scsi_strvis(model, diskinfo->model, sizeof(diskinfo->model));
 	scsi_strvis(serial, diskinfo->serial, sizeof(diskinfo->serial));
@@ -1380,7 +1454,7 @@ int
 arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
     size_t rbuflen, int sreadok)
 {
-	u_int8_t			rwbuf[ARC_REG_IOC_RWBUF_MAXLEN];
+	u_int8_t			rwbuf[ARC_RA_IOC_RWBUF_MAXLEN];
 	u_int8_t			*wbuf, *rbuf;
 	int				wlen, wdone = 0, rlen, rdone = 0;
 	u_int16_t			rlenhdr = 0;
@@ -1394,7 +1468,7 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 	DNPRINTF(ARC_D_DB, "%s: arc_msgbuf wbuflen: %d rbuflen: %d\n",
 	    DEVNAME(sc), wbuflen, rbuflen);
 
-	if (arc_read(sc, ARC_REG_OUTB_DOORBELL) != 0)
+	if (arc_read(sc, ARC_RA_OUTB_DOORBELL) != 0)
 		return (EBUSY);
 
 	wlen = sizeof(struct arc_fw_bufhdr) + wbuflen + 1; /* 1 for cksum */
@@ -1412,10 +1486,10 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 	bcopy(wptr, wbuf + sizeof(struct arc_fw_bufhdr), wbuflen);
 	wbuf[wlen - 1] = arc_msg_cksum(wptr, wbuflen);
 
-	reg = ARC_REG_OUTB_DOORBELL_READ_OK;
+	reg = ARC_RA_OUTB_DOORBELL_READ_OK;
 
 	do {
-		if ((reg & ARC_REG_OUTB_DOORBELL_READ_OK) && wdone < wlen) {
+		if ((reg & ARC_RA_OUTB_DOORBELL_READ_OK) && wdone < wlen) {
 			bzero(rwbuf, sizeof(rwbuf));
 			rwlen = (wlen - wdone) % sizeof(rwbuf);
 			bcopy(&wbuf[wdone], rwbuf, rwlen);
@@ -1430,32 +1504,28 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 #endif
 
 			/* copy the chunk to the hw */
-			arc_write(sc, ARC_REG_IOC_WBUF_LEN, rwlen);
-			arc_write_region(sc, ARC_REG_IOC_WBUF, rwbuf,
+			arc_write(sc, ARC_RA_IOC_WBUF_LEN, rwlen);
+			arc_write_region(sc, ARC_RA_IOC_WBUF, rwbuf,
 			    sizeof(rwbuf));
 
 			/* say we have a buffer for the hw */
-			arc_write(sc, ARC_REG_INB_DOORBELL,
-			    ARC_REG_INB_DOORBELL_WRITE_OK);
+			arc_write(sc, ARC_RA_INB_DOORBELL,
+			    ARC_RA_INB_DOORBELL_WRITE_OK);
 
 			wdone += rwlen;
 		}
 
-<<<<<<< HEAD
-		while ((reg = arc_read(sc, ARC_REG_OUTB_DOORBELL)) == 0)
-=======
 		if (rptr == NULL)
 			goto out;
 
 		while ((reg = arc_read(sc, ARC_RA_OUTB_DOORBELL)) == 0)
->>>>>>> origin/master
 			arc_wait(sc);
-		arc_write(sc, ARC_REG_OUTB_DOORBELL, reg);
+		arc_write(sc, ARC_RA_OUTB_DOORBELL, reg);
 
 		DNPRINTF(ARC_D_DB, "%s: reg: 0x%08x\n", DEVNAME(sc), reg);
 
-		if ((reg & ARC_REG_OUTB_DOORBELL_WRITE_OK) && rdone < rlen) {
-			rwlen = arc_read(sc, ARC_REG_IOC_RBUF_LEN);
+		if ((reg & ARC_RA_OUTB_DOORBELL_WRITE_OK) && rdone < rlen) {
+			rwlen = arc_read(sc, ARC_RA_IOC_RBUF_LEN);
 			if (rwlen > sizeof(rwbuf)) {
 				DNPRINTF(ARC_D_DB, "%s:  rwlen too big\n",
 				    DEVNAME(sc));
@@ -1463,11 +1533,11 @@ arc_msgbuf(struct arc_softc *sc, void *wptr, size_t wbuflen, void *rptr,
 				goto out;
 			}
 
-			arc_read_region(sc, ARC_REG_IOC_RBUF, rwbuf,
+			arc_read_region(sc, ARC_RA_IOC_RBUF, rwbuf,
 			    sizeof(rwbuf));
 
-			arc_write(sc, ARC_REG_INB_DOORBELL,
-			    ARC_REG_INB_DOORBELL_READ_OK);
+			arc_write(sc, ARC_RA_INB_DOORBELL,
+			    ARC_RA_INB_DOORBELL_READ_OK);
 
 #ifdef ARC_DEBUG
 			printf("%s:  len: %d+%d=%d/%d\n", DEVNAME(sc),
@@ -1540,7 +1610,7 @@ arc_lock(struct arc_softc *sc)
 
 	rw_enter_write(&sc->sc_lock);
 	s = splbio();
-	arc_write(sc, ARC_REG_INTRMASK, ~ARC_REG_INTRMASK_POSTQUEUE);
+	arc_write(sc, ARC_RA_INTRMASK, ~ARC_RA_INTRMASK_POSTQUEUE);
 	sc->sc_talking = 1;
 	splx(s);
 }
@@ -1552,8 +1622,8 @@ arc_unlock(struct arc_softc *sc)
 
 	s = splbio();
 	sc->sc_talking = 0;
-	arc_write(sc, ARC_REG_INTRMASK,
-	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRMASK_DOORBELL));
+	arc_write(sc, ARC_RA_INTRMASK,
+	    ~(ARC_RA_INTRMASK_POSTQUEUE|ARC_RA_INTRMASK_DOORBELL));
 	splx(s);
 	rw_exit_write(&sc->sc_lock);
 }
@@ -1564,13 +1634,14 @@ arc_wait(struct arc_softc *sc)
 	int				s;
 
 	s = splbio();
-	arc_write(sc, ARC_REG_INTRMASK,
-	    ~(ARC_REG_INTRMASK_POSTQUEUE|ARC_REG_INTRMASK_DOORBELL));
+	arc_write(sc, ARC_RA_INTRMASK,
+	    ~(ARC_RA_INTRMASK_POSTQUEUE|ARC_RA_INTRMASK_DOORBELL));
 	if (tsleep(sc, PWAIT, "arcdb", hz) == EWOULDBLOCK)
-		arc_write(sc, ARC_REG_INTRMASK, ~ARC_REG_INTRMASK_POSTQUEUE);
+		arc_write(sc, ARC_RA_INTRMASK, ~ARC_RA_INTRMASK_POSTQUEUE);
 	splx(s);
 }
 
+#ifndef SMALL_KERNEL
 void
 arc_create_sensors(void *xsc, void *arg)
 {
@@ -1594,8 +1665,7 @@ arc_create_sensors(void *xsc, void *arg)
 	sc->sc_nsensors = bi.bi_novol;
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nsensors,
-	    M_DEVBUF, M_WAITOK);
-	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nsensors);
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
@@ -1615,7 +1685,7 @@ arc_create_sensors(void *xsc, void *arg)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
 
-	if (sensor_task_register(sc, arc_refresh_sensors, 120) != 0)
+	if (sensor_task_register(sc, arc_refresh_sensors, 120) == NULL)
 		goto bad;
 
 	sensordev_install(&sc->sc_sensordev);
@@ -1667,6 +1737,7 @@ arc_refresh_sensors(void *arg)
 
 	}
 }
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 u_int32_t
@@ -1749,14 +1820,14 @@ int
 arc_msg0(struct arc_softc *sc, u_int32_t m)
 {
 	/* post message */
-	arc_write(sc, ARC_REG_INB_MSG0, m);
+	arc_write(sc, ARC_RA_INB_MSG0, m);
 	/* wait for the fw to do it */
-	if (arc_wait_eq(sc, ARC_REG_INTRSTAT, ARC_REG_INTRSTAT_MSG0,
-	    ARC_REG_INTRSTAT_MSG0) != 0)
+	if (arc_wait_eq(sc, ARC_RA_INTRSTAT, ARC_RA_INTRSTAT_MSG0,
+	    ARC_RA_INTRSTAT_MSG0) != 0)
 		return (1);
 
 	/* ack it */
-	arc_write(sc, ARC_REG_INTRSTAT, ARC_REG_INTRSTAT_MSG0);
+	arc_write(sc, ARC_RA_INTRSTAT, ARC_RA_INTRSTAT_MSG0);
 
 	return (0);
 }
@@ -1767,11 +1838,10 @@ arc_dmamem_alloc(struct arc_softc *sc, size_t size)
 	struct arc_dmamem		*adm;
 	int				nsegs;
 
-	adm = malloc(sizeof(struct arc_dmamem), M_DEVBUF, M_NOWAIT);
+	adm = malloc(sizeof(*adm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (adm == NULL)
 		return (NULL);
 
-	bzero(adm, sizeof(struct arc_dmamem));
 	adm->adm_size = size;
 
 	if (bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
@@ -1825,8 +1895,7 @@ arc_alloc_ccbs(struct arc_softc *sc)
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct arc_ccb) * sc->sc_req_count,
-	    M_DEVBUF, M_WAITOK);
-	bzero(sc->sc_ccbs, sizeof(struct arc_ccb) * sc->sc_req_count);
+	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	sc->sc_requests = arc_dmamem_alloc(sc,
 	    ARC_MAX_IOCMDLEN * sc->sc_req_count);
@@ -1852,7 +1921,7 @@ arc_alloc_ccbs(struct arc_softc *sc)
 
 		ccb->ccb_cmd = (struct arc_io_cmd *)&cmd[ccb->ccb_offset];
 		ccb->ccb_cmd_post = (ARC_DMA_DVA(sc->sc_requests) +
-		    ccb->ccb_offset) >> ARC_REG_POST_QUEUE_ADDR_SHIFT;
+		    ccb->ccb_offset) >> ARC_RA_POST_QUEUE_ADDR_SHIFT;
 
 		arc_put_ccb(sc, ccb);
 	}

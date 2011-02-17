@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: onewire_subr.c,v 1.1 2006/03/04 16:27:03 grange Exp $	*/
-=======
 /*	$OpenBSD: onewire_subr.c,v 1.4 2010/07/19 23:44:09 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

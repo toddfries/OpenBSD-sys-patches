@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ess.c,v 1.10 2005/04/15 13:05:14 mickey Exp $	*/
-=======
 /*	$OpenBSD: ess.c,v 1.16 2010/07/15 03:43:11 jakemsr Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ess.c,v 1.44.4.1 1999/06/21 01:18:00 thorpej Exp $	*/
 
 /*
@@ -241,6 +237,7 @@ struct audio_hw_if ess_1788_hw_if = {
 	ess_1788_get_props,
 	ess_audio1_trigger_output,
 	ess_audio1_trigger_input,
+	NULL
 };
 
 struct audio_hw_if ess_1888_hw_if = {
@@ -270,6 +267,7 @@ struct audio_hw_if ess_1888_hw_if = {
 	ess_1888_get_props,
 	ess_audio2_trigger_output,
 	ess_audio1_trigger_input,
+	NULL
 };
 
 #ifdef AUDIO_DEBUG
@@ -1257,14 +1255,14 @@ ess_set_params(addr, setmode, usemode, play, rec)
 		case AUDIO_ENCODING_ULAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = mulaw_to_ulinear16;
+				p->sw_code = mulaw_to_ulinear16_le;
 			} else
 				p->sw_code = ulinear8_to_mulaw;
 			break;
 		case AUDIO_ENCODING_ALAW:
 			if (mode == AUMODE_PLAY) {
 				p->factor = 2;
-				p->sw_code = alaw_to_ulinear16;
+				p->sw_code = alaw_to_ulinear16_le;
 			} else
 				p->sw_code = ulinear8_to_alaw;
 			break;

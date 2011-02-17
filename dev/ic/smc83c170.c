@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: smc83c170.c,v 1.7 2005/12/15 23:40:19 krw Exp $	*/
-=======
 /*	$OpenBSD: smc83c170.c,v 1.14 2009/08/10 20:29:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: smc83c170.c,v 1.59 2005/02/27 00:27:02 perry Exp $	*/
 
 /*-
@@ -39,11 +35,6 @@
  * Device driver for the Standard Microsystems Corp. 83C170
  * Ethernet PCI Integrated Controller (EPIC/100).
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: smc83c170.c,v 1.59 2005/02/27 00:27:02 perry Exp $");
-#endif
 
 #include "bpfilter.h"
 

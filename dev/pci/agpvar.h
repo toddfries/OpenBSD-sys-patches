@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: agpvar.h,v 1.4 2006/03/10 21:52:02 matthieu Exp $	*/
-=======
 /*	$OpenBSD: agpvar.h,v 1.22 2010/05/10 22:06:04 oga Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: agpvar.h,v 1.4 2001/10/01 21:54:48 fvdl Exp $	*/
 
 /*-
@@ -36,8 +32,7 @@
 #ifndef _PCI_AGPVAR_H_
 #define _PCI_AGPVAR_H_
 
-#include <sys/lock.h>
-#include <dev/pci/vga_pcivar.h>
+#include <sys/rwlock.h>
 
 /* #define	AGP_DEBUG */
 #ifdef AGP_DEBUG
@@ -48,21 +43,6 @@
 
 #define AGPUNIT(x)	minor(x)
 
-<<<<<<< HEAD
-struct agp_methods {
-	u_int32_t (*get_aperture)(struct vga_pci_softc *);
-	int	(*set_aperture)(struct vga_pci_softc *, u_int32_t);
-	int	(*bind_page)(struct vga_pci_softc *, off_t, bus_addr_t);
-	int	(*unbind_page)(struct vga_pci_softc *, off_t);
-	void	(*flush_tlb)(struct vga_pci_softc *);
-	int	(*enable)(struct vga_pci_softc *, u_int32_t mode);
-	struct agp_memory *
-		(*alloc_memory)(struct vga_pci_softc *, int, vsize_t);
-	int	(*free_memory)(struct vga_pci_softc *, struct agp_memory *);
-	int	(*bind_memory)(struct vga_pci_softc *, struct agp_memory *,
-		    off_t);
-	int	(*unbind_memory)(struct vga_pci_softc *, struct agp_memory *);
-=======
 struct agp_attach_args {
 	char			*aa_busname;
 	struct pci_attach_args	*aa_pa;
@@ -130,14 +110,11 @@ struct agp_methods {
 	int	(*free_memory)(void *, struct agp_memory *);
 	int	(*bind_memory)(void *, struct agp_memory *, bus_size_t);
 	int	(*unbind_memory)(void *, struct agp_memory *);
->>>>>>> origin/master
 };
 
 /*
  * All chipset drivers must have this at the start of their softc.
  */
-<<<<<<< HEAD
-=======
 struct agp_softc {
 	struct device			 sc_dev;
 
@@ -161,7 +138,6 @@ struct agp_softc {
 	u_int32_t			 sc_maxmem;	/* mem upper bound */
 	u_int32_t			 sc_allocated;	/* amount allocated */
 };
->>>>>>> origin/master
 
 struct agp_gatt {
 	u_int32_t	ag_entries;
@@ -177,40 +153,6 @@ struct agp_map;
 /*
  * Functions private to the AGP code.
  */
-<<<<<<< HEAD
-
-int	agp_find_caps(pci_chipset_tag_t, pcitag_t);
-int	agp_map_aperture(struct vga_pci_softc *);
-struct agp_gatt *
-	agp_alloc_gatt(struct vga_pci_softc *);
-void	agp_free_gatt(struct vga_pci_softc *, struct agp_gatt *);
-void	agp_flush_cache(void);
-int	agp_generic_attach(struct vga_pci_softc *);
-int	agp_generic_detach(struct vga_pci_softc *);
-int	agp_generic_enable(struct vga_pci_softc *, u_int32_t);
-struct agp_memory *
-	agp_generic_alloc_memory(struct vga_pci_softc *, int, vsize_t size);
-int	agp_generic_free_memory(struct vga_pci_softc *, struct agp_memory *);
-int	agp_generic_bind_memory(struct vga_pci_softc *, struct agp_memory *,
-	    off_t);
-int	agp_generic_unbind_memory(struct vga_pci_softc *, struct agp_memory *);
-
-int	agp_ali_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-int	agp_amd_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-int	agp_i810_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-int	agp_intel_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-int	agp_via_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-int	agp_sis_attach(struct vga_pci_softc *, struct pci_attach_args *,
-	    struct pci_attach_args *);
-
-int	agp_alloc_dmamem(bus_dma_tag_t, size_t, int, bus_dmamap_t *,
-	    caddr_t *, bus_addr_t *, bus_dma_segment_t *, int, int *);
-=======
 struct device	*agp_attach_bus(struct pci_attach_args *,
 		     const struct agp_methods *, bus_addr_t, bus_size_t,
 		     struct device *);
@@ -232,14 +174,11 @@ void	agp_unmap_subregion(struct agp_map *, bus_space_handle_t,
 
 int	agp_alloc_dmamem(bus_dma_tag_t, size_t, bus_dmamap_t *,
 	    bus_addr_t *, bus_dma_segment_t *);
->>>>>>> origin/master
 void	agp_free_dmamem(bus_dma_tag_t, size_t, bus_dmamap_t,
 	    bus_dma_segment_t *);
 int	agpdev_print(void *, const char *);
 int	agpbus_probe(struct agp_attach_args *aa);
 
-<<<<<<< HEAD
-=======
 
 int	agp_bus_dma_init(struct agp_softc *, bus_addr_t, bus_addr_t,
 	    bus_dma_tag_t *);
@@ -312,5 +251,4 @@ int	 agp_unbind_memory(void *, void *);
  */
 void	 agp_memory_info(void *, void *, struct agp_memory_info *);
 
->>>>>>> origin/master
 #endif /* !_PCI_AGPVAR_H_ */

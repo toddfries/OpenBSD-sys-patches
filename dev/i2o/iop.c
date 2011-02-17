@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: iop.c,v 1.28 2006/03/07 20:46:46 brad Exp $	*/
-=======
 /*	$OpenBSD: iop.c,v 1.37 2010/01/13 00:31:04 chl Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: iop.c,v 1.12 2001/03/21 14:27:05 ad Exp $	*/
 
 /*-
@@ -273,59 +269,57 @@ iop_init(struct iop_softc *sc, const char *intrstr)
 		iop_ictxhashtbl = hashinit(IOP_ICTXHASH_NBUCKETS, M_DEVBUF,
 		    M_NOWAIT, &iop_ictxhash);
 		if (iop_ictxhashtbl == NULL) {
-			printf("%s: cannot allocate hashtable\n",
-			    sc->sc_dv.dv_xname);
+			printf(": cannot allocate hashtable\n");
 			return;
 		}
 	}
 
 	/* Reset the IOP and request status. */
-	printf("I2O adapter");
 
 	/* Allocate a scratch DMA map for small miscellaneous shared data. */
 	if (bus_dmamap_create(sc->sc_dmat, PAGE_SIZE, 1, PAGE_SIZE, 0,
 	    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW, &sc->sc_scr_dmamap) != 0) {
-		printf("%s: cannot create scratch dmamap\n",
-		    sc->sc_dv.dv_xname);
+		printf(": cannot create scratch dmamap\n");
 		return;
 	}
 	state++;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, PAGE_SIZE, PAGE_SIZE, 0,
 	    sc->sc_scr_seg, 1, &nsegs, BUS_DMA_NOWAIT) != 0) {
-		printf("%s: cannot alloc scratch dmamem\n",
-		    sc->sc_dv.dv_xname);
+		printf(": cannot alloc scratch dmamem\n");
 		goto bail_out;
 	}
 	state++;
 
 	if (bus_dmamem_map(sc->sc_dmat, sc->sc_scr_seg, nsegs, PAGE_SIZE,
 	    &sc->sc_scr, 0)) {
-		printf("%s: cannot map scratch dmamem\n", sc->sc_dv.dv_xname);
+		printf(": cannot map scratch dmamem\n");
 		goto bail_out;
 	}
 	state++;
 
 	if (bus_dmamap_load(sc->sc_dmat, sc->sc_scr_dmamap, sc->sc_scr,
 	    PAGE_SIZE, NULL, BUS_DMA_NOWAIT)) {
-		printf("%s: cannot load scratch dmamap\n", sc->sc_dv.dv_xname);
+		printf(": cannot load scratch dmamap\n");
 		goto bail_out;
 	}
 	state++;
 
 	if ((rv = iop_reset(sc)) != 0) {
-		printf("%s: not responding (reset)\n", sc->sc_dv.dv_xname);
+		printf(": not responding (reset)\n");
 		goto bail_out;
 	}
 	if ((rv = iop_status_get(sc, 1)) != 0) {
-		printf("%s: not responding (get status)\n",
-		    sc->sc_dv.dv_xname);
+		printf(": not responding (get status)\n");
 		goto bail_out;
 	}
 	sc->sc_flags |= IOP_HAVESTATUS;
 	iop_strvis(sc, sc->sc_status.productid,
 	    sizeof(sc->sc_status.productid), ident, sizeof(ident));
-	printf(" <%s>\n", ident);
+	printf(": <%s>", ident);
+	if (intrstr != NULL)
+		printf(", %s", intrstr);
+	printf("\n");
 
 #ifdef I2ODEBUG
 	printf("%s: orgid=0x%04x version=%d\n", sc->sc_dv.dv_xname,
@@ -350,14 +344,13 @@ iop_init(struct iop_softc *sc, const char *intrstr)
 		sc->sc_maxib = IOP_MAX_INBOUND;
 
 	/* Allocate message wrappers. */
-	im = malloc(sizeof(*im) * sc->sc_maxib, M_DEVBUF, M_NOWAIT);
+	im = malloc(sizeof(*im) * sc->sc_maxib, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!im) {
 		printf("%s: couldn't allocate message", sc->sc_dv.dv_xname);
 		goto bail_out;
 	}
 	state++;
 
-	bzero(im, sizeof(*im) * sc->sc_maxib);
 	sc->sc_ims = im;
 	SLIST_INIT(&sc->sc_im_freelist);
 
@@ -376,7 +369,7 @@ iop_init(struct iop_softc *sc, const char *intrstr)
 		SLIST_INSERT_HEAD(&sc->sc_im_freelist, im, im_chain);
 	}
 
-	/* Initalise the IOP's outbound FIFO. */
+	/* Initialize the IOP's outbound FIFO. */
 	if (iop_ofifo_init(sc) != 0) {
 		printf("%s: unable to init outbound FIFO\n",
 		    sc->sc_dv.dv_xname);
@@ -390,10 +383,6 @@ iop_init(struct iop_softc *sc, const char *intrstr)
 	/* Ensure interrupts are enabled at the IOP. */
 	mask = iop_inl(sc, IOP_REG_INTR_MASK);
 	iop_outl(sc, IOP_REG_INTR_MASK, mask & ~IOP_INTR_OFIFO);
-
-	if (intrstr != NULL)
-		printf("%s: interrupting at %s\n", sc->sc_dv.dv_xname,
-		    intrstr);
 
 #ifdef I2ODEBUG
 	printf("%s: queue depths: inbound %d/%d, outbound %d/%d\n",
@@ -464,11 +453,10 @@ iop_config_interrupts(struct device *self)
 		i = sizeof(struct i2o_systab_entry) * (niop - 1) +
 		    sizeof(struct i2o_systab);
 		iop_systab_size = i;
-		iop_systab = malloc(i, M_DEVBUF, M_NOWAIT);
+		iop_systab = malloc(i, M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (!iop_systab)
 			return;
 
-		bzero(iop_systab, i);
 		iop_systab->numentries = niop;
 		iop_systab->version = I2O_VERSION_11;
 
@@ -680,12 +668,11 @@ iop_reconfigure(struct iop_softc *sc, u_int chgind)
 	if (sc->sc_tidmap != NULL)
 		free(sc->sc_tidmap, M_DEVBUF);
 	sc->sc_tidmap = malloc(sc->sc_nlctent * sizeof(struct iop_tidmap),
-	    M_DEVBUF, M_NOWAIT);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (!sc->sc_tidmap) {
 		DPRINTF(("iop_reconfigure: out of memory\n"));
 		return (ENOMEM);
 	}
-	bzero(sc->sc_tidmap, sc->sc_nlctent * sizeof(struct iop_tidmap));
 
 	/* Allow 1 queued command per device while we're configuring. */
 	iop_adjqparam(sc, 1);
@@ -943,7 +930,7 @@ iop_status_get(struct iop_softc *sc, int nosleep)
 }
 
 /*
- * Initalize and populate the IOP's outbound FIFO.
+ * Initialize and populate the IOP's outbound FIFO.
  */
 int
 iop_ofifo_init(struct iop_softc *sc)
@@ -2209,7 +2196,7 @@ iop_print_ident(struct iop_softc *sc, int tid)
 		struct	i2o_param_op_results pr;
 		struct	i2o_param_read_results prr;
 		struct	i2o_param_device_identity di;
-	} __attribute__ ((__packed__)) p;
+	} __packed p;
 	char buf[32];
 	int rv;
 

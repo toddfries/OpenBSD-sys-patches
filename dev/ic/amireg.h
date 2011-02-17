@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: amireg.h,v 1.26 2006/04/26 07:53:22 dlg Exp $	*/
-=======
 /*	$OpenBSD: amireg.h,v 1.30 2008/10/22 18:42:29 marco Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

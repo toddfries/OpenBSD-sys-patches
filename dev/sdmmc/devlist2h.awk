@@ -1,5 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: devlist2h.awk,v 1.1 2006/06/01 21:15:40 uwe Exp $
+#	$OpenBSD: devlist2h.awk,v 1.2 2006/06/02 21:16:44 uwe Exp $
 #	$NetBSD: devlist2h.awk,v 1.2 1998/07/22 11:47:13 christos Exp $
 #
 # Copyright (c) 1998, Christos Zoulas

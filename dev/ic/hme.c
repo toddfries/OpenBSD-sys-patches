@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hme.c,v 1.45 2006/12/21 21:48:11 jason Exp $	*/
-=======
 /*	$OpenBSD: hme.c,v 1.61 2009/10/15 17:54:54 deraadt Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-

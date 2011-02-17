@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tty_tty.c,v 1.9 2005/12/21 12:43:49 jsg Exp $	*/
-=======
 /*	$OpenBSD: tty_tty.c,v 1.11 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tty_tty.c,v 1.13 1996/03/30 22:24:46 christos Exp $	*/
 
 /*-

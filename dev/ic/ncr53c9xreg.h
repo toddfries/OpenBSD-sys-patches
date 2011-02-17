@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9xreg.h,v 1.8 2003/06/05 12:27:02 deraadt Exp $	*/
+/*	$OpenBSD: ncr53c9xreg.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
 /*	$NetBSD: ncr53c9xreg.h,v 1.4 1997/05/17 20:56:55 pk Exp $	*/
 
 /*

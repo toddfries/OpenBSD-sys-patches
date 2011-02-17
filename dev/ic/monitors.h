@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: monitors.h,v 1.3 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 /* $NetBSD$ */
 
 /*-

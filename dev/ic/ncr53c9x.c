@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ncr53c9x.c,v 1.32 2006/06/26 22:16:23 miod Exp $	*/
-=======
 /*	$OpenBSD: ncr53c9x.c,v 1.50 2010/11/11 17:47:00 miod Exp $	*/
->>>>>>> origin/master
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -199,7 +195,7 @@ ncr53c9x_attach(sc, adapter)
 	/*
 	 * Allocate SCSI message buffers.
 	 * Front-ends can override allocation to avoid alignment
-	 * handling in the DMA engines. Note that that ncr53c9x_msgout()
+	 * handling in the DMA engines. Note that ncr53c9x_msgout()
 	 * can request a 1 byte DMA transfer.
 	 */
 	if (sc->sc_omess == NULL)
@@ -222,8 +218,8 @@ ncr53c9x_attach(sc, adapter)
 		return;
 	}
 
-	printf(": %s, %dMHz, SCSI ID %d\n",
-	    ncr53c9x_variant_names[sc->sc_rev], sc->sc_freq, sc->sc_id);
+	printf(": %s, %dMHz\n", ncr53c9x_variant_names[sc->sc_rev],
+	    sc->sc_freq);
 
 	sc->sc_ccf = FREQTOCCF(sc->sc_freq);
 
@@ -877,15 +873,21 @@ ncr53c9x_poll(sc, xs, count)
 	struct scsi_xfer *xs;
 	int count;
 {
+	int s;
 
 	NCR_TRACE(("[ncr53c9x_poll] "));
 	while (count) {
 		if (NCRDMA_ISINTR(sc)) {
+			s = splbio();
 			ncr53c9x_intr(sc);
+			splx(s);
 		}
 #if alternatively
-		if (NCR_READ_REG(sc, NCR_STAT) & NCRSTAT_INT)
+		if (NCR_READ_REG(sc, NCR_STAT) & NCRSTAT_INT) {
+			s = splbio();
 			ncr53c9x_intr(sc);
+			splx(s);
+		}
 #endif
 		if ((xs->flags & ITSDONE) != 0)
 			return (0);
@@ -2600,7 +2602,6 @@ msgin:
 /*			DELAY(1); */
 		}
 		if (sc->sc_features & NCR_F_DMASELECT) {
-			size_t size;
 			/* setup DMA transfer for command */
 			size = ecb->clen;
 			sc->sc_cmdlen = size;

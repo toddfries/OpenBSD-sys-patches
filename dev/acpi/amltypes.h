@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: amltypes.h,v 1.24 2007/01/23 04:05:58 jordan Exp $ */
-=======
 /* $OpenBSD: amltypes.h,v 1.39 2010/10/15 20:25:04 jordan Exp $ */
->>>>>>> origin/master
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -182,14 +178,10 @@ enum aml_objecttype {
 
 	AML_OBJTYPE_NAMEREF = 0x100,
 	AML_OBJTYPE_OBJREF,
-<<<<<<< HEAD
-	AML_OBJTYPE_STATICINT=AML_OBJTYPE_INTEGER|AML_STATIC,
-=======
 	AML_OBJTYPE_SCOPE,
 	AML_OBJTYPE_NOTARGET,
 	AML_OBJTYPE_HEXSTRING,
 	AML_OBJTYPE_DECSTRING,
->>>>>>> origin/master
 };
 
 /* AML Opcode Arguments */
@@ -219,8 +211,6 @@ enum aml_objecttype {
 #define AML_ARG_TERMOBJLIST	'T'
 #define AML_ARG_TERMOBJ		't'
 
-<<<<<<< HEAD
-=======
 #define AML_ARG_IFELSE          'I'
 #define AML_ARG_BUFFER          'B'
 #define AML_ARG_SEARCHNAME      'n'
@@ -231,7 +221,6 @@ enum aml_objecttype {
 #define AML_ARG_CONST           'c'
 #define AML_ARG_TARGET          'r'
 
->>>>>>> origin/master
 #define AML_METHOD_ARGCOUNT(v)	 (((v) >> 0) & 0x7)
 #define AML_METHOD_SERIALIZED(v) (((v) >> 3) & 0x1)
 #define AML_METHOD_SYNCLEVEL(v)	 (((v) >> 4) & 0xF)
@@ -260,15 +249,12 @@ enum aml_objecttype {
 struct aml_scope;
 struct aml_node;
 
-<<<<<<< HEAD
-=======
 struct aml_waitq {
 	struct aml_scope          *scope;
 	SIMPLEQ_ENTRY(aml_waitq)   link;
 };
 SIMPLEQ_HEAD(aml_waitq_head, aml_waitq);
 
->>>>>>> origin/master
 /* AML Object Value */
 struct aml_value {
 	int	type;
@@ -285,12 +271,14 @@ struct aml_value {
 			u_int8_t	iospace;
 			u_int64_t	iobase;
 			u_int32_t	iolen;
+			int		flag;
 		} vopregion;
 		struct {
 			int		flags;
 			u_int8_t	*start;
 			u_int8_t	*end;
 			struct aml_value *(*fneval)(struct aml_scope *, struct aml_value *);
+			u_int8_t        *base;
 		} vmethod;
 		struct {
 			u_int16_t	 type;
@@ -307,6 +295,7 @@ struct aml_value {
 			u_int8_t	proc_len;
 		} vprocessor;
 		struct {
+			int		type;
 			int		index;
 			struct aml_value *ref;
 		} vobjref;
@@ -315,8 +304,6 @@ struct aml_value {
 			u_int16_t	pwr_order;
 		} vpowerrsrc;
 		struct acpi_mutex	*vmutex;
-<<<<<<< HEAD
-=======
 		struct {
 			u_int8_t         *name;
 			struct aml_node  *node;
@@ -333,7 +320,6 @@ struct aml_value {
 			int               state;
 			struct aml_waitq_head    waiters;
 		} Vevent;
->>>>>>> origin/master
 	} _;
 };
 
@@ -349,6 +335,8 @@ struct aml_value {
 #define v_processor		_.vprocessor
 #define v_powerrsrc		_.vpowerrsrc
 #define v_mutex			_.vmutex
+#define v_mtx                   _.Vmutex
+#define v_evt                   _.Vevent
 
 #define xaml_intval(v)		((v)->v_integer)
 #define aml_strlen(v)		((v)->length)

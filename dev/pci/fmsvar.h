@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: fmsvar.h,v 1.4 2002/05/28 04:19:53 mickey Exp $ */
-=======
 /*	$OpenBSD: fmsvar.h,v 1.6 2008/06/26 05:42:17 ray Exp $ */
->>>>>>> origin/master
 /*	$NetBSD: fmsvar.h,v 1.1 1999/11/01 21:54:12 augustss Exp $	*/
 
 /*-

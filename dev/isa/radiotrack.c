@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: radiotrack.c,v 1.4 2002/08/28 21:20:48 mickey Exp $ */
 /* $RuOBSD: radiotrack.c,v 1.3 2001/10/18 16:51:36 pva Exp $ */
 
 /*

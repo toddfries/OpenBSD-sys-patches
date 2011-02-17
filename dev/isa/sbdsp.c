@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: sbdsp.c,v 1.24 2005/04/15 13:05:14 mickey Exp $	*/
-=======
 /*	$OpenBSD: sbdsp.c,v 1.31 2010/07/15 03:43:11 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -662,7 +658,7 @@ sbdsp_set_params(addr, setmode, usemode, play, rec)
 				break;
 			case AUDIO_ENCODING_ULAW:
 				if (mode == AUMODE_PLAY) {
-					swcode = mulaw_to_ulinear16;
+					swcode = mulaw_to_ulinear16_le;
 					factor = 2;
 					m = &sbpmodes[PLAY16];
 				} else
@@ -671,7 +667,7 @@ sbdsp_set_params(addr, setmode, usemode, play, rec)
 				break;
 			case AUDIO_ENCODING_ALAW:
 				if (mode == AUMODE_PLAY) {
-					swcode = alaw_to_ulinear16;
+					swcode = alaw_to_ulinear16_le;
 					factor = 2;
 					m = &sbpmodes[PLAY16];
 				} else
@@ -688,14 +684,14 @@ sbdsp_set_params(addr, setmode, usemode, play, rec)
 			case AUDIO_ENCODING_SLINEAR_LE:
 				break;
 			case AUDIO_ENCODING_ULINEAR_LE:
-				swcode = change_sign16;
+				swcode = change_sign16_le;
 				break;
 			case AUDIO_ENCODING_SLINEAR_BE:
 				swcode = swap_bytes;
 				break;
 			case AUDIO_ENCODING_ULINEAR_BE:
 				swcode = mode == AUMODE_PLAY ?
-					swap_bytes_change_sign16 : change_sign16_swap_bytes;
+					swap_bytes_change_sign16_le : change_sign16_swap_bytes_le;
 				break;
 			case AUDIO_ENCODING_ULAW:
 				swcode = mode == AUMODE_PLAY ?
@@ -772,7 +768,7 @@ sbdsp_set_params(addr, setmode, usemode, play, rec)
 		DPRINTF(("sbdsp_set_params: fd=%d, usemode=%d, idma=%d, odma=%d\n", sc->sc_fullduplex, usemode, sc->sc_i.dmachan, sc->sc_o.dmachan));
 		if (sc->sc_o.dmachan == sc->sc_drq8) {
 			/* Use 16 bit DMA for playing by expanding the samples. */
-			play->sw_code = linear8_to_linear16;
+			play->sw_code = linear8_to_linear16_le;
 			play->factor = 2;
 			sc->sc_o.modep = &sbpmodes[PLAY16];
 			sc->sc_o.dmachan = sc->sc_drq16;
@@ -1966,6 +1962,9 @@ sbdsp_mixer_query_devinfo(addr, dip)
 
 	DPRINTF(("sbdsp_mixer_query_devinfo: model=%d index=%d\n",
 		 sc->sc_mixer_model, dip->index));
+
+	if (dip->index < 0)
+		return ENXIO;
 
 	if (sc->sc_mixer_model == SBM_NONE)
 		return ENXIO;

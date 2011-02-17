@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: ttycom.h,v 1.7 2006/04/27 19:30:28 deraadt Exp $	*/
-=======
 /*	$OpenBSD: ttycom.h,v 1.11 2009/05/06 18:21:23 stevesk Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: ttycom.h,v 1.4 1996/05/19 17:17:53 jonathan Exp $	*/
 
 /*-
@@ -125,7 +121,7 @@ struct tstamps {
 #define	TIOCCONS	_IOW('t', 98, int)	/* become virtual console */
 #define	TIOCSCTTY	 _IO('t', 97)		/* become controlling tty */
 #define	TIOCEXT		_IOW('t', 96, int)	/* pty: external processing */
-#define	TIOCSIG		 _IO('t', 95)		/* pty: generate signal */
+#define	TIOCSIG		_IOW('t', 95, int)	/* pty: generate signal */
 #define	TIOCDRAIN	 _IO('t', 94)		/* wait till output drained */
 #define	TIOCGFLAGS	_IOR('t', 93, int)	/* get device flags */
 #define	TIOCSFLAGS	_IOW('t', 92, int)	/* set device flags */
@@ -147,10 +143,7 @@ struct tstamps {
 #define	PPPDISC		5		/* ppp discipline */
 #define	STRIPDISC	6		/* metricom wireless IP discipline */
 #define	NMEADISC	7		/* NMEA0183 discipline */
-<<<<<<< HEAD
-=======
 #define	MSTSDISC	8		/* Meinberg time string discipline */
 #define	ENDRUNDISC	9		/* EndRun time format discipline */
->>>>>>> origin/master
 
 #endif /* !_SYS_TTYCOM_H_ */

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gpr.c,v 1.11 2005/01/27 17:04:55 millert Exp $	*/
-=======
 /*	$OpenBSD: gpr.c,v 1.15 2010/08/30 20:33:18 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2002, Federico G. Schwindt

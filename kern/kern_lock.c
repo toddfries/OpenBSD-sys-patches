@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kern_lock.c,v 1.26 2007/04/11 12:06:37 miod Exp $	*/
-=======
 /*	$OpenBSD: kern_lock.c,v 1.35 2010/04/26 05:48:17 deraadt Exp $	*/
->>>>>>> origin/master
 
 /* 
  * Copyright (c) 1995
@@ -52,31 +48,6 @@
  * Locks provide shared/exclusive synchronization.
  */
 
-<<<<<<< HEAD
-#if defined(LOCKDEBUG) || defined(DIAGNOSTIC) /* { */
-#define	COUNT(lkp, p, cpu_id, x)					\
-	(p)->p_locks += (x)
-#else
-#define COUNT(lkp, p, cpu_id, x)
-#endif /* LOCKDEBUG || DIAGNOSTIC */ /* } */
-
-#ifdef DDB /* { */
-#ifdef MULTIPROCESSOR
-int simple_lock_debugger = 1;	/* more serious on MP */
-#else
-int simple_lock_debugger = 0;
-#endif
-#define	SLOCK_DEBUGGER()	if (simple_lock_debugger) Debugger()
-#define	SLOCK_TRACE()							\
-	db_stack_trace_print((db_expr_t)__builtin_frame_address(0),	\
-	    TRUE, 65535, "", lock_printf);
-#else
-#define	SLOCK_DEBUGGER()	/* nothing */
-#define	SLOCK_TRACE()		/* nothing */
-#endif /* } */
-
-=======
->>>>>>> origin/master
 /*
  * Acquire a resource.
  */
@@ -102,68 +73,7 @@ do {									\
 	(lkp)->lk_lockholder = (pid)
 
 #define	WEHOLDIT(lkp, pid, cpu_id)					\
-<<<<<<< HEAD
-	(lkp)->lk_lockholder == (pid)
-
-#define	WAKEUP_WAITER(lkp)						\
-do {									\
-	if ((lkp)->lk_waitcount) 				{	\
-		/* XXX Cast away volatile. */				\
-		wakeup((void *)(lkp));					\
-	}								\
-} while (/*CONSTCOND*/0)
-
-#if defined(LOCKDEBUG) /* { */
-#if defined(MULTIPROCESSOR) /* { */
-struct simplelock spinlock_list_slock = SIMPLELOCK_INITIALIZER;
-
-#define	SPINLOCK_LIST_LOCK()						\
-	__cpu_simple_lock(&spinlock_list_slock.lock_data)
-
-#define	SPINLOCK_LIST_UNLOCK()						\
-	__cpu_simple_unlock(&spinlock_list_slock.lock_data)
-#else
-#define	SPINLOCK_LIST_LOCK()	/* nothing */
-
-#define	SPINLOCK_LIST_UNLOCK()	/* nothing */
-#endif /* MULTIPROCESSOR */ /* } */
-
-TAILQ_HEAD(, lock) spinlock_list =
-    TAILQ_HEAD_INITIALIZER(spinlock_list);
-#endif /* LOCKDEBUG */ /* } */
-
-#define	HAVEIT(lkp)							\
-do {									\
-} while (/*CONSTCOND*/0)
-
-#define	DONTHAVEIT(lkp)							\
-do {									\
-} while (/*CONSTCOND*/0)
-
-#if defined(LOCKDEBUG)
-/*
- * Lock debug printing routine; can be configured to print to console
- * or log to syslog.
- */
-void
-lock_printf(const char *fmt, ...)
-{
-	char b[150];
-	va_list ap;
-
-	va_start(ap, fmt);
-	if (lock_debug_syslog)
-		vlog(LOG_DEBUG, fmt, ap);
-	else {
-		vsnprintf(b, sizeof(b), fmt, ap);
-		printf_nolog("%s", b);
-	}
-	va_end(ap);
-}
-#endif /* LOCKDEBUG */
-=======
 	((lkp)->lk_lockholder == (pid))
->>>>>>> origin/master
 
 /*
  * Initialize a lock; required before use.
@@ -271,7 +181,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 			if (error)
 				break;
 			lkp->lk_sharecount++;
-			COUNT(lkp, p, cpu_id, 1);
 			break;
 		}
 		/*
@@ -279,7 +188,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 		 * An alternative would be to fail with EDEADLK.
 		 */
 		lkp->lk_sharecount++;
-		COUNT(lkp, p, cpu_id, 1);
 
 		if (WEHOLDIT(lkp, pid, cpu_id) == 0 ||
 		    lkp->lk_exclusivecount == 0)
@@ -305,7 +213,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 					panic("lockmgr: locking against myself");
 			}
 			lkp->lk_exclusivecount++;
-			COUNT(lkp, p, cpu_id, 1);
 			break;
 		}
 		/*
@@ -337,7 +244,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 		if (lkp->lk_exclusivecount != 0)
 			panic("lockmgr: non-zero exclusive count");
 		lkp->lk_exclusivecount = 1;
-		COUNT(lkp, p, cpu_id, 1);
 		break;
 
 	case LK_RELEASE:
@@ -348,14 +254,12 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 				    pid, lkp->lk_lockholder);
 			}
 			lkp->lk_exclusivecount--;
-			COUNT(lkp, p, cpu_id, -1);
 			if (lkp->lk_exclusivecount == 0) {
 				lkp->lk_flags &= ~LK_HAVE_EXCL;
 				SETHOLDER(lkp, LK_NOPROC, LK_NOCPU);
 			}
 		} else if (lkp->lk_sharecount != 0) {
 			lkp->lk_sharecount--;
-			COUNT(lkp, p, cpu_id, -1);
 		}
 #ifdef DIAGNOSTIC
 		else
@@ -393,7 +297,6 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 		lkp->lk_flags |= LK_DRAINING | LK_HAVE_EXCL;
 		SETHOLDER(lkp, pid, cpu_id);
 		lkp->lk_exclusivecount = 1;
-		COUNT(lkp, p, cpu_id, 1);
 		break;
 
 	default:
@@ -411,6 +314,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 	return (error);
 }
 
+#ifdef DIAGNOSTIC
 /*
  * Print out information about state of a lock. Used by VOP_PRINT
  * routines to display status about contained locks.
@@ -431,6 +335,7 @@ lockmgr_printinfo(__volatile struct lock *lkp)
 	if (lkp->lk_waitcount > 0)
 		printf(" with %d pending", lkp->lk_waitcount);
 }
+#endif /* DIAGNOSTIC */
 
 #if defined(MULTIPROCESSOR)
 /*
@@ -451,9 +356,8 @@ _kernel_lock_init(void)
  * and the lower half of the kernel.
  */
 
-/* XXX The flag should go, all callers want equal behaviour. */
 void
-_kernel_lock(int flag)
+_kernel_lock(void)
 {
 	SCHED_ASSERT_UNLOCKED();
 	__mp_lock(&kernel_lock);

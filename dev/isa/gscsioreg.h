@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gscsioreg.h,v 1.1 2004/05/23 17:41:09 grange Exp $	*/
-=======
 /*	$OpenBSD: gscsioreg.h,v 1.3 2009/06/02 12:12:35 grange Exp $	*/
->>>>>>> origin/master
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

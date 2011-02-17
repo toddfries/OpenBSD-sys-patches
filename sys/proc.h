@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: proc.h,v 1.95 2007/04/12 22:14:15 tedu Exp $	*/
-=======
 /*	$OpenBSD: proc.h,v 1.132 2010/07/26 01:56:27 guenther Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -49,14 +45,9 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>		/* For struct timeout */
 #include <sys/event.h>			/* For struct klist */
+#include <sys/mutex.h>			/* For struct mutex */
 #include <machine/atomic.h>
 
-<<<<<<< HEAD
-#ifdef __HAVE_CPUINFO
-#define curproc curcpu()->ci_curproc
-#endif
-=======
->>>>>>> origin/master
 #ifdef _KERNEL
 #define __need_process
 #endif
@@ -210,8 +201,7 @@ struct process {
 #endif /* __need_process */
 
 struct proc {
-	struct	proc *p_forw;		/* Doubly-linked run/sleep queue. */
-	struct	proc *p_back;
+	TAILQ_ENTRY(proc) p_runq;
 	LIST_ENTRY(proc) p_list;	/* List of all processes. */
 
 	struct	process *p_p;		/* The process of this thread. */
@@ -255,11 +245,7 @@ struct proc {
 	const char *p_wmesg;	 /* Reason for sleep. */
 	u_int	p_swtime;	 /* Time swapped in or out. */
 	u_int	p_slptime;	 /* Time since last blocked. */
-#ifdef __HAVE_CPUINFO
 	struct	cpu_info * __volatile p_cpu; /* CPU we're running on. */
-#else
-	int	p_schedflags;	 /* PSCHED_* flags */
-#endif
 
 	struct	itimerval p_realtimer;	/* Alarm timer. */
 	struct	timeout p_realit_to;	/* Alarm timeout. */
@@ -284,8 +270,6 @@ struct proc {
 					/* NULL. Malloc type M_EMULDATA */
 
 	sigset_t p_sigdivert;		/* Signals to be diverted to thread. */
-
-	TAILQ_HEAD(,selinfo) p_selects;	/* selinfos we're selecting on */
 
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_startcopy
@@ -314,7 +298,6 @@ struct proc {
 	u_short	p_xstat;	/* Exit status for wait; also stop signal. */
 	u_short	p_acflag;	/* Accounting flags. */
 	struct	rusage *p_ru;	/* Exit information. XXX */
-	int	p_locks;       	/* DEBUG: lockmgr count of held locks */
 };
 
 /* Status values. */
@@ -364,41 +347,23 @@ struct proc {
 #define	P_THREAD	0x4000000	/* Only a thread, not a real process */
 #define	P_IGNEXITRV	0x8000000	/* For thread kills */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
-<<<<<<< HEAD
-=======
 #define P_STOPPED	0x20000000	/* Just stopped. */
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
 
 #ifndef _KERNEL
 #define	P_CONTROLT	_P_CONTROLT
 #endif
->>>>>>> origin/master
 
 #define	P_BITS \
     ("\20\02CONTROLT\03INMEM\04NOCLDSTOP\05PPWAIT\06PROFIL\07SELECT" \
      "\010SINTR\011SUGID\012SYSTEM\013TIMEOUT\014TRACED\015WAITED\016WEXIT" \
      "\017EXEC\020PWEUPC\022SSTEP\023SUGIDEXEC\024NOCLDWAIT" \
      "\025NOZOMBIE\026INEXEC\027SYSTRACE\030CONTINUED\032BIGLOCK" \
-<<<<<<< HEAD
-     "\033THREAD\034IGNEXITRV\035SOFTDEP")
-=======
      "\033THREAD\034IGNEXITRV\035SOFTDEP\036STOPPED\037CPUPEG")
->>>>>>> origin/master
 
 /* Macro to compute the exit signal to be delivered. */
 #define P_EXITSIG(p) \
     (((p)->p_flag & P_TRACED) ? SIGCHLD : (p)->p_exitsig)
-
-#ifndef __HAVE_CPUINFO
-/*
- * These flags are kept in p_schedflags.  p_schedflags may be modified
- * only at splstatclock().
- */
-#define PSCHED_SEENRR		0x0001	/* process has been in roundrobin() */
-#define PSCHED_SHOULDYIELD	0x0002	/* process should yield */
-
-#define PSCHED_SWITCHCLEAR	(PSCHED_SEENRR|PSCHED_SHOULDYIELD)
-#endif
 
 /*
  * MOVE TO ucred.h?
@@ -468,9 +433,6 @@ extern u_long pidhash;
 extern LIST_HEAD(pgrphashhead, pgrp) *pgrphashtbl;
 extern u_long pgrphash;
 
-#if !defined(__HAVE_CPUINFO) && !defined(curproc)
-extern struct proc *curproc;		/* Current running proc. */
-#endif
 extern struct proc proc0;		/* Process slot for swapper. */
 extern int nprocs, maxproc;		/* Current and max number of procs. */
 extern int randompid;			/* fork() should create random pid's */
@@ -490,14 +452,6 @@ extern struct pool session_pool;	/* memory pool for sessions */
 extern struct pool pgrp_pool;		/* memory pool for pgrps */
 extern struct pool pcred_pool;		/* memory pool for pcreds */
 
-#define	NQS	32			/* 32 run queues. */
-extern int whichqs;			/* Bit mask summary of non-empty Q's. */
-struct	prochd {
-	struct	proc *ph_link;		/* Linked list of running processes. */
-	struct	proc *ph_rlink;
-};
-extern struct prochd qs[NQS];
-
 struct simplelock;
 
 struct process *prfind(pid_t);	/* Find process by id. */
@@ -512,39 +466,18 @@ void	fixjobc(struct process *, struct pgrp *, int);
 int	inferior(struct process *, struct process *);
 void	leavepgrp(struct process *);
 void	preempt(struct proc *);
-<<<<<<< HEAD
-void	mi_switch(void);
-void	pgdelete(struct pgrp *pgrp);
-=======
 void	pgdelete(struct pgrp *);
->>>>>>> origin/master
 void	procinit(void);
-#if !defined(remrunqueue)
-void	remrunqueue(struct proc *);
-#endif
 void	resetpriority(struct proc *);
 void	setrunnable(struct proc *);
-#if !defined(setrunqueue)
-void	setrunqueue(struct proc *);
-#endif
 void	unsleep(struct proc *);
 void	reaper(void);
 void	exit1(struct proc *, int, int);
 void	exit2(struct proc *);
+void	cpu_exit(struct proc *);
 int	fork1(struct proc *, int, int, void *, size_t, void (*)(void *),
 	    void *, register_t *, struct proc **);
-void	rqinit(void);
 int	groupmember(gid_t, struct ucred *);
-<<<<<<< HEAD
-#if !defined(cpu_switch)
-void	cpu_switch(struct proc *);
-#endif
-#if !defined(cpu_wait)
-void	cpu_wait(struct proc *);
-#endif
-void	cpu_exit(struct proc *);
-=======
->>>>>>> origin/master
 
 void	child_return(void *);
 
@@ -559,19 +492,6 @@ struct sleep_state {
 	int sls_sig;
 };
 
-<<<<<<< HEAD
-void	sleep_setup(struct sleep_state *, void *, int, const char *);
-void	sleep_setup_timeout(struct sleep_state *, int);
-void	sleep_setup_signal(struct sleep_state *, int);
-void	sleep_finish(struct sleep_state *, int);
-int	sleep_finish_timeout(struct sleep_state *);
-int	sleep_finish_signal(struct sleep_state *);
-
-int	tsleep(void *, int, const char *, int);
-#define ltsleep(c, p, w, t, l) tsleep(c, p, w, t)
-
-=======
->>>>>>> origin/master
 #if defined(MULTIPROCESSOR)
 void	proc_trampoline_mp(void);	/* XXX */
 #endif

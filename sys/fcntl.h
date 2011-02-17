@@ -1,4 +1,4 @@
-/*	$OpenBSD: fcntl.h,v 1.9 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: fcntl.h,v 1.11 2007/11/24 12:59:28 jmc Exp $	*/
 /*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
 
 /*-
@@ -88,7 +88,7 @@
 #if __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 420
 #define	O_SYNC		0x0080		/* synchronous writes */
 #endif
-#define	O_CREAT		0x0200		/* create if nonexistant */
+#define	O_CREAT		0x0200		/* create if nonexistent */
 #define	O_TRUNC		0x0400		/* truncate to zero length */
 #define	O_EXCL		0x0800		/* error if already exists */
 #ifdef _KERNEL

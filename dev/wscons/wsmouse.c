@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: wsmouse.c,v 1.18 2006/11/01 03:37:24 tedu Exp $ */
-=======
 /* $OpenBSD: wsmouse.c,v 1.21 2010/07/26 01:56:27 guenther Exp $ */
->>>>>>> origin/master
 /* $NetBSD: wsmouse.c,v 1.35 2005/02/27 00:27:52 perry Exp $ */
 
 /*

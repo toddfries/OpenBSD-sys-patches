@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uberry.c,v 1.1 2006/11/27 11:38:43 deraadt Exp $	*/
-=======
 /*	$OpenBSD: uberry.c,v 1.19 2011/01/25 20:03:36 jakemsr Exp $	*/
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 2006 Theo de Raadt <deraadt@openbsd.org>
@@ -26,7 +22,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
@@ -37,25 +32,28 @@
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
+#include <dev/usb/usbdivar.h>
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
 
 struct uberry_softc {
-	USBBASEDEVICE			sc_dev;
+	struct device			sc_dev;
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
 };
 
-#define UBERRY_CONFIG_NO		0
+#define UBERRY_INTERFACE_NO		0
+#define UBERRY_CONFIG_NO		1
 
-Static struct usb_devno const uberry_devices[] = {
+/*
+ * Do not match on the following device, because it is type umass
+ * { USB_VENDOR_RIM, USB_PRODUCT_RIM_PEARL_DUAL },
+ */
+struct usb_devno const uberry_devices[] = {
 	{ USB_VENDOR_RIM, USB_PRODUCT_RIM_BLACKBERRY },
-	{ 0, 0 }
+	{ USB_VENDOR_RIM, USB_PRODUCT_RIM_PEARL }
 };
 
-<<<<<<< HEAD
-USB_DECLARE_DRIVER(uberry);
-=======
 int uberry_match(struct device *, void *, void *); 
 void uberry_attach(struct device *, struct device *, void *); 
 int uberry_detach(struct device *, int); 
@@ -67,11 +65,19 @@ void uberry_charge(struct uberry_softc *);
 struct cfdriver uberry_cd = { 
 	NULL, "uberry", DV_DULL 
 }; 
->>>>>>> origin/master
 
-USB_MATCH(uberry)
+const struct cfattach uberry_ca = { 
+	sizeof(struct uberry_softc), 
+	uberry_match, 
+	uberry_attach, 
+	uberry_detach, 
+	uberry_activate, 
+};
+
+int
+uberry_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uberry, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -80,49 +86,65 @@ USB_MATCH(uberry)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(uberry)
+void
+uberry_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uberry, sc, uaa);
-	char *devinfop;
+	struct uberry_softc *sc = (struct uberry_softc *)self;
+	struct usb_attach_arg *uaa = aux;
+	usb_device_descriptor_t *dd;
 
 	sc->sc_udev = uaa->device;
 
-	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
-	usbd_devinfo_free(devinfop);
+	dd = usbd_get_device_descriptor(uaa->device);
+
+	/* Enable configuration, to keep it connected... */
+	if (usbd_set_config_no(sc->sc_udev, UBERRY_CONFIG_NO, 1) != 0) {
+		/*
+		 * Really ancient (ie. 7250) devices when off will
+		 * only charge at 100mA when turned off.
+		 */
+		printf("%s: Charging at %dmA\n", sc->sc_dev.dv_xname,
+		    sc->sc_udev->power);
+		return;
+	}
+
+	printf("%s: Charging at %dmA", sc->sc_dev.dv_xname,
+	    sc->sc_udev->power);
+	if (sc->sc_udev->power >= 250)
+		printf("\n");
+	else {
+		printf("... requesting higher-power charging\n");
+		uberry_charge(sc);
+		/*
+		 * Older berry's will disconnect/reconnect at this
+		 * point, and come back requesting higher power
+		 */
+	}
+
+	/* On the Pearl, request a change to Dual mode */
+	if (UGETW(dd->idProduct) == USB_PRODUCT_RIM_PEARL)
+		uberry_pearlmode(sc);
 
 	/* Enable the device, then it cannot idle, and will charge */
 	if (usbd_set_config_no(sc->sc_udev, UBERRY_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
-<<<<<<< HEAD
-	printf("%s: Charging enabled\n", USBDEVNAME(sc->sc_dev));
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-	USB_ATTACH_SUCCESS_RETURN;
-=======
->>>>>>> origin/master
+	if (UGETW(dd->idProduct) == USB_PRODUCT_RIM_PEARL) {
+		/*
+		 * Pearl does not disconnect/reconnect by itself,
+		 * and therefore needs to be told to reset, so that
+		 * it can come back in Dual mode.
+		 */
+		usb_needs_reattach(sc->sc_udev);
+	}
 }
 
-USB_DETACH(uberry)
+int
+uberry_detach(struct device *self, int flags)
 {
-<<<<<<< HEAD
-	USB_DETACH_START(uberry, sc);
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-	return 0;
-}
-
-Static int
-uberry_activate(device_ptr_t self, enum devact act)
-=======
 	/* struct uberry_softc *sc = (struct uberry_softc *)self; */
 
 	return 0;
@@ -130,7 +152,6 @@ uberry_activate(device_ptr_t self, enum devact act)
 
 int
 uberry_activate(struct device *self, int act)
->>>>>>> origin/master
 {
 	struct uberry_softc *sc = (struct uberry_softc *)self;
 
@@ -143,4 +164,39 @@ uberry_activate(struct device *self, int act)
 		break;
 	}
 	return 0;
+}
+
+void
+uberry_pearlmode(struct uberry_softc *sc)
+{
+	usb_device_request_t req;
+	char buffer[256];
+
+	req.bmRequestType = UT_READ_VENDOR_DEVICE;
+	req.bRequest = 0xa9;
+	USETW(req.wValue, 1);
+	USETW(req.wIndex, 1);
+	USETW(req.wLength, 2);
+	(void) usbd_do_request(sc->sc_udev, &req, &buffer);
+}
+
+void 
+uberry_charge(struct uberry_softc *sc)
+{
+	usb_device_request_t req;
+	char buffer[256];
+
+	req.bmRequestType = UT_READ_VENDOR_DEVICE;
+	req.bRequest = 0xa5;
+	USETW(req.wValue, 0);
+	USETW(req.wIndex, 1);
+	USETW(req.wLength, 2);
+	(void) usbd_do_request(sc->sc_udev, &req, &buffer);
+
+	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
+	req.bRequest = 0xa2;
+	USETW(req.wValue, 0);
+	USETW(req.wIndex, 1);
+	USETW(req.wLength, 0);
+	(void) usbd_do_request(sc->sc_udev, &req, &buffer);
 }

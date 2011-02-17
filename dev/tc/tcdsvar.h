@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: tcdsvar.h,v 1.2 2004/06/28 02:28:43 aaron Exp $ */
-=======
 /* $OpenBSD: tcdsvar.h,v 1.4 2008/08/09 16:42:30 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: tcdsvar.h,v 1.2 2001/08/22 05:00:27 nisimura Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: pdqreg.h,v 1.8 2001/04/06 04:42:06 csapuntz Exp $	*/
-=======
 /*	$OpenBSD: pdqreg.h,v 1.10 2009/06/06 19:21:33 jasper Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: pdqreg.h,v 1.6 1996/08/28 16:01:29 cgd Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/* $OpenBSD: vesabiosvar.h,v 1.1 2006/11/27 18:04:28 gwk Exp $ */
+/* $OpenBSD: vesabiosvar.h,v 1.2 2007/01/28 20:28:50 gwk Exp $ */
 
 /*
  * Copyright (c) 2006 Matthieu Herrb

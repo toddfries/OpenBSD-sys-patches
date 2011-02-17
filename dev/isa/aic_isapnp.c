@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: aic_isapnp.c,v 1.1 2002/09/03 16:30:55 mickey Exp $	*/
 
 /*
  * Copyright (c) 2002 Anders Arnholm

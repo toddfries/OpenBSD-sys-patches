@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: sdmmc_ioreg.h,v 1.4 2007/06/02 01:48:37 uwe Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -47,6 +47,7 @@
 #define SD_ARG_CMD53_REG_MASK		0x1ffff
 #define SD_ARG_CMD53_LENGTH_SHIFT	0
 #define SD_ARG_CMD53_LENGTH_MASK	0x1ff
+#define SD_ARG_CMD53_LENGTH_MAX		64 /* XXX should be 511? */
 
 /* 48-bit response decoding (32 bits w/o CRC) */
 #define MMC_R4(resp)			((resp)[0])
@@ -63,6 +64,8 @@
 #define SD_IO_CCCR_START		0x00000
 #define SD_IO_CCCR_SIZE			0x100
 #define SD_IO_CCCR_FN_ENABLE		0x02
+#define SD_IO_CCCR_FN_READY		0x03
+#define SD_IO_CCCR_INT_ENABLE		0x04
 #define SD_IO_CCCR_CTL			0x06
 #define  CCCR_CTL_RES			(1<<3)
 #define SD_IO_CCCR_BUS_WIDTH		0x07

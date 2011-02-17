@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: rf3000reg.h,v 1.3 2009/08/16 18:03:48 jsg Exp $	*/
->>>>>>> origin/master
 /*      $NetBSD: rf3000reg.h,v 1.3 2004/07/21 04:25:22 dyoung Exp $        */
 
 /*

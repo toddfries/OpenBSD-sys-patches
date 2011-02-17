@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gallant12x22.h,v 1.2 2002/05/09 08:59:03 maja Exp $ */
-=======
 /*	$OpenBSD: gallant12x22.h,v 1.4 2009/06/21 20:30:35 jsg Exp $ */
->>>>>>> origin/master
 /* 	$NetBSD: gallant12x22.h,v 1.2 1999/05/18 21:51:58 ad Exp $ */
 
 /*

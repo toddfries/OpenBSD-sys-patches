@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: tty_subr.c,v 1.17 2003/06/02 04:00:16 deraadt Exp $	*/
-=======
 /*	$OpenBSD: tty_subr.c,v 1.23 2010/11/11 17:35:23 miod Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: tty_subr.c,v 1.13 1996/02/09 19:00:43 christos Exp $	*/
 
 /*
@@ -59,21 +55,12 @@ void
 clalloc(struct clist *clp, int size, int quot)
 {
 
-	clp->c_cs = malloc(size, M_TTYS, M_WAITOK);
-	bzero(clp->c_cs, size);
+	clp->c_cs = malloc(size, M_TTYS, M_WAITOK|M_ZERO);
 
-<<<<<<< HEAD
-	if (quot) {
-		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK);
-		bzero(clp->c_cq, QMEM(size));
-	} else
-		clp->c_cq = (u_char *)0;
-=======
 	if (quot)
 		clp->c_cq = malloc(QMEM(size), M_TTYS, M_WAITOK|M_ZERO);
 	else
 		clp->c_cq = NULL;
->>>>>>> origin/master
 
 	clp->c_cf = clp->c_cl = NULL;
 	clp->c_ce = clp->c_cs + size;
@@ -110,9 +97,11 @@ getc(struct clist *clp)
 		goto out;
 
 	c = *clp->c_cf & 0xff;
+	*clp->c_cf = 0;
 	if (clp->c_cq) {
 		if (isset(clp->c_cq, clp->c_cf - clp->c_cs) )
 			c |= TTY_QUOTE;
+		clrbit(clp->c_cq, clp->c_cl - clp->c_cs);
 	}
 	if (++clp->c_cf == clp->c_ce)
 		clp->c_cf = clp->c_cs;
@@ -143,6 +132,9 @@ q_to_b(struct clist *clp, u_char *cp, int count)
 		if (cc > count)
 			cc = count;
 		bcopy(clp->c_cf, p, cc);
+		bzero(clp->c_cf, cc);
+		if (clp->c_cq)
+			clrbits(clp->c_cq, clp->c_cl - clp->c_cs, cc);
 		count -= cc;
 		p += cc;
 		clp->c_cc -= cc;
@@ -349,9 +341,8 @@ b_to_q(u_char *cp, int count, struct clist *clp)
 		if (cc > count)
 			cc = count;
 		bcopy(p, clp->c_cl, cc);
-		if (clp->c_cq) {
+		if (clp->c_cq)
 			clrbits(clp->c_cq, clp->c_cl - clp->c_cs, cc);
-		}
 		p += cc;
 		count -= cc;
 		clp->c_cc += cc;

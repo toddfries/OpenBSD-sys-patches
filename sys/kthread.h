@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: kthread.h,v 1.2 2002/03/14 01:27:14 millert Exp $	*/
-=======
 /*	$OpenBSD: kthread.h,v 1.4 2008/06/26 05:42:20 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: kthread.h,v 1.2 1998/11/14 00:08:49 thorpej Exp $	*/
 
 /*-

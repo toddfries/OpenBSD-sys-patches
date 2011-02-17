@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_syscalls.c,v 1.138 2006/11/24 17:04:20 art Exp $	*/
-=======
 /*	$OpenBSD: vfs_syscalls.c,v 1.165 2010/10/28 15:02:41 millert Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -55,6 +51,8 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/dirent.h>
+#include <sys/dkio.h>
+#include <sys/disklabel.h>
 
 #include <sys/syscallargs.h>
 
@@ -161,12 +159,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 			vput(vp);
 			return (error);
 		}
-<<<<<<< HEAD
-		VOP_UNLOCK(vp, 0, p);
-		mp->mnt_flag |= SCARG(uap, flags) & (MNT_RELOAD | MNT_UPDATE);
-=======
 		mp->mnt_flag |= flags & (MNT_RELOAD | MNT_UPDATE);
->>>>>>> origin/master
 		goto update;
 	}
 	/*
@@ -225,8 +218,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	 * Allocate and initialize the file system.
 	 */
 	mp = (struct mount *)malloc((u_long)sizeof(struct mount),
-		M_MOUNT, M_WAITOK);
-	bzero((char *)mp, (u_long)sizeof(struct mount));
+		M_MOUNT, M_WAITOK|M_ZERO);
 	(void) vfs_busy(mp, VB_READ|VB_NOWAIT);
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
@@ -256,7 +248,7 @@ update:
 		mp->mnt_stat.f_ctime = time_second;
 	}
 	if (mp->mnt_flag & MNT_UPDATE) {
-		vrele(vp);
+		vput(vp);
 		if (mp->mnt_flag & MNT_WANTRDWR)
 			mp->mnt_flag &= ~MNT_RDONLY;
 		mp->mnt_flag &=~
@@ -319,12 +311,8 @@ checkdirs(struct vnode *olddp)
 		return;
 	if (VFS_ROOT(olddp->v_mountedhere, &newdp))
 		panic("mount: lost mount");
-<<<<<<< HEAD
-	for (p = LIST_FIRST(&allproc); p != 0; p = LIST_NEXT(p, p_list)) {
-=======
 again:
 	LIST_FOREACH(p, &allproc, p_list) {
->>>>>>> origin/master
 		fdp = p->p_fd;
 		if (fdp->fd_cdir == olddp) {
 			vp = fdp->fd_cdir;
@@ -1046,10 +1034,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 		VOP_UNLOCK(vp, 0, p);
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, type);
 		if (error) {
-			/* closef will vn_close the file for us. */
-			fdremove(fdp, indx);
-			closef(fp, p);
-			return (error);
+			vp = NULL;	/* closef will vn_close the file */
+			goto bad;
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		fp->f_flag |= FHASLOCK;
@@ -1385,6 +1371,7 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct vattr vattr;
 	struct vnode *vp;
+	off_t offarg, newoff;
 	int error, special;
 
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -1398,30 +1385,42 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 		special = 1;
 	else
 		special = 0;
+	offarg = SCARG(uap, offset);
+
 	switch (SCARG(uap, whence)) {
 	case SEEK_CUR:
-		if (!special && fp->f_offset + SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset += SCARG(uap, offset);
+		newoff = fp->f_offset + offarg;;
 		break;
 	case SEEK_END:
 		error = VOP_GETATTR((struct vnode *)fp->f_data, &vattr,
 				    cred, p);
 		if (error)
 			return (error);
-		if (!special && (off_t)vattr.va_size + SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset = SCARG(uap, offset) + vattr.va_size;
+		newoff = offarg + (off_t)vattr.va_size;
 		break;
 	case SEEK_SET:
-		if (!special && SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset = SCARG(uap, offset);
+		newoff = offarg;
 		break;
 	default:
 		return (EINVAL);
 	}
-	*(off_t *)retval = fp->f_offset;
+	if (!special) {
+		if (newoff < 0)
+			return (EINVAL);
+	} else {
+		/*
+		 * Make sure the user don't seek beyond the end of the
+		 * partition.
+		 */
+		struct partinfo dpart;
+		error = vn_ioctl(fp, DIOCGPART, (void *)&dpart, p);
+		if (!error) {
+			if (newoff >= DL_GETPSIZE(dpart.part) *
+			    dpart.disklab->d_secsize)
+					return (EINVAL);
+		}
+	}
+	*(off_t *)retval = fp->f_offset = newoff;
 	fp->f_seek++;
 	return (0);
 }
@@ -1928,7 +1927,7 @@ sys_utimes(struct proc *p, void *v, register_t *retval)
 
 	VATTR_NULL(&vattr);
 	if (SCARG(uap, tptr) == NULL) {
-		microtime(&tv[0]);
+		getmicrotime(&tv[0]);
 		tv[1] = tv[0];
 		vattr.va_vaflags |= VA_UTIMES_NULL;
 	} else {
@@ -1979,7 +1978,7 @@ sys_futimes(struct proc *p, void *v, register_t *retval)
 
 	VATTR_NULL(&vattr);
 	if (SCARG(uap, tptr) == NULL) {
-		microtime(&tv[0]);
+		getmicrotime(&tv[0]);
 		tv[1] = tv[0];
 		vattr.va_vaflags |= VA_UTIMES_NULL;
 	} else {

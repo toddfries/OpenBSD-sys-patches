@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gentbi.c,v 1.2 2004/10/08 00:37:55 brad Exp $	*/
-=======
 /*	$OpenBSD: gentbi.c,v 1.8 2010/07/23 07:47:13 jsg Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: gentbi.c,v 1.12 2004/04/11 15:40:56 thorpej Exp $	*/
 
 /*-
@@ -65,11 +61,6 @@
  *
  * All we have to do here is correctly report speed and duplex.
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: gentbi.c,v 1.12 2004/04/11 15:40:56 thorpej Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -256,7 +247,7 @@ gentbi_status(struct mii_softc *sc)
 
 	if (bmcr & BMCR_AUTOEN) {
 		/*
-		 * The media status bits are only valid of autonegotiation
+		 * The media status bits are only valid if autonegotiation
 		 * has completed (or it's disabled).
 		 */
 		if ((bmsr & BMSR_ACOMP) == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_casreg.h,v 1.2 2007/02/25 21:54:52 kettenis Exp $	*/
+/*	$OpenBSD: if_casreg.h,v 1.10 2008/05/31 22:49:03 kettenis Exp $	*/
 
 /*
  *
@@ -113,6 +113,7 @@
 #define	CAS_RESET_TX		0x000000001	/* Reset TX half */
 #define	CAS_RESET_RX		0x000000002	/* Reset RX half */
 #define	CAS_RESET_RSTOUT	0x000000004	/* Force PCI RSTOUT# */
+#define	CAS_RESET_BLOCK_PCS	0x00000008	/* Block PCS reset */
 
 /* TX DMA registers */
 #define	CAS_TX_CONFIG		0x2004
@@ -131,9 +132,9 @@
 #define	CAS_TX_KICK3		0x2040
 #define	CAS_TX_KICK4		0x2044
 #define	CAS_TX_COMPLETION1	0x2048
-#define	CAS_TX_COMPLETION2	0x2048
-#define	CAS_TX_COMPLETION3	0x2048
-#define	CAS_TX_COMPLETION4	0x2048
+#define	CAS_TX_COMPLETION2	0x204c
+#define	CAS_TX_COMPLETION3	0x2050
+#define	CAS_TX_COMPLETION4	0x2054
 #define	CAS_TX_RING_PTR_LO1	0x2060
 #define	CAS_TX_RING_PTR_HI1	0x2064
 #define	CAS_TX_RING_PTR_LO2	0x2068
@@ -148,6 +149,7 @@
 #define	CAS_TX_MAXBURST4	0x208c
 
 #define CAS_TX_KICK		CAS_TX_KICK3
+#define CAS_TX_COMPLETION	CAS_TX_COMPLETION3
 #define CAS_TX_RING_PTR_LO	CAS_TX_RING_PTR_LO3
 #define CAS_TX_RING_PTR_HI	CAS_TX_RING_PTR_HI3
 
@@ -180,7 +182,6 @@
 /* RX DMA registers */
 #define	CAS_RX_CONFIG		0x4000
 #define	CAS_RX_PAGE_SIZE	0x4004
-
 #define	CAS_RX_FIFO_WR_PTR	0x4008		/* FIFO write pointer */
 #define	CAS_RX_FIFO_RD_PTR	0x400c		/* FIFO read pointer */
 #define	CAS_RX_IPPFIFO_WR_PTR	0x4010		/* IPP FIFO write pointer */
@@ -207,6 +208,24 @@
 #define	CAS_RX_FIFO_DATA_HI_T0	0x408c
 #define	CAS_RX_FIFO_DATA_HI_T1	0x4090
 
+/* The following registers only exist on Cassini+. */
+#define	CAS_RX_DRING_PTR_LO2	0x4200
+#define	CAS_RX_DRING_PTR_HI2	0x4204
+#define	CAS_RX_CRING_PTR_LO2	0x4208
+#define	CAS_RX_CRING_PTR_HI2	0x420c
+#define	CAS_RX_CRING_PTR_LO3	0x4210
+#define	CAS_RX_CRING_PTR_HI3	0x4214
+#define	CAS_RX_CRING_PTR_LO4	0x4218
+#define	CAS_RX_CRING_PTR_HI4	0x421c
+#define	CAS_RX_KICK2		0x4220
+#define	CAS_RX_COMPLETION2	0x4224
+#define	CAS_RX_COMP_HEAD2	0x4228
+#define	CAS_RX_COMP_TAIL2	0x422c
+#define	CAS_RX_COMP_HEAD3	0x4230
+#define	CAS_RX_COMP_TAIL3	0x4234
+#define	CAS_RX_COMP_HEAD4	0x4238
+#define	CAS_RX_COMP_TAIL4	0x423c
+
 /* CAS_RX_CONFIG register bits. */
 #define	CAS_RX_CONFIG_RXDMA_EN	0x00000001	/* RX DMA enable */
 #define	CAS_RX_CONFIG_RXDRNG_SZ	0x0000001e	/* RX descriptor ring size */
@@ -214,9 +233,20 @@
 #define	CAS_RX_CONFIG_BATCH_DIS	0x00000200	/* desc batching disable */
 #define	CAS_RX_CONFIG_FBOFF	0x00001c00	/* first byte offset */
 
-#define CAS_RX_CONFIG_RXDRNG_SZ_SHIFT	1
-#define CAS_RX_CONFIG_RXCRNG_SZ_SHIFT	5
+#define	CAS_RX_CONFIG_RXDRNG_SZ_SHIFT	1
+#define	CAS_RX_CONFIG_RXCRNG_SZ_SHIFT	5
 #define	CAS_RX_CONFIG_FBOFF_SHFT	10
+#define	CAS_RX_CONFIG_RXDRNG2_SZ_SHIFT	16	/* Cassini+ */
+
+/* CAS_RX_PAGE_SIZE register bits. */
+#define	CAS_RX_PAGE_SIZE_SZ	0x00000003	/* Page size */
+#define	CAS_RX_PAGE_SIZE_COUNT	0x00007800	/* MTU buffers per page */
+#define	CAS_RX_PAGE_SIZE_STRIDE	0x18000000	/* MTU buffer separation */
+#define	CAS_RX_PAGE_SIZE_FBOFF	0xc0000000	/* Firts byte offset */
+
+#define	CAS_RX_PAGE_SIZE_COUNT_SHIFT	11
+#define	CAS_RX_PAGE_SIZE_STRIDE_SHIFT	27
+#define	CAS_RX_PAGE_SIZE_FBOFF_SHIFT	30
 
 /* CAS_RX_PAUSE_THRESH register bits -- sizes in multiples of 64 bytes */
 #define	CAS_RX_PTH_XOFF_THRESH	0x000001ff
@@ -433,6 +463,7 @@
 #define	CAS_MII_SLINK_CONTROL	0x9054		/* Serial link control */
 #define	CAS_MII_OUTPUT_SELECT	0x9058
 #define	CAS_MII_SLINK_STATUS	0x905c		/* serial link status */
+#define	CAS_MII_PACKET_COUNT	0x9060
 
 /* CAS_MII_CONTROL bits */
 #define	CAS_MII_CONTROL_RESET	0x00008000

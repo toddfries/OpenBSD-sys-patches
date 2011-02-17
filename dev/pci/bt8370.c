@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt8370.c,v 1.6 2006/01/25 11:57:31 claudio Exp $ */
+/*	$OpenBSD: bt8370.c,v 1.7 2006/01/31 16:51:13 claudio Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland

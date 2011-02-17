@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD$	*/
-=======
 /*	$OpenBSD: intersil7170.h,v 1.2 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: intersil7170.h,v 1.1 1997/05/02 06:15:28 jeremy Exp $	*/
 
 /*-

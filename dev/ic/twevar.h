@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: twevar.h,v 1.6 2003/06/02 19:24:22 mickey Exp $	*/
-=======
 /*	$OpenBSD: twevar.h,v 1.9 2009/02/16 21:19:07 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2000 Michael Shalayeff

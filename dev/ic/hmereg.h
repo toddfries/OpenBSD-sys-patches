@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: hmereg.h,v 1.7 2004/09/28 00:21:23 brad Exp $	*/
-=======
 /*	$OpenBSD: hmereg.h,v 1.9 2008/06/26 05:42:15 ray Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: hmereg.h,v 1.8 2001/04/30 12:22:42 bouyer Exp $	*/
 
 /*-

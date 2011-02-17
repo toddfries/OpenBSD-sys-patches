@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic_pcmcia.c,v 1.14 2006/06/02 06:26:15 martin Exp $	*/
+/*	$OpenBSD: aic_pcmcia.c,v 1.15 2006/06/03 01:51:54 martin Exp $	*/
 /*	$NetBSD: aic_pcmcia.c,v 1.6 1998/07/19 17:28:15 christos Exp $	*/
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: vfs_conf.c,v 1.30 2006/09/22 14:23:04 pedro Exp $	*/
-=======
 /*	$OpenBSD: vfs_conf.c,v 1.40 2010/12/21 20:14:43 thib Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: vfs_conf.c,v 1.21.4.1 1995/11/01 00:06:26 jtc Exp $	*/
 
 /*
@@ -61,7 +57,6 @@
 #endif
 
 #ifdef NFSCLIENT
-#include <sys/rwlock.h>		/*  XXX*/
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfs/nfsnode.h>
@@ -70,9 +65,8 @@
 #endif
 
 /*
- * These define the root filesystem and device.
+ * This defines the root filesystem.
  */
-struct mount *rootfs;
 struct vnode *rootvnode;
 
 /*
@@ -109,10 +103,6 @@ extern	const struct vfsops procfs_vfsops;
 extern	const struct vfsops cd9660_vfsops;
 #endif
 
-#ifdef ADOSFS
-extern 	const struct vfsops adosfs_vfsops;
-#endif
-
 #ifdef EXT2FS
 extern	const struct vfsops ext2fs_vfsops;
 #endif
@@ -136,66 +126,55 @@ static struct vfsconf vfsconflist[] = {
 
         /* Fast Filesystem */
 #ifdef FFS
-        { &ffs_vfsops, MOUNT_FFS, 1, 0, MNT_LOCAL, ffs_mountroot, NULL },
+        { &ffs_vfsops, MOUNT_FFS, 1, 0, MNT_LOCAL, NULL },
 #endif
 
         /* Memory-based Filesystem */
 #ifdef MFS
-        { &mfs_vfsops, MOUNT_MFS, 3, 0, MNT_LOCAL, mfs_mountroot, NULL },
+        { &mfs_vfsops, MOUNT_MFS, 3, 0, MNT_LOCAL, NULL },
 #endif
 
 #ifdef EXT2FS
-	{ &ext2fs_vfsops, MOUNT_EXT2FS, 17, 0, MNT_LOCAL, ext2fs_mountroot, NULL },
+	{ &ext2fs_vfsops, MOUNT_EXT2FS, 17, 0, MNT_LOCAL, NULL },
 #endif
         /* ISO9660 (aka CDROM) Filesystem */
 #ifdef CD9660
-        { &cd9660_vfsops, MOUNT_CD9660, 14, 0, MNT_LOCAL, cd9660_mountroot, NULL },
+        { &cd9660_vfsops, MOUNT_CD9660, 14, 0, MNT_LOCAL, NULL },
 #endif
 
         /* MSDOS Filesystem */
 #ifdef MSDOSFS
-        { &msdosfs_vfsops, MOUNT_MSDOS, 4, 0, MNT_LOCAL, NULL, NULL },
-#endif
-
-        /* AmigaDOS Filesystem */
-#ifdef ADOSFS
-        { &adosfs_vfsops, MOUNT_ADOSFS, 16, 0, MNT_LOCAL, NULL, NULL },
+        { &msdosfs_vfsops, MOUNT_MSDOS, 4, 0, MNT_LOCAL, NULL },
 #endif
 
         /* Sun-compatible Network Filesystem */
 #ifdef NFSCLIENT
-        { &nfs_vfsops, MOUNT_NFS, 2, 0, 0, nfs_mountroot, NULL },
+        { &nfs_vfsops, MOUNT_NFS, 2, 0, 0, NULL },
 #endif
 
-<<<<<<< HEAD
-	/* XFS */
-#ifdef XFS
-	{ &xfs_vfsops, MOUNT_XFS, 21, 0, 0, NULL, NULL },
-=======
 	/* NNPFS */
 #ifdef NNPFS
 	{ &nnpfs_vfsops, MOUNT_NNPFS, 21, 0, 0, NULL },
->>>>>>> origin/master
 #endif
 	
         /* /proc Filesystem */
 #ifdef PROCFS
-        { &procfs_vfsops, MOUNT_PROCFS, 12, 0, 0, NULL, NULL },
+        { &procfs_vfsops, MOUNT_PROCFS, 12, 0, 0, NULL },
 #endif
 
         /* Portal Filesystem */
 #ifdef PORTAL
-        { &portal_vfsops, MOUNT_PORTAL, 8, 0, 0, NULL, NULL },
+        { &portal_vfsops, MOUNT_PORTAL, 8, 0, 0, NULL },
 #endif
 
 	/* NTFS Filesystem */
 #ifdef NTFS
-	{ &ntfs_vfsops, MOUNT_NTFS, 6, 0, MNT_LOCAL, NULL, NULL },
+	{ &ntfs_vfsops, MOUNT_NTFS, 6, 0, MNT_LOCAL, NULL },
 #endif
 
 	/* UDF Filesystem */
 #ifdef UDF
-	{ &udf_vfsops, MOUNT_UDF, 13, 0, MNT_LOCAL, NULL, NULL },
+	{ &udf_vfsops, MOUNT_UDF, 13, 0, MNT_LOCAL, NULL },
 #endif
 
 };
@@ -207,100 +186,3 @@ static struct vfsconf vfsconflist[] = {
  */
 int maxvfsconf = sizeof(vfsconflist) / sizeof(struct vfsconf);
 struct vfsconf *vfsconf = vfsconflist;
-<<<<<<< HEAD
-
-
-/*
- * vfs_opv_descs enumerates the list of vnode classes, each with its own
- * vnode operation vector.  It is consulted at system boot to build operation
- * vectors.  It is NULL terminated.
- */
-extern struct vnodeopv_desc sync_vnodeop_opv_desc;
-extern struct vnodeopv_desc ffs_vnodeop_opv_desc;
-extern struct vnodeopv_desc ffs_specop_opv_desc;
-extern struct vnodeopv_desc ffs_fifoop_opv_desc;
-extern struct vnodeopv_desc mfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc dead_vnodeop_opv_desc;
-extern struct vnodeopv_desc fifo_vnodeop_opv_desc;
-extern struct vnodeopv_desc spec_vnodeop_opv_desc;
-extern struct vnodeopv_desc nfsv2_vnodeop_opv_desc;
-extern struct vnodeopv_desc spec_nfsv2nodeop_opv_desc;
-extern struct vnodeopv_desc fifo_nfsv2nodeop_opv_desc;
-extern struct vnodeopv_desc portal_vnodeop_opv_desc;
-extern struct vnodeopv_desc procfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc cd9660_vnodeop_opv_desc;
-extern struct vnodeopv_desc cd9660_specop_opv_desc;
-extern struct vnodeopv_desc cd9660_fifoop_opv_desc;
-extern struct vnodeopv_desc msdosfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc adosfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc ext2fs_vnodeop_opv_desc;
-extern struct vnodeopv_desc ext2fs_specop_opv_desc;
-extern struct vnodeopv_desc ext2fs_fifoop_opv_desc;
-extern struct vnodeopv_desc xfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc ntfs_vnodeop_opv_desc;
-extern struct vnodeopv_desc udf_vnodeop_opv_desc;
-
-struct vnodeopv_desc *vfs_opv_descs[] = {
-	&sync_vnodeop_opv_desc,
-#ifdef FFS
-	&ffs_vnodeop_opv_desc,
-	&ffs_specop_opv_desc,
-#ifdef FIFO
-	&ffs_fifoop_opv_desc,
-#endif
-#endif
-	&dead_vnodeop_opv_desc,
-#ifdef FIFO
-	&fifo_vnodeop_opv_desc,
-#endif
-	&spec_vnodeop_opv_desc,
-#ifdef MFS
-	&mfs_vnodeop_opv_desc,
-#endif
-#ifdef NFSCLIENT
-	&nfsv2_vnodeop_opv_desc,
-	&spec_nfsv2nodeop_opv_desc,
-#ifdef FIFO
-	&fifo_nfsv2nodeop_opv_desc,
-#endif
-#endif
-#ifdef PORTAL
-	&portal_vnodeop_opv_desc,
-#endif
-#ifdef PROCFS
-	&procfs_vnodeop_opv_desc,
-#endif
-#ifdef CD9660
-	&cd9660_vnodeop_opv_desc,
-	&cd9660_specop_opv_desc,
-#ifdef FIFO
-	&cd9660_fifoop_opv_desc,
-#endif
-#endif
-#ifdef MSDOSFS
-	&msdosfs_vnodeop_opv_desc,
-#endif
-#ifdef ADOSFS
-	&adosfs_vnodeop_opv_desc,
-#endif
-#ifdef EXT2FS
-	&ext2fs_vnodeop_opv_desc,
-	&ext2fs_specop_opv_desc,
-#ifdef FIFO
-	&ext2fs_fifoop_opv_desc,
-#endif
-#endif
-#ifdef XFS
-	&xfs_vnodeop_opv_desc,
-#endif
-#ifdef NTFS
-	&ntfs_vnodeop_opv_desc,
-#endif
-#ifdef UDF
-	&udf_vnodeop_opv_desc,
-#endif
-
-	NULL
-};
-=======
->>>>>>> origin/master

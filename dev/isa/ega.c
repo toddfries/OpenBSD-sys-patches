@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD: ega.c,v 1.11 2006/12/02 19:11:11 miod Exp $ */
-=======
 /* $OpenBSD: ega.c,v 1.15 2009/09/05 14:09:35 miod Exp $ */
->>>>>>> origin/master
 /* $NetBSD: ega.c,v 1.4.4.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* $OpenBSD$ */
-=======
 /* $OpenBSD: decmonitors.c,v 1.3 2008/06/26 05:42:15 ray Exp $ */
->>>>>>> origin/master
 
 /*-
  * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: if_re_cardbus.c,v 1.10 2006/10/12 16:35:52 grange Exp $	*/
-=======
 /*	$OpenBSD: if_re_cardbus.c,v 1.21 2010/09/07 16:21:41 deraadt Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -162,15 +158,6 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 	snprintf(intrstr, sizeof(intrstr), "irq %d", ca->ca_intrline);
 
-<<<<<<< HEAD
-	sc->sc_flags |= RL_ENABLED;
-	sc->rl_type = RL_8169;
-
-	sc->sc_sdhook = shutdownhook_establish(re_cardbus_shutdown, sc);
-	sc->sc_pwrhook = powerhook_establish(re_cardbus_powerhook, sc);
-
-=======
->>>>>>> origin/master
 	/* Call bus-independent (common) attach routine */
 	if (re_attach(sc, intrstr)) {
 		cardbus_intr_disestablish(ct->ct_cc, ct->ct_cf, csc->sc_ih);

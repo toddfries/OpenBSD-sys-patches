@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: gpio.c,v 1.6 2006/01/14 12:33:49 grange Exp $	*/
-=======
 /*	$OpenBSD: gpio.c,v 1.11 2009/08/29 11:04:56 miod Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
