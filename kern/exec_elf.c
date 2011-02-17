@@ -423,17 +423,11 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
 			    BRKSIZ);
 
-		vm_map_lock(&p->p_vmspace->vm_map);
-		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-		    &addr, uobj, uoff, 0, UVM_FLAG_FIXED) == NULL) {
-			if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-			    &addr, uobj, uoff, 0, 0) == NULL) {
-				error = ENOMEM; /* XXX */
-				vm_map_unlock(&p->p_vmspace->vm_map);
-				goto bad1;
-			}
-		} 
-		vm_map_unlock(&p->p_vmspace->vm_map);
+		if (uvm_map_mquery(&p->p_vmspace->vm_map, &addr, size, uoff,
+		    0) != 0) {
+			error = ENOMEM;
+			goto bad1;
+		}
 		if (addr != pos + loadmap[i].vaddr) {
 			/* base changed. */
 			pos = addr - trunc_page(loadmap[i].vaddr);

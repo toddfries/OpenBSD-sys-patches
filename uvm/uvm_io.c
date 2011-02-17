@@ -93,7 +93,7 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 	chunksz = min(round_page(togo + pageoffset), MAXBSIZE);
 	error = 0;
 
-	extractflags = UVM_EXTRACT_QREF | UVM_EXTRACT_CONTIG;
+	extractflags = 0;
 	if (flags & UVM_IO_FIXPROT)
 		extractflags |= UVM_EXTRACT_FIXPROT;
 
@@ -107,7 +107,7 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		 * step 2: extract mappings from the map into kernel_map
 		 */
 
-		error = uvm_map_extract(map, baseva, chunksz, kernel_map, &kva,
+		error = uvm_map_extract(map, baseva, chunksz, &kva,
 		    extractflags);
 		if (error) {
 
@@ -139,8 +139,9 @@ uvm_io(vm_map_t map, struct uio *uio, int flags)
 		 */
 
 		vm_map_lock(kernel_map);
+		dead_entries = NULL;
 		uvm_unmap_remove(kernel_map, kva, kva+chunksz,
-		    &dead_entries, NULL, FALSE);
+		    &dead_entries, FALSE, TRUE);
 		vm_map_unlock(kernel_map);
 
 		if (dead_entries != NULL)
