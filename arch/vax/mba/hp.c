@@ -1,4 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.23 2010/09/22 06:40:25 krw Exp $ */
+/*	$OpenBSD: hp.c,v 1.26 2011/06/05 18:40:33 matthew Exp $ */
 /*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -53,6 +53,7 @@
 #include <sys/fcntl.h>
 #include <sys/syslog.h>
 #include <sys/reboot.h>
+#include <sys/conf.h>
 
 #include <machine/trap.h>
 #include <machine/pte.h>
@@ -69,23 +70,17 @@ struct	hp_softc {
 	struct	device	sc_dev;
 	struct	disk sc_disk;
 	struct	mba_device sc_md;	/* Common struct used by mbaqueue. */
-	int	sc_wlabel;		/* Disklabel area is writable */
 	int	sc_physnr;		/* Physical disk number */
 };
 
 int     hpmatch(struct device *, struct cfdata *, void *);
 void    hpattach(struct device *, struct device *, void *);
-void	hpstrategy(struct buf *);
 void	hpstart(struct mba_device *);
 int	hpattn(struct mba_device *);
 enum	xfer_action hpfinish(struct mba_device *, int, int *);
-int	hpopen(dev_t, int, int);
-int	hpclose(dev_t, int, int);
-int	hpioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	hpdump(dev_t, daddr64_t, caddr_t, size_t);
+bdev_decl(hp);
 int	hpread(dev_t, struct uio *);
 int	hpwrite(dev_t, struct uio *);
-daddr64_t hpsize(dev_t);
 
 struct	cfattach hp_ca = {
 	sizeof(struct hp_softc), hpmatch, hpattach
@@ -189,7 +184,7 @@ hpstrategy(bp)
 	sc = hp_cd.cd_devs[unit];
 	lp = sc->sc_disk.dk_label;
 
-	if (bounds_check_with_label(bp, lp, sc->sc_wlabel) <= 0)
+	if (bounds_check_with_label(bp, lp) <= 0)
 		goto done;
 
 	bp->b_rawblkno =
@@ -347,17 +342,10 @@ hpioctl(dev, cmd, addr, flag, p)
 		error = setdisklabel(lp, (struct disklabel *)addr, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO) {
-				sc->sc_wlabel = 1;
 				error = writedisklabel(dev, hpstrategy, lp, 0);
-				sc->sc_wlabel = 0;
 			}
 		}
 		return error;
-	case	DIOCWLABEL:
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		sc->sc_wlabel = 1;
-		break;
 
 	default:
 		printf("hpioctl: command %x\n", (unsigned int)cmd);

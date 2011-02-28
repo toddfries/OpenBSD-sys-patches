@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.253 2011/04/05 20:24:32 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.258 2011/06/16 13:21:00 kettenis Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -128,6 +128,13 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
@@ -322,6 +329,10 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	/* Determine hardware revision */
 	em_identify_hardware(sc);
 
+	/* Only use MSIe on the newer PCIe parts */
+	if (sc->hw.mac_type < em_82571)
+		pa->pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
+
 	/* Parameters (to be read from user) */
 	if (sc->hw.mac_type >= em_82544) {
 		sc->num_tx_desc = EM_MAX_TXD;
@@ -387,6 +398,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82572:
 		case em_82574:
 		case em_82575:
+		case em_82580:
 		case em_ich9lan:
 		case em_ich10lan:
 		case em_80003es2lan:
@@ -731,6 +743,7 @@ em_init(void *arg)
 	case em_82571:
 	case em_82572: /* Total Packet Buffer on these is 48k */
 	case em_82575:
+	case em_82580:
 	case em_80003es2lan:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
@@ -748,6 +761,9 @@ em_init(void *arg)
 	case em_ich10lan:
 	case em_pchlan:
 		pba = E1000_PBA_10K;
+		break;
+	case em_pch2lan:
+		pba = E1000_PBA_26K;
 		break;
 	default:
 		/* Devices before 82547 had a Packet Buffer of 64K.   */
@@ -820,54 +836,46 @@ em_init(void *arg)
 int 
 em_intr(void *arg)
 {
-	struct em_softc  *sc = arg;
-	struct ifnet	*ifp;
+	struct em_softc	*sc = arg;
+	struct ifnet	*ifp = &sc->interface_data.ac_if;
 	u_int32_t	reg_icr, test_icr;
-	int claimed = 0;
-	int refill;
+	int		refill = 0;
 
-	ifp = &sc->interface_data.ac_if;
+	test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
+	if (sc->hw.mac_type >= em_82571)
+		test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
+	if (!test_icr)
+		return (0);
 
-	for (;;) {
-		test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
-		if (sc->hw.mac_type >= em_82571)
-			test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
-		if (!test_icr)
-			break;
+	if (ifp->if_flags & IFF_RUNNING) {
+		em_rxeof(sc, -1);
+		em_txeof(sc);
+		if (!IFQ_IS_EMPTY(&ifp->if_snd))
+			em_start(ifp);
 
-		claimed = 1;
-		refill = 0;
-
-		if (ifp->if_flags & IFF_RUNNING) {
-			em_rxeof(sc, -1);
-			em_txeof(sc);
-			refill = 1;
-		}
-
-		/* Link status change */
-		if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
-			timeout_del(&sc->timer_handle);
-			sc->hw.get_link_status = 1;
-			em_check_for_link(&sc->hw);
-			em_update_link_status(sc);
-			timeout_add_sec(&sc->timer_handle, 1); 
-		}
-
-		if (reg_icr & E1000_ICR_RXO) {
-			sc->rx_overruns++;
-			refill = 1;
-		}
-
-		if (refill && em_rxfill(sc)) {
-			/* Advance the Rx Queue #0 "Tail Pointer". */
-			E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
-		}
+		refill = 1;
 	}
 
-	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
-		em_start(ifp);
+	/* Link status change */
+	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
+		timeout_del(&sc->timer_handle);
+		sc->hw.get_link_status = 1;
+		em_check_for_link(&sc->hw);
+		em_update_link_status(sc);
+		timeout_add_sec(&sc->timer_handle, 1); 
+	}
 
-	return (claimed);
+	if (reg_icr & E1000_ICR_RXO) {
+		sc->rx_overruns++;
+		refill = 1;
+	}
+
+	if (refill && em_rxfill(sc)) {
+		/* Advance the Rx Queue #0 "Tail Pointer". */
+		E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
+	}
+
+	return (1);
 }
 
 /*********************************************************************
@@ -1434,7 +1442,8 @@ em_update_link_status(struct em_softc *sc)
 			if ((sc->link_speed == SPEED_1000) &&
 			    ((sc->hw.mac_type == em_82571) ||
 			    (sc->hw.mac_type == em_82572) ||
-			    (sc->hw.mac_type == em_82575))) {
+			    (sc->hw.mac_type == em_82575) ||
+			    (sc->hw.mac_type == em_82580))) {
 				int tarc0;
 
 				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
@@ -1594,7 +1603,8 @@ em_allocate_pci_resources(struct em_softc *sc)
 	if (sc->hw.mac_type == em_ich8lan ||
 	    sc->hw.mac_type == em_ich9lan ||
 	    sc->hw.mac_type == em_ich10lan ||
-	    sc->hw.mac_type == em_pchlan) {
+	    sc->hw.mac_type == em_pchlan ||
+	    sc->hw.mac_type == em_pch2lan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1609,7 +1619,7 @@ em_allocate_pci_resources(struct em_softc *sc)
 		}
         }
 
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
 		return (ENXIO);
 	}
@@ -1723,7 +1733,8 @@ em_hardware_init(struct em_softc *sc)
 	if (!em_smart_pwr_down &&
 	     (sc->hw.mac_type == em_82571 ||
 	      sc->hw.mac_type == em_82572 ||
-	      sc->hw.mac_type == em_82575)) {
+	      sc->hw.mac_type == em_82575 ||
+	      sc->hw.mac_type == em_82580)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -3007,26 +3018,38 @@ void
 em_write_pci_cfg(struct em_hw *hw, uint32_t reg, uint16_t *value)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, reg, *value);
+	pcireg_t val;
+
+	val = pci_conf_read(pa->pa_pc, pa->pa_tag, reg & ~0x3);
+	if (reg & 0x2) {
+		val &= 0x0000ffff;
+		val |= (*value << 16);
+	} else {
+		val &= 0xffff0000;
+		val |= *value;
+	}
+	pci_conf_write(pa->pa_pc, pa->pa_tag, reg & ~0x3, val);
 }
 
 void
 em_read_pci_cfg(struct em_hw *hw, uint32_t reg, uint16_t *value)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	*value = pci_conf_read(pc, pa->pa_tag, reg);
+	pcireg_t val;
+
+	val = pci_conf_read(pa->pa_pc, pa->pa_tag, reg & ~0x3);
+	if (reg & 0x2)
+		*value = (val >> 16) & 0xffff;
+	else
+		*value = val & 0xffff;
 }
 
 void
 em_pci_set_mwi(struct em_hw *hw)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
 		(hw->pci_cmd_word | CMD_MEM_WRT_INVALIDATE));
 }
 
@@ -3034,9 +3057,8 @@ void
 em_pci_clear_mwi(struct em_hw *hw)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
 		(hw->pci_cmd_word & ~CMD_MEM_WRT_INVALIDATE));
 }
 

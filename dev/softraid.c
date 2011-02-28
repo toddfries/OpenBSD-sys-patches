@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.223 2011/04/05 19:52:02 krw Exp $ */
+/* $OpenBSD: softraid.c,v 1.231 2011/06/20 09:16:05 matthew Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -394,11 +394,15 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
 {
 	struct vnode		*vp;
 	struct buf		b;
-	size_t			bufsize;
+	size_t			bufsize, dma_bufsize;
 	int			rv = 1;
+	char			*dma_buf;
 
 	DNPRINTF(SR_D_MISC, "%s: sr_rw(0x%x, %p, %d, %llu 0x%x)\n",
 	    DEVNAME(sc), dev, buf, size, offset, flags);
+
+	dma_bufsize = (size > MAXPHYS) ? MAXPHYS : size;
+	dma_buf = dma_alloc(dma_bufsize, PR_WAITOK);
 
 	if (bdevvp(dev, &vp)) {
 		printf("%s: sr_rw: failed to allocate vnode\n", DEVNAME(sc));
@@ -406,20 +410,21 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
 	}
 
 	while (size > 0) {
-		DNPRINTF(SR_D_MISC, "%s: buf %p, size %d, offset %llu)\n",
-		    DEVNAME(sc), buf, size, offset);
+		DNPRINTF(SR_D_MISC, "%s: dma_buf %p, size %d, offset %llu)\n",
+		    DEVNAME(sc), dma_buf, size, offset);
 
 		bufsize = (size > MAXPHYS) ? MAXPHYS : size;
+		if (flags == B_WRITE)
+			bcopy(buf, dma_buf, bufsize);
 
 		bzero(&b, sizeof(b));
-
 		b.b_flags = flags | B_PHYS;
 		b.b_proc = curproc;
 		b.b_dev = dev;
 		b.b_iodone = NULL;
 		b.b_error = 0;
 		b.b_blkno = offset;
-		b.b_data = buf;
+		b.b_data = dma_buf;
 		b.b_bcount = bufsize;
 		b.b_bufsize = bufsize;
 		b.b_resid = bufsize;
@@ -438,10 +443,12 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
 			goto done;
 		}
 
+		if (flags == B_READ)
+			bcopy(dma_buf, buf, bufsize);
+
 		size -= bufsize;
 		buf += bufsize;
 		offset += howmany(bufsize, DEV_BSIZE);
-
 	}
 
 	rv = 0;
@@ -449,6 +456,8 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
 done:
 	if (vp)
 		vput(vp);
+
+	dma_free(dma_buf, dma_bufsize);
 
 	return (rv);
 }
@@ -1076,6 +1085,8 @@ sr_boot_assembly(struct sr_softc *sc)
 
 	SLIST_INIT(&sdklist);
 	SLIST_INIT(&mlh);
+	SLIST_INIT(&bvh);
+	SLIST_INIT(&kdh);
 
 	dk = TAILQ_FIRST(&disklist);
 	while (dk != TAILQ_END(&disklist)) {
@@ -1117,9 +1128,6 @@ sr_boot_assembly(struct sr_softc *sc)
 	/*
 	 * Create a list of volumes and associate chunks with each volume.
 	 */
-
-	SLIST_INIT(&bvh);
-	SLIST_INIT(&kdh);
 
 	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mlenext) {
 
@@ -1500,7 +1508,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	if (sr && not_sr) {
 		printf("%s: not all chunks are of the native metadata format\n",
-		     DEVNAME(sc));
+		    DEVNAME(sc));
 		goto bad;
 	}
 
@@ -2546,7 +2554,7 @@ sr_hotspare_rebuild(struct sr_discipline *sd)
 	struct sr_chunk_head	*cl;
 	struct sr_chunk		*hotspare, *chunk = NULL;
 	struct sr_workunit	*wu;
-	struct sr_ccb           *ccb;
+	struct sr_ccb		*ccb;
 	int			i, s, chunk_no, busy;
 
 	/*
@@ -3459,9 +3467,16 @@ sr_raid_inquiry(struct sr_workunit *wu)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
+	struct scsi_inquiry	*cdb = (struct scsi_inquiry *)xs->cmd;
 	struct scsi_inquiry_data inq;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_inquiry\n", DEVNAME(sd->sd_sc));
+
+	if (xs->cmdlen != sizeof(*cdb))
+		return (EINVAL);
+
+	if (ISSET(cdb->flags, SI_EVPD))
+		return (EOPNOTSUPP);
 
 	bzero(&inq, sizeof(inq));
 	inq.device = T_DIRECT;
@@ -3561,35 +3576,20 @@ sr_raid_request_sense(struct sr_workunit *wu)
 int
 sr_raid_start_stop(struct sr_workunit *wu)
 {
-	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
-	int			rv = 1;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_start_stop\n",
 	    DEVNAME(sd->sd_sc));
 
 	if (!ss)
-		return (rv);
+		return (1);
 
-	if (ss->byte2 == 0x00) {
-		/* START */
-		if (sd->sd_vol_status == BIOC_SVOFFLINE) {
-			/* bring volume online */
-			/* XXX check to see if volume can be brought online */
-			sd->sd_vol_status = BIOC_SVONLINE;
-		}
-		rv = 0;
-	} else /* XXX is this the check? if (byte == 0x01) */ {
-		/* STOP */
-		if (sd->sd_vol_status == BIOC_SVONLINE) {
-			/* bring volume offline */
-			sd->sd_vol_status = BIOC_SVOFFLINE;
-		}
-		rv = 0;
-	}
-
-	return (rv);
+	/*
+	 * do nothing!
+	 * a softraid discipline should always reflect correct status
+	 */
+	return (0);
 }
 
 int
@@ -3887,7 +3887,7 @@ sr_rebuild_thread(void *arg)
 	uint64_t		mysize = 0;
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
-	struct scsi_rw_16	cr, cw;
+	struct scsi_rw_16	*cr, *cw;
 	int			c, s, slept, percent = 0, old_percent = -1;
 	u_int8_t		*buf;
 
@@ -3922,7 +3922,8 @@ sr_rebuild_thread(void *arg)
 
 	sd->sd_reb_active = 1;
 
-	buf = malloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, M_DEVBUF, M_WAITOK);
+	/* currently this is 64k therefore we can use dma_alloc */
+	buf = dma_alloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, PR_WAITOK);
 	for (blk = restart; blk <= whole_blk; blk++) {
 		if (blk == whole_blk)
 			sz = partial_blk;
@@ -3939,16 +3940,16 @@ sr_rebuild_thread(void *arg)
 
 		/* setup read io */
 		bzero(&xs_r, sizeof xs_r);
-		bzero(&cr, sizeof cr);
 		xs_r.error = XS_NOERROR;
 		xs_r.flags = SCSI_DATA_IN;
 		xs_r.datalen = sz << DEV_BSHIFT;
 		xs_r.data = buf;
-		xs_r.cmdlen = 16;
-		cr.opcode = READ_16;
-		_lto4b(sz, cr.length);
-		_lto8b(lba, cr.addr);
-		xs_r.cmd = (struct scsi_generic *)&cr;
+		xs_r.cmdlen = sizeof(*cr);
+		xs_r.cmd = &xs_r.cmdstore;
+		cr = (struct scsi_rw_16 *)xs_r.cmd;
+		cr->opcode = READ_16;
+		_lto4b(sz, cr->length);
+		_lto8b(lba, cr->addr);
 		wu_r->swu_flags |= SR_WUF_REBUILD;
 		wu_r->swu_xs = &xs_r;
 		if (sd->sd_scsi_rw(wu_r)) {
@@ -3959,16 +3960,16 @@ sr_rebuild_thread(void *arg)
 
 		/* setup write io */
 		bzero(&xs_w, sizeof xs_w);
-		bzero(&cw, sizeof cw);
 		xs_w.error = XS_NOERROR;
 		xs_w.flags = SCSI_DATA_OUT;
 		xs_w.datalen = sz << DEV_BSHIFT;
 		xs_w.data = buf;
-		xs_w.cmdlen = 16;
-		cw.opcode = WRITE_16;
-		_lto4b(sz, cw.length);
-		_lto8b(lba, cw.addr);
-		xs_w.cmd = (struct scsi_generic *)&cw;
+		xs_w.cmdlen = sizeof(*cw);
+		xs_w.cmd = &xs_w.cmdstore;
+		cw = (struct scsi_rw_16 *)xs_w.cmd;
+		cw->opcode = WRITE_16;
+		_lto4b(sz, cw->length);
+		_lto8b(lba, cw->addr);
 		wu_w->swu_flags |= SR_WUF_REBUILD;
 		wu_w->swu_xs = &xs_w;
 		if (sd->sd_scsi_rw(wu_w)) {
@@ -4041,7 +4042,7 @@ abort:
 		printf("%s: could not save metadata to %s\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
 fail:
-	free(buf, M_DEVBUF);
+	dma_free(buf, SR_REBUILD_IO_SIZE << DEV_BSHIFT);
 	sd->sd_reb_active = 0;
 	kthread_exit(0);
 }

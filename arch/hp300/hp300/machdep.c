@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.129 2010/07/02 19:57:14 tedu Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.131 2011/06/05 19:41:06 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -99,20 +99,6 @@ struct vm_map *phys_map = NULL;
 
 extern paddr_t avail_start, avail_end;
 
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
-
 int	physmem;		/* size of physical memory, in pages */
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
@@ -177,7 +163,7 @@ hp300_init()
 	 * hp300 only has one segment.
 	 */
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
 
 	/* Initialize the interrupt handlers. */
 	intr_init();

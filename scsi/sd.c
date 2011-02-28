@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.222 2011/03/31 18:42:48 jasper Exp $	*/
+/*	$OpenBSD: sd.c,v 1.230 2011/06/19 04:55:34 deraadt Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -127,8 +127,6 @@ const struct scsi_inquiry_pattern sd_patterns[] = {
 	 "",         "",                 ""},
 };
 
-#define sdlock(softc)   disk_lock(&(softc)->sc_dk)
-#define sdunlock(softc) disk_unlock(&(softc)->sc_dk)
 #define sdlookup(unit) (struct sd_softc *)disk_lookup(&sd_cd, (unit))
 
 int
@@ -222,16 +220,15 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	if ((sc_link->flags & SDEV_REMOVABLE) != 0)
 		scsi_prevent(sc_link, PR_ALLOW, sd_autoconf);
 
-	printf("%s: ", sc->sc_dev.dv_xname);
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%lldMB, %lu bytes/sec, %lld sec total",
+		printf("%s: %lldMB, %lu bytes/sec, %lld sec total\n",
+		    sc->sc_dev.dv_xname,
 		    dp->disksize / (1048576 / dp->secsize), dp->secsize,
 		    dp->disksize);
 		break;
 
 	case SDGP_RESULT_OFFLINE:
-		printf("drive offline");
 		break;
 
 #ifdef DIAGNOSTIC
@@ -240,7 +237,6 @@ sdattach(struct device *parent, struct device *self, void *aux)
 		break;
 #endif
 	}
-	printf("\n");
 
 	memset(&dkc, 0, sizeof(dkc));
 	if (sd_ioctl_cache(sc, DIOCGCACHE, &dkc) == 0 && dkc.wrcache == 0) {
@@ -359,7 +355,7 @@ sdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	    ("sdopen: dev=0x%x (unit %d (of %d), partition %d)\n", dev, unit,
 	    sd_cd.cd_ndevs, part));
 
-	if ((error = sdlock(sc)) != 0) {
+	if ((error = disk_lock(&sc->sc_dk)) != 0) {
 		device_unref(&sc->sc_dev);
 		return (error);
 	}
@@ -462,7 +458,7 @@ bad:
 		sc_link->flags &= ~(SDEV_OPEN | SDEV_MEDIA_LOADED);
 	}
 
-	sdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return (error);
 }
@@ -476,7 +472,6 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct sd_softc *sc;
 	int part = DISKPART(dev);
-	int error;
 
 	sc = sdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -486,10 +481,7 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		return (ENXIO);
 	}
 
-	if ((error = sdlock(sc)) != 0) {
-		device_unref(&sc->sc_dev);
-		return (error);
-	}
+	disk_lock_nointr(&sc->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -520,7 +512,7 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		scsi_xsh_del(&sc->sc_xsh);
 	}
 
-	sdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return 0;
 }
@@ -575,8 +567,7 @@ sdstrategy(struct buf *bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    (sc->flags & (SDF_WLABEL|SDF_LABELLING)) != 0) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
 		goto done;
 
 	/* Place it in the queue of disk activities for this disk. */
@@ -738,7 +729,7 @@ sdstart(struct scsi_xfer *xs)
 	/* move onto the next io */
 	if (ISSET(sc->flags, SDF_WAITING))
 		CLR(sc->flags, SDF_WAITING);
-	else if (bufq_peek(&sc->sc_bufq) != NULL)
+	else if (bufq_peek(&sc->sc_bufq))
 		scsi_xsh_add(&sc->sc_xsh);
 }
 
@@ -883,7 +874,6 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	 */
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
 		switch (cmd) {
-		case DIOCWLABEL:
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
@@ -932,31 +922,18 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			goto exit;
 		}
 
-		if ((error = sdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dk)) != 0)
 			goto exit;
-		sc->flags |= SDF_LABELLING;
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*sd->sc_dk.dk_openmask : */0);
+		    (struct disklabel *)addr, sc->sc_dk.dk_openmask);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    sdstrategy, sc->sc_dk.dk_label);
 		}
 
-		sc->flags &= ~SDF_LABELLING;
-		sdunlock(sc);
-		goto exit;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		if (*(int *)addr)
-			sc->flags |= SDF_WLABEL;
-		else
-			sc->flags &= ~SDF_WLABEL;
+		disk_unlock(&sc->sc_dk);
 		goto exit;
 
 	case DIOCLOCK:

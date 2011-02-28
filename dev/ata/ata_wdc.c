@@ -1,4 +1,4 @@
-/*      $OpenBSD: ata_wdc.c,v 1.37 2011/04/05 19:57:40 deraadt Exp $	*/
+/*      $OpenBSD: ata_wdc.c,v 1.39 2011/05/24 23:18:47 matthew Exp $	*/
 /*	$NetBSD: ata_wdc.c,v 1.21 1999/08/09 09:43:11 bouyer Exp $	*/
 
 /*
@@ -97,10 +97,6 @@ int wdcdebug_wd_mask = WDCDEBUG_WD_MASK;
 #endif
 
 #define ATA_DELAY 45000 /* 45s for a drive I/O */
-
-struct cfdriver wdc_cd = {
-	NULL, "wdc", DV_DULL
-};
 
 void  wdc_ata_bio_start(struct channel_softc *, struct wdc_xfer *);
 void  _wdc_ata_bio_start(struct channel_softc *, struct wdc_xfer *);
@@ -420,6 +416,8 @@ intr:	/* Wait for IRQ (either real or polled) */
 	}
 	return;
 timeout:
+	if (chp->ch_status == 0xff)
+		return;
 	printf("%s:%d:%d: not ready, st=0x%b, err=0x%02x\n",
 	    chp->wdc->sc_dev.dv_xname, chp->channel, xfer->drive,
 	    chp->ch_status, WDCS_BITS, chp->ch_error);
@@ -756,6 +754,11 @@ wdc_ata_err(struct ata_drive_datas *drvp, struct ata_bio *ata_bio)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	ata_bio->error = 0;
+
+	if (chp->ch_status == 0xff) {
+		ata_bio->error = ERR_NODEV;
+		return WDC_ATA_ERR;
+	}
 	if (chp->ch_status & WDCS_BSY) {
 		ata_bio->error = TIMEOUT;
 		return WDC_ATA_ERR;

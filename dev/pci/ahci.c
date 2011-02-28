@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.173 2011/04/03 17:04:19 krw Exp $ */
+/*	$OpenBSD: ahci.c,v 1.180 2011/06/14 10:40:14 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -373,6 +373,7 @@ struct ahci_port {
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_free;
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_pending;
 	struct mutex		ap_ccb_mtx;
+	struct ahci_ccb		*ap_ccb_err;
 
 	u_int32_t		ap_state;
 #define AP_S_NORMAL			0
@@ -455,6 +456,8 @@ int			ahci_ati_sb700_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 int			ahci_amd_hudson2_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
+int			ahci_intel_3400_1_attach(struct ahci_softc *,
+			    struct pci_attach_args *);
 int			ahci_nvidia_mcp_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 
@@ -476,6 +479,9 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_ati_sb700_attach },
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_6,
 	    NULL,		ahci_ati_sb700_attach },
+
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_1,
+	    NULL,		ahci_intel_3400_1_attach },
 
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
@@ -621,6 +627,7 @@ struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
 	ahci_ata_free,
 	ahci_ata_get_xfer,
+	ahci_ata_put_xfer,
 	ahci_ata_cmd
 };
 
@@ -709,6 +716,13 @@ ahci_amd_hudson2_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 }
 
 int
+ahci_intel_3400_1_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	sc->sc_flags |= AHCI_F_IPMS_PROBE;
+	return (0);
+}
+
+int
 ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_IGN_FR;
@@ -760,7 +774,7 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		return;
 	}
@@ -863,8 +877,7 @@ noccc:
 	aaa.aaa_methods = &ahci_atascsi_methods;
 	aaa.aaa_minphys = NULL;
 	aaa.aaa_nports = AHCI_MAX_PORTS;
-	aaa.aaa_ncmds = sc->sc_ncmds;
-	aaa.aaa_capability = ASAA_CAP_NEEDS_RESERVED;
+	aaa.aaa_ncmds = sc->sc_ncmds - 1;
 	if (!(sc->sc_flags & AHCI_F_NO_NCQ) &&
 	    (sc->sc_cap & AHCI_REG_CAP_SNCQ)) {
 		aaa.aaa_capability |= ASAA_CAP_NCQ | ASAA_CAP_PMP_NCQ;
@@ -1228,11 +1241,14 @@ nomem:
 		ccb->ccb_xa.packetcmd = ccb->ccb_cmd_table->acmd;
 		ccb->ccb_xa.tag = i;
 
-		ccb->ccb_xa.ata_put_xfer = ahci_ata_put_xfer;
-
 		ccb->ccb_xa.state = ATA_S_COMPLETE;
 		ahci_put_ccb(ccb);
 	}
+
+	/* grab a ccb for use during error recovery */
+	ap->ap_ccb_err = &ap->ap_ccbs[sc->sc_ncmds - 1];
+	TAILQ_REMOVE(&ap->ap_ccb_free, ap->ap_ccb_err, ccb_entry);
+	ap->ap_ccb_err->ccb_xa.state = ATA_S_COMPLETE;
 
 	/* Wait for ICC change to complete */
 	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
@@ -1312,6 +1328,9 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 		ahci_pwrite(ap, AHCI_PREG_IS, ahci_pread(ap, AHCI_PREG_IS));
 		ahci_write(sc, AHCI_REG_IS, 1 << port);
 	}
+
+	if (ap->ap_ccb_err)
+		ahci_put_ccb(ap->ap_ccb_err);
 
 	if (ap->ap_ccbs) {
 		while ((ccb = ahci_get_ccb(ap)) != NULL)
@@ -2475,7 +2494,7 @@ ahci_issue_pending_ncq_commands(struct ahci_port *ap)
 	 * If a port multiplier is attached to the port, we can only
 	 * issue commands for one of its ports at a time.
 	 */
-	if (ap->ap_sactive != NULL &&
+	if (ap->ap_sactive != 0 &&
 	    ap->ap_pmp_ncq_port != nextccb->ccb_xa.pmp_port) {
 		return;
 	}
@@ -3012,12 +3031,11 @@ ahci_get_err_ccb(struct ahci_port *ap)
 	 * Grab a CCB to use for error recovery.  This should never fail, as
 	 * we ask atascsi to reserve one for us at init time.
 	 */
-	err_ccb = ahci_get_ccb(ap);
-	KASSERT(err_ccb != NULL);
+	err_ccb = ap->ap_ccb_err;
 	err_ccb->ccb_xa.flags = 0;
 	err_ccb->ccb_done = ahci_empty_done;
 
-	return err_ccb;
+	return (err_ccb);
 }
 
 void
@@ -3037,8 +3055,10 @@ ahci_put_err_ccb(struct ahci_ccb *ccb)
 		printf("ahci_port_err_ccb_restore but SACT %08x != 0?\n", sact);
 	KASSERT(ahci_pread(ap, AHCI_PREG_CI) == 0);
 
+#ifdef DIAGNOSTIC
 	/* Done with the CCB */
-	ahci_put_ccb(ccb);
+	KASSERT(ccb == ap->ap_ccb_err);
+#endif
 
 	/* Restore outstanding command state */
 	ap->ap_sactive = ap->ap_err_saved_sactive;

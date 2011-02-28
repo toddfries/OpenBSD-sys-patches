@@ -1,4 +1,4 @@
-/*	$OpenBSD: gumstix_machdep.c,v 1.4 2010/06/27 12:41:23 miod Exp $	*/
+/*	$OpenBSD: gumstix_machdep.c,v 1.6 2011/05/30 22:25:21 oga Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -238,6 +238,12 @@ extern int pmap_debug_level;
 pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
 extern struct user *proc0paddr;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 /* Prototypes */
 
@@ -1015,8 +1021,7 @@ initarm(void *arg)
 #endif
 	uvm_setpagesize();        /* initialize PAGE_SIZE-dependent variables */
 	uvm_page_physload(atop(physical_freestart), atop(physical_freeend),
-	    atop(physical_freestart), atop(physical_freeend),
-	    VM_FREELIST_DEFAULT);
+	    atop(physical_freestart), atop(physical_freeend), 0);
 
 	/* Boot strap pmap telling it where the kernel page table is */
 #ifdef VERBOSE_INIT_ARM

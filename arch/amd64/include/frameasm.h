@@ -1,4 +1,4 @@
-/*	$OpenBSD: frameasm.h,v 1.3 2011/04/05 21:14:00 guenther Exp $	*/
+/*	$OpenBSD: frameasm.h,v 1.5 2011/04/13 02:49:12 guenther Exp $	*/
 /*	$NetBSD: frameasm.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef _AMD64_MACHINE_FRAMEASM_H

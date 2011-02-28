@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.192 2011/04/04 18:05:31 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.197 2011/06/02 18:36:49 kettenis Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -161,8 +161,9 @@ typedef struct azalia_t {
 	codec_t *codecs;
 	int ncodecs;		/* number of codecs */
 	int codecno;		/* index of the using codec */
-	int detached;		/* nonzero if audio(4) is not attached */
-
+	int detached;		/* 1 if failed to initialize, 2 if
+				 * azalia_pci_detach has run
+				 */
 	azalia_dma_t corb_dma;
 	int corb_entries;
 	uint8_t corbsize;
@@ -389,13 +390,6 @@ azalia_configure_pci(azalia_t *az)
 	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
 
-	/* disable MSI, use INTx instead */
-	if (PCI_VENDOR(az->pciid) == PCI_VENDOR_INTEL) {
-		reg = azalia_pci_read(az->pc, az->tag, ICH_PCI_MMC);
-		reg &= ~(ICH_PCI_MMC_ME);
-		azalia_pci_write(az->pc, az->tag, ICH_PCI_MMC, reg);
-	}
-
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(az->pciid)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
@@ -475,6 +469,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	azalia_t *sc;
 	struct pci_attach_args *pa;
 	pcireg_t v;
+	uint8_t reg;
 	pci_intr_handle_t ih;
 	const char *interrupt_str;
 
@@ -498,8 +493,15 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	azalia_configure_pci(sc);
 
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(sc->pciid) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(sc->pc, sc->tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(sc->pc, sc->tag, ICH_PCI_MMC, reg);
+	}
+
 	/* interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 		return;
 	}
@@ -531,9 +533,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 err_exit:
-	printf("%s: initialization failure, detaching\n", XNAME(sc));
-	azalia_pci_detach(self, 0);
 	sc->detached = 1;
+	azalia_pci_detach(self, 0);
 }
 
 int
@@ -566,14 +567,29 @@ azalia_pci_activate(struct device *self, int act)
 int
 azalia_pci_detach(struct device *self, int flags)
 {
-	azalia_t *az;
+	azalia_t *az = (azalia_t*)self;
+	uint32_t gctl;
 	int i;
 
 	DPRINTF(("%s\n", __func__));
-	az = (azalia_t*)self;
+
+	/*
+	 * this function is called if the device could not be supported,
+	 * in which case az->detached == 1.  check if this function has
+	 * already cleaned up.
+	 */
+	if (az->detached > 1)
+		return 0;
+
 	if (az->audiodev != NULL) {
 		config_detach(az->audiodev, flags);
 		az->audiodev = NULL;
+	}
+
+	/* disable unsolicited responses if soft detaching */
+	if (az->detached == 1) {
+		gctl = AZ_READ_4(az, GCTL);
+		AZ_WRITE_4(az, GCTL, gctl &~(HDA_GCTL_UNSOL));
 	}
 
 	timeout_del(&az->unsol_to);
@@ -604,6 +620,17 @@ azalia_pci_detach(struct device *self, int flags)
 		az->unsolq = NULL;
 	}
 
+	/* disable interrupts if soft detaching */
+	if (az->detached == 1) {
+		DPRINTF(("%s: disable interrupts\n", __func__));
+		AZ_WRITE_4(az, INTCTL, 0);
+
+		DPRINTF(("%s: clear interrupts\n", __func__));
+		AZ_WRITE_4(az, INTSTS, HDA_INTSTS_CIS | HDA_INTSTS_GIS);
+		AZ_WRITE_2(az, STATESTS, HDA_STATESTS_SDIWAKE);
+		AZ_WRITE_1(az, RIRBSTS, HDA_RIRBSTS_RINTFL | HDA_RIRBSTS_RIRBOIS);
+	}
+
 	DPRINTF(("%s: delete PCI resources\n", __func__));
 	if (az->ih != NULL) {
 		pci_intr_disestablish(az->pc, az->ih);
@@ -613,6 +640,8 @@ azalia_pci_detach(struct device *self, int flags)
 		bus_space_unmap(az->iot, az->ioh, az->map_size);
 		az->map_size = 0;
 	}
+
+	az->detached = 2;
 	return 0;
 }
 
@@ -621,25 +650,32 @@ azalia_intr(void *v)
 {
 	azalia_t *az = v;
 	uint32_t intsts;
+	int ret = 0;
 
 	intsts = AZ_READ_4(az, INTSTS);
-	if (intsts == 0)
-		return (0);
+	if (intsts == 0 || intsts == 0xffffffff)
+		return (ret);
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
-	if (intsts & az->pstream.intr_bit)
+	if (intsts & az->pstream.intr_bit) {
 		azalia_stream_intr(&az->pstream);
+		ret = 1;
+	}
 
-	if (intsts & az->rstream.intr_bit)
+	if (intsts & az->rstream.intr_bit) {
 		azalia_stream_intr(&az->rstream);
+		ret = 1;
+	}
 
 	if ((intsts & HDA_INTSTS_CIS) &&
 	    (AZ_READ_1(az, RIRBCTL) & HDA_RIRBCTL_RINTCTL) &&
-	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL))
+	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL)) {
 		azalia_rirb_intr(az);
+		ret = 1;
+	}
 
-	return (1);
+	return (ret);
 }
 
 void

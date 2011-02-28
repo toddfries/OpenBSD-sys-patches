@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.26 2011/04/05 21:14:00 guenther Exp $
+#	$OpenBSD: genassym.cf,v 1.28 2011/04/13 02:49:12 guenther Exp $
 #	Written by Artur Grabowski art@openbsd.org, Public Domain
 
 include <sys/param.h>

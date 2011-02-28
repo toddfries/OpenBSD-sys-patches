@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 2011/03/31 20:37:44 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.30 2011/06/05 19:41:07 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -81,18 +81,6 @@
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 char	pmon_bootp[80];
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
 
 /*
  * Even though the system is 64bit, the hardware is constrained to up
@@ -207,6 +195,13 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	extern char exception[], e_exception[];
 	extern char *hw_vendor, *hw_prod;
 	extern void xtlb_miss;
+
+	/*
+	 * Make sure we can access the extended address space.
+	 * This is not necessary on real hardware, but some emulators
+	 * are not aware of this.
+	 */
+	setsr(getsr() | SR_KX | SR_UX);
 
 	/*
 	 * Clear the compiled BSS segment in OpenBSD code.
@@ -449,7 +444,6 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		/* kernel is linked in CKSEG0 */
@@ -463,14 +457,13 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -480,11 +473,11 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 

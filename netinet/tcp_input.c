@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.244 2011/04/05 18:16:07 blambert Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.250 2011/05/13 14:31:16 oga Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -477,7 +477,8 @@ tcp_input(struct mbuf *m, ...)
 	case AF_INET:
 		ip = mtod(m, struct ip *);
 		if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif))
+		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
+		    m->m_pkthdr.rdomain))
 			goto drop;
 #ifdef TCP_ECN
 		/* save ip_tos before clearing it for checksum */
@@ -740,7 +741,7 @@ findpcb:
 			case TH_RST:
 				syn_cache_reset(&src.sa, &dst.sa, th,
 				    inp->inp_rtableid);
-				break;
+				goto drop;
 
 			case TH_SYN|TH_ACK:
 				/*
@@ -771,6 +772,7 @@ findpcb:
 					 * do not free it.
 					 */
 					m = NULL;
+					goto drop;
 				} else {
 					/*
 					 * We have created a
@@ -782,7 +784,6 @@ findpcb:
 					if (tp == NULL)
 						goto badsyn;	/*XXX*/
 
-					goto after_listen;
 				}
 				break;
 
@@ -875,16 +876,15 @@ findpcb:
 				 * SYN looks ok; create compressed TCP
 				 * state for it.
 				 */
-				if (so->so_qlen <= so->so_qlimit &&
+				if (so->so_qlen > so->so_qlimit ||
 				    syn_cache_add(&src.sa, &dst.sa, th, iphlen,
-				    so, m, optp, optlen, &opti, reuse))
-					m = NULL;
+				    so, m, optp, optlen, &opti, reuse) == -1)
+					goto drop;
+				return;
 			}
-			goto drop;
 		}
 	}
 
-after_listen:
 #ifdef DIAGNOSTIC
 	/*
 	 * Should not happen now that all embryonic connections
@@ -2263,12 +2263,12 @@ dropwithreset:
 		goto drop;
 	if (tiflags & TH_ACK) {
 		tcp_respond(tp, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack,
-		    TH_RST, 0);
+		    TH_RST, m->m_pkthdr.rdomain);
 	} else {
 		if (tiflags & TH_SYN)
 			tlen++;
 		tcp_respond(tp, mtod(m, caddr_t), th, th->th_seq + tlen,
-		    (tcp_seq)0, TH_RST|TH_ACK, 0);
+		    (tcp_seq)0, TH_RST|TH_ACK, m->m_pkthdr.rdomain);
 	}
 	m_freem(m);
 	return;
@@ -3671,6 +3671,9 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	struct mbuf *am;
 	int s;
 	struct socket *oso;
+#if NPF > 0
+	struct pf_divert *divert = NULL;
+#endif
 
 	s = splsoftnet();
 	if ((sc = syn_cache_lookup(src, dst, &scp,
@@ -3754,6 +3757,12 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	inp = (struct inpcb *)so->so_pcb;
 #endif /* INET6 */
 
+#if NPF > 0
+	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED &&
+	    (divert = pf_find_divert(m)) != NULL)
+		inp->inp_rtableid = divert->rdomain;
+	else
+#endif
 	/* inherit rtable from listening socket */
 	inp->inp_rtableid = sc->sc_rtableid;
 
@@ -4032,7 +4041,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		tb.t_state = TCPS_LISTEN;
 		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi,
 		    sotoinpcb(so)->inp_rtableid))
-			return (0);
+			return (-1);
 	} else
 		tb.t_flags = 0;
 
@@ -4071,14 +4080,14 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 			tcpstat.tcps_sndacks++;
 			tcpstat.tcps_sndtotal++;
 		}
-		return (1);
+		return (0);
 	}
 
 	sc = pool_get(&syn_cache_pool, PR_NOWAIT|PR_ZERO);
 	if (sc == NULL) {
 		if (ipopts)
 			(void) m_free(ipopts);
-		return (0);
+		return (-1);
 	}
 
 	/*
@@ -4163,7 +4172,8 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		syn_cache_put(sc);
 		tcpstat.tcps_sc_dropped++;
 	}
-	return (1);
+
+	return (0);
 }
 
 int

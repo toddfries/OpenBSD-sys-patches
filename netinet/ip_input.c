@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.189 2011/04/04 16:51:15 claudio Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.192 2011/06/15 09:11:01 mikeb Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -144,8 +144,7 @@ struct pool ipq_pool;
 
 struct ipstat ipstat;
 
-struct in_ifaddr *
-	 in_iawithaddr(struct in_addr, struct mbuf *, u_int);
+int	in_ouraddr(struct in_addr, struct mbuf *);
 
 char *
 inet_ntoa(ina)
@@ -262,7 +261,6 @@ ipv4_input(m)
 {
 	struct ip *ip;
 	struct ipq *fp;
-	struct in_ifaddr *ia;
 	struct ipqent *ipqe;
 	int hlen, mff, len;
 	in_addr_t pfrdr = 0;
@@ -390,24 +388,8 @@ ipv4_input(m)
 	        return;
 	}
 
-	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
+	if (in_ouraddr(ip->ip_dst, m))
 		goto ours;
-
-#if NPF > 0
-	if (m->m_pkthdr.pf.statekey &&
-	    ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp)
-		goto ours;
-
-	/*
-	 * Check our list of addresses, to see if the packet is for us.
-	 * if we have linked state keys it is certainly to be forwarded.
-	 */
-	if (!m->m_pkthdr.pf.statekey ||
-	    !((struct pf_state_key *)m->m_pkthdr.pf.statekey)->reverse)
-#endif
-		if ((ia = in_iawithaddr(ip->ip_dst, m, m->m_pkthdr.rdomain)) !=
-		    NULL && (ia->ia_ifp->if_flags & IFF_UP))
-			goto ours;
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
@@ -682,8 +664,81 @@ bad:
 	m_freem(m);
 }
 
+int
+in_ouraddr(struct in_addr ina, struct mbuf *m)
+{
+	struct in_ifaddr	*ia;
+	struct sockaddr_in	 sin;
+#if NPF > 0
+	struct pf_state_key	*key;
+
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
+		return (1);
+
+	key = (struct pf_state_key *)m->m_pkthdr.pf.statekey;
+	if (key != NULL) {
+		if (key->inp != NULL)
+			return (1);
+
+		/* If we have linked state keys it is certainly forwarded. */
+		if (key->reverse != NULL)
+			return (0);
+	}
+#endif
+
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(sin);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = ina;
+	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin),
+	    m->m_pkthdr.rdomain);
+
+	if (ia == NULL) {
+		/*
+		 * No local address or broadcast address found, so check for
+		 * ancient classful broadcast addresses.
+		 * It must have been broadcast on the link layer, and for an
+		 * address on the interface it was received on.
+		 */
+		if (!ISSET(m->m_flags, M_BCAST) ||
+		    !IN_CLASSFULBROADCAST(ina.s_addr, ina.s_addr))
+			return (0);
+
+		/*
+		 * The check in the loop assumes you only rx a packet on an UP
+		 * interface, and that M_BCAST will only be set on a BROADCAST
+		 * interface.
+		 */
+		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+			if (ia->ia_ifp == m->m_pkthdr.rcvif &&
+			    ia->ia_ifp->if_rdomain == m->m_pkthdr.rdomain &&
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr))
+				return (1);
+		}
+
+		return (0);
+	}
+
+	if (ina.s_addr != ia->ia_addr.sin_addr.s_addr) {
+		/*
+		 * This matches a broadcast address on one of our interfaces.
+		 * If directedbcast is enabled we only consider it local if it
+		 * is received on the interface with that address.
+		 */
+		if (ip_directedbcast && ia->ia_ifp != m->m_pkthdr.rcvif)
+			return (0);
+
+		/* Make sure M_BCAST is set */
+		if (m)
+			m->m_flags |= M_BCAST;
+	}
+
+	return (ISSET(ia->ia_ifp->if_flags, IFF_UP));
+}
+
 struct in_ifaddr *
-in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
+in_iawithaddr(struct in_addr ina, u_int rdomain)
 {
 	struct in_ifaddr	*ia;
 	struct sockaddr_in	 sin;
@@ -693,24 +748,10 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
 	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin), rdomain);
+	if (ia == NULL || ina.s_addr == ia->ia_addr.sin_addr.s_addr)
+		return (ia);
 
-	/* check ancient classful, e. g. for rarp-based netboot */
-	if (ia == NULL && m->m_flags | M_BCAST &&
-	    IN_CLASSFULBROADCAST(ina.s_addr, ina.s_addr)) {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain != rdomain)
-				continue;
-			if (((ip_directedbcast == 0) ||
-			    (m && ip_directedbcast &&
-			    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
-			    (ia->ia_ifp->if_flags & IFF_BROADCAST) &&
-			    IN_CLASSFULBROADCAST(ina.s_addr,
-			    ia->ia_addr.sin_addr.s_addr))
-				return (ia);
-		}
-	}
-
-	return (ia);
+	return (NULL);
 }
 
 /*
@@ -1746,6 +1787,21 @@ ip_savecontrol(struct inpcb *inp, struct mbuf **mp, struct ip *ip,
 	if (inp->inp_flags & INP_RECVTTL) {
 		*mp = sbcreatecontrol((caddr_t) &ip->ip_ttl,
 		    sizeof(u_int8_t), IP_RECVTTL, IPPROTO_IP);
+		if (*mp)
+			mp = &(*mp)->m_next;
+	}
+	if (inp->inp_flags & INP_RECVRTABLE) {
+		u_int rtableid = inp->inp_rtableid;
+#if NPF > 0
+		struct pf_divert *divert;
+
+		if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED &&
+		    (divert = pf_find_divert(m)) != NULL)
+			rtableid = divert->rdomain;
+#endif
+
+		*mp = sbcreatecontrol((caddr_t) &rtableid,
+		    sizeof(u_int), IP_RECVRTABLE, IPPROTO_IP);
 		if (*mp)
 			mp = &(*mp)->m_next;
 	}

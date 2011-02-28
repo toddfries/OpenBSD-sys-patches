@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.712 2011/04/05 12:50:15 guenther Exp $
+#	$OpenBSD: GENERIC,v 1.718 2011/06/20 06:07:26 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -62,6 +62,7 @@ acpitz*		at acpi?
 acpiasus*	at acpi?
 acpisony*	at acpi?
 acpithinkpad*	at acpi?
+acpitoshiba*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
@@ -123,7 +124,7 @@ alipm*	at pci?				# Acer Labs M7101 power management
 iic*	at alipm?
 ichiic*	at pci?				# Intel ICH SMBus controller
 iic*	at ichiic?
-viapm*	at pci?				# VIA VT8237 power management
+viapm*	at pci?				# VIA SMBus controller
 iic*	at viapm?
 amdiic*	at pci?				# AMD-8111 SMBus controller
 iic*	at amdiic?
@@ -141,7 +142,6 @@ schsio*	at isa? port 0x4e
 schsio*	at isa? port 0x162e
 schsio*	at isa? port 0x164e
 
-viaenv*	at pci?				# VIA VT82C686A hardware monitor
 viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
 viasio*	at isa? port 0x4e flags 0x0000
 wbsio*	at isa? port 0x2e		# Winbond LPC Super I/O
@@ -254,7 +254,6 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -360,6 +359,7 @@ amdagp*		at pchb?
 intelagp*	at pchb?
 sisagp*		at pchb?
 viaagp*		at pchb?
+mmuagp*		at pchb?
 
 agp*		at intagp?	# AGP bridges
 agp*		at aliagp?	# AGP bridges
@@ -367,6 +367,7 @@ agp*		at amdagp?	# AGP bridges
 agp*		at intelagp?	# AGP bridges
 agp*		at sisagp?	# AGP bridges
 agp*		at viaagp?	# AGP bridges
+agp*		at mmuagp?	
 
 #option		DRMDEBUG
 inteldrm*	at vga?		# Intel i915, i945 DRM driver
@@ -612,6 +613,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 gcu*	at pci?				# Intel Pro/1000 ethernet GCU
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
+myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -633,7 +635,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
-alc*	at pci?				# Attansic L1C/L2C Ethernet
+alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.c,v 1.50 2010/09/22 01:18:57 matthew Exp $	*/
+/*	$OpenBSD: ramdisk.c,v 1.53 2011/06/05 18:40:33 matthew Exp $	*/
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -340,7 +340,7 @@ rdstrategy(struct buf *bp)
 	}
 
 	/* Do not write on "no trespassing" areas... */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label, 1) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
 		goto bad;
 
 	switch (sc->sc_type) {
@@ -434,20 +434,13 @@ rdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *proc)
 			return (EBADF);
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0);
+		    (struct disklabel *)data, sc->sc_dk.dk_openmask);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    rdstrategy, sc->sc_dk.dk_label);
 		}
 		return (error);
-
-	case DIOCWLABEL:
-		if (sc->sc_type == RD_UNCONFIGURED)
-			break;
-		if ((flag & FWRITE) == 0)
-			return (EBADF);
-		return (0);
 
 	case RD_GETCONF:
 		/* If this is not the control device, punt! */

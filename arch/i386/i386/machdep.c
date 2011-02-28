@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.489 2011/03/20 21:44:08 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.500 2011/06/05 19:41:07 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -108,6 +108,7 @@
 #include <machine/cpufunc.h>
 #include <machine/cpuvar.h>
 #include <machine/gdt.h>
+#include <machine/kcore.h>
 #include <machine/pio.h>
 #include <machine/bus.h>
 #include <machine/psl.h>
@@ -184,17 +185,6 @@ int	cpu_apmhalt = 0;	/* sysctl'd to 1 for halt -p hack */
 int	user_ldt_enable = 0;	/* sysctl'd to 1 to enable */
 #endif
 
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
-
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
 struct uvm_constraint_range *uvm_md_constraints[] = {
@@ -206,10 +196,7 @@ struct uvm_constraint_range *uvm_md_constraints[] = {
 extern int	boothowto;
 int	physmem;
 
-struct dumpmem {
-	paddr_t	start;
-	paddr_t	end;
-} dumpmem[VM_PHYSSEG_MAX];
+struct dumpmem dumpmem[VM_PHYSSEG_MAX];
 u_int ndumpmem;
 
 /*
@@ -417,13 +404,6 @@ cpu_startup()
 	printf("real mem  = %llu (%lluMB)\n",
 	    (unsigned long long)ptoa((psize_t)physmem),
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
-
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1347,6 +1327,8 @@ amd_family6_setperf_setup(struct cpu_info *ci)
 		k8_powernow_init();
 		break;
 	}
+	if (ci->ci_family >= 0x10)
+		k1x_init(ci);
 }
 #endif
 
@@ -2106,8 +2088,16 @@ p3_get_bus_clock(struct cpu_info *ci)
 		break;
 	case 0x1a: /* Core i7, Xeon 3500/5500 */
 	case 0x1e: /* Core i5/i7, Xeon 3400 */
+	case 0x1f: /* Core i5/i7 */
 	case 0x25: /* Core i3/i5, Xeon 3400 */
 	case 0x2c: /* Core i7, Xeon 3600/5600 */
+		/* BUS133 */
+		break;
+	case 0x2a: /* Core i5/i7 2nd Generation */
+	case 0x2d: /* Xeon E5 */
+		/* BUS100 */
+		break;
+	case 0x1d: /* Xeon MP 7400 */
 	case 0x2e: /* Xeon 6500/7500 */
 		break;
 	default: 
@@ -3062,9 +3052,9 @@ init386(paddr_t first_avail)
 				e = 0xfffff000;
 			}
 
-			/* skip first eight pages */
-			if (a < 8 * NBPG)
-				a = 8 * NBPG;
+			/* skip first 16 pages for tramps and hibernate */
+			if (a < 16 * NBPG)
+				a = 16 * NBPG;
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {
@@ -3134,12 +3124,11 @@ init386(paddr_t first_avail)
 #ifdef DEBUG
 		printf(" %x-%x (<16M)", lim, kb);
 #endif
-		uvm_page_physload(lim, kb, lim, kb, VM_FREELIST_FIRST16);
+		uvm_page_physload(lim, kb, lim, kb, 0);
 	}
 
 	for (i = 0; i < ndumpmem; i++) {
 		paddr_t a, e;
-		paddr_t lim;
 
 		a = dumpmem[i].start;
 		e = dumpmem[i].end;
@@ -3149,27 +3138,10 @@ init386(paddr_t first_avail)
 			e = atop(avail_end);
 
 		if (a < e) {
-			if (a < atop(16 * 1024 * 1024)) {
-				lim = MIN(atop(16 * 1024 * 1024), e);
-#ifdef DEBUG
-				printf(" %x-%x (<16M)", a, lim);
-#endif
-				uvm_page_physload(a, lim, a, lim,
-				    VM_FREELIST_FIRST16);
-				if (e > lim) {
-#ifdef DEBUG
-					printf(" %x-%x", lim, e);
-#endif
-					uvm_page_physload(lim, e, lim, e,
-					    VM_FREELIST_DEFAULT);
-				}
-			} else {
 #ifdef DEBUG
 				printf(" %x-%x", a, e);
 #endif
-				uvm_page_physload(a, e, a, e,
-				    VM_FREELIST_DEFAULT);
-			}
+				uvm_page_physload(a, e, a, e, 0);
 		}
 	}
 #ifdef DEBUG
@@ -3778,6 +3750,12 @@ i386_softintunlock(void)
 	__mp_unlock(&kernel_lock);
 }
 #endif
+
+/*
+ * True if the system has any non-level interrupts which are shared
+ * on the same pin.
+ */
+int	intr_shared_edge;
 
 /*
  * Software interrupt registration

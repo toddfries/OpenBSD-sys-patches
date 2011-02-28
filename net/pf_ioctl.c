@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.237 2011/03/25 10:54:22 claudio Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.240 2011/06/02 22:03:30 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -263,7 +263,7 @@ void
 pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 {
 	if (rulequeue != NULL) {
-		if (rule->states_cur <= 0) {
+		if (rule->states_cur <= 0 && rule->src_nodes <= 0) {
 			/*
 			 * XXX - we need to remove the table *before* detaching
 			 * the rule to make sure the table code does not delete
@@ -814,11 +814,11 @@ pf_setup_pfsync_matching(struct pf_ruleset *rs)
 
 		if (!rs->rules.inactive.ptr_array)
 			return (ENOMEM);
-	}
 
-	TAILQ_FOREACH(rule, rs->rules.inactive.ptr, entries) {
-		pf_hash_rule(&ctx, rule);
-		(rs->rules.inactive.ptr_array)[rule->nr] = rule;
+		TAILQ_FOREACH(rule, rs->rules.inactive.ptr, entries) {
+			pf_hash_rule(&ctx, rule);
+			(rs->rules.inactive.ptr_array)[rule->nr] = rule;
+		}
 	}
 
 	MD5Final(digest, &ctx);
@@ -2517,8 +2517,13 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->os_fingerprint = from->os_fingerprint;
 
 	to->rtableid = from->rtableid;
-	if (to->rtableid > 0 && !rtable_exists(to->rtableid))
+	if (to->rtableid >= 0 && !rtable_exists(to->rtableid))
 		return (EBUSY);
+	to->onrdomain = from->onrdomain;
+	if (to->onrdomain >= 0 && !rtable_exists(to->onrdomain))
+		return (EBUSY);
+	if (to->onrdomain >= 0)		/* make sure it is a real rdomain */
+		to->onrdomain = rtable_l2(to->onrdomain);
 
 	for (i = 0; i < PFTM_MAX; i++)
 		to->timeout[i] = from->timeout[i];

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.22 2010/08/30 18:56:18 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.24 2011/05/24 20:27:11 matthew Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -88,7 +88,6 @@ pci*	at ppb?
 #ulpt*	at uhub?		# USB Printers
 #umass*	at uhub?		# USB Mass Storage devices
 #scsibus* at umass?
-#atapiscsi* at umass?
 #uhidev*	at uhub?	# Human Interface Devices
 #ums*	at uhidev?		# USB mouse
 #wsmouse* at ums? mux 0
@@ -121,8 +120,8 @@ pci*	at ppb?
 
 #ie*	at pci?
 
-#siop*	at pci?			# NCR 538XX SCSI controllers(new)
-#scsibus* at siop?
+siop*	at pci?			# NCR 538XX SCSI controllers(new)
+scsibus* at siop?
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
 #scsibus* at ahd?
 
@@ -176,7 +175,7 @@ ukphy*		at mii?		# generic unknown PHYs
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
-#sd*	at scsibus?
+sd*	at scsibus?
 #st*	at scsibus?
 #cd*	at scsibus?
 #ch*	at scsibus?

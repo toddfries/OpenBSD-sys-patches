@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.128 2011/04/02 16:47:17 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.130 2011/06/05 19:41:04 deraadt Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -114,9 +114,6 @@ long buflowpages;	/* bufpages low water mark */
 long bufhighpages; 	/* bufpages high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
 
-/* XXX - should be defined here. */
-extern int bufcachepercent;
-
 vsize_t bufkvm;
 
 struct proc *cleanerproc;
@@ -193,9 +190,6 @@ bufinit(void)
 {
 	u_int64_t dmapages;
 	struct bqueues *dp;
-
-	/* XXX - for now */
-	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
 
 	dmapages = uvm_pagecount(&dma_constraint);
 
@@ -463,9 +457,10 @@ bread_cluster_callback(struct buf *bp)
 		size_t newsize = xbpp[1]->b_bufsize;
 
 		/*
-		 * Shrink this buffer to only cover its part of the total I/O.
+		 * Shrink this buffer's mapping to only cover its part of
+		 * the total I/O.
 		 */
-		buf_shrink_mem(bp, newsize);
+		buf_fix_mapping(bp, newsize);
 		bp->b_bcount = newsize;
 	}
 

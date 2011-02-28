@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma_alloc.c,v 1.6 2011/04/05 01:28:05 art Exp $	 */
+/*	$OpenBSD: dma_alloc.c,v 1.8 2011/04/18 19:23:46 art Exp $	 */
 /*
  * Copyright (c) 2010 Theo de Raadt <deraadt@openbsd.org>
  *

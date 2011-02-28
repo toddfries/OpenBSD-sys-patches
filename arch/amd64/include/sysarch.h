@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.8 2011/04/05 21:14:00 guenther Exp $	*/
+/*	$OpenBSD: sysarch.h,v 1.10 2011/04/13 02:49:12 guenther Exp $	*/
 /*	$NetBSD: sysarch.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 
 #ifndef _MACHINE_SYSARCH_H_

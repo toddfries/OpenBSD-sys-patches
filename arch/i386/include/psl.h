@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.17 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: psl.h,v 1.19 2011/06/08 22:57:59 kettenis Exp $	*/
 /*	$NetBSD: psl.h,v 1.30 1996/05/13 01:28:05 mycroft Exp $	*/
 
 /*-
@@ -85,11 +85,15 @@
 struct intrhand {
 	int		(*ih_fun)(void *);
 	void		*ih_arg;
-	struct intrhand	*ih_next;
 	int		ih_level;
+	struct intrhand	*ih_next;
+	int		ih_pin;
 	int		ih_irq;
 	struct evcount	ih_count;
+	int		ih_vec;
 };
+
+extern int intr_shared_edge;	/* This system has shared edge interrupts */
 
 #endif /* _LOCORE */
 #endif /* _KERNEL */

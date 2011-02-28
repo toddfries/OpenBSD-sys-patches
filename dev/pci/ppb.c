@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.47 2010/12/30 00:58:22 kettenis Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.51 2011/06/05 22:14:22 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -170,7 +170,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
 	    &sc->sc_cap_off, &reg) && (reg & PCI_PCIE_XCAP_SI)) {
 		if (pci_intr_map(pa, &ih) == 0)
-			sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_TTY,
+			sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_BIO,
 			    ppb_intr, sc, self->dv_xname);
 
 		if (sc->sc_intrhand) {
@@ -291,12 +291,10 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_memt = pa->pa_memt;
 	pba.pba_dmat = pa->pa_dmat;
 	pba.pba_pc = pc;
+	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
 	pba.pba_ioex = sc->sc_ioex;
 	pba.pba_memex = sc->sc_memex;
 	pba.pba_pmemex = sc->sc_pmemex;
-#if 0
-	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
-#endif
 	pba.pba_domain = pa->pa_domain;
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
 	pba.pba_bridgeih = sc->sc_ih;

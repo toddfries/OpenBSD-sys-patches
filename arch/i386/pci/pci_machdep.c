@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.58 2011/01/10 16:26:27 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.63 2011/06/08 22:57:59 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -103,6 +103,8 @@ extern bios_pciinfo_t *bios_pciinfo;
 #include "ioapic.h"
 
 #include <machine/i82093var.h>
+#include <machine/i82489reg.h>
+#include <machine/i82489var.h>
 #if NIOAPIC > 0
 #include <machine/mpbiosvar.h>
 #endif
@@ -193,6 +195,9 @@ void
 pci_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
+	pci_chipset_tag_t pc = pba->pba_pc;
+	pcitag_t tag;
+	pcireg_t id, class;
 
 #if NBIOS > 0
 	if (pba->pba_bus == 0)
@@ -202,6 +207,108 @@ pci_attach_hook(struct device *parent, struct device *self,
 	if (pba->pba_bus == 0)
 		printf(": configuration mode %d", pci_mode);
 #endif
+
+	if (pba->pba_bus != 0)
+		return;
+
+	/*
+	 * In order to decide whether the system supports MSI we look
+	 * at the host bridge, which should be device 0 function 0 on
+	 * bus 0.  It is better to not enable MSI on systems that
+	 * support it than the other way around, so be conservative
+	 * here.  So we don't enable MSI if we don't find a host
+	 * bridge there.  We also deliberately don't enable MSI on
+	 * chipsets from low-end manifacturers like VIA and SiS.
+	 */
+	tag = pci_make_tag(pc, 0, 0, 0);
+	id = pci_conf_read(pc, tag, PCI_ID_REG);
+	class = pci_conf_read(pc, tag, PCI_CLASS_REG);
+
+	if (PCI_CLASS(class) != PCI_CLASS_BRIDGE ||
+	    PCI_SUBCLASS(class) != PCI_SUBCLASS_BRIDGE_HOST)
+		return;
+
+	switch (PCI_VENDOR(id)) {
+	case PCI_VENDOR_INTEL:
+		/*
+		 * For Intel platforms, MSI support was introduced
+		 * with the new Pentium 4 processor interrupt delivery
+		 * mechanism, so we blacklist all PCI chipsets that
+		 * support Pentium III and earlier CPUs.
+		 */
+		switch (PCI_PRODUCT(id)) {
+		case PCI_PRODUCT_INTEL_PCMC: /* 82434LX/NX */
+		case PCI_PRODUCT_INTEL_82437FX:
+		case PCI_PRODUCT_INTEL_82437MX:
+		case PCI_PRODUCT_INTEL_82437VX:
+		case PCI_PRODUCT_INTEL_82439HX:
+		case PCI_PRODUCT_INTEL_82439TX:
+		case PCI_PRODUCT_INTEL_82440BX:
+		case PCI_PRODUCT_INTEL_82440BX_AGP:
+		case PCI_PRODUCT_INTEL_82440MX_HB:
+		case PCI_PRODUCT_INTEL_82441FX:
+		case PCI_PRODUCT_INTEL_82443BX:
+		case PCI_PRODUCT_INTEL_82443BX_AGP:
+		case PCI_PRODUCT_INTEL_82443BX_NOAGP:
+		case PCI_PRODUCT_INTEL_82443GX:
+		case PCI_PRODUCT_INTEL_82443LX:
+		case PCI_PRODUCT_INTEL_82443LX_AGP:
+		case PCI_PRODUCT_INTEL_82810_HB:
+		case PCI_PRODUCT_INTEL_82810E_HB:
+		case PCI_PRODUCT_INTEL_82815_HB:
+		case PCI_PRODUCT_INTEL_82820_HB:
+		case PCI_PRODUCT_INTEL_82830M_HB:
+		case PCI_PRODUCT_INTEL_82840_HB:
+			break;
+		default:
+			pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+			break;
+		}
+		break;
+	case PCI_VENDOR_NVIDIA:
+		/*
+		 * Since NVIDIA chipsets are completely undocumented,
+		 * we have to make a guess here.  We assume that all
+		 * chipsets that support PCIe include support for MSI,
+		 * since support for MSI is mandated by the PCIe
+		 * standard.
+		 */
+		switch (PCI_PRODUCT(id)) {
+		case PCI_PRODUCT_NVIDIA_NFORCE_PCHB:
+		case PCI_PRODUCT_NVIDIA_NFORCE2_PCHB:
+			break;
+		default:
+			pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+			break;
+		}
+		break;
+	case PCI_VENDOR_AMD:
+		/*
+		 * The AMD-750 and AMD-760 chipsets don't support MSI.
+		 */
+		switch (PCI_PRODUCT(id)) {
+		case PCI_PRODUCT_AMD_SC751_SC:
+		case PCI_PRODUCT_AMD_761_PCHB:
+		case PCI_PRODUCT_AMD_762_PCHB:
+			break;
+		default:
+			pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+			break;
+		}
+		break;
+	}
+
+	/*
+	 * Don't enable MSI on a HyperTransport bus.  In order to
+	 * determine that bus 0 is a HyperTransport bus, we look at
+	 * device 24 function 0, which is the HyperTransport
+	 * host/primary interface integrated on most 64-bit AMD CPUs.
+	 * If that device has a HyperTransport capability, bus 0 must
+	 * be a HyperTransport bus and we disable MSI.
+	 */
+	tag = pci_make_tag(pc, 0, 24, 0);
+	if (pci_get_capability(pc, tag, PCI_CAP_HT, NULL, NULL))
+		pba->pba_flags &= ~PCI_FLAGS_MSI_ENABLED;
 }
 
 int
@@ -478,6 +585,22 @@ not2:
 }
 
 int
+pci_intr_map_msi(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
+{
+	pci_chipset_tag_t pc = pa->pa_pc;
+	pcitag_t tag = pa->pa_tag;
+
+	if ((pa->pa_flags & PCI_FLAGS_MSI_ENABLED) == 0 || mp_busses == NULL ||
+	    pci_get_capability(pc, tag, PCI_CAP_MSI, NULL, NULL) == 0)
+		return 1;
+
+	ihp->tag = tag;
+	ihp->line = APIC_INT_VIA_MSG;
+	ihp->pin = 0;
+	return 0;
+}
+
+int
 pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 	int pin = pa->pa_rawintrpin;
@@ -607,10 +730,13 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 	static char irqstr[64];
 	int line = ih.line & APIC_INT_LINE_MASK;
 
+	if (ih.line & APIC_INT_VIA_MSG)
+		return ("msi");
+
 #if NIOAPIC > 0
 	if (ih.line & APIC_INT_VIA_APIC) {
-		snprintf(irqstr, sizeof irqstr, "apic %d int %d (irq %d)",
-		     APIC_IRQ_APIC(ih.line), APIC_IRQ_PIN(ih.line), line);
+		snprintf(irqstr, sizeof irqstr, "apic %d int %d",
+		     APIC_IRQ_APIC(ih.line), APIC_IRQ_PIN(ih.line));
 		return (irqstr);
 	}
 #endif
@@ -627,6 +753,9 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 void	acpiprt_route_interrupt(int bus, int dev, int pin);
 #endif
 
+extern struct intrhand *apic_intrhand[256];
+extern int apic_maxlevel[256];
+
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg, const char *what)
@@ -634,6 +763,49 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 	void *ret;
 	int bus, dev;
 	int l = ih.line & APIC_INT_LINE_MASK;
+	pcitag_t tag = ih.tag;
+	int irq = ih.line;
+
+	if (ih.line & APIC_INT_VIA_MSG) {
+		struct intrhand *ih;
+		pcireg_t reg;
+		int off, vec;
+
+		if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+			panic("%s: no msi capability", __func__);
+
+		vec = idt_vec_alloc(level, level + 15);
+		if (vec == 0)
+			return (NULL);
+
+		ih = malloc(sizeof(*ih), M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
+		if (ih == NULL)
+			panic("%s: can't malloc handler info", __func__);
+
+		ih->ih_fun = func;
+		ih->ih_arg = arg;
+		ih->ih_next = NULL;
+		ih->ih_level = level;
+		ih->ih_irq = irq;
+		ih->ih_pin = tag.mode1;
+		ih->ih_vec = vec;
+		evcount_attach(&ih->ih_count, what, &ih->ih_vec);
+
+		apic_maxlevel[vec] = level;
+		apic_intrhand[vec] = ih;
+		idt_vec_set(vec, apichandler[vec & 0xf]);
+
+		if (reg & PCI_MSI_MC_C64) {
+			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
+			pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
+			pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
+		} else {
+			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
+			pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
+		}
+		pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
+		return (ih);
+	}
 
 	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
 #if NACPIPRT > 0
@@ -659,6 +831,27 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 void
 pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
+	struct intrhand *ih = cookie;
+
+	if (ih->ih_irq & APIC_INT_VIA_MSG) {
+		pcitag_t tag = { .mode1 = ih->ih_pin };
+		pcireg_t reg;
+		int off;
+		
+		if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+			panic("%s: no msi capability", __func__);
+
+		pci_conf_write(pc, tag, off, reg &= ~PCI_MSI_MC_MSIE);
+
+		apic_maxlevel[ih->ih_vec] = 0;
+		apic_intrhand[ih->ih_vec] = NULL;
+		idt_vec_free(ih->ih_vec);
+
+		evcount_detach(&ih->ih_count);
+		free(ih, M_DEVBUF);
+		return;
+	}
+
 	/* XXX oh, unroute the pci int link? */
 	isa_intr_disestablish(NULL, cookie);
 }

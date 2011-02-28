@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.152 2011/04/05 11:48:28 blambert Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.157 2011/05/04 16:05:49 blambert Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -92,6 +92,11 @@
 #include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
+#endif
+
 struct	mbstat mbstat;		/* mbuf stats */
 struct	pool mbpool;		/* mbuf pool */
 
@@ -109,8 +114,6 @@ static	char mclnames[MCLPOOLS][8];
 struct	pool mclpools[MCLPOOLS];
 
 int	m_clpool(u_int);
-
-struct mbuf *m_split_mbuf(struct mbuf *, int, int, struct mbuf *);
 
 int max_linkhdr;		/* largest link-level header */
 int max_protohdr;		/* largest protocol header */
@@ -914,20 +917,16 @@ m_adj(struct mbuf *mp, int req_len)
 }
 
 /*
- * Rearange an mbuf chain so that len bytes are contiguous
- * and in the data area of an mbuf (so that mtod and dtom
- * will work for a structure of size len).  Returns the resulting
+ * Rearrange an mbuf chain so that len bytes are contiguous
+ * and in the data area of an mbuf (so that mtod will work
+ * for a structure of size len).  Returns the resulting
  * mbuf chain on success, frees it and returns null on failure.
- * If there is room, it will add up to max_protohdr-len extra bytes to the
- * contiguous region in an attempt to avoid being called next time.
  */
-struct mbuf *
-m_pullup(struct mbuf *n, int len)
+struct mbuf *   
+m_pullup(struct mbuf *n, int len)       
 {
 	struct mbuf *m;
 	int count;
-	int space;
-	int s;
 
 	/*
 	 * If first mbuf has no cluster, and has room for len bytes
@@ -941,62 +940,7 @@ m_pullup(struct mbuf *n, int len)
 		m = n;
 		n = n->m_next;
 		len -= m->m_len;
-	} else {
-		if (len > MHLEN)
-			goto bad;
-		MGET(m, M_DONTWAIT, n->m_type);
-		if (m == NULL)
-			goto bad;
-		m->m_len = 0;
-		if (n->m_flags & M_PKTHDR)
-			M_MOVE_PKTHDR(m, n);
-	}
-	space = &m->m_dat[MLEN] - (m->m_data + m->m_len);
-	s = splnet();
-	do {
-		count = min(min(max(len, max_protohdr), space), n->m_len);
-		bcopy(mtod(n, caddr_t), mtod(m, caddr_t) + m->m_len,
-		    (unsigned)count);
-		len -= count;
-		m->m_len += count;
-		n->m_len -= count;
-		space -= count;
-		if (n->m_len)
-			n->m_data += count;
-		else
-			n = m_free_unlocked(n);
-	} while (len > 0 && n);
-	if (len > 0) {
-		(void)m_free_unlocked(m);
-		splx(s);
-		goto bad;
-	}
-	splx(s);
-	m->m_next = n;
-	return (m);
-bad:
-	m_freem(n);
-	return (NULL);
-}
-
-/*
- * m_pullup2() works like m_pullup, save that len can be <= MCLBYTES.
- * m_pullup2() only works on values of len such that MHLEN < len <= MCLBYTES,
- * it calls m_pullup() for values <= MHLEN.  It also only coagulates the
- * requested number of bytes.  (For those of us who expect unwieldy option
- * headers.
- *
- * KEBE SAYS:  Remember that dtom() calls with data in clusters does not work!
- */
-struct mbuf *   
-m_pullup2(struct mbuf *n, int len)       
-{
-	struct mbuf *m;
-	int count;
-
-	if (len <= MHLEN)
-		return m_pullup(n, len);
-	if ((n->m_flags & M_EXT) != 0 &&
+	} else if ((n->m_flags & M_EXT) != 0 && len > MHLEN &&
 	    n->m_data + len < &n->m_data[MCLBYTES] && n->m_next) {
 		if (n->m_len >= len)
 			return (n);
@@ -1009,20 +953,16 @@ m_pullup2(struct mbuf *n, int len)
 		MGET(m, M_DONTWAIT, n->m_type);
 		if (m == NULL)
 			goto bad;
-		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0) {
-			m_free(m);
-			goto bad;
+		if (len > MHLEN) {
+			MCLGET(m, M_DONTWAIT);
+			if ((m->m_flags & M_EXT) == 0) {
+				m_free(m);
+				goto bad;
+			}
 		}
 		m->m_len = 0;
-		if (n->m_flags & M_PKTHDR) {
-			/* Too many adverse side effects. */
-			/* M_MOVE_PKTHDR(m, n); */
-			m->m_flags = (n->m_flags & M_COPYFLAGS) |
-			    M_EXT | M_CLUSTER;
-			M_MOVE_HDR(m, n);
-			/* n->m_data is cool. */
-		}
+		if (n->m_flags & M_PKTHDR)
+			M_MOVE_PKTHDR(m, n);
 	}
 
 	do {
@@ -1081,114 +1021,130 @@ m_getptr(struct mbuf *m, int loc, int *off)
 }
 
 /*
- * Inject a new mbuf chain of length len in mbuf chain m at
- * position off. Returns a pointer to the first injected mbuf, or
- * NULL on failure (m is left undisturbed). Note that if there is
- * enough space for an object of size len in the appropriate position,
+ * Inject a new mbuf chain of length siz in mbuf chain m0 at
+ * position len0. Returns a pointer to the first injected mbuf, or
+ * NULL on failure (m0 is left undisturbed). Note that if there is
+ * enough space for an object of size siz in the appropriate position,
  * no memory will be allocated. Also, there will be no data movement in
- * the first off bytes (pointers to that will remain valid).
+ * the first len0 bytes (pointers to that will remain valid).
  *
- * XXX It is assumed that len is less than the size of an mbuf at the moment.
+ * XXX It is assumed that siz is less than the size of an mbuf at the moment.
  */
 struct mbuf *
-m_inject(struct mbuf *m, int off, int len, int wait)
+m_inject(struct mbuf *m0, int len0, int siz, int wait)
 {
-	struct mbuf *n, *o, *p;
-	int off1;
+	struct mbuf *m, *n, *n2 = NULL, *n3;
+	unsigned len = len0, remain;
 
-	if (len > MHLEN || len <= 0)
+	if ((siz >= MHLEN) || (len0 <= 0))
+	        return (NULL);
+	for (m = m0; m && len > m->m_len; m = m->m_next)
+		len -= m->m_len;
+	if (m == NULL)
 		return (NULL);
+	remain = m->m_len - len;
+	if (remain == 0) {
+	        if ((m->m_next) && (M_LEADINGSPACE(m->m_next) >= siz)) {
+		        m->m_next->m_len += siz;
+			if (m0->m_flags & M_PKTHDR)
+				m0->m_pkthdr.len += siz;
+			m->m_next->m_data -= siz;
+			return m->m_next;
+		}
+	} else {
+	        n2 = m_copym2(m, len, remain, wait);
+		if (n2 == NULL)
+		        return (NULL);
+	}
 
-	if ((n = m_getptr(m, off, &off1)) == NULL)
-		return (NULL);
-
-	if ((o = m_get(wait, MT_DATA)) == NULL)
-		return (NULL);
-
-	if ((p = m_split_mbuf(n, off1, wait, NULL)) == NULL) {
-		m_freem(o);
+	MGET(n, wait, MT_DATA);
+	if (n == NULL) {
+	        if (n2)
+		        m_freem(n2);
 		return (NULL);
 	}
 
-	o->m_len = len;
-	o->m_next = p;
-	n->m_next = o;
-
-	if (m->m_flags & M_PKTHDR)
-		m->m_pkthdr.len += len;
-
-	return (o);
+	n->m_len = siz;
+	if (m0->m_flags & M_PKTHDR)
+		m0->m_pkthdr.len += siz;
+	m->m_len -= remain; /* Trim */
+	if (n2)	{
+	        for (n3 = n; n3->m_next != NULL; n3 = n3->m_next)
+		        ;
+		n3->m_next = n2;
+	} else
+	        n3 = n;
+	for (; n3->m_next != NULL; n3 = n3->m_next)
+	        ;
+	n3->m_next = m->m_next;
+	m->m_next = n;
+	return n;
 }
 
 /*
- * Split a single mbuf, leaving the chain intact.
+ * Partition an mbuf chain in two pieces, returning the tail --
+ * all but the first len0 bytes.  In case of failure, it returns NULL and
+ * attempts to restore the chain to its original state.
  */
 struct mbuf *
-m_split_mbuf(struct mbuf *m, int off, int wait, struct mbuf *mhdr)
+m_split(struct mbuf *m0, int len0, int wait)
 {
-	struct mbuf *n;
-	int copyhdr;
+	struct mbuf *m, *n;
+	unsigned len = len0, remain, olen;
 
-	if (off > m->m_len)
+	for (m = m0; m && len > m->m_len; m = m->m_next)
+		len -= m->m_len;
+	if (m == NULL)
 		return (NULL);
-
-	copyhdr = (mhdr && mhdr->m_flags & M_PKTHDR);
-
-	if (copyhdr)
-		n = m_gethdr(wait, MT_DATA);
-	else
-		n = m_get(wait, MT_DATA);
-	if (!n)
-		return (NULL);
-
-	if (m->m_len - off > (copyhdr ? MHLEN : MLEN)) {
-		MCLGET(n, wait);
-		if (!(n->m_flags & M_EXT)) {
-			m_free(n);
+	remain = m->m_len - len;
+	if (m0->m_flags & M_PKTHDR) {
+		MGETHDR(n, wait, m0->m_type);
+		if (n == NULL)
+			return (NULL);
+		if (m_dup_pkthdr(n, m0, wait)) {
+			m_freem(n);
 			return (NULL);
 		}
+		n->m_pkthdr.len -= len0;
+		olen = m0->m_pkthdr.len;
+		m0->m_pkthdr.len = len0;
+		if (m->m_flags & M_EXT)
+			goto extpacket;
+		if (remain > MHLEN) {
+			/* m can't be the lead packet */
+			MH_ALIGN(n, 0);
+			n->m_next = m_split(m, len, wait);
+			if (n->m_next == NULL) {
+				(void) m_free(n);
+				m0->m_pkthdr.len = olen;
+				return (NULL);
+			} else
+				return (n);
+		} else
+			MH_ALIGN(n, remain);
+	} else if (remain == 0) {
+		n = m->m_next;
+		m->m_next = NULL;
+		return (n);
+	} else {
+		MGET(n, wait, m->m_type);
+		if (n == NULL)
+			return (NULL);
+		M_ALIGN(n, remain);
 	}
-
-	if (copyhdr && m_dup_pkthdr(mhdr, n, wait)) {
-		m_free(n);
-		return (NULL);
+extpacket:
+	if (m->m_flags & M_EXT) {
+		n->m_ext = m->m_ext;
+		MCLADDREFERENCE(m, n);
+		n->m_data = m->m_data + len;
+	} else {
+		bcopy(mtod(m, caddr_t) + len, mtod(n, caddr_t), remain);
 	}
-
-	bcopy(mtod(m, caddr_t) + off, mtod(n, caddr_t), m->m_len - off);
-
-	n->m_len = m->m_len - off;
-	m->m_len = off;
+	n->m_len = remain;
+	m->m_len = len;
 	n->m_next = m->m_next;
-	m->m_next = n;
-
+	m->m_next = NULL;
 	return (n);
-}
-
-/*
- * Break mbuf chain into two parts at the specified offset.
- */
-struct mbuf *
-m_split(struct mbuf *m, int off, int wait)
-{
-	struct mbuf *n, *o;
-	int off1, copyhdr;
-
-	copyhdr = m->m_flags & M_PKTHDR;
-
-	if ((n = m_getptr(m, off, &off1)) == NULL)
-		return (NULL);
-
-	if ((o = m_split_mbuf(n, off1, wait, m)) == NULL)
-		return (NULL);
-
-	if (copyhdr) {
-		o->m_pkthdr.len = m->m_pkthdr.len - off;
-		m->m_pkthdr.len = off;
-	}
-
-	n->m_next = NULL;
-
-	return (o);
 }
 
 /*
@@ -1368,9 +1324,6 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int wait)
 }
 
 #ifdef DDB
-#include <machine/db_machdep.h>
-#include <ddb/db_interface.h>
-
 void
 m_print(void *v, int (*pr)(const char *, ...))
 {

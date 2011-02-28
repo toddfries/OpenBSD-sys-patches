@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.107 2011/04/03 22:32:39 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.110 2011/06/05 19:41:08 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -81,19 +81,6 @@ void dump_tlb(void);
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
 
 /* low 32 bits range. */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
@@ -315,7 +302,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
@@ -332,14 +318,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -349,11 +334,11 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -610,10 +595,10 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
-	    ptoa(physmem)/1024/1024);
-	printf("rsvd mem = %u (%uMB)\n", ptoa(rsvdmem),
-	    ptoa(rsvdmem)/1024/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
+	printf("rsvd mem = %lu (%luMB)\n", ptoa((psize_t)rsvdmem),
+	    ptoa((psize_t)rsvdmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments. This map effectively
@@ -629,8 +614,8 @@ cpu_startup()
 #ifdef PMAPDEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024/1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up CPU-specific registers, cache, etc.

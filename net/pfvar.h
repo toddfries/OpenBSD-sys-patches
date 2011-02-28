@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.325 2011/04/05 13:48:18 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.334 2011/06/21 08:59:47 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -543,13 +543,14 @@ struct pf_rule {
 	struct pf_rule_addr	 dst;
 #define PF_SKIP_IFP		0
 #define PF_SKIP_DIR		1
-#define PF_SKIP_AF		2
-#define PF_SKIP_PROTO		3
-#define PF_SKIP_SRC_ADDR	4
-#define PF_SKIP_SRC_PORT	5
-#define PF_SKIP_DST_ADDR	6
-#define PF_SKIP_DST_PORT	7
-#define PF_SKIP_COUNT		8
+#define PF_SKIP_RDOM		2
+#define PF_SKIP_AF		3
+#define PF_SKIP_PROTO		4
+#define PF_SKIP_SRC_ADDR	5
+#define PF_SKIP_SRC_PORT	6
+#define PF_SKIP_DST_ADDR	7
+#define PF_SKIP_DST_PORT	8
+#define PF_SKIP_COUNT		9
 	union pf_rule_ptr	 skip[PF_SKIP_COUNT];
 #define PF_RULE_LABEL_SIZE	 64
 	char			 label[PF_RULE_LABEL_SIZE];
@@ -581,6 +582,7 @@ struct pf_rule {
 	pf_osfp_t		 os_fingerprint;
 
 	int			 rtableid;
+	int			 onrdomain;
 	u_int32_t		 timeout[PFTM_MAX];
 	u_int32_t		 states_cur;
 	u_int32_t		 states_tot;
@@ -1219,8 +1221,6 @@ struct pf_pdesc {
 	u_int16_t	*proto_sum;
 
 	u_int16_t	 rdomain;	/* original routing domain */
-	u_int16_t	 flags;
-#define PFDESC_IP_REAS	0x0002		/* IP frags would've been reassembled */
 	sa_family_t	 af;
 	u_int8_t	 proto;
 	u_int8_t	 tos;
@@ -1440,6 +1440,7 @@ struct pf_divert {
 		struct in6_addr	ipv6;
 	}		addr;
 	u_int16_t	port;
+	u_int16_t	rdomain;
 };
 
 #define PFFRAG_FRENT_HIWAT	5000	/* Number of fragment entries */
@@ -1702,7 +1703,7 @@ extern void			 pf_tbladdr_copyout(struct pf_addr_wrap *);
 extern void			 pf_calc_skip_steps(struct pf_rulequeue *);
 extern struct pool		 pf_src_tree_pl, pf_sn_item_pl, pf_rule_pl;
 extern struct pool		 pf_state_pl, pf_state_key_pl, pf_state_item_pl,
-				    pf_altq_pl, pf_pooladdr_pl, pf_rule_item_pl;
+				    pf_altq_pl, pf_rule_item_pl;
 extern struct pool		 pf_state_scrub_pl;
 extern void			 pf_purge_thread(void *);
 extern void			 pf_purge_expired_src_nodes(int);
@@ -1740,7 +1741,7 @@ void				 pf_rm_rule(struct pf_rulequeue *,
 				    struct pf_rule *);
 struct pf_divert		*pf_find_divert(struct mbuf *);
 int				 pf_setup_pdesc(sa_family_t, int,
-				    struct pf_pdesc *, struct mbuf *,
+				    struct pf_pdesc *, struct mbuf **,
 				    u_short *, u_short *, struct pfi_kif *,
 				    struct pf_rule **, struct pf_rule **,
 				    struct pf_ruleset **, int *, int *);
@@ -1759,7 +1760,7 @@ void	pf_addr_inc(struct pf_addr *, sa_family_t);
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
 void	pf_change_a(void *, u_int16_t *, u_int32_t, u_int8_t);
-int	pflog_packet(struct pfi_kif *, struct mbuf *, sa_family_t, u_int8_t,
+int	pflog_packet(struct pfi_kif *, struct mbuf *, u_int8_t,
 	    u_int8_t, struct pf_rule *, struct pf_rule *, struct pf_ruleset *,
 	    struct pf_pdesc *);
 void	pf_send_deferred_syn(struct pf_state *);
@@ -1774,12 +1775,9 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
-int	pf_normalize_ip(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_ip6(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_tcp(int, struct pfi_kif *, struct mbuf *, int, int, void *,
-	    struct pf_pdesc *);
+int	pf_normalize_ip(struct mbuf **, int, u_short *);
+int	pf_normalize_ip6(struct mbuf **, int, u_short *);
+int	pf_normalize_tcp(int, struct mbuf *, int, struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
 int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
 	    struct tcphdr *, struct pf_state_peer *, struct pf_state_peer *);
@@ -1787,8 +1785,7 @@ int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 	    u_short *, struct tcphdr *, struct pf_state *,
 	    struct pf_state_peer *, struct pf_state_peer *, int *);
 int	pf_normalize_mss(struct mbuf *, int, struct pf_pdesc *, u_int16_t);
-void	pf_scrub_ip(struct mbuf **, u_int16_t, u_int8_t, u_int8_t);
-void	pf_scrub_ip6(struct mbuf **, u_int8_t);
+void	pf_scrub(struct mbuf *, u_int16_t, sa_family_t, u_int8_t, u_int8_t);
 u_int32_t
 	pf_state_expires(const struct pf_state *);
 void	pf_purge_expired_fragments(void);
@@ -1809,7 +1806,7 @@ void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *, sa_family_t,
 	    u_int64_t, int, int, int);
 int	pfr_pool_get(struct pfr_ktable *, int *, struct pf_addr *,
 	    struct pf_addr **, struct pf_addr **, struct pfi_kif **,
-	    sa_family_t);
+	    sa_family_t, int (*)(sa_family_t, struct pf_addr *));
 void	pfr_dynaddr_update(struct pfr_ktable *, struct pfi_dynaddr *);
 struct pfr_ktable *
 	pfr_attach_table(struct pf_ruleset *, char *, int);

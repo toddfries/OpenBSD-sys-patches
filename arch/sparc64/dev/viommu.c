@@ -1,4 +1,4 @@
-/*	$OpenBSD: viommu.c,v 1.10 2010/08/07 03:50:01 krw Exp $	*/
+/*	$OpenBSD: viommu.c,v 1.12 2011/05/18 23:36:31 ariane Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -327,11 +327,8 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 		for (a = trunc_page(addr); a < aend; a += PAGE_SIZE) {
 			paddr_t pa;
 
-			if (pmap_extract(pmap, a, &pa) == FALSE) {
-				printf("iomap pmap error addr 0x%llx\n", a);
-				iommu_iomap_clear_pages(ims);
-				return (EFBIG);
-			}
+			if (pmap_extract(pmap, a, &pa) == FALSE)
+				panic("iomap pmap error addr 0x%llx\n", a);
 
 			err = iommu_iomap_insert_page(ims, pa);
 			if (err) {
@@ -400,11 +397,8 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 			int pglen;
 
 			/* Yuck... Redoing the same pmap_extract... */
-			if (pmap_extract(pmap, a, &pa) == FALSE) {
-				printf("iomap pmap error addr 0x%llx\n", a);
-				err = EFBIG;
-				break;
-			}
+			if (pmap_extract(pmap, a, &pa) == FALSE)
+				panic("iomap pmap error addr 0x%llx\n", a);
 
 			pgstart = pa | (MAX(a, addr) & PAGE_MASK);
 			pgend = pa | (MIN(a + PAGE_SIZE - 1,
@@ -614,7 +608,7 @@ viommu_dvmamap_append_range(bus_dma_tag_t t, bus_dmamap_t map, paddr_t pa,
 	sgend = sgstart + length - 1;
 
 #ifdef DIAGNOSTIC
-	if (sgstart == NULL || sgstart > sgend) {
+	if (sgstart == 0 || sgstart > sgend) {
 		printf("append range invalid mapping for %lx "
 		    "(0x%llx - 0x%llx)\n", pa, sgstart, sgend);
 		map->dm_nsegs = 0;

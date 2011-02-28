@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.190 2011/04/05 18:01:21 henning Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.192 2011/05/16 20:06:28 henning Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -2629,7 +2629,7 @@ bridge_ip(struct bridge_softc *sc, int dir, struct ifnet *ifp,
 			goto dropit;
 		ip = mtod(m, struct ip *);
 		ip->ip_sum = 0;
-		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
+		if (0 && (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.119 2011/04/03 14:56:28 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.121 2011/04/18 21:44:56 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*

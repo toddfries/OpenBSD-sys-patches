@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.102 2011/04/05 01:28:05 art Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.104 2011/04/18 19:23:46 art Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -1012,7 +1012,7 @@ done:
 }
 
 void
-pool_set_constraints(struct pool *pp, struct kmem_pa_mode *mode)
+pool_set_constraints(struct pool *pp, const struct kmem_pa_mode *mode)
 {
 	pp->pr_crange = mode;
 }

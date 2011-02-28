@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.315 2011/04/03 12:32:05 claudio Exp $
+#	$OpenBSD: GENERIC,v 1.321 2011/06/20 06:06:34 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -52,6 +52,7 @@ acpimcfg*	at acpi?
 acpiasus*	at acpi?
 acpisony*	at acpi?
 acpithinkpad*	at acpi?
+acpitoshiba*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
@@ -90,7 +91,6 @@ schsio*	at isa? port 0x4e
 schsio*	at isa? port 0x162e
 schsio*	at isa? port 0x164e
 
-viaenv*	at pci?			# VIA VT82C686A hardware monitor
 #viasio* at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
 #viasio* at isa? port 0x4e flags 0x0000
 
@@ -105,7 +105,7 @@ piixpm*	at pci?			# Intel PIIX PM
 iic*	at piixpm?
 ichiic*	at pci?			# Intel ICH SMBus controller
 iic*	at ichiic?
-viapm*	at pci?			# VIA VT8237 power management
+viapm*	at pci?			# VIA SMBus controller
 iic*	at viapm?
 amdiic* at pci?			# AMD-8111 SMBus controller
 iic*	at amdiic?
@@ -201,7 +201,6 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -293,7 +292,10 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 
 intagp*		at vga?		# intel integrated graphics
+mmuagp*		at pchb?	# amd64 mmu agp.
+
 agp*		at intagp?
+agp*		at mmuagp?
 
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
@@ -452,6 +454,7 @@ msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
+myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -473,7 +476,7 @@ bce*	at pci?				# Broadcom BCM4401
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
-alc*	at pci?				# Attansic L1C/L2C Ethernet
+alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet

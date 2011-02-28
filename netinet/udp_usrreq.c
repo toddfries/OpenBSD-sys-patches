@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.140 2011/04/05 18:01:21 henning Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.144 2011/05/13 14:31:17 oga Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -352,7 +352,7 @@ udp_input(struct mbuf *m, ...)
 		 * to userland
 		 */
 		if (spi != 0) {
-			if ((m = m_pullup2(m, skip)) == NULL) {
+			if ((m = m_pullup(m, skip)) == NULL) {
 				udpstat.udps_hdrops++;
 				return;
 			}
@@ -412,10 +412,11 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 	if ((ip6 && IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) ||
 	    (ip && IN_MULTICAST(ip->ip_dst.s_addr)) ||
-	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif))) {
+	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
+	    m->m_pkthdr.rdomain))) {
 #else /* INET6 */
 	if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif)) {
+	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif, m->m_pkthdr.rdomain)) {
 #endif /* INET6 */
 		struct inpcb *last;
 		/*

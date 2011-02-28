@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.93 2011/04/05 01:28:05 art Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.98 2011/06/06 17:10:23 ariane Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -609,25 +609,26 @@ struct kmem_dyn_mode {
  * The exception is kv_page which needs to wait relatively often.
  * All kv_ except kv_intrsafe will potentially sleep.
  */
-extern struct kmem_va_mode kv_any;
-extern struct kmem_va_mode kv_intrsafe;
-extern struct kmem_va_mode kv_page;
+extern const struct kmem_va_mode kv_any;
+extern const struct kmem_va_mode kv_intrsafe;
+extern const struct kmem_va_mode kv_page;
 
-extern struct kmem_pa_mode kp_dirty;
-extern struct kmem_pa_mode kp_zero;
-extern struct kmem_pa_mode kp_dma;
-extern struct kmem_pa_mode kp_dma_zero;
-extern struct kmem_pa_mode kp_pageable;
-extern struct kmem_pa_mode kp_none;
+extern const struct kmem_pa_mode kp_dirty;
+extern const struct kmem_pa_mode kp_zero;
+extern const struct kmem_pa_mode kp_dma;
+extern const struct kmem_pa_mode kp_dma_zero;
+extern const struct kmem_pa_mode kp_pageable;
+extern const struct kmem_pa_mode kp_none;
 
-extern struct kmem_dyn_mode kd_waitok;
-extern struct kmem_dyn_mode kd_nowait;
-extern struct kmem_dyn_mode kd_trylock;
+extern const struct kmem_dyn_mode kd_waitok;
+extern const struct kmem_dyn_mode kd_nowait;
+extern const struct kmem_dyn_mode kd_trylock;
 
 
-void *km_alloc(size_t, struct kmem_va_mode *, struct kmem_pa_mode *,
-    struct kmem_dyn_mode *);
-void km_free(void *, size_t, struct kmem_va_mode *, struct kmem_pa_mode *);
+void *km_alloc(size_t, const struct kmem_va_mode *, const struct kmem_pa_mode *,
+    const struct kmem_dyn_mode *);
+void km_free(void *, size_t, const struct kmem_va_mode *,
+    const struct kmem_pa_mode *);
 
 /* uvm_map.c */
 #define	uvm_map(_m, _a, _sz, _u, _f, _al, _fl) uvm_map_p(_m, _a, _sz, _u, _f, _al, _fl, 0)
@@ -672,10 +673,8 @@ void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
 void			uvm_pagerealloc(struct vm_page *, 
 					     struct uvm_object *, voff_t);
 /* Actually, uvm_page_physload takes PF#s which need their own type */
-void			uvm_page_physload_flags(paddr_t, paddr_t, paddr_t,
-			    paddr_t, int, int);
-#define uvm_page_physload(s, e, as, ae, fl)	\
-	uvm_page_physload_flags(s, e, as, ae, fl, 0)
+void			uvm_page_physload(paddr_t, paddr_t, paddr_t,
+			    paddr_t, int);
 void			uvm_setpagesize(void);
 void			uvm_shutdown(void);
 

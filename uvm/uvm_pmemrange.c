@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.21 2011/04/05 22:33:51 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.25 2011/06/22 00:16:47 ariane Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -162,7 +162,8 @@ pow2divide(psize_t num, psize_t denom)
 {
 	int rshift;
 
-	for (rshift = 0; num > denom; rshift++, denom <<= 1);
+	for (rshift = 0; num > denom; rshift++, denom <<= 1)
+		;
 	return (paddr_t)1 << rshift;
 }
 
@@ -746,6 +747,9 @@ uvm_pmr_getpages(psize_t count, paddr_t start, paddr_t end, paddr_t align,
 	int	memtype;		/* Requested memtype. */
 	int	memtype_init;		/* Best memtype. */
 	int	desperate;		/* True if allocation failed. */
+#ifdef DIAGNOSTIC
+	struct	vm_page *diag_prev;	/* Used during validation. */
+#endif /* DIAGNOSTIC */
 
 	/*
 	 * Validate arguments.
@@ -854,7 +858,7 @@ retry_desperate:
 	}
 
 	/*
-	 * The hart of the contig case.
+	 * The heart of the contig case.
 	 *
 	 * The code actually looks like this:
 	 *
@@ -1048,6 +1052,11 @@ out:
 	uvm_unlock_fpageq();
 
 	/* Update statistics and zero pages if UVM_PLA_ZERO. */
+#ifdef DIAGNOSTIC
+	fnsegs = 0;
+	fcount = 0;
+	diag_prev = NULL;
+#endif /* DIAGNOSTIC */
 	TAILQ_FOREACH(found, result, pageq) {
 		atomic_clearbits_int(&found->pg_flags,
 		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
@@ -1074,7 +1083,37 @@ out:
 		 */
 		KDASSERT(start == 0 || atop(VM_PAGE_TO_PHYS(found)) >= start);
 		KDASSERT(end == 0 || atop(VM_PAGE_TO_PHYS(found)) < end);
+
+#ifdef DIAGNOSTIC
+		/*
+		 * Update fcount (# found pages) and
+		 * fnsegs (# found segments) counters.
+		 */
+		if (diag_prev == NULL ||
+		    /* new segment if it contains a hole */
+		    atop(VM_PAGE_TO_PHYS(diag_prev)) + 1 !=
+		    atop(VM_PAGE_TO_PHYS(found)) ||
+		    /* new segment if it crosses boundary */
+		    (atop(VM_PAGE_TO_PHYS(diag_prev)) & ~(boundary - 1)) !=
+		    (atop(VM_PAGE_TO_PHYS(found)) & ~(boundary - 1)))
+			fnsegs++;
+		fcount++;
+
+		diag_prev = found;
+#endif /* DIAGNOSTIC */
 	}
+
+#ifdef DIAGNOSTIC
+	/*
+	 * Panic on algorithm failure.
+	 */
+	if (fcount != count || fnsegs > maxseg) {
+		panic("pmemrange allocation error: "
+		    "allocated %ld pages in %d segments, "
+		    "but request was %ld pages in %d segments",
+		    fcount, fnsegs, count, maxseg);
+	}
+#endif /* DIAGNOSTIC */
 
 	return 0;
 }
@@ -1891,6 +1930,8 @@ uvm_pmr_alloc_pig(paddr_t *addr, psize_t *sz)
 			pg = RB_MAX(uvm_pmr_size, &pmr->size[memtype]);
 			if (pg == NULL)
 				pg = TAILQ_FIRST(&pmr->single[memtype]);
+			else
+				pg--;
 
 			if (pig_pg == NULL || (pg != NULL && pig_pg != NULL &&
 			    pig_pg->fpgsz < pg->fpgsz)) {

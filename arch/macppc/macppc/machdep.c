@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.123 2011/01/08 18:10:23 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.127 2011/06/05 19:41:07 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -91,20 +91,6 @@
  */
 extern struct user *proc0paddr;
 struct pool ppc_vecpl;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -1008,6 +994,12 @@ systype(char *name)
 
 int ppc_configed_intr_cnt = 0;
 struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
+
+/*
+ * True if the system has any non-level interrupts which are shared
+ * on the same pin.
+ */
+int	intr_shared_edge;
 
 void *
 ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type, int level,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_glue.c,v 1.56 2011/04/01 15:43:13 art Exp $	*/
+/*	$OpenBSD: uvm_glue.c,v 1.58 2011/04/15 21:47:24 oga Exp $	*/
 /*	$NetBSD: uvm_glue.c,v 1.44 2001/02/06 19:54:44 eeh Exp $	*/
 
 /* 
@@ -238,6 +238,7 @@ uvm_vslock_device(struct proc *p, void *addr, size_t len,
 		error = ENOMEM;
 		goto out_unwire;
 	}
+	sva = va;
 
 	TAILQ_INIT(&pgl);
 	error = uvm_pglistalloc(npages * PAGE_SIZE, dma_constraint.ucr_low,
@@ -245,7 +246,6 @@ uvm_vslock_device(struct proc *p, void *addr, size_t len,
 	if (error)
 		goto out_unmap;
 
-	sva = va;
 	while ((pg = TAILQ_FIRST(&pgl)) != NULL) {
 		TAILQ_REMOVE(&pgl, pg, pageq);
 		pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg),
@@ -475,3 +475,20 @@ uvm_swapout_threads(void)
 			pmap_collect(p->p_vmspace->vm_map.pmap);
 	}
 }
+
+/*
+ * uvm_atopg: convert KVAs back to their page structures.
+ */
+struct vm_page *
+uvm_atopg(vaddr_t kva)
+{
+	struct vm_page *pg;
+	paddr_t pa;
+	boolean_t rv;
+ 
+	rv = pmap_extract(pmap_kernel(), kva, &pa);
+	KASSERT(rv);
+	pg = PHYS_TO_VM_PAGE(pa);
+	KASSERT(pg != NULL);
+	return (pg);
+} 

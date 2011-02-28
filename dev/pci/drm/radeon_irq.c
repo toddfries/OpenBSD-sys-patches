@@ -1,3 +1,4 @@
+/* $OpenBSD: radeon_irq.c,v 1.27 2011/06/19 12:04:20 oga Exp $ */
 /* radeon_irq.c -- IRQ handling for radeon -*- linux-c -*- */
 /*
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
@@ -196,7 +197,6 @@ radeondrm_intr(void *arg)
 	drm_radeon_private_t	*dev_priv = dev->dev_private;
 	u_int32_t		 stat, r500_disp_int;
 
-	/* XXX wtf? */
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		return (0);
 

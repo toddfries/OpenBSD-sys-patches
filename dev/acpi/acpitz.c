@@ -1,4 +1,4 @@
-/* $OpenBSD: acpitz.c,v 1.39 2010/07/27 04:28:36 marco Exp $ */
+/* $OpenBSD: acpitz.c,v 1.43 2011/06/15 00:15:54 marco Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -204,7 +204,7 @@ acpitz_attach(struct device *parent, struct device *self, void *aux)
 	if ((sc->sc_crt = acpitz_gettempreading(sc, "_CRT")) == -1)
 		printf(": no critical temperature defined\n");
 	else
-		printf(": critical temperature %d degC\n", KTOC(sc->sc_crt));
+		printf(": critical temperature is %d degC\n", KTOC(sc->sc_crt));
 
 	sc->sc_hot = acpitz_gettempreading(sc, "_HOT");
 	sc->sc_tc1 = acpitz_getreading(sc, "_TC1");
@@ -248,18 +248,22 @@ acpitz_setfan(struct acpitz_softc *sc, int i, char *method)
 
 	dnprintf(20, "%s: acpitz_setfan(%d, %s)\n", DEVNAME(sc), i, method);
 
+	x = 0;
+	snprintf(name, sizeof(name), "_AL%d", i);
 	TAILQ_FOREACH(dl, &sc->sc_alx[i], dev_link) {
 		if (aml_evalname(sc->sc_acpi, dl->dev_node, "_PR0",0 , NULL,
 		    &res1)) {
 			printf("%s: %s[%d] _PR0 failed\n", DEVNAME(sc),
 			    name, x);
 			aml_freevalue(&res1);
+			x++;
 			continue;
 		}
 		if (res1.type != AML_OBJTYPE_PACKAGE) {
 			printf("%s: %s[%d] _PR0 not a package\n", DEVNAME(sc),
 			    name, x);
 			aml_freevalue(&res1);
+			x++;
 			continue;
 		}
 		for (y = 0; y < res1.length; y++) {
@@ -299,6 +303,7 @@ acpitz_setfan(struct acpitz_softc *sc, int i, char *method)
 			}
 		}
 		aml_freevalue(&res1);
+		x++;
 	}
 	rv = 0;
 	return (rv);
@@ -322,7 +327,8 @@ acpitz_refresh(void *arg)
 	/* critical trip points */
 	if (sc->sc_crt != -1 && sc->sc_crt <= sc->sc_tmp) {
 		/* do critical shutdown */
-		printf("%s: Critical temperature %dC (%dK), shutting down\n",
+		printf("%s: critical temperature exceeded %dC (%dK), shutting "
+		    "down\n",
 		    DEVNAME(sc), KTOC(sc->sc_tmp), sc->sc_tmp);
 		psignal(initproc, SIGUSR2);
 	}

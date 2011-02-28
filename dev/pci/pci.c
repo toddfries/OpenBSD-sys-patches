@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.88 2010/12/30 00:58:22 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.93 2011/06/12 11:13:28 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -63,6 +63,10 @@ struct pci_dev {
 	pcireg_t pd_int;
 	pcireg_t pd_map[NMAPREG];
 	pcireg_t pd_mask[NMAPREG];
+	pcireg_t pd_msi_mc;
+	pcireg_t pd_msi_ma;
+	pcireg_t pd_msi_mau32;
+	pcireg_t pd_msi_md;
 	int pd_pmcsr_state;
 };
 
@@ -167,6 +171,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_memt = pba->pba_memt;
 	sc->sc_dmat = pba->pba_dmat;
 	sc->sc_pc = pba->pba_pc;
+	sc->sc_flags = pba->pba_flags;
 	sc->sc_ioex = pba->pba_ioex;
 	sc->sc_memex = pba->pba_memex;
 	sc->sc_pmemex = pba->pba_pmemex;
@@ -215,8 +220,8 @@ void
 pci_suspend(struct pci_softc *sc)
 {
 	struct pci_dev *pd;
-	pcireg_t bhlc;
-	int i;
+	pcireg_t bhlc, reg;
+	int off, i;
 
 	LIST_FOREACH(pd, &sc->sc_devs, pd_next) {
 		/*
@@ -239,6 +244,22 @@ pci_suspend(struct pci_softc *sc)
 		pd->pd_int = pci_conf_read(sc->sc_pc, pd->pd_tag,
 		    PCI_INTERRUPT_REG);
 
+		if (pci_get_capability(sc->sc_pc, pd->pd_tag,
+		    PCI_CAP_MSI, &off, &reg)) {
+			pd->pd_msi_ma = pci_conf_read(sc->sc_pc, pd->pd_tag,
+			    off + PCI_MSI_MA);
+			if (reg & PCI_MSI_MC_C64) {
+				pd->pd_msi_mau32 = pci_conf_read(sc->sc_pc,
+				    pd->pd_tag, off + PCI_MSI_MAU32);
+				pd->pd_msi_md = pci_conf_read(sc->sc_pc,
+				    pd->pd_tag, off + PCI_MSI_MD64);
+			} else {
+				pd->pd_msi_md = pci_conf_read(sc->sc_pc,
+				    pd->pd_tag, off + PCI_MSI_MD32);
+			}
+			pd->pd_msi_mc = reg;
+		}
+
 		if (pci_dopm) {
 			/* Place the device into D3. */
 			pd->pd_pmcsr_state = pci_get_powerstate(sc->sc_pc,
@@ -254,7 +275,7 @@ pci_resume(struct pci_softc *sc)
 {
 	struct pci_dev *pd;
 	pcireg_t bhlc, reg;
-	int i;
+	int off, i;
 
 	LIST_FOREACH(pd, &sc->sc_devs, pd_next) {
 		/*
@@ -284,6 +305,23 @@ pci_resume(struct pci_softc *sc)
 		    pd->pd_bhlc);
 		pci_conf_write(sc->sc_pc, pd->pd_tag, PCI_INTERRUPT_REG,
 		    pd->pd_int);
+
+		if (pci_get_capability(sc->sc_pc, pd->pd_tag,
+		    PCI_CAP_MSI, &off, &reg)) {
+			pci_conf_write(sc->sc_pc, pd->pd_tag,
+			    off + PCI_MSI_MA, pd->pd_msi_ma);
+			if (reg & PCI_MSI_MC_C64) {
+				pci_conf_write(sc->sc_pc, pd->pd_tag,
+				    off + PCI_MSI_MAU32, pd->pd_msi_mau32);
+				pci_conf_write(sc->sc_pc, pd->pd_tag,
+				    off + PCI_MSI_MD64, pd->pd_msi_md);
+			} else {
+				pci_conf_write(sc->sc_pc, pd->pd_tag,
+				    off + PCI_MSI_MD32, pd->pd_msi_md);
+			}
+			pci_conf_write(sc->sc_pc, pd->pd_tag,
+			    off + PCI_MSI_MC, pd->pd_msi_mc);
+		}
 	}
 }
 
@@ -332,8 +370,10 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	struct pci_attach_args pa;
 	struct pci_dev *pd;
 	struct device *dev;
-	pcireg_t id, class, intr, bhlcr;
-	int ret = 0, pin, bus, device, function;
+	pcireg_t id, class, intr, bhlcr, cap;
+	int pin, bus, device, function;
+	int off, ret = 0;
+	uint64_t addr;
 
 	pci_decompose_tag(pc, tag, &bus, &device, &function);
 
@@ -371,7 +411,8 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	/* This is a simplification of the NetBSD code.
 	   We don't support turning off I/O or memory
 	   on broken hardware. <csapuntz@stanford.edu> */
-	pa.pa_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
+	pa.pa_flags = sc->sc_flags;
+	pa.pa_flags |= PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
 
 	if (sc->sc_bridgetag == NULL) {
 		pa.pa_intrswiz = 0;
@@ -397,6 +438,29 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 		    ((pin + pa.pa_intrswiz - 1) % 4) + 1;
 	}
 	pa.pa_intrline = PCI_INTERRUPT_LINE(intr);
+
+	if (pci_get_ht_capability(pc, tag, PCI_HT_CAP_MSI, &off, &cap)) {
+		/*
+		 * XXX Should we enable MSI mapping ourselves on
+		 * systems that have it disabled?
+		 */
+		if (cap & PCI_HT_MSI_ENABLED) {
+			if ((cap & PCI_HT_MSI_FIXED) == 0) {
+				addr = pci_conf_read(pc, tag,
+				    off + PCI_HT_MSI_ADDR);
+				addr |= (uint64_t)pci_conf_read(pc, tag,
+				    off + PCI_HT_MSI_ADDR_HI32) << 32;
+			} else
+				addr = PCI_HT_MSI_FIXED_ADDR;
+
+			/* 
+			 * XXX This will fail to enable MSI on systems
+			 * that don't use the canonical address.
+			 */
+			if (addr == PCI_HT_MSI_FIXED_ADDR)
+				pa.pa_flags |= PCI_FLAGS_MSI_ENABLED;
+		}
+	}
 
 	if (match != NULL) {
 		ret = (*match)(&pa);
@@ -500,12 +564,44 @@ pci_get_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
 
 	ofs = PCI_CAPLIST_PTR(pci_conf_read(pc, tag, ofs));
 	while (ofs != 0) {
-#ifdef DIAGNOSTIC
+		/*
+		 * Some devices, like parts of the NVIDIA C51 chipset,
+		 * have a broken Capabilities List.  So we need to do
+		 * a sanity check here.
+		 */
 		if ((ofs & 3) || (ofs < 0x40))
-			panic("pci_get_capability");
-#endif
+			return (0);
 		reg = pci_conf_read(pc, tag, ofs);
 		if (PCI_CAPLIST_CAP(reg) == capid) {
+			if (offset)
+				*offset = ofs;
+			if (value)
+				*value = reg;
+			return (1);
+		}
+		ofs = PCI_CAPLIST_NEXT(reg);
+	}
+
+	return (0);
+}
+
+int
+pci_get_ht_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
+    int *offset, pcireg_t *value)
+{
+	pcireg_t reg;
+	unsigned int ofs;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_HT, &ofs, NULL) == 0)
+		return (0);
+
+	while (ofs != 0) {
+#ifdef DIAGNOSTIC
+		if ((ofs & 3) || (ofs < 0x40))
+			panic("pci_get_ht_capability");
+#endif
+		reg = pci_conf_read(pc, tag, ofs);
+		if (PCI_HT_CAP(reg) == capid) {
 			if (offset)
 				*offset = ofs;
 			if (value)
@@ -571,9 +667,14 @@ pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state)
 		}
 		reg = pci_conf_read(pc, tag, offset + PCI_PMCSR);
 		if ((reg & PCI_PMCSR_STATE_MASK) != state) {
+			int ostate = reg & PCI_PMCSR_STATE_MASK;
+
 			pci_conf_write(pc, tag, offset + PCI_PMCSR,
 			    (reg & ~PCI_PMCSR_STATE_MASK) | state);
-			return (reg & PCI_PMCSR_STATE_MASK);
+			if (state == PCI_PMCSR_STATE_D3 ||
+			    ostate == PCI_PMCSR_STATE_D3)
+				delay(10 * 1000);
+			return (ostate);
 		}
 	}
 	return (state);

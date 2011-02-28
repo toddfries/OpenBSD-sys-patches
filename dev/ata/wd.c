@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.98 2011/04/05 19:57:40 deraadt Exp $ */
+/*	$OpenBSD: wd.c,v 1.106 2011/06/20 06:45:07 matthew Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -148,8 +148,6 @@ void  wd_shutdown(void *);
 cdev_decl(wd);
 bdev_decl(wd);
 
-#define wdlock(wd)  disk_lock(&(wd)->sc_dk)
-#define wdunlock(wd)  disk_unlock(&(wd)->sc_dk)
 #define wdlookup(unit) (struct wd_softc *)disk_lookup(&wd_cd, (unit))
 
 
@@ -355,13 +353,14 @@ wdactivate(struct device *self, int act)
 		/*
 		 * Do two resets separated by a small delay. The
 		 * first wakes the controller, the second resets
-		 * the channel
+		 * the channel.
 		 */
 		wdc_disable_intr(wd->drvp->chnl_softc);
-		wdc_reset_channel(wd->drvp);
+		wdc_reset_channel(wd->drvp, 1);
 		delay(10000);
-		wdc_reset_channel(wd->drvp);
+		wdc_reset_channel(wd->drvp, 0);
 		wdc_enable_intr(wd->drvp->chnl_softc);
+		wd_get_params(wd, at_poll, &wd->sc_params);
 		break;
 	}
 	return (rv);
@@ -371,17 +370,11 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *bp;
-	int s, bmaj, cmaj, mn;
+	int bmaj, cmaj, mn;
 
-	/* Remove unprocessed buffers from queue */
-	s = splbio();
-	while ((bp = bufq_dequeue(&sc->sc_bufq)) != NULL) {
-		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		biodone(bp);
-	}
-	splx(s);
+	timeout_del(&sc->sc_restart_timeout);
+
+	bufq_drain(&sc->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = DISKMINOR(self->dv_unit, 0);
@@ -445,8 +438,7 @@ wdstrategy(struct buf *bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, wd->sc_dk.dk_label,
-	    (wd->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
+	if (bounds_check_with_label(bp, wd->sc_dk.dk_label) <= 0)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	bufq_queue(&wd->sc_bufq, bp);
@@ -582,7 +574,7 @@ wddone(void *v)
 		    sizeof buf);
 retry:
 		/* Just reset and retry. Can we do more ? */
-		wdc_reset_channel(wd->drvp);
+		wdc_reset_channel(wd->drvp, 0);
 		diskerr(bp, "wd", errbuf, LOG_PRINTF,
 		    wd->sc_wdc_bio.blkdone, wd->sc_dk.dk_label);
 		if (wd->retries++ < WDIORETRIES) {
@@ -611,9 +603,14 @@ wdrestart(void *v)
 {
 	struct wd_softc *wd = v;
 	struct buf *bp = wd->sc_bp;
+	struct channel_softc *chnl;
 	int s;
 	WDCDEBUG_PRINT(("wdrestart %s\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
+
+	chnl = (struct channel_softc *)(wd->drvp->chnl_softc);
+	if (chnl->dying)
+		return;
 
 	s = splbio();
 	disk_unbusy(&wd->sc_dk, 0, (bp->b_flags & B_READ));
@@ -641,6 +638,7 @@ int
 wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct wd_softc *wd;
+	struct channel_softc *chnl;
 	int unit, part;
 	int error;
 
@@ -650,12 +648,15 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	wd = wdlookup(unit);
 	if (wd == NULL)
 		return ENXIO;
+	chnl = (struct channel_softc *)(wd->drvp->chnl_softc);
+	if (chnl->dying)
+		return (ENXIO);
 
 	/*
 	 * If this is the first open of this device, add a reference
 	 * to the adapter.
 	 */
-	if ((error = wdlock(wd)) != 0)
+	if ((error = disk_lock(&wd->sc_dk)) != 0)
 		goto bad4;
 
 	if (wd->sc_dk.dk_openmask != 0) {
@@ -705,7 +706,7 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	wd->sc_dk.dk_openmask =
 	    wd->sc_dk.dk_copenmask | wd->sc_dk.dk_bopenmask;
 
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 	device_unref(&wd->sc_dev);
 	return 0;
 
@@ -714,7 +715,7 @@ bad:
 	}
 
 bad3:
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 bad4:
 	device_unref(&wd->sc_dev);
 	return error;
@@ -725,15 +726,14 @@ wdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct wd_softc *wd;
 	int part = DISKPART(dev);
-	int error = 0;
 
 	wd = wdlookup(DISKUNIT(dev));
 	if (wd == NULL)
 		return ENXIO;
 
 	WDCDEBUG_PRINT(("wdclose\n"), DEBUG_FUNCS);
-	if ((error = wdlock(wd)) != 0)
-		goto exit;
+
+	disk_lock_nointr(&wd->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -751,11 +751,10 @@ wdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		/* XXXX Must wait for I/O to complete! */
 	}
 
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 
- exit:
 	device_unref(&wd->sc_dev);
-	return (error);
+	return (0);
 }
 
 void
@@ -856,12 +855,11 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 			goto exit;
 		}
 
-		if ((error = wdlock(wd)) != 0)
+		if ((error = disk_lock(&wd->sc_dk)) != 0)
 			goto exit;
-		wd->sc_flags |= WDF_LABELLING;
 
 		error = setdisklabel(wd->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*wd->sc_dk.dk_openmask : */0);
+		    (struct disklabel *)addr, wd->sc_dk.dk_openmask);
 		if (error == 0) {
 			if (wd->drvp->state > RECAL)
 				wd->drvp->drive_flags |= DRIVE_RESET;
@@ -870,20 +868,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 				    wdstrategy, wd->sc_dk.dk_label);
 		}
 
-		wd->sc_flags &= ~WDF_LABELLING;
-		wdunlock(wd);
-		goto exit;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-
-		if (*(int *)addr)
-			wd->sc_flags |= WDF_WLABEL;
-		else
-			wd->sc_flags &= ~WDF_WLABEL;
+		disk_unlock(&wd->sc_dk);
 		goto exit;
 
 #ifdef notyet
