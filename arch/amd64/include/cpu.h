@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.66 2011/04/13 02:49:12 guenther Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.68 2011/06/16 19:46:40 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -82,11 +82,11 @@ struct cpu_info {
 	struct pcb *ci_idle_pcb;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
-	u_int32_t	ci_ipending;
+	u_int64_t	ci_ipending;
 	int		ci_ilevel;
 	int		ci_idepth;
-	u_int32_t	ci_imask[NIPL];
-	u_int32_t	ci_iunmask[NIPL];
+	u_int64_t	ci_imask[NIPL];
+	u_int64_t	ci_iunmask[NIPL];
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
 #endif
@@ -317,6 +317,10 @@ void x86_bus_space_mallocok(void);
 /* powernow-k8.c */
 void k8_powernow_init(struct cpu_info *);
 void k8_powernow_setperf(int);
+
+/* k1x-pstate.c */
+void k1x_init(struct cpu_info *);
+void k1x_setperf(int);
 
 void est_init(struct cpu_info *);
 void est_setperf(int);

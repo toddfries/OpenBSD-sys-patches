@@ -1,12 +1,12 @@
-/*	$OpenBSD: uvm_pglist.h,v 1.6 2008/06/26 05:42:20 ray Exp $	*/
-/*	$NetBSD: uvm_pglist.h,v 1.3 2001/05/02 01:22:20 thorpej Exp $	*/
+/*	$OpenBSD: loadfile_machdep.h,v 1.1 2011/06/05 21:49:32 miod Exp $	*/
+/*	$NetBSD: loadfile_machdep.h,v 1.2 2001/10/31 17:20:49 thorpej Exp $	 */
 
 /*-
- * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
+ * Copyright (c) 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Jason R. Thorpe.
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,25 +30,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _PGLIST_H_
-#define _PGLIST_H_
+#define BOOT_ELF
+#define ELFSIZE	64
 
-/*
- * This defines the type of a page queue, e.g. active list, inactive
- * list, etc.
- */
-TAILQ_HEAD(pglist, vm_page);
+#define LOAD_KERNEL		(LOAD_ALL & ~LOAD_TEXTA)
+#define COUNT_KERNEL		(COUNT_ALL & ~COUNT_TEXTA)
 
-/*
- * A page free list consists of free pages of unknown contents and free
- * pages of all zeros.
- */
-#define	PGFL_UNKNOWN	0
-#define	PGFL_ZEROS	1
-#define	PGFL_NQUEUES	2
+#define LOADADDR(a)		(((u_long)(a)) + offset)
+#define READ(f, b, c)		read((f), (void *)LOADADDR(b), (c))
+#define BCOPY(s, d, c)		bcopy((void *)s, (void *)LOADADDR(d), (c))
+#define BZERO(d, c)		bzero((void *)LOADADDR(d), (c))
+#define	WARN(a)			(void)(printf a, \
+				    printf((errno ? ": %s\n" : "\n"), \
+				    strerror(errno)))
+#define PROGRESS(a)		(void) printf a
+#define ALLOC(a)		alloc(a)
+#define FREE(a, b)		free(a, b)
 
-struct pgfreelist {
-	struct pglist pgfl_queues[PGFL_NQUEUES];
-};
-
-#endif
+extern int check_phdr(void *);
+#define	CHECK_PHDR(sz,phdr)	check_phdr(phdr)

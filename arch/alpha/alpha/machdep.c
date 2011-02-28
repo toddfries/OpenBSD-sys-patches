@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.130 2011/04/18 21:44:55 guenther Exp $ */
+/* $OpenBSD: machdep.c,v 1.132 2011/06/05 19:41:06 deraadt Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -127,20 +127,6 @@ void	dumpsys(void);
 void	identifycpu(void);
 void	regdump(struct trapframe *framep);
 void	printregs(struct reg *);
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
@@ -559,7 +545,7 @@ nobootinfo:
 				    "0x%lx / 0x%lx\n", pfn0, kernstartpfn);
 #endif
 				uvm_page_physload(pfn0, kernstartpfn,
-				    pfn0, kernstartpfn, VM_FREELIST_DEFAULT);
+				    pfn0, kernstartpfn, 0);
 			}
 #ifdef _PMAP_MAY_USE_PROM_CONSOLE
 		    }
@@ -573,7 +559,7 @@ nobootinfo:
 				    "0x%lx / 0x%lx\n", kernendpfn, pfn1);
 #endif
 				uvm_page_physload(kernendpfn, pfn1,
-				    kernendpfn, pfn1, VM_FREELIST_DEFAULT);
+				    kernendpfn, pfn1, 0);
 			}
 		} else {
 			/*
@@ -583,8 +569,7 @@ nobootinfo:
 			printf("Loading cluster %d: 0x%lx / 0x%lx\n", i,
 			    pfn0, pfn1);
 #endif
-			uvm_page_physload(pfn0, pfn1, pfn0, pfn1,
-			    VM_FREELIST_DEFAULT);
+			uvm_page_physload(pfn0, pfn1, pfn0, pfn1, 0);
 		}
 #ifdef _PMAP_MAY_USE_PROM_CONSOLE
 	    }

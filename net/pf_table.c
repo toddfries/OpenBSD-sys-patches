@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_table.c,v 1.88 2010/11/20 23:58:13 tedu Exp $	*/
+/*	$OpenBSD: pf_table.c,v 1.90 2011/06/14 10:14:01 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2002 Cedric Berger
@@ -61,7 +61,12 @@
 	copyout((from), (to), (size)) :		\
 	(bcopy((from), (to), (size)), 0))
 
-#define YIELD(cnt, ok) do { if ((cnt % 1024 == 1023) && (ok)) yield(); } while (0)
+#define YIELD(cnt, ok)				\
+	do {					\
+		if ((cnt % 1024 == 1023) &&	\
+		    (ok))			\
+			yield();		\
+	} while (0)
 
 #define	FILLIN_SIN(sin, addr)			\
 	do {					\
@@ -275,7 +280,7 @@ pfr_add_addrs(struct pfr_table *tbl, struct pfr_addr *addr, int size,
 				ad.pfra_fback = PFR_FB_DUPLICATE;
 			else if (p == NULL)
 				ad.pfra_fback = PFR_FB_ADDED;
-			else if ((p->pfrke_flags & PFRKE_FLAG_NOT) != 
+			else if ((p->pfrke_flags & PFRKE_FLAG_NOT) !=
 			    ad.pfra_not)
 				ad.pfra_fback = PFR_FB_CONFLICT;
 			else
@@ -1096,7 +1101,8 @@ pfr_walktree(struct radix_node *rn, void *arg, u_int id)
 				bcopy(ke->pfrke_counters->pfrkc_bytes,
 				    as.pfras_bytes, sizeof(as.pfras_bytes));
 			} else {
-				bzero(as.pfras_packets, sizeof(as.pfras_packets));
+				bzero(as.pfras_packets,
+				    sizeof(as.pfras_packets));
 				bzero(as.pfras_bytes, sizeof(as.pfras_bytes));
 				as.pfras_a.pfra_fback = PFR_FB_NOCOUNT;
 			}
@@ -1687,7 +1693,7 @@ pfr_commit_ktable(struct pfr_ktable *kt, long tzero)
 			q = pfr_lookup_addr(kt, &ad, 1);
 			if (q != NULL) {
 				if ((q->pfrke_flags & PFRKE_FLAG_NOT) !=
-				   (p->pfrke_flags & PFRKE_FLAG_NOT))
+				    (p->pfrke_flags & PFRKE_FLAG_NOT))
 					SLIST_INSERT_HEAD(&changeq, q,
 					    pfrke_workq);
 				q->pfrke_flags |= PFRKE_FLAG_MARK;
@@ -2109,7 +2115,7 @@ pfr_detach_table(struct pfr_ktable *kt)
 int
 pfr_pool_get(struct pfr_ktable *kt, int *pidx, struct pf_addr *counter,
     struct pf_addr **raddr, struct pf_addr **rmask, struct pfi_kif **kif,
-    sa_family_t af)
+    sa_family_t af, int (*filter)(sa_family_t, struct pf_addr *))
 {
 	struct pfr_kentry	*ke, *ke2;
 	struct pf_addr		*addr;
@@ -2163,6 +2169,10 @@ _next_block:
 
 	if (!KENTRY_NETWORK(ke)) {
 		/* this is a single IP address - no possible nested block */
+		if (filter && filter(af, addr)) {
+			idx++;
+			goto _next_block;
+		}
 		PF_ACPY(counter, addr, af);
 		*pidx = idx;
 		kt->pfrkt_match++;
@@ -2181,6 +2191,8 @@ _next_block:
 		/* no need to check KENTRY_RNF_ROOT() here */
 		if (ke2 == ke) {
 			/* lookup return the same block - perfect */
+			if (filter && filter(af, addr))
+				goto _next_entry;
 			PF_ACPY(counter, addr, af);
 			*pidx = idx;
 			kt->pfrkt_match++;
@@ -2188,7 +2200,7 @@ _next_block:
 				*kif = ((struct pfr_kentry_route *)ke)->kif;
 			return (0);
 		}
-
+_next_entry:
 		/* we need to increase the counter past the nested block */
 		pfr_prepare_network(&mask, AF_INET, ke2->pfrke_net);
 		PF_POOLMASK(addr, addr, SUNION2PF(&mask, af), &pfr_ffaddr, af);

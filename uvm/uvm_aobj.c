@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.51 2010/07/02 02:08:53 syuu Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.53 2011/05/10 21:48:17 oga Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -147,12 +147,16 @@ struct uvm_aobj {
 	struct uvm_object u_obj; /* has: lock, pgops, memt, #pages, #refs */
 	int u_pages;		 /* number of pages in entire object */
 	int u_flags;		 /* the flags (see uvm_aobj.h) */
-	int *u_swslots;		 /* array of offset->swapslot mappings */
-				 /*
-				  * hashtable of offset->swapslot mappings
-				  * (u_swhash is an array of bucket heads)
-				  */
-	struct uao_swhash *u_swhash;
+	/*
+	 * Either an array or hashtable (array of bucket heads) of
+	 * offset -> swapslot mappings for the aobj.
+	 */
+#define u_swslots	u_swap.slot_array 
+#define u_swhash	u_swap.slot_hash
+	union swslots {
+		int			*slot_array;
+		struct uao_swhash	*slot_hash;
+	} u_swap;
 	u_long u_swhashmask;		/* mask for hashtable */
 	LIST_ENTRY(uvm_aobj) u_list;	/* global list of aobjs */
 };
@@ -1135,7 +1139,7 @@ uao_get(struct uvm_object *uobj, voff_t offset, struct vm_page **pps,
  * => aobj must be locked or have a reference count of 0.
  */
 
-void
+int
 uao_dropswap(struct uvm_object *uobj, int pageidx)
 {
 	int slot;
@@ -1144,6 +1148,7 @@ uao_dropswap(struct uvm_object *uobj, int pageidx)
 	if (slot) {
 		uvm_swap_free(slot, 1);
 	}
+	return (slot);
 }
 
 

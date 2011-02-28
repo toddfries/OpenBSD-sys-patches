@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.194 2011/04/10 17:10:08 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.197 2011/06/02 18:36:49 kettenis Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -390,13 +390,6 @@ azalia_configure_pci(azalia_t *az)
 	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
 
-	/* disable MSI, use INTx instead */
-	if (PCI_VENDOR(az->pciid) == PCI_VENDOR_INTEL) {
-		reg = azalia_pci_read(az->pc, az->tag, ICH_PCI_MMC);
-		reg &= ~(ICH_PCI_MMC_ME);
-		azalia_pci_write(az->pc, az->tag, ICH_PCI_MMC, reg);
-	}
-
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(az->pciid)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
@@ -476,6 +469,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	azalia_t *sc;
 	struct pci_attach_args *pa;
 	pcireg_t v;
+	uint8_t reg;
 	pci_intr_handle_t ih;
 	const char *interrupt_str;
 
@@ -499,8 +493,15 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	azalia_configure_pci(sc);
 
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(sc->pciid) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(sc->pc, sc->tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(sc->pc, sc->tag, ICH_PCI_MMC, reg);
+	}
+
 	/* interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 		return;
 	}
@@ -649,25 +650,32 @@ azalia_intr(void *v)
 {
 	azalia_t *az = v;
 	uint32_t intsts;
+	int ret = 0;
 
 	intsts = AZ_READ_4(az, INTSTS);
-	if (intsts == 0)
-		return (0);
+	if (intsts == 0 || intsts == 0xffffffff)
+		return (ret);
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
-	if (intsts & az->pstream.intr_bit)
+	if (intsts & az->pstream.intr_bit) {
 		azalia_stream_intr(&az->pstream);
+		ret = 1;
+	}
 
-	if (intsts & az->rstream.intr_bit)
+	if (intsts & az->rstream.intr_bit) {
 		azalia_stream_intr(&az->rstream);
+		ret = 1;
+	}
 
 	if ((intsts & HDA_INTSTS_CIS) &&
 	    (AZ_READ_1(az, RIRBCTL) & HDA_RIRBCTL_RINTCTL) &&
-	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL))
+	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL)) {
 		azalia_rirb_intr(az);
+		ret = 1;
+	}
 
-	return (1);
+	return (ret);
 }
 
 void

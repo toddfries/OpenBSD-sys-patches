@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.32 2011/04/03 15:36:02 jasper Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.34 2011/06/09 19:34:42 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.173 2011/04/06 15:16:54 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.176 2011/06/21 22:36:42 matthew Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -98,9 +98,9 @@ struct cfdriver scsibus_cd = {
 };
 
 #ifdef SCSIDEBUG
-int scsidebug_buses = SCSIDEBUG_BUSES;
-int scsidebug_targets = SCSIDEBUG_TARGETS;
-int scsidebug_luns = SCSIDEBUG_LUNS;
+u_int32_t scsidebug_buses = SCSIDEBUG_BUSES;
+u_int32_t scsidebug_targets = SCSIDEBUG_TARGETS;
+u_int32_t scsidebug_luns = SCSIDEBUG_LUNS;
 int scsidebug_level = SCSIDEBUG_LEVEL;
 #endif
 
@@ -789,9 +789,12 @@ scsibus_printlink(struct scsi_link *link)
 
 		if (ISSET(link->id->d_flags, DEVID_F_PRINT)) {
 			for (i = 0; i < link->id->d_len; i++) {
-				if (id[i] == '\0' || id[i] == ' ')
-					printf("_");
-				else if (id[i] < 0x20 || id[i] >= 0x80) {
+				if (id[i] == '\0' || id[i] == ' ') {
+					/* skip leading blanks */
+					/* collapse multiple blanks into one */
+					if (i > 0 && id[i-1] != id[i])
+						printf("_");
+				} else if (id[i] < 0x20 || id[i] >= 0x80) {
 					/* non-printable characters */
 					printf("~");
 				} else {
@@ -857,6 +860,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	sc_link->target = target;
 	sc_link->lun = lun;
 	sc_link->interpret_sense = scsi_interpret_sense;
+	sc_link->node_wwn = sc_link->port_wwn = 0;
 	TAILQ_INIT(&sc_link->queue);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_link created.\n"));
@@ -898,9 +902,10 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	 * Ask the device what it is
 	 */
 #ifdef SCSIDEBUG
-	if (((1 << sc_link->scsibus) & scsidebug_buses) &&
-	    ((target < 32) && ((1 << target) & scsidebug_targets)) &&
-	    ((lun < 32) && ((1 << lun) & scsidebug_luns)))
+	if (((scsi->sc_dev.dv_unit < 32) &&
+	     ((1U << scsi->sc_dev.dv_unit) & scsidebug_buses)) &&
+	    ((target < 32) && ((1U << target) & scsidebug_targets)) &&
+	    ((lun < 32) && ((1U << lun) & scsidebug_luns)))
 		sc_link->flags |= scsidebug_level;
 #endif /* SCSIDEBUG */
 

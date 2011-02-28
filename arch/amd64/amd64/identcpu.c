@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.30 2010/09/07 16:22:48 mikeb Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.32 2011/05/29 14:50:25 deraadt Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -364,6 +364,8 @@ identifycpu(struct cpu_info *ci)
 			if ((ci->ci_signature & 0xF00) == 0xf00)
 				setperf_setup = k8_powernow_init;
 		}
+		if (ci->ci_family >= 0x10)
+			setperf_setup = k1x_init;
 	}
 
 	if (cpu_ecxfeature & CPUIDECX_EST) {

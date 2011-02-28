@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.65 2011/04/06 03:14:51 marco Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.69 2011/06/18 23:35:21 matthew Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -590,7 +590,7 @@ sr_crypto_change_maskkey(struct sr_discipline *sd,
 
 	c = (u_char *)sd->mds.mdd_crypto.scr_meta->scm_key;
 	ksz = sizeof(sd->mds.mdd_crypto.scr_key);
-	p = malloc(ksz, M_DEVBUF, M_WAITOK | M_ZERO);
+	p = malloc(ksz, M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (p == NULL)
 		goto out;
 
@@ -671,13 +671,12 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 
 	/* Open device. */
 	if (bdevvp(dev, &vn)) {
-		printf("%s:, sr_create_key_disk: can't allocate vnode\n",
-		    DEVNAME(sc));
+		printf("%s: cannot open key disk %s\n", DEVNAME(sc), devname);
 		goto done;
 	}
 	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
-		DNPRINTF(SR_D_META,"%s: sr_create_key_disk cannot open %s\n",
-		    DEVNAME(sc), devname);
+		DNPRINTF(SR_D_META,"%s: sr_crypto_create_key_disk cannot "
+		    "open %s\n", DEVNAME(sc), devname);
 		vput(vn);
 		goto fail;
 	}
@@ -687,8 +686,8 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 	part = DISKPART(dev);
 	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label,
 	    FREAD, NOCRED, curproc)) {
-		DNPRINTF(SR_D_META, "%s: sr_create_key_disk ioctl failed\n",
-		    DEVNAME(sc));
+		DNPRINTF(SR_D_META, "%s: sr_crypto_create_key_disk ioctl "
+		    "failed\n", DEVNAME(sc));
 		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 		goto fail;
@@ -834,13 +833,12 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 
 	/* Open device. */
 	if (bdevvp(dev, &vn)) {
-		printf("%s:, sr_read_key_disk: can't allocate vnode\n",
-		    DEVNAME(sc));
+		printf("%s: cannot open key disk %s\n", DEVNAME(sc), devname);
 		goto done;
 	}
 	if (VOP_OPEN(vn, FREAD | FWRITE, NOCRED, curproc)) {
-		DNPRINTF(SR_D_META,"%s: sr_read_key_disk cannot open %s\n",
-		    DEVNAME(sc), devname);
+		DNPRINTF(SR_D_META,"%s: sr_crypto_read_key_disk cannot "
+		    "open %s\n", DEVNAME(sc), devname);
 		vput(vn);
 		goto done;
 	}
@@ -850,8 +848,8 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	part = DISKPART(dev);
 	if (VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&label, FREAD,
 	    NOCRED, curproc)) {
-		DNPRINTF(SR_D_META, "%s: sr_read_key_disk ioctl failed\n",
-		    DEVNAME(sc));
+		DNPRINTF(SR_D_META, "%s: sr_crypto_read_key_disk ioctl "
+		    "failed\n", DEVNAME(sc));
 		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
 		vput(vn);
 		goto done;
@@ -1086,7 +1084,7 @@ sr_crypto_ioctl(struct sr_discipline *sd, struct bioc_discipline *bd)
 bad:
 	explicit_bzero(&kdfpair, sizeof(kdfpair));
 	explicit_bzero(&kdfinfo1, sizeof(kdfinfo1));
-	explicit_bzero(&kdfinfo2, sizeof(&kdfinfo2));
+	explicit_bzero(&kdfinfo2, sizeof(kdfinfo2));
 	return (rv);
 }
 
@@ -1115,7 +1113,7 @@ sr_crypto_rw(struct sr_workunit *wu)
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
 		crp = sr_crypto_getcryptop(wu, 1);
 		if (crp == NULL)
-			panic("sr_crypto_rw: no crypto op");
+			return (1);
 		crp->crp_callback = sr_crypto_write;
 		crp->crp_opaque = wu;
 		s = splvm();

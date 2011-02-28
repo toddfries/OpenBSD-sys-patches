@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcd.c,v 1.56 2010/09/22 01:18:57 matthew Exp $ */
+/*	$OpenBSD: mcd.c,v 1.60 2011/06/20 08:47:59 matthew Exp $ */
 /*	$NetBSD: mcd.c,v 1.60 1998/01/14 12:14:41 drochner Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/mtio.h>
 #include <sys/cdio.h>
 #include <sys/errno.h>
@@ -120,10 +121,6 @@ struct mcd_softc {
 
 	char	*type;
 	int	flags;
-#define	MCDF_LOCKED	0x01
-#define	MCDF_WANTED	0x02
-#define	MCDF_WLABEL	0x04	/* label is writable */
-#define	MCDF_LABELLING	0x08	/* writing label */
 #define	MCDF_LOADED	0x10	/* parameters loaded */
 #define	MCDF_EJECTING	0x20	/* please eject at close */
 	short	status;
@@ -218,12 +215,10 @@ struct cfdriver mcd_cd = {
 	NULL, "mcd", DV_DISK
 };
 
-void	mcdgetdisklabel(dev_t, struct mcd_softc *, struct disklabel *, int);
+int	mcdgetdisklabel(dev_t, struct mcd_softc *, struct disklabel *, int);
 int	mcd_get_parms(struct mcd_softc *);
 void	mcdstrategy(struct buf *);
 void	mcdstart(struct mcd_softc *);
-int	mcdlock(struct mcd_softc *);
-void	mcdunlock(struct mcd_softc *);
 void	mcd_pseudointr(void *);
 
 #define MCD_RETRIES	3
@@ -289,42 +284,6 @@ mcdattach(parent, self, aux)
 	    IPL_BIO, mcdintr, sc, sc->sc_dev.dv_xname);
 }
 
-/*
- * Wait interruptibly for an exclusive lock.
- *
- * XXX
- * Several drivers do this; it should be abstracted and made MP-safe.
- */
-int
-mcdlock(sc)
-	struct mcd_softc *sc;
-{
-	int error;
-
-	while ((sc->flags & MCDF_LOCKED) != 0) {
-		sc->flags |= MCDF_WANTED;
-		if ((error = tsleep(sc, PRIBIO | PCATCH, "mcdlck", 0)) != 0)
-			return error;
-	}
-	sc->flags |= MCDF_LOCKED;
-	return 0;
-}
-
-/*
- * Unlock and wake up any waiters.
- */
-void
-mcdunlock(sc)
-	struct mcd_softc *sc;
-{
-
-	sc->flags &= ~MCDF_LOCKED;
-	if ((sc->flags & MCDF_WANTED) != 0) {
-		sc->flags &= ~MCDF_WANTED;
-		wakeup(sc);
-	}
-}
-
 int
 mcdopen(dev, flag, fmt, p)
 	dev_t dev;
@@ -342,7 +301,7 @@ mcdopen(dev, flag, fmt, p)
 	if (!sc)
 		return ENXIO;
 
-	if ((error = mcdlock(sc)) != 0)
+	if ((error = disk_lock(&sc->sc_dk)) != 0)
 		return error;
 
 	if (sc->sc_dk.dk_openmask != 0) {
@@ -412,7 +371,7 @@ mcdopen(dev, flag, fmt, p)
 	}
 	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 
-	mcdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	return 0;
 
 bad2:
@@ -427,7 +386,7 @@ bad:
 	}
 
 bad3:
-	mcdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	return error;
 }
 
@@ -439,12 +398,10 @@ mcdclose(dev, flag, fmt, p)
 {
 	struct mcd_softc *sc = mcd_cd.cd_devs[DISKUNIT(dev)];
 	int part = DISKPART(dev);
-	int error;
 	
 	MCD_TRACE("close: partition=%d\n", part, 0, 0, 0);
 
-	if ((error = mcdlock(sc)) != 0)
-		return error;
+	disk_lock_nointr(&sc->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -468,7 +425,7 @@ mcdclose(dev, flag, fmt, p)
 			sc->flags &= ~MCDF_EJECTING;
 		}
 	}
-	mcdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	return 0;
 }
 
@@ -505,8 +462,7 @@ mcdstrategy(bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    (sc->flags & (MCDF_WLABEL|MCDF_LABELLING)) != 0) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
 		goto done;
 	
 	/* Queue it. */
@@ -647,21 +603,16 @@ mcdioctl(dev, cmd, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		if ((error = mcdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dk)) != 0)
 			return error;
-		sc->flags |= MCDF_LABELLING;
 
 		error = setdisklabel(sc->sc_dk.dk_label,
 		    (struct disklabel *)addr, /*sc->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 		}
 
-		sc->flags &= ~MCDF_LABELLING;
-		mcdunlock(sc);
+		disk_unlock(&sc->sc_dk);
 		return error;
-
-	case DIOCWLABEL:
-		return EBADF;
 
 	case CDIOCPLAYTRACKS:
 		return mcd_playtracks(sc, (struct ioc_play_track *)addr);
@@ -725,15 +676,13 @@ mcdioctl(dev, cmd, addr, flag, p)
 #endif
 }
 
-void
+int
 mcdgetdisklabel(dev, sc, lp, spoofonly)
 	dev_t dev;
 	struct mcd_softc *sc;
 	struct disklabel *lp;
 	int spoofonly;
 {
-	char *errstring;
-	
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_secsize = sc->blksize;
@@ -759,11 +708,7 @@ mcdgetdisklabel(dev, sc, lp, spoofonly)
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), mcdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
-		return;
-	}
+	return (readdisklabel(DISKLABELDEV(dev), mcdstrategy, lp, spoofonly));
 }
 
 int

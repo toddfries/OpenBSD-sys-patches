@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.222 2011/01/02 04:56:57 jordan Exp $ */
+/* $OpenBSD: acpi.c,v 1.225 2011/06/16 23:02:11 pirofti Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -93,6 +93,7 @@ void	acpi_pbtn_task(void *, int);
 #ifndef SMALL_KERNEL
 
 int	acpi_thinkpad_enabled;
+int	acpi_toshiba_enabled;
 int	acpi_saved_spl;
 int	acpi_enabled;
 
@@ -707,7 +708,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n%s: tables", DEVNAME(sc));
 	SIMPLEQ_FOREACH(entry, &sc->sc_tables, q_next) {
-		printf(" %.4s", entry->q_table);
+		printf(" %.4s", (char *)entry->q_table);
 	}
 	printf("\n");
 
@@ -781,8 +782,8 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	/* check if we're running on a sony */
 	aml_find_node(&aml_root, "GBRT", acpi_foundsony, sc);
 
-	/* attach video only if this is not a stinkpad */
-	if (!acpi_thinkpad_enabled)
+	/* attach video only if this is not a stinkpad or toshiba */
+	if (!acpi_thinkpad_enabled && !acpi_toshiba_enabled)
 		aml_find_node(&aml_root, "_DOS", acpi_foundvideo, sc);
 
 	/* create list of devices we want to query when APM come in */
@@ -2328,11 +2329,19 @@ acpi_foundhid(struct aml_node *node, void *arg)
 		aaa.aaa_name = "acpibtn";
 	else if (!strcmp(dev, ACPI_DEV_ASUS))
 		aaa.aaa_name = "acpiasus";
-	else if (!strcmp(dev, ACPI_DEV_THINKPAD)) {
+	else if (!strcmp(dev, ACPI_DEV_IBM) ||
+	    !strcmp(dev, ACPI_DEV_LENOVO)) {
 		aaa.aaa_name = "acpithinkpad";
 		acpi_thinkpad_enabled = 1;
 	} else if (!strcmp(dev, ACPI_DEV_ASUSAIBOOSTER))
 		aaa.aaa_name = "aibs";
+	else if (!strcmp(dev, ACPI_DEV_TOSHIBA_LIBRETTO) ||
+	    !strcmp(dev, ACPI_DEV_TOSHIBA_DYNABOOK) ||
+	    !strcmp(dev, ACPI_DEV_TOSHIBA_SPA40)) {
+		aaa.aaa_name = "acpitoshiba";
+		acpi_toshiba_enabled = 1;
+	}
+
 
 	if (aaa.aaa_name)
 		config_found(self, &aaa, acpi_print);

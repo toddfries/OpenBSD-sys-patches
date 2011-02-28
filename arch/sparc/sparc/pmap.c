@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.158 2010/12/06 20:57:18 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.160 2011/05/30 22:25:22 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -865,7 +865,7 @@ pmap_page_upload(void)
 				start, chop, end);
 #endif
 			uvm_page_physload(atop(start), atop(chop),
-				atop(start), atop(chop), VM_FREELIST_DEFAULT);
+				atop(start), atop(chop), 0);
 
 			/*
 			 * Adjust the start address to reflect the
@@ -883,7 +883,7 @@ pmap_page_upload(void)
 
 		/* Upload (the rest of) this segment */
 		uvm_page_physload(atop(start), atop(end),
-			atop(start), atop(end), VM_FREELIST_DEFAULT);
+			atop(start), atop(end), 0);
 	}
 }
 
@@ -6275,7 +6275,8 @@ pmap_remove_holes(struct vm_map *map)
 		(void)uvm_map(map, &shole, ehole - shole, NULL,
 		    UVM_UNKNOWN_OFFSET, 0,
 		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-		      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
+		      UVM_ADV_RANDOM,
+		      UVM_FLAG_NOMERGE | UVM_FLAG_HOLE | UVM_FLAG_FIXED));
 	}
 #endif
 }

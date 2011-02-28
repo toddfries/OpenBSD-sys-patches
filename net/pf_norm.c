@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.131 2011/04/04 14:14:53 henning Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.135 2011/06/21 08:59:47 bluhm Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -739,29 +739,20 @@ pf_refragment6(struct mbuf **m0, struct m_tag *mtag, int dir)
 #endif /* INET6 */
 
 int
-pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif,
-    u_short *reason, struct pf_pdesc *pd)
+pf_normalize_ip(struct mbuf **m0, int dir, u_short *reason)
 {
 	struct mbuf		*m = *m0;
 	struct ip		*h = mtod(m, struct ip *);
-	int			 hlen = h->ip_hl << 2;
 	u_int16_t		 fragoff = (ntohs(h->ip_off) & IP_OFFMASK) << 3;
 	u_int16_t		 mff = (ntohs(h->ip_off) & IP_MF);
-
-	/* Check for illegal packets */
-	if (hlen < (int)sizeof(struct ip))
-		goto drop;
-
-	if (hlen > ntohs(h->ip_len))
-		goto drop;
-
-	/* Clear IP_DF if we're in no-df mode */
-	if (pf_status.reass & PF_REASS_NODF && h->ip_off & htons(IP_DF))
-		h->ip_off &= htons(~IP_DF);
 
 	/* We will need other tests here */
 	if (!fragoff && !mff)
 		goto no_fragment;
+
+	/* Clear IP_DF if we're in no-df mode */
+	if (pf_status.reass & PF_REASS_NODF && h->ip_off & htons(IP_DF))
+		h->ip_off &= htons(~IP_DF);
 
 	/* We're dealing with a fragment now. Don't allow fragments
 	 * with IP_DF to enter the cache. If the flag was cleared by
@@ -787,18 +778,12 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	if (h->ip_off & ~htons(IP_DF))
 		h->ip_off &= htons(IP_DF);
 
-	pd->flags |= PFDESC_IP_REAS;
 	return (PF_PASS);
-
- drop:
-	REASON_SET(reason, PFRES_NORM);
-	return (PF_DROP);
 }
 
 #ifdef INET6
 int
-pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
-    u_short *reason, struct pf_pdesc *pd)
+pf_normalize_ip6(struct mbuf **m0, int dir, u_short *reason)
 {
 	struct mbuf		*m = *m0;
 	struct ip6_hdr		*h = mtod(m, struct ip6_hdr *);
@@ -826,7 +811,6 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 		switch (proto) {
 		case IPPROTO_FRAGMENT:
 			goto fragment;
-			break;
 		case IPPROTO_AH:
 		case IPPROTO_ROUTING:
 		case IPPROTO_DSTOPTS:
@@ -924,7 +908,6 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	if (m == NULL)
 		return (PF_PASS);
 
-	pd->flags |= PFDESC_IP_REAS;
 	return (PF_PASS);
 
  shortpkt:
@@ -938,8 +921,7 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 #endif /* INET6 */
 
 int
-pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
-    int off, void *h, struct pf_pdesc *pd)
+pf_normalize_tcp(int dir, struct mbuf *m, int off, struct pf_pdesc *pd)
 {
 	struct tcphdr	*th = pd->hdr.tcp;
 	u_short		 reason;
@@ -1548,37 +1530,41 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 }
 
 void
-pf_scrub_ip(struct mbuf **m0, u_int16_t flags, u_int8_t min_ttl, u_int8_t tos)
+pf_scrub(struct mbuf *m, u_int16_t flags, sa_family_t af, u_int8_t min_ttl,
+    u_int8_t tos)
 {
-	struct mbuf		*m = *m0;
 	struct ip		*h = mtod(m, struct ip *);
+#ifdef INET6
+	struct ip6_hdr		*h6 = mtod(m, struct ip6_hdr *);
+#endif
 
 	/* Clear IP_DF if no-df was requested */
-	if (flags & PFSTATE_NODF && h->ip_off & htons(IP_DF))
+	if (flags & PFSTATE_NODF && af == AF_INET && h->ip_off & htons(IP_DF))
 		h->ip_off &= htons(~IP_DF);
 
 	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (min_ttl && h->ip_ttl < min_ttl)
+	if (min_ttl && af == AF_INET && h->ip_ttl < min_ttl)
 		h->ip_ttl = min_ttl;
+#ifdef INET6
+	if (min_ttl && af == AF_INET6 && h6->ip6_hlim < min_ttl)
+		h6->ip6_hlim = min_ttl;
+#endif
 
 	/* Enforce tos */
-	if (flags & PFSTATE_SETTOS)
-		h->ip_tos = tos;
+	if (flags & PFSTATE_SETTOS) {
+		if (af == AF_INET)
+			h->ip_tos = tos;
+#ifdef INET6
+		if (af == AF_INET6) {
+			/* drugs are unable to explain such idiocy */
+			h6->ip6_flow &= htonl(0x0ff00000);
+			h6->ip6_flow |= htonl(((u_int32_t)tos) << 20);
+		}
+#endif
+	}
 
 	/* random-id, but not for fragments */
-	if (flags & PFSTATE_RANDOMID && !(h->ip_off & ~htons(IP_DF)))
+	if (flags & PFSTATE_RANDOMID && af == AF_INET &&
+	    !(h->ip_off & ~htons(IP_DF)))
 		h->ip_id = htons(ip_randomid());
 }
-
-#ifdef INET6
-void
-pf_scrub_ip6(struct mbuf **m0, u_int8_t min_ttl)
-{
-	struct mbuf		*m = *m0;
-	struct ip6_hdr		*h = mtod(m, struct ip6_hdr *);
-
-	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (min_ttl && h->ip6_hlim < min_ttl)
-		h->ip6_hlim = min_ttl;
-}
-#endif

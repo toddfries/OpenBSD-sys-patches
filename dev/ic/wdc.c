@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.113 2011/04/18 04:16:13 deraadt Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.119 2011/06/10 01:38:46 deraadt Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -75,8 +75,6 @@
 #include <dev/ic/wdcvar.h>
 #include <dev/ic/wdcevent.h>
 
-#include "atapiscsi.h"
-
 #define WDCDELAY  100 /* 100 microseconds */
 #define WDCNDELAY_RST (WDC_RESET_WAIT * 1000 / WDCDELAY)
 #if 0
@@ -122,6 +120,10 @@ int at_poll = AT_POLL;
 int wdc_floating_bus(struct channel_softc *, int);
 int wdc_preata_drive(struct channel_softc *, int);
 int wdc_ata_present(struct channel_softc *, int);
+
+struct cfdriver wdc_cd = {
+	NULL, "wdc", DV_DULL
+};
 
 struct channel_softc_vtbl wdc_default_vtbl = {
 	wdc_default_read_reg,
@@ -697,12 +699,38 @@ wdcprobe(struct channel_softc *chp)
 	return (ret_value);
 }
 
+struct channel_queue *
+wdc_alloc_queue(void)
+{
+	static int inited = 0;
+	struct channel_queue *queue;
+
+	/* Initialize global data. */
+	if (inited == 0) {
+		/* Initialize the wdc_xfer pool. */
+		pool_init(&wdc_xfer_pool, sizeof(struct wdc_xfer), 0,
+		    0, 0, "wdcspl", NULL);
+		inited = 1;
+	}
+
+	queue = malloc(sizeof(*queue), M_DEVBUF, M_NOWAIT);
+	if (queue != NULL) {
+		TAILQ_INIT(&queue->sc_xfer);
+	}
+	return (queue);
+}
+
+void
+wdc_free_queue(struct channel_queue *queue)
+{
+	free(queue, M_DEVBUF);
+}
+
 void
 wdcattach(struct channel_softc *chp)
 {
-	int channel_flags, ctrl_flags, i;
+	int i;
 	struct ata_atapi_attach aa_link;
-	static int inited = 0, s;
 #ifdef WDCDEBUG
 	int    savedmask = wdcdebug_mask;
 #endif
@@ -717,6 +745,11 @@ wdcattach(struct channel_softc *chp)
 
 	if (!chp->_vtbl)
 		chp->_vtbl = &wdc_default_vtbl;
+
+	for (i = 0; i < 2; i++) {
+		chp->ch_drive[i].chnl_softc = chp;
+		chp->ch_drive[i].drive = i;
+	}
 
 	if (chp->wdc->drv_probe != NULL) {
 		chp->wdc->drv_probe(chp);
@@ -742,22 +775,9 @@ wdcattach(struct channel_softc *chp)
 	}
 #endif /* WDCDEBUG */
 
-	/* initialise global data */
-	s = splbio();
-	if (inited == 0) {
-		/* Initialize the wdc_xfer pool. */
-		pool_init(&wdc_xfer_pool, sizeof(struct wdc_xfer), 0,
-		    0, 0, "wdcspl", NULL);
-		inited++;
-	}
-	TAILQ_INIT(&chp->ch_queue->sc_xfer);
-	splx(s);
-
 	for (i = 0; i < 2; i++) {
 		struct ata_drive_datas *drvp = &chp->ch_drive[i];
 
-		drvp->chnl_softc = chp;
-		drvp->drive = i;
 		/* If controller can't do 16bit flag the drives as 32bit */
 		if ((chp->wdc->cap &
 		    (WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32)) ==
@@ -791,8 +811,6 @@ wdcattach(struct channel_softc *chp)
 				drvp->drive_flags &= ~DRIVE_OLD;
 		}
 	}
-	ctrl_flags = chp->wdc->sc_dev.dv_cfdata->cf_flags;
-	channel_flags = (ctrl_flags >> (NBBY * chp->channel)) & 0xff;
 
 	WDCDEBUG_PRINT(("wdcattach: ch_drive_flags 0x%x 0x%x\n",
 	    chp->ch_drive[0].drive_flags, chp->ch_drive[1].drive_flags),
@@ -861,9 +879,6 @@ wdcstart(struct channel_softc *chp)
 	if ((chp->ch_flags & WDCF_IRQ_WAIT) != 0)
 		panic("wdcstart: channel waiting for irq");
 #endif /* DIAGNOSTIC */
-	if (chp->wdc->cap & WDC_CAPABILITY_HWLOCK)
-		if (!(chp->wdc->claim_hw)(chp, 0))
-			return;
 
 	WDCDEBUG_PRINT(("wdcstart: xfer %p channel %d drive %d\n", xfer,
 	    chp->channel, xfer->drive), DEBUG_XFERS);
@@ -1077,9 +1092,6 @@ wdc_wait_for_status(struct channel_softc *chp, int mask, int bits, int timeout)
 				chp->ch_status = status =
 				    CHP_READ_REG(chp, wdr_status);
 				WDC_LOG_STATUS(chp, chp->ch_status);
-			} else {
-				chp->dying = 1;
-				return -1;
 			}
 		}
 		if ((status & WDCS_BSY) == 0 && (status & mask) == bits)
@@ -1919,7 +1931,6 @@ wdc_get_xfer(int flags)
 void
 wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
-	struct wdc_softc *wdc = chp->wdc;
 	int s;
 
 	if (xfer->c_flags & C_PRIVATEXFER) {
@@ -1928,8 +1939,6 @@ wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 		return;
 	}
 
-	if (wdc->cap & WDC_CAPABILITY_HWLOCK)
-		(*wdc->free_hw)(chp);
 	s = splbio();
 	chp->ch_flags &= ~WDCF_ACTIVE;
 	TAILQ_REMOVE(&chp->ch_queue->sc_xfer, xfer, c_xferchain);

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.713 2011/04/10 20:27:02 shadchin Exp $
+#	$OpenBSD: GENERIC,v 1.718 2011/06/20 06:07:26 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -62,6 +62,7 @@ acpitz*		at acpi?
 acpiasus*	at acpi?
 acpisony*	at acpi?
 acpithinkpad*	at acpi?
+acpitoshiba*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
@@ -253,7 +254,6 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -359,6 +359,7 @@ amdagp*		at pchb?
 intelagp*	at pchb?
 sisagp*		at pchb?
 viaagp*		at pchb?
+mmuagp*		at pchb?
 
 agp*		at intagp?	# AGP bridges
 agp*		at aliagp?	# AGP bridges
@@ -366,6 +367,7 @@ agp*		at amdagp?	# AGP bridges
 agp*		at intelagp?	# AGP bridges
 agp*		at sisagp?	# AGP bridges
 agp*		at viaagp?	# AGP bridges
+agp*		at mmuagp?	
 
 #option		DRMDEBUG
 inteldrm*	at vga?		# Intel i915, i945 DRM driver
@@ -611,6 +613,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 gcu*	at pci?				# Intel Pro/1000 ethernet GCU
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
+myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -632,7 +635,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
-alc*	at pci?				# Attansic L1C/L2C Ethernet
+alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.40 2011/04/02 14:36:45 dlg Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.43 2011/06/17 07:06:47 mk Exp $	*/
 /*
  * Copyright (c) 2010 Mike Belopuhov <mkb@crypt.org.ru>
  * Copyright (c) 2009 James Giannoules
@@ -2088,7 +2088,21 @@ void		mpii_refresh_sensors(void *);
 
 static const struct pci_matchid mpii_devices[] = {
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2004 },
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2008 }
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2008 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_3 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_4 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_5 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2116_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2116_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_3 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_4 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_5 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_6 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_3 }
 };
 
 int
@@ -2141,7 +2155,7 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 	    MPII_INTR_MASK_DOORBELL);
 
 	/* hook up the interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
@@ -5271,7 +5285,7 @@ mpii_create_sensors(struct mpii_softc *sc)
 	int			i;
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_vd_count,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
+	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 	sc->sc_nsensors = sc->sc_vd_count;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.132 2011/04/05 12:50:15 guenther Exp $	*/
+/*	$OpenBSD: locore.s,v 1.135 2011/05/10 11:11:56 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -126,7 +126,6 @@
 	popl	%edx		; \
 	popl	%ecx		; \
 	popl	%eax		; \
-	sti			; \
 	addl	$8,%esp		; \
 	iret
 
@@ -528,11 +527,7 @@ try586:	/* Use the `cpuid' instruction. */
 	movl	%edx,%ecx
 	subl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
-#ifdef DDB
-	orl	$(PG_V|PG_KW),%eax
-#else
 	orl	$(PG_V|PG_KR),%eax
-#endif
 	fillkpt
 
 	/* Map the data, BSS, and bootstrap tables read-write. */
@@ -1466,6 +1461,7 @@ IDTVEC(align)
  * This will cause the process to get a SIGBUS.
  */
 NENTRY(resume_iret)
+	sti
 	ZTRAP(T_PROTFLT)
 NENTRY(resume_pop_ds)
 	pushl	%es
@@ -1481,6 +1477,7 @@ NENTRY(resume_pop_gs)
 	movw	%ax,%fs
 NENTRY(resume_pop_fs)
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
+	sti
 	jmp	calltrap
 
 NENTRY(alltraps)

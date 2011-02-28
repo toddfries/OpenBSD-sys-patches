@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.119 2011/04/16 03:21:16 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.126 2011/06/19 04:53:17 matthew Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -77,6 +77,8 @@ int	disk_change;		/* set if a disk has been attached/detached
 				 * since last we looked at this variable. This
 				 * is reset by hw_sysctl()
 				 */
+
+u_char	rootduid[8];		/* DUID of root disk. */
 
 /* softraid callback, do not use! */
 void (*softraid_disk_attach)(struct disk *, int);
@@ -682,7 +684,7 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
  * early completion.
  */
 int
-bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
+bounds_check_with_label(struct buf *bp, struct disklabel *lp)
 {
 	struct partition *p = &lp->d_partitions[DISKPART(bp->b_dev)];
 	daddr64_t sz = howmany(bp->b_bcount, DEV_BSIZE);
@@ -782,13 +784,13 @@ disk_init(void)
 }
 
 int
-disk_construct(struct disk *diskp, char *lockname)
+disk_construct(struct disk *diskp)
 {
 	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
 
 	diskp->dk_flags |= DKF_CONSTRUCTED;
-	    
+
 	return (0);
 }
 
@@ -801,7 +803,7 @@ disk_attach(struct device *dv, struct disk *diskp)
 	int majdev;
 
 	if (!ISSET(diskp->dk_flags, DKF_CONSTRUCTED))
-		disk_construct(diskp, diskp->dk_name);
+		disk_construct(diskp);
 
 	/*
 	 * Allocate and initialize the disklabel structures.  Note that
@@ -860,9 +862,14 @@ disk_attach_callback(void *arg1, void *arg2)
 	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD)))
 		return;
 
+	/* XXX: Assumes dk is part of the device softc. */
+	device_ref(dk->dk_device);
+
 	/* Read disklabel. */
 	disk_readlabel(&dl, dev, errbuf, sizeof(errbuf));
 	dk->dk_flags |= DKF_OPENED;
+
+	device_unref(dk->dk_device);
 }
 
 /*
@@ -946,17 +953,19 @@ disk_unbusy(struct disk *diskp, long bcount, int read)
 int
 disk_lock(struct disk *dk)
 {
-	int error;
+	return (rw_enter(&dk->dk_lock, RW_WRITE|RW_INTR));
+}
 
-	error = rw_enter(&dk->dk_lock, RW_WRITE|RW_INTR);
-
-	return (error);
+void
+disk_lock_nointr(struct disk *dk)
+{
+	rw_enter_write(&dk->dk_lock);
 }
 
 void
 disk_unlock(struct disk *dk)
 {
-	rw_exit(&dk->dk_lock);
+	rw_exit_write(&dk->dk_lock);
 }
 
 int
@@ -1001,7 +1010,7 @@ dk_mountroot(void)
 #endif
 	default:
 #ifdef FFS
-		{ 
+		{
 		extern int ffs_mountroot(void);
 
 		printf("filesystem type %d not known.. assuming ffs\n",
@@ -1009,7 +1018,7 @@ dk_mountroot(void)
 		mountrootfn = ffs_mountroot;
 		}
 #else
-		panic("disk 0x%x filesystem type %d not known", 
+		panic("disk 0x%x filesystem type %d not known",
 		    rootdev, dl.d_partitions[part].p_fstype);
 #endif
 	}
@@ -1082,6 +1091,8 @@ setroot(struct device *bootdv, int part, int exitflags)
 	struct device *rootdv, *dv;
 	dev_t nrootdev, nswapdev = NODEV, temp = NODEV;
 	struct ifnet *ifp = NULL;
+	struct disk *dk = NULL;
+	u_char duid[8];
 	char buf[128];
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
@@ -1187,6 +1198,22 @@ gotswap:
 		 * `swap generic'
 		 */
 		rootdv = bootdv;
+		bzero(&duid, sizeof(duid));
+		if (bcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
+			TAILQ_FOREACH(dk, &disklist, dk_link)
+				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				    &rootduid, sizeof(rootduid)) == 0)
+					break;
+			if (dk == NULL)
+				panic("root device (%02hhx%02hhx%02hhx%02hhx"
+				    "%02hhx%02hhx%02hhx%02hhx) not found",
+				    rootduid[0], rootduid[1], rootduid[2],
+				    rootduid[3], rootduid[4], rootduid[5],
+				    rootduid[6], rootduid[7]);
+			bcopy(rootduid, duid, sizeof(duid));
+			rootdv = dk->dk_device;
+		}
+
 		majdev = findblkmajor(rootdv);
 		if (majdev >= 0) {
 			/*
@@ -1243,6 +1270,12 @@ gotswap:
 	}
 
 	printf("root on %s%c", rootdv->dv_xname, 'a' + part);
+
+	if (dk != NULL && bcmp(rootduid, &duid, sizeof(rootduid)) == 0)
+		printf(" (%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx.%c)",
+		    rootduid[0], rootduid[1], rootduid[2], rootduid[3],
+		    rootduid[4], rootduid[5], rootduid[6], rootduid[7],
+		    'a' + part);
 
 	/*
 	 * Make the swap partition on the root drive the primary swap.

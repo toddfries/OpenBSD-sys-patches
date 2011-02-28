@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.218 2011/04/05 20:33:12 henning Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.222 2011/06/15 09:11:01 mikeb Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -160,6 +160,15 @@ ip_output(struct mbuf *m0, ...)
 		ipstat.ips_localout++;
 	} else {
 		hlen = ip->ip_hl << 2;
+	}
+
+	/*
+	 * We should not send traffic to 0/8 say both Stevens and RFCs
+	 * 5735 section 3 and 1122 sections 3.2.1.3 and 3.3.6.
+	 */
+	if ((ntohl(ip->ip_dst.s_addr) >> IN_CLASSA_NSHIFT) == 0) {
+		error = ENETUNREACH;
+		goto bad;
 	}
 
 	/*
@@ -544,7 +553,8 @@ reroute:
 	 * such a packet; if the packet is going in an IPsec tunnel, skip
 	 * this check.
 	 */
-	if ((sproto == 0) && (in_broadcast(dst->sin_addr, ifp))) {
+	if ((sproto == 0) && (in_broadcast(dst->sin_addr, ifp,
+	    m->m_pkthdr.rdomain))) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
 			error = EADDRNOTAVAIL;
 			goto bad;
@@ -1058,6 +1068,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVIF:
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
+		case IP_RECVRTABLE:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1106,6 +1117,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVDSTPORT:
 					OPTSET(INP_RECVDSTPORT);
+					break;
+				case IP_RECVRTABLE:
+					OPTSET(INP_RECVRTABLE);
 					break;
 				}
 			}
@@ -1382,7 +1396,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			}
 #endif
 			break;
-		case SO_RTABLE:
+		case IP_RTABLE:
 			if (m == NULL || m->m_len < sizeof(u_int)) {
 				error = EINVAL;
 				break;
@@ -1438,6 +1452,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVIF:
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
+		case IP_RECVRTABLE:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1475,6 +1490,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVDSTPORT:
 				optval = OPTBIT(INP_RECVDSTPORT);
+				break;
+			case IP_RECVRTABLE:
+				optval = OPTBIT(INP_RECVRTABLE);
 				break;
 			}
 			*mtod(m, int *) = optval;

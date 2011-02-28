@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.50 2011/01/25 20:03:35 jakemsr Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.52 2011/06/22 16:44:29 tedu Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -913,8 +913,7 @@ wi_write_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	prid->frmlen = htole16(ltv->wi_len);
 	prid->rid  = htole16(ltv->wi_type);
 	if (ltv->wi_len > 1)
-		bcopy((u_int8_t *)&ltv->wi_val, (u_int8_t *)&prid->data[0],
-		    (ltv->wi_len-1)*2);
+		bcopy(&ltv->wi_val, &prid->data[0], (ltv->wi_len-1)*2);
 
 	bzero(((char*)prid)+total_len, rnd_len - total_len);
 
@@ -963,7 +962,7 @@ wi_alloc_nicmem_usb(struct wi_softc *wsc, int len, int *id)
 		return ENOMEM;
 	}
 
-	sc->wi_usb_txmem[nmem] = malloc(len, M_DEVBUF, M_WAITOK);
+	sc->wi_usb_txmem[nmem] = malloc(len, M_DEVBUF, M_WAITOK | M_CANFAIL);
 	if (sc->wi_usb_txmem[nmem] == NULL) {
 		sc->wi_usb_nummem--;
 		return ENOMEM;
@@ -1593,7 +1592,7 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 	    frmlen));
 
 	if (ltv->wi_len > 1)
-		bcopy(&presp->data[0], (u_int8_t *)&ltv->wi_val,
+		bcopy(&presp->data[0], &ltv->wi_val,
 		    (ltv->wi_len-1)*2);
 
 	sc->ridresperr = 0;

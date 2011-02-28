@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.72 2011/04/07 15:30:16 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.74 2011/05/30 22:25:22 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -1235,8 +1235,7 @@ remap_data:
 			atop(mp->start),
 			atop(mp->start+mp->size),
 			atop(mp->start),
-			atop(mp->start+mp->size),
-			VM_FREELIST_DEFAULT);
+			atop(mp->start+mp->size), 0);
 	}
 
 #if 0
@@ -1246,8 +1245,7 @@ remap_data:
 		uvm_page_physload(atop(ekdatap), 
 			atop(roundup(ekdatap, (4*MEG))),
 			atop(ekdatap), 
-			atop(roundup(ekdatap, (4*MEG))),
-			VM_FREELIST_DEFAULT);
+			atop(roundup(ekdatap, (4*MEG))), 0);
 	}
 #endif
 
@@ -3614,7 +3612,8 @@ pmap_remove_holes(struct vm_map *map)
 
 	(void)uvm_map(map, &shole, ehole - shole, NULL, UVM_UNKNOWN_OFFSET, 0,
 	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
+	      UVM_ADV_RANDOM,
+	      UVM_FLAG_NOMERGE | UVM_FLAG_HOLE | UVM_FLAG_FIXED));
 }
 
 #ifdef DDB

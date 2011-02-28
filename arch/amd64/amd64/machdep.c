@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.140 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.143 2011/06/05 19:41:06 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -194,17 +194,6 @@ extern struct vm_map *lkm_map;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 /* UVM constraint ranges. */
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
@@ -1360,7 +1349,6 @@ init_x86_64(paddr_t first_avail)
 	for (x = 0; x < mem_cluster_cnt; x++) {
 		paddr_t seg_start = mem_clusters[x].start;
 		paddr_t seg_end = seg_start + mem_clusters[x].size;
-		int seg_type;
 
 		if (seg_start < first_avail) seg_start = first_avail;
 		if (seg_start > seg_end) continue;
@@ -1368,20 +1356,12 @@ init_x86_64(paddr_t first_avail)
 
 		physmem += atop(mem_clusters[x].size);
 
-		/* XXX - Should deal with 4GB boundary */
-		if (seg_start >= (1UL<<32))
-			seg_type = VM_FREELIST_HIGH;
-		else if (seg_end <= 16*1024*1024)
-			seg_type = VM_FREELIST_LOW;
-		else
-			seg_type = VM_FREELIST_DEFAULT;
-
 #if DEBUG_MEMLOAD
 		printf("loading 0x%lx-0x%lx (0x%lx-0x%lx)\n",
 		    seg_start, seg_end, atop(seg_start), atop(seg_end));
 #endif
 		uvm_page_physload(atop(seg_start), atop(seg_end),
-		    atop(seg_start), atop(seg_end), seg_type);
+		    atop(seg_start), atop(seg_end), 0);
 	}
 #if DEBUG_MEMLOAD
 	printf("avail_start = 0x%lx\n", avail_start);
@@ -1704,6 +1684,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 {
 	bootarg32_t *q;
 	bios_ddb_t *bios_ddb;
+	bios_rootduid_t *bios_rootduid;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1788,6 +1769,11 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 #ifdef DDB
 			db_console = bios_ddb->db_console;
 #endif
+			break;
+
+		case BOOTARG_ROOTDUID:
+			bios_rootduid = (bios_rootduid_t *)q->ba_arg;
+			bcopy(bios_rootduid, rootduid, sizeof(rootduid));
 			break;
 
 		default:

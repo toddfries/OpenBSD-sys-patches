@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.176 2011/04/21 07:13:01 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.180 2011/06/14 10:40:14 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -456,6 +456,8 @@ int			ahci_ati_sb700_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 int			ahci_amd_hudson2_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
+int			ahci_intel_3400_1_attach(struct ahci_softc *,
+			    struct pci_attach_args *);
 int			ahci_nvidia_mcp_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 
@@ -477,6 +479,9 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_ati_sb700_attach },
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_6,
 	    NULL,		ahci_ati_sb700_attach },
+
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_1,
+	    NULL,		ahci_intel_3400_1_attach },
 
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
@@ -622,6 +627,7 @@ struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
 	ahci_ata_free,
 	ahci_ata_get_xfer,
+	ahci_ata_put_xfer,
 	ahci_ata_cmd
 };
 
@@ -710,6 +716,13 @@ ahci_amd_hudson2_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 }
 
 int
+ahci_intel_3400_1_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	sc->sc_flags |= AHCI_F_IPMS_PROBE;
+	return (0);
+}
+
+int
 ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_IGN_FR;
@@ -761,7 +774,7 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		return;
 	}
@@ -1228,8 +1241,6 @@ nomem:
 		ccb->ccb_xa.packetcmd = ccb->ccb_cmd_table->acmd;
 		ccb->ccb_xa.tag = i;
 
-		ccb->ccb_xa.ata_put_xfer = ahci_ata_put_xfer;
-
 		ccb->ccb_xa.state = ATA_S_COMPLETE;
 		ahci_put_ccb(ccb);
 	}
@@ -1237,6 +1248,7 @@ nomem:
 	/* grab a ccb for use during error recovery */
 	ap->ap_ccb_err = &ap->ap_ccbs[sc->sc_ncmds - 1];
 	TAILQ_REMOVE(&ap->ap_ccb_free, ap->ap_ccb_err, ccb_entry);
+	ap->ap_ccb_err->ccb_xa.state = ATA_S_COMPLETE;
 
 	/* Wait for ICC change to complete */
 	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
