@@ -127,13 +127,13 @@ ddb_init(void)
 	const db_symformat_t **symf;
 	const char *name = "bsd";
 	extern char *esym;
-#if defined(__sparc64__) || defined(__mips__) || defined(xen)
+#if defined(__sparc64__) || defined(__mips__)
 	extern char *ssym;
 #endif
 	char *xssym, *xesym;
 
 	xesym = esym;
-#if defined(__sparc64__) || defined(__mips__) || defined(xen)
+#if defined(__sparc64__) || defined(__mips__)
 	xssym = ssym;
 #else
 	xssym = (char *)&end;

@@ -43,7 +43,7 @@
 #include <machine/cpu.h>
 
 extern char *esym;				/* end of symbol table */
-#if defined(__sparc64__) || defined(__mips__) || defined(xen)
+#if defined(__sparc64__) || defined(__mips__)
 extern char *ssym;				/* end of kernel */
 #else
 extern long end;				/* end of kernel */
@@ -66,7 +66,7 @@ ksymsattach(num)
 	int num;
 {
 
-#if defined(__sparc64__) || defined(__mips__) || defined(xen)
+#if defined(__sparc64__) || defined(__mips__)
 	if (esym <= ssym) {
 		printf("/dev/ksyms: Symbol table not valid.\n");
 		return;
@@ -80,7 +80,7 @@ ksymsattach(num)
 
 #ifdef _NLIST_DO_ELF
 	do {
-#if defined(__sparc64__) || defined(__mips__) || defined(xen)
+#if defined(__sparc64__) || defined(__mips__)
 		caddr_t symtab = ssym;
 #else
 		caddr_t symtab = (caddr_t)&end;
@@ -128,30 +128,22 @@ ksymsattach(num)
 		 *	a_text - fake text segment (struct exec only)
 		 *	a_syms - size of symbol table
 		 */
-#if defined(xen)
-		caddr_t symtab = (char *)(&ssym + 1); 
-#else
 		caddr_t symtab = (char *)(&end + 1);
-#endif
 		struct exec *k1;
 
 		ksym_head_size = __LDPGSZ;
-		ksym_head = malloc(ksym_head_size, M_DEVBUF, M_NOWAIT);
+		ksym_head = malloc(ksym_head_size, M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (ksym_head == NULL) {
 			printf("failed to allocate memory for /dev/ksyms\n");
 			return;
 		}
-		bzero(ksym_head, ksym_head_size);
 
 		k1 = (struct exec *)ksym_head;
 
 		N_SETMAGIC(*k1, ZMAGIC, MID_MACHINE, 0);
 		k1->a_text = __LDPGSZ;
-#if defined(xen)
-		k1->a_syms = *ssym;
-#else
 		k1->a_syms = end;
-#endif
+
 		ksym_syms = symtab;
 		ksym_syms_size = (size_t)(esym - symtab);
 	}
