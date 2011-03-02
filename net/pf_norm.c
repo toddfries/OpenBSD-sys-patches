@@ -659,7 +659,7 @@ pf_reassemble6(struct mbuf **m0, struct ip6_hdr *ip6, struct ip6_frag *fraghdr,
 
  fail:
 	REASON_SET(reason, PFRES_MEMORY);
-	/* PF_DROP requires a valid mbuf *m0 in pf_test(), will free later */
+	/* PF_DROP requires a valid mbuf *m0 in pf_test6(), will free later */
 	return (PF_DROP);
 }
 
