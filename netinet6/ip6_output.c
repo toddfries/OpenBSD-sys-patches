@@ -994,7 +994,7 @@ bad:
 int
 ip6_fragment(struct mbuf *m0, int hlen, u_char nextproto, u_long mtu)
 {
-	struct mbuf	*m = m0, **mnext, *m_frgpart;
+	struct mbuf	*m, **mnext, *m_frgpart;
 	struct ip6_hdr	*mhip6;
 	struct ip6_frag	*ip6f;
 	u_int32_t	 id;
@@ -1003,10 +1003,10 @@ ip6_fragment(struct mbuf *m0, int hlen, u_char nextproto, u_long mtu)
 
 	id = htonl(ip6_randomid());
 
-	mnext = &m->m_nextpkt;
+	mnext = &m0->m_nextpkt;
 	*mnext = NULL;
 
-	tlen = m->m_pkthdr.len;
+	tlen = m0->m_pkthdr.len;
 	len = (mtu - hlen - sizeof(struct ip6_frag)) & ~7;
 	if (len < 8)
 		return (EMSGSIZE);
