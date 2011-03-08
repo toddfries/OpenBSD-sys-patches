@@ -1872,7 +1872,7 @@ void		 pf_tag_packet(struct mbuf *, int, int);
 u_int32_t	 pf_qname2qid(char *);
 void		 pf_qid2qname(u_int32_t, char *);
 void		 pf_qid_unref(u_int32_t);
-__inline int	 pf_addr_compare(struct pf_addr *, struct pf_addr *,
+int		 pf_addr_compare(struct pf_addr *, struct pf_addr *,
 		    sa_family_t);
 
 extern struct pf_status	pf_status;
