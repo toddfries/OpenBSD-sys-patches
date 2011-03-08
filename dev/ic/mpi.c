@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.165 2010/09/24 01:27:11 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.167 2011/03/04 15:44:39 mikeb Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -344,10 +344,7 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SCSI)
-		sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
-	else
-		sc->sc_link.openings = sc->sc_maxcmds;
+	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
@@ -889,6 +886,9 @@ mpi_intr(void *arg)
 	struct mpi_softc		*sc = arg;
 	u_int32_t			reg;
 	int				rv = 0;
+
+	if ((mpi_read_intr(sc) & MPI_INTR_STATUS_REPLY) == 0)
+		return (rv);
 
 	while ((reg = mpi_pop_reply(sc)) != 0xffffffff) {
 		mpi_reply(sc, reg);
