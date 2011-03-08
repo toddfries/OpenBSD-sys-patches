@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.727 2011/02/23 15:46:14 mikeb Exp $ */
+/*	$OpenBSD: pf.c,v 1.729 2011/03/07 23:30:18 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -297,8 +297,6 @@ enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_SOLICITED, PF_ICMP_MULTI_LINK };
 			mrm->r->states_cur--;			\
 	} while (0)
 
-static __inline int pf_addr_compare(struct pf_addr *, struct pf_addr *,
-	sa_family_t);
 static __inline int pf_src_compare(struct pf_src_node *, struct pf_src_node *);
 static __inline int pf_state_compare_key(struct pf_state_key *,
 	struct pf_state_key *);
@@ -315,7 +313,7 @@ RB_GENERATE(pf_state_tree, pf_state_key, entry, pf_state_compare_key);
 RB_GENERATE(pf_state_tree_id, pf_state,
     entry_id, pf_state_compare_id);
 
-static __inline int
+__inline int
 pf_addr_compare(struct pf_addr *a, struct pf_addr *b, sa_family_t af)
 {
 	switch (af) {
@@ -2293,17 +2291,13 @@ pf_match_rcvif(struct mbuf *m, struct pf_rule *r)
 	return (pfi_kif_match(r->rcv_kif, kif));
 }
 
-int
+void
 pf_tag_packet(struct mbuf *m, int tag, int rtableid)
 {
-	if (tag <= 0 && rtableid < 0)
-		return (0);
 	if (tag > 0)
 		m->m_pkthdr.pf.tag = tag;
 	if (rtableid >= 0)
 		m->m_pkthdr.rdomain = rtableid;
-
-	return (0);
 }
 
 void
@@ -2988,10 +2982,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	if (r->action == PF_DROP)
 		goto cleanup;
 
-	if (pf_tag_packet(m, tag, act.rtableid)) {
-		REASON_SET(&reason, PFRES_MEMORY);
-		goto cleanup;
-	}
+	pf_tag_packet(m, tag, act.rtableid);
 	if (act.rtableid >= 0 &&
 	    rtable_l2(act.rtableid) != pd->rdomain)
 		pd->destchg = 1;
@@ -3465,10 +3456,7 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 	if (r->action == PF_DROP)
 		return (PF_DROP);
 
-	if (pf_tag_packet(m, tag, -1)) {
-		REASON_SET(&reason, PFRES_MEMORY);
-		return (PF_DROP);
-	}
+	pf_tag_packet(m, tag, -1);
 
 	return (PF_PASS);
 }
