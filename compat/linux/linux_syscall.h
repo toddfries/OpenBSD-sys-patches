@@ -718,6 +718,9 @@
 /* syscall: "fremovexattr" ret: "int" args: */
 #define	LINUX_SYS_fremovexattr	237
 
+/* syscall: "set_thread_area" ret: "int" args: "struct l_segment_descriptor *" */
+#define	LINUX_SYS_set_thread_area	243
+
 /* syscall: "fadvise64" ret: "int" args: */
 #define	LINUX_SYS_fadvise64	250
 
