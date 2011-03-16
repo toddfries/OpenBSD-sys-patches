@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_sysent.c,v 1.55 2010/06/30 21:54:35 guenther Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call switch table.
@@ -532,8 +532,8 @@ struct sysent linux_sysent[] = {
 	    sys_nosys },			/* 241 = unimplemented linux_sys_sched_setaffinity */
 	{ 0, 0, 0,
 	    sys_nosys },			/* 242 = unimplemented linux_sys_sched_getaffinity */
-	{ 0, 0, 0,
-	    sys_nosys },			/* 243 = unimplemented linux_sys_set_thread_area */
+	{ 1, s(struct linux_sys_set_thread_area_args), 0,
+	    linux_sys_set_thread_area },	/* 243 = set_thread_area */
 	{ 0, 0, 0,
 	    sys_nosys },			/* 244 = unimplemented linux_sys_get_thread_area */
 	{ 0, 0, 0,

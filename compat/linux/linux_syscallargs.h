@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_syscallargs.h,v 1.56 2010/06/30 21:54:35 guenther Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call argument lists.
@@ -538,6 +538,10 @@ struct linux_sys_fcntl64_args {
 	syscallarg(void *) arg;
 };
 
+struct linux_sys_set_thread_area_args {
+	syscallarg(struct l_segment_descriptor *) desc;
+};
+
 /*
  * System call prototypes.
  */
@@ -794,5 +798,6 @@ int	linux_sys_flistxattr(struct proc *, void *, register_t *);
 int	linux_sys_removexattr(struct proc *, void *, register_t *);
 int	linux_sys_lremovexattr(struct proc *, void *, register_t *);
 int	linux_sys_fremovexattr(struct proc *, void *, register_t *);
+int	linux_sys_set_thread_area(struct proc *, void *, register_t *);
 int	linux_sys_fadvise64(struct proc *, void *, register_t *);
 int	sys_exit(struct proc *, void *, register_t *);
