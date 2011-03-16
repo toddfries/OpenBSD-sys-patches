@@ -122,4 +122,16 @@ dev_t linux_fakedev(dev_t);
 #define LINUX_VT_WAITACTIVE 0x5607
 #define LINUX_VT_DISALLOCATE 0x5608
 
+struct l_segment_descriptor {
+	unsigned int	entry_number;
+	unsigned int	base_addr;
+	unsigned int	limit;
+	unsigned int	seg_32bit:1;
+	unsigned int	contents:2;
+	unsigned int	read_exec_only:1;
+	unsigned int	limit_in_pages:1;
+	unsigned int	seg_not_present:1;
+	unsigned int	useable:1;
+};
+
 #endif /* _LINUX_MACHDEP_H */

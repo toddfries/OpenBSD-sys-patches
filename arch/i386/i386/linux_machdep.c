@@ -64,9 +64,11 @@
 #include <machine/reg.h>
 #include <machine/segments.h>
 #include <machine/specialreg.h>
+#include <machine/pcb.h>
 #include <machine/sysarch.h>
 #include <machine/vm86.h>
 #include <machine/linux_machdep.h>
+#include <machine/sysarch.h>
 
 /*
  * To see whether wsdisplay is configured (for virtual console ioctl calls).
@@ -633,4 +635,29 @@ linux_sys_ioperm(struct proc *p, void *v, register_t *retval)
 		fp->tf_eflags |= PSL_IOPL;
 	*retval = 0;
 	return 0;
+}
+
+int
+linux_sys_set_thread_area(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_set_thread_area_args *uap = v;
+
+	struct l_segment_descriptor ldesc;
+	int eno;
+
+	int error;
+
+	error = copyin(SCARG(uap, desc), &ldesc, sizeof ldesc); 
+	if (error != 0)
+		return error;
+
+	eno = ldesc.entry_number;
+	if (ldesc.entry_number == -1) {
+		ldesc.entry_number = GUGS_SEL;
+		if ((error = copyout(&ldesc, SCARG(uap, desc), sizeof ldesc)))
+			return error;
+	} else if (ldesc.entry_number != GUGS_SEL)
+		return EINVAL;
+
+	return i386_set_threadbase(p, &SCARG(uap, desc)->base_addr, TSEG_GS);
 }
