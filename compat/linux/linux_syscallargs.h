@@ -552,7 +552,8 @@ struct linux_sys_clock_gettime_args {
 struct linux_sys_clock_getres_args {
 	syscallarg(clockid_t) which;
 	syscallarg(struct l_timespec *) tp;
-}
+};
+
 struct linux_sys_set_thread_area_args {
 	syscallarg(struct l_segment_descriptor *) desc;
 };
