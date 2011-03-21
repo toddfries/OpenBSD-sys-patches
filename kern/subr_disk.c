@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.115 2011/03/14 17:20:00 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.117 2011/03/19 01:21:57 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -400,7 +400,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 	 * Read dos partition table, follow extended partitions.
 	 * Map the partitions to disklabel entries i-p
 	 */
-	while (wander && loop < 8) {
+	while (wander && loop < DOS_MAXEBR) {
 		loop++;
 		wander = 0;
 		if (part_blkno < extoff)
@@ -482,17 +482,14 @@ donot:
 			switch (dp2->dp_typ) {
 			case DOSPTYP_UNUSED:
 				fstype = FS_UNUSED;
-				n++;
 				break;
 
 			case DOSPTYP_LINUX:
 				fstype = FS_EXT2FS;
-				n++;
 				break;
 
 			case DOSPTYP_NTFS:
 				fstype = FS_NTFS;
-				n++;
 				break;
 
 			case DOSPTYP_FAT12:
@@ -502,7 +499,6 @@ donot:
 			case DOSPTYP_FAT32:
 			case DOSPTYP_FAT32L:
 				fstype = FS_MSDOS;
-				n++;
 				break;
 			case DOSPTYP_EXTEND:
 			case DOSPTYP_EXTENDL:
@@ -516,7 +512,6 @@ donot:
 				break;
 			default:
 				fstype = FS_OTHER;
-				n++;
 				break;
 			}
 
@@ -532,6 +527,7 @@ donot:
 				continue;
 
 			pp = &lp->d_partitions[8+n];
+			n++;
 			pp->p_fstype = fstype;
 			if (letoh32(dp2->dp_start))
 				DL_SETPOFFSET(pp,
