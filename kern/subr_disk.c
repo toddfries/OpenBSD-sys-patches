@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.114 2010/11/24 15:31:34 jsing Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.117 2011/03/19 01:21:57 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -400,7 +400,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 	 * Read dos partition table, follow extended partitions.
 	 * Map the partitions to disklabel entries i-p
 	 */
-	while (wander && n < 8 && loop < 8) {
+	while (wander && loop < DOS_MAXEBR) {
 		loop++;
 		wander = 0;
 		if (part_blkno < extoff)
@@ -466,8 +466,8 @@ donot:
 		 * In case the disklabel read below fails, we want to
 		 * provide a fake label in i-p.
 		 */
-		for (dp2=dp, i=0; i < NDOSPART && n < 8; i++, dp2++) {
-			struct partition *pp = &lp->d_partitions[8+n];
+		for (dp2=dp, i=0; i < NDOSPART; i++, dp2++) {
+			struct partition *pp;
 			u_int8_t fstype;
 
 			if (dp2->dp_typ == DOSPTYP_OPENBSD)
@@ -482,17 +482,14 @@ donot:
 			switch (dp2->dp_typ) {
 			case DOSPTYP_UNUSED:
 				fstype = FS_UNUSED;
-				n++;
 				break;
 
 			case DOSPTYP_LINUX:
 				fstype = FS_EXT2FS;
-				n++;
 				break;
 
 			case DOSPTYP_NTFS:
 				fstype = FS_NTFS;
-				n++;
 				break;
 
 			case DOSPTYP_FAT12:
@@ -502,7 +499,6 @@ donot:
 			case DOSPTYP_FAT32:
 			case DOSPTYP_FAT32L:
 				fstype = FS_MSDOS;
-				n++;
 				break;
 			case DOSPTYP_EXTEND:
 			case DOSPTYP_EXTENDL:
@@ -516,7 +512,6 @@ donot:
 				break;
 			default:
 				fstype = FS_OTHER;
-				n++;
 				break;
 			}
 
@@ -524,10 +519,15 @@ donot:
 			 * Don't set fstype/offset/size when just looking for
 			 * the offset of the OpenBSD partition. It would
 			 * invalidate the disklabel checksum!
+			 *
+			 * Don't try to spoof more than 8 partitions, i.e.
+			 * 'i' -'p'.
 			 */
-			if (partoffp)
+			if (partoffp || n >= 8)
 				continue;
 
+			pp = &lp->d_partitions[8+n];
+			n++;
 			pp->p_fstype = fstype;
 			if (letoh32(dp2->dp_start))
 				DL_SETPOFFSET(pp,
