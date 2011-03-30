@@ -382,7 +382,7 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	for (; after != NULL && frent->fe_off + frent->fe_len > after->fe_off;
 	    after = next)
 	{
-		int	aftercut;
+		u_int16_t	aftercut;
 
 		aftercut = frent->fe_off + frent->fe_len - after->fe_off;
 		DPFPRINTF(LOG_NOTICE, "adjust overlap %d", aftercut);
