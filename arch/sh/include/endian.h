@@ -1,16 +1,16 @@
-/*	$OpenBSD: endian.h,v 1.1.1.1 2006/10/06 21:02:55 miod Exp $	*/
+/*	$OpenBSD: endian.h,v 1.3 2011/03/12 04:03:04 guenther Exp $	*/
 /*	$NetBSD: endian.h,v 1.4 2000/03/17 00:09:25 mycroft Exp $	*/
 
 /* Written by Manuel Bouyer. Public domain */
 
-#ifndef _SH_ENDIAN_H_
-#define	_SH_ENDIAN_H_
+#ifndef _MACHINE_ENDIAN_H_
+#define	_MACHINE_ENDIAN_H_
 
 #ifdef  __GNUC__
 
 #define	__swap64md	__swap64gen
 
-#define __swap16md(x) ({						\
+#define __swap16md(x) __statement({					\
 	uint16_t rval;							\
 									\
 	__asm volatile ("swap.b %1,%0" : "=r"(rval) : "r"(x));		\
@@ -18,7 +18,7 @@
 	rval;								\
 })
 
-#define __swap32md(x) ({						\
+#define __swap32md(x) __statement({					\
 	uint32_t rval;							\
 									\
 	__asm volatile ("swap.b %1,%0; swap.w %0,%0; swap.b %0,%0"	\
@@ -40,4 +40,4 @@
 
 #define	__STRICT_ALIGNMENT
 
-#endif /* !_SH_ENDIAN_H_ */
+#endif /* !_MACHINE_ENDIAN_H_ */

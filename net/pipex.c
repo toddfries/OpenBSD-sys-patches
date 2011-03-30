@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.13 2010/09/29 22:15:54 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.16 2011/03/14 06:53:33 yasuoka Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -288,16 +288,23 @@ pipex_add_session(struct pipex_session_req *req,
 #endif
 		switch (req->peer_address.ss_family) {
 		case AF_INET:
-#ifdef INET6
-		case AF_INET6:
-#endif
-			if (req->peer_address.ss_family !=
-			    req->local_address.ss_family)
+			if (req->peer_address.ss_len != sizeof(struct sockaddr_in))
 				return (EINVAL);
 			break;
+#ifdef INET6
+		case AF_INET6:
+			if (req->peer_address.ss_len != sizeof(struct sockaddr_in6))
+				return (EINVAL);
+			break;
+#endif
 		default:
 			return (EPROTONOSUPPORT);
 		}
+		if (req->peer_address.ss_family !=
+		    req->local_address.ss_family ||
+		    req->peer_address.ss_len !=
+		    req->local_address.ss_len)
+			return (EINVAL);
 		break;
 #endif
 	default:
@@ -958,8 +965,11 @@ pipex_ppp_output(struct mbuf *m0, struct pipex_session *session, int proto)
 	}
 #endif /* PIPEX_MPPE */
 	cp = hdr;
-	PUTCHAR(PPP_ALLSTATIONS, cp);
-	PUTCHAR(PPP_UI, cp);
+	if (session->protocol != PIPEX_PROTO_PPPOE) {
+		/* PPPoE has not address and control field */
+		PUTCHAR(PPP_ALLSTATIONS, cp);
+		PUTCHAR(PPP_UI, cp);
+	}
 	PUTSHORT(proto, cp);
 
 	M_PREPEND(m0, cp - hdr, M_NOWAIT);
@@ -2535,13 +2545,6 @@ pipex_mppe_output(struct mbuf *m0, struct pipex_session *session,
 
 	mppe = &session->mppe_send;
 
-	/* prepend mppe header */
-	M_PREPEND(m0, sizeof(struct mppe_header), M_NOWAIT);
-	if (m0 == NULL)
-		goto drop;
-	hdr = mtod(m0, struct mppe_header *);
-	hdr->protocol = protocol;
-
 	/*
 	 * create a deep-copy if the mbuf has a shared mbuf cluster.
 	 * this is required to handle cases of tcp retransmition.
@@ -2556,6 +2559,12 @@ pipex_mppe_output(struct mbuf *m0, struct pipex_session *session,
 			break;
 		}
 	}
+	/* prepend mppe header */
+	M_PREPEND(m0, sizeof(struct mppe_header), M_NOWAIT);
+	if (m0 == NULL)
+		goto drop;
+	hdr = mtod(m0, struct mppe_header *);
+	hdr->protocol = protocol;
 
 	/* check coherency counter */
 	flushed = 0;

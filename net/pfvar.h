@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.319 2010/12/07 11:39:40 jsg Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.322 2011/03/07 23:30:19 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1228,6 +1228,7 @@ struct pf_pdesc {
 	u_int8_t	 sidx;		/* key index for source */
 	u_int8_t	 didx;		/* key index for destination */
 	u_int8_t	 destchg;	/* flag set when destination changed */
+	u_int8_t	 pflog;		/* flags for packet logging */
 };
 
 /* flags for RDR options */
@@ -1866,10 +1867,12 @@ u_int16_t	 pf_tagname2tag(char *);
 void		 pf_tag2tagname(u_int16_t, char *);
 void		 pf_tag_ref(u_int16_t);
 void		 pf_tag_unref(u_int16_t);
-int		 pf_tag_packet(struct mbuf *, int, int);
+void		 pf_tag_packet(struct mbuf *, int, int);
 u_int32_t	 pf_qname2qid(char *);
 void		 pf_qid2qname(u_int32_t, char *);
 void		 pf_qid_unref(u_int32_t);
+int		 pf_addr_compare(struct pf_addr *, struct pf_addr *,
+		    sa_family_t);
 
 extern struct pf_status	pf_status;
 extern struct pool	pf_frent_pl, pf_frag_pl;

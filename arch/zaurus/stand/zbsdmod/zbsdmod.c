@@ -1,4 +1,4 @@
-/*	$OpenBSD: zbsdmod.c,v 1.7 2005/05/02 02:45:29 uwe Exp $	*/
+/*	$OpenBSD: zbsdmod.c,v 1.9 2011/03/13 00:13:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>
@@ -266,7 +266,7 @@ init_module()
 	rc = register_chrdev(ZBOOTDEV_MAJOR, ZBOOTDEV_NAME, &fops);
 	if (rc != 0) {
 		printk("%s: register_chrdev(%d, ...): error %d\n",
-		    ZBOOTMOD_NAME, -rc);
+		    ZBOOTMOD_NAME, ZBOOTDEV_MAJOR, -rc);
 		return 1;
 	}
 
@@ -338,7 +338,7 @@ zbsdmod_close(struct inode *ino, struct file *f)
 
 	if (isopen) {
 		if (position > 0) {
-			printk("%s: loaded %d bytes\n", ZBOOTDEV_NAME,
+			printk("%s: loaded %ld bytes\n", ZBOOTDEV_NAME,
 			    position);
 
 			if (position < BOOTARGS_BUFSIZ) {

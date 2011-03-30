@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rsu.c,v 1.7 2010/12/18 22:55:18 jakemsr Exp $	*/
+/*	$OpenBSD: if_rsu.c,v 1.13 2011/02/10 17:26:40 jakemsr Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -130,6 +130,7 @@ static const struct usb_devno rsu_devs_noht[] = {
 int		rsu_match(struct device *, void *, void *);
 void		rsu_attach(struct device *, struct device *, void *);
 int		rsu_detach(struct device *, int);
+int		rsu_activate(struct device *, int);
 int		rsu_open_pipes(struct rsu_softc *);
 void		rsu_close_pipes(struct rsu_softc *);
 int		rsu_alloc_rx_list(struct rsu_softc *);
@@ -200,7 +201,8 @@ const struct cfattach rsu_ca = {
 	sizeof(struct rsu_softc),
 	rsu_match,
 	rsu_attach,
-	rsu_detach
+	rsu_detach,
+	rsu_activate
 };
 
 int
@@ -330,8 +332,6 @@ rsu_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RSU_TX_RADIOTAP_PRESENT);
 #endif
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev, &sc->sc_dev);
 }
 
 int
@@ -341,12 +341,16 @@ rsu_detach(struct device *self, int flags)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
-	s = splnet();
-	/* Wait for all async commands to complete. */
-	rsu_wait_async(sc);
+	s = splusb();
 
 	if (timeout_initialized(&sc->calib_to))
 		timeout_del(&sc->calib_to);
+
+	/* Wait for all async commands to complete. */
+	usb_rem_wait_task(sc->sc_udev, &sc->sc_task);
+
+	usbd_ref_wait(sc->sc_udev);
+
 	if (ifp->if_softc != NULL) {
 		ieee80211_ifdetach(ifp);
 		if_detach(ifp);
@@ -360,7 +364,21 @@ rsu_detach(struct device *self, int flags)
 	rsu_free_rx_list(sc);
 	splx(s);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, &sc->sc_dev);
+	return (0);
+}
+
+int
+rsu_activate(struct device *self, int act)
+{
+	struct rsu_softc *sc = (struct rsu_softc *)self;
+
+	switch (act) {
+	case DVACT_ACTIVATE:
+		break;
+	case DVACT_DEACTIVATE:
+		usbd_deactivate(sc->sc_udev);
+		break;
+	}
 	return (0);
 }
 
@@ -523,7 +541,6 @@ rsu_task(void *arg)
 		ring->queued--;
 		ring->next = (ring->next + 1) % RSU_HOST_CMD_RING_COUNT;
 	}
-	wakeup(ring);
 	splx(s);
 }
 
@@ -552,8 +569,7 @@ void
 rsu_wait_async(struct rsu_softc *sc)
 {
 	/* Wait for all queued asynchronous commands to complete. */
-	while (sc->cmdq.queued > 0)
-		tsleep(&sc->cmdq, 0, "cmdq", 0);
+	usb_wait_task(sc->sc_udev, &sc->sc_task);
 }
 
 int
@@ -788,8 +804,15 @@ rsu_calib_to(void *arg)
 {
 	struct rsu_softc *sc = arg;
 
+	if (usbd_is_dying(sc->sc_udev))
+		return;
+
+	usbd_ref_incr(sc->sc_udev);
+
 	/* Do it in a process context. */
 	rsu_do_async(sc, rsu_calib_cb, NULL, 0);
+
+	usbd_ref_decr(sc->sc_udev);
 }
 
 /* ARGSUSED */
@@ -814,7 +837,8 @@ rsu_calib_cb(struct rsu_softc *sc, void *arg)
 		DPRINTFN(8, ("RSSI=%d%%\n", reg >> 4));
 	}
 
-	timeout_add_sec(&sc->calib_to, 2);
+	if (!usbd_is_dying(sc->sc_udev))
+		timeout_add_sec(&sc->calib_to, 2);
 }
 
 int
@@ -881,7 +905,8 @@ rsu_newstate_cb(struct rsu_softc *sc, void *arg)
 		ic->ic_bss->ni_txrate = ic->ic_bss->ni_rates.rs_nrates - 1;
 
 		/* Start periodic calibration. */
-		timeout_add_sec(&sc->calib_to, 2);
+		if (!usbd_is_dying(sc->sc_udev))
+			timeout_add_sec(&sc->calib_to, 2);
 		break;
 	}
 	(void)sc->sc_newstate(ic, cmd->state, cmd->arg);
@@ -1685,6 +1710,11 @@ rsu_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr;
 	int s, error = 0;
 
+	if (usbd_is_dying(sc->sc_udev))
+		return ENXIO;
+
+	usbd_ref_incr(sc->sc_udev);
+
 	s = splnet();
 
 	switch (cmd) {
@@ -1727,6 +1757,9 @@ rsu_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = 0;
 	}
 	splx(s);
+
+	usbd_ref_decr(sc->sc_udev);
+
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.116 2010/06/07 16:51:22 damien Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.118 2011/03/04 23:48:15 fgsch Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -789,7 +789,7 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 		int error, len;
 
 		if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
-			m1 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
+			m1 = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
 			if (m1 == NULL)
 				ifp->if_oerrors++;
 			else
@@ -1379,10 +1379,6 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 			}
 			chan = frm[2];
 			break;
-		case IEEE80211_ELEMID_TIM:
-			break;
-		case IEEE80211_ELEMID_IBSSPARMS:
-			break;
 		case IEEE80211_ELEMID_XRATES:
 			xrates = frm;
 			break;
@@ -1398,8 +1394,6 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 			break;
 		case IEEE80211_ELEMID_EDCAPARMS:
 			edcaie = frm;
-			break;
-		case IEEE80211_ELEMID_QOS_CAP:
 			break;
 #ifndef IEEE80211_NO_HT
 		case IEEE80211_ELEMID_HTCAPS:
@@ -1421,11 +1415,6 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 				    frm[5] == 2 && frm[6] == 1)
 					wmmie = frm;
 			}
-			break;
-		default:
-			DPRINTF(("element id %u/len %u ignored\n",
-			    frm[0], frm[1]));
-			ic->ic_stats.is_rx_elem_unknown++;
 			break;
 		}
 		frm += 2 + frm[1];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.111 2010/10/28 17:18:35 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.114 2011/02/14 12:53:27 tedu Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -309,6 +309,8 @@ rt_senddesync(void *data)
 			rop->flags &= ~ROUTECB_FLAG_DESYNC;
 			sorwakeup(rp->rcb_socket);
 		} else {
+			if (desync_mbuf)
+				m_freem(desync_mbuf);
 			/* Re-add timeout to try sending msg again */
 			timeout_add(&rop->timeout, ROUTE_DESYNC_RESEND_TIMEOUT);
 		}
@@ -345,8 +347,7 @@ route_input(struct mbuf *m0, ...)
 			continue;
 		if (rp->rcb_proto.sp_family != proto->sp_family)
 			continue;
-		if (rp->rcb_proto.sp_protocol  &&
-		    proto->sp_protocol &&
+		if (rp->rcb_proto.sp_protocol && proto->sp_protocol &&
 		    rp->rcb_proto.sp_protocol != proto->sp_protocol)
 			continue;
 		/*
@@ -875,6 +876,8 @@ flush:
 			rtm->rtm_flags |= RTF_DONE;
 		}
 	}
+	if (dst)
+		route_proto.sp_protocol = dst->sa_family;
 	if (rt)
 		rtfree(rt);
 
@@ -894,8 +897,6 @@ fail:
 	}
 	if (rp)
 		rp->rcb_proto.sp_family = 0; /* Avoid us */
-	if (dst)
-		route_proto.sp_protocol = dst->sa_family;
 	if (rtm) {
 		m_copyback(m, 0, rtm->rtm_msglen, rtm, M_NOWAIT);
 		if (m->m_pkthdr.len < rtm->rtm_msglen) {

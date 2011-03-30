@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.64 2010/10/16 07:06:20 maja Exp $ */
+/*	$OpenBSD: udl.c,v 1.67 2011/01/25 20:03:36 jakemsr Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -389,8 +389,6 @@ udl_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_wsdisplay = config_found(self, &aa, wsemuldisplaydevprint);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev, &sc->sc_dev);
-
 	/*
 	 * Load Huffman table.
 	 */
@@ -479,19 +477,19 @@ udl_detach(struct device *self, int flags)
 	if (sc->sc_wsdisplay != NULL)
 		config_detach(sc->sc_wsdisplay, DETACH_FORCE);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, &sc->sc_dev);
-
 	return (0);
 }
 
 int
 udl_activate(struct device *self, int act)
 {
+	struct udl_softc *sc = (struct udl_softc *)self;
+
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 	case DVACT_DEACTIVATE:
-		/* XXX sc->sc_dying = 1; */
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 
@@ -593,11 +591,7 @@ udl_mmap(void *v, off_t off, int prot)
 		udl_fbmem_free(sc);
 		return (-1);
 	}
-#if defined(__powerpc__) || defined(__sparc64__)
 	return (pa);
-#else
-	return (atop(pa));
-#endif
 }
 
 int

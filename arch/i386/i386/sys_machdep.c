@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_machdep.c,v 1.27 2010/11/20 20:21:13 miod Exp $	*/
+/*	$OpenBSD: sys_machdep.c,v 1.28 2011/03/12 03:52:26 guenther Exp $	*/
 /*	$NetBSD: sys_machdep.c,v 1.28 1996/05/03 19:42:29 christos Exp $	*/
 
 /*-
@@ -72,6 +72,8 @@ extern struct vm_map *kernel_map;
 int i386_iopl(struct proc *, void *, register_t *);
 int i386_get_ioperm(struct proc *, void *, register_t *);
 int i386_set_ioperm(struct proc *, void *, register_t *);
+int i386_get_threadbase(struct proc *, void *, int);
+int i386_set_threadbase(struct proc *, void *, int);
 
 #ifdef USER_LDT
 
@@ -413,7 +415,6 @@ i386_set_threadbase(struct proc *p, void *args, int which)
 
 	if ((error = copyin(args, &base, sizeof(base))) != 0)
 		return error;
-	printf("i386_set_threadbase(): base = %X\n", base);
 
 	/*
 	 * We can't place a limit on the segment used by the library

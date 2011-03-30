@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.96 2010/11/06 23:01:56 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.98 2011/03/15 13:29:41 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -55,7 +55,7 @@ struct sr_uuid {
 
 struct sr_disk {
 	dev_t			sdk_devno;
-	SLIST_ENTRY(sr_disk) 	sdk_link;
+	SLIST_ENTRY(sr_disk)	sdk_link;
 };
 SLIST_HEAD(sr_disk_head, sr_disk);
 
@@ -64,7 +64,7 @@ struct sr_metadata {
 		/* do not change order of ssd_magic, ssd_version */
 		u_int64_t	ssd_magic;	/* magic id */
 #define	SR_MAGIC		0x4d4152436372616dLLU
-		u_int32_t	ssd_version; 	/* meta data version */
+		u_int32_t	ssd_version;	/* meta data version */
 		u_int32_t	ssd_vol_flags;	/* volume specific flags. */
 		struct sr_uuid	ssd_uuid;	/* unique identifier */
 
@@ -424,7 +424,7 @@ struct sr_boot_volume {
 
 	struct sr_metadata_list_head	sml;	/* List of metadata. */
 
-	SLIST_ENTRY(sr_boot_volume)	sbv_link;	
+	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
 
 SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
@@ -453,7 +453,7 @@ struct sr_volume {
 
 	/* sensors */
 	struct ksensor		sv_sensor;
-	struct ksensordev	sv_sensordev;
+	int			sv_sensor_attached;
 	int			sv_sensor_valid;
 };
 
@@ -573,7 +573,9 @@ struct sr_softc {
 	struct rwlock		sc_hs_lock;	/* Lock for hotspares list. */
 	int			sc_hotspare_no; /* Number of hotspares. */
 
+	struct ksensordev	sc_sensordev;
 	int			sc_sensors_running;
+
 	/*
 	 * during scsibus attach this is the discipline that is in use
 	 * this variable is protected by sc_lock and splhigh

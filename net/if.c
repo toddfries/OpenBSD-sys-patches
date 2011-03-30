@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.231 2010/11/29 19:38:59 miod Exp $	*/
+/*	$OpenBSD: if.c,v 1.234 2011/03/13 15:31:41 stsp Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -182,7 +182,7 @@ ifinit()
 	static struct timeout if_slowtim;
 
 	pool_init(&ifaddr_item_pl, sizeof(struct ifaddr_item), 0, 0, 0,
-	    "ifaddritempool", NULL);
+	    "ifaddritempl", NULL);
 
 	timeout_set(&if_slowtim, if_slowtimo, &if_slowtim);
 
@@ -1357,6 +1357,31 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 #endif
 
+#ifndef SMALL_KERNEL
+		if (ifp->if_capabilities & IFCAP_WOL) {
+			if (ISSET(ifr->ifr_flags, IFXF_WOL) &&
+			    !ISSET(ifp->if_xflags, IFXF_WOL)) {
+				int s = splnet();
+				ifp->if_xflags |= IFXF_WOL;
+				error = ifp->if_wol(ifp, 1);
+				splx(s);
+				if (error)
+					return (error);
+			}
+			if (ISSET(ifp->if_xflags, IFXF_WOL) &&
+			    !ISSET(ifr->ifr_flags, IFXF_WOL)) {
+				int s = splnet();
+				ifp->if_xflags &= ~IFXF_WOL;
+				error = ifp->if_wol(ifp, 0);
+				splx(s);
+				if (error)
+					return (error);
+			}
+		} else if (ISSET(ifr->ifr_flags, IFXF_WOL)) {
+			ifr->ifr_flags &= ~IFXF_WOL;
+			error = ENOTSUP;
+		}
+#endif
 
 		ifp->if_xflags = (ifp->if_xflags & IFXF_CANTCHANGE) |
 			(ifr->ifr_flags & ~IFXF_CANTCHANGE);
@@ -2195,7 +2220,9 @@ void
 ifa_update_broadaddr(struct ifnet *ifp, struct ifaddr *ifa, struct sockaddr *sa)
 {
 	ifa_item_remove(ifa->ifa_broadaddr, ifa, ifp);
-	ifa->ifa_broadaddr = sa;
+	if (ifa->ifa_broadaddr->sa_len != sa->sa_len)
+		panic("ifa_update_broadaddr does not support dynamic length");
+	bcopy(sa, ifa->ifa_broadaddr, sa->sa_len);
 	ifa_item_insert(ifa->ifa_broadaddr, ifa, ifp);
 }
 

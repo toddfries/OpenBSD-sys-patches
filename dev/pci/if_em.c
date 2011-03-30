@@ -31,18 +31,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.248 2010/09/19 13:10:21 yasuoka Exp $ */
+/* $OpenBSD: if_em.c,v 1.250 2011/03/09 12:24:15 mpf Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
 #include <dev/pci/if_em_soc.h>
-
-#ifdef EM_DEBUG
-/*********************************************************************
- *  Set this to one to display debug statistics
- *********************************************************************/
-int             em_display_debug_stats = 0;
-#endif
 
 /*********************************************************************
  *  Driver version
@@ -481,7 +474,9 @@ em_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Initialize statistics */
 	em_clear_hw_cntrs(&sc->hw);
+#ifndef SMALL_KERNEL
 	em_update_stats_counters(sc);
+#endif
 	sc->hw.get_link_status = 1;
 	if (!defer)
 		em_update_link_status(sc);
@@ -1411,10 +1406,12 @@ em_local_timer(void *arg)
 
 	em_check_for_link(&sc->hw);
 	em_update_link_status(sc);
+#ifndef SMALL_KERNEL
 	em_update_stats_counters(sc);
 #ifdef EM_DEBUG
-	if (em_display_debug_stats && ifp->if_flags & IFF_RUNNING)
+	if (ifp->if_flags & IFF_DEBUG && ifp->if_flags & IFF_RUNNING)
 		em_print_hw_stats(sc);
+#endif
 #endif
 	em_smartspeed(sc);
 
@@ -2824,8 +2821,10 @@ em_rxeof(struct em_softc *sc, int count)
 			last_byte = *(mtod(m, caddr_t) + desc_len - 1);
 			if (TBI_ACCEPT(&sc->hw, status, desc->errors,
 			    pkt_len, last_byte)) {
+#ifndef SMALL_KERNEL
 				em_tbi_adjust_stats(&sc->hw, &sc->stats, 
 				    pkt_len, sc->hw.mac_addr);
+#endif
 				if (len > 0)
 					len--;
 			} else
@@ -3094,6 +3093,7 @@ em_fill_descriptors(u_int64_t address, u_int32_t length,
         return desc_array->elements;
 }
 
+#ifndef SMALL_KERNEL
 /**********************************************************************
  *
  *  Update the board statistics counters. 
@@ -3202,7 +3202,7 @@ em_update_stats_counters(struct em_softc *sc)
 #ifdef EM_DEBUG
 /**********************************************************************
  *
- *  This routine is called only when em_display_debug_stats is enabled.
+ *  This routine is called only when IFF_DEBUG is enabled.
  *  This routine provides a way to take a look at important statistics
  *  maintained by the driver and hardware.
  *
@@ -3258,3 +3258,4 @@ em_print_hw_stats(struct em_softc *sc)
 		(long long)sc->stats.gptc);
 }
 #endif
+#endif /* !SMALL_KERNEL */
