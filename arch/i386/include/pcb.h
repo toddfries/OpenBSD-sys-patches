@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.14 2007/10/03 07:51:26 kettenis Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.15 2011/03/12 03:52:26 guenther Exp $	*/
 /*	$NetBSD: pcb.h,v 1.21 1996/01/08 13:51:42 mycroft Exp $	*/
 
 /*-
@@ -81,8 +81,9 @@ struct pcb {
 #define PCB_SAVECTX	0x00000001
 };
 
-/* the segments in pcb_threadsegs are in which order? */
-enum threadseg { TSEG_FS, TSEG_GS };
+/* the indexes of the %fs/%gs segments in pcb_threadsegs */
+#define	TSEG_FS		0
+#define	TSEG_GS		1
 
 /*    
  * The pcb is augmented with machine-dependent additional data for 
