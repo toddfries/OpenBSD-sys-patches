@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.50 2011/01/09 20:25:46 bluhm Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.52 2011/03/24 20:09:45 bluhm Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*

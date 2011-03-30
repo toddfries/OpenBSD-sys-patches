@@ -1,8 +1,9 @@
-/*	$OpenBSD: pf_norm.c,v 1.128 2011/02/01 16:10:31 bluhm Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.130 2011/03/24 20:09:44 bluhm Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
  * Copyright 2009 Henning Brauer <henning@openbsd.org>
+ * Copyright 2011 Alexander Bluhm <bluhm@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -367,14 +368,15 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	KASSERT(prev != NULL || after != NULL);
 
 	if (prev != NULL && prev->fe_off + prev->fe_len > frent->fe_off) {
-		int	precut;
+		u_int16_t	precut;
 
 		precut = prev->fe_off + prev->fe_len - frent->fe_off;
 		if (precut >= frent->fe_len)
 			goto bad_fragment;
 		DPFPRINTF(LOG_NOTICE, "overlap -%d", precut);
-		m_adj(prev->fe_m, -precut);
-		prev->fe_len -= precut;
+		m_adj(frent->fe_m, precut);
+		frent->fe_off += precut;
+		frent->fe_len -= precut;
 	}
 
 	for (; after != NULL && frent->fe_off + frent->fe_len > after->fe_off;
@@ -385,8 +387,9 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 		aftercut = frent->fe_off + frent->fe_len - after->fe_off;
 		DPFPRINTF(LOG_NOTICE, "adjust overlap %d", aftercut);
 		if (aftercut < after->fe_len) {
-			m_adj(frent->fe_m, -aftercut);
-			frent->fe_len -= aftercut;
+			m_adj(after->fe_m, aftercut);
+			after->fe_off += aftercut;
+			after->fe_len -= aftercut;
 			break;
 		}
 
