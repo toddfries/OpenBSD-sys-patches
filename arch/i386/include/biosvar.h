@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosvar.h,v 1.53 2010/11/22 21:08:08 miod Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.55 2011/03/23 16:54:35 pirofti Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -26,13 +26,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_BIOSVAR_H_
-#define _I386_BIOSVAR_H_
+#ifndef _MACHINE_BIOSVAR_H_
+#define _MACHINE_BIOSVAR_H_
 
 	/* some boxes put apm data seg in the 2nd page */
 #define	BOOTARG_OFF	(NBPG*2)
 #define	BOOTARG_LEN	(NBPG*1)
 #define	BOOTBIOS_ADDR	(0x7c00)
+#define	BOOTBIOS_MAXSEC	((1 << 28) - 1)
 
 	/* physical page for ptp 0 need for various tramps */
 #define PTP0_PA		(NBPG*3)	
@@ -265,4 +266,4 @@ extern bios_pciinfo_t *bios_pciinfo;
 #endif /* _LOCORE */
 #endif /* _KERNEL || _STANDALONE */
 
-#endif /* _I386_BIOSVAR_H_ */
+#endif /* _MACHINE_BIOSVAR_H_ */
