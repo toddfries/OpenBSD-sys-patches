@@ -404,3 +404,4 @@ owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
+pseudo-device	sequencer 1
