@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.13 2011/01/02 13:16:53 jsing Exp $	*/
+/*	$OpenBSD: trap.c,v 1.15 2011/03/30 13:54:23 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -178,7 +178,7 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	long oldcpl;
+	long oldcpl = cpl;
 #endif
 
 	trapnum = type & ~T_USER;
@@ -521,9 +521,9 @@ printf("eirr 0x%08x\n", mfctl(CR_EIRR));
 		}
 		/* FALLTHROUGH to unimplemented */
 	default:
-#if 1
-if (kdb_trap (type, va, frame))
-	return;
+#ifdef TRAPDEBUG
+		if (kdb_trap(type, va, frame))
+			return;
 #endif
 		panic("trap: unimplemented \'%s\' (%d)", tts, trapnum);
 	}
@@ -584,7 +584,7 @@ syscall(struct trapframe *frame)
 	int retq, nsys, code, argsize, argoff, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	long oldcpl;
+	long oldcpl = cpl;
 #endif
 
 	/* TODO syscall */
