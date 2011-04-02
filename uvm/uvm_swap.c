@@ -1952,8 +1952,7 @@ uvm_swap_io(struct vm_page **pps, int startslot, int npages, int flags)
 	 * fill in the bp.   we currently route our i/o through
 	 * /dev/drum's vnode [swapdev_vp].
 	 */
-	bp->b_flags = B_PRIV | B_BUSY | B_NOCACHE | B_RAW | 
-	  (flags & (B_READ|B_ASYNC));
+	bp->b_flags = B_BUSY | B_NOCACHE | B_RAW | (flags & (B_READ|B_ASYNC));
 	bp->b_proc = &proc0;	/* XXX */
 	bp->b_vnbufs.le_next = NOLIST;
 	if (bounce)

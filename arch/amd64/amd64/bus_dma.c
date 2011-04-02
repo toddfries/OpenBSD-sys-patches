@@ -333,6 +333,10 @@ _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
 			if (plen < sgsize)
 				sgsize = plen;
 
+
+			if (paddr > 0xffffffff)
+				panic("some motherfucker gave us a highmem buffer at paddr %p(raw)", paddr);
+
 			/*
 			 * Make sure we don't cross any boundaries.
 			 */
@@ -585,6 +589,9 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		 * Get the physical address for this segment.
 		 */
 		pmap_extract(pmap, vaddr, (paddr_t *)&curaddr);
+
+		if (curaddr > 0xffffffff)
+			panic("some motherfucker gave us a highmem buffer at %p buf %p", curaddr, buf);
 
 		/*
 		 * Compute the segment size, and adjust counts.
