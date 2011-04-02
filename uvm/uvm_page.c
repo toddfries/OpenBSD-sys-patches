@@ -1,9 +1,9 @@
 /*	$OpenBSD: uvm_page.c,v 1.102 2010/08/07 03:50:02 krw Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
-/* 
+/*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
- * Copyright (c) 1991, 1993, The Regents of the University of California.  
+ * Copyright (c) 1991, 1993, The Regents of the University of California.
  *
  * All rights reserved.
  *
@@ -21,7 +21,7 @@
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
  *	This product includes software developed by Charles D. Cranor,
- *      Washington University, the University of California, Berkeley and 
+ *      Washington University, the University of California, Berkeley and
  *      its contributors.
  * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
@@ -45,17 +45,17 @@
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
  * All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -83,9 +83,6 @@
 
 void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
 			    vsize_t, int);
-void			uvm_pagerealloc_multi(struct uvm_object *, voff_t,
-			    vsize_t, int, struct uvm_constraint_range *);
-
 /*
  * for object trees
  */
@@ -828,46 +825,11 @@ uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags)
 		panic("wtf - uvm_pglistalloc returned %x", error);
 	i = 0;
 	while((pg = TAILQ_FIRST(&plist)) != NULL) {
-	  pg->wire_count = 1;
-	  atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
-	  KASSERT((pg->pg_flags & PG_DEV) == 0);
-	  TAILQ_REMOVE(&plist, pg, pageq);
-	  uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
-	}
-}
-
-/*
- * interface used by the buffer cache to reallocate a buffer at a time.
- * The pages are reallocated wired outside the DMA accessible region.
- *
- */
-void
-uvm_pagerealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags, struct uvm_constraint_range *where)
-{
-	struct pglist    plist;
-	struct vm_page  *pg, *tpg;
-	int              i, error;
-	voff_t		offset;
-
-
-	TAILQ_INIT(&plist);
-	if (size == 0)
-		panic("size 0 uvm_pagerealloc");
-	error = uvm_pglistalloc(size, where->ucr_low, where->ucr_high, 0,
-	    0, &plist, atop(round_page(size)), UVM_PLA_WAITOK);
-	if (error)
-		panic("wtf - uvm_pglistalloc returned %x", error);
-	i = 0;
-	while((pg = TAILQ_FIRST(&plist)) != NULL) {
-	  offset = off + ptoa(i++);
-	  tpg = uvm_pagelookup(obj, offset);
-	  pg->wire_count = 1;
-	  atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
-	  KASSERT((pg->pg_flags & PG_DEV) == 0);
-	  TAILQ_REMOVE(&plist, pg, pageq);
-	  uvm_pagecopy(tpg, pg);
-	  uvm_pagefree(tpg);
-	  uvm_pagealloc_pg(pg, obj, offset, NULL);
+		pg->wire_count = 1;
+		atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+		KASSERT((pg->pg_flags & PG_DEV) == 0);
+		TAILQ_REMOVE(&plist, pg, pageq);
+		uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
 	}
 }
 

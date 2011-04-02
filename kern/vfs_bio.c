@@ -191,14 +191,14 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
-	long low, high, dmapages, highpages;
+	long low, high, dmapages;
 	struct bqueues *dp;
 
 	/* XXX - for now */
 	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
 
 	/*
-	 * First off, figure out how much of memory we can use. 
+	 * First off, figure out how much of memory we can use.
 	 *
 	 * XXX for now we only use dma-able memory
 	 *
@@ -206,18 +206,14 @@ bufinit(void)
 	 * be holes in the physical memory. This needs to be replaced
 	 * with a uvm_pmemrange function to tell us how many pages
 	 * are within a constraint range - but this is accurate enough
-	 * for now. 
+	 * for now.
 	 */
-	
+
 	low = atop(dma_constraint.ucr_low);
 	high = atop(dma_constraint.ucr_high);
 	if (high >= physmem) {
 		high = physmem;
-		highpages = 0;
 	}
-	else 
-	  	highpages = physmem - high;
-	/* XXX highpages not used yet but will be very soon. */
 	dmapages = high - low;
 
 	/*

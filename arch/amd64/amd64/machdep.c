@@ -1179,7 +1179,7 @@ typedef void (vector)(void);
 extern vector IDTVEC(osyscall);
 extern vector *IDTVEC(exceptions)[];
 
-int bigmem = 0;
+int bigmem = 1;
 
 void
 init_x86_64(paddr_t first_avail)
