@@ -191,19 +191,43 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
+	long low, high, dmapages, highpages;
 	struct bqueues *dp;
 
 	/* XXX - for now */
 	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
 
 	/*
+	 * First off, figure out how much of memory we can use. 
+	 *
+	 * XXX for now we only use dma-able memory
+	 *
+	 * XXX - this isn't completely accurate, because their may
+	 * be holes in the physical memory. This needs to be replaced
+	 * with a uvm_pmemrange function to tell us how many pages
+	 * are within a constraint range - but this is accurate enough
+	 * for now. 
+	 */
+	
+	low = atop(dma_constraint.ucr_low);
+	high = atop(dma_constraint.ucr_high);
+	if (high >= physmem) {
+		high = physmem;
+		highpages = 0;
+	}
+	else 
+	  	highpages = physmem - high;
+	/* XXX highpages not used yet but will be very soon. */
+	dmapages = high - low;
+
+	/*
 	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
-	 * 10% physmem for pages.
+	 * 10% of dmaable pages for cache pages.
 	 */
 	if (bufcachepercent == 0)
 		bufcachepercent = 10;
 	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
+		bufpages = dmapages * bufcachepercent / 100;
 
 	bufhighpages = bufpages;
 
@@ -212,7 +236,7 @@ bufinit(void)
 	 * we will not allow uvm to steal back more than this number of
 	 * pages
 	 */
-	buflowpages = physmem * 10 / 100;
+	buflowpages = dmapages * 10 / 100;
 
 	/*
 	 * set bufbackpages to 100 pages, or 10 percent of the low water mark

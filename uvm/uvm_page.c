@@ -81,6 +81,11 @@
 
 #include <uvm/uvm.h>
 
+void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
+			    vsize_t, int);
+void			uvm_pagerealloc_multi(struct uvm_object *, voff_t,
+			    vsize_t, int, struct uvm_constraint_range *);
+
 /*
  * for object trees
  */
@@ -801,6 +806,69 @@ uvm_pagealloc_pg(struct vm_page *pg, struct uvm_object *obj, voff_t off,
 	pg->owner_tag = NULL;
 #endif
 	UVM_PAGE_OWN(pg, "new alloc");
+}
+
+/*
+ * interface used by the buffer cache to allocate a buffer at a time.
+ * The pages are allocated wired in DMA accessible memory
+ */
+void
+uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags)
+{
+	struct pglist    plist;
+	struct vm_page  *pg;
+	int              i, error;
+
+
+	TAILQ_INIT(&plist);
+	error = uvm_pglistalloc(size, dma_constraint.ucr_low,
+	    dma_constraint.ucr_high, 0, 0, &plist, atop(round_page(size)),
+	    UVM_PLA_WAITOK);
+	if (error)
+		panic("wtf - uvm_pglistalloc returned %x", error);
+	i = 0;
+	while((pg = TAILQ_FIRST(&plist)) != NULL) {
+	  pg->wire_count = 1;
+	  atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+	  KASSERT((pg->pg_flags & PG_DEV) == 0);
+	  TAILQ_REMOVE(&plist, pg, pageq);
+	  uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
+	}
+}
+
+/*
+ * interface used by the buffer cache to reallocate a buffer at a time.
+ * The pages are reallocated wired outside the DMA accessible region.
+ *
+ */
+void
+uvm_pagerealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags, struct uvm_constraint_range *where)
+{
+	struct pglist    plist;
+	struct vm_page  *pg, *tpg;
+	int              i, error;
+	voff_t		offset;
+
+
+	TAILQ_INIT(&plist);
+	if (size == 0)
+		panic("size 0 uvm_pagerealloc");
+	error = uvm_pglistalloc(size, where->ucr_low, where->ucr_high, 0,
+	    0, &plist, atop(round_page(size)), UVM_PLA_WAITOK);
+	if (error)
+		panic("wtf - uvm_pglistalloc returned %x", error);
+	i = 0;
+	while((pg = TAILQ_FIRST(&plist)) != NULL) {
+	  offset = off + ptoa(i++);
+	  tpg = uvm_pagelookup(obj, offset);
+	  pg->wire_count = 1;
+	  atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+	  KASSERT((pg->pg_flags & PG_DEV) == 0);
+	  TAILQ_REMOVE(&plist, pg, pageq);
+	  uvm_pagecopy(tpg, pg);
+	  uvm_pagefree(tpg);
+	  uvm_pagealloc_pg(pg, obj, offset, NULL);
+	}
 }
 
 /*

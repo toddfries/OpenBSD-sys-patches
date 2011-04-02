@@ -144,6 +144,7 @@ struct buf {
 	LIST_ENTRY(buf) b_list;		/* All allocated buffers. */
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
+	TAILQ_ENTRY(buf) b_qda;		/* Device Accisible queue position */
 	time_t	b_synctime;		/* Time this buffer should be flushed */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
 	volatile long	b_flags;	/* B_* flags. */
@@ -189,6 +190,7 @@ struct buf {
 /*
  * These flags are kept in b_flags.
  */
+#define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
 #define	B_AGE		0x00000001	/* Move to age queue when I/O done. */
 #define	B_NEEDCOMMIT	0x00000002	/* Needs committing to stable storage */
 #define	B_ASYNC		0x00000004	/* Start I/O, do not wait. */
@@ -197,29 +199,31 @@ struct buf {
 #define	B_CACHE		0x00000020	/* Bread found us in the cache. */
 #define	B_CALL		0x00000040	/* Call b_iodone from biodone. */
 #define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
+#define	B_PRIV		0x00000100	/* Privately allocated buffer */
 #define	B_DONE		0x00000200	/* I/O completed. */
 #define	B_EINTR		0x00000400	/* I/O was interrupted */
 #define	B_ERROR		0x00000800	/* I/O error occurred. */
-#define	B_INVAL		0x00002000	/* Does not contain valid info. */
-#define	B_NOCACHE	0x00008000	/* Do not cache block after use. */
-#define	B_PHYS		0x00040000	/* I/O to user memory. */
-#define	B_RAW		0x00080000	/* Set by physio for raw transfers. */
-#define	B_READ		0x00100000	/* Read buffer. */
-#define	B_WANTED	0x00800000	/* Process wants this buffer. */
-#define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
-#define	B_WRITEINPROG	0x01000000	/* Write in progress. */
-#define	B_XXX		0x02000000	/* Debugging flag. */
-#define	B_DEFERRED	0x04000000	/* Skipped over for cleaning */
-#define	B_SCANNED	0x08000000	/* Block already pushed during sync */
-#define	B_PDAEMON	0x10000000	/* I/O started by pagedaemon */
-#define B_RELEASED	0x20000000	/* free this buffer after its kvm */
-#define B_NOTMAPPED	0x40000000	/* BUSY, but not necessarily mapped */
+#define	B_INVAL		0x00001000	/* Does not contain valid info. */
+#define	B_NOCACHE	0x00002000	/* Do not cache block after use. */
+#define	B_PHYS		0x00004000	/* I/O to user memory. */
+#define	B_RAW		0x00008000	/* Set by physio for raw transfers. */
+#define	B_READ		0x00010000	/* Read buffer. */
+#define	B_WANTED	0x00020000	/* Process wants this buffer. */
+#define	B_WRITEINPROG	0x00040000	/* Write in progress. */
+#define	B_XXX		0x00080000	/* Debugging flag. */
+#define	B_DEFERRED	0x00100000	/* Skipped over for cleaning */
+#define	B_SCANNED	0x00200000	/* Block already pushed during sync */
+#define	B_PDAEMON	0x00400000	/* I/O started by pagedaemon */
+#define B_RELEASED	0x00800000	/* free this buffer after its kvm */
+#define B_DMA		0x01000000	/* buffer is on the DA queue */
+#define B_DAQ		0x02000000	/* buffer is DMA reachable */
+#define B_NOTMAPPED	0x04000000	/* BUSY, but not necessarily mapped */
 
-#define	B_BITS	"\010\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY\006CACHE" \
-    "\007CALL\010DELWRI\012DONE\013EINTR\014ERROR" \
-    "\016INVAL\020NOCACHE\023PHYS\024RAW\025READ" \
-    "\030WANTED\031WRITEINPROG\032XXX\033DEFERRED" \
-    "\034SCANNED\035PDAEMON"
+#define	B_BITS	"\20\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY" \
+    "\006CACHE\007CALL\010DELWRI\011PRIV\012DONE\013EINTR\014ERROR" \
+    "\015INVAL\016NOCACHE\017PHYS\020RAW\021READ" \
+    "\022WANTED\023WRITEINPROG\024XXX(FORMAT)\025DEFERRED" \
+    "\026SCANNED\027DAEMON\030RELEASED\031DAQ\032DMA\033NOTMAPPED"
 
 /*
  * This structure describes a clustered I/O.  It is stored in the b_saveaddr

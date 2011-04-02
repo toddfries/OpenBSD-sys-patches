@@ -241,9 +241,9 @@ uvm_pageout(void *arg)
 		/*
 		 * get pages from the buffer cache, or scan if needed
 		 */
-		if (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
-		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
-			if (bufbackoff() == -1)
+		if ((bufbackoff() == -1)
+		    && (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
+  		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg))) {
 				uvmpd_scan();
 		}
 
