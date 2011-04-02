@@ -29,10 +29,19 @@
 vaddr_t buf_kva_start, buf_kva_end;
 int buf_needva;
 TAILQ_HEAD(,buf) buf_valist;
+void	buf_realloc_pages(struct buf *, struct uvm_constraint_range *);
 
 int buf_nkvmsleep;
+#if 0
+extern int needda;
+#endif
+extern void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
+			    vsize_t, int);
+extern void			uvm_pagerealloc_multi(struct uvm_object *, voff_t,
+			    vsize_t, int, struct uvm_constraint_range *);
 
 extern struct bcachestats bcstats;
+extern int needbuffer;
 
 /*
  * Pages are allocated from a uvm object (we only use it for page storage,
@@ -99,6 +108,10 @@ buf_acquire_unmapped(struct buf *bp)
 
 	s = splbio();
 	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
+	if (bp->b_data != NULL) {
+		TAILQ_REMOVE(&buf_valist, bp, b_valist);
+		bcstats.busymapped++;
+	}
 	splx(s);
 }
 
@@ -170,6 +183,26 @@ buf_release(struct buf *bp)
 		}
 	}
 	CLR(bp->b_flags, B_BUSY|B_NOTMAPPED);
+#if 0
+	if (ISSET(bp->b_flags, B_DAQ) && needda) {
+		wakeup(&needda);
+	}
+#endif
+	/* Wake up any processes waiting for any buffer to become free. */
+	if (needbuffer) {
+		needbuffer--;
+		wakeup(&needbuffer);
+	}
+
+	/*
+	 * Wake up any processes waiting for _this_ buffer to become
+	 * free.
+	 */
+
+	if (ISSET(bp->b_flags, B_WANTED)) {
+		CLR(bp->b_flags, B_WANTED);
+		wakeup(bp);
+	}
 	splx(s);
 }
 
@@ -259,11 +292,11 @@ buf_unmap(struct buf *bp)
 	return (va);
 }
 
+/* Always allocates in Device Accessible Memory */
 void
 buf_alloc_pages(struct buf *bp, vsize_t size)
 {
-	struct vm_page *pg;
-	voff_t offs, i;
+	voff_t offs;
 	int s;
 
 	KASSERT(size == round_page(size));
@@ -277,25 +310,51 @@ buf_alloc_pages(struct buf *bp, vsize_t size)
 
 	KASSERT(buf_page_offset > 0);
 
-	for (i = 0; i < atop(size); i++) {
-#if defined(DEBUG) || 1
-		if ((pg = uvm_pagelookup(buf_object, offs + ptoa(i))))
-			panic("buf_alloc_pages: overlap buf: %p page: %p",
-			    bp, pg);
-#endif
-
-		while ((pg = uvm_pagealloc(buf_object, offs + ptoa(i),
-			    NULL, 0)) == NULL) {
-			uvm_wait("buf_alloc_pages");
-		}
-		pg->wire_count = 1;
-		atomic_clearbits_int(&pg->pg_flags, PG_BUSY);
-		bcstats.numbufpages++;
-	}
-
+	uvm_pagealloc_multi(buf_object, offs, size, UVM_PLA_WAITOK);
+	bcstats.numbufpages+= atop(size);;
+	SET(bp->b_flags, B_DMA);
 	bp->b_pobj = buf_object;
 	bp->b_poffs = offs;
 	bp->b_bufsize = size;
+	splx(s);
+}
+
+/* reallocate into a particular location specified by "where" */
+void
+buf_realloc_pages(struct buf *bp, struct uvm_constraint_range *where)
+{
+	vaddr_t va;
+	int dma = 1;
+  	int s, i;
+
+	s = splbio();
+	KASSERT(ISSET(bp->b_flags, B_BUSY));
+
+	/* if the original buf is mapped, unmap it */
+	if ( bp->b_data != NULL) {
+		va = (vaddr_t)bp->b_data;
+		pmap_kremove(va, bp->b_bufsize);
+		pmap_update(pmap_kernel());
+	}
+	uvm_pagerealloc_multi(bp->b_pobj, bp->b_poffs, bp->b_bufsize,
+	    UVM_PLA_WAITOK, where);
+	/* if the original buf was mapped, re-map it */
+	for (i = 0; i < atop(bp->b_bufsize); i++) {
+		struct vm_page *pg = uvm_pagelookup(bp->b_pobj,
+		    bp->b_poffs + ptoa(i));
+		KASSERT(pg != NULL);
+		if  (!PADDR_IS_DMA_REACHABLE(VM_PAGE_TO_PHYS(pg)))
+			dma = 0;
+		if (bp->b_data != NULL) {
+			pmap_kenter_pa(va + ptoa(i), VM_PAGE_TO_PHYS(pg),
+			    VM_PROT_READ|VM_PROT_WRITE);
+			pmap_update(pmap_kernel());
+		}
+	}
+	if (dma)
+		SET(bp->b_flags, B_DMA);
+	else
+		CLR(bp->b_flags, B_DMA);
 	splx(s);
 }
 
