@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.127 2010/11/13 17:45:44 deraadt Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.128 2011/04/02 16:47:17 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -191,11 +191,13 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
-	long low, high, dmapages;
+	u_int64_t dmapages;
 	struct bqueues *dp;
 
 	/* XXX - for now */
 	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
+
+	dmapages = uvm_pagecount(&dma_constraint);
 
 	/*
 	 * First off, figure out how much of memory we can use.

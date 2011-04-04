@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_glue.c,v 1.55 2010/07/02 22:38:32 thib Exp $	*/
+/*	$OpenBSD: uvm_glue.c,v 1.56 2011/04/01 15:43:13 art Exp $	*/
 /*	$NetBSD: uvm_glue.c,v 1.44 2001/02/06 19:54:44 eeh Exp $	*/
 
 /* 
