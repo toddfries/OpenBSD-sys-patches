@@ -226,6 +226,7 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 
 	bzero(&hdr, sizeof(hdr));
 	hdr.length = PFLOG_REAL_HDRLEN;
+	hdr.af = af;
 	hdr.action = rm->action;
 	hdr.reason = reason;
 	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
@@ -253,10 +254,8 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 	hdr.rule_pid = rm->cpid;
 	hdr.dir = dir;
 
-	PF_ACPY(&hdr.saddr, &pd->nsaddr, pd->naf);
-	PF_ACPY(&hdr.daddr, &pd->ndaddr, pd->naf);
-	hdr.af = pd->af;
-	hdr.naf = pd->naf;
+	PF_ACPY(&hdr.saddr, &pd->nsaddr, pd->af);
+	PF_ACPY(&hdr.daddr, &pd->ndaddr, pd->af);
 	hdr.sport = pd->nsport;
 	hdr.dport = pd->ndport;
 
@@ -331,10 +330,6 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 
 	if (mfake->m_flags & M_PKTHDR)
 		mfake->m_pkthdr.len = min(mfake->m_pkthdr.len, mfake->m_len);
-
-	/* don't rewrite addresses for af-to */
-	if (pfloghdr->af != pfloghdr->naf)
-		return;
 
 	/* rewrite addresses if needed */
 	memset(&pd, 0, sizeof(pd));
