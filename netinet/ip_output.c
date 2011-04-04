@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.214 2010/09/30 09:18:18 phessler Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.216 2011/04/04 17:44:43 henning Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -335,11 +335,7 @@ reroute:
 		 * If it needs TCP/UDP hardware-checksumming, do the
 		 * computation now.
 		 */
-		if (m->m_pkthdr.csum_flags & (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)) {
-			in_delayed_cksum(m);
-			m->m_pkthdr.csum_flags &=
-			    ~(M_UDPV4_CSUM_OUT | M_TCPV4_CSUM_OUT);
-		}
+		in_proto_cksum_out(m, NULL);
 
 		/* If it's not a multicast packet, try to fast-path */
 		if (!IN_MULTICAST(ip->ip_dst.s_addr)) {
@@ -499,12 +495,7 @@ reroute:
 			 * Can't defer TCP/UDP checksumming, do the
 			 * computation now.
 			 */
-			if (m->m_pkthdr.csum_flags &
-			    (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)) {
-				in_delayed_cksum(m);
-				m->m_pkthdr.csum_flags &=
-				    ~(M_UDPV4_CSUM_OUT | M_TCPV4_CSUM_OUT);
-			}
+			in_proto_cksum_out(m, NULL);
 			ip_mloopback(ifp, m, dst);
 		}
 #ifdef MROUTING
@@ -697,20 +688,7 @@ sendit:
 	}
 #endif /* IPSEC */
 
-	/* Catch routing changes wrt. hardware checksumming for TCP or UDP. */
-	if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT) {
-		if (!(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
-		    ifp->if_bridge != NULL) {
-			in_delayed_cksum(m);
-			m->m_pkthdr.csum_flags &= ~M_TCPV4_CSUM_OUT; /* Clear */
-		}
-	} else if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) {
-		if (!(ifp->if_capabilities & IFCAP_CSUM_UDPv4) ||
-		    ifp->if_bridge != NULL) {
-			in_delayed_cksum(m);
-			m->m_pkthdr.csum_flags &= ~M_UDPV4_CSUM_OUT; /* Clear */
-		}
-	}
+	in_proto_cksum_out(m, ifp);
 
 	/*
 	 * Packet filter
@@ -760,8 +738,7 @@ sendit:
 	 */
 	if (ntohs(ip->ip_len) <= mtu) {
 		ip->ip_sum = 0;
-		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    ifp->if_bridge == NULL) {
+		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -857,11 +834,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	 * If we are doing fragmentation, we can't defer TCP/UDP
 	 * checksumming; compute the checksum and clear the flag.
 	 */
-	if (m->m_pkthdr.csum_flags & (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)) {
-		in_delayed_cksum(m);
-		m->m_pkthdr.csum_flags &= ~(M_UDPV4_CSUM_OUT | M_TCPV4_CSUM_OUT);
-	}
-
+	in_proto_cksum_out(m, NULL);
 	firstlen = len;
 	mnext = &m->m_nextpkt;
 
@@ -911,8 +884,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		mhip->ip_off = htons((u_int16_t)mhip->ip_off);
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
-		    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    ifp->if_bridge == NULL) {
+		    (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -931,8 +903,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	ip->ip_off |= htons(IP_MF);
 	ip->ip_sum = 0;
 	if ((ifp != NULL) &&
-	    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-	    ifp->if_bridge == NULL) {
+	    (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
 		m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 		ipstat.ips_outhwcsum++;
 	} else
@@ -2151,4 +2122,22 @@ in_delayed_cksum(struct mbuf *m)
 		m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
 	else
 		*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+}
+
+void
+in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
+{
+	if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT) {
+		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
+		    ifp->if_bridge != NULL) {
+			in_delayed_cksum(m);
+			m->m_pkthdr.csum_flags &= ~M_TCPV4_CSUM_OUT; /* Clear */
+		}
+	} else if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) {
+		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_UDPv4) ||
+		    ifp->if_bridge != NULL) {
+			in_delayed_cksum(m);
+			m->m_pkthdr.csum_flags &= ~M_UDPV4_CSUM_OUT; /* Clear */
+		}
+	}
 }
