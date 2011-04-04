@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.186 2011/02/11 12:16:30 bluhm Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.189 2011/04/04 16:51:15 claudio Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -143,6 +143,9 @@ struct pool ipqent_pool;
 struct pool ipq_pool;
 
 struct ipstat ipstat;
+
+struct in_ifaddr *
+	 in_iawithaddr(struct in_addr, struct mbuf *, u_int);
 
 char *
 inet_ntoa(ina)
@@ -411,14 +414,14 @@ ipv4_input(m)
 #ifdef MROUTING
 		extern struct socket *ip_mrouter;
 
-		if (m->m_flags & M_EXT) {
-			if ((m = m_pullup(m, hlen)) == NULL) {
-				ipstat.ips_toosmall++;
-				return;
-			}
-			ip = mtod(m, struct ip *);
-		}
 		if (ipmforwarding && ip_mrouter) {
+			if (m->m_flags & M_EXT) {
+				if ((m = m_pullup(m, hlen)) == NULL) {
+					ipstat.ips_toosmall++;
+					return;
+				}
+				ip = mtod(m, struct ip *);
+			}
 			/*
 			 * If we are acting as a multicast router, all
 			 * incoming multicast packets are passed to the
@@ -682,33 +685,32 @@ bad:
 struct in_ifaddr *
 in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 {
-	struct in_ifaddr *ia;
+	struct in_ifaddr	*ia;
+	struct sockaddr_in	 sin;
 
-	rdomain = rtable_l2(rdomain);
-	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-		if (ia->ia_ifp->if_rdomain != rdomain)
-			continue;
-		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
-		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
-			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
-			return ia;
-		/* check ancient classful too, e. g. for rarp-based netboot */
-		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
-		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
-		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(sin);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = ina;
+	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin), rdomain);
+
+	/* check ancient classful, e. g. for rarp-based netboot */
+	if (ia == NULL && m->m_flags | M_BCAST &&
+	    IN_CLASSFULBROADCAST(ina.s_addr, ina.s_addr)) {
+		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+			if (ia->ia_ifp->if_rdomain != rdomain)
+				continue;
+			if (((ip_directedbcast == 0) ||
+			    (m && ip_directedbcast &&
+			    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
+			    (ia->ia_ifp->if_flags & IFF_BROADCAST) &&
 			    IN_CLASSFULBROADCAST(ina.s_addr,
-			    ia->ia_addr.sin_addr.s_addr)) {
-				/* Make sure M_BCAST is set */
-				if (m)
-					m->m_flags |= M_BCAST;
-				return ia;
-			}
+			    ia->ia_addr.sin_addr.s_addr))
+				return (ia);
 		}
 	}
 
-	return NULL;
+	return (ia);
 }
 
 /*
