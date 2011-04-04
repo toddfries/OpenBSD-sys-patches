@@ -241,10 +241,9 @@ uvm_pageout(void *arg)
 		/*
 		 * get pages from the buffer cache, or scan if needed
 		 */
-		/* XXX backoff first so this is safe until we fix the swapper */
-		if ((bufbackoff() == -1)
-		    && (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
-  		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg))) {
+		if (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
+		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
+			if (bufbackoff() == -1)
 				uvmpd_scan();
 		}
 

@@ -81,8 +81,6 @@
 
 #include <uvm/uvm.h>
 
-void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
-			    vsize_t, int);
 /*
  * for object trees
  */

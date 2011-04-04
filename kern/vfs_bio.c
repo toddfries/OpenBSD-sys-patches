@@ -200,25 +200,6 @@ bufinit(void)
 	dmapages = uvm_pagecount(&dma_constraint);
 
 	/*
-	 * First off, figure out how much of memory we can use.
-	 *
-	 * XXX for now we only use dma-able memory
-	 *
-	 * XXX - this isn't completely accurate, because their may
-	 * be holes in the physical memory. This needs to be replaced
-	 * with a uvm_pmemrange function to tell us how many pages
-	 * are within a constraint range - but this is accurate enough
-	 * for now.
-	 */
-
-	low = atop(dma_constraint.ucr_low);
-	high = atop(dma_constraint.ucr_high);
-	if (high >= physmem) {
-		high = physmem;
-	}
-	dmapages = high - low;
-
-	/*
 	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
 	 * 10% of dmaable pages for cache pages.
 	 */

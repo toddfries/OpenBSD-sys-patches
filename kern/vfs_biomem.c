@@ -32,11 +32,7 @@ TAILQ_HEAD(,buf) buf_valist;
 
 int buf_nkvmsleep;
 
-extern void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
-			    vsize_t, int);
-
 extern struct bcachestats bcstats;
-extern int needbuffer;
 
 /*
  * Pages are allocated from a uvm object (we only use it for page storage,
@@ -103,10 +99,6 @@ buf_acquire_unmapped(struct buf *bp)
 
 	s = splbio();
 	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
-	if (bp->b_data != NULL) {
-		TAILQ_REMOVE(&buf_valist, bp, b_valist);
-		bcstats.busymapped++;
-	}
 	splx(s);
 }
 
@@ -178,22 +170,6 @@ buf_release(struct buf *bp)
 		}
 	}
 	CLR(bp->b_flags, B_BUSY|B_NOTMAPPED);
-
-	/* Wake up any processes waiting for any buffer to become free. */
-	if (needbuffer) {
-		needbuffer--;
-		wakeup(&needbuffer);
-	}
-
-	/*
-	 * Wake up any processes waiting for _this_ buffer to become
-	 * free.
-	 */
-
-	if (ISSET(bp->b_flags, B_WANTED)) {
-		CLR(bp->b_flags, B_WANTED);
-		wakeup(bp);
-	}
 	splx(s);
 }
 
