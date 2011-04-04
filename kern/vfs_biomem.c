@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.14 2010/04/30 21:56:39 oga Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.15 2011/04/02 16:47:17 beck Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -32,11 +32,7 @@ TAILQ_HEAD(,buf) buf_valist;
 
 int buf_nkvmsleep;
 
-extern void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
-			    vsize_t, int);
-
 extern struct bcachestats bcstats;
-extern int needbuffer;
 
 /*
  * Pages are allocated from a uvm object (we only use it for page storage,
@@ -103,10 +99,6 @@ buf_acquire_unmapped(struct buf *bp)
 
 	s = splbio();
 	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
-	if (bp->b_data != NULL) {
-		TAILQ_REMOVE(&buf_valist, bp, b_valist);
-		bcstats.busymapped++;
-	}
 	splx(s);
 }
 
@@ -178,22 +170,6 @@ buf_release(struct buf *bp)
 		}
 	}
 	CLR(bp->b_flags, B_BUSY|B_NOTMAPPED);
-
-	/* Wake up any processes waiting for any buffer to become free. */
-	if (needbuffer) {
-		needbuffer--;
-		wakeup(&needbuffer);
-	}
-
-	/*
-	 * Wake up any processes waiting for _this_ buffer to become
-	 * free.
-	 */
-
-	if (ISSET(bp->b_flags, B_WANTED)) {
-		CLR(bp->b_flags, B_WANTED);
-		wakeup(bp);
-	}
 	splx(s);
 }
 
@@ -283,7 +259,7 @@ buf_unmap(struct buf *bp)
 	return (va);
 }
 
-/* Always allocates in Device Accessible Memory */
+/* Always allocates in dma-reachable memory */
 void
 buf_alloc_pages(struct buf *bp, vsize_t size)
 {
@@ -302,7 +278,7 @@ buf_alloc_pages(struct buf *bp, vsize_t size)
 	KASSERT(buf_page_offset > 0);
 
 	uvm_pagealloc_multi(buf_object, offs, size, UVM_PLA_WAITOK);
-	bcstats.numbufpages+= atop(size);;
+	bcstats.numbufpages += atop(size);
 	bp->b_pobj = buf_object;
 	bp->b_poffs = offs;
 	bp->b_bufsize = size;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.102 2010/08/07 03:50:02 krw Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.105 2011/04/03 12:36:08 beck Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /*
@@ -81,8 +81,6 @@
 
 #include <uvm/uvm.h>
 
-void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
-			    vsize_t, int);
 /*
  * for object trees
  */
@@ -161,7 +159,7 @@ uvm_pageinsert(struct vm_page *pg)
 	UVMHIST_FUNC("uvm_pageinsert"); UVMHIST_CALLED(pghist);
 
 	KASSERT((pg->pg_flags & PG_TABLED) == 0);
-	/* XXX should we check duplicates? */	
+	/* XXX should we check duplicates? */
 	RB_INSERT(uvm_objtree, &pg->uobject->memt, pg);
 	atomic_setbits_int(&pg->pg_flags, PG_TABLED);
 	pg->uobject->uo_npages++;
@@ -190,7 +188,7 @@ uvm_pageremove(struct vm_page *pg)
 
 /*
  * uvm_page_init: init the page system.   called from uvm_init().
- * 
+ *
  * => we return the range of kernel virtual memory in kvm_startp/kvm_endp
  */
 
@@ -199,9 +197,9 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 {
 	vsize_t freepages, pagecount, n;
 	vm_page_t pagearray;
-	int lcv, i;  
+	int lcv, i;
 	paddr_t paddr;
-#if defined(UVMHIST)   
+#if defined(UVMHIST)
 	static struct uvm_history_ent pghistbuf[100];
 #endif
 
@@ -220,7 +218,7 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	mtx_init(&uvm.fpageqlock, IPL_VM);
 	uvm_pmr_init();
 
-	/* 
+	/*
 	 * allocate vm_page structures.
 	 */
 
@@ -233,15 +231,15 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 
 	if (vm_nphysseg == 0)
 		panic("uvm_page_bootstrap: no memory pre-allocated");
-	
+
 	/*
-	 * first calculate the number of free pages...  
+	 * first calculate the number of free pages...
 	 *
 	 * note that we use start/end rather than avail_start/avail_end.
 	 * this allows us to allocate extra vm_page structures in case we
 	 * want to return some memory to the pool after booting.
 	 */
-	 
+
 	freepages = 0;
 	for (lcv = 0 ; lcv < vm_nphysseg ; lcv++)
 		freepages += (vm_physmem[lcv].end - vm_physmem[lcv].start);
@@ -255,13 +253,13 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	 * truncation errors (since we can only allocate in terms of whole
 	 * pages).
 	 */
-	 
+
 	pagecount = (((paddr_t)freepages + 1) << PAGE_SHIFT) /
 	    (PAGE_SIZE + sizeof(struct vm_page));
 	pagearray = (vm_page_t)uvm_pageboot_alloc(pagecount *
 	    sizeof(struct vm_page));
 	memset(pagearray, 0, pagecount * sizeof(struct vm_page));
-					 
+
 	/*
 	 * init the vm_page structures and put them in the correct place.
 	 */
@@ -344,9 +342,9 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 
 /*
  * uvm_setpagesize: set the page size
- * 
+ *
  * => sets page_shift and page_mask from uvmexp.pagesize.
- */   
+ */
 
 void
 uvm_setpagesize(void)
@@ -371,8 +369,8 @@ uvm_pageboot_alloc(vsize_t size)
 #if defined(PMAP_STEAL_MEMORY)
 	vaddr_t addr;
 
-	/* 
-	 * defer bootstrap allocation to MD code (it may want to allocate 
+	/*
+	 * defer bootstrap allocation to MD code (it may want to allocate
 	 * from a direct-mapped segment).  pmap_steal_memory should round
 	 * off virtual_space_start/virtual_space_end.
 	 */
@@ -814,17 +812,15 @@ uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags)
 {
 	struct pglist    plist;
 	struct vm_page  *pg;
-	int              i, error;
+	int              i;
 
 
 	TAILQ_INIT(&plist);
-	error = uvm_pglistalloc(size, dma_constraint.ucr_low,
+	(void) uvm_pglistalloc(size, dma_constraint.ucr_low,
 	    dma_constraint.ucr_high, 0, 0, &plist, atop(round_page(size)),
 	    UVM_PLA_WAITOK);
-	if (error)
-		panic("wtf - uvm_pglistalloc returned %x", error);
 	i = 0;
-	while((pg = TAILQ_FIRST(&plist)) != NULL) {
+	while ((pg = TAILQ_FIRST(&plist)) != NULL) {
 		pg->wire_count = 1;
 		atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
 		KASSERT((pg->pg_flags & PG_DEV) == 0);
@@ -878,7 +874,7 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	use_reserve = (flags & UVM_PGA_USERESERVE) ||
 		(obj && UVM_OBJ_IS_KERN_OBJECT(obj));
 	if ((uvmexp.free <= uvmexp.reserve_kernel && !use_reserve) ||
-	    (uvmexp.free <= uvmexp.reserve_pagedaemon && 
+	    (uvmexp.free <= uvmexp.reserve_pagedaemon &&
 	     !((curproc == uvm.pagedaemon_proc) ||
 	      (curproc == syncerproc))))
 		goto fail;
@@ -979,8 +975,8 @@ uvm_pagefree(struct vm_page *pg)
 		 * if the object page is on loan we are going to drop ownership.
 		 * it is possible that an anon will take over as owner for this
 		 * page later on.   the anon will want a !PG_CLEAN page so that
-		 * it knows it needs to allocate swap if it wants to page the 
-		 * page out. 
+		 * it knows it needs to allocate swap if it wants to page the
+		 * page out.
 		 */
 
 		/* in case an anon takes over */
@@ -992,12 +988,12 @@ uvm_pagefree(struct vm_page *pg)
 		 * if our page was on loan, then we just lost control over it
 		 * (in fact, if it was loaned to an anon, the anon may have
 		 * already taken over ownership of the page by now and thus
-		 * changed the loan_count [e.g. in uvmfault_anonget()]) we just 
-		 * return (when the last loan is dropped, then the page can be 
+		 * changed the loan_count [e.g. in uvmfault_anonget()]) we just
+		 * return (when the last loan is dropped, then the page can be
 		 * freed by whatever was holding the last loan).
 		 */
 
-		if (saved_loan_count) 
+		if (saved_loan_count)
 			return;
 	} else if (saved_loan_count && pg->uanon) {
 		/*
@@ -1365,7 +1361,7 @@ uvm_pagewire(struct vm_page *pg)
 }
 
 /*
- * uvm_pageunwire: unwire the page.   
+ * uvm_pageunwire: unwire the page.
  *
  * => activate if wire count goes to zero.
  * => caller must lock page queues
@@ -1493,4 +1489,29 @@ uvm_page_lookup_freelist(struct vm_page *pg)
 	KASSERT(lcv != -1);
 	return (vm_physmem[lcv].free_list);
 #endif
+}
+
+/*
+ * uvm_pagecount: count the number of physical pages in the address range.
+ */
+psize_t
+uvm_pagecount(struct uvm_constraint_range* constraint)
+{
+	int lcv;
+	psize_t sz;
+	paddr_t low, high;
+	paddr_t ps_low, ps_high;
+
+	/* Algorithm uses page numbers. */
+	low = atop(constraint->ucr_low);
+	high = atop(constraint->ucr_high);
+
+	sz = 0;
+	for (lcv = 0; lcv < vm_nphysseg; lcv++) {
+		ps_low = MAX(low, vm_physmem[lcv].avail_start);
+		ps_high = MIN(high, vm_physmem[lcv].avail_end);
+		if (ps_low < ps_high)
+			sz += ps_high - ps_low;
+	}
+	return sz;
 }

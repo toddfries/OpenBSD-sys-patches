@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.56 2010/09/26 12:53:27 thib Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.57 2011/04/01 12:58:13 krw Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -151,7 +151,7 @@ uvm_wait(const char *wmsg)
 /*
  * uvmpd_tune: tune paging parameters
  *
- * => called when ever memory is added (or removed?) to the system
+ * => called whenever memory is added to (or removed from?) the system
  * => caller must call with page queues locked
  */
 
@@ -241,10 +241,9 @@ uvm_pageout(void *arg)
 		/*
 		 * get pages from the buffer cache, or scan if needed
 		 */
-		/* XXX backoff first so this is safe until we fix the swapper */
-		if ((bufbackoff() == -1)
-		    && (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
-  		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg))) {
+		if (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
+		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
+			if (bufbackoff() == -1)
 				uvmpd_scan();
 		}
 

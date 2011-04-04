@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.127 2010/11/13 17:45:44 deraadt Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.128 2011/04/02 16:47:17 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -191,30 +191,13 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
-	long low, high, dmapages;
+	u_int64_t dmapages;
 	struct bqueues *dp;
 
 	/* XXX - for now */
 	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
 
-	/*
-	 * First off, figure out how much of memory we can use.
-	 *
-	 * XXX for now we only use dma-able memory
-	 *
-	 * XXX - this isn't completely accurate, because their may
-	 * be holes in the physical memory. This needs to be replaced
-	 * with a uvm_pmemrange function to tell us how many pages
-	 * are within a constraint range - but this is accurate enough
-	 * for now.
-	 */
-
-	low = atop(dma_constraint.ucr_low);
-	high = atop(dma_constraint.ucr_high);
-	if (high >= physmem) {
-		high = physmem;
-	}
-	dmapages = high - low;
+	dmapages = uvm_pagecount(&dma_constraint);
 
 	/*
 	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
