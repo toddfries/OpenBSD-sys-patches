@@ -49,9 +49,9 @@
 #define PFSYNC_DFLTTL		255
 
 #define PFSYNC_ACT_CLR		0	/* clear all states */
-#define PFSYNC_ACT_OOINS	1	/* old insert state */
+#define PFSYNC_ACT_OINS		1	/* old insert state */
 #define PFSYNC_ACT_INS_ACK	2	/* ack of insterted state */
-#define PFSYNC_ACT_OOUPD	3	/* old update state */
+#define PFSYNC_ACT_OUPD		3	/* old update state */
 #define PFSYNC_ACT_UPD_C	4	/* "compressed" update state */
 #define PFSYNC_ACT_UPD_REQ	5	/* request "uncompressed" state */
 #define PFSYNC_ACT_DEL		6	/* delete state */
