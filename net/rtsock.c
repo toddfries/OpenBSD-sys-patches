@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.114 2011/02/14 12:53:27 tedu Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.116 2011/04/03 17:01:23 jsing Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -403,7 +403,8 @@ route_input(struct mbuf *m0, ...)
 		if (last) {
 			struct mbuf *n;
 			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
-				if (sbappendaddr(&last->so_rcv, sosrc,
+				if (sbspace(&last->so_rcv) < (2 * MSIZE) ||
+				    sbappendaddr(&last->so_rcv, sosrc,
 				    n, (struct mbuf *)0) == 0) {
 					/*
 					 * Flag socket as desync'ed and 
@@ -423,7 +424,8 @@ route_input(struct mbuf *m0, ...)
 		last = rp->rcb_socket;
 	}
 	if (last) {
-		if (sbappendaddr(&last->so_rcv, sosrc,
+		if (sbspace(&last->so_rcv) < (2 * MSIZE) ||
+		    sbappendaddr(&last->so_rcv, sosrc,
 		    m, (struct mbuf *)0) == 0) {
 			/* Flag socket as desync'ed and flush required */
 			sotoroutecb(last)->flags |= 
@@ -1469,4 +1471,4 @@ struct protosw routesw[] = {
 
 struct domain routedomain =
     { PF_ROUTE, "route", route_init, 0, 0,
-      routesw, &routesw[sizeof(routesw)/sizeof(routesw[0])] };
+      routesw, &routesw[nitems(routesw)] };
