@@ -1,9 +1,8 @@
-/*	$OpenBSD: intr.c,v 1.3 2011/04/05 15:30:45 jsing Exp $	*/
-
+/*	$OpenBSD: linux_time.h,v 1.1 2011/04/05 22:15:50 pirofti Exp $	*/
 /*
- * Copyright (c) Joel Sing <jsing@openbsd.org>
+ * Copyright (c) 2011 Paul Irofti <pirofti@openbsd.org>
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -16,25 +15,10 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#ifndef _LINUX_TIME_H_
+#define _LINUX_TIME_H_
 
-#include <machine/intr.h>
+void native_to_linux_timespec(struct l_timespec *, struct timespec *);
+int linux_to_native_clockid(clockid_t *, clockid_t);
 
-volatile u_long imask[NIPL];
-
-void *
-softintr_establish(int pri, void (*handler)(void *), void *arg)
-{
-	return (void *)1;
-}
-
-void
-softintr_disestablish(void *cookie)
-{
-}
-
-void
-softintr_schedule(void *cookie)
-{
-}
-
+#endif
