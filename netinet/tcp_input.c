@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.241 2011/04/04 13:56:11 blambert Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.243 2011/04/04 23:04:18 blambert Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -108,6 +108,7 @@
 struct	tcpiphdr tcp_saveti;
 
 int tcp_mss_adv(struct ifnet *, int);
+int tcp_flush_queue(struct tcpcb *);
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
@@ -189,6 +190,9 @@ do { \
 		TCP_SET_DELACK(tp); \
 } while (0)
 
+void syn_cache_put(struct syn_cache *);
+void syn_cache_rm(struct syn_cache *);
+
 /*
  * Insert segment ti into reassembly queue of tcp with
  * control block tp.  Return TH_FIN if reassembly now includes
@@ -204,15 +208,6 @@ int
 tcp_reass(struct tcpcb *tp, struct tcphdr *th, struct mbuf *m, int *tlen)
 {
 	struct tcpqent *p, *q, *nq, *tiqe;
-	struct socket *so = tp->t_inpcb->inp_socket;
-	int flags;
-
-	/*
-	 * Call with th==0 after become established to
-	 * force pre-ESTABLISHED data up to user socket.
-	 */
-	if (th == 0)
-		goto present;
 
 	/*
 	 * Allocate a new queue entry, before we throw away any data.
@@ -302,7 +297,19 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, struct mbuf *m, int *tlen)
 		TAILQ_INSERT_AFTER(&tp->t_segq, p, tiqe, tcpqe_q);
 	}
 
-present:
+	if (th->th_seq != tp->rcv_nxt)
+		return (0);
+
+	return (tcp_flush_queue(tp));
+}
+
+int
+tcp_flush_queue(struct tcpcb *tp)
+{
+	struct socket *so = tp->t_inpcb->inp_socket;
+	struct tcpqent *q, *nq;
+	int flags;
+
 	/*
 	 * Present data to user, advancing rcv_nxt through
 	 * completed sequence space.
@@ -1273,8 +1280,8 @@ after_listen:
 				tp->snd_scale = tp->requested_s_scale;
 				tp->rcv_scale = tp->request_r_scale;
 			}
-			(void) tcp_reass(tp, (struct tcphdr *)0,
-				(struct mbuf *)0, &tlen);
+			tcp_flush_queue(tp);
+
 			/*
 			 * if we didn't have to retransmit the SYN,
 			 * use its rtt as our initial srtt & rtt var.
@@ -1551,8 +1558,7 @@ trimthenstep6:
 			tp->rcv_scale = tp->request_r_scale;
 			tiwin = th->th_win << tp->snd_scale;
 		}
-		(void) tcp_reass(tp, (struct tcphdr *)0, (struct mbuf *)0,
-				 &tlen);
+		tcp_flush_queue(tp);
 		tp->snd_wl1 = th->th_seq - 1;
 		/* fall into ... */
 
@@ -3350,27 +3356,29 @@ do {									\
 } while (/*CONSTCOND*/0)
 #endif /* INET6 */
 
-#define	SYN_CACHE_RM(sc)						\
-do {									\
-	(sc)->sc_flags |= SCF_DEAD;					\
-	TAILQ_REMOVE(&tcp_syn_cache[(sc)->sc_bucketidx].sch_bucket,	\
-	    (sc), sc_bucketq);						\
-	(sc)->sc_tp = NULL;						\
-	LIST_REMOVE((sc), sc_tpq);					\
-	tcp_syn_cache[(sc)->sc_bucketidx].sch_length--;			\
-	timeout_del(&(sc)->sc_timer);					\
-	syn_cache_count--;						\
-} while (/*CONSTCOND*/0)
+void
+syn_cache_rm(struct syn_cache *sc)
+{
+	sc->sc_flags |= SCF_DEAD;
+	TAILQ_REMOVE(&tcp_syn_cache[sc->sc_bucketidx].sch_bucket,
+	    sc, sc_bucketq);
+	sc->sc_tp = NULL;
+	LIST_REMOVE(sc, sc_tpq);
+	tcp_syn_cache[sc->sc_bucketidx].sch_length--;
+	timeout_del(&sc->sc_timer);
+	syn_cache_count--;
+}
 
-#define	SYN_CACHE_PUT(sc)						\
-do {									\
-	if ((sc)->sc_ipopts)						\
-		(void) m_free((sc)->sc_ipopts);				\
-	if ((sc)->sc_route4.ro_rt != NULL)				\
-		RTFREE((sc)->sc_route4.ro_rt);				\
-	timeout_set(&(sc)->sc_timer, syn_cache_reaper, (sc));		\
-	timeout_add(&(sc)->sc_timer, 0);				\
-} while (/*CONSTCOND*/0)
+void
+syn_cache_put(struct syn_cache *sc)
+{
+	if (sc->sc_ipopts)
+		(void) m_free(sc->sc_ipopts);
+	if (sc->sc_route4.ro_rt != NULL)
+		RTFREE(sc->sc_route4.ro_rt);
+	timeout_set(&sc->sc_timer, syn_cache_reaper, sc);
+	timeout_add(&sc->sc_timer, 0);
+}
 
 struct pool syn_cache_pool;
 
@@ -3444,8 +3452,8 @@ syn_cache_insert(struct syn_cache *sc, struct tcpcb *tp)
 		if (sc2 == NULL)
 			panic("syn_cache_insert: bucketoverflow: impossible");
 #endif
-		SYN_CACHE_RM(sc2);
-		SYN_CACHE_PUT(sc2);
+		syn_cache_rm(sc2);
+		syn_cache_put(sc2);
 	} else if (syn_cache_count >= tcp_syn_cache_limit) {
 		struct syn_cache_head *scp2, *sce;
 
@@ -3478,8 +3486,8 @@ syn_cache_insert(struct syn_cache *sc, struct tcpcb *tp)
 #endif
 		}
 		sc2 = TAILQ_FIRST(&scp2->sch_bucket);
-		SYN_CACHE_RM(sc2);
-		SYN_CACHE_PUT(sc2);
+		syn_cache_rm(sc2);
+		syn_cache_put(sc2);
 	}
 
 	/*
@@ -3544,8 +3552,8 @@ syn_cache_timer(void *arg)
 
  dropit:
 	tcpstat.tcps_sc_timed_out++;
-	SYN_CACHE_RM(sc);
-	SYN_CACHE_PUT(sc);
+	syn_cache_rm(sc);
+	syn_cache_put(sc);
 	splx(s);
 }
 
@@ -3581,8 +3589,8 @@ syn_cache_cleanup(struct tcpcb *tp)
 		if (sc->sc_tp != tp)
 			panic("invalid sc_tp in syn_cache_cleanup");
 #endif
-		SYN_CACHE_RM(sc);
-		SYN_CACHE_PUT(sc);
+		syn_cache_rm(sc);
+		syn_cache_put(sc);
 	}
 	/* just for safety */
 	LIST_INIT(&tp->t_sc);
@@ -3677,7 +3685,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	}
 
 	/* Remove this cache entry */
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 
 	/*
@@ -3876,7 +3884,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	tp->last_ack_sent = tp->rcv_nxt;
 
 	tcpstat.tcps_sc_completed++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 	return (so);
 
 resetandabort:
@@ -3886,7 +3894,7 @@ resetandabort:
 abort:
 	if (so != NULL)
 		(void) soabort(so);
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 	tcpstat.tcps_sc_aborted++;
 	return ((struct socket *)(-1));
 }
@@ -3914,10 +3922,10 @@ syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		splx(s);
 		return;
 	}
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 	tcpstat.tcps_sc_reset++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 }
 
 void
@@ -3953,10 +3961,10 @@ syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		return;
 	}
 
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 	tcpstat.tcps_sc_unreach++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 }
 
 /*
@@ -4145,7 +4153,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		tcpstat.tcps_sndacks++;
 		tcpstat.tcps_sndtotal++;
 	} else {
-		SYN_CACHE_PUT(sc);
+		syn_cache_put(sc);
 		tcpstat.tcps_sc_dropped++;
 	}
 	return (1);
