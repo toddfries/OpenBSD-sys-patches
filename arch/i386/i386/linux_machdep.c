@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_machdep.c,v 1.35 2008/03/18 14:29:25 kettenis Exp $	*/
+/*	$OpenBSD: linux_machdep.c,v 1.37 2011/04/05 13:54:42 pirofti Exp $	*/
 /*	$NetBSD: linux_machdep.c,v 1.29 1996/05/03 19:42:11 christos Exp $	*/
 
 /*
@@ -64,11 +64,9 @@
 #include <machine/reg.h>
 #include <machine/segments.h>
 #include <machine/specialreg.h>
-#include <machine/pcb.h>
 #include <machine/sysarch.h>
 #include <machine/vm86.h>
 #include <machine/linux_machdep.h>
-#include <machine/sysarch.h>
 
 /*
  * To see whether wsdisplay is configured (for virtual console ioctl calls).
@@ -641,17 +639,13 @@ int
 linux_sys_set_thread_area(struct proc *p, void *v, register_t *retval)
 {
 	struct linux_sys_set_thread_area_args *uap = v;
-
 	struct l_segment_descriptor ldesc;
-	int eno;
-
 	int error;
 
-	error = copyin(SCARG(uap, desc), &ldesc, sizeof ldesc); 
+	error = copyin(SCARG(uap, desc), &ldesc, sizeof ldesc);
 	if (error != 0)
 		return error;
 
-	eno = ldesc.entry_number;
 	if (ldesc.entry_number == -1) {
 		ldesc.entry_number = GUGS_SEL;
 		if ((error = copyout(&ldesc, SCARG(uap, desc), sizeof ldesc)))
@@ -660,4 +654,41 @@ linux_sys_set_thread_area(struct proc *p, void *v, register_t *retval)
 		return EINVAL;
 
 	return i386_set_threadbase(p, &SCARG(uap, desc)->base_addr, TSEG_GS);
+}
+
+int
+linux_sys_get_thread_area(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_get_thread_area_args *uap = v;
+	struct l_segment_descriptor info;
+	int error;
+	int idx;
+	void *base;
+
+	error = copyin(SCARG(uap, desc), &info, sizeof(info));
+	if (error)
+		return error;
+
+	idx = info.entry_number;
+	if (idx != GUGS_SEL)
+		return (EINVAL);
+
+	error = i386_get_threadbase(p, &base, TSEG_GS);
+	if (error)
+		return error;
+
+	info.base_addr = (int)base;
+	info.limit = atop(VM_MAXUSER_ADDRESS) - 1;
+	info.seg_32bit = 1;
+	info.contents = 0;
+	info.read_exec_only = 0;	/* SDT_MEMRWA */
+	info.limit_in_pages = 1;
+	info.seg_not_present = 0;
+	info.useable = 1;
+
+	error = copyout(&info, SCARG(uap, desc), sizeof(SCARG(uap, desc)));
+	if (error)
+	   	return error;
+
+	return 0;
 }

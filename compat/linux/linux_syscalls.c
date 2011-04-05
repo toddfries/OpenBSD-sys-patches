@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_syscalls.c,v 1.56 2011/02/11 21:41:46 pirofti Exp $	*/
+/*	$OpenBSD: linux_syscalls.c,v 1.57 2011/04/04 21:53:50 pirofti Exp $	*/
 
 /*
  * System call names.
@@ -272,7 +272,7 @@ char *linux_syscallnames[] = {
 	"#241 (unimplemented linux_sys_sched_setaffinity)",		/* 241 = unimplemented linux_sys_sched_setaffinity */
 	"#242 (unimplemented linux_sys_sched_getaffinity)",		/* 242 = unimplemented linux_sys_sched_getaffinity */
 	"set_thread_area",			/* 243 = set_thread_area */
-	"#244 (unimplemented linux_sys_get_thread_area)",		/* 244 = unimplemented linux_sys_get_thread_area */
+	"get_thread_area",			/* 244 = get_thread_area */
 	"#245 (unimplemented linux_sys_io_setup)",		/* 245 = unimplemented linux_sys_io_setup */
 	"#246 (unimplemented linux_sys_io_destroy)",		/* 246 = unimplemented linux_sys_io_destroy */
 	"#247 (unimplemented linux_sys_io_getevents)",		/* 247 = unimplemented linux_sys_io_getevents */
