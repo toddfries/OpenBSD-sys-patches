@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.734 2011/04/05 13:48:18 mikeb Exp $ */
+/*	$OpenBSD: pf.c,v 1.737 2011/04/05 20:36:59 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -5162,9 +5162,9 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		} else
 			ip->ip_sum = in_cksum(m0, ip->ip_hl << 2);
 		/* Update relevant hardware checksum stats for TCP/UDP */
-		if (m0->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+		if (m0->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 			tcpstat.tcps_outhwcsum++;
-		else if (m0->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+		else if (m0->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 			udpstat.udps_outhwcsum++;
 		error = (*ifp->if_output)(ifp, m0, sintosa(dst), NULL);
 		goto done;
@@ -5336,21 +5336,24 @@ bad:
  *   off is the offset where the protocol header starts
  *   len is the total length of protocol header plus payload
  * returns 0 when the checksum is valid, otherwise returns 1.
+ * if the _OUT flag is set the checksum isn't done yet, consider these ok
  */
 int
 pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p,
     sa_family_t af)
 {
-	u_int16_t flag_ok, flag_bad;
+	u_int16_t flag_ok, flag_bad, flag_out;
 	u_int16_t sum;
 
 	switch (p) {
 	case IPPROTO_TCP:
 		flag_ok = M_TCP_CSUM_IN_OK;
+		flag_out = M_TCP_CSUM_OUT;
 		flag_bad = M_TCP_CSUM_IN_BAD;
 		break;
 	case IPPROTO_UDP:
 		flag_ok = M_UDP_CSUM_IN_OK;
+		flag_out = M_UDP_CSUM_OUT;
 		flag_bad = M_UDP_CSUM_IN_BAD;
 		break;
 	case IPPROTO_ICMP:
@@ -5362,7 +5365,7 @@ pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p,
 	default:
 		return (1);
 	}
-	if (m->m_pkthdr.csum_flags & flag_ok)
+	if (m->m_pkthdr.csum_flags & (flag_ok | flag_out))
 		return (0);
 	if (m->m_pkthdr.csum_flags & flag_bad)
 		return (1);
@@ -6021,6 +6024,7 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 	union pf_headers	 hdrs;
 	int			 off, hdrlen;
 	int			 dir = (fwdir == PF_FWD) ? PF_OUT : fwdir;
+	u_int32_t		 qid, pqid = 0;
 
 	if (!pf_status.running)
 		return (PF_PASS);
@@ -6098,6 +6102,8 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 	switch (pd.proto) {
 
 	case IPPROTO_TCP: {
+		if ((pd.hdr.tcp->th_flags & TH_ACK) && pd.p_len == 0)
+			pqid = 1;
 		action = pf_normalize_tcp(dir, kif, m, 0, off, h, &pd);
 		if (action == PF_DROP)
 			goto done;
@@ -6188,10 +6194,19 @@ done:
 	}
 
 	if (action != PF_DROP) {
-		if (s)
+		if (s) {
 			pf_scrub_ip6(&m, s->min_ttl);
-		else
+			if (pqid || (pd.tos & IPTOS_LOWDELAY))
+				qid = s->pqid;
+			else
+				qid = s->qid;
+		} else {
 			pf_scrub_ip6(&m, r->min_ttl);
+			if (pqid || (pd.tos & IPTOS_LOWDELAY))
+				qid = r->pqid;
+			else
+				qid = r->qid;
+		}
 	}
 	if (s && s->tag)
 		pf_tag_packet(m, s ? s->tag : 0, s->rtableid[pd.didx]);
@@ -6200,13 +6215,9 @@ done:
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
 
 #ifdef ALTQ
-	if (action == PF_PASS && s && s->qid) {
-		if (pd.tos & IPTOS_LOWDELAY)
-			m->m_pkthdr.pf.qid = s->pqid;
-		else
-			m->m_pkthdr.pf.qid = s->qid;
-		/* add hints for ecn */
-		m->m_pkthdr.pf.hdr = h;
+	if (action == PF_PASS && qid) {
+		m->m_pkthdr.pf.qid = qid;
+		m->m_pkthdr.pf.hdr = h; /* add hints for ecn */
 	}
 #endif /* ALTQ */
 
