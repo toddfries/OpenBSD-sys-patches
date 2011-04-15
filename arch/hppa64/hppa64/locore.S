@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.18 2011/04/07 18:36:26 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.23 2011/04/14 19:37:07 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -204,7 +204,6 @@ $start_zero_tf
 	mtctl	%arg3, %cr30
 	std	%r0, U_PCB+PCB_ONFAULT(%arg3)
 	std	%r0, U_PCB+PCB_SPACE(%arg3)
-	std	%arg3, U_PCB+PCB_UVA(%arg3)
 
 	ldil	L%proc0, %r1
 	ldo	R%proc0(%r1), %r1
@@ -796,29 +795,30 @@ ENTRY(TLABEL(all),0)
 	depi	0, PSL_I_POS, 1, %r9	/* Leave interrupts disabled. */
 	mtctl	%r9, %ipsw
 
-	mfctl	%cr30, %r9
-
 	mfsp	%sr0, %r8
 	extrd,u,*<> %r24, 63, 2, %r0	/* still pcoq head */
 	cmpb,*= %r0, %r8, TLABEL(all_kern)
 	copy	%sp, %r17
 
+	mfctl	%cr24, %r9
+	ldd	CI_CURPROC(%r9), %r9
 	depdi	1, T_USER_POS, 1, %r1
 	depdi	1, TFF_LAST_POS, 1, %r1
-	ldd	U_PCB+PCB_UVA(%r9), %sp
+	ldd	P_ADDR(%r9), %sp
 	ldo	PAGE_SIZE-TRAPFRAME_SIZEOF(%sp), %sp
 
 TLABEL(all_kern)
 	ldo	127(%sp), %sp
 	depdi	0, 63, 7, %sp
 
-	ldo	TF_SP(%sp), %r8
-	std	%r17, 0(%r8)
+	mfctl	%cr24, %r8
+	ldo	CI_TRAP_SAVE(%r8), %r8
+	std	%r17, 0(%r8)			/* sp */
 	fdc	%r0(%r8)
+	ldo	8(%r8), %r8
 
 	mfctl	%iir, %r16
-	ldo	TF_IIR(%sp), %r8
-	std	%r16, 0(%r8)
+	std	%r16, 0(%r8)			/* iir */
 	fdc	%r0(%r8)
 
 	mtctl	%r1, %cr26
@@ -933,6 +933,14 @@ TLABEL(all_virt)
 	mtsp	%r0, %sr5
 	mtsp	%r0, %sr6
 	mtsp	%r0, %sr7
+
+	/* Copy sp and iir from physical trap save area. */
+	mfctl	%cr24, %r1
+	ldo	CI_TRAP_SAVE(%r1), %r1
+	ldd	0*8(%r1), %arg2
+	ldd	1*8(%r1), %arg3
+	std	%arg2, TF_SP(%arg1)
+	std	%arg3, TF_IIR(%arg1)
 
 	ldo	TRAPFRAME_SIZEOF(%arg1), %sp
 	copy	%sp, %r3
@@ -1505,8 +1513,8 @@ LEAF_ENTRY(copy_on_fault)
 	mtsp	%r0, %sr1
 	mtsp	%r0, %sr2
 	std	%r1, PCB_ONFAULT+U_PCB(%rp)
-	ldd	HPPA_FRAME_RP(%sp), %rp
 	ldo	-HPPA_FRAME_SIZE(%sp), %sp
+	ldd	HPPA_FRAME_RP(%sp), %rp
 	bv	%r0(%rp)
 	ldi	EFAULT, %ret0
 EXIT(copy_on_fault)
@@ -1535,10 +1543,10 @@ LEAF_ENTRY(spstrcpy)
 	ldo	HPPA_FRAME_SIZE(%sp), %sp
 	add	arg4, %arg1, arg4
 	/* setup fault handler */
-	mfctl	%cr24, %arg1
-	ldd	CI_CURPROC(%arg1), %r1
+	mfctl	%cr24, %r1
+	ldd	CI_CURPROC(%r1), %r1
 	ldil	L%copy_on_fault, arg7
-	ldd	P_ADDR(arg6), %rp
+	ldd	P_ADDR(%r1), %rp
 	ldo	R%copy_on_fault(arg7), arg7
 	ldd	PCB_ONFAULT+U_PCB(%rp), %r1
 	std	arg7, PCB_ONFAULT+U_PCB(%rp)
@@ -1546,13 +1554,15 @@ LEAF_ENTRY(spstrcpy)
 	mtsp	%arg0, %sr1
 	mtsp	%arg2, %sr2
 	copy	%arg1, %arg0
+	copy	%r0, %ret0
 
 $spstrcpy_loop
 	ldbs,ma	1(%sr1, %arg1), arg7
-	comb,=	arg4, %arg1, $spstrcpy_exit
+	comb,=	%r0, arg7, $spstrcpy_exit
 	stbs,ma	arg7, 1(%sr2, %arg3)
-	comb,<>,n %r0, arg7, $spstrcpy_loop
+	comb,<>,n arg4, %arg1, $spstrcpy_loop
 	nop
+	ldi	ENAMETOOLONG, %ret0
 
 $spstrcpy_exit
 	ldo	-HPPA_FRAME_SIZE(%sp), %sp
@@ -1562,9 +1572,9 @@ $spstrcpy_exit
 	sub	%arg1, %arg0, %arg1
 	ldd	HPPA_FRAME_RP(%sp), %rp
 	sub,=	%r0, arg5, %r0
-	stw	%arg1, 0(arg5)
+	std	%arg1, 0(arg5)
 	bv	0(%rp)
-	copy	%r0, %ret0
+	nop
 EXIT(spstrcpy)
 
 LEAF_ENTRY(setjmp)
