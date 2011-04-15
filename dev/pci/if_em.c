@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.253 2011/04/05 20:24:32 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.255 2011/04/14 21:14:28 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -128,6 +128,11 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
@@ -387,6 +392,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82572:
 		case em_82574:
 		case em_82575:
+		case em_82580:
 		case em_ich9lan:
 		case em_ich10lan:
 		case em_80003es2lan:
@@ -731,6 +737,7 @@ em_init(void *arg)
 	case em_82571:
 	case em_82572: /* Total Packet Buffer on these is 48k */
 	case em_82575:
+	case em_82580:
 	case em_80003es2lan:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
@@ -820,54 +827,46 @@ em_init(void *arg)
 int 
 em_intr(void *arg)
 {
-	struct em_softc  *sc = arg;
-	struct ifnet	*ifp;
+	struct em_softc	*sc = arg;
+	struct ifnet	*ifp = &sc->interface_data.ac_if;
 	u_int32_t	reg_icr, test_icr;
-	int claimed = 0;
-	int refill;
+	int		refill = 0;
 
-	ifp = &sc->interface_data.ac_if;
+	test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
+	if (sc->hw.mac_type >= em_82571)
+		test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
+	if (!test_icr)
+		return (0);
 
-	for (;;) {
-		test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
-		if (sc->hw.mac_type >= em_82571)
-			test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
-		if (!test_icr)
-			break;
+	if (ifp->if_flags & IFF_RUNNING) {
+		em_rxeof(sc, -1);
+		em_txeof(sc);
+		if (!IFQ_IS_EMPTY(&ifp->if_snd))
+			em_start(ifp);
 
-		claimed = 1;
-		refill = 0;
-
-		if (ifp->if_flags & IFF_RUNNING) {
-			em_rxeof(sc, -1);
-			em_txeof(sc);
-			refill = 1;
-		}
-
-		/* Link status change */
-		if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
-			timeout_del(&sc->timer_handle);
-			sc->hw.get_link_status = 1;
-			em_check_for_link(&sc->hw);
-			em_update_link_status(sc);
-			timeout_add_sec(&sc->timer_handle, 1); 
-		}
-
-		if (reg_icr & E1000_ICR_RXO) {
-			sc->rx_overruns++;
-			refill = 1;
-		}
-
-		if (refill && em_rxfill(sc)) {
-			/* Advance the Rx Queue #0 "Tail Pointer". */
-			E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
-		}
+		refill = 1;
 	}
 
-	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
-		em_start(ifp);
+	/* Link status change */
+	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
+		timeout_del(&sc->timer_handle);
+		sc->hw.get_link_status = 1;
+		em_check_for_link(&sc->hw);
+		em_update_link_status(sc);
+		timeout_add_sec(&sc->timer_handle, 1); 
+	}
 
-	return (claimed);
+	if (reg_icr & E1000_ICR_RXO) {
+		sc->rx_overruns++;
+		refill = 1;
+	}
+
+	if (refill && em_rxfill(sc)) {
+		/* Advance the Rx Queue #0 "Tail Pointer". */
+		E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
+	}
+
+	return (1);
 }
 
 /*********************************************************************
@@ -1434,7 +1433,8 @@ em_update_link_status(struct em_softc *sc)
 			if ((sc->link_speed == SPEED_1000) &&
 			    ((sc->hw.mac_type == em_82571) ||
 			    (sc->hw.mac_type == em_82572) ||
-			    (sc->hw.mac_type == em_82575))) {
+			    (sc->hw.mac_type == em_82575) ||
+			    (sc->hw.mac_type == em_82580))) {
 				int tarc0;
 
 				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
@@ -1723,7 +1723,8 @@ em_hardware_init(struct em_softc *sc)
 	if (!em_smart_pwr_down &&
 	     (sc->hw.mac_type == em_82571 ||
 	      sc->hw.mac_type == em_82572 ||
-	      sc->hw.mac_type == em_82575)) {
+	      sc->hw.mac_type == em_82575 ||
+	      sc->hw.mac_type == em_82580)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
