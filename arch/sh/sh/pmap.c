@@ -903,6 +903,28 @@ pmap_prefer(vaddr_t foff, vaddr_t va)
 
 	return va;
 }
+
+/*
+ * pmap_prefer_align()
+ *
+ * Return virtual cache alignment.
+ */
+vaddr_t
+pmap_prefer_align(void)
+{
+	return SH_HAS_VIRTUAL_ALIAS ? sh_cache_prefer_mask + 1 : 0;
+}
+
+/*
+ * pmap_prefer_offset(vaddr_t of)
+ *
+ * Calculate offset in virtual cache.
+ */
+vaddr_t
+pmap_prefer_offset(vaddr_t of)
+{
+	return of & (SH_HAS_VIRTUAL_ALIAS ? sh_cache_prefer_mask : 0);
+}
 #endif /* SH4 */
 
 /*

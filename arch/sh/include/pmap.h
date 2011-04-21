@@ -81,6 +81,13 @@ pmap_remove_all(struct pmap *pmap)
 #ifdef SH4
 #define	PMAP_PREFER(pa, va)		pmap_prefer((pa), (va))
 vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
+vaddr_t	pmap_prefer_align(void);
+vaddr_t	pmap_prefer_offset(vaddr_t);
+
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()		pmap_prefer_align()
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)		pmap_prefer_offset(of)
 #endif /* SH4 */
 
 #define	__HAVE_PMAP_DIRECT

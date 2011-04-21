@@ -68,6 +68,11 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 	return pmap_prefer_hint;
 }
 
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()	(HPPA_PGALIAS)
+/* pmap prefer offset within alignment */
+#define PMAP_PREFER_OFFSET(of)	((of) & HPPA_PGAOFF)
+
 #define	PMAP_GROWKERNEL
 #define	PMAP_STEAL_MEMORY
 
