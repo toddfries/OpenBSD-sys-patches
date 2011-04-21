@@ -31,11 +31,13 @@
 #define _DISKPROBE_H
 
 #include <sys/queue.h>
+#include <dev/softraidvar.h>
 
 /* All the info on a disk we've found */
 struct diskinfo {
 	bios_diskinfo_t bios_info;
 	struct disklabel disklabel;
+	struct sr_boot_volume *sr_vol;
 
 	dev_t bsddev, bootdev;
 
