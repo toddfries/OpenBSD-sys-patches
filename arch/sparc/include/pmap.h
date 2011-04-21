@@ -263,6 +263,13 @@ int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64
 
 #define PMAP_PREFER(fo, ap)		pmap_prefer((fo), (ap))
 
+extern int	cache_alias_dist;
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()		cache_alias_dist
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)						\
+	((of) & (cache_alias_dist ? cache_alias_dist - 1 : 0))
+
 #define PMAP_EXCLUDE_DECLS	/* tells MI pmap.h *not* to include decls */
 
 /* FUNCTION DECLARATIONS FOR COMMON PMAP MODULE */

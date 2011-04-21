@@ -125,6 +125,13 @@ extern	struct pmap *const kernel_pmap_ptr;
 
 #define PMAP_PREFER(pa, va)		pmap_prefer(pa, va)
 
+extern vaddr_t CpuCacheAliasMask;	/* from mips64/mips64/cpu.c */
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()						\
+	(CpuCacheAliasMask ? CpuCacheAliasMask + 1 : 0)
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)		((of) & CpuCacheAliasMask)
+
 #define	pmap_update(x)			do { /* nothing */ } while (0)
 
 void	pmap_bootstrap(void);
