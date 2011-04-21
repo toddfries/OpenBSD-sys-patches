@@ -120,6 +120,40 @@ struct sr_meta_chunk {
 #define SR_CRYPTO_CHECKBYTES	64	/* size of generic key chksum struct */
 #define SR_CRYPTO_KEY_BLKSHIFT	30	/* 0.5TB per key */
 
+struct sr_metadata_list {
+	u_int8_t		sml_metadata[SR_META_SIZE * 512];
+	dev_t			sml_mm;
+	u_int32_t		sml_chunk_id;
+	int			sml_used;
+
+	void			*sml_diskinfo;
+	int			sml_disk;
+	char			sml_part;
+
+	SLIST_ENTRY(sr_metadata_list) sml_link;
+};
+
+SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
+
+struct sr_boot_volume {
+	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
+	u_int32_t		sbv_level;	/* Level. */
+	u_int32_t		sbv_volid;	/* Volume ID. */
+	u_int32_t		sbv_unit;	/* Disk unit. */
+	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
+	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
+	u_int32_t		sbv_flags;	/* Volume specific flags. */
+
+	void			*sbv_diskinfo;	/* MD disk information. */
+	char			sbv_part;	/* Partition opened. */
+
+	struct sr_metadata_list_head	sml;	/* List of metadata. */
+
+	SLIST_ENTRY(sr_boot_volume)	sbv_link;
+};
+
+SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
+
 /*
  * Check that HMAC-SHA1_k(decrypted scm_key) == sch_mac, where
  * k = SHA1(masking key)
@@ -403,31 +437,6 @@ struct sr_aoe {
 	struct ifnet		*sra_ifp;
 	char			sra_eaddr[6];
 };
-
-struct sr_metadata_list {
-	u_int8_t		sml_metadata[SR_META_SIZE * 512];
-	dev_t			sml_mm;
-	u_int32_t		sml_chunk_id;
-	int			sml_used;
-
-	SLIST_ENTRY(sr_metadata_list) sml_link;
-};
-
-SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
-
-struct sr_boot_volume {
-	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
-	u_int32_t		sbv_level;	/* Level. */
-	u_int32_t		sbv_volid;	/* Volume ID. */
-	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
-	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
-
-	struct sr_metadata_list_head	sml;	/* List of metadata. */
-
-	SLIST_ENTRY(sr_boot_volume)	sbv_link;
-};
-
-SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
 struct sr_chunk {
 	struct sr_meta_chunk	src_meta;	/* chunk meta data */
