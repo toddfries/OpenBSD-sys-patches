@@ -276,6 +276,9 @@ vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
 TAILQ_HEAD(pv_page_list, pv_page) pv_page_freelist;
 int		pv_nfree;
 
+#if defined(M68K_MMU_HP)
+extern int	pmap_aliasmask;	/* separation at which VA aliasing is ok */
+#endif
 #if defined(M68040) || defined(M68060)
 int		protostfree;	/* prototype (default) free ST map */
 #endif
