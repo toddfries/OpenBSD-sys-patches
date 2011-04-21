@@ -101,11 +101,6 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 	return pmap_prefer_hint;
 }
 
-/* pmap prefer alignment */
-#define PMAP_PREFER_ALIGN()	(HPPA_PGALIAS)
-/* pmap prefer offset within alignment */
-#define PMAP_PREFER_OFFSET(of)	((of) & HPPA_PGAOFF)
-
 #define	pmap_sid2pid(s)			(((s) + 1) << 1)
 #define pmap_kernel()			(&kernel_pmap_store)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)

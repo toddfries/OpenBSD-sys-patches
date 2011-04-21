@@ -184,14 +184,8 @@ uvm_km_init(vaddr_t start, vaddr_t end)
 	 * before installing.
 	 */
 
+	uvm_map_setup(&kernel_map_store, base, end, VM_MAP_PAGEABLE);
 	kernel_map_store.pmap = pmap_kernel();
-	uvm_map_setup(&kernel_map_store, base, end,
-#ifdef KVA_GUARDPAGES
-	    VM_MAP_PAGEABLE | VM_MAP_GUARDPAGES
-#else
-	    VM_MAP_PAGEABLE
-#endif
-	    );
 	if (base != start && uvm_map(&kernel_map_store, &base, start - base,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
 	    UVM_INH_NONE, UVM_ADV_RANDOM,UVM_FLAG_FIXED)) != 0)
@@ -248,8 +242,8 @@ uvm_km_suballoc(struct vm_map *map, vaddr_t *min, vaddr_t *max, vsize_t size,
 		if (submap == NULL)
 			panic("uvm_km_suballoc: unable to create submap");
 	} else {
-		submap->pmap = vm_map_pmap(map);
 		uvm_map_setup(submap, *min, *max, flags);
+		submap->pmap = vm_map_pmap(map);
 	}
 
 	/*
@@ -485,9 +479,8 @@ uvm_km_free_wakeup(struct vm_map *map, vaddr_t addr, vsize_t size)
 	struct vm_map_entry *dead_entries;
 
 	vm_map_lock(map);
-	dead_entries = NULL;
 	uvm_unmap_remove(map, trunc_page(addr), round_page(addr+size), 
-	     &dead_entries, FALSE, TRUE);
+	     &dead_entries, NULL, FALSE);
 	wakeup(map);
 	vm_map_unlock(map);
 
@@ -520,7 +513,7 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 	 */
 
 	if (__predict_false(uvm_map(map, &kva, size, uvm.kernel_object,
-	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
+	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
 	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)) != 0)) {
 		UVMHIST_LOG(maphist,"<- done (no VM)",0,0,0,0);
 		return(0);

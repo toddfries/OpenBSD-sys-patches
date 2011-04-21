@@ -620,14 +620,6 @@ vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
 
 extern uint32_t pmap_alias_dist;
 extern uint32_t pmap_alias_bits;
-
-/* pmap prefer alias alignment. */
-#define PMAP_PREFER_ALIGN()	(pmap_alias_dist)
-/* pmap prefer offset withing alignment. */
-#define PMAP_PREFER_OFFSET(of)						\
-    (PMAP_PREFER_ALIGN() == 0 ? 0 : ((of) & (PMAP_PREFER_ALIGN() - 1)))
-
-
 #endif /* _LOCORE */
 
 #endif /* _KERNEL */
