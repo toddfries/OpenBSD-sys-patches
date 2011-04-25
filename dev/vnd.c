@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.109 2011/04/18 16:50:22 thib Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.113 2011/04/23 22:00:09 miod Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -139,7 +139,6 @@ void	vndattach(int);
 
 void	vndclear(struct vnd_softc *);
 int	vndsetcred(struct vnd_softc *, struct ucred *);
-void	vndiodone(struct buf *);
 void	vndshutdown(void);
 int	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
@@ -225,13 +224,6 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	part = DISKPART(dev);
 	pmask = 1 << part;
-
-	/* Allow access to the raw device even if we are open. */
-	if (sc->sc_dk.dk_openmask && !(part == RAW_PART) &&
-	    !(mode == S_IFCHR)) {
-		error = EBUSY;
-		goto bad;
-	}
 
 	/* Check that the partition exists. */
 	if (part != RAW_PART &&
@@ -435,44 +427,6 @@ vndstrategy(struct buf *bp)
 	splx(s);
 }
 
-
-void
-vndiodone(struct buf *bp)
-{
-	struct vndbuf *vbp = (struct vndbuf *) bp;
-	struct buf *pbp = vbp->vb_obp;
-	struct vnd_softc *vnd = &vnd_softc[vndunit(pbp->b_dev)];
-
-	splassert(IPL_BIO);
-
-	DNPRINTF(VDB_IO,
-	    "vndiodone(%d): vbp %p vp %p blkno %lld addr %p cnt %lx\n",
-	    vnd-vnd_softc, vbp, vbp->vb_buf.b_vp, vbp->vb_buf.b_blkno,
-	    vbp->vb_buf.b_data, vbp->vb_buf.b_bcount);
-
-	if (vbp->vb_buf.b_error) {
-		DNPRINTF(VDB_IO, "vndiodone: vbp %p error %d\n", vbp,
-		    vbp->vb_buf.b_error);
-
-		pbp->b_flags |= (B_ERROR|B_INVAL);
-		pbp->b_error = vbp->vb_buf.b_error;
-		pbp->b_iodone = NULL;
-		biodone(pbp);
-		goto out;
-	}
-
-	pbp->b_resid -= vbp->vb_buf.b_bcount;
-
-	if (pbp->b_resid == 0) {
-		DNPRINTF(VDB_IO, "vndiodone: pbp %p iodone\n", pbp);
-		biodone(pbp);
-	}
-
-out:
-	putvndbuf(vbp);
-	disk_unbusy(&vnd->sc_dk, (pbp->b_bcount - pbp->b_resid),
-	    (pbp->b_flags & B_READ));
-}
 
 /* ARGSUSED */
 int
