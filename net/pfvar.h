@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.327 2011/04/12 10:47:29 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.329 2011/04/23 10:00:36 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1713,7 +1713,7 @@ extern void			 pf_tbladdr_copyout(struct pf_addr_wrap *);
 extern void			 pf_calc_skip_steps(struct pf_rulequeue *);
 extern struct pool		 pf_src_tree_pl, pf_sn_item_pl, pf_rule_pl;
 extern struct pool		 pf_state_pl, pf_state_key_pl, pf_state_item_pl,
-				    pf_altq_pl, pf_pooladdr_pl, pf_rule_item_pl;
+				    pf_altq_pl, pf_rule_item_pl;
 extern struct pool		 pf_state_scrub_pl;
 extern void			 pf_purge_thread(void *);
 extern void			 pf_purge_expired_src_nodes(int);
@@ -1799,8 +1799,8 @@ int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 	    u_short *, struct tcphdr *, struct pf_state *,
 	    struct pf_state_peer *, struct pf_state_peer *, int *);
 int	pf_normalize_mss(struct mbuf *, int, struct pf_pdesc *, u_int16_t);
-void	pf_scrub_ip(struct mbuf **, u_int16_t, u_int8_t, u_int8_t);
-void	pf_scrub_ip6(struct mbuf **, u_int8_t);
+void	pf_scrub_ip(struct mbuf *, u_int16_t, u_int8_t, u_int8_t);
+void	pf_scrub_ip6(struct mbuf *, u_int8_t);
 u_int32_t
 	pf_state_expires(const struct pf_state *);
 void	pf_purge_expired_fragments(void);
