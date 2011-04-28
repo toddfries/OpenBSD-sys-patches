@@ -67,6 +67,10 @@ option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
 option		MPLS		# Multi-Protocol Label Switching
 
+sym*		at scsibus?
+emc*		at scsibus?
+hds*		at scsibus?
+rdac*		at scsibus?
 mpath0		at root		# SCSI Multipathing
 scsibus*	at mpath?
 
