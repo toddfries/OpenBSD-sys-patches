@@ -108,12 +108,10 @@ int explore_pending;
 void	usb_explore(void *);
 void	usb_first_explore(void *);
 void	usb_create_task_threads(void *);
-void	usb_create_explore_thread(void *);
 void	usb_task_thread(void *);
 struct proc *usb_task_thread_proc = NULL;
 void	usb_abort_task_thread(void *);
 struct proc *usb_abort_task_thread_proc = NULL;
-struct proc *usb_explore_thread_proc = NULL;
 
 const char *usbrev_str[] = USBREV_STR;
 
@@ -227,7 +225,7 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 		if (sc->sc_bus->usbrev == USBREV_2_0)
 			explore_pending++;
 		config_pending_incr();
-		kthread_create_deferred(usb_create_explore_thread, sc);
+		kthread_create_deferred(usb_first_explore, sc);
 	}
 }
 
@@ -253,14 +251,6 @@ usb_end_tasks(void)
 	usb_run_tasks = usb_run_abort_tasks = 0;
 	wakeup(&usb_run_abort_tasks);
 	wakeup(&usb_run_tasks);
-}
-
-void
-usb_create_explore_thread(void *arg)
-{
-	if (kthread_create(usb_first_explore, arg,
-	    &usb_explore_thread_proc, "usbexplore"))
-		panic("unable to create usb explore task thread");
 }
 
 void
@@ -378,9 +368,7 @@ usb_first_explore(void *arg)
 	struct usb_softc *sc = arg;
 	struct timeval now, waited;
 	int pwrdly, waited_ms;
-	int s;
 
-	s = splusb();
 	getmicrouptime(&now);
 	timersub(&now, &sc->sc_ptime, &waited);
 	waited_ms = waited.tv_sec * 1000 + waited.tv_usec / 1000;
@@ -412,9 +400,6 @@ usb_first_explore(void *arg)
 		explore_pending--;
 		wakeup((void *)&explore_pending);
  	}
-	splx(s);
-
-	kthread_exit(0);
 }
 
 void
