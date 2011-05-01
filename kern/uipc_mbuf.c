@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.149 2011/01/29 13:15:39 bluhm Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.156 2011/04/18 19:23:46 art Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -92,6 +92,11 @@
 #include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
+#endif
+
 struct	mbstat mbstat;		/* mbuf stats */
 struct	pool mbpool;		/* mbuf pool */
 
@@ -136,7 +141,7 @@ mbinit(void)
 	int i;
 
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
-	pool_set_constraints(&mbpool, &dma_constraint, 1);
+	pool_set_constraints(&mbpool, &kp_dma);
 	pool_setlowat(&mbpool, mblowat);
 
 	for (i = 0; i < nitems(mclsizes); i++) {
@@ -144,7 +149,7 @@ mbinit(void)
 		    mclsizes[i] >> 10);
 		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
 		    mclnames[i], NULL);
-		pool_set_constraints(&mclpools[i], &dma_constraint, 1); 
+		pool_set_constraints(&mclpools[i], &kp_dma); 
 		pool_setlowat(&mclpools[i], mcllowat);
 	}
 
@@ -660,7 +665,7 @@ m_copym0(struct mbuf *m0, int off, int len, int wait, int deep)
 		if (n == NULL)
 			goto nospace;
 		if (copyhdr) {
-			if (m_dup_pkthdr(n, m0))
+			if (m_dup_pkthdr(n, m0, wait))
 				goto nospace;
 			if (len != M_COPYALL)
 				n->m_pkthdr.len = len;
@@ -1159,7 +1164,7 @@ m_split(struct mbuf *m0, int len0, int wait)
 		MGETHDR(n, wait, m0->m_type);
 		if (n == NULL)
 			return (NULL);
-		if (m_dup_pkthdr(n, m0)) {
+		if (m_dup_pkthdr(n, m0, wait)) {
 			m_freem(n);
 			return (NULL);
 		}
@@ -1360,7 +1365,7 @@ m_trailingspace(struct mbuf *m)
  * from must have M_PKTHDR set, and to must be empty.
  */
 int
-m_dup_pkthdr(struct mbuf *to, struct mbuf *from)
+m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int wait)
 {
 	int error;
 
@@ -1372,7 +1377,7 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from)
 
 	SLIST_INIT(&to->m_pkthdr.tags);
 
-	if ((error = m_tag_copy_chain(to, from)) != 0)
+	if ((error = m_tag_copy_chain(to, from, wait)) != 0)
 		return (error);
 
 	if ((to->m_flags & M_EXT) == 0)
@@ -1382,9 +1387,6 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from)
 }
 
 #ifdef DDB
-#include <machine/db_machdep.h>
-#include <ddb/db_interface.h>
-
 void
 m_print(void *v, int (*pr)(const char *, ...))
 {

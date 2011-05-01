@@ -31,20 +31,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.249 2011/02/13 19:45:54 miod Exp $ */
+/* $OpenBSD: if_em.c,v 1.256 2011/04/22 10:09:57 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
 #include <dev/pci/if_em_soc.h>
-
-#ifndef SMALL_KERNEL
-#ifdef EM_DEBUG
-/*********************************************************************
- *  Set this to one to display debug statistics
- *********************************************************************/
-int             em_display_debug_stats = 0;
-#endif
-#endif
 
 /*********************************************************************
  *  Driver version
@@ -137,6 +128,13 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
@@ -264,7 +262,7 @@ em_probe(struct device *parent, void *match, void *aux)
 	INIT_DEBUGOUT("em_probe: begin");
 
 	return (pci_matchbyid((struct pci_attach_args *)aux, em_devices,
-	    sizeof(em_devices)/sizeof(em_devices[0])));
+	    nitems(em_devices)));
 }
 
 void
@@ -396,6 +394,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82572:
 		case em_82574:
 		case em_82575:
+		case em_82580:
 		case em_ich9lan:
 		case em_ich10lan:
 		case em_80003es2lan:
@@ -740,6 +739,7 @@ em_init(void *arg)
 	case em_82571:
 	case em_82572: /* Total Packet Buffer on these is 48k */
 	case em_82575:
+	case em_82580:
 	case em_80003es2lan:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
@@ -757,6 +757,9 @@ em_init(void *arg)
 	case em_ich10lan:
 	case em_pchlan:
 		pba = E1000_PBA_10K;
+		break;
+	case em_pch2lan:
+		pba = E1000_PBA_26K;
 		break;
 	default:
 		/* Devices before 82547 had a Packet Buffer of 64K.   */
@@ -829,54 +832,46 @@ em_init(void *arg)
 int 
 em_intr(void *arg)
 {
-	struct em_softc  *sc = arg;
-	struct ifnet	*ifp;
+	struct em_softc	*sc = arg;
+	struct ifnet	*ifp = &sc->interface_data.ac_if;
 	u_int32_t	reg_icr, test_icr;
-	int claimed = 0;
-	int refill;
+	int		refill = 0;
 
-	ifp = &sc->interface_data.ac_if;
+	test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
+	if (sc->hw.mac_type >= em_82571)
+		test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
+	if (!test_icr)
+		return (0);
 
-	for (;;) {
-		test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
-		if (sc->hw.mac_type >= em_82571)
-			test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
-		if (!test_icr)
-			break;
+	if (ifp->if_flags & IFF_RUNNING) {
+		em_rxeof(sc, -1);
+		em_txeof(sc);
+		if (!IFQ_IS_EMPTY(&ifp->if_snd))
+			em_start(ifp);
 
-		claimed = 1;
-		refill = 0;
-
-		if (ifp->if_flags & IFF_RUNNING) {
-			em_rxeof(sc, -1);
-			em_txeof(sc);
-			refill = 1;
-		}
-
-		/* Link status change */
-		if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
-			timeout_del(&sc->timer_handle);
-			sc->hw.get_link_status = 1;
-			em_check_for_link(&sc->hw);
-			em_update_link_status(sc);
-			timeout_add_sec(&sc->timer_handle, 1); 
-		}
-
-		if (reg_icr & E1000_ICR_RXO) {
-			sc->rx_overruns++;
-			refill = 1;
-		}
-
-		if (refill && em_rxfill(sc)) {
-			/* Advance the Rx Queue #0 "Tail Pointer". */
-			E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
-		}
+		refill = 1;
 	}
 
-	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
-		em_start(ifp);
+	/* Link status change */
+	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
+		timeout_del(&sc->timer_handle);
+		sc->hw.get_link_status = 1;
+		em_check_for_link(&sc->hw);
+		em_update_link_status(sc);
+		timeout_add_sec(&sc->timer_handle, 1); 
+	}
 
-	return (claimed);
+	if (reg_icr & E1000_ICR_RXO) {
+		sc->rx_overruns++;
+		refill = 1;
+	}
+
+	if (refill && em_rxfill(sc)) {
+		/* Advance the Rx Queue #0 "Tail Pointer". */
+		E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
+	}
+
+	return (1);
 }
 
 /*********************************************************************
@@ -1418,7 +1413,7 @@ em_local_timer(void *arg)
 #ifndef SMALL_KERNEL
 	em_update_stats_counters(sc);
 #ifdef EM_DEBUG
-	if (em_display_debug_stats && ifp->if_flags & IFF_RUNNING)
+	if (ifp->if_flags & IFF_DEBUG && ifp->if_flags & IFF_RUNNING)
 		em_print_hw_stats(sc);
 #endif
 #endif
@@ -1443,7 +1438,8 @@ em_update_link_status(struct em_softc *sc)
 			if ((sc->link_speed == SPEED_1000) &&
 			    ((sc->hw.mac_type == em_82571) ||
 			    (sc->hw.mac_type == em_82572) ||
-			    (sc->hw.mac_type == em_82575))) {
+			    (sc->hw.mac_type == em_82575) ||
+			    (sc->hw.mac_type == em_82580))) {
 				int tarc0;
 
 				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
@@ -1566,7 +1562,13 @@ em_allocate_pci_resources(struct em_softc *sc)
 		return (ENXIO);
 	}
 
-	if (sc->hw.mac_type > em_82543) {
+	switch (sc->hw.mac_type) {
+	case em_82544:
+	case em_82540:
+	case em_82545:
+	case em_82546:
+	case em_82541:
+	case em_82541_rev_2:
 		/* Figure out where our I/O BAR is ? */
 		for (rid = PCI_MAPREG_START; rid < PCI_MAPREG_END;) {
 			val = pci_conf_read(pa->pa_pc, pa->pa_tag, rid);
@@ -1588,13 +1590,17 @@ em_allocate_pci_resources(struct em_softc *sc)
 		}
 
 		sc->hw.io_base = 0;
+		break;
+	default:
+		break;
 	}
 
 	/* for ICH8 and family we need to find the flash memory */
 	if (sc->hw.mac_type == em_ich8lan ||
 	    sc->hw.mac_type == em_ich9lan ||
 	    sc->hw.mac_type == em_ich10lan ||
-	    sc->hw.mac_type == em_pchlan) {
+	    sc->hw.mac_type == em_pchlan ||
+	    sc->hw.mac_type == em_pch2lan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1723,7 +1729,8 @@ em_hardware_init(struct em_softc *sc)
 	if (!em_smart_pwr_down &&
 	     (sc->hw.mac_type == em_82571 ||
 	      sc->hw.mac_type == em_82572 ||
-	      sc->hw.mac_type == em_82575)) {
+	      sc->hw.mac_type == em_82575 ||
+	      sc->hw.mac_type == em_82580)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -2245,14 +2252,14 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 	int curr_txd;
 
 	if (mp->m_pkthdr.csum_flags) {
-		if (mp->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT) {
+		if (mp->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 			*txd_upper = E1000_TXD_POPTS_TXSM << 8;
 			*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
 			if (sc->active_checksum_context == OFFLOAD_TCP_IP)
 				return;
 			else
 				sc->active_checksum_context = OFFLOAD_TCP_IP;
-		} else if (mp->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) {
+		} else if (mp->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
 			*txd_upper = E1000_TXD_POPTS_TXSM << 8;
 			*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
 			if (sc->active_checksum_context == OFFLOAD_UDP_IP)
@@ -3211,7 +3218,7 @@ em_update_stats_counters(struct em_softc *sc)
 #ifdef EM_DEBUG
 /**********************************************************************
  *
- *  This routine is called only when em_display_debug_stats is enabled.
+ *  This routine is called only when IFF_DEBUG is enabled.
  *  This routine provides a way to take a look at important statistics
  *  maintained by the driver and hardware.
  *

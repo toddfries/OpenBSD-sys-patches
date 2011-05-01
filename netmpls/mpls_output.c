@@ -1,4 +1,4 @@
-/* $OpenBSD: mpls_output.c,v 1.13 2011/01/21 17:42:57 mikeb Exp $ */
+/* $OpenBSD: mpls_output.c,v 1.15 2011/04/04 17:44:43 henning Exp $ */
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -68,9 +68,7 @@ mpls_output(struct ifnet *ifp0, struct mbuf *m, struct sockaddr *dst,
 	}
 
 	/* need to calculate checksums now if necessary */
-	if (m->m_pkthdr.csum_flags & (M_IPV4_CSUM_OUT | M_TCPV4_CSUM_OUT |
-	    M_UDPV4_CSUM_OUT))
-		mpls_do_cksum(m);
+	mpls_do_cksum(m);
 
 	/* initialize sockaddr_mpls */
 	bzero(&sa_mpls, sizeof(sa_mpls));
@@ -177,10 +175,8 @@ mpls_do_cksum(struct mbuf *m)
 	struct ip *ip;
 	u_int16_t hlen;
 
-	if (m->m_pkthdr.csum_flags & (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)) {
-		in_delayed_cksum(m);
-		m->m_pkthdr.csum_flags &= ~(M_UDPV4_CSUM_OUT|M_TCPV4_CSUM_OUT);
-	}
+	in_proto_cksum_out(m, NULL);
+
 	if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT) {
 		ip = mtod(m, struct ip *);
 		hlen = ip->ip_hl << 2;

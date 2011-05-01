@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.85 2010/09/23 04:45:15 yasuoka Exp $	*/
+/*	$OpenBSD: in.h,v 1.87 2011/04/28 09:56:27 claudio Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -792,7 +792,7 @@ in_cksum_addword(u_int16_t a, u_int16_t b)
 
 extern	   struct in_addr zeroin_addr;
 
-int	   in_broadcast(struct in_addr, struct ifnet *);
+int	   in_broadcast(struct in_addr, struct ifnet *, u_int);
 int	   in_canforward(struct in_addr);
 int	   in_cksum(struct mbuf *, int);
 int	   in4_cksum(struct mbuf *, u_int8_t, int, int);
@@ -800,6 +800,7 @@ void	   in_delayed_cksum(struct mbuf *);
 int	   in_localaddr(struct in_addr, u_int);
 void	   in_socktrim(struct sockaddr_in *);
 char	  *inet_ntoa(struct in_addr);
+void	   in_proto_cksum_out(struct mbuf *, struct ifnet *);
 
 #define	in_hosteq(s,t)	((s).s_addr == (t).s_addr)
 #define	in_nullhost(x)	((x).s_addr == INADDR_ANY)

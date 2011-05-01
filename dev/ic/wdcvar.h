@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.46 2010/08/29 18:40:33 deraadt Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.49 2011/04/18 04:16:14 deraadt Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -81,6 +81,8 @@ struct channel_softc { /* Per channel data */
 	 */
 	struct channel_queue *ch_queue;
 	struct timeout ch_timo;
+
+	int dying;
 };
 
 /*
@@ -226,6 +228,7 @@ struct wdc_xfer {
 #define C_SENSE		0x0080 /* cmd is a internal command */
 #define C_MEDIA_ACCESS	0x0100 /* is a media access command */
 #define C_POLL_MACHINE	0x0200 /* machine has a poll handler */
+#define C_PRIVATEXFER	0x0400 /* privately managed xfer */
 
 	/* Informations about our location */
 	struct channel_softc *chp;
@@ -270,8 +273,9 @@ struct wdc_xfer *wdc_get_xfer(int); /* int = WDC_NOSLEEP/CANSLEEP */
 void   wdc_free_xfer(struct channel_softc *, struct wdc_xfer *);
 void  wdcstart(struct channel_softc *);
 int   wdcreset(struct channel_softc *, int);
-#define VERBOSE	1
-#define SILENT	0 /* wdcreset will not print errors */
+#define NOWAIT  0x02
+#define VERBOSE	0x01
+#define SILENT	0x00 /* wdcreset will not print errors */
 int   wdc_wait_for_status(struct channel_softc *, int, int, int);
 int   wdc_dmawait(struct channel_softc *, struct wdc_xfer *, int);
 void  wdcbit_bucket(struct channel_softc *, int);

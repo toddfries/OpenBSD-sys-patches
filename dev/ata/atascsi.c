@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.101 2011/02/03 21:22:19 matthew Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.103 2011/04/27 23:51:09 matthew Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -26,6 +26,7 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/pool.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -237,7 +238,7 @@ atascsi_lookup_port(struct scsi_link *link)
 	struct atascsi 			*as = link->adapter_softc;
 	struct atascsi_host_port 	*ahp;
 
-	if (link->target > as->as_link.adapter_buswidth)
+	if (link->target >= as->as_link.adapter_buswidth)
 		return (NULL);
 
 	ahp = as->as_host_ports[link->target];
@@ -260,12 +261,12 @@ atascsi_probe(struct scsi_link *link)
 	u_int16_t			cmdset;
 
 	port = link->target;
-	if (port > as->as_link.adapter_buswidth)
+	if (port >= as->as_link.adapter_buswidth)
 		return (ENXIO);
 
 	/* if this is a PMP port, check it's valid */
 	if (link->lun > 0) {
-		if (link->lun > as->as_host_ports[port]->ahp_nports)
+		if (link->lun >= as->as_host_ports[port]->ahp_nports)
 			return (ENXIO);
 	}
 
@@ -335,8 +336,8 @@ atascsi_probe(struct scsi_link *link)
 			xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
 			if (xa == NULL)
 				panic("no free xfers on a new port");
-			/* XXX dma reachable */
-			identify = malloc(sizeof(*identify), M_TEMP, M_WAITOK);
+			identify = dma_alloc(sizeof(*identify),
+			    PR_WAITOK | PR_ZERO);
 			xa->pmp_port = ap->ap_pmp_port;
 			xa->data = identify;
 			xa->datalen = sizeof(*identify);
@@ -353,10 +354,10 @@ atascsi_probe(struct scsi_link *link)
 			if (rv == 0) {
 				bcopy(identify, &ap->ap_identify,
 				    sizeof(ap->ap_identify));
-				free(identify, M_TEMP);
+				dma_free(identify, sizeof(*identify));
 				break;
 			}
-			free(identify, M_TEMP);
+			dma_free(identify, sizeof(*identify));
 			delay(5000000);
 		} while (count--);
 
@@ -478,7 +479,7 @@ atascsi_free(struct scsi_link *link)
 	int				port;
 
 	port = link->target;
-	if (port > as->as_link.adapter_buswidth)
+	if (port >= as->as_link.adapter_buswidth)
 		return;
 
 	ahp = as->as_host_ports[port];

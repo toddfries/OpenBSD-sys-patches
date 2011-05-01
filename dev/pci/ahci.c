@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.172 2011/01/28 06:32:31 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.177 2011/04/24 11:09:48 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -27,6 +27,7 @@
 #include <sys/timeout.h>
 #include <sys/queue.h>
 #include <sys/mutex.h>
+#include <sys/pool.h>
 
 #include <machine/bus.h>
 
@@ -372,6 +373,7 @@ struct ahci_port {
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_free;
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_pending;
 	struct mutex		ap_ccb_mtx;
+	struct ahci_ccb		*ap_ccb_err;
 
 	u_int32_t		ap_state;
 #define AP_S_NORMAL			0
@@ -391,7 +393,7 @@ struct ahci_port {
 	u_int32_t		ap_err_saved_active;
 	u_int32_t		ap_err_saved_active_cnt;
 
-	u_int8_t		ap_err_scratch[512];
+	u_int8_t		*ap_err_scratch;
 
 #ifdef AHCI_DEBUG
 	char			ap_name[16];
@@ -862,8 +864,7 @@ noccc:
 	aaa.aaa_methods = &ahci_atascsi_methods;
 	aaa.aaa_minphys = NULL;
 	aaa.aaa_nports = AHCI_MAX_PORTS;
-	aaa.aaa_ncmds = sc->sc_ncmds;
-	aaa.aaa_capability = ASAA_CAP_NEEDS_RESERVED;
+	aaa.aaa_ncmds = sc->sc_ncmds - 1;
 	if (!(sc->sc_flags & AHCI_F_NO_NCQ) &&
 	    (sc->sc_cap & AHCI_REG_CAP_SNCQ)) {
 		aaa.aaa_capability |= ASAA_CAP_NCQ | ASAA_CAP_PMP_NCQ;
@@ -1094,6 +1095,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 		    DEVNAME(sc), port);
 		goto reterr;
 	}
+	ap->ap_err_scratch = dma_alloc(DEV_BSIZE, PR_NOWAIT | PR_ZERO);
+	if (ap->ap_err_scratch == NULL) {
+		printf("%s: unable to allocate DMA scratch buf for port %d\n",
+		    DEVNAME(sc), port);
+		goto freeport;
+	}
 
 #ifdef AHCI_DEBUG
 	snprintf(ap->ap_name, sizeof(ap->ap_name), "%s.%d",
@@ -1227,6 +1234,11 @@ nomem:
 		ahci_put_ccb(ccb);
 	}
 
+	/* grab a ccb for use during error recovery */
+	ap->ap_ccb_err = &ap->ap_ccbs[sc->sc_ncmds - 1];
+	TAILQ_REMOVE(&ap->ap_ccb_free, ap->ap_ccb_err, ccb_entry);
+	ap->ap_ccb_err->ccb_xa.state = ATA_S_COMPLETE;
+
 	/* Wait for ICC change to complete */
 	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
 
@@ -1306,6 +1318,9 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 		ahci_write(sc, AHCI_REG_IS, 1 << port);
 	}
 
+	if (ap->ap_ccb_err)
+		ahci_put_ccb(ap->ap_ccb_err);
+
 	if (ap->ap_ccbs) {
 		while ((ccb = ahci_get_ccb(ap)) != NULL)
 			bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
@@ -1318,6 +1333,8 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 		ahci_dmamem_free(sc, ap->ap_dmamem_rfis);
 	if (ap->ap_dmamem_cmd_table)
 		ahci_dmamem_free(sc, ap->ap_dmamem_cmd_table);
+	if (ap->ap_err_scratch)
+		dma_free(ap->ap_err_scratch, DEV_BSIZE);
 
 	/* bus_space(9) says we dont free the subregions handle */
 
@@ -2466,7 +2483,7 @@ ahci_issue_pending_ncq_commands(struct ahci_port *ap)
 	 * If a port multiplier is attached to the port, we can only
 	 * issue commands for one of its ports at a time.
 	 */
-	if (ap->ap_sactive != NULL &&
+	if (ap->ap_sactive != 0 &&
 	    ap->ap_pmp_ncq_port != nextccb->ccb_xa.pmp_port) {
 		return;
 	}
@@ -3003,12 +3020,11 @@ ahci_get_err_ccb(struct ahci_port *ap)
 	 * Grab a CCB to use for error recovery.  This should never fail, as
 	 * we ask atascsi to reserve one for us at init time.
 	 */
-	err_ccb = ahci_get_ccb(ap);
-	KASSERT(err_ccb != NULL);
+	err_ccb = ap->ap_ccb_err;
 	err_ccb->ccb_xa.flags = 0;
 	err_ccb->ccb_done = ahci_empty_done;
 
-	return err_ccb;
+	return (err_ccb);
 }
 
 void
@@ -3028,8 +3044,10 @@ ahci_put_err_ccb(struct ahci_ccb *ccb)
 		printf("ahci_port_err_ccb_restore but SACT %08x != 0?\n", sact);
 	KASSERT(ahci_pread(ap, AHCI_PREG_CI) == 0);
 
+#ifdef DIAGNOSTIC
 	/* Done with the CCB */
-	ahci_put_ccb(ccb);
+	KASSERT(ccb == ap->ap_ccb_err);
+#endif
 
 	/* Restore outstanding command state */
 	ap->ap_sactive = ap->ap_err_saved_sactive;
