@@ -176,30 +176,27 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct cpu_info *ci = (struct cpu_info *)self;
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
-
 #ifdef MULTIPROCESSOR
-	int cpunum = ci->ci_dev.dv_unit;
+	int cpunum = self->dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
 #endif
 
-	if (caa->cpu_role == CPU_ROLE_AP) {
-#ifdef MULTIPROCESSOR
-		if (cpu_info[cpunum] != NULL)
-			panic("cpu at apic id %d already attached?", cpunum);
-		cpu_info[cpunum] = ci;
-#endif
-	} else {
+	if (caa->cpu_role != CPU_ROLE_AP) {
 		ci = &cpu_info_primary;
 #ifdef MULTIPROCESSOR
 		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
-			    " instead of at expected %d",
-			    self->dv_xname, lapic_cpu_number(), caa->cpu_number);
+			    " instead of at expected %d", self->dv_xname,
+			    lapic_cpu_number(), caa->cpu_number);
 		}
 #endif
 		bcopy(self, &ci->ci_dev, sizeof *self);
 	}
+
+#ifdef MULTIPROCESSOR
+	cpu_info[cpunum] = ci;
+#endif
 
 	ci->ci_self = ci;
 	ci->ci_apicid = caa->cpu_number;
