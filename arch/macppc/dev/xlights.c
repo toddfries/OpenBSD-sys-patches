@@ -27,6 +27,7 @@
 #include <machine/autoconf.h>
 #include <macppc/dev/dbdma.h>
 #include <macppc/dev/i2sreg.h>
+#include <macppc/pci/macobio.h>
 
 struct xlights_softc {
 	struct device 			sc_dev;
@@ -55,8 +56,6 @@ void xlights_startdma(struct xlights_softc *);
 void xlights_deferred(void *);
 void xlights_theosDOT(void *);
 void xlights_timeout(void *);
-extern void keylargo_fcr_enable(int, u_int32_t);
-extern void keylargo_fcr_disable(int, u_int32_t);
 
 struct cfattach xlights_ca = {
 	sizeof(struct xlights_softc), xlights_match,
