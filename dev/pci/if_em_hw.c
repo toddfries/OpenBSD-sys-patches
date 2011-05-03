@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.63 2011/04/22 10:09:57 jsg Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.65 2011/05/02 18:16:58 dhill Exp $ */
 /*
  * if_em_hw.c Shared functions for accessing and configuring the MAC
  */
@@ -169,6 +169,7 @@ static int32_t	em_set_mdio_slow_mode_hv(struct em_hw *);
 int32_t		em_hv_phy_workarounds_ich8lan(struct em_hw *);
 int32_t		em_link_stall_workaround_hv(struct em_hw *);
 int32_t		em_k1_gig_workaround_hv(struct em_hw *, boolean_t);
+int32_t		em_k1_workaround_lv(struct em_hw *);
 int32_t		em_configure_k1_ich8lan(struct em_hw *, boolean_t);
 int32_t		em_access_phy_wakeup_reg_bm(struct em_hw *, uint32_t,
 		    uint16_t *, boolean_t);
@@ -3622,6 +3623,12 @@ em_check_for_link(struct em_hw *hw)
 
 			if (hw->phy_type == em_phy_82578) {
 				ret_val = em_link_stall_workaround_hv(hw);
+				if (ret_val)
+					return ret_val;
+			}
+
+			if (hw->mac_type == em_pch2lan) {
+				ret_val = em_k1_workaround_lv(hw);
 				if (ret_val)
 					return ret_val;
 			}
@@ -9856,20 +9863,6 @@ em_hv_phy_workarounds_ich8lan(struct em_hw *hw)
 	}
 
 	if (hw->phy_type == em_phy_82578) {
-		if (hw->revision_id < 3) {
-			/* PHY config */
-			ret_val = em_write_phy_reg(hw, (1 << 6) | 0x29,
-						   0x66C0);
-			if (ret_val)
-				goto out;
-
-			/* PHY config */
-			ret_val = em_write_phy_reg(hw, (1 << 6) | 0x1E,
-						   0xFFFF);
-			if (ret_val)
-				goto out;
-		}
-
 		/*
 		 * Return registers to default by doing a soft reset then
 		 * writing 0x3140 to the control register.
@@ -10051,6 +10044,34 @@ em_k1_gig_workaround_hv(struct em_hw *hw, boolean_t link)
 	ret_val = em_configure_k1_ich8lan(hw, k1_enable);
 
 	return ret_val;
+}
+
+/* Workaround to set the K1 beacon duration for 82579 parts */
+int32_t
+em_k1_workaround_lv(struct em_hw *hw)
+{
+	int32_t ret_val;
+	uint16_t phy_data;
+	uint32_t mac_reg;
+
+	ret_val = em_read_phy_reg(hw, BM_CS_STATUS, &phy_data);
+	if (ret_val)
+		return ret_val;
+
+	if ((phy_data & (HV_M_STATUS_LINK_UP | HV_M_STATUS_AUTONEG_COMPLETE))
+	    == (HV_M_STATUS_LINK_UP | HV_M_STATUS_AUTONEG_COMPLETE)) {
+		mac_reg = E1000_READ_REG(hw, FEXTNVM4);
+		mac_reg &= ~E1000_FEXTNVM4_BEACON_DURATION_MASK;
+
+		if (phy_data & HV_M_STATUS_SPEED_1000)
+			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_8USEC;
+		else
+			mac_reg |= E1000_FEXTNVM4_BEACON_DURATION_16USEC;
+
+		E1000_WRITE_REG(hw, FEXTNVM4, mac_reg);
+	}
+	
+	return E1000_SUCCESS;
 }
 
 /***************************************************************************
