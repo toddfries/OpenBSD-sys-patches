@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.103 2011/04/27 23:51:09 matthew Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.105 2011/05/08 19:46:10 matthew Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -331,8 +331,8 @@ atascsi_probe(struct scsi_link *link)
 		 * identification from working, so we retry a few times
 		 * with a fairly long delay.
 		 */
-		int count = 5;
-		do {
+		int count = (link->lun > 0) ? 6 : 1;
+		while (count--) {
 			xa = scsi_io_get(&ahp->ahp_iopool, SCSI_NOSLEEP);
 			if (xa == NULL)
 				panic("no free xfers on a new port");
@@ -358,8 +358,9 @@ atascsi_probe(struct scsi_link *link)
 				break;
 			}
 			dma_free(identify, sizeof(*identify));
-			delay(5000000);
-		} while (count--);
+			if (count > 0)
+				delay(5000000);
+		}
 
 		if (rv != 0) {
 			goto error;
@@ -1589,10 +1590,12 @@ atascsi_io_get(void *cookie)
 void
 atascsi_io_put(void *cookie, void *io)
 {
-	struct ata_xfer		*xa = io;
+	struct atascsi_host_port	*ahp = cookie;
+	struct atascsi			*as = ahp->ahp_as;
+	struct ata_xfer			*xa = io;
 
 	xa->state = ATA_S_COMPLETE; /* XXX this state machine is dumb */
-	xa->ata_put_xfer(xa);
+	as->as_methods->ata_put_xfer(xa);
 }
 
 void
