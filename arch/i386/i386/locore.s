@@ -1461,6 +1461,7 @@ IDTVEC(align)
  * This will cause the process to get a SIGBUS.
  */
 NENTRY(resume_iret)
+	sti
 	ZTRAP(T_PROTFLT)
 NENTRY(resume_pop_ds)
 	pushl	%es
@@ -1476,6 +1477,7 @@ NENTRY(resume_pop_gs)
 	movw	%ax,%fs
 NENTRY(resume_pop_fs)
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
+	sti
 	jmp	calltrap
 
 NENTRY(alltraps)
