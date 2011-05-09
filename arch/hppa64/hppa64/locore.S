@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.24 2011/04/16 22:02:32 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.27 2011/05/05 20:48:34 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -517,6 +517,21 @@ $syscall_return
 	mtctl	%arg2, %cr30
 	mtctl	%arg3, %cr27
 
+	ldd	TF_SR2(%arg0), %arg2
+	ldd	TF_SR3(%arg0), %arg3
+	mtsp	%arg2, %sr2
+	mtsp	%arg3, %sr3
+
+	ldd	TF_SR6(%arg0), %arg2
+	ldd	TF_SR7(%arg0), %arg3
+	mtsp	%arg2, %sr6
+	mtsp	%arg3, %sr7
+
+	ldd	TF_SR4(%arg0), %arg2
+	ldd	TF_SR5(%arg0), %arg3
+	mtsp	%arg2, %sr4
+	mtsp	%arg3, %sr5
+
 	/* Clear system masks before restoring queues and space registers. */
 	rsm	(PSL_R|PSL_Q|PSL_P|PSL_I|PSL_D), %r0
 	nop ! nop ! nop ! nop
@@ -870,12 +885,21 @@ TLABEL(all_virt)
 	mfsp	%sr1, %arg3
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr0 */
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr1 */
+
+	mfsp	%sr2, %arg2
+	mfsp	%sr3, %arg3
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr2 */
-	std,ma	%arg2, 8(%sr3,%sp)	/* %sr3 */
+	std,ma	%arg3, 8(%sr3,%sp)	/* %sr3 */
+
+	mfsp	%sr4, %arg2
+	mfsp	%sr5, %arg3
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr4 */
-	std,ma	%arg2, 8(%sr3,%sp)	/* %sr5 */
+	std,ma	%arg3, 8(%sr3,%sp)	/* %sr5 */
+
+	mfsp	%sr6, %arg2
+	mfsp	%sr7, %arg3
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr6 */
-	std,ma	%arg2, 8(%sr3,%sp)	/* %sr7 */
+	std,ma	%arg3, 8(%sr3,%sp)	/* %sr7 */
 
 	mfctl	%cr0, %arg3
 	mfctl	%cr10, %arg2
@@ -1001,6 +1025,8 @@ EXIT(TLABEL(all))
 
 TLABEL(itlb)
 	PTPULL(0, TLABEL(all))
+	extrd,u,*= %r17, 5, 1, %r0	/* gateway page needs to be public */
+	depdi	0, 62, 31, %r17
 	iitlbt	%r16, %r17
 	rfi,r
 	nop
