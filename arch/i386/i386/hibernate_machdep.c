@@ -48,6 +48,8 @@ void	*get_hibernate_io_function(void);
 int	get_hibernate_info(struct hibernate_info *);
 void	hibernate_enter_resume_pte(vaddr_t, paddr_t);
 void	hibernate_populate_resume_pt(paddr_t *, paddr_t *);
+int	hibernate_write_signature(void);
+int	hibernate_clear_signature(void);
 struct 	hibernate_info *global_hiber_info;
 paddr_t global_image_start;
 
@@ -70,7 +72,7 @@ get_hibernate_io_function()
 
 #if NWD > 0 
 	/* XXX - Only support wd hibernate presently */
-	if (strcmp(findblkname(major(swapdev)), "wd") == 0)
+	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "wd") == 0)
 		return wd_hibernate_io;
 	else
 		return NULL;
@@ -99,9 +101,9 @@ get_hibernate_info(struct hibernate_info *hiber_info)
 	hiber_info->image_size = 0;
 
 	for(i=0; i<ndumpmem; i++) {
-		hiber_info->ranges[i].base = dumpmem[i].start;
+		hiber_info->ranges[i].base = dumpmem[i].start * PAGE_SIZE;
 		hiber_info->ranges[i].end = 
-			(dumpmem[i].start + dumpmem[i].end * PAGE_SIZE);
+			(dumpmem[i].end * PAGE_SIZE);
 		hiber_info->image_size +=
 			hiber_info->ranges[i].end - hiber_info->ranges[i].base;
 	}
@@ -129,8 +131,9 @@ get_hibernate_info(struct hibernate_info *hiber_info)
 	}
 
 	/* Calculate signature block offset in swap */
-	hiber_info->sig_offset = DL_BLKTOSEC(&dl, (dl.d_partitions[1].p_size - 1)) *
-				 DL_BLKSPERSEC(&dl);
+	hiber_info->sig_offset = DL_BLKTOSEC(&dl, 
+					(dl.d_partitions[1].p_size - 1)) * 
+					DL_BLKSPERSEC(&dl);
 
 	/* Calculate memory image offset in swap */
 	hiber_info->image_offset = dl.d_partitions[1].p_offset +
@@ -229,6 +232,7 @@ hibernate_write_image()
 
 	pmap_kenter_pa(HIBERNATE_TEMP_PAGE, HIBERNATE_TEMP_PAGE, VM_PROT_ALL);	
 	pmap_kenter_pa(HIBERNATE_ALLOC_PAGE, HIBERNATE_ALLOC_PAGE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_IO_PAGE, HIBERNATE_IO_PAGE, VM_PROT_ALL);
 
 	blkctr = hiber_info.image_offset;
 
@@ -236,7 +240,7 @@ hibernate_write_image()
 		range_base = hiber_info.ranges[i].base;
 		range_end = hiber_info.ranges[i].end;
 
-		for (j=0; j < (range_end - range_base)/NBPG;
+		for (j=0; j < (range_end - range_base);
 		    blkctr += (NBPG/512), j += NBPG) {
 			addr = range_base + j;
 			pmap_kenter_pa(HIBERNATE_TEMP_PAGE, addr,
@@ -249,8 +253,9 @@ hibernate_write_image()
 				(void *)HIBERNATE_ALLOC_PAGE);
 		}
 	}
-		
-	return (1);
+	
+	/* Image write complete, write the signature and return */	
+	return hibernate_write_signature();
 }
 
 int
@@ -291,8 +296,9 @@ hibernate_read_image()
 		
 		}
 	}
-	
-	return (1);
+
+	/* Read complete, clear the signature and return */
+	return hibernate_clear_signature();
 }
 
 int
@@ -412,5 +418,50 @@ hibernate_resume()
 	 * Resume the loaded kernel by jumping to the S3 resume vector
 	 */
 	hibernate_resume_machine();
+}
+
+int
+hibernate_write_signature()
+{
+	struct hibernate_info hiber_info;
+	u_int8_t *io_page;
+
+	/* Get current running machine's hibernate info */
+	if (!get_hibernate_info(&hiber_info))
+		return (0);
+
+	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+	if (!io_page)
+		return (0);
+	
+	/* Write hibernate info to disk */
+	hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
+		(vaddr_t)&hiber_info, 512, 1, io_page);
+
+	free(io_page, M_DEVBUF);
+
+	return (1);
+}
+
+int
+hibernate_clear_signature()
+{
+	struct hibernate_info hiber_info;
+	u_int8_t *io_page;
+
+	/* Zero out a blank hiber_info */
+	bzero(&hiber_info, sizeof(hiber_info));
+
+	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+	if (!io_page)
+		return (0);
+	
+	/* Write (zeroed) hibernate info to disk */
+	hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
+		(vaddr_t)&hiber_info, 512, 1, io_page);
+
+	free(io_page, M_DEVBUF);
+
+	return (1);
 }
 #endif /* !SMALL_KERNEL */
