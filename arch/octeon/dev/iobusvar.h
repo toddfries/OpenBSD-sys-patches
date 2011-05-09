@@ -1,4 +1,4 @@
-/*	$OpenBSD: combusvar.h,v 1.1 2010/10/01 16:13:59 syuu Exp $	*/
+/*	$OpenBSD: iobusvar.h,v 1.1 2011/05/08 13:24:55 syuu Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -26,18 +26,27 @@
  *
  */
 
-#ifndef	_COMBUSVAR_H_
-#define	_COMBUSVAR_H_
+#ifndef	_IOBUSVAR_H_
+#define	_IOBUSVAR_H_
 
 #include <machine/bus.h>
 
-struct combus_attach_args {
-	char		*cba_name;
+extern bus_space_t iobus_tag;
+extern struct machine_bus_dma_tag iobus_dma_tag;
 
-	bus_space_tag_t  cba_iot;
-	bus_space_tag_t  cba_memt;
-	bus_addr_t	 cba_baseaddr;
-	int	 	 cba_intr;
+struct iobus_unit {
+	bus_addr_t addr;
+	int irq;
 };
 
-#endif	/* _COMBUSVAR_H_ */
+struct iobus_attach_args {
+	char		*aa_name;
+	int			aa_unitno;
+	
+	const struct iobus_unit *aa_unit;
+	
+	bus_space_tag_t  aa_bust;
+	bus_dma_tag_t	 aa_dmat;
+};
+
+#endif	/* _IOBUSVAR_H_ */
