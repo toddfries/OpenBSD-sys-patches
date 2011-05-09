@@ -1,4 +1,4 @@
-/*	$OpenBSD: obiovar.h,v 1.2 2010/11/23 18:46:29 syuu Exp $	*/
+/*	$OpenBSD: uartbusvar.h,v 1.1 2011/05/08 13:39:30 syuu Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -26,28 +26,16 @@
  *
  */
 
-#ifndef	_OBIOVAR_H_
-#define	_OBIOVAR_H_
+#ifndef	_UARTBUSVAR_H_
+#define	_UARTBUSVAR_H_
 
 #include <machine/bus.h>
 
-extern bus_space_t obio_tag;
-extern struct machine_bus_dma_tag obio_dma_tag;
-
-struct obio_attach_args {
-	char		*oba_name;
-
-	bus_space_tag_t  oba_iot;
-	bus_space_tag_t  oba_memt;
-	bus_dma_tag_t	 oba_dmat;
-	bus_addr_t	 oba_baseaddr;
-	int	 	 oba_intr;
+struct uartbus_attach_args {
+	char		*uba_name;
+	bus_space_tag_t  uba_memt;
+	bus_addr_t	 uba_baseaddr;
+	int	 	 uba_intr;
 };
 
-void	 obio_setintrmask(int);
-void   *obio_intr_establish(int, int, int (*)(void *),
-	    void *, const char *);
-void	obio_intr_disestablish(void *);
-void	obio_intr_init(void);
-
-#endif	/* _OBIOVAR_H_ */
+#endif	/* _UARTBUSVAR_H_ */
