@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.114 2011/05/08 17:33:56 matthew Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.116 2011/05/09 22:33:54 matthew Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -697,12 +697,38 @@ wdcprobe(struct channel_softc *chp)
 	return (ret_value);
 }
 
+struct channel_queue *
+wdc_alloc_queue(void)
+{
+	static int inited = 0;
+	struct channel_queue *queue;
+
+	/* Initialize global data. */
+	if (inited == 0) {
+		/* Initialize the wdc_xfer pool. */
+		pool_init(&wdc_xfer_pool, sizeof(struct wdc_xfer), 0,
+		    0, 0, "wdcspl", NULL);
+		inited = 1;
+	}
+
+	queue = malloc(sizeof(*queue), M_DEVBUF, M_NOWAIT);
+	if (queue != NULL) {
+		TAILQ_INIT(&queue->sc_xfer);
+	}
+	return (queue);
+}
+
+void
+wdc_free_queue(struct channel_queue *queue)
+{
+	free(queue, M_DEVBUF);
+}
+
 void
 wdcattach(struct channel_softc *chp)
 {
 	int channel_flags, ctrl_flags, i;
 	struct ata_atapi_attach aa_link;
-	static int inited = 0, s;
 #ifdef WDCDEBUG
 	int    savedmask = wdcdebug_mask;
 #endif
@@ -717,6 +743,11 @@ wdcattach(struct channel_softc *chp)
 
 	if (!chp->_vtbl)
 		chp->_vtbl = &wdc_default_vtbl;
+
+	for (i = 0; i < 2; i++) {
+		chp->ch_drive[i].chnl_softc = chp;
+		chp->ch_drive[i].drive = i;
+	}
 
 	if (chp->wdc->drv_probe != NULL) {
 		chp->wdc->drv_probe(chp);
@@ -742,22 +773,9 @@ wdcattach(struct channel_softc *chp)
 	}
 #endif /* WDCDEBUG */
 
-	/* initialise global data */
-	s = splbio();
-	if (inited == 0) {
-		/* Initialize the wdc_xfer pool. */
-		pool_init(&wdc_xfer_pool, sizeof(struct wdc_xfer), 0,
-		    0, 0, "wdcspl", NULL);
-		inited++;
-	}
-	TAILQ_INIT(&chp->ch_queue->sc_xfer);
-	splx(s);
-
 	for (i = 0; i < 2; i++) {
 		struct ata_drive_datas *drvp = &chp->ch_drive[i];
 
-		drvp->chnl_softc = chp;
-		drvp->drive = i;
 		/* If controller can't do 16bit flag the drives as 32bit */
 		if ((chp->wdc->cap &
 		    (WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32)) ==
