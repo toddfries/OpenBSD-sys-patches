@@ -163,6 +163,7 @@ int			 pf_change_icmp_af(struct mbuf *, int, int *,
 			    struct pf_pdesc *, struct pf_pdesc *,
 			    struct pf_addr *, struct pf_addr *, sa_family_t,
 			    sa_family_t);
+int			 pf_translate_icmp_af(int, void *);
 void			 pf_send_tcp(const struct pf_rule *, sa_family_t,
 			    const struct pf_addr *, const struct pf_addr *,
 			    u_int16_t, u_int16_t, u_int32_t, u_int32_t,
@@ -215,9 +216,9 @@ int			 pf_test_state_icmp(struct pf_state **, int,
 int			 pf_test_state_other(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, struct pf_pdesc *);
 void			 pf_route(struct mbuf **, struct pf_rule *, int,
-			    struct ifnet *, struct pf_state *, int);
+			    struct ifnet *, struct pf_state *);
 void			 pf_route6(struct mbuf **, struct pf_rule *, int,
-			    struct ifnet *, struct pf_state *, int);
+			    struct ifnet *, struct pf_state *);
 int			 pf_socket_lookup(int, struct pf_pdesc *);
 u_int8_t		 pf_get_wscale(struct mbuf *, int, u_int16_t,
 			    sa_family_t);
@@ -245,9 +246,6 @@ void			 pf_counters_inc(int, int,
 			    struct pf_pdesc *, struct pfi_kif *,
 			    struct pf_state *, struct pf_rule *,
 			    struct pf_rule *);
-int			 pf_translate_af(int, struct mbuf **, int,
-			    struct pf_pdesc *);
-int			 pf_translate_icmp(int, void *);
 
 extern struct pool pfr_ktable_pl;
 extern struct pool pfr_kentry_pl;
@@ -1947,6 +1945,77 @@ pf_change_icmp(struct pf_addr *ia, u_int16_t *ip, struct pf_addr *oa,
 }
 
 int
+pf_translate_af(int af, struct mbuf **m0, int off, struct pf_pdesc *pd)
+{
+#if INET && INET6
+	struct mbuf		*m = *m0, *mp = NULL;
+	struct ip		*ip4;
+	struct ip6_hdr		*ip6;
+	struct icmp6_hdr	*icmp;
+	int			 hlen;
+
+	hlen = af == AF_INET ? sizeof(*ip4) : sizeof(*ip6);
+
+	/* trim the old header */
+	m_adj(m, off);
+
+	/* prepend a new one */
+	if ((M_PREPEND(m, hlen, M_DONTWAIT)) == NULL) {
+		*m0 = NULL;
+		return (-1);
+	}
+
+	switch (af) {
+	case AF_INET:
+		ip4 = mtod(m, struct ip *);
+		bzero(ip4, hlen);
+		ip4->ip_v   = IPVERSION;
+		ip4->ip_hl  = hlen >> 2;
+		ip4->ip_len = htons(hlen + (pd->tot_len - off));
+		ip4->ip_id  = htons(ip_randomid());
+		ip4->ip_off = htons(IP_DF);
+		ip4->ip_ttl = pd->ttl;
+		ip4->ip_p   = pd->proto;
+		ip4->ip_src = pd->nsaddr.v4;
+		ip4->ip_dst = pd->ndaddr.v4;
+		break;
+	case AF_INET6:
+		ip6 = mtod(m, struct ip6_hdr *);
+		bzero(ip6, hlen);
+		ip6->ip6_vfc  = IPV6_VERSION;
+		ip6->ip6_plen = htons(pd->tot_len - off);
+		ip6->ip6_nxt  = pd->proto;
+		if (!pd->ttl || pd->ttl > IPV6_DEFHLIM)
+			ip6->ip6_hlim = IPV6_DEFHLIM;
+		else
+			ip6->ip6_hlim = pd->ttl;
+		ip6->ip6_src  = pd->nsaddr.v6;
+		ip6->ip6_dst  = pd->ndaddr.v6;
+		break;
+	default:
+		return (-1);
+	}
+
+	/* recalculate icmp/icmp6 checksums */
+	if (pd->proto == IPPROTO_ICMP || pd->proto == IPPROTO_ICMPV6) {
+		if ((mp = m_pulldown(m, hlen, sizeof(*icmp), &off)) == NULL) {
+			*m0 = NULL;
+			return (-1);
+		}
+		icmp = (struct icmp6_hdr *)(mp->m_data + off);
+		icmp->icmp6_cksum = 0;
+		icmp->icmp6_cksum = af == AF_INET ?
+		    in4_cksum(m, 0, hlen, ntohs(ip4->ip_len) - hlen) :
+		    in6_cksum(m, IPPROTO_ICMPV6, hlen, ntohs(ip6->ip6_plen));
+	}
+
+	*m0 = m;
+#endif /* INET && INET6 */
+
+	return (0);
+}
+
+int
 pf_change_icmp_af(struct mbuf *m, int off, int *poff,  struct pf_pdesc *pd,
     struct pf_pdesc *pd2, struct pf_addr *src, struct pf_addr *dst,
     sa_family_t af, sa_family_t naf)
@@ -2024,6 +2093,237 @@ pf_change_icmp_af(struct mbuf *m, int off, int *poff,  struct pf_pdesc *pd,
 	mlen = n->m_pkthdr.len;
 	m_cat(m, n);
 	m->m_pkthdr.len += mlen;
+#endif /* INET && INET6 */
+
+	return (0);
+}
+
+
+#define PTR_IP(field)	(offsetof(struct ip, field))
+#define PTR_IP6(field)	(offsetof(struct ip6_hdr, field))
+
+int
+pf_translate_icmp_af(int af, void *arg)
+{
+#if INET && INET6
+	struct icmp		*icmp4;
+	struct icmp6_hdr	*icmp6;
+	u_int32_t		 mtu;
+	int32_t			 ptr = -1;
+	u_int8_t		 type;
+	u_int8_t		 code;
+
+	switch (af) {
+	case AF_INET:
+		icmp6 = arg;
+		type  = icmp6->icmp6_type;
+		code  = icmp6->icmp6_code;
+		mtu   = ntohl(icmp6->icmp6_mtu);
+
+		switch (type) {
+		case ICMP6_ECHO_REQUEST:
+			type = ICMP_ECHO;
+			break;
+		case ICMP6_ECHO_REPLY:
+			type = ICMP_ECHOREPLY;
+			break;
+		case ICMP6_DST_UNREACH:
+			type = ICMP_UNREACH;
+			switch (code) {
+			case ICMP6_DST_UNREACH_NOROUTE:
+			case ICMP6_DST_UNREACH_BEYONDSCOPE:
+			case ICMP6_DST_UNREACH_ADDR:
+				code = ICMP_UNREACH_HOST;
+				break;
+			case ICMP6_DST_UNREACH_ADMIN:
+				code = ICMP_UNREACH_HOST_PROHIB;
+				break;
+			case ICMP6_DST_UNREACH_NOPORT:
+				code = ICMP_UNREACH_PORT;
+				break;
+			default:
+				return (-1);
+			}
+			break;
+		case ICMP6_PACKET_TOO_BIG:
+			type = ICMP_UNREACH;
+			code = ICMP_UNREACH_NEEDFRAG;
+			mtu -= 20;
+			break;
+		case ICMP6_TIME_EXCEEDED:
+			type = ICMP_TIMXCEED;
+			break;
+		case ICMP6_PARAM_PROB:
+			switch (code) {
+			case ICMP6_PARAMPROB_HEADER:
+				type = ICMP_PARAMPROB;
+				code = ICMP_PARAMPROB_ERRATPTR;
+				ptr  = ntohl(icmp6->icmp6_pptr);
+
+				if (ptr == PTR_IP6(ip6_vfc))
+					; /* preserve */
+				else if (ptr == PTR_IP6(ip6_vfc) + 1)
+					ptr = PTR_IP(ip_tos);
+				else if (ptr == PTR_IP6(ip6_plen) ||
+				    ptr == PTR_IP6(ip6_plen) + 1)
+					ptr = PTR_IP(ip_len);
+				else if (ptr == PTR_IP6(ip6_nxt))
+					ptr = PTR_IP(ip_p);
+				else if (ptr == PTR_IP6(ip6_hlim))
+					ptr = PTR_IP(ip_ttl);
+				else if (ptr >= PTR_IP6(ip6_src) &&
+				    ptr < PTR_IP6(ip6_dst))
+					ptr = PTR_IP(ip_src);
+				else if (ptr >= PTR_IP6(ip6_dst) &&
+				    ptr < sizeof(struct ip6_hdr))
+					ptr = PTR_IP(ip_dst);
+				else
+					return (-1);
+				break;
+			case ICMP6_PARAMPROB_NEXTHEADER:
+				type = ICMP_UNREACH;
+				code = ICMP_UNREACH_PROTOCOL;
+				break;
+			default:
+				return (-1);
+			}
+			break;
+		default:
+			return (-1);
+		}
+		if (icmp6->icmp6_type != type) {
+			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
+			    icmp6->icmp6_type, type, 0);
+			icmp6->icmp6_type = type;
+		}
+		if (icmp6->icmp6_code != code) {
+			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
+			    icmp6->icmp6_code, code, 0);
+			icmp6->icmp6_code = code;
+		}
+		if (icmp6->icmp6_mtu != htonl(mtu)) {
+			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
+			    htons(ntohl(icmp6->icmp6_mtu)), htons(mtu), 0);
+			/* aligns well with a icmpv4 nextmtu */
+			icmp6->icmp6_mtu = htonl(mtu);
+		}
+		if (ptr >= 0 && icmp6->icmp6_pptr != htonl(ptr)) {
+			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
+			    htons(ntohl(icmp6->icmp6_pptr)), htons(ptr), 0);
+			/* icmpv4 pptr is a one most significant byte */
+			icmp6->icmp6_pptr = htonl(ptr << 24);
+		}
+		break;
+	case AF_INET6:
+		icmp4 = arg;
+		type  = icmp4->icmp_type;
+		code  = icmp4->icmp_code;
+		mtu   = ntohs(icmp4->icmp_nextmtu);
+
+		switch (type) {
+		case ICMP_ECHO:
+			type = ICMP6_ECHO_REQUEST;
+			break;
+		case ICMP_ECHOREPLY:
+			type = ICMP6_ECHO_REPLY;
+			break;
+		case ICMP_UNREACH:
+			type = ICMP6_DST_UNREACH;
+			switch (code) {
+			case ICMP_UNREACH_NET:
+			case ICMP_UNREACH_HOST:
+			case ICMP_UNREACH_NET_UNKNOWN:
+			case ICMP_UNREACH_HOST_UNKNOWN:
+			case ICMP_UNREACH_ISOLATED:
+			case ICMP_UNREACH_TOSNET:
+			case ICMP_UNREACH_TOSHOST:
+				code = ICMP6_DST_UNREACH_NOROUTE;
+				break;
+			case ICMP_UNREACH_PORT:
+				code = ICMP6_DST_UNREACH_NOPORT;
+				break;
+			case ICMP_UNREACH_NET_PROHIB:
+			case ICMP_UNREACH_HOST_PROHIB:
+			case ICMP_UNREACH_FILTER_PROHIB:
+			case ICMP_UNREACH_PRECEDENCE_CUTOFF:
+				code = ICMP6_DST_UNREACH_ADMIN;
+				break;
+			case ICMP_UNREACH_PROTOCOL:
+				type = ICMP6_PARAM_PROB;
+				code = ICMP6_PARAMPROB_NEXTHEADER;
+				ptr  = offsetof(struct ip6_hdr, ip6_nxt);
+				break;
+			case ICMP_UNREACH_NEEDFRAG:
+				type = ICMP6_PACKET_TOO_BIG;
+				code = 0;
+				mtu += 20;
+				break;
+			default:
+				return (-1);
+			}
+			break;
+		case ICMP_TIMXCEED:
+			type = ICMP6_TIME_EXCEEDED;
+			break;
+		case ICMP_PARAMPROB:
+			type = ICMP6_PARAM_PROB;
+			switch (code) {
+			case ICMP_PARAMPROB_ERRATPTR:
+				code = ICMP6_PARAMPROB_HEADER;
+				break;
+			case ICMP_PARAMPROB_LENGTH:
+				code = ICMP6_PARAMPROB_HEADER;
+				break;
+			default:
+				return (-1);
+			}
+
+			ptr = icmp4->icmp_pptr;
+			if (ptr == 0 || ptr == PTR_IP(ip_tos))
+				; /* preserve */
+			else if (ptr == PTR_IP(ip_len) ||
+			    ptr == PTR_IP(ip_len) + 1)
+				ptr = PTR_IP6(ip6_plen);
+			else if (ptr == PTR_IP(ip_ttl))
+				ptr = PTR_IP6(ip6_hlim);
+			else if (ptr == PTR_IP(ip_p))
+				ptr = PTR_IP6(ip6_nxt);
+			else if (ptr >= PTR_IP(ip_src) &&
+			    ptr < PTR_IP(ip_dst))
+				ptr = PTR_IP6(ip6_src);
+			else if (ptr >= PTR_IP(ip_dst) &&
+			    ptr < sizeof(struct ip))
+				ptr = PTR_IP6(ip6_dst);
+			else
+				return (-1);
+			break;
+		default:
+			return (-1);
+		}
+		if (icmp4->icmp_type != type) {
+			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
+			    icmp4->icmp_type, type, 0);
+			icmp4->icmp_type = type;
+		}
+		if (icmp4->icmp_code != code) {
+			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
+			    icmp4->icmp_code, code, 0);
+			icmp4->icmp_code = code;
+		}
+		if (icmp4->icmp_nextmtu != htons(mtu)) {
+			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
+			    icmp4->icmp_nextmtu, htons(mtu), 0);
+			icmp4->icmp_nextmtu = htons(mtu);
+		}
+		if (ptr >= 0 && icmp4->icmp_void != ptr) {
+			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
+			    htons(icmp4->icmp_pptr), htons(ptr), 0);
+			icmp4->icmp_void = htonl(ptr);
+		}
+		break;
+	default:
+		return (-1);
+	}
 #endif /* INET && INET6 */
 
 	return (0);
@@ -2875,307 +3175,6 @@ pf_rule_to_actions(struct pf_rule *r, struct pf_rule_actions *a)
 }
 
 int
-pf_translate_af(int af, struct mbuf **m0, int off, struct pf_pdesc *pd)
-{
-#if INET && INET6
-	struct mbuf		*m = *m0, *mp = NULL;
-	struct ip		*ip4;
-	struct ip6_hdr		*ip6;
-	struct icmp6_hdr	*icmp;
-	int			 hlen;
-
-	hlen = af == AF_INET ? sizeof(*ip4) : sizeof(*ip6);
-
-	/* trim the old header */
-	m_adj(m, off);
-
-	/* prepend a new one */
-	if ((M_PREPEND(m, hlen, M_DONTWAIT)) == NULL) {
-		*m0 = NULL;
-		return (-1);
-	}
-
-	switch (af) {
-	case AF_INET:
-		ip4 = mtod(m, struct ip *);
-		bzero(ip4, hlen);
-		ip4->ip_v   = IPVERSION;
-		ip4->ip_hl  = hlen >> 2;
-		ip4->ip_len = htons(hlen + (pd->tot_len - off));
-		ip4->ip_id  = htons(ip_randomid());
-		ip4->ip_off = htons(IP_DF);
-		ip4->ip_ttl = pd->ttl;
-		ip4->ip_p   = pd->proto;
-		ip4->ip_src = pd->nsaddr.v4;
-		ip4->ip_dst = pd->ndaddr.v4;
-		break;
-	case AF_INET6:
-		ip6 = mtod(m, struct ip6_hdr *);
-		bzero(ip6, hlen);
-		ip6->ip6_vfc  = IPV6_VERSION;
-		ip6->ip6_plen = htons(pd->tot_len - off);
-		ip6->ip6_nxt  = pd->proto;
-		if (!pd->ttl || pd->ttl > IPV6_DEFHLIM)
-			ip6->ip6_hlim = IPV6_DEFHLIM;
-		else
-			ip6->ip6_hlim = pd->ttl;
-		ip6->ip6_src  = pd->nsaddr.v6;
-		ip6->ip6_dst  = pd->ndaddr.v6;
-		break;
-	default:
-		return (-1);
-	}
-
-	/* recalculate icmp/icmp6 checksums */
-	if (pd->proto == IPPROTO_ICMP || pd->proto == IPPROTO_ICMPV6) {
-		if ((mp = m_pulldown(m, hlen, sizeof(*icmp), &off)) == NULL) {
-			*m0 = NULL;
-			return (-1);
-		}
-		icmp = (struct icmp6_hdr *)(mp->m_data + off);
-		icmp->icmp6_cksum = 0;
-		icmp->icmp6_cksum = af == AF_INET ?
-		    in4_cksum(m, 0, hlen, ntohs(ip4->ip_len) - hlen) :
-		    in6_cksum(m, IPPROTO_ICMPV6, hlen, ntohs(ip6->ip6_plen));
-	}
-
-	*m0 = m;
-#endif /* INET && INET6 */
-
-	return (0);
-}
-
-#define PTR_IP(field)	(offsetof(struct ip, field))
-#define PTR_IP6(field)	(offsetof(struct ip6_hdr, field))
-
-int
-pf_translate_icmp(int af, void *arg)
-{
-#if INET && INET6
-	struct icmp		*icmp4;
-	struct icmp6_hdr	*icmp6;
-	u_int32_t		 mtu;
-	int32_t			 ptr = -1;
-	u_int8_t		 type;
-	u_int8_t		 code;
-
-	switch (af) {
-	case AF_INET:
-		icmp6 = arg;
-		type  = icmp6->icmp6_type;
-		code  = icmp6->icmp6_code;
-		mtu   = ntohl(icmp6->icmp6_mtu);
-
-		switch (type) {
-		case ICMP6_ECHO_REQUEST:
-			type = ICMP_ECHO;
-			break;
-		case ICMP6_ECHO_REPLY:
-			type = ICMP_ECHOREPLY;
-			break;
-		case ICMP6_DST_UNREACH:
-			type = ICMP_UNREACH;
-			switch (code) {
-			case ICMP6_DST_UNREACH_NOROUTE:
-			case ICMP6_DST_UNREACH_BEYONDSCOPE:
-			case ICMP6_DST_UNREACH_ADDR:
-				code = ICMP_UNREACH_HOST;
-				break;
-			case ICMP6_DST_UNREACH_ADMIN:
-				code = ICMP_UNREACH_HOST_PROHIB;
-				break;
-			case ICMP6_DST_UNREACH_NOPORT:
-				code = ICMP_UNREACH_PORT;
-				break;
-			default:
-				return (-1);
-			}
-			break;
-		case ICMP6_PACKET_TOO_BIG:
-			type = ICMP_UNREACH;
-			code = ICMP_UNREACH_NEEDFRAG;
-			mtu -= 20;
-			break;
-		case ICMP6_TIME_EXCEEDED:
-			type = ICMP_TIMXCEED;
-			break;
-		case ICMP6_PARAM_PROB:
-			switch (code) {
-			case ICMP6_PARAMPROB_HEADER:
-				type = ICMP_PARAMPROB;
-				code = ICMP_PARAMPROB_ERRATPTR;
-				ptr  = ntohl(icmp6->icmp6_pptr);
-
-				if (ptr == PTR_IP6(ip6_vfc))
-					; /* preserve */
-				else if (ptr == PTR_IP6(ip6_vfc) + 1)
-					ptr = PTR_IP(ip_tos);
-				else if (ptr == PTR_IP6(ip6_plen) ||
-				    ptr == PTR_IP6(ip6_plen) + 1)
-					ptr = PTR_IP(ip_len);
-				else if (ptr == PTR_IP6(ip6_nxt))
-					ptr = PTR_IP(ip_p);
-				else if (ptr == PTR_IP6(ip6_hlim))
-					ptr = PTR_IP(ip_ttl);
-				else if (ptr >= PTR_IP6(ip6_src) &&
-				    ptr < PTR_IP6(ip6_dst))
-					ptr = PTR_IP(ip_src);
-				else if (ptr >= PTR_IP6(ip6_dst) &&
-				    ptr < sizeof(struct ip6_hdr))
-					ptr = PTR_IP(ip_dst);
-				else
-					return (-1);
-				break;
-			case ICMP6_PARAMPROB_NEXTHEADER:
-				type = ICMP_UNREACH;
-				code = ICMP_UNREACH_PROTOCOL;
-				break;
-			default:
-				return (-1);
-			}
-			break;
-		default:
-			return (-1);
-		}
-		if (icmp6->icmp6_type != type) {
-			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
-			    icmp6->icmp6_type, type, 0);
-			icmp6->icmp6_type = type;
-		}
-		if (icmp6->icmp6_code != code) {
-			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
-			    icmp6->icmp6_code, code, 0);
-			icmp6->icmp6_code = code;
-		}
-		if (icmp6->icmp6_mtu != htonl(mtu)) {
-			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
-			    htons(ntohl(icmp6->icmp6_mtu)), htons(mtu), 0);
-			/* aligns well with a icmpv4 nextmtu */
-			icmp6->icmp6_mtu = htonl(mtu);
-		}
-		if (ptr >= 0 && icmp6->icmp6_pptr != htonl(ptr)) {
-			icmp6->icmp6_cksum = pf_cksum_fixup(icmp6->icmp6_cksum,
-			    htons(ntohl(icmp6->icmp6_pptr)), htons(ptr), 0);
-			/* icmpv4 pptr is a one most significant byte */
-			icmp6->icmp6_pptr = htonl(ptr << 24);
-		}
-		break;
-	case AF_INET6:
-		icmp4 = arg;
-		type  = icmp4->icmp_type;
-		code  = icmp4->icmp_code;
-		mtu   = ntohs(icmp4->icmp_nextmtu);
-
-		switch (type) {
-		case ICMP_ECHO:
-			type = ICMP6_ECHO_REQUEST;
-			break;
-		case ICMP_ECHOREPLY:
-			type = ICMP6_ECHO_REPLY;
-			break;
-		case ICMP_UNREACH:
-			type = ICMP6_DST_UNREACH;
-			switch (code) {
-			case ICMP_UNREACH_NET:
-			case ICMP_UNREACH_HOST:
-			case ICMP_UNREACH_NET_UNKNOWN:
-			case ICMP_UNREACH_HOST_UNKNOWN:
-			case ICMP_UNREACH_ISOLATED:
-			case ICMP_UNREACH_TOSNET:
-			case ICMP_UNREACH_TOSHOST:
-				code = ICMP6_DST_UNREACH_NOROUTE;
-				break;
-			case ICMP_UNREACH_PORT:
-				code = ICMP6_DST_UNREACH_NOPORT;
-				break;
-			case ICMP_UNREACH_NET_PROHIB:
-			case ICMP_UNREACH_HOST_PROHIB:
-			case ICMP_UNREACH_FILTER_PROHIB:
-			case ICMP_UNREACH_PRECEDENCE_CUTOFF:
-				code = ICMP6_DST_UNREACH_ADMIN;
-				break;
-			case ICMP_UNREACH_PROTOCOL:
-				type = ICMP6_PARAM_PROB;
-				code = ICMP6_PARAMPROB_NEXTHEADER;
-				ptr  = offsetof(struct ip6_hdr, ip6_nxt);
-				break;
-			case ICMP_UNREACH_NEEDFRAG:
-				type = ICMP6_PACKET_TOO_BIG;
-				code = 0;
-				mtu += 20;
-				break;
-			default:
-				return (-1);
-			}
-			break;
-		case ICMP_TIMXCEED:
-			type = ICMP6_TIME_EXCEEDED;
-			break;
-		case ICMP_PARAMPROB:
-			type = ICMP6_PARAM_PROB;
-			switch (code) {
-			case ICMP_PARAMPROB_ERRATPTR:
-				code = ICMP6_PARAMPROB_HEADER;
-				break;
-			case ICMP_PARAMPROB_LENGTH:
-				code = ICMP6_PARAMPROB_HEADER;
-				break;
-			default:
-				return (-1);
-			}
-
-			ptr = icmp4->icmp_pptr;
-			if (ptr == 0 || ptr == PTR_IP(ip_tos))
-				; /* preserve */
-			else if (ptr == PTR_IP(ip_len) ||
-			    ptr == PTR_IP(ip_len) + 1)
-				ptr = PTR_IP6(ip6_plen);
-			else if (ptr == PTR_IP(ip_ttl))
-				ptr = PTR_IP6(ip6_hlim);
-			else if (ptr == PTR_IP(ip_p))
-				ptr = PTR_IP6(ip6_nxt);
-			else if (ptr >= PTR_IP(ip_src) &&
-			    ptr < PTR_IP(ip_dst))
-				ptr = PTR_IP6(ip6_src);
-			else if (ptr >= PTR_IP(ip_dst) &&
-			    ptr < sizeof(struct ip))
-				ptr = PTR_IP6(ip6_dst);
-			else
-				return (-1);
-			break;
-		default:
-			return (-1);
-		}
-		if (icmp4->icmp_type != type) {
-			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
-			    icmp4->icmp_type, type, 0);
-			icmp4->icmp_type = type;
-		}
-		if (icmp4->icmp_code != code) {
-			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
-			    icmp4->icmp_code, code, 0);
-			icmp4->icmp_code = code;
-		}
-		if (icmp4->icmp_nextmtu != htons(mtu)) {
-			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
-			    icmp4->icmp_nextmtu, htons(mtu), 0);
-			icmp4->icmp_nextmtu = htons(mtu);
-		}
-		if (ptr >= 0 && icmp4->icmp_void != ptr) {
-			icmp4->icmp_cksum = pf_cksum_fixup(icmp4->icmp_cksum,
-			    htons(icmp4->icmp_pptr), htons(ptr), 0);
-			icmp4->icmp_void = htonl(ptr);
-		}
-		break;
-	default:
-		return (-1);
-	}
-#endif /* INET && INET6 */
-
-	return (0);
-}
-
-int
 pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
     struct pfi_kif *kif, struct mbuf *m, int off,
     struct pf_pdesc *pd, struct pf_rule **am, struct pf_ruleset **rsm,
@@ -3773,7 +3772,7 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 			return (0);
 
 		if (afto) {
-			if (pf_translate_icmp(AF_INET6, pd->hdr.icmp))
+			if (pf_translate_icmp_af(AF_INET6, pd->hdr.icmp))
 				return (0);
 			pd->proto = IPPROTO_ICMPV6;
 			rewrite = 1;
@@ -3811,7 +3810,7 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 
 		if (afto) {
 			/* ip_sum will be recalculated in pf_translate_af */
-			if (pf_translate_icmp(AF_INET, pd->hdr.icmp6))
+			if (pf_translate_icmp_af(AF_INET, pd->hdr.icmp6))
 				return (0);
 			pd->proto = IPPROTO_ICMP;
 			rewrite = 1;
@@ -4527,8 +4526,7 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (afto || PF_ANEQ(pd->src, &nk->addr[sidx], pd->af) ||
 		    nk->port[sidx] != th->th_sport)
 			pf_change_ap(pd->src, &th->th_sport, &th->th_sum,
-			    &nk->addr[sidx], nk->port[sidx], 0, pd->af,
-			    nk->af);
+			    &nk->addr[sidx], nk->port[sidx], 0, pd->af, nk->af);
 
 		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
 		    pd->rdomain != nk->rdomain)
@@ -4536,8 +4534,7 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
 		    nk->port[didx] != th->th_dport)
 			pf_change_ap(pd->dst, &th->th_dport, &th->th_sum,
-			    &nk->addr[didx], nk->port[didx], 0, pd->af,
-			    nk->af);
+			    &nk->addr[didx], nk->port[didx], 0, pd->af, nk->af);
 		m->m_pkthdr.rdomain = nk->rdomain;
 
 		if (afto) {
@@ -4775,7 +4772,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			case AF_INET:
 #ifdef INET6
 				if (afto) {
-					if (pf_translate_icmp(AF_INET6,
+					if (pf_translate_icmp_af(AF_INET6,
 					    pd->hdr.icmp))
 						return (PF_DROP);
 					pd->proto = IPPROTO_ICMPV6;
@@ -4811,7 +4808,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			case AF_INET6:
 #ifdef INET
 				if (afto) {
-					if (pf_translate_icmp(AF_INET,
+					if (pf_translate_icmp_af(AF_INET,
 					    pd->hdr.icmp6))
 						return (PF_DROP);
 					pd->proto = IPPROTO_ICMP;
@@ -4849,10 +4846,8 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 #endif /* INET6 */
 			}
 			if (afto) {
-				PF_ACPY(&pd->nsaddr, &nk->addr[sidx],
-				    nk->af);
-				PF_ACPY(&pd->ndaddr, &nk->addr[didx],
-				    nk->af);
+				PF_ACPY(&pd->nsaddr, &nk->addr[sidx], nk->af);
+				PF_ACPY(&pd->ndaddr, &nk->addr[didx], nk->af);
 				return (PF_AFRT);
 			}
 		}
@@ -5063,7 +5058,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 #if INET && INET6
 				if (afto) {
-					if (pf_translate_icmp(nk->af,
+					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
 						return (PF_DROP);
 					m_copyback(m, off,
@@ -5176,7 +5171,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 #if INET && INET6
 				if (afto) {
-					if (pf_translate_icmp(nk->af,
+					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
 						return (PF_DROP);
 					m_copyback(m, off,
@@ -5294,7 +5289,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				if (afto) {
 					if (nk->af != AF_INET6)
 						return (PF_DROP);
-					if (pf_translate_icmp(nk->af,
+					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
 						return (PF_DROP);
 					m_copyback(m, off,
@@ -5305,7 +5300,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 					    &nk->addr[didx], pd->af, nk->af))
 						return (PF_DROP);
 					pd->proto = IPPROTO_ICMPV6;
-					if (pf_translate_icmp(nk->af, &iih))
+					if (pf_translate_icmp_af(nk->af, &iih))
 						return (PF_DROP);
 					if (virtual_type == htons(ICMP_ECHO) &&
 					    nk->port[iidx] != iih.icmp_id)
@@ -5406,7 +5401,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				if (afto) {
 					if (nk->af != AF_INET)
 						return (PF_DROP);
-					if (pf_translate_icmp(nk->af,
+					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
 						return (PF_DROP);
 					m_copyback(m, off,
@@ -5417,7 +5412,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 					    &nk->addr[didx], pd->af, nk->af))
 						return (PF_DROP);
 					pd->proto = IPPROTO_ICMP;
-					if (pf_translate_icmp(nk->af, &iih))
+					if (pf_translate_icmp_af(nk->af, &iih))
 						return (PF_DROP);
 					if (virtual_type ==
 					    htons(ICMP6_ECHO_REQUEST) &&
@@ -5830,7 +5825,7 @@ pf_rtlabel_match(struct pf_addr *addr, sa_family_t af, struct pf_addr_wrap *aw,
 #ifdef INET
 void
 pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
-    struct pf_state *s, int fastroute)
+    struct pf_state *s)
 {
 	struct mbuf		*m0, *m1;
 	struct route		 iproute;
@@ -6013,7 +6008,7 @@ bad:
 #ifdef INET6
 void
 pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
-    struct pf_state *s, int fastroute)
+    struct pf_state *s)
 {
 	struct mbuf		*m0;
 	struct route_in6	 ip6route;
@@ -6023,6 +6018,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	struct ifnet		*ifp = NULL;
 	struct pf_addr		 naddr;
 	struct pf_src_node	*sn = NULL;
+	char			*cause = NULL;
 
 	if (m == NULL || *m == NULL || r == NULL ||
 	    (dir != PF_IN && dir != PF_OUT) || oifp == NULL)
@@ -6031,6 +6027,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if ((*m)->m_pkthdr.pf.routed++ > 3) {
 		m0 = *m;
 		*m = NULL;
+		cause = "routed";
 		goto bad;
 	}
 
@@ -6046,6 +6043,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (m0->m_len < sizeof(struct ip6_hdr)) {
 		DPFPRINTF(LOG_ERR,
 		    "pf_route6: m0->m_len < sizeof(struct ip6_hdr)");
+		cause = "m0->m_len < sizeof(struct ip6_hdr)";
 		goto bad;
 	}
 	ip6 = mtod(m0, struct ip6_hdr *);
@@ -6068,6 +6066,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		    &naddr, NULL, &sn, &r->route, PF_SN_ROUTE)) {
 			DPFPRINTF(LOG_ERR,
 			    "pf_route6: pf_map_addr() failed.");
+			cause="pf_map_addr() failed";
 			goto bad;
 		}
 		if (!PF_AZERO(&naddr, AF_INET6))
@@ -6084,13 +6083,16 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		goto bad;
 
 	if (oifp != ifp) {
-		if (pf_test6(PF_OUT, ifp, &m0, NULL) != PF_PASS)
+		if (pf_test6(PF_OUT, ifp, &m0, NULL) != PF_PASS) {
+			cause = "pf_test6 != PASS";
 			goto bad;
+		}
 		else if (m0 == NULL)
 			goto done;
 		if (m0->m_len < sizeof(struct ip6_hdr)) {
 			DPFPRINTF(LOG_ERR,
 			    "pf_route6: m0->m_len < sizeof(struct ip6_hdr)");
+			cause = "m0->m_len < sizeof(struct ip6_hdr)";
 			goto bad;
 		}
 		ip6 = mtod(m0, struct ip6_hdr *);
@@ -6108,8 +6110,10 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		in6_ifstat_inc(ifp, ifs6_in_toobig);
 		if (r->rt != PF_DUPTO)
 			icmp6_error(m0, ICMP6_PACKET_TOO_BIG, 0, ifp->if_mtu);
-		else
+		else {
+			cause = "too big";
 			goto bad;
+		}
 	}
 
 done:
@@ -6118,6 +6122,10 @@ done:
 	return;
 
 bad:
+	if (cause)
+		printf("pf_route6: \"%s\"\n", cause);
+	else
+		printf("pf_route6: no cause\n");
 	m_freem(m0);
 	goto done;
 }
@@ -6806,14 +6814,14 @@ done:
 			action = PF_DROP;
 			break;
 		}
-		pf_route6(&m, r, dir, kif->pfik_ifp, s, 1);
+		pf_route6(&m, r, dir, kif->pfik_ifp, s);
 		*m0 = NULL;
 		action = PF_PASS;
 		break;
 	default:
 		/* pf_route can free the mbuf causing *m0 to become NULL */
 		if (r->rt)
-			pf_route(m0, r, dir, kif->pfik_ifp, s, 0);
+			pf_route(m0, r, dir, kif->pfik_ifp, s);
 		break;
 	}
 
@@ -7104,14 +7112,14 @@ done:
 			action = PF_DROP;
 			break;
 		}
-		pf_route(&m, r, dir, kif->pfik_ifp, s, 1);
+		pf_route(&m, r, dir, kif->pfik_ifp, s);
 		*m0 = NULL;
 		action = PF_PASS;
 		break;
 	default:
 		/* pf_route6 can free the mbuf causing *m0 to become NULL */
 		if (r->rt)
-			pf_route6(m0, r, dir, kif->pfik_ifp, s, 0);
+			pf_route6(m0, r, dir, kif->pfik_ifp, s);
 		break;
 	}
 
