@@ -86,7 +86,7 @@
  * uvm_map.c: uvm map operations
  */
 
-#define DEBUG
+/* #define DEBUG */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -2199,8 +2199,6 @@ uvm_map_pageable(struct vm_map *map, vaddr_t start, vaddr_t end,
 		 */
 		if (VM_MAPENT_ISWIRED(first))
 			UVM_MAP_CLIP_START(map, first, start);
-		else
-			first = RB_NEXT(uvm_map_addr, &map->addr, first);
 		/*
 		 * Split last at end.
 		 * Make tmp be the first entry after what is to be touched.
@@ -2226,8 +2224,6 @@ out:
 		 */
 		if (!VM_MAPENT_ISWIRED(first))
 			UVM_MAP_CLIP_START(map, first, start);
-		else
-			first = RB_NEXT(uvm_map_addr, &map->addr, first);
 		/*
 		 * Split last at end.
 		 * Make tmp be the first entry after what is to be touched.
