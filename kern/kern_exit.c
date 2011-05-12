@@ -300,8 +300,8 @@ exit1(struct proc *p, int rv, int flags)
 	p->p_pctcpu = 0;
 
 	if ((p->p_flag & P_THREAD) == 0) {
-		/* notify interested parties of our demise and clean up */
-		knote_processexit(pr);
+		/* notify interested parties of our demise */
+		KNOTE(&pr->ps_klist, NOTE_EXIT);
 
 		/*
 		 * Notify parent that we're gone.  If we have P_NOZOMBIE
