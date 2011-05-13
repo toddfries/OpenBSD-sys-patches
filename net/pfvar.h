@@ -627,7 +627,6 @@ struct pf_rule {
 #define PF_STATE_SYNPROXY	0x3
 	u_int8_t		 keep_state;
 	sa_family_t		 af;
-	sa_family_t		 naf;
 	u_int8_t		 proto;
 	u_int8_t		 type;
 	u_int8_t		 code;
@@ -645,6 +644,9 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
+
+	sa_family_t		 naf;
+
 	u_int8_t		 pad2[2];
 
 	struct {
