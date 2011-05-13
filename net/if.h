@@ -332,9 +332,6 @@ struct ifnet {				/* and the entries */
 #define	IFXF_MPLS		0x8		/* supports MPLS */
 #define	IFXF_WOL		0x10		/* wake on lan enabled */
 
-#define IFXF_RTSOL	0x100		/* ipv6 autoconfiguration */
-#define IFXF_AUTOCONF	0xF00		/* ip autoconfiguration */
-
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
 
