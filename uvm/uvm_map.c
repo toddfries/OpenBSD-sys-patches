@@ -3940,11 +3940,15 @@ uvm_map_extract(struct vm_map *srcmap, vaddr_t start, vsize_t len,
 	end = start + len;
 
 	/*
-	 * stop 0: sanity check: start must be on a page boundary, length
-	 * must be page sized.
+	 * Sanity check on the parameters.
+	 * Also, since the mapping may not contain gaps, error out if the
+	 * mapped area is not in source map.
 	 */
 
-	KASSERT(start >= srcmap->min_offset && end <= srcmap->max_offset);
+	if ((start & PAGE_MASK) != 0 || (end & PAGE_MASK) != 0 || end < start)
+		return EINVAL;
+	if (start < srcmap->min_offset || end > srcmap->max_offset)
+		return EINVAL;
 
 	/*
 	 * Initialize dead entries.
