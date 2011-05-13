@@ -513,23 +513,8 @@ in_pcbdetach(v)
 	splx(s);
 #endif
 #if NPF > 0
-	if (inp->inp_pf_sk) {
-		struct pf_state_key	*sk;
-		struct pf_state_item	*si;
-
-		s = splsoftnet();
-		sk = (struct pf_state_key *)inp->inp_pf_sk;
-		TAILQ_FOREACH(si, &sk->states, entry)
-			if (sk == si->s->key[PF_SK_STACK] && si->s->rule.ptr &&
-			    si->s->rule.ptr->divert.port) {
-				pf_unlink_state(si->s);
-				break;
-			}
-		/* pf_unlink_state() may have detached the state */
-		if (inp->inp_pf_sk)
-			((struct pf_state_key *)inp->inp_pf_sk)->inp = NULL;
-		splx(s);
-	}
+	if (inp->inp_pf_sk)
+		((struct pf_state_key *)inp->inp_pf_sk)->inp = NULL;
 #endif
 	s = splnet();
 	LIST_REMOVE(inp, inp_lhash);
