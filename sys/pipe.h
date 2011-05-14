@@ -24,12 +24,11 @@
 #ifndef _SYS_PIPE_H_
 #define _SYS_PIPE_H_
 
-#ifndef _KERNEL
 #include <sys/time.h>			/* for struct timeval */
-#include <sys/selinfo.h>			/* for struct selinfo */
-#include <uvm/uvm_extern.h>		/* for vm_page_t */
+#include <sys/selinfo.h>		/* for struct selinfo */
+#include <sys/rwlock.h>
+
 #include <machine/param.h>		/* for PAGE_SIZE */
-#endif /* _KERNEL */
 
 /*
  * Pipe buffer size, keep moderate in value, pipes take kva space.
@@ -64,8 +63,8 @@ struct pipebuf {
 #define PIPE_WANT	0x020	/* Pipe is wanted to be run-down. */
 #define PIPE_SEL	0x040	/* Pipe has a select active. */
 #define PIPE_EOF	0x080	/* Pipe is in EOF condition. */
-#define PIPE_LOCK	0x100	/* Process has exclusive access to pointers/data. */
-#define PIPE_LWANT	0x200	/* Process wants exclusive access to pointers/data. */
+#define PIPE_LOCK	0x100   /* Process has exclusive access to pointers/data. */
+#define PIPE_LWANT	0x200   /* Process wants exclusive access to pointers/data. */
 
 /*
  * Per-pipe data structure.
@@ -73,6 +72,8 @@ struct pipebuf {
  */
 struct pipe {
 	struct	pipebuf pipe_buffer;	/* data storage */
+	struct	rwlock pipe_rdlock;	/* lock for data reads */
+	struct	rwlock pipe_wrlock;	/* lock for data writes */
 	struct	selinfo pipe_sel;	/* for compat with select */
 	struct	timespec pipe_atime;	/* time of last access */
 	struct	timespec pipe_mtime;	/* time of last modify */
