@@ -1,4 +1,4 @@
-/* $OpenBSD: xlights.c,v 1.4 2008/09/30 04:54:00 drahn Exp $ */
+/* $OpenBSD: xlights.c,v 1.5 2011/05/15 09:10:26 mpi Exp $ */
 /*
  * Copyright (c) 2007 Gordon Willem Klok <gwk@openbsd,org>
  *
@@ -169,9 +169,9 @@ xlights_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(": irq %d\n", sc->sc_intr);
 
-	keylargo_fcr_enable(I2SClockOffset, I2S0EN);
+	macobio_enable(I2SClockOffset, I2S0EN);
 	out32rb(sc->sc_reg + I2S_INT, I2S_INT_CLKSTOPPEND);
-	keylargo_fcr_disable(I2SClockOffset, I2S0CLKEN);
+	macobio_disable(I2SClockOffset, I2S0CLKEN);
 	for (error = 0; error < 1000; error++) {
 		if (in32rb(sc->sc_reg + I2S_INT) & I2S_INT_CLKSTOPPEND) {
 			error = 0;
@@ -188,7 +188,7 @@ xlights_attach(struct device *parent, struct device *self, void *aux)
 	    type, IPL_AUDIO, xlights_intr, sc, sc->sc_dev.dv_xname);
 
 	out32rb(sc->sc_reg + I2S_FORMAT, CLKSRC_VS);
-	keylargo_fcr_enable(I2SClockOffset, I2S0CLKEN);
+	macobio_enable(I2SClockOffset, I2S0CLKEN);
 
 	kthread_create_deferred(xlights_deferred, sc);
 	timeout_set(&sc->sc_tmo, xlights_timeout, sc);
