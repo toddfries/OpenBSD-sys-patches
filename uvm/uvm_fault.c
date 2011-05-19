@@ -1899,9 +1899,6 @@ uvmfault_lookup(struct uvm_faultinfo *ufi, boolean_t write_lock)
 	ufi->map = ufi->orig_map;
 	ufi->size = ufi->orig_size;
 
-	if (ufi->orig_rvaddr == 0)
-		return FALSE;
-
 	/*
 	 * keep going down levels until we are done.   note that there can
 	 * only be two levels so we won't loop very long.
