@@ -4656,20 +4656,25 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 	error = ENOMEM; /* Default error from here. */
 
 	/*
-	 * Handle outside address space.
+	 * At this point, the memory at <addr, sz> is not available.
+	 * The reasons are:
+	 * [1] it's outside the map,
+	 * [2] it starts in used memory (and therefore needs to move
+	 *     toward the first free page in entry),
+	 * [3] it starts in free memory but bumps into used memory.
+	 *
+	 * Note that for case [2], the forward moving is handled by the
+	 * for loop below.
 	 */
+
 	if (entry == NULL) {
-		if (addr >= map->max_offset) {
-			error = ENOMEM;
+		/* [1] Outside the map. */
+		if (addr >= map->max_offset)
 			goto out;
-		} else
+		else
 			entry = RB_MIN(uvm_map_addr, &map->addr);
-	}
-	if (entry && entry->end <= addr) {
-		/*
-		 * This entry was tested in the initial statement.
-		 * Skip forward.
-		 */
+	} else if (FREE_START(entry) <= addr) {
+		/* [3] Bumped into used memory. */
 		entry = RB_NEXT(uvm_map_addr, &map->addr, entry);
 	}
 
@@ -4682,6 +4687,8 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 			continue;
 		addr = FREE_START(entry);
 
+restart:	/* Restart address checks on address change. */
+
 #ifdef PMAP_PREFER
 		if (offset != UVM_UNKNOWN_OFFSET) {
 			tmp = (addr & ~(PMAP_PREFER_ALIGN() - 1)) |
@@ -4690,34 +4697,31 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 				tmp += PMAP_PREFER_ALIGN();
 			if (addr >= FREE_END(entry))
 				continue;
+			if (addr != tmp) {
+				addr = tmp;
+				goto restart;
+			}
 		}
 #endif
 
 		/*
-		 * Skip automatic allocation addresses.
-		 */
-		if (addr + sz > map->a_start && addr < map->a_end) {
-			if (FREE_END(entry) > map->a_end)
-				addr = map->a_end;
-			else
-				continue;
-		}
-		/*
 		 * Skip brk() allocation addresses.
 		 */
 		if (addr + sz > map->b_start && addr < map->b_end) {
-			if (FREE_END(entry) > map->b_end)
+			if (FREE_END(entry) > map->b_end) {
 				addr = map->b_end;
-			else
+				goto restart;
+			} else
 				continue;
 		}
 		/*
 		 * Skip stack allocation addresses.
 		 */
 		if (addr + sz > map->s_start && addr < map->s_end) {
-			if (FREE_END(entry) > map->s_end)
+			if (FREE_END(entry) > map->s_end) {
 				addr = map->s_end;
-			else
+				goto restart;
+			} else
 				continue;
 		}
 
