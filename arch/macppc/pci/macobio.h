@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: macobio.h,v 1.1 2011/05/15 09:10:26 mpi Exp $	*/
 /*
  * Copyright (c) 2011 Martin Pieuchot <mp@nolizard.org>
  *

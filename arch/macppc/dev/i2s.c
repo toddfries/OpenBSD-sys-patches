@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.20 2011/05/05 18:54:23 jasper Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.21 2011/05/15 09:10:26 mpi Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
