@@ -1115,7 +1115,7 @@ sr_crypto_rw(struct sr_workunit *wu)
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
 		crp = sr_crypto_getcryptop(wu, 1);
 		if (crp == NULL)
-			panic("sr_crypto_rw: no crypto op");
+			return (1);
 		crp->crp_callback = sr_crypto_write;
 		crp->crp_opaque = wu;
 		s = splvm();
