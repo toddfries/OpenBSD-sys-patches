@@ -3199,7 +3199,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	act.rtableid = pd->rdomain;
 	SLIST_INIT(&rules);
 
-	if (af == AF_INET6)
+	if (pd->af == AF_INET6)
 		ifq = &ip6intrq;
 
 	if (direction == PF_IN && pf_check_congestion(ifq)) {
