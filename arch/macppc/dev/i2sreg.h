@@ -36,6 +36,10 @@
 #define I2SClockOffset		0x3c
 #define I2S_INT_CLKSTOPPEND	0x01000000
 
+#define I2S_SELECT_SPEAKER	1 << 0
+#define I2S_SELECT_HEADPHONE	1 << 1
+#define I2S_SELECT_LINEOUT	1 << 2
+
 /* FCR(0x3c) bits */
 #define I2S0CLKEN	0x1000
 #define I2S0EN		0x2000
