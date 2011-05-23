@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.743 2011/05/13 14:31:16 oga Exp $ */
+/*	$OpenBSD: pf.c,v 1.744 2011/05/22 13:21:24 claudio Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -180,7 +180,7 @@ void			 pf_rule_to_actions(struct pf_rule *,
 int			 pf_test_rule(struct pf_rule **, struct pf_state **,
 			    int, struct pfi_kif *, struct mbuf *, int,
 			    struct pf_pdesc *, struct pf_rule **,
-			    struct pf_ruleset **, struct ifqueue *, int);
+			    struct pf_ruleset **, int);
 static __inline int	 pf_create_state(struct pf_rule *, struct pf_rule *,
 			    struct pf_pdesc *, struct pf_state_key **,
 			    struct pf_state_key **, struct mbuf *, int,
@@ -3170,7 +3170,7 @@ int
 pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
     struct pfi_kif *kif, struct mbuf *m, int off,
     struct pf_pdesc *pd, struct pf_rule **am, struct pf_ruleset **rsm,
-    struct ifqueue *ifq, int hdrlen)
+    int hdrlen)
 {
 	struct pf_rule		*lastr = NULL;
 	struct pf_rule		*r, *a = NULL;
@@ -3181,6 +3181,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	struct tcphdr		*th = pd->hdr.tcp;
 	struct pf_state_key	*skw = NULL, *sks = NULL;
 	struct pf_rule_actions	 act;
+	struct ifqueue		*ifq = &ipintrq;
 	u_short			 reason;
 	int			 rewrite = 0;
 	int			 tag = -1;
@@ -3197,6 +3198,9 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	bzero(sns, sizeof(sns));
 	act.rtableid = pd->rdomain;
 	SLIST_INIT(&rules);
+
+	if (af == AF_INET6)
+		ifq = &ip6intrq;
 
 	if (direction == PF_IN && pf_check_congestion(ifq)) {
 		REASON_SET(&reason, PFRES_CONGEST);
@@ -3340,7 +3344,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 						goto cleanup;
 					}
 					if (r->log || act.log & PF_LOG_MATCHES)
-						PFLOG_PACKET(kif, h, m, pd->af,
+						PFLOG_PACKET(kif, h, m,
 						    direction, reason, r,
 						    a, ruleset, pd);
 				} else {
@@ -3349,7 +3353,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 					*am = a;
 					*rsm = ruleset;
 					if (act.log & PF_LOG_MATCHES)
-						PFLOG_PACKET(kif, h, m, pd->af,
+						PFLOG_PACKET(kif, h, m,
 						    direction, reason, r,
 						    a, ruleset, pd);
 				}
@@ -3380,7 +3384,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	REASON_SET(&reason, PFRES_MATCH);
 
 	if (r->log || act.log & PF_LOG_MATCHES)
-		PFLOG_PACKET(kif, h, m, pd->af, direction, reason,
+		PFLOG_PACKET(kif, h, m, direction, reason,
 		    r, a, ruleset, pd);
 
 	if ((r->action == PF_DROP) &&
@@ -3941,8 +3945,7 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 	REASON_SET(&reason, PFRES_MATCH);
 
 	if (r->log)
-		PFLOG_PACKET(kif, h, m, af, direction, reason, r, a, ruleset,
-		    pd);
+		PFLOG_PACKET(kif, h, m, direction, reason, r, a, ruleset, pd);
 
 	if (r->action == PF_DROP)
 		return (PF_DROP);
@@ -6584,9 +6587,15 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED_PACKET)
 		return (PF_PASS);
 
+	if (m->m_pkthdr.pf.flags & PF_TAG_REFRAGMENTED) {
+		m->m_pkthdr.pf.flags &= ~PF_TAG_REFRAGMENTED;
+		return (PF_PASS);
+	}
+
 	/* packet reassembly here if 1) enabled 2) we deal with a fragment */
 	h = mtod(m, struct ip *);
-	if (pf_status.reass && (h->ip_off & htons(IP_MF | IP_OFFMASK)) &&
+	if (pf_status.reass &&
+	    (h->ip_off & htons(IP_MF | IP_OFFMASK)) &&
 	    pf_normalize_ip(m0, dir, kif, &reason, &pd) != PF_PASS) {
 		action = PF_DROP;
 		goto done;
@@ -6611,7 +6620,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		goto done;
 	}
 
-	switch (h->ip_p) {
+	switch (pd.proto) {
 
 	case IPPROTO_TCP: {
 		if ((pd.hdr.tcp->th_flags & TH_ACK) && pd.p_len == 0)
@@ -6630,7 +6639,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 
 		if (s) {
 			if (s->max_mss)
@@ -6652,7 +6661,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
@@ -6668,7 +6677,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ipintrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
@@ -6690,7 +6699,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif, m, off,
-			    &pd, &a, &ruleset, &ipintrq, hdrlen);
+			    &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
@@ -6768,12 +6777,12 @@ done:
 		struct pf_rule_item	*ri;
 
 		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
-			PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, r, a,
+			PFLOG_PACKET(kif, h, m, dir, reason, r, a,
 			    ruleset, &pd);
 		if (s) {
 			SLIST_FOREACH(ri, &s->match_rules, entry)
 				if (ri->r->log & PF_LOG_ALL)
-					PFLOG_PACKET(kif, h, m, AF_INET, dir,
+					PFLOG_PACKET(kif, h, m, dir,
 					    reason, ri->r, a, ruleset, &pd);
 		}
 	}
@@ -6925,7 +6934,7 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 
 		if (s) {
 			if (s->max_mss)
@@ -6947,7 +6956,7 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
@@ -6959,8 +6968,8 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 	case IPPROTO_ICMPV6: {
-		action = pf_test_state_icmp(&s, dir, kif,
-		    m, off, &pd, &reason);
+		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
+		    &reason);
 		if (action == PF_PASS || action == PF_AFRT) {
 #if NPFSYNC > 0
 			pfsync_update_state(s);
@@ -6970,7 +6979,7 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, &ip6intrq, hdrlen);
+			    m, off, &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
@@ -6985,24 +6994,25 @@ pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
 			pd.pflog |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif, m, off,
-			    &pd, &a, &ruleset, &ip6intrq, hdrlen);
+			    &pd, &a, &ruleset, hdrlen);
 		break;
 	}
 
 done:
-	/* handle dangerous IPv6 extension headers. */
-	if (action == PF_PASS && pd.rh_cnt &&
-	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
-		action = PF_DROP;
-		REASON_SET(&reason, PFRES_IPOPTIONS);
-		pd.pflog |= PF_LOG_FORCE;
-		DPFPRINTF(LOG_NOTICE,
-		    "dropping packet with dangerous v6 headers");
-	}
-
 	if (action != PF_DROP) {
 		if (s) {
+			/* handle dangerous IPv6 extension headers. */
+			if (action == PF_PASS && pd.rh_cnt &&
+			    !(s->state_flags & PFSTATE_ALLOWOPTS)) {
+				action = PF_DROP;
+				REASON_SET(&reason, PFRES_IPOPTIONS);
+				pd.pflog |= PF_LOG_FORCE;
+				DPFPRINTF(LOG_NOTICE, "dropping packet with "
+				    "dangerous v6 headers");
+			}
+
 			pf_scrub_ip6(m, s->min_ttl);
+			pf_tag_packet(m, s->tag, s->rtableid[pd.didx]);
 			if (pqid || (pd.tos & IPTOS_LOWDELAY))
 				qid = s->pqid;
 			else
@@ -7015,8 +7025,6 @@ done:
 				qid = r->qid;
 		}
 	}
-	if (s && s->tag)
-		pf_tag_packet(m, s ? s->tag : 0, s->rtableid[pd.didx]);
 
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
@@ -7059,12 +7067,12 @@ done:
 		struct pf_rule_item	*ri;
 
 		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
-			PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, r, a,
+			PFLOG_PACKET(kif, h, m, dir, reason, r, a,
 			    ruleset, &pd);
 		if (s) {
 			SLIST_FOREACH(ri, &s->match_rules, entry)
 				if (ri->r->log & PF_LOG_ALL)
-					PFLOG_PACKET(kif, h, m, AF_INET6, dir,
+					PFLOG_PACKET(kif, h, m, dir,
 					    reason, ri->r, a, ruleset, &pd);
 		}
 	}
