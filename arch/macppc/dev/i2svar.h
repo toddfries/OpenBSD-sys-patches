@@ -72,6 +72,16 @@ struct i2s_softc {
 	u_int sc_treble;
 	u_int sc_mute;
 
+	u_int sc_spkr;			/* amp mute gpio offset */
+	u_int sc_hp;			/* headphone mute gpio offset */
+	u_int sc_hp_detect;		/* headphone detect gpio */
+	u_int sc_hp_active;
+	u_int sc_line;			/* line out mute gpio offset */
+	u_int sc_line_detect;		/* line detect gpio */
+	u_int sc_line_active;
+	u_int sc_hw_reset;		/* hw reset gpio */
+
+
 	bus_dma_tag_t sc_dmat;
 	dbdma_regmap_t *sc_odma;
 	dbdma_regmap_t *sc_idma;
