@@ -890,7 +890,7 @@ pmap_prefer_retry:
 		    align, pmap_align, pmap_off, bias) == 0) {
 			if (bias > 0)
 				sel_addr = sel_max;
-			else if (bias > 0)
+			else if (bias < 0)
 				sel_addr = sel_min;
 			else if (sel_min == sel_max)
 				sel_addr = sel_min;
@@ -906,8 +906,6 @@ pmap_prefer_retry:
 				else
 					sel_addr += align;
 				sel_addr = MIN(sel_addr, FSPACE_MAXOFF);
-
-				sel_addr = arc4random_uniform(sel_addr);
 
 				/*
 				 * Shift down, so arc4random can deal with
