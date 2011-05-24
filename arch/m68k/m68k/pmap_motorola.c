@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.60 2011/04/28 20:53:32 ariane Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.61 2011/05/24 15:27:36 ariane Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
