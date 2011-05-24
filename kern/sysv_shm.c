@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.51 2010/07/03 03:04:55 tedu Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.52 2011/05/24 15:27:36 ariane Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.40 2009/11/24 10:35:56 otto Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.41 2011/05/24 15:27:36 ariane Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
