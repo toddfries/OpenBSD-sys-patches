@@ -613,9 +613,9 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 #ifdef PMAP_PREFER
 	vaddr_t pmap_min, pmap_max;
 #endif /* PMAP_PREFER */
-#ifdef DEBUG
+#ifdef DIAGNOSTIC
 	int bad;
-#endif /* DEBUG */
+#endif /* DIAGNOSTIC */
 
 	sel_min = FREE_START(sel);
 	sel_max = FREE_END(sel) - sz - (guardpg ? PAGE_SIZE : 0);
@@ -660,21 +660,24 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 		 */
 		pmap_max = sel_max & ~(pmap_align - 1);
 		pmap_min = sel_min;
+		if (pmap_max < sel_min)
+			return ENOMEM;
+
 		/* Adjust pmap_min for BIASGAP for top-addr bias. */
-		if (bias > 0 && pmap_max - FSPACE_BIASGAP > pmap_min) {
-			pmap_min = MAX(pmap_min,
-			    pmap_max - FSPACE_BIASGAP);
-		}
+		if (bias > 0 && pmap_max - pmap_min > FSPACE_BIASGAP)
+			pmap_min = pmap_max - FSPACE_BIASGAP;
 		/* Align pmap_min. */
 		pmap_min &= ~(pmap_align - 1);
 		if (pmap_min < sel_min)
 			pmap_min += pmap_align;
+		if (pmap_min > pmap_max)
+			return ENOMEM;
+
 		/* Adjust pmap_max for BIASGAP for bottom-addr bias. */
 		if (bias < 0 && pmap_max - pmap_min > FSPACE_BIASGAP) {
 			pmap_max = (pmap_min + FSPACE_BIASGAP) &
 			    ~(pmap_align - 1);
 		}
-
 		if (pmap_min > pmap_max)
 			return ENOMEM;
 
@@ -738,7 +741,7 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 	if (sel_min > sel_max)
 		return ENOMEM;
 
-#ifdef DEBUG
+#ifdef DIAGNOSTIC
 	bad = 0;
 	/* Lower boundary check. */
 	if (sel_min < FREE_START(sel)) {
@@ -787,7 +790,7 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 		    sz, (guardpg ? 'T' : 'F'), align, pmap_align, pmap_off,
 		    bias, FREE_START(sel), FREE_END(sel));
 	}
-#endif /* DEBUG */
+#endif /* DIAGNOSTIC */
 
 	*min = sel_min;
 	*max = sel_max;
