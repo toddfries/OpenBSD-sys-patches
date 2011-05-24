@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.135 2011/04/26 23:50:21 ariane Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.136 2011/05/24 15:27:36 ariane Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /*
@@ -142,9 +142,12 @@ void			 uvm_map_vmspace_update(struct vm_map*,
 			    struct uvm_map_deadq*, int);
 void			 uvm_map_kmem_grow(struct vm_map*,
 			    struct uvm_map_deadq*, vsize_t, int);
+void			 uvm_map_freelist_update_clear(struct vm_map*,
+			    struct uvm_map_deadq*);
+void			 uvm_map_freelist_update_refill(struct vm_map *, int);
 void			 uvm_map_freelist_update(struct vm_map*,
 			    struct uvm_map_deadq*, vaddr_t, vaddr_t,
-			    vaddr_t, vaddr_t, vaddr_t, vaddr_t, int);
+			    vaddr_t, vaddr_t, int);
 struct vm_map_entry	*uvm_map_fix_space(struct vm_map*, struct vm_map_entry*,
 			    vaddr_t, vaddr_t, int);
 int			 uvm_map_sel_limits(vaddr_t*, vaddr_t*, vsize_t, int,
@@ -157,8 +160,6 @@ int			 uvm_map_sel_limits(vaddr_t*, vaddr_t*, vsize_t, int,
 
 static __inline void	 uvm_mapent_copy(struct vm_map_entry*,
 			    struct vm_map_entry*);
-static __inline struct uvm_map_free
-			*uvm_free(struct vm_map*, vaddr_t);
 static int		 uvm_mapentry_addrcmp(struct vm_map_entry*,
 			    struct vm_map_entry*);
 static int		 uvm_mapentry_freecmp(struct vm_map_entry*,
@@ -175,6 +176,7 @@ void			 uvm_map_splitentry(struct vm_map*,
 			    struct vm_map_entry*, struct vm_map_entry*,
 			    vaddr_t);
 vsize_t			 uvm_map_boundary(struct vm_map*, vaddr_t, vaddr_t);
+struct uvm_map_free	*uvm_free(struct vm_map*, vaddr_t);
 int			 uvm_mapent_bias(struct vm_map*, struct vm_map_entry*);
 
 /* Find freelist for containing addr. */
@@ -310,7 +312,6 @@ struct pool uvm_vmspace_pool;
 struct pool uvm_map_entry_pool;
 struct pool uvm_map_entry_kmem_pool;
 
-#ifdef PMAP_GROWKERNEL
 /*
  * This global represents the end of the kernel virtual address
  * space. If we want to exceed this, we must grow the kernel
@@ -319,7 +320,6 @@ struct pool uvm_map_entry_kmem_pool;
  * Note, this variable is locked by kernel_map's lock.
  */
 vaddr_t uvm_maxkaddr;
-#endif
 
 /*
  * Locking predicate.
@@ -329,24 +329,6 @@ vaddr_t uvm_maxkaddr;
 		if (((_map)->flags & VM_MAP_INTRSAFE) == 0)		\
 			rw_assert_wrlock(&(_map)->lock);		\
 	} while (0)
-
-/*
- * Choose free list based on address at start of free space.
- */
-static __inline struct uvm_map_free*
-uvm_free(struct vm_map *map, vaddr_t addr)
-{
-	/* addr falls within dsiz area. */
-	if (addr >= map->a_start && addr < map->a_end)
-		return &map->free;
-	/* addr falls within brk() area. */
-	if (addr >= map->b_start && addr < map->b_end)
-		return &map->bfree;
-	/* addr falls within stack area. */
-	if (addr >= map->s_start && addr < map->s_end)
-		return &map->bfree;
-	return NULL;
-}
 
 /*
  * Tree describing entries by address.
@@ -631,9 +613,9 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 #ifdef PMAP_PREFER
 	vaddr_t pmap_min, pmap_max;
 #endif /* PMAP_PREFER */
-#ifdef DEBUG
+#ifdef DIAGNOSTIC
 	int bad;
-#endif /* DEBUG */
+#endif /* DIAGNOSTIC */
 
 	sel_min = FREE_START(sel);
 	sel_max = FREE_END(sel) - sz - (guardpg ? PAGE_SIZE : 0);
@@ -678,21 +660,24 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 		 */
 		pmap_max = sel_max & ~(pmap_align - 1);
 		pmap_min = sel_min;
+		if (pmap_max < sel_min)
+			return ENOMEM;
+
 		/* Adjust pmap_min for BIASGAP for top-addr bias. */
-		if (bias > 0 && pmap_max - FSPACE_BIASGAP > pmap_min) {
-			pmap_min = MAX(pmap_min,
-			    pmap_max - FSPACE_BIASGAP);
-		}
+		if (bias > 0 && pmap_max - pmap_min > FSPACE_BIASGAP)
+			pmap_min = pmap_max - FSPACE_BIASGAP;
 		/* Align pmap_min. */
 		pmap_min &= ~(pmap_align - 1);
 		if (pmap_min < sel_min)
 			pmap_min += pmap_align;
+		if (pmap_min > pmap_max)
+			return ENOMEM;
+
 		/* Adjust pmap_max for BIASGAP for bottom-addr bias. */
 		if (bias < 0 && pmap_max - pmap_min > FSPACE_BIASGAP) {
 			pmap_max = (pmap_min + FSPACE_BIASGAP) &
 			    ~(pmap_align - 1);
 		}
-
 		if (pmap_min > pmap_max)
 			return ENOMEM;
 
@@ -756,7 +741,7 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 	if (sel_min > sel_max)
 		return ENOMEM;
 
-#ifdef DEBUG
+#ifdef DIAGNOSTIC
 	bad = 0;
 	/* Lower boundary check. */
 	if (sel_min < FREE_START(sel)) {
@@ -805,7 +790,7 @@ uvm_map_sel_limits(vaddr_t *min, vaddr_t *max, vsize_t sz, int guardpg,
 		    sz, (guardpg ? 'T' : 'F'), align, pmap_align, pmap_off,
 		    bias, FREE_START(sel), FREE_END(sel));
 	}
-#endif /* DEBUG */
+#endif /* DIAGNOSTIC */
 
 	*min = sel_min;
 	*max = sel_max;
@@ -908,7 +893,7 @@ pmap_prefer_retry:
 		    align, pmap_align, pmap_off, bias) == 0) {
 			if (bias > 0)
 				sel_addr = sel_max;
-			else if (bias > 0)
+			else if (bias < 0)
 				sel_addr = sel_min;
 			else if (sel_min == sel_max)
 				sel_addr = sel_min;
@@ -924,8 +909,6 @@ pmap_prefer_retry:
 				else
 					sel_addr += align;
 				sel_addr = MIN(sel_addr, FSPACE_MAXOFF);
-
-				sel_addr = arc4random_uniform(sel_addr);
 
 				/*
 				 * Shift down, so arc4random can deal with
@@ -1146,6 +1129,25 @@ uvm_map(struct vm_map *map, vaddr_t *addr, vsize_t sz,
 			error = ENOMEM;
 			goto unlock;
 		}
+
+		/*
+		 * Grow pmap to include allocated address.
+		 * XXX not possible in kernel?
+		 */
+		if ((map->flags & VM_MAP_ISVMSPACE) == 0 &&
+		    uvm_maxkaddr < (*addr + sz)) {
+			uvm_map_kmem_grow(map, &dead,
+			    *addr + sz - uvm_maxkaddr, flags);
+
+			/*
+			 * Reload first, last, since uvm_map_kmem_grow likely
+			 * moved them around.
+			 */
+			first = last = NULL;
+			if (!uvm_map_isavail(&map->addr, &first, &last,
+			    *addr, sz))
+				panic("uvm_map: opened box, cat died");
+		}
 	} else if (*addr != 0 && (*addr & PAGE_MASK) == 0 &&
 	    (map->flags & VM_MAP_ISVMSPACE) == VM_MAP_ISVMSPACE &&
 	    (align == 0 || (*addr & (align - 1)) == 0) &&
@@ -1153,7 +1155,7 @@ uvm_map(struct vm_map *map, vaddr_t *addr, vsize_t sz,
 		/*
 		 * Address used as hint.
 		 *
-		 * Note: we force the alignment restriction,
+		 * Note: we enforce the alignment restriction,
 		 * but ignore the pmap_prefer.
 		 */
 	} else {
@@ -1180,25 +1182,24 @@ uvm_map(struct vm_map *map, vaddr_t *addr, vsize_t sz,
 				free = &map->bfree;
 			else
 				uvm_map_kmem_grow(map, &dead, sz, flags);
+
 			first = uvm_map_findspace_tree(free, sz, uoffset, align,
 			    map->flags & VM_MAP_GUARDPAGES, addr, map);
-		}
-
-		if (first == NULL) {
-			error = ENOMEM;
-			DPRINTF(("uvm_map_p:   no space for %ld bytes\n"
-			    "  auto bounds 0x%lx-0x%lx, %d free entries\n",
-			    sz,
-			    map->a_start, map->a_end, uvm_mapfree_size(free)));
-			goto unlock;
+			if (first == NULL) {
+				error = ENOMEM;
+				goto unlock;
+			}
 		}
 
 		/*
 		 * Fill in last.
 		 */
 		if (!uvm_map_isavail(&map->addr, &first, &last, *addr, sz))
-			panic("uvm_map_p: findspace and isavail disagree");
+			panic("uvm_map: findspace and isavail disagree");
 	}
+
+	KASSERT((map->flags & VM_MAP_ISVMSPACE) == VM_MAP_ISVMSPACE ||
+	    uvm_maxkaddr >= *addr + sz);
 
 	/*
 	 * If we only want a query, return now.
@@ -1207,14 +1208,6 @@ uvm_map(struct vm_map *map, vaddr_t *addr, vsize_t sz,
 		error = 0;
 		goto unlock;
 	}
-
-	/*
-	 * Grow pmap to include allocated address.
-	 */
-#ifdef PMAP_GROWKERNEL
-	if (map == kernel_map && uvm_maxkaddr < (*addr + sz))
-		uvm_maxkaddr = pmap_growkernel(*addr + sz);
-#endif /* PMAP_GROWKERNEL */
 
 	if (uobj == NULL)
 		uoffset = 0;
@@ -1282,7 +1275,7 @@ unlock:
 	vm_map_unlock(map);
 
 	if (error == 0) {
-		DPRINTF(("uvm_map_p:   0x%lx-0x%lx (query=%c)  map=%p\n",
+		DPRINTF(("uvm_map:   0x%lx-0x%lx (query=%c)  map=%p\n",
 		    *addr, *addr + sz,
 		    (flags & UVM_FLAG_QUERY ? 'T' : 'F'), map));
 	}
@@ -2337,22 +2330,14 @@ uvm_map_setup(struct vm_map *map, vaddr_t min, vaddr_t max, int flags)
 
 	map->size = 0;
 	map->ref_count = 1;
-	map->min_offset = map->a_start = min;
-	map->max_offset = map->a_end = max;
+	map->min_offset = min;
+	map->max_offset = max;
 	map->b_start = map->b_end = 0; /* Empty brk() area by default. */
 	map->s_start = map->s_end = 0; /* Empty stack area by default. */
 	map->flags = flags;
 	map->timestamp = 0;
 	rw_init(&map->lock, "vmmaplk");
 	simple_lock_init(&map->ref_lock);
-
-	/*
-	 * For kernel maps, we start with a small auto-alloc space and
-	 * grow it once it gets too cramped in there.
-	 */
-	if (__predict_false(!(map->flags & VM_MAP_ISVMSPACE) &&
-	    map->max_offset - map->min_offset > VM_MAP_KSIZE_INIT))
-		map->a_end = map->min_offset + VM_MAP_KSIZE_INIT;
 
 	/*
 	 * Fill map entries.
@@ -2730,8 +2715,6 @@ uvm_map_printit(struct vm_map *map, boolean_t full,
 	int in_free;
 
 	(*pr)("MAP %p: [0x%lx->0x%lx]\n", map, map->min_offset,map->max_offset);
-	(*pr)("\tauto allocate range: 0x%lx-0x%lx %ld segments\n",
-	    map->a_start, map->a_end, uvm_mapfree_size(&map->free));
 	(*pr)("\tbrk() allocate range: 0x%lx-0x%lx %ld segments\n",
 	    map->b_start, map->b_end, uvm_mapfree_size(&map->bfree));
 	(*pr)("\tstack allocate range: 0x%lx-0x%lx %ld segments\n",
@@ -3940,11 +3923,15 @@ uvm_map_extract(struct vm_map *srcmap, vaddr_t start, vsize_t len,
 	end = start + len;
 
 	/*
-	 * stop 0: sanity check: start must be on a page boundary, length
-	 * must be page sized.
+	 * Sanity check on the parameters.
+	 * Also, since the mapping may not contain gaps, error out if the
+	 * mapped area is not in source map.
 	 */
 
-	KASSERT(start >= srcmap->min_offset && end <= srcmap->max_offset);
+	if ((start & PAGE_MASK) != 0 || (end & PAGE_MASK) != 0 || end < start)
+		return EINVAL;
+	if (start < srcmap->min_offset || end > srcmap->max_offset)
+		return EINVAL;
 
 	/*
 	 * Initialize dead entries.
@@ -4354,17 +4341,46 @@ uvm_map_boundfix(vaddr_t min, vaddr_t max, vaddr_t bound)
 }
 
 /*
+ * Choose free list based on address at start of free space.
+ */
+struct uvm_map_free*
+uvm_free(struct vm_map *map, vaddr_t addr)
+{
+	/* Special case the first page, to prevent mmap from returning 0. */
+	if (addr < PAGE_SIZE)
+		return NULL;
+
+	if ((map->flags & VM_MAP_ISVMSPACE) == 0) {
+		if (addr >= uvm_maxkaddr)
+			return NULL;
+	} else {
+		/* addr falls within brk() area. */
+		if (addr >= map->b_start && addr < map->b_end)
+			return &map->bfree;
+		/* addr falls within stack area. */
+		if (addr >= map->s_start && addr < map->s_end)
+			return &map->bfree;
+	}
+	return &map->free;
+}
+
+/*
  * Returns the first free-memory boundary that is crossed by [min-max].
  */
 vsize_t
 uvm_map_boundary(struct vm_map *map, vaddr_t min, vaddr_t max)
 {
-	max = uvm_map_boundfix(min, max, map->a_start);
-	max = uvm_map_boundfix(min, max, map->a_end);
-	max = uvm_map_boundfix(min, max, map->b_start);
-	max = uvm_map_boundfix(min, max, map->b_end);
-	max = uvm_map_boundfix(min, max, map->s_start);
-	max = uvm_map_boundfix(min, max, map->s_end);
+	/* Treat the first page special, mmap returning 0 breaks too much. */
+	max = uvm_map_boundfix(min, max, PAGE_SIZE);
+
+	if ((map->flags & VM_MAP_ISVMSPACE) == 0) {
+		max = uvm_map_boundfix(min, max, uvm_maxkaddr);
+	} else {
+		max = uvm_map_boundfix(min, max, map->b_start);
+		max = uvm_map_boundfix(min, max, map->b_end);
+		max = uvm_map_boundfix(min, max, map->s_start);
+		max = uvm_map_boundfix(min, max, map->s_end);
+	}
 	return max;
 }
 
@@ -4376,7 +4392,7 @@ uvm_map_vmspace_update(struct vm_map *map,
     struct uvm_map_deadq *dead, int flags)
 {
 	struct vmspace *vm;
-	vaddr_t a_start, a_end, b_start, b_end, s_start, s_end;
+	vaddr_t b_start, b_end, s_start, s_end;
 
 	KASSERT(map->flags & VM_MAP_ISVMSPACE);
 	KASSERT(offsetof(struct vmspace, vm_map) == 0);
@@ -4387,26 +4403,22 @@ uvm_map_vmspace_update(struct vm_map *map,
 	vm = (struct vmspace *)map;
 	b_start = (vaddr_t)vm->vm_daddr;
 	b_end   = b_start + BRKSIZ;
-	a_start = b_end;
-	a_end   = a_start + MAXDSIZ;
 	s_start = MIN((vaddr_t)vm->vm_maxsaddr, (vaddr_t)vm->vm_minsaddr);
 	s_end   = MAX((vaddr_t)vm->vm_maxsaddr, (vaddr_t)vm->vm_minsaddr);
 #ifdef DIAGNOSTIC
-	if ((a_start & PAGE_MASK) != 0 || (a_end & PAGE_MASK) != 0 ||
-	    (b_start & PAGE_MASK) != 0 || (b_end & PAGE_MASK) != 0 ||
+	if ((b_start & PAGE_MASK) != 0 || (b_end & PAGE_MASK) != 0 ||
 	    (s_start & PAGE_MASK) != 0 || (s_end & PAGE_MASK) != 0) {
 		panic("uvm_map_vmspace_update: vmspace %p invalid bounds: "
-		    "a=0x%lx-0x%lx b=0x%lx-0x%lx s=0x%lx-0x%lx",
-		    vm, a_start, a_end, b_start, b_end, s_start, s_end);
+		    "b=0x%lx-0x%lx s=0x%lx-0x%lx",
+		    vm, b_start, b_end, s_start, s_end);
 	}
 #endif
 
-	if (__predict_true(map->a_start == a_start && map->a_end == a_end &&
-	    map->b_start == b_start && map->b_end == b_end &&
+	if (__predict_true(map->b_start == b_start && map->b_end == b_end &&
 	    map->s_start == s_start && map->s_end == s_end))
 		return;
 
-	uvm_map_freelist_update(map, dead, a_start, a_end, b_start, b_end,
+	uvm_map_freelist_update(map, dead, b_start, b_end,
 	    s_start, s_end, flags);
 }
 
@@ -4428,6 +4440,8 @@ uvm_map_kmem_grow(struct vm_map *map, struct uvm_map_deadq *dead,
 
 	/* Kernel memory only. */
 	KASSERT((map->flags & VM_MAP_ISVMSPACE) == 0);
+	/* Destroy free list. */
+	uvm_map_freelist_update_clear(map, dead);
 
 	/*
 	 * Grow by ALLOCMUL * alloc_sz, but at least VM_MAP_KSIZE_DELTA.
@@ -4446,10 +4460,10 @@ uvm_map_kmem_grow(struct vm_map *map, struct uvm_map_deadq *dead,
 	/*
 	 * Walk forward until a gap large enough for alloc_sz shows up.
 	 *
-	 * We assume the kernel map has no boundaries other than
-	 * a_start, a_end.
+	 * We assume the kernel map has no boundaries.
+	 * uvm_maxkaddr may be zero.
 	 */
-	end = map->a_end;
+	end = MAX(uvm_maxkaddr, map->min_offset);
 	entry = uvm_map_entrybyaddr(&map->addr, end);
 	while (entry && entry->fspace < alloc_sz)
 		entry = RB_NEXT(uvm_map_addr, &map->addr, entry);
@@ -4459,31 +4473,25 @@ uvm_map_kmem_grow(struct vm_map *map, struct uvm_map_deadq *dead,
 	} else
 		end = map->max_offset;
 
-	uvm_map_freelist_update(map, dead, map->a_start, end, 0, 0, 0, 0,
-	    flags);
-
-	KASSERT(map->a_end == map->max_offset ||
-	    (!RB_EMPTY(&map->free.tree) &&
-	    RB_MAX(uvm_map_free_int, &map->free.tree)->fspace >= alloc_sz));
+	/* Reserve pmap entries. */
+#ifdef PMAP_GROWKERNEL
+	uvm_maxkaddr = pmap_growkernel(end);
+#else
+	uvm_maxkaddr = end;
+#endif
+	/* Rebuild free list. */
+	uvm_map_freelist_update_refill(map, flags);
 }
 
 /*
- * Change {a,b}_{start,end} allocation ranges and associated free lists.
+ * Freelist update subfunction: unlink all entries from freelists.
  */
 void
-uvm_map_freelist_update(struct vm_map *map, struct uvm_map_deadq *dead,
-    vaddr_t a_start, vaddr_t a_end, vaddr_t b_start, vaddr_t b_end,
-    vaddr_t s_start, vaddr_t s_end, int flags)
+uvm_map_freelist_update_clear(struct vm_map *map, struct uvm_map_deadq *dead)
 {
 	struct uvm_map_free *free;
 	struct vm_map_entry *entry, *prev, *next;
-	vaddr_t min, max;
 
-	KDASSERT(a_end >= a_start && b_end >= b_start);
-
-	/*
-	 * Clear all free lists.
-	 */
 	prev = NULL;
 	for (entry = RB_MIN(uvm_map_addr, &map->addr); entry != NULL;
 	    entry = next) {
@@ -4500,20 +4508,17 @@ uvm_map_freelist_update(struct vm_map *map, struct uvm_map_deadq *dead,
 		} else
 			prev = entry;
 	}
+}
 
-	/*
-	 * Apply new bounds.
-	 */
-	map->a_start = a_start;
-	map->a_end   = a_end;
-	map->b_start = b_start;
-	map->b_end   = b_end;
-	map->s_start = s_start;
-	map->s_end   = s_end;
+/*
+ * Freelist update subfunction: refill the freelists with entries.
+ */
+void
+uvm_map_freelist_update_refill(struct vm_map *map, int flags)
+{
+	struct vm_map_entry *entry;
+	vaddr_t min, max;
 
-	/*
-	 * Refill free lists.
-	 */
 	RB_FOREACH(entry, uvm_map_addr, &map->addr) {
 		min = FREE_START(entry);
 		max = FREE_END(entry);
@@ -4523,6 +4528,28 @@ uvm_map_freelist_update(struct vm_map *map, struct uvm_map_deadq *dead,
 	}
 
 	uvm_tree_sanity(map, __FILE__, __LINE__);
+}
+
+/*
+ * Change {a,b}_{start,end} allocation ranges and associated free lists.
+ */
+void
+uvm_map_freelist_update(struct vm_map *map, struct uvm_map_deadq *dead,
+    vaddr_t b_start, vaddr_t b_end, vaddr_t s_start, vaddr_t s_end, int flags)
+{
+	KDASSERT(b_end >= b_start && s_end >= s_start);
+
+	/* Clear all free lists. */
+	uvm_map_freelist_update_clear(map, dead);
+
+	/* Apply new bounds. */
+	map->b_start = b_start;
+	map->b_end   = b_end;
+	map->s_start = s_start;
+	map->s_end   = s_end;
+
+	/* Refill free lists. */
+	uvm_map_freelist_update_refill(map, flags);
 }
 
 /*
@@ -4652,20 +4679,25 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 	error = ENOMEM; /* Default error from here. */
 
 	/*
-	 * Handle outside address space.
+	 * At this point, the memory at <addr, sz> is not available.
+	 * The reasons are:
+	 * [1] it's outside the map,
+	 * [2] it starts in used memory (and therefore needs to move
+	 *     toward the first free page in entry),
+	 * [3] it starts in free memory but bumps into used memory.
+	 *
+	 * Note that for case [2], the forward moving is handled by the
+	 * for loop below.
 	 */
+
 	if (entry == NULL) {
-		if (addr >= map->max_offset) {
-			error = ENOMEM;
+		/* [1] Outside the map. */
+		if (addr >= map->max_offset)
 			goto out;
-		} else
+		else
 			entry = RB_MIN(uvm_map_addr, &map->addr);
-	}
-	if (entry && entry->end <= addr) {
-		/*
-		 * This entry was tested in the initial statement.
-		 * Skip forward.
-		 */
+	} else if (FREE_START(entry) <= addr) {
+		/* [3] Bumped into used memory. */
 		entry = RB_NEXT(uvm_map_addr, &map->addr, entry);
 	}
 
@@ -4678,6 +4710,8 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 			continue;
 		addr = FREE_START(entry);
 
+restart:	/* Restart address checks on address change. */
+
 #ifdef PMAP_PREFER
 		if (offset != UVM_UNKNOWN_OFFSET) {
 			tmp = (addr & ~(PMAP_PREFER_ALIGN() - 1)) |
@@ -4686,34 +4720,31 @@ uvm_map_mquery(struct vm_map *map, vaddr_t *addr_p, vsize_t sz, voff_t offset,
 				tmp += PMAP_PREFER_ALIGN();
 			if (addr >= FREE_END(entry))
 				continue;
+			if (addr != tmp) {
+				addr = tmp;
+				goto restart;
+			}
 		}
 #endif
 
 		/*
-		 * Skip automatic allocation addresses.
-		 */
-		if (addr + sz > map->a_start && addr < map->a_end) {
-			if (FREE_END(entry) > map->a_end)
-				addr = map->a_end;
-			else
-				continue;
-		}
-		/*
 		 * Skip brk() allocation addresses.
 		 */
 		if (addr + sz > map->b_start && addr < map->b_end) {
-			if (FREE_END(entry) > map->b_end)
+			if (FREE_END(entry) > map->b_end) {
 				addr = map->b_end;
-			else
+				goto restart;
+			} else
 				continue;
 		}
 		/*
 		 * Skip stack allocation addresses.
 		 */
 		if (addr + sz > map->s_start && addr < map->s_end) {
-			if (FREE_END(entry) > map->s_end)
+			if (FREE_END(entry) > map->s_end) {
 				addr = map->s_end;
-			else
+				goto restart;
+			} else
 				continue;
 		}
 
