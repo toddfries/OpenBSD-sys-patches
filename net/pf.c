@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.745 2011/05/24 14:01:51 claudio Exp $ */
+/*	$OpenBSD: pf.c,v 1.746 2011/05/25 06:48:12 claudio Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -6724,8 +6724,8 @@ done:
 			else
 				qid = s->qid;
 		} else {
-			pf_scrub(m, a->scrub_flags, pd.af, a->min_ttl,
-			    a->set_tos);
+			pf_scrub(m, r->scrub_flags, pd.af, r->min_ttl,
+			    r->set_tos);
 			if (pqid || (pd.tos & IPTOS_LOWDELAY))
 				qid = r->pqid;
 			else
@@ -7021,8 +7021,8 @@ done:
 			else
 				qid = s->qid;
 		} else {
-			pf_scrub(m, a->scrub_flags, pd.af, a->min_ttl,
-			    a->set_tos);
+			pf_scrub(m, r->scrub_flags, pd.af, r->min_ttl,
+			    r->set_tos);
 			if (pqid || (pd.tos & IPTOS_LOWDELAY))
 				qid = r->pqid;
 			else
