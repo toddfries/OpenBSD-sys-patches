@@ -359,7 +359,15 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+	/*
+	 * i945G/GM report MSI capability despite not actually supporting it.
+	 * so explicitly disable it.
+	 */
+	if (IS_I945G(dev_priv) || IS_I945GM(dev_priv))
+		pa->pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
+
+	if (pci_intr_map_msi(pa, &dev_priv->ih) != 0 &&
+	    pci_intr_map(pa, &dev_priv->ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;
 	}
@@ -489,9 +497,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	dev = (struct drm_device *)dev_priv->drmdev;
 
 	/* XXX would be a lot nicer to get agp info before now */
-	uvm_page_physload_flags(atop(dev->agp->base), atop(dev->agp->base +
+	uvm_page_physload(atop(dev->agp->base), atop(dev->agp->base +
 	    dev->agp->info.ai_aperture_size), atop(dev->agp->base),
-	    atop(dev->agp->base + dev->agp->info.ai_aperture_size), 0,
+	    atop(dev->agp->base + dev->agp->info.ai_aperture_size),
 	    PHYSLOAD_DEVICE);
 	/* array of vm pages that physload introduced. */
 	dev_priv->pgs = PHYS_TO_VM_PAGE(dev->agp->base);
@@ -5901,6 +5909,12 @@ inteldrm_965_reset(struct inteldrm_softc *dev_priv, u_int8_t flags)
 {
 	pcireg_t	reg;
 	int		i = 0;
+
+	/*
+	 * There seems to be soemthing wrong with !full reset modes, so force
+	 * the whole shebang for now.
+	 */
+	flags = GDRST_FULL;
 
 	if (flags == GDRST_FULL)
 		inteldrm_save_display(dev_priv);
