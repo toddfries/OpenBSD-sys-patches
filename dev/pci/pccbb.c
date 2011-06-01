@@ -421,7 +421,7 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pcmcia_flags = flags;   /* set PCMCIA facility */
 
 	/* Map and establish the interrupt. */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;
 	}
