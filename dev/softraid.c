@@ -3760,6 +3760,7 @@ sr_shutdown(void *arg)
 #ifdef SR_DEBUG
 	struct sr_softc		*sc = sd->sd_sc;
 #endif
+	extern int boothowto;
 	DNPRINTF(SR_D_DIS, "%s: sr_shutdown %s\n",
 	    DEVNAME(sc), sd->sd_meta->ssd_devname);
 
@@ -3768,9 +3769,11 @@ sr_shutdown(void *arg)
 	while (sd->sd_reb_active)
 		tsleep(sd, PWAIT, "sr_shutdown", 1);
 
-	sr_meta_save(sd, 0);
+	if ((boothowto & RB_NOSYNC) == 0) {
+		sr_meta_save(sd, 0);
 
-	sr_discipline_shutdown(sd);
+		sr_discipline_shutdown(sd);
+	}
 }
 
 int
