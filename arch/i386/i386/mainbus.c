@@ -239,6 +239,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_pba.pba_iot = I386_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = I386_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
+		mba.mba_pba.pba_flags = PCI_FLAGS_MSI_ENABLED;
 		mba.mba_pba.pba_ioex = pciio_ex;
 		mba.mba_pba.pba_memex = pcimem_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
