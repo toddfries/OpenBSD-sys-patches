@@ -159,7 +159,7 @@ rl_pci_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Allocate our interrupt.
 	 */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, psc->psc_mapsize);
 		return;
