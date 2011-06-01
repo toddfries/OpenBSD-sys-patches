@@ -123,7 +123,7 @@ ohci_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	s = splusb();
 	/* Map and establish the interrupt. */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
 		splx(s);
