@@ -1304,7 +1304,7 @@ auixp_attach(struct device *parent, struct device *self, void *aux)
 	auixp_program_dma_chain(sc, sc->sc_input_dma);
 #endif
 
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": can't map interrupt\n");
 		return;
 	}
