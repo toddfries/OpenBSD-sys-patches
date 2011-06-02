@@ -29,6 +29,7 @@
 #include <sys/pool.h>
 #include <sys/kernel.h>
 #include <sys/disk.h>
+#include <sys/reboot.h>
 #include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/fcntl.h>
