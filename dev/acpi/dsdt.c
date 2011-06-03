@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.185 2011/04/22 18:22:01 jordan Exp $ */
+/* $OpenBSD: dsdt.c,v 1.188 2011/06/03 03:56:15 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -244,7 +244,7 @@ struct aml_opcode aml_table[] = {
 	{ AMLOP_INDEX,		"Index",	"tir",	},
 	{ AMLOP_DEREFOF,	"DerefOf",	"t",	},
 	{ AMLOP_REFOF,		"RefOf",	"S",	},
-	{ AMLOP_CONDREFOF,	"CondRef",	"SS",	},
+	{ AMLOP_CONDREFOF,	"CondRef",	"Sr",	},
 
 	{ AMLOP_LOADTABLE,	"LoadTable",	"tttttt" },
 	{ AMLOP_STALL,		"Stall",	"i",	},
@@ -1889,6 +1889,9 @@ aml_pushscope(struct aml_scope *parent, struct aml_value *range,
 	scope->type = type;
 	scope->sc = acpi_softc;
 
+	if (parent)
+		scope->depth = parent->depth+1;
+
 	aml_lastscope = scope;
 
 	return scope;
@@ -2166,7 +2169,7 @@ struct aml_value *
 aml_mid(struct aml_value *src, int index, int length)
 {
 	if (index > src->length)
-		index = 0;
+		index = src->length;
 	if ((index + length) > src->length)
 		length = src->length - index;
 	return aml_allocvalue(src->type, length, src->v_buffer + index);
@@ -3537,10 +3540,11 @@ aml_parse(struct aml_scope *scope, int ret_type, const char *stype)
 		ival = 0;
 		if (opargs[0]->node != NULL) {
 			/* Create Object Reference */
-			opargs[2] = aml_allocvalue(AML_OBJTYPE_OBJREF, opcode,
+			rv = aml_allocvalue(AML_OBJTYPE_OBJREF, opcode,
 				opargs[0]);
 			aml_addref(opargs[0], "CondRef");
-			aml_store(scope, opargs[1], 0, opargs[2]);
+			aml_store(scope, opargs[1], 0, rv);
+			aml_delref(&rv, 0);
 
 			/* Mark that we found it */
 			ival = -1;
