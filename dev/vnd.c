@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.116 2011/05/31 17:35:35 matthew Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.123 2011/06/02 19:18:21 deraadt Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -92,18 +92,9 @@ struct vndbuf {
 	struct buf	*vb_obp;
 };
 
-/*
- * struct vndbuf allocator
- */
-struct pool     vndbufpl;
-
-#define	getvndbuf()	pool_get(&vndbufpl, PR_WAITOK)
-#define	putvndbuf(vbp)	pool_put(&vndbufpl, vbp);
-
 struct vnd_softc {
 	struct device	 sc_dev;
 	struct disk	 sc_dk;
-	char		 sc_dk_name[16];
 
 	char		 sc_file[VNDNLEN];	/* file we're covering */
 	int		 sc_flags;		/* flags */
@@ -181,13 +172,15 @@ vndattach(int num)
 	}
 	vnd_softc = (struct vnd_softc *)mem;
 	for (i = 0; i < num; i++) {
-		rw_init(&vnd_softc[i].sc_rwlock, "vndlock");
+		struct vnd_softc *sc = &vnd_softc[i];
+
+		rw_init(&sc->sc_rwlock, "vndlock");
+		sc->sc_dev.dv_unit = i;
+		snprintf(sc->sc_dev.dv_xname, sizeof(sc->sc_dev.dv_xname),
+		    "vnd%d", i);
+		device_ref(&sc->sc_dev);
 	}
 	numvnd = num;
-
-	pool_init(&vndbufpl, sizeof(struct vndbuf), 0, 0, 0, "vndbufpl", NULL);
-	pool_setlowat(&vndbufpl, 16);
-	pool_sethiwat(&vndbufpl, 1024);
 }
 
 int
@@ -242,7 +235,6 @@ vndopen(dev_t dev, int flags, int mode, struct proc *p)
 	sc->sc_dk.dk_openmask =
 	    sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 
-	error = 0;
 bad:
 	vndunlock(sc);
 	return (error);
@@ -490,7 +482,7 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	struct vnd_user *vnu;
 	struct vattr vattr;
 	struct nameidata nd;
-	int error, part, pmask, s;
+	int error, part, pmask;
 
 	DNPRINTF(VDB_FOLLOW, "vndioctl(%x, %lx, %p, %x, %p): unit %d\n",
 	    dev, cmd, addr, flag, p, unit);
@@ -516,24 +508,6 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    sizeof(vnd->sc_file), NULL))) {
 			vndunlock(vnd);
 			return (error);
-		}
-
-		/* Set device name. */
-		bzero(vnd->sc_dev.dv_xname, sizeof(vnd->sc_dev.dv_xname));
-		if (snprintf(vnd->sc_dev.dv_xname, sizeof(vnd->sc_dev.dv_xname),
-		    "vnd%d", unit) >= sizeof(vnd->sc_dev.dv_xname)) {
-			printf("VNDIOCSET: device name too long\n");
-			vndunlock(vnd);
-			return(ENXIO);
-		}
-
-		/* Set disk name depending on how we were created. */
-		bzero(vnd->sc_dk_name, sizeof(vnd->sc_dk_name));
-		if (snprintf(vnd->sc_dk_name, sizeof(vnd->sc_dk_name),
-		    "vnd%d", unit) >= sizeof(vnd->sc_dk_name)) {
-			printf("VNDIOCSET: disk name too long\n");
-			vndunlock(vnd);
-			return(ENXIO);
 		}
 
 		/* Set geometry for device. */
@@ -606,7 +580,7 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    vnd->sc_vp, (unsigned long long)vnd->sc_size);
 
 		/* Attach the disk. */
-		vnd->sc_dk.dk_name = vnd->sc_dk_name;
+		vnd->sc_dk.dk_name = vnd->sc_dev.dv_xname;
 		disk_attach(&vnd->sc_dev, &vnd->sc_dk);
 
 		vndunlock(vnd);
@@ -645,12 +619,7 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 		/* Detach the disk. */
 		disk_detach(&vnd->sc_dk);
-
-		/* This must be atomic. */
-		s = splhigh();
 		vndunlock(vnd);
-		bzero(vnd, sizeof(struct vnd_softc));
-		splx(s);
 		break;
 
 	case VNDIOCGET:
@@ -792,7 +761,7 @@ vndclear(struct vnd_softc *vnd)
 
 	DNPRINTF(VDB_FOLLOW, "vndclear(%p): vp %p\n", vnd, vp);
 
-	vnd->sc_flags &= ~VNF_INITED;
+	vnd->sc_flags = 0;
 	if (vp == NULL)
 		panic("vndioctl: null vp");
 	(void) vn_close(vp, VNDRW(vnd), vnd->sc_cred, p);
@@ -800,6 +769,7 @@ vndclear(struct vnd_softc *vnd)
 	vnd->sc_vp = NULL;
 	vnd->sc_cred = NULL;
 	vnd->sc_size = 0;
+	bzero(vnd->sc_file, sizeof(vnd->sc_file));
 }
 
 daddr64_t
