@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.93 2011/04/12 20:18:13 miod Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.95 2011/06/05 18:40:33 matthew Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -134,8 +134,6 @@ struct ccd_softc {
 
 /* sc_flags */
 #define CCDF_INITED	0x01	/* unit has been initialized */
-#define CCDF_WLABEL	0x02	/* label area is writable */
-#define CCDF_LABELLING	0x04	/* unit is currently being labelled */
 
 #ifdef CCDDEBUG
 #define CCD_DCALL(m,c)		if (ccddebug & (m)) c
@@ -649,7 +647,6 @@ ccdstrategy(struct buf *bp)
 	int unit = DISKUNIT(bp->b_dev);
 	struct ccd_softc *cs = &ccd_softc[unit];
 	int s;
-	int wlabel;
 	struct disklabel *lp;
 
 	CCD_DPRINTF(CCDB_FOLLOW, ("ccdstrategy(%p): unit %d\n", bp, unit));
@@ -671,8 +668,7 @@ ccdstrategy(struct buf *bp)
 	 * Do bounds checking and adjust transfer.  If there's an
 	 * error, the bounds check will flag that for us.
 	 */
-	wlabel = cs->sc_flags & (CCDF_WLABEL|CCDF_LABELLING);
-	if (bounds_check_with_label(bp, lp, wlabel) <= 0)
+	if (bounds_check_with_label(bp, lp) <= 0)
 		goto done;
 
 	bp->b_resid = bp->b_bcount;
@@ -1033,7 +1029,6 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case CCDIOCCLR:
 	case DIOCWDINFO:
 	case DIOCSDINFO:
-	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 	}
@@ -1229,8 +1224,6 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		if ((error = ccdlock(cs)) != 0)
 			return (error);
 
-		cs->sc_flags |= CCDF_LABELLING;
-
 		error = setdisklabel(cs->sc_dkdev.dk_label,
 		    (struct disklabel *)data, 0);
 		if (error == 0) {
@@ -1239,19 +1232,10 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 				    ccdstrategy, cs->sc_dkdev.dk_label);
 		}
 
-		cs->sc_flags &= ~CCDF_LABELLING;
-
 		ccdunlock(cs);
 
 		if (error)
 			return (error);
-		break;
-
-	case DIOCWLABEL:
-		if (*(int *)data != 0)
-			cs->sc_flags |= CCDF_WLABEL;
-		else
-			cs->sc_flags &= ~CCDF_WLABEL;
 		break;
 
 	default:

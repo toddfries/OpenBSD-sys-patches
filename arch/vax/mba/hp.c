@@ -1,4 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.24 2011/04/06 18:12:47 miod Exp $ */
+/*	$OpenBSD: hp.c,v 1.26 2011/06/05 18:40:33 matthew Exp $ */
 /*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -70,7 +70,6 @@ struct	hp_softc {
 	struct	device	sc_dev;
 	struct	disk sc_disk;
 	struct	mba_device sc_md;	/* Common struct used by mbaqueue. */
-	int	sc_wlabel;		/* Disklabel area is writable */
 	int	sc_physnr;		/* Physical disk number */
 };
 
@@ -185,7 +184,7 @@ hpstrategy(bp)
 	sc = hp_cd.cd_devs[unit];
 	lp = sc->sc_disk.dk_label;
 
-	if (bounds_check_with_label(bp, lp, sc->sc_wlabel) <= 0)
+	if (bounds_check_with_label(bp, lp) <= 0)
 		goto done;
 
 	bp->b_rawblkno =
@@ -343,17 +342,10 @@ hpioctl(dev, cmd, addr, flag, p)
 		error = setdisklabel(lp, (struct disklabel *)addr, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO) {
-				sc->sc_wlabel = 1;
 				error = writedisklabel(dev, hpstrategy, lp, 0);
-				sc->sc_wlabel = 0;
 			}
 		}
 		return error;
-	case	DIOCWLABEL:
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		sc->sc_wlabel = 1;
-		break;
 
 	default:
 		printf("hpioctl: command %x\n", (unsigned int)cmd);
