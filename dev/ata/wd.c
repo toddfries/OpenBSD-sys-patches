@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.101 2011/05/31 17:35:35 matthew Exp $ */
+/*	$OpenBSD: wd.c,v 1.103 2011/06/05 18:40:33 matthew Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -448,8 +448,7 @@ wdstrategy(struct buf *bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, wd->sc_dk.dk_label,
-	    (wd->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
+	if (bounds_check_with_label(bp, wd->sc_dk.dk_label) <= 0)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	bufq_queue(&wd->sc_bufq, bp);
@@ -870,7 +869,6 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 
 		if ((error = wdlock(wd)) != 0)
 			goto exit;
-		wd->sc_flags |= WDF_LABELLING;
 
 		error = setdisklabel(wd->sc_dk.dk_label,
 		    (struct disklabel *)addr, wd->sc_dk.dk_openmask);
@@ -882,20 +880,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 				    wdstrategy, wd->sc_dk.dk_label);
 		}
 
-		wd->sc_flags &= ~WDF_LABELLING;
 		wdunlock(wd);
-		goto exit;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-
-		if (*(int *)addr)
-			wd->sc_flags |= WDF_WLABEL;
-		else
-			wd->sc_flags &= ~WDF_WLABEL;
 		goto exit;
 
 #ifdef notyet
