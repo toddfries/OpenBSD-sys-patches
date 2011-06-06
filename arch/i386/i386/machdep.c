@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.497 2011/05/30 22:25:21 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.500 2011/06/05 19:41:07 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -184,17 +184,6 @@ int	cpu_apmhalt = 0;	/* sysctl'd to 1 for halt -p hack */
 #ifdef USER_LDT
 int	user_ldt_enable = 0;	/* sysctl'd to 1 to enable */
 #endif
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
@@ -415,13 +404,6 @@ cpu_startup()
 	printf("real mem  = %llu (%lluMB)\n",
 	    (unsigned long long)ptoa((psize_t)physmem),
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
-
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively

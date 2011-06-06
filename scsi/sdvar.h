@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.34 2010/09/12 02:05:54 krw Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.36 2011/06/06 01:59:49 matthew Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -54,10 +54,6 @@ struct sd_softc {
 	struct bufq		sc_bufq;
 
 	int			flags;
-#define	SDF_LOCKED	0x01
-#define	SDF_WANTED	0x02
-#define	SDF_WLABEL	0x04		/* label is writable */
-#define	SDF_LABELLING	0x08		/* writing label */
 #define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
 #define	SDF_DYING	0x40		/* dying, when deactivated */
