@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.63 2010/09/22 01:18:57 matthew Exp $	*/
+/*	$OpenBSD: hd.c,v 1.65 2011/06/05 18:40:33 matthew Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -692,9 +692,8 @@ hdstrategy(bp)
 	 * Do bounds checking, adjust transfer. if error, process;
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, lp,
-	    (rs->sc_flags & HDF_WLABEL) != 0) <= 0)
-			goto done;
+	if (bounds_check_with_label(bp, lp) <= 0)
+		goto done;
 
 	s = splbio();
  	dp = &rs->sc_tab;
@@ -1162,17 +1161,6 @@ hdioctl(dev, cmd, data, flag, p)
 			&sc->sc_dkdev.dk_label->d_partitions[DISKPART(dev)];
 		goto exit;
 
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		if (*(int *)data)
-			sc->sc_flags |= HDF_WLABEL;
-		else
-			sc->sc_flags &= ~HDF_WLABEL;
-		goto exit;
-
 	case DIOCWDINFO:
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0) {
@@ -1182,7 +1170,6 @@ hdioctl(dev, cmd, data, flag, p)
 
 		if ((error = hdlock(sc)) != 0)
 			goto exit;
-		sc->sc_flags |= HDF_WLABEL;
 
 		error = setdisklabel(sc->sc_dkdev.dk_label,
 		    (struct disklabel *)data, /* sc->sc_dkdev.dk_openmask */ 0);
@@ -1192,7 +1179,6 @@ hdioctl(dev, cmd, data, flag, p)
 				    hdstrategy, sc->sc_dkdev.dk_label);
 		}
 
-		sc->sc_flags &= ~HDF_WLABEL;
 		hdunlock(sc);
 		goto exit;
 
