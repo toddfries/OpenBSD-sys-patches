@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.87 2011/05/24 15:27:36 ariane Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.89 2011/06/06 17:10:23 ariane Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -244,7 +244,7 @@ malloc(unsigned long size, int type, int flags)
 		    (vsize_t)ptoa(npg), 0,
 		    ((flags & M_NOWAIT) ? UVM_KMF_NOWAIT : 0) |
 		    ((flags & M_CANFAIL) ? UVM_KMF_CANFAIL : 0),
-		    dma_constraint.ucr_low, dma_constraint.ucr_high,
+		    no_constraint.ucr_low, no_constraint.ucr_high,
 		    0, 0, 0);
 		if (va == NULL) {
 			/*
@@ -576,13 +576,8 @@ kmeminit(void)
 	kmeminit_nkmempages();
 	base = vm_map_min(kernel_map);
 	kmem_map = uvm_km_suballoc(kernel_map, &base, &limit,
-	    (vsize_t)(nkmempages * PAGE_SIZE),
-#ifdef KVA_GUARDPAGES
-	    VM_MAP_INTRSAFE | VM_MAP_GUARDPAGES,
-#else
-	    VM_MAP_INTRSAFE,
-#endif
-	    FALSE, &kmem_map_store);
+	    (vsize_t)(nkmempages * PAGE_SIZE), VM_MAP_INTRSAFE, FALSE,
+	    &kmem_map_store);
 	kmembase = (char *)base;
 	kmemlimit = (char *)limit;
 	kmemusage = (struct kmemusage *) uvm_km_zalloc(kernel_map,
