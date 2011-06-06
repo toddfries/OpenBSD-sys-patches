@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.199 2011/05/31 17:35:35 matthew Exp $	*/
+/*	$OpenBSD: cd.c,v 1.202 2011/06/06 01:59:49 matthew Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -100,10 +100,6 @@ struct cd_softc {
 	struct disk sc_dk;
 
 	int sc_flags;
-#define	CDF_LOCKED	0x01
-#define	CDF_WANTED	0x02
-#define	CDF_WLABEL	0x04		/* label is writable */
-#define	CDF_LABELLING	0x08		/* writing label */
 #define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	CDF_DYING	0x40		/* dying, when deactivated */
 #define CDF_WAITING	0x100
@@ -525,8 +521,7 @@ cdstrategy(struct buf *bp)
 	 * Do bounds checking, adjust transfer. if error, process.
 	 * If end of partition, just return.
 	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    (sc->sc_flags & (CDF_WLABEL|CDF_LABELLING)) != 0) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
 		goto done;
 
 	/* Place it in the queue of disk activities for this disk. */
@@ -812,7 +807,6 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	 */
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
 		switch (cmd) {
-		case DIOCWLABEL:
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
@@ -881,19 +875,12 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		if ((error = cdlock(sc)) != 0)
 			break;
 
-		sc->sc_flags |= CDF_LABELLING;
-
 		error = setdisklabel(sc->sc_dk.dk_label,
 		    (struct disklabel *)addr, sc->sc_dk.dk_openmask);
 		if (error == 0) {
 		}
 
-		sc->sc_flags &= ~CDF_LABELLING;
 		cdunlock(sc);
-		break;
-
-	case DIOCWLABEL:
-		error = EBADF;
 		break;
 
 	case CDIOCPLAYTRACKS: {
