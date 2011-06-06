@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.50 2010/09/22 06:40:25 krw Exp $	*/
+/*	$OpenBSD: xy.c,v 1.52 2011/06/05 18:40:33 matthew Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -810,15 +810,6 @@ xyioctl(dev, command, addr, flag, p)
 		    &xy->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
-	case DIOCWLABEL:	/* change write status of disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		if (*(int *) addr)
-			xy->flags |= XY_WLABEL;
-		else
-			xy->flags &= ~XY_WLABEL;
-		return 0;
-
 	case DIOCWDINFO:	/* write disk label */
 	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
@@ -1018,8 +1009,7 @@ xystrategy(bp)
 	 * partition. Adjust transfer if needed, and signal errors or early
 	 * completion. */
 
-	if (bounds_check_with_label(bp, xy->sc_dk.dk_label,
-	    (xy->flags & XY_WLABEL) != 0) <= 0)
+	if (bounds_check_with_label(bp, xy->sc_dk.dk_label) <= 0)
 		goto done;
 
 	/*
