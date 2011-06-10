@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2svar.h,v 1.7 2011/05/05 18:54:23 jasper Exp $	*/
+/*	$OpenBSD: i2svar.h,v 1.8 2011/06/07 16:29:51 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2001,2003 Tsubai Masanari.  All rights reserved.
