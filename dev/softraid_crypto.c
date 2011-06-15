@@ -282,8 +282,12 @@ sr_crypto_setup_cryptop(struct sr_workunit *wu, int encrypt)
 	 * Otherwise crypto will get upset with us. So put n descs on the crp
 	 * and keep the rest.
 	 */
-	for (crd = crwu->cr_descs, i = 0; i < n - 1; i++, crd = crd->crd_next)
-		KASSERT(crd != NULL);
+	crd = crwu->cr_descs;
+	i = 0;
+	while (++i < n) {
+		crd = crd->crd_next;
+		KASSERT(crd);
+	}
 	crwu->cr_crp->crp_desc = crwu->cr_descs;
 	crwu->cr_descs = crd->crd_next;
 	crd->crd_next = NULL;
