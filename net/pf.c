@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.747 2011/06/02 22:08:40 sthen Exp $ */
+/*	$OpenBSD: pf.c,v 1.748 2011/06/14 10:14:01 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -207,9 +207,9 @@ int			 pf_test_state_udp(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, int,
 			    struct pf_pdesc *);
 int			 pf_icmp_state_lookup(struct pf_state_key_cmp *,
-			    struct pf_pdesc *, struct pf_state **, struct mbuf *,
-			    int, struct pfi_kif *, u_int16_t, u_int16_t,
-			    int, int *, int, int);
+			    struct pf_pdesc *, struct pf_state **,
+			    struct mbuf *, int, struct pfi_kif *, u_int16_t,
+			    u_int16_t, int, int *, int, int);
 int			 pf_test_state_icmp(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, int,
 			    struct pf_pdesc *, u_short *);
@@ -3445,7 +3445,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 
 	if (r->action == PF_PASS && pd->af == AF_INET && ! r->allow_opts) {
 		struct ip	*h4 = mtod(m, struct ip *);
-			
+
 		if (h4->ip_hl > 5) {
 			REASON_SET(&reason, PFRES_IPOPTIONS);
 			pd->pflog |= PF_LOG_FORCE;
@@ -4526,10 +4526,10 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
 		    pd->rdomain != nk->rdomain)
 			pd->destchg = 1;
-		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
-		    nk->port[didx] != th->th_dport)
+		if (afto || PF_ANEQ(pd->dst, &nk->addr[pd->didx], pd->af) ||
+		    nk->port[pd->didx] != th->th_dport)
 			pf_change_ap(pd->dst, &th->th_dport, &th->th_sum,
-			    &nk->addr[didx], nk->port[didx], 0, pd->af, nk->af);
+			    &nk->addr[pd->didx], nk->port[pd->didx], 0, pd->af, nk->af);
 		m->m_pkthdr.rdomain = nk->rdomain;
 
 		if (afto) {
@@ -5331,7 +5331,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 				if (PF_ANEQ(pd2.dst,
 				    &nk->addr[pd2.didx], pd2.af))
-                                       pf_change_icmp(pd2.dst, NULL, saddr,
+					pf_change_icmp(pd2.dst, NULL, saddr,
 					    &nk->addr[pd2.didx], 0, NULL,
 					    pd2.ip_sum, icmpsum, 0, AF_INET);
 
@@ -5428,7 +5428,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 				if (PF_ANEQ(pd2.src,
 				    &nk->addr[pd2.sidx], pd2.af) ||
-			 	    ((virtual_type ==
+				    ((virtual_type ==
 				    htons(ICMP6_ECHO_REQUEST)) &&
 				    nk->port[pd2.sidx] != iih.icmp6_id))
 					pf_change_icmp(pd2.src,
@@ -5886,7 +5886,8 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		m0->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
 	} else {
 		if (s == NULL) {
-			if (pf_map_addr(AF_INET, r, (struct pf_addr *)&ip->ip_src,
+			if (pf_map_addr(AF_INET, r,
+			    (struct pf_addr *)&ip->ip_src,
 			    &naddr, NULL, &sn, &r->route, PF_SN_ROUTE)) {
 				DPFPRINTF(LOG_ERR,
 				    "pf_route: pf_map_addr() failed.");
@@ -6486,7 +6487,7 @@ void
 pf_counters_inc(int dir, int action, struct pf_pdesc *pd,
     struct pfi_kif *kif, struct pf_state *s,
     struct pf_rule *r, struct pf_rule *a)
-{ 
+{
 	int dirndx;
 	kif->pfik_bytes[pd->af == AF_INET6][dir == PF_OUT][action != PF_PASS]
 	    += pd->tot_len;
