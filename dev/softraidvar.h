@@ -383,11 +383,10 @@ struct sr_raid6 {
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
+	struct mutex		 scr_mutex;
+	TAILQ_HEAD(,sr_crypto_wu) scr_wus;
 	struct sr_meta_crypto	*scr_meta;
 	struct sr_chunk		*key_disk;
-
-	struct pool		sr_uiopl;
-	struct pool		sr_iovpl;
 
 	/* XXX only keep scr_sid over time */
 	u_int8_t		scr_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
