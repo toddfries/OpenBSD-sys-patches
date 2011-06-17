@@ -385,9 +385,6 @@ struct sr_workunit {
 	struct workq_task	swu_intr;
 	int			swu_cb_active;	/* in callback */
 
-	/* per discipline private data */
-	void			*swu_priv;
-
 	TAILQ_ENTRY(sr_workunit) swu_link;
 };
 
@@ -420,6 +417,8 @@ struct sr_raid6 {
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
+	struct mutex		 scr_mutex;
+	TAILQ_HEAD(,sr_crypto_wu) scr_wus;
 	struct sr_meta_crypto	*scr_meta;
 	struct sr_chunk		*key_disk;
 
