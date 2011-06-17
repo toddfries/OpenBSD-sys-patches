@@ -4526,10 +4526,10 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
 		    pd->rdomain != nk->rdomain)
 			pd->destchg = 1;
-		if (afto || PF_ANEQ(pd->dst, &nk->addr[pd->didx], pd->af) ||
-		    nk->port[pd->didx] != th->th_dport)
+		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
+		    nk->port[didx] != th->th_dport)
 			pf_change_ap(pd->dst, &th->th_dport, &th->th_sum,
-			    &nk->addr[pd->didx], nk->port[pd->didx], 0, pd->af, nk->af);
+			    &nk->addr[didx], nk->port[didx], 0, pd->af, nk->af);
 		m->m_pkthdr.rdomain = nk->rdomain;
 
 		if (afto) {
