@@ -231,7 +231,6 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 
 	bzero(&hdr, sizeof(hdr));
 	hdr.length = PFLOG_REAL_HDRLEN;
-	hdr.af = pd->af;
 	hdr.action = rm->action;
 	hdr.reason = reason;
 	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
@@ -323,15 +322,12 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if (m == NULL)
 		panic("no second mbuf");
 
-	/*
-	 * temporary mbuf will hold an ip/ip6 header and 8 bytes
-	 * of the protocol header
-	 */
+	/* mhdr will hold an ip/ip6 header and 8 bytes of the protocol header */
 	m_inithdr(mhdr);
 	mhdr->m_len = 0;
 	mhdr->m_pkthdr.len = 0;
 
-	/* offset for a new header */
+	/* reserve space for header expansion (ip -> ip6) */
 	if (afto && pfloghdr->af == AF_INET)
 		mhdr->m_data += sizeof(struct ip6_hdr) -
 		    sizeof(struct ip);
@@ -417,7 +413,6 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	mlen = min(mhdr->m_pkthdr.len, len);
 	m_copydata(mhdr, 0, mlen, dst);
 	len -= mlen;
-
 	if (len > 0)
 		bzero(dst + mlen, len);
 }
