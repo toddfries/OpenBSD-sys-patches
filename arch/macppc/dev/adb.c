@@ -1,4 +1,4 @@
-/*	$OpenBSD: adb.c,v 1.30 2011/05/14 12:01:16 mpi Exp $	*/
+/*	$OpenBSD: adb.c,v 1.34 2011/06/16 10:51:48 mpi Exp $	*/
 /*	$NetBSD: adb.c,v 1.6 1999/08/16 06:28:09 tsubai Exp $	*/
 /*	$NetBSD: adb_direct.c,v 1.14 2000/06/08 22:10:45 tsubai Exp $	*/
 
@@ -186,19 +186,8 @@ struct ADBDevEntry {
 };
 
 /*
- * Used to hold ADB commands that are waiting to be sent out.
- */
-struct adbCmdHoldEntry {
-	u_char	outBuf[ADB_MAX_MSG_LENGTH];	/* our message */
-	u_char	*saveBuf;	/* buffer to know where to save result */
-	u_char	*compRout;	/* completion routine pointer */
-	u_char	*data;		/* completion routine data pointer */
-};
-
-/*
  * Eventually used for two separate queues, the queue between
  * the upper and lower halves, and the outgoing packet queue.
- * TO DO: adbCommand can replace all of adbCmdHoldEntry eventually
  */
 struct adbCommand {
 	u_char	header[ADB_MAX_HDR_LENGTH];	/* not used yet */
@@ -218,7 +207,6 @@ int	adbHardware = ADB_HW_UNKNOWN;
 int	adbActionState = ADB_ACTION_NOTREADY;
 int	adbWaiting;		/* waiting for return data from the device */
 int	adbWriteDelay;		/* working on (or waiting to do) a write */
-int	adbSoftPower;		/* machine supports soft power */
 
 int	adbWaitingCmd;		/* ADB command we are waiting for */
 u_char	*adbBuffer;		/* pointer to user data area */
@@ -228,7 +216,6 @@ int	adbStarting = 1;	/* doing adb_reinit so do polling differently */
 
 u_char	adbInputBuffer[ADB_MAX_MSG_LENGTH];	/* data input buffer */
 u_char	adbOutputBuffer[ADB_MAX_MSG_LENGTH];	/* data output buffer */
-struct	adbCmdHoldEntry adbOutQueue;		/* our 1 entry output queue */
 
 int	adbSentChars;		/* how many characters we have sent */
 
@@ -239,10 +226,6 @@ struct	adbCommand adbInbound[ADB_QUEUE];	/* incoming queue */
 int	adbInCount;			/* how many packets in in queue */
 int	adbInHead;			/* head of in queue */
 int	adbInTail;			/* tail of in queue */
-struct	adbCommand adbOutbound[ADB_QUEUE]; /* outgoing queue - not used yet */
-int	adbOutCount;			/* how many packets in out queue */
-int	adbOutHead;			/* head of out queue */
-int	adbOutTail;			/* tail of out queue */
 
 int	tickle_count;			/* how many tickles seen for this packet? */
 int	tickle_serial;			/* the last packet tickled */
@@ -269,7 +252,6 @@ void	adb_reinit(void);
 int	count_adbs(void);
 int	get_ind_adb_info(ADBDataBlock *, int);
 int	get_adb_info(ADBDataBlock *, int);
-void	adb_setup_hw_type(void);
 int	adb_op(Ptr, Ptr, Ptr, short);
 void	adb_hw_setup(void);
 int	adb_cmd_result(u_char *);
@@ -1004,8 +986,6 @@ adb_reinit(void)
 	for (i = 0; i < 16; i++)
 		ADBDevTable[i].devType = 0;
 
-	adb_setup_hw_type();	/* setup hardware type */
-
 	adb_hw_setup();		/* init the VIA bits and hard reset ADB */
 
 	delay(1000);
@@ -1297,23 +1277,6 @@ adb_op_comprout(caddr_t buffer, caddr_t compdata, int cmd)
 	*(int *)compdata = 0x01;		/* update flag value */
 }
 
-void
-adb_setup_hw_type(void)
-{
-	switch (adbHardware) {
-	case ADB_HW_CUDA:
-		adbSoftPower = 1;
-		return;
-
-	case ADB_HW_PMU:
-		adbSoftPower = 1;
-		return;
-
-	default:
-		panic("unknown adb hardware");
-	}
-}
-
 int
 count_adbs(void)
 {
@@ -1486,9 +1449,6 @@ adb_poweroff(void)
 {
 	u_char output[ADB_MAX_MSG_LENGTH];
 	int result;
-
-	if (!adbSoftPower)
-		return -1;
 
 	adb_polling = 1;
 
@@ -1687,6 +1647,7 @@ adbattach(struct device *parent, struct device *self, void *aux)
 		/* Get the ADB information */
 		adbaddr = get_ind_adb_info(&adbdata, adbindex);
 
+		aa_args.name = adb_device_name;
 		aa_args.origaddr = adbdata.origADBAddr;
 		aa_args.adbaddr = adbaddr;
 		aa_args.handler_id = adbdata.devType;
@@ -1695,12 +1656,12 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	}
 
 #if NAPM > 0
-	/* Magic for signalling the apm driver to match. */
-	aa_args.origaddr = ADBADDR_APM;
-	aa_args.adbaddr = ADBADDR_APM;
-	aa_args.handler_id = ADBADDR_APM;
-
-	(void)config_found(self, &aa_args, NULL);
+	if (adbHardware == ADB_HW_PMU) {
+		/* Magic for signalling the apm driver to match. */
+		nca.ca_name = "apm";
+		nca.ca_node = node;
+		config_found(self, &nca, NULL);
+	}
 #endif
 
 	/* Attach I2C controller. */
