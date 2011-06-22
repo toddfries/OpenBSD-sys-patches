@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.332 2011/05/24 14:01:52 claudio Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.334 2011/06/21 08:59:47 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1221,8 +1221,6 @@ struct pf_pdesc {
 	u_int16_t	*proto_sum;
 
 	u_int16_t	 rdomain;	/* original routing domain */
-	u_int16_t	 flags;
-#define PFDESC_IP_REAS	0x0002		/* IP frags would've been reassembled */
 	sa_family_t	 af;
 	u_int8_t	 proto;
 	u_int8_t	 tos;
@@ -1743,7 +1741,7 @@ void				 pf_rm_rule(struct pf_rulequeue *,
 				    struct pf_rule *);
 struct pf_divert		*pf_find_divert(struct mbuf *);
 int				 pf_setup_pdesc(sa_family_t, int,
-				    struct pf_pdesc *, struct mbuf *,
+				    struct pf_pdesc *, struct mbuf **,
 				    u_short *, u_short *, struct pfi_kif *,
 				    struct pf_rule **, struct pf_rule **,
 				    struct pf_ruleset **, int *, int *);
@@ -1777,12 +1775,9 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
-int	pf_normalize_ip(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_ip6(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_tcp(int, struct pfi_kif *, struct mbuf *, int, int, void *,
-	    struct pf_pdesc *);
+int	pf_normalize_ip(struct mbuf **, int, u_short *);
+int	pf_normalize_ip6(struct mbuf **, int, u_short *);
+int	pf_normalize_tcp(int, struct mbuf *, int, struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
 int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
 	    struct tcphdr *, struct pf_state_peer *, struct pf_state_peer *);
