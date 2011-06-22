@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.65 2011/06/05 18:40:33 matthew Exp $	*/
+/*	$OpenBSD: hd.c,v 1.68 2011/06/19 21:20:04 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -263,8 +263,6 @@ struct cfdriver hd_cd = {
 	NULL, "hd", DV_DISK
 };
 
-#define	hdlock(rs)	disk_lock(&(rs)->sc_dkdev)
-#define	hdunlock(rs)	disk_unlock(&(rs)->sc_dkdev)
 #define	hdlookup(unit)	(struct hd_softc *)device_lookup(&hd_cd, (unit))
 
 int
@@ -546,7 +544,7 @@ hdopen(dev, flags, mode, p)
 		return (error);
 	}
 
-	if ((error = hdlock(rs)) != 0) {
+	if ((error = disk_lock(&rs->sc_dkdev)) != 0) {
 		device_unref(&rs->sc_dev);
 		return (error);
 	}
@@ -589,7 +587,7 @@ hdopen(dev, flags, mode, p)
 
 	error = 0;
 out:
-	hdunlock(rs);
+	disk_unlock(&rs->sc_dkdev);
 	device_unref(&rs->sc_dev);
 	return (error);
 }
@@ -604,16 +602,12 @@ hdclose(dev, flag, mode, p)
 	struct hd_softc *rs;
 	struct disk *dk;
 	int mask, s;
-	int error;
 
 	rs = hdlookup(unit);
 	if (rs == NULL)
 		return (ENXIO);
 
-	if ((error = hdlock(rs)) != 0) {
-		device_unref(&rs->sc_dev);
-		return (error);
-	}
+	disk_lock_nointr(&rs->sc_dkdev);
 
 	mask = 1 << DISKPART(dev);
  	dk = &rs->sc_dkdev;
@@ -644,7 +638,7 @@ hdclose(dev, flag, mode, p)
 		rs->sc_flags &= ~(HDF_CLOSING);
 	}
 
-	hdunlock(rs);
+	disk_unlock(&rs->sc_dkdev);
 	device_unref(&rs->sc_dev);
 	return (0);
 }
@@ -1168,7 +1162,7 @@ hdioctl(dev, cmd, data, flag, p)
 			goto exit;
 		}
 
-		if ((error = hdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dkdev)) != 0)
 			goto exit;
 
 		error = setdisklabel(sc->sc_dkdev.dk_label,
@@ -1179,7 +1173,7 @@ hdioctl(dev, cmd, data, flag, p)
 				    hdstrategy, sc->sc_dkdev.dk_label);
 		}
 
-		hdunlock(sc);
+		disk_unlock(&sc->sc_dkdev);
 		goto exit;
 
 	default:

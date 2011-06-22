@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.34 2011/05/22 13:21:24 claudio Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.35 2011/06/20 19:03:41 claudio Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
