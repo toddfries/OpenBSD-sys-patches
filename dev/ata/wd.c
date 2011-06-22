@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.103 2011/06/05 18:40:33 matthew Exp $ */
+/*	$OpenBSD: wd.c,v 1.106 2011/06/20 06:45:07 matthew Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -148,8 +148,6 @@ void  wd_shutdown(void *);
 cdev_decl(wd);
 bdev_decl(wd);
 
-#define wdlock(wd)  disk_lock(&(wd)->sc_dk)
-#define wdunlock(wd)  disk_unlock(&(wd)->sc_dk)
 #define wdlookup(unit) (struct wd_softc *)disk_lookup(&wd_cd, (unit))
 
 
@@ -372,19 +370,11 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *bp;
-	int s, bmaj, cmaj, mn;
+	int bmaj, cmaj, mn;
 
 	timeout_del(&sc->sc_restart_timeout);
 
-	/* Remove unprocessed buffers from queue */
-	s = splbio();
-	while ((bp = bufq_dequeue(&sc->sc_bufq)) != NULL) {
-		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		biodone(bp);
-	}
-	splx(s);
+	bufq_drain(&sc->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = DISKMINOR(self->dv_unit, 0);
@@ -666,7 +656,7 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	 * If this is the first open of this device, add a reference
 	 * to the adapter.
 	 */
-	if ((error = wdlock(wd)) != 0)
+	if ((error = disk_lock(&wd->sc_dk)) != 0)
 		goto bad4;
 
 	if (wd->sc_dk.dk_openmask != 0) {
@@ -716,7 +706,7 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	wd->sc_dk.dk_openmask =
 	    wd->sc_dk.dk_copenmask | wd->sc_dk.dk_bopenmask;
 
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 	device_unref(&wd->sc_dev);
 	return 0;
 
@@ -725,7 +715,7 @@ bad:
 	}
 
 bad3:
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 bad4:
 	device_unref(&wd->sc_dev);
 	return error;
@@ -736,15 +726,14 @@ wdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct wd_softc *wd;
 	int part = DISKPART(dev);
-	int error = 0;
 
 	wd = wdlookup(DISKUNIT(dev));
 	if (wd == NULL)
 		return ENXIO;
 
 	WDCDEBUG_PRINT(("wdclose\n"), DEBUG_FUNCS);
-	if ((error = wdlock(wd)) != 0)
-		goto exit;
+
+	disk_lock_nointr(&wd->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -762,11 +751,10 @@ wdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		/* XXXX Must wait for I/O to complete! */
 	}
 
-	wdunlock(wd);
+	disk_unlock(&wd->sc_dk);
 
- exit:
 	device_unref(&wd->sc_dev);
-	return (error);
+	return (0);
 }
 
 void
@@ -867,7 +855,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 			goto exit;
 		}
 
-		if ((error = wdlock(wd)) != 0)
+		if ((error = disk_lock(&wd->sc_dk)) != 0)
 			goto exit;
 
 		error = setdisklabel(wd->sc_dk.dk_label,
@@ -880,7 +868,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 				    wdstrategy, wd->sc_dk.dk_label);
 		}
 
-		wdunlock(wd);
+		disk_unlock(&wd->sc_dk);
 		goto exit;
 
 #ifdef notyet
