@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.202 2011/06/06 01:59:49 matthew Exp $	*/
+/*	$OpenBSD: cd.c,v 1.204 2011/06/19 04:55:34 deraadt Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -172,8 +172,6 @@ const struct scsi_inquiry_pattern cd_patterns[] = {
 #endif
 };
 
-#define cdlock(softc)   disk_lock(&(softc)->sc_dk)
-#define cdunlock(softc) disk_unlock(&(softc)->sc_dk)
 #define cdlookup(unit) (struct cd_softc *)disk_lookup(&cd_cd, (unit))
 
 int
@@ -315,7 +313,7 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	    ("cdopen: dev=0x%x (unit %d (of %d), partition %d)\n", dev, unit,
 	    cd_cd.cd_ndevs, part));
 
-	if ((error = cdlock(sc)) != 0) {
+	if ((error = disk_lock(&sc->sc_dk)) != 0) {
 		device_unref(&sc->sc_dev);
 		return (error);
 	}
@@ -410,7 +408,7 @@ bad:
 		sc_link->flags &= ~(SDEV_OPEN | SDEV_MEDIA_LOADED);
 	}
 
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return (error);
 }
@@ -424,7 +422,6 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct cd_softc *sc;
 	int part = DISKPART(dev);
-	int error;
 
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -434,10 +431,7 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		return (ENXIO);
 	}
 
-	if ((error = cdlock(sc)) != 0) {
-		device_unref(&sc->sc_dev);
-		return error;
-	}
+	disk_lock_nointr(&sc->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -467,7 +461,7 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		scsi_xsh_del(&sc->sc_xsh);
 	}
 
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 
 	device_unref(&sc->sc_dev);
 	return 0;
@@ -872,7 +866,7 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			break;
 		}
 
-		if ((error = cdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dk)) != 0)
 			break;
 
 		error = setdisklabel(sc->sc_dk.dk_label,
@@ -880,7 +874,7 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		if (error == 0) {
 		}
 
-		cdunlock(sc);
+		disk_unlock(&sc->sc_dk);
 		break;
 
 	case CDIOCPLAYTRACKS: {
@@ -2186,7 +2180,7 @@ cd_eject(void)
 	if (cd_cd.cd_ndevs == 0 || (sc = cd_cd.cd_devs[0]) == NULL)
 		return (ENXIO);
 
-	if ((error = cdlock(sc)) != 0)
+	if ((error = disk_lock(&sc->sc_dk)) != 0)
 		return (error);
 
 	if (sc->sc_dk.dk_openmask == 0) {
@@ -2201,7 +2195,7 @@ cd_eject(void)
 
 		sc->sc_link->flags &= ~SDEV_EJECTING;
 	}
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 
 	return (error);
 }
