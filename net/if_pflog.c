@@ -377,7 +377,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	/* rewrite addresses if needed */
 	memset(&pd, 0, sizeof(pd));
 	pd.hdr.any = &pf_hdrs;
-	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, mhdr, &action,
+	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mhdr, &action,
 	    &reason, NULL, NULL, NULL, NULL, &off, &hdrlen) == -1)
 		return;
 	pd.naf = pfloghdr->naf;
