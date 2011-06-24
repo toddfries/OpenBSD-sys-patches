@@ -6260,7 +6260,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		panic("pf_setup_pdesc: no storage for headers provided");
 
 	*hdrlen = 0;
-	pd->af = naf->af = af;
+	pd->af = pd->naf = af;
 	switch (af) {
 #ifdef INET
 	case AF_INET: {
