@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.750 2011/06/21 08:59:47 bluhm Exp $ */
+/*	$OpenBSD: pf.c,v 1.751 2011/06/23 19:10:40 claudio Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -6260,6 +6260,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		panic("pf_setup_pdesc: no storage for headers provided");
 
 	*hdrlen = 0;
+	pd->af = naf->af = af;
 	switch (af) {
 #ifdef INET
 	case AF_INET: {
@@ -6291,7 +6292,6 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		pd->dir = dir;
 		pd->sidx = (dir == PF_IN) ? 0 : 1;
 		pd->didx = (dir == PF_IN) ? 1 : 0;
-		pd->af = pd->naf = AF_INET;
 		pd->tos = h->ip_tos;
 		pd->ttl = h->ip_ttl;
 		pd->tot_len = ntohs(h->ip_len);
@@ -6423,7 +6423,6 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		pd->dir = dir;
 		pd->sidx = (dir == PF_IN) ? 0 : 1;
 		pd->didx = (dir == PF_IN) ? 1 : 0;
-		pd->af = pd->naf = AF_INET6;
 		pd->tos = 0;
 		pd->ttl = h->ip6_hlim;
 		pd->tot_len = ntohs(h->ip6_plen) + sizeof(struct ip6_hdr);
