@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_myx.c,v 1.25 2011/06/22 10:34:15 dlg Exp $	*/
+/*	$OpenBSD: if_myx.c,v 1.28 2011/06/23 04:09:08 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>
@@ -129,6 +129,7 @@ struct myx_softc {
 	u_int			 sc_rx_ring_idx[2];
 #define  MYX_RXSMALL		 0
 #define  MYX_RXBIG		 1
+	struct timeout		 sc_refill;
 
 	bus_size_t		 sc_tx_boundary;
 	u_int			 sc_tx_ring_count;
@@ -146,8 +147,6 @@ struct myx_softc {
 	u_int			 sc_hwflags;
 #define  MYXFLAG_FLOW_CONTROL	 (1<<0)		/* Rx/Tx pause is enabled */
 	volatile u_int8_t	 sc_linkdown;
-
-	struct timeout		 sc_tick;
 };
 
 int	 myx_match(struct device *, void *, void *);
@@ -172,7 +171,6 @@ int	 myx_media_change(struct ifnet *);
 void	 myx_media_status(struct ifnet *, struct ifmediareq *);
 void	 myx_link_state(struct myx_softc *);
 void	 myx_watchdog(struct ifnet *);
-void	 myx_tick(void *);
 int	 myx_ioctl(struct ifnet *, u_long, caddr_t);
 void	 myx_up(struct myx_softc *);
 void	 myx_iff(struct myx_softc *);
@@ -194,6 +192,7 @@ struct myx_buf *	myx_buf_fill(struct myx_softc *, int);
 
 void			myx_rx_zero(struct myx_softc *, int);
 int			myx_rx_fill(struct myx_softc *, int);
+void			myx_refill(void *);
 
 struct cfdriver myx_cd = {
 	NULL, "myx", DV_IFNET
@@ -233,6 +232,8 @@ myx_attach(struct device *parent, struct device *self, void *aux)
 
 	SIMPLEQ_INIT(&sc->sc_tx_buf_free);
 	SIMPLEQ_INIT(&sc->sc_tx_buf_list);
+
+	timeout_set(&sc->sc_refill, myx_refill, sc);
 
 	/* Map the PCI memory space */
 	memtype = pci_mapreg_type(sc->sc_pc, sc->sc_tag, MYXBAR0);
@@ -473,8 +474,6 @@ myx_attachhook(void *arg)
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	timeout_set(&sc->sc_tick, myx_tick, sc);
 
 	return;
 
@@ -813,19 +812,20 @@ myx_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	struct myx_softc	*sc = (struct myx_softc *)ifp->if_softc;
 
 	imr->ifm_active = IFM_ETHER | IFM_AUTO;
-	imr->ifm_status = IFM_AVALID;
+	if (!ISSET(ifp->if_flags, IFF_RUNNING)) {
+		imr->ifm_status = 0;
+		return;
+	}
 
 	myx_link_state(sc);
 
+	imr->ifm_status = IFM_AVALID;
 	if (!LINK_STATE_IS_UP(ifp->if_link_state))
 		return;
 
-	imr->ifm_active |= IFM_FDX;
+	imr->ifm_active |= IFM_FDX | IFM_FLOW |
+	    IFM_ETH_RXPAUSE | IFM_ETH_TXPAUSE;
 	imr->ifm_status |= IFM_ACTIVE;
-
-	/* Flow control */
-	if (sc->sc_hwflags & MYXFLAG_FLOW_CONTROL)
-		imr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE | IFM_ETH_TXPAUSE;
 }
 
 void
@@ -833,9 +833,6 @@ myx_link_state(struct myx_softc *sc)
 {
 	struct ifnet		*ifp = &sc->sc_ac.ac_if;
 	int			 link_state = LINK_STATE_DOWN;
-
-	if (!ISSET(ifp->if_flags, IFF_RUNNING))
-		return;
 
 	if (betoh32(sc->sc_sts->ms_linkstate) == MYXSTS_LINKUP)
 		link_state = LINK_STATE_FULL_DUPLEX;
@@ -851,19 +848,6 @@ void
 myx_watchdog(struct ifnet *ifp)
 {
 	return;
-}
-
-void
-myx_tick(void *arg)
-{
-	struct myx_softc	*sc = (struct myx_softc *)arg;
-	struct ifnet		*ifp = &sc->sc_ac.ac_if;
-
-	if (!ISSET(ifp->if_flags, IFF_RUNNING))
-		return;
-
-	myx_link_state(sc);
-	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -978,6 +962,7 @@ myx_up(struct myx_softc *sc)
 	sc->sc_tx_ring_count = r / sizeof(struct myx_tx_desc);
 	sc->sc_tx_free = sc->sc_tx_ring_count - 1;
 	sc->sc_tx_nsegs = min(16, sc->sc_tx_ring_count / 4); /* magic */
+	sc->sc_tx_count = 0;
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->sc_tx_ring_count - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1317,7 +1302,15 @@ myx_down(struct myx_softc *sc)
 		    BUS_DMASYNC_POSTREAD);
 	}
 
+	timeout_del(&sc->sc_refill);
+
 	CLR(ifp->if_flags, IFF_RUNNING);
+
+	if (ifp->if_link_state != LINK_STATE_UNKNOWN) {
+		ifp->if_link_state = LINK_STATE_UNKNOWN;
+		ifp->if_baudrate = 0;
+		if_link_state_change(ifp);
+	}
 	splx(s);
 
 	bzero(&mc, sizeof(mc));
@@ -1575,11 +1568,30 @@ myx_intr(void *arg)
 	}
 
 	for (i = 0; i < 2; i++) {
-		if (ISSET(refill, 1 << i))
+		if (ISSET(refill, 1 << i)) {
 			myx_rx_fill(sc, i);
+			if (SIMPLEQ_EMPTY(&sc->sc_rx_buf_list[i]))
+				timeout_add(&sc->sc_refill, 0);
+		}
 	}
 
 	return (1);
+}
+
+void
+myx_refill(void *xsc)
+{
+	struct myx_softc *sc = xsc;
+	int i;
+	int s;
+
+	s = splnet();
+	for (i = 0; i < 2; i++) {
+		myx_rx_fill(sc, i);
+		if (SIMPLEQ_EMPTY(&sc->sc_rx_buf_list[i]))
+			timeout_add(&sc->sc_refill, 1);
+	}
+	splx(s);
 }
 
 void
