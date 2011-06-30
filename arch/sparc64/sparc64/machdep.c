@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.133 2011/06/23 20:44:39 ariane Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.135 2011/06/26 22:40:00 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -91,6 +91,7 @@
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
@@ -167,7 +168,6 @@ int	physmem;
 extern	caddr_t msgbufaddr;
 
 int sparc_led_blink;
-int kbd_reset;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -409,10 +409,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdint(oldp, oldlenp, newp, ceccerrs));
 	case CPU_CECCLAST:
 		return (sysctl_rdquad(oldp, oldlenp, newp, cecclast));
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -662,6 +658,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* ??? */
