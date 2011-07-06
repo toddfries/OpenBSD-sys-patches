@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.130 2011/06/05 19:41:04 deraadt Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.133 2011/07/06 20:50:05 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -56,10 +56,9 @@
 #include <sys/resourcevar.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <miscfs/specfs/specdev.h>
 
 /*
  * Definitions for the buffer free lists.
@@ -328,7 +327,7 @@ bufadjust(int newbufpages)
  * Make the buffer cache back off from cachepct.
  */
 int
-bufbackoff()
+bufbackoff(struct uvm_constraint_range *range, long size)
 {
 	/*
 	 * Back off the amount of buffer cache pages. Called by the page
@@ -403,8 +402,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
-    struct buf **bpp)
+bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
 {
 	struct buf *bp;
 
@@ -421,7 +419,7 @@ bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
  */
 int
 breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
-    int rasizes[], int nrablks, struct ucred *cred, struct buf **bpp)
+    int rasizes[], int nrablks, struct buf **bpp)
 {
 	struct buf *bp;
 	int i;
