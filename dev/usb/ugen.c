@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.64 2011/01/25 20:03:36 jakemsr Exp $ */
+/*	$OpenBSD: ugen.c,v 1.66 2011/07/03 15:47:17 matthew Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -746,9 +746,6 @@ ugen_activate(struct device *self, int act)
 	struct ugen_softc *sc = (struct ugen_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;
@@ -1406,12 +1403,12 @@ ugenkqfilter(dev_t dev, struct knote *kn)
 	sc = ugen_cd.cd_devs[UGENUNIT(dev)];
 
 	if (sc->sc_dying)
-		return (1);
+		return (ENXIO);
 
 	/* XXX always IN */
 	sce = &sc->sc_endpoints[UGENENDPOINT(dev)][IN];
 	if (sce == NULL)
-		return (1);
+		return (EINVAL);
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
@@ -1432,7 +1429,7 @@ ugenkqfilter(dev_t dev, struct knote *kn)
 			kn->kn_fop = &ugen_seltrue_filtops;
 			break;
 		default:
-			return (1);
+			return (EINVAL);
 		}
 		break;
 
@@ -1442,7 +1439,7 @@ ugenkqfilter(dev_t dev, struct knote *kn)
 		case UE_INTERRUPT:
 		case UE_ISOCHRONOUS:
 			/* XXX poll doesn't support this */
-			return (1);
+			return (EINVAL);
 
 		case UE_BULK:
 			/*
@@ -1453,12 +1450,12 @@ ugenkqfilter(dev_t dev, struct knote *kn)
 			kn->kn_fop = &ugen_seltrue_filtops;
 			break;
 		default:
-			return (1);
+			return (EINVAL);
 		}
 		break;
 
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (void *)sce;
