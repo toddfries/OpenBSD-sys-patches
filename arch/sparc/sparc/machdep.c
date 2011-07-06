@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.135 2011/06/05 19:41:08 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.137 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -62,6 +62,7 @@
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <dev/rndvar.h>
@@ -381,16 +382,16 @@ sendsig(catcher, sig, mask, code, type, val)
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	/*
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)(psp->ps_sigstk.ss_sp +
-					 psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		fp = (struct sigframe *)(p->p_sigstk.ss_sp +
+					 p->p_sigstk.ss_size);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (struct sigframe *)oldsp;
 	fp = (struct sigframe *)((int)(fp - 1) & ~7);
@@ -521,9 +522,9 @@ sys_sigreturn(p, v, retval)
 	tf->tf_out[0] = ksc.sc_o0;
 	tf->tf_out[6] = ksc.sc_sp;
 	if (ksc.sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 	return (EJUSTRETURN);
 }
@@ -567,6 +568,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* ??? */

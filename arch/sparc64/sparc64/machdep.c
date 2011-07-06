@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.133 2011/06/23 20:44:39 ariane Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.136 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -91,6 +91,7 @@
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
@@ -167,7 +168,6 @@ int	physmem;
 extern	caddr_t msgbufaddr;
 
 int sparc_led_blink;
-int kbd_reset;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -409,10 +409,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdint(oldp, oldlenp, newp, ceccerrs));
 	case CPU_CECCLAST:
 		return (sysctl_rdquad(oldp, oldlenp, newp, cecclast));
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -446,13 +442,13 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
-	if ((psp->ps_flags & SAS_ALTSTACK) && !onstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !onstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)((caddr_t)psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		fp = (struct sigframe *)((caddr_t)p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (struct sigframe *)oldsp;
 	/* Allocate an aligned sigframe */
@@ -598,9 +594,9 @@ sys_sigreturn(p, v, retval)
 
 	/* Restore signal stack. */
 	if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
@@ -662,6 +658,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* ??? */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_subr.c,v 1.23 2010/12/21 20:14:44 thib Exp $	*/
+/*	$OpenBSD: ext2fs_subr.c,v 1.27 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_subr.c,v 1.1 1997/06/11 09:34:03 bouyer Exp $	*/
 
 /*
@@ -39,6 +39,7 @@
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
+#include <sys/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -47,7 +48,6 @@
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 
-#include <miscfs/specfs/specdev.h>
 #include <miscfs/fifofs/fifo.h>
 
 union _qcvt {
@@ -90,7 +90,7 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 	lbn = lblkno(fs, offset);
 
 	*bpp = NULL;
-	if ((error = bread(vp, lbn, fs->e2fs_bsize, NOCRED, &bp)) != 0) {
+	if ((error = bread(vp, lbn, fs->e2fs_bsize, &bp)) != 0) {
 		brelse(bp);
 		return (error);
 	}
@@ -115,7 +115,7 @@ ext2fs_checkoverlap(struct buf *bp, struct inode *ip)
 		if (ep == bp || (ep->b_flags & B_INVAL) ||
 			ep->b_vp == NULLVP)
 			continue;
-		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, (daddr64_t)0, NULL))
+		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, NULL, NULL))
 			continue;
 		if (vp != ip->i_devvp)
 			continue;
@@ -162,7 +162,7 @@ ext2fs_vinit(struct mount *mp, struct vops *specops,
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
 			vp->v_op = &spec_vops;
-#ifdef VFSDEBUG
+#ifdef VFSLCKDEBUG
 			vp->v_flag &= ~VLOCKSWORK;
 #endif
 			vrele(vp);
