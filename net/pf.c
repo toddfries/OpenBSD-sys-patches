@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.751 2011/06/23 19:10:40 claudio Exp $ */
+/*	$OpenBSD: pf.c,v 1.760 2011/07/05 19:53:43 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -131,6 +131,8 @@ union pf_headers {
 	struct icmp		icmp;
 #ifdef INET6
 	struct icmp6_hdr	icmp6;
+	struct mld_hdr		mld;
+	struct nd_neighbor_solicit nd_ns;
 #endif /* INET6 */
 };
 
@@ -182,10 +184,10 @@ int			 pf_test_rule(struct pf_rule **, struct pf_state **,
 			    struct pf_pdesc *, struct pf_rule **,
 			    struct pf_ruleset **, int);
 static __inline int	 pf_create_state(struct pf_rule *, struct pf_rule *,
-			    struct pf_pdesc *, struct pf_state_key **,
-			    struct pf_state_key **, struct mbuf *, int,
-			    int *, struct pfi_kif *, struct pf_state **, int,
-			    struct pf_rule_slist *,
+			    struct pf_rule *, struct pf_pdesc *,
+			    struct pf_state_key **, struct pf_state_key **,
+			    struct mbuf *, int, int *, struct pfi_kif *,
+			    struct pf_state **, int, struct pf_rule_slist *,
 			    struct pf_rule_actions *, struct pf_src_node *[]);
 int			 pf_state_key_setup(struct pf_pdesc *, struct
 			    pf_state_key **, struct pf_state_key **, int);
@@ -1148,6 +1150,9 @@ void
 pf_unlink_state(struct pf_state *cur)
 {
 	splsoftassert(IPL_SOFTNET);
+
+	/* handle load balancing related tasks */
+	pf_postprocess_addr(cur);
 
 	if (cur->src.state == PF_TCPS_PROXY_DST) {
 		pf_send_tcp(cur->rule.ptr, cur->key[PF_SK_WIRE]->af,
@@ -3105,6 +3110,7 @@ pf_set_rt_ifp(struct pf_state *s, struct pf_addr *saddr)
 		pf_map_addr(AF_INET, r, saddr, &s->rt_addr, NULL, &sn,
 		    &r->route, PF_SN_ROUTE);
 		s->rt_kif = r->route.kif;
+		s->natrule.ptr = r;
 		break;
 #endif /* INET */
 #ifdef INET6
@@ -3112,6 +3118,7 @@ pf_set_rt_ifp(struct pf_state *s, struct pf_addr *saddr)
 		pf_map_addr(AF_INET6, r, saddr, &s->rt_addr, NULL, &sn,
 		    &r->route, PF_SN_ROUTE);
 		s->rt_kif = r->route.kif;
+		s->natrule.ptr = r;
 		break;
 #endif /* INET6 */
 	}
@@ -3173,7 +3180,10 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
     int hdrlen)
 {
 	struct pf_rule		*lastr = NULL;
-	struct pf_rule		*r, *a = NULL;
+	sa_family_t		 af = pd->af;
+	struct pf_rule		*r;
+	struct pf_rule		*nr = NULL;
+	struct pf_rule		*a = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_rule_slist	 rules;
 	struct pf_rule_item	*ri;
@@ -3199,8 +3209,10 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	act.rtableid = pd->rdomain;
 	SLIST_INIT(&rules);
 
-	if (pd->af == AF_INET6)
+#ifdef INET6
+	if (af == AF_INET6)
 		ifq = &ip6intrq;
+#endif
 
 	if (direction == PF_IN && pf_check_congestion(ifq)) {
 		REASON_SET(&reason, PFRES_CONGEST);
@@ -3343,19 +3355,23 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 						    PFRES_MEMORY);
 						goto cleanup;
 					}
+					/* 
+					 * We need to save this rule pointer, 
+					 * otherwise the counter decrease
+					 * would not work for SLB.
+					 */
+					nr = r;
 					if (r->log || act.log & PF_LOG_MATCHES)
-						PFLOG_PACKET(kif, h, m,
-						    direction, reason, r,
-						    a, ruleset, pd);
+						PFLOG_PACKET(kif, m, direction,
+						    reason, r, a, ruleset, pd);
 				} else {
 					match = 1;
 					*rm = r;
 					*am = a;
 					*rsm = ruleset;
 					if (act.log & PF_LOG_MATCHES)
-						PFLOG_PACKET(kif, h, m,
-						    direction, reason, r,
-						    a, ruleset, pd);
+						PFLOG_PACKET(kif, m, direction,
+						    reason, r, a, ruleset, pd);
 				}
 
 				if ((*rm)->quick)
@@ -3384,8 +3400,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	REASON_SET(&reason, PFRES_MATCH);
 
 	if (r->log || act.log & PF_LOG_MATCHES)
-		PFLOG_PACKET(kif, h, m, direction, reason,
-		    r, a, ruleset, pd);
+		PFLOG_PACKET(kif, m, direction, reason, r, a, ruleset, pd);
 
 	if ((r->action == PF_DROP) &&
 	    ((r->rule_flag & PFRULE_RETURNRST) ||
@@ -3443,16 +3458,12 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	    rtable_l2(act.rtableid) != pd->rdomain)
 		pd->destchg = 1;
 
-	if (r->action == PF_PASS && pd->af == AF_INET && ! r->allow_opts) {
-		struct ip	*h4 = mtod(m, struct ip *);
-
-		if (h4->ip_hl > 5) {
-			REASON_SET(&reason, PFRES_IPOPTIONS);
-			pd->pflog |= PF_LOG_FORCE;
-			DPFPRINTF(LOG_NOTICE, "dropping packet with "
-			    "ip options in pf_test_rule()");
-			goto cleanup;
-		}
+	if (r->action == PF_PASS && pd->badopts && ! r->allow_opts) {
+		REASON_SET(&reason, PFRES_IPOPTIONS);
+		pd->pflog |= PF_LOG_FORCE;
+		DPFPRINTF(LOG_NOTICE, "dropping packet with "
+		    "ip/ipv6 options in pf_test_rule()");
+		goto cleanup;
 	}
 
 	if (!state_icmp && r->keep_state) {
@@ -3465,7 +3476,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			goto cleanup;
 		}
 
-		action = pf_create_state(r, a, pd, &skw, &sks, m, off,
+		action = pf_create_state(r, a, nr, pd, &skw, &sks, m, off,
 		    &rewrite, kif, sm, tag, &rules, &act, sns);
 
 		if (action != PF_PASS)
@@ -3524,10 +3535,10 @@ cleanup:
 }
 
 static __inline int
-pf_create_state(struct pf_rule *r, struct pf_rule *a, struct pf_pdesc *pd,
-    struct pf_state_key **skw, struct pf_state_key **sks, struct mbuf *m,
-    int off, int *rewrite, struct pfi_kif *kif, struct pf_state **sm,
-    int tag, struct pf_rule_slist *rules,
+pf_create_state(struct pf_rule *r, struct pf_rule *a, struct pf_rule *nr,
+    struct pf_pdesc *pd, struct pf_state_key **skw, struct pf_state_key **sks,
+    struct mbuf *m, int off, int *rewrite, struct pfi_kif *kif,
+    struct pf_state **sm, int tag, struct pf_rule_slist *rules,
     struct pf_rule_actions *act, struct pf_src_node *sns[PF_SN_MAX])
 {
 	struct pf_state		*s = NULL;
@@ -3550,6 +3561,7 @@ pf_create_state(struct pf_rule *r, struct pf_rule *a, struct pf_pdesc *pd,
 	}
 	s->rule.ptr = r;
 	s->anchor.ptr = a;
+	s->natrule.ptr = nr;
 	bcopy(rules, &s->match_rules, sizeof(s->match_rules));
 	STATE_INC_COUNTERS(s);
 	if (r->allow_opts)
@@ -3945,7 +3957,7 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 	REASON_SET(&reason, PFRES_MATCH);
 
 	if (r->log)
-		PFLOG_PACKET(kif, h, m, direction, reason, r, a, ruleset, pd);
+		PFLOG_PACKET(kif, m, direction, reason, r, a, ruleset, pd);
 
 	if (r->action == PF_DROP)
 		return (PF_DROP);
@@ -5909,7 +5921,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 
 
 	if (oifp != ifp) {
-		if (pf_test(PF_OUT, ifp, &m0, NULL) != PF_PASS)
+		if (pf_test(AF_INET, PF_OUT, ifp, &m0, NULL) != PF_PASS)
 			goto bad;
 		else if (m0 == NULL)
 			goto done;
@@ -6078,8 +6090,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		goto bad;
 
 	if (oifp != ifp) {
-		if (pf_test6(PF_OUT, ifp, &m0, NULL) != PF_PASS) {
-			cause = "pf_test6 != PASS";
+		if (pf_test(AF_INET6, PF_OUT, ifp, &m0, NULL) != PF_PASS)
 			goto bad;
 		}
 		else if (m0 == NULL)
@@ -6277,11 +6288,28 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		*off = h->ip_hl << 2;
 
 		if (*off < (int)sizeof(struct ip) ||
-		    *off > ntohs(h->ip_len)) {
+		    *off > ntohs(h->ip_len) ||
+		    m->m_pkthdr.len < ntohs(h->ip_len)) {
 			*action = PF_DROP;
 			REASON_SET(reason, PFRES_SHORT);
 			return (-1);
 		}
+
+		/* packet reassembly */
+		if (h->ip_off & htons(IP_MF | IP_OFFMASK) &&
+		    pf_normalize_ip(m0, dir, reason) != PF_PASS) {
+			*action = PF_DROP;
+			return (-1);
+		}
+		m = *m0;
+		if (m == NULL) {
+			/* packet sits in reassembly queue, no error */
+			*action = PF_PASS;
+			return (-1);
+		}
+		/* refetch header, recalc offset and update pd */
+		h = mtod(m, struct ip *);
+		*off = h->ip_hl << 2;
 
 		pd->src = (struct pf_addr *)&h->ip_src;
 		pd->dst = (struct pf_addr *)&h->ip_dst;
@@ -6296,83 +6324,22 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		pd->ttl = h->ip_ttl;
 		pd->tot_len = ntohs(h->ip_len);
 		pd->rdomain = rtable_l2(m->m_pkthdr.rdomain);
+		if (h->ip_hl > 5)	/* has options */
+			pd->badopts++;
 
 		if (h->ip_off & htons(IP_MF | IP_OFFMASK)) {
-			if (!pf_status.reass) {
-				/*
-				 * handle fragments that aren't reassembled by
-				 * normalization
-				 */
-				if (kif == NULL || r == NULL)	/* pflog */
-					*action = PF_DROP;
-				else
-					*action = pf_test_fragment(r, dir, kif,
-					     m, pd, a, ruleset);
-				if (*action == PF_PASS)
-					/* m is still valid, return success */
-					return (0);
+			/*
+			 * handle fragments that aren't reassembled by
+			 * normalization
+			 */
+			if (kif == NULL || r == NULL)	/* pflog */
+				*action = PF_DROP;
+			else
+				*action = pf_test_fragment(r, dir, kif,
+				     m, pd, a, ruleset);
+			if (*action != PF_PASS)
 				REASON_SET(reason, PFRES_FRAG);
-				return (-1);
-			}
-			/* packet reassembly */
-			if (pf_normalize_ip(m0, dir, reason) != PF_PASS) {
-				*action = PF_DROP;
-				return (-1);
-			}
-			m = *m0;
-			if (m == NULL) {
-				/* packet sits in reassembly queue, no error */
-				*action = PF_PASS;
-				return (-1);
-			}
-			/* refetch header, recalc offset and update pd */
-			h = mtod(m, struct ip *);
-			*off = h->ip_hl << 2;
-			pd->src = (struct pf_addr *)&h->ip_src;
-			pd->dst = (struct pf_addr *)&h->ip_dst;
-			pd->ip_sum = &h->ip_sum;
-			pd->tot_len = ntohs(h->ip_len);
-			pd->tos = h->ip_tos;
-		}
-
-		switch (h->ip_p) {
-		case IPPROTO_TCP: {
-			struct tcphdr	*th = pd->hdr.tcp;
-
-			if (!pf_pull_hdr(m, *off, th, sizeof(*th),
-			    action, reason, AF_INET))
-				return (-1);
-			*hdrlen = sizeof(*th);
-			pd->p_len = pd->tot_len - *off - (th->th_off << 2);
-			pd->sport = &th->th_sport;
-			pd->dport = &th->th_dport;
-			break;
-		}
-		case IPPROTO_UDP: {
-			struct udphdr	*uh = pd->hdr.udp;
-
-			if (!pf_pull_hdr(m, *off, uh, sizeof(*uh),
-			    action, reason, AF_INET))
-				return (-1);
-			*hdrlen = sizeof(*uh);
-			if (uh->uh_dport == 0 ||
-			    ntohs(uh->uh_ulen) > m->m_pkthdr.len - *off ||
-			    ntohs(uh->uh_ulen) < sizeof(struct udphdr)) {
-				*action = PF_DROP;
-				REASON_SET(reason, PFRES_SHORT);
-				return (-1);
-			}
-			pd->sport = &uh->uh_sport;
-			pd->dport = &uh->uh_dport;
-			break;
-		}
-		case IPPROTO_ICMP: {
-			if (!pf_pull_hdr(m, *off, pd->hdr.icmp, ICMP_MINLEN,
-			    action, reason, AF_INET))
-				return (-1);
-			*hdrlen = ICMP_MINLEN;
-			break;
-		}
+			return (-1);
 		}
 		break;
 	}
@@ -6390,8 +6357,7 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		}
 
 		/* packet reassembly */
-		if (pf_status.reass &&
-		    pf_normalize_ip6(m0, dir, reason) != PF_PASS) {
+		if (pf_normalize_ip6(m0, dir, reason) != PF_PASS) {
 			*action = PF_DROP;
 			return (-1);
 		}
@@ -6436,13 +6402,13 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 				else
 					*action = pf_test_fragment(r, dir, kif,
 					     m, pd, a, ruleset);
-				if (*action == PF_DROP)
+				if (*action != PF_PASS)
 					REASON_SET(reason, PFRES_FRAG);
 				return (-1);
 			case IPPROTO_ROUTING: {
 				struct ip6_rthdr rthdr;
 
-				if (pd->rh_cnt++) {
+				if (pd->badopts++) {
 					DPFPRINTF(LOG_NOTICE,
 					    "IPv6 more than one rthdr");
 					*action = PF_DROP;
@@ -6492,69 +6458,76 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 				break;
 			}
 		} while (!terminal);
-
-		switch (pd->proto) {
-		case IPPROTO_TCP: {
-			struct tcphdr	*th = pd->hdr.tcp;
-
-			if (!pf_pull_hdr(m, *off, th, sizeof(*th),
-			    action, reason, AF_INET6))
-				return (-1);
-			*hdrlen = sizeof(*th);
-			pd->p_len = pd->tot_len - *off - (th->th_off << 2);
-			pd->sport = &th->th_sport;
-			pd->dport = &th->th_dport;
-			break;
-		}
-		case IPPROTO_UDP: {
-			struct udphdr	*uh = pd->hdr.udp;
-
-			if (!pf_pull_hdr(m, *off, uh, sizeof(*uh),
-			    action, reason, AF_INET6))
-				return (-1);
-			*hdrlen = sizeof(*uh);
-			if (uh->uh_dport == 0 ||
-			    ntohs(uh->uh_ulen) > m->m_pkthdr.len - *off ||
-			    ntohs(uh->uh_ulen) < sizeof(struct udphdr)) {
-				*action = PF_DROP;
-				REASON_SET(reason, PFRES_SHORT);
-				return (-1);
-			}
-			pd->sport = &uh->uh_sport;
-			pd->dport = &uh->uh_dport;
-			break;
-		}
-		case IPPROTO_ICMPV6: {
-			size_t	icmp_hlen = sizeof(struct icmp6_hdr);
-
-			if (!pf_pull_hdr(m, *off, pd->hdr.icmp6, icmp_hlen,
-			    action, reason, AF_INET6))
-				return (-1);
-			/* ICMP headers we look further into to match state */
-			switch (pd->hdr.icmp6->icmp6_type) {
-			case MLD_LISTENER_QUERY:
-			case MLD_LISTENER_REPORT:
-				icmp_hlen = sizeof(struct mld_hdr);
-				break;
-			case ND_NEIGHBOR_SOLICIT:
-			case ND_NEIGHBOR_ADVERT:
-				icmp_hlen = sizeof(struct nd_neighbor_solicit);
-				break;
-			}
-			if (icmp_hlen > sizeof(struct icmp6_hdr) &&
-			    !pf_pull_hdr(m, *off, pd->hdr.icmp6, icmp_hlen,
-			    action, reason, AF_INET6))
-				return (-1);
-			*hdrlen = icmp_hlen;
-			break;
-		}
-		}
 		break;
 	}
 #endif
 	default:
 		panic("pf_setup_pdesc called with illegal af %u", af);
 
+	}
+
+	switch (pd->proto) {
+	case IPPROTO_TCP: {
+		struct tcphdr	*th = pd->hdr.tcp;
+
+		if (!pf_pull_hdr(m, *off, th, sizeof(*th), action, reason, af))
+			return (-1);
+		*hdrlen = sizeof(*th);
+		pd->p_len = pd->tot_len - *off - (th->th_off << 2);
+		pd->sport = &th->th_sport;
+		pd->dport = &th->th_dport;
+		break;
+	}
+	case IPPROTO_UDP: {
+		struct udphdr	*uh = pd->hdr.udp;
+
+		if (!pf_pull_hdr(m, *off, uh, sizeof(*uh), action, reason, af))
+			return (-1);
+		*hdrlen = sizeof(*uh);
+		if (uh->uh_dport == 0 ||
+		    ntohs(uh->uh_ulen) > m->m_pkthdr.len - *off ||
+		    ntohs(uh->uh_ulen) < sizeof(struct udphdr)) {
+			*action = PF_DROP;
+			REASON_SET(reason, PFRES_SHORT);
+			return (-1);
+		}
+		pd->sport = &uh->uh_sport;
+		pd->dport = &uh->uh_dport;
+		break;
+	}
+	case IPPROTO_ICMP: {
+		if (!pf_pull_hdr(m, *off, pd->hdr.icmp, ICMP_MINLEN,
+		    action, reason, af))
+			return (-1);
+		*hdrlen = ICMP_MINLEN;
+		break;
+	}
+#ifdef INET6
+	case IPPROTO_ICMPV6: {
+		size_t	icmp_hlen = sizeof(struct icmp6_hdr);
+
+		if (!pf_pull_hdr(m, *off, pd->hdr.icmp6, icmp_hlen,
+		    action, reason, af))
+			return (-1);
+		/* ICMP headers we look further into to match state */
+		switch (pd->hdr.icmp6->icmp6_type) {
+		case MLD_LISTENER_QUERY:
+		case MLD_LISTENER_REPORT:
+			icmp_hlen = sizeof(struct mld_hdr);
+			break;
+		case ND_NEIGHBOR_SOLICIT:
+		case ND_NEIGHBOR_ADVERT:
+			icmp_hlen = sizeof(struct nd_neighbor_solicit);
+			break;
+		}
+		if (icmp_hlen > sizeof(struct icmp6_hdr) &&
+		    !pf_pull_hdr(m, *off, pd->hdr.icmp6, icmp_hlen,
+		    action, reason, af))
+			return (-1);
+		*hdrlen = icmp_hlen;
+		break;
+	}
+#endif	/* INET6 */
 	}
 	return (0);
 }
@@ -6611,9 +6584,8 @@ pf_counters_inc(int dir, int action, struct pf_pdesc *pd,
 	}
 }
 
-#ifdef INET
 int
-pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
+pf_test(sa_family_t af, int fwdir, struct ifnet *ifp, struct mbuf **m0,
     struct ether_header *eh)
 {
 	struct pfi_kif		*kif;
@@ -6625,6 +6597,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pf_pdesc		 pd;
 	union pf_headers	 hdrs;
 	int			 off, hdrlen;
+	int			 dir = (fwdir == PF_FWD) ? PF_OUT : fwdir;
 	u_int32_t		 qid, pqid = 0;
 
 	if (!pf_status.running)
@@ -6661,7 +6634,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		return (PF_PASS);
 	}
 
-	if (pf_setup_pdesc(AF_INET, dir, &pd, m0, &action, &reason, kif, &a, &r,
+	if (pf_setup_pdesc(af, dir, &pd, m0, &action, &reason, kif, &a, &r,
 	    &ruleset, &off, &hdrlen) == -1) {
 		if (action == PF_PASS)
 			return (PF_PASS);
@@ -6718,6 +6691,12 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 	case IPPROTO_ICMP: {
+		if (af == AF_INET6) {
+			action = PF_DROP;
+			DPFPRINTF(LOG_NOTICE,
+			    "dropping IPv6 packet with ICMPv4 payload");
+			goto done;
+		}
 		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
 		    &reason);
 		if (action == PF_PASS || action == PF_AFRT) {
@@ -6734,10 +6713,25 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 	case IPPROTO_ICMPV6: {
-		action = PF_DROP;
-		DPFPRINTF(LOG_NOTICE,
-		    "dropping IPv4 packet with ICMPv6 payload");
-		goto done;
+		if (af == AF_INET) {
+			action = PF_DROP;
+			DPFPRINTF(LOG_NOTICE,
+			    "dropping IPv4 packet with ICMPv6 payload");
+			goto done;
+		}
+		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
+		    &reason);
+		if (action == PF_PASS || action == PF_AFRT) {
+#if NPFSYNC > 0
+			pfsync_update_state(s);
+#endif /* NPFSYNC */
+			r = s->rule.ptr;
+			a = s->anchor.ptr;
+			pd.pflog |= s->log;
+		} else if (s == NULL)
+			action = pf_test_rule(&r, &s, dir, kif,
+			    m, off, &pd, &a, &ruleset, hdrlen);
+		break;
 	}
 
 	default:
@@ -6759,14 +6753,13 @@ done:
 	if (action != PF_DROP) {
 		if (s) {
 			/* The non-state case is handled in pf_test_rule() */
-			struct ip	*h = mtod(m, struct ip *);
-			if (action == PF_PASS && h->ip_hl > 5 &&
+			if (action == PF_PASS && pd.badopts &&
 			    !(s->state_flags & PFSTATE_ALLOWOPTS)) {
 				action = PF_DROP;
 				REASON_SET(&reason, PFRES_IPOPTIONS);
 				pd.pflog |= PF_LOG_FORCE;
 				DPFPRINTF(LOG_NOTICE, "dropping packet with "
-				    "ip options in pf_test()");
+				    "ip/ipv6 options in pf_test()");
 			}
 
 			pf_scrub(m, s->state_flags, pd.af, s->min_ttl,
@@ -6801,9 +6794,11 @@ done:
 	 * bound specifically to loopback due to security implications,
 	 * see tcp_input() and in_pcblookup_listen().
 	 */
-	if (pd.destchg &&
-	    (ntohl(pd.dst->v4.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)
-		m->m_pkthdr.pf.flags |= PF_TAG_TRANSLATE_LOCALHOST;
+	if (pd.destchg)
+		if ((af == AF_INET && (ntohl(pd.dst->v4.s_addr) >>
+		    IN_CLASSA_NSHIFT) == IN_LOOPBACKNET) || (af == AF_INET6 &&
+		    IN6_IS_ADDR_LOOPBACK(&pd.dst->v6)))
+			m->m_pkthdr.pf.flags |= PF_TAG_TRANSLATE_LOCALHOST;
 	/* We need to redo the route lookup on outgoing routes. */
 	if (pd.destchg && dir == PF_OUT)
 		m->m_pkthdr.pf.flags |= PF_TAG_REROUTE;
@@ -6815,7 +6810,7 @@ done:
 			m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED;
 			divert->port = r->divert.port;
 			divert->rdomain = pd.rdomain;
-			divert->addr.ipv4 = r->divert.addr.v4;
+			divert->addr = r->divert.addr;
 		}
 	}
 
@@ -6832,13 +6827,12 @@ done:
 		struct pf_rule_item	*ri;
 
 		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
-			PFLOG_PACKET(kif, h, m, dir, reason, r, a,
-			    ruleset, &pd);
+			PFLOG_PACKET(kif, m, dir, reason, r, a, ruleset, &pd);
 		if (s) {
 			SLIST_FOREACH(ri, &s->match_rules, entry)
 				if (ri->r->log & PF_LOG_ALL)
-					PFLOG_PACKET(kif, h, m, dir,
-					    reason, ri->r, a, ruleset, &pd);
+					PFLOG_PACKET(kif, m, dir, reason,
+					    ri->r, a, ruleset, &pd);
 		}
 	}
 
@@ -6852,270 +6846,12 @@ done:
 		action = PF_PASS;
 		break;
 	case PF_DIVERT:
-		divert_packet(m, dir);
-		*m0 = NULL;
-		action = PF_PASS;
-		break;
-	case PF_AFRT:
-		if (pf_translate_af(AF_INET6, &m, off, &pd)) {
-			if (!m)
-				*m0 = NULL;
-			action = PF_DROP;
-			break;
-		}
-		pf_route6(&m, r, dir, kif->pfik_ifp, s);
-		*m0 = NULL;
-		action = PF_PASS;
-		break;
-	default:
-		/* pf_route can free the mbuf causing *m0 to become NULL */
-		if (r->rt)
-			pf_route(m0, r, dir, kif->pfik_ifp, s);
-		break;
-	}
-
-	return (action);
-}
-#endif /* INET */
-
+		if (af == AF_INET)
+			divert_packet(m, dir);
 #ifdef INET6
-int
-pf_test6(int fwdir, struct ifnet *ifp, struct mbuf **m0,
-    struct ether_header *eh)
-{
-	struct pfi_kif		*kif;
-	u_short			 action, reason = 0;
-	struct mbuf		*m = *m0;
-	struct m_tag		*mtag;
-	struct pf_rule		*a = NULL, *r = &pf_default_rule;
-	struct pf_state		*s = NULL;
-	struct pf_ruleset	*ruleset = NULL;
-	struct pf_pdesc		 pd;
-	union pf_headers	 hdrs;
-	int			 off, hdrlen;
-	int			 dir = (fwdir == PF_FWD) ? PF_OUT : fwdir;
-	u_int32_t		 qid, pqid = 0;
-
-	if (!pf_status.running)
-		return (PF_PASS);
-
-	memset(&pd, 0, sizeof(pd));
-	pd.hdr.any = &hdrs;
-	if (ifp->if_type == IFT_CARP && ifp->if_carpdev)
-		kif = (struct pfi_kif *)ifp->if_carpdev->if_pf_kif;
-	else
-		kif = (struct pfi_kif *)ifp->if_pf_kif;
-
-	if (kif == NULL) {
-		DPFPRINTF(LOG_ERR,
-		    "pf_test6: kif == NULL, if_xname %s", ifp->if_xname);
-		return (PF_DROP);
-	}
-	if (kif->pfik_flags & PFI_IFLAG_SKIP)
-		return (PF_PASS);
-
-#ifdef DIAGNOSTIC
-	if ((m->m_flags & M_PKTHDR) == 0)
-		panic("non-M_PKTHDR is passed to pf_test6");
-#endif /* DIAGNOSTIC */
-
-	if (m->m_pkthdr.pf.flags & PF_TAG_GENERATED)
-		return (PF_PASS);
-
-	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED_PACKET)
-		return (PF_PASS);
-
-	if (m->m_pkthdr.pf.flags & PF_TAG_REFRAGMENTED) {
-		m->m_pkthdr.pf.flags &= ~PF_TAG_REFRAGMENTED;
-		return (PF_PASS);
-	}
-
-	if (pf_setup_pdesc(AF_INET6, dir, &pd, m0, &action, &reason, kif, &a,
-	    &r, &ruleset, &off, &hdrlen) == -1) {
-		if (action == PF_PASS)
-			return (PF_PASS);
-		m = *m0;
-		pd.pflog |= PF_LOG_FORCE;
-		goto done;
-	}
-	pd.eh = eh;
-	m = *m0;	/* pf_setup_pdesc -> pf_normalize messes with m0 */
-
-	switch (pd.proto) {
-
-	case IPPROTO_TCP: {
-		if ((pd.hdr.tcp->th_flags & TH_ACK) && pd.p_len == 0)
-			pqid = 1;
-		action = pf_normalize_tcp(dir, m, off, &pd);
-		if (action == PF_DROP)
-			goto done;
-		action = pf_test_state_tcp(&s, dir, kif, m, off, &pd,
-		    &reason);
-		if (action == PF_PASS || action == PF_AFRT) {
-#if NPFSYNC > 0
-			pfsync_update_state(s);
-#endif /* NPFSYNC */
-			r = s->rule.ptr;
-			a = s->anchor.ptr;
-			pd.pflog |= s->log;
-		} else if (s == NULL)
-			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, hdrlen);
-
-		if (s) {
-			if (s->max_mss)
-				pf_normalize_mss(m, off, &pd, s->max_mss);
-		} else if (r->max_mss)
-			pf_normalize_mss(m, off, &pd, r->max_mss);
-
-		break;
-	}
-
-	case IPPROTO_UDP: {
-		action = pf_test_state_udp(&s, dir, kif, m, off, &pd);
-		if (action == PF_PASS || action == PF_AFRT) {
-#if NPFSYNC > 0
-			pfsync_update_state(s);
-#endif /* NPFSYNC */
-			r = s->rule.ptr;
-			a = s->anchor.ptr;
-			pd.pflog |= s->log;
-		} else if (s == NULL)
-			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, hdrlen);
-		break;
-	}
-
-	case IPPROTO_ICMP: {
-		action = PF_DROP;
-		DPFPRINTF(LOG_NOTICE,
-		    "dropping IPv6 packet with ICMPv4 payload");
-		goto done;
-	}
-
-	case IPPROTO_ICMPV6: {
-		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
-		    &reason);
-		if (action == PF_PASS || action == PF_AFRT) {
-#if NPFSYNC > 0
-			pfsync_update_state(s);
-#endif /* NPFSYNC */
-			r = s->rule.ptr;
-			a = s->anchor.ptr;
-			pd.pflog |= s->log;
-		} else if (s == NULL)
-			action = pf_test_rule(&r, &s, dir, kif,
-			    m, off, &pd, &a, &ruleset, hdrlen);
-		break;
-	}
-
-	default:
-		action = pf_test_state_other(&s, dir, kif, m, &pd);
-		if (action == PF_PASS || action == PF_AFRT) {
-#if NPFSYNC > 0
-			pfsync_update_state(s);
-#endif /* NPFSYNC */
-			r = s->rule.ptr;
-			a = s->anchor.ptr;
-			pd.pflog |= s->log;
-		} else if (s == NULL)
-			action = pf_test_rule(&r, &s, dir, kif, m, off,
-			    &pd, &a, &ruleset, hdrlen);
-		break;
-	}
-
-done:
-	if (action != PF_DROP) {
-		if (s) {
-			/* handle dangerous IPv6 extension headers. */
-			if (action == PF_PASS && pd.rh_cnt &&
-			    !(s->state_flags & PFSTATE_ALLOWOPTS)) {
-				action = PF_DROP;
-				REASON_SET(&reason, PFRES_IPOPTIONS);
-				pd.pflog |= PF_LOG_FORCE;
-				DPFPRINTF(LOG_NOTICE, "dropping packet with "
-				    "dangerous v6 headers");
-			}
-
-			pf_scrub(m, s->state_flags, pd.af, s->min_ttl,
-			    s->set_tos);
-			pf_tag_packet(m, s->tag, s->rtableid[pd.didx]);
-			if (pqid || (pd.tos & IPTOS_LOWDELAY))
-				qid = s->pqid;
-			else
-				qid = s->qid;
-		} else {
-			pf_scrub(m, r->scrub_flags, pd.af, r->min_ttl,
-			    r->set_tos);
-			if (pqid || (pd.tos & IPTOS_LOWDELAY))
-				qid = r->pqid;
-			else
-				qid = r->qid;
-		}
-	}
-
-	if (dir == PF_IN && s && s->key[PF_SK_STACK])
-		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
-
-#ifdef ALTQ
-	if (action == PF_PASS && qid) {
-		m->m_pkthdr.pf.qid = qid;
-		m->m_pkthdr.pf.hdr = mtod(m, caddr_t); /* add hints for ecn */
-	}
-#endif /* ALTQ */
-
-	if (pd.destchg &&
-	    IN6_IS_ADDR_LOOPBACK(&pd.dst->v6))
-		m->m_pkthdr.pf.flags |= PF_TAG_TRANSLATE_LOCALHOST;
-	/* We need to redo the route lookup on outgoing routes. */
-	if (pd.destchg && dir == PF_OUT)
-		m->m_pkthdr.pf.flags |= PF_TAG_REROUTE;
-
-	if (dir == PF_IN && action == PF_PASS && r->divert.port) {
-		struct pf_divert *divert;
-
-		if ((divert = pf_get_divert(m))) {
-			m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED;
-			divert->port = r->divert.port;
-			divert->rdomain = pd.rdomain;
-			divert->addr.ipv6 = r->divert.addr.v6;
-		}
-	}
-
-	if (action == PF_PASS && r->divert_packet.port) {
-		struct pf_divert *divert;
-
-		if ((divert = pf_get_divert(m)))
-			divert->port = r->divert_packet.port;
-
-		action = PF_DIVERT;
-	}
-
-	if (pd.pflog) {
-		struct pf_rule_item	*ri;
-
-		if (pd.pflog & PF_LOG_FORCE || r->log & PF_LOG_ALL)
-			PFLOG_PACKET(kif, h, m, dir, reason, r, a,
-			    ruleset, &pd);
-		if (s) {
-			SLIST_FOREACH(ri, &s->match_rules, entry)
-				if (ri->r->log & PF_LOG_ALL)
-					PFLOG_PACKET(kif, h, m, dir,
-					    reason, ri->r, a, ruleset, &pd);
-		}
-	}
-
-	pf_counters_inc(dir, action, &pd, kif, s, r, a);
-
-	switch (action) {
-	case PF_SYNPROXY_DROP:
-		m_freem(*m0);
-	case PF_DEFER:
-		*m0 = NULL;
-		action = PF_PASS;
-		break;
-	case PF_DIVERT:
-		divert6_packet(m, dir);
+		if (af == AF_INET6)
+			divert6_packet(m, dir);
+#endif
 		*m0 = NULL;
 		action = PF_PASS;
 		break;
@@ -7131,20 +6867,29 @@ done:
 		action = PF_PASS;
 		break;
 	default:
-		/* pf_route6 can free the mbuf causing *m0 to become NULL */
-		if (r->rt)
-			pf_route6(m0, r, dir, kif->pfik_ifp, s);
+		/* pf_route can free the mbuf causing *m0 to become NULL */
+		if (r->rt) {
+			if (af == AF_INET)
+				pf_route(m0, r, dir, kif->pfik_ifp, s);
+#ifdef INET6
+			if (af == AF_INET6)
+				pf_route6(m0, r, dir, kif->pfik_ifp, s);
+#endif
+		}
 		break;
 	}
 
+#ifdef INET6
 	/* if reassembled packet passed, create new fragments */
-	if (pf_status.reass && action == PF_PASS && *m0 && fwdir == PF_FWD &&
-	    (mtag = m_tag_find(m, PACKET_TAG_PF_REASSEMBLED, NULL)) != NULL)
-		action = pf_refragment6(m0, mtag, fwdir);
+	if (pf_status.reass && action == PF_PASS && *m0 && fwdir == PF_FWD) {
+		struct m_tag	*mtag;
+		if ((mtag = m_tag_find(m, PACKET_TAG_PF_REASSEMBLED, NULL)))
+			action = pf_refragment6(m0, mtag, fwdir);
+	}
+#endif
 
 	return (action);
 }
-#endif /* INET6 */
 
 int
 pf_check_congestion(struct ifqueue *ifq)

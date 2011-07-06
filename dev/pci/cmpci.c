@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpci.c,v 1.31 2011/04/03 15:36:02 jasper Exp $	*/
+/*	$OpenBSD: cmpci.c,v 1.33 2011/07/03 15:47:17 matthew Exp $	*/
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*
@@ -526,8 +526,6 @@ cmpci_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
 		break;
@@ -672,7 +670,7 @@ cmpci_query_encoding(void *handle, struct audio_encoding *fp)
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
-		fp->flags = 0;
+		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
 		break;
 	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);

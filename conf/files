@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.514 2011/06/23 21:50:26 oga Exp $
+#	$OpenBSD: files,v 1.518 2011/07/06 10:25:21 ariane Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -558,10 +558,8 @@ file altq/altq_subr.c			altq
 file altq/altq_red.c			altq
 file altq/altq_cbq.c			altq
 file altq/altq_rmclass.c		altq
-file altq/altq_cdnr.c			altq_cdnr
 file altq/altq_hfsc.c			altq
 file altq/altq_priq.c			altq
-file altq/altq_rio.c			altq_rio
 file ddb/db_access.c			ddb | kgdb
 file ddb/db_aout.c			ddb
 file ddb/db_break.c			ddb
@@ -723,6 +721,7 @@ file kern/subr_autoconf.c
 file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
+file kern/subr_hiballoc.c		!small_kernel
 file kern/subr_log.c
 file kern/subr_pool.c
 file kern/dma_alloc.c
@@ -769,6 +768,7 @@ file kern/vfs_syscalls.c
 file kern/vfs_vops.c
 file kern/vfs_vnops.c
 file kern/vfs_getcwd.c
+file kern/spec_vnops.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
 file miscfs/procfs/procfs_cmdline.c	procfs
@@ -779,8 +779,6 @@ file miscfs/procfs/procfs_status.c	procfs
 file miscfs/procfs/procfs_subr.c	procfs
 file miscfs/procfs/procfs_vfsops.c	procfs
 file miscfs/procfs/procfs_vnops.c	procfs
-file miscfs/specfs/spec_vnops.c
-file miscfs/specfs/spec_subr.c
 file msdosfs/msdosfs_conv.c		msdosfs
 file msdosfs/msdosfs_denode.c		msdosfs
 file msdosfs/msdosfs_fat.c		msdosfs
@@ -1057,8 +1055,6 @@ file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/compat_vm.c		!small_kernel & compat_linux
 file compat/common/kern_info_09.c	!small_kernel & compat_linux
-file compat/common/vfs_syscalls_35.c	!small_kernel & compat_35
-file compat/common/kern_ipc_35.c	!small_kernel & compat_35
 file compat/common/kern_exit_43.c	!small_kernel
 file compat/common/kern_info_43.c	!small_kernel
 file compat/common/kern_resource_43.c	!small_kernel
