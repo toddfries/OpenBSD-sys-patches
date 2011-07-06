@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vnops.c,v 1.59 2011/04/05 14:14:07 thib Exp $	*/
+/*	$OpenBSD: ext2fs_vnops.c,v 1.61 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_vnops.c,v 1.1 1997/06/11 09:34:09 bouyer Exp $	*/
 
 /*
@@ -55,11 +55,11 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/signalvar.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <miscfs/fifofs/fifo.h>
-#include <miscfs/specfs/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -119,7 +119,7 @@ ext2fs_mknod(void *v)
 	vput(*vpp);
 	(*vpp)->v_type = VNON;
 	vgone(*vpp);
-	*vpp = 0;
+	*vpp = NULL;
 	return (0);
 }
 
