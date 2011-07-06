@@ -63,6 +63,7 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet/ip6.h>
 #include <netinet6/nd6.h>
 #include <netinet/icmp6.h>
 #endif /* INET6 */
@@ -91,7 +92,7 @@ struct if_clone	pflog_cloner =
     IF_CLONE_INITIALIZER("pflog", pflog_clone_create, pflog_clone_destroy);
 
 struct ifnet	*pflogifs[PFLOGIFS_MAX];	/* for fast access */
-struct mbuf	*mfake = NULL;
+struct mbuf	*pflog_mhdr = NULL, *pflog_mptr = NULL;
 
 void
 pflogattach(int npflog)
@@ -100,8 +101,12 @@ pflogattach(int npflog)
 	LIST_INIT(&pflogif_list);
 	for (i = 0; i < PFLOGIFS_MAX; i++)
 		pflogifs[i] = NULL;
-	if (mfake == NULL)
-		mfake = m_get(M_DONTWAIT, MT_HEADER);
+	if (pflog_mhdr == NULL)
+		if ((pflog_mhdr = m_get(M_DONTWAIT, MT_HEADER)) == NULL)
+			panic("pflogattach: no mbuf");
+	if (pflog_mptr == NULL)
+		if ((pflog_mptr = m_get(M_DONTWAIT, MT_DATA)) == NULL)
+			panic("pflogattach: no mbuf");
 	if_clone_attach(&pflog_cloner);
 }
 
@@ -226,7 +231,6 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 
 	bzero(&hdr, sizeof(hdr));
 	hdr.length = PFLOG_REAL_HDRLEN;
-	hdr.af = pd->af;
 	hdr.action = rm->action;
 	hdr.reason = reason;
 	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
@@ -254,8 +258,10 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 	hdr.rule_pid = rm->cpid;
 	hdr.dir = dir;
 
-	PF_ACPY(&hdr.saddr, &pd->nsaddr, pd->af);
-	PF_ACPY(&hdr.daddr, &pd->ndaddr, pd->af);
+	PF_ACPY(&hdr.saddr, &pd->nsaddr, pd->naf);
+	PF_ACPY(&hdr.daddr, &pd->ndaddr, pd->naf);
+	hdr.af = pd->af;
+	hdr.naf = pd->naf;
 	hdr.sport = pd->nsport;
 	hdr.dport = pd->ndport;
 
@@ -271,12 +277,12 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 void
 pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 {
-	const struct mbuf	*m;
+	struct mbuf		*m, *mp, *mhdr, *mptr;
 	struct pfloghdr		*pfloghdr;
 	u_int			 count;
-	u_char			*dst;
+	u_char			*dst, *mdst, *cp;
 	u_short			 action, reason;
-	int			 off = 0, hdrlen = 0;
+	int			 afto, hlen, mlen, off = 0, hdrlen = 0;
 	union {
 		struct tcphdr		tcp;
 		struct udphdr		udp;
@@ -292,14 +298,18 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	struct pf_addr		 osaddr, odaddr;
 	u_int16_t		 osport = 0, odport = 0;
 
-	m = src_arg;
+	m = (struct mbuf *)src_arg;
 	dst = dst_arg;
+
+	mhdr = pflog_mhdr;
+	mptr = pflog_mptr;
 
 	if (m == NULL)
 		panic("pflog_bpfcopy got no mbuf");
 
 	/* first mbuf holds struct pfloghdr */
 	pfloghdr = mtod(m, struct pfloghdr *);
+	afto = pfloghdr->af != pfloghdr->naf;
 	count = min(m->m_len, len);
 	bcopy(pfloghdr, dst, count);
 	pfloghdr = (struct pfloghdr *)dst;
@@ -307,38 +317,72 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	len -= count;
 	m = m->m_next;
 
-	/* second mbuf is pkthdr */
-	if (len > 0) {
-		if (m == NULL)
-			panic("no second mbuf");
-		bcopy(m, mfake, sizeof(*mfake));
-		mfake->m_flags &= ~(M_EXT|M_CLUSTER);
-		mfake->m_next = NULL;
-		mfake->m_nextpkt = NULL;
-		mfake->m_data = dst;
-		mfake->m_len = len;
-	} else
+	if (len <= 0)
 		return;
 
-	while (len > 0) {
-		if (m == 0)
-			panic("bpf_mcopy");
-		count = min(m->m_len, len);
-		bcopy(mtod(m, caddr_t), (caddr_t)dst, count);
-		m = m->m_next;
-		dst += count;
-		len -= count;
+	/* second mbuf is pkthdr */
+	if (m == NULL)
+		panic("no second mbuf");
+
+	/* mhdr will hold an ip/ip6 header and 8 bytes of the protocol header */
+	m_inithdr(mhdr);
+	mhdr->m_len = 0;
+	mhdr->m_pkthdr.len = 0;
+
+	/* reserve space for header expansion (ip -> ip6) */
+	if (afto && pfloghdr->af == AF_INET)
+		mhdr->m_data += sizeof(struct ip6_hdr) -
+		    sizeof(struct ip);
+
+	mdst = mtod(mhdr, char *);
+	switch (pfloghdr->af) {
+	case AF_INET: {
+		struct ip	*h;
+
+		m_copydata(m, 0, sizeof(*h), mdst);
+		h = (struct ip *)mdst;
+		hlen = h->ip_hl << 2;
+		if (hlen > sizeof(*h))
+			m_copydata(m, sizeof(*h), hlen - sizeof(*h),
+			    mdst + sizeof(*h));
+		break;
+	    }
+	case AF_INET6: {
+		hlen = sizeof(struct ip6_hdr);
+		m_copydata(m, 0, hlen, mdst);
+		break;
+	    }
+	default:
+		/* shouldn't happen ever :-) */
+		m_copydata(m, 0, len, dst);
+		return;
 	}
 
-	if (mfake->m_flags & M_PKTHDR)
-		mfake->m_pkthdr.len = min(mfake->m_pkthdr.len, mfake->m_len);
+	/* copy 8 bytes of the protocol header */
+	m_copydata(m, hlen, 8, mdst + hlen);
+
+	mhdr->m_len += hlen + 8;
+	mhdr->m_pkthdr.len = mhdr->m_len;
+
+	/* create a chain mhdr -> mptr, mptr->m_data = (m->m_data+hlen+8) */
+	mp = m_getptr(m, hlen + 8, &off);
+	if (mp != NULL) {
+		bcopy(mp, mptr, sizeof(*mptr));
+		cp = mtod(mp, char *);
+		mptr->m_data += off;
+		mptr->m_len -= off;
+		mptr->m_flags &= ~M_PKTHDR;
+		mhdr->m_next = mptr;
+		mhdr->m_pkthdr.len += m->m_pkthdr.len - (hlen + 8);
+	}
 
 	/* rewrite addresses if needed */
 	memset(&pd, 0, sizeof(pd));
 	pd.hdr.any = &pf_hdrs;
-	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mfake, &action,
+	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mhdr, &action,
 	    &reason, NULL, NULL, NULL, NULL, &off, &hdrlen) == -1)
 		return;
+	pd.naf = pfloghdr->naf;
 
 	PF_ACPY(&osaddr, pd.src, pd.af);
 	PF_ACPY(&odaddr, pd.dst, pd.af);
@@ -350,11 +394,27 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if ((pfloghdr->rewritten = pf_translate(&pd, &pfloghdr->saddr,
 	    pfloghdr->sport, &pfloghdr->daddr, pfloghdr->dport, 0,
 	    pfloghdr->dir))) {
-		m_copyback(mfake, off, min(mfake->m_len - off, hdrlen),
-		    pd.hdr.any, M_NOWAIT);
+		m_copyback(mhdr, off, min(mhdr->m_len - off, 8), pd.hdr.any,
+		    M_NOWAIT);
+		if (afto) {
+			PF_ACPY(&pd.nsaddr, &pfloghdr->saddr, pd.naf);
+			PF_ACPY(&pd.ndaddr, &pfloghdr->daddr, pd.naf);
+		}
 		PF_ACPY(&pfloghdr->saddr, &osaddr, pd.af);
 		PF_ACPY(&pfloghdr->daddr, &odaddr, pd.af);
 		pfloghdr->sport = osport;
 		pfloghdr->dport = odport;
 	}
+
+	pd.tot_len = min(pd.tot_len, len);
+	pd.tot_len -= mhdr->m_data - mhdr->m_pktdat;
+
+	if (afto)
+		pf_translate_af(pd.naf, &mhdr, off, &pd);
+
+	mlen = min(mhdr->m_pkthdr.len, len);
+	m_copydata(mhdr, 0, mlen, dst);
+	len -= mlen;
+	if (len > 0)
+		bzero(dst + mlen, len);
 }

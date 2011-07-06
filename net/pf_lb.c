@@ -103,6 +103,8 @@ void			 pf_hash(struct pf_addr *, struct pf_addr *,
 int			 pf_get_sport(struct pf_pdesc *, struct pf_rule *,
 			    struct pf_addr *, u_int16_t *, u_int16_t,
 			    u_int16_t, struct pf_src_node **);
+int			 pf_get_transaddr_af(struct pf_rule *,
+			    struct pf_pdesc *, struct pf_src_node **);
 int			 pf_islinklocal(sa_family_t, struct pf_addr *);
 
 #define mix(a,b,c) \
@@ -172,7 +174,7 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 	u_int16_t		cut;
 
 	bzero(&init_addr, sizeof(init_addr));
-	if (pf_map_addr(pd->af, r, &pd->nsaddr, naddr, &init_addr, sn, &r->nat,
+	if (pf_map_addr(pd->naf, r, &pd->nsaddr, naddr, &init_addr, sn, &r->nat,
 	    PF_SN_NAT))
 		return (1);
 
@@ -186,7 +188,7 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 	}
 
 	do {
-		key.af = pd->af;
+		key.af = pd->naf;
 		key.proto = pd->proto;
 		key.rdomain = pd->rdomain;
 		PF_ACPY(&key.addr[0], &pd->ndaddr, key.af);
@@ -251,7 +253,7 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 		case PF_POOL_RANDOM:
 		case PF_POOL_ROUNDROBIN:
 		case PF_POOL_LEASTSTATES:
-			if (pf_map_addr(pd->af, r, &pd->nsaddr, naddr,
+			if (pf_map_addr(pd->naf, r, &pd->nsaddr, naddr,
 			    &init_addr, sn, &r->nat, PF_SN_NAT))
 				return (1);
 			break;
@@ -261,7 +263,7 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 		default:
 			return (1);
 		}
-	} while (! PF_AEQ(&init_addr, naddr, pd->af) );
+	} while (! PF_AEQ(&init_addr, naddr, pd->naf) );
 	return (1);					/* none available */
 }
 
@@ -531,6 +533,9 @@ pf_get_transaddr(struct pf_rule *r, struct pf_pdesc *pd,
 {
 	struct pf_addr	naddr;
 	u_int16_t	nport = 0;
+
+	if (pd->af != pd->naf)
+		return (pf_get_transaddr_af(r, pd, sns));
 
 	if (r->nat.addr.type != PF_ADDR_NONE) {
 		/* XXX is this right? what if rtable is changed at the same

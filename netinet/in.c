@@ -87,7 +87,6 @@
 
 #ifdef INET
 
-int in_mask2len(struct in_addr *);
 void in_len2mask(struct in_addr *, int);
 int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
 	struct ifnet *);
