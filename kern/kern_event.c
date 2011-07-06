@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.40 2011/05/03 15:59:50 marco Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.41 2011/07/02 22:20:08 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -164,7 +164,7 @@ kqueue_kqfilter(struct file *fp, struct knote *kn)
 	struct kqueue *kq = (struct kqueue *)kn->kn_fp->f_data;
 
 	if (kn->kn_filter != EVFILT_READ)
-		return (1);
+		return (EINVAL);
 
 	kn->kn_fop = &kqread_filtops;
 	SLIST_INSERT_HEAD(&kq->kq_sel.si_note, kn, kn_selnext);
@@ -196,10 +196,6 @@ filt_procattach(struct knote *kn)
 
 	p = pfind(kn->kn_id);
 	if (p == NULL)
-		return (ESRCH);
-
-	/* threads and exiting processes can't be specified */
-	if (p->p_flag & (P_THREAD|P_WEXIT))
 		return (ESRCH);
 
 	/*
@@ -266,15 +262,11 @@ filt_proc(struct knote *kn, long hint)
 		kn->kn_fflags |= event;
 
 	/*
-	 * process is gone, so flag the event as finished and remove it
-	 * from the process's klist
+	 * process is gone, so flag the event as finished.
 	 */
 	if (event == NOTE_EXIT) {
-		struct process *pr = kn->kn_ptr.p_proc->p_p;
-
 		kn->kn_status |= KN_DETACHED;
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
-		SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 		return (1);
 	}
 
@@ -944,19 +936,6 @@ knote_fdclose(struct proc *p, int fd)
 	struct klist *list = &fdp->fd_knlist[fd];
 
 	knote_remove(p, list);
-}
-
-/*
- * handle a process exiting, including the triggering of NOTE_EXIT notes
- * XXX this could be more efficient, doing a single pass down the klist
- */
-void
-knote_processexit(struct process *pr)
-{
-	KNOTE(&pr->ps_klist, NOTE_EXIT);
-
-	/* remove other knotes hanging off the process */
-	knote_remove(pr->ps_mainproc, &pr->ps_klist);
 }
 
 void

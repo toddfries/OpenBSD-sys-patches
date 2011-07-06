@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rmclass.c,v 1.15 2008/05/08 15:22:02 chl Exp $	*/
+/*	$OpenBSD: altq_rmclass.c,v 1.19 2011/07/04 01:07:43 henning Exp $	*/
 /*	$KAME: altq_rmclass.c,v 1.10 2001/02/09 07:20:40 kjc Exp $	*/
 
 /*
@@ -51,7 +51,6 @@
 #include <altq/altq_rmclass.h>
 #include <altq/altq_rmclass_debug.h>
 #include <altq/altq_red.h>
-#include <altq/altq_rio.h>
 
 /*
  * Local Macros
@@ -191,14 +190,6 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 		return (NULL);
 	}
 #endif
-#ifndef ALTQ_RIO
-	if (flags & RMCF_RIO) {
-#ifdef ALTQ_DEBUG
-		printf("rmc_newclass: RIO not configured for CBQ!\n");
-#endif
-		return (NULL);
-	}
-#endif
 
 	cl = malloc(sizeof(struct rm_class), M_DEVBUF, M_WAITOK|M_ZERO);
 	CALLOUT_INIT(&cl->callout_);
@@ -245,18 +236,12 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 	cl->overlimit = action;
 
 #ifdef ALTQ_RED
-	if (flags & (RMCF_RED|RMCF_RIO)) {
+	if (flags & RMCF_RED) {
 		int red_flags, red_pkttime;
 
 		red_flags = 0;
 		if (flags & RMCF_ECN)
 			red_flags |= REDF_ECN;
-		if (flags & RMCF_FLOWVALVE)
-			red_flags |= REDF_FLOWVALVE;
-#ifdef ALTQ_RIO
-		if (flags & RMCF_CLEARDSCP)
-			red_flags |= RIOF_CLEARDSCP;
-#endif
 		red_pkttime = nsecPerByte * pktsize  / 1000;
 
 		if (flags & RMCF_RED) {
@@ -266,13 +251,6 @@ rmc_newclass(int pri, struct rm_ifdat *ifd, u_int nsecPerByte,
 			    red_flags, red_pkttime);
 			qtype(cl->q_) = Q_RED;
 		}
-#ifdef ALTQ_RIO
-		else {
-			cl->red_ = (red_t *)rio_alloc(0, NULL,
-						      red_flags, red_pkttime);
-			qtype(cl->q_) = Q_RIO;
-		}
-#endif
 	}
 #endif /* ALTQ_RED */
 
@@ -599,10 +577,6 @@ rmc_delete_class(struct rm_ifdat *ifd, struct rm_class *cl)
 	 * Free the class structure.
 	 */
 	if (cl->red_ != NULL) {
-#ifdef ALTQ_RIO
-		if (q_is_rio(cl->q_))
-			rio_destroy((rio_t *)cl->red_);
-#endif
 #ifdef ALTQ_RED
 		if (q_is_red(cl->q_))
 			red_destroy(cl->red_);
@@ -649,7 +623,6 @@ rmc_init(struct ifaltq *ifq, struct rm_ifdat *ifd, u_int nsecPerByte,
 	ifd->ns_per_byte_ = nsecPerByte;
 	ifd->maxpkt_ = mtu;
 	ifd->wrr_ = (flags & RMCF_WRR) ? 1 : 0;
-	ifd->efficient_ = (flags & RMCF_EFFICIENT) ? 1 : 0;
 #if 1
 	ifd->maxiftime_ = mtu * nsecPerByte / 1000 * 16;
 	if (mtu * nsecPerByte > 10 * 1000000)
@@ -933,12 +906,6 @@ _rmc_wrr_dequeue_next(struct rm_ifdat *ifd, int op)
 	if (op == ALTDQ_REMOVE && ifd->pollcache_) {
 		cl = ifd->pollcache_;
 		cpri = cl->pri_;
-		if (ifd->efficient_) {
-			/* check if this class is overlimit */
-			if (cl->undertime_.tv_sec != 0 &&
-			    rmc_under_limit(cl, &now) == 0)
-				first = cl;
-		}
 		ifd->pollcache_ = NULL;
 		goto _wrr_out;
 	}
@@ -1015,24 +982,8 @@ _rmc_wrr_dequeue_next(struct rm_ifdat *ifd, int op)
 	 */
 	reset_cutoff(ifd);
 	CBQTRACE(_rmc_wrr_dequeue_next, 'otsr', ifd->cutoff_);
+	return (NULL);
 
-	if (!ifd->efficient_ || first == NULL)
-		return (NULL);
-
-	cl = first;
-	cpri = cl->pri_;
-#if 0	/* too time-consuming for nothing */
-	if (cl->sleeping_)
-		CALLOUT_STOP(&cl->callout_);
-	cl->sleeping_ = 0;
-	cl->undertime_.tv_sec = 0;
-#endif
-	ifd->borrowed_[ifd->qi_] = cl->borrow_;
-	ifd->cutoff_ = cl->borrow_->depth_;
-
-	/*
-	 * Deque the packet and do the book keeping...
-	 */
  _wrr_out:
 	if (op == ALTDQ_REMOVE) {
 		m = _rmc_getq(cl);
@@ -1131,23 +1082,9 @@ _rmc_prr_dequeue_next(struct rm_ifdat *ifd, int op)
 	 * of the link-sharing structure are overlimit.
 	 */
 	reset_cutoff(ifd);
-	if (!ifd->efficient_ || first == NULL)
-		return (NULL);
 
-	cl = first;
-	cpri = cl->pri_;
-#if 0	/* too time-consuming for nothing */
-	if (cl->sleeping_)
-		CALLOUT_STOP(&cl->callout_);
-	cl->sleeping_ = 0;
-	cl->undertime_.tv_sec = 0;
-#endif
-	ifd->borrowed_[ifd->qi_] = cl->borrow_;
-	ifd->cutoff_ = cl->borrow_->depth_;
+	return (NULL);
 
-	/*
-	 * Deque the packet and do the book keeping...
-	 */
  _prr_out:
 	if (op == ALTDQ_REMOVE) {
 		m = _rmc_getq(cl);
@@ -1542,17 +1479,10 @@ rmc_root_overlimit(struct rm_class *cl, struct rm_class *borrow)
 static int
 _rmc_addq(rm_class_t *cl, mbuf_t *m)
 {
-#ifdef ALTQ_RIO
-	if (q_is_rio(cl->q_))
-		return rio_addq((rio_t *)cl->red_, cl->q_, m, cl->pktattr_);
-#endif
 #ifdef ALTQ_RED
 	if (q_is_red(cl->q_))
 		return red_addq(cl->red_, cl->q_, m, cl->pktattr_);
 #endif /* ALTQ_RED */
-
-	if (cl->flags_ & RMCF_CLEARDSCP)
-		write_dsfield(m, cl->pktattr_, 0);
 
 	_addq(cl->q_, m);
 	return (0);
@@ -1571,10 +1501,6 @@ _rmc_dropq(rm_class_t *cl)
 static mbuf_t *
 _rmc_getq(rm_class_t *cl)
 {
-#ifdef ALTQ_RIO
-	if (q_is_rio(cl->q_))
-		return rio_getq((rio_t *)cl->red_, cl->q_);
-#endif
 #ifdef ALTQ_RED
 	if (q_is_red(cl->q_))
 		return red_getq(cl->red_, cl->q_);
@@ -1648,7 +1574,7 @@ void cbqtrace_dump(int counter)
 }
 #endif /* CBQ_TRACE */
 
-#if defined(ALTQ_CBQ) || defined(ALTQ_RED) || defined(ALTQ_RIO) || defined(ALTQ_HFSC) || defined(ALTQ_PRIQ)
+#if defined(ALTQ_CBQ) || defined(ALTQ_RED) || defined(ALTQ_HFSC) || defined(ALTQ_PRIQ)
 #if !defined(__GNUC__) || defined(ALTQ_DEBUG)
 
 void
@@ -1764,4 +1690,4 @@ _flushq(class_queue_t *q)
 }
 
 #endif /* !__GNUC__ || ALTQ_DEBUG */
-#endif /* ALTQ_CBQ || ALTQ_RED || ALTQ_RIO || ALTQ_HFSC || ALTQ_PRIQ */
+#endif /* ALTQ_CBQ || ALTQ_RED || ALTQ_HFSC || ALTQ_PRIQ */

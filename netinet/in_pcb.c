@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.121 2011/05/29 13:22:53 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.124 2011/07/06 01:57:37 dlg Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -118,6 +118,7 @@ int ipport_lastauto = IPPORT_USERRESERVED;
 int ipport_hifirstauto = IPPORT_HIFIRSTAUTO;
 int ipport_hilastauto = IPPORT_HILASTAUTO;
 
+struct baddynamicports baddynamicports;
 struct pool inpcb_pool;
 int inpcb_pool_initialized = 0;
 
@@ -134,9 +135,7 @@ int inpcb_pool_initialized = 0;
 	&(table)->inpt_lhashtbl[(ntohs((lport)) + (rdom)) & table->inpt_lhash]
 
 void
-in_pcbinit(table, hashsize)
-	struct inpcbtable *table;
-	int hashsize;
+in_pcbinit(struct inpcbtable *table, int hashsize)
 {
 
 	CIRCLEQ_INIT(&table->inpt_queue);
@@ -150,8 +149,6 @@ in_pcbinit(table, hashsize)
 		panic("in_pcbinit: hashinit failed for lport");
 	table->inpt_lastport = 0;
 }
-
-struct baddynamicports baddynamicports;
 
 /*
  * Check if the specified port is invalid for dynamic allocation.
@@ -175,9 +172,7 @@ in_baddynamic(u_int16_t port, u_int16_t proto)
 }
 
 int
-in_pcballoc(so, v)
-	struct socket *so;
-	void *v;
+in_pcballoc(struct socket *so, void *v)
 {
 	struct inpcbtable *table = v;
 	struct inpcb *inp;
@@ -223,10 +218,7 @@ in_pcballoc(so, v)
 }
 
 int
-in_pcbbind(v, nam, p)
-	void *v;
-	struct mbuf *nam;
-	struct proc *p;
+in_pcbbind(void *v, struct mbuf *nam, struct proc *p)
 {
 	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
@@ -380,9 +372,7 @@ in_pcbbind(v, nam, p)
  * then pick one.
  */
 int
-in_pcbconnect(v, nam)
-	void *v;
-	struct mbuf *nam;
+in_pcbconnect(void *v, struct mbuf *nam)
 {
 	struct inpcb *inp = v;
 	struct sockaddr_in *ifaddr = NULL;
@@ -412,8 +402,10 @@ in_pcbconnect(v, nam)
 		if (sin->sin_addr.s_addr == INADDR_ANY)
 			sin->sin_addr = TAILQ_FIRST(&in_ifaddr)->ia_addr.sin_addr;
 		else if (sin->sin_addr.s_addr == INADDR_BROADCAST &&
-		  (TAILQ_FIRST(&in_ifaddr)->ia_ifp->if_flags & IFF_BROADCAST))
-			sin->sin_addr = TAILQ_FIRST(&in_ifaddr)->ia_broadaddr.sin_addr;
+		  (TAILQ_FIRST(&in_ifaddr)->ia_ifp->if_flags & IFF_BROADCAST) &&
+		  TAILQ_FIRST(&in_ifaddr)->ia_broadaddr.sin_addr.s_addr)
+			sin->sin_addr =
+			    TAILQ_FIRST(&in_ifaddr)->ia_broadaddr.sin_addr;
 	}
 	if (inp->inp_laddr.s_addr == INADDR_ANY) {
 		int error;
@@ -452,8 +444,7 @@ in_pcbconnect(v, nam)
 }
 
 void
-in_pcbdisconnect(v)
-	void *v;
+in_pcbdisconnect(void *v)
 {
 	struct inpcb *inp = v;
 
@@ -475,8 +466,7 @@ in_pcbdisconnect(v)
 }
 
 void
-in_pcbdetach(v)
-	void *v;
+in_pcbdetach(void *v)
 {
 	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
@@ -525,9 +515,7 @@ in_pcbdetach(v)
 }
 
 void
-in_setsockaddr(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in_setsockaddr(struct inpcb *inp, struct mbuf *nam)
 {
 	struct sockaddr_in *sin;
 
@@ -541,9 +529,7 @@ in_setsockaddr(inp, nam)
 }
 
 void
-in_setpeeraddr(inp, nam)
-	struct inpcb *inp;
-	struct mbuf *nam;
+in_setpeeraddr(struct inpcb *inp, struct mbuf *nam)
 {
 	struct sockaddr_in *sin;
 
@@ -625,8 +611,7 @@ in_pcbnotifyall(struct inpcbtable *table, struct sockaddr *dst, u_int rdomain,
  * (by a redirect), time to try a default gateway again.
  */
 void
-in_losing(inp)
-	struct inpcb *inp;
+in_losing(struct inpcb *inp)
 {
 	struct rtentry *rt;
 	struct rt_addrinfo info;
@@ -658,9 +643,7 @@ in_losing(inp)
  * and allocate a (hopefully) better one.
  */
 void
-in_rtchange(inp, errno)
-	struct inpcb *inp;
-	int errno;
+in_rtchange(struct inpcb *inp, int errno)
 {
 	if (inp->inp_route.ro_rt) {
 		rtfree(inp->inp_route.ro_rt);
@@ -757,8 +740,7 @@ in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg,
 }
 
 struct rtentry *
-in_pcbrtentry(inp)
-	struct inpcb *inp;
+in_pcbrtentry(struct inpcb *inp)
 {
 	struct route *ro;
 
@@ -884,8 +866,7 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 }
 
 void
-in_pcbrehash(inp)
-	struct inpcb *inp;
+in_pcbrehash(struct inpcb *inp)
 {
 	struct inpcbtable *table = inp->inp_table;
 	int s;
@@ -1025,10 +1006,10 @@ in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
 #if NPF > 0
 	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		struct pf_divert *divert;
-		/* XXX rdomain */
+
 		if ((divert = pf_find_divert(m)) == NULL)
 			return (NULL);
-		key1 = key2 = &divert->addr.ipv4;
+		key1 = key2 = &divert->addr.v4;
 		lport = divert->port;
 	} else
 #endif
@@ -1100,7 +1081,7 @@ in6_pcblookup_listen(struct inpcbtable *table, struct in6_addr *laddr,
 
 		if ((divert = pf_find_divert(m)) == NULL)
 			return (NULL);
-		key1 = key2 = &divert->addr.ipv6;
+		key1 = key2 = &divert->addr.v6;
 		lport = divert->port;
 	} else
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.48 2011/01/07 17:50:42 bluhm Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.50 2011/07/04 22:53:53 tedu Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -34,6 +34,7 @@
 
 #include <sys/selinfo.h>			/* for struct selinfo */
 #include <sys/queue.h>
+#include <sys/timeout.h>
 
 TAILQ_HEAD(soqhead, socket);
 
@@ -81,6 +82,8 @@ struct socket {
 	struct	socket *so_spliceback;	/* back ref for notify and cleanup */
 	off_t	so_splicelen;		/* number of bytes spliced so far */
 	off_t	so_splicemax;		/* maximum number of bytes to splice */
+	struct	timeval so_idletv;	/* idle timeout */
+	struct	timeout so_idleto;
 #endif /* SOCKET_SPLICE */
 /*
  * Variables for socket buffering.
@@ -111,7 +114,6 @@ struct socket {
 #define	SB_KNOTE	0x80		/* kernel note attached */
 #define	SB_SPLICE	0x0100		/* buffer is splice source or drain */
 
-	void	*so_internal;		/* Space for svr4 stream data */
 	void	(*so_upcall)(struct socket *so, caddr_t arg, int waitf);
 	caddr_t	so_upcallarg;		/* Arg for above */
 	uid_t	so_euid, so_ruid;	/* who opened the socket */
