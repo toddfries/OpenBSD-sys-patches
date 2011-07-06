@@ -1,4 +1,4 @@
-/*      $OpenBSD: cpu.h,v 1.37 2011/03/23 16:54:37 pirofti Exp $      */
+/*      $OpenBSD: cpu.h,v 1.39 2011/07/06 20:42:05 miod Exp $      */
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -91,7 +91,6 @@ struct	cpu_dep {
 	void	(*cpu_halt)(void); /* Cpu dependent halt call */
 	void	(*cpu_reboot)(int); /* Cpu dependent reboot call */
 	void	(*cpu_clrf)(void); /* Clear cold/warm start flags */
-	void	(*cpu_subconf)(struct device *);/*config cpu dep. devs */
 	void	(*cpu_hardclock)(struct clockframe *);	/* hardclock handler */
 };
 
@@ -152,7 +151,6 @@ void	dumpconf(void);
 void	dumpsys(void);
 void	swapconf(void);
 void	disk_printtype(int, int);
-void	disk_reallymapin(struct buf *, pt_entry_t *, int, int);
 vaddr_t	vax_map_physmem(paddr_t, int);
 void	vax_unmap_physmem(vaddr_t, int);
 void	ioaccess(vaddr_t, paddr_t, int);
