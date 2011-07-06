@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.59 2010/11/17 12:27:03 jsing Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.61 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -54,7 +54,7 @@
 #include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
-#include <miscfs/specfs/specdev.h> /* XXX */	/* defines v_rdev */
+#include <sys/specdev.h> /* XXX */	/* defines v_rdev */
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/file.h>
@@ -308,7 +308,7 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 	 * Read the boot sector of the filesystem, and then check the
 	 * boot signature.  If not a dos boot sector then error out.
 	 */
-	if ((error = bread(devvp, 0, 4096, NOCRED, &bp)) != 0)
+	if ((error = bread(devvp, 0, 4096, &bp)) != 0)
 		goto error_exit;
 	bp->b_flags |= B_AGE;
 	bsp = (union bootsector *)bp->b_data;
@@ -485,7 +485,7 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 	        struct fsinfo *fp;
 
 		if ((error = bread(devvp, pmp->pm_fsinfo, fsi_size(pmp),
-		    NOCRED, &bp)) != 0)
+		    &bp)) != 0)
 		        goto error_exit;
 		fp = (struct fsinfo *)bp->b_data;
 		if (!bcmp(fp->fsisig1, "RRaA", 4)

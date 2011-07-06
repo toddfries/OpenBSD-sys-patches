@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.6 2010/12/06 22:51:45 jasper Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.8 2011/06/26 23:19:11 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -35,8 +35,8 @@ extern int debug;
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
 const char bdevs[][4] = {
-	"wd", "", "fd", "", "sd", "st", "cd", "mcd",
-	"", "", "", "", "", "", "", "scd", "", "hd", ""
+	"wd", "", "fd", "", "sd", "st", "cd", "",
+	"", "", "", "", "", "", "", "", "", "hd", ""
 };
 const int nbdevs = nitems(bdevs);
 
