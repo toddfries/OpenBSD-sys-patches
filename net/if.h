@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.122 2011/03/13 15:31:41 stsp Exp $	*/
+/*	$OpenBSD: if.h,v 1.126 2011/07/05 00:58:27 henning Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -170,7 +170,8 @@ struct	ifqueue {
 #define LINK_STATE_HALF_DUPLEX	5	/* link is up and half duplex */
 #define LINK_STATE_FULL_DUPLEX	6	/* link is up and full duplex */
 
-#define LINK_STATE_IS_UP(_s)	((_s) >= LINK_STATE_UP)
+#define LINK_STATE_IS_UP(_s)	\
+		((_s) >= LINK_STATE_UP || (_s) == LINK_STATE_UNKNOWN)
 
 /*
  * Status bit descriptions for the various interface types.
@@ -682,7 +683,6 @@ do { \
 } while (/* CONSTCOND */0)
 
 #ifdef ALTQ
-#define	ALTQ_DECL(x)		x
 
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
@@ -734,19 +734,7 @@ do {									\
 	((ifq)->altq_flags |= ALTQF_READY);				\
 } while (/* CONSTCOND */0)
 
-#define	IFQ_CLASSIFY(ifq, m, af, pa)					\
-do {									\
-	if (ALTQ_IS_ENABLED((ifq))) {					\
-		if (ALTQ_NEEDS_CLASSIFY((ifq)))				\
-			(pa)->pattr_class = (*(ifq)->altq_classify)	\
-				((ifq)->altq_clfier, (m), (af));	\
-		(pa)->pattr_af = (af);					\
-		(pa)->pattr_hdr = mtod((m), caddr_t);			\
-	}								\
-} while (/* CONSTCOND */0)
-
 #else /* !ALTQ */
-#define	ALTQ_DECL(x)		/* nothing */
 
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
@@ -768,8 +756,6 @@ do {									\
 #define	IFQ_PURGE(ifq)		IF_PURGE((ifq))
 
 #define	IFQ_SET_READY(ifq)	/* nothing */
-
-#define	IFQ_CLASSIFY(ifq, m, af, pa) /* nothing */
 
 #endif /* ALTQ */
 
@@ -809,7 +795,6 @@ void	if_detach(struct ifnet *);
 void	if_down(struct ifnet *);
 void	if_downall(void);
 void	if_link_state_change(struct ifnet *);
-void	if_qflush(struct ifqueue *);
 void	if_slowtimo(void *);
 void	if_up(struct ifnet *);
 int	ifconf(u_long, caddr_t);
