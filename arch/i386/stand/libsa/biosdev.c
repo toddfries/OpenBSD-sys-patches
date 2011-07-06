@@ -52,14 +52,6 @@ extern int debug;
 int bios_bootdev;
 int bios_cddev = -1;		/* Set by srt0 if coming from CD */
 
-#if 0
-struct biosdisk {
-	bios_diskinfo_t *bios_info;
-	dev_t	bsddev;
-	struct disklabel disklabel;
-};
-#endif
-
 struct EDD_CB {
 	u_int8_t  edd_len;	/* size of packet */
 	u_int8_t  edd_res1;	/* reserved */
@@ -69,6 +61,66 @@ struct EDD_CB {
 	u_int16_t edd_seg;	/* address of buffer (segment) */
 	u_int64_t edd_daddr;	/* starting block */
 };
+
+
+int
+sr_strategy(struct sr_boot_volume *sbv, int rw, daddr32_t blk, size_t size,
+    void *buf, size_t *rsize)
+{
+	struct diskinfo *sr_dip, *dip;
+	struct sr_metadata_list *sml;
+	struct sr_metadata *md;
+	dev_t bsd_dev;
+
+	/* We only support read-only softraid. */
+	if (rw != F_READ)
+		return EPERM;
+
+	/* Partition offset within softraid volume. */
+	sr_dip = (struct diskinfo *)sbv->sbv_diskinfo;
+	blk += sr_dip->disklabel.d_partitions[sbv->sbv_part - 'a'].p_offset;
+
+	if (sbv->sbv_level == 1) {
+
+		/* XXX - pick online chunk with highest on disk version. */
+		sml = SLIST_FIRST(&sbv->sml);
+		dip = (struct diskinfo *)sml->sml_diskinfo;
+		md = (struct sr_metadata *)&sml->sml_metadata;
+		blk += md->ssd_data_offset;
+
+		bsd_dev = dip->bios_info.bsd_dev;
+		dip->bsddev = MAKEBOOTDEV(B_TYPE(bsd_dev), B_ADAPTOR(bsd_dev),
+		    B_CONTROLLER(bsd_dev), B_UNIT(bsd_dev),
+		    sml->sml_part - 'a');
+
+		return biosstrategy(dip, rw, blk, size, buf, rsize);
+
+	} else
+		return ENOTSUP;
+}
+
+const char *
+sr_getdisklabel(struct sr_boot_volume *sbv, struct disklabel *label)
+{
+	char *buf;
+
+	/* XXX check for MBR and partition offset... */
+	buf = alloca(DEV_BSIZE);
+	sr_strategy(sbv, F_READ, LABELSECTOR, sizeof(struct disklabel),
+	    buf, NULL);
+#if 0
+	printf("sr_getdisklabel: magic %lx\n",
+	    ((struct disklabel *)buf)->d_magic);
+	for (i = 0; i < MAXPARTITIONS; i++)
+		printf("part %c: type = %d, size = %d, offset = %d\n", 'a' + i,
+		    (int)((struct disklabel *)buf)->d_partitions[i].p_fstype,
+		    (int)((struct disklabel *)buf)->d_partitions[i].p_size,
+		    (int)((struct disklabel *)buf)->d_partitions[i].p_offset);
+#endif
+
+	/* Fill in disklabel */
+	return (getdisklabel(buf, label));
+}
 
 /*
  * reset disk system
@@ -462,11 +514,15 @@ bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 int
 biosopen(struct open_file *f, ...)
 {
-	va_list ap;
-	register char	*cp, **file;
+	extern struct sr_boot_volume_head bvh;
+	struct sr_boot_volume *sbv;
+	register char *cp, **file;
 	dev_t maj, unit, part;
 	struct diskinfo *dip;
-	int biosdev;
+	int biosdev, devlen;
+	const char *st;
+	va_list ap;
+	char *dev;
 
 	va_start(ap, f);
 	cp = *(file = va_arg(ap, char **));
@@ -478,17 +534,70 @@ biosopen(struct open_file *f, ...)
 #endif
 
 	f->f_devdata = NULL;
-	/* search for device specification */
-	cp += 2;
-	if (cp[2] != ':') {
-		if (cp[3] != ':')
-			return ENOENT;
-		else
-			cp++;
+
+	/* Search for device specification. */
+	dev = cp;
+	if (cp[4] == ':')
+		devlen = 2;
+	else if (cp[5] == ':')
+		devlen = 3;
+	else
+		return ENOENT;
+	cp += devlen;
+
+	/* Get unit. */
+	if ('0' <= *cp && *cp <= '9')
+		unit = *cp++ - '0';
+	else {
+		printf("Bad unit number\n");
+		return EUNIT;
 	}
 
-	for (maj = 0; maj < nbdevs && strncmp(*file, bdevs[maj], cp - *file); )
-	    maj++;
+	/* Get partition. */
+	if ('a' <= *cp && *cp <= 'p')
+		part = *cp++ - 'a';
+	else {
+		printf("Bad partition\n");
+		return EPART;
+	}
+
+	/* Get filename. */
+	cp++;	/* skip ':' */
+	if (*cp != 0)
+		*file = cp;
+	else
+		f->f_flags |= F_RAW;
+
+	/* Intercept softraid disks. */
+	if (strncmp("sr", dev, 2) == 0) {
+
+		/* Create a fake diskinfo for this softraid volume. */
+		SLIST_FOREACH(sbv, &bvh, sbv_link)
+			if (sbv->sbv_unit == unit)
+				break;
+		if (sbv == NULL) {
+			printf("Unknown device: sr%d\n", unit);
+			return EADAPT;
+		}
+		dip = alloc(sizeof(struct diskinfo));
+		bzero(dip, sizeof(*dip));
+		sbv->sbv_diskinfo = dip;
+		dip->sr_vol = sbv;
+
+		/* Read disklabel. */
+		sbv->sbv_part = 'c';
+		if(sr_getdisklabel(sbv, &dip->disklabel))
+			return ERDLAB;
+
+		sbv->sbv_part = part + 'a';
+		bootdev_dip = dip;
+		f->f_devdata = dip;
+
+		return 0;
+	}
+ 
+	for (maj = 0; maj < nbdevs &&
+	    strncmp(dev, bdevs[maj], devlen); maj++);
 	if (maj >= nbdevs) {
 		printf("Unknown device: ");
 		for (cp = *file; *cp != ':'; cp++)
@@ -496,27 +605,6 @@ biosopen(struct open_file *f, ...)
 		putchar('\n');
 		return EADAPT;
 	}
-
-	/* get unit */
-	if ('0' <= *cp && *cp <= '9')
-		unit = *cp++ - '0';
-	else {
-		printf("Bad unit number\n");
-		return EUNIT;
-	}
-	/* get partition */
-	if ('a' <= *cp && *cp <= 'p')
-		part = *cp++ - 'a';
-	else {
-		printf("Bad partition id\n");
-		return EPART;
-	}
-
-	cp++;	/* skip ':' */
-	if (*cp != 0)
-		*file = cp;
-	else
-		f->f_flags |= F_RAW;
 
 	biosdev = unit;
 	switch (maj) {
@@ -561,8 +649,7 @@ biosopen(struct open_file *f, ...)
 
 	/* Try for disklabel again (might be removable media) */
 	if (dip->bios_info.flags & BDI_BADLABEL) {
-		const char *st = bios_getdisklabel(&dip->bios_info,
-		    &dip->disklabel);
+		st = bios_getdisklabel(&dip->bios_info, &dip->disklabel);
 #ifdef BIOS_DEBUG
 		if (debug && st)
 			printf("%s\n", st);
@@ -667,10 +754,14 @@ biosstrategy(void *devdata, int rw, daddr32_t blk, size_t size, void *buf,
 	u_int8_t error = 0;
 	size_t nsect;
 
+	/* Intercept strategy for softraid volumes. */
+	if (dip->sr_vol)
+		return sr_strategy(dip->sr_vol, rw, blk, size, buf, rsize);
+
 	nsect = (size + DEV_BSIZE-1) / DEV_BSIZE;
-	if (rsize != NULL)
-		blk += dip->disklabel.
-			d_partitions[B_PARTITION(dip->bsddev)].p_offset;
+	//if (rsize != NULL) /* XXX ?!? */
+	blk += dip->disklabel.d_partitions[B_PARTITION(dip->bsddev)].p_offset;
+	//printf("biosstrategy: blk = %d, size = %d\n", blk, size);
 
 	/* Read all, sub-functions handle track boundaries */
 	if (blk < 0)

@@ -34,6 +34,8 @@
 #include <sys/queue.h>
 #include <sys/reboot.h>
 #include <sys/disklabel.h>
+#include <dev/biovar.h>
+#include <dev/softraidvar.h>
 #include <stand/boot/bootarg.h>
 #include <machine/biosvar.h>
 #include <lib/libz/zlib.h>
@@ -48,6 +50,11 @@ static int disksum(int);
 
 /* List of disk devices we found/probed */
 struct disklist_lh disklist;
+
+/* List of softraid volumes and metadata. */
+struct sr_boot_volume_head bvh;
+struct sr_metadata_list_head mlh;
+struct sr_metadata_list_head kdh;
 
 /* Pointer to boot device */
 struct diskinfo *bootdev_dip;
@@ -161,6 +168,157 @@ hardprobe(void)
 }
 
 
+static void
+srprobe(void)
+{
+	struct sr_metadata_list	*mle, *mlenext, *mle1, *mle2;
+	struct sr_boot_volume *vol, *vp1, *vp2;
+	struct sr_metadata *md;
+	struct diskinfo *dip;
+	struct partition *pp;
+	int i, error, volno;
+	daddr_t off;
+
+	/* Probe for softraid volumes. */
+	SLIST_INIT(&mlh);
+	md = alloc(SR_META_SIZE * 512);
+
+	TAILQ_FOREACH(dip, &disklist, list) {
+
+		/* Only check hard disks, skip those with I/O errors. */
+		if ((dip->bios_info.bios_number & 0x80) == 0 ||
+		    (dip->bios_info.flags & BDI_INVALID))
+			continue;
+
+		/* Make sure disklabel has been read. */
+		if ((dip->bios_info.flags & (BDI_BADLABEL|BDI_GOODLABEL)) == 0)
+			continue;
+
+		for (i = 0; i < MAXPARTITIONS; i++) {
+			pp = &dip->disklabel.d_partitions[i];
+			if (pp->p_fstype != FS_RAID || pp->p_size == 0)
+				continue;
+
+			/* Read softraid metadata. */
+			bzero(md, SR_META_SIZE * 512);
+			off = DL_GETPOFFSET(pp) + SR_META_OFFSET;
+			error = biosd_io(F_READ, &dip->bios_info, off,
+			    SR_META_SIZE, md);
+			if (error)
+				continue;
+		
+			/* XXX - validate checksum */
+	
+			/* Is this valid softraid metadata? */
+			if (md->ssdi.ssd_magic != SR_MAGIC)
+				continue;
+
+			mle = alloc(sizeof(struct sr_metadata_list));
+			if (mle == NULL)
+				continue;
+			bcopy(md, &mle->sml_metadata,
+			    sizeof(struct sr_metadata));
+			mle->sml_diskinfo = dip;
+			mle->sml_disk = dip->bios_info.bios_number;
+			mle->sml_part = 'a' + i;
+			SLIST_INSERT_HEAD(&mlh, mle, sml_link);
+		}
+	}
+
+	/*
+	 * Create a list of volumes and associate chunks with each volume.
+	 */
+
+	SLIST_INIT(&bvh);
+	SLIST_INIT(&kdh);
+
+	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mlenext) {
+
+		mlenext = SLIST_NEXT(mle, sml_link);
+		SLIST_REMOVE(&mlh, mle, sr_metadata_list, sml_link);
+
+		md = (struct sr_metadata *)&mle->sml_metadata;
+		mle->sml_chunk_id = md->ssdi.ssd_chunk_id;
+
+		/* Handle key disks separately. */
+		if (md->ssdi.ssd_level == SR_KEYDISK_LEVEL) {
+			SLIST_INSERT_HEAD(&kdh, mle, sml_link);
+			continue;
+		}
+
+		SLIST_FOREACH(vol, &bvh, sbv_link) {
+			if (bcmp(&md->ssdi.ssd_uuid, &vol->sbv_uuid,
+			    sizeof(md->ssdi.ssd_uuid)) == 0)
+				break;
+		}
+
+		if (vol == NULL) {
+			vol = alloc(sizeof(struct sr_boot_volume));
+			vol->sbv_level = md->ssdi.ssd_level;
+			vol->sbv_volid = md->ssdi.ssd_volid;
+			vol->sbv_chunk_no = md->ssdi.ssd_chunk_no;
+			vol->sbv_flags = md->ssdi.ssd_vol_flags;
+			bcopy(&md->ssdi.ssd_uuid, &vol->sbv_uuid,
+			    sizeof(md->ssdi.ssd_uuid));
+			SLIST_INIT(&vol->sml);
+
+			/* Maintain volume order. */
+			vp2 = NULL;
+			SLIST_FOREACH(vp1, &bvh, sbv_link) {
+				if (vp1->sbv_volid > vol->sbv_volid)
+					break;
+				vp2 = vp1;
+			}
+			if (vp2 == NULL)
+				SLIST_INSERT_HEAD(&bvh, vol, sbv_link);
+			else
+				SLIST_INSERT_AFTER(vp2, vol, sbv_link);
+		}
+
+		/* Maintain chunk order. */
+		mle2 = NULL;
+		SLIST_FOREACH(mle1, &vol->sml, sml_link) {
+			if (mle1->sml_chunk_id > mle->sml_chunk_id)
+				break;
+			mle2 = mle1;
+		}
+		if (mle2 == NULL)
+			SLIST_INSERT_HEAD(&vol->sml, mle, sml_link);
+		else
+			SLIST_INSERT_AFTER(mle2, mle, sml_link);
+
+		vol->sbv_dev_no++;
+	}
+
+	/*
+	 * Assemble RAID volumes.
+	 */
+	volno = 0;
+	SLIST_FOREACH(vol, &bvh, sbv_link) {
+
+		/* Check if this is a hotspare "volume". */
+		if (vol->sbv_level == SR_HOTSPARE_LEVEL &&
+		    vol->sbv_chunk_no == 1)
+			continue;
+
+		if (vol->sbv_chunk_no != vol->sbv_dev_no) {
+		}
+
+		/*
+		 * XXX - Validate that volume has sufficient chunks for
+		 * readonly mode.
+		 */
+
+		vol->sbv_unit = volno++;
+		printf(" sr%d%s", vol->sbv_unit,
+		    vol->sbv_flags & BIOC_SCBOOTABLE ? "*" : "");
+	}
+
+	if (md)
+		free(md, 0);
+}
+
+
 /* Probe for all BIOS supported disks */
 u_int32_t bios_cksumlen;
 void
@@ -182,6 +340,8 @@ diskprobe(void)
 		printf(";");
 #endif
 	hardprobe();
+
+	srprobe();
 
 	/* Checksumming of hard disks */
 	for (i = 0; disksum(i++) && i < MAX_CKSUMLEN; )
@@ -205,7 +365,6 @@ diskprobe(void)
 	addbootarg(BOOTARG_DISKINFO, i * sizeof(bios_diskinfo_t),
 	    bios_diskinfo);
 }
-
 
 void
 cdprobe(void)
