@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_subr.c,v 1.24 2009/08/14 13:05:08 jasper Exp $	*/
+/*	$OpenBSD: ffs_subr.c,v 1.26 2011/07/04 04:30:41 tedu Exp $	*/
 /*	$NetBSD: ffs_subr.c,v 1.6 1996/03/17 02:16:23 christos Exp $	*/
 
 /*
@@ -68,7 +68,7 @@ ffs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 	bsize = blksize(fs, ip, lbn);
 
 	*bpp = NULL;
-	if ((error = bread(vp, lbn, fs->fs_bsize, NOCRED, &bp)) != 0) {
+	if ((error = bread(vp, lbn, fs->fs_bsize, &bp)) != 0) {
 		brelse(bp);
 		return (error);
 	}
@@ -133,7 +133,7 @@ ffs_checkoverlap(struct buf *bp, struct inode *ip)
 		if (ep == bp || (ep->b_flags & B_INVAL) ||
 		    ep->b_vp == NULLVP)
 			continue;
-		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, (daddr64_t)0, NULL))
+		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, NULL, NULL))
 			continue;
 		if (vp != ip->i_devvp)
 			continue;

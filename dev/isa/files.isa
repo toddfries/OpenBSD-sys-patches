@@ -1,4 +1,4 @@
-#	$OpenBSD: files.isa,v 1.107 2010/07/31 08:33:20 ratchov Exp $
+#	$OpenBSD: files.isa,v 1.111 2011/06/29 17:48:22 tedu Exp $
 #	$NetBSD: files.isa,v 1.21 1996/05/16 03:45:55 mycroft Exp $
 #
 # Config file and device description for machine-independent ISA code.
@@ -7,7 +7,7 @@
 
 # ports should specify appropriate major numbers for the following
 # devices:
-#	mcd, scd, wd
+#	wd
 
 device	isa {[port = -1], [size = 0],
 	     [iomem = -1], [iosiz = 0],
@@ -77,11 +77,6 @@ file	dev/isa/pckbc_isa.c		pckbc_isa	needs-flag
 attach	vga at isa with vga_isa
 file	dev/isa/vga_isa.c		vga_isa
 
-# Generic EGA
-device	ega: wsemuldisplaydev, pcdisplayops
-attach	ega at isa
-file	dev/isa/ega.c			ega	needs-flag
-
 # Generic PC graphics adapter (MGA, CGA, ...)
 device	pcdisplay: wsemuldisplaydev, pcdisplayops
 attach	pcdisplay at isa
@@ -126,11 +121,6 @@ file	dev/isa/opti.c			opti
 #
 # Other ISA disk controllers
 #
-
-# Mitsumi CD-ROM controllers
-device	mcd: disk, opti
-attach	mcd at isa
-file	dev/isa/mcd.c			mcd needs-flag
 
 # ISA "wd" (ESDI/IDE/etc.) controllers, ATAPI bus
 attach	wdc at isa with wdc_isa: isa_dma
@@ -250,15 +240,6 @@ file	dev/isa/ad1848.c		ad1848
 define	ics2101
 file	dev/isa/ics2101.c		ics2101
 
-
-# Audio systems based on Echo Speech Corp. ESC61[45] ASICs
-device	pss {[port = -1], [size = 0],
-	     [iomem = -1], [iosiz = 0],
-	     [irq = -1], [drq = -1]}
-attach	pss at isa
-device	sp: audio, isa_dma, ad1848, auconv
-attach	sp at pss
-file	dev/isa/pss.c			pss needs-flag
 
 # Microsoft Windows Sound System
 device	wss: audio, isa_dma, ad1848, auconv

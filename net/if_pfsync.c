@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.163 2011/05/10 01:10:08 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.165 2011/07/06 02:42:28 henning Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -317,7 +317,7 @@ pfsync_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pfsyncoutput;
 	ifp->if_start = pfsyncstart;
 	ifp->if_type = IFT_PFSYNC;
-	ifp->if_snd.ifq_maxlen = ifqmaxlen;
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	ifp->if_hdrlen = sizeof(struct pfsync_header);
 	ifp->if_mtu = 1500; /* XXX */
 	ifp->if_hardmtu = MCLBYTES; /* XXX */
@@ -1551,7 +1551,7 @@ pfsync_sendout(void)
 	m->m_len = m->m_pkthdr.len = sc->sc_len;
 
 	/* build the ip header */
-	ip = (struct ip *)m->m_data;
+	ip = mtod(m, struct ip *);
 	bcopy(&sc->sc_template, ip, sizeof(*ip));
 	offset = sizeof(*ip);
 

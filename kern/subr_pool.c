@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.104 2011/04/18 19:23:46 art Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.108 2011/07/06 06:00:20 tedu Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -113,7 +113,7 @@ void	*pool_do_get(struct pool *, int);
 void	 pool_do_put(struct pool *, void *);
 void	 pr_rmpage(struct pool *, struct pool_item_header *,
 	    struct pool_pagelist *);
-int	pool_chk_page(struct pool *, const char *, struct pool_item_header *);
+int	pool_chk_page(struct pool *, struct pool_item_header *, int);
 struct pool_item_header *pool_alloc_item_header(struct pool *, caddr_t , int);
 
 void	*pool_allocator_alloc(struct pool *, int, int *);
@@ -226,6 +226,10 @@ pr_rmpage(struct pool *pp, struct pool_item_header *ph,
 	LIST_REMOVE(ph, ph_pagelist);
 	if ((pp->pr_roflags & PR_PHINPAGE) == 0)
 		RB_REMOVE(phtree, &pp->pr_phtree, ph);
+	pp->pr_npages--;
+	pp->pr_npagefree++;
+	pool_update_curpage(pp);
+
 	if (pq) {
 		LIST_INSERT_HEAD(pq, ph, ph_pagelist);
 	} else {
@@ -233,10 +237,6 @@ pr_rmpage(struct pool *pp, struct pool_item_header *ph,
 		if ((pp->pr_roflags & PR_PHINPAGE) == 0)
 			pool_put(&phpool, ph);
 	}
-	pp->pr_npages--;
-	pp->pr_npagefree++;
-
-	pool_update_curpage(pp);
 }
 
 /*
@@ -466,7 +466,19 @@ pool_get(struct pool *pp, int flags)
 		assertwaitok();
 
 	mtx_enter(&pp->pr_mtx);
+#ifdef POOL_DEBUG
+	if (pp->pr_roflags & PR_DEBUGCHK) {
+		if (pool_chk(pp))
+			panic("before pool_get");
+	}
+#endif
 	v = pool_do_get(pp, flags);
+#ifdef POOL_DEBUG
+	if (pp->pr_roflags & PR_DEBUGCHK) {
+		if (pool_chk(pp))
+			panic("after pool_get");
+	}
+#endif
 	mtx_leave(&pp->pr_mtx);
 	if (v == NULL)
 		return (v);
@@ -518,10 +530,10 @@ startover:
 	 * the pool.
 	 */
 #ifdef DIAGNOSTIC
-	if (__predict_false(pp->pr_nout > pp->pr_hardlimit))
+	if (pp->pr_nout > pp->pr_hardlimit)
 		panic("pool_do_get: %s: crossed hard limit", pp->pr_wchan);
 #endif
-	if (__predict_false(pp->pr_nout == pp->pr_hardlimit)) {
+	if (pp->pr_nout == pp->pr_hardlimit) {
 		if ((flags & PR_WAITOK) && !(flags & PR_LIMITFAIL)) {
 			/*
 			 * XXX: A warning isn't logged in this case.  Should
@@ -563,10 +575,10 @@ startover:
 		 * Call the back-end page allocator for more memory.
 		 */
 		v = pool_allocator_alloc(pp, flags, &slowdown);
-		if (__predict_true(v != NULL))
+		if (v != NULL)
 			ph = pool_alloc_item_header(pp, v, flags);
 
-		if (__predict_false(v == NULL || ph == NULL)) {
+		if (v == NULL || ph == NULL) {
 			if (v != NULL)
 				pool_allocator_free(pp, v);
 
@@ -599,11 +611,11 @@ startover:
 		/* Start the allocation process over. */
 		goto startover;
 	}
-	if (__predict_false((v = pi = TAILQ_FIRST(&ph->ph_itemlist)) == NULL)) {
+	if ((v = pi = TAILQ_FIRST(&ph->ph_itemlist)) == NULL) {
 		panic("pool_do_get: %s: page empty", pp->pr_wchan);
 	}
 #ifdef DIAGNOSTIC
-	if (__predict_false(pp->pr_nitems == 0)) {
+	if (pp->pr_nitems == 0) {
 		printf("pool_do_get: %s: items on itemlist, nitems %u\n",
 		    pp->pr_wchan, pp->pr_nitems);
 		panic("pool_do_get: nitems inconsistent");
@@ -611,7 +623,7 @@ startover:
 #endif
 
 #ifdef DIAGNOSTIC
-	if (__predict_false(pi->pi_magic != PI_MAGIC))
+	if (pi->pi_magic != PI_MAGIC)
 		panic("pool_do_get(%s): free list modified: "
 		    "page %p; item addr %p; offset 0x%x=0x%x",
 		    pp->pr_wchan, ph->ph_page, pi, 0, pi->pi_magic);
@@ -638,7 +650,7 @@ startover:
 	pp->pr_nout++;
 	if (ph->ph_nmissing == 0) {
 #ifdef DIAGNOSTIC
-		if (__predict_false(pp->pr_nidle == 0))
+		if (pp->pr_nidle == 0)
 			panic("pool_do_get: nidle inconsistent");
 #endif
 		pp->pr_nidle--;
@@ -653,7 +665,7 @@ startover:
 	ph->ph_nmissing++;
 	if (TAILQ_EMPTY(&ph->ph_itemlist)) {
 #ifdef DIAGNOSTIC
-		if (__predict_false(ph->ph_nmissing != pp->pr_itemsperpage)) {
+		if (ph->ph_nmissing != pp->pr_itemsperpage) {
 			panic("pool_do_get: %s: nmissing inconsistent",
 			    pp->pr_wchan);
 		}
@@ -690,7 +702,19 @@ pool_put(struct pool *pp, void *v)
 	if (pp->pr_dtor)
 		pp->pr_dtor(pp->pr_arg, v);
 	mtx_enter(&pp->pr_mtx);
+#ifdef POOL_DEBUG
+	if (pp->pr_roflags & PR_DEBUGCHK) {
+		if (pool_chk(pp))
+			panic("before pool_put");
+	}
+#endif
 	pool_do_put(pp, v);
+#ifdef POOL_DEBUG
+	if (pp->pr_roflags & PR_DEBUGCHK) {
+		if (pool_chk(pp))
+			panic("after pool_put");
+	}
+#endif
 	mtx_leave(&pp->pr_mtx);
 	pp->pr_nput++;
 }
@@ -721,14 +745,14 @@ pool_do_put(struct pool *pp, void *v)
 	if (pp->pr_ipl != -1)
 		splassert(pp->pr_ipl);
 
-	if (__predict_false(pp->pr_nout == 0)) {
+	if (pp->pr_nout == 0) {
 		printf("pool %s: putting with none out\n",
 		    pp->pr_wchan);
 		panic("pool_do_put");
 	}
 #endif
 
-	if (__predict_false((ph = pr_find_pagehead(pp, v)) == NULL)) {
+	if ((ph = pr_find_pagehead(pp, v)) == NULL) {
 		panic("pool_do_put: %s: page header missing", pp->pr_wchan);
 	}
 
@@ -757,10 +781,7 @@ pool_do_put(struct pool *pp, void *v)
 
 	if (pp->pr_flags & PR_WANTED) {
 		pp->pr_flags &= ~PR_WANTED;
-		if (ph->ph_nmissing == 0)
-			pp->pr_nidle++;
 		wakeup(pp);
-		return;
 	}
 
 	/*
@@ -781,8 +802,8 @@ pool_do_put(struct pool *pp, void *v)
 		} else {
 			LIST_REMOVE(ph, ph_pagelist);
 			LIST_INSERT_HEAD(&pp->pr_emptypages, ph, ph_pagelist);
+			pool_update_curpage(pp);
 		}
-		pool_update_curpage(pp);
 	}
 
 	/*
@@ -814,9 +835,9 @@ pool_prime(struct pool *pp, int n)
 
 	while (newpages-- > 0) {
 		cp = pool_allocator_alloc(pp, PR_NOWAIT, &slowdown);
-		if (__predict_true(cp != NULL))
+		if (cp != NULL)
 			ph = pool_alloc_item_header(pp, cp, PR_NOWAIT);
-		if (__predict_false(cp == NULL || ph == NULL)) {
+		if (cp == NULL || ph == NULL) {
 			if (cp != NULL)
 				pool_allocator_free(pp, cp);
 			break;
@@ -934,9 +955,9 @@ pool_catchup(struct pool *pp)
 		 * Call the page back-end allocator for more memory.
 		 */
 		cp = pool_allocator_alloc(pp, PR_NOWAIT, &slowdown);
-		if (__predict_true(cp != NULL))
+		if (cp != NULL)
 			ph = pool_alloc_item_header(pp, cp, PR_NOWAIT);
-		if (__predict_false(cp == NULL || ph == NULL)) {
+		if (cp == NULL || ph == NULL) {
 			if (cp != NULL)
 				pool_allocator_free(pp, cp);
 			error = ENOMEM;
@@ -1235,12 +1256,12 @@ db_show_all_pools(db_expr_t expr, int haddr, db_expr_t count, char *modif)
 		PRWORD(ovflw, " %*s", 6, 1, maxp);
 		PRWORD(ovflw, " %*lu\n", 5, 1, pp->pr_nidle);
 
-		pool_chk(pp, pp->pr_wchan);
+		pool_chk(pp);
 	}
 }
 
 int
-pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
+pool_chk_page(struct pool *pp, struct pool_item_header *ph, int expected)
 {
 	struct pool_item *pi;
 	caddr_t page;
@@ -1248,12 +1269,12 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 #if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
+	const char *label = pp->pr_wchan;
 
 	page = (caddr_t)((u_long)ph & pp->pr_alloc->pa_pagemask);
 	if (page != ph->ph_page &&
 	    (pp->pr_roflags & PR_PHINPAGE) != 0) {
-		if (label != NULL)
-			printf("%s: ", label);
+		printf("%s: ", label);
 		printf("pool(%p:%s): page inconsistency: page %p; "
 		    "at page head addr %p (p %p)\n",
 		    pp, pp->pr_wchan, ph->ph_page, ph, page);
@@ -1266,8 +1287,7 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 
 #ifdef DIAGNOSTIC
 		if (pi->pi_magic != PI_MAGIC) {
-			if (label != NULL)
-				printf("%s: ", label);
+			printf("%s: ", label);
 			printf("pool(%s): free list modified: "
 			    "page %p; item ordinal %d; addr %p "
 			    "(p %p); offset 0x%x=0x%x\n",
@@ -1295,28 +1315,41 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 		if (page == ph->ph_page)
 			continue;
 
-		if (label != NULL)
-			printf("%s: ", label);
+		printf("%s: ", label);
 		printf("pool(%p:%s): page inconsistency: page %p;"
 		    " item ordinal %d; addr %p (p %p)\n", pp,
 		    pp->pr_wchan, ph->ph_page, n, pi, page);
+		return 1;
+	}
+	if (n + ph->ph_nmissing != pp->pr_itemsperpage) {
+		printf("pool(%p:%s): page inconsistency: page %p;"
+		    " %d on list, %d missing, %d items per page\n", pp,
+		    pp->pr_wchan, ph->ph_page, n, ph->ph_nmissing,
+		    pp->pr_itemsperpage);
+		return 1;
+	}
+	if (expected >= 0 && n != expected) {
+		printf("pool(%p:%s): page inconsistency: page %p;"
+		    " %d on list, %d missing, %d expected\n", pp,
+		    pp->pr_wchan, ph->ph_page, n, ph->ph_nmissing,
+		    expected);
 		return 1;
 	}
 	return 0;
 }
 
 int
-pool_chk(struct pool *pp, const char *label)
+pool_chk(struct pool *pp)
 {
 	struct pool_item_header *ph;
 	int r = 0;
 
 	LIST_FOREACH(ph, &pp->pr_emptypages, ph_pagelist)
-		r += pool_chk_page(pp, label, ph);
+		r += pool_chk_page(pp, ph, pp->pr_itemsperpage);
 	LIST_FOREACH(ph, &pp->pr_fullpages, ph_pagelist)
-		r += pool_chk_page(pp, label, ph);
+		r += pool_chk_page(pp, ph, 0);
 	LIST_FOREACH(ph, &pp->pr_partpages, ph_pagelist)
-		r += pool_chk_page(pp, label, ph);
+		r += pool_chk_page(pp, ph, -1);
 
 	return (r);
 }
