@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.234 2011/07/02 17:39:12 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.241 2011/07/06 17:37:22 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -110,7 +110,7 @@ int			sr_ioctl_installboot(struct sr_softc *,
 void			sr_chunks_unwind(struct sr_softc *,
 			    struct sr_chunk_head *);
 void			sr_discipline_free(struct sr_discipline *);
-void			sr_discipline_shutdown(struct sr_discipline *);
+void			sr_discipline_shutdown(struct sr_discipline *, int);
 int			sr_discipline_init(struct sr_discipline *, int);
 
 /* utility functions */
@@ -1672,19 +1672,41 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 
 	softraid_disk_attach = sr_disk_attach;
 
+	sc->sc_shutdownhook = shutdownhook_establish(sr_shutdown, sc);
+
 	sr_boot_assembly(sc);
 }
 
 int
 sr_detach(struct device *self, int flags)
 {
-#ifndef SMALL_KERNEL
 	struct sr_softc		*sc = (void *)self;
+	int			i, rv;
 
+	DNPRINTF(SR_D_MISC, "%s: sr_detach\n", DEVNAME(sc));
+
+	if (sc->sc_shutdownhook)
+		shutdownhook_disestablish(sc->sc_shutdownhook);
+
+	/* XXX this will not work when we stagger disciplines */
+	for (i = 0; i < SR_MAX_LD; i++)
+		if (sc->sc_dis[i])
+			sr_discipline_shutdown(sc->sc_dis[i], 1);
+
+#ifndef SMALL_KERNEL
+	if (sc->sc_sensor_task != NULL)
+		sensor_task_unregister(sc->sc_sensor_task);
 	sensordev_deinstall(&sc->sc_sensordev);
 #endif /* SMALL_KERNEL */
 
-	return (0);
+	if (sc->sc_scsibus != NULL) {
+		rv = config_detach((struct device *)sc->sc_scsibus, flags);
+		if (rv != 0)
+			return (rv);
+		sc->sc_scsibus = NULL;
+	}
+
+	return (rv);
 }
 
 void
@@ -1921,8 +1943,8 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 	struct sr_discipline	*sd;
 	struct sr_ccb		*ccb;
 
-	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: scsibus%d xs: %p "
-	    "flags: %#x\n", DEVNAME(sc), link->scsibus, xs, xs->flags);
+	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: target %d xs: %p "
+	    "flags: %#x\n", DEVNAME(sc), link->target, xs, xs->flags);
 
 	sd = sc->sc_dis[link->target];
 	if (sd == NULL) {
@@ -2362,6 +2384,11 @@ sr_chunk_in_use(struct sr_softc *sc, dev_t dev)
 	struct sr_discipline	*sd;
 	struct sr_chunk		*chunk;
 	int			i, c;
+
+	DNPRINTF(SR_D_MISC, "%s: sr_chunk_in_use(%d)\n", DEVNAME(sc), dev);
+
+	if (dev == NODEV)
+		return BIOC_SDINVALID;
 
 	/* See if chunk is already in use. */
 	for (i = 0; i < SR_MAX_LD; i++) {
@@ -3078,8 +3105,8 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 
 		link = scsi_get_link(sc->sc_scsibus, target, 0);
 		dev = link->device_softc;
-		DNPRINTF(SR_D_IOCTL, "%s: sr device added: %s on scsibus%d\n",
-		    DEVNAME(sc), dev->dv_xname, sd->sd_link.scsibus);
+		DNPRINTF(SR_D_IOCTL, "%s: sr device added: %s at target %d\n",
+		    DEVNAME(sc), dev->dv_xname, sd->sd_target);
 
 		for (i = 0, vol = -1; i <= sd->sd_target; i++)
 			if (sc->sc_dis[i])
@@ -3131,7 +3158,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 
 	/* save metadata to disk */
 	rv = sr_meta_save(sd, SR_META_DIRTY);
-	sd->sd_shutdownhook = shutdownhook_establish(sr_shutdown, sd);
 
 	if (sd->sd_vol_status == BIOC_SVREBUILD)
 		kthread_create_deferred(sr_rebuild, sd);
@@ -3140,7 +3166,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 
 	return (rv);
 unwind:
-	sr_discipline_shutdown(sd);
+	sr_discipline_shutdown(sd, 0);
 
 	/* XXX - use internal status values! */
 	if (rv == EAGAIN)
@@ -3174,7 +3200,7 @@ sr_ioctl_deleteraid(struct sr_softc *sc, struct bioc_deleteraid *dr)
 
 	sd->sd_deleted = 1;
 	sd->sd_meta->ssdi.ssd_vol_flags = BIOC_SCNOAUTOASSEMBLE;
-	sr_shutdown(sd);
+	sr_discipline_shutdown(sd, 1);
 
 	rv = 0;
 bad:
@@ -3386,7 +3412,7 @@ sr_discipline_free(struct sr_discipline *sd)
 }
 
 void
-sr_discipline_shutdown(struct sr_discipline *sd)
+sr_discipline_shutdown(struct sr_discipline *sd, int meta_save)
 {
 	struct sr_softc		*sc;
 	int			s;
@@ -3398,12 +3424,19 @@ sr_discipline_shutdown(struct sr_discipline *sd)
 	DNPRINTF(SR_D_DIS, "%s: sr_discipline_shutdown %s\n", DEVNAME(sc),
 	    sd->sd_meta ? sd->sd_meta->ssd_devname : "nodev");
 
+	/* If rebuilding, abort rebuild and drain I/O. */
+	if (sd->sd_reb_active) {
+		sd->sd_reb_abort = 1;
+		while (sd->sd_reb_active)
+			tsleep(sd, PWAIT, "sr_shutdown", 1);
+	}
+
+	if (meta_save)
+		sr_meta_save(sd, 0);
+
 	s = splbio();
 
 	sd->sd_ready = 0;
-
-	if (sd->sd_shutdownhook)
-		shutdownhook_disestablish(sd->sd_shutdownhook);
 
 	/* make sure there isn't a sync pending and yield */
 	wakeup(sd);
@@ -3593,7 +3626,7 @@ sr_raid_start_stop(struct sr_workunit *wu)
 	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_start_stop\n",
-	    DEVNAME(sd->sd_sc));
+	    DEVNAME(wu->swu_dis->sd_sc));
 
 	if (!ss)
 		return (1);
@@ -3769,21 +3802,15 @@ sr_validate_stripsize(u_int32_t b)
 void
 sr_shutdown(void *arg)
 {
-	struct sr_discipline	*sd = arg;
-#ifdef SR_DEBUG
-	struct sr_softc		*sc = sd->sd_sc;
-#endif
-	DNPRINTF(SR_D_DIS, "%s: sr_shutdown %s\n",
-	    DEVNAME(sc), sd->sd_meta->ssd_devname);
+	struct sr_softc		*sc = arg;
+	int			i;
 
-	/* abort rebuild and drain io */
-	sd->sd_reb_abort = 1;
-	while (sd->sd_reb_active)
-		tsleep(sd, PWAIT, "sr_shutdown", 1);
+	DNPRINTF(SR_D_MISC, "%s: sr_shutdown\n", DEVNAME(sc));
 
-	sr_meta_save(sd, 0);
-
-	sr_discipline_shutdown(sd);
+	/* XXX this will not work when we stagger disciplines */
+	for (i = 0; i < SR_MAX_LD; i++)
+		if (sc->sc_dis[i])
+			sr_discipline_shutdown(sc->sc_dis[i], 1);
 }
 
 int
@@ -4078,10 +4105,11 @@ sr_sensors_create(struct sr_discipline *sd)
 	sensor_attach(&sc->sc_sensordev, &sd->sd_vol.sv_sensor);
 	sd->sd_vol.sv_sensor_attached = 1;
 
-	if (sc->sc_sensors_running == 0) {
-		if (sensor_task_register(sc, sr_sensors_refresh, 10) == NULL)
+	if (sc->sc_sensor_task == NULL) {
+		sc->sc_sensor_task = sensor_task_register(sc,
+		    sr_sensors_refresh, 10);
+		if (sc->sc_sensor_task == NULL)
 			goto bad;
-		sc->sc_sensors_running = 1;
 	}
 
 	rv = 0;

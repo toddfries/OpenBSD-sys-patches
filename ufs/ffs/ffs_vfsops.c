@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.130 2011/07/02 16:23:47 krw Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.133 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -51,10 +51,9 @@
 #include <sys/pool.h>
 #include <sys/dkio.h>
 #include <sys/disk.h>
+#include <sys/specdev.h>
 
 #include <dev/rndvar.h>
-
-#include <miscfs/specfs/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
@@ -149,7 +148,8 @@ ffs_mountroot(void)
 	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 	ump = VFSTOUFS(mp);
 	fs = ump->um_fs;
-	(void) copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1, 0);
+	(void)copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1,
+	    NULL);
 	(void)ffs_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
 	inittodr(fs->fs_time);
@@ -500,7 +500,7 @@ ffs_reload_vnode(struct vnode *vp, void *args)
 
 	error = bread(fra->devvp, 
 	    fsbtodb(fra->fs, ino_to_fsba(fra->fs, ip->i_number)),
-	    (int)fra->fs->fs_bsize, NOCRED, &bp);
+	    (int)fra->fs->fs_bsize, &bp);
 	if (error) {
 		brelse(bp);
 		vput(vp);
@@ -556,8 +556,7 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	 */
 	fs = VFSTOUFS(mountp)->um_fs;
 
-	error = bread(devvp, (daddr64_t)(fs->fs_sblockloc / DEV_BSIZE), SBSIZE,
-	    NOCRED, &bp);
+	error = bread(devvp, fs->fs_sblockloc / DEV_BSIZE, SBSIZE, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -594,8 +593,7 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 		size = fs->fs_bsize;
 		if (i + fs->fs_frag > blks)
 			size = (blks - i) * fs->fs_fsize;
-		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size,
-			      NOCRED, &bp);
+		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size, &bp);
 		if (error) {
 			brelse(bp);
 			return (error);
@@ -713,7 +711,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 			bp = NULL;
 		}
 
-		error = bread(devvp, sbtry[i] / DEV_BSIZE, SBSIZE, cred, &bp);
+		error = bread(devvp, sbtry[i] / DEV_BSIZE, SBSIZE, &bp);
 		if (error)
 			goto out;
 
@@ -816,8 +814,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		size = fs->fs_bsize;
 		if (i + fs->fs_frag > blks)
 			size = (blks - i) * fs->fs_fsize;
-		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size,
-			      cred, &bp);
+		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size, &bp);
 		if (error) {
 			free(fs->fs_csp, M_UFSMNT);
 			goto out;
@@ -1291,7 +1288,7 @@ retry:
 
 	/* Read in the disk contents for the inode, copy into the inode. */
 	error = bread(ump->um_devvp, fsbtodb(fs, ino_to_fsba(fs, ino)),
-		      (int)fs->fs_bsize, NOCRED, &bp);
+	    (int)fs->fs_bsize, &bp);
 	if (error) {
 		/*
 		 * The inode does not contain anything useful, so it would

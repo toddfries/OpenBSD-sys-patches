@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.99 2011/07/02 22:20:08 nicm Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.101 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -55,10 +55,10 @@
 #include <sys/lockf.h>
 #include <sys/event.h>
 #include <sys/poll.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <miscfs/specfs/specdev.h>
 #include <miscfs/fifofs/fifo.h>
 
 #include <ufs/ufs/quota.h>
@@ -160,7 +160,7 @@ ufs_mknod(void *v)
 	vput(*vpp);
 	(*vpp)->v_type = VNON;
 	vgone(*vpp);
-	*vpp = 0;
+	*vpp = NULL;
 	return (0);
 }
 
@@ -1248,7 +1248,7 @@ ufs_rmdir(void *v)
 	/*
 	 * No rmdir "." or of mounted on directories.
 	 */
-	if (dp == ip || vp->v_mountedhere != 0) {
+	if (dp == ip || vp->v_mountedhere != NULL) {
 		if (dp == ip)
 			vrele(dvp);
 		else

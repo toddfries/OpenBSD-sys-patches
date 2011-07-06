@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.101 2011/07/02 17:39:12 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.104 2011/07/06 17:32:47 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -381,13 +381,14 @@ struct sr_raid6 {
 };
 
 /* CRYPTO */
+TAILQ_HEAD(sr_crypto_wu_head, sr_crypto_wu);
 #define SR_CRYPTO_NOWU		16
+
 struct sr_crypto {
+	struct mutex		 scr_mutex;
+	struct sr_crypto_wu_head scr_wus;
 	struct sr_meta_crypto	*scr_meta;
 	struct sr_chunk		*key_disk;
-
-	struct pool		sr_uiopl;
-	struct pool		sr_iovpl;
 
 	/* XXX only keep scr_sid over time */
 	u_int8_t		scr_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
@@ -504,7 +505,6 @@ struct sr_discipline {
 	int			sd_deleted;
 
 	struct device		*sd_scsibus_dev;
-	void			(*sd_shutdownhook)(void *);
 
 	/* discipline volume */
 	struct sr_volume	sd_vol;		/* volume associated */
@@ -566,6 +566,7 @@ struct sr_softc {
 	struct device		sc_dev;
 
 	int			(*sc_ioctl)(struct device *, u_long, caddr_t);
+	void			(*sc_shutdownhook)(void *);
 
 	struct rwlock		sc_lock;
 
@@ -575,7 +576,7 @@ struct sr_softc {
 	int			sc_hotspare_no; /* Number of hotspares. */
 
 	struct ksensordev	sc_sensordev;
-	int			sc_sensors_running;
+	struct sensor_task	*sc_sensor_task;
 
 	struct scsi_link	sc_link;	/* scsi prototype link */
 	struct scsibus_softc	*sc_scsibus;
