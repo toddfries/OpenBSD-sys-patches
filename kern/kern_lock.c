@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.35 2010/04/26 05:48:17 deraadt Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.37 2011/07/06 21:41:37 art Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -366,25 +366,6 @@ _kernel_lock(void)
 void
 _kernel_unlock(void)
 {
-	__mp_unlock(&kernel_lock);
-}
-
-/*
- * Acquire/release the kernel_lock on behalf of a process.  Intended for
- * use in the top half of the kernel.
- */
-void
-_kernel_proc_lock(struct proc *p)
-{
-	SCHED_ASSERT_UNLOCKED();
-	__mp_lock(&kernel_lock);
-	atomic_setbits_int(&p->p_flag, P_BIGLOCK);
-}
-
-void
-_kernel_proc_unlock(struct proc *p)
-{
-	atomic_clearbits_int(&p->p_flag, P_BIGLOCK);
 	__mp_unlock(&kernel_lock);
 }
 

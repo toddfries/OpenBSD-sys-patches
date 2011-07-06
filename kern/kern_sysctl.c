@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.203 2011/06/09 21:10:55 sthen Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.206 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/resourcevar.h>
+#include <sys/signalvar.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/vnode.h>
@@ -611,6 +612,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  * hardware related system variables.
  */
 char *hw_vendor, *hw_prod, *hw_uuid, *hw_serial, *hw_ver;
+int allowpowerdown = 1;
 
 int
 hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
@@ -716,6 +718,12 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case HW_USERMEM64:
 		return (sysctl_rdquad(oldp, oldlenp, newp,
 		    ptoa((psize_t)physmem - uvmexp.wired)));
+	case HW_ALLOWPOWERDOWN:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp,
+			    allowpowerdown));
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &allowpowerdown));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1036,6 +1044,7 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 			cfile.f_offset = (off_t)-1;
 			cfile.f_rxfer = 0;
 			cfile.f_wxfer = 0;
+			cfile.f_seek = 0;
 			cfile.f_rbytes = 0;
 			cfile.f_wbytes = 0;
 		}
@@ -1071,17 +1080,18 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_uid = fp->f_cred->cr_uid;
 		kf->f_gid = fp->f_cred->cr_gid;
 		kf->f_ops = PTRTOINT64(fp->f_ops);
-		kf->f_offset = fp->f_offset;
 		kf->f_data = PTRTOINT64(fp->f_data);
 		kf->f_usecount = fp->f_usecount;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
+			kf->f_offset = fp->f_offset;
 			kf->f_rxfer = fp->f_rxfer;
 			kf->f_rwfer = fp->f_wxfer;
 			kf->f_seek = fp->f_seek;
 			kf->f_rbytes = fp->f_rbytes;
 			kf->f_wbytes = fp->f_rbytes;
-		}
+		} else
+			kf->f_offset = -1;
 	} else if (vp != NULL) {
 		/* fake it */
 		kf->f_type = DTYPE_VNODE;
@@ -1473,7 +1483,7 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki)
 	struct timeval ut, st;
 
 	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats);
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats, p->p_sigacts);
 
 	/* stuff that's too painful to generalize into the macros */
 	if (pr->ps_pptr)

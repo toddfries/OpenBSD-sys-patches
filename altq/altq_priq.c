@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_priq.c,v 1.22 2008/05/08 15:22:02 chl Exp $	*/
+/*	$OpenBSD: altq_priq.c,v 1.24 2011/07/03 23:59:43 henning Exp $	*/
 /*	$KAME: altq_priq.c,v 1.1 2000/10/18 09:15:23 kjc Exp $	*/
 /*
  * Copyright (C) 2000
@@ -253,10 +253,6 @@ priq_class_create(struct priq_if *pif, int pri, int qlimit, int flags, int qid)
 		if (!qempty(cl->cl_q))
 			priq_purgeq(cl);
 		splx(s);
-#ifdef ALTQ_RIO
-		if (q_is_rio(cl->cl_q))
-			rio_destroy((rio_t *)cl->cl_red);
-#endif
 #ifdef ALTQ_RED
 		if (q_is_red(cl->cl_q))
 			red_destroy(cl->cl_red);
@@ -285,28 +281,17 @@ priq_class_create(struct priq_if *pif, int pri, int qlimit, int flags, int qid)
 	cl->cl_handle = qid;
 
 #ifdef ALTQ_RED
-	if (flags & (PRCF_RED|PRCF_RIO)) {
+	if (flags & PRCF_RED) {
 		int red_flags, red_pkttime;
 
 		red_flags = 0;
 		if (flags & PRCF_ECN)
 			red_flags |= REDF_ECN;
-#ifdef ALTQ_RIO
-		if (flags & PRCF_CLEARDSCP)
-			red_flags |= RIOF_CLEARDSCP;
-#endif
 		if (pif->pif_bandwidth < 8)
 			red_pkttime = 1000 * 1000 * 1000; /* 1 sec */
 		else
 			red_pkttime = (int64_t)pif->pif_ifq->altq_ifp->if_mtu
 			  * 1000 * 1000 * 1000 / (pif->pif_bandwidth / 8);
-#ifdef ALTQ_RIO
-		if (flags & PRCF_RIO) {
-			cl->cl_red = (red_t *)rio_alloc(0, NULL,
-						red_flags, red_pkttime);
-			qtype(cl->cl_q) = Q_RIO;
-		} else
-#endif
 		if (flags & PRCF_RED) {
 			cl->cl_red = red_alloc(0, 0,
 			    qlimit(cl->cl_q) * 10/100,
@@ -345,10 +330,6 @@ priq_class_destroy(struct priq_class *cl)
 	splx(s);
 
 	if (cl->cl_red != NULL) {
-#ifdef ALTQ_RIO
-		if (q_is_rio(cl->cl_q))
-			rio_destroy((rio_t *)cl->cl_red);
-#endif
 #ifdef ALTQ_RED
 		if (q_is_red(cl->cl_q))
 			red_destroy(cl->cl_red);
@@ -443,11 +424,6 @@ static int
 priq_addq(struct priq_class *cl, struct mbuf *m)
 {
 
-#ifdef ALTQ_RIO
-	if (q_is_rio(cl->cl_q))
-		return rio_addq((rio_t *)cl->cl_red, cl->cl_q, m,
-				cl->cl_pktattr);
-#endif
 #ifdef ALTQ_RED
 	if (q_is_red(cl->cl_q))
 		return red_addq(cl->cl_red, cl->cl_q, m, cl->cl_pktattr);
@@ -457,9 +433,6 @@ priq_addq(struct priq_class *cl, struct mbuf *m)
 		return (-1);
 	}
 
-	if (cl->cl_flags & PRCF_CLEARDSCP)
-		write_dsfield(m, cl->cl_pktattr, 0);
-
 	_addq(cl->cl_q, m);
 
 	return (0);
@@ -468,10 +441,6 @@ priq_addq(struct priq_class *cl, struct mbuf *m)
 static struct mbuf *
 priq_getq(struct priq_class *cl)
 {
-#ifdef ALTQ_RIO
-	if (q_is_rio(cl->cl_q))
-		return rio_getq((rio_t *)cl->cl_red, cl->cl_q);
-#endif
 #ifdef ALTQ_RED
 	if (q_is_red(cl->cl_q))
 		return red_getq(cl->cl_red, cl->cl_q);
@@ -516,11 +485,6 @@ get_class_stats(struct priq_classstats *sp, struct priq_class *cl)
 	if (q_is_red(cl->cl_q))
 		red_getstats(cl->cl_red, &sp->red[0]);
 #endif
-#ifdef ALTQ_RIO
-	if (q_is_rio(cl->cl_q))
-		rio_getstats((rio_t *)cl->cl_red, &sp->red[0]);
-#endif
-
 }
 
 /* convert a class handle to the corresponding class pointer */
