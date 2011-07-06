@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.184 2011/05/04 16:05:49 blambert Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.188 2011/07/04 03:13:53 mpf Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -596,7 +596,7 @@ carp_proto_input(struct mbuf *m, ...)
 		return;
 	}
 	ip = mtod(m, struct ip *);
-	ch = (void *)ip + iplen;
+	ch = (struct carp_header *)(mtod(m, caddr_t) + iplen);
 
 	/* verify the CARP checksum */
 	m->m_data += iplen;
@@ -796,7 +796,7 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 		 *  treat him as timed out now.
 		 */
 		sc_tv.tv_sec = sc->sc_advbase * 3;
-		if (timercmp(&sc_tv, &ch_tv, <)) {
+		if (sc->sc_advbase && timercmp(&sc_tv, &ch_tv, <)) {
 			carp_master_down(vhe);
 			break;
 		}
@@ -906,6 +906,7 @@ carp_clone_create(ifc, unit)
 	/* Hook carp_addr_updated to cope with address and route changes. */
 	sc->ah_cookie = hook_establish(sc->sc_if.if_addrhooks, 0,
 	    carp_addr_updated, sc);
+	carp_set_state_all(sc, INIT);
 
 	return (0);
 }
@@ -1117,7 +1118,10 @@ carp_send_ad(void *v)
 		advbase = sc->sc_advbase;
 		advskew = vhe->advskew;
 		tv.tv_sec = advbase;
-		tv.tv_usec = advskew * 1000000 / 256;
+		if (advbase == 0 && advskew == 0)
+			tv.tv_usec = 1 * 1000000 / 256;
+		else
+			tv.tv_usec = advskew * 1000000 / 256;
 	}
 
 	ch.carp_version = CARP_VERSION;
@@ -1171,7 +1175,7 @@ carp_send_ad(void *v)
 		if (IN_MULTICAST(ip->ip_dst.s_addr))
 			m->m_flags |= M_MCAST;
 
-		ch_ptr = (void *)ip + sizeof(*ip);
+		ch_ptr = (struct carp_header *)(ip + 1);
 		bcopy(&ch, ch_ptr, sizeof(ch));
 		if (carp_prepare_ad(m, vhe, ch_ptr))
 			goto retry_later;
@@ -1260,7 +1264,7 @@ carp_send_ad(void *v)
 		ip6->ip6_dst.s6_addr16[1] = htons(sc->sc_carpdev->if_index);
 		ip6->ip6_dst.s6_addr8[15] = 0x12;
 
-		ch_ptr = (void *)ip6 + sizeof(*ip6);
+		ch_ptr = (struct carp_header *)(ip6 + 1);
 		bcopy(&ch, ch_ptr, sizeof(ch));
 		if (carp_prepare_ad(m, vhe, ch_ptr))
 			goto retry_later;
@@ -1583,6 +1587,8 @@ carp_input(struct mbuf *m, u_int8_t *shost, u_int8_t *dhost, u_int16_t etype)
 		 * for each CARP interface _before_ copying.
 		 */
 		TAILQ_FOREACH(vh, &cif->vhif_vrs, sc_list) {
+			if (!(vh->sc_if.if_flags & IFF_UP))
+				continue;
 			m0 = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
 			if (m0 == NULL)
 				continue;
@@ -1722,7 +1728,10 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 	case BACKUP:
 		timeout_del(&vhe->ad_tmo);
 		tv.tv_sec = 3 * sc->sc_advbase;
-		tv.tv_usec = vhe->advskew * 1000000 / 256;
+		if (sc->sc_advbase == 0 && vhe->advskew == 0)
+			tv.tv_usec = 3 * 1000000 / 256;
+		else
+			tv.tv_usec = vhe->advskew * 1000000 / 256;
 		if (vhe->vhe_leader)
 			sc->sc_delayed_arp = -1;
 		switch (af) {
@@ -1746,7 +1755,10 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 		break;
 	case MASTER:
 		tv.tv_sec = sc->sc_advbase;
-		tv.tv_usec = vhe->advskew * 1000000 / 256;
+		if (sc->sc_advbase == 0 && vhe->advskew == 0)
+			tv.tv_usec = 1 * 1000000 / 256;
+		else
+			tv.tv_usec = vhe->advskew * 1000000 / 256;
 		timeout_add(&vhe->ad_tmo, tvtohz(&tv));
 		break;
 	}
@@ -2286,7 +2298,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		}
 		if ((error = carp_vhids_ioctl(sc, &carpr)))
 			return (error);
-		if (carpr.carpr_advbase > 0) {
+		if (carpr.carpr_advbase >= 0) {
 			if (carpr.carpr_advbase > 255) {
 				error = EINVAL;
 				break;
@@ -2557,7 +2569,7 @@ carp_set_state(struct carp_vhost_entry *vhe, int state)
 		sc->sc_if.if_link_state = LINK_STATE_UP;
 		break;
 	default:
-		sc->sc_if.if_link_state = LINK_STATE_UNKNOWN;
+		sc->sc_if.if_link_state = LINK_STATE_INVALID;
 		break;
 	}
 	if_link_state_change(&sc->sc_if);
