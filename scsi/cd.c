@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.204 2011/06/19 04:55:34 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.207 2011/07/06 04:49:36 matthew Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -240,8 +240,6 @@ cdactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_RESUME:
 		/*
 		 * When resuming, hardware may have forgotten we locked it. So if
@@ -264,19 +262,10 @@ int
 cddetach(struct device *self, int flags)
 {
 	struct cd_softc *sc = (struct cd_softc *)self;
-	int bmaj, cmaj, mn;
 
 	bufq_drain(&sc->sc_bufq);
 
-	/* Locate the lowest minor number to be detached. */
-	mn = DISKMINOR(self->dv_unit, 0);
-
-	for (bmaj = 0; bmaj < nblkdev; bmaj++)
-		if (bdevsw[bmaj].d_open == cdopen)
-			vdevgone(bmaj, mn, mn + MAXPARTITIONS - 1, VBLK);
-	for (cmaj = 0; cmaj < nchrdev; cmaj++)
-		if (cdevsw[cmaj].d_open == cdopen)
-			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
+	disk_gone(cdopen, self->dv_unit);
 
 	/* Detach disk. */
 	bufq_destroy(&sc->sc_bufq);
@@ -379,23 +368,10 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 		SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel fabricated\n"));
 	}
 
-	/* Check that the partition exists. */
-	if (part != RAW_PART && (part >= sc->sc_dk.dk_label->d_npartitions ||
-	    sc->sc_dk.dk_label->d_partitions[part].p_fstype == FS_UNUSED)) {
-		error = ENXIO;
+out:
+	if ((error = disk_openpart(&sc->sc_dk, part, fmt, 1)) != 0)
 		goto bad;
-	}
 
-out:	/* Insure only one open at a time. */
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask |= (1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask |= (1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 	sc_link->flags |= SDEV_OPEN;
 	SC_DEBUG(sc_link, SDEV_DB3, ("open complete\n"));
 
@@ -433,15 +409,7 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 
 	disk_lock_nointr(&sc->sc_dk);
 
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask &= ~(1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
+	disk_closepart(&sc->sc_dk, part, fmt);
 
 	if (sc->sc_dk.dk_openmask == 0) {
 		/* XXXX Must wait for I/O to complete! */
@@ -498,24 +466,9 @@ cdstrategy(struct buf *bp)
 		bp->b_error = EIO;
 		goto bad;
 	}
-	/*
-	 * The transfer must be a whole number of blocks.
-	 */
-	if ((bp->b_bcount % sc->sc_dk.dk_label->d_secsize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-	/*
-	 * If it's a null transfer, return immediately
-	 */
-	if (bp->b_bcount == 0)
-		goto done;
 
-	/*
-	 * Do bounds checking, adjust transfer. if error, process.
-	 * If end of partition, just return.
-	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
 	/* Place it in the queue of disk activities for this disk. */
@@ -530,13 +483,10 @@ cdstrategy(struct buf *bp)
 	device_unref(&sc->sc_dev);
 	return;
 
-bad:
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	/*
-	 * Set the buf to indicate no xfer was done.
-	 */
 	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);

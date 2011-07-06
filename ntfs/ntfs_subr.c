@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_subr.c,v 1.23 2010/09/09 11:31:40 miod Exp $	*/
+/*	$OpenBSD: ntfs_subr.c,v 1.25 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $	*/
 
 /*-
@@ -40,8 +40,7 @@
 #include <sys/file.h>
 #include <sys/malloc.h>
 #include <sys/rwlock.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 /* #define NTFS_DEBUG 1 */
 #include <ntfs/ntfs.h>
@@ -292,9 +291,8 @@ ntfs_loadntnode(
 		bn = ntfs_cntobn(ntmp->ntm_mftcn) +
 			ntmp->ntm_bpmftrec * ip->i_number;
 
-		error = bread(ntmp->ntm_devvp,
-			      bn, ntfs_bntob(ntmp->ntm_bpmftrec),
-			      NOCRED, &bp);
+		error = bread(ntmp->ntm_devvp, bn,
+		    ntfs_bntob(ntmp->ntm_bpmftrec), &bp);
 		if (error) {
 			printf("ntfs_loadntnode: BREAD FAILED\n");
 			brelse(bp);
@@ -1509,7 +1507,7 @@ ntfs_writentvattr_plain(
 				clrbuf(bp);
 			} else {
 				error = bread(ntmp->ntm_devvp, ntfs_cntobn(cn),
-					      ntfs_cntob(cl), NOCRED, &bp);
+					      ntfs_cntob(cl), &bp);
 				if (error) {
 					brelse(bp);
 					return (error);
@@ -1618,7 +1616,7 @@ ntfs_readntvattr_plain(
 					error = bread(ntmp->ntm_devvp,
 						      ntfs_cntobn(cn),
 						      ntfs_cntob(cl),
-						      NOCRED, &bp);
+						      &bp);
 					if (error) {
 						brelse(bp);
 						return (error);
