@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.39 2010/12/21 14:56:24 claudio Exp $	*/
+/*	$OpenBSD: intr.c,v 1.43 2011/06/27 17:07:19 deraadt Exp $	*/
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -131,19 +131,24 @@ intr_list_handler(void *arg)
 {
 	struct cpu_info *ci = curcpu();
 	struct intrhand *ih = arg;
-	int claimed = 0;
+	int claimed = 0, rv, ipl = ci->ci_handled_intr_level;
 
 	while (ih) {
 		sparc_wrpr(pil, ih->ih_pil, 0);
 		ci->ci_handled_intr_level = ih->ih_pil;
 
-		if (ih->ih_fun(ih->ih_arg)) {
+		rv = ih->ih_fun(ih->ih_arg);
+		if (rv) {
 			ih->ih_count.ec_count++;
 			claimed = 1;
+			if (rv == 1)
+				break;
 		}
 
 		ih = ih->ih_next;
 	}
+	sparc_wrpr(pil, ipl, 0);
+	ci->ci_handled_intr_level = ipl;
 
 	return (claimed);
 }
@@ -203,7 +208,8 @@ intr_establish(int level, struct intrhand *ih)
 		/* No interrupt already there, just put handler in place. */
 		intrlev[ih->ih_number] = ih;
 	} else {
-		struct intrhand *nih;
+		struct intrhand *nih, *pih;
+		int ipl;
 
 		/*
 		 * Interrupt is already there.  We need to create a
@@ -225,16 +231,34 @@ intr_establish(int level, struct intrhand *ih)
 			nih->ih_map = q->ih_map;
 			nih->ih_clr = q->ih_clr;
 			nih->ih_ack = q->ih_ack;
+			q->ih_ack = NULL;
 
 			intrlev[ih->ih_number] = q = nih;
-		} else {
-			if (ih->ih_pil < q->ih_pil)
-				q->ih_pil = ih->ih_pil;
-		}
+		} else
+			q->ih_pil = min(q->ih_pil, ih->ih_pil);
 
-		/* Add the ih to the head of the list */
-		ih->ih_next = q->ih_arg;
-		q->ih_arg = ih;
+		ih->ih_ack = NULL;
+
+		/* Add ih to list in priority order. */
+		pih = q;
+		nih = pih->ih_arg;
+		ipl = nih->ih_pil;
+		while (nih && ih->ih_pil <= nih->ih_pil) {
+			ipl = nih->ih_pil;
+			pih = nih;
+			nih = nih->ih_next;
+		}
+#if DEBUG
+		printf("intr_establish: inserting pri %i after %i\n",
+		    ih->ih_pil, ipl);
+#endif
+		if (pih == q) {
+			ih->ih_next = pih->ih_arg;
+			pih->ih_arg = ih;
+		} else {
+			ih->ih_next = pih->ih_next;
+			pih->ih_next = ih;
+		}
 	}
 
 	if (ih->ih_clr != NULL)			/* Set interrupt to idle */
