@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.165 2010/10/28 15:02:41 millert Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.168 2011/07/06 04:49:13 guenther Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -676,16 +676,14 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	int error;
 
-	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
-		return (error);
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+		return (EBADF);
 	vp = (struct vnode *)fp->f_data;
+	if (fp->f_type != DTYPE_VNODE || vp->v_type != VDIR)
+		return (ENOTDIR);
 	vref(vp);
-	FRELE(fp);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	if (vp->v_type != VDIR)
-		error = ENOTDIR;
-	else
-		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
+	error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
 
 	while (!error && (mp = vp->v_mountedhere) != NULL) {
 		if (vfs_busy(mp, VB_READ|VB_WAIT))
@@ -1381,6 +1379,7 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 	vp = (struct vnode *)fp->f_data;
 	if (vp->v_type == VFIFO)
 		return (ESPIPE);
+	FREF(fp);
 	if (vp->v_type == VCHR)
 		special = 1;
 	else
@@ -1389,40 +1388,33 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 
 	switch (SCARG(uap, whence)) {
 	case SEEK_CUR:
-		newoff = fp->f_offset + offarg;;
+		newoff = fp->f_offset + offarg;
 		break;
 	case SEEK_END:
-		error = VOP_GETATTR((struct vnode *)fp->f_data, &vattr,
-				    cred, p);
+		error = VOP_GETATTR(vp, &vattr, cred, p);
 		if (error)
-			return (error);
+			goto bad;
 		newoff = offarg + (off_t)vattr.va_size;
 		break;
 	case SEEK_SET:
 		newoff = offarg;
 		break;
 	default:
-		return (EINVAL);
+		error = EINVAL;
+		goto bad;
 	}
 	if (!special) {
-		if (newoff < 0)
-			return (EINVAL);
-	} else {
-		/*
-		 * Make sure the user don't seek beyond the end of the
-		 * partition.
-		 */
-		struct partinfo dpart;
-		error = vn_ioctl(fp, DIOCGPART, (void *)&dpart, p);
-		if (!error) {
-			if (newoff >= DL_GETPSIZE(dpart.part) *
-			    dpart.disklab->d_secsize)
-					return (EINVAL);
+		if (newoff < 0) {
+			error = EINVAL;
+			goto bad;
 		}
 	}
 	*(off_t *)retval = fp->f_offset = newoff;
 	fp->f_seek++;
-	return (0);
+	error = 0;
+ bad:
+	FRELE(fp);
+	return (error);
 }
 
 /*
