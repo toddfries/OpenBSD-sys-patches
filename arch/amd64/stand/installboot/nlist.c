@@ -1,3 +1,4 @@
+/*	$OpenBSD: nlist.c,v 1.11 2011/07/04 00:59:26 krw Exp $	*/
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -53,28 +54,26 @@ int	__aout_fdnlist(int, struct nlist *);
 int	__ecoff_fdnlist(int, struct nlist *);
 int	__elf_fdnlist(int, struct nlist *);
 #ifdef _NLIST_DO_ELF
-int	__elf_is_okay__(register Elf_Ehdr *ehdr);
+int	__elf_is_okay__(Elf_Ehdr *ehdr);
 #endif
 
 #define	ISLAST(p)	(p->n_un.n_name == 0 || p->n_un.n_name[0] == 0)
 
 #ifdef _NLIST_DO_AOUT
 int
-__aout_fdnlist(fd, list)
-	register int fd;
-	register struct nlist *list;
+__aout_fdnlist(int fd, struct nlist *list)
 {
-	register struct nlist *p, *s;
-	register char *strtab;
-	register off_t symoff, stroff;
-	register u_long symsize;
-	register int nent, cc;
+	struct nlist *p, *s;
+	char *strtab;
+	off_t symoff, stroff;
+	u_long symsize;
+	int nent, cc;
 	int strsize, usemalloc = 0;
 	struct nlist nbuf[1024];
 	struct exec exec;
 
 	if (pread(fd, &exec, sizeof(exec), (off_t)0) != sizeof(exec) ||
-	    N_BADMAG(exec) || exec.a_syms == NULL)
+	    N_BADMAG(exec) || exec.a_syms == 0)
 		return (-1);
 
 	stroff = N_STROFF(exec);
@@ -168,9 +167,7 @@ aout_done:
 #define	BADUNMAP		do { rv = -1; goto unmap; } while (0)
 
 int
-__ecoff_fdnlist(fd, list)
-	register int fd;
-	register struct nlist *list;
+__ecoff_fdnlist(int fd, struct nlist *list)
 {
 	struct nlist *p;
 	struct ecoff_exechdr *exechdrp;
@@ -275,23 +272,29 @@ out:
  * as such its use should be restricted.
  */
 int
-__elf_is_okay__(ehdr)
-	register Elf_Ehdr *ehdr;
+__elf_is_okay__(Elf_Ehdr *ehdr)
 {
-	register int retval = 0;
+	int retval = 0;
 	/*
 	 * We need to check magic, class size, endianess,
 	 * and version before we look at the rest of the
 	 * Elf_Ehdr structure.  These few elements are
 	 * represented in a machine independent fashion.
 	 */
+
+	/*
+	 * We are constructing a 32-bit executable. So we can't
+	 * use the libc nlist.c, which would be upset. Manually
+	 * check for the i386 values for EI_CLASS and e_machine.
+	 */
+
 	if (IS_ELF(*ehdr) &&
-	    ehdr->e_ident[EI_CLASS] == ELF_TARG_CLASS &&
+	    ehdr->e_ident[EI_CLASS] == ELFCLASS32 &&
 	    ehdr->e_ident[EI_DATA] == ELF_TARG_DATA &&
 	    ehdr->e_ident[EI_VERSION] == ELF_TARG_VER) {
 
 		/* Now check the machine dependant header */
-		if (ehdr->e_machine == ELF_TARG_MACH &&
+		if (ehdr->e_machine == EM_386 &&
 		    ehdr->e_version == ELF_TARG_VER)
 			retval = 1;
 	}
@@ -300,15 +303,13 @@ __elf_is_okay__(ehdr)
 }
 
 int
-__elf_fdnlist(fd, list)
-	register int fd;
-	register struct nlist *list;
+__elf_fdnlist(int fd, struct nlist *list)
 {
-	register struct nlist *p;
-	register caddr_t strtab;
-	register Elf_Off symoff = 0, symstroff = 0;
-	register Elf_Word symsize = 0, symstrsize = 0;
-	register Elf_Sword nent, cc, i;
+	struct nlist *p;
+	caddr_t strtab;
+	Elf_Off symoff = 0, symstroff = 0;
+	Elf_Word symsize = 0, symstrsize = 0;
+	Elf_Sword nent, cc, i;
 	Elf_Sym sbuf[1024];
 	Elf_Sym *s;
 	Elf_Ehdr ehdr;
@@ -319,7 +320,7 @@ __elf_fdnlist(fd, list)
 
 	/* Make sure obj is OK */
 	if (pread(fd, &ehdr, sizeof(Elf_Ehdr), (off_t)0) != sizeof(Elf_Ehdr) ||
-	    /* !__elf_is_okay__(&ehdr) || */ fstat(fd, &st) < 0)
+	    !__elf_is_okay__(&ehdr) || fstat(fd, &st) < 0)
 		return (-1);
 
 	/* calculate section header table size */
@@ -332,7 +333,8 @@ __elf_fdnlist(fd, list)
 		usemalloc = 1;
 		if ((shdr = malloc(shdr_size)) == NULL)
 			return (-1);
-		if (pread(fd, shdr, shdr_size, ehdr.e_shoff) != shdr_size) {
+
+		if (pread(fd, shdr, shdr_size, (off_t)ehdr.e_shoff) != shdr_size) {
 			free(shdr);
 			return (-1);
 		}
@@ -369,7 +371,7 @@ __elf_fdnlist(fd, list)
 	if (usemalloc) {
 		if ((strtab = malloc(symstrsize)) == NULL)
 			return (-1);
-		if (pread(fd, strtab, symstrsize, symstroff) != symstrsize) {
+		if (pread(fd, strtab, symstrsize, (off_t)symstroff) != symstrsize) {
 			free(strtab);
 			return (-1);
 		}
@@ -405,7 +407,7 @@ __elf_fdnlist(fd, list)
 
 	while (symsize > 0) {
 		cc = MIN(symsize, sizeof(sbuf));
-		if (pread(fd, sbuf, cc, symoff) != cc)
+		if (pread(fd, sbuf, cc, (off_t)symoff) != cc)
 			break;
 		symsize -= cc;
 		symoff += cc;
@@ -419,9 +421,9 @@ __elf_fdnlist(fd, list)
 
 				/*
 				 * First we check for the symbol as it was
-				 * provided by the user. If that fails,
-				 * skip the first char if it's an '_' and
-				 * try again.
+				 * provided by the user. If that fails
+				 * and the first char is an '_', skip over
+				 * the '_' and try again.
 				 * XXX - What do we do when the user really
 				 *       wants '_foo' and the are symbols
 				 *       for both 'foo' and '_foo' in the
@@ -429,7 +431,7 @@ __elf_fdnlist(fd, list)
 				 */
 				sym = p->n_un.n_name;
 				if (strcmp(&strtab[soff], sym) != 0 &&
-				    ((sym[0] == '_') &&
+				    (sym[0] != '_' ||
 				     strcmp(&strtab[soff], sym + 1) != 0))
 					continue;
 
@@ -499,9 +501,7 @@ static struct nlist_handlers {
 };
 
 int
-__fdnlist(fd, list)
-	register int fd;
-	register struct nlist *list;
+__fdnlist(int fd, struct nlist *list)
 {
 	int n = -1, i;
 
@@ -515,9 +515,7 @@ __fdnlist(fd, list)
 
 
 int
-nlist(name, list)
-	const char *name;
-	struct nlist *list;
+nlist(const char *name, struct nlist *list)
 {
 	int fd, n;
 
