@@ -135,25 +135,6 @@ struct sr_metadata_list {
 
 SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
 
-struct sr_boot_volume {
-	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
-	u_int32_t		sbv_level;	/* Level. */
-	u_int32_t		sbv_volid;	/* Volume ID. */
-	u_int32_t		sbv_unit;	/* Disk unit. */
-	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
-	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
-	u_int32_t		sbv_flags;	/* Volume specific flags. */
-
-	void			*sbv_diskinfo;	/* MD disk information. */
-	char			sbv_part;	/* Partition opened. */
-
-	struct sr_metadata_list_head	sml;	/* List of metadata. */
-
-	SLIST_ENTRY(sr_boot_volume)	sbv_link;
-};
-
-SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
-
 /*
  * Check that HMAC-SHA1_k(decrypted scm_key) == sch_mac, where
  * k = SHA1(masking key)
@@ -454,10 +435,15 @@ struct sr_boot_volume {
 	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
 	u_int32_t		sbv_level;	/* Level. */
 	u_int32_t		sbv_volid;	/* Volume ID. */
+	u_int32_t		sbv_unit;	/* Disk unit. */
 	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
 	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
+	u_int32_t		sbv_flags;	/* Volume specific flags. */
 
-	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
+	void			*sbv_diskinfo;	/* MD disk information. */
+	char			sbv_part;	/* Partition opened. */
+
+	struct sr_metadata_list_head	sml;	/* List of metadata. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
