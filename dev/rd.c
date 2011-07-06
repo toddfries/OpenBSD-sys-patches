@@ -1,4 +1,4 @@
-/*	$OpenBSD: rd.c,v 1.3 2011/06/23 17:06:07 matthew Exp $	*/
+/*	$OpenBSD: rd.c,v 1.5 2011/07/06 04:49:36 matthew Exp $	*/
 
 /*
  * Copyright (c) 2011 Matthew Dempsky <matthew@dempsky.org>
@@ -136,17 +136,8 @@ int
 rd_detach(struct device *self, int flags)
 {
 	struct rd_softc *sc = (struct rd_softc *)self;
-	int bmaj, cmaj, mn;
 
-	/* Locate the lowest minor number to be detached. */
-	mn = DISKMINOR(self->dv_unit, 0);
-
-	for (bmaj = 0; bmaj < nblkdev; bmaj++)
-		if (bdevsw[bmaj].d_open == rdopen)
-			vdevgone(bmaj, mn, mn + MAXPARTITIONS - 1, VBLK);
-	for (cmaj = 0; cmaj < nchrdev; cmaj++)
-		if (cdevsw[cmaj].d_open == rdopen)
-			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
+	disk_gone(rdopen, self->dv_unit);
 
 	/* Detach disk. */
 	disk_detach(&sc->sc_dk);
@@ -178,23 +169,7 @@ rdopen(dev_t dev, int flag, int fmt, struct proc *p)
 			goto unlock;
 	}
 
-	/* Check that the partition exists. */
-	if (part != RAW_PART && (part >= sc->sc_dk.dk_label->d_npartitions ||
-	    sc->sc_dk.dk_label->d_partitions[part].p_fstype == FS_UNUSED)) {
-		error = ENXIO;
-		goto unlock;
-	}
-
-	/* Ensure the partition doesn't get changed under our feet. */
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask |= (1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask |= (1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
+	error = disk_openpart(&sc->sc_dk, part, fmt, 1);
 
  unlock:
 	disk_unlock(&sc->sc_dk);
@@ -218,15 +193,7 @@ rdclose(dev_t dev, int flag, int fmt, struct proc *p)
 
 	disk_lock_nointr(&sc->sc_dk);
 
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask &= ~(1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
+	disk_closepart(&sc->sc_dk, part, fmt);
 
 	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
@@ -248,18 +215,8 @@ rdstrategy(struct buf *bp)
 		goto bad;
 	}
 
-	/* If it's a null transfer, return immediately. */
-	if (bp->b_bcount == 0)
-		goto done;
-
-	/* The transfer must be a whole number of sectors. */
-	if ((bp->b_bcount % sc->sc_dk.dk_label->d_secsize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
-	/* Check that the request is within the partition boundaries. */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
 	/* Do the transfer. */
@@ -283,11 +240,13 @@ rdstrategy(struct buf *bp)
 
  bad:
 	bp->b_flags |= B_ERROR;
+	bp->b_resid = bp->b_bcount;
  done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
-	device_unref(&sc->sc_dev);
+	if (sc != NULL)
+		device_unref(&sc->sc_dev);
 }
 
 int
