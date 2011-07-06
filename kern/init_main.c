@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.177 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.179 2011/07/06 21:41:37 art Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -283,7 +283,7 @@ main(void *framep)
 	session0.s_count = 1;
 	session0.s_leader = pr;
 
-	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
+	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
 	pr->ps_nice = NZERO;
 	p->p_emul = &emul_native;
@@ -368,7 +368,7 @@ main(void *framep)
 	initclocks();
 
 	/* Lock the kernel on behalf of proc0. */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -615,6 +615,9 @@ start_init(void *arg)
 
 	check_console(p);
 
+	/* process 0 ignores SIGCHLD, but we can't */
+	p->p_sigacts->ps_flags = 0;
+
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
 	 */
@@ -713,7 +716,7 @@ start_init(void *arg)
 		 * other than it doesn't exist, complain.
 		 */
 		if ((error = sys_execve(p, &args, retval)) == 0) {
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			return;
 		}
 		if (error != ENOENT)

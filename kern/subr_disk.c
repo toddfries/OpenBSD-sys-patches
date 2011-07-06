@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.126 2011/06/19 04:53:17 matthew Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.130 2011/07/06 16:36:52 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -412,7 +412,8 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		bp->b_blkno = DL_BLKTOSEC(lp, part_blkno) * DL_BLKSPERSEC(lp);
 		offset = DL_BLKOFFSET(lp, part_blkno) + DOSPARTOFF;
 		bp->b_bcount = lp->d_secsize;
-		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+		bp->b_error = 0; /* B_ERROR and b_error may have stale data. */
+		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE | B_ERROR);
 		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 		(*strat)(bp);
 		error = biowait(bp);
@@ -687,36 +688,43 @@ int
 bounds_check_with_label(struct buf *bp, struct disklabel *lp)
 {
 	struct partition *p = &lp->d_partitions[DISKPART(bp->b_dev)];
-	daddr64_t sz = howmany(bp->b_bcount, DEV_BSIZE);
+	daddr64_t partblocks, sz;
 
-	/* Avoid division by zero, negative offsets and negative sizes. */
-	if (lp->d_secpercyl == 0 || bp->b_blkno < 0 || sz < 0)
+	/* Avoid division by zero, negative offsets, and negative sizes. */
+	if (lp->d_secpercyl == 0 || bp->b_blkno < 0 || bp->b_bcount < 0)
 		goto bad;
 
-	/* beyond partition? */
-	if (bp->b_blkno + sz > DL_SECTOBLK(lp, DL_GETPSIZE(p))) {
-		sz = DL_SECTOBLK(lp, DL_GETPSIZE(p)) - bp->b_blkno;
-		if (sz == 0) {
-			/* If exactly at end of disk, return EOF. */
-			bp->b_resid = bp->b_bcount;
-			return (-1);
-		}
-		if (sz < 0)
-			/* If past end of disk, return EINVAL. */
-			goto bad;
+	/* Ensure transfer is a whole number of aligned sectors. */
+	if ((bp->b_blkno % DL_BLKSPERSEC(lp)) != 0 ||
+	    (bp->b_bcount % lp->d_secsize) != 0)
+		goto bad;
 
-		/* Otherwise, truncate request. */
+	/* Ensure transfer starts within partition boundary. */
+	partblocks = DL_SECTOBLK(lp, DL_GETPSIZE(p));
+	if (bp->b_blkno > partblocks)
+		goto bad;
+
+	/* If exactly at end of partition or null transfer, return EOF. */
+	if (bp->b_blkno == partblocks || bp->b_bcount == 0)
+		goto done;
+
+	/* Truncate request if it exceeds past the end of the partition. */
+	sz = bp->b_bcount >> DEV_BSHIFT;
+	if (sz > partblocks - bp->b_blkno) {
+		sz = partblocks - bp->b_blkno;
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
 	bp->b_cylinder = (bp->b_blkno + DL_SECTOBLK(lp, DL_GETPOFFSET(p))) /
 	    DL_SECTOBLK(lp, lp->d_secpercyl);
-	return (1);
+	return (0);
 
-bad:
+ bad:
 	bp->b_error = EINVAL;
 	bp->b_flags |= B_ERROR;
+ done:
+	bp->b_resid = bp->b_bcount;
 	return (-1);
 }
 
@@ -894,6 +902,63 @@ disk_detach(struct disk *diskp)
 	disk_change = 1;
 	if (--disk_count < 0)
 		panic("disk_detach: disk_count < 0");
+}
+
+int
+disk_openpart(struct disk *dk, int part, int fmt, int haslabel)
+{
+	KASSERT(part >= 0 && part < MAXPARTITIONS);
+
+	/* Unless opening the raw partition, check that the partition exists. */
+	if (part != RAW_PART && (!haslabel ||
+	    part >= dk->dk_label->d_npartitions ||
+	    dk->dk_label->d_partitions[part].p_fstype == FS_UNUSED))
+		return (ENXIO);
+
+	/* Ensure the partition doesn't get changed under our feet. */
+	switch (fmt) {
+	case S_IFCHR:
+		dk->dk_copenmask |= (1 << part);
+		break;
+	case S_IFBLK:
+		dk->dk_bopenmask |= (1 << part);
+		break;
+	}
+	dk->dk_openmask = dk->dk_copenmask | dk->dk_bopenmask;
+
+	return (0);
+}
+
+void
+disk_closepart(struct disk *dk, int part, int fmt)
+{
+	KASSERT(part >= 0 && part < MAXPARTITIONS);
+
+	switch (fmt) {
+	case S_IFCHR:
+		dk->dk_copenmask &= ~(1 << part);
+		break;
+	case S_IFBLK:
+		dk->dk_bopenmask &= ~(1 << part);
+		break;
+	}
+	dk->dk_openmask = dk->dk_copenmask | dk->dk_bopenmask;
+}
+
+void
+disk_gone(int (*open)(dev_t, int, int, struct proc *), int unit)
+{
+	int bmaj, cmaj, mn;
+
+	/* Locate the lowest minor number to be detached. */
+	mn = DISKMINOR(unit, 0);
+
+	for (bmaj = 0; bmaj < nblkdev; bmaj++)
+		if (bdevsw[bmaj].d_open == open)
+			vdevgone(bmaj, mn, mn + MAXPARTITIONS - 1, VBLK);
+	for (cmaj = 0; cmaj < nchrdev; cmaj++)
+		if (cdevsw[cmaj].d_open == open)
+			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
 }
 
 /*
