@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.110 2011/06/05 19:41:08 deraadt Exp $ */
+/*	$OpenBSD: machdep.c,v 1.112 2011/06/26 22:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,6 +47,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -106,7 +107,6 @@ int	rsvdmem;		/* Reserved memory not usable. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 int	console_ok;		/* Set when console initialized. */
-int	kbd_reset;
 int16_t	masternasid;
 
 int32_t *environment;
@@ -657,10 +657,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -708,6 +704,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */

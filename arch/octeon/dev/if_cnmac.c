@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnmac.c,v 1.5 2011/06/24 02:13:23 yasuoka Exp $	*/
+/*	$OpenBSD: if_cnmac.c,v 1.7 2011/07/03 21:42:11 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#include <sys/cdefs.h>
+#include "bpfilter.h"
 
 /*
  * XXXSEIL
@@ -346,7 +346,7 @@ octeon_eth_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ip_offset = 0/* XXX */;
 
 	octeon_eth_board_mac_addr(enaddr, sizeof(enaddr), sc->sc_port);
-	printf(": Ethernet address %s\n", ether_sprintf(enaddr));
+	printf(", address %s\n", ether_sprintf(enaddr));
 
 	/*
 	 * live lock control notifications.

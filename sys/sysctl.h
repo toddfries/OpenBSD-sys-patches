@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.113 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.115 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -464,6 +464,7 @@ struct kinfo_proc {
  *	vm - source struct vmspace
  *	lim - source struct plimits
  *	ps - source struct pstats
+ *	sa - source struct sigacts
  * There are some members that are not handled by these macros
  * because they're too painful to generalize: p_ppid, p_sid, p_tdev,
  * p_tpgid, p_tsess, p_vm_rssize, p_u[us]time_{sec,usec}, p_cpuid
@@ -471,7 +472,7 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps, sa) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
@@ -518,8 +519,8 @@ do {									\
 									\
 	(kp)->p_siglist = (p)->p_siglist;				\
 	(kp)->p_sigmask = (p)->p_sigmask;				\
-	(kp)->p_sigignore = (p)->p_sigignore;				\
-	(kp)->p_sigcatch = (p)->p_sigcatch;				\
+	(kp)->p_sigignore = (sa) ? (sa)->ps_sigignore : 0;		\
+	(kp)->p_sigcatch = (sa) ? (sa)->ps_sigcatch : 0;		\
 									\
 	(kp)->p_stat = (p)->p_stat;					\
 	(kp)->p_nice = (pr)->ps_nice;					\
@@ -757,28 +758,29 @@ struct kinfo_file2 {
 /*
  * CTL_HW identifiers
  */
-#define	HW_MACHINE	 1		/* string: machine class */
-#define	HW_MODEL	 2		/* string: specific machine model */
-#define	HW_NCPU		 3		/* int: number of cpus being used */
-#define	HW_BYTEORDER	 4		/* int: machine byte order */
-#define	HW_PHYSMEM	 5		/* int: total memory */
-#define	HW_USERMEM	 6		/* int: non-kernel memory */
-#define	HW_PAGESIZE	 7		/* int: software page size */
-#define	HW_DISKNAMES	 8		/* strings: disk drive names */
-#define	HW_DISKSTATS	 9		/* struct: diskstats[] */
-#define	HW_DISKCOUNT	10		/* int: number of disks */
-#define	HW_SENSORS	11		/* node: hardware monitors */
-#define	HW_CPUSPEED	12		/* get CPU frequency */
-#define	HW_SETPERF	13		/* set CPU performance % */
-#define	HW_VENDOR	14		/* string: vendor name */
-#define	HW_PRODUCT	15		/* string: product name */
-#define	HW_VERSION	16		/* string: hardware version */
-#define	HW_SERIALNO	17		/* string: hardware serial number */
-#define	HW_UUID		18		/* string: universal unique id */
-#define	HW_PHYSMEM64	19		/* quad: total memory */
-#define	HW_USERMEM64	20		/* quad: non-kernel memory */
-#define	HW_NCPUFOUND	21		/* int: number of cpus found*/
-#define	HW_MAXID	22		/* number of valid hw ids */
+#define	HW_MACHINE		 1	/* string: machine class */
+#define	HW_MODEL		 2	/* string: specific machine model */
+#define	HW_NCPU			 3	/* int: number of cpus being used */
+#define	HW_BYTEORDER		 4	/* int: machine byte order */
+#define	HW_PHYSMEM		 5	/* int: total memory */
+#define	HW_USERMEM		 6	/* int: non-kernel memory */
+#define	HW_PAGESIZE		 7	/* int: software page size */
+#define	HW_DISKNAMES		 8	/* strings: disk drive names */
+#define	HW_DISKSTATS		 9	/* struct: diskstats[] */
+#define	HW_DISKCOUNT		10	/* int: number of disks */
+#define	HW_SENSORS		11	/* node: hardware monitors */
+#define	HW_CPUSPEED		12	/* get CPU frequency */
+#define	HW_SETPERF		13	/* set CPU performance % */
+#define	HW_VENDOR		14	/* string: vendor name */
+#define	HW_PRODUCT		15	/* string: product name */
+#define	HW_VERSION		16	/* string: hardware version */
+#define	HW_SERIALNO		17	/* string: hardware serial number */
+#define	HW_UUID			18	/* string: universal unique id */
+#define	HW_PHYSMEM64		19	/* quad: total memory */
+#define	HW_USERMEM64		20	/* quad: non-kernel memory */
+#define	HW_NCPUFOUND		21	/* int: number of cpus found*/
+#define	HW_ALLOWPOWERDOWN	22	/* allow power button shutdown */
+#define	HW_MAXID		23	/* number of valid hw ids */
 
 #define	CTL_HW_NAMES { \
 	{ 0, 0 }, \
@@ -803,6 +805,7 @@ struct kinfo_file2 {
 	{ "physmem", CTLTYPE_QUAD }, \
 	{ "usermem", CTLTYPE_QUAD }, \
 	{ "ncpufound", CTLTYPE_INT }, \
+	{ "allowpowerdown", CTLTYPE_INT }, \
 }
 
 /*
