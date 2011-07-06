@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.69 2011/06/18 23:35:21 matthew Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.70 2011/07/05 19:02:47 oga Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -343,11 +343,10 @@ sr_crypto_wu_get(struct sr_workunit *wu, int encrypt)
 
 	return (crwu);
 unwind:
-	/* steal the descrptions back from the cryptop */
+	/* steal the descriptors back from the cryptop */
 	crd = crwu->cr_crp->crp_desc;
-	while (crd->crd_next != NULL) {
+	while (crd->crd_next != NULL)
 		crd = crd->crd_next;
-	}
 
 	/* join the lists back again */
 	crd->crd_next = crwu->cr_descs;
@@ -370,9 +369,8 @@ sr_crypto_wu_put(struct sr_crypto_wu *crwu)
 	/* steal the descrptions back from the cryptop */
 	crd = crp->crp_desc;
 	KASSERT(crd);
-	while (crd->crd_next != NULL) {
+	while (crd->crd_next != NULL)
 		crd = crd->crd_next;
-	}
 
 	/* join the lists back again */
 	crd->crd_next = crwu->cr_descs;
@@ -1066,10 +1064,12 @@ sr_crypto_free_resources(struct sr_discipline *sd)
 		sd->mds.mdd_crypto.scr_sid[i] = (u_int64_t)-1;
 	}
 
+	mtx_enter(&sd->mds.mdd_crypto.scr_mutex);
 	while ((crwu = TAILQ_FIRST(&sd->mds.mdd_crypto.scr_wus)) != NULL) {
 		TAILQ_REMOVE(&sd->mds.mdd_crypto.scr_wus, crwu, cr_link);
 
-		dma_free(crwu->cr_dmabuf, MAXPHYS);
+		if (crwu->cr_dmabuf != NULL)
+			dma_free(crwu->cr_dmabuf, MAXPHYS);
 		/* twiddle cryptoreq back */
 		if (crwu->cr_crp) {
 			crwu->cr_crp->crp_desc = crwu->cr_descs;
@@ -1077,6 +1077,7 @@ sr_crypto_free_resources(struct sr_discipline *sd)
 		}
 		free(crwu, M_DEVBUF);
 	}
+	mtx_leave(&sd->mds.mdd_crypto.scr_mutex);
 
 	sr_wu_free(sd);
 	sr_ccb_free(sd);

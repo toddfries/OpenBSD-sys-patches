@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.60 2011/06/30 15:08:59 jsing Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.64 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -54,8 +54,7 @@
 #include <sys/pool.h>
 #include <sys/lock.h>
 #include <sys/dkio.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
@@ -143,11 +142,11 @@ ext2fs_mountroot(void)
 	fs = ump->um_e2fs;
 	bzero(fs->e2fs_fsmnt, sizeof(fs->e2fs_fsmnt));
 	(void)copystr(mp->mnt_stat.f_mntonname, fs->e2fs_fsmnt, 
-	    sizeof(fs->e2fs_fsmnt) - 1, 0);
+	    sizeof(fs->e2fs_fsmnt) - 1, NULL);
 	if (fs->e2fs.e2fs_rev > E2FS_REV0) {
 		bzero(fs->e2fs.e2fs_fsmnt, sizeof(fs->e2fs.e2fs_fsmnt));
 		(void)copystr(mp->mnt_stat.f_mntonname, fs->e2fs.e2fs_fsmnt,
-		    sizeof(fs->e2fs.e2fs_fsmnt) - 1, 0);
+		    sizeof(fs->e2fs.e2fs_fsmnt) - 1, NULL);
 	}
 	(void)ext2fs_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
@@ -359,7 +358,7 @@ ext2fs_reload_vnode(struct vnode *vp, void *args)
 	ip = VTOI(vp);
 	error = bread(era->devvp, 
 	    fsbtodb(era->fs, ino_to_fsba(era->fs, ip->i_number)),
-	    (int)era->fs->e2fs_bsize, NOCRED, &bp);
+	    (int)era->fs->e2fs_bsize, &bp);
 	if (error) {
 		vput(vp);
 		return (error);
@@ -392,8 +391,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	struct buf *bp;
 	struct m_ext2fs *fs;
 	struct ext2fs *newfs;
-	struct partinfo dpart;
-	int i, size, error;
+	int i, error;
 	struct ext2fs_reload_args era;
 
 	if ((mountp->mnt_flag & MNT_RDONLY) == 0)
@@ -408,11 +406,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	/*
 	 * Step 2: re-read superblock from disk.
 	 */
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, NOCRED, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
-	error = bread(devvp, (int32_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
+	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -450,7 +444,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	for (i=0; i < fs->e2fs_ngdb; i++) {
 		error = bread(devvp ,
 		    fsbtodb(fs, ((fs->e2fs_bsize>1024)? 0 : 1) + i + 1),
-		    fs->e2fs_bsize, NOCRED, &bp);
+		    fs->e2fs_bsize, &bp);
 		if (error) {
 			brelse(bp);
 			return (error);
@@ -482,8 +476,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	struct ext2fs *fs;
 	struct m_ext2fs *m_fs;
 	dev_t dev;
-	struct partinfo dpart;
-	int error, i, size, ronly;
+	int error, i, ronly;
 	struct ucred *cred;
 
 	dev = devvp->v_rdev;
@@ -505,10 +498,6 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, p);
 	if (error)
 		return (error);
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, cred, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
 
 	bp = NULL;
 	ump = NULL;
@@ -516,7 +505,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 #ifdef DEBUG_EXT2
 	printf("ext2 sb size: %d\n", sizeof(struct ext2fs));
 #endif
-	error = bread(devvp, (SBOFF / DEV_BSIZE), SBSIZE, cred, &bp);
+	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error)
 		goto out;
 	fs = (struct ext2fs *)bp->b_data;
@@ -564,7 +553,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	for (i=0; i < m_fs->e2fs_ngdb; i++) {
 		error = bread(devvp ,
 		    fsbtodb(m_fs, ((m_fs->e2fs_bsize>1024)? 0 : 1) + i + 1),
-		    m_fs->e2fs_bsize, NOCRED, &bp);
+		    m_fs->e2fs_bsize, &bp);
 		if (error) {
 			free(m_fs->e2fs_gd, M_UFSMNT);
 			goto out;
@@ -862,7 +851,7 @@ ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 
 	/* Read in the disk contents for the inode, copy into the inode. */
 	error = bread(ump->um_devvp, fsbtodb(fs, ino_to_fsba(fs, ino)),
-	    (int)fs->e2fs_bsize, NOCRED, &bp);
+	    (int)fs->e2fs_bsize, &bp);
 	if (error) {
 		/*
 		 * The inode does not contain anything useful, so it would

@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_rmclass.h,v 1.11 2008/08/27 01:37:16 deraadt Exp $	*/
+/*	$OpenBSD: altq_rmclass.h,v 1.13 2011/07/04 01:07:43 henning Exp $	*/
 /*	$KAME: altq_rmclass.h,v 1.6 2000/12/09 09:22:44 kjc Exp $	*/
 
 /*
@@ -181,7 +181,6 @@ struct rm_class {
  */
 struct rm_ifdat {
 	int		queued_;	/* # pkts queued downstream */
-	int		efficient_;	/* Link Efficiency bit */
 	int		wrr_;		/* Enable Weighted Round-Robin */
 	u_long		ns_per_byte_;	/* Link byte speed. */
 	int		maxqueued_;	/* Max packets to queue */
@@ -230,8 +229,6 @@ struct rm_ifdat {
 #define	RMCF_RED		0x0001
 #define	RMCF_ECN		0x0002
 #define	RMCF_RIO		0x0004
-#define	RMCF_FLOWVALVE		0x0008	/* use flowvalve (aka penalty-box) */
-#define	RMCF_CLEARDSCP		0x0010  /* clear diffserv codepoint */
 
 /* flags for rmc_init */
 #define	RMCF_WRR		0x0100

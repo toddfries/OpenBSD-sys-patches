@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.43 2011/05/30 22:25:24 oga Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.46 2011/07/06 19:50:38 beck Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -40,8 +40,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <uvm/uvm_stat.h>
-
 /*
  * pull in prototypes
  */
@@ -63,24 +61,6 @@
 #endif
 
 #include <machine/vmparam.h>
-
-/*
- * uvm_constraint_range's:
- * MD code is allowed to setup constraint ranges for memory allocators, the
- * primary use for this is to keep allocation for certain memory consumers
- * such as mbuf pools withing address ranges that are reachable by devices
- * that perform DMA.
- *
- * It is also to discourge memory allocations from being satisfied from ranges
- * such as the ISA memory range, if they can be satisfied with allocation
- * from other ranges.
- *
- * the MD ranges are defined in arch/ARCH/ARCH/machdep.c
- */
-struct uvm_constraint_range {
-	paddr_t	ucr_low;
-	paddr_t ucr_high;
-};
 
 /* Constraint ranges, set by MD code. */
 extern struct uvm_constraint_range  isa_constraint;
@@ -153,15 +133,6 @@ struct uvm {
  * holds all the internal UVM data
  */
 extern struct uvm uvm;
-
-/*
- * historys
- */
-#ifdef UVMHIST
-extern UVMHIST_DECL(maphist);
-extern UVMHIST_DECL(pdhist);
-extern UVMHIST_DECL(pghist);
-#endif
 
 /*
  * UVM_UNLOCK_AND_WAIT: atomic unlock+wait... wrapper around the

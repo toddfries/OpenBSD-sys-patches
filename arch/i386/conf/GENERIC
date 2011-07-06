@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.721 2011/06/29 20:52:09 matthew Exp $
+#	$OpenBSD: GENERIC,v 1.724 2011/07/05 00:33:22 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -23,9 +23,7 @@ option		APERTURE	# in-kernel aperture driver for XFree86
 #option		KGDB		# Remote debugger support; exclusive of DDB
 #option		"KGDB_DEVNAME=\"com\"",KGDBADDR=0x2f8,KGDBRATE=9600
 
-option		COMPAT_SVR4	# binary compatibility with SVR4
 option		COMPAT_LINUX	# binary compatibility with Linux
-option		COMPAT_AOUT	# a.out binaries are emulated
 
 option		PROCFS		# /proc
 option		NTFS		# NTFS support
@@ -177,6 +175,7 @@ thmc*	at iic?				# TI TMHC50 / Analog ADM1022
 spdmem*	at iic?				# SPD memory eeproms
 sdtemp*	at iic?				# SO-DIMM (JC-42.4) temperature
 wbng*	at iic?				# Winbond W83793G
+nvt*	at iic?				# Novoton W83795G
 
 #isagpio0 at isa? port 0x78		# ISA I/O mapped as GPIO
 #isagpio1 at isa? port 0x80

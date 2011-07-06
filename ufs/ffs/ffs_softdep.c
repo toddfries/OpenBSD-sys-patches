@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.104 2011/06/29 12:15:26 tedu Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.107 2011/07/04 20:35:35 deraadt Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -51,7 +51,7 @@
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <sys/vnode.h>
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -734,7 +734,7 @@ process_worklist_item(struct mount *matchmnt, int flags)
 		if (vp == NULL || !VOP_ISLOCKED(vp))
 			break;
 	}
-	if (wk == 0) {
+	if (wk == NULL) {
 		FREE_LOCK(&lk);
 		return (0);
 	}
@@ -826,11 +826,11 @@ softdep_move_dependencies(struct buf *oldbp, struct buf *newbp)
 
 	if (LIST_FIRST(&newbp->b_dep) != NULL)
 		panic("softdep_move_dependencies: need merge code");
-	wktail = 0;
+	wktail = NULL;
 	ACQUIRE_LOCK(&lk);
 	while ((wk = LIST_FIRST(&oldbp->b_dep)) != NULL) {
 		LIST_REMOVE(wk, wk_list);
-		if (wktail == 0)
+		if (wktail == NULL)
 			LIST_INSERT_HEAD(&newbp->b_dep, wk, wk_list);
 		else
 			LIST_INSERT_AFTER(wktail, wk, wk_list);
@@ -1123,7 +1123,7 @@ top:
 		*newblkpp = NULL;
 		return (0);
 	}
-	if (sema_get(&newblk_in_progress, 0) == 0)
+	if (sema_get(&newblk_in_progress, NULL) == 0)
 		goto top;
 	newblk = pool_get(&newblk_pool, PR_WAITOK);
 	newblk->nb_state = 0;
@@ -1167,7 +1167,7 @@ softdep_initialize(void)
 	sema_init(&inodedep_in_progress, "inodedep", PRIBIO, 0);
 	newblk_hashtbl = hashinit(64, M_NEWBLK, M_WAITOK, &newblk_hash);
 	sema_init(&newblk_in_progress, "newblk", PRIBIO, 0);
-	timeout_set(&proc_waiting_timeout, pause_timer, 0);
+	timeout_set(&proc_waiting_timeout, pause_timer, NULL);
 	pool_init(&pagedep_pool, sizeof(struct pagedep), 0, 0, 0,
 	    "pagedeppl", &pool_allocator_nointr);
 	pool_init(&inodedep_pool, sizeof(struct inodedep), 0, 0, 0,
@@ -1221,7 +1221,7 @@ softdep_mount(struct vnode *devvp, struct mount *mp, struct fs *fs,
 	bzero(&cstotal, sizeof cstotal);
 	for (cyl = 0; cyl < fs->fs_ncg; cyl++) {
 		if ((error = bread(devvp, fsbtodb(fs, cgtod(fs, cyl)),
-		    fs->fs_cgsize, cred, &bp)) != 0) {
+		    fs->fs_cgsize, &bp)) != 0) {
 			brelse(bp);
 			return (error);
 		}
@@ -1920,7 +1920,7 @@ softdep_setup_freeblocks(struct inode *ip, off_t length)
 	 */
 	if ((error = bread(ip->i_devvp,
 	    fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
-	    (int)fs->fs_bsize, NOCRED, &bp)) != 0)
+	    (int)fs->fs_bsize, &bp)) != 0)
 		softdep_error("softdep_setup_freeblocks", error);
 
 	if (ip->i_ump->um_fstype == UM_UFS1)
@@ -1959,7 +1959,7 @@ softdep_setup_freeblocks(struct inode *ip, off_t length)
 	 * been written to disk, so we can free any fragments without delay.
 	 */
 	merge_inode_lists(inodedep);
-	while ((adp = TAILQ_FIRST(&inodedep->id_inoupdt)) != 0)
+	while ((adp = TAILQ_FIRST(&inodedep->id_inoupdt)) != NULL)
 		free_allocdirect(&inodedep->id_inoupdt, adp, delay);
 	FREE_LOCK(&lk);
 	bdwrite(bp);
@@ -2050,7 +2050,7 @@ deallocate_dependencies(struct buf *bp, struct inodedep *inodedep)
 				panic("deallocate_dependencies: already gone");
 			}
 			indirdep->ir_state |= GOINGAWAY;
-			while ((aip = LIST_FIRST(&indirdep->ir_deplisthd)) != 0)
+			while ((aip = LIST_FIRST(&indirdep->ir_deplisthd)))
 				free_allocindir(aip, inodedep);
 			if (bp->b_lblkno >= 0 ||
 			    bp->b_blkno != indirdep->ir_savebp->b_lblkno) {
@@ -2073,7 +2073,7 @@ deallocate_dependencies(struct buf *bp, struct inodedep *inodedep)
 				while ((dap =
 				    LIST_FIRST(&pagedep->pd_diraddhd[i])))
 					free_diradd(dap);
-			while ((dap = LIST_FIRST(&pagedep->pd_pendinghd)) != 0)
+			while ((dap = LIST_FIRST(&pagedep->pd_pendinghd)))
 				free_diradd(dap);
 			/*
 			 * Copy any directory remove dependencies to the list
@@ -2454,7 +2454,7 @@ indir_trunc(struct inode *ip, daddr64_t dbn, int level, daddr64_t lbn,
 		FREE_LOCK(&lk);
 	} else {
 		FREE_LOCK(&lk);
-		error = bread(ip->i_devvp, dbn, (int)fs->fs_bsize, NOCRED, &bp);
+		error = bread(ip->i_devvp, dbn, (int)fs->fs_bsize, &bp);
 		if (error)
 			return (error);
 	}
@@ -3831,10 +3831,10 @@ softdep_disk_write_complete(struct buf *bp)
 				panic("disk_write_complete: indirdep gone");
 			bcopy(indirdep->ir_saveddata, bp->b_data, bp->b_bcount);
 			free(indirdep->ir_saveddata, M_INDIRDEP);
-			indirdep->ir_saveddata = 0;
+			indirdep->ir_saveddata = NULL;
 			indirdep->ir_state &= ~UNDONE;
 			indirdep->ir_state |= ATTACHED;
-			while ((aip = LIST_FIRST(&indirdep->ir_donehd)) != 0) {
+			while ((aip = LIST_FIRST(&indirdep->ir_donehd))) {
 				handle_allocindir_partdone(aip);
 				if (aip == LIST_FIRST(&indirdep->ir_donehd))
 					panic("disk_write_complete: not gone");
@@ -4173,7 +4173,8 @@ handle_written_inodeblock(struct inodedep *inodedep, struct buf *bp)
 	/*
 	 * If no outstanding dependencies, free it.
 	 */
-	if (free_inodedep(inodedep) || TAILQ_FIRST(&inodedep->id_inoupdt) == 0)
+	if (free_inodedep(inodedep) ||
+	    TAILQ_FIRST(&inodedep->id_inoupdt) == NULL)
 		return (0);
 	return (hadchanges);
 }
@@ -4586,7 +4587,7 @@ softdep_fsync(struct vnode *vp)
 		/*
 		 * Flush directory page containing the inode's name.
 		 */
-		error = bread(pvp, lbn, fs->fs_bsize, p->p_ucred, &bp);
+		error = bread(pvp, lbn, fs->fs_bsize, &bp);
 		if (error == 0) {
 			bp->b_bcount = blksize(fs, pip, lbn);
 			error = bwrite(bp);
@@ -4799,7 +4800,8 @@ loop:
 			 */
 			pagedep = WK_PAGEDEP(wk);
 			for (i = 0; i < DAHASHSZ; i++) {
-				if (LIST_FIRST(&pagedep->pd_diraddhd[i]) == 0)
+				if (LIST_FIRST(&pagedep->pd_diraddhd[i]) ==
+				    NULL)
 					continue;
 				if ((error =
 				    flush_pagedep_deps(vp, pagedep->pd_mnt,
@@ -5137,7 +5139,7 @@ flush_pagedep_deps(struct vnode *pvp, struct mount *mp,
 		FREE_LOCK(&lk);
 		if ((error = bread(ump->um_devvp,
 		    fsbtodb(ump->um_fs, ino_to_fsba(ump->um_fs, inum)),
-		    (int)ump->um_fs->fs_bsize, NOCRED, &bp)) != 0) {
+		    (int)ump->um_fs->fs_bsize, &bp)) != 0) {
 		    	brelse(bp);
 			break;
 		}

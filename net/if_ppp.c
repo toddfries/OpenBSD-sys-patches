@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.58 2010/05/02 22:34:31 stsp Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.61 2011/07/06 02:42:28 henning Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -251,9 +251,9 @@ ppp_clone_create(ifc, unit)
     sc->sc_if.if_start = ppp_ifstart;
 #endif
     IFQ_SET_MAXLEN(&sc->sc_if.if_snd, ifqmaxlen);
-    sc->sc_inq.ifq_maxlen = ifqmaxlen;
-    sc->sc_fastq.ifq_maxlen = ifqmaxlen;
-    sc->sc_rawq.ifq_maxlen = ifqmaxlen;
+    IFQ_SET_MAXLEN(&sc->sc_inq, ifqmaxlen);
+    IFQ_SET_MAXLEN(&sc->sc_fastq, ifqmaxlen);
+    IFQ_SET_MAXLEN(&sc->sc_rawq, ifqmaxlen);
     IFQ_SET_READY(&sc->sc_if.if_snd);
     if_attach(&sc->sc_if);
     if_alloc_sadl(&sc->sc_if);
@@ -1120,13 +1120,14 @@ pppintr()
     s = splsoftnet();	/* XXX - what's the point of this? see comment above */
     LIST_FOREACH(sc, &ppp_softc_list, sc_list) {
 	if (!(sc->sc_flags & SC_TBUSY)
-	    && (IFQ_IS_EMPTY(&sc->sc_if.if_snd) == 0 || sc->sc_fastq.ifq_head)) {
+	    && (!IFQ_IS_EMPTY(&sc->sc_if.if_snd) ||
+	    !IFQ_IS_EMPTY(&sc->sc_fastq))) {
 	    s2 = splnet();
 	    sc->sc_flags |= SC_TBUSY;
 	    splx(s2);
 	    (*sc->sc_start)(sc);
 	}
-	while (sc->sc_rawq.ifq_head) {
+	while (!IFQ_IS_EMPTY(&sc->sc_rawq)) {
 	    s2 = splnet();
 	    IF_DEQUEUE(&sc->sc_rawq, m);
 	    splx(s2);
@@ -1584,7 +1585,7 @@ pppdumpm(m0)
 
     for (m = m0; m; m = m->m_next) {
 	int l = m->m_len;
-	u_char *rptr = (u_char *)m->m_data;
+	u_char *rptr = mtod(m, u_char *);
 
 	while (l--) {
 	    if (bp > buf + sizeof(buf) - 4)
