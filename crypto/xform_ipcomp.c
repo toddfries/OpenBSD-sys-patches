@@ -1,4 +1,4 @@
-/* $OpenBSD: deflate.c,v 1.5 2007/09/13 21:26:41 hshoexer Exp $ */
+/* $OpenBSD: xform_ipcomp.c,v 1.1 2011/07/07 02:57:24 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)
@@ -36,8 +36,20 @@
 #include <sys/malloc.h>
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <net/zlib.h>
-#include <crypto/deflate.h>
+#include <lib/libz/zutil.h>
+
+#define Z_METHOD	8
+#define Z_MEMLEVEL	8
+#define MINCOMP		2	/* won't be used, but must be defined */
+#define ZBUF		10
+
+u_int32_t deflate_global(u_int8_t *, u_int32_t, int, u_int8_t **);
+
+struct deflate_buf {
+	u_int8_t *out;
+	u_int32_t size;
+	int flag;
+};
 
 int window_inflate = -1 * MAX_WBITS;
 int window_deflate = -12;
@@ -63,8 +75,8 @@ deflate_global(u_int8_t *data, u_int32_t size, int comp, u_int8_t **out)
 		buf[j].flag = 0;
 
 	zbuf.next_in = data;	/* data that is going to be processed */
-	zbuf.zalloc = z_alloc;
-	zbuf.zfree = z_free;
+	zbuf.zalloc = zcalloc;
+	zbuf.zfree = zcfree;
 	zbuf.opaque = Z_NULL;
 	zbuf.avail_in = size;	/* Total length of data to be processed */
 
@@ -95,7 +107,7 @@ deflate_global(u_int8_t *data, u_int32_t size, int comp, u_int8_t **out)
 
 	error = comp ? inflateInit2(&zbuf, window_inflate) :
 	    deflateInit2(&zbuf, Z_DEFAULT_COMPRESSION, Z_METHOD,
-	    window_deflate, Z_MEMLEVEL, Z_DEFAULT_STRATEGY, MINCOMP);
+	    window_deflate, Z_MEMLEVEL, Z_DEFAULT_STRATEGY);
 
 	if (error != Z_OK)
 		goto bad;
@@ -158,19 +170,4 @@ bad:
 	else
 		deflateEnd(&zbuf);
 	return 0;
-}
-
-void *
-z_alloc(void *nil, u_int type, u_int size)
-{
-	void *ptr;
-
-	ptr = malloc(type *size, M_CRYPTO_DATA, M_NOWAIT);
-	return ptr;
-}
-
-void
-z_free(void *nil, void *ptr, u_int size)
-{
-	free(ptr, M_CRYPTO_DATA);
 }
