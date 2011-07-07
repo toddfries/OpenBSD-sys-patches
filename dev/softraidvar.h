@@ -443,7 +443,7 @@ struct sr_boot_volume {
 	void			*sbv_diskinfo;	/* MD disk information. */
 	char			sbv_part;	/* Partition opened. */
 
-	struct sr_metadata_list_head	sml;	/* List of metadata. */
+	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
