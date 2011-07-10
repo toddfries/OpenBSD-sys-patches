@@ -1,4 +1,4 @@
-/*	$OpenBSD: fcntl.h,v 1.12 2011/06/28 10:15:38 thib Exp $	*/
+/*	$OpenBSD: fcntl.h,v 1.16 2011/07/09 01:28:48 matthew Exp $	*/
 /*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
 
 /*-
@@ -108,6 +108,10 @@
 /* defined by POSIX 1003.1; BSD default, this bit is not required */
 #define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
 
+/* defined by POSIX Issue 7 */
+#define	O_CLOEXEC	0x10000		/* atomically set FD_CLOEXEC */
+#define	O_DIRECTORY	0x20000		/* fail if not a directory */
+
 #ifdef _KERNEL
 /*
  * convert from open() flags to/from fflags; convert O_RD/WR to FREAD/FWRITE.
@@ -153,6 +157,9 @@
 #define	F_GETLK		7		/* get record locking information */
 #define	F_SETLK		8		/* set record locking information */
 #define	F_SETLKW	9		/* F_SETLK; wait if blocked */
+#if __BSD_VISIBLE || __POSIX_VISIBLE >= 200809
+#define	F_DUPFD_CLOEXEC	10		/* duplicate with FD_CLOEXEC set */
+#endif
 
 /* file descriptor flags (F_GETFD, F_SETFD) */
 #define	FD_CLOEXEC	1		/* close-on-exec flag */
@@ -188,6 +195,13 @@ struct flock {
 #define	LOCK_UN		0x08		/* unlock file */
 #endif
 
+#if __BSD_VISIBLE || __POSIX_VISIBLE >= 200809
+#define	AT_FDCWD	-100
+
+#define	AT_EACCESS		0x01
+#define	AT_SYMLINK_NOFOLLOW	0x02
+#define	AT_SYMLINK_FOLLOW	0x04
+#endif
 
 #ifndef _KERNEL
 __BEGIN_DECLS

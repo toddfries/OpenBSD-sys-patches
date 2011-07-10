@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.69 2011/07/07 01:19:39 tedu Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.72 2011/07/09 00:10:52 deraadt Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 #include <sys/mount.h>
 #include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/swap.h>
 #include <sys/resourcevar.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
@@ -765,52 +766,6 @@ linux_sys_times(p, v, retval)
 }
 
 /*
- * OpenBSD passes fd[0] in retval[0], and fd[1] in retval[1].
- * Linux directly passes the pointer.
- */
-int
-linux_sys_pipe(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_pipe_args /* {
-		syscallarg(int *) pfds;
-	} */ *uap = v;
-	int error;
-	int pfds[2];
-#ifdef __i386__
-	int reg_edx = retval[1];
-#endif /* __i386__ */
-
-	if ((error = sys_opipe(p, 0, retval))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		return error;
-	}
-
-	/* Assumes register_t is an int */
-
-	pfds[0] = retval[0];
-	pfds[1] = retval[1];
-	if ((error = copyout(pfds, SCARG(uap, pfds), 2 * sizeof (int)))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		fdrelease(p, retval[0]);
-		fdrelease(p, retval[1]);
-		return error;
-	}
-
-	retval[0] = 0;
-#ifdef __i386__
-	retval[1] = reg_edx;
-#endif /* __i386__ */
-	return 0;
-}
-
-/*
  * Alarm. This is a libc call which uses setitimer(2) in OpenBSD.
  * Fiddle with the timers to make it work.
  */
@@ -1498,4 +1453,31 @@ linux_sys_mprotect(struct proc *p, void *v, register_t *retval)
 	if (SCARG(uap, prot) & (PROT_WRITE | PROT_EXEC))
 		SCARG(uap, prot) |= PROT_READ;
 	return (sys_mprotect(p, uap, retval));
+}
+
+int
+linux_sys_setdomainname(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_setdomainname_args *uap = v;
+	int error, mib[1];
+	
+	if ((error = suser(p, 0)))
+		return (error);
+	mib[0] = KERN_DOMAINNAME;
+	return (kern_sysctl(mib, 1, NULL, NULL, SCARG(uap, name),
+	    SCARG(uap, len), p));
+}
+
+int
+linux_sys_swapon(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_swapctl_args ua;
+	struct linux_sys_swapon_args /* {
+		syscallarg(const char *) name;
+	} */ *uap = v;
+
+	SCARG(&ua, cmd) = SWAP_ON;
+	SCARG(&ua, arg) = (void *)SCARG(uap, name);
+	SCARG(&ua, misc) = 0;	/* priority */
+	return (sys_swapctl(p, &ua, retval));
 }

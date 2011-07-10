@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.520 2011/07/07 02:57:24 deraadt Exp $
+#	$OpenBSD: files,v 1.525 2011/07/09 00:47:18 henning Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -721,7 +721,7 @@ file kern/subr_autoconf.c
 file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
-file kern/subr_hiballoc.c		!small_kernel
+file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
 file kern/subr_pool.c
 file kern/dma_alloc.c
@@ -896,12 +896,6 @@ file crypto/hmac.c			wlan | (softraid & crypto)
 file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
-file netatalk/aarp.c			netatalk
-file netatalk/at_control.c		netatalk
-file netatalk/at_proto.c		netatalk
-file netatalk/ddp_input.c		netatalk
-file netatalk/ddp_output.c		netatalk
-file netatalk/ddp_usrreq.c		netatalk
 file netbt/bt_input.c			bluetooth		needs-flag
 file netbt/bt_proto.c			bluetooth
 file netbt/hci_event.c			bluetooth
@@ -1051,8 +1045,6 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
-file compat/common/compat_vm.c		!small_kernel & compat_linux
-file compat/common/kern_info_09.c	!small_kernel & compat_linux
 file compat/common/tty_43.c		compat_43
 
 # libx86emu

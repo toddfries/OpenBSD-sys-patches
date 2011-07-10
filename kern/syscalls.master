@@ -1,4 +1,4 @@
-;	$OpenBSD: syscalls.master,v 1.109 2011/07/07 01:19:40 tedu Exp $
+;	$OpenBSD: syscalls.master,v 1.117 2011/07/09 05:46:26 matthew Exp $
 ;	$NetBSD: syscalls.master,v 1.32 1996/04/23 10:24:21 mycroft Exp $
 
 ;	@(#)syscalls.master	8.2 (Berkeley) 1/13/94
@@ -72,10 +72,9 @@
 16	STD		{ int sys_chown(const char *path, uid_t uid, \
 			    gid_t gid); }
 17	STD		{ int sys_obreak(char *nsize); } break
-18	COMPAT_25	{ int sys_getfsstat(struct statfs *buf, long bufsize, \
-			    int flags); } ogetfsstat
+18	OBSOL		getfsstat25
 19	OBSOL		olseek
-20	STD		{ pid_t sys_getpid(void); }
+20	STD NOLOCK	{ pid_t sys_getpid(void); }
 21	STD		{ int sys_mount(const char *type, const char *path, \
 			    int flags, void *data); }
 22	STD		{ int sys_unmount(const char *path, int flags); }
@@ -110,7 +109,7 @@
 39	STD		{ pid_t sys_getppid(void); }
 40	OBSOL		lstat43
 41	STD		{ int sys_dup(int fd); }
-42	STD		{ int sys_opipe(void); }
+42	OBSOL		opipe
 43	STD		{ gid_t sys_getegid(void); }
 44	STD		{ int sys_profil(caddr_t samples, size_t size, \
 			    u_long offset, u_int scale); }
@@ -133,8 +132,7 @@
 51	UNIMPL		acct
 #endif
 52	STD		{ int sys_sigpending(void); }
-53	STD		{ int sys_osigaltstack(const struct osigaltstack *nss, \
-			    struct osigaltstack *oss); }
+53	OBSOL		osigaltstack
 54	STD		{ int sys_ioctl(int fd, \
 			    u_long com, ... void *data); }
 55	STD		{ int sys_reboot(int opt); }
@@ -150,12 +148,12 @@
 62	OBSOL		fstat43
 63	OBSOL		ogetkerninfo
 64	OBSOL		ogetpagesize
-65	COMPAT_25	{ int sys_omsync(caddr_t addr, size_t len); }
+65	OBSOL		omsync25
 66	STD		{ int sys_vfork(void); }
 67	OBSOL		vread
 68	OBSOL		vwrite
-69	STD		{ int sys_sbrk(int incr); }
-70	STD		{ int sys_sstk(int incr); }
+69	OBSOL		sbrk
+70	OBSOL		sstk
 71	OBSOL		ommap
 72	OBSOL		vadvise
 73	STD		{ int sys_munmap(void *addr, size_t len); }
@@ -177,7 +175,7 @@
 			    const struct itimerval *itv, \
 			    struct itimerval *oitv); }
 84	OBSOL		owait
-85	COMPAT_25	{ int sys_swapon(const char *name); }
+85	OBSOL		swapon25
 86	STD		{ int sys_getitimer(int which, \
 			    struct itimerval *itv); }
 87	OBSOL		ogethostname
@@ -196,8 +194,8 @@
 			    socklen_t namelen); }
 99	OBSOL		oaccept
 100	STD		{ int sys_getpriority(int which, id_t who); }
-101	OBSOL	osend
-102	OBSOL	orecv
+101	OBSOL		osend
+102	OBSOL		orecv
 103	STD		{ int sys_sigreturn(struct sigcontext *sigcntxp); }
 104	STD		{ int sys_bind(int s, const struct sockaddr *name, \
 			    socklen_t namelen); }
@@ -274,40 +272,21 @@
 155	UNIMPL
 #endif
 156	OBSOL		ogetdirentries
-157	COMPAT_25	{ int sys_statfs(const char *path, \
-			    struct ostatfs *buf); } ostatfs
-158	COMPAT_25	{ int sys_fstatfs(int fd, struct ostatfs *buf); } \
-			    ostatfs
+157	OBSOL		statfs25
+158	OBSOL		fstatfs25
 159	UNIMPL
 160	UNIMPL
 161	STD		{ int sys_getfh(const char *fname, fhandle_t *fhp); }
-162	COMPAT_09	{ int sys_getdomainname(char *domainname, int len); } \
-			    ogetdomainname
-163	COMPAT_09	{ int sys_setdomainname(char *domainname, int len); } \
-			    osetdomainname
+162	OBSOL		ogetdomainname
+163	OBSOL		osetdomainname
 164	UNIMPL		ouname
 165	STD		{ int sys_sysarch(int op, void *parms); }
 166	UNIMPL
 167	UNIMPL
 168	UNIMPL
-#if defined(SYSVSEM) && !defined(__LP64__)
-169	COMPAT_10	{ int sys_semsys(int which, int a2, int a3, int a4, \
-			    int a5); } osemsys
-#else
-169	UNIMPL		1.0 semsys
-#endif
-#if defined(SYSVMSG) && !defined(__LP64__)
-170	COMPAT_10	{ int sys_msgsys(int which, int a2, int a3, int a4, \
-			    int a5, int a6); } omsgsys
-#else
-170	UNIMPL		1.0 msgsys
-#endif
-#if defined(SYSVSHM) && !defined(__LP64__)
-171	COMPAT_10	{ int sys_shmsys(int which, int a2, int a3, int a4); } \
-			    oshmsys
-#else
-171	UNIMPL		1.0 shmsys
-#endif
+169	OBSOL		semsys10
+170	OBSOL		msgsys10
+171	OBSOL		shmsys10
 172	UNIMPL
 173	STD		{ ssize_t sys_pread(int fd, void *buf, \
 			  size_t nbyte, int pad, off_t offset); }
@@ -347,7 +326,7 @@
 			    struct rlimit *rlp); }
 195	STD		{ int sys_setrlimit(int which, \
 			    const struct rlimit *rlp); }
-196	STD		{ int sys_ogetdirentries(int fd, char *buf, \
+196	COMPAT_O48	{ int sys_getdirentries(int fd, char *buf, \
 			    int count, long *basep); }
 197	STD		{ void *sys_mmap(void *addr, size_t len, int prot, \
 			    int flags, int fd, long pad, off_t pos); }
@@ -565,3 +544,31 @@
 311	STD		{ int sys_getrtable(void); }
 312	STD		{ int sys_getdirentries(int fd, char *buf, \
 			    int count, off_t *basep); }
+313	STD		{ int sys_faccessat(int fd, const char *path, \
+			    int amode, int flag); }
+314	STD		{ int sys_fchmodat(int fd, const char *path, \
+			    mode_t mode, int flag); }
+315	STD		{ int sys_fchownat(int fd, const char *path, \
+			    uid_t uid, gid_t gid, int flag); }
+316	STD		{ int sys_fstatat(int fd, const char *path, \
+			    struct stat *buf, int flag); }
+317	STD		{ int sys_linkat(int fd1, const char *path1, int fd2, \
+			    const char *path2, int flag); }
+318	STD		{ int sys_mkdirat(int fd, const char *path, \
+			    mode_t mode); }
+319	STD		{ int sys_mkfifoat(int fd, const char *path, \
+			    mode_t mode); }
+320	STD		{ int sys_mknodat(int fd, const char *path, \
+			    mode_t mode, dev_t dev); }
+321	STD		{ int sys_openat(int fd, const char *path, int flags, \
+			    ... mode_t mode); }
+322	STD		{ ssize_t sys_readlinkat(int fd, const char *path, \
+			    char *buf, size_t count); }
+323	STD		{ int sys_renameat(int fromfd, const char *from, \
+			    int tofd, const char *to); }
+324	STD		{ int sys_symlinkat(const char *path, int fd, \
+			    const char *link); }
+325	STD		{ int sys_unlinkat(int fd, const char *path, \
+			    int flag); }
+326	STD		{ int sys_utimensat(int fd, const char *path, \
+			    const struct timespec *times, int flag); }

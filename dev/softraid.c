@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.241 2011/07/06 17:37:22 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.244 2011/07/08 22:09:27 matthew Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -114,7 +114,8 @@ void			sr_discipline_shutdown(struct sr_discipline *, int);
 int			sr_discipline_init(struct sr_discipline *, int);
 
 /* utility functions */
-void			sr_shutdown(void *);
+void			sr_shutdown(struct sr_softc *);
+void			sr_shutdownhook(void *);
 void			sr_uuid_get(struct sr_uuid *);
 void			sr_uuid_print(struct sr_uuid *, int);
 void			sr_checksum_print(u_int8_t *);
@@ -1661,18 +1662,18 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &sr_switch;
 	sc->sc_link.adapter_target = SR_MAX_LD;
-	sc->sc_link.adapter_buswidth = SR_MAX_LD;
-	sc->sc_link.luns = 1;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
+	saa.saa_targets = SR_MAX_LD;
+	saa.saa_luns = 1;
 
 	sc->sc_scsibus = (struct scsibus_softc *)config_found(&sc->sc_dev,
 	    &saa, scsiprint);
 
 	softraid_disk_attach = sr_disk_attach;
 
-	sc->sc_shutdownhook = shutdownhook_establish(sr_shutdown, sc);
+	sc->sc_shutdownhook = shutdownhook_establish(sr_shutdownhook, sc);
 
 	sr_boot_assembly(sc);
 }
@@ -1681,17 +1682,14 @@ int
 sr_detach(struct device *self, int flags)
 {
 	struct sr_softc		*sc = (void *)self;
-	int			i, rv;
+	int			rv;
 
 	DNPRINTF(SR_D_MISC, "%s: sr_detach\n", DEVNAME(sc));
 
 	if (sc->sc_shutdownhook)
 		shutdownhook_disestablish(sc->sc_shutdownhook);
 
-	/* XXX this will not work when we stagger disciplines */
-	for (i = 0; i < SR_MAX_LD; i++)
-		if (sc->sc_dis[i])
-			sr_discipline_shutdown(sc->sc_dis[i], 1);
+	sr_shutdown(sc);
 
 #ifndef SMALL_KERNEL
 	if (sc->sc_sensor_task != NULL)
@@ -3800,9 +3798,14 @@ sr_validate_stripsize(u_int32_t b)
 }
 
 void
-sr_shutdown(void *arg)
+sr_shutdownhook(void *arg)
 {
-	struct sr_softc		*sc = arg;
+	sr_shutdown((struct sr_softc *)arg);
+}
+
+void
+sr_shutdown(struct sr_softc *sc)
+{
 	int			i;
 
 	DNPRINTF(SR_D_MISC, "%s: sr_shutdown\n", DEVNAME(sc));
@@ -3924,7 +3927,6 @@ sr_rebuild_thread(void *arg)
 	struct sr_softc		*sc = sd->sd_sc;
 	daddr64_t		whole_blk, partial_blk, blk, sz, lba;
 	daddr64_t		psz, rb, restart;
-	uint64_t		mysize = 0;
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
 	struct scsi_rw_16	*cr, *cw;
@@ -3965,12 +3967,13 @@ sr_rebuild_thread(void *arg)
 	/* currently this is 64k therefore we can use dma_alloc */
 	buf = dma_alloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, PR_WAITOK);
 	for (blk = restart; blk <= whole_blk; blk++) {
-		if (blk == whole_blk)
+		lba = blk * SR_REBUILD_IO_SIZE;
+		sz = SR_REBUILD_IO_SIZE;
+		if (blk == whole_blk) {
+			if (partial_blk == 0)
+				break;
 			sz = partial_blk;
-		else
-			sz = SR_REBUILD_IO_SIZE;
-		mysize += sz;
-		lba = blk * sz;
+		}
 
 		/* get some wu */
 		if ((wu_r = scsi_io_get(&sd->sd_iopool, 0)) == NULL)
