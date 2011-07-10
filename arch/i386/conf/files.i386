@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.205 2011/07/04 22:53:53 tedu Exp $
+#	$OpenBSD: files.i386,v 1.207 2011/07/08 20:15:09 ariane Exp $
 #
 # new style config file for i386 architecture
 #
@@ -24,7 +24,7 @@ file	arch/i386/i386/est.c		!small_kernel
 file	arch/i386/i386/gdt.c
 file	arch/i386/i386/in_cksum.s	inet
 file	arch/i386/i386/machdep.c
-file	arch/i386/i386/hibernate_machdep.c
+file	arch/i386/i386/hibernate_machdep.c hibernate
 file	arch/i386/i386/via.c
 file	arch/i386/i386/amd64errata.c	!small_kernel
 file	arch/i386/i386/kgdb_machdep.c	kgdb
@@ -45,7 +45,6 @@ file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
 file	arch/i386/i386/softintr.c
 file	arch/i386/i386/dkcsum.c		bios
-file	lib/libz/adler32.c		!ppp_deflate & !ipsec & !crypto
 file	dev/cninit.c
 file	arch/i386/i386/mptramp.s	multiprocessor
 file	arch/i386/i386/mp_setperf.c	multiprocessor
