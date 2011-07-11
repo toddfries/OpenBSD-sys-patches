@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.51 2011/06/02 16:29:20 deraadt Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.53 2011/07/08 19:28:36 otto Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -100,6 +100,7 @@ ktrsyscall(struct proc *p, register_t code, size_t argsize, register_t args[])
 	u_int nargs = 0;
 	int i;
 
+	KERNEL_LOCK();
 	if (code == SYS___sysctl && (p->p_emul->e_flags & EMUL_NATIVE)) {
 		/*
 		 * The native sysctl encoding stores the mib[]
@@ -126,6 +127,7 @@ ktrsyscall(struct proc *p, register_t code, size_t argsize, register_t args[])
 	ktrwrite(p, &kth);
 	free(ktp, M_TEMP);
 	p->p_traceflag &= ~KTRFAC_ACTIVE;
+	KERNEL_UNLOCK();
 }
 
 void
@@ -133,6 +135,8 @@ ktrsysret(struct proc *p, register_t code, int error, register_t retval)
 {
 	struct ktr_header kth;
 	struct ktr_sysret ktp;
+
+	KERNEL_LOCK();
 
 	p->p_traceflag |= KTRFAC_ACTIVE;
 	ktrinitheader(&kth, p, KTR_SYSRET);
@@ -145,6 +149,7 @@ ktrsysret(struct proc *p, register_t code, int error, register_t retval)
 
 	ktrwrite(p, &kth);
 	p->p_traceflag &= ~KTRFAC_ACTIVE;
+	KERNEL_UNLOCK();
 }
 
 void
@@ -270,6 +275,30 @@ ktrcsw(struct proc *p, int out, int user)
 	kth.ktr_len = sizeof(struct ktr_csw);
 
 	ktrwrite(p, &kth);
+	p->p_traceflag &= ~KTRFAC_ACTIVE;
+}
+
+void
+ktrstruct(struct proc *p, const char *name, const void *data, size_t datalen)
+{
+	struct ktr_header kth;
+	void *buf;
+	size_t buflen;
+
+	p->p_traceflag |= KTRFAC_ACTIVE;
+	ktrinitheader(&kth, p, KTR_STRUCT);
+	
+	if (data == NULL)
+		datalen = 0;
+	buflen = strlen(name) + 1 + datalen;
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	strlcpy(buf, name, buflen);
+	bcopy(data, buf + strlen(name) + 1, datalen);
+	kth.ktr_buf = buf;
+	kth.ktr_len = buflen;
+
+	ktrwrite(p, &kth);
+	free(buf, M_TEMP);
 	p->p_traceflag &= ~KTRFAC_ACTIVE;
 }
 
