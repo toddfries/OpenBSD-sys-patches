@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.86 2011/04/02 17:04:35 guenther Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.88 2011/07/08 21:26:27 matthew Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <sys/syscallargs.h>
 #include <sys/event.h>
 #include <sys/pool.h>
+#include <sys/ktrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -312,6 +313,7 @@ restart:
 	switch (SCARG(uap, cmd)) {
 
 	case F_DUPFD:
+	case F_DUPFD_CLOEXEC:
 		newmin = (long)SCARG(uap, arg);
 		if ((u_int)newmin >= p->p_rlimit[RLIMIT_NOFILE].rlim_cur ||
 		    (u_int)newmin >= maxfiles) {
@@ -332,6 +334,9 @@ restart:
 			error = finishdup(p, fp, fd, i, retval);
 		else
 			FRELE(fp);
+
+		if (!error && SCARG(uap, cmd) == F_DUPFD_CLOEXEC)
+			fdp->fd_ofileflags[i] |= UF_EXCLOSE;
 
 		fdpunlock(fdp);
 		return (error);
@@ -632,6 +637,10 @@ sys_fstat(struct proc *p, void *v, register_t *retval)
 		error = copyout((caddr_t)&ub, (caddr_t)SCARG(uap, sb),
 		    sizeof (ub));
 	}
+#ifdef KTRACE
+	if (error == 0 && KTRPOINT(p, KTR_STRUCT))
+		ktrstat(p, &ub);
+#endif
 	return (error);
 }
 
