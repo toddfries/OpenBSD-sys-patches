@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.123 2011/07/06 21:41:37 art Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.125 2011/07/09 05:31:26 matthew Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -470,50 +470,6 @@ sys_sigsuspend(struct proc *p, void *v, register_t *retval)
 	return (EINTR);
 }
 
-/* ARGSUSED */
-int
-sys_osigaltstack(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_osigaltstack_args /* {
-		syscallarg(const struct osigaltstack *) nss;
-		syscallarg(struct osigaltstack *) oss;
-	} */ *uap = v;
-	struct osigaltstack ss;
-	const struct osigaltstack *nss;
-	struct osigaltstack *oss;
-	int error;
-
-	nss = SCARG(uap, nss);
-	oss = SCARG(uap, oss);
-
-	if (oss) {
-		ss.ss_sp = p->p_sigstk.ss_sp;
-		ss.ss_size = p->p_sigstk.ss_size;
-		ss.ss_flags = p->p_sigstk.ss_flags;
-		if ((error = copyout(&ss, oss, sizeof(ss))))
-			return (error);
-	}
-	if (nss == NULL)
-		return (0);
-	error = copyin(nss, &ss, sizeof(ss));
-	if (error)
-		return (error);
-	if (p->p_sigstk.ss_flags & SS_ONSTACK)
-		return (EPERM);
-	if (ss.ss_flags & ~SS_DISABLE)
-		return (EINVAL);
-	if (ss.ss_flags & SS_DISABLE) {
-		p->p_sigstk.ss_flags = ss.ss_flags;
-		return (0);
-	}
-	if (ss.ss_size < MINSIGSTKSZ)
-		return (ENOMEM);
-	p->p_sigstk.ss_sp = ss.ss_sp;
-	p->p_sigstk.ss_size = ss.ss_size;
-	p->p_sigstk.ss_flags = ss.ss_flags;
-	return (0);
-}
-
 int
 sys_sigaltstack(struct proc *p, void *v, register_t *retval)
 {
@@ -726,9 +682,11 @@ void
 trapsignal(struct proc *p, int signum, u_long code, int type,
     union sigval sigval)
 {
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *ps;
 	int mask;
 
+	KERNEL_LOCK();
+	ps = p->p_sigacts;
 	mask = sigmask(signum);
 	if ((p->p_flag & P_TRACED) == 0 && (ps->ps_sigcatch & mask) != 0 &&
 	    (p->p_sigmask & mask) == 0) {
@@ -758,6 +716,7 @@ trapsignal(struct proc *p, int signum, u_long code, int type,
 		p->p_sigval = sigval;
 		ptsignal(p, signum, STHREAD);
 	}
+	KERNEL_UNLOCK();
 }
 
 /*
