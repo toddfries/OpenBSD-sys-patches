@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.546 2011/06/15 13:56:47 jsg Exp $
+$OpenBSD: usbdevs,v 1.548 2011/07/08 23:09:06 yuo Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -457,6 +457,7 @@ vendor MOTOROLA4	0x100d	Motorola
 vendor HP3		0x103c	Hewlett Packard
 vendor THURLBY		0x103e	Thurlby Thandar Instruments
 vendor GIGABYTE		0x1044	GIGABYTE
+vendor YUBICO		0x1050	Yubico.com
 vendor MOTOROLA		0x1063	Motorola
 vendor CCYU		0x1065	CCYU Technology
 vendor HYUNDAI		0x106c	Hyundai
@@ -1962,8 +1963,9 @@ product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI Mobile		0x1008	HUAWEI Mobile Modem
 product HUAWEI E180		0x140c	HUAWEI Mobile E180
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
+product HUAWEI E1752		0x1417	HUAWEI Mobile Modem
 product HUAWEI E182		0x1429	HUAWEI Mobile Modem
-product HUAWEI E161		0x1446	HUAWEI Mobile E161
+product HUAWEI E161		0x1446	HUAWEI Mobile Modem
 product HUAWEI K3765		0x1465	HUAWEI Mobile K3765
 product HUAWEI E1820		0x14ac  HUAWEI Mobile Modem
 product HUAWEI K3765_INIT	0x1520	HUAWEI Mobile K3765 Initial
@@ -3892,6 +3894,9 @@ product YAMAHA RTA55I		0x4004	NetVolante RTA55i
 
 /* Yano products */
 product YANO U640MO		0x0101	U640MO-03
+
+/* Yubico products */
+product YUBICO YUBIKEY		0x0010	Yubikey
 
 /* Z-Com products */
 product ZCOM M4Y750		0x0001	M4Y-750

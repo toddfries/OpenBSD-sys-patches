@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.101 2011/07/06 19:50:38 beck Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.103 2011/07/08 00:10:59 tedu Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
