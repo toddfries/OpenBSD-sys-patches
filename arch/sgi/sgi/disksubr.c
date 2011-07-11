@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.23 2011/04/16 03:21:15 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.26 2011/07/10 16:16:08 krw Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -206,7 +206,15 @@ finished:
 	if (biowait(bp))
 		return (bp->b_error);
 
-	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
+	/*
+	 * Do OpenBSD disklabel validation/adjustment.
+	 *
+	 * N.B: No matter what the bits are on the disk, we now have the
+	 * OpenBSD disklabel for this sgi disk. DO NOT proceed to
+	 * readdoslabel(), iso_spooflabel(), etc.
+	 */
+	checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
+	return (0);
 }
 
 /*
@@ -229,8 +237,9 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
-	bp->b_blkno = DL_BLKTOSEC(lp, partoff+LABELSECTOR) * DL_BLKSPERSEC(lp);
-	offset = DL_BLKOFFSET(lp, partoff + LABELSECTOR) + LABELOFFSET;
+	bp->b_blkno = DL_BLKTOSEC(lp, partoff + DOS_LABELSECTOR) *
+	    DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, partoff + DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
 	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
 	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
