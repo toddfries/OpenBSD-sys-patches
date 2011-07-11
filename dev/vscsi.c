@@ -149,8 +149,8 @@ vscsi_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_link.adapter = &vscsi_switch;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.adapter_target = 2048;
-	sc->sc_link.adapter_buswidth = 2048;
+	sc->sc_link.adapter_target = 256;
+	sc->sc_link.adapter_buswidth = 256;
 	sc->sc_link.openings = 1;
 	sc->sc_link.pool = &sc->sc_iopool;
 
