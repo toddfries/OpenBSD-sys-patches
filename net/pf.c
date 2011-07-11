@@ -3397,6 +3397,8 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 				/* order is irrelevant */
 				SLIST_INSERT_HEAD(&rules, ri, entry);
 				pf_rule_to_actions(r, &act);
+				if (r->naf)
+					pd->naf = r->naf;
 				if (pf_get_transaddr(r, pd, sns) == -1) {
 					REASON_SET(&reason, PFRES_MEMORY);
 					goto cleanup;
@@ -4468,8 +4470,7 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (pf_tcp_track_sloppy(src, dst, state, pd, reason) == PF_DROP)
 			return (PF_DROP);
 	} else {
-		int		ret;
-
+		int ret;
 		if (PF_REVERSED_KEY((*state)->key, pd->af))
 			ret = pf_tcp_track_full(dst, src, state, kif, m, off,
 			    pd, reason, &copyback);
@@ -5017,7 +5018,6 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			    (*state)->key[PF_SK_STACK]) {
 				struct pf_state_key	*nk;
 				int			 afto, sidx, didx;
-
 				if (PF_REVERSED_KEY((*state)->key, pd->af))
 					nk = (*state)->key[pd->sidx];
 				else
@@ -5027,7 +5027,6 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				sidx = afto ? pd2.didx : pd2.sidx;
 				didx = afto ? pd2.sidx : pd2.didx;
 
-#if INET && INET6
 				if (afto) {
 					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
@@ -5054,7 +5053,6 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 					    &nk->addr[pd2.didx], nk->af);
 					return (PF_AFRT);
 				}
-#endif
 
 				if (PF_ANEQ(pd2.src,
 				    &nk->addr[pd2.sidx], pd2.af) ||
@@ -5261,7 +5259,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				didx = afto ? pd2.sidx : pd2.didx;
 				iidx = afto ? !iidx : iidx;
 
-#ifdef INET6
+#if INET6
 				if (afto) {
 					if (nk->af != AF_INET6)
 						return (PF_DROP);
@@ -5378,9 +5376,9 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				didx = afto ? pd2.sidx : pd2.didx;
 				iidx = afto ? !iidx : iidx;
 
-#ifdef INET
+#ifdef INET6
 				if (afto) {
-					if (nk->af != AF_INET)
+					if (nk->af != AF_INET6)
 						return (PF_DROP);
 					if (pf_translate_icmp_af(nk->af,
 					    pd->hdr.icmp))
@@ -5392,15 +5390,13 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 					    pd, &pd2, &nk->addr[sidx],
 					    &nk->addr[didx], pd->af, nk->af))
 						return (PF_DROP);
-					pd->proto = IPPROTO_ICMP;
+					pd->proto = IPPROTO_ICMPV6;
 					if (pf_translate_icmp_af(nk->af, &iih))
 						return (PF_DROP);
-					if (virtual_type ==
-					    htons(ICMP6_ECHO_REQUEST) &&
+					if (virtual_type == htons(ICMP_ECHO) &&
 					    nk->port[iidx] != iih.icmp6_id)
 						iih.icmp6_id = nk->port[iidx];
-					m_copyback(m, off2,
-					    sizeof(struct icmp6_hdr), &iih,
+					m_copyback(m, off2, ICMP_MINLEN, &iih,
 					    M_NOWAIT);
 					m->m_pkthdr.rdomain = nk->rdomain;
 					pd->destchg = 1;
@@ -5462,7 +5458,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			/* translate source/destination address, if necessary */
 			if ((*state)->key[PF_SK_WIRE] !=
 			    (*state)->key[PF_SK_STACK]) {
-				struct pf_state_key *nk =
+				struct pf_state_key	*nk =
 				    (*state)->key[pd->didx];
 
 				if (PF_ANEQ(pd2.src,
@@ -6000,7 +5996,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	struct ifnet		*ifp = NULL;
 	struct pf_addr		 naddr;
 	struct pf_src_node	*sn = NULL;
-	char			*cause = NULL;
 
 	if (m == NULL || *m == NULL || r == NULL ||
 	    (dir != PF_IN && dir != PF_OUT) || oifp == NULL)
@@ -6009,7 +6004,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if ((*m)->m_pkthdr.pf.routed++ > 3) {
 		m0 = *m;
 		*m = NULL;
-		cause = "routed";
 		goto bad;
 	}
 
@@ -6025,7 +6019,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (m0->m_len < sizeof(struct ip6_hdr)) {
 		DPFPRINTF(LOG_ERR,
 		    "pf_route6: m0->m_len < sizeof(struct ip6_hdr)");
-		cause = "m0->m_len < sizeof(struct ip6_hdr)";
 		goto bad;
 	}
 	ip6 = mtod(m0, struct ip6_hdr *);
@@ -6048,7 +6041,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		    &naddr, NULL, &sn, &r->route, PF_SN_ROUTE)) {
 			DPFPRINTF(LOG_ERR,
 			    "pf_route6: pf_map_addr() failed.");
-			cause="pf_map_addr() failed";
 			goto bad;
 		}
 		if (!PF_AZERO(&naddr, AF_INET6))
@@ -6067,13 +6059,11 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (oifp != ifp) {
 		if (pf_test(AF_INET6, PF_OUT, ifp, &m0, NULL) != PF_PASS)
 			goto bad;
-		}
 		else if (m0 == NULL)
 			goto done;
 		if (m0->m_len < sizeof(struct ip6_hdr)) {
 			DPFPRINTF(LOG_ERR,
 			    "pf_route6: m0->m_len < sizeof(struct ip6_hdr)");
-			cause = "m0->m_len < sizeof(struct ip6_hdr)";
 			goto bad;
 		}
 		ip6 = mtod(m0, struct ip6_hdr *);
@@ -6091,10 +6081,8 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		in6_ifstat_inc(ifp, ifs6_in_toobig);
 		if (r->rt != PF_DUPTO)
 			icmp6_error(m0, ICMP6_PACKET_TOO_BIG, 0, ifp->if_mtu);
-		else {
-			cause = "too big";
+		else
 			goto bad;
-		}
 	}
 
 done:
@@ -6103,10 +6091,6 @@ done:
 	return;
 
 bad:
-	if (cause)
-		printf("pf_route6: \"%s\"\n", cause);
-	else
-		printf("pf_route6: no cause\n");
 	m_freem(m0);
 	goto done;
 }
@@ -6530,7 +6514,6 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 		pd->sidx = (dir == PF_IN) ? 0 : 1;
 		pd->didx = (dir == PF_IN) ? 1 : 0;
 		pd->tos = 0;
-		pd->ttl = h->ip6_hlim;
 		pd->tot_len = ntohs(h->ip6_plen) + sizeof(struct ip6_hdr);
 		pd->virtual_proto = pd->proto = nxt;
 
@@ -6959,13 +6942,13 @@ done:
 		action = PF_PASS;
 		break;
 	case PF_AFRT:
-		if (pf_translate_af(AF_INET, &m, off, &pd)) {
+		if (pf_translate_af(AF_INET6, &m, off, &pd)) {
 			if (!m)
 				*m0 = NULL;
 			action = PF_DROP;
 			break;
 		}
-		pf_route(&m, r, dir, kif->pfik_ifp, s);
+		pf_route6(&m, r, dir, kif->pfik_ifp, s);
 		*m0 = NULL;
 		action = PF_PASS;
 		break;
