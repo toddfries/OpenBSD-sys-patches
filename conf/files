@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.518 2011/07/06 10:25:21 ariane Exp $
+#	$OpenBSD: files,v 1.525 2011/07/09 00:47:18 henning Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -721,7 +721,7 @@ file kern/subr_autoconf.c
 file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
-file kern/subr_hiballoc.c		!small_kernel
+file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
 file kern/subr_pool.c
 file kern/dma_alloc.c
@@ -806,7 +806,6 @@ file net/netisr.c
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate
-file net/zlib.c				ppp_deflate | ipsec | crypto
 file net/if_tun.c			tun			needs-count
 file net/if_bridge.c			bridge			needs-count
 file net/bridgestp.c			bridge
@@ -890,7 +889,7 @@ file crypto/cryptodev.c			((inet & ipsec) | crypto)	needs-flag
 file crypto/criov.c			(inet & ipsec) | crypto
 file crypto/cryptosoft.c		(inet & ipsec) | crypto
 file crypto/xform.c			(inet & ipsec) | crypto
-file crypto/deflate.c			(inet & ipsec) | crypto
+file crypto/xform_ipcomp.c		(inet & ipsec) | crypto
 file crypto/arc4.c			
 file crypto/michael.c			wlan
 file crypto/cmac.c			wlan
@@ -898,12 +897,6 @@ file crypto/hmac.c			wlan | (softraid & crypto)
 file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
-file netatalk/aarp.c			netatalk
-file netatalk/at_control.c		netatalk
-file netatalk/at_proto.c		netatalk
-file netatalk/ddp_input.c		netatalk
-file netatalk/ddp_output.c		netatalk
-file netatalk/ddp_usrreq.c		netatalk
 file netbt/bt_input.c			bluetooth		needs-flag
 file netbt/bt_proto.c			bluetooth
 file netbt/hci_event.c			bluetooth
@@ -1053,16 +1046,7 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
-file compat/common/compat_vm.c		!small_kernel & compat_linux
-file compat/common/kern_info_09.c	!small_kernel & compat_linux
-file compat/common/kern_exit_43.c	!small_kernel
-file compat/common/kern_info_43.c	!small_kernel
-file compat/common/kern_resource_43.c	!small_kernel
-file compat/common/kern_sig_43.c	!small_kernel
-file compat/common/tty_43.c		!small_kernel
-file compat/common/uipc_syscalls_43.c	!small_kernel
-file compat/common/vfs_syscalls_43.c	!small_kernel
-file compat/common/vm_43.c		!small_kernel
+file compat/common/tty_43.c		compat_43
 
 # libx86emu
 file dev/x86emu/x86emu.c		x86emu
@@ -1106,3 +1090,16 @@ file lib/libkern/arch/${MACHINE_ARCH}/skpc.S | lib/libkern/skpc.c
 file lib/libkern/arch/${MACHINE_ARCH}/htonl.S | lib/libkern/htonl.c
 file lib/libkern/arch/${MACHINE_ARCH}/htons.S | lib/libkern/htons.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncasecmp.S | lib/libkern/strncasecmp.c
+
+file lib/libz/adler32.c			ppp_deflate | ipsec | crypto | bios
+file lib/libz/crc32.c			ppp_deflate | ipsec | crypto
+file lib/libz/infback.c			ppp_deflate | ipsec | crypto
+file lib/libz/inffast.c			ppp_deflate | ipsec | crypto
+file lib/libz/inflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/inftrees.c		ppp_deflate | ipsec | crypto
+file lib/libz/deflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/zutil.c			ppp_deflate | ipsec | crypto
+file lib/libz/zopenbsd.c		ppp_deflate | ipsec | crypto
+file lib/libz/trees.c			ppp_deflate | ipsec | crypto
+file lib/libz/compress.c		ppp_deflate | ipsec | crypto
+

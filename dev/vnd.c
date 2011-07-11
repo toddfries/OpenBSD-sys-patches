@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.142 2011/07/06 17:28:00 matthew Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.146 2011/07/08 20:10:34 matthew Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -110,6 +110,7 @@ void	vndclear(struct vnd_softc *);
 int	vndsetcred(struct vnd_softc *, struct ucred *);
 int	vndgetdisklabel(dev_t, struct vnd_softc *, struct disklabel *, int);
 void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
+void	vndencryptbuf(struct vnd_softc *, struct buf *, int);
 size_t	vndbdevsize(struct vnode *, struct proc *);
 
 void
@@ -132,6 +133,12 @@ vndencrypt(struct vnd_softc *sc, caddr_t addr, size_t size, daddr64_t off,
 		addr += bsize;
 		off++;
 	}
+}
+
+void
+vndencryptbuf(struct vnd_softc *sc, struct buf *bp, int encrypt)
+{
+	vndencrypt(sc, bp->b_data, bp->b_bcount, bp->b_blkno, encrypt);
 }
 
 void
@@ -259,87 +266,63 @@ void
 vndstrategy(struct buf *bp)
 {
 	int unit = DISKUNIT(bp->b_dev);
-	struct vnd_softc *sc = &vnd_softc[unit];
-	int s, part;
-	struct iovec aiov;
-	struct uio auio;
-	struct proc *p = curproc;
-	daddr64_t off;
+	struct vnd_softc *sc;
+	struct partition *p;
+	off_t off;
+	int s;
 
 	DNPRINTF(VDB_FOLLOW, "vndstrategy(%p): unit %d\n", bp, unit);
 
+	if (unit >= numvnd) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
+	sc = &vnd_softc[unit];
+
 	if ((sc->sc_flags & VNF_HAVELABEL) == 0) {
 		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		bp->b_resid = bp->b_bcount;
-		goto done;
+		goto bad;
 	}
 
 	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
-	part = DISKPART(bp->b_dev);
-	off = DL_SECTOBLK(sc->sc_dk.dk_label,
-	    DL_GETPOFFSET(&sc->sc_dk.dk_label->d_partitions[part]));
-	aiov.iov_base = bp->b_data;
-	auio.uio_resid = aiov.iov_len = bp->b_bcount;
-	auio.uio_iov = &aiov;
-	auio.uio_iovcnt = 1;
-	auio.uio_offset = dbtob((off_t)(bp->b_blkno + off));
-	auio.uio_segflg = UIO_SYSSPACE;
-	auio.uio_procp = p;
+	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
+	off = DL_GETPOFFSET(p) * sc->sc_dk.dk_label->d_secsize +
+	    (u_int64_t)bp->b_blkno * DEV_BSIZE;
 
-	vn_lock(sc->sc_vp, LK_EXCLUSIVE | LK_RETRY, p);
-	if (bp->b_flags & B_READ) {
-		auio.uio_rw = UIO_READ;
-		bp->b_error = VOP_READ(sc->sc_vp, &auio, 0,
-		    sc->sc_cred);
-		if (sc->sc_keyctx)
-			vndencrypt(sc,	bp->b_data,
-			   bp->b_bcount, bp->b_blkno, 0);
-	} else {
-		if (sc->sc_keyctx)
-			vndencrypt(sc, bp->b_data,
-			   bp->b_bcount, bp->b_blkno, 1);
-		auio.uio_rw = UIO_WRITE;
-		/*
-		 * Upper layer has already checked I/O for
-		 * limits, so there is no need to do it again.
-		 */
-		bp->b_error = VOP_WRITE(sc->sc_vp, &auio,
-		    IO_NOLIMIT, sc->sc_cred);
-		/* Data in buffer cache needs to be in clear */
-		if (sc->sc_keyctx)
-			vndencrypt(sc, bp->b_data,
-			   bp->b_bcount, bp->b_blkno, 0);
-	}
-	VOP_UNLOCK(sc->sc_vp, 0, p);
+	if (sc->sc_keyctx && !(bp->b_flags & B_READ))
+		vndencryptbuf(sc, bp, 1);
+
+	/*
+	 * Use IO_NOLIMIT because upper layer has already checked I/O
+	 * for limits, so there is no need to do it again.
+	 */
+	bp->b_error = vn_rdwr((bp->b_flags & B_READ) ? UIO_READ : UIO_WRITE,
+	    sc->sc_vp, bp->b_data, bp->b_bcount, off, UIO_SYSSPACE, IO_NOLIMIT,
+	    sc->sc_cred, &bp->b_resid, curproc);
 	if (bp->b_error)
 		bp->b_flags |= B_ERROR;
-	bp->b_resid = auio.uio_resid;
-done:
+
+	/* Data in buffer cache needs to be in clear */
+	if (sc->sc_keyctx)
+		vndencryptbuf(sc, bp, 0);
+
+	goto done;
+
+ bad:
+	bp->b_flags |= B_ERROR;
+	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
 }
 
-
 /* ARGSUSED */
 int
 vndread(dev_t dev, struct uio *uio, int flags)
 {
-	int unit = DISKUNIT(dev);
-	struct vnd_softc *sc;
-
-	DNPRINTF(VDB_FOLLOW, "vndread(%x, %p)\n", dev, uio);
-
-	if (unit >= numvnd)
-		return (ENXIO);
-	sc = &vnd_softc[unit];
-
-	if ((sc->sc_flags & VNF_INITED) == 0)
-		return (ENXIO);
-
 	return (physio(vndstrategy, dev, B_READ, minphys, uio));
 }
 
@@ -347,18 +330,6 @@ vndread(dev_t dev, struct uio *uio, int flags)
 int
 vndwrite(dev_t dev, struct uio *uio, int flags)
 {
-	int unit = DISKUNIT(dev);
-	struct vnd_softc *sc;
-
-	DNPRINTF(VDB_FOLLOW, "vndwrite(%x, %p)\n", dev, uio);
-
-	if (unit >= numvnd)
-		return (ENXIO);
-	sc = &vnd_softc[unit];
-
-	if ((sc->sc_flags & VNF_INITED) == 0)
-		return (ENXIO);
-
 	return (physio(vndstrategy, dev, B_WRITE, minphys, uio));
 }
 
@@ -625,29 +596,19 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 int
 vndsetcred(struct vnd_softc *sc, struct ucred *cred)
 {
-	struct uio auio;
-	struct iovec aiov;
-	char *tmpbuf;
+	void *buf;
+	size_t size;
 	int error;
-	struct proc *p = curproc;
 
 	sc->sc_cred = crdup(cred);
-	tmpbuf = malloc(DEV_BSIZE, M_TEMP, M_WAITOK);
+	buf = malloc(DEV_BSIZE, M_TEMP, M_WAITOK);
+	size = MIN(DEV_BSIZE, sc->sc_size * sc->sc_secsize);
 
 	/* XXX: Horrible kludge to establish credentials for NFS */
-	aiov.iov_base = tmpbuf;
-	aiov.iov_len = MIN(DEV_BSIZE, sc->sc_size * sc->sc_secsize);
-	auio.uio_iov = &aiov;
-	auio.uio_iovcnt = 1;
-	auio.uio_offset = 0;
-	auio.uio_rw = UIO_READ;
-	auio.uio_segflg = UIO_SYSSPACE;
-	auio.uio_resid = aiov.iov_len;
-	vn_lock(sc->sc_vp, LK_RETRY | LK_EXCLUSIVE, p);
-	error = VOP_READ(sc->sc_vp, &auio, 0, sc->sc_cred);
-	VOP_UNLOCK(sc->sc_vp, 0, p);
+	error = vn_rdwr(UIO_READ, sc->sc_vp, buf, size, 0, UIO_SYSSPACE, 0,
+	    sc->sc_cred, NULL, curproc);
 
-	free(tmpbuf, M_TEMP);
+	free(buf, M_TEMP);
 	return (error);
 }
 
