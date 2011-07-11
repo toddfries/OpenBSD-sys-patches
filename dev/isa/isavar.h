@@ -1,4 +1,4 @@
-/*	$OpenBSD: isavar.h,v 1.55 2010/06/24 21:17:59 jasper Exp $	*/
+/*	$OpenBSD: isavar.h,v 1.57 2011/07/08 08:26:41 jsg Exp $	*/
 /*	$NetBSD: isavar.h,v 1.26 1997/06/06 23:43:57 thorpej Exp $	*/
 
 /*-
@@ -121,8 +121,6 @@ struct isabus_attach_args;
 #include <hp300/dev/isa_machdep.h>
 #elif defined(__i386__)
 #include <i386/isa/isa_machdep.h>
-#elif defined(__mvmeppc__)
-#include <mvmeppc/isa/isa_machdep.h>
 #elif defined(__powerpc__)
 #include <powerpc/isa/isa_machdep.h>
 #else
@@ -404,19 +402,14 @@ static __inline void isapnp_write_reg(struct isapnp_softc *, int, u_char);
 static __inline u_char isapnp_read_reg(struct isapnp_softc *, int);
 
 static __inline void
-isapnp_write_reg(sc, r, v)
-	struct isapnp_softc *sc;
-	int r;
-	u_char v;
+isapnp_write_reg(struct isapnp_softc *sc, int r, u_char v)
 {
 	ISAPNP_WRITE_ADDR(sc, r);
 	ISAPNP_WRITE_DATA(sc, v);
 }
 
 static __inline u_char
-isapnp_read_reg(sc, r)
-	struct isapnp_softc *sc;
-	int r;
+isapnp_read_reg(struct isapnp_softc *sc, int r)
 {
 	ISAPNP_WRITE_ADDR(sc, r);
 	return ISAPNP_READ_DATA(sc);

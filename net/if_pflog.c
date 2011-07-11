@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.37 2011/07/06 02:42:28 henning Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.38 2011/07/07 00:47:18 mcbride Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -279,6 +279,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 {
 	struct mbuf		*m, *mp, *mhdr, *mptr;
 	struct pfloghdr		*pfloghdr;
+	struct pf_state		*s = NULL;
 	u_int			 count;
 	u_char			*dst, *mdst, *cp;
 	u_short			 action, reason;
@@ -356,7 +357,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		/* shouldn't happen ever :-) */
 		m_copydata(m, 0, len, dst);
 		return;
-	}
+ 	}
 
 	/* copy 8 bytes of the protocol header */
 	m_copydata(m, hlen, 8, mdst + hlen);
@@ -380,7 +381,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	memset(&pd, 0, sizeof(pd));
 	pd.hdr.any = &pf_hdrs;
 	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mhdr, &action,
-	    &reason, NULL, NULL, NULL, NULL, &off, &hdrlen) == -1)
+	    &reason, NULL, NULL, NULL, &s, NULL, &off, &hdrlen) == -1)
 		return;
 	pd.naf = pfloghdr->naf;
 
