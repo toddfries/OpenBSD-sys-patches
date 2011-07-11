@@ -646,11 +646,9 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
-
-	sa_family_t		 naf;
-
 #define PF_PRIO_NOTSET		0xff
 	u_int8_t		 prio[2];
+	sa_family_t		 naf;
 
 	struct {
 		struct pf_addr		addr;

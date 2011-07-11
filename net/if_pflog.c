@@ -357,7 +357,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		/* shouldn't happen ever :-) */
 		m_copydata(m, 0, len, dst);
 		return;
-	}
+ 	}
 
 	/* copy 8 bytes of the protocol header */
 	m_copydata(m, hlen, 8, mdst + hlen);
