@@ -163,9 +163,10 @@ udl*		at uhub?
 wsdisplay*	at udl?
 
 # Bluetooth controllers
-#ubt*	at uhub? disable	# USB Bluetooth
-#bthub*	at ubt?
-#bthidev* at bthub?		# Bluetooth HID support
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
+
+bthidev* at bthub?		# Bluetooth HID support
 #btkbd*	at bthidev?
 #btms*	at bthidev?
 #wskbd*	at btkbd? mux 1

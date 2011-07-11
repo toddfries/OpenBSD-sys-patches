@@ -143,7 +143,7 @@ uscanner*	at uhub? disable	# USB Scanners
 #uyap*		at uhub?		# Y@P firmware loader
 udsbr*		at uhub?		# D-Link DSB-R100 radio
 radio*		at udsbr?		# USB radio
-#ubt*		at uhub? disable	# USB Bluetooth
+#ubt*		at uhub?		# USB Bluetooth
 ugen*		at uhub?		# USB Generic driver
 
 ukphy*	at mii?				# "unknown" PHYs
@@ -168,7 +168,7 @@ com0	at ahb?	addr	0x49020000	size 0x400 intr 74 # UART3
 sdmmc*	at ommmc?		# SD/MMC bus
 
 # Bluetooth controllers
-#sbt*	at sdmmc? disable	# SDIO Bluetooth
+#sbt*	at sdmmc?		# SDIO Bluetooth
 
 # APM emulation
 #apm0		at pxaip?
