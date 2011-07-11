@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.27 2011/07/06 19:50:38 beck Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.32 2011/07/08 18:25:56 ariane Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -95,10 +95,6 @@ uvm_pmr_pg_to_memtype(struct vm_page *pg)
 }
 
 /* Trees. */
-RB_PROTOTYPE(uvm_pmr_addr, vm_page, objt, uvm_pmr_addr_cmp);
-RB_PROTOTYPE(uvm_pmr_size, vm_page, objt, uvm_pmr_size_cmp);
-RB_PROTOTYPE(uvm_pmemrange_addr, uvm_pmemrange, pmr_addr,
-    uvm_pmemrange_addr_cmp);
 RB_GENERATE(uvm_pmr_addr, vm_page, objt, uvm_pmr_addr_cmp);
 RB_GENERATE(uvm_pmr_size, vm_page, objt, uvm_pmr_size_cmp);
 RB_GENERATE(uvm_pmemrange_addr, uvm_pmemrange, pmr_addr,
@@ -121,18 +117,6 @@ struct vm_page		*uvm_pmr_nextsz(struct uvm_pmemrange *,
 void			 uvm_pmr_pnaddr(struct uvm_pmemrange *pmr,
 			    struct vm_page *pg, struct vm_page **pg_prev,
 			    struct vm_page **pg_next);
-struct vm_page		*uvm_pmr_insert_addr(struct uvm_pmemrange *,
-			    struct vm_page *, int);
-void			 uvm_pmr_insert_size(struct uvm_pmemrange *,
-			    struct vm_page *);
-struct vm_page		*uvm_pmr_insert(struct uvm_pmemrange *,
-			    struct vm_page *, int);
-void			 uvm_pmr_remove_size(struct uvm_pmemrange *,
-			    struct vm_page *);
-void			 uvm_pmr_remove_addr(struct uvm_pmemrange *,
-			    struct vm_page *);
-void			 uvm_pmr_remove(struct uvm_pmemrange *,
-			    struct vm_page *);
 struct vm_page		*uvm_pmr_findnextsegment(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t);
 psize_t			 uvm_pmr_remove_1strange(struct pglist *, paddr_t,
@@ -141,9 +125,6 @@ void			 uvm_pmr_split(paddr_t);
 struct uvm_pmemrange	*uvm_pmemrange_find(paddr_t);
 struct uvm_pmemrange	*uvm_pmemrange_use_insert(struct uvm_pmemrange_use *,
 			    struct uvm_pmemrange *);
-struct vm_page		*uvm_pmr_extract_range(struct uvm_pmemrange *,
-			    struct vm_page *, paddr_t, paddr_t,
-			    struct pglist *);
 psize_t			 pow2divide(psize_t, psize_t);
 struct vm_page		*uvm_pmr_rootupdate(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t, paddr_t, int);
@@ -1961,87 +1942,3 @@ uvm_wakeup_pla(paddr_t low, psize_t len)
 		}
 	}
 }
-
-#ifndef SMALL_KERNEL
-/*
- * Zero all free memory.
- */
-void
-uvm_pmr_zero_everything(void)
-{
-	struct uvm_pmemrange	*pmr;
-	struct vm_page		*pg;
-	int			 i;
-
-	uvm_lock_fpageq();
-	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
-		/* Zero single pages. */
-		while ((pg = TAILQ_FIRST(&pmr->single[UVM_PMR_MEMTYPE_DIRTY]))
-		    != NULL) {
-			uvm_pmr_remove(pmr, pg);
-			uvm_pagezero(pg);
-			atomic_setbits_int(&pg->pg_flags, PG_ZERO);
-			uvmexp.zeropages++;
-			uvm_pmr_insert(pmr, pg, 0);
-		}
-
-		/* Zero multi page ranges. */
-		while ((pg = RB_ROOT(&pmr->size[UVM_PMR_MEMTYPE_DIRTY]))
-		    != NULL) {
-			pg--; /* Size tree always has second page. */
-			uvm_pmr_remove(pmr, pg);
-			for (i = 0; i < pg->fpgsz; i++) {
-				uvm_pagezero(&pg[i]);
-				atomic_setbits_int(&pg[i].pg_flags, PG_ZERO);
-				uvmexp.zeropages++;
-			}
-			uvm_pmr_insert(pmr, pg, 0);
-		}
-	}
-	uvm_unlock_fpageq();
-}
-
-/*
- * Allocate the biggest contig chunk of memory.
- */
-int
-uvm_pmr_alloc_pig(paddr_t *addr, psize_t *sz)
-{
-	struct uvm_pmemrange	*pig_pmr, *pmr;
-	struct vm_page		*pig_pg, *pg;
-	int			 memtype;
-
-	uvm_lock_fpageq();
-	pig_pg = NULL;
-	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
-		for (memtype = 0; memtype < UVM_PMR_MEMTYPE_MAX; memtype++) {
-			/* Find biggest page in this memtype pmr. */
-			pg = RB_MAX(uvm_pmr_size, &pmr->size[memtype]);
-			if (pg == NULL)
-				pg = TAILQ_FIRST(&pmr->single[memtype]);
-			else
-				pg--;
-
-			if (pig_pg == NULL || (pg != NULL && pig_pg != NULL &&
-			    pig_pg->fpgsz < pg->fpgsz)) {
-				pig_pmr = pmr;
-				pig_pg = pg;
-			}
-		}
-	}
-
-	/* Remove page from freelist. */
-	if (pig_pg != NULL) {
-		uvm_pmr_remove(pig_pmr, pig_pg);
-		uvmexp.free -= pig_pg->fpgsz;
-		if (pig_pg->pg_flags & PG_ZERO)
-			uvmexp.zeropages -= pig_pg->fpgsz;
-		*addr = VM_PAGE_TO_PHYS(pig_pg);
-		*sz = pig_pg->fpgsz;
-	}
-	uvm_unlock_fpageq();
-
-	/* Return. */
-	return (pig_pg != NULL ? 0 : ENOMEM);
-}
-#endif /* SMALL_KERNEL */
