@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.30 2010/07/02 15:02:38 blambert Exp $	*/
+/*	$OpenBSD: uipc_domain.c,v 1.32 2011/07/09 00:47:18 henning Exp $	*/
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -89,9 +89,6 @@ domaininit(void)
 #if defined (KEY) || defined (IPSEC) || defined (TCP_SIGNATURE)
 	pfkey_init();
 #endif /* KEY || IPSEC */
-#ifdef NETATALK
-	ADDDOMAIN(atalk);
-#endif
 #ifdef MPLS
        ADDDOMAIN(mpls);
 #endif
@@ -206,6 +203,11 @@ net_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #if NPFLOW > 0
 	if (family == PF_PFLOW)
 		return (pflow_sysctl(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen));
+#endif
+#ifdef PIPEX
+	if (family == PF_PIPEX)
+		return (pipex_sysctl(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
 	dp = pffinddomain(family);
