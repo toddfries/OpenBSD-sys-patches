@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.337 2011/07/04 18:12:51 bluhm Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.340 2011/07/08 18:50:52 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -525,11 +525,12 @@ struct pf_rule_actions {
 	u_int16_t	qid;
 	u_int16_t	pqid;
 	u_int16_t	max_mss;
+	u_int16_t	flags;
 	u_int8_t	log;
 	u_int8_t	set_tos;
 	u_int8_t	min_ttl;
-	u_int8_t	pad[1];
-	u_int16_t	flags;
+	u_int8_t	prio[2];
+	u_int8_t	pad[3];
 };
 
 union pf_rule_ptr {
@@ -548,8 +549,8 @@ struct pf_rule {
 #define PF_SKIP_AF		3
 #define PF_SKIP_PROTO		4
 #define PF_SKIP_SRC_ADDR	5
-#define PF_SKIP_SRC_PORT	6
-#define PF_SKIP_DST_ADDR	7
+#define PF_SKIP_DST_ADDR	6
+#define PF_SKIP_SRC_PORT	7
 #define PF_SKIP_DST_PORT	8
 #define PF_SKIP_COUNT		9
 	union pf_rule_ptr	 skip[PF_SKIP_COUNT];
@@ -648,7 +649,8 @@ struct pf_rule {
 
 	sa_family_t		 naf;
 
-	u_int8_t		 pad2[2];
+#define PF_PRIO_NOTSET		0xff
+	u_int8_t		 prio[2];
 
 	struct {
 		struct pf_addr		addr;
@@ -847,6 +849,8 @@ struct pf_state {
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
 	u_int16_t		 max_mss;
+	u_int8_t		 prio[2];
+	u_int8_t		 pad2[2];
 };
 
 /*
@@ -1245,6 +1249,8 @@ struct pf_pdesc {
 	u_int16_t	*proto_sum;
 
 	u_int16_t	 rdomain;	/* original routing domain */
+	u_int16_t	 virtual_proto;
+#define PF_VPROTO_FRAGMENT	256
 	sa_family_t	 af;
 	sa_family_t	 naf;
 	u_int8_t	 proto;
@@ -1767,7 +1773,8 @@ int				 pf_setup_pdesc(sa_family_t, int,
 				    struct pf_pdesc *, struct mbuf **,
 				    u_short *, u_short *, struct pfi_kif *,
 				    struct pf_rule **, struct pf_rule **,
-				    struct pf_ruleset **, int *, int *);
+				    struct pf_state **, struct pf_ruleset **,
+				    int *, int *);
 
 int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **,
 	    struct ether_header *);
@@ -1798,7 +1805,7 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
 int	pf_normalize_ip(struct mbuf **, int, u_short *);
-int	pf_normalize_ip6(struct mbuf **, int, u_short *);
+int	pf_normalize_ip6(struct mbuf **, int, int, int, u_short *);
 int	pf_normalize_tcp(int, struct mbuf *, int, struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
 int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,

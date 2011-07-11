@@ -18,21 +18,10 @@
 
 /* i386 hibernate support structures and functions */
 
-struct hibernate_memory_range {
-	paddr_t		base;
-	paddr_t		end;
-};
-
-struct hibernate_info {
-	u_int 		nranges;		
-	u_int64_t	image_size;
-	dev_t		device;
-	daddr_t		sig_offset;
-	daddr_t		image_offset;
-	struct hibernate_memory_range ranges[VM_PHYSSEG_MAX];
-	char		kernel_version[128];
-	int 		(*io_func)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
-};
-
+int	get_hibernate_info_md(union hibernate_info *);
+void	hibernate_flush(void);
+void	hibernate_enter_resume_mapping(vaddr_t, paddr_t, int);
+int	hibernate_zlib_reset(int);
+int	hibernate_inflate_skip(paddr_t);
 int	hibernate_suspend(void);
 void	hibernate_resume(void);
