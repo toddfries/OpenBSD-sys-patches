@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.73 2011/07/04 00:33:36 mikeb Exp $	*/
+/*	$OpenBSD: socket.h,v 1.76 2011/07/08 20:53:59 deraadt Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -97,6 +97,7 @@ struct	linger {
 	int	l_linger;		/* linger time */
 };
 
+#if __BSD_VISIBLE
 /*
  * Structure used for manipulating splice option.
  */
@@ -105,6 +106,7 @@ struct	splice {
 	off_t	sp_max;			/* if set, maximum bytes to splice */
 	struct	timeval	sp_idle;	/* idle timeout */
 };
+#endif /* __BSD_VISIBLE */
 
 /*
  * Level number for (get/set)sockopt() to apply to socket itself.
@@ -153,7 +155,8 @@ struct	splice {
 #define	AF_BLUETOOTH	32		/* Bluetooth */
 #define AF_MPLS         33              /* MPLS */
 #define pseudo_AF_PFLOW 34		/* pflow */
-#define AF_MAX          35
+#define pseudo_AF_PIPEX 35		/* PIPEX */
+#define AF_MAX          36
 
 /*
  * Structure used by kernel to store most
@@ -234,6 +237,7 @@ struct sockproto {
 #define	PF_BLUETOOTH	AF_BLUETOOTH
 #define PF_MPLS		AF_MPLS
 #define PF_PFLOW	pseudo_AF_PFLOW
+#define PF_PIPEX	pseudo_AF_PIPEX
 #define	PF_MAX		AF_MAX
 
 /*
@@ -316,6 +320,7 @@ struct sockpeercred {
 	{ "bluetooth", CTLTYPE_NODE }, \
 	{ "mpls", CTLTYPE_NODE }, \
 	{ "pflow", CTLTYPE_NODE }, \
+	{ "pipex", CTLTYPE_NODE }, \
 }
 
 /*
@@ -511,12 +516,8 @@ int	socketpair(int, int, int, int *);
 int	getrtable(void);
 int	setrtable(int);
 __END_DECLS
-#else
-# if defined(COMPAT_43) || defined(COMPAT_LINUX)
-#  define COMPAT_OLDSOCK
-#  define MSG_COMPAT	0x8000
-# endif
 
+#else
 void	pfctlinput(int, struct sockaddr *);
 #endif /* !_KERNEL */
 

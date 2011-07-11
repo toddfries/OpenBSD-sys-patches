@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.108 2011/07/05 03:47:55 dlg Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.114 2011/07/09 06:24:41 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -50,6 +50,7 @@ struct atascsi {
 	struct scsi_link	as_link;
 	struct scsibus_softc	*as_scsibus;
 
+	int			as_nports;
 	int			as_capability;
 	int			as_ncqdepth;
 };
@@ -115,10 +116,15 @@ void		atascsi_disk_inquiry(struct scsi_xfer *);
 void		atascsi_disk_vpd_supported(struct scsi_xfer *);
 void		atascsi_disk_vpd_serial(struct scsi_xfer *);
 void		atascsi_disk_vpd_ident(struct scsi_xfer *);
+void		atascsi_disk_vpd_ata(struct scsi_xfer *);
 void		atascsi_disk_vpd_limits(struct scsi_xfer *);
 void		atascsi_disk_vpd_info(struct scsi_xfer *);
+void		atascsi_disk_vpd_thin(struct scsi_xfer *);
 void		atascsi_disk_write_same_16(struct scsi_xfer *);
 void		atascsi_disk_write_same_16_done(struct ata_xfer *);
+void		atascsi_disk_unmap(struct scsi_xfer *);
+void		atascsi_disk_unmap_task(void *, void *);
+void		atascsi_disk_unmap_done(struct ata_xfer *);
 void		atascsi_disk_capacity(struct scsi_xfer *);
 void		atascsi_disk_capacity16(struct scsi_xfer *);
 void		atascsi_disk_sync(struct scsi_xfer *);
@@ -174,6 +180,7 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 	as->as_cookie = aaa->aaa_cookie;
 	as->as_methods = aaa->aaa_methods;
 	as->as_capability = aaa->aaa_capability;
+	as->as_nports = aaa->aaa_nports;
 	as->as_ncqdepth = aaa->aaa_ncmds;
 
 	/* copy from template and modify for ourselves */
@@ -184,16 +191,16 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 	/* fill in our scsi_link */
 	as->as_link.adapter = &as->as_switch;
 	as->as_link.adapter_softc = as;
-	as->as_link.adapter_buswidth = aaa->aaa_nports;
-	as->as_link.luns = SATA_PMP_MAX_PORTS;
-	as->as_link.adapter_target = aaa->aaa_nports;
+	as->as_link.adapter_target = SCSI_NO_ADAPTER_TARGET;
 	as->as_link.openings = 1;
 
 	as->as_host_ports = malloc(sizeof(struct atascsi_host_port *) *
-	    aaa->aaa_nports, M_DEVBUF, M_WAITOK | M_ZERO);
+	    as->as_nports, M_DEVBUF, M_WAITOK | M_ZERO);
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &as->as_link;
+	saa.saa_targets = as->as_nports;
+	saa.saa_luns = SATA_PMP_MAX_PORTS;
 
 	/* stash the scsibus so we can do hotplug on it */
 	as->as_scsibus = (struct scsibus_softc *)config_found(self, &saa,
@@ -243,7 +250,7 @@ atascsi_lookup_port(struct scsi_link *link)
 	struct atascsi 			*as = link->adapter_softc;
 	struct atascsi_host_port 	*ahp;
 
-	if (link->target >= as->as_link.adapter_buswidth)
+	if (link->target >= as->as_nports)
 		return (NULL);
 
 	ahp = as->as_host_ports[link->target];
@@ -266,7 +273,7 @@ atascsi_probe(struct scsi_link *link)
 	u_int16_t			cmdset;
 
 	port = link->target;
-	if (port >= as->as_link.adapter_buswidth)
+	if (port >= as->as_nports)
 		return (ENXIO);
 
 	/* if this is a PMP port, check it's valid */
@@ -448,7 +455,7 @@ atascsi_free(struct scsi_link *link)
 	int				port;
 
 	port = link->target;
-	if (port >= as->as_link.adapter_buswidth)
+	if (port >= as->as_nports)
 		return;
 
 	ahp = as->as_host_ports[port];
@@ -535,6 +542,9 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 
 	case WRITE_SAME_16:
 		atascsi_disk_write_same_16(xs);
+		return;
+	case UNMAP:
+		atascsi_disk_unmap(xs);
 		return;
 
 	case SYNCHRONIZE_CACHE:
@@ -679,11 +689,17 @@ atascsi_disk_inq(struct scsi_xfer *xs)
 		case SI_PG_DEVID:
 			atascsi_disk_vpd_ident(xs);
 			break;
+		case SI_PG_ATA:
+			atascsi_disk_vpd_ata(xs);
+			break;
 		case SI_PG_DISK_LIMITS:
 			atascsi_disk_vpd_limits(xs);
 			break;
 		case SI_PG_DISK_INFO:
 			atascsi_disk_vpd_info(xs);
+			break;
+		case SI_PG_DISK_THIN:
+			atascsi_disk_vpd_thin(xs);
 			break;
 		default:
 			atascsi_done(xs, XS_DRIVER_STUFFUP);
@@ -725,21 +741,29 @@ atascsi_disk_vpd_supported(struct scsi_xfer *xs)
 {
 	struct {
 		struct scsi_vpd_hdr	hdr;
-		u_int8_t		list[5];
+		u_int8_t		list[7];
 	}			pg;
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	int			fat;
+
+	ap = atascsi_lookup_port(link);
+	fat = ISSET(ap->ap_features, ATA_PORT_F_TRIM) ? 0 : 1;
 
 	bzero(&pg, sizeof(pg));
 
 	pg.hdr.device = T_DIRECT;
 	pg.hdr.page_code = SI_PG_SUPPORTED;
-	_lto2b(sizeof(pg.list), pg.hdr.page_length);
+	_lto2b(sizeof(pg.list) - fat, pg.hdr.page_length);
 	pg.list[0] = SI_PG_SUPPORTED;
 	pg.list[1] = SI_PG_SERIAL;
 	pg.list[2] = SI_PG_DEVID;
-	pg.list[3] = SI_PG_DISK_LIMITS;
-	pg.list[4] = SI_PG_DISK_INFO;
+	pg.list[3] = SI_PG_ATA;
+	pg.list[4] = SI_PG_DISK_LIMITS;
+	pg.list[5] = SI_PG_DISK_INFO;
+	pg.list[6] = SI_PG_DISK_THIN; /* "trimmed" if fat. get it? tehe. */
 
-	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+	bcopy(&pg, xs->data, MIN(sizeof(pg) - fat, xs->datalen));
 
 	atascsi_done(xs, XS_NOERROR);
 }
@@ -817,6 +841,48 @@ atascsi_disk_vpd_ident(struct scsi_xfer *xs)
 }
 
 void
+atascsi_disk_vpd_ata(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_vpd_ata	pg;
+
+	ap = atascsi_lookup_port(link);
+	bzero(&pg, sizeof(pg));
+
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_ATA;
+	_lto2b(sizeof(pg) - sizeof(pg.hdr), pg.hdr.page_length);
+
+	memset(pg.sat_vendor, ' ', sizeof(pg.sat_vendor));
+	memcpy(pg.sat_vendor, "OpenBSD",
+	    MIN(strlen("OpenBSD"), sizeof(pg.sat_vendor)));
+	memset(pg.sat_product, ' ', sizeof(pg.sat_product));
+	memcpy(pg.sat_product, "atascsi",
+	    MIN(strlen("atascsi"), sizeof(pg.sat_product)));
+	memset(pg.sat_revision, ' ', sizeof(pg.sat_revision));
+	memcpy(pg.sat_revision, osrelease,
+	    MIN(strlen(osrelease), sizeof(pg.sat_product)));
+
+	/* XXX device signature */
+
+	switch (ap->ap_type) {
+	case ATA_PORT_T_DISK:
+		pg.command_code = VPD_ATA_COMMAND_CODE_ATA;
+		break;
+	case ATA_PORT_T_ATAPI:
+		pg.command_code = VPD_ATA_COMMAND_CODE_ATAPI;
+		break;
+	}
+
+	memcpy(pg.identify, &ap->ap_identify, sizeof(pg.identify));
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
 atascsi_disk_vpd_limits(struct scsi_xfer *xs)
 {
 	struct scsi_link        *link = xs->sc_link;
@@ -831,6 +897,16 @@ atascsi_disk_vpd_limits(struct scsi_xfer *xs)
 
 	_lto2b(1 << ata_identify_block_l2p_exp(&ap->ap_identify),
 	    pg.optimal_xfer_granularity);
+
+	if (ISSET(ap->ap_features, ATA_PORT_F_TRIM)) {
+		/*
+		 * ATA only supports 65535 blocks per TRIM descriptor, so
+		 * avoid having to split UNMAP descriptors and overflow the page
+		 * limit by using that as a max.
+		 */
+		_lto4b(ATA_DSM_TRIM_MAX_LEN, pg.max_unmap_lba_count);
+		_lto4b(512 / 8, pg.max_unmap_desc_count);
+        }
 
 	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
 
@@ -859,6 +935,31 @@ atascsi_disk_vpd_info(struct scsi_xfer *xs)
 }
 
 void
+atascsi_disk_vpd_thin(struct scsi_xfer *xs)
+{
+	struct scsi_link        *link = xs->sc_link;
+	struct atascsi_port	*ap;
+	struct scsi_vpd_disk_thin pg;
+
+	ap = atascsi_lookup_port(link);
+	if (!ISSET(ap->ap_features, ATA_PORT_F_TRIM)) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
+	}
+
+	bzero(&pg, sizeof(pg));
+	pg.hdr.device = T_DIRECT;
+	pg.hdr.page_code = SI_PG_DISK_THIN;
+	_lto2b(sizeof(pg) - sizeof(pg.hdr), pg.hdr.page_length);
+
+	pg.flags = VPD_DISK_THIN_TPU | VPD_DISK_THIN_TPWS;
+
+	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
+
+	atascsi_done(xs, XS_NOERROR);
+}
+
+void
 atascsi_disk_write_same_16(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -879,7 +980,7 @@ atascsi_disk_write_same_16(struct scsi_xfer *xs)
 	ap = atascsi_lookup_port(link);
 	cdb = (struct scsi_write_same_16 *)xs->cmd;
 
-	if (cdb->flags != WRITE_SAME_F_UNMAP ||
+	if (!ISSET(cdb->flags, WRITE_SAME_F_UNMAP) ||
 	   !ISSET(ap->ap_features, ATA_PORT_F_TRIM)) {
 		/* generate sense data */
 		atascsi_done(xs, XS_DRIVER_STUFFUP);
@@ -895,7 +996,7 @@ atascsi_disk_write_same_16(struct scsi_xfer *xs)
 	lba = _8btol(cdb->lba);
 	length = _4btol(cdb->length);
 
-	if (length > 0xffff) {
+	if (length > ATA_DSM_TRIM_MAX_LEN) {
 		/* XXX we dont support requests over 65535 blocks */
 		atascsi_done(xs, XS_DRIVER_STUFFUP);
 		return;
@@ -913,7 +1014,7 @@ atascsi_disk_write_same_16(struct scsi_xfer *xs)
 
 	/* TRIM sends a list of blocks to discard in the databuf. */
 	memset(xa->data, 0, xa->datalen);
-	desc = htole64(((u_int64_t)length << 48) | lba);
+	desc = htole64(ATA_DSM_TRIM_DESC(lba, length));
 	memcpy(xa->data, &desc, sizeof(desc));
 
 	fis = xa->fis;
@@ -934,17 +1035,133 @@ atascsi_disk_write_same_16_done(struct ata_xfer *xa)
 	case ATA_S_COMPLETE:
 		xs->error = XS_NOERROR;
 		break;
-
 	case ATA_S_ERROR:
+		xs->error = XS_DRIVER_STUFFUP;
+		break;
 	case ATA_S_TIMEOUT:
-		printf("atascsi_disk_write_same_16_done: %s\n",
-		    xa->state == ATA_S_TIMEOUT ? "timeout" : "error");
-		xs->error = (xa->state == ATA_S_TIMEOUT ? XS_TIMEOUT :
-		    XS_DRIVER_STUFFUP);
+		xs->error = XS_TIMEOUT;
 		break;
 
 	default:
 		panic("atascsi_disk_write_same_16_done: "
+		    "unexpected ata_xfer state (%d)", xa->state);
+	}
+
+	scsi_done(xs);
+}
+
+void
+atascsi_disk_unmap(struct scsi_xfer *xs)
+{
+	struct scsi_unmap	*cdb;
+	struct scsi_unmap_data	*unmap;
+	u_int			len;
+
+	if (ISSET(xs->flags, SCSI_POLL) || xs->cmdlen != sizeof(*cdb))
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+
+	cdb = (struct scsi_unmap *)xs->cmd;
+	len = _2btol(cdb->list_len);
+	if (xs->datalen != len || len < sizeof(*unmap))
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+
+	unmap = (struct scsi_unmap_data *)xs->data;
+	if (_2btol(unmap->data_length) != len)
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+
+	len = _2btol(unmap->desc_length);
+	if (len != xs->datalen - sizeof(*unmap))
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+
+	if (len < sizeof(struct scsi_unmap_desc)) {
+		/* no work, no error according to sbc3 */
+		atascsi_done(xs, XS_NOERROR);
+	}
+
+	if (len > sizeof(struct scsi_unmap_desc) * 64) {
+		/* more work than we advertised */
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+	}
+
+	/* let's go */
+	if (!ISSET(xs->flags, SCSI_NOSLEEP))
+		atascsi_disk_unmap_task(xs, NULL);
+	else if (workq_add_task(NULL, 0, atascsi_disk_unmap_task,
+	    xs, NULL) != 0)
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+}
+
+void
+atascsi_disk_unmap_task(void *xxs, void *a)
+{
+	struct scsi_xfer	*xs = xxs;
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct atascsi_port	*ap;
+	struct ata_xfer		*xa = xs->io;
+	struct ata_fis_h2d	*fis;
+	struct scsi_unmap_data	*unmap;
+	struct scsi_unmap_desc	*descs, *d;
+	u_int64_t		*trims;
+	u_int			len, i;
+
+	trims = dma_alloc(512, PR_WAITOK | PR_ZERO);
+
+	unmap = (struct scsi_unmap_data *)xs->data;
+	descs = (struct scsi_unmap_desc *)(unmap + 1);
+
+	len = _2btol(unmap->desc_length) / sizeof(*d);
+	for (i = 0; i < len; i++) {
+		d = &descs[i];
+		if (_4btol(d->logical_blocks) > ATA_DSM_TRIM_MAX_LEN)
+			goto fail;
+
+		trims[i] = htole64(ATA_DSM_TRIM_DESC(_8btol(d->logical_addr),
+		    _4btol(d->logical_blocks)));
+	}
+
+	xa->data = trims;
+	xa->datalen = 512;
+	xa->flags = ATA_F_WRITE;
+	xa->pmp_port = ap->ap_pmp_port;
+	xa->complete = atascsi_disk_unmap_done;
+	xa->atascsi_private = xs;
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+
+	fis = xa->fis;
+	fis->flags = ATA_H2D_FLAGS_CMD | ap->ap_pmp_port;
+	fis->command = ATA_C_DSM;
+	fis->features = ATA_DSM_TRIM;
+	fis->sector_count = 1;
+
+	ata_exec(as, xa);
+	return;
+
+ fail:
+	dma_free(xa->data, 512);
+	atascsi_done(xs, XS_DRIVER_STUFFUP);
+}
+
+void
+atascsi_disk_unmap_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+
+	dma_free(xa->data, 512);
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		xs->error = XS_NOERROR;
+		break;
+	case ATA_S_ERROR:
+		xs->error = XS_DRIVER_STUFFUP;
+		break;
+	case ATA_S_TIMEOUT:
+		xs->error = XS_TIMEOUT;
+		break;
+
+	default:
+		panic("atascsi_disk_unmap_done: "
 		    "unexpected ata_xfer state (%d)", xa->state);
 	}
 
