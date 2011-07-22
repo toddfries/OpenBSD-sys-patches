@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.548 2011/07/08 23:09:06 yuo Exp $
+$OpenBSD: usbdevs,v 1.551 2011/07/22 11:34:17 dcoppa Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -1961,8 +1961,10 @@ product HTC ANDROID		0x0ffe	Android phone
 product HUAWEI E618		0x1001	HUAWEI Mobile E618
 product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI Mobile		0x1008	HUAWEI Mobile Modem
+product HUAWEI E1750		0x1406	HUAWEI Mobile Modem
 product HUAWEI E180		0x140c	HUAWEI Mobile E180
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
+product HUAWEI E181		0x1414	HUAWEI Mobile E181
 product HUAWEI E1752		0x1417	HUAWEI Mobile Modem
 product HUAWEI E182		0x1429	HUAWEI Mobile Modem
 product HUAWEI E161		0x1446	HUAWEI Mobile Modem
@@ -3273,6 +3275,7 @@ product SANYO SCP4900 		0x0701	Sanyo SCP-4900 Phone
 /* Samsung products */
 product SAMSUNG2 RT2870_1	0x2018	RT2870
 product SAMSUNG2 ANDROID	0x6881	Android
+product SAMSUNG2 ANDROID2	0x6863	Android v2
 product SAMSUNG2 I330		0x8001	I330
 product SAMSUNG SWL2100W	0xa000	SWL-2100U
 
