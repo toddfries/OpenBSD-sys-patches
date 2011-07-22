@@ -325,12 +325,15 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if (m == NULL)
 		panic("no second mbuf");
 
-	/* mhdr will hold an ip/ip6 header and 8 bytes of the protocol header */
+	/*
+	 * temporary mbuf will hold an ip/ip6 header and 8 bytes
+	 * of the protocol header
+	 */
 	m_inithdr(mhdr);
 	mhdr->m_len = 0;
 	mhdr->m_pkthdr.len = 0;
 
-	/* reserve space for header expansion (ip -> ip6) */
+	/* offset for a new header */
 	if (afto && pfloghdr->af == AF_INET)
 		mhdr->m_data += sizeof(struct ip6_hdr) -
 		    sizeof(struct ip);
@@ -357,7 +360,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		/* shouldn't happen ever :-) */
 		m_copydata(m, 0, len, dst);
 		return;
- 	}
+	}
 
 	/* copy 8 bytes of the protocol header */
 	m_copydata(m, hlen, 8, mdst + hlen);
