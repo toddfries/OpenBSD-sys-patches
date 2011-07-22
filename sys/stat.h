@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.h,v 1.18 2011/07/14 23:34:37 matthew Exp $	*/
+/*	$OpenBSD: stat.h,v 1.20 2011/07/18 17:29:49 matthew Exp $	*/
 /*	$NetBSD: stat.h,v 1.20 1996/05/16 22:17:49 cgd Exp $	*/
 
 /*-
@@ -181,6 +181,11 @@ struct stat {
 #endif /* _KERNEL */
 #endif /* __BSD_VISIBLE */
 
+#if __POSIX_VISIBLE >= 200809
+#define	UTIME_NOW	-2L
+#define	UTIME_OMIT	-1L
+#endif /* __POSIX_VISIBLE */
+
 #ifndef _KERNEL
 __BEGIN_DECLS
 int	chmod(const char *, mode_t);
@@ -190,6 +195,15 @@ int	mkdir(const char *, mode_t);
 int	mkfifo(const char *, mode_t);
 int	stat(const char *, struct stat *);
 mode_t	umask(mode_t);
+#if __POSIX_VISIBLE >= 200809
+int	fchmodat(int, const char *, mode_t, int);
+int	fstatat(int, const char *, struct stat *, int);
+int	mkdirat(int, const char *, mode_t);
+int	mkfifoat(int, const char *, mode_t);
+int	mknodat(int, const char *, mode_t, dev_t);
+int	utimensat(int, const char *, const struct timespec [2], int);
+int	futimens(int, const struct timespec [2]);
+#endif
 #if __BSD_VISIBLE
 int	chflags(const char *, unsigned int);
 int	fchflags(int, unsigned int);
