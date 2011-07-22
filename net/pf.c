@@ -4506,10 +4506,10 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
 		    pd->rdomain != nk->rdomain)
 			pd->destchg = 1;
-		if (afto || PF_ANEQ(pd->dst, &nk->addr[pd->didx], pd->af) ||
-		    nk->port[pd->didx] != th->th_dport)
+		if (afto || PF_ANEQ(pd->dst, &nk->addr[didx], pd->af) ||
+		    nk->port[didx] != th->th_dport)
 			pf_change_ap(pd->dst, &th->th_dport, &th->th_sum,
-			    &nk->addr[pd->didx], nk->port[pd->didx], 0, pd->af,
+			    &nk->addr[didx], nk->port[didx], 0, pd->af,
 			    nk->af);
 		m->m_pkthdr.rdomain = nk->rdomain;
 
@@ -6783,7 +6783,7 @@ pf_test(sa_family_t af, int fwdir, struct ifnet *ifp, struct mbuf **m0,
 		}
 		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
 		    &reason);
-		if (action == PF_PASS) {
+		if (action == PF_PASS || action == PF_AFRT) {
 #if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
