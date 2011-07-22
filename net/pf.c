@@ -6783,7 +6783,7 @@ pf_test(sa_family_t af, int fwdir, struct ifnet *ifp, struct mbuf **m0,
 		}
 		action = pf_test_state_icmp(&s, dir, kif, m, off, &pd,
 		    &reason);
-		if (action == PF_PASS) {
+		if (action == PF_PASS || action == PF_AFRT) {
 #if NPFSYNC > 0
 			pfsync_update_state(s);
 #endif /* NPFSYNC */
