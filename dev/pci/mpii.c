@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.44 2011/07/08 22:09:27 matthew Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.47 2011/07/21 01:03:30 sthen Exp $	*/
 /*
  * Copyright (c) 2010 Mike Belopuhov <mkb@crypt.org.ru>
  * Copyright (c) 2009 James Giannoules
@@ -2246,13 +2246,13 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter = &mpii_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = -1;
+	sc->sc_link.adapter_buswidth = sc->sc_max_devices;
+	sc->sc_link.luns = 1;
 	sc->sc_link.openings = sc->sc_request_depth - 1;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
-	saa.saa_targets = sc->sc_max_devices;
-	saa.saa_luns = 1;
 
 	/* config_found() returns the scsibus attached to us */
 	sc->sc_scsibus = (struct scsibus_softc *) config_found(&sc->sc_dev,
@@ -5293,9 +5293,8 @@ mpii_create_sensors(struct mpii_softc *sc)
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
 
-	for (i = sc->sc_vd_id_low; i < sc->sc_vd_id_low + sc->sc_vd_count;
-	     i++) {
-		link = scsi_get_link(ssc, i, 0);
+	for (i = 0; i < sc->sc_vd_count; i++) {
+		link = scsi_get_link(ssc, i + sc->sc_vd_id_low, 0);
 		if (link == NULL)
 			goto bad;
 
@@ -5353,7 +5352,7 @@ mpii_refresh_sensors(void *arg)
 			sc->sc_sensors[i].status = SENSOR_S_OK;
 			break;
 		case BIOC_SVINVALID:
-			/* FALLTRHOUGH */
+			/* FALLTHROUGH */
 		default:
 			sc->sc_sensors[i].value = 0; /* unknown */
 			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
